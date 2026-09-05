@@ -4,6 +4,7 @@ import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import { DEFAULT_MIGRATIONS_DIR, runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
+import { dropTempDatabase } from "./temp-database.js";
 
 /**
  * マイグレーション台帳の旧名からの引き継ぎ（`_mnemo_migrations` → `_mnemora_migrations`）を
@@ -85,7 +86,8 @@ function connectionStringFor(database: string): string {
  * （`CREATE DATABASE` の名前はパラメータ化できない）。
  */
 async function createBlankDatabase(database: string): Promise<Pool> {
-  await admin().query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+  // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
+  await dropTempDatabase(admin(), database);
   await admin().query(`CREATE DATABASE ${database}`);
   createdDatabases.push(database);
   const pool = new Pool({ connectionString: connectionStringFor(database), max: 2 });
@@ -125,7 +127,7 @@ describe("マイグレーション台帳の引き継ぎ（_mnemo_migrations → 
       await pool.end();
     }
     for (const database of createdDatabases) {
-      await admin().query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+      await dropTempDatabase(admin(), database);
     }
     if (adminPool) {
       await adminPool.end();

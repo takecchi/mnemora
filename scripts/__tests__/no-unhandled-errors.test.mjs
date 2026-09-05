@@ -149,10 +149,22 @@ describe("vitest は『全部通ったが unhandled error が1件』を緑にし
       },
     );
     const output = `${result.stdout}${result.stderr}`;
+    // NO_COLOR/FORCE_COLOR はランナーが尊重してくれることへの依存でしかない
+    // （実測: 尊重されない/上書きされる環境がありうる）。より強い保証として、
+    // 一致させる前に ANSI エスケープシーケンスそのものを剥がす。
+    // eslint-disable-next-line no-control-regex -- ANSI エスケープの除去に \x1b を使う。
+    const plain = output.replace(/\x1b\[[0-9;]*m/g, "");
 
     // 芯: テストのアサーションは全部通っているのに、門は緑にならない。
-    expect(output).toContain("Test Files  1 passed (1)");
-    expect(output).toContain("Vitest caught 1 unhandled error during the test run.");
+    //
+    // 空白の個数をリテラルで固定しない（`\s+` にする）: vitest のバージョンが
+    // reporter の桁揃え方法を変えるだけでこの歯が赤くなるのは脆さであり、
+    // この歯が守りたい区別（全部 passed でも unhandled error が在れば赤になること）
+    // とは無関係。**ただし件数の数字（`1`）は固定したままにする**——ここを
+    // `\d+` のように緩めると、「1 passed」と「2 passed」を区別できなくなり、
+    // 歯の芯（“全部 passed でも”）そのものが測れなくなる。
+    expect(plain).toMatch(/Test Files\s+1 passed\s+\(1\)/);
+    expect(plain).toMatch(/Vitest caught\s+1\s+unhandled error/);
     expect(result.status).not.toBe(0);
   }, 60_000);
 });

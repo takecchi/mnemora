@@ -140,12 +140,45 @@
   誰か（例えば手元で `psql` を開いたままの人間）が居るなら、殺すのではなく
   「閉じ切れていない」と教える方が正しい。
 
-  副次的に見つけた漏れも直した: 両ファイルの `grabLockFromAnotherSession()`
+  **同じ形の穴が3つ目のファイルにも丸ごと残っていた。** 最初の実装
+  （このADRの初版）では `migrate-concurrency.test.ts` /
+  `vector-space-concurrency.test.ts` の2ファイルしか直していなかったが、
+  `packages/postgres/src/__tests__/migrate-ledger-handover.test.ts` の
+  `createBlankDatabase()`（87-93行）と `afterAll`（122-133行）も、
+  構造・使い捨て DB 名（`mnemora_ledger_handover_*` 4種）まで含めて
+  完全に同じ形で `DROP DATABASE ... WITH (FORCE)` を使っていた。これは
+  マネージャーが CI の tarball（head `eaa8ee8e`）を展開して
+  `grep -rn -E "CREATE DATABASE|DROP DATABASE"`（`node_modules` と `docs/` を除外）
+  で全文検索し、指摘したもの（出所: マネージャーの報告。このリポジトリの
+  作業者は指摘を受けて該当ファイルを実際に読み、構造が同一であることを
+  確認した）。このファイルにはこの unhandled error が実際に観測された例は
+  無い（観測された3件はすべて `mnemora_lock_concurrent`、つまり
+  `migrate-concurrency.test.ts` 由来）が、`await pool.end()` が resolve
+  しても socket が閉じ切っていないという前提（このADR冒頭の「機構」）は
+  ファイルに関係なく成り立つため、同じ形で起こりうる——同じ穴を1つだけ
+  残すと直したという記述が事実とずれるため、この3つ目のファイルも
+  `dropTempDatabase()` 経由に統一した。このファイルには
+  `grabLockFromAnotherSession()` 相当のヘルパは無い（実際に全文を読んで
+  確認した）ため、pool 登録漏れの問題は生じていない。
+
+  副次的に見つけた漏れも直した: `migrate-concurrency.test.ts` /
+  `vector-space-concurrency.test.ts` の `grabLockFromAnotherSession()`
   が作る `Pool` が `openedPools`（`afterAll` が一括で `pool.end()` する配列）に
   登録されていなかった。登録し、`release()` はロックを手放すことだけを担い、
   pool を閉じるのは `afterAll` の一括処理に一本化した（同じ pool を2箇所で
   `end()` すると `pg-pool` が「Called end on pool more than once」で例外を
   投げるため）。
+
+  **`WITH (FORCE)` がヘルパ以外に残っていないことの確認**: 実装後に
+  `grep -rn "WITH (FORCE)" .` と `grep -rn -E "CREATE DATABASE|DROP DATABASE" .`
+  （どちらも repo ルートから、`node_modules` 配下を除外）を自分で実行し、
+  ヒットしたのは `temp-database.ts`（ヘルパ自身とそのコメント）・
+  `temp-database.test.ts`（歯のコメント）・このADR・ADR 0018（別の実験
+  ハーネスに関する歴史的記述、このリポジトリ内のテストコードではない）
+  のみであることを確認した。`CREATE DATABASE` を呼んでいる全箇所
+  （`migrate-ledger-handover.test.ts` / `migrate-concurrency.test.ts` /
+  `vector-space-concurrency.test.ts` / `temp-database.test.ts`）が、
+  いずれもその直前で `dropTempDatabase()` を呼んでいることも確認した。
 
   加えて、`scripts/__tests__/no-unhandled-errors.test.mjs` を新設し、
   「unhandled error を黙らせる設定がどこかに紛れ込んでいないか」を別の角度から
@@ -213,11 +246,50 @@
   deeply equal []`、該当ファイルのパスを含む）。変異を戻すと緑に戻ることも
   確認した。
 
+  **動的な歯の脆さを直した経緯**: 最初の実装は `expect(output).toContain(
+  "Test Files  1 passed (1)")` のような素朴なリテラル文字列一致だった。
+  この PR 自身の CI（`typecheck / lint / test / build` ジョブ、run
+  33995845407）で実際に赤くなった——GitHub Actions のランナーが子プロセスの
+  標準出力に色を強制し、vitest の reporter が `"Test Files"` と
+  `"1 passed (1)"` の間に ANSI エスケープシーケンスを挟み込んだため。
+  手元で `FORCE_COLOR=1` を強制して再現し、原因を特定した。
+
+  この歯が誤って赤くなることの実費は他の歯より一段高い——赤くなれば
+  この repo の**すべてのマージ**が止まり、次に踏んだ人は「歯を弱める」
+  誘惑を持つ（オーナーの指摘）。そのため2つの手当てを両方行った:
+
+  1. **色（環境依存の軸）**: 子プロセスへ `NO_COLOR=1` / `FORCE_COLOR=0` を
+     明示して渡す**うえで**、`output.replace(/\x1b\[[0-9;]*m/g, "")` で
+     ANSI エスケープそのものを剥がしてから一致させる。`NO_COLOR` が
+     尊重されるかどうかはランナー側の実装に依存する仮定であり、
+     剥がすほうが強い保証になる。
+  2. **文言・空白（vitest のバージョン依存の軸）**: リテラル一致
+     （空白の個数を固定する形）をやめ、`/Test Files\s+1 passed\s+\(1\)/` /
+     `/Vitest caught\s+1\s+unhandled error/` という正規表現にした。
+     **ただし件数の数字（`1`）は残したまま**——ここを `\d+` のように
+     緩めると「1 passed」と「2 passed」の区別が付かなくなり、この歯の芯
+     （全部 passed でも unhandled error が在れば赤になること）が測れなく
+     なる。緩めすぎて歯を殺すことは、脆さを直すこととは別の失敗である。
+
+  **変異試験（4本、すべて「当たったうえで赤くなった」ことを確認、SKIP は
+  無い）**:
+
+  | # | 変異 | 結果 |
+  |---|---|---|
+  | M1 | 1本目の正規表現の `1 passed` を `2 passed` へ | 赤（`scripts/__tests__/no-unhandled-errors.test.mjs:166` で失敗、他の2本は緑のまま） |
+  | M2 | 2本目の正規表現の `caught\s+1\s+unhandled` を `caught\s+2\s+unhandled` へ | 赤（同ファイル:167 で失敗） |
+  | M3 | 3本目の `.not.toBe(0)` を `.toBe(0)` へ | 赤（`expected 1 to be +0`） |
+  | M4（測定対象側） | フィクスチャから `setImmediate(...)` の塊を削り、unhandled error が出ないようにする | 赤（2本目・3本目が独立に失敗することを、アサーションの順序を一時的に入れ替えて個別に確認した——1つの `it()` 内では最初に失敗したアサーションで打ち切られるため） |
+
+  4本とも変異を当てた状態で実際にその歯が実行され（skip されていない）、
+  赤くなったことを確認し、変異を戻すと緑に戻ることも確認した
+  （最終的な `no-unhandled-errors.test.mjs` は変異を含まない）。
+
   **`temp-database.test.ts` / `migrate-concurrency.test.ts` /
-  `vector-space-concurrency.test.ts` に対する変異試験・実行そのものは
-  行っていない。** 下の「確かめていないこと」を参照——この環境に
-  PostgreSQL が無く、手元で DB テストを1本も実行できないため。CI
-  （`postgres` ジョブ・`root-gate-db-stage` ジョブ）を、この決定の
+  `vector-space-concurrency.test.ts` / `migrate-ledger-handover.test.ts` に
+  対する変異試験・実行そのものは行っていない。** 下の「確かめていないこと」を
+  参照——この環境に PostgreSQL が無く、手元で DB テストを1本も実行できない
+  ため。CI（`postgres` ジョブ・`root-gate-db-stage` ジョブ）を、この決定の
   唯一の実行環境として位置づけている。
 
 - **結果（この決定が招くもの）**:
@@ -226,8 +298,9 @@
     遅くなりうる。通常時（接続がすでに閉じている）は最初のポーリングで
     即座に0本と判定されるため、体感の遅延はほぼ無い。
   - `packages/postgres/src/__tests__/migrate-concurrency.test.ts` /
-    `vector-space-concurrency.test.ts` の `afterAll` が失敗する経路が
-    新たに生まれた（`DatabaseDrainTimeoutError`）。これは「隠していた
+    `vector-space-concurrency.test.ts` / `migrate-ledger-handover.test.ts`
+    の `afterAll` が失敗する経路が新たに生まれた
+    （`DatabaseDrainTimeoutError`）。これは「隠していた
     不具合を隠さない形に変える」という決定の意図した効果であり、退行では
     ない——ただし、もし本当に接続が長時間残る別の原因（例えばテスト本体の
     バグで pool を閉じ忘れる）が今後入り込むと、`afterAll` がこのエラーで
@@ -259,22 +332,43 @@
   - **この環境（この ADR を書いた作業）には PostgreSQL が無く（`docker` /
     `psql` / `initdb` 無し、root 権限無し）、DB を要求するテストを
     1本も手元で実行していない。** `temp-database.test.ts` /
-    `migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` の
-    実行結果は、すべて CI（GitHub Actions の `pgvector/pgvector:pg17`
-    service container）でのみ確認する。この ADR の「歯」節に書いた
-    `temp-database.test.ts` の2本の意図（正・負）は、コードレビューの上での
-    設計であり、**CI で実際に緑になることを見て初めて実測したと言える。**
-    PR の CI 結果を必ず参照すること。
-  - **`migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` へ
-    実際に変異（`dropTempDatabase` を元の `WITH (FORCE)` へ戻す等）を当てて
-    赤くなることは確認していない。** DB が無い環境では変異試験自体が
-    実行できないため。ADR 0017 / 0018 が行ったのと同水準の変異試験は、
-    この決定については**行われていない、未確認**として明記する。
-  - **間欠障害が実際に直ったこと**は、この作業単体では確認できない
-    （間欠＝低確率事象であり、1回や少数回の緑では偶然と区別できない）。
-    マネージャーの実測（PR マージ後、同一 head に対する
-    `root-gate-db-stage` ジョブの再実行を複数回行い、全て緑であることを
-    確認する）に委ねる。その結果は PR のやり取りに記録する。
+    `migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` /
+    `migrate-ledger-handover.test.ts` の実行結果は、すべて CI（GitHub
+    Actions の `pgvector/pgvector:pg17` service container）でのみ確認した。
+    この ADR の「歯」節に書いた `temp-database.test.ts` の2本の意図（正・負）
+    は、コードレビューの上での設計であり、**CI で実際に緑になることを
+    見て初めて実測したと言える。**
+  - **`migrate-concurrency.test.ts` / `vector-space-concurrency.test.ts` /
+    `migrate-ledger-handover.test.ts` へ実際に変異（`dropTempDatabase` を
+    元の `WITH (FORCE)` へ戻す等）を当てて赤くなることは確認していない。**
+    DB が無い環境では変異試験自体が実行できないため。ADR 0017 / 0018 が
+    行ったのと同水準の変異試験は、この決定については**行われていない、
+    未確認**として明記する。
+  - **間欠障害が実際に直ったことについて、実測した内容と、その限界**:
+
+    マネージャーが実測した（出所(1)、マネージャーの実測）: head
+    `eaa8ee8ee4b9b2b6b634d7460b500f2ab2845586` に対する CI run
+    `33996088663` の `root-gate-db-stage` ジョブを、`gh run rerun <run> --job
+    <id>` で9回再実行し、**attempt 1〜10 の合計10回すべてが
+    `completed`/`success`（10/10）だった。** 各 attempt で4ジョブ
+    （`typecheck / lint / test / build` / `packages/postgres` /
+    `examples/chat` / `root-gate-db-stage`）すべてが実行されたことも確認した
+    （job id: 101386790627 / 101389490502 / 101390968525 など）。
+    直す前のベースラインは約33%（9試行中6緑・3赤、上述）であり、
+    **偶然に10連続緑になる確率は 0.67^10 ≒ 1.8%** と見積もれる。
+
+    **⚠ これは確率的根拠であって証明ではない。** 33%という数字自体、
+    9試行という小さい母数から出したものであり、真の発生率の点推定として
+    強い精度を持たない。1.8%は「直っていないのに10連続で偶然通った」
+    可能性を完全には排除しない。
+
+    **⚠ さらに、この10/10は head `eaa8ee8e`（動的な歯の脆さを直す前の
+    コミット）に対する観測であり、その後に積んだコミット
+    （動的な歯の ANSI 対応・正規表現化、`migrate-ledger-handover.test.ts`
+    への横展開）を含む最終 head に対する観測ではない。** 最終 head に
+    対する追加の CI 実行結果は、PR 本文・やり取りに記録する
+    （このリポジトリの作業者が最終 head で改めて複数回 rerun し、
+    その回数と結果を報告する）。
   - **`pg_stat_activity` に自分自身の管理接続（`admin`）が含まれないこと**は
     `datname` で絞り込む設計上そうなるはずだが、これも CI 上の
     `temp-database.test.ts` の正のケースが実際に緑になることでしか
