@@ -8,6 +8,7 @@ import {
 import { embeddingSpaceIndexName, embeddingSpaceTableName } from "../embedding-space-table.js";
 import { runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
+import { dropTempDatabase } from "./temp-database.js";
 
 /**
  * `registerEmbeddingSpace` の排他（段階2・ADR 0018）を検査する。
@@ -83,7 +84,8 @@ function connectionStringFor(
 }
 
 async function createMigratedDatabase(database: string): Promise<Pool> {
-  await admin().query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+  // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
+  await dropTempDatabase(admin(), database);
   await admin().query(`CREATE DATABASE ${database}`);
   createdDatabases.push(database);
   const pool = new Pool({ connectionString: connectionStringFor(database), max: 10 });
@@ -109,17 +111,25 @@ async function createTableOnly(pool: Pool): Promise<void> {
   `);
 }
 
-/** 別セッションから advisory lock を握る（テストの「先客」役）。 */
+/**
+ * 別セッションから advisory lock を握る（テストの「先客」役）。
+ *
+ * この client も `openedPools` に登録し、`afterAll` の一括 `pool.end()` に委ねる
+ * （以前は登録されておらず、`afterAll` が把握しないまま残る接続だった）。
+ * `release()` はロックを手放すことだけを担い、pool を閉じるのは `afterAll` の役目に
+ * 一本化する——同じ pool を2箇所で `end()` すると `pg-pool` が
+ * 「Called end on pool more than once」で例外を投げるため。
+ */
 async function grabLockFromAnotherSession(
   database: string,
   lockKey: bigint,
 ): Promise<{ release: () => Promise<void> }> {
   const client = new Pool({ connectionString: connectionStringFor(database), max: 1 });
+  openedPools.push(client);
   await client.query("SELECT pg_advisory_lock($1)", [lockKey.toString()]);
   return {
     release: async () => {
       await client.query("SELECT pg_advisory_unlock($1)", [lockKey.toString()]);
-      await client.end();
     },
   };
 }
@@ -146,7 +156,7 @@ describe("registerEmbeddingSpace の排他（advisory lock）", () => {
       await adminPool.query(`DROP ROLE IF EXISTS ${RESTRICTED_ROLE}`).catch(() => {});
     }
     for (const database of createdDatabases) {
-      await admin().query(`DROP DATABASE IF EXISTS ${database} WITH (FORCE)`);
+      await dropTempDatabase(admin(), database);
     }
     if (adminPool) {
       await adminPool.end();

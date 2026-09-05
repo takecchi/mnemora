@@ -6,3 +6,8 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# scripts/__tests__/no-unhandled-errors.test.mjs が動的な歯のために使い捨てで作る一時
+# フィクスチャ置き場。root の vitest.config.mts の include（scripts/**/*.test.mjs）には
+# 当たらない場所・名前にしてあり、テスト自身が後始末で消す（残っていたら消し忘れ）。
+.tmp/
