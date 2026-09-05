@@ -135,7 +135,18 @@ describe("vitest は『全部通ったが unhandled error が1件』を緑にし
         "--config",
         join(fixtureDir, "vitest.config.mts"),
       ],
-      { cwd: repoRoot, encoding: "utf8" },
+      {
+        cwd: repoRoot,
+        encoding: "utf8",
+        // GitHub Actions のランナーは（ログビューアが ANSI を解釈できるため）子プロセスの
+        // 標準出力に色を強制することがある。実測して確認した: `FORCE_COLOR=1` の下で
+        // vitest を走らせると、reporter が "Test Files" と "1 passed (1)" の間に
+        // エスケープシーケンスを挟み込み、この歯の `toContain` の素朴な文字列一致が
+        // 見た目には出力に含まれているのに一致しなくなる（CI で実際に踏んだ）。
+        // `NO_COLOR=1` はそれに優先して色を止めることを実測で確認済みなので、ここで
+        // 明示的に指定し、実行環境の色設定に結果が左右されないようにする。
+        env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
+      },
     );
     const output = `${result.stdout}${result.stderr}`;
 
