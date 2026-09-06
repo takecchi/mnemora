@@ -37,6 +37,8 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  * - append した event が get/list で取得できる
  * - テナント分離（get/list とも他テナントの行を返さない）
  * - list の kind フィルタ・memoryId フィルタ
+ * - list の並び順（`at` 昇順）・`limit`（並べ替えた後に適用）・`since`/`until`（両端含む）
+ *   （docs/decisions/0042、`packages/core/src/interfaces/event-store.ts` の doc コメント）
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
   const { name, createStore } = options;
@@ -130,6 +132,121 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
 
       const listB = await store.list(ctxB, {});
       expect(listB).toEqual([]);
+    });
+
+    it("list は at 昇順で返す（挿入順ではない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      // T1 < T2 < T3 だが、挿入順は T3, T1, T2 —— 挿入順と at 順をわざと不一致にする
+      // （フィクスチャの非対称性: 挿入順でソートしても at 順でソートしても同じ結果になる
+      // 並びを作らない）。
+      const t1 = new Date("2026-01-01T00:00:00.000Z");
+      const t2 = new Date("2026-01-02T00:00:00.000Z");
+      const t3 = new Date("2026-01-03T00:00:00.000Z");
+
+      const e3 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t3 }),
+      );
+      const e1 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t1 }),
+      );
+      const e2 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t2 }),
+      );
+
+      const listed = await store.list(ctx, { memoryId });
+
+      expect(listed.map((event) => event.id)).toEqual([e1.id, e2.id, e3.id]);
+    });
+
+    it("limit は at 昇順に並べ替えた後に適用する（挿入順の先頭 n 件ではない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      const t1 = new Date("2026-01-01T00:00:00.000Z");
+      const t2 = new Date("2026-01-02T00:00:00.000Z");
+      const t3 = new Date("2026-01-03T00:00:00.000Z");
+
+      // 挿入順の先頭は t3 の行。limit: 1 が挿入順の先頭 n 件を返す実装だと t3 の行が
+      // 返ってしまう —— at が最も古い e1 の1件が返ることを検査する（集合そのものが
+      // 変わることの歯）。
+      const e3 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t3 }),
+      );
+      const e1 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t1 }),
+      );
+      await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t2 }),
+      );
+
+      const limited = await store.list(ctx, { memoryId, limit: 1 });
+
+      expect(limited.map((event) => event.id)).toEqual([e1.id]);
+      expect(limited.map((event) => event.id)).not.toEqual([e3.id]);
+    });
+
+    it("since は境界を含む（at >= since）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      const t1 = new Date("2026-01-01T00:00:00.000Z");
+      const t2 = new Date("2026-01-02T00:00:00.000Z");
+      const t3 = new Date("2026-01-03T00:00:00.000Z");
+
+      await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t1 }),
+      );
+      const e2 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t2 }),
+      );
+      const e3 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t3 }),
+      );
+
+      const listed = await store.list(ctx, { memoryId, since: t2 });
+
+      expect(listed.map((event) => event.id)).toEqual([e2.id, e3.id]);
+    });
+
+    it("until は境界を含む（at <= until）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      const t1 = new Date("2026-01-01T00:00:00.000Z");
+      const t2 = new Date("2026-01-02T00:00:00.000Z");
+      const t3 = new Date("2026-01-03T00:00:00.000Z");
+
+      const e1 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t1 }),
+      );
+      const e2 = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t2 }),
+      );
+      await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, at: t3 }),
+      );
+
+      const listed = await store.list(ctx, { memoryId, until: t2 });
+
+      expect(listed.map((event) => event.id)).toEqual([e1.id, e2.id]);
     });
   });
 }
