@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
+import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
@@ -72,6 +73,62 @@ function buildRuntime() {
     hashContent: (content: string) => `sha256(${content})`,
     clock: { now: () => NOW },
   });
+  return { runtime, stores };
+}
+
+/**
+ * `ann_unreached`（ADR 0026）の歯のためだけの、`VectorStore` の薄いラッパー。
+ *
+ * `FakeVectorStore`（`runtime-fakes.ts`）は「本物同様に status/decayFloor でフィルタしつつ
+ * cosine 距離で ANN を模する」ことはできるが、「scope にもっと候補があるのに、ANN が
+ * それより少ない件数しか返さない」——近似索引が届かなかった、という状況そのものは
+ * 作れない（`limit` まで律儀に返してしまう）。この状況を作るのに `runtime-fakes.ts`
+ * 自体を変える必要は無く、`search` の返り件数を後から切り詰めるだけで足りるので、
+ * ここに局所的なラッパーとして置く（`runtime-fakes.ts` は変更しない）。
+ */
+class CappedVectorStore implements VectorStore {
+  constructor(
+    private readonly inner: VectorStore,
+    private readonly cap: number,
+  ) {}
+
+  upsert(...args: Parameters<VectorStore["upsert"]>): ReturnType<VectorStore["upsert"]> {
+    return this.inner.upsert(...args);
+  }
+
+  async search(...args: Parameters<VectorStore["search"]>): ReturnType<VectorStore["search"]> {
+    const hits = await this.inner.search(...args);
+    return hits.slice(0, this.cap);
+  }
+
+  delete(...args: Parameters<VectorStore["delete"]>): ReturnType<VectorStore["delete"]> {
+    return this.inner.delete(...args);
+  }
+}
+
+/** `buildRuntime()` と同じ配線だが、`vectorStore` だけ `CappedVectorStore` に差し替える。 */
+function buildRuntimeWithCappedAnn(cap: number) {
+  const stores = createFakeRuntimeStores();
+  const runtime = createRuntime({
+    memoryStore: stores.memoryStore,
+    outboxStore: stores.outboxStore,
+    vectorStore: new CappedVectorStore(stores.vectorStore, cap),
+    eventStore: stores.eventStore,
+    tenantSettingsStore: stores.tenantSettingsStore,
+    llmProvider: {
+      complete: async () => {
+        throw new Error("not used");
+      },
+      completeStructured: async () => {
+        throw new Error("not used");
+      },
+    },
+    embeddingProvider: stores.embeddingProvider,
+    hashContent: (content: string) => `sha256(${content})`,
+    clock: { now: () => NOW },
+  });
+  // `createEmbeddedMemory` は `stores.vectorStore.upsert` を直接呼ぶ想定なので、
+  // 返す `stores` は素の（capされていない）参照のままにする——upsert は cap の対象外。
   return { runtime, stores };
 }
 
@@ -232,6 +289,44 @@ describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3）", 
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, overFetchFactor: 4 });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(false);
+  });
+});
+
+describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR 0026 の決定）", () => {
+  it("歯A（鳴る側）: scope に候補が多くあるのに ANN が eligible 未満しか返さないと ann_unreached が付く", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(2);
+    // 5件が scope 内・embeddingStatus='ready'（= eligible = 5）だが、ANN は2件しか返さない
+    // （CappedVectorStore が模する「近似索引が届かなかった」状況。2 < kPrime(=40) かつ
+    // 2 < eligible(=5) なので発火するはず）。
+    for (let i = 0; i < 5; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
+  });
+
+  it("歯B（⭐ 鳴ってはいけない側。オーナー名指し）: scope の候補を全部 ANN が返した場合は ann_unreached が鳴らない", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 候補3件・kPrime=40（limit10×overFetchFactor4）・hits=3。3 < 40 だが 3 == eligible なので
+    // 発火してはいけない——ここが赤くなったら「常に鳴る」側へ倒れたことを意味する。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, overFetchFactor: 4 });
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+  });
+
+  it("歯C: ann_truncated が鳴る状況（hits == k'）では ann_unreached は同時に鳴らない", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0]);
+    await createEmbeddedMemory(stores, [1, 0.001]);
+
+    // limit=1, overFetchFactor=1 -> k'=1。候補2件のうち1件しか返らないので ann_truncated が鳴る。
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 1 });
+    expect(result.omitted).toContainEqual({ kind: "ann_truncated", countKind: "unknown" });
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
   });
 });
 

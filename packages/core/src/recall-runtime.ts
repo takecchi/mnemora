@@ -439,6 +439,37 @@ export async function runRecall(
   }
 
   // -------------------------------------------------------------------
+  // ann_unreached（ADR 0025 の実測、ADR 0026 の決定）: 「近似索引がこの scope に
+  // 届かなかった」ことが `omitted` に一度も出ない、という ADR 0008 の破れを埋める。
+  //
+  // **⚠ ここは段5（`aggregate`）に依存する。** `eligible`（= scope 内で埋め込みがあり
+  // ANN の候補になり得た件数）は段1の情報だけでは出せない——`aggregate.totalInScope` と
+  // `aggregate.notIndexed` が要る。この関数には早期 return が無く、段5は常にここに
+  // 到達する前に実行されている（`aggregate` は必ず存在する。§報告のとおり確認済み）。
+  // **もし将来、段5をスキップする経路が実装されたら、この判定はそこでは行えない
+  // ——「取りこぼしたかもしれない」と断言する根拠（eligible）が無いため、鳴らさないこと。**
+  const notIndexedTotal =
+    aggregate.notIndexed.pending.count +
+    aggregate.notIndexed.failed.count +
+    aggregate.notIndexed.skipped.count;
+  const eligible = aggregate.totalInScope - notIndexedTotal;
+  if (
+    candidateGenerationExecuted &&
+    kPrime > 0 &&
+    // k' に達していない。達していれば ann_truncated の領域であり、これと同時には立てない
+    // ——「打ち切り」（もっと在るはずだが LIMIT で切った）と「届かなかった」（scope の他所へ
+    // ANN が行ってしまった）は別の出来事だから、同じ札に相乗りさせない（ADR 0026）。
+    annHits.length < kPrime &&
+    // scope 内にまだ見られていない候補が残っている。
+    // ⚠ この条件を落とすと、小さい subject で候補が ANN に全部返った場合
+    // （例: 候補3件・kPrime 40・hits 3。3 < 40 だが 3 == eligible）にも常に鳴るようになる
+    // ——「鳴ってはいけない側」を守っているのはこの条件である。
+    annHits.length < eligible
+  ) {
+    omitted.push({ kind: "ann_unreached", countKind: "unknown" });
+  }
+
+  // -------------------------------------------------------------------
   // usage（docs/recall.md §6）: 計測と強制を混同しない——強制は段4で既に行った。
   // ここでは実際に返した量を測るだけ。
   // -------------------------------------------------------------------
