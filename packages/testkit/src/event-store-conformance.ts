@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx, EventStore, MemoryId } from "@mnemora/core";
 import { buildNewMemoryEventFixture } from "./test-data.js";
@@ -66,6 +67,27 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect(fetched?.id).toBe(appended.id);
     });
 
+    // -------------------------------------------------------------------
+    // get（族A: 無い id は null — 形式不正な id も例外を投げない）
+    //
+    // packages/postgres/src/mapping.ts の isUuidLike の doc コメントが定める規約と
+    // 同じ判定基準を EventStore にも適用する。⚠ 3つを並べて見る: 形式不正 /
+    // well-formed だが実在しない / 実在する（3番目が無いと「常に null」が通ってしまう。
+    // 「実在する」は上の「append した event が get で取得できる」で既に検査済み）。
+    // -------------------------------------------------------------------
+
+    it("get は形式不正な id に対して例外を投げず null を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.get(ctx, "does-not-exist")).resolves.toBeNull();
+    });
+
+    it("get は well-formed だが実在しない id に対して null を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.get(ctx, randomUUID())).resolves.toBeNull();
+    });
+
     it("クロステナントの get は null になる", async () => {
       const store = await createStore();
       const ctxA: Ctx = { tenantId: "tenant-a" };
@@ -121,6 +143,24 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       const filtered = await store.list(ctx, { memoryId });
       expect(filtered.length).toBeGreaterThanOrEqual(1);
       expect(filtered.every((event) => event.memoryId === memoryId)).toBe(true);
+    });
+
+    it("list の memoryId フィルタは形式不正な memoryId に対して例外を投げず空配列を返す（他のフィルタに関わらず）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", kind: "created" }),
+      );
+      await expect(
+        store.list(ctx, { memoryId: "does-not-exist", kind: "created" }),
+      ).resolves.toEqual([]);
+    });
+
+    it("list の memoryId フィルタは well-formed だが実在しない memoryId に対して空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.list(ctx, { memoryId: randomUUID() })).resolves.toEqual([]);
     });
 
     it("クロステナントの list は他テナントのイベントを含まない", async () => {

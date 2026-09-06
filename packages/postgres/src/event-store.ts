@@ -8,7 +8,7 @@ import type {
   NewMemoryEvent,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { rowToMemoryEvent, type MemoryEventRow } from "./mapping.js";
+import { isUuidLike, rowToMemoryEvent, type MemoryEventRow } from "./mapping.js";
 
 /**
  * `EventStore` の Postgres 実装（docs/architecture.md §5.8、docs/memory-model.md §9）。
@@ -39,6 +39,11 @@ export class PostgresEventStore implements EventStore {
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
+    // id 列は uuid 型。この口の契約は「無い == null」なので、形式が壊れた入力も
+    // クエリを投げる前に同じ null へ寄せる（mapping.ts の isUuidLike の doc参照）。
+    if (!isUuidLike(id)) {
+      return null;
+    }
     const result = await this.db.execute(sql`
       SELECT * FROM memory_events WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
     `);
@@ -48,6 +53,13 @@ export class PostgresEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    // memory_id 列は uuid 型。この口の契約は「無い == []」なので、形式が壊れた
+    // memoryId もクエリを投げる前に空配列へ寄せる（他のフィルタの値に関わらず、
+    // memory_id の等値条件が絶対に一致しえない以上、結果は必ず空になるため）
+    // （mapping.ts の isUuidLike の doc参照）。
+    if (filter.memoryId !== undefined && !isUuidLike(filter.memoryId)) {
+      return [];
+    }
     const conditions = [sql`tenant_id = ${ctx.tenantId}`];
     if (filter.memoryId !== undefined) {
       conditions.push(sql`memory_id = ${filter.memoryId}`);

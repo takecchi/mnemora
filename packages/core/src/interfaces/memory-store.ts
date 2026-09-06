@@ -138,14 +138,28 @@ export interface MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+  /**
+   * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
+   * （例外を投げない）。core の `MemoryId` は単なる `string` であり形式を強制しないため、
+   * ある adapter が主キーに特定の形式（例: UUID）を要求していても、その形式に合わない
+   * `id` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
+   * `isUuidLike` の doc コメント参照）。
+   */
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
-  /** D9: recall 段3の mandatory companion retrieval のための一括取得。 */
+  /**
+   * D9: recall 段3の mandatory companion retrieval のための一括取得。**呼び出し全体を
+   * 弾かない**——`ids` のうち adapter の期待する形式でないものは、無い id と同じく
+   * 静かに結果から落とす（該当する id 以外は通常どおり返す）。全件が形式に合わなければ
+   * 空配列を返す。
+   */
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
   /**
    * ADR 0028: ある Observation から、ある版の抽出器で作られた Memory を列挙する
    * （**SELECT のみ**。マイグレーション・索引を追加しない）。`extractorVersion` は
    * `NULLS NOT DISTINCT`（0001_init.sql）と同じ規約で `null` を1つの値として扱う
    * ——`extractorVersion: null` を渡すと `extractor_version IS NULL` の行を返す。
+   * `observationId` が adapter の期待する形式でない場合も「存在しない」と同じ空配列を
+   * 返す（例外を投げない）。
    */
   listBySourceObservation(
     ctx: Ctx,
