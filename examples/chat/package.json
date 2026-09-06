@@ -10,6 +10,7 @@
     "test:db": "vitest run",
     "chat": "tsx src/cli.ts chat",
     "compare": "tsx src/cli.ts compare",
+    "scope": "tsx src/cli.ts scope",
     "retrieval": "tsx src/cli.ts retrieval"
   },
   "dependencies": {
