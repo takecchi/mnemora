@@ -1,12 +1,23 @@
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import {
+  DEFAULT_MIGRATIONS_DIR,
   MigrationLockTimeoutError,
   MigrationLockUnavailableError,
+  listMigrationFiles,
   runMigrations,
 } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
+
+/**
+ * マネージャー指摘（`0002_outbox_claim_lease_index.sql` の追加で判明）: このファイルの
+ * 期待値を `["0001_init.sql"]` のようにハードコードすると、`migrations/` にファイルが
+ * 増えるたびに歯が転ぶ——「マイグレーションが1本のときしか通らない歯」になっていた。
+ * `listMigrationFiles(DEFAULT_MIGRATIONS_DIR)` を唯一の真実の源にして、期待値を
+ * そこから導出する（ハードコードした配列を書き換えるのではなく、導出する形にする）。
+ */
+const ALL_MIGRATION_FILES = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
 
 /**
  * `runMigrations` の排他（段階2・ADR 0017）を検査する。
@@ -150,10 +161,12 @@ describe("runMigrations の排他（advisory lock）", () => {
     const results = await Promise.all(pools.map((p) => runMigrations(p)));
 
     const appliedCounts = results.map((r) => r.applied.length);
-    // 4本のうち、実際にファイルを適用したのはちょうど1本（他はロック待ちの後
-    // 「もう適用済み」を見て何もしない）。
-    expect(appliedCounts.filter((n) => n > 0)).toEqual([1]);
-    expect(appliedCounts.reduce((a, b) => a + b, 0)).toBe(1);
+    // 4本のうち、実際にファイルを適用した「プロセス」はちょうど1本（他はロック待ちの後
+    // 「もう適用済み」を見て何もしない）。何本を適用したか（ファイル数）はここでは
+    // 問わない——ハードコードした「1」ではなく「未適用ファイルの総数」で測る
+    // （マネージャー指摘: migrations/ にファイルが増えるたびに歯が転んでいた）。
+    expect(appliedCounts.filter((n) => n > 0)).toHaveLength(1);
+    expect(appliedCounts.reduce((a, b) => a + b, 0)).toBe(ALL_MIGRATION_FILES.length);
 
     // 全員の lock.waitedMs が観測できている（数値であること）。
     for (const r of results) {
@@ -175,8 +188,10 @@ describe("runMigrations の排他（advisory lock）", () => {
       "recalls",
       "tenant_settings",
     ]);
-    const ledger = await pool.query<{ name: string }>("SELECT name FROM _mnemora_migrations");
-    expect(ledger.rows).toEqual([{ name: "0001_init.sql" }]);
+    const ledger = await pool.query<{ name: string }>(
+      "SELECT name FROM _mnemora_migrations ORDER BY name ASC",
+    );
+    expect(ledger.rows).toEqual(ALL_MIGRATION_FILES.map((name) => ({ name })));
   }, 20_000);
 
   // 歯2: 先客が少し後に手放す → 待って取れる。待ったことが戻り値に出る。
@@ -198,7 +213,7 @@ describe("runMigrations の排他（advisory lock）", () => {
     // 待った分だけ経過している。多少の余裕を見て HOLD_MS の半分以上とする。
     expect(elapsedMs).toBeGreaterThanOrEqual(HOLD_MS / 2);
     expect(result.lock.waitedMs).toBeGreaterThanOrEqual(HOLD_MS / 2);
-    expect(result.applied).toEqual(["0001_init.sql"]);
+    expect(result.applied).toEqual(ALL_MIGRATION_FILES);
   }, 20_000);
 
   // 歯3: 先客が手放さない → 時間切れで落ちる。黙って続行して成功してはならない。

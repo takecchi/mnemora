@@ -87,7 +87,7 @@
 
      ```sql
      CREATE INDEX idx_outbox_claimable
-       ON outbox (tenant_id, kind, available_at)
+       ON outbox (tenant_id, available_at)
        WHERE completed_at IS NULL AND failed_at IS NULL;
      ```
 
@@ -98,6 +98,23 @@
      使ったリース条件は `leaseMs` というクエリ実行時の引数に依存するため、索引の述語には
      できない）。
 
+     🔴 **列順 `(tenant_id, available_at)` は CI の実測で判明した修正であり、
+     当初の案から変えた（「1回目の CI 実測」参照）。** 当初は `idx_outbox_pending`
+     を踏襲して `(tenant_id, kind, available_at)` としていたが、`claimBatch` は
+     `kind = ANY(ARRAY['extract','embed'])` のように複数の kind を指定する
+     （`runtime.tick` の既定 `kinds` が2値の配列）。索引の列順に `kind` を挟むと、
+     `kind` を単一の値に絞らない限り索引の並びは `available_at` の全体順序を
+     供給できず（`tenant_id` を固定しても、`kind` の値ごとに `available_at` が
+     別々にソートされた区間になるだけ）、プランナは必ず `Sort` を挟む。`ORDER BY
+     available_at ASC LIMIT n` の早期打ち切りはこの `Sort` によって失われる。
+     **これは `idx_outbox_pending` から受け継いだ欠陥であり、`idx_outbox_pending`
+     も述語さえ揃っていればこのクエリを供給できた、という話ではなかった**——
+     元の索引の列順自体に同じ欠陥があった。`kind` を索引から外し
+     `(tenant_id, available_at)` にすることで、`tenant_id` の等値だけで
+     `available_at` 昇順の並びをそのまま使えるようにした。`kind` は残った行への
+     `Filter` 条件として効けば足りる（claim 可能な行の母数はもともと小さいことが
+     前提——「歯について」の seed 分布参照）。
+
   6. **`packages/testkit/src/__fixtures__/in-memory-outbox-store.ts`
      （`InMemoryOutboxStore`）と `packages/core/src/__tests__/runtime-fakes.ts`
      （`FakeOutboxStore`）に同じリース意味論を実装する。** 前者は
@@ -106,6 +123,65 @@
      fake（`core` は `testkit` に依存しない、docs/architecture.md §4）であり、こちらだけ
      古い意味論のままだと `runtime.test.ts` が「直った後の姿」を「今日の姿」のつもりで
      検査してしまう。
+
+- **CI の実測（1回目、列順を直す前）**:
+
+  **「使われるはず」ではなく、実際に CI が出した `EXPLAIN` の逐語。** 当初の
+  `idx_outbox_claimable`（列順 `(tenant_id, kind, available_at)`）と、当初の seed
+  （claim 可能な行が全体の約50%）に対する結果——`packages/postgres/src/__tests__/
+  outbox-claim-lease-index.test.ts` の assert が実際にこれを検出して落ちた。
+
+  **前**（`claimed_at` に触れない今日の述語）:
+  ```
+  Update on outbox o  (cost=302.29..449.66 rows=50 width=90)
+    CTE claimable
+      ->  Limit  (cost=300.04..300.66 rows=50 width=30)
+            ->  LockRows  (cost=300.04..350.66 rows=4050 width=30)
+                  ->  Sort  (cost=300.04..310.16 rows=4050 width=30)
+                        Sort Key: outbox.available_at
+                        ->  Seq Scan on outbox  (cost=0.00..165.50 rows=4050 width=30)
+  ```
+
+  **後**（リース条件付き、修正前の索引）:
+  ```
+      ->  Limit  (cost=262.08..262.70 rows=50 width=30)
+            ->  LockRows  (cost=262.08..293.72 rows=2531 width=30)
+                  ->  Sort  (cost=262.08..268.41 rows=2531 width=30)
+                        Sort Key: outbox.available_at
+                        ->  Seq Scan on outbox  (cost=0.00..178.00 rows=2531 width=30)
+  ```
+
+  **どちらも `Seq Scan` + `Sort` であり、`idx_outbox_claimable` は選ばれていなかった。**
+  原因は2つ重なっていたと判断した（マネージャーの読み、この2点は実測した事実として
+  ここに記録する。推論ではない）:
+
+  1. **列順の欠陥（実測した事実）**: `claimBatch` は `kind = ANY(ARRAY['extract',
+     'embed'])` のように複数の kind を指定する。索引が `(tenant_id, kind,
+     available_at)` だと、`kind` を単一の値に絞らない限り索引の並びは
+     `available_at` の全体順序を提供できない——`tenant_id` を固定しても `kind` の
+     値ごとに `available_at` が別々にソートされた区間になるだけであり、プランナは
+     必ず `Sort` を挟む（上の `Sort Key: outbox.available_at` がまさにこれ）。
+     **これは `idx_outbox_pending` から受け継いだ欠陥であり、`idx_outbox_pending`
+     も述語さえ揃っていればこのクエリを供給できた、という話ではなかった**——
+     この事実は「確かめていないこと」ではなく、CI の実測で確定した。
+  2. **seed データが非現実的だった（実測した事実）**: `rows=2531 / 20000`
+     （旧 seed では `rows=2531 / 5000`）——述語が全体の約50%に当たっていた。
+     全体の半分を指す部分索引は Seq Scan に勝てない。本物の outbox は逆に、
+     大半が `completed_at` 済みで claim 可能な行はごく一部という定常状態であり、
+     seed をそれに合わせて直した（後述「歯について」）。
+
+  この2点を受けて、決定5の索引を `(tenant_id, available_at)` に列順変更し、
+  `packages/postgres/src/__tests__/outbox-claim-lease-index.test.ts` の seed を
+  95%が終端済み・5%が未終端という分布に直した。**「前」のテストも、`idx_outbox_claimable`
+  が既に存在する DB で測っていたため、新索引の述語が「前」のクエリからも含意されて
+  しまい前後の比較になっていなかった**——テストの中で `DROP INDEX
+  idx_outbox_claimable` してから測り、`finally` で作り直す形に直した。「後」の
+  assert も `not.toMatch(/Seq Scan on outbox/)`（外側の `UPDATE ... FROM
+  claimable c` にも Seq Scan が出うるため測りたいものを測れていなかった）から
+  `not.toContain("Sort Key: outbox.available_at")`（CTE 側で全体ソートが
+  要らなくなったことそのものを測る）へ直した。**修正後の EXPLAIN は、この作業を
+  行った環境に `DATABASE_URL` が無いため未実測——次の CI 実行で初めて確認される
+  （「確かめていないこと」参照）。**
 
 - **採らなかった案**:
 
@@ -138,13 +214,28 @@
 
 - **歯について**:
 
-  基準線（`main`=`a475593`、マネージャー実測値と一致することを確認済み）: root **7** /
-  `packages/core` **203** / `packages/testkit` **68** / `packages/openai` **20**。
-  本 PR 後: root 7（変わらず）/ `packages/core` 203（変わらず——`FakeOutboxStore` の
-  リース意味論は直したが新規の `it()` は足していない）/ `packages/testkit`
-  **70**（+2、`outbox-store-conformance.ts` に新設した2本）/ `packages/openai` 20
-  （変わらず）。`packages/postgres` は `DATABASE_URL` が無いこの環境では実行できない
-  （後述「確かめていないこと」）。
+  最初の基準線（`main`=`a475593`、マネージャー実測値と一致することを確認済み）:
+  root **7** / `packages/core` **203** / `packages/testkit` **68** /
+  `packages/openai` **20**。本 PR の1回目のコミット後: root 7（変わらず）/
+  `packages/core` 203（変わらず——`FakeOutboxStore` のリース意味論は直したが新規の
+  `it()` は足していない）/ `packages/testkit` **70**（+2、
+  `outbox-store-conformance.ts` に新設した2本）/ `packages/openai` 20（変わらず）。
+
+  **その後、`fix/outbox-claim-lease` は PR #30（ADR 0031、+4）マージ後の
+  `origin/main`（`2007234`）へマネージャーが rebase 済み。** 新しい基準線は
+  root 7 / `packages/core` 203 / `packages/testkit` **74**（70 + #30 の4）/
+  `packages/openai` 20——マネージャーが実測しレビューコメントに明記した値と、
+  本ラウンドの作業後に手元で実測した値が一致することを確認した（下記）。
+
+  **本ラウンド（CI 発見1・2の対応）の変更は `packages/core`/`packages/testkit`
+  の `it()` を増減させていない**（`packages/postgres` の既存6本のテスト内容を
+  「ハードコードした期待値」から「導出した期待値」へ書き換えた・EXPLAIN テスト
+  2本の中身を直した・`packages/postgres/src/migrate.ts` に1関数を export
+  追加しただけで、いずれも `packages/postgres` 側の変更であり `DATABASE_URL`
+  が無いこの環境では実行できない）。本ラウンド後の手元の実測: root 7 /
+  `packages/core` 203 / `packages/testkit` 74 / `packages/openai` 20——**基準線と
+  完全に一致し、何も壊していないことを確認した。**`packages/postgres` は
+  `DATABASE_URL` が無いこの環境では実行できない（後述「確かめていないこと」）。
 
   新設した2本（`packages/testkit/src/outbox-store-conformance.ts`、
   `InMemoryOutboxStore`/`PostgresOutboxStore` 両方に対して走る）:
@@ -197,6 +288,24 @@
   対して順に検査し、「リース内では奪わない」と「リース失効後は奪う」の両方を
   1本の中で対にして押さえている。
 
+  **M5**（本ラウンドで新たに撃った変異、マイグレーションの歯の直しに対して）:
+  `packages/postgres/src/__tests__/migrate-concurrency.test.ts` /
+  `migrate-ledger-handover.test.ts` の期待値の導出（`ALL_MIGRATION_FILES`/
+  `NON_LEGACY_FILES`）を、再びハードコードした `["0001_init.sql"]` に戻す変異。
+  **⚠ これは DB が必要な `packages/postgres` の歯であり、この環境では実際に
+  赤くすることを確認できていない**（「確かめていないこと」参照）。手元で確認したのは
+  「ハードコードに戻しても `tsc` の型検査は通る」ことのみ——`listMigrationFiles` も
+  `ALL_MIGRATION_FILES.filter(...)` も戻り値の型はどちらも `string[]` であり、
+  ハードコードした配列に差し替えても型は壊れない。**この変異が実際にどの歯を
+  何本赤くするかは、CI の postgres ジョブで初めて実測される。** 期待される結果
+  （実測ではなく設計上の予想であることを明示する）: `migrate-concurrency.test.ts`
+  の「まっさらな DB へ4プロセス相当が同時に migrate」の歯（`ALL_MIGRATION_FILES.length`
+  への `toBe` が `2`（0001+0002）ではなく `1` を期待するようになり、実際の適用数
+  `2` と食い違って落ちるはず）、および `migrate-ledger-handover.test.ts` の
+  「旧名の台帳が在る DB へ migrate しても 0001_init.sql は再実行されない」の歯
+  （`NON_LEGACY_FILES` が `["0001_init.sql"]` になり、実際に適用される
+  `["0002_outbox_claim_lease_index.sql"]` と食い違って落ちるはず）。
+
 - **引き受ける負債**:
 
   - **`tick(ctx)` を引数無しで呼べなくなった。** `leaseMs` を必須にした意図した
@@ -225,13 +334,34 @@
     「core は testkit に依存しない」という制約から来る）が、リース意味論を両方に
     手で複製した以上、今後この2つが再び食い違う可能性は本 PR でも解消していない。
 
+  - **既存のマイグレーションの歯6本（`migrate-concurrency.test.ts` 3本・
+    `migrate-ledger-handover.test.ts` 3本）が、実質的に「マイグレーションファイルは
+    `0001_init.sql` の1本だけ」というこのリポジトリの歴史的事実に結びついていた。**
+    `0002_outbox_claim_lease_index.sql` を足した1回目の CI で、この6本が
+    一斉に転んだ（`["0001_init.sql"]` 等のハードコードした期待値と実際の適用結果が
+    食い違った）。**このリポジトリは今回まで2本目のマイグレーションを足したことが
+    無かった。** 期待値を `packages/postgres/src/migrate.ts` から新たに export した
+    `listMigrationFiles(DEFAULT_MIGRATIONS_DIR)` から導出する形に直した
+    （書き換えたのはハードコードした配列の中身ではなく、導出の仕方そのもの——
+    3本目が増えたときにまた同じ転び方をしないため）。この直し自体は本 PR の
+    主題（claim のリース）とは独立した既存不備の発覚であり、本 PR がその1本目を
+    足した張本人として直した。
+
 - **確かめていないこと**:
 
-  - **`packages/postgres/src/__tests__/outbox-claim-lease-index.test.ts` の
-    `EXPLAIN` は、この作業環境では実行していない。** この環境には Docker/PostgreSQL/
-    `DATABASE_URL` が無く、`requireDatabaseUrl()` が未設定を検知してテストランナー
-    自体が起動しない。CI の postgres ジョブが唯一の実行環境であり、「索引が
-    使われるようになった」ことは CI のログで初めて実測される。
+  - **列順を `(tenant_id, available_at)` に直した後の `EXPLAIN`（`idx_outbox_claimable`
+    が実際に使われ、`Sort Key: outbox.available_at` が消えること）は、この作業環境
+    では未実測。** 1回目の CI 実測（上記「CI の実測」）で列順とseed分布の欠陥を
+    検出し、その場で列順・seed・assert を直したが、**直した後のバージョンをCIで
+    走らせた結果はまだ無い**——次の CI 実行が唯一の実測経路である。この環境には
+    Docker/PostgreSQL/`DATABASE_URL` が無く、`requireDatabaseUrl()` が未設定を
+    検知してテストランナー自体が起動しない。
+  - **マイグレーションの歯（`migrate-concurrency.test.ts`・
+    `migrate-ledger-handover.test.ts`）を `listMigrationFiles` から導出する形に
+    直した後、実際に本物の Postgres に対して通ることも同じ理由で未実測。** 手元では
+    型検査（`tsc`）が通ることのみ確認した——導出ロジック自体の正しさ（例えば
+    `NON_LEGACY_FILES` の計算、`carriedRows` の絞り込み）は、コードレビューでの
+    確認に留まる。
   - **`describeOutboxStoreConformance` に足した2本（先頭詰まり・リース失効後の
     再 claim）の postgres 版**も同じ理由でこの環境では実行していない。手元では
     `InMemoryOutboxStore` に対してのみ実行し、通ることを確認した（「歯について」参照）。
@@ -242,6 +372,11 @@
   - **`examples/chat` の30分という値が実運用で適切かどうか**は、実際に OpenAI の
     API を長時間叩き続ける状況で検証していない。SDK のドキュメント上の既定値から
     導いた理論値であり、実測ではない。
+  - **M5**（マイグレーション期待値の導出を再びハードコードへ戻す変異）**は、
+    DB が必要なためこの環境では実際に赤くすることを確認できていない。** 手元では
+    「ハードコードに戻しても型検査は通る」ことだけを確認した——型は「文字列配列」
+    でしかなく、導出をやめても壊れない。**この変異が実際に歯を赤くすることは、
+    CI の postgres ジョブで初めて実測される。**
 
 - **これが覆るとしたら**:
 
