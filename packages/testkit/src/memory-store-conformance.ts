@@ -1,8 +1,25 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
 import type { Ctx, MemoryStore, RecallId } from "@mnemora/core";
 import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
+
+/**
+ * 「対象が無い」系の検査専用の、well-formed だが実在しない id。
+ *
+ * `packages/postgres` の `memories.id` は `uuid` 型（migrations/0001_init.sql）で、
+ * `setEmbeddingStatus`/`reinforce`/`updateStatus` は `getObservation` と違い
+ * `isUuidLike` による事前チェックを持たない（packages/postgres/src/memory-store.ts）。
+ * そのため UUID の形をしていない文字列（例: 旧 `"does-not-exist"`）を渡すと、
+ * SQL 実行時点でドライバの `invalid input syntax for type uuid` が飛び、
+ * 「memory not found」を投げる意図した分岐（同ファイル :362/:370/:384/:394）に
+ * 到達する前に例外になってしまう。`.rejects.toThrow()` はどちらの例外でも
+ * 満たされてしまうため、これでは意図した分岐を検査したことにならない。
+ * `randomUUID()` で実行のたびに新しい値を生成すれば、fixture が作る実在の id
+ * （store が発行する UUID）と衝突しないことは構造的に保証される。
+ */
+const NONEXISTENT_MEMORY_ID = randomUUID();
 
 export interface MemoryStoreConformanceOptions {
   /** テスト出力に出す adapter 名（例: "postgres", "in-memory"）。 */
@@ -487,7 +504,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("setEmbeddingStatus は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      await expect(store.setEmbeddingStatus(ctx, "does-not-exist", "ready")).rejects.toThrow();
+      // UUID の形をした id を渡す必要がある。形式不正な文字列だと、Postgres 実装では
+      // adapter が投げる「memory not found」に到達する前に、ドライバの UUID パース
+      // エラーで例外になり、意図した分岐を検査できない（NONEXISTENT_MEMORY_ID 定義参照）。
+      await expect(store.setEmbeddingStatus(ctx, NONEXISTENT_MEMORY_ID, "ready")).rejects.toThrow();
     });
 
     // -------------------------------------------------------------------
@@ -557,7 +577,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("reinforce は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      await expect(store.reinforce(ctx, "does-not-exist", new Date())).rejects.toThrow();
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
+      // 形式不正な文字列では、Postgres 実装は「memory not found」に到達する前に
+      // ドライバの UUID パースエラーで落ちてしまう。
+      await expect(store.reinforce(ctx, NONEXISTENT_MEMORY_ID, new Date())).rejects.toThrow();
     });
 
     // -------------------------------------------------------------------
@@ -598,7 +621,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatus は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      await expect(store.updateStatus(ctx, "does-not-exist", "archived")).rejects.toThrow();
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
+      // 形式不正な文字列では、Postgres 実装は「memory not found」に到達する前に
+      // ドライバの UUID パースエラーで落ちてしまう。
+      await expect(store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "archived")).rejects.toThrow();
     });
 
     // -------------------------------------------------------------------
@@ -668,8 +694,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
 
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。形式不正な
+      // 文字列だと、Postgres 実装ではドライバの UUID パースエラー（MemoryStatusConflictError
+      // ではない）で `.rejects.not.toBeInstanceOf(...)` が意図せず満たされてしまい、
+      // 「対象が無い」分岐を検査したことにならない。
       await expect(
-        store.updateStatus(ctx, "does-not-exist", "superseded", { expectedStatus: "active" }),
+        store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "superseded", { expectedStatus: "active" }),
       ).rejects.not.toBeInstanceOf(MemoryStatusConflictError);
     });
 
