@@ -364,20 +364,6 @@ function summarizePlan(plan: string): {
 // ---------------------------------------------------------------------------
 
 /**
- * `subjectCount` は規模に応じて変える（呼び出し側が決める）。全部同じ subject だと
- * `GROUP BY subject_id` が1行しか返らず、群カウントの費用を過小評価するため。
- *
- * 分布は完全な一様分布にしない: `power(random(), 3)` で低い添字（subject-0 に近いほう）
- * に寄せる緩い skew を掛け、「一部の大きな subject + 大量の小さな subject」という
- * 現実のテナントに近い形にする（完全な Zipf 分布の実装ではない——その主張はしない）。
- * `subjectCount - 1`（分布の裾、最も小さい部類の subject）を、後段の「小さい subject を
- * subjectId で絞る」計測に使う。
- *
- * 各列の値（status / embedding_status の分布、half_life_hours 等）は
- * `aggregateScope` の `FILTER (WHERE ...)` の各枝を実際に踏ませるための最小限の作り込みで、
- * 「これが現実の分布だ」という主張はしていない。
- */
-/**
  * `INSERT INTO memories ... SELECT ...` の雛形。`subjectExpr` だけが呼び出し側ごとに違う
  * （skew を掛けた乱数割り当てにするか、定数の subject_id にするか）。パラメータは常に
  * `$1` = tenant、`$2` = `subjectExpr` が使う値、`$3` = 投入行数の3つで揃える。
@@ -421,6 +407,20 @@ const SKEWED_SUBJECT_EXPR = "'subject-' || floor(power(random(), 3) * $2)::int";
 /** `$2` をそのまま定数の subject_id として使う式（Part 3 の狙いの subject 用）。 */
 const FIXED_SUBJECT_EXPR = "$2::text";
 
+/**
+ * `subjectCount` は規模に応じて変える（呼び出し側が決める）。全部同じ subject だと
+ * `GROUP BY subject_id` が1行しか返らず、群カウントの費用を過小評価するため。
+ *
+ * 分布は完全な一様分布にしない: `power(random(), 3)` で低い添字（subject-0 に近いほう）
+ * に寄せる緩い skew を掛け、「一部の大きな subject + 大量の小さな subject」という
+ * 現実のテナントに近い形にする（完全な Zipf 分布の実装ではない——その主張はしない）。
+ * `subjectCount - 1`（分布の裾、最も小さい部類の subject）を、後段の「小さい subject を
+ * subjectId で絞る」計測に使う。
+ *
+ * 各列の値（status / embedding_status の分布、half_life_hours 等）は
+ * `aggregateScope` の `FILTER (WHERE ...)` の各枝を実際に踏ませるための最小限の作り込みで、
+ * 「これが現実の分布だ」という主張はしていない。
+ */
 async function seedMemories(
   pool: Pool,
   tenant: string,
