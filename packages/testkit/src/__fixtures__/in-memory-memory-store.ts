@@ -1,4 +1,4 @@
-import { defaultDecayStrategy } from "@mnemora/core";
+import { defaultDecayStrategy, MemoryStatusConflictError } from "@mnemora/core";
 import type { NotIndexedReason } from "@mnemora/core";
 import type {
   Ctx,
@@ -220,15 +220,19 @@ export class InMemoryMemoryStore implements MemoryStore {
     return results;
   }
 
+  /** ADR 0030: `opts.expectedStatus` があるときだけ compare-and-swap にする（postgres 実装と同じ意味論）。 */
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId },
+    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+      throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
     memory.status = status;
     if (opts?.supersededById !== undefined) {

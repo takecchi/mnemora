@@ -26,7 +26,7 @@ import type { NewObservation, Observation } from "./observation.js";
 import type { OutboxJobRecord } from "./outbox.js";
 import { runRecall } from "./recall-runtime.js";
 import type { RecallQuery, RecallResult } from "./recall.js";
-import { classifyReextractTargets } from "./strategies/reextract.js";
+import { classifyReextractTargets, classifySupersedeFailure } from "./strategies/reextract.js";
 import type { ReextractSkip } from "./strategies/reextract.js";
 
 /**
@@ -129,20 +129,26 @@ export interface ReextractResult {
    * - 対象は同じ `(sourceObservationId, extractorVersion)` を持つ **`status: 'active'`** の
    *   Memory のうち、今回作られた content_hash の集合に含まれないものだけ
    *   （`forgotten` は絶対に含めない。`contested` も対象外——理由は ADR 0028 参照）。
+   * - 🔴 安全弁3（ADR 0030）: `updateStatus` を `expectedStatus: "active"` の
+   *   compare-and-swap で呼ぶ。読み（`listBySourceObservation`）と書き（`updateStatus`）の
+   *   間に他の書き込みで status が変わっていた Memory は、ここには**入らない**
+   *   （`skipped` に `status_changed_concurrently` として出る）。
    */
   supersededMemoryIds: MemoryId[];
   /**
    * ADR 0029: 既存 Memory を supersede しなかった理由。ADR 0028 が「引き受ける負債」に
    * 記録した欠落——`contested` で飛ばした・`forgotten` で飛ばした・そもそも置き換える
    * ものが無かった、の3つが `supersededMemoryIds: []` という同じ顔になっていた——を埋める。
+   * ADR 0030（安全弁3）で `status_changed_concurrently`（TOCTOU で弾かれた）を追加した。
    *
    * **件数は持たない**（`ReextractSkip` 自体に `count`/`countKind` が無い。`recall.ts` の
    * `StageSkippedOmission` に倣った形。理由は ADR 0029 参照）。
    *
    * `usedWholeObservationFallback` の早期 return、`candidates.length === 0` の早期 return、
-   * 本経路（`classifyReextractTargets`）の3つの書き込み経路がある——早期 return の2つは
-   * **`listBySourceObservation` を呼ぶ前に return する**ため、`skipped` には
-   * `{ kind: 'not_examined', ... }` が入る（「何も飛ばさなかった」ではなく「既存を見ていない」）。
+   * 本経路（`classifyReextractTargets` + `classifySupersedeFailure`）の3つの書き込み経路が
+   * ある——早期 return の2つは**`listBySourceObservation` を呼ぶ前に return する**ため、
+   * `skipped` には `{ kind: 'not_examined', ... }` が入る（「何も飛ばさなかった」ではなく
+   * 「既存を見ていない」）。
    */
   skipped: ReextractSkip[];
   extraction: ExtractionOutcome;
@@ -178,8 +184,8 @@ export interface Runtime {
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
    * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
    * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする。
-   * 安全弁2つ（LLM がまた失敗したら何もしない・候補0件なら何もしない）は
-   * `ReextractResult` の doc コメントを参照。
+   * 安全弁3つ（LLM がまた失敗したら何もしない・候補0件なら何もしない・compare-and-swap で
+   * TOCTOU の競合を検知する）は `ReextractResult` の doc コメントを参照。
    */
   reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
 }
@@ -295,6 +301,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 返す。失敗を根拠に既存の記憶を置き換えない。
    * 🔴 安全弁2: 候補が0件なら、何も supersede しない。「何も記憶に値しない」という正常な
    * 抽出結果を根拠に既存を消さない（`superseded_by_id` の指す先も無い）。
+   * 🔴 安全弁3（ADR 0030）: `classifyReextractTargets` が「今回作る前」に読んだ時点で
+   * `active` だった Memory でも、実際に書きに行くまでの間（TOCTOU の窓）に別の書き込みで
+   * status が変わっていることがある。`updateStatus` を `expectedStatus: "active"` の
+   * compare-and-swap で呼び、弾かれたら `classifySupersedeFailure` で判定して `skipped` に
+   * 積む（`supersededMemoryIds` には入れず、`superseded` イベントも積まない）。
    *
    * supersede 対象は、同じ `(sourceObservationId, extractorVersion)` を持つ既存 Memory のうち
    * **`status: 'active'`** かつ今回作られた content_hash の集合に含まれないものだけ。
@@ -366,7 +377,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const supersededMemoryIds: MemoryId[] = [];
     for (const existing of toSupersede) {
-      await deps.memoryStore.updateStatus(ctx, existing.id, "superseded", { supersededById });
+      try {
+        // 🔴 安全弁3（PR「update-status-compare-and-swap」、ADR 0030）: `classifyReextractTargets`
+        // が「今回作る前」に読んだ時点で active だったからといって、書きに来た今この瞬間も
+        // active だとは限らない（TOCTOU）。`expectedStatus: "active"` の compare-and-swap で
+        // 「読んでから書くまでの間に status が変わった」ケースを検知不能なまま通さない。
+        await deps.memoryStore.updateStatus(ctx, existing.id, "superseded", {
+          supersededById,
+          expectedStatus: "active",
+        });
+      } catch (error) {
+        const skip = classifySupersedeFailure(existing.id, error);
+        if (skip === null) {
+          // 競合以外の例外——飲み込まずそのまま投げる（classifySupersedeFailure の doc 参照）。
+          throw error;
+        }
+        // CAS に弾かれた——supersededMemoryIds に入れず、superseded イベントも積まない
+        // （積むと「置き換えた」という監査ログが嘘になる）。
+        skipped.push(skip);
+        continue;
+      }
       await deps.eventStore.append(ctx, {
         tenantId: ctx.tenantId,
         memoryId: existing.id,

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
 import type { Ctx, MemoryStore, RecallId } from "@mnemora/core";
+import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
 
 export interface MemoryStoreConformanceOptions {
@@ -598,6 +599,78 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       await expect(store.updateStatus(ctx, "does-not-exist", "archived")).rejects.toThrow();
+    });
+
+    // -------------------------------------------------------------------
+    // updateStatus の expectedStatus（compare-and-swap、ADR 0030・安全弁3）
+    // -------------------------------------------------------------------
+
+    it("updateStatus は expectedStatus が現在の status と一致すれば更新する", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      expect(memory.status).toBe("active");
+
+      const updated = await store.updateStatus(ctx, memory.id, "superseded", {
+        expectedStatus: "active",
+      });
+
+      expect(updated.status).toBe("superseded");
+    });
+
+    it("updateStatus は expectedStatus が現在の status と不一致なら MemoryStatusConflictError を投げ、行を一切変えない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.updateStatus(ctx, memory.id, "archived"); // 現在の status を archived にしておく
+
+      await expect(
+        store.updateStatus(ctx, memory.id, "superseded", { expectedStatus: "active" }),
+      ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+
+      // 読み直して、行が一切変わっていないことを確認する（黙って部分的に書かれていない）。
+      const unchanged = await store.get(ctx, memory.id);
+      expect(unchanged?.status).toBe("archived");
+    });
+
+    it("updateStatus は expectedStatus を渡しても、投げる MemoryStatusConflictError の observedStatus に現在の status が入る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.updateStatus(ctx, memory.id, "archived");
+
+      let caught: unknown;
+      await store
+        .updateStatus(ctx, memory.id, "superseded", { expectedStatus: "active" })
+        .catch((error: unknown) => {
+          caught = error;
+        });
+
+      expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+      const conflict = caught as MemoryStatusConflictError;
+      expect(conflict.memoryId).toBe(memory.id);
+      expect(conflict.expectedStatus).toBe("active");
+      expect(conflict.observedStatus).toBe("archived");
+    });
+
+    it("updateStatus は expectedStatus を省略すると、今日どおり status に関係なく更新する", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.updateStatus(ctx, memory.id, "archived");
+
+      // expectedStatus 無し——現在の status（archived）と違う値を期待していないので通る。
+      const updated = await store.updateStatus(ctx, memory.id, "forgotten");
+      expect(updated.status).toBe("forgotten");
+    });
+
+    it("updateStatus は存在しない id に expectedStatus を渡しても、競合ではなく『対象が無い』の例外になる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.updateStatus(ctx, "does-not-exist", "superseded", { expectedStatus: "active" }),
+      ).rejects.not.toBeInstanceOf(MemoryStatusConflictError);
     });
 
     // -------------------------------------------------------------------

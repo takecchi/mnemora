@@ -317,7 +317,7 @@ interface MemoryStore {
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId }
+    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus }
   ): Promise<Memory>;
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
   reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory>;
@@ -356,6 +356,15 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
 >   `recalls` テーブルへ1行書き込み、発行した `recallId` を返す。この段は省略可能な段では
 >   ない——`recallId` が発行されないと `observe({kind:'memory_usage'})` が recall を
 >   参照できなくなる（ADR 0008）。
+
+> **PR「update-status-compare-and-swap」（2026-09 追記、ADR 0030・安全弁3）**: `updateStatus`
+> の `opts` に `expectedStatus?: MemoryStatus` を足した。渡すと、書き込み時点の実際の
+> status がそれと一致するときだけ更新する compare-and-swap になる——`reextract` の
+> 「`status !== 'active'` の Memory には触らない」という安全弁が、読み
+> （`listBySourceObservation`）と書き（`updateStatus`）の間に別の書き込みが割り込む
+> TOCTOU で破れていたのを塞ぐ。省略時は今日と同じ振る舞い（status を条件にしない）。
+> 期待と異なる status を観測した場合は `MemoryStatusConflictError` を投げる
+> （対象が存在しない場合は今日どおり別の例外のまま）。詳細は ADR 0030。
 
 > **ADR 0028（2026-09 追記）**: `listBySourceObservation` を足した。**SELECT のみ**——
 > マイグレーション・索引の追加は伴わない。`runtime.reextract`（§3.4）が「ある Observation・

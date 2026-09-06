@@ -1,5 +1,6 @@
 import { sql } from "drizzle-orm";
 import { defaultDecayStrategy } from "@mnemora/core";
+import { MemoryStatusConflictError } from "@mnemora/core";
 import type {
   Ctx,
   EmbeddingStatus,
@@ -323,24 +324,53 @@ export class PostgresMemoryStore implements MemoryStore {
     return result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
   }
 
+  /**
+   * ADR 0030（安全弁3）: `opts.expectedStatus` を渡すと `AND status = ${expectedStatus}` を
+   * 足した条件付き UPDATE になる（compare-and-swap）。**`expectedStatus` が無いときは
+   * 今日と一字も変えない**——このメソッドの大半の呼び出し元（`archived`/`forgotten` への
+   * 遷移等）は無条件更新のままでよい。
+   *
+   * 条件付き UPDATE が0行だった場合、それが「対象の id がそもそも無い」のか
+   * 「id はあるが status が期待と違う」のかを、追加の `SELECT` で読み直して区別する
+   * ——前者は今日と同じ「memory not found」の `Error`、後者は
+   * {@link MemoryStatusConflictError}。**この読み直しは弾かれた後に行うため、
+   * `observedStatus` は弾かれた瞬間の値ではない**（`MemoryStatusConflictError` の
+   * doc コメント参照）。
+   */
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId },
+    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    const expectedStatus = opts?.expectedStatus;
+    const statusCondition =
+      expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
     const result = await this.db.execute(sql`
       UPDATE memories
       SET status = ${status},
           superseded_by_id = COALESCE(${opts?.supersededById ?? null}, superseded_by_id),
           updated_at = now()
-      WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+      WHERE tenant_id = ${ctx.tenantId} AND id = ${id} ${statusCondition}
       RETURNING *
     `);
-    if (result.rows.length === 0) {
+    if (result.rows.length > 0) {
+      return rowToMemory(result.rows[0] as unknown as MemoryRow);
+    }
+
+    if (expectedStatus === undefined) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
-    return rowToMemory(result.rows[0] as unknown as MemoryRow);
+
+    // 0行だった理由を切り分けるための読み直し（上記 doc コメント参照）。
+    const current = await this.db.execute(sql`
+      SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+    `);
+    if (current.rows.length === 0) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+    }
+    const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
+    throw new MemoryStatusConflictError(id, expectedStatus, observedStatus);
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {

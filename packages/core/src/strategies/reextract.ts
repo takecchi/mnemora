@@ -1,5 +1,6 @@
 import type { MemoryId } from "../ids.js";
 import type { Memory, MemoryStatus } from "../memory.js";
+import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
 
 /**
  * `runtime.reextract` が既存 Memory を supersede しなかった理由（ADR 0029）。
@@ -12,11 +13,53 @@ import type { Memory, MemoryStatus } from "../memory.js";
  * **件数の欄を持たせない**（`count` も `countKind` も無い。`recall.ts` の
  * `StageSkippedOmission` に倣った形。ADR 0029 参照: 「contested が1件か5件か」で
  * 次の一手は変わらない）。
+ *
+ * PR「update-status-compare-and-swap」（安全弁3、ADR 0030）で `status_changed_concurrently`
+ * を追加した: `classifyReextractTargets` が「今回作る前」に読んだ時点では `active` だった
+ * Memory でも、実際に `updateStatus` を撃つまでの間（TOCTOU の窓）に他の書き込みで
+ * status が変わっていることがある（例: 利用者が同じ Memory を `forgotten` にする）。
+ * `status_not_active` の `status: Exclude<MemoryStatus, "active">` と違い、こちらの
+ * `observedStatus` は `MemoryStatus | null` である——**この非対称は構造的に保証できない
+ * ことの反映**。`status_not_active` は `classifyReextractTargets` 自身が読んだ
+ * `Memory.status` をそのまま運ぶので `"active"` を除いた型で閉じられるが、
+ * `status_changed_concurrently` は adapter（`packages/postgres`）が競合を検知した**後**に
+ * 読み直した値（`MemoryStatusConflictError.observedStatus`）をそのまま運ぶ。読み直した
+ * 時点で対象行が消えている可能性は型として排除できない——だから `null` を許す。
  */
 export type ReextractSkip =
   | { kind: "status_not_active"; memoryId: MemoryId; status: Exclude<MemoryStatus, "active"> }
   | { kind: "unchanged"; memoryId: MemoryId }
-  | { kind: "not_examined"; reason: "llm_failed_whole_observation" | "no_candidates" };
+  | { kind: "not_examined"; reason: "llm_failed_whole_observation" | "no_candidates" }
+  | {
+      kind: "status_changed_concurrently";
+      memoryId: MemoryId;
+      observedStatus: MemoryStatus | null;
+    };
+
+/**
+ * `reextract` が既存 Memory を supersede しようとして `updateStatus` に投げられた例外を
+ * 判定する純関数（安全弁3、ADR 0030）。
+ *
+ * `MemoryStatusConflictError`（`expectedStatus: "active"` の CAS が破れた）を受け取ったら
+ * `ReextractSkip` を返す——呼び出し側（`runtime.ts`）はこれを `skipped` に積み、
+ * `supersededMemoryIds` には入れず、`superseded` イベントも積まない。
+ *
+ * **⚠ ここが芯である**: それ以外の例外（DB 接続断・想定外のバグ等）に対しては
+ * **必ず `null` を返す**。`null` を受け取った呼び出し側はその例外をそのまま再送出する
+ * ——競合でない例外を skip に化けさせて飲み込むと、今まさに塞いでいる「TOCTOU で
+ * 安全弁が破れたことが誰にも見えない」という穴を、別の場所（無関係な例外の握り潰し）に
+ * 開け直すことになる。
+ */
+export function classifySupersedeFailure(memoryId: MemoryId, error: unknown): ReextractSkip | null {
+  if (error instanceof MemoryStatusConflictError) {
+    return {
+      kind: "status_changed_concurrently",
+      memoryId,
+      observedStatus: error.observedStatus,
+    };
+  }
+  return null;
+}
 
 /**
  * `reextract` の supersede 判定そのものを純関数として切り出したもの（ADR 0029）。
