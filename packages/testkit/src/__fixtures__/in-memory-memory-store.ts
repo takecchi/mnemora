@@ -273,7 +273,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     let totalInScope = 0;
     const notIndexed: Record<NotIndexedReason, number> = { pending: 0, failed: 0, skipped: 0 };
     let filteredArchived = 0;
-    let filteredStatus = 0;
+    let filteredSuperseded = 0;
+    let filteredForgotten = 0;
     let filteredPeriod = 0;
 
     for (const memory of this.memories.values()) {
@@ -288,8 +289,12 @@ export class InMemoryMemoryStore implements MemoryStore {
         filteredArchived += 1;
         continue;
       }
-      if (memory.status === "superseded" || memory.status === "forgotten") {
-        filteredStatus += 1;
+      if (memory.status === "superseded") {
+        filteredSuperseded += 1;
+        continue;
+      }
+      if (memory.status === "forgotten") {
+        filteredForgotten += 1;
         continue;
       }
       // ここに来るのは status IN ('active','contested') のみ。
@@ -330,7 +335,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         skipped: { count: notIndexed.skipped, countKind: "exact" },
       },
       filteredArchived: { count: filteredArchived, countKind: "exact" },
-      filteredStatus: { count: filteredStatus, countKind: "exact" },
+      filteredSuperseded: { count: filteredSuperseded, countKind: "exact" },
+      filteredForgotten: { count: filteredForgotten, countKind: "exact" },
       filteredPeriod: { count: filteredPeriod, countKind: "exact" },
     };
   }

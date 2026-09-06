@@ -66,7 +66,7 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 **決定: スコープ = tenant + subject + 時間窓(period) + taxonomy + status ゲート。** status ゲートは段1の候補生成と同じ `status IN ('active', 'contested')` である。
 
 - **tenant と subject はスコープの外側の境界である。** 呼び出し側が明示した境界の外は「失われた」のではなく「そもそも問うていない」——ちょうどこの段落が「スコープ外は『無い』ではなく『そもそも問うていない』」と述べているのと同じ扱いであり、`Omission`（§4）としては報告しない（`FilteredOmission.condition` に `'tenant'`/`'subject'` の値が無いことと対応する。`'tenant'` という値自体は型として残っているが、Phase 1 の recall はテナント境界の外を問うことが構造的に無いため、実際には発生しない）。
-- **period・status（archived / それ以外）が実際に `filtered` として報告される次元である。** status ゲートで落ちる Memory はさらに二分する——`status = 'archived'`（`condition: 'archived'`）と `status IN ('superseded', 'forgotten')`（`condition: 'status'`）。分ける理由: `archived` は「使われなくなって静かに遠ざかった」ものであり、強化すれば戻ってくる可能性がある（次の一手が違う）。一方 `superseded`/`forgotten` は、前者はより新しい Memory が既に別の形で返るはずのもの、後者は明示的に忘れられたものであり、`archived` とは次の一手が異なる。この2つを両方とも単純に `'status'` へ丸めると、この区別が消える。
+- **period・status（archived / superseded / forgotten）が実際に `filtered` として報告される次元である。** status ゲートで落ちる Memory はさらに三分する——`status = 'archived'`（`condition: 'archived'`）、`status = 'superseded'`（`condition: 'superseded'`）、`status = 'forgotten'`（`condition: 'forgotten'`）。分ける理由: `archived` は「使われなくなって静かに遠ざかった」ものであり、強化すれば戻ってくる可能性がある（次の一手が違う）。`superseded` はより新しい Memory が既に別の形で返るはずのもの（**機構の都合**であり、`superseded_by_id` で置き換え先を辿れる）、`forgotten` は利用者が明示的に忘れさせたもの（**製品の振る舞い**であり、置き換え先を持たない）で、互いに次の一手が異なる（[ADR 0027](./decisions/0027-split-superseded-forgotten-omission.md)）。以前はこの2つを単純に `'status'` という1つの condition へ丸めていたが、それでは「利用者が忘れてほしいと言ったのか、こちらが作り直しただけなのか」を呼び出し側が判定できなくなる。
 - **taxonomy は Phase 1 に実体が無い**（labels/memory_labels は Phase 2、[./memory-model.md](./memory-model.md) §8）。したがって Phase 1 のスコープの taxonomy 次元は常に無条件であり、`Omission { kind: 'filtered', condition: 'taxonomy' }` は Phase 1 では発生しない（型としては残す）。
 
 **件数はすべて単一の集約から取る。** `IndexBand.totalInScope` と `groups`、および `filtered` 系 Omission の件数・`not_indexed` の件数は、すべて同じ1回の集約クエリ（`MemoryStore.aggregateScope`）から得る。ADR 0011 が段1の `count(*) OVER ()` を締め出したのと同じ理由——**別々のクエリから出すと、その間の書き込みで総和が一致しなくなる**——がここでも成り立つ。
@@ -192,7 +192,7 @@ type Omission =
       stage: 'candidate_generation' | 'rescore' | 'index_band'
       reason: 'embedding_provider_unavailable' | 'empty_query_content' | 'budget_exhausted' }
   | { kind: 'filtered'
-      condition: 'tenant' | 'status' | 'archived' | 'taxonomy' | 'period'
+      condition: 'tenant' | 'superseded' | 'forgotten' | 'archived' | 'taxonomy' | 'period'
       count: number; countKind: CountKind }
   | { kind: 'below_threshold'
       count: number; countKind: CountKind
@@ -222,7 +222,7 @@ type Omission =
 | kind | 次の一手がどう変わるか |
 |---|---|
 | `stage_skipped` | その段の経路自体を疑う（埋め込み provider の復旧、クエリの中身の見直し、予算そのものの見直し）。スコアやフィルタの調整では直らない。 |
-| `filtered` | 条件を緩める判断ができる（例: `taxonomy` フィルタを外す、`period` を広げる）。どの条件かが分かって初めて緩め方が決まる。 |
+| `filtered` | 条件を緩める判断ができる（例: `taxonomy` フィルタを外す、`period` を広げる）。どの条件かが分かって初めて緩め方が決まる。`condition: 'superseded'` なら `superseded_by_id` を辿って置き換え先を探す一手があるが、`condition: 'forgotten'` にはその一手が無い（利用者が意図して忘れさせたものであり、指す先を持たない）。この2つを束ねると一手が選べなくなる（ADR 0027）。 |
 | `below_threshold` | 閾値を緩めて聞き直す判断ができる。`nearMisses` があれば「惜しかったものがどれくらい惜しかったか」まで見える。 |
 | `over_limit` | 閾値は超えている集合が k より大きいと分かる。k を増やす、あるいはページングする一手につながる。 |
 | `budget_dropped` | スコアの問題ではなく量の問題だと分かる。予算を緩めるか、`memories` を要約させる判断につながる。 |

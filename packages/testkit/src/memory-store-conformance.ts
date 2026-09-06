@@ -594,25 +594,54 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const aggregate = await store.aggregateScope(ctx, {});
       expect(aggregate.totalInScope).toBe(1);
       expect(aggregate.filteredArchived.count).toBe(1);
-      expect(aggregate.filteredStatus.count).toBe(0);
+      expect(aggregate.filteredSuperseded.count).toBe(0);
+      expect(aggregate.filteredForgotten.count).toBe(0);
     });
 
-    it("aggregateScope は status IN ('superseded','forgotten') を filteredStatus に束ねて計上する", async () => {
+    it("aggregateScope は status='superseded' と status='forgotten' を別々に計上する（ADR 0027、束ねない）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+
+      // 件数をわざと非対称にする（3 と 5）。これは実測の歯である
+      // （オーナー指摘: `count(*) OVER ()` が `hnsw.ef_search` の設定値をそのまま返して
+      // `exact` を名乗っていた事故が ADR 0008 の前例にある。「数えられるはずだ」は設計の
+      // 主張であって値の主張ではないので、既知の真値と突き合わせて確かめる）。
+      // 1件ずつでは、取り違え（superseded と forgotten を入れ替えて数える）も
+      // 束ねたまま（両方を1つの filteredStatus のような欄に合算する）も検出できない。
+      // 3 と 5 なら、束ねれば合計8になり、取り違えれば 5/3 と出る——どちらも必ず落ちる。
+      const SUPERSEDED_COUNT = 3;
+      const FORGOTTEN_COUNT = 5;
+      for (let i = 0; i < SUPERSEDED_COUNT; i++) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", status: "superseded" }),
+        );
+      }
+      for (let i = 0; i < FORGOTTEN_COUNT; i++) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", status: "forgotten" }),
+        );
+      }
+      // active / archived も混ぜて、フィルタの取り違え（例えば status='active' まで
+      // superseded/forgotten の列に混入する）が起きていないことも同時に検査する。
       await store.createMemory(
         ctx,
-        buildNewMemoryFixture({ tenantId: "tenant-1", status: "superseded" }),
+        buildNewMemoryFixture({ tenantId: "tenant-1", status: "active" }),
       );
       await store.createMemory(
         ctx,
-        buildNewMemoryFixture({ tenantId: "tenant-1", status: "forgotten" }),
+        buildNewMemoryFixture({ tenantId: "tenant-1", status: "archived" }),
       );
 
       const aggregate = await store.aggregateScope(ctx, {});
-      expect(aggregate.totalInScope).toBe(0);
-      expect(aggregate.filteredStatus.count).toBe(2);
-      expect(aggregate.filteredArchived.count).toBe(0);
+      expect(aggregate.totalInScope).toBe(1);
+      expect(aggregate.filteredArchived.count).toBe(1);
+      expect(aggregate.filteredSuperseded.count).toBe(SUPERSEDED_COUNT);
+      expect(aggregate.filteredForgotten.count).toBe(FORGOTTEN_COUNT);
+      // `countKind: 'exact'` という名乗り自体を歯にする（オーナー指摘の核）。
+      expect(aggregate.filteredSuperseded.countKind).toBe("exact");
+      expect(aggregate.filteredForgotten.countKind).toBe("exact");
     });
 
     it("aggregateScope は status='contested' を totalInScope に含める（段1と同じゲート）", async () => {

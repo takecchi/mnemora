@@ -188,18 +188,36 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.index.totalInScope).toBe(1);
   });
 
-  it("status IN ('superseded','forgotten') は filtered(status) に束ねて報告される", async () => {
+  it("status='superseded'/'forgotten' は別々の filtered omission として報告される（ADR 0027、束ねない）", async () => {
     const { runtime, stores } = buildRuntime();
-    await stores.memoryStore.createMemory(ctx, newMemory({ status: "superseded" }));
-    await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    // 件数をわざと非対称にする（3 と 5）。1件ずつだと、取り違え
+    // （superseded と forgotten を入れ替えて push する）も、束ねたまま
+    // （両方を1つの omission に合算する）も、どちらも見抜けない。3 と 5 なら、
+    // 束ねれば8、取り違えれば5/3になり、どちらも必ず落ちる。
+    for (let i = 0; i < 3; i++) {
+      await stores.memoryStore.createMemory(ctx, newMemory({ status: "superseded" }));
+    }
+    for (let i = 0; i < 5; i++) {
+      await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    }
 
     const result = await runtime.recall(ctx, {});
     expect(result.omitted).toContainEqual({
       kind: "filtered",
-      condition: "status",
-      count: 2,
+      condition: "superseded",
+      count: 3,
       countKind: "exact",
     });
+    expect(result.omitted).toContainEqual({
+      kind: "filtered",
+      condition: "forgotten",
+      count: 5,
+      countKind: "exact",
+    });
+    // 束ねられていないこと（"status" という condition はもう存在しない）を確認する。
+    expect(result.omitted).not.toContainEqual(
+      expect.objectContaining({ kind: "filtered", condition: "status" }),
+    );
   });
 
   it("occurredAfter の外にある Memory は filtered(period) に報告され、totalInScope から除かれる", async () => {

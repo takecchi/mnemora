@@ -26,7 +26,15 @@ export interface StageSkippedOmission {
 
 export interface FilteredOmission {
   kind: "filtered";
-  condition: "tenant" | "status" | "archived" | "taxonomy" | "period";
+  /**
+   * `"superseded"` と `"forgotten"` を分けて持つ（ADR 0027）。両方とも status ゲートで
+   * 落ちる点は同じだが、次の一手が違う——`superseded` はより良い抽出に置き換えられた
+   * という**機構の都合**（`superseded_by_id` で置き換え先を辿れる）、`forgotten` は
+   * 利用者が明示的に忘れさせたという**製品の振る舞い**（指す先を持たない）。1つの
+   * `"status"` に束ねると、「利用者が忘れてほしいと言ったのか、こちらが作り直したのか」を
+   * 呼び出し側が判定できなくなる。`"archived"` が既に別条件として独立している先例に倣う。
+   */
+  condition: "tenant" | "superseded" | "forgotten" | "archived" | "taxonomy" | "period";
   count: number;
   countKind: CountKind;
 }
@@ -119,7 +127,7 @@ const StageSkippedOmissionSchema = z.object({
 
 const FilteredOmissionSchema = z.object({
   kind: z.literal("filtered"),
-  condition: z.enum(["tenant", "status", "archived", "taxonomy", "period"]),
+  condition: z.enum(["tenant", "superseded", "forgotten", "archived", "taxonomy", "period"]),
   count: z.number().int().nonnegative(),
   countKind: CountKindSchema,
 }) satisfies z.ZodType<FilteredOmission>;
@@ -237,14 +245,15 @@ export const IndexBandSchema = z.object({
  * （`FilteredOmission.condition` に `'tenant'`/`'subject'` の値が無いことと対応する。
  * ちょうど「別テナントのデータ」を omission として報告しないのと同じ理由——呼び出し側が
  * 明示した境界の外は「失われた」のではなく「そもそも問うていない」）。
- * **period・status（archived / それ以外）が実際に `filtered` として報告される次元である。**
- * taxonomy は Phase 1 に実体が無い（labels テーブルは Phase 2、docs/memory-model.md §8）ため、
+ * **period・status（archived / superseded / forgotten）が実際に `filtered` として
+ * 報告される次元である。** taxonomy は Phase 1 に実体が無い（labels テーブルは Phase 2、docs/memory-model.md §8）ため、
  * この集約では常に発生しない（型としての `FilteredOmission.condition: 'taxonomy'` は
  * Phase 2 向けに残す）。
  *
  * **件数はすべてこの集約1本から取る**（ADR 0011 が段1から締め出した
  * `count(*) OVER ()` の代わりに指定した経路と同じ発想）。`groups` の総和・`totalInScope`・
- * `filteredArchived`/`filteredStatus`/`filteredPeriod`/`notIndexed` の各件数を、
+ * `filteredArchived`/`filteredSuperseded`/`filteredForgotten`/`filteredPeriod`/`notIndexed`
+ * の各件数を、
  * 別々のクエリではなく同一の集約クエリから得ることで、書き込みが並行して起きていても
  * 「群カウントと totalInScope の総和が一致する」という被覆不変条件が構造的に崩れない。
  */
@@ -266,8 +275,21 @@ export interface ScopeAggregate {
   notIndexed: Record<NotIndexedReason, { count: number; countKind: CountKind }>;
   /** status = 'archived' で「スコープを定義するフィルタ」により落ちた件数。 */
   filteredArchived: { count: number; countKind: CountKind };
-  /** status IN ('superseded','forgotten') で落ちた件数（本 PR の裁量による束ね方。PR 本文参照）。 */
-  filteredStatus: { count: number; countKind: CountKind };
+  /**
+   * status = 'superseded' で落ちた件数——**機構の都合**（より良い抽出に置き換えられた）。
+   * `filteredForgotten` とは分けて持つ（ADR 0027）。ADR 0008 の判定基準（区別があると
+   * 呼び出し側の次の一手が変わるか）に照らすと変わる——`superseded` は置き換え先
+   * （`superseded_by_id`）を辿れば「なぜ無いのか」の説明が付くのに対し、`forgotten` は
+   * 利用者が意図して忘れさせた結果であり、置き換え先を持たない。同じ札に束ねると、
+   * 「利用者が忘れてほしいと言ったのか、こちらが作り直しただけなのか」を呼び出し側が
+   * 判定できなくなる。`archived` が既に独立した条件になっている先例に倣う。
+   */
+  filteredSuperseded: { count: number; countKind: CountKind };
+  /**
+   * status = 'forgotten' で落ちた件数——**製品の振る舞い**（利用者が明示的に忘れさせた）。
+   * `filteredSuperseded` を見よ。
+   */
+  filteredForgotten: { count: number; countKind: CountKind };
   /** 時間窓（period）の外にあるため落ちた件数。period 未指定なら常に0。 */
   filteredPeriod: { count: number; countKind: CountKind };
 }

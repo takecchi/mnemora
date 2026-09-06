@@ -186,7 +186,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
   });
 
-  it("omitted: filtered(archived) / filtered(status) / filtered(period) / not_indexed", async () => {
+  it("omitted: filtered(archived) / filtered(superseded) / filtered(forgotten) / filtered(period) / not_indexed", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
 
@@ -199,6 +199,13 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     await memoryStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: TENANT, status: "archived" }),
+    );
+    // superseded と forgotten を非対称の件数にする（ADR 0027、2件と1件）。
+    // 1件ずつだと、取り違え（superseded/forgotten を入れ替えて数える）も
+    // 束ねたまま（両方を1つの filtered omission に合算する）も見抜けない。
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: TENANT, status: "superseded" }),
     );
     await memoryStore.createMemory(
       ctx,
@@ -233,8 +240,14 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
-      condition: "status",
+      condition: "superseded",
       count: 2,
+      countKind: "exact",
+    });
+    expect(result.omitted).toContainEqual({
+      kind: "filtered",
+      condition: "forgotten",
+      count: 1,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
