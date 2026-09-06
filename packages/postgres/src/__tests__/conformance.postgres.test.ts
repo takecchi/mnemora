@@ -78,10 +78,18 @@ describeVectorStoreConformance({
     const { db } = await getTestClient();
     return new PostgresVectorStore(db);
   },
-  prepareMemoryId: async (ctx: Ctx) => {
+  prepareMemoryId: async (ctx: Ctx, attrs) => {
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
-    const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: ctx.tenantId }));
+    const memory = await store.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        ...(attrs?.status !== undefined ? { status: attrs.status } : {}),
+        ...(attrs?.subjectId !== undefined ? { subjectId: attrs.subjectId } : {}),
+        ...(attrs?.decayFloorAt !== undefined ? { decayFloorAt: attrs.decayFloorAt } : {}),
+      }),
+    );
     return memory.id;
   },
 });

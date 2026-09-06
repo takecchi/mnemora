@@ -46,4 +46,5 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0031](./0031-supersede-status-and-event-in-one-transaction.md) | `reextract` の supersede の status 更新とイベント追記を、別々の2コミットから1トランザクションにまとめる | 採用 (2026-09) |
 | [0032](./0032-outbox-claim-lease.md) | `OutboxStore.claimBatch` に claim のリースを足し、「見えない停止」と「先頭詰まり」を塞ぐ | 採用 (2026-09) |
 | [0033](./0033-what-decided-the-rank-in-the-retrieval-bench.md) | `retrieval` ベンチが順位の理由を捨てていたのをやめる — 実際に順位を決めていた項の実測 | 採用 (2026-09) |
+| [0034](./0034-vector-store-filter-conformance.md) | `VectorFilter` を「adapter が実際に適用しなければならない」契約にし、その契約を適合テストの歯として置く | 採用 (2026-09) |
 | [0035](./0035-recalled-memory-provenance-kind.md) | `recall()` の返り値に `provenanceKind` を載せる — 「区別して返す」を返り値の側で満たす | 採用 (2026-09) |
