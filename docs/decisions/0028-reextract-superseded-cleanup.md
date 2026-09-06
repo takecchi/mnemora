@@ -140,6 +140,11 @@ extractorVersion)` を追加する。マイグレーション・索引は追加�
     直すなら別の ADR を起こすこと（欄を足す判断になり、
     [ADR 0024](./0024-remove-exact-counts-option.md) の義務——足した欄の経路を実測する——が生じる）。
 
+    **→ [ADR 0029](./0029-reextract-skip-visibility.md) で解消した。**
+    `ReextractResult.skipped: ReextractSkip[]` を足し、`contested`/`forgotten` で飛ばした・
+    そもそも置き換えるものが無かった・既存を見てすらいない（早期 return 2つ）、の各顔を
+    区別して出すようにした。
+
   - `runtime.reextract` を実際に**いつ**呼ぶかの経路（cron、手動、`ExtractionOutcome ===
 'llm_failed_whole_observation'` を検知した監視からの自動トリガーなど）は本 PR の範囲外
     である。ADR 0013 と同じく「検知・掃除の機構」を作っただけで、「いつ使うか」の運用は

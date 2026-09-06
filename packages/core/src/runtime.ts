@@ -26,6 +26,8 @@ import type { NewObservation, Observation } from "./observation.js";
 import type { OutboxJobRecord } from "./outbox.js";
 import { runRecall } from "./recall-runtime.js";
 import type { RecallQuery, RecallResult } from "./recall.js";
+import { classifyReextractTargets } from "./strategies/reextract.js";
+import type { ReextractSkip } from "./strategies/reextract.js";
 
 /**
  * `runtime.observe` / `runtime.tick` の実装（roadmap.md 段階3、docs/architecture.md §3.2・§3.3）。
@@ -102,11 +104,15 @@ export interface ObserveResult {
 }
 
 /**
- * `runtime.reextract` の結果（ADR 0028）。
+ * `runtime.reextract` の結果（ADR 0028、ADR 0029）。
  *
- * `observe()` の `ExtractionOutcome` と同じ3値のうち、`reextract` は `skipped` を返さない
- * ——呼び出し側が明示的に指定した Observation に対して常に抽出を試みるため、
- * 「この呼び出しでは抽出していない」という状態が無い（deferred も冪等な再送もここには来ない）。
+ * `observe()` の `ExtractionOutcome` が持つ `'skipped'`（`ObserveResult.extraction`。
+ * `memory_usage` 入力用の値）と、この型が持つ `ReextractResult.skipped` フィールドは
+ * **別の語彙**である——前者は「この呼び出しで抽出そのものを行ったか」、後者は
+ * 「既存 Memory を supersede しなかった理由」。名前が似ているだけで無関係。
+ * `reextract` の `extraction` は常に `'ok'` か `'llm_failed_whole_observation'` のどちらかで、
+ * `'skipped'` は取らない——呼び出し側が明示的に指定した Observation に対して常に抽出を
+ * 試みるため（deferred も冪等な再送もここには来ない）。
  */
 export interface ReextractResult {
   observationId: ObservationId;
@@ -125,6 +131,20 @@ export interface ReextractResult {
    *   （`forgotten` は絶対に含めない。`contested` も対象外——理由は ADR 0028 参照）。
    */
   supersededMemoryIds: MemoryId[];
+  /**
+   * ADR 0029: 既存 Memory を supersede しなかった理由。ADR 0028 が「引き受ける負債」に
+   * 記録した欠落——`contested` で飛ばした・`forgotten` で飛ばした・そもそも置き換える
+   * ものが無かった、の3つが `supersededMemoryIds: []` という同じ顔になっていた——を埋める。
+   *
+   * **件数は持たない**（`ReextractSkip` 自体に `count`/`countKind` が無い。`recall.ts` の
+   * `StageSkippedOmission` に倣った形。理由は ADR 0029 参照）。
+   *
+   * `usedWholeObservationFallback` の早期 return、`candidates.length === 0` の早期 return、
+   * 本経路（`classifyReextractTargets`）の3つの書き込み経路がある——早期 return の2つは
+   * **`listBySourceObservation` を呼ぶ前に return する**ため、`skipped` には
+   * `{ kind: 'not_examined', ... }` が入る（「何も飛ばさなかった」ではなく「既存を見ていない」）。
+   */
+  skipped: ReextractSkip[];
   extraction: ExtractionOutcome;
 }
 
@@ -296,15 +316,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
 
     if (usedWholeObservationFallback) {
+      // ADR 0029: この早期 return は `listBySourceObservation` を呼ぶ前に return する——
+      // つまり既存 Memory を「見ていない」。`skipped: []`（既定値の顔）にすると
+      // 「何も飛ばさなかった」と嘘をつくことになるため、`not_examined` を明示する。
       return {
         observationId,
         memoryIds: [],
         supersededMemoryIds: [],
+        skipped: [{ kind: "not_examined", reason: "llm_failed_whole_observation" }],
         extraction: "llm_failed_whole_observation",
       };
     }
     if (candidates.length === 0) {
-      return { observationId, memoryIds: [], supersededMemoryIds: [], extraction: "ok" };
+      // ADR 0029: 同じ理由でここも `listBySourceObservation` の前——既存を見ていない。
+      return {
+        observationId,
+        memoryIds: [],
+        supersededMemoryIds: [],
+        skipped: [{ kind: "not_examined", reason: "no_candidates" }],
+        extraction: "ok",
+      };
     }
 
     // supersede 判定は「今回作る前」の既存 Memory を基準にする——これから作る Memory 自身が
@@ -328,16 +359,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 当てても歯が落ちなくなり、安全弁の実効性を検査できなくなる）。
     const supersededById = memoryIds[0]!;
 
+    // ADR 0029: 判定そのものは純関数（`classifyReextractTargets`）に切り出してある——
+    // ここでは判定結果（`toSupersede`・`skipped`）を受け取って I/O するだけ。
+    // supersede する対象・順序・イベントの中身は ADR 0028 からミリも変えていない。
+    const { toSupersede, skipped } = classifyReextractTargets(existingBefore, contentHashes);
+
     const supersededMemoryIds: MemoryId[] = [];
-    for (const existing of existingBefore) {
-      if (existing.status !== "active") {
-        // 🔴 forgotten を絶対に触らない・contested は対象外（doc コメント参照）。
-        continue;
-      }
-      if (contentHashes.has(existing.contentHash)) {
-        // 今回の抽出でも変わらず作られた内容——置き換えられていないので supersede しない。
-        continue;
-      }
+    for (const existing of toSupersede) {
       await deps.memoryStore.updateStatus(ctx, existing.id, "superseded", { supersededById });
       await deps.eventStore.append(ctx, {
         tenantId: ctx.tenantId,
@@ -356,7 +384,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       supersededMemoryIds.push(existing.id);
     }
 
-    return { observationId, memoryIds, supersededMemoryIds, extraction: "ok" };
+    return { observationId, memoryIds, supersededMemoryIds, skipped, extraction: "ok" };
   }
 
   async function handleMemoryUsage(
