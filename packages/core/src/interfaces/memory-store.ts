@@ -1,4 +1,5 @@
 import type { Ctx } from "../ctx.js";
+import type { MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
@@ -94,6 +95,15 @@ export class MemoryStatusConflictError extends Error {
  * を足した: `reextract` の「`status !== 'active'` なら触らない」という安全弁が、読み（
  * `listBySourceObservation`）と書き（`updateStatus`）の間に別の書き込みが割り込む
  * TOCTOU で破れる穴を塞ぐ。省略時の振る舞いは変えていない。
+ *
+ * ADR 0031 で `updateStatusWithEvent` を追加した: `updateStatus` の呼び出しと
+ * `EventStore.append` の呼び出しを別々のコミットとして行うと、前者が成功し後者が失敗した
+ * 場合に「行は `superseded` のまま、対応する `superseded` イベントは永久に存在しない」という
+ * *永続化された*不整合が残る（docs/memory-model.md §11 行5・docs/architecture.md §3.2 が
+ * 要求する「同一トランザクション」に実装が違反していた）。`updateStatusWithEvent` は
+ * status の更新とイベントの追記を1回の呼び出し・1トランザクションにまとめる。
+ * **`updateStatus` は変更していない**——status だけを更新したい呼び出し元
+ * （`archived`/`forgotten` への遷移等、イベントを別の理由で別途書く場合）はそのまま使える。
  */
 export interface MemoryStore {
   createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
@@ -160,6 +170,44 @@ export interface MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory>;
+  /**
+   * ADR 0031: `updateStatus` と同じ status 更新を行い、**同一トランザクションで**
+   * `event` を `memory_events` へ追記する。命名は `createObservationWithOutbox` /
+   * `createMemoryWithOutbox`（ADR 0012 D-ingest-1: 「同一トランザクションで行う必要がある
+   * 2つの書き込みを、その組み合わせに特化したメソッドとして `MemoryStore` に持たせる」）に
+   * 揃えた。
+   *
+   * 🔴 守る不変条件: **`memories.status` の更新が永続化されたことと、対応するイベントが
+   * 永続化されたことは、同値である。** 一方だけが起きて他方が起きない状態を作らない。
+   *
+   * 契約（`updateStatus` と共通の部分は同じ意味論）:
+   * - `opts.expectedStatus` を渡すと compare-and-swap になる。書き込み時点の実際の status が
+   *   一致しなければ {@link MemoryStatusConflictError} を投げ、**status の更新もイベントの
+   *   追記も一切起きない**（両方とも起きないか、両方とも起きるかのどちらかであり、
+   *   片方だけ起きることはない）。
+   * - `opts.expectedStatus` を省略すると、`updateStatus` の省略時と同じく status を条件に
+   *   せず常に更新し、イベントを追記する。
+   * - 対象の Memory がそもそも存在しない場合は、`expectedStatus` の有無に関わらず今日と
+   *   同じ「memory not found」の `Error` を投げる（イベントは積まれない）。
+   *
+   * 🔴 **買わない不変条件**（呼び出し側の `reextract` ループが対象1件ごとにこのメソッドを
+   * 呼ぶ場合）: 「複数回の呼び出しをまとめて全部成功させるか全部失敗させるか」は買わない。
+   * このメソッド自体は単一の Memory 1件・イベント1件の原子性しか保証しない
+   * ——複数の Memory にまたがる操作全体の原子性は呼び出し側の責務（ADR 0031「採らなかった案」
+   * 参照）。
+   *
+   * また、docs/memory-model.md §11 行5 が規定する「旧行の status 更新と*新 Memory の作成*も
+   * 1トランザクション」は**このメソッドの範囲外**——新しい Memory の作成（`createMemory`/
+   * `createMemoryWithOutbox`）は別の呼び出しのままであり、このメソッドは既存 Memory の
+   * status 更新とイベント追記の対だけを扱う（ADR 0031「これが覆るとしたら」参照）。
+   */
+  updateStatusWithEvent(
+    ctx: Ctx,
+    id: MemoryId,
+    status: MemoryStatus,
+    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
   /** roadmap.md 段階3: `embeddingStatus` の `pending → ready | failed` 遷移を書き込む。 */
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
   reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory>;

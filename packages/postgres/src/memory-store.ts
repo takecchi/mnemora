@@ -5,10 +5,12 @@ import type {
   Ctx,
   EmbeddingStatus,
   Memory,
+  MemoryEvent,
   MemoryId,
   MemoryStatus,
   MemoryStore,
   NewMemory,
+  NewMemoryEvent,
   NewObservation,
   NewRecallRecord,
   Observation,
@@ -23,8 +25,10 @@ import type { Db } from "./client.js";
 import {
   isUuidLike,
   rowToMemory,
+  rowToMemoryEvent,
   rowToObservation,
   rowToOutboxJob,
+  type MemoryEventRow,
   type MemoryRow,
   type ObservationRow,
   type OutboxJobRow,
@@ -371,6 +375,78 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
     throw new MemoryStatusConflictError(id, expectedStatus, observedStatus);
+  }
+
+  /**
+   * ADR 0031: `updateStatus` の UPDATE と `EventStore.append`（`packages/postgres/src/
+   * event-store.ts`）の INSERT を**同一トランザクション**で行う。この2つが別コミット
+   * だったこと自体が直された不具合——前者だけ成功し後者が失敗すると、行は永久に
+   * 新しい status のまま、対応するイベントは永久に存在しないという永続化された
+   * 不整合が残っていた（PR「supersede-status-and-event-in-one-transaction」）。
+   *
+   * `db.transaction()` のコールバック内で throw すると自動的にロールバックされる
+   * （`createObservationWithOutbox`/`createMemoryWithOutbox` と同じ形——ADR 0012
+   * D-ingest-1）。CAS に弾かれた場合・対象が存在しない場合は、UPDATE が0行のまま
+   * この関数を抜けて例外を投げるだけなので、`memory_events` への INSERT は実行されない
+   * ——ロールバックを待つまでもなく、そもそも書き込みコマンド自体を発行しない。
+   */
+  async updateStatusWithEvent(
+    ctx: Ctx,
+    id: MemoryId,
+    status: MemoryStatus,
+    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const expectedStatus = opts.expectedStatus;
+    const statusCondition =
+      expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
+
+    return this.db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE memories
+        SET status = ${status},
+            superseded_by_id = COALESCE(${opts.supersededById ?? null}, superseded_by_id),
+            updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId} AND id = ${id} ${statusCondition}
+        RETURNING *
+      `);
+
+      if (result.rows.length === 0) {
+        if (expectedStatus === undefined) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+        // 0行だった理由を切り分けるための読み直し（`updateStatus` の doc コメント参照）。
+        const current = await tx.execute(sql`
+          SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+        `);
+        if (current.rows.length === 0) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+        const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
+        throw new MemoryStatusConflictError(id, expectedStatus, observedStatus);
+      }
+
+      const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
+
+      const eventResult = await tx.execute(sql`
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        VALUES (
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          ${event.memoryId},
+          ${event.kind},
+          ${event.at ?? new Date()},
+          ${JSON.stringify(event.actor)}::jsonb,
+          ${event.digestSnapshot ?? null},
+          ${event.sizeBeforeBytes ?? null},
+          ${JSON.stringify(event.meta)}::jsonb
+        )
+        RETURNING *
+      `);
+      const storedEvent = rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
+
+      return { memory, event: storedEvent };
+    });
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {

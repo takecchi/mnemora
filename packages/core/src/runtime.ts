@@ -382,10 +382,33 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // が「今回作る前」に読んだ時点で active だったからといって、書きに来た今この瞬間も
         // active だとは限らない（TOCTOU）。`expectedStatus: "active"` の compare-and-swap で
         // 「読んでから書くまでの間に status が変わった」ケースを検知不能なまま通さない。
-        await deps.memoryStore.updateStatus(ctx, existing.id, "superseded", {
-          supersededById,
-          expectedStatus: "active",
-        });
+        //
+        // ADR 0031: status の更新と `superseded` イベントの追記は、以前は
+        // `updateStatus` + `eventStore.append` という**別々の2コミット**だった——前者が
+        // 成功し後者が失敗すると、行は永久に `superseded` のまま対応するイベントが
+        // 永久に存在しない、という永続化された不整合が残りうる。`updateStatusWithEvent`
+        // は両方を1回の呼び出し・1トランザクションにまとめる。CAS に弾かれた場合は
+        // 両方とも起きない（イベントは積まれない）。
+        await deps.memoryStore.updateStatusWithEvent(
+          ctx,
+          existing.id,
+          "superseded",
+          { supersededById, expectedStatus: "active" },
+          {
+            tenantId: ctx.tenantId,
+            memoryId: existing.id,
+            kind: "superseded",
+            actor: { type: "system" },
+            digestSnapshot: existing.digest,
+            sizeBeforeBytes: null,
+            meta: {
+              reason: "reextract_superseded",
+              supersededById,
+              sourceObservationId: observationId,
+              extractorVersion,
+            },
+          },
+        );
       } catch (error) {
         const skip = classifySupersedeFailure(existing.id, error);
         if (skip === null) {
@@ -393,24 +416,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           throw error;
         }
         // CAS に弾かれた——supersededMemoryIds に入れず、superseded イベントも積まない
-        // （積むと「置き換えた」という監査ログが嘘になる）。
+        // （積むと「置き換えた」という監査ログが嘘になる。`updateStatusWithEvent` 自身が
+        // 弾かれたときは何も書き換えず何も積まないことを保証している）。
         skipped.push(skip);
         continue;
       }
-      await deps.eventStore.append(ctx, {
-        tenantId: ctx.tenantId,
-        memoryId: existing.id,
-        kind: "superseded",
-        actor: { type: "system" },
-        digestSnapshot: existing.digest,
-        sizeBeforeBytes: null,
-        meta: {
-          reason: "reextract_superseded",
-          supersededById,
-          sourceObservationId: observationId,
-          extractorVersion,
-        },
-      });
       supersededMemoryIds.push(existing.id);
     }
 
