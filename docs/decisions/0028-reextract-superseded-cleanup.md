@@ -116,6 +116,30 @@ extractorVersion)` を追加する。マイグレーション・索引は追加�
 
 - **引き受ける負債**:
 
+  - **🔴 `active` 以外を飛ばしたことが、どこにも出ない（2026-09-06 に確認）。**
+    `reextract` は `status !== 'active'` の既存 Memory を `continue` で飛ばすが、
+    **飛ばしたことは `ReextractResult` にも `memory_events` にも残らない**
+    （`superseded` イベントは実際に supersede したときだけ積む）。
+    ⟹ **`supersededMemoryIds: []` は、次の3つで同じ顔になる**:
+
+    | 実際に起きたこと | 呼び出し側から見える形 |
+    |---|---|
+    | `contested` だったので飛ばした | `supersededMemoryIds: []` |
+    | `forgotten` だったので飛ばした | `supersededMemoryIds: []` |
+    | そもそも置き換えるものが無かった | `supersededMemoryIds: []` |
+
+    **[ADR 0008](./0008-absence-taxonomy.md) の判定基準（その区別があると次の一手が変わるか）に
+    照らすと、変わる**——`contested` なら対向の解決が先に要る、`forgotten` なら触ってはいけない、
+    無かったのなら何もしなくてよい。**次の一手は3つとも違う。**
+
+    **⚠ これはこの repo で繰り返し現れている形である**——
+    [ADR 0011](./0011-no-window-count-in-ann-stage.md)（件数が設定値を返していた）、
+    [ADR 0025](./0025-ann-underfill-is-not-reported-in-omitted.md)（取りこぼしが `omitted` に出ない）、
+    [ADR 0027](./0027-split-superseded-forgotten-omission.md)（`superseded` と `forgotten` が同じ札）
+    と同じ族である。**本 ADR ではこれを記録に留め、直していない。**
+    直すなら別の ADR を起こすこと（欄を足す判断になり、
+    [ADR 0024](./0024-remove-exact-counts-option.md) の義務——足した欄の経路を実測する——が生じる）。
+
   - `runtime.reextract` を実際に**いつ**呼ぶかの経路（cron、手動、`ExtractionOutcome ===
 'llm_failed_whole_observation'` を検知した監視からの自動トリガーなど）は本 PR の範囲外
     である。ADR 0013 と同じく「検知・掃除の機構」を作っただけで、「いつ使うか」の運用は
