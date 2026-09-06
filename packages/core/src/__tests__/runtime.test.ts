@@ -807,8 +807,10 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
         hashContent: (content: string) => `sha256(${content})`,
       });
 
-      // 競合ではない、ただの障害（例: 接続断）を模す。
-      stores.memoryStore.updateStatus = async () => {
+      // 競合ではない、ただの障害（例: 接続断）を模す。`reextract` は ADR 0031 以降
+      // `updateStatus` ではなく `updateStatusWithEvent` を呼ぶ（status 更新とイベント追記を
+      // 1回のトランザクションにまとめたため）——ここで差し替えるのもそちらにする。
+      stores.memoryStore.updateStatusWithEvent = async () => {
         throw new Error("simulated connection reset");
       };
 

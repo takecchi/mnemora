@@ -14,7 +14,12 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { rowToOutboxJob, type OutboxJobRow } from "../mapping.js";
+import {
+  rowToMemoryEvent,
+  rowToOutboxJob,
+  type MemoryEventRow,
+  type OutboxJobRow,
+} from "../mapping.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
@@ -41,6 +46,13 @@ describeMemoryStoreConformance({
       RETURNING id
     `);
     return (result.rows[0] as unknown as { id: string }).id;
+  },
+  listEventsForMemory: async (ctx: Ctx, memoryId: string) => {
+    const { db } = await getTestClient();
+    const result = await db.execute(sql`
+      SELECT * FROM memory_events WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
+    `);
+    return result.rows.map((row) => rowToMemoryEvent(row as unknown as MemoryEventRow));
   },
 });
 

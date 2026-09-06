@@ -9,24 +9,40 @@ import type {
 import { nextId } from "./id.js";
 
 /**
+ * `NewMemoryEvent` から永続化済みの `MemoryEvent` を組み立てる。`InMemoryEventStore.append`
+ * と `InMemoryMemoryStore.updateStatusWithEvent`（ADR 0031）の両方がこれを使う——
+ * 「同じ形の memory_events 行を作る」というロジックを2箇所に複製すると、片方だけ直して
+ * もう片方を直し忘れる食い違いを作りかねない。
+ */
+export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
+  return {
+    id: nextId("evt"),
+    tenantId: ctx.tenantId,
+    memoryId: event.memoryId,
+    kind: event.kind,
+    at: event.at ?? new Date(),
+    actor: event.actor,
+    digestSnapshot: event.digestSnapshot ?? null,
+    sizeBeforeBytes: event.sizeBeforeBytes ?? null,
+    meta: event.meta,
+  };
+}
+
+/**
  * `EventStore` のインメモリ・プレースホルダ実装。append-only を実装としても徹底する
  * （`update`/`delete` に相当するメソッドを持たない）。
+ *
+ * ADR 0031: コンストラクタで既存の配列を渡せる（`InMemoryOutboxStore` が
+ * `InMemoryMemoryStore.outboxJobs` を共有するのと同じパターン）。
+ * `InMemoryMemoryStore.updateStatusWithEvent` が積んだイベントを、同じ配列を渡した
+ * `InMemoryEventStore` からも `get`/`list` できるようにするため。省略時は独立した
+ * 空配列を持つ（既存の `new InMemoryEventStore()` の呼び出しは今まで通り動く）。
  */
 export class InMemoryEventStore implements EventStore {
-  private readonly events: MemoryEvent[] = [];
+  constructor(private readonly events: MemoryEvent[] = []) {}
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
-    const stored: MemoryEvent = {
-      id: nextId("evt"),
-      tenantId: ctx.tenantId,
-      memoryId: event.memoryId,
-      kind: event.kind,
-      at: event.at ?? new Date(),
-      actor: event.actor,
-      digestSnapshot: event.digestSnapshot ?? null,
-      sizeBeforeBytes: event.sizeBeforeBytes ?? null,
-      meta: event.meta,
-    };
+    const stored = buildStoredMemoryEvent(ctx, event);
     this.events.push(stored);
     return stored;
   }

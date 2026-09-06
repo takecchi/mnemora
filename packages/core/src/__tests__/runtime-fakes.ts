@@ -35,6 +35,26 @@ function nextId(prefix: string): string {
 
 type OutboxJobMutable = OutboxJobRecord;
 
+/**
+ * `NewMemoryEvent` から永続化済みの `MemoryEvent` を組み立てる。`FakeEventStore.append`
+ * と `FakeMemoryStore.updateStatusWithEvent`（ADR 0031）の両方がこれを使う
+ * ——`packages/testkit` の `buildStoredMemoryEvent`（`in-memory-event-store.ts`）と
+ * 同じ形だが、ファイル冒頭のコメントの通り意図的に独立している。
+ */
+function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
+  return {
+    id: nextId("evt"),
+    tenantId: ctx.tenantId,
+    memoryId: event.memoryId,
+    kind: event.kind,
+    at: event.at ?? new Date(),
+    actor: event.actor,
+    digestSnapshot: event.digestSnapshot ?? null,
+    sizeBeforeBytes: event.sizeBeforeBytes ?? null,
+    meta: event.meta,
+  };
+}
+
 class FakeBackingStore {
   observations = new Map<string, Observation>();
   memories = new Map<string, Memory>();
@@ -42,6 +62,13 @@ class FakeBackingStore {
   usages = new Set<string>();
   recalls = new Map<string, NewRecallRecord & { tenantId: string }>();
   outboxJobs: OutboxJobMutable[] = [];
+  /**
+   * ADR 0031: `FakeMemoryStore.updateStatusWithEvent` と `FakeEventStore` が共有する
+   * memory_events 相当の配列。以前は `FakeEventStore` が独立した配列を持っており
+   * `FakeBackingStore` に載っていなかった——`outboxJobs` と同じ「同一トランザクションで
+   * 書く2つの書き込み先を共有する」という形に揃えた。
+   */
+  events: MemoryEvent[] = [];
 
   extractionKey(
     tenantId: string,
@@ -233,6 +260,10 @@ export class FakeMemoryStore implements MemoryStore {
    * `beforeUpdateStatus`（テスト専用のフック）は CAS 判定の**直前**に呼ぶ——
    * `reextract` の TOCTOU（読んでから書くまでの間に別の書き込みが割り込む）を
    * 決定的に再現するための差し込み口。本番相当の実装には存在しない、このフェイク限りの機構。
+   * ADR 0031 で追加した `updateStatusWithEvent` も、`reextract` が実際に呼ぶ経路として
+   * 同じ位置（CAS 判定の直前）でこのフックを発火する——さもないと PR #28 が
+   * このフックで決定的に再現している TOCTOU の歯が、`reextract` が `updateStatus` を
+   * 呼ばなくなった時点で意味を失う。
    */
   beforeUpdateStatus?: (id: MemoryId) => void;
 
@@ -256,6 +287,38 @@ export class FakeMemoryStore implements MemoryStore {
     }
     memory.updatedAt = new Date();
     return memory;
+  }
+
+  /**
+   * ADR 0031: `updateStatus` と同じ CAS 判定のあと、通ったときだけイベントも積む。
+   * `reextract` の supersede ループは、以前の「`updateStatus` を呼んでから
+   * 別途 `eventStore.append` を呼ぶ」という2コミットの形をやめてこちらを呼ぶ
+   * （`packages/core/src/runtime.ts`）——`beforeUpdateStatus` はここでも CAS 判定の
+   * 直前に発火するため、PR #28 の TOCTOU の歯はそのまま生きる。
+   */
+  async updateStatusWithEvent(
+    ctx: Ctx,
+    id: MemoryId,
+    status: MemoryStatus,
+    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    this.beforeUpdateStatus?.(id);
+    const memory = await this.get(ctx, id);
+    if (!memory) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+      throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
+    }
+    memory.status = status;
+    if (opts.supersededById !== undefined) {
+      memory.supersededById = opts.supersededById;
+    }
+    memory.updatedAt = new Date();
+    const storedEvent = buildStoredEvent(ctx, event);
+    this.backing.events.push(storedEvent);
+    return { memory, event: storedEvent };
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
@@ -491,30 +554,31 @@ export class FakeVectorStore implements VectorStore {
 }
 
 export class FakeEventStore implements EventStore {
-  events: MemoryEvent[] = [];
+  /**
+   * ADR 0031: `backing.events` を共有する（`FakeMemoryStore.updateStatusWithEvent` が
+   * 積んだイベントもここから読めるようにするため）。以前は独立した配列を持っており
+   * `FakeBackingStore` に載っていなかった——`FakeOutboxStore` が `backing.outboxJobs` を
+   * 共有するのと同じ形に揃えた。`stores.eventStore.events` という既存の参照の仕方
+   * （`runtime.test.ts` 等）を壊さないよう、`events` は `backing.events` を指す getter。
+   */
+  constructor(private readonly backing: FakeBackingStore) {}
+
+  get events(): MemoryEvent[] {
+    return this.backing.events;
+  }
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
-    const stored: MemoryEvent = {
-      id: nextId("evt"),
-      tenantId: ctx.tenantId,
-      memoryId: event.memoryId,
-      kind: event.kind,
-      at: event.at ?? new Date(),
-      actor: event.actor,
-      digestSnapshot: event.digestSnapshot ?? null,
-      sizeBeforeBytes: event.sizeBeforeBytes ?? null,
-      meta: event.meta,
-    };
-    this.events.push(stored);
+    const stored = buildStoredEvent(ctx, event);
+    this.backing.events.push(stored);
     return stored;
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
-    return this.events.find((e) => e.id === id && e.tenantId === ctx.tenantId) ?? null;
+    return this.backing.events.find((e) => e.id === id && e.tenantId === ctx.tenantId) ?? null;
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
-    return this.events.filter((e) => {
+    return this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
       if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
       if (filter.kind !== undefined && e.kind !== filter.kind) return false;
@@ -557,7 +621,7 @@ export function createFakeRuntimeStores(): {
     memoryStore: new FakeMemoryStore(backing),
     outboxStore: new FakeOutboxStore(backing),
     vectorStore: new FakeVectorStore(backing),
-    eventStore: new FakeEventStore(),
+    eventStore: new FakeEventStore(backing),
     tenantSettingsStore: new FakeTenantSettingsStore(),
     embeddingProvider: new FakeEmbeddingProvider(),
   };

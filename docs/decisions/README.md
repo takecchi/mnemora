@@ -43,3 +43,4 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0028](./0028-reextract-superseded-cleanup.md) | `runtime.reextract` は古い抽出結果を `superseded` にする（`forgotten` にしない） | 採用 (2026-09) |
 | [0029](./0029-reextract-skip-visibility.md) | `reextract` が既存 Memory を supersede しなかった理由を `ReextractResult.skipped` に出す | 採用 (2026-09) |
 | [0030](./0030-update-status-compare-and-swap.md) | `MemoryStore.updateStatus` を compare-and-swap にし、`reextract` の安全弁の TOCTOU を塞ぐ | 採用 (2026-09) |
+| [0031](./0031-supersede-status-and-event-in-one-transaction.md) | `reextract` の supersede の status 更新とイベント追記を、別々の2コミットから1トランザクションにまとめる | 採用 (2026-09) |

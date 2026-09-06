@@ -319,6 +319,13 @@ interface MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus }
   ): Promise<Memory>;
+  updateStatusWithEvent(
+    ctx: Ctx,
+    id: MemoryId,
+    status: MemoryStatus,
+    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    event: NewMemoryEvent
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
   reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory>;
   recordUsage(
@@ -365,6 +372,26 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
 > TOCTOU で破れていたのを塞ぐ。省略時は今日と同じ振る舞い（status を条件にしない）。
 > 期待と異なる status を観測した場合は `MemoryStatusConflictError` を投げる
 > （対象が存在しない場合は今日どおり別の例外のまま）。詳細は ADR 0030。
+
+> **PR「supersede-status-and-event-in-one-transaction」（2026-09 追記、ADR 0031）**:
+> `updateStatusWithEvent` を足した。`runtime.reextract` の supersede ループは、以前
+> `updateStatus` の呼び出しと `EventStore.append` の呼び出しを**別々の2コミット**として
+> 行っていた——前者が成功し後者が失敗すると、`memories.status` は書き換わったまま
+> 対応する `superseded` イベントが永久に存在しないという*永続化された*不整合が残る。
+> これは [docs/memory-model.md](./memory-model.md) §11 行5・本節末尾「破棄系」の節が
+> 要求する「同一トランザクション」に実装が違反していた不具合であり、正典ではなく
+> 実装のほうを直した。`updateStatusWithEvent` は `updateStatus` と同じ CAS 判定を行い、
+> 通ったときだけ status の更新とイベントの追記を1回のトランザクションで両方行う
+> ——弾かれたときは両方とも起きない。命名は `createObservationWithOutbox` /
+> `createMemoryWithOutbox`（ADR 0012 D-ingest-1: 「同一トランザクションで行う必要がある
+> 2つの書き込みを、その組み合わせに特化したメソッドとして `MemoryStore` に持たせる」）に
+> 揃えた——D-ingest-1 が却下した「トランザクションハンドルを core の型として持つ」案は
+> ここでも採らない。**`updateStatus` はそのまま残す**——status だけを更新したい呼び出し元
+> はそのまま使える。**買っていない範囲**: 複数の Memory にまたがる supersede ループ全体の
+> 原子性（ADR 0030 が既に「範囲外」としていたのと同じ理由で範囲外のまま）、および
+> 「旧行の status 更新と*新 Memory の作成*も1トランザクション」という §11 行5 のもう一方の
+> 要求（このメソッドは既存 Memory の status 更新とイベント追記の対だけを扱う）。詳細は
+> ADR 0031。
 
 > **ADR 0028（2026-09 追記）**: `listBySourceObservation` を足した。**SELECT のみ**——
 > マイグレーション・索引の追加は伴わない。`runtime.reextract`（§3.4）が「ある Observation・

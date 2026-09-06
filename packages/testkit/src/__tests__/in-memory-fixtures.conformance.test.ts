@@ -14,9 +14,27 @@ import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
 import { InMemoryTenantSettingsStore } from "../__fixtures__/in-memory-tenant-settings-store.js";
 import { InMemoryVectorStore } from "../__fixtures__/in-memory-vector-store.js";
 
+// `listEventsForMemory`（ADR 0031）も `seedJob`/`setDefaultHalfLifeHours` と同じ理由で
+// 直近のインスタンスを持ち回る——`updateStatusWithEvent` が積んだイベントを読むには、
+// `createStore()` が作った、まさにその `InMemoryMemoryStore` インスタンスの `events` 配列を
+// 見る必要がある。
+let latestMemoryStoreForEvents: InMemoryMemoryStore | undefined;
+
 describeMemoryStoreConformance({
   name: "in-memory placeholder",
-  createStore: () => new InMemoryMemoryStore(),
+  createStore: () => {
+    const store = new InMemoryMemoryStore();
+    latestMemoryStoreForEvents = store;
+    return store;
+  },
+  listEventsForMemory: (ctx, memoryId) => {
+    if (!latestMemoryStoreForEvents) {
+      throw new Error("listEventsForMemory より先に createStore() を呼ぶ必要がある");
+    }
+    return latestMemoryStoreForEvents.events.filter(
+      (event) => event.tenantId === ctx.tenantId && event.memoryId === memoryId,
+    );
+  },
 });
 
 describeVectorStoreConformance({

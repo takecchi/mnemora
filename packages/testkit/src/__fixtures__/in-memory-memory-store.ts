@@ -4,10 +4,12 @@ import type {
   Ctx,
   EmbeddingStatus,
   Memory,
+  MemoryEvent,
   MemoryId,
   MemoryStatus,
   MemoryStore,
   NewMemory,
+  NewMemoryEvent,
   NewObservation,
   NewRecallRecord,
   Observation,
@@ -18,6 +20,7 @@ import type {
   RecallScope,
   ScopeAggregate,
 } from "@mnemora/core";
+import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import { nextId } from "./id.js";
 
 /**
@@ -32,6 +35,10 @@ import { nextId } from "./id.js";
  * `createMemoryWithOutbox` が積んだジョブを `OutboxStore` 側から claim/complete/fail できる
  * （`packages/postgres` が同一 DB・同一トランザクションで両方を実装するのと対応する、
  * ADR 0005・0003）。
+ *
+ * ADR 0031 で `events` を同じ理由で公開した。`InMemoryEventStore`
+ * （`./in-memory-event-store.js`）のコンストラクタにこの配列をそのまま渡すことで、
+ * `updateStatusWithEvent` が積んだイベントを `EventStore` 側からも `get`/`list` できる。
  */
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly observations = new Map<string, Observation>();
@@ -42,6 +49,8 @@ export class InMemoryMemoryStore implements MemoryStore {
   private readonly usages = new Set<string>();
   /** roadmap.md 段階4/5: recall 段6（記録）が書き込む `recalls` 相当のインメモリ表。 */
   readonly recalls = new Map<string, NewRecallRecord & { tenantId: string }>();
+  /** `InMemoryEventStore` と共有する memory_events 相当の配列（ADR 0031、同一プロセス内の参照共有）。 */
+  readonly events: MemoryEvent[] = [];
   /** `InMemoryOutboxStore` と共有する outbox ジョブの配列（同一プロセス内の参照共有）。 */
   readonly outboxJobs: OutboxJobRecord[] = [];
 
@@ -240,6 +249,35 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     memory.updatedAt = new Date();
     return memory;
+  }
+
+  /**
+   * ADR 0031: `updateStatus` と同じ CAS 判定のあと、通ったときだけイベントも積む
+   * （postgres 実装の `db.transaction()` に対応する意味論——CAS に弾かれたら status も
+   * イベントも一切変わらない）。
+   */
+  async updateStatusWithEvent(
+    ctx: Ctx,
+    id: MemoryId,
+    status: MemoryStatus,
+    opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const memory = await this.get(ctx, id);
+    if (!memory) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+      throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
+    }
+    memory.status = status;
+    if (opts.supersededById !== undefined) {
+      memory.supersededById = opts.supersededById;
+    }
+    memory.updatedAt = new Date();
+    const storedEvent = buildStoredMemoryEvent(ctx, event);
+    this.events.push(storedEvent);
+    return { memory, event: storedEvent };
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {

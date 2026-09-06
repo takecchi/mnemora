@@ -1,7 +1,14 @@
 import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
-import type { Ctx, MemoryStore, RecallId } from "@mnemora/core";
+import type {
+  Ctx,
+  MemoryEvent,
+  MemoryId,
+  MemoryStore,
+  NewMemoryEvent,
+  RecallId,
+} from "@mnemora/core";
 import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
 
@@ -55,6 +62,18 @@ export interface MemoryStoreConformanceOptions {
    * 省略時は固定文字列を使う（外部キーを持たない in-memory 実装向け）。
    */
   prepareRecallId?: (ctx: Ctx) => Promise<RecallId> | RecallId;
+  /**
+   * ADR 0031: `updateStatusWithEvent` が実際に `memory_events`（相当）へ書いたイベントを
+   * 読み出すためのフック。**必須。**「CAS に弾かれたときイベントが1件も積まれていないこと」
+   * を検査するには、適合テストがイベントを直接読める必要がある——`MemoryStore` interface
+   * 自体には「あるメモリに紐づくイベントを読む」操作が無い（それは `EventStore` の責務）ため、
+   * `prepareRecallId` / `outbox-store-conformance.ts` の `seedJob` と同じ理由で、
+   * adapter ごとの用意の仕方を呼び出し側に委ねる。**省略可のオプションにしないこと**——
+   * 省略できると「検査した」adapter と「検査していない」adapter が同じ緑色の出力になり、
+   * このリポジトリが ADR 0011/0025/0027/0028 で繰り返した「名乗れる以上の精度を主張する」
+   * 族の失敗を、フックの省略という形で再現することになる。
+   */
+  listEventsForMemory: (ctx: Ctx, memoryId: MemoryId) => Promise<MemoryEvent[]> | MemoryEvent[];
 }
 
 /**
@@ -68,13 +87,16 @@ export interface MemoryStoreConformanceOptions {
  * - `recordUsage` が実際に挿入が起きたときだけ `insertedMemoryIds` に載ること
  *   （D9・§3.5、全件新規/全件再送/部分再送/空配列の各分岐）
  * - `reinforce` / `updateStatus` の正常系と「対象が無い」異常系
+ * - `updateStatusWithEvent`（ADR 0031）が status 更新とイベント追記を1つの操作として
+ *   扱うこと——成功時は両方起きる、CAS に弾かれたら両方とも起きない、対象が無ければ
+ *   両方とも起きない、の3分岐を「Memory の状態」と「積まれたイベント数」を並べて検査する
  * - `aggregateScope` の集計が実データを反映すること（群カウント・totalInScope・
  *   status ゲート・period フィルタ・not_indexed の各分岐、roadmap.md 段階4/5・
  *   docs/recall.md §5「スコープの外延」）
  * - `createRecall` が recallId を発行すること（段6、ADR 0008）
  */
 export function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void {
-  const { name, createStore } = options;
+  const { name, createStore, listEventsForMemory } = options;
   const prepareRecallId: (ctx: Ctx) => Promise<RecallId> | RecallId =
     options.prepareRecallId ?? (() => "recall-1");
 
@@ -730,6 +752,125 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
       await expect(rejection).rejects.not.toBeInstanceOf(MemoryStatusConflictError);
       await expect(rejection).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+    });
+
+    // -------------------------------------------------------------------
+    // updateStatusWithEvent（status 更新とイベント追記を同一トランザクションで、ADR 0031）
+    //
+    // 🔴 守る不変条件: memories.status の更新が永続化されたことと、対応するイベントが
+    // 永続化されたことは、同値である。以下の各ケースで「Memory の状態」と「積まれた
+    // イベントの数」を必ず並べて assert する——どちらか一方だけを見ると、この不変条件が
+    // 崩れていても検査をすり抜けてしまう。
+    // -------------------------------------------------------------------
+
+    function buildSupersedeEvent(ctx: Ctx, memoryId: MemoryId, digest: string): NewMemoryEvent {
+      return {
+        tenantId: ctx.tenantId,
+        memoryId,
+        kind: "superseded",
+        actor: { type: "system" },
+        digestSnapshot: digest,
+        sizeBeforeBytes: null,
+        meta: { reason: "conformance-test" },
+      };
+    }
+
+    it("updateStatusWithEvent は成功時、Memory を更新し、かつイベントを1件積む", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      expect(memory.status).toBe("active");
+
+      const { memory: updated, event } = await store.updateStatusWithEvent(
+        ctx,
+        memory.id,
+        "superseded",
+        { expectedStatus: "active" },
+        buildSupersedeEvent(ctx, memory.id, memory.digest),
+      );
+
+      expect(updated.status).toBe("superseded");
+      expect(event.kind).toBe("superseded");
+      expect(event.memoryId).toBe(memory.id);
+
+      const events = await listEventsForMemory(ctx, memory.id);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.kind).toBe("superseded");
+    });
+
+    it("updateStatusWithEvent は CAS に弾かれたら MemoryStatusConflictError を投げ、Memory は一切変わらず、イベントも1件も積まれない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.updateStatus(ctx, memory.id, "archived"); // 現在の status を archived にしておく
+
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "superseded",
+          { expectedStatus: "active" },
+          buildSupersedeEvent(ctx, memory.id, memory.digest),
+        ),
+      ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+
+      // 行が一切変わっていない（黙って部分的に書かれていない）。
+      const unchanged = await store.get(ctx, memory.id);
+      expect(unchanged?.status).toBe("archived");
+
+      // イベントも1件も積まれていない。
+      const events = await listEventsForMemory(ctx, memory.id);
+      expect(events).toEqual([]);
+    });
+
+    it("updateStatusWithEvent は対象が無ければ『memory not found』の例外を投げ、イベントも積まれない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      // 別 PR が直した既存の "does-not-exist" 検査とは別に、well-formed だが実在しない
+      // UUID を使う（`randomUUID()`）——`.rejects.toThrow()` を引数無しで使うと TypeError
+      // でも通ってしまうため、メッセージまで固定する。
+      const missingId = randomUUID();
+
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          missingId,
+          "superseded",
+          {},
+          buildSupersedeEvent(ctx, missingId, "digest"),
+        ),
+      ).rejects.toThrow(/memory not found for tenant/);
+
+      const events = await listEventsForMemory(ctx, missingId);
+      expect(events).toEqual([]);
+    });
+
+    it("updateStatusWithEvent は expectedStatus を省略すると、今日の updateStatus どおり無条件に更新し、イベントも積む", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      await store.updateStatus(ctx, memory.id, "archived");
+
+      const { memory: updated } = await store.updateStatusWithEvent(
+        ctx,
+        memory.id,
+        "forgotten",
+        {},
+        {
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "forgotten",
+          actor: { type: "human" },
+          digestSnapshot: memory.digest,
+          sizeBeforeBytes: null,
+          meta: {},
+        },
+      );
+
+      expect(updated.status).toBe("forgotten");
+      const events = await listEventsForMemory(ctx, memory.id);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.kind).toBe("forgotten");
     });
 
     // -------------------------------------------------------------------
