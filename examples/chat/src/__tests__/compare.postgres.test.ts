@@ -26,6 +26,7 @@ describe("examples/chat: runComparison（本物の Postgres）", () => {
       const rows = await runComparison(handle.runtime, {
         fillerPairsSequence: [0, 30],
         tenantPrefix: "example-compare-test",
+        memoryStore: handle.memoryStore,
       });
 
       expect(rows).toHaveLength(2);
@@ -61,6 +62,7 @@ describe("examples/chat: runComparison（本物の Postgres）", () => {
       const rows = await runComparison(handle.runtime, {
         fillerPairsSequence: [20, 3],
         tenantPrefix: "example-compare-isolation-test",
+        memoryStore: handle.memoryStore,
       });
 
       const [long, short] = rows;

@@ -13,8 +13,10 @@
     "scope": "tsx src/cli.ts scope",
     "backfill": "tsx src/cli.ts backfill",
     "retrieval": "tsx src/cli.ts retrieval",
-    "record": "tsx src/cli.ts record",
-    "verify": "tsx src/cli.ts verify"
+    "record": "tsx src/cli.ts record retrieval",
+    "verify": "tsx src/cli.ts verify retrieval",
+    "record:compare": "tsx src/cli.ts record compare",
+    "verify:compare": "tsx src/cli.ts verify compare"
   },
   "dependencies": {
     "@mnemora/core": "workspace:*",
