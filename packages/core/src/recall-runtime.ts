@@ -172,6 +172,22 @@ export function countKindForUnits(units: readonly Unit[], candidateCount: number
   return covered === candidateCount ? "exact" : "unknown";
 }
 
+/**
+ * 単位が候補を**覆えていない件数**を返す（ADR 0043）。覆えていれば 0。
+ *
+ * **🔴 二重計上（覆った数が候補数を超える）でも 0 を返す。**候補は*消えて*いないので、
+ * 「落ちた」と名乗るのは嘘になる。**差の絶対値ではない**——向きが意味を持つ。
+ * 二重計上そのものは `countKindForUnits` が `'unknown'` として名乗る（ADR 0045）。
+ *
+ * **⚠ この関数の 0 を返す2つの経路（覆えている / 二重計上）は、`recall()` からは
+ * 区別できない。**どちらも omission が出ないという同じ結果になるためである。
+ * ⟹ **向きの判断そのものは、この関数を直接呼ぶ歯で測る。**
+ */
+export function unitAssemblyShortfall(units: readonly Unit[], candidateCount: number): number {
+  const covered = units.reduce((sum, unit) => sum + unit.members.length, 0);
+  return Math.max(0, candidateCount - covered);
+}
+
 export async function runRecall(
   ctx: Ctx,
   query: RecallQuery,
@@ -436,6 +452,24 @@ export async function runRecall(
   units.sort((a, b) => b.rankScore - a.rankScore);
   // 段4の件数がどれだけ正確かは、この時点で決まっている（ADR 0045）。
   const unitsCountKind = countKindForUnits(units, allCandidates.length);
+
+  // 🔴 単位を組む繰り返しから候補が漏れたら、黙らない（ADR 0043）。
+  //
+  // ⚠ **Phase 1 ではここは一度も通らない。**`Runtime`（observe/tick/recall/reextract）は
+  // `contested` も `contestedWithId` も書かないため、一対一が破れた状態を作れない
+  // （`docs/memory-model.md`「関係グラフ本体は Phase 2」）。
+  // **⟹ これは「いま壊れているもの」ではなく、`contested` を作る主体が入ったときの契約である。**
+  //
+  // ⚠ 二重計上のときに出さない判断は `unitAssemblyShortfall` が持つ（その doc を参照）。
+  const unitsShortfall = unitAssemblyShortfall(units, allCandidates.length);
+  if (unitsShortfall > 0) {
+    omitted.push({
+      kind: "unit_assembly_dropped",
+      count: unitsShortfall,
+      // 二重計上が同時に起きていれば、その分だけ消失が隠れる。⟹ 下限しか言えない。
+      countKind: "lower_bound",
+    });
+  }
 
   // -------------------------------------------------------------------
   // 段4: 予算による切り詰め（docs/recall.md §2 段4・§8）

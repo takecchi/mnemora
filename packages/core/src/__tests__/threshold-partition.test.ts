@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countKindForPartition,
   countKindForUnits,
+  unitAssemblyShortfall,
   partitionByThreshold,
 } from "../recall-runtime.js";
 import type { ScoreBreakdown } from "../recall.js";
@@ -165,5 +166,36 @@ describe("countKindForUnits（ADR 0045）", () => {
 
   it("候補も単位も0なら網羅（'exact'）", () => {
     expect(countKindForUnits([], 0)).toBe("exact");
+  });
+});
+
+describe("unitAssemblyShortfall（ADR 0043）", () => {
+  // **🔴 向きの判断を測る歯である。**`recall()` からは「覆えている」と「二重計上」が
+  // どちらも omission 無しになって区別が付かない ⟹ ここで直接測るしかない。
+  function units(...memberCounts: number[]) {
+    return memberCounts.map((n) => ({
+      members: Array.from({ length: n }, (_, i) => candidate(`m-${i}`, 0)),
+      rankScore: 0,
+    }));
+  }
+
+  it("覆えていれば 0（不足なし）", () => {
+    expect(unitAssemblyShortfall(units(1, 2, 1), 4)).toBe(0);
+  });
+
+  it("🔴 覆えていない分だけ返す（候補5に対して単位が4なら 1）", () => {
+    expect(unitAssemblyShortfall(units(1, 2, 1), 5)).toBe(1);
+    // 非対称: 不足が2件のときは 2 を返す（1 で固定する実装を弾く）。
+    expect(unitAssemblyShortfall(units(1, 2, 1), 6)).toBe(2);
+  });
+
+  it("🔴 二重計上でも 0（差の絶対値ではない。向きが意味を持つ）", () => {
+    // 候補4件に対して単位が5件ぶん覆っている＝どこかが二重に入っている。
+    // 候補は*消えて*いないので「落ちた」と名乗ってはいけない。
+    expect(unitAssemblyShortfall(units(1, 2, 1, 1), 4)).toBe(0);
+  });
+
+  it("候補も単位も0なら 0", () => {
+    expect(unitAssemblyShortfall([], 0)).toBe(0);
   });
 });

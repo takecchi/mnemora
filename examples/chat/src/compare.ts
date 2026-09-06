@@ -167,6 +167,8 @@ function formatOmittedSummary(omitted: Omission[]): string {
           return "ann_truncated";
         case "ann_unreached":
           return "ann_unreached";
+        case "unit_assembly_dropped":
+          return `unit_assembly_dropped:${o.count}`;
         case "score_not_comparable":
           return `score_not_comparable:${o.count}`;
         default: {
