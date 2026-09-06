@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
+import type { ReextractSkip } from "../strategies/reextract.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -523,5 +524,179 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
     const original = await stores.memoryStore.get(ctx, originalId);
     expect(original?.status).toBe("active");
     expect(original?.supersededById ?? null).toBeNull();
+  });
+
+  // ADR 0029: ADR 0028 が「引き受ける負債」に記録した欠落を埋める歯。
+  // `ReextractResult.skipped` が「見ていない」「見たが対象外」「見て変わっていなかった」を
+  // 別の顔で出すことを確かめる。
+  describe("skipped（ADR 0029: 既存 Memory を supersede しなかった理由を出す）", () => {
+    /** 同じ stores を共有しつつ、llmProvider だけ差し替えた runtime を作る。 */
+    function runtimeWithLlm(
+      stores: ReturnType<typeof createFakeRuntimeStores>,
+      llmProvider: LLMProvider,
+    ) {
+      return createRuntime({
+        memoryStore: stores.memoryStore,
+        outboxStore: stores.outboxStore,
+        vectorStore: stores.vectorStore,
+        eventStore: stores.eventStore,
+        tenantSettingsStore: stores.tenantSettingsStore,
+        llmProvider,
+        embeddingProvider: stores.embeddingProvider,
+        hashContent: (content: string) => `sha256(${content})`,
+      });
+    }
+
+    function skipForId(skipped: ReextractSkip[], id: string) {
+      return skipped.find((s) => s.kind !== "not_examined" && s.memoryId === id);
+    }
+
+    it("⭐ contested 1件・forgotten 2件が status 付きで非対称に skipped へ出る（隣の値への入れ替え変異を検出する）", async () => {
+      const stores = createFakeRuntimeStores();
+      const runtime1 = runtimeWithLlm(
+        stores,
+        llmReturning([
+          { content: "候補1", digest: "要旨1", provenanceKind: "stated" },
+          { content: "候補2", digest: "要旨2", provenanceKind: "stated" },
+          { content: "候補3", digest: "要旨3", provenanceKind: "stated" },
+        ]),
+      );
+      const observeResult = await runtime1.observe(ctx, { kind: "utterance", text: "発話" });
+      expect(observeResult.memoryIds).toHaveLength(3);
+      const [contestedId, forgotten1Id, forgotten2Id] = observeResult.memoryIds as [
+        string,
+        string,
+        string,
+      ];
+      await stores.memoryStore.updateStatus(ctx, contestedId, "contested");
+      await stores.memoryStore.updateStatus(ctx, forgotten1Id, "forgotten");
+      await stores.memoryStore.updateStatus(ctx, forgotten2Id, "forgotten");
+
+      // 別内容を返す LLM で reextract する——3件とも今回の content_hash 集合に含まれない。
+      const runtime2 = runtimeWithLlm(
+        stores,
+        llmReturning([{ content: "新しい抽出結果", digest: "要旨", provenanceKind: "stated" }]),
+      );
+      const result = await runtime2.reextract(ctx, observeResult.observationId);
+
+      expect(result.skipped).toHaveLength(3);
+      expect(result.supersededMemoryIds).toEqual([]); // 3件とも active ではないので supersede 対象外
+
+      const contestedSkip = skipForId(result.skipped, contestedId);
+      const forgotten1Skip = skipForId(result.skipped, forgotten1Id);
+      const forgotten2Skip = skipForId(result.skipped, forgotten2Id);
+      expect(contestedSkip).toEqual({
+        kind: "status_not_active",
+        memoryId: contestedId,
+        status: "contested",
+      });
+      expect(forgotten1Skip).toEqual({
+        kind: "status_not_active",
+        memoryId: forgotten1Id,
+        status: "forgotten",
+      });
+      expect(forgotten2Skip).toEqual({
+        kind: "status_not_active",
+        memoryId: forgotten2Id,
+        status: "forgotten",
+      });
+
+      // 非対称であることそのものを assert する——同数だと入れ替え変異が生き残る。
+      const statuses = result.skipped
+        .filter(
+          (s): s is Extract<ReextractSkip, { kind: "status_not_active" }> =>
+            s.kind === "status_not_active",
+        )
+        .map((s) => s.status);
+      expect(statuses.filter((status) => status === "contested")).toHaveLength(1);
+      expect(statuses.filter((status) => status === "forgotten")).toHaveLength(2);
+    });
+
+    it("content_hash が一致した既存 Memory は { kind: 'unchanged' } として skipped に出る", async () => {
+      const stores = createFakeRuntimeStores();
+      const succeedingLlm = llmReturning([
+        { content: "変わらない内容", digest: "要旨", provenanceKind: "stated" },
+      ]);
+      const runtime = runtimeWithLlm(stores, succeedingLlm);
+
+      const observeResult = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+      expect(observeResult.extraction).toBe("ok");
+      const originalId = observeResult.memoryIds[0]!;
+
+      // 同じ内容を返す LLM で reextract する——content_hash が一致し続ける。
+      const result = await runtime.reextract(ctx, observeResult.observationId);
+
+      expect(result.skipped).toEqual([{ kind: "unchanged", memoryId: originalId }]);
+      expect(result.supersededMemoryIds).toEqual([]);
+    });
+
+    it("🔴 候補が0件のとき skipped は [{ kind: 'not_examined', reason: 'no_candidates' }]（listBySourceObservation を呼ぶ前の早期 return）", async () => {
+      const { runtime1, runtime2 } = buildReextractScenario([]);
+      const observeResult = await runtime1.observe(ctx, { kind: "utterance", text: "発話" });
+
+      const result = await runtime2.reextract(ctx, observeResult.observationId);
+
+      expect(result.extraction).toBe("ok");
+      expect(result.skipped).toEqual([{ kind: "not_examined", reason: "no_candidates" }]);
+    });
+
+    it("🔴 LLM がまた失敗したとき skipped は [{ kind: 'not_examined', reason: 'llm_failed_whole_observation' }]（listBySourceObservation を呼ぶ前の早期 return）", async () => {
+      const stores = createFakeRuntimeStores();
+      const runtime1 = runtimeWithLlm(stores, throwingLlm());
+      const observeResult = await runtime1.observe(ctx, {
+        kind: "utterance",
+        text: "障害時に取り込まれた発話",
+      });
+      expect(observeResult.extraction).toBe("llm_failed_whole_observation");
+
+      // reextract でも同じく LLM が失敗し続ける。
+      const runtime2 = runtimeWithLlm(stores, throwingLlm());
+      const result = await runtime2.reextract(ctx, observeResult.observationId);
+
+      expect(result.extraction).toBe("llm_failed_whole_observation");
+      expect(result.skipped).toEqual([
+        { kind: "not_examined", reason: "llm_failed_whole_observation" },
+      ]);
+    });
+
+    it("⭐ 「飛ばすものが無かった」・「候補0件」・「LLM失敗」の3つの顔が違う（オーナーの追加要求）", async () => {
+      const stores = createFakeRuntimeStores();
+      // 候補0件の LLM で observe() する——Memory は1件も作られない。
+      const zeroLlm = llmReturning([]);
+      const zeroRuntime = runtimeWithLlm(stores, zeroLlm);
+
+      // 顔1: 「飛ばすものが無かった」——既存 Memory が無い Observation に、候補が有る LLM で
+      // reextract する。本経路（`classifyReextractTargets`）を通るが、existingBefore が
+      // 空なので skipped も空になる。
+      const observeResult1 = await zeroRuntime.observe(ctx, { kind: "utterance", text: "発話1" });
+      expect(observeResult1.memoryIds).toEqual([]);
+      const succeedingRuntime = runtimeWithLlm(
+        stores,
+        llmReturning([{ content: "新規", digest: "要旨", provenanceKind: "stated" }]),
+      );
+      const nothingToSkip = await succeedingRuntime.reextract(ctx, observeResult1.observationId);
+      expect(nothingToSkip.skipped).toEqual([]);
+
+      // 顔2: 「候補0件」——別の Observation に対し、候補0件の LLM のまま reextract する。
+      // listBySourceObservation を呼ぶ前の早期 return。
+      const observeResult2 = await zeroRuntime.observe(ctx, { kind: "utterance", text: "発話2" });
+      const noCandidates = await zeroRuntime.reextract(ctx, observeResult2.observationId);
+      expect(noCandidates.skipped).toEqual([{ kind: "not_examined", reason: "no_candidates" }]);
+
+      // 顔3: 「LLM失敗」——さらに別の Observation に対し、LLM 自体が例外を投げる。
+      // これも listBySourceObservation を呼ぶ前の早期 return。
+      const observeResult3 = await zeroRuntime.observe(ctx, { kind: "utterance", text: "発話3" });
+      const throwingRuntime = runtimeWithLlm(stores, throwingLlm());
+      const llmFailed = await throwingRuntime.reextract(ctx, observeResult3.observationId);
+      expect(llmFailed.skipped).toEqual([
+        { kind: "not_examined", reason: "llm_failed_whole_observation" },
+      ]);
+
+      // 3つの顔がそれぞれ違うことを並べて確認する——どれも `skipped` が空ではない
+      // （顔1だけが空配列）のに、顔2・顔3は同じ「見ていない」でも reason が違う。
+      expect(nothingToSkip.skipped).not.toEqual(noCandidates.skipped);
+      expect(noCandidates.skipped).not.toEqual(llmFailed.skipped);
+      expect(nothingToSkip.skipped).not.toEqual(llmFailed.skipped);
+    });
   });
 });

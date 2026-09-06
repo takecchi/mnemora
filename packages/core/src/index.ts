@@ -24,6 +24,7 @@ export * from "./interfaces/tenant-settings-store.js";
 
 export * from "./strategies/decay.js";
 export * from "./strategies/scoring.js";
+export * from "./strategies/reextract.js";
 
 export * from "./heuristic-token-counter.js";
 export * from "./clock.js";

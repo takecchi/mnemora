@@ -165,6 +165,9 @@ ADR 0013 は「検知できるようになっただけで、やり直す操作�
 意図して忘れさせた、という**製品の振る舞い**）ではなく `superseded`（より良い抽出に
 置き換えられた、という**機構の都合**）にするのはオーナー決定である。詳細・却下した案・
 引き受けた負債は [ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) を参照。
+supersede しなかった理由（`contested`/`forgotten` だったので飛ばした・変わっていなかった・
+そもそも既存を見ていない）は `ReextractResult.skipped` に出る
+（[ADR 0029](./decisions/0029-reextract-skip-visibility.md)）。
 
 ---
 
