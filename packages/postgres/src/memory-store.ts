@@ -518,13 +518,35 @@ export class PostgresMemoryStore implements MemoryStore {
       halfLifeHours: memory.halfLifeHours,
     });
 
-    const updated = await this.db.execute(sql`
-      UPDATE memories
-      SET last_reinforced_at = ${at}, decay_floor_at = ${decayFloorAt}, updated_at = now()
+    // 🔴 減衰の起点を巻き戻さない（ADR 0048）。**この条件は WHERE 句に置く**——
+    // 上の SELECT で読んだ値をアプリ側で比べて書くかどうか決めると、読みと書きの間に
+    // 入った別の強化を上書きしうる（同じ形を `updateStatus` は ADR 0030 の
+    // compare-and-swap で塞いでいる）。ここは比較そのものを DB の1文へ入れる。
+    //
+    // ⚠ 古い `at` は**失敗にしない。**呼び出し側から見れば「すでにもっと新しい強化が
+    // 入っている」だけであり、例外にすると `runtime.observe` の使用報告ループが
+    // 途中で止まる（`updateStatus` の CAS とはここが違う——あちらは status の
+    // 取り違えなので呼び出し側の次の一手が変わる）。
+    //
+    // ⚠ **更新できなかったときに返す行も、同じ1文の中で読む。**別の `SELECT` に分けると、
+    // 「上で読んだ古い値をそのまま返す」実装との差が**外から観測できない枝**になる
+    // （実際に変異を撃って確かめた。PR 本文参照）。1文なら、更新できた場合も
+    // できなかった場合も同じ経路を通るので、その取り違えは歯で捕まる。
+    const result = await this.db.execute(sql`
+      WITH updated AS (
+        UPDATE memories
+        SET last_reinforced_at = ${at}, decay_floor_at = ${decayFloorAt}, updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+          AND (last_reinforced_at IS NULL OR last_reinforced_at < ${at})
+        RETURNING *
+      )
+      SELECT * FROM updated
+      UNION ALL
+      SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
-      RETURNING *
+        AND NOT EXISTS (SELECT 1 FROM updated)
     `);
-    return rowToMemory(updated.rows[0] as unknown as MemoryRow);
+    return rowToMemory(result.rows[0] as unknown as MemoryRow);
   }
 
   async recordUsage(
