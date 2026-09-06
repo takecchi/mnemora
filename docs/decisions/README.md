@@ -52,4 +52,5 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0037](./0037-callers-pass-occurred-at.md) | `observe()` の `occurredAt` を実際に通す — 「いつの出来事か」を絞れるようにする | 採用 (2026-09) |
 | [0038](./0038-vector-hit-distance-is-cosine.md) | `VectorHit.distance` はコサイン距離だと契約に明記し、適合テストの歯で adapter 非依存に検査する | 採用 (2026-09) |
 | [0039](./0039-period-boundary-conformance.md) | `period` の判定規則が4箇所に在ることを、境界の歯で固定する | 採用 (2026-09) |
+| [0040](./0040-zero-vector-never-returned.md) | ゼロベクトルが絡む候補は `recall()` の結果に出ない — 契約は振る舞いで揃える | 採用 (2026-09) |
 | [0041](./0041-reinforce-does-not-change-strength.md) | `reinforce` は `strength` を動かさない — 「強化」の意味を確定させる | 採用 (2026-09) |

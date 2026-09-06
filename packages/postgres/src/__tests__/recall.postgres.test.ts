@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingProvider, LLMProvider, MemoryStatus } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
@@ -263,6 +264,45 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       count: 1,
       countKind: "exact",
     });
+  });
+
+  it("⚠ ゼロベクトルの候補は scoreThreshold を 0 にしても返らない（ADR 0040）", async () => {
+    // **契約: ゼロベクトルが絡む候補は recall() の結果に出ない。**
+    //
+    // 既定の scoreThreshold（0.1）では「similarity 0（in-memory の旧実装）」でも
+    // 「NaN（Postgres）」でも落ちるので、**差が観測できるのは閾値を 0 以下にしたときだけ**である
+    //（ADR 0040 でそう特定した）。⟹ ここは 0 で測る。
+    //
+    // フィクスチャは非対称: ゼロベクトル1件に対して正常な候補2件を、
+    // **互いに違う距離**で置く。正常な候補が返ることを同時に見ないと、
+    // 「閾値0では何も返らない」実装でも緑になる。
+    const ctx: Ctx = { tenantId: `tenant-zero-vector-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    const zero = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 0, 0], {
+      digest: "ゼロベクトルの記憶",
+      contentHash: `zero-${randomUUID()}`,
+    });
+    const near = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      digest: "近い記憶",
+      contentHash: `near-${randomUUID()}`,
+    });
+    const far = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 1, 0], {
+      digest: "遠い記憶",
+      contentHash: `far-${randomUUID()}`,
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      scoreThreshold: 0,
+      limit: 10,
+    });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    // 前提: 正常な候補は2件とも返っている（0件なら「ゼロが返らない」は無意味な緑）。
+    expect(ids).toContain(near.id);
+    expect(ids).toContain(far.id);
+    // 本題: ゼロベクトルの候補は返らない。
+    expect(ids).not.toContain(zero.id);
   });
 
   it("omitted: below_threshold（閾値未満）", async () => {

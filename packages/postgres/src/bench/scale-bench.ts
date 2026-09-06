@@ -664,8 +664,11 @@ async function benchVectorSearch(
   const vectorStore = new PostgresVectorStore(db);
   const ctx: Ctx = { tenantId: TENANT };
   // クエリベクトルは決定的な擬似乱数から作る（`test-db.ts` の `seededRandom` を再利用）。
-  // ⚠ 全部 0 のベクトルは使わない——cosine 距離はゼロベクトルに対して定義できず
-  // （ノルムが 0 になり 0 除算になる）、pgvector の `<=>` がエラーになる。
+  // ⚠ 全部 0 のベクトルは使わない——cosine 距離はゼロベクトルに対して定義できない
+  // （ノルムが 0 になる）。
+  // **🔴 訂正（ADR 0040）**: ここには以前「pgvector の `<=>` がエラーになる」と
+  // 書いてあったが、**それは誤りだった。実測すると `NaN` を返す**（pgvector 0.8.2）。
+  // ベンチの測定値としては NaN も使い物にならないので、使わない方針は変えない。
   const queryRand = seededRandom(QUERY_VECTOR_SEED);
   const queryVector = Array.from({ length: dimensions }, () => queryRand() * 2 - 1);
   const smallSubjectId = smallSubjectIdFor(subjectCount);

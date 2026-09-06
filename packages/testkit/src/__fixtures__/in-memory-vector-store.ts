@@ -26,11 +26,22 @@ interface Entry {
  * import できない（`packages/core` の実行時依存が zod のみであることを壊すことになる）ため、
  * ここで意図して重複させている。
  *
- * ゼロベクトルはコサインが未定義（0/0）になる。pgvector の `<=>` はゼロベクトルに対して
- * エラーを返す（`packages/postgres/src/bench/scale-bench.ts:667` に実測の注意がある）が、
- * この in-memory 実装はテストを止めずに「無関係（類似度0 ＝ 距離1）」として扱う——
- * `FakeVectorStore.cosineDistance` と同じ扱いに揃えた（エラーにする実装は postgres 側だけで
- * 検査されている前提。in-memory がここでエラーを投げるべきかは確かめていない）。
+ * ゼロベクトルはコサインが未定義（0/0）になる。
+ *
+ * **🔴 訂正（[ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md)）**:
+ * ここには以前「pgvector の `<=>` はゼロベクトルに対してエラーを返す」と書いてあったが、
+ * **それは誤りだった。実測すると `NaN` を返す**（pgvector 0.8.2。両引数位置・両方ゼロ・
+ * `ORDER BY` の中でも例外にならない）。
+ *
+ * そしてこの実装は「無関係（距離1）」を返していた。**⟹ 同じ呼び出しが adapter によって
+ * 別の答えになっていた**——`similarity = 1 - distance` なので in-memory は
+ * `similarity = 0`、Postgres は `NaN`。既定の `scoreThreshold`（0.1）では
+ * どちらも落ちるが、**呼び出し側が `scoreThreshold` を 0 以下にすると
+ * in-memory だけが候補を返していた。**
+ *
+ * **契約（ADR 0040）: ゼロベクトルが絡む候補は `recall()` の結果に出ない。**
+ * `NaN` はどんな数との比較も false になるので、**どんな `scoreThreshold` でも通らない。**
+ * `Infinity` は `scoreThreshold = -Infinity` で通ってしまうため使わない。
  */
 function cosineDistance(a: number[], b: number[]): number {
   const length = Math.max(a.length, b.length);
@@ -45,7 +56,9 @@ function cosineDistance(a: number[], b: number[]): number {
     normB += bi * bi;
   }
   if (normA === 0 || normB === 0) {
-    return 1;
+    // ⚠ 0 でも 1 でも Infinity でもなく NaN を返す。理由は上の doc を参照
+    //（どんな閾値と比べても通らない値でなければ契約を満たせない）。
+    return Number.NaN;
   }
   const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
   return 1 - similarity;
