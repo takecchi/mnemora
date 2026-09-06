@@ -934,6 +934,37 @@ async function benchRecallOnce(
     { variant: "subjectId 無し（比較用）", ctxSubjectId: undefined },
   ];
 
+  // ---- 診断（Part 4 が hits=0 を返した原因を切り分けるためのもの）----
+  // recall() の段1と、同じ入力で直接叩く search() を突き合わせる。
+  // 食い違えば recall() の配線、一致すれば seeding かクエリ側の前提が原因である。
+  {
+    const table = embeddingSpaceTableName(space);
+    const cnt = await pool.query<{ n: string }>(`SELECT count(*)::text AS n FROM ${table}`);
+    const memCnt = await pool.query<{ n: string }>(
+      "SELECT count(*)::text AS n FROM memories WHERE tenant_id = $1",
+      [TENANT],
+    );
+    log(
+      `  [診断] 埋め込み表=${table} 行数=${cnt.rows[0]?.n} / memories(tenant)=${memCnt.rows[0]?.n}`,
+    );
+    log(`  [診断] queryVector.length=${queryVector.length} / space.dimensions=${space.dimensions}`);
+    const direct = await vectorStore.search({ tenantId: TENANT }, space, queryVector, {
+      limit: 40,
+      filter: { tenantId: TENANT, status: ["active", "contested"] },
+    });
+    log(`  [診断] 直接 search（subject 無し・status 有り）= ${direct.length} 件`);
+    const directNoStatus = await vectorStore.search({ tenantId: TENANT }, space, queryVector, {
+      limit: 40,
+      filter: { tenantId: TENANT },
+    });
+    log(`  [診断] 直接 search（filter は tenant のみ）= ${directNoStatus.length} 件`);
+    const directSubject = await vectorStore.search({ tenantId: TENANT }, space, queryVector, {
+      limit: 40,
+      filter: { tenantId: TENANT, status: ["active", "contested"], subjectId },
+    });
+    log(`  [診断] 直接 search（subject 有り・status 有り）= ${directSubject.length} 件`);
+  }
+
   const results: RecallOnceResult[] = [];
   for (const v of variants) {
     log(`  runtime.recall()（${v.variant}）を1回呼ぶ...`);
