@@ -193,9 +193,11 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # まず煙試験: 小さい規模で「そもそも走るか」を確かめる。
-      BENCH_SCOPE_SCALES: "1000,10000"
-      BENCH_VECTOR_SCALES: "1000"
+      # 本番の実測。Part 1（aggregateScope）はベクトル不要なので 1M まで回す。
+      # Part 2（ベクトル検索）は HNSW の逐次維持が重いため 10k/100k に留める
+      # （1M 点は別途、次元を落として測る）。
+      BENCH_SCOPE_SCALES: "10000,100000,1000000"
+      BENCH_VECTOR_SCALES: "10000,100000"
       BENCH_VECTOR_DIMENSIONS: "256"
     steps:
       - name: Checkout
@@ -218,7 +220,7 @@ jobs:
         run: pnpm --filter @mnemora/core run build
       - name: Run migrations
         run: pnpm --filter @mnemora/postgres run migrate
-      - name: 規模ベンチ（煙試験）
+      - name: 規模ベンチ（本実測）
         timeout-minutes: 45
         run: pnpm --filter @mnemora/postgres run bench:scale
 
