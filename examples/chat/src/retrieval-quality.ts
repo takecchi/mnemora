@@ -342,7 +342,12 @@ export async function runRetrievalQualityArm(
     mrrOverall: average(probes.map((p) => p.reciprocalRank)),
     mrrLexicalControl: average(lexicalProbes.map((p) => p.reciprocalRank)),
     mrrNonLexical: average(nonLexicalProbes.map((p) => p.reciprocalRank)),
-    usageReport: options.usageMeter ? options.usageMeter.formatReport() : formatNoApiCallsNotice(),
+    usageReport: options.usageMeter
+      ? options.usageMeter.formatReport()
+      : formatNoApiCallsNotice({
+          llmMode: options.llmMode,
+          embeddingMode: options.embeddingMode,
+        }),
   };
 }
 

@@ -53,11 +53,19 @@ export class CassetteRecorder {
    * 気づかれない。書き出す側で先に落とす。
    */
   toCassette(now: Date = new Date()): Cassette {
+    // **何が起きたかだけでなく、どうすればいいかまで言う。**この失敗の既知の原因は1つに
+    // 集中している——`observe()` は `externalId` で重複排除するため、取り込み済みの
+    // テナントで記録を走らせると抽出も埋め込みも呼ばれない。実際にこれで一度落ちた
+    // （ADR 0050「引き受けた負債4」）ので、その原因を例外本文に載せる。
+    const hint =
+      "記録の実行が API を1回も呼んでいない。よくある原因: 取り込み済みのテナントで " +
+      "`record` を走らせた——`observe()` は externalId で重複排除するため、抽出も埋め込みも " +
+      "呼ばれない。新しい tenantId で録り直すこと（ADR 0050）。";
     if (this.embeddingSpace === undefined || this.embeddingEntries.size === 0) {
-      throw new Error("CassetteRecorder: 埋め込みが1件も記録されていない。");
+      throw new Error(`CassetteRecorder: 埋め込みが1件も記録されていない。${hint}`);
     }
     if (this.llmModel === undefined || this.llmEntries.size === 0) {
-      throw new Error("CassetteRecorder: LLM 応答が1件も記録されていない。");
+      throw new Error(`CassetteRecorder: LLM 応答が1件も記録されていない。${hint}`);
     }
     return {
       version: CASSETTE_FORMAT_VERSION,

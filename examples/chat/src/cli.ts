@@ -44,8 +44,28 @@ function requireDatabaseUrl(): string {
   return url;
 }
 
+/**
+ * **3層すべてを名指しする**（ADR 0050）。
+ *
+ * ⚠ ここは一度壊れていた——`ProviderMode` に `"recorded"` を足したとき、この関数は
+ * 「`openai` でなければ擬似 provider」のままだった。その結果、記録を再生している run が
+ * 画面には「決定的な擬似 provider」と出て、**同じ report の別の行（`llm=recorded`）と
+ * 矛盾していた。**ADR 0050 が「どちらで走ったかを隠さない」ことを土台にしている以上、
+ * これは最も起こしてはならない壊れ方である。**モードを増やすときは必ずここも増やすこと。**
+ */
 function describeMode(mode: ProviderMode): string {
-  return mode === "openai" ? "本物の OpenAI" : "@mnemora/testkit の決定的な擬似 provider";
+  switch (mode) {
+    case "openai":
+      return "本物の OpenAI";
+    case "recorded":
+      return "記録した実 API 応答の再生（ADR 0050）";
+    case "deterministic":
+      return "@mnemora/testkit の決定的な擬似 provider";
+    default: {
+      const exhaustive: never = mode;
+      throw new Error(`describeMode: 未知の ProviderMode: ${String(exhaustive)}`);
+    }
+  }
 }
 
 /**
@@ -115,7 +135,14 @@ async function runChat(): Promise<void> {
     );
 
     console.log("");
-    console.log(handle.usageMeter ? handle.usageMeter.formatReport() : formatNoApiCallsNotice());
+    console.log(
+      handle.usageMeter
+        ? handle.usageMeter.formatReport()
+        : formatNoApiCallsNotice({
+            llmMode: handle.llmMode,
+            embeddingMode: handle.embeddingMode,
+          }),
+    );
   } finally {
     await handle.close();
   }
@@ -194,7 +221,14 @@ async function runCompare(): Promise<void> {
         "（docs/decisions/0021-drain-embed-ticks-in-ingest.md）。",
     );
     console.log("");
-    console.log(handle.usageMeter ? handle.usageMeter.formatReport() : formatNoApiCallsNotice());
+    console.log(
+      handle.usageMeter
+        ? handle.usageMeter.formatReport()
+        : formatNoApiCallsNotice({
+            llmMode: handle.llmMode,
+            embeddingMode: handle.embeddingMode,
+          }),
+    );
   } finally {
     await handle.close();
   }
@@ -223,6 +257,11 @@ function buildArmSpecs(source: "openai" | "recorded"): {
   tenantId: string;
   llmOverride: ProviderMode;
   embeddingOverride: ProviderMode;
+  /**
+   * この arm が実 API に触れるか。`record` は**この欄で**対象を選ぶ——
+   * tenantId の文字列一致で除外すると、arm の id を変えた瞬間に静かに壊れる。
+   */
+  touchesApi: boolean;
 }[] {
   return [
     {
@@ -230,18 +269,21 @@ function buildArmSpecs(source: "openai" | "recorded"): {
       tenantId: "retrieval-quality-arm-a",
       llmOverride: "deterministic",
       embeddingOverride: "deterministic",
+      touchesApi: false,
     },
     {
       armLabel: "B: 擬似LLM+本物の埋め込み",
       tenantId: "retrieval-quality-arm-b",
       llmOverride: "deterministic",
       embeddingOverride: source,
+      touchesApi: true,
     },
     {
       armLabel: "C: 本物LLM+本物の埋め込み",
       tenantId: "retrieval-quality-arm-c",
       llmOverride: source,
       embeddingOverride: source,
+      touchesApi: true,
     },
   ];
 }
@@ -324,8 +366,8 @@ async function runRecord(): Promise<void> {
   }
 
   const recorder = new CassetteRecorder();
-  // arm A（API を叩かない）は録らない。
-  const armSpecs = buildArmSpecs("openai").filter((a) => a.tenantId !== "retrieval-quality-arm-a");
+  // arm A（API を叩かない）は録らない。**id の文字列一致ではなく、宣言された欄で選ぶ。**
+  const armSpecs = buildArmSpecs("openai").filter((a) => a.touchesApi);
 
   // ⚠ **記録は必ず新しいテナントで走らせる。**`observe()` は `externalId` で
   // 重複排除するため、既に取り込み済みのテナントで走らせると抽出も埋め込みも呼ばれず、

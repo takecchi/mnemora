@@ -134,4 +134,23 @@ export function assertCassette(value: unknown, source: string): asserts value is
   if (typeof c.llm.entries !== "object" || c.llm.entries === null) {
     throw fail("llm.entries が無い");
   }
+
+  // **entry 1件ずつの形も見る。**ここを省くと、壊れた entry は再生時に
+  // `RecordedEmbeddingProvider` の中で素の `TypeError` になり、「カセットが壊れている」と
+  // いう本当の理由が伝わらない。**読んだ時点で、読んだファイルの名前と一緒に落とす。**
+  for (const [key, entry] of Object.entries(c.embedding.entries)) {
+    const e = entry as Partial<EmbeddingCassetteEntry> | null;
+    if (typeof e?.text !== "string" || !Array.isArray(e.vector)) {
+      throw fail(`embedding.entries[${key}] が {text, vector} の形をしていない`);
+    }
+  }
+  for (const [key, entry] of Object.entries(c.llm.entries)) {
+    const e = entry as Partial<LLMCassetteEntry> | null;
+    if (typeof e?.prompt !== "object" || e.prompt === null || !("messages" in e.prompt)) {
+      throw fail(`llm.entries[${key}] の prompt が PromptSpec の形をしていない`);
+    }
+    if (!("value" in (e as object))) {
+      throw fail(`llm.entries[${key}] に value が無い`);
+    }
+  }
 }
