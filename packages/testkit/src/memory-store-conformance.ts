@@ -337,6 +337,59 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(second.observation.id).toBe(first.observation.id);
     });
 
+    /**
+     * ADR 0052: `created` は、**この呼び出し自身が行を作ったか**を表す。
+     *
+     * 上の「冪等な再送」の歯は逐次に2回呼ぶだけなので、`created` を「呼び出しの前後で
+     * store 全体の件数が増えたか」という**大域の差分**から導いている実装でも通ってしまう
+     * ——逐次実行では、差分を測っている区間に他の書き込みが入らないからである。
+     *
+     * この歯は、その区間に**別の行の作成**を重ねる。既に存在する外部 id への再送（`dup`）と、
+     * 全く新しい外部 id の作成（`fresh`）を同時に走らせると、大域の件数は `fresh` のぶん
+     * だけ増える。`dup` はその増加を自分の挿入と取り違えてはならない。
+     *
+     * **フィクスチャは非対称にしてある**——`dup` と `fresh` は別の外部 id・別の行であり、
+     * 期待値も `created`/`jobs` の両方で食い違う。件数だけを測ると「2件のうち1件が
+     * created」という和が合ってしまう変異を見逃すため、**どのジョブがどの observation を
+     * 指しているか**まで assert する。
+     */
+    it("createObservationWithOutbox は、別の行の作成が同時に起きても created を取り違えない（ADR 0052）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const dupInput = buildNewObservationFixture({
+        tenantId: "tenant-1",
+        externalId: "ext-adr52-existing",
+      });
+
+      const seed = await store.createObservationWithOutbox(ctx, dupInput, ["extract"]);
+      expect(seed.created).toBe(true);
+
+      const [dup, fresh] = await Promise.all([
+        store.createObservationWithOutbox(ctx, dupInput, ["extract"]),
+        store.createObservationWithOutbox(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-adr52-fresh" }),
+          ["extract"],
+        ),
+      ]);
+
+      expect({
+        dupCreated: dup.created,
+        dupJobs: dup.jobs.length,
+        dupIsSeedRow: dup.observation.id === seed.observation.id,
+        freshCreated: fresh.created,
+        freshJobTargets: fresh.jobs.map((job) => job.payload.observationId),
+        freshIsDistinctRow: fresh.observation.id !== seed.observation.id,
+      }).toEqual({
+        dupCreated: false,
+        dupJobs: 0,
+        dupIsSeedRow: true,
+        freshCreated: true,
+        freshJobTargets: [fresh.observation.id],
+        freshIsDistinctRow: true,
+      });
+    });
+
     it("createObservationWithOutbox は jobKinds が空なら job を作らない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -592,6 +645,60 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(second.created).toBe(false);
       expect(second.jobs).toEqual([]);
       expect(second.memory.id).toBe(first.memory.id);
+    });
+
+    /**
+     * ADR 0052: `createMemoryWithOutbox` 側の同じ契約。上の
+     * `createObservationWithOutbox` の歯と同じ理由・同じ形（そちらの doc を参照）。
+     * こちらは冪等キーが `(sourceObservationId, extractorVersion, contentHash)` なので、
+     * **同じ observation に紐づく別の contentHash** を同時に作ることで大域の件数を動かす。
+     */
+    it("createMemoryWithOutbox は、別の行の作成が同時に起きても created を取り違えない（ADR 0052）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const dupInput = buildNewMemoryFixture({
+        tenantId: "tenant-1",
+        sourceObservationId: observation.id,
+        extractorVersion: "v1",
+        contentHash: "hash-adr52-existing",
+      });
+
+      const seed = await store.createMemoryWithOutbox(ctx, dupInput, ["embed"]);
+      expect(seed.created).toBe(true);
+
+      const [dup, fresh] = await Promise.all([
+        store.createMemoryWithOutbox(ctx, dupInput, ["embed"]),
+        store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: observation.id,
+            extractorVersion: "v1",
+            contentHash: "hash-adr52-fresh",
+          }),
+          ["embed"],
+        ),
+      ]);
+
+      expect({
+        dupCreated: dup.created,
+        dupJobs: dup.jobs.length,
+        dupIsSeedRow: dup.memory.id === seed.memory.id,
+        freshCreated: fresh.created,
+        freshJobTargets: fresh.jobs.map((job) => job.payload.memoryId),
+        freshIsDistinctRow: fresh.memory.id !== seed.memory.id,
+      }).toEqual({
+        dupCreated: false,
+        dupJobs: 0,
+        dupIsSeedRow: true,
+        freshCreated: true,
+        freshJobTargets: [fresh.memory.id],
+        freshIsDistinctRow: true,
+      });
     });
 
     // -------------------------------------------------------------------
