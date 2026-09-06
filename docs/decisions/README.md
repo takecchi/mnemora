@@ -40,3 +40,4 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0025](./0025-ann-underfill-is-not-reported-in-omitted.md) | 段1の ANN が窓を埋められなかったことが `omitted` に出ていない（実測のみ） | **未決** (2026-09) |
 | [0026](./0026-ann-unreached-omission.md) | 近似索引が scope に届かなかったことを `Omission { kind: 'ann_unreached' }` として出す | 採用 (2026-09) |
 | [0027](./0027-split-superseded-forgotten-omission.md) | `filtered` omission の `condition: 'status'` を `'superseded'` と `'forgotten'` に分ける | 採用 (2026-09) |
+| [0028](./0028-reextract-superseded-cleanup.md) | `runtime.reextract` は古い抽出結果を `superseded` にする（`forgotten` にしない） | 採用 (2026-09) |

@@ -200,6 +200,26 @@ export class InMemoryMemoryStore implements MemoryStore {
     return results;
   }
 
+  /**
+   * ADR 0028: `reextract` が既存 Memory のうち今回作られなかったものを判定するための列挙
+   * （**SELECT のみ**）。`extractorVersion: null` は `extractor_version IS NULL`
+   * （postgres 実装の `IS NOT DISTINCT FROM` と同じ規約）を意味する。
+   */
+  async listBySourceObservation(
+    ctx: Ctx,
+    observationId: ObservationId,
+    extractorVersion: string | null,
+  ): Promise<Memory[]> {
+    const results: Memory[] = [];
+    for (const memory of this.memories.values()) {
+      if (memory.tenantId !== ctx.tenantId) continue;
+      if (memory.sourceObservationId !== observationId) continue;
+      if ((memory.extractorVersion ?? null) !== (extractorVersion ?? null)) continue;
+      results.push(memory);
+    }
+    return results;
+  }
+
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,

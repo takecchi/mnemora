@@ -44,6 +44,13 @@ import type { OutboxJobKind } from "./scheduler.js";
  * - `setEmbeddingStatus` — `embeddingStatus` の `pending → ready | failed` 遷移
  *   （roadmap.md 段階3の完了条件）を書き込む。
  *
+ * ADR 0028（`runtime.reextract`）で以下1メソッドを追加した:
+ * - `listBySourceObservation` — ある Observation から、ある版の抽出器で作られた Memory を
+ *   列挙する（**SELECT のみ**）。`reextract` が「今回作られた content_hash の集合に
+ *   含まれない既存 Memory」を判定するために使う。マイグレーション・索引の追加は伴わない
+ *   ——`(tenant_id, source_observation_id, extractor_version, content_hash)` の一意索引
+ *   （0001_init.sql）は既に `source_observation_id` を先頭から使える形をしている。
+ *
  * roadmap.md 段階4/5（想起・説明）で以下2メソッドを追加した（本 PR）:
  * - `aggregateScope` — `countByGroup` を置き換える。旧 `countByGroup` は群カウント
  *   （`GroupCount[]`）しか返さず、`totalInScope`・`filtered` 系の件数を別のクエリで
@@ -89,6 +96,17 @@ export interface MemoryStore {
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   /** D9: recall 段3の mandatory companion retrieval のための一括取得。 */
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
+  /**
+   * ADR 0028: ある Observation から、ある版の抽出器で作られた Memory を列挙する
+   * （**SELECT のみ**。マイグレーション・索引を追加しない）。`extractorVersion` は
+   * `NULLS NOT DISTINCT`（0001_init.sql）と同じ規約で `null` を1つの値として扱う
+   * ——`extractorVersion: null` を渡すと `extractor_version IS NULL` の行を返す。
+   */
+  listBySourceObservation(
+    ctx: Ctx,
+    observationId: ObservationId,
+    extractorVersion: string | null,
+  ): Promise<Memory[]>;
   updateStatus(
     ctx: Ctx,
     id: MemoryId,

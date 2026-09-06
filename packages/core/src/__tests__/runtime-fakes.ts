@@ -209,6 +209,22 @@ export class FakeMemoryStore implements MemoryStore {
     return results;
   }
 
+  /** ADR 0028: `runtime.reextract` が既存 Memory を判定するための列挙（**SELECT のみ**）。 */
+  async listBySourceObservation(
+    ctx: Ctx,
+    observationId: ObservationId,
+    extractorVersion: string | null,
+  ): Promise<Memory[]> {
+    const results: Memory[] = [];
+    for (const memory of this.backing.memories.values()) {
+      if (memory.tenantId !== ctx.tenantId) continue;
+      if (memory.sourceObservationId !== observationId) continue;
+      if ((memory.extractorVersion ?? null) !== (extractorVersion ?? null)) continue;
+      results.push(memory);
+    }
+    return results;
+  }
+
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,

@@ -80,6 +80,8 @@
     `(observationId, extractorVersion)` であり、同じ版で再実行しても
     content_hash が変わるため、**やり直すと生テキストの Memory が残ったまま
     正しい Memory が追加される**（重複）。この掃除をどうするかは未解決である。
+    **2026-09 追記**: [ADR 0028](./0028-reextract-superseded-cleanup.md) で `runtime.reextract`
+    を追加し、この掃除（`superseded` にする）を実装した。
 
 - **これが覆るとしたら**:
   - `ExtractionOutcome` の3値で実運用の失敗パターンを表せない（例えば

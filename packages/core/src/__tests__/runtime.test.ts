@@ -383,3 +383,145 @@ describe("runtime.tick — 未知の outbox job kind", () => {
     expect(tickResult).toEqual({ processed: 0, failed: 1 });
   });
 });
+
+describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」の掃除）", () => {
+  /**
+   * runtime1（失敗する LLM）で observe() させ、全文フォールバックの Memory を1件作る。
+   * runtime2（成功する LLM）は同じ stores を共有する——「provider が復旧した後」を模す。
+   */
+  function buildReextractScenario(succeedingCandidates: Parameters<typeof llmReturning>[0]) {
+    const { runtime: runtime1, stores } = buildRuntime(throwingLlm());
+    const runtime2 = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: llmReturning(succeedingCandidates),
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    return { runtime1, runtime2, stores };
+  }
+
+  it("⭐ reextract を2回走らせても、2回目では Memory が増えない（冪等は『数が増えない』で測る。オーナーの線）", async () => {
+    const { runtime1, runtime2, stores } = buildReextractScenario([
+      { content: "抽出結果A", digest: "要旨A", provenanceKind: "stated" },
+      { content: "抽出結果B", digest: "要旨B", provenanceKind: "stated" },
+    ]);
+    const observeResult = await runtime1.observe(ctx, {
+      kind: "utterance",
+      text: "障害時に取り込まれた発話",
+    });
+    expect(observeResult.extraction).toBe("llm_failed_whole_observation");
+
+    const countFor = async () =>
+      (await stores.memoryStore.listBySourceObservation(ctx, observeResult.observationId, "v1"))
+        .length;
+
+    expect(await countFor()).toBe(1); // フォールバックの1件のみ
+
+    const first = await runtime2.reextract(ctx, observeResult.observationId);
+    expect(first.extraction).toBe("ok");
+    const afterFirst = await countFor();
+    expect(afterFirst).toBe(3); // フォールバック(superseded) + 新規2件
+
+    const second = await runtime2.reextract(ctx, observeResult.observationId);
+    expect(second.extraction).toBe("ok");
+    const afterSecond = await countFor();
+    // ⚠ 「キーが在る」ではなく「数が増えない」を assert する。
+    expect(afterSecond).toBe(afterFirst);
+  });
+
+  it("全文フォールバックの Memory が superseded になり、superseded_by_id が新しい Memory を指す", async () => {
+    const { runtime1, runtime2, stores } = buildReextractScenario([
+      { content: "新しい抽出結果", digest: "要旨", provenanceKind: "stated" },
+    ]);
+    const observeResult = await runtime1.observe(ctx, { kind: "utterance", text: "発話" });
+    const fallbackId = observeResult.memoryIds[0]!;
+
+    const result = await runtime2.reextract(ctx, observeResult.observationId);
+    expect(result.supersededMemoryIds).toEqual([fallbackId]);
+
+    const fallbackMemory = await stores.memoryStore.get(ctx, fallbackId);
+    expect(fallbackMemory?.status).toBe("superseded");
+    expect(fallbackMemory?.supersededById).toBe(result.memoryIds[0]);
+
+    const target = await stores.memoryStore.get(ctx, fallbackMemory!.supersededById!);
+    expect(target?.status).toBe("active");
+  });
+
+  it("🔴 候補が0件なら、何も supersede しない（0件は正常な抽出結果であり、これを根拠に既存を消さない）", async () => {
+    const { runtime1, runtime2, stores } = buildReextractScenario([]);
+    const observeResult = await runtime1.observe(ctx, { kind: "utterance", text: "発話" });
+    const fallbackId = observeResult.memoryIds[0]!;
+
+    const result = await runtime2.reextract(ctx, observeResult.observationId);
+    expect(result.extraction).toBe("ok");
+    expect(result.memoryIds).toEqual([]);
+    expect(result.supersededMemoryIds).toEqual([]);
+
+    const fallbackMemory = await stores.memoryStore.get(ctx, fallbackId);
+    expect(fallbackMemory?.status).toBe("active"); // 触られていない
+  });
+
+  it("🔴 forgotten の Memory は supersede されない（利用者が意図して忘れさせたものを機構の都合で上書きしない）", async () => {
+    const { runtime1, runtime2, stores } = buildReextractScenario([
+      { content: "新しい抽出結果", digest: "要旨", provenanceKind: "stated" },
+    ]);
+    const observeResult = await runtime1.observe(ctx, { kind: "utterance", text: "発話" });
+    const fallbackId = observeResult.memoryIds[0]!;
+    await stores.memoryStore.updateStatus(ctx, fallbackId, "forgotten");
+
+    const result = await runtime2.reextract(ctx, observeResult.observationId);
+    expect(result.supersededMemoryIds).toEqual([]);
+
+    const stillForgotten = await stores.memoryStore.get(ctx, fallbackId);
+    expect(stillForgotten?.status).toBe("forgotten");
+    expect(stillForgotten?.supersededById ?? null).toBeNull();
+  });
+
+  it("reextract のあと、recall() の omitted に filtered(superseded) が出る（ADR 0027 と繋がる）", async () => {
+    const { runtime1, runtime2 } = buildReextractScenario([
+      { content: "新しい抽出結果", digest: "要旨", provenanceKind: "stated" },
+    ]);
+    const observeResult = await runtime1.observe(ctx, { kind: "utterance", text: "発話" });
+    await runtime2.reextract(ctx, observeResult.observationId);
+
+    const recallResult = await runtime2.recall(ctx, {});
+    expect(recallResult.omitted).toContainEqual(
+      expect.objectContaining({ kind: "filtered", condition: "superseded" }),
+    );
+  });
+
+  it("変わっていない候補は、2回目の reextract でも superseded にならない（content_hash 比較を外すと壊れる歯）", async () => {
+    // ここでは observe() 自体が最初から成功する（フォールバックを経由しない）。
+    const stores = createFakeRuntimeStores();
+    const succeedingLlm = llmReturning([
+      { content: "変わらない内容", digest: "要旨", provenanceKind: "stated" },
+    ]);
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: succeedingLlm,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+
+    const observeResult = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+    expect(observeResult.extraction).toBe("ok");
+    const originalId = observeResult.memoryIds[0]!;
+
+    // 同じ候補で reextract を2回走らせる——LLM は毎回同じ内容を返す（決定的）。
+    await runtime.reextract(ctx, observeResult.observationId);
+    const result = await runtime.reextract(ctx, observeResult.observationId);
+
+    expect(result.supersededMemoryIds).toEqual([]);
+    const original = await stores.memoryStore.get(ctx, originalId);
+    expect(original?.status).toBe("active");
+    expect(original?.supersededById ?? null).toBeNull();
+  });
+});

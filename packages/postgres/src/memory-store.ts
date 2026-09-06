@@ -303,6 +303,26 @@ export class PostgresMemoryStore implements MemoryStore {
     return result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
   }
 
+  /**
+   * ADR 0028: `reextract` が「今回作られた content_hash の集合に含まれない既存 Memory」を
+   * 判定するための列挙。**SELECT のみ**——索引は 0001_init.sql の一意索引
+   * `uq_memories_extraction (tenant_id, source_observation_id, extractor_version, content_hash)`
+   * が `(tenant_id, source_observation_id, extractor_version)` の前方一致で使える。
+   */
+  async listBySourceObservation(
+    ctx: Ctx,
+    observationId: ObservationId,
+    extractorVersion: string | null,
+  ): Promise<Memory[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM memories
+      WHERE tenant_id = ${ctx.tenantId}
+        AND source_observation_id = ${observationId}
+        AND extractor_version IS NOT DISTINCT FROM ${extractorVersion}
+    `);
+    return result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
+  }
+
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,

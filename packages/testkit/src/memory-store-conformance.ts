@@ -333,6 +333,90 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // listBySourceObservation（ADR 0028・runtime.reextract の前提）
+    // -------------------------------------------------------------------
+
+    it("listBySourceObservation は同じ Observation・同じ extractorVersion の Memory を列挙する", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const a = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-list-a",
+        }),
+      );
+      const b = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-list-b",
+        }),
+      );
+      // 別の Observation・別の extractorVersion の Memory は混ざってはならない。
+      const otherObservation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: otherObservation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-list-other-observation",
+        }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v2",
+          contentHash: "hash-list-other-version",
+        }),
+      );
+
+      const listed = await store.listBySourceObservation(ctx, observation.id, "v1");
+      expect(listed.map((m) => m.id).sort()).toEqual([a.id, b.id].sort());
+    });
+
+    it("listBySourceObservation はクロステナントの Memory を返さない（テナント分離）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const observationA = await store.createObservation(
+        ctxA,
+        buildNewObservationFixture({ tenantId: "tenant-a" }),
+      );
+      await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({
+          tenantId: "tenant-a",
+          sourceObservationId: observationA.id,
+          extractorVersion: "v1",
+          contentHash: "hash-tenant-a",
+        }),
+      );
+
+      // tenant-b からは同じ observationId を渡しても何も見えない
+      // （観測そのものがテナント分離されている前提と一貫させる）。
+      const listedFromB = await store.listBySourceObservation(ctxB, observationA.id, "v1");
+      expect(listedFromB).toEqual([]);
+
+      const listedFromA = await store.listBySourceObservation(ctxA, observationA.id, "v1");
+      expect(listedFromA).toHaveLength(1);
+    });
+
+    // -------------------------------------------------------------------
     // createMemoryWithOutbox（roadmap.md 段階3・transactional outbox）
     // -------------------------------------------------------------------
 
