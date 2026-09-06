@@ -110,11 +110,40 @@ describe("PostgresVectorStore.search — subject フィルタが段1に効くこ
 });
 
 /**
- * 歯B（EXPLAIN）: `m.subject_id = $x` を足した形の段1クエリでも HNSW 索引が使われるかを検査する。
+ * 歯B（EXPLAIN）: `m.subject_id = $x` を足した形の段1クエリで、プランナが実際に何を選ぶか。
  *
- * ⚠ マネージャー指示: もし HNSW が使われなくなっているなら、それは重要な発見である。
- * この assertion をごまかして緑にしない——手元に DB が無いため、この歯自体は実行できていない。
- * 実際に何が起きるかは CI での実測に委ねる。
+ * **⚠ この歯の当初の期待（「HNSW 索引が使われる」）は、CI の実測で反証された。**
+ * GitHub Actions run 34007687930（PostgreSQL 17 + pgvector、3,000行・100 subject）で
+ * 実際に出たプランは以下だった:
+ *
+ * ```
+ * Limit
+ *   -> Sort  (Sort Key: (e.embedding <=> '...'::vector))
+ *        -> Hash Join  (Hash Cond: (e.memory_id = m.id))
+ *             -> Seq Scan on memory_embeddings_...  (Filter: tenant_id = ...)
+ *             -> Hash
+ *                  -> Index Scan using idx_memories_by_subject on memories m
+ *                       Index Cond: ((tenant_id = ...) AND (subject_id = ...) AND (status = ANY (...)))
+ * ```
+ *
+ * ⟹ **選択性の高い等値条件（subject_id）を足すと、プランナは HNSW を捨て、
+ * 「memories を subject の索引で絞ってから、距離で並べ替える」という*厳密な*経路を選ぶ。**
+ * これは [ADR 0011](../../../../docs/decisions/0011-no-window-count-in-ann-stage.md) が
+ * `count(*) OVER ()` について実測したのと同じ現象である——**プランナは、正しい答えを
+ * 安く出せる代替経路があるなら、近似索引を使わない。**
+ *
+ * **正しさは損なわれない**（むしろ近似ではなく厳密になる。歯Aが結果の正しさを押さえている）。
+ * **⚠ しかし代償がある**: 上のプランは埋め込みテーブル側を `Seq Scan` している。
+ * 3,000行では最安（cost 148）だが、**テナントが大きくなればこの経路の費用は
+ * テナントの行数に比例して伸びる。この規模での実測はしていない**
+ * （[ADR 0023](../../../../docs/decisions/0023-subject-filter-in-ann-stage.md)
+ * 「確かめていないこと」）。
+ *
+ * **この歯は、その実測された現実をそのまま固定する**——期待を実測に合わせて書き換えたのであって、
+ * 緑にするために緩めたのではない（当初の期待は仮説であり、測って否定された）。
+ * **もし将来この歯が赤くなったら、それはプランの選択が変わったということであり、
+ * ADR 0023 を見直す合図である**（例: `hnsw.iterative_scan` を入れた、
+ * 埋め込みテーブルに `subject_id` を複製した、など）。
  */
 const EXPLAIN_TENANT = "hnsw-subject-explain-tenant";
 const EXPLAIN_ROW_COUNT = 3000;
@@ -140,7 +169,7 @@ async function seedForExplain(
   await pool.query("ANALYZE memories");
 }
 
-describe("PostgresVectorStore.search — subject_id を足しても HNSW 索引が使われるか（歯B）", () => {
+describe("PostgresVectorStore.search — subject_id を足すとプランナが何を選ぶか（歯B、実測で確定）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
   });
@@ -149,7 +178,7 @@ describe("PostgresVectorStore.search — subject_id を足しても HNSW 索引�
     await closeTestClient();
   });
 
-  it("m.subject_id = $x を足した形の段1クエリでも EXPLAIN に HNSW 索引が出る（再現用の等価クエリ）", async () => {
+  it("m.subject_id = $x を足すと、HNSW ではなく idx_memories_by_subject + Sort の厳密な経路が選ばれる（再現用の等価クエリ）", async () => {
     const { db, pool } = await getTestClient();
     const memoryStore = new PostgresMemoryStore(db);
     const vectorStore = new PostgresVectorStore(db);
@@ -169,11 +198,15 @@ describe("PostgresVectorStore.search — subject_id を足しても HNSW 索引�
     const plan = explainResult.rows
       .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
       .join("\n");
-    expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
-    expect(plan).not.toMatch(/Seq Scan/);
+    // 実測（run 34007687930）で確定した経路: memories を subject の索引で絞り、距離で並べ替える。
+    expect(plan).toMatch(/Index Scan using idx_memories_by_subject/);
+    // そして HNSW は使われない。これが当初の期待を反証した点であり、この歯の主張の中心。
+    expect(plan).not.toMatch(/idx_memory_embeddings_hnsw/);
+    // ⚠ 埋め込み側が Seq Scan になるかは行数とプランナ次第なので、ここでは主張しない
+    //（3,000行では Seq Scan だった。大規模での費用は未実測——ADR 0023）。
   }, 120_000);
 
-  it("PostgresVectorStore.search が subjectId 込みで実際に発行するクエリ自体が EXPLAIN で HNSW 索引を使う", async () => {
+  it("PostgresVectorStore.search が subjectId 込みで実際に発行するクエリも、同じ厳密な経路になる", async () => {
     const { db, pool } = await getTestClient();
     const memoryStore = new PostgresMemoryStore(db);
     const vectorStore = new PostgresVectorStore(db);
@@ -213,7 +246,9 @@ describe("PostgresVectorStore.search — subject_id を足しても HNSW 索引�
     const plan = explainResult.rows
       .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
       .join("\n");
-    expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
-    expect(plan).not.toMatch(/Seq Scan/);
+    // 上の「再現用の等価クエリ」と同じ経路になることを、実際に発行されるクエリでも押さえる
+    //（歯Bの docstring 参照。実測 run 34007687930 で確定）。
+    expect(plan).toMatch(/Index Scan using idx_memories_by_subject/);
+    expect(plan).not.toMatch(/idx_memory_embeddings_hnsw/);
   }, 120_000);
 });
