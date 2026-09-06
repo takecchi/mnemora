@@ -314,6 +314,50 @@ type GroupCount = {
 
 **Phase 1 の実装上の限界(2026-09 追記、本 PR)**: 上記は近似経路を持つことを前提に書かれているが、`MemoryStore.aggregateScope`(roadmap.md 段階4/5 の実装)は Phase 1 では**常に厳密集計のみ**を実装しており、近似経路(例えば `pg_stats`/`reltuples` に基づく安価な推定)は無い。**近似を要求するオプションも持たない**——以前は `RecallQuery.exactCounts` という欄が型に在ったが、値を受け取って黙って無視していた（呼び出し側は「頼んだ」と思い込める形だった）ため、[ADR 0024](./decisions/0024-remove-exact-counts-option.md) で**削除した**（「予約・未実装」と書き残すのではなく消した。理由は ADR を参照）。これは 100万件級のテナントで `aggregateScope` のコストが無視できなくなる可能性を先送りしたものであり、隠さずここに書く(PR 本文「設計上の疑義」参照)。
 
+### `aggregateScope` の実測（2026-09 追記）
+
+上の「先送りにした」コストを、規模を振って測った（GitHub Actions run 34009301567、
+PostgreSQL 17 + pgvector、`packages/postgres/src/bench/scale-bench.ts`、擬似の合成ベクトル・
+実 API 不使用）。
+
+| 規模（行数） | subject 数 | 変種 | 所要時間（中央値） | プランの要点 |
+|---:|---:|---|---:|---|
+| 10,000 | 200 | 全体 | 9.0ms | Seq Scan あり（HashAggregate） |
+| 10,000 | 200 | subjectId 指定（小さい subject） | 0.9ms | Seq Scan 無し（GroupAggregate + idx_memories_by_subject） |
+| 100,000 | 2,000 | 全体 | 45.8ms | Seq Scan あり（Finalize HashAggregate、並列） |
+| 100,000 | 2,000 | subjectId 指定（小さい subject） | 0.7ms | Seq Scan 無し |
+| 1,000,000 | 20,000 | 全体 | 408.0ms | Seq Scan あり（Finalize HashAggregate、並列） |
+| 1,000,000 | 20,000 | subjectId 指定（小さい subject） | 0.7ms | Seq Scan 無し |
+
+**読み方**: コストは「テナント全体を集計する」呼び出しに在り、「subject で絞って集計する」
+呼び出しには無い。全体集計は 10k→9.0ms / 100k→45.8ms / 1M→408.0ms と規模に応じて伸びる
+（`Seq Scan` を伴う `HashAggregate`）。一方 subject 指定は全規模でおおむね 0.7〜0.9ms の
+横ばいで、`idx_memories_by_subject` を使った索引スキャンに乗っている。
+
+**⚠ この数値だけから「近似が要る／要らない」を結論しないこと。** 「何 ms なら割に合わないか」
+の閾値を、この repo はまだ定義していない。ここでは生の数値とスケーリングの傾向だけを示し、
+閾値の判断は読む人に委ねる。
+
+**⚠ 測っていないこと**:
+
+- **大きい subject を測っていない。** 上の「subjectId 指定」はいずれも小さい subject
+  （該当10〜21行程度）である。subject 自体が大きい場合の `GROUP BY` 集約コストは別問題であり、
+  今回の実測はそれに答えていない。
+- **同時実行下では測っていない**（単発クエリの中央値のみ）。
+- 1,000,000行を超える規模、および `subject` 以外の軸（`taxonomy` / `time_window`）での
+  集計は測っていない。
+
+このベンチは同時に `PostgresVectorStore.search` の subject フィルタ（段1の ANN クエリ）も
+測っており、そちらの実測と見立ての訂正は
+[ADR 0023](./decisions/0023-subject-filter-in-ann-stage.md) の追記節に書いた
+（本節が対象とする `aggregateScope` とは別のクエリである）。
+
+**回し方**: `pnpm --filter @mnemora/postgres run bench:scale`。環境変数
+`BENCH_SCOPE_SCALES` / `BENCH_VECTOR_SCALES` / `BENCH_VECTOR_DIMENSIONS` で規模・次元数を
+調整できる（既定値・詳細は `packages/postgres/src/bench/scale-bench.ts` 冒頭のコメントを参照）。
+**このベンチは CI に常時つないでいない**——一時的な計測ジョブで1回回した実測であり、
+手で回す口として repo に残っている。
+
 ### Phase 1 の範囲
 
 **Phase 1 では第3階(群カウント)のみを実装する。digest 帯(第2階)は Phase 2 に送る。** 理由は、digest 帯が taxonomy(分類語彙)を要するのに対し、群カウントは `subject` 単位だけでも成立するからである。Phase 1 の `IndexBand.groups` の既定 `axis` は `'subject'` とする。`taxonomy` 軸によるグルーピングは、taxonomy の `registered` / `proposed` 状態(`./memory-model.md` の taxonomy strict/open の節を参照)を扱う必要があり、digest 帯と合わせて Phase 2 に含める。`time_window` 軸は型として持つが Phase 1 で既定にはしない。

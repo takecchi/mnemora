@@ -155,3 +155,67 @@
   - **実運用規模（100万件級）での性能は測っていない。**歯Aは 503行、歯Bは 3,000行である。
   - `subjectId` に空文字列などの特殊値を渡した場合の挙動は検討していない
     （`status` / `decayFloorAtAfter` も同様に無検証であり、既存方針に倣った）。
+
+---
+
+## 追記（2026-09-06）: 規模を振った実測。当時の「規模に比例して伸びうる」という見立ては、この実測に限り反証された
+
+**上の「実測でわかったこと」「代償（塞いでいない）」節は書き換えていない。**
+当時（3,000行・100 subject）の記録として残す。以下は別の計測（GitHub Actions run
+34009301567、PostgreSQL 17 + pgvector、`packages/postgres/src/bench/scale-bench.ts`、
+擬似の合成ベクトル・実 API 不使用）で、10,000行と100,000行のスケールを追加で測った結果である。
+
+### 実測表（`PostgresVectorStore.search`、subject フィルタ）
+
+| 規模（行数） | 次元数 | 変種 | 所要時間（中央値） | HNSW 使用 | Seq Scan |
+|---:|---:|---|---:|---:|---:|
+| 10,000 | 256 | subjectId 無し | 1.1ms | yes | no |
+| 10,000 | 256 | subjectId 有り（小さい subject） | 0.9ms | no | no |
+| 100,000 | 256 | subjectId 無し | 1.2ms | yes | no |
+| 100,000 | 256 | subjectId 有り（小さい subject） | 0.9ms | no | no |
+
+100,000行・subject 指定のプラン（逐語）:
+
+```
+Limit  (cost=226.05..226.10 rows=21 width=32) (actual time=0.048..0.050 rows=10 loops=1)
+->  Sort
+->  Nested Loop
+->  Index Scan using idx_memories_by_subject on memories m  (actual rows=10)
+->  Index Scan using <埋め込み表>_pkey on <埋め込み表> e  (loops=10)
+```
+
+### この実測が言っていること、そして見立ての訂正
+
+**上の「代償（塞いでいない）」節は「上のプランは埋め込みテーブル側を `Seq Scan` している……
+この経路の費用はテナントの行数に比例して伸びる」と書いていた。**
+**今回の実測では、そうならなかった。** 10,000行・100,000行のどちらでも
+`Seq Scan` は出ず、`idx_memories_by_subject` → 埋め込み表の主キーという **Nested Loop** が
+選ばれ、**0.9ms でほぼ横ばい**だった（1.1ms→0.9ms、1.2ms→0.9ms）。
+
+⟹ **当時観測した 3,000行での `Seq Scan` は、表が小さいときの産物だった可能性が高い**
+（表が小さいと Seq Scan が最安になるためプランナがそれを選ぶ。今回の10,000行・100,000行
+では既に Nested Loop の方が安く、プランが切り替わっている）。
+
+**⚠ ただし「だから問題ない」とは言えない。次の点を測っていない:**
+
+- **大きい subject を測っていない。** 今回測ったのは小さい subject（該当10〜21行）だけである。
+  `Seq Scan` あるいは Nested Loop の loop 回数が効いてくる懸念は、**むしろ大きい subject の
+  ほうで現実的**である（Nested Loop が多数回まわる）。
+- **1,000,000行でのベクトル検索を測っていない**（このベンチは Part 2 を 100,000行までに
+  留めている。HNSW の逐次維持コストが重くなりうるため）。
+- **256次元でしか測っていない。** 次元数は埋め込みテーブルの行幅を決めるため、
+  `Seq Scan` になった場合の費用に直結する。より高次元（例えば `text-embedding-3-small`
+  相当の1536次元）で測り直した結果ではない。
+- **同時実行下では測っていない**（単発クエリの中央値のみ）。
+- **「何 ms なら割に合わないか」の閾値を、この repo は定義していない。** ⟹ この数値だけから
+  「近似索引が要る／要らない」を結論しないこと。生の数値とスケーリングの傾向を示すに留め、
+  閾値の判断は読む人に委ねる。
+
+この計測は同時に `docs/recall.md` §5 の `aggregateScope`（群カウント）についても
+10,000/100,000/1,000,000行で測っている。そちらの実測と読み方は `docs/recall.md` §5 に書いた
+（本 ADR の対象である段1の ANN クエリとは別の場所である）。
+
+ベンチの回し方: `pnpm --filter @mnemora/postgres run bench:scale`
+（環境変数 `BENCH_SCOPE_SCALES` / `BENCH_VECTOR_SCALES` / `BENCH_VECTOR_DIMENSIONS` で調整可能。
+詳細はスクリプト冒頭のコメント `packages/postgres/src/bench/scale-bench.ts` を参照）。
+**このベンチは CI に常時つないでいない。手で回す口である。**
