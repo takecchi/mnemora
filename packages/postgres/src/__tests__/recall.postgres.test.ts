@@ -305,6 +305,73 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(ids).not.toContain(zero.id);
   });
 
+  it("omitted: score_not_comparable（ゼロベクトルの候補、ADR 0044）", async () => {
+    // **本物の pgvector で NaN を作る唯一の実用的な経路がゼロベクトルである**
+    // （ADR 0040 / 0044。`<=>` はゼロベクトルに対してエラーではなく NaN を返す）。
+    //
+    // ⚠ `scoreThreshold: 0` で測る。既定の 0.1 では、直す前も
+    // 「返らない」ところまでは同じだったので差が観測できない
+    // ——**直す前は `omitted` が空配列だった**（「取りこぼしは無い」と誤答していた）。
+    const ctx: Ctx = { tenantId: `tenant-not-comparable-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    // ⚠ 件数を 1 対 2 と違える。
+    const zero = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 0, 0], {
+      digest: "ゼロベクトル",
+      contentHash: `z-${randomUUID()}`,
+    });
+    const near = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      digest: "近い",
+      contentHash: `n-${randomUUID()}`,
+    });
+    const far = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 1, 0], {
+      digest: "遠い",
+      contentHash: `f-${randomUUID()}`,
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0], limit: 10, scoreThreshold: 0 });
+    const ids = result.memories.map((m) => m.memoryId);
+
+    // 前提: 正常な2件は返っている（0件なら「ゼロが落ちた」は無意味な緑）。
+    expect(ids).toContain(near.id);
+    expect(ids).toContain(far.id);
+    expect(ids).not.toContain(zero.id);
+
+    // 本題: 落ちたことが omitted に出る。**直す前はここが空配列だった。**
+    expect(result.omitted).toContainEqual({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+
+    // 網羅の不変条件を、本物の Postgres 経路でも見る。
+    const rescore = result.explain.stages.find((st) => st.stage === "rescore");
+    const detail = rescore?.detail as { scored: number; passedThreshold: number } | undefined;
+    const below = result.omitted.find((o) => o.kind === "below_threshold")?.count ?? 0;
+    expect(detail!.passedThreshold + below + 1).toBe(detail!.scored);
+  });
+
+  it("⚠ 鳴ってはいけない側: ゼロベクトルが無ければ score_not_comparable は出ない", async () => {
+    const ctx: Ctx = { tenantId: `tenant-comparable-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      digest: "近い",
+      contentHash: `n2-${randomUUID()}`,
+    });
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 1, 0], {
+      digest: "遠い",
+      contentHash: `f2-${randomUUID()}`,
+    });
+
+    for (const scoreThreshold of [undefined, 0]) {
+      const result = await runtime.recall(ctx, {
+        vector: [1, 0, 0],
+        limit: 10,
+        ...(scoreThreshold === undefined ? {} : { scoreThreshold }),
+      });
+      expect(result.omitted.some((o) => o.kind === "score_not_comparable")).toBe(false);
+    }
+  });
+
   it("omitted: below_threshold（閾値未満）", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };

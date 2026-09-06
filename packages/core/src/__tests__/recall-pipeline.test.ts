@@ -348,6 +348,104 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
   });
 });
 
+describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () => {
+  // 段2の閾値比較がどちらにも決まらなかった候補が、`omitted` に出ること。
+  //
+  // **⚠ NaN を作る経路の選び方**: ゼロベクトル（`similarity = NaN`）は本命の経路だが、
+  // `FakeVectorStore` はゼロベクトルに 1 を返すのでここでは作れない
+  // （そちらは `packages/postgres` 側の歯で本物の pgvector に対して測る）。
+  // ここでは `halfLifeHours = 0` かつ経過時間ちょうど 0 を使う——
+  // `0.5 ** (0 / 0)` が `NaN` になる（実測: +1ms なら 0、−1ms なら +Infinity）。
+  // この歯の時計は `NOW` に固定してあり、`recordedAt` も `NOW` なので経過時間は厳密に 0。
+
+  it("比較が決まらない候補は score_not_comparable に出る（件数と countKind つき）", async () => {
+    const { runtime, stores } = buildRuntime();
+    // ⚠ 件数を 1 対 2 と違える。同数だと取り違えが観測できない。
+    await createEmbeddedMemory(stores, [1, 0], { digest: "壊れた", halfLifeHours: 0 });
+    await createEmbeddedMemory(stores, [1, 0], { digest: "正常1" });
+    await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "正常2" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const digests = result.memories.map((m) => m.digest);
+    expect(digests).toContain("正常1");
+    expect(digests).toContain("正常2");
+    expect(digests).not.toContain("壊れた");
+
+    expect(result.omitted).toContainEqual({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+  });
+
+  it("🔴 三分割は網羅である: scored = passed + below_threshold + score_not_comparable", async () => {
+    // これが本 PR の不変条件である。**直す前は偽だったので書けなかった。**
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "壊れた", halfLifeHours: 0 });
+    await createEmbeddedMemory(stores, [1, 0], { digest: "正常" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, scoreThreshold: 0 });
+    const rescore = result.explain.stages.find((st) => st.stage === "rescore");
+    const detail = rescore?.detail as
+      { scored: number; passedThreshold: number; notComparable: number } | undefined;
+    const below = result.omitted.find((o) => o.kind === "below_threshold")?.count ?? 0;
+    const notComparable = result.omitted.find((o) => o.kind === "score_not_comparable")?.count ?? 0;
+
+    expect(detail?.scored).toBe(2);
+    expect(detail?.notComparable).toBe(notComparable);
+    expect(detail!.passedThreshold + below + notComparable).toBe(detail!.scored);
+  });
+
+  it("⭐ ゼロベクトルの記憶が混ざると score_not_comparable が出る（ADR 0040 と繋がる端）", async () => {
+    // **これが端から端まで繋がる唯一の場所である。**
+    //
+    // [ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md) は
+    // 「ゼロベクトルが絡む候補は recall() の結果に出ない」を契約にし、
+    // `FakeVectorStore` もゼロベクトルに `NaN` を返すようになった（ADR 0042 の PR で追随）。
+    // **⟹ Fake が NaN を作り、本 PR の三分割がそれを omitted に出す。**
+    // その組み合わせをここで一度だけ通しで測る。
+    //
+    // ⚠ 上の歯が `halfLifeHours = 0` で NaN を作っているのは、
+    // **本物の pgvector と同じ経路ではないから**である（Fake が NaN を返すようになる前に書いた）。
+    // どちらも残す——**NaN の作られ方が2通りあることを、歯の側でも示しておく。**
+    const { runtime, stores } = buildRuntime();
+    // ⚠ 件数を 1 対 2 と違える。
+    await createEmbeddedMemory(stores, [0, 0], { digest: "ゼロベクトル" });
+    await createEmbeddedMemory(stores, [1, 0], { digest: "正常1" });
+    await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "正常2" });
+
+    // ⚠ scoreThreshold: 0 で測る。既定の 0.1 では、Fake が 1 を返していた頃でも
+    // 「返らない」ところまでは同じだったので差が観測できない。
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, scoreThreshold: 0 });
+    const digests = result.memories.map((m) => m.digest);
+    expect(digests).toContain("正常1");
+    expect(digests).toContain("正常2");
+    expect(digests).not.toContain("ゼロベクトル");
+
+    expect(result.omitted).toContainEqual({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+  });
+
+  it("⚠ 鳴ってはいけない側: 正常な候補だけなら score_not_comparable は出ない", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "正常1" });
+    await createEmbeddedMemory(stores, [0.5, 0.5], { digest: "正常2" });
+
+    // 既定の閾値と 0 の両方で鳴らないことを見る（差が出るのは 0 側なので、両方要る）。
+    for (const scoreThreshold of [undefined, 0]) {
+      const result = await runtime.recall(ctx, {
+        vector: [1, 0],
+        limit: 10,
+        ...(scoreThreshold === undefined ? {} : { scoreThreshold }),
+      });
+      expect(result.omitted.some((o) => o.kind === "score_not_comparable")).toBe(false);
+    }
+  });
+});
+
 describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答の条件）", () => {
   // オーナーの回答は条件付きだった——「既定の recall に含める。**ただし provenance.kind で
   // 区別して返す**」。前半（既定で含める）は元から満たされていたが、後半は

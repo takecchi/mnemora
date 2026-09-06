@@ -167,6 +167,8 @@ function formatOmittedSummary(omitted: Omission[]): string {
           return "ann_truncated";
         case "ann_unreached":
           return "ann_unreached";
+        case "score_not_comparable":
+          return `score_not_comparable:${o.count}`;
         default: {
           // 網羅性の歯: Omission に新しい kind が増えたらここが型エラーになる。
           const exhaustive: never = o;

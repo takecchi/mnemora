@@ -89,6 +89,8 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 出力: 減衰・類似度・タグ一致・鮮度・強度を掛け合わせてスコアリングし直した上位 k 件（と、それ未満の残り）。
 テーブル全体ではなく k' 件だけを触るので索引を必要としない。ここで閾値未満に落ちたものは `below_threshold`、閾値は超えたが k に入らなかったものは `over_limit` として記録する（§4）。
 
+**⚠ 段2の閾値比較は網羅的な三分割である**（[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）。`total >= threshold`（残す）・`total < threshold`（`below_threshold`）・**どちらでもない**（`score_not_comparable`）の3つで、`scored = passed + below_threshold + score_not_comparable` が常に成り立つ。「どちらでもない」が在りうるのは、`total` が `NaN` のとき **`>=` と `<` の両方が false になる**からである——以前この2つを独立した `filter` で書いていたため、その候補は返らないのに `omitted` にも現れず、**`omitted` が空配列になって「取りこぼしは無い」と誤答していた。**
+
 ### 段3: 矛盾の解決と必須の同伴取得
 
 入力: 段2で残った候補。
@@ -208,6 +210,8 @@ type Omission =
       countKind: 'unknown' }
   | { kind: 'ann_unreached'
       countKind: 'unknown' }
+  | { kind: 'score_not_comparable'
+      count: number; countKind: CountKind }
 ```
 
 **`ann_truncated` と `ann_unreached` の違い（2026-09 追記、[ADR 0025](./decisions/0025-ann-underfill-is-not-reported-in-omitted.md)・[ADR 0026](./decisions/0026-ann-unreached-omission.md)）**:
@@ -229,6 +233,7 @@ type Omission =
 | `not_indexed` | 記憶は存在するが埋め込みがまだ無いと分かる（`embeddingStatus`、`./memory-model.md` 参照）。埋め込みジョブの遅延を疑う一手につながり、記憶が失われたと誤認しない。 |
 | `ann_truncated` | 「見えていない領域があるかもしれない」という不確実性そのものが一手になる——例えば厳密検索へのフォールバックを選べる。 |
 | `ann_unreached` | 近似索引がこの scope に届かなかった可能性がある、と分かる（ADR 0025・0026）。`ann_truncated`（打ち切り）とは別の出来事——こちらは k' に届く前に候補を取りこぼした疑いであり、厳密検索へのフォールバックや subject を絞り直す一手につながる。件数は原理的に分からない（`countKind` は常に `'unknown'`）。 |
+| `score_not_comparable` | **スコアが閾値と比較できなかった**と分かる（[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）。閾値を緩めても直らない——`below_threshold` とは別の出来事である。実際に起きるのは埋め込みがゼロベクトルのとき（コサインが未定義になり距離が `NaN` になる。[ADR 0040](./decisions/0040-zero-vector-never-returned.md)）で、次の一手は「その記憶の埋め込みを作り直す」であって「閾値を下げる」ではない。**件数は数え上げられる**（段2が触った候補の三分割なので）——ただし `countKind` は三分割が網羅であることを確かめた結果から決まる。 |
 
 ### 件数にも「無いの種類」を適用する
 

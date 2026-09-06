@@ -14,6 +14,7 @@ import {
   RecallQuerySchema,
 } from "./recall.js";
 import type {
+  CountKind,
   IndexBand,
   Omission,
   RecallBudget,
@@ -55,6 +56,69 @@ type ScoredCandidate = {
   companionOf?: MemoryId;
   score: ScoreBreakdown;
 };
+
+/**
+ * 段2の閾値比較の結果を、**網羅的な三分割**にする（ADR 0044）。
+ *
+ * **⚠ 以前は `filter(total >= t)` と `filter(total < t)` の2本を独立に走らせていた。
+ * この2つは補集合ではない**——どちらかが `NaN` だと両方の比較が false になり、
+ * 候補は残らないのに `below_threshold` にも数えられなかった
+ * （`omitted` が空配列になり、「取りこぼしは無い」と積極的に誤答していた）。
+ *
+ * ここでは**1件につき1回だけ分岐**し、必ず3つのどれか1つに入れる。
+ * ⟹ `passed.length + belowThreshold.length + notComparable.length === scored.length` が
+ * **構造的に成り立つ。**成り立っていることは呼び出し側が確かめ、`countKind` の名乗りに使う。
+ */
+export interface ThresholdPartition {
+  passed: ScoredCandidate[];
+  belowThreshold: ScoredCandidate[];
+  /** `>= threshold` でも `< threshold` でもなかった候補（実際には `total` が `NaN`）。 */
+  notComparable: ScoredCandidate[];
+}
+
+export function partitionByThreshold(
+  scored: readonly ScoredCandidate[],
+  threshold: number,
+): ThresholdPartition {
+  const passed: ScoredCandidate[] = [];
+  const belowThreshold: ScoredCandidate[] = [];
+  const notComparable: ScoredCandidate[] = [];
+  for (const candidate of scored) {
+    const total = candidate.score.total;
+    if (total >= threshold) {
+      passed.push(candidate);
+    } else if (total < threshold) {
+      belowThreshold.push(candidate);
+    } else {
+      // ⚠ ここは「else if を書き忘れた残り」ではない。**到達する**——
+      // total か threshold が NaN のとき、上の2つはどちらも false になる。
+      notComparable.push(candidate);
+    }
+  }
+  return { passed, belowThreshold, notComparable };
+}
+
+/**
+ * 三分割の件数の `countKind` を決める（ADR 0044）。
+ *
+ * **🔴 `'exact'` をリテラルで書かないための関数である。**この repo が一度破れたのは、
+ * `count(*) OVER ()` が `hnsw.ef_search` 依存の値を返すようになっても名乗りが
+ * `'exact'` のままだった件である（ADR 0011）。**名乗りは、正確さを知っている場所から引き継ぐ。**
+ * ここで正確さを知っているのは「三分割が網羅であること」なので、それを実際に数えて確かめる。
+ *
+ * **⚠ `partitionByThreshold` が正しい限り `'unknown'` は返らない。**
+ * それでもこの分岐を置くのは、**壊れたときに嘘をつくのではなく黙るため**である。
+ * 分岐が到達不能であること自体は、この関数を直接呼ぶ歯が測っている
+ * （網羅でない分割を渡すと `'unknown'` が返ることを確かめてある）。
+ */
+export function countKindForPartition(
+  partition: ThresholdPartition,
+  scoredCount: number,
+): CountKind {
+  const partitioned =
+    partition.passed.length + partition.belowThreshold.length + partition.notComparable.length;
+  return partitioned === scoredCount ? "exact" : "unknown";
+}
 
 /** budget truncation の単位。同伴ペアは分割しない（docs/recall.md §8）ため、1つ以上の候補をまとめて持つ。 */
 type Unit = {
@@ -222,24 +286,34 @@ export async function runRecall(
   scored.sort((a, b) => b.score.total - a.score.total);
 
   const scoreThreshold = validatedQuery.scoreThreshold ?? DEFAULT_SCORE_THRESHOLD;
-  const passed = scored.filter((c) => c.score.total >= scoreThreshold);
-  const belowThreshold = scored.filter((c) => c.score.total < scoreThreshold);
+  const partition = partitionByThreshold(scored, scoreThreshold);
+  const { passed, belowThreshold, notComparable } = partition;
+  // ⚠ `'exact'` をリテラルで書かない（ADR 0044）。理由は countKindForPartition の doc を参照。
+  const rescoreCountKind = countKindForPartition(partition, scored.length);
 
   if (belowThreshold.length > 0) {
     omitted.push({
       kind: "below_threshold",
       count: belowThreshold.length,
-      countKind: "exact",
+      countKind: rescoreCountKind,
       nearMisses: belowThreshold
         .slice(0, 5)
         .map((c) => ({ memoryId: c.memory.id, score: c.score.total })),
     });
   }
 
+  if (notComparable.length > 0) {
+    omitted.push({
+      kind: "score_not_comparable",
+      count: notComparable.length,
+      countKind: rescoreCountKind,
+    });
+  }
+
   const withinLimit = passed.slice(0, limit);
   const overLimit = passed.slice(limit);
   if (overLimit.length > 0) {
-    omitted.push({ kind: "over_limit", count: overLimit.length, countKind: "exact" });
+    omitted.push({ kind: "over_limit", count: overLimit.length, countKind: rescoreCountKind });
   }
 
   stages.push({
@@ -248,6 +322,9 @@ export async function runRecall(
     detail: {
       scored: scored.length,
       passedThreshold: passed.length,
+      // 三分割の3つ目。ADR 0044 で omitted にも出るようになったが、
+      // trace の側でも辻褄が合っていることを読めるようにしておく。
+      notComparable: notComparable.length,
       withinLimit: withinLimit.length,
     },
   });
