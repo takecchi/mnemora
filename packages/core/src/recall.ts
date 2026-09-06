@@ -133,6 +133,29 @@ export interface ScoreNotComparableOmission {
   countKind: CountKind;
 }
 
+/**
+ * 段3で組んだ「単位」から、候補が**どの単位にも入らないまま消えた**ことの報告
+ * （[ADR 0043](../../../docs/decisions/0043-unit-assembly-dropped-omission.md)）。
+ *
+ * 段3は `contested` の対向を必ず同伴させるため、候補を「単位（Unit）」にまとめる。
+ * **その繰り返しは `contestedWithId` が一対一であることを前提にしている**
+ * （`docs/memory-model.md` §5「一対一の対向関係に限って Phase 1 で成立させるための補助列」）。
+ * **⚠ 一対一が破れていると、候補がどの単位にも入らないまま落ちる。**
+ * そうなるとその候補は返り値にも他のどの `omitted` にも現れず、**黙って消える。**
+ *
+ * **⟹ この欄は「黙らせない」ためだけに在る。**候補が消えたこと自体が良いか悪いかは
+ * ここでは決めない——決めるのは、`contested` を作る主体が入る Phase 2 の判断である。
+ *
+ * **`countKind` は `'lower_bound'` である。**単位が候補を*覆えていない*数は数えられるが、
+ * 別の候補が二重に単位へ入っていると、その分だけ消失が隠れる。
+ * **⟹ 「少なくともこの件数は消えた」までしか言えない。**
+ */
+export interface UnitAssemblyDroppedOmission {
+  kind: "unit_assembly_dropped";
+  count: number;
+  countKind: CountKind;
+}
+
 export type Omission =
   | StageSkippedOmission
   | FilteredOmission
@@ -142,7 +165,8 @@ export type Omission =
   | NotIndexedOmission
   | AnnTruncatedOmission
   | AnnUnreachedOmission
-  | ScoreNotComparableOmission;
+  | ScoreNotComparableOmission
+  | UnitAssemblyDroppedOmission;
 
 const StageSkippedOmissionSchema = z.object({
   kind: z.literal("stage_skipped"),
@@ -199,6 +223,12 @@ const ScoreNotComparableOmissionSchema = z.object({
   countKind: CountKindSchema,
 }) satisfies z.ZodType<ScoreNotComparableOmission>;
 
+const UnitAssemblyDroppedOmissionSchema = z.object({
+  kind: z.literal("unit_assembly_dropped"),
+  count: z.number().int().positive(),
+  countKind: CountKindSchema,
+}) satisfies z.ZodType<UnitAssemblyDroppedOmission>;
+
 export const OmissionSchema = z.discriminatedUnion("kind", [
   StageSkippedOmissionSchema,
   FilteredOmissionSchema,
@@ -209,6 +239,7 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
   AnnTruncatedOmissionSchema,
   AnnUnreachedOmissionSchema,
   ScoreNotComparableOmissionSchema,
+  UnitAssemblyDroppedOmissionSchema,
 ]);
 
 // ---------------------------------------------------------------------------

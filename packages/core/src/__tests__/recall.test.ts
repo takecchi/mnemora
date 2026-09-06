@@ -9,10 +9,10 @@ import {
   RecallUsageSchema,
 } from "../recall.js";
 
-describe("OmissionSchema — 9つの kind すべて", () => {
+describe("OmissionSchema — 10 の kind すべて", () => {
   // ⚠ 題は以前「7つの kind すべて」だった。ann_unreached（ADR 0026）が入った時点で 8 に
-  // なっていたのに直っておらず、本 PR の score_not_comparable（ADR 0044）で 9 になる。
-  // **名乗りは実測に合わせる。**
+  // なっていたのに直っておらず、score_not_comparable（ADR 0044）で 9、
+  // unit_assembly_dropped（ADR 0043）で 10 になる。**名乗りは実測に合わせる。**
   it("accepts 'stage_skipped'", () => {
     const result = OmissionSchema.safeParse({
       kind: "stage_skipped",
@@ -185,6 +185,36 @@ describe("OmissionSchema — score_not_comparable（ADR 0044）", () => {
       countKind: "unknown",
     });
     expect(result.success).toBe(true);
+  });
+});
+
+describe("OmissionSchema — unit_assembly_dropped（ADR 0043）", () => {
+  it("accepts 'unit_assembly_dropped'", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "unit_assembly_dropped",
+      count: 1,
+      countKind: "lower_bound",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects count: 0（消えていないのに「消えた」と名乗らない）", () => {
+    // ⚠ 他の件数つき omission は nonnegative だが、この欄は positive にしてある——
+    //    0件の消失を報告することは、この欄の意味（黙らせない）と矛盾する。
+    const result = OmissionSchema.safeParse({
+      kind: "unit_assembly_dropped",
+      count: 0,
+      countKind: "lower_bound",
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects count を欠く unit_assembly_dropped", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "unit_assembly_dropped",
+      countKind: "lower_bound",
+    });
+    expect(result.success).toBe(false);
   });
 });
 

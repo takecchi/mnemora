@@ -348,6 +348,88 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
   });
 });
 
+describe("recall() — omitted.kind = 'unit_assembly_dropped'（ADR 0043）", () => {
+  // **⚠ この歯は Phase 1 では一度も本番経路を通らない。**
+  // `Runtime`（observe/tick/recall/reextract）は `contested` も `contestedWithId` も書かないため、
+  // 一対一が破れた状態を作れない（`docs/memory-model.md`「関係グラフ本体は Phase 2」）。
+  // ⟹ ここで測っているのは「いま壊れているもの」ではなく、
+  //    **`contested` を作る主体が入ったときに機構が黙らない**という契約である。
+  //
+  // ⚠ この歯は「候補が単位から漏れること」を*正しい振る舞いとして固定しない*。
+  //    固定するのは「漏れたときに黙らないこと」だけである。
+
+  /**
+   * 一対一が破れた `contested` の鎖 A→B→C を作る。
+   * `contestedWithId` は一対一と定められているので、これは**壊れたデータ**である。
+   *
+   * 単位を組む繰り返しは A から始まり、A の対向として B を消費してペア [A,B] を作る。
+   * 次の B は消費済みなので飛ばされ、**B の同伴として取られた C はどの単位にも入らない。**
+   * ⟹ 候補3件に対して単位が覆うのは2件。
+   */
+  async function seedBrokenChain(stores: ReturnType<typeof createFakeRuntimeStores>) {
+    const c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", digest: "C" }),
+    );
+    const b = await createEmbeddedMemory(stores, [0.9, 0.1], {
+      status: "contested",
+      digest: "B",
+      contestedWithId: c.id,
+    });
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      digest: "A",
+      contestedWithId: b.id,
+    });
+    return { a, b, c };
+  }
+
+  it("🔴 一対一が破れて候補が単位から漏れたら、omitted に出す（黙らない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const { c } = await seedBrokenChain(stores);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+
+    // 前提: C は返っていない（返っているなら「消えた」は成り立たない）。
+    expect(result.memories.map((m) => m.memoryId)).not.toContain(c.id);
+    // 本題: 消えたことが omitted に出る。**直す前はここに何も出なかった。**
+    expect(result.omitted).toContainEqual({
+      kind: "unit_assembly_dropped",
+      count: 1,
+      countKind: "lower_bound",
+    });
+  });
+
+  it("⚠ 鳴ってはいけない側: 一対一が破れていなければ出ない（対向ペア）", async () => {
+    // ⚠ 件数を 2 対 1 と違える（ペア1組＋単独1件 = 候補3件）。
+    //    同じ件数で作ると、単位の取り違えが出力を変えない。
+    const { runtime, stores } = buildRuntime();
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", digest: "B" }),
+    );
+    await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      digest: "A",
+      contestedWithId: b.id,
+    });
+    await createEmbeddedMemory(stores, [0.8, 0.2], { digest: "単独" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    expect(result.memories.length).toBe(3);
+    expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);
+  });
+
+  it("⚠ 鳴ってはいけない側: contested が1件も無い普通の recall でも出ない", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "普通1" });
+    await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "普通2" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);
+  });
+});
+
 describe("recall() — budget_dropped の countKind は単位の網羅性から決まる（ADR 0045）", () => {
   it("🔴 単位が候補を網羅していないとき、budget_dropped は 'exact' を名乗らない", async () => {
     // **⚠ この歯は「候補が単位から漏れること」を*正しい振る舞いとして固定するものではない*。**
