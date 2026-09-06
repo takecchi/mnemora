@@ -3,7 +3,12 @@ import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "../interfaces/outbox-store.js";
 import type { OutboxJobKind } from "../interfaces/scheduler.js";
-import type { TenantSettingsStore } from "../interfaces/tenant-settings-store.js";
+import { assertValidEventRetentionDays } from "../interfaces/tenant-settings-store.js";
+import type {
+  EventRetention,
+  EventRetentionSetting,
+  TenantSettingsStore,
+} from "../interfaces/tenant-settings-store.js";
 import type { VectorStore, VectorFilter, VectorHit } from "../interfaces/vector-store.js";
 import type { NotIndexedReason } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
@@ -709,11 +714,31 @@ export class FakeEventStore implements EventStore {
   }
 }
 
+// `getEventRetention`/`setEventRetention` は `TenantSettingsStore` interface が必須にした
+// ため（ADR 0050）、型を満たすためだけに足した最小実装。このファイル以外の既存テストは
+// `getDefaultHalfLifeHours` しか使わず、これら2メソッドを呼ぶ既存テストは無い——
+// `packages/testkit` の `InMemoryTenantSettingsStore`（適合スイートの対象）とは異なり、
+// `FakeTenantSettingsStore` は適合スイートの対象外（ADR 0047 が明記した「core 専用の
+// Fake は testkit の適合テストが届かない」構造と同じ）ため、ここに置いた実装を
+// 独立に検査する歯は無い。
 export class FakeTenantSettingsStore implements TenantSettingsStore {
+  private eventRetention: EventRetention = { kind: "unset" };
+
   constructor(private readonly halfLifeHours = 720) {}
 
   async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
     return this.halfLifeHours;
+  }
+
+  async getEventRetention(_ctx: Ctx): Promise<EventRetention> {
+    return this.eventRetention;
+  }
+
+  async setEventRetention(_ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    if (retention.kind === "days") {
+      assertValidEventRetentionDays(retention.days);
+    }
+    this.eventRetention = retention;
   }
 }
 
