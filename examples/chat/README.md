@@ -44,6 +44,12 @@ pnpm --filter @mnemora/example-chat run compare
 設定しなければ `@mnemora/testkit` の決定的な擬似 provider で動く——**どちらで動いているかは
 起動直後に必ず画面へ出す**（黙って擬似物にフォールバックしない）。
 
+**⚠ ただし `packages/openai` の live テストは、`OPENAI_API_KEY` だけでは走らない。**
+`MNEMORA_LIVE_OPENAI` も設定したときだけ本物を叩く——**鍵を持っていることは、いま課金して
+よいという意思表示ではない**（`packages/openai/src/__tests__/live.openai.test.ts`）。
+このサンプルアプリ側（`chat` / `compare` / `retrieval`）は従来どおり `OPENAI_API_KEY` の
+有無で切り替わる。**これらは手で叩くコマンドであり、門の一部として黙って走ることはない。**
+
 ### テスト
 
 ```bash
@@ -346,6 +352,13 @@ DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run retr
   元の `externalId`(`gold-<id>`/`distractor-<id>`/`filler-NNNN`)へ戻し、gold/distractor
   の順位(`goldRank`/`distractorRank`)・`hit@1`/`hit@10`・`distractorBeatsGold`・MRR
   (全体・`lexicalControl`・非語彙で分けて集計)を probe ごとに計算する。
+- **順位と一緒に、`recall()` が返したスコア内訳も記録する**
+  ([ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md))。
+  gold・distractor・1位の `ScoreBreakdown`(`scoreDetails`)と、返った候補全体で各項が
+  取った値の幅(`termSpreads`)を出す。**幅が最大の項が、その `recall()` の順位を実際に
+  決めた項である**——幅が 0 の項は「重みが小さい」のではなく、候補間で差が付いておらず
+  順位に一切寄与していない。**⚠ これは記録と印字だけであり、閾値・重み・`limit`・
+  `overFetchFactor` は1つも変えていない**([ADR 0022](../../docs/decisions/0022-fake-provider-compare-does-not-claim-recall-quality.md))。
 
 ### 3つの arm
 
@@ -428,15 +441,38 @@ arm B → arm C（LLM も本物に）の上積みは 0.714 → 0.743 と小さ�
 | diet | 「私が避けたほうがいい食べ物はありますか?」 | **「妻は卵アレルギーがあります。」** | 「牛乳を飲むとお腹を壊します。」（**5位**） |
 | travel | 「次の遠出の行き先はどこでしたか?」 | **「先月は大阪へ出張しました。」** | 「来月、京都へ出張します。」（2位） |
 
-共通する形が2つある。
+**⚠ この表は当時（ADR 0019）の実測値である。**本物の LLM が作る `content` は実行ごとに変わるため、
+**diet の goldRank は 4 / 5 / 7 / 9 と揺れる**（[ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) §2.3）。
+**`hit@1` が 4/7 であることと、外す3件の顔ぶれは、測り直しても変わらなかった。**
 
-1. **主語を見ていない。**「私の」と聞いているのに「父は」「妻は」が先に来る。
-   埋め込みの類似度は話題の近さを測っており、**誰の話かを区別しない。**
-   `Ctx.subjectId` はスコープの次元として既に在るが、**埋め込みだけでは主語は分かれない。**
-2. **時制を見ていない。**「次の」と聞いているのに「先月は」が先に来る。
+**🔴 ここには当初「共通する形が2つある（主語を見ていない／時制を見ていない）」と
+書いてあった。後日スコア内訳を実際に記録して測ったところ、それは成立しなかった**
+（[ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)）。
+**あれは返り値から測ったものではなく、順位の表を人が読んで立てた解釈だった。**
+測った結果は次の3つである。
+
+1. **順位を決めていたのは `similarity` だけだった。**
    [docs/recall.md](../../docs/recall.md) §7 のスコアは
-   `similarity × decay × tagMatch × freshness × strength` であり、
-   **質問が未来を指しているか過去を指しているかを見る項が無い。**
+   `similarity × decay × tagMatch × freshness × strength` だが、この測定では
+   `tagMatch` と `strength` は**厳密に 1**（クエリタグを渡さない／`strength` は
+   作成時に 1 で固定）、`decay` と `freshness` は**同じ値**（`occurredAt` が
+   全件 null なので起点が同じ）で、その幅は probe ごとに 1.1〜1.8×10⁻⁵ しかない。
+   **hit@1 を落とした3件の最小の逆転幅は 0.0191 であり、最も不利に取っても約1050倍の開きがある。**
+   **⟹ 「スコアが主語と時制を見ていない」のではなく、スコアに見る場所が無い。**
+2. **失敗3件の原因は、3件とも違う。** travel は時制だが、**埋め込みは時制を見ており**、
+   質問「次の遠出の行き先はどこ**でしたか**?」の表層が過去形であることが効いている
+   （質問の表層だけ現在形にすると gold が勝つ）。exercise は**埋め込みが主語の一致を
+   見ているのに、gold の主語がゼロ代名詞で落ちている**（gold に「私は」を戻すと勝つ）。
+   diet はどちらでもなく、**記憶は症状（「牛乳を飲むとお腹を壊す」）、質問は帰結
+   （「避けたほうがいい食べ物」）**という推論の飛躍である。
+3. **`occurredAt` はこの設計では原理的に常に null になる。**抽出スキーマに時刻の欄が無く、
+   `observe()` に `occurredAt` を渡している箇所はリポジトリ内に0件である。
+   **`RecallQuery.occurredAfter`/`occurredBefore` はいま「いつ言われたか」を絞っている。**
+
+**⚠ 質問文を書き直して数字を上げることはしない。**それは
+[ADR 0022](../../docs/decisions/0022-fake-provider-compare-does-not-claim-recall-quality.md)
+の「測る条件を選び直さない」を越える。**「〜でしたか」は日本語の想起質問として自然であり、
+実運用で来る形である。**
 
 **⟹ 「載せる量を削っても答えが残る」は言えるが、
 「一番上に正しいものが来る」はまだ言えない。**この2つを混同しないこと。

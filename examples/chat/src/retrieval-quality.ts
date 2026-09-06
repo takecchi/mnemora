@@ -1,4 +1,4 @@
-import type { Ctx, MemoryStore, Runtime } from "@mnemora/core";
+import type { Ctx, MemoryStore, RecalledMemory, Runtime, ScoreBreakdown } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
 import type { DrainResult } from "./embed-drain.js";
 import type { ProviderMode } from "./providers.js";
@@ -72,6 +72,135 @@ export { drainEmbedTicks };
 export type { DrainResult };
 
 // ---------------------------------------------------------------------------
+// スコア内訳(docs/recall.md §7)を、順位と一緒に記録する
+//
+// **なぜ足すか**: このベンチは順位(goldRank/distractorRank)だけを記録し、
+// `recall()` が返した `RecalledMemory.score` を捨てていた。その結果
+// [ADR 0019 §7.5](../../../docs/decisions/0019-real-openai-measurement-cost.md) は
+// 「なぜ distractor が上に来たか」を**解釈**として書くしかなかった
+// (「主語と時制を見ていない」)。北極星の問い3(なぜ選ばれたかを後から説明できるか)を
+// 第一級と書いている製品のベンチが、説明を捨てていた。
+//
+// ここで足すのは**記録と印字だけ**である——閾値・重み・limit・overFetchFactor は
+// 一切変えない(ADR 0022 の線: 見栄えの良い数字のために測る条件を選び直さない)。
+// ---------------------------------------------------------------------------
+
+/**
+ * `ScoreBreakdown` のうち `total` を除いた項。**`total` を含めない**のは、
+ * `total` が他の項の積であり、「どの項が順位を決めたか」を問う対象ではないため。
+ */
+export const SCORE_TERMS = ["similarity", "decay", "tagMatch", "freshness", "strength"] as const;
+export type ScoreTerm = (typeof SCORE_TERMS)[number];
+
+/**
+ * 返ってきた候補の集合の中で、その項が取った値の幅。
+ *
+ * **これが順位の説明の本体である。**幅が 0 の項は、その recall の順位付けに
+ * 一切寄与していない——「重みが小さい」のではなく、**候補間で差が付いていない**。
+ * 幅が最大の項が、順位を実際に決めた項である。
+ */
+export interface TermSpread {
+  term: ScoreTerm;
+  /** その項を持っていた候補の件数。`similarity` は ANN 経由の候補にしか存在しない。 */
+  presentCount: number;
+  /** 項を持つ候補が1件も無ければ null。 */
+  min: number | null;
+  max: number | null;
+  /** `max - min`。項を持つ候補が1件も無ければ null(0 と区別する)。 */
+  spread: number | null;
+}
+
+/**
+ * 返ってきた候補全体について、項ごとの値の幅を出す。
+ *
+ * **項を持つ候補が0件のときに `spread` を 0 と書かない。**「差が無かった」と
+ * 「測る対象が無かった」は別物である(ADR 0008 の「無いには種類がある」の、
+ * この文脈への適用)。
+ */
+export function computeTermSpreads(memories: readonly RecalledMemory[]): TermSpread[] {
+  return SCORE_TERMS.map((term) => {
+    const values = memories
+      .map((memory) => memory.score[term])
+      .filter((value): value is number => value !== undefined);
+    if (values.length === 0) {
+      return { term, presentCount: 0, min: null, max: null, spread: null };
+    }
+    const min = Math.min(...values);
+    const max = Math.max(...values);
+    return { term, presentCount: values.length, min, max, spread: max - min };
+  });
+}
+
+/** 1件の候補が、この probe においてどの役だったか。複数該当しうる(gold が1位など)。 */
+export type ScoredRole = "gold" | "distractor" | "top1";
+
+export interface ProbeScoreDetail {
+  /** 該当する役をすべて持つ。gold が1位なら `["gold","top1"]`。 */
+  roles: ScoredRole[];
+  /** 1始まりの順位。 */
+  rank: number;
+  digest: string;
+  score: ScoreBreakdown;
+}
+
+/**
+ * gold・distractor・1位の3つについて、スコア内訳を取り出す。
+ *
+ * **返らなかったものは含めない。**gold が `limit` の外に落ちていれば内訳は存在しない——
+ * そこで 0 や「不明」を捏造しない。なぜ返らなかったかは `ProbeOutcome.omittedKinds` の側が答える。
+ *
+ * `goldRank`/`distractorRank` は `runRetrievalQualityArm` が系譜追跡で決めた順位を
+ * そのまま受け取る(この関数自身は externalId を解決しない——純関数に保つため)。
+ *
+ * **2つの順位を位置引数ではなくオブジェクトで受ける。**どちらも `number | null` なので、
+ * 位置で渡すと取り違えても型が通り、**gold と distractor の役が入れ替わったまま
+ * 出力される**(この配線は検査が届いていない——`runRetrievalQualityArm` は Runtime と
+ * MemoryStore を要求するため単体で呼べない)。**検査で捕まえられないなら、
+ * 起こせない形にするほうが強い。**
+ *
+ * **範囲外の順位を弾く番人は置いていない。**呼び出し側は `memories` の `indexOf` から
+ * 順位を作るので、`null` か `1..memories.length` 以外は構造上出てこない。届かない分岐を
+ * 「念のため」で置くと、検査できない経路が増えるだけである(ADR 0024 の「実装の無い予約を
+ * 残さない」と同じ理由)。**別の `recall()` の順位を混ぜて渡せば添字が外れて例外になるが、
+ * それは黙って別の記憶を返すより良い**——壊れているものを壊れていない顔で返さない。
+ */
+export interface ProbeRanks {
+  /** `recall().memories` の中の gold の順位(1始まり)。返っていなければ null。 */
+  goldRank: number | null;
+  distractorRank: number | null;
+}
+
+export function collectScoreDetails(
+  memories: readonly RecalledMemory[],
+  ranks: ProbeRanks,
+): ProbeScoreDetail[] {
+  const rolesByRank = new Map<number, ScoredRole[]>();
+  const addRole = (rank: number | null, role: ScoredRole): void => {
+    if (rank === null) {
+      return;
+    }
+    const roles = rolesByRank.get(rank) ?? [];
+    roles.push(role);
+    rolesByRank.set(rank, roles);
+  };
+  addRole(ranks.goldRank, "gold");
+  addRole(ranks.distractorRank, "distractor");
+  addRole(memories.length > 0 ? 1 : null, "top1");
+
+  return [...rolesByRank.keys()]
+    .sort((a, b) => a - b)
+    .map((rank) => {
+      const memory = memories[rank - 1]!;
+      return {
+        roles: rolesByRank.get(rank)!,
+        rank,
+        digest: memory.digest,
+        score: memory.score,
+      };
+    });
+}
+
+// ---------------------------------------------------------------------------
 // probe ごとの指標
 // ---------------------------------------------------------------------------
 
@@ -91,6 +220,10 @@ export interface ProbeOutcome {
   reciprocalRank: number;
   omittedKinds: string[];
   totalInScope: number;
+  /** gold / distractor / 1位 のスコア内訳(返らなかったものは含まない)。 */
+  scoreDetails: ProbeScoreDetail[];
+  /** 返ってきた候補全体で、各項が取った値の幅。順位を実際に決めた項がどれかを示す。 */
+  termSpreads: TermSpread[];
 }
 
 function average(values: number[]): number {
@@ -187,6 +320,8 @@ export async function runRetrievalQualityArm(
       reciprocalRank: goldRank !== null ? 1 / goldRank : 0,
       omittedKinds: result.omitted.map((o) => o.kind),
       totalInScope: result.index.totalInScope,
+      scoreDetails: collectScoreDetails(result.memories, { goldRank, distractorRank }),
+      termSpreads: computeTermSpreads(result.memories),
     });
   }
 
@@ -219,6 +354,42 @@ function formatRank(rank: number | null): string {
   return rank === null ? "(無し)" : String(rank);
 }
 
+/**
+ * 小さい値を 0.000000 に潰さない。幅が 1e-4 未満のときに指数表記へ倒すのは、
+ * 「その項は動いていない」を「その項は 0 だった」と読み違えさせないため——
+ * decay の幅は実測で 10^-5 の桁に出る（0 ではないが順位を動かせない）。
+ */
+export function formatScoreValue(value: number): string {
+  if (value !== 0 && Math.abs(value) < 1e-4) {
+    return value.toExponential(3);
+  }
+  return value.toFixed(6);
+}
+
+/** 項ごとの値の幅を1行にする。幅が最大の項が、その recall の順位を決めた項である。 */
+export function formatTermSpreads(spreads: readonly TermSpread[]): string {
+  return spreads
+    .map((s) =>
+      s.spread === null
+        ? `${s.term}=(この項を持つ候補が無い)`
+        : `${s.term}=${formatScoreValue(s.spread)}`,
+    )
+    .join(" ");
+}
+
+/** gold/distractor/1位のスコア内訳を、掛け算の形のまま1行ずつ出す。 */
+export function formatScoreDetail(detail: ProbeScoreDetail): string {
+  const s = detail.score;
+  const similarity =
+    s.similarity === undefined ? "(ANN 経由でない)" : formatScoreValue(s.similarity);
+  return (
+    `#${detail.rank} [${detail.roles.join(",")}] total=${formatScoreValue(s.total)} = ` +
+    `similarity ${similarity} × decay ${formatScoreValue(s.decay)} × ` +
+    `tagMatch ${formatScoreValue(s.tagMatch)} × freshness ${formatScoreValue(s.freshness)} × ` +
+    `strength ${formatScoreValue(s.strength)}  ${detail.digest}`
+  );
+}
+
 /** arm ごとの詳細(probe 単位の内訳・ingest の内訳・usage レポート)。 */
 export function formatArmDetail(report: ArmReport): string {
   const lines: string[] = [];
@@ -245,6 +416,10 @@ export function formatArmDetail(report: ArmReport): string {
         `distractorRank=${formatRank(p.distractorRank)} distractorBeatsGold=${p.distractorBeatsGold} ` +
         `omitted=[${p.omittedKinds.join(",")}] totalInScope=${p.totalInScope}`,
     );
+    lines.push(`      項ごとの値の幅(返った候補全体): ${formatTermSpreads(p.termSpreads)}`);
+    for (const detail of p.scoreDetails) {
+      lines.push(`      ${formatScoreDetail(detail)}`);
+    }
   }
   lines.push(
     `MRR: 全体=${report.mrrOverall.toFixed(3)} ` +
