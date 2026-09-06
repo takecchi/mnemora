@@ -51,3 +51,4 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0036](./0036-clamp-freshness-at-one.md) | `freshness` を 1 で頭打ちにする — 「まだ起きていない出来事は、最も古びていない」 | 採用 (2026-09) |
 | [0037](./0037-callers-pass-occurred-at.md) | `observe()` の `occurredAt` を実際に通す — 「いつの出来事か」を絞れるようにする | 採用 (2026-09) |
 | [0038](./0038-vector-hit-distance-is-cosine.md) | `VectorHit.distance` はコサイン距離だと契約に明記し、適合テストの歯で adapter 非依存に検査する | 採用 (2026-09) |
+| [0039](./0039-period-boundary-conformance.md) | `period` の判定規則が4箇所に在ることを、境界の歯で固定する | 採用 (2026-09) |

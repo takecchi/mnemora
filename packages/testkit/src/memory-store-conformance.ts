@@ -1013,7 +1013,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.totalInScope).toBe(1);
     });
 
-    it("aggregateScope は occurredAfter/occurredBefore の外にある Memory を filteredPeriod に計上し、totalInScope から除く", async () => {
+    it("aggregateScope は occurredAfter の外にある Memory を filteredPeriod に計上し、totalInScope から除く", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       await store.createMemory(
@@ -1036,6 +1036,136 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
       expect(aggregate.totalInScope).toBe(1);
       expect(aggregate.filteredPeriod.count).toBe(1);
+    });
+
+    // -----------------------------------------------------------------------
+    // period の境界（ADR 0039）
+    //
+    // **同じ規則が4箇所で実装されている**——`recall-runtime.ts` の候補フィルタ、
+    // `PostgresMemoryStore.aggregateScope`、`InMemoryMemoryStore.aggregateScope`、
+    // `packages/core` のテスト用 `FakeMemoryStore.aggregateScope`。
+    // 2026-09-06 時点では4つとも境界を含む（`>=` / `<=`）が、**それを測る歯が無かった。**
+    // ⟹ 将来どれか1つを直したとき、他が追随しないと**返る件数と `omitted` の内訳が
+    // 食い違い、`omitted` が嘘をつく。**
+    //
+    // ⚠ この適合テストが届くのは adapter の2つ（postgres / in-memory）だけである。
+    // `recall-runtime.ts` と `packages/core` の fake には届かない（届かない理由と、
+    // そちらを別に測っていることは ADR 0039 に書いた）。
+    //
+    // ⚠ フィクスチャは非対称にする。**「境界1件 / 内側3件 / 外側5件」**にしてあるのは、
+    // 対称な件数（例: 内1・外1）だと**規則を丸ごと反転させても同じ数が出て、
+    // 変異が素通りする**ためである（既存の歯がまさにその形だった——内1・外1で
+    // `totalInScope=1, filteredPeriod=1`。反転しても同じ値になる）。
+    // -----------------------------------------------------------------------
+
+    /** 境界1件・内側 `inside` 件・外側 `outside` 件を作る。件数は必ず互いに違える。 */
+    async function seedPeriodFixture(
+      store: MemoryStore,
+      ctx: Ctx,
+      opts: { boundary: Date; inside: Date; outside: Date; inside_n: number; outside_n: number },
+    ): Promise<void> {
+      const make = async (occurredAt: Date, tag: string, n: number) => {
+        for (let i = 0; i < n; i += 1) {
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              occurredAt,
+              contentHash: `period-${tag}-${i}`,
+            }),
+          );
+        }
+      };
+      await make(opts.boundary, "boundary", 1);
+      await make(opts.inside, "inside", opts.inside_n);
+      await make(opts.outside, "outside", opts.outside_n);
+    }
+
+    const PERIOD_CUTOFF = new Date("2026-06-01T00:00:00.000Z");
+    const PERIOD_BEFORE_CUTOFF = new Date("2026-05-01T00:00:00.000Z");
+    const PERIOD_AFTER_CUTOFF = new Date("2026-07-01T00:00:00.000Z");
+
+    it("aggregateScope の occurredAfter は境界を含む（occurredAt === occurredAfter は残る）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedPeriodFixture(store, ctx, {
+        boundary: PERIOD_CUTOFF,
+        inside: PERIOD_AFTER_CUTOFF,
+        outside: PERIOD_BEFORE_CUTOFF,
+        inside_n: 3,
+        outside_n: 5,
+      });
+
+      const aggregate = await store.aggregateScope(ctx, { occurredAfter: PERIOD_CUTOFF });
+      // 境界1 + 内側3 = 4 が残り、外側5が落ちる。4 !== 5 なので、規則を反転させても
+      // 境界を外しても、この2つの数の組は一致しない。
+      expect(aggregate.totalInScope).toBe(4);
+      expect(aggregate.filteredPeriod.count).toBe(5);
+    });
+
+    it("aggregateScope の occurredBefore は境界を含む（occurredAt === occurredBefore は残る）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedPeriodFixture(store, ctx, {
+        boundary: PERIOD_CUTOFF,
+        inside: PERIOD_BEFORE_CUTOFF,
+        outside: PERIOD_AFTER_CUTOFF,
+        inside_n: 3,
+        outside_n: 5,
+      });
+
+      const aggregate = await store.aggregateScope(ctx, { occurredBefore: PERIOD_CUTOFF });
+      expect(aggregate.totalInScope).toBe(4);
+      expect(aggregate.filteredPeriod.count).toBe(5);
+    });
+
+    it("⚠ 鳴ってはいけない側: occurredAfter も occurredBefore も渡さなければ period は一切絞らない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedPeriodFixture(store, ctx, {
+        boundary: PERIOD_CUTOFF,
+        inside: PERIOD_AFTER_CUTOFF,
+        outside: PERIOD_BEFORE_CUTOFF,
+        inside_n: 3,
+        outside_n: 5,
+      });
+
+      const aggregate = await store.aggregateScope(ctx, {});
+      // 9件すべてが残り、filteredPeriod は 0。これを測らないと、
+      // 「常に絞る」側へ倒しても誰も気づかない。
+      expect(aggregate.totalInScope).toBe(9);
+      expect(aggregate.filteredPeriod.count).toBe(0);
+    });
+
+    it("aggregateScope の period は、occurredAt が null の Memory には recordedAt を当てる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      // occurredAt は渡さない（null のまま）。recordedAt だけを内側/外側に置く。
+      // 件数を 2 対 7 と違えてあるので、取り違えても束ねても別の値になる。
+      for (let i = 0; i < 2; i += 1) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            recordedAt: PERIOD_AFTER_CUTOFF,
+            contentHash: `period-null-inside-${i}`,
+          }),
+        );
+      }
+      for (let i = 0; i < 7; i += 1) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            recordedAt: PERIOD_BEFORE_CUTOFF,
+            contentHash: `period-null-outside-${i}`,
+          }),
+        );
+      }
+
+      const aggregate = await store.aggregateScope(ctx, { occurredAfter: PERIOD_CUTOFF });
+      expect(aggregate.totalInScope).toBe(2);
+      expect(aggregate.filteredPeriod.count).toBe(7);
     });
 
     it("aggregateScope は notIndexed を理由ごと（pending/failed/skipped）に分けて数え、totalInScope からは除かない", async () => {

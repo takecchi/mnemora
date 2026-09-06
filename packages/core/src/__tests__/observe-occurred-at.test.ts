@@ -169,3 +169,81 @@ describe("recall() の occurredAfter は、occurredAt を渡したときだけ�
     );
   });
 });
+
+/**
+ * period の判定規則は、この repo に**4箇所**ある（ADR 0039）——
+ * `recall-runtime.ts` の候補フィルタ、`PostgresMemoryStore.aggregateScope`、
+ * `InMemoryMemoryStore.aggregateScope`、`packages/core` のテスト用
+ * `FakeMemoryStore.aggregateScope`。
+ *
+ * **候補フィルタは「何が返るか」を決め、`aggregateScope` は「`omitted` が何と言うか」を決める。**
+ * ⟹ **この2つが食い違うと、`omitted` が嘘をつく。**
+ *
+ * `packages/testkit` の適合テストは adapter 2つ（postgres / in-memory）に届くが、
+ * `recall-runtime.ts` には届かない（`recall()` を呼ばないため）。
+ * **ここで測るのは「候補フィルタと `aggregateScope` が、同じ境界に対して同じ答えを出すこと」である。**
+ */
+describe("recall() の period は境界を含み、返り値と omitted が食い違わない（ADR 0039）", () => {
+  const BOUNDARY_TEXT = "きょうどの話です";
+  const JUST_OUTSIDE_TEXT = "そのまえの話で";
+
+  async function ingestBoundaryPair(
+    runtime: ReturnType<typeof buildRuntime>["runtime"],
+    cutoff: Date,
+  ): Promise<void> {
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: BOUNDARY_TEXT,
+      externalId: "boundary",
+      occurredAt: cutoff,
+    });
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: JUST_OUTSIDE_TEXT,
+      externalId: "just-outside",
+      // 境界の1ミリ秒だけ外。**1日ではなく1ミリ秒**にしてあるのは、
+      // 境界を1つずらす変異（`>=` → `>`）だけを捕まえるためである。
+      occurredAt: new Date(cutoff.getTime() - 1),
+    });
+    await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
+  }
+
+  it("occurredAt === occurredAfter ちょうどの記憶は返り、1ミリ秒だけ外のものは落ちる", async () => {
+    const { runtime } = buildRuntime();
+    const cutoff = new Date(Date.now() - RECENT_DAYS * DAY);
+    await ingestBoundaryPair(runtime, cutoff);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], occurredAfter: cutoff });
+    const digests = result.memories.map((m) => m.digest);
+
+    // 候補フィルタ（recall-runtime.ts）の側: 境界は残り、1ミリ秒外は落ちる。
+    expect(digests).toContain(BOUNDARY_TEXT);
+    expect(digests).not.toContain(JUST_OUTSIDE_TEXT);
+    // aggregateScope の側: 落ちたのはちょうど1件だと言っている。
+    expect(result.omitted).toContainEqual({
+      kind: "filtered",
+      condition: "period",
+      count: 1,
+      countKind: "exact",
+    });
+    // ⚠ 閾値で落ちたのではないことを名指しで確かめる。
+    expect(result.omitted.some((o) => o.kind === "below_threshold")).toBe(false);
+    // ⟹ 「返った件数」と「落ちたと言っている件数」の合計が、取り込んだ2件と一致する。
+    //    片方だけを直したときに、この等式が破れる。
+    expect(digests.length + 1).toBe(2);
+  });
+
+  it("⚠ 鳴ってはいけない側: occurredAfter を渡さなければ、両方とも返り period の omission は出ない", async () => {
+    const { runtime } = buildRuntime();
+    const cutoff = new Date(Date.now() - RECENT_DAYS * DAY);
+    await ingestBoundaryPair(runtime, cutoff);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const digests = result.memories.map((m) => m.digest);
+    expect(digests).toContain(BOUNDARY_TEXT);
+    expect(digests).toContain(JUST_OUTSIDE_TEXT);
+    expect(result.omitted.some((o) => o.kind === "filtered" && o.condition === "period")).toBe(
+      false,
+    );
+  });
+});
