@@ -9,54 +9,20 @@ import {
   distractorExternalId,
   goldExternalId,
 } from "./probe-set.js";
+import { resolveExternalId } from "./provenance-trace.js";
 import { formatNoApiCallsNotice } from "./usage-meter.js";
 import type { UsageMeter } from "./usage-meter.js";
 
 /**
  * probe ごとの順位を測る(PR 本文 (D))。
  *
- * **memory → observation の系譜の辿り方(この PR で一番難しかった点)**:
- * 本物の LLM は発話を書き換えて記憶を作る(要約・言い換え)ため、
- * `recall().memories[].digest`/`memoryId` から「どの発話が元になったか」を
- * **文字列一致では判定できない**。`packages/core`/`packages/postgres` を変更せずに
- * 辿れる経路として、以下の**公開 interface のみ**を使う:
- *
- *   `recall().memories[i].memoryId`
- *     → `memoryStore.get(ctx, memoryId)` (`MemoryStore` interface、既存)
- *     → `Memory.sourceObservationId`(`buildNewMemoryFromCandidate` が
- *        `provenanceKind` の stated/inferred どちらでも常に元の Observation の id を
- *        設定している——`packages/core/src/extraction.ts` で確認済み)
- *     → `memoryStore.getObservation(ctx, sourceObservationId)` (`MemoryStore` interface、既存)
- *     → `Observation.externalId`(`observe()` に渡した `gold-<id>`/`distractor-<id>`/
- *        `filler-NNNN`)
- *
- * `provenance.basis.observationIds`(`InferredProvenance`)ではなく `Memory` 直下の
- * `sourceObservationId` を選んだ理由: 後者は `stated`/`inferred` どちらの分岐でも
- * `buildNewMemoryFromCandidate` が無条件に設定する単一の値であり、
- * provenance の判別ユニオンで分岐する必要がない(`provenance.basis` は `inferred` にしか
- * 無く、かつ配列であるため「1つの Memory は1つの Observation から生まれる」という
- * Phase 1 の実際の抽出フロー(1 Observation → N Memory 候補、1候補 → 1 Memory)には
- * `sourceObservationId` のほうが素直に対応する)。**Phase 2 の consolidate/reflected**
- * (複数の Memory から1つを合成する)が入ると `sourceObservationId` は
- * 存在しなくなりうるが、Phase 1 の範囲(roadmap.md 「いまの状態」)ではまだ実装されて
- * いないため、この経路で確認できないケースは無い。
- *
- * この経路が辿れないケース(`sourceObservationId` が無い、`getObservation` が null を
- * 返す)は `null` を返す——**辿れないことを黙って別の何かに読み替えない**(例:
- * 文字列一致にフォールバックする、等はしない)。
+ * **memory → observation の系譜の辿り方**: 本物の LLM は発話を書き換えて記憶を作る
+ * (要約・言い換え)ため、`recall().memories[].digest`/`memoryId` から「どの発話が元に
+ * なったか」を**文字列一致では判定できない**。その辿り方は `./provenance-trace.js` の
+ * `resolveExternalId` に在る——**`compare.ts` も同じ経路を必要とするようになったため、
+ * 共有の部品としてそちらへ降ろした**(ADR 0052)。ここでは互換のため re-export する。
  */
-export async function resolveExternalId(
-  memoryStore: MemoryStore,
-  ctx: Ctx,
-  memoryId: string,
-): Promise<string | null> {
-  const memory = await memoryStore.get(ctx, memoryId);
-  if (!memory || !memory.sourceObservationId) {
-    return null;
-  }
-  const observation = await memoryStore.getObservation(ctx, memory.sourceObservationId);
-  return observation?.externalId ?? null;
-}
+export { resolveExternalId };
 
 // ---------------------------------------------------------------------------
 // outbox を干上がるまで処理する(PR 本文「実行時の規律」)

@@ -1,38 +1,28 @@
 import { heuristicTokenCounter } from "@mnemora/core";
-import type { Ctx, Omission, Runtime } from "@mnemora/core";
+import type { Ctx, MemoryStore, Omission, Runtime } from "@mnemora/core";
 import { buildConversation } from "./scenario.js";
 import { measureNaive } from "./naive-path.js";
-import { runMnemoraPath } from "./mnemora-path.js";
-
-/**
- * 冒頭の事実表明（`FACT_STATEMENT` = 「私の好きな色は青です。誕生日は4月3日です。」）に
- * しか出現しない部分文字列。`scenario.ts` の `FILLER_USER_LINES`/`FILLER_ASSISTANT_LINES`
- * には「青」は出てこない（目視で確認済み。この前提が崩れると偽陽性になる）。
- */
-const FACT_MARKER = "青";
+import { factStatementExternalId, runMnemoraPath } from "./mnemora-path.js";
+import { resultContainsObservation } from "./provenance-trace.js";
 
 /**
  * `recall().memories` の中に、冒頭の事実表明が残っているかを判定する。
  *
- * **⚠ この判定方法の限界（このシナリオと擬似 provider に固有であり、一般の判定ではない）**:
- * `@mnemora/testkit` の決定的な擬似 LLM は Observation を要約せず、digest が発話の
- * 本文そのものになる。そのため「digest に FACT_MARKER が含まれるか」で
- * 「元の Observation が FACT_STATEMENT だったか」を判定できる
- * （`src/__tests__/mnemora-path.postgres.test.ts` が使っている `digest.includes("青")`
- * と同じ判定法に倣った）。
+ * ⚠ **かつてここは `digest.includes("青")` という文字列一致だった**（ADR 0052 で置き換えた）。
+ * その判定は `@mnemora/testkit` の擬似 LLM が「digest ＝ 発話の本文そのもの」を作ることに
+ * 依存しており、**本物の LLM では成立しない**——digest は要約・言い換えされるので、
+ * 「青」という語を使わずに要約されれば偽陰性、無関係な記憶がその語を含めば偽陽性になる。
+ * その限界は当時のコメントにも書かれていたが、**限界を書いたまま使い続けていた。**
  *
- * **本物の LLM（`OPENAI_API_KEY` 有り）を使うと、digest は要約・言い換えされるため、
- * この文字列一致はもう成立しない**——「青」という語を使わずに要約されれば偽陰性になるし、
- * 逆に無関係な記憶の要約が「青」という語を含めば偽陽性になる。つまりこの関数は
- * 「一般に記憶が保持されたかを判定する方法」ではなく、**`buildConversation` が作る
- * この決定的な会話 × 擬似 provider の組み合わせに限って成立する近似**である。
- * 本物の provider で同じことを言うには、`FACT_STATEMENT` から実際に生成された Memory の
- * `sourceObservationId` を辿る必要がある（`retrieval-quality.ts` の `resolveExternalId`
- * と同じ発想。ここでは compare.ts の既存の依存関係（MemoryStore を受け取らない）を
- * 変えないために、その経路までは実装していない）。
+ * ⟹ **`sourceObservationId` を辿って `externalId` で照合する**（`./provenance-trace.js`）。
+ * digest の中身を一切見ないため、擬似・記録の再生・実 API のどれでも同じ意味になる。
  */
-function factStatementSurvived(memories: { digest: string }[]): boolean {
-  return memories.some((m) => m.digest.includes(FACT_MARKER));
+async function factStatementSurvived(
+  memoryStore: MemoryStore,
+  ctx: Ctx,
+  memories: readonly { memoryId: string }[],
+): Promise<boolean> {
+  return resultContainsObservation(memoryStore, ctx, memories, factStatementExternalId());
 }
 
 /** `omitted` のうち `not_indexed`（reason 問わず）の `count` を合算する。 */
@@ -41,6 +31,15 @@ function notIndexedCount(omitted: Omission[]): number {
     .filter((o): o is Extract<Omission, { kind: "not_indexed" }> => o.kind === "not_indexed")
     .reduce((sum, o) => sum + o.count, 0);
 }
+
+/**
+ * `compare` が測る会話の長さ（filler 往復数）の既定の列。
+ *
+ * **`cli.ts` から移した**（ADR 0052）——カセットの被覆を検査する歯
+ * （`cassette-coverage.test.ts`）が、実 API を何回叩く列なのかを知る必要があるため。
+ * 合計 Σ(fillerPairs+1) = 657 回の LLM 呼び出しになる。
+ */
+export const DEFAULT_COMPARE_SEQUENCE = [0, 1, 2, 3, 4, 5, 10, 20, 40, 80, 160, 320];
 
 export interface ComparisonRow {
   fillerPairs: number;
@@ -91,6 +90,13 @@ export interface CompareOptions {
   fillerPairsSequence: number[];
   /** テナントIDの接頭辞。テスト側から重複を避けるために差し替えられるようにしてある。 */
   tenantPrefix?: string;
+  /**
+   * 冒頭の事実が残ったかを `sourceObservationId` で辿るために必要（ADR 0052）。
+   *
+   * **省略可能にしていない。**省略を許すと文字列一致へ倒れる経路が残り、
+   * 「どちらの判定で出た ❌ なのか」が表から読めなくなる。
+   */
+  memoryStore: MemoryStore;
 }
 
 /**
@@ -126,7 +132,7 @@ export async function runComparison(
       omitted: recall.omitted,
       returnedCount: recall.memories.length,
       annCandidateCount: recall.index.totalInScope - notIndexedCount(recall.omitted),
-      factStatementSurvived: factStatementSurvived(recall.memories),
+      factStatementSurvived: await factStatementSurvived(options.memoryStore, ctx, recall.memories),
     });
   }
   return rows;

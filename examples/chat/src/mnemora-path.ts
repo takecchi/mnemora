@@ -10,6 +10,21 @@ export interface MnemoraPathResult {
   recall: RecallResult;
 }
 
+export function externalIdForTurn(index: number): string {
+  return `turn-${index}`;
+}
+
+/**
+ * 冒頭の事実表明（`FACT_STATEMENT`）を取り込んだ Observation の `externalId`。
+ *
+ * `buildConversation` は事実表明を必ず先頭（index 0）に置く（`scenario.ts`）。
+ * **その前提をここで1箇所に閉じ込める**——`compare.ts` が系譜を辿って
+ * 「冒頭の事実が残ったか」を判定するのに使う（ADR 0052）。
+ */
+export function factStatementExternalId(): string {
+  return externalIdForTurn(0);
+}
+
 /**
  * 会話全体を observe() し、tick() で embed を処理する（経路Bの取り込み段）。
  *
@@ -43,7 +58,7 @@ export async function ingestConversation(
       kind: "utterance",
       text: turn.text,
       speaker: turn.role,
-      externalId: `turn-${turn.index}`,
+      externalId: externalIdForTurn(turn.index),
     });
   }
   await drainEmbedTicks(runtime, ctx);

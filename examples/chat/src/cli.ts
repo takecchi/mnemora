@@ -1,14 +1,21 @@
 #!/usr/bin/env node
 import { heuristicTokenCounter } from "@mnemora/core";
 import { CassetteRecorder } from "@mnemora/testkit";
+import type { CassetteTarget } from "./cassette-io.js";
 import {
-  RETRIEVAL_CASSETTE_PATH,
   cassetteExists,
+  cassettePathFor,
   describeCassette,
   loadCassette,
+  parseCassetteTarget,
   saveCassette,
 } from "./cassette-io.js";
-import { formatComparisonTable, formatRecallQualityTable, runComparison } from "./compare.js";
+import {
+  DEFAULT_COMPARE_SEQUENCE,
+  formatComparisonTable,
+  formatRecallQualityTable,
+  runComparison,
+} from "./compare.js";
 import { formatRecall } from "./format.js";
 import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
@@ -29,8 +36,6 @@ import { formatNoApiCallsNotice } from "./usage-meter.js";
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
 /** budget が実際に切り詰めることを見せるための、意図的に小さい文字数予算。 */
 const TINY_BUDGET_CHARS = 60;
-/** `compare` サブコマンドで測る会話の長さ(filler 往復数)の既定の列。 */
-const DEFAULT_COMPARE_SEQUENCE = [0, 1, 2, 3, 4, 5, 10, 20, 40, 80, 160, 320];
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -83,6 +88,34 @@ function printProviderMode(llmMode: ProviderMode, embeddingMode: ProviderMode): 
         "関連度そのものは評価できない（examples/chat/README.md「正直に書くべき限界」参照）。",
     );
   }
+}
+
+/**
+ * この実行が実 API を使うのか、記録の再生を使うのかを決める（ADR 0051 / 0052）。
+ *
+ * **キーがあれば実 API、無ければ記録。どちらでもなければ落ちる**——
+ * 「記録が無いなら擬似物で」と読み替えない。擬似物は意味を持たない stub であり、
+ * それで出た数字を物差しの表に載せると嘘になる（ADR 0051）。
+ *
+ * 返り値が `undefined` なら実 API を使う、という意味である。
+ */
+function resolveCassetteForRun(target: CassetteTarget) {
+  if (process.env.OPENAI_API_KEY) {
+    return undefined;
+  }
+  const path = cassettePathFor(target);
+  if (!cassetteExists(path)) {
+    throw new Error(
+      `${target} を実キー無しで走らせるには記録が要る。OPENAI_API_KEY を設定するか、` +
+        `先に \`record ${target}\` でカセットを作ること（ADR 0052）。`,
+    );
+  }
+  const cassette = loadCassette(path);
+  console.log(`[cassette] 記録した応答を再生する: ${describeCassette(cassette)}`);
+  console.log(
+    "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること。",
+  );
+  return cassette;
 }
 
 async function runChat(): Promise<void> {
@@ -196,7 +229,17 @@ async function runBackfill(): Promise<void> {
 }
 
 async function runCompare(): Promise<void> {
-  const handle = await createExampleRuntime(requireDatabaseUrl());
+  const databaseUrl = requireDatabaseUrl();
+  // `retrieval` と同じ規律（ADR 0051）: キーがあれば実 API、無ければ記録の再生。
+  // **どちらで走ったかは必ず画面に出す。**
+  const cassette = resolveCassetteForRun("compare");
+  const handle = await createExampleRuntime(
+    databaseUrl,
+    cassette
+      ? { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" }
+      : process.env,
+    cassette ? { cassette } : {},
+  );
   printProviderMode(handle.llmMode, handle.embeddingMode);
   try {
     console.log(
@@ -204,6 +247,7 @@ async function runCompare(): Promise<void> {
     );
     const rows = await runComparison(handle.runtime, {
       fillerPairsSequence: DEFAULT_COMPARE_SEQUENCE,
+      memoryStore: handle.memoryStore,
     });
     console.log(formatComparisonTable(rows));
     console.log(
@@ -293,22 +337,9 @@ async function runRetrieval(): Promise<void> {
 
   // **キーがあれば本物、無ければ記録の再生。どちらで走ったかは必ず画面に出す**
   // （黙って別のものへ倒れない、という既存の規律の適用。ADR 0051）。
-  const useReal = Boolean(process.env.OPENAI_API_KEY);
-  if (!useReal && !cassetteExists()) {
-    throw new Error(
-      "retrieval は arm B・C で本物の OpenAI(embedding、C はさらに LLM も)を使う。" +
-        "OPENAI_API_KEY を設定するか、先に `record` サブコマンドでカセットを作ること（ADR 0051）。",
-    );
-  }
-  const cassette = useReal ? undefined : loadCassette();
-  if (cassette) {
-    console.log(`[cassette] 記録した応答を再生する: ${describeCassette(cassette)}`);
-    console.log(
-      "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること（ADR 0051）。",
-    );
-  }
-
-  const armSpecs = buildArmSpecs(useReal ? "openai" : "recorded");
+  // 判定は `compare` と同じ `resolveCassetteForRun` に寄せてある（ADR 0052）。
+  const cassette = resolveCassetteForRun("retrieval");
+  const armSpecs = buildArmSpecs(cassette ? "recorded" : "openai");
 
   const reports = [];
   for (const arm of armSpecs) {
@@ -357,25 +388,20 @@ async function runRetrieval(): Promise<void> {
  * arm C は本物の LLM が書き換えた digest を埋め込む——**埋め込みへの入力が arm 間で違う**。
  * arm A は API を一切叩かないため、記録の対象にならない。
  */
-async function runRecord(): Promise<void> {
-  const databaseUrl = requireDatabaseUrl();
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error(
-      "record は本物の OpenAI を叩いて記録する。OPENAI_API_KEY を設定してから実行すること。",
-    );
-  }
-
-  const recorder = new CassetteRecorder();
-  // arm A（API を叩かない）は録らない。**id の文字列一致ではなく、宣言された欄で選ぶ。**
+/**
+ * `retrieval` の arm B・C を実 API で走らせて記録する（ADR 0051）。
+ *
+ * arm A は API を一切叩かないため記録の対象にならない。arm B と C の**両方**が要る——
+ * arm B は擬似 LLM が作った digest を、arm C は本物の LLM が書き換えた digest を
+ * 埋め込むので、**埋め込みへの入力が arm 間で違う。**
+ */
+async function recordRetrieval(
+  databaseUrl: string,
+  recorder: CassetteRecorder,
+  runId: number,
+): Promise<void> {
+  // **id の文字列一致ではなく、宣言された欄で選ぶ。**
   const armSpecs = buildArmSpecs("openai").filter((a) => a.touchesApi);
-
-  // ⚠ **記録は必ず新しいテナントで走らせる。**`observe()` は `externalId` で
-  // 重複排除するため、既に取り込み済みのテナントで走らせると抽出も埋め込みも呼ばれず、
-  // 「1件も記録されていない」カセットができる（実際にこれで一度落ちた）。
-  // 記録に必要なのはプロンプトと入力テキストの対応だけであり、それは probe set から
-  // 決まってテナントに依らない——だから再生側の tenantId と揃える必要は無い。
-  const recordRunId = Date.now();
-
   for (const arm of armSpecs) {
     console.log(`\n########## 記録中: arm ${arm.armLabel} ##########`);
     const handle = await createExampleRuntime(
@@ -387,7 +413,7 @@ async function runRecord(): Promise<void> {
     try {
       await runRetrievalQualityArm({
         armLabel: arm.armLabel,
-        tenantId: `${arm.tenantId}-record-${recordRunId}`,
+        tenantId: `${arm.tenantId}-record-${runId}`,
         runtime: handle.runtime,
         memoryStore: handle.memoryStore,
         llmMode: handle.llmMode,
@@ -398,10 +424,79 @@ async function runRecord(): Promise<void> {
       await handle.close();
     }
   }
+}
+
+/**
+ * `compare` の全会話長を実 API で走らせて記録する（ADR 0052）。
+ *
+ * **`retrieval` より1桁高い。**`DEFAULT_COMPARE_SEQUENCE` の合計 = Σ(fillerPairs+1) 回の
+ * LLM 呼び出しが要る（ADR 0019 §3 の見積もりで657回・約8〜15分・約 $0.023）。
+ * だからこそ `record` は対象を明示させる（`parseCassetteTarget`）。
+ */
+async function recordCompare(
+  databaseUrl: string,
+  recorder: CassetteRecorder,
+  runId: number,
+): Promise<void> {
+  console.log("\n########## 記録中: compare（全会話長） ##########");
+  const handle = await createExampleRuntime(
+    databaseUrl,
+    { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
+    { recorder },
+  );
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const rows = await runComparison(handle.runtime, {
+      fillerPairsSequence: DEFAULT_COMPARE_SEQUENCE,
+      tenantPrefix: `example-compare-record-${runId}`,
+      memoryStore: handle.memoryStore,
+    });
+    // 記録しながら実測もできてしまうので、その場で出す——**この表が
+    // 「本物の provider で走らせた compare」そのものである。**
+    console.log(`\n${formatComparisonTable(rows)}`);
+    console.log(`\n${formatRecallQualityTable(rows)}`);
+    if (handle.usageMeter) {
+      console.log(`\n${handle.usageMeter.formatReport()}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * 実 API の応答を記録してカセットに書き出す（ADR 0051 / 0052）。
+ *
+ * **再生する当のものをそのまま走らせて録る。**probe set や会話生成を読んで
+ * 「必要そうな入力」を列挙する形は採らない——列挙が漏れると再生時に落ちる。
+ * 実行経路そのものが唯一の正しい入力一覧である。
+ */
+async function runRecord(target: CassetteTarget): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  if (!process.env.OPENAI_API_KEY) {
+    throw new Error(
+      "record は本物の OpenAI を叩いて記録する。OPENAI_API_KEY を設定してから実行すること。",
+    );
+  }
+
+  const recorder = new CassetteRecorder();
+
+  // ⚠ **記録は必ず新しいテナントで走らせる。**`observe()` は `externalId` で
+  // 重複排除するため、既に取り込み済みのテナントで走らせると抽出も埋め込みも呼ばれず、
+  // 「1件も記録されていない」カセットができる（実際にこれで一度落ちた）。
+  // 記録に必要なのはプロンプトと入力テキストの対応だけであり、それは probe set /
+  // 会話生成関数から決まってテナントに依らない。
+  const runId = Date.now();
+
+  if (target === "retrieval") {
+    await recordRetrieval(databaseUrl, recorder, runId);
+  } else {
+    await recordCompare(databaseUrl, recorder, runId);
+  }
 
   const cassette = recorder.toCassette();
-  saveCassette(cassette);
-  console.log(`\n書き出した: ${RETRIEVAL_CASSETTE_PATH}`);
+  const path = cassettePathFor(target);
+  saveCassette(cassette, path);
+  console.log(`\n書き出した: ${path}`);
   console.log(`  ${describeCassette(cassette)}`);
   console.log(
     "  ⚠ これはこの時点の API の姿の記録である。モデルが更新されても記録は変わらない——" +
@@ -450,12 +545,12 @@ function cosine(a: readonly number[], b: readonly number[]): number {
  * 揺らぎの実測の下に置いた線であって、モデル交代を実際に検出できると確かめた値ではない。
  */
 const DRIFT_COSINE_THRESHOLD = 0.99;
-async function runVerify(): Promise<void> {
+async function runVerify(target: CassetteTarget): Promise<void> {
   if (!process.env.OPENAI_API_KEY) {
     throw new Error("verify は実 API と記録を突き合わせる。OPENAI_API_KEY を設定すること。");
   }
-  const cassette = loadCassette();
-  console.log(`照合するカセット: ${describeCassette(cassette)}`);
+  const cassette = loadCassette(cassettePathFor(target));
+  console.log(`照合するカセット（${target}）: ${describeCassette(cassette)}`);
 
   const { createProviders } = await import("./providers.js");
   const { embeddingProvider, usageMeter } = createProviders({
@@ -512,13 +607,18 @@ function printHelp(): void {
       "使い方:",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run chat       # observe/recall の往復・omitted/usage/budget を実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
+      "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0052)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run retrieval # 意味的関連性の probe set を3 arm(擬似/埋め込みのみ本物/フル本物)で比較",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
-      "                                                                      # 実 API の応答を記録してカセットに書き出す(ADR 0051)",
-      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify   # 記録と実 API の乖離を測る(ADR 0051)",
+      "                                                                      # retrieval の応答を記録する(ADR 0051)",
+      "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",
+      "                                                                      # compare の応答を記録する(ADR 0052。657回・8〜15分・約$0.023)",
+      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify   # retrieval の記録と実 API の乖離を測る",
+      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:compare",
+      "                                                                      # compare の記録と実 API の乖離を測る",
     ].join("\n"),
   );
 }
@@ -536,9 +636,9 @@ async function main(): Promise<void> {
   } else if (command === "retrieval") {
     await runRetrieval();
   } else if (command === "record") {
-    await runRecord();
+    await runRecord(parseCassetteTarget(process.argv[3]));
   } else if (command === "verify") {
-    await runVerify();
+    await runVerify(parseCassetteTarget(process.argv[3]));
   } else {
     printHelp();
     if (command !== undefined) {
