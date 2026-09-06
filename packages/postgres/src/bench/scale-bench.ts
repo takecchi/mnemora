@@ -4,7 +4,7 @@
  *
  * ## 何のためのベンチか
  *
- * 2つの未計測の穴に、1回の計測で答える。
+ * 3つの未計測の穴に、1回の計測で答える。
  *
  * 1. **`docs/decisions/0011-no-window-count-in-ann-stage.md` / `docs/recall.md` §5**:
  *    `MemoryStore.aggregateScope`（目次帯・第3階の群カウント）は Phase 1 では常に厳密集計
@@ -20,6 +20,18 @@
  *    埋め込みテーブル側は `Seq Scan` になる。この経路がテナント規模に対してどう伸びるかは
  *    未測定。
  *
+ *    **⟹ Part 1 / Part 2 として実装し、CI で 10k/100k を実測した結果（ADR 0023 追記）、
+ *    `Seq Scan` は出ず Nested Loop が 0.9ms 横ばいだった。しかし、その計測は
+ *    「小さい subject」（該当10〜21行）だけを対象にしていた。** Nested Loop が多数回
+ *    まわる懸念は、むしろ**大きい subject** でこそ現実的であり、そこが埋まっていなかった。
+ *
+ * 3. **（本追加分）穴2の続き——subject の大きさそのものを振っていなかった。**
+ *    Part 2 が固定していた「小さい subject」を、10行 / 1,000行 / 10,000行（既定）と
+ *    振って計測する。**振る軸は subject の大きさだけ**（次元は 256 に固定）——
+ *    2つ同時に振ると、どちらが効いたのか分からなくなるため。
+ *    `aggregateScope` も同じ subject の大きさで併せて測る（穴1の「小さい subject でしか
+ *    測っていない」も同時に埋まる）。
+ *
  * ## 実行方法
  *
  * `DATABASE_URL` が本物の Postgres + pgvector を指している状態で:
@@ -30,30 +42,43 @@
  *
  * 既定では 10k/100k/1M の3点で `aggregateScope` を測り（安いので既定でフル規模）、
  * ベクトル検索（Part 2）は既定で 10k/100k までに留める（1M × 高次元は HNSW の
- * 逐次維持コストが非常に重くなりうるため）。以下の環境変数で調整できる:
+ * 逐次維持コストが非常に重くなりうるため）。Part 3（subject の大きさを振る）は
+ * 既定で常に走る。以下の環境変数で調整できる:
  *
  * - `BENCH_SCOPE_SCALES`: `aggregateScope` を測る行数（カンマ区切り）。既定 `10000,100000,1000000`
  * - `BENCH_VECTOR_SCALES`: ベクトル検索を測る行数（カンマ区切り）。`BENCH_SCOPE_SCALES` の
  *   部分集合でなければならない（そのスケールの `memories` を既に流し込んだ上でベクトルだけ
  *   追加するため）。既定 `10000,100000`（1M は明示的な opt-in）
- * - `BENCH_VECTOR_DIMENSIONS`: ベクトルの次元数。既定 `256`
+ * - `BENCH_VECTOR_DIMENSIONS`: ベクトルの次元数（Part 1 / Part 2 用）。既定 `256`
  *   （`text-embedding-3-small` 相当の 1536 は重いので既定にしない。次元数は
  *   `memory_embeddings_<space>` の行幅を決め、`Seq Scan` の費用に直接効く——
  *   高次元で測り直したい場合はこの環境変数を上げること）
+ * - `BENCH_SUBJECT_SIZES`（Part 3 専用）: 狙いの subject の大きさ（行数、カンマ区切り）。
+ *   既定 `10,1000,10000`。**Part 3 の次元数はこの環境変数の対象外で、常に 256 固定**
+ *   （振る軸を subject の大きさだけに保つため。`BENCH_VECTOR_DIMENSIONS` は Part 3 に効かない）。
+ * - `BENCH_SUBJECT_TOTAL_ROWS`（Part 3 専用）: Part 3 のテーブル全体の行数。既定 `100000`。
+ *   狙いの subject 群の合計より大きくなければならない（残りは filler subject に散る）。
  * - `BENCH_SEED`: 決定的な乱数の種（`setseed` に渡す）。既定 `0.20260906`
+ *   （Part 3 は同じ種から別系統の値を導出し、他の Part と乱数列を共有しない）。
  *
  * ## 使い捨てデータベース
  *
  * 規模ごとに専用のデータベースを作り（`packages/postgres/src/__tests__/temp-database.ts`
  * と同じ作法）、計測後に `dropTempDatabase` で `WITH (FORCE)` を使わずに落とす
  * （ADR 0020: `WITH (FORCE)` は「閉じ切れていないコネクションが残っている」不具合を
- * 検知不能にする）。
+ * 検知不能にする）。**Part 3 は Part 1 / Part 2 とは別のデータベース
+ * （`mnemora_scale_bench_subject`）を使う**——Part 1 / Part 2 の subject 分布
+ * （skew を掛けた乱数割り当て）は狙った大きさの subject を作らないため、Part 3 専用の
+ * 一様でない・しかし行数が既知の分布を別途作る。
  *
  * ## 行の投入
  *
  * `createMemory()` / `vectorStore.upsert()` を1件ずつ呼ぶと1M件は終わらないので、
  * `INSERT ... SELECT FROM generate_series(...)` によるバルク SQL で入れる
- * （`seedMemories` / `seedVectors` 参照）。
+ * （`seedMemories` / `seedVectors` 参照）。Part 3 は同じ SQL 雛形（`memoriesInsertSql`）を
+ * 再利用し、filler 用の1文 + 狙いの subject ごとの1文（`subject_id` を定数で固定）を追加で撃つ。
+ * **狙いの subject の行数は `SELECT count(*)` で実測し、狙い値と並べて出力する**
+ * （「狙った」と「実際にそうだった」は別ものであるため）。
  *
  * ## 手元では一切実行できていない
  *
@@ -89,6 +114,27 @@ const QUERY_VECTOR_SEED = 20260906;
 
 const DEFAULT_SCOPE_SCALES = [10_000, 100_000, 1_000_000];
 /**
+ * Part 3（subject の大きさを振る）の既定値。
+ *
+ * - 全体行数は 100,000 に固定する: Part 2 が既に 100k で Nested Loop / 0.9ms 横ばいを
+ *   実測しており、その同じ全体規模の中で「subject 自体が大きくなったらどうなるか」を
+ *   分離して見るため（全体規模まで同時に動かすと、どちらが効いたのか分からなくなる）。
+ * - 狙いの subject の大きさは 10 / 1,000 / 10,000 行:
+ *   10 は Part 2 で実測した「小さい subject」（該当10〜21行）とほぼ同じ桁に揃えた対照点、
+ *   10,000 はテーブル全体（既定10万行）の10%を1つの subject が占める、現実的に大きい部類、
+ *   1,000 はその中間点。
+ */
+const DEFAULT_SUBJECT_SIZES = [10, 1_000, 10_000];
+const DEFAULT_SUBJECT_TOTAL_ROWS = 100_000;
+/**
+ * Part 3 で振る軸は subject の大きさ「だけ」にする。次元数を同時に振ると、
+ * 時間の変化が「subject が大きくなったから」なのか「次元が変わったから」なのか
+ * 区別できなくなる。だからこの値は環境変数で変えられない（Part 1 / Part 2 の
+ * `BENCH_VECTOR_DIMENSIONS` とは独立）。Part 1 / Part 2 の既定 `DEFAULT_DIMENSIONS`
+ * と同じ 256 を使う（比較可能にするため）。
+ */
+const SUBJECT_BENCH_DIMENSIONS = 256;
+/**
  * ベクトル検索の既定スケールは控えめにする。1M × 高次元は HNSW 索引の（挿入のたびに
  * 逐次維持される）構築コストだけで非常に重くなりうる——このスクリプトは
  * `registerEmbeddingSpace` をそのまま使い（索引を先に作ってからデータを流し込む、
@@ -121,6 +167,10 @@ interface BenchConfig {
   vectorScales: number[];
   dimensions: number;
   seed: number;
+  /** Part 3: 狙いの subject の大きさ（行数）。昇順に正規化済み。 */
+  subjectSizes: number[];
+  /** Part 3: テーブル全体の行数。 */
+  subjectTotalRows: number;
 }
 
 function loadConfig(): BenchConfig {
@@ -152,7 +202,42 @@ function loadConfig(): BenchConfig {
   if (!Number.isFinite(seed) || seed < -1 || seed > 1) {
     throw new Error(`不正な BENCH_SEED: ${process.env.BENCH_SEED}（-1..1 の範囲で指定すること）`);
   }
-  return { databaseUrl, scopeScales, vectorScales, dimensions, seed };
+
+  const subjectSizes = parseScales(process.env.BENCH_SUBJECT_SIZES, DEFAULT_SUBJECT_SIZES).sort(
+    (a, b) => a - b,
+  );
+  if (new Set(subjectSizes).size !== subjectSizes.length) {
+    throw new Error(
+      "BENCH_SUBJECT_SIZES に重複がある。各 subject の大きさは一意でなければならない" +
+        "（同じ大きさを2回作ると、狙いの行数がその分ずれる）。",
+    );
+  }
+  const subjectTotalRows = process.env.BENCH_SUBJECT_TOTAL_ROWS
+    ? Number(process.env.BENCH_SUBJECT_TOTAL_ROWS)
+    : DEFAULT_SUBJECT_TOTAL_ROWS;
+  if (!Number.isInteger(subjectTotalRows) || subjectTotalRows <= 0) {
+    throw new Error(
+      `不正な BENCH_SUBJECT_TOTAL_ROWS: ${process.env.BENCH_SUBJECT_TOTAL_ROWS}（正の整数で指定すること）`,
+    );
+  }
+  const subjectSizesTotal = subjectSizes.reduce((a, b) => a + b, 0);
+  if (subjectSizesTotal >= subjectTotalRows) {
+    throw new Error(
+      `BENCH_SUBJECT_SIZES の合計（${subjectSizesTotal}）が BENCH_SUBJECT_TOTAL_ROWS（${subjectTotalRows}）` +
+        `以上になっている。filler subject に回す行が残らない。BENCH_SUBJECT_TOTAL_ROWS を増やすか、` +
+        `BENCH_SUBJECT_SIZES を減らすこと。`,
+    );
+  }
+
+  return {
+    databaseUrl,
+    scopeScales,
+    vectorScales,
+    dimensions,
+    seed,
+    subjectSizes,
+    subjectTotalRows,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +363,50 @@ function summarizePlan(plan: string): {
  * `aggregateScope` の `FILTER (WHERE ...)` の各枝を実際に踏ませるための最小限の作り込みで、
  * 「これが現実の分布だ」という主張はしていない。
  */
+/**
+ * `INSERT INTO memories ... SELECT ...` の雛形。`subjectExpr` だけが呼び出し側ごとに違う
+ * （skew を掛けた乱数割り当てにするか、定数の subject_id にするか）。パラメータは常に
+ * `$1` = tenant、`$2` = `subjectExpr` が使う値、`$3` = 投入行数の3つで揃える。
+ */
+function memoriesInsertSql(subjectExpr: string): string {
+  return `
+    INSERT INTO memories (
+      id, tenant_id, subject_id, content, content_hash, digest, digest_source,
+      provenance_kind, provenance, status, tags, occurred_at, recorded_at,
+      strength, half_life_hours, decay_floor_at, embedding_status, created_at, updated_at
+    )
+    SELECT
+      gen_random_uuid(),
+      $1,
+      ${subjectExpr},
+      'bench memory #' || gs,
+      md5('bench-content-' || gs::text),
+      'bench digest #' || gs,
+      'llm',
+      'imported',
+      '{"kind":"imported"}'::jsonb,
+      (ARRAY['active','active','active','active','contested','archived','superseded','forgotten'])
+        [1 + floor(random() * 8)::int],
+      '{}'::text[],
+      NULL,
+      now() - (random() * interval '365 days'),
+      1.0,
+      720,
+      now() + interval '30 days',
+      (ARRAY['ready','ready','ready','ready','pending','failed','skipped'])
+        [1 + floor(random() * 7)::int],
+      now(),
+      now()
+    FROM generate_series(1, $3) AS gs
+  `;
+}
+
+/** skew を掛けた乱数で subject を割り当てる式（Part 1 / Part 2 が使う分布）。 */
+const SKEWED_SUBJECT_EXPR = "'subject-' || floor(power(random(), 3) * $2)::int";
+
+/** `$2` をそのまま定数の subject_id として使う式（Part 3 の狙いの subject 用）。 */
+const FIXED_SUBJECT_EXPR = "$2::text";
+
 async function seedMemories(
   pool: Pool,
   tenant: string,
@@ -290,42 +419,66 @@ async function seedMemories(
     // setseed はセッション（このコネクション）に対して効く。同じクライアントで
     // 続けて INSERT を発行することで、乱数列を決定的にする。
     await client.query("SELECT setseed($1)", [seed]);
-    await client.query(
-      `
-      INSERT INTO memories (
-        id, tenant_id, subject_id, content, content_hash, digest, digest_source,
-        provenance_kind, provenance, status, tags, occurred_at, recorded_at,
-        strength, half_life_hours, decay_floor_at, embedding_status, created_at, updated_at
-      )
-      SELECT
-        gen_random_uuid(),
-        $1,
-        'subject-' || floor(power(random(), 3) * $2)::int,
-        'bench memory #' || gs,
-        md5('bench-content-' || gs::text),
-        'bench digest #' || gs,
-        'llm',
-        'imported',
-        '{"kind":"imported"}'::jsonb,
-        (ARRAY['active','active','active','active','contested','archived','superseded','forgotten'])
-          [1 + floor(random() * 8)::int],
-        '{}'::text[],
-        NULL,
-        now() - (random() * interval '365 days'),
-        1.0,
-        720,
-        now() + interval '30 days',
-        (ARRAY['ready','ready','ready','ready','pending','failed','skipped'])
-          [1 + floor(random() * 7)::int],
-        now(),
-        now()
-      FROM generate_series(1, $3) AS gs
-      `,
-      [tenant, subjectCount, rowCount],
-    );
+    await client.query(memoriesInsertSql(SKEWED_SUBJECT_EXPR), [tenant, subjectCount, rowCount]);
   } finally {
     client.release();
   }
+}
+
+/** Part 3 用の subject id（狙いの大きさをそのまま名前に埋め込む。衝突しない専用DBで使う）。 */
+function subjectIdForSize(size: number): string {
+  return `subject-size-${size}`;
+}
+
+/**
+ * Part 3: テーブル全体を `totalRows` 行に固定し、その中に `targetSizes` の
+ * 各値ぴったりの行数を持つ subject を作る（`subjectIdForSize` で名付ける）。
+ * 残りの行（`totalRows - sum(targetSizes)`）は、Part 1 / Part 2 と同じ skew 分布で
+ * 多数の filler subject に散らす。
+ *
+ * 狙いどおりの行数になっているかどうかはここでは確認しない
+ * （呼び出し側が `countSubjectRows` で実測する——「狙った」と「実際にそうだった」を
+ * 混同しないため、投入と確認を分離する）。
+ */
+async function seedSubjectSizeMemories(
+  pool: Pool,
+  tenant: string,
+  totalRows: number,
+  targetSizes: number[],
+  seed: number,
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT setseed($1)", [seed]);
+
+    const targetTotal = targetSizes.reduce((a, b) => a + b, 0);
+    const fillerRows = totalRows - targetTotal;
+    const fillerSubjectCount = subjectCountFor(fillerRows);
+    await client.query(memoriesInsertSql(SKEWED_SUBJECT_EXPR), [
+      tenant,
+      fillerSubjectCount,
+      fillerRows,
+    ]);
+
+    for (const size of targetSizes) {
+      await client.query(memoriesInsertSql(FIXED_SUBJECT_EXPR), [
+        tenant,
+        subjectIdForSize(size),
+        size,
+      ]);
+    }
+  } finally {
+    client.release();
+  }
+}
+
+/** 狙いの subject に実際に何行入ったかを、`count(*)` で直接数える。 */
+async function countSubjectRows(pool: Pool, tenant: string, subjectId: string): Promise<number> {
+  const result = await pool.query<{ count: string }>(
+    "SELECT count(*)::text AS count FROM memories WHERE tenant_id = $1 AND subject_id = $2",
+    [tenant, subjectId],
+  );
+  return Number(result.rows[0]!.count);
 }
 
 /**
@@ -534,6 +687,183 @@ async function benchVectorSearch(
 }
 
 // ---------------------------------------------------------------------------
+// Part 3: subject の大きさを振る（search と aggregateScope の両方）
+// ---------------------------------------------------------------------------
+
+interface SubjectSizeResult {
+  /** 狙った行数。 */
+  targetSize: number;
+  /** `count(*)` で実測した実際の行数。 */
+  actualCount: number;
+  /** テーブル全体の行数（固定）。 */
+  totalRows: number;
+  dimensions: number;
+  operation: "search" | "aggregateScope";
+  medianMs: number;
+  plan: ReturnType<typeof summarizePlan>;
+}
+
+/**
+ * 1つの狙いの subject サイズについて、`PostgresVectorStore.search` と
+ * `aggregateScope` の両方を測る。
+ */
+async function benchSubjectSize(
+  pool: Pool,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  totalRows: number,
+  targetSize: number,
+  space: EmbeddingSpaceId,
+  queryVector: number[],
+): Promise<SubjectSizeResult[]> {
+  const subjectId = subjectIdForSize(targetSize);
+  const table = embeddingSpaceTableName(space);
+  const actualCount = await countSubjectRows(pool, TENANT, subjectId);
+  log(
+    `  subject=${subjectId}（狙い ${targetSize.toLocaleString()}行 / 実測 ${actualCount.toLocaleString()}行）`,
+  );
+
+  const results: SubjectSizeResult[] = [];
+  const ctx: Ctx = { tenantId: TENANT };
+
+  // 1. PostgresVectorStore.search（filter.subjectId 有り）
+  const vectorStore = new PostgresVectorStore(db);
+  const filter: VectorFilter = { tenantId: TENANT, status: STATUS_FILTER, subjectId };
+  log(`  PostgresVectorStore.search（subject=${subjectId}）を計測中...`);
+  const searchMedianMs = await measureMedian(() =>
+    vectorStore.search(ctx, space, queryVector, { limit: 40, filter }),
+  );
+  const searchCaptured = await captureQuery(
+    pool,
+    (text) => text.includes(table) && /order by/i.test(text),
+    () => vectorStore.search(ctx, space, queryVector, { limit: 40, filter }),
+  );
+  const searchPlan = summarizePlan(
+    await explainAnalyze(pool, searchCaptured.text, searchCaptured.params),
+  );
+  log(
+    `    中央値 ${fmtMs(searchMedianMs)} / HNSW使用=${searchPlan.usesHnsw} / ` +
+      `Seq Scan=${searchPlan.hasSeqScan} / プラン先頭行: ${searchPlan.topLine}`,
+  );
+  results.push({
+    targetSize,
+    actualCount,
+    totalRows,
+    dimensions: space.dimensions,
+    operation: "search",
+    medianMs: searchMedianMs,
+    plan: searchPlan,
+  });
+
+  // 2. aggregateScope（scope.subjectId 有り）
+  const memoryStore = new PostgresMemoryStore(db);
+  log(`  aggregateScope（subject=${subjectId}）を計測中...`);
+  const scopeMedianMs = await measureMedian(() => memoryStore.aggregateScope(ctx, { subjectId }));
+  const scopeCaptured = await captureQuery(
+    pool,
+    (text) => text.includes("GROUP BY subject_id"),
+    () => memoryStore.aggregateScope(ctx, { subjectId }),
+  );
+  const scopePlan = summarizePlan(
+    await explainAnalyze(pool, scopeCaptured.text, scopeCaptured.params),
+  );
+  log(
+    `    中央値 ${fmtMs(scopeMedianMs)} / Seq Scan=${scopePlan.hasSeqScan} / ` +
+      `プラン先頭行: ${scopePlan.topLine}`,
+  );
+  results.push({
+    targetSize,
+    actualCount,
+    totalRows,
+    dimensions: space.dimensions,
+    operation: "aggregateScope",
+    medianMs: scopeMedianMs,
+    plan: scopePlan,
+  });
+
+  return results;
+}
+
+/**
+ * Part 3 全体を1つの使い捨てデータベース（`mnemora_scale_bench_subject`）で走らせる。
+ * Part 1 / Part 2 とは別データベースにした理由は、ファイル冒頭のコメント
+ * 「使い捨てデータベース」節を参照——Part 1 / Part 2 の skew 分布は狙った大きさの
+ * subject を作らないため。
+ */
+async function runSubjectSizeBench(config: BenchConfig): Promise<SubjectSizeResult[]> {
+  const database = "mnemora_scale_bench_subject";
+  log(
+    `=== Part 3: subject の大きさを振る（全体 ${config.subjectTotalRows.toLocaleString()}行、` +
+      `狙いの大きさ ${config.subjectSizes.map((n) => n.toLocaleString()).join(" / ")}、` +
+      `次元 ${SUBJECT_BENCH_DIMENSIONS} 固定）===`,
+  );
+  log(`使い捨てデータベース ${database} を作成中...`);
+  const handle = await createScaleDatabase(config.databaseUrl, database);
+
+  const results: SubjectSizeResult[] = [];
+  try {
+    // Part 1 / Part 2 とは異なる乱数系列にする（同じ種の使い回しを避ける）。
+    // |seed| <= 1 なので、係数を掛けても setseed の範囲(-1..1)に収まる。
+    const subjectSeed = config.seed * 0.5;
+    const vectorSeed = subjectSeed * -1;
+
+    log(
+      `memories を ${config.subjectTotalRows.toLocaleString()}行バルク投入中` +
+        `（狙いの subject: ${config.subjectSizes.join(", ")}）...`,
+    );
+    const seedStart = performance.now();
+    await seedSubjectSizeMemories(
+      handle.pool,
+      TENANT,
+      config.subjectTotalRows,
+      config.subjectSizes,
+      subjectSeed,
+    );
+    await handle.pool.query("ANALYZE memories");
+    log(`  投入完了（${fmtMs(performance.now() - seedStart)}）。`);
+
+    const space: EmbeddingSpaceId = {
+      provider: "bench",
+      model: `scale-bench-subject-dim${SUBJECT_BENCH_DIMENSIONS}`,
+      dimensions: SUBJECT_BENCH_DIMENSIONS,
+    };
+    const table = embeddingSpaceTableName(space);
+    assertSafeIdentifier(table);
+
+    log(`  埋め込み空間を登録中（table=${table}, dims=${SUBJECT_BENCH_DIMENSIONS}）...`);
+    await registerEmbeddingSpace(handle.pool, space);
+
+    log(
+      `  ベクトルをバルク投入中（${config.subjectTotalRows.toLocaleString()}行 x ` +
+        `${SUBJECT_BENCH_DIMENSIONS}次元）...`,
+    );
+    await seedVectors(handle.pool, TENANT, table, SUBJECT_BENCH_DIMENSIONS, vectorSeed);
+    await handle.pool.query(`ANALYZE ${table}`);
+    await handle.pool.query("ANALYZE memories");
+
+    // クエリベクトルの種も Part 1 / Part 2 とは別にする。
+    const queryRand = seededRandom(QUERY_VECTOR_SEED + 1);
+    const queryVector = Array.from({ length: SUBJECT_BENCH_DIMENSIONS }, () => queryRand() * 2 - 1);
+
+    for (const targetSize of config.subjectSizes) {
+      log(`--- 狙いの subject 大きさ ${targetSize.toLocaleString()}行 ---`);
+      const forThisSize = await benchSubjectSize(
+        handle.pool,
+        handle.db,
+        config.subjectTotalRows,
+        targetSize,
+        space,
+        queryVector,
+      );
+      results.push(...forThisSize);
+    }
+  } finally {
+    log(`使い捨てデータベース ${database} を drop 中...`);
+    await teardownScaleDatabase(handle);
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // レポート出力（markdown）
 // ---------------------------------------------------------------------------
 
@@ -590,6 +920,34 @@ function renderVectorExplainDetails(results: VectorResult[]): string {
     .join("\n\n");
 }
 
+function renderSubjectSizeTable(results: SubjectSizeResult[]): string {
+  const lines = [
+    "| subject の大きさ（狙い） | subject の大きさ（実測 count） | 全体行数 | 次元数 | 操作 | 所要時間（中央値） | HNSW 使用 | Seq Scan | プランの要点 |",
+    "|---:|---:|---:|---:|---|---:|---:|---:|---|",
+  ];
+  for (const r of results) {
+    lines.push(
+      `| ${r.targetSize.toLocaleString()} | ${r.actualCount.toLocaleString()} | ${r.totalRows.toLocaleString()} | ` +
+        `${r.dimensions} | ${r.operation} | ${fmtMs(r.medianMs)} | ${r.plan.usesHnsw ? "yes" : "no"} | ` +
+        `${r.plan.hasSeqScan ? "yes" : "no"} | ${r.plan.topLine} |`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function renderSubjectSizeExplainDetails(results: SubjectSizeResult[]): string {
+  return results
+    .map(
+      (r) =>
+        `### ${r.operation}: 狙い subject 行数=${r.targetSize.toLocaleString()}` +
+        `（実測 ${r.actualCount.toLocaleString()}）, 全体=${r.totalRows.toLocaleString()}行\n\n` +
+        "```\n" +
+        (r.plan.actualRowsLines.length > 0 ? r.plan.actualRowsLines.join("\n") : r.plan.topLine) +
+        "\n```",
+    )
+    .join("\n\n");
+}
+
 /**
  * 「この計測が答えるべき問い」への回答欄。**ここでは何も先に主張しない**——
  * 実測結果（`scopeResults` / `vectorResults`）から機械的に導ける事実だけを、
@@ -599,6 +957,7 @@ function renderAnswers(
   config: BenchConfig,
   scopeResults: ScopeResult[],
   vectorResults: VectorResult[],
+  subjectSizeResults: SubjectSizeResult[],
 ): string {
   const lines: string[] = [];
   lines.push("## この計測が答えるべき問い");
@@ -695,6 +1054,111 @@ function renderAnswers(
       "上表に 1M 行のデータ点が含まれている（`BENCH_VECTOR_SCALES` で明示的に指定された）。",
     );
   }
+  lines.push("");
+
+  lines.push(
+    "### 3. subject が大きくなると、Nested Loop は `Seq Scan` へ切り替わるか。時間はどう伸びるか",
+  );
+  lines.push("");
+  lines.push(
+    `（測定条件: テーブル全体 ${config.subjectTotalRows.toLocaleString()}行に固定、` +
+      `次元数 ${SUBJECT_BENCH_DIMENSIONS} に固定。振ったのは subject の大きさだけ` +
+      `（狙い ${config.subjectSizes.map((n) => n.toLocaleString()).join(" / ")} 行）。` +
+      "以下は実測値から機械的に導いた事実のみを記す。）",
+  );
+  lines.push("");
+
+  const searchBySize = subjectSizeResults.filter((r) => r.operation === "search");
+  const scopeBySize = subjectSizeResults.filter((r) => r.operation === "aggregateScope");
+
+  if (searchBySize.length > 0) {
+    lines.push("`PostgresVectorStore.search`（`filter.subjectId` あり）:");
+    lines.push("");
+    for (const r of searchBySize) {
+      lines.push(
+        `- 狙い ${r.targetSize.toLocaleString()}行（実測 ${r.actualCount.toLocaleString()}行）: ` +
+          `${fmtMs(r.medianMs)} / HNSW使用=${r.plan.usesHnsw ? "yes" : "no"} / ` +
+          `Seq Scan=${r.plan.hasSeqScan ? "yes" : "no"} / ` +
+          `idx_memories_by_subject使用=${r.plan.usesSubjectIndex ? "yes" : "no"} / ` +
+          `プラン先頭行: ${r.plan.topLine}`,
+      );
+    }
+    if (searchBySize.length >= 2) {
+      const first = searchBySize[0]!;
+      const last = searchBySize[searchBySize.length - 1]!;
+      lines.push("");
+      if (first.actualCount > 0) {
+        const scaleRatio = last.actualCount / first.actualCount;
+        const timeRatio = last.medianMs / first.medianMs;
+        lines.push(
+          `実測 subject 行数は ${scaleRatio.toFixed(1)}倍（${first.actualCount.toLocaleString()} → ` +
+            `${last.actualCount.toLocaleString()}）に対し、所要時間は ${timeRatio.toFixed(1)}倍` +
+            `（${fmtMs(first.medianMs)} → ${fmtMs(last.medianMs)}）。` +
+            `${
+              timeRatio > scaleRatio * 1.3
+                ? "subject 行数の伸びより時間の伸びが大きい（超線形）。"
+                : timeRatio < scaleRatio * 0.7
+                  ? "subject 行数の伸びより時間の伸びが小さい（劣線形）。"
+                  : "ほぼ subject 行数に比例（線形）。"
+            }`,
+        );
+      }
+      lines.push(
+        `Seq Scan: 最小の subject では${first.plan.hasSeqScan ? "有り" : "無し"}、` +
+          `最大の subject では${last.plan.hasSeqScan ? "有り" : "無し"}。` +
+          `HNSW: 最小の subject では${first.plan.usesHnsw ? "使用" : "不使用"}、` +
+          `最大の subject では${last.plan.usesHnsw ? "使用" : "不使用"}。`,
+      );
+    }
+    lines.push("");
+  }
+
+  if (scopeBySize.length > 0) {
+    lines.push("`aggregateScope`（`scope.subjectId` あり）:");
+    lines.push("");
+    for (const r of scopeBySize) {
+      lines.push(
+        `- 狙い ${r.targetSize.toLocaleString()}行（実測 ${r.actualCount.toLocaleString()}行）: ` +
+          `${fmtMs(r.medianMs)} / Seq Scan=${r.plan.hasSeqScan ? "yes" : "no"} / ` +
+          `プラン先頭行: ${r.plan.topLine}`,
+      );
+    }
+    if (scopeBySize.length >= 2) {
+      const first = scopeBySize[0]!;
+      const last = scopeBySize[scopeBySize.length - 1]!;
+      lines.push("");
+      if (first.actualCount > 0) {
+        const scaleRatio = last.actualCount / first.actualCount;
+        const timeRatio = last.medianMs / first.medianMs;
+        lines.push(
+          `実測 subject 行数は ${scaleRatio.toFixed(1)}倍（${first.actualCount.toLocaleString()} → ` +
+            `${last.actualCount.toLocaleString()}）に対し、所要時間は ${timeRatio.toFixed(1)}倍` +
+            `（${fmtMs(first.medianMs)} → ${fmtMs(last.medianMs)}）。` +
+            `${
+              timeRatio > scaleRatio * 1.3
+                ? "subject 行数の伸びより時間の伸びが大きい（超線形）。"
+                : timeRatio < scaleRatio * 0.7
+                  ? "subject 行数の伸びより時間の伸びが小さい（劣線形）。"
+                  : "ほぼ subject 行数に比例（線形）。"
+            }`,
+        );
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    "**この節も、他の問いと同じく、実測値から機械的に導ける事実のみを記す。" +
+      "『Nested Loop のままで良いか』『何 ms なら割に合わないか』の閾値は、" +
+      "この repo では定義していない——判断はこの表を見た人が行うこと。**",
+  );
+  lines.push("");
+  lines.push(
+    "**⚠ この計測は全体行数を " +
+      `${config.subjectTotalRows.toLocaleString()}行に固定している。` +
+      "全体行数そのものを増やしたときに、同じ大きさの subject でも結果が変わるかどうかは、" +
+      "この計測には含まれていない（`BENCH_SUBJECT_TOTAL_ROWS` で変えて別途測る必要がある）。**",
+  );
 
   return lines.join("\n");
 }
@@ -712,6 +1176,10 @@ async function main(): Promise<void> {
   log(`Part 1（aggregateScope）の規模: ${config.scopeScales.join(", ")}`);
   log(
     `Part 2（vector search）の規模: ${config.vectorScales.join(", ")}, 次元数: ${config.dimensions}`,
+  );
+  log(
+    `Part 3（subject の大きさ）: ${config.subjectSizes.join(", ")} 行` +
+      `（全体 ${config.subjectTotalRows.toLocaleString()}行、次元 ${SUBJECT_BENCH_DIMENSIONS} 固定）`,
   );
 
   const scopeResults: ScopeResult[] = [];
@@ -761,13 +1229,18 @@ async function main(): Promise<void> {
     }
   }
 
-  log("すべての規模の計測が完了した。レポートを出力する。");
+  log("Part 1 / Part 2 の計測が完了した。続けて Part 3 を実行する。");
+  const subjectSizeResults = await runSubjectSizeBench(config);
+
+  log("すべての計測が完了した。レポートを出力する。");
   console.log("");
   console.log("# 規模を振るベンチ（結果）");
   console.log("");
   console.log(
     `測定日時: ${new Date().toISOString()} / 規模: aggregateScope=[${config.scopeScales.join(", ")}], ` +
-      `vector search=[${config.vectorScales.join(", ")}] / 次元数: ${config.dimensions} / 種: ${config.seed}`,
+      `vector search=[${config.vectorScales.join(", ")}] / 次元数: ${config.dimensions} / ` +
+      `subject サイズ=[${config.subjectSizes.join(", ")}]（全体 ${config.subjectTotalRows.toLocaleString()}行、` +
+      `次元 ${SUBJECT_BENCH_DIMENSIONS} 固定） / 種: ${config.seed}`,
   );
   console.log("");
   console.log("## Part 1: `aggregateScope`（穴1）");
@@ -790,7 +1263,17 @@ async function main(): Promise<void> {
   console.log("");
   console.log("</details>");
   console.log("");
-  console.log(renderAnswers(config, scopeResults, vectorResults));
+  console.log("## Part 3: subject の大きさを振る（`search` / `aggregateScope`、穴2の続き + 穴1）");
+  console.log("");
+  console.log(renderSubjectSizeTable(subjectSizeResults));
+  console.log("");
+  console.log("<details><summary>EXPLAIN (ANALYZE, BUFFERS) 抜粋</summary>");
+  console.log("");
+  console.log(renderSubjectSizeExplainDetails(subjectSizeResults));
+  console.log("");
+  console.log("</details>");
+  console.log("");
+  console.log(renderAnswers(config, scopeResults, vectorResults, subjectSizeResults));
 }
 
 main().catch((err: unknown) => {
