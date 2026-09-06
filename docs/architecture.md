@@ -69,7 +69,7 @@ observe
 ```
 recall
   → EmbeddingProvider.embed(query)
-  → VectorStore.search()      ── 段1: ANN + 索引が効くフィルタのみ（tenant/status/decay_floor_at）
+  → VectorStore.search()      ── 段1: ANN + 索引が効くフィルタのみ（tenant/subject/status/decay_floor_at）
   → ScoringStrategy(...)      ── 段2: 純関数で over-fetch 分を再スコア
   → MemoryStore                ── contested の対向を mandatory companion retrieval
   → recalls / recall_usages を記録（後述 §3.5・[docs/recall.md](./recall.md)）

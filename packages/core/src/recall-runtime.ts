@@ -145,8 +145,15 @@ export async function runRecall(
   if (queryVector !== undefined) {
     annHits = await deps.vectorStore.search(ctx, deps.embeddingProvider.space, queryVector, {
       limit: kPrime,
-      filter: { tenantId: ctx.tenantId, status: ["active", "contested"] },
+      filter: {
+        tenantId: ctx.tenantId,
+        status: ["active", "contested"],
+        subjectId: scope.subjectId,
+      },
       // ADR 0011: decayFloorAtAfter は Phase 1 では読み取りフィルタに使わない。
+      // subjectId は等値一致なので段1に降ろす（マネージャー決定）。period は連続値の範囲比較
+      // であり partial index の離散値向き制約（docs/recall.md 133行目）に関わる設計判断が
+      // 要るため、今回は含めない——Phase 1 の scope に残したまま後段フィルタのみで扱う。
     });
     candidateGenerationExecuted = true;
   }
@@ -179,6 +186,12 @@ export async function runRecall(
   for (const hit of annHits) {
     const memory = memoriesById.get(hit.memoryId);
     if (!memory) continue; // getMany は存在しない/クロステナントの id を静かに落とす契約。
+    // subjectId は段1の filter にも渡している（上）が、ここでも改めて見る。二重に見えるが
+    // 意図的——`VectorStore` は「絞ってもよいが絞らなくてもよい」派生索引であり
+    // （interfaces/vector-store.ts の doc）、正しさの責任は常にこの後段にある。
+    // `InMemoryVectorStore`（testkit）は filter を無視するプレースホルダなので、
+    // ここを削ると core の契約そのものが壊れる。段1の絞りは正しさのためではなく、
+    // over-fetch の窓（k'）を無駄にしないための最適化に過ぎない。
     if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) continue;
     const effectiveTime = memory.occurredAt ?? memory.recordedAt;
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
