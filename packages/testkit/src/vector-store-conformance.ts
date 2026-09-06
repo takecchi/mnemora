@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingSpaceId, MemoryId, MemoryStatus, VectorStore } from "@mnemora/core";
 
@@ -197,6 +198,29 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       });
 
       expect(hits.map((hit) => hit.memoryId)).not.toContain(memoryId);
+    });
+
+    // -------------------------------------------------------------------
+    // delete（族A: 契約は void・「無ければ何もしない」——形式不正な memoryId も
+    // 例外を投げず何もしない。packages/postgres/src/mapping.ts の isUuidLike の
+    // doc コメントが定める基準そのもの: 「存在しない」と「壊れた入力」を区別せずに
+    // 済ませたい口では、クエリを投げる前に判定し、DB 由来のエラーを漏らさない。
+    //
+    // ⚠ 3つを並べて見る: 形式不正 / well-formed だが実在しない / 実在する
+    // （実在するほうは直前の「delete した vector は search に現れなくなる」で
+    // 既に検査済み）。
+    // -------------------------------------------------------------------
+
+    it("delete は形式不正な memoryId に対して例外を投げない（no-op）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.delete(ctx, space, "does-not-exist")).resolves.toBeUndefined();
+    });
+
+    it("delete は well-formed だが実在しない memoryId に対して例外を投げない（no-op）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.delete(ctx, space, randomUUID())).resolves.toBeUndefined();
     });
 
     it("search は limit を超えない件数を返す", async () => {
