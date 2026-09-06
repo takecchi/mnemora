@@ -14,12 +14,7 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import {
-  rowToMemoryEvent,
-  rowToOutboxJob,
-  type MemoryEventRow,
-  type OutboxJobRow,
-} from "../mapping.js";
+import { rowToOutboxJob, type OutboxJobRow } from "../mapping.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
@@ -47,12 +42,15 @@ describeMemoryStoreConformance({
     `);
     return (result.rows[0] as unknown as { id: string }).id;
   },
+  // ⚠ 生 SQL ではなく PostgresEventStore.list を通す。
+  // このフックは「イベントが積まれていないこと」を測る道具であり、**形式不正な id を
+  // 渡される検査でも使われる**（updateStatusWithEvent の歯）。生 SQL のままだと
+  // memory_id が uuid 型なのでドライバのパースエラーになり、**測りたい差ではなく
+  // フィクスチャ側の都合で赤くなる**（実際に CI でそうなった）。adapter が読むのと
+  // 同じ経路で読めば、その経路のガード（isUuidLike）がそのまま効く。
   listEventsForMemory: async (ctx: Ctx, memoryId: string) => {
     const { db } = await getTestClient();
-    const result = await db.execute(sql`
-      SELECT * FROM memory_events WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
-    `);
-    return result.rows.map((row) => rowToMemoryEvent(row as unknown as MemoryEventRow));
+    return new PostgresEventStore(db).list(ctx, { memoryId });
   },
 });
 
