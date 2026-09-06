@@ -617,6 +617,36 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reinforced.decayFloorAt.getTime()).not.toBe(before);
     });
 
+    it("⚠ reinforce は strength を動かさない（ADR 0041）", async () => {
+      // **「強化」の意味は `last_reinforced_at`（＝減衰の起点が動く）と
+      // `decay_floor_at` の再計算に確定している。`strength` は初期値として設定できる欄であり、
+      // `reinforce` では動かない。**
+      //
+      // ⚠ 初期値を **1 ではない値**にしてある。1 のままだと「`strength` を 1 で上書きする」
+      // 実装や「`strength` に `decay` を掛ける」実装（1×何かが 1 に見える場合）を
+      // この検査が通してしまう。0.42 は他のどの既定値とも一致しない。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const initialStrength = 0.42;
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", strength: initialStrength }),
+      );
+      expect(memory.strength).toBeCloseTo(initialStrength, 6);
+
+      const reinforcedAt = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60 * 24 * 30);
+      const reinforced = await store.reinforce(ctx, memory.id, reinforcedAt);
+
+      // 前提: reinforce 自体は効いている（何も起きていないなら「変わらない」は無意味な緑）。
+      expect(reinforced.lastReinforcedAt?.getTime()).toBe(reinforcedAt.getTime());
+      // 本題: strength は1ミリも動かない。
+      expect(reinforced.strength).toBeCloseTo(initialStrength, 6);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reloaded = await store.get(ctx, memory.id);
+      expect(reloaded?.strength).toBeCloseTo(initialStrength, 6);
+    });
+
     it("reinforce は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
