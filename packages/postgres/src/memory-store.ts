@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import { defaultDecayStrategy } from "@mnemora/core";
-import { MemoryStatusConflictError } from "@mnemora/core";
+import { EMBEDDING_STATUS_ROLLBACK, MemoryStatusConflictError } from "@mnemora/core";
 import type {
   Ctx,
   EmbeddingStatus,
@@ -485,11 +485,41 @@ export class PostgresMemoryStore implements MemoryStore {
     if (!isUuidLike(id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
+
+    // 🔴 `ready` を `failed` へ巻き戻さない（ADR 0051）。`ready` は VectorStore.upsert が
+    // 返った*後*にしか書かれない＝「ベクトル行が在る」の主張であり、リースを失った古い
+    // ワーカーの catch から来る `failed`（ADR 0032 の at-least-once）に負けてはならない。
+    //
+    // 書こうとしている値（引数 `status`）は*読んだ状態*ではないので JS 側で見てよい。
+    // WHERE に入れなければならないのは *読んだ状態* のほう（現在の embedding_status）だけ
+    // ——アプリ側で現在値を読んで比べてから書くと、読みと書きの間に入った別の書き込みを
+    // 上書きしうる（ADR 0048 の reinforce と同じ形。updateStatus の compare-and-swap
+    // （ADR 0030）と同じ条件片の組み立て方をここでも使う）。
+    //
+    // ⚠ **共有述語 `isEmbeddingStatusRollback` はここでは呼べない。**比較そのものを DB の
+    // 1文へ入れる必要があるため、値（`from`/`to`）だけを EMBEDDING_STATUS_ROLLBACK から
+    // 取り、比較の形は SQL 側にもう一度書かれる（ADR 0051「引き受けた負債」）。
+    const rollbackGuard =
+      status === EMBEDDING_STATUS_ROLLBACK.to
+        ? sql` AND embedding_status <> ${EMBEDDING_STATUS_ROLLBACK.from}`
+        : sql``;
+
+    // ⚠ **更新できなかったときに返す行も、同じ1文の中で読む。**別の `SELECT` に分けると、
+    // 「上で読んだ古い値をそのまま返す」実装との差が**外から観測できない枝**になる
+    // （reinforce と同じ理由・同じ形）。1文なら、更新できた場合もできなかった場合も
+    // 同じ経路を通るので、その取り違えは適合テストの歯で捕まる。
     const result = await this.db.execute(sql`
-      UPDATE memories
-      SET embedding_status = ${status}, updated_at = now()
+      WITH updated AS (
+        UPDATE memories
+        SET embedding_status = ${status}, updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId} AND id = ${id}${rollbackGuard}
+        RETURNING *
+      )
+      SELECT * FROM updated
+      UNION ALL
+      SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
-      RETURNING *
+        AND NOT EXISTS (SELECT 1 FROM updated)
     `);
     if (result.rows.length === 0) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
