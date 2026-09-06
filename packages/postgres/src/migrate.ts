@@ -168,7 +168,19 @@ async function ensureMigrationsTable(pool: Pool): Promise<void> {
   `);
 }
 
-function listMigrationFiles(migrationsDir: string): string[] {
+/**
+ * `migrationsDir` にある `*.sql` を適用順（ファイル名の昇順）で列挙する。
+ *
+ * **export する理由（マネージャー指摘）**: `packages/postgres/src/__tests__/
+ * migrate-concurrency.test.ts` / `migrate-ledger-handover.test.ts` は「適用された
+ * マイグレーション名」を検査するが、期待値を `["0001_init.sql"]` のようにハードコード
+ * すると、`migrations/` に2本目・3本目が増えるたびにテストの期待値を書き換える
+ * 羽目になる——それは「マイグレーションが1本のときしか通らない歯」であり、
+ * 実際に本 PR（`0002_outbox_claim_lease_index.sql` の追加）で6本が転んだ。
+ * この関数を唯一の真実の源にして、テスト側は `listMigrationFiles(DEFAULT_MIGRATIONS_DIR)`
+ * から期待値を導出する。
+ */
+export function listMigrationFiles(migrationsDir: string): string[] {
   return readdirSync(migrationsDir)
     .filter((name) => name.endsWith(".sql"))
     .sort();

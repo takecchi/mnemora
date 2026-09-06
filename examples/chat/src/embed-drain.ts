@@ -8,6 +8,29 @@ import type { Ctx, Runtime } from "@mnemora/core";
 // あったため、共有モジュールへ切り出した(docs/decisions/0021 参照)。
 // ---------------------------------------------------------------------------
 
+/**
+ * `runtime.tick` に渡す claim リース長(ADR 0032)。**この harness の呼び出し側として
+ * 決めた方針であり、`packages/core` の既定値ではない**(`ClaimOutboxJobsOptions.leaseMs`
+ * に既定値は無い)。
+ *
+ * 根拠: `packages/openai` の `EmbeddingProvider`/`LLMProvider` はどちらも
+ * `new OpenAI({ apiKey })` をオプション無しで作っており(`packages/openai/src/
+ * embedding-provider.ts`・`llm-provider.ts`)、インストール済みの `openai` SDK
+ * (このリポジトリの `node_modules/openai` で確認: v7.10.0)の既定値がそのまま効く——
+ * 既定の `timeout` は1リクエストあたり10分、既定の `maxRetries` は2
+ * (`node_modules/.pnpm/openai@7.10.0.../openai/client.d.ts` の doc コメントに明記)。
+ * つまり1回の embed/extract ジョブは、SDK が自動リトライする分も含めると
+ * 最大 (1 + 2) × 10分 = 30分は「正常に処理中」でありうる。リースがこれより短いと、
+ * まだ生きているワーカーのジョブを「止まった」と誤判定して奪ってしまう
+ * (ADR 0032 の「引き受ける負債」——リース切れの再 claim は at-least-once の重複を
+ * 招くため、無用に短くしない)。この harness は単一プロセス・単一ワーカーの
+ * バッチ処理で、`tick()` は claim した分を同じ呼び出しの中で必ず complete/fail
+ * させてから返る(`runtime.ts` の `tick` 実装)ため、通常運転ではリース満了は
+ * そもそも発生しない——満了が意味を持つのは、このプロセス自体がクラッシュして
+ * 再実行されたときの回収だけである。
+ */
+const EMBED_DRAIN_LEASE_MS = 30 * 60 * 1000;
+
 export interface DrainResult {
   /** 呼んだ tick() の回数。 */
   ticks: number;
@@ -44,7 +67,7 @@ export async function drainEmbedTicks(runtime: Runtime, ctx: Ctx): Promise<Drain
   let totalFailed = 0;
   let firstTickProcessed = 0;
   for (;;) {
-    const result = await runtime.tick(ctx, { kinds: ["embed"] });
+    const result = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: EMBED_DRAIN_LEASE_MS });
     ticks += 1;
     totalProcessed += result.processed;
     totalFailed += result.failed;

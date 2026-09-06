@@ -2,9 +2,26 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
-import { DEFAULT_MIGRATIONS_DIR, runMigrations } from "../migrate.js";
+import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles, runMigrations } from "../migrate.js";
 import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
+
+/**
+ * マネージャー指摘（`0002_outbox_claim_lease_index.sql` の追加で判明）: このファイルの
+ * 期待値を `["0001_init.sql"]`・`applied: []` のようにハードコードすると、
+ * `migrations/` にファイルが増えるたびに歯が転ぶ——「0001 が再実行されない」という
+ * 測りたい不変条件と、「1本しかマイグレーションが無い」という前提を混同していた。
+ * `listMigrationFiles(DEFAULT_MIGRATIONS_DIR)` を唯一の真実の源にして期待値を導出する。
+ *
+ * `seedLegacyDatabase` は `0001_init.sql` だけを旧名の台帳経由で適用する（改名前の
+ * DB を再現するため）。0001 より後に増えたファイル（この時点では 0002）は
+ * `seedLegacyDatabase` の対象外——旧い DB には存在しなかったファイルなので、
+ * 引き継ぎ後の最初の `runMigrations` で初めて適用される。この「引き継いだ0001は
+ * 再実行しないが、その後に増えたファイルは適用する」という区別こそが本ファイルの
+ * 検査対象であり、`NON_LEGACY_FILES` はそれを表す。
+ */
+const ALL_MIGRATION_FILES = listMigrationFiles(DEFAULT_MIGRATIONS_DIR);
+const NON_LEGACY_FILES = ALL_MIGRATION_FILES.filter((name) => name !== "0001_init.sql");
 
 /**
  * マイグレーション台帳の旧名からの引き継ぎ（`_mnemo_migrations` → `_mnemora_migrations`）を
@@ -140,12 +157,17 @@ describe("マイグレーション台帳の引き継ぎ（_mnemo_migrations → 
     const pool = await createBlankDatabase(DB_NOT_REAPPLIED);
     await seedLegacyDatabase(pool);
 
-    await expect(runMigrations(pool)).resolves.toEqual({
-      applied: [],
-      lock: { waitedMs: expect.any(Number) },
-    });
+    // 引き継ぎにより 0001_init.sql は「適用済み」として扱われ、再実行されない
+    // ——これが測りたい不変条件。0001 より後に増えた未適用ファイル（この時点では
+    // 0002_outbox_claim_lease_index.sql）は、旧い DB には存在しなかった以上
+    // ここで初めて適用されるのが正しい（「何も適用しない」ことは測りたい不変条件では
+    // ない。マネージャー指摘: ここを `applied: []` に固定すると、ファイルが増える
+    // たびに歯が転ぶ）。
+    const first = await runMigrations(pool);
+    expect(first.applied).not.toContain("0001_init.sql");
+    expect(first.applied).toEqual(NON_LEGACY_FILES);
 
-    // 冪等: 引き継ぎ済みの DB へもう一度走らせても同じ結果になる。
+    // 冪等: 引き継ぎ済み・かつ全ファイル適用済みの DB へもう一度走らせても何もしない。
     await expect(runMigrations(pool)).resolves.toEqual({
       applied: [],
       lock: { waitedMs: expect.any(Number) },
@@ -169,12 +191,19 @@ describe("マイグレーション台帳の引き継ぎ（_mnemo_migrations → 
     // 旧名は消えている（引き継ぎは RENAME であって、コピーではない）。
     expect(await legacyLedgerExists(pool)).toBe(false);
 
-    // 行はすべて残っている。`applied_at` まで一致することが「作り直しではない」ことの証拠
-    // ——作り直せば now() で入り直すので、必ず違う値になる。
+    // 引き継いだ行（SENTINEL_ROW・0001_init.sql）は、`applied_at` まで一致したまま
+    // 新名の台帳に残っている——作り直せば now() で入り直すので、必ず違う値になる。
+    // 0001 より後の未適用ファイル（この時点では 0002）はこの呼び出しで新たに
+    // 適用されるため、新名の台帳の行数は「引き継いだ分 + 新規適用分」になる
+    // （マネージャー指摘: 行数をそのまま固定すると、ファイルが増えるたびに歯が転ぶ）。
     const after = await pool.query<{ name: string; applied_at: Date }>(
       "SELECT name, applied_at FROM _mnemora_migrations ORDER BY name ASC",
     );
-    expect(after.rows).toEqual(before.rows);
+    const carriedRows = after.rows.filter((row) =>
+      before.rows.some((beforeRow) => beforeRow.name === row.name),
+    );
+    expect(carriedRows).toEqual(before.rows);
+    expect(after.rows).toHaveLength(before.rows.length + NON_LEGACY_FILES.length);
   });
 
   // 歯3: 引き継ぎが無害であること。旧名が無い DB では何もしない。
@@ -182,10 +211,10 @@ describe("マイグレーション台帳の引き継ぎ（_mnemo_migrations → 
     const pool = await createBlankDatabase(DB_BLANK);
 
     await expect(runMigrations(pool)).resolves.toEqual({
-      applied: ["0001_init.sql"],
+      applied: ALL_MIGRATION_FILES,
       lock: { waitedMs: expect.any(Number) },
     });
-    expect(await ledgerNames(pool, "_mnemora_migrations")).toEqual(["0001_init.sql"]);
+    expect(await ledgerNames(pool, "_mnemora_migrations")).toEqual(ALL_MIGRATION_FILES);
     expect(await legacyLedgerExists(pool)).toBe(false);
 
     // 二度目は何も適用しない（既存の冪等性が引き継ぎを足しても保たれている）。
@@ -206,7 +235,7 @@ describe("マイグレーション台帳の引き継ぎ（_mnemo_migrations → 
   // PR #8 で当てた変異（引き継ぎと台帳作成の順序入れ替え）では、この歯は緑のままだった。
   it("新旧どちらの台帳も在るときは、引き継ぎは何もしない", async () => {
     const pool = await createBlankDatabase(DB_BOTH_PRESENT);
-    await runMigrations(pool); // 新名の台帳ができる
+    await runMigrations(pool); // 新名の台帳ができる（この時点で全ファイルが適用済み）
     await pool.query(LEGACY_LEDGER_DDL); // 取り残された旧名の台帳を後から置く
     await pool.query("INSERT INTO _mnemo_migrations (name) VALUES ($1)", [SENTINEL_ROW]);
 
@@ -215,8 +244,9 @@ describe("マイグレーション台帳の引き継ぎ（_mnemo_migrations → 
       lock: { waitedMs: expect.any(Number) },
     });
 
-    // 新名の台帳は上書きされていない（目印の行が混ざっていない）。
-    expect(await ledgerNames(pool, "_mnemora_migrations")).toEqual(["0001_init.sql"]);
+    // 新名の台帳は上書きされていない（目印の行が混ざっていない）。全ファイルが
+    // 適用済みのまま変わらない。
+    expect(await ledgerNames(pool, "_mnemora_migrations")).toEqual(ALL_MIGRATION_FILES);
 
     // 旧名のほうも勝手に消さない（中身の突き合わせは人間の判断に属する）。
     expect(await legacyLedgerExists(pool)).toBe(true);
