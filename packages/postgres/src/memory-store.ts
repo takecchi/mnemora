@@ -292,6 +292,11 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
+    // id 列は uuid 型。この口の契約は「無い == null」なので、形式が壊れた入力も
+    // クエリを投げる前に同じ null へ寄せる（mapping.ts の isUuidLike の doc参照）。
+    if (!isUuidLike(id)) {
+      return null;
+    }
     const result = await this.db.execute(sql`
       SELECT * FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
     `);
@@ -299,11 +304,15 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
-    if (ids.length === 0) {
+    // この口の契約は「無い id は静かに落とす」（D9）。形式が壊れた id も同じ扱いにする
+    // ため、クエリを投げる前に取り除く——呼び出し全体を弾かない
+    // （mapping.ts の isUuidLike の doc参照）。
+    const wellFormedIds = ids.filter((id) => isUuidLike(id));
+    if (wellFormedIds.length === 0) {
       return [];
     }
     const result = await this.db.execute(sql`
-      SELECT * FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(ids)}::uuid[])
+      SELECT * FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
     `);
     return result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
   }
@@ -319,6 +328,12 @@ export class PostgresMemoryStore implements MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null,
   ): Promise<Memory[]> {
+    // source_observation_id 列は uuid 型。この口の契約は「無い == []」なので、
+    // 形式が壊れた observationId もクエリを投げる前に空配列へ寄せる
+    // （mapping.ts の isUuidLike の doc参照）。
+    if (!isUuidLike(observationId)) {
+      return [];
+    }
     const result = await this.db.execute(sql`
       SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId}

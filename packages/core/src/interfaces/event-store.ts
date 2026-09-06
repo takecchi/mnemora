@@ -11,6 +11,13 @@ import type { EventFilter, MemoryEvent, NewMemoryEvent } from "../event.js";
  */
 export interface EventStore {
   append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent>;
+  /**
+   * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
+   * （例外を投げない）。core の `EventId` は単なる `string` であり形式を強制しないため、
+   * ある adapter が主キーに特定の形式（例: UUID）を要求していても、その形式に合わない
+   * `id` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
+   * `isUuidLike` の doc コメント参照）。
+   */
   get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null>;
   /**
    * `filter` に一致する `MemoryEvent` を返す（docs/decisions/0042 参照）。
@@ -23,6 +30,8 @@ export interface EventStore {
    *   任意の `at` を渡せる（`event.at ?? new Date()`）ため、挿入順と `at` 順は
    *   一致するとは限らない。
    * - **`since` / `until`**: 両端を含む（`at >= since` かつ `at <= until`）。
+   * - **`filter.memoryId`**: adapter の期待する形式でない場合も「一致する行が無い」と
+   *   同じ空配列を返す（他のフィルタの指定に関わらず。例外を投げない）。
    */
   list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]>;
 }

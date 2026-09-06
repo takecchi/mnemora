@@ -208,6 +208,58 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // get / getMany（族A: 無い id は null/[] — 形式不正な id も例外を投げない）
+    //
+    // packages/postgres/src/mapping.ts の isUuidLike の doc コメントが定める規約:
+    // 「存在しない」と「壊れた入力」を区別せずに済ませたい口では、形式チェックで
+    // クエリを投げる前に判定し、DB 由来のエラーを呼び出し側に漏らさない。
+    //
+    // ⚠ 3つを並べて見る: 形式不正 / well-formed だが実在しない / 実在する。
+    // 「常に null を返す」実装を通さないためには3番目が要る。
+    // -------------------------------------------------------------------
+
+    it("get は形式不正な id に対して例外を投げず null を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.get(ctx, "does-not-exist")).resolves.toBeNull();
+    });
+
+    it("get は well-formed だが実在しない id に対して null を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.get(ctx, NONEXISTENT_MEMORY_ID)).resolves.toBeNull();
+    });
+
+    it("get は実在する id に対して Memory を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const fetched = await store.get(ctx, memory.id);
+      expect(fetched?.id).toBe(memory.id);
+    });
+
+    it("getMany は全件が形式不正なら例外を投げず空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.getMany(ctx, ["does-not-exist", "also-not-a-uuid"])).resolves.toEqual([]);
+    });
+
+    it("getMany は well-formed だが実在しない id に対して空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.getMany(ctx, [NONEXISTENT_MEMORY_ID])).resolves.toEqual([]);
+    });
+
+    it("getMany は実在する id と形式不正な id が混ざっていても、実在するほうだけを返す（形式不正なほうは静かに落ちる）", async () => {
+      // ⟹ 「全部弾く」実装と「全部返す」実装の両方をこの1つで落とす。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const result = await store.getMany(ctx, [memory.id, "does-not-exist"]);
+      expect(result.map((m) => m.id)).toEqual([memory.id]);
+    });
+
+    // -------------------------------------------------------------------
     // getObservation / createObservationWithOutbox（roadmap.md 段階3・transactional outbox）
     // -------------------------------------------------------------------
 
@@ -473,6 +525,18 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
       const listedFromA = await store.listBySourceObservation(ctxA, observationA.id, "v1");
       expect(listedFromA).toHaveLength(1);
+    });
+
+    it("listBySourceObservation は形式不正な observationId に対して例外を投げず空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.listBySourceObservation(ctx, "does-not-exist", "v1")).resolves.toEqual([]);
+    });
+
+    it("listBySourceObservation は well-formed だが実在しない observationId に対して空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.listBySourceObservation(ctx, randomUUID(), "v1")).resolves.toEqual([]);
     });
 
     // -------------------------------------------------------------------
