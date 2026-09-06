@@ -325,10 +325,28 @@ export class InMemoryMemoryStore implements MemoryStore {
     return memory;
   }
 
+  /**
+   * ADR 0048（Postgres）/ ADR 0049（本実装）: 減衰の起点を巻き戻さない。
+   *
+   * `PostgresMemoryStore.reinforce`（`packages/postgres/src/memory-store.ts`）の
+   * `WHERE ... AND (last_reinforced_at IS NULL OR last_reinforced_at < ${at})` と
+   * 同じ意味論——**狭義の `<`**（同じ `at` は no-op）で、`lastReinforcedAt` と
+   * `decayFloorAt` を同じ条件でまとめて動かす。古い `at` を**例外にはしない**——
+   * 呼び出し側（`runtime.observe` の使用報告ループ）の次の一手が無いため、
+   * no-op のまま現在の（更新されなかった）行を返す。
+   */
   async reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (
+      memory.lastReinforcedAt !== null &&
+      memory.lastReinforcedAt !== undefined &&
+      memory.lastReinforcedAt.getTime() >= at.getTime()
+    ) {
+      // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
+      return memory;
     }
     memory.lastReinforcedAt = at;
     memory.decayFloorAt = defaultDecayStrategy.floorAt({

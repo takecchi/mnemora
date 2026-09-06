@@ -355,10 +355,23 @@ export class FakeMemoryStore implements MemoryStore {
     return memory;
   }
 
+  /**
+   * ADR 0048（Postgres）/ ADR 0049（本 fake）: 減衰の起点を巻き戻さない。
+   * `InMemoryMemoryStore.reinforce`（`packages/testkit`）と同じ意味論・同じ理由
+   * ——狭義の `<`（同じ `at` は no-op）で `lastReinforcedAt`/`decayFloorAt` を
+   * 同じ条件でまとめて動かす。古い `at` は例外にせず、no-op のまま現在の行を返す。
+   */
   async reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (
+      memory.lastReinforcedAt !== null &&
+      memory.lastReinforcedAt !== undefined &&
+      memory.lastReinforcedAt.getTime() >= at.getTime()
+    ) {
+      return memory;
     }
     memory.lastReinforcedAt = at;
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
