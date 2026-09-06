@@ -125,6 +125,48 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(hitB?.distance).toBeCloseTo(1 - 1 / Math.sqrt(2), 5);
     });
 
+    it("⚠ ゼロベクトルの候補は、どんな閾値とも比較が通らない距離になる（ADR 0040）", async () => {
+      // **契約は「ゼロベクトルが絡む候補は recall() の結果に出ない」である。**
+      // adapter がどんな値を返すかは自由だが、**下流の `total >= scoreThreshold` を
+      // どんな閾値でも通らない値**でなければ契約を満たせない。
+      // ⟹ ここでは「返した distance が `>= 0` の比較を通らないこと」を見る。
+      // 実装が `NaN` を返すか別の値を返すかには踏み込まない。
+      //
+      // ⚠ 例外を投げないことも同時に見る。pgvector 0.8.2 の `<=>` は
+      // **エラーにならず NaN を返す**（本 ADR で実測。以前は「エラーになる」と
+      // 3箇所に書かれていたが誤りだった）。
+      //
+      // フィクスチャは非対称: ゼロベクトルの候補1件に対し、正常な候補を2件置く。
+      // 正常な候補が返ることを同時に見ないと、「search が常に空を返す」実装が通る。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const zeroId = await prepareMemoryId(ctx);
+      const okId1 = await prepareMemoryId(ctx);
+      const okId2 = await prepareMemoryId(ctx);
+
+      await store.upsert(ctx, space, zeroId, [0, 0, 0]);
+      await store.upsert(ctx, space, okId1, [1, 0, 0]);
+      await store.upsert(ctx, space, okId2, [0, 1, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+
+      // 正常な候補2件は、比較の通る距離で返る（前提が成り立っていることの確認）。
+      const ok1 = hits.find((h) => h.memoryId === okId1);
+      const ok2 = hits.find((h) => h.memoryId === okId2);
+      expect(ok1?.distance).toBeCloseTo(0, 5);
+      expect(ok2?.distance).toBeCloseTo(1, 5);
+
+      // ゼロベクトルの候補は、返ってきたとしても比較が通らない。
+      const zero = hits.find((h) => h.memoryId === zeroId);
+      if (zero !== undefined) {
+        expect(zero.distance >= 0).toBe(false);
+        expect(zero.distance <= 0).toBe(false);
+      }
+    });
+
     it("クロステナントの search には他テナントの vector が現れない", async () => {
       const store = await createStore();
       const ctxA: Ctx = { tenantId: "tenant-a" };
