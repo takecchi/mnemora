@@ -210,9 +210,9 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Enable required extensions
         run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \\
-            -c "CREATE EXTENSION IF NOT EXISTS vector;" \\
-            -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \\
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+            -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+            -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
             -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
       - name: Build @mnemora/core
         run: pnpm --filter @mnemora/core run build
