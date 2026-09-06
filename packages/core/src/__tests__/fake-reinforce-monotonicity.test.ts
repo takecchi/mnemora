@@ -106,6 +106,12 @@ describe("FakeMemoryStore.reinforce — 減衰の起点を巻き戻さない（A
     const first = await stores.memoryStore.reinforce(ctx, memory.id, at);
     expect(first.lastReinforcedAt?.getTime()).toBe(at.getTime());
 
+    // ⚠ `updatedAt` は壁時計を使う。2回の呼び出しが同期的に一瞬で終わると、ガードが
+    // 外れて2回目も書き込む実装であっても、ミリ秒の解像度に収まって偶然同じ値になり
+    // かねない。実際に時間を進めてから2回目を呼び、「書けば必ず値が変わる」状況を
+    // 作ってから「変わっていない」を確かめる。
+    await new Promise((resolve) => setTimeout(resolve, 5));
+
     const again = await stores.memoryStore.reinforce(ctx, memory.id, at);
     expect(again.lastReinforcedAt?.getTime()).toBe(at.getTime());
     expect(again.decayFloorAt.getTime()).toBe(first.decayFloorAt.getTime());

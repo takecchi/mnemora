@@ -800,6 +800,13 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 前提: 1回目は実際に効いている。
       expect(first.lastReinforcedAt?.getTime()).toBe(at.getTime());
 
+      // ⚠ `updatedAt` は壁時計を使う（`new Date()`/`now()`）。in-memory の2回の呼び出しは
+      // 同期的に一瞬で終わるため、ガードが外れて2回目も書き込んでしまう実装であっても、
+      // 解像度（ミリ秒）の中に収まって偶然同じ値になりかねない——それでは境界を検査した
+      // ことにならない。実際に時間を進めてから2回目を呼び、「書けば必ず値が変わる」
+      // 状況を作ってから「変わっていない」を確かめる。
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
       const again = await store.reinforce(ctx, memory.id, at);
       expect(again.lastReinforcedAt?.getTime()).toBe(at.getTime());
       expect(again.decayFloorAt.getTime()).toBe(first.decayFloorAt.getTime());
