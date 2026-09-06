@@ -1,6 +1,20 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { DEFAULT_MIGRATIONS_DIR } from "../migrate.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
+
+/**
+ * 「前」の測定のために落とした索引を作り直すための DDL。**マイグレーションファイルから
+ * そのまま読む**——ここに DDL を書き写すと、migrations/0002_outbox_claim_lease_index.sql
+ * を後から直したときに、この復元だけが古い定義のまま静かにずれる（同じ内容の写しは必ず
+ * ずれる、というのは AGENTS.md が北極星の要約を置かない理由と同じ）。
+ */
+const MIGRATION_0002_SQL = readFileSync(
+  join(DEFAULT_MIGRATIONS_DIR, "0002_outbox_claim_lease_index.sql"),
+  "utf8",
+);
 
 /**
  * ADR 0032 の実測（マネージャー指摘の帰結2を検査する）。
@@ -165,12 +179,8 @@ describe("outbox claim のリース化と索引（ADR 0032）", () => {
       // 含意されないため、プランナはこの索引を選べない。
       expect(plan).not.toContain("idx_outbox_pending");
     } finally {
-      // migrations/0002_outbox_claim_lease_index.sql と同一の DDL に戻す。
-      await pool.query(
-        `CREATE INDEX idx_outbox_claimable
-           ON outbox (tenant_id, available_at)
-           WHERE completed_at IS NULL AND failed_at IS NULL`,
-      );
+      // マイグレーションファイルそのものを流し直して戻す（MIGRATION_0002_SQL の doc 参照）。
+      await pool.query(MIGRATION_0002_SQL);
     }
   }, 60_000);
 
