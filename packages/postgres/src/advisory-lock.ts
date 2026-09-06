@@ -105,6 +105,29 @@ export async function acquireAdvisoryLock(
   } catch (err) {
     await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
     client.release();
+    // 🔴 **この `.code` の直読みが効くのは、生の `PoolClient.query()` を使っているからである。**
+    // 実測（PostgreSQL 17.9）: 生 query の例外は最初の1段目にそのまま `code` を持つ。
+    //
+    // ⚠ **drizzle の `db.execute()` では効かない。**あちらは pg のエラーを
+    // `Error: Failed query: ...` で包むので、`.code` の直読みは `undefined` になる。
+    // 実測では、1段目が包んだ `Error`、その `cause`（2段目）が pg のエラーで、
+    // `code` はそちらに在る。**⟹ `db.execute()` の失敗から SQLSTATE を読むなら、
+    // `cause` の連鎖を辿ること。**この形をそのままコピーすると静かに `undefined` になり、
+    // **誤りは必ず「その SQLSTATE ではなかった」の向きに倒れる**——つまり黙って通る。
+    // 辿る例は `foreign-key-violation.postgres.test.ts` の `sqlStateOf`。
+    //
+    // ⚠ **共有の helper は意図的に置いていない。**本番でこれを読む箇所はここ1つだけで、
+    // 候補として挙がった2つはどちらも repo の決定が需要を消している——アダプタ間で
+    // エラーの種別を揃えることは ADR 0047 が採らないと決めており（`memory-store-conformance.ts`
+    // の `.rejects.toThrow()` の doc を参照）、不正な uuid（`22P02`）は例外を分類せず
+    // `isUuidLike` の事前検査で弾く設計になっている。**必要になったら、そのとき作ればよい。**
+    // ⟹ これは「helper が抜けている」ではなく「置かないと決めた」である。
+    //
+    // ⚠ **この注意書きには歯を置いていない。**これは警告であって安全性の主張ではなく、
+    // drizzle が包み方を変えたら**この記述が古くなるだけで何も壊れない**。歯で固定すると
+    // 「drizzle の挙動を変えてはいけない」を意味してしまう。
+    // （なお `55P03` の側は歯が在る——定数が違えば `migrate-concurrency.test.ts` の
+    // `MigrationLockTimeoutError` 検査が赤くなる。あちらは事故で変わる前提なので固定してよい。）
     const code = (err as { code?: string }).code;
     if (code === PG_LOCK_TIMEOUT_SQLSTATE) {
       throw errors.timeout(Date.now() - startedAt, err);

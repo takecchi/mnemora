@@ -40,6 +40,9 @@ import { getTestClient, resetTestDatabase } from "./test-db.js";
  * `Error: Failed query: ...` で**包む**——SQLSTATE は `cause` の側に入る。
  * （CI で実測して判明した: `code` を直接読むと `undefined` になる。）
  *
+ * 実測（PostgreSQL 17.9、手元）: 連鎖は2段——1段目が包んだ `Error`、2段目が `code` を持つ
+ * pg のエラー。上限の 8 はその余裕であって、8段の連鎖を観測したわけではない。
+ *
  * ⟹ 連鎖を辿って探す。見つからなければ `undefined` を返し、呼び出し側の
  * assertion が落ちる——「何か失敗した」で済ませないため。
  */
