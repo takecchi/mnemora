@@ -136,6 +136,67 @@
     避け、追加のみのマイグレーションに留めた。`idx_outbox_pending` は今後プランナから
     選ばれなくなる見込みだが、存在すること自体の害は無い。
 
+- **歯について**:
+
+  基準線（`main`=`a475593`、マネージャー実測値と一致することを確認済み）: root **7** /
+  `packages/core` **203** / `packages/testkit` **68** / `packages/openai` **20**。
+  本 PR 後: root 7（変わらず）/ `packages/core` 203（変わらず——`FakeOutboxStore` の
+  リース意味論は直したが新規の `it()` は足していない）/ `packages/testkit`
+  **70**（+2、`outbox-store-conformance.ts` に新設した2本）/ `packages/openai` 20
+  （変わらず）。`packages/postgres` は `DATABASE_URL` が無いこの環境では実行できない
+  （後述「確かめていないこと」）。
+
+  新設した2本（`packages/testkit/src/outbox-store-conformance.ts`、
+  `InMemoryOutboxStore`/`PostgresOutboxStore` 両方に対して走る）:
+
+  - 「リース内で claim 済みの行は再 claim されず、後続の未処理行に到達できる
+    （先頭詰まりの検査、オーナーの仮説）」——**オーナーの「先頭詰まり」仮説を
+    実際に再現する歯。** `limit: 1` で先に available になった行を claim したまま
+    完了させず、リースが切れる前に次の `claimBatch` を呼ぶと、正しい実装では
+    後続の行に到達できることを確認する。
+  - 「リースが切れた claim 済みの行は再び claim される（見えない停止にしない。
+    `claimed_at IS NULL` 単独案を却下した理由そのもの）」——リース満了の前後
+    （`leaseMs - 1` と `leaseMs` ちょうど）で reclaim の可否が切り替わることを
+    境界まで検査する。
+
+  変異を4本撃った（手元で走る `InMemoryOutboxStore` に対して。`git diff --stat` が
+  空でないこと・`git checkout --` での復元・`git status --short` が空になることを
+  毎回確認した）。**すべて新設した歯だけが固有に赤くなり、既存68本は無傷のまま**
+  （テストファイル数・テスト総数は常に70のまま——数が変わっていない＝変異以外の
+  何かが起きていないことも確認済み）:
+
+  - **M1**（リース条件を丸ごと落とす＝今日の姿に戻す）: 2本が赤くなる
+    （先頭詰まりの歯・リース失効の歯の両方——リース条件が無いと「beforeExpiry」も
+    「secondClaim」も両方とも今日の壊れ方をそのまま再現するため）。
+    先頭詰まりの歯の失敗メッセージ（逐語）:
+    `AssertionError: expected [ 'job-114' ] to deeply equal [ 'job-116' ]`
+    （`later.id` を期待したのに `stuck.id` が返り続けた——先頭詰まりが実際に起きた）。
+  - **M2**（却下案: `claimed_at IS NULL` 単独にする）: 1本が赤くなる
+    （リース失効の歯のみ——先頭詰まりの歯は「リース内は再 claim しない」という点では
+    却下案と正しい実装が同じ挙動をするため通ってしまう。これは想定通りで、
+    却下案固有の欠陥＝「リースが永遠に切れない」を専用の歯だけが捕まえる）。
+    失敗メッセージ（逐語）: `AssertionError: expected [] to include 'job-118'`
+    （`afterExpiry` が空——リースが切れた後も永久に再 claim されなかった）。
+  - **M3**（境界を `<=` から `<` に取り違える）: 1本が赤くなる（リース失効の歯のみ、
+    `afterExpiry` を `now = base + leaseMs` ちょうどに固定してあるため、境界の
+    取り違えを一意に検出する）。失敗メッセージ（逐語、M2 と同一文字列だが
+    原因は異なる——ちょうど境界の取りこぼし）:
+    `AssertionError: expected [] to include 'job-118'`。
+  - **M4**（符号を取り違える: `now - leaseMs` を `now + leaseMs` にする）: 2本が
+    赤くなる。`leaseExpiresBefore` が未来側にずれるため、実質的に「claim 済みの行が
+    ほぼ即座に再 claim 可能になる」という M1 と同じ壊れ方になり、同じ2本・同じ
+    失敗メッセージ（逐語）が再現した:
+    `AssertionError: expected [ 'job-114' ] to deeply equal [ 'job-116' ]` および
+    `AssertionError: expected [ 'job-118' ] to not include 'job-118'`。
+
+  fixture の非対称性: 先頭詰まりの歯は `stuck`（先に available、claim される）と
+  `later`（後から available、claim されない）という2つの異なる行を使い、「壊れて
+  いないほうが通る」ことも同じ歯の中で押さえている（`later` に到達できることを
+  assert している時点で、`stuck` だけが特別扱いされていないことも同時に検査される）。
+  リース失効の歯は `beforeExpiry`/`afterExpiry` という2つの異なる時刻を1つの job に
+  対して順に検査し、「リース内では奪わない」と「リース失効後は奪う」の両方を
+  1本の中で対にして押さえている。
+
 - **引き受ける負債**:
 
   - **`tick(ctx)` を引数無しで呼べなくなった。** `leaseMs` を必須にした意図した
