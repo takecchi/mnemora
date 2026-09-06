@@ -283,7 +283,8 @@ CREATE TABLE recall_usages (
 同じ `(recall_id, memory_id)` の組が二度目に届いた場合、`INSERT ... ON CONFLICT DO NOTHING`
 で**挿入自体が弾かれる。** アプリケーション層は「実際に新しい行が挿入されたかどうか」
 （`INSERT` の返り行数、または `RETURNING`）を見て、**挿入が実際に起きたときだけ**
-`memories.last_reinforced_at` / `memories.strength` を更新する。再送では何も変化しない。
+`memories.last_reinforced_at` を更新する（**`memories.strength` は動かさない**——
+[ADR 0041](./decisions/0041-reinforce-does-not-change-strength.md)）。再送では何も変化しない。
 これにより二重計上が構造的に起きない。
 
 強化が起きると `decay_floor_at` を再計算する（§7）。これは「強化された時点で減衰の起点が
@@ -916,7 +917,7 @@ observed → extracted → active ───────────────�
 | 1 | (なし) → observed | `observe()` 呼び出し | 同期 | `observations` へ INSERT | なし（`observations` 自体が追記専用の記録） |
 | 2 | observed → extracted → active | 抽出パイプライン実行。`extract: 'sync'` なら `observe()` 内、`'deferred'` なら `outbox` 経由のワーカー | `sync`: 同期 / `deferred`: 非同期（`outbox` 行は `observe()` と同一トランザクションで先に書かれる） | `memories` へ INSERT（`status='active'`、`digest`、`provenance`、`decay_floor_at` を初期計算） | `created` |
 | 3 | active → active（embedding 反映） | 抽出後の埋め込み計算ジョブ | 非同期（`outbox` 経由。外部 embedding provider 呼び出しをトランザクション内に置かない） | `memory_embeddings_<space>` へ INSERT、`memories.embedding_status` 更新 | なし（列単位の状態変化はログしない。§21 の監査ログ量リスクへの対処） |
-| 4 | active → active（reinforced） | `observe({kind:'memory_usage', ...})` により `recall_usages` へ新規行が実際に挿入されたとき | 同期（`observe()` と同一トランザクション） | `recall_usages` へ INSERT（新規のみ）、`memories.last_reinforced_at` / `strength` / `decay_floor_at` 更新 | `updated`（`meta.reason='reinforced'`） |
+| 4 | active → active（reinforced） | `observe({kind:'memory_usage', ...})` により `recall_usages` へ新規行が実際に挿入されたとき | 同期（`observe()` と同一トランザクション） | `recall_usages` へ INSERT（新規のみ）、`memories.last_reinforced_at` / `decay_floor_at` 更新（`strength` は動かさない。ADR 0041） | `updated`（`meta.reason='reinforced'`） |
 | 5 | active → superseded | 抽出・統合パイプラインが置換を機械的に決定 | 判定ロジック自体は非同期でよいが、書き込み（旧行の `status`/`superseded_by_id` 更新と新 Memory の作成）は1トランザクションで完結させる | `status='superseded'`、`superseded_by_id` | `superseded` |
 | 6 | active → contested | 判定できない対向を検出 | 同上 | 両側の `status='contested'`、`contested_with_id` を相互に設定 | `updated`（`meta.reason='contested'`） |
 | 7 | contested → active \| superseded | 新しい証拠・人手の訂正・統合により解決 | 判定は非同期でよいが書き込みは1トランザクション | `status` を確定、`contested_with_id` をクリア、（負けた側は）`superseded_by_id` を設定 | `updated` または `superseded` |

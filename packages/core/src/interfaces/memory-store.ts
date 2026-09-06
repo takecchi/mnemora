@@ -42,8 +42,11 @@ export class MemoryStatusConflictError extends Error {
  * 契約（振る舞い。型からは読み取れないため、`packages/testkit` の適合テストで検査する）:
  * - `createMemory` は `(tenant_id, source_observation_id, extractor_version, content_hash)` の
  *   一意制約により冪等（docs/architecture.md §3.5）。
- * - `reinforce` は挿入が実際に起きたときだけ `last_reinforced_at` / `strength` を更新し、
- *   `decay_floor_at` を再計算する。
+ * - `reinforce` は挿入が実際に起きたときだけ `last_reinforced_at` を更新し、
+ *   `decay_floor_at` を再計算する。**`strength` は動かさない**
+ *   （[ADR 0041](../../../../docs/decisions/0041-reinforce-does-not-change-strength.md)。
+ *   以前この行は `strength` も更新すると名乗っていたが、3つの実装のどれも更新しておらず、
+ *   **増分の式はどこにも決まっていない**）。
  * - `status = 'contested'` の Memory を単独で返してはならない。対向する Memory を
  *   スコアに関係なく必ず一緒に取得できなければならない（mandatory companion retrieval）。
  * - `aggregateScope` の返り値は近似を許すが、`countKind` を必ず伴う（Phase 1 は常に厳密。
