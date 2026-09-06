@@ -38,6 +38,9 @@ pnpm --filter @mnemora/example-chat run chat
 
 # 会話の長さを変えて、経路A/経路Bの量を実測する（このサンプルの主目的）
 pnpm --filter @mnemora/example-chat run compare
+
+# tenantId/subjectId のスコープを実演する（後述「scope」節）
+pnpm --filter @mnemora/example-chat run scope
 ```
 
 `OPENAI_API_KEY` を環境に設定すると本物の OpenAI（LLM 抽出・Embedding）で動く。
@@ -47,7 +50,7 @@ pnpm --filter @mnemora/example-chat run compare
 **⚠ ただし `packages/openai` の live テストは、`OPENAI_API_KEY` だけでは走らない。**
 `MNEMORA_LIVE_OPENAI` も設定したときだけ本物を叩く——**鍵を持っていることは、いま課金して
 よいという意思表示ではない**（`packages/openai/src/__tests__/live.openai.test.ts`）。
-このサンプルアプリ側（`chat` / `compare` / `retrieval`）は従来どおり `OPENAI_API_KEY` の
+このサンプルアプリ側（`chat` / `compare` / `scope` / `retrieval`）は従来どおり `OPENAI_API_KEY` の
 有無で切り替わる。**これらは手で叩くコマンドであり、門の一部として黙って走ることはない。**
 
 ### テスト
@@ -73,6 +76,75 @@ pnpm --filter @mnemora/example-chat run test:db
 `recall()` の返り値のうち roadmap.md 段階7の完了条件そのものである `omitted` と
 `usage` を画面に出し、さらに小さな `budget`（`maxMemoryChars`）を渡した場合に実際に候補が
 落ちること（`omitted` に `budget_dropped` が現れ、`memories` の件数が減ること）を示す。
+
+---
+
+## `scope`: tenantId/subjectId のスコープを実演する
+
+ルート [README.md](../../README.md)「記憶を誰に紐づけるか（`tenantId` / `subjectId`）」が
+`Ctx = { tenantId, subjectId? }` の非対称——`tenantId` は隔離境界（跨いだら事故）、
+`subjectId` はテナント**内**の整理の単位（跨いでも事故ではない）——を説明している。
+`compare`/`retrieval` を含め、これまで `examples/chat` は一度も `ctx.subjectId` を
+設定していなかった。この節はその隙間を、`src/scope.ts` の「動く例」で塞ぐ。
+
+```bash
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope
+```
+
+**`OPENAI_API_KEY` が無くても動く**（`@mnemora/testkit` の決定的な擬似 provider。
+`chat`/`compare` と同じ切り替え）。同じテナントの中に `alice`/`bob` という2つの
+subject を作り（ペットの事実——alice は犬「ポチ」、bob は猫「タマ」——を1件ずつ
+observe する。取り違えたら一目で分かるようにしてある）、別テナントも1つ用意して、
+同じ質問文を3通りの `ctx` で `recall()` する。
+
+### 出力の読み方
+
+1. **`{ tenantId, subjectId: "alice" }` で recall** → alice の記憶（「ポチ」）だけが返り、
+   bob の記憶（「タマ」）は返らない。
+2. **`{ tenantId }`（`subjectId` を省略）で recall** → テナント全体が対象になり、
+   alice・bob 両方の記憶が返る。
+3. **`{ tenantId: otherTenantId }`（別テナント）で recall** → 元のテナントの記憶は
+   1件も返らない（0件）。
+
+画面には各ケースの件数と、返ってきた記憶の digest（本文そのもの）をそのまま出す——
+「何が返って、何が返らなかったか」を文字列で確認できる。
+
+### 既存の固定 `tenantId` は「隔離の実演」ではない
+
+`compare`（会話の長さ＝ filler 往復数ごと）・`retrieval`（arm A/B/C ごと）は、どちらも
+複数の固定 `tenantId` を使う。**これは `tenantId` の隔離を見せるためではない。**
+
+- `compare`（`src/compare.ts` の `runComparison`）は会話の長さごとに新しい `tenantId`
+  を使う。同じテナントに会話を積み増すと、後の計測が前の会話の記憶を引きずり、
+  「その長さの会話単体で何文字になるか」を独立に測れなくなるため（同ファイルの
+  コメント参照）——**測定同士を混ぜないため**の分離であり、隔離の実演ではない。
+- `retrieval`（`src/cli.ts` の `runRetrieval`）は arm（A/B/C）ごとに固定の `tenantId`
+  を使う。同じ probe set をそのまま arm ごとに観測し直すため、同じテナントを
+  使い回すと前の arm の記憶が後の arm の recall に混ざってしまう——ここも
+  **測定同士を混ぜないため**の分離であり、`tenantId` を分けること自体は
+  「隔離が安全に効く」ことの実演を意図していない。
+
+**`tenantId`/`subjectId` のスコープが実際にどう効くかを動く形で見せるのは、この
+`scope` サブコマンドが初めてである。**
+
+### 🔴 正直に書く限界
+
+**`compare` と `retrieval` は `subjectId` を一切使っていない。そしてそれはわざとである。**
+`examples/chat` の主目的は北極星の物差し——「会話ログを全部プロンプトへ積むのを
+やめられたか」——を実測することであり、`compare`/`retrieval` の `recall()` は
+その主測定の経路そのものである。もし `subjectId` をそこに入れると、`recall()` の
+候補は subject 単位に絞られ、擬似 haystack（`compare` の filler・`retrieval` の
+haystack）との競合が減る——量の削減率や順位が「実際に絞り込みに勝った」からでは
+なく「競争相手を減らした」ことで良く見えるようになる。これは
+[ADR 0022](../../docs/decisions/0022-fake-provider-compare-does-not-claim-recall-quality.md)
+が却下した「数値を良く見せるために測定条件を選び直す」の一種であり、この `scope`
+サブコマンドを足す作業でも同じ理由で `compare.ts`/`retrieval-quality.ts`/
+`probe-set.ts`/`scenario.ts`/`naive-path.ts` には一切手を入れていない。
+
+**`subject` は整理の単位であって隔離の保証ではない**——`tenantId` を跨ぐ漏れは
+事故だが、同じテナント内で `subjectId` を省略・誤指定して alice/bob の記憶が
+混ざることは、mnemora の欠陥ではなく呼び出し側の使い方の問題である
+（ルート README.md「記憶を誰に紐づけるか」参照）。
 
 ---
 

@@ -13,6 +13,7 @@ import {
 } from "./retrieval-quality.js";
 import { createExampleRuntime } from "./runtime-factory.js";
 import { buildConversation } from "./scenario.js";
+import { formatScopeDemo, runScopeDemo } from "./scope.js";
 import { formatNoApiCallsNotice } from "./usage-meter.js";
 
 /** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
@@ -106,6 +107,28 @@ async function runChat(): Promise<void> {
 
     console.log("");
     console.log(handle.usageMeter ? handle.usageMeter.formatReport() : formatNoApiCallsNotice());
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * `tenantId`/`subjectId` のスコープを「動く例」で見せるデモ(`src/scope.ts`)。
+ * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行——
+ * `runScopeDemo`/`formatScopeDemo` は `compare.ts`/`retrieval-quality.ts` を import しない。
+ */
+async function runScope(): Promise<void> {
+  const handle = await createExampleRuntime(requireDatabaseUrl());
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const tenantId = `example-chat-scope-${Date.now()}`;
+    const otherTenantId = `${tenantId}-other`;
+    console.log(
+      "\n同じテナントの中に alice/bob という2つの subject を作り、別テナントも1つ用意して、" +
+        "recall() のスコープの違いを実演する。\n",
+    );
+    const result = await runScopeDemo(handle.runtime, tenantId, otherTenantId);
+    console.log(formatScopeDemo(result));
   } finally {
     await handle.close();
   }
@@ -226,6 +249,7 @@ function printHelp(): void {
       "使い方:",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run chat       # observe/recall の往復・omitted/usage/budget を実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run retrieval",
       "                                                                      # 意味的関連性の probe set を3 arm(擬似/埋め込みのみ本物/フル本物)で比較",
     ].join("\n"),
@@ -238,6 +262,8 @@ async function main(): Promise<void> {
     await runChat();
   } else if (command === "compare") {
     await runCompare();
+  } else if (command === "scope") {
+    await runScope();
   } else if (command === "retrieval") {
     await runRetrieval();
   } else {
