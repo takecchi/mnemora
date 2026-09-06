@@ -484,7 +484,7 @@ type ScoreBreakdown = {
   similarity?: number   // ANN 経由でのみ存在。距離から変換した類似度
   decay: number          // decay(now, lastReinforcedAt, strength, halfLife) の値
   tagMatch: number
-  freshness: number
+  freshness: number      // 1 で頭打ち（ADR 0036）。まだ起きていない出来事は古びようがない
   strength: number
   total: number           // 段2で使った最終スコア
 }

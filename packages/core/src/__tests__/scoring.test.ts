@@ -149,3 +149,80 @@ describe("defaultScoringStrategy: 鮮度と減衰は別の時計を使う（docs
     expect(score.decay).not.toBeCloseTo(0.125, 5);
   });
 });
+
+describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 0036）", () => {
+  // `occurredAt` は docs/memory-model.md §3 の定義上ふつうに未来になる（「来月、京都へ出張する」）。
+  // 減衰式は経過時間が負のとき 1 を超え、上限を持たない。
+  //
+  // ⚠ 未来側だけを見ると「常に 1 を返す」実装も通ってしまう。過去側が1ミリも動いていない
+  // ことを、上限を入れる前に実測した値そのもので押さえる。
+  const NOW = new Date("2026-09-06T00:00:00.000Z");
+  const DAY = 24 * HOUR;
+
+  function freshnessFor(occurredAt: Date | null): number {
+    return defaultScoringStrategy({
+      now: NOW,
+      tags: [],
+      queryTags: [],
+      occurredAt,
+      recordedAt: NOW,
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+    }).freshness;
+  }
+
+  it("未来の occurredAt では freshness がちょうど 1 になる（+30日 / +365日 / +10年）", () => {
+    // 上限が無ければ順に 2 / 4597.6 / 4.22e36 だった（本 PR 前に実測した値）。
+    expect(freshnessFor(new Date(NOW.getTime() + 30 * DAY))).toBe(1);
+    expect(freshnessFor(new Date(NOW.getTime() + 365 * DAY))).toBe(1);
+    expect(freshnessFor(new Date(NOW.getTime() + 3650 * DAY))).toBe(1);
+  });
+
+  it("過去の occurredAt は1ミリも動かない（上限を入れる前に実測した値そのもの）", () => {
+    expect(freshnessFor(new Date(NOW.getTime() - 30 * DAY))).toBe(0.5);
+    expect(freshnessFor(new Date(NOW.getTime() - 365 * DAY))).toBe(0.00021750456985848138);
+    expect(freshnessFor(new Date(NOW.getTime() - HOUR))).toBe(0.9990377588337834);
+  });
+
+  it("occurredAt === now ちょうどでも 1（境界で1つずれていないこと）", () => {
+    expect(freshnessFor(NOW)).toBe(1);
+    // 1ミリ秒だけ過去は 1 未満、1ミリ秒だけ未来は 1。
+    expect(freshnessFor(new Date(NOW.getTime() - 1))).toBeLessThan(1);
+    expect(freshnessFor(new Date(NOW.getTime() + 1))).toBe(1);
+  });
+
+  it("occurredAt が無い記憶（いまのリポジトリの全件）では、上限に当たらず何も変わらない", () => {
+    // recordedAt 起点になり、now === recordedAt なので 1。上限の有無に依らない。
+    expect(freshnessFor(null)).toBe(1);
+    const past = defaultScoringStrategy({
+      now: NOW,
+      tags: [],
+      queryTags: [],
+      occurredAt: null,
+      recordedAt: new Date(NOW.getTime() - 30 * DAY),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+    });
+    expect(past.freshness).toBe(0.5);
+  });
+
+  it("上限を掛けたのは freshness だけで、decay には掛けていない", () => {
+    // occurredAt は未来、lastReinforcedAt は過去。freshness は 1 に丸められるが、
+    // decay は過去起点のまま 0.5 でなければならない（両方 1 に丸める実装を弾く）。
+    const score = defaultScoringStrategy({
+      now: NOW,
+      tags: [],
+      queryTags: [],
+      occurredAt: new Date(NOW.getTime() + 365 * DAY),
+      recordedAt: new Date(NOW.getTime() - 30 * DAY),
+      lastReinforcedAt: new Date(NOW.getTime() - 30 * DAY),
+      strength: 1,
+      halfLifeHours: 720,
+    });
+    expect(score.freshness).toBe(1);
+    expect(score.decay).toBe(0.5);
+    expect(score.total).toBe(0.5);
+  });
+});

@@ -15,6 +15,7 @@ import type { ScoreBreakdown } from "../recall.js";
  *   生の強度は `total` の計算で別要素として掛ける（二重に強度を織り込まない）。
  * - `freshness` は同じ減衰関数を `occurredAt ?? recordedAt` を起点に、`strength = 1` で
  *   呼んで求める（「鮮度は occurred_at ?? recorded_at を使う」という規定を満たす）。
+ *   **ただし 1 で頭打ちにする**（`MAX_FRESHNESS`。[ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md)）。
  * - `tagMatch` はクエリタグが無ければ中立の 1、あれば `1 + 0.1 * 一致数` とし、
  *   タグが一致しないことで total を 0 に落とさない（タグは加点要素であり除外条件では
  *   ない、という recall.md §2 の位置づけ——段1のフィルタではなく段2の再スコアである
@@ -36,6 +37,31 @@ export interface ScoringInput {
 
 export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
 
+/**
+ * `freshness` の上限（[ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md)）。
+ *
+ * **🔴 これは「まだ起きていない出来事は、最も古びていない」と決めたものである。**
+ * 式の副作用として 1 になるのではなく、選んだ結果として 1 になる。
+ *
+ * `freshness` の起点は `occurredAt ?? recordedAt` であり、`occurredAt` は
+ * docs/memory-model.md §3 の定義（「その出来事・事実がいつのものか」）上、**ふつうに未来になる**
+ * （「来月、京都へ出張する」）。減衰式 `0.5 ** (elapsedHours / halfLifeHours)` は
+ * 経過時間が負のとき 1 を超え、**上限を持たない**——実測で +30日 → 2.0、
+ * +365日 → 4,597、+10年 → 4.2×10³⁶ になる。**上限が無いと、未来の日付を1つ持つ記憶が
+ * そのテナントの想起を永久に支配する。**
+ *
+ * **⚠ これは「未来の出来事を優遇する」決定ではない。**`freshness` は**古び**を測る項なので、
+ * まだ起きていない出来事は古びようがない——**「たったいま起きたこと」と同じ扱いにするだけ**である。
+ *
+ * **⚠ 上限を掛けるのは `freshness` だけで、`decay` には掛けない。**
+ * `decay` の起点は `lastReinforcedAt ?? recordedAt` であり、どちらも「mnemora が知った時刻」
+ * 系である。そして `defaultDecayStrategy` に手を入れると
+ * [ADR 0010](../../../../docs/decisions/0010-decay-parameters.md) が価値を置いている
+ * 「`floorAt` が `strengthAt(now) = threshold` の解析解として導かれ、両者が同じ式から
+ * 機械的に一貫する」という性質が壊れる。**戦略の側で頭打ちにし、減衰関数そのものは変えない。**
+ */
+export const MAX_FRESHNESS = 1;
+
 function computeTagMatch(tags: string[], queryTags: string[]): number {
   const tagSet = new Set(tags);
   const matchedCount = queryTags.filter((tag) => tagSet.has(tag)).length;
@@ -50,12 +76,15 @@ export const defaultScoringStrategy: ScoringStrategy = (input) => {
     halfLifeHours: input.halfLifeHours,
   });
 
-  const freshness = defaultDecayStrategy.strengthAt(input.now, {
-    recordedAt: input.occurredAt ?? input.recordedAt,
-    lastReinforcedAt: null,
-    strength: 1,
-    halfLifeHours: input.halfLifeHours,
-  });
+  const freshness = Math.min(
+    MAX_FRESHNESS,
+    defaultDecayStrategy.strengthAt(input.now, {
+      recordedAt: input.occurredAt ?? input.recordedAt,
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: input.halfLifeHours,
+    }),
+  );
 
   const tagMatch = computeTagMatch(input.tags, input.queryTags);
   const similarity = input.similarity;
