@@ -692,8 +692,8 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
         { kind: "not_examined", reason: "llm_failed_whole_observation" },
       ]);
 
-      // 3つの顔がそれぞれ違うことを並べて確認する——どれも `skipped` が空ではない
-      // （顔1だけが空配列）のに、顔2・顔3は同じ「見ていない」でも reason が違う。
+      // 3つの顔がそれぞれ違うことを並べて確認する——顔1だけが空配列（見たうえで、飛ばす
+      // ものが無かった）で、顔2・顔3は同じ「見ていない」でも reason が違う。
       expect(nothingToSkip.skipped).not.toEqual(noCandidates.skipped);
       expect(noCandidates.skipped).not.toEqual(llmFailed.skipped);
       expect(nothingToSkip.skipped).not.toEqual(llmFailed.skipped);
