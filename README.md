@@ -96,6 +96,51 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 
 ---
 
+## 記憶を誰に紐づけるか（`tenantId` / `subjectId`）
+
+**上の5つは、すべて第一引数に `ctx` を取る。**その `ctx` が、記憶を誰に紐づけるかを決める。
+
+```ts
+// tenantId は必須。subjectId は省略できる。
+const ctx = { tenantId: "guild-123", subjectId: "user-456" }
+
+await observe(ctx, input)
+const recalled = await recall(ctx, { text: "..." })
+```
+
+| | 何の単位か | 跨いだら |
+|---|---|---|
+| **`tenantId`** | **隔離境界。安全性の単位** | **事故** |
+| **`subjectId`**（省略可） | テナント**内**の整理の単位 | 事故ではない |
+
+**この非対称が芯である。**ひとつの Discord Bot をいくつものサーバーへ導入する場合、
+**導入先のサーバーが `tenantId`、そのサーバー内の各ユーザーが `subjectId`** になる。
+別のサーバーの記憶が出てくることは設計上あってはならない事故だが、同じサーバー内で
+ユーザー A と B の記憶が混ざるのは整理の失敗であって、性質が違う。
+
+**⟹ ひとつの DB で複数のエージェントを動かすなら、`tenantId` を分ける。**
+`subjectId` を渡すと `recall()` はテナント内のその subject に絞られ、**省略するとテナント全体**になる。
+
+**クロステナントで漏れないことは、`packages/testkit` の適合テストが測っている**——
+どの adapter 実装に対しても走る:
+
+- `VectorStore conformance` — 「クロステナントの search には他テナントの vector が現れない」
+- `OutboxStore conformance` — 「クロステナントの claimBatch は他テナントの未処理ジョブを返さない」
+- `EventStore conformance` — 「クロステナントの list は他テナントのイベントを含まない」
+
+### ⚠ mnemora が保証していないこと
+
+**`tenantId` は呼び出し側が渡す不透明な文字列である。mnemora はテナントの台帳を持たず、
+`tenantId` の存在確認も認証もしない。**
+
+**⟹ 隔離は「使う側が正しい `tenantId` を渡すこと」に依存している。**
+誰がどの `tenantId` を名乗ってよいかを決めるのは、mnemora ではなく上のアプリケーションである。
+
+詳細は [docs/vision.md](./docs/vision.md) の「Tenant と Subject を混同しない」と
+[docs/architecture.md](./docs/architecture.md) §3.7。
+
+---
+
 ## ⚠ 暫定
 
 - **ここに書かれているのは設計であって、実装された事実ではない。**
