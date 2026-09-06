@@ -198,12 +198,21 @@
     この器には Docker/PostgreSQL/`DATABASE_URL` が無く、`requireDatabaseUrl()` が
     未設定を検知してテストランナー自体が起動しない。
 
-  変異を4本撃った（各段の詳細は PR 本文参照。要約: すべて赤くなり、うち3本
-  ［M1: `runtime.ts` から `expectedStatus: "active"` を落とす／M2: in-memory fixture の
-  CAS 条件を落とす／M4: `reextract` が skip を `skipped` に積むのをやめる］は新設した歯
-  だけが固有に捕まえ、M3［`classifySupersedeFailure` の `instanceof` 判定を潰す］は
-  新設した歯（competing でない例外の再送出テスト）が捕まえた——このケースは同時に
-  「⭐ 決定的な TOCTOU の再現」の歯も巻き込まれて壊れる。詳細は PR 本文の変異の表を参照）。
+  変異を4本撃った（すべて新設した歯だけが固有に捕まえ、既存の197本は無傷のまま。
+  実測値・落ちたテスト名は PR 本文の変異の表を参照）:
+
+  - M1（`runtime.ts` から `expectedStatus: "active"` を落とす）: `packages/core` で
+    203本中1本が赤くなる（⭐ 決定的な TOCTOU の再現の歯）。
+  - M2（in-memory fixture の CAS 条件を落とす）: `packages/testkit` で68本中2本が赤くなる
+    （expectedStatus 不一致の conformance テスト2本）。
+  - M3（`classifySupersedeFailure` の `instanceof` 判定を潰し常に skip を返す）:
+    `packages/core` で203本中3本が赤くなる（`classifySupersedeFailure` の純関数テスト2本
+    ＋「競合でない例外はそのまま再送出される」の歯1本）。**⭐ 決定的な TOCTOU の再現の歯は
+    このケースでは赤くならない**——この変異は「本物の競合」に対しては正しく skip を返す
+    ため、TOCTOU 再現の歯自体は通ってしまう。競合でない例外まで skip に化けさせることを
+    専用の歯（M3 が狙う欠陥そのもの）だけが捕まえる。
+  - M4（`reextract` が skip を `skipped` に積むのをやめる）: `packages/core` で203本中
+    1本が赤くなる（⭐ 決定的な TOCTOU の再現の歯——`skipped` の中身を assert している）。
 
 - **引き受ける負債**:
 
