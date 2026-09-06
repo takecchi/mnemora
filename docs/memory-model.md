@@ -158,6 +158,14 @@ digest の生成方式がどちらであったかを隠さないのは同じ原�
 これは [ADR 0008](./decisions/0008-absence-taxonomy.md) が `recall()` に対して定めた原則を、
 取り込み側にも一貫させたものである。
 
+ADR 0013 は「検知できるようになっただけで、やり直す操作は無い」という負債を残していた。
+**`runtime.reextract(ctx, observationId)`（ADR 0028、2026-09 追記）**がこれを埋める。
+同じ Observation に対して抽出をもう一度走らせ、成功すれば、2 で残った生テキストの Memory
+（および古い版の抽出結果一般）を `status: 'superseded'` にする——`forgotten`（利用者が
+意図して忘れさせた、という**製品の振る舞い**）ではなく `superseded`（より良い抽出に
+置き換えられた、という**機構の都合**）にするのはオーナー決定である。詳細・却下した案・
+引き受けた負債は [ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) を参照。
+
 ---
 
 ## 5. 矛盾の扱い

@@ -2,7 +2,7 @@ import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
 import type { Ctx } from "./ctx.js";
 import { buildNewMemoryFromCandidate, extractCandidates } from "./extraction.js";
-import type { ExtractionOutcome } from "./extraction.js";
+import type { ExtractedMemoryCandidate, ExtractionOutcome } from "./extraction.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
@@ -101,6 +101,33 @@ export interface ObserveResult {
   extraction: ExtractionOutcome;
 }
 
+/**
+ * `runtime.reextract` の結果（ADR 0028）。
+ *
+ * `observe()` の `ExtractionOutcome` と同じ3値のうち、`reextract` は `skipped` を返さない
+ * ——呼び出し側が明示的に指定した Observation に対して常に抽出を試みるため、
+ * 「この呼び出しでは抽出していない」という状態が無い（deferred も冪等な再送もここには来ない）。
+ */
+export interface ReextractResult {
+  observationId: ObservationId;
+  /**
+   * 今回の抽出で作られた（または冪等に既存の行として返された）Memory の id。
+   * `outcome !== 'ok'`、または候補が0件だった場合は空配列。
+   */
+  memoryIds: MemoryId[];
+  /**
+   * 🔴 安全弁により supersede された既存 Memory の id。
+   * - LLM がまた失敗した場合（`outcome: 'llm_failed_whole_observation'`）は必ず空配列
+   *   ——失敗を根拠に既存の記憶を置き換えない。
+   * - 候補が0件だった場合も必ず空配列——そもそも `supersededById` の指す先が無い。
+   * - 対象は同じ `(sourceObservationId, extractorVersion)` を持つ **`status: 'active'`** の
+   *   Memory のうち、今回作られた content_hash の集合に含まれないものだけ
+   *   （`forgotten` は絶対に含めない。`contested` も対象外——理由は ADR 0028 参照）。
+   */
+  supersededMemoryIds: MemoryId[];
+  extraction: ExtractionOutcome;
+}
+
 export interface TickOptions {
   limit?: number;
   kinds?: OutboxJobKind[];
@@ -126,6 +153,15 @@ export interface Runtime {
    * （実装は `./recall-runtime.js` の `runRecall`）。
    */
   recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult>;
+  /**
+   * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
+   * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
+   * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
+   * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする。
+   * 安全弁2つ（LLM がまた失敗したら何もしない・候補0件なら何もしない）は
+   * `ReextractResult` の doc コメントを参照。
+   */
+  reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
 }
 
 function extractObservationPayload(
@@ -153,25 +189,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const digestFallbackLength = deps.config?.digestFallbackLength ?? DEFAULT_DIGEST_FALLBACK_LENGTH;
   const defaultClaimedBy = deps.config?.defaultClaimedBy ?? DEFAULT_CLAIMED_BY;
 
-  /** 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。 */
-  async function runExtraction(
+  /**
+   * 抽出候補から Memory を作る核（`runExtraction` と `reextract` の共通経路）。
+   * `createMemoryWithOutbox` の ON CONFLICT により冪等——同じ候補で複数回呼んでも
+   * 新規行は増えない（`created: false` の場合はイベントも積まない）。
+   * `contentHashes` は `reextract` が「今回作られた集合」を判定するために使う。
+   */
+  async function createMemoriesFromCandidates(
     ctx: Ctx,
     observation: Observation,
-  ): Promise<{ memoryIds: MemoryId[]; outcome: ExtractionOutcome }> {
-    const { candidates, usedWholeObservationFallback } = await extractCandidates(
-      deps.llmProvider,
-      ctx,
-      observation,
-    );
-    const outcome: ExtractionOutcome = usedWholeObservationFallback
-      ? "llm_failed_whole_observation"
-      : "ok";
-    if (candidates.length === 0) {
-      return { memoryIds: [], outcome };
-    }
+    candidates: ExtractedMemoryCandidate[],
+    outcome: ExtractionOutcome,
+  ): Promise<{ memoryIds: MemoryId[]; contentHashes: Set<string> }> {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
     const memoryIds: MemoryId[] = [];
+    const contentHashes = new Set<string>();
     for (const candidate of candidates) {
       const newMemory = buildNewMemoryFromCandidate({
         ctx,
@@ -185,6 +218,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         now,
         digestFallbackLength,
       });
+      contentHashes.add(newMemory.contentHash);
       const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, [
         "embed",
       ]);
@@ -210,7 +244,119 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // embed ジョブは常に outbox 経由（非同期、docs/memory-model.md §11 行3）。
       // ここでは何もしない — tick() の processEmbedJob が処理する。
     }
+    return { memoryIds, contentHashes };
+  }
+
+  /** 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。 */
+  async function runExtraction(
+    ctx: Ctx,
+    observation: Observation,
+  ): Promise<{ memoryIds: MemoryId[]; outcome: ExtractionOutcome }> {
+    const { candidates, usedWholeObservationFallback } = await extractCandidates(
+      deps.llmProvider,
+      ctx,
+      observation,
+    );
+    const outcome: ExtractionOutcome = usedWholeObservationFallback
+      ? "llm_failed_whole_observation"
+      : "ok";
+    if (candidates.length === 0) {
+      return { memoryIds: [], outcome };
+    }
+    const { memoryIds } = await createMemoriesFromCandidates(ctx, observation, candidates, outcome);
     return { memoryIds, outcome };
+  }
+
+  /**
+   * ADR 0028: `observe()` が LLM 障害で全文フォールバックへ倒れた（または単に古い抽出器版で
+   * 作られた）Observation に対して、抽出をやり直す。
+   *
+   * 🔴 安全弁1: LLM がまた失敗したら（`usedWholeObservationFallback`）、何も supersede せずに
+   * 返す。失敗を根拠に既存の記憶を置き換えない。
+   * 🔴 安全弁2: 候補が0件なら、何も supersede しない。「何も記憶に値しない」という正常な
+   * 抽出結果を根拠に既存を消さない（`superseded_by_id` の指す先も無い）。
+   *
+   * supersede 対象は、同じ `(sourceObservationId, extractorVersion)` を持つ既存 Memory のうち
+   * **`status: 'active'`** かつ今回作られた content_hash の集合に含まれないものだけ。
+   * `forgotten`（利用者が意図して忘れさせた）は絶対に含めない。`contested` も対象外にする
+   * ——contested は対向 Memory との対で初めて意味を持つ契約（mandatory companion retrieval）を
+   * 持つため、機構都合の reextract がその対の片方だけを動かすと契約を壊しかねない
+   * （ADR 0028「確かめていないこと」参照）。
+   */
+  async function reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult> {
+    const observation = await deps.memoryStore.getObservation(ctx, observationId);
+    if (!observation) {
+      throw new Error(`runtime.reextract: observation not found: ${observationId}`);
+    }
+
+    const { candidates, usedWholeObservationFallback } = await extractCandidates(
+      deps.llmProvider,
+      ctx,
+      observation,
+    );
+
+    if (usedWholeObservationFallback) {
+      return {
+        observationId,
+        memoryIds: [],
+        supersededMemoryIds: [],
+        extraction: "llm_failed_whole_observation",
+      };
+    }
+    if (candidates.length === 0) {
+      return { observationId, memoryIds: [], supersededMemoryIds: [], extraction: "ok" };
+    }
+
+    // supersede 判定は「今回作る前」の既存 Memory を基準にする——これから作る Memory 自身が
+    // 混ざって「今回作ったものを今回 supersede する」という自己矛盾を起こさないため。
+    const existingBefore = await deps.memoryStore.listBySourceObservation(
+      ctx,
+      observationId,
+      extractorVersion,
+    );
+
+    const { memoryIds, contentHashes } = await createMemoriesFromCandidates(
+      ctx,
+      observation,
+      candidates,
+      "ok",
+    );
+    // `candidates.length === 0` を上で早期リターンしている以上、`createMemoriesFromCandidates`
+    // は候補ごとに必ず1件 push するため `memoryIds` は非空——ここは構造的に保証されている
+    // （防御的な二重チェックをあえて置かない。安全弁は「候補0件なら supersede しない」の
+    // 早期リターン1本に絞る。ADR 0028「変異A」参照: ここを二重化すると、安全弁を外す変異を
+    // 当てても歯が落ちなくなり、安全弁の実効性を検査できなくなる）。
+    const supersededById = memoryIds[0]!;
+
+    const supersededMemoryIds: MemoryId[] = [];
+    for (const existing of existingBefore) {
+      if (existing.status !== "active") {
+        // 🔴 forgotten を絶対に触らない・contested は対象外（doc コメント参照）。
+        continue;
+      }
+      if (contentHashes.has(existing.contentHash)) {
+        // 今回の抽出でも変わらず作られた内容——置き換えられていないので supersede しない。
+        continue;
+      }
+      await deps.memoryStore.updateStatus(ctx, existing.id, "superseded", { supersededById });
+      await deps.eventStore.append(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: existing.id,
+        kind: "superseded",
+        actor: { type: "system" },
+        digestSnapshot: existing.digest,
+        sizeBeforeBytes: null,
+        meta: {
+          reason: "reextract_superseded",
+          supersededById,
+          sourceObservationId: observationId,
+          extractorVersion,
+        },
+      });
+      supersededMemoryIds.push(existing.id);
+    }
+
+    return { observationId, memoryIds, supersededMemoryIds, extraction: "ok" };
   }
 
   async function handleMemoryUsage(
@@ -370,5 +516,5 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     });
   }
 
-  return { observe, tick, recall };
+  return { observe, tick, recall, reextract };
 }

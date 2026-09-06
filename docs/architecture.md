@@ -140,6 +140,11 @@ LLM 呼び出し自体が失敗した場合は Observation の全文を1件の `
 安全弁を持つ（ADR 0012 D-ingest-4、[docs/memory-model.md](./memory-model.md) §4 の
 digest 安全弁と対になる）。
 
+`runtime` は `observe` / `tick` / `recall` に加えて `reextract` も実装する——ADR 0013 が
+未解決のまま残した「失敗した抽出をやり直す」操作。概念的な位置づけ（`superseded` にする
+判断の理由を含む）は [docs/memory-model.md](./memory-model.md) §4 と
+[ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) を参照。
+
 ### 3.5 冪等
 
 再送・二重配信は前提として設計する。**カウンタの盲目的インクリメントを設計原則として禁止する。**
@@ -303,6 +308,11 @@ interface MemoryStore {
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
   get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
+  listBySourceObservation(
+    ctx: Ctx,
+    observationId: ObservationId,
+    extractorVersion: string | null
+  ): Promise<Memory[]>;
   updateStatus(
     ctx: Ctx,
     id: MemoryId,
@@ -346,6 +356,10 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
 >   `recalls` テーブルへ1行書き込み、発行した `recallId` を返す。この段は省略可能な段では
 >   ない——`recallId` が発行されないと `observe({kind:'memory_usage'})` が recall を
 >   参照できなくなる（ADR 0008）。
+
+> **ADR 0028（2026-09 追記）**: `listBySourceObservation` を足した。**SELECT のみ**——
+> マイグレーション・索引の追加は伴わない。`runtime.reextract`（§3.4）が「ある Observation・
+> ある版の抽出器から今回作られなかった既存 Memory」を判定するために使う。
 
 > **D9（2026-09 追記）**: `getMany` と `recordUsage` を足した。
 >
