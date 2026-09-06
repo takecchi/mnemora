@@ -1,0 +1,799 @@
+#!/usr/bin/env node
+/**
+ * 規模を振るベンチ（テストではなくスクリプト。`pnpm --filter @mnemora/postgres run bench:scale`）。
+ *
+ * ## 何のためのベンチか
+ *
+ * 2つの未計測の穴に、1回の計測で答える。
+ *
+ * 1. **`docs/decisions/0011-no-window-count-in-ann-stage.md` / `docs/recall.md` §5**:
+ *    `MemoryStore.aggregateScope`（目次帯・第3階の群カウント）は Phase 1 では常に厳密集計
+ *    （`memories` テーブルへの `GROUP BY subject_id` 集約）であり、近似経路が無い。
+ *    `docs/recall.md` は「大規模テナントでは近似を許す」と書いているが、どの規模から
+ *    厳密集計が割に合わなくなるのかは誰も測っていない。
+ *    `aggregateScope` は `memories` テーブルだけを読む（`memory-store.ts` の実装を参照。
+ *    `JOIN` 無し）ので、**埋め込みを1件も作らずに測れる**。
+ *
+ * 2. **`docs/decisions/0023-subject-filter-in-ann-stage.md`**: 段1の ANN クエリに
+ *    `m.subject_id = $x` を足すと、CI の実測（3,000行）でプランナが HNSW を捨てて
+ *    「`idx_memories_by_subject` で絞ってから距離で Sort」という厳密な経路を選んだ。
+ *    埋め込みテーブル側は `Seq Scan` になる。この経路がテナント規模に対してどう伸びるかは
+ *    未測定。
+ *
+ * ## 実行方法
+ *
+ * `DATABASE_URL` が本物の Postgres + pgvector を指している状態で:
+ *
+ * ```
+ * pnpm --filter @mnemora/postgres run bench:scale
+ * ```
+ *
+ * 既定では 10k/100k/1M の3点で `aggregateScope` を測り（安いので既定でフル規模）、
+ * ベクトル検索（Part 2）は既定で 10k/100k までに留める（1M × 高次元は HNSW の
+ * 逐次維持コストが非常に重くなりうるため）。以下の環境変数で調整できる:
+ *
+ * - `BENCH_SCOPE_SCALES`: `aggregateScope` を測る行数（カンマ区切り）。既定 `10000,100000,1000000`
+ * - `BENCH_VECTOR_SCALES`: ベクトル検索を測る行数（カンマ区切り）。`BENCH_SCOPE_SCALES` の
+ *   部分集合でなければならない（そのスケールの `memories` を既に流し込んだ上でベクトルだけ
+ *   追加するため）。既定 `10000,100000`（1M は明示的な opt-in）
+ * - `BENCH_VECTOR_DIMENSIONS`: ベクトルの次元数。既定 `256`
+ *   （`text-embedding-3-small` 相当の 1536 は重いので既定にしない。次元数は
+ *   `memory_embeddings_<space>` の行幅を決め、`Seq Scan` の費用に直接効く——
+ *   高次元で測り直したい場合はこの環境変数を上げること）
+ * - `BENCH_SEED`: 決定的な乱数の種（`setseed` に渡す）。既定 `0.20260906`
+ *
+ * ## 使い捨てデータベース
+ *
+ * 規模ごとに専用のデータベースを作り（`packages/postgres/src/__tests__/temp-database.ts`
+ * と同じ作法）、計測後に `dropTempDatabase` で `WITH (FORCE)` を使わずに落とす
+ * （ADR 0020: `WITH (FORCE)` は「閉じ切れていないコネクションが残っている」不具合を
+ * 検知不能にする）。
+ *
+ * ## 行の投入
+ *
+ * `createMemory()` / `vectorStore.upsert()` を1件ずつ呼ぶと1M件は終わらないので、
+ * `INSERT ... SELECT FROM generate_series(...)` によるバルク SQL で入れる
+ * （`seedMemories` / `seedVectors` 参照）。
+ *
+ * ## 手元では一切実行できていない
+ *
+ * この環境には PostgreSQL が無い（`DATABASE_URL` 無し・docker 無し・root 無し）。
+ * このスクリプトは**一度も実行されていない**——構文・型は `tsc` で検査したのみ。
+ */
+
+import { performance } from "node:perf_hooks";
+import { Pool } from "pg";
+import { drizzle } from "drizzle-orm/node-postgres";
+import type { Ctx, EmbeddingSpaceId, RecallScope, VectorFilter } from "@mnemora/core";
+import * as schema from "../schema.js";
+import { runMigrations } from "../migrate.js";
+import { registerEmbeddingSpace } from "../vector-space.js";
+import { assertSafeIdentifier, embeddingSpaceTableName } from "../embedding-space-table.js";
+import { PostgresMemoryStore } from "../memory-store.js";
+import { PostgresVectorStore } from "../vector-store.js";
+import { dropTempDatabase } from "../__tests__/temp-database.js";
+import { seededRandom } from "../__tests__/test-db.js";
+
+// ---------------------------------------------------------------------------
+// 設定
+// ---------------------------------------------------------------------------
+
+const TENANT = "scale-bench-tenant";
+const STATUS_FILTER: Array<"active" | "contested"> = ["active", "contested"];
+
+/** 決定的な乱数の種。`SELECT setseed($1)` に渡す（-1..1 の範囲）。 */
+const DEFAULT_SEED = 0.20260906;
+
+/** クエリベクトルを作る `seededRandom`（JS 側、DB の `setseed` とは別系統）の種。 */
+const QUERY_VECTOR_SEED = 20260906;
+
+const DEFAULT_SCOPE_SCALES = [10_000, 100_000, 1_000_000];
+/**
+ * ベクトル検索の既定スケールは控えめにする。1M × 高次元は HNSW 索引の（挿入のたびに
+ * 逐次維持される）構築コストだけで非常に重くなりうる——このスクリプトは
+ * `registerEmbeddingSpace` をそのまま使い（索引を先に作ってからデータを流し込む、
+ * 本番と同じ順序）、その現実そのものを計測対象にしている。だからこそ既定では
+ * 1M を含めない。
+ */
+const DEFAULT_VECTOR_SCALES = [10_000, 100_000];
+const DEFAULT_DIMENSIONS = 256;
+
+function parseScales(envVar: string | undefined, fallback: number[]): number[] {
+  if (!envVar) {
+    return fallback;
+  }
+  return envVar
+    .split(",")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .map((s) => {
+      const n = Number(s);
+      if (!Number.isInteger(n) || n <= 0) {
+        throw new Error(`不正な規模指定: "${s}"（正の整数のカンマ区切りで指定すること）`);
+      }
+      return n;
+    });
+}
+
+interface BenchConfig {
+  databaseUrl: string;
+  scopeScales: number[];
+  vectorScales: number[];
+  dimensions: number;
+  seed: number;
+}
+
+function loadConfig(): BenchConfig {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (!databaseUrl) {
+    throw new Error(
+      "DATABASE_URL が設定されていません。本物の Postgres + pgvector を指す接続文字列を" +
+        "設定してから実行すること（擬似物では代替しない）。",
+    );
+  }
+  const scopeScales = parseScales(process.env.BENCH_SCOPE_SCALES, DEFAULT_SCOPE_SCALES);
+  const vectorScales = parseScales(process.env.BENCH_VECTOR_SCALES, DEFAULT_VECTOR_SCALES);
+  for (const v of vectorScales) {
+    if (!scopeScales.includes(v)) {
+      throw new Error(
+        `BENCH_VECTOR_SCALES の ${v} が BENCH_SCOPE_SCALES に含まれていない。` +
+          `ベクトル検索はそのスケールの memories を既に流し込んだ上で測るため、` +
+          `BENCH_SCOPE_SCALES のスケールの部分集合でなければならない。`,
+      );
+    }
+  }
+  const dimensions = process.env.BENCH_VECTOR_DIMENSIONS
+    ? Number(process.env.BENCH_VECTOR_DIMENSIONS)
+    : DEFAULT_DIMENSIONS;
+  if (!Number.isInteger(dimensions) || dimensions <= 0) {
+    throw new Error(`不正な BENCH_VECTOR_DIMENSIONS: ${process.env.BENCH_VECTOR_DIMENSIONS}`);
+  }
+  const seed = process.env.BENCH_SEED ? Number(process.env.BENCH_SEED) : DEFAULT_SEED;
+  if (!Number.isFinite(seed) || seed < -1 || seed > 1) {
+    throw new Error(`不正な BENCH_SEED: ${process.env.BENCH_SEED}（-1..1 の範囲で指定すること）`);
+  }
+  return { databaseUrl, scopeScales, vectorScales, dimensions, seed };
+}
+
+// ---------------------------------------------------------------------------
+// 進捗ログ（CI で長時間無言にならないため）
+// ---------------------------------------------------------------------------
+
+function log(message: string): void {
+  const ts = new Date().toISOString();
+  console.log(`[${ts}] ${message}`);
+}
+
+// ---------------------------------------------------------------------------
+// 小さなユーティリティ
+// ---------------------------------------------------------------------------
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  if (sorted.length === 0) {
+    throw new Error("median: 空配列");
+  }
+  return sorted.length % 2 !== 0 ? sorted[mid]! : (sorted[mid - 1]! + sorted[mid]!) / 2;
+}
+
+function fmtMs(ms: number): string {
+  return `${ms.toFixed(1)}ms`;
+}
+
+/**
+ * `warmup 1回 + 本計測3回` を行い、本計測の中央値（ミリ秒）を返す。
+ * 1回だけの値は揺れるため、必ずこの形で測る（マネージャー指示）。
+ */
+async function measureMedian(fn: () => Promise<unknown>): Promise<number> {
+  await fn(); // warm-up（捨てる）
+  const samples: number[] = [];
+  for (let i = 0; i < 3; i += 1) {
+    const t0 = performance.now();
+    await fn();
+    samples.push(performance.now() - t0);
+  }
+  return median(samples);
+}
+
+/**
+ * `pool.query` を一時的に監視し、`matcher` に一致した最初のクエリのテキスト/パラメータを
+ * 捕まえる（`vector-search-subject.test.ts` の手法をそのまま踏襲）。drizzle-orm の
+ * `db.execute(sql\`...\`)` は内部でこの `pool.query` を通るため、`PostgresMemoryStore` /
+ * `PostgresVectorStore` が実際に発行するクエリをそのまま捕まえて、後で
+ * `EXPLAIN (ANALYZE, BUFFERS)` にかけられる。
+ */
+async function captureQuery(
+  pool: Pool,
+  matcher: (text: string) => boolean,
+  fn: () => Promise<unknown>,
+): Promise<{ text: string; params: unknown[] }> {
+  let capturedText: string | undefined;
+  let capturedParams: unknown[] | undefined;
+  const originalQuery = pool.query.bind(pool);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (pool as any).query = (...args: unknown[]) => {
+    const [config, params] = args as [string | { text: string }, unknown[] | undefined];
+    const text = typeof config === "string" ? config : config.text;
+    if (matcher(text)) {
+      capturedText = text;
+      capturedParams = params;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalQuery as any)(...args);
+  };
+  try {
+    await fn();
+  } finally {
+    pool.query = originalQuery;
+  }
+  if (capturedText === undefined) {
+    throw new Error("captureQuery: matcher に一致するクエリが観測されなかった");
+  }
+  return { text: capturedText, params: capturedParams ?? [] };
+}
+
+async function explainAnalyze(pool: Pool, text: string, params: unknown[]): Promise<string> {
+  const result = await pool.query<{ "QUERY PLAN": string }>(
+    `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) ${text}`,
+    params,
+  );
+  return result.rows.map((row) => row["QUERY PLAN"]).join("\n");
+}
+
+/** EXPLAIN の全文から、報告に十分な要約を機械的に抜き出す（本文は結果に含める）。 */
+function summarizePlan(plan: string): {
+  usesHnsw: boolean;
+  usesSubjectIndex: boolean;
+  hasSeqScan: boolean;
+  topLine: string;
+  actualRowsLines: string[];
+} {
+  const usesHnsw = /idx_memory_embeddings_hnsw/.test(plan);
+  const usesSubjectIndex = /idx_memories_by_subject/.test(plan);
+  const hasSeqScan = /Seq Scan/.test(plan);
+  const topLine = plan.split("\n")[0]?.trim() ?? "";
+  const actualRowsLines = plan
+    .split("\n")
+    .filter((line) => /actual time=/.test(line))
+    .map((line) => line.trim());
+  return { usesHnsw, usesSubjectIndex, hasSeqScan, topLine, actualRowsLines };
+}
+
+// ---------------------------------------------------------------------------
+// データ投入（バルク SQL。1件ずつ createMemory() を呼ばない）
+// ---------------------------------------------------------------------------
+
+/**
+ * `subjectCount` は規模に応じて変える（呼び出し側が決める）。全部同じ subject だと
+ * `GROUP BY subject_id` が1行しか返らず、群カウントの費用を過小評価するため。
+ *
+ * 分布は完全な一様分布にしない: `power(random(), 3)` で低い添字（subject-0 に近いほう）
+ * に寄せる緩い skew を掛け、「一部の大きな subject + 大量の小さな subject」という
+ * 現実のテナントに近い形にする（完全な Zipf 分布の実装ではない——その主張はしない）。
+ * `subjectCount - 1`（分布の裾、最も小さい部類の subject）を、後段の「小さい subject を
+ * subjectId で絞る」計測に使う。
+ *
+ * 各列の値（status / embedding_status の分布、half_life_hours 等）は
+ * `aggregateScope` の `FILTER (WHERE ...)` の各枝を実際に踏ませるための最小限の作り込みで、
+ * 「これが現実の分布だ」という主張はしていない。
+ */
+async function seedMemories(
+  pool: Pool,
+  tenant: string,
+  rowCount: number,
+  subjectCount: number,
+  seed: number,
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    // setseed はセッション（このコネクション）に対して効く。同じクライアントで
+    // 続けて INSERT を発行することで、乱数列を決定的にする。
+    await client.query("SELECT setseed($1)", [seed]);
+    await client.query(
+      `
+      INSERT INTO memories (
+        id, tenant_id, subject_id, content, content_hash, digest, digest_source,
+        provenance_kind, provenance, status, tags, occurred_at, recorded_at,
+        strength, half_life_hours, decay_floor_at, embedding_status, created_at, updated_at
+      )
+      SELECT
+        gen_random_uuid(),
+        $1,
+        'subject-' || floor(power(random(), 3) * $2)::int,
+        'bench memory #' || gs,
+        md5('bench-content-' || gs::text),
+        'bench digest #' || gs,
+        'llm',
+        'imported',
+        '{"kind":"imported"}'::jsonb,
+        (ARRAY['active','active','active','active','contested','archived','superseded','forgotten'])
+          [1 + floor(random() * 8)::int],
+        '{}'::text[],
+        NULL,
+        now() - (random() * interval '365 days'),
+        1.0,
+        720,
+        now() + interval '30 days',
+        (ARRAY['ready','ready','ready','ready','pending','failed','skipped'])
+          [1 + floor(random() * 7)::int],
+        now(),
+        now()
+      FROM generate_series(1, $3) AS gs
+      `,
+      [tenant, subjectCount, rowCount],
+    );
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * `memory_embeddings_<space>` へベクトルをバルク投入する。`vectorStore.upsert()` を
+ * 1件ずつ呼ぶと1M件は終わらないので、`memories` から `INSERT ... SELECT` で1文で埋める。
+ * ベクトルは `real[]` を組み立てて `::vector` にキャストする（pgvector が対応するキャスト）。
+ *
+ * `registerEmbeddingSpace` を先に呼んでおく前提（テーブルと HNSW 索引は既に存在する）ので、
+ * この INSERT はテーブルが空でない索引へ逐次追記する形になる——本番でベクトルが
+ * 継続的に流し込まれるのと同じ順序であり、まさに計測したい経路そのものである。
+ */
+async function seedVectors(
+  pool: Pool,
+  tenant: string,
+  table: string,
+  dimensions: number,
+  seed: number,
+): Promise<void> {
+  const client = await pool.connect();
+  try {
+    await client.query("SELECT setseed($1)", [seed]);
+    await client.query(
+      `
+      INSERT INTO ${table} (tenant_id, memory_id, embedding, model, created_at)
+      SELECT
+        tenant_id,
+        id,
+        (ARRAY(SELECT (random() * 2 - 1)::real FROM generate_series(1, $2)))::vector,
+        'bench-model',
+        now()
+      FROM memories
+      WHERE tenant_id = $1
+      `,
+      [tenant, dimensions],
+    );
+  } finally {
+    client.release();
+  }
+}
+
+function subjectCountFor(rowCount: number): number {
+  // 平均 ~50行/subject という単純な比率で規模に連動させる。
+  // 10k -> 200 subject, 100k -> 2,000 subject, 1M -> 20,000 subject。
+  return Math.max(20, Math.round(rowCount / 50));
+}
+
+function smallSubjectIdFor(subjectCount: number): string {
+  return `subject-${subjectCount - 1}`;
+}
+
+// ---------------------------------------------------------------------------
+// 使い捨てデータベースのライフサイクル
+// ---------------------------------------------------------------------------
+
+function urlForDatabase(baseUrl: string, database: string): string {
+  const url = new URL(baseUrl);
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+interface ScaleDatabase {
+  admin: Pool;
+  pool: Pool;
+  db: ReturnType<typeof drizzle<typeof schema>>;
+  database: string;
+}
+
+async function createScaleDatabase(baseUrl: string, database: string): Promise<ScaleDatabase> {
+  const admin = new Pool({ connectionString: baseUrl, max: 1 });
+  // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
+  await dropTempDatabase(admin, database);
+  await admin.query(`CREATE DATABASE ${database}`);
+  const pool = new Pool({ connectionString: urlForDatabase(baseUrl, database), max: 5 });
+  await runMigrations(pool);
+  const db = drizzle(pool, { schema });
+  return { admin, pool, db, database };
+}
+
+async function teardownScaleDatabase(handle: ScaleDatabase): Promise<void> {
+  await handle.pool.end();
+  await dropTempDatabase(handle.admin, handle.database);
+  await handle.admin.end();
+}
+
+// ---------------------------------------------------------------------------
+// Part 1: aggregateScope
+// ---------------------------------------------------------------------------
+
+interface ScopeResult {
+  rows: number;
+  subjectCount: number;
+  variant: "全体" | "subjectId 指定（小さい subject）";
+  medianMs: number;
+  plan: ReturnType<typeof summarizePlan>;
+}
+
+async function benchAggregateScope(
+  pool: Pool,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  rowCount: number,
+  subjectCount: number,
+): Promise<ScopeResult[]> {
+  const memoryStore = new PostgresMemoryStore(db);
+  const ctx: Ctx = { tenantId: TENANT };
+  const smallSubjectId = smallSubjectIdFor(subjectCount);
+
+  const variants: Array<{ label: ScopeResult["variant"]; scope: RecallScope }> = [
+    { label: "全体", scope: {} },
+    { label: "subjectId 指定（小さい subject）", scope: { subjectId: smallSubjectId } },
+  ];
+
+  const results: ScopeResult[] = [];
+  for (const variant of variants) {
+    log(`  aggregateScope（${variant.label}）を計測中...`);
+    const medianMs = await measureMedian(() => memoryStore.aggregateScope(ctx, variant.scope));
+
+    const captured = await captureQuery(
+      pool,
+      (text) => text.includes("GROUP BY subject_id"),
+      () => memoryStore.aggregateScope(ctx, variant.scope),
+    );
+    const plan = summarizePlan(await explainAnalyze(pool, captured.text, captured.params));
+
+    log(`    中央値 ${fmtMs(medianMs)} / プラン先頭行: ${plan.topLine}`);
+    results.push({ rows: rowCount, subjectCount, variant: variant.label, medianMs, plan });
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// Part 2: PostgresVectorStore.search（subject フィルタが段1にある場合）
+// ---------------------------------------------------------------------------
+
+interface VectorResult {
+  rows: number;
+  dimensions: number;
+  variant: "subjectId 無し" | "subjectId 有り（小さい subject）";
+  medianMs: number;
+  plan: ReturnType<typeof summarizePlan>;
+}
+
+async function benchVectorSearch(
+  pool: Pool,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  rowCount: number,
+  subjectCount: number,
+  dimensions: number,
+  vectorSeed: number,
+): Promise<VectorResult[]> {
+  const space: EmbeddingSpaceId = {
+    provider: "bench",
+    model: `scale-bench-dim${dimensions}`,
+    dimensions,
+  };
+  const table = embeddingSpaceTableName(space);
+  // 生 SQL に埋め込む前の防御的チェック（`space` はこの関数内で組み立てた固定値のみだが、
+  // `vector-store.ts` / `vector-space.ts` と同じ規律を踏襲する）。
+  assertSafeIdentifier(table);
+
+  log(`  埋め込み空間を登録中（table=${table}, dims=${dimensions}）...`);
+  await registerEmbeddingSpace(pool, space);
+
+  log(`  ベクトルをバルク投入中（${rowCount}行 x ${dimensions}次元）...`);
+  await seedVectors(pool, TENANT, table, dimensions, vectorSeed);
+
+  await pool.query(`ANALYZE ${table}`);
+  await pool.query("ANALYZE memories");
+
+  const vectorStore = new PostgresVectorStore(db);
+  const ctx: Ctx = { tenantId: TENANT };
+  // クエリベクトルは決定的な擬似乱数から作る（`test-db.ts` の `seededRandom` を再利用）。
+  // ⚠ 全部 0 のベクトルは使わない——cosine 距離はゼロベクトルに対して定義できず
+  // （ノルムが 0 になり 0 除算になる）、pgvector の `<=>` がエラーになる。
+  const queryRand = seededRandom(QUERY_VECTOR_SEED);
+  const queryVector = Array.from({ length: dimensions }, () => queryRand() * 2 - 1);
+  const smallSubjectId = smallSubjectIdFor(subjectCount);
+
+  const variants: Array<{ label: VectorResult["variant"]; filter: VectorFilter }> = [
+    { label: "subjectId 無し", filter: { tenantId: TENANT, status: STATUS_FILTER } },
+    {
+      label: "subjectId 有り（小さい subject）",
+      filter: { tenantId: TENANT, status: STATUS_FILTER, subjectId: smallSubjectId },
+    },
+  ];
+
+  const results: VectorResult[] = [];
+  for (const variant of variants) {
+    log(`  PostgresVectorStore.search（${variant.label}）を計測中...`);
+    const medianMs = await measureMedian(() =>
+      vectorStore.search(ctx, space, queryVector, { limit: 40, filter: variant.filter }),
+    );
+
+    const captured = await captureQuery(
+      pool,
+      (text) => text.includes(table) && /order by/i.test(text),
+      () => vectorStore.search(ctx, space, queryVector, { limit: 40, filter: variant.filter }),
+    );
+    const plan = summarizePlan(await explainAnalyze(pool, captured.text, captured.params));
+
+    log(
+      `    中央値 ${fmtMs(medianMs)} / HNSW使用=${plan.usesHnsw} / Seq Scan=${plan.hasSeqScan} / プラン先頭行: ${plan.topLine}`,
+    );
+    results.push({ rows: rowCount, dimensions, variant: variant.label, medianMs, plan });
+  }
+  return results;
+}
+
+// ---------------------------------------------------------------------------
+// レポート出力（markdown）
+// ---------------------------------------------------------------------------
+
+function renderScopeTable(results: ScopeResult[]): string {
+  const lines = [
+    "| 規模（行数） | subject 数 | 変種 | 所要時間（中央値） | プランの要点 |",
+    "|---:|---:|---|---:|---|",
+  ];
+  for (const r of results) {
+    const planNote = r.plan.hasSeqScan
+      ? `Seq Scan あり（${r.plan.topLine}）`
+      : `Seq Scan 無し（${r.plan.topLine}）`;
+    lines.push(
+      `| ${r.rows.toLocaleString()} | ${r.subjectCount.toLocaleString()} | ${r.variant} | ${fmtMs(r.medianMs)} | ${planNote} |`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function renderVectorTable(results: VectorResult[]): string {
+  const lines = [
+    "| 規模（行数） | 次元数 | 変種 | 所要時間（中央値） | HNSW 使用 | Seq Scan | プランの要点 |",
+    "|---:|---:|---|---:|---:|---:|---|",
+  ];
+  for (const r of results) {
+    lines.push(
+      `| ${r.rows.toLocaleString()} | ${r.dimensions} | ${r.variant} | ${fmtMs(r.medianMs)} | ${r.plan.usesHnsw ? "yes" : "no"} | ${r.plan.hasSeqScan ? "yes" : "no"} | ${r.plan.topLine} |`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function renderScopeExplainDetails(results: ScopeResult[]): string {
+  return results
+    .map(
+      (r) =>
+        `### aggregateScope: rows=${r.rows.toLocaleString()}, ${r.variant}\n\n` +
+        "```\n" +
+        (r.plan.actualRowsLines.length > 0 ? r.plan.actualRowsLines.join("\n") : r.plan.topLine) +
+        "\n```",
+    )
+    .join("\n\n");
+}
+
+function renderVectorExplainDetails(results: VectorResult[]): string {
+  return results
+    .map(
+      (r) =>
+        `### search: rows=${r.rows.toLocaleString()}, dims=${r.dimensions}, ${r.variant}\n\n` +
+        "```\n" +
+        (r.plan.actualRowsLines.length > 0 ? r.plan.actualRowsLines.join("\n") : r.plan.topLine) +
+        "\n```",
+    )
+    .join("\n\n");
+}
+
+/**
+ * 「この計測が答えるべき問い」への回答欄。**ここでは何も先に主張しない**——
+ * 実測結果（`scopeResults` / `vectorResults`）から機械的に導ける事実だけを、
+ * このセクションで実際に組み立てる（値は実行時に埋まる）。
+ */
+function renderAnswers(
+  config: BenchConfig,
+  scopeResults: ScopeResult[],
+  vectorResults: VectorResult[],
+): string {
+  const lines: string[] = [];
+  lines.push("## この計測が答えるべき問い");
+  lines.push("");
+  lines.push(
+    `（測定条件: aggregateScope は ${config.scopeScales.map((n) => n.toLocaleString()).join(" / ")} 行、` +
+      `ベクトル検索は ${config.vectorScales.map((n) => n.toLocaleString()).join(" / ")} 行 × ${config.dimensions} 次元で実測。` +
+      `以下は実測値から機械的に導いた事実のみを記す。）`,
+  );
+  lines.push("");
+
+  lines.push("### 1. `aggregateScope` は、どの規模から厳密集計が割に合わなくなるか");
+  lines.push("");
+  const wholeTenant = scopeResults.filter((r) => r.variant === "全体");
+  if (wholeTenant.length > 0) {
+    lines.push("行数と所要時間（`scope.subjectId` 無し、テナント全体）:");
+    lines.push("");
+    for (const r of wholeTenant) {
+      const perRowUs = (r.medianMs * 1000) / r.rows;
+      lines.push(
+        `- ${r.rows.toLocaleString()}行: ${fmtMs(r.medianMs)}（1行あたり ${perRowUs.toFixed(3)}µs） / ` +
+          `${r.plan.hasSeqScan ? "Seq Scan あり" : "Seq Scan 無し"}`,
+      );
+    }
+    if (wholeTenant.length >= 2) {
+      const first = wholeTenant[0]!;
+      const last = wholeTenant[wholeTenant.length - 1]!;
+      const scaleRatio = last.rows / first.rows;
+      const timeRatio = last.medianMs / first.medianMs;
+      lines.push("");
+      lines.push(
+        `行数は ${scaleRatio.toFixed(1)}倍（${first.rows.toLocaleString()} → ${last.rows.toLocaleString()}）に対し、` +
+          `所要時間は ${timeRatio.toFixed(1)}倍（${fmtMs(first.medianMs)} → ${fmtMs(last.medianMs)}）。` +
+          `${timeRatio > scaleRatio * 1.3 ? "行数の伸びより時間の伸びが大きい（超線形）。" : timeRatio < scaleRatio * 0.7 ? "行数の伸びより時間の伸びが小さい（劣線形）。" : "ほぼ行数に比例（線形）。"}`,
+      );
+    }
+  }
+  lines.push("");
+  lines.push(
+    "**この数値だけから「どの規模から割に合わなくなるか」を判断するには、比較対象" +
+      "（例えば recall 全体のレイテンシ予算・許容できる P99）が要る。本ベンチはその閾値を" +
+      "決めておらず、生の所要時間とスケーリングだけを出す。閾値の判断はこの表を見た人が行うこと。**",
+  );
+  lines.push("");
+
+  lines.push(
+    "### 2. subject で絞る段1は、規模が上がるとどうなるか。`Seq Scan` は実際に効いてくるか",
+  );
+  lines.push("");
+  const withSubject = vectorResults.filter((r) => r.variant === "subjectId 有り（小さい subject）");
+  const withoutSubject = vectorResults.filter((r) => r.variant === "subjectId 無し");
+  if (withSubject.length > 0) {
+    lines.push("`filter.subjectId` あり（小さい subject）の場合:");
+    lines.push("");
+    for (const r of withSubject) {
+      lines.push(
+        `- ${r.rows.toLocaleString()}行 × ${r.dimensions}次元: ${fmtMs(r.medianMs)} / ` +
+          `HNSW使用=${r.plan.usesHnsw ? "yes" : "no"} / Seq Scan=${r.plan.hasSeqScan ? "yes" : "no"} / ` +
+          `idx_memories_by_subject使用=${r.plan.usesSubjectIndex ? "yes" : "no"}`,
+      );
+    }
+    if (withSubject.length >= 2) {
+      const first = withSubject[0]!;
+      const last = withSubject[withSubject.length - 1]!;
+      lines.push("");
+      lines.push(
+        `${first.rows.toLocaleString()}行 → ${last.rows.toLocaleString()}行で、所要時間は ` +
+          `${fmtMs(first.medianMs)} → ${fmtMs(last.medianMs)}（${(last.medianMs / first.medianMs).toFixed(1)}倍）。`,
+      );
+    }
+  }
+  if (withoutSubject.length > 0) {
+    lines.push("");
+    lines.push("参考: `filter.subjectId` 無しの場合（比較対象）:");
+    lines.push("");
+    for (const r of withoutSubject) {
+      lines.push(
+        `- ${r.rows.toLocaleString()}行 × ${r.dimensions}次元: ${fmtMs(r.medianMs)} / ` +
+          `HNSW使用=${r.plan.usesHnsw ? "yes" : "no"} / Seq Scan=${r.plan.hasSeqScan ? "yes" : "no"}`,
+      );
+    }
+  }
+  lines.push("");
+  if (config.vectorScales.every((n) => n < 1_000_000)) {
+    lines.push(
+      "**⚠ このベクトル検索の計測は 1M 行を含んでいない**（既定は 10k/100k まで。" +
+        "`BENCH_VECTOR_SCALES=10000,100000,1000000` を指定すれば含められるが、" +
+        "HNSW 索引の逐次維持コストが乗るため実行時間が大きく伸びる可能性がある）。" +
+        "**したがって『100万件級でどうなるか』への直接の答えは、この実行結果には無い。**" +
+        "上の 10k→100k の伸び方から外挿する以上のことは言えない。",
+    );
+  } else {
+    lines.push(
+      "上表に 1M 行のデータ点が含まれている（`BENCH_VECTOR_SCALES` で明示的に指定された）。",
+    );
+  }
+
+  return lines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// main
+// ---------------------------------------------------------------------------
+
+async function main(): Promise<void> {
+  const config = loadConfig();
+  // memories とは異なる種を使う（同じ乱数列を2度使い回さない）。
+  const vectorSeed = config.seed * -1;
+
+  log("規模を振るベンチを開始する。");
+  log(`Part 1（aggregateScope）の規模: ${config.scopeScales.join(", ")}`);
+  log(
+    `Part 2（vector search）の規模: ${config.vectorScales.join(", ")}, 次元数: ${config.dimensions}`,
+  );
+
+  const scopeResults: ScopeResult[] = [];
+  const vectorResults: VectorResult[] = [];
+
+  for (const rowCount of config.scopeScales) {
+    const database = `mnemora_scale_bench_${rowCount}`;
+    const subjectCount = subjectCountFor(rowCount);
+
+    log(`=== 規模 ${rowCount.toLocaleString()}行（subject数 ${subjectCount.toLocaleString()}）===`);
+    log(`使い捨てデータベース ${database} を作成中...`);
+    const handle = await createScaleDatabase(config.databaseUrl, database);
+
+    try {
+      log(`memories を ${rowCount.toLocaleString()}行バルク投入中...`);
+      const seedStart = performance.now();
+      await seedMemories(handle.pool, TENANT, rowCount, subjectCount, config.seed);
+      await handle.pool.query("ANALYZE memories");
+      log(`  投入完了（${fmtMs(performance.now() - seedStart)}）。`);
+
+      log("Part 1: aggregateScope を計測中...");
+      const scopeForThisScale = await benchAggregateScope(
+        handle.pool,
+        handle.db,
+        rowCount,
+        subjectCount,
+      );
+      scopeResults.push(...scopeForThisScale);
+
+      if (config.vectorScales.includes(rowCount)) {
+        log("Part 2: PostgresVectorStore.search を計測中...");
+        const vectorForThisScale = await benchVectorSearch(
+          handle.pool,
+          handle.db,
+          rowCount,
+          subjectCount,
+          config.dimensions,
+          vectorSeed,
+        );
+        vectorResults.push(...vectorForThisScale);
+      } else {
+        log("  この規模は BENCH_VECTOR_SCALES に含まれていないため、Part 2 はスキップする。");
+      }
+    } finally {
+      log(`使い捨てデータベース ${database} を drop 中...`);
+      await teardownScaleDatabase(handle);
+    }
+  }
+
+  log("すべての規模の計測が完了した。レポートを出力する。");
+  console.log("");
+  console.log("# 規模を振るベンチ（結果）");
+  console.log("");
+  console.log(
+    `測定日時: ${new Date().toISOString()} / 規模: aggregateScope=[${config.scopeScales.join(", ")}], ` +
+      `vector search=[${config.vectorScales.join(", ")}] / 次元数: ${config.dimensions} / 種: ${config.seed}`,
+  );
+  console.log("");
+  console.log("## Part 1: `aggregateScope`（穴1）");
+  console.log("");
+  console.log(renderScopeTable(scopeResults));
+  console.log("");
+  console.log("<details><summary>EXPLAIN (ANALYZE, BUFFERS) 抜粋</summary>");
+  console.log("");
+  console.log(renderScopeExplainDetails(scopeResults));
+  console.log("");
+  console.log("</details>");
+  console.log("");
+  console.log("## Part 2: `PostgresVectorStore.search`（subject フィルタ、穴2）");
+  console.log("");
+  console.log(renderVectorTable(vectorResults));
+  console.log("");
+  console.log("<details><summary>EXPLAIN (ANALYZE, BUFFERS) 抜粋</summary>");
+  console.log("");
+  console.log(renderVectorExplainDetails(vectorResults));
+  console.log("");
+  console.log("</details>");
+  console.log("");
+  console.log(renderAnswers(config, scopeResults, vectorResults));
+}
+
+main().catch((err: unknown) => {
+  console.error(err);
+  process.exitCode = 1;
+});
