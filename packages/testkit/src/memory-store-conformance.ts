@@ -1,8 +1,44 @@
+import { randomUUID } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { EmbeddingStatus } from "@mnemora/core";
 import type { Ctx, MemoryStore, RecallId } from "@mnemora/core";
 import { MemoryStatusConflictError } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
+
+/**
+ * 「対象が無い」系の検査専用の、well-formed だが実在しない id。
+ *
+ * この適合テストは複数の `MemoryStore` 実装（postgres / in-memory）に同じ入力を
+ * 投げて、*同じ種類の*失敗になることを測る（このファイル冒頭の doc コメント参照）。
+ * `packages/postgres` の `memories.id` は `uuid` 型（migrations/0001_init.sql）で、
+ * `setEmbeddingStatus`/`reinforce`/`updateStatus` は `getObservation` と違い
+ * `isUuidLike` による事前チェックを持たない（packages/postgres/src/memory-store.ts）ため、
+ * UUID の形をしていない文字列（例: 旧 `"does-not-exist"`）を渡すと Postgres 側だけ
+ * SQL 実行時点でドライバの `invalid input syntax for type uuid` が飛ぶ——in-memory側は
+ * 意図した「memory not found」を投げる。**id を well-formed な UUID に揃えないと、
+ * 両実装がここで初めて違う種類の失敗を返すようになり、後段でメッセージを
+ * `/memory not found for tenant/` に固定したときに、測りたい対象（「対象が無い」を
+ * 両実装が同じに扱っているか）ではなく、この入力形式の食い違いだけで赤くなってしまう**。
+ * `randomUUID()` で実行のたびに新しい値を生成すれば、fixture が作る実在の id
+ * （store が発行する UUID）と衝突しないことは構造的に保証される。
+ */
+const NONEXISTENT_MEMORY_ID = randomUUID();
+
+/**
+ * 「対象が無い」異常系が投げる例外を検査するための、両実装に共通する部分文字列。
+ *
+ * `packages/postgres/src/memory-store.ts` は
+ * `PostgresMemoryStore: memory not found for tenant: ${id}`、
+ * `InMemoryMemoryStore`（packages/testkit/src/__fixtures__/in-memory-memory-store.ts）は
+ * `InMemoryMemoryStore: memory not found for tenant: ${id}` を投げる——共通する安定した
+ * 部分が `memory not found for tenant`。引数なしの `.rejects.toThrow()` は「何かが
+ * 投げられた」しか測らないため、`if (!memory) throw ...` を消しても、null に対する
+ * プロパティアクセスが投げる `TypeError`（例: `Cannot set properties of null`）で
+ * 同じく満たされてしまい、意図した「対象が無い」分岐を検査したことにならない。
+ * メッセージをこのパターンに固定することで、`TypeError` のような別種の失敗と
+ * 区別する。
+ */
+const NOT_FOUND_ERROR_MESSAGE = /memory not found for tenant/;
 
 export interface MemoryStoreConformanceOptions {
   /** テスト出力に出す adapter 名（例: "postgres", "in-memory"）。 */
@@ -487,7 +523,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("setEmbeddingStatus は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      await expect(store.setEmbeddingStatus(ctx, "does-not-exist", "ready")).rejects.toThrow();
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
+      // メッセージまで固定するのは、ガード節が抜けて null 参照の TypeError に
+      // すり替わっても緑のままになる事故を防ぐため（NOT_FOUND_ERROR_MESSAGE 定義参照）。
+      await expect(store.setEmbeddingStatus(ctx, NONEXISTENT_MEMORY_ID, "ready")).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
     });
 
     // -------------------------------------------------------------------
@@ -557,7 +598,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("reinforce は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      await expect(store.reinforce(ctx, "does-not-exist", new Date())).rejects.toThrow();
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
+      // メッセージまで固定するのは、ガード節が抜けて null 参照の TypeError に
+      // すり替わっても緑のままになる事故を防ぐため（NOT_FOUND_ERROR_MESSAGE 定義参照）。
+      await expect(store.reinforce(ctx, NONEXISTENT_MEMORY_ID, new Date())).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
     });
 
     // -------------------------------------------------------------------
@@ -598,7 +644,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("updateStatus は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      await expect(store.updateStatus(ctx, "does-not-exist", "archived")).rejects.toThrow();
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
+      // メッセージまで固定するのは、ガード節が抜けて null 参照の TypeError に
+      // すり替わっても緑のままになる事故を防ぐため（NOT_FOUND_ERROR_MESSAGE 定義参照）。
+      await expect(store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "archived")).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
     });
 
     // -------------------------------------------------------------------
@@ -668,9 +719,17 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
 
-      await expect(
-        store.updateStatus(ctx, "does-not-exist", "superseded", { expectedStatus: "active" }),
-      ).rejects.not.toBeInstanceOf(MemoryStatusConflictError);
+      // UUID の形をした id を渡す必要がある（NONEXISTENT_MEMORY_ID 定義参照）。
+      // `.rejects.not.toBeInstanceOf(MemoryStatusConflictError)` だけでは
+      // 「競合ではない」までしか測れず、ガード節が抜けて null 参照の TypeError に
+      // すり替わっても（TypeError も MemoryStatusConflictError ではないので）緑のまま
+      // になる。ADR 0030 の主張どおり「競合ではなく『対象が無い』」であることまで
+      // 押さえるため、メッセージも NOT_FOUND_ERROR_MESSAGE に固定する。
+      const rejection = store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "superseded", {
+        expectedStatus: "active",
+      });
+      await expect(rejection).rejects.not.toBeInstanceOf(MemoryStatusConflictError);
+      await expect(rejection).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
     });
 
     // -------------------------------------------------------------------
