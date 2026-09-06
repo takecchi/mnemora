@@ -802,7 +802,7 @@ async function benchSubjectSize(
 // ---------------------------------------------------------------------------
 
 interface RecallOnceResult {
-  variant: "subjectId 指定（狙いの大きさ）" | "subjectId 無し（比較用）";
+  variant: string;
   ctxSubjectId: string | null;
   targetSize: number;
   actualCount: number;
@@ -926,12 +926,31 @@ async function benchRecallOnce(
     clock: { now: () => referenceNow },
   });
 
+  // **なぜ scoreThreshold=0 の変種を測るか**（実測で分かったこと）:
+  // seeding は recorded_at を「now() - random()*365日」で散らすため、既定の
+  // halfLife（720h=30日）だと大半の Memory が減衰でスコア ~0 になり、
+  // 既定の scoreThreshold(0.1) で全部 below_threshold に落ちる。
+  // 実測（run 34011723766）では候補3件が score 2e-4 / 7e-7 / 6e-9 で全滅した。
+  // ⟹ それでは「窓が埋まらない」ではなく「減衰で落ちた」を測ることになる。
+  // そこで scoreThreshold=0 の変種を併せて測り、減衰の影響を外した状態で
+  // 「取りこぼしが omitted に出るか」を見る。既定閾値の変種も残して両方見せる。
   const variants: Array<{
     variant: RecallOnceResult["variant"];
     ctxSubjectId: string | undefined;
+    scoreThreshold?: number;
   }> = [
     { variant: "subjectId 指定（狙いの大きさ）", ctxSubjectId: subjectId },
+    {
+      variant: "subjectId 指定・scoreThreshold=0（減衰の影響を外す）",
+      ctxSubjectId: subjectId,
+      scoreThreshold: 0,
+    },
     { variant: "subjectId 無し（比較用）", ctxSubjectId: undefined },
+    {
+      variant: "subjectId 無し・scoreThreshold=0（比較用）",
+      ctxSubjectId: undefined,
+      scoreThreshold: 0,
+    },
   ];
 
   // ---- 診断（Part 4 が hits=0 を返した原因を切り分けるためのもの）----
@@ -972,7 +991,10 @@ async function benchRecallOnce(
       v.ctxSubjectId !== undefined
         ? { tenantId: TENANT, subjectId: v.ctxSubjectId }
         : { tenantId: TENANT };
-    const result = await runtime.recall(ctx, { vector: queryVector });
+    const result = await runtime.recall(ctx, {
+      vector: queryVector,
+      ...(v.scoreThreshold !== undefined ? { scoreThreshold: v.scoreThreshold } : {}),
+    });
     log(
       `    memories.length=${result.memories.length} / omitted件数=${result.omitted.length} / ` +
         `index.totalInScope=${result.index.totalInScope}`,
