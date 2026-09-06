@@ -202,6 +202,32 @@ pnpm --filter @mnemora/example-chat run test:db
 `recall()` はこれを `omitted` に正直に出していた——**隠していたのは mnemora ではなく、
 `omitted` を読まずにこの表を書いた側である。**
 
+**⚠⚠⚠ 追記（本 PR、[ADR 0021](../../docs/decisions/0021-drain-embed-ticks-in-ingest.md)）:
+上の欠陥はこの PR で直した。** `ingestConversation`（`examples/chat/src/mnemora-path.ts`）は
+`tick({kinds:["embed"]})` を1回だけ呼ぶのをやめ、`processed === 0` になるまで
+回し切るようになった（`examples/chat/src/embed-drain.ts` の `drainEmbedTicks`。
+`retrieval-quality.ts` が使っていた同じ関数を共有モジュールへ切り出して使い回している）。
+「`omitted` に `not_indexed(pending)` が残らないこと」は
+`src/__tests__/mnemora-path.postgres.test.ts` に歯として足した（DEFAULT_TICK_LIMIT
+= 50 を超える61件の観測を ingest し、`ingestConversation` を tick() 1回に戻すと
+必ず赤くなることを想定した歯——この作業を行った環境には `DATABASE_URL` が無く、
+CI で実際に走らせたわけではない）。
+
+**⟹ 上の表（173〜181行の「スコープ内の Memory」列）と直前の `omitted` の実測値は、
+いずれも修正前（tick() 1回・271件が `pending` のまま）の挙動で測定したものであり、
+**本 PR ではこの数値を測り直していない**（この作業を行った環境には PostgreSQL が
+無く、`compare` を実行できない）。「直したので改善するはず」と決め打って数値を
+書き換えることはしない。修正後に実際に321件（あるいはそれ以上のスコープ）全件と
+競わせた結果は、次に `compare` を実測できる環境で埋める:
+
+| 会話ターン数 | スコープ内の Memory | 実際に ANN の候補になれた件数（修正後） | 返った件数 | 冒頭の事実が残っているか | `omitted` の内訳 |
+|---|---|---|---|---|---|
+| 642 | TODO(実測) | TODO(実測) | TODO(実測) | TODO(実測) | TODO(実測) |
+
+（「実際に ANN の候補になれた件数」列は、修正が効いていれば「スコープ内の Memory」と
+一致し、`not_indexed(pending)` が `omitted` に現れないはずである——ただしこれも
+**実測で確認するまでは主張しない**。）
+
 **⚠ この表が主張しないこと**: 擬似 embedding は意味的な類似度を持たないので、これは
 「意味的に関連する記憶が正しく上位に来る」ことの証明では**ない**。主張しているのは、
 **この決定的なシナリオにおいて、量を1桁以上削っても目的の記憶が落ちなかった**という

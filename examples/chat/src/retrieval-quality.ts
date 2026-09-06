@@ -1,4 +1,6 @@
 import type { Ctx, MemoryStore, Runtime } from "@mnemora/core";
+import { drainEmbedTicks } from "./embed-drain.js";
+import type { DrainResult } from "./embed-drain.js";
 import type { ProviderMode } from "./providers.js";
 import {
   DEFAULT_HAYSTACK_SIZE,
@@ -58,47 +60,16 @@ export async function resolveExternalId(
 
 // ---------------------------------------------------------------------------
 // outbox を干上がるまで処理する(PR 本文「実行時の規律」)
+//
+// `drainEmbedTicks`/`DrainResult` の実体は `./embed-drain.js` に移した——
+// `mnemora-path.ts` の `ingestConversation`(主測定である `compare` 経路)にも
+// 同じ罠があったため、共有モジュールへ切り出した(docs/decisions/0021 参照)。
+// ここでは import した名前をそのまま re-export し、この関数を
+// `./retrieval-quality.js` から import している既存コードとの互換を保つ。
 // ---------------------------------------------------------------------------
 
-export interface DrainResult {
-  /** 呼んだ tick() の回数。 */
-  ticks: number;
-  totalProcessed: number;
-  totalFailed: number;
-  /** 1回目の tick() が処理した件数(既定 limit=50 が実際に効いた件数)。 */
-  firstTickProcessed: number;
-}
-
-/**
- * `tick({kinds:['embed']})` を `processed === 0` になるまで繰り返す。
- *
- * **背景**: `examples/chat/src/mnemora-path.ts` の `ingestConversation` は `tick()` を
- * 1回しか呼ばない。`tick()` の既定 `limit` は50(`DEFAULT_TICK_LIMIT`、
- * `packages/core/src/runtime.ts`)であり、embed ジョブは `claimBatch` が
- * `ORDER BY available_at ASC` で先着順に claim するため、**記憶が50件を超えると
- * 51件目以降は埋め込まれないまま `pending` に残る**。retrieval-quality の haystack は
- * 意図的にこれを超える件数にしてある(`DEFAULT_HAYSTACK_SIZE` のコメント参照)ため、
- * ここで実際に干上がるまで回して確かめる。
- */
-export async function drainEmbedTicks(runtime: Runtime, ctx: Ctx): Promise<DrainResult> {
-  let ticks = 0;
-  let totalProcessed = 0;
-  let totalFailed = 0;
-  let firstTickProcessed = 0;
-  for (;;) {
-    const result = await runtime.tick(ctx, { kinds: ["embed"] });
-    ticks += 1;
-    totalProcessed += result.processed;
-    totalFailed += result.failed;
-    if (ticks === 1) {
-      firstTickProcessed = result.processed;
-    }
-    if (result.processed === 0) {
-      break;
-    }
-  }
-  return { ticks, totalProcessed, totalFailed, firstTickProcessed };
-}
+export { drainEmbedTicks };
+export type { DrainResult };
 
 // ---------------------------------------------------------------------------
 // probe ごとの指標

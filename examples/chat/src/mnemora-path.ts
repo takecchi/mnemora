@@ -1,4 +1,5 @@
 import type { Ctx, RecallBudget, RecallResult, Runtime } from "@mnemora/core";
+import { drainEmbedTicks } from "./embed-drain.js";
 import type { Conversation } from "./scenario.js";
 
 export interface MnemoraPathOptions {
@@ -17,6 +18,20 @@ export interface MnemoraPathResult {
  * 誤ってもう一度 ingest してしまっても）Observation が重複して作られない
  * （roadmap.md 段階3の冪等性がそのまま効く）。**呼び出し側は ingest と query を
  * 混ぜて何度も呼ばない**のが前提だが、それでも壊れないようにしてある。
+ *
+ * **なぜ `tick()` を1回だけ呼ばないのか（docs/decisions/0019-real-openai-measurement-cost.md
+ * §5、docs/decisions/0021-drain-embed-ticks-in-ingest.md）**: `tick()` の既定 `limit` は
+ * 50（`DEFAULT_TICK_LIMIT`、`packages/core/src/runtime.ts`）。embed ジョブは
+ * `claimBatch` が `ORDER BY available_at ASC` で先着順に claim するため、
+ * この関数がかつて `tick()` を1回しか呼んでいなかった頃は、**会話が長くなって
+ * observe() された発話が50件を超えると、51件目以降の記憶が埋め込まれないまま
+ * `pending` に残り、`recall()` の ANN 候補にすらならない**という欠陥があった
+ * （`recall()` はこれを `omitted` に `not_indexed(reason: "pending")` として
+ * 正直に出していたが、`examples/chat` 側はそれを読まずに「スコープ内 N 件のうち
+ * 10件を返した」という表を書いていた——ADR 0019 §5 が実測して記録した）。
+ * ここでは `drainEmbedTicks`（`./embed-drain.js`）で `processed === 0` になるまで
+ * `tick()` を回し切ることで、**取り込んだ量に関わらず、ingest が終わった時点で
+ * 全件が embed 済みであること**を保証する。
  */
 export async function ingestConversation(
   runtime: Runtime,
@@ -31,7 +46,7 @@ export async function ingestConversation(
       externalId: `turn-${turn.index}`,
     });
   }
-  await runtime.tick(ctx, { kinds: ["embed"] });
+  await drainEmbedTicks(runtime, ctx);
 }
 
 /**
