@@ -142,6 +142,28 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
     }
 
+    // 外部キー相当（0001_init.sql）: `memories.source_observation_id` /
+    // `superseded_by_id` / `contested_with_id` は、非 null なら実在する行を指さなければ
+    // ならない。`packages/postgres` は実際の外部キー制約でこれを強制するが、この
+    // in-memory 実装は `Map` の生成物にすぎず、参照整合性を放置すると「本番では起きない
+    // 書き込みが手元では黙って成功する」（ADR 0047）。**「存在」だけを見る——一対一等の
+    // 整合までは踏み込まない（`contested_with_id` が双方向かどうかはここでは見ない）。**
+    if (input.sourceObservationId && !this.observations.has(input.sourceObservationId)) {
+      throw new Error(
+        `InMemoryMemoryStore: source observation not found: ${input.sourceObservationId}`,
+      );
+    }
+    if (input.supersededById && !this.memories.has(input.supersededById)) {
+      throw new Error(
+        `InMemoryMemoryStore: superseded-by memory not found: ${input.supersededById}`,
+      );
+    }
+    if (input.contestedWithId && !this.memories.has(input.contestedWithId)) {
+      throw new Error(
+        `InMemoryMemoryStore: contested-with memory not found: ${input.contestedWithId}`,
+      );
+    }
+
     const now = new Date();
     const memory: Memory = {
       id: nextId("mem"),
@@ -243,6 +265,13 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
+    // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
+    // ならない（`memories.superseded_by_id → memories(id)`）。
+    if (opts?.supersededById !== undefined && !this.memories.has(opts.supersededById)) {
+      throw new Error(
+        `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
+      );
+    }
     memory.status = status;
     if (opts?.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -269,6 +298,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
+    }
+    // 外部キー相当（ADR 0047）: updateStatus と同じ理由・同じ検査。
+    if (opts.supersededById !== undefined && !this.memories.has(opts.supersededById)) {
+      throw new Error(
+        `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
+      );
     }
     memory.status = status;
     if (opts.supersededById !== undefined) {
@@ -311,6 +346,27 @@ export class InMemoryMemoryStore implements MemoryStore {
     recallId: RecallId,
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    // 外部キー相当（ADR 0047）: `recall_usages.recall_id → recalls(id)` /
+    // `recall_usages.memory_id → memories(id)`。Postgres は単一の
+    // `INSERT ... SELECT ... FROM unnest(...)` で全件をまとめて書くため、どれか1件でも
+    // 外部キーに違反すれば文全体が失敗し、部分挿入は起きない——ここでも「全件の存在を
+    // 先に確かめてから挿入する」ことで同じ全体原子性を再現する。
+    //
+    // ⚠ `memoryIds` が空配列なら、Postgres 実装（`packages/postgres/src/memory-store.ts`）は
+    // クエリを一切発行せず即座に空の結果を返す——`recallId` の実在は問われない。
+    // ここでもその早期リターンより後ろで検査することで、同じ非対称を再現する。
+    if (memoryIds.length === 0) {
+      return { insertedMemoryIds: [] };
+    }
+    if (!this.recalls.has(recallId)) {
+      throw new Error(`InMemoryMemoryStore: recall not found: ${recallId}`);
+    }
+    for (const memoryId of memoryIds) {
+      if (!this.memories.has(memoryId)) {
+        throw new Error(`InMemoryMemoryStore: memory not found: ${memoryId}`);
+      }
+    }
+
     const insertedMemoryIds: MemoryId[] = [];
     for (const memoryId of memoryIds) {
       const key = `${ctx.tenantId}:${recallId}:${memoryId}`;

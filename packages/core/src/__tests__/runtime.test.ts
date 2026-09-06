@@ -4,6 +4,34 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import { createRuntime } from "../runtime.js";
 import type { ReextractSkip } from "../strategies/reextract.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import type { FakeMemoryStore } from "./runtime-fakes.js";
+
+/**
+ * ADR 0047: `MemoryStore.recordUsage` は `recall_usages.recall_id → recalls(id)` の
+ * 外部キー相当を要求するようになった（`FakeMemoryStore` にも適用した）。以前この節の
+ * 2つのテストは実体の無い固定文字列 `"recall-1"` を渡していたが、それは「本番経路では
+ * 起きえない `recall_usages` 行」を手元でだけ緑にしていた（ADR 0047 の決め手）。
+ * `MemoryStore.createRecall`（recall 段6の書き込み口そのもの）で実在の recallId を用意する。
+ */
+async function createRecallFixture(stores: { memoryStore: FakeMemoryStore }, ctx: Ctx) {
+  return stores.memoryStore.createRecall(ctx, {
+    tenantId: ctx.tenantId,
+    subjectId: null,
+    query: { text: "fixture" },
+    budget: null,
+    omitted: [],
+    usage: {
+      chars: 0,
+      estimatedTokens: 0,
+      counter: "heuristic",
+      byTier: { full: 0, digest: 0, index: 0 },
+      indexChars: 0,
+    },
+    indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+    explain: { stages: [] },
+    returnedMemoryIds: [],
+  });
+}
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 // このファイルの歯はリースの境界そのものを検査しない(それは
@@ -296,9 +324,10 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       embeddingStatus: "pending",
     });
 
+    const recallId = await createRecallFixture(stores, ctx);
     const result = await runtime.observe(ctx, {
       kind: "memory_usage",
-      recallId: "recall-1",
+      recallId,
       usedMemoryIds: [memory.id],
     });
 
@@ -330,14 +359,15 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       embeddingStatus: "pending",
     });
 
+    const recallId = await createRecallFixture(stores, ctx);
     await runtime.observe(ctx, {
       kind: "memory_usage",
-      recallId: "recall-1",
+      recallId,
       usedMemoryIds: [memory.id],
     });
     const second = await runtime.observe(ctx, {
       kind: "memory_usage",
-      recallId: "recall-1",
+      recallId,
       usedMemoryIds: [memory.id],
     });
     expect(second.memoryIds).toEqual([]);

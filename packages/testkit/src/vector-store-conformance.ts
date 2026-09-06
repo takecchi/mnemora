@@ -329,5 +329,24 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(ids).not.toContain(statusOnlyMatchId);
       expect(ids).not.toContain(subjectOnlyMatchId);
     });
+
+    // -------------------------------------------------------------------
+    // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
+    // **存在だけ**を見る。
+    //
+    // ⚠ `.rejects.toThrow()` を引数なしで使っている理由は
+    // `memory-store-conformance.ts` の同種の節と同じ（メッセージの一致ではなく
+    // 「実在しない参照では必ず失敗する」ことを見る）。
+    // -------------------------------------------------------------------
+
+    it("upsert は実在しない memoryId に対して失敗し、実在する memoryId では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(store.upsert(ctx, space, randomUUID(), [1, 0, 0])).rejects.toThrow();
+
+      const memoryId = await prepareMemoryId(ctx);
+      await expect(store.upsert(ctx, space, memoryId, [1, 0, 0])).resolves.toBeUndefined();
+    });
   });
 }

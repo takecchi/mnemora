@@ -99,6 +99,13 @@ export class InMemoryVectorStore implements VectorStore {
     memoryId: MemoryId,
     vector: number[],
   ): Promise<void> {
+    // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
+    // `search` は既に `this.memoryStore.get(...)` を真実の源として引いている
+    // （クラス doc 参照）——書き込み側（upsert）でも同じ非対称を強制する。
+    const memory = await this.memoryStore.get(ctx, memoryId);
+    if (!memory) {
+      throw new Error(`InMemoryVectorStore: memory not found: ${memoryId}`);
+    }
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,

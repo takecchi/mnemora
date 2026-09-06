@@ -7,12 +7,20 @@ export interface EventStoreConformanceOptions {
   name: string;
   createStore: () => EventStore | Promise<EventStore>;
   /**
-   * `memory_id` に実在の Memory を要求する adapter（`packages/postgres` の外部キー）向けの
-   * フック。省略時は固定文字列を使う（外部キーを持たない in-memory 実装向け）。
-   * `docs/testkit` の既定フィクスチャ（`buildNewMemoryEventFixture`）は `memoryId: null` を
-   * 既定にしているため、`memoryId` を伴うテスト（list の memoryId フィルタ等）でのみ使う。
+   * `memory_id` に実在の Memory を要求するためのフック。**必須。**
+   *
+   * `memory_events.memory_id → memories(id)` は外部キー（`kind = 'events_purged'` の
+   * 場合のみ NULL）。`docs/testkit` の既定フィクスチャ（`buildNewMemoryEventFixture`）は
+   * `memoryId: null` を既定にしているため、`memoryId` を伴うテスト（list の memoryId
+   * フィルタ・並び順・limit・since/until 等）でのみ使う。
+   *
+   * **ADR 0047 より前は省略可で、省略時は `mem-fixture-N` という実体を作らない固定文字列を
+   * 使っていた**——当時は「外部キーを持たない in-memory 実装向け」の既定として正当だったが、
+   * ADR 0047 で `InMemoryEventStore`/`FakeEventStore` にも外部キーを適用したため、この既定は
+   * 「実在しない memoryId」を意味するようになった。**省略可のオプションのままにしないこと**
+   * ——`vector-store-conformance.ts` の `prepareMemoryId`（ADR 0034）と同じ理由。
    */
-  prepareMemoryId?: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
+  prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
 }
 
 /**
@@ -42,10 +50,7 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  *   （docs/decisions/0042、`packages/core/src/interfaces/event-store.ts` の doc コメント）
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
-  const { name, createStore } = options;
-  let fixtureMemoryIdCounter = 0;
-  const prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId =
-    options.prepareMemoryId ?? (() => `mem-fixture-${(fixtureMemoryIdCounter += 1)}`);
+  const { name, createStore, prepareMemoryId } = options;
 
   describe(`EventStore conformance (${name})`, () => {
     it("append した実装オブジェクトに update/delete メソッドが生えていない（実装側の実行時の念のための確認）", async () => {
@@ -287,6 +292,53 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       const listed = await store.list(ctx, { memoryId, until: t2 });
 
       expect(listed.map((event) => event.id)).toEqual([e1.id, e2.id]);
+    });
+
+    // -------------------------------------------------------------------
+    // 外部キー相当（ADR 0047）: `memory_events.memory_id → memories(id)`
+    // （`kind = 'events_purged'` の場合のみ NULL）。**存在だけ**を見る。
+    //
+    // ⚠ `.rejects.toThrow()` を引数なしで使っている理由は
+    // `memory-store-conformance.ts` の同種の節と同じ（メッセージの一致ではなく
+    // 「実在しない参照では必ず失敗する」ことを見る）。
+    // -------------------------------------------------------------------
+
+    it("append は実在しない memoryId に対して失敗し、実在する memoryId では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.append(
+          ctx,
+          buildNewMemoryEventFixture({
+            tenantId: "tenant-1",
+            memoryId: randomUUID(),
+            kind: "created",
+          }),
+        ),
+      ).rejects.toThrow();
+
+      const memoryId = await prepareMemoryId(ctx);
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, kind: "created" }),
+      );
+      expect(appended.memoryId).toBe(memoryId);
+    });
+
+    it("append は memoryId が null なら外部キーを要求しない（events_purged 等、NULL は拒まない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({
+          tenantId: "tenant-1",
+          memoryId: null,
+          kind: "events_purged",
+        }),
+      );
+      expect(appended.memoryId).toBeNull();
     });
   });
 }
