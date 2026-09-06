@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { heuristicTokenCounter } from "@mnemora/core";
-import { formatComparisonTable, runComparison } from "./compare.js";
+import { formatComparisonTable, formatRecallQualityTable, runComparison } from "./compare.js";
 import { formatRecall } from "./format.js";
 import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
@@ -124,6 +124,17 @@ async function runCompare(): Promise<void> {
     console.log(formatComparisonTable(rows));
     console.log(
       "\n(注) mnemora chars は recall() の budget 無し usage.chars。切り詰めていない、そのままの量。",
+    );
+
+    console.log(
+      "\n量を削っただけでは北極星の物差しに答えられない——" +
+        "「削っても冒頭の事実が残っているか」「実際に何件と競って絞ったか」を測る:\n",
+    );
+    console.log(formatRecallQualityTable(rows));
+    console.log(
+      "\n(注) 「ANN の候補になれた件数」が「スコープ内の Memory」を下回っていたら、" +
+        "そのぶんは `omitted` の `not_indexed` に理由付きで出ている" +
+        "（docs/decisions/0021-drain-embed-ticks-in-ingest.md）。",
     );
     console.log("");
     console.log(handle.usageMeter ? handle.usageMeter.formatReport() : formatNoApiCallsNotice());
