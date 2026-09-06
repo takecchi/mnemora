@@ -121,7 +121,7 @@ export function countKindForPartition(
 }
 
 /** budget truncation の単位。同伴ペアは分割しない（docs/recall.md §8）ため、1つ以上の候補をまとめて持つ。 */
-type Unit = {
+export type Unit = {
   members: ScoredCandidate[];
   /** 並び替え・切り詰めの基準スコア。ペアの場合は主(スコアで選ばれた側)のスコアを使う。 */
   rankScore: number;
@@ -143,6 +143,33 @@ function effectiveTokenBudget(budget: RecallBudget | undefined): number | undefi
   );
   if (candidates.length === 0) return undefined;
   return Math.min(...candidates);
+}
+
+/**
+ * 段4（予算による切り詰め）の件数の `countKind` を決める（ADR 0045）。
+ *
+ * **🔴 `'exact'` をリテラルで書かないための関数である。**
+ * [ADR 0044](../../../docs/decisions/0044-score-not-comparable-omission.md) で段2に入れたのと
+ * 同じ規律を段4へ広げる——**名乗りは、正確さを知っている場所から引き継ぐ。**
+ *
+ * **⚠ ここで「正確さを知っている場所」は `slice` ではない。**
+ * `keptUnits = units.slice(0, cut)` と `droppedUnits = units.slice(cut)` が網羅であることは
+ * 言語の保証であり、確かめても同語反復にしかならない。
+ *
+ * **正確さを決めているのは、その手前の「単位を組む繰り返し」である**——
+ * 段3までに集まった候補（`withinLimit` ＋ 同伴取得分）が、**それぞれちょうど1つの単位に入ったか。**
+ * あの繰り返しは `consumed` の集合で重複を避けながら同伴をペアにしており、
+ * **どの候補もどの単位にも入らないまま落ちる余地が構造として在る**（対向関係が
+ * 一対一でない壊れたデータが来た場合など）。**そうなると、その候補は返り値にも
+ * `budget_dropped` にも現れずに消える**——[ADR 0044](../../../docs/decisions/0044-score-not-comparable-omission.md)
+ * が段2で塞いだのと同じ形の穴が、段4で開くことになる。
+ *
+ * **⟹ 単位が候補を網羅していれば `'exact'`、していなければ `'unknown'` と名乗る。**
+ * 嘘をつくのではなく黙る。
+ */
+export function countKindForUnits(units: readonly Unit[], candidateCount: number): CountKind {
+  const covered = units.reduce((sum, unit) => sum + unit.members.length, 0);
+  return covered === candidateCount ? "exact" : "unknown";
 }
 
 export async function runRecall(
@@ -407,6 +434,8 @@ export async function runRecall(
     }
   }
   units.sort((a, b) => b.rankScore - a.rankScore);
+  // 段4の件数がどれだけ正確かは、この時点で決まっている（ADR 0045）。
+  const unitsCountKind = countKindForUnits(units, allCandidates.length);
 
   // -------------------------------------------------------------------
   // 段4: 予算による切り詰め（docs/recall.md §2 段4・§8）
@@ -435,7 +464,8 @@ export async function runRecall(
     const droppedUnits = units.slice(cut);
     const droppedCount = droppedUnits.reduce((sum, u) => sum + u.members.length, 0);
     if (droppedCount > 0) {
-      omitted.push({ kind: "budget_dropped", count: droppedCount, countKind: "exact" });
+      // ⚠ `'exact'` をリテラルで書かない（ADR 0045）。理由は countKindForUnits の doc を参照。
+      omitted.push({ kind: "budget_dropped", count: droppedCount, countKind: unitsCountKind });
     }
   }
 

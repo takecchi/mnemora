@@ -348,6 +348,68 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
   });
 });
 
+describe("recall() — budget_dropped の countKind は単位の網羅性から決まる（ADR 0045）", () => {
+  it("🔴 単位が候補を網羅していないとき、budget_dropped は 'exact' を名乗らない", async () => {
+    // **⚠ この歯は「候補が単位から漏れること」を*正しい振る舞いとして固定するものではない*。**
+    // 固定しているのは「漏れているときに `'exact'` と名乗らないこと」——つまり**正直さ**である。
+    // 漏れること自体は別の欠陥として報告してある（下記）。
+    //
+    // 作り方: contested の鎖 A→B→C を作る。`contestedWithId` は
+    // `docs/memory-model.md` §5 が**一対一の対向関係**と定めているので、この鎖は**壊れたデータ**である。
+    // ⟹ 機構はそれを拒まないので、こう並ぶ:
+    //   - withinLimit = [A, B]（C は埋め込みが無いので候補にならない）
+    //   - A の対向 B は withinLimit に居るので、同伴取得の対象は B の対向 C だけ
+    //   - 単位を組む繰り返しは A から始まり、A の対向として B を消費してペア [A,B] を作る
+    //   - 次の B は消費済みなので飛ばされ、**C はどの単位にも入らない**
+    // ⟹ 候補3件に対して単位が覆うのは2件。**`countKindForUnits` が `'unknown'` へ落とす。**
+    const { runtime, stores } = buildRuntime();
+    const c = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", digest: "C" }),
+    );
+    const b = await createEmbeddedMemory(stores, [0.9, 0.1], {
+      status: "contested",
+      digest: "B",
+      contestedWithId: c.id,
+    });
+    await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      digest: "A",
+      contestedWithId: b.id,
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      budget: { maxMemoryChars: 1 },
+    });
+    const dropped = result.omitted.find((o) => o.kind === "budget_dropped");
+    expect(dropped).toBeDefined();
+    // 件数そのものは出す（数えられた分は数えられている）。
+    expect(dropped).toMatchObject({ count: 2 });
+    // **本題**: 覆えていないので `'exact'` とは名乗らない。
+    expect(dropped).toMatchObject({ countKind: "unknown" });
+  });
+
+  it("⚠ 鳴ってはいけない側: 単位が候補を網羅していれば 'exact' のまま", async () => {
+    // 対向関係を持たない普通の候補だけ。単位は1候補1つずつになり、必ず網羅する。
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "A".repeat(30) });
+    await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "B".repeat(30) });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      budget: { maxMemoryChars: 1 },
+    });
+    expect(result.omitted).toContainEqual({
+      kind: "budget_dropped",
+      count: 2,
+      countKind: "exact",
+    });
+  });
+});
+
 describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () => {
   // 段2の閾値比較がどちらにも決まらなかった候補が、`omitted` に出ること。
   //

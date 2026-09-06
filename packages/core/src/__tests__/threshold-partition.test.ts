@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { countKindForPartition, partitionByThreshold } from "../recall-runtime.js";
+import {
+  countKindForPartition,
+  countKindForUnits,
+  partitionByThreshold,
+} from "../recall-runtime.js";
 import type { ScoreBreakdown } from "../recall.js";
 
 /**
@@ -126,5 +130,40 @@ describe("countKindForPartition（ADR 0044）", () => {
 
   it("0件どうしは網羅（'exact'）", () => {
     expect(countKindForPartition(part(0, 0, 0), 0)).toBe("exact");
+  });
+});
+
+describe("countKindForUnits（ADR 0045）", () => {
+  // **🔴 段2でやったのと同じ形——到達不能な分岐の「前提そのもの」を測る歯である。**
+  // 単位を組む繰り返しが正しい限り 'unknown' 側は recall() から到達しない。
+  // ⟹ 到達しないことを理由に測らないでいると、`'exact'` をリテラルで書き戻す変更が
+  //    素通りする（段2ではまさにそれが起きた）。
+  //
+  // ⚠ ここで測っているのは `slice` の網羅性ではない。それは言語の保証であり同語反復になる。
+  //    測っているのは「候補がそれぞれちょうど1つの単位に入ったか」という、
+  //    単位を組む繰り返しの性質である。
+  function units(...memberCounts: number[]) {
+    return memberCounts.map((n) => ({
+      members: Array.from({ length: n }, (_, i) => candidate(`m-${i}`, 0)),
+      rankScore: 0,
+    }));
+  }
+
+  it("単位が候補を網羅していれば 'exact' と名乗る", () => {
+    // 単位の形も非対称にする（1件の単位2つ・2件の同伴ペア1つ = 候補4件）。
+    expect(countKindForUnits(units(1, 2, 1), 4)).toBe("exact");
+  });
+
+  it("🔴 候補が1件どの単位にも入っていなければ 'unknown' へ落ちる（嘘をつくのではなく黙る）", () => {
+    // 候補5件のうち4件しか単位に入っていない＝1件が消えている。
+    expect(countKindForUnits(units(1, 2, 1), 5)).toBe("unknown");
+  });
+
+  it("🔴 同じ候補が二重に単位へ入っていても 'unknown' へ落ちる", () => {
+    expect(countKindForUnits(units(1, 2, 1, 1), 4)).toBe("unknown");
+  });
+
+  it("候補も単位も0なら網羅（'exact'）", () => {
+    expect(countKindForUnits([], 0)).toBe("exact");
   });
 });
