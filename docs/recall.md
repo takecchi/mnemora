@@ -206,7 +206,18 @@ type Omission =
       count: number; countKind: CountKind }
   | { kind: 'ann_truncated'
       countKind: 'unknown' }
+  | { kind: 'ann_unreached'
+      countKind: 'unknown' }
 ```
+
+**`ann_truncated` と `ann_unreached` の違い（2026-09 追記、[ADR 0025](./decisions/0025-ann-underfill-is-not-reported-in-omitted.md)・[ADR 0026](./decisions/0026-ann-unreached-omission.md)）**:
+`ann_truncated` は「k' に達した＝もっと在るはずだが LIMIT で打ち切った」という**打ち切り**であり、
+`ann_unreached` は「k' に届く前に、近似索引がこの scope の候補へ**そもそも辿り着かなかった**」
+という**取りこぼし**である。前者は「LIMIT を打った」という確定した事実、後者は
+「scope にまだ見られていない候補が残っているのに、返った件数が k' 未満で止まった」という
+不確実な事実であり、原因も違えば呼び出し側の次の一手も違う（前者は k' を上げる、
+後者は厳密検索へのフォールバックを検討する）。**2つは同時には立たない**
+——`ann_truncated` の条件（hits ≥ k'）と `ann_unreached` の条件（hits < k'）は排反である。
 
 | kind | 次の一手がどう変わるか |
 |---|---|
@@ -217,6 +228,7 @@ type Omission =
 | `budget_dropped` | スコアの問題ではなく量の問題だと分かる。予算を緩めるか、`memories` を要約させる判断につながる。 |
 | `not_indexed` | 記憶は存在するが埋め込みがまだ無いと分かる（`embeddingStatus`、`./memory-model.md` 参照）。埋め込みジョブの遅延を疑う一手につながり、記憶が失われたと誤認しない。 |
 | `ann_truncated` | 「見えていない領域があるかもしれない」という不確実性そのものが一手になる——例えば厳密検索へのフォールバックを選べる。 |
+| `ann_unreached` | 近似索引がこの scope に届かなかった可能性がある、と分かる（ADR 0025・0026）。`ann_truncated`（打ち切り）とは別の出来事——こちらは k' に届く前に候補を取りこぼした疑いであり、厳密検索へのフォールバックや subject を絞り直す一手につながる。件数は原理的に分からない（`countKind` は常に `'unknown'`）。 |
 
 ### 件数にも「無いの種類」を適用する
 

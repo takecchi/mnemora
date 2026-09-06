@@ -109,3 +109,6 @@
   禁じられていない。**ただし [ADR 0024](./0024-remove-exact-counts-option.md) の教訓が効く**
   ——**欄を足したら、その値を作る経路を1つずつ実測して、名乗りどおりのものが入るか
   確かめなければならない。**「あとで実装する欄」を型に置かない。
+
+  **⟹ 2026-09、オーナーが決定。[ADR 0026](./0026-ann-unreached-omission.md) を見よ**
+  （`Omission { kind: 'ann_unreached', countKind: 'unknown' }` として出す。本 ADR のこの節から下は当時の記録のまま書き換えていない）。

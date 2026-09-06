@@ -78,6 +78,29 @@ export interface AnnTruncatedOmission {
   countKind: "unknown";
 }
 
+/**
+ * ANR 索引が、scope 内にまだ見られていない候補を残したまま k' に届かなかったことの報告
+ * （[ADR 0025](../../../docs/decisions/0025-ann-underfill-is-not-reported-in-omitted.md) の
+ * 実測、[ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md) の決定）。
+ *
+ * **`ann_truncated` に相乗りさせない。** over-fetch の打ち切り（k' に達した＝もっと在るはず
+ * だが LIMIT で切った）と、この事象（k' に届く前に ANN が scope の他の場所へ行ってしまい、
+ * この scope の候補に届かなかった）は**別の出来事**である。同じ札に潰すと、
+ * ADR 0008 が禁じている「別の理由を同じ顔にする」を自分でやることになる。
+ *
+ * **🔴 件数を持たせない。`countKind` は常に `'unknown'` である。**
+ * 理由: この系は「何件取りこぼしたか」を原理的に知りようがない——ANN が触れなかった
+ * 候補を数えるには、scope 全体を厳密に走査して ANN が返した集合と突き合わせる必要があり、
+ * それをやるなら ANN を使う意味（近似で索引を使い倒す）自体が無くなる。
+ * だから新しい語彙（例えば独自の "unreachable" カウント種別）を作らず、既にある
+ * `CountKind` の `'unknown'` で「取りこぼしたのは確かだが、何件かは分からない」とだけ言う。
+ * （`AnnTruncatedOmission` が同じ形をしているのに倣った。）
+ */
+export interface AnnUnreachedOmission {
+  kind: "ann_unreached";
+  countKind: "unknown";
+}
+
 export type Omission =
   | StageSkippedOmission
   | FilteredOmission
@@ -85,7 +108,8 @@ export type Omission =
   | OverLimitOmission
   | BudgetDroppedOmission
   | NotIndexedOmission
-  | AnnTruncatedOmission;
+  | AnnTruncatedOmission
+  | AnnUnreachedOmission;
 
 const StageSkippedOmissionSchema = z.object({
   kind: z.literal("stage_skipped"),
@@ -131,6 +155,11 @@ const AnnTruncatedOmissionSchema = z.object({
   countKind: z.literal("unknown"),
 }) satisfies z.ZodType<AnnTruncatedOmission>;
 
+const AnnUnreachedOmissionSchema = z.object({
+  kind: z.literal("ann_unreached"),
+  countKind: z.literal("unknown"),
+}) satisfies z.ZodType<AnnUnreachedOmission>;
+
 export const OmissionSchema = z.discriminatedUnion("kind", [
   StageSkippedOmissionSchema,
   FilteredOmissionSchema,
@@ -139,6 +168,7 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
   BudgetDroppedOmissionSchema,
   NotIndexedOmissionSchema,
   AnnTruncatedOmissionSchema,
+  AnnUnreachedOmissionSchema,
 ]);
 
 // ---------------------------------------------------------------------------

@@ -165,6 +165,8 @@ function formatOmittedSummary(omitted: Omission[]): string {
           return `stage_skipped(${o.stage}/${o.reason})`;
         case "ann_truncated":
           return "ann_truncated";
+        case "ann_unreached":
+          return "ann_unreached";
         default: {
           // 網羅性の歯: Omission に新しい kind が増えたらここが型エラーになる。
           const exhaustive: never = o;
