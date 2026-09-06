@@ -156,6 +156,19 @@ jobs:
       - name: Run examples/chat の observe→recall 往復・量の比較テストを本物の DB に対して実行
         run: pnpm --filter @mnemora/example-chat run test:db
 
+      - name: 北極星の物差し（会話ログを全部積むのをやめても答えが残るか）を compare で実測しログに残す
+        # このジョブで唯一 OPENAI_API_KEY を設定していないため、擬似 provider で走る
+        # （オーナーが CI に OPENAI_API_KEY が無いことを確認済み）。`compare` は
+        # 「量を削れたか」（naive/mnemora の文字数比）だけでなく、本 PR で追加した
+        # 「冒頭の事実が削った後にも残っているか」「スコープ内の何件が実際に ANN の
+        # 候補になれたか（= 何件と競って絞ったか）」を表にして出力する
+        # （docs/north-star.md の物差し、examples/chat/README.md
+        # 「⭐ 削減率だけでは意味を持たない——答えが残っているか」節）。
+        # これまでこの数値は手元で測ったきり CI では実測していなかった
+        # （ADR 0021 参照）——このステップはそれを埋め、以後の変更で
+        # 「削れたが答えが落ちた」への回帰をログから読めるようにする。
+        run: pnpm --filter @mnemora/example-chat run compare
+
   root-gate-db-stage:
     name: ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）
     runs-on: ubuntu-latest
