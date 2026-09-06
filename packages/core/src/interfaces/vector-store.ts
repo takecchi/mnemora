@@ -43,6 +43,23 @@ export interface VectorFilter {
 
 export interface VectorHit {
   memoryId: MemoryId;
+  /**
+   * **コサイン距離（`1 - cosine similarity`）。** 他の距離関数（ユークリッド距離等）ではない
+   * ——`packages/postgres/src/vector-space.ts` の HNSW 索引が `vector_cosine_ops` を明示しており
+   * （pgvector の `<=>` 演算子＝コサイン距離）、[ADR 0033](../../../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
+   * が「距離はコサイン」を実測として記録し、`packages/core/src/__tests__/runtime-fakes.ts` の
+   * `FakeVectorStore` も `cosineDistance` を使っている。下流（`recall-runtime.ts`）は
+   * `1 - distance` を `similarity` として扱っており、これはコサイン距離の場合にのみ
+   * 「同一なら1、無関係なら0付近」という意味を持つ——adapter が別の距離関数を返すと
+   * 下流のスコアリングの意味が壊れる。
+   *
+   * **⚠ 範囲は 0〜1 ではない。** コサイン距離は逆向き（cosine similarity = -1）のとき
+   * 最大 2 まで出る（[ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md) が
+   * `similarity = 1 - distance` が −1 まで負になりうることを実測として記録している）。
+   *
+   * 適合テスト（`packages/testkit/src/vector-store-conformance.ts`）がこの契約を
+   * adapter 非依存の歯として検査する。
+   */
   distance: number;
 }
 
