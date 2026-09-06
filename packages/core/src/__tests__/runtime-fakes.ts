@@ -614,12 +614,21 @@ export class FakeEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
-    return this.backing.events.filter((e) => {
+    const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
       if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
       if (filter.kind !== undefined && e.kind !== filter.kind) return false;
+      if (filter.since !== undefined && e.at < filter.since) return false;
+      if (filter.until !== undefined && e.at > filter.until) return false;
       return true;
     });
+    // EventStore.list の契約（../interfaces/event-store.ts）どおり `at` 昇順に並べ替えてから
+    // `limit` を適用する。`filter()` は新しい配列を返すので、その配列を sort() すれば
+    // `this.backing.events`（ADR 0031: FakeMemoryStore.updateStatusWithEvent と共有、
+    // `store.events` getter 経由で runtime.test.ts が直接読む）を in-place で破壊しない
+    // （`packages/testkit` の `InMemoryEventStore.list` と同じ形・同じ理由）。
+    const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime());
+    return filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted;
   }
 }
 
