@@ -8,6 +8,7 @@ import { describeMemoryStoreConformance } from "../memory-store-conformance.js";
 import { describeOutboxStoreConformance } from "../outbox-store-conformance.js";
 import { describeTenantSettingsStoreConformance } from "../tenant-settings-store-conformance.js";
 import { describeVectorStoreConformance } from "../vector-store-conformance.js";
+import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryOutboxStore } from "../__fixtures__/in-memory-outbox-store.js";
@@ -37,9 +38,42 @@ describeMemoryStoreConformance({
   },
 });
 
+// `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり
+// ベクトルの属性ではない）を見るために `InMemoryMemoryStore` を必須で参照する
+// （in-memory-vector-store.ts のクラス doc、ADR 0034）。`prepareMemoryId` はこの
+// 「まさに同じ `InMemoryMemoryStore` インスタンス」に実在の Memory を作ることで、
+// `describeOutboxStoreConformance` の `seedJob`/`latestMemoryStoreForOutboxSeed` と
+// 同じ理由・同じ形で辻褄を合わせる。
+let latestMemoryStoreForVectorFixtures: InMemoryMemoryStore | undefined;
+let vectorFixtureContentHashCounter = 0;
+
 describeVectorStoreConformance({
   name: "in-memory placeholder",
-  createStore: () => new InMemoryVectorStore(),
+  createStore: () => {
+    const memoryStore = new InMemoryMemoryStore();
+    latestMemoryStoreForVectorFixtures = memoryStore;
+    return new InMemoryVectorStore(memoryStore);
+  },
+  prepareMemoryId: async (ctx, attrs) => {
+    if (!latestMemoryStoreForVectorFixtures) {
+      throw new Error("prepareMemoryId より先に createStore() を呼ぶ必要がある");
+    }
+    // `sourceObservationId` を持たせないため `createMemory` の冪等キー（extractionIndex）は
+    // 使われず、`contentHash` の一意性は本来不要——それでも「別の Memory のつもりが
+    // 同じ内容のまま」に読めてしまわないよう、呼ぶたびに変える。
+    vectorFixtureContentHashCounter += 1;
+    const memory = await latestMemoryStoreForVectorFixtures.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: `fixture-hash-vector-${vectorFixtureContentHashCounter}`,
+        ...(attrs?.status !== undefined ? { status: attrs.status } : {}),
+        ...(attrs?.subjectId !== undefined ? { subjectId: attrs.subjectId } : {}),
+        ...(attrs?.decayFloorAt !== undefined ? { decayFloorAt: attrs.decayFloorAt } : {}),
+      }),
+    );
+    return memory.id;
+  },
 });
 
 describeEventStoreConformance({
