@@ -441,15 +441,23 @@ export class FakeMemoryStore implements MemoryStore {
 export class FakeOutboxStore implements OutboxStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
+  // リース意味論（ADR 0032）は `packages/testkit` の `InMemoryOutboxStore`/
+  // `PostgresOutboxStore` と一致させてある——この fake だけ古い意味論のままだと
+  // `runtime.test.ts` が「今日の姿」を検査しているつもりで、実は直った後の姿を
+  // 検査してしまう食い違いが起きる。
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
-    const eligible = this.backing.outboxJobs.filter(
-      (job) =>
+    const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
+    const eligible = this.backing.outboxJobs.filter((job) => {
+      const claimedAt = job.claimedAt ?? null;
+      return (
         job.tenantId === ctx.tenantId &&
         (opts.kinds === undefined || opts.kinds.includes(job.kind)) &&
         job.completedAt === null &&
         job.failedAt === null &&
-        job.availableAt <= opts.now,
-    );
+        job.availableAt <= opts.now &&
+        (claimedAt === null || claimedAt.getTime() <= leaseExpiresBefore)
+      );
+    });
     eligible.sort((a, b) => a.availableAt.getTime() - b.availableAt.getTime());
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {

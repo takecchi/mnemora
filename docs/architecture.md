@@ -114,6 +114,9 @@ CPU を出して溜まったジョブを消化する必要がある。この継�
 として明示的に露出する。cron や手動呼び出しから叩ける形にする。「キューが無ければ黙って何も起きない」
 という状態を作らない——これも姿3（漏れを黙って無かったことにしない）の適用である。
 
+**2026-09 追記（ADR 0032）**: `opts.leaseMs` は必須で既定値を持たない——`tick(ctx)` を
+引数無しで呼ぶことはできない。理由は §5.11 の `ClaimOutboxJobsOptions.leaseMs` を参照。
+
 ### 3.4 transactional outbox
 
 `observe()` の DB コミットと「抽出ジョブを積む」は同一トランザクションでなければならない。
@@ -619,7 +622,7 @@ interface Clock {
   注入できるようにするための境界。alteroid・オーナー案のどちらにも無いが、multi-tenant・複数
   インスタンスで動く mnemora では時刻取得を暗黙に `new Date()` へ散らさないための最小限の追加である。
 
-### 5.11 OutboxStore — Phase 1（roadmap.md 段階3で追加、ADR 0012 D-ingest-2）
+### 5.11 OutboxStore — Phase 1（roadmap.md 段階3で追加、ADR 0012 D-ingest-2。claim のリースは ADR 0032）
 
 ```ts
 interface ClaimOutboxJobsOptions {
@@ -627,6 +630,8 @@ interface ClaimOutboxJobsOptions {
   limit: number;
   now: Date;
   claimedBy: string;
+  /** claim のリース長（ミリ秒）。必須・既定値なし（ADR 0032）。呼び出し側が方針を決める。 */
+  leaseMs: number;
 }
 
 interface OutboxStore {
@@ -644,6 +649,18 @@ transactional outbox の「書く」側だとすれば、`OutboxStore` は `runt
 - `claimBatch` は `completed_at IS NULL AND failed_at IS NULL AND available_at <= now`
   のジョブだけを返す。複数ワーカーが同時に呼んでも同じジョブを二重に claim しない
   （`packages/postgres` は `FOR UPDATE SKIP LOCKED` で実装する）。
+- **claim のリース（2026-09 追記、ADR 0032）**: `claimBatch` が返すジョブは、
+  「一度も claim されていない」か「`claimed_at` が `leaseMs` 以上前」のどちらか。
+  `FOR UPDATE SKIP LOCKED` の行ロックは SQL 文の実行が終わった瞬間に解放される
+  ——claim 後に処理を完了できないまま止まったワーカー（クラッシュ・ハング）の
+  ジョブを、`claimed_at IS NULL` だけで再取得不能にすると、`completed_at`/`failed_at`
+  のどちらも付かないまま二度と claim されず「見えない停止」になる。リースはこれを
+  避けるための時間切れの仕組みであり、**その代償として処理は at-least-once になる**
+  （リース切れ後に同じジョブが複数回処理されうる。呼び出し側は冪等に書くこと）。
+  これは次項「Phase 1 は失敗したジョブを自動リトライしない」とは別の話——あちらは
+  `fail()` で終端状態になったジョブの話、リースは終端に至らないまま止まったジョブの
+  回収である。`leaseMs` に既定値は無い（`packages/core` が発明せず、呼び出し側の
+  運用方針で決める）。
 - `complete` / `fail` は対象が存在しない・形式が不正な id でも例外を投げない
   （べき等な終端更新）。
 - Phase 1 は失敗したジョブを自動リトライしない（ADR 0012 D-ingest-2）。

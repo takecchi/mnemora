@@ -155,6 +155,13 @@ export interface ReextractResult {
 }
 
 export interface TickOptions {
+  /**
+   * claim のリース長（ミリ秒）。`ClaimOutboxJobsOptions.leaseMs`（ADR 0032）へそのまま渡す。
+   * **必須・既定値なし**——リース長は「ワーカーが止まったとみなすまでの時間」という
+   * 運用方針であり、`packages/core` が決めてよい値ではなく呼び出し側が決める。
+   * これにより `tick(ctx)` を引数無しで呼ぶことはできない（意図した破壊的変更、ADR 0032）。
+   */
+  leaseMs: number;
   limit?: number;
   kinds?: OutboxJobKind[];
   claimedBy?: string;
@@ -172,8 +179,12 @@ export interface Runtime {
    * `extract: 'deferred'` かつ `InlineScheduler`（キュー無し）構成では、これを誰かが
    * 明示的に呼ばない限り抽出・埋め込みは永久に走らない——「キューが無ければ黙って
    * 何も起きない」を作らない、という設計方針をそのまま体現する。
+   *
+   * `opts.leaseMs` は必須（ADR 0032）。`tick(ctx)` を引数無しで呼ぶことはできない
+   * ——`claimBatch` の claim リース長は運用方針であり、`packages/core` が既定値を
+   * 発明せず呼び出し側に決めさせるための意図した破壊的変更。
    */
-  tick(ctx: Ctx, opts?: TickOptions): Promise<TickResult>;
+  tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
   /**
    * roadmap.md 段階4「想起」・段階5「説明」。docs/recall.md §2 の7段パイプライン
    * （実装は `./recall-runtime.js` の `runRecall`）。
@@ -542,12 +553,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
   }
 
-  async function tick(ctx: Ctx, opts: TickOptions = {}): Promise<TickResult> {
+  async function tick(ctx: Ctx, opts: TickOptions): Promise<TickResult> {
     const claimOpts: ClaimOutboxJobsOptions = {
       kinds: opts.kinds ?? ["extract", "embed"],
       limit: opts.limit ?? DEFAULT_TICK_LIMIT,
       now: clock.now(),
       claimedBy: opts.claimedBy ?? defaultClaimedBy,
+      leaseMs: opts.leaseMs,
     };
     const jobs = await deps.outboxStore.claimBatch(ctx, claimOpts);
 

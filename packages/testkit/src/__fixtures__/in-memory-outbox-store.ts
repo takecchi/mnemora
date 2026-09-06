@@ -6,19 +6,29 @@ import type { ClaimOutboxJobsOptions, Ctx, OutboxJobRecord, OutboxStore } from "
  * `jobs` 配列は呼び出し側から共有参照として渡される想定
  * （`InMemoryMemoryStore.outboxJobs` と同じ配列を渡すことで、`createObservationWithOutbox` /
  * `createMemoryWithOutbox` が積んだジョブをここから claim/complete/fail できる）。
+ *
+ * `claimBatch` のリース意味論（ADR 0032）は `PostgresOutboxStore` と一致させてある
+ * ——`packages/testkit` の適合テスト（`outbox-store-conformance.ts`）が両方の実装に
+ * 対して同じ歯を走らせるため、ここで食い違うと歯が嘘をつく。
  */
 export class InMemoryOutboxStore implements OutboxStore {
   constructor(private readonly jobs: OutboxJobRecord[]) {}
 
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
-    const eligible = this.jobs.filter(
-      (job) =>
+    // リースが切れたとみなす境界時刻。`PostgresOutboxStore` と同じ `<=`（両端含む）。
+    const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
+    const eligible = this.jobs.filter((job) => {
+      const claimedAt = job.claimedAt ?? null;
+      return (
         job.tenantId === ctx.tenantId &&
         (opts.kinds === undefined || opts.kinds.includes(job.kind)) &&
         (job.completedAt ?? null) === null &&
         (job.failedAt ?? null) === null &&
-        job.availableAt <= opts.now,
-    );
+        job.availableAt <= opts.now &&
+        // claim されたことが無い、またはリースが切れている（ADR 0032）。
+        (claimedAt === null || claimedAt.getTime() <= leaseExpiresBefore)
+      );
+    });
     eligible.sort((a, b) => a.availableAt.getTime() - b.availableAt.getTime());
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {

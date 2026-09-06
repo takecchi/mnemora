@@ -1,0 +1,197 @@
+# ADR 0032: `OutboxStore.claimBatch` に claim のリースを足し、「見えない停止」と「先頭詰まり」を塞ぐ
+
+- **状態**: 採用 (2026-09)
+
+- **文脈**:
+
+  マネージャーが現物で確認した事実として渡された、`PostgresOutboxStore.claimBatch`
+  （`packages/postgres/src/outbox-store.ts`）の次の1点を直す。
+
+  `claimBatch` の `WHERE` は
+
+  ```sql
+  WHERE tenant_id = ... AND completed_at IS NULL AND failed_at IS NULL AND available_at <= ${opts.now}
+  ```
+
+  であり、**`claimed_at` の条件が無い**。一方 `migrations/0001_init.sql` の部分索引
+  `idx_outbox_pending` は
+
+  ```sql
+  CREATE INDEX idx_outbox_pending ON outbox (tenant_id, kind, available_at)
+    WHERE completed_at IS NULL AND claimed_at IS NULL;
+  ```
+
+  で張られ、直前のコメントは「ワーカーの claim クエリ: *未着手*・未完了のジョブを
+  `available_at` 昇順で取得」と書いている。**索引は「未着手」を前提に張られ、クエリは
+  その条件を落とした。**
+
+  帰結は2つある。
+
+  1. **`FOR UPDATE SKIP LOCKED` の行ロックは、この SQL 文がコミットした瞬間に解放される。**
+     `claim` は `claimed_at`/`claimed_by`/`attempts` を書くだけで `available_at` を
+     進めないため、claim 済み・未完了（＝処理中）の行は `available_at <= now` に
+     合致し続ける。**クラッシュを要求しない、通常運用のレースとして、次の `tick()` の
+     `claimBatch` が同じ行を再び claim する。**
+  2. **部分索引の述語がクエリの `WHERE` から論理的に含意されないため、`idx_outbox_pending`
+     はプランナから使えない。** `outbox` にはこれ以外の索引が無い。
+
+  1点目に加えて、`ORDER BY available_at ASC LIMIT n` と組み合わさると、claim 済みで
+  完了しない行が n 件あれば**先頭を占め続け、n+1件目以降に永久に到達できない**
+  という懸念（先頭詰まり）がオーナーから提示された。これは推論であり、実測していない
+  ——本 PR の歯（`packages/testkit/src/outbox-store-conformance.ts`）で実際に再現するかを
+  確かめた（「歯について」参照。**再現した**）。
+
+  2点目も「読んでそう推論した」段階だった。`packages/postgres/src/__tests__/
+  outbox-claim-lease-index.test.ts` で `EXPLAIN` により実測した（同上）。
+
+- **決定**:
+
+  1. **`claimed_at IS NULL` を単独で足すのではなく、リースにする。**
+     `claimBatch` は「一度も claim されていない」か「`claimed_at` が `leaseMs` 以上前」
+     の行を claim する:
+
+     ```sql
+     AND (claimed_at IS NULL OR claimed_at <= ${opts.now - opts.leaseMs})
+     ```
+
+     境界は `available_at <= opts.now` と同じ `<=`（両端含む）に揃える。
+
+  2. **`ClaimOutboxJobsOptions`（`packages/core/src/interfaces/outbox-store.ts`）に
+     `leaseMs: number` を追加する。必須・既定値なし。** 既存フィールド（`now`/`limit`/
+     `kinds`/`claimedBy`）と揃えた命名にした。
+
+  3. **`runtime.tick` の `TickOptions`（`packages/core/src/runtime.ts`）にも
+     `leaseMs: number` を必須で足す。** `Runtime.tick` のシグネチャを
+     `tick(ctx: Ctx, opts?: TickOptions)` から `tick(ctx: Ctx, opts: TickOptions)` へ変える
+     ——**`tick(ctx)` を引数無しで呼べなくなる、意図した破壊的変更。** リース長は
+     「ワーカーが止まったとみなすまでの時間」という運用方針であり、`packages/core` が
+     決めてよい値ではなく呼び出し側が決める。
+
+  4. **呼び出し側**（`examples/chat/src/embed-drain.ts`、唯一の非テスト呼び出し側）:
+     `leaseMs = 30分`（`1_800_000`ms）。根拠——`packages/openai` の `EmbeddingProvider`/
+     `LLMProvider` はどちらも `new OpenAI({ apiKey })` をオプション無しで作っており、
+     インストール済みの `openai` SDK（このリポジトリの `node_modules/openai`、v7.10.0で
+     確認）の既定値がそのまま効く: 既定の `timeout` は1リクエストあたり10分、既定の
+     `maxRetries` は2（`node_modules/.pnpm/openai@7.10.0.../openai/client.d.ts` の doc
+     コメントに明記）。つまり1回の embed/extract ジョブは、SDK が自動リトライする分も
+     含めると最大 (1 + 2) × 10分 = 30分は「正常に処理中」でありうる。リースがこれより
+     短いと、まだ生きているワーカーのジョブを「止まった」と誤判定して奪ってしまう。
+     **この harness は単一プロセス・単一ワーカーのバッチ処理で、`tick()` は claim した分を
+     同じ呼び出しの中で必ず complete/fail させてから返る**ため、通常運転ではリース満了は
+     発生しない——満了が意味を持つのは、このプロセス自体がクラッシュして再実行された
+     ときの回収だけである。「それっぽい数字」を発明しないため、実際にこのコードベースが
+     依存している SDK の実測可能な既定値から導いた。
+
+  5. **索引は追加のみ。既存の `idx_outbox_pending` は DROP しない。**
+     `packages/postgres/migrations/0002_outbox_claim_lease_index.sql` を新設:
+
+     ```sql
+     CREATE INDEX idx_outbox_claimable
+       ON outbox (tenant_id, kind, available_at)
+       WHERE completed_at IS NULL AND failed_at IS NULL;
+     ```
+
+     この述語（`completed_at IS NULL AND failed_at IS NULL`）は、新しい `claimBatch` の
+     `WHERE` が持つ AND 節の**部分集合**であり、`leaseMs`/`now` の実引数に関わらず常に
+     成立する——`claimed_at` を述語に含めていないため、リースの実引数から独立している
+     （部分索引の述語は作成時に固定される定数式でなければならず、`claimed_at` を
+     使ったリース条件は `leaseMs` というクエリ実行時の引数に依存するため、索引の述語には
+     できない）。
+
+  6. **`packages/testkit/src/__fixtures__/in-memory-outbox-store.ts`
+     （`InMemoryOutboxStore`）と `packages/core/src/__tests__/runtime-fakes.ts`
+     （`FakeOutboxStore`）に同じリース意味論を実装する。** 前者は
+     `describeOutboxStoreConformance`（後述）が Postgres 実装と共通で走らせる相手であり、
+     ここで食い違うと歯が嘘をつく。後者は `packages/core` 自身のテストが使う独立した
+     fake（`core` は `testkit` に依存しない、docs/architecture.md §4）であり、こちらだけ
+     古い意味論のままだと `runtime.test.ts` が「直った後の姿」を「今日の姿」のつもりで
+     検査してしまう。
+
+- **採らなかった案**:
+
+  - **`claimed_at IS NULL` を単独で足す**（オーナーの却下案）。これは「重複」を
+    「見えない停止」に交換する変更である。足すと、claim 後にワーカーが死んだジョブは
+    `completed_at` も `failed_at` も付かないまま**二度と claim されず、どこからも
+    見えなくなる**。今日は（二重処理という代償を払って）自己回復している。この repo は
+    既にこの族（「無い」の種類を潰す変更）を ADR 0011・0025・0027・0028 で4回破っており、
+    それを直す本 PR で5回目を作ることになる。オーナーの芯（「無い」の種類を潰さない）に
+    照らすと、後者（見えない停止）のほうが悪い。
+
+  - **リース長を実装側の定数にする**（例: `DEFAULT_LEASE_MS = 5 * 60_000` を
+    `packages/core` に置く）。却下。リース長は「何をもって処理が止まったとみなすか」と
+    いう運用方針であり、`packages/core` が決めてよい値ではない。呼び出し側ごとに
+    処理時間の性格が違う（`examples/chat` は OpenAI SDK 呼び出しを含み最大30分かかりうる、
+    別の呼び出し側は数秒で終わる軽量ジョブしか扱わないかもしれない）——単一の既定値は
+    どちらに合わせても片方を壊す。省略可能にすると「方針を決めた呼び出し側」と
+    「決めていない呼び出し側」が同じ顔になる、という理由も ADR 0030 の
+    `expectedStatus`（省略時は今日と一字も変えない設計）とは対照的にここでは効かない
+    ——`expectedStatus` は「省略時は今日通り」という後方互換な既定を持てたが、
+    `leaseMs` の「今日」は「リース無し」であり、それを既定にすることは
+    「`claimed_at IS NULL` を単独で足す」を裏から実装するのと同じ結果になる
+    （リースが常に0扱いになり、claim 済みの行は事実上二度と claim されない）。
+    だから既定値そのものを持たせられない。
+
+  - **既存索引 `idx_outbox_pending` を張り替える（述語を変える、または DROP して
+    作り直す）**。マネージャーの指示により、破壊的な変更（DROP・列の削除・型変更）を
+    避け、追加のみのマイグレーションに留めた。`idx_outbox_pending` は今後プランナから
+    選ばれなくなる見込みだが、存在すること自体の害は無い。
+
+- **引き受ける負債**:
+
+  - **`tick(ctx)` を引数無しで呼べなくなった。** `leaseMs` を必須にした意図した
+    破壊的変更であり、`examples/chat` を含むすべての呼び出し側の変更が要る
+    （本 PR で `examples/chat/src/embed-drain.ts` を更新済み。他に非テストの
+    呼び出し側は無いことを確認済み——`grep -rn "\.tick(\|claimBatch("` で全件確認）。
+
+  - **リースが切れた行は再び claim されるので、処理は at-least-once であり重複しうる。**
+    `packages/core/src/interfaces/outbox-store.ts` の契約 doc にこれを明記した。
+    これは既存の契約文「Phase 1 では失敗したジョブの自動リトライを行わない（`fail` は
+    終端状態）」とは**別の話**である——あちらは `fail()` で終端状態になった（＝処理を
+    試みて失敗が確定した）ジョブの話、リースによる再 claim は**終端状態に至らないまま
+    止まったジョブ**の回収である。「失敗した仕事の再試行」ではなく
+    「終わらなかった仕事の回収」であり、混同しないこと。
+
+  - **使われていない `idx_outbox_pending` が残る。** DROP しない決定の裏返し。
+
+  - **リース長は運用側の判断に委ねられ、この PR は `examples/chat` 以外の
+    「本番相当の」呼び出し側を持たない。** 将来、実際のワーカー・スケジューラ実装が
+    現れたとき、そこでも同じように「発明せず、実測可能な根拠から導く」ことが要る
+    ——本 ADR の決定4がその手本になる。
+
+  - **`packages/core` 自身のテスト用 fake（`FakeOutboxStore`）と `packages/testkit` の
+    `InMemoryOutboxStore` という、意味的に重複する2つの in-memory 実装が存在する
+    ことは本 PR が作った負債ではない**（既存の構造、docs/architecture.md §4 の
+    「core は testkit に依存しない」という制約から来る）が、リース意味論を両方に
+    手で複製した以上、今後この2つが再び食い違う可能性は本 PR でも解消していない。
+
+- **確かめていないこと**:
+
+  - **`packages/postgres/src/__tests__/outbox-claim-lease-index.test.ts` の
+    `EXPLAIN` は、この作業環境では実行していない。** この環境には Docker/PostgreSQL/
+    `DATABASE_URL` が無く、`requireDatabaseUrl()` が未設定を検知してテストランナー
+    自体が起動しない。CI の postgres ジョブが唯一の実行環境であり、「索引が
+    使われるようになった」ことは CI のログで初めて実測される。
+  - **`describeOutboxStoreConformance` に足した2本（先頭詰まり・リース失効後の
+    再 claim）の postgres 版**も同じ理由でこの環境では実行していない。手元では
+    `InMemoryOutboxStore` に対してのみ実行し、通ることを確認した（「歯について」参照）。
+  - **本物の並行**（複数プロセスが実際に同時にネットワーク越しで `claimBatch` を
+    撃つときのタイミング）で `FOR UPDATE SKIP LOCKED` とリースの組み合わせが
+    どう振る舞うかは、単一プロセス内の逐次呼び出ししか検査していない
+    （docs/architecture.md の既存の「確かめていないこと」がそのまま引き続く）。
+  - **`examples/chat` の30分という値が実運用で適切かどうか**は、実際に OpenAI の
+    API を長時間叩き続ける状況で検証していない。SDK のドキュメント上の既定値から
+    導いた理論値であり、実測ではない。
+
+- **これが覆るとしたら**:
+
+  - `examples/chat` 以外の「本番相当の」呼び出し側（実際のワーカー・スケジューラ）が
+    実装されたとき、そこでのリース長の根拠は本 ADR の決定4をそのまま流用できない
+    可能性がある（処理内容が変われば「正常に処理中でありうる時間」の上限も変わる）。
+  - CI の `EXPLAIN` 実測で `idx_outbox_claimable` が選ばれなかった場合、索引の列順・
+    述語を見直す必要がある。
+  - オーナーの「先頭詰まり」仮説が歯で再現しなかった場合（本 PR では再現したが）、
+    リースだけでは解決しない別の設計が要ることになる。
+  - `fail()` の自動リトライ・`attempts` の活用・`complete`/`fail` の CAS 化は、本 PR の
+    範囲外として名前だけ残した（PR 本文「範囲外」参照）。これらが実装されるとき、
+    リースとの相互作用（例: リース切れの再 claim と自動リトライのバックオフが
+    二重に効かないか）を再検討する必要がある。

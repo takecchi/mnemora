@@ -6,6 +6,9 @@ import type { ReextractSkip } from "../strategies/reextract.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const ctx: Ctx = { tenantId: "tenant-1" };
+// このファイルの歯はリースの境界そのものを検査しない(それは
+// outbox-store-conformance.ts の役目)ので、十分に長く固定した値を使う。
+const TEST_LEASE_MS = 60_000;
 
 function llmReturning(
   memories: {
@@ -163,6 +166,7 @@ describe("runtime.observe — extract: 'sync'（既定, D2）", () => {
       limit: 10,
       now: new Date(),
       claimedBy: "test",
+      leaseMs: TEST_LEASE_MS,
     });
     expect(pending).toEqual([]);
   });
@@ -177,6 +181,7 @@ describe("runtime.observe — extract: 'sync'（既定, D2）", () => {
       limit: 10,
       now: new Date(),
       claimedBy: "test",
+      leaseMs: TEST_LEASE_MS,
     });
     expect(pending).toHaveLength(1);
   });
@@ -200,6 +205,7 @@ describe("runtime.observe — extract: 'deferred'", () => {
       limit: 10,
       now: new Date(),
       claimedBy: "test",
+      leaseMs: TEST_LEASE_MS,
     });
     expect(pending).toHaveLength(1);
     expect(pending[0]?.payload.observationId).toBe(result.observationId);
@@ -216,7 +222,7 @@ describe("runtime.observe — extract: 'deferred'", () => {
     });
     expect(result.memoryIds).toEqual([]);
 
-    const tickResult = await runtime.tick(ctx, { kinds: ["extract"] });
+    const tickResult = await runtime.tick(ctx, { kinds: ["extract"], leaseMs: TEST_LEASE_MS });
     expect(tickResult).toEqual({ processed: 1, failed: 0 });
 
     const aggregate = await stores.memoryStore.aggregateScope(ctx, {});
@@ -261,6 +267,7 @@ describe("runtime.observe — 冪等性（roadmap.md 段階3の完了条件）",
       limit: 10,
       now: new Date(),
       claimedBy: "test",
+      leaseMs: TEST_LEASE_MS,
     });
     expect(pending).toHaveLength(1);
   });
@@ -345,7 +352,7 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
     const observeResult = await runtime.observe(ctx, { kind: "utterance", text: "本文" });
     const memoryId = observeResult.memoryIds[0]!;
 
-    const tickResult = await runtime.tick(ctx, { kinds: ["embed"] });
+    const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
     expect(tickResult).toEqual({ processed: 1, failed: 0 });
 
     const memory = await stores.memoryStore.get(ctx, memoryId);
@@ -361,7 +368,7 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
     const memoryId = observeResult.memoryIds[0]!;
 
     stores.embeddingProvider.shouldFail = true;
-    const tickResult = await runtime.tick(ctx, { kinds: ["embed"] });
+    const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
     expect(tickResult).toEqual({ processed: 0, failed: 1 });
 
     const memory = await stores.memoryStore.get(ctx, memoryId);
@@ -380,7 +387,7 @@ describe("runtime.tick — 未知の outbox job kind", () => {
     );
     expect(jobs).toHaveLength(1);
 
-    const tickResult = await runtime.tick(ctx, { kinds: ["mystery-kind"] });
+    const tickResult = await runtime.tick(ctx, { kinds: ["mystery-kind"], leaseMs: TEST_LEASE_MS });
     expect(tickResult).toEqual({ processed: 0, failed: 1 });
   });
 });

@@ -10,6 +10,15 @@ import { isUuidLike, rowToOutboxJob, type OutboxJobRow } from "./mapping.js";
  * `claimBatch` は `FOR UPDATE SKIP LOCKED` を使う。複数のワーカーが同時に `tick()` を
  * 呼んでも、同じ行を二重に claim しない（ロック待ちで詰まらせるのでもなく、既に他の
  * ワーカーが取ろうとしている行はスキップして次の行を取りに行く）。
+ *
+ * 🔴 **ただし `FOR UPDATE SKIP LOCKED` の行ロックは、この SQL 文の実行（コミット）が
+ * 終わった瞬間に解放される。** 「claim した」こと自体は `claimed_at`/`claimed_by` という
+ * 列の値としてしか残らない。そのため `claimBatch` の `WHERE` は `claimed_at` を
+ * 単に `IS NULL` で見るのではなく、**リース（ADR 0032）**——`claimed_at` が無いか、
+ * `leaseMs` 以上前——で見る。`claimed_at IS NULL` だけにすると、claim 後に処理が
+ * 終わらないまま止まったワーカーのジョブが `completed_at`/`failed_at` のどちらも
+ * 付かないまま二度と claim されなくなる（「見えない停止」）。詳細は
+ * `packages/core/src/interfaces/outbox-store.ts` の doc と ADR 0032。
  */
 export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly db: Db) {}
@@ -17,6 +26,10 @@ export class PostgresOutboxStore implements OutboxStore {
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
     const kindsFilter =
       opts.kinds !== undefined ? sql`AND kind = ANY(${sql.param(opts.kinds)}::text[])` : sql``;
+    // リースが切れたとみなす境界時刻。`claimed_at <= leaseExpiresBefore` の行は
+    // 「十分前に claim されたまま完了していない」＝止まったワーカーの行とみなす。
+    // 境界は `available_at <= opts.now` と同じ `<=`（両端含む）に揃えてある。
+    const leaseExpiresBefore = new Date(opts.now.getTime() - opts.leaseMs);
 
     const result = await this.db.execute(sql`
       WITH claimable AS (
@@ -25,6 +38,7 @@ export class PostgresOutboxStore implements OutboxStore {
           AND completed_at IS NULL
           AND failed_at IS NULL
           AND available_at <= ${opts.now}
+          AND (claimed_at IS NULL OR claimed_at <= ${leaseExpiresBefore})
           ${kindsFilter}
         ORDER BY available_at ASC
         LIMIT ${opts.limit}
