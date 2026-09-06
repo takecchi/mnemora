@@ -3,7 +3,7 @@ import type { EmbeddingCassetteSection } from "./cassette.js";
 import { embeddingCassetteKey } from "./cassette.js";
 
 /**
- * 記録した実 API の応答を再生する `EmbeddingProvider`（ADR 0050）。
+ * 記録した実 API の応答を再生する `EmbeddingProvider`（ADR 0051）。
  *
  * **`DeterministicEmbeddingProvider` の代わりではない。**あちらは文字コードから
  * 機械的にベクトルを作る stub であり、意味的な類似度を一切表現しない（配線の検査用）。
@@ -22,7 +22,7 @@ export interface RecordedEmbeddingProviderOptions {
    * 呼び出し側が期待する埋め込み空間。指定すると、記録元の空間と食い違ったときに
    * **構築時に**落ちる。
    *
-   * **なぜ必要か（ADR 0050 の「引き受ける負債」）**: カセットはモデル版を凍結する。
+   * **なぜ必要か（ADR 0051 の「引き受ける負債」）**: カセットはモデル版を凍結する。
    * 呼び出し側が `text-embedding-3-small` / 256次元のつもりで、別のモデルで録った
    * カセットを読んだ場合、ベクトルは正常に引けてしまい、順位も出てしまう——
    * **数字が出るのに意味が違う**という最も見つけにくい壊れ方になる。ここで照合する。

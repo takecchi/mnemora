@@ -151,7 +151,7 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
 
         // 擬似 provider で走ったことが、レポートの文面からも明示されている
         // (0 を黙って出さない、という PR 本文 (A) の要求のテスト)。
-        // ADR 0050 でモードを引数に取るようになったため、この arm の実際のモードを渡す。
+        // ADR 0051 でモードを引数に取るようになったため、この arm の実際のモードを渡す。
         expect(report.usageReport).toBe(
           formatNoApiCallsNotice({
             llmMode: report.llmMode,

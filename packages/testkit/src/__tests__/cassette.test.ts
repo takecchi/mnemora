@@ -1,4 +1,4 @@
-// ADR 0050: 記録した実 API の応答を再生する provider の歯。
+// ADR 0051: 記録した実 API の応答を再生する provider の歯。
 //
 // **ここで固定したい振る舞いは1つに尽きる**——「記録に無いものを訊かれたら、
 // 黙って何かを返さずに落ちる」。カセットの価値は「本物と同じ数字が出る」ことにあり、
@@ -59,7 +59,7 @@ async function recordRoundTrip(): Promise<Cassette> {
   return recorder.toCassette();
 }
 
-describe("CassetteRecorder（ADR 0050）", () => {
+describe("CassetteRecorder（ADR 0051）", () => {
   it("録ったものを再生すると、記録元と同じベクトルが返る", async () => {
     const cassette = await recordRoundTrip();
     const replay = new RecordedEmbeddingProvider({ section: cassette.embedding });
@@ -96,7 +96,7 @@ describe("CassetteRecorder（ADR 0050）", () => {
   });
 });
 
-describe("RecordedEmbeddingProvider（ADR 0050）", () => {
+describe("RecordedEmbeddingProvider（ADR 0051）", () => {
   it("記録に無い入力は、擬似ベクトルへ倒れず例外になる", async () => {
     const cassette = await recordRoundTrip();
     const replay = new RecordedEmbeddingProvider({ section: cassette.embedding });
@@ -132,7 +132,7 @@ describe("RecordedEmbeddingProvider（ADR 0050）", () => {
   });
 });
 
-describe("RecordedLLMProvider（ADR 0050）", () => {
+describe("RecordedLLMProvider（ADR 0051）", () => {
   it("記録に無いプロンプトは、擬似応答へ倒れず例外になる", async () => {
     const cassette = await recordRoundTrip();
     const replay = new RecordedLLMProvider({ section: cassette.llm });
@@ -164,7 +164,7 @@ describe("RecordedLLMProvider（ADR 0050）", () => {
   });
 });
 
-describe("鍵の導出（ADR 0050）", () => {
+describe("鍵の導出（ADR 0051）", () => {
   it("スキーマを鍵に含めない——同じプロンプトなら同じ鍵になる", () => {
     expect(llmCassetteKey(PROMPT)).toBe(llmCassetteKey({ ...PROMPT }));
   });
@@ -174,7 +174,7 @@ describe("鍵の導出（ADR 0050）", () => {
   });
 });
 
-describe("assertCassette（ADR 0050）", () => {
+describe("assertCassette（ADR 0051）", () => {
   it("形式版が違うカセットは読まずに落ちる", async () => {
     const cassette = (await recordRoundTrip()) as Cassette;
     const stale = { ...cassette, version: CASSETTE_FORMAT_VERSION + 1 };

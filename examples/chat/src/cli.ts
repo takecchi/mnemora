@@ -45,12 +45,12 @@ function requireDatabaseUrl(): string {
 }
 
 /**
- * **3層すべてを名指しする**（ADR 0050）。
+ * **3層すべてを名指しする**（ADR 0051）。
  *
  * ⚠ ここは一度壊れていた——`ProviderMode` に `"recorded"` を足したとき、この関数は
  * 「`openai` でなければ擬似 provider」のままだった。その結果、記録を再生している run が
  * 画面には「決定的な擬似 provider」と出て、**同じ report の別の行（`llm=recorded`）と
- * 矛盾していた。**ADR 0050 が「どちらで走ったかを隠さない」ことを土台にしている以上、
+ * 矛盾していた。**ADR 0051 が「どちらで走ったかを隠さない」ことを土台にしている以上、
  * これは最も起こしてはならない壊れ方である。**モードを増やすときは必ずここも増やすこと。**
  */
 function describeMode(mode: ProviderMode): string {
@@ -58,7 +58,7 @@ function describeMode(mode: ProviderMode): string {
     case "openai":
       return "本物の OpenAI";
     case "recorded":
-      return "記録した実 API 応答の再生（ADR 0050）";
+      return "記録した実 API 応答の再生（ADR 0051）";
     case "deterministic":
       return "@mnemora/testkit の決定的な擬似 provider";
     default: {
@@ -245,7 +245,7 @@ async function runCompare(): Promise<void> {
  * `.github/**` は変更していない。本物の API を叩く実行はこのコマンドを手動で叩いたときだけ。
  */
 /**
- * arm の定義（ADR 0050 で `source` を足した）。
+ * arm の定義（ADR 0051 で `source` を足した）。
  *
  * `source` は「本物の API を叩くか、記録した応答を再生するか」だけを切り替える。
  * **arm の意味（どちらが擬似で、どちらが本物由来か）は変えていない**——arm B は
@@ -292,19 +292,19 @@ async function runRetrieval(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
 
   // **キーがあれば本物、無ければ記録の再生。どちらで走ったかは必ず画面に出す**
-  // （黙って別のものへ倒れない、という既存の規律の適用。ADR 0050）。
+  // （黙って別のものへ倒れない、という既存の規律の適用。ADR 0051）。
   const useReal = Boolean(process.env.OPENAI_API_KEY);
   if (!useReal && !cassetteExists()) {
     throw new Error(
       "retrieval は arm B・C で本物の OpenAI(embedding、C はさらに LLM も)を使う。" +
-        "OPENAI_API_KEY を設定するか、先に `record` サブコマンドでカセットを作ること（ADR 0050）。",
+        "OPENAI_API_KEY を設定するか、先に `record` サブコマンドでカセットを作ること（ADR 0051）。",
     );
   }
   const cassette = useReal ? undefined : loadCassette();
   if (cassette) {
     console.log(`[cassette] 記録した応答を再生する: ${describeCassette(cassette)}`);
     console.log(
-      "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること（ADR 0050）。",
+      "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること（ADR 0051）。",
     );
   }
 
@@ -347,7 +347,7 @@ async function runRetrieval(): Promise<void> {
 }
 
 /**
- * 実 API の応答を記録してカセットに書き出す（ADR 0050）。
+ * 実 API の応答を記録してカセットに書き出す（ADR 0051）。
  *
  * **再生する当のもの（`retrieval` の arm B・C）をそのまま走らせて録る。**
  * probe set を読んで「必要そうな入力」を列挙する形は採らない——列挙が漏れると、
@@ -405,7 +405,7 @@ async function runRecord(): Promise<void> {
   console.log(`  ${describeCassette(cassette)}`);
   console.log(
     "  ⚠ これはこの時点の API の姿の記録である。モデルが更新されても記録は変わらない——" +
-      "乖離は `verify` で確かめること（ADR 0050 の「引き受ける負債」）。",
+      "乖離は `verify` で確かめること（ADR 0051 の「引き受ける負債」）。",
   );
 }
 
@@ -426,7 +426,7 @@ function cosine(a: readonly number[], b: readonly number[]): number {
 }
 
 /**
- * 記録が実 API から乖離していないかを測る（ADR 0050 の「覆る条件」を、測れる形にしたもの）。
+ * 記録が実 API から乖離していないかを測る（ADR 0051 の「覆る条件」を、測れる形にしたもの）。
  *
  * **埋め込みだけを照合する。**`gpt-4o-mini` の応答は同じ入力でも揺れるため、差が出ても
  * 「モデルが変わった」とは言えない——**照合できないものを照合したふりをしない**ので、
@@ -492,7 +492,7 @@ async function runVerify(): Promise<void> {
   console.log(`  最も離れた入力: ${JSON.stringify(worst.text)}`);
   console.log(`  閾値 ${DRIFT_COSINE_THRESHOLD} を割った件数: ${drifted}`);
   if (drifted > 0) {
-    console.log("  🔴 記録が実 API から乖離している。記録し直すこと（ADR 0050）。");
+    console.log("  🔴 記録が実 API から乖離している。記録し直すこと（ADR 0051）。");
     process.exitCode = 1;
   } else {
     console.log("  ✅ 揺らぎの範囲内。記録は実 API と整合している。");
@@ -515,10 +515,10 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run retrieval # 意味的関連性の probe set を3 arm(擬似/埋め込みのみ本物/フル本物)で比較",
-      "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0050)",
+      "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
-      "                                                                      # 実 API の応答を記録してカセットに書き出す(ADR 0050)",
-      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify   # 記録と実 API の乖離を測る(ADR 0050)",
+      "                                                                      # 実 API の応答を記録してカセットに書き出す(ADR 0051)",
+      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify   # 記録と実 API の乖離を測る(ADR 0051)",
     ].join("\n"),
   );
 }

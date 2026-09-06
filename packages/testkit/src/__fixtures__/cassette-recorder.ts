@@ -11,7 +11,7 @@ import type { Cassette, EmbeddingCassetteEntry, LLMCassetteEntry } from "./casse
 import { CASSETTE_FORMAT_VERSION, embeddingCassetteKey, llmCassetteKey } from "./cassette.js";
 
 /**
- * 実 provider を包んで入出力を記録するデコレータ一式（ADR 0050）。
+ * 実 provider を包んで入出力を記録するデコレータ一式（ADR 0051）。
  *
  * **1回の実行で1つのカセットを作る。**LLM と埋め込みで別々のファイルにしないのは、
  * 両者が同じ1回の記録セッションに属する——同じ probe set・同じ日・同じ API の姿——
@@ -56,11 +56,11 @@ export class CassetteRecorder {
     // **何が起きたかだけでなく、どうすればいいかまで言う。**この失敗の既知の原因は1つに
     // 集中している——`observe()` は `externalId` で重複排除するため、取り込み済みの
     // テナントで記録を走らせると抽出も埋め込みも呼ばれない。実際にこれで一度落ちた
-    // （ADR 0050「引き受けた負債4」）ので、その原因を例外本文に載せる。
+    // （ADR 0051「引き受けた負債4」）ので、その原因を例外本文に載せる。
     const hint =
       "記録の実行が API を1回も呼んでいない。よくある原因: 取り込み済みのテナントで " +
       "`record` を走らせた——`observe()` は externalId で重複排除するため、抽出も埋め込みも " +
-      "呼ばれない。新しい tenantId で録り直すこと（ADR 0050）。";
+      "呼ばれない。新しい tenantId で録り直すこと（ADR 0051）。";
     if (this.embeddingSpace === undefined || this.embeddingEntries.size === 0) {
       throw new Error(`CassetteRecorder: 埋め込みが1件も記録されていない。${hint}`);
     }

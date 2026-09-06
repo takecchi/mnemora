@@ -5,7 +5,7 @@ import type { Cassette } from "@mnemora/testkit";
 import { assertCassette } from "@mnemora/testkit";
 
 /**
- * カセット（記録した実 API の応答）の読み書き（ADR 0050）。
+ * カセット（記録した実 API の応答）の読み書き（ADR 0051）。
  *
  * **置き場所は `examples/chat/cassettes/` である。**`packages/testkit` には置かない——
  * 記録の中身は probe set（`probe-set.ts`）に強く結び付いており、probe set が住んでいる
@@ -31,7 +31,7 @@ export function loadCassette(path: string = RETRIEVAL_CASSETTE_PATH): Cassette {
     throw new Error(
       `カセットが無い: ${path}\n` +
         "OPENAI_API_KEY を設定して `pnpm --filter @mnemora/example-chat run record` を" +
-        "先に実行すること（ADR 0050）。",
+        "先に実行すること（ADR 0051）。",
     );
   }
   const raw: unknown = JSON.parse(readFileSync(path, "utf-8"));

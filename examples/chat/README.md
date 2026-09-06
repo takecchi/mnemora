@@ -43,7 +43,7 @@ pnpm --filter @mnemora/example-chat run compare
 pnpm --filter @mnemora/example-chat run scope
 
 # 意味的関連性を測る（後述「retrieval」節）
-#   OPENAI_API_KEY があれば実 API、無ければ記録した応答を再生する（ADR 0050）
+#   OPENAI_API_KEY があれば実 API、無ければ記録した応答を再生する（ADR 0051）
 pnpm --filter @mnemora/example-chat run retrieval
 ```
 
@@ -505,7 +505,7 @@ arm ごとに別テナントを使う。outbox は `tick()` の `processed === 0
 arm ごとに画面へ出す。擬似 provider だけの arm(A)ではその旨を明示する
 (「OpenAI の API は一切叩いていない」)。
 
-### 実キー無しで走らせる——記録した応答の再生（ADR 0050）
+### 実キー無しで走らせる——記録した応答の再生（ADR 0051）
 
 `retrieval` は **`OPENAI_API_KEY` が無ければ、記録した実 API の応答を再生する**
 （`examples/chat/cassettes/retrieval.json`）。どちらで走ったかは起動直後に必ず画面へ出す。
@@ -526,7 +526,7 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify
 （`cassette-coverage.test.ts` が、その食い違いを検査の時点で捕まえる）。
 
 **⚠ 再生が保証するのは「測定の再現性」であって「実 API との一致」ではない。**
-実際に測った差は次のとおり（**ADR 0050 に実測として記録した**）。
+実際に測った差は次のとおり（**ADR 0051 に実測として記録した**）。
 
 | arm | 実 API | 再生 | |
 |---|---|---|---|

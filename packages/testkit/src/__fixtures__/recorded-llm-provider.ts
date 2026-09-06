@@ -3,7 +3,7 @@ import type { LLMCassetteSection } from "./cassette.js";
 import { llmCassetteKey } from "./cassette.js";
 
 /**
- * 記録した実 API の応答を再生する `LLMProvider`（ADR 0050）。
+ * 記録した実 API の応答を再生する `LLMProvider`（ADR 0051）。
  *
  * **`DeterministicLLMProvider` の代わりではない。**あちらは発話をそのまま content にして
  * 40文字で切るだけで、抽出をしていない。こちらは**本物の `gpt-4o-mini` が実際に返した

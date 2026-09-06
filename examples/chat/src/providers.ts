@@ -27,7 +27,7 @@ import { createUsageMeter } from "./usage-meter.js";
  * 既存テストはこの2つの環境変数を設定しないため、そのまま通る）。
  */
 /**
- * `"recorded"` は ADR 0050 で足した第3のモード——**記録した実 API の応答を再生する**。
+ * `"recorded"` は ADR 0051 で足した第3のモード——**記録した実 API の応答を再生する**。
  *
  * `"deterministic"`（意味を持たない stub）とも `"openai"`（実 API を叩く）とも違う。
  * 記録済みの入力に対しては `"openai"` と同じベクトル・同じ抽出結果を返し、
@@ -108,12 +108,12 @@ export function selectEmbeddingMode(env: EnvLike): ProviderMode {
 
 export interface CreateProvidersOptions {
   /**
-   * `"recorded"` モードで再生に使うカセット（ADR 0050）。`"recorded"` を選んだのに
+   * `"recorded"` モードで再生に使うカセット（ADR 0051）。`"recorded"` を選んだのに
    * これが無ければ**構築時に落ちる**——カセット未指定を「じゃあ擬似物で」と読み替えない。
    */
   cassette?: Cassette;
   /**
-   * 実 API の入出力を記録する（ADR 0050）。`"openai"` を選んだ側だけが記録の対象になる
+   * 実 API の入出力を記録する（ADR 0051）。`"openai"` を選んだ側だけが記録の対象になる
    * ——叩いていない API は記録しようがない。
    */
   recorder?: CassetteRecorder;
@@ -131,7 +131,7 @@ export function createProviders(
   const requireCassette = (which: string): Cassette => {
     if (cassette === undefined) {
       throw new Error(
-        `${which} に "recorded" を指定したが、カセットが渡されていない（ADR 0050）。` +
+        `${which} に "recorded" を指定したが、カセットが渡されていない（ADR 0051）。` +
           "先に `record` サブコマンドで記録すること。",
       );
     }

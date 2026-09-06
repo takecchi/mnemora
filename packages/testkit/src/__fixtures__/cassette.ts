@@ -2,13 +2,13 @@ import { createHash } from "node:crypto";
 import type { EmbeddingSpaceId, PromptSpec } from "@mnemora/core";
 
 /**
- * 記録した実 API の入出力（カセット）の型と、その鍵の導出（ADR 0050）。
+ * 記録した実 API の入出力（カセット）の型と、その鍵の導出（ADR 0051）。
  *
  * **これは擬似 provider の置き換えではなく、二層のうちの上の層である。**
  * 配線・契約・適合テストは従来どおり `DeterministicLLMProvider` /
  * `DeterministicEmbeddingProvider`（意味を持たない stub）で走る。カセットを使うのは
  * 北極星の物差しを測る経路（`examples/chat` の `retrieval`）だけである。
- * 理由と、採らなかった案は [ADR 0050](../../../../docs/decisions/0050-recorded-provider-cassette.md)。
+ * 理由と、採らなかった案は [ADR 0051](../../../../docs/decisions/0051-recorded-provider-cassette.md)。
  *
  * **鍵は入力そのものの SHA-256 にする。**入力文字列をそのまま JSON のキーにしないのは、
  * 長さが揃わず diff が読みにくくなるためであり、意味は無い。**引ける形を優先して
@@ -38,7 +38,7 @@ export interface LLMCassetteEntry {
 export interface EmbeddingCassetteSection {
   /**
    * 記録元の埋め込み空間。再生側が要求する空間と食い違ったら落とす
-   * （ADR 0050「負債」: モデル版の凍結を、黙って進ませない）。
+   * （ADR 0051「負債」: モデル版の凍結を、黙って進ませない）。
    */
   space: EmbeddingSpaceId;
   entries: Record<string, EmbeddingCassetteEntry>;

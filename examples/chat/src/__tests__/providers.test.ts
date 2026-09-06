@@ -112,7 +112,7 @@ describe("createProviders: LLM/Embedding の個別上書き", () => {
 });
 
 // ---------------------------------------------------------------------------
-// ADR 0050: 第3のモード `"recorded"` の配線
+// ADR 0051: 第3のモード `"recorded"` の配線
 //
 // ⚠ **この節が無かったために、表示層の不具合が「691テスト緑」のまま出荷されかけた。**
 // `ProviderMode` に `"recorded"` を足したとき、`createProviders` は直したが
@@ -134,7 +134,7 @@ function minimalCassette(): Cassette {
   };
 }
 
-describe("createProviders — recorded モード（ADR 0050）", () => {
+describe("createProviders — recorded モード（ADR 0051）", () => {
   it('MNEMORA_EMBEDDING="recorded" でカセットが無ければ落ちる（擬似物へ倒れない）', () => {
     expect(() => createProviders({ MNEMORA_EMBEDDING: "recorded" })).toThrow(
       /カセットが渡されていない/,
@@ -198,7 +198,7 @@ describe("createProviders — recorded モード（ADR 0050）", () => {
   });
 });
 
-describe("formatNoApiCallsNotice — モードを取り違えない（ADR 0050）", () => {
+describe("formatNoApiCallsNotice — モードを取り違えない（ADR 0051）", () => {
   it("擬似 stub の run を「記録の再生」と言わない", () => {
     const notice = formatNoApiCallsNotice({
       llmMode: "deterministic",

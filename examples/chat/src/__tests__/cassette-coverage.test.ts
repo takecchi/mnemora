@@ -1,4 +1,4 @@
-// ADR 0050 の「引き受けた負債1」を、測れる形にした歯。
+// ADR 0051 の「引き受けた負債1」を、測れる形にした歯。
 //
 // カセットは probe set に強く結び付いている。probe を1件足して録り直しを忘れると、
 // **再生は「記録に無い」で落ちる**——設計としてはそれで正しいが、落ちる場所が
@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { cassetteExists, loadCassette } from "../cassette-io.js";
 import { DEFAULT_HAYSTACK_SIZE, PROBES, buildProbeSetConversation } from "../probe-set.js";
 
-describe("記録した応答のカセットと probe set の対応（ADR 0050）", () => {
+describe("記録した応答のカセットと probe set の対応（ADR 0051）", () => {
   it("カセットがリポジトリに存在する", () => {
     expect(cassetteExists()).toBe(true);
   });

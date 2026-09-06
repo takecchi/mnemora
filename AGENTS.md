@@ -52,7 +52,7 @@
 （`OPENAI_API_KEY` があれば本物に切り替わる）。この非対称は
 [examples/chat/README.md](./examples/chat/README.md) に明記してある。
 
-**provider は3層ある**（[ADR 0050](./docs/decisions/0050-recorded-provider-cassette.md)）。
+**provider は3層ある**（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)）。
 **用途で使い分けること。**
 
 | 層 | 何か | 使う場所 |
