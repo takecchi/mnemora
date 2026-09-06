@@ -71,7 +71,17 @@ async function buildTestRuntime(opts: { embeddingShouldFail?: boolean } = {}) {
       get: async () => null,
       list: async () => [],
     },
-    tenantSettingsStore: { getDefaultHalfLifeHours: async () => 720 },
+    tenantSettingsStore: {
+      getDefaultHalfLifeHours: async () => 720,
+      // recall() 経路は event retention を読み書きしないため、呼ばれたら壊れる形で
+      // 埋めておく（ダミーの他プロパティと同じ作法）。
+      getEventRetention: async () => {
+        throw new Error("recall.postgres.test.ts のダミーは getEventRetention を呼ばないはず");
+      },
+      setEventRetention: async () => {
+        throw new Error("recall.postgres.test.ts のダミーは setEventRetention を呼ばないはず");
+      },
+    },
     llmProvider: throwingLlm,
     embeddingProvider: makeEmbeddingProvider({ shouldFail: opts.embeddingShouldFail }),
     hashContent: (content: string) => `sha256(${content})`,
