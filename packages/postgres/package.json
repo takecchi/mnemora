@@ -18,7 +18,8 @@
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
     "migrate": "tsx src/bin/migrate.ts",
-    "test:db": "vitest run"
+    "test:db": "vitest run",
+    "bench:scale": "tsx src/bench/scale-bench.ts"
   },
   "dependencies": {
     "@mnemora/core": "workspace:*",

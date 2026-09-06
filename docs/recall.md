@@ -307,12 +307,61 @@ type GroupCount = {
 
 > **⚠ 2026-09 追記: 上の段落は設計の意図であって、Phase 1 の実装ではない。**
 > Phase 1 は**常に厳密集計**であり、近似経路もそれを要求するオプションも**存在しない**（下記「Phase 1 の実装上の限界」・[ADR 0024](./decisions/0024-remove-exact-counts-option.md)）。
-> **近似が実際に要るかどうかは、まだ測っていない。**10k / 100k / 1M の3点で `aggregateScope` の費用を測り、
-> 「どこから近似が要るか」を曲線として出してから、欄を足すかどうかを決める。
+> **近似が実際に要るかどうかは、下記「`aggregateScope` の実測」で 10k / 100k / 1M の3点を測った。**
+> 費用は**テナント全体の集計**に在り（1M で 408ms）、**subject で絞った集計には無い**（全規模で 1ms 未満）。
+> **ただし「何 ms なら割に合わないか」の閾値をこの repo は定義していないので、
+> 「近似が要る」とはまだ結論していない。**欄を足すかどうかは、その閾値を決めてからである。
 > **欄を先に足すと、[ADR 0011](./decisions/0011-no-window-count-in-ann-stage.md) の `count(*) OVER ()` と同じ事故になる**
 > ——区別を表す欄が、名乗りどおりの値を持たないまま置かれる。
 
 **Phase 1 の実装上の限界(2026-09 追記、本 PR)**: 上記は近似経路を持つことを前提に書かれているが、`MemoryStore.aggregateScope`(roadmap.md 段階4/5 の実装)は Phase 1 では**常に厳密集計のみ**を実装しており、近似経路(例えば `pg_stats`/`reltuples` に基づく安価な推定)は無い。**近似を要求するオプションも持たない**——以前は `RecallQuery.exactCounts` という欄が型に在ったが、値を受け取って黙って無視していた（呼び出し側は「頼んだ」と思い込める形だった）ため、[ADR 0024](./decisions/0024-remove-exact-counts-option.md) で**削除した**（「予約・未実装」と書き残すのではなく消した。理由は ADR を参照）。これは 100万件級のテナントで `aggregateScope` のコストが無視できなくなる可能性を先送りしたものであり、隠さずここに書く(PR 本文「設計上の疑義」参照)。
+
+### `aggregateScope` の実測（2026-09 追記）
+
+上の「先送りにした」コストを、規模を振って測った（GitHub Actions run 34009301567、
+PostgreSQL 17 + pgvector、`packages/postgres/src/bench/scale-bench.ts`、擬似の合成ベクトル・
+実 API 不使用）。
+
+| 規模（行数） | subject 数 | 変種 | 所要時間（中央値） | プランの要点 |
+|---:|---:|---|---:|---|
+| 10,000 | 200 | 全体 | 9.0ms | Seq Scan あり（HashAggregate） |
+| 10,000 | 200 | subjectId 指定（小さい subject） | 0.9ms | Seq Scan 無し（GroupAggregate + idx_memories_by_subject） |
+| 100,000 | 2,000 | 全体 | 45.8ms | Seq Scan あり（Finalize HashAggregate、並列） |
+| 100,000 | 2,000 | subjectId 指定（小さい subject） | 0.7ms | Seq Scan 無し |
+| 1,000,000 | 20,000 | 全体 | 408.0ms | Seq Scan あり（Finalize HashAggregate、並列） |
+| 1,000,000 | 20,000 | subjectId 指定（小さい subject） | 0.7ms | Seq Scan 無し |
+
+**読み方**: コストは「テナント全体を集計する」呼び出しに在り、「subject で絞って集計する」
+呼び出しには無い。全体集計は 10k→9.0ms / 100k→45.8ms / 1M→408.0ms と規模に応じて伸びる
+（`Seq Scan` を伴う `HashAggregate`）。一方 subject 指定は全規模でおおむね 0.7〜0.9ms の
+横ばいで、`idx_memories_by_subject` を使った索引スキャンに乗っている。
+
+**⚠ この数値だけから「近似が要る／要らない」を結論しないこと。** 「何 ms なら割に合わないか」
+の閾値を、この repo はまだ定義していない。ここでは生の数値とスケーリングの傾向だけを示し、
+閾値の判断は読む人に委ねる。
+
+**⚠ 測っていないこと**:
+
+- ~~大きい subject を測っていない~~ → **測った**（run 34010394105、全体100,000行固定・次元256固定、
+  狙いの subject の行数は `SELECT count(*)` で実測）。`aggregateScope` は subject が大きいほど伸びる:
+  **10行で 0.8ms / 1,000行で 1.2ms / 10,000行で 5.2ms**。
+  ⟹ **subject で絞れている限り、テナント全体の集計（100,000行で 45.8ms、1,000,000行で 408ms）
+  とは桁が違う。** ただし**全体行数は 100,000 に固定しており、振っていない。**
+  同じ subject の大きさでも全体行数が変われば結果は変わりうる。
+- **同時実行下では測っていない**（単発クエリの中央値のみ）。
+- 1,000,000行を超える規模、および `subject` 以外の軸（`taxonomy` / `time_window`）での
+  集計は測っていない。
+
+このベンチは同時に `PostgresVectorStore.search` の subject フィルタ（段1の ANN クエリ）も
+測っており、そちらの実測と見立ての訂正は
+[ADR 0023](./decisions/0023-subject-filter-in-ann-stage.md) の追記節に書いた
+（本節が対象とする `aggregateScope` とは別のクエリである）。
+
+**回し方**: `pnpm --filter @mnemora/postgres run bench:scale`。環境変数
+`BENCH_SCOPE_SCALES` / `BENCH_VECTOR_SCALES` / `BENCH_VECTOR_DIMENSIONS` で規模・次元数を
+調整できる（既定値・詳細は `packages/postgres/src/bench/scale-bench.ts` 冒頭のコメントを参照）。
+**このベンチは CI に常時つないでいない**——一時的な計測ジョブで1回回した実測であり、
+手で回す口として repo に残っている。
 
 ### Phase 1 の範囲
 
