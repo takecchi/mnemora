@@ -163,8 +163,17 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         buildNewMemoryFixture({ tenantId: "tenant-a" }),
       );
 
-      await expect(store.updateStatus(ctxB, memoryA.id, "archived")).rejects.toThrow();
-      await expect(store.reinforce(ctxB, memoryA.id, new Date())).rejects.toThrow();
+      // ⚠ 引数なしの `.rejects.toThrow()` にしないこと。ここは**両実装が同じ種類の失敗**
+      // （自分の「memory not found for tenant」）を返す経路なので、種類まで固定できる。
+      // 引数なしだと、`if (!memory) throw` を消す変異が `TypeError: Cannot set properties
+      // of null` を投げても緑のままになる——**実際にこの歯だけが素通ししていた**
+      // （PR #29 が同じ形を直したとき、この2本は「クロステナント」なので対象から漏れていた）。
+      await expect(store.updateStatus(ctxB, memoryA.id, "archived")).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
+      await expect(store.reinforce(ctxB, memoryA.id, new Date())).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
     });
 
     // -------------------------------------------------------------------
