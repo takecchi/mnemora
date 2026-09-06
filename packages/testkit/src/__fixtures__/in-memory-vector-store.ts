@@ -14,14 +14,41 @@ interface Entry {
   vector: number[];
 }
 
-function euclideanDistance(a: number[], b: number[]): number {
+/**
+ * `VectorHit.distance` の契約（`packages/core/src/interfaces/vector-store.ts`）に合わせて
+ * コサイン距離を返す。以前はユークリッド距離だったが、`packages/postgres/src/vector-store.ts`
+ * はコサイン距離（pgvector の `<=>`、`vector_cosine_ops`）を使っており、
+ * `recall-runtime.ts` は `1 - distance` を similarity として扱う——ユークリッド距離のままでは
+ * その意味論が崩れ、in-memory と postgres で「同じ入力に別の順序」が出てしまう。
+ *
+ * `packages/core/src/__tests__/runtime-fakes.ts` の `FakeVectorStore` に全く同じ実装
+ * （`cosineDistance`）が既にあるが、`packages/testkit` は `packages/core` の**テストファイル**を
+ * import できない（`packages/core` の実行時依存が zod のみであることを壊すことになる）ため、
+ * ここで意図して重複させている。
+ *
+ * ゼロベクトルはコサインが未定義（0/0）になる。pgvector の `<=>` はゼロベクトルに対して
+ * エラーを返す（`packages/postgres/src/bench/scale-bench.ts:667` に実測の注意がある）が、
+ * この in-memory 実装はテストを止めずに「無関係（類似度0 ＝ 距離1）」として扱う——
+ * `FakeVectorStore.cosineDistance` と同じ扱いに揃えた（エラーにする実装は postgres 側だけで
+ * 検査されている前提。in-memory がここでエラーを投げるべきかは確かめていない）。
+ */
+function cosineDistance(a: number[], b: number[]): number {
   const length = Math.max(a.length, b.length);
-  let sumOfSquares = 0;
+  let dot = 0;
+  let normA = 0;
+  let normB = 0;
   for (let i = 0; i < length; i += 1) {
-    const diff = (a[i] ?? 0) - (b[i] ?? 0);
-    sumOfSquares += diff * diff;
+    const ai = a[i] ?? 0;
+    const bi = b[i] ?? 0;
+    dot += ai * bi;
+    normA += ai * ai;
+    normB += bi * bi;
   }
-  return Math.sqrt(sumOfSquares);
+  if (normA === 0 || normB === 0) {
+    return 1;
+  }
+  const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
+  return 1 - similarity;
 }
 
 /**
@@ -109,7 +136,7 @@ export class InMemoryVectorStore implements VectorStore {
         // `m.decay_floor_at > ${decayFloorAtAfter}` と揃える。
         continue;
       }
-      hits.push({ memoryId: entry.memoryId, distance: euclideanDistance(query, entry.vector) });
+      hits.push({ memoryId: entry.memoryId, distance: cosineDistance(query, entry.vector) });
     }
     hits.sort((a, b) => a.distance - b.distance);
     return hits.slice(0, opts.limit);

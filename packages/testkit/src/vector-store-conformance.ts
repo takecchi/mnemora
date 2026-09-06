@@ -90,6 +90,41 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(matches[0]?.distance).toBeCloseTo(0, 5);
     });
 
+    it("distance はコサイン距離である（ユークリッド距離では出ない順序・値になる組で検査する）", async () => {
+      // q/A/B は「向きの違いを無視するコサイン」と「長さの違いも見るユークリッド」が
+      // *逆の順序*を出すように選んだ組（呼び出し元の指示に基づく検算済みの値）。
+      //   q = [1,0,0], A = [10,0,0]（向きは q と同じ、長さは10倍）, B = [1,1,0]
+      //   コサイン距離: A=0, B=1-1/√2≈0.2928932 → 順序は A→B
+      //   ユークリッド距離: A=9, B=1                → 順序は B→A（逆転する）
+      // ⟹ A が B より先に返ることは、実装がコサインでありユークリッドでないことの
+      // 直接の証拠になる。全成分0のベクトルはコサインが未定義になるため使わない
+      // （packages/postgres/src/bench/scale-bench.ts:667 と同じ注意）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const idA = await prepareMemoryId(ctx);
+      const idB = await prepareMemoryId(ctx);
+
+      await store.upsert(ctx, space, idA, [10, 0, 0]);
+      await store.upsert(ctx, space, idB, [1, 1, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      // 順序の歯: ユークリッドなら B が先になる組であり、A が先に返ることを検査する。
+      expect(ids.indexOf(idA)).toBeLessThan(ids.indexOf(idB));
+
+      // 値の歯: 期待値はリテラル（コサイン距離の式を独立に計算した結果）であり、
+      // 実装側の距離関数を呼んで作ったものではない——検査対象と期待値が同じ関数を
+      // 共有すると、両方が一緒に壊れて変異が素通りする。
+      const hitA = hits.find((hit) => hit.memoryId === idA);
+      const hitB = hits.find((hit) => hit.memoryId === idB);
+      expect(hitA?.distance).toBeCloseTo(0, 5);
+      expect(hitB?.distance).toBeCloseTo(1 - 1 / Math.sqrt(2), 5);
+    });
+
     it("クロステナントの search には他テナントの vector が現れない", async () => {
       const store = await createStore();
       const ctxA: Ctx = { tenantId: "tenant-a" };
