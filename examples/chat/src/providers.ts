@@ -1,6 +1,14 @@
 import type { EmbeddingProvider, LLMProvider } from "@mnemora/core";
 import { OpenAIEmbeddingProvider, OpenAILLMProvider } from "@mnemora/openai";
-import { DeterministicEmbeddingProvider, DeterministicLLMProvider } from "@mnemora/testkit";
+import type { Cassette, CassetteRecorder } from "@mnemora/testkit";
+import {
+  DeterministicEmbeddingProvider,
+  DeterministicLLMProvider,
+  RecordedEmbeddingProvider,
+  RecordedLLMProvider,
+  RecordingEmbeddingProvider,
+  RecordingLLMProvider,
+} from "@mnemora/testkit";
 import type { UsageMeter } from "./usage-meter.js";
 import { createUsageMeter } from "./usage-meter.js";
 
@@ -18,7 +26,14 @@ import { createUsageMeter } from "./usage-meter.js";
  * `OPENAI_API_KEY` の有無だけで両方が決まる**（`selectProviderMode` の契約は変えない。
  * 既存テストはこの2つの環境変数を設定しないため、そのまま通る）。
  */
-export type ProviderMode = "openai" | "deterministic";
+/**
+ * `"recorded"` は ADR 0050 で足した第3のモード——**記録した実 API の応答を再生する**。
+ *
+ * `"deterministic"`（意味を持たない stub）とも `"openai"`（実 API を叩く）とも違う。
+ * 記録済みの入力に対しては `"openai"` と同じベクトル・同じ抽出結果を返し、
+ * 記録に無い入力に対しては例外を投げる（黙って stub へ倒れない）。
+ */
+export type ProviderMode = "openai" | "deterministic" | "recorded";
 
 export interface Providers {
   /**
@@ -72,11 +87,12 @@ function parseModeOverride(
   if (value === undefined || value === "") {
     return undefined;
   }
-  if (value === "openai" || value === "deterministic") {
+  if (value === "openai" || value === "deterministic" || value === "recorded") {
     return value;
   }
   throw new Error(
-    `${varName} には "openai" か "deterministic" のいずれかを指定すること（実際: "${value}"）。`,
+    `${varName} には "openai" / "deterministic" / "recorded" のいずれかを指定すること` +
+      `（実際: "${value}"）。`,
   );
 }
 
@@ -90,10 +106,37 @@ export function selectEmbeddingMode(env: EnvLike): ProviderMode {
   return parseModeOverride("MNEMORA_EMBEDDING", env.MNEMORA_EMBEDDING) ?? selectProviderMode(env);
 }
 
-export function createProviders(env: EnvLike = process.env): Providers {
+export interface CreateProvidersOptions {
+  /**
+   * `"recorded"` モードで再生に使うカセット（ADR 0050）。`"recorded"` を選んだのに
+   * これが無ければ**構築時に落ちる**——カセット未指定を「じゃあ擬似物で」と読み替えない。
+   */
+  cassette?: Cassette;
+  /**
+   * 実 API の入出力を記録する（ADR 0050）。`"openai"` を選んだ側だけが記録の対象になる
+   * ——叩いていない API は記録しようがない。
+   */
+  recorder?: CassetteRecorder;
+}
+
+export function createProviders(
+  env: EnvLike = process.env,
+  options: CreateProvidersOptions = {},
+): Providers {
   const mode = selectProviderMode(env);
   const llmMode = selectLLMMode(env);
   const embeddingMode = selectEmbeddingMode(env);
+  const { cassette, recorder } = options;
+
+  const requireCassette = (which: string): Cassette => {
+    if (cassette === undefined) {
+      throw new Error(
+        `${which} に "recorded" を指定したが、カセットが渡されていない（ADR 0050）。` +
+          "先に `record` サブコマンドで記録すること。",
+      );
+    }
+    return cassette;
+  };
 
   // LLM・Embedding のどちらか一方でも本物を使うなら、1つの usage-meter（1つの実
   // OpenAI クライアント）を両方で共有する——呼び出し回数・トークン・費用をこのプロセスの
@@ -107,24 +150,49 @@ export function createProviders(env: EnvLike = process.env): Providers {
         })
       : undefined;
 
-  const llmProvider: LLMProvider =
-    llmMode === "openai"
-      ? new OpenAILLMProvider({
-          apiKey: env.OPENAI_API_KEY,
-          model: OPENAI_LLM_MODEL,
-          client: usageMeter?.client,
-        })
-      : new DeterministicLLMProvider();
+  const buildLLM = (): LLMProvider => {
+    if (llmMode === "recorded") {
+      return new RecordedLLMProvider({
+        section: requireCassette("MNEMORA_LLM").llm,
+        expectedModel: OPENAI_LLM_MODEL,
+      });
+    }
+    if (llmMode !== "openai") {
+      return new DeterministicLLMProvider();
+    }
+    const real = new OpenAILLMProvider({
+      apiKey: env.OPENAI_API_KEY,
+      model: OPENAI_LLM_MODEL,
+      client: usageMeter?.client,
+    });
+    return recorder ? new RecordingLLMProvider(real, recorder, OPENAI_LLM_MODEL) : real;
+  };
 
-  const embeddingProvider: EmbeddingProvider =
-    embeddingMode === "openai"
-      ? new OpenAIEmbeddingProvider({
-          apiKey: env.OPENAI_API_KEY,
+  const buildEmbedding = (): EmbeddingProvider => {
+    if (embeddingMode === "recorded") {
+      return new RecordedEmbeddingProvider({
+        section: requireCassette("MNEMORA_EMBEDDING").embedding,
+        expectedSpace: {
+          provider: "openai",
           model: OPENAI_EMBEDDING_MODEL,
           dimensions: OPENAI_EMBEDDING_DIMENSIONS,
-          client: usageMeter?.client,
-        })
-      : new DeterministicEmbeddingProvider(DETERMINISTIC_EMBEDDING_SPACE);
+        },
+      });
+    }
+    if (embeddingMode !== "openai") {
+      return new DeterministicEmbeddingProvider(DETERMINISTIC_EMBEDDING_SPACE);
+    }
+    const real = new OpenAIEmbeddingProvider({
+      apiKey: env.OPENAI_API_KEY,
+      model: OPENAI_EMBEDDING_MODEL,
+      dimensions: OPENAI_EMBEDDING_DIMENSIONS,
+      client: usageMeter?.client,
+    });
+    return recorder ? new RecordingEmbeddingProvider(real, recorder) : real;
+  };
+
+  const llmProvider = buildLLM();
+  const embeddingProvider = buildEmbedding();
 
   return {
     mode,
