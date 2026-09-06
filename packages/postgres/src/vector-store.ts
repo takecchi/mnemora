@@ -65,6 +65,9 @@ export class PostgresVectorStore implements VectorStore {
     if (opts.filter.decayFloorAtAfter !== undefined) {
       conditions.push(sql`m.decay_floor_at > ${opts.filter.decayFloorAtAfter}`);
     }
+    if (opts.filter.subjectId !== undefined) {
+      conditions.push(sql`m.subject_id = ${opts.filter.subjectId}`);
+    }
     const whereClause = sql.join(conditions, sql` AND `);
 
     // ORDER BY には距離演算子の結果をそのまま昇順で置く（式にしない。docs/recall.md §3）。

@@ -11,6 +11,13 @@ export interface VectorFilter {
   tenantId: string;
   status?: MemoryStatus[];
   decayFloorAtAfter?: Date;
+  /**
+   * subject の等値一致（`docs/vision.md` の「Tenant と Subject を混同しない」区別における
+   * テナント内の整理の単位）。等値比較なので上のクラス doc の「索引で表現できる形」に
+   * そのまま当たる——`period`（`occurredAfter`/`occurredBefore`）のような連続値の範囲比較とは
+   * 事情が異なる（`docs/recall.md` が指摘する partial index の離散値向き制約は period 側の話）。
+   */
+  subjectId?: string;
 }
 
 export interface VectorHit {
