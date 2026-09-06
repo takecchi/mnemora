@@ -699,4 +699,122 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       expect(nothingToSkip.skipped).not.toEqual(llmFailed.skipped);
     });
   });
+
+  // ADR 0030（安全弁3）: 読み（listBySourceObservation）と書き（updateStatus）の間に
+  // 割り込む書き込みで安全弁が破れる TOCTOU を、compare-and-swap で塞いだことを検査する。
+  describe("compare-and-swap（ADR 0030: 読んでから書くまでの間の TOCTOU を検知する）", () => {
+    it("⭐ 対象 M の1件目を書きに来た瞬間に M を forgotten へ変えても、M は forgotten のまま・supersede されず・イベントも積まれない（別の対象 N は普通に supersede される）", async () => {
+      const stores = createFakeRuntimeStores();
+      // 既存 Memory を2件作る（非対称: M は割り込みで forgotten に変わる、N は変わらない）。
+      const setupRuntime = createRuntime({
+        memoryStore: stores.memoryStore,
+        outboxStore: stores.outboxStore,
+        vectorStore: stores.vectorStore,
+        eventStore: stores.eventStore,
+        tenantSettingsStore: stores.tenantSettingsStore,
+        llmProvider: llmReturning([
+          { content: "M候補", digest: "M要旨", provenanceKind: "stated" },
+          { content: "N候補", digest: "N要旨", provenanceKind: "stated" },
+        ]),
+        embeddingProvider: stores.embeddingProvider,
+        hashContent: (content: string) => `sha256(${content})`,
+      });
+      const observeResult = await setupRuntime.observe(ctx, { kind: "utterance", text: "発話" });
+      const [mId, nId] = observeResult.memoryIds as [string, string];
+
+      // reextract 用の runtime（別内容を返す LLM——M・N とも今回の content_hash 集合に無い）。
+      const reextractRuntime = createRuntime({
+        memoryStore: stores.memoryStore,
+        outboxStore: stores.outboxStore,
+        vectorStore: stores.vectorStore,
+        eventStore: stores.eventStore,
+        tenantSettingsStore: stores.tenantSettingsStore,
+        llmProvider: llmReturning([
+          { content: "新しい抽出結果", digest: "新要旨", provenanceKind: "stated" },
+        ]),
+        embeddingProvider: stores.embeddingProvider,
+        hashContent: (content: string) => `sha256(${content})`,
+      });
+
+      // 決定的な差し込み: toSupersede は existingBefore の順（M, N）でループされる
+      // （FakeBackingStore.memories は Map で挿入順を保つ）。M への1件目の書き込みが
+      // 来た「まさにその瞬間」に、別の誰か（利用者による forget 相当）が M を
+      // forgotten に変えたことにする。N には介入しない——フィクスチャを非対称にする
+      // ことで「件数は合っているが対応が崩れている」変異も捕まえられるようにする。
+      //
+      // `FakeMemoryStore.get` は backing.memories に入っている Memory オブジェクトへの
+      // 参照をそのまま返す実装（コピーを作らない）なので、事前に取得した参照の
+      // `status` を書き換えるだけで「割り込み」を再現できる。
+      const mBeforeIntervention = await stores.memoryStore.get(ctx, mId);
+      let intervened = false;
+      stores.memoryStore.beforeUpdateStatus = (id) => {
+        if (!intervened && id === mId) {
+          intervened = true;
+          mBeforeIntervention!.status = "forgotten";
+        }
+      };
+
+      const result = await reextractRuntime.reextract(ctx, observeResult.observationId);
+
+      // M: forgotten のまま・supersede されていない・skipped に status_changed_concurrently。
+      const mAfter = await stores.memoryStore.get(ctx, mId);
+      expect(mAfter?.status).toBe("forgotten");
+      expect(result.supersededMemoryIds).not.toContain(mId);
+      expect(result.skipped).toContainEqual({
+        kind: "status_changed_concurrently",
+        memoryId: mId,
+        observedStatus: "forgotten",
+      });
+      const mEvents = stores.eventStore.events.filter(
+        (e) => e.memoryId === mId && e.kind === "superseded",
+      );
+      expect(mEvents).toEqual([]); // superseded イベントは一切積まれていない
+
+      // N: 同じ呼び出しの中で、普通に supersede されている（非対称であることの確認）。
+      expect(result.supersededMemoryIds).toContain(nId);
+      const nAfter = await stores.memoryStore.get(ctx, nId);
+      expect(nAfter?.status).toBe("superseded");
+      const nEvents = stores.eventStore.events.filter(
+        (e) => e.memoryId === nId && e.kind === "superseded",
+      );
+      expect(nEvents).toHaveLength(1);
+    });
+
+    it("競合でない例外（updateStatus が想定外のエラーを投げた）はそのまま再送出される", async () => {
+      const stores = createFakeRuntimeStores();
+      const setupRuntime = createRuntime({
+        memoryStore: stores.memoryStore,
+        outboxStore: stores.outboxStore,
+        vectorStore: stores.vectorStore,
+        eventStore: stores.eventStore,
+        tenantSettingsStore: stores.tenantSettingsStore,
+        llmProvider: llmReturning([{ content: "候補", digest: "要旨", provenanceKind: "stated" }]),
+        embeddingProvider: stores.embeddingProvider,
+        hashContent: (content: string) => `sha256(${content})`,
+      });
+      const observeResult = await setupRuntime.observe(ctx, { kind: "utterance", text: "発話" });
+
+      const reextractRuntime = createRuntime({
+        memoryStore: stores.memoryStore,
+        outboxStore: stores.outboxStore,
+        vectorStore: stores.vectorStore,
+        eventStore: stores.eventStore,
+        tenantSettingsStore: stores.tenantSettingsStore,
+        llmProvider: llmReturning([
+          { content: "新しい抽出結果", digest: "新要旨", provenanceKind: "stated" },
+        ]),
+        embeddingProvider: stores.embeddingProvider,
+        hashContent: (content: string) => `sha256(${content})`,
+      });
+
+      // 競合ではない、ただの障害（例: 接続断）を模す。
+      stores.memoryStore.updateStatus = async () => {
+        throw new Error("simulated connection reset");
+      };
+
+      await expect(reextractRuntime.reextract(ctx, observeResult.observationId)).rejects.toThrow(
+        "simulated connection reset",
+      );
+    });
+  });
 });

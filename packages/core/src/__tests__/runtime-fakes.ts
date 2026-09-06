@@ -11,6 +11,7 @@ import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory
 import type { NewObservation, Observation } from "../observation.js";
 import type { MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
 import type { EventId } from "../ids.js";
+import { MemoryStatusConflictError } from "../interfaces/memory-store.js";
 import type { MemoryStore } from "../interfaces/memory-store.js";
 import type { NewRecallRecord, RecallScope, ScopeAggregate } from "../recall.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
@@ -225,15 +226,29 @@ export class FakeMemoryStore implements MemoryStore {
     return results;
   }
 
+  /**
+   * ADR 0030: `opts.expectedStatus` があるときだけ compare-and-swap にする
+   * （postgres 実装・testkit の in-memory 実装と同じ意味論）。
+   *
+   * `beforeUpdateStatus`（テスト専用のフック）は CAS 判定の**直前**に呼ぶ——
+   * `reextract` の TOCTOU（読んでから書くまでの間に別の書き込みが割り込む）を
+   * 決定的に再現するための差し込み口。本番相当の実装には存在しない、このフェイク限りの機構。
+   */
+  beforeUpdateStatus?: (id: MemoryId) => void;
+
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId },
+    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
+      throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
     memory.status = status;
     if (opts?.supersededById !== undefined) {

@@ -7,6 +7,33 @@ import type { NewRecallRecord, RecallScope, ScopeAggregate } from "../recall.js"
 import type { OutboxJobKind } from "./scheduler.js";
 
 /**
+ * `updateStatus` に `opts.expectedStatus` を渡したとき、書き込み時点の実際の status が
+ * それと一致しなかったことを表す（PR「update-status-compare-and-swap」、ADR 0030）。
+ * `packages/postgres/src/advisory-lock.ts` の型付きエラー階層（`AdvisoryLockTimeoutError` /
+ * `AdvisoryLockUnavailableError`）に倣い、`Error` を継承した専用の型として定義する
+ * ——呼び出し側が `instanceof` で「対象が無かった」と区別できることが目的。
+ *
+ * **`observedStatus` は「弾かれた後に読み直した値」であり、弾かれた瞬間の値とは限らない。**
+ * adapter（`packages/postgres`）は `UPDATE ... WHERE status = expectedStatus` が0行だった
+ * ときに追加の `SELECT` で読み直して詰めるため、その `SELECT` と実際に条件が破れた瞬間の
+ * 間にも別の書き込みが割り込む余地がある。「衝突があったこと」は確実だが、「衝突した
+ * 相手が何だったか」の正確な値としては読まないこと。
+ */
+export class MemoryStatusConflictError extends Error {
+  constructor(
+    readonly memoryId: MemoryId,
+    readonly expectedStatus: MemoryStatus,
+    readonly observedStatus: MemoryStatus | null,
+  ) {
+    super(
+      `MemoryStore.updateStatus: expected status "${expectedStatus}" for memory ${memoryId}, ` +
+        `but observed ${observedStatus === null ? "(memory disappeared)" : `"${observedStatus}"`}`,
+    );
+    this.name = "MemoryStatusConflictError";
+  }
+}
+
+/**
  * MemoryStore — Phase 1（docs/architecture.md §5.1）。
  *
  * 実装は adapter 側（`packages/postgres` 等）に置く。ここは型のみ。
@@ -62,6 +89,11 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   テーブルへ1行残す（docs/recall.md §2 段6、ADR 0008）。この段は省略可能な段ではない
  *   ——`recallId` が発行されないと `observe({kind:'memory_usage'})` が recall を
  *   参照できなくなる。
+ *
+ * PR「update-status-compare-and-swap」（ADR 0030）で `updateStatus` に `opts.expectedStatus`
+ * を足した: `reextract` の「`status !== 'active'` なら触らない」という安全弁が、読み（
+ * `listBySourceObservation`）と書き（`updateStatus`）の間に別の書き込みが割り込む
+ * TOCTOU で破れる穴を塞ぐ。省略時の振る舞いは変えていない。
  */
 export interface MemoryStore {
   createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
@@ -107,11 +139,26 @@ export interface MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null,
   ): Promise<Memory[]>;
+  /**
+   * PR「update-status-compare-and-swap」（安全弁3、docs/decisions/0030-*.md）:
+   * `opts.expectedStatus` を渡すと、書き込み時点で対象 Memory の `status` が
+   * その値と一致するときだけ更新する（compare-and-swap）。**省略時は今日と同じ振る舞い**
+   * ——status を条件にせず常に更新する。
+   *
+   * `expectedStatus` と実際の status が食い違っていた場合は {@link MemoryStatusConflictError}
+   * を投げる。対象の Memory がそもそも存在しない場合は（`expectedStatus` の有無に関わらず）
+   * 今日と同じ「memory not found」の例外のまま——「対象が無い」と「status が期待と
+   * 違った」は別の例外で区別できる。
+   *
+   * `expectedStatus` を**単数**にしている理由: 現時点の唯一の呼び出し元
+   * （`runtime.ts` の `reextract`）が要る条件は `"active"` の1つだけであり、
+   * 集合（配列）にする理由が無い。採らなかった案は ADR 0030 参照。
+   */
   updateStatus(
     ctx: Ctx,
     id: MemoryId,
     status: MemoryStatus,
-    opts?: { supersededById?: MemoryId },
+    opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory>;
   /** roadmap.md 段階3: `embeddingStatus` の `pending → ready | failed` 遷移を書き込む。 */
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;

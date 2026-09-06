@@ -42,3 +42,4 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0027](./0027-split-superseded-forgotten-omission.md) | `filtered` omission の `condition: 'status'` を `'superseded'` と `'forgotten'` に分ける | 採用 (2026-09) |
 | [0028](./0028-reextract-superseded-cleanup.md) | `runtime.reextract` は古い抽出結果を `superseded` にする（`forgotten` にしない） | 採用 (2026-09) |
 | [0029](./0029-reextract-skip-visibility.md) | `reextract` が既存 Memory を supersede しなかった理由を `ReextractResult.skipped` に出す | 採用 (2026-09) |
+| [0030](./0030-update-status-compare-and-swap.md) | `MemoryStore.updateStatus` を compare-and-swap にし、`reextract` の安全弁の TOCTOU を塞ぐ | 採用 (2026-09) |
