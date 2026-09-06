@@ -509,12 +509,22 @@ function cosineDistance(a: number[], b: number[]): number {
  * `FakeVectorStore` は `packages/core` 自身のテスト用であり `@mnemora/testkit` に依存しない
  * （このファイル冒頭のコメント参照）。recall のテストが意味のある結果を得られるよう、
  * `upsert` されたベクトルに対して実際に cosine 距離で ANN を模する
- * （`FakeBackingStore.memories` を参照して `status` フィルタも本物同様に適用する）。
+ * （`FakeBackingStore.memories` を参照して `VectorFilter`（ADR 0034）を本物同様に適用する）。
+ *
+ * **`backing` を必須のコンストラクタ引数にしている（省略不可）。** `status` / `subjectId` /
+ * `decayFloorAt` は Memory の属性であって、ベクトルの属性ではない
+ * （`VectorFilter` — `packages/core/src/interfaces/vector-store.ts`、ADR 0034）。
+ * `packages/testkit` の `InMemoryVectorStore` が `memoryStore` を必須にしたのと同じ理由——
+ * **省略可能にしなかった理由（ADR 0034 の「採らなかった案」節）**: 省略できると
+ * 「filter を実際に検査できる fake」と「検査できない（＝常に無視しても壊れない）fake」が
+ * 同じ緑色の出力になる。このリポジトリは ADR 0011/0025/0027/0028 で同じ族の失敗
+ * （名乗れる以上の精度を主張する）を繰り返しており、ここでも繰り返さない。唯一の生成箇所
+ * （このファイルの `createFakeRuntimeStores`）は既に `backing` を渡している。
  */
 export class FakeVectorStore implements VectorStore {
   entries = new Map<string, { tenantId: string; memoryId: MemoryId; vector: number[] }>();
 
-  constructor(private readonly backing?: FakeBackingStore) {}
+  constructor(private readonly backing: FakeBackingStore) {}
 
   private key(space: EmbeddingSpaceId, tenantId: string, memoryId: MemoryId): string {
     return `${space.provider}:${space.model}:${space.dimensions}:${tenantId}:${memoryId}`;
@@ -542,13 +552,31 @@ export class FakeVectorStore implements VectorStore {
     const hits: VectorHit[] = [];
     for (const entry of this.entries.values()) {
       if (entry.tenantId !== opts.filter.tenantId || entry.tenantId !== ctx.tenantId) continue;
-      if (opts.filter.status !== undefined && this.backing) {
-        const memory = this.backing.memories.get(entry.memoryId);
-        if (!memory || !opts.filter.status.includes(memory.status)) continue;
+      // status / subjectId / decayFloorAtAfter は Memory の属性であり、ベクトルの属性ではない
+      // （ADR 0034）。`backing.memories` を真実の源として引く——`InMemoryVectorStore` の
+      // `this.memoryStore.get(...)` に対応する一段。
+      const memory = this.backing.memories.get(entry.memoryId);
+      if (!memory) {
+        // 真実の源に無い vector は返さない——Postgres の外部キー制約
+        // （`memory_id → memories(id)`）に対応する扱い（ADR 0034 決定2、
+        // `InMemoryVectorStore` と揃える）。このリポジトリ内で `vectorStore.upsert` を
+        // 直接呼ぶテストは必ず `memoryStore.createMemory` で作った実在の memory.id を渡して
+        // いるため（`recall-pipeline.test.ts`）、この既定によって既存の歯が落ちないことを
+        // 確認済み。
+        continue;
       }
-      if (opts.filter.decayFloorAtAfter !== undefined && this.backing) {
-        const memory = this.backing.memories.get(entry.memoryId);
-        if (!memory || memory.decayFloorAt <= opts.filter.decayFloorAtAfter) continue;
+      if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
+        continue;
+      }
+      if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
+        continue;
+      }
+      if (
+        opts.filter.decayFloorAtAfter !== undefined &&
+        memory.decayFloorAt <= opts.filter.decayFloorAtAfter
+      ) {
+        // 狭義の `>`（境界とちょうど同じものは除外）。この意味論は変えていない。
+        continue;
       }
       hits.push({ memoryId: entry.memoryId, distance: cosineDistance(query, entry.vector) });
     }
