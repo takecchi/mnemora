@@ -428,11 +428,6 @@ export interface RecallQuery {
   excludeProvenanceKinds?: ProvenanceKind[];
   budget?: RecallBudget;
   /**
-   * 目次帯（第3階)の厳密カウントを要求するか。既定は近似許可（false）
-   * （docs/recall.md §5「既定は近似許可」）。
-   */
-  exactCounts?: boolean;
-  /**
    * 段2（再スコア）で候補を残すか捨てるかの閾値（docs/recall.md §2 段2）。
    *
    * docs/recall.md はこの閾値の具体的な値・単位を規定していない
@@ -466,7 +461,6 @@ export const RecallQuerySchema = z.object({
     .array(z.enum(["stated", "inferred", "consolidated", "reflected", "imported"]))
     .optional(),
   budget: RecallBudgetSchema.optional(),
-  exactCounts: z.boolean().optional(),
   scoreThreshold: z.number().optional(),
 }) satisfies z.ZodType<RecallQuery>;
 
