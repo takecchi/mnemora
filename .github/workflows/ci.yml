@@ -169,59 +169,6 @@ jobs:
         # 「削れたが答えが落ちた」への回帰をログから読めるようにする。
         run: pnpm --filter @mnemora/example-chat run compare
 
-  # ⚠⚠⚠ 一時的なジョブ。**マージ前に必ず削除する。**
-  # Part 4（recall() を丸ごと1回呼んで omitted / explain を見る）を一度だけ実測するためのもの。
-  # **この計測を CI へ常時繋がない**（オーナー指示）。
-  TEMP-omitted-probe:
-    name: "[一時] 大きい subject で omitted に何が出るかを実測する（マージ前に削除）"
-    runs-on: ubuntu-latest
-    services:
-      postgres:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: mnemora_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd="pg_isready -U postgres"
-          --health-interval=5s
-          --health-timeout=5s
-          --health-retries=10
-    env:
-      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
-      # Part 1/2 は実測済みなので最小にし、Part 3/4（大きい subject）だけを測る。
-      BENCH_SCOPE_SCALES: "10000"
-      BENCH_VECTOR_SCALES: "10000"
-      BENCH_VECTOR_DIMENSIONS: "256"
-      BENCH_SUBJECT_TOTAL_ROWS: "100000"
-      BENCH_SUBJECT_SIZES: "10,1000,10000"
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-      - name: Enable corepack
-        run: corepack enable
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
-      - name: Enable required extensions
-        run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
-            -c "CREATE EXTENSION IF NOT EXISTS vector;" \
-            -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
-            -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
-      - name: Build @mnemora/core
-        run: pnpm --filter @mnemora/core run build
-      - name: Run migrations
-        run: pnpm --filter @mnemora/postgres run migrate
-      - name: omitted の実測
-        timeout-minutes: 45
-        run: pnpm --filter @mnemora/postgres run bench:scale
-
   root-gate-db-stage:
     name: ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）
     runs-on: ubuntu-latest
