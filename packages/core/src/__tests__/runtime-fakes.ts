@@ -499,7 +499,17 @@ function cosineDistance(a: number[], b: number[]): number {
     normB += (b[i] ?? 0) ** 2;
   }
   if (normA === 0 || normB === 0) {
-    return 1; // 無関係（類似度0）として扱う。ゼロベクトル同士の割り算を避ける。
+    // ADR 0040: 契約は「ゼロベクトルが絡む候補は recall() の結果に出ない」——
+    // どんな scoreThreshold でも `total >= scoreThreshold` を通らない値を返さなければならない。
+    // `0` でも `1` でもだめ（どちらも scoreThreshold 次第で通りうる）。
+    // `Infinity` もだめ——`similarity = 1 - Infinity = -Infinity` になり、
+    // `scoreThreshold = -Infinity` のとき `-Infinity >= -Infinity` が真になって通ってしまう。
+    // `NaN` は、どんな数との比較も false になる唯一の値である。
+    // 🔴 この番人（`normA === 0 || normB === 0`）を「下の式が 0/0 で同じ NaN になるから」と
+    // 消さないこと——消しても値は変わらない（等価変異）が、番人が保持しているのは値ではなく
+    // 「0/1/Infinity ではなく NaN を選んだ」という決定そのもの。消すと、次に式を触った人が
+    // その決定ごと落とす。
+    return NaN;
   }
   const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
   return 1 - similarity;
