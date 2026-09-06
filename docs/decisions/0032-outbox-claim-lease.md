@@ -292,12 +292,29 @@
   `packages/postgres/src/__tests__/migrate-concurrency.test.ts` /
   `migrate-ledger-handover.test.ts` の期待値の導出（`ALL_MIGRATION_FILES`/
   `NON_LEGACY_FILES`）を、再びハードコードした `["0001_init.sql"]` に戻す変異。
-  **⚠ これは DB が必要な `packages/postgres` の歯であり、この環境では実際に
-  赤くすることを確認できていない**（「確かめていないこと」参照）。手元で確認したのは
-  「ハードコードに戻しても `tsc` の型検査は通る」ことのみ——`listMigrationFiles` も
-  `ALL_MIGRATION_FILES.filter(...)` も戻り値の型はどちらも `string[]` であり、
-  ハードコードした配列に差し替えても型は壊れない。**この変異が実際にどの歯を
-  何本赤くするかは、CI の postgres ジョブで初めて実測される。** 期待される結果
+  **⚠ これは DB が必要な `packages/postgres` の歯であり、テスト自体が実際に
+  赤くなることはこの環境では確認できていない**（「確かめていないこと」参照）。
+
+  手元で実際に確認できたのはこの2つ:
+  - `git diff --stat` が空でないこと・変異後 `git checkout --` で復元し
+    `git status --short` が空になることを確認した。
+  - **`pnpm run typecheck` は通ったが、`eslint`（lint 門）は実際に落ちた。**
+    ハードコードに戻すと `listMigrationFiles`/`DEFAULT_MIGRATIONS_DIR` の import が
+    未使用になり、`@typescript-eslint/no-unused-vars` が2ファイルで計3件の
+    エラーを出した（逐語）:
+    ```
+    packages/postgres/src/__tests__/migrate-concurrency.test.ts
+      4:3  error  'DEFAULT_MIGRATIONS_DIR' is defined but never used. ...
+      7:3  error  'listMigrationFiles' is defined but never used. ...
+    packages/postgres/src/__tests__/migrate-ledger-handover.test.ts
+      5:34  error  'listMigrationFiles' is defined but never used. ...
+    ```
+    **これは意図した検査（マイグレーションの歯が赤くなること）ではなく、
+    「導出をやめると import が要らなくなる」という副作用が lint 門にたまたま
+    引っかかっただけである。** 本命の検査（テスト自体が期待値の食い違いで赤くなる
+    こと）は DB が要るため、CI の postgres ジョブで初めて実測される。**この lint
+    エラーが出たことをもって「歯が効いている」と主張しない**——lint はテストの
+    赤ではないため、区別する。期待される結果
   （実測ではなく設計上の予想であることを明示する）: `migrate-concurrency.test.ts`
   の「まっさらな DB へ4プロセス相当が同時に migrate」の歯（`ALL_MIGRATION_FILES.length`
   への `toBe` が `2`（0001+0002）ではなく `1` を期待するようになり、実際の適用数
@@ -372,11 +389,13 @@
   - **`examples/chat` の30分という値が実運用で適切かどうか**は、実際に OpenAI の
     API を長時間叩き続ける状況で検証していない。SDK のドキュメント上の既定値から
     導いた理論値であり、実測ではない。
-  - **M5**（マイグレーション期待値の導出を再びハードコードへ戻す変異）**は、
-    DB が必要なためこの環境では実際に赤くすることを確認できていない。** 手元では
-    「ハードコードに戻しても型検査は通る」ことだけを確認した——型は「文字列配列」
-    でしかなく、導出をやめても壊れない。**この変異が実際に歯を赤くすることは、
-    CI の postgres ジョブで初めて実測される。**
+  - **M5**（マイグレーション期待値の導出を再びハードコードへ戻す変異）が
+    **実際にテストを赤くすること自体**は、DB が必要なためこの環境では確認できて
+    いない。手元で確認できたのは、ハードコードに戻すと未使用 import が生まれ
+    `eslint`（lint 門）が落ちることのみ（「歯について」参照）——これは意図した
+    検査ではなく副作用であり、「歯が効いている」ことの証明として使っていない。
+    **この変異がマイグレーションのテストを赤くすることは、CI の postgres ジョブで
+    初めて実測される。**
 
 - **これが覆るとしたら**:
 
