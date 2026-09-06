@@ -32,6 +32,19 @@
  *    `aggregateScope` も同じ subject の大きさで併せて測る（穴1の「小さい subject でしか
  *    測っていない」も同時に埋まる）。
  *
+ * 4. **（本追加分・Part 4）穴3——`PostgresVectorStore.search` 単体ではなく
+ *    `runtime.recall()` を丸ごと1回呼んで、`RecallResult` をそのまま見る。**
+ *    ADR 0023 追記の実測（Part 3、大きい subject＝全体の10%）では、`LIMIT 40` に対して
+ *    ANN が6件しか返さなかった。これは段1（`PostgresVectorStore.search`）単体の観測であり、
+ *    **その「6件しか無かった」という事実が `runtime.recall()` の返り値
+ *    （`omitted` / `explain` / `index`）のどこかに実際に現れるのかは、まだ誰も見ていない**
+ *    （[ADR 0008](../../../../docs/decisions/0008-absence-taxonomy.md) の「無いの分類」が
+ *    ここで機能しているかという疑い）。**`recall-runtime.ts` を読む限り、
+ *    `ann_truncated` は `annHits.length >= kPrime` のときにしか積まれない設計に見える
+ *    （6 < 40 の場合は条件を満たさないため、コード上は積まれないはず）——これは読んで
+ *    立てた推測であり、Part 4 はこれを実際に走らせて確かめるためだけに存在する。**
+ *    測るだけで、`recall()` の挙動もフィールドも変えない。**
+ *
  * ## 実行方法
  *
  * `DATABASE_URL` が本物の Postgres + pgvector を指している状態で:
@@ -89,7 +102,8 @@
 import { performance } from "node:perf_hooks";
 import { Pool } from "pg";
 import { drizzle } from "drizzle-orm/node-postgres";
-import type { Ctx, EmbeddingSpaceId, RecallScope, VectorFilter } from "@mnemora/core";
+import type { Ctx, EmbeddingSpaceId, RecallResult, RecallScope, VectorFilter } from "@mnemora/core";
+import { createRuntime } from "@mnemora/core";
 import * as schema from "../schema.js";
 import { runMigrations } from "../migrate.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
@@ -783,13 +797,184 @@ async function benchSubjectSize(
   return results;
 }
 
+// ---------------------------------------------------------------------------
+// Part 4: runtime.recall() を丸ごと1回呼ぶ（穴3: 「取りこぼした」と「そもそも無かった」の区別）
+// ---------------------------------------------------------------------------
+
+interface RecallOnceResult {
+  variant: "subjectId 指定（狙いの大きさ）" | "subjectId 無し（比較用）";
+  ctxSubjectId: string | null;
+  targetSize: number;
+  actualCount: number;
+  /** `clock.now()` に固定した値（下のコメント参照）。 */
+  referenceNowIso: string;
+  memoriesLength: number;
+  omitted: RecallResult["omitted"];
+  index: RecallResult["index"];
+  explain: RecallResult["explain"];
+}
+
+/**
+ * `runtime.recall()` を丸ごと1回呼び、返り値をそのまま持ち帰る（穴3、マネージャー指示）。
+ * **測るだけ**——`recall()` の実装にもフィールドにも一切手を入れない。
+ *
+ * Part 3 が測ったのは `PostgresVectorStore.search` 単体（段1だけ）だった。ここでは
+ * `recall()` パイプライン全体を1回通し、`omitted` / `explain` / `index` を実際に見る。
+ * `ctx.subjectId` に Part 3 と同じ狙いの subject（既定では最大の 10,000 行、
+ * `config.subjectSizes` の末尾）を入れ、同じデータ（Part 3 の seeding をそのまま再利用、
+ * 再シードしない）に対して呼ぶ。比較のため `ctx.subjectId` を指定しない呼び出しも
+ * 同じデータに対して1回行う。
+ *
+ * ## 罠1: 時計
+ *
+ * `memoriesInsertSql` が入れる `recorded_at` は `now() - random() * interval '365 days'`
+ * ——`now()` はシード投入時点の **Postgres 側の実時刻**であり、
+ * `recall.postgres.test.ts` の `buildNewMemoryFixture` が使うような固定リテラル日付
+ * （例: `2026-01-01`）ではない。`recall()` の減衰計算（`defaultScoringStrategy`）は
+ * `clock.now() - recordedAt` の経過時間を使うため、ここで `clock` を省略して
+ * `systemClock`（実際の壁時計）に委ねると、結果が「このプロセスが実際に何時何分に
+ * このクエリを発行したか」——Part 1〜3 がここまでに要した実時間、CI ランナーの混雑具合、
+ * DB 接続の遅延など、**再現性の無い雑音**——に左右されてしまう
+ * （`recall.postgres.test.ts` 76-83行のコメントが警告している「実時計だと decay で
+ * ほぼ0まで落ちて全部 below_threshold に化ける」と同じ罠。ただしそちらは固定リテラル
+ * 日付と実時計の食い違いが原因、こちらは「実行時刻に測定結果が依存してしまう」ことが
+ * 問題——原因は違うが、どちらも clock を固定しないと解けない）。
+ *
+ * **そこで、`recorded_at` が実際にアンカーしている時刻そのもの
+ * （`SELECT MAX(recorded_at)`——乱数が0に最も近い行、つまりシード投入時刻に
+ * 最も近い値）を実測し、それを固定 `clock.now()` として使う。** こうすると
+ * `recall()` から見た各行の経過時間は、シードが意図した「0〜365日」の分布に厳密に
+ * 一致し、このベンチが実際に何時に走ったかから完全に独立する
+ * （365日というレンジ自体は `half_life_hours=720`＝30日に対して十分大きく、
+ * 経過時間が長い行の一部は正しく大きく減衰する——これは意図された分布であり、
+ * 「時計を固定した」こととは別の話）。
+ *
+ * ## 罠2: status
+ *
+ * Part 3 の狙いの subject 行は `memoriesInsertSql` の8択の `status` 分布のまま
+ * （`active` x4 / `contested` x1 / `archived` x1 / `superseded` x1 / `forgotten` x1）
+ * ——**ここを `active` に揃えて作り直すことはしない。** ADR 0023 追記が測った
+ * 「`LIMIT 40` に対して6件」という数字は、まさにこの混在した分布に対する
+ * `PostgresVectorStore.search` 単体の実測値であり、ここで母集団を変えると
+ * その数字と直接比較できなくなる。**混在は承知の上で、内訳（`filtered(status)` /
+ * `filtered(archived)`）を含めて `result.omitted` を生のまま出力する**——
+ * 「窓が埋まらない」話（ann_truncated の有無）と「そもそもスコープの外」話
+ * （filtered の件数）を、読む側が別々に見分けられるようにする。
+ */
+async function benchRecallOnce(
+  pool: Pool,
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  space: EmbeddingSpaceId,
+  queryVector: number[],
+  targetSize: number,
+): Promise<RecallOnceResult[]> {
+  const subjectId = subjectIdForSize(targetSize);
+  const actualCount = await countSubjectRows(pool, TENANT, subjectId);
+
+  const referenceNowResult = await pool.query<{ max: string | null }>(
+    "SELECT max(recorded_at)::text AS max FROM memories WHERE tenant_id = $1",
+    [TENANT],
+  );
+  const referenceNowText = referenceNowResult.rows[0]?.max;
+  if (!referenceNowText) {
+    throw new Error("benchRecallOnce: MAX(recorded_at) が取れなかった（memories が空？）");
+  }
+  const referenceNow = new Date(referenceNowText);
+  log(
+    `  Part 4: clock.now() を MAX(recorded_at)（${referenceNow.toISOString()}）に固定して ` +
+      `runtime.recall() を実行する。`,
+  );
+
+  const memoryStore = new PostgresMemoryStore(db);
+  const vectorStore = new PostgresVectorStore(db);
+  const runtime = createRuntime({
+    memoryStore,
+    vectorStore,
+    // observe()/tick() 関連の依存は recall では使わないため、buildTestRuntime
+    // （recall.postgres.test.ts）と同じ作法でダミーを埋める。
+    outboxStore: {
+      claimBatch: async () => [],
+      complete: async () => {},
+      fail: async () => {},
+    },
+    eventStore: {
+      append: async (_ctx, e) => ({ id: "evt", ...e, at: e.at ?? new Date() }),
+      get: async () => null,
+      list: async () => [],
+    },
+    tenantSettingsStore: { getDefaultHalfLifeHours: async () => 720 },
+    llmProvider: {
+      complete: async () => {
+        throw new Error("bench: runtime.recall() では使われないはず");
+      },
+      completeStructured: async () => {
+        throw new Error("bench: runtime.recall() では使われないはず");
+      },
+    },
+    // クエリに `vector` を明示して渡すため embed() は呼ばれない想定
+    // （呼ばれたらこのベンチの前提が崩れているので例外で気づけるようにする）。
+    // `space` だけは実際に使われる（段1の ANN クエリがどの埋め込みテーブルを見るかを決める）。
+    embeddingProvider: {
+      space,
+      embed: async () => {
+        throw new Error(
+          "bench: runtime.recall() には vector を明示して渡しているため embed() は呼ばれないはず",
+        );
+      },
+    },
+    hashContent: (content: string) => `sha256(${content})`,
+    clock: { now: () => referenceNow },
+  });
+
+  const variants: Array<{
+    variant: RecallOnceResult["variant"];
+    ctxSubjectId: string | undefined;
+  }> = [
+    { variant: "subjectId 指定（狙いの大きさ）", ctxSubjectId: subjectId },
+    { variant: "subjectId 無し（比較用）", ctxSubjectId: undefined },
+  ];
+
+  const results: RecallOnceResult[] = [];
+  for (const v of variants) {
+    log(`  runtime.recall()（${v.variant}）を1回呼ぶ...`);
+    const ctx: Ctx =
+      v.ctxSubjectId !== undefined
+        ? { tenantId: TENANT, subjectId: v.ctxSubjectId }
+        : { tenantId: TENANT };
+    const result = await runtime.recall(ctx, { vector: queryVector });
+    log(
+      `    memories.length=${result.memories.length} / omitted件数=${result.omitted.length} / ` +
+        `index.totalInScope=${result.index.totalInScope}`,
+    );
+    results.push({
+      variant: v.variant,
+      ctxSubjectId: v.ctxSubjectId ?? null,
+      targetSize,
+      actualCount,
+      referenceNowIso: referenceNow.toISOString(),
+      memoriesLength: result.memories.length,
+      omitted: result.omitted,
+      index: result.index,
+      explain: result.explain,
+    });
+  }
+  return results;
+}
+
 /**
  * Part 3 全体を1つの使い捨てデータベース（`mnemora_scale_bench_subject`）で走らせる。
  * Part 1 / Part 2 とは別データベースにした理由は、ファイル冒頭のコメント
  * 「使い捨てデータベース」節を参照——Part 1 / Part 2 の skew 分布は狙った大きさの
  * subject を作らないため。
+ *
+ * **Part 4（`runtime.recall()` を1回呼ぶ計測）はここに同居させる**——Part 3 の seeding
+ * （マネージャー指示で「そのまま再利用してよい」とされた）を再利用するため、
+ * 同じ使い捨てデータベース・同じ `space`・同じクエリベクトルのまま、Part 3 のループの後に
+ * 続けて実行する（再シードしない）。
  */
-async function runSubjectSizeBench(config: BenchConfig): Promise<SubjectSizeResult[]> {
+async function runSubjectSizeBench(
+  config: BenchConfig,
+): Promise<{ subjectSizeResults: SubjectSizeResult[]; recallOnceResults: RecallOnceResult[] }> {
   const database = "mnemora_scale_bench_subject";
   log(
     `=== Part 3: subject の大きさを振る（全体 ${config.subjectTotalRows.toLocaleString()}行、` +
@@ -856,11 +1041,30 @@ async function runSubjectSizeBench(config: BenchConfig): Promise<SubjectSizeResu
       );
       results.push(...forThisSize);
     }
+
+    // Part 4: runtime.recall() を丸ごと1回呼ぶ。狙いの subject は「大きい subject」
+    // （config.subjectSizes は昇順に正規化済みなので、末尾＝最大。既定では 10,000 行、
+    // 全体の10%）——ADR 0023 追記が「6件しか返らなかった」と実測したのと同じ大きさ。
+    const largestTargetSize = config.subjectSizes[config.subjectSizes.length - 1];
+    if (largestTargetSize === undefined) {
+      throw new Error("runSubjectSizeBench: config.subjectSizes が空（Part 4 を実行できない）");
+    }
+    log(
+      `--- Part 4: runtime.recall() を1回呼ぶ（狙いの subject ${largestTargetSize.toLocaleString()}行）---`,
+    );
+    const recallOnceResults = await benchRecallOnce(
+      handle.pool,
+      handle.db,
+      space,
+      queryVector,
+      largestTargetSize,
+    );
+
+    return { subjectSizeResults: results, recallOnceResults };
   } finally {
     log(`使い捨てデータベース ${database} を drop 中...`);
     await teardownScaleDatabase(handle);
   }
-  return results;
 }
 
 // ---------------------------------------------------------------------------
@@ -949,15 +1153,53 @@ function renderSubjectSizeExplainDetails(results: SubjectSizeResult[]): string {
 }
 
 /**
+ * Part 4 の生データをそのまま出す（マネージャー指示: 「加工しすぎないこと」）。
+ * `result.omitted` / `result.explain` は JSON でそのまま出す。
+ */
+function renderRecallOnceDetails(results: RecallOnceResult[]): string {
+  return results
+    .map((r) => {
+      const lines: string[] = [];
+      const subjectNote =
+        r.ctxSubjectId !== null
+          ? `subject=${r.ctxSubjectId}（狙い ${r.targetSize.toLocaleString()}行 / 実測 ${r.actualCount.toLocaleString()}行）`
+          : "scope 全体（subjectId 無し）";
+      lines.push(`### runtime.recall(): ${r.variant} — ${subjectNote}`);
+      lines.push("");
+      lines.push(`- \`clock.now()\`（固定値。\`MAX(recorded_at)\`）: ${r.referenceNowIso}`);
+      lines.push(`- \`result.memories.length\`: ${r.memoriesLength}`);
+      lines.push(
+        `- \`result.index.totalInScope\`: ${r.index.totalInScope}（countKind=${r.index.countKind}）`,
+      );
+      lines.push(`- \`result.index.groups\`: ${JSON.stringify(r.index.groups)}`);
+      lines.push("");
+      lines.push("`result.omitted`（生のまま）:");
+      lines.push("");
+      lines.push("```json");
+      lines.push(JSON.stringify(r.omitted, null, 2));
+      lines.push("```");
+      lines.push("");
+      lines.push("`result.explain`（生のまま）:");
+      lines.push("");
+      lines.push("```json");
+      lines.push(JSON.stringify(r.explain, null, 2));
+      lines.push("```");
+      return lines.join("\n");
+    })
+    .join("\n\n");
+}
+
+/**
  * 「この計測が答えるべき問い」への回答欄。**ここでは何も先に主張しない**——
- * 実測結果（`scopeResults` / `vectorResults`）から機械的に導ける事実だけを、
- * このセクションで実際に組み立てる（値は実行時に埋まる）。
+ * 実測結果（`scopeResults` / `vectorResults` / `subjectSizeResults` / `recallOnceResults`）
+ * から機械的に導ける事実だけを、このセクションで実際に組み立てる（値は実行時に埋まる）。
  */
 function renderAnswers(
   config: BenchConfig,
   scopeResults: ScopeResult[],
   vectorResults: VectorResult[],
   subjectSizeResults: SubjectSizeResult[],
+  recallOnceResults: RecallOnceResult[],
 ): string {
   const lines: string[] = [];
   lines.push("## この計測が答えるべき問い");
@@ -1159,6 +1401,101 @@ function renderAnswers(
       "全体行数そのものを増やしたときに、同じ大きさの subject でも結果が変わるかどうかは、" +
       "この計測には含まれていない（`BENCH_SUBJECT_TOTAL_ROWS` で変えて別途測る必要がある）。**",
   );
+  lines.push("");
+
+  lines.push(
+    "### 4. 窓が埋まらない（`LIMIT` に対して返りが少ない）とき、呼び出し側は" +
+      "『取りこぼした』と『そもそも無かった』を区別できるか",
+  );
+  lines.push("");
+  lines.push(
+    "（測定条件: `runtime.recall()`（パイプライン全体、`PostgresVectorStore.search` 単体ではない）を、" +
+      "Part 3 と同じ狙いの subject・同じ8択の `status` 分布のまま、`vector` を明示して渡し1回だけ呼んだ" +
+      "（embedding provider は呼ばれない）。`clock.now()` は seeding の `recorded_at` の `MAX` に固定してある" +
+      "（固定の理由は `benchRecallOnce` のコメントを参照）。以下は実測値から機械的に導いた事実のみを記す。）",
+  );
+  lines.push("");
+
+  const recallWithSubject = recallOnceResults.find(
+    (r) => r.variant === "subjectId 指定（狙いの大きさ）",
+  );
+  const recallWithoutSubject = recallOnceResults.find(
+    (r) => r.variant === "subjectId 無し（比較用）",
+  );
+
+  if (recallWithSubject) {
+    const stage1 = recallWithSubject.explain.stages.find((s) => s.stage === "candidate_generation");
+    const hits = stage1?.detail?.["hits"];
+    const kPrime = stage1?.detail?.["kPrime"];
+    const hasAnnTruncated = recallWithSubject.omitted.some((o) => o.kind === "ann_truncated");
+    const filteredEntries = recallWithSubject.omitted.filter((o) => o.kind === "filtered");
+    const notIndexedEntries = recallWithSubject.omitted.filter((o) => o.kind === "not_indexed");
+
+    lines.push(
+      `- 狙いの subject（実測 ${recallWithSubject.actualCount.toLocaleString()}行）に \`ctx.subjectId\` を` +
+        `指定して呼んだ場合: \`result.memories.length\` = ${recallWithSubject.memoriesLength}、` +
+        `\`result.index.totalInScope\` = ${recallWithSubject.index.totalInScope}` +
+        `（countKind=${recallWithSubject.index.countKind}）。`,
+    );
+    lines.push(
+      `- 段1（\`candidate_generation\`）の \`explain.stages\` に記録された detail: ` +
+        `\`kPrime\` = ${JSON.stringify(kPrime)}、\`hits\` = ${JSON.stringify(hits)}` +
+        (typeof hits === "number" && typeof kPrime === "number"
+          ? hits < kPrime
+            ? "（`hits < kPrime`）"
+            : "（`hits >= kPrime`）"
+          : "（`hits`/`kPrime` が数値として取れなかった——上の Part 4 生データを確認すること）"),
+    );
+    lines.push(
+      `- \`result.omitted\` に \`kind: "ann_truncated"\` が` +
+        `${hasAnnTruncated ? "**含まれている**" : "**含まれていない**"}。`,
+    );
+    lines.push(
+      `- \`result.omitted\` の \`filtered\` エントリ（status/archived/period の混在由来）: ` +
+        `${filteredEntries.length > 0 ? JSON.stringify(filteredEntries) : "無し"}。`,
+    );
+    lines.push(
+      `- \`result.omitted\` の \`not_indexed\` エントリ: ` +
+        `${notIndexedEntries.length > 0 ? JSON.stringify(notIndexedEntries) : "無し"}。`,
+    );
+    lines.push("");
+    lines.push(
+      "**この4点（`hits` と `kPrime` の大小関係・`ann_truncated` の有無・`filtered` の内訳・" +
+        "`not_indexed` の内訳）を合わせて読むと**、段1の ANN が `kPrime` に届かず打ち切られたという事実が " +
+        "`result.omitted` に `ann_truncated` として現れているか、それとも `result.index.totalInScope` や " +
+        "`filtered`/`not_indexed` を全部足し合わせても `memories.length` との差が説明しきれない" +
+        "『どこにも計上されない取りこぼし』が残るか——**そのどちらであるかは、上の Part 4 の生データ " +
+        "（`result.omitted` の JSON 全文・`explain.stages` 全文）を直接見て判断すること。" +
+        "**ここでは先に結論を書かない。**",
+    );
+  } else {
+    lines.push(
+      "（`subjectId 指定` の結果が無い——`runtime.recall()` の呼び出しが例外で終わった可能性がある。" +
+        "上の Part 4 セクションのログを確認すること。）",
+    );
+  }
+  lines.push("");
+
+  if (recallWithoutSubject) {
+    lines.push(
+      "参考（`ctx.subjectId` 無し・同じデータに対する比較用の呼び出し）: " +
+        `\`result.memories.length\` = ${recallWithoutSubject.memoriesLength}、` +
+        `\`result.index.totalInScope\` = ${recallWithoutSubject.index.totalInScope}` +
+        `（countKind=${recallWithoutSubject.index.countKind}）。` +
+        "全体スコープでは大きい subject 1つ分の希釈効果が消えるため、同じ `kPrime` に対する " +
+        "`hits` が変わりうる——`subjectId` 指定の場合と並べて Part 4 の生データを見比べること。",
+    );
+    lines.push("");
+  }
+
+  lines.push(
+    "**⚠ この計測は狙いの subject 内の `status` を Part 1/2/3 と同じ8択分布のまま変えていない" +
+      "（マネージャー指示: 狙いの subject の行を全部 `active` に揃えるか、混ざることを承知で内訳を" +
+      "出すかを選ばせる裁量だったので、後者を選んだ——ADR 0023 追記の実測値と直接比較できるようにするため）。" +
+      "したがって『窓が埋まらない』の一部は ANN の打ち切りではなく、単に `status` フィルタで" +
+      "スコープ外になった行が混ざっている可能性がある。その内訳は上の `filtered` の値そのものであり、" +
+      "この計測はそれを別々に出す以上のことはしていない。**",
+  );
 
   return lines.join("\n");
 }
@@ -1229,8 +1566,8 @@ async function main(): Promise<void> {
     }
   }
 
-  log("Part 1 / Part 2 の計測が完了した。続けて Part 3 を実行する。");
-  const subjectSizeResults = await runSubjectSizeBench(config);
+  log("Part 1 / Part 2 の計測が完了した。続けて Part 3（と、それに同居する Part 4）を実行する。");
+  const { subjectSizeResults, recallOnceResults } = await runSubjectSizeBench(config);
 
   log("すべての計測が完了した。レポートを出力する。");
   console.log("");
@@ -1273,7 +1610,15 @@ async function main(): Promise<void> {
   console.log("");
   console.log("</details>");
   console.log("");
-  console.log(renderAnswers(config, scopeResults, vectorResults, subjectSizeResults));
+  console.log(
+    "## Part 4: `runtime.recall()` を丸ごと1回呼ぶ（穴3: 「取りこぼした」と「そもそも無かった」の区別）",
+  );
+  console.log("");
+  console.log(renderRecallOnceDetails(recallOnceResults));
+  console.log("");
+  console.log(
+    renderAnswers(config, scopeResults, vectorResults, subjectSizeResults, recallOnceResults),
+  );
 }
 
 main().catch((err: unknown) => {
