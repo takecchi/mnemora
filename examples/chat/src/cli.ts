@@ -13,6 +13,7 @@ import {
 } from "./retrieval-quality.js";
 import { createExampleRuntime } from "./runtime-factory.js";
 import { buildConversation } from "./scenario.js";
+import { formatBackfillDemo, runBackfillDemo } from "./backfill.js";
 import { formatScopeDemo, runScopeDemo } from "./scope.js";
 import { formatNoApiCallsNotice } from "./usage-meter.js";
 
@@ -134,6 +135,31 @@ async function runScope(): Promise<void> {
   }
 }
 
+/**
+ * `observe()` の `occurredAt` を「動く例」で見せるデモ(`src/backfill.ts`、ADR 0037)。
+ * 同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせ、
+ * **同じ問い合わせが取り込み方だけで別の答えを返す**ことを並べて見せる。
+ * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行。
+ */
+async function runBackfill(): Promise<void> {
+  const handle = await createExampleRuntime(requireDatabaseUrl());
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const base = `example-chat-backfill-${Date.now()}`;
+    console.log(
+      "\n生の会話ログを後から取り込む(backfill)と、recordedAt は取り込んだ今日になる。" +
+        "occurredAt を渡すかどうかで、同じ recall() が別の答えを返すことを実演する。\n",
+    );
+    const result = await runBackfillDemo(handle.runtime, {
+      withOccurredAt: `${base}-with`,
+      withoutOccurredAt: `${base}-without`,
+    });
+    console.log(formatBackfillDemo(result));
+  } finally {
+    await handle.close();
+  }
+}
+
 async function runCompare(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
   printProviderMode(handle.llmMode, handle.embeddingMode);
@@ -250,6 +276,7 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run chat       # observe/recall の往復・omitted/usage/budget を実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run retrieval",
       "                                                                      # 意味的関連性の probe set を3 arm(擬似/埋め込みのみ本物/フル本物)で比較",
     ].join("\n"),
@@ -264,6 +291,8 @@ async function main(): Promise<void> {
     await runCompare();
   } else if (command === "scope") {
     await runScope();
+  } else if (command === "backfill") {
+    await runBackfill();
   } else if (command === "retrieval") {
     await runRetrieval();
   } else {

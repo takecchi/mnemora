@@ -49,4 +49,5 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0034](./0034-vector-store-filter-conformance.md) | `VectorFilter` を「adapter が実際に適用しなければならない」契約にし、その契約を適合テストの歯として置く | 採用 (2026-09) |
 | [0035](./0035-recalled-memory-provenance-kind.md) | `recall()` の返り値に `provenanceKind` を載せる — 「区別して返す」を返り値の側で満たす | 採用 (2026-09) |
 | [0036](./0036-clamp-freshness-at-one.md) | `freshness` を 1 で頭打ちにする — 「まだ起きていない出来事は、最も古びていない」 | 採用 (2026-09) |
+| [0037](./0037-callers-pass-occurred-at.md) | `observe()` の `occurredAt` を実際に通す — 「いつの出来事か」を絞れるようにする | 採用 (2026-09) |
 | [0038](./0038-vector-hit-distance-is-cosine.md) | `VectorHit.distance` はコサイン距離だと契約に明記し、適合テストの歯で adapter 非依存に検査する | 採用 (2026-09) |
