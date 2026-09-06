@@ -499,7 +499,17 @@ function cosineDistance(a: number[], b: number[]): number {
     normB += (b[i] ?? 0) ** 2;
   }
   if (normA === 0 || normB === 0) {
-    return 1; // 無関係（類似度0）として扱う。ゼロベクトル同士の割り算を避ける。
+    // ADR 0040: 契約は「ゼロベクトルが絡む候補は recall() の結果に出ない」——
+    // どんな scoreThreshold でも `total >= scoreThreshold` を通らない値を返さなければならない。
+    // `0` でも `1` でもだめ（どちらも scoreThreshold 次第で通りうる）。
+    // `Infinity` もだめ——`similarity = 1 - Infinity = -Infinity` になり、
+    // `scoreThreshold = -Infinity` のとき `-Infinity >= -Infinity` が真になって通ってしまう。
+    // `NaN` は、どんな数との比較も false になる唯一の値である。
+    // 🔴 この番人（`normA === 0 || normB === 0`）を「下の式が 0/0 で同じ NaN になるから」と
+    // 消さないこと——消しても値は変わらない（等価変異）が、番人が保持しているのは値ではなく
+    // 「0/1/Infinity ではなく NaN を選んだ」という決定そのもの。消すと、次に式を触った人が
+    // その決定ごと落とす。
+    return NaN;
   }
   const similarity = dot / (Math.sqrt(normA) * Math.sqrt(normB));
   return 1 - similarity;
@@ -614,12 +624,21 @@ export class FakeEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
-    return this.backing.events.filter((e) => {
+    const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
       if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
       if (filter.kind !== undefined && e.kind !== filter.kind) return false;
+      if (filter.since !== undefined && e.at < filter.since) return false;
+      if (filter.until !== undefined && e.at > filter.until) return false;
       return true;
     });
+    // EventStore.list の契約（../interfaces/event-store.ts）どおり `at` 昇順に並べ替えてから
+    // `limit` を適用する。`filter()` は新しい配列を返すので、その配列を sort() すれば
+    // `this.backing.events`（ADR 0031: FakeMemoryStore.updateStatusWithEvent と共有、
+    // `store.events` getter 経由で runtime.test.ts が直接読む）を in-place で破壊しない
+    // （`packages/testkit` の `InMemoryEventStore.list` と同じ形・同じ理由）。
+    const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime());
+    return filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted;
   }
 }
 

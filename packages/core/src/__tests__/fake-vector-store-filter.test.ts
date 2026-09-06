@@ -149,3 +149,53 @@ describe("FakeVectorStore — VectorFilter の契約（ADR 0034）", () => {
     expect(ids).not.toContain(subjectOnlyMatch.id);
   });
 });
+
+/**
+ * `FakeVectorStore.search`（`cosineDistance` 経由）が ADR 0040 の契約を守っていることを
+ * 検査する歯。
+ *
+ * ADR 0040 の「引き受ける負債」節が名指ししているとおり、`FakeVectorStore.cosineDistance` は
+ * 本 ADR の対象外として `1` を返したまま残されていた（`packages/core` は `packages/testkit` の
+ * `vector-store-conformance.ts` の適合テストが届かない別系統——`dependency-boundary.test.ts` が
+ * core の実行時依存を zod だけに固定しており、core は testkit を import できない）。
+ * ここではその適合テストと同じ形の歯を `packages/core` 側に自前で置く。
+ *
+ * **`Number.isNaN` で等値を見ない。** 見るのは「返ってきた distance がどんな閾値とも比較が
+ * 通らないこと」——`distance >= 0` も `distance <= 0` も false であること。実装が `NaN` を
+ * 返すという詳細ではなく、ADR 0040 が定めた契約（振る舞い）を検査する
+ * （`vector-store-conformance.ts` の「⚠ ゼロベクトルの候補は、どんな閾値とも比較が通らない
+ * 距離になる（ADR 0040）」と同じ理由・同じ形）。
+ *
+ * フィクスチャは非対称: ゼロベクトルの候補1件に対し、正常な候補を2件置く。正常な候補が
+ * 比較の通る距離で返ることを同時に見ないと、「search が常に空を返す」実装が通ってしまう。
+ */
+describe("FakeVectorStore.search — ゼロベクトルの契約（ADR 0040）", () => {
+  it("⚠ ゼロベクトルの候補は、どんな閾値とも比較が通らない距離になり、例外も投げない", async () => {
+    const stores = createFakeRuntimeStores();
+    const zero = await stores.memoryStore.createMemory(ctx, newMemory());
+    const ok1 = await stores.memoryStore.createMemory(ctx, newMemory());
+    const ok2 = await stores.memoryStore.createMemory(ctx, newMemory());
+
+    await stores.vectorStore.upsert(ctx, space, zero.id, [0, 0, 0]);
+    await stores.vectorStore.upsert(ctx, space, ok1.id, [1, 0, 0]);
+    await stores.vectorStore.upsert(ctx, space, ok2.id, [0, 1, 0]);
+
+    const hits = await stores.vectorStore.search(ctx, space, [1, 0, 0], {
+      limit: 10,
+      filter: { tenantId: "tenant-1" },
+    });
+
+    // 正常な候補2件は、比較の通る距離で返る（前提が成り立っていることの確認）。
+    const hitOk1 = hits.find((hit) => hit.memoryId === ok1.id);
+    const hitOk2 = hits.find((hit) => hit.memoryId === ok2.id);
+    expect(hitOk1?.distance).toBeCloseTo(0, 5);
+    expect(hitOk2?.distance).toBeCloseTo(1, 5);
+
+    // ゼロベクトルの候補は、返ってきたとしても比較が通らない。
+    const hitZero = hits.find((hit) => hit.memoryId === zero.id);
+    if (hitZero !== undefined) {
+      expect(hitZero.distance >= 0).toBe(false);
+      expect(hitZero.distance <= 0).toBe(false);
+    }
+  });
+});
