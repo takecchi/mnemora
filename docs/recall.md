@@ -476,6 +476,7 @@ type RecalledMemory = {
   digest: string
   retrievedVia: 'ann' | 'tag_match' | 'recency' | 'mandatory_companion'
   companionOf?: string          // 矛盾の相手として同伴取得された場合、その相手の memoryId
+  provenanceKind: ProvenanceKind // 本人が述べた事実か、AI の推論か（オーナーの原則7）
   score: ScoreBreakdown
 }
 
@@ -489,7 +490,11 @@ type ScoreBreakdown = {
 }
 ```
 
-Memory 本体(内容・provenance・状態)の詳細な型は `./memory-model.md` に譲る。ここで持つのは recall という文脈固有の付加情報——「どの経路で拾われたか」「スコアの内訳」「同伴取得ならどの矛盾の相手として来たか」である。
+Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.md` に譲る。ここで持つのは recall という文脈固有の付加情報——「どの経路で拾われたか」「スコアの内訳」「同伴取得ならどの矛盾の相手として来たか」、そして**「本人が述べた事実か、AI の推論か」**である。
+
+**`provenanceKind` だけは `Memory` 本体からの持ち出しである(2026-09 追記)。**理由は `./memory-model.md` §2 が既に書いていた——「recall がデフォルトで `stated` と `inferred` を**区別して返す**」ために `provenance_kind` を列に上げている。**列は最初から在ったが、`recall()` の返り値に出ていなかった。**オーナーが `../roadmap.md` §5.5 の回答で「含める。ただし `provenance.kind` で区別して返す」という条件を明示したため、この欠落を塞いだ([ADR 0035](./decisions/0035-recalled-memory-provenance-kind.md))。
+
+**⚠ 持ち出すのは `kind` だけである。**`model` / `promptVersion` / `basis` / `confidence` は返さない。求められているのは**区別**であって中身の追加ではなく、毎回の返り値を太らせない(問い1)。それらが要る呼び出し側は `MemoryStore.get()` を引く——「1件を詳しく見る」は別の問いである。
 
 **「なぜこれが返ったか」は自然文ではなく構造で返す。** `explain.stages` と `RecalledMemory.score` を組み合わせれば「段1でベクトル距離0.12として拾われ、段2で decay 0.9 × tagMatch 1.2 × freshness 1.0 × strength 0.8 を掛けて total 0.83 になり、k=10 の9位で予算内に収まった」という説明を機械的に再構成できる。この構造から自然文の説明文を組み立てるのは呼び出し側の仕事であり、mnemora の仕事ではない。理由は §6 で述べたのと同じ——mnemora はどんな言語で・どんなトーンで・誰に向けて説明するかを知らない。mnemora が保証するのは、説明を組み立てるために必要な材料が欠けていないことだけである。
 

@@ -232,7 +232,9 @@ mnemora はこの前提を採用しない。mnemora は計測（`usage`）を提
 
 **2026-09 追記（オーナー回答 2026-09-06。マネージャー経由で伝達された）**: **推論（`inferred`）を既定の recall に含める。⚠ ただし `provenance.kind` で区別して返すこと。**上記の推奨のとおりの内容だが、決めたのはオーナーである。この項目は解決済みであり、これ以上オーナーの判断待ちではない。
 
-**⚠ 実装状況（現物を読んで確かめた、2026-09-06 時点）**: 前半（既定で含める）は満たされている——`RecallQuery.excludeProvenanceKinds` は既定で空であり、`recall-runtime.ts` は指定された `kind` だけを落とす。**後半（`provenance.kind` で区別して返す）は満たされていない**——`RecalledMemory`（`packages/core/src/recall.ts`）は `memoryId` / `digest` / `retrievedVia` / `companionOf` / `score` しか持たず、**`provenance` を持たない。**呼び出し側は `recall()` の返り値だけでは stated と inferred を区別できず、`MemoryStore.get()` を引き直す必要がある。**⟹ この条件を満たすには別の変更が要る。**
+**実装状況（現物を読んで確かめた、2026-09-06 時点）**: 前半（既定で含める）は満たされている——`RecallQuery.excludeProvenanceKinds` は既定で空であり、`recall-runtime.ts` は指定された `kind` だけを落とす。**後半（`provenance.kind` で区別して返す）は満たされていなかった**——`RecalledMemory`（`packages/core/src/recall.ts`）は `memoryId` / `digest` / `retrievedVia` / `companionOf` / `score` しか持たず、`provenance` を持っていなかった。呼び出し側は `recall()` の返り値だけでは stated と inferred を区別できなかった。
+
+**追記（2026-09-06、[ADR 0035](./decisions/0035-recalled-memory-provenance-kind.md)）**: 後半の条件を塞いだ。`RecalledMemory` に `provenanceKind: ProvenanceKind` を**必須の欄として**足し、値はその Memory 自身の `provenance.kind` から引き継ぐ。**`provenance` 全体は返さない**——求められているのは区別であって中身の追加ではない。**⟹ §5.5 の条件は両方とも満たされた。**
 
 **この決定が解いた保留**: [ADR 0033](./decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) が測った diet probe の失敗（記憶は症状、質問は帰結を訊いている）は、`inferred` の記憶を作れば埋まる形をしている。**§5.5 が未決だった間は、その実装は「オーナーの判断の前提そのものを先に決めてしまう」ことになるため保留されていた。**この回答でその保留は解けた。
 

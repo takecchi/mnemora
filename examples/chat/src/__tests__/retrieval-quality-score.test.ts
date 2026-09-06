@@ -22,6 +22,7 @@ function memory(
     memoryId: `memory-${digest}`,
     digest,
     retrievedVia: "ann",
+    provenanceKind: "stated",
     score: {
       decay: 1,
       tagMatch: 1,

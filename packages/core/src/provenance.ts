@@ -8,6 +8,21 @@ import { z } from "zod";
  */
 export type ProvenanceKind = "stated" | "inferred" | "consolidated" | "reflected" | "imported";
 
+/**
+ * `ProvenanceKind` の綴りを1箇所にまとめる。
+ *
+ * これを置く前、同じ5値の列挙が `recall.ts` の `RecallQuerySchema.excludeProvenanceKinds` に
+ * 手で複製されていた。閉じたユニオンの綴りが2箇所にあると、片方を直してもう片方を直し忘れる
+ * ことは注意力に依存し、必ず失敗する（AGENTS.md の「複製した瞬間から、正文と要約はずれ始める」）。
+ */
+export const ProvenanceKindSchema = z.enum([
+  "stated",
+  "inferred",
+  "consolidated",
+  "reflected",
+  "imported",
+]) satisfies z.ZodType<ProvenanceKind>;
+
 export interface StatedProvenance {
   kind: "stated";
   sourceObservationId: string;

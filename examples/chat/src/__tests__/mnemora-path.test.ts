@@ -34,6 +34,7 @@ describe("buildMnemoraPrompt", () => {
           memoryId: "m1",
           digest: "テストの digest",
           retrievedVia: "ann",
+          provenanceKind: "stated",
           score: { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 },
         },
       ]),

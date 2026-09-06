@@ -348,6 +348,95 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
   });
 });
 
+describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答の条件）", () => {
+  // オーナーの回答は条件付きだった——「既定の recall に含める。**ただし provenance.kind で
+  // 区別して返す**」。前半（既定で含める）は元から満たされていたが、後半は
+  // `RecalledMemory` が provenance を一切持たないため満たされていなかった。
+  //
+  // ⚠ ここでの fixture は **kind をすべて違える**。同じ kind を並べると、
+  // 「その Memory の kind」ではなく「どれか1つの kind」を全件に配ってしまう実装を
+  // この検査が通してしまう。newMemory() の既定は 'imported' なので、
+  // 'stated' / 'inferred' はどちらも既定と異なる。
+
+  it("ANN 経由の候補は、その Memory 自身の provenance.kind を名乗る（候補ごとに違う値になる）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const stated = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "stated の記憶",
+      provenance: { kind: "stated", sourceObservationId: "obs-1", at: NOW.toISOString() },
+    });
+    const inferred = await createEmbeddedMemory(stores, [0.99, 0.01], {
+      digest: "inferred の記憶",
+      provenance: {
+        kind: "inferred",
+        model: "gpt-4o-mini",
+        promptVersion: "v1",
+        basis: { memoryIds: [], observationIds: ["obs-1"] },
+        confidence: 0.7,
+      },
+    });
+    const imported = await createEmbeddedMemory(stores, [0.98, 0.02], {
+      digest: "imported の記憶",
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const kindById = new Map(result.memories.map((m) => [m.memoryId, m.provenanceKind]));
+    expect(kindById.get(stated.id)).toBe("stated");
+    expect(kindById.get(inferred.id)).toBe("inferred");
+    expect(kindById.get(imported.id)).toBe("imported");
+  });
+
+  it("同伴取得（mandatory_companion）でも、対向の Memory 自身の kind を名乗る", async () => {
+    // 同伴側は ANN を通らず getMany で拾われる別経路である。
+    // ここを別に見ないと、「ANN 経由だけ正しく、同伴側は主の kind を配る」実装が通る。
+    const { runtime, stores } = buildRuntime();
+    const companion = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        status: "contested",
+        digest: "B".repeat(20),
+        provenance: {
+          kind: "inferred",
+          model: "gpt-4o-mini",
+          promptVersion: "v1",
+          basis: { memoryIds: [], observationIds: ["obs-1"] },
+          confidence: 0.4,
+        },
+      }),
+    );
+    const owner = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: companion.id,
+      digest: "A".repeat(5),
+      provenance: { kind: "stated", sourceObservationId: "obs-1", at: NOW.toISOString() },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const returnedCompanion = result.memories.find((m) => m.memoryId === companion.id);
+    const returnedOwner = result.memories.find((m) => m.memoryId === owner.id);
+    expect(returnedCompanion?.retrievedVia).toBe("mandatory_companion");
+    expect(returnedCompanion?.provenanceKind).toBe("inferred");
+    expect(returnedOwner?.provenanceKind).toBe("stated");
+  });
+
+  it("usage は provenanceKind を数に入れない（測るのは digest と目次帯だけ）", async () => {
+    // 北極星の物差しは「毎回プロンプトへ積む量」である。provenanceKind は
+    // score/retrievedVia/companionOf と同じ**付加情報**であり、digest tier には入らない。
+    // ⟹ 欄が1つ増えても usage.chars は動かない、という不変条件をここで押さえる。
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], {
+      digest: "digest-1",
+      provenance: { kind: "stated", sourceObservationId: "obs-1", at: NOW.toISOString() },
+    });
+    await createEmbeddedMemory(stores, [0.99, 0.01], { digest: "digest-22" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const digestChars = result.memories.reduce((sum, m) => sum + m.digest.length, 0);
+    expect(result.memories).toHaveLength(2);
+    expect(result.usage.byTier.digest).toBe(digestChars);
+    expect(result.usage.chars).toBe(digestChars + result.usage.indexChars);
+  });
+});
+
 describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/recall.md §8）", () => {
   async function setupContestedPair(stores: ReturnType<typeof createFakeRuntimeStores>) {
     // b を先に作り、a から b を指す(一対一の対向関係。docs/memory-model.md §5)。
