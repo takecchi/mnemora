@@ -222,7 +222,9 @@ mnemora はこの前提を採用しない。mnemora は計測（`usage`）を提
 
 **2026-09 追記（オーナー回答 2026-09-06。マネージャー経由で伝達された）**: **監査ログの既定保持期間は無期限。⚠ テナント単位で短縮できる口は「必須」である**（オーナーが「必須」と明示した）。上記の推奨のとおりの内容だが、決めたのはオーナーである。この項目は解決済みであり、これ以上オーナーの判断待ちではない。
 
-**⚠ 実装状況（現物を読んで確かめた、2026-09-06 時点）**: `tenant_settings` には `event_retention_days`（`NULL` = 無期限）列が既に在る（`packages/postgres/src/schema.ts`）。**しかし `TenantSettingsStore` interface が公開しているのは `getDefaultHalfLifeHours` だけであり、保持期間を読み書きする経路は無い**（interface 自身が「テナント設定の完全な CRUD は本 PR の範囲外」と書いている）。**⟹ 「短縮できる口は必須」という条件は、いまの公開 interface では満たせない。**
+**⚠ 実装状況（2026-09-06 時点、現物を読んで確かめた）**: `tenant_settings` には `event_retention_days`（`NULL` = 無期限）列が既に在る（`packages/postgres/src/schema.ts`）。**しかし `TenantSettingsStore` interface が公開しているのは `getDefaultHalfLifeHours` だけであり、保持期間を読み書きする経路は無い**（interface 自身が「テナント設定の完全な CRUD は本 PR の範囲外」と書いている）。**⟹ 「短縮できる口は必須」という条件は、いまの公開 interface では満たせない。**
+
+**追記（2026-09-07、[ADR 0050](./decisions/0050-tenant-event-retention.md)）**: この条件を塞いだ。`TenantSettingsStore` に `getEventRetention`/`setEventRetention` を足し、`event_retention_days` の3状態（行が無い/行は在るが `NULL`/日数）を区別して読み書きできるようにした。`PostgresTenantSettingsStore` は UPSERT で書く（マイグレーションは追加していない。列は既に在ったため）。`InMemoryTenantSettingsStore` は「行」を持つ形に作り直し、Postgres と同じく half-life だけ設定したテナントが `unlimited` を返すようにした。値の検査（正の整数のみ、延長は許す）は `packages/core` の `assertValidEventRetentionDays` に1箇所だけ持たせ、両実装が共有する。削除処理（期限切れ行を実際に消すジョブ）は`docs/memory-model.md` §9 が指定する別の独立した保守ジョブの範囲であり、本追記の対象外。**⟹ §5.4 の条件は満たされた。**
 
 ### 5.5 推論（`inferred`）を既定の recall に含めるか除外するか
 
