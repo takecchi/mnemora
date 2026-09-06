@@ -799,6 +799,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const first = await store.reinforce(ctx, memory.id, at);
       // 前提: 1回目は実際に効いている。
       expect(first.lastReinforcedAt?.getTime()).toBe(at.getTime());
+      // ⚠ プリミティブへ即座に写し取る。in-memory 実装は Map に入れた行オブジェクトへの
+      // 参照をそのまま返すため、`first` を後段の再代入まで保持すると「別の読み取り」では
+      // なく「同じオブジェクトを2回見ている」だけになり、比較が常に真になって歯が死ぬ
+      // （実際にこの取り違えで変異が生き残ることを確認した上での書き方）。
+      const firstDecayFloorAt = first.decayFloorAt.getTime();
+      const firstUpdatedAt = first.updatedAt.getTime();
 
       // ⚠ `updatedAt` は壁時計を使う（`new Date()`/`now()`）。in-memory の2回の呼び出しは
       // 同期的に一瞬で終わるため、ガードが外れて2回目も書き込んでしまう実装であっても、
@@ -809,13 +815,13 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
       const again = await store.reinforce(ctx, memory.id, at);
       expect(again.lastReinforcedAt?.getTime()).toBe(at.getTime());
-      expect(again.decayFloorAt.getTime()).toBe(first.decayFloorAt.getTime());
+      expect(again.decayFloorAt.getTime()).toBe(firstDecayFloorAt);
       // 行そのものを触っていないことは updatedAt で確かめる。
-      expect(again.updatedAt.getTime()).toBe(first.updatedAt.getTime());
+      expect(again.updatedAt.getTime()).toBe(firstUpdatedAt);
 
       // 読み直しても同じ（返り値だけを繕う実装を弾く）。
       const reread = await store.get(ctx, memory.id);
-      expect(reread?.updatedAt.getTime()).toBe(first.updatedAt.getTime());
+      expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
     });
 
     // -------------------------------------------------------------------

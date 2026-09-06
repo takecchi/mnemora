@@ -105,6 +105,12 @@ describe("FakeMemoryStore.reinforce — 減衰の起点を巻き戻さない（A
 
     const first = await stores.memoryStore.reinforce(ctx, memory.id, at);
     expect(first.lastReinforcedAt?.getTime()).toBe(at.getTime());
+    // ⚠ プリミティブへ即座に写し取る。FakeMemoryStore も backing の Map に入れた行
+    // オブジェクトへの参照をそのまま返すため、`first` を後段の再代入まで保持すると
+    // 「別の読み取り」ではなく「同じオブジェクトを2回見ている」だけになり、比較が
+    // 常に真になって歯が死ぬ（`packages/testkit` の同種の歯と同じ理由）。
+    const firstDecayFloorAt = first.decayFloorAt.getTime();
+    const firstUpdatedAt = first.updatedAt.getTime();
 
     // ⚠ `updatedAt` は壁時計を使う。2回の呼び出しが同期的に一瞬で終わると、ガードが
     // 外れて2回目も書き込む実装であっても、ミリ秒の解像度に収まって偶然同じ値になり
@@ -114,12 +120,12 @@ describe("FakeMemoryStore.reinforce — 減衰の起点を巻き戻さない（A
 
     const again = await stores.memoryStore.reinforce(ctx, memory.id, at);
     expect(again.lastReinforcedAt?.getTime()).toBe(at.getTime());
-    expect(again.decayFloorAt.getTime()).toBe(first.decayFloorAt.getTime());
+    expect(again.decayFloorAt.getTime()).toBe(firstDecayFloorAt);
     // 行そのものを触っていないことは updatedAt で確かめる。
-    expect(again.updatedAt.getTime()).toBe(first.updatedAt.getTime());
+    expect(again.updatedAt.getTime()).toBe(firstUpdatedAt);
 
     const reread = await stores.memoryStore.get(ctx, memory.id);
-    expect(reread?.updatedAt.getTime()).toBe(first.updatedAt.getTime());
+    expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
   });
 
   it("reinforce は存在しない Memory に対して失敗する（既存の挙動を壊していないことの確認）", async () => {
