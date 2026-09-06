@@ -9,7 +9,10 @@ import {
   RecallUsageSchema,
 } from "../recall.js";
 
-describe("OmissionSchema — 7つの kind すべて", () => {
+describe("OmissionSchema — 9つの kind すべて", () => {
+  // ⚠ 題は以前「7つの kind すべて」だった。ann_unreached（ADR 0026）が入った時点で 8 に
+  // なっていたのに直っておらず、本 PR の score_not_comparable（ADR 0044）で 9 になる。
+  // **名乗りは実測に合わせる。**
   it("accepts 'stage_skipped'", () => {
     const result = OmissionSchema.safeParse({
       kind: "stage_skipped",
@@ -150,6 +153,38 @@ describe("OmissionSchema — 7つの kind すべて", () => {
   it("rejects 未知の kind", () => {
     const result = OmissionSchema.safeParse({ kind: "vanished" });
     expect(result.success).toBe(false);
+  });
+});
+
+describe("OmissionSchema — score_not_comparable（ADR 0044）", () => {
+  it("accepts 'score_not_comparable'", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects count を欠く score_not_comparable（件数は必ず持つ）", () => {
+    // ann_unreached（ADR 0026）は「原理的に数えられない」ので件数を持たないが、
+    // こちらは段2が触った候補を数え上げるだけなので、必ず持つ。
+    const result = OmissionSchema.safeParse({ kind: "score_not_comparable", countKind: "exact" });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects countKind を欠く score_not_comparable（名乗りなしで件数を出さない）", () => {
+    const result = OmissionSchema.safeParse({ kind: "score_not_comparable", count: 1 });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts countKind: 'unknown'（三分割が網羅でなくなったときに落ちる先）", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "unknown",
+    });
+    expect(result.success).toBe(true);
   });
 });
 
