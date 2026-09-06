@@ -391,9 +391,11 @@ export class PostgresMemoryStore implements MemoryStore {
    * ADR 0011 が段1から締め出した `count(*) OVER ()` と同じ理由——**別々のクエリから
    * 出すと、その間の書き込みで総和が一致しなくなる**——を、段5でも同じ形で守る。
    *
-   * `status` の3分岐（scope 内 / archived / それ以外）と period の内外は、
+   * `status` の4分岐（scope 内 / archived / superseded / forgotten）と period の内外は、
    * すべて `FILTER (WHERE ...)` による条件付き集約として同じ `GROUP BY subject_id` の
-   * 1回のスキャンで計算する。
+   * 1回のスキャンで計算する。**superseded と forgotten は別々の列として数える**
+   * （ADR 0027）——前者は機構の都合（より良い抽出に置き換えられた）、後者は製品の振る舞い
+   * （利用者が意図して忘れさせた）であり、束ねると呼び出し側がどちらだったか判定できない。
    */
   async aggregateScope(ctx: Ctx, scope: RecallScope): Promise<ScopeAggregate> {
     const subjectFilter =
@@ -426,7 +428,8 @@ export class PostgresMemoryStore implements MemoryStore {
           WHERE status IN ('active', 'contested') AND ${inPeriod} AND embedding_status = 'skipped'
         )::int AS not_indexed_skipped,
         count(*) FILTER (WHERE status = 'archived')::int AS archived,
-        count(*) FILTER (WHERE status IN ('superseded', 'forgotten'))::int AS other_status,
+        count(*) FILTER (WHERE status = 'superseded')::int AS superseded,
+        count(*) FILTER (WHERE status = 'forgotten')::int AS forgotten,
         count(*) FILTER (
           WHERE status IN ('active', 'contested') AND NOT (${inPeriod})
         )::int AS period_filtered
@@ -444,7 +447,8 @@ export class PostgresMemoryStore implements MemoryStore {
           not_indexed_failed: number;
           not_indexed_skipped: number;
           archived: number;
-          other_status: number;
+          superseded: number;
+          forgotten: number;
           period_filtered: number;
         },
     );
@@ -465,7 +469,8 @@ export class PostgresMemoryStore implements MemoryStore {
         | "not_indexed_failed"
         | "not_indexed_skipped"
         | "archived"
-        | "other_status"
+        | "superseded"
+        | "forgotten"
         | "period_filtered",
     ) => rows.reduce((total, row) => total + row[field], 0);
 
@@ -479,7 +484,8 @@ export class PostgresMemoryStore implements MemoryStore {
         skipped: { count: sum("not_indexed_skipped"), countKind: "exact" },
       },
       filteredArchived: { count: sum("archived"), countKind: "exact" },
-      filteredStatus: { count: sum("other_status"), countKind: "exact" },
+      filteredSuperseded: { count: sum("superseded"), countKind: "exact" },
+      filteredForgotten: { count: sum("forgotten"), countKind: "exact" },
       filteredPeriod: { count: sum("period_filtered"), countKind: "exact" },
     };
   }

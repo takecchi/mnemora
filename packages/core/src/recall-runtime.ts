@@ -407,12 +407,24 @@ export async function runRecall(
       countKind: aggregate.filteredArchived.countKind,
     });
   }
-  if (aggregate.filteredStatus.count > 0) {
+  // superseded と forgotten を別々に push する（ADR 0027）。前者は機構の都合
+  // （より良い抽出に置き換えられた。置き換え先を持つ）、後者は製品の振る舞い
+  // （利用者が意図して忘れさせた。置き換え先を持たない）——束ねると次の一手が
+  // 判定できなくなる。
+  if (aggregate.filteredSuperseded.count > 0) {
     omitted.push({
       kind: "filtered",
-      condition: "status",
-      count: aggregate.filteredStatus.count,
-      countKind: aggregate.filteredStatus.countKind,
+      condition: "superseded",
+      count: aggregate.filteredSuperseded.count,
+      countKind: aggregate.filteredSuperseded.countKind,
+    });
+  }
+  if (aggregate.filteredForgotten.count > 0) {
+    omitted.push({
+      kind: "filtered",
+      condition: "forgotten",
+      count: aggregate.filteredForgotten.count,
+      countKind: aggregate.filteredForgotten.countKind,
     });
   }
   if (aggregate.filteredPeriod.count > 0) {
