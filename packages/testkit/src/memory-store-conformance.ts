@@ -617,6 +617,20 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
     });
 
+    // 族B（無い == 例外）だが、mapping.ts の isUuidLike の doc コメントが定める基準
+    // 「存在しない」と「壊れた入力」を区別せずに済ませたい口にはここも当たる——
+    // 形式不正な id も「対象が無い」と同じ例外（今日と同じ Error）に寄せる。
+    // ⚠ 引数無しの `.rejects.toThrow()` は使わない——TypeError やドライバの
+    // パースエラーもそのパターンには一致してしまい、意図した「memory not found」の
+    // 分岐を検査したことにならない（NOT_FOUND_ERROR_MESSAGE 定義参照）。
+    it("setEmbeddingStatus は形式不正な id に対しても『memory not found』と同じ例外を投げる（ドライバのエラーを漏らさない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.setEmbeddingStatus(ctx, "does-not-exist", "ready")).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
+    });
+
     // -------------------------------------------------------------------
     // recordUsage（D9・docs/architecture.md §3.5「挿入の成否で数える」）
     // -------------------------------------------------------------------
@@ -722,6 +736,16 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
     });
 
+    // mapping.ts の isUuidLike の doc コメントが定める基準に当たる（setEmbeddingStatus と
+    // 同じ理由）: 形式不正な id も「対象が無い」と同じ例外に寄せる。
+    it("reinforce は形式不正な id に対しても『memory not found』と同じ例外を投げる（ドライバのエラーを漏らさない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.reinforce(ctx, "does-not-exist", new Date())).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
+    });
+
     // -------------------------------------------------------------------
     // updateStatus（docs/memory-model.md §5）
     // -------------------------------------------------------------------
@@ -764,6 +788,16 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // メッセージまで固定するのは、ガード節が抜けて null 参照の TypeError に
       // すり替わっても緑のままになる事故を防ぐため（NOT_FOUND_ERROR_MESSAGE 定義参照）。
       await expect(store.updateStatus(ctx, NONEXISTENT_MEMORY_ID, "archived")).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
+    });
+
+    // mapping.ts の isUuidLike の doc コメントが定める基準に当たる（setEmbeddingStatus と
+    // 同じ理由）: 形式不正な id も「対象が無い」と同じ例外に寄せる。
+    it("updateStatus は形式不正な id に対しても『memory not found』と同じ例外を投げる（ドライバのエラーを漏らさない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.updateStatus(ctx, "does-not-exist", "archived")).rejects.toThrow(
         NOT_FOUND_ERROR_MESSAGE,
       );
     });
@@ -936,6 +970,31 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       ).rejects.toThrow(/memory not found for tenant/);
 
       const events = await listEventsForMemory(ctx, missingId);
+      expect(events).toEqual([]);
+    });
+
+    // mapping.ts の isUuidLike の doc コメントが定める基準に当たる（他の族B口と
+    // 同じ理由）: 形式不正な id も「対象が無い」と同じ例外に寄せる。
+    // 🔴 例外が飛ぶだけでなく、イベントが1件も積まれていないことまで見る——
+    // ガードをトランザクションの外に置いても中に置いても結果（イベント0件）は
+    // 同じだが、`listEventsForMemory` を使わないと「例外は正しいメッセージだが
+    // 実は先に1件書き込んでからロールバックし損ねている」ような事故を見逃す。
+    it("updateStatusWithEvent は形式不正な id に対しても『memory not found』と同じ例外を投げ、イベントも積まれない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const malformedId = "does-not-exist";
+
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          malformedId,
+          "superseded",
+          {},
+          buildSupersedeEvent(ctx, malformedId, "digest"),
+        ),
+      ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+
+      const events = await listEventsForMemory(ctx, malformedId);
       expect(events).toEqual([]);
     });
 

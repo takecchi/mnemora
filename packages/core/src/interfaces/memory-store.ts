@@ -177,6 +177,12 @@ export interface MemoryStore {
    * 今日と同じ「memory not found」の例外のまま——「対象が無い」と「status が期待と
    * 違った」は別の例外で区別できる。
    *
+   * `id` が adapter の期待する形式でない場合も、この「memory not found」の例外と
+   * 同じ結果になる。core の `MemoryId` は単なる `string` であり形式を強制しないため、
+   * ある adapter が主キーに特定の形式（例: UUID）を要求していても、その形式に合わない
+   * `id` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
+   * `isUuidLike` の doc コメント参照）。
+   *
    * `expectedStatus` を**単数**にしている理由: 現時点の唯一の呼び出し元
    * （`runtime.ts` の `reextract`）が要る条件は `"active"` の1つだけであり、
    * 集合（配列）にする理由が無い。採らなかった案は ADR 0030 参照。
@@ -206,6 +212,11 @@ export interface MemoryStore {
    *   せず常に更新し、イベントを追記する。
    * - 対象の Memory がそもそも存在しない場合は、`expectedStatus` の有無に関わらず今日と
    *   同じ「memory not found」の `Error` を投げる（イベントは積まれない）。
+   * - `id` が adapter の期待する形式でない場合も、この「memory not found」の例外と
+   *   同じ結果になる（イベントは積まれない）。core の `MemoryId` は単なる `string` で
+   *   あり形式を強制しないため、adapter が主キーに要求する形式に合わない `id` は
+   *   「存在しない」の一種として扱う（`updateStatus` の doc コメント・
+   *   `packages/postgres/src/mapping.ts` の `isUuidLike` の doc コメント参照）。
    *
    * 🔴 **買わない不変条件**（呼び出し側の `reextract` ループが対象1件ごとにこのメソッドを
    * 呼ぶ場合）: 「複数回の呼び出しをまとめて全部成功させるか全部失敗させるか」は買わない。
@@ -225,8 +236,21 @@ export interface MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
-  /** roadmap.md 段階3: `embeddingStatus` の `pending → ready | failed` 遷移を書き込む。 */
+  /**
+   * roadmap.md 段階3: `embeddingStatus` の `pending → ready | failed` 遷移を書き込む。
+   * 対象の Memory が存在しない場合は「memory not found」の `Error` を投げる。`id` が
+   * adapter の期待する形式でない場合も同じ結果になる——core の `MemoryId` は単なる
+   * `string` であり形式を強制しないため、adapter が主キーに要求する形式に合わない `id`
+   * は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
+   * `isUuidLike` の doc コメント参照）。
+   */
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
+  /**
+   * docs/memory-model.md §7、ADR 0010: `last_reinforced_at`/`decay_floor_at` を更新する。
+   * 対象の Memory が存在しない場合は「memory not found」の `Error` を投げる。`id` が
+   * adapter の期待する形式でない場合も同じ結果になる（`setEmbeddingStatus` の doc
+   * コメント・`packages/postgres/src/mapping.ts` の `isUuidLike` の doc コメント参照）。
+   */
   reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory>;
   /**
    * D9: 使用報告を記録する。`(recall_id, memory_id)` の挿入が実際に起きたものだけを

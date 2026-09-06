@@ -362,6 +362,13 @@ export class PostgresMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
+    // クエリを投げる前に同じ「memory not found」の Error へ寄せる——ドライバの
+    // invalid input syntax for type uuid を呼び出し側に漏らさない
+    // （mapping.ts の isUuidLike の doc参照）。
+    if (!isUuidLike(id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+    }
     const expectedStatus = opts?.expectedStatus;
     const statusCondition =
       expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
@@ -412,6 +419,13 @@ export class PostgresMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力は
+    // トランザクションを開く前に同じ「memory not found」の Error へ寄せる——
+    // トランザクション内で投げても結果（イベントが積まれない）は同じだが、そもそも
+    // 開かないほうが意図が明確（mapping.ts の isUuidLike の doc参照）。
+    if (!isUuidLike(id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+    }
     const expectedStatus = opts.expectedStatus;
     const statusCondition =
       expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
@@ -465,6 +479,12 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
+    // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
+    // クエリを投げる前に同じ「memory not found」の Error へ寄せる（mapping.ts の
+    // isUuidLike の doc参照）。
+    if (!isUuidLike(id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+    }
     const result = await this.db.execute(sql`
       UPDATE memories
       SET embedding_status = ${status}, updated_at = now()
@@ -478,6 +498,12 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory> {
+    // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
+    // クエリを投げる前に同じ「memory not found」の Error へ寄せる（mapping.ts の
+    // isUuidLike の doc参照）。
+    if (!isUuidLike(id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+    }
     const current = await this.db.execute(sql`
       SELECT * FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
     `);

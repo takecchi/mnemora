@@ -82,5 +82,12 @@ export interface VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]>;
+  /**
+   * 対象の vector が存在しなければ何もしない（`void`、べき等）。`memoryId` が adapter
+   * の期待する形式でない場合も同じ「何もしない」という結果になる。core の `MemoryId` は
+   * 単なる `string` であり形式を強制しないため、adapter が期待する形式に合わない
+   * `memoryId` は「存在しない」の一種として扱う（`packages/postgres/src/mapping.ts` の
+   * `isUuidLike` の doc コメント参照）。
+   */
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
 }
