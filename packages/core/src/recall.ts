@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { MemoryId, RecallId } from "./ids.js";
+import { ProvenanceKindSchema } from "./provenance.js";
 import type { ProvenanceKind } from "./provenance.js";
 
 /**
@@ -409,6 +410,22 @@ export interface RecalledMemory {
   retrievedVia: "ann" | "tag_match" | "recency" | "mandatory_companion";
   /** 矛盾の相手として同伴取得された場合、その相手の memoryId。 */
   companionOf?: MemoryId;
+  /**
+   * この記憶が「本人が述べた事実」なのか「AI の推論」なのか（オーナーの原則7）。
+   *
+   * **なぜ `provenance` 全体ではなく `kind` だけを返すか。**
+   * オーナーが roadmap.md §5.5 の回答で付けた条件は「**`provenance.kind` で区別して返す**」
+   * であり、求められているのは**区別**であって中身の追加ではない。`kind` だけを平らに持てば、
+   * 「そのうち `basis` や `confidence` も足そう」という圧力が構造的に掛からない
+   * （`provenance: Provenance` という形にすると、欄が1つ増えるたびに毎回の返り値が太る）。
+   * `model` / `promptVersion` / `basis` / `confidence` が要るなら
+   * `MemoryStore.get()` を引く——**そちらは「1件を詳しく見る」問いであり、
+   * recall の「何を返したか」とは別の問いである。**
+   *
+   * 欄名を `provenanceKind` と平らにしてあるのは、既にある
+   * `RecallQuery.excludeProvenanceKinds` と同じ語彙で揃えるためでもある。
+   */
+  provenanceKind: ProvenanceKind;
   score: ScoreBreakdown;
 }
 
@@ -417,6 +434,7 @@ export const RecalledMemorySchema = z.object({
   digest: z.string(),
   retrievedVia: z.enum(["ann", "tag_match", "recency", "mandatory_companion"]),
   companionOf: z.string().min(1).optional(),
+  provenanceKind: ProvenanceKindSchema,
   score: ScoreBreakdownSchema,
 }) satisfies z.ZodType<RecalledMemory>;
 
@@ -509,9 +527,7 @@ export const RecallQuerySchema = z.object({
   occurredBefore: z.date().optional(),
   limit: z.number().int().positive().optional(),
   overFetchFactor: z.number().positive().optional(),
-  excludeProvenanceKinds: z
-    .array(z.enum(["stated", "inferred", "consolidated", "reflected", "imported"]))
-    .optional(),
+  excludeProvenanceKinds: z.array(ProvenanceKindSchema).optional(),
   budget: RecallBudgetSchema.optional(),
   scoreThreshold: z.number().optional(),
 }) satisfies z.ZodType<RecallQuery>;

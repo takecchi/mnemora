@@ -374,6 +374,10 @@ export async function runRecall(
         memoryId: member.memory.id,
         digest: member.memory.digest,
         retrievedVia: member.retrievedVia,
+        // ⚠ リテラルを書かない。値は **その Memory の provenance そのもの**から引き継ぐ。
+        // 出どころが将来変わったら、名乗りも一緒に変わる——countKind の exact が
+        // リテラル固定のまま出どころだけ変わって嘘になった件（ADR 0011）の裏返しである。
+        provenanceKind: member.memory.provenance.kind,
         score: member.score,
       };
       if (member.companionOf !== undefined) {

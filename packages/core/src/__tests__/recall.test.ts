@@ -4,6 +4,7 @@ import {
   IndexBandSchema,
   OmissionSchema,
   RecallQuerySchema,
+  RecalledMemorySchema,
   RecallResultSchema,
   RecallUsageSchema,
 } from "../recall.js";
@@ -222,6 +223,38 @@ describe("RecallQuerySchema — D5: excludeProvenanceKinds", () => {
     const result = RecallQuerySchema.safeParse({
       excludeProvenanceKinds: ["fabricated"],
     });
+    expect(result.success).toBe(false);
+  });
+});
+
+describe("RecalledMemorySchema — provenanceKind（roadmap.md §5.5 のオーナー回答の条件）", () => {
+  // 型（TypeScript）だけでなく schema（zod）でも必須にしてある。
+  // 型は境界の外（HTTP・JSON）では効かないので、**片方だけでは
+  // 「欄が抜けたまま既定値の顔で通る」経路が残る。**
+  const base = {
+    memoryId: "mem-1",
+    digest: "digest",
+    retrievedVia: "ann",
+    score: { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 },
+  };
+
+  it("accepts provenanceKind: 'stated'（本人が述べた事実）", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, provenanceKind: "stated" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts provenanceKind: 'inferred'（AI の推論。区別して返る）", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, provenanceKind: "inferred" });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects provenanceKind を欠く RecalledMemory（省略可能にしない）", () => {
+    const result = RecalledMemorySchema.safeParse(base);
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects 未知の provenance kind", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, provenanceKind: "fabricated" });
     expect(result.success).toBe(false);
   });
 });
