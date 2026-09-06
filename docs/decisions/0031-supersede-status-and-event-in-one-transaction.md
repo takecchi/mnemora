@@ -163,6 +163,51 @@
     「呼び出し側に何を伝えるか」ではなく「何が実際に書き込まれるか」であり、後者を
     直すには書き込みの単位を変える以外にない。
 
+- **歯について**:
+
+  基準線（`main` の head、ADR 0030 の PR で実測済みの値と一致することを確認済み）:
+  root 7 / `packages/core` 203 / `packages/testkit` 68 / `packages/openai` 20。
+  本 PR 後: root 7（変わらず）/ `packages/core` 203（変わらず——`updateStatus` を
+  呼んでいた既存の TOCTOU の歯を `updateStatusWithEvent` に向け直しただけで、新設の
+  テストファイルは足していない）/ `packages/testkit` 72（+4:
+  `memory-store-conformance.ts` の `updateStatusWithEvent` の歯）/ `packages/openai`
+  20（変わらず）。手元で走らせたのはこの4パッケージ（DB 不要）のみ。
+
+  DB 不要な変異を4本撃った（すべて `git checkout --` で戻し、`git status --short` が
+  空であることを確認してから次に進んだ）:
+
+  | # | 変異 | 当たったか | 赤くなったテスト数（走った総数の変化） | 一意に捕まえた歯 | 赤の出どころ |
+  |---|---|---|---|---|---|
+  | M1 | `FakeMemoryStore.updateStatusWithEvent` から `beforeUpdateStatus` の発火を落とす | 当たった | `packages/core` 203本中1本（総数は不変） | PR #28 の ⭐ 決定的な TOCTOU 再現の歯（`compare-and-swap（ADR 0030: ...）`） | `AssertionError: expected 'superseded' to be 'forgotten'`（`toBe` assertion、`TypeError` ではない） |
+  | M2 | `runtime.ts` の `updateStatusWithEvent` 呼び出しから `expectedStatus: "active"` を落とす | 当たった | `packages/core` 203本中1本（総数は不変） | 同上（M1 と同一の歯） | 同上と同一の `AssertionError`（`expected 'superseded' to be 'forgotten'`） |
+  | M3 | in-memory 実装（`InMemoryMemoryStore.updateStatusWithEvent`）で、CAS 判定より前にイベントを積んでしまう | 当たった | `packages/testkit` 72本中1本（総数は不変） | 新設の「CAS に弾かれたら…イベントも1件も積まれない」の歯 | `AssertionError: expected [ {...} ] to deeply equal []`（`toEqual` assertion） |
+  | M4 | in-memory 実装で、CAS 判定の順序を逆にする（先に書き換えてから判定する） | 当たった | `packages/testkit` 72本中1本（総数は不変） | 同上の歯のうち「行が一切変わっていない」の assertion | `AssertionError: expected 'superseded' to be 'archived'`（`toBe` assertion） |
+
+  各行について:
+  - **⓪** 4本とも `git diff --stat` が変異ごとに非空であることを確認した（差分行数は
+    それぞれ本文中の該当箇所を参照）。
+  - **①** 4本とも「当たった」——`SKIP` になったものは無い。
+  - **②** 走ったテスト総数は基準線と一致したまま（`packages/core` 203・`packages/testkit`
+    72）で、赤くなった本数だけが変わった。総数がずれていない＝変異以外の要因で
+    テストの発見・実行自体が変わっていないことの確認。
+  - **③** M1・M2 はどちらも同じ1本（PR #28 の TOCTOU 再現の歯）だけが赤くなった——
+    これは意図どおりである。M1（フックが発火しない）と M2（CAS 条件が無い）は
+    どちらも「この歯が期待する割り込みが検知されない」という同じ結果に落ちるため、
+    同じ歯が両方を捕まえる。M3・M4 は新設の CAS 競合の歯（1本）が捕まえた。
+  - **④** 4本とも `AssertionError`（`expect().toBe()`/`toEqual()`）であり、型検査や
+    フレームワークの番犬（`TypeError`・unhandled rejection 等）ではない。失敗メッセージは
+    表の「赤の出どころ」列に逐語で記載した。
+  - **⑤** M1・M2 が撃った ⭐ の歯（`runtime.test.ts`）は、フィクスチャを非対称にして
+    ある（対象 M は割り込みを受け forgotten になる、対象 N は介入を受けず普通に
+    supersede される）——歯自体がこの非対称性を1本で assert する構造になっている
+    （変異を当てた今回は M の assertion で止まったため N 側の assert には到達して
+    いないが、非対称フィクスチャであることは歯の設計として維持されている。
+    変異を当てていない通常実行では N が supersede されることまで同じ歯が確認する）。
+    M3・M4 は単一対象の歯であり、同じ `describe` 内の「成功時は Memory 更新・イベント
+    1件」「`expectedStatus` 省略時は無条件更新」の別の it() が変異の影響を受けずに
+    通り続けたことを、これらの変異が対象外の振る舞いまで壊していないことの確認として
+    使った。
+
 - **引き受ける負債**:
 
   - **`MemoryStore` の責務が「Memory の永続化」から「Memory の永続化 + イベント追記」に
