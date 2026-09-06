@@ -145,7 +145,34 @@
       中で見る。**この歯は本 PR に残す**——「なぜ擬似物も揃えるのか」という本 ADR の
       根拠が repo に残る形にするため。
 
-- **採らなかった案**:
+  11. **`packages/core/src/__tests__/fake-referential-integrity.test.ts` を新設する
+      （実装後の変異テストで判明した穴を埋める、下記「⚠ 実装後に判明したこと」参照）。**
+      `FakeMemoryStore`/`FakeVectorStore`/`FakeEventStore` に足した決定1〜4のガードを、
+      `packages/testkit` の適合テストとは独立に（core は testkit に依存しない、
+      `runtime-fakes.ts` 冒頭のコメント）検査する9本の歯を置く。
+      `fake-vector-store-filter.test.ts`（ADR 0034）・`fake-event-store-list.test.ts`
+      （ADR 0042）と同じ形。
+
+- **⚠ 実装後に判明したこと（変異テストで実測、歯が弱かった）**:
+
+  決定1〜4のガードを `FakeMemoryStore`/`FakeVectorStore`/`FakeEventStore` に実装した
+  直後、各ガードを1つずつ `if (false) { ... }` に潰す変異を撃って確認したところ、
+  **9箇所とも `packages/core` の既存テストは1本も赤くならなかった。**
+
+  原因は単純だった——`packages/testkit` の適合テスト（決定9で足した歯）は
+  `InMemoryMemoryStore`/`InMemoryVectorStore`/`InMemoryEventStore` を対象にしており、
+  **`packages/core` 自身のテスト専用の別系統である `Fake*` は最初から検査の対象外**
+  （`runtime-fakes.ts` 冒頭のコメント: 「1つを直せばもう1つが壊れる、という結合を
+  作らない」ため、意図的に独立している）。`recall-pipeline.test.ts` は `contestedWithId`
+  に実在する id しか渡さないため、この穴を検査しない。⟹ **ガードは実装されていたが、
+  それを守る歯が repo のどこにも無かった。**
+
+  これは「あってもよいが検査されていない」という、ADR 0011/0025/0027/0028/0034 が
+  繰り返し破ってきた族そのものである——今回は adapter 間の非対称ではなく、
+  **同じ ADR が同時に触った2つの実装系統（`packages/testkit` と `packages/core`）の
+  間の非対称**として現れた。決定11の `fake-referential-integrity.test.ts` を追加で
+  新設し、9本とも変異を1本ずつ入れ直して「1本だけが赤くなる」ことを確認し直した
+  （PR 本文の変異テスト記録参照）。
 
   - **「規定しない」で済ませる（ADR 0042 の形を踏襲する）。** 却下。文脈節に書いた通り、
     ADR 0042 は Postgres が保証できないことを「規定しない」と書いた——**Postgres が
