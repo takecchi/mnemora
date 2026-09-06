@@ -148,6 +148,52 @@ haystack）との競合が減る——量の削減率や順位が「実際に絞
 
 ---
 
+## `backfill`: `observe()` の `occurredAt` を実演する
+
+```bash
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill
+```
+
+**同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせる。**
+
+```
+取り込んだ2件: 「三週間前に沖縄へ旅行しました。」(20日前の出来事) / 「一昨日に金沢へ旅行しました。」(2日前の出来事)
+問い合わせ: recall({ text: "わたしの旅行について知っていますか?", occurredAfter: <10日前> })
+
+--- 1. observe() に occurredAt を渡した ---
+件数: 1
+  - "一昨日に金沢へ旅行しました。"
+  omitted: filtered:period
+
+--- 2. ⚠ occurredAt を渡さなかった ---
+件数: 2
+  - "一昨日に金沢へ旅行しました。"
+  - "三週間前に沖縄へ旅行しました。"
+  omitted: (無し)
+```
+
+**⟹ 同じ問い合わせが、取り込み方だけで別の答えを返す。**
+
+`recall-runtime.ts` は `effectiveTime = memory.occurredAt ?? memory.recordedAt` で
+`occurredAfter` / `occurredBefore` を当てる。**`occurredAt` を渡さないと `recordedAt`
+（＝取り込んだ今日）に落ちるので、「いつの出来事か」を絞ったつもりの条件が、実際には
+「いつ言われたか」を絞る。**生の会話ログを後から取り込む（backfill）とき、
+**この取り違えは黙って間違う**——2件目のほうがエラーも警告も出さない。
+
+### ⚠ これは想起を良くするものではない
+
+**`hit@1` は改善しない。**これは*嘘をつかなくする*変更である。
+「来月、京都へ出張します」の中の「来月」を読むのは別の話（発話中の時間表現の抽出）であり、
+**このデモの範囲外である**（[ADR 0037](../../docs/decisions/0037-callers-pass-occurred-at.md)）。
+
+### ⚠ 北極星の主測定には触れていない
+
+`src/backfill.ts` は `compare.ts` / `retrieval-quality.ts` / `probe-set.ts` /
+`scenario.ts` / `naive-path.ts` のどれも import しない（`scope.ts` と同じ規律）。
+**`compare` / `retrieval` の数字は本 PR の前後で変わっていない**（実測。ADR 0037）。
+
+---
+
 ## `compare`: 量の比較（このサンプルの主目的）
 
 会話の長さ（filler の往復数）を `[0, 1, 2, 3, 4, 5, 10, 20, 40, 80, 160, 320, 642(turns)]`
