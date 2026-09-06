@@ -752,6 +752,79 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // reinforce の単調性（`PostgresMemoryStore` は ADR 0048、in-memory 実装は
+    // ADR 0049 でそれに揃えた——古い `at` は減衰の起点を巻き戻さない）
+    // -------------------------------------------------------------------
+
+    it("reinforce は減衰の起点を巻き戻さない（ADR 0048/0049）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const hour = 1000 * 60 * 60;
+      const early = new Date(memory.recordedAt.getTime() + hour);
+      const late = new Date(memory.recordedAt.getTime() + 48 * hour);
+
+      // 前提: 新しい at で強化すると実際に動く。これを先に固定しないと、reinforce が
+      // 丸ごと壊れて何も書かなくなっても「巻き戻らない」だけを見る歯は緑のままになる。
+      const forward = await store.reinforce(ctx, memory.id, late);
+      expect(forward.lastReinforcedAt?.getTime()).toBe(late.getTime());
+      const floorAfterLate = forward.decayFloorAt.getTime();
+
+      // 本題: すでに late で強化済みのところへ、それより古い early を渡しても
+      // last_reinforced_at/decay_floor_at は戻らない。
+      const backward = await store.reinforce(ctx, memory.id, early);
+      expect(backward.lastReinforcedAt?.getTime()).toBe(late.getTime());
+      expect(backward.decayFloorAt.getTime()).toBe(floorAfterLate);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.lastReinforcedAt?.getTime()).toBe(late.getTime());
+      expect(reread?.decayFloorAt.getTime()).toBe(floorAfterLate);
+    });
+
+    it("⚠ reinforce は同じ at をもう一度渡すと no-op である（狭義の `<` の境界、ADR 0048/0049）", async () => {
+      // ⚠ ここが `<` と `<=` の境界である。`<=` にすると同じ値を書き直すだけなので、
+      // last_reinforced_at と decay_floor_at だけを見ていては区別が付かない
+      // （どちらも同じ値になる）。区別が付くのは updated_at だけ——「べき等」を
+      // 「同じ値になる」ではなく「行を触らない」の意味で固定する
+      // （`packages/postgres/src/__tests__/memory-store-reinforce-monotonicity.test.ts`
+      // の同種の歯と同じ形）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const hour = 1000 * 60 * 60;
+      // 既定値（null）ではない、具体的な起点を先に作ってから境界を検査する。
+      const at = new Date(memory.recordedAt.getTime() + 48 * hour);
+
+      const first = await store.reinforce(ctx, memory.id, at);
+      // 前提: 1回目は実際に効いている。
+      expect(first.lastReinforcedAt?.getTime()).toBe(at.getTime());
+      // ⚠ プリミティブへ即座に写し取る。in-memory 実装は Map に入れた行オブジェクトへの
+      // 参照をそのまま返すため、`first` を後段の再代入まで保持すると「別の読み取り」では
+      // なく「同じオブジェクトを2回見ている」だけになり、比較が常に真になって歯が死ぬ
+      // （実際にこの取り違えで変異が生き残ることを確認した上での書き方）。
+      const firstDecayFloorAt = first.decayFloorAt.getTime();
+      const firstUpdatedAt = first.updatedAt.getTime();
+
+      // ⚠ `updatedAt` は壁時計を使う（`new Date()`/`now()`）。in-memory の2回の呼び出しは
+      // 同期的に一瞬で終わるため、ガードが外れて2回目も書き込んでしまう実装であっても、
+      // 解像度（ミリ秒）の中に収まって偶然同じ値になりかねない——それでは境界を検査した
+      // ことにならない。実際に時間を進めてから2回目を呼び、「書けば必ず値が変わる」
+      // 状況を作ってから「変わっていない」を確かめる。
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const again = await store.reinforce(ctx, memory.id, at);
+      expect(again.lastReinforcedAt?.getTime()).toBe(at.getTime());
+      expect(again.decayFloorAt.getTime()).toBe(firstDecayFloorAt);
+      // 行そのものを触っていないことは updatedAt で確かめる。
+      expect(again.updatedAt.getTime()).toBe(firstUpdatedAt);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
+    });
+
+    // -------------------------------------------------------------------
     // updateStatus（docs/memory-model.md §5）
     // -------------------------------------------------------------------
 
