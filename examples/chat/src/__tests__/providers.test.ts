@@ -1,12 +1,23 @@
 import { describe, expect, it } from "vitest";
 import { OpenAIEmbeddingProvider, OpenAILLMProvider } from "@mnemora/openai";
-import { DeterministicEmbeddingProvider, DeterministicLLMProvider } from "@mnemora/testkit";
+import type { Cassette } from "@mnemora/testkit";
+import {
+  CASSETTE_FORMAT_VERSION,
+  CassetteRecorder,
+  DeterministicEmbeddingProvider,
+  DeterministicLLMProvider,
+  RecordedEmbeddingProvider,
+  RecordedLLMProvider,
+  RecordingEmbeddingProvider,
+  RecordingLLMProvider,
+} from "@mnemora/testkit";
 import {
   createProviders,
   selectEmbeddingMode,
   selectLLMMode,
   selectProviderMode,
 } from "../providers.js";
+import { formatNoApiCallsNotice } from "../usage-meter.js";
 
 /**
  * `selectProviderMode`/`createProviders` の唯一の分岐（`OPENAI_API_KEY` の有無）に、
@@ -97,5 +108,123 @@ describe("createProviders: LLM/Embedding の個別上書き", () => {
   it("両方擬似物のときは usageMeter を持たない（API を叩く経路が無いため）", () => {
     const providers = createProviders({});
     expect(providers.usageMeter).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR 0051: 第3のモード `"recorded"` の配線
+//
+// ⚠ **この節が無かったために、表示層の不具合が「691テスト緑」のまま出荷されかけた。**
+// `ProviderMode` に `"recorded"` を足したとき、`createProviders` は直したが
+// `describeMode`/`formatNoApiCallsNotice` は直しておらず、記録を再生している run が
+// 画面には「決定的な擬似 provider」と出ていた。**モードを増やす変更は、provider の
+// 構築だけでなく、それを人に見せる経路まで含めて検査する。**
+// ---------------------------------------------------------------------------
+
+/** 最小のカセット。中身の正しさは packages/testkit の歯が見るので、ここでは形だけ。 */
+function minimalCassette(): Cassette {
+  return {
+    version: CASSETTE_FORMAT_VERSION,
+    recordedAt: "2026-09-07T00:00:00.000Z",
+    embedding: {
+      space: { provider: "openai", model: "text-embedding-3-small", dimensions: 256 },
+      entries: {},
+    },
+    llm: { model: "gpt-4o-mini", entries: {} },
+  };
+}
+
+describe("createProviders — recorded モード（ADR 0051）", () => {
+  it('MNEMORA_EMBEDDING="recorded" でカセットが無ければ落ちる（擬似物へ倒れない）', () => {
+    expect(() => createProviders({ MNEMORA_EMBEDDING: "recorded" })).toThrow(
+      /カセットが渡されていない/,
+    );
+  });
+
+  it('MNEMORA_LLM="recorded" でカセットが無ければ落ちる（擬似物へ倒れない）', () => {
+    expect(() => createProviders({ MNEMORA_LLM: "recorded" })).toThrow(/カセットが渡されていない/);
+  });
+
+  it("カセットがあれば Recorded* を返し、擬似物でも本物でもない", () => {
+    const providers = createProviders(
+      { MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
+      { cassette: minimalCassette() },
+    );
+    expect(providers.llmMode).toBe("recorded");
+    expect(providers.embeddingMode).toBe("recorded");
+    expect(providers.llmProvider).toBeInstanceOf(RecordedLLMProvider);
+    expect(providers.embeddingProvider).toBeInstanceOf(RecordedEmbeddingProvider);
+    expect(providers.llmProvider).not.toBeInstanceOf(DeterministicLLMProvider);
+    expect(providers.embeddingProvider).not.toBeInstanceOf(DeterministicEmbeddingProvider);
+  });
+
+  it("recorded は API を叩かないので usageMeter を作らない", () => {
+    const providers = createProviders(
+      { MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
+      { cassette: minimalCassette() },
+    );
+    expect(providers.usageMeter).toBeUndefined();
+  });
+
+  it("recorded の埋め込み空間は、実 OpenAI と同じ空間である（別テーブルに分かれない）", () => {
+    const providers = createProviders(
+      { MNEMORA_EMBEDDING: "recorded" },
+      { cassette: minimalCassette() },
+    );
+    expect(providers.embeddingProvider.space).toEqual({
+      provider: "openai",
+      model: "text-embedding-3-small",
+      dimensions: 256,
+    });
+  });
+
+  it("recorder を渡すと、本物の provider が記録用に包まれる", () => {
+    const providers = createProviders(
+      { OPENAI_API_KEY: "sk-fake-for-test" },
+      { recorder: new CassetteRecorder() },
+    );
+    expect(providers.llmProvider).toBeInstanceOf(RecordingLLMProvider);
+    expect(providers.embeddingProvider).toBeInstanceOf(RecordingEmbeddingProvider);
+  });
+
+  it("recorder を渡さなければ、本物の provider は包まれない", () => {
+    const providers = createProviders({ OPENAI_API_KEY: "sk-fake-for-test" });
+    expect(providers.llmProvider).not.toBeInstanceOf(RecordingLLMProvider);
+    expect(providers.embeddingProvider).not.toBeInstanceOf(RecordingEmbeddingProvider);
+  });
+
+  it('MNEMORA_LLM に未知の値を与えたら、"recorded" を含む一覧を示して落ちる', () => {
+    expect(() => createProviders({ MNEMORA_LLM: "cassette" })).toThrow(/"recorded"/);
+  });
+});
+
+describe("formatNoApiCallsNotice — モードを取り違えない（ADR 0051）", () => {
+  it("擬似 stub の run を「記録の再生」と言わない", () => {
+    const notice = formatNoApiCallsNotice({
+      llmMode: "deterministic",
+      embeddingMode: "deterministic",
+    });
+    expect(notice).toContain("擬似 stub");
+    expect(notice).not.toContain("記録の再生");
+  });
+
+  it("🔴 記録を再生した run を「擬似」と言わない（この取り違えが実際に起きた）", () => {
+    const notice = formatNoApiCallsNotice({ llmMode: "recorded", embeddingMode: "recorded" });
+    expect(notice).toContain("記録の再生");
+    expect(notice).not.toContain("擬似 stub");
+  });
+
+  it("片側だけ recorded の run は、両側を別々に名指しする", () => {
+    const notice = formatNoApiCallsNotice({
+      llmMode: "deterministic",
+      embeddingMode: "recorded",
+    });
+    expect(notice).toContain("LLM=擬似 stub");
+    expect(notice).toContain("埋め込み=記録の再生");
+  });
+
+  it("記録の再生では「値の出所」と「費用」を別の話として明示する", () => {
+    const notice = formatNoApiCallsNotice({ llmMode: "recorded", embeddingMode: "recorded" });
+    expect(notice).toContain("この run 自体は API を叩いていない");
   });
 });

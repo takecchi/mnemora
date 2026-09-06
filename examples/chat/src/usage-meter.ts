@@ -1,4 +1,7 @@
 import OpenAI from "openai";
+// 型だけの import。`providers.ts` が本モジュールを値として import しているが、
+// `import type` は実行時に消えるため循環にならない。
+import type { ProviderMode } from "./providers.js";
 
 /**
  * 本物の OpenAI を使ったとき、実際に何回叩き・何トークン使い・いくら掛かったかを
@@ -208,14 +211,31 @@ export function createUsageMeter(options: UsageMeterOptions): UsageMeter {
 }
 
 /**
- * 擬似 provider で走った場合に画面へ出す明示的な注記。**0 を黙って出さない**——
+ * API を叩かなかった run で画面へ出す明示的な注記。**0 を黙って出さない**——
  * 「呼び出し0回・費用$0」という表示は、一見しただけでは「本物を叩いて0回だった」のか
  * 「そもそも叩いていない」のかが区別できない。後者であることを文字で明言する。
+ *
+ * ⚠ **モードを引数で必ず受け取る**（ADR 0051）。以前は引数を取らず、本文に
+ * 「擬似 provider（@mnemora/testkit）で走っている」と決め打ちで書いていた。
+ * `"recorded"`（記録の再生）が入ったことで**その決め打ちは嘘になった**——記録の再生は
+ * 本物の応答に由来する値であり、意味を持たない stub とは別物である。
+ * **呼び出し側に真実を言わせるため、引数は省略可能にしていない。**
  */
-export function formatNoApiCallsNotice(): string {
+export function formatNoApiCallsNotice(modes: {
+  llmMode: ProviderMode;
+  embeddingMode: ProviderMode;
+}): string {
+  const label = (mode: ProviderMode): string =>
+    mode === "recorded" ? "記録の再生" : mode === "deterministic" ? "擬似 stub" : "本物の OpenAI";
+  const usesRecorded = modes.llmMode === "recorded" || modes.embeddingMode === "recorded";
   return (
     "--- OpenAI API 実測（usage-meter） ---\n" +
-    "擬似 provider（@mnemora/testkit）で走っているため、OpenAI の API は一切叩いていない。" +
-    "呼び出し回数・トークン・費用は計測対象が存在しない（0 ではなく、計測していない）。"
+    `この run では OpenAI の API を一切叩いていない（LLM=${label(modes.llmMode)} / ` +
+    `埋め込み=${label(modes.embeddingMode)}）。` +
+    "呼び出し回数・トークン・費用は計測対象が存在しない（0 ではなく、計測していない）。" +
+    (usesRecorded
+      ? "\n⚠ 「記録の再生」が返す値は本物の API 応答に由来するが、" +
+        "**この run 自体は API を叩いていない**——費用と、値の出所は別の話である。"
+      : "")
   );
 }

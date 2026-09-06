@@ -41,6 +41,10 @@ pnpm --filter @mnemora/example-chat run compare
 
 # tenantId/subjectId のスコープを実演する（後述「scope」節）
 pnpm --filter @mnemora/example-chat run scope
+
+# 意味的関連性を測る（後述「retrieval」節）
+#   OPENAI_API_KEY があれば実 API、無ければ記録した応答を再生する（ADR 0051）
+pnpm --filter @mnemora/example-chat run retrieval
 ```
 
 `OPENAI_API_KEY` を環境に設定すると本物の OpenAI（LLM 抽出・Embedding）で動く。
@@ -500,6 +504,40 @@ arm ごとに別テナントを使う。outbox は `tick()` の `processed === 0
 コードに書いた定数表による概算であり、OpenAI の請求 API から取得した実額ではない)を
 arm ごとに画面へ出す。擬似 provider だけの arm(A)ではその旨を明示する
 (「OpenAI の API は一切叩いていない」)。
+
+### 実キー無しで走らせる——記録した応答の再生（ADR 0051）
+
+`retrieval` は **`OPENAI_API_KEY` が無ければ、記録した実 API の応答を再生する**
+（`examples/chat/cassettes/retrieval.json`）。どちらで走ったかは起動直後に必ず画面へ出す。
+
+```bash
+# 記録する（実キーが要る。arm B と C の両方を走らせて録る）
+DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record
+
+# 再生する（キー不要。arm B/C の provider が "recorded" になる）
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run retrieval
+
+# 記録が実 API から乖離していないか測る（実キーが要る）
+OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify
+```
+
+**記録に無い入力は例外になる。**黙って擬似 provider へ倒れない——一部が意味を持たない値で
+埋まった出力は、どの行が信用できるかを分からなくするため。probe set を変えたら録り直すこと
+（`cassette-coverage.test.ts` が、その食い違いを検査の時点で捕まえる）。
+
+**⚠ 再生が保証するのは「測定の再現性」であって「実 API との一致」ではない。**
+実際に測った差は次のとおり（**ADR 0051 に実測として記録した**）。
+
+| arm | 実 API | 再生 | |
+|---|---|---|---|
+| B: 擬似LLM+本物の埋め込み | 0.714 | **0.714** | ✅ 完全一致（probe 7件すべてで順位が一致） |
+| C: 本物LLM+本物の埋め込み | 0.714 | **0.738** | ❌ ずれる（`gpt-4o-mini` の応答が揺れるため） |
+
+**カセットの arm C は「ある1回のサンプル」であり、「本物の LLM の実力」ではない。**
+
+**⚠⚠ 埋め込みも、ビット単位では再現しない。**同じ日・同じモデルに記録済み152件を投げ直したところ、
+**完全一致したのは5件だけ**（最小コサイン類似度 **0.998646713**）。方向はほぼ保たれるが値は揺れる。
+`verify` はこれを踏まえ、「完全一致したか」と「閾値 0.99 を割ったか」を別々に数える。
 
 ### 実測結果（2026-09-06、本物の `gpt-4o-mini` / `text-embedding-3-small`(256次元)）
 

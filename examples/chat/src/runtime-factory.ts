@@ -12,7 +12,7 @@ import {
   runMigrations,
   sha256Hex,
 } from "@mnemora/postgres";
-import type { EnvLike, ProviderMode } from "./providers.js";
+import type { CreateProvidersOptions, EnvLike, ProviderMode } from "./providers.js";
 import { createProviders } from "./providers.js";
 import type { UsageMeter } from "./usage-meter.js";
 
@@ -52,12 +52,13 @@ export interface ExampleRuntimeHandle {
 export async function createExampleRuntime(
   databaseUrl: string,
   env: EnvLike = process.env,
+  providerOptions: CreateProvidersOptions = {},
 ): Promise<ExampleRuntimeHandle> {
   const client = createPostgresClient(databaseUrl);
   await runMigrations(client.pool);
 
   const { llmProvider, embeddingProvider, mode, llmMode, embeddingMode, usageMeter } =
-    createProviders(env);
+    createProviders(env, providerOptions);
   await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
   const memoryStore = new PostgresMemoryStore(client.db);
