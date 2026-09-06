@@ -170,6 +170,21 @@ export class FakeMemoryStore implements MemoryStore {
         }
       }
     }
+    // 外部キー相当（ADR 0047、`packages/testkit` の `InMemoryMemoryStore.createMemory` と
+    // 同じ理由・同じ検査）: `sourceObservationId`/`supersededById`/`contestedWithId` は
+    // 非 null なら実在する行を指さなければならない。**「存在」だけを見る**——一対一等の
+    // 整合まではここでは踏み込まない。
+    if (input.sourceObservationId && !this.backing.observations.has(input.sourceObservationId)) {
+      throw new Error(
+        `FakeMemoryStore: source observation not found: ${input.sourceObservationId}`,
+      );
+    }
+    if (input.supersededById && !this.backing.memories.has(input.supersededById)) {
+      throw new Error(`FakeMemoryStore: superseded-by memory not found: ${input.supersededById}`);
+    }
+    if (input.contestedWithId && !this.backing.memories.has(input.contestedWithId)) {
+      throw new Error(`FakeMemoryStore: contested-with memory not found: ${input.contestedWithId}`);
+    }
     const now = new Date();
     const memory: Memory = {
       id: nextId("mem"),
@@ -281,6 +296,11 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts?.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
     }
+    // 外部キー相当（ADR 0047）: `supersededById` を渡すなら実在する Memory を指さなければ
+    // ならない。
+    if (opts?.supersededById !== undefined && !this.backing.memories.has(opts.supersededById)) {
+      throw new Error(`FakeMemoryStore: superseded-by memory not found: ${opts.supersededById}`);
+    }
     memory.status = status;
     if (opts?.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -310,6 +330,10 @@ export class FakeMemoryStore implements MemoryStore {
     }
     if (opts.expectedStatus !== undefined && memory.status !== opts.expectedStatus) {
       throw new MemoryStatusConflictError(id, opts.expectedStatus, memory.status);
+    }
+    // 外部キー相当（ADR 0047）: updateStatus と同じ理由・同じ検査。
+    if (opts.supersededById !== undefined && !this.backing.memories.has(opts.supersededById)) {
+      throw new Error(`FakeMemoryStore: superseded-by memory not found: ${opts.supersededById}`);
     }
     memory.status = status;
     if (opts.supersededById !== undefined) {
@@ -352,6 +376,23 @@ export class FakeMemoryStore implements MemoryStore {
     recallId: string,
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    // 外部キー相当（ADR 0047、`packages/testkit` の `InMemoryMemoryStore.recordUsage` と
+    // 同じ理由・同じ検査）: `recall_usages.recall_id → recalls(id)` /
+    // `recall_usages.memory_id → memories(id)`。`memoryIds` が空配列なら Postgres 実装は
+    // クエリを一切発行せず即座に空の結果を返す（`recallId` の実在は問われない）ため、
+    // その早期リターンより後ろで検査する。
+    if (memoryIds.length === 0) {
+      return { insertedMemoryIds: [] };
+    }
+    if (!this.backing.recalls.has(recallId)) {
+      throw new Error(`FakeMemoryStore: recall not found: ${recallId}`);
+    }
+    for (const memoryId of memoryIds) {
+      if (!this.backing.memories.has(memoryId)) {
+        throw new Error(`FakeMemoryStore: memory not found: ${memoryId}`);
+      }
+    }
+
     const insertedMemoryIds: MemoryId[] = [];
     for (const memoryId of memoryIds) {
       const key = `${ctx.tenantId}:${recallId}:${memoryId}`;
@@ -546,6 +587,13 @@ export class FakeVectorStore implements VectorStore {
     memoryId: MemoryId,
     vector: number[],
   ): Promise<void> {
+    // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
+    // `search` は同じ `backing.memories` を真実の源として引いており（クラス doc 参照）、
+    // 書き込み側（upsert）でも同じ非対称を強制する——ADR 0034 が実装した「MemoryStore が
+    // 真実の源」を、書き込み時点でも成り立たせる。
+    if (!this.backing.memories.has(memoryId)) {
+      throw new Error(`FakeVectorStore: memory not found: ${memoryId}`);
+    }
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,
@@ -614,6 +662,12 @@ export class FakeEventStore implements EventStore {
   }
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
+    // 外部キー相当（ADR 0047）: `memory_events.memory_id → memories(id)`（nullable。
+    // `kind = 'events_purged'` の場合のみ NULL が正当）。**NULL は拒まない**——kind を
+    // 問わず、`memoryId` が非 null のときだけ実在を要求する。
+    if (event.memoryId !== null && !this.backing.memories.has(event.memoryId)) {
+      throw new Error(`FakeEventStore: memory not found: ${event.memoryId}`);
+    }
     const stored = buildStoredEvent(ctx, event);
     this.backing.events.push(stored);
     return stored;

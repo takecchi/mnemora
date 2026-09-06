@@ -36,6 +36,34 @@ describeMemoryStoreConformance({
       (event) => event.tenantId === ctx.tenantId && event.memoryId === memoryId,
     );
   },
+  // ADR 0047: `recall_usages.recall_id → recalls(id)` の外部キーを `InMemoryMemoryStore`
+  // にも適用したことで、`recordUsage` の適合テストには実在の recallId が要る
+  // （既定の固定文字列 `"recall-1"` はもう通らない）。`MemoryStore.createRecall` は
+  // 本体がまさに用意している「recall を記録する」書き込み口そのものなので、それを使う
+  // （`memory-store-conformance.ts` の「createRecall は recallId を発行する」の歯と
+  // 同じ最小フィクスチャ）。
+  prepareRecallId: async (ctx) => {
+    if (!latestMemoryStoreForEvents) {
+      throw new Error("prepareRecallId より先に createStore() を呼ぶ必要がある");
+    }
+    return latestMemoryStoreForEvents.createRecall(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId: null,
+      query: { text: "fixture" },
+      budget: null,
+      omitted: [],
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+      explain: { stages: [] },
+      returnedMemoryIds: [],
+    });
+  },
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり
@@ -76,9 +104,35 @@ describeVectorStoreConformance({
   },
 });
 
+// ADR 0047: `memory_events.memory_id → memories(id)` の外部キーを `InMemoryEventStore`
+// にも適用したことで、コンストラクタに `InMemoryMemoryStore` が必須になった
+// （#33 が `InMemoryVectorStore` に対して通したのと同じ形）。`prepareMemoryId` はこの
+// 「まさに同じ `InMemoryMemoryStore` インスタンス」に実在の Memory を作ることで辻褄を
+// 合わせる（`latestMemoryStoreForVectorFixtures`/`prepareMemoryId` と同じパターン）。
+let latestMemoryStoreForEventFixtures: InMemoryMemoryStore | undefined;
+let eventFixtureContentHashCounter = 0;
+
 describeEventStoreConformance({
   name: "in-memory placeholder",
-  createStore: () => new InMemoryEventStore(),
+  createStore: () => {
+    const memoryStore = new InMemoryMemoryStore();
+    latestMemoryStoreForEventFixtures = memoryStore;
+    return new InMemoryEventStore(memoryStore);
+  },
+  prepareMemoryId: async (ctx) => {
+    if (!latestMemoryStoreForEventFixtures) {
+      throw new Error("prepareMemoryId より先に createStore() を呼ぶ必要がある");
+    }
+    eventFixtureContentHashCounter += 1;
+    const memory = await latestMemoryStoreForEventFixtures.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        contentHash: `fixture-hash-event-${eventFixtureContentHashCounter}`,
+      }),
+    );
+    return memory.id;
+  },
 });
 
 // `describeOutboxStoreConformance` の各 `it()` は必ず `createStore()` を先に呼ぶ

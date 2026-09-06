@@ -7,6 +7,7 @@ import type {
   NewMemoryEvent,
 } from "@mnemora/core";
 import { nextId } from "./id.js";
+import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 
 /**
  * `NewMemoryEvent` から永続化済みの `MemoryEvent` を組み立てる。`InMemoryEventStore.append`
@@ -36,12 +37,32 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
  * `InMemoryMemoryStore.outboxJobs` を共有するのと同じパターン）。
  * `InMemoryMemoryStore.updateStatusWithEvent` が積んだイベントを、同じ配列を渡した
  * `InMemoryEventStore` からも `get`/`list` できるようにするため。省略時は独立した
- * 空配列を持つ（既存の `new InMemoryEventStore()` の呼び出しは今まで通り動く）。
+ * 空配列を持つ。
+ *
+ * **`memoryStore` を必須のコンストラクタ引数にしている（省略不可、ADR 0047）。**
+ * `memory_events.memory_id → memories(id)` は外部キー（`kind = 'events_purged'` の
+ * 場合のみ NULL）。`InMemoryVectorStore` が `InMemoryMemoryStore` を必須にしたのと
+ * 同じ理由（ADR 0034）——省略できると「外部キーを実際に検査できる adapter」と
+ * 「検査できない adapter」が同じ緑色の出力になる。
  */
 export class InMemoryEventStore implements EventStore {
-  constructor(private readonly events: MemoryEvent[] = []) {}
+  constructor(
+    private readonly memoryStore: InMemoryMemoryStore,
+    private readonly events: MemoryEvent[] = [],
+  ) {}
 
   async append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent> {
+    // 外部キー相当（ADR 0047）: `memoryId` が非 null なら実在する Memory を指さなければ
+    // ならない。**NULL は拒まない**——`kind = 'events_purged'` は `memoryId` が無い
+    // 正当なケースであり、他の kind であっても NULL 自体を本メソッドは咎めない
+    // （0001_init.sql の CHECK 制約が禁じるのは「events_purged なのに非 NULL」の
+    // 向きだけであり、その逆は禁じていない）。
+    if (event.memoryId !== null) {
+      const memory = await this.memoryStore.get(ctx, event.memoryId);
+      if (!memory) {
+        throw new Error(`InMemoryEventStore: memory not found: ${event.memoryId}`);
+      }
+    }
     const stored = buildStoredMemoryEvent(ctx, event);
     this.events.push(stored);
     return stored;

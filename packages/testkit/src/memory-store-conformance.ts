@@ -53,15 +53,22 @@ export interface MemoryStoreConformanceOptions {
   /** テストケースごとに独立した状態を持つ新しい MemoryStore を返す。 */
   createStore: () => MemoryStore | Promise<MemoryStore>;
   /**
-   * `recordUsage` を呼ぶ前に、有効な `recallId` を用意する必要がある adapter のためのフック。
+   * `recordUsage` を呼ぶ前に、有効な `recallId` を用意するためのフック。**必須。**
    *
    * docs/memory-model.md §10 の DDL は `recall_usages.recall_id` を `recalls(id)` への
    * 外部キーにしている。`MemoryStore` interface 自体には「recall を記録する」操作が無い
    * （それは recall() の実装、roadmap.md 段階4の責務）ため、この適合テストは
    * `recordUsage` を単体で検査する際に使う `recallId` をどう用意するかを adapter に委ねる。
-   * 省略時は固定文字列を使う（外部キーを持たない in-memory 実装向け）。
+   *
+   * **ADR 0047 より前は省略可で、省略時は固定文字列 `"recall-1"` を使っていた**——
+   * 当時は「外部キーを持たない in-memory 実装向け」の既定として正当だったが、ADR 0047 で
+   * `InMemoryMemoryStore`/`FakeMemoryStore` にも `recall_usages` 相当の外部キーを適用した
+   * ため、この既定は「実在しない recallId」を意味するようになった。**省略可のオプションの
+   * ままにしないこと**——`vector-store-conformance.ts` の `prepareMemoryId`
+   * （ADR 0034）と同じ理由: 省略できると「外部キーを実際に検査できる adapter」と
+   * 「検査できない adapter」が同じ緑色の出力になる。
    */
-  prepareRecallId?: (ctx: Ctx) => Promise<RecallId> | RecallId;
+  prepareRecallId: (ctx: Ctx) => Promise<RecallId> | RecallId;
   /**
    * ADR 0031: `updateStatusWithEvent` が実際に `memory_events`（相当）へ書いたイベントを
    * 読み出すためのフック。**必須。**「CAS に弾かれたときイベントが1件も積まれていないこと」
@@ -96,9 +103,7 @@ export interface MemoryStoreConformanceOptions {
  * - `createRecall` が recallId を発行すること（段6、ADR 0008）
  */
 export function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void {
-  const { name, createStore, listEventsForMemory } = options;
-  const prepareRecallId: (ctx: Ctx) => Promise<RecallId> | RecallId =
-    options.prepareRecallId ?? (() => "recall-1");
+  const { name, createStore, listEventsForMemory, prepareRecallId } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
     // -------------------------------------------------------------------
@@ -1374,6 +1379,206 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
       expect(typeof recallId).toBe("string");
       expect(recallId.length).toBeGreaterThan(0);
+    });
+
+    // -------------------------------------------------------------------
+    // 外部キー相当（ADR 0047）: `memories.source_observation_id` /
+    // `superseded_by_id` / `contested_with_id` → 実在する行への参照、
+    // `recall_usages.recall_id`/`memory_id` → 実在する行への参照。
+    //
+    // `packages/postgres/migrations/0001_init.sql` が実際に持つ外部キーであり、
+    // Postgres は既にこれを制約として強制している。ここで検査するのは
+    // 「in-memory 実装も同じ非対称を強制すること」——**存在だけ**を見る（一対一等の
+    // 整合までは踏み込まない、ADR 0047「線を引いた場所」）。
+    //
+    // ⚠ すべて非対称: 「実在しない参照では失敗する」と「実在する参照では成功する」を
+    // 同じ検査の中で見る。片方だけだと「常に失敗する」実装／「常に無視する」実装の
+    // どちらかを緑にしてしまう。
+    //
+    // ⚠ `.rejects.toThrow()` を引数なしで使っている。Postgres 側はドライバの外部キー
+    // 違反（`code: '23503'`、`packages/postgres/src/__tests__/foreign-key-violation.
+    // postgres.test.ts` が識別できる印まで検査する）、in-memory 側はこのリポジトリが
+    // 書いた `Error` であり、メッセージの文言を1つに揃える理由が無い
+    // （`packages/postgres` は Postgres 自身の文言をそのまま漏らす設計——ADR 0047
+    // 「Postgres 側は変更しない」）。ここで測りたいのは「存在しない参照を渡すと必ず失敗し、
+    // 実在する参照では必ず成功する」という一点であり、メッセージの一致ではない。
+    // -------------------------------------------------------------------
+
+    it("createMemory は実在しない sourceObservationId に対して失敗し、実在する observation では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            sourceObservationId: randomUUID(),
+            contentHash: "hash-fk-source-observation-missing",
+          }),
+        ),
+      ).rejects.toThrow();
+
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          contentHash: "hash-fk-source-observation-ok",
+        }),
+      );
+      expect(created.sourceObservationId).toBe(observation.id);
+    });
+
+    it("createMemory は実在しない supersededById に対して失敗し、実在する Memory では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            supersededById: randomUUID(),
+            contentHash: "hash-fk-superseded-by-missing",
+          }),
+        ),
+      ).rejects.toThrow();
+
+      const target = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "hash-fk-superseded-by-target",
+        }),
+      );
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          supersededById: target.id,
+          contentHash: "hash-fk-superseded-by-ok",
+        }),
+      );
+      expect(created.supersededById).toBe(target.id);
+    });
+
+    it("createMemory は実在しない contestedWithId に対して失敗し、実在する Memory では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contestedWithId: randomUUID(),
+            contentHash: "hash-fk-contested-with-missing",
+          }),
+        ),
+      ).rejects.toThrow();
+
+      const target = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "hash-fk-contested-with-target",
+        }),
+      );
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contestedWithId: target.id,
+          contentHash: "hash-fk-contested-with-ok",
+        }),
+      );
+      expect(created.contestedWithId).toBe(target.id);
+    });
+
+    it("updateStatus は実在しない supersededById に対して失敗し、実在する Memory では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+
+      await expect(
+        store.updateStatus(ctx, memory.id, "superseded", { supersededById: randomUUID() }),
+      ).rejects.toThrow();
+
+      const target = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "hash-fk-update-status-superseded-by-target",
+        }),
+      );
+      const updated = await store.updateStatus(ctx, memory.id, "superseded", {
+        supersededById: target.id,
+      });
+      expect(updated.supersededById).toBe(target.id);
+    });
+
+    it("updateStatusWithEvent は実在しない supersededById に対して失敗し、実在する Memory では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "superseded",
+          { supersededById: randomUUID() },
+          buildSupersedeEvent(ctx, memory.id, memory.digest),
+        ),
+      ).rejects.toThrow();
+
+      const target = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "hash-fk-update-status-with-event-superseded-by-target",
+        }),
+      );
+      const { memory: updated } = await store.updateStatusWithEvent(
+        ctx,
+        memory.id,
+        "superseded",
+        { supersededById: target.id },
+        buildSupersedeEvent(ctx, memory.id, memory.digest),
+      );
+      expect(updated.supersededById).toBe(target.id);
+    });
+
+    it("recordUsage は実在しない recallId に対して失敗し、実在する recallId では成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+
+      await expect(store.recordUsage(ctx, randomUUID(), [memory.id])).rejects.toThrow();
+
+      const recallId = await prepareRecallId(ctx);
+      const result = await store.recordUsage(ctx, recallId, [memory.id]);
+      expect(result.insertedMemoryIds).toEqual([memory.id]);
+    });
+
+    it("recordUsage は実在しない memoryId を含むと全体が失敗し、実在する memoryId だけなら成功する（外部キー、ADR 0047）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const recallId = await prepareRecallId(ctx);
+
+      // ⚠ 実在する id と実在しない id を混ぜる。全体が失敗し、実在するほうも
+      // 部分的に挿入されないことまでは、このテストでは踏み込まない
+      // （「存在」だけを見る、ADR 0047の線）。
+      await expect(store.recordUsage(ctx, recallId, [memory.id, randomUUID()])).rejects.toThrow();
+
+      const result = await store.recordUsage(ctx, recallId, [memory.id]);
+      expect(result.insertedMemoryIds).toEqual([memory.id]);
     });
   });
 }

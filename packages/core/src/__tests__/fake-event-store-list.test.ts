@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { NewMemoryEvent } from "../event.js";
+import type { NewMemory } from "../memory.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
@@ -27,17 +28,52 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * `FakeMemoryStore.updateStatusWithEvent` と共有される配列であり、`runtime.test.ts` が
  * `stores.eventStore.events` として直接読んでいる。`list` がこの共有配列を in-place で
  * 並べ替えると `runtime.test.ts` を静かに壊しかねない——最後の歯でそれを検査する。
+ *
+ * ADR 0047: `FakeEventStore.append` は `memoryId` が非 null なら実在の Memory を要求する
+ * （`memory_events.memory_id → memories(id)` の外部キーを fake にも適用したため）。
+ * 以前は固定文字列 `"mem-fixture-1"` を渡していたが、それは実体の無い id になった
+ * ——各 `it()` の先頭で `stores.memoryStore.createMemory(...)` を呼び、その id を渡す。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
-/** `event-store-conformance.ts` の `buildNewMemoryEventFixture` と似た形だが、
- * 意図的に独立したコピー（ファイル冒頭のコメント: `FakeEventStore` はこの系統の
- * 別テストと結合させない。core は testkit に依存しない）。 */
-function newEvent(overrides: Partial<NewMemoryEvent> = {}): NewMemoryEvent {
+let contentHashCounter = 0;
+
+/** `recall-pipeline.test.ts`/`fake-vector-store-filter.test.ts` の `newMemory` と似た形だが、
+ * 意図的に独立したコピー（ファイル冒頭のコメント: `FakeEventStore` はこの系統の別テストと
+ * 結合させない。core は testkit に依存しない）。 */
+function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
+  contentHashCounter += 1;
   return {
     tenantId: "tenant-1",
-    memoryId: "mem-fixture-1",
+    subjectId: null,
+    sourceObservationId: null,
+    extractorVersion: null,
+    content: "本文",
+    contentHash: `hash-${contentHashCounter}`,
+    digest: "digest",
+    digestSource: "llm",
+    provenance: { kind: "imported", batchId: "fixture" },
+    tags: [],
+    occurredAt: null,
+    recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+    lastReinforcedAt: null,
+    strength: 1,
+    halfLifeHours: 720,
+    decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+    embeddingStatus: "pending",
+    ...overrides,
+  };
+}
+
+/** `event-store-conformance.ts` の `buildNewMemoryEventFixture` と似た形だが、
+ * 意図的に独立したコピー（ファイル冒頭のコメント: `FakeEventStore` はこの系統の
+ * 別テストと結合させない。core は testkit に依存しない）。`memoryId` は必須
+ * ——ADR 0047 により実在する Memory の id を渡す必要があるため、既定値を持たせない。 */
+function newEvent(memoryId: string, overrides: Partial<NewMemoryEvent> = {}): NewMemoryEvent {
+  return {
+    tenantId: "tenant-1",
+    memoryId,
     kind: "created",
     actor: { type: "system" },
     digestSnapshot: null,
@@ -54,10 +90,11 @@ const T3 = new Date("2026-01-03T00:00:00.000Z");
 describe("FakeEventStore.list — EventStore.list の契約（ADR 0042）", () => {
   it("at 昇順で返す（挿入順ではない）", async () => {
     const stores = createFakeRuntimeStores();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory());
     // 挿入順は T3, T1, T2 —— at 順（T1, T2, T3）とわざと不一致にする。
-    const e3 = await stores.eventStore.append(ctx, newEvent({ at: T3 }));
-    const e1 = await stores.eventStore.append(ctx, newEvent({ at: T1 }));
-    const e2 = await stores.eventStore.append(ctx, newEvent({ at: T2 }));
+    const e3 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T3 }));
+    const e1 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T1 }));
+    const e2 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T2 }));
 
     const listed = await stores.eventStore.list(ctx, {});
 
@@ -66,12 +103,13 @@ describe("FakeEventStore.list — EventStore.list の契約（ADR 0042）", () =
 
   it("limit は at 昇順に並べ替えた後に適用する（挿入順の先頭 n 件ではない）", async () => {
     const stores = createFakeRuntimeStores();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory());
     // 挿入順の先頭は T3 の行。limit: 1 が挿入順の先頭 n 件を返す実装だと T3 の行が
     // 返ってしまう —— at が最も古い e1 の1件が返ることを検査する（順序ではなく
     // 集合そのものが変わることの歯）。
-    const e3 = await stores.eventStore.append(ctx, newEvent({ at: T3 }));
-    const e1 = await stores.eventStore.append(ctx, newEvent({ at: T1 }));
-    await stores.eventStore.append(ctx, newEvent({ at: T2 }));
+    const e3 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T3 }));
+    const e1 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T1 }));
+    await stores.eventStore.append(ctx, newEvent(memory.id, { at: T2 }));
 
     const limited = await stores.eventStore.list(ctx, { limit: 1 });
 
@@ -81,9 +119,10 @@ describe("FakeEventStore.list — EventStore.list の契約（ADR 0042）", () =
 
   it("since は境界を含む（at >= since）", async () => {
     const stores = createFakeRuntimeStores();
-    await stores.eventStore.append(ctx, newEvent({ at: T1 }));
-    const e2 = await stores.eventStore.append(ctx, newEvent({ at: T2 }));
-    const e3 = await stores.eventStore.append(ctx, newEvent({ at: T3 }));
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory());
+    await stores.eventStore.append(ctx, newEvent(memory.id, { at: T1 }));
+    const e2 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T2 }));
+    const e3 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T3 }));
 
     const listed = await stores.eventStore.list(ctx, { since: T2 });
 
@@ -92,9 +131,10 @@ describe("FakeEventStore.list — EventStore.list の契約（ADR 0042）", () =
 
   it("until は境界を含む（at <= until）", async () => {
     const stores = createFakeRuntimeStores();
-    const e1 = await stores.eventStore.append(ctx, newEvent({ at: T1 }));
-    const e2 = await stores.eventStore.append(ctx, newEvent({ at: T2 }));
-    await stores.eventStore.append(ctx, newEvent({ at: T3 }));
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory());
+    const e1 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T1 }));
+    const e2 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T2 }));
+    await stores.eventStore.append(ctx, newEvent(memory.id, { at: T3 }));
 
     const listed = await stores.eventStore.list(ctx, { until: T2 });
 
@@ -103,13 +143,14 @@ describe("FakeEventStore.list — EventStore.list の契約（ADR 0042）", () =
 
   it("list を呼んだ後も backing.events（store.events）の並びは挿入順のまま変わらない（共有配列を in-place で壊さない）", async () => {
     const stores = createFakeRuntimeStores();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory());
     // ADR 0031: store.events は backing.events を指す getter であり、
     // FakeMemoryStore.updateStatusWithEvent と共有される。list が this.backing.events を
     // 直接 sort() すると、runtime.test.ts が stores.eventStore.events を読む箇所を
     // 静かに壊す——ここではその共有配列そのものが呼び出し後も挿入順のままであることを見る。
-    const e3 = await stores.eventStore.append(ctx, newEvent({ at: T3 }));
-    const e1 = await stores.eventStore.append(ctx, newEvent({ at: T1 }));
-    const e2 = await stores.eventStore.append(ctx, newEvent({ at: T2 }));
+    const e3 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T3 }));
+    const e1 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T1 }));
+    const e2 = await stores.eventStore.append(ctx, newEvent(memory.id, { at: T2 }));
 
     await stores.eventStore.list(ctx, {});
 
