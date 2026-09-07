@@ -99,7 +99,7 @@ function log(label: string, value: unknown): void {
 /** `relname` がどのスキーマに在るかを全部挙げる（同名の同居を見るため）。 */
 async function relationNamespaces(pool: Pool, relnames: string[]): Promise<string[]> {
   const { rows } = await pool.query<{ loc: string }>(
-    `SELECT n.nspname || '.' || c.relname || ':' || c.relkind AS loc
+    `SELECT n.nspname || '.' || c.relname || ':' || c.relkind::text AS loc
        FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE c.relname = ANY($1::text[])
       ORDER BY 1`,
@@ -110,7 +110,7 @@ async function relationNamespaces(pool: Pool, relnames: string[]): Promise<strin
 
 async function constraintNamespaces(pool: Pool, table: string): Promise<string[]> {
   const { rows } = await pool.query<{ loc: string }>(
-    `SELECT n.nspname || '.' || con.conname || ':' || con.contype AS loc
+    `SELECT n.nspname || '.' || con.conname || ':' || con.contype::text AS loc
        FROM pg_constraint con
        JOIN pg_class c ON c.oid = con.conrelid
        JOIN pg_namespace n ON n.oid = con.connamespace
@@ -126,6 +126,29 @@ async function extensionSchemas(pool: Pool): Promise<string[]> {
     `SELECT e.extname || '@' || n.nspname AS loc
        FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
       ORDER BY 1`,
+  );
+  return rows.map((r) => r.loc);
+}
+
+/**
+ * 索引が実際に使っている operator class と、その operator class が在るスキーマ。
+ *
+ * 「`search_path` から `public` を外すと btree_gin の operator class が解けない」
+ * という主張の裏取りに要る——落ちなかった場合、**何がどこから解決されたのか**を
+ * 見ないと「たまたま通った」と区別できない。
+ */
+async function indexOpclasses(pool: Pool, schema: string, index: string): Promise<string[]> {
+  const { rows } = await pool.query<{ loc: string }>(
+    `SELECT n.nspname || '.' || o.opcname AS loc
+       FROM pg_index x
+       JOIN pg_class i ON i.oid = x.indexrelid
+       JOIN pg_namespace ni ON ni.oid = i.relnamespace
+       JOIN LATERAL unnest(x.indclass::oid[]) AS u(cls) ON true
+       JOIN pg_opclass o ON o.oid = u.cls
+       JOIN pg_namespace n ON n.oid = o.opcnamespace
+      WHERE i.relname = $1 AND ni.nspname = $2
+      ORDER BY 1`,
+    [index, schema],
   );
   return rows.map((r) => r.loc);
 }
@@ -158,24 +181,32 @@ describe("🔬 段1: 共有 DB の中に専用スキーマを切って隔離で�
     const pool = probePool();
 
     // --- 前提の記録: この DB が「共有 DB」の条件を満たしていること ---
+    //
+    // ⚠ `to_regclass(...)::text` は**スキーマ名を付けずに**描画される（その関係が
+    // search_path 上で解決できる場合）。1周目の探針はここを
+    // `toBe("public._mnemora_migrations")` と書いて落ちた——実測値は
+    // `"_mnemora_migrations"` だった。描画の都合であって隔離の性質ではないので、
+    // 存在の有無は `IS NOT NULL` で見る。
     const before = await pool.query<{
-      ledger: string | null;
-      memories: string | null;
+      ledger: boolean;
+      memories: boolean;
+      ledger_oid: string | null;
       search_path: string;
       version: string;
     }>(
-      `SELECT to_regclass('public._mnemora_migrations')::text AS ledger,
-              to_regclass('public.memories')::text            AS memories,
-              current_setting('search_path')                  AS search_path,
-              version()                                       AS version`,
+      `SELECT to_regclass('public._mnemora_migrations') IS NOT NULL AS ledger,
+              to_regclass('public.memories')            IS NOT NULL AS memories,
+              to_regclass('public._mnemora_migrations')::oid::text  AS ledger_oid,
+              current_setting('search_path')                        AS search_path,
+              version()                                             AS version`,
     );
     log("precondition", before.rows[0]);
     log("extensions", await extensionSchemas(pool));
 
     // CI のワークフローはテストの前に `run migrate` する。この探針が測りたい条件
     // （本番の台帳が public に在る）が実際に成り立っていることを、まず確かめる。
-    expect(before.rows[0]!.ledger).toBe("public._mnemora_migrations");
-    expect(before.rows[0]!.memories).toBe("public.memories");
+    expect(before.rows[0]!.ledger).toBe(true);
+    expect(before.rows[0]!.memories).toBe(true);
 
     await pool.query(`DROP SCHEMA IF EXISTS ${PROBE_SCHEMA} CASCADE`);
     await pool.query(`CREATE SCHEMA ${PROBE_SCHEMA}`);
@@ -246,13 +277,18 @@ describe("🔬 段1: 共有 DB の中に専用スキーマを切って隔離で�
       `SELECT to_regclass('${PROBE_SCHEMA}.idx_memories_tags')::text AS v`,
     );
     log("gin index in probe schema", gin.rows[0]);
-
-    // 修飾した台帳の判定が、public 側と独立に動くこと。
-    const both = await pool.query<{ pub: string | null; probe: string | null }>(
-      `SELECT to_regclass('public._mnemora_migrations')::text AS pub,
-              to_regclass('${PROBE_SCHEMA}._mnemora_migrations')::text AS probe`,
+    log(
+      "gin index opclasses in probe schema",
+      await indexOpclasses(pool, PROBE_SCHEMA, "idx_memories_tags"),
     );
-    log("qualified ledgers", both.rows[0]);
+
+    // 修飾した台帳の判定が、public 側と独立に動くこと（oid が別なら別の関係である）。
+    const both = await pool.query<{ pub: string | null; probe: string | null }>(
+      `SELECT to_regclass('public._mnemora_migrations')::oid::text AS pub,
+              to_regclass('${PROBE_SCHEMA}._mnemora_migrations')::oid::text AS probe`,
+    );
+    log("qualified ledger oids", both.rows[0]);
+    expect(both.rows[0]!.pub).not.toBe(both.rows[0]!.probe);
 
     // public 側の本番テーブルに手が入っていないこと（探針が共有 DB を壊していない）。
     const publicIntact = await pool.query<{ v: string | null }>(
@@ -284,6 +320,13 @@ describe("🔬 段1: 共有 DB の中に専用スキーマを切って隔離で�
       client.release();
     }
     log("0001_init.sql under <schema> only (no public)", outcome);
+    // 落ちなかった場合、**本当にそのスキーマへ作られたのか**・**gin の operator class は
+    // どこから解決されたのか**を見る（見ないと「たまたま通った」と区別できない）。
+    log("tables under no-public schema", await relationNamespaces(pool, DOMAIN_TABLES));
+    log(
+      "gin index opclasses under no-public schema",
+      await indexOpclasses(pool, PROBE_SCHEMA_NO_PUBLIC, "idx_memories_tags"),
+    );
   });
 
   // 測定5: ALTER TABLE ... SET SCHEMA で既存環境を後から移せるか。
