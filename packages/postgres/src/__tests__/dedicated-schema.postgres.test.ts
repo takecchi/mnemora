@@ -1,12 +1,17 @@
 import { Pool } from "pg";
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingSpaceId } from "@mnemora/core";
-import { buildNewMemoryFixture, buildNewObservationFixture } from "@mnemora/testkit";
+import {
+  buildNewMemoryFixture,
+  buildNewObservationFixture,
+  buildProvenanceFixture,
+} from "@mnemora/testkit";
 import { DEFAULT_MIGRATIONS_DIR, listMigrationFiles, runMigrations } from "../migrate.js";
 import { registerEmbeddingSpace } from "../vector-space.js";
 import { embeddingSpaceIndexName, embeddingSpaceTableName } from "../embedding-space-table.js";
 import { closePostgresClient, createPostgresClient } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
+import { PostgresVectorStore } from "../vector-store.js";
 import { requireDatabaseUrl } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
@@ -55,6 +60,7 @@ const DB_FRESH_EXT = "mnemora_ds_fresh_ext";
 const DB_VECTOR_SPACE = "mnemora_ds_vector_space";
 const DB_CLIENT = "mnemora_ds_client";
 const DB_DEFAULT = "mnemora_ds_default";
+const DB_VECTOR_STORE = "mnemora_ds_vector_store";
 
 const VECTOR_SPACE: EmbeddingSpaceId = {
   provider: "test",
@@ -287,4 +293,115 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
       expect(oid, `public.${table} が存在すること`).not.toBeNull();
     }
   });
+
+  it(
+    "測定7: PostgresVectorStore.search が専用スキーマ経由で" +
+      "「動的識別子 + JOIN + ::vector + ADR 0056 の除外条件」を1文で通し、public 側は一切読まれない",
+    async () => {
+      const pool = await createBlankDatabase(DB_VECTOR_STORE);
+
+      // 既定経路（public）と専用スキーマの両方に同じ一式（migrations + 埋め込みテーブル）を
+      // 用意する。「そちらを読んでいない」ことを言うには、そちらにも読める形が在って
+      // 初めて意味が出る（測定5と同じ理由）。埋め込みテーブルも public 側に無いと、
+      // 後段で public 側を件数0で確認できない（relation does not exist で落ちるだけになる）。
+      await runMigrations(pool);
+      await registerEmbeddingSpace(pool, VECTOR_SPACE);
+
+      const schema = "mnemora_vstore";
+      await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema });
+      await registerEmbeddingSpace(pool, VECTOR_SPACE, { schema });
+
+      const client = createPostgresClient(connectionStringFor(DB_VECTOR_STORE), { schema });
+      try {
+        const memoryStore = new PostgresMemoryStore(client.db);
+        const vectorStore = new PostgresVectorStore(client.db);
+        const ctx: Ctx = { tenantId: "tenant-dedicated-schema-vector-store" };
+
+        // provenanceKind に実際に使える値: migrations/0001_init.sql の
+        // memories_provenance_kind_check は5値
+        // ('stated'|'inferred'|'consolidated'|'reflected'|'imported') を許すが、
+        // 同ファイルのもう1つの CHECK
+        // `CHECK (provenance_kind NOT IN ('stated','inferred') OR source_observation_id IS NOT NULL)`
+        // により 'stated'/'inferred' は実在する Observation を指す source_observation_id を
+        // 要求する。ここでは sourceObservationId を用意しない（buildNewMemoryFixture の
+        // 既定は null）ため、その2値は使わない——testkit の buildProvenanceFixture が
+        // まさにこの理由で 'stated'/'inferred' を throw で弾き、'consolidated'/'reflected'/
+        // 'imported' だけを作る（test-data.ts の doc コメント参照）。ADR 0056 の適合テスト
+        // （vector-store-conformance.ts の excludeProvenanceKinds の歯）と同じ2値
+        // （'imported' = 残す側、'consolidated' = 除外する側）を選ぶ。
+        const excludedMemory = await memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            contentHash: "fixture-hash-vector-store-excluded",
+            provenance: buildProvenanceFixture("consolidated"),
+          }),
+        );
+        const keptMemory = await memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            contentHash: "fixture-hash-vector-store-kept",
+            provenance: buildProvenanceFixture("imported"),
+          }),
+        );
+
+        await vectorStore.upsert(ctx, VECTOR_SPACE, excludedMemory.id, [1, 0, 0]);
+        await vectorStore.upsert(ctx, VECTOR_SPACE, keptMemory.id, [0, 1, 0]);
+
+        // excludeProvenanceKinds 無し: 2件とも返る（前提が成り立っていることの確認）。
+        const bothHits = await vectorStore.search(ctx, VECTOR_SPACE, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId },
+        });
+        const bothIds = bothHits.map((hit) => hit.memoryId);
+        expect(bothIds, "excludeProvenanceKinds 無しなら2件とも返ること（除外側）").toContain(
+          excludedMemory.id,
+        );
+        expect(bothIds, "excludeProvenanceKinds 無しなら2件とも返ること（残す側）").toContain(
+          keptMemory.id,
+        );
+        expect(bothIds, "excludeProvenanceKinds 無しなら2件ちょうどであること").toHaveLength(2);
+
+        // excludeProvenanceKinds: ['consolidated'] → 残す側（imported）1件だけ返る。
+        // この1文には動的識別子（sql.identifier(table)）・memories との JOIN・
+        // 拡張の型 ::vector・ADR 0056 が足した m.provenance_kind <> ALL(...) がすべて載る
+        // ——search_path 方式がこの1文全体に効いていることを、この歯が測る。
+        const filteredHits = await vectorStore.search(ctx, VECTOR_SPACE, [1, 0, 0], {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId, excludeProvenanceKinds: ["consolidated"] },
+        });
+        const filteredIds = filteredHits.map((hit) => hit.memoryId);
+        expect(
+          filteredIds,
+          "excludeProvenanceKinds: ['consolidated'] なら残す側（imported）1件だけ返ること",
+        ).toEqual([keptMemory.id]);
+
+        // 🔴 public 側が読まれていないことを直接示す。ここは client ではなく生の pool で問う
+        // ——pool（admin() ではなく createBlankDatabase が返すこの DB 専用の Pool）は
+        // search_path を一切設定していない（createPostgresClient の schema オプションを
+        // 渡していない生の Pool）ため、常に既定の public を見る。client（search_path の
+        // 先頭が専用スキーマ）で書いた行が万一 public 側にも漏れていたら、この
+        // 「同じ問いを非対称な経路で投げる」ことでしか検出できない。
+        const embeddingTable = embeddingSpaceTableName(VECTOR_SPACE);
+        const publicMemories = await pool.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM public.memories WHERE tenant_id = $1`,
+          [ctx.tenantId],
+        );
+        expect(
+          publicMemories.rows[0]!.n,
+          "public.memories が0件のままであること（search_path 越しに専用スキーマへしか書いていない証拠）",
+        ).toBe("0");
+
+        const publicEmbeddings = await pool.query<{ n: string }>(
+          `SELECT count(*)::text AS n FROM ${qualifiedName("public", embeddingTable)} WHERE tenant_id = $1`,
+          [ctx.tenantId],
+        );
+        expect(
+          publicEmbeddings.rows[0]!.n,
+          "public 側の埋め込みテーブルも0件のままであること",
+        ).toBe("0");
+      } finally {
+        await closePostgresClient(client);
+      }
+    },
+  );
 });
