@@ -664,20 +664,29 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
 
       const readied = await store.setEmbeddingStatus(ctx, memory.id, "ready");
-      // 前提: 'ready' への遷移は実際に効いている。これが無いと、実装が丸ごと壊れて
-      // 何も書かなくなっても「巻き戻らない」だけを見る歯は緑のままになる。
+      // 前提: 'ready' への遷移は実際に効いている。
+      // ⚠ **この行はこの歯の捕獲力を増やしていない**（実測。PR 本文の変異 Mu4b）——
+      // 下の `expect(rolledBack.embeddingStatus).toBe("ready")` は*正の*等値比較なので、
+      // 実装が丸ごと壊れて何も書かなくなった場合（`pending` のまま）にも、この行が
+      // 無くてもそれだけで赤くなる。この行が足しているのは**赤くなる位置**であって、
+      // 赤くなるかどうかではない。⟹ 将来この歯を「巻き戻っていない」だけを見る形
+      // （`.not.toBe("failed")` など）へ弱めたときに、初めてこの行が唯一の捕獲点になる。
       expect(readied.embeddingStatus).toBe("ready");
 
       // ⚠ プリミティブへ即座に写し取る。in-memory 実装は Map に入れた行オブジェクトへの
-      // 参照をそのまま返すため、`readied` を保持したまま後段で比べると「別の読み取り」では
-      // なく「同じオブジェクトを2回見ている」だけになり、比較が常に真になって歯が死ぬ
-      // （reinforce の no-op の歯と同じ取り違え）。
+      // 参照をそのまま返すため、`readied`（＝行そのもの）を保持したまま後段で比べると
+      // 「別の読み取り」ではなく「同じオブジェクトを2回見ている」だけになり、比較が常に
+      // 真になって歯が死ぬ（reinforce の no-op の歯と同じ取り違え）。
+      // **実測: この写し取りを `const readyRow = readied` へ置き換えると、`updatedAt` を
+      // 触ってしまう変異が生き残る**（PR 本文の変異 Mu6''）。⟹ この行は効いている。
       const readyUpdatedAtMs = readied.updatedAt.getTime();
 
       // ⚠ `updatedAt` は壁時計（`new Date()`/`now()`）。2回の呼び出しは一瞬で終わるため、
       // ガードが外れて書き込んでしまう実装でもミリ秒の解像度に収まって偶然同じ値に
       // なりかねない。実際に時間を進め、「書けば必ず値が変わる」状況を作ってから
       // 「変わっていない」を確かめる。
+      // **実測: この `await` を消すと、`updatedAt` を触ってしまう変異が生き残る**
+      // （PR 本文の変異 Mu7）。⟹ この行は効いている。
       await new Promise((resolve) => setTimeout(resolve, 5));
 
       const rolledBack = await store.setEmbeddingStatus(ctx, memory.id, "failed");
@@ -704,7 +713,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
 
       const failed = await store.setEmbeddingStatus(ctx, memory.id, "failed");
-      // 前提: 'failed' への遷移は実際に効いている。
+      // 前提: 'failed' への遷移は実際に効いている（上の歯と同じく、捕獲力ではなく
+      // 赤くなる位置を足す行である。実測は PR 本文の変異 Mu4b）。
       expect(failed.embeddingStatus).toBe("failed");
       // ⚠ 上の歯と同じ理由でプリミティブへ写し取る（参照を持ち回らない）。
       const failedUpdatedAtMs = failed.updatedAt.getTime();
