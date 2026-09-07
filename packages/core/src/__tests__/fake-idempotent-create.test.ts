@@ -107,4 +107,78 @@ describe("FakeMemoryStore の created は自分が作った行だけを指す（
       freshIsDistinctRow: true,
     });
   });
+
+  /**
+   * ADR 0054 の不変条件のうち、**「判定と挿入の間に `await` を挟まない」側**。
+   * 上の2本は「`created` を大域の件数差から導く」壊れ方を捕まえるが、**事前の存在検査 +
+   * `await` 境界**という壊れ方は、鍵が違えば答えが合ってしまうため捕まえない。
+   * ここでは**同じ冪等キーを同時に2回**作らせる（適合スイート側の同名の歯と同じ形）。
+   */
+  it("createObservationWithOutbox は、同じ冪等キーを同時に作っても created を1回しか返さない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const input = observationInput("ext-race");
+
+    const [a, b] = await Promise.all([
+      memoryStore.createObservationWithOutbox(ctx, input, ["extract"]),
+      memoryStore.createObservationWithOutbox(ctx, input, ["extract"]),
+    ]);
+
+    const allJobs = [...a.jobs, ...b.jobs];
+    expect({
+      createdCount: [a.created, b.created].filter(Boolean).length,
+      sameRow: a.observation.id === b.observation.id,
+      totalJobs: allJobs.length,
+      jobTargets: [...new Set(allJobs.map((job) => job.payload.observationId))],
+    }).toEqual({
+      createdCount: 1,
+      sameRow: true,
+      totalJobs: 1,
+      jobTargets: [a.observation.id],
+    });
+  });
+
+  it("createMemoryWithOutbox は、同じ冪等キーを同時に作っても created を1回しか返さない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const observation = await memoryStore.createObservation(ctx, observationInput("ext-for-race"));
+    const input = {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: observation.id,
+      extractorVersion: "v1",
+      content: "本文",
+      contentHash: "hash-race",
+      digest: "要約",
+      digestSource: "llm" as const,
+      provenance: {
+        kind: "stated" as const,
+        sourceObservationId: observation.id,
+        at: "2026-01-01T00:00:00.000Z",
+      },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date(),
+      strength: 1,
+      halfLifeHours: 24,
+      decayFloorAt: new Date(),
+      embeddingStatus: "pending" as const,
+    };
+
+    const [a, b] = await Promise.all([
+      memoryStore.createMemoryWithOutbox(ctx, input, ["embed"]),
+      memoryStore.createMemoryWithOutbox(ctx, input, ["embed"]),
+    ]);
+
+    const allJobs = [...a.jobs, ...b.jobs];
+    expect({
+      createdCount: [a.created, b.created].filter(Boolean).length,
+      sameRow: a.memory.id === b.memory.id,
+      totalJobs: allJobs.length,
+      jobTargets: [...new Set(allJobs.map((job) => job.payload.memoryId))],
+    }).toEqual({
+      createdCount: 1,
+      sameRow: true,
+      totalJobs: 1,
+      jobTargets: [a.memory.id],
+    });
+  });
 });

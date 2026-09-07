@@ -884,7 +884,7 @@ describe("observe の冪等な再送は、同時に別の観測が入っても�
     const seed = await runtime.observe(ctx, {
       kind: "utterance",
       text: "明日東京に出張します",
-      externalId: "utt-adr52",
+      externalId: "utt-adr54",
     });
     expect(seed.extraction).toBe("ok");
     const llmCallsAfterSeed = llmCalls;
@@ -893,12 +893,12 @@ describe("observe の冪等な再送は、同時に別の観測が入っても�
       runtime.observe(ctx, {
         kind: "utterance",
         text: "明日東京に出張します",
-        externalId: "utt-adr52",
+        externalId: "utt-adr54",
       }),
       runtime.observe(ctx, {
         kind: "utterance",
         text: "来週大阪に行きます",
-        externalId: "utt-adr52-other",
+        externalId: "utt-adr54-other",
       }),
     ]);
 

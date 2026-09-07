@@ -358,7 +358,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const ctx: Ctx = { tenantId: "tenant-1" };
       const dupInput = buildNewObservationFixture({
         tenantId: "tenant-1",
-        externalId: "ext-adr52-existing",
+        externalId: "ext-adr54-existing",
       });
 
       const seed = await store.createObservationWithOutbox(ctx, dupInput, ["extract"]);
@@ -368,7 +368,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         store.createObservationWithOutbox(ctx, dupInput, ["extract"]),
         store.createObservationWithOutbox(
           ctx,
-          buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-adr52-fresh" }),
+          buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-adr54-fresh" }),
           ["extract"],
         ),
       ]);
@@ -387,6 +387,51 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         freshCreated: true,
         freshJobTargets: [fresh.observation.id],
         freshIsDistinctRow: true,
+      });
+    });
+
+    /**
+     * ADR 0054 の不変条件のうち、**「判定と挿入の間に `await` を挟まない」側**を測る歯。
+     *
+     * 上の歯（別の行の同時作成）は「`created` を大域の件数差から導く」壊れ方を捕まえるが、
+     * **判定と挿入の間に `await` 境界を入れる**壊れ方は捕まえない——鍵が違えば、
+     * 事前の存在検査でも答えが合ってしまうからである。
+     *
+     * こちらは**同じ冪等キーを同時に2回**作らせる。判定と挿入が1つの同期区間に
+     * 閉じていなければ、両方が「存在しない」を見てから両方が挿入・両方が `created: true` を
+     * 返し、**同じ observation に対して `extract` ジョブが2件積まれる**（= LLM が2回叩かれる）。
+     *
+     * ⚠ どちらの呼び出しが作成側になるかは契約が決めていない。だから
+     * **「片方だけが `created`」という非対称そのもの**を assert する（個々の呼び出しの
+     * `created` を固定値と比べない）。ジョブの総数と宛先も併せて見る——件数だけだと
+     * 「2件のうち1件が created」の和が合う変異を見逃す。
+     */
+    it("createObservationWithOutbox は、同じ冪等キーを同時に作っても created を1回しか返さない（ADR 0054）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const input = buildNewObservationFixture({
+        tenantId: "tenant-1",
+        externalId: "ext-adr54-race",
+      });
+
+      const [a, b] = await Promise.all([
+        store.createObservationWithOutbox(ctx, input, ["extract"]),
+        store.createObservationWithOutbox(ctx, input, ["extract"]),
+      ]);
+
+      const allJobs = [...a.jobs, ...b.jobs];
+      expect({
+        createdCount: [a.created, b.created].filter(Boolean).length,
+        sameRow: a.observation.id === b.observation.id,
+        totalJobs: allJobs.length,
+        jobTargets: [...new Set(allJobs.map((job) => job.payload.observationId))],
+        rowIsReadable: (await store.getObservation(ctx, a.observation.id))?.id,
+      }).toEqual({
+        createdCount: 1,
+        sameRow: true,
+        totalJobs: 1,
+        jobTargets: [a.observation.id],
+        rowIsReadable: a.observation.id,
       });
     });
 
@@ -664,7 +709,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         tenantId: "tenant-1",
         sourceObservationId: observation.id,
         extractorVersion: "v1",
-        contentHash: "hash-adr52-existing",
+        contentHash: "hash-adr54-existing",
       });
 
       const seed = await store.createMemoryWithOutbox(ctx, dupInput, ["embed"]);
@@ -678,7 +723,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
             tenantId: "tenant-1",
             sourceObservationId: observation.id,
             extractorVersion: "v1",
-            contentHash: "hash-adr52-fresh",
+            contentHash: "hash-adr54-fresh",
           }),
           ["embed"],
         ),
@@ -698,6 +743,47 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         freshCreated: true,
         freshJobTargets: [fresh.memory.id],
         freshIsDistinctRow: true,
+      });
+    });
+
+    /**
+     * ADR 0054: `createMemoryWithOutbox` 側の、同じ冪等キーの同時作成
+     * （上の `createObservationWithOutbox` の歯と同じ理由・同じ形。そちらの doc を参照）。
+     * こちらの冪等キーは `(sourceObservationId, extractorVersion, contentHash)` である。
+     * 2回積まれれば **同じ記憶に対して `embed` ジョブが重複する**（埋め込み API が2回叩かれる）。
+     */
+    it("createMemoryWithOutbox は、同じ冪等キーを同時に作っても created を1回しか返さない（ADR 0054）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const input = buildNewMemoryFixture({
+        tenantId: "tenant-1",
+        sourceObservationId: observation.id,
+        extractorVersion: "v1",
+        contentHash: "hash-adr54-race",
+      });
+
+      const [a, b] = await Promise.all([
+        store.createMemoryWithOutbox(ctx, input, ["embed"]),
+        store.createMemoryWithOutbox(ctx, input, ["embed"]),
+      ]);
+
+      const allJobs = [...a.jobs, ...b.jobs];
+      expect({
+        createdCount: [a.created, b.created].filter(Boolean).length,
+        sameRow: a.memory.id === b.memory.id,
+        totalJobs: allJobs.length,
+        jobTargets: [...new Set(allJobs.map((job) => job.payload.memoryId))],
+        rowIsReadable: (await store.get(ctx, a.memory.id))?.id,
+      }).toEqual({
+        createdCount: 1,
+        sameRow: true,
+        totalJobs: 1,
+        jobTargets: [a.memory.id],
+        rowIsReadable: a.memory.id,
       });
     });
 
