@@ -25,10 +25,15 @@ import {
  * `schema-namespace.ts` とそこに乗る `migrate.ts` / `vector-space.ts` / `client.ts` の
  * 分岐を、**DB 無しで**検査する歯。
  *
- * ⚠ この器に PostgreSQL は無い。DB を要する検査（実際に `runMigrations` /
- * `registerEmbeddingSpace` を専用スキーマへ通す・`0001_init.sql` が本当に流れることを
- * 見る等）はここでは書かない——別の担当が本物の Postgres に対して書く
- * （`schema-namespace-probe.postgres.test.ts` はその前段の測定であり、このファイルとは別物）。
+ * ⚠ DB を要する検査（実際に `runMigrations` / `registerEmbeddingSpace` を専用スキーマへ
+ * 通す・`0001_init.sql` が本当に流れる・`search_path` が DML に効くことを見る等）は
+ * **ここには書かない。**それは `dedicated-schema.postgres.test.ts` が持つ。
+ * このファイルが測るのは、DB を持たない環境でも走る純関数と設定の組み立てだけである。
+ *
+ * ⚠ **この分割は「片方が緑なら他方も正しい」を意味しない。**ここの歯は
+ * `qualify` が正しい**文字列**を作ることまでしか見ていない——その文字列を
+ * PostgreSQL が期待どおりに解釈するかは、`dedicated-schema.postgres.test.ts` が
+ * 本物の DB に対してしか測れない。
  */
 
 describe("qualify / qualifiedLiteral", () => {
