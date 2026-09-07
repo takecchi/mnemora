@@ -94,7 +94,7 @@ export class FakeMemoryStore implements MemoryStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
   /**
-   * ADR 0052: 判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから出す
+   * ADR 0054: 判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから出す
    * （`InMemoryMemoryStore.createObservationIdempotent` と同じ形・同じ理由）。
    */
   private createObservationIdempotent(
@@ -173,7 +173,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0052: 冪等キーの判定と挿入を1つの同期区間に閉じる
+   * ADR 0054: 冪等キーの判定と挿入を1つの同期区間に閉じる
    * （`InMemoryMemoryStore.createMemoryIdempotent` と同じ形・同じ理由）。
    */
   private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {

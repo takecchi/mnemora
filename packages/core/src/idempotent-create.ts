@@ -15,7 +15,7 @@ export interface IdempotentCreateResult<T> {
 }
 
 /**
- * ADR 0052: 擬似実装（`InMemoryMemoryStore` / `FakeMemoryStore`）が `created` を導くための
+ * ADR 0054: 擬似実装（`InMemoryMemoryStore` / `FakeMemoryStore`）が `created` を導くための
  * **唯一の形**。
  *
  * 🔴 守る不変条件: **`created` は、挿入するかどうかを決めたその判定そのものから出る。**

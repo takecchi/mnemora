@@ -338,7 +338,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     /**
-     * ADR 0052: `created` は、**この呼び出し自身が行を作ったか**を表す。
+     * ADR 0054: `created` は、**この呼び出し自身が行を作ったか**を表す。
      *
      * 上の「冪等な再送」の歯は逐次に2回呼ぶだけなので、`created` を「呼び出しの前後で
      * store 全体の件数が増えたか」という**大域の差分**から導いている実装でも通ってしまう
@@ -353,7 +353,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
      * created」という和が合ってしまう変異を見逃すため、**どのジョブがどの observation を
      * 指しているか**まで assert する。
      */
-    it("createObservationWithOutbox は、別の行の作成が同時に起きても created を取り違えない（ADR 0052）", async () => {
+    it("createObservationWithOutbox は、別の行の作成が同時に起きても created を取り違えない（ADR 0054）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       const dupInput = buildNewObservationFixture({
@@ -648,12 +648,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     /**
-     * ADR 0052: `createMemoryWithOutbox` 側の同じ契約。上の
+     * ADR 0054: `createMemoryWithOutbox` 側の同じ契約。上の
      * `createObservationWithOutbox` の歯と同じ理由・同じ形（そちらの doc を参照）。
      * こちらは冪等キーが `(sourceObservationId, extractorVersion, contentHash)` なので、
      * **同じ observation に紐づく別の contentHash** を同時に作ることで大域の件数を動かす。
      */
-    it("createMemoryWithOutbox は、別の行の作成が同時に起きても created を取り違えない（ADR 0052）", async () => {
+    it("createMemoryWithOutbox は、別の行の作成が同時に起きても created を取り違えない（ADR 0054）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       const observation = await store.createObservation(

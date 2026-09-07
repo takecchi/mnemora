@@ -3,7 +3,7 @@ import type { Ctx } from "../ctx.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * ADR 0052: 擬似実装の `created` は、**この呼び出し自身が行を作ったか**を表す。
+ * ADR 0054: 擬似実装の `created` は、**この呼び出し自身が行を作ったか**を表す。
  *
  * `packages/testkit` の適合スイートは `InMemoryMemoryStore` と（CI では）
  * `PostgresMemoryStore` に対して同じ契約を測るが、`FakeMemoryStore`
@@ -26,7 +26,7 @@ function observationInput(externalId: string) {
   };
 }
 
-describe("FakeMemoryStore の created は自分が作った行だけを指す（ADR 0052）", () => {
+describe("FakeMemoryStore の created は自分が作った行だけを指す（ADR 0054）", () => {
   it("createObservationWithOutbox は、別の行の作成が同時に起きても created を取り違えない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const dupInput = observationInput("ext-existing");
@@ -68,7 +68,11 @@ describe("FakeMemoryStore の created は自分が作った行だけを指す（
       content: "本文",
       digest: "要約",
       digestSource: "llm" as const,
-      provenance: { kind: "stated" as const, observationId: observation.id },
+      provenance: {
+        kind: "stated" as const,
+        sourceObservationId: observation.id,
+        at: "2026-01-01T00:00:00.000Z",
+      },
       tags: [],
       occurredAt: null,
       recordedAt: new Date(),

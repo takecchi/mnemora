@@ -858,7 +858,7 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
   });
 });
 
-describe("observe の冪等な再送は、同時に別の観測が入っても抽出をやり直さない（ADR 0052）", () => {
+describe("observe の冪等な再送は、同時に別の観測が入っても抽出をやり直さない（ADR 0054）", () => {
   /**
    * `handleExtractableObservation` は `createObservationWithOutbox` の `created` だけを見て
    * 「抽出をやり直すか」を決める。擬似実装が `created` を大域の件数差から導いていると、

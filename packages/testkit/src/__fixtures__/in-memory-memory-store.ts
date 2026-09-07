@@ -60,7 +60,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   readonly outboxJobs: OutboxJobRecord[] = [];
 
   /**
-   * ADR 0052: 「既存を引く」と「挿入する」を1つの同期区間に閉じ、`created` をその判定
+   * ADR 0054: 「既存を引く」と「挿入する」を1つの同期区間に閉じ、`created` をその判定
    * そのものから出す。**`await` を挟まない**——挟むと判定と挿入の間に他の呼び出しの
    * 同期区間が入り、`created` が別の書き込みの影響を受ける。
    */
@@ -140,7 +140,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0052: 冪等キーの判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから
+   * ADR 0054: 冪等キーの判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから
    * 出す（`createObservationIdempotent` と同じ理由）。
    */
   private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
