@@ -245,6 +245,111 @@
     （本 ADR で追加した3本）が同じ変異を確実に捕まえることを確認済みであり
     （下の変異試験の結果参照）、実害の中心はそちらで塞がれている。
 
+- **⭐ 変異試験の結果**:
+
+  **撃った環境と門**: この節の測定は `feat/exclude-provenance-kinds-in-ann` の
+  `b281fd3` に対して、**手元**（PostgreSQL / `DATABASE_URL` の無い作業環境）で行った。
+  回した門は `pnpm run typecheck` / `pnpm run lint` / `pnpm run test`（ルートの test 門。
+  DB 段は `DATABASE_URL` が無いため実行されず、門自身がそう報告する。ADR 0015）。
+  **基準線**: `packages/core` 298 tests / 28 files、`packages/testkit` 150 tests / 2 files、
+  ルート直下 7 tests / 3 files。**下の各行で「走ったテスト数」が基準線と一致していることは、
+  歯が走る前に木が壊れていない（変異が型検査や import を落としていない）ことの証拠である。**
+
+  **各変異は1本ずつ当て、当てるたびに `git diff --stat` が空でないことを門の*前*に確かめ、
+  測り終えたら `git checkout --` で復元して木が清いことを確かめた。**
+
+  **⭐ 本 ADR が新しく足した歯には、それぞれ「その歯だけが赤くなる」変異が在る:**
+
+  | # | 当てた変異（置換の前後は下に逐語） | 赤くなった歯 | 走ったテスト数 |
+  |---|---|---|---|
+  | 1 | 段1の filter から `excludeProvenanceKinds` の欄を落とす | **配線の歯の1本目**（新規） | 298（基準線と一致。1 failed / 297 passed） |
+  | 2 | in-memory の除外を「`status` の絞りが在るときだけ」に狭める | **適合テストの歯A**（新規） | 150（1 failed / 149 passed） |
+  | 3 | in-memory で空配列を「全件除外」に取り違える（`status: []` との混同） | **適合テストの歯B**（新規） | 150（1 failed / 149 passed） |
+  | 4 | in-memory の除外を「`status` の絞りが無いときだけ」に狭める | **適合テストの歯C**（新規） | 150（1 failed / 149 passed） |
+
+  **4本とも「1本だけ赤」であり、赤の出どころは4本ともこの適合テスト／配線の歯自身の
+  `expect(...)` である**（`AssertionError` に `Expected` / `Received` が出る形。
+  フレームワークのガードでもヘルパ内の生 `throw` でもない）。逐語:
+
+  - 変異1（`recall-runtime.ts`、段1呼び出しから1行削除）:
+    削除したのは `excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,`。
+    赤: `excludeProvenanceKinds を渡すと VectorStore.search の opts.filter.excludeProvenanceKinds に渡る`。
+    失敗メッセージ逐語: `AssertionError: expected undefined to deeply equal [ 'inferred' ]`。
+    **配線の歯の2本目（既定が no-op であること）は緑のまま**——`undefined` はこの歯が
+    許す形だからであり、正しい振る舞いである。
+  - 変異2（`in-memory-vector-store.ts`）: `opts.filter.excludeProvenanceKinds !== undefined &&`
+    の**前**に `opts.filter.status !== undefined &&` を足す。
+    赤: `filter.excludeProvenanceKinds: 配列に在る kind の Memory は返らず、無い kind の Memory は返る`。
+    失敗メッセージ逐語: `AssertionError: expected [ 'mem-182', 'mem-183' ] to not include 'mem-182'`。
+  - 変異3（`in-memory-vector-store.ts`）:
+    `opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)` を
+    `(opts.filter.excludeProvenanceKinds.length === 0 || opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind))`
+    に置き換える。赤: `filter.excludeProvenanceKinds: [] は no-op（status: [] とは非対称——両方とも返る）`。
+    失敗メッセージ逐語: `AssertionError: expected [] to include 'mem-184'`。
+    **⟹ 上の「意味論の非対称」節が言葉で書いた区別を、この歯が実際に噛んでいる。**
+  - 変異4（`in-memory-vector-store.ts`）: 変異2と同じ位置に、向きを逆にした
+    `opts.filter.status === undefined &&` を足す。
+    赤: `filter.excludeProvenanceKinds は他の filter（status）と AND になる`。
+    失敗メッセージ逐語: `AssertionError: expected [ 'mem-186', 'mem-187' ] to not include 'mem-187'`。
+
+  **⭐ 加えて、`InMemoryVectorStore` の除外の向きを反転する変異**
+  （`opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)` →
+  `!opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)`）
+  **では、上の3本が同時に赤くなる**（150 tests、3 failed / 147 passed。
+  1本目の逐語: `AssertionError: expected [ 'mem-182' ] to not include 'mem-182'`）。
+  ⟹ 上の「引き受ける負債」節が `InMemoryVectorStore` 側について書いた「適合テストの歯が
+  同じ変異を確実に捕まえる」は、この測定による。
+
+- **⭐ 生き残った変異と、その理由（段1と段2が互いを庇っている）**:
+
+  **上の「引き受ける負債」節が記録した2件は、本 ADR の後任が独立に再現した。**
+  どちらも `pnpm run typecheck` / `pnpm run lint` / `pnpm run test` の**3門すべてを素通り**し、
+  走ったテスト数は基準線と完全に一致した（`packages/core` 298 / `packages/testkit` 150 /
+  ルート 7、いずれも 0 failed）。
+
+  | # | 当てた変異 | 結果 |
+  |---|---|---|
+  | 5 | 段2の除外集合を常に空にする: `const excludeKinds = new Set(validatedQuery.excludeProvenanceKinds ?? []);` → `const excludeKinds = new Set<string>();` | **生き残る** |
+  | 6 | `FakeVectorStore`（段1）の除外の向きを反転する: `opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)` → `!opts.filter.excludeProvenanceKinds.includes(memory.provenance.kind)` | **生き残る** |
+
+  **⚠ どちらも等価変異ではない——プログラムの意味は変わっている。**変異5では段2の
+  多層防御が消え、変異6では段1が*除外すべきでないほう*を落とす。**歯が無いだけである。**
+
+  **⭐ そして、この2本を*同時に*当てると赤くなる**——`recall-pipeline.test.ts` の既存の歯
+  `D5: 既定で provenance.kind='inferred' を含める。除外オプション > excludeProvenanceKinds: ['inferred'] を渡すと除外される`
+  が落ちる（298 tests、1 failed / 297 passed。逐語:
+  `AssertionError: expected [ { memoryId: 'mem-118', …(4) } ] to have a length of +0 but got 1`）。
+
+  **⟹ 段1と段2は互いを庇っている。** D5 が使うシナリオでは、段1を壊しても段2が結果を救い、
+  段2を壊しても段1が結果を救う。**⟹ このリポジトリの既存の歯は、`recall()` の段1の絞りと
+  段2の絞りを*独立には*検査していない。**「多層防御が実際に効いている」ことは、
+  片方を壊す変異では観測できない。これは新しい欠陥ではなく、ADR 0034 が `subjectId` に
+  ついて記録した現象と同じ族であり、`excludeProvenanceKinds` もその仲間に入ったという追認である。
+  **本 ADR はこの穴を塞いでいない**——塞ぐには段1がわざと絞らない `VectorStore` を使って
+  段2だけを検査する歯が要り、それは別の作業として残す。
+
+  **⚠ 変異5について1点、測り方の注記**: 段2の行
+  `if (excludeKinds.has(memory.provenance.kind)) continue;` を*削除*する形で当てると、
+  `excludeKinds` が未使用になり `@typescript-eslint/no-unused-vars` で `pnpm run lint` が
+  赤くなる。**これは歯が振る舞いを捕まえたのではなく、変異の当て方が残した副作用である。**
+  ⟹ 上の表の変異5は、変数が使われたまま振る舞いだけが消える形（除外集合を常に空にする）に
+  撃ち直したものであり、この形では lint も緑である。
+
+- **⚠ この変異試験が測っていない範囲**:
+
+  - **`packages/postgres` の歯A・歯B（`vector-search-provenance.test.ts`）には変異を
+    当てていない。** この作業環境に PostgreSQL / `DATABASE_URL` が無いため、この2本は
+    そもそも手元で走らない（CI が唯一の実行環境である）。**⟹ この2本が何かを噛むかは、
+    まだ測られていない。**
+  - **適合テスト（`vector-store-conformance.ts`）の歯3本は、`InMemoryVectorStore` に対する
+    実行でしか撃っていない。** 同じ3本は CI で `PostgresVectorStore` に対しても走るが、
+    **`PostgresVectorStore` 側の実装（`m.provenance_kind <> ALL($x::text[])` と、
+    空配列のときに条件を出さない `length > 0` の番人）には変異を当てていない。**
+  - **網羅的な変異試験ツール（stryker 等）は使っていない。**上の7本は手で選んだものであり、
+    **「これ以外に生き残る変異が無い」ことは示していない。**
+  - 上のどの測定も、**CI の4ジョブが緑であること**とは別の話である——変異試験は歯の質を
+    測るものであり、実装の正しさを CI の代わりに保証するものではない。
+
 - **これが覆るとしたら**:
 
   - `period` を段1で絞りたいという要求が実測で裏付けられたら（ADR 0023 の「これが
