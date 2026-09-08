@@ -1,0 +1,53 @@
+-- 0003_contested_with_index.sql
+--
+-- `memories.contested_with_id`（0001_init.sql）は memories(id) への自己参照 FK だが、
+-- この列を先頭に置いた索引が一本も無かった。`idx_memories_contested` は
+-- `(tenant_id, status) WHERE status = 'contested'` であり、`status` の索引であって
+-- `contested_with_id` の索引ではない——名前に釣られて「これで足りている」と読まないこと。
+--
+-- 親側（memories）の行を DELETE するたびに、Postgres の参照整合性トリガーは
+-- おおむね次の形のクエリを発行し、「この行を contested_with_id として指している行が
+-- 無いか」を確かめる:
+--
+--   SELECT 1 FROM ONLY "public"."memories" x
+--     WHERE $1 OPERATOR(pg_catalog.=) "contested_with_id" FOR KEY SHARE OF x
+--
+-- **この WHERE に tenant_id は一切現れない。** 索引が無い（あるいは先頭列が
+-- contested_with_id でない）と、この問い合わせのたびに memories 全体の Seq Scan が
+-- 走る——CI の実測（packages/postgres/src/__tests__/contested-with-index.test.ts）で
+-- 実際に Seq Scan になることを確認した。
+--
+-- idx_memories_superseded_by（(tenant_id, superseded_by_id) の形）を真似しない:
+-- あちらは「この Memory は何に置き換わったか」を tenant_id 前提で引く
+-- アプリケーション側の検索を supply するための索引であり、RI チェックの供給先ではない。
+-- RI チェックの WHERE には tenant_id が出てこないため、tenant_id を先頭に置いた索引は
+-- この問い合わせに対して先頭列を活かせず（tenant_id で絞り込めない）、実質的に
+-- 索引全体を舐めるのと変わらない。**索引は contested_with_id を先頭に置かなければ
+-- 意味がない。**
+--
+-- 部分索引（WHERE contested_with_id IS NOT NULL）にするか、無条件の単一列索引にするかは
+-- 「どちらがこの RI クエリに対して実際にプランナから選ばれるか」で決めた（CI の EXPLAIN
+-- 実測）。`$1 = contested_with_id` という strict な等号演算子は、一致する行の
+-- contested_with_id が NULL ではあり得ないことを含意する——プランナはこの含意を使って
+-- 部分索引の述語 `contested_with_id IS NOT NULL` を証明できる。実測でこの部分索引が
+-- 実際に選ばれることを確認できたため、より小さい部分索引を採用する
+-- （idx_memories_superseded_by・idx_memories_contested と同じ「NULL が多数派の列は
+-- 部分索引にする」という、このスキーマの規約にも合う）。
+--
+-- 追加の列（INCLUDE 等）は持たせない: RI クエリは `SELECT 1 ... FOR KEY SHARE OF x` で
+-- 行ロックを取る必要があり、ロックは常にヒープへのアクセスを要求する——Index Only Scan
+-- にはならないため、他の列を索引に含めても段1の絞り込み以上の効果はない。
+-- また grep で確認した限り、アプリケーション側（packages/postgres/src/memory-store.ts・
+-- mapping.ts）は contested_with_id を INSERT の列挙・SELECT の行マッピングに使うのみで、
+-- WHERE / JOIN の絞り込みには使っていない——追加の列を持たせる理由が無い。
+--
+-- **`CREATE INDEX CONCURRENTLY` は使わない**（使えない）: `packages/postgres/src/migrate.ts`
+-- は各マイグレーションファイルを丸ごと1つのトランザクション（BEGIN/COMMIT）で包んでおり、
+-- `CONCURRENTLY` はトランザクション内では実行できない。この制約に触れずに済ませるため、
+-- 通常の `CREATE INDEX` を使う（実運用でこの索引を後追いで当てる場合の一時的なロックは
+-- 引き受ける。CONCURRENTLY 版の migrate.ts を求めるなら、それは本 PR の権限の外——
+-- PR 本文に書いて委ねる）。
+
+CREATE INDEX idx_memories_contested_with
+  ON memories (contested_with_id)
+  WHERE contested_with_id IS NOT NULL;
