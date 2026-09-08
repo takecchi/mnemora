@@ -74,14 +74,10 @@ export class PostgresVectorStore implements VectorStore {
     // （`>=`/`<=`）——`VectorFilter.occurredAfter`/`occurredBefore` の doc、および
     // 既存の厳密経路（`memory-store.ts` の `aggregateScope`）と同じ境界の含み方に揃える。
     if (opts.filter.occurredAfter !== undefined) {
-      conditions.push(
-        sql`COALESCE(m.occurred_at, m.recorded_at) >= ${opts.filter.occurredAfter}`,
-      );
+      conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) >= ${opts.filter.occurredAfter}`);
     }
     if (opts.filter.occurredBefore !== undefined) {
-      conditions.push(
-        sql`COALESCE(m.occurred_at, m.recorded_at) <= ${opts.filter.occurredBefore}`,
-      );
+      conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) <= ${opts.filter.occurredBefore}`);
     }
     // ADR 0056: 空配列は no-op（`VectorFilter.excludeProvenanceKinds` の doc 参照）。
     // `length > 0` で番わないと `<> ALL('{}')` という無駄な条件が出る——常に真になり実害は
