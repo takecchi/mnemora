@@ -1,4 +1,4 @@
--- 0003_contested_with_index.sql
+-- 0004_contested_with_index.sql
 --
 -- `memories.contested_with_id`（0001_init.sql）は memories(id) への自己参照 FK だが、
 -- この列を先頭に置いた索引が一本も無かった。`idx_memories_contested` は

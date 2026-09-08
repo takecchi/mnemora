@@ -18,7 +18,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  *
  * この WHERE には tenant_id が一切現れない。索引が無いと、この問い合わせのたびに
  * memories 全体の Seq Scan が走る。本ファイルはこれを実測し、
- * `migrations/0003_contested_with_index.sql` を足した後に Index Scan へ変わることを
+ * `migrations/0004_contested_with_index.sql` を足した後に Index Scan へ変わることを
  * `EXPLAIN` で検査する。
  *
  * **このファイルが検査しないこと（マネージャー指摘、意図的な不採用）**:
@@ -52,13 +52,13 @@ const ROW_COUNT = 100_000;
 const CONTESTED_PAIR_COUNT = 1_000; // 2,000行 = 全体の2%
 
 /**
- * `migrations/0003_contested_with_index.sql` を後から直したときにこのファイルの
+ * `migrations/0004_contested_with_index.sql` を後から直したときにこのファイルの
  * 「作り直し」だけが古い定義のまま静かにずれないよう、DDL はここに書き写さず
  * マイグレーションファイルからそのまま読む
  * （outbox-claim-lease-index.test.ts の `MIGRATION_0002_SQL` と同じ作法）。
  */
-const MIGRATION_0003_SQL = readFileSync(
-  join(DEFAULT_MIGRATIONS_DIR, "0003_contested_with_index.sql"),
+const MIGRATION_0004_SQL = readFileSync(
+  join(DEFAULT_MIGRATIONS_DIR, "0004_contested_with_index.sql"),
   "utf8",
 );
 
@@ -173,7 +173,7 @@ describe("idx_memories_contested_with（memories.contested_with_id の自己参�
     // であり「前」の世界には存在しない——migrate 済みの DB からこのテストの間だけ
     // 一時的に落とす。`resetTestDatabase()` はテーブルの中身を TRUNCATE するだけで
     // スキーマ（索引を含む）は再作成しないため、**必ず `finally` で元の定義
-    // （`migrations/0003_contested_with_index.sql` と同一の DDL）を作り直す**
+    // （`migrations/0004_contested_with_index.sql` と同一の DDL）を作り直す**
     // ——戻し忘れると「後」のテストや、同じプロセス内で後から走る他のテストファイルまで
     // 索引の無い状態を引きずる（outbox-claim-lease-index.test.ts と同じ罠）。
     await pool.query("DROP INDEX idx_memories_contested_with");
@@ -186,7 +186,7 @@ describe("idx_memories_contested_with（memories.contested_with_id の自己参�
       expect(plan).toMatch(/Seq Scan on memories x/);
       expect(plan).not.toContain("idx_memories_contested_with");
     } finally {
-      await pool.query(MIGRATION_0003_SQL);
+      await pool.query(MIGRATION_0004_SQL);
     }
   }, 60_000);
 
