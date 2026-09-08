@@ -213,4 +213,56 @@ describe("idx_memories_contested_with（memories.contested_with_id の自己参�
     );
     expect(dataResult.rows.map((row) => row.id)).toEqual([seeded.contestedReferrerId]);
   }, 60_000);
+
+  /**
+   * `migrations/0004_contested_with_index.sql` 自身のコメントは「索引は
+   * contested_with_id を先頭に置かなければ意味がない」と主張しているが、その主張を
+   * 検査する歯がこれまで無かった（オーナー指摘: コメントは検査されない。「これはXだから
+   * 安全」と書くなら、Xを歯にすること）。
+   *
+   * 上の2本（「前」「後」）の EXPLAIN assert は、**プランナが実際にこの索引を
+   * 選んだこと**を証明する——が、これだけでは**なぜ選ばれたか**、つまり索引が
+   * コメントの主張どおりの形（先頭列 = contested_with_id・部分述語 =
+   * contested_with_id IS NOT NULL）をしているかまでは証明しない。実際、この
+   * ROW_COUNT・CONTESTED_PAIR_COUNT の分布では、先頭列を誤って
+   * (tenant_id, contested_with_id) にした索引や、部分述語を落とした無条件索引でも、
+   * 部分述語がテーブルの2%まで絞り込むために Seq Scan よりコストが低く、プランナに
+   * 選ばれてしまう（実測: cost 0.28..104.06 対 Seq Scan 5254.00）——上の EXPLAIN
+   * assert は Index Scan という結果しか見ないため、この2つの壊れ方を検出できない。
+   *
+   * だからここでは、EXPLAIN を補う形で pg_catalog から索引の**形**そのものを読む。
+   * ただし「idx_memories_contested_with が存在する」という素朴な existence assert には
+   * しない——冒頭のコメント（本ファイル）が既に指摘している通り、存在そのものは
+   * 「先頭列や述語を間違えていないか」を何も保証しないため。先頭列の判定は
+   * `pg_indexes.indexdef`（DDL 文字列）を正規表現で突き合わせるのではなく、
+   * `pg_index.indkey[0]` が指す `pg_attribute.attnum` を解決する——文字列一致は
+   * 列が増えたり順序表記が変わったりしたときに書き方次第で誤検出しうるが、
+   * catalog 上の列位置は表記に依存しない実体である。
+   */
+  it("索引の形: idx_memories_contested_with は contested_with_id を先頭列に持つ部分索引である（マイグレーションのコメントの主張を歯にする）", async () => {
+    const { pool } = await getTestClient();
+
+    const shapeResult = await pool.query<{
+      leading_col: string;
+      is_partial: boolean;
+      pred_expr: string | null;
+    }>(
+      `SELECT
+         a.attname AS leading_col,
+         i.indpred IS NOT NULL AS is_partial,
+         pg_get_expr(i.indpred, i.indrelid) AS pred_expr
+       FROM pg_index i
+       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = i.indkey[0]
+       WHERE i.indexrelid = 'idx_memories_contested_with'::regclass`,
+    );
+
+    expect(shapeResult.rows).toHaveLength(1);
+    const shape = shapeResult.rows[0]!;
+    // 先頭列が contested_with_id であること（M1: 先頭に tenant_id を置く壊れ方を殺す)。
+    expect(shape.leading_col).toBe("contested_with_id");
+    // 部分索引であり、述語が contested_with_id IS NOT NULL であること
+    // （M2: 部分述語を落とす壊れ方を殺す）。
+    expect(shape.is_partial).toBe(true);
+    expect(shape.pred_expr).toBe("(contested_with_id IS NOT NULL)");
+  });
 });
