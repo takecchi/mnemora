@@ -1,4 +1,4 @@
-# ADR 0062: `memories.contested_with_id` の自己参照 FK に索引を足す — 「先頭列に tenant_id」が RI チェックには効かないことと、索引名は中身を保証しないこと
+# ADR 0062: `memories.contested_with_id` の自己参照 FK に索引を足す — `tenant_id` 先頭の複合索引は RI チェックを効率良く供給できないこと・索引名は中身を保証しないこと
 
 - **状態**: 採用 (2026-09)
 
@@ -31,13 +31,17 @@
     WHERE $1 OPERATOR(pg_catalog.=) "contested_with_id" FOR KEY SHARE OF x
   ```
 
-  **この `WHERE` に `tenant_id` は一切現れない。** 索引が無い（あるいは先頭列が
-  `contested_with_id` でない）と、この問い合わせのたびに `memories` 全体の
-  `Seq Scan` が走る——`idx_memories_contested` も `idx_memories_recall_gate`
-  （`tenant_id, status, decay_floor_at`）も `idx_memories_by_subject`
-  （`tenant_id, subject_id, status`）も、先頭列が `tenant_id` である以上この
-  RI チェックの絞り込みには使えない。CI の実測（`contested-with-index.test.ts`）で
-  実際に `Seq Scan` になることを確認済み。
+  **この `WHERE` に `tenant_id` は一切現れない。** 索引が無い、あるいは既存の索引が
+  `contested_with_id` を列としてまったく含んでいない場合、この問い合わせのたびに
+  `memories` 全体の `Seq Scan` が走る——`idx_memories_contested`
+  （`tenant_id, status`）も `idx_memories_recall_gate`（`tenant_id, status,
+  decay_floor_at`）も `idx_memories_by_subject`（`tenant_id, subject_id,
+  status`）も、**`contested_with_id` という列自体をどこにも持たない**ため、
+  この RI チェックに対しては「索引が無い」のと同じである。CI の実測
+  （`contested-with-index.test.ts`）で実際に `Seq Scan` になることを確認済み。
+  （⚠ これは「先頭列が `tenant_id` だから使えない」という話とは別である——
+  `tenant_id` を先頭に置きつつ `contested_with_id` を列に含む索引が使えるかどうかは
+  下記 (a) で扱う。そちらは実測で「使える（ただし非効率）」と判明した。）
 
 - **決定**:
 
@@ -61,36 +65,56 @@
      `WHERE`/`JOIN` の絞り込みには使っていない。
   5. `CREATE INDEX CONCURRENTLY` は使わない。理由は下記 (c)。
 
-- **(a) 一般則: 先頭列が `tenant_id` の複合索引は、RI（外部キー）チェックを供給できない**
+- **(a) 一般則: 先頭列が `tenant_id` の複合索引は、RI（外部キー）チェックを
+  効率良くは供給できない（供給できない、ではない）**
 
-  **これは本 PR 固有の事実ではなく、このリポジトリ全体に対する一般則として記録する:**
+  **⚠ この節は当初「供給できない」と断定していたが、この PR の期間中に実測して
+  みたところ誤りだったので訂正する。以下は訂正後の版であり、実測に合わせて
+  読むこと。**
 
-  > **RI チェックの `WHERE` 句は、参照整合性トリガーが自動生成するものであり、
-  > 常に FK 列（ここでは `contested_with_id`）の等値条件だけを持つ。
-  > `tenant_id` は原理的にそこへ現れない**（`memories` は単一テーブルの自己参照
-  > FK であり、PostgreSQL の RI トリガーはテナントという概念を知らない）。
-  > **ゆえに、先頭列が `tenant_id` の複合索引を見て「この索引があるから対応する
-  > 外部キーの検査も速い」と読んではならない。** 索引は FK 列そのものが先頭に
-  > 来ていない限り、その FK の RI チェックに対して**索引の絞り込み能力を提供しない**
-  > ——B-tree は先頭列で絞れて初めて後続列が効くため、`tenant_id` が先頭にある限り
-  > `contested_with_id = $1` という条件だけでは索引スキャンの起点を作れない。
+  RI チェックの `WHERE` 句は、参照整合性トリガーが自動生成するものであり、
+  常に FK 列（ここでは `contested_with_id`）の等値条件だけを持つ。`tenant_id` は
+  原理的にそこへ現れない（`memories` は単一テーブルの自己参照 FK であり、
+  PostgreSQL の RI トリガーはテナントという概念を知らない）。ここまでは変わらない。
+
+  **変わったのは、その先の帰結である。** `tenant_id` が先頭にある複合索引
+  （例: `(tenant_id, contested_with_id)`）に対し、実際に `EXPLAIN` で RI チェックの
+  クエリ（`tenant_id` を一切含まない、`contested_with_id = $1` のみ）を当てて
+  比較した:
+
+  | 索引の形 | プラン | cost |
+  |---|---|---|
+  | 索引なし | `Seq Scan on memories x` | 0.00..**5254.00** |
+  | `(tenant_id, contested_with_id) WHERE contested_with_id IS NOT NULL` | `Index Scan`、`Index Cond: (contested_with_id = ...)` | 0.28..**104.06** |
+  | `(contested_with_id) WHERE contested_with_id IS NOT NULL`（本 PR が実際に採用した形） | `Index Scan` | 0.28..**8.29** |
+
+  **`tenant_id` 先頭の複合索引は、実際には `Index Scan` として使われた。** プランナは
+  `tenant_id` が先頭にあっても、非先頭列の `contested_with_id` を `Index Cond`
+  として適用し、事実上その部分索引全体を走査する形で候補を絞る——**この部分索引が
+  全体の約2%しか行を持たないため、それでも `Seq Scan` より大幅に安い。**
+  ⟹ **「先頭列で絞れない索引は RI チェックを供給できない」という当初の書き方は
+  誤りである。** 正しくは: **先頭列（`tenant_id`）による絞り込みは使えない
+  （`tenant_id` がその RI チェックの `WHERE` に現れない以上、そこを起点に
+  スキャン範囲を狭めることはできない）ため、実質的に索引全体を舐める形になる
+  ——それでも部分索引が小さい限り `Seq Scan` よりは安いが、`contested_with_id`
+  自身を先頭に置いた専用の索引と比べると約12倍重い（104.06 対 8.29）。**
+  「使えない」ではなく「使えるが専用の索引より非効率」というのが実測の結論である。
 
   **今後このリポジトリで `tenant_id` 先頭の複合索引を見たとき、「テナントで絞る
   クエリ」を供給する索引だと読むのは正しいが、「テナント内のある列を指す外部キーの
-  DELETE 時 RI チェックも供給する」と拡大解釈しないこと。** 両者は別の性質の
-  クエリであり、後者を供給するには FK 列自身を先頭に置いた別の索引が要る。
+  DELETE 時 RI チェックも効率良く供給する」と拡大解釈しないこと。** 使われは
+  するが、専用の索引に比べて約12倍のコストを払う形になる。
 
   `idx_memories_superseded_by`（`(tenant_id, superseded_by_id) WHERE
-  superseded_by_id IS NOT NULL`）を本 PR が真似なかったのはこの一般則の適用例
-  である。あの索引は「この Memory は何に置き換わったか」という**アプリケーション側**
-  の検索（`superseded_by_id` を使う読み取り経路。`grep` では未確認——存在すると
-  仮定して設計された索引としてコメントに書かれている、`memory-store.ts` 側の
-  実際の呼び出し確認は本 PR の範囲外）を `tenant_id` 前提で引くために作られたもので
-  あり、**`superseded_by_id` 自身の RI チェックを供給する索引ではない**
-  （もし `superseded_by_id` にも自己参照 FK があれば、`idx_memories_superseded_by`
-  はそちらの RI チェックに対しても本 ADR と同じ理由で無力である——確かめていないが、
-  もし `superseded_by_id` が FK なら理屈上同じ穴が既にある。**この点は本 PR の
-  スコープ外であり、ここでは指摘のみに留め、直さない。**）。
+  superseded_by_id IS NOT NULL`）について本 PR が同じ形を真似なかった理由と、
+  その索引が実際に `superseded_by_id` 自身の RI チェックにどう使われているかは
+  下の「(f) `superseded_by_id`」にまとめて記録する（結論だけ言えば、あの索引は
+  実際に使われている——ただし理由は `tenant_id` が先頭にあることではない）。
+
+  **⚠ 「部分索引が育つほどこの差は開く」という主張は、まだ測っていない外挿である。**
+  本 PR ではテナント全体の約2%という1点でしか測っておらず、部分索引の行数が
+  増えたときにコストの比（12倍という数字）がどう動くかは確かめていない。
+  **未測定の外挿として扱い、ここでは主張しない。**
 
 - **(b) 一般則: 索引の名前は、その索引が何を供給するかを保証しない**
 
@@ -137,6 +161,97 @@
     との整合を含めて再設計が要り、1本の索引追加のために決めることではない。
     **本 PR は意図的にこの手段へ踏み込まない。**
 
+- **(d) 統計情報: 索引を足すだけでは終わらない——オーナーはこれを本 ADR の索引そのものより
+  一般に価値があると見ている**:
+
+  本 PR の当初の作業から `ANALYZE memories;`（`packages/postgres/migrations/0005_analyze_memories.sql`）
+  が抜け落ちていたことが分かった（経緯は下の「履歴」参照）。それを機に、
+  「索引を足すこと」と「その索引の統計をプランナに持たせること」が別の作業である
+  ことを、このリポジトリの一般則として記録する。
+
+  **(i) 索引を追加しても、その統計は自動的には生まれない——`ANALYZE` を、行が
+  入った後に走らせて初めて生まれる。** 実測:
+
+  | 状態 | `memories` の `pg_stats` 行数 | 式索引の統計行数 | `reltuples`\|`relpages` |
+  |---|---|---|---|
+  | 空テーブル、`ANALYZE` 実行済み | 0 | 0 | 0\|0 |
+  | 100,000行、索引はあるが `ANALYZE` 未実行 | 0 | 0 | **-1**\|0 |
+  | 100,000行、`ANALYZE` 実行後 | 27 | **1** | 100000\|3226 |
+
+  `reltuples = -1`（PostgreSQL 14 以降の意味）は「一度も `ANALYZE` されていない」
+  ことを表し、この状態では**プランナは行数の見積もりを一切持たない**。`ANALYZE`
+  自体は空テーブルに対しても失敗せず成功し、`last_analyze` も更新されるが、
+  **サンプルする行が無いので何も集めない。**
+
+  **(ii) 新規インストールでは、その `ANALYZE` はノーオペになる。** マイグレーションは
+  空のテーブルに対して順に適用されるため、新規インストールで `0005` が走る時点でも
+  `memories` はまだ空である。実測（実際の `runMigrations()` を通した、ADR 0059
+  の段1 ANN クエリでの計測）:
+
+  - `0001`〜`0004` を適用（索引は空テーブルの上に作られる、実際のマイグレーションと
+    同じ順序）→ 100,000行を投入 → **`ANALYZE` を一切走らせない**まま測定:
+    プランナは誤った索引（`idx_memories_recall_gate` + 事後の `Filter`）を選び、
+    `reltuples|relpages` は `-1|0`。**35.0 / 39.8 / 42.4 ms。**
+  - 同じ状態から `0005`（`ANALYZE memories;`）を実際の migrate 経路で適用:
+    プランナは `idx_memories_period_ann_stage` に切り替わり、見積もり **535** 行
+    対 実際 **491** 行。**4.6 / 4.5 / 5.6 ms。**
+  - 対して「新規インストール順」（`0001`〜`0005` を空テーブルに全部適用してから
+    100,000行を投入し、**以降 `ANALYZE` を一切走らせない**）: **37.4 / 33.2 / 32.9 ms**
+    ——**本 PR の修正が何も無い場合と統計的に同じ遅さ。**
+
+  ⟹ **これがこの PR で再現できた、クリーンで再現可能なデモンストレーションである。**
+  （狭い時間窓での 14.0ms/228.6ms/0.9-3.0ms という、別途配布されていた数字は
+  **再現しなかった**——0.62%窓のはずが実際の行数は56,192件ではなく489件であり、
+  数字自体が内部矛盾していた。「`ANALYZE` 前は見積もりが悪く、後で正確になる」
+  という定性的な筋は変わらないが、具体的な数字はこちらの表で置き換える。）
+
+  ⟹ **本 PR が出す結論**: `0005` を適用しただけでは、新規デプロイでは何も変わらない。
+  データを投入した**後**に、運用側（デプロイの手順書・cron・オペレータ操作の
+  いずれか）が改めて `ANALYZE` を走らせて初めて統計が生まれる。この運用手順の
+  整備自体は本 PR の範囲外——ここでは「必要である」という事実だけを記録する。
+
+- **(e) 履歴: `ANALYZE` はなぜ最初から無かったのか**:
+
+  `ANALYZE memories;` は本来 PR #67（ADR 0059、`0003_period_ann_stage_index.sql`）の
+  一部として書かれていた。**それが変異試験の後始末（`git checkout -- <広いパス>`
+  でコミット前の作業を戻す操作）によって失われた**——PR #67 を引き継いで完成させた
+  委譲者は、`ANALYZE` が欠けた木を受け取っており、それが欠けていること自体を
+  知りようがなかった。**⟹ これは設計上の見落としではなく、事故による消失である。**
+  `0005` がこの PR で独立したファイルとして存在する理由の一部は、この事故の
+  埋め合わせでもある——次に同じことが起きたときの手がかりとして、ここに残す。
+
+- **(f) `superseded_by_id`: 「同じ穴があるはず」という仮説は実測で反証された**:
+
+  当初、`superseded_by_id` にも自己参照 FK があるなら `contested_with_id` と同じ穴
+  （RI チェックが `Seq Scan` になる）が空いているはずだという仮説を「確かめていない」
+  として残していた。**実測した——反証された。**
+
+  `auto_explain`（`session_preload_libraries` で接続ごとに読み込む。`log_statement =
+  'all'` では捕まらない——RI トリガーは SPI 経由で内部的にクエリを発行するため）で
+  サーバログから捕まえた実際の RI クエリ:
+
+  ```sql
+  SELECT 1 FROM ONLY "public"."memories" x
+    WHERE $1 OPERATOR(pg_catalog.=) "superseded_by_id" FOR KEY SHARE OF x
+  ```
+
+  `idx_memories_superseded_by`（`(tenant_id, superseded_by_id) WHERE
+  superseded_by_id IS NOT NULL`）は**実際にこの RI チェックに使われている**:
+  `Index Scan using idx_memories_superseded_by`、cost 0.28..**115.46**、
+  中央値 **0.255 ms**（5回: 0.284/0.255/0.298/0.226/0.197）、見積もり=実際=1行。
+  `Seq Scan` は一度も出なかった。相互に指し合うペアの `DELETE` を
+  `EXPLAIN (ANALYZE)` した実測でも `Trigger for constraint
+  memories_superseded_by_id_fkey: time=0.487 calls=2`。
+
+  **使える理由は `tenant_id` が先頭にあることではない——この索引が部分索引であり
+  （`superseded_by_id IS NOT NULL` で全体の約2,000/100,000行に絞られる）、先頭列
+  `tenant_id` は単に使われていないだけである。** (a) で実測した
+  `(tenant_id, contested_with_id)` の挙動と機構は同じ——先頭列は活きていないが、
+  索引全体が小さいので舐めても安い。
+
+  ⟹ **`superseded_by_id` には索引を追加する必要が無い。** 既存の
+  `idx_memories_superseded_by` で十分。⛔ 追加しない。テストも書かない。
+
 - **マイグレーション番号について**:
 
   本 ADR の対象の実装は当初 `packages/postgres/migrations/0003_contested_with_index.sql`
@@ -146,12 +261,42 @@
   + テストファイル内の参照を追随。詳細はコミットメッセージ・PR 参照）。索引の定義・
   テストの assert・本 ADR が扱う3点の論旨には変更を加えていない。
 
+  **⭐ この改名が `_mnemora_migrations` の台帳（ledger）とどう相互作用するかを実測した。**
+  旧名 `0003_contested_with_index.sql` として一度適用済みのデータベースに対し、
+  改名後の `0004_contested_with_index.sql` を適用しようとすると、台帳はこのファイルを
+  「未適用」として扱うため再実行される。実測した失敗は逐語で:
+
+  ```
+  migration 0004_contested_with_index.sql failed: relation "idx_memories_contested_with" already exists
+  ```
+
+  （SQLSTATE `42P07`）。トランザクションはロールバックし、`0004` は台帳に入らず、
+  以降のあらゆる `migrate` 呼び出しが同じ理由で同様に失敗し続ける。
+
+  **`CREATE INDEX IF NOT EXISTS` にすればこの衝突は消える——が、その代償も実測した。**
+  そのテーブル名の場所に無関係な別の索引（`ON memories (tenant_id)`、列も述語も違う）
+  が既に存在する状態で `CREATE INDEX IF NOT EXISTS idx_memories_contested_with ...`
+  を実行すると、**`migrate` はエラーも警告も出さずに成功したと報告し、台帳にも
+  行を記録した——ただし実際に存在する索引の定義は、間違ったまま変わらない。**
+  ⟹ **決定: `IF NOT EXISTS` は付けない。** エラーで止まる方が、統計も気付かず
+  間違った索引が居座り続けるよりましである。
+
+  ただし: **`main` にはこのファイルが旧名 `0003_contested_with_index.sql` として
+  存在したことは一度も無い**（この問題はこの未マージのブランチだけで起きた自己完結
+  した事象であり、旧名は `main` にマージされていない）。⟹ **通常のアップグレード
+  経路でこの衝突が起きることはない**——開発環境・CI のサンドボックスでブランチを
+  行き来する場合にだけ起こりうる、開発時限定の懸念として記録する。
+
 - **採らなかった案**:
 
   - **`(tenant_id, contested_with_id)` の複合索引にする**（`idx_memories_superseded_by`
-    と同じ形）。却下。上記 (a) の理由により、RI チェックの `WHERE` に `tenant_id`
-    が現れない以上、先頭列を `tenant_id` にすると索引の絞り込み能力を活かせない
-    ——実質的に索引全体を舐めるのと変わらない。
+    と同じ形）。却下。上記 (a) の実測により、この形は **使えないわけではない**
+    （`Index Scan`、cost 0.28..104.06——`Seq Scan` の 5254.00 よりずっと安い）。
+    それでも `contested_with_id` 単独の専用索引（cost 0.28..8.29）と比べて約12倍
+    重く、`tenant_id` を先頭に置く理由（テナントで絞る他のクエリを兼ねる）がこの
+    索引には無い（RI チェックは `tenant_id` を使わない）ため、専用の索引を別に
+    持つほうが安い。「使えないから却下」ではなく「使えるが専用の索引より高いから
+    却下」に訂正する。
   - **無条件の単一列索引（`WHERE` 句なし）にする。** 部分索引（`WHERE
     contested_with_id IS NOT NULL`）と比較し、CI の `EXPLAIN` 実測でどちらが
     実際にプランナから選ばれるかで決めた。`$1 = contested_with_id` という
@@ -163,32 +308,52 @@
   - **`CREATE INDEX CONCURRENTLY` を使える形に `migrate.ts` を書き換える。**
     マネージャーの指示によりこの PR の権限の外——(c) 参照。
 
-- **⭐ 変異試験について（この PR の作業者が用意したもの、CI 未実測）**:
+- **⭐ 変異試験の結果（実測済み）**:
 
-  `packages/postgres/src/__tests__/contested-with-index.test.ts` が実際にどの変異を
-  捕まえるかは、**本物の PostgreSQL に対する `EXPLAIN` の実測でしか判定できない**
-  ——この作業環境には Postgres/`DATABASE_URL` が無いため、以下の変異はいずれも
-  **パッチとして用意しただけであり、赤/緑の判定はしていない。**
+  `packages/postgres/src/__tests__/contested-with-index.test.ts` に列順の assert を
+  足す前後で、3つの変異を実際の PostgreSQL に当てて赤/緑を確認した。
 
-  1. `(contested_with_id)` → `(tenant_id, contested_with_id)`（先頭列を破壊する）
-  2. `WHERE contested_with_id IS NOT NULL` の部分索引述語を削除する
-  3. 索引の `CREATE INDEX` 文自体を削除する
+  - **列順の assert を足す前**: **M1**（索引を `(tenant_id, contested_with_id)` に
+    変え、先頭列を破壊する）は **緑のまま生き残った**。**M2**（`WHERE` 述語を消す）
+    も**緑のまま生き残った**。**M3**（索引の `CREATE INDEX` 文自体を削除する）だけが
+    赤になった。
+  - **列順の assert を足した後**（コミット `28c3d85`、本ブランチに既に載っている）:
+    **M0**（対照、変異なし）は緑。**M1 は赤**
+    （`AssertionError: expected 'tenant_id' to be 'contested_with_id'`）。
+    **M2 は赤**（`expected false to be true`、`is_partial` を検査する assert 上で）。
+    **M3 は赤**（3本とも失敗）。
 
-  用意したパッチは `/tmp/mutations/`（この器のローカルパス、リポジトリの一部ではない）
-  に置いた。**次の CI 実行で `packages/postgres` の DB ジョブが走った時点が、
-  これらの変異に対する唯一の実測経路である。**
+  各変異は**まっさらなデータベースに対して**実行した——台帳（`_mnemora_migrations`）に
+  既に記録されたマイグレーションは `migrate` から黙ってスキップされるため、使い回しの
+  DB では変異を当てても「未適用のまま既存の索引が残っている」だけで緑になり、判定が
+  意味を失う。実行ごとに2つの証拠（`_mnemora_migrations` に該当行があること、
+  `pg_indexes.indexdef` が変異後の定義になっていること）で、変異が実際に適用された
+  ことを確認した。
+
+  **⚠ この歯がまだ捕まえていないもの**: **索引の形が正しく存在するのに、統計が
+  無いためプランナがそれを選ばない**というケース。この歯は `CREATE INDEX` 文の
+  形だけを検査しており、`ANALYZE` の有無をプランの選択として検査してはいない
+  ——(d) の統計の話は、この歯の外側にある。
+
+  **参考: `0004` は `ANALYZE` 前後で挙動が変わらない。** テスト自体が
+  バルク INSERT 直後、両方の `it()` の前に `ANALYZE memories` を実行済み
+  （`contested-with-index.test.ts:131`）。独立に再現: `Index Scan using
+  idx_memories_contested_with`、cost 0.28..**8.29**、中央値 **0.085 ms**
+  （5回: 0.087/0.082/0.085/0.097/0.097）、見積もり=実際=1行。**(a) の部分索引の
+  見積もり過小の罠を受けない**——RI チェックは索引化された列そのものへの
+  **点等値**であり、`=` の選択度は部分集合からの外挿ではなく厳密だから。⟹ `0004`
+  を非部分索引にする必要は無い。
 
 - **これが覆るとしたら**:
 
   - **`ACCESS EXCLUSIVE` ロックの停止時間が実運用で許容できない長さになると
     判明したら**、非トランザクションの移行経路を別途設計する、より大きな判断の
     引き金になる（(c) 参照）。
-  - **`superseded_by_id` に自己参照 FK があり、かつ `idx_memories_superseded_by`
-    がその RI チェックを供給できていないことが確認されたら**、本 ADR と同じ理由で
-    別途 `superseded_by_id` 先頭の索引を追加する判断が要る——ただし本 PR は
-    `superseded_by_id` に索引を追加しない（明示的にスコープ外）。
   - **CI の `EXPLAIN` 実測で `idx_memories_contested_with` が選ばれなかった場合**、
     索引の形（部分/無条件、列の追加）を見直す。
+  - **(a) の「部分索引が育つほど12倍という差が開く」という未測定の外挿が、
+    実際の測定で裏付けられた（あるいは反証された）場合**、(a) の記述を実測値で
+    差し替える。
 
 - **確かめていないこと**:
 
@@ -196,12 +361,10 @@
     見つからなかった経緯・理由は確かめていない。** 「索引名から中身を誤読した」は
     ありうる説明として (b) に書いたが、実際の経緯（そもそも気づかれていなかったのか、
     気づいた上で後回しにされたのか）は調べていない。
-  - **`superseded_by_id` が自己参照 FK かどうか、それに対する RI チェックが同じ穴を
-    持つかどうかは確かめていない。** (a) に「もし FK なら理屈上同じ穴がある」と
-    書いたが、これは推論であり、`0001_init.sql` の `superseded_by_id` 列定義を
-    読んで FK 制約の有無を確認する作業はしていない。
   - **`ACCESS EXCLUSIVE` ロックの実際の停止時間**（100万件級のテーブルでどれだけ
     書き込みが止まるか）は測っていない。
-  - **本 ADR が用意した変異試験パッチが実際に `contested-with-index.test.ts` を
-    赤くするかどうかは、この作業環境に Postgres が無いため未実測。** CI の
-    postgres ジョブでの実行が唯一の実測経路である。
+  - **(a) の「部分索引が育つほど差が開く」という主張は未測定の外挿であり、
+    実測していない。** 上に明記した通り、この ADR ではこの主張を採用しない。
+  - **PR #67 で `ANALYZE` が失われた経緯**は、コミット履歴・変異試験の後始末の
+    記録から推測したものであり、`git reflog` 等で当時の操作列そのものを追跡した
+    わけではない——(e) の記述は伝えられた経緯の要約である。
