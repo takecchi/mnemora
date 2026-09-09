@@ -58,6 +58,10 @@ export interface LexicalHit {
  * - `filter` の各フィールドを adapter が実際に適用する（`LexicalFilter` の doc）。
  * - **`query` は正規化前の生のクエリ文字列である。**どう分かち書きするかは adapter の責務で
  *   あり、core は一切関与しない——**core は「語彙的に引く」としか言っていない。**
+ *   **⟹ adapter は、自分の索引では原理的に一致しえない種類の語を query から落としてよい。**
+ *   postgres 実装は実際にそうしている（日本語の語を落とす。ADR 0084 §2.1.1）——
+ *   残しても真陽性を1件も生まず、AND で偽陰性だけを作るためである。
+ *   **⚠ ただし「落としてよい」は「落とすべき」ではない。**何を落としたかは adapter が説明できること。
  *
  * **🔴 書き込み口（`upsert` / `delete`）を持たない。**`VectorStore` との最大の違いである。
  * Phase 1 の postgres 実装は `memories.content` そのものの上に式索引を張るので、
