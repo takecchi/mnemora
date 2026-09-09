@@ -203,18 +203,35 @@ for (const reason of NOT_INDEXED_REASONS) {
 ⟹ **これが痛むとしたら**: 積み直しを cron などで自動化した利用者が、壊れたままの provider に
 向かって無限に積み直し、outbox が膨らむ。**その形が実際に現れたら、案B を提起する材料になる。**
 
-### 2. 🔴 `embedding_status <> 'ready'` の冗長な条件片が、SQL と migration の2箇所に書かれる
+### 2. 索引が効く形は、**測って初めて分かった**（当初の見立ては2重に崩れた）
 
-`requeueEmbedJobs` の `WHERE` にある `AND embedding_status <> 'ready'` は、その下の
-`= ANY($n::text[])`（`statuses` の型が `NotIndexedReason` なので `ready` を含まない）から
-**論理的には冗長**である。**それでも消せない**——`$n` は実行時の引数であり、
-プランナは「その配列に 'ready' が入っていないこと」を証明できないため、部分索引
-`idx_memories_requeue_embed` の述語がクエリの `WHERE` から含意されず、**索引が選ばれなくなる。**
+**当初、`requeueEmbedJobs` の `WHERE` には `AND embedding_status <> 'ready'` を
+冗長を承知で書いていた。**理由はこう考えていた——部分索引 `idx_memories_requeue_embed` の
+述語をクエリ側へ写さないと含意が成立せず、`= ANY($n::text[])` の実引数からは
+プランナが何も証明できないので索引が選ばれない（ADR 0032 で一度踏んだ穴と同じ形だと読んだ）。
 
-⟹ **同じ条件がクエリ側と索引側の2箇所に書かれ、片方だけ直すとずれる。**
-ADR 0053 が `EMBEDDING_STATUS_ROLLBACK` の比較について引き受けたのと同じ形の負債である。
-**歯は置いた**（`packages/postgres/src/__tests__/memories-requeue-embed-index.test.ts` が、
-この条件片を落とした述語では索引が使われないことを EXPLAIN で実測する）。
+**CI の EXPLAIN で、その見立ては2重に崩れた**（プランの全文は「測ったこと」）:
+
+1. **書かなくても索引は選ばれる。**プランナは `= ANY($n)` の**実引数を定数として**見る
+   （node-postgres は unnamed statement を使うので custom plan になる）。
+   `opts.statuses` の型は `NotIndexedReason` で `ready` を含まないため、
+   この証明はどの呼び出しでも成立する。
+2. 🔴 **書くと逆に遅くなる。**その条件片が `Recheck Cond` に回って Bitmap Heap Scan が
+   選ばれ、`ORDER BY updated_at, id` のために `Sort` が挟まる（cost 843.86）。
+   書かなければ素の Index Scan で並びがそのまま供給される（cost 58.17）。
+   ⟹ **`LIMIT` の早期打ち切りが効かなくなる。この口の眼目そのものを潰していた。**
+
+⟹ **条件片を消した。**[ADR 0078](./0078-strength-value-range.md) が `Number.isFinite` で
+「変異試験で歯が当たらないと分かった冗長なコードは、コードのほうを消す」を実行したのと
+同じ形である。**ここではさらに、消したほうが速いことまで測れた。**
+
+**⚠ そして、その過程で歯が1本嘘をついていたことも分かった。**「後」の検査は
+`expect(plan).not.toContain("Sort Key: memories.updated_at")` と書いていたが、
+PostgreSQL の EXPLAIN は単一テーブルの `Sort Key` に**表名を前置しない**（実際の出力は
+`Sort Key: updated_at, id`）。⟹ **この assert は常に成立し、Sort が挟まっていても
+緑だった。**`not.toContain("Sort Key")` に直した。
+**⟹ 引き受けた負債はここに残る: 「無いこと」を文字列で測る歯は、文字列を1文字間違えると
+永久に緑になる。**この形の歯を足すときは、**一度は落ちるところを見ること。**
 
 ### 3. `MemoryStore` interface にメソッドが1つ増えた（adapter 実装者にとって破壊的）
 

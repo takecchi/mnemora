@@ -1,4 +1,5 @@
 import { sql } from "drizzle-orm";
+import type { SQL } from "drizzle-orm";
 import { defaultDecayStrategy } from "@mnemora/core";
 import { EMBEDDING_STATUS_ROLLBACK, MemoryStatusConflictError } from "@mnemora/core";
 import type {
@@ -824,36 +825,16 @@ export class PostgresMemoryStore implements MemoryStore {
    * いる行はスキップして次へ行く）。
    */
   async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
-    // `memoryIds` を渡された場合、形式が壊れた id は `getMany` と同じく静かに落とす
-    // （uuid 列への cast で文全体が例外になるのを避ける。mapping.ts の isUuidLike 参照）。
-    // **絞り込みを渡されたのに残りが0件なら、空集合との積なので問い合わせない。**
-    let idFilter = sql``;
-    if (opts.memoryIds !== undefined) {
-      const wellFormedIds = opts.memoryIds.filter((id) => isUuidLike(id));
-      if (wellFormedIds.length === 0) {
-        return { requeued: 0, memoryIds: [] };
-      }
-      idFilter = sql` AND id = ANY(${sql.param(wellFormedIds)}::uuid[])`;
+    const target = buildRequeueEmbedTargetSelect(ctx, opts);
+    // `memoryIds` を渡されたのに well-formed な id が1つも残らなかった場合
+    // （空集合との積）。問い合わせる意味が無い。
+    if (target === null) {
+      return { requeued: 0, memoryIds: [] };
     }
 
     const result = await this.db.execute(sql`
       WITH target AS (
-        SELECT id FROM memories
-        WHERE tenant_id = ${ctx.tenantId}
-          AND status IN ('active', 'contested')
-          -- 🔴 **この行は冗長に見えて、消すと索引が効かなくなる**（migration 0007）。
-          -- 下の \`= ANY($n::text[])\` の引数は実行時の値であり、プランナは「その配列に
-          -- 'ready' が入っていないこと」を証明できない——部分索引
-          -- \`idx_memories_requeue_embed\` の述語 \`embedding_status <> 'ready'\` が
-          -- クエリの WHERE から含意されず、索引が選ばれない。定数どうしの比較を
-          -- ここに書いて初めて含意が成立する（ADR 0032 で一度踏んだ穴と同じ形）。
-          -- 歯: \`__tests__/memories-requeue-embed-index.test.ts\` の EXPLAIN。
-          AND embedding_status <> 'ready'
-          AND embedding_status = ANY(${sql.param(opts.statuses)}::text[])
-          ${idFilter}
-        ORDER BY updated_at ASC, id ASC
-        LIMIT ${opts.limit}
-        FOR UPDATE SKIP LOCKED
+        ${target}
       ),
       requeued AS (
         UPDATE memories m
@@ -873,4 +854,49 @@ export class PostgresMemoryStore implements MemoryStore {
     const memoryIds = result.rows.map((row) => (row as unknown as { memory_id: string }).memory_id);
     return { requeued: memoryIds.length, memoryIds };
   }
+}
+
+/**
+ * ADR 0079: `requeueEmbedJobs` が「どの行を積み直すか」を選ぶ `SELECT`。
+ *
+ * **本体と `EXPLAIN` の歯が、同じものを使うために切り出してある。**
+ * `packages/postgres/src/__tests__/memories-requeue-embed-index.test.ts` がこの関数の
+ * 返り値をそのまま `EXPLAIN` する——**テスト側に SQL を書き写すと、本体の述語を
+ * 直したときに歯だけが古い述語を測り続ける**（`outbox-claim-lease-index.test.ts` が
+ * DDL をマイグレーションファイルから読むのと同じ理由。AGENTS.md が北極星の要約を
+ * 置かないのと同じ理由でもある）。
+ *
+ * `memoryIds` を渡されたのに well-formed な id が1つも残らなかったときは `null` を返す
+ * ——形式が壊れた id は `getMany` と同じく静かに落とす（uuid 列への cast で文全体が
+ * 例外になるのを避ける。`mapping.ts` の `isUuidLike` の doc 参照）が、**絞り込みを
+ * 渡されたのに残りが0件なら、それは空集合との積**であり、問い合わせる意味が無い。
+ */
+export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOptions): SQL | null {
+  let idFilter = sql``;
+  if (opts.memoryIds !== undefined) {
+    const wellFormedIds = opts.memoryIds.filter((id) => isUuidLike(id));
+    if (wellFormedIds.length === 0) {
+      return null;
+    }
+    idFilter = sql` AND id = ANY(${sql.param(wellFormedIds)}::uuid[])`;
+  }
+
+  return sql`
+    SELECT id FROM memories
+    WHERE tenant_id = ${ctx.tenantId}
+      AND status IN ('active', 'contested')
+      -- ⚠ **ここに "AND embedding_status <> 'ready'" を書き足さないこと。**
+      -- 部分索引 idx_memories_requeue_embed（migration 0007）の述語を WHERE へ写して
+      -- 含意を助ける必要がある、と当初は考えた。**CI の EXPLAIN で逆だと分かった**
+      -- （ADR 0079「測ったこと」に全文）: プランナは "= ANY($n)" の実引数を定数として
+      -- 見るので（node-postgres の unnamed statement は custom plan になる）、
+      -- 述語 "embedding_status <> 'ready'" は書かなくても含意される。
+      -- そして**書くと逆に遅くなる**——その条件片が Recheck Cond に回って Bitmap Heap
+      -- Scan が選ばれ、ORDER BY のために Sort が挟まる（cost 843、LIMIT の早期打ち切りが
+      -- 効かない）。書かなければ素の Index Scan で並びがそのまま供給される（cost 58）。
+      AND embedding_status = ANY(${sql.param(opts.statuses)}::text[])
+      ${idFilter}
+    ORDER BY updated_at ASC, id ASC
+    LIMIT ${opts.limit}
+    FOR UPDATE SKIP LOCKED`;
 }

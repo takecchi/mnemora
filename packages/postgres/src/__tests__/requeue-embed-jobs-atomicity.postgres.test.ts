@@ -47,6 +47,24 @@ const DROP_FAILING_TRIGGER = `
   DROP FUNCTION IF EXISTS requeue_atomicity_block_insert();
 `;
 
+/**
+ * `Error.cause` の連鎖を平らにして1本の文字列にする。
+ *
+ * **drizzle の `db.execute()` が投げる例外から元の PostgreSQL のメッセージは直接読めない**
+ * ——`Failed query: <SQL>` という別の `Error` で包まれ、pg のエラーは `cause` 側に入る
+ * （このリポジトリで一度実測した。`advisory-lock.ts` が生の `PoolClient` を使って
+ * `err.code` を読めるのは、あちらが drizzle を経由していないからである）。
+ */
+function messageChain(error: unknown): string {
+  const parts: string[] = [];
+  let current: unknown = error;
+  while (current instanceof Error) {
+    parts.push(current.message);
+    current = (current as Error & { cause?: unknown }).cause;
+  }
+  return parts.join("\n<- caused by ->\n");
+}
+
 describe("requeueEmbedJobs の原子性（ADR 0079）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
@@ -71,9 +89,19 @@ describe("requeueEmbedJobs の原子性（ADR 0079）", () => {
 
     await pool.query(CREATE_FAILING_TRIGGER);
     try {
-      await expect(
-        store.requeueEmbedJobs(ctx, { statuses: ["failed"], limit: 10 }),
-      ).rejects.toThrow(/requeue-atomicity: outbox insert blocked on purpose/);
+      const error = await store.requeueEmbedJobs(ctx, { statuses: ["failed"], limit: 10 }).then(
+        () => null as unknown,
+        (err: unknown) => err,
+      );
+
+      // ⚠ **`rejects.toThrow(/.../)` では捕まらない。**drizzle は失敗したクエリを
+      // `Failed query: …` という別の `Error` で包み、**元の PostgreSQL の
+      // エラーメッセージは `cause` の連鎖側に入る**（実測: 一度この形で赤くなった）。
+      // 引数無しの `.rejects.toThrow()` に緩めると「何かが投げられた」しか測らず、
+      // トリガーとは無関係な失敗（接続断・SQL の書き間違い）でも緑になる
+      // ——`memory-store-conformance.ts` の `NOT_FOUND_ERROR_MESSAGE` と同じ理由。
+      // ⟹ **連鎖を平らにしてから照合する。**
+      expect(messageChain(error)).toMatch(/requeue-atomicity: outbox insert blocked on purpose/);
 
       // 🔴 ここが本題。UPDATE だけがコミットされていたら `pending` になっている。
       const after = await store.get(ctx, memory.id);

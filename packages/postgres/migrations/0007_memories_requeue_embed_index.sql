@@ -1,33 +1,34 @@
 -- 0007_memories_requeue_embed_index.sql
 --
--- ADR 0079: `PostgresMemoryStore.requeueEmbedJobs`（`packages/postgres/src/memory-store.ts`）
--- が対象を選ぶ述語のための部分索引。
+-- ADR 0079: `PostgresMemoryStore.requeueEmbedJobs`（`packages/postgres/src/memory-store.ts` の
+-- `buildRequeueEmbedTargetSelect`）が対象を選ぶ述語のための部分索引。
 --
 -- 対象を選ぶ側の SQL は次の形をしている:
 --
 --   SELECT id FROM memories
 --   WHERE tenant_id = $1
 --     AND status IN ('active', 'contested')
---     AND embedding_status <> 'ready'
 --     AND embedding_status = ANY($2::text[])
 --   ORDER BY updated_at ASC, id ASC
 --   LIMIT $3
 --   FOR UPDATE SKIP LOCKED
 --
--- **`embedding_status <> 'ready'` が冗長に見えるのは意図である。この行がこの索引の
--- 生命線であり、消すと索引が使われなくなる。**`= ANY($2::text[])` の `$2` は実行時の
--- 引数であり、**プランナは「その配列に 'ready' が入っていないこと」を証明できない**
--- ——部分索引は、その述語がクエリの WHERE から**論理的に含意される**ことを
--- プランナが示せて初めて使える。`ANY($2)` からは何も含意されない。
--- 定数どうしの比較 `embedding_status <> 'ready'` を WHERE に**そのまま書く**ことで、
--- 初めて含意が成立する。
+-- **⚠ クエリ側に `AND embedding_status <> 'ready'` は書かない。書くと遅くなる。**
+-- 当初は「部分索引の述語をクエリの WHERE へ写さないと含意が成立せず索引が選ばれない」
+-- （ADR 0032 で一度踏んだ穴と同じ形）と考えて書いていた。**CI の EXPLAIN で2重に
+-- 崩れた**（プランの全文は ADR 0079「測ったこと」）:
 --
--- ⚠ **これは ADR 0032（`migrations/0002_outbox_claim_lease_index.sql`）で一度踏んだ穴と
--- 同じ形である。**あちらは「部分索引の述語 `claimed_at IS NULL` がクエリの WHERE から
--- 含意されない」ために索引が選ばれなかった。ここでは、**含意が成立する条件片を
--- クエリ側へ明示的に置く**ことで先回りしている。
+-- 1. **書かなくても含意される。**プランナは `= ANY($n::text[])` の**実引数を定数として**
+--    見る（node-postgres は unnamed statement を使うので custom plan になる）。
+--    `embedding_status = ANY('{failed,pending}')` から `embedding_status <> 'ready'` は
+--    証明できる。`opts.statuses` の型は `NotIndexedReason` であり 'ready' を含まないので、
+--    この証明はどの呼び出しでも成立する。
+-- 2. **書くと逆に遅くなる。**その条件片が Recheck Cond に回って Bitmap Heap Scan が
+--    選ばれ、`ORDER BY updated_at, id` のために `Sort` が挟まる（実測 cost 843.86、
+--    LIMIT の早期打ち切りが効かない）。書かなければ素の Index Scan で並びがそのまま
+--    供給される（実測 cost 58.17）。
 --
--- **`embedding_status` を索引キーに入れない**のも ADR 0032 の実測の帰結である。
+-- **`embedding_status` を索引キーに入れない**のは ADR 0032 の実測の帰結である。
 -- `requeueEmbedJobs` は `embedding_status = ANY(ARRAY['failed','pending'])` のように
 -- 複数値を指定しうる。キー列順を `(tenant_id, embedding_status, updated_at)` にすると、
 -- `embedding_status` を等号1点に絞らない限り索引の並びは `updated_at` の全体順序を

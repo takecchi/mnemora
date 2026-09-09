@@ -2,7 +2,10 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { sql } from "drizzle-orm";
+import type { Ctx } from "@mnemora/core";
 import { DEFAULT_MIGRATIONS_DIR } from "../migrate.js";
+import { buildRequeueEmbedTargetSelect } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
@@ -19,43 +22,24 @@ const MIGRATION_0007_SQL = readFileSync(
 /**
  * ADR 0079 の実測。
  *
- * `PostgresMemoryStore.requeueEmbedJobs`（`packages/postgres/src/memory-store.ts`）が
- * 対象を選ぶ CTE の `SELECT` は次の形をしている:
- *
- *   SELECT id FROM memories
- *   WHERE tenant_id = $1
- *     AND status IN ('active', 'contested')
- *     AND embedding_status <> 'ready'
- *     AND embedding_status = ANY($2::text[])
- *   ORDER BY updated_at ASC, id ASC
- *   LIMIT $3
- *   FOR UPDATE SKIP LOCKED
+ * `PostgresMemoryStore.requeueEmbedJobs`（`../memory-store.js`）が対象を選ぶ CTE の
+ * 中身は `buildRequeueEmbedTargetSelect` が組み立てる。**この検査はその関数の返り値を
+ * そのまま `EXPLAIN` する**——テスト側に述語を書き写さない（`explainTargetSelect` の
+ * doc コメント参照）。
  *
  * `migrations/0007_memories_requeue_embed_index.sql` はこの述語のための部分索引
  * `idx_memories_requeue_embed`（`(tenant_id, updated_at, id)`、
  * `WHERE status IN ('active', 'contested') AND embedding_status <> 'ready'`）を足した。
  *
- * このテストは:
- * 1. 「前」= 索引が無い世界での上の `SELECT` を `EXPLAIN` し、`Seq Scan` になることを
- *    確認する。**`idx_memories_requeue_embed` は本PRが足した索引であり「前」には
- *    存在しない**——この DB には既に `0007_*.sql` が適用済みなので、テストの中で
- *    明示的に `DROP INDEX idx_memories_requeue_embed` してから測り、**`finally` で
- *    必ずマイグレーションファイルそのものを流し直して作り直す**（`resetTestDatabase()`
- *    はテーブルの中身を TRUNCATE するだけでスキーマは再作成しないため、戻し忘れると
- *    「後」のテストや後続の他テストファイルまで索引の無い状態を引きずる。詳細は
- *    outbox-claim-lease-index.test.ts の同種のコメント参照）。
- * 2. 「後」= 索引が在る状態で同じ述語を `EXPLAIN` し、`idx_memories_requeue_embed` が
- *    実際に使われる**うえで**、`updated_at, id` の全体ソートを索引が肩代わりしている
- *    こと（＝ `LIMIT` が早期に打ち切れる）を assert する。
- * 3. ⭐ **この PR のいちばん大事な歯。** `embedding_status <> 'ready'` を落とし
- *    `embedding_status = ANY($2::text[])` だけを残した述語を `EXPLAIN` し、索引が
- *    **使われなくなる**ことを実測する。`migrations/0007_*.sql` のコメントが書いている
- *    「`= ANY($n)` の引数は実行時の値であり、プランナは配列に 'ready' が入っていない
- *    ことを証明できない」という主張は、この assert が通って初めて実測になる——
- *    通らなければ、その主張は「読んでそう推論した」段階のままである
- *    （outbox-claim-lease-index.test.ts が ADR 0032 で踏んだ穴と同じ形）。
- *    `AND embedding_status <> 'ready'` が「冗長に見えるが消すと索引が死ぬ」ことの
- *    証明そのものが、このテストの存在理由である。
+ * このテストは3本ある:
+ * 1. **前** = 索引が無い世界。`ORDER BY updated_at, id LIMIT n` を索引が供給できず
+ *    `Sort` が挟まる（＝ `LIMIT` の早期打ち切りが効かない）ことを確認する。
+ * 2. **後** = 索引が在る世界。索引が実際に使われ、**`Sort` が消える**ことを確認する。
+ *    ⟹ **本体の述語を変えるとこの検査が直接それを測る**（同じ SQL を EXPLAIN している）。
+ * 3. ⭐ **当初の見立てが崩れた記録。**本 PR は当初、本体の WHERE に
+ *    `AND embedding_status <> 'ready'` を冗長を承知で書いていた。CI の EXPLAIN で
+ *    **2重に崩れた**——書かなくても索引は選ばれ、書くとむしろ Sort が挟まって遅くなる。
+ *    その差を出力そのもので残す（詳細はその `it()` の doc コメント）。
  *
  * すべて `console.log` で全文を出力する——「索引が使われる/使われない」を出力そのもので
  * 示す必要がある（「使われるはず」と書かない）。CI のログから PR 本文へ貼るための意図的な
@@ -137,6 +121,28 @@ function planText(rows: { "QUERY PLAN": string }[]): string {
   return rows.map((row) => row["QUERY PLAN"]).join("\n");
 }
 
+const CTX: Ctx = { tenantId: TENANT };
+const OPTS = { statuses: ["failed", "pending"] as const, limit: 50 };
+
+/**
+ * 🔴 **本体が実際に打つ `SELECT` をそのまま `EXPLAIN` する。**
+ *
+ * `buildRequeueEmbedTargetSelect`（`../memory-store.js`）は
+ * `PostgresMemoryStore.requeueEmbedJobs` が CTE の中身として使っている、まさにその
+ * `SQL` を返す。**ここで述語を書き写すと、本体を直したときにこの歯だけが古い述語を
+ * 測り続ける**——「後」の assert が緑のまま、実際には索引が使われなくなる。
+ * ⟹ **本体の述語を変えると、この歯がその変更を直接測る。**それがこの共有の目的である。
+ */
+async function explainTargetSelect(): Promise<string> {
+  const { db } = await getTestClient();
+  const target = buildRequeueEmbedTargetSelect(CTX, { ...OPTS, statuses: [...OPTS.statuses] });
+  if (target === null) {
+    throw new Error("buildRequeueEmbedTargetSelect が null を返した（memoryIds を渡していない）");
+  }
+  const result = await db.execute(sql`EXPLAIN (FORMAT TEXT) ${target}`);
+  return planText(result.rows as unknown as { "QUERY PLAN": string }[]);
+}
+
 describe("memories の requeueEmbedJobs 索引（ADR 0079）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
@@ -146,7 +152,7 @@ describe("memories の requeueEmbedJobs 索引（ADR 0079）", () => {
     await closeTestClient();
   });
 
-  it("前: idx_memories_requeue_embed が無い世界では Seq Scan になる", async () => {
+  it("前: idx_memories_requeue_embed が無い世界では Sort が挟まる（LIMIT の早期打ち切りが効かない）", async () => {
     const { pool } = await getTestClient();
     await seedManyMemories(pool, TENANT, ROW_COUNT);
 
@@ -160,19 +166,7 @@ describe("memories の requeueEmbedJobs 索引（ADR 0079）", () => {
     // （`migrations/0007_memories_requeue_embed_index.sql` と同一の DDL）を作り直す。**
     await pool.query("DROP INDEX idx_memories_requeue_embed");
     try {
-      const explainResult = await pool.query(
-        `EXPLAIN (FORMAT TEXT)
-         SELECT id FROM memories
-         WHERE tenant_id = $1
-           AND status IN ('active', 'contested')
-           AND embedding_status <> 'ready'
-           AND embedding_status = ANY($2::text[])
-         ORDER BY updated_at ASC, id ASC
-         LIMIT $3
-         FOR UPDATE SKIP LOCKED`,
-        [TENANT, ["failed", "pending"], 50],
-      );
-      const plan = planText(explainResult.rows as { "QUERY PLAN": string }[]);
+      const plan = await explainTargetSelect();
       console.log(`=== EXPLAIN（前: idx_memories_requeue_embed 無し）===\n${plan}`);
 
       // ⚠ **`Seq Scan on memories` を assert しない。**「前」の世界でプランナが
@@ -192,6 +186,44 @@ describe("memories の requeueEmbedJobs 索引（ADR 0079）", () => {
     const { pool } = await getTestClient();
     await seedManyMemories(pool, TENANT, ROW_COUNT);
 
+    const plan = await explainTargetSelect();
+    console.log(`=== EXPLAIN（後: idx_memories_requeue_embed 在り）===\n${plan}`);
+
+    expect(plan).toContain("idx_memories_requeue_embed");
+    // 「索引が使われている」だけでは足りない——測りたいのは「`updated_at, id` の
+    // 全体ソートを索引が肩代わりしている」ことそのもの（outbox-claim-lease-index.test.ts
+    // と同じ勘所）。これが無いと `ORDER BY ... LIMIT` の早期打ち切りが効かない。
+    //
+    // ⚠ **`"Sort Key: memories.updated_at"` と書かないこと。**PostgreSQL の EXPLAIN は
+    // 単一テーブルの `Sort Key` に表名を前置しない（実測: 出るのは
+    // `Sort Key: updated_at, id`）。表名つきで書くと**この assert は常に成立し、
+    // Sort が挟まっていても緑になる**——一度そうなっていた（ADR 0079「測ったこと」）。
+    expect(plan).not.toContain("Sort Key");
+  }, 60_000);
+
+  /**
+   * ⭐ **当初の見立てが崩れた記録。**
+   *
+   * 本 PR は当初、本体の `WHERE` に `AND embedding_status <> 'ready'` を
+   * **冗長を承知で書いていた**——部分索引の述語をクエリ側へ写さないと含意が成立せず
+   * 索引が選ばれない、と考えたためである（ADR 0032 で一度踏んだ穴と同じ形だと読んだ）。
+   *
+   * **CI の EXPLAIN でその見立ては2重に崩れた:**
+   * 1. 書かなくても索引は選ばれる。プランナは `= ANY($n)` の**実引数を定数として**
+   *    見るので（node-postgres の unnamed statement は custom plan になる）、
+   *    `embedding_status <> 'ready'` は含意される。
+   * 2. **書くと逆に遅くなる。**その条件片が Recheck Cond に回って Bitmap Heap Scan が
+   *    選ばれ、`ORDER BY` のために Sort が挟まる。
+   *
+   * この検査はその差を**出力そのもので**残す。⚠ **「冗長だが無害」ではなかった**
+   * ——[ADR 0078](../../../../docs/decisions/0078-strength-value-range.md) が
+   * `Number.isFinite` で踏んだのと同じく、**歯が当たらない冗長なコードは消すのが
+   * このリポジトリの型である。**ここではさらに、消したほうが速いことまで測れた。
+   */
+  it("⭐ embedding_status <> 'ready' を書き足すと、索引は使われるが Sort が挟まって遅くなる（当初の見立ての反証）", async () => {
+    const { pool } = await getTestClient();
+    await seedManyMemories(pool, TENANT, ROW_COUNT);
+
     const explainResult = await pool.query(
       `EXPLAIN (FORMAT TEXT)
        SELECT id FROM memories
@@ -205,42 +237,11 @@ describe("memories の requeueEmbedJobs 索引（ADR 0079）", () => {
       [TENANT, ["failed", "pending"], 50],
     );
     const plan = planText(explainResult.rows as { "QUERY PLAN": string }[]);
-    console.log(`=== EXPLAIN（後: idx_memories_requeue_embed 在り）===\n${plan}`);
+    console.log(`=== EXPLAIN（<> 'ready' を書き足した述語。本体はこれを書かない）===\n${plan}`);
 
+    // 索引そのものは使われる（見立て1の反証）。
     expect(plan).toContain("idx_memories_requeue_embed");
-    // 「索引が使われている」だけでは足りない——測りたいのは「`updated_at, id` の
-    // 全体ソートを索引が肩代わりしている」ことそのもの（outbox-claim-lease-index.test.ts
-    // と同じ勘所）。これが無いと `ORDER BY ... LIMIT` の早期打ち切りが効かない。
-    expect(plan).not.toContain("Sort Key: memories.updated_at");
-  }, 60_000);
-
-  it("⭐ embedding_status <> 'ready' を落とすと idx_memories_requeue_embed は使われなくなる", async () => {
-    const { pool } = await getTestClient();
-    await seedManyMemories(pool, TENANT, ROW_COUNT);
-
-    // `AND embedding_status <> 'ready'` を意図的に落とした述語。`migrations/0007_*.sql`
-    // のコメントが立てている主張——「`= ANY($n::text[])` は実行時の引数であり、
-    // プランナは配列に 'ready' が入っていないことを証明できない。部分索引の述語
-    // `embedding_status <> 'ready'` がクエリの WHERE から含意されなくなり、索引が
-    // 選べなくなる」——を、ここで実測する。この assert が通って初めて、memory-store.ts
-    // の `AND embedding_status <> 'ready'` が「冗長に見えるが消すと索引が死ぬ」行だと
-    // 言える。この PR のいちばん大事な歯。
-    const explainResult = await pool.query(
-      `EXPLAIN (FORMAT TEXT)
-       SELECT id FROM memories
-       WHERE tenant_id = $1
-         AND status IN ('active', 'contested')
-         AND embedding_status = ANY($2::text[])
-       ORDER BY updated_at ASC, id ASC
-       LIMIT $3
-       FOR UPDATE SKIP LOCKED`,
-      [TENANT, ["failed", "pending"], 50],
-    );
-    const plan = planText(explainResult.rows as { "QUERY PLAN": string }[]);
-    console.log(
-      `=== EXPLAIN（embedding_status <> 'ready' を落とした述語。idx_memories_requeue_embed は使われないはず）===\n${plan}`,
-    );
-
-    expect(plan).not.toContain("idx_memories_requeue_embed");
+    // しかし Sort が挟まる（見立て2。本体がこの条件片を書かない理由）。
+    expect(plan).toContain("Sort Key");
   }, 60_000);
 });
