@@ -33,12 +33,20 @@ export const MAX_STRENGTH = 1;
  * という意味になり、それは `status: 'forgotten'` が既に表しているからである。**
  * 同じことを言う道が2つ在ると、どちらで表されているかを読む側が両方見る必要が出る。
  *
- * ⚠ `Number.isFinite` を先に見る。**`NaN` は比較が全部 false になるため、
- * `value > 0 && value <= 1` だけでは弾けるが、`value <= 0 || value > 1` のような
- * 書き方だと素通りする。**この関数を唯一の綴りにして、その差を1箇所に閉じる。
+ * 🔴 **`NaN` と `Infinity` を弾いているのは、この比較の「向き」である。**
+ * `NaN` との比較は全部 false になるので `NaN > 0` が false になって落ちる。
+ * `Infinity` は `Infinity <= 1` が false で落ちる。
+ * **⚠ だから `value <= 0 || value > MAX_STRENGTH` のように否定で書き直してはならない**
+ * ——その形にすると `NaN` は「範囲外ではない」と判定されて素通りする。
+ *
+ * ⚠ **最初は `Number.isFinite(value) &&` を先頭に置いていたが、変異試験で外した。**
+ * それを落としても適合スイートは赤くならなかった——上のとおり冗長だからである。
+ * **歯の当たらない防御を「守っている」の顔で残すと、後から比較の向きを変える人が
+ * 「`isFinite` が見ているから大丈夫」と読む。**それがいちばん危ない。
+ * 経緯は ADR 0078 の「変異試験で分かったこと」に書いてある。
  */
 export function isStrengthInRange(value: number): boolean {
-  return Number.isFinite(value) && value > 0 && value <= MAX_STRENGTH;
+  return value > 0 && value <= MAX_STRENGTH;
 }
 
 export type EmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
