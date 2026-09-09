@@ -2396,8 +2396,27 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // `claimEmbedJobs` まで見る（`claimEmbedJobs` の doc コメント参照）。
     // -------------------------------------------------------------------
 
+    /**
+     * 🔴 **`new Date()` をそのまま `now` に渡さないこと。**
+     *
+     * `claimBatch` は `available_at <= now` で絞る。`requeueEmbedJobs` が積んだ行の
+     * `available_at` は **DB 側の `now()`（マイクロ秒精度）**で書かれるのに対し、
+     * JavaScript の `Date` は**ミリ秒までしか持たない**——同じミリ秒の中で
+     * `available_at = 12:00:00.123456`、`new Date()` = `12:00:00.123`（切り捨て）に
+     * なると、**積んだばかりの行が `available_at <= now` を満たさず claim できない。**
+     *
+     * ⚠ **これは実際に CI で踏んだ。**同じ検査が `packages/postgres` のジョブでは緑、
+     * ルートの test 門の DB 段では赤という**割れ方**をした（ADR 0079「測ったこと」）。
+     * ミリ秒の端数次第で結果が変わるので、**再実行すれば直るように見える種類の赤**である。
+     *
+     * ⟹ 少しだけ未来を渡す。`leaseMs`（60秒）よりずっと小さいので、**既に claim 済みの
+     * 行がリース切れとして再取得されることはない**（`claimed_at <= now - leaseMs` は
+     * 成立しない）。
+     */
+    const CLAIM_NOW_SKEW_MS = 1_000;
+
     async function claimedMemoryIds(ctx: Ctx): Promise<unknown[]> {
-      const jobs = await claimEmbedJobs(ctx, new Date());
+      const jobs = await claimEmbedJobs(ctx, new Date(Date.now() + CLAIM_NOW_SKEW_MS));
       return jobs.map((job) => job.payload.memoryId);
     }
 
@@ -2621,7 +2640,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 2回目は既に `pending` なので `statuses` に `pending` を含めて呼ぶ。
       await store.requeueEmbedJobs(ctx, { statuses: ["pending"], limit: 10 });
 
-      const jobs = await claimEmbedJobs(ctx, new Date());
+      const jobs = await claimEmbedJobs(ctx, new Date(Date.now() + CLAIM_NOW_SKEW_MS));
       expect(jobs.map((job) => job.payload.memoryId)).toEqual([memory.id, memory.id]);
     });
   });

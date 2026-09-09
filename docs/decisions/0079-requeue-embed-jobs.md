@@ -71,8 +71,9 @@ for (const reason of NOT_INDEXED_REASONS) {
 `packages/core/src/runtime.ts` の1行だけで、他はすべて型定義・適合テスト・doc コメントだった
 （私が実行した）。`outbox.failed_at` を書く本番の呼び出し口も1本（`tick` の `catch`）。
 
-**数えるべきは呼び出し口ではなく、そこへ到達する `throw` の地点である。**
-`processEmbedJob` の中には `throw` が6地点あり、**そのうち2つは `try` の外に在る**:
+**数えるべきは呼び出し口ではなく、そこへ到達する失敗の出口である。**
+`processEmbedJob` の中には失敗の出口が8つあり、**そのうち3つは `try` の外に在る**
+（`try` の外で投げると `catch` を通らないので、`embedding_status` は書かれない）:
 
 | 地点 | outbox | `embedding_status` |
 |---|---|---|
@@ -278,20 +279,66 @@ Seq Scan を選びうる。**その場合でも正しさは変わらない**（�
 
 ## 測ったこと
 
-（コマンドと出力は PR 本文に貼る。この節はそこを指す。）
+**コマンドと出力の全文は PR 本文に貼ってある。**この節には、**測って初めて分かったこと**
+だけを残す（数字合わせではなく、後から読む人が同じ穴を踏まないために）。
 
-- 6つの門（`typecheck` / `lint` / `format:check` / `test` / `build` / `pack:check`）の終了コード
-- 変異試験（置いた歯が実際に噛むこと・**噛まなかった変異**の両方）
-- `EXPLAIN` による索引の実測
+### 1. 冗長な条件片は、消したほうが**速い**（CI の EXPLAIN）
+
+| クエリ | プラン | cost |
+|---|---|---|
+| `AND embedding_status <> 'ready'` **なし**（＝いまの本体） | 素の `Index Scan`、`Sort` 無し | **58.17** |
+| `AND embedding_status <> 'ready'` **あり**（＝当初の実装） | `Bitmap Heap Scan` ＋ `Sort` | **843.86** |
+| 索引そのものが無い | `Seq Scan` ＋ `Sort` | 1104.04 |
+
+詳細は「引き受けた負債」§2。
+
+### 2. ⚠ 「無いこと」を文字列で測る歯は、1文字違うと**永久に緑**になる
+
+`not.toContain("Sort Key: memories.updated_at")` と書いていたが、PostgreSQL の EXPLAIN は
+単一テーブルの `Sort Key` に表名を前置しない（出力は `Sort Key: updated_at, id`）。
+⟹ **`Sort` が挟まっているプランでも緑だった。**`not.toContain("Sort Key")` に直した。
+
+### 3. ⚠ drizzle の例外から元の PostgreSQL のメッセージは**直接読めない**
+
+`db.execute()` の失敗は `Failed query: <SQL>` という別の `Error` に包まれ、pg の
+エラーは `cause` の連鎖側に入る。原子性の歯の `rejects.toThrow(/…/)` がこれで外れた。
+⟹ `cause` を平らにしてから照合する形に直した。**引数無しの `.rejects.toThrow()` には
+緩めない**（「何かが投げられた」しか測らなくなる。`NOT_FOUND_ERROR_MESSAGE` と同じ理由）。
+
+### 4. 🔴 JS の `Date` は**ミリ秒まで**、DB の `now()` は**マイクロ秒まで**
+
+適合スイートの claim で `new Date()` をそのまま `now` に渡していた。
+`available_at = 12:00:00.123456` に対して `new Date()` が `12:00:00.123` に切り捨てられると、
+**積んだばかりの行が `available_at <= now` を満たさず claim できない。**
+
+⚠ **同じ検査が `packages/postgres` のジョブでは緑、ルートの test 門の DB 段では赤、
+という割れ方をした**——ミリ秒の端数次第なので、**再実行すれば直るように見える種類の赤**
+である。⟹ claim の `now` に 1 秒だけ未来を渡す（`leaseMs` の 60 秒よりずっと小さいので、
+claim 済みの行がリース切れとして再取得されることはない）。
+
+### 5. 変異試験 — 撃った8つのうち7つが噛み、1つは**等価変異**だった
+
+表と落ちた歯の名前は PR 本文にある。**⚪ 生存した M8（同期区間を割る＝トランザクションを
+外す相当）を「歯が弱い」とは読まない**——in-memory 実装では、単一スレッドのテストから
+「更新だけ起きて INSERT が起きていない中間状態」を観測する手段が無い。
+**保持しているのは*値*ではなく*決定*である**（`FakeVectorStore` のゼロベクトルが `NaN` を
+返す件と同じ形）。⟹ **消さない。**
+そして **Postgres 側には歯を置いた**——`outbox` への INSERT を必ず失敗させるトリガーで、
+`embedding_status` が `failed` のまま巻き戻ることを見る
+（`packages/postgres/src/__tests__/requeue-embed-jobs-atomicity.postgres.test.ts`）。
 
 ## 確かめていないこと
 
-- 🔴 **上の表の🔴2本（`pending` のまま残る経路）が実際に発生することを観測していない。**
-  コードの構造から読める「起こりうる」までである。
+- 🔴 **「`failed` に落ちる経路の数え方」の🔴2本（`pending` のまま残る経路）が実際に
+  発生することを観測していない。**コードの構造から読める「起こりうる」までである。
 - **手元では DB テストを1本も走らせていない。**この環境に PostgreSQL も docker も無い
   （`which psql docker` が空、`DATABASE_URL` 未設定。私が実行した）。
-  `packages/postgres` と適合スイートの postgres 側は **CI の3ジョブでしか見届けていない。**
+  `packages/postgres`・適合スイートの postgres 側・原子性の歯・EXPLAIN の歯は
+  **すべて CI でしか見届けていない。**
   ⚠ 手元の `pnpm run test` が緑であることは、**DB 側を見たことにならない**（ADR 0015）。
 - **実運用での `embedding_status` の分布を測っていない**（負債4）。
 - **積み直しが「実際に想起の質を回復させるか」を測っていない。**この PR が測ったのは
-  「索引へ戻る」までであり、北極星の物差し（`examples/chat` の `retrieval`）は動かしていない。
+  「索引へ戻る」までであり、北極星の物差し（`examples/chat` の `retrieval`）は
+  動かしていない。
+- `stage_skipped.reason: "budget_exhausted"` が本番コードで0件という点は、
+  **受け取った報告のままで再検算していない。**
