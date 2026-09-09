@@ -20,6 +20,8 @@ import type {
   OutboxJobRecord,
   RecallId,
   RecallScope,
+  RequeueEmbedJobsOptions,
+  RequeueEmbedJobsResult,
   ScopeAggregate,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
@@ -796,5 +798,79 @@ export class PostgresMemoryStore implements MemoryStore {
       RETURNING id
     `);
     return (result.rows[0] as unknown as { id: string }).id;
+  }
+
+  /**
+   * ADR 0079: 索引に載っていない Memory を選んで `pending` へ戻し、**同じ1文の中で**
+   * `embed` の outbox 行を積み直す。
+   *
+   * 🔴 **`memories` の更新と `outbox` の INSERT は、同一トランザクションでなければ
+   * ならない。**片方だけ起きると次のどちらかになる:
+   * - 更新だけ起きた: `pending` に戻ったのに運ぶジョブが無い。**その行は永久に
+   *   `pending` のまま**で、`recall` は「待て」と案内し続ける——直すつもりが、
+   *   直せない状態を一つ増やしたことになる。
+   * - INSERT だけ起きた: `failed` のまま `embed` ジョブが積まれる。処理そのものは
+   *   走るので致命的ではないが、`aggregateScope` の `notIndexed.failed` は
+   *   ジョブが成功するまで減らない。
+   *
+   * **ここでは単一の `WITH ... INSERT ... SELECT` 文にしてある**——1文なら、
+   * 明示的な `BEGIN`/`COMMIT` を書かなくても両方が同じトランザクションに入る
+   * （`createMemoryWithOutbox` は複数文なので `db.transaction` で包む必要がある。
+   * こちらは1文で済むので包まない）。**この選択には歯が在る**: 適合スイートの
+   * 「更新と INSERT は片方だけ起きない」の検査（`memory-store-conformance.ts`）。
+   *
+   * `FOR UPDATE SKIP LOCKED` は `claimBatch`（`./outbox-store.ts`）と同じ理由で使う——
+   * 2つの呼び出しが同時に走っても、同じ Memory を二重に積み直さない（取ろうとして
+   * いる行はスキップして次へ行く）。
+   */
+  async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+    // `memoryIds` を渡された場合、形式が壊れた id は `getMany` と同じく静かに落とす
+    // （uuid 列への cast で文全体が例外になるのを避ける。mapping.ts の isUuidLike 参照）。
+    // **絞り込みを渡されたのに残りが0件なら、空集合との積なので問い合わせない。**
+    let idFilter = sql``;
+    if (opts.memoryIds !== undefined) {
+      const wellFormedIds = opts.memoryIds.filter((id) => isUuidLike(id));
+      if (wellFormedIds.length === 0) {
+        return { requeued: 0, memoryIds: [] };
+      }
+      idFilter = sql` AND id = ANY(${sql.param(wellFormedIds)}::uuid[])`;
+    }
+
+    const result = await this.db.execute(sql`
+      WITH target AS (
+        SELECT id FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND status IN ('active', 'contested')
+          -- 🔴 **この行は冗長に見えて、消すと索引が効かなくなる**（migration 0007）。
+          -- 下の \`= ANY($n::text[])\` の引数は実行時の値であり、プランナは「その配列に
+          -- 'ready' が入っていないこと」を証明できない——部分索引
+          -- \`idx_memories_requeue_embed\` の述語 \`embedding_status <> 'ready'\` が
+          -- クエリの WHERE から含意されず、索引が選ばれない。定数どうしの比較を
+          -- ここに書いて初めて含意が成立する（ADR 0032 で一度踏んだ穴と同じ形）。
+          -- 歯: \`__tests__/memories-requeue-embed-index.test.ts\` の EXPLAIN。
+          AND embedding_status <> 'ready'
+          AND embedding_status = ANY(${sql.param(opts.statuses)}::text[])
+          ${idFilter}
+        ORDER BY updated_at ASC, id ASC
+        LIMIT ${opts.limit}
+        FOR UPDATE SKIP LOCKED
+      ),
+      requeued AS (
+        UPDATE memories m
+        SET embedding_status = 'pending', updated_at = now()
+        FROM target t
+        WHERE m.id = t.id
+        RETURNING m.id
+      )
+      INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
+      SELECT
+        gen_random_uuid(), ${ctx.tenantId}, 'embed',
+        jsonb_build_object('memoryId', r.id), now(), 0, now()
+      FROM requeued r
+      RETURNING (payload->>'memoryId') AS memory_id
+    `);
+
+    const memoryIds = result.rows.map((row) => (row as unknown as { memory_id: string }).memory_id);
+    return { requeued: memoryIds.length, memoryIds };
   }
 }

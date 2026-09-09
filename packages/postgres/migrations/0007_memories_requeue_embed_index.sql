@@ -1,0 +1,57 @@
+-- 0007_memories_requeue_embed_index.sql
+--
+-- ADR 0079: `PostgresMemoryStore.requeueEmbedJobs`（`packages/postgres/src/memory-store.ts`）
+-- が対象を選ぶ述語のための部分索引。
+--
+-- 対象を選ぶ側の SQL は次の形をしている:
+--
+--   SELECT id FROM memories
+--   WHERE tenant_id = $1
+--     AND status IN ('active', 'contested')
+--     AND embedding_status <> 'ready'
+--     AND embedding_status = ANY($2::text[])
+--   ORDER BY updated_at ASC, id ASC
+--   LIMIT $3
+--   FOR UPDATE SKIP LOCKED
+--
+-- **`embedding_status <> 'ready'` が冗長に見えるのは意図である。この行がこの索引の
+-- 生命線であり、消すと索引が使われなくなる。**`= ANY($2::text[])` の `$2` は実行時の
+-- 引数であり、**プランナは「その配列に 'ready' が入っていないこと」を証明できない**
+-- ——部分索引は、その述語がクエリの WHERE から**論理的に含意される**ことを
+-- プランナが示せて初めて使える。`ANY($2)` からは何も含意されない。
+-- 定数どうしの比較 `embedding_status <> 'ready'` を WHERE に**そのまま書く**ことで、
+-- 初めて含意が成立する。
+--
+-- ⚠ **これは ADR 0032（`migrations/0002_outbox_claim_lease_index.sql`）で一度踏んだ穴と
+-- 同じ形である。**あちらは「部分索引の述語 `claimed_at IS NULL` がクエリの WHERE から
+-- 含意されない」ために索引が選ばれなかった。ここでは、**含意が成立する条件片を
+-- クエリ側へ明示的に置く**ことで先回りしている。
+--
+-- **`embedding_status` を索引キーに入れない**のも ADR 0032 の実測の帰結である。
+-- `requeueEmbedJobs` は `embedding_status = ANY(ARRAY['failed','pending'])` のように
+-- 複数値を指定しうる。キー列順を `(tenant_id, embedding_status, updated_at)` にすると、
+-- `embedding_status` を等号1点に絞らない限り索引の並びは `updated_at` の全体順序を
+-- 提供できず（`embedding_status` ごとに `updated_at` が別々に並んだ区間になるだけ）、
+-- `ORDER BY updated_at ASC LIMIT n` の早期打ち切りが効かなくなる。
+-- **`embedding_status` は部分索引の述語（'ready' の除外）で母数を削るのに使い、
+-- 具体的にどの値かは残った行への Filter に任せる。**
+--
+-- `id` を第3キーに入れているのは `ORDER BY updated_at ASC, id ASC` の同着解決まで
+-- 索引に肩代わりさせるためで、これが無いと同着があるたびに Sort が挟まりうる。
+--
+-- **索引の母数について。**正常に動いている系では大半の Memory が `ready` である
+-- （`embedding_status` の既定は `pending` で、`tick()` が処理して `ready` になる）。
+-- ⚠ **この「大半が ready」は設計上の想定であり、実運用の分布を測ったものではない**
+-- （ADR 0079「確かめていないこと」）。想定が外れて `ready` 以外が多数を占める系では、
+-- この部分索引は母数を削れず、プランナが Seq Scan を選びうる。**その場合でも
+-- 正しさは変わらない**（索引は速さの話であり、結果は同じ）。
+--
+-- ⚠ この `CREATE INDEX` は素のまま（`CONCURRENTLY` を付けない）。
+-- `packages/postgres/src/migrate.ts` が各移行ファイルを1トランザクションで包んでおり、
+-- `CREATE INDEX CONCURRENTLY` はトランザクション内で実行できないためである
+-- （`0002_outbox_claim_lease_index.sql` / `0003_period_ann_stage_index.sql` /
+-- `0004_contested_with_index.sql` と同じ理由・同じ形）。
+
+CREATE INDEX idx_memories_requeue_embed
+  ON memories (tenant_id, updated_at, id)
+  WHERE status IN ('active', 'contested') AND embedding_status <> 'ready';
