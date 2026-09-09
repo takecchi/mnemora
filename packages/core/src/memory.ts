@@ -12,6 +12,35 @@ export const MemoryStatusSchema = z.enum([
   "forgotten",
 ]) satisfies z.ZodType<MemoryStatus>;
 
+/**
+ * `Memory.strength` の上限（ADR 0078）。
+ *
+ * `strength` は `total = similarity × decay × tagMatch × freshness × strength`
+ * （docs/recall.md §7）に掛かる係数であり、**1 は「素通り」を意味する唯一の値**である。
+ * 上限が無いと、値を1つ大きく書いた Memory がそのテナントの想起を支配する——
+ * [ADR 0036](../../../docs/decisions/0036-clamp-freshness-at-one.md) が `freshness` で
+ * 塞いだのと同じ穴である。
+ *
+ * `MAX_FRESHNESS`（`strategies/scoring.ts`）と同じ理由で export する:
+ * 呼び出し側が**上限の存在と値を読める**形にしておく。
+ */
+export const MAX_STRENGTH = 1;
+
+/**
+ * `Memory.strength` の値域は **`(0, MAX_STRENGTH]`**（ADR 0078）。
+ *
+ * **0 を含めないのは、`strength = 0` が `total` を恒久的に 0 にする＝「二度と引かれない」
+ * という意味になり、それは `status: 'forgotten'` が既に表しているからである。**
+ * 同じことを言う道が2つ在ると、どちらで表されているかを読む側が両方見る必要が出る。
+ *
+ * ⚠ `Number.isFinite` を先に見る。**`NaN` は比較が全部 false になるため、
+ * `value > 0 && value <= 1` だけでは弾けるが、`value <= 0 || value > 1` のような
+ * 書き方だと素通りする。**この関数を唯一の綴りにして、その差を1箇所に閉じる。
+ */
+export function isStrengthInRange(value: number): boolean {
+  return Number.isFinite(value) && value > 0 && value <= MAX_STRENGTH;
+}
+
 export type EmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
 
 export const EmbeddingStatusSchema = z.enum([
@@ -107,7 +136,13 @@ export const MemorySchema = z.object({
   recordedAt: z.date(),
   lastReinforcedAt: z.date().nullable().optional(),
 
-  strength: z.number(),
+  // ADR 0078: 値域は `(0, MAX_STRENGTH]`。
+  // ⚠ **この schema は書き込み経路では走らない**——`MemorySchema` / `NewMemorySchema` を
+  // `.parse()` している箇所はリポジトリに0件であり、型の導出元として使われている。
+  // 実際に値域を強制するのは store の層（`packages/postgres` の CHECK 制約と、
+  // in-memory 実装の検査）である。ここを締めるのは**公開された型の契約**としてであって、
+  // これが防波堤なのではない。
+  strength: z.number().gt(0).max(MAX_STRENGTH),
   halfLifeHours: z.number().positive(),
   decayFloorAt: z.date(),
 
