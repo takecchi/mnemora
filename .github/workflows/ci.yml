@@ -88,11 +88,6 @@ jobs:
               -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
               -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
-      - name: "[一時的な診断・PR #123のCI赤対応で後で必ず消す] vector/btree_gin/pgcryptoがtrusted拡張かどうかを実測する"
-        run: |
-          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
-            -c "SELECT name, version, superuser, trusted FROM pg_available_extension_versions WHERE name IN ('vector','btree_gin','pgcrypto') ORDER BY name, version;"
-
       - name: Build @mnemora/core (postgres package depends on it)
         run: pnpm --filter @mnemora/core run build
 
