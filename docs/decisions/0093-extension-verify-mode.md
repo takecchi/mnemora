@@ -173,7 +173,7 @@
   **手元で実際に走らせて緑を確認したのは、下の「手元で実測したこと」に挙げたものだけ。**
 
 
-  `packages/postgres/src/__tests__/extension-mode.postgres.test.ts`（4本）:
+  `packages/postgres/src/__tests__/extension-mode.postgres.test.ts`（5本）:
 
   - **測定1**: 拡張が全部揃っていれば、`extensionMode: "verify"` は `CREATE EXTENSION` を
     一切発行せずに一式（`observations` / `memories` 等）が出来る。
@@ -212,6 +212,16 @@
   そこでは `create` モードは生の権限エラーで落ち、`verify` モードは
   足りない拡張名と実行すべき SQL を示す制御されたエラーで落ちる。測定4はこの区別を
   誤魔化さず、両方を対照で示している。
+
+  - **測定5**: `vector` / `btree_gin` / `pgcrypto` が全部既に設置済みの DB に、
+    `CREATE EXTENSION` 権限を持たない実ロール（測定4と同じ土台 `ensureRestrictedRole`
+    を再利用。別建てのロールは作らない）で接続し、`extensionMode` を省略（既定 `"create"`）
+    したまま `runMigrations` を呼ぶと成功する——PostgreSQL の `CreateExtension()` が
+    既存の拡張を検出して早期リターンし、権限チェックに到達しないことの直接証拠。
+    ⭐ **この歯は ADR の動機の説明を1点弱める**: 「拡張さえ揃っていれば、既定モードでも
+    権限の無いロールで通ってしまう」。verify モードの価値はこの状況には無く、
+    拡張が足りない場合（測定2・測定4a）と、承認された `CREATE EXTENSION` 文以外を
+    一切送らないという監査・ガバナンス上の要求に在る——上の「決定4直後」の記述と一致する。
 
   `packages/postgres/src/__tests__/extension-mode.test.ts`（DB 無し、13本）:
   `matchCreateExtensionLines` / `stripCreateExtensionStatements` を実ファイル
