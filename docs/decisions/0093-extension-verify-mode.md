@@ -185,7 +185,9 @@
   - **測定3（対照）**: 同じ状況で `extensionMode` 省略（既定）なら、superuser では
     今日どおり成功する——**既定の挙動を変えていないことの直接確認。**
   - **測定4**: `CREATE EXTENSION` 権限を持たない実ロール（`CREATE ROLE ... LOGIN`、
-    `public` への `CREATE` を明示的に `REVOKE` 済み）で、`vector` が未設置の状態を再現し:
+    `public` への `CREATE` を一度 `PUBLIC` から `REVOKE` した上で、このロール自身にだけ
+    `GRANT CREATE ON SCHEMA public` を戻したもの——理由は次段落）で、`vector` が
+    未設置の状態を再現し:
     - 既定（`"create"`）モードは、`0001_init.sql` 本文の `CREATE EXTENSION vector` が
       生の PostgreSQL の権限エラーで落ちる（**制御されていない失敗**——これが今日の
       mnemora が導入者を締め出す実際の壊れ方）。
@@ -194,9 +196,31 @@
     - その後 superuser が `vector` を設置すれば（DBA が承認した SQL を実行する運用そのもの）、
       権限を持たない同じロールで `extensionMode: "verify"` が成功し、一式ができる。
 
+  🔴 **`public` への `CREATE` をこのロールへ戻している理由（CI で赤を実際に踏んで直した点）**:
+  最初は「このロールは `public` への `CREATE` を一切持たない」で組んだが、CI で
+  `permission denied for schema public`（`ensureMigrationsTable` の
+  `CREATE TABLE IF NOT EXISTS _mnemora_migrations`）で落ちた——`runMigrations` は
+  `extensionMode` に関わらず自分の台帳とアプリのテーブルを作る必要があり、これは
+  「`CREATE EXTENSION` が使えない」という制約とは別の、ごく普通の要求だった。
+  この戻し（`GRANT CREATE ON SCHEMA public`）が「trusted 拡張なら schema への `CREATE`
+  だけで作れてしまう」抜け道を再び開かないかを、CI の実物
+  （`pgvector/pgvector:pg17`、`pg_available_extension_versions`）で実測した:
+
+  | name | version | superuser | trusted |
+  |---|---|---|---|
+  | vector | 0.8.6 | t | **f** |
+  | btree_gin | 1.0〜1.3 | t | t |
+  | pgcrypto | 1.3 | t | t |
+
+  `vector` は `trusted = false`（superuser 必須、schema への `CREATE` だけでは作れない）
+  ——これが測定4a・測定4bの成立条件そのもの。`btree_gin`・`pgcrypto` は `trusted = true`
+  だが、測定4・測定5のどちらもこの2つを事前に superuser で用意済みなので、
+  trusted であることが挙動に影響することはない。**この設計はもはや
+  「trusted かどうかに関わらず失敗する」ではなく、「`vector` が trusted でないことに
+  明示的に依存する」——下の「確かめていないこと」もこの変化に合わせて書き直した。**
+
   ⭐ **PostgreSQL 本体のソースコード（`src/backend/commands/extension.c` の `CreateExtension()`）
-  を読んだ限りの主張（⚠ これは実測ではなくソース読解であり、測定4の出力から得たものではない。
-  この PR は下の測定5でこれを実測に格上げする）**:
+  を読んだ限りの主張**:
   `CREATE EXTENSION IF NOT EXISTS x` は、`x` が**既に存在する**場合、
   `get_extension_oid` で既存を検出した時点で NOTICE を出して早期リターンし、
   `CreateExtensionInternal` 内の権限チェック（superuser 判定・対象スキーマへの
@@ -218,10 +242,16 @@
     を再利用。別建てのロールは作らない）で接続し、`extensionMode` を省略（既定 `"create"`）
     したまま `runMigrations` を呼ぶと成功する——PostgreSQL の `CreateExtension()` が
     既存の拡張を検出して早期リターンし、権限チェックに到達しないことの直接証拠。
+    **CI（`packages/postgres` ジョブ、head `25e8db0`、
+    [run 34436157469](https://github.com/takecchi/mnemora/actions/runs/34436157469)）で
+    実際に緑になった。**上の「PostgreSQL 本体のソースコードを読んだ限りの主張」は
+    ソース読解のままではなく、この歯によって実測に格上げされている。
     ⭐ **この歯は ADR の動機の説明を1点弱める**: 「拡張さえ揃っていれば、既定モードでも
     権限の無いロールで通ってしまう」。verify モードの価値はこの状況には無く、
     拡張が足りない場合（測定2・測定4a）と、承認された `CREATE EXTENSION` 文以外を
     一切送らないという監査・ガバナンス上の要求に在る——上の「決定4直後」の記述と一致する。
+    **隠す意図はない**——verify モードの価値が「拡張が足りない場合」と「監査上の要求」に
+    在ることは、この ADR がもともと書いていた主張であり、測定5はそれを崩さない。
 
   `packages/postgres/src/__tests__/extension-mode.test.ts`（DB 無し、13本）:
   `matchCreateExtensionLines` / `stripCreateExtensionStatements` を実ファイル
@@ -260,6 +290,42 @@
     対照を1本混ぜてあるのは、歯が0本のまま変異試験を回すと**全部「生存」と返り**、
     「まだ歯が足りない」と誤読して回し続けることになるため。
 
+- **CI で実測したこと（PR #123、この器にも DB は無いため、DB を要する歯は CI が唯一の実測場所）**:
+
+  - この PR の当初の push（head `39d1e78`、
+    [run 34433449426](https://github.com/takecchi/mnemora/actions/runs/34433449426)）は
+    測定4・測定5が「ちょうど 30000ms」で `Test timed out` / `Hook timed out` になり赤だった。
+    原因は advisory lock の待ちではなく、node-postgres の接続プール枯渇だった:
+    `runMigrations` は advisory lock 用のコネクションを1本 `pool.connect()` で
+    処理の最後まで保持したまま、本体の DDL 用にもう1本を要求する
+    （`packages/postgres/src/advisory-lock.ts` の `acquireAdvisoryLock`）。
+    測定4・5の `restrictedPool` を `max: 1` にしていたため2本目の要求がプールの
+    空きキューに積まれ、`connectionTimeoutMillis` 未設定のこのプールでは待ちに
+    上限が無く、事実上永久に固まっていた（vitest の `testTimeout: 30_000` が
+    それを外側から30秒で打ち切っていただけ）。`max: 2` に直して解消
+    （`migrate-concurrency.test.ts` の同種のロールが `max: 1` のままで問題にならないのは、
+    そちらは `pg_advisory_lock` の EXECUTE 権限自体を剥奪していて1本目の要求で
+    即座に権限エラーになり、2本目を要求する手前で終わるため）。
+  - この直後に別の実在するエラーが出た: `permission denied for schema public`
+    （`ensureMigrationsTable` の `CREATE TABLE IF NOT EXISTS _mnemora_migrations`、
+    `migrate.ts:366`）。上の「`public` への `CREATE` をこのロールへ戻している理由」節の
+    経緯そのもの。
+  - 両方を直した head `25e8db0`
+    （[run 34436157469](https://github.com/takecchi/mnemora/actions/runs/34436157469)）で
+    5ジョブ全部が緑になった。PR の `headRefOid` と run の `head_sha` を40桁で
+    突き合わせ済み。
+  - **CI での変異試験**（測定5専用の `GRANT CREATE ON SCHEMA public` を1行コメントアウトし
+    push → 確認 → revert の順で実施、head `03b8aee` →
+    [run 34435885674](https://github.com/takecchi/mnemora/actions/runs/34435885674)）:
+
+    | 変異 | 期待 | 実際 |
+    |---|---|---|
+    | 測定5の `GRANT CREATE ON SCHEMA public` を外す | 測定5だけ赤 | **測定5だけ赤**（`permission denied for schema public`、92ms・ハングではない） |
+    | （対照）測定1/1b/2/3/4 は無関係のまま | **緑のまま** | **緑**（5本とも、ハング無し） |
+
+    revert 後（head `25e8db0`）に全ジョブ緑を再確認し、`git status` で変異が
+    ツリーに残っていないことも確認した。
+
 - **確かめていないこと**:
 
   - **案2（`0001_init.sql` の編集）の「既存利用者には無影響のはず」という推測の当否。**
@@ -270,10 +336,17 @@
   - **PostgreSQL のバージョンによる `CreateExtension()` の早期リターンの挙動差。**
     確認したのは PostgreSQL 17（CI の `pgvector/pgvector:pg17`）のソースコード1点のみ。
     より古い/新しいバージョンで同じ順序かは確認していない。
-  - **`vector` 拡張が "trusted" フラグを持つかどうか。** 測定4は `public` への `CREATE`
-    を明示的に剥奪しているため、trusted かどうかに関わらず失敗することを狙って
-    設計してある（結果としてこの値には依存しない歯になっているはずだが、
-    trusted フラグの値そのものは調べていない）。
+  - ~~`vector` 拡張が "trusted" フラグを持つかどうか~~ →
+    **実測済み（CI の `pgvector/pgvector:pg17`、`pg_available_extension_versions`）**:
+    `vector 0.8.6` は `superuser = t` / `trusted = f`、`btree_gin`・`pgcrypto` は
+    `trusted = t`。この結果、測定4・測定5のロールには `public` への `CREATE` を
+    戻してある（自分のテーブルを作るため）——設計はもはや「`public` への `CREATE` を
+    丸ごと剥奪して trusted かどうかに関わらず失敗させる」ではなく、
+    「`vector` が trusted でないことに明示的に依存する」に変わった。
+    **確かめていない残り**: この trusted 値は pgvector 0.8.6・PostgreSQL 17 の組の
+    ものであり、pgvector や PostgreSQL のバージョンが変わっても同じ値である保証はない
+    （pgvector 側が将来 `trusted = true` に変えれば、測定4a・4bの前提——このロールが
+    `vector` を自力で作れないこと——が崩れる。その変化を検出する歯は無い）。
   - **`migrations/*.sql` に将来 `WITH SCHEMA` 付きや複数行にまたがる `CREATE EXTENSION`
     が増えた場合の挙動。** 決定3の一致条件はそれらを対象外とする（除去されず、
     verify モードでも送信される）。負債として残す。
