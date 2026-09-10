@@ -288,11 +288,8 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
     await pool.query(
       `GRANT CONNECT ON DATABASE ${DB_ALL_PRESENT_RESTRICTED_ROLE} TO ${RESTRICTED_ROLE}`,
     );
-    // 測定4の同種のコメント参照——`runMigrations` は自分の台帳・アプリのテーブルを
-    // 作る必要があるため、schema public への CREATE をこのロールへ戻す。この測定は
-    // 拡張3つを全部あらかじめ superuser で作っているため、trusted かどうかは
-    // そもそも関係ない（早期リターンで CREATE EXTENSION 自体を一切発行しない）。
-    await pool.query(`GRANT CREATE ON SCHEMA public TO ${RESTRICTED_ROLE}`);
+    // 🔴 MUTATION-TEST（PR #123 CI赤対応・測定5が噛むことの確認用、必ず戻す）:
+    // 次の1行を意図的にコメントアウトする。
 
     // `max: 2` にする理由は測定4の同種のコメントと同じ
     // （`runMigrations` が advisory lock 用のコネクションを1本保持したまま
