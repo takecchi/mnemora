@@ -411,10 +411,10 @@ jobs:
       # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "22"
 
@@ -442,7 +442,7 @@ jobs:
         # ため、`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`（`examples/chat/src/providers.ts` が
         # `LocalEmbeddingProvider` の `cacheDir` オプションへそのまま渡す——**使うだけで
         # `@mnemora/local-embedding` 自体は変更していない**）で場所を明示的に固定する。
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
           key: local-embedding-ruri-v3-30m-q8-v1
@@ -481,7 +481,7 @@ jobs:
 
       - name: 実測値そのもの（機械可読）を成果物として残す
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: identifier-probe
           path: ${{ github.workspace }}/identifier-probe.json
