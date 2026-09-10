@@ -39,6 +39,22 @@ export interface EmbeddingProviderConformanceOptions {
   texts: EmbeddingProviderConformanceTexts;
   /** 省略時は `{ tenantId: "embedding-provider-conformance" }`。 */
   ctx?: Ctx;
+  /**
+   * 各 `it` のタイムアウト（ミリ秒）。**省略時は vitest の既定（5秒）。**
+   *
+   * **なぜ要るか**: この suite は本物の実装にも当たる（Issue #116 の残債）。
+   * ネットワーク往復や、42MB の ONNX モデルのプロセス内ロードは 5 秒に収まらない。
+   * しかも `createProvider` は**毎回新しいインスタンスを作る**契約なので、
+   * その費用は `it` の本数だけ繰り返し掛かる。
+   *
+   * ⚠ **`deterministic` と違って、こちらは省略できてよい**——`undefined` は
+   * 「vitest の既定に従う」という**曖昧さの無い**意味しか持たない。
+   * `deterministic` の `undefined` が「決定的でない」と「宣言し忘れた」に
+   * 割れてしまうのとは事情が違う（**決定2 の理由をここへ持ち込まないこと**）。
+   * `it(name, fn, undefined)` が `it(name, fn)` と同じに振る舞うことは、
+   * vitest 5.0.0 で実際に走らせて確かめてある。
+   */
+  timeout?: number;
 }
 
 const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };
@@ -62,75 +78,103 @@ const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };
 export function describeEmbeddingProviderConformance(
   options: EmbeddingProviderConformanceOptions,
 ): void {
-  const { name, createProvider, deterministic, texts, ctx = defaultCtx } = options;
+  const { name, createProvider, deterministic, texts, ctx = defaultCtx, timeout } = options;
   const { a, b, c } = texts;
 
   describe(`EmbeddingProvider conformance (${name})`, () => {
-    it("space.provider / space.model は空でない文字列で、space.dimensions は正の整数である", async () => {
-      const provider = await createProvider();
+    it(
+      "space.provider / space.model は空でない文字列で、space.dimensions は正の整数である",
+      async () => {
+        const provider = await createProvider();
 
-      expect(provider.space.provider.length).toBeGreaterThan(0);
-      expect(provider.space.model.length).toBeGreaterThan(0);
-      expect(Number.isInteger(provider.space.dimensions)).toBe(true);
-      expect(provider.space.dimensions).toBeGreaterThan(0);
-    });
+        expect(provider.space.provider.length).toBeGreaterThan(0);
+        expect(provider.space.model.length).toBeGreaterThan(0);
+        expect(Number.isInteger(provider.space.dimensions)).toBe(true);
+        expect(provider.space.dimensions).toBeGreaterThan(0);
+      },
+      timeout,
+    );
 
-    it("space は embed() の前後で変わらない（provider/model/dimensions とも）", async () => {
-      const provider = await createProvider();
-      const before = { ...provider.space };
+    it(
+      "space は embed() の前後で変わらない（provider/model/dimensions とも）",
+      async () => {
+        const provider = await createProvider();
+        const before = { ...provider.space };
 
-      await provider.embed(ctx, [a, b, c]);
+        await provider.embed(ctx, [a, b, c]);
 
-      expect(provider.space.provider).toBe(before.provider);
-      expect(provider.space.model).toBe(before.model);
-      expect(provider.space.dimensions).toBe(before.dimensions);
-    });
+        expect(provider.space.provider).toBe(before.provider);
+        expect(provider.space.model).toBe(before.model);
+        expect(provider.space.dimensions).toBe(before.dimensions);
+      },
+      timeout,
+    );
 
-    it("embed(ctx, []) は [] を返す", async () => {
-      const provider = await createProvider();
+    it(
+      "embed(ctx, []) は [] を返す",
+      async () => {
+        const provider = await createProvider();
 
-      const vectors = await provider.embed(ctx, []);
+        const vectors = await provider.embed(ctx, []);
 
-      expect(vectors).toEqual([]);
-    });
+        expect(vectors).toEqual([]);
+      },
+      timeout,
+    );
 
-    it("embed(ctx, [a, b, c]) はちょうど3件返す", async () => {
-      const provider = await createProvider();
+    it(
+      "embed(ctx, [a, b, c]) はちょうど3件返す",
+      async () => {
+        const provider = await createProvider();
 
-      const vectors = await provider.embed(ctx, [a, b, c]);
+        const vectors = await provider.embed(ctx, [a, b, c]);
 
-      expect(vectors).toHaveLength(3);
-    });
+        expect(vectors).toHaveLength(3);
+      },
+      timeout,
+    );
 
-    it("返る各ベクトルの長さは space.dimensions と一致する", async () => {
-      const provider = await createProvider();
+    it(
+      "返る各ベクトルの長さは space.dimensions と一致する",
+      async () => {
+        const provider = await createProvider();
 
-      const vectors = await provider.embed(ctx, [a, b, c]);
+        const vectors = await provider.embed(ctx, [a, b, c]);
 
-      for (const vector of vectors) {
-        expect(vector).toHaveLength(provider.space.dimensions);
-      }
-    });
-
-    it("ベクトルの各成分は有限の数である（NaN/Infinity を含まない）", async () => {
-      const provider = await createProvider();
-
-      const vectors = await provider.embed(ctx, [a, b, c]);
-
-      for (const vector of vectors) {
-        for (const component of vector) {
-          expect(Number.isFinite(component)).toBe(true);
+        for (const vector of vectors) {
+          expect(vector).toHaveLength(provider.space.dimensions);
         }
-      }
-    });
+      },
+      timeout,
+    );
 
-    it("1件だけ渡すと1件返る", async () => {
-      const provider = await createProvider();
+    it(
+      "ベクトルの各成分は有限の数である（NaN/Infinity を含まない）",
+      async () => {
+        const provider = await createProvider();
 
-      const vectors = await provider.embed(ctx, [a]);
+        const vectors = await provider.embed(ctx, [a, b, c]);
 
-      expect(vectors).toHaveLength(1);
-    });
+        for (const vector of vectors) {
+          for (const component of vector) {
+            expect(Number.isFinite(component)).toBe(true);
+          }
+        }
+      },
+      timeout,
+    );
+
+    it(
+      "1件だけ渡すと1件返る",
+      async () => {
+        const provider = await createProvider();
+
+        const vectors = await provider.embed(ctx, [a]);
+
+        expect(vectors).toHaveLength(1);
+      },
+      timeout,
+    );
 
     // 以下は `deterministic: true` の実装だけに要求する歯。`false` のときは
     // 消さずに `it.skip` として名前を残す——「無い」と「決定的でないので測っていない」を
@@ -148,6 +192,7 @@ export function describeEmbeddingProviderConformance(
 
         expect(second).toEqual(first);
       },
+      timeout,
     );
 
     // ⚠ 順序の検査は決定性を前提にしている——決定的でない実装では、順序が正しいことを
@@ -167,6 +212,7 @@ export function describeEmbeddingProviderConformance(
         expect(ab[0]).toEqual(ba[1]);
         expect(ab[1]).toEqual(ba[0]);
       },
+      timeout,
     );
   });
 }
