@@ -211,12 +211,27 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
     // （superuser、または trusted 拡張向けの対象スキーマへの CREATE 権限）を
     // 一切持たないロールにする。
 
+    // `max: 2` にすること（`max: 1` にしない）。`runMigrations` は
+    // advisory lock 用のコネクションを1本 `pool.connect()` で借り切ったまま
+    // 処理の最後まで保持する（`acquireAdvisoryLock`、`advisory-lock.ts`）——
+    // その間に本体の DDL（`ensureMigrationsTable` 等）がさらに `pool.query`/
+    // `pool.connect()` でもう1本を要求する。`max: 1` だと2本目の要求がプールの
+    // 空きを待つキューに積まれ、`connectionTimeoutMillis` を設定していない
+    // このプールでは**その待ちに上限が無い**（`pg-pool` の実装: `connectionTimeoutMillis`
+    // が偽値なら `_pendingQueue` に積むだけでタイムアウトを仕掛けない）——lockClient が
+    // 空くことは（処理が終わるまで）無いので、事実上ここで永久に止まる。CI で本測定
+    // （4・5）だけが「ちょうど 30000ms」で固まっていたのはこれが原因で、
+    // `migrate-concurrency.test.ts` の同種のロール（`RESTRICTED_ROLE`）は
+    // `pg_advisory_lock` の EXECUTE 権限自体を剥奪しており、ロック取得の1本目で
+    // 即座に権限エラーになるため2本目を要求する手前で終わり、この罠を踏まない
+    // （`max: 1` のままで問題が顕在化しなかった）。`migrate-concurrency.test.ts` 歯1
+    // が並行4プロセスの pool を `max: 2` にしているのも同じ理由。
     const restrictedPool = new Pool({
       connectionString: connectionStringFor(DB_RESTRICTED_ROLE, {
         user: RESTRICTED_ROLE,
         password: RESTRICTED_ROLE_PASSWORD,
       }),
-      max: 1,
+      max: 2,
     });
     openedPools.push(restrictedPool);
 
@@ -261,12 +276,16 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
       `GRANT CONNECT ON DATABASE ${DB_ALL_PRESENT_RESTRICTED_ROLE} TO ${RESTRICTED_ROLE}`,
     );
 
+    // `max: 2` にする理由は測定4の同種のコメントと同じ
+    // （`runMigrations` が advisory lock 用のコネクションを1本保持したまま
+    // 本体の DDL 用にもう1本を要求するため、`max: 1` だと2本目がプールの空きを
+    // 待ち続けて固まる——`connectionTimeoutMillis` 未設定でこのプールには待ちの上限が無い）。
     const restrictedPool = new Pool({
       connectionString: connectionStringFor(DB_ALL_PRESENT_RESTRICTED_ROLE, {
         user: RESTRICTED_ROLE,
         password: RESTRICTED_ROLE_PASSWORD,
       }),
-      max: 1,
+      max: 2,
     });
     openedPools.push(restrictedPool);
 
