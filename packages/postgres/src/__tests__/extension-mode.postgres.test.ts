@@ -201,14 +201,27 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
     await pool.query(`CREATE EXTENSION IF NOT EXISTS pgcrypto`);
 
     // PostgreSQL 15+ は既定で public への CREATE を PUBLIC から剥奪しているはずだが、
-    // イメージ側の初期化スクリプトに依存させない——ここで明示的に剥奪し、
-    // 「trusted 拡張なら CREATE 権限だけで作れてしまう」経路も塞いでおく。
+    // イメージ側の初期化スクリプトに依存させない——ここで明示的に剥奪する。
     await pool.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC`);
 
     await ensureRestrictedRole();
     await pool.query(`GRANT CONNECT ON DATABASE ${DB_RESTRICTED_ROLE} TO ${RESTRICTED_ROLE}`);
-    // これ以外は何も許可しない——CREATE EXTENSION に要る権限
-    // （superuser、または trusted 拡張向けの対象スキーマへの CREATE 権限）を
+    // RESTRICTED_ROLE 自身には schema public への CREATE を戻す——`runMigrations` は
+    // `extensionMode` に関わらず自分の台帳（`_mnemora_migrations`）とアプリのテーブル
+    // （`observations` 等）を作る必要があり、これは「CREATE EXTENSION が使えない」という
+    // このロールの制約と別の、ごく普通の要求（自分のテーブルを持てないなら
+    // どのモードでも migrate できない）。schema への CREATE だけでは「trusted 拡張」を
+    // 自分でインストールできてしまう抜け道が生まれ得るが、実測（CI の
+    // pgvector/pgvector:pg17、`pg_available_extension_versions`）では
+    // vector = 0.8.6 は trusted = false（superuser 必須、CREATE 権限では作れない）——
+    // ⭐ **これが測定4a・測定4b の成立条件そのもの**（vector が欠けた状態で
+    // このロールが create/verify どちらのモードでも自力で vector を作れてはいけない）。
+    // btree_gin・pgcrypto は trusted = true だが、この測定・測定5のどちらも
+    // 両方を事前に superuser で用意済みなので、trusted であること自体は
+    // このロールの挙動に影響しない（既にある拡張を CREATE EXTENSION IF NOT EXISTS
+    // し直すだけ）。
+    await pool.query(`GRANT CREATE ON SCHEMA public TO ${RESTRICTED_ROLE}`);
+    // これ以外は何も許可しない——`CREATE EXTENSION` に要る superuser 権限を
     // 一切持たないロールにする。
 
     // `max: 2` にすること（`max: 1` にしない）。`runMigrations` は
@@ -266,7 +279,7 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
       await pool.query(`CREATE EXTENSION IF NOT EXISTS ${ext}`);
     }
 
-    // 測定4と同様、trusted 拡張なら CREATE 権限だけで作れてしまう経路も塞いでおく。
+    // 測定4と同様、PostgreSQL 15+ の既定を明示的に敷き直す。
     await pool.query(`REVOKE CREATE ON SCHEMA public FROM PUBLIC`);
 
     // 測定4が作っている低権限ロールの土台（RESTRICTED_ROLE）を再利用する——
@@ -275,6 +288,11 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
     await pool.query(
       `GRANT CONNECT ON DATABASE ${DB_ALL_PRESENT_RESTRICTED_ROLE} TO ${RESTRICTED_ROLE}`,
     );
+    // 測定4の同種のコメント参照——`runMigrations` は自分の台帳・アプリのテーブルを
+    // 作る必要があるため、schema public への CREATE をこのロールへ戻す。この測定は
+    // 拡張3つを全部あらかじめ superuser で作っているため、trusted かどうかは
+    // そもそも関係ない（早期リターンで CREATE EXTENSION 自体を一切発行しない）。
+    await pool.query(`GRANT CREATE ON SCHEMA public TO ${RESTRICTED_ROLE}`);
 
     // `max: 2` にする理由は測定4の同種のコメントと同じ
     // （`runMigrations` が advisory lock 用のコネクションを1本保持したまま
