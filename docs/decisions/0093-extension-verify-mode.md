@@ -165,7 +165,13 @@
      `extensionMode` を渡した記憶が呼び出し側に残っていないと区別できない
      ——戻り値に載せることで、その場で読める形にした。
 
-- **確かめたこと（本物の PostgreSQL 17 + pgvector、CI: `postgres` ジョブ）**:
+- **この PR で書いた歯（DB を要するものは CI の `postgres` ジョブが測る）**:
+
+  ⚠ **この節は「歯が何を主張するか」であって、「既に測り終えた」という意味ではない。**
+  DB を要する歯は、この器（PostgreSQL・docker・`DATABASE_URL` が無い）では1件も走らせられない
+  ——`pgvector/pgvector:pg17` に対して走る CI の `postgres` ジョブが唯一の実測場所である。
+  **手元で実際に走らせて緑を確認したのは、下の「手元で実測したこと」に挙げたものだけ。**
+
 
   `packages/postgres/src/__tests__/extension-mode.postgres.test.ts`（4本）:
 
@@ -188,8 +194,9 @@
     - その後 superuser が `vector` を設置すれば（DBA が承認した SQL を実行する運用そのもの）、
       権限を持たない同じロールで `extensionMode: "verify"` が成功し、一式ができる。
 
-  ⭐ **測定4の過程で、PostgreSQL 本体のソースコード
-  （`src/backend/commands/extension.c` の `CreateExtension()`）を読んで確かめた事実**:
+  ⭐ **PostgreSQL 本体のソースコード（`src/backend/commands/extension.c` の `CreateExtension()`）
+  を読んだ限りの主張（⚠ これは実測ではなくソース読解であり、測定4の出力から得たものではない。
+  この PR は下の測定5でこれを実測に格上げする）**:
   `CREATE EXTENSION IF NOT EXISTS x` は、`x` が**既に存在する**場合、
   `get_extension_oid` で既存を検出した時点で NOTICE を出して早期リターンし、
   `CreateExtensionInternal` 内の権限チェック（superuser 判定・対象スキーマへの
@@ -225,6 +232,23 @@
 
   `pnpm --filter @mnemora/postgres run typecheck` は緑（2回、DB 無しの歯は
   `vitest run` を2回実行しファイル数・件数の一致を確認）。
+
+- **手元で実測したこと（この器には PostgreSQL・docker・`DATABASE_URL` が無いので、DB を要さないものだけ）**:
+
+  - `pnpm --filter @mnemora/postgres run typecheck` → `exit=0`
+  - DB 無しの歯 3ファイル（`extension-mode.test.ts` / `cli-options.test.ts` /
+    `schema-namespace.test.ts`）を **2回**走らせ、`Test Files 3 passed (3)` /
+    `Tests 63 passed (63)` / `exit=0` が2回とも一致することを確認した。
+  - **変異試験**（「歯を書く → ベースライン緑を確かめる → 撃つ」の順で実施）:
+
+    | 変異 | 期待 | 実際 |
+    |---|---|---|
+    | `stripCreateExtensionStatements` を no-op（経路2を塞がない）にする | 赤 | **赤**（4件失敗） |
+    | 足りない拡張が在っても `MissingExtensionsError` を投げない | 赤 | **赤**（1件失敗） |
+    | （対照）`fetchInstalledExtensions` の内部変数名を変えるだけ | **緑のまま** | **緑**（63件） |
+
+    対照を1本混ぜてあるのは、歯が0本のまま変異試験を回すと**全部「生存」と返り**、
+    「まだ歯が足りない」と誤読して回し続けることになるため。
 
 - **確かめていないこと**:
 
