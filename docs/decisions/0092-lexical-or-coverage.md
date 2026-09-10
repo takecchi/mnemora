@@ -261,9 +261,16 @@ postgres 実装と in-memory 実装の差を縮める方向に働く。**
 
 ## 【実測・CI】書いた時点で「疑わしい」と自覚していた2点は、CI が解決した
 
-**GitHub Actions の run `34433584750`（job `102733975235` = `packages/postgres（本物の
-Postgres + pgvector）`、commit `2c8ecb5`、PostgreSQL 17 + pgvector）で実測。**
+**GitHub Actions の run `34437557302`（job `102745692943` = `packages/postgres（本物の
+Postgres + pgvector）`、PostgreSQL 17 + pgvector）で実測。**
 ⚠ **打ったのは CI であり、この ADR の書き手ではない**（ADR 0084 の【実測・委】と同じ断り）。
+⚠ **この run が測った commit は、この段落がこの run ID を書く前のものである**
+——ADR が自分を測った run の ID を書くと、書いた時点で commit が変わる。
+**自己参照は原理的に閉じない。**⟹ ここが指しているのは
+**「この枝の、この内容のコードを本物の PostgreSQL で通した run」**であり、
+**この ADR ファイル自身のバイト列を含む commit ではない。**
+⚠ この run は **#123（ADR 0093 の `extensionMode`）と #125（`budgetExceeded`）が
+`main` に着地した後の base（`7e4a8ca`）**に対して測っている。
 
 **この ADR の草稿は、次の2点を「疑わしい」と名指ししていた。⟹ 両方とも通った。**
 
