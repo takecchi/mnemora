@@ -164,7 +164,7 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       memoryStore,
       ctx,
       "hash-q4-distractor",
-      "The gurumi-chan-frontend release went smoothly.",
+      "gurumi-chan-frontend release went smoothly.",
     );
 
     const hits = await lexicalStore.search(
@@ -194,7 +194,7 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       memoryStore,
       ctx,
       "hash-q5-distractor",
-      "#proj-beta discussed a completely different rollout.",
+      "#proj-beta had a completely different rollout plan.",
     );
 
     const hits = await lexicalStore.search(
@@ -266,5 +266,65 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       filter: { tenantId: TENANT },
     });
     expect(presentHits.length).toBe(1);
+  });
+
+  it("8. ⚠ OR の副作用: ありふれた語だけを共有する記憶も候補に入る — 被覆率が下へ押すだけである（ADR 0084 §8 の負債は塞がっていない）", async () => {
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const lexicalStore = new PostgresLexicalStore(db);
+    const ctx: Ctx = { tenantId: TENANT };
+
+    const target = await createMemory(
+      memoryStore,
+      ctx,
+      "hash-q8-target",
+      "The gurumi-chan-backend deploy failed twice this week.",
+    );
+    // 🔴 識別子を1つも共有しない。共有するのは "deploy" という**ありふれた語1つ**だけ。
+    // ⚠ 'simple' 辞書は語幹処理もストップワード除去もしない（ADR 0084 §2 が
+    // 'simple' を選んだ理由そのもの）ため、この語は確実に語彙になる。
+    const noise = await createMemory(
+      memoryStore,
+      ctx,
+      "hash-q8-noise",
+      "The nightly deploy pipeline was migrated to a new runner.",
+    );
+
+    const hits = await lexicalStore.search(
+      ctx,
+      "anything about gurumi-chan-backend deploy failures",
+      {
+        limit: 10,
+        filter: { tenantId: TENANT },
+      },
+    );
+    const ids = hits.map((h) => h.memoryId);
+
+    // 🔴 AND（ADR 0084 の旧契約）なら noise は候補にすら入らなかった。
+    // OR にした結果、**入る**。これは設計どおりであり、隠さずここで主張する
+    // ——「引けなかった」と「そもそも探していない」を同じ顔にしないのと同じ理由で、
+    // 「OR にしたら余計なものが入る」も同じ顔にしない。
+    expect(ids).toContain(target.id);
+    expect(ids).toContain(noise.id);
+
+    const targetHit = hits.find((h) => h.memoryId === target.id);
+    const noiseHit = hits.find((h) => h.memoryId === noise.id);
+    expect(targetHit).toBeDefined();
+    expect(noiseHit).toBeDefined();
+
+    // ⟹ 被覆率が押し下げる: target は識別子と "deploy" の2語、noise は "deploy" の1語。
+    expect(targetHit!.coverage).toBeGreaterThan(noiseHit!.coverage);
+    // ⟹ 並び順（coverage 降順）にもそれが現れる。
+    expect(ids[0]).toBe(target.id);
+
+    // ⚠ ただし「押し下げた」だけであり、**塞いでいない**。
+    // ありふれた語1語だけのクエリを投げれば、その語を含む記憶が全件 coverage 1 で並ぶ
+    // ——ADR 0084 §8 / ADR 0092「引き受けた負債」がそのまま残っている。
+    const lowSelectivity = await lexicalStore.search(ctx, "deploy", {
+      limit: 10,
+      filter: { tenantId: TENANT },
+    });
+    expect(lowSelectivity.length).toBe(2);
+    expect(lowSelectivity.every((h) => h.coverage === 1)).toBe(true);
   });
 });
