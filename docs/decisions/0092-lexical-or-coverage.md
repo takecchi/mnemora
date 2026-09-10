@@ -259,20 +259,62 @@ postgres 実装と in-memory 実装の差を縮める方向に働く。**
 
 ---
 
+## 【実測・CI】書いた時点で「疑わしい」と自覚していた2点は、CI が解決した
+
+**GitHub Actions の run `34433584750`（job `102733975235` = `packages/postgres（本物の
+Postgres + pgvector）`、commit `2c8ecb5`、PostgreSQL 17 + pgvector）で実測。**
+⚠ **打ったのは CI であり、この ADR の書き手ではない**（ADR 0084 の【実測・委】と同じ断り）。
+
+**この ADR の草稿は、次の2点を「疑わしい」と名指ししていた。⟹ 両方とも通った。**
+
+1. **`array_agg(DISTINCT q)`（`q` は `tsquery`）が構文・実行時エラーを起こさないか。**
+   ⟹ **通った。**`0009_memories_lexical_or_coverage.sql` を含む9本のマイグレーションが
+   適用され（ログの「適用したマイグレーション: … `0009_memories_lexical_or_coverage.sql`」）、
+   `CREATE FUNCTION` は3本とも成功した。
+2. **文字列連結（`string_agg('(' || q::text || ')', ' | ')`）から `::tsquery` への
+   再パースが、意図した OR 構造に一致するか。**
+   ⟹ **一致した。**`lexical-store-reporter-questions.test.ts` の **8本すべてが緑**である。
+   特に歯2（`what did we say about PROJ-1234` が引ける ＝ OR が効いている）と
+   歯7（`PROJ-5678` が `PROJ-1234 and TASK-5678` に誤爆しない ＝ 各語を `"..."` で
+   囲んだフレーズの隣接要求が OR の後も保たれている）が、この2つを同時に主張している。
+
+**そして `idx_memories_lexical` は、新しい述語でも引き続き選ばれた。**
+`lexical-store-index.test.ts` の2本が緑であり、EXPLAIN の実出力は:
+
+```
+->  Bitmap Index Scan on idx_memories_lexical  (cost=0.00..1165.85 rows=198 width=0)
+```
+
+対照（同じ歯が索引を `DROP` して測り直す側）は:
+
+```
+->  Seq Scan on memories  (cost=0.00..6227.99 rows=198 width=28)
+```
+
+⟹ **プランナが本当にこの索引を選んでいた。**`WHERE` の左辺の式を索引式と字句どおり
+一致させ続けた（`to_tsvector('simple', mnemora_lexical_normalize(content))`）ことが
+効いている——**OR 化は `@@` の右辺だけを変えた。**
+
+⚠ **これはプランナの選択であり、版・統計・行数に依存する**
+（`recall-gate-index.test.ts` / `memories-requeue-embed-index.test.ts` と同じ留保）。
+
+### ⭐ 【実測・CI】`'simple'` 辞書がストップワードを落とさないことの帰結
+
+**歯8 が緑であることが、次の3つを同時に測っている:**
+
+- `deploy` という**ありふれた語1つだけ**を共有する記憶が、**OR では候補に入る**
+  （AND の旧契約では入らなかった）。
+- **被覆率がそれを下へ押す**（`0.4` 対 `0.2`。並びも `coverage` 降順に従った）。
+- **それでも `deploy` 単独のクエリでは、2件とも `coverage = 1` で並ぶ**
+  ⟹ **ADR 0084 §8 の低選択率の負債は、実測でも塞がっていない。**
+
+---
+
 ## 確かめていないこと
 
-- **postgres 側の SQL は、この作業環境に `psql`/`DATABASE_URL` が無いため、
-  書き手自身の手では一切実行できていない。**構文・意味は読解と
-  PostgreSQL 公式文書の該当箇所（tsquery の比較演算子・`array_agg(DISTINCT ...)` が
-  使える型であること）で裏取りしたが、**実際に CREATE FUNCTION が通るか・
-  期待通りの `tsquery`/`coverage` を返すかは CI の実行結果でしか確かめられない。**
-  特に次の2点は疑わしいと自覚している:
-  - `array_agg(DISTINCT q)`（`q` は `tsquery`）が構文・実行時エラーを起こさないか。
-  - 文字列連結（`string_agg('(' || q::text || ')', ' | ')`）から `::tsquery` への
-    再パースが、意図した OR 構造に一致するか。
-- **`idx_memories_lexical` が新しい述語（`mnemora_lexical_query_or`）でも
-  引き続き選ばれるか**は `lexical-store-index.test.ts` の CI 実行でしか確かめられない
-  （`WHERE` の左辺の式は変えていないので選ばれ続けると見込んでいるが、実測ではない）。
+- ⚠ **postgres 側の SQL は、この ADR の書き手の手元では一度も実行していない**
+  （作業環境に `psql`/`DATABASE_URL` が無い）。**⟹ 下の【実測・CI】は、
+  書き手が自分の手で打った数字ではない。**出所を分けるためにここに書いておく。
 - **`mnemora_lexical_coverage` の実行コスト**（大規模テーブルでの体感速度）は
   測っていない。
 - 🔴 **`retrieval` ベンチ（MRR / `hit@1` / `hit@10`）への影響は「測っていない」のではなく
