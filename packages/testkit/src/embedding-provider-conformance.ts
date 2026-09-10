@@ -197,20 +197,40 @@ export function describeEmbeddingProviderConformance(
 
     // ⚠ 順序の検査は決定性を前提にしている——決定的でない実装では、順序が正しいことを
     // この方法では確かめられない（同じ入力に毎回違うベクトルを返してよい実装にとって、
-    // 「入れ替えた入力の結果を入れ替えて比較する」ことに意味が無いため）。
+    // 「並べ替えた入力の結果を並べ直して比較する」ことに意味が無いため）。
     // これは潰してはならない区別である：`deterministic: false` を選んだ実装に対して
     // この歯を黙って走らせてはならない。
+    //
+    // 🔴🔴 **2件の入れ替え（`[a,b]` と `[b,a]`）ではなく、3件の巡回（`[a,b,c]` と
+    // `[b,c,a]`）で測る。これは意図であって、大は小を兼ねる式の飾りではない。**
+    //
+    // **なぜ変えたか（Issue #116 の残債作業で実測して分かった）**: この歯は元々
+    // 「`embed([a,b])[0]` と `embed([b,a])[1]` が一致するか」を見ていた。ところが
+    // **入力順をつねに逆にして返す実装は、その等式を恒等的に満たす**
+    // （`[a,b]→[vb,va]` なので0番目は `vb`、`[b,a]→[va,vb]` なので1番目も `vb`）。
+    // ⟹ **2件では「入力順を守る」と「入力順をきっちり逆にする」を区別できない。**
+    // 実測: `OpenAIEmbeddingProvider` から `index` による並べ直し（`.sort(...)`）を
+    // 丸ごと外す変異を入れても、この歯は緑のままだった（落ちたのは
+    // `packages/openai` 自身のユニットテスト1本だけ）。
+    //
+    // 3件の巡回にすると、同じ「つねに逆順」の実装は
+    // `[a,b,c]→[vc,vb,va]` / `[b,c,a]→[va,vc,vb]` となり、
+    // `abc[0]=vc` に対して `bca[2]=vb` ⟹ **落ちる。**
+    // ⚠ **バッチ不変性は相変わらず要求していない**——比べる2回はどちらも3件のバッチであり、
+    // 「`embed([a,b])` と `embed([a])` が一致するか」は依然として問うていない（決定5）。
     maybeIt(
-      "順序が入力順に対応する: embed([a,b]) の0番目と embed([b,a]) の1番目が一致し、" +
-        "embed([a,b]) の1番目と embed([b,a]) の0番目が一致する",
+      "順序が入力順に対応する: [a,b,c] と、1つ回した [b,c,a] で、同じテキストの位置どうしが一致する",
       async () => {
         const provider = await createProvider();
 
-        const ab = await provider.embed(ctx, [a, b]);
-        const ba = await provider.embed(ctx, [b, a]);
+        const abc = await provider.embed(ctx, [a, b, c]);
+        const bca = await provider.embed(ctx, [b, c, a]);
 
-        expect(ab[0]).toEqual(ba[1]);
-        expect(ab[1]).toEqual(ba[0]);
+        // a は abc の0番目 / bca の2番目、b は abc の1番目 / bca の0番目、
+        // c は abc の2番目 / bca の1番目に居る。
+        expect(abc[0]).toEqual(bca[2]);
+        expect(abc[1]).toEqual(bca[0]);
+        expect(abc[2]).toEqual(bca[1]);
       },
       timeout,
     );

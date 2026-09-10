@@ -56,9 +56,19 @@ const [a, b, c] = recorded.entries.map((e) => e.text) as [string, string, string
  *
  * `OpenAIEmbeddingProvider.embed` は `[...response.data].sort((a, b) => a.index - b.index)` で
  * 応答を並べ直している（「OpenAI は入力順を保つと文書化しているが、前提を作らない」）。
- * **足場が入力順のまま返すと、この並べ直しを丸ごと消しても適合テストは緑のままになる。**
- * ＝ 歯が偽陽性になる。逆順で返して初めて、並べ直しが本当に効いていることを測れる。
- * （実際に `.sort(...)` を外す変異を入れて、順序の歯が落ちることを確かめてある。PR 本文参照。）
+ * **足場が入力順のまま返すと、並べ直しは一度も仕事をしない**——並べ直しを消しても
+ * 出力が1ビットも変わらない構成で「並べ直しを測った」とは言えない。逆順で返すことで、
+ * 返り値が `.sort(...)` の実行に実際に依存する状態を作っている。
+ *
+ * ⚠⚠ **ただし、逆順にするだけでは順序の歯は `.sort(...)` の除去を検出しない。**
+ * これは推測ではなく実測である: 逆順の再生 client のまま `.sort(...)` を外す変異を
+ * 入れたところ、**適合テスト10本は全部緑のまま**で、落ちたのは
+ * `./embedding-provider.test.ts` の「index 順に並べ替えて返す」1本だけだった。
+ * 理由は当時の順序の歯が2件の入れ替え（`[a,b]` と `[b,a]`）で測っていたことにあり、
+ * **つねに逆順で返す実装はその等式を恒等的に満たしてしまう。**
+ * ⟹ 適合 suite 側の順序の歯を**3件の巡回**（`[a,b,c]` と `[b,c,a]`）へ強めた
+ * （`packages/testkit/src/embedding-provider-conformance.ts` の当該コメント）。
+ * その後に同じ変異を入れ直すと、**順序の歯がちょうど1本落ちる。**
  *
  * ⛔ **記録に無い入力には例外を投げる。**黙って作りものベクトルへ倒れない
  * ——`RecordedEmbeddingProvider`（ADR 0051）が守っているのと同じ規律である。
@@ -76,6 +86,19 @@ function createReplayClient(): Pick<OpenAI, "embeddings"> {
       if (params.dimensions !== DIMENSIONS) {
         throw new Error(
           `再生クライアント: dimensions が記録と違う（受け取り: ${String(params.dimensions)} / 記録: ${DIMENSIONS}）`,
+        );
+      }
+      // 🔴🔴 **空入力で呼ばれたら投げる。これも意図である。**
+      // `OpenAIEmbeddingProvider.embed` は `if (texts.length === 0) return []` で
+      // **client を呼ばずに**返す契約である（既存の `./embedding-provider.test.ts` が
+      // `expect(create).not.toHaveBeenCalled()` で固定している）。
+      // ⚠ **足場が空入力に `data: []` を返してしまうと、この早期 return を丸ごと消しても
+      // 「`embed(ctx, [])` は `[]` を返す」の歯は緑のままになる**——実測でそうなった。
+      // 投げるようにして初めて、「空配列で API を叩いていない」ことを測れる。
+      if (params.input.length === 0) {
+        throw new Error(
+          "再生クライアント: 空の input で呼ばれた。OpenAIEmbeddingProvider は " +
+            "embed(ctx, []) で client を呼ばずに返す契約であり、ここへ到達してはならない",
         );
       }
       const data = params.input.map((text, index) => {
