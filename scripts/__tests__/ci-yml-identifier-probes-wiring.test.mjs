@@ -375,4 +375,76 @@ describe("ci.yml の identifier-probes ジョブの配線", () => {
   it("ジョブに timeout-minutes が設定されている（既定 360 分で刺さらない）", () => {
     expect(jobBlock).toMatch(/^ {4}timeout-minutes: \d+$/m);
   });
+
+  /**
+   * 🔴 **この歯が在る理由（この PR で実際に一度起きた形）**
+   *
+   * #127 が `ci.yml` の action を node24 の版へ上げたとき、この
+   * `identifier-probes` ジョブは**まだ存在していなかった。**⟹ 両方が載ると
+   * 「既存は v6・このジョブだけ v4(node20)」になる。
+   *
+   * ⚠ **これは何も鳴らない形の欠陥である:** 足した行が既存行と違うので git は
+   * 衝突を報告せず（`mergeStateStatus` は `CLEAN` のまま）、GitHub Actions が
+   * runner から Node 20 を削除する **2026-09-23** までは CI も緑である。
+   * ⟹ **期限の日に、このジョブだけが壊れる。**
+   * ⟹ 「両方が載った状態」を誰も検査していなかった。**そこを固定する。**
+   *
+   * ⚠ **歯からネットワークへ出ていない**（`action.yml` の `runs.using` を実際に
+   * 引くことはしていない）。代わりに (a) ファイル内の他のジョブに後れを
+   * 取っていないこと と (b) node24 だと確認できた版の下限表 の2つで挟む。
+   */
+  const NODE24_MIN_MAJOR = {
+    // 2026-09-10 に `action.yml` の `runs.using` を引いて node24 だと確認した
+    // 最小のメジャー。⚠ **表に無いメジャーは確認していない**——だから下限は
+    // 安全側に寄せてある。ここより下の版へ落とすときは `runs.using` を自分で
+    // 引き直し、この表を更新すること。
+    //   actions/checkout@v6        node24（v4 は node20。v5 は未確認）
+    //   actions/setup-node@v6      node24（v4 は node20。v5 は未確認）
+    //   actions/upload-artifact@v6 node24（v4・v5 は未確認）
+    //   actions/cache@v5, @v6      node24（v4 は node20）
+    "actions/checkout": 6,
+    "actions/setup-node": 6,
+    "actions/upload-artifact": 6,
+    "actions/cache": 5,
+  };
+
+  /**
+   * `uses: actions/<name>@v<major>` を拾う。
+   *
+   * @param {string} block
+   */
+  function usesInBlock(block) {
+    return [...block.matchAll(/^\s*uses: (actions\/[a-z-]+)@v(\d+)$/gm)].map((match) => ({
+      action: match[1],
+      major: Number(match[2]),
+    }));
+  }
+
+  it("🔴 このジョブの action が ci.yml の他のジョブに後れを取っていない（#127 型の取り残し）", () => {
+    const mine = usesInBlock(jobBlock);
+    expect(mine.length).toBeGreaterThan(0);
+    const fileWide = usesInBlock(workflow);
+    for (const { action, major } of mine) {
+      const maxMajor = Math.max(
+        ...fileWide.filter((used) => used.action === action).map((used) => used.major),
+      );
+      expect(
+        major,
+        `${action}: このジョブは @v${major} だが、ci.yml の他所は @v${maxMajor} を使っている`,
+      ).toBe(maxMajor);
+    }
+  });
+
+  it("🔴 このジョブの action が node24 の版である（2026-09-23 に runner から Node 20 が消える）", () => {
+    const mine = usesInBlock(jobBlock);
+    expect(mine.length).toBeGreaterThan(0);
+    for (const { action, major } of mine) {
+      const min = NODE24_MIN_MAJOR[action];
+      expect(min, `${action} の node24 下限が表に無い（引き直して表を更新すること）`).toBeDefined();
+      expect(
+        major,
+        `${action}@v${major} は node24 だと確認できている下限 v${min} より古い`,
+      ).toBeGreaterThanOrEqual(min);
+    }
+  });
 });
