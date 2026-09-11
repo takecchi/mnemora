@@ -411,6 +411,66 @@ export interface MemoryStore {
    * 動くので、繰り返し呼ぶと対象が一巡する（同じ行だけを取り続けて他が飢えることがない）。
    */
   requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+  /**
+   * Issue #134 / [ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md):
+   * docs/memory-model.md §11 行5 が要求する「旧行の `status`/`superseded_by_id` 更新と
+   * **新 Memory の作成**は1トランザクションで完結させる」の、後半（新 Memory の作成側）を
+   * 満たすための口。`updateStatusWithEvent`（ADR 0031）は既存 Memory の status 更新と
+   * イベント追記の対だけを扱い、新しい Memory の作成は範囲外だった——このメソッドは
+   * その2つを1回の呼び出し・1トランザクションにまとめる。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に 0.1.4 で公開済み、
+   * `docs/autonomy.md:114`）。この口を実装しない adapter は今日どおり
+   * `updateStatusWithEvent` + 別呼び出しの `createMemoryWithOutbox` の2段のままでよい。
+   *
+   * `news` が配列である理由: `runtime.consolidate`（N→1）は1件で足りるが、
+   * `runtime.reextract` は候補ごとに `createMemoryWithOutbox` をループで呼び M件作る
+   * （`runtime.ts` の `createMemoriesFromCandidates`）。1件しか受け取らない形にすると
+   * `reextract` をこの口へ寄せられない。
+   *
+   * 意味論:
+   * - `news` の各要素は {@link MemoryStore.createMemoryWithOutbox} と**同じ冪等経路**
+   *   （ON CONFLICT。既存行と衝突したら `created: false` を返し、ジョブは一切積まない）。
+   * - `supersede` の各要素は {@link MemoryStore.updateStatusWithEvent} と**同じ CAS 意味論**
+   *   （`status` は常に `"superseded"` に固定——このメソッドは supersede 専用であり、
+   *   任意の status への更新は今日どおり `updateStatus`/`updateStatusWithEvent` を使うこと）。
+   * - 🔴 **CAS に弾かれた対象は例外にしない。** `conflicted` に `{ id, observedStatus }` として
+   *   積み、**トランザクションはそのまま commit する**（条件付き UPDATE の0行はエラーでは
+   *   ない）。ADR 0031「採らなかった案」（supersede ループ全体を1トランザクションにする案の
+   *   却下）を本メソッドは覆さない——「1件の競合」を「全部やらなかった」に化けさせない。
+   * - 🔴 **`supersede[].id` の行がそもそも存在しない場合は、`updateStatusWithEvent` と同じ
+   *   「memory not found」の `Error` を投げる。**このときトランザクション全体がロール
+   *   バックされ、**`news` の作成も巻き戻る**——⛔ **`conflicted` には混ぜない**
+   *   （「CAS で弾かれた」と「行が無い」は別の「無い」であり、潰すとこの設計の要が壊れる）。
+   * - `supersededById` の外部キー相当は ADR 0047 の線どおり「存在」まで検査する
+   *   （一対一等の整合までは踏み込まない）。
+   *
+   * ⚠ **これは振る舞いの変更である。** 今日（`updateStatusWithEvent` を単独で呼ぶ経路）は
+   * 対象が存在しない場合、直前に別途呼んでいた `createMemoryWithOutbox` の作成はすでに
+   * commit 済みで残る。このメソッドを経由すると、その作成も巻き戻る——ADR 0100
+   * 「引き受ける負債」参照。
+   *
+   * 🔴 **原子性の証拠ではない。**この口が在ること自体は「adapter がこの口を実装したと
+   * 宣言した」ことしか意味しない——`packages/testkit` の `InMemoryMemoryStore` のように、
+   * 実装していても「トランザクションは一切模していない」adapter がありうる
+   * （`InMemoryMemoryStore` クラス doc 参照）。実際に原子性を測るのは適合テストと
+   * `packages/postgres` の並行の歯であって、この口の有無そのものではない。
+   */
+  supersedeWithNewMemories?(
+    ctx: Ctx,
+    news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
+    supersede: ReadonlyArray<{
+      id: MemoryId;
+      supersededById: MemoryId;
+      expectedStatus?: MemoryStatus;
+      event: NewMemoryEvent;
+    }>,
+  ): Promise<{
+    created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+    superseded: MemoryEvent[];
+    conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+  }>;
 }
 
 /**

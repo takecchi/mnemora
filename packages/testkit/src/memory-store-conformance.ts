@@ -102,6 +102,22 @@ export interface MemoryStoreConformanceOptions {
    * （`now` は呼び出し側が渡す。`leaseMs` はこの検査の中だけの値でよい）。
    */
   claimEmbedJobs: (ctx: Ctx, now: Date) => Promise<OutboxJobRecord[]> | OutboxJobRecord[];
+  /**
+   * Issue #134 / ADR 0100: 対象の `MemoryStore` 実装が `supersedeWithNewMemories`
+   * （任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * ADR 0031 決定9 / ADR 0047 決定9 と同じ判断——**省略可にしないこと。**省略できると
+   * 「原子性の歯を実際に検査した」adapter と「検査していない」adapter が同じ緑色の
+   * 出力になり、このリポジトリが ADR 0011/0025/0027/0028/0034/0047 で繰り返した
+   * 「名乗れる以上の精度を主張する」族の失敗を、フックの省略という形で再現することになる。
+   *
+   * `true` なら原子性の歯（成功／CAS 競合が `conflicted` に出て他は commit される／対象
+   * 不在で「memory not found」・news の作成ごと rollback／`supersededById` の外部キー／
+   * `news` が複数件）を実行する。`false` なら
+   * `expect(store.supersedeWithNewMemories).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない（`docs/autonomy.md` ⛔、マネージャー指示）。
+   */
+  supportsSupersedeWithNewMemories: boolean;
 }
 
 /**
@@ -124,7 +140,14 @@ export interface MemoryStoreConformanceOptions {
  * - `createRecall` が recallId を発行すること（段6、ADR 0008）
  */
 export function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void {
-  const { name, createStore, listEventsForMemory, prepareRecallId, claimEmbedJobs } = options;
+  const {
+    name,
+    createStore,
+    listEventsForMemory,
+    prepareRecallId,
+    claimEmbedJobs,
+    supportsSupersedeWithNewMemories,
+  } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
     // -------------------------------------------------------------------
@@ -1472,6 +1495,230 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(events).toHaveLength(1);
       expect(events[0]?.kind).toBe("forgotten");
     });
+
+    // -------------------------------------------------------------------
+    // supersedeWithNewMemories（news の作成と supersede を1トランザクションで、
+    // Issue #134 / ADR 0100）。docs/memory-model.md §11 行5 が要求する「旧行の status 更新と
+    // 新 Memory の作成は1トランザクションで完結させる」の、`updateStatusWithEvent`
+    // （ADR 0031）が範囲外にしていた後半を埋める。🔴 任意メソッド——`supportsSupersede-
+    // WithNewMemories` が false の adapter では、メソッドそのものが存在しないことだけを
+    // 検査する。
+    // -------------------------------------------------------------------
+
+    if (supportsSupersedeWithNewMemories) {
+      it("supersedeWithNewMemories は news を作り（複数件）、supersede を成功させ、superseded イベントを1件ずつ積む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "anchor" }),
+        );
+        const oldA = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "old-a" }),
+        );
+        const oldB = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "old-b" }),
+        );
+
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "news-1" }),
+              jobKinds: ["embed"],
+            },
+            {
+              input: buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "news-2" }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: oldA.id,
+              supersededById: anchor.id,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, oldA.id, oldA.digest),
+            },
+            {
+              id: oldB.id,
+              supersededById: anchor.id,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, oldB.id, oldB.digest),
+            },
+          ],
+        );
+
+        // news が複数件、それぞれ冪等経路（created: true、jobKinds どおりのジョブ数）で作られる。
+        expect(result.created).toHaveLength(2);
+        expect(result.created.every((c) => c.created)).toBe(true);
+        expect(result.created[0]?.jobs).toHaveLength(1);
+        expect(result.created[1]?.jobs).toHaveLength(0);
+
+        expect(result.conflicted).toEqual([]);
+        expect(result.superseded).toHaveLength(2);
+
+        const updatedA = await store.get(ctx, oldA.id);
+        const updatedB = await store.get(ctx, oldB.id);
+        expect(updatedA?.status).toBe("superseded");
+        expect(updatedA?.supersededById).toBe(anchor.id);
+        expect(updatedB?.status).toBe("superseded");
+        expect(updatedB?.supersededById).toBe(anchor.id);
+
+        expect(await listEventsForMemory(ctx, oldA.id)).toHaveLength(1);
+        expect(await listEventsForMemory(ctx, oldB.id)).toHaveLength(1);
+      });
+
+      it("supersedeWithNewMemories は CAS に弾かれた対象を conflicted に積み、他の news/supersede は commit される", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "anchor-conflict" }),
+        );
+        const oldOk = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "old-ok" }),
+        );
+        const oldConflicted = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "old-conflicted" }),
+        );
+        await store.updateStatus(ctx, oldConflicted.id, "archived");
+        // ⚠ in-memory は Map の行の参照をそのまま返す——「変わっていない」を assert する前に
+        // プリミティブへ写し取っておく（`in-memory-memory-store.ts` の該当コメント参照。
+        // 写し取らずに同じ参照を2回見ると、変異を入れても歯が赤くならない）。
+        const observedBeforeStatus: string = oldConflicted.status;
+
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "news-conflict" }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: oldOk.id,
+              supersededById: anchor.id,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, oldOk.id, oldOk.digest),
+            },
+            {
+              id: oldConflicted.id,
+              supersededById: anchor.id,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, oldConflicted.id, oldConflicted.digest),
+            },
+          ],
+        );
+
+        // CAS に弾かれた対象は conflicted に積まれる——例外にはならない。
+        expect(result.conflicted).toEqual([{ id: oldConflicted.id, observedStatus: "archived" }]);
+        // 他の news・supersede は commit される。
+        expect(result.created).toHaveLength(1);
+        expect(result.created[0]?.created).toBe(true);
+        expect(result.superseded).toHaveLength(1);
+
+        const updatedOk = await store.get(ctx, oldOk.id);
+        expect(updatedOk?.status).toBe("superseded");
+
+        // 弾かれた対象は一切変わっていない（プリミティブに写し取った値と比較する）。
+        const stillConflicted = await store.get(ctx, oldConflicted.id);
+        expect(stillConflicted?.status).toBe(observedBeforeStatus);
+        expect(await listEventsForMemory(ctx, oldConflicted.id)).toEqual([]);
+      });
+
+      it("supersedeWithNewMemories は supersede 対象がそもそも存在しなければ throw し、news の作成も含めてロールバックする", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "anchor-rollback" }),
+        );
+        const missingId = randomUUID();
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const newsInput = buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "conformance-supersede-with-new-memories-v1",
+          contentHash: "rollback-check-not-found",
+        });
+
+        await expect(
+          store.supersedeWithNewMemories!(
+            ctx,
+            [{ input: newsInput, jobKinds: [] }],
+            [
+              {
+                id: missingId,
+                supersededById: anchor.id,
+                expectedStatus: "active",
+                event: buildSupersedeEvent(ctx, missingId, "digest"),
+              },
+            ],
+          ),
+        ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+
+        // news が本当にロールバックされたことの確認: 同じ冪等キーでもう一度
+        // createMemoryWithOutbox を呼ぶと、ロールバックされていれば新規作成
+        // （created: true）になる。ロールバックされていなければ既存行に衝突して
+        // created: false になる。
+        const { created } = await store.createMemoryWithOutbox(ctx, newsInput, []);
+        expect(created).toBe(true);
+      });
+
+      it("supersedeWithNewMemories は実在しない supersededById に対して失敗し、news の作成もロールバックする（外部キー、ADR 0047）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const oldA = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "old-a-fk" }),
+        );
+        const missingAnchor = randomUUID();
+        const observation = await store.createObservation(
+          ctx,
+          buildNewObservationFixture({ tenantId: "tenant-1" }),
+        );
+        const newsInput = buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "conformance-supersede-with-new-memories-v1",
+          contentHash: "rollback-check-fk",
+        });
+
+        await expect(
+          store.supersedeWithNewMemories!(
+            ctx,
+            [{ input: newsInput, jobKinds: [] }],
+            [
+              {
+                id: oldA.id,
+                supersededById: missingAnchor,
+                expectedStatus: "active",
+                event: buildSupersedeEvent(ctx, oldA.id, oldA.digest),
+              },
+            ],
+          ),
+        ).rejects.toThrow();
+
+        const unchanged = await store.get(ctx, oldA.id);
+        expect(unchanged?.status).toBe("active");
+
+        const { created } = await store.createMemoryWithOutbox(ctx, newsInput, []);
+        expect(created).toBe(true);
+      });
+    } else {
+      it("supersedeWithNewMemories は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.supersedeWithNewMemories).toBeUndefined();
+      });
+    }
 
     // -------------------------------------------------------------------
     // aggregateScope（docs/recall.md §5 目次帯・第3階・「スコープの外延」マネージャー決定）
