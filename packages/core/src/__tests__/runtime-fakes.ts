@@ -394,7 +394,7 @@ export class FakeMemoryStore implements MemoryStore {
     news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
     supersede: ReadonlyArray<{
       id: MemoryId;
-      supersededById: MemoryId;
+      supersededByIndex: number;
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
@@ -403,16 +403,20 @@ export class FakeMemoryStore implements MemoryStore {
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
-    // 1. 事前検証——まだ何も書いていないうちに投げる。
+    // 1. 事前検証——まだ何も書いていないうちに投げる。⛔ 3種類の失敗を潰さない（ADR 0100）。
     for (const target of supersede) {
+      if (
+        !Number.isInteger(target.supersededByIndex) ||
+        target.supersededByIndex < 0 ||
+        target.supersededByIndex >= news.length
+      ) {
+        throw new RangeError(
+          `FakeMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
+        );
+      }
       const memory = this.backing.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${target.id}`);
-      }
-      if (!this.backing.memories.has(target.supersededById)) {
-        throw new Error(
-          `FakeMemoryStore: superseded-by memory not found: ${target.supersededById}`,
-        );
       }
     }
 
@@ -439,9 +443,14 @@ export class FakeMemoryStore implements MemoryStore {
         continue;
       }
       memory.status = "superseded";
-      memory.supersededById = target.supersededById;
+      const anchorId = created[target.supersededByIndex]!.memory.id;
+      memory.supersededById = anchorId;
       memory.updatedAt = new Date();
-      const storedEvent = buildStoredEvent(ctx, target.event);
+      // `meta.supersededById` は解決した id で埋める（interface の契約）。
+      const storedEvent = buildStoredEvent(ctx, {
+        ...target.event,
+        meta: { ...target.event.meta, supersededById: anchorId },
+      });
       this.backing.events.push(storedEvent);
       superseded.push(storedEvent);
     }

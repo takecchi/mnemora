@@ -506,7 +506,7 @@ export class PostgresMemoryStore implements MemoryStore {
     news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
     supersede: ReadonlyArray<{
       id: MemoryId;
-      supersededById: MemoryId;
+      supersededByIndex: number;
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
@@ -515,6 +515,21 @@ export class PostgresMemoryStore implements MemoryStore {
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
+    // 呼び手が壊れた索引を渡した場合は、トランザクションを開く前に落とす（ADR 0100）。
+    // ⛔ `conflicted` にも「memory not found」にも混ぜない——3つとも別の失敗である。
+    // 開く前に落とすので、`news` の作成も当然起きない。
+    for (const target of supersede) {
+      if (
+        !Number.isInteger(target.supersededByIndex) ||
+        target.supersededByIndex < 0 ||
+        target.supersededByIndex >= news.length
+      ) {
+        throw new RangeError(
+          `PostgresMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
+        );
+      }
+    }
+
     return this.db.transaction(async (tx) => {
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
@@ -602,10 +617,11 @@ export class PostgresMemoryStore implements MemoryStore {
         const statusCondition =
           expectedStatus !== undefined ? sql`AND status = ${expectedStatus}` : sql``;
 
+        const anchorId = created[target.supersededByIndex]!.memory.id;
         const result = await tx.execute(sql`
           UPDATE memories
           SET status = 'superseded',
-              superseded_by_id = ${target.supersededById},
+              superseded_by_id = ${anchorId},
               updated_at = now()
           WHERE tenant_id = ${ctx.tenantId} AND id = ${target.id} ${statusCondition}
           RETURNING *
@@ -637,7 +653,7 @@ export class PostgresMemoryStore implements MemoryStore {
             ${JSON.stringify(target.event.actor)}::jsonb,
             ${target.event.digestSnapshot ?? null},
             ${target.event.sizeBeforeBytes ?? null},
-            ${JSON.stringify(target.event.meta)}::jsonb
+            ${JSON.stringify({ ...target.event.meta, supersededById: anchorId })}::jsonb
           )
           RETURNING *
         `);

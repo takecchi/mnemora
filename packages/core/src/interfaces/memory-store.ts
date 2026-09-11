@@ -443,8 +443,30 @@ export interface MemoryStore {
    *   「memory not found」の `Error` を投げる。**このときトランザクション全体がロール
    *   バックされ、**`news` の作成も巻き戻る**——⛔ **`conflicted` には混ぜない**
    *   （「CAS で弾かれた」と「行が無い」は別の「無い」であり、潰すとこの設計の要が壊れる）。
-   * - `supersededById` の外部キー相当は ADR 0047 の線どおり「存在」まで検査する
-   *   （一対一等の整合までは踏み込まない）。
+   * - 🔴 **`supersededByIndex` は `news` への索引である**（`MemoryId` ではない）。この口は
+   *   「今まさに作る Memory へ寄せる」ためのものであり、その id は store が採番するまで
+   *   存在しない——呼び出し側は渡すべき id を渡す前に知りえない（`NewMemory` は
+   *   `Omit<Memory, "id" | ...>` で `id` を持たない）。ADR 0100「採らなかった案」参照。
+   *   索引にしたことで `supersededById` の外部キー違反は**構造的に起こりえなくなった**
+   *   （指す先は必ずこの呼び出しが作った/見つけた行である）——ADR 0047 の「存在」検査は
+   *   下の範囲検査がその役目を引き継ぐ。
+   * - 🔴 **`event.meta.supersededById` は、実装が解決したアンカーの id で埋める**（呼び出し
+   *   側が渡した値があれば上書きする）。呼び出し側は索引しか持たないため、この欄を自分で
+   *   埋められない——実装が埋めることで、**監査ログの中身がこの口を実装した adapter と
+   *   実装していない adapter で同一になる。**⛔ 同じ論理操作が adapter ごとに別の監査記録を
+   *   残す形にはしない。`event` の他の欄は一切変えない。
+   * - ⚠ **`supersededByIndex` が指すのは `news[i]` に対応する Memory であって、それが
+   *   今回作られたか既に在ったかは問わない**（冪等経路で既存行と衝突した場合も同じ行を
+   *   指す。`created[i].created` がどちらかを名乗る）。
+   * - 🔴 **`created` は `news` と同じ順序・同じ長さで返す。**`supersededByIndex` が正しい行を
+   *   指せるのはこの対応が保たれているときだけであり、⚠ **並びがずれても型は何も言わない**
+   *   ——`superseded_by_id` に別の記憶の id が書かれ、検査は緑のまま通る。適合テストが
+   *   3件以上の `news` でこの対応を固定している（1件や2件では並びの入れ替えを検出できない）。
+   * - 🔴 **範囲外の `supersededByIndex` は専用の失敗として落とす**（`RangeError`。
+   *   メッセージは `supersededByIndex out of range`）。⛔ **黙って無視しない。⛔ `conflicted`
+   *   にも「memory not found」にも混ぜない**——「呼び手が壊れた索引を渡した」「CAS で
+   *   弾かれた」「対象の行が無い」は3つとも別の失敗であり、潰すとこの設計の要が壊れる。
+   *   このときも何も書かれない（`news` の作成も巻き戻る）。
    *
    * ⚠ **これは振る舞いの変更である。** 今日（`updateStatusWithEvent` を単独で呼ぶ経路）は
    * 対象が存在しない場合、直前に別途呼んでいた `createMemoryWithOutbox` の作成はすでに
@@ -462,7 +484,7 @@ export interface MemoryStore {
     news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
     supersede: ReadonlyArray<{
       id: MemoryId;
-      supersededById: MemoryId;
+      supersededByIndex: number;
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,

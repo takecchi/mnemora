@@ -60,57 +60,79 @@ function supersedeEvent(memoryId: string, overrides: Partial<NewMemoryEvent> = {
 }
 
 describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", () => {
-  it("news を作り（複数件）、supersede を成功させ、superseded イベントを1件ずつ積む", async () => {
+  it("news を作り（3件）、created を news と同じ順序で返し、supersededByIndex が指す行へ寄せる", async () => {
     const stores = createFakeRuntimeStores();
-    const anchor = await stores.memoryStore.createMemory(ctx, newMemory());
     const oldA = await stores.memoryStore.createMemory(ctx, newMemory());
     const oldB = await stores.memoryStore.createMemory(ctx, newMemory());
+
+    // 🔴 news は**3件**（ADR 0100 の穴①）。`created[i]` が `news[i]` に対応することは
+    // 型が保証しておらず、並びがずれると `supersededById` に別の記憶の id が書かれたまま
+    // 検査が緑で通る。3件にして**異なる索引（0 と 2）**へ寄せることで取り違えを捕まえる。
+    const news1 = newMemory({ content: "news-1 の本文" });
+    const news2 = newMemory({ content: "news-2 の本文" });
+    const news3 = newMemory({ content: "news-3 の本文" });
 
     const result = await stores.memoryStore.supersedeWithNewMemories(
       ctx,
       [
-        { input: newMemory(), jobKinds: ["embed"] },
-        { input: newMemory(), jobKinds: [] },
+        { input: news1, jobKinds: ["embed"] },
+        { input: news2, jobKinds: [] },
+        { input: news3, jobKinds: [] },
       ],
       [
         {
           id: oldA.id,
-          supersededById: anchor.id,
+          supersededByIndex: 0,
           expectedStatus: "active",
           event: supersedeEvent(oldA.id),
         },
         {
           id: oldB.id,
-          supersededById: anchor.id,
+          supersededByIndex: 2,
           expectedStatus: "active",
           event: supersedeEvent(oldB.id),
         },
       ],
     );
 
-    expect(result.created).toHaveLength(2);
+    expect(result.created).toHaveLength(3);
+    expect(result.created.map((c) => c.memory.contentHash)).toEqual([
+      news1.contentHash,
+      news2.contentHash,
+      news3.contentHash,
+    ]);
+    expect(result.created.map((c) => c.memory.content)).toEqual([
+      "news-1 の本文",
+      "news-2 の本文",
+      "news-3 の本文",
+    ]);
     expect(result.created.every((c) => c.created)).toBe(true);
     expect(result.created[0]?.jobs).toHaveLength(1);
     expect(result.created[1]?.jobs).toHaveLength(0);
+    expect(result.created[2]?.jobs).toHaveLength(0);
+
+    const anchor0 = result.created[0]!.memory.id;
+    const anchor2 = result.created[2]!.memory.id;
+    expect(anchor0).not.toBe(anchor2);
+
     expect(result.conflicted).toEqual([]);
     expect(result.superseded).toHaveLength(2);
 
     const updatedA = await stores.memoryStore.get(ctx, oldA.id);
     const updatedB = await stores.memoryStore.get(ctx, oldB.id);
     expect(updatedA?.status).toBe("superseded");
-    expect(updatedA?.supersededById).toBe(anchor.id);
+    expect(updatedA?.supersededById).toBe(anchor0);
     expect(updatedB?.status).toBe("superseded");
-    expect(updatedB?.supersededById).toBe(anchor.id);
+    expect(updatedB?.supersededById).toBe(anchor2);
   });
 
   it("CAS に弾かれた対象を conflicted に積み、他の news/supersede は commit される", async () => {
     const stores = createFakeRuntimeStores();
-    const anchor = await stores.memoryStore.createMemory(ctx, newMemory());
     const oldOk = await stores.memoryStore.createMemory(ctx, newMemory());
     const oldConflicted = await stores.memoryStore.createMemory(ctx, newMemory());
     await stores.memoryStore.updateStatus(ctx, oldConflicted.id, "archived");
-    // ⚠ FakeMemoryStore も Map の行の参照をそのまま返す——プリミティブへ写し取ってから比べる。
-    const observedBeforeStatus: string = oldConflicted.status;
+    // ⚠ Fake も Map の行の参照をそのまま返す——プリミティブへ写し取ってから比べる。
+    const observedBeforeStatus: string = "archived";
 
     const result = await stores.memoryStore.supersedeWithNewMemories(
       ctx,
@@ -118,13 +140,13 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
       [
         {
           id: oldOk.id,
-          supersededById: anchor.id,
+          supersededByIndex: 0,
           expectedStatus: "active",
           event: supersedeEvent(oldOk.id),
         },
         {
           id: oldConflicted.id,
-          supersededById: anchor.id,
+          supersededByIndex: 0,
           expectedStatus: "active",
           event: supersedeEvent(oldConflicted.id),
         },
@@ -133,11 +155,11 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
 
     expect(result.conflicted).toEqual([{ id: oldConflicted.id, observedStatus: "archived" }]);
     expect(result.created).toHaveLength(1);
-    expect(result.created[0]?.created).toBe(true);
     expect(result.superseded).toHaveLength(1);
 
     const updatedOk = await stores.memoryStore.get(ctx, oldOk.id);
     expect(updatedOk?.status).toBe("superseded");
+    expect(updatedOk?.supersededById).toBe(result.created[0]!.memory.id);
 
     const stillConflicted = await stores.memoryStore.get(ctx, oldConflicted.id);
     expect(stillConflicted?.status).toBe(observedBeforeStatus);
@@ -145,7 +167,6 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
 
   it("supersede 対象がそもそも存在しなければ throw し、news の作成も含めてロールバックする", async () => {
     const stores = createFakeRuntimeStores();
-    const anchor = await stores.memoryStore.createMemory(ctx, newMemory());
     const missingId = randomUUID();
     const observation = await stores.memoryStore.createObservation(ctx, {
       tenantId: "tenant-1",
@@ -169,7 +190,7 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
         [
           {
             id: missingId,
-            supersededById: anchor.id,
+            supersededByIndex: 0,
             expectedStatus: "active",
             event: supersedeEvent(missingId),
           },
@@ -177,17 +198,13 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
       ),
     ).rejects.toThrow(/memory not found for tenant/);
 
-    // news が本当にロールバックされたことの確認: ロールバックされていれば、同じ冪等キー
-    // での再作成は新規行（created: true）になる。ロールバックされていなければ、直前の
-    // （本来なら巻き戻るはずの）行に衝突して created: false になる。
     const { created } = await stores.memoryStore.createMemoryWithOutbox(ctx, newsInput, []);
     expect(created).toBe(true);
   });
 
-  it("実在しない supersededById に対して失敗し、news の作成もロールバックする（外部キー、ADR 0047）", async () => {
+  it("範囲外の supersededByIndex を RangeError で落とし、news の作成もロールバックする", async () => {
     const stores = createFakeRuntimeStores();
     const oldA = await stores.memoryStore.createMemory(ctx, newMemory());
-    const missingAnchor = randomUUID();
     const observation = await stores.memoryStore.createObservation(ctx, {
       tenantId: "tenant-1",
       subjectId: null,
@@ -201,6 +218,8 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
       extractorVersion: "fake-supersede-with-new-memories-v1",
     });
 
+    // 🔴 穴②: 「呼び手が壊れた索引を渡した」は「CAS で弾かれた」とも「対象の行が無い」とも
+    // 別の失敗である。⛔ 潰さない——`RangeError` であることとメッセージまで固定する。
     await expect(
       stores.memoryStore.supersedeWithNewMemories(
         ctx,
@@ -208,13 +227,13 @@ describe("FakeMemoryStore.supersedeWithNewMemories（Issue #134 / ADR 0100）", 
         [
           {
             id: oldA.id,
-            supersededById: missingAnchor,
+            supersededByIndex: 1,
             expectedStatus: "active",
             event: supersedeEvent(oldA.id),
           },
         ],
       ),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/supersededByIndex out of range/);
 
     const unchanged = await stores.memoryStore.get(ctx, oldA.id);
     expect(unchanged?.status).toBe("active");

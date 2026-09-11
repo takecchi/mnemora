@@ -49,10 +49,6 @@ describe("PostgresMemoryStore.supersedeWithNewMemories を本物の並行・本�
     const { db } = await getTestClient();
     const seedStore = new PostgresMemoryStore(db);
     const ctx: Ctx = { tenantId: "tenant-1" };
-    const anchor = await seedStore.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "anchor" }),
-    );
     const target = await seedStore.createMemory(
       ctx,
       buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "target" }),
@@ -82,7 +78,7 @@ describe("PostgresMemoryStore.supersedeWithNewMemories を本物の並行・本�
           [
             {
               id: target.id,
-              supersededById: anchor.id,
+              supersededByIndex: 0,
               expectedStatus: "active",
               event: {
                 tenantId: ctx.tenantId,
@@ -124,7 +120,9 @@ describe("PostgresMemoryStore.supersedeWithNewMemories を本物の並行・本�
     // 最終状態: superseded が1回分だけ適用されている（二重に上書きされていない）。
     const final = await seedStore.get(ctx, target.id);
     expect(final?.status).toBe("superseded");
-    expect(final?.supersededById).toBe(anchor.id);
+    // 勝った1本が自分の news として作った行へ寄っている——`supersededByIndex: 0` が
+    // 「この呼び出しの news[0]」を指すこと（他の3本が作った行ではないこと）の確認。
+    expect(final?.supersededById).toBe(winners[0]?.created[0]?.memory.id);
 
     // 🔴 本 PR の芯: status の更新と同じ回数だけイベントが残っている——3本が競合した分の
     // イベントが漏れて積まれていないこと（原子性が本物の並行下でも保たれていること）を、
@@ -141,10 +139,6 @@ describe("PostgresMemoryStore.supersedeWithNewMemories を本物の並行・本�
     const { db } = await getTestClient();
     const store = new PostgresMemoryStore(db);
     const ctx: Ctx = { tenantId: "tenant-1" };
-    const anchor = await store.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "anchor-rollback" }),
-    );
     const observation = await store.createObservation(ctx, {
       tenantId: "tenant-1",
       subjectId: null,
@@ -168,7 +162,7 @@ describe("PostgresMemoryStore.supersedeWithNewMemories を本物の並行・本�
         [
           {
             id: missingId,
-            supersededById: anchor.id,
+            supersededByIndex: 0,
             expectedStatus: "active",
             event: {
               tenantId: ctx.tenantId,

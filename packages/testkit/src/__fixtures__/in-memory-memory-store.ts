@@ -400,7 +400,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
     supersede: ReadonlyArray<{
       id: MemoryId;
-      supersededById: MemoryId;
+      supersededByIndex: number;
       expectedStatus?: MemoryStatus;
       event: NewMemoryEvent;
     }>,
@@ -410,17 +410,22 @@ export class InMemoryMemoryStore implements MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }> {
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
-    //    かったのと同じに見せる）。
+    //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
     for (const target of supersede) {
+      // 1a. 呼び手が壊れた索引を渡した（RangeError。conflicted にも not found にも混ぜない）。
+      if (
+        !Number.isInteger(target.supersededByIndex) ||
+        target.supersededByIndex < 0 ||
+        target.supersededByIndex >= news.length
+      ) {
+        throw new RangeError(
+          `InMemoryMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
+        );
+      }
+      // 1b. 対象の行がそもそも無い。
       const memory = this.memories.get(target.id);
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${target.id}`);
-      }
-      // 外部キー相当（ADR 0047）: updateStatus/updateStatusWithEvent と同じ検査。
-      if (!this.memories.has(target.supersededById)) {
-        throw new Error(
-          `InMemoryMemoryStore: superseded-by memory not found: ${target.supersededById}`,
-        );
       }
     }
 
@@ -451,9 +456,16 @@ export class InMemoryMemoryStore implements MemoryStore {
         continue;
       }
       memory.status = "superseded";
-      memory.supersededById = target.supersededById;
+      // `created` は `news` と同じ順序（下の 2. がそのまま push している）。1. で範囲を
+      // 検査済みなので、この索引は必ず在る。
+      const anchorId = created[target.supersededByIndex]!.memory.id;
+      memory.supersededById = anchorId;
       memory.updatedAt = new Date();
-      const storedEvent = buildStoredMemoryEvent(ctx, target.event);
+      // `meta.supersededById` は解決した id で埋める（interface の契約）。
+      const storedEvent = buildStoredMemoryEvent(ctx, {
+        ...target.event,
+        meta: { ...target.event.meta, supersededById: anchorId },
+      });
       this.events.push(storedEvent);
       superseded.push(storedEvent);
     }
