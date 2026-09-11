@@ -1616,10 +1616,14 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "old-conflicted" }),
         );
         await store.updateStatus(ctx, oldConflicted.id, "archived");
-        // ⚠ in-memory は Map の行の参照をそのまま返す——「変わっていない」を assert する前に
-        // プリミティブへ写し取っておく（`in-memory-memory-store.ts` の該当コメント参照。
-        // 写し取らずに同じ参照を2回見ると、変異を入れても歯が赤くならない）。
-        const observedBeforeStatus: string = oldConflicted.status;
+        // ⚠ ここは**リテラルで書く**。`oldConflicted.status` を読んで期待値にしてはいけない
+        // ——in-memory は Map の行の参照をそのまま返すので `updateStatus` の後に読むと
+        // `"archived"` に見えるが、postgres は切り離された行を返すので `"active"` のまま
+        // であり、**同じ式が adapter ごとに別の期待値になる**（CI の postgres ジョブで
+        // 実際に落ちた: `expected 'archived' to be 'active'`）。
+        // 「CAS に弾かれた対象は一切変わっていない」の正しい期待値は、直前に自分で書いた
+        // `"archived"` そのものである。
+        const observedBeforeStatus = "archived";
 
         const result = await store.supersedeWithNewMemories!(
           ctx,
