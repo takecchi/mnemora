@@ -269,9 +269,19 @@
     ⚠ これは型が変わる破壊的変更より**むしろ悪い**——型が変わるなら少なくとも
     コンパイルで止まる。⟹ だからこそ `docs/autonomy.md`:114 の手順（提起して承認を待つ）を
     通した。**オーナーの承認は 2026-09-11 に下りた**（回答: `a`＝投げる形を採る）。
-    **本 repo 内に `runtime.consolidate()` の production の呼び手は現時点で0件である**
-    （`grep` で確認。[Issue #136](https://github.com/takecchi/mnemora/issues/136)「`examples/chat`
-    への配線が無い」がその住所）——⟹ **repo 内で壊れるものは無い。壊れうるのは第三者だけ。**
+    🔴 **⚠ この負債は、本 PR の作業中に repo 内で現実になった。**作業開始時点では
+    `runtime.consolidate()` の production の呼び手は0件だった（[Issue #136](https://github.com/takecchi/mnemora/issues/136)
+    「`examples/chat` への配線が無い」がその住所）。**しかし [ADR 0101](./0101-how-to-measure-whether-consolidate-moved-the-north-star.md)
+    （PR #143）が作業中に `main` へ入り、`examples/chat/src/consolidation-cost.ts` が
+    `runtime.consolidate()` を呼ぶようになった——そしてその呼び出しは `try`/`catch` で
+    包まれていない。**
+    ⟹ **「壊れうるのは第三者だけ」はもう成り立たない。**予期しない store の失敗
+    （接続断など）が起きたとき、このベンチは以前なら `sources` に `failed`/`not_attempted`
+    を記録して続行したが、本 PR 以降は**そこで落ちる。**
+    ⚠ **ベンチが実測中の失敗で大きな音を立てて落ちるのは、むしろ望ましい**とも言えるが、
+    **それはこの ADR が決めたことではなく、`examples/chat` 側の判断である。**
+    ⛔ 本 PR では `examples/chat` を触っていない（PR #143 が着地した直後のファイルであり、
+    そこへ手を入れるかは別の判断）。**この住所をここに残す。**
 
   - ⚠ **決定4 の振る舞いの変更**（対象行が存在しないとき `news` の作成も巻き戻る）。
   - **`MemoryStore` の責務がさらに広がった。** ADR 0012 D-ingest-1 → ADR 0031 の延長線上。
