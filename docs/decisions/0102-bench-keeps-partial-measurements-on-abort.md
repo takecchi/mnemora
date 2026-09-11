@@ -229,6 +229,60 @@ round 2 の群を5つ中3つまで統合し終えて落ちた場合、その3つ
 🔴 **`DATABASE_URL` が無いため、本物の PostgreSQL に対しては1回も走らせていない**
 ——「確かめていないこと」を参照。
 
+### 門【実測】
+
+| 門 | 終了コード |
+| --- | --- |
+| `pnpm run typecheck` | **0** |
+| `pnpm run lint` | **0** |
+| `pnpm run format:check` | 最初 **1**（新しい歯が未整形）→ `pnpm run format` 後 **0** |
+| `pnpm vitest run`（root＝`scripts/`）1回目 / 2回目 | **0 / 0**（どちらも 21 files / 425 tests） |
+| `pnpm vitest run --exclude **/*.postgres.test.ts`（`examples/chat`）1回目 / 2回目 | **0 / 0**（どちらも 21 files / 202 tests） |
+
+⚠ **2回走らせて `Test Files` / `Tests` が一致した**（器の飽和の指紋は出ていない）。
+⚠ **全ログに `Errors N error(s)` の行は1件も無い。**
+
+🔴 **⚠ root の `vitest.config.mts` は `include: ["scripts/**/*.test.mjs"]` であり、
+この ADR が足した歯は1本も含まれない。**本件の歯は `examples/chat` の側にしか無い
+——CI では `examples/chat`（本物の Postgres を持つジョブ）で走る。
+
+### 歯の数【実測】
+
+| | 基準線（`origin/main` = `f5f151c`） | 本 PR 後 | 差 |
+| --- | --- | --- | --- |
+| `examples/chat`（`*.postgres.test.ts` を除く） | 20 files / 190 | **21 / 202** | **+1 file / +12** |
+
+⚠ **skip は1本も増えていない。**
+
+### 変異試験（⚠ **手で撃った**）
+
+⚠ **`.claude/skills/mutation-testing/` のハーネスはこの repo に存在しない**（`ls` で確認）。
+⟹ **ハーネスではなく手で当てた。**各変異は 適用 → `tsc` → 対象の歯を実行 →
+**退避コピーから `cp` で復元** → `diff` で一致確認、の順。⛔ `git checkout` に頼っていない。
+**変異が当たっているあいだ commit も push もしていない。**
+
+| # | 変異 | 予想（撃つ前に固定） | 実測 | 赤/総数 | 赤くなった歯 | 赤の出どころ |
+| --- | --- | --- | --- | --- | --- | --- |
+| M1 | `describeThrownError` を `String(error)` に畳む | 赤 | **赤** | 2/31 | `cause の連鎖を3段辿って…` ほか | `expected null to be 23503` |
+| M2 | `sqlState` を常に `null` | 赤 | **赤** | 1/31 | `cause の連鎖を3段辿って…` | `expected null to be 23503` |
+| M3 | `exitCodeForConsolidationCostRun` が常に 0 | 赤 | **赤** | 2/31 | `aborted_on_error は 1` / `weights_unavailable は 1` | `expected +0 to be 1` |
+| M4 | formatter の abort ブロックを無効化 | 赤 | **赤** | 2/31 | `round 3 で打ち切った場合…` ほか | `to contain outer-format-test-message-7q2z` |
+| **MX-1** | **round の `try` を関数全体を囲む位置へ動かす** | 赤（e2e の歯だけ、1/32） | **赤（予想どおり）** | **1/32** | `round 2 で例外を投げても、round 0・1 の結果を捨てず…` | 🔴 `expected -1 to be 2`（**どの round で死んだかが消える**） |
+| **MX-2** | **catch の `break` を `continue` に** | 赤（e2e の歯だけ、1/32） | **赤（予想どおり）** | **1/32** | 同上 | 🔴 `expected [ +0, 1, 3 ] to deeply equal [ +0, 1 ]` |
+| **M-control-1**（⭐ 赤くなってはいけない） | formatter の打ち切りメッセージの**文言のみ**を書き換え | 緑のまま | **✅ 緑のまま** | 0/31 | — | — |
+| **M-control-2**（⭐ 赤くなってはいけない） | `cli.ts` の**別のサブコマンド**（`time-term` / `identifier-probes`）の入口を壊す | 本件の歯は緑のまま | **✅ 緑のまま**（`tsc` も 0） | 0/31 | — | — |
+| **MX-3**（⭐ 赤くなってはいけない） | catch の中を中間変数へ分割（ふるまい不変） | 緑のまま | **✅ 緑のまま**（`tsc` も 0） | 0/32 | — | — |
+
+**各行について:**
+- ⭐ **対照3本はすべて緑のまま**だった ⟹ 歯が「ふるまい」ではなく「書き方・文言」に
+  反応しているのではないことの確認。**特に M-control-2 は `tsc` が 0 で通っており**、
+  変異が実在してコンパイルもされた上で**本件の歯が1本も巻き込まれなかった**
+  ——⟹ **この PR の歯は他のサブコマンドを測っていない。**
+- 🔴 **MX-1 / MX-2 は e2e の歯を足すまで1本も殺せなかった**（純関数の歯11本は
+  round のループの**構造**を見ていない）。⟹ **e2e の歯は「あれば良い」ものではなく、
+  決定1（`try` の位置）を支える唯一の歯である。**
+- ⚠ **予想は3本とも当たった**（MX-1 / MX-2 / MX-3）。外れは無かった。
+
 ---
 
 ## 確かめていないこと
@@ -238,9 +292,10 @@ round 2 の群を5つ中3つまで統合し終えて落ちた場合、その3つ
   `sqlStateOf`（文脈4）が同じ辿り方で `23503` を当てている**現物からの類推**であって、
   この経路での**実測ではない。**
 - **8段を超える `cause` の連鎖が現実に起きるか。**
-- **`scripts/consolidation-cost-summary-lib.mjs` が `stopReason: "aborted_on_error"` を
-  含む JSON を読んだときの挙動**——`REQUIRED_TOP_STRING_FIELDS` は文字列であることしか
-  見ていないので通るはずだが、**実測していない。**
+- ⚠ **`scripts/consolidation-cost-summary-lib.mjs` に本物の成果物を食わせていない。**
+  【現物】検証器を読んだ限り**必須欄の allow-list** であり、**未知の欄を拒まない**
+  （`abort` を足しても落ちない）。`stopReason` も「空でない文字列」しか見ていないので
+  `"aborted_on_error"` は通る。⟹ **読んで確かめたが、走らせて確かめてはいない。**
 
 ---
 
