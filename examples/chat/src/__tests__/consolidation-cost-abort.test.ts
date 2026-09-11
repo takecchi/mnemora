@@ -90,7 +90,13 @@ function buildFakeRuntime(): Runtime {
       memories: [],
       omitted: [],
       index: { groups: [], totalInScope: 0, countKind: "exact" },
-      usage: { chars: 0, estimatedTokens: 0, counter: "heuristic", byTier: { full: 0, digest: 0, index: 0 }, indexChars: 0 },
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
       explain: { stages: [] },
     }) as unknown as Awaited<ReturnType<Runtime["recall"]>>;
 
