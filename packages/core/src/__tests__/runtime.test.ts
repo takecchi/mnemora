@@ -1424,9 +1424,8 @@ describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」�
       // 口を持たない adapter を模す——第三者の既存 adapter がこの形である。
       // ⚠ `delete` では消えない（クラスのメソッドは prototype に在り、インスタンスの
       // own property ではない）——`undefined` を代入して prototype を隠す。
-      (
-        stores.memoryStore as { supersedeWithNewMemories?: unknown }
-      ).supersedeWithNewMemories = undefined;
+      (stores.memoryStore as { supersedeWithNewMemories?: unknown }).supersedeWithNewMemories =
+        undefined;
 
       const withoutPort = createRuntime({
         memoryStore: stores.memoryStore,
