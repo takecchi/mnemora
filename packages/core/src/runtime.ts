@@ -449,6 +449,14 @@ export type ConsolidateSourceOutcome =
  */
 export interface ConsolidationResult {
   outcome: ConsolidateOutcome;
+  /**
+   * {@link WriteAtomicity}。⛔ 省略可能にしない。
+   *
+   * `outcome` が `"consolidated"` 以外（`dry_run`・`nothing_to_consolidate`・
+   * `not_examined`・`llm_failed`）のときは必ず `"not_attempted"`——書き込みを1件も
+   * 試みていないからである。
+   */
+  atomicity: WriteAtomicity;
   /** `outcome === "nothing_to_consolidate"` のときだけ非 `null`。それ以外は必ず `null`。 */
   nothingReason: ConsolidateNothingReason | null;
   /** 作られた統合先の id。`outcome !== "consolidated"` のときは必ず `null`。 */
@@ -1526,6 +1534,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (ids.length === 0) {
       // store に一切触れない——「見ていない」。
       return {
+        // 書き込みを1件も試みていない（ADR 0100）。
+        atomicity: "not_attempted" as const,
         outcome: "not_examined",
         nothingReason: null,
         consolidatedMemoryId: null,
@@ -1594,6 +1604,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 3. eligible が0件・1件なら、ここで打ち切る（冪等性の芯）。
     if (eligibleIds.length === 0) {
       return {
+        // 書き込みを1件も試みていない（ADR 0100）。
+        atomicity: "not_attempted" as const,
         outcome: "nothing_to_consolidate",
         nothingReason: "no_eligible_sources",
         consolidatedMemoryId: null,
@@ -1604,6 +1616,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     if (eligibleIds.length === 1) {
       return {
+        // 書き込みを1件も試みていない（ADR 0100）。
+        atomicity: "not_attempted" as const,
         outcome: "nothing_to_consolidate",
         nothingReason: "single_eligible_source",
         consolidatedMemoryId: null,
@@ -1616,6 +1630,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 4. dryRun はここで打ち切る。1件も書かない。
     if (opts.dryRun === true) {
       return {
+        // 書き込みを1件も試みていない（ADR 0100）。
+        atomicity: "not_attempted" as const,
         outcome: "dry_run",
         nothingReason: null,
         consolidatedMemoryId: null,
@@ -1636,6 +1652,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       });
     } catch (error) {
       return {
+        // 書き込みを1件も試みていない（ADR 0100）。
+        atomicity: "not_attempted" as const,
         outcome: "llm_failed",
         nothingReason: null,
         consolidatedMemoryId: null,
@@ -1657,6 +1675,95 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       halfLifeHours,
       now,
     });
+    const actor = opts.actor ?? { type: "system" };
+    const buildCreatedEvent = () =>
+      ({
+        tenantId: ctx.tenantId,
+        memoryId: "",
+        kind: "created",
+        actor: { type: "system" },
+        digestSnapshot: "",
+        sizeBeforeBytes: null,
+        meta: { reason: "consolidated", sources: eligibleIds },
+      }) satisfies NewMemoryEvent;
+    const buildConsolidateSupersedeEvent = (source: Memory, supersededById?: MemoryId) =>
+      ({
+        tenantId: ctx.tenantId,
+        memoryId: source.id,
+        kind: "superseded",
+        actor,
+        digestSnapshot: source.digest,
+        sizeBeforeBytes: null,
+        meta: {
+          reason: "consolidated",
+          // 口を使う経路では store が解決した id で埋める（ADR 0100）。⟹ 監査ログの中身は
+          // 口が在る adapter と無い adapter で同一になる。
+          ...(supersededById === undefined ? {} : { supersededById }),
+          ...(opts.reason !== undefined ? { note: opts.reason } : {}),
+        },
+      }) satisfies NewMemoryEvent;
+
+    const finalOutcomeById = new Map<MemoryId, ConsolidateSourceOutcome>();
+
+    // ------------------------------------------------------------------
+    // ADR 0100: 口が在れば、統合先の作成と統合元の supersede を1トランザクションで撃つ。
+    // 🔴 フォールバックは**口の不在に対してだけ**。⛔ 投げられたときに今日の経路で
+    // 撃ち直さない（「張れなかった」と「張ったが失敗した」を潰さない）。
+    //
+    // 🔴 ADR 0089 決定5 を**部分的に覆す**: あちらは「予期しない例外が出たらそこで打ち切り、
+    // 残りを not_attempted にして返す（投げない）」と決めていた。この経路では**投げる**。
+    // 理由——ADR 0089 が「投げない」とした理由は逐語で「部分的に起きたことを呼び出し側から
+    // 見えなくしないためである」。1トランザクションでは**部分的に起きたことが無くなる**
+    // （統合先の作成も supersede も全部巻き戻る）ので、その理由は満たされたままである。
+    // ⚠ 型は変わらないため、例外を受け止めていない呼び手はコンパイルでは気づけない。
+    // ADR 0100「引き受ける負債」参照。オーナー承認済み（`docs/autonomy.md:114`）。
+    // ------------------------------------------------------------------
+    const supersedeWithNewMemories = deps.memoryStore.supersedeWithNewMemories;
+    if (supersedeWithNewMemories !== undefined) {
+      const result = await supersedeWithNewMemories.call(
+        deps.memoryStore,
+        ctx,
+        [{ input: newMemory, jobKinds: ["embed"] as OutboxJobKind[] }],
+        eligibleIds.map((id) => ({
+          id,
+          supersededByIndex: 0,
+          expectedStatus: "active" as MemoryStatus,
+          event: buildConsolidateSupersedeEvent(byId.get(id)!),
+        })),
+      );
+
+      const consolidated = result.created[0]!;
+      if (consolidated.created) {
+        await deps.eventStore.append(ctx, {
+          ...buildCreatedEvent(),
+          memoryId: consolidated.memory.id,
+          digestSnapshot: consolidated.memory.digest,
+        });
+      }
+
+      const conflictedById = new Map(result.conflicted.map((c) => [c.id, c.observedStatus]));
+      for (const id of eligibleIds) {
+        const observed = conflictedById.get(id);
+        finalOutcomeById.set(
+          id,
+          observed === undefined
+            ? { memoryId: id, kind: "superseded", previousStatus: "active" }
+            : { memoryId: id, kind: "status_changed_concurrently", observedStatus: observed },
+        );
+      }
+
+      return {
+        outcome: "consolidated",
+        nothingReason: null,
+        consolidatedMemoryId: consolidated.memory.id,
+        sources: mapSources((id) => finalOutcomeById.get(id)!),
+        llmCalls: 1,
+        llmFailure: null,
+        atomicity: "store_supported",
+      };
+    }
+
+    // 口が無い adapter——今日どおりの2段（作成 → supersede ループ）。
     const { memory: consolidatedMemory, created } = await deps.memoryStore.createMemoryWithOutbox(
       ctx,
       newMemory,
@@ -1664,21 +1771,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
     if (created) {
       await deps.eventStore.append(ctx, {
-        tenantId: ctx.tenantId,
+        ...buildCreatedEvent(),
         memoryId: consolidatedMemory.id,
-        kind: "created",
-        actor: { type: "system" },
         digestSnapshot: consolidatedMemory.digest,
-        sizeBeforeBytes: null,
-        meta: { reason: "consolidated", sources: eligibleIds },
       });
     }
     // embed ジョブは常に outbox 経由（`createMemoryWithOutbox` が積む）。ここでは何もしない
     // — tick() の processEmbedJob が処理する。
 
     // 7. eligible を1件ずつ superseded へ CAS する（`reextract` のループと同じ形）。
-    const actor = opts.actor ?? { type: "system" };
-    const finalOutcomeById = new Map<MemoryId, ConsolidateSourceOutcome>();
     for (let i = 0; i < eligibleIds.length; i += 1) {
       const id = eligibleIds[i]!;
       const source = byId.get(id)!;
@@ -1688,19 +1789,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           id,
           "superseded",
           { supersededById: consolidatedMemory.id, expectedStatus: "active" },
-          {
-            tenantId: ctx.tenantId,
-            memoryId: id,
-            kind: "superseded",
-            actor,
-            digestSnapshot: source.digest,
-            sizeBeforeBytes: null,
-            meta: {
-              reason: "consolidated",
-              supersededById: consolidatedMemory.id,
-              ...(opts.reason !== undefined ? { note: opts.reason } : {}),
-            },
-          },
+          buildConsolidateSupersedeEvent(source, consolidatedMemory.id),
         );
         finalOutcomeById.set(id, { memoryId: id, kind: "superseded", previousStatus: "active" });
       } catch (error) {
@@ -1713,7 +1802,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           });
           continue;
         }
-        // 競合以外の例外——ここで打ち切り、残りは「見ていない」として返す。例外は外へ投げない。
+        // 競合以外の例外——ここで打ち切り、残りは「見ていない」として返す。例外は外へ投げない
+        // （ADR 0089 決定5。⚠ この経路では書き込みが部分的に起きているため、ADR 0100 の
+        // 判断はここには当てはまらない——投げずに返す形をそのまま残す）。
         finalOutcomeById.set(id, {
           memoryId: id,
           kind: "failed",
@@ -1738,6 +1829,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       sources: mapSources((id) => finalOutcomeById.get(id)!),
       llmCalls: 1,
       llmFailure: null,
+      atomicity: "store_unsupported",
     };
   }
 
