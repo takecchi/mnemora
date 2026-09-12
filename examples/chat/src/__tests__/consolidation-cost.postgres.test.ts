@@ -7,6 +7,7 @@ import { afterAll, afterEach, describe, expect, it } from "vitest";
 import { measureNewMemoriesEmbedding, runConsolidationCost } from "../consolidation-cost.js";
 import { lookupLatestEmbedFailureKind } from "../embed-failure-kind.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
+import { localEmbeddingCacheDirEnv } from "../providers.js";
 import { createExampleRuntime } from "../runtime-factory.js";
 import {
   closeTestClient,
@@ -112,6 +113,7 @@ describe("consolidation-cost: 埋め込みの入力上限(ADR 0090)への着地"
     const handle = await createExampleRuntime(requireDatabaseUrl(), {
       MNEMORA_LLM: "deterministic",
       MNEMORA_EMBEDDING: "local",
+      ...localEmbeddingCacheDirEnv(),
     });
     try {
       const warmup = await warmupLocalEmbedding(handle.embeddingProvider);
