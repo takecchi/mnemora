@@ -352,8 +352,12 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
               to_tsvector('simple', $1)::text AS "rawTsvector",
               to_tsvector('simple', $1) @@ websearch_to_tsquery('simple', $2) AS "rawIdentifierHit",
               to_tsvector('simple', $1) @@ websearch_to_tsquery('simple', $3) AS "rawJapaneseWordHit",
-              current_setting('lc_collate') AS "lcCollate",
-              current_setting('lc_ctype') AS "lcCtype",
+              -- PostgreSQL 16 で lc_collate / lc_ctype は GUC ではなくなり、DB ごとの
+              -- 属性になった。GUC として引くと 42704 unrecognized configuration
+              -- parameter で落ちる（PR #151 の CI が pg17 で実際に落ちた。2026-09-12）。
+              -- そこで pg_database から引く。GUC 経由へ戻さないこと。
+              (SELECT datcollate FROM pg_database WHERE datname = current_database()) AS "lcCollate",
+              (SELECT datctype   FROM pg_database WHERE datname = current_database()) AS "lcCtype",
               current_setting('default_text_search_config') AS "defaultTextSearchConfig"`,
       [content, "PROJ-1234", "レビュー"],
     );

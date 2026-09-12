@@ -559,14 +559,31 @@ describe("値を作る側の歯が MNEMORA_LEXICAL_REGIME_JSON を参照して�
     // ⟹ **実際に問い合わせていること**も固定する。
     // ⚠ この器には DB が無いので、これが「本当に Postgres で動く SQL か」までは
     // 測っていない。測っているのは「問い合わせる行がソースから消えていないこと」だけである。
-    for (const setting of ["lc_collate", "lc_ctype", "default_text_search_config"]) {
+    // ⚠ 欄ごとに「正しい引き方」が違う。**同じ式で全部を測ろうとしない。**
+    // PostgreSQL 16 で lc_collate / lc_ctype は GUC ではなくなり DB ごとの属性に
+    // なった ⟹ GUC として引くと 42704 で落ちる（PR #151 の CI が pg17 で実測）。
+    // ⟹ ロケール2つは pg_database から、text search config は GUC から引く。
+    const probeExpressions = [
+      ["lcCollate", "SELECT datcollate FROM pg_database"],
+      ["lcCtype", "SELECT datctype   FROM pg_database"],
+      ["defaultTextSearchConfig", "current_setting('default_text_search_config')"],
+    ];
+    for (const [field, expression] of probeExpressions) {
       expect(
         toothCode,
-        `probe の SQL が current_setting('${setting}') を問い合わせていない。` +
+        `probe の SQL が ${field} を実際に問い合わせていない（期待する式: ${expression}）。` +
           "JSON の欄と TS の型だけが残ると、値は undefined になり、" +
           "Job Summary 側の validateMeasured が「値が空だった」で落ちるまで誰も気づかない。",
-      ).toContain(`current_setting('${setting}')`);
+      ).toContain(expression);
     }
+    // 🔴 弾いていないことも測る: GUC 経由へ戻したら赤くなる。
+    // 戻すと pg17 で 42704 になり、測定段そのものが落ちる。
+    expect(
+      toothCode.includes("current_setting('lc_collate')") ||
+        toothCode.includes("current_setting('lc_ctype')"),
+      "probe が lc_collate / lc_ctype を GUC として引いている。PostgreSQL 16 以降では " +
+        "存在しないパラメータなので 42704 で落ちる。pg_database.datcollate / datctype を使うこと。",
+    ).toBe(false);
   });
 
   it("schemaVersion: 2 である(ロケール3項目を足した版であることの固定点)", () => {

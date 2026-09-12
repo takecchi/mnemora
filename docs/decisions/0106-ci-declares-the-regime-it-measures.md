@@ -185,6 +185,33 @@ PR #149 の可視化は「反転が見えるようになる」だけで、**反�
    初めて確かめる。** postgres の公式 entrypoint はこの変数を尊重する仕様だが
    【受】、`pgvector/pgvector:pg17` イメージでの実地の確認はこの PR より前には無い。
 
+## 【実測】負債3は、この PR の CI が答えを出した — **動かなかった**（2026-09-12、追記）
+
+⛔ **上の「負債3」は書いたとおり未検証のまま出し、CI が答えを出した。訂正ではなく、その答えの記録である。**
+
+**PR #151 の CI（`pgvector/pgvector:pg17`）で `packages/postgres` の測定段が落ちた。**逐語:
+
+```
+error: unrecognized configuration parameter "lc_collate"
+code: '42704', file: 'guc.c', routine: 'find_option'
+  at src/__tests__/lexical-store-identifier.test.ts:348
+```
+
+⟹ **PostgreSQL 16 で `lc_collate` / `lc_ctype` は GUC ではなくなり、DB ごとの属性になった。**
+⟹ GUC として引く形は pg16 以降で必ず落ちる。⟹ `pg_database.datcollate` / `datctype` から引く形へ直した。
+
+### 🔑 この落ち方が教えたこと
+
+**「名前が3つとも在る」を測る歯は通っていた。**歯が測れていなかったのは「**その式が実際に動く SQL か**」である——歯自身がそう名乗っていた（逐語「⚠ この器には DB が無いので、これが『本当に Postgres で動く SQL か』までは測っていない。測っているのは『問い合わせる行がソースから消えていないこと』だけである」）。
+
+⟹ ⭐ **歯は自分の射程を正しく名乗っており、その射程の外で落ちた。**⟹ **歯の欠陥ではない。**⟹ だから歯は消さず、**射程の外側を CI が埋める**という分担のまま、式だけを直した。
+
+⟹ 併せて「**弾いていないことを測る歯**」を対にした: `current_setting('lc_collate')` / `current_setting('lc_ctype')` へ戻したら赤くなる。⛔ 検出する歯だけを置くと、この決定は静かに巻き戻る。
+
+### ⚠ 負債4（`POSTGRES_INITDB_ARGS` が pgvector イメージへ効くか）は、まだ答えが出ていない
+
+同じ CI で測定段が先に落ちたため、regime JSON が書かれず Job Summary も出なかった。⟹ **次の CI が初めて答える。**
+
 ## これが覆るとしたら
 
 - **pgvector の image が `POSTGRES_INITDB_ARGS` を無視するようになったとき。**
