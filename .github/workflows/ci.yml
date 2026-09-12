@@ -256,6 +256,23 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # 🔴 Issue #164 (1): `test:db`(= `vitest run`)は `root-gate-db-stage`
+      # ジョブが `run-db-tests.mjs` 経由で走らせるのと**同じ**
+      # `consolidation-cost.postgres.test.ts` を実行する——`warmupLocalEmbedding` が
+      # `@mnemora/local-embedding` のモデル重み(42MB)を Hugging Face から取得する。
+      # 2026-09-12 の run 34699094705(14:25 UTC)では、このジョブ自身は
+      # `✓ src/__tests__/consolidation-cost.postgres.test.ts (3 tests) 43228ms`
+      # で成功していたが、同 run の `root-gate-db-stage` は重み取得が 429 になって
+      # 落ちた——**同じ重みを取りに行くジョブが実は4本ある**うちの1本である。
+      # 🔑 `identifier-probes`/`consolidation-cost`/`root-gate-db-stage` と
+      # **同じキー空間を意図的に共有する**(下の cache 段の `key` を参照。同じモデル
+      # `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い)。
+      # ⚠ この job-level env は後段の `compare` ステップにも見えるが、`compare` は
+      # `deterministic` provider で走るため読まれない
+      # (`examples/chat/src/providers.ts` は `embeddingMode === "local"` のときだけ
+      # `LocalEmbeddingProvider` へ `cacheDir` を渡す。このジョブの `compare` は
+      # OPENAI_API_KEY 無しの擬似 provider であり `embeddingMode` は `"local"` ではない)。
+      MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -284,6 +301,16 @@ jobs:
 
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
+        # 🔴 ⛔ これは「取りに行く頻度」を下げる変更であって、「取れなかったときの
+        # 倒れ方」は変えていない。リトライ・フォールバック・既定値・skip は
+        # 入れていない——重みがキャッシュにも Hugging Face にも無ければ、
+        # 次の test:db ステップは従来どおり赤くなる。
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-ruri-v3-30m-q8-v1
 
       - name: Run examples/chat の observe→recall 往復・量の比較テストを本物の DB に対して実行
         run: pnpm --filter @mnemora/example-chat run test:db
@@ -351,6 +378,18 @@ jobs:
           --health-retries=10
     env:
       DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # 🔴 Issue #164 (1): このジョブは `node scripts/run-db-tests.mjs` 経由で
+      # `examples/chat` の `test:db`(= `vitest run`)を呼ぶ。その中の
+      # `consolidation-cost.postgres.test.ts` が `warmupLocalEmbedding` を通じて
+      # `@mnemora/local-embedding` のモデル重み(42MB)を実際に Hugging Face から
+      # 取得する——`identifier-probes`/`consolidation-cost` ジョブと同じ理由で、
+      # このジョブも「毎 run 素で重みを取りに行く」側だった。2026-09-12 の
+      # run 34699094705(14:25 UTC)では、この重み取得が 429 になって1本の PR を
+      # 止めた実測がある。
+      # 🔑 `identifier-probes`/`consolidation-cost` と**同じキー空間を意図的に
+      # 共有する**(下の cache 段の `key` を参照。同じモデル
+      # `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い)。
+      MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -379,6 +418,16 @@ jobs:
 
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
+        # 🔴 ⛔ これは「取りに行く頻度」を下げる変更であって、「取れなかったときの
+        # 倒れ方」は変えていない。リトライ・フォールバック・既定値・skip は
+        # 入れていない——重みがキャッシュにも Hugging Face にも無ければ、
+        # このジョブは従来どおり赤くなる。
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-ruri-v3-30m-q8-v1
 
       - name: ルートの門の DB 段を DATABASE_URL 在りで通す（順方向の実測）
         run: |

@@ -138,6 +138,31 @@ export function selectEmbeddingMode(env: EnvLike): ProviderMode {
   );
 }
 
+/**
+ * `source`（既定 `process.env`）から `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` だけを
+ * 持ち出す。設定されていなければ（未設定 or 空文字。`parseModeOverride` と同じ
+ * 「空文字は未指定」という作法）`{}` を返す。
+ *
+ * **なぜ要るか（Issue #164 の続き）**: `createExampleRuntime(databaseUrl, { MNEMORA_LLM: …,
+ * MNEMORA_EMBEDDING: "local", … })` のようにリテラルの env オブジェクトを渡す呼び出しは
+ * `process.env` を丸ごと展開しない——CI の `actions/cache` が job-level env で
+ * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を設定していても、リテラルの側がそれを運ばなければ
+ * `LocalEmbeddingProvider` まで届かず、キャッシュが（保存も復元もされないまま）空回りする。
+ * `consolidation-cost.postgres.test.ts` の1本がこれで実際に 429 を踏んだ
+ * （`cacheDir=未指定（既定の場所）` が transformers.js の既定パスに落ち、
+ * `actions/cache` の `path:` の外へ書き込んでいた。CI run 34704804772）。
+ *
+ * ⛔ **`...process.env` を丸ごと展開する代わりにこれを使うこと。** `cli.ts` の
+ * `identifier-probes`/`consolidation-cost` サブコマンドは `...process.env` を展開して
+ * いるが、DB 歯の側は環境変数を意図して固定している（同じファイルの deterministic 版は
+ * 素のリテラルのまま）——`...process.env` に戻すと、歯が周囲の環境変数すべてに
+ * 左右されるようになる。必要なのはこの1変数だけである。
+ */
+export function localEmbeddingCacheDirEnv(source: EnvLike = process.env): EnvLike {
+  const value = source.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
+  return value === undefined || value === "" ? {} : { MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: value };
+}
+
 // ---------------------------------------------------------------------------
 // カセット再生か実 API かを決める(ADR 0068 ③)
 //

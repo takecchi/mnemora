@@ -16,6 +16,7 @@ import {
   createProviders,
   decideProviderSource,
   describeProviderSourceReason,
+  localEmbeddingCacheDirEnv,
   selectEmbeddingMode,
   selectLLMMode,
   selectProviderMode,
@@ -198,6 +199,58 @@ describe("createProviders — recorded モード（ADR 0051）", () => {
 
   it('MNEMORA_LLM に未知の値を与えたら、"recorded" を含む一覧を示して落ちる', () => {
     expect(() => createProviders({ MNEMORA_LLM: "cassette" })).toThrow(/"recorded"/);
+  });
+});
+
+/**
+ * `localEmbeddingCacheDirEnv`（Issue #164 続き）。
+ *
+ * リテラルの env オブジェクトを `createExampleRuntime` に渡す呼び出し
+ * （`consolidation-cost.postgres.test.ts` 等）が `process.env` を丸ごと展開せずに
+ * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` だけを運べるようにする、小さな公開ヘルパ。
+ * 設定在り／無しの両方を測る——`{}` を返す場合、呼び出し側が
+ * `...localEmbeddingCacheDirEnv()` と展開しても何も足されないことが要る
+ * （余計なキーを増やさない）。
+ */
+describe("localEmbeddingCacheDirEnv — MNEMORA_LOCAL_EMBEDDING_CACHE_DIR だけを持ち出す", () => {
+  it("設定されていれば、その値を持つオブジェクトを返す", () => {
+    expect(localEmbeddingCacheDirEnv({ MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: "/tmp/cache" })).toEqual({
+      MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: "/tmp/cache",
+    });
+  });
+
+  it("設定されていなければ {} を返す（キーごと持ち出さない）", () => {
+    expect(localEmbeddingCacheDirEnv({})).toEqual({});
+    expect(localEmbeddingCacheDirEnv({ OPENAI_API_KEY: "sk-fake-for-test" })).toEqual({});
+  });
+
+  it("空文字は未指定として扱う（parseModeOverride と同じ作法）", () => {
+    expect(localEmbeddingCacheDirEnv({ MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: "" })).toEqual({});
+  });
+
+  it("既定は process.env を見る（引数を省略できる）", () => {
+    const original = process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
+    try {
+      process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR = "/tmp/from-process-env";
+      expect(localEmbeddingCacheDirEnv()).toEqual({
+        MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: "/tmp/from-process-env",
+      });
+    } finally {
+      if (original === undefined) {
+        delete process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
+      } else {
+        process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR = original;
+      }
+    }
+  });
+
+  it("展開しても他のキーを増やさない（スプレッドの実使用形）", () => {
+    const merged = {
+      MNEMORA_LLM: "deterministic",
+      MNEMORA_EMBEDDING: "local",
+      ...localEmbeddingCacheDirEnv({}),
+    };
+    expect(merged).toEqual({ MNEMORA_LLM: "deterministic", MNEMORA_EMBEDDING: "local" });
   });
 });
 
