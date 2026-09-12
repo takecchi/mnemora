@@ -175,7 +175,10 @@ jobs:
         run: pnpm --filter @mnemora/postgres run build
 
   postgres-regime-coverage:
-    name: 両方の server_encoding regime が実際に走ったことを測る(Issue #155)
+    # ⚠ クォートが要る: YAML は `空白 + #` をコメントの開始として読むので、
+    # 引用符なしだと check の名前が `…を測る(Issue` で**黙って切れる**
+    # (2026-09-12 実測。required status check の名前と一致しなくなる)。
+    name: "両方の server_encoding regime が実際に走ったことを測る (Issue #155)"
     needs: postgres
     # 🔴 `postgres` ジョブ(matrix)の一部の脚が落ちても、このジョブは必ず走る——
     # 「揃って別々に走ったか」を測れるだけの artifact は、失敗した run にも残りうる
