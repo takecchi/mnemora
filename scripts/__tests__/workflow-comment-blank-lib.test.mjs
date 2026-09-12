@@ -23,7 +23,7 @@ describe("blankOutWorkflowComments — YAML の地の文のコメント", () => 
   });
 
   it("半角空白の直後の # はコメントを開始する(黙って切れる、ここが直したい欠陥そのもの)", () => {
-    const source = 'if: always() # 常に走る\n';
+    const source = "if: always() # 常に走る\n";
     const { text } = blankOutWorkflowComments(source);
     expect(text).toContain("if: always()");
     expect(text).not.toContain("常に走る");
@@ -42,10 +42,10 @@ describe("blankOutWorkflowComments — YAML の地の文のコメント", () => 
     expect(text).toContain("測れない（Issue #155）");
   });
 
-  it("二重引用符: エスケープされた \\\" は閉じ引用符として扱わない", () => {
+  it('二重引用符: エスケープされた \\" は閉じ引用符として扱わない', () => {
     const source = '  echo "値に \\"引用符\\" を含む #1" >&2\n';
     const { text, unhandled } = blankOutWorkflowComments(source);
-    expect(text).toContain("値に \\\"引用符\\\" を含む #1");
+    expect(text).toContain('値に \\"引用符\\" を含む #1');
     expect(unhandled).toEqual([]);
   });
 
@@ -99,13 +99,7 @@ describe("blankOutWorkflowComments — 扱えない形は黙って通さず unha
   });
 
   it("ヒアドキュメントは本体ごと unhandled にし、本体を潰さない", () => {
-    const source = [
-      "run: |",
-      "  cat <<EOF",
-      "  name: dummy #123",
-      "  EOF",
-      "",
-    ].join("\n");
+    const source = ["run: |", "  cat <<EOF", "  name: dummy #123", "  EOF", ""].join("\n");
     const { text, unhandled } = blankOutWorkflowComments(source);
     expect(text).toContain("name: dummy #123");
     expect(unhandled.some((u) => u.reason === "heredoc-body-unhandled")).toBe(true);
@@ -139,9 +133,7 @@ describe("blankOutWorkflowComments 自体が効いていること(⭐ この可�
 
   it("引用符の中の # は潰さない", () => {
     const source = 'echo "https://example.invalid/ok#fragment" >&2\n';
-    expect(blankOutWorkflowComments(source).text).toContain(
-      "https://example.invalid/ok#fragment",
-    );
+    expect(blankOutWorkflowComments(source).text).toContain("https://example.invalid/ok#fragment");
   });
 
   it("添字が元のソースと一致する(順序の固定が壊れないための性質)", () => {

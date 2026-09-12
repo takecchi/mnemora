@@ -99,9 +99,10 @@ export function blankOutWorkflowComments(text) {
       return line;
     }
 
-    const heredocMatch = /<<-?\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|'([A-Za-z_][A-Za-z0-9_]*)'|([A-Za-z_][A-Za-z0-9_]*))/.exec(
-      line,
-    );
+    const heredocMatch =
+      /<<-?\s*(?:"([A-Za-z_][A-Za-z0-9_]*)"|'([A-Za-z_][A-Za-z0-9_]*)'|([A-Za-z_][A-Za-z0-9_]*))/.exec(
+        line,
+      );
     if (heredocMatch) {
       unhandled.push({
         lineNumber,
