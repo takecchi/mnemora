@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   findWorkspaceProtocolViolations,
   findMissingEntryPoints,
+  findMissingReadme,
   findOrphanedSourceMaps,
   findLicenseViolations,
   findPrivateViolations,
@@ -322,6 +323,34 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       writeFileSync(join(fixtureDir, "index.js"), "export {};\n");
 
       expect(findMissingEntryPoints({ main: "./index.js" }, fixtureDir)).toEqual([]);
+    });
+  });
+
+  describe("findMissingReadme", () => {
+    /** @type {string | undefined} */
+    let fixtureDir;
+
+    afterEach(() => {
+      if (fixtureDir) {
+        rmSync(fixtureDir, { recursive: true, force: true });
+        fixtureDir = undefined;
+      }
+    });
+
+    it("README.md が実在すれば検出しない", () => {
+      fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-readme-ok-"));
+      writeFileSync(join(fixtureDir, "README.md"), "# hello\n");
+
+      expect(findMissingReadme(fixtureDir)).toEqual([]);
+    });
+
+    it("README.md が無ければ検出する", () => {
+      fixtureDir = mkdtempSync(join(tmpdir(), "publish-pack-checks-readme-missing-"));
+      // README.md を意図して作らない。
+
+      const violations = findMissingReadme(fixtureDir);
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain("README.md が tarball に入っていません");
     });
   });
 
