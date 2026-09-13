@@ -244,6 +244,8 @@ function probe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
     totalInScope: 75,
     scoreDetails: collectScoreDetails(memories, { goldRank: 2, distractorRank: 1 }),
     termSpreads: computeTermSpreads(memories),
+    recalledRows: memories.length,
+    lexicalMatchRows: memories.filter((m) => m.score.lexicalMatch !== undefined).length,
     ...overrides,
   };
 }

@@ -275,6 +275,61 @@ function buildCautionSection() {
 }
 
 /**
+ * ⭐ 向きを反転させた警告(ADR 0108)。
+ *
+ * 他の節はすべて「いま赤く、直ったら緑」の形(基準値との相違・入力の破損)だが、
+ * これは逆向きである——**「いま静かで、ベンチの構成が黙って変わったら騒ぐ」。**
+ * 測っているのは欠陥ではなく、**ベンチの構成そのもの**である: `examples/chat` の
+ * retrieval ベンチは `recall()` に `channels` を渡しておらず、既定
+ * `DEFAULT_RECALL_CHANNELS`(`["ann"]`)だけで recall している——`LexicalStore` を
+ * 配線していない限り、`score.lexicalMatch` 欄は返ってきた行のどれにも現れない。
+ *
+ * ⛔ **このジョブは門ではない。**この関数も exit code には触れない
+ * (`buildSummaryMarkdown` が呼ぶ側であり、こちら自身は文字列を返すだけ)。
+ * `lexicalMatchRows`/`recalledRows` は `RetrievalQualityArmJson` の**省略可能欄**
+ * (`examples/chat/src/retrieval-json.ts`)なので、古い実測 JSON(この PR 以前に
+ * 書かれたもの)にはそもそも欄が無い——そのときは何も警告しない(測れないことを
+ * 「0 だった」と偽らない)。
+ *
+ * @param {Record<string, unknown>[]} arms
+ * @returns {string | null} 警告すべき arm が無ければ(欄自体が無い run を含む)null。
+ */
+export function buildLexicalChannelWarningSection(arms) {
+  const measurable = arms.filter((arm) => typeof arm.lexicalMatchRows === "number");
+  if (measurable.length === 0) {
+    return null;
+  }
+  const silent = measurable.filter((arm) => arm.lexicalMatchRows === 0);
+  if (silent.length === 0) {
+    return null;
+  }
+  const lines = [
+    "## ⚠ 語彙チャンネルが1行も通っていない",
+    "",
+    "🔴 **これは直ったら消える警告である。**次の arm で、返ってきた候補行のうち" +
+      "`score.lexicalMatch` 欄を持つ行が **0 行**だった:",
+    "",
+  ];
+  for (const arm of silent) {
+    const recalled = typeof arm.recalledRows === "number" ? arm.recalledRows : "?";
+    lines.push(`- ${arm.armLabel}: lexicalMatchRows=0 / recalledRows=${recalled}`);
+  }
+  lines.push(
+    "",
+    "⚠ **これは失敗ではない。**`examples/chat` の retrieval ベンチは `recall()` に" +
+      '`channels` を渡しておらず、既定 `DEFAULT_RECALL_CHANNELS`(`["ann"]`)だけで' +
+      "recall している——`LexicalStore` が配線されていないという、**このベンチの構成**の" +
+      `反映である（[ADR 0108](${REPO_BLOB_BASE}/0108-retrieval-bench-does-not-exercise-lexical-channel.md)）。`,
+    "",
+    "⟹ **この警告が消えたら、それはベンチの構成が変わったという意味である**" +
+      '（`channels` に `"lexical"` を足す、または同等の変更）。' +
+      "**そのときは `hit@1` を測り直すこと**（それがこの警告の目的である）。" +
+      "⛔ この警告を消すだけにしないこと。",
+  );
+  return lines.join("\n");
+}
+
+/**
  * Markdown を組み立てる(このスクリプトの主機能)。**stdout に出すのは呼び出し側の役目**
  * ——ここは文字列を返すだけ。
  *
@@ -292,6 +347,10 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   ];
   if (baseline) {
     lines.push(buildDiffSection(measured.arms, baseline.arms), "");
+  }
+  const lexicalWarning = buildLexicalChannelWarningSection(measured.arms);
+  if (lexicalWarning) {
+    lines.push(lexicalWarning, "");
   }
   lines.push(buildCautionSection());
   return lines.join("\n");

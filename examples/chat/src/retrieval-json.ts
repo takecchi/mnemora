@@ -40,6 +40,19 @@ export interface RetrievalQualityArmJson {
   hit1Count: number;
   hit10Count: number;
   probeCount: number;
+  /**
+   * この arm が実際に返した候補行の総数、および そのうち `score.lexicalMatch` 欄を
+   * 持っていた行数(ADR 0108。非門ジョブへの可視化)。
+   *
+   * **省略可能欄にした理由**: `RetrievalQualityRunJson.schemaVersion` は `1` の
+   * リテラル型で「この形が変わったら上げる」という契約を負っている
+   * (`schemaVersion` 自身の doc)。ここで足すのは既存の欄の意味を変えない**追加**であり、
+   * 欄を持たない古い実測 JSON・`examples/chat/retrieval-baseline.json`(この欄を持たない)
+   * を読む側(`validateMeasured`/`validateBaseline`。`REQUIRED_ARM_*_FIELDS` に含めていない)
+   * が引き続き通ることを保っている。⟹ `schemaVersion` は上げない。
+   */
+  lexicalMatchRows?: number;
+  recalledRows?: number;
 }
 
 export interface RetrievalQualityCassetteJson {
@@ -132,6 +145,8 @@ export function buildRetrievalQualityJson(
         hit1Count: headline.hit1Count,
         hit10Count: headline.hit10Count,
         probeCount: headline.probeCount,
+        lexicalMatchRows: headline.lexicalMatchRows,
+        recalledRows: headline.recalledRows,
       };
     }),
   };

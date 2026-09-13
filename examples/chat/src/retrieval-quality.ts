@@ -190,6 +190,25 @@ export interface ProbeOutcome {
   scoreDetails: ProbeScoreDetail[];
   /** 返ってきた候補全体で、各項が取った値の幅。順位を実際に決めた項がどれかを示す。 */
   termSpreads: TermSpread[];
+  /**
+   * この probe で `recall()` が実際に返した候補行数(`result.memories.length`)。
+   *
+   * **なぜ足すか**(非門ジョブへの可視化。ADR 0108): `SCORE_TERMS` は `lexicalMatch` を
+   * 含まない(第6の項として掛けない、という ADR 0084 §5 の決定の反映であって、この欄が
+   * 無い理由ではない)。⟹ 語彙チャンネルが**そもそも1行も通っていないのか**、**通っては
+   * いるが値が無いのか**を、`termSpreads` だけでは区別できない。この欄と
+   * `lexicalMatchRows` を並べることで、その区別を行数として残す。
+   */
+  recalledRows: number;
+  /**
+   * そのうち `score.lexicalMatch` 欄を持っていた行数。
+   *
+   * **`examples/chat` のベンチは `channels` を渡していない**(既定
+   * `DEFAULT_RECALL_CHANNELS` = `["ann"]`)ため、現状はどの probe でも 0 のまま推移する
+   * ——これは欠陥ではなく、「語彙チャンネルが配線されていない」という構成そのものの
+   * 反映である(ADR 0108)。
+   */
+  lexicalMatchRows: number;
 }
 
 function average(values: number[]): number {
@@ -396,6 +415,8 @@ export async function runRetrievalQualityArm(
       totalInScope: result.index.totalInScope,
       scoreDetails: collectScoreDetails(result.memories, { goldRank, distractorRank }),
       termSpreads: computeTermSpreads(result.memories),
+      recalledRows: result.memories.length,
+      lexicalMatchRows: result.memories.filter((m) => m.score.lexicalMatch !== undefined).length,
     });
   }
 
@@ -489,6 +510,10 @@ export interface ArmHeadline {
   hit1Count: number;
   hit10Count: number;
   probeCount: number;
+  /** `report.probes[].recalledRows` の総和(この arm が実際に返した候補行の総数)。 */
+  recalledRows: number;
+  /** `report.probes[].lexicalMatchRows` の総和(語彙チャンネルが引き当てた行の総数)。 */
+  lexicalMatchRows: number;
 }
 
 /** 1つの arm の見出し数字。`report.probes` からのみ導く。 */
@@ -498,6 +523,8 @@ export function armHeadline(report: ArmReport): ArmHeadline {
     hit1Count: report.probes.filter((p) => p.hit1).length,
     hit10Count: report.probes.filter((p) => p.hit10).length,
     probeCount: report.probes.length,
+    recalledRows: report.probes.reduce((sum, p) => sum + p.recalledRows, 0),
+    lexicalMatchRows: report.probes.reduce((sum, p) => sum + p.lexicalMatchRows, 0),
   };
 }
 
