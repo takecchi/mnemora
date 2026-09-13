@@ -96,6 +96,26 @@ export function findMissingEntryPoints(manifest, packageDir) {
 }
 
 /**
+ * `README.md` が tarball 内（に相当するディレクトリ）に実在するか調べる。
+ *
+ * **なぜ作業ツリーの `README.md` ではなく tarball 側（`packageDir`）を見るか**: 作業ツリーに
+ * `README.md` が実在していても、`files` の絞り込みや `.npmignore` 相当の設定次第では、
+ * 使う人が実際に受け取る tarball には入らないことがある——`findLicenseViolations` が
+ * `LICENSE` ファイルについて同じ理由で tarball 側を見ているのと同じ理由である
+ * （このモジュールの他の関数と同じく、呼び出し側が「pack して展開した実体」を渡す前提に
+ * 揃えている）。README が無い tarball は npm のパッケージページや `npm view` で
+ * 説明が空になる——publish 自体は失敗しないため、この歯が無いと気づかれないまま起きる。
+ */
+export function findMissingReadme(packageDir) {
+  try {
+    statSync(join(packageDir, "README.md"));
+    return [];
+  } catch {
+    return ["README.md が tarball に入っていません"];
+  }
+}
+
+/**
  * tarball 内の manifest に `private` が立っていないか調べる（ADR 0066）。
  *
  * **なぜ tarball の側でも見るか**: `private: true` のままだと publish は

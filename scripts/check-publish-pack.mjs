@@ -37,7 +37,7 @@
  * ——見落としを機械的には検知できない。
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -45,6 +45,7 @@ import { PUBLISH_TARGETS } from "./publish-targets.mjs";
 import {
   findWorkspaceProtocolViolations,
   findMissingEntryPoints,
+  findMissingReadme,
   findOrphanedSourceMaps,
   findLicenseViolations,
   findPrivateViolations,
@@ -62,8 +63,8 @@ const BANNER = "─".repeat(72);
 
 /**
  * 判定関数（`findWorkspaceProtocolViolations` / `findMissingEntryPoints` /
- * `findOrphanedSourceMaps` / `findLicenseViolations` / `findPrivateViolations`）の本体は
- * `./publish-pack-checks.mjs` にある。
+ * `findMissingReadme` / `findOrphanedSourceMaps` / `findLicenseViolations` /
+ * `findPrivateViolations`）の本体は `./publish-pack-checks.mjs` にある。
  * ここに実装を持たないのは、`scripts/__tests__/check-publish-pack.test.mjs` が
  * `pnpm pack` を一切走らせずに合成フィクスチャへ直接それらを呼べるようにするため
  * （`publish-pack-checks.mjs` 冒頭のコメント参照）。
@@ -180,10 +181,9 @@ try {
     }
 
     // 4. README.md
-    try {
-      statSync(join(packageDir, "README.md"));
-    } catch {
-      violations.push(`[${target.name}] README.md が tarball に入っていません`);
+    const missingReadme = findMissingReadme(packageDir);
+    for (const r of missingReadme) {
+      violations.push(`[${target.name}] ${r}`);
     }
 
     // 5. publishConfig.access
