@@ -1,6 +1,23 @@
 import { describe, expect, it } from "vitest";
+import type { RecalledMemory, ScoreBreakdown } from "@mnemora/core";
 import type { ArmReport, ProbeOutcome } from "../retrieval-quality.js";
-import { armHeadline, formatArmSummaryTable } from "../retrieval-quality.js";
+import {
+  armHeadline,
+  computeDecayFreshnessRowwise,
+  computeTermSpreads,
+  formatArmSummaryTable,
+} from "../retrieval-quality.js";
+
+/** `computeTermSpreads`/`computeDecayFreshnessRowwise` の検査用に、最小の `RecalledMemory` を作る。 */
+function memory(score: ScoreBreakdown): RecalledMemory {
+  return {
+    memoryId: `memory-${JSON.stringify(score)}`,
+    digest: "d",
+    retrievedVia: "ann",
+    provenanceKind: "stated",
+    score,
+  };
+}
 
 /**
  * ADR 0068 ②: 「arm を跨いで数字を拾えてしまう」を塞ぐ歯。
@@ -32,6 +49,7 @@ function makeProbe(id: string, hit1: boolean, hit10: boolean): ProbeOutcome {
     termSpreads: [],
     recalledRows: 10,
     lexicalMatchRows: 0,
+    decayFreshnessRowwise: { rows: 0, equalRows: 0, differentRows: 0 },
   };
 }
 
@@ -171,5 +189,64 @@ describe("armHeadline — ArmReport を1つだけ受け取り、probes からの
     const headline = armHeadline(report);
     expect(headline.recalledRows).toBe(20);
     expect(headline.lexicalMatchRows).toBe(2);
+  });
+
+  /**
+   * ⭐ ADR 0109: `termDistinct`/`decayFreshnessEqualRows`/`decayFreshnessDifferentRows`
+   * が `report.probes` からのみ導かれること(別計算をしないこと)。
+   */
+  it("termDistinct は probes の termSpreads から、項ごとの何通りかを arm 単位で集計する", () => {
+    // p0: tagMatch/strength は1通り(常に1)、similarity は2通り。
+    const memoriesP0 = [
+      memory({ similarity: 0.5, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.5 }),
+      memory({ similarity: 0.3, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.3 }),
+    ];
+    // p1: tagMatch は1通りのまま(arm全体でも1通り)、similarity はさらに広い範囲。
+    const memoriesP1 = [
+      memory({ similarity: 0.9, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.9 }),
+      memory({ similarity: 0.1, decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 0.1 }),
+    ];
+    const probes: ProbeOutcome[] = [
+      {
+        ...makeProbe("p0", true, true),
+        termSpreads: computeTermSpreads(memoriesP0),
+        decayFreshnessRowwise: computeDecayFreshnessRowwise(memoriesP0),
+      },
+      {
+        ...makeProbe("p1", true, true),
+        termSpreads: computeTermSpreads(memoriesP1),
+        decayFreshnessRowwise: computeDecayFreshnessRowwise(memoriesP1),
+      },
+    ];
+    const headline = armHeadline(makeArmReport("Z", probes, 1.0));
+
+    const similarity = headline.termDistinct.find((t) => t.term === "similarity")!;
+    expect(similarity.presentRows).toBe(4);
+    expect(similarity.minDistinctPerProbe).toBe(2);
+    expect(similarity.maxDistinctPerProbe).toBe(2);
+    // arm 全体の min/max は probe を跨いだ最小・最大(丸めない生値)。
+    expect(similarity.min).toBe(0.1);
+    expect(similarity.max).toBe(0.9);
+
+    const tagMatch = headline.termDistinct.find((t) => t.term === "tagMatch")!;
+    expect(tagMatch.presentRows).toBe(4);
+    // ⟹ どの probe でも1通りしか値を取らない: 重みを触っても順位は動かない。
+    expect(tagMatch.minDistinctPerProbe).toBe(1);
+    expect(tagMatch.maxDistinctPerProbe).toBe(1);
+    expect(tagMatch.min).toBe(1);
+    expect(tagMatch.max).toBe(1);
+
+    // decay===freshness は全4行で厳密等価(どちらも1のまま)。
+    expect(headline.decayFreshnessEqualRows).toBe(4);
+    expect(headline.decayFreshnessDifferentRows).toBe(0);
+  });
+
+  it("termSpreads を持たない(空配列の)probe しか無ければ、その項は presentRows=0・min/max=null になる", () => {
+    const headline = armHeadline(armA);
+    for (const t of headline.termDistinct) {
+      expect(t.presentRows).toBe(0);
+      expect(t.min).toBeNull();
+      expect(t.max).toBeNull();
+    }
   });
 });

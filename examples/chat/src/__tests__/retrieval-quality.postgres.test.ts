@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { PROBES, buildProbeSetConversation, findTopicKeywordViolations } from "../probe-set.js";
-import { resolveExternalId, runRetrievalQualityArm } from "../retrieval-quality.js";
+import { armHeadline, resolveExternalId, runRetrievalQualityArm } from "../retrieval-quality.js";
 import { createExampleRuntime } from "../runtime-factory.js";
 import { formatNoApiCallsNotice } from "../usage-meter.js";
 import {
@@ -219,6 +219,89 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
             "hit@1 を測り直すこと(それがこの歯の目的である。ADR 0108)。" +
             "⛔ 歯を消すだけにしないこと。",
         ).toBe(0);
+      } finally {
+        await handle.close();
+      }
+    },
+  );
+
+  /**
+   * ⭐ 向きを反転させた歯(ADR 0109)。ADR 0108 の歯と同じ形。
+   *
+   * **他の歯はすべて「いま赤く、直ったら緑」だが、これは逆である**——
+   * **「いま緑で、前提が黙って変わったら赤」**。ADR 0081 が(捨てた計装で)一度だけ
+   * 測った「`tagMatch`/`strength` は候補集合の上で1通りしか値を取らない
+   * (順位に構造上ゼロ寄与している)」「`freshness` は `decay` の行ごと厳密な複製である」
+   * という2つの実測を、恒久の歯として置き直す。
+   *
+   * **なぜ `tagMatch`/`strength` が1通りに固定されるか**(現状の構成に対する現物の理由):
+   * - `runRetrievalQualityArm` は `recall()` に `text` 以外を渡さない
+   *   (このファイル冒頭のコメント「パラメータは既定のまま変えない」)——`tags`/
+   *   `subjectId` を渡していないので、`tagMatch` は候補間で差が付きようがない。
+   * - `buildNewMemoryFromCandidate`(`packages/core/src/extraction.ts`)は無条件に
+   *   `strength: 1` を書く——抽出が `strength` に1以外を書く経路が無い。
+   *
+   * **なぜ `decay`===`freshness` が行ごと厳密等価になるか**: `freshness` の起点は
+   * `occurredAt ?? recordedAt`、`decay` の起点は `lastReinforcedAt ?? recordedAt`
+   * (`packages/core/src/strategies/scoring.ts`)。このベンチは `observe()` に
+   * `occurredAt` を渡さず、`memory_usage` の強化も起きない(`lastReinforcedAt` が
+   * 埋まらない)ため、両方とも `recordedAt` 起点の同じ値になる。
+   *
+   * **⚠ `similarity`/`decay` の値そのもの・MRR・順位は assert しない**
+   * (カセットや実行時刻に依存するため。ADR 0108 の歯と同じ規律)。
+   */
+  it(
+    "🔴 [ADR 0109] tagMatch/strength はどの probe でも候補間で1通り(=1)、" +
+      "decay===freshness は全行で厳密等価 — この前提が崩れたらこの歯が赤くなる",
+    async () => {
+      await resetTestDatabase();
+      await getTestClient();
+      const handle = await createExampleRuntime(requireDatabaseUrl(), {
+        MNEMORA_LLM: "deterministic",
+        MNEMORA_EMBEDDING: "deterministic",
+      });
+      try {
+        const report = await runRetrievalQualityArm({
+          armLabel: "test-arm-adr-0109",
+          tenantId: "retrieval-quality-test-arm-adr-0109",
+          runtime: handle.runtime,
+          memoryStore: handle.memoryStore,
+          llmMode: handle.llmMode,
+          embeddingMode: handle.embeddingMode,
+          haystackSize: 20,
+        });
+
+        const headline = armHeadline(report);
+
+        const failureMeaning =
+          "この歯が赤いのは欠陥が入ったからではない。ベンチの前提が変わったという" +
+          "意味である——具体的には recall() に tags が渡されるようになった／" +
+          "Memory.strength に 1 以外が書かれるようになった／occurredAt か " +
+          "lastReinforcedAt が埋まるようになった(＝ decay と freshness の起点が" +
+          "分かれた)。⟹ 意図した変更なら、この歯を更新したうえで順位を測り直すこと" +
+          "(それがこの歯の目的である。ADR 0109)。⛔ 歯を消すだけにしないこと。";
+
+        // まず、この歯自体が何も測っていない(候補が1件も返らない)状態ではないことを
+        // 確かめる——そうでなければ以下の assertion が「測れなかったから通っただけ」
+        // になってしまう(ADR 0108 の歯と同じ番人)。
+        expect(headline.recalledRows, failureMeaning).toBeGreaterThan(0);
+
+        for (const probe of report.probes) {
+          const tagMatch = probe.termSpreads.find((s) => s.term === "tagMatch");
+          expect(tagMatch, failureMeaning).toBeDefined();
+          expect([tagMatch!.distinctCount, tagMatch!.min, tagMatch!.max], failureMeaning).toEqual([
+            1, 1, 1,
+          ]);
+
+          const strength = probe.termSpreads.find((s) => s.term === "strength");
+          expect(strength, failureMeaning).toBeDefined();
+          expect([strength!.distinctCount, strength!.min, strength!.max], failureMeaning).toEqual([
+            1, 1, 1,
+          ]);
+        }
+
+        expect(headline.decayFreshnessDifferentRows, failureMeaning).toBe(0);
+        expect(headline.decayFreshnessEqualRows, failureMeaning).toBe(headline.recalledRows);
       } finally {
         await handle.close();
       }

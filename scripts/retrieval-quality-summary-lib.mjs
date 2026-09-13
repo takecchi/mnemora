@@ -330,6 +330,94 @@ export function buildLexicalChannelWarningSection(arms) {
 }
 
 /**
+ * ⭐ 非門の節(ADR 0109)。`buildLexicalChannelWarningSection`(ADR 0108・上)と
+ * **同じ向き**である。
+ *
+ * **向きの判定(このコメントに明記する理由: マネージャーから「自分で考えて明記せよ」と
+ * 指示された)**: 「向きを反転させた」は、この repo の他のほとんどの節
+ * (基準値との相違・入力の破損 = **いま赤く、直ったら緑**)に対する反転であって、
+ * `buildLexicalChannelWarningSection` 自体に対する反転ではない。
+ * `buildLexicalChannelWarningSection` が測るのは
+ * 「**いま(語彙チャンネルは)静かで(lexicalMatchRows===0=チャンネルが一度も
+ * 発火していない)、ベンチの構成が黙って変わったら騒ぐ(発火するようになる)**」
+ * という極性である。この節が測る「候補間で値が1通りしか無い項」も、同じ極性を持つ
+ * ——**いま(その項は)静かで(`maxDistinctPerProbe === 1` = 候補間で値が動いていない)、
+ * ベンチの前提が黙って変わったら騒ぐ(何通りかの値を取るようになる)。**
+ * 違いは「何が静かか」だけである——`buildLexicalChannelWarningSection` は
+ * **チャンネルの不在**(欄そのものが1行も現れない)を測り、この節は
+ * **値の定数性**(欄は現れるが候補間で動かない)を測る。⟹ **「いま騒いでいて、
+ * 直ったら静かになる」の逆向きではない**——採らなかった。理由は、両方とも
+ * 「この構成のままでは重みを触っても順位が動かない」という**現状の限界**を示す
+ * 警告であり、限界が解消されたときに警告が消える(=直ったら静かになるのではなく、
+ * 今の"静かな項"が"騒ぎ出したら"警告が消える)という同じ因果の向きを持つため。
+ *
+ * ⛔ **このジョブは門ではない。**この関数も exit code には触れない。
+ * `termDistinct`/`decayFreshnessEqualRows`/`decayFreshnessDifferentRows` は
+ * `RetrievalQualityArmJson` の**省略可能欄**なので、古い実測 JSON(この変更以前に
+ * 書かれたもの)にはそもそも欄が無い——そのときは何も言わない(測れないことを
+ * 「0だった」と偽らない。`buildLexicalChannelWarningSection` と同じ規律)。
+ *
+ * @param {Record<string, unknown>[]} arms
+ * @returns {string | null} 報告すべき項が1つも無ければ(欄自体が無い run を含む)null。
+ */
+export function buildConstantTermSection(arms) {
+  const measurable = arms.filter((arm) => Array.isArray(arm.termDistinct));
+  if (measurable.length === 0) {
+    return null;
+  }
+
+  const armLines = [];
+  for (const arm of measurable) {
+    const constantTerms = /** @type {{ term: string, maxDistinctPerProbe: number }[]} */ (
+      arm.termDistinct
+    ).filter((t) => t.maxDistinctPerProbe === 1);
+    if (constantTerms.length > 0) {
+      armLines.push(
+        `- ${arm.armLabel}: ${constantTerms.map((t) => t.term).join(", ")} は、` +
+          "どの probe でも候補間に1通りしか値を取らなかった " +
+          "⟹ この重みをいくら触っても順位は動かない。",
+      );
+    }
+    const equalRows = arm.decayFreshnessEqualRows;
+    const differentRows = arm.decayFreshnessDifferentRows;
+    if (
+      typeof equalRows === "number" &&
+      typeof differentRows === "number" &&
+      differentRows === 0 &&
+      equalRows > 0
+    ) {
+      armLines.push(
+        `- ${arm.armLabel}: decay と freshness は全行(${equalRows}行)で厳密に等価だった ` +
+          "（＝独立した項として効いていない）。",
+      );
+    }
+  }
+
+  if (armLines.length === 0) {
+    return null;
+  }
+
+  return [
+    "## ⚠ 候補間で値が動いていない項がある",
+    "",
+    "🔴 **これは直ったら消える警告である。**" +
+      `（[ADR 0081](${REPO_BLOB_BASE}/0081-similarity-is-the-only-term-that-ranks.md) §1 の実測と同じ形の計装）:`,
+    "",
+    ...armLines,
+    "",
+    "⚠ **これは失敗ではない。**このベンチの呼び方(`recall(ctx, {text})` のみ)・" +
+      "記憶の作られ方(抽出が常に `strength: 1` を書く等)が、現状こうなっているという" +
+      "構成の反映である(ADR 0109)。",
+    "",
+    "⟹ **この警告が消えたら、それはベンチの前提が変わったという意味である**" +
+      "(`recall()` に `tags` が渡されるようになった／`Memory.strength` に 1 以外が" +
+      "書かれるようになった／`occurredAt` か `lastReinforcedAt` が埋まるようになった" +
+      "＝ `decay`/`freshness` の起点が分かれた)。**そのときは順位を測り直すこと**" +
+      "（それがこの警告の目的である）。⛔ この警告を消すだけにしないこと。",
+  ].join("\n");
+}
+
+/**
  * Markdown を組み立てる(このスクリプトの主機能)。**stdout に出すのは呼び出し側の役目**
  * ——ここは文字列を返すだけ。
  *
@@ -351,6 +439,10 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   const lexicalWarning = buildLexicalChannelWarningSection(measured.arms);
   if (lexicalWarning) {
     lines.push(lexicalWarning, "");
+  }
+  const constantTermSection = buildConstantTermSection(measured.arms);
+  if (constantTermSection) {
+    lines.push(constantTermSection, "");
   }
   lines.push(buildCautionSection());
   return lines.join("\n");

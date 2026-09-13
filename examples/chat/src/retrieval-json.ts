@@ -1,7 +1,7 @@
 import type { Cassette } from "@mnemora/testkit";
 import type { ProviderMode } from "./providers.js";
 import { armHeadline } from "./retrieval-quality.js";
-import type { ArmReport } from "./retrieval-quality.js";
+import type { ArmReport, ArmTermDistinct } from "./retrieval-quality.js";
 
 /**
  * `retrieval` の機械可読な出力口（PR「retrieval を CI に載せる」）。
@@ -53,6 +53,22 @@ export interface RetrievalQualityArmJson {
    */
   lexicalMatchRows?: number;
   recalledRows?: number;
+  /**
+   * 項ごとの「何通りか」(arm 単位。ADR 0081 §1.1 / ADR 0109)、および
+   * `decay`/`freshness` の行ごと厳密等価の集計。**省略可能欄にした理由は
+   * `lexicalMatchRows`/`recalledRows` と同じ**——既存の欄の意味を変えない追加であり、
+   * `schemaVersion` を上げる理由が無い(古い実測 JSON・`retrieval-baseline.json` は
+   * この欄を持たないまま、引き続き `validateMeasured`/`validateBaseline` を通る。
+   * `REQUIRED_ARM_*_FIELDS`/`DIFF_FIELDS` のどちらにも含めていない)。
+   *
+   * **⚠ JSON は数値をそのまま書く(丸めない)。**`formatScoreValue` を経由しないので、
+   * `min`/`max` がここでは 1e-7 桁の `decay`/`freshness` の差(ADR 0109 §4 の実測)を保つ**唯一の保全経路**
+   * である——コンソール出力(`formatArmDetail`)は `formatExactScoreValue` で
+   * 丸めずに出すとはいえ、機械可読な形で残るのはこの JSON だけである。
+   */
+  termDistinct?: ArmTermDistinct[];
+  decayFreshnessEqualRows?: number;
+  decayFreshnessDifferentRows?: number;
 }
 
 export interface RetrievalQualityCassetteJson {
@@ -147,6 +163,9 @@ export function buildRetrievalQualityJson(
         probeCount: headline.probeCount,
         lexicalMatchRows: headline.lexicalMatchRows,
         recalledRows: headline.recalledRows,
+        termDistinct: headline.termDistinct,
+        decayFreshnessEqualRows: headline.decayFreshnessEqualRows,
+        decayFreshnessDifferentRows: headline.decayFreshnessDifferentRows,
       };
     }),
   };

@@ -74,6 +74,21 @@ export interface TermSpread {
   max: number | null;
   /** `max - min`。項を持つ候補が1件も無ければ null(0 と区別する)。 */
   spread: number | null;
+  /**
+   * その項を持つ候補が、実際に何通りの値を取ったか(`new Set(values).size`。
+   * 浮動小数は厳密比較)。項を持つ候補が0件なら 0。
+   *
+   * **⚠ `spread`(幅 = `max - min`)とは別の主張である**(ADR 0081 §1.1)。
+   * 幅が0(または極小)であることと、候補間で1通りしか値を取らないことは、
+   * この文脈では違う主張である——**幅は両端の距離だけを言い、中間に何個の値が
+   * 在るかを言わない。**`decay` はこの違いが出る項の実例で、幅は 1e-7 桁(ADR 0109 §4 の実測。
+   * **この桁は系の定数ではなく、取り込みから `recall()` までの実時間の関数である**)だが
+   * 通り数は候補数ぶんある(= 重みを触れば理論上は動く余地がある)のに対し、
+   * `tagMatch`/`strength` は通り数そのものが1であり(= 重みをいくら触っても
+   * 順位は1つも動かない)。**「重みが小さい」と「項が動いていない」を区別するには、
+   * 幅ではなく通り数が要る。**
+   */
+  distinctCount: number;
 }
 
 /**
@@ -82,6 +97,9 @@ export interface TermSpread {
  * **項を持つ候補が0件のときに `spread` を 0 と書かない。**「差が無かった」と
  * 「測る対象が無かった」は別物である(ADR 0008 の「無いには種類がある」の、
  * この文脈への適用)。
+ *
+ * **`presentCount`/`min`/`max`/`spread` の計算はここで変えていない**——
+ * `distinctCount`(ADR 0081 §1.1)を追加で計算するだけである。
  */
 export function computeTermSpreads(memories: readonly RecalledMemory[]): TermSpread[] {
   return SCORE_TERMS.map((term) => {
@@ -89,12 +107,57 @@ export function computeTermSpreads(memories: readonly RecalledMemory[]): TermSpr
       .map((memory) => memory.score[term])
       .filter((value): value is number => value !== undefined);
     if (values.length === 0) {
-      return { term, presentCount: 0, min: null, max: null, spread: null };
+      return { term, presentCount: 0, min: null, max: null, spread: null, distinctCount: 0 };
     }
     const min = Math.min(...values);
     const max = Math.max(...values);
-    return { term, presentCount: values.length, min, max, spread: max - min };
+    return {
+      term,
+      presentCount: values.length,
+      min,
+      max,
+      spread: max - min,
+      distinctCount: new Set(values).size,
+    };
   });
+}
+
+/**
+ * `decay` と `freshness` を、同じ候補行の中で1件ずつ厳密比較(`===`)する
+ * (ADR 0081 §2 / ADR 0109)。
+ *
+ * **なぜ「幅が一致すること」では代用できないか**: `termSpreads` の `decay`/`freshness`
+ * の幅が同じ値であっても、それは両端(min/max)が一致しているだけであり、
+ * **同じ候補行どうしで値が一致していることを含意しない**——間接証拠でしかない。
+ * ここでは行ごとの厳密等価を直接数える。
+ *
+ * **`ScoreBreakdown.decay`/`freshness` はどちらも必須欄(optional ではない)なので、
+ * `memories` に1件でも要素があれば、その行は必ず両方の欄を持つ。**⟹ `rows` は
+ * 実質 `memories.length` と一致する。それでも名前を「両方の欄を持つ行数」とするのは、
+ * 将来どちらかが optional になった場合に、この関数の意図(「測れた行だけを数える」)を
+ * 呼び出し側のコードから読み取れるようにするため。
+ */
+export function computeDecayFreshnessRowwise(
+  memories: readonly RecalledMemory[],
+): DecayFreshnessRowwise {
+  const rows = memories.length;
+  let equalRows = 0;
+  for (const memory of memories) {
+    if (memory.score.decay === memory.score.freshness) {
+      equalRows += 1;
+    }
+  }
+  return { rows, equalRows, differentRows: rows - equalRows };
+}
+
+/** `computeDecayFreshnessRowwise` の結果(ADR 0109)。 */
+export interface DecayFreshnessRowwise {
+  /** `decay`/`freshness` の両方を持っていた行数。 */
+  rows: number;
+  /** そのうち `decay === freshness`(厳密等価)だった行数。 */
+  equalRows: number;
+  /** そのうち `decay !== freshness` だった行数。 */
+  differentRows: number;
 }
 
 /** 1件の候補が、この probe においてどの役だったか。複数該当しうる(gold が1位など)。 */
@@ -209,6 +272,14 @@ export interface ProbeOutcome {
    * 反映である(ADR 0108)。
    */
   lexicalMatchRows: number;
+  /**
+   * この probe において、`decay` と `freshness` が行ごとに厳密等価だったか(ADR 0109)。
+   *
+   * **なぜ足すか**: ADR 0081 §2 は「`freshness` は `decay` の行ごと厳密な複製である」を
+   * 一時的な計装で測ったが、その計装は捨てられ(§6.1)、再現するには足し直す必要が
+   * あった。ここで恒久化する。
+   */
+  decayFreshnessRowwise: DecayFreshnessRowwise;
 }
 
 function average(values: number[]): number {
@@ -417,6 +488,7 @@ export async function runRetrievalQualityArm(
       termSpreads: computeTermSpreads(result.memories),
       recalledRows: result.memories.length,
       lexicalMatchRows: result.memories.filter((m) => m.score.lexicalMatch !== undefined).length,
+      decayFreshnessRowwise: computeDecayFreshnessRowwise(result.memories),
     });
   }
 
@@ -469,6 +541,25 @@ export function formatScoreValue(value: number): string {
   return value.toFixed(6);
 }
 
+/**
+ * 丸めない整形(ADR 0081 §6.2 / ADR 0109)。
+ *
+ * **`formatScoreValue`(6桁丸め、または `1e-4` 未満は指数表記)はここでは変えない**
+ * ——既存の印字(`formatTermSpreads`/`formatScoreDetail`)はそのまま使い続ける。
+ * こちらは新設で、`String(value)` がそのまま返す、double を往復可能な最短の
+ * 10進表現を使う。
+ *
+ * **なぜ要るか**: ADR 0081 §6.2 は、`formatScoreValue` を `decay`/`freshness` の
+ * 生値の印字に流用したところ、両者とも `1.000000` に丸められ、「`distinctCount=10`
+ * なのに `min=max=1.000000`」という自己矛盾した表示になったことを記録している
+ * (`decay`/`freshness` は 1 からの差が 1e-7〜1e-8 桁であり、6桁丸めでは差が消える。
+ * 実測は ADR 0109 §4)。
+ * `formatTermDistinctCounts` はこの関数を使うことで、その欠陥を再現しない。
+ */
+export function formatExactScoreValue(value: number): string {
+  return String(value);
+}
+
 /** 項ごとの値の幅を1行にする。幅が最大の項が、その recall の順位を決めた項である。 */
 export function formatTermSpreads(spreads: readonly TermSpread[]): string {
   return spreads
@@ -478,6 +569,30 @@ export function formatTermSpreads(spreads: readonly TermSpread[]): string {
         : `${s.term}=${formatScoreValue(s.spread)}`,
     )
     .join(" ");
+}
+
+/**
+ * 項ごとの「何通りか」を1行にする(ADR 0081 §1.1 / ADR 0109)。
+ *
+ * **既存の `formatTermSpreads`(幅)とは別の行として足す。**両者は別の主張であり
+ * (`TermSpread.distinctCount` の doc 参照)、既存の行の文面は1文字も変えない。
+ * min/max は丸めない(`formatExactScoreValue`)——`decay`/`freshness` の 1e-7 桁の
+ * 差を、6桁丸めの `formatScoreValue` で消さないため(ADR 0081 §6.2 / ADR 0109 §4)。
+ */
+export function formatTermDistinctCounts(spreads: readonly TermSpread[]): string {
+  return spreads
+    .map((s) =>
+      s.min === null || s.max === null
+        ? `${s.term}=(この項を持つ候補が無い)`
+        : `${s.term}=${s.distinctCount}通り[${formatExactScoreValue(s.min)}..${formatExactScoreValue(s.max)}]`,
+    )
+    .join(" ");
+}
+
+/** `decay`/`freshness` の行ごと厳密等価を1行にする(ADR 0081 §2 / ADR 0109)。 */
+export function formatDecayFreshnessRowwise(rowwise: DecayFreshnessRowwise): string {
+  const suffix = rowwise.differentRows > 0 ? `(違う行が${rowwise.differentRows}件ある)` : "";
+  return `${rowwise.equalRows}/${rowwise.rows}行${suffix}`;
 }
 
 /** gold/distractor/1位のスコア内訳を、掛け算の形のまま1行ずつ出す。 */
@@ -514,6 +629,78 @@ export interface ArmHeadline {
   recalledRows: number;
   /** `report.probes[].lexicalMatchRows` の総和(語彙チャンネルが引き当てた行の総数)。 */
   lexicalMatchRows: number;
+  /** 項ごとの、arm 全体での「何通りか」の集計(ADR 0081 §1.1 / ADR 0109)。 */
+  termDistinct: ArmTermDistinct[];
+  /** `report.probes[].decayFreshnessRowwise.equalRows` の総和。 */
+  decayFreshnessEqualRows: number;
+  /** `report.probes[].decayFreshnessRowwise.differentRows` の総和。 */
+  decayFreshnessDifferentRows: number;
+}
+
+/**
+ * 項ごとに、arm 全体での「何通りか」を集計する(ADR 0109)。
+ *
+ * **`probes[].termSpreads` からのみ導く。**別の集計にすると、この関数と
+ * `formatArmDetail` の印字が食い違いうる(ADR 0068 ②と同じ理由)。
+ */
+export interface ArmTermDistinct {
+  term: ScoreTerm;
+  /** arm 全体で、その欄を持っていた行数(`presentCount` の probe 間の総和)。 */
+  presentRows: number;
+  /** probe ごとの `distinctCount` の最小。 */
+  minDistinctPerProbe: number;
+  /**
+   * probe ごとの `distinctCount` の最大。**これが 1 なら、arm 内のどの probe でも
+   * この項は候補間で1通りしか値を取っていない**(= 重みを触っても順位は動かない。
+   * ADR 0081 §1)。
+   */
+  maxDistinctPerProbe: number;
+  /** arm 全体の最小値(丸めない生値)。項を持つ候補がどの probe にも無ければ null。 */
+  min: number | null;
+  max: number | null;
+}
+
+function computeArmTermDistinct(probes: readonly ProbeOutcome[]): ArmTermDistinct[] {
+  return SCORE_TERMS.map((term) => {
+    let presentRows = 0;
+    // `null` は「まだ1件も見ていない」——先頭の probe がたまたまこの項を
+    // 持たない(`termSpreads` にこの項の要素そのものが無い)場合でも、
+    // 見つかった最初の1件を基準に min/max を初期化できるようにする
+    // (probe の並び順に依存させない)。
+    let minDistinctPerProbe: number | null = null;
+    let maxDistinctPerProbe: number | null = null;
+    let min: number | null = null;
+    let max: number | null = null;
+    for (const probe of probes) {
+      const spread = probe.termSpreads.find((s) => s.term === term);
+      if (!spread) {
+        continue;
+      }
+      presentRows += spread.presentCount;
+      minDistinctPerProbe =
+        minDistinctPerProbe === null
+          ? spread.distinctCount
+          : Math.min(minDistinctPerProbe, spread.distinctCount);
+      maxDistinctPerProbe =
+        maxDistinctPerProbe === null
+          ? spread.distinctCount
+          : Math.max(maxDistinctPerProbe, spread.distinctCount);
+      if (spread.min !== null) {
+        min = min === null ? spread.min : Math.min(min, spread.min);
+      }
+      if (spread.max !== null) {
+        max = max === null ? spread.max : Math.max(max, spread.max);
+      }
+    }
+    return {
+      term,
+      presentRows,
+      minDistinctPerProbe: minDistinctPerProbe ?? 0,
+      maxDistinctPerProbe: maxDistinctPerProbe ?? 0,
+      min,
+      max,
+    };
+  });
 }
 
 /** 1つの arm の見出し数字。`report.probes` からのみ導く。 */
@@ -525,6 +712,15 @@ export function armHeadline(report: ArmReport): ArmHeadline {
     probeCount: report.probes.length,
     recalledRows: report.probes.reduce((sum, p) => sum + p.recalledRows, 0),
     lexicalMatchRows: report.probes.reduce((sum, p) => sum + p.lexicalMatchRows, 0),
+    termDistinct: computeArmTermDistinct(report.probes),
+    decayFreshnessEqualRows: report.probes.reduce(
+      (sum, p) => sum + p.decayFreshnessRowwise.equalRows,
+      0,
+    ),
+    decayFreshnessDifferentRows: report.probes.reduce(
+      (sum, p) => sum + p.decayFreshnessRowwise.differentRows,
+      0,
+    ),
   };
 }
 
@@ -576,6 +772,12 @@ export function formatArmDetail(report: ArmReport): string {
         `omitted=[${p.omittedKinds.join(",")}] totalInScope=${p.totalInScope}`,
     );
     lines.push(`      項ごとの値の幅(返った候補全体): ${formatTermSpreads(p.termSpreads)}`);
+    lines.push(
+      `      項ごとの何通りか(返った候補全体): ${formatTermDistinctCounts(p.termSpreads)}`,
+    );
+    lines.push(
+      `      decay===freshness(行ごと厳密等価): ${formatDecayFreshnessRowwise(p.decayFreshnessRowwise)}`,
+    );
     for (const detail of p.scoreDetails) {
       lines.push(`      ${formatScoreDetail(detail)}`);
     }
