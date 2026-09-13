@@ -46,6 +46,9 @@ import {
   findWorkspaceProtocolViolations,
   findMissingEntryPoints,
   findMissingReadme,
+  findVersionViolations,
+  findVersionSkewViolations,
+  findPublishAccessViolations,
   findOrphanedSourceMaps,
   findLicenseViolations,
   findPrivateViolations,
@@ -63,7 +66,8 @@ const BANNER = "─".repeat(72);
 
 /**
  * 判定関数（`findWorkspaceProtocolViolations` / `findMissingEntryPoints` /
- * `findMissingReadme` / `findOrphanedSourceMaps` / `findLicenseViolations` /
+ * `findMissingReadme` / `findVersionViolations` / `findVersionSkewViolations` /
+ * `findPublishAccessViolations` / `findOrphanedSourceMaps` / `findLicenseViolations` /
  * `findPrivateViolations`）の本体は `./publish-pack-checks.mjs` にある。
  * ここに実装を持たないのは、`scripts/__tests__/check-publish-pack.test.mjs` が
  * `pnpm pack` を一切走らせずに合成フィクスチャへ直接それらを呼べるようにするため
@@ -168,9 +172,11 @@ try {
     }
 
     // 2. version
-    if (manifest.version === "0.0.0" || !manifest.version) {
-      violations.push(`[${target.name}] version が未設定か 0.0.0 のままです: ${manifest.version}`);
-    } else {
+    const versionViolations = findVersionViolations(manifest);
+    for (const v of versionViolations) {
+      violations.push(`[${target.name}] ${v}`);
+    }
+    if (versionViolations.length === 0) {
       versions.push({ name: target.name, version: manifest.version });
     }
 
@@ -187,10 +193,9 @@ try {
     }
 
     // 5. publishConfig.access
-    if (manifest.publishConfig?.access !== "public") {
-      violations.push(
-        `[${target.name}] publishConfig.access が "public" ではありません: ${JSON.stringify(manifest.publishConfig)}`,
-      );
+    const publishAccessViolations = findPublishAccessViolations(manifest);
+    for (const p of publishAccessViolations) {
+      violations.push(`[${target.name}] ${p}`);
     }
 
     // 6. 宙に浮いた source map
@@ -213,12 +218,8 @@ try {
   }
 
   // publish 対象すべてで同じ版であること（version 自体が有効だったものだけを比較する）
-  const distinctVersions = new Set(versions.map((v) => v.version));
-  if (versions.length === PUBLISH_TARGETS.length && distinctVersions.size > 1) {
-    violations.push(
-      `version が publish 対象で揃っていません: ${versions.map((v) => `${v.name}@${v.version}`).join(", ")}`,
-    );
-  }
+  const versionSkewViolations = findVersionSkewViolations(versions, PUBLISH_TARGETS.length);
+  violations.push(...versionSkewViolations);
 } finally {
   for (const dir of cleanupDirs) {
     rmSync(dir, { recursive: true, force: true });

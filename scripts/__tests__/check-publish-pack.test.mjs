@@ -8,6 +8,9 @@ import {
   findWorkspaceProtocolViolations,
   findMissingEntryPoints,
   findMissingReadme,
+  findVersionViolations,
+  findVersionSkewViolations,
+  findPublishAccessViolations,
   findOrphanedSourceMaps,
   findLicenseViolations,
   findPrivateViolations,
@@ -351,6 +354,125 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
       const violations = findMissingReadme(fixtureDir);
       expect(violations).toHaveLength(1);
       expect(violations[0]).toContain("README.md が tarball に入っていません");
+    });
+  });
+
+  describe("findVersionViolations（検査2・単一パッケージ側。Issue #174）", () => {
+    it("version が 0.0.0 なら検出する", () => {
+      const violations = findVersionViolations({ version: "0.0.0" });
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain("0.0.0");
+    });
+
+    it("version が未設定（フィールド自体が無い）なら検出する", () => {
+      const violations = findVersionViolations({});
+      expect(violations).toHaveLength(1);
+    });
+
+    it("version が空文字列なら検出する", () => {
+      const violations = findVersionViolations({ version: "" });
+      expect(violations).toHaveLength(1);
+    });
+
+    it("version が 0.1.0 なら検出しない", () => {
+      expect(findVersionViolations({ version: "0.1.0" })).toEqual([]);
+    });
+
+    /**
+     * ⭐ 隣の値を通すことを固定する歯——`0.0.0` だけを弾くのであって、
+     * 小さい版そのものを弾くのではない（ADR 0070: 版の権威は tag 側に在り、
+     * ここは「まだ tag の値を受け取っていない」ことの目印だけを見ている）。
+     */
+    it("version が 0.0.1 なら検出しない（隣の値を通す）", () => {
+      expect(findVersionViolations({ version: "0.0.1" })).toEqual([]);
+    });
+
+    it("version が 1.0.0-rc.1 なら検出しない（prerelease を弾かない）", () => {
+      expect(findVersionViolations({ version: "1.0.0-rc.1" })).toEqual([]);
+    });
+  });
+
+  describe("findVersionSkewViolations（検査2・publish 対象をまたぐ側。Issue #174）", () => {
+    it("6件すべて同じ版なら検出しない", () => {
+      const versions = [
+        { name: "@mnemora/core", version: "0.1.1" },
+        { name: "@mnemora/testkit", version: "0.1.1" },
+        { name: "@mnemora/openai", version: "0.1.1" },
+        { name: "@mnemora/anthropic", version: "0.1.1" },
+        { name: "@mnemora/postgres", version: "0.1.1" },
+        { name: "@mnemora/local-embedding", version: "0.1.1" },
+      ];
+      expect(findVersionSkewViolations(versions, 6)).toEqual([]);
+    });
+
+    it("6件のうち1件だけ別の版なら検出する", () => {
+      const versions = [
+        { name: "@mnemora/core", version: "0.1.1" },
+        { name: "@mnemora/testkit", version: "0.1.1" },
+        { name: "@mnemora/openai", version: "0.1.1" },
+        { name: "@mnemora/anthropic", version: "0.1.1" },
+        { name: "@mnemora/postgres", version: "0.1.1" },
+        { name: "@mnemora/local-embedding", version: "0.1.2" },
+      ];
+      const violations = findVersionSkewViolations(versions, 6);
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain("@mnemora/local-embedding@0.1.2");
+      expect(violations[0]).toContain("@mnemora/core@0.1.1");
+    });
+
+    /**
+     * ⚠ これは見落としではなく意図である（`publish-pack-checks.mjs` の
+     * `findVersionSkewViolations` の JSDoc 参照）。欠けた1件はすでに
+     * `findVersionViolations` 側で「version が未設定か 0.0.0 のままです」として
+     * 別に報告済みなので、集まった5件がバラバラでも、ここでは二重に
+     * （しかも不正確な文言で）報告しない。
+     */
+    it("5件しか集まっておらず版がバラバラでも検出しない（欠けた1件は別の違反として既に報告済み）", () => {
+      const versions = [
+        { name: "@mnemora/core", version: "0.1.1" },
+        { name: "@mnemora/testkit", version: "0.1.2" },
+        { name: "@mnemora/openai", version: "0.1.3" },
+        { name: "@mnemora/anthropic", version: "0.1.1" },
+        { name: "@mnemora/postgres", version: "0.1.1" },
+      ];
+      expect(findVersionSkewViolations(versions, 6)).toEqual([]);
+    });
+
+    it("空配列なら検出しない", () => {
+      expect(findVersionSkewViolations([], 6)).toEqual([]);
+    });
+  });
+
+  describe("findPublishAccessViolations（検査5。Issue #174）", () => {
+    it("publishConfig.access が restricted なら検出する", () => {
+      const violations = findPublishAccessViolations({
+        publishConfig: { access: "restricted" },
+      });
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain("restricted");
+    });
+
+    it("publishConfig 自体が無ければ検出する", () => {
+      const violations = findPublishAccessViolations({});
+      expect(violations).toHaveLength(1);
+    });
+
+    it("publishConfig はあるが access が無ければ検出する", () => {
+      const violations = findPublishAccessViolations({ publishConfig: {} });
+      expect(violations).toHaveLength(1);
+    });
+
+    /** 大文字違いを通さない——"public" との厳密な等値検査であることの歯。 */
+    it("publishConfig.access が Public（大文字違い）なら検出する", () => {
+      const violations = findPublishAccessViolations({
+        publishConfig: { access: "Public" },
+      });
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain("Public");
+    });
+
+    it("publishConfig.access が public なら検出しない", () => {
+      expect(findPublishAccessViolations({ publishConfig: { access: "public" } })).toEqual([]);
     });
   });
 
