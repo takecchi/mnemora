@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
@@ -181,6 +182,74 @@ const steps = parseSteps(jobBlock);
 
 const benchStep = steps.find((step) => step.env.MNEMORA_RETRIEVAL_JSON !== undefined);
 const summaryStep = steps.find((step) => step.run.includes("retrieval-quality-summary.mjs"));
+const artifactStep = steps.find((step) => step.name.includes("成果物として残す"));
+
+/**
+ * このファイル内で `extractStepBlock` が `blankOutWorkflowComments` を通した結果、
+ * 「扱えない」と名乗った箇所をすべて集める（呼び出し側がこれを無視できないようにするため
+ * ——下の describe("コメント潰しが …") が空であることを固定する。
+ * `ci-yml-consolidation-wiring.test.mjs` と同じ形）。
+ *
+ * @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]}
+ */
+const stepBlockCommentUnhandled = [];
+
+/**
+ * ある段の生テキスト（`- name: <name>` から次の段の `- name:` まで）を切り出す。
+ * `parseSteps` は `if:`/`uses:`/`with:` を読まないので、それらを検査したいときは
+ * こちらを使う。
+ *
+ * 🔴 **返す前にコメントを空白へ潰す。**identifier-probes ジョブの summary 段
+ * （`ci-yml-identifier-probes-wiring.test.mjs` を見ること）は、実キー `if: always()`
+ * のすぐ上の地の文コメントが同じ文字列 `` `if: always()` `` を引用している——
+ * 素朴な `toContain` は、実キーを `if: success()` へ変異させてもコメントの引用にだけ
+ * 一致して緑のまま通ってしまう（PR #176・`ci-yml-consolidation-wiring.test.mjs` の
+ * `extractStepBlock` docstring と同じ欠陥）。この直しは PR #176 が採った形
+ * （`blankOutWorkflowComments` を照合専用に通す）をそのまま踏襲する——独自設計をしない。
+ *
+ * ⛔ **この関数は照合専用であり、実行はしない。**`jobBlock`/`parseSteps` 側
+ * （`summaryStep.run` → `runSummaryStepFromWorkflow` が子プロセスで実際に走らせる）には
+ * 適用しない——実行するテキストからコメントを潰すと歯の意味が変わる。
+ *
+ * @param {string} stepName
+ * @returns {string | undefined}
+ */
+function extractStepBlock(stepName) {
+  const lines = jobBlock.split("\n");
+  const start = lines.findIndex((line) => line.trim() === `- name: ${stepName}`);
+  if (start === -1) {
+    return undefined;
+  }
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i += 1) {
+    if (/^ {6}- name:/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  const raw = lines.slice(start, end).join("\n");
+  const { text, unhandled } = blankOutWorkflowComments(raw);
+  if (unhandled.length > 0) {
+    stepBlockCommentUnhandled.push({ stepName, unhandled });
+  }
+  return text;
+}
+
+/**
+ * コメントを潰した段の生テキストに、実キーとしての `if: always()` が在るか。
+ *
+ * ⚠ **ただの `toContain("if: always()")` で終わらせない。**判定を「`if:` キーの行として
+ * 現れているか」という正規表現に切り出すことで、下の
+ * describe("blockDeclaresAlways: …") の陽性／陰性対照が書ける——素朴な部分文字列一致では
+ * 「実キーを壊す変異」と「ふるまいを変えないコメントの書き換え」を区別する歯を
+ * 別途書けない。
+ *
+ * @param {string} blankedBlock コメントを潰した段の生テキスト（`extractStepBlock` の返り値）
+ * @returns {boolean}
+ */
+function blockDeclaresAlways(blankedBlock) {
+  return /^\s*if:\s*always\(\)\s*$/m.test(blankedBlock);
+}
 
 /**
  * `${{ github.workspace }}` を実際の場所に置き換える。GitHub Actions がやることを、
@@ -332,5 +401,63 @@ describe("ci.yml の retrieval-quality ジョブの配線", () => {
 
   it("ジョブに timeout-minutes が設定されている（既定 360 分で刺さらない）", () => {
     expect(jobBlock).toMatch(/^ {4}timeout-minutes: \d+$/m);
+  });
+
+  it("🔴 artifact 段に if: always() の実キーが付いている（measure が落ちても成果物は残す。Issue #177）", () => {
+    expect(artifactStep, "成果物を upload する段が無い").toBeDefined();
+    const block = extractStepBlock(artifactStep.name);
+    expect(block, "artifact 段の生テキストが見つからない").toBeDefined();
+    expect(blockDeclaresAlways(block)).toBe(true);
+  });
+});
+
+describe("blockDeclaresAlways: 実キーとコメントの引用を区別する（Issue #177）", () => {
+  it("陽性: 実キーが if: success() で、地の文コメントだけが if: always() を引用している場合は false", () => {
+    const raw = [
+      "      - name: 合成した段",
+      "        # このステップは常に走る（if: always()）——測っていないことを測っていないと言う。",
+      "        if: success()",
+      "        run: echo hi",
+    ].join("\n");
+    const { text } = blankOutWorkflowComments(raw);
+    expect(blockDeclaresAlways(text)).toBe(false);
+  });
+
+  it("🔴 陰性対照: 実キーが if: always() のままで、コメント側が if: success() を引用していても true", () => {
+    const raw = [
+      "      - name: 合成した段",
+      "        # 通常は if: success() だが、このステップだけは常に走らせる。",
+      "        if: always()",
+      "        run: echo hi",
+    ].join("\n");
+    const { text } = blankOutWorkflowComments(raw);
+    expect(blockDeclaresAlways(text)).toBe(true);
+  });
+
+  it("🔴 陰性対照2: ふるまいを変えないコメントの書き換え・追加をしても true のまま", () => {
+    const raw = [
+      "      - name: 合成した段",
+      "        # 全く無関係なコメント行を1行足す。",
+      "        # このステップは常に走る。",
+      "        if: always()",
+      "        run: echo hi",
+    ].join("\n");
+    const { text } = blankOutWorkflowComments(raw);
+    expect(blockDeclaresAlways(text)).toBe(true);
+  });
+});
+
+describe("コメント潰しが retrieval-quality ジョブの対象範囲で「扱えない」形に当たっていないこと(Issue #177)", () => {
+  // 🔴 `extractStepBlock` が返す前に通す `blankOutWorkflowComments` の
+  // unhandled を無視できないようにする(呼び出し側が黙って安全側へ倒さないための
+  // 配線そのもの。`scripts/workflow-comment-blank-lib.mjs` の docstring)。
+  // ⚠ 特定の呼び出し履歴に依存しないよう、ここで retrieval-quality ジョブの
+  // 全段を洗い直してから確かめる。
+  it("retrieval-quality ジョブの全段(name 段)に unhandled が無い", () => {
+    stepBlockCommentUnhandled.length = 0;
+    for (const step of steps) {
+      extractStepBlock(step.name);
+    }
+    expect(stepBlockCommentUnhandled).toEqual([]);
   });
 });
