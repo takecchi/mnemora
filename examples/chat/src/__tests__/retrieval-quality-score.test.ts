@@ -5,6 +5,7 @@ import {
   SCORE_TERMS,
   formatArmDetail,
   collectScoreDetails,
+  computeDecayFreshnessRowwise,
   computeTermSpreads,
   formatScoreDetail,
   formatScoreValue,
@@ -56,11 +57,11 @@ describe("computeTermSpreads", () => {
     ]);
     expect(spreads.map((s) => s.term)).toEqual([...SCORE_TERMS]);
     expect(spreads).toEqual([
-      { term: "similarity", presentCount: 2, min: 0.25, max: 0.5, spread: 0.25 },
-      { term: "decay", presentCount: 2, min: 0.5, max: 0.75, spread: 0.25 },
-      { term: "tagMatch", presentCount: 2, min: 1, max: 1.5, spread: 0.5 },
-      { term: "freshness", presentCount: 2, min: 0.25, max: 0.25, spread: 0 },
-      { term: "strength", presentCount: 2, min: 0.25, max: 1, spread: 0.75 },
+      { term: "similarity", presentCount: 2, min: 0.25, max: 0.5, spread: 0.25, distinctCount: 2 },
+      { term: "decay", presentCount: 2, min: 0.5, max: 0.75, spread: 0.25, distinctCount: 2 },
+      { term: "tagMatch", presentCount: 2, min: 1, max: 1.5, spread: 0.5, distinctCount: 2 },
+      { term: "freshness", presentCount: 2, min: 0.25, max: 0.25, spread: 0, distinctCount: 1 },
+      { term: "strength", presentCount: 2, min: 0.25, max: 1, spread: 0.75, distinctCount: 2 },
     ]);
   });
 
@@ -76,6 +77,7 @@ describe("computeTermSpreads", () => {
       min: 0.6,
       max: 0.6,
       spread: 0,
+      distinctCount: 1,
     });
     expect(spreads.find((s) => s.term === "decay")?.presentCount).toBe(2);
   });
@@ -90,6 +92,7 @@ describe("computeTermSpreads", () => {
         min: null,
         max: null,
         spread: null,
+        distinctCount: 0,
       });
     }
   });
@@ -100,7 +103,60 @@ describe("computeTermSpreads", () => {
       memory("y", { decay: 0.5, total: 0.5 }),
     ]);
     expect(spreads.find((s) => s.term === "similarity")?.spread).toBeNull();
+    expect(spreads.find((s) => s.term === "similarity")?.distinctCount).toBe(0);
     expect(spreads.find((s) => s.term === "decay")?.spread).toBe(0.5);
+  });
+
+  /**
+   * ⭐ `distinctCount` は `spread`(幅)と別の主張であることを示す歯(ADR 0081 §1.1)。
+   *
+   * 幅がほぼ0(浮動小数として極小)であっても、候補が実際に2通りの異なる値を
+   * 持っていれば `distinctCount` は2のままである——「幅が小さい」ことと
+   * 「候補間で値が動いていない(1通りしか無い)」ことは別物である、という
+   * ADR 0081 の指摘そのものを、ここで固定する。
+   */
+  it("distinctCount は spread(幅)と違うものを測る: 値がほぼ同じでも通り数は区別する", () => {
+    const spreads = computeTermSpreads([
+      memory("a", { similarity: 1, total: 1 }),
+      memory("b", { similarity: 1 + 1e-8, total: 1 }),
+      memory("c", { similarity: 1, total: 1 }),
+    ]);
+    const similarity = spreads.find((s) => s.term === "similarity")!;
+    // 幅は極小(1e-8 桁)だが、厳密には 0 ではない。
+    expect(similarity.spread).toBeGreaterThan(0);
+    expect(similarity.spread).toBeLessThan(1e-7);
+    // それでも通り数は2(1 と 1+1e-8 は厳密比較で別の値)。
+    expect(similarity.distinctCount).toBe(2);
+  });
+});
+
+describe("computeDecayFreshnessRowwise", () => {
+  it("全行で decay===freshness なら differentRows は0(ADR 0081 §2)", () => {
+    const memories = [
+      memory("a", { decay: 0.999978, freshness: 0.999978, total: 1 }),
+      memory("b", { decay: 1, freshness: 1, total: 1 }),
+    ];
+    expect(computeDecayFreshnessRowwise(memories)).toEqual({
+      rows: 2,
+      equalRows: 2,
+      differentRows: 0,
+    });
+  });
+
+  it("一部の行で decay!==freshness なら differentRows に数える", () => {
+    const memories = [
+      memory("a", { decay: 0.999978, freshness: 0.999978, total: 1 }),
+      memory("b", { decay: 0.9, freshness: 0.8, total: 1 }),
+    ];
+    expect(computeDecayFreshnessRowwise(memories)).toEqual({
+      rows: 2,
+      equalRows: 1,
+      differentRows: 1,
+    });
+  });
+
+  it("候補が0件なら rows/equalRows/differentRows はすべて0", () => {
+    expect(computeDecayFreshnessRowwise([])).toEqual({ rows: 0, equalRows: 0, differentRows: 0 });
   });
 });
 
@@ -246,6 +302,7 @@ function probe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
     termSpreads: computeTermSpreads(memories),
     recalledRows: memories.length,
     lexicalMatchRows: memories.filter((m) => m.score.lexicalMatch !== undefined).length,
+    decayFreshnessRowwise: computeDecayFreshnessRowwise(memories),
     ...overrides,
   };
 }
@@ -298,5 +355,67 @@ describe("formatArmDetail", () => {
     });
     expect(out).toContain("goldRank=(無し)");
     expect(out).not.toContain("[gold]");
+  });
+
+  /**
+   * ⭐ ADR 0109: 「何通りか」と「decay===freshness」の2行が、既存の行の文面を
+   * 一切変えずに追加されていることを確かめる。
+   */
+  it("probe ごとに、項ごとの「何通りか」の行を出す（既存の幅の行はそのまま）", () => {
+    const out = formatArmDetail(armReport());
+    // 既存の行はこの PR の前後で1文字も変わっていない。
+    expect(out).toContain(
+      "項ごとの値の幅(返った候補全体): similarity=0.019073 decay=1.000e-6 " +
+        "tagMatch=0.000000 freshness=1.000e-6 strength=0.000000",
+    );
+    // 新設の行: tagMatch/strength は1通り(=順位に寄与していない)、
+    // similarity/decay/freshness は2通り。min/max は丸めない生値。
+    expect(out).toContain(
+      "項ごとの何通りか(返った候補全体): " +
+        "similarity=2通り[0.449758..0.468831] decay=2通り[0.999978..0.999979] " +
+        "tagMatch=1通り[1..1] freshness=2通り[0.999978..0.999979] strength=1通り[1..1]",
+    );
+  });
+
+  it("probe ごとに、decay===freshness の行ごと厳密等価を出す", () => {
+    const out = formatArmDetail(armReport());
+    expect(out).toContain("decay===freshness(行ごと厳密等価): 2/2行");
+  });
+
+  it("decay と freshness が食い違う行があれば、その件数を明示する", () => {
+    const memories = [
+      memory("a", { decay: 0.9, freshness: 0.9, total: 0.9 }),
+      memory("b", { decay: 0.8, freshness: 0.7, total: 0.8 }),
+    ];
+    const out = formatArmDetail({
+      ...armReport(),
+      probes: [
+        probe({
+          scoreDetails: collectScoreDetails(memories, { goldRank: null, distractorRank: null }),
+          termSpreads: computeTermSpreads(memories),
+          decayFreshnessRowwise: computeDecayFreshnessRowwise(memories),
+        }),
+      ],
+    });
+    expect(out).toContain("decay===freshness(行ごと厳密等価): 1/2行(違う行が1件ある)");
+  });
+
+  it("その項を持つ候補が無いときは「(この項を持つ候補が無い)」と出す（何通りかの行）", () => {
+    const out = formatArmDetail({
+      ...armReport(),
+      probes: [
+        probe({
+          scoreDetails: [],
+          termSpreads: computeTermSpreads([]),
+          decayFreshnessRowwise: computeDecayFreshnessRowwise([]),
+        }),
+      ],
+    });
+    expect(out).toContain(
+      "項ごとの何通りか(返った候補全体): similarity=(この項を持つ候補が無い) " +
+        "decay=(この項を持つ候補が無い) tagMatch=(この項を持つ候補が無い) " +
+        "freshness=(この項を持つ候補が無い) strength=(この項を持つ候補が無い)",
+    );
+    expect(out).toContain("decay===freshness(行ごと厳密等価): 0/0行");
   });
 });

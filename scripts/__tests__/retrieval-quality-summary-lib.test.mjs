@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildConstantTermSection,
   buildLexicalChannelWarningSection,
   buildSummaryMarkdown,
   diffArm,
@@ -235,5 +236,96 @@ describe("buildLexicalChannelWarningSection — 向きを反転させた警告(A
     const measured = { arms: [makeArm()] };
     const markdown = buildSummaryMarkdown({ measured });
     expect(markdown).not.toContain("語彙チャンネルが1行も通っていない");
+  });
+});
+
+/** `termDistinct` を持つ arm を作る補助(ADR 0109)。 */
+function makeArmWithTermDistinct(overrides = {}) {
+  return makeArm({
+    termDistinct: [
+      { term: "similarity", presentRows: 10, minDistinctPerProbe: 10, maxDistinctPerProbe: 10, min: 0.1, max: 0.9 },
+      { term: "decay", presentRows: 10, minDistinctPerProbe: 10, maxDistinctPerProbe: 10, min: 0.99, max: 1 },
+      { term: "tagMatch", presentRows: 10, minDistinctPerProbe: 1, maxDistinctPerProbe: 1, min: 1, max: 1 },
+      { term: "freshness", presentRows: 10, minDistinctPerProbe: 10, maxDistinctPerProbe: 10, min: 0.99, max: 1 },
+      { term: "strength", presentRows: 10, minDistinctPerProbe: 1, maxDistinctPerProbe: 1, min: 1, max: 1 },
+    ],
+    decayFreshnessEqualRows: 10,
+    decayFreshnessDifferentRows: 0,
+    ...overrides,
+  });
+}
+
+describe("buildConstantTermSection — 非門の節(ADR 0109)", () => {
+  it("maxDistinctPerProbe===1 の項があれば節を返し、項名を列挙する", () => {
+    const arms = [makeArmWithTermDistinct()];
+    const section = buildConstantTermSection(arms);
+    expect(section).not.toBeNull();
+    expect(section).toContain("候補間で値が動いていない項がある");
+    expect(section).toContain("tagMatch");
+    expect(section).toContain("strength");
+    // similarity/decay/freshness は1通りではないので列挙されない。
+    const armLine = section
+      .split("\n")
+      .find((line) => line.startsWith(`- ${arms[0].armLabel}:`) && line.includes("tagMatch"));
+    expect(armLine).toBeDefined();
+    expect(armLine).not.toContain("similarity");
+  });
+
+  it("decayFreshnessDifferentRows===0(かつ行数>0)なら、decay/freshness の等価も併記する", () => {
+    const arms = [makeArmWithTermDistinct()];
+    const section = buildConstantTermSection(arms);
+    expect(section).toContain("decay と freshness は全行(10行)で厳密に等価だった");
+  });
+
+  it("decayFreshnessDifferentRows>0 なら、decay/freshness の等価は併記しない", () => {
+    const arms = [
+      makeArmWithTermDistinct({ decayFreshnessEqualRows: 8, decayFreshnessDifferentRows: 2 }),
+    ];
+    const section = buildConstantTermSection(arms);
+    expect(section).not.toContain("厳密に等価だった");
+  });
+
+  it("maxDistinctPerProbe が全項で1より大きければ null(報告すべきことが無い)", () => {
+    const arms = [
+      makeArm({
+        termDistinct: [
+          { term: "similarity", presentRows: 10, minDistinctPerProbe: 5, maxDistinctPerProbe: 10, min: 0.1, max: 0.9 },
+        ],
+        decayFreshnessEqualRows: 5,
+        decayFreshnessDifferentRows: 5,
+      }),
+    ];
+    expect(buildConstantTermSection(arms)).toBeNull();
+  });
+
+  it("欄自体が無い(この変更以前の古い実測JSON)なら null——0だったと偽らない", () => {
+    const arms = [makeArm()];
+    expect(arms[0].termDistinct).toBeUndefined();
+    expect(buildConstantTermSection(arms)).toBeNull();
+  });
+
+  it("失敗の意味(⛔ これを消すだけにしない)が文面に含まれる", () => {
+    const section = buildConstantTermSection([makeArmWithTermDistinct()]);
+    expect(section).toContain("これは失敗ではない");
+    expect(section).toContain("測り直すこと");
+  });
+
+  it("buildSummaryMarkdown に配線されている", () => {
+    const measured = { arms: [makeArmWithTermDistinct()] };
+    const markdown = buildSummaryMarkdown({ measured });
+    expect(markdown).toContain("候補間で値が動いていない項がある");
+  });
+
+  it("欄が無い measured では buildSummaryMarkdown に節が現れない", () => {
+    const measured = { arms: [makeArm()] };
+    const markdown = buildSummaryMarkdown({ measured });
+    expect(markdown).not.toContain("候補間で値が動いていない項がある");
+  });
+
+  it("exit code には触れない(呼び出し側の契約——このテストは文字列を返すだけであることの確認)", () => {
+    // buildConstantTermSection は process.exit を一切呼ばない純関数である。
+    // 呼べば副作用としてテストプロセスごと落ちるはずなので、正常に return することが
+    // 「exit code に触れていない」ことの検査になる。
+    expect(() => buildConstantTermSection([makeArmWithTermDistinct()])).not.toThrow();
   });
 });

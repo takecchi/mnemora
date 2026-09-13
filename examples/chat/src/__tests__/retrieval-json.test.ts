@@ -29,6 +29,7 @@ function fakeProbe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
     termSpreads: [],
     recalledRows: 10,
     lexicalMatchRows: 0,
+    decayFreshnessRowwise: { rows: 10, equalRows: 10, differentRows: 0 },
     ...overrides,
   };
 }
@@ -214,6 +215,41 @@ describe("buildRetrievalQualityJson", () => {
     expect(json.arms).toEqual([]);
     expect(json.probeCount).toBe(0);
     expect(json.haystackSize).toBe(0);
+  });
+
+  /**
+   * ⭐ ADR 0109: `termDistinct`/`decayFreshnessEqualRows`/`decayFreshnessDifferentRows`
+   * が省略可能欄として運ばれること。
+   */
+  it("termDistinct/decayFreshnessEqualRows/decayFreshnessDifferentRows を運ぶ(ADR 0109)", () => {
+    const report = fakeReport({
+      probes: [
+        fakeProbe({
+          probeId: "p0",
+          termSpreads: [
+            { term: "similarity", presentCount: 2, min: 0.1, max: 0.5, spread: 0.4, distinctCount: 2 },
+            { term: "decay", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },
+            { term: "tagMatch", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },
+            { term: "freshness", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },
+            { term: "strength", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },
+          ],
+          decayFreshnessRowwise: { rows: 2, equalRows: 2, differentRows: 0 },
+        }),
+      ],
+    });
+    const json = buildRetrievalQualityJson({
+      reports: [report],
+      providerSource: "recorded",
+      cassette: FAKE_CASSETTE,
+      measuredAt: new Date(),
+      commit: null,
+    });
+    const arm = json.arms[0]!;
+    expect(arm.termDistinct).toBeDefined();
+    const tagMatch = arm.termDistinct!.find((t) => t.term === "tagMatch")!;
+    expect(tagMatch.maxDistinctPerProbe).toBe(1);
+    expect(arm.decayFreshnessEqualRows).toBe(2);
+    expect(arm.decayFreshnessDifferentRows).toBe(0);
   });
 
   it("schemaVersion は 1", () => {
