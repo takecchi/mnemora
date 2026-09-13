@@ -163,6 +163,70 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
       }
     },
   );
+
+  /**
+   * ⭐ 向きを反転させた歯(ADR 0108)。
+   *
+   * **他の歯はすべて「いま赤く、直ったら緑」だが、これは逆である**——
+   * **「いま緑で、前提が黙って変わったら赤」**。測っているのは欠陥ではなく、
+   * **このベンチの構成そのもの**: `runRetrievalQualityArm` は `recall()` に
+   * `text` 以外を渡さない(このファイル冒頭のコメント「パラメータは既定のまま変えない」)
+   * ——`channels` を渡していないので、`packages/core` の既定
+   * `DEFAULT_RECALL_CHANNELS`(`["ann"]`)だけで recall しており、`examples/chat` の
+   * `Runtime` には `LexicalStore` が配線されていない(`runtime-factory.ts` を grep すると
+   * `lexicalStore`/`LexicalStore` の言及が0件)。
+   *
+   * ⟹ **返ってきた候補行に `score.lexicalMatch` 欄が1行も現れないはずである。**
+   * この歯はそれを実際の DB・実際の `recall()` に対して測る(grep 的な静的検査ではなく、
+   * 実際の挙動を測る歯を優先する、という指示に沿う)。
+   */
+  it(
+    "🔴 [ADR 0108] 既定の channels(=ann のみ)では、返った候補のどの行にも " +
+      "score.lexicalMatch 欄が現れない — 現れたらこの歯が赤くなる",
+    async () => {
+      await resetTestDatabase();
+      await getTestClient();
+      const handle = await createExampleRuntime(requireDatabaseUrl(), {
+        MNEMORA_LLM: "deterministic",
+        MNEMORA_EMBEDDING: "deterministic",
+      });
+      try {
+        const report = await runRetrievalQualityArm({
+          armLabel: "test-arm-adr-0108",
+          tenantId: "retrieval-quality-test-arm-adr-0108",
+          runtime: handle.runtime,
+          memoryStore: handle.memoryStore,
+          llmMode: handle.llmMode,
+          embeddingMode: handle.embeddingMode,
+          haystackSize: 20,
+        });
+
+        const totalRecalledRows = report.probes.reduce((sum, p) => sum + p.recalledRows, 0);
+        const totalLexicalMatchRows = report.probes.reduce(
+          (sum, p) => sum + p.lexicalMatchRows,
+          0,
+        );
+
+        // まず、この歯自体が何も測っていない(候補が1件も返らない)状態ではないことを
+        // 確かめる——そうでなければ以下の assertion が「測れなかったから通っただけ」
+        // になってしまう。
+        expect(totalRecalledRows).toBeGreaterThan(0);
+
+        expect(
+          totalLexicalMatchRows,
+          "この歯が赤いのは、欠陥が入ったからではない。" +
+            "ベンチマークが語彙チャンネルを使う構成に変わった、という意味である" +
+            "(examples/chat の Runtime に LexicalStore が配線された、または " +
+            "runRetrievalQualityArm が recall() へ channels:['ann','lexical'] 等を" +
+            "渡すようになった)。⟹ 意図した変更なら、この歯を更新したうえで " +
+            "hit@1 を測り直すこと(それがこの歯の目的である。ADR 0108)。" +
+            "⛔ 歯を消すだけにしないこと。",
+        ).toBe(0);
+      } finally {
+        await handle.close();
+      }
+    },
+  );
 });
 
 afterAll(async () => {

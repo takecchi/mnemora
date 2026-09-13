@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildLexicalChannelWarningSection,
   buildSummaryMarkdown,
   diffArm,
   validateBaseline,
@@ -186,5 +187,53 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("similarity");
     expect(markdown).toContain("probe 7件");
     expect(markdown).toContain("否定・時制・矛盾");
+  });
+});
+
+describe("buildLexicalChannelWarningSection — 向きを反転させた警告(ADR 0108)", () => {
+  it("lexicalMatchRows が0の arm があれば警告節を返す", () => {
+    const arms = [makeArm({ lexicalMatchRows: 0, recalledRows: 70 })];
+    const section = buildLexicalChannelWarningSection(arms);
+    expect(section).not.toBeNull();
+    expect(section).toContain("語彙チャンネルが1行も通っていない");
+    expect(section).toContain("lexicalMatchRows=0");
+    expect(section).toContain("recalledRows=70");
+    expect(section).toContain("ADR 0108");
+    // 🔑 赤の意味(コードを読まずに分かること)。
+    expect(section).toContain("これは失敗ではない");
+    expect(section).toContain("測り直すこと");
+  });
+
+  it("lexicalMatchRows が1件でも正の arm があれば、その arm は警告に含めない", () => {
+    const arms = [
+      makeArm({ armLabel: "A", lexicalMatchRows: 0, recalledRows: 70 }),
+      makeArm({ armLabel: "B", lexicalMatchRows: 5, recalledRows: 70 }),
+    ];
+    const section = buildLexicalChannelWarningSection(arms);
+    expect(section).toContain("A");
+    expect(section).not.toContain("- B:");
+  });
+
+  it("全 arm の lexicalMatchRows が正なら null(警告なし)", () => {
+    const arms = [makeArm({ lexicalMatchRows: 3, recalledRows: 70 })];
+    expect(buildLexicalChannelWarningSection(arms)).toBeNull();
+  });
+
+  it("欄自体が無い(この PR 以前の古い実測 JSON)なら null——0 だったと偽らない", () => {
+    const arms = [makeArm()];
+    expect(arms[0].lexicalMatchRows).toBeUndefined();
+    expect(buildLexicalChannelWarningSection(arms)).toBeNull();
+  });
+
+  it("buildSummaryMarkdown に配線されている", () => {
+    const measured = { arms: [makeArm({ lexicalMatchRows: 0, recalledRows: 70 })] };
+    const markdown = buildSummaryMarkdown({ measured });
+    expect(markdown).toContain("語彙チャンネルが1行も通っていない");
+  });
+
+  it("欄が無い measured では buildSummaryMarkdown に警告節が現れない(⛔ 門ではない・0とは偽らない)", () => {
+    const measured = { arms: [makeArm()] };
+    const markdown = buildSummaryMarkdown({ measured });
+    expect(markdown).not.toContain("語彙チャンネルが1行も通っていない");
   });
 });

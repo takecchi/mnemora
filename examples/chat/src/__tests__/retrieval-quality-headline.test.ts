@@ -30,6 +30,8 @@ function makeProbe(id: string, hit1: boolean, hit10: boolean): ProbeOutcome {
     totalInScope: 74,
     scoreDetails: [],
     termSpreads: [],
+    recalledRows: 10,
+    lexicalMatchRows: 0,
   };
 }
 
@@ -158,5 +160,16 @@ describe("armHeadline — ArmReport を1つだけ受け取り、probes からの
     expect(armHeadline(armA)).not.toEqual(armHeadline(armB));
     expect(armHeadline(armA).hit1Count).toBe(7);
     expect(armHeadline(armB).hit1Count).toBe(0);
+  });
+
+  it("recalledRows/lexicalMatchRows は probes の同名欄の総和(ADR 0108)", () => {
+    const probes: ProbeOutcome[] = [
+      { ...makeProbe("p0", true, true), recalledRows: 10, lexicalMatchRows: 2 },
+      { ...makeProbe("p1", true, true), recalledRows: 10, lexicalMatchRows: 0 },
+    ];
+    const report = makeArmReport("Z", probes, 1.0);
+    const headline = armHeadline(report);
+    expect(headline.recalledRows).toBe(20);
+    expect(headline.lexicalMatchRows).toBe(2);
   });
 });

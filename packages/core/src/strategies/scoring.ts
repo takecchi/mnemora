@@ -42,8 +42,9 @@ export interface ScoringInput {
   similarity?: number;
   /**
    * 語彙チャンネルが引き当てた場合のみ渡す（ADR 0084）。
-   * **現在の実装では常に 1 である**——理由と、それが順位に何を意味するかは
-   * `ScoreBreakdown.lexicalMatch`（`recall.ts`）の doc に書いてある。
+   * **`(0, 1]` の被覆率を取る**（ADR 0092。一致したクエリ語彙数 ÷ クエリ語彙の総数）
+   * ——理由と、それが順位に何を意味するかは `ScoreBreakdown.lexicalMatch`
+   * （`recall.ts`）の doc に書いてある。
    */
   lexicalMatch?: number;
   tags: string[];

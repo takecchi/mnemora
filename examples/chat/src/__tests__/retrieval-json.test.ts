@@ -27,6 +27,8 @@ function fakeProbe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
     totalInScope: 10,
     scoreDetails: [],
     termSpreads: [],
+    recalledRows: 10,
+    lexicalMatchRows: 0,
     ...overrides,
   };
 }
@@ -84,6 +86,46 @@ describe("buildRetrievalQualityJson", () => {
     expect(arm.probeCount).toBe(report.probes.length);
     expect(arm.mrrLexicalControl).toBe(report.mrrLexicalControl);
     expect(arm.mrrNonLexical).toBe(report.mrrNonLexical);
+  });
+
+  it("lexicalMatchRows/recalledRows を probes の実カウントの総和として運ぶ(ADR 0108)", () => {
+    // 7 probe、うち2件は語彙チャンネルが引き当てた(lexicalMatchRows > 0)体で作る。
+    const report = fakeReport({
+      probes: [
+        fakeProbe({ probeId: "p0", recalledRows: 10, lexicalMatchRows: 3 }),
+        fakeProbe({ probeId: "p1", recalledRows: 10, lexicalMatchRows: 1 }),
+        fakeProbe({ probeId: "p2", recalledRows: 10, lexicalMatchRows: 0 }),
+        fakeProbe({ probeId: "p3", recalledRows: 10, lexicalMatchRows: 0 }),
+        fakeProbe({ probeId: "p4", recalledRows: 10, lexicalMatchRows: 0 }),
+        fakeProbe({ probeId: "p5", recalledRows: 10, lexicalMatchRows: 0 }),
+        fakeProbe({ probeId: "p6", recalledRows: 10, lexicalMatchRows: 0 }),
+      ],
+    });
+    const json = buildRetrievalQualityJson({
+      reports: [report],
+      providerSource: "recorded",
+      cassette: FAKE_CASSETTE,
+      measuredAt: new Date(),
+      commit: null,
+    });
+    const arm = json.arms[0]!;
+    expect(arm.recalledRows).toBe(70);
+    expect(arm.lexicalMatchRows).toBe(4);
+  });
+
+  it("語彙チャンネルが1行も通っていない run では lexicalMatchRows が 0 になる" +
+    "(examples/chat の既定構成。ADR 0108)", () => {
+    const report = fakeReport();
+    const json = buildRetrievalQualityJson({
+      reports: [report],
+      providerSource: "recorded",
+      cassette: FAKE_CASSETTE,
+      measuredAt: new Date(),
+      commit: null,
+    });
+    const arm = json.arms[0]!;
+    expect(arm.lexicalMatchRows).toBe(0);
+    expect(arm.recalledRows).toBeGreaterThan(0);
   });
 
   it("arm ごとに『実際に使われた』llmMode/embeddingMode を持つ(宣言値ではなく ArmReport の実値)", () => {
