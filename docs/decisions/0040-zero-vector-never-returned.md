@@ -16,11 +16,11 @@
 
 **実測（pgvector 0.8.2、この器の PostgreSQL 17.9）:**
 
-| クエリ                                    | 結果                         |
-| ----------------------------------------- | ---------------------------- |
-| `'[0,0,0]'::vector <=> '[1,0,0]'`         | **`NaN`**                    |
-| `'[1,0,0]'::vector <=> '[0,0,0]'`         | **`NaN`**                    |
-| `'[0,0,0]'::vector <=> '[0,0,0]'`         | **`NaN`**                    |
+| クエリ | 結果 |
+|---|---|
+| `'[0,0,0]'::vector <=> '[1,0,0]'` | **`NaN`** |
+| `'[1,0,0]'::vector <=> '[0,0,0]'` | **`NaN`** |
+| `'[0,0,0]'::vector <=> '[0,0,0]'` | **`NaN`** |
 | ゼロベクトルを含む表に `ORDER BY e <=> …` | **通る。NaN 行が最後に来る** |
 
 **⟹ エラーにならない。`NaN` を返す。**
@@ -35,13 +35,13 @@
 
 `recall-runtime.ts` は `similarity = 1 - distance` として使い、段2で `total >= scoreThreshold` で絞る。
 
-|                                  | in-memory | Postgres                              |
-| -------------------------------- | --------- | ------------------------------------- |
-| `distance`                       | 1         | `NaN`                                 |
-| `similarity`                     | 0         | `NaN`                                 |
-| `total`                          | 0         | `NaN`                                 |
-| 既定の `scoreThreshold`（0.1）で | 落ちる    | 落ちる                                |
-| **`scoreThreshold <= 0` で**     | **返る**  | **落ちる**（`NaN >= x` は常に false） |
+|  | in-memory | Postgres |
+|---|---|---|
+| `distance` | 1 | `NaN` |
+| `similarity` | 0 | `NaN` |
+| `total` | 0 | `NaN` |
+| 既定の `scoreThreshold`（0.1）で | 落ちる | 落ちる |
+| **`scoreThreshold <= 0` で** | **返る** | **落ちる**（`NaN >= x` は常に false） |
 
 **⟹ 観測できる差は `scoreThreshold <= 0` のときだけである**（実測で特定した）。
 **そして到達経路は公開 API にある**——`recall(ctx, { vector: [0,0,0], scoreThreshold: 0 })`。
