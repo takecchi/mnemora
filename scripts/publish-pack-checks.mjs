@@ -172,6 +172,80 @@ export function findLicenseViolations(manifest, packageDir) {
 }
 
 /**
+ * `version` が `0.0.0` のまま、または未設定のまま publish 対象の tarball が出ていかないか
+ * 調べる（検査2・単一パッケージ側。Issue #174）。
+ *
+ * **⚠ この検査は「version が正しい値か」を決めているのではない（ADR 0070）**: 版の権威は
+ * Release の tag に置かれており、`package.json` の `version` はそれを受け取る側でしかない
+ * ——`scripts/apply-release-version.mjs` が publish 直前に tag の値を書き込む。ここで見ているのは
+ * 「その書き込みより前の、初期値のまま（`0.0.0`）や空のまま publish 対象が出ていかないこと」
+ * だけである。**`0.0.1` のような小さい値や `1.0.0-rc.1` のような prerelease はここでは
+ * 弾かない**——弾く理由が無い（`0.0.0` と未設定だけが「まだ tag の値を受け取っていない」
+ * ことの目印である）。
+ */
+export function findVersionViolations(manifest) {
+  if (manifest.version === "0.0.0" || !manifest.version) {
+    return [`version が未設定か 0.0.0 のままです: ${manifest.version}`];
+  }
+  return [];
+}
+
+/**
+ * publish 対象のうち version 検査（`findVersionViolations`）を通過したものだけを集めた
+ * `versions` が、`targetCount`（`PUBLISH_TARGETS.length`）ぶん揃ったうえで全パッケージ
+ * 同じ版であるか調べる（検査2・publish 対象をまたぐ側。Issue #174）。
+ *
+ * **なぜ `manifest` 1個ではなく `versions` の配列と `targetCount` を受け取るか**: この検査は
+ * 単一パッケージの中では判定できない——他の対象と揃っているかを見るものなので、呼び出し側
+ * （`scripts/check-publish-pack.mjs`）が全対象のループを回し終えたあとに、集まった `versions`
+ * を渡して1回だけ呼ぶ。単一パッケージ側の `findVersionViolations` とは引数の形も呼ばれる
+ * 回数も違うため、1つの関数にまとめない。
+ *
+ * **⚠ `versions.length === targetCount` の条件が入っている理由（意図的な性質。歯で固定する）**:
+ * `versions` には version 検査を通過したものしか入らない（呼び出し側が
+ * `if (versionViolations.length === 0) { versions.push(...) }` という形で積む——
+ * `scripts/check-publish-pack.mjs` 参照）。だから1つでも version 違反（`0.0.0` や未設定）で
+ * 落ちた回は `versions.length` が `targetCount` より少なくなり、この検査は**揃い検査をしない**。
+ * これは見落としではない——欠けた1件はすでに「version が未設定か 0.0.0 のままです」として
+ * 別に報告済みであり、それを「version が揃っていません」という不正確な文言（本当は集まった
+ * 分の中でどれだけ揃っているかしか言えない）でもう一度重ねて報告しないためである
+ * （`scripts/check-publish-pack.mjs` の呼び出し側コメント「version 自体が有効だったものだけを
+ * 比較する」がその意図）。
+ */
+export function findVersionSkewViolations(versions, targetCount) {
+  const distinctVersions = new Set(versions.map((v) => v.version));
+  if (versions.length === targetCount && distinctVersions.size > 1) {
+    return [
+      `version が publish 対象で揃っていません: ${versions.map((v) => `${v.name}@${v.version}`).join(", ")}`,
+    ];
+  }
+  return [];
+}
+
+/**
+ * `publishConfig.access` が `"public"` であることを調べる（検査5。Issue #174）。
+ *
+ * **なぜ「`restricted` でないこと」ではなく「`public` と等しいこと」を見るか**:
+ * `findLicenseViolations` が `license` について「`UNLICENSED` でないこと」ではなく `MIT`
+ * との等値を見ているのと同じ理由——前者は隣の値（未設定・大文字違いの `"Public"` 等）も
+ * そのまま通してしまう弱い歯になる。ここで検査したいのは「publish 可能な何らかの値」では
+ * なく、スコープ付きパッケージ（`@mnemora/*`）を誰でも `npm install` できる状態で出す、
+ * という選んだ値そのものである。
+ *
+ * **`publishConfig` 自体が無い場合も違反になる**: `manifest.publishConfig?.access` は
+ * `publishConfig` が無ければ `undefined` になり、`undefined !== "public"` は真になる
+ * ——「明示していない」を「public にすると決めていない」として扱う。
+ */
+export function findPublishAccessViolations(manifest) {
+  if (manifest.publishConfig?.access !== "public") {
+    return [
+      `publishConfig.access が "public" ではありません: ${JSON.stringify(manifest.publishConfig)}`,
+    ];
+  }
+  return [];
+}
+
+/**
  * tarball 内（に相当するディレクトリ）の `*.map` のうち、`sources` がそのディレクトリ内に
  * 実在しない相対パスを指しているものを集める（「宙に浮いた source map」）。
  *
