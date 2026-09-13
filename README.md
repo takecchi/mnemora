@@ -44,13 +44,27 @@ Application → Agent / LLM → Cognitive Runtime → Storage / LLM / Queue
 
 外から見える API は小さく保つ:
 
+**⚠ `brain` のような受け皿オブジェクトは無い。**上の5つの動詞は
+`createRuntime()`（`@mnemora/core`）が返す `runtime` のメソッドであり、
+**すべて第一引数に `ctx`（`tenantId` 必須）を取る。**
+
 ```ts
-await brain.observe({ type: "message", actor: "user", content: "..." })
-const recalled = await brain.recall({ query: "..." })
-const thought = await brain.reflect()
-await brain.consolidate()
-await brain.forget()
+import type { Runtime } from "@mnemora/core";
+
+// runtime は createRuntime() で組み立てる（実装は @mnemora/postgres・@mnemora/openai から。
+// 配線の詳細は packages/core/README.md）。ここでは型だけを示す骨格。
+declare const runtime: Runtime;
+const ctx = { tenantId: "guild-123", subjectId: "user-456" };
+
+await runtime.observe(ctx, { kind: "utterance", text: "明日、京都へ出張する", speaker: "user" });
+const recalled = await runtime.recall(ctx, { text: "京都の予定は?" });
+await runtime.reflect(ctx, { target: { memoryIds: [] } });
+await runtime.consolidate(ctx, { target: { memoryIds: [] } });
+await runtime.forget(ctx, { memoryIds: [] });
 ```
+
+**⟹ 5つの動詞の正式なシグネチャは「## 外から見える API」節、`ctx` の意味は
+「## 記憶を誰に紐づけるか」節を見ること。**
 
 ---
 
