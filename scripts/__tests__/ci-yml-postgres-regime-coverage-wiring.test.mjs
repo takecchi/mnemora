@@ -2,7 +2,9 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { EXPECTED_SERVER_ENCODINGS } from "../lexical-regime-coverage-lib.mjs";
+import { artifactNameForEncoding } from "../lexical-regime-coverage-lib.mjs";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
+import { normalizeWorkflowExpressions } from "../workflow-expression-lib.mjs";
 
 /**
  * ⭐ **この歯が測っているもの(消す前に読むこと)**
@@ -98,6 +100,149 @@ function extractMatrixServerEncodings() {
   return encodings;
 }
 
+/**
+ * `postgres-regime-coverage` ジョブの `actions/download-artifact` の段を切り出す
+ * (⛔ `path:` や `pattern:` の**値**で見分けない——それらこそ変異させる対象であり、
+ * 値で同定すると変異を当てた瞬間に段が「対象外」になって歯が空回りする。
+ * Issue #162 のコメントが名指しした一般形: **測る対象を、変異させる当のフィールドで
+ * 同定してはいけない**)。
+ *
+ * @returns {string}
+ */
+function extractDownloadStepBlock() {
+  const lines = coverageJobBlock.split("\n");
+  const at = lines.findIndex((line) => /uses:\s*actions\/download-artifact@/.test(line));
+  if (at === -1) {
+    throw new Error(
+      "postgres-regime-coverage ジョブに actions/download-artifact の段が無い" +
+        "(Issue #155 の artifact 収集が外れている)。",
+    );
+  }
+  let start = at;
+  while (start > 0 && !/^\s*- name:/.test(lines[start])) {
+    start -= 1;
+  }
+  let end = lines.length;
+  for (let i = at + 1; i < lines.length; i += 1) {
+    if (/^\s*- name:/.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start, end).join("\n");
+}
+
+/**
+ * download 段の `pattern:` の値。
+ *
+ * @returns {string}
+ */
+function extractDownloadPattern() {
+  const match = /^\s*pattern:\s*(\S.*?)\s*$/m.exec(extractDownloadStepBlock());
+  if (match === null) {
+    throw new Error("download-artifact の段に pattern: が無い。");
+  }
+  return stripQuotes(match[1]);
+}
+
+/**
+ * download 段の `path:`(降ろす先)の値。
+ *
+ * @returns {string}
+ */
+function extractDownloadPath() {
+  const match = /^\s*path:\s*(\S.*?)\s*$/m.exec(extractDownloadStepBlock());
+  if (match === null) {
+    throw new Error("download-artifact の段に path: が無い。");
+  }
+  return stripQuotes(match[1]);
+}
+
+/**
+ * `lexical-regime-coverage.mjs` を呼ぶ段が渡す `--artifacts-dir` の値
+ * (⛔ こちらも `path:` の値では見分けず、スクリプト名で同定している)。
+ *
+ * @returns {string}
+ */
+function extractArtifactsDirArgument() {
+  const match = /--artifacts-dir\s+"([^"]+)"/.exec(coverageJobBlock);
+  if (match === null) {
+    throw new Error('lexical-regime-coverage.mjs へ --artifacts-dir "…" を渡す段が見つからない。');
+  }
+  return match[1];
+}
+
+/**
+ * @param {string} value
+ * @returns {string}
+ */
+function stripQuotes(value) {
+  return value.replace(/^["']|["']$/g, "");
+}
+
+/**
+ * Actions の式を**照合のためだけに**正規形へ揃える(Issue #163 ① で足した網)。
+ * ⛔ 実行されるテキストへは通さない——この歯は `toBe` の比較にしか使っていない。
+ *
+ * @param {string} value
+ * @returns {string}
+ */
+function normalizeExpression(value) {
+  const { text, unhandled } = normalizeWorkflowExpressions(value);
+  if (unhandled.length > 0) {
+    throw new Error(`照合専用の網が正規化できない式が在る: ${unhandled.join(", ")}`);
+  }
+  return text;
+}
+
+/**
+ * `actions/*-artifact` の `pattern:` を、**グロブとして**当てる。
+ *
+ * ⚠ **`*` だけを扱う。**`?` / `[…]` / `!`(除外)は解釈していない——いま ci.yml が
+ * 使っているのは `*` だけだからである。ci.yml がそれ以外を使い始めたら、ここも合わせて
+ * 直すこと(**歯を消さないこと**)。⛔ この歯のために依存(minimatch 等)は足していない
+ * (依存追加はオーナー専権。`docs/autonomy.md`)。
+ *
+ * @param {string} pattern
+ * @param {string} name
+ * @returns {boolean}
+ */
+function globMatches(pattern, name) {
+  const source = pattern
+    .split("*")
+    .map((part) => part.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"))
+    .join("[^/]*");
+  return new RegExp(`^${source}$`).test(name);
+}
+
+/**
+ * この workflow が `actions/upload-artifact` で上げている artifact 名を全部読み出す
+ * (陰性対照を文字列で書き置かないため。⭐ 空回りしていないことの根拠でもある)。
+ *
+ * @returns {string[]}
+ */
+function extractUploadedArtifactNames() {
+  const { text } = blankOutWorkflowComments(workflow);
+  const lines = text.split("\n");
+  const names = [];
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!/uses:\s*actions\/upload-artifact@/.test(lines[i])) {
+      continue;
+    }
+    for (let j = i + 1; j < Math.min(lines.length, i + 8); j += 1) {
+      if (/^\s*- name:/.test(lines[j])) {
+        break;
+      }
+      const match = /^\s*name:\s*(\S.*?)\s*$/.exec(lines[j]);
+      if (match !== null) {
+        names.push(stripQuotes(match[1]));
+        break;
+      }
+    }
+  }
+  return names;
+}
+
 // 🔴 **コメントを潰してから当てる(Issue #155 段1)。**この歯の一部(`exit 1` /
 // `needs: postgres` / `if: always()` の固定)は、実際に実行される行ではなく
 // **地の文のコメントがその文字列を引用しているだけ**でも `toContain` が一致していた
@@ -130,6 +275,68 @@ describe("ci.yml の postgres-regime-coverage ジョブの配線(Issue #155 満�
   it("lexical-regime-* パターンで artifact をダウンロードする段がある", () => {
     expect(coverageJobBlock).toContain("uses: actions/download-artifact@v");
     expect(coverageJobBlock).toContain("pattern: lexical-regime-*");
+  });
+
+  it("🔴🔴 Issue #163 ②: download の pattern が、消費側(artifactNameForEncoding)が探す名前を実際に拾える", () => {
+    // ⭐ **字面の `toContain` ではなく、グロブとして当てる。**上の歯は
+    // `pattern: lexical-regime-*` という**文字列**が在ることしか見ていない ⟹ 命名規則
+    // (`scripts/lexical-regime-coverage-lib.mjs` の `artifactNameForEncoding`)と
+    // `pattern:` の関係は1ミリも測っていない。ここはその関係だけを見る。
+    const pattern = extractDownloadPattern();
+    for (const encoding of EXPECTED_SERVER_ENCODINGS) {
+      const artifactName = artifactNameForEncoding(encoding);
+      expect(
+        globMatches(pattern, artifactName),
+        `download の pattern(${pattern})が、消費側が探す artifact 名(${artifactName})を拾えない。` +
+          "⟹ その脚の artifact は download されず、coverage は「脚が走っていない」と読む。",
+      ).toBe(true);
+    }
+  });
+
+  it("🔴🔴 Issue #163 ②: download の pattern が、この workflow の他の artifact まで巻き込んでいない(陰性対照)", () => {
+    // ⭐ **陰性対照が空でないことの確かめ方**: 比較対象を文字列で書き置かず、
+    // **ci.yml から実際に upload されている artifact 名を読み出して**使う。
+    // ⟹ 下の `toBeGreaterThan(0)` が、この主張が空回りしていないことの根拠である
+    // (lexical-regime 以外の artifact が1つも無い workflow なら、この歯は何も弾いていない)。
+    const otherNames = extractUploadedArtifactNames().filter(
+      (name) => !name.startsWith("lexical-regime-"),
+    );
+    expect(
+      otherNames.length,
+      "ci.yml から lexical-regime 以外の artifact 名を1つも読み出せなかった。" +
+        "⟹ この陰性対照は何も弾いていない(空回り)。取り出し方が古くなっている。",
+    ).toBeGreaterThan(0);
+
+    const pattern = extractDownloadPattern();
+    for (const name of otherNames) {
+      expect(
+        globMatches(pattern, name),
+        `download の pattern(${pattern})が、この coverage ジョブと無関係な artifact(${name})まで拾う。`,
+      ).toBe(false);
+    }
+  });
+
+  it("🔴🔴 Issue #163 ②: download の path: と、coverage.mjs へ渡す --artifacts-dir が同じ場所を指している", () => {
+    // 🔴 **2026-09-13 に手で当てて実測した、生き残った変異**: download の `path:` だけを
+    // `…/lexical-regime-artifacts-TYPO` へ書き換えても `scripts/__tests__/` は
+    // **614件すべて緑のまま**だった。⟹ 「どこへ降ろしたか」と「どこを読むか」の対を、
+    // ここまで誰も測っていなかった。
+    //
+    // ⭐ これは PR #165(Issue #162 F)が `actions/cache` の `path:` ↔
+    // `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` に対してやったのと**同じ族**である。
+    //
+    // ⛔ **`path:` の値そのもので段を見分けていない**(Issue #162 のコメントが名指しした
+    // 空回り)——download 段は `uses: actions/download-artifact` で、消費段は
+    // `lexical-regime-coverage.mjs` で同定している。⟹ `path:` を変異させても、歯は
+    // 同じ2つの段を見続ける。
+    const downloadPath = extractDownloadPath();
+    const artifactsDirArg = extractArtifactsDirArgument();
+    expect(
+      normalizeExpression(artifactsDirArg),
+      "download-artifact が降ろす先(path:)と、lexical-regime-coverage.mjs へ渡す " +
+        "--artifacts-dir が食い違っている。⟹ 両脚の artifact を落としても、coverage は " +
+        "空のディレクトリを読んで「どちらの脚も走っていない」と報告する。",
+    ).toBe(normalizeExpression(downloadPath));
   });
 
   it("scripts/lexical-regime-coverage.mjs を実行する段がある", () => {

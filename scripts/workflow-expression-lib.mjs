@@ -249,7 +249,6 @@ export function normalizeWorkflowExpressions(text) {
       // `${{` は在るのに `}}` が無い。⟹ 何も変えずに残し、呼び出し側へ名乗る。
       unhandled.push(text.slice(open, Math.min(text.length, open + 80)));
       out += text.slice(open);
-      cursor = text.length;
       break;
     }
     const collapsed = collapseWhitespace(found.inner);
