@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { findInconsistentLegs, parseInitdbArgs } from "../initdb-args-lib.mjs";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { normalizeWorkflowExpressions } from "../workflow-expression-lib.mjs";
 
@@ -934,6 +935,46 @@ describe("ci.yml の6本の pgvector ジョブが regime を宣言している�
           "自身の serverEncoding と食い違う",
       ).toBe(leg.serverEncoding);
     }
+  });
+
+  it("(c'') ⭐ matrix の各脚は --locale= も含めて自己無矛盾(--locale= が含意する encoding と serverEncoding が一致する。Issue #162 E)", () => {
+    // ⚠ この歯が測る「赤の意味」: --locale= が含意する encoding と、その脚が宣言した
+    // serverEncoding が食い違っている。initdb は encoding とロケールの整合を検査する
+    // ため(ci.yml のコメント参照)、これが実際の CI ではコンテナの起動ごと失敗しうる
+    // ——「歯が気づかないまま矛盾した脚が main に残る」ことを防ぐための歯である。
+    // ⛔ --locale= の有無そのものは要求していない(UTF8 脚には --locale= が無いのが
+    // 正しい)。findInconsistentLegs は「自己無矛盾かどうか」だけを見る
+    // (scripts/initdb-args-lib.mjs の docstring)。
+    const flagged = findInconsistentLegs(matrixLegs);
+    expect(
+      flagged,
+      flagged
+        .map((leg) => `脚 ${leg.serverEncoding}(initdbArgs=${leg.initdbArgs}): ${leg.reason}`)
+        .join("\n"),
+    ).toEqual([]);
+  });
+
+  it("(c''') ⭐ 陰性対照(空回り防止): 現物の脚のうち --locale= を持つものからだけ --locale= を剥がすと、剥がした脚だけが挙がる(Issue #162 E)", () => {
+    // 「弾くものと弾いてはいけないものを同じ1回の呼び出しに混ぜる」陰性対照。
+    // ⛔ `toEqual(new Set())`(空=空)だけの歯は陰性対照として数えない——それは
+    // 「歯が何も測っていない」場合と区別が付かない。ここでは現物の matrixLegs を
+    // 混合の材料にして、集合の一致で見る。
+    const hasLocale = (/** @type {{ initdbArgs: string }} */ leg) =>
+      parseInitdbArgs(leg.initdbArgs).locale !== undefined;
+    const withLocale = matrixLegs.filter(hasLocale);
+    const withoutLocale = matrixLegs.filter((leg) => !hasLocale(leg));
+
+    // ⭐ 混合であること自体を先に固定する(どちらかが空なら、この歯は何も測っていない)。
+    expect(new Set(withLocale.map((leg) => leg.serverEncoding))).not.toEqual(new Set());
+    expect(new Set(withoutLocale.map((leg) => leg.serverEncoding))).not.toEqual(new Set());
+
+    const perturbed = matrixLegs.map((leg) =>
+      hasLocale(leg) ? { ...leg, initdbArgs: leg.initdbArgs.replace(/\s*--locale=\S+/, "") } : leg,
+    );
+    const flagged = findInconsistentLegs(perturbed);
+    expect(new Set(flagged.map((leg) => leg.serverEncoding))).toEqual(
+      new Set(withLocale.map((leg) => leg.serverEncoding)),
+    );
   });
 
   it("(c') ⭐ service env の POSTGRES_INITDB_ARGS と summary 段の --expect-encoding は、どちらも同じ matrix 変数へ直接配線されている(値を書き写すのではなく、実行時に自動で揃う)", () => {
