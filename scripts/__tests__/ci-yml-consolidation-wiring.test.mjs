@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 
 /**
  * ⭐ **この歯が測っているもの(消す前に読むこと)**
@@ -179,9 +180,37 @@ const summaryStep = steps.find((step) => step.run.includes("consolidation-cost-s
 const artifactStep = steps.find((step) => step.name.includes("成果物として残す"));
 
 /**
+ * このファイル内で `extractStepBlock` が `blankOutWorkflowComments` を通した結果、
+ * 「扱えない」と名乗った箇所をすべて集める(呼び出し側がこれを無視できないようにするため
+ * ——下の describe("コメント潰しが …") が空であることを固定する)。
+ *
+ * @type {{ stepName: string, unhandled: { lineNumber: number, reason: string, line: string }[] }[]}
+ */
+const stepBlockCommentUnhandled = [];
+
+/**
  * ある段の生テキスト(`- name: <name>` から次の段の `- name:` まで)を切り出す。
  * `parseSteps` は `if:`/`uses:`/`with:` を読まないので、それらを検査したいときは
  * こちらを使う。
+ *
+ * 🔴 **返す前にコメントを空白へ潰す(Issue #160 段0/段B の変異H で実測)。**
+ * `it("要約ステップに if: always() が付いている…")` はこの関数の生テキストへ
+ * `toContain("if: always()")` を当てていたが、consolidation-cost ジョブの要約ステップは
+ * 787行目に「このステップは常に走る(`if: always()`)——…」という**地の文のコメント**
+ * が実キー(791行目)と同じ行を引用している。⟹ 791行目を `if: success()` に変異させても
+ * (実キーを壊しても)、787行目のコメントがまだ `if: always()` という文字列を含んでいる
+ * ため `toContain` は一致したまま緑で通っていた(段Bの変異Hで実測。歯がここに直る前は
+ * 欠陥だった)。artifact ステップ(799行目)にはそのようなコメントの引用が無いため、
+ * 同じ変異(変異H')は直す前から赤くなっていた——⟹ 欠陥は「コメントが実キーと同じ文字列を
+ * 引用している段」に限られていた。
+ *
+ * この直しは `ci-yml-postgres-regime-wiring.test.mjs` が同じ変異H(段0)を踏んで
+ * 入れたのと同じ形(`scripts/workflow-comment-blank-lib.mjs` の docstring)を
+ * そのまま踏襲する——独自設計をしない。
+ *
+ * ⛔ **この関数は照合専用であり、実行はしない。**`jobBlock`/`parseSteps` 側
+ * (`summaryStep.run` → `runSummaryStepFromWorkflow` が子プロセスで実際に走らせる)には
+ * 適用しない——実行するテキストからコメントを潰すと歯の意味が変わる。
  *
  * @param {string} stepName
  * @returns {string | undefined}
@@ -199,7 +228,12 @@ function extractStepBlock(stepName) {
       break;
     }
   }
-  return lines.slice(start, end).join("\n");
+  const raw = lines.slice(start, end).join("\n");
+  const { text, unhandled } = blankOutWorkflowComments(raw);
+  if (unhandled.length > 0) {
+    stepBlockCommentUnhandled.push({ stepName, unhandled });
+  }
+  return text;
 }
 
 /**
@@ -482,5 +516,20 @@ describe("ci.yml の consolidation-cost ジョブの配線", () => {
 
   it("ジョブに timeout-minutes が設定されている(既定 360 分で刺さらない)", () => {
     expect(jobBlock).toMatch(/^ {4}timeout-minutes: \d+$/m);
+  });
+});
+
+describe("コメント潰しが consolidation-cost ジョブの対象範囲で「扱えない」形に当たっていないこと(Issue #160)", () => {
+  // 🔴 `extractStepBlock` が返す前に通す `blankOutWorkflowComments` の
+  // unhandled を無視できないようにする(呼び出し側が黙って安全側へ倒さないための
+  // 配線そのもの。`scripts/workflow-comment-blank-lib.mjs` の docstring)。
+  // ⚠ 特定の呼び出し履歴に依存しないよう、ここで consolidation-cost ジョブの
+  // 全段を洗い直してから確かめる。
+  it("consolidation-cost ジョブの全段(name 段)に unhandled が無い", () => {
+    stepBlockCommentUnhandled.length = 0;
+    for (const step of steps) {
+      extractStepBlock(step.name);
+    }
+    expect(stepBlockCommentUnhandled).toEqual([]);
   });
 });
