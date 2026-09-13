@@ -252,3 +252,74 @@ describe("recall() — 段2（recall-runtime.ts の後段 excludeProvenanceKinds
     expect(digests).not.toContain("excluded-inferred-2");
   });
 });
+
+// ---------------------------------------------------------------------------
+// ⭐⭐ 段1（FakeVectorStore.search の excludeProvenanceKinds 適用）専用の歯。
+// ADR 0056 が「引き受ける負債」節に記録した族——`FakeVectorStore` の除外方向を
+// 反転する変異（変異6）や、除外の適用そのものを削る変異——を、既存のどの歯も
+// 独立には捕まえていなかった（マネージャーが手元で実測: `FakeVectorStore` の
+// exclude 適用ブロックを丸ごと削っても、フルスイート 527 本が1本も赤くならない）。
+//
+// `recall-period-filter.test.ts` の「period の押し下げが over-fetch の窓（k'）を
+// 無駄にしない」describe と同型の処方——**素の `FakeVectorStore`（ラッパ無し）**を使い、
+// 「crowd（除外対象の kind・distance 0）が over-fetch の窓を埋めても、target
+// （除外対象外の kind・distance > 0）が返る」ことを測る。段2は生かしたまま
+// ——段2が生きていても、段1が候補の時点で crowd を落としていなければ、狭い窓
+// （k'）が crowd で埋まってしまい target が一度も候補に現れない、という段1
+// 固有の主張をこの歯だけで測るため。
+//
+// ⛔ 本番コード（recall-runtime.ts / vector-store.ts）は1文字も変えない——
+// 素の `FakeVectorStore`（`runtime-fakes.ts`、既存の test double）をそのまま使う。
+// ---------------------------------------------------------------------------
+
+describe("recall() — 段1（FakeVectorStore の excludeProvenanceKinds 適用）が over-fetch の窓（k'）を無駄にしない専用の歯（ADR 0056、変異6の族）", () => {
+  it("除外対象の kind（distance 0）が窓を埋めても、除外対象外の kind（distance > 0）が返る", async () => {
+    const { runtime, stores } = buildRuntime();
+
+    const query = [1, 0];
+    const inferredProvenance = {
+      kind: "inferred" as const,
+      model: "test-model",
+      promptVersion: "v1",
+      basis: { memoryIds: [], observationIds: [] },
+      confidence: 0.9,
+    };
+
+    // crowd: 除外対象（kind: "inferred"）・クエリと完全一致（distance 0）。
+    // limit=3, overFetchFactor=1 -> k'=3 なので、段1が除外しなければこの3件だけで
+    // ANN の窓（k'=3）が埋まり、除外対象外の候補は段1の hits に一度も現れない。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, query, {
+        digest: `crowd-inferred-${i}`,
+        provenance: inferredProvenance,
+      });
+    }
+
+    // target: 除外対象外（kind: "imported"、newMemory の既定）・クエリからわずかに
+    // ずれる（distance > 0、しかし similarity は十分高く既定の scoreThreshold=0.1 を
+    // 大きく上回る）。
+    const targetIds: string[] = [];
+    for (let i = 0; i < 3; i += 1) {
+      const memory = await createEmbeddedMemory(stores, [1, 0.01], {
+        digest: `target-imported-${i}`,
+      });
+      targetIds.push(memory.id);
+    }
+
+    const result = await runtime.recall(stage2Ctx, {
+      vector: query,
+      excludeProvenanceKinds: ["inferred"],
+      limit: 3,
+      overFetchFactor: 1,
+    });
+
+    // ⟹ 段1が除外していれば、filter が crowd を最初から候補から外すので k'=3 の窓は
+    // target 3件だけで埋まり、3件とも返る。
+    // ⟹ 段1の exclude 適用を削る変異（あるいは向きを反転する変異6）を当てると、
+    // 段1は距離だけで crowd 3件を選んでしまい（distance 0 が最短）、
+    // target は一度も窓に入らない——段2がまだ生きていても、段2は crowd 3件を
+    // 除外対象として全部落とすため、結果は 0件になる。
+    expect(result.memories).toHaveLength(3);
+    expect(result.memories.map((m) => m.memoryId).sort()).toEqual([...targetIds].sort());
+  });
+});
