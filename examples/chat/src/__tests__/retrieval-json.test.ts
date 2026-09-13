@@ -113,20 +113,23 @@ describe("buildRetrievalQualityJson", () => {
     expect(arm.lexicalMatchRows).toBe(4);
   });
 
-  it("語彙チャンネルが1行も通っていない run では lexicalMatchRows が 0 になる" +
-    "(examples/chat の既定構成。ADR 0108)", () => {
-    const report = fakeReport();
-    const json = buildRetrievalQualityJson({
-      reports: [report],
-      providerSource: "recorded",
-      cassette: FAKE_CASSETTE,
-      measuredAt: new Date(),
-      commit: null,
-    });
-    const arm = json.arms[0]!;
-    expect(arm.lexicalMatchRows).toBe(0);
-    expect(arm.recalledRows).toBeGreaterThan(0);
-  });
+  it(
+    "語彙チャンネルが1行も通っていない run では lexicalMatchRows が 0 になる" +
+      "(examples/chat の既定構成。ADR 0108)",
+    () => {
+      const report = fakeReport();
+      const json = buildRetrievalQualityJson({
+        reports: [report],
+        providerSource: "recorded",
+        cassette: FAKE_CASSETTE,
+        measuredAt: new Date(),
+        commit: null,
+      });
+      const arm = json.arms[0]!;
+      expect(arm.lexicalMatchRows).toBe(0);
+      expect(arm.recalledRows).toBeGreaterThan(0);
+    },
+  );
 
   it("arm ごとに『実際に使われた』llmMode/embeddingMode を持つ(宣言値ではなく ArmReport の実値)", () => {
     const armA = fakeReport({

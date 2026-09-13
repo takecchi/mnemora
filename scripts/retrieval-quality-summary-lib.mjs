@@ -317,12 +317,12 @@ export function buildLexicalChannelWarningSection(arms) {
   lines.push(
     "",
     "⚠ **これは失敗ではない。**`examples/chat` の retrieval ベンチは `recall()` に" +
-      "`channels` を渡しておらず、既定 `DEFAULT_RECALL_CHANNELS`(`[\"ann\"]`)だけで" +
+      '`channels` を渡しておらず、既定 `DEFAULT_RECALL_CHANNELS`(`["ann"]`)だけで' +
       "recall している——`LexicalStore` が配線されていないという、**このベンチの構成**の" +
       `反映である（[ADR 0108](${REPO_BLOB_BASE}/0108-retrieval-bench-does-not-exercise-lexical-channel.md)）。`,
     "",
     "⟹ **この警告が消えたら、それはベンチの構成が変わったという意味である**" +
-      "（`channels` に `\"lexical\"` を足す、または同等の変更）。" +
+      '（`channels` に `"lexical"` を足す、または同等の変更）。' +
       "**そのときは `hit@1` を測り直すこと**（それがこの警告の目的である）。" +
       "⛔ この警告を消すだけにしないこと。",
   );

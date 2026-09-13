@@ -202,10 +202,7 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
         });
 
         const totalRecalledRows = report.probes.reduce((sum, p) => sum + p.recalledRows, 0);
-        const totalLexicalMatchRows = report.probes.reduce(
-          (sum, p) => sum + p.lexicalMatchRows,
-          0,
-        );
+        const totalLexicalMatchRows = report.probes.reduce((sum, p) => sum + p.lexicalMatchRows, 0);
 
         // まず、この歯自体が何も測っていない(候補が1件も返らない)状態ではないことを
         // 確かめる——そうでなければ以下の assertion が「測れなかったから通っただけ」
