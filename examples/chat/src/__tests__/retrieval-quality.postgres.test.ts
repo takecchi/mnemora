@@ -1,11 +1,7 @@
 import { afterAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { PROBES, buildProbeSetConversation, findTopicKeywordViolations } from "../probe-set.js";
-import {
-  armHeadline,
-  resolveExternalId,
-  runRetrievalQualityArm,
-} from "../retrieval-quality.js";
+import { armHeadline, resolveExternalId, runRetrievalQualityArm } from "../retrieval-quality.js";
 import { createExampleRuntime } from "../runtime-factory.js";
 import { formatNoApiCallsNotice } from "../usage-meter.js";
 import {
@@ -293,17 +289,15 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
         for (const probe of report.probes) {
           const tagMatch = probe.termSpreads.find((s) => s.term === "tagMatch");
           expect(tagMatch, failureMeaning).toBeDefined();
-          expect(
-            [tagMatch!.distinctCount, tagMatch!.min, tagMatch!.max],
-            failureMeaning,
-          ).toEqual([1, 1, 1]);
+          expect([tagMatch!.distinctCount, tagMatch!.min, tagMatch!.max], failureMeaning).toEqual([
+            1, 1, 1,
+          ]);
 
           const strength = probe.termSpreads.find((s) => s.term === "strength");
           expect(strength, failureMeaning).toBeDefined();
-          expect(
-            [strength!.distinctCount, strength!.min, strength!.max],
-            failureMeaning,
-          ).toEqual([1, 1, 1]);
+          expect([strength!.distinctCount, strength!.min, strength!.max], failureMeaning).toEqual([
+            1, 1, 1,
+          ]);
         }
 
         expect(headline.decayFreshnessDifferentRows, failureMeaning).toBe(0);

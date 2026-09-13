@@ -227,7 +227,14 @@ describe("buildRetrievalQualityJson", () => {
         fakeProbe({
           probeId: "p0",
           termSpreads: [
-            { term: "similarity", presentCount: 2, min: 0.1, max: 0.5, spread: 0.4, distinctCount: 2 },
+            {
+              term: "similarity",
+              presentCount: 2,
+              min: 0.1,
+              max: 0.5,
+              spread: 0.4,
+              distinctCount: 2,
+            },
             { term: "decay", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },
             { term: "tagMatch", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },
             { term: "freshness", presentCount: 2, min: 1, max: 1, spread: 0, distinctCount: 1 },

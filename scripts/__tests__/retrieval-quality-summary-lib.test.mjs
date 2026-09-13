@@ -243,11 +243,46 @@ describe("buildLexicalChannelWarningSection — 向きを反転させた警告(A
 function makeArmWithTermDistinct(overrides = {}) {
   return makeArm({
     termDistinct: [
-      { term: "similarity", presentRows: 10, minDistinctPerProbe: 10, maxDistinctPerProbe: 10, min: 0.1, max: 0.9 },
-      { term: "decay", presentRows: 10, minDistinctPerProbe: 10, maxDistinctPerProbe: 10, min: 0.99, max: 1 },
-      { term: "tagMatch", presentRows: 10, minDistinctPerProbe: 1, maxDistinctPerProbe: 1, min: 1, max: 1 },
-      { term: "freshness", presentRows: 10, minDistinctPerProbe: 10, maxDistinctPerProbe: 10, min: 0.99, max: 1 },
-      { term: "strength", presentRows: 10, minDistinctPerProbe: 1, maxDistinctPerProbe: 1, min: 1, max: 1 },
+      {
+        term: "similarity",
+        presentRows: 10,
+        minDistinctPerProbe: 10,
+        maxDistinctPerProbe: 10,
+        min: 0.1,
+        max: 0.9,
+      },
+      {
+        term: "decay",
+        presentRows: 10,
+        minDistinctPerProbe: 10,
+        maxDistinctPerProbe: 10,
+        min: 0.99,
+        max: 1,
+      },
+      {
+        term: "tagMatch",
+        presentRows: 10,
+        minDistinctPerProbe: 1,
+        maxDistinctPerProbe: 1,
+        min: 1,
+        max: 1,
+      },
+      {
+        term: "freshness",
+        presentRows: 10,
+        minDistinctPerProbe: 10,
+        maxDistinctPerProbe: 10,
+        min: 0.99,
+        max: 1,
+      },
+      {
+        term: "strength",
+        presentRows: 10,
+        minDistinctPerProbe: 1,
+        maxDistinctPerProbe: 1,
+        min: 1,
+        max: 1,
+      },
     ],
     decayFreshnessEqualRows: 10,
     decayFreshnessDifferentRows: 0,
@@ -289,7 +324,14 @@ describe("buildConstantTermSection — 非門の節(ADR 0109)", () => {
     const arms = [
       makeArm({
         termDistinct: [
-          { term: "similarity", presentRows: 10, minDistinctPerProbe: 5, maxDistinctPerProbe: 10, min: 0.1, max: 0.9 },
+          {
+            term: "similarity",
+            presentRows: 10,
+            minDistinctPerProbe: 5,
+            maxDistinctPerProbe: 10,
+            min: 0.1,
+            max: 0.9,
+          },
         ],
         decayFreshnessEqualRows: 5,
         decayFreshnessDifferentRows: 5,

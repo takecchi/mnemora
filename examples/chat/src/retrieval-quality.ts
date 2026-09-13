@@ -772,7 +772,9 @@ export function formatArmDetail(report: ArmReport): string {
         `omitted=[${p.omittedKinds.join(",")}] totalInScope=${p.totalInScope}`,
     );
     lines.push(`      項ごとの値の幅(返った候補全体): ${formatTermSpreads(p.termSpreads)}`);
-    lines.push(`      項ごとの何通りか(返った候補全体): ${formatTermDistinctCounts(p.termSpreads)}`);
+    lines.push(
+      `      項ごとの何通りか(返った候補全体): ${formatTermDistinctCounts(p.termSpreads)}`,
+    );
     lines.push(
       `      decay===freshness(行ごと厳密等価): ${formatDecayFreshnessRowwise(p.decayFreshnessRowwise)}`,
     );
