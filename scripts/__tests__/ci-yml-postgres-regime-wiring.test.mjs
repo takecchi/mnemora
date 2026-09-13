@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
+import { normalizeWorkflowExpressions } from "../workflow-expression-lib.mjs";
 
 /**
  * ⚠ **2026-09-12 追記(Issue #155)**: `postgres` ジョブを `server_encoding` の
@@ -72,6 +73,19 @@ const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", imp
 const workflow = readFileSync(workflowPath, "utf8");
 
 const JOB_ID = "postgres";
+
+/**
+ * artifact 名の**正規形**(Issue #163 ①)。
+ *
+ * 🔴 これは「${{ }} の中がこう書かれていること」を要求するものではない——
+ * `normalizeWorkflowExpressions` を通したあとの形である。⟹ `${{matrix.serverEncoding}}`
+ * や `${{ format('{0}', matrix.serverEncoding) }}` のような**同値な書き換えは、
+ * どれもこの形へ揃ってから照合される**(2026-09-13 実測: 直す前はどちらも赤くなっていた)。
+ *
+ * ⭐ **測りたい主張は「artifact 名が matrix.serverEncoding に依存していること」**であり、
+ * その依存が消えれば(`lexical-regime-UTF8` など)いまも赤くなる。
+ */
+const ARTIFACT_NAME_CANONICAL = "name: lexical-regime-${{ matrix.serverEncoding }}";
 const TOOTH_SOURCE_PATH = fileURLToPath(
   new URL(
     "../../packages/postgres/src/__tests__/lexical-store-identifier.test.ts",
@@ -427,9 +441,39 @@ describe("ci.yml の postgres ジョブの regime 配線(Issue #148)", () => {
     expect(block).toContain("if-no-files-found: ignore");
   });
 
-  it("🔴 Issue #155: artifact 名が matrix.serverEncoding へ配線されている(脚ごとに分かれていないと上書き・衝突する)", () => {
+  it("🔴 Issue #155/#163: artifact 名が matrix.serverEncoding へ配線されている(脚ごとに分かれていないと上書き・衝突する)", () => {
+    // 🔴 **Issue #163 ①**: 以前はここで生テキストを1文字単位で \`toContain\` していた。
+    // ⟹ \`${{matrix.serverEncoding}}\`(内側の空白落とし)や
+    // \`${{ format('{0}', matrix.serverEncoding) }}\` のような、**Actions にとって
+    // 完全に同値で artifact 名の値も変わらない書き換え**で赤くなっていた(2026-09-13 に
+    // 手で当てて実測)。PR #154 が一度直したのと同じ向きの欠陥である。
+    //
+    // ⟹ **照合専用の網(\`scripts/workflow-expression-lib.mjs\`)を通してから当てる。**
+    // ⛔ この網を \`substituteWorkspace\`(summary 段を実際に spawn するための展開)へ
+    // 混ぜてはいけない——あちらの出力は**実行されるテキスト**であり、照合専用の変換が
+    // 漏れる(PR #181 と同じ判断。lib の docstring に理由を書いた)。
+    //
+    // ⭐ **弱めていない**: 測りたい主張は「artifact 名が \`matrix.serverEncoding\` に
+    // 依存している(脚ごとに分かれている)」であって、式の字面ではない。依存が消えた
+    // \`lexical-regime-UTF8\` は**いまも赤くなる**(下の describe が両向きで固定している)。
     const block = extractStepBlock(artifactStep.name);
-    expect(block).toContain("name: lexical-regime-${{ matrix.serverEncoding }}");
+    const { text, unhandled } = normalizeWorkflowExpressions(block ?? "");
+    expect(
+      unhandled,
+      "artifact 段に、照合専用の網が正規化できない ${{ … }} が在る。" +
+        "網が黙って素通りしたまま緑になるのを防ぐため、ここで名乗らせている。",
+    ).toEqual([]);
+    expect(text).toContain(ARTIFACT_NAME_CANONICAL);
+  });
+
+  it("🔴 Issue #163: 正規化しても、artifact 名の接頭辞と脚ごとの分岐そのものは消えていない(網が式を丸ごと畳んでいないことの固定)", () => {
+    const block = extractStepBlock(artifactStep.name);
+    const { text } = normalizeWorkflowExpressions(block ?? "");
+    // ⭐ **空回り防止**: 網が「${{ … }} を全部消す」実装に退化すると、上の
+    // \`toContain\` は \`name: lexical-regime-\` の一致だけで緑になりうる。
+    // ⟹ 正規化後のテキストに**式そのものが残っている**ことを別途見る。
+    expect(text).toContain("${{ matrix.serverEncoding }}");
+    expect(text).not.toContain("name: lexical-regime-UTF8");
   });
 
   it("⭐ 正常な JSON なら exit 0 で、Job Summary に server_encoding / server_version が出る(UTF8 脚)", () => {
