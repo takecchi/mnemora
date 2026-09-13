@@ -62,7 +62,7 @@ export interface RetrievalQualityArmJson {
    * `REQUIRED_ARM_*_FIELDS`/`DIFF_FIELDS` のどちらにも含めていない)。
    *
    * **⚠ JSON は数値をそのまま書く(丸めない)。**`formatScoreValue` を経由しないので、
-   * `min`/`max` がここでは 1e-8 桁の `decay`/`freshness` の差を保つ**唯一の保全経路**
+   * `min`/`max` がここでは 1e-7 桁の `decay`/`freshness` の差(ADR 0109 §4 の実測)を保つ**唯一の保全経路**
    * である——コンソール出力(`formatArmDetail`)は `formatExactScoreValue` で
    * 丸めずに出すとはいえ、機械可読な形で残るのはこの JSON だけである。
    */

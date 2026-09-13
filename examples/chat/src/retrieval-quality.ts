@@ -81,7 +81,8 @@ export interface TermSpread {
    * **⚠ `spread`(幅 = `max - min`)とは別の主張である**(ADR 0081 §1.1)。
    * 幅が0(または極小)であることと、候補間で1通りしか値を取らないことは、
    * この文脈では違う主張である——**幅は両端の距離だけを言い、中間に何個の値が
-   * 在るかを言わない。**`decay` はこの違いが出る項の実例で、幅は 1e-8 桁だが
+   * 在るかを言わない。**`decay` はこの違いが出る項の実例で、幅は 1e-7 桁(ADR 0109 §4 の実測。
+   * **この桁は系の定数ではなく、取り込みから `recall()` までの実時間の関数である**)だが
    * 通り数は候補数ぶんある(= 重みを触れば理論上は動く余地がある)のに対し、
    * `tagMatch`/`strength` は通り数そのものが1であり(= 重みをいくら触っても
    * 順位は1つも動かない)。**「重みが小さい」と「項が動いていない」を区別するには、
@@ -551,7 +552,8 @@ export function formatScoreValue(value: number): string {
  * **なぜ要るか**: ADR 0081 §6.2 は、`formatScoreValue` を `decay`/`freshness` の
  * 生値の印字に流用したところ、両者とも `1.000000` に丸められ、「`distinctCount=10`
  * なのに `min=max=1.000000`」という自己矛盾した表示になったことを記録している
- * (`decay`/`freshness` の変域は 1e-8 桁であり、6桁丸めでは差が消える)。
+ * (`decay`/`freshness` は 1 からの差が 1e-7〜1e-8 桁であり、6桁丸めでは差が消える。
+ * 実測は ADR 0109 §4)。
  * `formatTermDistinctCounts` はこの関数を使うことで、その欠陥を再現しない。
  */
 export function formatExactScoreValue(value: number): string {
@@ -574,8 +576,8 @@ export function formatTermSpreads(spreads: readonly TermSpread[]): string {
  *
  * **既存の `formatTermSpreads`(幅)とは別の行として足す。**両者は別の主張であり
  * (`TermSpread.distinctCount` の doc 参照)、既存の行の文面は1文字も変えない。
- * min/max は丸めない(`formatExactScoreValue`)——`decay`/`freshness` の 1e-8 桁の
- * 差を、6桁丸めの `formatScoreValue` で消さないため(ADR 0081 §6.2)。
+ * min/max は丸めない(`formatExactScoreValue`)——`decay`/`freshness` の 1e-7 桁の
+ * 差を、6桁丸めの `formatScoreValue` で消さないため(ADR 0081 §6.2 / ADR 0109 §4)。
  */
 export function formatTermDistinctCounts(spreads: readonly TermSpread[]): string {
   return spreads
