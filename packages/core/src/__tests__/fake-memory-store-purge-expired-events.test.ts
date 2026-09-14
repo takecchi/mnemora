@@ -189,4 +189,110 @@ describe("FakeMemoryStore.purgeExpiredEvents（Issue #210 / ADR 0115）", () => 
     expect(await eventStore.list(otherCtx, {})).toHaveLength(1);
     expect((await eventStore.list(otherCtx, {}))[0]?.kind).toBe("updated");
   });
+
+  it("limit を超えた対象を reachedLimit: true で知らせ、超えない呼び出しでは false になる", async () => {
+    const { memoryStore, eventStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "purge-limit-fake",
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+    const base = new Date("2024-01-01T00:00:00.000Z").getTime();
+    // 5件、すべて cutoff より古い。
+    for (let i = 0; i < 5; i++) {
+      await eventStore.append(ctx, {
+        tenantId: "tenant-1",
+        memoryId: memory.id,
+        kind: "updated",
+        at: new Date(base + i * 1000),
+        actor: { type: "system" },
+        meta: {},
+      });
+    }
+    const cutoff = new Date(base + 10_000);
+
+    const first = await memoryStore.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 3 });
+    expect(first.purged).toBe(3);
+    expect(first.reachedLimit).toBe(true);
+    // 最も古い3件（i=0,1,2）が消え、i=3,4 が残る。
+    expect(first.oldestPurgedAt).toEqual(new Date(base));
+    expect(first.newestPurgedAt).toEqual(new Date(base + 2000));
+
+    const second = await memoryStore.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 10 });
+    expect(second.purged).toBe(2);
+    expect(second.reachedLimit).toBe(false);
+
+    const remainingOriginal = (await eventStore.list(ctx, {})).filter(
+      (e) => e.kind !== "events_purged",
+    );
+    expect(remainingOriginal).toHaveLength(0);
+  });
+
+  it("kind='events_purged' 自身を対象から除外する（無限後退を避ける）", async () => {
+    const { memoryStore, eventStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "purge-no-regress-fake",
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+    const veryOld = new Date("2020-01-01T00:00:00.000Z");
+    // 以前の掃除が積んだ古い events_purged 行を直接仕込む。
+    await eventStore.append(ctx, {
+      tenantId: "tenant-1",
+      memoryId: null,
+      kind: "events_purged",
+      at: veryOld,
+      actor: { type: "system" },
+      meta: { purgedCount: 1, oldestPurgedAt: veryOld, newestPurgedAt: veryOld },
+    });
+    // 掃除対象になりうる普通のイベントも1件。
+    await eventStore.append(ctx, {
+      tenantId: "tenant-1",
+      memoryId: memory.id,
+      kind: "updated",
+      at: veryOld,
+      actor: { type: "system" },
+      meta: {},
+    });
+
+    const cutoff = new Date("2024-06-01T00:00:00.000Z");
+    const result = await memoryStore.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 10 });
+
+    // 対象は普通のイベント1件だけ——仕込んだ古い events_purged は除外される。
+    expect(result.purged).toBe(1);
+
+    const purgedEvents = await eventStore.list(ctx, { kind: "events_purged" });
+    // 仕込んだ古い events_purged（1件）+ 今回の掃除が積んだ新しい events_purged（1件）= 2件。
+    // 仕込んだ方が消えていたら1件のままになる。
+    expect(purgedEvents).toHaveLength(2);
+    expect(purgedEvents.some((e) => e.at.getTime() === veryOld.getTime())).toBe(true);
+  });
 });
