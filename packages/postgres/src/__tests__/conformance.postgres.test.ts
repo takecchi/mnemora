@@ -75,6 +75,8 @@ describeMemoryStoreConformance({
     const { db } = await getTestClient();
     return new PostgresEventStore(db).list(ctx, { kind: "events_purged" });
   },
+  // ADR 0114: PostgresMemoryStore は archiveDecayed を実装している。
+  supportsArchiveDecayed: true,
 });
 
 describeEventStoreConformance({

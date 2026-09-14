@@ -95,6 +95,8 @@ describeMemoryStoreConformance({
       (event) => event.tenantId === ctx.tenantId && event.kind === "events_purged",
     );
   },
+  // ADR 0114: InMemoryMemoryStore は archiveDecayed を実装している。
+  supportsArchiveDecayed: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり
