@@ -682,7 +682,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0112: `docs/memory-model.md` §11 行8の掃引。`requeueEmbedJobs` と同じ作法
+   * ADR 0114: `docs/memory-model.md` §11 行8の掃引。`requeueEmbedJobs` と同じ作法
    * ——`status = 'active'` かつ `decayFloorAt <= opts.now`（境界を含む）の Memory を
    * `decayFloorAt` 昇順で `opts.limit` 件まで選び、更新とイベント追記を `await` を
    * 挟まない同期区間で行う（postgres 実装の単一トランザクションを模す）。

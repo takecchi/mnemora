@@ -119,7 +119,7 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsSupersedeWithNewMemories: boolean;
   /**
-   * ADR 0112: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
+   * ADR 0114: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
    * 実装しているかどうか。**必須。**
    *
    * `supportsSupersedeWithNewMemories` と同じ判断——**省略可にしないこと。**省略できると
@@ -1776,7 +1776,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     }
 
     // -------------------------------------------------------------------
-    // archiveDecayed（ADR 0112: docs/memory-model.md §11 行8 の掃引、任意メソッド）
+    // archiveDecayed（ADR 0114: docs/memory-model.md §11 行8 の掃引、任意メソッド）
     // -------------------------------------------------------------------
 
     if (supportsArchiveDecayed) {

@@ -743,7 +743,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0112: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` かつ
+   * ADR 0114: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` かつ
    * `decayFloorAt <= opts.now`（境界を含む）の Memory を `decayFloorAt` 昇順で
    * `opts.limit` 件まで選び、`status='archived'` への更新と `kind='archived'` の
    * イベント追記を1つの同期区間（`await` を挟まない）で行う——

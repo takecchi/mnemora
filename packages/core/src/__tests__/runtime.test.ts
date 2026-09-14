@@ -660,7 +660,7 @@ describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻
 });
 
 /**
- * ADR 0112: `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する
+ * ADR 0114: `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する
  * 低頻度の掃引…→ `status='archived'` + `archived` イベント」を実行する
  * `Runtime.sweepArchive` の検査。
  *
@@ -698,7 +698,7 @@ async function createDecayedMemory(
   });
 }
 
-describe("runtime.sweepArchive（ADR 0112: 減衰しきった Memory の掃引）", () => {
+describe("runtime.sweepArchive（ADR 0114: 減衰しきった Memory の掃引）", () => {
   const NOW = new Date("2026-06-01T00:00:00.000Z");
 
   it("口が在る adapter では supported: true を名乗り、active かつ decayFloorAt <= now の Memory だけを archived にする", async () => {

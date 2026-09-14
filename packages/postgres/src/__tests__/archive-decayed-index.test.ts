@@ -8,7 +8,7 @@ import * as schema from "../schema.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0112 の実測: `archiveDecayed` が対象を選ぶ `buildArchiveDecayedTargetSelect`
+ * ADR 0114 の実測: `archiveDecayed` が対象を選ぶ `buildArchiveDecayedTargetSelect`
  * （`../memory-store.js`）が、**新しい索引を追加せずに**既存の `idx_memories_recall_gate`
  * （`(tenant_id, status, decay_floor_at)`、`WHERE status IN ('active', 'contested')`。
  * `migrations/0001_init.sql`）だけで適用可能であることを確かめる。
@@ -155,7 +155,7 @@ async function targetRowIds(pool: Pool, forcing: Forcing): Promise<string[]> {
   });
 }
 
-describe("archiveDecayed の対象選択索引（ADR 0112）", () => {
+describe("archiveDecayed の対象選択索引（ADR 0114）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
   });

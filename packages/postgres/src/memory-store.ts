@@ -1041,7 +1041,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0112: `docs/memory-model.md` §11 行8 の掃引。doc コメントの契約そのものは
+   * ADR 0114: `docs/memory-model.md` §11 行8 の掃引。doc コメントの契約そのものは
    * `MemoryStore.archiveDecayed`（`@mnemora/core`）側にある——ここはクエリの実装のみ。
    *
    * 🔴 `memories` の UPDATE と `memory_events` への INSERT は、`requeueEmbedJobs`
@@ -1094,7 +1094,7 @@ export class PostgresMemoryStore implements MemoryStore {
 }
 
 /**
- * ADR 0112: `archiveDecayed` が「どの行を archived にするか」を選ぶ `SELECT`。
+ * ADR 0114: `archiveDecayed` が「どの行を archived にするか」を選ぶ `SELECT`。
  *
  * **本体と `EXPLAIN` の歯（`packages/postgres/src/__tests__/archive-decayed-index.test.ts`）
  * が、同じものを使うために切り出してある**——`buildRequeueEmbedTargetSelect`

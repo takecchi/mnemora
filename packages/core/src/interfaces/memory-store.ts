@@ -182,7 +182,7 @@ export interface AggregateScopeOptions {
  * **`updateStatus` は変更していない**——status だけを更新したい呼び出し元
  * （`archived`/`forgotten` への遷移等、イベントを別の理由で別途書く場合）はそのまま使える。
  *
- * [ADR 0112](../../../../docs/decisions/0112-archive-sweep-for-decayed-memories.md) で
+ * [ADR 0114](../../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md) で
  * `archiveDecayed`（任意メソッド）を追加した: docs/memory-model.md §11 行8「掃引 →
  * `status='archived'` + `archived` イベント」を満たす唯一の書き込み口。`Memory.decayFloorAt`
  * は書き込み時に計算されて列に持たれていた（ADR 0004・ADR 0011）が、それを読んで実際に
@@ -500,7 +500,7 @@ export interface MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }>;
   /**
-   * [ADR 0112](../../../../docs/decisions/0112-archive-sweep-for-decayed-memories.md):
+   * [ADR 0114](../../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md):
    * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
    * → `status='archived'` + `archived` イベント」を満たすための口。
    *
@@ -520,7 +520,7 @@ export interface MemoryStore {
    * 契約:
    * - 対象は **`status = 'active'` のみ**（`superseded`/`contested` はこの口では
    *   触らない。lifecycle 表行8が挙げる3つの起点のうち2つを意図的に外している。
-   *   ADR 0112「採らなかった案」参照）。
+   *   ADR 0114「採らなかった案」参照）。
    * - `tenant_id = ctx.tenantId` かつ `decay_floor_at <= opts.now`
    *   （**`<=`、境界を含む**）。⚠ **`VectorFilter.decayFloorAtAfter`
    *   （`./vector-store.js`）は狭義の `>`（境界を含まない）であり、この非対称は意図
@@ -561,7 +561,7 @@ export interface MemoryStore {
 }
 
 /**
- * {@link MemoryStore.archiveDecayed} の引数（ADR 0112）。
+ * {@link MemoryStore.archiveDecayed} の引数（ADR 0114）。
  *
  * **`now` は呼び出し側が渡す**（ADR 0037 の「時刻は呼び出し側が渡す」規律をここでも
  * 踏襲する——テストで時刻を固定できるようにするため。`packages/core` 内部の
@@ -581,7 +581,7 @@ export interface ArchiveDecayedOptions {
   limit: number;
 }
 
-/** {@link MemoryStore.archiveDecayed} の返り値（ADR 0112）。 */
+/** {@link MemoryStore.archiveDecayed} の返り値（ADR 0114）。 */
 export interface ArchiveDecayedResult {
   /** 実際に archived にした Memory。`decay_floor_at` 昇順（最も古く遠ざかったもの順）。 */
   archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }>;

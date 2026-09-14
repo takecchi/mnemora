@@ -627,7 +627,7 @@ export interface TickResult {
 }
 
 /**
- * {@link Runtime.sweepArchive} の返り値（ADR 0112）。
+ * {@link Runtime.sweepArchive} の返り値（ADR 0114）。
  *
  * `MemoryStore.archiveDecayed` は任意メソッドである。**store 側の
  * {@link ArchiveDecayedResult} をそのまま返り値にしない**——store 側の型には
@@ -715,7 +715,7 @@ export interface Runtime {
    */
   reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
   /**
-   * [ADR 0112](../../../docs/decisions/0112-archive-sweep-for-decayed-memories.md):
+   * [ADR 0114](../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md):
    * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
    * → `status='archived'` + `archived` イベント」を実行する。
    *
@@ -1466,7 +1466,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `Runtime.sweepArchive` の実装（ADR 0112）。doc コメントは interface 側にある
+   * `Runtime.sweepArchive` の実装（ADR 0114）。doc コメントは interface 側にある
    * ——ここは「口が在るかどうかで分岐する」というアルゴリズムそのものだけ。
    *
    * `deps.memoryStore.archiveDecayed` を一度ローカル変数へ受けてから `undefined` を
@@ -1474,10 +1474,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す必要があるため
    * （分割代入したメソッドは `this` を失うので、呼び出し時に元のオブジェクトを渡す）。
    */
-  async function sweepArchive(
-    ctx: Ctx,
-    opts: ArchiveDecayedOptions,
-  ): Promise<SweepArchiveResult> {
+  async function sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult> {
     const archiveDecayed = deps.memoryStore.archiveDecayed;
     if (archiveDecayed === undefined) {
       return { supported: false, archived: [], reachedLimit: false };

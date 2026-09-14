@@ -5,7 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * ADR 0112: `archiveDecayed` の「`memories.status` の更新と `memory_events` への
+ * ADR 0114: `archiveDecayed` の「`memories.status` の更新と `memory_events` への
  * `kind='archived'` の追記は同一トランザクションである」という主張を、
  * **実際に片方を失敗させて**検査する。
  *
@@ -58,7 +58,7 @@ function messageChain(error: unknown): string {
   return parts.join("\n<- caused by ->\n");
 }
 
-describe("archiveDecayed の原子性（ADR 0112）", () => {
+describe("archiveDecayed の原子性（ADR 0114）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
   });
