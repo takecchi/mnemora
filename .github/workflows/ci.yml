@@ -839,6 +839,13 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: mnemora_ci
+          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
+          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
+          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
+          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
+          #    からである(この PR で測る側には足したが、その実測値が出るのは
+          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
+          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
           POSTGRES_INITDB_ARGS: "--encoding=UTF8"
         ports:
           - 5432:5432
