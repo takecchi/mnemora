@@ -119,8 +119,8 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
       { limit: 25, now },
     );
 
-    expect(outcome.kind).toBe("purged");
-    if (outcome.kind !== "purged") throw new Error("unreachable");
+    expect(outcome.kind).toBe("executed");
+    if (outcome.kind !== "executed") throw new Error("unreachable");
     expect(outcome.result.purged).toBe(1);
     expect(outcome.result.oldestPurgedAt).toEqual(new Date("2024-05-31T00:00:00.000Z"));
 
@@ -146,8 +146,8 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
       { limit: 10 },
     );
 
-    expect(outcome.kind).toBe("purged");
-    if (outcome.kind !== "purged") throw new Error("unreachable");
+    expect(outcome.kind).toBe("executed");
+    if (outcome.kind !== "executed") throw new Error("unreachable");
     expect(outcome.result.purged).toBe(1);
 
     const remainingOriginal = (await eventStore.list(ctx, {})).filter(

@@ -21,14 +21,23 @@ import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js"
  *   [ADR 0100](../../../docs/decisions/0100-supersede-with-new-memories.md) の
  *   `WriteAtomicity.store_unsupported` と同じ語彙上の判断——「この adapter では
  *   構造的に縮められない」ことを、実行時エラーではなく戻り値の種類で示す。
- * - `{ kind: "purged"; result }` — `purgeExpiredEvents` を実際に呼んだ。
- *   `result` はその戻り値そのもの（`dryRun` を含む）。
+ * - `{ kind: "executed"; result }` — `purgeExpiredEvents` を実際に呼んだ。
+ *   `result` はその戻り値そのもの（`dryRun` を含む。`result.purged` が実削除件数）。
+ *   🔴 **値を `"executed"` と名付け、`"purged"` にしなかった**——
+ *   `packages/core/src/event.ts` の `MemoryEventKind`（`memory_events.kind` 列の型）にも
+ *   同名の値 `"purged"` が存在し、`kind: "purged"` という同じ文字面のオブジェクトリテラルに
+ *   なる。両者は無関係の型（あちらは Phase 2 の物理削除イベント種別、こちらは
+ *   このオーケストレータの実行結果）だが、[ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)
+ *   の回帰テスト（`unreachable-union-values.test.ts`）は型を見ずテキスト一致で
+ *   `kind: "purged"` を探すため、同じ文字列を使うと「`MemoryEventKind.purged` が
+ *   生成された」という偽陽性になる。**文字列が衝突するなら、文字列を変えて衝突を解消する**
+ *   ——ADR 0117 側のテキストスキャンを型認識に書き換える負担を、無関係な本 PR に持ち込まない。
  */
 export type PurgeExpiredEventsForTenantOutcome =
   | { kind: "unset" }
   | { kind: "unlimited" }
   | { kind: "store_unsupported" }
-  | { kind: "purged"; result: PurgeExpiredEventsResult };
+  | { kind: "executed"; result: PurgeExpiredEventsResult };
 
 /**
  * {@link purgeExpiredEventsForTenant} の引数。
@@ -89,5 +98,5 @@ export async function purgeExpiredEventsForTenant(
     limit: opts.limit,
     dryRun: opts.dryRun,
   });
-  return { kind: "purged", result };
+  return { kind: "executed", result };
 }

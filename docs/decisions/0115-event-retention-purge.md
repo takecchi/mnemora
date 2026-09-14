@@ -124,7 +124,7 @@ type PurgeExpiredEventsForTenantOutcome =
   | { kind: "unset" }
   | { kind: "unlimited" }
   | { kind: "store_unsupported" }
-  | { kind: "purged"; result: PurgeExpiredEventsResult };
+  | { kind: "executed"; result: PurgeExpiredEventsResult };
 ```
 
 - `unset`/`unlimited` のときは **`memoryStore` に一切触れない**——`retention` が
@@ -135,6 +135,15 @@ type PurgeExpiredEventsForTenantOutcome =
   構造的に縮められない」ことを実行時エラーではなく戻り値の種類で示す。
 - `cutoff`（`olderThan`）は `opts.now`（省略時 `new Date()`）から `retention.days`
   日ぶん遡った時刻として、ここで計算する。
+- 🔴 **4番目の値は `"purged"` ではなく `"executed"` と名付けた。** 当初は `"purged"` と
+  していたが、`packages/core/src/event.ts` の `MemoryEventKind`（`memory_events.kind` 列の型、
+  ADR 0117 の棚卸し対象）にも同名の値 `"purged"` が存在し、両者は無関係の型でありながら
+  `kind: "purged"` という同じ文字面のオブジェクトリテラルになっていた。並行で着地した
+  [ADR 0117](./0117-unreachable-union-values-inventory.md) の回帰テスト
+  （`unreachable-union-values.test.ts`）は型を見ずテキスト一致で `kind: "purged"` を探すため、
+  本 PR のこのオーケストレータのコードが「`MemoryEventKind.purged` を生成した」という
+  偽陽性を引いた。**文字列の衝突が原因なので、文字列を変えて解消した**——ADR 0117 側の
+  テキストスキャンをこちらの都合で型認識に書き換える負担を持ち込まない側を選んだ。
 
 **`unset` と `unlimited` を同じ顔で返さない**（Issue #210 設計上の注意5）——
 ADR 0050 が `TenantSettingsStore.getEventRetention` 自体で守った区別を、
