@@ -125,8 +125,12 @@
     **規約と harness の既定が食い違ったら、規約を採る。**
   - **既に付いている分は履歴として残す。履歴を書き換えない。**
     決めたのは「これから付けない」であって、「1本も付いていない状態が正しい」ではない
-    （【実測】2026-09-15、`main` 162本のうち **106本**がどちらかを持つ:
-    `git log origin/main --format='%H' -i --grep='Co-authored-by' --grep='Generated with \[Claude Code\]' | wc -l`）。
+    （【実測】2026-09-15、`origin/main` が `c3dda79`（162本）だった時点で **106本**が
+    どちらかを持つ:
+    `git log origin/main --format='%H' -i --grep='Co-authored-by' --grep='Generated with \[Claude Code\]' | wc -l`。
+    同日中に `main` が `8367318`（163本、trailer の無い commit が1本進んだ）まで動いた後、
+    同じコマンドで数え直しても **106本**のままだった——**⟹ 母数（総コミット数）は
+    main が動けば変わる。この数字を引くときは、必ずどの SHA で見たかを添えること。**）。
   - **⚠ 規約の有無を、履歴の分布から推定しないこと。**
     **この節を書く直前に、実際に推定して間違えた** 【実測】——
     `git log origin/main -40 --format='%B' | grep -c "Co-Authored-By"` が **1** を返したので
