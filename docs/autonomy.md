@@ -90,7 +90,8 @@ gh pr list --state open --limit 20
 - [ ] ADR が在る（`AGENTS.md` の要件を満たす。**採らなかった案・引き受けた負債・これが覆るとしたら**まで）
 - [ ] 6つの門が緑（`typecheck` / `lint` / `format:check` / `test` / `build` / `pack:check`）
 - [ ] **歯が実際に噛むことを、変異試験で示した**（壊した入力で赤く、直したら緑に戻る）
-- [ ] **CI が緑**（手元の `pnpm run test` は DB 段を実行しない。§4 を見ること）
+- [ ] **CI が緑**（手元の `pnpm run test` は DB 段を実行しない。§4 を見ること。
+      「緑」の判定手順そのものは §2.1 を見ること——素朴な判定は外れる）
 - [ ] PR 本文に、測った数字と**確かめていないこと**が書いてある
 
 **CI が緑で差分に問題が無ければ、そのままマージする**（§3。ADR 0118）。
@@ -99,6 +100,70 @@ gh pr list --state open --limit 20
 
 **⚠ 「ついでに直す」をしない。**ADR に書いていない変更を混ぜると、
 **その PR が何を主張しているのか読めなくなる。**別の PR にすること。
+
+### 2.1 「CI が緑」の判定手順（Issue #228 / ADR 0132）
+
+**上の止まる条件にある「CI が緑」は、素朴に見ると外れる。**この節は、
+**実際に打つコマンドと、その出力の読み方**を書く。手順の背景・検証の詳細は
+[ADR 0132](./decisions/0132-ci-green-verdict-procedure.md) を見ること。
+
+**手順:**
+
+1. **head sha を明示して取る。PR 番号だけで判定しない。**
+
+   ```bash
+   gh pr view <PR番号> --json headRefOid -q .headRefOid
+   ```
+
+   push されると head は動く。**この sha を以後の手順すべてで使い回す**——
+   途中で PR を再度見て番号から判定し直すと、別の commit を見ていることになりうる。
+
+2. **その sha の check-runs（job 単位）を取る。**
+
+   ```bash
+   gh api repos/<owner>/<repo>/commits/<sha>/check-runs --paginate \
+     -q '.check_runs[] | {name, status, conclusion}'
+   ```
+
+   - **`status` が全件 `"completed"` であることを先に見る。** 1件でも
+     `"in_progress"`/`"queued"` なら、**まだ判定してはいけない**——
+     結論を出さずに後で引き直す。
+   - **`status: "completed"` の中で、`conclusion` が全件 `"success"` であることを見る。**
+     **`"skipped"`/`"neutral"`/`"cancelled"`/`"timed_out"`/`"action_required"` はどれも
+     緑ではない。**
+   - **ここで見ているのは job 単位の `conclusion` であり、
+     `gh api repos/<owner>/<repo>/actions/runs/<run_id>` が返す run 全体の `conclusion`
+     ではない。**両者は別物である（ADR 0132 の「検算した」節）——run 全体が `failure` でも、
+     その中の特定の job は `success`ということが起きる。**逆に、1 job の `success` を見て
+     run 全体・ひいては PR 全体を緑と読むのも誤り。**
+
+3. **`mergeStateStatus` は、緑の根拠として一度も使わない。**
+   `BLOCKED` は draft のときにも check 走行中にも出うる。`CLEAN` は
+   **全 check が終端に達した後についてくる結果**であり、独立した確認にはならない。
+
+4. **「いま引いた時点で全部揃っている」を信じない。**
+   同じ sha の check-runs は、**依存ジョブ（例: 2つの regime ジョブが両方終わってから
+   登録される集計ジョブ）の分だけ、後から本数が増えることがある。**
+   確度を上げたいなら、**間隔を空けて2回引き直し、check run の名前集合が
+   増減していないかを見る**（下記のツールの `--recheck-after` がこれを機械化する）。
+   ⚠ これは「もう増えない」ことの証明にはならない——2回とも同じだった、
+   という以上の主張はできない。
+
+5. **手元の6つの門（typecheck/lint/format:check/test/build/pack:check）の緑を、
+   CI の緑の代わりにしない。** 手元は `DATABASE_URL` が無いと DB 段を実行しない
+   （ADR 0015・本書 §4）。CI は DB を要するジョブを持ち、**手元が全部緑でも
+   そこだけ赤くなることが実際に起きている。**
+
+6. **別リポジトリ（[alteroid](https://github.com/takecchi/alteroid) 等）の CI の作法を、
+   検算せずに持ち込まない。** 「draft では checks が `skipped` になる」のような教訓は
+   **この repo には当てはまらないことがある**（この repo では draft でも本物の CI が走る、
+   ADR 0132 の「検算した」節）。
+
+**機械化した道具**: `node scripts/ci-green-check.mjs --pr <番号>` が上の1〜4を1コマンドで行う
+（`--recheck-after <秒>` で4番の再確認、`--sha <sha>` で sha 直指定、`--json` で機械可読出力）。
+終了コード `0`=green・`1`=red・`2`=pending・`3`=実行時エラー。**5番（手元の門を代用にしない）は
+このツールの設計そのもの**——常に `gh` 経由で CI 自身に聞き、手元の門の結果を一切参照しない。
+**6番（他 repo の作法の持ち込み）は道具では防げない。**読む側が注意すること。
 
 ---
 
@@ -148,6 +213,26 @@ gh pr list --state open --limit 20
 | **手元の `pnpm run pack:check` が赤い** | `dist/` に古い `.map` が居残る（`tsc` は `outDir` を掃除しない）。**CI では起きない** | `rm -rf packages/*/dist && pnpm run build` |
 | **擬似 provider の数字を「性能」と読む** | arm A（擬似埋め込み）の **MRR は 0.018**＝実質ランダム | 想起の質を測るなら `recorded`（ADR 0051）。`deterministic` は配線と契約の検査用 |
 | **`npm view` で publish の成否を判断する** | registry の読み取り側は書き込みに数分遅れ、**CDN を迂回する `?write=true` でも 404 を返す**（ADR 0066 測ったこと8） | `npm publish` の出力で判断する |
+| **「CI が緑」を素朴に判定する**（PR 番号だけで見る／run 全体の `conclusion` を見る／`mergeStateStatus` を見る／手元の門の緑で代用する） | **check の本数は時間とともに増えうる・run と job の `conclusion` は別・`mergeStateStatus` は終端後の結果であって根拠にならない・手元の緑は CI の緑を予測しない**（Issue #228。5点のうち run/job の差・手元と CI の乖離は本 ADR 0132 で自分の `gh` 呼び出しにより再検算した） | §2.1 の手順どおり、**head sha を明示**して `check-runs` を job 単位で読む。`node scripts/ci-green-check.mjs --pr <番号>` が機械化している |
+| **ADR PR をマージするとき、索引の再生成を忘れる** | `docs/decisions/README.md` の ADR 索引は**機械生成**であり（[ADR 0137](./decisions/0137-adr-index-generated-from-source.md)）、**ADR を足す PR の作成者は索引を触らない**——触らないことが並行 PR 間の行位置の衝突を消している仕組みである。⟹ **マージする側が再生成しないと `main` の索引が陳腐化する**（`main` 限定の鮮度の歯が赤くなる） | **squash merge する直前に、PR ブランチ上で**次を実行してコミットし、push してからマージする: `git fetch origin main && git merge origin/main` → `node scripts/generate-adr-index.mjs` → commit → push。⚠ **マージ「後」に `main` 上で再生成する形にしない**——`ci.yml` は `on: push: branches: [main]` であり、**マージで生まれた `main` のコミットが索引の古いまま CI に入って赤くなる**（その赤は履歴に残る）。手順は ADR 0137「決定」2番
+| **CI の履歴から失敗率を数える**（「この故障は稀だ」「この test は N 回に1回落ちる」） | **再実行（rerun）は run 全体の `conclusion` を上書きする。**⟹ `status=failure` で run を絞って数えると、**再実行で緑になった回を取りこぼす。**⟹ **履歴から数えた失敗率は、必ず下限になる。**【実測】[Issue #261](https://github.com/takecchi/mnemora/issues/261) の対象 incident 自身がその実例である——失敗ジョブを再実行して緑にしたため、`status=failure` では拾えなくなった | **run ではなく個々の job の attempt を見る。**それをしていないなら、**「稀である」と断定しない**——「数えた範囲では N 件。これは下限である」と書くこと（本書 §5「確かめていないこと」の適用）。実例と数字は [ADR 0141](./decisions/0141-local-embedding-load-retry.md) §2.1 |
+
+### 4.1 ⚠ 静かに失敗する道具（「出力が出た」を成功と読まない）
+
+**上の表のいくつかは、同じ1つの族である**——**道具が、失敗したのに失敗の顔をしない。**
+`npm view` の行がそれであり、以下もそれである。**新しい実例はここに足すこと。**
+
+**族の見分け方**: **「エラーが出なかった」以外に成功の証拠が無いなら、それは確かめていない。**
+
+| 道具 | どう静かに失敗するか | どうするか |
+|---|---|---|
+| **`gh issue close --body-file <file>`** | **`--body-file` は `gh issue close` に存在しないオプションである。**⚠ **エラーで落ちない**——`gh help accessibility` の案内が返り、**issue は close されないまま**終わる。⟹ **「出力が出た」を成功と読むと、閉じていないのに閉じたと思う** 【実測】2026-09-15、Issue #234 で実際に踏んだ（`gh issue view 234 --json state,comments` が `state=OPEN comments=0` を返して発覚した） | 正しい形は **`--comment "<本文>"`**。本文をファイルに置いているなら `BODY=$(cat file)` で読んでから渡す |
+| **複合したシェル呼び出し**（`a && b`／`a; b`／`$(...)`） | **前段の失敗が後段を止めるとは限らない。**`;` は止めず、`&&` は「成功」の定義がコマンドごとに違い（**`grep -c` は 0 件を「失敗」と呼ぶ**）、`$(...)` の失敗は代入の成否としてしか伝わらない。⟹ **外から見える結果は「一部だけ実行された」であり、それが「全部通った」に見える** 【実測】2026-09-15 に3回踏んだ——①検査を `;` で繋いで **fail-open**（本来止めるべき commit が通った）②`HITS=$(… grep -c …) && …` で **fail-closed**（マージが走らなかった）③ファイル生成と `cat` を同じ呼び出しに混ぜ、生成が失敗したのに `gh issue close` だけ通って **空のコメントで close された** | **`set -eu` を先頭に置く**／**生成と使用を別の呼び出しに分ける**／⭐ **副作用のある手（`gh issue close`・`gh pr merge`・`git push`）を、判定と同じ行に繋がない。`if` で明示する** |
+
+**⭐ そして、どの道具についても最後の一手は同じである**——
+**副作用のある手を打ったら、打った直後に結果を引いて検算する。**
+`gh issue view --json state`／`gh pr view --json state`／`git log --oneline -1 origin/main`。
+**これをやっていれば、上の3例はどれも「踏んだが、その場で気づいた」で済む。**
 
 ---
 

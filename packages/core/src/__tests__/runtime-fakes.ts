@@ -1,6 +1,7 @@
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
+import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "../interfaces/outbox-store.js";
 import type { OutboxJobKind } from "../interfaces/scheduler.js";
 import { assertValidEventRetentionDays } from "../interfaces/tenant-settings-store.js";
@@ -19,11 +20,16 @@ import type { MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
   isEmbeddingStatusRollback,
+  MemoryPurgeConflictError,
   MemoryStatusConflictError,
 } from "../interfaces/memory-store.js";
 import type {
   AggregateScopeOptions,
+  ArchiveDecayedOptions,
+  ArchiveDecayedResult,
   MemoryStore,
+  PurgeExpiredEventsOptions,
+  PurgeExpiredEventsResult,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
 } from "../interfaces/memory-store.js";
@@ -235,6 +241,7 @@ export class FakeMemoryStore implements MemoryStore {
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: input.decayFloorAt,
         embeddingStatus: input.embeddingStatus,
+        purgedAt: input.purgedAt ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -459,6 +466,54 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #210 / ADR 0115: `InMemoryMemoryStore.purgeExpiredEvents`（`packages/testkit`）と
+   * 同じ意味論。`backing.events` を直接操作し、`FakeEventStore` のメソッドは一切呼ばない
+   * ——append-only の型に触れない、という契約を Fake 側でも保つ。
+   */
+  async purgeExpiredEvents(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsOptions,
+  ): Promise<PurgeExpiredEventsResult> {
+    const dryRun = opts.dryRun ?? false;
+    const candidates = this.backing.events
+      .filter(
+        (event) =>
+          event.tenantId === ctx.tenantId &&
+          event.kind !== "events_purged" &&
+          event.at.getTime() < opts.olderThan.getTime(),
+      )
+      .sort((a, b) => a.at.getTime() - b.at.getTime());
+
+    const reachedLimit = candidates.length > opts.limit;
+    const victims = candidates.slice(0, opts.limit);
+    const purged = victims.length;
+    const oldestPurgedAt = purged > 0 ? victims[0]!.at : null;
+    const newestPurgedAt = purged > 0 ? victims[purged - 1]!.at : null;
+
+    if (dryRun || purged === 0) {
+      return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+    }
+
+    const victimIds = new Set(victims.map((event) => event.id));
+    for (let i = this.backing.events.length - 1; i >= 0; i--) {
+      if (victimIds.has(this.backing.events[i]!.id)) {
+        this.backing.events.splice(i, 1);
+      }
+    }
+
+    const storedEvent = buildStoredEvent(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: null,
+      kind: "events_purged",
+      actor: { type: "system" },
+      meta: { purgedCount: purged, oldestPurgedAt, newestPurgedAt, olderThan: opts.olderThan },
+    });
+    this.backing.events.push(storedEvent);
+
+    return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+  }
+
+  /**
    * ADR 0053: `ready` を `failed` へ巻き戻さない。
    * `InMemoryMemoryStore.setEmbeddingStatus`（`packages/testkit`）と同じ意味論・
    * 同じ理由——禁じる遷移の判定は共有の {@link isEmbeddingStatusRollback} に固定し、
@@ -678,6 +733,130 @@ export class FakeMemoryStore implements MemoryStore {
     }
     return { requeued: memoryIds.length, memoryIds };
   }
+
+  /**
+   * ADR 0114: `docs/memory-model.md` §11 行8の掃引。`requeueEmbedJobs` と同じ作法
+   * ——`status = 'active'` かつ `decayFloorAt <= opts.now`（境界を含む）の Memory を
+   * `decayFloorAt` 昇順で `opts.limit` 件まで選び、更新とイベント追記を `await` を
+   * 挟まない同期区間で行う（postgres 実装の単一トランザクションを模す）。
+   */
+  async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    const nowMs = opts.now.getTime();
+    const targets = [...this.backing.memories.values()]
+      .filter(
+        (m) =>
+          m.tenantId === ctx.tenantId && m.status === "active" && m.decayFloorAt.getTime() <= nowMs,
+      )
+      .sort(
+        (a, b) =>
+          a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      )
+      .slice(0, Math.max(0, opts.limit));
+
+    const archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }> = [];
+    for (const memory of targets) {
+      const digestSnapshot = memory.digest;
+      memory.status = "archived";
+      memory.updatedAt = new Date();
+      const storedEvent = buildStoredEvent(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "archived",
+        actor: { type: "system" },
+        digestSnapshot,
+        sizeBeforeBytes: null,
+        meta: {},
+      });
+      this.backing.events.push(storedEvent);
+      archived.push({ memoryId: memory.id, decayFloorAt: memory.decayFloorAt });
+    }
+    return { archived, reachedLimit: archived.length === opts.limit };
+  }
+
+  /**
+   * Issue #198 / ADR 0124: `forgotten` かつ未 purge（`purgedAt === null`）な Memory だけを
+   * 対象にした CAS。`beforeUpdateStatus`（テスト専用のフック）を CAS 判定の直前に発火する
+   * ——`updateStatus`/`updateStatusWithEvent` と同じ位置・同じ理由（`purge` の並行の歯も
+   * この既存のフックで決定的に再現する）。
+   */
+  async purgeMemory(
+    ctx: Ctx,
+    id: MemoryId,
+    tombstone: { content: string; digest: string },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    this.beforeUpdateStatus?.(id);
+    const memory = await this.get(ctx, id);
+    if (!memory) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (memory.status !== "forgotten" || (memory.purgedAt ?? null) !== null) {
+      throw new MemoryPurgeConflictError(id, memory.status, memory.purgedAt ?? null);
+    }
+    memory.content = tombstone.content;
+    memory.digest = tombstone.digest;
+    memory.purgedAt = new Date();
+    memory.updatedAt = new Date();
+    const storedEvent = buildStoredEvent(ctx, event);
+    this.backing.events.push(storedEvent);
+    return { memory, event: storedEvent };
+  }
+
+  /**
+   * Issue #197 / ADR 0134: 両側とも `status === 'active'` の CAS を課したうえで、
+   * `status='contested'`・`contestedWithId` を相互に設定する。`InMemoryMemoryStore`
+   * （testkit）/ `PostgresMemoryStore` と同じ「事前検証してから書く」作法——
+   * まだ何も書いていないうちに、存在確認と CAS 判定を両方の対象について済ませる
+   * ことで、in-memory の「ロールバック」を模す（`supersedeWithNewMemories` と同じ形）。
+   *
+   * `beforeUpdateStatus` は各対象の CAS 判定の**直前**に発火する——`updateStatus`/
+   * `updateStatusWithEvent`/`supersedeWithNewMemories` と同じ位置。TOCTOU の歯が
+   * この口でも決定的に再現できるようにする。
+   */
+  async markContestedPair(
+    ctx: Ctx,
+    first: { id: MemoryId; event: NewMemoryEvent },
+    second: { id: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    if (first.id === second.id) {
+      throw new RangeError("FakeMemoryStore: first.id and second.id must differ");
+    }
+
+    // 1. 事前検証——存在確認。まだ何も書いていない。
+    const firstMemory = await this.get(ctx, first.id);
+    if (!firstMemory) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${first.id}`);
+    }
+    const secondMemory = await this.get(ctx, second.id);
+    if (!secondMemory) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${second.id}`);
+    }
+
+    // 2. 事前検証——CAS（両側とも `active` であること）。まだ何も書いていない。
+    this.beforeUpdateStatus?.(first.id);
+    if (firstMemory.status !== "active") {
+      throw new MemoryStatusConflictError(first.id, "active", firstMemory.status);
+    }
+    this.beforeUpdateStatus?.(second.id);
+    if (secondMemory.status !== "active") {
+      throw new MemoryStatusConflictError(second.id, "active", secondMemory.status);
+    }
+
+    // 3. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
+    firstMemory.status = "contested";
+    firstMemory.contestedWithId = second.id;
+    firstMemory.updatedAt = new Date();
+    secondMemory.status = "contested";
+    secondMemory.contestedWithId = first.id;
+    secondMemory.updatedAt = new Date();
+
+    const firstEvent = buildStoredEvent(ctx, first.event);
+    const secondEvent = buildStoredEvent(ctx, second.event);
+    this.backing.events.push(firstEvent, secondEvent);
+
+    return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
 }
 
 export class FakeOutboxStore implements OutboxStore {
@@ -722,19 +901,29 @@ export class FakeOutboxStore implements OutboxStore {
     return claimed.map((job) => ({ ...job }));
   }
 
-  async complete(ctx: Ctx, jobId: string): Promise<void> {
+  // CAS 意味論（ADR 0142, Issue #233）も `packages/testkit` の `InMemoryOutboxStore`/
+  // `PostgresOutboxStore` と一致させてある。
+  async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
-    if (job) {
-      job.completedAt = new Date();
+    if (!job) {
+      return;
     }
+    if (job.attempts !== expectedAttempts) {
+      throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
+    }
+    job.completedAt = new Date();
   }
 
-  async fail(ctx: Ctx, jobId: string, error: string): Promise<void> {
+  async fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
-    if (job) {
-      job.failedAt = new Date();
-      job.lastError = error;
+    if (!job) {
+      return;
     }
+    if (job.attempts !== expectedAttempts) {
+      throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
+    }
+    job.failedAt = new Date();
+    job.lastError = error;
   }
 }
 
@@ -1060,9 +1249,23 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId = { provider: "fake", model: "fake-model", dimensions: 2 };
   shouldFail = false;
 
+  /**
+   * ADR 0142 の「tick はリース競合が起きても他のジョブの処理を続ける」歯のための、
+   * 決定的な差し込みフック（`FakeMemoryStore.beforeUpdateStatus`、ADR 0030と同じ形）。
+   * `embed()` が値を返す直前に呼ばれる——`processEmbedJob` が
+   * `deps.outboxStore.complete(...)` を呼ぶより前の、まさにその隙間を指す。
+   * ここで（テストコードから）別ワーカーの再 claim を直接起こすことで、
+   * 「処理には成功したが complete しようとした時点でリースを失っていた」を
+   * 確率的な並行に頼らず毎回同じ形で再現できる。
+   */
+  beforeEmbedReturn?: () => Promise<void> | void;
+
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
     if (this.shouldFail) {
       throw new Error("simulated embedding provider failure");
+    }
+    if (this.beforeEmbedReturn) {
+      await this.beforeEmbedReturn();
     }
     // 決定的: 文字列長から機械的にベクトルを作る。
     return texts.map((text) => [text.length, [...text].filter((c) => c === "a").length]);

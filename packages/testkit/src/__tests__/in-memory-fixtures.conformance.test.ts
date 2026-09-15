@@ -85,6 +85,22 @@ describeMemoryStoreConformance({
   },
   // Issue #134 / ADR 0100: InMemoryMemoryStore は supersedeWithNewMemories を実装している。
   supportsSupersedeWithNewMemories: true,
+  // Issue #210 / ADR 0115: InMemoryMemoryStore は purgeExpiredEvents を実装している。
+  supportsPurgeExpiredEvents: true,
+  listPurgedEvents: (ctx) => {
+    if (!latestMemoryStoreForEvents) {
+      throw new Error("listPurgedEvents より先に createStore() を呼ぶ必要がある");
+    }
+    return latestMemoryStoreForEvents.events.filter(
+      (event) => event.tenantId === ctx.tenantId && event.kind === "events_purged",
+    );
+  },
+  // ADR 0114: InMemoryMemoryStore は archiveDecayed を実装している。
+  supportsArchiveDecayed: true,
+  // Issue #198 / ADR 0124: InMemoryMemoryStore は purgeMemory を実装している。
+  supportsPurgeMemory: true,
+  // Issue #197 / ADR 0134: InMemoryMemoryStore は markContestedPair を実装している。
+  supportsMarkContestedPair: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり

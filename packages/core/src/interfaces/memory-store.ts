@@ -35,6 +35,113 @@ export class MemoryStatusConflictError extends Error {
 }
 
 /**
+ * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
+ * （Issue #243 続き、ADR 0136 決定3の設計メモを実装した）: `status: 'contested'` を
+ * **対向（`contestedWithId`）無しで**書き込もうとしたときに、`updateStatus` /
+ * `updateStatusWithEvent` / `createMemory` / `createMemoryWithOutbox` /
+ * `supersedeWithNewMemories`（`news` 側）が投げる。
+ *
+ * `updateStatus`/`updateStatusWithEvent` には `contestedWithId` を渡す引数がそもそも
+ * 無いため、この2メソッドで `status: 'contested'` を対象にした呼び出しは**常に**この
+ * 例外になる——「対向を渡し忘れた」ケースを区別する余地が構造的に無い。
+ * `createMemory` 系は `input.contestedWithId` が `null`/`undefined` のときにだけ
+ * この例外になる。**対向を明示した作成（既存の Memory を指す `contestedWithId` 付き）は
+ * 引き続き許される**——これは相互ペアの構成を保証しないが（ADR 0046
+ * 「一対一が要求する状態を、今日どの経路でも作れない」参照）、少なくとも「対向が
+ * 一切無い」状態は作らせない、という決定3の範囲に一致させている。
+ *
+ * **`status: 'contested'` を正しく（両側 CAS・相互参照・同一トランザクション）書く
+ * 唯一の口は `markContestedPair`（任意メソッド、ADR 0134）である。**この例外を
+ * 受け取った呼び出し元は、`markContestedPair` の実装有無を確認して使うこと。
+ */
+export class ContestedWithoutCompanionError extends Error {
+  constructor(
+    readonly method:
+      | "updateStatus"
+      | "updateStatusWithEvent"
+      | "createMemory"
+      | "createMemoryWithOutbox"
+      | "supersedeWithNewMemories",
+    readonly memoryId: MemoryId | null,
+  ) {
+    super(
+      `MemoryStore.${method}: writing status "contested" without a companion ` +
+        `(contestedWithId) is rejected` +
+        (memoryId !== null ? ` (memoryId: ${memoryId})` : " (at creation time)") +
+        `. Use markContestedPair to create a mutually-contested pair (ADR 0134 / ADR 0140).`,
+    );
+    this.name = "ContestedWithoutCompanionError";
+  }
+}
+
+/**
+ * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
+ * が使う判定そのもの。`ContestedWithoutCompanionError` を投げるべきかどうかを、
+ * adapter（`packages/postgres`・`packages/testkit`）それぞれで書き写さず、ここ1箇所に
+ * 置く——判定基準が adapter ごとにずれることを防ぐ（ADR 0053 の
+ * `isEmbeddingStatusRollback` と同じ形の判断）。
+ */
+export function isContestedWithoutCompanion(
+  status: MemoryStatus | undefined,
+  contestedWithId: MemoryId | null | undefined,
+): boolean {
+  return status === "contested" && (contestedWithId ?? null) === null;
+}
+
+/**
+ * `MemoryStore.purgeMemory` の CAS 条件（`status = 'forgotten' AND purged_at IS NULL`）が
+ * 破れたときに投げる（Issue #198、[ADR 0124](../../../../docs/decisions/0124-purge-physical-delete.md)）。
+ *
+ * 🔴 **`MemoryStatusConflictError` を再利用しない。**`purge` は `status` を動かさない
+ * （`purged` は `memories.status` の値ではなく `purged_at IS NOT NULL` で表される、
+ * docs/memory-model.md §11 行10）ため、CAS が破れても `observedStatus` は
+ * `expectedStatus`（常に `'forgotten'`）と**同じ値になりうる**——「期待した値と違う値を
+ * 観測した」という `MemoryStatusConflictError` の前提そのものが成り立たない場面がある
+ * （例: 既に purge 済みで `status` は依然 `'forgotten'` のまま）。この専用の型は
+ * `status` に加えて `purgedAt` も運ぶことで、その区別を表現する。
+ *
+ * **`observedStatus`/`observedPurgedAt` は「弾かれた後に読み直した値」であり、弾かれた
+ * 瞬間の値とは限らない**（`MemoryStatusConflictError` の doc コメントと同じ注意）。
+ * 呼び出し側（`Runtime.purge`）はこの値を信用せず、自分でもう一度 `get` を呼んで
+ * `not_found`/`already_purged`/`status_not_forgotten`/`conflicted` のどれかに分類する。
+ */
+export class MemoryPurgeConflictError extends Error {
+  constructor(
+    readonly memoryId: MemoryId,
+    readonly observedStatus: MemoryStatus | null,
+    readonly observedPurgedAt: Date | null,
+  ) {
+    super(
+      `MemoryStore.purgeMemory: memory ${memoryId} is not purgeable ` +
+        `(expected status "forgotten" with purgedAt null, observed ` +
+        `${
+          observedStatus === null
+            ? "(memory disappeared)"
+            : `status="${observedStatus}", purgedAt=${observedPurgedAt === null ? "null" : observedPurgedAt.toISOString()}`
+        })`,
+    );
+    this.name = "MemoryPurgeConflictError";
+  }
+}
+
+/**
+ * `MemoryStore.purgeMemory` が `content`/`digest` を上書きする固定の文字列
+ * （Issue #198、[ADR 0124](../../../../docs/decisions/0124-purge-physical-delete.md)）。
+ * docs/memory-model.md §9「forget() と purge() を分ける」: 「`content` と `digest` を
+ * 固定のトゥームストーン文字列で上書きする…『NULL にする』ではなく『消えたことを示す値で
+ * 上書きする』ことで、NOT NULL と物理削除の両立を図る」。
+ *
+ * `content`/`digest` に同じ文字列を使う——別々の文字列を持つ利点が無い一方、値を1つに
+ * 保つほうが「これが tombstone だ」という直感的な確認がしやすい。
+ *
+ * 🔴 **「purge されたか」の判定にこの文字列を使わない。**常に `Memory.purgedAt !== null`
+ * で判定する（`memories.status` は動かないため、`content`/`digest` の値そのものを
+ * 判定の根拠にすると、将来この文字列を変えたときに判定ロジックまで壊れる）。
+ */
+export const PURGE_TOMBSTONE_CONTENT = "[purged]";
+export const PURGE_TOMBSTONE_DIGEST = "[purged]";
+
+/**
  * `setEmbeddingStatus` が**唯一禁じる遷移**
  * （`docs/decisions/0053-set-embedding-status-does-not-roll-back-ready.md`）。
  * `ready` は `VectorStore.upsert` が返った*後*にしか書かれない——すなわち
@@ -181,6 +288,12 @@ export interface AggregateScopeOptions {
  * status の更新とイベントの追記を1回の呼び出し・1トランザクションにまとめる。
  * **`updateStatus` は変更していない**——status だけを更新したい呼び出し元
  * （`archived`/`forgotten` への遷移等、イベントを別の理由で別途書く場合）はそのまま使える。
+ *
+ * [ADR 0114](../../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md) で
+ * `archiveDecayed`（任意メソッド）を追加した: docs/memory-model.md §11 行8「掃引 →
+ * `status='archived'` + `archived` イベント」を満たす唯一の書き込み口。`Memory.decayFloorAt`
+ * は書き込み時に計算されて列に持たれていた（ADR 0004・ADR 0011）が、それを読んで実際に
+ * `archived` へ倒す経路がこれまで無かった——この掃引がその欠落を埋める。
  */
 export interface MemoryStore {
   createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
@@ -199,6 +312,13 @@ export interface MemoryStore {
     input: NewObservation,
     jobKinds: OutboxJobKind[],
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
+  /**
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
+   * `input.status === 'contested'` かつ `input.contestedWithId` が `null`/`undefined` の
+   * 呼び出しは {@link ContestedWithoutCompanionError} を投げる（`isContestedWithoutCompanion`
+   * が判定する）。対向を明示した作成（`contestedWithId` に既存 Memory の id を渡す）は
+   * 引き続き許される。
+   */
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   /**
    * roadmap.md 段階3: Memory の作成と outbox ジョブ書き込み（主に `embed`）を
@@ -206,6 +326,9 @@ export interface MemoryStore {
    * 抽出の冪等性（`(tenant_id, source_observation_id, extractor_version, content_hash)`）で
    * 既存行に衝突した場合は `created: false` を返し、ジョブは作らない
    * （同じ内容に対して埋め込みジョブを重複させない）。
+   *
+   * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
+   * の制約を受ける。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
@@ -260,6 +383,12 @@ export interface MemoryStore {
    * `expectedStatus` を**単数**にしている理由: 現時点の唯一の呼び出し元
    * （`runtime.ts` の `reextract`）が要る条件は `"active"` の1つだけであり、
    * 集合（配列）にする理由が無い。採らなかった案は ADR 0030 参照。
+   *
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
+   * `status === 'contested'` を対象にした呼び出しは**常に** {@link ContestedWithoutCompanionError}
+   * を投げる——この口には対向（`contestedWithId`）を渡す引数がそもそも無いため、区別の
+   * 余地なく単独の `contested` になる。`contested` を正しく書くには `markContestedPair`
+   * （ADR 0134）を使うこと。
    */
   updateStatus(
     ctx: Ctx,
@@ -302,6 +431,10 @@ export interface MemoryStore {
    * 1トランザクション」は**このメソッドの範囲外**——新しい Memory の作成（`createMemory`/
    * `createMemoryWithOutbox`）は別の呼び出しのままであり、このメソッドは既存 Memory の
    * status 更新とイベント追記の対だけを扱う（ADR 0031「これが覆るとしたら」参照）。
+   *
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
+   * `updateStatus` と同じ理由で、`status === 'contested'` を対象にした呼び出しは**常に**
+   * {@link ContestedWithoutCompanionError} を投げる（status もイベントも一切書かれない）。
    */
   updateStatusWithEvent(
     ctx: Ctx,
@@ -478,6 +611,11 @@ export interface MemoryStore {
    * 実装していても「トランザクションは一切模していない」adapter がありうる
    * （`InMemoryMemoryStore` クラス doc 参照）。実際に原子性を測るのは適合テストと
    * `packages/postgres` の並行の歯であって、この口の有無そのものではない。
+   *
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
+   * `news[i].input` にも `createMemory` と同じ制約が掛かる——`status === 'contested'` かつ
+   * `contestedWithId` が `null`/`undefined` の要素が1件でもあれば、`news`/`supersede`
+   * どちらの書き込みも一切行わずに {@link ContestedWithoutCompanionError} を投げる。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -493,6 +631,308 @@ export interface MemoryStore {
     superseded: MemoryEvent[];
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }>;
+  /**
+   * Issue #210: `docs/roadmap.md` §5.4「監査ログの既定保持期間」でオーナーが必須と決めた
+   * 「テナント単位で短縮できる口」（`TenantSettingsStore.getEventRetention`/
+   * `setEventRetention`、ADR 0050）に対応する削除側。ADR 0050 決定8が明示的に範囲外へ
+   * 残していた「期限切れの `memory_events` 行を実際に消す処理」を、この口が埋める。
+   *
+   * `docs/memory-model.md` §11 Memory lifecycle 行「(memory_events の掃除)」が要求する
+   * 保守ジョブ本体。**`EventStore` interface（`append`/`list`/`get`）はこの口を経由しない
+   * ——append-only の型そのものに `update`/`delete` を持たせない、という
+   * `docs/memory-model.md` §9 の規律を、削除操作の置き場所でも守るためである。**
+   * `EventStore.append` を呼ぶことも禁じてはいないが（実際には呼ばない。下記参照）、
+   * 型としては `EventStore` に一切触れない。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`
+   * 「してはいけないこと」表の「公開 API の破壊的変更」）。[ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md)
+   * の `supersedeWithNewMemories?` と同じ形の判断。この口を実装しない adapter は、
+   * 保持期間を「設定できるが、実際には縮まない」ままにする——[ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)
+   * 「守れないもの」に明記した。
+   *
+   * 契約:
+   * - 対象は `tenant_id = ctx.tenantId AND at < opts.olderThan AND kind <> 'events_purged'`
+   *   の行に限る。**`kind = 'events_purged'` 自身は対象から除外する**——含めると、
+   *   ある回の掃除が積んだ `events_purged` イベントが次回の掃除対象になり得るという
+   *   無限後退（ADR 0115 決定「無限後退」参照）を生む。除外の代償として
+   *   `events_purged` 行はこの口の対象にならず単調に増え続けるが、増分は「呼び出し
+   *   1回につき高々1行」であり、削除対象の生の件数とは無関係に小さい。
+   * - **`opts.limit` は必須・既定値を持たない**（`ClaimOutboxJobsOptions.leaseMs`、
+   *   ADR 0032 と同じ理由——取り消せない削除の上限を `packages/core` が勝手に決めない）。
+   * - 並び順は `at` 昇順（最も古い行から消す）。対象が `opts.limit` を超える場合は
+   *   `reachedLimit: true` を返す——**呼び出し側が「1回で消しきれなかった」ことを
+   *   知るための唯一の信号であり、`purged === opts.limit` からの推測に頼らせない**
+   *   （`opts.limit` ちょうどの件数が対象の全件だった場合と区別できないため）。
+   * - **`opts.dryRun` を必ず持つ。**`true` のときは対象を数えるだけで、
+   *   `memory_events` を1行も DELETE せず、`events_purged` イベントも1行も INSERT
+   *   しない。返り値の `purged`/`reachedLimit`/`oldestPurgedAt`/`newestPurgedAt` は
+   *   「実行していたら何が起きたか」のプレビューであり、DB の状態は変わらない。
+   * - **削除と `events_purged` イベントの追記は同一トランザクション**（ADR 0031・
+   *   ADR 0100 と同じ「必ず」の強制。`forget()` が `EventStore` 追記と同一トランザクション
+   *   であるのと同じ理由）。`purged === 0`（対象が無かった）ときは、削除も追記も
+   *   一切発生しない——「何も変わらなかった」ことを表す `events_purged` 行を積む
+   *   意味が無いため（0件の掃除を毎回記録すると、頻繁なスケジュール実行で無意味な
+   *   行が積み上がる）。
+   * - 積む `events_purged` イベントの `meta` は `{ purgedCount, oldestPurgedAt,
+   *   newestPurgedAt, olderThan }` の4欄のみ——`docs/memory-model.md` §9 が言う
+   *   「件数と期間のみ。削除された個々のイベントの詳細は残らない」を、`memory_id`
+   *   個別の記録を一切持たないことで守る。
+   */
+  purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+  /**
+   * [ADR 0114](../../../../docs/decisions/0114-archive-sweep-for-decayed-memories.md):
+   * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
+   * → `status='archived'` + `archived` イベント」を満たすための口。
+   *
+   * `Memory.decayFloorAt` は書き込み時（作成時・強化時）に計算されて列に持たれている
+   * （ADR 0004・ADR 0011）が、**それを読んで実際に `archived` へ倒す経路がこれまで
+   * どこにも無かった**——`docs/recall.md` §2 段0・§4 が `FilteredOmission.condition
+   * = 'archived'` を定義していても、`status='archived'` にする経路が無い限りこの分岐は
+   * 一度も発火しない。このメソッドがその唯一の書き込み口になる。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`:114、
+   * ADR 0100 決定1と同じ理由）。この口を実装しない adapter では、`Runtime.sweepArchive`
+   * が `{ supported: false, archived: [], reachedLimit: false }` を返すことで
+   * 「対応していない」と正しく名乗る——黙って0件を返さない（ADR 0082「黙って何も
+   * 起きない形にしない」の哲学をここでも守る）。
+   *
+   * 契約:
+   * - 対象は **`status = 'active'` のみ**（`superseded`/`contested` はこの口では
+   *   触らない。lifecycle 表行8が挙げる3つの起点のうち2つを意図的に外している。
+   *   ADR 0114「採らなかった案」参照）。
+   * - `tenant_id = ctx.tenantId` かつ `decay_floor_at <= opts.now`
+   *   （**`<=`、境界を含む**）。⚠ **`VectorFilter.decayFloorAtAfter`
+   *   （`./vector-store.js`）は狭義の `>`（境界を含まない）であり、この非対称は意図
+   *   である**——`decayFloorAtAfter` は「これより後のものだけを ANN の候補にする」
+   *   という recall 側の下限境界、こちらは「これ以前に閾値を割ったものを掃く」という
+   *   掃引側の上限境界であり、2つの異なる関心が同じ演算子を共有する理由が無い。
+   * - **`decay_floor_at` 昇順**（最も古く遠ざかったものから）で `opts.limit` 件まで。
+   * - 選ばれた各行について `status='archived'` への更新と `memory_events` への
+   *   `kind='archived'` の追記を行う。**この2つは同一トランザクション**
+   *   （ADR 0031 が `updateStatusWithEvent` で確立した「更新とイベントは同値」の
+   *   不変条件を、この掃引にも適用する）。
+   * - 対象が0件なら `{ archived: [], reachedLimit: false }` を返す（例外を投げない）。
+   * - **一度 `archived` になった行は `status = 'active'` の条件に合わなくなるため、
+   *   同じ範囲を繰り返し掃引しても同じ行が二度 archived になることはない**
+   *   （呼び出し自体が特別にべき等性を持つのではなく、対象条件が書き込みの結果として
+   *   自然に外れることによる）。
+   *
+   * ⚠ **既存索引 `idx_memories_recall_gate`（`tenant_id, status, decay_floor_at`、
+   * `WHERE status IN ('active','contested')`。`migrations/0001_init.sql`）をそのまま
+   * 使う。新しい索引は追加しない**——`status = 'active'` という等値条件はこの部分索引の
+   * 述語を含意するため、プランナはこの索引を選べる
+   * （`packages/postgres/src/__tests__/archive-decayed-index.test.ts` が適用可能性を
+   * 測る）。
+   *
+   * 🔴 **ADR 0011 の決定と衝突しない。**ADR 0011 は「recall 段1の候補生成クエリに
+   * `decay_floor_at` を読み取りフィルタとして使わない」という Phase 1 の決定であり、
+   * この掃引は recall の段1とは別の、保守用の書き込み経路である。ADR 0011 は
+   * むしろ「索引の3列目として `decay_floor_at` を最初から持つのは、これを読み取りに
+   * 使い始めるとき（この掃引を含む）に索引を作り直さずに済むため」と明言しており、
+   * この掃引はその想定どおりの使われ方である
+   * （`packages/postgres/src/__tests__/recall-gate-index.test.ts` 末尾の注記参照）。
+   *
+   * 🔴 **この掃引は自動では一度も走らない。**`Runtime.tick`/`Runtime.observe` に
+   * 相乗りさせない——呼び出し側が明示的に `Runtime.sweepArchive` を呼んだときだけ走る
+   * （`Runtime.sweepArchive` の doc コメント参照）。
+   */
+  archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
+  /**
+   * Issue #198（docs/roadmap.md §5.3、docs/memory-model.md「forget() と purge() を分ける」・
+   * §11 行10、[ADR 0124](../../../../docs/decisions/0124-purge-physical-delete.md)）:
+   * `forgotten` な Memory を物理削除する——`content`/`digest` を固定のトゥームストーン
+   * 文字列（{@link PURGE_TOMBSTONE_CONTENT}/{@link PURGE_TOMBSTONE_DIGEST}）で上書きし、
+   * `purgedAt` を設定する。**行そのものは消さない**（`memory_events` からの外部キー
+   * 参照整合性のため、また `superseded_by_id`/`contested_with_id` の参照先としても
+   * 残す必要があるため）。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`「してはいけ
+   * ないこと」表の「公開 API の破壊的変更」、[ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md)
+   * 決定1と同じ理由）。この口を実装しない adapter では `Runtime.purge` が
+   * `{ supported: false, outcomes: [...すべて not_attempted] }` を返す——`archiveDecayed`/
+   * `purgeExpiredEvents` と同じ「フォールバック経路を持たない」形（`content`/`digest`/
+   * `purgedAt` を書く経路はこの口以外に無いため）。
+   *
+   * **なぜ既存の `updateStatusWithEvent` を再利用しないか**: [ADR 0122](../../../../docs/decisions/0122-restore-archived-memory.md)
+   * の `restoreArchived` は「`status` を1つ動かし、同一トランザクションで
+   * `memory_events` に1件積む」という形が既存の `updateStatusWithEvent` にそのまま
+   * 収まったため、新しい任意メソッドを足さなかった。**`purge` はこの形に収まらない**
+   * ——`status` を動かさない代わりに `content`/`digest`/`purgedAt` という、
+   * `updateStatusWithEvent` のシグネチャには無い列を書く必要がある
+   * （`archiveDecayed`/`purgeExpiredEvents` と同じ「既存のどのメソッドにも無い形」）。
+   *
+   * 契約:
+   * - 対象の行が存在しなければ「memory not found」の `Error` を投げる
+   *   （`updateStatusWithEvent` と同じ規約。`id` が adapter の期待する形式でない場合も
+   *   同じ結果になる——`packages/postgres/src/mapping.ts` の `isUuidLike` の doc 参照）。
+   * - 🔴 **CAS の条件は `status = 'forgotten' AND purged_at IS NULL` の両方。**
+   *   `purge` は `status` を動かさないため（`purged` は `memories.status` の値ではない）、
+   *   `status` だけを条件にすると、同じ Memory への2回目の呼び出しも条件を満たしてしまい、
+   *   `content`/`digest`/`purgedAt` が再び書かれ、`purged` イベントが2件目積まれる
+   *   ——**`purged_at IS NULL` がこの操作固有のべき等性を買う。**
+   * - 条件を満たさない場合（対象は存在するが `status !== 'forgotten'` または
+   *   `purgedAt` が既に非 `null`）は {@link MemoryPurgeConflictError} を投げる。
+   * - 条件を満たす場合、`content`/`digest` を `tombstone.content`/`tombstone.digest` へ
+   *   上書きし、`purgedAt` に書き込み時刻を設定し、同一トランザクションで `event`
+   *   （`kind: 'purged'`）を追記する。**片方だけ起きることはない**（ADR 0031 が確立した
+   *   「更新とイベントは同値」をここでも適用）。
+   * - `status`/`contentHash`/`digestSource` は変更しない。**`status` は `'forgotten'` の
+   *   ままである。**
+   * - `event.digestSnapshot` は呼び出し側が上書き**前**の digest を渡すこと
+   *   （このメソッド自身は snapshot を作らない——`updateStatusWithEvent` と同じ、
+   *   「呼び出し側が読んだ値を event に埋める」規律）。**purge 後、元の digest が残る
+   *   唯一の場所はこの監査ログである**（`content` は事後もどこにも残らない）。
+   */
+  purgeMemory?(
+    ctx: Ctx,
+    id: MemoryId,
+    tombstone: { content: string; digest: string },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
+  /**
+   * Issue #197（ADR 0134）: `docs/memory-model.md` §11 行6「判定できない対向を検出
+   * → 両側の `status='contested'`、`contested_with_id` を相互に設定」を書き込む口。
+   *
+   * [ADR 0046](../../../../docs/decisions/0046-contested-pair-invariant-tooth.md) が数え上げた
+   * とおり、**`contested_with_id` を作成後に書けるメソッドは今日この口が追加されるまで
+   * 存在しなかった**（`updateStatus`/`updateStatusWithEvent` の `SET` 句は `status` と
+   * `superseded_by_id` だけであり、`createMemory` 系は作成時にしか書けない——相互参照は
+   * 「まだ存在しない側」を先に指すことができないため作成時には構成不能）。この口が、
+   * ADR 0046 が「作成後に書く経路が入るとき、表は数え直すこと」と予告していたその経路である。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`「してはいけ
+   * ないこと」表の「公開 API の破壊的変更」、ADR 0100 決定1と同じ理由）。
+   *
+   * ⚠ **フォールバック経路を持たない**（`archiveDecayed?`/`purgeMemory?` と同じ判断。
+   * `sweepArchive`/`purge` の doc コメント参照）。`supersedeWithNewMemories?` のように
+   * 「口が無ければ既存メソッドの2段呼び出しで代替する」という擬似フォールバックは、
+   * **意図的に作らない**——既存メソッドは `contestedWithId` を書けないため、
+   * 代替として書けるのは「片方だけ `status='contested'` にして `contestedWithId` は
+   * 空のまま」という状態に限られ、それは ADR 0046 が「単独で返り、機構2（`docs/memory-model.md`
+   * §5）が破れる」と名指しした壊れた状態そのものである。**この口を実装しない adapter に
+   * 対しては、`Runtime.markContested` は「対応していない」とだけ返し、劣化した代替を
+   * 試みない**（`docs/decisions/0134-*.md` 参照）。
+   *
+   * 契約:
+   * - **両側とも呼び出し時点で `status === 'active'` であること**（CAS。この口は
+   *   `active → contested`（lifecycle 行6）専用であり、他の status からの遷移や
+   *   任意の status への更新は今日どおり `updateStatus`/`updateStatusWithEvent` を使う
+   *   こと。`supersedeWithNewMemories` が `status` を `'superseded'` に固定するのと
+   *   同じ形の専用化）。
+   * - 🔴 **`first.id === second.id` は呼び出し前の programmer error として扱う。**
+   *   実装は `RangeError`（メッセージ: `markContestedPair: first.id and second.id must differ`）
+   *   を、書き込みを一切行う前に投げる——`supersedeWithNewMemories` の
+   *   `supersededByIndex out of range` と同じ「開く前に落とす」位置。
+   * - **両側どちらかの id がそのテナントに存在しない場合、`updateStatusWithEvent` と同じ
+   *   「memory not found」の `Error` を投げる。**書き込みは一切行われない（もう一方が
+   *   存在してもロールバックする）。
+   * - **CAS が破れた場合（存在はするが `status !== 'active'`）は
+   *   {@link MemoryStatusConflictError} を投げる。**`expectedStatus` は常に `'active'`。
+   *   `supersedeWithNewMemories` の `conflicted` 配列（部分成功を許す設計）とは違い、
+   *   **この口は全部成功するか全部失敗するかのどちらかである**——対向ペアは本質的に
+   *   結合しており、「片方だけ contested になった」状態を作ること自体が防ぐべき対象
+   *   （ADR 0046）だからである。
+   * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う: 両側の
+   *   `status='contested'`・`contestedWithId` を相手の id に相互設定、`memory_events`
+   *   へそれぞれ1件ずつ追記（`event.kind` は呼び出し側が渡した値をそのまま使う。
+   *   `docs/memory-model.md` §11 行6 が定める形は `kind:'updated'`,
+   *   `meta.reason:'contested'` だが、この口自体は値を強制しない——`updateStatusWithEvent`
+   *   と同じく「渡された event をそのまま積む」規律）。
+   * - 🔴 **原子性の証拠ではない。**`supersedeWithNewMemories` の doc コメントと同じ
+   *   注意——この口が在ることは adapter がこの口を実装したことしか意味しない。
+   *   実際に原子性を測るのは適合テストと `packages/postgres` の並行の歯である。
+   */
+  markContestedPair?(
+    ctx: Ctx,
+    first: { id: MemoryId; event: NewMemoryEvent },
+    second: { id: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+}
+
+/**
+ * {@link MemoryStore.archiveDecayed} の引数（ADR 0114）。
+ *
+ * **`now` は呼び出し側が渡す**（ADR 0037 の「時刻は呼び出し側が渡す」規律をここでも
+ * 踏襲する——テストで時刻を固定できるようにするため。`packages/core` 内部の
+ * `Clock`（`systemClock`/`{ now: () => Date }`）を経由させず、この口の引数として
+ * 明示的に要求する）。
+ *
+ * **`limit` には既定値を置かない**（`ClaimOutboxJobsOptions.leaseMs`（ADR 0032）・
+ * `RequeueEmbedJobsOptions.limit`（ADR 0079）と同じ理由——1回の掃引でいくつ処理するかは
+ * 運用方針であり、`packages/core` が発明してよい値ではない。この口は範囲走査
+ * （`decay_floor_at` の昇順）の打ち切り位置を決めるので、既定値を置くとその影響範囲を
+ * core が黙って決めることになる）。
+ */
+export interface ArchiveDecayedOptions {
+  /** この時刻以前に `decay_floor_at` を迎えた Memory を対象にする（`<=`、境界を含む）。 */
+  now: Date;
+  /** 1回の呼び出しで archived にする上限。**既定値なし**（上の doc コメント参照）。 */
+  limit: number;
+}
+
+/** {@link MemoryStore.archiveDecayed} の返り値（ADR 0114）。 */
+export interface ArchiveDecayedResult {
+  /** 実際に archived にした Memory。`decay_floor_at` 昇順（最も古く遠ざかったもの順）。 */
+  archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }>;
+  /**
+   * 🔴 **`true` は「`limit` 件ちょうど返した＝まだ在るかもしれない」を意味する。**
+   * `archived.length === opts.limit` のときに `true`——`decay_floor_at <= now` を満たす
+   * `active` な Memory が、まだこの呼び出しの範囲の外に残っている可能性がある
+   * （`countKind` の `'unknown'`/`'lower_bound'` と同じ理由づけ。`docs/recall.md` §4
+   * 「推定値を実測値の顔で出さない」）。
+   *
+   * ⚠ **「残り何件か」は返さない。**数えるには対象全体を数える別のクエリが要り、
+   * この掃引を「範囲走査のみで安価に済ませる」という設計（`docs/memory-model.md` §11
+   * 「アーカイブ掃引…は…全件走査ではなく `decay_floor_at` の範囲走査」）そのものと
+   * 衝突する。「もう無い」（`false`）と「分からない」（`true`）を区別するところまでが
+   * この口の契約であり、`ann_truncated`/`ann_unreached`（`docs/recall.md` §4）が
+   * 守っている規律と同じ形である。
+   */
+  reachedLimit: boolean;
+}
+
+/**
+ * {@link MemoryStore.purgeExpiredEvents} の引数（Issue #210、ADR 0115）。
+ */
+export interface PurgeExpiredEventsOptions {
+  /** この日時より古い（`at < olderThan`）行だけが対象。境界値の `at === olderThan` は対象外。 */
+  olderThan: Date;
+  /**
+   * 1回の呼び出しで削除する上限。**必須・既定値なし**
+   * （`ClaimOutboxJobsOptions.leaseMs` と同じ理由。上の interface doc 参照）。
+   */
+  limit: number;
+  /**
+   * `true` なら削除もイベント追記も行わず、何が起きるかだけを返す。
+   * 省略時は `false`（`runtime.ts` の `ConsolidateOptions.dryRun`/`ReflectOptions.dryRun`
+   * と同じ既定）。
+   */
+  dryRun?: boolean;
+}
+
+/** {@link MemoryStore.purgeExpiredEvents} の返り値（Issue #210、ADR 0115）。 */
+export interface PurgeExpiredEventsResult {
+  /**
+   * 実際に削除された行数。`opts.dryRun === true` のときは、削除していたら消えていた
+   * であろう件数（プレビュー）——1行も削除していない。
+   */
+  purged: number;
+  /**
+   * 対象が `opts.limit` より多かった（＝この呼び出しだけでは消しきれなかった）ことを示す。
+   * `purged === opts.limit` からの推測に頼らせないための専用の信号
+   * （interface doc の契約節参照）。
+   */
+  reachedLimit: boolean;
+  /** 削除された（またはプレビューで数えられた）行のうち最も古い `at`。`purged === 0` なら `null`。 */
+  oldestPurgedAt: Date | null;
+  /** 削除された（またはプレビューで数えられた）行のうち最も新しい `at`。`purged === 0` なら `null`。 */
+  newestPurgedAt: Date | null;
+  /** `opts.dryRun` の写し。呼び出し側が結果だけを見て「本当に消えたか」を取り違えないため。 */
+  dryRun: boolean;
 }
 
 /**

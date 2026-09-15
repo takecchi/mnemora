@@ -1,14 +1,20 @@
 import {
+  ContestedWithoutCompanionError,
   defaultDecayStrategy,
+  isContestedWithoutCompanion,
   isEmbeddingStatusRollback,
+  isHalfLifeHoursInRange,
   isStrengthInRange,
   MAX_STRENGTH,
+  MemoryPurgeConflictError,
   MemoryStatusConflictError,
   resolveIdempotentCreate,
 } from "@mnemora/core";
 import type { IdempotentCreateResult, NotIndexedReason } from "@mnemora/core";
 import type {
   AggregateScopeOptions,
+  ArchiveDecayedOptions,
+  ArchiveDecayedResult,
   Ctx,
   EmbeddingStatus,
   Memory,
@@ -24,6 +30,8 @@ import type {
   ObservationId,
   OutboxJobKind,
   OutboxJobRecord,
+  PurgeExpiredEventsOptions,
+  PurgeExpiredEventsResult,
   RecallId,
   RecallScope,
   RequeueEmbedJobsOptions,
@@ -148,7 +156,16 @@ export class InMemoryMemoryStore implements MemoryStore {
    * ADR 0054: 冪等キーの判定と挿入を1つの同期区間に閉じ、`created` をその判定そのものから
    * 出す（`createObservationIdempotent` と同じ理由）。
    */
-  private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
+  private createMemoryIdempotent(
+    ctx: Ctx,
+    input: NewMemory,
+    method: "createMemory" | "createMemoryWithOutbox" = "createMemory",
+  ): IdempotentCreateResult<Memory> {
+    // ADR 0140: createMemory/createMemoryWithOutbox 共通の入口。PostgresMemoryStore の
+    // createMemory と同じ位置（何も書く前）で落とす——冪等衝突の判定より前に見る。
+    if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+      throw new ContestedWithoutCompanionError(method, null);
+    }
     const idemKey = this.extractionKey(
       ctx.tenantId,
       input.sourceObservationId ?? null,
@@ -188,6 +205,15 @@ export class InMemoryMemoryStore implements MemoryStore {
           `InMemoryMemoryStore: strength out of range (0, ${MAX_STRENGTH}]: ${input.strength}`,
         );
       }
+      // 値域（ADR 0125）: `packages/postgres` は `memories_half_life_range` の CHECK 制約で
+      // これを強制する。`decay`/`freshness` は `elapsedHours / halfLifeHours` として
+      // この値で割るため、`0`・負・`NaN`・`Infinity` は決して通してはならない
+      // （Issue #231。`isHalfLifeHoursInRange` の doc に実測を記録した）。
+      if (!isHalfLifeHoursInRange(input.halfLifeHours)) {
+        throw new Error(
+          `InMemoryMemoryStore: halfLifeHours out of range (0, ∞): ${input.halfLifeHours}`,
+        );
+      }
 
       const now = new Date();
       const memory: Memory = {
@@ -212,6 +238,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: input.decayFloorAt,
         embeddingStatus: input.embeddingStatus,
+        purgedAt: input.purgedAt ?? null,
         createdAt: now,
         updatedAt: now,
       };
@@ -232,7 +259,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
-    const { value: memory, created } = this.createMemoryIdempotent(ctx, input);
+    const { value: memory, created } = this.createMemoryIdempotent(
+      ctx,
+      input,
+      "createMemoryWithOutbox",
+    );
     if (!created) {
       return { memory, created: false, jobs: [] };
     }
@@ -309,6 +340,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
+    // 書き込みは常に単独になる。PostgresMemoryStore と同じ位置（対象の存在確認より前）で
+    // 落とす。
+    if (status === "contested") {
+      throw new ContestedWithoutCompanionError("updateStatus", id);
+    }
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -343,6 +380,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    // ADR 0140: updateStatus と同じ理由・同じ位置。
+    if (status === "contested") {
+      throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
+    }
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -428,6 +469,12 @@ export class InMemoryMemoryStore implements MemoryStore {
         throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${target.id}`);
       }
     }
+    // 1c. ADR 0140: news の各要素にも createMemory と同じ制約を課す。
+    for (const { input } of news) {
+      if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+        throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
+      }
+    }
 
     // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
@@ -471,6 +518,64 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
 
     return { created, superseded, conflicted };
+  }
+
+  /**
+   * Issue #210 / ADR 0115: `events` 配列（`InMemoryEventStore` と共有、ADR 0031）から
+   * 期限切れの行を消す。`EventStore`（`InMemoryEventStore`）のメソッドは一切呼ばない
+   * ——append-only の型に触れず、`events` 配列を直接操作する
+   * （`PostgresMemoryStore.purgeExpiredEvents` が `PostgresEventStore` を経由せず
+   * `memory_events` へ直接 SQL を発行するのと同じ形）。
+   *
+   * `kind = 'events_purged'` の行は対象から除外する（無限後退を避ける、interface doc
+   * 参照）。`at` 昇順に並べ替えてから `opts.limit` 件（+1件、`reachedLimit` 判定用）を
+   * 見る。`dryRun` のときは `this.events` を一切変更しない。
+   */
+  async purgeExpiredEvents(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsOptions,
+  ): Promise<PurgeExpiredEventsResult> {
+    const dryRun = opts.dryRun ?? false;
+    const candidates = this.events
+      .filter(
+        (event) =>
+          event.tenantId === ctx.tenantId &&
+          event.kind !== "events_purged" &&
+          event.at.getTime() < opts.olderThan.getTime(),
+      )
+      .sort((a, b) => a.at.getTime() - b.at.getTime());
+
+    const reachedLimit = candidates.length > opts.limit;
+    const victims = candidates.slice(0, opts.limit);
+    const purged = victims.length;
+    const oldestPurgedAt = purged > 0 ? victims[0]!.at : null;
+    const newestPurgedAt = purged > 0 ? victims[purged - 1]!.at : null;
+
+    if (dryRun || purged === 0) {
+      return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+    }
+
+    // 削除。`victims` は `this.events` から探し出した同じ参照なので id で除く。
+    const victimIds = new Set(victims.map((event) => event.id));
+    for (let i = this.events.length - 1; i >= 0; i--) {
+      if (victimIds.has(this.events[i]!.id)) {
+        this.events.splice(i, 1);
+      }
+    }
+
+    // 削除と同一の同期区間で `events_purged` を積む（`await` を挟まないため、
+    // 他の呼び出しがこの間に割り込む余地が無い——本物のトランザクションではないが、
+    // in-memory 実装として原子性を模す唯一の手段。クラス冒頭の doc コメント参照）。
+    const storedEvent = buildStoredMemoryEvent(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: null,
+      kind: "events_purged",
+      actor: { type: "system" },
+      meta: { purgedCount: purged, oldestPurgedAt, newestPurgedAt, olderThan: opts.olderThan },
+    });
+    this.events.push(storedEvent);
+
+    return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
   }
 
   /**
@@ -738,6 +843,126 @@ export class InMemoryMemoryStore implements MemoryStore {
       memoryIds.push(memory.id);
     }
     return { requeued: memoryIds.length, memoryIds };
+  }
+
+  /**
+   * ADR 0114: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` かつ
+   * `decayFloorAt <= opts.now`（境界を含む）の Memory を `decayFloorAt` 昇順で
+   * `opts.limit` 件まで選び、`status='archived'` への更新と `kind='archived'` の
+   * イベント追記を1つの同期区間（`await` を挟まない）で行う——
+   * `requeueEmbedJobs` / `supersedeWithNewMemories` と同じ作法で、
+   * postgres 実装の単一トランザクションを模す。
+   *
+   * `digestSnapshot` には更新前の `digest` を入れる（`updateStatusWithEvent` を経由する
+   * `forget` と同じ規約、docs/memory-model.md §9）。
+   */
+  async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    const nowMs = opts.now.getTime();
+    const targets = [...this.memories.values()]
+      .filter(
+        (m) =>
+          m.tenantId === ctx.tenantId && m.status === "active" && m.decayFloorAt.getTime() <= nowMs,
+      )
+      .sort(
+        (a, b) =>
+          a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
+          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+      )
+      .slice(0, Math.max(0, opts.limit));
+
+    const archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }> = [];
+    for (const memory of targets) {
+      const digestSnapshot = memory.digest;
+      memory.status = "archived";
+      memory.updatedAt = new Date();
+      const storedEvent = buildStoredMemoryEvent(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "archived",
+        actor: { type: "system" },
+        digestSnapshot,
+        sizeBeforeBytes: null,
+        meta: {},
+      });
+      this.events.push(storedEvent);
+      archived.push({ memoryId: memory.id, decayFloorAt: memory.decayFloorAt });
+    }
+    return { archived, reachedLimit: archived.length === opts.limit };
+  }
+
+  /**
+   * Issue #198 / ADR 0124: `forgotten` かつ未 purge（`purgedAt === null`）の Memory だけを
+   * 対象にした CAS——`content`/`digest` をトゥームストーンで上書きし `purgedAt` を設定した上で
+   * `kind: 'purged'` のイベントを積む。`status` は動かさない（`purged` は `status` の値では
+   * ない）。条件を満たさなければ {@link MemoryPurgeConflictError} を投げる（`updateStatus`/
+   * `updateStatusWithEvent` と同じ「まだ何も書いていないうちに判定する」作法）。
+   */
+  async purgeMemory(
+    ctx: Ctx,
+    id: MemoryId,
+    tombstone: { content: string; digest: string },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const memory = await this.get(ctx, id);
+    if (!memory) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
+    }
+    if (memory.status !== "forgotten" || (memory.purgedAt ?? null) !== null) {
+      throw new MemoryPurgeConflictError(id, memory.status, memory.purgedAt ?? null);
+    }
+    memory.content = tombstone.content;
+    memory.digest = tombstone.digest;
+    memory.purgedAt = new Date();
+    memory.updatedAt = new Date();
+    const storedEvent = buildStoredMemoryEvent(ctx, event);
+    this.events.push(storedEvent);
+    return { memory, event: storedEvent };
+  }
+
+  /**
+   * Issue #197 / ADR 0134: 両側とも `status === 'active'` の CAS を課したうえで、
+   * `status='contested'`・`contestedWithId` を相互に設定する。**in-memory にトランザクションは
+   * 無い**——「まだ何も書いていない」ことでロールバックを模す
+   * （`supersedeWithNewMemories`/`updateStatusWithEvent` と同じ「まだ何も書いていないうちに
+   * 判定する」作法）。存在確認・CAS 判定の両方を先に済ませ、どちらか一方でも失敗したら
+   * この時点で throw する——`first`/`second` のどちらの Map エントリもまだ書き換えていない。
+   */
+  async markContestedPair(
+    ctx: Ctx,
+    first: { id: MemoryId; event: NewMemoryEvent },
+    second: { id: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    if (first.id === second.id) {
+      throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
+    }
+
+    const firstMemory = await this.get(ctx, first.id);
+    if (!firstMemory) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${first.id}`);
+    }
+    const secondMemory = await this.get(ctx, second.id);
+    if (!secondMemory) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${second.id}`);
+    }
+    if (firstMemory.status !== "active") {
+      throw new MemoryStatusConflictError(first.id, "active", firstMemory.status);
+    }
+    if (secondMemory.status !== "active") {
+      throw new MemoryStatusConflictError(second.id, "active", secondMemory.status);
+    }
+
+    firstMemory.status = "contested";
+    firstMemory.contestedWithId = second.id;
+    firstMemory.updatedAt = new Date();
+    secondMemory.status = "contested";
+    secondMemory.contestedWithId = first.id;
+    secondMemory.updatedAt = new Date();
+
+    const firstEvent = buildStoredMemoryEvent(ctx, first.event);
+    const secondEvent = buildStoredMemoryEvent(ctx, second.event);
+    this.events.push(firstEvent, secondEvent);
+
+    return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
   }
 
   private extractionKey(

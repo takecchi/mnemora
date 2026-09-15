@@ -69,6 +69,18 @@ describeMemoryStoreConformance({
   },
   // Issue #134 / ADR 0100: PostgresMemoryStore は supersedeWithNewMemories を実装している。
   supportsSupersedeWithNewMemories: true,
+  // Issue #210 / ADR 0115: PostgresMemoryStore は purgeExpiredEvents を実装している。
+  supportsPurgeExpiredEvents: true,
+  listPurgedEvents: async (ctx: Ctx) => {
+    const { db } = await getTestClient();
+    return new PostgresEventStore(db).list(ctx, { kind: "events_purged" });
+  },
+  // ADR 0114: PostgresMemoryStore は archiveDecayed を実装している。
+  supportsArchiveDecayed: true,
+  // Issue #198 / ADR 0124: PostgresMemoryStore は purgeMemory を実装している。
+  supportsPurgeMemory: true,
+  // Issue #197 / ADR 0134: PostgresMemoryStore は markContestedPair を実装している。
+  supportsMarkContestedPair: true,
 });
 
 describeEventStoreConformance({

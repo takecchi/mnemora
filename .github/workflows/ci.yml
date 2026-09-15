@@ -42,6 +42,25 @@ jobs:
       - name: "配布物（packages/*/dist）が CommonJS として構文解析できること（Issue #110）"
         run: pnpm run check:cjs-parse
 
+      - name: "publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）"
+        # 六つの門（docs/autonomy.md §2）のうち pack:check だけが、これまで
+        # publish.yml（release / workflow_dispatch 経由）でしか走っていなかった
+        # ——毎 PR の CI（このジョブ）には一度も現れていなかった。
+        #
+        # このジョブに足す（独立ジョブにしない）理由: pack:check は各 publish
+        # 対象パッケージの `prepack`（`tsc -p tsconfig.build.json`）を経由して
+        # 自分で dist を作り直す（scripts/check-publish-pack.mjs 冒頭のコメント）ため、
+        # 直前の Build ステップの成果物に依存しない。だから独立ジョブにしても
+        # チェックアウト・install・build を丸ごとやり直すだけで意味が薄く、
+        # このジョブの末尾に1ステップ足すほうが CI 時間の増分が小さい。
+        # また、このジョブ名（`typecheck / lint / test / build`）は branch
+        # protection の required_status_checks に登録された文字列そのものである
+        # （`gh api repos/takecchi/mnemora/branches/main/protection` で確認済み）
+        # ため、ジョブ名を変えたり分割したりすると別途 branch protection の更新が
+        # 要る——それはこの PR の範囲外（オーナー権限の設定変更）とし、既存の
+        # ジョブへステップを足す形に留めた。
+        run: pnpm run pack:check
+
   postgres:
     name: packages/postgres (本物の Postgres + pgvector, server_encoding=${{ matrix.serverEncoding }})
     runs-on: ubuntu-latest
@@ -315,8 +334,13 @@ jobs:
         run: pnpm --filter @mnemora/example-chat run test:db
 
       - name: 北極星の物差し（会話ログを全部積むのをやめても答えが残るか）を compare で実測しログに残す
-        # このジョブで唯一 OPENAI_API_KEY を設定していないため、擬似 provider で走る
-        # （オーナーが CI に OPENAI_API_KEY が無いことを確認済み）。`compare` は
+        # 🔴 このステップは `OPENAI_API_KEY` を設定していないが、**擬似(deterministic)
+        # provider では走らない**——`examples/chat/cassettes/compare.json`
+        # （ADR 0052 の `record:compare`）が存在するため、`resolveCassetteForRun`
+        # （`cli.ts`）経由の `decideProviderSource` が「no-key」理由で `recorded`
+        # （記録した実 API 応答の再生）を選ぶ。このコメントは以前「擬似 provider で
+        # 走る」と書いていたが、それは誤りだった——実測（ADR 0133）で判明し、この
+        # コメントは実際の挙動に合わせて訂正した。`compare` は
         # 「量を削れたか」（naive/mnemora の文字数比）だけでなく、本 PR で追加した
         # 「冒頭の事実が削った後にも残っているか」「スコープ内の何件が実際に ANN の
         # 候補になれたか（= 何件と競って絞ったか）」を表にして出力する
@@ -325,7 +349,41 @@ jobs:
         # これまでこの数値は手元で測ったきり CI では実測していなかった
         # （ADR 0021 参照）——このステップはそれを埋め、以後の変更で
         # 「削れたが答えが落ちた」への回帰をログから読めるようにする。
+        #
+        # 🔴 Issue #242 / ADR 0133: `MNEMORA_COMPARE_JSON` で機械可読な出力口を足した
+        # （`retrieval`/`time-term` と同じ規約、`examples/chat/src/compare-json.ts`）。
+        # 基準値ファイル `examples/chat/compare-baseline.json` は、この機構を配線した
+        # 最初の CI run（同一 commit を2回実行し、`measuredAt` を除いて完全一致した
+        # ことを確認した run）の artifact をそのままコミットしたものである
+        # （詳細は基準値ファイルの `provenance` / ADR 0133「測ったこと」参照）。
+        env:
+          MNEMORA_COMPARE_JSON: ${{ github.workspace }}/compare.json
         run: pnpm --filter @mnemora/example-chat run compare
+
+      - name: 北極星の物差しが基準値から悪化していないかを判定する（⭐ 門。ADR 0133）
+        # 🔴 このステップは他5本の summary 段と違い、**門である**。
+        # `scripts/compare-summary.mjs` は、同一 commit の CI 2回実行が
+        # `measuredAt` を除いて完全一致した（ADR 0133「測ったこと」）ことを踏まえ、
+        # `mnemoraShareOfNaiveChars` の悪化・`factStatementSurvived` の
+        # true→false 退行を検知すると非0で終わる（`compare-summary-lib.mjs` の
+        # `computeRegressions`）。それ以外の入力異常（JSON が読めない/parse
+        # できない/形が想定と違う）でも非0になる。このステップは常に走る
+        # （`if: always()`）——`compare` 自体が壊れて JSON を書けなかった場合も、
+        # その理由を Job Summary に残す。
+        if: always()
+        run: |
+          node scripts/compare-summary.mjs \
+            --measured "${{ github.workspace }}/compare.json" \
+            --baseline examples/chat/compare-baseline.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: compare の実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: compare
+          path: ${{ github.workspace }}/compare.json
+          if-no-files-found: ignore
 
   root-gate-db-stage:
     name: ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）
@@ -572,8 +630,9 @@ jobs:
     #
     # ⚠ **なぜ閾値の門にしないか**: ADR 0088 が `retrieval-quality` について
     # 「標本7件では偽陽性を出す」として明示的に採らなかったのと同じ理由——この bench の
-    # probe は12件(識別子)・7件(日本語)であり、ADR 0033 §3 の規律に照らして統計的な
-    # 閾値判定に足る母数ではない。probe を増やした後、別途測ってから決める段取りである。
+    # probe は30件(識別子)・12件(日本語)であり(ADR 0094 追記 / PR #191 / PR #192)、
+    # ADR 0033 §3 の規律に照らして統計的な閾値判定に足る母数ではない。probe を増やした後、
+    # 別途測ってから決める段取りである。
     #
     # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
     # ——`identifier-probes` サブコマンドは `warmup()` が失敗したらメトリクスを1件も
@@ -800,4 +859,229 @@ jobs:
         with:
           name: consolidation-cost
           path: ${{ github.workspace }}/consolidation-cost.json
+          if-no-files-found: ignore
+
+  archive-sweep-cost:
+    name: "掃引(Runtime.sweepArchive)が「載る量」/hit@k に効くかを実測し、値を残す（Issue #209）"
+    runs-on: ubuntu-latest
+    # Issue #209。`consolidation-cost` ジョブと同じ体裁を踏襲する——`retrieval-quality`/
+    # `identifier-probes`/`consolidation-cost` が確立した「実測値を Job Summary へ残す・
+    # 落とすのは bench 自体が壊れたときだけ」という形（ADR 0088）。
+    #
+    # ⚠ **なぜ閾値の門にしないか**: ADR 0088 §2 が retrieval 系を門にしない理由
+    # （decay/freshness が実行毎に揺れる、標本 probe 7件では失敗率も成功率も主張できない
+    # ——ADR 0033 §3）は、この bench にもそのまま当たる。この bench はさらに
+    # `decay_floor_at`（掃引の判定基準そのもの）を扱うため、時刻依存の揺れに対して
+    # `consolidation-cost` より慎重であるべき理由はあっても、緩めてよい理由は無い。
+    #
+    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
+    # ——`archive-sweep-cost` サブコマンドも `warmup()` が失敗したらメトリクスを1件も
+    # 出さずに `process.exitCode = 1` で終わる（`local-embedding-warmup.ts` を共有）。
+    # measure ステップが失敗しても、後続の summary/artifact ステップは `if: always()` で
+    # 必ず走る。
+    #
+    # ⛔ **これは想起の質の門でも、掃引の正しさの門でもない。**この bench が測るのは
+    # 「載る量」（`store`/`recall.*.usage` の実測）と「掃引の前後で omitted/hit@k が
+    # どう動くか」であって、`deterministic` LLM が作る抽出結果の意味的な良し悪しではない
+    # （AGENTS.md「`deterministic` で測った想起の質は、性能について何も言っていない」）。
+    #
+    # 🔴 **基準値ファイル `examples/chat/archive-sweep-baseline.json`（ADR 0121）は、
+    # ADR 0119 決定6が予告したとおり、初回 CI（main の run 34911117399、headSha
+    # fd6ee53296f63c053fedf3706d2ba831b6d8e655）が出した artifact をそのまま基準値に
+    # コミットしたものである。この作業環境に DB が無いため、基準値の作業者自身は
+    # この bench を一度も自分の手で実行していない——値は CI が実測したものである
+    # （基準値ファイルの `provenance` 参照）。
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
+          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
+          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
+          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
+          #    からである(この PR で測る側には足したが、その実測値が出るのは
+          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
+          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
+      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)。
+      # 掃引は LLM を呼ばないが、この bench の ingest 段（`observe()`）は抽出のために
+      # LLM を呼ぶ——`consolidation-cost` と同じ理由で `deterministic` に固定するため
+      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
+        run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
+        # `identifier-probes`/`consolidation-cost` ジョブと同じキー空間を使う——同じモデル
+        # （`sirasagi62/ruri-v3-30m-ONNX`、既定 dtype）を使うため、キャッシュを分ける理由が無い。
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-ruri-v3-30m-q8-v1
+
+      - name: 掃引(Runtime.sweepArchive)が「載る量」に効くかを実測する
+        # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
+        # このジョブが赤くなること自体が仕様である（メトリクスを出さずに落ちる）。
+        env:
+          MNEMORA_ARCHIVE_SWEEP_JSON: ${{ github.workspace }}/archive-sweep-cost.json
+          MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+        run: pnpm --filter @mnemora/example-chat run archive-sweep-cost
+
+      - name: 実測値と基準値の差分を Job Summary に残す（⛔ 門ではない）
+        # このステップは常に走る（`if: always()`）——measure ステップが重み取得失敗で
+        # 落ちても、その理由を Job Summary へ出すのはこのステップの役目である。
+        # `archive-sweep-cost-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
+        # 非0で終わる。
+        if: always()
+        run: |
+          node scripts/archive-sweep-cost-summary.mjs \
+            --measured "${{ github.workspace }}/archive-sweep-cost.json" \
+            --baseline examples/chat/archive-sweep-baseline.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: archive-sweep-cost
+          path: ${{ github.workspace }}/archive-sweep-cost.json
+          if-no-files-found: ignore
+
+  time-term:
+    name: "時間項(freshness/decay)が順位を動かすかを実測し、値を残す（ADR 0058 / Issue #217）"
+    runs-on: ubuntu-latest
+    # Issue #217。`retrieval-quality`/`identifier-probes`/`consolidation-cost` と同じ体裁
+    # ——「実測値を Job Summary へ残す・落とすのは bench 自体が壊れたときだけ」という形
+    # （ADR 0088）。
+    #
+    # ⚠ **なぜ閾値の門にしないか**: 標本は probe 8件であり、ADR 0033 §3 の規律
+    # （標本7件からは失敗率も成功率も統計的に主張しない）にそのまま照らせば、
+    # 閾値判定に足る母数ではない（`identifier-probes`/`retrieval-quality` と同じ判断。
+    # ADR 0058・Issue #217 本文も同じ理由を書いている）。
+    #
+    # ⚠ **`@mnemora/local-embedding` は使わない。**この bench は `deterministic`
+    # embedding に固定される（ペアの本文が厳密に同一なので `similarity` は構成上
+    # 定数になり、provider 層に依らない測定になる。ADR 0058 / `time-term-arm.ts`
+    # docstring 参照）——⟹ HuggingFace への外向き通信も、モデル重みのキャッシュも
+    # 「重みを取得できなかった」という失敗モードも、このジョブには無い
+    # （`identifier-probes`/`consolidation-cost` との違い）。
+    #
+    # 🔴 **基準値ファイル `examples/chat/time-term-baseline.json`（ADR 0121）は、
+    # ADR 0120 §5 が予告したとおり、初回 CI（main の run 34911117399、headSha
+    # fd6ee53296f63c053fedf3706d2ba831b6d8e655）が出した artifact をそのまま基準値に
+    # コミットしたものである。この作業環境に DB が無いため、基準値の作業者自身は
+    # この bench を一度も自分の手で実行していない——値は CI が実測したものである
+    # （基準値ファイルの `provenance` 参照）。
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          # 🔴 Issue #148 ②: この CI が**どの regime で測っているか**を宣言する。
+          # 値は推測ではない——PR #149 が入れた可視化が main の run 34635954755 で
+          # 実測した server_encoding そのもの(artifact `lexical-regime`)である。
+          # ⛔ ロケール(LANG / LC_COLLATE / LC_CTYPE)は宣言しない。**まだ測っていない**
+          #    からである(この PR で測る側には足したが、その実測値が出るのは
+          #    この PR の CI が初めてである)。測る前に宣言するのは、Issue #148 が
+          #    「⛔ 順序を逆にしない」と名指しで禁じた形そのものである。
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # `time-term` は `deterministic` LLM + `deterministic` embedding に固定される
+      # （`cli.ts` の `runTimeTerm()` docstring）——`MNEMORA_PROVIDER_SOURCE`/
+      # `OPENAI_API_KEY` はこのジョブに関係が無い。
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
+        run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: freshness/decay が順位を動かすかを実測する（8 probe・擬似 provider）
+        env:
+          MNEMORA_TIME_TERM_JSON: ${{ github.workspace }}/time-term.json
+        run: pnpm --filter @mnemora/example-chat run time-term
+
+      - name: 実測値と基準値の差分を Job Summary に残す（⛔ 門ではない）
+        # このステップは常に走る（`if: always()`）。`time-term-summary.mjs` 自体は
+        # 「入力そのものが壊れている」ときだけ非0で終わる（JSON が読めない/parse
+        # できない/形が想定と違う）。
+        if: always()
+        run: |
+          node scripts/time-term-summary.mjs \
+            --measured "${{ github.workspace }}/time-term.json" \
+            --baseline examples/chat/time-term-baseline.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: time-term
+          path: ${{ github.workspace }}/time-term.json
           if-no-files-found: ignore

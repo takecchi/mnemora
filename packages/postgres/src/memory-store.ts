@@ -1,9 +1,17 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import { defaultDecayStrategy } from "@mnemora/core";
-import { EMBEDDING_STATUS_ROLLBACK, MemoryStatusConflictError } from "@mnemora/core";
+import {
+  ContestedWithoutCompanionError,
+  EMBEDDING_STATUS_ROLLBACK,
+  isContestedWithoutCompanion,
+  MemoryPurgeConflictError,
+  MemoryStatusConflictError,
+} from "@mnemora/core";
 import type {
   AggregateScopeOptions,
+  ArchiveDecayedOptions,
+  ArchiveDecayedResult,
   Ctx,
   EmbeddingStatus,
   Memory,
@@ -19,6 +27,8 @@ import type {
   ObservationId,
   OutboxJobKind,
   OutboxJobRecord,
+  PurgeExpiredEventsOptions,
+  PurgeExpiredEventsResult,
   RecallId,
   RecallScope,
   RequeueEmbedJobsOptions,
@@ -28,6 +38,7 @@ import type {
 import type { Db } from "./client.js";
 import {
   isUuidLike,
+  parsePgTimestamp,
   rowToMemory,
   rowToMemoryEvent,
   rowToObservation,
@@ -163,6 +174,10 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
+    // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
+    if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+      throw new ContestedWithoutCompanionError("createMemory", null);
+    }
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -222,6 +237,10 @@ export class PostgresMemoryStore implements MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
+    // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
+    if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+      throw new ContestedWithoutCompanionError("createMemoryWithOutbox", null);
+    }
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -366,6 +385,11 @@ export class PostgresMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
+    // 書き込みは常に単独になる。UPDATE を投げる前に落とす。
+    if (status === "contested") {
+      throw new ContestedWithoutCompanionError("updateStatus", id);
+    }
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる——ドライバの
     // invalid input syntax for type uuid を呼び出し側に漏らさない
@@ -423,6 +447,11 @@ export class PostgresMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    // ADR 0140: updateStatus と同じ理由（contestedWithId を渡す引数が無い）。
+    // トランザクションを開く前に落とす。
+    if (status === "contested") {
+      throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
+    }
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力は
     // トランザクションを開く前に同じ「memory not found」の Error へ寄せる——
     // トランザクション内で投げても結果（イベントが積まれない）は同じだが、そもそも
@@ -527,6 +556,13 @@ export class PostgresMemoryStore implements MemoryStore {
         throw new RangeError(
           `PostgresMemoryStore: supersededByIndex out of range: ${target.supersededByIndex} (news.length=${news.length})`,
         );
+      }
+    }
+    // ADR 0140: createMemory と同じ制約を `news` の各要素にも課す。1件でも違反があれば
+    // トランザクションを開く前に落とす（`news`/`supersede` どちらの書き込みも起きない）。
+    for (const { input } of news) {
+      if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
+        throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
       }
     }
 
@@ -661,6 +697,86 @@ export class PostgresMemoryStore implements MemoryStore {
       }
 
       return { created, superseded, conflicted };
+    });
+  }
+
+  /**
+   * Issue #210 / ADR 0115: `memory_events` から期限切れ行を消す保守ジョブ本体。
+   *
+   * 🔴 **`PostgresEventStore` を一切呼ばない。**`memory_events` へ直接 SQL を発行する
+   * ——`updateStatusWithEvent`/`supersedeWithNewMemories` が append を `PostgresEventStore`
+   * 経由にせず直接 INSERT しているのと同じ形（`EventStore` interface はこの経路を
+   * 経由しない、という `docs/memory-model.md` §9・§11 の要求を型だけでなく実装でも守る）。
+   *
+   * 対象の選定は {@link buildPurgeExpiredEventsTargetSelect} に切り出してある——
+   * `packages/postgres/src/__tests__/memory-events-retention-index.test.ts` の `EXPLAIN`
+   * がこの関数の返り値をそのまま測る（`buildRequeueEmbedTargetSelect` と同じ理由）。
+   *
+   * `dryRun` のときは対象を数えるだけで `db.transaction` を開かない——削除も INSERT も
+   * 実行しないので、トランザクションで包む対象が無い。
+   */
+  async purgeExpiredEvents(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsOptions,
+  ): Promise<PurgeExpiredEventsResult> {
+    const dryRun = opts.dryRun ?? false;
+    const target = buildPurgeExpiredEventsTargetSelect(ctx, opts);
+
+    if (dryRun) {
+      const candidates = await this.db.execute(target);
+      const rows = candidates.rows as unknown as { at: string }[];
+      const reachedLimit = rows.length > opts.limit;
+      const victims = rows.slice(0, opts.limit);
+      return {
+        purged: victims.length,
+        reachedLimit,
+        oldestPurgedAt: victims.length > 0 ? parsePgTimestamp(victims[0]!.at) : null,
+        newestPurgedAt:
+          victims.length > 0 ? parsePgTimestamp(victims[victims.length - 1]!.at) : null,
+        dryRun,
+      };
+    }
+
+    return this.db.transaction(async (tx) => {
+      const candidates = await tx.execute(target);
+      const rows = candidates.rows as unknown as { id: string; at: string }[];
+      const reachedLimit = rows.length > opts.limit;
+      const victims = rows.slice(0, opts.limit);
+
+      if (victims.length === 0) {
+        return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+      }
+
+      const victimIds = victims.map((row) => row.id);
+      await tx.execute(sql`
+        DELETE FROM memory_events
+        WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(victimIds)}::uuid[])
+      `);
+
+      const oldestPurgedAt = parsePgTimestamp(victims[0]!.at);
+      const newestPurgedAt = parsePgTimestamp(victims[victims.length - 1]!.at);
+
+      await tx.execute(sql`
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        VALUES (
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          NULL,
+          'events_purged',
+          now(),
+          ${JSON.stringify({ type: "system" })}::jsonb,
+          NULL,
+          NULL,
+          ${JSON.stringify({
+            purgedCount: victims.length,
+            oldestPurgedAt,
+            newestPurgedAt,
+            olderThan: opts.olderThan,
+          })}::jsonb
+        )
+      `);
+
+      return { purged: victims.length, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
     });
   }
 
@@ -1036,6 +1152,268 @@ export class PostgresMemoryStore implements MemoryStore {
     const memoryIds = result.rows.map((row) => (row as unknown as { memory_id: string }).memory_id);
     return { requeued: memoryIds.length, memoryIds };
   }
+
+  /**
+   * ADR 0114: `docs/memory-model.md` §11 行8 の掃引。doc コメントの契約そのものは
+   * `MemoryStore.archiveDecayed`（`@mnemora/core`）側にある——ここはクエリの実装のみ。
+   *
+   * 🔴 `memories` の UPDATE と `memory_events` への INSERT は、`requeueEmbedJobs`
+   * （ADR 0079、直上のメソッド）と同じ理由で**単一の `WITH ... UPDATE ... INSERT ...
+   * SELECT` 文**にまとめてある——1文なら、明示的な `BEGIN`/`COMMIT` を書かなくても
+   * 両方が同じトランザクションに入る（`片方だけ起きる」を構造的に作れない）。
+   *
+   * `digest_snapshot` には archived にする直前の `digest` を入れる
+   * （`docs/memory-model.md` §9「記録時点の digest」）——`updateStatusWithEvent` を
+   * 経由する `forget` が `digestSnapshot: current.digest` を渡すのと同じ規約を、
+   * 1文の SQL の中で `RETURNING`/`SELECT` を通じて再現する。
+   *
+   * 最終 `SELECT` に `ORDER BY` を付けているのは、`archived`（返り値）の並びを
+   * ターゲット選択の並び（`decay_floor_at` 昇順）と一致させるため——`UPDATE ...
+   * FROM target` の `RETURNING` はターゲットの行順を保証しないので、返り値としての
+   * 順序契約はここで別途つけ直す必要がある。
+   */
+  async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    const target = buildArchiveDecayedTargetSelect(ctx, opts);
+
+    const result = await this.db.execute(sql`
+      WITH target AS (
+        ${target}
+      ),
+      archived AS (
+        UPDATE memories m
+        SET status = 'archived', updated_at = now()
+        FROM target t
+        WHERE m.id = t.id
+        RETURNING m.id AS id, m.decay_floor_at AS decay_floor_at, m.digest AS digest
+      ),
+      inserted_events AS (
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        SELECT
+          gen_random_uuid(), ${ctx.tenantId}, a.id, 'archived', now(),
+          '{"type":"system"}'::jsonb, a.digest, NULL, '{}'::jsonb
+        FROM archived a
+        RETURNING memory_id
+      )
+      SELECT id, decay_floor_at FROM archived
+      ORDER BY decay_floor_at ASC, id ASC
+    `);
+
+    const archived = result.rows.map((row) => {
+      const r = row as unknown as { id: string; decay_floor_at: string };
+      return { memoryId: r.id as MemoryId, decayFloorAt: parsePgTimestamp(r.decay_floor_at) };
+    });
+    return { archived, reachedLimit: archived.length === opts.limit };
+  }
+
+  /**
+   * Issue #198 / ADR 0124: `forgotten` かつ未 purge（`purged_at IS NULL`）の Memory だけを
+   * 対象にした CAS。`updateStatusWithEvent`（本ファイル上部）と同じ形——条件付き `UPDATE`
+   * が0行なら、対象がそもそも存在しないのか（`isUuidLike` の事前チェックで弾く、または
+   * 読み直しで0行）、条件を満たさなかったのか（読み直して {@link MemoryPurgeConflictError}
+   * を投げる）を切り分ける。`status` は更新しない——`purged` は `memories.status` の値
+   * ではない（docs/memory-model.md §11 行10）。
+   */
+  async purgeMemory(
+    ctx: Ctx,
+    id: MemoryId,
+    tombstone: { content: string; digest: string },
+    event: NewMemoryEvent,
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    if (!isUuidLike(id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+    }
+
+    return this.db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE memories
+        SET content = ${tombstone.content},
+            digest = ${tombstone.digest},
+            purged_at = now(),
+            updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
+          AND status = 'forgotten' AND purged_at IS NULL
+        RETURNING *
+      `);
+
+      if (result.rows.length === 0) {
+        // 0行だった理由を切り分けるための読み直し（`updateStatusWithEvent` と同じ作法）。
+        const current = await tx.execute(sql`
+          SELECT status, purged_at FROM memories
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+        `);
+        if (current.rows.length === 0) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+        }
+        const row = current.rows[0] as unknown as {
+          status: MemoryStatus;
+          purged_at: string | null;
+        };
+        throw new MemoryPurgeConflictError(id, row.status, parsePgTimestamp(row.purged_at));
+      }
+
+      const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
+
+      const eventResult = await tx.execute(sql`
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        VALUES (
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          ${event.memoryId},
+          ${event.kind},
+          ${event.at ?? new Date()},
+          ${JSON.stringify(event.actor)}::jsonb,
+          ${event.digestSnapshot ?? null},
+          ${event.sizeBeforeBytes ?? null},
+          ${JSON.stringify(event.meta)}::jsonb
+        )
+        RETURNING *
+      `);
+      const storedEvent = rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
+
+      return { memory, event: storedEvent };
+    });
+  }
+
+  /**
+   * Issue #197 / ADR 0134: 両側とも `status = 'active'` の CAS を課したうえで、
+   * `status='contested'`・`contested_with_id` を相互に設定する——1トランザクションで
+   * 完結し、`updateStatusWithEvent`/`purgeMemory` と同じ「条件付き UPDATE が0行なら
+   * 読み直して切り分ける」作法を、対象2件それぞれについて行う。**どちらか一方が
+   * 失敗したら、その場で throw してロールバックする**（もう一方が先に成功していても
+   * 巻き戻る）——対向ペアは本質的に結合しており、部分成功を許さない。
+   */
+  async markContestedPair(
+    ctx: Ctx,
+    first: { id: MemoryId; event: NewMemoryEvent },
+    second: { id: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    if (first.id === second.id) {
+      throw new RangeError("PostgresMemoryStore: first.id and second.id must differ");
+    }
+    if (!isUuidLike(first.id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
+    }
+    if (!isUuidLike(second.id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${second.id}`);
+    }
+
+    return this.db.transaction(async (tx) => {
+      // 事前検証——存在確認。**両方の UPDATE を撃つ前に済ませる**（先に第1の UPDATE で
+      // `contested_with_id = second.id` を書こうとすると、`second.id` がそもそも
+      // 存在しない場合に外部キー違反という別種の失敗になり、「memory not found」に
+      // 揃わない。`supersedeWithNewMemories` が `supersededByIndex` の範囲検査を
+      // 書き込み前に済ませるのと同じ理由）。
+      const existing = await tx.execute(sql`
+        SELECT id, status FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND id = ANY(${sql.param([first.id, second.id])}::uuid[])
+      `);
+      const statusById = new Map(
+        existing.rows.map((row) => {
+          const r = row as unknown as { id: string; status: MemoryStatus };
+          return [r.id, r.status] as const;
+        }),
+      );
+      if (!statusById.has(first.id)) {
+        throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
+      }
+      if (!statusById.has(second.id)) {
+        throw new Error(`PostgresMemoryStore: memory not found for tenant: ${second.id}`);
+      }
+      if (statusById.get(first.id) !== "active") {
+        throw new MemoryStatusConflictError(first.id, "active", statusById.get(first.id)!);
+      }
+      if (statusById.get(second.id) !== "active") {
+        throw new MemoryStatusConflictError(second.id, "active", statusById.get(second.id)!);
+      }
+
+      const updateSide = async (id: MemoryId, oppositeId: MemoryId): Promise<Memory> => {
+        const result = await tx.execute(sql`
+          UPDATE memories
+          SET status = 'contested',
+              contested_with_id = ${oppositeId},
+              updated_at = now()
+          WHERE tenant_id = ${ctx.tenantId} AND id = ${id} AND status = 'active'
+          RETURNING *
+        `);
+        if (result.rows.length === 0) {
+          // 事前検証を通った直後にここへ来るとすれば TOCTOU（事前検証と UPDATE の間に
+          // 別の書き込みが割り込んだ）——読み直して切り分ける（`updateStatusWithEvent`
+          // と同じ作法）。
+          const current = await tx.execute(sql`
+            SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${id} LIMIT 1
+          `);
+          if (current.rows.length === 0) {
+            throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
+          }
+          const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
+          throw new MemoryStatusConflictError(id, "active", observedStatus);
+        }
+        return rowToMemory(result.rows[0] as unknown as MemoryRow);
+      };
+
+      const firstMemory = await updateSide(first.id, second.id);
+      const secondMemory = await updateSide(second.id, first.id);
+
+      const insertEvent = async (event: NewMemoryEvent) => {
+        const eventResult = await tx.execute(sql`
+          INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+          VALUES (
+            gen_random_uuid(),
+            ${ctx.tenantId},
+            ${event.memoryId},
+            ${event.kind},
+            ${event.at ?? new Date()},
+            ${JSON.stringify(event.actor)}::jsonb,
+            ${event.digestSnapshot ?? null},
+            ${event.sizeBeforeBytes ?? null},
+            ${JSON.stringify(event.meta)}::jsonb
+          )
+          RETURNING *
+        `);
+        return rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
+      };
+
+      const firstEvent = await insertEvent(first.event);
+      const secondEvent = await insertEvent(second.event);
+
+      return {
+        first: firstMemory,
+        second: secondMemory,
+        events: [firstEvent, secondEvent] as [MemoryEvent, MemoryEvent],
+      };
+    });
+  }
+}
+
+/**
+ * ADR 0114: `archiveDecayed` が「どの行を archived にするか」を選ぶ `SELECT`。
+ *
+ * **本体と `EXPLAIN` の歯（`packages/postgres/src/__tests__/archive-decayed-index.test.ts`）
+ * が、同じものを使うために切り出してある**——`buildRequeueEmbedTargetSelect`
+ * （ADR 0079、直上）と同じ理由。テスト側に述語を書き写すと、本体の述語を直したときに
+ * 歯だけが古い述語を測り続ける。
+ *
+ * 既存索引 `idx_memories_recall_gate`（`migrations/0001_init.sql`、
+ * `(tenant_id, status, decay_floor_at)`、`WHERE status IN ('active','contested')`）を
+ * そのまま使う——**新しい索引は追加しない**。ここでの述語 `status = 'active'` は
+ * 部分索引の述語 `status IN ('active','contested')` を含意するため、プランナはこの
+ * 索引を選べる。
+ *
+ * ⚠ **`decay_floor_at <= opts.now`（境界を含む）。**
+ * `VectorFilter.decayFloorAtAfter`（`packages/core/src/interfaces/vector-store.ts`）は
+ * 狭義の `>`（境界を含まない）——この非対称は意図である
+ * （`MemoryStore.archiveDecayed` の doc コメント参照）。
+ */
+export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL {
+  return sql`
+    SELECT id FROM memories
+    WHERE tenant_id = ${ctx.tenantId}
+      AND status = 'active'
+      AND decay_floor_at <= ${opts.now}
+    ORDER BY decay_floor_at ASC, id ASC
+    LIMIT ${opts.limit}
+    FOR UPDATE SKIP LOCKED`;
 }
 
 /**
@@ -1081,4 +1459,33 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
     ORDER BY updated_at ASC, id ASC
     LIMIT ${opts.limit}
     FOR UPDATE SKIP LOCKED`;
+}
+
+/**
+ * Issue #210 / ADR 0115: `PostgresMemoryStore.purgeExpiredEvents` が「どの行を消すか」を
+ * 選ぶ `SELECT`。**本体と `EXPLAIN` の歯が、同じものを使うために切り出してある**
+ * （`buildRequeueEmbedTargetSelect` と同じ理由——テスト側に述語を書き写すと、本体の
+ * 述語を直したときにその歯だけが古い述語を測り続ける）。
+ *
+ * `LIMIT opts.limit + 1` で1件多く取る——`reachedLimit`（「1回で消しきれなかった」）を
+ * `purged === opts.limit` からの推測に頼らず、専用の信号として立てるため
+ * （`packages/core/src/interfaces/memory-store.ts` の契約節参照）。
+ *
+ * `kind <> 'events_purged'` は `memory_events` に `(tenant_id, at)` の索引
+ * （`migrations/0010_memory_events_retention_index.sql`）を張ったうえで Filter として
+ * 残す——`kind` を索引に含めない（無限後退を避けるための除外は「対象の絞り込み」で
+ * あり、行数の大半を削る述語ではないため、部分索引にする動機が薄い。実測は
+ * `memory-events-retention-index.test.ts` 参照）。
+ */
+export function buildPurgeExpiredEventsTargetSelect(
+  ctx: Ctx,
+  opts: PurgeExpiredEventsOptions,
+): SQL {
+  return sql`
+    SELECT id, at FROM memory_events
+    WHERE tenant_id = ${ctx.tenantId}
+      AND at < ${opts.olderThan}
+      AND kind <> 'events_purged'
+    ORDER BY at ASC
+    LIMIT ${opts.limit + 1}`;
 }

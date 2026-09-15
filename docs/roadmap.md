@@ -228,6 +228,16 @@ mnemora はこの前提を採用しない。mnemora は計測（`usage`）を提
 分ける」のとおり Phase 2 以降）。⚠ **`decay_floor_at` を読み取りに使っていない点も変わっていない**
 ——`forget()` は明示操作であり、§5.3 が言う「既定の忘却」（減衰による自然な弱化）とは別の話である。
 
+**2026-09-15 追記（Issue #198、[ADR 0124](./decisions/0124-purge-physical-delete.md)）**:
+上の ⚠ のうち **`purge()` の側も解消した**——`Runtime.purge(ctx, target, opts?)` を実装した。
+`forgotten` からのみ遷移できる（任意 status からの直接 purge は設計判断として採らなかった。
+ADR 0124 決定1）。`content`/`digest` を固定のトゥームストーンで上書きし `purged_at` を設定、
+`memory_events` に `kind: 'purged'` を積む——`status` そのものは動かさない（`purged` は
+`memories.status` の値ではない）。`MemoryStore.purgeMemory`（任意メソッド）の CAS 条件は
+`status = 'forgotten' AND purged_at IS NULL` の両方（`status` だけでは2回目の呼び出しを
+弾けないため）。`opts.dryRun`（下見）を持ち、`tick()`/`observe()` には配線していない。
+`decay_floor_at` を読み取りに使っていない点は本 PR の範囲外のままであり、変わっていない。
+
 ### 5.4 監査ログの既定保持期間
 
 **なぜオーナーが決めるべきか**: 適正な保持期間はコンプライアンス要件（法域・業種）によって変わり、技術だけでは決まらない。
@@ -239,6 +249,8 @@ mnemora はこの前提を採用しない。mnemora は計測（`usage`）を提
 **⚠ 実装状況（2026-09-06 時点、現物を読んで確かめた）**: `tenant_settings` には `event_retention_days`（`NULL` = 無期限）列が既に在る（`packages/postgres/src/schema.ts`）。**しかし `TenantSettingsStore` interface が公開しているのは `getDefaultHalfLifeHours` だけであり、保持期間を読み書きする経路は無い**（interface 自身が「テナント設定の完全な CRUD は本 PR の範囲外」と書いている）。**⟹ 「短縮できる口は必須」という条件は、いまの公開 interface では満たせない。**
 
 **追記（2026-09-07、[ADR 0050](./decisions/0050-tenant-event-retention.md)）**: この条件を塞いだ。`TenantSettingsStore` に `getEventRetention`/`setEventRetention` を足し、`event_retention_days` の3状態（行が無い/行は在るが `NULL`/日数）を区別して読み書きできるようにした。`PostgresTenantSettingsStore` は UPSERT で書く（マイグレーションは追加していない。列は既に在ったため）。`InMemoryTenantSettingsStore` は「行」を持つ形に作り直し、Postgres と同じく half-life だけ設定したテナントが `unlimited` を返すようにした。値の検査（正の整数のみ、延長は許す）は `packages/core` の `assertValidEventRetentionDays` に1箇所だけ持たせ、両実装が共有する。削除処理（期限切れ行を実際に消すジョブ）は`docs/memory-model.md` §9 が指定する別の独立した保守ジョブの範囲であり、本追記の対象外。**⟹ §5.4 の条件は満たされた。**
+
+**訂正（2026-09-15、Issue #210 / [ADR 0115](./decisions/0115-event-retention-purge.md)）**: 上の「§5.4 の条件は満たされた」は誤りだった。`setEventRetention` で保持期間を短く設定できても、期限切れの `memory_events` 行を実際に DELETE するコードが、この PR まで**リポジトリのどこにも存在しなかった**（`events_purged` イベントを積むコードも同様）。**「短縮できる口」が在ることと、それが実際に短縮することは別だった。** 本追記でこの穴を塞いだ——`MemoryStore.purgeExpiredEvents?`（任意メソッド。`limit` 必須・`dryRun` 対応・`kind='events_purged'` 自身は対象から除外）と、`TenantSettingsStore.getEventRetention` の3状態を読んでこれを呼ぶ `packages/core` の `purgeExpiredEventsForTenant` を足した。**`tick()`/`observe()` には配線していない**（Issue #210 設計上の注意7）——定期実行そのものは運用側のスクリプト・cron の責務のままである。⟹ §5.4 の条件は、今度こそ実際に満たされた。
 
 ### 5.5 推論（`inferred`）を既定の recall に含めるか除外するか
 

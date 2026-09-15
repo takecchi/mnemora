@@ -10,7 +10,11 @@ import type {
   OutboxJobRecord,
   RecallId,
 } from "@mnemora/core";
-import { MemoryStatusConflictError } from "@mnemora/core";
+import {
+  ContestedWithoutCompanionError,
+  MemoryPurgeConflictError,
+  MemoryStatusConflictError,
+} from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "./test-data.js";
 
 /**
@@ -118,6 +122,71 @@ export interface MemoryStoreConformanceOptions {
    * ——`it.skip` にはしない（`docs/autonomy.md` ⛔、マネージャー指示）。
    */
   supportsSupersedeWithNewMemories: boolean;
+  /**
+   * Issue #210 / ADR 0115: 対象の `MemoryStore` 実装が `purgeExpiredEvents`
+   * （任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * ADR 0031 決定9 / ADR 0100 と同じ判断——省略可にしない。`true` なら削除の歯
+   * （境界・テナント越境しない・`limit`/`reachedLimit`・`dryRun` で1行も変わらない・
+   * `events_purged` が件数と期間を持つ・`events_purged` 自身は対象から除外される）を
+   * 実行する。`false` なら `expect(store.purgeExpiredEvents).toBeUndefined()` を
+   * 積極的に assert する。
+   */
+  supportsPurgeExpiredEvents: boolean;
+  /**
+   * Issue #210 / ADR 0115: `purgeExpiredEvents` が積んだ `events_purged` イベント
+   * （`memoryId: null`）を読み出すためのフック。`supportsPurgeExpiredEvents: true` の
+   * ときだけ呼ばれる。`listEventsForMemory` と同じ理由で必須にする——`MemoryStore`
+   * interface 自体には「あるテナントの `events_purged` を読む」操作が無いため。
+   */
+  listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
+  /**
+   * ADR 0114: 対象の `MemoryStore` 実装が `archiveDecayed`（任意メソッド）を
+   * 実装しているかどうか。**必須。**
+   *
+   * `supportsSupersedeWithNewMemories` と同じ判断——**省略可にしないこと。**省略できると
+   * 「掃引の歯を実際に検査した」adapter と「検査していない」adapter が同じ緑色の
+   * 出力になる。
+   *
+   * `true` なら契約の歯（`status='active'` かつ `decayFloorAt <= now` のみを対象にする、
+   * `contested`/`superseded`/`forgotten`/既に `archived` な行は触らない、境界は `<=`
+   * で含む、`decayFloorAt` 昇順で `limit` 件まで、`limit` ちょうど返したときだけ
+   * `reachedLimit: true`、`memory_events` に `kind='archived'` が1件だけ積まれ
+   * `digestSnapshot` が更新前の digest と一致する、テナント分離、対象0件でも例外を
+   * 投げない）を実行する。`false` なら
+   * `expect(store.archiveDecayed).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。
+   */
+  supportsArchiveDecayed: boolean;
+  /**
+   * Issue #198 / ADR 0124: 対象の `MemoryStore` 実装が `purgeMemory`（任意メソッド）を
+   * 実装しているかどうか。**必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsPurgeExpiredEvents` と同じ判断——省略可にしない。
+   * `true` なら契約の歯（`forgotten` かつ未 purge のみを対象にする、`content`/`digest`
+   * がトゥームストーンで上書きされ `purgedAt` が設定される、`status` は動かない、
+   * `active`/`archived`/`superseded`/`contested`/既に purge 済みは
+   * {@link MemoryPurgeConflictError} で弾かれる、対象が無ければ「memory not found」、
+   * `memory_events` に `kind='purged'` が1件だけ積まれ `digestSnapshot` が更新前の
+   * digest と一致する、テナント分離）を実行する。`false` なら
+   * `expect(store.purgeMemory).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。
+   */
+  supportsPurgeMemory: boolean;
+  /**
+   * Issue #197 / ADR 0134: 対象の `MemoryStore` 実装が `markContestedPair`
+   * （任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsPurgeMemory` と同じ判断——省略可にしない。
+   * `true` なら契約の歯（両側 `status='active'` のみを対象にする、成功すると両側が
+   * `contested` になり `contestedWithId` が相互に設定される、片方でも `active` でなければ
+   * {@link MemoryStatusConflictError} で弾かれ両側とも無傷、対象が無ければ
+   * 「memory not found」で両側とも無傷、`first.id === second.id` は `RangeError`、
+   * `memory_events` に両側1件ずつ積まれる、テナント分離）を実行する。`false` なら
+   * `expect(store.markContestedPair).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。
+   */
+  supportsMarkContestedPair: boolean;
 }
 
 /**
@@ -147,6 +216,11 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     prepareRecallId,
     claimEmbedJobs,
     supportsSupersedeWithNewMemories,
+    supportsPurgeExpiredEvents,
+    listPurgedEvents,
+    supportsArchiveDecayed,
+    supportsPurgeMemory,
+    supportsMarkContestedPair,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -1122,6 +1196,63 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       }
     });
 
+    it("⚠ createMemory は値域の外の halfLifeHours を拒む（ADR 0125 / Issue #231）", async () => {
+      // **`halfLifeHours` は `decay`/`freshness` の式 `elapsedHours / halfLifeHours` の
+      // 分母である。`0`・負・`NaN`・`Infinity` はこの式を壊し、`decay` が `NaN` や
+      // `+Infinity` になる**（Issue #231。実測は `isHalfLifeHoursInRange` の doc に
+      // 記録した——issue 本文の「`0` で `+Infinity` になる」という記述は不正確で、
+      // 実際に `+Infinity` に発散するのは負の `halfLifeHours` のときである。
+      // ただしどちらにせよ拒むべき値であることは変わらない）。
+      //
+      // ⚠ **強制の責任は store の層に在る。**`MemorySchema` / `NewMemorySchema`（zod）の
+      // `halfLifeHours: z.number().positive()` は `.parse()` される箇所が0件なので、
+      // 型を締めても実行時には何も起きない（ADR 0078 実測3と同じ理由）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const outOfRange: Array<[string, number]> = [
+        ["ちょうど 0", 0],
+        ["負の 0", -0],
+        ["負", -1],
+        ["NaN", Number.NaN],
+        ["Infinity", Number.POSITIVE_INFINITY],
+        ["-Infinity", Number.NEGATIVE_INFINITY],
+      ];
+
+      // 🔴 `decayFloorAt` を明示的に上書きする。`buildNewMemoryFixture` は
+      // `defaultDecayStrategy.floorAt()` で `decayFloorAt` を計算するが、
+      // `halfLifeHours` が `NaN`/`Infinity` のとき `floorAt` は `Invalid Date` を返す
+      // （strength 版のテスト（ADR 0078）と同じ形の実測）。それをそのまま渡すと
+      // `packages/postgres` は `timestamptz` 列のほうで落ち、「値域の歯が無くても赤く
+      // なる」状態になる。ここでは妥当な `decayFloorAt` を与え、落ちる理由を
+      // `halfLifeHours` だけに絞る。
+      const validFloorAt = new Date("2026-06-01T00:00:00.000Z");
+
+      for (const [label, halfLifeHours] of outOfRange) {
+        await expect(
+          store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              halfLifeHours,
+              decayFloorAt: validFloorAt,
+            }),
+          ),
+          `halfLifeHours=${halfLifeHours}（${label}）は拒まれなければならない`,
+        ).rejects.toThrow();
+      }
+
+      // 前提: 値域の内側なら通る（「何を渡しても落ちる」実装を弾く）。
+      // 上限は無い（有限であれば大きい値も許す）ことを `1e6` で確かめる。
+      for (const halfLifeHours of [720, 1, 1e6]) {
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", halfLifeHours }),
+        );
+        expect(memory.halfLifeHours).toBeCloseTo(halfLifeHours, 6);
+      }
+    });
+
     it("reinforce は存在しない Memory に対して失敗する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -1757,6 +1888,1154 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     }
 
     // -------------------------------------------------------------------
+    // purgeExpiredEvents（Issue #210、ADR 0115）。🔴 任意メソッド——
+    // `supportsPurgeExpiredEvents` が false の adapter では、メソッドそのものが
+    // 存在しないことだけを検査する。
+    // -------------------------------------------------------------------
+
+    /**
+     * `updateStatusWithEvent` を、特定の `at`/`kind`/`memoryId` を持つ `memory_events` 行を
+     * 1件積むためだけの道具として使う（`buildSupersedeEvent` と同じ発想。`MemoryStore`
+     * interface には「任意の kind/at を持つイベントを1件足す」専用の口が無いため）。
+     * 対象の `targetMemoryId` の `status` も同時に書き換わるが、この適合テストでは
+     * `memory_events` の中身だけを見るので無害——複数回呼んでも `expectedStatus` を
+     * 渡さないので CAS には引っかからない。
+     */
+    async function seedEvent(
+      store: MemoryStore,
+      ctx: Ctx,
+      targetMemoryId: MemoryId,
+      opts: { at: Date; kind?: NewMemoryEvent["kind"]; memoryId?: MemoryId | null },
+    ): Promise<void> {
+      await store.updateStatusWithEvent!(
+        ctx,
+        targetMemoryId,
+        "archived",
+        {},
+        {
+          tenantId: ctx.tenantId,
+          memoryId: opts.memoryId !== undefined ? opts.memoryId : targetMemoryId,
+          kind: opts.kind ?? "updated",
+          at: opts.at,
+          actor: { type: "system" },
+          meta: { reason: "conformance-purge-fixture" },
+        },
+      );
+    }
+
+    if (supportsPurgeExpiredEvents) {
+      it("purgeExpiredEvents は olderThan より古い行だけを消す（境界 at === olderThan は対象外）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-boundary" }),
+        );
+        const cutoff = new Date("2024-06-01T00:00:00.000Z");
+        await seedEvent(store, ctx, memory.id, { at: new Date(cutoff.getTime() - 2000) }); // 古い→対象
+        await seedEvent(store, ctx, memory.id, { at: new Date(cutoff.getTime() - 1000) }); // 古い→対象
+        await seedEvent(store, ctx, memory.id, { at: cutoff }); // 境界ちょうど→対象外
+        await seedEvent(store, ctx, memory.id, { at: new Date(cutoff.getTime() + 1000) }); // 新しい→対象外
+
+        const result = await store.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 10 });
+
+        expect(result.purged).toBe(2);
+        expect(result.reachedLimit).toBe(false);
+        expect(result.dryRun).toBe(false);
+        expect(result.oldestPurgedAt).toEqual(new Date(cutoff.getTime() - 2000));
+        expect(result.newestPurgedAt).toEqual(new Date(cutoff.getTime() - 1000));
+
+        const remaining = await listEventsForMemory(ctx, memory.id);
+        expect(remaining.map((e) => e.at.getTime()).sort()).toEqual(
+          [cutoff.getTime(), cutoff.getTime() + 1000].sort(),
+        );
+      });
+
+      it("purgeExpiredEvents はテナント越境しない", async () => {
+        const store = await createStore();
+        const ctx1: Ctx = { tenantId: "tenant-purge-1" };
+        const ctx2: Ctx = { tenantId: "tenant-purge-2" };
+        const memory1 = await store.createMemory(
+          ctx1,
+          buildNewMemoryFixture({ tenantId: "tenant-purge-1", contentHash: "purge-cross-1" }),
+        );
+        const memory2 = await store.createMemory(
+          ctx2,
+          buildNewMemoryFixture({ tenantId: "tenant-purge-2", contentHash: "purge-cross-2" }),
+        );
+        const oldAt = new Date("2024-01-01T00:00:00.000Z");
+        await seedEvent(store, ctx1, memory1.id, { at: oldAt });
+        await seedEvent(store, ctx2, memory2.id, { at: oldAt });
+
+        const cutoff = new Date("2024-06-01T00:00:00.000Z");
+        const result = await store.purgeExpiredEvents!(ctx1, { olderThan: cutoff, limit: 10 });
+
+        expect(result.purged).toBe(1);
+        expect(await listEventsForMemory(ctx1, memory1.id)).toEqual([]);
+        // tenant-purge-2 の行は無事（越境して消えていない）。
+        expect(await listEventsForMemory(ctx2, memory2.id)).toHaveLength(1);
+      });
+
+      it("purgeExpiredEvents は limit を超えた対象を reachedLimit: true で知らせ、超えない呼び出しでは false になる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-limit" }),
+        );
+        const base = new Date("2024-01-01T00:00:00.000Z").getTime();
+        // 5件、すべて cutoff より古い。
+        for (let i = 0; i < 5; i++) {
+          await seedEvent(store, ctx, memory.id, { at: new Date(base + i * 1000) });
+        }
+        const cutoff = new Date(base + 10_000);
+
+        const first = await store.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 3 });
+        expect(first.purged).toBe(3);
+        expect(first.reachedLimit).toBe(true);
+        // 最も古い3件（i=0,1,2）が消え、i=3,4 が残る。
+        expect(first.oldestPurgedAt).toEqual(new Date(base));
+        expect(first.newestPurgedAt).toEqual(new Date(base + 2000));
+
+        const second = await store.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 10 });
+        expect(second.purged).toBe(2);
+        expect(second.reachedLimit).toBe(false);
+
+        expect(await listEventsForMemory(ctx, memory.id)).toEqual([]);
+      });
+
+      it("purgeExpiredEvents は dryRun のとき1行も消さず、events_purged も1行も積まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-dry-run" }),
+        );
+        const oldAt = new Date("2024-01-01T00:00:00.000Z");
+        await seedEvent(store, ctx, memory.id, { at: oldAt });
+        const cutoff = new Date("2024-06-01T00:00:00.000Z");
+
+        const purgedEventsBefore = await listPurgedEvents(ctx);
+
+        const result = await store.purgeExpiredEvents!(ctx, {
+          olderThan: cutoff,
+          limit: 10,
+          dryRun: true,
+        });
+
+        expect(result.dryRun).toBe(true);
+        expect(result.purged).toBe(1); // 「消していたら1件消えていた」というプレビュー
+        expect(result.oldestPurgedAt).toEqual(oldAt);
+        expect(result.newestPurgedAt).toEqual(oldAt);
+
+        // 1行も消えていない。
+        expect(await listEventsForMemory(ctx, memory.id)).toHaveLength(1);
+        // events_purged も1行も積まれていない。
+        expect(await listPurgedEvents(ctx)).toEqual(purgedEventsBefore);
+      });
+
+      it("purgeExpiredEvents が積む events_purged は memoryId が null で、件数と期間を meta に持つ", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-summary" }),
+        );
+        const oldest = new Date("2024-01-01T00:00:00.000Z");
+        const newest = new Date("2024-01-02T00:00:00.000Z");
+        await seedEvent(store, ctx, memory.id, { at: oldest });
+        await seedEvent(store, ctx, memory.id, { at: newest });
+        const cutoff = new Date("2024-06-01T00:00:00.000Z");
+
+        await store.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 10 });
+
+        const purgedEvents = await listPurgedEvents(ctx);
+        expect(purgedEvents).toHaveLength(1);
+        const summary = purgedEvents[0]!;
+        expect(summary.kind).toBe("events_purged");
+        expect(summary.memoryId).toBeNull();
+        expect(summary.meta.purgedCount).toBe(2);
+        expect(new Date(summary.meta.oldestPurgedAt as string).getTime()).toBe(oldest.getTime());
+        expect(new Date(summary.meta.newestPurgedAt as string).getTime()).toBe(newest.getTime());
+      });
+
+      it("purgeExpiredEvents は kind='events_purged' 自身を対象から除外する（無限後退を避ける）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-no-regress" }),
+        );
+        const veryOld = new Date("2020-01-01T00:00:00.000Z");
+        // 古い events_purged 行を直接仕込む（本来は掃除ジョブ自身が積むが、ここでは
+        // 「以前の掃除で積まれた行が、今回の cutoff の範囲内にある」状況を再現する）。
+        await seedEvent(store, ctx, memory.id, {
+          at: veryOld,
+          kind: "events_purged",
+          memoryId: null,
+        });
+        // 掃除対象になりうる普通のイベントも1件。
+        await seedEvent(store, ctx, memory.id, { at: veryOld });
+
+        const cutoff = new Date("2024-06-01T00:00:00.000Z");
+        const result = await store.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: 10 });
+
+        // 対象は普通のイベント1件だけ——events_purged は除外される。
+        expect(result.purged).toBe(1);
+
+        const purgedEvents = await listPurgedEvents(ctx);
+        // 仕込んだ古い events_purged（1件）+ 今回の掃除が積んだ新しい events_purged（1件）= 2件。
+        // 仕込んだ方が消えていたら1件のままになる。
+        expect(purgedEvents).toHaveLength(2);
+        expect(purgedEvents.some((e) => e.at.getTime() === veryOld.getTime())).toBe(true);
+      });
+    } else {
+      it("purgeExpiredEvents は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.purgeExpiredEvents).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // archiveDecayed（ADR 0114: docs/memory-model.md §11 行8 の掃引、任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsArchiveDecayed) {
+      it("archiveDecayed は status='active' かつ decayFloorAt <= now（境界を含む）の Memory だけを archived にし、archived イベントを積む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+
+        const decayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-target",
+            decayFloorAt: new Date(now.getTime() - 1_000),
+          }),
+        );
+        // 境界そのもの（decayFloorAt === now）も対象に含む——`<=`、境界を含む。
+        const boundary = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-boundary",
+            decayFloorAt: now,
+          }),
+        );
+        const notYetDecayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-not-yet",
+            decayFloorAt: new Date(now.getTime() + 1_000),
+          }),
+        );
+
+        const result = await store.archiveDecayed!(ctx, { now, limit: 10 });
+
+        const decayedAfter = await store.get(ctx, decayed.id);
+        const boundaryAfter = await store.get(ctx, boundary.id);
+        const notYetAfter = await store.get(ctx, notYetDecayed.id);
+        const decayedEvents = await listEventsForMemory(ctx, decayed.id);
+        const notYetEvents = await listEventsForMemory(ctx, notYetDecayed.id);
+
+        expect({
+          archivedIds: new Set(result.archived.map((a) => a.memoryId)),
+          reachedLimit: result.reachedLimit,
+          decayedStatus: decayedAfter?.status,
+          boundaryStatus: boundaryAfter?.status,
+          notYetStatus: notYetAfter?.status,
+          decayedEventKinds: decayedEvents.map((e) => e.kind),
+          // digestSnapshot は「更新前」の digest と一致すること（docs/memory-model.md §9）。
+          decayedEventDigestSnapshot: decayedEvents[0]?.digestSnapshot,
+          notYetEvents,
+        }).toEqual({
+          archivedIds: new Set([decayed.id, boundary.id]),
+          reachedLimit: false,
+          decayedStatus: "archived",
+          boundaryStatus: "archived",
+          notYetStatus: "active",
+          decayedEventKinds: ["archived"],
+          decayedEventDigestSnapshot: decayed.digest,
+          notYetEvents: [],
+        });
+      });
+
+      it("archiveDecayed は active 以外（contested/superseded/forgotten/既に archived）を対象にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        const past = new Date(now.getTime() - 1_000);
+        const statuses = ["contested", "superseded", "forgotten", "archived"] as const;
+        // ADR 0140: status='contested' は contestedWithId 無しでは作れない。この歯の
+        // 主題は archiveDecayed の status ゲートであって contested の一対一ではないので、
+        // 対向として使うだけの companion を先に作る。**decayFloorAt を `now` より先に
+        // 置く**——既定の fixture の decayFloorAt は `past` より古く、companion が active の
+        // ままだと archiveDecayed 自身の対象に紛れ込み、この歯が検査したい「対象が
+        // ちょうど4件（各 status に1件ずつ）」という前提を壊す。
+        const future = new Date(now.getTime() + 1_000);
+        const contestedCompanion = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-contested-companion",
+            decayFloorAt: future,
+          }),
+        );
+
+        const created = [];
+        for (const [i, status] of statuses.entries()) {
+          created.push(
+            await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: `archive-decayed-status-${i}`,
+                status,
+                contestedWithId: status === "contested" ? contestedCompanion.id : undefined,
+                decayFloorAt: past,
+              }),
+            ),
+          );
+        }
+
+        const result = await store.archiveDecayed!(ctx, { now, limit: 10 });
+
+        const afterStatuses = [];
+        for (const memory of created) {
+          afterStatuses.push((await store.get(ctx, memory.id))?.status);
+        }
+
+        expect({ archived: result.archived, afterStatuses }).toEqual({
+          archived: [],
+          afterStatuses: [...statuses],
+        });
+      });
+
+      it("archiveDecayed は decayFloorAt 昇順（最も古く遠ざかったものから）で limit 件までに絞る", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        // オフセットを作成順とわざと入れ替える——挿入順ではなく decayFloorAt の値で
+        // ソートされていることを確かめるため。
+        const offsetsSeconds = [3, 1, 2];
+        const memories = [];
+        for (const [i, offsetSeconds] of offsetsSeconds.entries()) {
+          memories.push(
+            await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: `archive-decayed-order-${i}`,
+                decayFloorAt: new Date(now.getTime() - offsetSeconds * 1_000),
+              }),
+            ),
+          );
+        }
+        // 昇順で期待される順序: 3秒前(memories[0]) → 2秒前(memories[2]) → 1秒前(memories[1])。
+
+        const result = await store.archiveDecayed!(ctx, { now, limit: 2 });
+
+        expect({
+          archivedIds: result.archived.map((a) => a.memoryId),
+          reachedLimit: result.reachedLimit,
+        }).toEqual({
+          archivedIds: [memories[0]!.id, memories[2]!.id],
+          reachedLimit: true,
+        });
+      });
+
+      it("archiveDecayed は対象がちょうど limit 件なら reachedLimit が true になる（『まだあるかもしれない』の意味であり、実際にまだあるとは限らない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        for (let i = 0; i < 2; i += 1) {
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: `archive-decayed-exact-${i}`,
+              decayFloorAt: new Date(now.getTime() - 1_000),
+            }),
+          );
+        }
+
+        const result = await store.archiveDecayed!(ctx, { now, limit: 2 });
+
+        expect({ count: result.archived.length, reachedLimit: result.reachedLimit }).toEqual({
+          count: 2,
+          reachedLimit: true,
+        });
+      });
+
+      it("archiveDecayed は対象が0件でも例外を投げない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        const result = await store.archiveDecayed!(ctx, {
+          now: new Date("2026-06-01T00:00:00.000Z"),
+          limit: 10,
+        });
+
+        expect(result).toEqual({ archived: [], reachedLimit: false });
+      });
+
+      it("archiveDecayed は他テナントの Memory を対象にしない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        const past = new Date(now.getTime() - 1_000);
+
+        const memoryA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "archive-decayed-tenant-a",
+            decayFloorAt: past,
+          }),
+        );
+        const memoryB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "archive-decayed-tenant-b",
+            decayFloorAt: past,
+          }),
+        );
+
+        const result = await store.archiveDecayed!(ctxA, { now, limit: 10 });
+
+        const afterA = await store.get(ctxA, memoryA.id);
+        const afterB = await store.get(ctxB, memoryB.id);
+
+        expect({
+          archivedIds: result.archived.map((a) => a.memoryId),
+          statusA: afterA?.status,
+          statusB: afterB?.status,
+        }).toEqual({ archivedIds: [memoryA.id], statusA: "archived", statusB: "active" });
+      });
+
+      it("archiveDecayed を同じ範囲へ二度呼んでも、一度 archived になった行は二度拾われない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-repeat",
+            decayFloorAt: new Date(now.getTime() - 1_000),
+          }),
+        );
+
+        const first = await store.archiveDecayed!(ctx, { now, limit: 10 });
+        const second = await store.archiveDecayed!(ctx, { now, limit: 10 });
+
+        expect({ firstCount: first.archived.length, second }).toEqual({
+          firstCount: 1,
+          second: { archived: [], reachedLimit: false },
+        });
+      });
+    } else {
+      it("archiveDecayed は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.archiveDecayed).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // purgeMemory（Issue #198 / ADR 0124: 物理削除、任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsPurgeMemory) {
+      it("purgeMemory は forgotten な Memory の content/digest をトゥームストーンで上書きし、purgedAt を設定し、status は動かさず、purged イベントを積む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-basic",
+            status: "forgotten",
+            content: "秘密の本文",
+            digest: "元の要旨",
+          }),
+        );
+
+        const { memory: returned, event } = await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        const after = await store.get(ctx, memory.id);
+        const events = await listEventsForMemory(ctx, memory.id);
+
+        expect({
+          returnedContent: returned.content,
+          returnedDigest: returned.digest,
+          returnedStatus: returned.status,
+          returnedPurgedAt: returned.purgedAt instanceof Date,
+          afterContent: after?.content,
+          afterDigest: after?.digest,
+          afterStatus: after?.status,
+          afterPurgedAt: after?.purgedAt instanceof Date,
+          eventKind: event.kind,
+          eventDigestSnapshot: event.digestSnapshot,
+          eventKinds: events.map((e) => e.kind),
+        }).toEqual({
+          returnedContent: "[purged]",
+          returnedDigest: "[purged]",
+          returnedStatus: "forgotten",
+          returnedPurgedAt: true,
+          afterContent: "[purged]",
+          afterDigest: "[purged]",
+          afterStatus: "forgotten",
+          afterPurgedAt: true,
+          eventKind: "purged",
+          eventDigestSnapshot: "元の要旨",
+          eventKinds: ["purged"],
+        });
+      });
+
+      it.each(["active", "archived", "superseded", "contested"] as const)(
+        "purgeMemory は status=%s な Memory を対象にしない（MemoryPurgeConflictError）",
+        async (status) => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          // ADR 0140: status='contested' は contestedWithId 無しでは作れない。この歯の
+          // 主題は purgeMemory の CAS であって contested の一対一ではないので、
+          // 対向として使うだけの companion を必要な場合にだけ用意する。
+          const companion =
+            status === "contested"
+              ? await store.createMemory(
+                  ctx,
+                  buildNewMemoryFixture({
+                    tenantId: "tenant-1",
+                    contentHash: `purge-memory-status-${status}-companion`,
+                  }),
+                )
+              : undefined;
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: `purge-memory-status-${status}`,
+              status,
+              contestedWithId: companion?.id,
+            }),
+          );
+
+          await expect(
+            store.purgeMemory!(
+              ctx,
+              memory.id,
+              { content: "[purged]", digest: "[purged]" },
+              {
+                tenantId: "tenant-1",
+                memoryId: memory.id,
+                kind: "purged",
+                actor: { type: "system" },
+                digestSnapshot: memory.digest,
+                meta: {},
+              },
+            ),
+          ).rejects.toThrow(MemoryPurgeConflictError);
+
+          const after = await store.get(ctx, memory.id);
+          expect(after?.status).toBe(status);
+          expect(after?.content).toBe(memory.content);
+        },
+      );
+
+      it("purgeMemory は既に purge 済みの Memory を対象にしない（MemoryPurgeConflictError、べき等性の要）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-already-purged",
+            status: "forgotten",
+          }),
+        );
+        const event: NewMemoryEvent = {
+          tenantId: "tenant-1",
+          memoryId: memory.id,
+          kind: "purged",
+          actor: { type: "system" },
+          digestSnapshot: memory.digest,
+          meta: {},
+        };
+        await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          event,
+        );
+
+        await expect(
+          store.purgeMemory!(ctx, memory.id, { content: "[purged]", digest: "[purged]" }, event),
+        ).rejects.toThrow(MemoryPurgeConflictError);
+
+        const events = await listEventsForMemory(ctx, memory.id);
+        expect(events.filter((e) => e.kind === "purged")).toHaveLength(1); // 2件目は積まれない
+      });
+
+      it("purgeMemory は対象が存在しなければ「memory not found」を投げる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await expect(
+          store.purgeMemory!(
+            ctx,
+            NONEXISTENT_MEMORY_ID,
+            { content: "[purged]", digest: "[purged]" },
+            {
+              tenantId: "tenant-1",
+              memoryId: NONEXISTENT_MEMORY_ID,
+              kind: "purged",
+              actor: { type: "system" },
+              digestSnapshot: null,
+              meta: {},
+            },
+          ),
+        ).rejects.toThrow(/memory not found/);
+      });
+
+      it("purgeMemory は他テナントの Memory を対象にしない（memory not found）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const memoryA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "purge-memory-tenant-a",
+            status: "forgotten",
+          }),
+        );
+
+        await expect(
+          store.purgeMemory!(
+            ctxB,
+            memoryA.id,
+            { content: "[purged]", digest: "[purged]" },
+            {
+              tenantId: "tenant-b",
+              memoryId: memoryA.id,
+              kind: "purged",
+              actor: { type: "system" },
+              digestSnapshot: memoryA.digest,
+              meta: {},
+            },
+          ),
+        ).rejects.toThrow(/memory not found/);
+
+        const afterA = await store.get(ctxA, memoryA.id);
+        expect(afterA?.content).toBe(memoryA.content); // tenant-a 側は無傷
+      });
+    } else {
+      it("purgeMemory は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.purgeMemory).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // ADR 0140（Issue #243 続き・ADR 0136 決定3の実装）:
+    // `status: 'contested'` を対向（`contestedWithId`）無しで書くことを、書き込み側で
+    // 拒否する。`updateStatus`/`updateStatusWithEvent` には `contestedWithId` を渡す
+    // 引数がそもそも無いため、この2メソッドは status='contested' を対象にした呼び出しを
+    // **常に**拒否する。`createMemory`/`createMemoryWithOutbox`/`supersedeWithNewMemories`
+    // （`news` 側）は `contestedWithId` が `null`/`undefined` のときにだけ拒否する——
+    // 対向を明示した作成（既存 Memory を指す `contestedWithId` 付き）は引き続き許される。
+    // -------------------------------------------------------------------
+
+    it("createMemory は status='contested' かつ contestedWithId 無し を ContestedWithoutCompanionError で拒否する（何も書かれない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            status: "contested",
+            contentHash: "lone-contested-create",
+          }),
+        ),
+      ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+
+      // 何も書かれていないことを、別クエリ（aggregateScope）で確かめる——例外の型だけでなく
+      // 副作用の不在まで見る。
+      const aggregate = await store.aggregateScope(ctx, {});
+      expect(aggregate.totalInScope).toBe(0);
+    });
+
+    it("createMemory は status='contested' かつ contestedWithId が既存 Memory を指すなら受け付ける", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const companion = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "companion-for-create-ok" }),
+      );
+
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          status: "contested",
+          contestedWithId: companion.id,
+          contentHash: "contested-with-companion",
+        }),
+      );
+
+      expect(memory.status).toBe("contested");
+      expect(memory.contestedWithId).toBe(companion.id);
+    });
+
+    it("createMemoryWithOutbox は status='contested' かつ contestedWithId 無し を ContestedWithoutCompanionError で拒否する（jobs も積まれない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      await expect(
+        store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            status: "contested",
+            contentHash: "lone-contested-create-outbox",
+          }),
+          ["embed"],
+        ),
+      ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+
+      const aggregate = await store.aggregateScope(ctx, {});
+      expect(aggregate.totalInScope).toBe(0);
+    });
+
+    it("updateStatus は status='contested' への書き込みを常に ContestedWithoutCompanionError で拒否する（対象は無傷）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "update-status-contested" }),
+      );
+
+      await expect(store.updateStatus(ctx, memory.id, "contested")).rejects.toBeInstanceOf(
+        ContestedWithoutCompanionError,
+      );
+
+      const after = await store.get(ctx, memory.id);
+      expect(after?.status).toBe("active"); // 無傷
+      expect(after?.contestedWithId ?? null).toBeNull();
+    });
+
+    it("updateStatusWithEvent は status='contested' への書き込みを常に ContestedWithoutCompanionError で拒否し、イベントも1件も積まれない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "update-status-with-event-contested",
+        }),
+      );
+
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "contested",
+          {},
+          buildSupersedeEvent(ctx, memory.id, memory.digest),
+        ),
+      ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+
+      const after = await store.get(ctx, memory.id);
+      expect(after?.status).toBe("active"); // 無傷
+      const events = await listEventsForMemory(ctx, memory.id);
+      expect(events).toHaveLength(0);
+    });
+
+    if (supportsSupersedeWithNewMemories) {
+      it("supersedeWithNewMemories は news のいずれかが status='contested' かつ contestedWithId 無し なら ContestedWithoutCompanionError で拒否し、news も supersede も一切起きない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const oldMemory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "supersede-guard-old",
+          }),
+        );
+
+        await expect(
+          store.supersedeWithNewMemories!(
+            ctx,
+            [
+              // 🔴 先に有効な news を1件置く——違反する要素（index 1）へ到達する前に
+              // 有効な要素（index 0）が書き込まれてしまう実装（事前検査を素通りし、
+              // ループの途中で初めて落ちる）を、この順序でなければ見逃す。
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  contentHash: "supersede-guard-valid-news",
+                }),
+                jobKinds: [],
+              },
+              {
+                input: buildNewMemoryFixture({
+                  tenantId: "tenant-1",
+                  status: "contested",
+                  contentHash: "supersede-guard-lone-contested",
+                }),
+                jobKinds: [],
+              },
+            ],
+            [
+              {
+                id: oldMemory.id,
+                supersededByIndex: 0,
+                expectedStatus: "active",
+                event: buildSupersedeEvent(ctx, oldMemory.id, oldMemory.digest),
+              },
+            ],
+          ),
+        ).rejects.toBeInstanceOf(ContestedWithoutCompanionError);
+
+        // supersede 対象も無傷（ロールバック済みと同じに見える）。
+        const afterOld = await store.get(ctx, oldMemory.id);
+        expect(afterOld?.status).toBe("active");
+        // news 側（有効だった index 0 も含めて）も一切作られていない——事前検査が
+        // 全要素を見てから初めて書き込みを始めることの歯。
+        const aggregate = await store.aggregateScope(ctx, {});
+        expect(aggregate.totalInScope).toBe(1); // oldMemory だけ
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // markContestedPair（Issue #197 / ADR 0134: 矛盾の検出・明示的操作、任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsMarkContestedPair) {
+      it("markContestedPair は両側 active な Memory を contested にし、contestedWithId を相互に設定し、両側に1件ずつイベントを積む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "mark-contested-a" }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "mark-contested-b" }),
+        );
+
+        const result = await store.markContestedPair!(
+          ctx,
+          {
+            id: a.id,
+            event: {
+              tenantId: "tenant-1",
+              memoryId: a.id,
+              kind: "updated",
+              actor: { type: "system" },
+              digestSnapshot: a.digest,
+              meta: { reason: "contested" },
+            },
+          },
+          {
+            id: b.id,
+            event: {
+              tenantId: "tenant-1",
+              memoryId: b.id,
+              kind: "updated",
+              actor: { type: "system" },
+              digestSnapshot: b.digest,
+              meta: { reason: "contested" },
+            },
+          },
+        );
+
+        const afterA = await store.get(ctx, a.id);
+        const afterB = await store.get(ctx, b.id);
+        const eventsA = await listEventsForMemory(ctx, a.id);
+        const eventsB = await listEventsForMemory(ctx, b.id);
+
+        expect({
+          returnedFirstStatus: result.first.status,
+          returnedFirstContestedWith: result.first.contestedWithId,
+          returnedSecondStatus: result.second.status,
+          returnedSecondContestedWith: result.second.contestedWithId,
+          afterAStatus: afterA?.status,
+          afterAContestedWith: afterA?.contestedWithId,
+          afterBStatus: afterB?.status,
+          afterBContestedWith: afterB?.contestedWithId,
+          eventsAKinds: eventsA.map((e) => e.kind),
+          eventsBKinds: eventsB.map((e) => e.kind),
+        }).toEqual({
+          returnedFirstStatus: "contested",
+          returnedFirstContestedWith: b.id,
+          returnedSecondStatus: "contested",
+          returnedSecondContestedWith: a.id,
+          afterAStatus: "contested",
+          afterAContestedWith: b.id,
+          afterBStatus: "contested",
+          afterBContestedWith: a.id,
+          eventsAKinds: ["updated"],
+          eventsBKinds: ["updated"],
+        });
+      });
+
+      it("markContestedPair は first.id === second.id を RangeError で落とし、何も書き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "mark-contested-same-id" }),
+        );
+        const event: NewMemoryEvent = {
+          tenantId: "tenant-1",
+          memoryId: a.id,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: a.digest,
+          meta: {},
+        };
+
+        await expect(
+          store.markContestedPair!(ctx, { id: a.id, event }, { id: a.id, event }),
+        ).rejects.toThrow(RangeError);
+
+        const after = await store.get(ctx, a.id);
+        expect(after?.status).toBe("active");
+        expect(after?.contestedWithId ?? null).toBeNull();
+      });
+
+      it.each(["superseded", "contested", "archived", "forgotten"] as const)(
+        "markContestedPair は片方が status=%s だと対象にせず（MemoryStatusConflictError）、両側とも無傷のまま",
+        async (status) => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const a = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: `mark-contested-status-active-${status}`,
+            }),
+          );
+          // ADR 0140: status='contested' は contestedWithId 無しでは作れない。この歯の
+          // 主題は markContestedPair の CAS（対象が active でない）であって contested の
+          // 一対一ではないので、対向として使うだけの第三の companion を必要な場合にだけ
+          // 用意する（a・b とは無関係——a・b 自体のペア構成をこの companion で乱さない）。
+          const bContestedCompanion =
+            status === "contested"
+              ? await store.createMemory(
+                  ctx,
+                  buildNewMemoryFixture({
+                    tenantId: "tenant-1",
+                    contentHash: `mark-contested-status-other-${status}-companion`,
+                  }),
+                )
+              : undefined;
+          const b = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: `mark-contested-status-other-${status}`,
+              status,
+              contestedWithId: bContestedCompanion?.id,
+            }),
+          );
+          const event = (memoryId: MemoryId): NewMemoryEvent => ({
+            tenantId: "tenant-1",
+            memoryId,
+            kind: "updated",
+            actor: { type: "system" },
+            digestSnapshot: "digest",
+            meta: {},
+          });
+
+          await expect(
+            store.markContestedPair!(
+              ctx,
+              { id: a.id, event: event(a.id) },
+              { id: b.id, event: event(b.id) },
+            ),
+          ).rejects.toThrow(MemoryStatusConflictError);
+
+          const afterA = await store.get(ctx, a.id);
+          const afterB = await store.get(ctx, b.id);
+          expect(afterA?.status).toBe("active");
+          expect(afterA?.contestedWithId ?? null).toBeNull();
+          expect(afterB?.status).toBe(status);
+          const eventsA = await listEventsForMemory(ctx, a.id);
+          const eventsB = await listEventsForMemory(ctx, b.id);
+          expect(eventsA).toHaveLength(0);
+          expect(eventsB).toHaveLength(0);
+        },
+      );
+
+      it("markContestedPair は対象が存在しなければ「memory not found」を投げ、存在する側も無傷のまま", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "mark-contested-not-found" }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+
+        await expect(
+          store.markContestedPair!(
+            ctx,
+            { id: a.id, event: event(a.id) },
+            { id: NONEXISTENT_MEMORY_ID, event: event(NONEXISTENT_MEMORY_ID) },
+          ),
+        ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+
+        const afterA = await store.get(ctx, a.id);
+        expect(afterA?.status).toBe("active");
+        expect(afterA?.contestedWithId ?? null).toBeNull();
+        expect(await listEventsForMemory(ctx, a.id)).toHaveLength(0);
+      });
+
+      it("markContestedPair は他テナントの Memory を対象にしない（memory not found）", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const memoryA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "mark-contested-tenant-a" }),
+        );
+        const memoryB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "mark-contested-tenant-b" }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-b",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+
+        await expect(
+          store.markContestedPair!(
+            ctxB,
+            { id: memoryA.id, event: event(memoryA.id) },
+            { id: memoryB.id, event: event(memoryB.id) },
+          ),
+        ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+
+        const afterA = await store.get(ctxA, memoryA.id);
+        expect(afterA?.status).toBe("active"); // tenant-a 側は無傷
+        expect(afterA?.contestedWithId ?? null).toBeNull();
+      });
+    } else {
+      it("markContestedPair は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.markContestedPair).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // 明示的な復帰（archived → active。Issue #195、ADR 0122）
+    //
+    // 🔴 `restoreArchived` は `MemoryStore` の新しい任意メソッドではない
+    // （`Runtime.restoreArchived` の doc コメント参照）——`archived` → `active` への
+    // compare-and-swap は既存の必須メソッド `updateStatusWithEvent`（ADR 0031）で
+    // 表現できるため、ここでは `supportsArchiveDecayed` のような分岐を持たない。
+    // **この歯は両方の adapter（postgres・in-memory）で常に走る**——`archiveDecayed`
+    // を経由せず、`buildNewMemoryFixture({ status: 'archived' })` で直接 archived な
+    // Memory を用意し、`updateStatusWithEvent` に新しい event kind `'restored'`
+    // （ADR 0122 が `MemoryEventKind` へ足した値）を渡せることそのものを検査する
+    // ——DB 側の CHECK 制約（`migrations/0011_memory_events_kind_restored.sql`）が
+    // 実際にこの値を受け付けることを postgres 側で確認する場でもある。
+    // -------------------------------------------------------------------
+
+    function buildRestoredEvent(ctx: Ctx, memoryId: MemoryId, digest: string): NewMemoryEvent {
+      return {
+        tenantId: ctx.tenantId,
+        memoryId,
+        kind: "restored",
+        actor: { type: "system" },
+        digestSnapshot: digest,
+        sizeBeforeBytes: null,
+        meta: {},
+      };
+    }
+
+    it("updateStatusWithEvent は kind='restored' で archived な Memory を active へ戻せる（往復の店側半分）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", status: "archived" }),
+      );
+      expect(memory.status).toBe("archived");
+
+      const { memory: restored, event } = await store.updateStatusWithEvent(
+        ctx,
+        memory.id,
+        "active",
+        { expectedStatus: "archived" },
+        buildRestoredEvent(ctx, memory.id, memory.digest),
+      );
+
+      expect(restored.status).toBe("active");
+      expect(event.kind).toBe("restored");
+      expect(event.memoryId).toBe(memory.id);
+
+      const events = await listEventsForMemory(ctx, memory.id);
+      expect(events).toHaveLength(1);
+      expect(events[0]?.kind).toBe("restored");
+
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.status).toBe("active");
+    });
+
+    it("kind='restored' の compare-and-swap は archived 以外を対象にできない（active に戻っている行を二重に戻さない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", status: "active" }),
+      );
+
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          memory.id,
+          "active",
+          { expectedStatus: "archived" },
+          buildRestoredEvent(ctx, memory.id, memory.digest),
+        ),
+      ).rejects.toBeInstanceOf(MemoryStatusConflictError);
+
+      const events = await listEventsForMemory(ctx, memory.id);
+      expect(events).toEqual([]);
+    });
+
+    // -------------------------------------------------------------------
     // aggregateScope（docs/recall.md §5 目次帯・第3階・「スコープの外延」マネージャー決定）
     // -------------------------------------------------------------------
 
@@ -1887,13 +3166,28 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("aggregateScope は status='contested' を totalInScope に含める（段1と同じゲート）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
+      // ADR 0140: `status: 'contested'` は `contestedWithId` 無しでは作れない
+      // （`ContestedWithoutCompanionError`）。この歯の主題は aggregateScope の
+      // ゲートであって contested の一対一ではないので、対向として使うだけの
+      // companion を先に作る（companion 自身も active として totalInScope に入る）。
+      const companion = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "contested-scope-companion" }),
+      );
       await store.createMemory(
         ctx,
-        buildNewMemoryFixture({ tenantId: "tenant-1", status: "contested" }),
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          status: "contested",
+          contestedWithId: companion.id,
+          contentHash: "contested-scope-subject",
+        }),
       );
 
       const aggregate = await store.aggregateScope(ctx, {});
-      expect(aggregate.totalInScope).toBe(1);
+      // companion（active）+ 本体（contested）の2件とも status IN ('active','contested') の
+      // ゲートに入る。
+      expect(aggregate.totalInScope).toBe(2);
     });
 
     it("aggregateScope は occurredAfter の外にある Memory を filteredPeriod に計上し、totalInScope から除く", async () => {

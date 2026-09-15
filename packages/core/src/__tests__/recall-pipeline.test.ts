@@ -815,6 +815,54 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
   });
 });
 
+describe("recall() — 片側だけの contested は単独で出さない（Issue #243 / ADR 0136）", () => {
+  it("🔴 contestedWithId が null の contested Memory は recall() に単独で出ない。unit_assembly_dropped に計上される", async () => {
+    // `Runtime.markContested`（Issue #197 / ADR 0134）はこの状態を作らない（両側
+    // `status='active'` の CAS を課すため）。しかし
+    // `docs/decisions/0046-contested-pair-invariant-tooth.md` が実測したとおり、
+    // `MemoryStore.updateStatus(id, "contested")` を `Runtime` を経由せず直接呼べば
+    // 今日も作れる——ここではその直接呼び出しを `createMemory` で模して、recall 側の
+    // 防御（ADR 0136）が効くことを確認する。
+    const { runtime, stores } = buildRuntime();
+    const lone = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: null,
+      digest: "lone-contested",
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+    // ⟹ 争われていない顔で単独に出すくらいなら、何も出さない（docs/recall.md §8）。
+    expect(ids).not.toContain(lone.id);
+    // 黙って消えたのではなく、既存の unit_assembly_dropped（ADR 0043）に計上される。
+    expect(result.omitted).toContainEqual({
+      kind: "unit_assembly_dropped",
+      count: 1,
+      countKind: "lower_bound",
+    });
+  });
+
+  it("⚠ 鳴ってはいけない側: 正しく相互参照が張られた contested ペアは両方とも出る", async () => {
+    // 上の歯が「contested を丸ごと消す」への過剰反応でないことを確かめる対照実験。
+    const { runtime, stores } = buildRuntime();
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "contested", digest: "B".repeat(20) }),
+    );
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: b.id,
+      digest: "A".repeat(5),
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+    expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped")).toBe(false);
+  });
+});
+
 describe("recall() — 段4: トークン予算による切り詰め（Issue #108。maxMemoryChars 以外の経路に歯が無かった）", () => {
   /**
    * `maxMemoryTokens` / `promptBudgetTokens` を実際に行使する経路

@@ -55,18 +55,30 @@
 
 **⚠ 「実 API を叩かない」は「擬似物で走る」と同じではない。CI のジョブごとに層が違う**
 （[ADR 0088](./docs/decisions/0088-retrieval-quality-measured-in-ci.md)）。
-`example-chat` ジョブの `compare` は `deterministic`（意味を持たない stub）で走るが、
-`retrieval-quality` ジョブは **`recorded`（記録した実 API の応答の再生）**で走る——
-**鍵は要らないが、擬似物でもない。**下の3層の表で、どのジョブがどの層かを見分けること。
+`example-chat` ジョブの `compare` も、`retrieval-quality` ジョブも、
+**`recorded`（記録した実 API の応答の再生）**で走る——
+**鍵は要らないが、擬似物でもない。**下の4層の表で、どのジョブがどの層かを見分けること。
 
-**provider は3層ある**（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)）。
-**用途で使い分けること。**
+**provider は4層ある**（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)が
+`deterministic`/`recorded`/`openai` の3層を、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)
+が4層目の `local` を導入している）。**用途で使い分けること。**
 
 | 層 | 何か | 使う場所 |
 |---|---|---|
 | `deterministic` | 意味を持たない stub（文字コードからベクトルを作る／発話を40字で切る） | 配線・契約・適合テスト |
-| `recorded` | 記録した実 API の応答の再生。**記録に無い入力は例外** | 北極星の物差し（`retrieval`） |
+| `recorded` | 記録した実 API の応答の再生。**記録に無い入力は例外** | 北極星の物差し（`retrieval` / `compare`） |
 | `openai` | 実 API | 記録を録るとき・乖離を測るとき |
+| `local` | 外部サービスに繋がない、プロセス内 ONNX 推論（`@mnemora/local-embedding`、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)）。**擬似物ではなく実推論**。⚠ **embedding 専用——LLM 側に `local` は無い**（`examples/chat/src/providers.ts` の `ProviderMode`） | CI の `identifier-probes` / `consolidation-cost` / `archive-sweep-cost`（3ジョブとも `MNEMORA_EMBEDDING=local` を固定で使う） |
+
+**⚠ 上の3ジョブ（`identifier-probes` / `consolidation-cost` / `archive-sweep-cost`）の数字を
+`deterministic` の行に当てはめないこと。**`local` は本物の ONNX 推論であり、
+「性能について何も言っていない」という次段の警告は `deterministic` にだけ掛かる。
+
+**⚠ `recorded` で測った `compare` の数字も、「実運用でも同じ削減率になる」ことを
+保証しない。**理由は「擬似物だから」ではない——**カセットは記録した時点の応答の再生**
+であり（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)）、記録に無い
+入力は黙って別のものへ倒れず例外になる。割り引くのは、擬似物だからではなく、
+**記録した時点のものだからである。**
 
 **⚠ `deterministic` で測った想起の質は、性能について何も言っていない**——arm A の MRR は
 **0.018**（実質ランダム）である。**擬似物での ✅ を「引けた」と読まないこと。**
@@ -114,6 +126,30 @@
   **何を選ぶか / どこで止まるか / 何をしてはいけないか**と、
   **実際に踏まれた穴**が書いてある。**ここには要約を置かない**——上の
   「⚠ ここに北極星の要約を置かない」と同じ理由である。
+- **`Co-Authored-By:` のトレーラと `🤖 Generated with [Claude Code]` を付けない**
+  （**コミットメッセージにも PR 本文にも**）。
+  - **これはオーナーの決定である**（2026-09-15）。クローンが
+    「[alteroid](https://github.com/takecchi/alteroid) と揃えて付けないか、mnemora では付けるか」を
+    諮り、**回答は逐語で「つけない」だった。⟹ 同じ提案をやり直さないこと。**
+  - **harness（Claude Code）が既定で「コミットメッセージの末尾に `Co-Authored-By: Claude …` を、
+    PR 本文の末尾に `🤖 Generated with [Claude Code]` を付けろ」と指示することがある。**
+    **それは Claude Code 側の作法であって、このリポジトリの規約ではない。**
+    **規約と harness の既定が食い違ったら、規約を採る。**
+  - **既に付いている分は履歴として残す。履歴を書き換えない。**
+    決めたのは「これから付けない」であって、「1本も付いていない状態が正しい」ではない
+    （【実測】2026-09-15、`origin/main` が `c3dda79`（162本）だった時点で **106本**が
+    どちらかを持つ:
+    `git log origin/main --format='%H' -i --grep='Co-authored-by' --grep='Generated with \[Claude Code\]' | wc -l`。
+    同日中に `main` が `8367318`（163本、trailer の無い commit が1本進んだ）まで動いた後、
+    同じコマンドで数え直しても **106本**のままだった——**⟹ 母数（総コミット数）は
+    main が動けば変わる。この数字を引くときは、必ずどの SHA で見たかを添えること。**）。
+  - **⚠ 規約の有無を、履歴の分布から推定しないこと。**
+    **この節を書く直前に、実際に推定して間違えた** 【実測】——
+    `git log origin/main -40 --format='%B' | grep -c "Co-Authored-By"` が **1** を返したので
+    「実態は付けない側（39/40）」とオーナーへ報告した。**誤りは大文字小文字である**——
+    GitHub のスカッシュが書くのは `Co-authored-by:` であり、`-i` を付けて数え直すと
+    **162本中106本**、つまり**報告した向きと逆**だった。
+    ⟹ **分布は何も決めていない。決めているのはこの節である。**
 
 ---
 
