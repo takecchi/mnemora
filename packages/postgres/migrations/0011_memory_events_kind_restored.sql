@@ -24,6 +24,24 @@
 -- `LIKE '%= ANY%'` で1本目だけを一意に特定できる。対象が見つからない・複数見つかった
 -- 場合は `RAISE EXCEPTION` で失敗させる——想定が崩れていたら黙って何もしない、
 -- ではなく気付けるようにする。
+--
+-- 🔴 **`rel.relname = 'memory_events'` だけでは足りない（CI で実際に踏んだ、ADR 0057）。**
+-- `packages/postgres/src/migrate.ts` は専用スキーマ（ADR 0057）向けに各移行ファイルを
+-- `SET LOCAL search_path TO <schema>[,<extensionSchema>]` の直後に実行する——この
+-- ファイル自身も含め、移行の中身は常に裸のテーブル名（`memory_events`）で書かれており、
+-- どのスキーマに効くかは search_path 任せである（`schema-namespace.ts` の doc:
+-- 「DML は search_path に任せ、DDL と存在検査は明示修飾する」。この移行の
+-- `ALTER TABLE memory_events ...` 自体が前者の形そのもの）。
+-- 1つの DB に `mnemora_a` / `mnemora_b` のように複数の専用スキーマを同居させると
+-- （`dedicated-schema.postgres.test.ts` 測定2・3）、`pg_class`/`pg_constraint` には
+-- 各スキーマの `memory_events` が別行として存在する。`relname` だけで絞ると
+-- **どのスキーマの行かを区別せずに全部拾う**ため、他のスキーマで本移行が既に
+-- 適用済み（＝新しい制約 `memory_events_kind_check` も `IN (...)` で書かれており、
+-- 同じく `= ANY` に正規化される）だと候補が2件以上になり、まさにこの安全弁が
+-- 発火する。**安全弁は設計どおり働いた——直すのは安全弁ではなくこの絞り込み。**
+-- `pg_table_is_visible(rel.oid)` で、今まさに `search_path` の下で裸の
+-- `ALTER TABLE memory_events` が指すのと同じ1行だけに絞る（他スキーマの同名テーブルは
+-- search_path 上で隠れているので visible にならない）。
 
 DO $$
 DECLARE
@@ -35,6 +53,7 @@ BEGIN
   FROM pg_constraint con
   JOIN pg_class rel ON rel.oid = con.conrelid
   WHERE rel.relname = 'memory_events'
+    AND pg_table_is_visible(rel.oid)
     AND con.contype = 'c'
     AND pg_get_constraintdef(con.oid) LIKE '%= ANY%';
 
