@@ -40,8 +40,20 @@ import {
  * `examples/chat/src/mutable-clock.ts` の docstring）。⟹ `runtime.tick()`（embed の消化）は
  * **必ずクロックを実時刻付近に置いた状態で呼ぶ**——過去や未来へ振った直後に
  * `tick()` を呼ぶと `available_at <= opts.now` が成り立たず embed ジョブを claim できない
- * （`outbox-store.ts` の `claimBatch`）。このファイルでは、embed を消化し終えるまでは
- * クロックを実時刻に置いたままにし、その後だけ未来へ進める。
+ * （`outbox-store.ts` の `claimBatch`）。**ローカル Postgres で実際にこの失敗を再現した**
+ * （`observe()` の直前に取った `t0` をそのまま `tick()` に渡すと、`observe()` の INSERT が
+ * 実際にコミットされる実時刻のほうがわずかに後になり、`available_at > opts.now` で
+ * 0件しか claim できなかった）。⟹ このファイルでは `tick()` の**直前**に必ず
+ * `clock.set(new Date())` で取り直す（`archive-sweep-cost.ts` と同じ対処）。
+ *
+ * ⭐ **実測で分かった、忘却ゲート（`decayGateActive`）と段2のスコア減衰は別物である**
+ * （`(乙)` の歯で検算した）。`decayGateActive` は段1・SQL 側の**硬い**除外だが、
+ * `strategies/scoring.ts` の `total = affinity × decay × tagMatch × freshness × strength`
+ * も同じ `defaultDecayStrategy.strengthAt()` を使っており、`decayFloorAt` を過ぎた
+ * Memory は `includeFullyDecayed: true` でゲートを外しても**既定の `scoreThreshold`
+ * （0.1）では below_threshold として落ちる**（`decay`/`freshness` が ≈threshold(0.05) 以下
+ * になるため）。⟹ ゲート単体の効果を切り出すには `scoreThreshold: 0` を併用する必要がある
+ * ——`(乙)` はこの2つを分けて検算している。
  *
  * **確かめていないこと**: この歯は `channels` を指定しない既定（ANN のみ、
  * `DEFAULT_RECALL_CHANNELS`）でしか測っていない。語彙チャンネル（lexical）は
@@ -94,8 +106,15 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const observed = await runtime.observe(ctx, { kind: "utterance", text });
     const memoryId = observed.memoryIds[0]!;
 
-    // embed を消化する。⭐ クロックはまだ実時刻（t0）——outbox.available_at
-    // （SQL now() で入る）との比較を壊さないため、未来へ進める前に済ませる。
+    // embed を消化する直前に、クロックを実時刻へ**取り直す**（`t0` のまま使い回さない）。
+    // ⚠ 実測で踏んだ罠: `outbox.available_at` は Postgres 側の SQL `now()` で入るため、
+    // `observe()` の INSERT が実際にコミットされる時刻は `t0` よりわずかに後になる。
+    // `opts.now`（`claimBatch` の `available_at <= opts.now` 判定に使われる）を `t0` の
+    // ままにしておくと `available_at > opts.now` になり、embed ジョブを1件も claim
+    // できない（`tickResult.processed` が 0 のまま）——実際にローカル Postgres でこの
+    // 失敗を再現した。`archive-sweep-cost.ts` が `tick()` の直前に必ず
+    // `clock.set(new Date())` で取り直しているのと同じ理由・同じ対処。
+    clock.set(new Date());
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     expect(tickResult.processed).toBe(1);
 
@@ -135,7 +154,8 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const observed = await runtime.observe(ctx, { kind: "utterance", text });
     const memoryId = observed.memoryIds[0]!;
 
-    // 実時刻のうちに embed を消化する（(甲) と同じ理由）。
+    // embed を消化する直前にクロックを実時刻へ取り直す（(甲) と同じ理由・同じ罠）。
+    clock.set(new Date());
     const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
     expect(tickResult.processed).toBe(1);
 
@@ -160,7 +180,7 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     // 後置フィルタ（`decayFilteredCount` → `omitted.push({kind:"filtered",
     // condition:"decayed", countKind:"lower_bound"})`）は「ANN の候補として一度返ってきた
     // ものを、それでも念のため落とす」ときにしか鳴らない——語彙チャンネル
-    // （`LexicalFilter` は `decayFloorAtAfter` を持たない、マネージャー決定3）が
+    // （`LexicalFilter` は `decayFloorAtAfter` を持たない）が
     // 混ざったときの非対称を塞ぐための保険であって、ANN 単体の既定経路では
     // 一度も鳴らない。⟹ ここで「消えたこと」は、`omitted` の中身ではなく
     // 下の対照実験（`includeFullyDecayed: true` で戻ってくること）で示す。
@@ -171,10 +191,37 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     const gatedDetail = gatedCandidateGen?.detail as { decayGate?: string } | undefined;
     expect(gatedDetail?.decayGate).toBe("pushed_down");
 
-    // 対照実験: 同じクロック・同じクエリで `includeFullyDecayed: true` を渡すと戻ってくる。
-    // これが「消えたのは忘却ゲートのせいであって、他の理由（tenant 取り違え・embedding
-    // 失敗など）ではない」ことの証拠になる。
-    const ungated = await runtime.recall(ctx, { text, limit: 10, includeFullyDecayed: true });
+    // ⚠ 実測で分かったこと（設計当初は想定していなかった）: `includeFullyDecayed: true` で
+    // ゲートを外しても、**既定の scoreThreshold（0.1）のままでは戻ってこない。**
+    // 段2の再スコア（`strategies/scoring.ts`）の `total = affinity × decay × tagMatch ×
+    // freshness × strength` のうち `decay`/`freshness` はどちらも
+    // `defaultDecayStrategy.strengthAt()` そのもので、floorAt を過ぎた時点では
+    // ≈threshold（0.05）以下——ゲートとは**別の理由**（below_threshold、段2のソフトな
+    // 足切り）で落ちる。⟹ ゲート単体の効果を切り出すには `scoreThreshold: 0` で
+    // このソフトな足切りを外す必要がある。まずそれ自体を検算する。
+    const ungatedDefaultThreshold = await runtime.recall(ctx, {
+      text,
+      limit: 10,
+      includeFullyDecayed: true,
+    });
+    const ungatedDefaultThresholdIds = ungatedDefaultThreshold.memories.map((m) => m.memoryId);
+    expect(ungatedDefaultThresholdIds).not.toContain(memoryId);
+    expect(ungatedDefaultThreshold.omitted.some((o) => o.kind === "below_threshold")).toBe(true);
+
+    // 対照実験（本題）: `includeFullyDecayed: true` **かつ** `scoreThreshold: 0` で
+    // 段2のソフトな足切りも外すと戻ってくる。gate 側は `scoreThreshold` を通っていない
+    // （段1・SQL 側の話）ので、`scoreThreshold: 0` にしても gated 側の結果は変わらないはず
+    // ——それも合わせて検算する（下の `gatedZeroThreshold`）。
+    const gatedZeroThreshold = await runtime.recall(ctx, { text, limit: 10, scoreThreshold: 0 });
+    const gatedZeroThresholdIds = gatedZeroThreshold.memories.map((m) => m.memoryId);
+    expect(gatedZeroThresholdIds).not.toContain(memoryId);
+
+    const ungated = await runtime.recall(ctx, {
+      text,
+      limit: 10,
+      includeFullyDecayed: true,
+      scoreThreshold: 0,
+    });
     const ungatedIds = ungated.memories.map((m) => m.memoryId);
     expect(ungatedIds).toContain(memoryId);
     const ungatedCandidateGen = ungated.explain.stages.find(
