@@ -1,4 +1,4 @@
-# ADR 0160: `examples/chat` が `memory_usage` を報告する — `reinforce` を実アプリで発火させる（Issue #301）
+# ADR 0161: `examples/chat` が `memory_usage` を報告する — `reinforce` を実アプリで発火させる（Issue #301）
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-16
