@@ -325,7 +325,35 @@ jobs:
         # これまでこの数値は手元で測ったきり CI では実測していなかった
         # （ADR 0021 参照）——このステップはそれを埋め、以後の変更で
         # 「削れたが答えが落ちた」への回帰をログから読めるようにする。
+        #
+        # 🔴 Issue #242: `MNEMORA_COMPARE_JSON` で機械可読な出力口を足した
+        # （`retrieval`/`time-term` と同じ規約、`examples/chat/src/compare-json.ts`）。
+        # ⚠ **基準値ファイルはこの時点ではまだコミットしていない**
+        # （`examples/chat/compare-baseline.json` は存在しない）。値を捏造しないため
+        # ——この作業環境に DB が無く、この bench を自分の手で実行できない
+        # （docs/autonomy.md §1.1）。初回 CI の artifact を後続コミットで基準値にする。
+        env:
+          MNEMORA_COMPARE_JSON: ${{ github.workspace }}/compare.json
         run: pnpm --filter @mnemora/example-chat run compare
+
+      - name: compare の実測値を Job Summary に残す（⛔ 門ではない。基準値ファイルはまだ無い）
+        # このステップは常に走る（`if: always()`）。`compare-summary.mjs` 自体は
+        # 「入力そのものが壊れている」ときだけ非0で終わる（JSON が読めない/parse
+        # できない/形が想定と違う）。`--baseline` はまだ渡さない——コミット済みの
+        # 基準値ファイルが無いため（上のステップのコメント参照）。
+        if: always()
+        run: |
+          node scripts/compare-summary.mjs \
+            --measured "${{ github.workspace }}/compare.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: compare の実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: compare
+          path: ${{ github.workspace }}/compare.json
+          if-no-files-found: ignore
 
   root-gate-db-stage:
     name: ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）
