@@ -223,7 +223,7 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 
 **mnemora を入れるとプロンプトが小さくなるのか、会話ログを全部積むほうが小さいのかは、
 会話の長さによって変わる**——短い会話では mnemora のほうが大きい。
-その判定は `@mnemora/core` の**純関数**として提供する（[ADR 0146](./docs/decisions/0146-recall-footprint-estimator.md)）。
+その判定は `@mnemora/core` の**純関数**として提供する（[ADR 0147](./docs/decisions/0147-recall-footprint-estimator.md)）。
 
 ```ts
 import { compareWithFullLog } from "@mnemora/core";
