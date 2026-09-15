@@ -46,9 +46,26 @@ Issue #109 のコメント（2026-09-14 付、マネージャー代理の報告�
 自分でファイルを開いて数え直した**【実測（読解による）】:
 
 ```
-$ node -e '... "第一/第二/…"は数えない。IDENTIFIER_PROBES の { … id: … } ブロックを数える ...'
-IDENTIFIER_PROBES entries: 30   カテゴリ内訳: project-code 6 / ticket 6 / system 6 / channel 6 / person 6
+$ node -e '
+const fs = require("fs");
+const src = fs.readFileSync("examples/chat/src/identifier-probe-set.ts","utf8");
+const m = src.match(/export const IDENTIFIER_PROBES: IdentifierProbe\[\] = \[([\s\S]*?)\n\];/);
+const body = m[1];
+const count = (body.match(/\{\s*\n\s*id:/g) || []).length;
+console.log("IDENTIFIER_PROBES entries:", count);
+const cats = {};
+for (const cm of body.matchAll(/category:\s*"([^"]+)"/g)) { cats[cm[1]] = (cats[cm[1]]||0)+1; }
+console.log(cats);
+'
+IDENTIFIER_PROBES entries: 30
+{ 'project-code': 6, ticket: 6, system: 6, channel: 6, person: 6 }
 ```
+
+**⚠ 何を数えているか**: 配列リテラル本体（`export const IDENTIFIER_PROBES = […]`）の中で
+`{` の直後に改行して `id:` が続くブロックだけを正規表現で数えている。`grep -c "id:"` を
+使わない理由（マネージャー指示）どおり、interface 宣言の `id: string;` や
+`IDENTIFIER_TOPIC_KEYWORDS` のような配列外の `id:` は、この正規表現の対象
+（配列リテラルの範囲に限定し、かつ `{` 直後の改行を要求する形）には現れないため拾わない。
 
 `JAPANESE_NAME_PROBES` は全文を読んで12件（person4/org3/product3/place2）を確認した。
 `PROBES`（`probe-set.ts`）は7件（color/pet/exercise/diet/family/language/travel）。
