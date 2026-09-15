@@ -173,6 +173,27 @@
   ため。ADR 0122 の本文は書き換えず、追記節でこの上書きを指す
   （[ADR 0122](./0122-restore-archived-memory.md) 追記節）。
 
+  **⚠ ADR 0122 決定4 の却下理由は2つあったが、上書きしたのは片方だけである。**
+  もう一方（「`decay_floor_at` の再計算式が2箇所に住むことになる。[ADR 0038](./0038-vector-hit-distance-is-cosine.md)
+  が測った『実装が2つあると食い違う』穴を自分から作りにいくことになる」）は、
+  **本 ADR の実装には当たらない**——`restoreArchived` は式を複製せず、
+  **`MemoryStore.reinforce(ctx, id, at)` を呼ぶ**（`decay_floor_at` の再計算を持つ唯一の口。
+  [ADR 0041](./0041-reinforce-does-not-change-strength.md) /
+  [ADR 0048](./0048-reinforce-does-not-move-decay-origin-backwards.md)）。
+  ⟹ 式は今も1箇所にしか住んでいない。**上書きしたのは「復帰と強化は別の意思決定である」
+  という原則のほうだけであり、それは本 ADR がその前提を壊したからである。**
+
+  **⭐ この上書きで何を落としたか**: **「強化せずに復帰させる」ことが、公開 API から
+  表現できなくなった。**ADR 0122 の世界では、呼び出し側は `restoreArchived` だけを呼んで
+  「status は戻すが、減衰の起点は動かさない」を選べた（続けて `reinforce` を呼ぶかどうかは
+  呼び出し側の裁量だった）。**本 ADR の後は、復帰は常に強化を伴う。**この自由度を落とした
+  理由は、忘却ゲートを既定 ON にした結果、その選択肢が
+  **「復帰したと返るのに recall には二度と現れない」という黙った no-op にしかならなくなった**
+  からである——選べる意味を失った選択肢を残すより、落とすほうが正直だと判断した。
+  ⟹ **この自由度が再び必要になったとき（`RestoreArchivedOptions` に `reinforce?: boolean` を
+  足したくなったとき）が、この決定が覆るときである。**⚠ ADR 0122 決定4 が
+  「その分岐を足したくなる圧力を生む」と警告していたのは、まさにこの形である。
+
   **reinforce が失敗したときの扱い**: `status` の復帰は `reinforce` の前に既に成功して
   いるため、**`reinforce` が例外を投げても、その成功を握り潰さない**——
   `RestoreArchivedOutcome` の `kind` は `"restored"` のままとし、失敗は追加欄
