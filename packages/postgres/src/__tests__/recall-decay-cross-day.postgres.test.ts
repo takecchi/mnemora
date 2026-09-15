@@ -183,7 +183,7 @@ describe("runtime.recall() が decay を跨いで実際にどう振る舞うか 
     // （`LexicalFilter` は `decayFloorAtAfter` を持たない）が
     // 混ざったときの非対称を塞ぐための保険であって、ANN 単体の既定経路では
     // 一度も鳴らない。⟹ ここで「消えたこと」は、`omitted` の中身ではなく
-    // 下の対照実験（`includeFullyDecayed: true` で戻ってくること）で示す。
+    // 下の対照実験（`includeFullyDecayed: true` + `scoreThreshold: 0` で戻ってくること）で示す。
     expect(gated.omitted.some((o) => o.kind === "filtered" && o.condition === "decayed")).toBe(
       false,
     );
