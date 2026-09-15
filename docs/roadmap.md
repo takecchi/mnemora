@@ -461,7 +461,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 |---|---|---|---|
 | 1 | 言ったことを、次の日も覚えている | **在る** | — |
 | 2 | 聞かれていないことを、自分から思い出す | **半分** | [#290](https://github.com/takecchi/mnemora/pull/290)（[ADR 0151](./decisions/0151-recall-association-unprompted.md)）で機構は入ったが、`RecallQuery.association` を明示しないと効かない ⟹ [#291](https://github.com/takecchi/mnemora/issues/291) |
-| 3 | なぜそれを思い出したのかを、後から説明できる | **半分** | スコア内訳が永続化されない（`recalls` は `returned_memory_ids` だけ）⟹ 「後から」が無い |
+| 3 | なぜそれを思い出したのかを、後から説明できる | **半分** | その場の説明可能性（`explain.stages` / `ScoreBreakdown`）は**実在する**。⚠ **「`recalls` は `returned_memory_ids` だけ」ではない**——`query`/`budget`/`omitted`/`usage`/`index_band`/`explain`（段トレース）も列に在る（`migrations/0001_init.sql:167-179`）。欠けているのは **per-memory の側**で、スコア内訳・`retrievedVia`・`companionOf`・`provenanceKind` がどの列にも無い（`returned_memory_ids` は UUID 配列のみ）⟹ **別セッションで `recalls` 行を読み返しても、どの記憶がどの内訳で選ばれたかは復元できない** = 「後から」が無い |
 | 4 | 使われない記憶が、静かに遠ざかる | **半分** | 減衰（順位を下げる側）は `recall()` のたびに必ず効く。⚠ **「`reinforce` / `sweepArchive` を誰も呼ばない」ではない**——`reinforce` は `observe({ kind: 'memory_usage' })` が呼び、`sweepArchive` は `examples/chat` の `archive-sweep-cost` が呼ぶ。欠けているのは ①`examples/chat/src` に `memory_usage` の報告が**1件も無い**（実演していない）②`tick()` が `reflect()`/`consolidate()` を駆動しない ⟹ [#204](https://github.com/takecchi/mnemora/issues/204) |
 | 5 | 間違いを正すと、古いほうが先に出てこなくなる | **半分** | `markContested` を呼ぶ本番コードが1つも無い |
 | 6 | 知らないことを、知らないと言える | **在る** | — |
