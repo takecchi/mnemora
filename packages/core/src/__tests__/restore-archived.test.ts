@@ -121,7 +121,9 @@ describe("runtime.restoreArchived — status のバリエーション（archived
 
       const result = await runtime.restoreArchived(ctx, { memoryId: memory.id });
 
-      expect(result.outcomes).toEqual([{ memoryId: memory.id, kind: "status_not_archived", status }]);
+      expect(result.outcomes).toEqual([
+        { memoryId: memory.id, kind: "status_not_archived", status },
+      ]);
       const stored = await stores.memoryStore.get(ctx, memory.id);
       expect(stored?.status).toBe(status);
       expect(stores.eventStore.events).toHaveLength(0);
@@ -210,7 +212,11 @@ describe("runtime.restoreArchived — reason / actor", () => {
       newMemory({ status: "archived" }),
     );
 
-    await runtime.restoreArchived(ctx, { memoryId: withReason.id }, { reason: "問い合わせで必要になった" });
+    await runtime.restoreArchived(
+      ctx,
+      { memoryId: withReason.id },
+      { reason: "問い合わせで必要になった" },
+    );
     await runtime.restoreArchived(ctx, { memoryId: withoutReason.id });
 
     const [reasonEvent] = restoredEvents(stores, withReason.id);
@@ -223,10 +229,7 @@ describe("runtime.restoreArchived — reason / actor", () => {
 
   it("actor を渡すとイベントの actor がそれになり、省略時は { type: 'system' }", async () => {
     const { runtime, stores } = buildRuntime();
-    const withActor = await stores.memoryStore.createMemory(
-      ctx,
-      newMemory({ status: "archived" }),
-    );
+    const withActor = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
     const withoutActor = await stores.memoryStore.createMemory(
       ctx,
       newMemory({ status: "archived" }),
