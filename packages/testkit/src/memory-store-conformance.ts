@@ -756,6 +756,87 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // decayBaseSeq/decayFloorSeq/halfLifeRecalls（活動時計の3つ組、
+    // [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと3、
+    // Issue #305）
+    //
+    // ⚠ **この3本は「前任の作業者が実際に踏んだ漏れ1」を直接検出するために置く**
+    // （`InMemoryMemoryStore.createMemoryIdempotent`（`packages/testkit/src/__fixtures__/
+    // in-memory-memory-store.ts`）が `decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls` を
+    // 一切転記せず、型が optional なので TypeScript が黙って通してしまっていた）。
+    // `validFrom`/`validUntil` の歯と同じ形（round-trip・省略時の既定値・他フィールドとの
+    // 取り違え検出）をここでも置く。
+    // -------------------------------------------------------------------
+
+    it("createMemory は decayBaseSeq/decayFloorSeq/halfLifeRecalls を書き込み、読み戻す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          decayBaseSeq: 10,
+          decayFloorSeq: 500,
+          halfLifeRecalls: 360,
+        }),
+      );
+      expect(created.decayBaseSeq).toBe(10);
+      expect(created.decayFloorSeq).toBe(500);
+      expect(created.halfLifeRecalls).toBe(360);
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.decayBaseSeq).toBe(10);
+      expect(reread?.decayFloorSeq).toBe(500);
+      expect(reread?.halfLifeRecalls).toBe(360);
+    });
+
+    it("createMemory は decayBaseSeq/decayFloorSeq/halfLifeRecalls を省略すると null のまま保存・返却する（ADR 0163 決めたこと4）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1" }),
+      );
+      expect(created.decayBaseSeq ?? null).toBeNull();
+      expect(created.decayFloorSeq ?? null).toBeNull();
+      expect(created.halfLifeRecalls ?? null).toBeNull();
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.decayBaseSeq ?? null).toBeNull();
+      expect(reread?.decayFloorSeq ?? null).toBeNull();
+      expect(reread?.halfLifeRecalls ?? null).toBeNull();
+    });
+
+    it("createMemory は decayBaseSeq/decayFloorSeq と壁時計の halfLifeHours/decayFloorAt を混同しない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const decayFloorAt = new Date("2026-06-01T00:00:00.000Z");
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          halfLifeHours: 720,
+          decayFloorAt,
+          decayBaseSeq: 0,
+          decayFloorSeq: 1000,
+          halfLifeRecalls: 360,
+        }),
+      );
+
+      // ⚠ 単位の違う4つの数値（720 / 1000 / 0 / 360）を混同していないことを個別に見る
+      // ——`validFrom`/`validUntil` の歯と同じ理由（round-trip だけでは、フィールドを
+      // 取り違えて代入していても「同じ値を書けば通ってしまう」ケースを見逃す）。
+      expect(created.halfLifeHours).toBe(720);
+      expect(created.decayFloorAt.getTime()).toBe(decayFloorAt.getTime());
+      expect(created.decayBaseSeq).toBe(0);
+      expect(created.decayFloorSeq).toBe(1000);
+      expect(created.halfLifeRecalls).toBe(360);
+    });
+
+    // -------------------------------------------------------------------
     // listBySourceObservation（ADR 0028・runtime.reextract の前提）
     // -------------------------------------------------------------------
 
@@ -2419,6 +2500,124 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           firstCount: 1,
           second: { archived: [], reachedLimit: false },
         });
+      });
+
+      // -----------------------------------------------------------------
+      // [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15
+      // （Issue #305）: `opts.clock` の2軸。
+      //
+      // ⚠ **境界の非対称を1バイトも変えずに写す**（決めたこと14）: ゲート
+      // （`VectorFilter.decayFloorSeqAfter`、`vector-store-conformance.ts`）は狭義の `>`
+      // （境界は落ちる）、掃引はここで見るとおり境界を含む `<=`。片方だけ `>=` にする
+      // 実装ミスは、境界1件のズレとして歯に出ないまま紛れ込みうる——だから両方に
+      // 同じ形の境界の歯を置く。
+      // -----------------------------------------------------------------
+
+      it("archiveDecayed(clock: 'activity') は decayFloorSeq <= nowSeq（境界を含む）の Memory だけを対象にする。decayFloorSeq が NULL の行は対象にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        const nowSeq = 1000;
+
+        const decayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-target",
+            decayFloorAt: now, // 壁時計は無関係であることを示すため、あえて境界に置く。
+            decayFloorSeq: nowSeq - 1,
+          }),
+        );
+        // 境界そのもの（decayFloorSeq === nowSeq）も対象に含む——`<=`、境界を含む
+        // （`decayFloorAtAfter`/`decay_floor_at <= now` の境界の歯と同じ形）。
+        const boundary = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-boundary",
+            decayFloorAt: now,
+            decayFloorSeq: nowSeq,
+          }),
+        );
+        const notYetDecayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-not-yet",
+            decayFloorAt: now,
+            decayFloorSeq: nowSeq + 1,
+          }),
+        );
+        // decayFloorSeq が NULL（この軸を使っていない）の行は 'activity' 単独では対象外
+        // （ADR 0163 決めたこと4「NULL はこの軸には床が無い」——掃引側も NULL を拾わない）。
+        const nullSeq = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-null",
+            decayFloorAt: now,
+          }),
+        );
+
+        const result = await store.archiveDecayed!(ctx, {
+          now,
+          nowSeq,
+          clock: "activity",
+          limit: 10,
+        });
+
+        const archivedIds = new Set(result.archived.map((a) => a.memoryId));
+        expect(archivedIds).toEqual(new Set([decayed.id, boundary.id]));
+        expect((await store.get(ctx, notYetDecayed.id))?.status).toBe("active");
+        expect((await store.get(ctx, nullSeq.id))?.status).toBe("active");
+      });
+
+      it("archiveDecayed(clock: 'either') は AND——両方の軸で沈んでいる Memory だけを対象にする（ゲートの OR とは逆向き）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        const nowSeq = 1000;
+        const decayedAt = new Date(now.getTime() - 1_000);
+        const notYetAt = new Date(now.getTime() + 1_000);
+
+        const bothDecayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-either-both",
+            decayFloorAt: decayedAt,
+            decayFloorSeq: nowSeq - 1,
+          }),
+        );
+        const onlyWallDecayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-either-wall-only",
+            decayFloorAt: decayedAt,
+            decayFloorSeq: nowSeq + 1,
+          }),
+        );
+        const onlySeqDecayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-either-seq-only",
+            decayFloorAt: notYetAt,
+            decayFloorSeq: nowSeq - 1,
+          }),
+        );
+
+        const result = await store.archiveDecayed!(ctx, {
+          now,
+          nowSeq,
+          clock: "either",
+          limit: 10,
+        });
+
+        expect(new Set(result.archived.map((a) => a.memoryId))).toEqual(new Set([bothDecayed.id]));
+        expect((await store.get(ctx, onlyWallDecayed.id))?.status).toBe("active");
+        expect((await store.get(ctx, onlySeqDecayed.id))?.status).toBe("active");
       });
     } else {
       it("archiveDecayed は任意メソッドであり、この adapter は実装していない", async () => {

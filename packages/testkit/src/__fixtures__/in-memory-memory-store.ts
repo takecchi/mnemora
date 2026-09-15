@@ -79,6 +79,15 @@ export class InMemoryMemoryStore implements MemoryStore {
   readonly events: MemoryEvent[] = [];
   /** `InMemoryOutboxStore` と共有する outbox ジョブの配列（同一プロセス内の参照共有）。 */
   readonly outboxJobs: OutboxJobRecord[] = [];
+  /**
+   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと5
+   * （Issue #305）: `tenant_activity` 相当のテナントごとの活動カウンタ。
+   * `InMemoryTenantSettingsStore` にこの Map をそのまま渡すことで、`createRecall`
+   * （書く側）と `getActivitySeq`（読む側）が同じ値を見る——`outboxJobs`/`events` と
+   * 同じ「同一プロセス内の参照共有」の形（`packages/core/src/__tests__/runtime-fakes.ts`
+   * の `FakeBackingStore.activitySeq` と同じ設計）。
+   */
+  readonly activitySeq = new Map<string, number>();
 
   /**
    * ADR 0054: 「既存を引く」と「挿入する」を1つの同期区間に閉じ、`created` をその判定
@@ -247,6 +256,12 @@ export class InMemoryMemoryStore implements MemoryStore {
         strength: input.strength,
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: input.decayFloorAt,
+        // ADR 0163（Issue #305）: 活動時計の3つ組。省略可能なフィールドなので `?? null` で
+        // 転記しないと `undefined` のまま消える——これが前任の作業者が実際に踏んだ漏れ1
+        // （core commit 5e37afb の doc 参照）。ここで同じ漏れを作らない。
+        decayBaseSeq: input.decayBaseSeq ?? null,
+        decayFloorSeq: input.decayFloorSeq ?? null,
+        halfLifeRecalls: input.halfLifeRecalls ?? null,
         embeddingStatus: input.embeddingStatus,
         purgedAt: input.purgedAt ?? null,
         createdAt: now,
@@ -807,9 +822,22 @@ export class InMemoryMemoryStore implements MemoryStore {
     };
   }
 
+  /**
+   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと5
+   * （Issue #305）: `record.advanceActivityClock === true` のとき `this.activitySeq` を
+   * `+1` する——`await` を挟まない同期区間で行を作るのと同じ処理の中で行うことで、
+   * `PostgresMemoryStore.createRecall` の「同一トランザクション」を模す
+   * （`createObservationIdempotent`（ADR 0054）と同じ作法）。**`false`/未指定なら
+   * 一切触らない**（既定 `'wall'` のテナントで `activity_seq` が動かない、という
+   * ADR の意味論をここでも守る）。
+   */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     const id = nextId("rcl");
     this.recalls.set(id, { ...record, tenantId: ctx.tenantId, createdAt: new Date() });
+    if (record.advanceActivityClock === true) {
+      const current = this.activitySeq.get(ctx.tenantId) ?? 0;
+      this.activitySeq.set(ctx.tenantId, current + 1);
+    }
     return id;
   }
 
@@ -884,23 +912,44 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0114: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` かつ
-   * `decayFloorAt <= opts.now`（境界を含む）の Memory を `decayFloorAt` 昇順で
-   * `opts.limit` 件まで選び、`status='archived'` への更新と `kind='archived'` の
-   * イベント追記を1つの同期区間（`await` を挟まない）で行う——
-   * `requeueEmbedJobs` / `supersedeWithNewMemories` と同じ作法で、
-   * postgres 実装の単一トランザクションを模す。
+   * ADR 0114 / [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15
+   * （Issue #305）: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` の Memory を
+   * `opts.clock`（省略時 `'wall'`）で選び、`decayFloorAt` 昇順で `opts.limit` 件まで
+   * `status='archived'` への更新と `kind='archived'` のイベント追記を1つの同期区間
+   * （`await` を挟まない）で行う——`requeueEmbedJobs` / `supersedeWithNewMemories` と
+   * 同じ作法で、postgres 実装の単一トランザクションを模す。
+   *
+   * `opts.clock` の分岐は `PostgresMemoryStore`/`buildArchiveDecayedTargetSelect`
+   * （`packages/postgres/src/memory-store.ts`）と同じ形——**境界の非対称
+   * （ゲートは狭義 `>`、掃引は境界を含む `<=`）を1バイトも変えずに写す**。
+   * `'either'` は AND（両方の軸で沈んでいるものだけ掃く。ゲートの OR とは逆向き、
+   * `ArchiveDecayedOptions.clock` の doc コメント参照）。
    *
    * `digestSnapshot` には更新前の `digest` を入れる（`updateStatusWithEvent` を経由する
    * `forget` と同じ規約、docs/memory-model.md §9）。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
     const nowMs = opts.now.getTime();
+    const clock = opts.clock ?? "wall";
+    const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
+    const passesActivity = (m: Memory): boolean => {
+      if (opts.nowSeq === undefined) {
+        throw new Error(
+          `InMemoryMemoryStore.archiveDecayed: opts.nowSeq is required when clock is "${clock}"`,
+        );
+      }
+      const decayFloorSeq = m.decayFloorSeq ?? null;
+      return decayFloorSeq !== null && decayFloorSeq <= opts.nowSeq;
+    };
+    const passesClock = (m: Memory): boolean => {
+      if (clock === "wall") return passesWall(m);
+      if (clock === "activity") return passesActivity(m);
+      // 'either': AND（両方の軸で沈んでいるものだけ掃く）。
+      return passesWall(m) && passesActivity(m);
+    };
+
     const targets = [...this.memories.values()]
-      .filter(
-        (m) =>
-          m.tenantId === ctx.tenantId && m.status === "active" && m.decayFloorAt.getTime() <= nowMs,
-      )
+      .filter((m) => m.tenantId === ctx.tenantId && m.status === "active" && passesClock(m))
       .sort(
         (a, b) =>
           a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
