@@ -379,6 +379,46 @@ Memory は即座にまた `archived` へ戻る。** これは実際に歯で確�
 5. **`docs/architecture.md` §3.2 の動詞一覧を更新していない。** ADR 0114
    （`sweepArchive`）・ADR 0089（`consolidate`）・ADR 0091（`reflect`）も
    この文書を更新しておらず、同じ前例に倣った。
+6. **🔴 決定3の「破壊的変更にならない」という判断は、この repo の中でしか検証していない。**
+   `grep`/`rg` で確認した射程は `packages/*/src`（`packages/core`・`packages/postgres`・
+   `packages/openai`・`packages/local-embedding`・`packages/anthropic`——出荷対象パッケージの
+   ソースそのもの）までであり、**`@mnemora/core` を消費する repo の外側の利用者は
+   見ていない・見られない。**
+
+   **`@mnemora/core` は npm 公開済みである。** TypeScript の union に値を1つ足すことは、
+   `MemoryEventKind` を**網羅的に**分岐している外部の利用者のコードにとっては
+   非互換になりうる——例えば
+
+   ```ts
+   switch (event.kind) {
+     case "created": /* ... */ break;
+     // ...
+     default: {
+       const exhaustive: never = event.kind; // "restored" を足すとここが型エラーになる
+       throw new Error(`unreachable: ${exhaustive}`);
+     }
+   }
+   ```
+
+   のような、`never` への代入で網羅性を強制するパターンを書いている利用者は、
+   このバージョンへ上げると**その利用者側のコンパイルが壊れうる。** ⟹
+   **「この repo 内では破壊的変更にならない」ことと「利用者にとって破壊的変更に
+   ならない」ことは別の主張であり、本 ADR が現物で確認したのは前者だけである。**
+
+   **それでも `"restored"` を足す判断をした理由**:
+   - `@mnemora/core` は `0.x` であり、semver 上マイナー・パッチ双方でこの種の変更は
+     許容される（ADR 0070 の versioning 方針）。
+   - `MemoryEventKind` はイベント分類として今後も育つことが前提の型である
+     （現に `"archived"`（ADR 0114 の前後どこかの時点）・本 ADR の `"restored"` と、
+     Phase の進行とともに値が増えてきた）。**union を「二度と値を足さない」前提で
+     固定すると、監査ログの分類そのものが陳腐化する**——足さない側のコストが、
+     足す側が外部の網羅的 `switch` に与えうるコストより大きいと判断した。
+   - **この repo 内に、`MemoryEventKind` を網羅的に分岐する消費側が無いことは
+     確認済みである**（決定3の `grep` 結果）。危険が及ぶとすれば repo の外側の
+     利用者だけであり、その存在・数・書き方は本 ADR の作業者からは観測できない。
+
+   **⚠ これは「測っていない」ではない。**観測できないことを承知のうえで、
+   足す側を選んだという判断そのものが負債である。
 
 ---
 
@@ -395,6 +435,11 @@ Memory は即座にまた `archived` へ戻る。** これは実際に歯で確�
   `decay_floor_at` の再計算をこのメソッドに含める。そのときも ADR 0041/0048 の
   契約自体（`reinforce` の意味）は変えない前提で設計できる（`restoreArchived` 側が
   `defaultDecayStrategy` を呼ぶだけで足りる）。
+- **外部の利用者から「`MemoryEventKind` を網羅的に分岐していたコードが、この版への
+  更新で壊れた」という報告が実際に来たとき**（引き受けた負債6）——そのときは
+  union を分岐する既知の消費パターンが実在すると確定するので、以降の値追加は
+  major バージョンでの通知（CHANGELOG での明記等）を伴わせるかどうかを検討する
+  材料になる。
 
 ---
 
