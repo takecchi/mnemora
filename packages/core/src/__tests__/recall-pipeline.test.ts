@@ -565,7 +565,7 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
   // `0.5 ** (0 / 0)` が `NaN` になる（実測: +1ms なら 0、−1ms なら +Infinity）。
   // この歯の時計は `NOW` に固定してあり、`recordedAt` も `NOW` なので経過時間は厳密に 0。
   //
-  // ⚠ 2026-09（ADR 0147・Issue #196）追記: `halfLifeHours: 0` は `defaultDecayStrategy.floorAt`
+  // ⚠ 2026-09（ADR 0153・Issue #196）追記: `halfLifeHours: 0` は `defaultDecayStrategy.floorAt`
   // の `hours = 0 * log2(...)  = 0` により `decayFloorAt === recordedAt === NOW` になる——
   // 忘却ゲートの境界（狭義の `>`）にちょうど乗り、**既定では段1にすら候補として現れなくなる**
   // （score_not_comparable に届く前に、忘却ゲートが「decayed」として先に落とす）。
@@ -603,7 +603,7 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
     await createEmbeddedMemory(stores, [1, 0], { digest: "壊れた", halfLifeHours: 0 });
     await createEmbeddedMemory(stores, [1, 0], { digest: "正常" });
 
-    // includeFullyDecayed: true の理由は上の describe 冒頭コメント（ADR 0147）を参照。
+    // includeFullyDecayed: true の理由は上の describe 冒頭コメント（ADR 0153）を参照。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 10,

@@ -1,4 +1,4 @@
-# ADR 0147: recall の段1に忘却ゲート（`decay_floor_at`）を既定で通す — opt-in ではなく opt-out、黙って減らさない
+# ADR 0153: recall の段1に忘却ゲート（`decay_floor_at`）を既定で通す — opt-in ではなく opt-out、黙って減らさない
 
 - **状態**: 採用 (2026-09)
 

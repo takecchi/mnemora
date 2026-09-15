@@ -726,9 +726,9 @@ export interface RestoreArchivedOptions {
  * - `"restored"`: 今回の呼び出しで実際に `status` を `archived` から `active` へ動かし、
  *   `memory_events` に `kind: 'restored'` を積んだ。`previousStatus` は常に `"archived"`
  *   （このメソッドが動かす遷移はこの1本だけであり、他の値を取らない）。
- *   **⚠ 2026-09 追記（マネージャー決定、Issue #196 / [ADR 0147](../../../docs/decisions/0147-recall-decay-floor-gate.md)）:
+ *   **⚠ 2026-09 追記（マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）:
  *   `status` の復帰に続けて `MemoryStore.reinforce` も呼ぶ**（`decay_floor_at` を
- *   復帰の瞬間から引き直す。理由は `restoreArchived` の JSDoc・ADR 0147 を参照）。
+ *   復帰の瞬間から引き直す。理由は `restoreArchived` の JSDoc・ADR 0153 を参照）。
  *   **`reinforce` が失敗しても、既に成功した `status` の復帰は握り潰さない**
  *   ——`kind` は `"restored"` のままで、失敗は `reinforceError` に運ぶ
  *   （additive。省略時は成功、または対象が無かった旧来の形と区別が付かないという
@@ -756,7 +756,7 @@ export type RestoreArchivedOutcome =
       previousStatus: "archived";
       /**
        * `status` の復帰に続けて試みた `reinforce` が失敗した場合だけ在る
-       * （マネージャー決定、Issue #196 / ADR 0147）。省略時（`undefined`）は
+       * （マネージャー決定、Issue #196 / ADR 0153）。省略時（`undefined`）は
        * `reinforce` も成功したことを意味する——「試みていない」という第3の状態は
        * 無い（`reinforce` は復帰が成功した全件に対して必ず試みる）。
        */
@@ -1161,10 +1161,10 @@ export interface Runtime {
    * 同じ規律。docs/memory-model.md §9）。`opts.reason` を渡すと `meta.reason` に入り、
    * 省略すると `meta` に `reason` キー自体を持たせない。
    *
-   * ⚠ **2026-09 訂正（マネージャー決定、Issue #196 / [ADR 0147](../../../docs/decisions/0147-recall-decay-floor-gate.md)）:
+   * ⚠ **2026-09 訂正（マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）:
    * `decay_floor_at` は動かす。** ADR 0122 の当初決定は「復帰と強化は別の操作であり、
    * `decay_floor_at` の再計算は複製しない。居着かせたい呼び出し側が `reinforce` を
-   * 別途呼ぶこと」だった。**この決定は ADR 0147 が覆した。** 理由は、ADR 0147 が
+   * 別途呼ぶこと」だった。**この決定は ADR 0153 が覆した。** 理由は、ADR 0153 が
    * `recall()` に既定 ON の忘却ゲート（`decayFloorAt <= now` の Memory を候補から
    * 除外する）を導入したことで、上記の「引き受けた負債」が実害に変わったため——
    * `sweepArchive` が `archived` にする選定条件はまさに `decayFloorAt <= now` であり、
@@ -1177,7 +1177,7 @@ export interface Runtime {
    * 続けて `MemoryStore.reinforce(ctx, id, now)` を呼ぶ**（新しい interface・adapter
    * は増やさない。既存の契約された口をそのまま呼ぶだけ）。**復帰させるという行為
    * そのものが「この記憶がいま必要だ」という明示の信号であり、北極星が言う
-   * 「必要な場合」に当たる、というのが ADR 0147 の意味づけである。**
+   * 「必要な場合」に当たる、というのが ADR 0153 の意味づけである。**
    *
    * `reinforce` が失敗しても、既に成功した `status` の復帰は握り潰さない——`outcomes`
    * の `kind` は `"restored"` のままで、失敗は `RestoreArchivedOutcome` の
@@ -1189,7 +1189,7 @@ export interface Runtime {
    * `docs/recall.md` §2 段0「スコープの外延」・§5 の被覆不変条件のどちらも、
    * この操作のために1行も変更していない。**変わったのはこのメソッドが `reinforce`
    * も呼ぶようになったことだけであり**、それによって `decayFloorAt` が「いま」より
-   * 先へ進むので、既定の忘却ゲート（ADR 0147）を通過できるようになる。
+   * 先へ進むので、既定の忘却ゲート（ADR 0153）を通過できるようになる。
    */
   restoreArchived(
     ctx: Ctx,
@@ -2238,11 +2238,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
         byId.set(id, memory);
 
-        // マネージャー決定（Issue #196 / ADR 0147「restoreArchived と忘却ゲートの
+        // マネージャー決定（Issue #196 / ADR 0153「restoreArchived と忘却ゲートの
         // 相互作用」）: 復帰そのものが「いま必要だ」という明示の信号なので、
         // reinforce して decay_floor_at を復帰の瞬間から引き直す。これをしないと、
         // status は active に戻ったのに decayFloorAt が過去を指したままなので、
-        // recall() の既定の忘却ゲート（ADR 0147、`RecallQuery.includeFullyDecayed`
+        // recall() の既定の忘却ゲート（ADR 0153、`RecallQuery.includeFullyDecayed`
         // の既定 false）に阻まれて recall に二度と現れない——「必要な場合だけ過去の
         // 記憶を再び呼び戻せる」（docs/north-star.md「目指す姿」）と正面から食い違う。
         // interface/adapter は増やさない——既存の契約された口 `reinforce`

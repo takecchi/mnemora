@@ -271,10 +271,10 @@ export async function runRecall(
   const wantsAnn = channels.includes("ann");
   const wantsLexical = channels.includes("lexical");
 
-  // 忘却ゲート（decay floor gate、マネージャー決定、Issue #196 / ADR 0147）。
+  // 忘却ゲート（decay floor gate、マネージャー決定、Issue #196 / ADR 0153）。
   // 既定で有効——opt-in ではなく opt-out（`RecallQuery.includeFullyDecayed`）。
   // ADR 0011「Phase 1 では decayFloorAtAfter を読み取りフィルタに使わない」を
-  // ADR 0147 が明示的に上書きしている。
+  // ADR 0153 が明示的に上書きしている。
   const decayGateActive = validatedQuery.includeFullyDecayed !== true;
 
   // 🔴 配線されていない語彙チャンネルを明示的に要求されたら、ここで投げる（ADR 0084 §4）。
@@ -343,12 +343,12 @@ export async function runRecall(
         excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
         occurredAfter: scope.occurredAfter,
         occurredBefore: scope.occurredBefore,
-        // ADR 0147（Issue #196）が ADR 0011「Phase 1 では decayFloorAtAfter を
+        // ADR 0153（Issue #196）が ADR 0011「Phase 1 では decayFloorAtAfter を
         // 読み取りフィルタに使わない」を明示的に上書きした。既定（decayGateActive）では
         // 「いま」を押し下げ、`decayFloorAt` を過ぎた（完全に減衰しきった）Memory を
         // 段1の候補集合そのものから外す——over-fetch の窓（k'）を、まだ生きている記憶で
         // 埋める方向に働く。`includeFullyDecayed: true` を渡すと `undefined` になり、
-        // ADR 0147 より前の挙動（decayFloorAtAfter を渡さない）に戻る。
+        // ADR 0153 より前の挙動（decayFloorAtAfter を渡さない）に戻る。
         decayFloorAtAfter: decayGateActive ? now : undefined,
       },
       // subjectId は等値一致なので段1に降ろす（ADR 0023）。excludeProvenanceKinds も
@@ -370,7 +370,7 @@ export async function runRecall(
     stages.push({
       stage: "candidate_generation",
       executed: candidateGenerationExecuted,
-      // decayGate（ADR 0147）: ANN は段1の VectorFilter.decayFloorAtAfter へ押し下げる
+      // decayGate（ADR 0153）: ANN は段1の VectorFilter.decayFloorAtAfter へ押し下げる
       // ——落ちた件数は原理的に数えられない（ADR 0011 と同じ理由）ので、ここでは
       // 「適用されたかどうか」だけを名乗る。件数は omitted.filtered(condition:'decayed') を見よ。
       detail: {
@@ -411,7 +411,7 @@ export async function runRecall(
     stages.push({
       stage: "candidate_generation",
       executed: lexicalExecuted,
-      // decayGate（ADR 0147）: `LexicalFilter` は decayFloorAtAfter を持たない
+      // decayGate（ADR 0153）: `LexicalFilter` は decayFloorAtAfter を持たない
       // （マネージャー決定3 — interface/adapter を増やさない）。代わりに core が
       // 全チャンネル共通の後置フィルタで同じ述語（`memory.decayFloorAt > now`）を掛ける
       // ——語彙チャンネルだけ減衰しきった記憶が返り続ける非対称を消す。
@@ -470,7 +470,7 @@ export async function runRecall(
   const memoriesById = new Map(fetchedMemories.map((m) => [m.id, m]));
 
   const excludeKinds = new Set(validatedQuery.excludeProvenanceKinds ?? []);
-  // 忘却ゲート（decay floor gate、マネージャー決定、Issue #196 / ADR 0147）の後置フィルタで
+  // 忘却ゲート（decay floor gate、マネージャー決定、Issue #196 / ADR 0153）の後置フィルタで
   // 実際に落とした件数。ANN の押し下げ分はここに含まれない（原理的に数えられない）ので、
   // これは常に「少なくともこれだけは落ちた」という下限である（下の omitted push を参照）。
   let decayFilteredCount = 0;
@@ -501,7 +501,7 @@ export async function runRecall(
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
     if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
     if (excludeKinds.has(memory.provenance.kind)) continue;
-    // 忘却ゲート（ADR 0147）: `LexicalFilter` に decayFloorAtAfter を足さず（マネージャー決定3）、
+    // 忘却ゲート（ADR 0153）: `LexicalFilter` に decayFloorAtAfter を足さず（マネージャー決定3）、
     // ここで**全チャンネル共通**の述語を適用する——ANN の候補にも同じ述語が掛かる。
     // 既定で押し下げている ANN の候補は `memory.decayFloorAt > now` を段1で既に満たして
     // いるはずなので、通常はここでは何も落とさない（実際に落ちないことを歯で検算する。

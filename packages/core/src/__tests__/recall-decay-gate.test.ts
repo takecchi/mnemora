@@ -10,10 +10,10 @@ import type { FakeVectorStore } from "./runtime-fakes.js";
 
 /**
  * 忘却ゲート（decay floor gate）の歯（マネージャー決定、Issue #196 /
- * [ADR 0147](../../../docs/decisions/0147-recall-decay-floor-gate.md)）。
+ * [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
  *
  * ADR 0011「Phase 1 では `decayFloorAtAfter` を読み取りフィルタに使わない」を
- * ADR 0147 が明示的に上書きした——recall は既定でこのゲートを有効にする
+ * ADR 0153 が明示的に上書きした——recall は既定でこのゲートを有効にする
  * （opt-in ではなく opt-out。`RecallQuery.includeFullyDecayed`）。
  *
  * `recall-period-filter.test.ts`（ADR 0059）と同型: `packages/core` 自身のテストなので
@@ -112,7 +112,7 @@ async function createEmbeddedMemory(
 // includeFullyDecayed:true で undefined に戻る。
 // ---------------------------------------------------------------------------
 
-describe("recall() — 段1の filter に decayFloorAtAfter が載ること（配線の歯、ADR 0147）", () => {
+describe("recall() — 段1の filter に decayFloorAtAfter が載ること（配線の歯、ADR 0153）", () => {
   it("既定（includeFullyDecayed 未指定）では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る", async () => {
     const { runtime, stores } = buildRuntime();
     const capturedFilters = captureFilters(stores);
@@ -123,7 +123,7 @@ describe("recall() — 段1の filter に decayFloorAtAfter が載ること（�
     expect(capturedFilters[0]?.decayFloorAtAfter).toEqual(NOW);
   });
 
-  it("includeFullyDecayed: true では decayFloorAtAfter は undefined のまま渡る（ADR 0147 以前の挙動に戻す）", async () => {
+  it("includeFullyDecayed: true では decayFloorAtAfter は undefined のまま渡る（ADR 0153 以前の挙動に戻す）", async () => {
     const { runtime, stores } = buildRuntime();
     const capturedFilters = captureFilters(stores);
 
@@ -138,7 +138,7 @@ describe("recall() — 段1の filter に decayFloorAtAfter が載ること（�
 // ⭐ 本命の歯: ゲートが実際に何を変えるか（ANN チャンネル）。
 // ---------------------------------------------------------------------------
 
-describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チャンネル、ADR 0147）", () => {
+describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チャンネル、ADR 0153）", () => {
   it("decayFloorAt が過去（減衰しきった）記憶は既定では返らず、omitted にも explain にも黙って消えない", async () => {
     const { runtime, stores } = buildRuntime();
     const decayed = await createEmbeddedMemory(stores, [1, 0], {
@@ -208,7 +208,7 @@ describe("recall() — 忘却ゲートが実際に候補を落とす（ANN チ�
 // （マネージャー決定3）ので、core の後置フィルタだけがゲートを担う。
 // ---------------------------------------------------------------------------
 
-describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語で効く（後置フィルタ、ADR 0147）", () => {
+describe("recall() — 忘却ゲートが語彙チャンネルにも同じ述語で効く（後置フィルタ、ADR 0153）", () => {
   it("語彙チャンネルだけを使っても、減衰しきった記憶は既定では返らず、omitted に filtered(decayed) が実測件数で出る", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.memoryStore.createMemory(
@@ -328,7 +328,7 @@ class DecayFloorAtAfterStrippingVectorStore implements VectorStore {
   }
 }
 
-describe("recall() — 押し下げと後置フィルタは同じ述語であることの検算（ADR 0147 決めたこと3）", () => {
+describe("recall() — 押し下げと後置フィルタは同じ述語であることの検算（ADR 0153 決めたこと3）", () => {
   it("段1の adapter が decayFloorAtAfter を無視しても、core の後置フィルタが同じ述語で拾う（多層防御）", async () => {
     const { runtime, stores } = buildRuntime({
       vectorStoreOverride: (fvs) => new DecayFloorAtAfterStrippingVectorStore(fvs),

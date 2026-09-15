@@ -54,7 +54,7 @@ export interface FilteredOmission {
    *   という意味で `"tenant"` とは性質が違う。
    *
    * **`"decayed"`（マネージャー決定、Issue #196 /
-   * [ADR 0147](../../../docs/decisions/0147-recall-decay-floor-gate.md)）**:
+   * [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）**:
    * `decayFloorAt` を過ぎた（＝完全に減衰しきった）Memory が recall の候補から
    * 外れたことを表す。**`"archived"` に相乗りさせない**——`archived` は
    * `status` 列によるゲート（掃引が明示的に書き換えた状態）だが、`"decayed"` は
@@ -920,23 +920,23 @@ export interface RecallQuery {
   digestBandLimit?: number;
   /**
    * **忘却ゲート（decay floor gate）の明示的な opt-out**
-   * （マネージャー決定、Issue #196 / [ADR 0147](../../../docs/decisions/0147-recall-decay-floor-gate.md)）。
+   * （マネージャー決定、Issue #196 / [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）。
    *
    * **既定（省略 = `false`）では、`decayFloorAt` を過ぎた（＝完全に減衰しきった）Memory は
    * recall の候補から外れる。**ANN チャンネル（段1）は `VectorFilter.decayFloorAtAfter` に
    * 「いま」を押し下げ、語彙チャンネルは `LexicalFilter` を増やさず core の後置フィルタで
-   * 同じ述語（`memory.decayFloorAt > now`）を適用する（ADR 0147「決めたこと」3）。
+   * 同じ述語（`memory.decayFloorAt > now`）を適用する（ADR 0153「決めたこと」3）。
    *
    * **⚠ これは破壊的変更である。**[ADR 0011](../../../docs/decisions/0011-no-window-count-in-ann-stage.md)
    * の「Phase 1 では `decayFloorAtAfter` を読み取りフィルタに使わない」という決定を、
-   * ADR 0147 が明示的に上書きしている——**「使われない記憶が、静かに遠ざかる」
+   * ADR 0153 が明示的に上書きしている——**「使われない記憶が、静かに遠ざかる」
    * （docs/north-star.md「目指す姿」）を、掃引（`status='archived'`）を呼んでいない期間にも
    * 効かせるため。**
    *
    * `true` を渡すと、この PR より前の挙動（減衰しきった Memory も候補に残り続ける）に戻る
    * ——北極星の問い2（「これを無効にしたとき、Memory Framework として成立するか」）に
    * 応じて用意した明示的な逃げ道であり、既定を opt-in にする代わりに opt-out を持たせる形
-   * （ADR 0147「検討した代替案」）。
+   * （ADR 0153「検討した代替案」）。
    *
    * `true` を渡したときの `explain.stages` の `candidate_generation` の `detail.decayGate`
    * は `"disabled"` になる（既定は ANN が `"pushed_down"`、語彙が `"post_filtered"`）——

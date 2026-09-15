@@ -394,7 +394,7 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           {
             stage: "candidate_generation",
             executed: true,
-            // decayGate: ADR 0147（Issue #196）以降、既定で忘却ゲートが段1へ押し下げられる
+            // decayGate: ADR 0153（Issue #196）以降、既定で忘却ゲートが段1へ押し下げられる
             // ——ここは②の「1バイトも変わらない」歯の対象外(この PR で意図的に破壊的変更した
             // 箇所そのもの。PR 本文参照)。
             detail: { channel: "ann", kPrime: 40, hits: 1, decayGate: "pushed_down" },
@@ -452,7 +452,7 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
     const candidateTraces = result.explain.stages.filter((s) => s.stage === "candidate_generation");
     expect(candidateTraces).toHaveLength(1);
     // detail が過不足なく { channel, kPrime, hits, decayGate } であること
-    // （toEqual は多すぎず少なすぎずを見る。decayGate は ADR 0147 で増えた欄）。
+    // （toEqual は多すぎず少なすぎずを見る。decayGate は ADR 0153 で増えた欄）。
     expect(candidateTraces[0]?.detail).toEqual({
       channel: "ann",
       kPrime: 40,

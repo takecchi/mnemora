@@ -17,10 +17,10 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  *   同一トランザクションで積む。
  * - 冪等寄りの設計: 既に `archived` でない対象は書き込みをせず `status_not_archived` を返す。
  * - `recall()` 側は一切変更していない——歯②（下の「往復」節）で裏取りする。
- * - **⚠ 2026-09 訂正（マネージャー決定、Issue #196 / [ADR 0147](../../../../docs/decisions/0147-recall-decay-floor-gate.md)）:
+ * - **⚠ 2026-09 訂正（マネージャー決定、Issue #196 / [ADR 0153](../../../../docs/decisions/0153-recall-decay-floor-gate.md)）:
  *   `decay_floor_at` は動かす。** ADR 0122 の当初決定（復帰の直後に `sweepArchive` を
  *   同じ `now` で呼べば再び archived になりうる、というドキュメント化した既知の相互作用）は
- *   ADR 0147 が覆した——`restoreArchived` は `status` の復帰に続けて `reinforce` も呼ぶ。
+ *   ADR 0153 が覆した——`restoreArchived` は `status` の復帰に続けて `reinforce` も呼ぶ。
  *   下の「往復」節の最後の歯がこの新しい挙動（再び archived にならないこと）を検査する。
  *
  * `@mnemora/testkit` には依存しない（`forget.test.ts` と同じ理由。`runtime-fakes.ts` 冒頭の
@@ -361,7 +361,7 @@ describe("runtime.restoreArchived — 打ち切り（競合でない例外）", 
   });
 });
 
-describe("runtime.restoreArchived — reinforce が失敗しても status の復帰は握り潰さない（マネージャー決定、Issue #196 / ADR 0147）", () => {
+describe("runtime.restoreArchived — reinforce が失敗しても status の復帰は握り潰さない（マネージャー決定、Issue #196 / ADR 0153）", () => {
   it("reinforce が例外を投げても outcome は 'restored' のままで、reinforceError にメッセージが入る。status は active のまま", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
@@ -441,7 +441,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
 
-    // ⚠ 2026-09（ADR 0147・Issue #196）追記: このフィクスチャは `sweepArchive` の
+    // ⚠ 2026-09（ADR 0153・Issue #196）追記: このフィクスチャは `sweepArchive` の
     // 選定条件（decayFloorAt <= now）を満たすために意図的に「既に減衰しきっている」
     // 状態で作る——この describe が検査したい対象は `status` の往復
     // （active → archived → active）であって、忘却ゲートではない。**ゲートは既定で
@@ -496,10 +496,10 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     expect(after.index.totalInScope).toBe(totalInScopeBefore);
   });
 
-  it("⚠ 訂正済みの相互作用（ADR 0147・Issue #196）: 復帰は reinforce も行うため、同じ now で sweepArchive をもう一度呼んでも再び archived にならない", async () => {
+  it("⚠ 訂正済みの相互作用（ADR 0153・Issue #196）: 復帰は reinforce も行うため、同じ now で sweepArchive をもう一度呼んでも再び archived にならない", async () => {
     // この歯はかつて逆のことを検査していた（ADR 0122 の当初決定「decay_floor_at は
     // 動かさない」の下では、同じ now での2回目の sweepArchive が即座に再び archived に
-    // していた）。ADR 0147 がその決定を覆したので、期待値も逆になる——「動かなくなった」
+    // していた）。ADR 0153 がその決定を覆したので、期待値も逆になる——「動かなくなった」
     // のではなく「動くようになった」ことを固定する。
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(
@@ -521,7 +521,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
 
     const secondSweep = await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
 
-    // 🔴 ADR 0147 が変えた点そのもの: 以前はここで [memory.id] を返し、即座に再び
+    // 🔴 ADR 0153 が変えた点そのもの: 以前はここで [memory.id] を返し、即座に再び
     // archived にしていた。reinforce 込みの復帰は decayFloorAt を「いま」より先へ
     // 動かすので、同じ now では二度と sweepArchive の対象にならない。
     expect(secondSweep.archived.map((a) => a.memoryId)).toEqual([]);
@@ -529,7 +529,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     expect(afterSecondSweep?.status).toBe("active");
   });
 
-  it("⭐ ADR 0147 が塞いだ穴そのもの: 復帰後は includeFullyDecayed を渡さなくても recall() に現れる（忘却ゲートとの非対称が、修正が効いていることの証拠）", async () => {
+  it("⭐ ADR 0153 が塞いだ穴そのもの: 復帰後は includeFullyDecayed を渡さなくても recall() に現れる（忘却ゲートとの非対称が、修正が効いていることの証拠）", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(
       ctx,
@@ -541,7 +541,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
 
-    // 段0（復帰前）: 既定（忘却ゲート有効）では返らない——これは ADR 0147 が意図した
+    // 段0（復帰前）: 既定（忘却ゲート有効）では返らない——これは ADR 0153 が意図した
     // 挙動であり、includeFullyDecayed:true が要る（buildRuntime の他の歯が検査済み）。
     const before = await runtime.recall(ctx, { vector: [1, 0] });
     expect(before.memories.map((m) => m.memoryId)).not.toContain(memory.id);
@@ -549,7 +549,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
 
     // 段1（archived 中）: 既定でも includeFullyDecayed:true でも返らない
-    // （status ゲートで落ちる。これは ADR 0147 と無関係）。
+    // （status ゲートで落ちる。これは ADR 0153 と無関係）。
     const duringArchive = await runtime.recall(ctx, {
       vector: [1, 0],
       includeFullyDecayed: true,
