@@ -13,10 +13,15 @@ import { afterEach, describe, expect, it } from "vitest";
  *
  * 🔴 **このファイルが固定している線**:
  *
- * 1. **基準値と相違しても exit 0**(⛔ 門ではない。ADR 0133)。
- * 2. **`--baseline` を省略しても exit 0**——基準値ファイルがまだコミットされていない
- *    段階でも CI の summary 段が組める。
- * 3. **入力そのものが壊れていれば非0**(JSON が読めない・parse できない・rows が
+ * 1. **⭐ `compare` は他5本と違い門である(ADR 0133)**——`mnemoraShareOfNaiveChars` が
+ *    基準値より悪化(増加)した、または `factStatementSurvived` が true→false に
+ *    退行したら非0で終わる。
+ * 2. **それ以外の相違(`naiveChars` 等、退行の判定対象外の欄)だけなら exit 0**。
+ *    改善(`mnemoraShareOfNaiveChars` が減った / `factStatementSurvived` が
+ *    false→true)も exit 0。
+ * 3. **`--baseline` を省略すれば exit 0**——基準値が無ければ退行の判定そのものが
+ *    できない(門として機能しない)。
+ * 4. **入力そのものが壊れていれば非0**(JSON が読めない・parse できない・rows が
  *    欠ける・`--baseline` が壊れている)。
  *
  * DB もネットワークも要求しない——このスクリプトは JSON ファイルを最大2つ読むだけである。
@@ -100,10 +105,40 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     expect(result.stdout).toContain("一致(差分なし)");
   });
 
-  it("🔴 基準値と相違するときも exit 0（⛔ 門ではないことをここで固定する）", () => {
+  it("🔴 mnemoraShareOfNaiveChars が悪化(基準値より増加)したときは非0（⭐ 門。ADR 0133）", () => {
+    const baseline = baselineFrom(makeMeasured());
     const measured = makeMeasured();
-    const baseline = baselineFrom(measured);
-    baseline.rows[0].mnemoraShareOfNaiveChars = 0.1; // 「量が急に減った」に相当する変化
+    measured.rows[0].mnemoraShareOfNaiveChars = 5; // 基準値より大きい ⟹ 悪化
+    const result = run([
+      "--measured",
+      writeJson("measured.json", measured),
+      "--baseline",
+      writeJson("baseline.json", baseline),
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stdout).toContain("相違した会話長が 1 件ある");
+    expect(result.stderr).toContain("turnCount=2");
+    expect(result.stderr).toContain("mnemoraShareOfNaiveChars");
+  });
+
+  it("🔴 factStatementSurvived が true→false に退行したときは非0（⭐ 門。ADR 0133）", () => {
+    const baseline = baselineFrom(makeMeasured());
+    const measured = makeMeasured();
+    measured.rows[0].factStatementSurvived = false;
+    const result = run([
+      "--measured",
+      writeJson("measured.json", measured),
+      "--baseline",
+      writeJson("baseline.json", baseline),
+    ]);
+    expect(result.status).not.toBe(0);
+    expect(result.stderr).toContain("factStatementSurvived");
+  });
+
+  it("mnemoraShareOfNaiveChars が改善(基準値より減少)しただけなら exit 0", () => {
+    const baseline = baselineFrom(makeMeasured());
+    const measured = makeMeasured();
+    measured.rows[0].mnemoraShareOfNaiveChars = 0.01; // 基準値より小さい ⟹ 改善
     const result = run([
       "--measured",
       writeJson("measured.json", measured),
@@ -112,7 +147,20 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     ]);
     expect(result.status, result.stderr).toBe(0);
     expect(result.stdout).toContain("相違した会話長が 1 件ある");
-    expect(result.stdout).toContain("mnemoraShareOfNaiveChars");
+  });
+
+  it("退行の判定対象外の欄(naiveChars 等)だけが相違しても exit 0", () => {
+    const baseline = baselineFrom(makeMeasured());
+    const measured = makeMeasured();
+    measured.rows[0].naiveChars = 99999;
+    const result = run([
+      "--measured",
+      writeJson("measured.json", measured),
+      "--baseline",
+      writeJson("baseline.json", baseline),
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("naiveChars");
   });
 
   it("--measured を渡さないと非0", () => {

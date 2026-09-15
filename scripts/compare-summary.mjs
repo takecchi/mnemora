@@ -11,21 +11,30 @@
  * 2. ファイルを読んで JSON.parse する(壊れていたら理由を stderr に出して非0で終わる)
  * 3. 形を検査する(`validateMeasured`/`validateBaseline`。壊れていたら同様に非0)
  * 4. Markdown を stdout に出す
+ * 5. `--baseline` が在れば `computeRegressions` で退行を判定し、退行が在れば非0で終わる
  *
  * だけを行う。
  *
  * 使い方:
  *   node scripts/compare-summary.mjs --measured <path> [--baseline <path>]
  *
- * 🔴 **基準値ファイルと相違しても exit 0 のままである。**これは意図した設計であり、
- * バグではない——`./compare-summary-lib.mjs` の冒頭 docstring・ADR 0133 を読むこと。
- * **このスクリプトは門ではない。**非0になるのは、入力そのものが壊れているとき
+ * ⭐ **`compare` は他5本(retrieval-quality/identifier-probes/consolidation-cost/
+ * archive-sweep-cost/time-term)と違い、門である(ADR 0133)。**
+ * `--baseline` を渡し、かつ `mnemoraShareOfNaiveChars` の悪化 または
+ * `factStatementSurvived` の true→false 退行を検知したら、非0で終わる
+ * (`compare-summary-lib.mjs` の `computeRegressions`)。
+ *
+ * それ以外で非0になるのは、入力そのものが壊れているとき
  * (measured の JSON が読めない・parse できない・rows が欠ける・必須項目が無い。
- * `--baseline` を指定していて、それが読めない/壊れている場合も含む)だけである。
+ * `--baseline` を指定していて、それが読めない/壊れている場合も含む)である。
+ *
+ * `--baseline` を渡さない場合はこれまで通り exit 0(門として機能しない。
+ * 基準値が無ければ悪化の判定そのものができない)。
  */
 import { readFileSync } from "node:fs";
 import {
   buildSummaryMarkdown,
+  computeRegressions,
   validateBaseline,
   validateMeasured,
 } from "./compare-summary-lib.mjs";
@@ -101,6 +110,19 @@ console.log(
     ...(baselineValidated ? { baseline: baselineValidated.value } : {}),
   }),
 );
-// **明示的に 0 を宣言する**——`--baseline` が相違を含んでいても、ここまで来たら
-// 入力は壊れていない。門ではない、という設計の要をコード上で目に見える形にする。
+
+if (baselineValidated) {
+  const regressions = computeRegressions(measuredValidated.value, baselineValidated.value);
+  if (regressions.length > 0) {
+    console.error(
+      `[compare-summary] ⭐ 北極星の物差しが ${regressions.length} 会話長で退行した(ADR 0133 により門):`,
+    );
+    for (const regression of regressions) {
+      console.error(`  - turnCount=${regression.turnCount}: ${regression.reasons.join(" / ")}`);
+    }
+    process.exit(1);
+  }
+}
+
+// **明示的に 0 を宣言する**——ここまで来たら、入力は壊れておらず退行も無い。
 process.exit(0);
