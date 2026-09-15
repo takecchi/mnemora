@@ -291,7 +291,23 @@ export function calibrateRecallFootprint(
     borrowed.push("fixedIndexChars");
     const n = usable.length;
     const meanY = usable.reduce((a, s) => a + s.totalChars, 0) / n;
-    charsPerDigest = (meanY - fixedIndexChars) / usable[0]!.memoryCount;
+    const derived = (meanY - fixedIndexChars) / usable[0]!.memoryCount;
+    if (derived > 0) {
+      charsPerDigest = derived;
+    } else {
+      // ⚠ 借りた切片のほうが標本の総量より大きい ⟹ 傾きが 0 以下になる。
+      // **digest の平均長が負であることはありえない。**
+      //
+      // これは「標本が語っていること」ではなく「借りた値がこの環境に合っていない」
+      // ことの現れである。⟹ **その値をそのまま係数として採らない。**
+      // 借りていない顔で負の係数を返すと、以後の見積もりが静かに壊れる
+      // （`chars` が負になり、判定は常に `mnemora_smaller` へ倒れる）。
+      //
+      // 代わりに **傾きも借りたことにして、名前で出す。**
+      // 「決められなかった」を「決めた」と同じ顔で返さないための分岐である
+      // （`FootprintProfileOrigin` の doc、北極星「目指す姿」6本目）。
+      borrowed.push("charsPerDigest");
+    }
   } else {
     // 使える標本がない ⟹ 両方とも借りる。
     borrowed.push("charsPerDigest", "fixedIndexChars");
