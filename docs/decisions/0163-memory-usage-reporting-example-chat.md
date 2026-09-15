@@ -169,6 +169,27 @@ recall.ts`】——**この ADR は新しい欄を足していない。**繋い�
 
 **【実測】ブランチ**: `feat/301-memory-usage-reporting-example-chat`。
 
+**【実測】ADR 番号の衝突を、この1本の PR で3回踏んだ**（`docs/autonomy.md` §4
+「1つのセッションで3回起きた実績がある」の再現）。この repo は複数のエージェントが
+並行して PR をマージしており、`git fetch origin main` 直後に空きだと確認した番号が、
+push する頃には別の merge 済み PR に取られている、ということが3回連続で起きた:
+
+| 試行 | 選んだ番号 | 衝突相手 | 発覚した方法 |
+|---|---|---|---|
+| 1 | 0159 | PR #325（Issue #304）が main に merge 済みだった | `git fetch` 直後の再確認で事前に発覚 |
+| 2 | 0160 | PR #330（Issue #306、当時 open） | `git fetch` 直後の再確認で事前に発覚 |
+| 3 | 0161 | PR #328（Issue #312）が push 後に main へ merge された | CI の `typecheck / lint / test / build` ジョブの `adr-duplicate-number.test.mjs` が赤くなって発覚 |
+| 4 | 0162 | PR #320/#331 系（Issue #303）が push 後に main へ merge された | 同上 |
+| **5（採用）** | **0163** | （この ADR の作業時点で衝突なし） | `git fetch` 直後・push 直前の2回、`gh pr list --state open` も確認して押した |
+
+⟹ **「push 直前に確認する」だけでは、この repo の merge 速度には追いつかないことがある**
+——3・4回目は「確認して空きだった番号」が、CI 実行中〜完了までの数分の間に
+別 PR の merge で埋まった。**CI が検知して教えてくれる**
+（`scripts/__tests__/adr-duplicate-number.test.mjs`、Issue #315／PR #318
+「ADR 番号の重複を PR でも検出する」）ため実害は無かったが、
+同じ番号を採番し直す作業が3往復発生した——製品判断ではなく作業手順の記録として
+ここに残す。
+
 **【実測】ローカル Postgres 環境**（`DATABASE_URL` が元から無い作業環境のため、
 自分で用意した）:
 
@@ -262,13 +283,15 @@ examples/chat/compare-baseline.json と同じだった。
 `recall` を受け取るだけで撃たない）が実際にその行の測定値へ影響しないことの
 実測である。
 
-**【実測・追記】PR #332 の CI（`example-chat` ジョブ、run `35034603829`）が
-成功したのち、ADR 0133 が定めた本来の手順（`gh run download` で artifact を
-取得して比較する）でも同じ比較を行った**:
+**【実測・追記】PR #332 の CI（`example-chat` ジョブ、最終的な head sha
+`ded3034aafbe09369a6b39ef78e2d56650ec3095` の run `35037229437`。ADR 番号の
+衝突を3回踏んで採番し直した経緯は下記「測ったこと」参照）が成功したのち、
+ADR 0133 が定めた本来の手順（`gh run download` で artifact を取得して比較する）
+でも同じ比較を行った**:
 
 ```
-$ gh run download 35034603829 -n compare -D /tmp/ci-compare-332
-$ node scripts/compare-summary.mjs --measured /tmp/ci-compare-332/compare.json \
+$ gh run download 35037229437 -n compare -D /tmp/ci-compare-332-final
+$ node scripts/compare-summary.mjs --measured /tmp/ci-compare-332-final/compare.json \
     --baseline examples/chat/compare-baseline.json
 ✅ 一致(差分なし)。全会話長で北極星の物差し(mnemoraShareOfNaiveChars 他)が
 examples/chat/compare-baseline.json と同じだった。
