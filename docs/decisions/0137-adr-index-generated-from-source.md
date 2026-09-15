@@ -381,6 +381,28 @@ issue のコメントが指摘した「衝突は消えない」という D の�
      で復元し、`md5sum` が変異前と一致することを確認したうえで再実行すると、
      2本とも green に戻った（`main` を rebase で取り込むたびに同じ手順を
      やり直しており、都度ハッシュ値は変わるが手順と結果の形は変わらない）。
+- **【実測】手順そのもの（マージ直前・PRブランチ上での再生成）を、
+  ローカルの使い捨てブランチで再現した**（push はしていない。実際の PR には
+  一切影響しない。手順:）:
+  1. 本 PR の HEAD（`ec4b34a`）から `demo/fake-adr-9997` を切り、
+     `docs/decisions/9997-fake-demo-adr.md` を1本追加してコミットした
+     （**実際の ADR PR の作成者がやることと同じ**——`docs/decisions/README.md`
+     は一切触っていない）。
+  2. **「手順を飛ばした」場合**: `demo/main-like`（`main` の代役）へ
+     `demo/fake-adr-9997` を、再生成せずにそのまま `--no-ff` merge。
+     `ADR_INDEX_FRESHNESS_FORCE=1` で `main` 扱いを強制して
+     `adr-index-freshness.test.mjs` を実行すると、
+     `docs/decisions/README.md が陳腐化している: 索引に無い ADR: ["9997"]`
+     で**赤**になった——これがマネージャーの指摘した「陳腐化した squash
+     コミットが `main` に着地する」を模したケースである。
+  3. **「手順どおり」の場合**: `demo/fake-adr-9997` 上で
+     `node scripts/generate-adr-index.mjs` を実行してコミット（決定2番の
+     手順3）してから `demo/main-like` へ `--no-ff` merge。同じ強制フラグで
+     再実行すると**緑**になった（2 tests とも passed）。
+  4. 検証後、`demo/fake-adr-9997` / `demo/main-like` / `demo/mistake-no-regen`
+     の3ブランチをすべて `git branch -D` で削除し、`feat/230-adr-index-generated`
+     の HEAD が変わっていないこと（`git status --short` が空、`git log --oneline -1`
+     が `ec4b34a` のまま）を確認した。
 - **【実測】手元の6つの門**（この作業環境、`DATABASE_URL` 無し）:
   - `pnpm run typecheck`: 緑（7 workspace projects）
   - `pnpm run lint`: 緑（`eslint .` エラー無し）
@@ -398,13 +420,19 @@ issue のコメントが指摘した「衝突は消えない」という D の�
 
 ## 確かめていないこと
 
-- **GitHub Actions から `main` へ直接 push する経路の実現可能性**
-  （branch protection の扱い・トークンの権限・無限ループ防止）。この環境では
-  `gh` の書き込み権限が無く、実際に main へ push する実験ができない。
-  「引き受けた負債」1番・「これが覆るとしたら」1番に切り出した。
-- **鮮度検査が実際に `main` の CI 上で赤くなる場面**（本物の GitHub Actions が
-  `GITHUB_REF=refs/heads/main` を渡すこと自体は GitHub の公開仕様だが、
-  この repo の実際の CI 実行でそれを見たことはまだ無い）。CI 側で確認する。
-- **マージする側（マネージャー）が実際にこの手順（`generate-adr-index.mjs` の
-  実行 → commit → push）を毎回実行し続けられるか**——運用が定着するかどうかは
-  今回の実装時点では検証しようがない。
+- **GitHub Actions が `pull_request` イベントで PR ブランチへ自動 push する経路の
+  実現可能性**（この設計はもう `main` への直接 push には依存しないが、
+  「マージ側が手で行っている手順」を自動化するならこちらの経路になる。
+  branch protection が feature ブランチへの bot push をどう扱うか、
+  無限ループ防止などは、この環境では `gh` の書き込み権限が無く実験できない）。
+  「これが覆るとしたら」1番に切り出した。
+- **`main` の実際の CI 上で、鮮度検査が今回の設計どおり routine では
+  発火しないこと。** 本 PR 自体が `main` に着地する squash コミットで
+  この歯がどう振る舞うかは、CI 側で確認する（本 ADR の「測ったこと」は
+  ローカルの使い捨てブランチでの再現であり、本物の GitHub Actions 上の
+  `push: [main]` イベントでの確認ではない）。
+- **マージする側（マネージャー）が実際にこの手順（PR ブランチ上での
+  `git merge origin/main` → `generate-adr-index.mjs` の実行 → commit →
+  push → squash merge）を毎回実行し続けられるか**——運用が定着するかどうかは
+  今回の実装時点では検証しようがない。手順が本 ADR の想定より煩雑だと感じたら、
+  簡略化（例: 上の bot 自動化）を別途検討する価値がある。
