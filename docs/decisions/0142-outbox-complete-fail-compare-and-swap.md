@@ -32,20 +32,36 @@
 本 ADR が実装する変更（`complete`/`fail` が第三引数 `expectedAttempts` を必須で要求する
 ようになる)はこの条項に該当する。
 
-**マネージャー経由で、オーナー本人の回答として次を受領した**（逐語、本タスクの指示に
-そのまま示された文言。**私自身がオーナー本人に直接確認したものではない**）:
+**出所の連鎖を分けて書く**（クローンからマネージャー経由で受領した訂正に基づく。
+以下は誰が・何を問われて・何と答え・誰がどう解釈して援用したか、を分離して書く）:
 
-> **ほとんど使われていない(v0.X.X)の段階なので破壊的変更であっても構わず実装してください**
+1. **オーナー本人の発言**（マネージャー経由で受領。**私自身がオーナー本人に直接
+   確認したものではない**）:
 
-この文言は [ADR 0140](./0140-contested-write-side-companion-required.md) が Issue #243 に
-ついて引いたものと一字一句同じである。**同じ回答が別の issue にも適用される標準方針として
-転用されたのか、独立に同じ判断が今回も下ったのかは、私には分からない**——マネージャー経由の
-受領であり、出所を検算する手段がこの作業環境には無い。**ただし、いずれであっても
-「この具体的な変更（`OutboxStore.complete`/`fail` への `expectedAttempts` 追加）を実装して
-よい」という許可として使うことに支障は無い**と判断した——ADR 0140 と同じ理由（0.x・破壊的変更が
-許容される段階・記録は残す）がそのまま当てはまるため。
+   > **ほとんど使われていない(v0.X.X)の段階なので破壊的変更であっても構わず実装してください**
 
-**⟹ §3 の「公開 API の破壊的変更は提起までにする」条項は、この件については解けた。**
+   この発言は [ADR 0140](./0140-contested-write-side-companion-required.md) が
+   Issue #243（`MemoryStore` の書き込み側ガード）について引いたものと一字一句同じ
+   文言である。**⚠ これは「オーナーが Issue #233 について問われて答えたもの」では
+   ない。** 発言そのものは **`v0.x` という段階についての一般論**であり、特定の issue
+   を名指しして下されたものではない。
+2. **クローン（マネージャーの上位）が明示した射程**（マネージャー経由で受領、逐語）:
+
+   > 効くのは `docs/autonomy.md` §3 の「公開 API の破壊的変更は承認を待つ」条項だけです。
+   > ⛔ 他の ⛔ 条項には効きません。
+
+   ⟹ **この発言の射程は「§3 の破壊的変更条項」という条項単位であり、「特定の PR
+   （#260）1本」ではない。**
+3. **マネージャーが、上記2の射程指定に基づいて本 Issue（#233）へ援用した。** 本 ADR の
+   著者（担い手）はこの援用を受け取って実装した——**援用の判断自体はマネージャーが
+   行ったものであり、著者が独自に「#233 にも当てはまるはずだ」と拡大解釈したものでは
+   ない**（当初、著者はこの点を独自に判断せず、援用してよいか立ち止まって確認した。
+   その確認への回答が上記2である）。
+
+**⟹ §3 の「公開 API の破壊的変更は提起までにする」条項は、この件については解けた
+——ただし「オーナーが Issue #233 を承認した」という意味ではなく、「オーナーが述べた
+`v0.x` 段階についての一般論を、その条項に対する一般的な判断としてクローンが明示し、
+それをマネージャーが本 issue に援用した」という意味である。** この区別を消さずに書く。
 **「気にせず実装してよい」は「記録しなくてよい」ではない**——以下の「誰が壊れうるか」
 「移行の道」は、その記録として書く。
 
@@ -275,24 +291,41 @@ export class OutboxLeaseConflictError extends Error {
 同じ限界を持つ（弾かれた後に読み直した値であり、弾かれた瞬間の値そのものの保証では
 ない——doc コメント参照)。
 
-## 決定3: `runtime.tick`/`observe` の呼び出し元は、対応する `job`/`extractJob` オブジェクト
-## の `attempts` をそのまま渡す。`OutboxLeaseConflictError` を tick() 内では特別扱いしない
+## 決定3: `runtime.tick` は `OutboxLeaseConflictError` を検知すると、そのジョブだけを
+## 飛ばして残りのジョブの処理を続ける。`TickResult.leaseConflicts` に名指しで積む
 
 `packages/core/src/runtime.ts` の4箇所すべてで、直前に受け取った `OutboxJobRecord` の
 `attempts` を渡す(`handleExtractableObservation` の同期抽出パスは `extractJob.attempts`
 ——`createObservationWithOutbox` が返した生成直後の値、通常は`0`。`tick` のループは
 `job.attempts`——`claimBatch` が返した値)。
 
-**`tick()` は `OutboxLeaseConflictError` を catch しない。** ジョブ処理中に自分のリースが
-奪われるという事態が実際に起きた場合、その例外は `tick()` の呼び出し元まで伝播し、
-その回の `tick()` は残りの claim 済みジョブを処理せずに終わる（それらの行は、いずれ
-リースが切れれば別のワーカーに再 claim される——at-least-once の枠内)。**これは意図的な
-選択であり、黙って握りつぶす代替案より安全側に倒した**——「自分のリースはもう有効では
-ない」という事実を、`tick()` が knowingly 飲み込んで「何も無かった顔」で処理を続ける
-ほうが、この issue が塞ごうとしている「気づかれない上書き」の族に近い。**ただし、
-これは1回の `tick()` 呼び出しが複数ジョブを claim している場合、1件のリース競合が
-残り全部の処理を止めてしまうという意味でもある**——この振る舞いが運用上望ましいかは
-別途判断が要る余地として残す（下記「これが覆るとしたら」)。
+**⚠ 当初の実装案（`tick()` は `OutboxLeaseConflictError` を catch せず、`tick()` 全体を
+中断する）は、レビューで覆った。** レビュー（クローン経由）の指摘: **リース競合は異常
+ではなく、正常な並行の結果である。** `OutboxLeaseConflictError` が出るということは、
+**別のワーカーが既にそのジョブを終わらせたということ**であり、システムから見れば
+「その仕事は済んだ」であって失敗ではない。**⟹ 1件の良性の競合で、同じ tick 内の
+無関係な他のジョブ処理まで止めるのは、狭い事象を広い停止に変換する形であり、この PR が
+新しく持ち込むべきではない**——修正前は「静かに上書きする」だった壊れ方を、修正後に
+「1件の競合で `tick` が落ちる」という別の壊れ方に置き換えるだけになりかねない。
+
+**⟹ 実装を次の形に変えた**（当初案は「採らなかった案」に残す）:
+
+1. `TickResult` に `leaseConflicts: OutboxLeaseConflict[]`（`{ jobId, kind,
+   attemptedOutcome: "complete" | "fail" }`）を追加する。`processed`/`failed` の
+   どちらにも数えない——`unsupported`（ADR 0082）と同じ「無いの種類を潰さない」族。
+2. `tick` のループは、`complete`/`fail` の呼び出しが `OutboxLeaseConflictError` を
+   投げたら、そのジョブを `leaseConflicts` に積んで **`continue`**（次のジョブへ進む）。
+   `fail()` 自体が競合で弾かれるケース（「対応していない kind」を fail() で終端に
+   落とそうとした先で既に別ワーカーに奪われていた・処理失敗を fail() で記録しようと
+   した先で既に別ワーカーに奪われていた）も同様に扱う。
+3. **競合が起きたこと自体を黙って消さない。** `leaseConflicts` が空配列を既定にし
+   `undefined` にはならない（他の `TickResult` の欄と同じ規約）——ここに件数が
+   出ないと、「リース競合が実際に起きている」ことそのものが呼び出し側から見えなく
+   なり、`leaseMs` のチューニングが必要かどうかの唯一のシグナルを失う。
+
+**これにより、`tick()` は「良性の競合」と「本当の異常」を区別する**——競合でない例外
+（ハンドラの処理失敗・DB接続断等）は従来どおり `fail()` を試み、それも競合で弾かれない
+限り `failed` にカウントされる。競合だけが `leaseConflicts` という別の顔を持つ。
 
 ---
 
@@ -310,10 +343,12 @@ export class OutboxLeaseConflictError extends Error {
    ときに「ちょうど1本だけ成功する」こと）は、この作業環境では検証していない
    （下記「確かめていないこと」）。CAS 自体は Postgres の行レベルロック・MVCC が提供する
    保証にそのまま乗るので理論上は問題ないはずだが、実測はできていない。
-4. **`tick()` がリース競合を特別扱いしない**（決定3）ことで、1件の競合が同じ `tick()`
-   呼び出し内の残りのジョブ処理を止める。運用上これが問題になるなら、別 ADR で
-   `TickResult` に競合の件数を出す・競合したジョブだけスキップして処理を続ける、
-   といった設計が要る。
+4. **`tick()` は「良性の競合」と「対応していない kind」「処理して失敗した」を
+   `TickResult` の別々の欄（`leaseConflicts`/`unsupported`/`failed`）で区別するが、
+   `processed` された他のジョブとの**順序**は保証しない。** `leaseConflicts` に
+   積まれたジョブが、同じ `tick` 呼び出し内で他のどのジョブより先/後に処理された
+   かは `TickResult` からは分からない——配列の順序は claim 順（`available_at` 昇順）
+   のままである。運用上、競合の発生順が重要になる場面が出たら見直しが要る。
 
 ---
 
@@ -341,21 +376,23 @@ export class OutboxLeaseConflictError extends Error {
 
 決定2参照。ADR 0030 の「採らなかった案」と同じ理由——結果値は握りつぶせる。
 
-### `fail()`/`complete()` の呼び出しごとに、`tick()` がリース競合を catch して
-### 「スキップ」として扱い、残りのジョブ処理を続ける
+### `tick()` は `OutboxLeaseConflictError` を catch せず、`tick()` 呼び出し全体を
+### 中断する（当初の実装案）
 
-決定3の代替案。**採らなかった。** 実装の複雑さ（`TickResult` に新しいフィールドが
-要る・「競合してスキップした」と「対応していない kind」「処理して失敗した」の3つを
-呼び出し側がどう区別するかという ADR 0082 と同種の設計判断が要る）が、本 PR の主題
-（CAS を可能にすること）を超える。将来、運用上これが必要になったら別 ADR で扱う
-（「これが覆るとしたら」参照）。
+**当初これを採っていたが、レビューで覆した。** 決定3参照——理由は「リース競合は異常
+ではなく正常な並行の結果であり、1件の良性の競合で無関係な他のジョブ処理まで止めるのは
+狭い事象を広い停止に変換する形」であるため。当初案の根拠だった「`tick()` が knowingly
+飲み込んで『何も無かった顔』で処理を続けるほうが、この issue が塞ごうとしている
+『気づかれない上書き』の族に近い」という懸念は、`leaseConflicts` を**明示的に**
+`TickResult` へ出す（黙って握りつぶさない）ことで別の形で解消した——「無かったことに
+する」と「握りつぶさずに記録した上で処理を続ける」は同じではない。
 
 ---
 
 ## これが覆るとしたら
 
-- **`tick()` が1件のリース競合で残りのジョブ処理を止めることが、運用上問題になったとき**
-  ——競合したジョブだけスキップして処理を続ける設計へ変える別 ADR が要る。
+- **`leaseConflicts` に積まれたジョブの発生順・他ジョブとの相対順が運用上重要になった
+  とき**——`TickResult` にタイムスタンプや処理順の情報を足す設計へ変える必要がある。
 - **`attempts` を使った自動リトライ・バックオフが実装されるとき**——CAS との相互作用
   （リトライ判断に使う `attempts` の値と、CAS のフェンシングトークンとしての `attempts`
   が同じ列を指すことによる副作用が無いか）を再検討する必要がある。
@@ -407,12 +444,16 @@ export class OutboxLeaseConflictError extends Error {
 - `pnpm run format:check`（prettier、リポジトリ全体） — 緑。
 - `rm -rf packages/*/dist && pnpm run build` — 緑。
 - `pnpm run pack:check` — 緑（6パッケージとも publish 梱包の検査を通過）。
-- `pnpm run test`（ルート） — root 943 / `@mnemora/core` 627（+4）/ `@mnemora/testkit`
-  260（+4）/ `@mnemora/openai` 43 passed + 11 skipped / `@mnemora/anthropic` 49 passed +
-  2 skipped / `@mnemora/local-embedding` 83 passed + 15 skipped、すべて緑。
-  **`packages/postgres` と `examples/chat` の DB テストは実行していない**
-  （`DATABASE_URL` 未設定。「DB テストは実行していません」と明示的に告知されることを
-  確認した。ADR 0015 の通り、これは「DB 側を見ていない」であって「全部通った」ではない）。
+- `pnpm run test`（ルート、`fix/233-outbox-complete-fail-cas` ブランチ上） — root
+  941 passed + 2 skipped（`docs/decisions/README.md` の ADR 索引鮮度チェックは
+  `main` 限定の歯であり、feature branch では意図して skip される。ADR 0137参照）/
+  `@mnemora/core` 628（+5: CAS の歯4本 + tick のリース競合スキップの歯1本）/
+  `@mnemora/testkit` 260（+4）/ `@mnemora/openai` 43 passed + 11 skipped /
+  `@mnemora/anthropic` 49 passed + 2 skipped / `@mnemora/local-embedding` 83 passed +
+  15 skipped、すべて緑。**`packages/postgres` と `examples/chat` の DB テストは
+  実行していない**（`DATABASE_URL` 未設定。「DB テストは実行していません」と明示的に
+  告知されることを確認した。ADR 0015 の通り、これは「DB 側を見ていない」であって
+  「全部通った」ではない）。
 
 ### ⭐ 再現（バグが実害であることの実験）
 
@@ -421,12 +462,24 @@ export class OutboxLeaseConflictError extends Error {
 fail、という手順を実際に走らせ、`completedAt`/`failedAt` の両方が非 null になる矛盾
 した終端状態を確認した。
 
+**決定3（tick はリース競合が起きても他のジョブの処理を続ける）も、決定的な差し込みで
+実際に確認した。** `FakeEmbeddingProvider` に `beforeEmbedReturn` フック
+（`FakeMemoryStore.beforeUpdateStatus`、ADR 0030 と同じ形の決定的差し込み口）を新設し、
+job A の `embed()` 呼び出し中（`processEmbedJob` が `complete()` を呼ぶ**前**）に、
+テストコードから直接 `stores.outboxStore.claimBatch()` を呼んで job A だけを
+「別ワーカー」として横取りした。結果: `tickResult.processed === 1`（job B は正常に
+処理された）・`tickResult.leaseConflicts` に job A が
+`{ kind: "embed", attemptedOutcome: "complete" }` として名指しで出た・job A の
+`embeddingStatus` は `"ready"`（handler 自体の処理は成功していた、という区別も
+確認した）。
+
 ### 変異試験（`packages/core`/`packages/testkit` は DB を要さないため、実際に実行した）
 
-**手順**: 変異の前に対象ファイルを `/tmp/mnemora-backup-233/` へ退避コピーしてから、
-その場でコードを直接書き換えて赤を確認し、退避コピーから `cp` で戻して緑を確認した
-（`git checkout` は使っていない——`docs/autonomy.md` §4 が指摘する「未コミットの編集も
-消える」穴を踏まないため）。
+**手順**: 変異の前に対象ファイルを `/tmp/mnemora-backup-233/`・`/tmp/
+mnemora-backup-233-round2/`（決定3の実装後、レビューの指摘を受けて2回目の変異試験を
+行った際の退避先）へ退避コピーしてから、その場でコードを直接書き換えて赤を確認し、
+退避コピーから `cp` で戻して緑を確認した（`git checkout` は使っていない——
+`docs/autonomy.md` §4 が指摘する「未コミットの編集も消える」穴を踏まないため）。
 
 - **M1**（`packages/testkit` の `InMemoryOutboxStore`: CAS 判定を `if (false && ...)`
   に変異）: `packages/testkit` で260本中**3本が固有に赤くなった**（「attempts が
@@ -440,16 +493,37 @@ fail、という手順を実際に走らせ、`completedAt`/`failedAt` の両方
   も開くところだった)。残り63本は無傷。復元後、66本すべて緑に戻ることを確認した。
 - **M3**（`packages/core/src/runtime.ts`: `tick`/`handleExtractableObservation` の
   `complete(ctx, jobId, job.attempts)` 呼び出しの第三引数を、意図的に間違った定数
-  `9999` へ変異——「wiring 自体が間違っていたら検出できるか」を検査): `packages/core`
-  で**44ファイル中3ファイル・627本中52本が赤くなった**（`runtime.test.ts` の
-  tick/observe を経由するテストの大半——CAS が実際に効いている以上、
-  誤った `expectedAttempts` を渡すだけで大半の既存フローが `OutboxLeaseConflictError`
-  で落ちることが分かった。想定通り: この wiring は「間違えたら静かに通る」形では
-  ない)。復元後、627本すべて緑に戻ることを確認した。
+  `9999` へ変異——「wiring 自体が間違っていたら検出できるか」を検査): 決定3の実装後
+  （tick がリース競合を catch するようになった後）に**再実行し、結果が変わることを
+  確認した**——`packages/core` で**44ファイル中3ファイル・628本中53本が赤くなった**
+  （decision3実装前は627本中52本だった。決定3の新しい歯自身も、この変異で
+  `attemptedOutcome`/`processed` の期待値が崩れて赤くなるため、+1本増えた）。
+  復元後、628本すべて緑に戻ることを確認した。
+- **M4**（`packages/core/src/runtime.ts`: 決定3の実装——`OutboxLeaseConflictError` を
+  catch して `leaseConflicts` に積み `continue` する3箇所すべて——を
+  `if (false && ...)` に変異させ、当初案（catch しない）へ戻す）: `packages/core` で
+  **67本中1本が固有に赤くなった**（決定3の再現テストのみ——同じ tick 呼び出し内で
+  job B の `processed` が0のまま `tick()` 全体が `OutboxLeaseConflictError` を
+  投げて中断することを、失敗メッセージ（逐語）
+  `OutboxLeaseConflictError: OutboxStore: expected attempts 1 for job job-170,
+  but observed 2` が示した)。残り66本は無傷。復元後、67本すべて緑に戻ることを
+  確認した。**これが「tick は他のジョブの処理を続ける」という決定3の主張そのものを
+  検査する歯である。**
 
 いずれの変異も、`git diff --stat` が空でないこと（変異が実際に入ったこと）・
 `cp` での復元後に `git status --short`（追跡対象ファイルの差分）が変異前の状態に
 戻っていること・該当パッケージのテストスイートが全数元通りの緑になることを確認した。
+
+### `docs/architecture.md` §5.11・§3.3 の更新
+
+**当初、担い手への作業指示はこの doc を射程外としていたが、レビューでその指示自体が
+誤りだったと訂正された**（ADR 0032 のときは同じ PR 内でこの doc を更新していた先例が
+あり、`OutboxStore` の interface を変える PR がその interface を引いている文書を
+直さないのは不整合であるため）。本 ADR の実装（`complete`/`fail` の CAS 化・
+`OutboxLeaseConflictError`・`TickResult.leaseConflicts`）を反映する形で §5.11 の
+interface 抜粋・契約の箇条書き、および §3.3 の `tick()` の記述を更新した
+（`docs/architecture.md` はコード実体を持たないため、typecheck/test では検査されない
+——更新箇所を実装コードと突き合わせて手で確認した、という限りでの確認である）。
 
 ### `packages/postgres`（CAS の実装自体）
 
@@ -462,16 +536,6 @@ DB 不要スタブテストを別途新設する必要は無く、**CI の postg
 自動的に本 PR の新しいテストも `PostgresOutboxStore` に対して実行される。**
 
 ---
-
-## 射程外（担い手の作業指示により、この PR では触っていない）
-
-- **`docs/architecture.md` §5.11**（`OutboxStore` の interface 抜粋）は、本 PR の
-  `complete`/`fail` のシグネチャ変更を反映していない——本 PR の作業指示が変更を
-  `packages/core`/`packages/postgres`/`packages/testkit` と新しい ADR 1本に限定しており、
-  `docs/architecture.md` はその範囲外である。ADR 0032 のときはこの doc も同じ PR 内で
-  更新されていた（該当箇所に「2026-09 追記」として残っている）が、本 PR はそれを踏襲
-  していない。**マージする側が、別途この doc の該当箇所（§5.11 の `interface` コード
-  ブロックと契約の箇条書き）を更新する必要がある。**
 
 ## 確かめていないこと
 
@@ -490,8 +554,10 @@ DB 不要スタブテストを別途新設する必要は無く、**CI の postg
 - **CI 全体の緑。** この PR を出した後、`node scripts/ci-green-check.mjs --pr <番号>`
   で確認する（下記、報告参照）。
 - **外部実装者への実際の影響。** 提起した通り、本リポジトリからは確認できない。
-- **`tick()` がリース競合を catch せず伝播させる設計（決定3）が、実運用のワーカー
-  実装にとって適切かどうか。** `examples/chat` は現状このシナリオ（`tick()` の
-  実行中にリースが切れて別ワーカーに奪われる)が起きない構え（ADR 0032 決定4——単一
-  プロセス・単一ワーカーで `tick()` が同じ呼び出し内で claim/complete/fail を完結
-  させる)なので、この作業では実運用相当の検証ができていない。
+- **`tick()` が実際にリース競合を経験する頻度**（決定3で「良性の競合」として扱う形に
+  したが、これが実運用でどの程度の頻度で起きるかは未計測）。`examples/chat` は現状
+  このシナリオ（`tick()` の実行中にリースが切れて別ワーカーに奪われる)が起きない構え
+  （ADR 0032 決定4——単一プロセス・単一ワーカーで `tick()` が同じ呼び出し内で
+  claim/complete/fail を完結させる)なので、この作業では実運用相当の検証ができて
+  いない。決定3のロジック自体は `packages/core` の決定的な差し込みテストで確認済み
+  （「測ったこと」参照）。
