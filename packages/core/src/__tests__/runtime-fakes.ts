@@ -1,6 +1,7 @@
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
+import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "../interfaces/outbox-store.js";
 import type { OutboxJobKind } from "../interfaces/scheduler.js";
 import { assertValidEventRetentionDays } from "../interfaces/tenant-settings-store.js";
@@ -900,19 +901,29 @@ export class FakeOutboxStore implements OutboxStore {
     return claimed.map((job) => ({ ...job }));
   }
 
-  async complete(ctx: Ctx, jobId: string): Promise<void> {
+  // CAS 意味論（ADR 0142, Issue #233）も `packages/testkit` の `InMemoryOutboxStore`/
+  // `PostgresOutboxStore` と一致させてある。
+  async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
-    if (job) {
-      job.completedAt = new Date();
+    if (!job) {
+      return;
     }
+    if (job.attempts !== expectedAttempts) {
+      throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
+    }
+    job.completedAt = new Date();
   }
 
-  async fail(ctx: Ctx, jobId: string, error: string): Promise<void> {
+  async fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
-    if (job) {
-      job.failedAt = new Date();
-      job.lastError = error;
+    if (!job) {
+      return;
     }
+    if (job.attempts !== expectedAttempts) {
+      throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
+    }
+    job.failedAt = new Date();
+    job.lastError = error;
   }
 }
 

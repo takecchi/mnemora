@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
+import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
 import {
   TICK_SUPPORTED_JOB_KINDS,
   UNSUPPORTED_KIND_ERROR_PREFIX,
@@ -949,6 +950,122 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
       expect(tickResult).toEqual({ processed: 0, failed: 1, unsupported: [{ jobId, kind }] });
     },
   );
+});
+
+/**
+ * ADR 0142 / Issue #233: `OutboxStore.complete`/`fail` を CAS にする。
+ *
+ * `packages/testkit` の `outbox-store-conformance.ts` が `InMemoryOutboxStore`/
+ * `PostgresOutboxStore` の両方に対して同じ契約を検査しているが、`FakeOutboxStore`
+ * （このファイルが使う `packages/core` 自身の私的なテストダブル）はその適合スイートの
+ * 対象外である（`core` は `testkit` に依存しない、docs/architecture.md §4）。
+ * ⚠ **この節が無いと、`FakeOutboxStore` の CAS 判定は「実装されているが、どの歯からも
+ * 呼ばれない」まま残る**——ADR 0053 が「Mu5a 変異が生存」として残した穴と同じ形
+ * （実装だけあって、それを壊す変異を検出する歯が無い）を、ここで自分から開けないための節。
+ */
+describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutboxStore）", () => {
+  async function enqueueJob(stores: ReturnType<typeof buildRuntime>["stores"]): Promise<string> {
+    const { jobs } = await stores.memoryStore.createObservationWithOutbox(
+      ctx,
+      { tenantId: "tenant-1", subjectId: null, externalId: null, kind: "utterance", payload: {} },
+      ["extract"],
+    );
+    expect(jobs).toHaveLength(1);
+    return jobs[0]!.id;
+  }
+
+  it("complete は claim 時の attempts と一致すれば成功する", async () => {
+    const { stores } = buildRuntime(llmReturning([]));
+    const jobId = await enqueueJob(stores);
+
+    const claimed = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(),
+      claimedBy: "worker-1",
+      leaseMs: TEST_LEASE_MS,
+    });
+    const job = claimed.find((j) => j.id === jobId)!;
+
+    await expect(stores.outboxStore.complete(ctx, jobId, job.attempts)).resolves.not.toThrow();
+    expect(
+      stores.outboxStore.listJobs(ctx).find((j) => j.id === jobId)!.completedAt,
+    ).not.toBeNull();
+  });
+
+  it("complete は attempts が一致しないと OutboxLeaseConflictError を投げる", async () => {
+    const { stores } = buildRuntime(llmReturning([]));
+    const jobId = await enqueueJob(stores);
+
+    const claimed = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(),
+      claimedBy: "worker-1",
+      leaseMs: TEST_LEASE_MS,
+    });
+    const job = claimed.find((j) => j.id === jobId)!;
+
+    await expect(stores.outboxStore.complete(ctx, jobId, job.attempts - 1)).rejects.toBeInstanceOf(
+      OutboxLeaseConflictError,
+    );
+  });
+
+  it("fail は attempts が一致しないと OutboxLeaseConflictError を投げる", async () => {
+    const { stores } = buildRuntime(llmReturning([]));
+    const jobId = await enqueueJob(stores);
+
+    const claimed = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(),
+      claimedBy: "worker-1",
+      leaseMs: TEST_LEASE_MS,
+    });
+    const job = claimed.find((j) => j.id === jobId)!;
+
+    await expect(
+      stores.outboxStore.fail(ctx, jobId, "boom", job.attempts - 1),
+    ).rejects.toBeInstanceOf(OutboxLeaseConflictError);
+  });
+
+  it("⭐ 再現(Issue #233): リース切れ後に別ワーカーが再claim・completeした結果を、遅れたワーカーのfailが上書きできない", async () => {
+    const { stores } = buildRuntime(llmReturning([]));
+    const jobId = await enqueueJob(stores);
+    const leaseMs = 1000;
+    const base = new Date();
+
+    // ワーカーA が claim する。
+    const claimA = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: base,
+      claimedBy: "worker-A",
+      leaseMs,
+    });
+    const jobAsClaimedByA = claimA.find((j) => j.id === jobId)!;
+
+    // リースが切れる。
+    const afterExpiry = new Date(base.getTime() + leaseMs);
+
+    // ワーカーB が再 claim して complete する。
+    const claimB = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: afterExpiry,
+      claimedBy: "worker-B",
+      leaseMs,
+    });
+    const jobAsClaimedByB = claimB.find((j) => j.id === jobId)!;
+    expect(jobAsClaimedByB.attempts).toBeGreaterThan(jobAsClaimedByA.attempts);
+    await stores.outboxStore.complete(ctx, jobId, jobAsClaimedByB.attempts);
+
+    // ワーカーA が遅れて、自分が claim した時点の(もう古い) attempts で fail を呼ぶ。
+    await expect(
+      stores.outboxStore.fail(ctx, jobId, "worker-A: stale failure", jobAsClaimedByA.attempts),
+    ).rejects.toBeInstanceOf(OutboxLeaseConflictError);
+
+    // Bの complete の結果が、Aの遅れた呼び出しによって上書きされていない
+    // ——本 Issue が指摘したバグの直接の否定。
+    const finalJob = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobId)!;
+    expect(finalJob.completedAt).not.toBeNull();
+    expect(finalJob.failedAt).toBeNull();
+  });
 });
 
 describe("runtime.reextract（ADR 0028: 「やり直したら重複が残る」の掃除）", () => {

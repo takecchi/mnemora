@@ -1747,7 +1747,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const { memoryIds, outcome, failure } = await runExtraction(ctx, observation);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
-      await deps.outboxStore.complete(ctx, extractJob.id);
+      // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
+      // 生成時の値（0）のまま——「ここまで誰にも claim/complete/fail されていない」を
+      // 表す自分のフェンシングトークンとして渡す。
+      await deps.outboxStore.complete(ctx, extractJob.id, extractJob.attempts);
     }
     return {
       observationId: observation.id,
@@ -1845,17 +1848,29 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         //    再び claim され、「claim され続けるがいつまでも進まない」になる。
         // 2. `unsupported` に**名指しで積む**。`failed` に数えるだけだと、
         //    「試して失敗した」と同じ顔になって呼び出し側から区別が付かない。
-        await deps.outboxStore.fail(ctx, job.id, `${UNSUPPORTED_KIND_ERROR_PREFIX}${job.kind}`);
+        // CAS（ADR 0142）: `job` はこの tick が `claimBatch` からたった今受け取った
+        // ものであり、`job.attempts` は「自分の claim」を指すフェンシングトークンである。
+        await deps.outboxStore.fail(
+          ctx,
+          job.id,
+          `${UNSUPPORTED_KIND_ERROR_PREFIX}${job.kind}`,
+          job.attempts,
+        );
         unsupported.push({ jobId: job.id, kind: job.kind });
         failed += 1;
         continue;
       }
       try {
         await handler(ctx, job);
-        await deps.outboxStore.complete(ctx, job.id);
+        await deps.outboxStore.complete(ctx, job.id, job.attempts);
         processed += 1;
       } catch (err) {
-        await deps.outboxStore.fail(ctx, job.id, err instanceof Error ? err.message : String(err));
+        await deps.outboxStore.fail(
+          ctx,
+          job.id,
+          err instanceof Error ? err.message : String(err),
+          job.attempts,
+        );
         failed += 1;
       }
     }
