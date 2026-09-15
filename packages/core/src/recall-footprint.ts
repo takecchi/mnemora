@@ -452,6 +452,23 @@ export type FullLogVerdict = "mnemora_smaller" | "full_log_smaller" | "too_close
  * （オーナーが**第一級の機能**と書いているもの）の、この関数への適用である。
  */
 export type FootprintReason =
+  /**
+   * **見積もった量のうち、どの項がいちばん大きいか。**
+   *
+   * ⭐ **この札は必ず立つ。**`reasons` が空になりうる形にしないためである——
+   * 空の `reasons` は「この判定の理由を1つも説明できない」ことであり、
+   * 北極星の問い3（説明できない賢さは採らない）に正面から反する。
+   *
+   * ⚠ **他の札と違い、これは警告ではない。**「何が効いているか」を名指しするだけである
+   * （例: 短い会話では `'fixed_index'` が支配的で、長い会話では `'digest_band'` に移る）。
+   */
+  | {
+      code: "dominant_term";
+      term: "memories" | "digest_band" | "fixed_index";
+      chars: number;
+      /** その項が見積もり総量に占める割合。 */
+      shareOfEstimate: number;
+    }
   /** mnemora の固定費（目次帯の器など）だけで会話ログ全部を超えている ＝ 会話が短すぎる。 */
   | { code: "full_log_below_fixed_cost"; fixedIndexChars: number; fullLogChars: number }
   /** 目次帯が上限に当たっている ＝ **会話がこれ以上伸びても mnemora は増えない。** */
@@ -493,7 +510,17 @@ export interface FullLogComparison {
    * **この交点は「いまの件数のままなら」という条件付きである。**
    */
   breakEvenFullLogChars: number;
-  /** 根拠。**空にならない**（少なくとも出所に関する札が1枚は立つ）。 */
+  /**
+   * 根拠。**空にならない**——`dominant_term` が必ず1枚立つ（`FootprintReason` の doc）。
+   *
+   * ⚠ **かつてここは「少なくとも出所に関する札が1枚は立つ」と書いていたが、それは誤りだった**
+   * 【実測】——較正済み・較正範囲の内側・帯が非飽和・件数が非切り詰め・許容誤差の外、が
+   * 重なると出所の札も量の札も1枚も立たず、`reasons` は空配列で返っていた
+   * （`recall-footprint.test.ts` の歯が、この doc を信じて書かれて赤くなり発見された）。
+   * ⟹ **doc ではなく実装のほうを直した**（`dominant_term` を常に立てる）。
+   * 空の `reasons` は「理由を1つも説明できない」ことであり、doc を緩めて済ませてよい
+   * 種類の食い違いではない。
+   */
   reasons: readonly FootprintReason[];
   /** 見積もりそのもの（内訳を読みたい呼び出し側のために持ち上げる）。 */
   estimate: RecallFootprintEstimate;
@@ -518,7 +545,23 @@ export function compareWithFullLog(input: FullLogComparisonInput): FullLogCompar
 
   const reasons: FootprintReason[] = [];
 
-  // --- 出所に関する札（結論より先に立てる。ここが空になることはない） ---
+  // --- 支配項の札（**必ず立つ**。これが `reasons` の非空を構造的に保証する） ---
+  const bandChars = estimate.byTier.index - profile.fixedIndexChars;
+  const terms = [
+    { term: "memories" as const, chars: estimate.byTier.digest },
+    { term: "digest_band" as const, chars: bandChars },
+    { term: "fixed_index" as const, chars: profile.fixedIndexChars },
+  ];
+  // 同点のときは上の並び順で先に来たものを採る（決定的にするため。`reduce` は `>` で比較）。
+  const dominant = terms.reduce((best, t) => (t.chars > best.chars ? t : best));
+  reasons.push({
+    code: "dominant_term",
+    term: dominant.term,
+    chars: dominant.chars,
+    shareOfEstimate: estimate.chars > 0 ? dominant.chars / estimate.chars : 0,
+  });
+
+  // --- 出所に関する札 ---
   if (profile.origin.kind === "builtin_default") {
     reasons.push({ code: "profile_not_calibrated" });
   } else {
