@@ -748,8 +748,7 @@ export async function runRecall(
   const associationQuery = validatedQuery.association;
   const associationUnits: Unit[] = [];
   if (associationQuery !== undefined) {
-    const getVectors = deps.vectorStore.getVectors;
-    if (getVectors === undefined) {
+    if (deps.vectorStore.getVectors === undefined) {
       // 北極星の問い2（無効にしても成立するか）を型で担保する任意メソッドが無い。
       // `query.association` を渡していても、連想は一切実行されない。
       omitted.push({
@@ -758,6 +757,10 @@ export async function runRecall(
         reason: "vector_store_lacks_get_vectors",
       });
     } else {
+      // ⚠ `.bind` で `this` を固定してから切り出す——`FakeVectorStore.getVectors` の
+      // ような通常のクラスメソッドは、`const f = obj.method; f(...)` の形で呼ぶと
+      // `this` 束縛が外れる（実測: `this.entries` が `undefined` になり落ちた）。
+      const getVectors = deps.vectorStore.getVectors.bind(deps.vectorStore);
       const anchorCount = associationQuery.anchorCount ?? DEFAULT_ASSOCIATION_ANCHOR_COUNT;
       const minSimilarity = associationQuery.minSimilarity ?? DEFAULT_ASSOCIATION_MIN_SIMILARITY;
       // アンカーは「クエリに実際に当たった」候補（withinLimit）から取る——companions
