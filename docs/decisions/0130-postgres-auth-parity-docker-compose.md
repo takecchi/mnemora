@@ -175,6 +175,27 @@
     テストする手順を1節足した。
   - `pnpm run test`（`DATABASE_URL` 無し）の既定挙動・出力は変えていない。
 
+- **引き受けた負債**:
+
+  この決定で明示的に引き受けたものを、ここに括る（詳細はそれぞれ下記の節が持っており、
+  ここでは重複させず、どこに詳細が在るかだけを指す）。
+
+  1. **正規表現ベースの YAML 抽出は壊れやすい。** `extractJob` / `extractCiPostgresService` /
+     `extractComposePostgresService` は YAML パーサを持たず、`ci-yml-*-wiring` 系と同じ
+     テキストベースの切り出しである。開発中に実際に「env ブロック中のコメント行で
+     走査を打ち切り、7ジョブ全てで `POSTGRES_INITDB_ARGS` を取りこぼす」という偽陽性を
+     踏んでおり（上の「歯」節）、`services.postgres` が composite action /
+     reusable workflow へ切り出された場合は追随できない（下の「これが覆るとしたら」
+     1点目）。
+  2. **`postgres`（`server_encoding` matrix）ジョブは比較対象から外れている。**
+     この歯は、そのジョブの認証設定（`image` / `POSTGRES_USER` / `POSTGRES_PASSWORD` /
+     `POSTGRES_DB`）が他7ジョブと食い違っても気づかない（下の「確かめていないこと」
+     3点目）。
+  3. **Docker を実際に起動しての検証をしていない。** `docker compose up` して
+     「手元でも本当に scram-sha-256 認証が要求されるか」を実測しておらず、
+     状況証拠（ADR 0017 の実測記録・postgres イメージの既定仕様）からの推測に
+     留まる（下の「確かめていないこと」1点目）。
+
 - **これが覆るとしたら**:
 
   - CI が `.github/workflows/ci.yml` の重複した `services.postgres` ブロックを
@@ -182,7 +203,7 @@
     抽出（`extractJob` / `extractCiPostgresService`）は `jobs:` 直下の
     フラットな `key: value` 形を前提にしており、切り出し後の間接参照までは
     追わない。そのときは、参照先の composite action / reusable workflow の
-    ファイルも読む形にこの歯を拡張する必要がある。
+    ファイルも読む形にこの歯を拡張する必要がある（上の「引き受けた負債」1点目）。
   - `postgres` イメージ側（docker-library の postgres イメージ）が
     `POSTGRES_PASSWORD` 設定時の既定 host 認証方式を `scram-sha-256` から
     変えたとき——この ADR も ADR 0017 も、その既定を repo の外側の事実として
@@ -200,7 +221,7 @@
     を踏んだ実測記録、(2) docker-library の postgres イメージが
     `POSTGRES_PASSWORD` 設定時に host 認証を `scram-sha-256` にする既定仕様、の
     2つの状況証拠であり、**この PR の作業者自身が `docker-compose.yml` を
-    upして繋いで確認した一次情報ではない。**
+    upして繋いで確認した一次情報ではない。**（上の「引き受けた負債」3点目）
   - **`docker-compose.yml` を使わずに独自の方法（conda-forge の Postgres 等）で
     手元 Postgres を用意している開発者**には、この決定は何も強制しない——
     使うかどうかは任意なので、その開発者の手元は今までどおり `trust` の
@@ -210,7 +231,7 @@
     比較対象に含めていない。** `image` / `POSTGRES_USER` / `POSTGRES_PASSWORD` /
     `POSTGRES_DB` は目視では他7ジョブと同じに見えるが、この歯はそれを
     機械的には検査していない——このジョブだけがこっそり変わっても、この歯は
-    気づかない。
+    気づかない（上の「引き受けた負債」2点目）。
   - **CI そのもの（本 PR の CI 実行）でこの歯が緑になることは、この ADR を
     書いた時点ではまだ確認できていない。** 手元の `vitest run` では緑だが、
     「編集した」ことと「CI で効いた」ことは別であり、PR の CI 実行で確認する
