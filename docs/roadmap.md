@@ -462,7 +462,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 | 1 | 言ったことを、次の日も覚えている | **在る** | — |
 | 2 | 聞かれていないことを、自分から思い出す | **半分** | [#290](https://github.com/takecchi/mnemora/pull/290)（[ADR 0151](./decisions/0151-recall-association-unprompted.md)）で機構は入ったが、`RecallQuery.association` を明示しないと効かない ⟹ [#291](https://github.com/takecchi/mnemora/issues/291) |
 | 3 | なぜそれを思い出したのかを、後から説明できる | **半分** | スコア内訳が永続化されない（`recalls` は `returned_memory_ids` だけ）⟹ 「後から」が無い |
-| 4 | 使われない記憶が、静かに遠ざかる | **半分** | `reinforce` / `sweepArchive` を誰も呼ばない ⟹ [#204](https://github.com/takecchi/mnemora/issues/204) |
+| 4 | 使われない記憶が、静かに遠ざかる | **半分** | 減衰（順位を下げる側）は `recall()` のたびに必ず効く。⚠ **「`reinforce` / `sweepArchive` を誰も呼ばない」ではない**——`reinforce` は `observe({ kind: 'memory_usage' })` が呼び、`sweepArchive` は `examples/chat` の `archive-sweep-cost` が呼ぶ。欠けているのは ①`examples/chat/src` に `memory_usage` の報告が**1件も無い**（実演していない）②`tick()` が `reflect()`/`consolidate()` を駆動しない ⟹ [#204](https://github.com/takecchi/mnemora/issues/204) |
 | 5 | 間違いを正すと、古いほうが先に出てこなくなる | **半分** | `markContested` を呼ぶ本番コードが1つも無い |
 | 6 | 知らないことを、知らないと言える | **在る** | — |
 | 7 | どれだけ載せるかを、使う側が決められる | **在る** | — |
@@ -474,6 +474,13 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 **機構（型・実装・歯・実 Postgres）は在るのに、「その口を実際に使う側」が無い。**
 
 ⟹ **v1.0 の残作業は、新しい機構ではなく「既にある機構を駆動する配線と実演」である。**
+
+**⚠ ただし「配線すれば済む」と読まないこと。**半分4項目のうち **2つは、配線しないことが記録済みの設計判断である**:
+
+- **項目4の掃引**（`sweepArchive` の自動駆動）—— [ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md) **決定3** が「`Runtime.tick`/`Runtime.observe` に相乗りさせない」と明記し、**北極星の問い2（これを無効にしたとき Memory Framework として成立するか）を理由に**採らなかった案5 を却下している。
+- **項目5の検出起点**（自分で矛盾を見つける）—— [ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) が「LLM なしで一般判定する方法が無い」として**明示的に見送っている**。`packages/core/src/__tests__/mark-contested.test.ts` は「`tick()`/`observe()` から呼ばれない」ことを**テストで固定している。**
+
+⟹ **この2つを自動駆動へ変えるなら、配線ではなく「記録済みの判断を覆す」ことになる。先に ADR が要る。**⚠ **§7.2 の予定は、この費用を見積もっていない**（§7.6 の延びる条件に数えていない——**確かめていない、ではなく、数え落としている**）。
 
 ⟹ ⛔ **[#291](https://github.com/takecchi/mnemora/issues/291)（連想枠が想起の質を動かすかの測定）が唯一の関門。**体験を動かす2つの道（`examples/chat` が使う／既定を on にする）は、**どちらもこれを通る。**
 
