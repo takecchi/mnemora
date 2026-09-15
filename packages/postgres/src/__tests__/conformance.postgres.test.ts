@@ -137,6 +137,8 @@ describeVectorStoreConformance({
     const { pool } = await getTestClient();
     await registerEmbeddingSpace(pool, space);
   },
+  // Issue #200 / ADR 0146: PostgresVectorStore は getVectors を実装している。
+  supportsGetVectors: true,
 });
 
 describeLexicalStoreConformance({
