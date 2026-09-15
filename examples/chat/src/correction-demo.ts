@@ -21,6 +21,17 @@ import { CORRECTION_SCENARIO } from "./correction-scenario.js";
  * **⚠ 北極星の主測定（`compare`/`retrieval`）には一切関わらない。**`compare.ts`/
  * `compare-json.ts`/`scenario.ts`/`probe-set.ts`/`naive-path.ts` のいずれも import しない
  * （`scope.ts`/`backfill.ts` と同じ規律）。
+ *
+ * **⚠ `recall()` は `limit: 1` を明示して呼ぶ（PR #320 の CI 失敗の修正、ADR 0160 決定5）。**
+ * この会話には `original`/`correction` の2件しか Memory が無いため、既定の limit（10件）
+ * では両方が独立に段2（再スコア）の `withinLimit` へ収まってしまい、段3「矛盾の解決と
+ * 必須の同伴取得」（`docs/recall.md` §2 段3）の同伴取得（`retrievedVia: 'mandatory_companion'`）
+ * が一度も発火しない——両方ともスコアだけで既に出るので、対向を「必ず連れてくる」機構が
+ * 要らない状態になる。`limit: 1` にすると、段2で上位1件だけが `withinLimit` に残り、
+ * その1件が `contested` なら対向（もう一方）が limit を超えて強制的に連れてこられる
+ * （実測: `afterMark.memories.length` は limit=1 でも 2 になる）。これで Issue #197 の
+ * 受け入れ条件「段3 が実際に発火することを測る歯が在る」を、`examples/chat` からも
+ * 満たす。
  */
 
 export interface CorrectionDemoResult {
@@ -75,16 +86,27 @@ function resolveContestedIds(
 }
 
 /**
+ * この3回の `recall()` が共通して使うクエリ。**`limit: 1` を明示する**——理由は
+ * このファイル冒頭の doc コメント参照（段3の必須同伴取得を実際に発火させるため、
+ * ADR 0160 決定5）。同じクエリを使い回すことで、「訂正の前後で答えがどう変わるか」を
+ * 同じ条件で比較できる。
+ */
+function buildRecallQuery(scenario: CorrectionScenario): { text: string; limit: number } {
+  return { text: scenario.query, limit: 1 };
+}
+
+/**
  * シナリオを `Runtime` に対して端から端まで走らせる。
  *
  * 1. `original`/`correction` を `observe()` する（別々の Memory になる）。
  * 2. `tick()` を干上がるまで回して埋め込みを済ませる。
- * 3. 訂正前の `recall()`（対向の宣言をまだ `markContested` していない状態）。
+ * 3. 訂正前の `recall()`（対向の宣言をまだ `markContested` していない状態。`limit: 1`
+ *    なのでこの時点では1件しか返らない）。
  * 4. `markContested`（シナリオの宣言をそのまま渡す）。
- * 5. 訂正を対にした直後の `recall()`（両方が隣接して出るはず——mandatory companion
- *    retrieval、ADR 0134）。
+ * 5. 訂正を対にした直後の `recall()`（`limit: 1` でも両方が隣接して出るはず——
+ *    mandatory companion retrieval が limit を超えて対向を連れてくる、ADR 0134/0160）。
  * 6. `resolveContested({ kind: 'supersede', winnerId })`（`winnerId` もシナリオの宣言）。
- * 7. 解決後の `recall()`（負けた側はもう出ないはず）。
+ * 7. 解決後の `recall()`（負けた側は `superseded` になり、`limit` に関わらずもう出ない）。
  */
 export async function runCorrectionDemo(
   runtime: Runtime,
@@ -113,19 +135,20 @@ export async function runCorrectionDemo(
     );
   }
 
-  const beforeMark = await runtime.recall(ctx, { text: scenario.query });
+  const recallQuery = buildRecallQuery(scenario);
+  const beforeMark = await runtime.recall(ctx, recallQuery);
 
   const { firstId, secondId, winnerId } = resolveContestedIds(scenario, originalId, correctionId);
   const markResult = await runtime.markContested(ctx, firstId, secondId);
 
-  const afterMark = await runtime.recall(ctx, { text: scenario.query });
+  const afterMark = await runtime.recall(ctx, recallQuery);
 
   const resolveResult = await runtime.resolveContested(ctx, firstId, secondId, {
     kind: "supersede",
     winnerId,
   });
 
-  const afterResolve = await runtime.recall(ctx, { text: scenario.query });
+  const afterResolve = await runtime.recall(ctx, recallQuery);
 
   return {
     scenario,
@@ -146,10 +169,26 @@ export interface CorrectionDemoCheck {
   resolveSucceeded: boolean;
   /** markContested 後の recall で、両方が同時に出たか。 */
   afterMarkBothPresent: boolean;
-  /** markContested 後の recall で、敗者側の retrievedVia が mandatory_companion か。 */
+  /**
+   * markContested 後の recall で、`original`/`correction` の**どちらか片方**の
+   * retrievedVia が mandatory_companion か。
+   *
+   * ⚠ **どちらが mandatory_companion になるかはスコアのランキング次第であり、
+   * `resolveContested` の勝者（`scenario.contestedPair.winnerExternalId`）とは無関係**
+   * （ADR 0160 決定5）——段2（再スコア）で `limit` 内に自然に残ったほうが「アンカー」、
+   * 残らなかったほうが「同伴（mandatory_companion）」として強制的に連れてこられる。
+   * このスコア順は実行のたびに変わりうる想定はしていない（決定的な provider・固定の
+   * テキストなので同じ実行環境では安定するはずだが、**どちらが勝つかを前提にした
+   * 検査にしない**——`afterMarkCompanionOfOther` も参照）。
+   */
   afterMarkCompanionRetrieval: boolean;
-  /** markContested 後の recall で、companionOf が勝者側 id を指しているか。 */
-  afterMarkCompanionOfWinner: boolean;
+  /**
+   * markContested 後の recall で、mandatory_companion 側の companionOf が、
+   * もう片方（アンカー側）の memoryId を指しているか。**`original`/`correction` の
+   * どちらがアンカーでどちらが同伴かは決め打たない**（上の `afterMarkCompanionRetrieval`
+   * の注記参照）——対がちゃんと相互に指し合っているかだけを見る。
+   */
+  afterMarkCompanionOfOther: boolean;
   /**
    * 北極星 項目5 の核心: resolveContested 後、**古いほう（original）が recall から
    * 消えたか**。
@@ -161,15 +200,32 @@ export interface CorrectionDemoCheck {
 
 /** `CorrectionDemoResult` から、見せたい性質を機械的に判定する（印字・歯の両方が使う）。 */
 export function checkCorrectionDemo(result: CorrectionDemoResult): CorrectionDemoCheck {
-  const afterMarkCompanion = findByMemoryId(result.afterMark.memories, result.originalId);
+  const afterMarkOriginal = findByMemoryId(result.afterMark.memories, result.originalId);
+  const afterMarkCorrection = findByMemoryId(result.afterMark.memories, result.correctionId);
+
+  // 🔑 どちらが mandatory_companion になるかを決め打たない（上の doc コメント参照）。
+  // 「ちょうど片方が mandatory_companion で、その companionOf がもう片方を指す」ことだけを
+  // 見る——ランキングの勝敗にも resolveContested の勝敗にも依存しない検査にする。
+  const companion =
+    afterMarkOriginal?.retrievedVia === "mandatory_companion"
+      ? afterMarkOriginal
+      : afterMarkCorrection?.retrievedVia === "mandatory_companion"
+        ? afterMarkCorrection
+        : undefined;
+  const anchor =
+    companion === undefined
+      ? undefined
+      : companion === afterMarkOriginal
+        ? afterMarkCorrection
+        : afterMarkOriginal;
+
   return {
     markSucceeded: result.markOutcomeKind === "contested",
     resolveSucceeded: result.resolveOutcomeKind === "resolved",
-    afterMarkBothPresent:
-      findByMemoryId(result.afterMark.memories, result.originalId) !== undefined &&
-      findByMemoryId(result.afterMark.memories, result.correctionId) !== undefined,
-    afterMarkCompanionRetrieval: afterMarkCompanion?.retrievedVia === "mandatory_companion",
-    afterMarkCompanionOfWinner: afterMarkCompanion?.companionOf === result.correctionId,
+    afterMarkBothPresent: afterMarkOriginal !== undefined && afterMarkCorrection !== undefined,
+    afterMarkCompanionRetrieval: companion !== undefined,
+    afterMarkCompanionOfOther:
+      companion !== undefined && anchor !== undefined && companion.companionOf === anchor.memoryId,
     afterResolveOriginalAbsent:
       findByMemoryId(result.afterResolve.memories, result.originalId) === undefined,
     afterResolveCorrectionPresent:
@@ -196,7 +252,7 @@ export function formatCorrectionDemo(result: CorrectionDemoResult): string {
 
   lines.push(`元の発話: "${result.scenario.original.text}" (memoryId=${result.originalId})`);
   lines.push(`訂正の発話: "${result.scenario.correction.text}" (memoryId=${result.correctionId})`);
-  lines.push(`問い合わせ: recall({ text: "${result.scenario.query}" })`);
+  lines.push(`問い合わせ: recall({ text: "${result.scenario.query}", limit: 1 })`);
   lines.push("");
 
   lines.push("--- 1. markContested 前（まだ対向として宣言していない） ---");

@@ -2,6 +2,7 @@ import type { Runtime } from "@mnemora/core";
 import { describe, expect, it } from "vitest";
 import type { CorrectionScenario } from "../correction-scenario.js";
 import { CORRECTION_SCENARIO } from "../correction-scenario.js";
+import type { CorrectionDemoResult } from "../correction-demo.js";
 import {
   checkCorrectionDemo,
   formatCorrectionDemo,
@@ -254,12 +255,121 @@ describe("checkCorrectionDemo / formatCorrectionDemo: 固定した RecallResult 
     expect(check.resolveSucceeded).toBe(true);
     expect(check.afterMarkBothPresent).toBe(true);
     expect(check.afterMarkCompanionRetrieval).toBe(true);
-    expect(check.afterMarkCompanionOfWinner).toBe(true);
+    // このフィクスチャでは buildFakeRuntime が「resolveContested の敗者(loser)が
+    // mandatory_companion になる」形で afterMark を作っているが、
+    // checkCorrectionDemo 自体はそれを前提にしていない(下の
+    // 「mandatory_companion がどちらに付くかは決め打たない」参照)。
+    expect(check.afterMarkCompanionOfOther).toBe(true);
     expect(check.afterResolveOriginalAbsent).toBe(true);
     expect(check.afterResolveCorrectionPresent).toBe(true);
 
     const formatted = formatCorrectionDemo(result);
     expect(formatted).toContain("古いほうが消えた: はい");
     expect(formatted).toContain("新しいほうは残った: はい");
+  });
+});
+
+describe("checkCorrectionDemo: mandatory_companion がどちらに付くかを決め打たない(ADR 0160 決定5、PR #320 の CI 失敗の修正)", () => {
+  const originalId = "fixed-original-id";
+  const correctionId = "fixed-correction-id";
+
+  function buildResult(
+    afterMarkMemories: Array<{
+      memoryId: string;
+      digest: string;
+      retrievedVia: string;
+      companionOf: string | null;
+    }>,
+  ): CorrectionDemoResult {
+    const emptyRecall = {
+      recallId: "r",
+      memories: [],
+      omitted: [],
+      index: { groups: [], totalInScope: 0, countKind: "exact" },
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      explain: { stages: [] },
+    };
+    return {
+      scenario: CORRECTION_SCENARIO,
+      originalId,
+      correctionId,
+      beforeMark: emptyRecall,
+      markOutcomeKind: "contested",
+      afterMark: { ...emptyRecall, memories: afterMarkMemories },
+      resolveOutcomeKind: "resolved",
+      afterResolve: {
+        ...emptyRecall,
+        memories: [
+          { memoryId: correctionId, digest: "赤", retrievedVia: "ann", companionOf: null },
+        ],
+      },
+    } as unknown as CorrectionDemoResult;
+  }
+
+  it("original がアンカー(ann)・correction が mandatory_companion(段2のランキングで correction が limit から落ちた形)", () => {
+    const result = buildResult([
+      { memoryId: originalId, digest: "青", retrievedVia: "ann", companionOf: null },
+      {
+        memoryId: correctionId,
+        digest: "赤",
+        retrievedVia: "mandatory_companion",
+        companionOf: originalId,
+      },
+    ]);
+    const check = checkCorrectionDemo(result);
+
+    // `correction` は resolveContested の勝者だが、段2のランキングでは limit から
+    // 落ちて mandatory_companion 側に回った——このケースでも正しく検出できること。
+    expect(check.afterMarkCompanionRetrieval).toBe(true);
+    expect(check.afterMarkCompanionOfOther).toBe(true);
+  });
+
+  it("correction がアンカー(ann)・original が mandatory_companion(実測した Postgres と同じ形ではない方の並び)", () => {
+    const result = buildResult([
+      {
+        memoryId: originalId,
+        digest: "青",
+        retrievedVia: "mandatory_companion",
+        companionOf: correctionId,
+      },
+      { memoryId: correctionId, digest: "赤", retrievedVia: "ann", companionOf: null },
+    ]);
+    const check = checkCorrectionDemo(result);
+
+    expect(check.afterMarkCompanionRetrieval).toBe(true);
+    expect(check.afterMarkCompanionOfOther).toBe(true);
+  });
+
+  it("companionOf がもう片方を指していなければ afterMarkCompanionOfOther は false(壊れた対応を見逃さない)", () => {
+    const result = buildResult([
+      { memoryId: originalId, digest: "青", retrievedVia: "ann", companionOf: null },
+      {
+        memoryId: correctionId,
+        digest: "赤",
+        retrievedVia: "mandatory_companion",
+        companionOf: "someone-else-entirely",
+      },
+    ]);
+    const check = checkCorrectionDemo(result);
+
+    expect(check.afterMarkCompanionRetrieval).toBe(true);
+    expect(check.afterMarkCompanionOfOther).toBe(false);
+  });
+
+  it("どちらも mandatory_companion でなければ afterMarkCompanionRetrieval は false(段3が発火しなかった場合。これが直した回帰)", () => {
+    const result = buildResult([
+      { memoryId: originalId, digest: "青", retrievedVia: "ann", companionOf: null },
+      { memoryId: correctionId, digest: "赤", retrievedVia: "ann", companionOf: null },
+    ]);
+    const check = checkCorrectionDemo(result);
+
+    expect(check.afterMarkCompanionRetrieval).toBe(false);
+    expect(check.afterMarkCompanionOfOther).toBe(false);
   });
 });

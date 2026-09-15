@@ -18,8 +18,12 @@ import {
  * `scope.postgres.test.ts` と同じ規約——`env: {}` を渡し `OPENAI_API_KEY` の有無に関わらず
  * deterministic モードを強制する）。DB は擬似物で代替しない。
  *
- * **⚠ この作業環境では実行できない**（`DATABASE_URL` が無い）。CI の `example-chat` ジョブが
- * 実測の場になる（`docs/autonomy.md`/ADR 0015 と同じ非対称）。
+ * **⚠ この作業環境では `DATABASE_URL` は既定で無い**（`docs/autonomy.md` §1.1）。
+ * CI の `example-chat` ジョブと「ルートの test 門の DB 段」（`root-gate-db-stage`）が
+ * 継続的な実測の場になる。**PR #320 の CI 失敗を引き継いだ修正作業（Issue #303）では、
+ * `initdb` で一時的な Postgres 17 + pgvector クラスタをローカルに立てて実際にこの歯を
+ * 実行し、赤（`afterMarkCompanionRetrieval` が false）→修正→緑を手元で確認した**
+ * （`docs/decisions/0160-correction-scenario-example-chat.md` 決定5「測ったこと」参照）。
  */
 describe("examples/chat: correction（markContested → resolveContested、本物の Postgres）", () => {
   it("markContested で対になった2件は recall で隣接して出て、resolveContested(supersede) 後は古いほうが消える", async () => {
@@ -40,12 +44,14 @@ describe("examples/chat: correction（markContested → resolveContested、本�
       expect(check.markSucceeded).toBe(true);
       expect(check.resolveSucceeded).toBe(true);
 
-      // markContested 直後: 両方が隣接して出て、負けた側(まだ決まっていないが、この時点では
-      // まだ勝敗は付いていない——両方 contested)は mandatory_companion として付く。
+      // markContested 直後: `recall({ limit: 1 })` でも両方が隣接して出て、
+      // 段2で limit に自然に残らなかったほう(まだ勝敗は付いていない——両方 contested。
+      // どちらが残るかはスコアのランキング次第であり、resolveContested の勝者とは無関係)は
+      // mandatory_companion として強制的に連れてこられる(ADR 0160 決定5)。
       expect(result.beforeMark.memories.length).toBeGreaterThan(0);
       expect(check.afterMarkBothPresent).toBe(true);
       expect(check.afterMarkCompanionRetrieval).toBe(true);
-      expect(check.afterMarkCompanionOfWinner).toBe(true);
+      expect(check.afterMarkCompanionOfOther).toBe(true);
 
       // 🔑 北極星の核心: resolveContested(supersede) の後、古いほう(original)は
       // 二度と recall に出てこない。
