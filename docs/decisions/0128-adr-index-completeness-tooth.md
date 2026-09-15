@@ -228,10 +228,34 @@ D は衝突そのものを消せないが、**「回避に失敗した」こと�
   ```
   ⟹ **この PR は既存の穴を塞ぐものではない**（塞ぐべき穴は無かった）。歯を追加し、
   自分自身の索引行を足しただけである。
-- **【実測】変異試験・両側**（詳細は PR 本文。`cp` で退避してから `docs/decisions/README.md`
-  を書き換え、歯を実行してから復元し `diff`/`md5sum` で一致を確認する手順を踏んだ）。
-- 手元の6つの門（`typecheck` / `lint` / `format:check` / `test` / `build` /
-  `pack:check`）の結果は PR 本文に記載する。
+- **【実測】単体テスト**: `npx vitest run scripts/__tests__/adr-index-completeness-lib.test.mjs
+scripts/__tests__/adr-index-completeness.test.mjs` → **17 tests, 17 passed**
+  （lib 側13本、配線側4本。配線側は実際の `docs/decisions/` を読んで緑）。
+- **【実測】変異試験・両側**（`cp` で `docs/decisions/README.md` を退避してから書き換え、
+  歯を実行してから `cp` で退避しておいた原本へ戻し、`diff`/`md5sum` で復元一致を
+  確認する手順を踏んだ。詳細は PR 本文）:
+  1. **穴（1番）**: 索引から ADR 0122 の行を1行削除 → `findMissingIndexRows` の it が
+     **`{"number":"0122","filename":"0122-restore-archived-memory.md"}` を名指しして赤**。
+  2. **孤児行（4番）**: 存在しない `0999-nonexistent.md` を指す行を1行追加 →
+     `findOrphanIndexRows` の it が **`{"number":"0999", ...}` を名指しして赤**。
+  3. **壊れたリンク（5番）**: ADR 0100 の行のリンク先だけを `0100-wrong-slug-name.md`
+     に書き換え（番号はそのまま） → `findBrokenIndexLinks` の it が
+     **`{"number":"0100", "actualFilename":"0100-supersede-with-new-memories.md", ...}`
+     を名指しして赤**。
+  4. **復元後**: `md5sum docs/decisions/README.md` が変異前と一致
+     （`604dcf336220ac09bd452400a413712b`）。
+  - **正常側（2番）**: 上の3つの変異をすべて戻した状態（欠番 `0080`/`0116` を含む、
+    ADR 0128 の行を足した後の `main` 相当の索引）で `adr-index-completeness.test.mjs`
+    の4本すべてが**緑**（欠番を誤検出しない）。
+- **【実測】手元の6つの門**（この作業環境、`DATABASE_URL` 無し）:
+  - `pnpm run typecheck`: 緑（7 workspace projects）
+  - `pnpm run lint`: 緑（`eslint .` エラー無し）
+  - `pnpm run format:check`: 緑（`All matched files use Prettier code style!`）
+  - `pnpm run test`: 非DB段はすべて緑（ルート 44 files / 844 tests、各パッケージも
+    全緑）。**DB テストは実行していません**と告知されて緑（ADR 0015 の仕様どおり
+    ——「全部通った」ではない）。
+  - `pnpm run build`: 緑（7 workspace projects）
+  - `pnpm run pack:check`: 緑（6パッケージとも publish 梱包の門を通過）
 
 ## 確かめていないこと
 
