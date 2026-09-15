@@ -203,24 +203,52 @@ issue が観測した4点のうち、少なくとも2点（run と job の `conc
 
 ## 検算していない（出所: Issue #228。このセッションでは再導出していない）
 
-- **観測1の時系列**（「最初は10件、後で11件になった」という秒単位の推移）そのもの。
-  上記の通り、機序は確認したが、増える瞬間そのものは見ていない
-  （本 PR 自身の CI で追加確認を試みる。下記参照）。
-- **観測3**（`mergeStateStatus` が draft のときにも走行中のときにも `BLOCKED` を返す
-  という具体的な値）。issue が対象にした PR は本 ADR 作成時点で既にマージ済みで
-  `mergeStateStatus` が `UNKNOWN` に変わっており、過去の値を遡って見る手段が無い
-  （GitHub の `mergeStateStatus` は現在の状態のみを返す）。**この repo の他の
-  現存 PR（#212）で `mergeStateStatus` を見たが `UNKNOWN` であり、`BLOCKED` を
-  自分では観測できていない。**本 PR 自身が draft の間、CI が走行中に
-  `mergeStateStatus` を見ることで確認を試みる（下記参照）。
-- **観測4**（draft でも本物の CI が走ること）。本 PR 自身を draft として出し、
-  実際に check-runs が登録されるかどうかで確認するつもりである（下記参照）。
-- **`skipped` がこの repo で出る条件**。issue 本文と同じく、今回も測っていない。
+**下の「本 PR 自身の CI を見て確認したこと」により、観測1（機序＋部分的な時系列）・
+観測3（`BLOCKED`）・観測4（draft でも実 CI）は、このセッションで実際に検算できた。**
+それでも検算できていない部分は次の通り:
+
+- **観測1の秒単位の時系列**（「10件だったものが、まさに11件に変わった瞬間」）。
+  「10件で始まり、11件目の条件（`postgres` matrix 完了）がまだ揃っていない」ところまでは
+  自分の PR で確認できたが、**11件へ実際に増える瞬間をこのセッションで見届けたかは、
+  本 ADR 末尾の追記時点で確定する**（下記参照）。
+- **`mergeStateStatus` が `CLEAN` に変わる瞬間**——全 check が終端に達した直後に
+  `CLEAN` を経由するかどうかは、本 PR の CI が全部終わった時点で追加確認する
+  （下記参照）。issue が対象にした PR（#220 等）は本 ADR 作成時点で既にマージ済みで
+  `mergeStateStatus` が `UNKNOWN` に変わっており、過去の値を遡って見る手段が無い。
+- **`skipped` がこの repo で出る条件**。issue 本文と同じく、今回も測っていない
+  （今回の10〜11件も全件 `success` か `in_progress` であり、`skipped` は出ていない）。
 - **「本数が最終的に何本か」を事前に知る方法**。§2.1・`--recheck-after` は
   弱い確認（2回一致）を提供するだけで、確定的な判定手順ではない。
+- **issue 本文の根本原因の記述**（マイグレーションが CHECK 制約の候補を2件拾い
+  `RAISE EXCEPTION` が発火した、という具体的なコード上の原因）はコードを読んで
+  いない——検算したのは「赤くなった3ジョブの内訳」という構造だけである。
 
 ## 本 PR 自身の CI を見て確認したこと
 
-（このセクションは、`docs/228-ci-green-criteria` ブランチの draft PR を実際に出し、
-その CI を観測した後に追記する。追記前にこの節が残っていること自体が
-「まだ観測していない」の印である。）
+`docs/228-ci-green-criteria` ブランチを **draft PR #239** として実際に出し（head sha
+`6908fa4fb65274c555cfe59028d313b082c651ab`）、その CI をこのセッションでリアルタイムに
+観測した。
+
+- **【実測】観測4（draft でも本物の CI が走る）**: PR #239 は `isDraft: true` のまま、
+  push 直後に `gh api repos/takecchi/mnemora/commits/<sha>/check-runs` で
+  **10件の check-runs が `status: "in_progress"` として登録された**（`conclusion` は
+  すべて `null`）。**`skipped` は1本も無かった。** ⟹ issue の観測4を、この repo の
+  今回の PR で直接再現・確認した。
+- **【実測】観測3（`mergeStateStatus` は draft/走行中に `BLOCKED` を返す）**:
+  push 直後、`gh pr view 239 --json mergeStateStatus` は **`"BLOCKED"`** を返した
+  （このとき `isDraft: true` かつ check-runs は全件 `in_progress`）。⟹ issue の観測3
+  （`BLOCKED` は draft のときにも check 走行中にも出る）の少なくとも一方
+  （draft かつ走行中）を、この PR 自身で確認した。
+- **【実測】観測1（check の本数が後から増える機序）**: push 直後の10件の内訳を見ると、
+  `.github/workflows/ci.yml` の `postgres-regime-coverage`（`needs: postgres`、
+  「両方の server_encoding regime が実際に走ったことを測る」ジョブ）は
+  **最初の10件に含まれていなかった**——`postgres` matrix（UTF8/SQL_ASCII の2脚）が
+  ある前提のジョブであり、GitHub Actions は `needs:` を持つジョブの check-run を、
+  依存先が終わるまで一覧に出さない（少なくともこの回はそう振る舞った）。
+  ⟹ **issue の「10件→11件」という観測を、この PR 自身でほぼそのまま再現できた**
+  （厳密には「10件で始まり、11件目が要る条件のジョブがまだ無い」ところまでを
+  確認した時点の記録であり、実際に11件へ増えた瞬間を秒単位で見届けたわけではない
+  ——増えたことの確認は、この ADR の更新後に本 PR が完了した時点の
+  check-runs 総数で裏付ける）。
+
+（このセクションは CI 完了後にさらに追記する。）

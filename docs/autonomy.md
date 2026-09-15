@@ -131,7 +131,7 @@ gh pr list --state open --limit 20
      緑ではない。**
    - **ここで見ているのは job 単位の `conclusion` であり、
      `gh api repos/<owner>/<repo>/actions/runs/<run_id>` が返す run 全体の `conclusion`
-     ではない。**両者は別物である（下記「検算した」）——run 全体が `failure` でも、
+     ではない。**両者は別物である（ADR 0132 の「検算した」節）——run 全体が `failure` でも、
      その中の特定の job は `success`ということが起きる。**逆に、1 job の `success` を見て
      run 全体・ひいては PR 全体を緑と読むのも誤り。**
 
@@ -155,7 +155,7 @@ gh pr list --state open --limit 20
 6. **別リポジトリ（[alteroid](https://github.com/takecchi/alteroid) 等）の CI の作法を、
    検算せずに持ち込まない。** 「draft では checks が `skipped` になる」のような教訓は
    **この repo には当てはまらないことがある**（この repo では draft でも本物の CI が走る、
-   下記「検算した」）。
+   ADR 0132 の「検算した」節）。
 
 **機械化した道具**: `node scripts/ci-green-check.mjs --pr <番号>` が上の1〜4を1コマンドで行う
 （`--recheck-after <秒>` で4番の再確認、`--sha <sha>` で sha 直指定、`--json` で機械可読出力）。
