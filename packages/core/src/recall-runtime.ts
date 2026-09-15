@@ -696,7 +696,7 @@ export async function runRecall(
 
   // 🔴 単位を組む繰り返しから候補が漏れたら、黙らない（ADR 0043）。
   //
-  // ⚠ **Issue #197 / ADR 0133（2026-09 追記）で `Runtime.markContested` が入り、
+  // ⚠ **Issue #197 / ADR 0134（2026-09 追記）で `Runtime.markContested` が入り、
   // `contested` を書く主体自体は存在するようになった。** ただし `markContested` は
   // 両側 `status='active'` の CAS を課したうえで相互参照を1トランザクションで書くため、
   // **`Runtime` 経由で作られた `contested` ペアが一対一を破ることは無い**——鎖

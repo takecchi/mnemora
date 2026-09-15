@@ -294,7 +294,7 @@ describe("contested の一対一（ADR 0046）— Runtime を一巡させても�
     // ⚠ **この歯が Phase 1 で見ているのは「破れていないこと」だけであり、**
     // **「`contested` が作られること」は見ていない。**`observe`/`tick`/`reextract` は
     // 今日も `contested` を一切書かないので、対向関係の枝は通らない
-    // （Issue #197 / ADR 0133 で `Runtime.markContested` が追加された後も、この3つの
+    // （Issue #197 / ADR 0134 で `Runtime.markContested` が追加された後も、この3つの
     // 経路自体は変わっていない——下の describe を参照）。
     //
     // **⟹ それを「Runtime は contested を書かない」という歯にはしない。**
@@ -330,7 +330,7 @@ describe("contested の一対一（ADR 0046）— Runtime を一巡させても�
   });
 });
 
-describe("contested の一対一（ADR 0046）— Issue #197 / ADR 0133: markContested が作る対向は一対一を破らない", () => {
+describe("contested の一対一（ADR 0046）— Issue #197 / ADR 0134: markContested が作る対向は一対一を破らない", () => {
   it("🔴 runtime.markContested で作った相互ペアは、検査器が『破れていない』側として認める形と一致する", async () => {
     // ⚠ ADR 0046 の「出たこと2」——「相互ペア A↔B は、公開 interface の組み合わせでは
     // 構成できない」——を、本 PR がここで初めて覆す。この歯は、`mutualPair()`（この

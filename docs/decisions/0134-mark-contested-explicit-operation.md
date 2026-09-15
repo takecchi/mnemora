@@ -1,4 +1,4 @@
-# ADR 0133: 矛盾の検出（第1弾）— `Runtime.markContested` という明示的操作で `contested_with_id` を初めて書く
+# ADR 0134: 矛盾の検出（第1弾）— `Runtime.markContested` という明示的操作で `contested_with_id` を初めて書く
 
 - **状態**: 採用 (2026-09)
 

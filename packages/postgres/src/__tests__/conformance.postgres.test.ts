@@ -79,7 +79,7 @@ describeMemoryStoreConformance({
   supportsArchiveDecayed: true,
   // Issue #198 / ADR 0124: PostgresMemoryStore は purgeMemory を実装している。
   supportsPurgeMemory: true,
-  // Issue #197 / ADR 0133: PostgresMemoryStore は markContestedPair を実装している。
+  // Issue #197 / ADR 0134: PostgresMemoryStore は markContestedPair を実装している。
   supportsMarkContestedPair: true,
 });
 

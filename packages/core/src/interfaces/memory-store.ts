@@ -714,7 +714,7 @@ export interface MemoryStore {
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   /**
-   * Issue #197（ADR 0133）: `docs/memory-model.md` §11 行6「判定できない対向を検出
+   * Issue #197（ADR 0134）: `docs/memory-model.md` §11 行6「判定できない対向を検出
    * → 両側の `status='contested'`、`contested_with_id` を相互に設定」を書き込む口。
    *
    * [ADR 0046](../../../../docs/decisions/0046-contested-pair-invariant-tooth.md) が数え上げた
@@ -736,7 +736,7 @@ export interface MemoryStore {
    * 空のまま」という状態に限られ、それは ADR 0046 が「単独で返り、機構2（`docs/memory-model.md`
    * §5）が破れる」と名指しした壊れた状態そのものである。**この口を実装しない adapter に
    * 対しては、`Runtime.markContested` は「対応していない」とだけ返し、劣化した代替を
-   * 試みない**（`docs/decisions/0133-*.md` 参照）。
+   * 試みない**（`docs/decisions/0134-*.md` 参照）。
    *
    * 契約:
    * - **両側とも呼び出し時点で `status === 'active'` であること**（CAS。この口は

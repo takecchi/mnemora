@@ -170,7 +170,7 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsPurgeMemory: boolean;
   /**
-   * Issue #197 / ADR 0133: 対象の `MemoryStore` 実装が `markContestedPair`
+   * Issue #197 / ADR 0134: 対象の `MemoryStore` 実装が `markContestedPair`
    * （任意メソッド）を実装しているかどうか。**必須。**
    *
    * `supportsArchiveDecayed`/`supportsPurgeMemory` と同じ判断——省略可にしない。
@@ -2519,7 +2519,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     }
 
     // -------------------------------------------------------------------
-    // markContestedPair（Issue #197 / ADR 0133: 矛盾の検出・明示的操作、任意メソッド）
+    // markContestedPair（Issue #197 / ADR 0134: 矛盾の検出・明示的操作、任意メソッド）
     // -------------------------------------------------------------------
 
     if (supportsMarkContestedPair) {

@@ -817,7 +817,7 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
 
 describe("recall() — 既知の未修復のギャップ: 片側だけの contested（Issue #243）", () => {
   it("🔴 contestedWithId が null の contested Memory は、単独で recall に出る（memory-store.ts:175 の契約違反。Issue #197 のこの PR では未修復）", async () => {
-    // ⚠ **これは望ましい振る舞いではない。**Issue #197（ADR 0133）の `Runtime.markContested`
+    // ⚠ **これは望ましい振る舞いではない。**Issue #197（ADR 0134）の `Runtime.markContested`
     // はこの状態を作らない（両側 `status='active'` の CAS を課すため）。しかし
     // `docs/decisions/0046-contested-pair-invariant-tooth.md` が実測したとおり、
     // `MemoryStore.updateStatus(id, "contested")` を `Runtime` を経由せず直接呼べば

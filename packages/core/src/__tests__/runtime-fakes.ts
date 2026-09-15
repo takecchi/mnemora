@@ -803,7 +803,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #197 / ADR 0133: 両側とも `status === 'active'` の CAS を課したうえで、
+   * Issue #197 / ADR 0134: 両側とも `status === 'active'` の CAS を課したうえで、
    * `status='contested'`・`contestedWithId` を相互に設定する。`InMemoryMemoryStore`
    * （testkit）/ `PostgresMemoryStore` と同じ「事前検証してから書く」作法——
    * まだ何も書いていないうちに、存在確認と CAS 判定を両方の対象について済ませる

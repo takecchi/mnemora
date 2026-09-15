@@ -1248,7 +1248,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #197 / ADR 0133: 両側とも `status = 'active'` の CAS を課したうえで、
+   * Issue #197 / ADR 0134: 両側とも `status = 'active'` の CAS を課したうえで、
    * `status='contested'`・`contested_with_id` を相互に設定する——1トランザクションで
    * 完結し、`updateStatusWithEvent`/`purgeMemory` と同じ「条件付き UPDATE が0行なら
    * 読み直して切り分ける」作法を、対象2件それぞれについて行う。**どちらか一方が

@@ -811,7 +811,7 @@ export interface PurgeResult {
 
 /**
  * `runtime.markContested` が対象1件（`first`/`second` のどちらか）ごとに分類する適格性
- * （Issue #197、ADR 0133）。**新しい語彙を作らない**——`ForgetOutcome`/`ConsolidateSourceOutcome`
+ * （Issue #197、ADR 0134）。**新しい語彙を作らない**——`ForgetOutcome`/`ConsolidateSourceOutcome`
  * が既に使っている `"not_found"`/`"status_not_active"`/`"eligible"` にそのまま揃える。
  *
  * - `"eligible"` — `status === "active"`。書き込みの CAS 条件を満たす。
@@ -825,7 +825,7 @@ export type MarkContestedSideOutcome =
   | { memoryId: MemoryId; kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> };
 
 /**
- * `runtime.markContested` 全体の結末（Issue #197、ADR 0133）。ADR 0008 の「無い」の分類の
+ * `runtime.markContested` 全体の結末（Issue #197、ADR 0134）。ADR 0008 の「無い」の分類の
  * 適用——「対象が適格でなかった」「書き込み時点で競合した」「対応していない」を
  * 1つの `false`/例外に潰さない。
  *
@@ -853,7 +853,7 @@ export type MarkContestedOutcome =
   | { kind: "not_attempted" };
 
 /**
- * `runtime.markContested` の任意オプション（Issue #197、ADR 0133）。`ConsolidateOptions`/
+ * `runtime.markContested` の任意オプション（Issue #197、ADR 0134）。`ConsolidateOptions`/
  * `ForgetOptions` と同じ形。
  */
 export interface MarkContestedOptions {
@@ -868,7 +868,7 @@ export interface MarkContestedOptions {
 }
 
 /**
- * `runtime.markContested` の結果（Issue #197、ADR 0133）。
+ * `runtime.markContested` の結果（Issue #197、ADR 0134）。
  */
 export interface MarkContestedResult {
   /**
@@ -1139,7 +1139,7 @@ export interface Runtime {
    */
   purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
   /**
-   * Issue #197（ADR 0133）: `docs/memory-model.md` §11 lifecycle 行6「判定できない対向を
+   * Issue #197（ADR 0134）: `docs/memory-model.md` §11 lifecycle 行6「判定できない対向を
    * 検出 → 両側の `status='contested'`、`contested_with_id` を相互に設定」を実行する
    * **明示的操作**。
    *
@@ -1149,10 +1149,10 @@ export interface Runtime {
    * mandatory companion retrieval が働く状態）で機械的に書き込むだけである。
    * ⟹ **順序（新しい方を勝たせる）で判定しない・LLM を呼ばない**——
    * どちらの北極星の制約も、判定そのものをこの口が持たないことで自動的に満たす
-   * （`docs/decisions/0133-*.md` 参照）。
+   * （`docs/decisions/0134-*.md` 参照）。
    *
    * `docs/memory-model.md` §11 行7「`contested` → `active | superseded`」（解決）は
-   * この PR の範囲外——別の issue/PR で扱う（ADR 0133「採らなかった案」参照）。
+   * この PR の範囲外——別の issue/PR で扱う（ADR 0134「採らなかった案」参照）。
    *
    * 手順:
    * 1. `firstId === secondId` は呼び出し前の programmer error として扱い、
@@ -2231,7 +2231,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `Runtime.markContested` の実装（Issue #197、ADR 0133）。doc コメントは interface 側
+   * `Runtime.markContested` の実装（Issue #197、ADR 0134）。doc コメントは interface 側
    * （`markContested` の JSDoc）にある——ここはアルゴリズムそのものだけ。
    */
   async function markContested(

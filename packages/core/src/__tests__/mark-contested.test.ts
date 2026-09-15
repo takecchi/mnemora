@@ -7,7 +7,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `runtime.markContested`（Issue #197、ADR 0133）の歯。
+ * `runtime.markContested`（Issue #197、ADR 0134）の歯。
  *
  * 設計の要点（`runtime.ts` の `MarkContestedOutcome`/`markContested` の doc コメント参照）:
  * - 両側とも呼び出し時点で `status === 'active'` であることを CAS で要求する。

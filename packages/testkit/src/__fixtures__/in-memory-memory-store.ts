@@ -889,7 +889,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #197 / ADR 0133: 両側とも `status === 'active'` の CAS を課したうえで、
+   * Issue #197 / ADR 0134: 両側とも `status === 'active'` の CAS を課したうえで、
    * `status='contested'`・`contestedWithId` を相互に設定する。**in-memory にトランザクションは
    * 無い**——「まだ何も書いていない」ことでロールバックを模す
    * （`supersedeWithNewMemories`/`updateStatusWithEvent` と同じ「まだ何も書いていないうちに

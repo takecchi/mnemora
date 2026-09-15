@@ -99,7 +99,7 @@ describeMemoryStoreConformance({
   supportsArchiveDecayed: true,
   // Issue #198 / ADR 0124: InMemoryMemoryStore は purgeMemory を実装している。
   supportsPurgeMemory: true,
-  // Issue #197 / ADR 0133: InMemoryMemoryStore は markContestedPair を実装している。
+  // Issue #197 / ADR 0134: InMemoryMemoryStore は markContestedPair を実装している。
   supportsMarkContestedPair: true,
 });
 
