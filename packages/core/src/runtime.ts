@@ -31,6 +31,11 @@ import type {
 import { OutboxLeaseConflictError } from "./interfaces/outbox-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "./interfaces/outbox-store.js";
 import type { OutboxJobKind } from "./interfaces/scheduler.js";
+import {
+  readActivitySeq,
+  readDecayClock,
+  readDefaultHalfLifeRecalls,
+} from "./interfaces/tenant-settings-store.js";
 import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
 import type { TokenCounter } from "./interfaces/token-counter.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
@@ -1707,6 +1712,35 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * ⟹ 作成より前に content_hash を知る必要がある。組み立てと書き込みを分けないと、
    * この2つを同時に満たせない。
    */
+  /**
+   * [ADR 0158](../../docs/decisions/0158-decay-activity-clock.md) 決めたこと1・3・5・12:
+   * Memory 書き込み側3箇所（抽出・consolidate 手順6・reflect 手順7）が共通して要る、
+   * 活動時計の入力の組み立て。
+   *
+   * **`decay_clock === 'wall'` のテナントでは `tenant_activity` を一度も読まない**
+   * ——`{}` を返し、`activitySeq`/`halfLifeRecalls` は `undefined` のまま
+   * `buildNewMemoryFromCandidate` 等へ渡る。これらの関数は両方揃っているときだけ
+   * 活動時計の3つ組（`decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls`）を作る
+   * （`extraction.ts` の doc 参照）ので、`'wall'` のテナントで作られる Memory は
+   * 本 ADR の前後で1バイトも変わらない。
+   *
+   * ⚠ **これは 0158 の話であり、tick が consolidate/reflect を駆動する ADR 0157 とは無関係**
+   * ——ここで読むのは `decay_clock`/`activity_seq` だけで、tick のスケジューリングには触れない。
+   */
+  async function resolveActivityClockInputs(
+    ctx: Ctx,
+  ): Promise<{ activitySeq?: number; halfLifeRecalls?: number }> {
+    const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
+    if (decayClock === "wall") {
+      return {};
+    }
+    const [activitySeq, halfLifeRecalls] = await Promise.all([
+      readActivitySeq(deps.tenantSettingsStore, ctx),
+      readDefaultHalfLifeRecalls(deps.tenantSettingsStore, ctx),
+    ]);
+    return { activitySeq, halfLifeRecalls };
+  }
+
   async function buildNewMemoriesForCandidates(
     ctx: Ctx,
     observation: Observation,
@@ -1714,6 +1748,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   ): Promise<NewMemory[]> {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
+    // ADR 0158 決めたこと3・5・12: 活動時計の3つ組を、書き込み側3箇所のうちの1つとして
+    // ここで織り込む。
+    const activityClockInputs = await resolveActivityClockInputs(ctx);
     return candidates.map((candidate) =>
       buildNewMemoryFromCandidate({
         ctx,
@@ -1726,6 +1763,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         halfLifeHours,
         now,
         digestFallbackLength,
+        ...activityClockInputs,
       }),
     );
   }
@@ -3164,6 +3202,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 6. 統合先を作る。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
+    // ADR 0158 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（consolidate 手順6）。
+    const activityClockInputs = await resolveActivityClockInputs(ctx);
     const newMemory = buildConsolidatedMemory({
       ctx,
       eligible: eligibleMemories,
@@ -3172,6 +3212,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       digestFallbackLength,
       halfLifeHours,
       now,
+      ...activityClockInputs,
     });
     const actor = opts.actor ?? { type: "system" };
     const buildCreatedEvent = () =>
@@ -3511,6 +3552,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 7. 新しい Memory を1件作る（既存の行へは一切書き込まない——決定4）。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
+    // ADR 0158 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（reflect 手順7）。
+    const activityClockInputs = await resolveActivityClockInputs(ctx);
     const newMemory = buildReflectedMemory({
       ctx,
       eligible: eligibleMemories,
@@ -3519,6 +3562,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       digestFallbackLength,
       halfLifeHours,
       now,
+      ...activityClockInputs,
     });
     const { memory: reflectedMemory, created } = await deps.memoryStore.createMemoryWithOutbox(
       ctx,

@@ -290,10 +290,7 @@ export const DECAY_CLOCK_UNSUPPORTED_MESSAGE =
  * 呼び出し側に散らさないための1箇所である（interface の doc を参照）。
  * **メソッドが在って投げた場合は素通しで投げる**——「未実装」と「失敗」を混ぜない。
  */
-export async function readDecayClock(
-  store: TenantSettingsStore,
-  ctx: Ctx,
-): Promise<DecayClock> {
+export async function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Promise<DecayClock> {
   if (store.getDecayClock === undefined) {
     return DEFAULT_DECAY_CLOCK;
   }

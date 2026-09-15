@@ -445,9 +445,7 @@ export async function runRecall(
         // - 'activity': decayFloorSeqAfter のみ。
         // - 'either': 両方 + decayFloorAnyAxis（OR で結ぶ、最も緩い）。
         decayFloorAtAfter:
-          decayGateActive && (decayClock === "wall" || decayClock === "either")
-            ? now
-            : undefined,
+          decayGateActive && (decayClock === "wall" || decayClock === "either") ? now : undefined,
         decayFloorSeqAfter:
           decayGateActive && (decayClock === "activity" || decayClock === "either")
             ? nowSeq
