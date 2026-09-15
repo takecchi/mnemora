@@ -559,7 +559,8 @@ export function compareWithFullLog(input: FullLogComparisonInput): FullLogCompar
   // --- 結論 ---
   // `fullLogChars === 0` は「会話ログが空」であり、比が定義できない。
   // **0除算の結果（Infinity / NaN）を結論の顔で返さない。**
-  const estimatedShare = fullLogChars > 0 ? estimate.chars / fullLogChars : Number.POSITIVE_INFINITY;
+  const estimatedShare =
+    fullLogChars > 0 ? estimate.chars / fullLogChars : Number.POSITIVE_INFINITY;
 
   let verdict: FullLogVerdict;
   if (Math.abs(estimatedShare - 1) <= tolerance) {
