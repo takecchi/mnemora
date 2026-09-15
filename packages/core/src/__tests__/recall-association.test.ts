@@ -7,7 +7,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores, withoutGetVectors } from "./runtime-fakes.js";
 
 /**
- * 連想枠（Issue #200、ADR 0146、docs/recall.md §9）の歯。
+ * 連想枠（Issue #200、ADR 0151、docs/recall.md §9）の歯。
  *
  * `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
  */

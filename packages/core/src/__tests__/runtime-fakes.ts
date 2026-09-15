@@ -1080,7 +1080,7 @@ export class FakeVectorStore implements VectorStore {
   }
 
   /**
-   * Issue #200 / ADR 0146: 連想枠の歯が使う。`InMemoryVectorStore`
+   * Issue #200 / ADR 0151: 連想枠の歯が使う。`InMemoryVectorStore`
    * （`packages/testkit`）の同名メソッドと同じ意味論——存在しない memoryId・
    * 他テナントの memoryId は静かに結果から落ちる（tenant 境界は key の一致で掛かる）。
    */
@@ -1101,7 +1101,7 @@ export class FakeVectorStore implements VectorStore {
 }
 
 /**
- * Issue #200 / ADR 0146: `getVectors` を実装していない `VectorStore` を模す薄いラッパー。
+ * Issue #200 / ADR 0151: `getVectors` を実装していない `VectorStore` を模す薄いラッパー。
  * `FakeVectorStore` の `upsert`/`search`/`delete` へそのまま委譲するが、`getVectors` を
  * プロパティとして持たない——`deps.vectorStore.getVectors === undefined` を検査する歯
  * （`stage_skipped { reason: "vector_store_lacks_get_vectors" }`）専用。

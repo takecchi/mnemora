@@ -98,7 +98,7 @@ type ScoredCandidate = {
    */
   retrievedVia: "ann" | "lexical" | "mandatory_companion" | "association";
   companionOf?: MemoryId;
-  /** `retrievedVia: "association"` のときだけ在る。どのアンカーから連想したか（ADR 0146）。 */
+  /** `retrievedVia: "association"` のときだけ在る。どのアンカーから連想したか（ADR 0151）。 */
   associationOf?: MemoryId;
   score: ScoreBreakdown;
 };
@@ -734,7 +734,7 @@ export async function runRecall(
   }
 
   // -------------------------------------------------------------------
-  // 段3.5: 連想（任意。既定 off。docs/recall.md §9、ADR 0146）
+  // 段3.5: 連想（任意。既定 off。docs/recall.md §9、ADR 0151）
   //
   // 「聞かれていないことを、自分から思い出す」の実装。クエリで引けた記憶（アンカー）の
   // 近傍を、同じ埋め込み空間の二段目として引く——「何が似ているか」を新しく定義せず、
@@ -780,7 +780,7 @@ export async function runRecall(
           ...anchorIds,
         ]);
         // 複数アンカーから同じ記憶が浮上しても、associationOf は最初に当たった
-        // アンカーだけを記録する（ADR 0146 の負債4「アンカーを1つしか指さない」）。
+        // アンカーだけを記録する（ADR 0151 の負債4「アンカーを1つしか指さない」）。
         const seen = new Set<MemoryId>();
         const associationHits: { memoryId: MemoryId; anchorId: MemoryId; similarity: number }[] =
           [];
@@ -840,7 +840,7 @@ export async function runRecall(
           if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
           if (excludeKinds.has(memory.provenance.kind)) continue;
           // ⛔ アンカーとの類似度を score.similarity（クエリとの類似度の枠）に入れない
-          // ——嘘になる（北極星の問い3・問い4、ADR 0146「採らなかった案」）。
+          // ——嘘になる（北極星の問い3・問い4、ADR 0151「採らなかった案」）。
           // `mandatory_companion`（段3）の先例に倣い、similarity/lexicalMatch を渡さず
           // decay × tagMatch × freshness × strength だけでスコアする（affinity は
           // 中立の1に退化する。`strategies/scoring.ts` の doc 参照）——スコアを
@@ -945,7 +945,7 @@ export async function runRecall(
     }),
   );
 
-  // 連想枠（Issue #200、ADR 0146）が返した digest の合計文字数の内訳。`association` を
+  // 連想枠（Issue #200、ADR 0151）が返した digest の合計文字数の内訳。`association` を
   // 渡したときだけ usage.byTier に載せる（申告されていなければ欄自体が無い。`share`/
   // `budgetExceeded` と同じ規約）——「呼び手が連想で何文字増えたか」を見られるようにする。
   const associationChars = finalMemories
