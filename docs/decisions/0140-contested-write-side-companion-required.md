@@ -1,4 +1,4 @@
-# ADR 0139: `MemoryStore` の書き込み側で、対向（`contestedWithId`）の無い単独 `contested` を拒否する — ADR 0136 決定3の実装（生成経路も含む）
+# ADR 0140: `MemoryStore` の書き込み側で、対向（`contestedWithId`）の無い単独 `contested` を拒否する — ADR 0136 決定3の実装（生成経路も含む）
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-15

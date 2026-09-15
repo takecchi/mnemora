@@ -440,7 +440,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
 
-    // ADR 0139（Issue #243続き）: `createMemory` は `status: 'contested'` を
+    // ADR 0140（Issue #243続き）: `createMemory` は `status: 'contested'` を
     // `contestedWithId` 無しでは作れなくなった（`ContestedWithoutCompanionError`）。
     // `status: 'contested'` を正しく（両側 CAS・相互参照・同一トランザクション）書く
     // 唯一の口は `markContestedPair`（ADR 0134）——まず両方を active で作り、

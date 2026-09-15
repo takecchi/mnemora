@@ -35,7 +35,7 @@ export class MemoryStatusConflictError extends Error {
 }
 
 /**
- * [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md)
+ * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * （Issue #243 続き、ADR 0136 決定3の設計メモを実装した）: `status: 'contested'` を
  * **対向（`contestedWithId`）無しで**書き込もうとしたときに、`updateStatus` /
  * `updateStatusWithEvent` / `createMemory` / `createMemoryWithOutbox` /
@@ -68,14 +68,14 @@ export class ContestedWithoutCompanionError extends Error {
       `MemoryStore.${method}: writing status "contested" without a companion ` +
         `(contestedWithId) is rejected` +
         (memoryId !== null ? ` (memoryId: ${memoryId})` : " (at creation time)") +
-        `. Use markContestedPair to create a mutually-contested pair (ADR 0134 / ADR 0139).`,
+        `. Use markContestedPair to create a mutually-contested pair (ADR 0134 / ADR 0140).`,
     );
     this.name = "ContestedWithoutCompanionError";
   }
 }
 
 /**
- * [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md)
+ * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * が使う判定そのもの。`ContestedWithoutCompanionError` を投げるべきかどうかを、
  * adapter（`packages/postgres`・`packages/testkit`）それぞれで書き写さず、ここ1箇所に
  * 置く——判定基準が adapter ごとにずれることを防ぐ（ADR 0053 の
@@ -313,7 +313,7 @@ export interface MemoryStore {
     jobKinds: OutboxJobKind[],
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }>;
   /**
-   * 🔴 [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md):
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
    * `input.status === 'contested'` かつ `input.contestedWithId` が `null`/`undefined` の
    * 呼び出しは {@link ContestedWithoutCompanionError} を投げる（`isContestedWithoutCompanion`
    * が判定する）。対向を明示した作成（`contestedWithId` に既存 Memory の id を渡す）は
@@ -327,7 +327,7 @@ export interface MemoryStore {
    * 既存行に衝突した場合は `created: false` を返し、ジョブは作らない
    * （同じ内容に対して埋め込みジョブを重複させない）。
    *
-   * 🔴 `createMemory` と同じ [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md)
+   * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
    * の制約を受ける。
    */
   createMemoryWithOutbox(
@@ -384,7 +384,7 @@ export interface MemoryStore {
    * （`runtime.ts` の `reextract`）が要る条件は `"active"` の1つだけであり、
    * 集合（配列）にする理由が無い。採らなかった案は ADR 0030 参照。
    *
-   * 🔴 [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md):
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
    * `status === 'contested'` を対象にした呼び出しは**常に** {@link ContestedWithoutCompanionError}
    * を投げる——この口には対向（`contestedWithId`）を渡す引数がそもそも無いため、区別の
    * 余地なく単独の `contested` になる。`contested` を正しく書くには `markContestedPair`
@@ -432,7 +432,7 @@ export interface MemoryStore {
    * `createMemoryWithOutbox`）は別の呼び出しのままであり、このメソッドは既存 Memory の
    * status 更新とイベント追記の対だけを扱う（ADR 0031「これが覆るとしたら」参照）。
    *
-   * 🔴 [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md):
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
    * `updateStatus` と同じ理由で、`status === 'contested'` を対象にした呼び出しは**常に**
    * {@link ContestedWithoutCompanionError} を投げる（status もイベントも一切書かれない）。
    */
@@ -612,7 +612,7 @@ export interface MemoryStore {
    * （`InMemoryMemoryStore` クラス doc 参照）。実際に原子性を測るのは適合テストと
    * `packages/postgres` の並行の歯であって、この口の有無そのものではない。
    *
-   * 🔴 [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md):
+   * 🔴 [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md):
    * `news[i].input` にも `createMemory` と同じ制約が掛かる——`status === 'contested'` かつ
    * `contestedWithId` が `null`/`undefined` の要素が1件でもあれば、`news`/`supersede`
    * どちらの書き込みも一切行わずに {@link ContestedWithoutCompanionError} を投げる。

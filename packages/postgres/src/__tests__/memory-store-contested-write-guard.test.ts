@@ -6,7 +6,7 @@ import type { Db } from "../client.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 
 /**
- * [ADR 0139](../../../../docs/decisions/0139-contested-write-side-companion-required.md)
+ * [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
  * の書き込み側ガードだけを検査する。
  *
  * ⚠ **DB を要求しない。** ガードは `this.db.execute`/`this.db.transaction` を一度も
@@ -51,7 +51,7 @@ function event(memoryId: string): NewMemoryEvent {
   };
 }
 
-describe("PostgresMemoryStore — ADR 0139 書き込み側ガード（DB 不要）", () => {
+describe("PostgresMemoryStore — ADR 0140 書き込み側ガード（DB 不要）", () => {
   it("createMemory: status='contested' かつ contestedWithId 無し を拒否する", async () => {
     const store = new PostgresMemoryStore(UNREACHABLE_DB);
     await expect(store.createMemory(ctx, contestedInput())).rejects.toBeInstanceOf(

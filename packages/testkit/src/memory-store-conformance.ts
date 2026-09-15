@@ -2168,7 +2168,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const now = new Date("2026-06-01T00:00:00.000Z");
         const past = new Date(now.getTime() - 1_000);
         const statuses = ["contested", "superseded", "forgotten", "archived"] as const;
-        // ADR 0139: status='contested' は contestedWithId 無しでは作れない。この歯の
+        // ADR 0140: status='contested' は contestedWithId 無しでは作れない。この歯の
         // 主題は archiveDecayed の status ゲートであって contested の一対一ではないので、
         // 対向として使うだけの companion を先に作る。**decayFloorAt を `now` より先に
         // 置く**——既定の fixture の decayFloorAt は `past` より古く、companion が active の
@@ -2413,7 +2413,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         async (status) => {
           const store = await createStore();
           const ctx: Ctx = { tenantId: "tenant-1" };
-          // ADR 0139: status='contested' は contestedWithId 無しでは作れない。この歯の
+          // ADR 0140: status='contested' は contestedWithId 無しでは作れない。この歯の
           // 主題は purgeMemory の CAS であって contested の一対一ではないので、
           // 対向として使うだけの companion を必要な場合にだけ用意する。
           const companion =
@@ -2553,7 +2553,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     }
 
     // -------------------------------------------------------------------
-    // ADR 0139（Issue #243 続き・ADR 0136 決定3の実装）:
+    // ADR 0140（Issue #243 続き・ADR 0136 決定3の実装）:
     // `status: 'contested'` を対向（`contestedWithId`）無しで書くことを、書き込み側で
     // 拒否する。`updateStatus`/`updateStatusWithEvent` には `contestedWithId` を渡す
     // 引数がそもそも無いため、この2メソッドは status='contested' を対象にした呼び出しを
@@ -2835,7 +2835,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
               contentHash: `mark-contested-status-active-${status}`,
             }),
           );
-          // ADR 0139: status='contested' は contestedWithId 無しでは作れない。この歯の
+          // ADR 0140: status='contested' は contestedWithId 無しでは作れない。この歯の
           // 主題は markContestedPair の CAS（対象が active でない）であって contested の
           // 一対一ではないので、対向として使うだけの第三の companion を必要な場合にだけ
           // 用意する（a・b とは無関係——a・b 自体のペア構成をこの companion で乱さない）。
@@ -3166,7 +3166,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     it("aggregateScope は status='contested' を totalInScope に含める（段1と同じゲート）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
-      // ADR 0139: `status: 'contested'` は `contestedWithId` 無しでは作れない
+      // ADR 0140: `status: 'contested'` は `contestedWithId` 無しでは作れない
       // （`ContestedWithoutCompanionError`）。この歯の主題は aggregateScope の
       // ゲートであって contested の一対一ではないので、対向として使うだけの
       // companion を先に作る（companion 自身も active として totalInScope に入る）。

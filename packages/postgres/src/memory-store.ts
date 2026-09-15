@@ -174,7 +174,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
-    // ADR 0139: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
+    // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemory", null);
     }
@@ -237,7 +237,7 @@ export class PostgresMemoryStore implements MemoryStore {
     input: NewMemory,
     jobKinds: OutboxJobKind[],
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
-    // ADR 0139: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
+    // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemoryWithOutbox", null);
     }
@@ -385,7 +385,7 @@ export class PostgresMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
-    // ADR 0139: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
+    // ADR 0140: この口には contestedWithId を渡す引数が無いため、status: 'contested' への
     // 書き込みは常に単独になる。UPDATE を投げる前に落とす。
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
@@ -447,7 +447,7 @@ export class PostgresMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
-    // ADR 0139: updateStatus と同じ理由（contestedWithId を渡す引数が無い）。
+    // ADR 0140: updateStatus と同じ理由（contestedWithId を渡す引数が無い）。
     // トランザクションを開く前に落とす。
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
@@ -558,7 +558,7 @@ export class PostgresMemoryStore implements MemoryStore {
         );
       }
     }
-    // ADR 0139: createMemory と同じ制約を `news` の各要素にも課す。1件でも違反があれば
+    // ADR 0140: createMemory と同じ制約を `news` の各要素にも課す。1件でも違反があれば
     // トランザクションを開く前に落とす（`news`/`supersede` どちらの書き込みも起きない）。
     for (const { input } of news) {
       if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
