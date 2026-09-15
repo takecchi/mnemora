@@ -500,7 +500,7 @@ describe("Issue #304: レジストリが Omission.kind を過不足なく覆う"
   it("zod schema の判別子は11個あり、重複していない", () => {
     // 判別子の重複は `z.discriminatedUnion` 自身が構築時に弾くが、**この歯は件数のほうを見る**
     // ——「11」という数は Issue #304 の受け入れ条件が名指ししている数であり、
-    // 増減したときに ADR 0158 とこのファイルの記述を見直す合図になる。
+    // 増減したときに ADR 0159 とこのファイルの記述を見直す合図になる。
     expect(new Set(schemaKinds).size).toBe(schemaKinds.length);
     expect(schemaKinds).toHaveLength(11);
   });
