@@ -1249,9 +1249,23 @@ export class FakeEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId = { provider: "fake", model: "fake-model", dimensions: 2 };
   shouldFail = false;
 
+  /**
+   * ADR 0142 の「tick はリース競合が起きても他のジョブの処理を続ける」歯のための、
+   * 決定的な差し込みフック（`FakeMemoryStore.beforeUpdateStatus`、ADR 0030と同じ形）。
+   * `embed()` が値を返す直前に呼ばれる——`processEmbedJob` が
+   * `deps.outboxStore.complete(...)` を呼ぶより前の、まさにその隙間を指す。
+   * ここで（テストコードから）別ワーカーの再 claim を直接起こすことで、
+   * 「処理には成功したが complete しようとした時点でリースを失っていた」を
+   * 確率的な並行に頼らず毎回同じ形で再現できる。
+   */
+  beforeEmbedReturn?: () => Promise<void> | void;
+
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
     if (this.shouldFail) {
       throw new Error("simulated embedding provider failure");
+    }
+    if (this.beforeEmbedReturn) {
+      await this.beforeEmbedReturn();
     }
     // 決定的: 文字列長から機械的にベクトルを作る。
     return texts.map((text) => [text.length, [...text].filter((c) => c === "a").length]);
