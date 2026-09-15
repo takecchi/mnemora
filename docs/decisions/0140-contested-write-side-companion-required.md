@@ -139,14 +139,16 @@ grep -rn "updateStatus(.*contested\|updateStatusWithEvent(.*contested" --include
 | `createMemory`/fixture ヘルパで `status: "contested"` かつ `contestedWithId` 無し | `packages/core/src/__tests__/recall-pipeline.test.ts` の6箇所（432, 469, 510, 699, 752, 850行——いずれも ADR 0136 自身が読み取り側の防御を検査するために作った「壊れた」fixture） | `FakeMemoryStore`（6件） |
 | 同上 | `packages/testkit/src/memory-store-conformance.ts` の4箇所（`aggregateScope`/`archiveDecayed`/`purgeMemory`/`markContestedPair` の各歯が、主題と無関係に `status: "contested"` の fixture を添え物として使っていた） | `PostgresMemoryStore` **と** `InMemoryMemoryStore` 双方に対して実行される共有適合スイート（4件） |
 | 同上 | `packages/postgres/src/__tests__/recall.postgres.test.ts:445` | `PostgresMemoryStore`（1件） |
+| 同上 | `packages/postgres/src/__tests__/recall-gate-index.test.ts` の `insertManyMemories`（4000行中、5分の1が `status: "contested"`） | `PostgresMemoryStore`（1件。**手元の grep では見つけられず、CI の DB ジョブが実際に落ちて初めて見つかった**——下の「CI で見つかった、手元では見つけきれなかった影響」参照） |
 
 **ベンチ**（`packages/postgres/src/bench/scale-bench.ts:388`）は `INSERT INTO memories (...)`
 を生 SQL で直接発行しており、**`MemoryStore` の公開メソッドを一切経由しない**——本 ADR の
 制約はこのベンチに構造的に及ばない（そもそも対象外）。
 
-**⟹ 実際に壊れたのは4本の共有適合テスト（Postgres・InMemory 双方）と1本の Postgres 統合
-テストであり、いずれも本 PR で修正済みである（下記「測ったこと」参照）。`FakeMemoryStore`
-を使う7件は無傷のまま残る（下記「決定」参照——`FakeMemoryStore` は本 ADR の対象外）。**
+**⟹ 実際に壊れたのは4本の共有適合テスト（Postgres・InMemory 双方）・1本の Postgres 統合
+テスト・1本の Postgres 索引テストであり、いずれも本 PR で修正済みである（下記「測ったこと」
+参照）。`FakeMemoryStore` を使う7件は無傷のまま残る（下記「決定」参照——`FakeMemoryStore`
+は本 ADR の対象外）。**
 
 ### 外部の利用実態（別段落・未検証であることを明記する）
 
@@ -351,8 +353,8 @@ recall の出力そのものを変えない）。
      （`archiveDecayed`/`purgeMemory`/`markContestedPair` の各1本）が、主題と無関係に
      対向無しの `contested` fixture を使っていたために新設ガードで赤くなることを
      発見した——companion を足す形で修正し、緑に戻したことを確認した
-     （このリポジトリで実際に走らせて確認した回帰であり、後述の「予測していなかった
-     副作用」そのものである）。
+     （このリポジトリで実際に走らせて確認した回帰。下の「CI で見つかった、手元では
+     見つけきれなかった影響」に、同じ形で見つかったもう1件を記録する）。
 - **`packages/postgres`（`PostgresMemoryStore`）**: 本物の DB は無いが、**ガード自体は
   `this.db.execute`/`this.db.transaction` を呼ぶ前に判定する純粋な分岐**であるため、
   実接続を持たない `Db` 型のスタブ（`{} as unknown as Db`）で `PostgresMemoryStore` を
@@ -372,6 +374,48 @@ recall の出力そのものを変えない）。
   `markContestedPair` 経由の正しい相互ペア構成へ書き換えた——**この歯自体は DB を
   要するため、この作業環境では実行して確認していない**（下記「確かめていないこと」）。
 
+### CI で見つかった、手元では見つけきれなかった影響
+
+**出所: マネージャーが CI（PR #260、sha `2d30865`）のログから実測して報告し、
+私がそれを受けて直した。**
+
+`packages/postgres/src/__tests__/recall-gate-index.test.ts` の `insertManyMemories`
+ヘルパが、`["active", "contested", "superseded", "archived", "forgotten"]` を
+順に回して `store.createMemory(ctx, buildNewMemoryFixture({ ..., status }))` を
+4000行ぶん呼んでおり、`status === "contested"` の行を `contestedWithId` 無しで
+作っていた。この歯の主題は段1のゲート述語（`status IN ('active','contested')`）が
+どの status を拾うかであって `contested` の一対一ではないため、companion を1件
+足す形で修正した（`packages/postgres/src/__tests__/recall-gate-index.test.ts` の
+`insertManyMemories`）。
+
+**この箇所は、本 PR がこの作業環境（`DATABASE_URL` 無し）で実行できる層のどこにも
+現れなかった。** `packages/core`/`packages/testkit` の変異試験・grep による横断
+（本 ADR 執筆時点）のどちらでも見つけられず、**CI の DB ジョブが実際に走って
+初めて表面化した**——`packages/postgres (UTF8)`/`packages/postgres (SQL_ASCII)`/
+「ルートの test 門の DB 段」の3ジョブが、同じ1箇所を原因に揃って赤くなった。
+
+**⟹ これは Issue #247 の族（この作業環境に DB が無いこと）が実際に効いた記録である。**
+手元で確認できる範囲（`packages/core`/`packages/testkit`、および DB を要さない
+`packages/postgres` のガード専用テスト）をどれだけ厳密にやっても、**DB に依存する
+固定 fixture（`buildNewMemoryFixture` に status を渡すだけの単純なヘルパ関数）の
+横断的な洗い出しは、実際にその fixture を使うテストを実行しないと完結しない**——
+grep は「`status: "contested"` という字面」までは見つけられるが、それが
+`contestedWithId` を伴わずに `store.createMemory` へ渡っているかは、関数呼び出しの
+組み立てを追わないと分からず、今回は grep でも見落とした。
+
+同じ横断 grep（`packages/postgres/src/__tests__/*.ts` を対象に `contested` を含む
+全ファイルを洗い出す）を、この修正の際に改めて実行し直した——`contested-with-index.test.ts`
+/`archive-decayed-index.test.ts`/`lexical-store-index.test.ts`/
+`memories-requeue-embed-index.test.ts` は生 SQL の `INSERT ... SELECT ... FROM
+generate_series` で直接 `memories` テーブルへ書き込んでおり、`MemoryStore` の
+公開メソッドを一切経由しないため本 ADR の制約が構造的に及ばない（対象外）。
+`vector-search-subject.test.ts`/`vector-search-provenance.test.ts` は `filter:
+{ status: ["active", "contested"] }` という**クエリ側の絞り込み**でのみ
+`"contested"` を使っており、`contested` な Memory を作成してはいない。
+**⟹ `recall-gate-index.test.ts` 以外に、同種の対向無し `contested` 生成箇所は
+見つからなかった**（ただし、この結論も grep と目視によるものであり、DB を伴う
+全テストを実行して確認したものではない——次節「確かめていないこと」参照）。
+
 ---
 
 ## 確かめていないこと
@@ -388,6 +432,15 @@ recall の出力そのものを変えない）。
 - **書き換えた `recall.postgres.test.ts` の歯が実際に通ること。** `markContestedPair`
   経由の構成に書き換えたが、DB が無いためこの作業環境では実行していない。CI の
   `postgres` ジョブで確認する必要がある。
+- **書き換えた `recall-gate-index.test.ts`（`insertManyMemories`）の歯が実際に通る
+  こと。** companion を足す形に直したが、DB が無いためこの作業環境では実行して
+  いない。CI で確認する必要がある。
+- **`packages/postgres/src/__tests__/` を横断した grep が、対向無し `contested`
+  生成の全箇所を本当に洗い出せているという保証。** grep と目視で「見つからなかった」
+  ことを確認したに留まり、DB を伴う全テストを実際に実行して確認したものではない
+  ——`recall-gate-index.test.ts` の1件も、まさに「grep では見つかると思っていたが
+  実際には見落としていた」ものだった経緯を踏まえると、**同種の見落としが他にも
+  残っている可能性を否定できない。**
 - **CI 全体の緑**。この PR を出した後、`node scripts/ci-green-check.mjs --pr <番号>`
   で確認する（下記、報告参照）。
 - **外部実装者への実際の影響。** 提起した通り、本リポジトリからは確認できない。
