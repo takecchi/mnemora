@@ -89,6 +89,27 @@ export interface RuntimeConfig {
   digestFallbackLength?: number;
   /** `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。 */
   defaultClaimedBy?: string;
+  /**
+   * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
+   * [ADR 0157](../../../docs/decisions/0157-tick-drives-consolidate-and-reflect.md):
+   * `extract`（`observe()` の sync 経路・`tick()` の `extract` ジョブ経路の両方）が新しい
+   * Memory を1件作るたびに、その `memoryId` を種にした `consolidate` / `reflect` の
+   * outbox ジョブも追加で積むかどうか。
+   *
+   * 🔴 **既定は `false`（積まない）。** 北極星の問い2（「これを無効にしたとき、
+   * Memory Framework として成立するか」）を満たすための opt-in——この設定を有効に
+   * しなくても `observe()`/`recall()`/`tick()` は完全に成立し、`tick()` は
+   * `embed` ジョブだけを処理し続ける。`consolidate()`/`reflect()` 自体は
+   * この設定と無関係に、呼び出し側が明示的に呼べば常に動く（ADR 0089/0091）。
+   *
+   * `true` にすると、積む job kinds が `["embed"]` から `["embed", "consolidate", "reflect"]`
+   * に変わる。ジョブの `payload` は既存の `embed` ジョブと同じ `{ memoryId }`
+   * （`MemoryStore.createMemoryWithOutbox` が `jobKinds` の各要素に同じ payload を使う。
+   * 新しい payload 形は発明していない）。`tick()` はその2種を
+   * `consolidate(ctx, { target: { seedMemoryId: memoryId } })` /
+   * `reflect(ctx, { target: { seedMemoryId: memoryId } })` として処理する。
+   */
+  autoQueueConsolidateReflectOnExtract?: boolean;
 }
 
 const DEFAULT_EXTRACTOR_VERSION = "v1";
@@ -116,7 +137,7 @@ const DEFAULT_TICK_LIMIT = 50;
  * 積むこと自体は正しい使い方である（利用者が独自の種別を足して別経路で処理する）。
  * ここに無い kind を **`tick` に渡した**ときの倒れ方は {@link TickResult.unsupported} を見ること。
  */
-export const TICK_SUPPORTED_JOB_KINDS = ["extract", "embed"] as const;
+export const TICK_SUPPORTED_JOB_KINDS = ["extract", "embed", "consolidate", "reflect"] as const;
 
 /** {@link TICK_SUPPORTED_JOB_KINDS} の要素型。 */
 export type TickSupportedJobKind = (typeof TICK_SUPPORTED_JOB_KINDS)[number];
@@ -522,17 +543,59 @@ export interface ConsolidationResult {
 }
 
 /**
- * `runtime.reflect` の対象（Issue #104）。`consolidate` の {@link ConsolidateTarget} と
- * **意図的に同じ形**——`reflect` に「何を見るか」を決めさせない。`target` を必須にしたのは、
- * これを省略できると `reflect` 自身が対象を選ぶことになり、それは Background Cognition の
- * *実運用*（Phase 1 の範囲外、docs/roadmap.md §1.3）の決定を先取りしてしまうためである。
+ * `runtime.reflect` の対象（Issue #104。`{ seedMemoryId }` は Issue #204、ADR 0154）。
+ * `consolidate` の {@link ConsolidateTarget} と**意図的に同じ形**——`reflect` に「何を見るか」を
+ * 決めさせない。`target` を必須にしたのは、これを省略できると `reflect` 自身が対象を選ぶことに
+ * なり、それは Background Cognition の*実運用*（Phase 1 の範囲外、docs/roadmap.md §1.3）の決定を
+ * 先取りしてしまうためである。
  *
  * `{ memoryIds }` は正規化せず、**重複も入力順もそのまま保つ**。`{ query, maxCandidates }` は
  * `recall(ctx, query)` を1回呼んで得られた `memories` の id を順に採る（`maxCandidates` が
  * あれば先頭からその件数で切る）。
+ *
+ * `{ seedMemoryId }` は `ConsolidateTarget` の `{ seedMemoryId }`（ADR 0152）と**同じ土台選定**
+ * を使う——種の `digest` を `RecallQuery.text` にして `recall()` を1回呼び、`computeAffinity`
+ * （`strategies/consolidate.ts`、`max(similarity, lexicalMatch)`）が `minAffinity` 未満の
+ * 候補を落とす。**新しい「似ている」は発明しない。**種そのものは判定を受けず、必ず先頭に
+ * 含める（種の embedding がまだ `pending` で `recall()` に現れない窓があるため、
+ * `ConsolidateTarget` の doc コメントと同じ理由）。
+ *
+ * ⚠ **`minAffinity` の既定値は `consolidate` と別の定数である**
+ * （{@link DEFAULT_REFLECT_MIN_AFFINITY}、`consolidate` は {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}）。
+ * `consolidate` と `reflect` は同じ道具に**逆向きの帯**を要求する——`consolidate` が欲しいのは
+ * 「同じ事実の言い換え」（近いほどよい）、`reflect` が欲しいのは「関連するが同じではない
+ * 複数の事実」（近すぎると導けるものが無い。同じ事実の写しを5枚並べて内省させても、
+ * 新しい知識は出てこない）。低い閾値でよいもう1つの根拠: `reflect()` は既存行の `status` を
+ * 1つも動かさない（ADR 0091 決定4）⟹ 取り違えたときの damage が `consolidate`（統合元が
+ * `superseded` へ動く）より小さい⟹ 保守側へ倒す理由が `consolidate` ほど強くない。
+ *
+ * ⛔ **上限（近すぎるものを除く帯）は無い。**上限を入れると `reflect` が「何が重複か」を
+ * 判断することになり、それは `consolidate` の仕事である（責務の二重化、Issue #103 が
+ * 訴えたのと同じ形）。代わりに「`consolidate` が先に走っていれば重複は既に畳まれている」
+ * という前提に乗る——**この前提は負債である**（ADR 0154「引き受けた負債」）。
+ *
+ * `seedMemoryId` が指す Memory が無い場合、`recall()` は呼ばない——対象は `[seedMemoryId]` の
+ * 1件のみとなり、後続の `getMany` が既存の分類（`not_found`）にそのまま落とす（新しい
+ * `nothingReason`/`ReflectBasisOutcome` は発明しない）。
+ *
+ * この形も `target` を呼び手が必須で渡す点は変わらない——`reflect` 自身が「何を見るか」を
+ * 決めているわけではなく、ADR 0091 決定3（`target` 必須）に反しない（ADR 0154）。
  */
 export type ReflectTarget =
-  { memoryIds: MemoryId[] } | { query: RecallQuery; maxCandidates?: number };
+  | { memoryIds: MemoryId[] }
+  | { query: RecallQuery; maxCandidates?: number }
+  | { seedMemoryId: MemoryId; maxCandidates?: number; minAffinity?: number };
+
+/**
+ * `{ seedMemoryId }` 形（Issue #204、ADR 0154）が使う `minAffinity` の既定値。
+ *
+ * 🔴 **この値は実測していない。**根拠は向きの議論だけであり、数字の根拠ではない
+ * （`DEFAULT_CONSOLIDATE_MIN_AFFINITY` の JSDoc と同じ書き方）。`consolidate` の 0.8 より
+ * 低くしてあるのは、`reflect` が「近すぎない」複数の事実を欲しがるためである
+ * （{@link ReflectTarget} の doc コメント参照）。緩める/締めるのは、`reflect` 側の実測
+ * （`consolidation-cost` に相当する reflect 側の計測）が入ってから判断する。
+ */
+export const DEFAULT_REFLECT_MIN_AFFINITY = 0.4;
 
 /**
  * `runtime.reflect` の任意オプション（Issue #104）。
@@ -1519,8 +1582,15 @@ export interface Runtime {
    * （`reextract_superseded` に次ぐ2つ目の値、ADR 0074 が予言した形）。`digestSnapshot` は
    * 積むが **`content` は積まない**（`forget`/`reextract` と同じ規律）。
    *
-   * ⚠ **`tick()` はこの操作を駆動しない。**`TICK_SUPPORTED_JOB_KINDS` に `'consolidate'` は
-   * 足していない（Issue #103 本文「tick のジョブとして回せる形は別 issue」。ADR 0089 §4）。
+   * ⭐ **`tick()` は `'consolidate'` の outbox ジョブが在ればこれを駆動する**
+   * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。ジョブの
+   * `payload` は `{ memoryId }`（既存の `embed` ジョブと同じ形）で、`tick` はそれを
+   * `seedMemoryId` として `consolidate(ctx, { target: { seedMemoryId } })` を呼ぶ
+   * だけである——このメソッド自身の意味論・呼び出し方は一切変わっていない。
+   * ⚠ **そのジョブが自動で積まれるとは限らない**——`extract` がこの種を積むのは
+   * `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効にした
+   * ときだけである。無効のままでも `consolidate()` を直接呼ぶ経路は変わらず動く
+   * （北極星の問い2）。
    */
   consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
   /**
@@ -1538,6 +1608,15 @@ export interface Runtime {
    *    store に一切触れず `outcome: 'not_examined'`。`{ query, maxCandidates }` は
    *    `recall(ctx, query)` を1回呼び、返った `memories` の id を順に採る
    *    （`maxCandidates` があれば先頭からその件数で切る）。0件も `not_examined`。
+   *    `{ seedMemoryId, maxCandidates?, minAffinity? }`（Issue #204、ADR 0154）は
+   *    `consolidate` の `{ seedMemoryId }`（ADR 0152）と同じ土台選定——種の Memory を
+   *    `get` し、その `digest` を `text` にして `recall()` を1回呼ぶ（`{ query }` と
+   *    まったく同じ経路）。`recall()` が返した候補のうち、`RecalledMemory.score` から
+   *    `computeAffinity`（`max(similarity, lexicalMatch)`、`strategies/consolidate.ts`）が
+   *    `minAffinity`（既定 {@link DEFAULT_REFLECT_MIN_AFFINITY}）未満のものは落とす。
+   *    **種そのものはこの判定を受けず、必ず先頭に含める**（種の embedding がまだ無いと
+   *    ANN に載らないため）。`maxCandidates` は結果の配列全体（種＋近傍）を先頭から切る。
+   *    種が見つからなければ `recall()` を呼ばず、対象は種の id 1件のみになる。
    * 2. `getMany` で一括読み。**この優先順で**分類する: 無ければ `not_found`、
    *    `status !== 'active'` なら `status_not_active`、`active` かつ
    *    `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を
@@ -1571,10 +1650,17 @@ export interface Runtime {
    * `reflected` Memory が2件できる。**これを塞ぐために `MemoryStore` へメソッドや索引を
    * 足すことはしていない（`reflect.test.ts` がこの挙動を歯で固定している）。
    *
-   * ⚠ **`tick()` はこの操作を駆動しない。**`TICK_SUPPORTED_JOB_KINDS` に `'reflect'` は
-   * 足していない——`reflect()` の*実運用*（Background Cognition）が Phase 1 の範囲外
-   * （docs/roadmap.md §1.3）なのであって、この動詞の口が範囲外なのではない
-   * （ADR 0089 決定7 が `consolidate` について採ったのと同じ立場）。
+   * ⭐ **`tick()` は `'reflect'` の outbox ジョブが在ればこれを駆動する**
+   * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。`consolidate` と
+   * 対称——ジョブの `payload` は `{ memoryId }` で、`tick` はそれを `seedMemoryId` として
+   * `reflect(ctx, { target: { seedMemoryId } })` を呼ぶだけである。
+   * ⚠ **`reflect()` の *実運用*（Background Cognition・Scheduler による自動起動）は
+   * 依然として Phase 1 の範囲外のままである**（docs/roadmap.md §1.1/§1.3）——ここで
+   * 変わったのは「`tick` に渡されたジョブを処理できるようになった」ことだけであり、
+   * ジョブを**自動で積む**かどうかは別の決定である。`extract` がこの種を積むのは
+   * `RuntimeConfig.autoQueueConsolidateReflectOnExtract`（既定 `false`）を有効に
+   * したときだけであり、無効のままでも `reflect()` を直接呼ぶ経路は変わらず動く
+   * （北極星の問い2）。
    */
   reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
 }
@@ -1603,6 +1689,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const promptVersion = deps.config?.promptVersion ?? DEFAULT_PROMPT_VERSION;
   const digestFallbackLength = deps.config?.digestFallbackLength ?? DEFAULT_DIGEST_FALLBACK_LENGTH;
   const defaultClaimedBy = deps.config?.defaultClaimedBy ?? DEFAULT_CLAIMED_BY;
+  const autoQueueConsolidateReflectOnExtract =
+    deps.config?.autoQueueConsolidateReflectOnExtract ?? false;
 
   /**
    * 抽出候補から Memory を作る核（`runExtraction` と `reextract` の共通経路）。
@@ -1692,17 +1780,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const newMemories = await buildNewMemoriesForCandidates(ctx, observation, candidates);
     const memoryIds: MemoryId[] = [];
     const contentHashes = new Set<string>();
+    // Issue #204 / ADR 0157: 既定 `["embed"]` のみ。opt-in（config.autoQueueConsolidateReflectOnExtract）
+    // が true のときだけ、同じ memoryId を種にした consolidate/reflect ジョブも積む——
+    // `createMemoryWithOutbox` は jobKinds の各要素に同じ payload `{ memoryId }` を使うので、
+    // 新しい payload 形を発明する必要がない（下の processConsolidateJob/processReflectJob 参照）。
+    const jobKinds: OutboxJobKind[] = autoQueueConsolidateReflectOnExtract
+      ? ["embed", "consolidate", "reflect"]
+      : ["embed"];
     for (const newMemory of newMemories) {
       contentHashes.add(newMemory.contentHash);
-      const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, [
-        "embed",
-      ]);
+      const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(
+        ctx,
+        newMemory,
+        jobKinds,
+      );
       memoryIds.push(memory.id);
       if (created) {
         await appendCreatedEvent(ctx, memory, observation, outcome, failure);
       }
-      // embed ジョブは常に outbox 経由（非同期、docs/memory-model.md §11 行3）。
-      // ここでは何もしない — tick() の processEmbedJob が処理する。
+      // embed/consolidate/reflect ジョブは常に outbox 経由（非同期、docs/memory-model.md §11 行3）。
+      // ここでは何もしない — tick() の各 processXxxJob が処理する。
     }
     return { memoryIds, contentHashes };
   }
@@ -2091,6 +2188,51 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `job.payload` から `memoryId` を取り出す共通部分（Issue #204 / ADR 0157）。
+   * `processEmbedJob` の `memoryId` 取り出しと同じ形——`consolidate`/`reflect` の
+   * ジョブも `createMemoryWithOutbox` が作る以上、payload の形は embed と同じ
+   * `{ memoryId }` である（新しい payload 形を発明しない、ADR 0157 決定2）。
+   *
+   * 🔴 **payload が壊れていた（`memoryId` が無い/文字列でない）場合は投げる。**
+   * `processEmbedJob` と同じ規律——黙って何もしない・空処理として `complete()` しない
+   * （ADR 0082 の哲学）。呼び出し元の `tick()` がこれを catch し、`outboxStore.fail()`
+   * で終端に落として `TickResult.failed` に数える。
+   */
+  function readSeedMemoryIdFromPayload(job: OutboxJobRecord): MemoryId {
+    const memoryId = job.payload.memoryId;
+    if (typeof memoryId !== "string") {
+      throw new Error(`runtime.tick: ${job.kind} job payload missing memoryId`);
+    }
+    return memoryId;
+  }
+
+  /**
+   * `tick` の `consolidate` ジョブハンドラ（Issue #204 / ADR 0157）。
+   *
+   * **`seedMemoryId` が指す Memory が見つからない場合は投げない。**
+   * `consolidate()` 自身が「種が見つからない」を `nothingReason` 経由の正規の結末
+   * （`not_found` → `nothing_to_consolidate`/`no_eligible_sources` 等、ADR 0152 決定6）
+   * として扱うため、ここで二重に判定しない——`processEmbedJob` が `memory not found` を
+   * 例外にしているのとは事情が違う（embed には「対象が無かった」を表す正規の結末が無い）。
+   * `consolidate()` が投げるのは LLM/store が本当に失敗したときだけであり、その例外は
+   * そのまま伝播させて `tick()` に `fail()` させる。
+   */
+  async function processConsolidateJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+    const seedMemoryId = readSeedMemoryIdFromPayload(job);
+    await consolidate(ctx, { target: { seedMemoryId } });
+  }
+
+  /**
+   * `tick` の `reflect` ジョブハンドラ（Issue #204 / ADR 0157）。
+   * `processConsolidateJob` と対称——理由は同じ（`reflect()` も種が見つからない場合を
+   * `not_found` 経由の正規の結末として扱う、ADR 0154 決定5）。
+   */
+  async function processReflectJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+    const seedMemoryId = readSeedMemoryIdFromPayload(job);
+    await reflect(ctx, { target: { seedMemoryId } });
+  }
+
+  /**
    * `tick` がジョブを配る先。**キーの集合は {@link TICK_SUPPORTED_JOB_KINDS} と型で結ばれている**
    * ——`Record<TickSupportedJobKind, JobHandler>` なので、片方だけ足す/消すと型検査が落ちる。
    * issue #105（型に `consolidate` が在るのに分岐が無い）と同じずれを、次からは
@@ -2099,6 +2241,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   const jobHandlers: Record<TickSupportedJobKind, JobHandler> = {
     extract: processExtractJob,
     embed: processEmbedJob,
+    consolidate: processConsolidateJob,
+    reflect: processReflectJob,
   };
   /**
    * `job.kind`（開いたユニオン＝任意の文字列）で引くための索引。
@@ -3198,6 +3342,30 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     let ids: MemoryId[];
     if ("memoryIds" in target) {
       ids = target.memoryIds;
+    } else if ("seedMemoryId" in target) {
+      // Issue #204（ADR 0154）: `consolidate` の { seedMemoryId }（ADR 0152）と同じ土台選定。
+      // ReflectTarget の doc コメント参照。
+      const seed = await deps.memoryStore.get(ctx, target.seedMemoryId);
+      if (seed === null) {
+        // 種が無い——recall を呼ばない。対象は種の id 1件のみとなり、後続の getMany が
+        // not_found に分類する（新しい nothingReason は発明しない）。
+        ids = [target.seedMemoryId];
+      } else {
+        // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
+        // 経路を通す（新しい「似ている」の判定を作らない）。
+        const recallResult = await recall(ctx, { text: seed.digest });
+        const minAffinity = target.minAffinity ?? DEFAULT_REFLECT_MIN_AFFINITY;
+        const neighborIds = recallResult.memories
+          .filter((m) => m.memoryId !== target.seedMemoryId)
+          .filter((m) => computeAffinity(m.score) >= minAffinity)
+          .map((m) => m.memoryId);
+        // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと
+        // recall() の結果に現れないため——ReflectTarget の doc コメント参照）。
+        ids = [target.seedMemoryId, ...neighborIds];
+        if (target.maxCandidates !== undefined) {
+          ids = ids.slice(0, target.maxCandidates);
+        }
+      }
     } else {
       const recallResult = await recall(ctx, target.query);
       const recalledIds = recallResult.memories.map((m) => m.memoryId);
