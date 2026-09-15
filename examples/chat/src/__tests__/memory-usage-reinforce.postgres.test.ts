@@ -13,7 +13,7 @@ import {
 } from "./test-db.js";
 
 /**
- * ⭐ Issue #301 / ADR 0162 の核心の歯。
+ * ⭐ Issue #301 / ADR 0163 の核心の歯。
  *
  * `examples/chat` が `reportMemoryUsage`（`mnemora-path.ts`）を実際に配線するまで、
  * `observe({kind:'memory_usage'})` はどこからも呼ばれず、`reinforce`

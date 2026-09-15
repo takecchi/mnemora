@@ -74,7 +74,7 @@ describe("examples/chat: runComparison（本物の Postgres）", () => {
   });
 
   /**
-   * ⭐ Issue #301 / ADR 0162: `runComparison` が各行で `reportMemoryUsage` を実際に
+   * ⭐ Issue #301 / ADR 0163: `runComparison` が各行で `reportMemoryUsage` を実際に
    * 呼び、`recall_usages` へ行を入れていることを本物の Postgres で検査する。
    *
    * **`recall.memories.length` は常に非0**（`fillerPairsSequence` に0を含めても

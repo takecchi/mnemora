@@ -205,7 +205,7 @@ async function runChat(): Promise<void> {
     console.log("呼び出し側がプロンプトへ積む文字列（recall() の返り値だけから組み立てる例）:");
     console.log(buildMnemoraPrompt(withoutBudget));
 
-    // ⭐ Issue #301 / ADR 0162: 実際にプロンプトへ積んだ Memory を、使用報告として
+    // ⭐ Issue #301 / ADR 0163: 実際にプロンプトへ積んだ Memory を、使用報告として
     // observe({kind:'memory_usage'}) で mnemora へ伝え返す。これが無いと reinforce
     // が一度も発火せず、使われた記憶と使われなかった記憶が同じ速さで遠ざかる。
     // ここは recall() の測定・表示を終えたあとに呼ぶ——この呼び出しは

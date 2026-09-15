@@ -45,7 +45,7 @@ describe("buildMnemoraPrompt", () => {
 });
 
 /**
- * `reportMemoryUsage`（Issue #301 / ADR 0162）——DB を一切使わず、`runtime.observe`
+ * `reportMemoryUsage`（Issue #301 / ADR 0163）——DB を一切使わず、`runtime.observe`
  * の呼び出し方だけを検査する配線の歯。本物の Postgres 上で `reinforce` が実際に
  * 発火することの検査は `__tests__/memory-usage-reinforce.postgres.test.ts` にある。
  */

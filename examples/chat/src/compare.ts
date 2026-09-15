@@ -84,7 +84,7 @@ export interface ComparisonRow {
    */
   factStatementSurvived: boolean;
   /**
-   * ⭐ Issue #301 / ADR 0162: この行の `recall()` で実際にプロンプトへ積んだ Memory
+   * ⭐ Issue #301 / ADR 0163: この行の `recall()` で実際にプロンプトへ積んだ Memory
    * （`recall.memories`）を `observe({kind:'memory_usage'})` で報告したか。
    *
    * **`compare-json.ts` の `buildCompareJson` はこの欄を写さない**——`compare.json`
@@ -131,7 +131,7 @@ export async function runComparison(
     const { recall } = await runMnemoraPath(runtime, ctx, conversation);
     const survived = await factStatementSurvived(options.memoryStore, ctx, recall.memories);
 
-    // ⭐ Issue #301 / ADR 0162: この行の測定(上の `recall`/`survived`)が終わった
+    // ⭐ Issue #301 / ADR 0163: この行の測定(上の `recall`/`survived`)が終わった
     // あとに使用報告する。`reportMemoryUsage` は recall を撃たない(受け取るだけ)
     // ので、ここで呼んでもこの行の測定値(naiveChars/mnemoraChars/omitted/…)は
     // 一切変わらない——「報告は測定済みの recall の後」という配線方針そのもの。
