@@ -509,9 +509,9 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 | 警報日 | ここまでに**着手できていなければ疑う**もの | ⭐ 前に何が終わっていれば入れるか（**揃えば日付を待たない**） | 実績 |
 |---|---|---|---|
-| **2026-09-16(水)** | [#302](https://github.com/takecchi/mnemora/issues/302) 項目1 の歯／[#304](https://github.com/takecchi/mnemora/issues/304) 項目6 の歯／[#306](https://github.com/takecchi/mnemora/issues/306) 項目7 の歯／[#291](https://github.com/takecchi/mnemora/issues/291) の probe 集合を**作る**／[#298](https://github.com/takecchi/mnemora/issues/298) の ADR／[#204](https://github.com/takecchi/mnemora/issues/204) 本体 | **何も要らない。⭐ 6本すべて、いま同時に出せる**（§7.5） | `—（未記入）` |
-| **2026-09-17(木)** | #291 で**測る**／[#301](https://github.com/takecchi/mnemora/issues/301) 実装 ⟹ **項目4**／#298 第1弾（書き込み側 + migration） | #291 の測定 ← probe 集合が在ること。#301 ← 何も要らない。#298 第1弾 ← ADR が在ること | `—（未記入）` |
-| **2026-09-18(金)** | 項目2 の道を決めて実装 ⟹ **項目2**／#298 第2弾（`getRecall`）⟹ **項目3**／[#303](https://github.com/takecchi/mnemora/issues/303) 実装 ⟹ **項目5** | 項目2 ← **#291 の測定結果**（🔴 唯一の本当の前提）。#298 第2弾 ← 第1弾。#303 ← ⭐門の基準値更新が #301 と重ならないこと | `—（未記入）` |
+| **2026-09-16(水)** | [#302](https://github.com/takecchi/mnemora/issues/302) 項目1 の歯／[#304](https://github.com/takecchi/mnemora/issues/304) 項目6 の歯／[#306](https://github.com/takecchi/mnemora/issues/306) 項目7 の歯／[#291](https://github.com/takecchi/mnemora/issues/291) の probe 集合を**作る**／[#312](https://github.com/takecchi/mnemora/issues/312) 項目3 の実演／[#204](https://github.com/takecchi/mnemora/issues/204) 本体／[#301](https://github.com/takecchi/mnemora/issues/301) 項目4 | **何も要らない。⭐ 7本すべて、いま同時に出せる**（§7.5）。⚠ **[#307](https://github.com/takecchi/mnemora/pull/307) の着地で #298 の3段の鎖が消えた** —— 項目3 に残るのは実演1本だけ | `—（未記入）` |
+| **2026-09-17(木)** | #291 で**測る**／#301 が着地 ⟹ **項目4**／#312 が着地 ⟹ **項目3** | #291 の測定 ← probe 集合が在ること。#301・#312 ← **何も要らない**（9/16 に着地していればこの行は空になる） | `—（未記入）` |
+| **2026-09-18(金)** | 項目2 の道を決めて実装 ⟹ **項目2**／[#303](https://github.com/takecchi/mnemora/issues/303) 実装 ⟹ **項目5** | 項目2 ← **#291 の測定結果**（🔴 唯一の本当の前提）。#303 ← ⭐門の基準値更新が #301 と*着地で*重ならないこと（§7.5） | `—（未記入）` |
 | **2026-09-19(土)** | **7項目の再監査** —— ⛔ 文書ではなく**本番コードからの呼び出しを `grep` で数える**（§7.1 の教訓） | 7項目すべてが「在る」に到達していること | `—（未記入）` |
 | **2026-09-20(日)** | 再監査で出た漏れの修正／**v1.0 を切れる状態まで**（README・移行ガイド・CHANGELOG・`pack:check`）。⛔ `version` を上げる・publish・Release はオーナー専権（§7.8） | 再監査が終わっていること | `—（未記入）` |
 
@@ -527,9 +527,9 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 |---|---|---|---|---|
 | 1 | 言ったことを、次の日も覚えている | **在る** | 既定の余裕は `strategies/decay.ts:47-52` の `floorAt()` × `interfaces/tenant-settings-store.ts:9` の `DEFAULT_HALF_LIFE_HOURS=720` × `decay.ts:23` の閾値 0.05 ⟹ **作成 + 約129.6日** 【逆算】。[#286](https://github.com/takecchi/mnemora/pull/286) が忘却ゲートを**既定で**通した後もここは壊れていない。⚠ **ただし本物の Postgres で日をまたいで測る歯は無い。**⚠ **そしてこの「約129.6日」は `halfLifeHours` が絶対時間であることに乗っている ⟹ [#305](https://github.com/takecchi/mnemora/issues/305) の設計見直しで動きうる** | [#302](https://github.com/takecchi/mnemora/issues/302)（維持）/ [#305](https://github.com/takecchi/mnemora/issues/305) |
 | 2 | 聞かれていないことを、自分から思い出す | **半分** | ①`examples/chat/src/mnemora-path.ts:84` の `runtime.recall(ctx, {text, budget})` に `association` を渡す、**または** ②`packages/core/src/recall.ts:1015` の既定を倒す（⚠ ②は ADR 0151 が北極星の**問い1** で却下済み ⟹ 新 ADR が要る）。**「自分で作る」側**は `packages/core/src/runtime.ts:119` の `TICK_SUPPORTED_JOB_KINDS`（**今も `["extract","embed"]`**）に足す | [#291](https://github.com/takecchi/mnemora/issues/291)（🔴 関門）/ [#204](https://github.com/takecchi/mnemora/issues/204) |
-| 3 | なぜそれを思い出したのかを、後から説明できる | **半分** | ①`packages/core/src/recall-runtime.ts:1266` の `returnedMemoryIds: finalMemories.map((m) => m.memoryId)` が捨てている `score` / `retrievedVia` / `companionOf` を、`NewRecallRecord`（`recall.ts:1270-1281`）ごと拡張する。**かつ** ②`MemoryStore` に **`getRecall(ctx, recallId)` を新設**する ——`getRecall` / `listRecalls` / `findRecall` は**リポジトリ全体で0件**で、`recalls` は**書き込み専用**である。⭐ **①だけでも②だけでも「在る」にならない** | [#298](https://github.com/takecchi/mnemora/issues/298) |
+| 3 | なぜそれを思い出したのかを、後から説明できる | **半分** | ⭐ **機構は [#307](https://github.com/takecchi/mnemora/pull/307)（[ADR 0155](./decisions/0155-recall-score-breakdown-persisted.md)）で一巡した**——`recalls` に per-memory の内訳が永続化され、`MemoryStore.getRecall(ctx, id)` で読み戻せる。🔴 **だが呼ぶ本番コードが0件**（`Runtime` に口が無く、`examples/chat` にも言及が無い。ADR 0155 自身が「`examples/chat` の配線はこの PR の範囲外」と明記）⟹ **残るのは「採用側が届く場所に口を出し、`examples/chat` が `recallId` から引いて見せる」1本だけ** | [#312](https://github.com/takecchi/mnemora/issues/312)（[#298](https://github.com/takecchi/mnemora/issues/298) は CLOSED） |
 | 4 | 使われない記憶が、静かに遠ざかる | **半分** | `examples/chat` の呼び出し側が `runtime.observe(ctx, {kind:'memory_usage', recallId, usedMemoryIds})` を呼ぶこと。⭐ **残るギャップはこれ1つだけ** ——[#286](https://github.com/takecchi/mnemora/pull/286)（ADR 0153）が「`decay_floor_at` を読み取りフィルタに使う経路が無い」を閉じ、`sweepArchive` の非自動は [ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md) 決定3 の**意図した設計**（穴ではない）。⛔ ⚠ **ただし「遠ざかる」の定義そのものが動く**——[#305](https://github.com/takecchi/mnemora/issues/305) でオーナーが「**時間減衰と時間ベースでないものの両方を持つ**」と決めた。**別の担い手が設計中**（§7.9 の条件2） | [#301](https://github.com/takecchi/mnemora/issues/301) / [#305](https://github.com/takecchi/mnemora/issues/305) |
-| 5 | 間違いを正すと、古いほうが先に出てこなくなる | **半分** | `examples/chat` に**訂正シナリオを新規に作り**、そこから `runtime.markContested`（`runtime.ts:2611`）→ `runtime.resolveContested`（`:2710`）を呼ぶ。⚠ **「配線するだけ」では済まない** —— [ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) が「検出は呼び出し側の役目」と決めているため、**検出のしかたとシナリオを作る必要がある** | [#303](https://github.com/takecchi/mnemora/issues/303) |
+| 5 | 間違いを正すと、古いほうが先に出てこなくなる | **半分** | `examples/chat` に**訂正シナリオを新規に作り**、そこから `runtime.markContested`（`runtime.ts:2611`）→ `runtime.resolveContested`（`:2710`）を呼ぶ。⚠ **「配線するだけ」では済まない** —— [ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) が「検出は呼び出し側の役目」と決めているため、**アプリ側が何をもって矛盾と決めるかを選ぶ必要がある**。⭕ **ただし ADR の上書きは要らない**（これは §7.5 の (乙) であり、ADR 0134 決定2 が名指しで指定した場所である） | [#303](https://github.com/takecchi/mnemora/issues/303) |
 | 6 | 知らないことを、知らないと言える | **在る** | `Omission.kind` 11種すべてに本番の生成コードと歯が在ることを**種ごとに数え直した**。⚠ #286 は `kind` ではなく `FilteredOmission.condition` に新値 `"decayed"` を足し、コード上で「`archived` に相乗りしない」と明記している ⟹ **新しい落ち方が同じ顔で返る形にはなっていない**。維持の要は `examples/chat/src/compare.ts:184-186` の `const exhaustive: never` | [#304](https://github.com/takecchi/mnemora/issues/304)（維持） |
 | 7 | どれだけ載せるかを、使う側が決められる | **在る** | ①`budget` 未指定なら `effectiveTokenBudget()`（`recall-runtime.ts:185-192`）が `undefined` を返す = **隠れた既定上限は無い** ②指定すれば削れて `budget_dropped` に出る ③連想枠も**予算の内側**（`recall-runtime.ts:949`）。⚠ 弱点は `examples/chat/src/cli.ts:194-215` の対比デモが `__tests__` の外で、**消えても CI が緑**なこと | [#306](https://github.com/takecchi/mnemora/issues/306)（維持） |
 
@@ -540,7 +540,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 ⛔ **日数で割り振らないために、先に依存で分解する。**⭐ **そして「手待ちを作らない順序」を明示する**——担い手が「明日になるまで待つ」形になったら、この節の書き方が失敗している。
 
-#### ⭐ いま（前提ゼロで）同時に出せるもの —— **6本**
+#### ⭐ いま（前提ゼロで）同時に出せるもの —— **7本**
 
 **⛔ どれも他の作業の完了を待たない。⟹ 全部いま出してよい。**
 
@@ -550,22 +550,22 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 | [#304](https://github.com/takecchi/mnemora/issues/304) `Omission.kind` 11値の機械的な回帰の歯 | `packages/core/src/__tests__/` | — |
 | [#306](https://github.com/takecchi/mnemora/issues/306) 予算デモを守る歯 | `examples/chat` | ⚠ **検査のみ。`compare` の出力を変えないこと**（変えると⭐門に触れる） |
 | [#291](https://github.com/takecchi/mnemora/issues/291) の **probe 集合を作る** | `examples/chat/src/probe-set.ts` ほか | 🔴 **鎖1の第1段。ここが動かないと項目2 が動かない** |
-| [#298](https://github.com/takecchi/mnemora/issues/298) の **ADR**（保存する欄・格納形式） | `docs/decisions/` | ⚠ ADR 番号は取り合う（[#295](https://github.com/takecchi/mnemora/issues/295)） |
+| [#312](https://github.com/takecchi/mnemora/issues/312) 項目3 の実演（`recallId` から内訳を引いて見せる） | `packages/core` / `examples/chat` | ⭐ **[#307](https://github.com/takecchi/mnemora/pull/307) の着地で機構は入った。残るのは口と実演だけ**（[#298](https://github.com/takecchi/mnemora/issues/298) は CLOSED） |
 | [#204](https://github.com/takecchi/mnemora/issues/204) 本体（`TICK_SUPPORTED_JOB_KINDS`） | `packages/core/src/runtime.ts` | [#300](https://github.com/takecchi/mnemora/pull/300) 着地済みで前提は解けている |
-
-**さらに [#301](https://github.com/takecchi/mnemora/issues/301)（項目4）も前提ゼロで出せる。**⚠ ただし⭐門の基準値を動かすので、下の「⛔ 直列化が要る3本」を見ること。
+| [#301](https://github.com/takecchi/mnemora/issues/301) 項目4 の `memory_usage` 報告 | `examples/chat` | ⚠ **⭐門の基準値を動かす** ⟹ 下の「直列化が要る」を見ること（着手は並行でよい） |
 
 #### 直列にしか動けない鎖（上ほど長い＝律速）
 
 | # | 鎖 | 段 |
 |---|---|---|
 | 1 | ⭐ **項目2** | #291 の probe 集合を作る → #291 で**測る** → 結果で道を決める（(b) なら新 ADR を1本） → 実装 → ⭐門の基準値を更新 |
-| 2 | **項目3** | [#298](https://github.com/takecchi/mnemora/issues/298) の ADR → 書き込み側 + migration + `createRecall` → **`getRecall` 新設** + Postgres / InMemory / testkit 適合 |
-| 3 | **項目5** | 訂正シナリオの設計 → 実装（[#303](https://github.com/takecchi/mnemora/issues/303)） |
+| 2 | **項目5** | 訂正シナリオの設計 → 実装（[#303](https://github.com/takecchi/mnemora/issues/303)）。⭕ **ADR は要らない**（§7.5 の (乙)） |
 
 **⟹ 律速は鎖1（項目2、5段）である。**⛔ **残り 10〜13本という総量ではない。**
 
-⚠ **鎖2 の注意**: migration 番号（次は 0013）と ADR 番号は**取り合いになる**（[Issue #295](https://github.com/takecchi/mnemora/issues/295)。**ADR 0154 は [#300](https://github.com/takecchi/mnemora/pull/300) の着地で埋まった** ⟹ 0155 以降。**マージ直前に取り直すこと。**）
+⭐ **2026-09-16 05:30 の更新: 鎖がひとつ消えた。**旧版はここに「**項目3**（3段: #298 の ADR → 書き込み側 + migration → `getRecall` 新設）」を置いていたが、**[PR #307](https://github.com/takecchi/mnemora/pull/307) が3段まとめて着地させた** ⟹ **項目3 に残るのは実演1本だけ**（[#312](https://github.com/takecchi/mnemora/issues/312)、前提ゼロ）。⟹ **鎖は3本から2本へ減った。**
+
+⚠ **ADR 番号と migration 番号は取り合いになる**（[Issue #295](https://github.com/takecchi/mnemora/issues/295)）。**ADR 0155 は #307 の着地で埋まった。⟹ 0156 以降**（⚠ [PR #310](https://github.com/takecchi/mnemora/pull/310) が 0156 を claim 済み）。**マージ直前に取り直すこと。**
 
 #### ⛔ 直列化が要る3本 —— ⭐門の基準値
 
@@ -573,7 +573,29 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 ⟹ ⛔ **同時に走らせると基準値の更新が競合する。**⟹ **この3本だけは、着手ではなく*着地*を直列にすること。**（着手は並行でよい。基準値を更新する PR が2本同時に open にならなければよい。）
 
-**⟹ ⭐ 手待ちを作らない順序**: **上の6本 + #301 を全部いま出す** → 鎖1の測定結果が返ってきた時点で項目2 の道を決める → その間に鎖2 が第2段・第3段へ進む。**⟹ 待ちが発生するのは「#291 の測定結果を待つ」1点だけであり、そこも他の6本が埋める。**
+**⟹ ⭐ 手待ちを作らない順序**: **上の7本を全部いま出す** → 鎖1の測定結果が返ってきた時点で項目2 の道を決める → その間に鎖2 が第2段・第3段へ進む。**⟹ 待ちが発生するのは「#291 の測定結果を待つ」1点だけであり、そこも他の6本が埋める。**
+
+#### ⭐ 「誰が呼ぶか」で費用が変わる —— (甲) と (乙) を混ぜないこと
+
+**⚠ この節は [PR #311](https://github.com/takecchi/mnemora/pull/311) が旧 §7.4 に入れた訂正を引き継いだものである。**本 §7 の作り直しが旧 §7.4 ごと差し替えるため、**内容を落とさないようここへ移した。**
+
+**旧 §7.4 は「項目4・項目5 は配線しないことが記録済みの判断であり、先に ADR が要る」と*無条件に*書いていた。⟹ 誤りだった。**成り立つのは **(甲) を採るときだけ**である。
+
+| 道 | 誰が呼ぶか | ADR との関係 |
+|---|---|---|
+| **(甲)** mnemora 本体が自動で駆動する（`tick()` / `observe()` から掃引・検出を起こす） | ライブラリ側 | 🔴 **記録済みの判断の上書きになる。先に ADR が要る** |
+| **(乙)** 呼び出し側のアプリ（`examples/chat`）が明示的に呼ぶ | アプリ側 | ⭕ **上書きは要らない。ADR が*指定した*場所がここである** |
+
+**⛔ 同じ2本の ADR が (乙) を名指しで指定している（逐語）:**
+
+- [ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md) **決定3**: 「**呼び出し側が明示的に `sweepArchive` を呼んだときだけ走る保守操作である**」
+- [ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) **決定2**: 「**呼び出し側（人・上位のアプリケーション層・将来の自動検出）**が既に『この2件は対向する』と決めていることを前提に、…機械的に書き込むだけである」
+
+⟹ **`examples/chat` が呼ぶのは「上位のアプリケーション層」そのものであり、上書きではなく ADR に*沿った*使い方である。**
+
+**⭐ そして (乙) は既に実践されている。**`examples/chat/src/archive-sweep-cost.ts:290` が `runtime.sweepArchive()` を実際に呼んでおり、**ADR の上書きを一度も必要としていない。**
+
+**⟹ §7.5 の鎖3（項目5）と [#303](https://github.com/takecchi/mnemora/issues/303) に ADR は要らない。**残る費用は「`examples/chat` が*どうやって*矛盾だと決めるか（利用者の訂正発話か、LLM か）を選ぶこと」であり、**それはアプリ側の設計選択であって、記録済みの判断の上書きではない。**
 ### 7.6 ⭐ 項目2 の道は2つしかなく、どちらも [#291](https://github.com/takecchi/mnemora/issues/291) を通る
 
 **[ADR 0151](./decisions/0151-recall-association-unprompted.md) の「引き受けた負債」1番が、逐語でこう書いている:**
