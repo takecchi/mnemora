@@ -1005,6 +1005,7 @@ export interface RecallQuery {
    * 偽らない」の一部）。
    */
   includeFullyDecayed?: boolean;
+  /**
    * **連想枠（Issue #200、北極星「聞かれていないことを、自分から思い出す」）。**
    *
    * **省略時は連想を一切走らせない**（既定 off）——`association` を渡さない呼び出しの
