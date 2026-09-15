@@ -261,6 +261,7 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
   - `tick()`/`observe()` に `purge` 相当の呼び出しを混ぜ込む変異 → 決定3の歯が赤くなる。
   - `vectorStore.delete` の呼び出しを消す変異 → 「embedding が実際に消える」歯が赤くなる。
   - `aggregateScope`/`recall-runtime.ts` を変更していないことの確認（変異ではなく `rg` による静的な検算）。
+- **既存の回帰の歯が実際に噛んだ（設計どおりの副作用）**: [ADR 0117](./0117-unreachable-union-values-inventory.md) の棚卸し（`unreachable-union-values.test.ts`）は `kind: "purged"` を「分類2: 後続 Phase 待ち」として登録していた。本 PR で `Runtime.purge` がこの値を実際に生成するようになった結果、この歯が赤くなった——**まさにこの歯が捕まえるべきものを捕まえた**（「実装漏れ」ではなく「実装完了」の検知）。棚卸しの一覧からこのエントリを外すことで対応した（`unreachable-union-values.test.ts` の追記コメント参照）。
 
 ## 確かめていないこと
 
