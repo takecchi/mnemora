@@ -105,6 +105,24 @@
   「0件だった」行（`{breakdownCaptured: true, memories: []}`）は、どちらも `memories: []`
   という同じ顔にならない。
 
+  ### `returned_memories` に `DEFAULT` を置かない（意図的。CI の DB ジョブが実際に踏んだ）
+
+  🔴 **`returned_memories jsonb NOT NULL` に `DEFAULT` を足す誘惑がある**——実際、CI の
+  DB 系ジョブ（`conformance.postgres.test.ts`・`ingest-roundtrip.postgres.test.ts`）が、
+  `recalls` へ最小列だけを渡して直接 `INSERT`（`recall_usages` の外部キーの相手を
+  用意するだけの目的のテストフィクスチャ）する箇所で `23502`（NOT NULL 違反）に落ちた。
+  旧 `returned_memory_ids uuid[] NOT NULL DEFAULT '{}'` は列を省略できていたため、
+  この種のフィクスチャが気付かず依存していた。
+
+  **⟹ それでも `DEFAULT` は足さない。** `DEFAULT` を置くと、**内訳を記録し忘れた新しい行が
+  黙って成功し、しかも移行前の旧行と同じ顔になる。** それは Issue #298 が塞ごうとしている
+  穴そのもの（「無い」と「空」を同じ顔で返さない、ADR 0008 の族）を、スキーマの側で
+  新しく開けることになる。移行前の行が `breakdownCaptured: false` なのは「この機能より
+  前に書かれた」という事実だからであって、**今日書かれた行が内訳を持たないことはバグ**
+  であり、同じ表現を与えてはいけない。⟹ `NOT NULL`・`DEFAULT` 無しを維持し、`recalls` へ
+  書く者に「何を返したか」を必ず言わせる——テストフィクスチャ側を直す
+  （`INSERT INTO recalls (...)` に `returned_memories` を明示的に渡すよう更新した）。
+
   ## 決定3: `getRecall(ctx, recallId)` を `MemoryStore` の必須メソッドとして足す
 
   [ADR 0122](./0122-restore-archived-memory.md) の規律
@@ -197,6 +215,17 @@
      済ませる（「無い」と「空」を区別しない）。**
      却下。ADR 0008「無い」の分類の族に反する——呼び出し側が「内訳を記録しそこねた」と
      「記録したが0件だった」を区別できなくなる。受け入れ条件5が明示的にこれを禁じている。
+
+  6. **`returned_memories jsonb` に `DEFAULT '{"breakdownCaptured":true,"memories":[]}'`
+     等を足し、`recalls` へ最小列だけ書く既存のテストフィクスチャを温存する。**
+     却下（CI の DB 系ジョブが実際にこれで落ちたのを見て検討した案）。「決定2」の
+     「`DEFAULT` を置かない」節で述べた通り、`DEFAULT` は「内訳を記録し忘れた新しい行」
+     を黙って成功させ、しかも移行前の旧行（`breakdownCaptured: false`）とは別の、
+     しかし同じくらい嘘くさい顔（`breakdownCaptured: true` だが実際には何も計算していない）
+     を持たせてしまう。Issue #298 が塞ごうとしている穴を、スキーマの便宜のために
+     再び開けることになるため却下——**フィクスチャ側（`conformance.postgres.test.ts`
+     の `prepareRecallId`・`ingest-roundtrip.postgres.test.ts` の使用報告テスト）を
+     `returned_memories` を明示的に渡す形に直した。**
 
 - **引き受けた負債・覆えていない範囲**:
 
