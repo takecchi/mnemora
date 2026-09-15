@@ -30,6 +30,16 @@ interface FakeRuntimeCalls {
   markContestedArgs: [string, string] | null;
   resolveContestedArgs: [string, string, unknown] | null;
   recallCallCount: number;
+  /**
+   * `recall()` に実際に渡ったクエリを、呼ばれた順にすべて記録する。
+   *
+   * 🔑 **`limit` を見るためにこの欄が在る。**`limit: 1` は決定5の核（既定の
+   * limit=10 では対の2件が両方とも段2の `withinLimit` に収まり、段3の必須同伴取得が
+   * 発火しない）であり、それが失われたことを DB 無しで検出できるようにしておく
+   * ——これが無いと、`limit` の退行を捕まえる歯は `correction-demo.postgres.test.ts`
+   * （本物の Postgres を要求する）だけになる。
+   */
+  recallQueries: unknown[];
 }
 
 /**
@@ -58,8 +68,9 @@ function buildFakeRuntime(calls: FakeRuntimeCalls): Runtime {
       ReturnType<Runtime["tick"]>
     >;
 
-  const recall: Runtime["recall"] = async () => {
+  const recall: Runtime["recall"] = async (_ctx, query) => {
     calls.recallCallCount += 1;
+    calls.recallQueries.push(query);
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
     const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
     if (calls.recallCallCount === 1) {
@@ -170,6 +181,7 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
       markContestedArgs: null,
       resolveContestedArgs: null,
       recallCallCount: 0,
+      recallQueries: [],
     };
     const runtime = buildFakeRuntime(calls);
 
@@ -211,6 +223,7 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
       markContestedArgs: null,
       resolveContestedArgs: null,
       recallCallCount: 0,
+      recallQueries: [],
     };
     const runtime = buildFakeRuntime(calls);
 
@@ -221,6 +234,31 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
     // observe() の呼び出し順は変わらない(original が先) — それでも winnerId は original。
     expect(calls.observedExternalIds[0]).toBe(CORRECTION_SCENARIO.original.externalId);
     expect(calls.resolveContestedArgs?.[2]).toEqual({ kind: "supersede", winnerId: originalId });
+  });
+
+  it("🔑 3回の recall() はすべて limit: 1 で呼ばれる — 段3の必須同伴取得を発火させる条件そのもの(ADR 0162 決定5)", async () => {
+    const calls: FakeRuntimeCalls = {
+      observedExternalIds: [],
+      markContestedArgs: null,
+      resolveContestedArgs: null,
+      recallCallCount: 0,
+      recallQueries: [],
+    };
+    const runtime = buildFakeRuntime(calls);
+
+    await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+
+    // beforeMark / afterMark / afterResolve の3回。
+    expect(calls.recallQueries).toHaveLength(3);
+
+    // 🔑 PR #320 の CI 失敗そのものの回帰検査。既定の limit(=10)へ戻すと、対の2件が
+    // 両方とも段2の withinLimit に収まってしまい、段3「矛盾の解決と必須の同伴取得」
+    // (docs/recall.md §2 段3)が一度も発火しない——afterMarkCompanionRetrieval が
+    // false になる。**この歯は DB を要求しない**ので、本物の Postgres が無い環境でも
+    // limit の退行を捕まえられる(correction-demo.postgres.test.ts だけが頼りにならない)。
+    for (const query of calls.recallQueries) {
+      expect(query).toEqual({ text: CORRECTION_SCENARIO.query, limit: 1 });
+    }
   });
 
   it("observe() が Memory を作らなかった(memoryIds が空)場合は例外を投げる", async () => {
@@ -246,6 +284,7 @@ describe("checkCorrectionDemo / formatCorrectionDemo: 固定した RecallResult 
       markContestedArgs: null,
       resolveContestedArgs: null,
       recallCallCount: 0,
+      recallQueries: [],
     };
     const runtime = buildFakeRuntime(calls);
     const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);

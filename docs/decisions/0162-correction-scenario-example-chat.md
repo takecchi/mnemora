@@ -311,7 +311,7 @@ Issue #291）が **`docs/decisions/0158-association-probes-bench.md` を先に m
   `OPENAI_API_KEY` 無しでも `examples/chat/cassettes/compare.json`（記録済みカセット）
   により `recorded` モードで走った。出力した `compare.json` を
   `node scripts/compare-summary.mjs --measured <出力> --baseline
-  examples/chat/compare-baseline.json` に通したところ、**「✅ 一致(差分なし)。全会話長で
+examples/chat/compare-baseline.json` に通したところ、**「✅ 一致(差分なし)。全会話長で
   北極星の物差し(mnemoraShareOfNaiveChars 他)が examples/chat/compare-baseline.json と
   同じだった」（exit 0）**。⟹ 決定3の「構造上ゼロ影響」の静的検査に加え、**動的な実測
   でも `compare` の⭐門（ADR 0133）に影響が無いことを確認した**——この PR は
@@ -330,6 +330,15 @@ Issue #291）が **`docs/decisions/0158-association-probes-bench.md` を先に m
   （「original がアンカー・correction が mandatory_companion」「companionOf が
   もう片方を指していなければ false」）が実際に赤くなることを確認してから、同じく
   `cp` の退避コピーから復元し、`diff` で完全一致を確認した。
+- **変異試験3（`limit` の退行を DB 無しで捕まえる歯）**: レビューで「偽 `Runtime` の
+  `recall` が引数を一切見ないため、`limit: 1` の退行を捕まえる歯が
+  `correction-demo.postgres.test.ts`（本物の Postgres を要求する）だけになっている」と
+  指摘を受けた。`FakeRuntimeCalls.recallQueries` に実際に渡ったクエリを記録させ、
+  「3回の `recall()` がすべて `{ text, limit: 1 }` で呼ばれる」ことを見る歯を
+  `correction-demo.test.ts` に足した。`buildRecallQuery` を `limit: 10` へ戻すと
+  **この歯が（DB 無しで）実際に赤くなる**ことを確認し、`cp` の退避コピーから復元して
+  `diff` で完全一致を確認した（復元後 9 tests 緑）。⟹ `limit` の退行は、DB を持たない
+  `typecheck / lint / test / build` ジョブでも捕まる。
 - PR #320 時点の変異試験（`resolveContestedIds` の順序規則化・`compare.ts` への
   import 追加）はこの修正で対象コードを変えていないため、再検証していない
   （既存の効力を引き継ぐ想定——ただし今回改めて実行してはいない。下記
