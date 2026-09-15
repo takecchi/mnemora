@@ -30,6 +30,7 @@ import type {
   PurgeExpiredEventsOptions,
   PurgeExpiredEventsResult,
   RecallId,
+  RecallRecord,
   RecallScope,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
