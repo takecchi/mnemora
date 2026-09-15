@@ -2347,6 +2347,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       vectorStore: deps.vectorStore,
       lexicalStore: deps.lexicalStore,
       embeddingProvider: deps.embeddingProvider,
+      tenantSettingsStore: deps.tenantSettingsStore,
       clock,
       tokenCounter,
       outputValidation: deps.outputValidation,
