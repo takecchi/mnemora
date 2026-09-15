@@ -260,10 +260,22 @@ examples/chat/compare-baseline.json と同じだった。
 `mnemoraShareOfNaiveChars`/`factStatementSurvived` を含む）。これは
 「報告は測定済みの recall の後に呼ぶ」という配線方針（`reportMemoryUsage` は
 `recall` を受け取るだけで撃たない）が実際にその行の測定値へ影響しないことの
-実測である。**ただしこれは CI の artifact ではなく、この作業者が用意した
-ローカル Postgres での実行である**——ADR 0133 の手順（CI artifact を
-`gh run download` で取得して比較する）そのものではない。PR の CI が緑になった
-時点で、同じ比較を CI artifact に対しても行い、この ADR の該当節を更新する。
+実測である。
+
+**【実測・追記】PR #332 の CI（`example-chat` ジョブ、run `35034603829`）が
+成功したのち、ADR 0133 が定めた本来の手順（`gh run download` で artifact を
+取得して比較する）でも同じ比較を行った**:
+
+```
+$ gh run download 35034603829 -n compare -D /tmp/ci-compare-332
+$ node scripts/compare-summary.mjs --measured /tmp/ci-compare-332/compare.json \
+    --baseline examples/chat/compare-baseline.json
+✅ 一致(差分なし)。全会話長で北極星の物差し(mnemoraShareOfNaiveChars 他)が
+examples/chat/compare-baseline.json と同じだった。
+```
+
+**⟹ ローカルでの先行確認と、CI artifact に対する本来の手順の、両方が同じ結論
+（差分なし）を出した。** ⭐ 門（ADR 0133）の基準値はこの PR で動かない。
 
 ## 確かめていないこと
 
@@ -273,9 +285,6 @@ examples/chat/compare-baseline.json と同じだった。
   試していない**（引き受けた負債1）。
 - **decay の差が、より長い壁時計時間・より多い記憶数でどう変化するかは
   測っていない**（引き受けた負債3）。
-- **この PR の CI（GitHub Actions）が実際に緑で終わること、および
-  `example-chat` ジョブの `compare` artifact が ADR 0133 の基準値と一致するか
-  は、この ADR の初版執筆時点ではまだ確認していない**（PR 本文で追記する）。
 
 ## 人から受け取った前提（出所付き）
 
