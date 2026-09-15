@@ -240,6 +240,7 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
 4. **`content_hash` は purge 後も元の値のまま残る。** 本文が上書きされているのに `content_hash` はトゥームストーン以前の内容のハッシュを指し続ける。`(tenant_id, source_observation_id, extractor_version, content_hash)` の一意制約は `source_observation_id` が同じ行に対してのみ働き、purge された行は既に `forgotten` であって新規作成の対象にならないため実害は無いと判断したが、**「本文とハッシュが一致しない行が存在する」という事実は残る**。
 5. **本物の Postgres に対してこの機能を実行していない**（この作業環境に `DATABASE_URL` が無い）。「確かめていないこと」節参照。
 6. **並行呼び出しの歯は fake の store に対してのみ測っており、実 DB の行ロックの振る舞いは測っていない**（[ADR 0087](./0087-runtime-forget-shape.md) が確かめていないこととして残した限界と同じ）。
+7. **`docs/architecture.md` §3.2 の動詞一覧を更新していない。** [ADR 0114](./0114-archive-sweep-for-decayed-memories.md)（`sweepArchive`）・[ADR 0122](./0122-restore-archived-memory.md)（`restoreArchived`）もこの文書を更新しておらず、同じ前例に倣った。
 
 ---
 
