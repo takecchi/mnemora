@@ -132,6 +132,9 @@ describe("recall() — 連想枠（association、既定 off）", () => {
       stage: "association",
       reason: "no_anchor",
     });
+    // association を申告した以上、byTier.association 欄は在る（走ったが収穫0）。
+    // 欄自体が無い（＝申告していない）既定offの形とは区別する。
+    expect(result.usage.byTier.association).toBe(0);
   });
 
   it("連想で拾った候補は retrievedVia:'association' と associationOf:<アンカー> を持ち、クエリには当たらない", async () => {
