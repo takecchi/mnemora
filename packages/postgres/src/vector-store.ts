@@ -19,10 +19,7 @@ function toVectorLiteral(vector: number[]): string {
 
 /** `toVectorLiteral` の逆——pgvector のテキスト表現（`[1,2,3]`）を `number[]` に戻す。 */
 function parseVectorLiteral(literal: string): number[] {
-  return literal
-    .slice(1, -1)
-    .split(",")
-    .map(Number);
+  return literal.slice(1, -1).split(",").map(Number);
 }
 
 /**

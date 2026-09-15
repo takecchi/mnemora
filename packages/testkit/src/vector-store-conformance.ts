@@ -126,8 +126,7 @@ const spaceB: EmbeddingSpaceId = { provider: "test", model: "fixture-model-b", d
  * `packages/postgres` 側のテスト（生 SQL・`EXPLAIN` を直接扱う）に置く。
  */
 export function describeVectorStoreConformance(options: VectorStoreConformanceOptions): void {
-  const { name, createStore, prepareMemoryId, prepareEmbeddingSpace, supportsGetVectors } =
-    options;
+  const { name, createStore, prepareMemoryId, prepareEmbeddingSpace, supportsGetVectors } = options;
 
   describe(`VectorStore conformance (${name})`, () => {
     it("upsert した vector が search で見つかる", async () => {
