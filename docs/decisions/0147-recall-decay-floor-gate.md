@@ -133,6 +133,76 @@
      効率の負債（語彙チャンネルの over-fetch 窓が減衰済み候補に食われうる）を実測で無視
      できないと分かった場合、**将来採りうる案として残す。**
 
+- **`restoreArchived` と忘却ゲートの相互作用（マネージャー決定。ゲートを既定 ON にしたこと
+  自体が作った穴を、同じ ADR が引き受ける）**:
+
+  **本 ADR の PR のレビューで見つかった設計上の穴**: `Runtime.sweepArchive` が
+  `archived` にする選定条件は `decayFloorAt <= now` である
+  （[ADR 0114](./0114-archive-sweep-for-decayed-memories.md)）。一方
+  `Runtime.restoreArchived`（[ADR 0122](./0122-restore-archived-memory.md)）は
+  `status` を `archived → active` へ戻すだけで、`decayFloorAt` には一切触れない
+  （ADR 0122 決定4「`decay_floor_at` は動かさない」）。**⟹ `restoreArchived` の対象は、
+  定義上すべて本 ADR の忘却ゲートが除く側（`decayFloorAt <= now`）に居る。**
+  ⟹ **既定では、復帰させた Memory は `status=active` に戻っても recall に二度と
+  現れない。**呼び出し側から見ると `restoreArchived` が `"restored"` と言うのに
+  `recall()` が何も返さない、という形になる。**これは `docs/north-star.md`「目指す姿」の
+  逐語「必要な場合だけ過去の記憶を再び呼び戻せる」と正面から食い違う**
+  （`AGENTS.md`「正典と実装が食い違ったら、バグなのは実装のほう」）。
+  **⟹ この穴を残したまま忘却ゲートを既定 ON で出すことはできない。**
+
+  **決定**: `restoreArchived` は、`status` の復帰に成功した対象へ続けて
+  `MemoryStore.reinforce(ctx, id, now)` を呼ぶ（`packages/core/src/runtime.ts` の
+  `restoreArchived`）。**新しい interface・adapter は増やさない**——`reinforce` は
+  既に契約された口である（`docs/memory-model.md` §7、[ADR 0041](./0041-reinforce-does-not-change-strength.md)・
+  [ADR 0048](./0048-reinforce-does-not-move-decay-origin-backwards.md)。
+  `packages/postgres/src/memory-store.ts` は `defaultDecayStrategy.floorAt({ recordedAt,
+  lastReinforcedAt: at, strength, halfLifeHours })` で `decay_floor_at` を計算し直す）。
+
+  **意味づけ**: 復帰させるという行為そのものが「この記憶がいま必要だ」という明示の信号
+  であり、北極星が言う「**必要な場合だけ過去の記憶を再び呼び戻せる**」の「必要な場合」に
+  当たる。⟹ そのときに減衰の起点を引き直すのは、新しい減衰戦略の発明ではなく、
+  **既存の戦略（`defaultDecayStrategy`、`reinforce` が既に呼んでいるもの）を復帰の瞬間に
+  適用するだけ**である。
+
+  **ADR 0122 が「復帰は強化を兼ねるべきだ」を却下していたことの上書き**: ADR 0122
+  決定4は、この設計（`restoreArchived` 自身が `reinforce` を代行する）を検討したうえで
+  却下していた。理由は「復帰と強化は呼び出し側にとって別の意思決定である」
+  「`reinforce?: boolean` のような分岐を将来足したくなる圧力を生む」の2点。**本 ADR は
+  この判断を上書きする**——却下の前提（`decay_floor_at` を動かさなくても recall の既定
+  挙動には影響しない）が、本 ADR 自身の決定（忘却ゲートを既定 ON にする）によって崩れた
+  ため。ADR 0122 の本文は書き換えず、追記節でこの上書きを指す
+  （[ADR 0122](./0122-restore-archived-memory.md) 追記節）。
+
+  **reinforce が失敗したときの扱い**: `status` の復帰は `reinforce` の前に既に成功して
+  いるため、**`reinforce` が例外を投げても、その成功を握り潰さない**——
+  `RestoreArchivedOutcome` の `kind` は `"restored"` のままとし、失敗は追加欄
+  `reinforceError?: string` に運ぶ（additive。既存欄の意味は変えない）。**この repo の
+  既存の作法（`setEmbeddingStatus` の `failed → ready` 巻き戻し防止、ADR 0048 の
+  `reinforce` 自体の設計）に倣い、「元の成功を握り潰す新しい例外にすり替えない」**
+  という原則を適用した——`restoreArchived` 自身の「競合以外の例外は打ち切って
+  `not_attempted` にする」という既存の分岐（ADR 0122 決定）とは意図的に別の経路にした:
+  あちらは「書き込みそのものが起きなかった」場合の安全弁だが、`reinforce` の失敗は
+  「主たる書き込み（status の復帰）は成功したあとの、副次的な強化の失敗」であり、
+  呼び出し側にとっての意味が違う（前者は「何も変わっていない」、後者は「復帰はしたが、
+  忘却ゲートに再び阻まれるかもしれない」）。`reinforceError` を無視する呼び出し側は
+  この PR 以前と同じ挙動になるだけであり、握り潰しではなく「見なくてもよい追加情報」
+  として設計した。
+
+  **歯**: `packages/core/src/__tests__/restore-archived.test.ts`。
+  - 往復の歯を新しい挙動に合わせて書き換えた——ADR 0122 当時は「同じ `now` で
+    `sweepArchive` を再度呼ぶと即座に再び `archived` になる」ことを固定していたが、
+    今は逆（**再び `archived` にならない**）を固定する。
+  - **⭐ 本 ADR が塞いだ穴そのものを検査する歯**: 復帰**前**は `includeFullyDecayed:
+    true` が無いと recall に現れないが、復帰**後**は明示的な opt-out 無しで現れる。
+    **この非対称そのものが、修正が効いていることの証拠になる**（マネージャー指示）。
+  - `reinforce` が失敗しても `outcomes` の `kind` が `"restored"` のままで
+    `reinforceError` にメッセージが入ること、後続の対象の処理が打ち切られないこと
+    （「打ち切り」節の分岐とは別の規律であること）を専用の describe で固定した。
+  - **変異試験**: `restoreArchived` 内の `reinforce` 呼び出しを取り除く変異を当てると、
+    上記「塞いだ穴」の歯と「往復」の歯（2件）が赤くなることを確認し、退避コピー
+    （`git checkout` は使わず、`cp` で取った一時コピー）から戻して緑に復帰することを
+    確認した。
+
 - **引き受けた負債**:
 
   1. **語彙チャンネルの over-fetch 窓（k'）が、減衰済みの候補に食われうる。**
