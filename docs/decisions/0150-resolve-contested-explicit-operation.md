@@ -242,8 +242,9 @@ ADR 0136 により `recall` からは落ち続ける。**（**確かめていな
 
 ADR 0134 負債3 と同じ。この環境には Postgres も docker も無く（`DATABASE_URL` 未設定）、
 `packages/postgres` のテストは**走らせていない**。**CI（`DATABASE_URL` が在る）が初めて
-実行する。**⟹ 本 ADR の postgres 側についての記述は、**コードの読み取りに基づく主張であり、
-実行して確かめたものではない。**
+実行した。**⟹ 本 ADR の postgres 側についての記述は、**この作業環境では、コードの
+読み取りに基づく主張である。**CI での実測は「測ったこと」に分けて書いた**——手元で
+確かめたことと CI が確かめたことを、同じ顔で並べない。
 
 ---
 
@@ -349,6 +350,26 @@ DB 側を見たことになりません」と名指しで出力した（ADR 0015
 （`first.id === second.id` の `RangeError`・`isUuidLike` 不一致の「memory not found」。
 既存の `memory-store-contested-write-guard.test.ts` と同じ形で
 `resolve-contested-pair-guard.test.ts` に置いた）。
+
+### CI（**`packages/postgres` の実装が実際に Postgres へ対して走った**）
+
+**出所: この PR の担い手が `gh` で引いて確認した。**PR #283、head sha `adc837c`。
+
+- `node scripts/ci-green-check.mjs --pr 283 --recheck-after 30`（ADR 0132 の手順。
+  手製の `grep` の近似は書いていない）→ **`status=green — 11件すべてが completed かつ success`**。
+  30秒空けて引き直しても同じで `stable=true`
+  （⚠ このツール自身が書くとおり、**「もう増えない」ことの証明ではない**）。
+- **`skipped` を緑と読んでいない。**新しい適合テストが**本当に実行された**ことを、
+  件数の差分で確かめた:
+
+| ジョブ | `conformance.postgres.test.ts` の件数 |
+|---|---|
+| `main`（`8adb25d`、run 35004444181） | **228 tests** |
+| 本 PR（`adc837c`、run 35005167765） | **237 tests** |
+
+⟹ **`resolveContestedPair` の適合テスト9本が、本物の Postgres + pgvector に対して
+実際に走って通った**（`server_encoding=UTF8` / `SQL_ASCII` の両 regime で）。
+⟹ **負債4 は、手元については今も真だが、CI については解消した。**
 
 **`origin/main`（`8adb25d`）の CI は `node scripts/ci-green-check.mjs` で
 `status=green — 11件すべてが completed かつ success`**（ADR 0132 の手順。
