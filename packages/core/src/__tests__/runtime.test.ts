@@ -920,7 +920,7 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
   });
 
   /**
-   * 🔴 **この歯は時限式だった。ここで役目を終えた（Issue #204 / ADR 0156）。**
+   * 🔴 **この歯は時限式だった。ここで役目を終えた（Issue #204 / ADR 0157）。**
    *
    * 元の歯は「`consolidate` / `reflect` はいまは `tick` に分岐が無く `unsupported` に出る」を
    * `it.each(["consolidate", "reflect"])` で測っていた。ADR 0082 決定5 が予告していた
@@ -930,7 +930,7 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
    * （`expect(TICK_SUPPORTED_JOB_KINDS).not.toContain(kind)` と
    * `unsupported: [{ jobId, kind }]`）はどちらも成り立たなくなった。
    *
-   * **単に削除しない**（ADR 0156 決定3）——代わりに、下の2本を「いまは tick が処理する」
+   * **単に削除しない**（ADR 0157 決定3）——代わりに、下の2本を「いまは tick が処理する」
    * ことを測る歯として書き換えた:
    *
    * 1. `TICK_SUPPORTED_JOB_KINDS` が実際に両方を含むこと（元の歯の否定）。
@@ -961,7 +961,7 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
       const { runtime, stores } = buildRuntime(llmReturning([]));
       // `enqueueJobOfKind` は observation 用の outbox 経路を借りて payload を
       // `{ observationId }` にする——`consolidate`/`reflect` が読む `memoryId` を持たない、
-      // 「payload が壊れている」ケースの具体例（ADR 0156 決定「payload が壊れていたときの
+      // 「payload が壊れている」ケースの具体例（ADR 0157 決定「payload が壊れていたときの
       // 倒れ方を決める」）。
       const jobId = await enqueueJobOfKind(stores, kind);
 
@@ -981,11 +981,11 @@ describe("runtime.tick — 対応していない outbox job kind（ADR 0082 / is
 });
 
 /**
- * Issue #204 / ADR 0156: `tick()` が `consolidate`/`reflect` の outbox ジョブを実際に処理する
+ * Issue #204 / ADR 0157: `tick()` が `consolidate`/`reflect` の outbox ジョブを実際に処理する
  * ことを、正常系（payload が正しい）で測る。上の describe（対応していない kind の節）は
  * 「壊れた payload」の倒れ方を測っており、ここは「対応している」ことそのものを測る。
  */
-describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue #204 / ADR 0156）", () => {
+describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue #204 / ADR 0157）", () => {
   it.each(["consolidate", "reflect"] as const)(
     "⭐ payload `{ memoryId }` が正しければ、'%s' ジョブは unsupported にも failed にもならず処理される",
     async (kind) => {
@@ -1035,11 +1035,11 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
 });
 
 /**
- * Issue #204 / ADR 0156 決定4: 🔴 自動駆動は**既定で有効にならない**（北極星の問い2 /
+ * Issue #204 / ADR 0157 決定4: 🔴 自動駆動は**既定で有効にならない**（北極星の問い2 /
  * docs/roadmap.md §1.1）。この describe は両方向を測る——
  * 「既定では1件も積まれない」と「opt-in すると積まれ、tick が処理する」。
  */
-describe("runtime.observe(extract) が consolidate/reflect の種を積むのは opt-in のときだけ（Issue #204 / ADR 0156）", () => {
+describe("runtime.observe(extract) が consolidate/reflect の種を積むのは opt-in のときだけ（Issue #204 / ADR 0157）", () => {
   it("🔴 既定（config を渡さない）では、extract は embed 以外のジョブを1件も積まない", async () => {
     const { runtime, stores } = buildRuntime(
       llmReturning([{ content: "本文", digest: "要旨", provenanceKind: "stated" }]),
@@ -1049,7 +1049,7 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
 
     // `extract: 'sync'`（既定）は監査/冪等性のための `extract` ジョブを常に積み、
     // 同じ呼び出しの中で `complete()` する（`handleExtractableObservation` 参照。
-    // ADR 0156 の対象ではない、既存の挙動）——ここで測りたいのは
+    // ADR 0157 の対象ではない、既存の挙動）——ここで測りたいのは
     // `consolidate`/`reflect` が積まれないことだけなので、それ以外の kind は無視する。
     const kinds = stores.outboxStore
       .listJobs(ctx)
@@ -1069,7 +1069,7 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
 
     // `extract` ジョブも積まれるが（既存の挙動、上のテストのコメント参照）、sync 抽出の
     // 中で既に `complete()` されているので、ここでは `consolidate`/`embed`/`reflect` の
-    // 3つだけを見る（ADR 0156 の対象）。
+    // 3つだけを見る（ADR 0157 の対象）。
     const jobsBeforeTick = stores.outboxStore.listJobs(ctx).filter((job) => job.kind !== "extract");
     expect(
       jobsBeforeTick

@@ -1,4 +1,4 @@
-# ADR 0156: `tick()` が `consolidate()`/`reflect()` を駆動する — 事象駆動（outbox）、既定 off の opt-in
+# ADR 0157: `tick()` が `consolidate()`/`reflect()` を駆動する — 事象駆動（outbox）、既定 off の opt-in
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-16

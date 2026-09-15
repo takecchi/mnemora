@@ -91,7 +91,7 @@ export interface RuntimeConfig {
   defaultClaimedBy?: string;
   /**
    * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
-   * [ADR 0156](../../../docs/decisions/0156-tick-drives-consolidate-and-reflect.md):
+   * [ADR 0157](../../../docs/decisions/0157-tick-drives-consolidate-and-reflect.md):
    * `extract`（`observe()` の sync 経路・`tick()` の `extract` ジョブ経路の両方）が新しい
    * Memory を1件作るたびに、その `memoryId` を種にした `consolidate` / `reflect` の
    * outbox ジョブも追加で積むかどうか。
@@ -1583,7 +1583,7 @@ export interface Runtime {
    * 積むが **`content` は積まない**（`forget`/`reextract` と同じ規律）。
    *
    * ⭐ **`tick()` は `'consolidate'` の outbox ジョブが在ればこれを駆動する**
-   * （Issue #204 / ADR 0156。`TICK_SUPPORTED_JOB_KINDS` に足された）。ジョブの
+   * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。ジョブの
    * `payload` は `{ memoryId }`（既存の `embed` ジョブと同じ形）で、`tick` はそれを
    * `seedMemoryId` として `consolidate(ctx, { target: { seedMemoryId } })` を呼ぶ
    * だけである——このメソッド自身の意味論・呼び出し方は一切変わっていない。
@@ -1651,7 +1651,7 @@ export interface Runtime {
    * 足すことはしていない（`reflect.test.ts` がこの挙動を歯で固定している）。
    *
    * ⭐ **`tick()` は `'reflect'` の outbox ジョブが在ればこれを駆動する**
-   * （Issue #204 / ADR 0156。`TICK_SUPPORTED_JOB_KINDS` に足された）。`consolidate` と
+   * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。`consolidate` と
    * 対称——ジョブの `payload` は `{ memoryId }` で、`tick` はそれを `seedMemoryId` として
    * `reflect(ctx, { target: { seedMemoryId } })` を呼ぶだけである。
    * ⚠ **`reflect()` の *実運用*（Background Cognition・Scheduler による自動起動）は
@@ -1780,7 +1780,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const newMemories = await buildNewMemoriesForCandidates(ctx, observation, candidates);
     const memoryIds: MemoryId[] = [];
     const contentHashes = new Set<string>();
-    // Issue #204 / ADR 0156: 既定 `["embed"]` のみ。opt-in（config.autoQueueConsolidateReflectOnExtract）
+    // Issue #204 / ADR 0157: 既定 `["embed"]` のみ。opt-in（config.autoQueueConsolidateReflectOnExtract）
     // が true のときだけ、同じ memoryId を種にした consolidate/reflect ジョブも積む——
     // `createMemoryWithOutbox` は jobKinds の各要素に同じ payload `{ memoryId }` を使うので、
     // 新しい payload 形を発明する必要がない（下の processConsolidateJob/processReflectJob 参照）。
@@ -2188,10 +2188,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `job.payload` から `memoryId` を取り出す共通部分（Issue #204 / ADR 0156）。
+   * `job.payload` から `memoryId` を取り出す共通部分（Issue #204 / ADR 0157）。
    * `processEmbedJob` の `memoryId` 取り出しと同じ形——`consolidate`/`reflect` の
    * ジョブも `createMemoryWithOutbox` が作る以上、payload の形は embed と同じ
-   * `{ memoryId }` である（新しい payload 形を発明しない、ADR 0156 決定2）。
+   * `{ memoryId }` である（新しい payload 形を発明しない、ADR 0157 決定2）。
    *
    * 🔴 **payload が壊れていた（`memoryId` が無い/文字列でない）場合は投げる。**
    * `processEmbedJob` と同じ規律——黙って何もしない・空処理として `complete()` しない
@@ -2207,7 +2207,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `tick` の `consolidate` ジョブハンドラ（Issue #204 / ADR 0156）。
+   * `tick` の `consolidate` ジョブハンドラ（Issue #204 / ADR 0157）。
    *
    * **`seedMemoryId` が指す Memory が見つからない場合は投げない。**
    * `consolidate()` 自身が「種が見つからない」を `nothingReason` 経由の正規の結末
@@ -2223,7 +2223,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `tick` の `reflect` ジョブハンドラ（Issue #204 / ADR 0156）。
+   * `tick` の `reflect` ジョブハンドラ（Issue #204 / ADR 0157）。
    * `processConsolidateJob` と対称——理由は同じ（`reflect()` も種が見つからない場合を
    * `not_found` 経由の正規の結末として扱う、ADR 0154 決定5）。
    */
