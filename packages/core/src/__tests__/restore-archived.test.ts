@@ -380,8 +380,16 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     );
     await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
 
+    // ⚠ 2026-09（ADR 0147・Issue #196）追記: このフィクスチャは `sweepArchive` の
+    // 選定条件（decayFloorAt <= now）を満たすために意図的に「既に減衰しきっている」
+    // 状態で作る——この describe が検査したい対象は `status` の往復
+    // （active → archived → active）であって、忘却ゲートではない。**ゲートは既定で
+    // 有効**なので、ここで `includeFullyDecayed: true` を渡さないと、忘却ゲートに
+    // 阻まれて往復の「前」（0番）から既にこの Memory が現れず、テストの前提が壊れる。
+    const recallOpts = { vector: [1, 0], includeFullyDecayed: true };
+
     // 0. 往復の前: recall に出る。totalInScope はこの1件を含む。
-    const before = await runtime.recall(ctx, { vector: [1, 0] });
+    const before = await runtime.recall(ctx, recallOpts);
     expect(before.memories.map((m) => m.memoryId)).toContain(memory.id);
     const totalInScopeBefore = before.index.totalInScope;
 
@@ -396,7 +404,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     expect(afterSweep?.status).toBe("archived");
 
     // 2. recall から消え、archived として filtered に計上され、totalInScope が1件分減る。
-    const duringArchive = await runtime.recall(ctx, { vector: [1, 0] });
+    const duringArchive = await runtime.recall(ctx, recallOpts);
     expect(duringArchive.memories.map((m) => m.memoryId)).not.toContain(memory.id);
     expect(duringArchive.omitted).toContainEqual({
       kind: "filtered",
@@ -419,7 +427,7 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     // （被覆不変条件: groups の総和 === totalInScope は、recall-runtime.ts を一切
     // 変更していないため常に成り立つが、その値そのものが往復の前後で復元することを
     // ここで実測する）。
-    const after = await runtime.recall(ctx, { vector: [1, 0] });
+    const after = await runtime.recall(ctx, recallOpts);
     expect(after.memories.map((m) => m.memoryId)).toContain(memory.id);
     expect(after.omitted).not.toContainEqual(
       expect.objectContaining({ kind: "filtered", condition: "archived" }),
