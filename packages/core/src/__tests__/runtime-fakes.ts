@@ -240,6 +240,7 @@ export class FakeMemoryStore implements MemoryStore {
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: input.decayFloorAt,
         embeddingStatus: input.embeddingStatus,
+        purgedAt: input.purgedAt ?? null,
         createdAt: now,
         updatedAt: now,
       };

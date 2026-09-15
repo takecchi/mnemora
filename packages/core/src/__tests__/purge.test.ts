@@ -281,7 +281,11 @@ describe("runtime.purge — reason / actor / digestSnapshot", () => {
       newMemory({ status: "forgotten" }),
     );
 
-    await runtime.purge(ctx, { memoryId: withActor.id }, { actor: { type: "human", id: "user-42" } });
+    await runtime.purge(
+      ctx,
+      { memoryId: withActor.id },
+      { actor: { type: "human", id: "user-42" } },
+    );
     await runtime.purge(ctx, { memoryId: withoutActor.id });
 
     const [actorEvent] = purgedEvents(stores, withActor.id);
