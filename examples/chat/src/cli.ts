@@ -44,7 +44,8 @@ import {
   buildWeightsUnavailableIdentifierProbeJson,
 } from "./identifier-json.js";
 import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
-import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
+import { buildMnemoraPrompt, ingestConversation } from "./mnemora-path.js";
+import { TINY_BUDGET_CHARS, runBudgetDemo } from "./budget-demo.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
 import type { ProviderMode } from "./providers.js";
 import { decideProviderSource, describeProviderSourceReason } from "./providers.js";
@@ -62,7 +63,9 @@ import {
 import { createExampleRuntime } from "./runtime-factory.js";
 import { buildConversation } from "./scenario.js";
 import { formatBackfillDemo, runBackfillDemo } from "./backfill.js";
+import { formatCorrectionDemo, runCorrectionDemo } from "./correction-demo.js";
 import { formatScopeDemo, runScopeDemo } from "./scope.js";
+import { formatRecallExplainDemo, runRecallExplainDemo } from "./recall-explain.js";
 import { createMutableClock } from "./mutable-clock.js";
 import { formatTimeTermReport, runTimeTermArm } from "./time-term-arm.js";
 import { buildTimeTermJson } from "./time-term-json.js";
@@ -70,8 +73,6 @@ import { formatNoApiCallsNotice } from "./usage-meter.js";
 
 /** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
-/** budget が実際に切り詰めることを見せるための、意図的に小さい文字数予算。 */
-const TINY_BUDGET_CHARS = 60;
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -194,8 +195,12 @@ async function runChat(): Promise<void> {
       `${conversation.userUtterances.length} 件の user 発話を observe() し、tick() で embed を処理した。`,
     );
 
+    // デモ本体は budget-demo.ts に切り出してある（Issue #306）——`__tests__` から
+    // 同じ2回の recall() 呼び出しを検査できるようにするためで、ここでの印字は
+    // これまでと1バイトも変えていない。
+    const { withoutBudget, withBudget } = await runBudgetDemo(handle.runtime, ctx, conversation);
+
     console.log("\n=== recall()（budget 無し） ===");
-    const withoutBudget = await queryRecall(handle.runtime, ctx, conversation);
     console.log(formatRecall(withoutBudget, "budget 無し"));
     console.log("呼び出し側がプロンプトへ積む文字列（recall() の返り値だけから組み立てる例）:");
     console.log(buildMnemoraPrompt(withoutBudget));
@@ -203,9 +208,6 @@ async function runChat(): Promise<void> {
     console.log(
       `\n=== budget を渡すと実際に切り詰められる（maxMemoryChars=${TINY_BUDGET_CHARS}） ===`,
     );
-    const withBudget = await queryRecall(handle.runtime, ctx, conversation, {
-      budget: { maxMemoryChars: TINY_BUDGET_CHARS },
-    });
     console.log(formatRecall(withBudget, `budget maxMemoryChars=${TINY_BUDGET_CHARS}`));
 
     console.log("\n=== まとめ ===");
@@ -254,6 +256,32 @@ async function runScope(): Promise<void> {
 }
 
 /**
+ * `Runtime.getRecall` を「動く例」で見せるデモ(`src/recall-explain.ts`、Issue #312、
+ * ADR 0161)。`recall()` の戻り値からは `recallId` だけを使い、別の呼び出しとして
+ * `getRecall(ctx, recallId)` を呼んで、永続化された `recalls` 行から内訳を読み戻す。
+ * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行——
+ * `runRecallExplainDemo`/`formatRecallExplainDemo` は `compare.ts`/`retrieval-quality.ts`/
+ * `probe-set.ts`/`scenario.ts`/`naive-path.ts` を import しない。
+ */
+async function runExplain(): Promise<void> {
+  const handle = await createExampleRuntime(requireDatabaseUrl());
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const tenantId = `example-chat-explain-${Date.now()}`;
+    console.log(
+      "\n2件の事実を observe して embed を干上がらせ、3件目はあえて索引に載せないまま" +
+        "recall() を呼ぶ。返り値からは recallId だけを使い、別の呼び出し " +
+        "runtime.getRecall(ctx, recallId) で、なぜその記憶が・どの内訳で選ばれたか" +
+        "(そして3件目がなぜ落ちたか)を、永続化された recalls 行から読み戻す。\n",
+    );
+    const result = await runRecallExplainDemo(handle.runtime, handle.memoryStore, tenantId);
+    console.log(formatRecallExplainDemo(result));
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * `observe()` の `occurredAt` を「動く例」で見せるデモ(`src/backfill.ts`、ADR 0037)。
  * 同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせ、
  * **同じ問い合わせが取り込み方だけで別の答えを返す**ことを並べて見せる。
@@ -273,6 +301,34 @@ async function runBackfill(): Promise<void> {
       withoutOccurredAt: `${base}-without`,
     });
     console.log(formatBackfillDemo(result));
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * 訂正を含む会話シナリオを実演するデモ(`src/correction-demo.ts`、Issue #303)。
+ *
+ * 北極星「間違いを正すと、古いほうが先に出てこなくなる」を、`markContested`
+ * （ADR 0134）→`recall`（両方隣接して出る）→`resolveContested`（ADR 0150）→`recall`
+ * （古いほうが消える）の一巡で実演する。`Runtime.markContested`/`resolveContested` は
+ * `examples/chat` からこれまで一度も呼ばれていなかった（Issue #303 本文）。
+ *
+ * **どの2件が対向し、どちらが勝つかは `correction-scenario.ts` が構造として宣言する。**
+ * このコマンドは判定をせず、宣言をそのまま渡すだけ。北極星の主測定(`compare`/`retrieval`)
+ * には触れない、独立したデモ実行。
+ */
+async function runCorrection(): Promise<void> {
+  const handle = await createExampleRuntime(requireDatabaseUrl());
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const ctx = { tenantId: `example-chat-correction-${Date.now()}` };
+    console.log(
+      "\n最初に事実を表明し、後から訂正する会話を observe() し、markContested → recall → " +
+        "resolveContested → recall で「間違いを正すと古いほうが出てこなくなる」ことを実演する。\n",
+    );
+    const result = await runCorrectionDemo(handle.runtime, ctx);
+    console.log(formatCorrectionDemo(result));
   } finally {
     await handle.close();
   }
@@ -1308,7 +1364,9 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0052)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run explain    # recallId から Runtime.getRecall() で内訳を後から読み戻す(Issue #312)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction # 訂正を含む会話で markContested→resolveContested を実演(Issue #303)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run retrieval # 意味的関連性の probe set を3 arm(擬似/埋め込みのみ本物/フル本物)で比較",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0051)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run time-term # 時間項(freshness/decay)を意味的類似度から分離して測る",
@@ -1349,8 +1407,12 @@ async function main(): Promise<void> {
     await runCompare();
   } else if (command === "scope") {
     await runScope();
+  } else if (command === "explain") {
+    await runExplain();
   } else if (command === "backfill") {
     await runBackfill();
+  } else if (command === "correction") {
+    await runCorrection();
   } else if (command === "retrieval") {
     await runRetrieval();
   } else if (command === "time-term") {
