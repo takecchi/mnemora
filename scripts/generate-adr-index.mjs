@@ -8,10 +8,17 @@
  *   node scripts/generate-adr-index.mjs --check  # 書き込まず、最新かどうかだけを判定する
  *                                                 # （終了コード 0=最新 / 1=陳腐化）
  *
- * **ADR を追加する PR は、原則としてこのスクリプトを実行しない。**
- * 索引は `main` へマージされた直後に、マージした側（当面はマネージャー）が実行して
- * コミットする——ADR PR 自体が `docs/decisions/README.md` を触らないことで、
+ * **ADR を追加する PR の作成者は、原則としてこのスクリプトを実行しない。**
+ * 索引は、マージする側（当面はマネージャー）が、その PR を **squash merge
+ * する直前**に、PR ブランチ上で実行してコミットし、push する
+ * ——ADR PR の作成者自身は `docs/decisions/README.md` を触らないことで、
  * 並行 PR 間の行位置の衝突を構造的に無くしている（ADR 0137）。
+ *
+ * ⚠ **「マージした直後に `main` 上で実行する」ではない。** そうすると
+ * squash コミット自体が索引の陳腐化した状態のまま `main` に着地し、
+ * `main` への push で毎回走る CI（`ci.yml`）を赤くする。マージ**前**に
+ * PR ブランチ上で実行することで、`main` に着地する squash コミットは
+ * 最初から索引が最新の状態を含む（ADR 0137「決定」2番）。
  */
 import { readFileSync, writeFileSync, readdirSync } from "node:fs";
 import { dirname, join } from "node:path";

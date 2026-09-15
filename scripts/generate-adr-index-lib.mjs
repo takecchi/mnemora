@@ -18,14 +18,19 @@
  * （`docs/decisions-index-conflict-reproduction.md` 相当の再現手順は ADR 0137 の
  * 「測ったこと」を見ること）。
  *
- * その代わり、`docs/decisions/README.md` の生成部分は ADR PR がマージされた直後に
+ * その代わり、`docs/decisions/README.md` の生成部分は ADR PR のブランチ上で
  * **陳腐化する**（新しいファイルが増えたのに表がまだ追いついていない）。これは
- * バグではなく、この設計が意図して受け入れる過渡状態である。`main` へ入った直後に
- * `node scripts/generate-adr-index.mjs` を実行してコミットすることで解消する
- * （手順は README 自身のコメントと ADR 0137「決定」を見ること）。この「陳腐化して
- * いないか」を `main` に限って検査するのが `scripts/__tests__/adr-index-freshness.test.mjs`
- * であり、ADR 0128 の歯が担っていた役割を引き継ぐ（ただし PR を塞ぐ門ではなく、
- * `main` の安全網としてのみ働く——理由は ADR 0137 の「決定」3番）。
+ * バグではなく、この設計が意図して受け入れる過渡状態である——**ただし、その
+ * 陳腐化を `main` へ持ち込まない。** マージする側が、squash merge する
+ * **直前**に PR ブランチ上で `node scripts/generate-adr-index.mjs` を実行して
+ * コミットし、push してからマージする（手順は README 自身のコメントと
+ * ADR 0137「決定」2番を見ること）。こうすると `main` に着地する squash
+ * コミットは最初から索引が最新であり、`main` が陳腐化した状態を持つ瞬間が
+ * 無い。この「陳腐化していないか」を `main` に限って検査するのが
+ * `scripts/__tests__/adr-index-freshness.test.mjs` であり、ADR 0128 の歯が
+ * 担っていた役割を引き継ぐ（ただし PR を塞ぐ門ではなく、上の手順が実際に
+ * 守られたかを見る `main` の安全網としてのみ働く——手順が守られている限り
+ * routine では鳴らない。理由は ADR 0137 の「決定」2番・3番）。
  *
  * ## ソースにするもの
  *
