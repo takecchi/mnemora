@@ -23,7 +23,7 @@ import {
  * 継続的な実測の場になる。**PR #320 の CI 失敗を引き継いだ修正作業（Issue #303）では、
  * `initdb` で一時的な Postgres 17 + pgvector クラスタをローカルに立てて実際にこの歯を
  * 実行し、赤（`afterMarkCompanionRetrieval` が false）→修正→緑を手元で確認した**
- * （`docs/decisions/0161-correction-scenario-example-chat.md` 決定5「測ったこと」参照）。
+ * （`docs/decisions/0162-correction-scenario-example-chat.md` 決定5「測ったこと」参照）。
  */
 describe("examples/chat: correction（markContested → resolveContested、本物の Postgres）", () => {
   it("markContested で対になった2件は recall で隣接して出て、resolveContested(supersede) 後は古いほうが消える", async () => {
@@ -47,7 +47,7 @@ describe("examples/chat: correction（markContested → resolveContested、本�
       // markContested 直後: `recall({ limit: 1 })` でも両方が隣接して出て、
       // 段2で limit に自然に残らなかったほう(まだ勝敗は付いていない——両方 contested。
       // どちらが残るかはスコアのランキング次第であり、resolveContested の勝者とは無関係)は
-      // mandatory_companion として強制的に連れてこられる(ADR 0161 決定5)。
+      // mandatory_companion として強制的に連れてこられる(ADR 0162 決定5)。
       expect(result.beforeMark.memories.length).toBeGreaterThan(0);
       expect(check.afterMarkBothPresent).toBe(true);
       expect(check.afterMarkCompanionRetrieval).toBe(true);

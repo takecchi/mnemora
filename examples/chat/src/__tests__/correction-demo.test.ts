@@ -269,7 +269,7 @@ describe("checkCorrectionDemo / formatCorrectionDemo: 固定した RecallResult 
   });
 });
 
-describe("checkCorrectionDemo: mandatory_companion がどちらに付くかを決め打たない(ADR 0161 決定5、PR #320 の CI 失敗の修正)", () => {
+describe("checkCorrectionDemo: mandatory_companion がどちらに付くかを決め打たない(ADR 0162 決定5、PR #320 の CI 失敗の修正)", () => {
   const originalId = "fixed-original-id";
   const correctionId = "fixed-correction-id";
 
