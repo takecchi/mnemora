@@ -661,14 +661,14 @@ describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻
 });
 
 /**
- * Issue #312 / [ADR 0159](../../../docs/decisions/0159-runtime-get-recall.md):
+ * Issue #312 / [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
  * `Runtime.getRecall` は `MemoryStore.getRecall` への**素通し**である
  * （`reembed` と同じ形——`runtime.ts` の doc コメント参照）。ここで検査するのは
  * 「素通しであること」そのもの——`viaRuntime` と `stores.memoryStore.getRecall` を
  * 直接呼んだ結果が一致することを見る。値の中身（score/retrievedVia の形）の検査は
  * `recall-runtime.ts` の歯の役目であり、ここでは行わない。
  */
-describe("runtime.getRecall（Issue #312、ADR 0159: MemoryStore.getRecall への素通し）", () => {
+describe("runtime.getRecall（Issue #312、ADR 0161: MemoryStore.getRecall への素通し）", () => {
   it("createRecall で書いた行を、memoryStore.getRecall と同じ内容で読み戻す", async () => {
     const { runtime, stores } = buildRuntime(llmReturning([]));
     const recallId = await createRecallFixture(stores, ctx);

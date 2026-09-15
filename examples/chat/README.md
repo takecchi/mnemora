@@ -178,7 +178,7 @@ haystack）との競合が減る——量の削減率や順位が「実際に絞
 [ADR 0155](../../docs/decisions/0155-recall-score-breakdown-persisted.md) で `recalls` に
 per-memory のスコア内訳が永続化され、`MemoryStore.getRecall(ctx, recallId)` で読み戻せる
 ようになったが、それを呼ぶ本番コードは1つも無かった（Issue #312）。この節はその空白を
-`src/recall-explain.ts` の「動く例」で塞ぐ——[ADR 0159](../../docs/decisions/0159-runtime-get-recall.md)
+`src/recall-explain.ts` の「動く例」で塞ぐ——[ADR 0161](../../docs/decisions/0161-runtime-get-recall.md)
 が足した `Runtime.getRecall` を、`examples/chat` から初めて実演する。
 
 ```bash

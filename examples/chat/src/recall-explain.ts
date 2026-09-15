@@ -13,7 +13,7 @@ import { drainEmbedTicks } from "./embed-drain.js";
 
 /**
  * [Issue #312](https://github.com/takecchi/mnemora/issues/312) /
- * [ADR 0159](../../../docs/decisions/0159-runtime-get-recall.md):
+ * [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
  * 北極星「目指す姿」の「なぜそれを思い出したのかを、後から説明できる。」の**「後から」**を、
  * 動く例として見せるデモ（examples/chat/README.md「`explain`」節）。
  *

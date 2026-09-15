@@ -10,7 +10,7 @@ import {
 
 /**
  * `examples/chat/src/recall-explain.ts` の歯——`Runtime.getRecall`（Issue #312、
- * ADR 0159）が、`recall()` の戻り値からは分からない「後から」を実際に満たすことを、
+ * ADR 0161）が、`recall()` の戻り値からは分からない「後から」を実際に満たすことを、
  * 本物の Postgres に対して検査する。
  *
  * provider は `@mnemora/testkit` の決定的な擬似実装（`scope.postgres.test.ts` と

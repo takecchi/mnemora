@@ -256,7 +256,7 @@ async function runScope(): Promise<void> {
 
 /**
  * `Runtime.getRecall` を「動く例」で見せるデモ(`src/recall-explain.ts`、Issue #312、
- * ADR 0159)。`recall()` の戻り値からは `recallId` だけを使い、別の呼び出しとして
+ * ADR 0161)。`recall()` の戻り値からは `recallId` だけを使い、別の呼び出しとして
  * `getRecall(ctx, recallId)` を呼んで、永続化された `recalls` 行から内訳を読み戻す。
  * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行——
  * `runRecallExplainDemo`/`formatRecallExplainDemo` は `compare.ts`/`retrieval-quality.ts`/

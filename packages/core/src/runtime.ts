@@ -1168,7 +1168,7 @@ export interface Runtime {
   recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult>;
   /**
    * [Issue #312](https://github.com/takecchi/mnemora/issues/312) /
-   * [ADR 0159](../../../docs/decisions/0159-runtime-get-recall.md):
+   * [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
    * `recall()` が返した `RecallId` から、その recall が実際に何を・どの内訳で返したかを
    * **後から**読み戻す。
    *
@@ -1195,7 +1195,7 @@ export interface Runtime {
    * 決定1が `digest` を「後から `MemoryStore.get()` で再現できる」という理由で
    * `recalls` へ複製しなかったため）。`Runtime` には記憶を1件読む口が無いため、
    * `digest` まで要る採用側は `MemoryStore` を自前で保持する必要がある——検討の詳細は
-   * ADR 0159 の「検討して採らなかった案」を参照。
+   * ADR 0161 の「検討して採らなかった案」を参照。
    */
   getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
   /**
@@ -2386,7 +2386,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `Runtime.getRecall` の実装（Issue #312、ADR 0159）。doc コメントは interface 側にある
+   * `Runtime.getRecall` の実装（Issue #312、ADR 0161）。doc コメントは interface 側にある
    * ——ここは素通しそのものだけ。
    */
   async function getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null> {
