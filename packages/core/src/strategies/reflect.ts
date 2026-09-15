@@ -80,7 +80,7 @@ export interface BuildReflectedMemoryParams {
   halfLifeHours: number;
   now: Date;
   /**
-   * [ADR 0157](../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと3・5:
+   * [ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと3・5:
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls`・
    * `consolidate.ts` の `BuildConsolidatedMemoryParams` と同じ形。
    */
@@ -147,7 +147,7 @@ export function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMem
     halfLifeHours: params.halfLifeHours,
   });
 
-  // ADR 0157 決めたこと3・5: 活動時計の3つ組（`extraction.ts`/`consolidate.ts` と同じ規律）。
+  // ADR 0158 決めたこと3・5: 活動時計の3つ組（`extraction.ts`/`consolidate.ts` と同じ規律）。
   const hasActivityInputs =
     params.activitySeq !== undefined && params.halfLifeRecalls !== undefined;
   const decayBaseSeq = hasActivityInputs ? params.activitySeq : undefined;

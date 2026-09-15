@@ -57,7 +57,7 @@ export interface BuildConsolidatedMemoryParams {
   halfLifeHours: number;
   now: Date;
   /**
-   * [ADR 0157](../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと3・5:
+   * [ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと3・5:
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls` と同じ形
    * ——両方揃っているときだけ活動時計の3つ組を作る。`'wall'` のテナントでは
    * 呼び出し側がどちらも渡さない。
@@ -109,7 +109,7 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
     halfLifeHours: params.halfLifeHours,
   });
 
-  // ADR 0157 決めたこと3・5: 活動時計の3つ組（`extraction.ts` の
+  // ADR 0158 決めたこと3・5: 活動時計の3つ組（`extraction.ts` の
   // `buildNewMemoryFromCandidate` と同じ規律）。
   const hasActivityInputs =
     params.activitySeq !== undefined && params.halfLifeRecalls !== undefined;

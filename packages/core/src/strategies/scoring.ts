@@ -56,11 +56,11 @@ export interface ScoringInput {
   strength: number;
   halfLifeHours: number;
   /**
-   * [ADR 0157](../../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと12:
+   * [ADR 0158](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと12:
    * そのテナントの `decay_clock`。省略時は壁時計のみ（本 ADR 以前と1バイトも変わらない）。
    * `'activity'`/`'either'` でも、下の `nowSeq`/`decayBaseSeq`/`halfLifeRecalls` が
    * 揃っていなければ壁時計へフォールバックする——「揃っていない」は「この軸に床が無い
-   * （NULL）＝活動時計では沈まない」（ADR 0157 決めたこと4）と同じ向きの判断である。
+   * （NULL）＝活動時計では沈まない」（ADR 0158 決めたこと4）と同じ向きの判断である。
    */
   decayClock?: DecayClock;
   /** 活動時計の「いま」（`TenantSettingsStore.getActivitySeq` の値）。 */
@@ -194,15 +194,15 @@ export const DEFAULT_STRATEGY_BOUND_ASSUMPTIONS: readonly string[] = [
 ];
 
 /**
- * 段2の再スコア係数 `decay`（ADR 0157 決めたこと12）。
+ * 段2の再スコア係数 `decay`（ADR 0158 決めたこと12）。
  *
  * - `decayClock` 省略 or `'wall'`: 壁時計のみ（従来どおり）。
  * - `'activity'`: `nowSeq`・`decayBaseSeq`・`halfLifeRecalls` の3つが揃っていれば活動時計の
  *   係数を使う。**揃っていなければ壁時計へフォールバックする**——「揃っていない」は
- *   ADR 0157 決めたこと4「NULL はこの軸に床が無い＝活動時計では沈まない」と同じ向きの
+ *   ADR 0158 決めたこと4「NULL はこの軸に床が無い＝活動時計では沈まない」と同じ向きの
  *   判断であり、活動時計だけを使おうとして値が無い場合に `decay = 0`/`NaN` へ倒すのは
  *   その向きに反する。
- * - `'either'`: **2つの係数の `Math.max`**（最も緩い）を使う。ADR 0157 決めたこと1が
+ * - `'either'`: **2つの係数の `Math.max`**（最も緩い）を使う。ADR 0158 決めたこと1が
  *   段1のゲートで `'either'` を OR（どちらかが生きていれば通す）にしたのと同じ向き
  *   ——段2の係数も「どちらの時計で見ても、より生きている（減衰していない）ほうを採る」
  *   ことで、ゲートを通った候補の順位付けがゲートの判定と矛盾しないようにする。
@@ -230,7 +230,7 @@ function computeDecay(input: ScoringInput): number {
     input.halfLifeRecalls !== null;
 
   if (!hasActivityInputs) {
-    // 揃っていない＝この軸に床が無い（ADR 0157 決めたこと4）。壁時計へフォールバックする。
+    // 揃っていない＝この軸に床が無い（ADR 0158 決めたこと4）。壁時計へフォールバックする。
     return wallDecay;
   }
 

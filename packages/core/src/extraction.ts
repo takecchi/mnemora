@@ -229,18 +229,18 @@ export interface BuildNewMemoryParams {
   now: Date;
   digestFallbackLength: number;
   /**
-   * [ADR 0157](../../docs/decisions/0157-decay-activity-clock.md) 決めたこと3・5:
+   * [ADR 0158](../../docs/decisions/0158-decay-activity-clock.md) 決めたこと3・5:
    * 書き込み時点の `tenant_activity.activity_seq`（テナントの `decay_clock` が
    * `'wall'` 以外のときだけ呼び出し側が渡す）。`halfLifeRecalls` と対で渡すこと——
    * 片方だけ渡しても活動時計の3つ組は作られない（下記 `halfLifeRecalls` 参照）。
    */
   activitySeq?: number;
   /**
-   * [ADR 0157](../../docs/decisions/0157-decay-activity-clock.md) 決めたこと3:
+   * [ADR 0158](../../docs/decisions/0158-decay-activity-clock.md) 決めたこと3:
    * この Memory の活動時計での半減期（単位: recall 回数）。**`activitySeq` と両方
    * 揃っていないと、活動時計の3つ組（`decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls`）は
    * 作られない**——`'wall'` のテナントでは呼び出し側がどちらも渡さず、3つとも
-   * `undefined` のまま Memory に書かれる（ADR 0157 決めたこと5「`'wall'` のテナントでは
+   * `undefined` のまま Memory に書かれる（ADR 0158 決めたこと5「`'wall'` のテナントでは
    * 何も増えない」）。
    */
   halfLifeRecalls?: number;
@@ -275,7 +275,7 @@ export function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMe
     strength: 1,
     halfLifeHours: params.halfLifeHours,
   });
-  // ADR 0157 決めたこと3・5: 活動時計の3つ組。`activitySeq`/`halfLifeRecalls` の両方が
+  // ADR 0158 決めたこと3・5: 活動時計の3つ組。`activitySeq`/`halfLifeRecalls` の両方が
   // 揃っているときだけ作る——入力が無ければ3つとも undefined のまま（'wall' のテナント）。
   const hasActivityInputs =
     params.activitySeq !== undefined && params.halfLifeRecalls !== undefined;

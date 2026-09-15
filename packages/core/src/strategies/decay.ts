@@ -29,7 +29,7 @@ function decayBase(params: DecayParams): Date {
 }
 
 /**
- * [ADR 0157](../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと7:
+ * [ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと7:
  * 単位を持たない数値核。`elapsed` と `halfLife` が「時間」の単位であろうと「recall 回数」の
  * 単位であろうと、この式自体は変わらない——`floorAt`/`floorSeqAt`（活動時計側は
  * `defaultActivityDecayStrategy.floorAt`）は、この核を「時刻」または「通し番号」で
@@ -44,7 +44,7 @@ export function decayFactor(elapsed: number, halfLife: number): number {
 
 /**
  * `decayFactor` の逆関数側——「`strength` が `threshold` をちょうど下回るまでの `elapsed`」を
- * 返す、単位を持たない数値核（ADR 0157 決めたこと7）。
+ * 返す、単位を持たない数値核（ADR 0158 決めたこと7）。
  *
  * `strength <= threshold`（既に閾値以下）のときは `0` を返す——`floorAt`/`floorSeqAt` 側で
  * 「base をそのまま返す」という既存の分岐（`strength <= threshold` → 経過していない）に
@@ -90,7 +90,7 @@ export const defaultDecayStrategy: DecayStrategy = {
 
 /**
  * ActivityDecayStrategy — 壁時計（`DecayStrategy`）と同じ式を、「recall() が起きた回数」を
- * 単位にして読む実例（[ADR 0157](../../../docs/decisions/0157-decay-activity-clock.md)
+ * 単位にして読む実例（[ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md)
  * 決めたこと1・3・7）。
  *
  * | | 起点（base） | 進み方（1単位） | 保存する床 |
@@ -124,7 +124,7 @@ function activityStrengthAt(nowSeq: number, params: ActivityDecayParams): number
 /**
  * `baseSeq + Math.ceil(decayFloorOffset(...))` を返す（整数）。
  *
- * **⭐ `ceil` は意図的である**（ADR 0157 決めたこと4「NULL は…緩い側へ倒す」と同じ向き）。
+ * **⭐ `ceil` は意図的である**（ADR 0158 決めたこと4「NULL は…緩い側へ倒す」と同じ向き）。
  * 段1のゲートは `decay_floor_seq > nowSeq`（**狭義**）であり、`decayFloorOffset` が返す実数を
  * そのまま足すと小数を切り捨てる形になり、「まだ閾値を割っていない seq」が
  * `decay_floor_seq <= nowSeq` の側に落ちて忘却ゲートを通ってしまう場面が起こりうる

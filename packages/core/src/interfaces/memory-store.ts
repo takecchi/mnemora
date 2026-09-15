@@ -511,7 +511,7 @@ export interface MemoryStore {
   /**
    * roadmap.md 段階4/5: recall 段6（記録）。`recalls` へ1行書き込み、発行した recallId を返す。
    *
-   * [ADR 0157](../../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと5:
+   * [ADR 0158](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと5:
    * `record.advanceActivityClock === true` のとき、実装は `recalls` への INSERT と
    * **同一トランザクションで** `tenant_activity.activity_seq` を `+1` しなければならない
    * （`NewRecallRecord.advanceActivityClock` の doc コメント参照）。
@@ -991,7 +991,7 @@ export interface ArchiveDecayedOptions {
   /** 1回の呼び出しで archived にする上限。**既定値なし**（上の doc コメント参照）。 */
   limit: number;
   /**
-   * [ADR 0157](../../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと15:
+   * [ADR 0158](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと15:
    * 「いまの `activity_seq`」を呼び出し側から受け取る。`now: Date` と同じ規律
    * （ADR 0037「時刻は呼び出し側が渡す」）——**store が自分で `tenant_activity` を
    * 読みに行かない。** `clock` が `'activity'`/`'either'` のときに必須になる（`clock` の
@@ -999,7 +999,7 @@ export interface ArchiveDecayedOptions {
    */
   nowSeq?: number;
   /**
-   * ADR 0157 決めたこと1・12・15: どの軸で掃くかを選ぶ。省略時は `'wall'`
+   * ADR 0158 決めたこと1・12・15: どの軸で掃くかを選ぶ。省略時は `'wall'`
    * （本 ADR 以前と1バイトも変わらない挙動）。
    *
    * - `'wall'`（省略時と同じ）: `decay_floor_at <= now`（現行、境界を含む）。
@@ -1016,7 +1016,7 @@ export interface ArchiveDecayedOptions {
    * 避けるには、掃引の条件はゲートの条件の**論理否定**と一致していなければならず、
    * `NOT (A OR B) = (NOT A) AND (NOT B)` により AND になる。
    *
-   * **境界の非対称（ADR 0157 決めたこと14）**: ゲートは狭義の `>`（境界を含まない）、
+   * **境界の非対称（ADR 0158 決めたこと14）**: ゲートは狭義の `>`（境界を含まない）、
    * 掃引は `<=`（境界を含む）——これは `decayFloorAtAfter`/既存の `now` 側で既に
    * 意図的だと明記されている非対称であり（上の `now` の doc コメント、
    * `VectorFilter.decayFloorAtAfter` の doc コメント参照）、`decay_floor_seq` 側にも

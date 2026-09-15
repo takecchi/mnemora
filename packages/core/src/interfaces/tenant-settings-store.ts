@@ -108,7 +108,7 @@ export function assertValidEventRetentionDays(days: number): void {
 }
 
 /**
- * 減衰の時計の種類（[ADR 0157](../../../docs/decisions/0157-decay-activity-clock.md)
+ * 減衰の時計の種類（[ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md)
  * 決めたこと1）。
  *
  * - `'wall'`: 段1のゲートは `decay_floor_at > now()` のみ（本 ADR 以前と同じ）。
@@ -119,14 +119,14 @@ export type DecayClock = "wall" | "activity" | "either";
 
 /**
  * `tenant_settings.decay_clock` の DB 側デフォルトと一致させる、テナント設定行が
- * 存在しない場合のフォールバック値（ADR 0157 決めたこと1「`tenant_settings` に行が無い
+ * 存在しない場合のフォールバック値（ADR 0158 決めたこと1「`tenant_settings` に行が無い
  * テナントは `'wall'` として動く」——`DEFAULT_HALF_LIFE_HOURS` と同じ扱い）。
  */
 export const DEFAULT_DECAY_CLOCK: DecayClock = "wall";
 
 /**
  * `tenant_settings.default_half_life_recalls` の DB 側デフォルト、テナント設定行が
- * 存在しない場合のフォールバック値（ADR 0157 決めたこと3）。
+ * 存在しない場合のフォールバック値（ADR 0158 決めたこと3）。
  *
  * **⭐ `720` は「1 recall ↔ 1時間」という1対1の対応を既定に置いたものである。**
  * 壁時計の既定 `DEFAULT_HALF_LIFE_HOURS` も `720`（720時間 = 30日）——この2つの数字が
@@ -193,17 +193,30 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
  *   （`EventRetentionSetting` 型がそもそも許さない）。「まだ設定していない」状態への
  *   巻き戻し（行の削除）は、この interface の対象外である。
  *
- * [ADR 0157](../../../docs/decisions/0157-decay-activity-clock.md) 決めたこと13で
+ * [ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと13で
  * `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/`getActivitySeq` を足した。
  * `taxonomy_mode`（interface に出していない）と `event_retention_days`（`getEventRetention`/
  * `setEventRetention` を専用メソッドとして足した、ADR 0050）という2つの前例のうち、
  * **後者を採る**——`examples/chat` が実際に `decay_clock` を設定できなければ、この機能は
- * 「在る」と数えられない（ADR 0157 決めたこと11）。4メソッドとも**必須**である
- * （`?` を付けない）。理由は `getEventRetention`/`setEventRetention` と同じ2点: (1) 読み書きの
- * 口が無いまま列だけ足すと、`examples/chat` が公開 interface を迂回して生 SQL で
- * UPSERT する経路をもう1つ増やすことになる。(2) 任意にすると「この adapter は活動時計を
- * 扱えない」（未実装）と「読み書きに失敗した」（実行時エラー）が呼び出し側から同じ顔に
- * なってしまう。
+ * 「在る」と数えられない（ADR 0158 決めたこと11）。
+ *
+ * ⭐ **ただし4メソッドはすべて省略可能（`?` 付き）である。**`getEventRetention`/
+ * `setEventRetention` を**必須**にした ADR 0050 とは、ここだけ向きが違う。理由は
+ * ADR 0158 決めたこと13 に書いた（要点: `@mnemora/core` は npm 公開済みであり、
+ * interface に必須メソッドを足すと**外部の adapter 実装が軒並みコンパイルできなくなる**。
+ * そして本 ADR の既定は `'wall'` なので、**活動時計を実装していない adapter の
+ * 望ましい振る舞いは「いまと同じ」**——`?` の欠落をそのまま既定へ倒せば、
+ * 意味論が過不足なく一致する）。`event_retention_days` を必須にできたのは、オーナーが
+ * 「短縮できる口は必須」と決めていたからであり、`decay_clock` にその指定は無い。
+ *
+ * ⚠ **省略時のフォールバックを呼び出し側に散らさないこと。**`packages/core` は
+ * `readDecayClock`/`readActivitySeq`/`readDefaultHalfLifeRecalls`（本ファイル）を通して
+ * のみ読む。「未実装」と「実行時エラー」が呼び出し側から同じ顔になる、という
+ * ADR 0050 が挙げた懸念は、**フォールバックを1箇所に閉じ込めること**で受ける
+ * ——未実装は `readXxx` が既定値へ倒し、実行時エラーは素通しで投げる。
+ * `setDecayClock` を持たない adapter へ書こうとした場合は
+ * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
+ * （黙って無視しない——`examples/chat --decay-clock` が黙って効かない形を作らない）。
  *
  * ⚠ **`bumpActivitySeq`（activity_seq を+1する書き込み）はここに無い。**
  * カウンタの前進は `MemoryStore.createRecall` が `recalls` への INSERT と**同一トランザクション**
@@ -228,31 +241,102 @@ export interface TenantSettingsStore {
 
   /**
    * `tenant_settings.decay_clock` の現在値。行が無ければ `DEFAULT_DECAY_CLOCK`（`'wall'`）を
-   * 返す（ADR 0157 決めたこと1）。
+   * 返す（ADR 0158 決めたこと1）。
    */
-  getDecayClock(ctx: Ctx): Promise<DecayClock>;
+  getDecayClock?(ctx: Ctx): Promise<DecayClock>;
 
   /**
    * `tenant_settings.decay_clock` を設定する（UPSERT。行が無ければ作る）。`clock` が
    * `DecayClock` の3値のいずれでもない場合は `DECAY_CLOCK_INVALID_MESSAGE` を含む `Error` で
    * 失敗する（`assertValidDecayClock` 参照）。
    */
-  setDecayClock(ctx: Ctx, clock: DecayClock): Promise<void>;
+  setDecayClock?(ctx: Ctx, clock: DecayClock): Promise<void>;
 
   /**
    * `tenant_settings.default_half_life_recalls` の現在値。行が無ければ
    * `DEFAULT_HALF_LIFE_RECALLS`（`720`）を返す（`getDefaultHalfLifeHours` と同じ規律）。
    * `halfLifeHours` がそうであるのと同じ理由で、これは**新規作成時の初期値としてのみ**
-   * 使う（ADR 0157 決めたこと3）——既存 Memory の `halfLifeRecalls` はこの値が変わっても
+   * 使う（ADR 0158 決めたこと3）——既存 Memory の `halfLifeRecalls` はこの値が変わっても
    * 再計算されない。
    */
-  getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number>;
+  getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
 
   /**
-   * `tenant_activity.activity_seq` の現在値。行が無ければ `0` を返す（ADR 0157 決めたこと2・5
+   * `tenant_activity.activity_seq` の現在値。行が無ければ `0` を返す（ADR 0158 決めたこと2・5
    * ——`decay_clock` を一度も `'wall'` 以外に設定していないテナントでは `activity_seq` は
    * `0` のまま）。**読み出し専用。**進めるのは `MemoryStore.createRecall`
    * （`advanceActivityClock: true`）だけである。
    */
-  getActivitySeq(ctx: Ctx): Promise<number>;
+  getActivitySeq?(ctx: Ctx): Promise<number>;
+}
+
+/**
+ * `setDecayClock` を実装していない adapter へ書こうとしたときに投げる `Error` の
+ * メッセージに必ず含める文字列（[ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md)
+ * 決めたこと13）。
+ *
+ * ⭐ **黙って無視しない。**`decay_clock` は「書けたつもりで効いていない」がいちばん
+ * 危険な設定である——`'activity'` に切り替えたつもりのテナントが `'wall'` のまま動くと、
+ * **誰も気づかないまま Issue #305 の症状が再発する。**
+ */
+export const DECAY_CLOCK_UNSUPPORTED_MESSAGE =
+  "this TenantSettingsStore does not support setDecayClock";
+
+/**
+ * `getDecayClock` を持たない adapter では `DEFAULT_DECAY_CLOCK`（`'wall'`）へ倒す
+ * （ADR 0158 決めたこと13）。
+ *
+ * ⚠ **`packages/core` はここを通してのみ `decay_clock` を読む。**省略時の倒し方を
+ * 呼び出し側に散らさないための1箇所である（interface の doc を参照）。
+ * **メソッドが在って投げた場合は素通しで投げる**——「未実装」と「失敗」を混ぜない。
+ */
+export async function readDecayClock(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+): Promise<DecayClock> {
+  if (store.getDecayClock === undefined) {
+    return DEFAULT_DECAY_CLOCK;
+  }
+  return await store.getDecayClock(ctx);
+}
+
+/**
+ * `getActivitySeq` を持たない adapter では `0` へ倒す（`tenant_activity` に行が無い
+ * テナントと同じ値。ADR 0158 決めたこと2・5）。`readDecayClock` と同じ規律。
+ */
+export async function readActivitySeq(store: TenantSettingsStore, ctx: Ctx): Promise<number> {
+  if (store.getActivitySeq === undefined) {
+    return 0;
+  }
+  return await store.getActivitySeq(ctx);
+}
+
+/**
+ * `getDefaultHalfLifeRecalls` を持たない adapter では `DEFAULT_HALF_LIFE_RECALLS` へ倒す。
+ * `readDecayClock` と同じ規律。
+ */
+export async function readDefaultHalfLifeRecalls(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+): Promise<number> {
+  if (store.getDefaultHalfLifeRecalls === undefined) {
+    return DEFAULT_HALF_LIFE_RECALLS;
+  }
+  return await store.getDefaultHalfLifeRecalls(ctx);
+}
+
+/**
+ * `setDecayClock` を持たない adapter では `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む
+ * `Error` で**明示的に失敗する**（ADR 0158 決めたこと13）。読み出し側3つと違い、
+ * 書き込みは既定へ倒せない——倒すと「設定したのに効かない」が黙って成立する。
+ */
+export async function writeDecayClock(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+  clock: DecayClock,
+): Promise<void> {
+  if (store.setDecayClock === undefined) {
+    throw new Error(DECAY_CLOCK_UNSUPPORTED_MESSAGE);
+  }
+  await store.setDecayClock(ctx, clock);
 }
