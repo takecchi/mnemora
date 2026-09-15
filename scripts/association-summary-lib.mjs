@@ -802,8 +802,7 @@ function buildAssociationFrameRolesTable(measured) {
  * (ただし「CI 再実行間でも一致するはず」までは、この表だけでは主張できない)。
  */
 function buildRepeatConsistencyTable(measured) {
-  const header =
-    "| armLabel | 連想枠 | 枠が一致した probe 数 | goldRank が一致した probe 数 |";
+  const header = "| armLabel | 連想枠 | 枠が一致した probe 数 | goldRank が一致した probe 数 |";
   const divider = "|---|---|---|---|";
   const lines = [header, divider];
   for (const arm of measured.arms) {
