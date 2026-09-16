@@ -257,6 +257,11 @@ DB を要さない（`packages/core` 自身の擬似物。`recall-decay-gate.tes
 ⟹ **落とすべきものが1件も無い。**この修正が減らすのは「減衰しきった／期限切れの記憶」
 だけであり、このベンチにはそれが存在しない。
 
+**CI でも一致した**【実測】: この PR の CI run 35056903563（`example-chat` ジョブ）の
+artifact `compare` を取得して突き合わせたところ、`rows` は基準値と**バイト単位で一致**
+（`measuredAt=2026-09-16T04:48:14.229Z`）。⟹ **手元3回 + CI 1回で一致。**
+`compare-summary.mjs` の門も CI 上で緑だった。
+
 **⟹ `examples/chat/compare-baseline.json` は更新しない。**
 （Issue #347 本文は「基準値の更新は要る」と書いていたが、**実測では要らなかった**
 ——これは Issue の「確かめていないこと」節が自ら未検証と断っていた項目である。）
@@ -321,9 +326,15 @@ DB を要さない（`packages/core` 自身の擬似物。`recall-decay-gate.tes
 - **`examples/chat` の `association-probes` ベンチ（ADR 0158 / 0167、`local` 埋め込み）を
   走らせていない。**このベンチの probe set は減衰も有効期限も持たないため影響は無い
   **はず**だが、**確かめていない。**
-- **⭐門の3回の一致は、すべて同一マシン・同一クラスタでの再実行である。**
-  CI（`pgvector/pgvector:pg17` の service container）で同じ値になることは、
-  この PR の CI が出るまで確かめていない。
+- ~~**⭐門の3回の一致は、すべて同一マシン・同一クラスタでの再実行である。**
+  CI で同じ値になることは、この PR の CI が出るまで確かめていない。~~
+  **⟹ 確かめた**【実測】: この PR の CI run 35056903563（`example-chat` ジョブ、
+  `pgvector/pgvector:pg17` の service container）が生成した artifact `compare` を
+  `gh run download` で取得し、`rows`（12行）が基準値と `JSON.stringify` で
+  **バイト単位に一致**することを確認した（`measuredAt=2026-09-16T04:48:14.229Z`、
+  書き手のローカル3回とは別の測定）。⟹ 手元3回 + CI 1回の計4回で一致している。
+  **⚠ ただし CI 側は1回だけである**——同一 sha の CI 再実行による突き合わせは
+  行っていない（ADR 0133 / 0170 が行った形の裏取りはしていない）。
 - **`compare` 以外の5本のベンチ**（`retrieval` / `identifier-probes` /
   `consolidation-cost` / `archive-sweep-cost` / `time-term`）は走らせていない。
 - **この修正が、連想枠から返る件数を実運用でどれだけ減らすか**——測っていない
