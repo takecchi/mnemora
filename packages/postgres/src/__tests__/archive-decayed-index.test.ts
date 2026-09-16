@@ -244,7 +244,7 @@ describe("archiveDecayed の対象選択索引（ADR 0114）", () => {
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・9・15
    * （Issue #305）: `clock: 'activity'` の掃引が、新しく追加した索引
    * `idx_memories_recall_gate_seq`（`(tenant_id, status, decay_floor_seq)`）を使えることを
-   * 確かめる。マイグレーションのコメント（`migrations/0014_decay_activity_clock.sql`）が
+   * 確かめる。マイグレーションのコメント（`migrations/0015_decay_activity_clock.sql`）が
    * 「掃引のための索引を別に作らない——壁時計側もそうしている」と書いているとおり、
    * ゲート用に足したこの索引を掃引側も再利用する。`recall-gate-index.test.ts` /
    * 上の壁時計版と同じ形（選ばれることではなく選べることを測る）。

@@ -1,4 +1,4 @@
--- 0014_decay_activity_clock.sql
+-- 0015_decay_activity_clock.sql
 --
 -- 減衰の時計を2本にする（ADR 0165 / Issue #305）。
 -- 壁時計（`decay_floor_at`、単位は時刻）に加えて、**活動時計**（`decay_floor_seq`、

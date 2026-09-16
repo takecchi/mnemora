@@ -1689,12 +1689,35 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
     clockCondition = sql`(${wallCondition} AND ${activityCondition()})`;
   }
 
+  // ⭐ [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8:
+  // **並べる軸は、掃く軸に合わせる。** `clock: 'activity'` のときに `decay_floor_at` で
+  // 並べると、`idx_memories_recall_gate_seq`（`(tenant_id, status, decay_floor_seq)`）は
+  // **並び替えを満たせないので選ばれず**、プランナは壁時計側の索引を走査して
+  // `decay_floor_seq` を Filter に落とす——【実測】2026-09-16、CI の
+  // `archive-decayed-index.test.ts`「適用可能性（活動時計）」が実際にこれで赤くなった
+  // （EXPLAIN 逐語: `Filter: ((decay_floor_seq IS NOT NULL) AND (decay_floor_seq <= '20000'::bigint))`）。
+  // ⟹ 活動軸で沈んだ行が疎なテナントでは、`limit` 件を見つけるまで壁時計順に大量の行を
+  // 走査することになる。**正しさではなく処理量の問題である。**
+  //
+  // 意味論の上でも、活動時計のテナントで「いちばん沈んだものから掃く」なら、
+  // 並べるべきは活動軸である。
+  //
+  // ⚠ **これは `ArchiveDecayedResult.archived` の並び順の契約を変えない。**
+  // 呼び出し元（`archiveDecayed`）の外側のクエリが、返す行を常に
+  // `ORDER BY decay_floor_at ASC, id ASC` に並べ直している。ここで変わるのは
+  // 「`limit` が効くときに *どの行を選ぶか*」だけである。
+  //
+  // `'either'` は壁時計のまま——掃引の条件が AND（両方の軸で沈んだものだけ）であり、
+  // どちらの索引も単独では述語を満たしきれない。ADR 決めたこと9 が `'either'` について
+  // 「1本の btree で範囲スキャンできるとは主張しない」と書いているのと同じ理由である。
+  const targetOrder = clock === "activity" ? sql`decay_floor_seq ASC` : sql`decay_floor_at ASC`;
+
   return sql`
     SELECT id FROM memories
     WHERE tenant_id = ${ctx.tenantId}
       AND status = 'active'
       AND ${clockCondition}
-    ORDER BY decay_floor_at ASC, id ASC
+    ORDER BY ${targetOrder}, id ASC
     LIMIT ${opts.limit}
     FOR UPDATE SKIP LOCKED`;
 }

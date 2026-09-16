@@ -2699,6 +2699,76 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect((await store.get(ctx, nullSeq.id))?.status).toBe("active");
       });
 
+      /**
+       * ⭐ ADR 0165 決めたこと8: **`limit` が効くとき、`'activity'` は活動軸の昇順で選ぶ。**
+       *
+       * **なぜ歯にするか**: `packages/postgres` 側では、この並び順が
+       * `idx_memories_recall_gate_seq` を掃引で引けるかどうかを決めている。
+       * 【実測】2026-09-16、掃引を `decay_floor_at` 順のままにしていたとき、CI の
+       * `archive-decayed-index.test.ts`「適用可能性（活動時計）」が実際に赤くなった
+       * （プランナが壁時計側の索引を選び、`decay_floor_seq` が Filter に落ちた）。
+       * ⟹ **この歯が緑であることは、向こうの索引が引けることの前提条件である。**
+       *
+       * ⚠ **返り値 `archived` の並び順は `decayFloorAt` 昇順のまま**（全 clock 共通）。
+       * ここが固定しているのは「*どの行が選ばれるか*」であって「どの順で返るか」ではない。
+       * だから **`decayFloorAt` を活動軸と逆向きに置いて**、両者が混ざらないようにしてある。
+       */
+      it("archiveDecayed(clock: 'activity') は limit が効くとき decayFloorSeq 昇順で選ぶ（decayFloorAt 昇順ではない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const now = new Date("2026-06-01T00:00:00.000Z");
+        const nowSeq = 1000;
+
+        // ⭐ 活動軸の昇順と壁時計の昇順が **逆向き** になるように置く。
+        //   seq が小さい（＝もっとも沈んでいる）ものほど decayFloorAt が新しい。
+        const seqFirst = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-order-1",
+            decayFloorAt: new Date(now.getTime() - 1_000),
+            decayFloorSeq: 10,
+          }),
+        );
+        const seqSecond = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-order-2",
+            decayFloorAt: new Date(now.getTime() - 2_000),
+            decayFloorSeq: 20,
+          }),
+        );
+        const seqThird = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-seq-order-3",
+            decayFloorAt: new Date(now.getTime() - 3_000),
+            decayFloorSeq: 30,
+          }),
+        );
+
+        const result = await store.archiveDecayed!(ctx, {
+          now,
+          nowSeq,
+          clock: "activity",
+          limit: 2,
+        });
+
+        // 活動軸の昇順で 10, 20 が選ばれる。
+        // ⛔ 壁時計の昇順なら seqThird（-3000）と seqSecond（-2000）が選ばれるはずで、
+        //    この歯はそれを排除している。
+        expect(new Set(result.archived.map((a) => a.memoryId))).toEqual(
+          new Set([seqFirst.id, seqSecond.id]),
+        );
+        expect((await store.get(ctx, seqThird.id))?.status).toBe("active");
+        expect(result.reachedLimit).toBe(true);
+
+        // 返り値の並びは `decayFloorAt` 昇順のまま（選び方とは別の契約）。
+        expect(result.archived.map((a) => a.memoryId)).toEqual([seqSecond.id, seqFirst.id]);
+      });
+
       it("archiveDecayed(clock: 'either') は AND——両方の軸で沈んでいる Memory だけを対象にする（ゲートの OR とは逆向き）", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };

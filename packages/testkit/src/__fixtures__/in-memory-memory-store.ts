@@ -990,13 +990,22 @@ export class InMemoryMemoryStore implements MemoryStore {
       return passesWall(m) && passesActivity(m);
     };
 
+    // ⭐ ADR 0165 決めたこと8: **並べる軸は、掃く軸に合わせる。**`clock: 'activity'` では
+    // `decayFloorSeq` 昇順で選ぶ（`packages/postgres` の `buildArchiveDecayedTargetSelect` と
+    // 同じ規律——向こうでは `idx_memories_recall_gate_seq` が並び替えを担えるかどうかが
+    // 掛かっている。詳しい経緯はそちらの doc コメントを見ること）。
+    // ⚠ **返り値 `archived` の並び順の契約は変えない**——下で `decayFloorAt` 昇順に
+    // 並べ直す。ここで変わるのは「`limit` が効くときに *どの行を選ぶか*」だけである。
+    // `'either'` は壁時計のまま（掃引の条件が AND なので、どちらの軸も単独では足りない）。
+    const byId = (a: Memory, b: Memory): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const selectionOrder = (a: Memory, b: Memory): number =>
+      clock === "activity"
+        ? (a.decayFloorSeq ?? 0) - (b.decayFloorSeq ?? 0) || byId(a, b)
+        : a.decayFloorAt.getTime() - b.decayFloorAt.getTime() || byId(a, b);
+
     const targets = [...this.memories.values()]
       .filter((m) => m.tenantId === ctx.tenantId && m.status === "active" && passesClock(m))
-      .sort(
-        (a, b) =>
-          a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
-          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-      )
+      .sort(selectionOrder)
       .slice(0, Math.max(0, opts.limit));
 
     const archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }> = [];
@@ -1016,6 +1025,13 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.events.push(storedEvent);
       archived.push({ memoryId: memory.id, decayFloorAt: memory.decayFloorAt });
     }
+    // `packages/postgres` の外側クエリ（`ORDER BY decay_floor_at ASC, id ASC`）と
+    // 同じ契約に揃える——選び方が clock で変わっても、**返る並びは常に `decayFloorAt` 昇順**。
+    archived.sort(
+      (a, b) =>
+        a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
+        (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
+    );
     return { archived, reachedLimit: archived.length === opts.limit };
   }
 

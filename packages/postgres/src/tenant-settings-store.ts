@@ -80,7 +80,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       return DEFAULT_DECAY_CLOCK;
     }
     const row = result.rows[0] as unknown as { decay_clock: string };
-    // DB 側の CHECK 制約（migrations/0014）がこの列を3値に限定しているため、ここでの
+    // DB 側の CHECK 制約（migrations/0015）がこの列を3値に限定しているため、ここでの
     // asserts は「読み直した値が予期しない値だった」ことを検出する防御であって、
     // 通常経路では常に通る。
     assertValidDecayClock(row.decay_clock);

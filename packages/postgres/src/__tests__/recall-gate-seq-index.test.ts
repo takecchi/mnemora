@@ -9,7 +9,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・9
  * （Issue #305）: `idx_memories_recall_gate_seq`
  * （`(tenant_id, status, decay_floor_seq)`、`WHERE status IN ('active', 'contested')`。
- * `migrations/0014_decay_activity_clock.sql`）に対して、`recall-gate-index.test.ts` が
+ * `migrations/0015_decay_activity_clock.sql`）に対して、`recall-gate-index.test.ts` が
  * Issue #150 で確立した3本立て（歯1 形・歯2 適用可能性・歯3 同値）を**同じ形で**置く。
  *
  * **`recall-gate-index.test.ts` 冒頭の doc コメントを先に読むこと。** ここでは繰り返さない

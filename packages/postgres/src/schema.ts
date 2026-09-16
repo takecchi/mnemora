@@ -90,7 +90,7 @@ export const memories = pgTable(
     // ADR 0165（Issue #305）: 活動時計の3つ組。壁時計の
     // recordedAt/lastReinforcedAt → decayFloorAt → halfLifeHours と1対1に対応する。
     // すべて NULL 許容——NULL は「この軸には床が無い＝活動時計では沈まない」を意味する
-    // （migrations/0014_decay_activity_clock.sql）。
+    // （migrations/0015_decay_activity_clock.sql）。
     decayBaseSeq: bigint("decay_base_seq", { mode: "number" }),
     decayFloorSeq: bigint("decay_floor_seq", { mode: "number" }),
     halfLifeRecalls: real("half_life_recalls"),
@@ -175,7 +175,7 @@ export const tenantSettings = pgTable("tenant_settings", {
 /**
  * ADR 0165（Issue #305）: テナントごとに1行の活動カウンタ。`tenant_settings` の行に
  * 相乗りさせない（recall のたびの UPDATE が設定の読み出しまで行ロックで待たせないため。
- * `migrations/0014_decay_activity_clock.sql` 参照）。
+ * `migrations/0015_decay_activity_clock.sql` 参照）。
  */
 export const tenantActivity = pgTable("tenant_activity", {
   tenantId: text("tenant_id").primaryKey(),

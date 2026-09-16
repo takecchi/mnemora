@@ -775,14 +775,21 @@ export interface MemoryStore {
    *   である**——`decayFloorAtAfter` は「これより後のものだけを ANN の候補にする」
    *   という recall 側の下限境界、こちらは「これ以前に閾値を割ったものを掃く」という
    *   掃引側の上限境界であり、2つの異なる関心が同じ演算子を共有する理由が無い。
-   * - **`decay_floor_at` 昇順**（最も古く遠ざかったものから）で `opts.limit` 件まで。
-   *   ⚠ [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15 が
-   *   `opts.clock`/`opts.nowSeq` を足した後も、この順序は**全 `clock` 値で** `decay_floor_at`
-   *   昇順のままである（`'activity'`/`'either'` でも `decay_floor_seq` 順にはならない）。
-   *   返り値の型 `ArchiveDecayedResult.archived` が `decayFloorSeq` を持たないための、
-   *   意図した仕様であり、見落としではない
-   *   （`packages/postgres/src/memory-store.ts` の `buildArchiveDecayedTargetSelect` の
-   *   doc コメント参照）。
+   * - **「どの行を選ぶか」と「どの順で返すか」は別の契約である。**
+   *   [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・15:
+   *   - **選び方**: `opts.limit` 件を切り出す順序は、**掃く軸に合わせる**。
+   *     `clock: 'activity'` は `decay_floor_seq` 昇順、`'wall'` と `'either'` は
+   *     `decay_floor_at` 昇順（どちらも同着は `id` 昇順）。
+   *     ⭐ **`'activity'` をこうしないと、`packages/postgres` 側で
+   *     `idx_memories_recall_gate_seq` が並び替えを担えず、掃引で索引が引けない**
+   *     ——【実測】2026-09-16 の CI で実際に赤くなった。詳細は
+   *     `packages/postgres/src/memory-store.ts` の `buildArchiveDecayedTargetSelect` の
+   *     doc コメント。**正しさではなく処理量の問題である。**
+   *   - **返し方**: {@link ArchiveDecayedResult.archived} は、`clock` によらず常に
+   *     **`decay_floor_at` 昇順**（同着は `id` 昇順）。返り値の型が `decayFloorSeq` を
+   *     持たないので、返す並びに活動軸を持ち込まない。
+   *   ⟹ `'activity'` では「選んだ順」と「返す順」が一致しないことがある。
+   *   **これは意図した仕様であり、見落としではない。**
    * - 選ばれた各行について `status='archived'` への更新と `memory_events` への
    *   `kind='archived'` の追記を行う。**この2つは同一トランザクション**
    *   （ADR 0031 が `updateStatusWithEvent` で確立した「更新とイベントは同値」の
