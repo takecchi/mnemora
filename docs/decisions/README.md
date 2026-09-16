@@ -189,6 +189,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0174](./0174-filtered-omission-scope-relation.md) | `FilteredOmission` に `scopeRelation` を足し、`decayed` の非対称を契約として確定させる | 採用 (2026-09) |
 | [0175](./0175-lexical-search-tiebreak-nondeterminism.md) | 語彙チャンネルの `search()` に決定的な最終キーを足す — ANN 側（ADR 0170）と同じ形で、同族の欠陥を塞ぐ（Issue #345） | 採用 (2026-09) |
 | [0177](./0177-fix-stage3-tooth-blind-asserts.md) | 段3の歯の「壊れても緑のままの assert」2件を直す — 変異試験で実測する（Issue #293） | 採用 (2026-09) |
+| [0178](./0178-public-api-surface-gate.md) | 公開 API 表面の破壊的変更を検出する歯を CI に足す | 採用 (2026-09) |
 | [0179](./0179-adr-number-assigned-at-merge.md) | ADR の番号は「マージ直前」に確定させる — 採番を、衝突しようがないタイミングまで遅らせる（Issue #295） | 採用 (2026-09) |
 | [0181](./0181-schema-type-equals-parity.md) | `satisfies` の片方向性を `Equals`/`MutualAssignable` の型検査で塞ぐ — `schema-type-equals-parity.test.ts`（Issue #272） | 採用 (2026-09) |
 | [0183](./0183-local-postgres-makes-postgres-mutation-testing-possible.md) | `packages/postgres` の変異試験を、CI のトリガを変えずに手元で成立させる — `initdb` で自分専用のインスタンスを立てる手順を `AGENTS.md` に置く | 採用 (2026-09) |
@@ -197,5 +198,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0188](./0188-association-over-limit-omission.md) | 連想枠（段3.5）の `maxCount` 切り捨てを `omitted` に名乗らせる — `over_limit` に `stage` を足す（Issue #375） | 採用 (2026-09) |
 | [0190](./0190-correction-cli-dispatch-ci-tooth.md) | `correction` サブコマンドを CI の歯にする — 既存ジョブへ相乗り・`deterministic` 層・`omitted` の `superseded` assert | 採用 (2026-09) |
 | [0191](./0191-ci-green-verdict-bound-to-sha.md) | 「CI が緑」の判定を sha に縛る——`gh pr merge --match-head-commit` を道具側で強制する（Issue #294） | 採用 (2026-09) |
+| [0192](./0192-adr-index-freshness-enforced-in-pull-request-ci.md) | ADR 索引の鮮度を、CI の `pull_request` でも強制する — 手順が守られたかを、注意力ではなく機構で確かめる（Issue #267） | 採用 (2026-09) |
+| [0193](./0193-ann-unreached-covers-full-window.md) | `ann_unreached` を「窓が満杯でも鳴る」形に直す — `ann-truncation.ts` の約束をようやく果たす | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
