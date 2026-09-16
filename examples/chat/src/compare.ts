@@ -9,7 +9,7 @@ import type {
 } from "@mnemora/core";
 import { buildConversation } from "./scenario.js";
 import { measureNaive } from "./naive-path.js";
-import { factStatementExternalId, runMnemoraPath } from "./mnemora-path.js";
+import { factStatementExternalId, reportMemoryUsage, runMnemoraPath } from "./mnemora-path.js";
 import { resultContainsObservation } from "./provenance-trace.js";
 
 /**
@@ -90,6 +90,15 @@ export interface ComparisonRow {
    * **このシナリオと擬似 provider に固有の近似判定であり、一般的な判定ではない。**
    */
   factStatementSurvived: boolean;
+  /**
+   * ⭐ Issue #301 / ADR 0163: この行の `recall()` で実際にプロンプトへ積んだ Memory
+   * （`recall.memories`）を `observe({kind:'memory_usage'})` で報告したか。
+   *
+   * **`compare-json.ts` の `buildCompareJson` はこの欄を写さない**——`compare.json`
+   * のスキーマ（⭐ 門、ADR 0133）を変えないため、明示的に列挙から外してある。
+   * この欄はテスト・呼び出し側からの可視化のためだけに在る。
+   */
+  memoryUsageReported: boolean;
 }
 
 export interface CompareOptions {
@@ -143,6 +152,14 @@ export async function runComparison(
     const conversation = buildConversation(fillerPairs);
     const naive = measureNaive(conversation, heuristicTokenCounter);
     const { recall } = await runMnemoraPath(runtime, ctx, conversation);
+    const survived = await factStatementSurvived(options.memoryStore, ctx, recall.memories);
+
+    // ⭐ Issue #301 / ADR 0163: この行の測定(上の `recall`/`survived`)が終わった
+    // あとに使用報告する。`reportMemoryUsage` は recall を撃たない(受け取るだけ)
+    // ので、ここで呼んでもこの行の測定値(naiveChars/mnemoraChars/omitted/…)は
+    // 一切変わらない——「報告は測定済みの recall の後」という配線方針そのもの。
+    const usageReport = await reportMemoryUsage(runtime, ctx, recall);
+
     rows.push({
       fillerPairs,
       turnCount: conversation.turns.length,
@@ -155,7 +172,8 @@ export async function runComparison(
       omitted: recall.omitted,
       returnedCount: recall.memories.length,
       annCandidateCount: recall.index.totalInScope - notIndexedCount(recall.omitted),
-      factStatementSurvived: await factStatementSurvived(options.memoryStore, ctx, recall.memories),
+      factStatementSurvived: survived,
+      memoryUsageReported: usageReport.reported,
     });
   }
   return rows;
