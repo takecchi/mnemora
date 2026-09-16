@@ -189,6 +189,10 @@
      「4箇所の複製」と同じ形の負債である。**適合テストと `(丙)` の歯がこの一致を検算するが、
      掃引側との非対称（OR / AND）を検査する歯は無い**（掃引はこの ADR の射程外）。
 
+     ⚠ **`recall-runtime.ts` 側の「軸を決める式」は、増えるどころか1箇所に減った**
+     （下記「ADR 0172 との合流」）——`scope` が唯一の出所であり、
+     `gateVectorFilterFields` も `aggregateScope` も、そこから読むだけである。
+
   4. **`filteredDecayed` が `totalInScope` の部分集合であることは、他の `filtered*` 欄と
      関係が違う。** 呼び出し側が「`filtered` の件数を全部足せばスコープ外の総数になる」と
      読むと、`decayed` の分だけ過大になる。型の doc に明記したが、**型としては区別できない**
@@ -239,6 +243,22 @@
   **【本作業で実測】本物の Postgres に対する歯**: `packages/postgres` の DB テストを
   上記クラスタに対して実行した（`(丙)` の活動時計の歯を含む）。
 
+  **【本作業で実測】ADR 0172 との合流後に、もう一度掛けた変異**（`main` に
+  ADR 0172 が着地したあと `git merge origin/main` で合流し、`recall-runtime.ts` の
+  衝突を解いた状態で実施）。**「衝突解決で Issue #347 を黙って戻していない」ことの証拠は
+  これである**——合流後のコードから ADR 0172 の配線を剥がしたときに、
+  ADR 0172 の歯が実際に赤くなること:
+
+  | 変異（合流後のコードに対して） | 結果 |
+  |---|---|
+  | 段3.5 から `...gateVectorFilterFields` の spread を剥がす | **赤2件**（ADR 0172 の**配線**の歯: 「段1と段3.5 の4欄が一致する」「`includeFullyDecayed`/`includeOutsideValidity` で連想用 filter でもゲートが外れる」） |
+  | 段3.5 から後置（`survivesValidityGate`/`survivesDecayGate`）を剥がす | **赤3件**（ADR 0172 の**多層防御**の歯: 減衰 / 活動時計 / 期限切れ） |
+
+  ⚠ **spread を剥がしても「振る舞い」の歯は緑のまま**である——後置が救うためであり、
+  これは ADR 0172 自身が「実 Postgres の歯は押し下げ単体を切り分けない（後置が救うため）
+  ——切り分けは core の配線の歯が持つ」と記録していたとおりである。⟹ **合流の正しさを
+  検査しているのは、配線の歯2本である。**
+
   **【前任の調査者から受け取った前提。本作業では再測していない】**
   （`docs/autonomy.md` §5「人から受け取った前提——出所を書く」）:
   - 案(A) の latency（1.216ms → 1.202ms、有意差なし）と、その理由（`decay_floor_at` の
@@ -281,10 +301,62 @@
     - `decayFloorAnyAxis` の OR と、渡さないときの AND の**4象限**。
     - `subjectId`/`period` で絞った scope に従うこと。
     - `archived`/`expired` と**二重計上しない**こと。
+  - `packages/core/src/__tests__/recall-association-gates.test.ts`（ADR 0172 の歯。**1件反転**）
+    - 連想用 `search()` がゲートを剥がされた状態でも、`filtered(decayed)` の `count` が
+      **ちょうど 1**であること（＝段5の集約だけが数え、両段の後置は足さない＝**二重計上しない**）。
+      反転の理由は下記「ADR 0172 との合流」。
   - `packages/postgres/src/__tests__/recall-decay-cross-day.postgres.test.ts`
     - `(乙)` の反転（上記「歯の反転」節）+ (a)(b)(c)。
     - `(丙)` **活動時計の3種すべてで、段1の押し下げと段5の集約が一致すること**（本物の Postgres）。
       ⚠ この軸は「測ったこと」の実測が一度も触れていない——**歯で埋めた。**
+
+- **[ADR 0172](./0172-association-passes-decay-and-validity-gates.md)（Issue #347）との合流**:
+
+  本 ADR の実装中に、ADR 0172 が先に `main` へ着地した。**2つは同じ関数（`runRecall`）の
+  同じゲートに触っており、向きは噛み合っている。**
+
+  - **ADR 0172 がしたこと**: ゲートの4欄（`decayFloorAtAfter`/`decayFloorSeqAfter`/
+    `decayFloorAnyAxis`/`validAt`）を `gateVectorFilterFields` という**1つの断片**に集約し、
+    段1（ANN）と**段3.5（連想枠）の両方**がそれを spread する形にした。後置も
+    `survivesDecayGate`/`survivesValidityGate` を両段で共有させた。
+    理由は「3欄を足すだけでは、次にゲートが増えたときにまた連想枠だけが漏れる」。
+  - **本 ADR がしたこと**: 同じ4欄を `RecallScope` へ持ち上げ、**段1の `VectorFilter` は
+    式を書かず `scope` から作る**形にした。理由は「段5の集約が同じ `scope` を受け取るので、
+    押し下げと集約が構造的に同じ述語を見る」。
+
+  **⟹ 合流後の形は、2つの規律を重ねたものである**（本 ADR の実装がこれである）:
+
+  > **`gateVectorFilterFields` は式を1つも持たず、4欄すべてを `scope` から読む。
+  > 段1と段3.5 は、その同じ断片を spread する。段5の `aggregateScope` は、同じ `scope` を受け取る。**
+
+  ⟹ **ゲートを増やすときの手順が1本に定まった**: `RecallScope` に欄を足す →
+  `gateVectorFilterFields` でその欄を撒く（両段が自動で追随する）→
+  `aggregateScope` の述語に同じものを足す。**この3点セットで1つである。**
+  片方だけやると、ADR 0172 が塞いだ穴（連想枠だけ漏れる）か、
+  本 ADR が塞いだ穴（落ちた数を名乗れない）のどちらかが再発する。
+
+  **⭐ 合流で ADR 0172 の歯を1件反転させた。**
+  `packages/core/src/__tests__/recall-association-gates.test.ts` の
+  「減衰しきった記憶は、連想用 `search()` がゲートを剥がしても返らない」にあった
+  `expect(result.omitted).not.toContainEqual({condition:"decayed"})` を、
+  `toContainEqual({count: 1, countKind: "exact"})` に変えた。
+
+  - **この歯も、本 ADR を名指しで待っていた歯である。**逐語のコメントが根拠として
+    挙げていたのは「段1の押し下げで落ちた分を数えないのと同じ扱いであり、
+    **Issue #329 の対応と数え方を混ぜないため**」——⟹ ADR 0172 は
+    「数え方は変えない」という**自分の射程の宣言**をこの行で固定していたのであって、
+    「載ってはならない」という性質を定めたのではない。
+  - **ADR 0172 の主張そのものは1ミリも変わっていない**——
+    「連想枠の後置は件数を足さない」は今も真である。変わったのは、
+    **別の場所（段5の集約）が数え始めた**ことである。
+  - ⛔ **弱めていない。** `not.toContainEqual` を消したのではなく、**`count` がちょうど 1**
+    であることを固定した。この scope に減衰しきった Memory は1件しか無いので、
+    連想枠の後置か段1の後置が集約とは別に足し込んでいたら **2 になる。**
+    ⟹ **この行は「数えるのは段5の1箇所だけ」＝二重計上しないことの検算**になり、
+    ADR 0172 が守りたかったもの（射程の分離）をより強く守る。
+
+  **合流が ADR 0172 を黙って戻していないことは、変異試験で示した**（上記「測ったこと」の
+  「ADR 0172 との合流後に、もう一度掛けた変異」）。
 
 - **出所について**:
 
