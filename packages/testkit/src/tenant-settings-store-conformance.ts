@@ -31,7 +31,7 @@ export interface TenantSettingsStoreConformanceOptions {
   setDefaultHalfLifeHours?: (ctx: Ctx, hours: number) => Promise<void> | void;
 
   /**
-   * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと13
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13
    * （Issue #305）: `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/
    * `getActivitySeq` の4メソッドを検査するかどうか。
    *
@@ -39,7 +39,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * `supportsArchiveDecayed`/`supportsPurgeMemory` 等（任意メソッドを検査するかどうかの
    * 明示フラグ、いずれも「省略可にしない」という同じ規律）に倣う。4メソッドは
    * `TenantSettingsStore` interface 上は任意（`?`、外部 adapter が壊れないための配慮、
-   * ADR 0163 決めたこと13）だが、**この repo に同梱される2実装
+   * ADR 0165 決めたこと13）だが、**この repo に同梱される2実装
    * （`PostgresTenantSettingsStore`/`InMemoryTenantSettingsStore`）はどちらも実装している**
    * ——呼び出し側（`packages/postgres`/`packages/testkit` それぞれの配線ファイル）に
    * `true`/`false` を明示させることで、「実装したのに配線を忘れて検査されていない」を
@@ -57,7 +57,7 @@ export interface TenantSettingsStoreConformanceOptions {
   /**
    * `supportsDecayClock: true` のときに使う。`tenant_activity.activity_seq` を+1する
    * （`MemoryStore.createRecall({ advanceActivityClock: true })` を呼ぶことを想定）。
-   * `getActivitySeq` は読み出し専用（ADR 0163 決めたこと2・5・13）なので、`TenantSettingsStore`
+   * `getActivitySeq` は読み出し専用（ADR 0165 決めたこと2・5・13）なので、`TenantSettingsStore`
    * 単体では進める口が無い——呼び出し側が `MemoryStore` と同じバッキング（in-memory なら
    * 共有 Map、postgres なら同じ DB）を経由してこのフックを実装する。省略時は
    * `getActivitySeq` を「進める」歯をスキップする（`0` を返すことの歯は
@@ -203,7 +203,7 @@ export function describeTenantSettingsStoreConformance(
 
     // -----------------------------------------------------------------
     // getDecayClock / setDecayClock / getDefaultHalfLifeRecalls / getActivitySeq
-    // (ADR 0163, Issue #305)
+    // (ADR 0165, Issue #305)
     //
     // `supportsDecayClock` の理由は `TenantSettingsStoreConformanceOptions` の doc
     // コメント参照——interface 上は任意だが、この repo の2実装は両方実装しているので、
@@ -249,7 +249,7 @@ export function describeTenantSettingsStoreConformance(
           expect(await store.getDefaultHalfLifeRecalls!(ctx)).toBe(24);
         });
 
-        it("⚠ 値域の外の default_half_life_recalls を拒む（ADR 0163 が isHalfLifeHoursInRange と同じ値域を課す）", async () => {
+        it("⚠ 値域の外の default_half_life_recalls を拒む（ADR 0165 が isHalfLifeHoursInRange と同じ値域を課す）", async () => {
           // `isHalfLifeRecallsInRange` の doc コメント参照——`isHalfLifeHoursInRange`
           // （Issue #231）と同じ理由・同じ値域。同期 throw の実装にも対応するため
           // Promise チェーンで包む（上の half-life-hours の歯と同じ形）。

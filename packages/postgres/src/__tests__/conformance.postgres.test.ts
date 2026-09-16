@@ -223,7 +223,7 @@ describeTenantSettingsStoreConformance({
       ON CONFLICT (tenant_id) DO UPDATE SET default_half_life_hours = EXCLUDED.default_half_life_hours
     `);
   },
-  // ADR 0163 決めたこと13（Issue #305）: PostgresTenantSettingsStore は4メソッドとも実装している。
+  // ADR 0165 決めたこと13（Issue #305）: PostgresTenantSettingsStore は4メソッドとも実装している。
   supportsDecayClock: true,
   setDefaultHalfLifeRecalls: async (ctx: Ctx, recalls: number) => {
     const { db } = await getTestClient();
@@ -233,7 +233,7 @@ describeTenantSettingsStoreConformance({
       ON CONFLICT (tenant_id) DO UPDATE SET default_half_life_recalls = EXCLUDED.default_half_life_recalls
     `);
   },
-  // `getActivitySeq` は読み出し専用（ADR 0163 決めたこと2・5・13）——進める唯一の口は
+  // `getActivitySeq` は読み出し専用（ADR 0165 決めたこと2・5・13）——進める唯一の口は
   // `PostgresMemoryStore.createRecall({ advanceActivityClock: true })` であり、同じ DB
   // （`tenant_activity`）を共有するので、`TenantSettingsStore` とは別 adapter でも
   // 書いた値がそのまま読み直せる。

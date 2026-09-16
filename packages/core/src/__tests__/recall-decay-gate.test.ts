@@ -377,7 +377,7 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
 });
 
 // ---------------------------------------------------------------------------
-// ⭐⭐ ADR 0163: 活動時計（decay_clock）の歯。
+// ⭐⭐ ADR 0165: 活動時計（decay_clock）の歯。
 //
 // 下の歯はどれも「壁時計は永久に生きる設定（decayFloorAt が遠い未来）」にしたうえで
 // `decayFloorSeq`/`decayBaseSeq` だけを操作する——`halfLifeRecalls` は Memory に載せない
@@ -388,7 +388,7 @@ describe("recall() — 押し下げと後置フィルタは同じ述語である
 
 const FAR_FUTURE = new Date(NOW.getTime() + 1_000 * 60 * 60 * 24 * 365 * 100); // +100年、壁時計では絶対に沈まない
 
-describe("recall() — 忘却ゲートの時計選択（ADR 0163 決めたこと1）", () => {
+describe("recall() — 忘却ゲートの時計選択（ADR 0165 決めたこと1）", () => {
   it("'wall'（既定）のテナントでは decayFloorSeq が割れていても無視する", async () => {
     const { runtime, stores } = buildRuntime();
     // decay_clock を明示的に設定しない = 既定 'wall'。
@@ -440,7 +440,7 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0163 決めたこと
     expect(result.memories.map((m) => m.memoryId)).toContain(alive.id);
   });
 
-  it("'activity' のテナントで decayFloorSeq が NULL（この軸に床が無い）なら常に生き残る（ADR 0163 決めたこと4）", async () => {
+  it("'activity' のテナントで decayFloorSeq が NULL（この軸に床が無い）なら常に生き残る（ADR 0165 決めたこと4）", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
     const alive = await createEmbeddedMemory(stores, [1, 0], {
@@ -514,7 +514,7 @@ describe("recall() — 忘却ゲートの時計選択（ADR 0163 決めたこと
   });
 });
 
-describe("recall() — 語彙チャンネルの後置フィルタにも活動時計が掛かる（ADR 0163 決めたこと12、忘れやすい非対称）", () => {
+describe("recall() — 語彙チャンネルの後置フィルタにも活動時計が掛かる（ADR 0165 決めたこと12、忘れやすい非対称）", () => {
   it("'activity' のテナントで、語彙チャンネルだけを使っても decayFloorSeq を割れば除外される", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
@@ -554,7 +554,7 @@ describe("recall() — 語彙チャンネルの後置フィルタにも活動時
   });
 });
 
-describe("recall() — 非破壊性: RecallRuntimeDeps.tenantSettingsStore を省略しても 'wall' として動く（ADR 0163 決めたこと13）", () => {
+describe("recall() — 非破壊性: RecallRuntimeDeps.tenantSettingsStore を省略しても 'wall' として動く（ADR 0165 決めたこと13）", () => {
   it("tenantSettingsStore を渡さない runRecall() は、activity 列があっても壁時計だけで判定する", async () => {
     const stores = createFakeRuntimeStores();
     const deps: RecallRuntimeDeps = {
@@ -595,7 +595,7 @@ describe("recall() — 非破壊性: RecallRuntimeDeps.tenantSettingsStore を�
  * 速く沈む」ことを示す。** 多忙なテナント（recall() が何度も起きて activity_seq が
  * 速く進む）では、壁時計なら生きている記憶が活動時計では床を割る。
  *
- * `advanceActivityClock`（`NewRecallRecord`、ADR 0163 決めたこと5）は `decay_clock` が
+ * `advanceActivityClock`（`NewRecallRecord`、ADR 0165 決めたこと5）は `decay_clock` が
  * `'wall'` 以外のテナントの `recall()` 呼び出しごとに `activity_seq` を+1する
  * ——`FakeMemoryStore.createRecall` と `FakeTenantSettingsStore.getActivitySeq` が
  * 同じ `FakeBackingStore.activitySeq` を共有することで、この歯はスタブを1つも追加せず
@@ -675,7 +675,7 @@ describe("recall() — ⭐ 'activity' 単独で、素通りされ続けた記憶
     }
 
     // 'wall' のテナントでは activity_seq が1本も進んでいないことも検算する
-    // (ADR 0163 決めたこと5「advanceActivityClock は decay_clock != 'wall' のテナントに限る」)。
+    // (ADR 0165 決めたこと5「advanceActivityClock は decay_clock != 'wall' のテナントに限る」)。
     expect(await stores.tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
   });
 });

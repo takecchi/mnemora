@@ -28,7 +28,7 @@ export interface PrepareMemoryIdAttrs {
   subjectId?: string;
   decayFloorAt?: Date;
   /**
-   * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと1・4・12
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・4・12
    * （Issue #305）: `filter.decayFloorSeqAfter`/`decayFloorAnyAxis` の歯が使う。
    * `null`/未指定は「この軸には床が無い」（NULL 通過の歯が使う）。
    */
@@ -526,11 +526,11 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // filter.decayFloorSeqAfter / decayFloorAnyAxis（ADR 0163、Issue #305）:
+    // filter.decayFloorSeqAfter / decayFloorAnyAxis（ADR 0165、Issue #305）:
     // 活動時計の忘却ゲート。`decayFloorAtAfter` と同じ**狭義の `>`**だが、`decay_floor_seq`
-    // は NULL 許容なので NULL は常に通す（ADR 0163 決めたこと4）という追加の契約を持つ。
+    // は NULL 許容なので NULL は常に通す（ADR 0165 決めたこと4）という追加の契約を持つ。
     //
-    // ⚠ **境界の非対称を1バイトも変えずに写す**（ADR 0163 決めたこと14）: ゲートは狭義
+    // ⚠ **境界の非対称を1バイトも変えずに写す**（ADR 0165 決めたこと14）: ゲートは狭義
     // （`>`、境界は落ちる）。掃引側（`archiveDecayed`）の境界を含む `<=` はこのテスト
     // 対象ではない——ここは `VectorStore.search`（段1のゲート）だけを見る。
     // -------------------------------------------------------------------
@@ -555,7 +555,7 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(ids).toContain(afterBoundaryId);
     });
 
-    it("filter.decayFloorSeqAfter: decayFloorSeq が NULL の Memory は境界に関わらず常に通す（ADR 0163 決めたこと4）", async () => {
+    it("filter.decayFloorSeqAfter: decayFloorSeq が NULL の Memory は境界に関わらず常に通す（ADR 0165 決めたこと4）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       const boundary = 1_000_000; // どんなに大きい境界でも NULL は通る、を示すため大きめの値にする。

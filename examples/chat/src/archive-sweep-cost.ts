@@ -85,7 +85,7 @@ export interface RunArchiveSweepCostOptions {
   /** 既定は `DEFAULT_HAYSTACK_SIZE`(`probe-set.ts`、既存 `retrieval`/`consolidation-cost` と同じ既定)。 */
   haystackSize?: number;
   /**
-   * `--decay-clock`(ADR 0163 決めたこと11)が指定されたときだけ渡す。`compare.ts` の
+   * `--decay-clock`(ADR 0165 決めたこと11)が指定されたときだけ渡す。`compare.ts` の
    * `CompareOptions.decayClock` と同じ形——「書くかどうか」を1個の optional な値の
    * 有無だけで判定できるようにするため、`store`/`clock` を1つの欄にまとめる。
    * この bench 専用テナント(`tenantId`)1つに対して、ingest を始める前に

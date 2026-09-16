@@ -82,7 +82,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   /** `InMemoryOutboxStore` と共有する outbox ジョブの配列（同一プロセス内の参照共有）。 */
   readonly outboxJobs: OutboxJobRecord[] = [];
   /**
-   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと5
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5
    * （Issue #305）: `tenant_activity` 相当のテナントごとの活動カウンタ。
    * `InMemoryTenantSettingsStore` にこの Map をそのまま渡すことで、`createRecall`
    * （書く側）と `getActivitySeq`（読む側）が同じ値を見る——`outboxJobs`/`events` と
@@ -258,7 +258,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         strength: input.strength,
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: input.decayFloorAt,
-        // ADR 0163（Issue #305）: 活動時計の3つ組。省略可能なフィールドなので `?? null` で
+        // ADR 0165（Issue #305）: 活動時計の3つ組。省略可能なフィールドなので `?? null` で
         // 転記しないと `undefined` のまま消える——これが前任の作業者が実際に踏んだ漏れ1
         // （core commit 5e37afb の doc 参照）。ここで同じ漏れを作らない。
         decayBaseSeq: input.decayBaseSeq ?? null,
@@ -646,7 +646,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 呼び出し側（`runtime.observe` の使用報告ループ）の次の一手が無いため、
    * no-op のまま現在の（更新されなかった）行を返す。
    *
-   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16:
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
    * `opts.nowSeq` が渡され、かつこの Memory が `halfLifeRecalls` を持つときに限り、
    * 活動時計側の起点・床（`decayBaseSeq`/`decayFloorSeq`）も同じ条件で一緒に進める
    * （`PostgresMemoryStore.reinforce` と同じ分岐。`ReinforceOptions.nowSeq` の doc
@@ -839,7 +839,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと5
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5
    * （Issue #305）: `record.advanceActivityClock === true` のとき `this.activitySeq` を
    * `+1` する——`await` を挟まない同期区間で行を作るのと同じ処理の中で行うことで、
    * `PostgresMemoryStore.createRecall` の「同一トランザクション」を模す
@@ -928,7 +928,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * ADR 0114 / [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15
+   * ADR 0114 / [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
    * （Issue #305）: `docs/memory-model.md` §11 行8の掃引。`status = 'active'` の Memory を
    * `opts.clock`（省略時 `'wall'`）で選び、`decayFloorAt` 昇順で `opts.limit` 件まで
    * `status='archived'` への更新と `kind='archived'` のイベント追記を1つの同期区間

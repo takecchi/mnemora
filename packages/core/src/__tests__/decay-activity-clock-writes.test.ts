@@ -8,7 +8,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと3・5・12 の
+ * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5・12 の
  * 書き込み側3箇所（`runtime.ts` の `buildNewMemoriesForCandidates` / `consolidate` 手順6 /
  * `reflect` 手順7）の配線の歯。
  *
@@ -100,7 +100,7 @@ function buildRuntime(llmProvider: LLMProvider) {
   return { runtime, stores };
 }
 
-describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 0163 決めたこと3・5・12）", () => {
+describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 0165 決めたこと3・5・12）", () => {
   it("'wall' のテナント（既定）では decayBaseSeq/decayFloorSeq/halfLifeRecalls が3つとも undefined のまま——tenant_activity を読まない", async () => {
     const { runtime, stores } = buildRuntime(
       llmReturningMemories([{ content: "東京出張の予定", provenanceKind: "stated" }]),
@@ -120,7 +120,7 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
     expect(memory?.decayBaseSeq ?? null).toBeNull();
     expect(memory?.decayFloorSeq ?? null).toBeNull();
     expect(memory?.halfLifeRecalls ?? null).toBeNull();
-    // ADR 0163 決めたこと2 の doc「tenant_settings は読み出しの多い設定行」——
+    // ADR 0165 決めたこと2 の doc「tenant_settings は読み出しの多い設定行」——
     // 'wall' のテナントでは activity_seq を読みに行く理由が無い。
     expect(getActivitySeqCalls).toBe(0);
   });
@@ -131,7 +131,7 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
     );
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
     // activity_seq を先に進めておく(3にする)——recall を3回行う代わりに、
-    // createRecall の同じ経路を直接使う(ADR 0163 決めたこと5 と同じ書き込み口)。
+    // createRecall の同じ経路を直接使う(ADR 0165 決めたこと5 と同じ書き込み口)。
     for (let i = 0; i < 3; i += 1) {
       await stores.memoryStore.createRecall(ctx, {
         tenantId: ctx.tenantId,
@@ -165,7 +165,7 @@ describe("runtime.observe（抽出） — 活動時計の3つ組の配線（ADR 
   });
 });
 
-describe("runtime.consolidate — 活動時計の3つ組の配線（同じ resolveActivityClockInputs を通る、ADR 0163 決めたこと3・5・12）", () => {
+describe("runtime.consolidate — 活動時計の3つ組の配線（同じ resolveActivityClockInputs を通る、ADR 0165 決めたこと3・5・12）", () => {
   it("'activity' のテナントでは統合先の Memory にも活動時計の3つ組が書かれる", async () => {
     const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後の本文" }));
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
@@ -195,7 +195,7 @@ describe("runtime.consolidate — 活動時計の3つ組の配線（同じ resol
   });
 });
 
-describe("runtime.reflect — 活動時計の3つ組の配線（同じ resolveActivityClockInputs を通る、ADR 0163 決めたこと3・5・12）", () => {
+describe("runtime.reflect — 活動時計の3つ組の配線（同じ resolveActivityClockInputs を通る、ADR 0165 決めたこと3・5・12）", () => {
   it("'activity' のテナントでは反映先の Memory にも活動時計の3つ組が書かれる", async () => {
     const { runtime, stores } = buildRuntime(llmReflectingTo({ content: "気づき" }));
     await stores.tenantSettingsStore.setDecayClock(ctx, "activity");

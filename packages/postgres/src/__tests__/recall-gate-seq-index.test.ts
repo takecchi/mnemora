@@ -6,7 +6,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと8・9
+ * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・9
  * （Issue #305）: `idx_memories_recall_gate_seq`
  * （`(tenant_id, status, decay_floor_seq)`、`WHERE status IN ('active', 'contested')`。
  * `migrations/0014_decay_activity_clock.sql`）に対して、`recall-gate-index.test.ts` が
@@ -19,7 +19,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  *
  * ⚠ **この歯が測らないもの**: 段1の実際のゲート述語（`packages/postgres/src/vector-store.ts`）は
  * `(decay_floor_seq IS NULL OR decay_floor_seq > $n)` という、**NULL を通す OR** を含む形である
- * （ADR 0163 決めたこと4「NULL はこの軸には床が無いことを意味する」）。この索引テストの
+ * （ADR 0165 決めたこと4「NULL はこの軸には床が無いことを意味する」）。この索引テストの
  * 代表クエリ（`GATE_SELECT`、下記）は `recall-gate-index.test.ts` の `decay_floor_at`
  * 版と同じく**「本番が実際に発行する SQL ではない」**——`decay_floor_at` がそうであるのと
  * 同じ理由で、ここでは NULL 分岐を持たない素の範囲比較にしてある。
@@ -139,7 +139,7 @@ async function gateRowIds(pool: Pool, forcing: Forcing): Promise<string[]> {
   });
 }
 
-describe("idx_memories_recall_gate_seq（ADR 0163 / Issue #305）", () => {
+describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
   });

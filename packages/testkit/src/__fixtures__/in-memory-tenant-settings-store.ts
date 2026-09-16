@@ -39,7 +39,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   >();
 
   /**
-   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと2・5・13
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと2・5・13
    * （Issue #305）: `getActivitySeq` が読む `tenant_activity` 相当のカウンタ。
    * `InMemoryMemoryStore.activitySeq`（`createRecall` が書く側）をそのまま渡すことで、
    * 書く側・読む側が同じ値を見る——`packages/core/src/__tests__/runtime-fakes.ts` の
@@ -111,7 +111,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと1・13
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・13
    * （Issue #305）: 行が無ければ `DEFAULT_DECAY_CLOCK`（`'wall'`）——`getDefaultHalfLifeHours`
    * と同じ規律。
    */
@@ -129,7 +129,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0163 決めたこと3・13: 行が無ければ `DEFAULT_HALF_LIFE_RECALLS`（720）——
+   * ADR 0165 決めたこと3・13: 行が無ければ `DEFAULT_HALF_LIFE_RECALLS`（720）——
    * `getDefaultHalfLifeHours` と同じ規律。
    */
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
@@ -138,7 +138,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
 
   /**
    * テスト用フック（`setDefaultHalfLifeHours` と対になる、`default_half_life_recalls` 版）。
-   * 値域は `isHalfLifeRecallsInRange`（ADR 0163、`isHalfLifeHoursInRange` と同じ値域）。
+   * 値域は `isHalfLifeRecallsInRange`（ADR 0165、`isHalfLifeHoursInRange` と同じ値域）。
    */
   setDefaultHalfLifeRecalls(tenantId: string, recalls: number): void {
     if (!isHalfLifeRecallsInRange(recalls)) {
@@ -150,7 +150,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0163 決めたこと2・5・13: `activitySeqBacking`（コンストラクタで渡された、
+   * ADR 0165 決めたこと2・5・13: `activitySeqBacking`（コンストラクタで渡された、
    * `InMemoryMemoryStore.activitySeq` と共有する Map）を読む。**読み出し専用**——
    * 進めるのは `InMemoryMemoryStore.createRecall`（`advanceActivityClock: true`）だけ。
    * 渡されていなければ常に `0`（`FakeTenantSettingsStore` と同じ規律）。

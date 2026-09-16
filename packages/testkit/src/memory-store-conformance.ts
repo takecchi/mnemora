@@ -759,7 +759,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
     // -------------------------------------------------------------------
     // decayBaseSeq/decayFloorSeq/halfLifeRecalls（活動時計の3つ組、
-    // [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと3、
+    // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3、
     // Issue #305）
     //
     // ⚠ **この3本は「前任の作業者が実際に踏んだ漏れ1」を直接検出するために置く**
@@ -793,7 +793,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reread?.halfLifeRecalls).toBe(360);
     });
 
-    it("createMemory は decayBaseSeq/decayFloorSeq/halfLifeRecalls を省略すると null のまま保存・返却する（ADR 0163 決めたこと4）", async () => {
+    it("createMemory は decayBaseSeq/decayFloorSeq/halfLifeRecalls を省略すると null のまま保存・返却する（ADR 0165 決めたこと4）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -1513,8 +1513,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // reinforce と活動時計（`ReinforceOptions.nowSeq`、[ADR 0163]
-    // (../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16）
+    // reinforce と活動時計（`ReinforceOptions.nowSeq`、[ADR 0165]
+    // (../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16）
     //
     // ⚠ **この4本は「reinforce に活動時計の『いま』を渡す口が無かった穴」を直接検出する
     // ために置く。**穴が塞がれる前は、強化しても decayBaseSeq/decayFloorSeq が
@@ -1522,7 +1522,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // 完全な no-op になっていた）。
     // -------------------------------------------------------------------
 
-    it("reinforce は opts.nowSeq を渡すと、halfLifeRecalls を持つ Memory の decayBaseSeq/decayFloorSeq を進める（ADR 0163 決めたこと16）", async () => {
+    it("reinforce は opts.nowSeq を渡すと、halfLifeRecalls を持つ Memory の decayBaseSeq/decayFloorSeq を進める（ADR 0165 決めたこと16）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       const memory = await store.createMemory(
@@ -2630,7 +2630,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
 
       // -----------------------------------------------------------------
-      // [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15
+      // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
       // （Issue #305）: `opts.clock` の2軸。
       //
       // ⚠ **境界の非対称を1バイトも変えずに写す**（決めたこと14）: ゲート
@@ -2676,7 +2676,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           }),
         );
         // decayFloorSeq が NULL（この軸を使っていない）の行は 'activity' 単独では対象外
-        // （ADR 0163 決めたこと4「NULL はこの軸には床が無い」——掃引側も NULL を拾わない）。
+        // （ADR 0165 決めたこと4「NULL はこの軸には床が無い」——掃引側も NULL を拾わない）。
         const nullSeq = await store.createMemory(
           ctx,
           buildNewMemoryFixture({

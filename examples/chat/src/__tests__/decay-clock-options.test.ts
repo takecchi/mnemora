@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { DECAY_CLOCK_FLAG, parseDecayClockFlag } from "../decay-clock-options.js";
 
 /**
- * `--decay-clock <wall|activity|either>` の argv 解析(純関数。ADR 0163 決めたこと11)。
+ * `--decay-clock <wall|activity|either>` の argv 解析(純関数。ADR 0165 決めたこと11)。
  *
  * ⭐ **いちばん重要な歯は「未指定なら `undefined`」である**——`examples/chat` の既定挙動
  * （既定 `'wall'`）をビット単位で保つための唯一の入口がここ。呼び出し側（`cli.ts`）は

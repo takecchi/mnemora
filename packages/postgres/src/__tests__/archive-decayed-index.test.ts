@@ -48,7 +48,7 @@ const TENANT = "archive-decayed-index-tenant";
 const ROW_COUNT = 20_000;
 
 /**
- * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15
+ * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
  * （Issue #305）: 活動時計側の `decay_base_seq`/`decay_floor_seq`/`half_life_recalls` も
  * 同じ seed で populate する——`clock: 'activity'` の掃引（下記 `describe` の後半）が
  * 同じデータを再利用できるようにするため。`decay_floor_seq` は `decay_floor_at` と
@@ -119,7 +119,7 @@ const NOW = new Date();
 const OPTS = { now: NOW, limit: 50 };
 
 /**
- * ADR 0163 決めたこと15（Issue #305）: 活動時計軸の掃引オプション。`nowSeq = ROW_COUNT` が
+ * ADR 0165 決めたこと15（Issue #305）: 活動時計軸の掃引オプション。`nowSeq = ROW_COUNT` が
  * `seedManyMemories` の `decay_floor_seq` 分布（偶数の `i` は `i` 自身＝`ROW_COUNT` 以下、
  * 奇数の `i` は `ROW_COUNT * 10 + i`＝はるかに大きい）の境界と一致する——偶数側だけが
  * `decay_floor_seq <= nowSeq` を満たす。
@@ -241,7 +241,7 @@ describe("archiveDecayed の対象選択索引（ADR 0114）", () => {
   }, 60_000);
 
   /**
-   * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと8・9・15
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと8・9・15
    * （Issue #305）: `clock: 'activity'` の掃引が、新しく追加した索引
    * `idx_memories_recall_gate_seq`（`(tenant_id, status, decay_floor_seq)`）を使えることを
    * 確かめる。マイグレーションのコメント（`migrations/0014_decay_activity_clock.sql`）が

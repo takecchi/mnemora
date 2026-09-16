@@ -55,7 +55,7 @@ export interface ExampleRuntimeHandle {
    */
   pool: PostgresClient["pool"];
   /**
-   * `--decay-clock`（ADR 0163 決めたこと11）が実際に `tenant_settings.decay_clock` へ
+   * `--decay-clock`（ADR 0165 決めたこと11）が実際に `tenant_settings.decay_clock` へ
    * 書き込むために公開する。**`packages/core`/`packages/postgres` は変更していない**
    * ——`PostgresTenantSettingsStore` は元から公開の class であり、これまで
    * `createExampleRuntime` の返り値に含めていなかっただけ（`memoryStore` を

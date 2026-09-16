@@ -291,11 +291,11 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill
 ここで見せたいのは「切り詰めずに、そのままだと何文字になるか」であり、強制ではなく
 計測の比較だからである（budget が実際に切り詰めることは `chat` サブコマンドの方で見せる）。
 
-### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0163](../../docs/decisions/0163-decay-activity-clock.md)）
+### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
 `compare`/`archive-sweep-cost` は `--decay-clock <wall|activity|either>` を受け付ける。
 指定すると、そのサブコマンドが使うテナントの `tenant_settings.decay_clock` へ
-`writeDecayClock`（`@mnemora/core`）で実際に書き込む——ADR 0163 決めたこと11
+`writeDecayClock`（`@mnemora/core`）で実際に書き込む——ADR 0165 決めたこと11
 「`examples/chat` が実際に `decay_clock` を設定して使う。設定項目を足して終わりに
 しない」に対する応え。生 SQL の UPSERT は増やしていない（`writeDecayClock` が
 唯一の書き込み経路）。
@@ -310,7 +310,7 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost -- -
 動く——`examples/chat/src/__tests__/compare-decay-clock.test.ts`・
 `archive-sweep-cost-decay-clock.test.ts` がこれを spy で固定している。
 
-⭐ **次の表は ADR 0163「引き受けた負債」7 の数字をそのまま引く。逆算であって実測ではない**
+⭐ **次の表は ADR 0165「引き受けた負債」7 の数字をそのまま引く。逆算であって実測ではない**
 ——`half_life_hours`/`half_life_recalls` の既定値（どちらも 720）と、段1のゲートの閾値
 `0.05` から `node` で計算した値であり、実際に走らせて確かめてはいない:
 
@@ -1246,7 +1246,7 @@ budget に関係なく全件載っている**ことを意味する。この状�
 DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost
 ```
 
-`--decay-clock <wall|activity|either>` も受け付ける（[ADR 0163](../../docs/decisions/0163-decay-activity-clock.md)
+`--decay-clock <wall|activity|either>` も受け付ける（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)
 決めたこと11）。この bench 専用テナントの `tenant_settings.decay_clock` へ実際に書き込む
 ——効果・既定挙動が変わらないことの詳細は `compare` の節の
 「`--decay-clock`: 減衰の時計を選ぶ」を参照。

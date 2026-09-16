@@ -114,7 +114,7 @@ export interface CompareOptions {
    */
   memoryStore: MemoryStore;
   /**
-   * `--decay-clock`（ADR 0163 決めたこと11）が指定されたときだけ渡す。
+   * `--decay-clock`（ADR 0165 決めたこと11）が指定されたときだけ渡す。
    * `store`/`clock` を1つの欄にまとめているのは、**「書くかどうか」を1個の
    * optional な値の有無だけで判定できるようにするため**——`decayClock` と
    * `tenantSettingsStore` を別々の optional にすると、片方だけ渡された不整合な

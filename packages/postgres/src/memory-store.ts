@@ -880,7 +880,7 @@ export class PostgresMemoryStore implements MemoryStore {
       halfLifeHours: memory.halfLifeHours,
     });
 
-    // [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16:
+    // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
     // `opts.nowSeq` が渡され、かつこの Memory が `halfLifeRecalls` を持つときに限り、
     // 活動時計側の起点・床（decay_base_seq/decay_floor_seq）も同じ強化イベントとして
     // 進める。`halfLifeRecalls` が無い（'wall' のテナントで作られた、あるいは
@@ -917,7 +917,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // できなかった場合も同じ経路を通るので、その取り違えは歯で捕まる。
     //
     // ⚠ 活動時計側の3列も、壁時計側と**同じ WHERE 句**（同じ `at` の比較）で守る——
-    // 両方とも「同じ強化イベント」の一部であり（ADR 0163 文脈節「起点は両方の時計で
+    // 両方とも「同じ強化イベント」の一部であり（ADR 0165 文脈節「起点は両方の時計で
     // 同じく『最後の書き込み』に置く」）、片方だけ別の条件で進むと2軸の起点がずれる。
     const result = await this.db.execute(sql`
       WITH updated AS (
@@ -1118,7 +1118,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと5:
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5:
    * `record.advanceActivityClock === true` のとき、`recalls` への INSERT と**同一
    * トランザクションで** `tenant_activity.activity_seq` を `+1` する（UPSERT——行が
    * 無ければ `activity_seq = 1` の行を作る。`ON CONFLICT DO UPDATE` の `EXCLUDED` は
@@ -1607,7 +1607,7 @@ export class PostgresMemoryStore implements MemoryStore {
 }
 
 /**
- * ADR 0114 / [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15:
+ * ADR 0114 / [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15:
  * `archiveDecayed` が「どの行を archived にするか」を選ぶ `SELECT`。
  *
  * **本体と `EXPLAIN` の歯（`packages/postgres/src/__tests__/archive-decayed-index.test.ts`）
@@ -1631,7 +1631,7 @@ export class PostgresMemoryStore implements MemoryStore {
  *
  * ⚠ **`ORDER BY decay_floor_at ASC` は `'activity'`/`'either'` でもそのまま使う。**
  * `MemoryStore.archiveDecayed`/`ArchiveDecayedResult.archived` の doc コメントは
- * ADR 0163 導入後も「`decay_floor_at` 昇順」としか書いておらず（`decay_floor_seq` 順の
+ * ADR 0165 導入後も「`decay_floor_at` 昇順」としか書いておらず（`decay_floor_seq` 順の
  * 契約は無い）、返り値の型 `{ memoryId; decayFloorAt: Date }` も `decayFloorSeq` を
  * 持たない——`decay_floor_at` は常に non-null なので、この列で安定した順序を作れる。
  */

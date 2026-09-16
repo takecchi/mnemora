@@ -263,7 +263,7 @@ describeOutboxStoreConformance({
 });
 
 let latestTenantSettingsStore: InMemoryTenantSettingsStore | undefined;
-// [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと2・5・13
+// [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと2・5・13
 // （Issue #305）: `advanceActivitySeq` が `MemoryStore.createRecall({ advanceActivityClock:
 // true })` を呼ぶための、まさに同じ `InMemoryMemoryStore` インスタンス
 // （`InMemoryTenantSettingsStore` のコンストラクタへ `activitySeq` Map を共有渡ししたのと
@@ -285,7 +285,7 @@ describeTenantSettingsStoreConformance({
     }
     latestTenantSettingsStore.setDefaultHalfLifeHours(ctx.tenantId, hours);
   },
-  // ADR 0163 決めたこと13: `InMemoryTenantSettingsStore` は4メソッドとも実装している。
+  // ADR 0165 決めたこと13: `InMemoryTenantSettingsStore` は4メソッドとも実装している。
   supportsDecayClock: true,
   setDefaultHalfLifeRecalls: (ctx: Ctx, recalls: number) => {
     if (!latestTenantSettingsStore) {

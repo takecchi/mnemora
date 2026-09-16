@@ -133,14 +133,14 @@ export interface Memory {
   decayFloorAt: Date;
 
   /**
-   * 活動時計（[ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md)）の3つ組。
+   * 活動時計（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)）の3つ組。
    * 壁時計の `recordedAt`/`lastReinforcedAt` → `decayFloorAt` → `halfLifeHours` と
    * **1対1に対応する**——`decayBaseSeq` は起点（書き込み時点の `tenant_activity.activity_seq`）、
    * `decayFloorSeq` は床（書き込み時に一度だけ計算する）、`halfLifeRecalls` は
    * Memory 単位の半減期（単位: そのテナントで `recall()` が起きた回数）。
    *
    * **すべて省略可能。**`undefined` も `null` も**「この軸には床が無い＝活動時計では
-   * 沈まない」**を意味する（ADR 0163 決めたこと4）。`decay_clock` が `'wall'` のまま
+   * 沈まない」**を意味する（ADR 0165 決めたこと4）。`decay_clock` が `'wall'` のまま
    * 一度も `'activity'`/`'either'` に切り替えていないテナントでは、この3つは
    * 一度も書かれない。
    *
@@ -238,7 +238,7 @@ export const MemorySchema = z.object({
   halfLifeHours: z.number().positive(),
   decayFloorAt: z.date(),
 
-  // ADR 0163: 活動時計の3つ組。3つとも省略可能——`Memory.decayBaseSeq` の doc コメント参照。
+  // ADR 0165: 活動時計の3つ組。3つとも省略可能——`Memory.decayBaseSeq` の doc コメント参照。
   // ⚠ この schema は書き込み経路では走らない（上の halfLifeHours の doc コメントと同じ注記）。
   decayBaseSeq: z.number().nullable().optional(),
   decayFloorSeq: z.number().nullable().optional(),

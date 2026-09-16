@@ -13,7 +13,7 @@ import { createMutableClock } from "../mutable-clock.js";
 /**
  * `runArchiveSweepCost()` に `decayClock` を渡したときだけ `writeDecayClock`
  * （`@mnemora/core`。実体は `store.setDecayClock`）が呼ばれることを、DB/LLM/embedding を
- * 実物で叩かずに検査する（ADR 0163 決めたこと11）。
+ * 実物で叩かずに検査する（ADR 0165 決めたこと11）。
  *
  * **`consolidation-cost-abort.test.ts` と同じやり方**——`RunArchiveSweepCostOptions` の
  * `runtime`/`memoryStore`/`embeddingProvider`/`pool` を最小の偽物で埋め、
@@ -134,7 +134,7 @@ function baseOptions() {
   };
 }
 
-describe("runArchiveSweepCost: --decay-clock の有無で writeDecayClock の呼び出しが変わる(ADR 0163 決めたこと11)", () => {
+describe("runArchiveSweepCost: --decay-clock の有無で writeDecayClock の呼び出しが変わる(ADR 0165 決めたこと11)", () => {
   it("decayClock を渡さなければ setDecayClock は一度も呼ばれない(既定 'wall' を1バイトも変えない)", async () => {
     const setDecayClock = vi.fn();
 

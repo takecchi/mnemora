@@ -348,7 +348,8 @@ async function runCorrection(): Promise<void> {
   }
 }
 
- * `--decay-clock`（ADR 0163 決めたこと11）が指定されたときだけ、`compare`/
+/**
+ * `--decay-clock`（ADR 0165 決めたこと11）が指定されたときだけ、`compare`/
  * `archive-sweep-cost` の実行前に画面へ出す。**未指定なら1行も出ない**——
  * `decay-clock-options.ts`/`compare.ts`/`archive-sweep-cost.ts` が持つ
  * 「省略時は `writeDecayClock` を一度も呼ばない」契約と対になる案内。
@@ -359,7 +360,7 @@ function printDecayClockNotice(decayClock: DecayClock | undefined): void {
   }
   console.log(
     `\n[decay-clock] --decay-clock ${decayClock} が指定された。` +
-      `対象テナントの tenant_settings.decay_clock へ書き込む（ADR 0163）。`,
+      `対象テナントの tenant_settings.decay_clock へ書き込む（ADR 0165）。`,
   );
 }
 
@@ -1400,7 +1401,7 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run chat       # observe/recall の往復・omitted/usage/budget を実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0052)",
-      "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0163、既定は未指定=何も書かない)",
+      "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run explain    # recallId から Runtime.getRecall() で内訳を後から読み戻す(Issue #312)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
@@ -1421,7 +1422,7 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost",
       "                                                                      # 掃引(Runtime.sweepArchive)が「載る量」/hit@k をどう動かすかを実測する(Issue #209)",
       "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_ARCHIVE_SWEEP_JSON で機械可読出力",
-      "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0163、既定は未指定=何も書かない)",
+      "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
       "                                                                      # retrieval の応答を記録する(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",

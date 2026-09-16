@@ -149,7 +149,7 @@ export class InMemoryVectorStore implements VectorStore {
       if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
         continue;
       }
-      // ADR 0163 決めたこと1・4・12（Issue #305）: 忘却ゲートの2軸。`decayFloorAnyAxis` が
+      // ADR 0165 決めたこと1・4・12（Issue #305）: 忘却ゲートの2軸。`decayFloorAnyAxis` が
       // true かつ両方の境界が渡されているときだけ OR で結ぶ——`PostgresVectorStore.search`
       // （`packages/postgres/src/vector-store.ts`）と同じ意味論。それ以外は今日どおり
       // AND のまま個別に効く。
@@ -163,7 +163,7 @@ export class InMemoryVectorStore implements VectorStore {
         // 狭義の `>`（境界とちょうど同じものは除外）。postgres 実装の
         // `m.decay_floor_at > ${decayFloorAtAfter}` と揃える。
         memory.decayFloorAt > opts.filter.decayFloorAtAfter;
-      // 契約: `decay_floor_seq IS NULL` の行は通す（ADR 0163 決めたこと4「NULL はこの軸には
+      // 契約: `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4「NULL はこの軸には
       // 床が無い＝活動時計では沈まない」）。
       const passesDecayFloorSeq =
         opts.filter.decayFloorSeqAfter === undefined ||

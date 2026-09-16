@@ -95,18 +95,18 @@ export interface VectorFilter {
    */
   occurredBefore?: Date;
   /**
-   * 活動時計の忘却ゲート（[ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md)
+   * 活動時計の忘却ゲート（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
    * 決めたこと1・12、`decay_clock: 'activity'`/`'either'`）。**狭義の `>`**——`decayFloorAtAfter`
    * と同じ意味論・同じ境界（`decayFloorAtAfter` の doc「名前だけで意味論を推測しないこと」の
    * 注記を、この2つの `〜After` フィールド間では守る）。
    *
    * **契約: `decay_floor_seq IS NULL` の行は通す。** `NULL` は「この軸には床が無い＝
-   * 活動時計では沈まない」（ADR 0163 決めたこと4）——`decayFloorSeqAfter` を渡しても、
+   * 活動時計では沈まない」（ADR 0165 決めたこと4）——`decayFloorSeqAfter` を渡しても、
    * `decay_floor_seq` が無い行を落としてはならない。
    */
   decayFloorSeqAfter?: number;
   /**
-   * `decayFloorAtAfter` と `decayFloorSeqAfter` の結び方を切り替える（ADR 0163 決めたこと1、
+   * `decayFloorAtAfter` と `decayFloorSeqAfter` の結び方を切り替える（ADR 0165 決めたこと1、
    * `decay_clock: 'either'` の表現）。既定 `false`（未指定時と同じ）。
    *
    * **契約: `true` かつ `decayFloorAtAfter` と `decayFloorSeqAfter` の両方が与えられている

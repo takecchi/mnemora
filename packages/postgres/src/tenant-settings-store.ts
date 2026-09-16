@@ -69,7 +69,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0163 決めたこと1・13: `tenant_settings.decay_clock` の現在値。行が無ければ
+   * ADR 0165 決めたこと1・13: `tenant_settings.decay_clock` の現在値。行が無ければ
    * `DEFAULT_DECAY_CLOCK`（`'wall'`）——`getDefaultHalfLifeHours` と同じ規律。
    */
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
@@ -88,7 +88,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0163 決めたこと13: 不正な値は `assertValidDecayClock`（core 共有）で拒む。
+   * ADR 0165 決めたこと13: 不正な値は `assertValidDecayClock`（core 共有）で拒む。
    * `event_retention_days`/`default_half_life_hours`/`default_half_life_recalls` は
    * 指定しない——行が無い場合は DB 側の DEFAULT に任せる（`setEventRetention` と同じ形）。
    */
@@ -103,7 +103,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0163 決めたこと3・13: `tenant_settings.default_half_life_recalls` の現在値。
+   * ADR 0165 決めたこと3・13: `tenant_settings.default_half_life_recalls` の現在値。
    * 行が無ければ `DEFAULT_HALF_LIFE_RECALLS`（720）——`getDefaultHalfLifeHours` と同じ規律。
    */
   async getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number> {
@@ -118,7 +118,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ADR 0163 決めたこと2・5・13: `tenant_activity.activity_seq` の現在値。行が無ければ
+   * ADR 0165 決めたこと2・5・13: `tenant_activity.activity_seq` の現在値。行が無ければ
    * `0`（`decay_clock` を一度も `'wall'` 以外に設定していないテナントの既定）。
    * **読み出し専用**——進めるのは `PostgresMemoryStore.createRecall`
    * （`advanceActivityClock: true`）だけである。

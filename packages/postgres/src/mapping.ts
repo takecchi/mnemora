@@ -94,7 +94,7 @@ export interface MemoryRow {
   strength: number;
   half_life_hours: number;
   decay_floor_at: string;
-  // ADR 0163（Issue #305）: 活動時計の3つ組。`bigint` 列は node-postgres が精度損失を
+  // ADR 0165（Issue #305）: 活動時計の3つ組。`bigint` 列は node-postgres が精度損失を
   // 避けるため文字列で返す——`parsePgBigint` で変換する（`parsePgTimestamp` と同じ形の
   // 境界）。すべて NULL 許容（「この軸には床が無い」を意味する）。
   decay_base_seq: string | number | null;
@@ -109,7 +109,7 @@ export interface MemoryRow {
 /**
  * Postgres の `bigint` 列（node-postgres が精度損失を避けるため文字列で返しうる。
  * `parsePgTimestamp` の doc コメント参照——生 SQL 実行では drizzle の decode を経由しない）
- * を `number` に変換する。`null` はそのまま通す（ADR 0163 決めたこと4「NULL はこの軸に
+ * を `number` に変換する。`null` はそのまま通す（ADR 0165 決めたこと4「NULL はこの軸に
  * 床が無いことを意味する」）。
  *
  * `Number.MAX_SAFE_INTEGER` を超える運用は想定していない（活動時計は「recall() の回数」を
