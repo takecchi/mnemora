@@ -1486,7 +1486,7 @@ export async function runRecall(
   }
 
   // -------------------------------------------------------------------
-  // ann_unreached（ADR 0025 の実測、ADR 0026 の決定、ADR 0192 が発火条件を拡張）:
+  // ann_unreached（ADR 0025 の実測、ADR 0026 の決定、ADR 0193 が発火条件を拡張）:
   // 「近似索引がこの scope に届かなかった」ことが `omitted` に一度も出ない、という
   // ADR 0008 の破れを埋める。
   //
@@ -1501,14 +1501,14 @@ export async function runRecall(
     aggregate.notIndexed.failed.count +
     aggregate.notIndexed.skipped.count;
   const eligible = aggregate.totalInScope - notIndexedTotal;
-  // 🔴 ADR 0192: **かつてここに `annHits.length < kPrime`（窓が埋まっていない）という
+  // 🔴 ADR 0193: **かつてここに `annHits.length < kPrime`（窓が埋まっていない）という
   // 条件があった。** その条件は「窓が埋まっていれば ann_truncated の領域であり、
   // scope の候補は ANN が拾いきれている」という前提に立っていたが、その前提は
   // `ann-truncation.ts` の doc コメント自身が否定している——`sim_k'` は**索引が返した**
   // k' 番目であって**真の** k' 番目ではなく、近似索引が scope の他の場所へ行っていた場合、
   // 窓が満杯でも scope 内の真により近い候補を取りこぼしうる。**その事象をここが「別に扱う」と
   // `ann-truncation.ts` が名指ししていたのに、旧条件はまさにその場合（窓が満杯）を除外していた
-  // ——約束が破れていた。** ADR 0192 はこの条件を落とし、窓の満杯/未満を問わず
+  // ——約束が破れていた。** ADR 0193 はこの条件を落とし、窓の満杯/未満を問わず
   // 「scope 内にまだ見られていない候補が残っているか」だけで判定するよう直した。
   // ⟹ **`ann_truncated` と同時に立ちうる**（もう排反ではない）。2つは別の問いに答えている
   // ——`ann_truncated` は「窓の外は k 位を抜けないと証明できるか」、`ann_unreached` は

@@ -1,4 +1,4 @@
-# ADR 0192: `ann_unreached` を「窓が満杯でも鳴る」形に直す — `ann-truncation.ts` の約束をようやく果たす
+# ADR 0193: `ann_unreached` を「窓が満杯でも鳴る」形に直す — `ann-truncation.ts` の約束をようやく果たす
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-17
@@ -208,7 +208,7 @@ scope を拾いきれない状況は、仮説ではなく実測済みの現象�
 ——`ann_truncated` の条件（hits ≥ k'）と `ann_unreached` の条件（hits < k'）は
 排反である」と決定していた。**その決定は、当時の実測・当時の設計としては正しく
 記録されている。この ADR はその記述を書き換えていない。** 代わりに ADR 0026 の
-末尾に「追記（2026-09-17）」の節を足し、この ADR 0192 が何を・なぜ覆したかを
+末尾に「追記（2026-09-17）」の節を足し、この ADR 0193 が何を・なぜ覆したかを
 そこから指す形にした（`docs/decisions/0026-ann-unreached-omission.md` 参照）。
 `docs/recall.md` の同じ記述も同様に、旧文をその場で書き換えるのではなく
 「🔴 2つは同時に立ちうる（2026-09-17 訂正）」という節を足し、旧記述が何を
@@ -405,6 +405,21 @@ scope を拾いきれない状況は、仮説ではなく実測済みの現象�
   影響経路は無い。**⟹ ⭐門・`recall-footprint` の較正がこの変更で数値として
   動く経路は、静的に読む限り無い。** ただし実際に `compare` を走らせての実測は
   していない（§10）。
+- 【実測】**⭐門の実際の CI 結果**: PR #399 の CI（`examples/chat (本物の Postgres +
+  pgvector、擬似 provider)` ジョブ）で「北極星の物差しが基準値から悪化していないか
+  を判定する（⭐ 門。ADR 0133）」ステップが `success` で通った。`examples/chat/compare-baseline.json`
+  は一切変更していない。⟹ 上の「読み」（⭐門は動かない）は実際の CI 結果でも裏付けられた。
+- 【実測】**採番の衝突が実際に起きた。** 本 ADR は当初 `0192` として書いたが、
+  PR #398（`fix(scripts): ADR 索引の鮮度を CI の pull_request でも強制する`）が
+  `main` へ先に着地し、同じ `0192` を使っていた。`git fetch origin main && git merge
+  origin/main` の後、`node scripts/adr-renumber.mjs` を実行したところ衝突を検出し、
+  本ファイルを自動で `0193` へ付け替え、参照していた8ファイルすべてを書き換えた
+  （`docs/decisions/0026-...md`・`docs/recall.md`・`ann-truncation.ts`・`recall.ts`・
+  `recall-runtime.ts`・テスト2本・本ファイル自身）。付け替え後、`grep -rn "0192"` で
+  本 PR が触ったファイルに旧番号の残骸が無いことを確認した。この衝突自体が、
+  `docs/decisions/README.md`（ADR 索引）を「マージ直前に再生成する」規律
+  （ADR 0137）と、それを CI の `pull_request` でも強制する仕組み（PR #398 / ADR 0192）
+  が、まさに今この PR で機能した実例である。
 
 ## 10. 確かめていないこと
 
