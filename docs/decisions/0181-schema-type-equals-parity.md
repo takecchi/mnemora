@@ -46,7 +46,9 @@ zod に無い値は、利用者から見れば「あり得る値」だが `parse
   （recall.ts 29 / observation.ts 7 / provenance.ts 6 / memory.ts 5 / event.ts 5 /
   outbox.ts 1 / embedding.ts 1 / ctx.ts 1）。**【実測で再確認】**——本 ADR の実装時に
   `grep -c 'satisfies z\.ZodType<' packages/core/src/<file>` を各ファイルで実行し、
-  同じ内訳を得た（下記「測ったこと」参照）。
+  同じ内訳を得た（下記「測ったこと」参照）。**この55という数は「55ペア」の数であり、
+  本 ADR で `satisfies` を3行足した後も変わらない**——足したのは既存ペアの再カウント
+  ではなく、まとめの discriminated union 自体への新規の宣言だからである（下記「決定」）。
 - 型側だけ union を広げる変異（`RecalledMemory.retrievedVia` に旧値を1つ戻す）は
   `typecheck` も vitest も検知しない。**【実測で再確認、下記「変異試験」】**。
 - `OmissionSchema`（`z.discriminatedUnion`）は、55箇所のうち唯一
@@ -54,6 +56,10 @@ zod に無い値は、利用者から見れば「あり得る値」だが `parse
   実装中に、**同じ形の欠落が `ProvenanceSchema`（provenance.ts）と
   `ObserveInputSchema`（observation.ts）にもあることを追加で見つけた**（下記
   「55ペアの外側で見つかったこと」）。これは受け取った前提には無かった、本 ADR 独自の発見。
+  **2026-09-17 追記（マネージャー指摘）**: 当初は `OmissionSchema` にだけ `satisfies` を
+  足し、`ProvenanceSchema`/`ObserveInputSchema` は「1つだけ直すと、残り2つが
+  『意図的に外してある』と誤読されうる」というマネージャーの指摘を受けて、
+  **3つとも同じ扱いに揃えた**（下記「決定」2番）。
 
 ---
 
@@ -90,38 +96,44 @@ zod だけを広げても、どちらでも赤くなる（下記「変異試験�
 一致するか」も検査する**——`_p03_Omission_whole`/`_p34_ObserveInput_whole`/
 `_p40_Provenance_whole` の3本がそれである（55ペアの外側、下記参照）。
 
-### 2. `OmissionSchema` に `satisfies z.ZodType<Omission>` を1行足した
+### 2. `OmissionSchema`/`ProvenanceSchema`/`ObserveInputSchema` の3つとも `satisfies` を1行ずつ足した
 
-`recall.ts` は変更しない方針だったが、**足しても `tsc` が緑のままであることを確認した
-うえで**（11本の各枝が既に個別に `satisfies` を持ち、`Equals` によるテスト側の検査でも
-緑だったため、実質的にリスクが無いと判断した）足した。`recall.ts` の他の箇所
-（`Omission` の種類・数え方・`recall-runtime.ts`）は一切触っていない
-——変更は `OmissionSchema` の宣言直後に doc コメントと `satisfies z.ZodType<Omission>`
-を足した1箇所のみ（`git diff --stat` で確認、下記「測ったこと」）。
+55箇所のうち唯一 `satisfies` を欠いていたのは `OmissionSchema`（recall.ts）だと
+受け取っていたが、本 ADR の実装中に **`ProvenanceSchema`（provenance.ts）と
+`ObserveInputSchema`（observation.ts）にも同じ欠落があることを見つけた**（上記
+「文脈」参照）。
+
+**当初は `OmissionSchema` にだけ `satisfies z.ZodType<Omission>` を足し、他の2つは
+ファイルを変更せずテスト側の `Equals` 検査だけで済ませていた**（`_p40_Provenance_whole`/
+`_p34_ObserveInput_whole`）。**マネージャーの指摘を受けて、3つとも同じ扱いに揃えた**
+——1つだけ直して2つ残すと、次に読む人が「この2つは意図的に外してある」と誤読しうる
+という理由に同意する。
+
+- `recall.ts` の `OmissionSchema` に `satisfies z.ZodType<Omission>` を追加。
+- `provenance.ts` の `ProvenanceSchema` に `satisfies z.ZodType<Provenance>` を追加。
+- `observation.ts` の `ObserveInputSchema` に `satisfies z.ZodType<ObserveInput>` を追加。
+
+**3箇所とも、足す前に `tsc` が緑のままであることを確認してから残した**（各 union の
+全枝が既に個別に `satisfies` を持ち、`Equals` によるテスト側の検査でも緑だったため、
+実質的にリスクが無いと判断した——`pnpm run typecheck` の結果は下記「測ったこと」）。
+**赤くなっていたら足さず「実際にずれている発見」として報告する予定だったが、
+3箇所とも赤くならなかった。**
+
+3ファイルとも、それ以外の箇所（`Omission`/`Provenance`/`ObserveInput` の種類・
+`recall-runtime.ts` 等）は一切触っていない——変更はそれぞれの discriminated union の
+宣言直前に doc コメントと `satisfies z.ZodType<...>` を足した1箇所のみ
+（`git diff --stat` で確認、下記「測ったこと」）。
 
 **足しても既存の検査に対して冗長である**（各枝が個別に検査済みのため）が、
 「まとめの discriminated union 自体は誰も見ていない」という読み手の誤解を防ぐ、
-という文書的な価値のために残した。テスト側の `_p03_Omission_whole` が、この1行が
-万一巻き戻っても同じ検査を独立に持つ。
+という文書的な価値のために残した。テスト側の `_p03_Omission_whole`/
+`_p40_Provenance_whole`/`_p34_ObserveInput_whole` の3本が、この3行が万一巻き戻っても
+同じ検査を独立に持つ。
 
-### 3. 55ペアの外側で見つかったこと: `ProvenanceSchema`/`ObserveInputSchema` も同じ欠落を持つ
+**⟹ `satisfies z.ZodType<...>` の出現数は 55 → 58 に変わった**（下記「決定」5番の
+歯の期待値もこれに合わせて更新した）。
 
-本 ADR の実装中に見つけた、受け取った前提には無かった事実:
-
-- `provenance.ts` の `ProvenanceSchema = z.discriminatedUnion(...)` も
-  `satisfies z.ZodType<Provenance>` を持たない。
-- `observation.ts` の `ObserveInputSchema = z.discriminatedUnion(...)` も
-  `satisfies z.ZodType<ObserveInput>` を持たない。
-
-**これら2つは `.ts` ファイル側を変更しなかった**（`OmissionSchema` と違い、
-issue #272 の直接の対象ではなく、`recall.ts` 以外のファイルとはいえ、1 PR の範囲を
-無限に広げないため）。代わりに、テスト側の `_p40_Provenance_whole`/
-`_p34_ObserveInput_whole`（`Equals<z.infer<typeof X>, T>`）が同じ効果
-（相互代入可能性の固定）を持つ。**マネージャーへ報告する**——`ProvenanceSchema`/
-`ObserveInputSchema` に `satisfies` 行そのものを足すかどうかは、この ADR の範囲外の
-判断として残す。
-
-### 4. `Equals` が通らなかった4ペアは `MutualAssignable`（弱い形）に落とした
+### 3. `Equals` が通らなかった4ペアは `MutualAssignable`（弱い形）に落とした
 
 55ペア全部について実際に `Equals` を書いて `tsc` を走らせ、通らないものを個別に
 分類した（下記「測ったこと」に実測コマンドと出力）。
@@ -144,6 +156,54 @@ issue #272 の直接の対象ではなく、`recall.ts` 以外のファイルと
 だった**——4ペアとも、単純な双方向 `extends`（`MutualAssignable`）は通る
 （下記「測ったこと」でデバッグ用の scratch を使って個別に確認した）。**実際に
 zod と型がずれているペアは見つからなかった。**
+
+### 4. `_pNN` の本数を数える歯を「壊れても緑のままの assert」から実際に数える形へ直した（ADR 0177 と同種、マネージャー指摘）
+
+**この repo は本 PR の直前、[ADR 0177](./0177-fix-stage3-tooth-blind-asserts.md)
+（Issue #293）で「在ると思わせるのに噛んでいない assert」を2件直したばかりだった。**
+本 PR の初版は、同じ形の欠陥を新しく持ち込んでいた——マネージャーのレビューで
+指摘を受けた。
+
+**元の形**（`packages/core/src/__tests__/schema-type-equals-parity.test.ts`
+「実行時の存在証明」節）:
+
+```ts
+it("55ペア（...）+ 3本（...）を保持する", () => {
+  // この it 自体は何も実行時検証をしない——上のファイル全体が `tsc` に通ることが検査である。
+  expect(55 + 3).toBe(58);
+});
+```
+
+`55 + 3` は TypeScript がコンパイル時に計算する**定数どうしの比較**であり、
+このファイルのどの `_pNN` を何本消しても、`55 + 3` は `55 + 3` のまま変わらない
+——**ADR 0177 が指摘した「壊れても緑のままの assert」と全く同じ構造**
+（あちらは `indexOf` が `-1` を返す世界で `Math.abs(...) === 1` が偶然成立する形、
+こちらは「ファイルの中身を一切見ずに、コメントで主張した数を定数として書き写す」形。
+**どちらも「本来検査したいものを見ていない」という点で同じ族**）。
+
+**直した形**: このファイル自身のソースを `readFileSync` で読み、
+`/^type _p(\d+)_[A-Za-z_]+ =/gm` で `_pNN` 宣言を実際に数え上げ、
+(a) 本数が58であること、(b) 番号の集合が `1..58` の連番（重複も欠番も無い）であること
+の2つを検査する。**これで「`_pNN` を1本消す／複製する」という変異に対して、
+実際に赤くなる歯になった**（下記「測ったこと」の変異試験で実測）。
+
+**失敗メッセージにも、何をすべきかを書いた**——`expect(numbers.length, howToFix).toBe(...)`
+の第2引数に、EXPECTED_PAIR_COUNT を更新すべきか・番号の重複を疑うべきかの分岐と、
+Issue #272 / 本 ADR への参照を埋め込んだ（下記「決定」5番と同じ形）。
+
+### 5. 「satisfies の出現数」の歯にも、失敗メッセージへ対処法を埋め込んだ
+
+「引き受けた負債」節で述べる `satisfies z.ZodType<...>` の出現数を数える歯
+（`packages/core/src` 全体を静的走査するほう）は、当初 `expect(count).toBe(56)` という
+メッセージ無しの形だった。**マネージャーの指摘**——「58と59が違う、としか言わない
+失敗出力では、赤くなった人が何をすればいいか分からない」——を受けて、
+`expect(count, "<説明>").toBe(EXPECTED_SATISFIES_COUNT)` の形に直した。説明文には
+「新しい `satisfies` を足したなら、対応する `_pNN` を本ファイルへ足し、この期待値と
+決定4の歯の期待値も一緒に更新すること」と、Issue #272 / 本 ADR への参照を入れた。
+
+**この歯自体は、他の担当（並行して走っている複数のマネージャー）が `packages/core` に
+新しい zod スキーマを足すたびに赤くなる**——これは摩擦だが、意図した挙動である
+（マネージャーの判断で維持。「引き受けた負債」節参照）。
 
 ---
 
@@ -218,15 +278,21 @@ zod と型がずれているペアは見つからなかった。**
     （`schema-type-equals-parity.test.ts` 末尾の
     「satisfies z.ZodType<...> の出現数が変わったら気づく」）。`packages/core/src`
     （`__tests__` を除く）を `unreachable-union-values.test.ts` と同じ手法
-    （ディレクトリ走査 + コメント行除外）で静的に走査し、出現数が56（55 + 本 ADR で
-    足した `OmissionSchema` の1行）と一致することを検査する。
-  - **これは強制ではなく合図である。**新しい `satisfies z.ZodType<X>` が
-    どこかに増えれば、この歯が赤くなって「対応する `_pNN` をここへ足すこと」に
+    （ディレクトリ走査 + コメント行除外）で静的に走査し、出現数が58（55 + 本 ADR で
+    足した `OmissionSchema`/`ProvenanceSchema`/`ObserveInputSchema` の3行、
+    「決定」2番）と一致することを検査する。失敗時のメッセージに対処法を埋め込んだ
+    （「決定」5番）。
+  - **これに加えて、`_pNN` 宣言の本数と番号自体を数える歯も足した**（「決定」4番）
+    ——`ADR 0177` と同種の「壊れても緑のままの assert」を直したものであり、
+    「新しい型を足したのに `_pNN` を足し忘れた」ケースの一部（本数が合わない・
+    番号が飛ぶ）を検出できる。
+  - **これらは強制ではなく合図である。**新しい `satisfies z.ZodType<X>` が
+    どこかに増えれば、出現数の歯が赤くなって「対応する `_pNN` をここへ足すこと」に
     気づける。**しかし**: (a) 2箇所が同時に増減して数が偶然一致すれば見逃す、
-    (b) 数が正しく56のままでも、55ペアのうちどれかが**別の型を指すように
+    (b) 数が正しく58のままでも、55ペアのうちどれかが**別の型を指すように
     書き換えられた**場合（例: コピペミスで `_p23_RecalledMemory` が
-    `RecallScope` と比較するようになった）はこの歯では気づけない——**歯そのものが
-    網羅を強制しているのではなく、数の一致だけを見ている。**
+    `RecallScope` と比較するようになった）はどちらの歯でも気づけない——**歯そのものが
+    網羅を強制しているのではなく、数の一致・番号の連番だけを見ている。**
   - **⟹ 強制できるか、で問われたら「できない」と正直に書く。** ADR 0159 の
     `Record<Omission["kind"], OmissionProbe>` は union の要素数と1対1対応する
     キー不足検査で真に強制できていたが、本 ADR の55ペアは「型とスキーマの
@@ -277,7 +343,7 @@ $ rm -rf packages/*/dist && pnpm run build   # 7 projects すべて Done
 $ pnpm run pack:check   # ✔ publish 梱包の門を通りました。
 ```
 
-### 55箇所の内訳の再確認
+### 55箇所の内訳の再確認（決定2で3行足す前）
 
 ```
 $ for f in recall.ts observation.ts provenance.ts memory.ts event.ts outbox.ts embedding.ts ctx.ts; do
@@ -288,6 +354,23 @@ memory.ts: 5         event.ts: 5         outbox.ts: 1
 embedding.ts: 1      ctx.ts: 1
 ```
 （合計55。受け取った前提と一致した。）
+
+### 58箇所への再確認（決定2で `OmissionSchema`/`ProvenanceSchema`/`ObserveInputSchema` に `satisfies` を足した後）
+
+```
+$ for f in recall.ts observation.ts provenance.ts memory.ts event.ts outbox.ts embedding.ts ctx.ts; do
+    n=$(grep -v -E '^\s*(\*|//)' packages/core/src/$f | grep -c 'satisfies z\.ZodType<')
+    echo "$f: $n"
+  done
+recall.ts: 30        observation.ts: 8   provenance.ts: 7
+memory.ts: 5         event.ts: 5         outbox.ts: 1
+embedding.ts: 1      ctx.ts: 1
+```
+（合計58 = 55 + 3。`recall.ts`/`observation.ts`/`provenance.ts` がそれぞれ1本ずつ増えた。
+コメント行を除外するコマンドに変えたのは、本 ADR の追記コメント自身が
+`satisfies z.ZodType<...>` という文字列を3回プローズで引用しており、コメント行を
+除外しないと自分の説明文を誤って数えてしまうため——「決定」5番の歯が実装過程で
+実際に踏んだ問題と同じである。）
 
 ### `Equals` が通らなかった4ペアの原因切り分け
 
@@ -323,12 +406,19 @@ type _c2 = Expect<Equals<WithOptional, ViaOmitExtend>>; // TS2344 で落ちる
 
 | # | フィールド | 変異 | `tsc` の結果（抜粋） |
 |---|---|---|---|
-| 1 | `RecalledMemory.retrievedVia` | 型だけ `\| "tag_match"` を足す | `schema-type-equals-parity.test.ts(279,35)` `_p23_RecalledMemory` が **TS2344 で赤**。`(299,33)` `_p30_RecallResult`（`RecalledMemory[]` を含むため連鎖）も赤。**`satisfies` 側（`recall.ts`）は緑のまま**——issue #272 の指摘どおり |
+| 1 | `RecalledMemory.retrievedVia` | 型だけ `\| "tag_match"` を足す | `schema-type-equals-parity.test.ts(281,35)` `_p23_RecalledMemory` が **TS2344 で赤**。`(301,33)` `_p30_RecallResult`（`RecalledMemory[]` を含むため連鎖）も赤。**`satisfies` 側（`recall.ts`）は緑のまま**——issue #272 の指摘どおり |
 | 2 | 同上 | zod だけ `.enum([...,"tag_match"])` にする | 上と同じ2箇所が赤に加え、`recall.ts(966,4)` `RecalledMemorySchema` と `recall.ts(1431,4)` `RecallResultSchema` が **TS1360（`satisfies` 違反）で赤** |
-| 3 | `StageSkippedOmission.reason` | 型だけ `\| "budget_exhausted"` を足す | `(213,35)` `_p03_Omission_whole`、`(216,3)` `_p04_StageSkippedOmission`、`(299,33)` `_p30_RecallResult` が赤。`satisfies` 側は緑のまま |
-| 4 | 同上 | zod だけ広げる | 上3箇所に加え、`recall.ts(330,4)` `StageSkippedOmissionSchema`・`recall.ts(434,4)` `OmissionSchema`（本 ADR で足した1行が捕まえた）・`recall.ts(1432,4)` `RecallResultSchema` が TS1360 で赤 |
-| 5 | `GroupCount.axis` | 型だけ `\| "time_window"` を足す | `(259,31)` `_p15_GroupCount`、`(271,30)` `_p19_IndexBand`（`GroupCount[]` を含むため連鎖）、`(299,33)` `_p30_RecallResult` が赤。`satisfies` 側は緑のまま |
+| 3 | `StageSkippedOmission.reason` | 型だけ `\| "budget_exhausted"` を足す | `(215,35)` `_p03_Omission_whole`、`(218,3)` `_p04_StageSkippedOmission`、`(301,33)` `_p30_RecallResult` が赤。`satisfies` 側は緑のまま |
+| 4 | 同上 | zod だけ広げる | 上3箇所に加え、`recall.ts(329,4)` `StageSkippedOmissionSchema`・`recall.ts(433,4)` `OmissionSchema`（本 ADR で足した1行が捕まえた）・`recall.ts(1431,4)` `RecallResultSchema` が TS1360 で赤 |
+| 5 | `GroupCount.axis` | 型だけ `\| "time_window"` を足す | `(261,31)` `_p15_GroupCount`、`(273,30)` `_p19_IndexBand`（`GroupCount[]` を含むため連鎖）、`(301,33)` `_p30_RecallResult` が赤。`satisfies` 側は緑のまま |
 | 6 | 同上 | zod だけ広げる | 上3箇所に加え、`recall.ts(463,4)` `GroupCountSchema`・`(543,4)` `IndexBandSchema`・`(1431,4)` `RecallResultSchema` が TS1360 で赤 |
+
+**⚠ この表の行番号は、本 PR の最終状態（`_pNN` を数える歯を「決定」4番の形へ直し、
+`ProvenanceSchema`/`ObserveInputSchema` に `satisfies` を足した後）で測り直したものである。**
+初稿の表はそれより前の版で測った行番号を載せており、**最終状態では再現しなかった**
+（テストファイル側が一律2行、`recall.ts` 側も変異4の3箇所ずれていた）。
+**実測として書いた数字が再現しないのは、測っていないのと同じである。**
+6変異すべてを最終状態で1本ずつ測り直し、表を入れ替えた。
 
 **変異1・3・5（型だけ広げる）はいずれも、変異後に既存の歯
 （`unreachable-union-values.test.ts`・`recall.test.ts`）を実行しても緑のままである
@@ -363,6 +453,58 @@ src/association-arm.ts(350,7): error TS2322: Type '"association" | "ann" | "lexi
 「`M packages/core/src/recall.ts`」（本 ADR で足した1行の変更のみ）であることを
 確認した。
 
+### 変異試験: `_pNN` を数える歯（「決定」4番、ADR 0177 と同種の欠陥を直したことの証明）
+
+**マネージャー指摘を受けて修正した「`_pNN` の本数を数える歯」自身についても、
+`cp` で退避コピーを取り、2種類の変異で赤くなることを確認してから復元した。**
+
+**変異A: `_p29_RecallOutputValidation` の宣言を丸ごと1つ削除する**（本数が58→57になる）
+
+```
+$ pnpm --filter @mnemora/core exec vitest run src/__tests__/schema-type-equals-parity.test.ts
+ ❯ schema ↔ 型 の Equals parity（Issue #272） (1)
+   × _pNN 宣言が58本あり、番号1..58に重複も欠番も無い
+
+AssertionError: packages/core/src/__tests__/schema-type-equals-parity.test.ts の
+`type _pNN_...` 宣言を数え直したところ期待値と食い違った。…
+expected 57 to be 58
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+```
+
+**変異B: `_p30_RecallResult` を `_p29_RecallResult` に改名する**（本数は58のまま、
+番号29が重複し30が欠番になる——本数だけを見る検査では拾えない壊れ方）
+
+```
+$ pnpm --filter @mnemora/core exec vitest run src/__tests__/schema-type-equals-parity.test.ts
+ ❯ schema ↔ 型 の Equals parity（Issue #272） (1)
+   × _pNN 宣言が58本あり、番号1..58に重複も欠番も無い
+
+AssertionError: …（番号が1..58の連番になっていない）: expected [ Array(58) ] to deeply equal [ Array(58) ]
+- Expected
++ Received
+@@ -26,11 +26,11 @@
+    29,
+-   30,
++   29,
+    31,
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 passed (4)
+```
+
+**両変異とも、`cp` の退避コピーから復元し `diff` 0行を確認した後、再実行して
+4 tests すべて緑に戻ることを確認した。** 変異Aは「本数」の assert（1つ目）が、
+変異Bは「番号の連番」の assert（2つ目）が、それぞれ独立に捕まえている——
+本数だけを見る検査だと変異Bは見逃す（58本のまま）ため、2つの assert を両方
+残す判断（「決定」4番）が実際に効いていることを、この変異で確認した。
+
+**⟹ 当初の `expect(55 + 3).toBe(58)`（定数どうしの比較）では、変異A・Bのどちらを
+入れても永遠に緑のままだった**（`55 + 3` はファイルの中身を一切見ないため）。
+直した歯は両方の変異で実際に赤くなり、ADR 0177 が要求する「歯が実際に噛むことを
+変異試験で示す」を満たす。
+
 ---
 
 ## 確かめていないこと
@@ -373,15 +515,13 @@ src/association-arm.ts(350,7): error TS2322: Type '"association" | "ann" | "lexi
   に同種の `satisfies z.ZodType<...>` があるかは調べていない**——issue #272 も
   受け取った前提も `packages/core` に限定している。他パッケージへ射程を広げるかは
   この ADR の範囲外。
-- **`ProvenanceSchema`/`ObserveInputSchema` に `satisfies` 行そのものを足すべきかは
-  判断していない。**テスト側の `Equals` 検査で同じ効果は持たせたが、
-  `OmissionSchema` と同様に `.ts` ファイル側にも足すかどうかは、マネージャーの
-  判断に委ねる。
 - **DB を要する検査は実行していない**（この issue の射程に DB は関係しない
   ため、そもそも該当する検査が無い）。
-- **「satisfies z.ZodType<...> の出現数」の歯が、実際に将来の担当者に気づかれて
-  正しく `_pNN` を足す行動につながるか**は、実際にそのシナリオが起きるまで
-  確認できない。
+- **「satisfies z.ZodType<...> の出現数」の歯・「`_pNN` の本数と連番」の歯が、
+  実際に将来の担当者に気づかれて正しく行動（`_pNN` を足す・期待値を更新する）に
+  つながるか**は、実際にそのシナリオが起きるまで確認できない
+  （マネージャーが「並行する他のマネージャーが `packages/core` にスキーマを足すと
+  この歯で赤くなる」と指摘した摩擦は、CI で実際に観測されるまで机上の想定である）。
 
 ---
 
@@ -394,6 +534,11 @@ src/association-arm.ts(350,7): error TS2322: Type '"association" | "ann" | "lexi
 - [ADR 0159](./0159-omission-kind-generation-registry.md) — `Omission.kind` の
   レジストリ型検査（`Record<Union, Probe>`）。本 ADR が「同じ水準の強制は
   作れなかった」と書いた比較対象。
+- [ADR 0177](./0177-fix-stage3-tooth-blind-asserts.md)（Issue #293） —
+  「壊れても緑のままの assert」を直した直前の ADR。本 ADR の初版が同じ形の欠陥
+  （`expect(55 + 3).toBe(58)` という定数どうしの比較）を新しく持ち込みかけ、
+  マネージャーの指摘で「決定」4番のとおり直した（「これが覆るとしたら」ではなく
+  実際に本 PR の中で起きた）。
 - [Issue #206](https://github.com/takecchi/mnemora/issues/206) /
   [ADR 0117](./0117-unreachable-union-values-inventory.md) — 「型に在って
   一度も生成されない値」の人手の棚卸し。同じ形の嘘を歯で防ぐ、という

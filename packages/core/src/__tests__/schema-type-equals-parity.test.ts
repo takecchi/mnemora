@@ -476,17 +476,49 @@ type _p58_Ctx = Expect<Equals<z.infer<typeof CtxSchema>, Ctx>>;
 // 上の `type _pNN_... = Expect<Equals<...>>` は、`Equals<A,B>` が `false` になった
 // 瞬間にこのファイル自体の宣言でコンパイルエラーになる（型検査だけで完結する——
 // 実行時コードは無い）。`vitest` にも「この歯が実在する」ことを見えるようにするため、
-// 数を数えるだけの1本を置く（`describe`/`it` が無いテストファイルは vitest 上
-// 判別しにくいため）。
+// この it が要る。
+//
+// ⚠ **2026-09-17 追記（マネージャー指摘、[ADR 0177](../../../docs/decisions/0177-fix-stage3-tooth-blind-asserts.md)
+// と同種の欠陥）**: 当初この it は `expect(55 + 3).toBe(58)` という**定数どうしの比較**
+// だった——`_pNN` を何本消しても、このファイルの外の事実は何も見ていないので永久に緑の
+// ままである。ADR 0177 が `mark-contested.test.ts` の「壊れても緑のままの assert」を
+// 直した直後に、同じ形の欠陥を新しい PR で持ち込みかけていた。**このファイル自身の
+// ソースを `readFileSync` で読み、実際に `_pNN` 宣言の本数と番号を数える形に直した。**
 // =============================================================================
 
+const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
+const EXPECTED_PAIR_COUNT = 58;
+
+/**
+ * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
+ * インデント無し）が持つ番号をすべて拾う。`_OmissionInfer`/`_ObserveInputInfer`/
+ * `_ProvenanceInfer` のような補助型（`_pNN` 接頭辞を持たない）は対象外。
+ */
+function findDeclaredPairNumbers(): number[] {
+  const source = readFileSync(THIS_FILE_PATH, "utf8");
+  const matches = [...source.matchAll(/^type _p(\d+)_[A-Za-z_]+ =/gm)];
+  return matches.map((m) => Number(m[1]));
+}
+
 describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
-  it("55ペア（satisfies 宣言のあるもの）+ 3本（satisfies が無い discriminated union 自体の全体一致）を保持する", () => {
-    // この it 自体は何も実行時検証をしない——上のファイル全体が `tsc` に通ることが検査である。
-    // `_p01`〜`_p58` のうち、55本が本来の55ペア（`satisfies` 宣言の1対1対応）、
-    // 3本（_p03 Omission_whole / _p34 ObserveInput_whole / _p40 Provenance_whole）が
-    // 「そもそも satisfies を持たない discriminated union 自体」を追加で検査したもの。
-    expect(55 + 3).toBe(58);
+  it("_pNN 宣言が58本あり、番号1..58に重複も欠番も無い", () => {
+    const numbers = findDeclaredPairNumbers();
+    const howToFix =
+      "packages/core/src/__tests__/schema-type-equals-parity.test.ts の " +
+      "`type _pNN_...` 宣言を数え直したところ期待値と食い違った。" +
+      "ペアを足した／消したなら、この EXPECTED_PAIR_COUNT を更新すること。" +
+      "そうでないなら、番号の重複・欠番（コピペミス等）を疑うこと。" +
+      "内訳: 55本が本来の55ペア（`satisfies` 宣言との1対1対応）、" +
+      "3本（_p03 Omission_whole / _p34 ObserveInput_whole / _p40 Provenance_whole）が" +
+      "discriminated union 自体の全体一致（Issue #272 / ADR 0181 参照）。";
+
+    expect(numbers.length, howToFix).toBe(EXPECTED_PAIR_COUNT);
+
+    const sorted = [...numbers].sort((a, b) => a - b);
+    const expectedSequence = Array.from({ length: EXPECTED_PAIR_COUNT }, (_, i) => i + 1);
+    expect(sorted, `${howToFix}（番号が1..${EXPECTED_PAIR_COUNT}の連番になっていない）`).toEqual(
+      expectedSequence,
+    );
   });
 });
 
@@ -525,8 +557,10 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
+const EXPECTED_SATISFIES_COUNT = 58;
+
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
-  it("packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は56件（55ペア + OmissionSchema）", () => {
+  it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件（55ペア + OmissionSchema/ProvenanceSchema/ObserveInputSchema）`, () => {
     const files = listTsFilesUnder(CORE_SRC_ROOT);
     let count = 0;
     for (const file of files) {
@@ -543,9 +577,16 @@ describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強
         count += matches ? matches.length : 0;
       }
     }
-    // 55（issue #272 の調査で数えたペア）+ 1（本 PR で OmissionSchema に足した1行、
-    // ADR 0181「決定」参照）= 56。この数が変わったら、対応する `_pNN` をこのファイルへ
-    // 足す／削り、この期待値も一緒に更新すること。
-    expect(count).toBe(56);
+    // 55（issue #272 の調査で数えたペア）+ 3（OmissionSchema・ProvenanceSchema・
+    // ObserveInputSchema。いずれも discriminated union のまとめに足りなかった1行、
+    // ADR 0181「決定」参照）= 58。
+    expect(
+      count,
+      "packages/core/src の satisfies z.ZodType<...> の出現数が期待値と食い違った。" +
+        "新しい satisfies を足したなら、対応する Equals（または MutualAssignable）の " +
+        "`_pNN` を packages/core/src/__tests__/schema-type-equals-parity.test.ts へ足し、" +
+        "この EXPECTED_SATISFIES_COUNT とファイル冒頭の it の EXPECTED_PAIR_COUNT も " +
+        "一緒に更新すること（Issue #272 / ADR 0181 参照）。",
+    ).toBe(EXPECTED_SATISFIES_COUNT);
   });
 });
