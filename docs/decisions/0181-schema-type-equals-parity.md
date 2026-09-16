@@ -507,6 +507,36 @@ AssertionError: …（番号が1..58の連番になっていない）: expected 
 
 ---
 
+### ⭐ この歯は、着地する前に実際に噛んだ（`ScopeRelation`）
+
+**【実測】本 PR の CI が、`typecheck / lint / test / build` ジョブで
+`expected 59 to be 58` で赤くなった**（head `e8e0cb1`、
+`https://github.com/takecchi/mnemora/actions/runs/35119246121/job/104872499214`）。
+
+原因は本 PR の誤りではない。**PR #376（[ADR 0174](./0174-filtered-omission-scope-relation.md)、
+`FilteredOmission` に `scopeRelation` を足した）が、`main` に
+`ScopeRelation` の型と `ScopeRelationSchema`（`satisfies z.ZodType<ScopeRelation>` 付き）を
+入れていた**ためである。
+
+**ここで重要なのは、なぜ手元では緑だったかである** ——本 PR のブランチは
+その `main` を取り込む前の木を見ており、手元の6つの門はすべて緑だった。
+**CI は PR と `main` のマージ後の木を検査するので、そこで初めて 59 件になった。**
+⟹ `docs/autonomy.md` §2 の「手元の門の緑を、CI の緑の代わりにしない」が、
+**この歯についても当てはまる**ことの実例である。
+
+**対処**: `git merge origin/main` して `_p59_ScopeRelation` を足し、
+`EXPECTED_PAIR_COUNT`／`EXPECTED_SATISFIES_COUNT` を 59 へ上げた。
+
+⟹ **「新しい型を足した人が、対応するペアの登録を忘れる」という、まさにこの ADR が
+『引き受けた負債』として書いた事象が、ADR が着地する前に1件起きた。**
+そして**歯はそれを拾った。**下の「引き受けた負債」に書いたとおり、
+**これは「気づける」であって「強制できる」ではない**——気づいた後にペアを足すのは
+人間の仕事である。**ただし、気づけなければ 55ペアの一覧は静かに腐っていた。**
+
+⚠ **この歯は、`packages/core` に zod スキーマを足す他の PR を赤くする。**
+それは摩擦であるが、**上のとおり、それがこの歯の唯一の働き方である。**
+2つの歯の失敗メッセージには、赤くなった人が何をすべきかを埋め込んである。
+
 ## 確かめていないこと
 
 - **`Equals` トリックが TypeScript のどのバージョンから今の挙動を持つかは

@@ -8,6 +8,7 @@ import type {
   CountKindSchema,
   NotIndexedReasonSchema,
   OmissionSchema,
+  ScopeRelationSchema,
   GroupCountSchema,
   DigestEntrySchema,
   DigestBandLimitedBySchema,
@@ -29,6 +30,7 @@ import type {
   CountKind,
   NotIndexedReason,
   Omission,
+  ScopeRelation,
   StageSkippedOmission,
   FilteredOmission,
   BelowThresholdOmission,
@@ -471,6 +473,23 @@ type _p57_EmbeddingSpaceId = Expect<
 type _p58_Ctx = Expect<Equals<z.infer<typeof CtxSchema>, Ctx>>;
 
 // =============================================================================
+// 後から `main` で増えたペア（番号は末尾に足す）
+//
+// ⭐ **この節は、本 PR の歯が実際に噛んだ結果として生まれた。**
+// PR #376（[ADR 0174](../../../../docs/decisions/0174-filtered-omission-scope-relation.md)、
+// `FilteredOmission` に `scopeRelation` を足した）が `ScopeRelation` の型と
+// `ScopeRelationSchema` を `main` へ入れたが、**対応する `_pNN` はここに無かった。**
+// 本 PR の手元の門は緑のままだったが（枝は `main` より前の木を見ている）、
+// **CI は PR と `main` のマージ後の木を検査するため、出現数の歯が
+// `expected 59 to be 58` で赤くなった**——`main` を取り込み、このペアを足して直した。
+// ⟹ **「新しい型を足した人が登録し忘れる」を、この歯が初回から実際に拾った。**
+// （ADR 0181「引き受けた負債」に書いたとおり、これは「気づける」であって
+// 「強制できる」ではない——気づいた後に足すのは人間の仕事である。）
+// =============================================================================
+
+type _p59_ScopeRelation = Expect<Equals<z.infer<typeof ScopeRelationSchema>, ScopeRelation>>;
+
+// =============================================================================
 // 実行時の存在証明
 //
 // 上の `type _pNN_... = Expect<Equals<...>>` は、`Equals<A,B>` が `false` になった
@@ -487,7 +506,7 @@ type _p58_Ctx = Expect<Equals<z.infer<typeof CtxSchema>, Ctx>>;
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
-const EXPECTED_PAIR_COUNT = 58;
+const EXPECTED_PAIR_COUNT = 59;
 
 /**
  * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
@@ -501,7 +520,7 @@ function findDeclaredPairNumbers(): number[] {
 }
 
 describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
-  it("_pNN 宣言が58本あり、番号1..58に重複も欠番も無い", () => {
+  it(`_pNN 宣言が${EXPECTED_PAIR_COUNT}本あり、番号1..${EXPECTED_PAIR_COUNT}に重複も欠番も無い`, () => {
     const numbers = findDeclaredPairNumbers();
     const howToFix =
       "packages/core/src/__tests__/schema-type-equals-parity.test.ts の " +
@@ -510,7 +529,8 @@ describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
       "そうでないなら、番号の重複・欠番（コピペミス等）を疑うこと。" +
       "内訳: 55本が本来の55ペア（`satisfies` 宣言との1対1対応）、" +
       "3本（_p03 Omission_whole / _p34 ObserveInput_whole / _p40 Provenance_whole）が" +
-      "discriminated union 自体の全体一致（Issue #272 / ADR 0181 参照）。";
+      "discriminated union 自体の全体一致、1本（_p59 ScopeRelation）が `main` から" +
+      "取り込んだ分（Issue #272 / ADR 0181 参照）。";
 
     expect(numbers.length, howToFix).toBe(EXPECTED_PAIR_COUNT);
 
@@ -557,10 +577,10 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-const EXPECTED_SATISFIES_COUNT = 58;
+const EXPECTED_SATISFIES_COUNT = 59;
 
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
-  it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件（55ペア + OmissionSchema/ProvenanceSchema/ObserveInputSchema）`, () => {
+  it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件`, () => {
     const files = listTsFilesUnder(CORE_SRC_ROOT);
     let count = 0;
     for (const file of files) {
@@ -579,7 +599,7 @@ describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強
     }
     // 55（issue #272 の調査で数えたペア）+ 3（OmissionSchema・ProvenanceSchema・
     // ObserveInputSchema。いずれも discriminated union のまとめに足りなかった1行、
-    // ADR 0181「決定」参照）= 58。
+    // ADR 0181「決定」参照）+ 1（`ScopeRelationSchema`、`main` から取り込んだ分）= 59。
     expect(
       count,
       "packages/core/src の satisfies z.ZodType<...> の出現数が期待値と食い違った。" +
