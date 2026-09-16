@@ -318,15 +318,29 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 **見るもの**:
 
 ```bash
+# ⚠ (a) も (b) も origin/main の中身を見る。手元の作業ツリーを読まない
+git fetch origin main
+
 # (a) [1.0.0] 節が、どの sha を基準に書かれていると宣言しているか
-grep -n '実測' CHANGELOG.md | head
+git show origin/main:CHANGELOG.md | grep -n '実測' | head
 
 # (b) いまの origin/main の先頭
-git fetch origin main && git rev-parse origin/main
+git rev-parse origin/main
 
 # (c) (a) の sha から (b) までに何が入ったか
 git log --oneline <a の sha>..origin/main
 ```
+
+⚠ **(a) が素の `grep ... CHANGELOG.md` ではなく `git show origin/main:CHANGELOG.md` なのは、
+手元の作業ツリーではなく `origin/main` の中身を見るためである。**
+素のほうを打つと、**手元が `origin/main` に追従していないときに、(a) と (b) が
+別の時点を指したまま突き合わせることになる。**
+【実測】2026-09-17、手元が2 commit 遅れている状態（その2本のうち1本が
+`CHANGELOG.md` の `[1.0.0]` 節を書き換えた commit だった）で両方を引いたところ、
+**(a) が拾う基準 sha は `origin/main` のそれとは別物になった。**
+⚠ **倒れる向きは安全側である**（古いほうを拾う＝実際より「追従していない」と見せる）が、
+**この項目が警戒しているのは基準 sha が腐ることそのものである** ⟹ 手順自身が
+腐った基準を読まないようにしてある。
 
 **(a) と (b) が離れていたら、(c) に並ぶものが `[1.0.0]` 節に反映されているかを人間が見る。**
 
