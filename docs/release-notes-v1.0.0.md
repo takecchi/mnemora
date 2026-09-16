@@ -25,8 +25,11 @@
 
 1. 🔴 **「項目5 が『半分』である理由」の段落が埋まっているか。**⛔ **埋まっていなければ貼らない**（オーナーの判断待ち）
 2. **7項目の数が `roadmap.md` §7.13 と一致しているか。**食い違っていたら §7.13 を信じて直す
-3. **「利用者に見える変更は6件」が `CHANGELOG.md` の `[1.0.0]` と一致しているか**
-4. **マイグレーションの本数が `packages/postgres/migrations/` と一致しているか**（草稿の時点では `0016` / `0017` の2本が `v0.2.0` 以降の追加）
+3. **「利用者に見える変更は9件」が `CHANGELOG.md` の `[1.0.0]` と一致しているか。**
+   ⚠ **項目の件数（9件）と PR の本数（8本）は違う**——PR #416 が「後方互換の追加」と
+   「破壊的変更」を両方持つため。⟹ **どちらの数の話をしているかを取り違えないこと**
+4. **「破壊的変更が3件」が `CHANGELOG.md` の `### 変更（破壊的）` の項目数と一致しているか**
+5. **マイグレーションの本数が `packages/postgres/migrations/` と一致しているか**（草稿の時点では `0016` / `0017` の2本が `v0.2.0` 以降の追加）
 
 ---
 
@@ -40,7 +43,7 @@
 >
 > ### v0.2.0 からの変更
 >
-> 利用者に見える変更は6件です。**一覧とそれぞれの根拠 ADR は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) を見てください。**
+> 利用者に見える変更は9件です。**一覧とそれぞれの根拠 ADR は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) を見てください。**
 >
 > 🔴 **上げるときに DB マイグレーションが要ります**（`0016` / `0017` の2本）。
 >
@@ -50,7 +53,10 @@
 >
 > 手順と、既存行の走査を `NOT VALID` で切り離した理由は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) に在ります。
 >
-> ⚠ **破壊的変更が2件あります。**どちらも「返り値の型に**必須**フィールドが増えた」形なので、**読むだけなら影響を受けません。**自分で `FilteredOmission` / `Omission` を組み立てている側（独自 adapter・テストダブル）は型エラーになります。
+> ⚠ **破壊的変更が3件あります。壊れ方が2種類あるので、分けて書きます。**
+>
+> - **2件は「返り値の型に必須フィールドが増えた」形**です（`FilteredOmission.scopeRelation` / `Omission` の `over_limit.stage`、どちらも `@mnemora/core`）。⟹ **読むだけなら影響を受けません。**自分で組み立てている側（独自 adapter・テストダブル）だけが型エラーになります。
+> - 🔴 **1件は「公開クラスのメソッドの署名が変わった」形**です。`@mnemora/testkit` の `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` が `(tenantId: string, recalls: number): void` から **`(ctx: Ctx, recalls: number): Promise<void>`** になりました。⟹ **呼んでいれば壊れます。**同期から `Promise` へ変わったので、**引数を直すだけでは足りません**（`await` が要ります）。書き換え方は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「8.」に在ります。
 >
 > ### 🔴 いま何ができて、何ができないか
 >
@@ -84,6 +90,8 @@
 > ⟹ **連想を使いたい場合は、`recall()` に `association` を明示的に渡してください。**⚠ そのとき、上の項目4 / 項目6 の前提は外れます。
 >
 > 🔴 **そして、渡しても規模が大きいと届きにくいことを先に書いておきます。**連想のアンカー窓は既定 `anchorCount=3` で、**規模に追随しません。**【実測】1万件では、探している記憶自身のアンカーがクエリ上位3件から押し出され、**12件中5件しか上位3件に入りません**（本番既定）。⟹ **「渡せば効く」とは書けません。**[#377](https://github.com/takecchi/mnemora/issues/377)
+>
+> 🔴 **その回避策も、`anchorCount` だけを上げても効きません。**アンカーは `RecallQuery.limit`（既定 10）の**内側に入った候補からしか**取られないので、**`limit` が `anchorCount` の天井になります。**実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` です。⟹ **`limit` を超えた分は「届きにくい」のではなく、必ず起点になりません。**【実測】`limit=10` のまま `anchorCount=40` にしてもアンカーは **10** で止まり、`limit=40 / anchorCount=40` では 40 になります。**裾野を広げたいなら `limit` と `anchorCount` の両方**を上げてください。⚠ ただし `limit` を上げると段1の取り込み幅も一緒に広がるので、**費用は連想枠だけの話では済みません。**詳細は [docs/recall.md](https://github.com/takecchi/mnemora/blob/main/docs/recall.md) §9.2
 >
 > #### 項目5 が「半分」である理由
 >
