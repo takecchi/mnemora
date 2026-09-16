@@ -128,7 +128,10 @@ describe.skipIf(!enforceFreshnessNow)(
       const howToFix = [
         "これは ADR PR では想定された過渡状態であることがある",
         "（ADR PR の作成者は索引を意図的に触らない設計——ADR 0137「決定」2番）。",
-        "マージする側が、マージ直前に PR ブランチ上で次を実行してコミット・push すれば緑になる:",
+        "⛔ この PR の【作成者】は、これを自分で直さないこと——【実測】並行する2本が",
+        "   どちらも索引を再生成すると、表の末尾の同じ位置へ1行ずつ足すため衝突する",
+        "   （ADR 0192「測ったこと」）。作成者が触らないことが、その衝突を消している。",
+        "⭐【マージする側】が、マージ直前に PR ブランチ上で次を実行してコミット・push すれば緑になる:",
         "  node scripts/generate-adr-index.mjs",
         "  git add docs/decisions/README.md",
         '  git commit -m "docs(adr-index): regenerate before merging #<PR番号>"',
