@@ -29,7 +29,7 @@ permissions:
 
 # 同じ版に対して2本が並走しないようにする（Release の編集で published が
 # 再発火する場合などに備える）。cancel-in-progress は false——publish の途中で
-# 殺すと「4本のうち2本だけ上がった」を作りうる。
+# 殺すと「6本のうち2本だけ上がった」を作りうる。
 concurrency:
   group: publish-${{ github.event.release.tag_name || github.ref }}
   cancel-in-progress: false
