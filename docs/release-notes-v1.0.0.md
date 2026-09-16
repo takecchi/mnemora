@@ -77,11 +77,13 @@
 > ⭐ **そして、この既定は他の2項目を支えています。**
 >
 > - **項目4（使われない記憶が、静かに遠ざかる）** — 連想枠を既定 on にすると、**段2 で落ちた記憶が連想経路から返り続ける**ことが分かっています。⟹ 「静かに遠ざかる」が出荷既定の中で破れます
-> - **項目6（知らないことを、知らないと言える）** — 同じく、連想経路が増える分だけ「名乗る」対象が増えます
+> - **項目6（知らないことを、知らないと言える）** — 連想枠を既定 on にすると、**同じ記憶が `result.memories` と `result.omitted`（`below_threshold`）の両方に載る**ことが分かっています。`omitted` は「返らなかったものの分類」なので、**返した記憶について「閾値未満で落ちた」と名乗り続ける**ことになります（[#421](https://github.com/takecchi/mnemora/issues/421)）
 >
 > ⟹ **「連想枠は既定 off」は単なる設定ではなく、項目4 と項目6 の ⭕ がその上に乗っています。**既定 on にするかどうかは、**10万行級で測ってから判断する**という順序が決まっています（測定が先・判断が後）。
 >
 > ⟹ **連想を使いたい場合は、`recall()` に `association` を明示的に渡してください。**⚠ そのとき、上の項目4 / 項目6 の前提は外れます。
+>
+> 🔴 **そして、渡しても規模が大きいと届きにくいことを先に書いておきます。**連想のアンカー窓は既定 `anchorCount=3` で、**規模に追随しません。**【実測】1万件では、探している記憶自身のアンカーがクエリ上位3件から押し出され、**12件中5件しか上位3件に入りません**（本番既定）。⟹ **「渡せば効く」とは書けません。**[#377](https://github.com/takecchi/mnemora/issues/377)
 >
 > #### 項目5 が「半分」である理由
 >
@@ -95,6 +97,7 @@
 > | | 中身 |
 > |---|---|
 > | **実 API に一度も当てていない** | CI に OpenAI / Anthropic の鍵が無いため、適合テストは**実 API を一度も叩いていません**。想起の質は「記録した実 API の応答の再生」で測っています——擬似物ではありませんが、**記録した時点のもの**です。[#142](https://github.com/takecchi/mnemora/issues/142) |
+> | **`LLMProvider` の適合テストが存在しない** | `@mnemora/testkit` に `describeLLMProviderConformance` は**ありません**。⟹ `@mnemora/anthropic` と `@mnemora/openai` の `LLMProvider` は、**契約そのものを検査する歯を持たないまま publish されています**（`@mnemora/anthropic` は publish 対象6本の1つです）。`provider-parity.test.ts` は2実装を突き合わせる歯であって、契約の歯ではありません。[#389](https://github.com/takecchi/mnemora/issues/389) |
 > | **テナント全体の `recall()` は10万行で重い** | `recall()` は `aggregateScope` を無条件に呼びます。【実測】10万行・1テナントで **165.1ms**。`ctx.subjectId` を指定すると **1.3〜4.0ms**（**約41倍**の差）。⚠ **`ctx.subjectId` は任意フィールドで、意識して足さないと付きません。**詳細は [docs/recall.md](https://github.com/takecchi/mnemora/blob/main/docs/recall.md) |
 > | **目次帯が返却量の大半を占める** | 【実測】既定（`limit=10`・`budget` 未指定）で、返る文字数の **90.7%** が目次帯（`IndexBand`）です。⚠ **`budget` では1文字も削れません**——予算が縛るのは `memories` tier だけです。削るなら `digestBandLimit` を使ってください。[#413](https://github.com/takecchi/mnemora/issues/413) |
 > | **近似索引が完全一致を取りこぼしうる** | HNSW は近似索引なので、クエリと完全一致する記憶を候補窓に入れられないことがあります。【実測】10万行で **62件中13件が実損**、うち2件は1位を失います。⭕ **取りこぼした可能性は `omitted` の `ann_unreached` として名乗るようになりました**（この版で直しました）⟹ **黙って落ちることはありません。**⛔ **取りこぼしそのものは残っています。**[#361](https://github.com/takecchi/mnemora/issues/361) |
