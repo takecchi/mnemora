@@ -1,4 +1,4 @@
-# ADR 0202: `result.memories` と `result.omitted` の排他性を契約にする — 段3.5 が昇格させた記憶を `below_threshold` から取り下げる（Issue #421）
+# ADR 0203: `result.memories` と `result.omitted` の排他性を契約にする — 段3.5 が昇格させた記憶を `below_threshold` から取り下げる（Issue #421）
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-17

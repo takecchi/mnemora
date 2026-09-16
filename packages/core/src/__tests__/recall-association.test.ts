@@ -241,7 +241,7 @@ describe("recall() — 連想枠（association、既定 off）", () => {
   });
 });
 
-describe("recall() — memories と omitted の排他性（Issue #421 / ADR 0202）", () => {
+describe("recall() — memories と omitted の排他性（Issue #421 / ADR 0203）", () => {
   it("段2で below_threshold として落ちた記憶が連想で丸ごと昇格すると、below_threshold の omission 自体が消える", async () => {
     const { runtime, stores } = buildRuntime();
     // A はクエリに強く当たる → アンカーになる。B はクエリには当たらない
