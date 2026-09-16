@@ -103,6 +103,29 @@ export interface LexicalHit {
  * （ADR 0084 §8 の負債）。
  */
 export interface LexicalStore {
+  /**
+   * `coverage` 降順・同値なら `rank` 降順で最大 `opts.limit` 件を返す（クラス doc
+   * 「返り値は `coverage` の降順である。同値なら `rank` の降順でタイブレークする」）。
+   *
+   * **⚠ `coverage`/`rank` の両方が完全に一致する行が複数あるときの順序も、adapter の
+   * 責務である**（Issue #345 /
+   * [ADR 0175](../../../../docs/decisions/0175-lexical-search-tiebreak-nondeterminism.md)、
+   * `VectorStore.search` の doc（`packages/core/src/interfaces/vector-store.ts`）が
+   * [ADR 0170](../../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)
+   * で書いたのと同じ形の契約の、語彙チャンネル版）。`recall-runtime.ts` の段2（再スコア）は
+   * `search()` が返す配列の**先頭から `limit` 件を切り詰める**——`Array.prototype.sort` は
+   * 安定（ES2019+）なので、`coverage`/`rank` が同点の候補は `search()` が返した順序を
+   * そのまま保つ。⟹ **同点候補が adapter ごとに違う順序で返ると、`recall()` の結果が
+   * 同じ入力・同じスコアに対して変わりうる。**
+   *
+   * `PostgresLexicalStore` は `coverage` → `rank` → `recorded_at` DESC → `id` の4段で
+   * tie-break する（`packages/postgres/src/lexical-store.ts` のクラス doc参照）。
+   * **`id` だけに頼る tie-break は不十分**——`id` はテナントの内容とは無関係な、
+   * ingest のたびに新しく振られる値であり、同一内容が重複記録される場面（同じ `content`
+   * を持つ行が複数ある場合、`coverage`/`ts_rank_cd` はどちらも完全に一致する）では、
+   * DB を作り直すたびに同点候補の並び順が変わる。**adapter を新しく書くときは、
+   * `coverage`/`rank` だけでなく完全なタイブレークまで含めて決定的な順序を返すこと。**
+   */
   search(
     ctx: Ctx,
     query: string,
