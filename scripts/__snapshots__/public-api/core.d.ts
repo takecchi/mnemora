@@ -1808,7 +1808,7 @@ export interface RecallQuery {
     includeFullyDecayed?: boolean;
     validAt?: Date;
     includeOutsideValidity?: boolean;
-    association?: RecallAssociationQuery;
+    association?: RecallAssociationQuery | null;
 }
 export declare const RECALL_CHANNELS: readonly [
     "ann",
@@ -1831,6 +1831,7 @@ export declare const RecallAssociationQuerySchema: z.ZodObject<{
 }, z.core.$strip>;
 export declare const DEFAULT_ASSOCIATION_ANCHOR_COUNT = 3;
 export declare const DEFAULT_ASSOCIATION_MIN_SIMILARITY = 0.5;
+export declare const DEFAULT_RECALL_ASSOCIATION: RecallAssociationQuery;
 export declare const DEFAULT_RECALL_LIMIT = 10;
 export declare const DEFAULT_OVER_FETCH_FACTOR = 4;
 export declare const RecallQuerySchema: z.ZodObject<{
@@ -1862,11 +1863,11 @@ export declare const RecallQuerySchema: z.ZodObject<{
     includeFullyDecayed: z.ZodOptional<z.ZodBoolean>;
     validAt: z.ZodOptional<z.ZodDate>;
     includeOutsideValidity: z.ZodOptional<z.ZodBoolean>;
-    association: z.ZodOptional<z.ZodObject<{
+    association: z.ZodOptional<z.ZodNullable<z.ZodObject<{
         maxCount: z.ZodNumber;
         anchorCount: z.ZodOptional<z.ZodNumber>;
         minSimilarity: z.ZodOptional<z.ZodNumber>;
-    }, z.core.$strip>>;
+    }, z.core.$strip>>>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;
