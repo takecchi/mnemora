@@ -102,13 +102,17 @@
 >
 > これは「バグ報告が無い」という意味ではなく、**私たちが知っていて、まだ直していないもの**です。
 >
+> ⭐ **並べる順に意味があります。上ほど「踏む確率が高く、しかも自分では気づきにくい」ものです。**上2つは**既定のまま使っていて踏み**、⛔ **踏んでも「弱さ」の顔をしません**（片方は「予算を絞ったのに減らない」、もう片方は「ただ遅い」に見えます）。下2つは運用中に壊れるものではなく、**採用を決めるときに知っておくべきこと**です。
+>
 > | | 中身 |
 > |---|---|
+> | **目次帯が返却量の大半を占める** | 【実測】既定（`limit=10`・`budget` 未指定）で、返る文字数の **90.7%** が目次帯（`IndexBand`）です。⚠ **`budget` では1文字も削れません**——予算が縛るのは `memories` tier だけです。削るなら `digestBandLimit` を使ってください。[#413](https://github.com/takecchi/mnemora/issues/413) |
+> | **テナント全体の `recall()` は10万行で重い** | `recall()` は `aggregateScope` を無条件に呼びます。【実測】10万行・1テナントで **165.1ms**。`ctx.subjectId` を指定すると **1.3〜4.0ms**（**約41倍**の差）。⚠ **`ctx.subjectId` は任意フィールドで、意識して足さないと付きません。**詳細は [docs/recall.md](https://github.com/takecchi/mnemora/blob/main/docs/recall.md) |
+> | **近似索引が完全一致を取りこぼしうる** | HNSW は近似索引なので、クエリと完全一致する記憶を候補窓に入れられないことがあります。【実測】10万行で **62件中13件が実損**、うち2件は1位を失います。⭕ **取りこぼした可能性は `omitted` の `ann_unreached` として名乗るようになりました**（この版で直しました）⟹ **黙って落ちることはありません。**⛔ **取りこぼしそのものは残っています。**[#361](https://github.com/takecchi/mnemora/issues/361) |
 > | **実 API に一度も当てていない** | CI に OpenAI / Anthropic の鍵が無いため、適合テストは**実 API を一度も叩いていません**。想起の質は「記録した実 API の応答の再生」で測っています——擬似物ではありませんが、**記録した時点のもの**です。[#142](https://github.com/takecchi/mnemora/issues/142) |
 > | **`LLMProvider` の適合テストが存在しない** | `@mnemora/testkit` に `describeLLMProviderConformance` は**ありません**。⟹ `@mnemora/anthropic` と `@mnemora/openai` の `LLMProvider` は、**契約そのものを検査する歯を持たないまま publish されています**（`@mnemora/anthropic` は publish 対象6本の1つです）。`provider-parity.test.ts` は2実装を突き合わせる歯であって、契約の歯ではありません。[#389](https://github.com/takecchi/mnemora/issues/389) |
-> | **テナント全体の `recall()` は10万行で重い** | `recall()` は `aggregateScope` を無条件に呼びます。【実測】10万行・1テナントで **165.1ms**。`ctx.subjectId` を指定すると **1.3〜4.0ms**（**約41倍**の差）。⚠ **`ctx.subjectId` は任意フィールドで、意識して足さないと付きません。**詳細は [docs/recall.md](https://github.com/takecchi/mnemora/blob/main/docs/recall.md) |
-> | **目次帯が返却量の大半を占める** | 【実測】既定（`limit=10`・`budget` 未指定）で、返る文字数の **90.7%** が目次帯（`IndexBand`）です。⚠ **`budget` では1文字も削れません**——予算が縛るのは `memories` tier だけです。削るなら `digestBandLimit` を使ってください。[#413](https://github.com/takecchi/mnemora/issues/413) |
-> | **近似索引が完全一致を取りこぼしうる** | HNSW は近似索引なので、クエリと完全一致する記憶を候補窓に入れられないことがあります。【実測】10万行で **62件中13件が実損**、うち2件は1位を失います。⭕ **取りこぼした可能性は `omitted` の `ann_unreached` として名乗るようになりました**（この版で直しました）⟹ **黙って落ちることはありません。**⛔ **取りこぼしそのものは残っています。**[#361](https://github.com/takecchi/mnemora/issues/361) |
+>
+> ⚠ **連想枠（`association`）を使う場合は、ここにもう1つ弱さがあります**——アンカーの天井です。上の「項目2 が『半分』である理由」に書きました。⛔ **この表に再掲していないのは、隠すためではなく、回避策を説明している場所から離さないためです。**
 >
 > ### 何を「やらない」と決めているか
 >
