@@ -31,9 +31,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⛔ **`v1.0.0` の tag はまだ切られていない。**【実測】2026-09-17、`gh release list` の最新は `v0.2.0`。
 
-**この節は `0.2.0` からの差分を対象とする。**【実測】`git rev-list --count v0.2.0..origin/main` は **31**、
-うち `feat`/`fix` は **12本**。冒頭「何を載せるか」の除外規則（docs のみ・テスト追加のみ・
-内部スクリプト・ADR 索引の再生成は載せない）に当てると、**利用者に見えるのは7件**である。
+**この節は `0.2.0` からの差分を対象とする。**
+
+⭐ **数えた基準を明記する。**この節の数字は `v0.2.0` … **`32bbf22`** の範囲を数えたものである。
+⟹ 🔴 **`origin/main` がこれより進んでいたら、この節は腐っている可能性がある**——読む人が
+`git log --oneline 32bbf22..origin/main` で自分で判定できる。**数字を焼き込む以上、`main` が動けば
+必ず腐る**（`docs/roadmap.md` §7.0 と同じ規律を、この節にも掛ける）。
+
+【実測】`git rev-list --count v0.2.0..32bbf22` は **33**、
+うち `feat`/`fix` は **13本**。冒頭「何を載せるか」の除外規則（docs のみ・テスト追加のみ・
+内部スクリプト・ADR 索引の再生成は載せない）に当てると、**利用者に見えるのは8件**である。
 
 ⚠ **「`packages/*/src` を触ったか」で数えないこと。**この規則とずれる例が両方向に在る——
 `0016`/`0017` のマイグレーション追加（PR #396）は `src` を1行も触らないが**載せる**（利用者が
@@ -65,6 +72,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **語彙チャンネルの `search()` に決定的な最終キーが入った。**同点の候補の順序が
   呼び出しごとに変わりうる状態を解消（[#345](https://github.com/takecchi/mnemora/issues/345) /
   [ADR 0175](./docs/decisions/0175-lexical-search-tiebreak-nondeterminism.md)、PR #390）
+
+### 追加
+
+- **`TenantSettingsStore.setDefaultHalfLifeRecalls`**（任意メソッド）。テナント既定の
+  半減期を「recall 回数」で設定する本番の経路（[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
+  ⭕ **任意メソッドなので後方互換**——実装していない adapter は従来どおり動く
 
 ### 変更（性能）
 
