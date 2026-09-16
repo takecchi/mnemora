@@ -310,7 +310,12 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
       association: null,
     });
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual({ kind: "over_limit", count: 1, countKind: "exact" });
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "rescore",
+      count: 1,
+      countKind: "exact",
+    });
   });
 });
 

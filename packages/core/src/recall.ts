@@ -232,8 +232,20 @@ export interface BelowThresholdOmission {
   nearMisses?: { memoryId: MemoryId; score: number }[];
 }
 
+/**
+ * **`stage`（Issue #375 / [ADR 0188](../../../docs/decisions/0188-association-over-limit-omission.md)）**:
+ * この上限切り捨てがどの段で起きたかを言う。次の一手を変える欄なので必須にした
+ * （`filtered.condition` と同じ理由——「どの上限を動かせばよいか」が段ごとに違う）。
+ *
+ * - `"rescore"` — 段2。`RecallQuery.limit` を超えた分（`docs/recall.md` §2 段2）。
+ *   次の一手: `limit` を増やす、あるいはページングする。
+ * - `"association"` — 段3.5。`RecallAssociationQuery.maxCount` を超えた分
+ *   （`docs/recall.md` §9）。次の一手: `maxCount` を増やす。**`limit` を増やしても
+ *   直らない**——連想枠の候補は段2の `limit` とは別の上限（`maxCount`）で切られる。
+ */
 export interface OverLimitOmission {
   kind: "over_limit";
+  stage: "rescore" | "association";
   count: number;
   countKind: CountKind;
 }
@@ -446,6 +458,7 @@ const BelowThresholdOmissionSchema = z.object({
 
 const OverLimitOmissionSchema = z.object({
   kind: z.literal("over_limit"),
+  stage: z.enum(["rescore", "association"]),
   count: z.number().int().nonnegative(),
   countKind: CountKindSchema,
 }) satisfies z.ZodType<OverLimitOmission>;
@@ -499,6 +512,17 @@ const UnitAssemblyDroppedOmissionSchema = z.object({
   countKind: CountKindSchema,
 }) satisfies z.ZodType<UnitAssemblyDroppedOmission>;
 
+/**
+ * **2026-09-17 追記（Issue #272、[ADR 0181](../../../docs/decisions/0181-schema-type-equals-parity.md)）**:
+ * `satisfies z.ZodType<Omission>` を足した。この discriminated union は、11本の枝
+ * それぞれには `satisfies z.ZodType<XxxOmission>` が付いているのに、まとめのこの1行にだけ
+ * 付いていなかった（55箇所の `satisfies z.ZodType<...>` のうち、唯一この形の宣言が
+ * 欠けていた箇所）。**足しても `tsc` は緑のまま**——各枝が既に個別に検査されているため、
+ * 実質的な検査の追加ではないが、「まとめの discriminated union 自体は誰も見ていない」
+ * という読み手の誤解を防ぐ。`packages/core/src/__tests__/schema-type-equals-parity.test.ts`
+ * が、この1行が無くても `Equals<z.infer<typeof OmissionSchema>, Omission>` として
+ * 同じ検査をテスト側からも固定している（この行が万一巻き戻っても、あちらの歯が拾う）。
+ */
 export const OmissionSchema = z.discriminatedUnion("kind", [
   StageSkippedOmissionSchema,
   FilteredOmissionSchema,
@@ -511,7 +535,7 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
   LexicalTruncatedOmissionSchema,
   ScoreNotComparableOmissionSchema,
   UnitAssemblyDroppedOmissionSchema,
-]);
+]) satisfies z.ZodType<Omission>;
 
 // ---------------------------------------------------------------------------
 // 目次帯 / 被覆不変条件（docs/recall.md §5）
