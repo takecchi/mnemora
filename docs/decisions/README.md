@@ -197,5 +197,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0188](./0188-association-over-limit-omission.md) | 連想枠（段3.5）の `maxCount` 切り捨てを `omitted` に名乗らせる — `over_limit` に `stage` を足す（Issue #375） | 採用 (2026-09) |
 | [0190](./0190-correction-cli-dispatch-ci-tooth.md) | `correction` サブコマンドを CI の歯にする — 既存ジョブへ相乗り・`deterministic` 層・`omitted` の `superseded` assert | 採用 (2026-09) |
 | [0191](./0191-ci-green-verdict-bound-to-sha.md) | 「CI が緑」の判定を sha に縛る——`gh pr merge --match-head-commit` を道具側で強制する（Issue #294） | 採用 (2026-09) |
+| [0192](./0192-ann-unreached-covers-full-window.md) | `ann_unreached` を「窓が満杯でも鳴る」形に直す — `ann-truncation.ts` の約束をようやく果たす | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
