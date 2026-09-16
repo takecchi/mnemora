@@ -41,7 +41,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 | 4 | `FilteredOmission.condition` の union に `"expired"`/`"not_yet_valid"` が増えた。 | 消費するだけなら非破壊。**`never` で網羅性を検査しているコードは壊れる** | [ADR 0164](./docs/decisions/0164-valid-from-until-recall.md) |
 | 5 | `Runtime.getRecall` が必須メソッドとして追加された。 | `Runtime` を自前実装している側。⚠ 根拠 ADR に破壊性の言及が無い——[移行ガイド](./docs/migration-v1.md)を必ず見ること | [ADR 0161](./docs/decisions/0161-runtime-get-recall.md) |
 | 6 | `TenantSettingsStoreConformanceOptions.supportsDecayClock`（`@mnemora/testkit`）が必須フィールドとして追加された。 | `describeTenantSettingsStoreConformance(...)` を呼んでいる adapter 作者。⚠ 根拠 ADR は当初「非破壊」と誤記載していたが訂正済み | [ADR 0165](./docs/decisions/0165-decay-activity-clock.md) |
-| 7 | `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドとして追加された。 | **返り値の型なので、読むだけ・呼ぶだけの利用者には非破壊。** `RecallFootprintEstimate` を自前で構築している側だけが影響を受ける。入力側（`estimateRecallFootprint`）は省略可能フィールドとして追加されており非破壊（省略時は `?? 0`）。⚠ この項目は ADR 0166 を根拠とする PR（#336）が本ブランチ作成時点で `origin/main` に未着地であることに基づく（マージ前に現物との突き合わせが必要——詳細は本 PR の報告を見ること） | ADR 0166 |
+| 7 | `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドとして追加された。 | **返り値の型なので、読むだけ・呼ぶだけの利用者には非破壊。** `RecallFootprintEstimate` を自前で構築している側だけが影響を受ける。入力側（`estimateRecallFootprint`）は省略可能フィールドとして追加されており非破壊（省略時は `?? 0`）。（【実測】`packages/core/src/recall-footprint.ts:392` が必須、入力側の `RecallFootprintShape.associationCount` は `:368` で省略可能、既定は `:463` の `?? 0`） | ADR 0166 |
 
 ### Changed（後方互換だが挙動が変わりうる）
 
@@ -56,6 +56,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`PostgresVectorStore.search` の `ORDER BY` に `memory_id` の tie-break が追加された。**
   距離が完全一致した候補の順序が決定的になった（以前は未定義）。
   ([ADR 0167](./docs/decisions/0167-association-getvectors-order-nondeterminism.md))
+- **連想枠の非決定性は、上の修正だけでは消えていなかった（第2段）。** `search()` が返す
+  候補に距離の完全一致タイが在ると、`memory_id` による tie-break が取り込みのたびに
+  揺れていた。段1と段2の両方で順序を決定的にして直した（Issue #339）。
+  ([ADR 0170](./docs/decisions/0170-association-search-tiebreak-nondeterminism.md))
 
 ### Added
 
@@ -70,6 +74,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **減衰の時計を2本持てる（`decay_clock`）** — 壁時計（`wall`、既定）に加え、活動時計
   （`activity`）・両方（`either`）をテナントごとに選べる。低頻度利用のテナントが
   一律に沈むのを避けられる。([ADR 0165](./docs/decisions/0165-decay-activity-clock.md))
+- **`estimateRecallFootprint` が連想枠の分も見積もれる** — 入力
+  `RecallFootprintShape.associationCount?`（**省略可能**）を渡すと、返り値に
+  `associationCount` が出る。**渡さなければ従来と同じ値が返る**（`?? 0`）。
+  ([ADR 0166](./docs/decisions/0166-recall-footprint-association-term.md))
+- **`examples/chat` の想起経路が連想枠を既定で使うようになった**（`maxCount=10`）。
+  ⚠ **`@mnemora/core` の `recall()` の既定は off のままである**——連想枠は
+  `query.association` を渡したときだけ走る（`packages/core/src/recall.ts:1100`
+  「省略時は連想を一切走らせない」）。**変わったのは採用側が明示して使うようになったこと**であって、
+  ライブラリの既定ではない。
+  ([ADR 0168](./docs/decisions/0168-examples-chat-uses-association.md))
 - **`tick()` が `consolidate()`/`reflect()` を駆動できる**（既定 off の opt-in、
   `RuntimeConfig.autoQueueConsolidateReflectOnExtract`）。
   ([ADR 0157](./docs/decisions/0157-tick-drives-consolidate-and-reflect.md))

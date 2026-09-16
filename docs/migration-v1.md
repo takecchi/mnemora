@@ -232,10 +232,10 @@ describeTenantSettingsStoreConformance({
 
 ### 7. `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドになった
 
-**⚠ この項目は ADR 0166 を根拠とする PR（#336）に基づく。この移行ガイドの作成時点で
-`origin/main` に未着地であり、この作業環境では現物（`packages/core/src/recall-footprint.ts`）
-を確認できていない。** マージ前に、この節の記述が実際のコードと一致するかの確認が必要
-——詳細は本 PR の報告を見ること。
+**【実測】2026-09-16、PR #336 の着地後に現物（`packages/core/src/recall-footprint.ts`）で
+確かめた**: 返り値の `RecallFootprintEstimate.associationCount: number` は `:392` で**必須**、
+入力の `RecallFootprintShape.associationCount?: number` は `:368` で**省略可能**、
+省略時の既定は `:463` の `Math.max(0, shape.associationCount ?? 0)` である。
 
 **誰が影響を受けるか**: **読むだけ・呼ぶだけの利用者には非破壊。**
 `estimateRecallFootprint()`/`compareWithFullLog()` を呼んで戻り値を読んでいるだけなら
@@ -297,7 +297,5 @@ recall の結果が意味的に変わることは無い**——同点だった�
 
 - **DB マイグレーション（`0013`/`0014`/`0015`）を実際に Postgres へ適用した結果**
   ——この作業環境には `DATABASE_URL` が無く、SQL ファイルの内容を読んだ確認に留まる。
-- **`RecallFootprintEstimate.associationCount`（🔴7番）の現物**——根拠とする PR #336 が
-  この作業環境のブランチにまだ着地していない。
 - **ここに挙げた「誰が影響を受けるか」の判定が、実際の外部 adapter 実装者にとって
   過不足ないか**——この repo の中からは検証できない。
