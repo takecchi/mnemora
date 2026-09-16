@@ -776,8 +776,9 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 | [#338](https://github.com/takecchi/mnemora/issues/338) | `activity` 時計で項目1 が破れる | ⭕ **止めない**（⚠ 既知の制約として出す） | **逆算は式の上で正しい**（§7.4 の ⚠1）。⛔ **だが既定は `wall` である**——`packages/core/src/interfaces/tenant-settings-store.ts:125` `DEFAULT_DECAY_CLOCK: DecayClock = "wall"`、`packages/postgres/migrations/0015_decay_activity_clock.sql:92` の `NOT NULL DEFAULT 'wall'`、`readDecayClock`（`:293`）も `getDecayClock` を持たない adapter では `'wall'` へ倒す。⟹ **既定の利用者には今日壊れているものが無い。**到達には `decay_clock` を明示的に `activity`/`either` へ変え、かつ recall 頻度が高いことが要る。⚠ **`3112` は逆算であって実測ではなく、実運用の recall 頻度の数字は1つも無い。**⚠ **守る歯も、採用者が境界に気づく仕組みも無い。** |
 | [#329](https://github.com/takecchi/mnemora/issues/329) | 忘却ゲートで落ちた記憶が `omitted` に出ない | ⭕ **止めた ⟹ 塞いだ**（初版の判定は 🔴 止める） | **初版の判定**: これが項目6 を「在る」から「半分」へ下げている当のものであり、§7.2 の定義どおりに数えるなら塞がるまで7項目は揃わない。北極星 項目6 と正面から食い違い、`AGENTS.md`「正典と実装が食い違ったら、バグなのは実装のほう」に当たる。⛔ **ただし塞ぐ費用が小さくないので、「塞ぐ」か「仕様として確定する」かはオーナーの判断**とした。⭐ **結果**: オーナーが「塞ぐ方向で進めてよい。ただし押し下げを買い直すコストが実測で許容できないほど大きいなら止まって報告」と判断 ⟹ **実測したところ、押し下げを買い直す必要が無かった** —— `decay_floor_at` の述語は **HNSW 索引スキャンに届いておらず**、Nested Loop 内側の `memories_pkey` の Filter に出るだけで、外しても latency はほぼ変わらない（100k行・50%減衰で 1.216ms → 1.202ms）。押し下げが買っているのは**速度ではなく候補の質**であった（`LIMIT 40` の生存が 50%減衰で中央値 21/40、90%減衰で 4/40、min 0）⟹ 外す案は北極星の問い1 で落ちる。⟹ **押し下げを一切外さず、既に無条件で走っている `aggregateScope` に述語を1本足して厳密に数える**形で [#351](https://github.com/takecchi/mnemora/pull/351)（ADR 0173）が着地。費用は `aggregateScope` の **+6.3%（150.6ms → 160.1ms、buffers は 6456 で同数）**。`countKind` は `lower_bound` → **`exact`** に上がった |
 | [#337](https://github.com/takecchi/mnemora/issues/337) | 10万行級の測定 | ⭕ **止めない** | ⛔ **これは残件ではなく、オーナーの決定の記録である**（逐語「10万行級で測ってから既定 on をやるか判断してほしいです。」）。⟹ **v1.0 は連想枠を既定 off（[ADR 0151](./decisions/0151-recall-association-unprompted.md) の opt-in）のまま出す、ということが既に決まっている。**issue 本文も「門にはしない想定」と書いている。⚠ **ただしこの決定が、項目2 から道 (い) を外している**（§7.4）。 |
-| [#349](https://github.com/takecchi/mnemora/issues/349) | 段1の3段 tie-break が HNSW を LIMIT の約10倍まで汲み出している | ⛔ **判定していない（オーナーへ材料を出した）** | ⚠ **この再監査の副産物**（#329 のコスト実測の比較対象として出た）。⛔ **提案ではなく実測の報告**として起票しており、ADR 0170 の判断（再現性）を覆す提案ではない。**手は付けていない。**数字と、測っていないことは §7.11 に整理した |
+| [#349](https://github.com/takecchi/mnemora/issues/349) | 段1の3段 tie-break が HNSW を LIMIT の約10倍まで汲み出している | ⭕ **止めない**（オーナー判定、2026-09-16） | ⚠ **この再監査の副産物**（[#329](https://github.com/takecchi/mnemora/issues/329) のコスト実測の比較対象として出た）。判定の根拠4つ: ①🔴 **絶対値が median 3.002 ms → 0.700 ms（差 約2.3 ms）で、同条件の段5 `aggregateScope` は median 150.6 ms** ⟹ **段1 は段5 の約1/50 であり、この差は `recall()` 全体の約1.5%。体感に出ない**（§7.11）②**正しさは保たれている**——[ADR 0170](./decisions/0170-association-search-tiebreak-nondeterminism.md) が解いた「fresh ingest をまたいだ順序の再現」は実在する欠陥であり、**tie-break を外すのは解ではない** ③**HNSW の順序提供は外れていない**（索引は使われたまま。差は `Incremental Sort` の有無）④🔴 **ADR 0170 の退行かどうかは測っていない**（0170 の直前＝ADR 0167 の `e.memory_id` 単独 tie-break を測っていない）⟹ **「0170 が持ち込んだ」と言えない以上、0170 を疑って急いで動かす理由が無い**。⛔ **「問題ではない」ではない。**2.3 ms も `Incremental Sort` の挟まりも実在する。**判定したのは「v1.0 を止めない」までであり、直すかどうかは別の判断である** |
 | [#352](https://github.com/takecchi/mnemora/issues/352) | `omitted` の7つの `condition` のうち `decayed` だけが `totalInScope` の**内側**を数えている | ⭕ **止めない** | [#351](https://github.com/takecchi/mnemora/pull/351) の検分中に見つけた。`in_scope` は `status IN ('active','contested') AND inPeriod AND isValid`（`packages/postgres/src/memory-store.ts:1072-1073`）で、他の6つは全部この**外側**だが `decayed` だけ**内側**である。⚠ **`expired` と構造が同じ**（どちらも「いま」に依存し、opt-out を持ち、列から導く）**なのに扱いが逆**。⛔ **ただし誤った数を返す問題ではなく、意味の一貫性の問題である** ⟹ 外から見た故障は無い。揃えるとどちらの向きでも ⭐門の基準値か既存 ADR に触るので、**別 issue に分離した**（オーナー判断） |
+| [#355](https://github.com/takecchi/mnemora/issues/355) | 段5 の `aggregateScope` が10万行で median 150.6 ms（段1 の約50倍）で、`recall()` から無条件に呼ばれる | ⛔ **判定していない（オーナーへ材料を出した）** | ⭐ **この再監査の副産物のうち、いちばん大きい。**[#329](https://github.com/takecchi/mnemora/issues/329) のコストを測るついでに、段1 と比べる基準として測ったところ、**本体より桁が大きかった**という形である。`packages/core/src/recall-runtime.ts:1335` が**分岐なしで**呼ぶ（実装は `packages/postgres/src/memory-store.ts:999`）。中身は `memories` のテナント全件スキャンの上で `count(*) FILTER` を複数本 + `groups` + `digestBand`。⚠ **`subjectId` で絞った場合は測っていない**——`docs/recall.md` §5 の既存の実測では subject 絞りは全規模 1ms 未満とされており、**そちらが実運用の主経路である可能性が高い** ⟹ **この 150.6 ms は「テナント全体を対象にした recall」の数字である。**⛔ **今日入れたものではない**（[#351](https://github.com/takecchi/mnemora/pull/351) の寄与は +6.3% と測れているので、150.6 ms は #351 より前の値）。**いつからかは測っていない。**対処はどれも ADR 0011 / ADR 0133 / `docs/recall.md` §5 に触るので、issue には方向だけ挙げて判断は書いていない |
 
 #### ⛔ 残件6件に入っていなかったが、v1.0 を止めていたもの —— **この再監査で新しく見つけ、同日中に塞いだ**
 
@@ -814,9 +815,9 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 ⛔ **`version` を上げること・publish・Release の作成は、いまもオーナー専権である**（§7.8）。**この節は「切れるか」を判定しただけで、切っていない。**
 
-### 7.11 [#349](https://github.com/takecchi/mnemora/issues/349)（段1の tie-break の費用）の材料 —— ⛔ **判定はしていない**
+### 7.11 [#349](https://github.com/takecchi/mnemora/issues/349)（段1の tie-break の費用）の材料 —— ⭕ **判定: v1.0 を止めない**
 
-**この節は数字を置くだけである。**「v1.0 を止めるか」はオーナーが決める。⛔ **新しい測定はしていない**——[#329](https://github.com/takecchi/mnemora/issues/329) のコスト実測の中で、比較対象として `ORDER BY` を振ったときに出た数字である。
+**この節は数字を置くだけの節だった。**⭐ **2026-09-16、オーナーがこの数字を読んで「v1.0 を止めない」と判定した**（根拠は §7.10 の #349 の行）。⛔ **新しい測定はしていない**——[#329](https://github.com/takecchi/mnemora/issues/329) のコスト実測の中で、比較対象として `ORDER BY` を振ったときに出た数字である。⛔ **「問題ではない」と判定されたのではない。**2.3 ms も `Incremental Sort` の挟まりも実在する。**直すかどうかは別の判断として開いている。**
 
 | 問い | 答え |
 |---|---|
@@ -835,3 +836,12 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 - **cold cache・複数テナント・`subjectId` で絞る経路**は測っていない。
 - **順序の再現性を保ったまま速くする案は検討していない。**ADR 0170 が解こうとした問題（fresh ingest をまたいだ順序の再現）は実在するので、**単に第2・第3キーを外すのは解ではない。**
 - **`Incremental Sort` の有無を検査する歯は、リポジトリに1本も無い**（`grep -rn "Incremental Sort"` が0件）【実測】。⟹ **いまこれが変わっても、CI は何も言わない。**
+
+
+#### ⭐ この測定から出た、もっと大きいもの —— [Issue #355](https://github.com/takecchi/mnemora/issues/355)
+
+**同じ器で段5 の `aggregateScope` を測ったところ、median 150.6 ms だった**（段1 の約50倍）。**`packages/core/src/recall-runtime.ts:1335` が分岐なしで呼ぶ経路である。**
+
+⟹ 🔴 **#349 の 2.3 ms は、この 150.6 ms の約 1.5% にあたる。**⛔ **4.3倍という比だけを独り歩きさせないこと**——**段1 そのものが、`recall()` の費用のごく一部である。**
+
+⛔ **#355 の判定はしていない**（オーナーが判定する）。⚠ **`subjectId` で絞った場合は測っていない**——`docs/recall.md` §5 の既存の実測では subject 絞りは全規模 1ms 未満とされており、**そちらが実運用の主経路である可能性が高い。**⟹ **150.6 ms は「テナント全体を対象にした recall」の数字である。**⛔ **今日入れたものではない**（[#351](https://github.com/takecchi/mnemora/pull/351) の寄与は +6.3% と測れているため、150.6 ms はそれより前の値）。**いつからかは測っていない。**
