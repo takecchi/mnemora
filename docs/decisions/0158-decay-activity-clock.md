@@ -304,6 +304,59 @@
       呼び出し側が渡す」）と同じ形で `nowSeq` を受け取る。**store が自分で
       `tenant_activity` を読みに行かない。**
 
+  16. **⚠ 実装中に見つけた穴を、この ADR で塞いだ: `MemoryStore.reinforce` に活動時計の
+      「いま」を渡す口が無かった。**（`packages/core/src/interfaces/memory-store.ts`
+      の元の宣言は `reinforce(ctx, id, at): Promise<Memory>` の3引数のみ。）
+
+      **何が壊れていたか**: 強化（`reinforce`）すると壁時計の床（`decay_floor_at`）は
+      `at` から引き直されるのに、活動時計の床（`decay_floor_seq`）を引き直す入力
+      （`nowSeq`）を渡す口が無いため、**据え置かれたままになっていた。**
+      ⟹ `decay_clock` が `'activity'` のテナントでは、`reinforce` が忘却ゲートに対して
+      **完全な no-op** になる。`'either'` では壁時計軸だけが戻る非対称になる。
+      これは本 ADR の文脈節の表（「起点は両方の時計で同じく『最後の書き込み（作成・
+      強化）』に置く」）と食い違う——強化は「最後の書き込み」の一種のはずである。
+
+      **決めたこと**: `reinforce` の**末尾に省略可能な第4引数**を足す。
+
+      ```ts
+      reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+      interface ReinforceOptions {
+        nowSeq?: number;
+      }
+      ```
+
+      - `nowSeq` は `ArchiveDecayedOptions.nowSeq`/`now` と同じ規律（ADR 0037「時刻は
+        呼び出し側が渡す」）——**store が自分で `tenant_activity` を読みに行かない。**
+        `packages/core/src/runtime.ts` の呼び出し側2箇所（使用報告ループ・
+        `restoreArchived`）が `resolveActivityClockInputs` と同じ経路
+        （`readDecayClock`）で `decay_clock` を読み、**`'wall'` 以外のときだけ**
+        `readActivitySeq` を読んで `nowSeq` に渡す——`'wall'` のテナントでは
+        `tenant_activity` を一度も読まない（「決めたこと」5 と同じ規律）。
+      - **`nowSeq` を省略した場合の契約: 活動時計側の3列
+        （`decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls`）は据え置く**
+        （本 ADR 以前と同じ挙動）。**黙って `0` として扱わない。**
+      - 対象の Memory が `halfLifeRecalls` を持たない（`null`/未設定）場合は、`nowSeq`
+        を渡しても活動時計側の列には触れない——その Memory はそもそも活動時計では
+        沈まない（「決めたこと」4 と同じ理由）。
+      - `packages/postgres/src/memory-store.ts` の `reinforce` は、`opts?.nowSeq` と
+        対象行の `half_life_recalls` が両方揃っているときに限り、`decay_base_seq`/
+        `decay_floor_seq` を壁時計側と**同じ WHERE 句**（同じ `at` の比較）でまとめて
+        更新する——2軸とも「同じ強化イベント」の一部だからである。壁時計側の
+        SET 句・WHERE 句は1バイトも変えていない（`opts` を渡さない全既存呼び出しは、
+        従来とバイト単位で同じ SQL 文になる）。
+
+      **⭐ 非破壊である理由**: 引数を1つ増やすだけであり、TypeScript の構造的部分型の
+      下では、引数3つの既存実装（`MemoryStore` を実装する第三者の adapter を含む）は
+      1行も直さずにこの4引数の interface をそのまま満たす——「決めたこと」13 が
+      `TenantSettingsStore` の新メソッドを省略可能にしたのと同じ理由（`@mnemora/core`
+      は npm 公開済み）。⟹ **この PR 全体が非破壊であるという本 ADR の性質
+      （「決めたこと」13 末尾）は、この項目でも保たれている。**
+
+      ⚠ **これは ADR 0158 自身の記述との食い違いを事後に見つけて塞いだものである。**
+      「引き受けた負債」に新しい項目は増やさない——`reinforce` を呼ぶ本番経路
+      （「確かめていないこと」参照）が入った時点で、文脈節の記述どおりに動くことを
+      この項目で保証したので、負債ではなく修正として記録する。
+
 - **検討した代替案（落とした案）**:
 
   1. **`'either'` を全テナントに固定で適用する（設定項目を作らない）。**

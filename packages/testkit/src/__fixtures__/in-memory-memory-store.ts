@@ -1,5 +1,6 @@
 import {
   ContestedWithoutCompanionError,
+  defaultActivityDecayStrategy,
   defaultDecayStrategy,
   isContestedWithoutCompanion,
   isEmbeddingStatusRollback,
@@ -35,6 +36,7 @@ import type {
   RecallId,
   RecallRecord,
   RecallScope,
+  ReinforceOptions,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
   ScopeAggregate,
@@ -643,8 +645,14 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `decayFloorAt` を同じ条件でまとめて動かす。古い `at` を**例外にはしない**——
    * 呼び出し側（`runtime.observe` の使用報告ループ）の次の一手が無いため、
    * no-op のまま現在の（更新されなかった）行を返す。
+   *
+   * [ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+   * `opts.nowSeq` が渡され、かつこの Memory が `halfLifeRecalls` を持つときに限り、
+   * 活動時計側の起点・床（`decayBaseSeq`/`decayFloorSeq`）も同じ条件で一緒に進める
+   * （`PostgresMemoryStore.reinforce` と同じ分岐。`ReinforceOptions.nowSeq` の doc
+   * コメント参照）。
    */
-  async reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory> {
+  async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
@@ -664,6 +672,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       strength: memory.strength,
       halfLifeHours: memory.halfLifeHours,
     });
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      memory.decayBaseSeq = opts.nowSeq;
+      memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
+        baseSeq: opts.nowSeq,
+        strength: memory.strength,
+        halfLifeRecalls: memory.halfLifeRecalls,
+      });
+    }
     memory.updatedAt = new Date();
     return memory;
   }

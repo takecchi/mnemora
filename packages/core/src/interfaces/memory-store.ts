@@ -481,8 +481,23 @@ export interface MemoryStore {
    * 対象の Memory が存在しない場合は「memory not found」の `Error` を投げる。`id` が
    * adapter の期待する形式でない場合も同じ結果になる（`setEmbeddingStatus` の doc
    * コメント・`packages/postgres/src/mapping.ts` の `isUuidLike` の doc コメント参照）。
+   *
+   * [ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+   * `opts.nowSeq` を渡すと、活動時計側の起点・床（`decayBaseSeq`/`decayFloorSeq`）も
+   * 同じ強化イベントとして進める——**対象の Memory が `halfLifeRecalls` を持つ場合に限る**
+   * （`ReinforceOptions.nowSeq` の doc コメント参照）。`opts` を渡さない、または
+   * `opts.nowSeq` を省略した場合の契約: **活動時計側の3列（`decayBaseSeq`/`decayFloorSeq`/
+   * `halfLifeRecalls`）には一切触れない**（黙って `0` として扱わない）。壁時計側
+   * （`last_reinforced_at`/`decay_floor_at`）の更新は `opts` の有無に関わらず今日どおり。
+   *
+   * ⭐ **`opts` は省略可能な第4引数であり、この変更は非破壊である。**この口を実装する
+   * 既存の3引数実装（`reinforce(ctx, id, at): Promise<Memory>`）は、1行も直さずに
+   * この4引数の interface をそのまま満たす——TypeScript の構造的部分型の下で、
+   * 「呼び出し側が省略可能な引数を渡さない」ことと「実装がその引数を最初から
+   * 持たない」ことは区別されない。ADR 0158 決めたこと13 が
+   * `TenantSettingsStore` の新メソッドを省略可能にしたのと同じ規律をここでも守る。
    */
-  reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory>;
+  reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
   /**
    * D9: 使用報告を記録する。`(recall_id, memory_id)` の挿入が実際に起きたものだけを
    * `insertedMemoryIds` として返す（再送は空配列になりうる）。
@@ -761,6 +776,13 @@ export interface MemoryStore {
    *   という recall 側の下限境界、こちらは「これ以前に閾値を割ったものを掃く」という
    *   掃引側の上限境界であり、2つの異なる関心が同じ演算子を共有する理由が無い。
    * - **`decay_floor_at` 昇順**（最も古く遠ざかったものから）で `opts.limit` 件まで。
+   *   ⚠ [ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと15 が
+   *   `opts.clock`/`opts.nowSeq` を足した後も、この順序は**全 `clock` 値で** `decay_floor_at`
+   *   昇順のままである（`'activity'`/`'either'` でも `decay_floor_seq` 順にはならない）。
+   *   返り値の型 `ArchiveDecayedResult.archived` が `decayFloorSeq` を持たないための、
+   *   意図した仕様であり、見落としではない
+   *   （`packages/postgres/src/memory-store.ts` の `buildArchiveDecayedTargetSelect` の
+   *   doc コメント参照）。
    * - 選ばれた各行について `status='archived'` への更新と `memory_events` への
    *   `kind='archived'` の追記を行う。**この2つは同一トランザクション**
    *   （ADR 0031 が `updateStatusWithEvent` で確立した「更新とイベントは同値」の
@@ -972,6 +994,44 @@ export interface MemoryStore {
 }
 
 /**
+ * {@link MemoryStore.reinforce} の省略可能な第4引数
+ * ([ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16)。
+ *
+ * **穴**: `reinforce` にはこれまで活動時計の「いま」を渡す口が無かった。強化すると
+ * 壁時計の床（`decay_floor_at`）は引き直されるのに、活動時計の床（`decay_floor_seq`）は
+ * 据え置かれたままになる——`decay_clock` が `'activity'` のテナントでは、強化が忘却
+ * ゲートに対して完全な no-op になり、`'either'` では壁時計軸だけが戻る非対称になる。
+ * これは ADR 0158 の文脈節の表（「起点は両方の時計で同じく『最後の書き込み（作成・
+ * 強化）』に置く」）と食い違っていたため、この口を足す。
+ *
+ * ⭐ **非破壊である**——引数を1つ増やすだけであり、`opts` を省略すればいまと同じ
+ * `reinforce(ctx, id, at)` の3引数呼び出しがそのまま動く。既存の3引数の実装
+ * （`MemoryStore` を実装する第三者の adapter を含む）も、1行も直さずにこの4引数の
+ * interface をそのまま満たす——TypeScript の構造的部分型の下では「呼び出し側が
+ * 省略可能な引数を渡さない」ことと「実装がその引数を最初から受け取らない」ことは
+ * 区別されない。`@mnemora/core` は npm 公開済みなので、これは ADR 0158 決めたこと13
+ * （`TenantSettingsStore` の新メソッドを省略可能にした判断）と同じ理由で選んでいる。
+ */
+export interface ReinforceOptions {
+  /**
+   * 強化する時点の活動時計の「いま」（`tenant_activity.activity_seq`）。
+   * `ArchiveDecayedOptions.nowSeq` と同じ規律（ADR 0037「時刻は呼び出し側が渡す」）
+   * ——**store が自分で `tenant_activity` を読みに行かない。**
+   *
+   * **省略した場合の契約: 活動時計側の3列（`decayBaseSeq`/`decayFloorSeq`/
+   * `halfLifeRecalls`）は据え置く**（本 ADR 以前と同じ挙動）。**黙って `0` として
+   * 扱わない**——省略と `0` は別の指示である。壁時計側（`lastReinforcedAt`/
+   * `decayFloorAt`）の更新には一切影響しない。
+   *
+   * 対象の Memory が `halfLifeRecalls` を持たない（`null`/未設定、＝そもそも活動時計では
+   * 沈まない Memory）場合は、`nowSeq` を渡しても活動時計側の列には触れない
+   * （`Memory.decayBaseSeq` の doc コメント、ADR 0158 決めたこと4「NULL は…緩い側へ倒す」
+   * と同じ理由）。
+   */
+  nowSeq?: number;
+}
+
+/**
  * {@link MemoryStore.archiveDecayed} の引数（ADR 0114）。
  *
  * **`now` は呼び出し側が渡す**（ADR 0037 の「時刻は呼び出し側が渡す」規律をここでも
@@ -1028,7 +1088,12 @@ export interface ArchiveDecayedOptions {
 
 /** {@link MemoryStore.archiveDecayed} の返り値（ADR 0114）。 */
 export interface ArchiveDecayedResult {
-  /** 実際に archived にした Memory。`decay_floor_at` 昇順（最も古く遠ざかったもの順）。 */
+  /**
+   * 実際に archived にした Memory。`decay_floor_at` 昇順（最も古く遠ざかったもの順）。
+   * ⚠ `opts.clock` が `'activity'`/`'either'` のときも同じ——`decay_floor_seq` 順の契約は
+   * 無い（この型が `decayFloorSeq` を持たないことがその宣言。`archiveDecayed` の
+   * 契約節、doc コメント参照）。
+   */
   archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }>;
   /**
    * 🔴 **`true` は「`limit` 件ちょうど返した＝まだ在るかもしれない」を意味する。**

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
-import { defaultDecayStrategy } from "@mnemora/core";
+import { defaultActivityDecayStrategy, defaultDecayStrategy } from "@mnemora/core";
 import {
   ContestedWithoutCompanionError,
   EMBEDDING_STATUS_ROLLBACK,
@@ -33,6 +33,7 @@ import type {
   RecallRecord,
   RecallRecordReturnedMemories,
   RecallScope,
+  ReinforceOptions,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
   ScopeAggregate,
@@ -858,7 +859,7 @@ export class PostgresMemoryStore implements MemoryStore {
     return rowToMemory(result.rows[0] as unknown as MemoryRow);
   }
 
-  async reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory> {
+  async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     // id 列は uuid 型。この口の契約は「無い == 例外」なので、形式が壊れた入力も
     // クエリを投げる前に同じ「memory not found」の Error へ寄せる（mapping.ts の
     // isUuidLike の doc参照）。
@@ -879,6 +880,27 @@ export class PostgresMemoryStore implements MemoryStore {
       halfLifeHours: memory.halfLifeHours,
     });
 
+    // [ADR 0163](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+    // `opts.nowSeq` が渡され、かつこの Memory が `halfLifeRecalls` を持つときに限り、
+    // 活動時計側の起点・床（decay_base_seq/decay_floor_seq）も同じ強化イベントとして
+    // 進める。`halfLifeRecalls` が無い（'wall' のテナントで作られた、あるいは
+    // 活動時計を一度も使っていない）Memory はそもそも活動時計では沈まないので、
+    // ここで列を作らない（`ReinforceOptions.nowSeq` の doc コメント参照）。
+    //
+    // ⚠ **壁時計側の SET 句・WHERE 句は1バイトも変えない**——この条件片は同じ SET の
+    // 末尾に追記するだけであり、`opts.nowSeq` が無い呼び出し（既存の全呼び出し）では
+    // 空文字列になって従来の SQL とバイト単位で同じ文になる。
+    const activitySet =
+      opts?.nowSeq !== undefined && memory.halfLifeRecalls != null
+        ? sql`, decay_base_seq = ${opts.nowSeq}, decay_floor_seq = ${defaultActivityDecayStrategy.floorAt(
+            {
+              baseSeq: opts.nowSeq,
+              strength: memory.strength,
+              halfLifeRecalls: memory.halfLifeRecalls,
+            },
+          )}`
+        : sql``;
+
     // 🔴 減衰の起点を巻き戻さない（ADR 0048）。**この条件は WHERE 句に置く**——
     // 上の SELECT で読んだ値をアプリ側で比べて書くかどうか決めると、読みと書きの間に
     // 入った別の強化を上書きしうる（同じ形を `updateStatus` は ADR 0030 の
@@ -893,10 +915,14 @@ export class PostgresMemoryStore implements MemoryStore {
     // 「上で読んだ古い値をそのまま返す」実装との差が**外から観測できない枝**になる
     // （実際に変異を撃って確かめた。PR 本文参照）。1文なら、更新できた場合も
     // できなかった場合も同じ経路を通るので、その取り違えは歯で捕まる。
+    //
+    // ⚠ 活動時計側の3列も、壁時計側と**同じ WHERE 句**（同じ `at` の比較）で守る——
+    // 両方とも「同じ強化イベント」の一部であり（ADR 0158 文脈節「起点は両方の時計で
+    // 同じく『最後の書き込み』に置く」）、片方だけ別の条件で進むと2軸の起点がずれる。
     const result = await this.db.execute(sql`
       WITH updated AS (
         UPDATE memories
-        SET last_reinforced_at = ${at}, decay_floor_at = ${decayFloorAt}, updated_at = now()
+        SET last_reinforced_at = ${at}, decay_floor_at = ${decayFloorAt}, updated_at = now()${activitySet}
         WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
           AND (last_reinforced_at IS NULL OR last_reinforced_at < ${at})
         RETURNING *

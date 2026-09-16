@@ -12,6 +12,8 @@ import type {
 } from "@mnemora/core";
 import {
   ContestedWithoutCompanionError,
+  defaultActivityDecayStrategy,
+  defaultDecayStrategy,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
 } from "@mnemora/core";
@@ -1508,6 +1510,131 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // 読み直しても同じ（返り値だけを繕う実装を弾く）。
       const reread = await store.get(ctx, memory.id);
       expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
+    });
+
+    // -------------------------------------------------------------------
+    // reinforce と活動時計（`ReinforceOptions.nowSeq`、[ADR 0163]
+    // (../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16）
+    //
+    // ⚠ **この4本は「reinforce に活動時計の『いま』を渡す口が無かった穴」を直接検出する
+    // ために置く。**穴が塞がれる前は、強化しても decayBaseSeq/decayFloorSeq が
+    // 一切動かなかった（'activity' のテナントでは reinforce が忘却ゲートに対して
+    // 完全な no-op になっていた）。
+    // -------------------------------------------------------------------
+
+    it("reinforce は opts.nowSeq を渡すと、halfLifeRecalls を持つ Memory の decayBaseSeq/decayFloorSeq を進める（ADR 0163 決めたこと16）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          decayBaseSeq: 0,
+          decayFloorSeq: 10,
+          halfLifeRecalls: 360,
+        }),
+      );
+      const nowSeq = 1000;
+      const at = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
+
+      const reinforced = await store.reinforce(ctx, memory.id, at, { nowSeq });
+
+      const expectedDecayFloorSeq = defaultActivityDecayStrategy.floorAt({
+        baseSeq: nowSeq,
+        strength: memory.strength,
+        halfLifeRecalls: memory.halfLifeRecalls!,
+      });
+      expect(reinforced.decayBaseSeq).toBe(nowSeq);
+      expect(reinforced.decayFloorSeq).toBe(expectedDecayFloorSeq);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.decayBaseSeq).toBe(nowSeq);
+      expect(reread?.decayFloorSeq).toBe(expectedDecayFloorSeq);
+    });
+
+    it("⚠ reinforce は opts.nowSeq を省略すると decayBaseSeq/decayFloorSeq/halfLifeRecalls を据え置く（穴の回帰。黙って 0 として扱わない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          decayBaseSeq: 5,
+          decayFloorSeq: 500,
+          halfLifeRecalls: 360,
+        }),
+      );
+
+      // 3引数呼び出し（opts を渡さない。既存の全呼び出しがこの形）。
+      const reinforced = await store.reinforce(
+        ctx,
+        memory.id,
+        new Date(memory.recordedAt.getTime() + 1000 * 60 * 60),
+      );
+      expect(reinforced.decayBaseSeq).toBe(5);
+      expect(reinforced.decayFloorSeq).toBe(500);
+      expect(reinforced.halfLifeRecalls).toBe(360);
+
+      // opts は渡すが nowSeq だけ省略した場合も同じ——「opts 自体の有無」ではなく
+      // 「nowSeq の有無」で分岐することを確かめる。
+      const reinforcedAgain = await store.reinforce(
+        ctx,
+        memory.id,
+        new Date(memory.recordedAt.getTime() + 2000 * 60 * 60),
+        {},
+      );
+      expect(reinforcedAgain.decayBaseSeq).toBe(5);
+      expect(reinforcedAgain.decayFloorSeq).toBe(500);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.decayBaseSeq).toBe(5);
+      expect(reread?.decayFloorSeq).toBe(500);
+    });
+
+    it("reinforce は halfLifeRecalls を持たない Memory では opts.nowSeq を渡しても活動時計側に触れない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      // 前提: この Memory はそもそも活動時計を使っていない。
+      expect(memory.halfLifeRecalls ?? null).toBeNull();
+
+      const reinforced = await store.reinforce(
+        ctx,
+        memory.id,
+        new Date(memory.recordedAt.getTime() + 1000 * 60 * 60),
+        { nowSeq: 1000 },
+      );
+      expect(reinforced.decayBaseSeq ?? null).toBeNull();
+      expect(reinforced.decayFloorSeq ?? null).toBeNull();
+      expect(reinforced.halfLifeRecalls ?? null).toBeNull();
+    });
+
+    it("reinforce は opts.nowSeq を渡しても、壁時計側（lastReinforcedAt/decayFloorAt）の更新は従来どおり（回帰）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          decayBaseSeq: 0,
+          decayFloorSeq: 10,
+          halfLifeRecalls: 360,
+        }),
+      );
+      const at = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
+
+      const reinforced = await store.reinforce(ctx, memory.id, at, { nowSeq: 1000 });
+
+      const expectedDecayFloorAt = defaultDecayStrategy.floorAt({
+        recordedAt: memory.recordedAt,
+        lastReinforcedAt: at,
+        strength: memory.strength,
+        halfLifeHours: memory.halfLifeHours,
+      });
+      expect(reinforced.lastReinforcedAt?.getTime()).toBe(at.getTime());
+      expect(reinforced.decayFloorAt.getTime()).toBe(expectedDecayFloorAt.getTime());
     });
 
     // -------------------------------------------------------------------

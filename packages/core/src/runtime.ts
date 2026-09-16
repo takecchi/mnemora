@@ -1741,6 +1741,31 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { activitySeq, halfLifeRecalls };
   }
 
+  /**
+   * [ADR 0163](../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+   * `reinforce` の呼び出し側2箇所（使用報告ループ・`restoreArchived`）が共通して要る、
+   * 活動時計の「いま」の解決。
+   *
+   * `resolveActivityClockInputs` と同じく `decay_clock === 'wall'` のテナントでは
+   * `tenant_activity` を一度も読まない。`reinforce` は Memory 単位の `halfLifeRecalls` を
+   * 対象の Memory 自身から読む（store 側の実装、`ReinforceOptions.nowSeq` の doc
+   * コメント参照）ので、ここでは `activitySeq` だけを読めば足り、
+   * `resolveActivityClockInputs` が読む `default_half_life_recalls` は不要——
+   * 読まない分だけ `'activity'`/`'either'` のテナントでも `tenant_settings` への
+   * 往復を1回減らせる。
+   */
+  async function resolveReinforceNowSeq(ctx: Ctx): Promise<number | undefined> {
+    const decayClock = await readDecayClock(deps.tenantSettingsStore, ctx);
+    if (decayClock === "wall") {
+      return undefined;
+    }
+    return readActivitySeq(deps.tenantSettingsStore, ctx);
+  }
+
+  function toReinforceOptions(nowSeq: number | undefined): { nowSeq: number } | undefined {
+    return nowSeq === undefined ? undefined : { nowSeq };
+  }
+
   async function buildNewMemoriesForCandidates(
     ctx: Ctx,
     observation: Observation,
@@ -2108,8 +2133,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       input.usedMemoryIds,
     );
     const reinforcedAt = clock.now();
+    // ADR 0158 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
+    // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
+    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
     for (const memoryId of insertedMemoryIds) {
-      await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt);
+      await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);
     }
 
     return {
@@ -2438,6 +2466,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const actor = opts?.actor ?? { type: "system" };
     const outcomes: RestoreArchivedOutcome[] = [];
+    // ADR 0158 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
+    // が `resolveActivityClockInputs` を候補バッチ1つにつき1回だけ読むのと同じ理由——
+    // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
+    // `tenant_activity` への往復が増える）。
+    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
@@ -2497,7 +2530,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         const reinforcedAt = clock.now();
         let reinforceError: string | undefined;
         try {
-          const reinforced = await deps.memoryStore.reinforce(ctx, id, reinforcedAt);
+          const reinforced = await deps.memoryStore.reinforce(ctx, id, reinforcedAt, reinforceOpts);
           byId.set(id, reinforced);
         } catch (err) {
           reinforceError = err instanceof Error ? err.message : String(err);
