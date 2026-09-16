@@ -187,3 +187,13 @@ ADR 0151 は北極星の問い1で「既定 on」を明示的に落としてい�
 - Issue #291 の本文・全コメント——`gh issue view 291 --json title,body,comments` で直接読んだ【現物】。
 - ADR 0151 / 0158 / 0167 の内容——`docs/decisions/` から直接読んだ【現物】。
 - マネージャーからの作業指示（道1を採る、道2はオーナーに諮る案件として分離する、`maxCount` は費用対効果で決める）——委譲文として受け取った。`maxCount=10` を選んだ理由付けそのものはこの ADR が実測に基づき自分で行った。
+
+---
+
+## 追記 (2026-09-16): ADR 0166 が前提として要ったこと／§1の見落としを訂正する
+
+**この ADR が CI 上で `compare-baseline.json` を更新したところ、`examples/chat/src/__tests__/recall-footprint-baseline.test.ts`（Issue #276 の `estimateRecallFootprint` を同じ `compare-baseline.json` に対して検算する⭐門の歯）が7件赤くなった。** [ADR 0166](./0166-recall-footprint-association-term.md) がその原因（推定器が連想枠の項を持っていなかった）を直し、`estimateRecallFootprint` に `associationCount` の項を足している。**⟹ この PR は ADR 0168（本 ADR）単体では成立せず、ADR 0166 を前提として要る。**
+
+**🔴 §1「どの門・どの基準値が動くか」の結論(「影響するのは `compare-baseline.json` の1本だけである」)は誤りだった。** 正確には——**動く基準値ファイルは `compare-baseline.json` の1本で合っている**（`retrieval-baseline.json` 等5本は本文の通り無関係）が、**その1本を読む門は2本ある**ことを§1が見落としていた: (1) `scripts/compare-summary.mjs` が `compare-baseline.json` 自身との差分を見る⭐門（ADR 0133）、(2) `recall-footprint-baseline.test.ts` が**同じ `compare-baseline.json` を、`estimateRecallFootprint`/`calibrateRecallFootprint` の検算に使う**⭐門（Issue #276）。§1は`recall()` の呼び出し箇所（`mnemora-path.ts`・5本のベンチ・`association-arm.ts`）だけを洗い出し、**基準値ファイルの「書き手」側の影響だけを追って、「読み手」側の影響を追っていなかった**——`compare-baseline.json` は `compare` ベンチの基準値であると同時に、`recall-footprint` の較正・検算のデータソースでもある、という二重の役割を持つことが§1の洗い出しから漏れていた。
+
+**引き受けた負債への追記**: 上記は「オーナーが仕様に明示した非目標」のような設計判断ではなく、単純な洗い出し漏れである。**同種の見落とし**——ある基準値ファイルを「書く」経路だけを洗い出し、「読む」経路（他のテスト・他の bench・他の門）を洗い出さない——が、今後 `*-baseline.json` を更新する PR で繰り返される可能性がある。`git grep` で対象ファイル名を検索し、書き手だけでなく読み手も列挙することを、次に基準値ファイルを更新する作業者への申し送りとする。
