@@ -194,6 +194,7 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -217,12 +218,14 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: "outside_scope",
       count: 3,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: "outside_scope",
       count: 5,
       countKind: "exact",
     });
@@ -249,6 +252,7 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -298,7 +302,12 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 10 });
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual({ kind: "over_limit", count: 1, countKind: "exact" });
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "rescore",
+      count: 1,
+      countKind: "exact",
+    });
   });
 });
 

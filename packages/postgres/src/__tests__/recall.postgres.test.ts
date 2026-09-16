@@ -254,24 +254,28 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: "outside_scope",
       count: 2,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -427,7 +431,12 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
 
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual({ kind: "over_limit", count: 2, countKind: "exact" });
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "rescore",
+      count: 2,
+      countKind: "exact",
+    });
     const truncated = result.omitted.find((o) => o.kind === "ann_truncated");
     if (truncated === undefined || truncated.kind !== "ann_truncated") {
       throw new Error("ann_truncated が積まれていない");

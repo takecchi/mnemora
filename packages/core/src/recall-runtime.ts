@@ -26,6 +26,7 @@ import {
   LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX,
   DIGEST_BAND_MAX_CHARS,
   DIGEST_BAND_MAX_ENTRY_CHARS,
+  FILTERED_CONDITION_SCOPE_RELATION,
   RecallQuerySchema,
 } from "./recall.js";
 import { packDigestBand } from "./digest-band.js";
@@ -828,7 +829,12 @@ export async function runRecall(
   const withinLimit = passed.slice(0, limit);
   const overLimit = passed.slice(limit);
   if (overLimit.length > 0) {
-    omitted.push({ kind: "over_limit", count: overLimit.length, countKind: rescoreCountKind });
+    omitted.push({
+      kind: "over_limit",
+      stage: "rescore",
+      count: overLimit.length,
+      countKind: rescoreCountKind,
+    });
   }
 
   // -------------------------------------------------------------------
@@ -1162,6 +1168,27 @@ export async function runRecall(
         // を持たず、同じ多層防御を足すには追加の DB 往復が要る。ADR 0170「採らなかった案」）。
         associationHits.sort((a, b) => b.similarity - a.similarity);
         const selectedHits = associationHits.slice(0, associationQuery.maxCount);
+        // maxCount で切り捨てた分を over_limit として名乗る（Issue #375 / ADR 0188）。
+        // 段2の `passed.slice(limit)`（上、`stage: "rescore"`）と同じ形——ここまでの
+        // `associationHits` は既に忘却/validAt ゲート・除外集合・minSimilarity を
+        // 通過し、類似度降順に並び終えた「連想枠の候補集合」そのものであり、この
+        // slice は DB へ戻って何かを問い合わせ直すものではない。⟹ 捨てた件数は
+        // JS 側で既に確定しており、`countKind: "exact"`（段2の `rescoreCountKind` が
+        // `scored`（全数）から出るのと同じ理由）。
+        // ⚠ 直前の `slice` を境に選ばれなかった側だけを数える——`selectedHits` 側は
+        // この後さらに多層防御（subjectId/period/excludeKinds/両ゲート）を通るが、
+        // それは「一度選んだのに落ちる」既存の負債であり本 PR の射程外（下の
+        // `survivesValidityGate`/`survivesDecayGate` 呼び出し直前のコメントが、
+        // その分を数えない理由を説明している。二重計上を避けるため、ここでは触れない）。
+        const overLimitAssociationHits = associationHits.slice(associationQuery.maxCount);
+        if (overLimitAssociationHits.length > 0) {
+          omitted.push({
+            kind: "over_limit",
+            stage: "association",
+            count: overLimitAssociationHits.length,
+            countKind: "exact",
+          });
+        }
         const associationMemories =
           selectedHits.length > 0
             ? await deps.memoryStore.getMany(
@@ -1369,6 +1396,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.archived,
       count: aggregate.filteredArchived.count,
       countKind: aggregate.filteredArchived.countKind,
     });
@@ -1381,6 +1409,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.superseded,
       count: aggregate.filteredSuperseded.count,
       countKind: aggregate.filteredSuperseded.countKind,
     });
@@ -1389,6 +1418,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.forgotten,
       count: aggregate.filteredForgotten.count,
       countKind: aggregate.filteredForgotten.countKind,
     });
@@ -1397,6 +1427,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "period",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.period,
       count: aggregate.filteredPeriod.count,
       countKind: aggregate.filteredPeriod.countKind,
     });
@@ -1408,6 +1439,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "expired",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.expired,
       count: aggregate.filteredExpired.count,
       countKind: aggregate.filteredExpired.countKind,
     });
@@ -1416,6 +1448,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "not_yet_valid",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.not_yet_valid,
       count: aggregate.filteredNotYetValid.count,
       countKind: aggregate.filteredNotYetValid.countKind,
     });
@@ -1432,6 +1465,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "decayed",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.decayed,
       count: aggregate.filteredDecayed.count,
       countKind: aggregate.filteredDecayed.countKind,
     });
