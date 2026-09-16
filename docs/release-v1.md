@@ -295,10 +295,13 @@ Actions → `Publish` → `Run workflow` → `dry_run` を `true`（既定）の
 
 **⚠ この実測が言っていないこと**:
 
-- **CI と同じ条件で走らせたのではない。**pnpm は **12.4.2** で、CI が corepack で使う
+- **CI と同じ条件で走らせたのではない**【未検証】。pnpm は **12.4.2** で、CI が corepack で使う
   `packageManager` の **`11.25.0`** とは違う。また `pnpm install --frozen-lockfile` ではなく
   ただの `pnpm install` で入れた。⟹ **lockfile と `package.json` の不整合
   （§1.2 のステップ5で赤くなりうる箇所）は、この実測では何も見ていない。**
+  **⟹ 上の `pack:check` の ✔ は、この2点の外側までは届かない。**当日の CI は
+  `packageManager` で pnpm の版を固定し `--frozen-lockfile` で入れるので、
+  **そこだけは手元の実測と条件が違う——lockfile 由来の赤は、当日まで分からない。**
 - **版は作業ツリーの `0.1.1` のままである。**`v1.0.0` の tag で
   `apply-release-version.mjs` が版を書き換えた後の状態では `pack:check` を走らせていない。
 - `pack:check` 以外の門（`typecheck` / `lint` / `format:check` / `test` / `build`）は走らせていない。
