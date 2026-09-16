@@ -586,7 +586,9 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 3. **オーナーは文言を見たうえで撤回した**（逐語: 「**やっぱいいや。変更はなしで。普通に『聞かれていないことを、自分から思い出す。』のほうがわかりやすくていいです**」）。⟹ **[#350](https://github.com/takecchi/mnemora/pull/350) は close し、`docs/north-star.md` は1バイトも変わっていない。**
 
-**⟹ ⛔ 項目2 の判定は「半分」のままである。**上のこの節の分析——①出荷物の既定が反対を向いている（`recall.ts:1104` / `recall-runtime.ts:988`）②on にしている唯一の呼び手 `examples/chat` が出荷されない ③項目2 だけは `examples/chat` が無いと項目が立たない——は**そのまま生きている。**
+**⟹ ⛔ 項目2 の判定は「半分」のままである。**上のこの節の分析——①出荷物の既定が反対を向いている ②on にしている唯一の呼び手 `examples/chat` が出荷されない ③項目2 だけは `examples/chat` が無いと項目が立たない——は**そのまま生きている。**
+
+⚠ **ただし①の行番号は動いた。**上の節が引く `recall.ts:1104` / `recall-runtime.ts:988` は **`main = 9fcd47c` を読んだ時点の位置**であり（§7.4 冒頭の注記のとおり）、[#348](https://github.com/takecchi/mnemora/pull/348) と [#351](https://github.com/takecchi/mnemora/pull/351) の着地で `recall.ts` / `recall-runtime.ts` が動いている。**`main = 0b47e84` 時点では `recall.ts:1136`（`association?: RecallAssociationQuery;`）/ `recall-runtime.ts:1049`（`if (associationQuery !== undefined)`）である** 【現物】。⭕ **中身は変わっていない**——`recall.ts:1131` の doc は逐語「**省略時は連想を一切走らせない**（既定 off）」のままで、`examples/chat/package.json:4` の `"private": true` も `scripts/publish-targets.mjs` の6件も動いていない 【現物】。⟹ **①②③ が崩れたのではなく、位置だけが動いた。**
 
 ⚠ **却下されたのは「正典のこの一行の分かりやすさ」である。**オーナーの逐語は「**普通に…のほうがわかりやすくていい**」であり、(ろ) の*内容*（呼び手のオプトインを充足に数えるという読み）を否定した言葉ではない。⟹ **別の言い回しを持っていくとしても、正典の一行としての読みやすさが優先されたことを前提にすること。**⛔ **そして、それを推測で「内容は生きている」と読み替えないこと**——オーナーが言ったのは上の逐語だけである。
 
