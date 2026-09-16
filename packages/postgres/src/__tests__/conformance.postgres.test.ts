@@ -229,7 +229,7 @@ describeTenantSettingsStoreConformance({
   },
   // ADR 0165 決めたこと13（Issue #305）: PostgresTenantSettingsStore は4メソッドとも実装している。
   supportsDecayClock: true,
-  // ADR 0195: `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls` は本番の書き込み口
+  // ADR 0197: `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls` は本番の書き込み口
   // そのものになったため、生 SQL の UPSERT で行を作る代わりにそれを直接呼ぶ——`setDecayClock`
   // に対して分離した hook を持たない（`store.setDecayClock!` を直接呼ぶ）のと同じ理由。
   // `PostgresTenantSettingsStore` はステートレス（`db` クライアントを包むだけ）なので、

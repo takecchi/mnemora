@@ -137,16 +137,16 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0195](../../../../docs/decisions/0195-set-default-half-life-recalls.md):
+   * [ADR 0197](../../../../docs/decisions/0197-set-default-half-life-recalls.md):
    * `TenantSettingsStore` interface の本番の書き込み口。`setDecayClock`
    * （このファイル上）と同じ規律——不正な値は `assertValidHalfLifeRecalls`（core 共有、
    * `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls` と同じ検証関数）で拒む。
    *
    * ⚠ **これ以前はここに `setDefaultHalfLifeRecalls(tenantId: string, recalls: number): void`
    * というテスト専用フックが在った**（`setDefaultHalfLifeHours` と対になる形。値域検査は
-   * 同じ `isHalfLifeRecallsInRange`）。ADR 0195 が `TenantSettingsStore` interface に
+   * 同じ `isHalfLifeRecallsInRange`）。ADR 0197 が `TenantSettingsStore` interface に
    * 同名の本番メソッドを足したため名前が衝突し、**「本番の口だけを残す」を選んで削除した**
-   * （ADR 0195「決めたこと」参照。`setDefaultHalfLifeHours` を削除しなかったのは、
+   * （ADR 0197「決めたこと」参照。`setDefaultHalfLifeHours` を削除しなかったのは、
    * `setDefaultHalfLifeHours` には対応する本番メソッドが無く、テスト用フックが唯一の
    * 設定手段のままだから——非対称ではなく、対称にする理由が無くなっただけである）。
    * 旧フックを直接呼んでいた外部コードがあれば、この呼び出しは

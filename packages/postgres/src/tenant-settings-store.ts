@@ -119,7 +119,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0195](../../../docs/decisions/0195-set-default-half-life-recalls.md):
+   * [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md):
    * `tenant_settings.default_half_life_recalls` を設定する（UPSERT。行が無ければ作る）。
    * `setDecayClock`（上）と**完全に同じ形**——不正な値は `assertValidHalfLifeRecalls`
    * （core 共有）で拒む。`event_retention_days`/`default_half_life_hours`/`decay_clock` は

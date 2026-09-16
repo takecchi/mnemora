@@ -1,4 +1,4 @@
-# ADR 0195: `TenantSettingsStore` に `setDefaultHalfLifeRecalls` を本番の経路として足す
+# ADR 0197: `TenantSettingsStore` に `setDefaultHalfLifeRecalls` を本番の経路として足す
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-17

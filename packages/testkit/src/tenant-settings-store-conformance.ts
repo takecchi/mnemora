@@ -51,7 +51,7 @@ export interface TenantSettingsStoreConformanceOptions {
    * `supportsDecayClock: true` のときに使う。テナントの `default_half_life_recalls` を
    * 明示的に設定するためのフック。省略時はこのケースをスキップする。
    *
-   * ⭐ [ADR 0195](../../../docs/decisions/0195-set-default-half-life-recalls.md) 以降、
+   * ⭐ [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md) 以降、
    * `setDefaultHalfLifeHours`（本番の書き込み口を持たないため、呼び出し側は生 SQL の
    * UPSERT で行を作る）とは違い、**このフックは `TenantSettingsStore.setDefaultHalfLifeRecalls`
    * （interface 上は `?` 付きだが production の口そのもの）をそのまま呼ぶことを想定する**

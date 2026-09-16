@@ -1572,15 +1572,15 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * ⚠ **この Fake は `TenantSettingsStore.setDefaultHalfLifeRecalls`（[ADR 0195]
-   * (../../../docs/decisions/0195-set-default-half-life-recalls.md) が足した、`?` 付きの
+   * ⚠ **この Fake は `TenantSettingsStore.setDefaultHalfLifeRecalls`（[ADR 0197]
+   * (../../../docs/decisions/0197-set-default-half-life-recalls.md) が足した、`?` 付きの
    * 本番の書き込み口）を実装していない。**このメソッドは、interface のメソッドとは
    * 別名の、テスト専用の口である——`getDefaultHalfLifeHours` がコンストラクタ引数で
    * 差し替えられるのと同じ役割を、テナントごとに持てるようにしたもの。名前が違うのは
    * 偶然ではなく、`packages/testkit` の `InMemoryTenantSettingsStore` が同じ理由
    * （本番メソッドとの名前衝突）で同名のテスト専用フックを削除したのと対になる決定
    * ——このファイルは適合スイートの対象外（上のコメント参照）なので衝突は起きないが、
-   * 読む側の混乱を避けるため命名だけ揃えた（ADR 0195「決めたこと」参照）。
+   * 読む側の混乱を避けるため命名だけ揃えた（ADR 0197「決めたこと」参照）。
    */
   setDefaultHalfLifeRecallsForTest(tenantId: string, value: number): void {
     this.halfLifeRecallsByTenant.set(tenantId, value);

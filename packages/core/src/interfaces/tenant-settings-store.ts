@@ -237,13 +237,13 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
  * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
  * （黙って無視しない——`examples/chat --decay-clock` が黙って効かない形を作らない）。
  *
- * [ADR 0195](../../../docs/decisions/0195-set-default-half-life-recalls.md) で
+ * [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md) で
  * `setDefaultHalfLifeRecalls`（`getDefaultHalfLifeRecalls` の書き込み版）を足した。
  * ADR 0165「引き受けた負債」7 と [Issue #338](https://github.com/takecchi/mnemora/issues/338)
  * がどちらも対処として名指ししていた「`'activity'` を選ぶ採用者は `half_life_recalls` を
  * 自分の recall 頻度に合わせて上げる必要がある」を、本番コードから呼べる口にする。
  * **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は足していない**——理由は
- * `setDefaultHalfLifeRecalls` の doc コメント、および ADR 0195 を参照。**5メソッド目の
+ * `setDefaultHalfLifeRecalls` の doc コメント、および ADR 0197 を参照。**5メソッド目の
  * 追加も、他の4つと同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
  * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
  * 決めたこと13 と同じ理由）。
@@ -297,7 +297,7 @@ export interface TenantSettingsStore {
    * `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` で失敗する
    * （`assertValidHalfLifeRecalls` 参照）。
    *
-   * [ADR 0195](../../../docs/decisions/0195-set-default-half-life-recalls.md): ADR 0165
+   * [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md): ADR 0165
    * 「引き受けた負債」7 と Issue #338 が対処として名指ししていた「`'activity'` を選ぶ
    * 採用者は `half_life_recalls` を自分の recall 頻度に合わせて上げる必要がある」を、
    * 本番コードから呼べる口にする。
@@ -311,7 +311,7 @@ export interface TenantSettingsStore {
    * 書き換えない」設計を、活動時計側でもそのまま踏襲する）。
    *
    * ⚠ **`setDefaultHalfLifeHours`（壁時計側の対称なメソッド）は意図的に足していない。**
-   * ADR 0195「採らなかった案」1 を参照——文書が対処として名指ししているのは
+   * ADR 0197「採らなかった案」1 を参照——文書が対処として名指ししているのは
    * `half_life_recalls` の側だけであり、壁時計側の既定値の与え方（Issue #305）は
    * オーナー判断としてまだ未決である。
    */
