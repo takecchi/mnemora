@@ -254,24 +254,28 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: "outside_scope",
       count: 2,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -427,7 +431,12 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
 
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual({ kind: "over_limit", count: 2, countKind: "exact" });
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "rescore",
+      count: 2,
+      countKind: "exact",
+    });
     const truncated = result.omitted.find((o) => o.kind === "ann_truncated");
     if (truncated === undefined || truncated.kind !== "ann_truncated") {
       throw new Error("ann_truncated が積まれていない");
@@ -487,6 +496,14 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(companion?.companionOf).toBe(a.id);
     const indexA = withoutBudgetIds.indexOf(a.id);
     const indexB = withoutBudgetIds.indexOf(b.id);
+    // ⚠ Issue #293: `indexOf` は見つからないとき `-1` を返すため、片方だけが結果から
+    // 完全に消えた世界でも `Math.abs(indexA - indexB) === 1` が偶然成立しうる
+    // （例: a だけ残り b が消えると `Math.abs(0 - (-1)) === 1`）。上の `toContain` は
+    // 今日は先に落ちて守ってくれるが、隣接性の assert 自体は自立していなかった——
+    // 両方が実際に結果に含まれていること（`index >= 0`）を、この assert 自身の前提としても
+    // 先に assert する。
+    expect(indexA).toBeGreaterThanOrEqual(0);
+    expect(indexB).toBeGreaterThanOrEqual(0);
     expect(Math.abs(indexA - indexB)).toBe(1);
 
     const withTightBudget = await runtime.recall(ctx, {

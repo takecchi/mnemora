@@ -194,6 +194,7 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -217,12 +218,14 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: "outside_scope",
       count: 3,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: "outside_scope",
       count: 5,
       countKind: "exact",
     });
@@ -249,6 +252,7 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -298,7 +302,12 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 10 });
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual({ kind: "over_limit", count: 1, countKind: "exact" });
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "rescore",
+      count: 1,
+      countKind: "exact",
+    });
   });
 });
 
@@ -801,6 +810,14 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
     const ids = result.memories.map((m) => m.memoryId);
     const indexA = ids.indexOf(a.id);
     const indexB = ids.indexOf(b.id);
+    // ⚠ Issue #293: `indexOf` は見つからないとき `-1` を返すため、片方だけが結果から
+    // 完全に消えた世界でも `Math.abs(indexA - indexB) === 1` が偶然成立しうる
+    // （例: a だけ残り b が消えると `Math.abs(0 - (-1)) === 1`）。この歯には
+    // （mark-contested.test.ts と違い）事前の `toContain` チェックも無いため、
+    // 隣接性の assert 単独が「両方本当に返ってきたか」の唯一の砦になっている。
+    // ⟹ 両方が実際に結果に含まれていること（`index >= 0`）を先に assert する。
+    expect(indexA).toBeGreaterThanOrEqual(0);
+    expect(indexB).toBeGreaterThanOrEqual(0);
     expect(Math.abs(indexA - indexB)).toBe(1);
   });
 
