@@ -163,11 +163,10 @@ ADR 0168 は 42〜162ターン行で **費用が減り**、322〜642ターン行
 
 **⟹ 12行すべて 2.5% 以内。**旧モデル（連想の項なし）の誤差 3.97%〜12.81% から、最大2.304%まで縮まった。
 
-**🔴 この表は `origin/main`（`8e11663`、Issue #280 / ADR 0164「`recall` に `validAt` ゲートを足す」を含む）をマージする前の `compare-baseline.json` に対するものである。** マージ後、この PR 自身の CI（`example-chat` ジョブ）で `compare-baseline.json` を実測し直した後の最終的な12行の誤差は、PR #336 の本文と ADR 0168 の追記に記録する（ADR 0133 の手順——基準値は必ずこの PR 自身の CI artifact から取る）。
+**【実測】main マージ後の再確認**: 上の表を測った後、`origin/main` を2回取り込んだ（`8e11663`＝PR #334 `validAt` ゲート/ADR 0164、`1021a93`＝PR #335 decay活動時計/ADR 0165、いずれも migration を含む）。この PR 自身の CI run（`35045819349`、head `3b854e3`、`example-chat` ジョブ）が生成した `compare.json` artifact を取得し、`examples/chat/compare-baseline.json` の12行と `measuredAt` を除いて突き合わせたところ、**1バイトも違わなかった**（`docs/decisions/0166-...`執筆時点でこの diff を `node` で実行し確認。`examples/chat/compare-baseline.json` の `provenance.reconfirmedAfterMainMerge` に記録）。⟹ **PR #334・#335 は `compare` の実測値を動かしていない**——`validAt` ゲートはこのシナリオが `valid_from`/`valid_until` を使わないため効かず、decay 活動時計は既定 `'wall'`（非破壊）のままだからである。**⟹ 上の表（誤差3.97%〜12.81%→修正後最大2.304%）は main マージ後の状態にもそのまま当てはまる。基準値ファイルの更新は不要だった**（ADR 0133 決定1が言う「CI artifact をそのまま基準値の本体にする」対象は、最初に固定した run `35040893466` の値のままで正しい）。
 
 ## 確かめていないこと
 
-- **main マージ後（`validAt` ゲート適用後）の `compare-baseline.json` で、同じ式・同じ許容誤差が成立するか。**「測ったこと」の表は main マージ前の値であり、PR 本文で最終確認する。
 - **より長い会話・より多様な連想パターンを持つ実データでの一般化**（引き受けた負債4）。
 - **連想の探索窓が `memoryCountInScope` の外へ出ないことの変異試験**（引き受けた負債3。実装を読んだ結論であり、`digest-band.ts`/`recall-runtime.ts` の値を直接動かして検証してはいない）。
 
