@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { writeFileSync } from "node:fs";
-import { heuristicTokenCounter } from "@mnemora/core";
+import { DEFAULT_RECALL_LIMIT, heuristicTokenCounter } from "@mnemora/core";
 import { CassetteRecorder } from "@mnemora/testkit";
+import { runAssociationArm } from "./association-arm.js";
+import { formatAssociationProbeRunReport } from "./association-format.js";
+import { buildAssociationProbeRunJson } from "./association-json.js";
 import type { CassetteTarget } from "./cassette-io.js";
 import {
   cassetteExists,
@@ -41,7 +44,8 @@ import {
   buildWeightsUnavailableIdentifierProbeJson,
 } from "./identifier-json.js";
 import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
-import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
+import { buildMnemoraPrompt, ingestConversation } from "./mnemora-path.js";
+import { TINY_BUDGET_CHARS, runBudgetDemo } from "./budget-demo.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
 import type { ProviderMode } from "./providers.js";
 import { decideProviderSource, describeProviderSourceReason } from "./providers.js";
@@ -59,7 +63,9 @@ import {
 import { createExampleRuntime } from "./runtime-factory.js";
 import { buildConversation } from "./scenario.js";
 import { formatBackfillDemo, runBackfillDemo } from "./backfill.js";
+import { formatCorrectionDemo, runCorrectionDemo } from "./correction-demo.js";
 import { formatScopeDemo, runScopeDemo } from "./scope.js";
+import { formatRecallExplainDemo, runRecallExplainDemo } from "./recall-explain.js";
 import { createMutableClock } from "./mutable-clock.js";
 import { formatTimeTermReport, runTimeTermArm } from "./time-term-arm.js";
 import { buildTimeTermJson } from "./time-term-json.js";
@@ -69,8 +75,6 @@ import { formatNoApiCallsNotice } from "./usage-meter.js";
 
 /** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
-/** budget が実際に切り詰めることを見せるための、意図的に小さい文字数予算。 */
-const TINY_BUDGET_CHARS = 60;
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -193,8 +197,12 @@ async function runChat(): Promise<void> {
       `${conversation.userUtterances.length} 件の user 発話を observe() し、tick() で embed を処理した。`,
     );
 
+    // デモ本体は budget-demo.ts に切り出してある（Issue #306）——`__tests__` から
+    // 同じ2回の recall() 呼び出しを検査できるようにするためで、ここでの印字は
+    // これまでと1バイトも変えていない。
+    const { withoutBudget, withBudget } = await runBudgetDemo(handle.runtime, ctx, conversation);
+
     console.log("\n=== recall()（budget 無し） ===");
-    const withoutBudget = await queryRecall(handle.runtime, ctx, conversation);
     console.log(formatRecall(withoutBudget, "budget 無し"));
     console.log("呼び出し側がプロンプトへ積む文字列（recall() の返り値だけから組み立てる例）:");
     console.log(buildMnemoraPrompt(withoutBudget));
@@ -202,9 +210,6 @@ async function runChat(): Promise<void> {
     console.log(
       `\n=== budget を渡すと実際に切り詰められる（maxMemoryChars=${TINY_BUDGET_CHARS}） ===`,
     );
-    const withBudget = await queryRecall(handle.runtime, ctx, conversation, {
-      budget: { maxMemoryChars: TINY_BUDGET_CHARS },
-    });
     console.log(formatRecall(withBudget, `budget maxMemoryChars=${TINY_BUDGET_CHARS}`));
 
     console.log("\n=== まとめ ===");
@@ -253,6 +258,32 @@ async function runScope(): Promise<void> {
 }
 
 /**
+ * `Runtime.getRecall` を「動く例」で見せるデモ(`src/recall-explain.ts`、Issue #312、
+ * ADR 0161)。`recall()` の戻り値からは `recallId` だけを使い、別の呼び出しとして
+ * `getRecall(ctx, recallId)` を呼んで、永続化された `recalls` 行から内訳を読み戻す。
+ * 北極星の主測定(`compare`/`retrieval`)には触れない、独立したデモ実行——
+ * `runRecallExplainDemo`/`formatRecallExplainDemo` は `compare.ts`/`retrieval-quality.ts`/
+ * `probe-set.ts`/`scenario.ts`/`naive-path.ts` を import しない。
+ */
+async function runExplain(): Promise<void> {
+  const handle = await createExampleRuntime(requireDatabaseUrl());
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const tenantId = `example-chat-explain-${Date.now()}`;
+    console.log(
+      "\n2件の事実を observe して embed を干上がらせ、3件目はあえて索引に載せないまま" +
+        "recall() を呼ぶ。返り値からは recallId だけを使い、別の呼び出し " +
+        "runtime.getRecall(ctx, recallId) で、なぜその記憶が・どの内訳で選ばれたか" +
+        "(そして3件目がなぜ落ちたか)を、永続化された recalls 行から読み戻す。\n",
+    );
+    const result = await runRecallExplainDemo(handle.runtime, handle.memoryStore, tenantId);
+    console.log(formatRecallExplainDemo(result));
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * `observe()` の `occurredAt` を「動く例」で見せるデモ(`src/backfill.ts`、ADR 0037)。
  * 同じ2発話・同じ問い合わせを、`occurredAt` を渡す側と渡さない側の2テナントで走らせ、
  * **同じ問い合わせが取り込み方だけで別の答えを返す**ことを並べて見せる。
@@ -272,6 +303,34 @@ async function runBackfill(): Promise<void> {
       withoutOccurredAt: `${base}-without`,
     });
     console.log(formatBackfillDemo(result));
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * 訂正を含む会話シナリオを実演するデモ(`src/correction-demo.ts`、Issue #303)。
+ *
+ * 北極星「間違いを正すと、古いほうが先に出てこなくなる」を、`markContested`
+ * （ADR 0134）→`recall`（両方隣接して出る）→`resolveContested`（ADR 0150）→`recall`
+ * （古いほうが消える）の一巡で実演する。`Runtime.markContested`/`resolveContested` は
+ * `examples/chat` からこれまで一度も呼ばれていなかった（Issue #303 本文）。
+ *
+ * **どの2件が対向し、どちらが勝つかは `correction-scenario.ts` が構造として宣言する。**
+ * このコマンドは判定をせず、宣言をそのまま渡すだけ。北極星の主測定(`compare`/`retrieval`)
+ * には触れない、独立したデモ実行。
+ */
+async function runCorrection(): Promise<void> {
+  const handle = await createExampleRuntime(requireDatabaseUrl());
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const ctx = { tenantId: `example-chat-correction-${Date.now()}` };
+    console.log(
+      "\n最初に事実を表明し、後から訂正する会話を observe() し、markContested → recall → " +
+        "resolveContested → recall で「間違いを正すと古いほうが出てこなくなる」ことを実演する。\n",
+    );
+    const result = await runCorrectionDemo(handle.runtime, ctx);
+    console.log(formatCorrectionDemo(result));
   } finally {
     await handle.close();
   }
@@ -1051,6 +1110,137 @@ async function runIdentifierProbes(): Promise<void> {
 }
 
 /**
+ * `association-probes` サブコマンド(連想枠、ADR 0151、Issue #291)。
+ *
+ * **`identifier-probes` と同じ provider の組み合わせ**(`deterministic` LLM +
+ * `local` 埋め込み。鍵・カセット不要)——差は probe set と arm(`./association-arm.js`)。
+ *
+ * **同じ会話を、別テナントへ4回 ingest する**(`off` / `on(maxCount=3)` /
+ * `on(maxCount=5)` / `on(maxCount=10)`)。`maxCount=10` は、CI 実測(commit `4362333`)で
+ * `returnedCount` が全 probe で「10 + maxCount」ちょうどになっていた
+ * (連想枠が常に満杯)ことを受け、「gold は枠のすぐ下に居て `maxCount` を増やせば
+ * 届くのか、それとも枠を広げても届かないのか」を切り分けるために足した(Issue #291
+ * フォローアップ)。arm 間の汚染を断つため、テナントは `buildArmTenantId` で
+ * 必ず別々にする(`retrieval-quality.ts` の先例と同じ理由)。
+ *
+ * **`warmup()` を明示的に呼び、失敗を区別する**(`identifier-probes` と同じ理由)。
+ * `ok: false` なら、メトリクスを1つも出さずに打ち切る——この bench の
+ * `AssociationProbeRunJson`(`./association-json.js`)は4 arm・3 delta を持つ形で
+ * 確定しており、「一部だけ測れた」を表す枠が無い。⟹ 失敗時は JSON も書かない
+ * (打ち切ったことは標準エラー出力と `process.exitCode` で伝える)。
+ */
+async function runAssociationProbes(): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const runToken = newRunToken();
+  const measuredAt = new Date();
+  const commit = tryGitRevParseHead(process.cwd());
+
+  const handle = await createExampleRuntime(databaseUrl, {
+    ...process.env,
+    MNEMORA_LLM: "deterministic",
+    MNEMORA_EMBEDDING: "local",
+  });
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+
+  try {
+    console.log(
+      "\n[association-probes] warmup() でモデルの読み込みを先に済ませる" +
+        "(取得に失敗したら、ここでメトリクスを出さずに打ち切る)…",
+    );
+    const warmup = await warmupLocalEmbedding(handle.embeddingProvider);
+    if (!warmup.ok) {
+      console.error(`\n🔴 ${warmup.detail}`);
+      console.error(
+        "  メトリクスは1件も測っていない(前回の値・既定値・0 へは倒さない)。" +
+          "ネットワーク・Hugging Face repo の状態を確認し、再実行すること。",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.log(`  ${warmup.detail}`);
+
+    const embeddingSpace = handle.embeddingProvider.space;
+    console.log(
+      `[association-probes] embedding space: provider=${embeddingSpace.provider} ` +
+        `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}`,
+    );
+
+    console.log("\n=== arm: off(連想枠なし、既定の recall) ===");
+    const offReport = await runAssociationArm({
+      armLabel: `off: 連想枠なし（既定の recall）(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元)`,
+      tenantId: buildArmTenantId("assoc-off", runToken),
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+    });
+    console.log(
+      `  goldReturned=${offReport.goldReturnedCount}/${offReport.probeCount} MRR=${offReport.mrr.toFixed(3)}`,
+    );
+
+    console.log("\n=== arm: on(連想枠あり、maxCount=3) ===");
+    const on3Report = await runAssociationArm({
+      armLabel: `on: 連想枠あり（maxCount=3）(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元)`,
+      tenantId: buildArmTenantId("assoc-on3", runToken),
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+      association: { maxCount: 3 },
+    });
+    console.log(
+      `  goldReturned=${on3Report.goldReturnedCount}/${on3Report.probeCount} MRR=${on3Report.mrr.toFixed(3)}`,
+    );
+
+    console.log("\n=== arm: on(連想枠あり、maxCount=5) ===");
+    const on5Report = await runAssociationArm({
+      armLabel: `on: 連想枠あり（maxCount=5）(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元)`,
+      tenantId: buildArmTenantId("assoc-on5", runToken),
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+      association: { maxCount: 5 },
+    });
+    console.log(
+      `  goldReturned=${on5Report.goldReturnedCount}/${on5Report.probeCount} MRR=${on5Report.mrr.toFixed(3)}`,
+    );
+
+    console.log("\n=== arm: on(連想枠あり、maxCount=10) ===");
+    const on10Report = await runAssociationArm({
+      armLabel: `on: 連想枠あり（maxCount=10）(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元)`,
+      tenantId: buildArmTenantId("assoc-on10", runToken),
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+      association: { maxCount: 10 },
+    });
+    console.log(
+      `  goldReturned=${on10Report.goldReturnedCount}/${on10Report.probeCount} MRR=${on10Report.mrr.toFixed(3)}`,
+    );
+
+    const json = buildAssociationProbeRunJson({
+      offReport,
+      on3Report,
+      on5Report,
+      on10Report,
+      embeddingSpace,
+      recallLimit: DEFAULT_RECALL_LIMIT,
+      warmup,
+      measuredAt,
+      commit,
+    });
+
+    console.log(`\n${formatAssociationProbeRunReport(json)}`);
+    console.log(
+      `\n(注) ADR 0033 §3: 標本${offReport.probeCount}件からは統計的に主張しない。` +
+        "ここで言えるのは「今回、この母数のうち何件・何文字だったか」までである。",
+    );
+
+    const jsonPath = process.env.MNEMORA_ASSOCIATION_JSON;
+    if (jsonPath) {
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(`\n[association-probes] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * `consolidation-cost` サブコマンド(Issue #136)。
  *
  * **なぜ `deterministic` LLM + `local` embedding か**（仕様書「使う provider 層」節）:
@@ -1225,7 +1415,9 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0052)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run explain    # recallId から Runtime.getRecall() で内訳を後から読み戻す(Issue #312)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction # 訂正を含む会話で markContested→resolveContested を実演(Issue #303)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run retrieval # 意味的関連性の probe set を3 arm(擬似/埋め込みのみ本物/フル本物)で比較",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0051)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run time-term # 時間項(freshness/decay)を意味的類似度から分離して測る",
@@ -1235,6 +1427,9 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes",
       "                                                                      # ASCII識別子・固有名詞を含む probe(Issue #109)を@mnemora/local-embeddingで測る",
       "                                                                      #   鍵・カセット不要。日本語意味probe7件・識別子probe30件(sparse/dense haystack)を別々に集計する",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run association-probes",
+      "                                                                      # 連想枠(段3.5、ADR 0151、Issue #291)が想起の質を動かすかを、off/on(maxCount=3)/on(maxCount=5)の3armで比較",
+      "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_ASSOCIATION_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run consolidation-cost",
       "                                                                      # Runtime.consolidate() の統合が「載る量」をどう動かすかをラウンド制で実測する(Issue #136)",
       "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_CONSOLIDATION_JSON で機械可読出力",
@@ -1265,8 +1460,12 @@ async function main(): Promise<void> {
     await runCompare();
   } else if (command === "scope") {
     await runScope();
+  } else if (command === "explain") {
+    await runExplain();
   } else if (command === "backfill") {
     await runBackfill();
+  } else if (command === "correction") {
+    await runCorrection();
   } else if (command === "retrieval") {
     await runRetrieval();
   } else if (command === "time-term") {
@@ -1275,6 +1474,8 @@ async function main(): Promise<void> {
     await runValidity();
   } else if (command === "identifier-probes") {
     await runIdentifierProbes();
+  } else if (command === "association-probes") {
+    await runAssociationProbes();
   } else if (command === "consolidation-cost") {
     await runConsolidationCostCommand();
   } else if (command === "archive-sweep-cost") {
