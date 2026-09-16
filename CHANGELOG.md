@@ -33,14 +33,16 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `0.2.0` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節の数字は `v0.2.0` … **`32bbf22`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節の数字は `v0.2.0` … **`4b92134`** の範囲を数えたものである。
 ⟹ 🔴 **`origin/main` がこれより進んでいたら、この節は腐っている可能性がある**——読む人が
-`git log --oneline 32bbf22..origin/main` で自分で判定できる。**数字を焼き込む以上、`main` が動けば
+`git log --oneline 4b92134..origin/main` で自分で判定できる。**数字を焼き込む以上、`main` が動けば
 必ず腐る**（`docs/roadmap.md` §7.0 と同じ規律を、この節にも掛ける）。
 
-【実測】`git rev-list --count v0.2.0..32bbf22` は **33**、
+【実測】`git rev-list --count v0.2.0..4b92134` は **36**、
 うち `feat`/`fix` は **13本**。冒頭「何を載せるか」の除外規則（docs のみ・テスト追加のみ・
-内部スクリプト・ADR 索引の再生成は載せない）に当てると、**利用者に見えるのは8件**である。
+内部スクリプト・ADR 索引の再生成は載せない）に当てると、**利用者に見える PR は8本**である。
+⚠ **項目の件数は9件で、PR の本数と一致しない**——PR #416 が「後方互換の追加」と「破壊的変更」を
+**両方**持つため、下では2項目に分けて書いている。⟹ **PR の本数と項目の件数を同じ数だと思わないこと。**
 
 ⚠ **「`packages/*/src` を触ったか」で数えないこと。**この規則とずれる例が両方向に在る——
 `0016`/`0017` のマイグレーション追加（PR #396）は `src` を1行も触らないが**載せる**（利用者が
@@ -49,8 +51,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### 変更（破壊的）
 
-⚠ **いずれも「返り値の型に必須フィールドが増えた」形である。**⟹ **読むだけの利用者は影響を受けない。**
-**自分で組み立てている側**（独自 adapter・テストダブル）は型エラーになる。
+⚠ **3件ある。1件目・2件目と、3件目とで壊れ方が違う。**
+
+**1件目・2件目は「返り値の型に必須フィールドが増えた」形**である。⟹ **読むだけの利用者は影響を受けない。**
+**自分で組み立てている側**（独自 adapter・テストダブル）だけが型エラーになる。
+
+🔴 **3件目は「公開クラスのメソッドの署名が変わった」形**である。⟹ **呼んでいる側が壊れる。**
+同期から `Promise` へ変わったので、**引数を直しただけでは足りない**（`await` が要る）。
 
 - `FilteredOmission` に必須フィールド `scopeRelation` が増えた。`decayed` だけが
   `totalInScope` の**内側**を数えるという非対称を、契約として明示するもの
@@ -58,6 +65,20 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - `Omission` の `over_limit` に `stage` が増えた。連想枠（段3.5）の `maxCount` 切り捨てを
   段1 の打ち切りと区別して名乗るため（[#375](https://github.com/takecchi/mnemora/issues/375) /
   [ADR 0188](./docs/decisions/0188-association-over-limit-omission.md)、PR #391）
+- 🔴 **`@mnemora/testkit` の `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` の署名が変わった。**
+  `(tenantId: string, recalls: number): void` → **`(ctx: Ctx, recalls: number): Promise<void>`**。
+  ADR 0197 が `TenantSettingsStore` interface に同名の**本番**メソッドを足したため名前が衝突し、
+  **テスト専用フックのほうを消して本番の口だけを残した**
+  （[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
+  ⟹ 呼んでいた側は **`store.setDefaultHalfLifeRecalls({ tenantId }, recalls)` へ書き換え、
+  返り値を `await` する**必要がある。
+  ⚠ **これは `@mnemora/testkit/fixtures` の公開型である**——`packages/testkit/src/fixtures.ts` は
+  `v0.2.0` の時点で既に `InMemoryTenantSettingsStore` を export しており、
+  `@mnemora/testkit` は publish 対象6本の1つである。
+  ⟹ ⭐ **`@mnemora/core` だけを見て数えると、この1件は落ちる。**
+  ⚠ **移行手順は複製しない**——[docs/migration-v1.md](./docs/migration-v1.md)
+  「8. `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（`@mnemora/testkit`）の
+  シグネチャが変わった」を見ること
 
 ### 変更（挙動）
 
@@ -77,7 +98,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`TenantSettingsStore.setDefaultHalfLifeRecalls`**（任意メソッド）。テナント既定の
   半減期を「recall 回数」で設定する本番の経路（[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
-  ⭕ **任意メソッドなので後方互換**——実装していない adapter は従来どおり動く
+  ⭕ **任意メソッドなので、この追加そのものは後方互換**——実装していない adapter は従来どおり動く。
+  ⚠ **ただし同じ PR #416 は破壊的変更も1件持っている**（上「変更（破壊的）」の3件目。
+  `@mnemora/testkit` の `InMemoryTenantSettingsStore` の同名メソッドの署名）。
+  ⟹ **「任意メソッドだから丸ごと後方互換」と読まないこと。**
 
 ### 変更（性能）
 
