@@ -112,8 +112,10 @@ Issue #347 は「実行して再現していない」と明記していた。**�
 ```
 
 **⟹ Issue #347 の指摘は、コードの読解だけでなく振る舞いとして実在した。**
-（この再現は `packages/core` の擬似物に対するものであり、**実 Postgres では再現していない**
-——下記「確かめていないこと」。）
+
+**さらに、本物の Postgres + pgvector でも再現した**（後述の
+`recall-association-gates.postgres.test.ts` を同じバグの状態に対して走らせると、
+7本中3本が赤——減衰・活動時計・期限切れの3つ）。⟹ **擬似物の産物ではない。**
 
 ---
 
@@ -221,6 +223,32 @@ DB を要さない（`packages/core` 自身の擬似物。`recall-decay-gate.tes
    に対して、減衰・期限切れ・**活動時計で沈んだもの**が返らないこと。
    加えて、**`filtered(decayed)` が積まれない**こと（決定3の歯）。
 
+### `packages/postgres/src/__tests__/recall-association-gates.postgres.test.ts`（新設、7本）
+
+**本物の Postgres + pgvector に対する歯**（マネージャーの指摘により追加）。
+配置はユニットの歯と同じ三角形を3次元で作る（`TEST_EMBEDDING_SPACE.dimensions = 3`）:
+`Q=[1,0,0]` / アンカー `A=[0.70710678,0.70710678,0]` / 相方 `B=[0,1,0]`
+——`cos(Q,B)=0` ちょうどなので `B` は段1では below_threshold、`cos(A,B)≈0.7071` なので
+**連想枠でしか届かない。**
+
+| 歯 | 何を測るか |
+|---|---|
+| 対照 | この配置が本当に段3.5 を通ること（`retrievedVia:'association'` と `associationOf`） |
+| (甲) | 減衰しきった記憶が連想枠から返らない |
+| (乙) | `includeFullyDecayed: true` で返る（opt-out が実 adapter 経路でも効く） |
+| (丙) | `decay_clock:'activity'` のテナントで、壁時計が遠い未来でも `decay_floor_seq` を割った記憶は返らない（**ADR 0165 の2軸目が実 SQL で効くこと**） |
+| (丁) | 対照: 同じ記憶を `'wall'` のテナントで引くと返る |
+| (戊) | 期限切れ（`valid_until` が過去）が連想枠から返らない |
+| (己) | `includeOutsideValidity: true` で返る（opt-out） |
+
+⚠ **`recall-decay-cross-day.postgres.test.ts` には足していない**——そちらは Issue #302 の歯であり、
+Issue #329 の作業が同じファイルを触っているため（マネージャーの指示）。
+
+⭐ **ユニットの歯との違いが1つ現れた**: `recall-decay-cross-day.postgres.test.ts` の `(乙)` は
+`includeFullyDecayed: true` だけでは戻らず `scoreThreshold: 0` を要したが、**連想枠の (乙) は
+要らない**——段3.5 の候補は段2の閾値分割を通らない（`associationUnits` は閾値の後に連結される）。
+**この非対称自体が、この歯が段1ではなく段3.5 を測っていることの証拠である。**
+
 ### 変異試験【実測】
 
 退避コピー（`/tmp/e347/recall-runtime.ts.bak`）から戻す方式で行った
@@ -232,6 +260,13 @@ DB を要さない（`packages/core` 自身の擬似物。`recall-decay-gate.tes
 | **B**: 連想の後置2行（`survivesValidityGate` / `survivesDecayGate`）を消す | **2本が赤**（多層防御の歯。押し下げが効いているので他は緑） |
 | **C**: A と B の両方（= バグの状態そのもの） | **8本が赤**（上記「3. 再現した」） |
 | **D**: 連想の後置で `survivesDecayGate` の代わりに `wallAxisAlive` を呼ぶ（活動時計の軸を忘れる） | **最初は17本中0本が赤だった**——押し下げが先に候補を落とすため。⟹ **歯を1本足した**（`'activity'` × ゲート剥がしの組み合わせ）。足した後は**その1本が赤**になる |
+
+**実 Postgres の歯に対しても同じ変異を当てた**【実測】:
+
+| 変異 | 実 Postgres の歯（7本）の結果 |
+|---|---|
+| **C**（= バグの状態そのもの） | **3本が赤**——(甲) 減衰 / (丙) 活動時計 / (戊) 期限切れ。対照と opt-out の4本は緑 |
+| **A**（連想用 `search()` から押し下げだけを剥がす） | **7本とも緑**——後置が救うため。⟹ **この歯は押し下げ単体を切り分けない**（切り分けはユニットの歯が持つ。上記「引き受けた負債3」） |
 
 **⚠ 変異Dは、歯を書いた後の実測で「捕まらない」ことが判明して歯を足した実例である。**
 `recall-decay-gate.test.ts` が語彙チャンネルで同じ理屈（押し下げが効く経路では後置の
@@ -292,12 +327,16 @@ artifact `compare` を取得して突き合わせたところ、`rows` は基準
 2. **連想枠の後置で落ちた分は、どこにも数として現れない**（決定3）。
    adapter が契約を破った場合、**黙って減る。**Issue #329 の対応が入ったら、
    ここも同じ数え方に揃えるべきである。
-3. **`packages/testkit` の conformance は、この境界を測っていない。**
-   連想枠は `recall-runtime.ts`（core）の段であり、adapter 適合テストの対象ではない
-   ——`VectorFilter` の各欄を adapter が適用することは既に測られているが、
-   **「core が連想用 `search()` へその欄を渡すか」は adapter 非依存の歯では測れない。**
-   今回は core のユニットの歯で塞いだ。
-4. **実 Postgres に対する連想枠×ゲートの歯は足していない**（下記「確かめていないこと」）。
+3. **`packages/testkit` の conformance は、この境界を測れない**（adapter 非依存の歯では
+   「core が連想用 `search()` へその欄を渡すか」を表現できない）。⟹ **3層に分けて塞いだ**
+   ——(a) adapter 単体は既存の conformance（`decayFloorAtAfter`/`decayFloorSeqAfter`/
+   `decayFloorAnyAxis`、ADR 0034 / 0165）、(b) core の配線は新設のユニットの歯、
+   (c) **2つを繋いだ既定経路は新設の実 Postgres の歯**。
+   **⚠ (c) は押し下げ単体を切り分けない**（後置が救うため）——下記「変異試験」参照。
+4. **実 Postgres の歯は `decay_clock: 'either'` を測っていない。**
+   `'wall'`（既定）・`'activity'`・`validAt` は測ったが、OR で結ぶ `'either'` は
+   ユニットの歯だけである（`decayFloorAnyAxis` の adapter 側の挙動自体は conformance が
+   別に測っている）。
 
 ## これが覆るとしたら
 
@@ -317,12 +356,17 @@ artifact `compare` を取得して突き合わせたところ、`rows` は基準
 
 ## 確かめていないこと
 
-- **実 Postgres に対して「減衰しきった記憶が連想枠から返る／返らない」を実測していない。**
-  再現・回帰とも `packages/core` の擬似物（`FakeVectorStore`/`FakeMemoryStore`）に対する
-  歯である。⚠ ただし `FakeVectorStore` は `VectorFilter` の4欄を実際に適用する実装であり
-  （`runtime-fakes.ts`）、`PostgresVectorStore` が同じ契約を守ることは
-  `packages/testkit` の適合テスト（ADR 0034）が別に測っている——**2つを繋いだ経路
-  そのものは測っていない。**
+- ~~**実 Postgres に対して「減衰しきった記憶が連想枠から返る／返らない」を実測していない。**~~
+  **⟹ 実測した**（`packages/postgres/src/__tests__/recall-association-gates.postgres.test.ts`、
+  7本）。**この ADR の初版は「実 Postgres の歯は既存の作法に無いので足さない」と書いていたが、
+  その前提が事実と違った**——`recall-decay-cross-day.postgres.test.ts`（Issue #302 / PR #324）が
+  忘却ゲートを実 Postgres で既に測っている。⟹ **作法は「core のユニットだけ」ではない。**
+  連想枠は PR #336 以降 `examples/chat` の既定経路であり、**実 Postgres で一度も測られて
+  いないゲート経路**を残さないために足した（マネージャーの指摘による訂正）。
+- **実 Postgres の歯は、押し下げ（`VectorFilter`）と後置フィルタを切り分けない。**【実測】
+  連想用 `search()` から押し下げだけを剥がす変異では、**7本とも緑のまま**だった
+  ——後置が救うためである（それ自体は多層防御が働いている証拠でもある）。
+  ⟹ **押し下げ単体・後置単体の切り分けは、`packages/core` のユニットの歯の側が持つ。**
 - **`examples/chat` の `association-probes` ベンチ（ADR 0158 / 0167、`local` 埋め込み）を
   走らせていない。**このベンチの probe set は減衰も有効期限も持たないため影響は無い
   **はず**だが、**確かめていない。**
