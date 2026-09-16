@@ -187,9 +187,12 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0172](./0172-association-passes-decay-and-validity-gates.md) | 連想枠（段3.5）にも忘却ゲートと `validAt` ゲートを通す — ゲートの欄を1箇所に集め、述語は段1と共有する（Issue #347） | 採用 (2026-09) |
 | [0173](./0173-decayed-omission-counted-by-aggregate-scope.md) | 忘却ゲートで落ちた件数を `aggregateScope` で厳密に数える — 押し下げは外さず、`countKind` を `lower_bound` から `exact` へ上げる | 採用 (2026-09) |
 | [0174](./0174-filtered-omission-scope-relation.md) | `FilteredOmission` に `scopeRelation` を足し、`decayed` の非対称を契約として確定させる | 採用 (2026-09) |
+| [0175](./0175-lexical-search-tiebreak-nondeterminism.md) | 語彙チャンネルの `search()` に決定的な最終キーを足す — ANN 側（ADR 0170）と同じ形で、同族の欠陥を塞ぐ（Issue #345） | 採用 (2026-09) |
 | [0177](./0177-fix-stage3-tooth-blind-asserts.md) | 段3の歯の「壊れても緑のままの assert」2件を直す — 変異試験で実測する（Issue #293） | 採用 (2026-09) |
 | [0179](./0179-adr-number-assigned-at-merge.md) | ADR の番号は「マージ直前」に確定させる — 採番を、衝突しようがないタイミングまで遅らせる（Issue #295） | 採用 (2026-09) |
 | [0183](./0183-local-postgres-makes-postgres-mutation-testing-possible.md) | `packages/postgres` の変異試験を、CI のトリガを変えずに手元で成立させる — `initdb` で自分専用のインスタンスを立てる手順を `AGENTS.md` に置く | 採用 (2026-09) |
 | [0186](./0186-sweep-archive-follows-decay-clock.md) | `sweepArchive` は `opts.clock` 省略時に `tenant_settings.decay_clock` へ従う — ADR 0165 決めたこと12 の数え漏れ（掃引）を埋める | 採用 (2026-09) |
+| [0190](./0190-correction-cli-dispatch-ci-tooth.md) | `correction` サブコマンドを CI の歯にする — 既存ジョブへ相乗り・`deterministic` 層・`omitted` の `superseded` assert | 採用 (2026-09) |
+| [0191](./0191-ci-green-verdict-bound-to-sha.md) | 「CI が緑」の判定を sha に縛る——`gh pr merge --match-head-commit` を道具側で強制する（Issue #294） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
