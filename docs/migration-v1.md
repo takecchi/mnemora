@@ -27,6 +27,45 @@
 
 ---
 
+## ⚠ 追記（2026-09-17）: `v0.2.0` → `v1.0.0`（未リリース）で予定されている最初の破壊的変更
+
+**上の「`v1.0.0` に何が入るかが決まっていない」は、まだ全体としては変わっていない。**
+この節は、**`v1.0.0` に入る予定の変更のうち、既に実装されて手順が分かっているもの**を
+先出しする。**`v1.0.0` の tag が実際に切られるまでは、これも未確定である**
+（draft PR の段階。[ADR 0187](./decisions/0187-recall-association-default-on.md) 参照）。
+
+### 連想枠（`RecallQuery.association`）の既定が off から on に反転する
+
+**誰が影響を受けるか**: `@mnemora/core` の `recall()`（または `Runtime.recall()`）を
+呼ぶ**全利用者**。`association` を明示せずに呼んでいるなら、`v0.2.0` までは
+「連想は一切走らない」だったが、**`v1.0.0` では既定で連想が走るようになる**——
+`DEFAULT_RECALL_ASSOCIATION`（`{ maxCount: 10 }`。⚠ 根拠のある確定値ではなく、
+いまの時点の仮値）が適用される。
+
+**何が変わるか**:
+1. 返る `memories` に、クエリには直接当たらなかった候補（`retrievedVia: "association"`）が
+   増えうる。載る文字数・費用が増える方向——`association-probes` ベンチの実測では
+   `maxCount=10` で `memoryChars` **+4.32%**（出所: [ADR 0168](./decisions/0168-examples-chat-uses-association.md)）。
+2. `RecallUsage.byTier.association` 欄が、既定の呼び出しでも現れるようになる
+   （以前は `association` を明示したときだけ現れた）。
+3. `RecallQuery.association` の型が `RecallAssociationQuery` から
+   `RecallAssociationQuery | null` に広がった。
+
+**何をすればよいか**: 従来どおり連想を一切走らせたくないなら、
+`RecallQuery.association: null` を明示的に渡す（`undefined` = 省略とは区別される）。
+
+**⚠ この変更は、`estimateRecallFootprint`（Issue #276）の見積もり誤差にも影響しうる。**
+`RecallFootprintShape.associationCount` を渡さずに見積もっている場合、既定は `0` の
+まま据え置いてある（`packages/core` は連想が実際に何件昇格するかを構造的に知りようが
+ないため——`maxCount` をそのまま流用すると過大評価になりうる）。⟹ **`association` を
+省略した呼び出しの見積もりは、`v1.0.0` 以降は実態を過小評価する方向にずれうる。**
+正確に見積もりたい場合は `associationCount` を実測・較正して渡すこと。
+詳細は [ADR 0187](./decisions/0187-recall-association-default-on.md) を参照。
+
+根拠: [ADR 0187](./decisions/0187-recall-association-default-on.md)。
+
+---
+
 ## まず: 影響を受けない人
 
 **ほとんどの利用者は何もしなくてよい。** `createRuntime()`（`@mnemora/postgres` /

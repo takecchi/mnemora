@@ -54,6 +54,28 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⚠ **`v1.0.0` に何が入るか・いつ切るかは、この節を書いた時点で決まっていない。**
 経緯は [docs/roadmap.md](./docs/roadmap.md) §7.12 に在る。
 
+**追記（2026-09-17、[ADR 0187](./docs/decisions/0187-recall-association-default-on.md)）:
+上の「項目0件」は、この追記の対象 PR を含まない時点の記述である（当時の記録として
+書き換えない）。この PR が `packages/*/src` の非テストコードを変更する最初の
+`[1.0.0]` 項目になる。**
+
+### Breaking
+
+| # | 変更 | 誰が影響を受けるか | 根拠 |
+|---|---|---|---|
+| 1 | `RecallQuery.association` の**既定が off から on に反転した**。省略すると `DEFAULT_RECALL_ASSOCIATION`（`{ maxCount: 10 }`。仮値）が適用され、連想枠が走る。 | `@mnemora/core` の `recall()` を呼ぶ**全利用者**。明示的に止めたいときは `association: null` を渡す（`undefined` = 省略とは別の状態） | [ADR 0187](./docs/decisions/0187-recall-association-default-on.md) |
+| 2 | `RecallQuery.association` の型が `RecallAssociationQuery` から **`RecallAssociationQuery \| null`** に広がった。 | 網羅的に型を扱っている利用者・`association` を独自に構築している利用者 | [ADR 0187](./docs/decisions/0187-recall-association-default-on.md) |
+| 3 | `RecallUsage.byTier.association` の**存在条件が変わった**。以前は「`association` を渡したかどうか」、いまは「連想を実際に走らせたか（`null` で明示的に止めていないか）」。既定の呼び出しでも欄が現れるようになる。 | `byTier` の形を厳密に検査している利用者（例: 網羅的なキー比較） | [ADR 0187](./docs/decisions/0187-recall-association-default-on.md) |
+| 4 | 既定の呼び出しで **載る文字数・費用が増える**（`association-probes` ベンチの実測では `maxCount=10` で `memoryChars` +4.32%、出所は ADR 0168）。 | `@mnemora/core` の `recall()` を明示せず呼ぶ全利用者 | [ADR 0187](./docs/decisions/0187-recall-association-default-on.md) |
+
+### Changed（後方互換だが挙動が変わりうる）
+
+- **`examples/chat` の想起経路（`mnemora-path.ts`）は、もう独自の連想枠の既定値
+  （`DEFAULT_MNEMORA_PATH_ASSOCIATION`）を持たない。** `packages/core` 自身の既定
+  （`DEFAULT_RECALL_ASSOCIATION`）をそのまま継ぐ——出荷される既定を、例が実演する
+  という形に揃えた。挙動そのものは変わらない（値は同じ `{ maxCount: 10 }`）。
+  ([ADR 0187](./docs/decisions/0187-recall-association-default-on.md))
+
 ---
 
 ## [0.2.0] - 2026-09-16
