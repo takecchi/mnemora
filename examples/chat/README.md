@@ -1040,8 +1040,7 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
 | `japaneseNamesSparse` | 日本語固有名詞 probe 12件（person4/org3/product3/place2） | sparse（固有名詞0件） | `japaneseNamesDense`（同じ12 probe、haystack だけが違う） |
 | `japaneseNamesDense` | 同じ12 probe | dense（固有名詞60件、密度5:1） | `japaneseNamesSparse` |
 
-### 実測結果（[identifier-probe-baseline.json](./identifier-probe-baseline.json)、
-`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
+### 実測結果（[identifier-probe-baseline.json](./identifier-probe-baseline.json)、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
 
 🔴 **数字には必ず arm 名・`(provider, model, dimensions)`・haystack 条件を添える**
 （この repo で「条件を落とした数字」が実際に3度壊れているため。ADR 0068・ADR 0081 §3.2）。
