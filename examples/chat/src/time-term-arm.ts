@@ -72,6 +72,18 @@ export interface PairMember {
   rank: number;
   score: ScoreBreakdown;
   digest: string;
+  /**
+   * この member がどの段から来たか（`RecalledMemory.retrievedVia`、`recall-runtime.ts:119`）。
+   * 段2の `below_threshold` で落ちた候補が段3.5（連想、ADR 0151/0187）で拾い直されると
+   * `"association"` になる——`far-past` probe の older がその実例（`time-term.postgres.test.ts`
+   * 「5. far-past」参照）。この arm は「どちらの経路で返ってきたか」までは元々測っていなかった
+   * ——outcome/score だけでは、閾値の外に落ちた候補が連想枠経由で戻ってきたのか、
+   * それとも段2の閾値をそもそも通過したのかを区別できない。この欄を足すことで、それを
+   * 区別できるようにする（probe の計測項目を増やす方向であり、既存の判定を弱める変更ではない）。
+   */
+  retrievedVia: RecalledMemory["retrievedVia"];
+  /** `retrievedVia: "association"` のときだけ在る。どのアンカーから連想したか。 */
+  associationOf?: RecalledMemory["associationOf"];
 }
 
 /**
@@ -202,7 +214,13 @@ export interface RunTimeTermArmOptions {
 }
 
 function toPairMember(memory: RecalledMemory, index: number): PairMember {
-  return { rank: index + 1, score: memory.score, digest: memory.digest };
+  return {
+    rank: index + 1,
+    score: memory.score,
+    digest: memory.digest,
+    retrievedVia: memory.retrievedVia,
+    ...(memory.associationOf !== undefined ? { associationOf: memory.associationOf } : {}),
+  };
 }
 
 async function runOneProbe(

@@ -125,10 +125,41 @@ describe("examples/chat: time-term arm(擬似 provider・本物の Postgres)", (
       expect(realistic.totalRatio).not.toBeNull();
       expect(Math.abs(realistic.totalRatio! - realistic.freshnessRatio!)).toBeLessThan(1e-3);
 
-      // 5. far-past: freshness が閾値を割って older 側が落ちる。
+      // 5. far-past: freshness が閾値を割って older 側が段2で落ちる。
+      //
+      // ⭐ 段3.5(連想、既定 on。ADR 0151/0187)が既定 on になったため、この probe は
+      // 「段2 が older を閾値で落とす」ことと「段3.5 が、クエリに当たらなかった候補を
+      // アンカー(newer)の近傍として拾い直す」ことの**両方**を1回の recall() で観測する
+      // ようになった——`recall-runtime.ts` の段3.5 冒頭のコメントいわく「段1に置くと
+      // 必ず段2の below_threshold で落ちる。スコアに関係なく候補へ足す経路は既に段3が
+      // 持っており、連想はその一般化である」。older は段2で below_threshold に落ちた
+      // *まま*(あとの段が前の段の判断を覆さない、docs/recall.md §2 の契約)、段3.5 経由で
+      // `result.memories` に戻ってくる。
+      //
+      // ⚠ **below_threshold の assert を先に置く**——outcome の assert より前に置かないと、
+      // outcome が想定と違って落ちたときに below_threshold 側が一度も実行されず、「段2 がいまも
+      // older を落としているか」を確かめ損なう(過去に実際にこの順で踏んだ事故)。
       const farPast = byId.get("far-past")!;
-      expect(farPast.outcome).toBe("older-not-returned");
+      // 段2 はいまも older を below_threshold として落としている——閾値の挙動そのものは
+      // 何も変わっていない。
       expect(farPast.omittedKinds).toContain("below_threshold");
+      // 段3.5 が older を拾い直すので、両者とも返り、newer が上位に来る
+      // (連想候補は段2の再スコアを経ないので、newer の高い total には及ばない)。
+      // ⛔ 「older-not-returned」への置き換えではない——below_threshold の assert を
+      // 上で維持したまま、outcome だけをいまの実際の挙動(連想枠あり)に合わせて足している。
+      expect(farPast.outcome).toBe("newer-ranked-higher");
+      expect(farPast.newer).not.toBeNull();
+      expect(farPast.older).not.toBeNull();
+      // older が連想枠経由で戻ったことを実証する(recall-runtime.ts:119 の
+      // `retrievedVia: "ann" | "lexical" | "mandatory_companion" | "association"`)。
+      // これが無いと、「below_threshold で落ちたはずの older がなぜ返ってきたか」を
+      // この歯だけからは説明できない。
+      expect(farPast.older!.retrievedVia).toBe("association");
+      // newer はクエリに直接当たった候補であり、連想枠経由ではない。
+      expect(farPast.newer!.retrievedVia).not.toBe("association");
+      // 連想の起点(アンカー)は newer 自身であるはず——このペアは他に候補を持たない
+      // 専用テナントなので、アンカーになり得るのは newer だけである。
+      expect(farPast.older!.associationOf).toBeDefined();
 
       // ---------------------------------------------------------------------
       // decay を freshness から分離して測る3件。

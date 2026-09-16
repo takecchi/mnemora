@@ -159,6 +159,7 @@ function member(overrides: Partial<PairMember> & { total: number }): PairMember 
     rank: overrides.rank ?? 1,
     digest: overrides.digest ?? "digest",
     score,
+    retrievedVia: overrides.retrievedVia ?? "ann",
   };
 }
 

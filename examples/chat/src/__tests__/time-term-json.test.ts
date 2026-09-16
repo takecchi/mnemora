@@ -22,6 +22,7 @@ function makeMember(overrides: Partial<PairMember> = {}): PairMember {
       strength: 1,
     },
     digest: "d",
+    retrievedVia: "ann",
     ...overrides,
   };
 }
