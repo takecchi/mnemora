@@ -135,7 +135,8 @@ ORDER BY coverage DESC, rank DESC, recorded_at DESC, id
 ADR 0170 が `VectorStore.search`（`packages/core/src/interfaces/vector-store.ts`）に対して行ったのと同じ書き方・同じ濃さで、`LexicalStore.search` の doc に段落を足した:
 
 - `coverage`/`rank` が完全一致する行が複数あるときの順序も adapter の責務である。
-- `recall-runtime.ts` は `search()` の返り値を先頭から `limit` 件切り詰める（`Array.prototype.sort` の安定性の話は `VectorStore` 側の段2 の話であり、`LexicalStore` は現状 core 側で明示のソートを追加でかけていない——`search()` が返した順序がそのまま使われる）。
+- **⚠ これが効く理由は「core が返却順をそのまま使うから」ではない。** 段2は `compareScoredCandidates`（ADR 0170 決定2、`recall-runtime.ts:802` の `scored.sort(compareScoredCandidates)`）で候補を**並べ直す**——`score.total` → 実効時刻 → `memory.id` の3段で、`memory.id` は一意だから**全順序**である。⟹ 段2に届いた後の並びは `search()` の返却順に依存しない。**効くのはその手前、`opts.limit` による切り詰めのほうである**——`search()` が「同点の候補のうちどの `limit` 件を返すか」を決めており、**そこで落ちた候補は段2に一度も届かない。**⟹ 順序が変われば**候補集合そのものが変わる。**ADR 0170 が Issue #339 で実際に踏んだのもこの機序である（あちらは `maxCount`／段2の `limit` による切り詰めだった）。
+  - ⚠ **この段落は、最初この ADR にも interface の doc にも「段2の `Array.prototype.sort` が安定だから `search()` の順序が保たれる」と誤って書いていた。マージ前のレビューで `recall-runtime.ts:802` を読んで誤りと分かり、両方を直した。** 記録として残す——`compareScoredCandidates` は ADR 0170 自身が足したものであり、それを読まずに「core は順序を保つ」と書くと、**この PR が塞いでいる穴の場所そのものを取り違える。**
 - `PostgresLexicalStore` は `coverage → rank → recorded_at DESC → id` の4段で tie-break する。
 
 ### 決定3: `recorded_at` が完全一致したときの挙動を明記する（衝突は無くならない）
