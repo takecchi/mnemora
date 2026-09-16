@@ -76,6 +76,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `v0.2.0` の時点で既に `InMemoryTenantSettingsStore` を export しており、
   `@mnemora/testkit` は publish 対象6本の1つである。
   ⟹ ⭐ **`@mnemora/core` だけを見て数えると、この1件は落ちる。**
+  ⚠ **移行手順は複製しない**——[docs/migration-v1.md](./docs/migration-v1.md)
+  「8. `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（`@mnemora/testkit`）の
+  シグネチャが変わった」を見ること
 
 ### 変更（挙動）
 
