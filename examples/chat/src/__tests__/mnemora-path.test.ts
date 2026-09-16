@@ -8,12 +8,7 @@ import type {
   Runtime,
 } from "@mnemora/core";
 import type { Conversation } from "../scenario.js";
-import {
-  DEFAULT_MNEMORA_PATH_ASSOCIATION,
-  buildMnemoraPrompt,
-  queryRecall,
-  reportMemoryUsage,
-} from "../mnemora-path.js";
+import { buildMnemoraPrompt, queryRecall, reportMemoryUsage } from "../mnemora-path.js";
 
 function recallWith(memories: RecallResult["memories"]): RecallResult {
   return {
@@ -48,25 +43,26 @@ const FAKE_CONVERSATION: Conversation = {
   query: "テストの質問",
 };
 
-describe("queryRecall（Issue #291 / ADR 0168: 既定で association を渡す）", () => {
-  it("opts.association を省略すると DEFAULT_MNEMORA_PATH_ASSOCIATION を渡す", async () => {
+describe("queryRecall（Issue #291 / ADR 0168・ADR 0187: association は packages/core へ素通しする）", () => {
+  it("opts.association を省略すると association キー自体を渡さない（packages/core 自身の既定 DEFAULT_RECALL_ASSOCIATION に委ねる）", async () => {
     const captured: { query?: RecallQuery } = {};
     const runtime = fakeRuntimeCapturingQuery(captured);
 
     await queryRecall(runtime, { tenantId: "t" }, FAKE_CONVERSATION);
 
     expect(captured.query?.text).toBe("テストの質問");
-    expect(captured.query?.association).toEqual(DEFAULT_MNEMORA_PATH_ASSOCIATION);
+    expect(captured.query?.association).toBeUndefined();
+    expect(captured.query && "association" in captured.query).toBe(false);
   });
 
-  it("opts.association: null を渡すと association を渡さない（packages/core 既定の off のまま呼ぶ脱出口）", async () => {
+  it("opts.association: null を渡すと association: null をそのまま渡す（packages/core 側の明示的な opt-out、ADR 0187）", async () => {
     const captured: { query?: RecallQuery } = {};
     const runtime = fakeRuntimeCapturingQuery(captured);
 
     await queryRecall(runtime, { tenantId: "t" }, FAKE_CONVERSATION, { association: null });
 
-    expect(captured.query?.association).toBeUndefined();
-    expect(captured.query && "association" in captured.query).toBe(false);
+    expect(captured.query?.association).toBeNull();
+    expect(captured.query && "association" in captured.query).toBe(true);
   });
 
   it("opts.association に明示的な値を渡すと、それをそのまま渡す（既定を上書きできる）", async () => {

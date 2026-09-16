@@ -663,6 +663,19 @@ decay/freshness/strength の再スコアは考慮していない）。
 2つの独立したベンチが近い増分を報告している。**ただし完全一致ではない**——probe 集合
 （12件の三角形）と会話シナリオ（filler の巡回）は別物であり、一致を主張しない。
 
+**追記（[ADR 0187](../../docs/decisions/0187-recall-association-default-on.md)）:
+`packages/core` 自身の `RecallQuery.association` の既定が on になった
+（`DEFAULT_RECALL_ASSOCIATION = { maxCount: 10 }`）のに伴い、`mnemora-path.ts` は
+独自の `DEFAULT_MNEMORA_PATH_ASSOCIATION` を持たなくなった——`queryRecall` は
+`association` を `packages/core` へそのまま素通しするだけである。**この節が実測した
+`compare` の数字そのものは変わらない**（`packages/core` の既定 `{ maxCount: 10 }` を
+そのまま継ぐため）——変わったのは既定値を誰が持つかだけである。**⚠ `maxCount: 10` は
+いまも根拠のある確定値ではなく、仮値のままである**（ADR 0187）。**⚠ `@mnemora/core` を
+npm から入れた採用者にとって、連想枠はもう opt-in ではない**——`association: null` を
+明示しない限り既定で走る。**上のほうにある「`@mnemora/core` の `recall()` では既定で走らない」
+という趣旨の記述は、この追記と ADR 0187 により古くなっている**（このファイル内の該当箇所は
+別途 grep して直すこと）。**
+
 ### この実測の限界
 
 - **（測定当時、2026-09-05/06 時点）擬似 embedding は意味的な類似度を表現しない。**

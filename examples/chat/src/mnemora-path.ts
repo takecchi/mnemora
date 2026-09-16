@@ -8,29 +8,19 @@ import type {
 import { drainEmbedTicks } from "./embed-drain.js";
 import type { Conversation } from "./scenario.js";
 
-/**
- * `queryRecall` が既定で渡す `RecallQuery.association`（Issue #291 / ADR 0168）。
- *
- * **値の根拠**: `association-probes` ベンチ（ADR 0158 / 0167 で器の非決定性・
- * probe の公正性を直した後の実測、Issue #291 の 2026-09-16 コメント）が
- * `maxCount=10` で `goldReturned` 0/12 → 12/12（連想でしか届かない gold の
- * 到達が全件揃う）、費用は `memoryChars` +4.32% だったことに基づく。
- * `maxCount=5` では 10/12 止まり（+2.22%）——「聞かれていないことを自分から
- * 思い出す」という目指す姿を、この12件の範囲で完全に満たすのは 10 だけである。
- * 詳細は ADR 0168。
- */
-export const DEFAULT_MNEMORA_PATH_ASSOCIATION: RecallAssociationQuery = { maxCount: 10 };
-
 export interface MnemoraPathOptions {
   budget?: RecallBudget;
   /**
-   * `RecallQuery.association` に渡す値。**省略時は
-   * {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} を渡す**（ADR 0168。「聞かれていないことを、
-   * 自分から思い出す」を実際に呼び手側で使う経路にするための既定）。
+   * `RecallQuery.association` にそのまま渡す値（ADR 0168 / [ADR 0187](../../../docs/decisions/0187-recall-association-default-on.md)）。
+   *
+   * **省略時は `packages/core` 自身の既定（`DEFAULT_RECALL_ASSOCIATION`、
+   * ADR 0187）が適用される**——この関数はもう独自の既定値を持たない
+   * （2026-09-17 まではここに `DEFAULT_MNEMORA_PATH_ASSOCIATION = { maxCount: 10 }`
+   * という、この関数だけの明示的なオプトインが在ったが、ADR 0187 が `packages/core` の
+   * 既定を on にしたので外した——⭐門（`compare` ベンチ）が「出荷される既定」を
+   * そのまま測るようにするためである。詳細は ADR 0187「決めたこと」）。
    * 連想枠そのものを止めたい呼び出し側（比較・検査のため）は `association: null` を
-   * 明示すること——`packages/core` 側の既定（省略時 off）とは別に、この関数だけの
-   * 既定を on にしている（ADR 0151「決定」の既定 off はそのまま——ここは
-   * `examples/chat` という一呼び手が、明示的にオプトインしている形である）。
+   * 明示すること——`packages/core` の `null` opt-out（ADR 0187）がそのまま素通しされる。
    */
   association?: RecallAssociationQuery | null;
 }
@@ -104,10 +94,11 @@ export async function ingestConversation(
  * `opts.budget` を渡すと、段4（予算による切り詰め）が実際に候補を落とす
  * （docs/recall.md §2 段4）。渡さなければ切り詰めは起こらない。
  *
- * **既定で `association`（連想枠、ADR 0151・Issue #291・ADR 0168）を渡す**——
- * `opts.association` を省略すると {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} が使われる。
- * 明示的に `association: null` を渡した呼び出しだけが、連想枠を持たない
- * `packages/core` の既定（off）のまま呼ぶ。
+ * **`association` は `packages/core` へそのまま素通しする**（ADR 0151・Issue #291・
+ * ADR 0168・[ADR 0187](../../../docs/decisions/0187-recall-association-default-on.md)）。
+ * `opts.association` を省略すると `RecallQuery.association` も省略され、
+ * `packages/core` 自身の既定（`DEFAULT_RECALL_ASSOCIATION`、既定 on）が適用される。
+ * 明示的に `association: null` を渡した呼び出しだけが、連想枠を止める。
  */
 export async function queryRecall(
   runtime: Runtime,
@@ -115,12 +106,10 @@ export async function queryRecall(
   conversation: Conversation,
   opts: MnemoraPathOptions = {},
 ): Promise<RecallResult> {
-  const association =
-    opts.association === null ? undefined : (opts.association ?? DEFAULT_MNEMORA_PATH_ASSOCIATION);
   return runtime.recall(ctx, {
     text: conversation.query,
     ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
-    ...(association !== undefined ? { association } : {}),
+    ...(opts.association !== undefined ? { association: opts.association } : {}),
   });
 }
 

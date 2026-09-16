@@ -232,10 +232,11 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 **内部が複雑でも、記憶そのものを動かす中核操作はこの5つに保つ。ここは増やさない。**
 
 **⚠ 冒頭の構成図にある `Association`（連想枠）は、`@mnemora/core` の `recall()` では
-既定で走らない。**`recall()` に `association: { maxCount: 10 }` のように**明示的に渡した
-ときだけ**走る（省略時は連想を一切走らせない——`packages/core/src/recall.ts:1132`、
-[ADR 0151](./docs/decisions/0151-recall-association-unprompted.md)）。
-⟹ **npm から入れたままの既定の振る舞いは「聞かれたことにしか答えない」。**
+既定で走る。**`RecallQuery.association` を省略すると `DEFAULT_RECALL_ASSOCIATION`
+（`{ maxCount: 10 }`。いまの時点の仮値）が使われる（[ADR 0151](./docs/decisions/0151-recall-association-unprompted.md)
+が導入し、[ADR 0187](./docs/decisions/0187-recall-association-default-on.md)が既定を on に反転した）。
+⟹ **npm から入れたままの既定の振る舞いは「聞かれていないことも、自分から思い出す」。**
+止めたいときは `association: null` を明示的に渡す。
 渡し方・各フィールドの既定値・渡したときの実測値は
 [packages/core/README.md](./packages/core/README.md) を見ること。
 

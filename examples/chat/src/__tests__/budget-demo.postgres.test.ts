@@ -47,6 +47,12 @@ import {
  *   = `{ maxCount: 10 }`）ため、このデモの会話も `association` を申告している。
  *   ⟹ `byTier.association` は欄として常に現れる（`RecallUsage.byTier.association` の
  *   存在条件は「`association` を渡したかどうか」——`packages/core/src/recall.ts` の doc）。
+ * - ⚠ **さらに追記（[ADR 0187](../../../../docs/decisions/0187-recall-association-default-on.md)）**:
+ *   `packages/core` 自身の既定が on になったのに伴い、`mnemora-path.ts` は独自の
+ *   `DEFAULT_MNEMORA_PATH_ASSOCIATION` を持たなくなった——`queryRecall` は `association` を
+ *   `packages/core` へそのまま素通しするだけである。**このデモが `byTier.association` を
+ *   常に持つという結論そのものは変わらない**（`packages/core` の既定 `{ maxCount: 10 }` を
+ *   継ぐため）——変わったのは、その既定を誰が持つかだけである。
  *   `buildConversation(8)` はスコープ内総数が既定 `limit`(10) を超えないため、
  *   段3.5が拾える「クエリの limit で既に返っている集合の外」の候補が無く、実測では
  *   `byTier.association` は常に `0`（**検査していない**: 上の実測値

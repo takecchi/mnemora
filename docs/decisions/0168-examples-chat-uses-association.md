@@ -197,3 +197,15 @@ ADR 0151 は北極星の問い1で「既定 on」を明示的に落としてい�
 **🔴 §1「どの門・どの基準値が動くか」の結論(「影響するのは `compare-baseline.json` の1本だけである」)は誤りだった。** 正確には——**動く基準値ファイルは `compare-baseline.json` の1本で合っている**（`retrieval-baseline.json` 等5本は本文の通り無関係）が、**その1本を読む門は2本ある**ことを§1が見落としていた: (1) `scripts/compare-summary.mjs` が `compare-baseline.json` 自身との差分を見る⭐門（ADR 0133）、(2) `recall-footprint-baseline.test.ts` が**同じ `compare-baseline.json` を、`estimateRecallFootprint`/`calibrateRecallFootprint` の検算に使う**⭐門（Issue #276）。§1は`recall()` の呼び出し箇所（`mnemora-path.ts`・5本のベンチ・`association-arm.ts`）だけを洗い出し、**基準値ファイルの「書き手」側の影響だけを追って、「読み手」側の影響を追っていなかった**——`compare-baseline.json` は `compare` ベンチの基準値であると同時に、`recall-footprint` の較正・検算のデータソースでもある、という二重の役割を持つことが§1の洗い出しから漏れていた。
 
 **引き受けた負債への追記**: 上記は「オーナーが仕様に明示した非目標」のような設計判断ではなく、単純な洗い出し漏れである。**同種の見落とし**——ある基準値ファイルを「書く」経路だけを洗い出し、「読む」経路（他のテスト・他の bench・他の門）を洗い出さない——が、今後 `*-baseline.json` を更新する PR で繰り返される可能性がある。`git grep` で対象ファイル名を検索し、書き手だけでなく読み手も列挙することを、次に基準値ファイルを更新する作業者への申し送りとする。
+
+---
+
+## 追記 (2026-09-17): [ADR 0187](./0187-recall-association-default-on.md) が `packages/core` の既定を on にした — `DEFAULT_MNEMORA_PATH_ASSOCIATION` を廃止する
+
+**本 ADR「これが覆るとしたら」2番が現実になった。**`packages/core` の `RecallQuery.association` の既定が on になった（`DEFAULT_RECALL_ASSOCIATION = { maxCount: 10 }`、ADR 0187）。⟹ **`mnemora-path.ts` 独自の `DEFAULT_MNEMORA_PATH_ASSOCIATION`（本 ADR「決定」1番）は不要になり、廃止した。**`queryRecall` はもう独自の既定値を持たず、`association` を `packages/core` へそのまま素通しするだけである。
+
+**この ADR の決定のうち、生きているもの**: `maxCount: 10` という値そのもの（ADR 0187 は本 ADR の実測値をそのまま引き継いでいる）、`association: null` という opt-out の語彙（ADR 0187 が `packages/core` 自身の語彙として採用した）、「5本のベンチ arm には混ぜない」という決定4。
+
+**この ADR の決定のうち、もう実体が無いもの**: 「決定」3番（`packages/core` の既定を on にしない理由）——ADR 0187 がこれを覆した。「決定」1番の `DEFAULT_MNEMORA_PATH_ASSOCIATION` という定数自体（上記のとおり廃止）。「これが覆るとしたら」2番はもう「覆るとしたら」ではなく、覆った事実の記録である。
+
+**⛔ 「北極星 項目2 が在るへ上がった」ことを、この追記は主張しない。**それは ADR 0187 自身が判断すること。ADR 0187 を参照。

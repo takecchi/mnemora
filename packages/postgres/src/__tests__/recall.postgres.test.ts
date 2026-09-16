@@ -148,7 +148,11 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     };
 
     try {
-      await runtime.recall(ctx, { vector: [0.5, 0.5, 0.5], limit: 10 });
+      // association: null — 連想枠は既定 on（ADR 0187）。連想も同じテーブルへ
+      // `ORDER BY` 付きの検索を出すため、明示的に止めないと下の傍受
+      // （`text.includes(TABLE) && /order by/i.test(text)`）が段1ではなく
+      // 連想の検索文を捕まえてしまう。
+      await runtime.recall(ctx, { vector: [0.5, 0.5, 0.5], limit: 10, association: null });
     } finally {
       pool.query = originalQuery;
     }
@@ -181,7 +185,9 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       status: "active",
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    // association: null — この歯は既定 on（ADR 0187）の対象外（status ゲートだけを
+    // 検査する）。toEqual による厳密な集合比較なので、連想の効果を明示的に止める。
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0], association: null });
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toEqual([included.id]);
   });
@@ -246,9 +252,12 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       buildNewMemoryFixture({ tenantId: TENANT, embeddingStatus: "pending" }),
     );
 
+    // association: null — この歯は omitted の各 kind だけを検査する（対象外の効果を
+    // 持ち込まないため。ADR 0187）。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       occurredAfter: new Date("2020-01-01T00:00:00.000Z"),
+      association: null,
     });
 
     expect(result.omitted).toContainEqual({
@@ -309,10 +318,13 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       contentHash: `far-${randomUUID()}`,
     });
 
+    // association: null — この歯は ADR 0040 の契約（ゼロベクトルが絡む候補は
+    // recall() の結果に出ない）だけを検査する（ADR 0187、対象外の効果を持ち込まない）。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       scoreThreshold: 0,
       limit: 10,
+      association: null,
     });
     const ids = result.memories.map((m) => m.memoryId);
 
@@ -346,7 +358,13 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       contentHash: `f-${randomUUID()}`,
     });
 
-    const result = await runtime.recall(ctx, { vector: [1, 0, 0], limit: 10, scoreThreshold: 0 });
+    // association: null — score_not_comparable（NaN 三分割）だけを検査する（ADR 0187）。
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 10,
+      scoreThreshold: 0,
+      association: null,
+    });
     const ids = result.memories.map((m) => m.memoryId);
 
     // 前提: 正常な2件は返っている（0件なら「ゼロが落ちた」は無意味な緑）。
@@ -384,6 +402,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       const result = await runtime.recall(ctx, {
         vector: [1, 0, 0],
         limit: 10,
+        association: null, // ADR 0187: この歯は score_not_comparable の非発生だけを検査する
         ...(scoreThreshold === undefined ? {} : { scoreThreshold }),
       });
       expect(result.omitted.some((o) => o.kind === "score_not_comparable")).toBe(false);
@@ -397,7 +416,8 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     // 直交ベクトル -> similarity=0 -> total=0 (< 既定閾値0.1) -> below_threshold
     await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0, 1, 0]);
 
-    const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    // association: null — below_threshold だけを検査する（ADR 0187）。
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0], association: null });
     expect(result.memories).toHaveLength(0);
     const omission = result.omitted.find((o) => o.kind === "below_threshold");
     expect(omission).toBeDefined();
@@ -419,11 +439,14 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     // 「窓の外が top-k へ入りえたか」まで判定してから鳴る。この歯の主題は
     // **「2つの omission が同時に出うる」ことであって `ann_truncated` の鳴り方ではない**ので、
     // 鳴る側になる形（どの候補も持たないタグをクエリへ足し、上界を 1.1 倍にする）で作る。
+    // association: null — over_limit/ann_truncated の同時発生だけを検査する（ADR 0187、
+    // limit の外に落ちた候補が連想で拾われると toHaveLength(1) が崩れる）。
     const result = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       limit: 1,
       overFetchFactor: 3,
       tags: ["どの候補も持っていないタグ"],
+      association: null,
     });
 
     expect(result.memories).toHaveLength(1);
@@ -478,7 +501,8 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       },
     );
 
-    const withoutBudget = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    // association: null — 矛盾の同伴取得と予算切り詰めだけを検査する（ADR 0187）。
+    const withoutBudget = await runtime.recall(ctx, { vector: [1, 0, 0], association: null });
     const withoutBudgetIds = withoutBudget.memories.map((m) => m.memoryId);
     expect(withoutBudgetIds).toContain(a.id);
     expect(withoutBudgetIds).toContain(b.id);
@@ -500,6 +524,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const withTightBudget = await runtime.recall(ctx, {
       vector: [1, 0, 0],
       budget: { maxMemoryChars: 10 },
+      association: null,
     });
     const tightIds = withTightBudget.memories.map((m) => m.memoryId);
     expect(tightIds).not.toContain(a.id);

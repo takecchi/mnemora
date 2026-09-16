@@ -443,6 +443,33 @@ describe("RecallQuerySchema — digestBandLimit（目次帯の件数上限。本
   });
 });
 
+describe("RecallQuerySchema — association: null と undefined の区別（ADR 0187、既定 on）", () => {
+  it("association を省略すると、パース後も undefined のまま（キー自体が無い）", () => {
+    const result = RecallQuerySchema.parse({});
+    expect(result.association).toBeUndefined();
+    expect("association" in result).toBe(false);
+  });
+
+  it("association: null は、パース後も null のまま（undefined に丸められない）", () => {
+    const result = RecallQuerySchema.parse({ association: null });
+    expect(result.association).toBeNull();
+    expect("association" in result).toBe(true);
+  });
+
+  it("accepts association: { maxCount }（明示値はそのまま通る）", () => {
+    const result = RecallQuerySchema.safeParse({ association: { maxCount: 5 } });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.association).toEqual({ maxCount: 5 });
+    }
+  });
+
+  it("rejects association: { maxCount: 0 }（量の上限を必ず正の整数で明示させる）", () => {
+    const result = RecallQuerySchema.safeParse({ association: { maxCount: 0 } });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("RecalledMemorySchema — provenanceKind（roadmap.md §5.5 のオーナー回答の条件）", () => {
   // 型（TypeScript）だけでなく schema（zod）でも必須にしてある。
   // 型は境界の外（HTTP・JSON）では効かないので、**片方だけでは
