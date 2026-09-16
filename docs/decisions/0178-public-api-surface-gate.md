@@ -267,6 +267,34 @@ prettier 書式でもない（`eslint` はこれを実際のソースとして�
   で、`build` ジョブに `pnpm run api:check` を打つ段が実在し、`Build` ステップの直後・
   `check:cjs-parse`/`pack:check` より前にあり、`--write` を渡していないことを固定した。
 
+### 【実測】この歯は、マージされる前に実際に1度噛んだ（基準線の由来）
+
+**この PR を `origin/main`（`67fd5b7`）へ取り込み直した時点で、`api:check` が
+`@mnemora/core` の差分を検出して落ちた。** 初版の snapshot を録った `9e13ac8` から
+`67fd5b7` までの間に、公開型が実際に動いていたためである。
+
+**基準線を `main` に合わせる前に、検出された変化の出所を1件ずつ辿った**
+（Issue #342 が言っている欠陥は「破壊的変更が根拠 ADR に書かれないまま着地すること」
+であり、**確かめずに snapshot を上書きすると、歯を入れる前に歯が見つけたものを消す**）:
+
+| 検出された変化 | 入った PR | 根拠 ADR | ADR に破壊性の記載 |
+|---|---|---|---|
+| `FilteredOmission.scopeRelation`（**必須**フィールドの追加） | [#376](https://github.com/takecchi/mnemora/pull/376)（`c4a3dc7`） | [0174](./0174-filtered-omission-scope-relation.md) | **在る**——「破壊的変更である（`@mnemora/core` の公開型に必須フィールドを追加した）」と逐語で書かれている |
+| `ScopeRelation` / `ScopeRelationSchema` の新規 export | 同上 | 同上 | 同上（追加 export 自体は破壊的ではない） |
+| `FILTERED_CONDITION_SCOPE_RELATION` の新規 export | 同上 | 同上 | 同上（追加 export 自体は破壊的ではない） |
+| `OverLimitOmission.stage`（**必須**フィールドの追加） | [#391](https://github.com/takecchi/mnemora/pull/391)（`2097a72`） | [0188](./0188-association-over-limit-omission.md) | **在る**——「🔴 破壊的変更。`OverLimitOmission` に必須フィールド `stage` を足したので」 |
+
+⟹ **4件とも申告済みだった。未申告の破壊的変更は見つからなかった**（⟹ 新しい issue は立てていない）。
+**そのうえで基準線を `67fd5b7` 時点の `main` に置いた。**
+
+⚠ **これは「この歯が入っていれば #342 の2件を捕まえられた」ことの傍証であって、証明ではない。**
+今回捕まえた4件は**どれも申告済み**であり、**未申告のものを捕まえた実績はまだ無い。**
+
+⚠ **`satisfies` の追加（[#382](https://github.com/takecchi/mnemora/pull/382) / ADR 0181）は
+snapshot に現れなかった**——`satisfies` は式の型を変えないため宣言出力が動かない。
+**⟹ この歯が「型として書かれていない変化を拾わない」ことの実例が1つ増えた**
+（「引き受けた負債」の該当項目）。
+
 ## 確かめていないこと
 
 - **実際の GitHub Actions 上での変異試験。** 上記「測ったこと」の変異試験2本は、

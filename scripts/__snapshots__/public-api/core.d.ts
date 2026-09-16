@@ -1330,12 +1330,19 @@ export interface StageSkippedOmission {
     stage: "candidate_generation" | "rescore" | "index_band" | "association";
     reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor";
 }
+export type ScopeRelation = "outside_scope" | "within_scope";
+export declare const ScopeRelationSchema: z.ZodEnum<{
+    outside_scope: "outside_scope";
+    within_scope: "within_scope";
+}>;
 export interface FilteredOmission {
     kind: "filtered";
     condition: "tenant" | "superseded" | "forgotten" | "archived" | "taxonomy" | "period" | "decayed" | "expired" | "not_yet_valid";
+    scopeRelation: ScopeRelation;
     count: number;
     countKind: CountKind;
 }
+export declare const FILTERED_CONDITION_SCOPE_RELATION: Record<FilteredOmission["condition"], ScopeRelation>;
 export interface BelowThresholdOmission {
     kind: "below_threshold";
     count: number;
@@ -1347,6 +1354,7 @@ export interface BelowThresholdOmission {
 }
 export interface OverLimitOmission {
     kind: "over_limit";
+    stage: "rescore" | "association";
     count: number;
     countKind: CountKind;
 }
@@ -1424,6 +1432,10 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
             expired: "expired";
             not_yet_valid: "not_yet_valid";
         }>;
+        scopeRelation: z.ZodEnum<{
+            outside_scope: "outside_scope";
+            within_scope: "within_scope";
+        }>;
         count: z.ZodNumber;
         countKind: z.ZodEnum<{
             unknown: "unknown";
@@ -1446,6 +1458,10 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"over_limit">;
+        stage: z.ZodEnum<{
+            rescore: "rescore";
+            association: "association";
+        }>;
         count: z.ZodNumber;
         countKind: z.ZodEnum<{
             unknown: "unknown";
@@ -1962,6 +1978,10 @@ export declare const RecallResultSchema: z.ZodObject<{
                 expired: "expired";
                 not_yet_valid: "not_yet_valid";
             }>;
+            scopeRelation: z.ZodEnum<{
+                outside_scope: "outside_scope";
+                within_scope: "within_scope";
+            }>;
             count: z.ZodNumber;
             countKind: z.ZodEnum<{
                 unknown: "unknown";
@@ -1984,6 +2004,10 @@ export declare const RecallResultSchema: z.ZodObject<{
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"over_limit">;
+            stage: z.ZodEnum<{
+                rescore: "rescore";
+                association: "association";
+            }>;
             count: z.ZodNumber;
             countKind: z.ZodEnum<{
                 unknown: "unknown";
