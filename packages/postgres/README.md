@@ -202,11 +202,11 @@ await runtime.observe(ctx, {
 （[`scripts/readme-postgres-objects-lib.mjs`](../../scripts/readme-postgres-objects-lib.mjs)）が
 migrations と `src/` の現物から機械的に導いた集合と突き合わせている。**この一覧が
 CI で赤くなったら、コードではなくこの一覧のほうを直すこと**（歯が正、この文章が従。
-導出のやり方・DROP された索引を数えない理由は [ADR 0200](../../docs/decisions/0200-postgres-shared-db-object-names.md) 参照）。
+導出のやり方・DROP された索引を数えない理由は [ADR 0202](../../docs/decisions/0202-postgres-shared-db-object-names.md) 参照）。
 
 ⚠ **`CREATE FUNCTION`（`mnemora_lexical_normalize` 等）は対象外。**関数名も
 理屈のうえでは共有 DB で衝突しうるが、この節・この歯はそれを検査しない
-（ADR 0200「引き受けた負債」）。
+（ADR 0202「引き受けた負債」）。
 
 ### テーブル（8）
 
@@ -256,7 +256,7 @@ CI で赤くなったら、コードではなくこの一覧のほうを直す�
 63バイトまで**のため、これを超える場合は末尾を切り詰め、内容から導いたハッシュ片
 （8桁の16進）を足して衝突を避ける——⚠ **この歯は接頭辞の一致しか検査していない。
 実際に切り詰め・ハッシュ付与が起きたときの具体的な名前は確かめていない**
-（ADR 0200「引き受けた負債」2番）。
+（ADR 0202「引き受けた負債」2番）。
 
 ### advisory lock のキー
 

@@ -1,4 +1,4 @@
-# ADR 0200: `packages/postgres` が作るオブジェクト名の一覧を README に置き、migrations と機械的に突き合わせる（Issue #168）
+# ADR 0202: `packages/postgres` が作るオブジェクト名の一覧を README に置き、migrations と機械的に突き合わせる（Issue #168）
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-17
