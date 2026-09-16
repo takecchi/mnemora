@@ -26,6 +26,7 @@ import {
   LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX,
   DIGEST_BAND_MAX_CHARS,
   DIGEST_BAND_MAX_ENTRY_CHARS,
+  FILTERED_CONDITION_SCOPE_RELATION,
   RecallQuerySchema,
 } from "./recall.js";
 import { packDigestBand } from "./digest-band.js";
@@ -1395,6 +1396,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.archived,
       count: aggregate.filteredArchived.count,
       countKind: aggregate.filteredArchived.countKind,
     });
@@ -1407,6 +1409,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.superseded,
       count: aggregate.filteredSuperseded.count,
       countKind: aggregate.filteredSuperseded.countKind,
     });
@@ -1415,6 +1418,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.forgotten,
       count: aggregate.filteredForgotten.count,
       countKind: aggregate.filteredForgotten.countKind,
     });
@@ -1423,6 +1427,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "period",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.period,
       count: aggregate.filteredPeriod.count,
       countKind: aggregate.filteredPeriod.countKind,
     });
@@ -1434,6 +1439,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "expired",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.expired,
       count: aggregate.filteredExpired.count,
       countKind: aggregate.filteredExpired.countKind,
     });
@@ -1442,6 +1448,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "not_yet_valid",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.not_yet_valid,
       count: aggregate.filteredNotYetValid.count,
       countKind: aggregate.filteredNotYetValid.countKind,
     });
@@ -1458,6 +1465,7 @@ export async function runRecall(
     omitted.push({
       kind: "filtered",
       condition: "decayed",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.decayed,
       count: aggregate.filteredDecayed.count,
       countKind: aggregate.filteredDecayed.countKind,
     });
