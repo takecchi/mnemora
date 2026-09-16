@@ -147,17 +147,17 @@ describe("DEFAULT_DECAY_THRESHOLD（ADR 0010 が固定する値）", () => {
 });
 
 /**
- * [ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと7:
+ * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと7:
  * 単位を持たない数値核（`decayFactor`/`decayFloorOffset`）そのものの歯。
  *
  * `defaultDecayStrategy`（壁時計）と `defaultActivityDecayStrategy`（活動時計）は
  * どちらもこの2関数の薄い包みである——**この2関数が壊れれば両方の時計が同時に壊れる**。
  * 上の「defaultDecayStrategy.strengthAt/floorAt」の歯は数値をリテラルで固定しているので、
- * `strengthAt`/`floorAt` の実装をこの核へ書き換えても（ADR 0158 が実際に行った変更）
+ * `strengthAt`/`floorAt` の実装をこの核へ書き換えても（ADR 0163 が実際に行った変更）
  * 出力が1つも変わっていないことは、既存の歯がそのまま回帰の歯になっている。
  * ここではさらに核そのものの性質を直接固定する。
  */
-describe("decayFactor（単位を持たない核、ADR 0158 決めたこと7）", () => {
+describe("decayFactor（単位を持たない核、ADR 0163 決めたこと7）", () => {
   it("elapsed=0 のとき常に1", () => {
     expect(decayFactor(0, 24)).toBe(1);
   });
@@ -168,12 +168,12 @@ describe("decayFactor（単位を持たない核、ADR 0158 決めたこと7）"
 
   it("elapsed=2*halfLife のとき常に0.25（単位に依らない——時間でも recall 回数でも同じ式）", () => {
     expect(decayFactor(48, 24)).toBeCloseTo(0.25, 10);
-    // 単位を「回数」として読んでも式は同じ（ADR 0158 決めたこと7の主張そのもの）。
+    // 単位を「回数」として読んでも式は同じ（ADR 0163 決めたこと7の主張そのもの）。
     expect(decayFactor(10, 5)).toBeCloseTo(0.25, 10);
   });
 });
 
-describe("decayFloorOffset（単位を持たない核、ADR 0158 決めたこと7）", () => {
+describe("decayFloorOffset（単位を持たない核、ADR 0163 決めたこと7）", () => {
   it("strength <= threshold のとき 0 を返す（既に閾値以下）", () => {
     expect(decayFloorOffset(0.05, 24, 0.05)).toBe(0);
     expect(decayFloorOffset(0.01, 24, 0.05)).toBe(0);
@@ -188,7 +188,7 @@ describe("decayFloorOffset（単位を持たない核、ADR 0158 決めたこと
 
 /**
  * `defaultActivityDecayStrategy` — 壁時計と同じ式を「recall() が起きた回数」の単位で
- * 読む実例（ADR 0158 決めたこと1・3・7）。
+ * 読む実例（ADR 0163 決めたこと1・3・7）。
  */
 describe("defaultActivityDecayStrategy.strengthAt", () => {
   it("elapsed=0 のとき strength をそのまま返す", () => {

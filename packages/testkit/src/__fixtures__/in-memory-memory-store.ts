@@ -646,7 +646,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 呼び出し側（`runtime.observe` の使用報告ループ）の次の一手が無いため、
    * no-op のまま現在の（更新されなかった）行を返す。
    *
-   * [ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16:
    * `opts.nowSeq` が渡され、かつこの Memory が `halfLifeRecalls` を持つときに限り、
    * 活動時計側の起点・床（`decayBaseSeq`/`decayFloorSeq`）も同じ条件で一緒に進める
    * （`PostgresMemoryStore.reinforce` と同じ分岐。`ReinforceOptions.nowSeq` の doc

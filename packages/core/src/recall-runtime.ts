@@ -74,13 +74,13 @@ export interface RecallRuntimeDeps {
   memoryStore: MemoryStore;
   vectorStore: VectorStore;
   /**
-   * [ADR 0158](../../docs/decisions/0158-decay-activity-clock.md): 忘却ゲート（段1・
+   * [ADR 0163](../../docs/decisions/0163-decay-activity-clock.md): 忘却ゲート（段1・
    * 後置フィルタ）と段2の再スコアが、そのテナントの `decay_clock`・活動時計の「いま」
    * （`activity_seq`）を読むために使う。`Runtime`（`runtime.ts`）は既に
    * `RuntimeDeps.tenantSettingsStore`（`getDefaultHalfLifeHours` 用に必須）を持っており、
    * `recall` の配線（`runtime.ts` の `recall` 関数）がそれをここへそのまま渡す。
    *
-   * **省略可能**（ADR 0158 決めたこと13）。`createRecallRuntime` を直接呼ぶ外部の
+   * **省略可能**（ADR 0163 決めたこと13）。`createRecallRuntime` を直接呼ぶ外部の
    * 呼び出し側を壊さないため——省略すると `decay_clock` は `'wall'` 固定として動く
    * （＝本 ADR 以前とまったく同じ挙動）。
    */
@@ -299,7 +299,7 @@ export async function runRecall(
   // ADR 0153 が明示的に上書きしている。
   const decayGateActive = validatedQuery.includeFullyDecayed !== true;
 
-  // ADR 0158: テナントの decay_clock を読み、忘却ゲート（段1・後置フィルタ）と段2の
+  // ADR 0163: テナントの decay_clock を読み、忘却ゲート（段1・後置フィルタ）と段2の
   // 再スコアに織り込む。`decayClock` は 'wall' 以外なら段2でも使うため、ゲートが
   // 無効（includeFullyDecayed: true）でも常に読む——「ゲートを外す」ことと「順位付けに
   // 使う時計を選ぶ」ことは別の軸である。
@@ -308,7 +308,7 @@ export async function runRecall(
       ? DEFAULT_DECAY_CLOCK
       : await readDecayClock(deps.tenantSettingsStore, ctx);
   // 活動時計の「いま」。'wall' のテナントでは一度も `tenant_activity` を読まない
-  // （ADR 0158 決めたこと5「activity_seq を進めるのは decay_clock != 'wall' のテナントに
+  // （ADR 0163 決めたこと5「activity_seq を進めるのは decay_clock != 'wall' のテナントに
   // 限る」の読み側の対になる節約——'wall' のテナントの activity_seq は常に無意味な 0 なので
   // 読む理由が無い）。
   const nowSeq: number | undefined =
@@ -323,7 +323,7 @@ export async function runRecall(
 
   /**
    * 忘却ゲートの活動時計側の軸: `decayFloorSeq` が無い（NULL）なら「この軸には床が無い
-   * ＝活動時計では沈まない」（ADR 0158 決めたこと4）ので常に true。`nowSeq` 自体が
+   * ＝活動時計では沈まない」（ADR 0163 決めたこと4）ので常に true。`nowSeq` 自体が
    * 無い（`decayClock === 'wall'` で一度も読んでいない）場合も、判定できないので
    * 緩い側（true）へ倒す。
    */
@@ -336,7 +336,7 @@ export async function runRecall(
 
   /**
    * ⭐ 全チャンネル共通の後置フィルタと段1（ANN）の押し下げが、同じ述語を2軸ぶん見る
-   * （ADR 0158 決めたこと1・12）。
+   * （ADR 0163 決めたこと1・12）。
    * - `'wall'`: 壁時計の軸だけ。
    * - `'activity'`: 活動時計の軸だけ。
    * - `'either'`: **OR**（どちらかが生きていれば通す。最も緩い——決めたこと1）。
@@ -348,7 +348,7 @@ export async function runRecall(
   };
 
   /**
-   * 段2の再スコア（`strategies/scoring.ts`）へ渡す、活動時計まわりの入力（ADR 0158
+   * 段2の再スコア（`strategies/scoring.ts`）へ渡す、活動時計まわりの入力（ADR 0163
    * 決めたこと12）。`decayClock`/`nowSeq` はテナント単位、`decayBaseSeq`/`halfLifeRecalls` は
    * Memory 単位——`computeDecay`（scoring.ts）が「揃っていなければ壁時計へフォールバック」
    * するので、ここでは単に Memory の値をそのまま渡すだけでよい。
@@ -440,7 +440,7 @@ export async function runRecall(
         // 埋める方向に働く。`includeFullyDecayed: true` を渡すと `undefined` になり、
         // ADR 0153 より前の挙動（decayFloorAtAfter を渡さない）に戻る。
         //
-        // ADR 0158 決めたこと1・12: `decay_clock` に応じて2軸を押し下げる。
+        // ADR 0163 決めたこと1・12: `decay_clock` に応じて2軸を押し下げる。
         // - 'wall': decayFloorAtAfter のみ（従来どおり）。
         // - 'activity': decayFloorSeqAfter のみ。
         // - 'either': 両方 + decayFloorAnyAxis（OR で結ぶ、最も緩い）。
@@ -479,7 +479,7 @@ export async function runRecall(
         kPrime,
         hits: annHits.length,
         decayGate: decayGateActive ? "pushed_down" : "disabled",
-        // ADR 0158 決めたこと1・12（北極星の問い3）: 実際に使った時計を名乗る。
+        // ADR 0163 決めたこと1・12（北極星の問い3）: 実際に使った時計を名乗る。
         clock: decayClock,
       },
     });
@@ -523,7 +523,7 @@ export async function runRecall(
         kPrime,
         hits: lexicalHits.length,
         decayGate: decayGateActive ? "post_filtered" : "disabled",
-        // ADR 0158 決めたこと1・12（北極星の問い3）: 実際に使った時計を名乗る。
+        // ADR 0163 決めたこと1・12（北極星の問い3）: 実際に使った時計を名乗る。
         clock: decayClock,
       },
     });
@@ -606,14 +606,14 @@ export async function runRecall(
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
     if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
     if (excludeKinds.has(memory.provenance.kind)) continue;
-    // 忘却ゲート（ADR 0153、ADR 0158 決めたこと12）: `LexicalFilter` に decayFloorAtAfter を
+    // 忘却ゲート（ADR 0153、ADR 0163 決めたこと12）: `LexicalFilter` に decayFloorAtAfter を
     // 足さず（マネージャー決定3）、ここで**全チャンネル共通**の述語を適用する——ANN の候補にも
     // 同じ述語が掛かる。既定で押し下げている ANN の候補は `survivesDecayGate` を段1で
     // 既に満たしているはずなので、通常はここでは何も落とさない（実際に落ちないことを歯で
     // 検算する。マネージャー決定「押し下げと後置が同じ述語であることの検算になる」）。
-    // ⭐ ADR 0158: `decay_clock` が 'activity'/'either' のテナントでは、この述語が
+    // ⭐ ADR 0163: `decay_clock` が 'activity'/'either' のテナントでは、この述語が
     // 壁時計だけでなく活動時計の軸も見る（`survivesDecayGate` の doc コメント参照）——
-    // これを忘れると、語彙チャンネルだけ壁時計のまま残る（ADR 0158 決めたこと12 の表）。
+    // これを忘れると、語彙チャンネルだけ壁時計のまま残る（ADR 0163 決めたこと12 の表）。
     if (decayGateActive && !survivesDecayGate(memory)) {
       decayFilteredCount += 1;
       continue;
@@ -1380,7 +1380,7 @@ export async function runRecall(
       ...(m.companionOf !== undefined ? { companionOf: m.companionOf } : {}),
       ...(m.associationOf !== undefined ? { associationOf: m.associationOf } : {}),
     })),
-    // ADR 0158 決めたこと5: `decay_clock != 'wall'` のテナントに限り、この recall で
+    // ADR 0163 決めたこと5: `decay_clock != 'wall'` のテナントに限り、この recall で
     // `tenant_activity.activity_seq` を進める。「1単位 = recall() 1回」——この呼び出し
     // そのものが1回の recall なので、既定のテナント（'wall'）では false のまま渡り、
     // `activity_seq` は1本も UPDATE が増えない。

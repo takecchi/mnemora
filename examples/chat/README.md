@@ -234,7 +234,7 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill
 ここで見せたいのは「切り詰めずに、そのままだと何文字になるか」であり、強制ではなく
 計測の比較だからである（budget が実際に切り詰めることは `chat` サブコマンドの方で見せる）。
 
-### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0163](../../docs/decisions/0158-decay-activity-clock.md)）
+### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0163](../../docs/decisions/0163-decay-activity-clock.md)）
 
 `compare`/`archive-sweep-cost` は `--decay-clock <wall|activity|either>` を受け付ける。
 指定すると、そのサブコマンドが使うテナントの `tenant_settings.decay_clock` へ
@@ -1189,7 +1189,7 @@ budget に関係なく全件載っている**ことを意味する。この状�
 DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost
 ```
 
-`--decay-clock <wall|activity|either>` も受け付ける（[ADR 0163](../../docs/decisions/0158-decay-activity-clock.md)
+`--decay-clock <wall|activity|either>` も受け付ける（[ADR 0163](../../docs/decisions/0163-decay-activity-clock.md)
 決めたこと11）。この bench 専用テナントの `tenant_settings.decay_clock` へ実際に書き込む
 ——効果・既定挙動が変わらないことの詳細は `compare` の節の
 「`--decay-clock`: 減衰の時計を選ぶ」を参照。

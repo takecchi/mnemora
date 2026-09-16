@@ -229,14 +229,14 @@ describe("defaultScoringStrategy: freshness は 1 で頭打ちにする（ADR 00
 
 /**
  * `computeDecay`（`strategies/scoring.ts`、非 export）の歯——`defaultScoringStrategy` 越しに
- * `score.decay` だけを見て検査する（[ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md)
+ * `score.decay` だけを見て検査する（[ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md)
  * 決めたこと12）。
  *
  * 壁時計側は「1 half-life 経過 → 0.5」（halfLifeHours=24, elapsed=24h）に固定し、
  * 活動時計側はそれとは違う値（0.25 or 0.933...）になるよう別の half-life を選ぶ——
  * 2つの時計の値が偶然一致すると「どちらが使われたか」を判別できない歯になる。
  */
-describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0158 決めたこと12）", () => {
+describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0163 決めたこと12）", () => {
   const recordedAt = new Date("2026-01-01T00:00:00.000Z");
   const now = new Date(recordedAt.getTime() + 24 * HOUR); // 壁時計: elapsed=24h, halfLifeHours=24 → wallDecay=0.5
 
@@ -286,7 +286,7 @@ describe("defaultScoringStrategy: computeDecay の時計選択（ADR 0158 決め
     expect(score.decay).not.toBeCloseTo(0.5, 5);
   });
 
-  it("decayClock: 'activity' でも活動時計の入力が欠けていれば壁時計へフォールバックする（ADR 0158 決めたこと4と同じ向き）", () => {
+  it("decayClock: 'activity' でも活動時計の入力が欠けていれば壁時計へフォールバックする（ADR 0163 決めたこと4と同じ向き）", () => {
     const score = defaultScoringStrategy({
       ...baseWallInput(),
       decayClock: "activity",

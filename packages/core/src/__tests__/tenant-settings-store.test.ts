@@ -20,7 +20,7 @@ import type {
 } from "../interfaces/tenant-settings-store.js";
 
 /**
- * [ADR 0158](../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと13の歯。
+ * [ADR 0163](../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと13の歯。
  *
  * `readDecayClock`/`readActivitySeq`/`readDefaultHalfLifeRecalls`/`writeDecayClock` は
  * `packages/core` が `TenantSettingsStore` の4つの省略可能メソッドへ読み書きする

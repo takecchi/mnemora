@@ -482,7 +482,7 @@ export interface MemoryStore {
    * adapter の期待する形式でない場合も同じ結果になる（`setEmbeddingStatus` の doc
    * コメント・`packages/postgres/src/mapping.ts` の `isUuidLike` の doc コメント参照）。
    *
-   * [ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16:
    * `opts.nowSeq` を渡すと、活動時計側の起点・床（`decayBaseSeq`/`decayFloorSeq`）も
    * 同じ強化イベントとして進める——**対象の Memory が `halfLifeRecalls` を持つ場合に限る**
    * （`ReinforceOptions.nowSeq` の doc コメント参照）。`opts` を渡さない、または
@@ -494,7 +494,7 @@ export interface MemoryStore {
    * 既存の3引数実装（`reinforce(ctx, id, at): Promise<Memory>`）は、1行も直さずに
    * この4引数の interface をそのまま満たす——TypeScript の構造的部分型の下で、
    * 「呼び出し側が省略可能な引数を渡さない」ことと「実装がその引数を最初から
-   * 持たない」ことは区別されない。ADR 0158 決めたこと13 が
+   * 持たない」ことは区別されない。ADR 0163 決めたこと13 が
    * `TenantSettingsStore` の新メソッドを省略可能にしたのと同じ規律をここでも守る。
    */
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
@@ -526,7 +526,7 @@ export interface MemoryStore {
   /**
    * roadmap.md 段階4/5: recall 段6（記録）。`recalls` へ1行書き込み、発行した recallId を返す。
    *
-   * [ADR 0158](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと5:
+   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと5:
    * `record.advanceActivityClock === true` のとき、実装は `recalls` への INSERT と
    * **同一トランザクションで** `tenant_activity.activity_seq` を `+1` しなければならない
    * （`NewRecallRecord.advanceActivityClock` の doc コメント参照）。
@@ -776,7 +776,7 @@ export interface MemoryStore {
    *   という recall 側の下限境界、こちらは「これ以前に閾値を割ったものを掃く」という
    *   掃引側の上限境界であり、2つの異なる関心が同じ演算子を共有する理由が無い。
    * - **`decay_floor_at` 昇順**（最も古く遠ざかったものから）で `opts.limit` 件まで。
-   *   ⚠ [ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと15 が
+   *   ⚠ [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15 が
    *   `opts.clock`/`opts.nowSeq` を足した後も、この順序は**全 `clock` 値で** `decay_floor_at`
    *   昇順のままである（`'activity'`/`'either'` でも `decay_floor_seq` 順にはならない）。
    *   返り値の型 `ArchiveDecayedResult.archived` が `decayFloorSeq` を持たないための、
@@ -995,13 +995,13 @@ export interface MemoryStore {
 
 /**
  * {@link MemoryStore.reinforce} の省略可能な第4引数
- * ([ADR 0163](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16)。
+ * ([ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16)。
  *
  * **穴**: `reinforce` にはこれまで活動時計の「いま」を渡す口が無かった。強化すると
  * 壁時計の床（`decay_floor_at`）は引き直されるのに、活動時計の床（`decay_floor_seq`）は
  * 据え置かれたままになる——`decay_clock` が `'activity'` のテナントでは、強化が忘却
  * ゲートに対して完全な no-op になり、`'either'` では壁時計軸だけが戻る非対称になる。
- * これは ADR 0158 の文脈節の表（「起点は両方の時計で同じく『最後の書き込み（作成・
+ * これは ADR 0163 の文脈節の表（「起点は両方の時計で同じく『最後の書き込み（作成・
  * 強化）』に置く」）と食い違っていたため、この口を足す。
  *
  * ⭐ **非破壊である**——引数を1つ増やすだけであり、`opts` を省略すればいまと同じ
@@ -1009,7 +1009,7 @@ export interface MemoryStore {
  * （`MemoryStore` を実装する第三者の adapter を含む）も、1行も直さずにこの4引数の
  * interface をそのまま満たす——TypeScript の構造的部分型の下では「呼び出し側が
  * 省略可能な引数を渡さない」ことと「実装がその引数を最初から受け取らない」ことは
- * 区別されない。`@mnemora/core` は npm 公開済みなので、これは ADR 0158 決めたこと13
+ * 区別されない。`@mnemora/core` は npm 公開済みなので、これは ADR 0163 決めたこと13
  * （`TenantSettingsStore` の新メソッドを省略可能にした判断）と同じ理由で選んでいる。
  */
 export interface ReinforceOptions {
@@ -1025,7 +1025,7 @@ export interface ReinforceOptions {
    *
    * 対象の Memory が `halfLifeRecalls` を持たない（`null`/未設定、＝そもそも活動時計では
    * 沈まない Memory）場合は、`nowSeq` を渡しても活動時計側の列には触れない
-   * （`Memory.decayBaseSeq` の doc コメント、ADR 0158 決めたこと4「NULL は…緩い側へ倒す」
+   * （`Memory.decayBaseSeq` の doc コメント、ADR 0163 決めたこと4「NULL は…緩い側へ倒す」
    * と同じ理由）。
    */
   nowSeq?: number;
@@ -1051,7 +1051,7 @@ export interface ArchiveDecayedOptions {
   /** 1回の呼び出しで archived にする上限。**既定値なし**（上の doc コメント参照）。 */
   limit: number;
   /**
-   * [ADR 0158](../../../../docs/decisions/0158-decay-activity-clock.md) 決めたこと15:
+   * [ADR 0163](../../../../docs/decisions/0163-decay-activity-clock.md) 決めたこと15:
    * 「いまの `activity_seq`」を呼び出し側から受け取る。`now: Date` と同じ規律
    * （ADR 0037「時刻は呼び出し側が渡す」）——**store が自分で `tenant_activity` を
    * 読みに行かない。** `clock` が `'activity'`/`'either'` のときに必須になる（`clock` の
@@ -1059,7 +1059,7 @@ export interface ArchiveDecayedOptions {
    */
   nowSeq?: number;
   /**
-   * ADR 0158 決めたこと1・12・15: どの軸で掃くかを選ぶ。省略時は `'wall'`
+   * ADR 0163 決めたこと1・12・15: どの軸で掃くかを選ぶ。省略時は `'wall'`
    * （本 ADR 以前と1バイトも変わらない挙動）。
    *
    * - `'wall'`（省略時と同じ）: `decay_floor_at <= now`（現行、境界を含む）。
@@ -1076,7 +1076,7 @@ export interface ArchiveDecayedOptions {
    * 避けるには、掃引の条件はゲートの条件の**論理否定**と一致していなければならず、
    * `NOT (A OR B) = (NOT A) AND (NOT B)` により AND になる。
    *
-   * **境界の非対称（ADR 0158 決めたこと14）**: ゲートは狭義の `>`（境界を含まない）、
+   * **境界の非対称（ADR 0163 決めたこと14）**: ゲートは狭義の `>`（境界を含まない）、
    * 掃引は `<=`（境界を含む）——これは `decayFloorAtAfter`/既存の `now` 側で既に
    * 意図的だと明記されている非対称であり（上の `now` の doc コメント、
    * `VectorFilter.decayFloorAtAfter` の doc コメント参照）、`decay_floor_seq` 側にも

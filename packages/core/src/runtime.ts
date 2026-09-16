@@ -1713,7 +1713,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * この2つを同時に満たせない。
    */
   /**
-   * [ADR 0158](../../docs/decisions/0158-decay-activity-clock.md) 決めたこと1・3・5・12:
+   * [ADR 0163](../../docs/decisions/0163-decay-activity-clock.md) 決めたこと1・3・5・12:
    * Memory 書き込み側3箇所（抽出・consolidate 手順6・reflect 手順7）が共通して要る、
    * 活動時計の入力の組み立て。
    *
@@ -1724,7 +1724,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （`extraction.ts` の doc 参照）ので、`'wall'` のテナントで作られる Memory は
    * 本 ADR の前後で1バイトも変わらない。
    *
-   * ⚠ **これは 0158 の話であり、tick が consolidate/reflect を駆動する ADR 0157 とは無関係**
+   * ⚠ **これは 0163 の話であり、tick が consolidate/reflect を駆動する ADR 0157 とは無関係**
    * ——ここで読むのは `decay_clock`/`activity_seq` だけで、tick のスケジューリングには触れない。
    */
   async function resolveActivityClockInputs(
@@ -1742,7 +1742,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * [ADR 0163](../../docs/decisions/0158-decay-activity-clock.md) 決めたこと16:
+   * [ADR 0163](../../docs/decisions/0163-decay-activity-clock.md) 決めたこと16:
    * `reinforce` の呼び出し側2箇所（使用報告ループ・`restoreArchived`）が共通して要る、
    * 活動時計の「いま」の解決。
    *
@@ -1773,7 +1773,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   ): Promise<NewMemory[]> {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
-    // ADR 0158 決めたこと3・5・12: 活動時計の3つ組を、書き込み側3箇所のうちの1つとして
+    // ADR 0163 決めたこと3・5・12: 活動時計の3つ組を、書き込み側3箇所のうちの1つとして
     // ここで織り込む。
     const activityClockInputs = await resolveActivityClockInputs(ctx);
     return candidates.map((candidate) =>
@@ -2133,7 +2133,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       input.usedMemoryIds,
     );
     const reinforcedAt = clock.now();
-    // ADR 0158 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
+    // ADR 0163 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
     // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
     const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
     for (const memoryId of insertedMemoryIds) {
@@ -2466,7 +2466,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const actor = opts?.actor ?? { type: "system" };
     const outcomes: RestoreArchivedOutcome[] = [];
-    // ADR 0158 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
+    // ADR 0163 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
     // が `resolveActivityClockInputs` を候補バッチ1つにつき1回だけ読むのと同じ理由——
     // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
     // `tenant_activity` への往復が増える）。
@@ -3235,7 +3235,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 6. 統合先を作る。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
-    // ADR 0158 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（consolidate 手順6）。
+    // ADR 0163 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（consolidate 手順6）。
     const activityClockInputs = await resolveActivityClockInputs(ctx);
     const newMemory = buildConsolidatedMemory({
       ctx,
@@ -3585,7 +3585,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 7. 新しい Memory を1件作る（既存の行へは一切書き込まない——決定4）。
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
-    // ADR 0158 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（reflect 手順7）。
+    // ADR 0163 決めたこと3・5・12: 書き込み側3箇所のうちの1つ（reflect 手順7）。
     const activityClockInputs = await resolveActivityClockInputs(ctx);
     const newMemory = buildReflectedMemory({
       ctx,
