@@ -102,7 +102,8 @@ CHECK 制約だけ）。**ただし `0017` は、既存の `memories` 行に
 `provenance_kind`（列）と `provenance->>'kind'`（jsonb）が実際にずれている行があれば、
 そこで失敗する。** 失敗した場合は `0016` の保護（新規の不一致行の拒否）は適用済みのまま残る
 ——**その場で失敗したデータを直そうとせず、原因（何がその行を作ったか）を先に特定すること**
-（ADR 0182「🔴 このファイルが失敗したら」参照）。通常の書き込み経路（`@mnemora/postgres` が
+（[`0017_provenance_kind_matches_provenance_validate.sql`](../packages/postgres/migrations/0017_provenance_kind_matches_provenance_validate.sql)
+「🔴 このファイルが失敗したら」参照）。通常の書き込み経路（`@mnemora/postgres` が
 提供する `PostgresMemoryStore` をそのまま使っている場合）ではこの2列は常に同じ値から書かれる
 ため、通常は `0017` も無事に適用される。
 
