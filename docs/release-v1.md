@@ -167,6 +167,12 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 **⚠ 0.1〜0.4 がすべて通っても、次の3つは何も確かめられていない。**
 **当日の判断材料として読むための再掲であり、通過条件は無い。**
 
+⚠ **2026-09-17 の実測で、3番目（lockfile 不整合）だけは他の2つと性質が違うと分かった。**
+1・2 は**この器の構造上**（本番 tag を打てない・npmjs.com の画面を見られない）どうやっても
+ここでは緑にできないのに対し、3番目は「CI と同じ条件を手元で再現していなかっただけ」の
+不安だった。**再現して測ったら通った**——詳細は3番目の項目と §2.3 を見ること。
+**1・2 はこの追記でも変わっていない。**
+
 1. **`npm publish --provenance` が通ること自体**（`publish.yml:227`）。
    **本番 tag を打つまで分からない。**⟹ **予行（`workflow_dispatch` / `dry_run: true`）が
    全ステップ success でも、これは何も保証しない**——`--dry-run` は書き込みの要求を投げないので、
@@ -180,13 +186,23 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
    （§4.2）。⚠ 特に `@mnemora/anthropic` と `@mnemora/local-embedding` は初版を手元 bootstrap で
    出した経緯があり、**現在 OIDC 経路に乗っているかの後続記録が見つかっていない**
    （末尾「現物を読んでも分からなかった点」5）。
-3. **lockfile 不整合。**§2.3 の手元の `pack:check` 実測は、**pnpm 12.4.2 ＋ 素の `pnpm install`**
-   で走らせており、CI が使う **corepack ＋ `packageManager` の `pnpm@11.25.0` ＋
-   `pnpm install --frozen-lockfile`** とは条件が違う。⟹ **その実測は lockfile について何も見ていない**
-   （§2.3「⚠ この実測が言っていないこと」）。赤くなるとすれば §1.2 のステップ5である。
-   ⚠ **0.1 の CI は `pnpm install --frozen-lockfile` で入れている**ため（`ci.yml:25` ほか。
-   【読んで確かめた】）、**0.1 が緑なら その sha については lockfile も一度通っている**——
-   **ただし §2.3 が「手元の実測では見ていない」と書いていることは、そのまま変わらない。**
+3. **lockfile 不整合 → 2026-09-17、CI と同じ条件で実測済み【実測】。**
+   2026-09-16 までの §2.3 の実測は **pnpm 12.4.2 ＋ 素の `pnpm install`** で走らせており、
+   CI が使う **corepack ＋ `packageManager` の `pnpm@11.25.0` ＋ `pnpm install --frozen-lockfile`**
+   とは条件が違ったため、「lockfile について何も見ていない」状態だった。
+   2026-09-17、この器で `corepack enable` した上で `pnpm --version` が **`11.25.0`**
+   （`/usr/local/bin/pnpm` が corepack のシムであり、`package.json` の `packageManager` の値
+   `pnpm@11.25.0` を解決していることを確認済み）であることを確かめてから
+   `pnpm install --frozen-lockfile` を実行し、**exit 0・`ERR_PNPM_OUTDATED_LOCKFILE` 等のエラー無し**
+   だった（`origin/main` = `9e13ac874d36abd88d23200cd3df9d234dc0acd2`。詳細は §2.3
+   「実際に走らせた結果【実測】」の2026-09-17分）。⟹ **この commit については、lockfile と
+   各 `package.json` の不整合は無い。**
+   ⚠ ただし**その時点の1 commit を実測しただけ**であり、「今後もう二度と壊れない」ことを
+   意味しない——`pnpm-lock.yaml` や各 `package.json` に手を入れる commit が出るたびに、
+   また `--frozen-lockfile` が赤くなりうる余地は残る。赤くなるとすれば §1.2 のステップ5である。
+   ⚠ **0.1 の CI も `pnpm install --frozen-lockfile` で入れている**ため（`ci.yml:25` ほか。
+   【読んで確かめた】）、**0.1 が緑ならその sha については lockfile も一度通っている**——
+   今回の実測は、それを**この器（CI とは別の環境）でも独立に再現した**という位置づけである。
 
 **⟹ この3つは「止まる条件」ではなく、「失敗したときに何を疑うか」を先に読んでおく項目である。**
 失敗したときの兆候と回復は **§3** と **§4**、確認方法そのものが分かっていない点は
@@ -519,20 +535,57 @@ Actions → `Publish` → `Run workflow` → `dry_run` を `true`（既定）の
 これは「いまの並びを支えているのは依存の向きだけ（＝当時の未公開の経緯はもう効いていない）」という
 `scripts/publish-targets.mjs` のコメントと整合する。
 
-**⚠ この実測が言っていないこと**:
+#### 追記【実測】（2026-09-17、CI と同じ条件で）
 
-- **CI と同じ条件で走らせたのではない**【未検証】。pnpm は **12.4.2** で、CI が corepack で使う
-  `packageManager` の **`11.25.0`** とは違う。また `pnpm install --frozen-lockfile` ではなく
-  ただの `pnpm install` で入れた。⟹ **lockfile と `package.json` の不整合
-  （§1.2 のステップ5で赤くなりうる箇所）は、この実測では何も見ていない。**
-  **⟹ 上の `pack:check` の ✔ は、この2点の外側までは届かない。**当日の CI は
-  `packageManager` で pnpm の版を固定し `--frozen-lockfile` で入れるので、
-  **そこだけは手元の実測と条件が違う——lockfile 由来の赤は、当日まで分からない。**
-- **版は作業ツリーの `0.1.1` のままである。**`v1.0.0` の tag で
-  `apply-release-version.mjs` が版を書き換えた後の状態では `pack:check` を走らせていない。
-- `pack:check` 以外の門（`typecheck` / `lint` / `format:check` / `test` / `build`）は走らせていない。
-- **上の「何をカバーしないか」は1つも解消していない。**型の互換性と registry の状態は
-  【未検証】のままである。**この門が緑でも、publish が通ることは何も保証されない。**
+**上の実測（2026-09-16）は、pnpm の版とインストール方法が CI と違っていた。**
+今回はその差を埋めて測り直した。`origin/main` = `9e13ac874d36abd88d23200cd3df9d234dc0acd2`
+の、clean な作業ツリーで実行した。
+
+環境（前回との違いだけ記す。それ以外は前回と同じ）:
+
+| | 値 |
+|---|---|
+| `corepack enable` | 実行済み（exit 0） |
+| `pnpm --version` | **`11.25.0`**（実出力そのまま）。`/usr/local/bin/pnpm` が `../lib/node_modules/corepack/dist/pnpm.js` へのシムであることを `ls -la` で確認し、`package.json` の `"packageManager": "pnpm@11.25.0"`（10行目）と一致することを確かめた |
+| インストール | `pnpm install --frozen-lockfile`（前回はただの `pnpm install`） |
+
+結果:
+
+- **`pnpm install --frozen-lockfile` — exit 0。**
+  `ERR_PNPM_OUTDATED_LOCKFILE` 等のエラーは出なかった。出力は
+  `Lockfile passes supply-chain policies` → `Lockfile is up to date, resolution step is skipped`
+  → `Packages: +207` で、前回の素の `pnpm install` と同じ207件。
+  `packages/postgres/dist/bin/migrate.js` 未ビルドによる bin リンクの `WARN` が3本出るが、
+  これは前回（pnpm 12.4.2・素の `pnpm install`）でも出ていたのと同種のもので、
+  `prepack` 前の想定内の warning であり lockfile とは無関係。
+  ⟹ **`9e13ac874d36abd88d23200cd3df9d234dc0acd2` の時点で、lockfile と各 `package.json` の
+  不整合は無い。CI と同じ条件（corepack ＋ `packageManager` の `pnpm@11.25.0` ＋
+  `--frozen-lockfile`）で、この器でも独立に確認した。**
+- **`pnpm run pack:check`（同じ pnpm 11.25.0 の環境）— exit 0、違反0件。**
+  前回（pnpm 12.4.2）と同じく `✔ publish 梱包の門を通りました。`。
+- **`apply-release-version.mjs` を `RELEASE_TAG=v1.0.0 GITHUB_PRERELEASE=false` で実行 —
+  exit 0。**6パッケージとも `0.1.1` → `1.0.0` に変わり、`git diff` は各ファイルとも
+  `version` の1行だけだった（§1.3 の2026-09-16実測と同じ挙動を pnpm 11.25.0 環境で再確認）。
+  `$GITHUB_OUTPUT` には `version=1.0.0` / `npm_tag=latest` が書かれた。
+- **§2.3「この実測が言っていないこと」が指摘していた穴の1つを埋めた**: 版を `1.0.0` に
+  書き換えたその状態のまま `pnpm run pack:check` を実行し、**exit 0、
+  `✔ publish 梱包の門を通りました。`** だった（違反0件、6パッケージとも通過）。
+  ⟹ **`v1.0.0` へ版を書き換えた後の状態でも `pack:check` は通る**ことを、この器で確認した。
+- 確認後、`git checkout -- .` で作業ツリーを戻し、`git status` が
+  `nothing to commit, working tree clean` であることを確認した。commit・push はしていない。
+
+**⚠ この追記実測が言っていないこと**:
+
+- **今回測ったのは `9e13ac874d36abd88d23200cd3df9d234dc0acd2` という1つの commit についてだけである。**
+  以後 `pnpm-lock.yaml` や各 `package.json` に手を入れる commit が出れば、また
+  `--frozen-lockfile` が赤くなりうる。「一度通った」は「今後も通り続ける」を意味しない。
+  当日、tag を切る直前の `origin/main` の sha で §0.1 の CI が緑であることを見ることに変わりはない。
+- `typecheck` / `lint` / `format:check` / `test` / `build` は今回も走らせていない
+  （オーナー方針により `pnpm run test` の全体実行はしない。CI に任せる）。
+- **§2.3 の「何をカバーしないか」は今回も1つも解消していない。**型の互換性と registry の状態
+  （信頼発行元の設定・パッケージの存在・直接 publish の許可）は【未検証】のままである。
+  **この門が緑でも、publish が通ることは何も保証されない。**§0.5 の項目1・2は、
+  この追記でも変わらず未検証のままである。
 
 ---
 
