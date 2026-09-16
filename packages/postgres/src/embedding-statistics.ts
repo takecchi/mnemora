@@ -4,7 +4,7 @@ import type { Db } from "./client.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
 
 /**
- * Issue #360 / ADR 0193: `registerEmbeddingSpace` が作る `memory_embeddings_*` を
+ * Issue #360 / ADR 0194: `registerEmbeddingSpace` が作る `memory_embeddings_*` を
  * `ANALYZE` する production 経路が存在しなかった問題への対処。
  *
  * ## 何が起きていたか（Issue #360、【受】——この PR では再現していない）
@@ -15,7 +15,7 @@ import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space
  * 342.354ms（Nested Loop 経由）、`ANALYZE` 後は 0.981ms（HNSW 経由）——約350倍。
  * HNSW が選ばれ始める規模は約2,000行だった（同issue の表）。
  *
- * ## この対処の形（マネージャーが決めた設計。詳細は ADR 0193）
+ * ## この対処の形（マネージャーが決めた設計。詳細は ADR 0194）
  *
  * `PostgresVectorStore.upsert` が呼ばれるたびに、**このプロセスが upsert で書いた行数**を
  * 埋め込み空間（テーブル）ごとに数える。その累計が**等比の閾値**
@@ -45,7 +45,7 @@ import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space
  *   重複して撃たれうる。害は無い（冪等・直列化されるだけ）——プロセス間の協調機構は
  *   意図的に1つも足していない。
  *
- * ## 採らなかった案（ADR 0193 に詳細）
+ * ## 採らなかった案（ADR 0194 に詳細）
  *
  * - `registerEmbeddingSpace` が `CREATE INDEX` 直後に撃つ: ADR 0143 と同じ構造的却下
  *   （唯一の production 呼び出し元は表が空の時点でしか呼ばれない）。

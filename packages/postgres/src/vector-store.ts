@@ -78,7 +78,7 @@ export class PostgresVectorStore implements VectorStore {
       ON CONFLICT (tenant_id, memory_id)
       DO UPDATE SET embedding = EXCLUDED.embedding, model = EXCLUDED.model, created_at = now()
     `);
-    // Issue #360 / ADR 0193: 統計が実態から遅れているときだけ ANALYZE を撃つ（詳細は
+    // Issue #360 / ADR 0194: 統計が実態から遅れているときだけ ANALYZE を撃つ（詳細は
     // ./embedding-statistics.ts のクラス doc）。ここでは呼ぶだけ——判断はそちらに集約する。
     await maybeAnalyzeAfterUpsert(this.db, space);
   }

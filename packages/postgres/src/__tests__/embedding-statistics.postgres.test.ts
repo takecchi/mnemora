@@ -14,7 +14,7 @@ import { requireDatabaseUrl, seededRandom } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #360 / ADR 0193: `PostgresVectorStore.upsert` が閾値越えのときだけ `ANALYZE` を
+ * Issue #360 / ADR 0194: `PostgresVectorStore.upsert` が閾値越えのときだけ `ANALYZE` を
  * 撃つ歯（(甲) 端から端までの証明、(乙) 統計が足りている表では撃たないこと）。
  *
  * (丙)（等比閾値の純関数の単体テスト）は `embedding-statistics.test.ts` に別立てで置いた
@@ -77,7 +77,7 @@ async function disableAutovacuum(pool: Pool, table: string): Promise<void> {
   await pool.query(`ALTER TABLE ${table} SET (autovacuum_enabled = false)`);
 }
 
-describe("PostgresVectorStore.upsert と ANALYZE の自動発火（Issue #360 / ADR 0193）", () => {
+describe("PostgresVectorStore.upsert と ANALYZE の自動発火（Issue #360 / ADR 0194）", () => {
   let client: PostgresClient | undefined;
 
   beforeAll(async () => {
