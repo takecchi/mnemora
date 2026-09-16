@@ -226,7 +226,7 @@ export const FILTERED_CONDITION_SCOPE_RELATION: Record<
 };
 
 /**
- * **排他性契約（Issue #421 / [ADR 0200](../../../docs/decisions/0200-memories-omitted-exclusivity.md)）:
+ * **排他性契約（Issue #421 / [ADR 0201](../../../docs/decisions/0201-memories-omitted-exclusivity.md)）:
  * `nearMisses`（および `count` が数える集合）は、`RecallResult.memories` に実際に
  * 返った memoryId を含まない。** 段2はこの Omission を「閾値未満で落ちた」候補から
  * 確定させるが、段3.5（連想）や段3（必須の同伴取得）がその候補を後から
@@ -1551,11 +1551,11 @@ export interface RecallResult {
    * **返さなかった記憶の分類（`docs/recall.md` §4）。** `memories` と memoryId で排他——
    * ある memoryId が `memories` に載っているなら、この配列のどの Omission も
    * その memoryId を名指しで含まない（Issue #421 /
-   * [ADR 0200](../../../docs/decisions/0200-memories-omitted-exclusivity.md)）。
+   * [ADR 0201](../../../docs/decisions/0201-memories-omitted-exclusivity.md)）。
    * ただし memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり、
    * この契約が**個体単位で検証できる**のもそこだけである——他の10種の `kind` は
    * 件数（`count`）だけを持ち、どの記憶を指しているかを言わない
-   * （ADR 0200「引き受けた負債」参照）。
+   * （ADR 0201「引き受けた負債」参照）。
    */
   omitted: Omission[];
   index: IndexBand;
