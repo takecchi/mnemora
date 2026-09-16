@@ -1346,13 +1346,13 @@ export async function runRecall(
   );
 
   // -------------------------------------------------------------------
-  // 排他性契約（Issue #421 / ADR 0199）: `omitted` は「返さなかった」記憶の集合である
+  // 排他性契約（Issue #421 / ADR 0200）: `omitted` は「返さなかった」記憶の集合である
   // （`docs/recall.md` §1 の `RecallResult.omitted` の doc の逐語どおり）。
   //
   // 段2が `below_threshold` として確定させた記憶を、段3.5（連想）や段3（必須の同伴取得）が
   // 後から `finalMemories` へ昇格させることがある——連想の除外集合
   // （`withinLimit` + `companions` + アンカー自身）は below_threshold を含まないので、
-  // 連想は「一度落ちた」記憶を候補として拾い直せる（これは意図した挙動——ADR 0199
+  // 連想は「一度落ちた」記憶を候補として拾い直せる（これは意図した挙動——ADR 0200
   // 「採らなかった案」参照）。⟹ 段2の確定を**そのまま**残すと、同じ memoryId が
   // `memories` と `omitted` の両方に載り、「返したのに落ちたと名乗る」ことになる。
   //
@@ -1365,7 +1365,7 @@ export async function runRecall(
   // 各 interface を見ること）、他の kind（`over_limit`/`budget_dropped`/
   // `score_not_comparable` 等）はどの記憶を指しているかを個体で言わない——同じ昇格が
   // 起きても「同じ memoryId が両方に載る」という**検証可能な**矛盾を作らないため、
-  // 本 PR の射程外とする（ADR 0199「引き受けた負債」参照）。
+  // 本 PR の射程外とする（ADR 0200「引き受けた負債」参照）。
   const returnedMemoryIds = new Set(finalMemories.map((m) => m.memoryId));
   const promotedFromBelowThreshold = belowThreshold.filter((c) =>
     returnedMemoryIds.has(c.memory.id),
