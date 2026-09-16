@@ -333,7 +333,7 @@ jobs:
       - name: Run examples/chat の observe→recall 往復・量の比較テストを本物の DB に対して実行
         run: pnpm --filter @mnemora/example-chat run test:db
 
-      - name: correction サブコマンド(cli.ts の dispatch 行)を実際に実行し、recall 段3(矛盾の解決と必須の同伴取得)が本番経路で発火することを CI が判定する(Issue #374 / ADR 0190)
+      - name: "correction サブコマンド(cli.ts の dispatch 行)を実際に実行し、recall 段3(矛盾の解決と必須の同伴取得)が本番経路で発火することを CI が判定する(Issue #374 / ADR 0190)"
         # 🔴 Issue #374: `grep -c "correction" .github/workflows/ci.yml` が 0 だった
         # ——`examples/chat/src/cli.ts` の `command === "correction"` という
         # dispatch 行は、これまで CI から一度も実行されていなかった
