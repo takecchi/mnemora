@@ -29,6 +29,12 @@ Issue #360 本文——**私自身は再現していない**。ADR 0170/0173/017
 既に育って統計のある空間では、`reltuples` がこのプロセスの書いた行数を超えるので、
 一度も撃たない——定常運用に恒久的な費用を足さない。
 
+**⚠ 本 PR は「採用者が 350倍遅い想起を踏まなくなる」ことを保証しない。** `search()` は
+埋め込み表を `memories` と `JOIN` してテナントで絞るため、埋め込み表の統計を本 PR が
+正しく保っても、`memories` 側の統計が実態からずれていればプランナは HNSW を検討しない
+——実際に CI（後述「CI が実際に教えたこと」）でこの経路が踏まれた。**本 PR が閉じたのは
+埋め込み表側の窓だけである。** `memories` 側の窓は「引き受けた負債」2番として残る。
+
 ---
 
 ## Issue #360 が指摘した問題（【受】——別の作業者が `main` で確認済み。私は再現していない）
@@ -217,6 +223,12 @@ Issue #360 本文——**私自身は再現していない**。ADR 0170/0173/017
   `vector-search-provenance.test.ts` / `vector-space-concurrency.test.ts` を
   まとめて実行 — **8ファイル315本すべて緑**（`upsert` は全ファイルから呼ばれる
   中核関数なので、既存の回帰が無いことをここで確認した）。
+- **PR #406 追記**: CI が (甲) を赤くした後（下記「CI が実際に教えたこと」）、
+  (甲) を書き換えて `pnpm --filter @mnemora/postgres exec vitest run
+  src/__tests__/embedding-statistics.test.ts
+  src/__tests__/embedding-statistics.postgres.test.ts` を再実行 — **2ファイル
+  14本すべて緑**（22秒前後）。`pnpm -r typecheck` / `pnpm run lint` /
+  `pnpm run format:check` も再度緑を確認した。
 
 ### (甲) の設計変更（実測して踏んだ問題と、直した経緯）
 
@@ -234,21 +246,68 @@ Issue #360 本文——**私自身は再現していない**。ADR 0170/0173/017
 postgres.test.ts` と同じ作法（使い捨てデータベース、`temp-database.ts`）に
 書き直し、(甲)(乙) とも緑になることを確認した。
 
+### CI が実際に教えたこと（追記 2026-09-17。PR #406）
+
+**【実測】CI（`.github/workflows/ci.yml` の postgres ジョブ、`pgvector/pgvector:pg17`）
+で (甲) が赤くなった。** 手元（PostgreSQL 17.11 + pgvector 0.8.0）ではこの前まで
+緑だった。CI の実際の出力:
+
+```
+AssertionError: expected 'Limit  (cost=115.97..115.99 rows=10 w…' to match /Index Scan.*using idx_memory_embeddin…/
+```
+
+上の「(甲) の設計変更」で使い捨てデータベースへ切り替えた後も、**(甲) は
+`vectorStore.search()` が実際に発行する SQL（`memories` と `JOIN` してテナントで
+絞る）をそのまま `EXPLAIN` していた**。使い捨てデータベースは他のテストファイルの
+ノイズからは隔離できたが、**`memories` に一度も `ANALYZE` が走らないこと自体は
+変わらない**——この歯は埋め込み表以外に `ANALYZE` を撃たず、`upsert` も
+`memories` の統計には触らない。そのため `search()` の `JOIN` 先である `memories`
+の行数をプランナが見誤り、HNSW を検討する前に安い Nested Loop を選んだ。
+
+**⟹ 歯は嘘をついていない。**「この PR だけでは、`JOIN` を含む本物の `search()`
+では HNSW に届かないことがある」を正しく検出した。これは下の「引き受けた負債」
+2番（`memories` 側に同じ穴が開いたまま）に、**CI からの実測の裏付けが付いた**
+ということである。
+
+⚠ 手元で（この追記の前まで）緑だった理由は、**確かめていない見立て**として、
+投入（28秒ほどかかる）の間に autovacuum が `memories` を拾ったのではないか、
+というものがある。裏は取っていない。
+
+**⟹ 対処: (甲) が `EXPLAIN` する対象を、既存の先例（`vector-search-hnsw.test.ts`
+の「等価クエリ」の歯）と同じ形に変えた。** `pool.query` をフックして `search()`
+の実発行 SQL を捕まえる作りはやめ、埋め込み表だけを引く SQL
+（`search()` と同じ `ORDER BY <距離演算子>` の形。`memories` と `JOIN` しない）を
+直接 `EXPLAIN` するようにした。**これは歯を弱めたのではなく、対照を正したもの**
+である——`memories` の統計は本 PR が触っていない変数であり、(甲) が検査すべきは
+「この PR が実際に触ったもの」（埋め込み表の統計）だけである。`ANALYZE` を撃たない
+こと・`autovacuum_enabled = false` を先に打つこと・`last_analyze` が入り
+`last_autoanalyze` が null のままであることの検査は、そのまま残した（歯の核心は
+変えていない）。
+
+この書き換えが実際に検査していることは、下の「⭐ 変異試験」の変異Aで実測した
+（`ANALYZE` を撃つ行を消すと、書き換え後の (甲) も赤くなることを確認済み）。
+
 ### ⭐ 変異試験（実測。すべて `cp` で退避・復元し、`git checkout` は使っていない）
 
-**退避**: `cp packages/postgres/src/embedding-statistics.ts
-/tmp/mnemora-mut-360/embedding-statistics.ts.orig`
+初出時（Issue #360、上の3本）に加え、**PR #406 で (甲) を書き換えた後、同じ3本の
+変異を再実測した**（書き換え後の (甲) が実際に何かを検査しているかを確かめるため。
+上の「CI が実際に教えたこと」参照）。以下は PR #406 時点の再実測（退避先
+`/tmp/mnemora-mut-406/embedding-statistics.ts.orig`）。
 
-**変異A**（`ANALYZE` を撃つ行を消す）:
+**退避**: `cp packages/postgres/src/embedding-statistics.ts
+/tmp/mnemora-mut-406/embedding-statistics.ts.orig`
+
+**変異A**（`ANALYZE` を撃つ行を消す）——**最重要: 書き換えた (甲) がこれを検出するか**:
 
 ```
 pnpm --filter @mnemora/postgres exec vitest run \
   src/__tests__/embedding-statistics.postgres.test.ts -t "甲"
 ```
-→ **1 failed | 1 skipped**（`AssertionError: expected null not to be null` —
-`last_analyze` が入っていないことを検出）。(甲) が赤くなることを実測した。
+→ **1 failed | 1 skipped**（`AssertionError: expected null not to be null` at
+`expect(statResult.rows[0]?.last_analyze).not.toBeNull()` — `last_analyze` が
+入っていないことを検出）。書き換え後の (甲) も赤くなることを実測した。
 
-`cp /tmp/mnemora-mut-360/embedding-statistics.ts.orig
+`cp /tmp/mnemora-mut-406/embedding-statistics.ts.orig
 packages/postgres/src/embedding-statistics.ts` で復元 → 同じコマンドで
 **1 passed | 1 skipped** に戻ることを確認した。`diff` で元の内容と1バイトも
 違わないことも確認済み。
@@ -260,8 +319,8 @@ pnpm --filter @mnemora/postgres exec vitest run \
   src/__tests__/embedding-statistics.postgres.test.ts -t "乙"
 ```
 → **1 failed | 1 skipped**（`last_analyze` の値が変異前後で変わってしまい、
-`toEqual` が失敗——`AssertionError: expected 2026-...:24.721Z to deeply equal
-2026-...:21.210Z`）。(乙) が赤くなることを実測した。
+`toEqual` が失敗——`AssertionError: expected 2026-09-16T17:42:08.555Z to deeply
+equal 2026-09-16T17:42:05.087Z`）。(乙) が赤くなることを実測した。
 
 `cp` で復元 → **1 passed | 1 skipped** に戻ることを確認した。
 
@@ -277,7 +336,7 @@ pnpm --filter @mnemora/postgres exec vitest run src/__tests__/embedding-statisti
 実測した。
 
 `cp` で復元 → **12 passed** に戻ることを確認した。3本の変異すべてで
-`diff /tmp/mnemora-mut-360/embedding-statistics.ts.orig
+`diff /tmp/mnemora-mut-406/embedding-statistics.ts.orig
 packages/postgres/src/embedding-statistics.ts` が差分無しであることを確認済み。
 
 ---
@@ -294,12 +353,23 @@ packages/postgres/src/embedding-statistics.ts` が差分無しであることを
    上記「(甲) の設計変更」で踏んだとおり、`search()` は `memories` と `JOIN` して
    テナントで絞るため、**埋め込み表の統計が正しくても、`memories` の統計が実態から
    ずれていればプランナは HNSW を検討しない**（実測: `rows=1` の見積りで Nested Loop が
-   選ばれた）。⚠ **あの実測は共有テスト DB のノイズが原因であり、本番で同じことが
-   起きると示したわけではない。**が、**構造としては同型である**——新規インストールでは
-   `migrations/0005` / `0015` の `ANALYZE memories` は**表が空のときに走る**ため効かず
+   選ばれた）。あの実測は共有テスト DB のノイズが原因であり、当時は「本番で同じことが
+   起きると示したわけではない」と書いていた。
+
+   **⟹ PR #406 で、この負債に CI からの実測の裏付けが付いた（上の「CI が実際に
+   教えたこと」参照）。** 使い捨てデータベース（他のテストとの共有ノイズが無い状態）
+   でも、CI（`pgvector/pgvector:pg17`）は (甲) を赤くした——原因は「古い統計」では
+   なく「`memories` に統計が一度も無いこと」だった。**構造としては同型どころか、
+   もっと直接的である**——新規インストールでは `migrations/0005` / `0015` の
+   `ANALYZE memories` は**表が空のときに走る**ため効かず
    （[ADR 0143](./0143-analyze-memories-after-seed.md)）、`--analyze-memories` は
    opt-in である。⟹ **初回の大量投入の直後、`memories` にも統計が無い窓が開く。**
    **本 ADR はこの窓を閉じていない。**別の issue として追跡する。
+
+   この裏付けを受けて、(甲) の `EXPLAIN` 対象を `search()` の実発行 SQL（`memories`
+   と `JOIN` する）から、既存の先例（`vector-search-hnsw.test.ts`）と同じ「埋め込み
+   表だけを引く等価クエリ」に変えた。**歯を弱めたのではなく対照を正したもの**——
+   `memories` の統計という本 PR が触っていない変数を、この歯の検査対象から外した。
 
 3. **カウンタはプロセスローカルである。** プロセスが再起動すると0に戻り、閾値の確認が
    一巡だけ余計に走る（`reltuples` の guard が在るので `ANALYZE` 自体は撃たれない）。
@@ -358,7 +428,13 @@ packages/postgres/src/embedding-statistics.ts` が差分無しであることを
   影響**は、[ADR 0143](./0143-analyze-memories-after-seed.md) が引用した PostgreSQL
   公式文書の記述を再確認しただけで、本 PR ではこの環境で計測していない。
 - **CI（`.github/workflows/ci.yml` の postgres ジョブ、`pgvector/pgvector:pg17`）
-  での緑**は、この PR を出した後 `node scripts/ci-green-check.mjs --pr <番号>` で
-  確認する（この ADR の時点ではまだ確認していない）。
+  での緑**: 一度は赤くなったこと自体は【実測】済み（上の「CI が実際に教えたこと」）。
+  (甲) を書き換えた後の CI での緑は、この PR を push した後
+  `node scripts/ci-green-check.mjs --pr <番号>` で確認する（この追記の時点では
+  まだ確認していない——手元での再実行が緑になったことまでしか言えない）。
+- **手元では緑だった理由（autovacuum が投入中に `memories` を拾ったのではないか）
+  は、見立てであって確かめていない。** 裏を取るには、投入の途中で
+  `pg_stat_user_tables.last_autoanalyze` をポーリングして実際に発火時刻を
+  記録する必要があるが、この追記ではそれをやっていない。
 - **`registerEmbeddingSpace` が呼ばれる別経路（`examples/chat` 以外の採用者）**が
   存在するかどうかは、このリポジトリからは確認できない（ADR 0142 と同じ理由）。
