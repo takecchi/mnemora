@@ -1,7 +1,7 @@
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
@@ -93,6 +93,19 @@ const adrPath = join(repoRoot, "docs/decisions/0085-local-embedding-provider.md"
 const adrText = readFileSync(adrPath, "utf8");
 
 /**
+ * この歯自身のファイル(repo ルートからの相対パス)。
+ *
+ * 🔴 **スキャン対象から自分自身を除く。** この docstring は「取り違えの実例」を
+ * 説明するために `36MB`/`42MB` を並べて言及しており(例:
+ * 「重み(`model_quantized.onnx` 本体、36MB)」と「一式(4ファイル計、42MB)」)、
+ * これは実際の記述を検証する対象の「事実の主張」ではなく**事例の解説**である。
+ * 【実測】この除外を入れる前、CI 上で実際にこの歯が自分の docstring を誤検知した
+ * (「重み」の直前に置いた `model_quantized.onnx` よりも、直後の例示で置いた
+ * 「一式」のほうが文字距離で近く、最近傍判定が「一式」文脈だと誤って判定した)。
+ */
+const selfPath = relative(repoRoot, fileURLToPath(import.meta.url));
+
+/**
  * ADR 0085(決定7/決定1)から読んだ正典値。**新しい JSON/定数ファイルは作らない**
  * ——この歯の中に literal で持ち、下の `it` で ADR 本文への実在を検査する。
  */
@@ -129,7 +142,8 @@ function listScannableFiles() {
     .split("\n")
     .filter(Boolean)
     .filter((relPath) => !relPath.startsWith("docs/decisions/"))
-    .filter((relPath) => relPath !== ".github/workflows/publish.yml");
+    .filter((relPath) => relPath !== ".github/workflows/publish.yml")
+    .filter((relPath) => relPath !== selfPath);
 }
 
 /**
