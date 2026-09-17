@@ -51,13 +51,22 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 
 ### 3.2 Runtime 内部 — 中核の5動詞がどこを通るか
 
-**記憶そのものを動かす中核操作**は5動詞に固定する（ここは増やさない）。`Runtime` には他に
-10個のメソッド（保守操作 `tick`/`reembed`/`reextract`/`sweepArchive`、是正・取り消し
+**記憶そのものを動かす中核操作**は5動詞に固定する（ここは増やさない）。`Runtime` には他にも
+メソッド（保守操作 `tick`/`reembed`/`reextract`/`sweepArchive`、是正・取り消し
 `markContested`/`resolveContested`/`restoreArchived`/`restoreSuperseded`/`purge`、説明
 `getRecall`）があるが、これらは中核を狭く保つために別の層へ出した口である——詳細は
 [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md) と
-[docs/vision.md](./vision.md)「外から見える API」を見ること。以下はこの中核5動詞それぞれが
-Runtime 内部でどの部品を通るかで分類する。
+[docs/vision.md](./vision.md)「外から見える API」を見ること。
+
+⭐ **何が在るかの正本は `packages/core/src/runtime.ts` の `export interface Runtime` であり、
+⛔ ここに個数を写さない**（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⚠ **上の列挙は ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
+実際に `findCorrectionCandidates`（[ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md)）は
+どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
+（[Issue #518](https://github.com/takecchi/mnemora/issues/518)）。⛔ **書き込まない口**なので、
+少なくとも「是正・取り消し」（**書き込む**口）ではない。
+
+以下はこの中核5動詞それぞれが Runtime 内部でどの部品を通るかで分類する。
 
 **書き込み系 — `observe(ctx, input)`**
 
