@@ -90,6 +90,8 @@ describeMemoryStoreConformance({
   supportsMarkContestedPair: true,
   // Issue #197 / ADR 0150: PostgresMemoryStore は resolveContestedPair を実装している。
   supportsResolveContestedPair: true,
+  // 本 PR: PostgresMemoryStore は restoreSupersededBy を実装している。
+  supportsRestoreSupersededBy: true,
 });
 
 describeEventStoreConformance({

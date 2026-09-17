@@ -1,5 +1,5 @@
 import type { Ctx } from "../ctx.js";
-import type { MemoryEvent, NewMemoryEvent } from "../event.js";
+import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
@@ -998,6 +998,88 @@ export interface MemoryStore {
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」を書き込む口
+   * （`Runtime.restoreSuperseded` の doc コメントに設計全体の理由がある。ここは
+   * この店側メソッド固有の契約と、**なぜ新しい任意メソッドが要るか**だけを述べる）。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`「してはいけ
+   * ないこと」表の「公開 API の破壊的変更」、[ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md)
+   * 決定1と同じ理由）。この口を実装しない adapter に対しては、`Runtime.restoreSuperseded`
+   * が `{ supported: false, supersedingMemoryId, outcomes: [] }` を返す——`archiveDecayed?`/
+   * `Runtime.sweepArchive` と同じ「対応していない、と名指しする」形（ADR 0082）。
+   *
+   * ⚠ **フォールバック経路を持たない**（`archiveDecayed?`/`purgeMemory?`/
+   * `markContestedPair?`/`resolveContestedPair?` と同じ判断）。「口が無ければ既存メソッドの
+   * 呼び出しで代替する」という擬似フォールバックは意図的に作らない——下の理由のとおり、
+   * 既存の必須メソッドにはこの操作を表現する形がそもそも無い。
+   *
+   * 🔴 **なぜ既存の `updateStatusWithEvent` を再利用しないか（ここが `restoreArchived`
+   * との分岐点）。** [ADR 0122](../../../../docs/decisions/0122-restore-archived-memory.md)
+   * 決定1は「`archived → active` は1件の compare-and-swap であり、既に必須メソッドとして
+   * 存在する `updateStatusWithEvent` がそのまま満たせる形をしている」ことを理由に、新しい
+   * 任意メソッドを足さなかった。**この前例は `superseded → active` には転用できない**。
+   * 理由は2つある:
+   * 1. **粒度が違う。** `restoreArchived` は id 単位の CAS だが、`restoreSuperseded`
+   *    （`Runtime` 側）は「置き換えた側の id」から**群**（複数の Memory）を選ぶ
+   *    範囲走査であり、`archiveDecayed?` と同じ「既存のどのメソッドにも無い形
+   *    （範囲走査 + 一括更新）」に属する。
+   * 2. **`superseded_by_id` を `NULL` へ戻す経路が、型にも SQL にも無い。** 本ファイル
+   *    上部の `updateStatusWithEvent` の契約・`packages/postgres/src/memory-store.ts` の
+   *    実装は `superseded_by_id = COALESCE(${opts.supersededById ?? null}, superseded_by_id)`
+   *    である——`opts.supersededById` を省略すると**現在の値をそのまま保持する**という
+   *    意味しか無く、明示的に `NULL` を書く経路が引数の形にもクエリにも存在しない
+   *    （`opts.supersededById` は `MemoryId | undefined` であり `MemoryId | null |
+   *    undefined` ではない）。⟹ `updateStatusWithEvent` をどう組み合わせても
+   *    `superseded_by_id` を `NULL` へ戻すことはできず、理由1の粒度の問題を措いても
+   *    この一点だけで新しい任意メソッドが要る。
+   *
+   * 契約:
+   * - 対象は **`tenant_id = ctx.tenantId AND superseded_by_id = supersededById AND
+   *   status = 'superseded'` の行に限る。**既存の部分索引
+   *   `idx_memories_superseded_by`（`tenant_id, superseded_by_id`、
+   *   `WHERE superseded_by_id IS NOT NULL`、`migrations/0001_init.sql`）がそのまま
+   *   この `WHERE` を担う——新しい索引は足さない。
+   * - 🔴 **`status = 'superseded'` を条件に必ず含める。** `superseded_by_id` が
+   *   非 `null` のまま `status` が `'archived'`/`'forgotten'` へ**さらに**進んだ行
+   *   （`purge`/`sweepArchive` 等、`superseded_by_id` を消さない別の遷移を経由した行）
+   *   を巻き込まない——この口が動かしてよい遷移は lifecycle 表行15の
+   *   `superseded → active` 一本だけであり、他の起点からの `→ active` は今日どおり
+   *   `updateStatus`/`updateStatusWithEvent` の領分である。
+   * - すべての条件を満たす行について、**1トランザクションで**次を行う: `status='active'`・
+   *   `superseded_by_id=NULL`・`updated_at=now()` へ更新し、行ごとに `memory_events` へ
+   *   `kind: 'unsuperseded'` を1件追記する（`MemoryEventKind` が本 PR で足す新しい値、
+   *   `packages/core/src/event.ts` 参照）。`digestSnapshot` にはその Memory の
+   *   （変更しない）現在の `digest` を入れる——`content`/`digest` はこの操作では
+   *   一切書き換えない。
+   * - `meta` には最低限 `{ reason, supersededById }` を入れる。`reason` は
+   *   `event.reason` を渡された値、省略時は固定タグ `"unsuperseded"`
+   *   （`Runtime.restoreSuperseded` 側の `RestoreSupersededOptions.reason` の doc
+   *   コメント参照——`ForgetOptions.reason`/`RestoreArchivedOptions.reason` のような
+   *   「省略時はキー自体を持たせない」規律とはここだけ意図的に違う）。`supersededById`
+   *   には**外した相手の id**（＝この呼び出しの `supersededById` 引数、更新前に
+   *   `superseded_by_id` へ入っていた値）をそのまま入れる——`status='superseded'` の
+   *   行がまとめて対象になる一括操作である以上、個々の `memory_events` 行だけを見ても
+   *   「どの群の一部として戻ったか」が分かるようにする。
+   * - `event.actor` を省略した場合は `{ type: 'system' }`。
+   * - 対象が0件なら `{ restored: [] }` を返す（**例外にしない**）。`supersededById` に
+   *   実在しない・形式不正な id を渡した場合も同じ（`isUuidLike` の doc 参照。
+   *   `updateStatusWithEvent` のような「対象が無ければ例外」の規律はここでは採らない
+   *   ——この口はそもそも「範囲に何件あるか分からない」問い合わせであり、0件は
+   *   異常ではなく正常な結果の一種であるため。`archiveDecayed?` が対象0件で
+   *   `{ archived: [] }` を返すのと同じ規律）。
+   * - 返す `restored` の順序は adapter に委ねる（`Runtime.restoreSuperseded` 側は
+   *   これをそのまま `outcomes` の順序として運ぶだけで、特定の順序を要求しない）。
+   * - 🔴 **原子性の証拠ではない。**`markContestedPair`/`supersedeWithNewMemories` の
+   *   doc コメントと同じ注意——この口が在ることは adapter がこの口を実装したことしか
+   *   意味しない。実際に原子性を測るのは適合テストと `packages/postgres` の並行の歯である。
+   */
+  restoreSupersededBy?(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+  ): Promise<{ restored: Memory[] }>;
 }
 
 /**

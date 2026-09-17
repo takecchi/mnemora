@@ -18,6 +18,7 @@ import type {
   ArchiveDecayedResult,
   Ctx,
   EmbeddingStatus,
+  EventActor,
   Memory,
   MemoryEvent,
   MemoryId,
@@ -1218,6 +1219,49 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
+
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
+   * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここは選定・更新の
+   * 実装のみ。`archiveDecayed`（直上ではなく本クラス冒頭寄りのメソッド）と同じ
+   * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
+   * 追記を行うことで、postgres 実装の単一トランザクションを模す。
+   */
+  async restoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+  ): Promise<{ restored: Memory[] }> {
+    const targets = [...this.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded",
+    );
+
+    const actor = event.actor ?? { type: "system" };
+    const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+
+    const restored: Memory[] = [];
+    for (const memory of targets) {
+      memory.status = "active";
+      memory.supersededById = null;
+      memory.updatedAt = new Date();
+      const storedEvent = buildStoredMemoryEvent(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "unsuperseded",
+        at: event.at,
+        actor,
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta,
+      });
+      this.events.push(storedEvent);
+      restored.push(memory);
+    }
+    return { restored };
   }
 
   private extractionKey(

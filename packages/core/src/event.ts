@@ -23,6 +23,17 @@ import type { EventId, MemoryId } from "./ids.js";
  * （`rg -n "switch" packages/*\/src` の結果に `MemoryEventKind` を分岐する箇所は無い）
  * ——union へ値を足すことが破壊的変更になる経路（網羅的 switch）がこの repo に
  * 存在しないため、追加である。
+ *
+ * **`"unsuperseded"`（`Runtime.restoreSuperseded`、superseded → active の復旧口）も
+ * 同じ理由で追加する。** `"restored"` を再利用しない理由（`kind:"updated"` +
+ * `meta.reason` に寄せない理由と同じ形の判断）: `idx_memory_events_by_kind`
+ * （`tenant_id, kind, at`）で監査ログを引くとき、「archive から戻った」
+ * （`restoreArchived`）と「supersede を取り消した」（`restoreSuperseded`）が
+ * 同じ `kind` だと索引で分けて引けない——ADR 0122 が `"updated"` の再利用を却下して
+ * `"restored"` を新設したのと同じ理由で、`"restored"` の再利用も却下し専用の値を足す。
+ * 追加が破壊的変更にならないことは、上の `"restored"` を足したときの確認がそのまま
+ * 当てはまる（この PR の時点で改めて `rg -n "switch" packages/*\/src` を確認しても、
+ * `MemoryEventKind` を分岐する網羅的 `switch` はこの repo のどこにも無い）。
  */
 export type MemoryEventKind =
   | "created"
@@ -32,7 +43,8 @@ export type MemoryEventKind =
   | "forgotten"
   | "purged"
   | "events_purged"
-  | "restored";
+  | "restored"
+  | "unsuperseded";
 
 export const MemoryEventKindSchema = z.enum([
   "created",
@@ -43,6 +55,7 @@ export const MemoryEventKindSchema = z.enum([
   "purged",
   "events_purged",
   "restored",
+  "unsuperseded",
 ]) satisfies z.ZodType<MemoryEventKind>;
 
 export interface EventActor {

@@ -92,7 +92,7 @@ export declare function purgeExpiredEventsForTenant(ctx: Ctx, deps: {
 // ===== dist/event.d.ts =====
 import { z } from "zod";
 import type { EventId, MemoryId } from "./ids.js";
-export type MemoryEventKind = "created" | "updated" | "superseded" | "archived" | "forgotten" | "purged" | "events_purged" | "restored";
+export type MemoryEventKind = "created" | "updated" | "superseded" | "archived" | "forgotten" | "purged" | "events_purged" | "restored" | "unsuperseded";
 export declare const MemoryEventKindSchema: z.ZodEnum<{
     superseded: "superseded";
     forgotten: "forgotten";
@@ -102,6 +102,7 @@ export declare const MemoryEventKindSchema: z.ZodEnum<{
     purged: "purged";
     events_purged: "events_purged";
     restored: "restored";
+    unsuperseded: "unsuperseded";
 }>;
 export interface EventActor {
     type: "human" | "system" | "clone";
@@ -139,6 +140,7 @@ export declare const MemoryEventSchema: z.ZodObject<{
         purged: "purged";
         events_purged: "events_purged";
         restored: "restored";
+        unsuperseded: "unsuperseded";
     }>;
     at: z.ZodDate;
     actor: z.ZodObject<{
@@ -168,6 +170,7 @@ export declare const NewMemoryEventSchema: z.ZodObject<{
         purged: "purged";
         events_purged: "events_purged";
         restored: "restored";
+        unsuperseded: "unsuperseded";
     }>;
     at: z.ZodOptional<z.ZodDate>;
     actor: z.ZodObject<{
@@ -200,6 +203,7 @@ export declare const EventFilterSchema: z.ZodObject<{
         purged: "purged";
         events_purged: "events_purged";
         restored: "restored";
+        unsuperseded: "unsuperseded";
     }>>;
     since: z.ZodOptional<z.ZodDate>;
     until: z.ZodOptional<z.ZodDate>;
@@ -410,7 +414,7 @@ export interface LLMProvider {
 
 // ===== dist/interfaces/memory-store.d.ts =====
 import type { Ctx } from "../ctx.js";
-import type { MemoryEvent, NewMemoryEvent } from "../event.js";
+import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
@@ -546,6 +550,13 @@ export interface MemoryStore {
             MemoryEvent,
             MemoryEvent
         ];
+    }>;
+    restoreSupersededBy?(ctx: Ctx, supersededById: MemoryId, event: {
+        reason?: string;
+        actor?: EventActor;
+        at: Date;
+    }): Promise<{
+        restored: Memory[];
     }>;
 }
 export interface ReinforceOptions {
@@ -2472,6 +2483,29 @@ export type RestoreArchivedOutcome = {
 export interface RestoreArchivedResult {
     outcomes: RestoreArchivedOutcome[];
 }
+export type RestoreSupersededTarget = {
+    supersededById: MemoryId;
+};
+export interface RestoreSupersededOptions {
+    reason?: string;
+    actor?: EventActor;
+}
+export type RestoreSupersededOutcome = {
+    memoryId: MemoryId;
+    kind: "restored";
+    previousStatus: "superseded";
+    decayFloorAt: Date;
+    reinforceError?: string;
+} | {
+    memoryId: MemoryId;
+    kind: "failed";
+    error: string;
+};
+export interface RestoreSupersededResult {
+    supported: boolean;
+    supersedingMemoryId: MemoryId;
+    outcomes: RestoreSupersededOutcome[];
+}
 export type PurgeTarget = {
     memoryId: MemoryId;
 } | {
@@ -2611,6 +2645,7 @@ export interface Runtime {
     reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
     sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult>;
     restoreArchived(ctx: Ctx, target: RestoreArchivedTarget, opts?: RestoreArchivedOptions): Promise<RestoreArchivedResult>;
+    restoreSuperseded(ctx: Ctx, target: RestoreSupersededTarget, opts?: RestoreSupersededOptions): Promise<RestoreSupersededResult>;
     forget(ctx: Ctx, target: ForgetTarget, opts?: ForgetOptions): Promise<ForgetResult>;
     purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
     markContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, opts?: MarkContestedOptions): Promise<MarkContestedResult>;

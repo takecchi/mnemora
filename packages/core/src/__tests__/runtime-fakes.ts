@@ -22,7 +22,7 @@ import type { NotIndexedReason } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
-import type { MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
+import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
   isEmbeddingStatusRollback,
@@ -1055,6 +1055,49 @@ export class FakeMemoryStore implements MemoryStore {
     this.backing.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
+
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」。`archiveDecayed` と同じ
+   * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
+   * 追記を行うことで、postgres 実装の単一トランザクションを模す
+   * （`packages/testkit` の `InMemoryMemoryStore.restoreSupersededBy` と同じ形だが、
+   * ファイル冒頭のコメントの通り意図的に独立している）。
+   */
+  async restoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+  ): Promise<{ restored: Memory[] }> {
+    const targets = [...this.backing.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded",
+    );
+
+    const actor = event.actor ?? { type: "system" };
+    const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+
+    const restored: Memory[] = [];
+    for (const memory of targets) {
+      memory.status = "active";
+      memory.supersededById = null;
+      memory.updatedAt = new Date();
+      const storedEvent = buildStoredEvent(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "unsuperseded",
+        at: event.at,
+        actor,
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta,
+      });
+      this.backing.events.push(storedEvent);
+      restored.push(memory);
+    }
+    return { restored };
   }
 }
 

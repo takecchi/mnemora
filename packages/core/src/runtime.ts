@@ -894,6 +894,120 @@ export interface RestoreArchivedResult {
 }
 
 /**
+ * `runtime.restoreSuperseded` の対象（`docs/memory-model.md` §11 行15
+ * 「`superseded → active`」を書き込む口）。
+ *
+ * 🔴 **粒度は「群」だけであり、個別の Memory id を渡す形は無い。**`ForgetTarget`/
+ * `RestoreArchivedTarget` の `{ memoryId } | { memoryIds }` という二形は、ここでは
+ * 意図的に採らない。
+ *
+ * **理由**: `superseded` な Memory は `recall()` に出てこない——段1の候補生成が使う
+ * status ゲートは `['active','contested']` 固定である（`recall-runtime.ts` の該当箇所。
+ * `docs/recall.md` §2 段0「スコープの外延」）。⟹ **呼び出し側は「戻したい Memory の id」を
+ * そもそも知る手段を持たない**——`restoreArchived` の呼び出し側が辿れる「recall で
+ * 見つからないものを id で名指しする」という経路が、ここには無い。手元にある唯一の
+ * 取っ手は「置き換えた側（supersede した側）」の id である。そして `superseded_by_id` は、
+ * 1回の `consolidate`（N件の統合元 → 1件の統合先）・1回の `reextract`・1回の
+ * `resolveContested` が作った「群」とちょうど一致する——既存の部分索引
+ * `idx_memories_superseded_by`（`tenant_id, superseded_by_id`、
+ * `WHERE superseded_by_id IS NOT NULL`、`migrations/0001_init.sql`）もその群を単位に
+ * 張られている。`MemoryStore.restoreSupersededBy?` の doc コメントも参照。
+ */
+export type RestoreSupersededTarget = { supersededById: MemoryId };
+
+/** `runtime.restoreSuperseded` の任意オプション。 */
+export interface RestoreSupersededOptions {
+  /**
+   * 監査ログ（`memory_events.meta.reason`）に残る自由文。
+   *
+   * ⚠ **省略時の規律が `RestoreArchivedOptions.reason`/`ForgetOptions.reason` とは
+   * 違う。**あちらは省略すると `meta` に `reason` キー自体を持たせないが、こちらは
+   * 省略すると固定タグ `"unsuperseded"` が入る（`MemoryStore.restoreSupersededBy` の
+   * 契約節、`meta` の doc 参照）。**この操作は群単位（複数の Memory にまたがる）
+   * であり、`meta.supersededById`（外した相手の id）と組み合わせて監査ログから
+   * 「どの群が、なぜ戻ったか」を引けるようにするには、`reason` キー自体が常に
+   * 存在するほうが検索・集計しやすい——1件ずつの CAS である `restoreArchived` とは
+   * 前提が違う、という判断。
+   */
+  reason?: string;
+  /** イベントの `actor`。省略時 `{ type: "system" }`。 */
+  actor?: EventActor;
+}
+
+/**
+ * `runtime.restoreSuperseded` が対象1件ごとに返す結果。
+ *
+ * `RestoreArchivedOutcome` と違い、`"not_found"`/`"status_not_archived"`/`"conflicted"`/
+ * `"not_attempted"` を持たない——このメソッドは個別 id への compare-and-swap ではなく、
+ * `MemoryStore.restoreSupersededBy` が1トランザクションで選んで戻した行の集合を
+ * そのまま返すだけである。`status = 'superseded'` を条件に含めた `WHERE` 句が選定
+ * そのものを兼ねるため、「対象ではあったが状態が違った」という分岐がそもそも
+ * 発生しない——一致しない行は最初から選ばれていない。
+ *
+ * - `"restored"`: `status` を `"superseded"` から `"active"` へ動かし、
+ *   `superseded_by_id` を `null` にし、`memory_events` に `kind: "unsuperseded"`
+ *   （`MemoryEventKind` が本 PR で足す新しい値）を1件積んだ。続けて試みた
+ *   `MemoryStore.reinforce` が失敗した場合だけ `reinforceError` が入る
+ *   （`RestoreArchivedOutcome.reinforceError` と同じ規律——status の復帰そのものは
+ *   reinforce の成否と無関係に確定している）。`decayFloorAt` は reinforce の
+ *   成否に関わらず、この呼び出しが最後に観測した値（reinforce が成功していれば
+ *   その結果、失敗していれば復帰直後の値）。
+ * - `"failed"`: 🔴 **現在の実装では到達しない防御的な分類**（`PurgeOutcome.conflicted`
+ *   と同じ立場——`forget`/`restoreArchived` と同じ「上限の無い再試行にしない安全弁」の
+ *   一族だが、こちらは元になる並行の競合そのものが構造的に起こらない）。
+ *   `restoreSupersededBy` の1トランザクションが成功したあと、個々の Memory について
+ *   `Runtime` が行うのは `reinforce` の呼び出しだけであり、その失敗は必ず
+ *   `reinforceError` に運ぶ（`"failed"` には落ちない）。このメンバーは、将来 store 側が
+ *   行ごとの部分失敗を報告するようになったときのための予約であり、今日のコードパスからは
+ *   一度も生成されない。
+ */
+export type RestoreSupersededOutcome =
+  | {
+      memoryId: MemoryId;
+      kind: "restored";
+      previousStatus: "superseded";
+      decayFloorAt: Date;
+      reinforceError?: string;
+    }
+  | { memoryId: MemoryId; kind: "failed"; error: string };
+
+/**
+ * `runtime.restoreSuperseded` の結果。
+ *
+ * ⛔ `restoredCount` のような派生値を持たない（`RestoreArchivedResult`/`ForgetResult` と
+ * 同じ理由——`outcomes` を数えれば得られる値を欄として複製すると、片方だけ直して
+ * ずれるという、このリポジトリが繰り返し踏んできた欠陥を新しく作ることになる）。
+ */
+export interface RestoreSupersededResult {
+  /**
+   * `MemoryStore.restoreSupersededBy?` が実装されていたか。**`false` のとき
+   * `outcomes` は常に空配列**——`SweepArchiveResult.supported` と同じ規律
+   * （「対応していないので0件」であって「対応していて0件だった」ではない。
+   * 呼び出し側はこの2つを取り違えないよう、必ず `supported` を先に見ること）。
+   */
+  supported: boolean;
+  /**
+   * 置き換えた側（新しいほう）の id——`target.supersededById` をそのまま運ぶ。
+   *
+   * 🔴 **この操作は、この id が指す Memory に一切触れない。**消さない・`forget` しない・
+   * `status` を変えない。呼び出し側がそれを見落とさないよう、返り値自身にも明示的に
+   * 運ぶ——`recall()` は戻した直後、古いほう（`outcomes` に載る Memory）も新しいほう
+   * （この `supersedingMemoryId`）も両方 `active` として返しうる。始末したいなら
+   * 呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、あるいは
+   * `markContested` で対にすること——**この分岐をこのメソッドの `opts` には足さない**
+   * （`Runtime.restoreSuperseded` の doc コメント「やらないこと」参照）。
+   */
+  supersedingMemoryId: MemoryId;
+  /**
+   * `MemoryStore.restoreSupersededBy` が返した `restored` の順序をそのまま引き継ぐ
+   * （順序の契約は store 側に委ねる。`RestoreArchivedResult.outcomes` のような
+   * 「入力と同じ順序」という契約は無い——入力がそもそも id の配列ではなく単一の群
+   * 指定子であるため）。
+   */
+  outcomes: RestoreSupersededOutcome[];
+}
+
+/**
  * `runtime.purge` の対象（Issue #198、ADR 0124）。`ForgetTarget`/`RestoreArchivedTarget` と
  * 意図的に同じ形——`{ memoryId }`（単数）と `{ memoryIds }`（複数）のどちらでも同じ意味論であり、
  * 内部で `MemoryId[]` に正規化してから処理する。
@@ -1349,6 +1463,90 @@ export interface Runtime {
     target: RestoreArchivedTarget,
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult>;
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」を、呼び出し側が
+   * **明示的に**取り戻す。`consolidate`/`reextract`/`resolveContested` が閉じる方向
+   * （`active` → `superseded`）だけを持っていた片道を、開く方向（`superseded` →
+   * `active`）で埋める——`restoreArchived`（ADR 0122）が `sweepArchive`（ADR 0114）に
+   * 対して果たしたのと同じ役割を、`superseded` という別の起点に対して果たす。
+   *
+   * 🔴 **粒度は「群」だけである。**`target: { supersededById }` は、置き換えた側
+   * （新しいほう）の id を指す——個別の Memory id を渡す形は無い。理由は
+   * {@link RestoreSupersededTarget} の doc コメントを参照（要約: `superseded` な
+   * Memory は `recall()` に出てこないため、呼び出し側は戻したい id を知る手段を
+   * そもそも持たない。手元にある唯一の取っ手が「置き換えた側」であり、
+   * `superseded_by_id` はちょうど1回の統合操作が作った群と一致する）。
+   *
+   * 🔴 **`MemoryStore` に新しい任意メソッド `restoreSupersededBy?` を足している。**
+   * `restoreArchived` が `updateStatusWithEvent`（既存の必須メソッド）にそのまま
+   * 収まったのとは違う——理由は {@link MemoryStore.restoreSupersededBy} の doc
+   * コメントを参照（要約: (1) 個別 CAS ではなく群単位の範囲走査+一括更新であること、
+   * (2) `updateStatusWithEvent` には `superseded_by_id` を `NULL` へ戻す経路が
+   * 型にも SQL にも無いこと、の2点）。**adapter がこの口を実装していなければ
+   * `{ supported: false, supersedingMemoryId, outcomes: [] }` を返す**——
+   * `sweepArchive`/`archiveDecayed?` と同じ「対応していない、と名指しする」形
+   * （ADR 0082）。フォールバック経路は持たない。
+   *
+   * 手順:
+   * 1. `deps.memoryStore.restoreSupersededBy` が無ければ
+   *    `{ supported: false, supersedingMemoryId: target.supersededById, outcomes: [] }`。
+   * 2. 在れば `restoreSupersededBy(ctx, target.supersededById, { reason, actor, at: now })`
+   *    を呼ぶ——store 側が1トランザクションで対象行（`status = 'superseded'` かつ
+   *    `superseded_by_id = target.supersededById`）を選び、`status='active'`・
+   *    `superseded_by_id=null` へ更新し、行ごとに `memory_events` へ
+   *    `kind: 'unsuperseded'` を積んで、戻した `Memory[]` を返す。
+   * 3. `status` の復帰に成功した各対象について、続けて `MemoryStore.reinforce` を
+   *    呼ぶ——理由は `restoreArchived` と同じ「ADR 0153 の忘却ゲート」だが、
+   *    **前提が違う**点に注意（下記「⚠ reinforce する理由」）。`reinforce` が
+   *    例外を投げても、既に成功した `status` の復帰は握り潰さない——`kind` は
+   *    `"restored"` のままで、失敗は `reinforceError` に運ぶ（`RestoreArchivedOutcome`
+   *    と同じ規律。`restoreArchived` の doc コメント参照）。
+   * 4. 対象が0件なら `{ supported: true, supersedingMemoryId, outcomes: [] }`。
+   *    **例外にしない。**
+   * 5. `target.supersededById` に実在しない・形式不正な id を渡しても例外にしない
+   *    （対象0件と同じ——`MemoryStore.restoreSupersededBy` の契約節参照）。
+   *
+   * ⚠ **reinforce する理由は `restoreArchived` と同じだが、前提は違う。** ADR 0153 が
+   * `recall()` に既定 ON の忘却ゲート（`decayFloorAt <= now` の Memory を候補から
+   * 除外する）を導入したため、`status` だけを戻しても `decayFloorAt` が過去のままなら
+   * recall に出てこない＝復旧になっていない、という事情は同じである。ADR 0048
+   * （`reinforce` は減衰の起点を巻き戻さない）により、床がまだ未来の Memory に対して
+   * 呼んでも縮まないため、無条件に呼んで安全であることも同じ。**しかし
+   * `restoreArchived` の対象（`sweepArchive` が `archived` にした行）は、掃引の選定
+   * 条件そのものにより床が必ず過去である**のに対し、**`superseded` な Memory の床は
+   * 過去とは限らない**——`consolidate`/`reextract` は「まだ活発に使われている
+   * Memory を統合する」ことを妨げておらず、統合された直後の Memory の
+   * `decayFloorAt` は先の未来を指しうる。⟹ **「`restoreArchived` と形を揃えた」から
+   * reinforce するのではなく、「recall の忘却ゲートが同じ土俵にある」から reinforce
+   * する**——床が既に未来を指す対象に対しても、ADR 0048 により安全に呼べるので、
+   * 呼ぶかどうかを対象ごとに出し分ける理由が無い。
+   *
+   * ⛔ **この操作が「やらないこと」（設計上、意図的に持たない機能）:**
+   * - **置き換えた側（`target.supersededById` が指す Memory）に一切触らない。**
+   *   消さない・`forget` しない・`status` を変えない。理由:
+   *   (1) `consolidate` の統合先は、supersede が誤りだったとしても中身自体は
+   *   正しいことがある——黙って消すと作業を破壊する。(2) `forget` が既に在る
+   *   ＝呼び出し側が明示的に選べる。(3) `docs/north-star.md` の迷ったときの問い3
+   *   （説明できるか）——操作1つにイベント1つのほうが後から辿れる。(4) 同じ問い4
+   *   （推論と事実を区別できるか）——統合先の `provenance.kind` は多くの場合
+   *   `'consolidated'`（推論由来）、戻す側は `'stated'` のことが多い。どちらを
+   *   残すかをこの枠組みが勝手に決めない。
+   * - ⟹ **戻した直後は、古いほう（`outcomes` に載る Memory）も新しいほう
+   *   （`supersedingMemoryId`）も両方 `active` であり、`recall()` は両方を返しうる。**
+   *   始末したいなら呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、
+   *   あるいは `markContested` で対にすること。**この分岐をこのメソッドの `opts` には
+   *   足さない**——1つの操作が2つの意思決定（「戻す」と「置き換えた側をどうするか」）
+   *   を暗黙に束ねないため。
+   *
+   * `recall()` 自身は一切変更していない——`restoreArchived` と同じく、`status` が
+   * `'active'` へ戻った時点で既存の status ゲートへ他の `active` な Memory と全く
+   * 同じ経路で合流する。
+   */
+  restoreSuperseded(
+    ctx: Ctx,
+    target: RestoreSupersededTarget,
+    opts?: RestoreSupersededOptions,
+  ): Promise<RestoreSupersededResult>;
   /**
    * Issue #102: Memory を**論理的に**忘れさせる。
    *
@@ -2657,6 +2855,82 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `Runtime.restoreSuperseded` の実装。doc コメントは interface 側
+   * （`restoreSuperseded` の JSDoc）にある——ここはアルゴリズムそのものだけ。
+   *
+   * `sweepArchive` と同じ「口が在るかどうかで分岐する」骨格
+   * （`deps.memoryStore.restoreSupersededBy` を一度ローカル変数へ受けてから
+   * `undefined` を判定し、`.call(deps.memoryStore, ...)` で `this` を明示的に
+   * 束ね直す——分割代入したメソッドは `this` を失うため。ADR 0100 の
+   * `supersedeWithNewMemories` 呼び出しと同じ作法）。
+   */
+  async function restoreSuperseded(
+    ctx: Ctx,
+    target: RestoreSupersededTarget,
+    opts?: RestoreSupersededOptions,
+  ): Promise<RestoreSupersededResult> {
+    const supersedingMemoryId = target.supersededById;
+    const restoreSupersededBy = deps.memoryStore.restoreSupersededBy;
+    if (restoreSupersededBy === undefined) {
+      return { supported: false, supersedingMemoryId, outcomes: [] };
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
+    const { restored } = await restoreSupersededBy.call(
+      deps.memoryStore,
+      ctx,
+      supersedingMemoryId,
+      {
+        reason: opts?.reason,
+        actor,
+        at: clock.now(),
+      },
+    );
+
+    if (restored.length === 0) {
+      return { supported: true, supersedingMemoryId, outcomes: [] };
+    }
+
+    // ADR 0165 決めたこと16 と同じ理由（`restoreArchived` の実装コメント参照）:
+    // この呼び出し全体で1回だけ読む。
+    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+
+    const outcomes: RestoreSupersededOutcome[] = [];
+    for (const memory of restored) {
+      // status の復帰は既に `restoreSupersededBy` の1トランザクションで成立している
+      // ——ここから先は `restoreArchived` と同じ「reinforce 専用の内側の try/catch」
+      // （復帰の成功を reinforce の失敗で握り潰さない）。
+      let decayFloorAt = memory.decayFloorAt;
+      let reinforceError: string | undefined;
+      try {
+        const reinforced = await deps.memoryStore.reinforce(
+          ctx,
+          memory.id,
+          clock.now(),
+          reinforceOpts,
+        );
+        decayFloorAt = reinforced.decayFloorAt;
+      } catch (err) {
+        reinforceError = err instanceof Error ? err.message : String(err);
+      }
+
+      outcomes.push(
+        reinforceError === undefined
+          ? { memoryId: memory.id, kind: "restored", previousStatus: "superseded", decayFloorAt }
+          : {
+              memoryId: memory.id,
+              kind: "restored",
+              previousStatus: "superseded",
+              decayFloorAt,
+              reinforceError,
+            },
+      );
+    }
+
+    return { supported: true, supersedingMemoryId, outcomes };
+  }
+
+  /**
    * `Runtime.forget` の実装（Issue #102）。doc コメントは interface 側
    * （`forget` の JSDoc）にある——ここはアルゴリズムそのものだけ。
    */
@@ -3711,6 +3985,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     reembed,
     sweepArchive,
     restoreArchived,
+    restoreSuperseded,
     forget,
     purge,
     markContested,
