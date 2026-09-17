@@ -295,6 +295,44 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill
 ここで見せたいのは「切り詰めずに、そのままだと何文字になるか」であり、強制ではなく
 計測の比較だからである（budget が実際に切り詰めることは `chat` サブコマンドの方で見せる）。
 
+### 基準値（`compare-baseline.json`）を更新する手順（⭐ 2回以上の run で一致を確かめてから採る）
+
+**`compare` は⭐門である**（[ADR 0133](../../docs/decisions/0133-compare-baseline-and-gate.md)）。
+基準値は `examples/chat/compare-baseline.json` にコミットされていて、**CI はこれを自動更新しない。**
+値が意図して動いたときは人が更新する——⭐ **その手間は目的である**（同じ規律の説明は
+本 README の `identifier-probes` 節「基準値との差分を Job Summary に出す」にある）。
+
+⛔ **手元で測った値を書かない。**[ADR 0121](../../docs/decisions/0121-bench-baselines-from-ci-artifacts.md)
+の表題が逐語で「基準値を、CI 初回実測の artifact から作る（**手元では書かない**）」であり、
+[ADR 0119](../../docs/decisions/0119-archive-sweep-cost-bench.md) 決定6 が
+「**実測せずに数値を書けば、それは捏造である。**」と書いている。⟹ **本体は CI の artifact を
+プログラムで読み込んで差し替える**（ADR 0133 決定1。形の実例は
+[ADR 0168](../../docs/decisions/0168-examples-chat-uses-association.md) 決定5）。
+
+⭐ **採る前に、2回以上の成功 run で一致することを確かめる**（[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md) 決定5。
+ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化されていなかった規律である）。
+
+1. 更新を含む PR を立て、**その PR 自身の CI（`example-chat` ジョブ）**を走らせる。
+2. artifact を **2本以上**取る。同一 commit で同じジョブを再実行した2本が最も強い
+   （`gh run rerun <run-id> --job <job-id>`。前例は [ADR 0170](../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md) の3本）。
+
+   ```bash
+   gh run download <run-id> -R takecchi/mnemora -n compare -D <dir>
+   ```
+
+3. **`measuredAt` と `commit` を除いて `rows` がバイト単位で一致すること**を確かめる。
+   ⛔ **一致しなければ基準値を更新しない**——先に直すべきは値ではなく非決定である
+   （前例: ADR 0170。基準値に採った値が、実は run ごとに揺れる3値のうちの1点だった）。
+4. 一致したら、artifact を**プログラムで読み込んで** `llmMode`/`embeddingMode`/`rowCount`/`rows`
+   を差し替える。⛔ 手で数値を打たない。
+5. `provenance` に `commit`/`measuredAt`/`ciJob`/`repeatRuns` と、**なぜ値が動いたか**の `note` を書く。
+6. PR 本文に **「旧基準での結果」「新基準での結果」「変更理由」「失う保証」を分けて**書く
+   （`docs/autonomy.md` §2.2）。
+
+⚠ **Job Summary の「基準値の鮮度」節は、⭐門が見ない欄（`omitted` 等）の食い違いを毎 run 名乗る**
+（[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md)）。⛔ **これは門ではない**——ジョブは落ちない。
+**古いことに気づかせるためだけに在る。**
+
 ### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
 `compare`/`archive-sweep-cost` は `--decay-clock <wall|activity|either>` を受け付ける。

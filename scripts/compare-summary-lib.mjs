@@ -221,6 +221,21 @@ const DIFF_FIELDS = [
 ];
 
 /**
+ * ⭐門(`computeComparison`)が判定に使う2欄——`mnemoraShareOfNaiveChars` の悪化と
+ * `factStatementSurvived` の true→false だけを見る(上の `computeComparison` 参照)。
+ * 🔴 `computeComparison` の判定ロジックを変えたら、ここも揃えること
+ * (欄名の出所を2箇所に増やさないため、`FRESHNESS_FIELDS` は `DIFF_FIELDS` から
+ * この2欄を引いて導出する——ベタ書きしない)。
+ */
+const GATE_FIELDS = ["mnemoraShareOfNaiveChars", "factStatementSurvived"];
+
+/**
+ * 基準値の「鮮度」(`evaluateBaselineFreshness`)が見る欄——`DIFF_FIELDS` から
+ * `GATE_FIELDS`(⭐門が見る2欄)を引いたもの。鮮度は門の仕事を二重にしない。
+ */
+const FRESHNESS_FIELDS = DIFF_FIELDS.filter((field) => !GATE_FIELDS.includes(field));
+
+/**
  * @param {Record<string, any>} row
  * @param {string} field
  */
@@ -399,6 +414,85 @@ export function evaluateCompare(measured, baseline) {
 }
 
 /**
+ * ⭐ 基準値の「鮮度」(Issue #403。⛔ **判定ではない**——終了コードを一切変えない)。
+ *
+ * `evaluateCompare`(⭐門)は `GATE_FIELDS` の2欄だけを見るため、それ以外の欄
+ * (`omitted` 等)が相違しても緑のまま出続ける——ADR 0188 の負債3が実際にこの形で
+ * 放置された。この関数は判定をやり直さず、**基準値が名乗る出所(`declaration`)と
+ * いま実測したもの(`current`)を毎回並べて言わせ**、⭐門が見ない欄の食い違いを
+ * `staleRows`/`staleFieldNames` として返すだけである(道具の役目は宣言と現在地の差を
+ * 言わせることに留める。ADR 0214 決定5)。
+ *
+ * 比較は `diffRow` を再利用する(`omitted` の JSON 化比較を書き直さない)。
+ * 両側に `turnCount` が在る行だけを見る——片側だけの `turnCount` は
+ * `computeComparison` の判定不能の担当であり、鮮度では数えない。
+ *
+ * @param {Record<string, any>} measured
+ * @param {{ rows: Record<string, unknown>[], provenance?: unknown }} baseline
+ * @returns {{
+ *   declaration: { commit: unknown, measuredAt: unknown, repeatRuns: unknown, ciJob: unknown } | null,
+ *   current: { commit: unknown, measuredAt: unknown },
+ *   sameCommit: boolean,
+ *   comparedTurnCounts: number[],
+ *   staleRows: { turnCount: number, fields: string[] }[],
+ *   staleFieldNames: string[],
+ *   isStale: boolean,
+ * }} `declaration` は `baseline.provenance` から読む(無ければ `null` ——出所を
+ * 名乗っていない)。`current` は実測の同名トップレベル欄(無ければ `undefined`)。
+ * `sameCommit` は両方の commit が文字列で在って一致するときだけ `true`。
+ * `staleRows` は `turnCount` 昇順、`fields` は `DIFF_FIELDS` の順。
+ */
+export function evaluateBaselineFreshness(measured, baseline) {
+  const provenance = /** @type {any} */ (baseline).provenance;
+  const declaration = isObject(provenance)
+    ? {
+        commit: provenance.commit,
+        measuredAt: provenance.measuredAt,
+        repeatRuns: provenance.repeatRuns,
+        ciJob: provenance.ciJob,
+      }
+    : null;
+  const current = { commit: measured.commit, measuredAt: measured.measuredAt };
+  const sameCommit =
+    declaration !== null &&
+    typeof declaration.commit === "string" &&
+    typeof current.commit === "string" &&
+    declaration.commit === current.commit;
+
+  const measuredByTurn = new Map(measured.rows.map((r) => [r.turnCount, r]));
+  const baselineByTurn = new Map(baseline.rows.map((r) => [/** @type {any} */ (r).turnCount, r]));
+  const comparedTurnCounts = [...measuredByTurn.keys()]
+    .filter((turnCount) => baselineByTurn.has(turnCount))
+    .sort((a, b) => a - b);
+
+  /** @type {{ turnCount: number, fields: string[] }[]} */
+  const staleRows = [];
+  for (const turnCount of comparedTurnCounts) {
+    const diff = diffRow(turnCount, measuredByTurn.get(turnCount), baselineByTurn.get(turnCount));
+    const fields = diff.fieldDiffs
+      .map((fieldDiff) => fieldDiff.field)
+      .filter((field) => FRESHNESS_FIELDS.includes(field));
+    if (fields.length > 0) {
+      staleRows.push({ turnCount, fields });
+    }
+  }
+
+  const staleFieldNames = FRESHNESS_FIELDS.filter((field) =>
+    staleRows.some((row) => row.fields.includes(field)),
+  );
+
+  return {
+    declaration,
+    current,
+    sameCommit,
+    comparedTurnCounts,
+    staleRows,
+    staleFieldNames,
+    isStale: staleRows.length > 0,
+  };
+}
+
+/**
  * 基準値との差分節。**一致なら1行、違うときだけ展開する**(ADR 0088 §3-3)。
  *
  * @param {Record<string, any>} measured
@@ -486,6 +580,94 @@ function buildRowLine(row) {
 }
 
 /**
+ * 「基準値の宣言」の1行。`provenance` が無ければ、出所を名乗っていない旨を返す。
+ *
+ * @param {ReturnType<typeof evaluateBaselineFreshness>["declaration"]} declaration
+ */
+function formatDeclarationLine(declaration) {
+  if (declaration === null) {
+    return (
+      "🔴 基準値の宣言: この基準値は出所を名乗っていない(`provenance` 欄が無い)" +
+      "⟹ 鮮度を言えない。"
+    );
+  }
+  const commit = typeof declaration.commit === "string" ? `\`${declaration.commit}\`` : "不明";
+  const measuredAt = declaration.measuredAt ?? "不明";
+  const repeatRuns = declaration.repeatRuns ?? "不明";
+  const ciJob = declaration.ciJob ?? "不明";
+  return (
+    `基準値の宣言: commit ${commit}` +
+    `(measuredAt=${measuredAt}、repeatRuns=${repeatRuns}、ciJob=${ciJob})`
+  );
+}
+
+/**
+ * 「いま実測したもの」の1行。
+ *
+ * @param {ReturnType<typeof evaluateBaselineFreshness>["current"]} current
+ */
+function formatCurrentLine(current) {
+  const commit =
+    typeof current.commit === "string" ? `\`${current.commit}\`` : "不明(commit 欄が無い)";
+  const measuredAt = current.measuredAt ?? "不明(measuredAt 欄が無い)";
+  return `いま実測したもの: commit ${commit}(measuredAt=${measuredAt})`;
+}
+
+/**
+ * ⭐門ではなく警告のための節——`evaluateBaselineFreshness` の結果を Markdown にする。
+ * ⛔ **これはゲートではない**——ここに書く内容が exit code を変えることは無い
+ * (`compare-summary.mjs` 側で終了コードを変えない設計になっている)。
+ *
+ * @param {Record<string, any>} measured
+ * @param {{ rows: Record<string, unknown>[], provenance?: unknown }} baseline
+ */
+function buildFreshnessSection(measured, baseline) {
+  const freshness = evaluateBaselineFreshness(measured, baseline);
+  const lines = ["## 基準値の鮮度(⛔ 門ではない)", ""];
+  lines.push(formatDeclarationLine(freshness.declaration), "");
+  lines.push(formatCurrentLine(freshness.current), "");
+
+  if (freshness.declaration !== null && !freshness.sameCommit) {
+    const declCommit =
+      typeof freshness.declaration.commit === "string"
+        ? `\`${freshness.declaration.commit}\``
+        : "不明";
+    const curCommit =
+      typeof freshness.current.commit === "string" ? `\`${freshness.current.commit}\`` : "不明";
+    lines.push(
+      `commit: 基準値の宣言(${declCommit})といま実測したもの(${curCommit})は一致していない` +
+        "(main は毎 commit 動くので、commit 相違それ自体は常態であり警告ではない)。",
+      "",
+    );
+  }
+
+  if (!freshness.isStale) {
+    lines.push(
+      `✅ ⭐門が見ない欄も、比較した ${freshness.comparedTurnCounts.length} 会話長すべてで` +
+        "基準値と一致している。",
+    );
+    return lines.join("\n");
+  }
+
+  lines.push(
+    `⚠ ⭐門が見ない欄が ${freshness.staleRows.length} 会話長で基準値と相違している` +
+      `(turnCount=${freshness.staleRows.map((row) => row.turnCount).join(", ")}、` +
+      `欄: ${freshness.staleFieldNames.join(", ")})。`,
+    "",
+    ...freshness.staleRows.map((row) => `- turnCount = ${row.turnCount}: ${row.fields.join(", ")}`),
+    "",
+    "⛔ これは退行ではない——門は緑のままである" +
+      "(ADR 0133 の判定基準(mnemoraShareOfNaiveChars の悪化 / factStatementSurvived の " +
+      "true→false)に当たらない)。",
+    "🔴 判定に使わない欄は、誰も直す義務を負わないまま出続ける" +
+      "——それが Issue #403 で実際に起きたことである。",
+    "⟹ 意図した変化なら、基準値を更新すること(手順は `examples/chat/README.md` の " +
+      "`compare` 節)。",
+  );
+  return lines.join("\n");
+}
+
+/**
  * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
  * **呼び出し側は必ず validate 済みの値を渡すこと**
  * (`time-term-summary-lib.mjs`/`archive-sweep-cost-summary-lib.mjs` と同じ分担)。
@@ -508,6 +690,7 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   ];
   if (baseline) {
     lines.push(buildDiffSection(measured, baseline), "");
+    lines.push(buildFreshnessSection(measured, baseline), "");
   } else {
     lines.push(
       "⚠ 基準値ファイルがまだ無い(`examples/chat/compare-baseline.json`)。" +

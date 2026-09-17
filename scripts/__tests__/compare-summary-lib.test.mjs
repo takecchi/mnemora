@@ -3,6 +3,7 @@ import {
   buildSummaryMarkdown,
   computeComparison,
   diffRow,
+  evaluateBaselineFreshness,
   evaluateCompare,
   validateBaseline,
   validateMeasured,
@@ -341,6 +342,89 @@ describe("evaluateCompare（⭐ 門の判定。Issue #477 の陽性対照）", (
   });
 });
 
+/**
+ * ⭐ Issue #403: 基準値の「鮮度」——⭐門(`evaluateCompare`)が見ない欄(`omitted` 等)の
+ * 相違を検出する。⛔ **判定ではない**——この関数は `verdict`/exit code を持たない。
+ */
+describe("evaluateBaselineFreshness", () => {
+  function baselineWithProvenance(measured, provenance) {
+    return { ...baselineFrom(measured), provenance };
+  }
+
+  it("🔴 omitted だけが相違すると isStale:true になり、turnCount と欄名を返す", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    measured.rows[1].omitted = [{ kind: "below_threshold", count: 1 }];
+    const result = evaluateBaselineFreshness(measured, baseline);
+    expect(result.isStale).toBe(true);
+    expect(result.staleRows).toEqual([{ turnCount: 10, fields: ["omitted"] }]);
+    expect(result.staleFieldNames).toEqual(["omitted"]);
+  });
+
+  it("全欄一致なら isStale:false で、比較した会話長を返す", () => {
+    const measured = makeMeasured();
+    const result = evaluateBaselineFreshness(measured, baselineFrom(measured));
+    expect(result.isStale).toBe(false);
+    expect(result.staleRows).toEqual([]);
+    expect(result.comparedTurnCounts).toEqual([2, 10]);
+  });
+
+  it("🔴 ⭐門が見る2欄(mnemoraShareOfNaiveChars/factStatementSurvived)だけが相違しても isStale:false(鮮度は門の仕事を二重にしない)", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    measured.rows[1].mnemoraShareOfNaiveChars = 5;
+    measured.rows[0].factStatementSurvived = false;
+    const result = evaluateBaselineFreshness(measured, baseline);
+    expect(result.isStale).toBe(false);
+    expect(result.staleRows).toEqual([]);
+  });
+
+  it("provenance が無い基準値では declaration:null になる", () => {
+    const measured = makeMeasured();
+    const result = evaluateBaselineFreshness(measured, baselineFrom(measured));
+    expect(result.declaration).toBeNull();
+  });
+
+  it("provenance が在れば declaration に commit/measuredAt/repeatRuns/ciJob を写す", () => {
+    const measured = makeMeasured();
+    const baseline = baselineWithProvenance(measured, {
+      commit: "deadbeef",
+      measuredAt: "2026-09-01T00:00:00.000Z",
+      repeatRuns: 3,
+      ciJob: "example-chat",
+    });
+    const result = evaluateBaselineFreshness(measured, baseline);
+    expect(result.declaration).toEqual({
+      commit: "deadbeef",
+      measuredAt: "2026-09-01T00:00:00.000Z",
+      repeatRuns: 3,
+      ciJob: "example-chat",
+    });
+    expect(result.current).toEqual({ commit: measured.commit, measuredAt: measured.measuredAt });
+    expect(result.sameCommit).toBe(false);
+  });
+
+  it("commit が両方在って一致すれば sameCommit:true", () => {
+    const measured = makeMeasured({ commit: "same-sha" });
+    const baseline = baselineWithProvenance(measured, { commit: "same-sha" });
+    expect(evaluateBaselineFreshness(measured, baseline).sameCommit).toBe(true);
+  });
+
+  it("基準値側にしか無い turnCount / 実測側にしか無い turnCount は鮮度で数えない", () => {
+    const measured = makeMeasured({
+      rows: [
+        ...makeMeasured().rows,
+        makeRow({ turnCount: 999, omitted: [{ kind: "below_threshold", count: 9 }] }),
+      ],
+    });
+    const baseline = baselineFrom(makeMeasured());
+    baseline.rows.push(makeRow({ turnCount: 1234 }));
+    const result = evaluateBaselineFreshness(measured, baseline);
+    expect(result.comparedTurnCounts).toEqual([2, 10]);
+    expect(result.staleRows).toEqual([]);
+  });
+});
+
 describe("buildSummaryMarkdown", () => {
   it("baseline を渡さなければ「まだ無い」旨を出し、差分節を出さない", () => {
     const markdown = buildSummaryMarkdown({ measured: makeMeasured() });
@@ -398,5 +482,58 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("mnemora/naive");
     expect(markdown).toContain("冒頭の事実");
     expect(markdown).toContain("✅");
+  });
+
+  describe("⭐ 基準値の鮮度の節(Issue #403。⛔ 門ではない)", () => {
+    it("baseline を渡さなければ節そのものを出さない", () => {
+      const markdown = buildSummaryMarkdown({ measured: makeMeasured() });
+      expect(markdown).not.toContain("## 基準値の鮮度");
+    });
+
+    it("baseline を渡せば節見出しが在る", () => {
+      const measured = makeMeasured();
+      const markdown = buildSummaryMarkdown({ measured, baseline: baselineFrom(measured) });
+      expect(markdown).toContain("## 基準値の鮮度");
+    });
+
+    it("provenance の無い基準値では「出所を名乗っていない」と出る", () => {
+      const measured = makeMeasured();
+      const markdown = buildSummaryMarkdown({ measured, baseline: baselineFrom(measured) });
+      expect(markdown).toContain("出所を名乗っていない");
+    });
+
+    it("provenance が在れば宣言(commit/measuredAt/repeatRuns/ciJob)を出す", () => {
+      const measured = makeMeasured();
+      const baseline = {
+        ...baselineFrom(measured),
+        provenance: {
+          commit: "deadbeef",
+          measuredAt: "2026-09-01T00:00:00.000Z",
+          repeatRuns: 1,
+          ciJob: "example-chat",
+        },
+      };
+      const markdown = buildSummaryMarkdown({ measured, baseline });
+      expect(markdown).toContain("基準値の宣言");
+      expect(markdown).toContain("deadbeef");
+      expect(markdown).toContain("いま実測したもの");
+    });
+
+    it("⭐門が見ない欄(omitted)だけが相違すれば ⚠ で名指しし、門ではないと明示する", () => {
+      const measured = makeMeasured();
+      const baseline = baselineFrom(measured);
+      measured.rows[1].omitted = [{ kind: "below_threshold", count: 1 }];
+      const markdown = buildSummaryMarkdown({ measured, baseline });
+      expect(markdown).toContain("turnCount=10");
+      expect(markdown).toContain("omitted");
+      expect(markdown).toContain("Issue #403");
+      expect(markdown).toContain("退行ではない");
+    });
+
+    it("全欄一致すれば ✅ の1行で済ませる", () => {
+      const measured = makeMeasured();
+      const markdown = buildSummaryMarkdown({ measured, baseline: baselineFrom(measured) });
+      expect(markdown).toContain("✅ ⭐門が見ない欄も");
+    });
   });
 });

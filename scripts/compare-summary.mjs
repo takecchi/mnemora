@@ -37,10 +37,15 @@
  *
  * `--baseline` を渡さない場合はこれまで通り exit 0(門として機能しない。
  * 基準値が無ければ悪化の判定そのものができない)。
+ *
+ * ⚠ `--baseline` を渡していて、⭐門が見ない欄(`omitted` 等)が基準値と相違しているときは
+ * stderr へ基準値の鮮度の警告を出す(`evaluateBaselineFreshness`、Issue #403)。
+ * ⛔ **これは門ではない**——終了コード(0/1/2 の意味)は一切変えない。
  */
 import { readFileSync } from "node:fs";
 import {
   buildSummaryMarkdown,
+  evaluateBaselineFreshness,
   evaluateCompare,
   validateBaseline,
   validateMeasured,
@@ -120,6 +125,18 @@ console.log(
 
 if (baselineValidated) {
   const evaluation = evaluateCompare(measuredValidated.value, baselineValidated.value);
+
+  // ⚠ ⭐門ではない鮮度の警告(Issue #403)。fail / indeterminate で早期 exit する前に、
+  // 必ず一度は出す——配置をここより下へ動かさないこと。
+  const freshness = evaluateBaselineFreshness(measuredValidated.value, baselineValidated.value);
+  if (freshness.isStale) {
+    console.error(
+      `[compare-summary] ⚠ 基準値の鮮度: turnCount=` +
+        `${freshness.staleRows.map((row) => row.turnCount).join(", ")} で` +
+        `⭐門が見ない欄(${freshness.staleFieldNames.join(", ")})が基準値と相違している。` +
+        "⛔ これは門ではない(終了コードは変えない)。",
+    );
+  }
 
   if (evaluation.verdict === "indeterminate") {
     // ⛔ **判定不能を pass に倒さない**(`check-publish-run-coverage.mjs` と同じ規律)。
