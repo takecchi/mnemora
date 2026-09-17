@@ -1,4 +1,4 @@
-import type { Runtime } from "@mnemora/core";
+import type { CorrectionCandidate, Runtime } from "@mnemora/core";
 import { describe, expect, it } from "vitest";
 import type { CorrectionScenario } from "../correction-scenario.js";
 import { CORRECTION_SCENARIO } from "../correction-scenario.js";
@@ -11,19 +11,25 @@ import {
 } from "../correction-demo.js";
 
 /**
- * `runCorrectionDemo`/`checkCorrectionDemo`/`formatCorrectionDemo` の歯（Issue #303）。
+ * `runCorrectionDemo`/`checkCorrectionDemo`/`formatCorrectionDemo` の歯（Issue #303 / Issue #369 (C)）。
  * DB/LLM/embedding を実物で叩く代わりに、`Runtime` の必要な口だけを最小の偽物で埋める
  * （`consolidation-cost-abort.test.ts` と同じ規律）。
  *
- * **この歯が測っているもの**: `runCorrectionDemo` が `markContested`/`resolveContested` に
- * *どの id を*渡すか——具体的には、`scenario.contestedPair` の宣言（`firstExternalId`/
- * `secondExternalId`/`winnerExternalId`）が、`turns` の並び順や「後に observe したほうが
- * 勝つ」という順序規則を経由せず、**そのまま**呼び出しの引数に反映されることを実測する。
+ * **この歯が測っているもの**: `runCorrectionDemo` が
+ * - 【発見の段】`findCorrectionCandidates` を正しい引数（`text`/`excludeMemoryIds`）で
+ *   1回だけ呼ぶこと。
+ * - 【選択の段】`choice`（呼び出し側の明示的な指名）を**候補の並びから一切導かず**、
+ *   指名が候補に居るかどうかの照合にしか候補を使わないこと。
+ * - `choice` が無い・指名が候補に無い、の2ケースで**書き込みを1件もしない**こと。
+ * - `markContested`/`resolveContested` に*どの id を*渡すか——
+ *   `scenario.contestedPair` の宣言（`firstExternalId`/`secondExternalId`/
+ *   `winnerExternalId`）が、`turns` の並び順や「後に observe したほうが勝つ」という
+ *   順序規則を経由せず、**そのまま**呼び出しの引数に反映されることを実測する。
  *
- * **測っていないもの**: `markContested`/`resolveContested`/`recall` 自体の実装の正しさ
- * （それは `packages/core`/`packages/postgres` の領分であり、この歯の偽 Runtime は
- * 固定の戻り値を返すだけ）。実際の Postgres に対する一巡の実測は
- * `correction-demo.postgres.test.ts` で行う。
+ * **測っていないもの**: `markContested`/`resolveContested`/`recall`/
+ * `findCorrectionCandidates` 自体の実装の正しさ（それは `packages/core`/
+ * `packages/postgres` の領分であり、この歯の偽 Runtime は固定の戻り値を返すだけ）。
+ * 実際の Postgres に対する一巡の実測は `correction-demo.postgres.test.ts` で行う。
  */
 
 interface FakeRuntimeCalls {
@@ -41,6 +47,22 @@ interface FakeRuntimeCalls {
    * （本物の Postgres を要求する）だけになる。
    */
   recallQueries: unknown[];
+  /** `findCorrectionCandidates` が呼ばれた回数。 */
+  findCorrectionCandidatesCallCount: number;
+  /** `findCorrectionCandidates` に実際に渡った引数（最後の呼び出し分）。 */
+  findCorrectionCandidatesArgs: { text: string; excludeMemoryIds?: readonly string[] } | null;
+}
+
+function emptyCalls(): FakeRuntimeCalls {
+  return {
+    observedExternalIds: [],
+    markContestedArgs: null,
+    resolveContestedArgs: null,
+    recallCallCount: 0,
+    recallQueries: [],
+    findCorrectionCandidatesCallCount: 0,
+    findCorrectionCandidatesArgs: null,
+  };
 }
 
 /**
@@ -52,7 +74,32 @@ function memoryIdFor(externalId: string): string {
   return `${externalId}-memid`;
 }
 
-function buildFakeRuntime(calls: FakeRuntimeCalls): Runtime {
+function fakeScore(total: number) {
+  return { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total };
+}
+
+/**
+ * `findCorrectionCandidates` の既定の戻り値: `scenario.original` の1件だけを
+ * 候補の1位として返す（`correctionId` は呼び出し側が `excludeMemoryIds` で
+ * 自己除外している前提を、フィクスチャ側でも素直に反映する）。
+ */
+function defaultDiscoveryCandidates(): CorrectionCandidate[] {
+  const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
+  return [
+    {
+      memoryId: originalId,
+      digest: "青",
+      recallRank: 1,
+      score: fakeScore(0.9),
+      retrievedVia: "ann",
+    } as unknown as CorrectionCandidate,
+  ];
+}
+
+function buildFakeRuntime(
+  calls: FakeRuntimeCalls,
+  discoveryCandidates: CorrectionCandidate[] = defaultDiscoveryCandidates(),
+): Runtime {
   const observe: Runtime["observe"] = async (_ctx, input) => {
     const externalId = (input as { externalId: string }).externalId;
     calls.observedExternalIds.push(externalId);
@@ -68,6 +115,23 @@ function buildFakeRuntime(calls: FakeRuntimeCalls): Runtime {
     ({ processed: 0, failed: 0, unsupported: [] }) as unknown as Awaited<
       ReturnType<Runtime["tick"]>
     >;
+
+  const findCorrectionCandidates: Runtime["findCorrectionCandidates"] = async (_ctx, input) => {
+    calls.findCorrectionCandidatesCallCount += 1;
+    calls.findCorrectionCandidatesArgs = input as {
+      text: string;
+      excludeMemoryIds?: readonly string[];
+    };
+    return {
+      recallId: "correction-candidates-recall",
+      candidates: discoveryCandidates,
+      omitted: [],
+      explain: { stages: [] },
+      outcome: discoveryCandidates.length > 0 ? "candidates" : "no_candidates",
+      recalledCount: discoveryCandidates.length,
+      excludedCount: 0,
+    } as unknown as Awaited<ReturnType<Runtime["findCorrectionCandidates"]>>;
+  };
 
   const recall: Runtime["recall"] = async (_ctx, query) => {
     calls.recallCallCount += 1;
@@ -138,7 +202,7 @@ function buildFakeRuntime(calls: FakeRuntimeCalls): Runtime {
           companionOf: null,
         },
       ],
-      omitted: [],
+      omitted: [{ kind: "filtered", condition: "superseded", count: 1, countKind: "exact" }],
       index: { groups: [], totalInScope: 1, countKind: "exact" },
       usage: {
         chars: 0,
@@ -172,21 +236,32 @@ function buildFakeRuntime(calls: FakeRuntimeCalls): Runtime {
     } as unknown as Awaited<ReturnType<Runtime["resolveContested"]>>;
   };
 
-  return { observe, tick, recall, markContested, resolveContested } as unknown as Runtime;
+  return {
+    observe,
+    tick,
+    findCorrectionCandidates,
+    recall,
+    markContested,
+    resolveContested,
+  } as unknown as Runtime;
 }
 
-describe("runCorrectionDemo: markContested/resolveContested に渡す id は scenario.contestedPair の宣言どおり", () => {
-  it("既定シナリオ: winnerExternalId=correction ⟹ resolveContested に correction の memoryId が winnerId として渡る", async () => {
-    const calls: FakeRuntimeCalls = {
-      observedExternalIds: [],
-      markContestedArgs: null,
-      resolveContestedArgs: null,
-      recallCallCount: 0,
-      recallQueries: [],
-    };
+/** `scenario.contestedPair.firstExternalId` を「記録済みの採用者の判断」として渡す。 */
+function recordedChoice(scenario: CorrectionScenario = CORRECTION_SCENARIO) {
+  return { chosenExternalId: scenario.contestedPair.firstExternalId };
+}
+
+describe("runCorrectionDemo: markContested/resolveContested に渡す id は 指名(choice) と scenario.contestedPair.winnerExternalId の宣言どおり", () => {
+  it("既定シナリオ: choice=firstExternalId(original) ⟹ resolveContested に correction の memoryId が winnerId として渡る", async () => {
+    const calls = emptyCalls();
     const runtime = buildFakeRuntime(calls);
 
-    const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+    const result = await runCorrectionDemo(
+      runtime,
+      { tenantId: "t" },
+      CORRECTION_SCENARIO,
+      recordedChoice(),
+    );
 
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
     const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
@@ -197,7 +272,12 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
       CORRECTION_SCENARIO.correction.externalId,
     ]);
 
-    // markContested は contestedPair.first/secondExternalId が指す2件で呼ばれる。
+    expect(result.outcome).toBe("resolved");
+    // 🔑 指名(choice)が候補の何位だったかが結果に載る(北極星 問い3)。
+    expect(result.chosenId).toBe(originalId);
+    expect(result.chosenRecallRank).toBe(1);
+
+    // markContested は指名(chosenId)と correction の2件で呼ばれる。
     expect(calls.markContestedArgs).toEqual([originalId, correctionId]);
 
     // 🔑 resolveContested の winnerId は contestedPair.winnerExternalId(=correction)が
@@ -219,16 +299,15 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
         winnerExternalId: CORRECTION_SCENARIO.original.externalId,
       },
     };
-    const calls: FakeRuntimeCalls = {
-      observedExternalIds: [],
-      markContestedArgs: null,
-      resolveContestedArgs: null,
-      recallCallCount: 0,
-      recallQueries: [],
-    };
+    const calls = emptyCalls();
     const runtime = buildFakeRuntime(calls);
 
-    await runCorrectionDemo(runtime, { tenantId: "t" }, reversedScenario);
+    await runCorrectionDemo(
+      runtime,
+      { tenantId: "t" },
+      reversedScenario,
+      recordedChoice(reversedScenario),
+    );
 
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
 
@@ -238,16 +317,10 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
   });
 
   it("🔑 3回の recall() はすべて limit: 1 で呼ばれる — 段3の必須同伴取得を発火させる条件そのもの(ADR 0162 決定5)", async () => {
-    const calls: FakeRuntimeCalls = {
-      observedExternalIds: [],
-      markContestedArgs: null,
-      resolveContestedArgs: null,
-      recallCallCount: 0,
-      recallQueries: [],
-    };
+    const calls = emptyCalls();
     const runtime = buildFakeRuntime(calls);
 
-    await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+    await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO, recordedChoice());
 
     // beforeMark / afterMark / afterResolve の3回。
     expect(calls.recallQueries).toHaveLength(3);
@@ -273,22 +346,190 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は sce
     } as unknown as Runtime;
 
     await expect(
-      runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO),
+      runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO, recordedChoice()),
     ).rejects.toThrow(/Memory を作らなかった/);
+  });
+});
+
+/**
+ * 🔴🔴 最優先の歯: `runCorrectionDemo` が「候補の1位を機械的に採る」実装であれば
+ * 赤くなる（ADR 0232 引き受けた負債1「採用側が候補[0] を機械的に採る実装を書けば、
+ * 深い誤爆 75% はそのまま再現する」への応答）。
+ *
+ * `findCorrectionCandidates` の候補1位を decoy にし、指名(choice)は候補2位の
+ * originalId にする。`candidates[0]` を採る実装なら、`markContested`/
+ * `resolveContested` は decoy に対して呼ばれてしまうはずである——この歯はそれが
+ * **起きないこと**を実測する。
+ *
+ * ⚠ この歯だけでは「decoy が active のまま残る」ことを DB レベルでは確かめられない
+ * （偽 Runtime は状態を持たない）。ここで実測しているのは「decoy の memoryId が
+ * markContested/resolveContested の引数に一度も現れない」ことであり、
+ * `examples/chat` の書き込み口を偽 Runtime で置き換えている以上、これが
+ * 「decoy に触れていない」ことの実測できる範囲である。
+ */
+describe("🔴🔴 採用者の指名が候補1位ではないケース: candidates[0]実装なら赤くなる歯", () => {
+  it("指名(originalId)は候補2位。候補1位のdecoyはmarkContested/resolveContestedの引数に一度も現れない", async () => {
+    const calls = emptyCalls();
+    const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
+    const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
+    const decoyId = "decoy-memid-should-remain-untouched";
+    const discoveryCandidates: CorrectionCandidate[] = [
+      {
+        memoryId: decoyId,
+        digest: "無関係な既存の記憶(守るべき事実)",
+        recallRank: 1,
+        score: fakeScore(0.95),
+        retrievedVia: "ann",
+      } as unknown as CorrectionCandidate,
+      {
+        memoryId: originalId,
+        digest: "青",
+        recallRank: 2,
+        score: fakeScore(0.87),
+        retrievedVia: "ann",
+      } as unknown as CorrectionCandidate,
+    ];
+    const runtime = buildFakeRuntime(calls, discoveryCandidates);
+
+    const result = await runCorrectionDemo(
+      runtime,
+      { tenantId: "t" },
+      CORRECTION_SCENARIO,
+      recordedChoice(),
+    );
+
+    expect(result.outcome).toBe("resolved");
+    // 指名は候補の1位ではなく2位だった、ということが結果からも読める。
+    expect(result.chosenRecallRank).toBe(2);
+    expect(result.chosenId).toBe(originalId);
+
+    // 🔴 本体: markContested/resolveContested は指名(originalId)に対して呼ばれ、
+    // 候補1位のdecoyは一度も引数に現れない。
+    expect(calls.markContestedArgs).toEqual([originalId, correctionId]);
+    expect(calls.markContestedArgs).not.toContain(decoyId);
+    expect(calls.resolveContestedArgs?.[0]).toBe(originalId);
+    expect(calls.resolveContestedArgs?.[1]).toBe(correctionId);
+    expect(JSON.stringify(calls.resolveContestedArgs)).not.toContain(decoyId);
+  });
+});
+
+describe("発見の段: findCorrectionCandidates は text=訂正の発話・excludeMemoryIds=[自己] で1回だけ呼ばれる", () => {
+  it("引数が correction.text / [correctionId] のとおりである", async () => {
+    const calls = emptyCalls();
+    const runtime = buildFakeRuntime(calls);
+    const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
+
+    await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO, recordedChoice());
+
+    expect(calls.findCorrectionCandidatesCallCount).toBe(1);
+    expect(calls.findCorrectionCandidatesArgs).toEqual({
+      text: CORRECTION_SCENARIO.correction.text,
+      excludeMemoryIds: [correctionId],
+    });
+  });
+
+  it("choice が無くても findCorrectionCandidates は呼ばれる(候補は棄権せずに常に提示する、ADR 0232 B群実測: 棄権率0/8)", async () => {
+    const calls = emptyCalls();
+    const runtime = buildFakeRuntime(calls);
+
+    const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+
+    expect(calls.findCorrectionCandidatesCallCount).toBe(1);
+    expect(result.discovery.candidates.length).toBeGreaterThan(0);
+  });
+});
+
+describe("選択を渡さない・指名が候補に無い: 書き込み0件で停止する(ADR 0232 B群の危険を可視化する経路)", () => {
+  it("choice が undefined ⟹ outcome=awaiting_choice、markContested/resolveContested/recallは一度も呼ばれない(書き込み0件)", async () => {
+    const calls = emptyCalls();
+    const runtime = buildFakeRuntime(calls);
+
+    const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+
+    expect(result.outcome).toBe("awaiting_choice");
+    expect(result.chosenId).toBeNull();
+    expect(result.chosenRecallRank).toBeNull();
+    expect(result.beforeMark).toBeNull();
+    expect(result.markOutcomeKind).toBeNull();
+    expect(result.afterMark).toBeNull();
+    expect(result.resolveOutcomeKind).toBeNull();
+    expect(result.afterResolve).toBeNull();
+
+    // 🔴 書き込み0件: markContested/resolveContested はそもそも呼ばれない。
+    expect(calls.markContestedArgs).toBeNull();
+    expect(calls.resolveContestedArgs).toBeNull();
+    // 🔴 recall() (beforeMark/afterMark/afterResolve用)も一度も呼ばれない
+    // — イベントが増えない・どの Memory の状態も変わらないことの代理指標。
+    expect(calls.recallCallCount).toBe(0);
+
+    // それでも候補は提示されている(棄権していない)。
+    expect(result.discovery.candidates.length).toBeGreaterThan(0);
+  });
+
+  it("choice はあるが指名先が候補一覧に居ない ⟹ outcome=choice_not_in_candidates、書き込み0件", async () => {
+    const calls = emptyCalls();
+    const decoyOnly: CorrectionCandidate[] = [
+      {
+        memoryId: "someone-else-entirely",
+        digest: "全く別の記憶",
+        recallRank: 1,
+        score: fakeScore(0.9),
+        retrievedVia: "ann",
+      } as unknown as CorrectionCandidate,
+    ];
+    const runtime = buildFakeRuntime(calls, decoyOnly);
+
+    const result = await runCorrectionDemo(
+      runtime,
+      { tenantId: "t" },
+      CORRECTION_SCENARIO,
+      recordedChoice(),
+    );
+
+    const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
+
+    expect(result.outcome).toBe("choice_not_in_candidates");
+    expect(result.chosenId).toBe(originalId);
+    expect(result.chosenRecallRank).toBeNull();
+    expect(result.beforeMark).toBeNull();
+    expect(result.afterMark).toBeNull();
+    expect(result.afterResolve).toBeNull();
+
+    expect(calls.markContestedArgs).toBeNull();
+    expect(calls.resolveContestedArgs).toBeNull();
+    expect(calls.recallCallCount).toBe(0);
+  });
+
+  it("checkCorrectionDemo/checkCorrectionOmission を outcome!=='resolved' の結果に呼ぶと例外になる(書き込みに進んでいない結果へ適用する誤りを防ぐ)", async () => {
+    const calls = emptyCalls();
+    const runtime = buildFakeRuntime(calls);
+    const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+
+    expect(() => checkCorrectionDemo(result)).toThrow(/outcome/);
+    expect(() => checkCorrectionOmission(result)).toThrow(/outcome/);
+  });
+
+  it("formatCorrectionDemo は outcome=awaiting_choice でも例外を投げず、候補一覧と停止を印字する", async () => {
+    const calls = emptyCalls();
+    const runtime = buildFakeRuntime(calls);
+    const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+
+    const formatted = formatCorrectionDemo(result);
+    expect(formatted).toContain("書き込み0件で停止");
+    expect(formatted).toContain("選ばなければ何も起きない");
   });
 });
 
 describe("checkCorrectionDemo / formatCorrectionDemo: 固定した RecallResult から性質を正しく読む", () => {
   it("北極星の核心: afterResolve に original が居なければ afterResolveOriginalAbsent=true", async () => {
-    const calls: FakeRuntimeCalls = {
-      observedExternalIds: [],
-      markContestedArgs: null,
-      resolveContestedArgs: null,
-      recallCallCount: 0,
-      recallQueries: [],
-    };
+    const calls = emptyCalls();
     const runtime = buildFakeRuntime(calls);
-    const result = await runCorrectionDemo(runtime, { tenantId: "t" }, CORRECTION_SCENARIO);
+    const result = await runCorrectionDemo(
+      runtime,
+      { tenantId: "t" },
+      CORRECTION_SCENARIO,
+      recordedChoice(),
+    );
     const check = checkCorrectionDemo(result);
 
     expect(check.markSucceeded).toBe(true);
@@ -339,6 +580,18 @@ describe("checkCorrectionDemo: mandatory_companion がどちらに付くかを�
       scenario: CORRECTION_SCENARIO,
       originalId,
       correctionId,
+      discovery: {
+        recallId: "r",
+        candidates: [],
+        omitted: [],
+        explain: { stages: [] },
+        outcome: "no_candidates",
+        recalledCount: 0,
+        excludedCount: 0,
+      },
+      outcome: "resolved",
+      chosenId: originalId,
+      chosenRecallRank: 1,
       beforeMark: emptyRecall,
       markOutcomeKind: "contested",
       afterMark: { ...emptyRecall, memories: afterMarkMemories },
@@ -444,6 +697,18 @@ describe("checkCorrectionOmission: omitted 側から「消えた」と「最初�
       scenario: CORRECTION_SCENARIO,
       originalId: "fixed-original-id",
       correctionId: "fixed-correction-id",
+      discovery: {
+        recallId: "r",
+        candidates: [],
+        omitted: [],
+        explain: { stages: [] },
+        outcome: "no_candidates",
+        recalledCount: 0,
+        excludedCount: 0,
+      },
+      outcome: "resolved",
+      chosenId: "fixed-original-id",
+      chosenRecallRank: 1,
       beforeMark: emptyRecall,
       markOutcomeKind: "contested",
       afterMark: emptyRecall,

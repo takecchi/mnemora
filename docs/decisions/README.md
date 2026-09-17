@@ -258,5 +258,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0232](./0232-correction-candidates-returned-not-chosen.md) | 訂正の相手は mnemora が選ばない — **候補を返し、採用者が選ぶ**（Issue #369 (C)） | 採用 (2026-09) |
 | [0233](./0233-answer-quality-measured-once-against-the-real-api.md) | 回答品質を実 API で1回測り、記録で再生できる形にする — 記録器が同じ鍵を二度録っていた穴を塞ぐ（Issue #498 / #506） | 採用 (2026-09) |
 | [0234](./0234-bake-no-numbers-into-tools-and-artifacts.md) | 「焼き込んだ数字は腐る」の道具・生成物版を `AGENTS.md` へ置く — ⛔ 射程だけを広げず、**線**と**対象外**を同時に書く | 採用 (2026-09) |
+| [0235](./0235-correction-demo-explicit-choice.md) | 訂正の相手は `examples/chat` でも人が指名する — `findCorrectionCandidates` を本番コードの経路に立てる（Issue #369 (C) / 北極星 項目5） | **草案 (2026-09)** |
+| [0236](./0236-answer-retention-mutation-tested-not-recorded.md) | Issue #498 完了条件4を内容保持の側だけで満たす — 回答評価側の陽性対照は実 API での記録追加を要するため未達のまま残す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
