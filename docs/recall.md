@@ -31,6 +31,8 @@ type RecallResult = {
 
 `memories` と `omitted` は対になる二つのフィールドであって、片方が主でもう片方が付録ではない。型定義上も並び順上も対等に置く。呼び出し側のコードが `omitted` を無視して `memories` だけを使うことは自由だが、mnemora の側が「無視してよい」という前提で設計してはならない——`omitted` を計算しない・空配列で済ませる、という手を抜く経路を作らない。
 
+**⚠ 排他性契約（2026-09 追記。Issue #421 / [ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）**: `omitted` は文字どおり「返らなかったもの」の分類である——ある memoryId が `memories` に載っているなら、`omitted` のどの Omission もその memoryId を名指しで含まない。段3.5（連想、§9）が段2の `below_threshold` 判定を後から `memories` へ昇格させることがあり、そのときは昇格した分を `below_threshold` の `count`/`nearMisses` から取り下げる（§9.8）。**この契約が個体単位で検証できるのは `nearMisses` を持つ `below_threshold` だけである**——他の `Omission.kind` は件数だけを持ち、どの記憶を指すかを言わない。
+
 `index` と `usage` も同じ理由でトップレベルに置く。「何が在るか」（index、§5）と「どれだけの量を返したか」（usage、§6）は、`memories` の中身をどう解釈するかに直接影響する周辺情報であり、後から復元できない。`explain.stages` はパイプラインの実行そのものの記録であり、次節で扱う。
 
 以降の節はこの型の各フィールドを埋めていく作業である。
@@ -374,7 +376,7 @@ scope の候補を ANN が拾いきれている」という前提に立ってい
 
 **`filtered(condition: 'decayed')` の次の一手（2026-09 追記、[ADR 0153](./decisions/0153-recall-decay-floor-gate.md)、Issue #196）**: 忘却ゲートが効いたと分かる。`filtered(condition:'archived')` とは別の一手につながる——`archived` は強化すれば戻る可能性があるが（次の recall で `status` を見直す）、`decayed` は `RecallQuery.includeFullyDecayed: true` を明示的に渡さない限り、強化しても `decayFloorAt` が先へ延びるだけで、次の recall では再びこの条件に当たらなくなる。
 
-**`over_limit(stage: 'association')` の次の一手（2026-09-17 追記、[Issue #375](https://github.com/takecchi/mnemora/issues/375) / [ADR 0188](./decisions/0188-association-over-limit-omission.md)）**: 連想枠（§9）が `RecallAssociationQuery.maxCount` で切り捨てた分だと分かる。`over_limit(stage: 'rescore')` とは別の一手——`limit` を増やしても連想枠の切り捨ては直らない（連想枠は段2の `limit` を一切見ていない）。`maxCount` を増やすと、切り捨てられていた候補が `retrievedVia: 'association'` として本体へ入ってくる。⚠ この札が積まれても `RecallResult.memories` の合計件数は変わらない——連想枠は「元々居なかった候補を追加する」機能であり、切り捨てられた分は最初から `memories` に入っていない。
+**`over_limit(stage: 'association')` の次の一手（2026-09-17 追記、[Issue #375](https://github.com/takecchi/mnemora/issues/375) / [ADR 0188](./decisions/0188-association-over-limit-omission.md)）**: 連想枠（§9）が `RecallAssociationQuery.maxCount` で切り捨てた分だと分かる。`over_limit(stage: 'rescore')` とは別の一手——`limit` を増やしても連想枠の切り捨ては直らない（切り捨ての件数を決めているのは `maxCount` だけである）。⚠ **ただし「連想枠が段2の `limit` を一切見ていない」わけではない**（2026-09-17 訂正、[Issue #377](https://github.com/takecchi/mnemora/issues/377)）——アンカーの取り方には `limit` が効く（§9.2「⚠ `anchorCount` の天井は `RecallQuery.limit` である」）。`limit` を増やすと起点にできるアンカーが増えるので、**連想枠が拾ってくる候補の顔ぶれは変わりうる。**変わらないのは「`maxCount` で切られる事実そのもの」であり、アンカーが増えれば切り捨て件数はむしろ増えうる。`maxCount` を増やすと、切り捨てられていた候補が `retrievedVia: 'association'` として本体へ入ってくる。⚠ この札が積まれても `RecallResult.memories` の合計件数は変わらない——連想枠は「元々居なかった候補を追加する」機能であり、切り捨てられた分は最初から `memories` に入っていない。
 
 ### 件数にも「無いの種類」を適用する
 
@@ -863,8 +865,11 @@ Issue #200 は**2つの読み方**を挙げていた。
 1. `query.association` が無ければ**何もしない**（`omitted` にも積まない）。
 2. `VectorStore.getVectors`（**任意メソッド**）が無ければ
    `stage_skipped { stage: 'association', reason: 'vector_store_lacks_get_vectors' }` を積んで終わる。
-3. 段3までに残った集合の上位 `anchorCount` 件をアンカーにする。0件なら
+3. 段3までに残った集合のうち**段2で `limit` の内側に入った分**（`withinLimit`）の、
+   さらに上位 `anchorCount` 件をアンカーにする。0件なら
    `stage_skipped { stage: 'association', reason: 'no_anchor' }`。
+   ⚠ **`limit` が `anchorCount` の天井になる**——直後の「⚠ `anchorCount` の天井は
+   `RecallQuery.limit` である」を見ること。
 4. アンカーのベクトルを `getVectors` で引き、**そのベクトルで** `VectorStore.search` を
    **段1の ANN 検索と同じ filter で**呼ぶ——scope（tenant/subject/status/period/
    `excludeProvenanceKinds`）**だけでなく、忘却ゲート（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md) /
@@ -885,6 +890,29 @@ Issue #200 は**2つの読み方**を挙げていた。
    通過した時点で候補は既にゲート・除外・類似度の条件を満たしており、単に `maxCount`
    で切っただけである。段2の `passed.slice(limit)`（§7）が `over_limit` を積むのと
    同じ形。
+
+**⚠ `anchorCount` の天井は `RecallQuery.limit` である**（2026-09-17 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377)）——
+手順3のアンカーは「段3までに残った候補」全部からではなく、**そのうち `limit` の内側に入った分**から取る
+（`recall-runtime.ts` の `const anchors = withinLimit.slice(0, anchorCount)`、`withinLimit` は段2の
+`passed.slice(0, limit)`）。⟹ **`anchorCount` だけを上げても、`limit` を超えた候補は起点にならない。**
+
+【実測 2026-09-17、本物の Postgres + pgvector、`main` = `f8a8fa7`。単一話題90件を ingest し、段2を通った
+候補が常に `limit` より多い状態（`over_limit(stage:'rescore')` が毎回積まれることで確認）で、段3.5 が
+`VectorStore.getVectors` へ渡した memoryId の件数を数えた——`packages/core` が `getVectors` を呼ぶのは
+この1箇所だけである。テストスイートの外の使い捨て測定であり、CI には載せていない】
+
+| `limit` | `anchorCount` | 実際に起点になったアンカー |
+| --- | --- | --- |
+| 10 | 3（既定） | 3 |
+| 10 | 40 | **10** |
+| 40 | 40 | 40 |
+| 5 | 40 | **5** |
+| 40 | 3（既定） | 3 |
+
+すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
+連想の裾野を広げたいなら **`limit` と `anchorCount` の両方**を上げること。
+⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`（= `limit × overFetchFactor`、§3）も一緒に広がる
+——費用は連想枠だけの話では済まない。
 
 **⚠ 「走らせて0件だった」と「走らせなかった」を同じ顔にしない。**
 走らせて0件のときは `stage_skipped` を積まない——本文書全体を貫く原則3
@@ -947,3 +975,15 @@ Issue #200 は**2つの読み方**を挙げていた。
   測るべき器は `retrieval` ベンチ（`hit@k` / MRR）だが、**それは⭐門ではない**（ADR 0133）。
 
 ⟹ **測る仕事は別に割ってある。**測って動かなければ落とす（ADR 0151「これが覆るとしたら」3番）。
+
+### 9.8 `memories` と `omitted` の排他性（2026-09 追記。Issue #421 / [ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）
+
+**上の §9.7 が測ったのは「順位」の破れ（[Issue #402](https://github.com/takecchi/mnemora/issues/402)）だった。これは別の軸——「分類」の破れである。**
+
+段2が `below_threshold` として確定させた記憶を、段3.5（連想）が後から `retrievedVia: 'association'` として `memories` へ拾い直すことがある（連想の除外集合は `withinLimit` + `companions` + アンカー自身だけで、`below_threshold` を含まない——§9.2）。**これ自体は意図した挙動である**——段2で落ちた記憶こそが連想枠の主な獲物であり、除外すると連想枠の意味がほぼ無くなる（実測: 連想枠 on の返却の47.5%がこの範囲。§9.7 の実測と同じ窓）。
+
+**だが、段2が確定させた `below_threshold` の `Omission` を誰も取り下げなければ、同じ memoryId が `memories` と `omitted` の両方に載る**——「返したものについて『落ちた』と名乗る」。`RecallResult.omitted` の doc が言う「返らなかったものの分類」という文言と、実際の挙動が食い違っていた。
+
+**直したこと**: 段3.5・段3・段4がすべて終わり `finalMemories`（実際に返す集合）が確定した時点で、`below_threshold` の `count`/`nearMisses` から `finalMemories` に含まれる memoryId を取り下げる（`recall-runtime.ts` の「排他性契約」ブロック）。§3 の規約「段2で確定し、以降は積み上げるだけ。最後に集計し直さない」は破っていない——ここで行っているのは件数の再集計ではなく、**確定した分類と、実際に返した集合との突き合わせ**である。
+
+**この排他性が個体単位で検証できるのは `below_threshold.nearMisses` だけである**——`Omission` の他10種は memoryId を持たない。段3（必須の同伴取得）が同種の昇格を起こす経路（争われている記憶の同伴が偶然 `below_threshold` に居た場合）も構造的には同じ後処理で救われるが、実測で確かめたのは段3.5（連想）の経路だけである（ADR 0203「確かめていないこと」）。

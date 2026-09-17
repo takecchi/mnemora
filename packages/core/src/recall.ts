@@ -225,6 +225,16 @@ export const FILTERED_CONDITION_SCOPE_RELATION: Record<
   decayed: "within_scope",
 };
 
+/**
+ * **排他性契約（Issue #421 / [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）:
+ * `nearMisses`（および `count` が数える集合）は、`RecallResult.memories` に実際に
+ * 返った memoryId を含まない。** 段2はこの Omission を「閾値未満で落ちた」候補から
+ * 確定させるが、段3.5（連想）や段3（必須の同伴取得）がその候補を後から
+ * `RecallResult.memories` へ昇格させることがある——その場合、昇格した分は `count`/
+ * `nearMisses` の両方から取り下げる（`recall-runtime.ts` の「排他性契約」ブロック）。
+ * ⟹ **`nearMisses` に載っている memoryId が、同じ `recall()` の `memories` に
+ * 同時に現れることは無い。**
+ */
 export interface BelowThresholdOmission {
   kind: "below_threshold";
   count: number;
@@ -1340,8 +1350,24 @@ export interface RecallAssociationQuery {
    */
   maxCount: number;
   /**
-   * 起点にするアンカー（段3までに残った候補の上位何件を連想の起点にするか）の数。
-   * 既定 {@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}。
+   * 起点にするアンカーの数。既定 {@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}。
+   *
+   * **⚠ `RecallQuery.limit`（既定 {@link DEFAULT_RECALL_LIMIT} = 10）が天井になる。**
+   * アンカーは「段3までに残った候補」全部からではなく、**そのうち `limit` の内側に入った分**
+   * （`recall-runtime.ts` の `withinLimit = passed.slice(0, limit)`）から取る
+   * （`const anchors = withinLimit.slice(0, anchorCount)`）。
+   * ⟹ **`anchorCount` だけを上げても、`limit` を超えた候補は起点にならない。**
+   * 連想の裾野を広げたいなら `limit` と `anchorCount` の**両方**を上げること。
+   * ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`
+   * （= `limit` × {@link DEFAULT_OVER_FETCH_FACTOR}）も一緒に広がる——費用は連想枠だけの話では済まない。
+   *
+   * 【実測 2026-09-17、本物の Postgres + pgvector、`main` = `f8a8fa7`。単一話題90件を ingest し、
+   * 段2を通った候補が常に `limit` より多い状態で、段3.5 が `VectorStore.getVectors` へ渡した
+   * memoryId の件数を数えた（`packages/core` が `getVectors` を呼ぶのはこの1箇所だけである）】
+   * `limit:10 / anchorCount:3` → 3、**`limit:10 / anchorCount:40` → 10**、
+   * `limit:40 / anchorCount:40` → 40、**`limit:5 / anchorCount:40` → 5**、
+   * `limit:40 / anchorCount:3` → 3。
+   * すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
    */
   anchorCount?: number;
   /**
@@ -1521,6 +1547,16 @@ export interface RecallResult {
   /** 記録された recall の識別子。observe() の usage 報告で使う。 */
   recallId: RecallId;
   memories: RecalledMemory[];
+  /**
+   * **返さなかった記憶の分類（`docs/recall.md` §4）。** `memories` と memoryId で排他——
+   * ある memoryId が `memories` に載っているなら、この配列のどの Omission も
+   * その memoryId を名指しで含まない（Issue #421 /
+   * [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）。
+   * ただし memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり、
+   * この契約が**個体単位で検証できる**のもそこだけである——他の10種の `kind` は
+   * 件数（`count`）だけを持ち、どの記憶を指しているかを言わない
+   * （ADR 0203「引き受けた負債」参照）。
+   */
   omitted: Omission[];
   index: IndexBand;
   usage: RecallUsage;
