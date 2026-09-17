@@ -131,7 +131,7 @@ describe("resultContainsObservation: 出典到達は digest の中身に依ら�
  * の `llmCassetteKey` は `{system, messages}` を正準化した SHA-256 なので、`digest` を
  * 変異させれば鍵が変わり、`recorded` provider は例外を投げる。記録し直すには実 API と
  * 鍵が要り、それはオーナーの判断である——詳細は
- * [ADR 0234](../../../docs/decisions/0234-answer-retention-mutation-tested-not-recorded.md)）。
+ * [ADR 0236](../../../docs/decisions/0236-answer-retention-mutation-tested-not-recorded.md)）。
  * ⟹ 内容保持の側だけがこの検査の対象であり、**#498 はこれで閉じない。**
  *
  * ⛔ **もう一つ正直に書く**: 下の3番目のアサーション（`buildMnemoraPrompt` の出力に
