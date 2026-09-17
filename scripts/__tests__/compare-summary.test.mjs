@@ -292,6 +292,45 @@ describe("compare-summary.mjs（子プロセスで起動）", () => {
     expect(result.status).not.toBe(0);
   });
 
+  /**
+   * ⭐ Issue #403: 基準値の鮮度は⭐門が見ない欄(`omitted` 等)の相違を stderr へ
+   * 警告として出す。⛔ **門ではない**——終了コードは変えない。
+   */
+  it("🔴 omitted だけが相違する入力でも exit 0 のままで、stderr に鮮度の警告が出る", () => {
+    const baseline = baselineFrom(makeMeasured());
+    const measured = makeMeasured();
+    measured.rows[1].omitted = [{ kind: "below_threshold", count: 1 }];
+    const result = run([
+      "--measured",
+      writeJson("measured.json", measured),
+      "--baseline",
+      writeJson("baseline.json", baseline),
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stderr).toContain("[compare-summary]");
+    expect(result.stderr).toContain("基準値の鮮度");
+    expect(result.stderr).toContain("turnCount=10");
+    expect(result.stderr).toContain("omitted");
+    expect(result.stderr).toContain("門ではない");
+  });
+
+  it("🔴 退行が在る入力でも exit 1 のままで、鮮度の警告も出ている(門は壊れていない)", () => {
+    const baseline = baselineFrom(makeMeasured());
+    const measured = makeMeasured();
+    measured.rows[0].mnemoraShareOfNaiveChars = 5; // 退行
+    measured.rows[1].omitted = [{ kind: "below_threshold", count: 1 }]; // 鮮度だけの相違
+    const result = run([
+      "--measured",
+      writeJson("measured.json", measured),
+      "--baseline",
+      writeJson("baseline.json", baseline),
+    ]);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("退行した");
+    expect(result.stderr).toContain("基準値の鮮度");
+    expect(result.stderr).toContain("turnCount=10");
+  });
+
   it("--baseline の rows に turnCount が無いと非0", () => {
     const measured = makeMeasured();
     const baseline = baselineFrom(measured);
