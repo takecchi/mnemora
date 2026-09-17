@@ -14,6 +14,14 @@ ADR (Architecture Decision Record) として記録する。`docs/architecture.md
 ⚠ **まだ採用されていない初稿はこの限りではない。**そして
 **`docs/north-star.md` は別の規律で守られている**——`AGENTS.md` を見ること。）
 
+**⚠ ADR 本文に現れる識別子名（関数名・ファイル名・型名）は、その ADR が書かれた時点のものである。現在の名前とは限らない。**
+現在の名前は現物を引くこと。**⛔ 名前が変わるたびに、既存 ADR へ追記して回らないこと。**
+[ADR 0213](./0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5 の 2026-09-17 の追記が、
+**「いまの状態を指すポインタ」は直し、「当時の観測・当時の状態を書き留めた記録」は直さない**と
+線を引いている——ADR 本文は後者である。**旧名から現在の名前へ辿れる形は、名前を変えた側の
+ADR が持つ**（例: [ADR 0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md)
+決定1 と、同 ADR「引き受けた負債」節の逐語「**旧名を追う人は、この ADR の決定1へ辿り着くこと**」）。
+
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
