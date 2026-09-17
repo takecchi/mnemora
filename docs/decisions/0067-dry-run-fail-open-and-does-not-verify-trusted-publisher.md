@@ -2,7 +2,7 @@
 
 - **状態**: 採用 (2026-09)
 
-- **🔴 後の実測が、下の (B) の列挙のうち1項目を訂正した（2026-09-17。[ADR 0207](./0207-dry-run-reads-existence-and-coverage-degrades-silently.md)）**:
+- **🔴 訂正の追記（2026-09-17、[ADR 0207](./0207-dry-run-reads-existence-and-coverage-degrades-silently.md)）— 下の (B) の列挙のうち1項目が、後の実測で崩れた**:
 
   **予行（`--dry-run`）は registry の「既に在るか」を読める。**⟹ (B) の
   「サーバ側の権限・**存在**・検証の状態については、緑からも赤からも何も読み取れない」は、
