@@ -289,6 +289,30 @@ transform のコストは他のファイルと共有される。より近い数�
 サイズを削っていない——1 arm（`recorded` のみ）・既定の haystack（60件、
 `DEFAULT_HAYSTACK_SIZE`）のまま、`probe-set.ts` の凍結された入力をそのまま使う。
 
+### ⭐【実測】CI 実機での所要時間 —— ローカルの近似より1桁小さい
+
+**上の数字はローカルの `initdb` インスタンスでの近似である。**この PR をマージする側が、
+`example-chat` ジョブ（`pgvector/pgvector:pg17` の service container、GitHub Actions
+ランナー）の実ログから、この歯自身の所要時間を引いた:
+
+```
+✓ src/__tests__/retrieval-quality-regression.postgres.test.ts (1 test) 1058ms
+  ✓ PROBES の全7件で、gold が recall() の既定候補(limit=10)に入っている 1052ms
+Test Files  58 passed (58)
+   Duration  61.39s
+```
+
+⟹ **CI 実機では 1058ms**（vitest 自身の reporter が報告する、このファイルの所要時間）。
+ローカルで測った「正味の増分の近似 約10.2秒」より**1桁小さい**。
+
+⚠ **両者は同じものを測っていない。**ローカルの 10.2 秒は「2ファイル構成と1ファイル構成の
+`Duration` の差」であり、プロセス起動・transform・`resetTestDatabase()` の取り分を含む。
+CI の 1058ms は reporter がこのファイル1本に帰属させた時間だけである。⟹ **`example-chat`
+ジョブ全体（この run では `Duration 61.39s`）に対するこの歯の比重は、ローカルの近似が
+示唆したものより小さい。**
+
+⛔ **この 1058ms は1 run の値であり、分布・ばらつきは測っていない。**
+
 ## 変異試験（【実測】、ADR 0224 §2.2 の3番）
 
 `cp` で退避 → 変異を入れる → 赤を確認 → `cp` で復元 → `git status --porcelain` が
@@ -359,10 +383,9 @@ gold/distractor には触れていない）。**この歯は緑のまま**だっ
 
 ## 確かめていないこと
 
-- **CI 実機での所要時間。** 上の「実行費用」節の数字はすべてこの PR の作業者の
-  自前 `initdb` インスタンス（`initdb` で立てたローカルの Postgres 17）上の実測
-  であり、`example-chat` ジョブが使う `pgvector/pgvector:pg17` の service
-  container（GitHub Actions ランナー）での実測ではない。
+- ~~**CI 実機での所要時間。**~~ ⭐ **これはマージ直前に測れた**——「実行費用」節の
+  「⭐【実測】CI 実機での所要時間」を見ること（1 run で 1058ms）。⛔ **ただし測ったのは
+  1 run だけであり、分布・ばらつきは測っていない。**
 - **HNSW が自然選択される規模（テナントあたり数万行）での挙動。** マネージャーの
   委譲文の先行実測【受・未検算】が示した「この規模では正確走査になる」が別の規模
   でも成り立つかは、この PR の範囲外。
