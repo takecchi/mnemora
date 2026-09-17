@@ -10,6 +10,70 @@
 
 ---
 
+## 🔴 訂正の追記（2026-09-18）—— 「破壊的変更かどうか」節の**結論行が誤っている**。これは **v1.0.0 の破壊的変更として数える**
+
+⛔ **下の本文は1バイトも書き換えていない**（`docs/decisions/README.md` の規約「採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」と、[ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) 決定1 の自己適用）。
+
+### 何が誤っているか
+
+**下の「## 破壊的変更かどうか（ADR 0156 / ADR 0178 の要求）」節の、見出し直下の結論行**（逐語）:
+
+> **追加のみで、破壊的変更ではない。**
+
+🔴 **これは誤りである。**
+
+### ⭐ 同じ節の4番目の箇条書きは、元から正しかった
+
+⛔ **矛盾していたのは結論行のほうである。**下の箇条書きは逐語でこう書いており、**訂正の対象ではない**（逐語を引くためにここに再掲するが、**本文側は消さないこと**）:
+
+> `MemoryStoreConformanceOptions.supportsPreviewRestoreSupersededBy: boolean` は必須フィールドとして足した…**これは `@mnemora/testkit` を使ってこの適合テストを呼び出す側（この repo 内の2箇所のみ、他に利用者は確認していない）に対しては破壊的**
+
+⟹ ⭐ **開示は在った。打ち消していたのは結論行である。**⟹ **節の見出しだけを見て「破壊的変更なし」と読むと、必ず誤る。**
+
+### 🔴 なぜ「数えない」が成り立たないか —— 【実測 2026-09-18、`main` = `242ce7f`】
+
+| 確かめたこと | 結果 |
+|---|---|
+| `packages/testkit/package.json` の `private` | **未設定（＝非 private）**。version `0.1.1` |
+| `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` | **6本。`@mnemora/testkit` はその1つ**（`@mnemora/core` の次） |
+
+⟹ 🔴 **`@mnemora/testkit` は出荷される公開契約である。**⛔ **「repo 内の2箇所のみ」は、repo の外を見ていないという申告であって、外に利用者が居ないことの根拠ではない。**⟹ **publish 済みのパッケージについて、外に利用者が居ないことは確かめられない。**
+
+⟹ ⭐ **必須フィールドの追加は、その型を使う既存の呼び出しをコンパイルエラーにする。**⟹ **v1.0.0 の破壊的変更として数える。**
+
+🔴 ⛔ **ここに「何件目」とは書かない。**総数は`scripts/release-candidates.mjs` で**リリース直前に数え直して初めて決まる**（[ADR 0214](./0214-release-candidates-lists-not-judges.md) が「数字も tag も repo 名も焼き込まない」と決めた形。焼き込めば腐る）。
+⟹ ⭐ **代わりに書くのはこれである**: **リリース直前の数え直しで、この commit（`c5d022e`、[PR #524](https://github.com/takecchi/mnemora/pull/524)）を名指しで確認すること。**
+
+⚠ **下の節が挙げた緩和（「adapter 実装者向けの検査道具である」「`docs/architecture.md` の想定利用者もそちら」）は、⭐ 壊れる人が少ないことの根拠であって、壊れないことの根拠ではない。**⟹ **この追記はその緩和を否定しない。数え方だけを直す。**
+
+### ⭕ ⛔ ただし、**必須のままにする**（optional へ変えない）
+
+**下の本文が、必須にした理由を既に書いている**（逐語）:
+
+> `supportsRestoreSupersededBy` 等、既存の同種フラグと同じ判断（**省略可にすると「検査していないのに緑」を許してしまう**）
+
+⭐ **そして既存の同種フラグは全部必須である**【実測 2026-09-18、`packages/testkit/src/memory-store-conformance.ts`】——`supportsSupersedeWithNewMemories` / `supportsPurgeExpiredEvents` / `supportsArchiveDecayed` / `supportsPurgeMemory` / `supportsMarkContestedPair` / `supportsResolveContestedPair` / `supportsRestoreSupersededBy` の**7本とも `: boolean`（`?:` は1つも無い）**。
+
+⟹ ⭐ **黙って通る歯を作るくらいなら、破壊的変更を1つ増やすほうがよい。**⟹ **承知のうえで破壊的変更を選んだ**、と読めるようにここに残す。
+
+### ⚠ この訂正が本当に塞いでいるもの —— **道具ではなく、読む人のほうである**
+
+**[`scripts/release-candidates.mjs`](../../scripts/release-candidates.mjs) は、この変更をちゃんと拾う**【実測 2026-09-18】:
+
+```
+c5d022e  feat(core,postgres)  PR=#524  signals=[body-breaking,public-api,src]
+```
+
+⛔ **だから道具は直していない。**同じ道具が自分の出力に逐語でこう書いている:
+
+> ・**余計に拾う側（安い）**: `e1c0793` は本文が逐語で「破壊的変更ではない。」と書いているのに body-breaking が立つ——**語を見ているだけで、否定文を読み分けない。**
+
+🔴 ⟹ **危険はここである。**当日この候補を読む人が、**下の節の結論行（「破壊的変更ではない。」）を見て `e1c0793` と同型の偽陽性だと判断すると、棄却してしまう。**⟹ **しかも棄却した人は「ADR を読んで確かめた」と思う。**
+
+⟹ ⭐ **道具を直しても、この経路は消えない。**拾うのは道具、棄却するのは人であり、**棄却の材料が誤っていたからである。**⟹ **だから直したのは結論行のほうである。**
+
+---
+
 ## 文脈
 
 [ADR 0230](./0230-restore-superseded-recovery-path.md) 冒頭の訂正（2026-09-17）が、`restoreSuperseded` の対象（`superseded_by_id` が指す群）は「1回の統合操作」と一致しないことがあると訂正した——`resolveContested` の勝者は新規作成された Memory ではなく前から在る Memory であるため、同じ `superseded_by_id` の下に別々の操作の敗者が積み上がりうる（【実測、ADR 0230 に記録済み】インメモリと本物の Postgres の両方で再現している）。
