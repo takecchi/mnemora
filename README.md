@@ -248,13 +248,21 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 `RecallQuery.limit`（既定 10）の内側から取るので、`limit` が天井になる（同 README /
 [docs/recall.md](./docs/recall.md) §9.2）。
 
-### `Runtime` の残り10個 — 中核を守る3つの層
+### `Runtime` の中核5動詞以外 — 中核を守る3つの層
 
-**`Runtime` には他に10個のメソッドがある**（`tick` / `getRecall` / `reextract` / `reembed` /
-`sweepArchive` / `restoreArchived` / `restoreSuperseded` / `purge` / `markContested` /
-`resolveContested`）。これらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ
-出した口**であり、3つに分かれる（詳細と検討過程は
+**`Runtime` には、中核5動詞のほかにもメソッドがある。**⭐ **何が在るかの正本は
+`packages/core/src/runtime.ts` の `export interface Runtime` である**——⛔ **ここに個数を写さない**
+（写せば `Runtime` にメソッドが1本増えるたびに腐る。`AGENTS.md`「⚠ 数を、道具と生成物に
+焼き込まない」と [ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+それらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ出した口**であり、
+3つに分かれる（詳細と検討過程は
 [ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
+
+⚠ **下の3層の列挙は、ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
+実際に `findCorrectionCandidates`（[ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)）は
+どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
+（[Issue #518](https://github.com/takecchi/mnemora/issues/518)）。⛔ **書き込まない口**なので、
+少なくとも「是正・取り消し」（**書き込む**口）ではない。
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない（`sweepArchive` の doc コメント自身が
@@ -270,7 +278,7 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 **この分類の要点は、歯止めが *どこに* 効くかである。**新しく何かを足したくなったとき、
 それが記憶そのものを動かす操作（中核5動詞と同じ性質）なら、足せない。保守・是正・説明の
 どれかに当たるなら、その層の性格に合っているかを問う——**「分類できるから足してよい」では
-ない。**3層はあくまで既存の9個を説明する後付けの整理であり、新しい口を作る免罪符には
+ない。**3層はあくまで**既に在る口**を説明する後付けの整理であり、新しい口を作る免罪符には
 しない。
 
 ### 「mnemora を使うべきか」を判定する（動詞ではない）

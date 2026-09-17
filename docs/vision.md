@@ -66,11 +66,17 @@ forget(ctx, target)      // -> ForgetResult
 
 ### 中核を守る3つの層
 
-`Runtime`（`@mnemora/core` の実装）には、上の5つ以外にも10個のメソッドがある
-（`tick` / `getRecall` / `reextract` / `reembed` / `sweepArchive` / `restoreArchived` /
-`restoreSuperseded` / `purge` / `markContested` / `resolveContested`）。これらは
+`Runtime`（`@mnemora/core` の実装）には、上の5つ以外にもメソッドがある。⭐ **何が在るかの
+正本は `packages/core/src/runtime.ts` の `export interface Runtime` である**——⛔ **ここに個数を写さない**
+（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。これらは
 「6つ目の動詞」ではなく、中核を5つに保つために別の層へ出した口であり、3つに分かれる
 （検討過程は [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md)）。
+
+⚠ **下の3層の列挙は、ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
+実際に `findCorrectionCandidates`（[ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md)）は
+どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
+（[Issue #518](https://github.com/takecchi/mnemora/issues/518)）。⛔ **書き込まない口**なので、
+少なくとも「是正・取り消し」（**書き込む**口）ではない。
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない。
