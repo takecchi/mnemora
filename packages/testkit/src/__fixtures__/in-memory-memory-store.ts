@@ -1264,6 +1264,47 @@ export class InMemoryMemoryStore implements MemoryStore {
     return { restored };
   }
 
+  /**
+   * `restoreSupersededBy` を実際に呼ぶ**前**に見るための読み取り専用の口
+   * （Issue #515、ADR 0237）。契約は `MemoryStore.previewRestoreSupersededBy`（`@mnemora/core`）
+   * 側にある——対象の選び方は `restoreSupersededBy` と同じ `filter` を使う。
+   * `this.events`（`InMemoryEventStore` と共有する配列、ファイル冒頭の doc コメント
+   * 参照）から、対象ごとに直近の `kind: 'superseded'` イベントを探して
+   * `meta.reason` を運ぶ——見つからなければ `null`。書き込みは一切行わない。
+   */
+  async previewRestoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    const targets = [...this.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded",
+    );
+
+    const candidates = targets.map((memory) => {
+      let latest: MemoryEvent | undefined;
+      for (const event of this.events) {
+        if (
+          event.tenantId === ctx.tenantId &&
+          event.memoryId === memory.id &&
+          event.kind === "superseded" &&
+          (latest === undefined || event.at.getTime() > latest.at.getTime())
+        ) {
+          latest = event;
+        }
+      }
+      const reason = latest?.meta?.["reason"];
+      return {
+        memoryId: memory.id,
+        supersededReason: typeof reason === "string" ? reason : null,
+      };
+    });
+
+    return { candidates };
+  }
+
   private extractionKey(
     tenantId: string,
     sourceObservationId: string | null,

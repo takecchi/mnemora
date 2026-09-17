@@ -225,6 +225,12 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }): Promise<{
         restored: Memory[];
     }>;
+    previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId): Promise<{
+        candidates: Array<{
+            memoryId: MemoryId;
+            supersededReason: string | null;
+        }>;
+    }>;
     private extractionKey;
 }
 
@@ -387,6 +393,7 @@ export interface MemoryStoreConformanceOptions {
     supportsMarkContestedPair: boolean;
     supportsResolveContestedPair: boolean;
     supportsRestoreSupersededBy: boolean;
+    supportsPreviewRestoreSupersededBy: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 

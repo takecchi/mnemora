@@ -222,6 +222,21 @@ export interface MemoryStoreConformanceOptions {
    * 積極的に assert する——`it.skip` にはしない。
    */
   supportsRestoreSupersededBy: boolean;
+  /**
+   * Issue #515、ADR 0237: 対象の `MemoryStore` 実装が `previewRestoreSupersededBy`
+   * （任意メソッド、`restoreSupersededBy` を実際に呼ぶ**前**に群の内容を見る
+   * 読み取り専用の口）を実装しているかどうか。**必須。**
+   *
+   * `supportsRestoreSupersededBy` と**独立した**フラグである——2つは独立した
+   * 任意メソッドであり、片方だけを実装した adapter があり得る
+   * （`MemoryStore.previewRestoreSupersededBy` の doc コメント参照）。`true` なら
+   * 契約の歯（対象の選び方が `restoreSupersededBy` と完全に一致する、書き込みを
+   * 一切起こさない、`superseded` イベントの `meta.reason` を `supersededReason` として
+   * 運ぶ・無ければ `null`、対象0件でも例外を投げない、テナント分離）を実行する。
+   * `false` なら `expect(store.previewRestoreSupersededBy).toBeUndefined()` を
+   * 積極的に assert する——`it.skip` にはしない。
+   */
+  supportsPreviewRestoreSupersededBy: boolean;
 }
 
 /**
@@ -258,6 +273,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsMarkContestedPair,
     supportsResolveContestedPair,
     supportsRestoreSupersededBy,
+    supportsPreviewRestoreSupersededBy,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -3997,6 +4013,174 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       it("restoreSupersededBy は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.restoreSupersededBy).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // previewRestoreSupersededBy（Issue #515。restoreSupersededBy を実際に呼ぶ前に
+    // 群の内容を見る読み取り専用の口。restoreSupersededBy とは独立した任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsPreviewRestoreSupersededBy) {
+      it("previewRestoreSupersededBy は restoreSupersededBy と同じ対象を選ぶが、一切書き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-restore-anchor" }),
+        );
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-restore-a",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-restore-b",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        expect(new Set(preview.candidates.map((c) => c.memoryId))).toEqual(new Set([a.id, b.id]));
+
+        // 一切書き込んでいない——status/supersededById は不変、イベントも0件。
+        const aAfter = await store.get(ctx, a.id);
+        const bAfter = await store.get(ctx, b.id);
+        expect(aAfter?.status).toBe("superseded");
+        expect(aAfter?.supersededById).toBe(anchor.id);
+        expect(bAfter?.status).toBe("superseded");
+        expect(bAfter?.supersededById).toBe(anchor.id);
+        expect(await listEventsForMemory(ctx, a.id)).toEqual([]);
+        expect(await listEventsForMemory(ctx, b.id)).toEqual([]);
+      });
+
+      it("previewRestoreSupersededBy は対象の直近の superseded イベントの meta.reason を supersededReason として運ぶ。無ければ null", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-reason-anchor" }),
+        );
+        // `withReason` は consolidate/reextract と同じ形で作る——`active` から
+        // `updateStatusWithEvent` で `superseded` へ CAS しつつ、実際に `kind:
+        // 'superseded'` のイベントを1件積む。`withoutReason` は最初から `superseded`
+        // として作り、イベントは一切積まない——「対象は在るが由来は取れない」を
+        // 意図的に作る。
+        const withReason = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-reason-with" }),
+        );
+        await store.updateStatusWithEvent(
+          ctx,
+          withReason.id,
+          "superseded",
+          { supersededById: anchor.id, expectedStatus: "active" },
+          {
+            tenantId: ctx.tenantId,
+            memoryId: withReason.id,
+            kind: "superseded",
+            actor: { type: "system" },
+            digestSnapshot: withReason.digest,
+            meta: { reason: "consolidated" },
+          },
+        );
+        const withoutReason = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-reason-without",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        const byId = new Map(preview.candidates.map((c) => [c.memoryId, c.supersededReason]));
+        expect(byId.get(withReason.id)).toBe("consolidated");
+        expect(byId.get(withoutReason.id)).toBeNull();
+      });
+
+      it("previewRestoreSupersededBy は status='superseded' でない行を巻き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-guard-anchor" }),
+        );
+        const progressed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-guard-progressed",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        await store.updateStatus(ctx, progressed.id, "archived");
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        expect(preview.candidates).toEqual([]);
+      });
+
+      it("previewRestoreSupersededBy は別テナントの行を巻き込まない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const anchorA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "preview-tenant-anchor" }),
+        );
+        const supersededA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "preview-tenant-a",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+        await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "preview-tenant-b",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctxA, anchorA.id);
+
+        expect(preview.candidates.map((c) => c.memoryId)).toEqual([supersededA.id]);
+      });
+
+      it("previewRestoreSupersededBy は対象が無くても例外を投げない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-empty-anchor" }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        expect(preview.candidates).toEqual([]);
+      });
+    } else {
+      it("previewRestoreSupersededBy は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.previewRestoreSupersededBy).toBeUndefined();
       });
     }
 

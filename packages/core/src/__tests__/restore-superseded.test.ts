@@ -355,6 +355,237 @@ describe("runtime.restoreSuperseded — reason / actor", () => {
   });
 });
 
+describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻す前に何が戻るかを返す」）", () => {
+  /**
+   * 🔴 この歯の中心も「往復」と同じ構え——申告ではなく実行で示す。`consolidate` を
+   * 実際に呼んで群を作り、`dryRun: true` で見た候補が、直後に `dryRun` 無しで
+   * 呼んだときに実際に戻る集合とちょうど一致することまで確認する。
+   */
+  it("dryRun: true は書き込みを一切起こさず、would_restore で候補と由来（meta.reason）を返す。直後の実行と集合が一致する", async () => {
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後の本文" }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+
+    const consolidateResult = await runtime.consolidate(ctx, {
+      target: { memoryIds: [a.id, b.id] },
+    });
+    expect(consolidateResult.outcome).toBe("consolidated");
+    const consolidatedId = consolidateResult.consolidatedMemoryId!;
+
+    const before = await stores.memoryStore.get(ctx, a.id);
+    expect(before?.status).toBe("superseded"); // 前提: 実際に群ができている
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: consolidatedId },
+      { dryRun: true },
+    );
+
+    expect(preview.supported).toBe(true);
+    expect(preview.supersedingMemoryId).toBe(consolidatedId);
+    expect(preview.outcomes).toHaveLength(2);
+    expect(new Set(preview.outcomes.map((o) => o.memoryId))).toEqual(new Set([a.id, b.id]));
+    for (const outcome of preview.outcomes) {
+      expect(outcome.kind).toBe("would_restore");
+      if (outcome.kind === "would_restore") {
+        expect(outcome.previousStatus).toBe("superseded");
+        // consolidate が積む superseded イベントの meta.reason は "consolidated"
+        // （`buildConsolidateSupersedeEvent`、runtime.ts）。
+        expect(outcome.supersededReason).toBe("consolidated");
+      }
+    }
+
+    // 🔴 書き込みは一切起きていない——status・supersededById は変わらず、
+    // unsuperseded イベントも1件も積まれていない。
+    const aAfterPreview = await stores.memoryStore.get(ctx, a.id);
+    const bAfterPreview = await stores.memoryStore.get(ctx, b.id);
+    expect(aAfterPreview?.status).toBe("superseded");
+    expect(aAfterPreview?.supersededById).toBe(consolidatedId);
+    expect(bAfterPreview?.status).toBe("superseded");
+    expect(bAfterPreview?.supersededById).toBe(consolidatedId);
+    expect(unsupersededEvents(stores, a.id)).toHaveLength(0);
+    expect(unsupersededEvents(stores, b.id)).toHaveLength(0);
+
+    // 直後に dryRun 無しで呼ぶと、実際に戻る集合は preview と一致する。
+    const real = await runtime.restoreSuperseded(ctx, { supersededById: consolidatedId });
+    expect(real.supported).toBe(true);
+    expect(new Set(real.outcomes.map((o) => o.memoryId))).toEqual(
+      new Set(preview.outcomes.map((o) => o.memoryId)),
+    );
+    for (const outcome of real.outcomes) {
+      expect(outcome.kind).toBe("restored");
+    }
+  });
+
+  it("dryRun: true で対象0件なら supported: true・outcomes は空配列（書き込みは無いのでこれも例外にしない）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: anchor.id },
+      { dryRun: true },
+    );
+
+    expect(preview).toEqual({ supported: true, supersedingMemoryId: anchor.id, outcomes: [] });
+  });
+
+  it("由来が取れない（一致する superseded イベントが無い）ときは supersededReason: null——取れるふりをしない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+    // superseded なイベントを一切積まず、status だけ手で superseded にする
+    // （テストの前提を直接作る。`updateStatusWithEvent` は使わない——'superseded' の
+    // 対向必須の分岐と関係が無いことを確かめたいので、"kind: superseded" のイベントを
+    // 意図的に0件のままにする）。
+    const source = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
+    );
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: anchor.id },
+      { dryRun: true },
+    );
+
+    expect(preview.outcomes).toHaveLength(1);
+    expect(preview.outcomes[0]).toEqual({
+      memoryId: source.id,
+      kind: "would_restore",
+      previousStatus: "superseded",
+      supersededReason: null,
+    });
+  });
+
+  it("resolveContested が積む superseded イベントの reason（'contested_resolved'）も由来としてそのまま読める", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+    const source = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
+    );
+    // resolveContested が実際に積む形と同じ meta を、直接1件積む
+    // （`runtime.ts` の `buildMeta`/`buildSide` 参照——`reason: "contested_resolved"`）。
+    await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: source.id,
+      kind: "superseded",
+      actor: { type: "system" },
+      digestSnapshot: source.digest,
+      meta: { reason: "contested_resolved", resolution: "supersede" },
+    });
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: anchor.id },
+      { dryRun: true },
+    );
+
+    expect(preview.outcomes).toHaveLength(1);
+    expect(preview.outcomes[0]).toMatchObject({
+      memoryId: source.id,
+      kind: "would_restore",
+      supersededReason: "contested_resolved",
+    });
+  });
+
+  it("dryRun: true は複数の superseded イベントがあっても直近（at が最大）の reason を返す", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+    const source = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
+    );
+    await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: source.id,
+      kind: "superseded",
+      at: new Date("2026-01-01T00:00:00.000Z"),
+      actor: { type: "system" },
+      digestSnapshot: source.digest,
+      meta: { reason: "reextract_superseded" },
+    });
+    await stores.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: source.id,
+      kind: "superseded",
+      at: new Date("2026-06-01T00:00:00.000Z"),
+      actor: { type: "system" },
+      digestSnapshot: source.digest,
+      meta: { reason: "consolidated" },
+    });
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: anchor.id },
+      { dryRun: true },
+    );
+
+    expect(preview.outcomes).toHaveLength(1);
+    expect(preview.outcomes[0]).toMatchObject({ supersededReason: "consolidated" });
+  });
+
+  it("dryRun: true で store が previewRestoreSupersededBy を持たなければ supported: false・outcomes は空配列で、書き込みは一切起きない（restoreSupersededBy の有無とは独立）", async () => {
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const consolidateResult = await runtime.consolidate(ctx, {
+      target: { memoryIds: [a.id, b.id] },
+    });
+    const consolidatedId = consolidateResult.consolidatedMemoryId!;
+
+    // `restoreSupersededBy` はそのまま残す——「dryRun の対応は独立した任意メソッドで
+    // 決まる」ことを確かめたいので、こちらだけを外す。
+    Object.defineProperty(stores.memoryStore, "previewRestoreSupersededBy", {
+      value: undefined,
+      configurable: true,
+    });
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: consolidatedId },
+      { dryRun: true },
+    );
+
+    expect(preview).toEqual({
+      supported: false,
+      supersedingMemoryId: consolidatedId,
+      outcomes: [],
+    });
+    const aAfter = await stores.memoryStore.get(ctx, a.id);
+    expect(aAfter?.status).toBe("superseded"); // 書き込みは一切起きていない
+    expect(unsupersededEvents(stores, a.id)).toHaveLength(0);
+  });
+
+  it("opts.dryRun を省略・false にすると、この PR 以前と同じ『実際に戻す』既定のまま", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+    const source = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
+    );
+
+    const omittedResult = await runtime.restoreSuperseded(ctx, { supersededById: anchor.id });
+    const sourceAfterOmitted = await stores.memoryStore.get(ctx, source.id);
+    expect(omittedResult.outcomes[0]?.kind).toBe("restored");
+    expect(sourceAfterOmitted?.status).toBe("active"); // 省略時は実際に戻っている
+
+    // 2本目: dryRun: false を明示しても同じ既定。
+    const source2 = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source2", status: "superseded", supersededById: anchor.id }),
+    );
+    const explicitFalseResult = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: anchor.id },
+      { dryRun: false },
+    );
+    const source2After = await stores.memoryStore.get(ctx, source2.id);
+    expect(explicitFalseResult.outcomes[0]?.kind).toBe("restored");
+    expect(source2After?.status).toBe("active");
+  });
+});
+
 describe("runtime.restoreSuperseded — reinforce が失敗しても status の復帰は握り潰さない（ADR 0153 と同じ規律）", () => {
   it("reinforce が例外を投げても outcome は 'restored' のままで、reinforceError にメッセージが入る。status は active のまま", async () => {
     const { runtime, stores } = buildRuntime();

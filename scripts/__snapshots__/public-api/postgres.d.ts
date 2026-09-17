@@ -194,6 +194,12 @@ export declare class PostgresMemoryStore implements MemoryStore {
     }): Promise<{
         restored: Memory[];
     }>;
+    previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId): Promise<{
+        candidates: Array<{
+            memoryId: MemoryId;
+            supersededReason: string | null;
+        }>;
+    }>;
 }
 export declare function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL;
 export declare function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOptions): SQL | null;

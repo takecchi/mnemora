@@ -587,6 +587,12 @@ export interface MemoryStore {
     }): Promise<{
         restored: Memory[];
     }>;
+    previewRestoreSupersededBy?(ctx: Ctx, supersededById: MemoryId): Promise<{
+        candidates: Array<{
+            memoryId: MemoryId;
+            supersededReason: string | null;
+        }>;
+    }>;
 }
 export interface ReinforceOptions {
     nowSeq?: number;
@@ -2519,6 +2525,7 @@ export type RestoreSupersededTarget = {
 export interface RestoreSupersededOptions {
     reason?: string;
     actor?: EventActor;
+    dryRun?: boolean;
 }
 export type RestoreSupersededOutcome = {
     memoryId: MemoryId;
@@ -2526,6 +2533,11 @@ export type RestoreSupersededOutcome = {
     previousStatus: "superseded";
     decayFloorAt: Date;
     reinforceError?: string;
+} | {
+    memoryId: MemoryId;
+    kind: "would_restore";
+    previousStatus: "superseded";
+    supersededReason: string | null;
 } | {
     memoryId: MemoryId;
     kind: "failed";
