@@ -938,6 +938,18 @@ export interface RestoreSupersededOptions {
   reason?: string;
   /** イベントの `actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor;
+  /**
+   * 🔴 **下見（Issue #515、ADR 0237、方向3「戻す前に何が戻るかを返す」）。**
+   * `true` のとき、一切の書き込み（`memories` の `UPDATE`・`memory_events` への
+   * `INSERT`・`reinforce`）を行わず、「実際に呼べば何が戻るか」だけを
+   * {@link RestoreSupersededOutcome} の `"would_restore"` として返す。省略時 `false`
+   * ——⚠ **既定は変えていない。省略・`false` のどちらでも、この PR 以前と1バイトも
+   * 違わない「実際に戻す」経路を通る**（`PurgeOptions.dryRun` と同じ規律。あちらは
+   * 対象 id が既知だが、こちらは「群」を範囲走査で選ぶ点が違う——選ぶ内容は
+   * `MemoryStore.previewRestoreSupersededBy?` が `restoreSupersededBy?` と同じ
+   * `WHERE` で選ぶ。前者が無い adapter では `supported: false`）。
+   */
+  dryRun?: boolean;
 }
 
 /**
@@ -958,6 +970,12 @@ export interface RestoreSupersededOptions {
  *   reinforce の成否と無関係に確定している）。`decayFloorAt` は reinforce の
  *   成否に関わらず、この呼び出しが最後に観測した値（reinforce が成功していれば
  *   その結果、失敗していれば復帰直後の値）。
+ * - `"would_restore"`: **Issue #515、ADR 0237。**`opts.dryRun: true` のとき、`status = 'superseded'`
+ *   かつ `superseded_by_id` が対象と一致する行について、実際に呼べば `"restored"` に
+ *   なったはずであることを示す。**書き込みは一切起きていない**（`reinforce` も呼ばない）。
+ *   `supersededReason` は `MemoryStore.previewRestoreSupersededBy?` の doc コメント参照
+ *   ——「なぜその群に入っているか」を運ぶが、`memory_events` に一致する行が無ければ
+ *   `null`（**取れないことを `null` で正直に返す。取れるふりをしない**）。
  * - `"failed"`: 🔴 **現在の実装では到達しない防御的な分類**（`PurgeOutcome.conflicted`
  *   と同じ立場——`forget`/`restoreArchived` と同じ「上限の無い再試行にしない安全弁」の
  *   一族だが、こちらは元になる並行の競合そのものが構造的に起こらない）。
@@ -975,6 +993,12 @@ export type RestoreSupersededOutcome =
       decayFloorAt: Date;
       reinforceError?: string;
     }
+  | {
+      memoryId: MemoryId;
+      kind: "would_restore";
+      previousStatus: "superseded";
+      supersededReason: string | null;
+    }
   | { memoryId: MemoryId; kind: "failed"; error: string };
 
 /**
@@ -986,9 +1010,12 @@ export type RestoreSupersededOutcome =
  */
 export interface RestoreSupersededResult {
   /**
-   * `MemoryStore.restoreSupersededBy?` が実装されていたか。**`false` のとき
-   * `outcomes` は常に空配列**——`SweepArchiveResult.supported` と同じ規律
-   * （「対応していないので0件」であって「対応していて0件だった」ではない。
+   * `opts.dryRun` の有無で、見ている口が違う。**`dryRun` 省略・`false`**:
+   * `MemoryStore.restoreSupersededBy?` が実装されていたか。**`dryRun: true`**:
+   * `MemoryStore.previewRestoreSupersededBy?` が実装されていたか（Issue #515）
+   * ——2つの口は独立した任意メソッドであり、片方だけを実装した adapter があり得る。
+   * どちらの場合も `false` のとき `outcomes` は常に空配列**——`SweepArchiveResult.supported`
+   * と同じ規律（「対応していないので0件」であって「対応していて0件だった」ではない。
    * 呼び出し側はこの2つを取り違えないよう、必ず `supported` を先に見ること）。
    */
   supported: boolean;
@@ -1554,6 +1581,20 @@ export interface Runtime {
    * `{ supported: false, supersedingMemoryId, outcomes: [] }` を返す**——
    * `sweepArchive`/`archiveDecayed?` と同じ「対応していない、と名指しする」形
    * （ADR 0082）。フォールバック経路は持たない。
+   *
+   * 🔴 **`opts.dryRun: true`（Issue #515、ADR 0237）は、ここまでの「実際に戻す」経路を
+   * 一切通らない別の枝である。**呼ぶのは `MemoryStore.previewRestoreSupersededBy?`
+   * （もう1つの新しい任意メソッド、`restoreSupersededBy?` とは独立）だけで、
+   * `memories` の更新も `memory_events` への追記も `reinforce` の呼び出しも起きない。
+   * 対象の選び方（`WHERE`）は `restoreSupersededBy?` と完全に一致させてあるので、
+   * `dryRun: true` で見た `outcomes`（`kind: "would_restore"`）の `memoryId` 集合は、
+   * 直後に `dryRun` 無しで呼んだときの `outcomes`（`kind: "restored"`）の `memoryId`
+   * 集合と一致する——**ただし「一致することを保証する仕組み」は無い**。2回の呼び出しの
+   * 間に別の書き込みが起きれば、当然ずれる（他の compare-and-swap 系メソッドと同じ、
+   * 「見てから呼ぶ」に内在する race）。`previewRestoreSupersededBy?` を実装しない
+   * adapter では `dryRun: true` も `{ supported: false, supersedingMemoryId,
+   * outcomes: [] }`——`restoreSupersededBy?` を実装済みでも、この2つは独立した
+   * 任意メソッドなので免除されない。
    *
    * 手順:
    * 1. `deps.memoryStore.restoreSupersededBy` が無ければ
@@ -2987,6 +3028,32 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     opts?: RestoreSupersededOptions,
   ): Promise<RestoreSupersededResult> {
     const supersedingMemoryId = target.supersededById;
+
+    // Issue #515、ADR 0237: `opts.dryRun` は既存の既定（省略時・false 時は実際に戻す）を
+    // 1バイトも変えない別の枝——別のメソッド（`previewRestoreSupersededBy?`）へ
+    // 分岐するだけで、下の「実際に戻す」経路には一切触れない。
+    if (opts?.dryRun === true) {
+      const previewRestoreSupersededBy = deps.memoryStore.previewRestoreSupersededBy;
+      if (previewRestoreSupersededBy === undefined) {
+        return { supported: false, supersedingMemoryId, outcomes: [] };
+      }
+      const { candidates } = await previewRestoreSupersededBy.call(
+        deps.memoryStore,
+        ctx,
+        supersedingMemoryId,
+      );
+      return {
+        supported: true,
+        supersedingMemoryId,
+        outcomes: candidates.map((c): RestoreSupersededOutcome => ({
+          memoryId: c.memoryId,
+          kind: "would_restore",
+          previousStatus: "superseded",
+          supersededReason: c.supersededReason,
+        })),
+      };
+    }
+
     const restoreSupersededBy = deps.memoryStore.restoreSupersededBy;
     if (restoreSupersededBy === undefined) {
       return { supported: false, supersedingMemoryId, outcomes: [] };

@@ -105,6 +105,8 @@ describeMemoryStoreConformance({
   supportsResolveContestedPair: true,
   // 本 PR: InMemoryMemoryStore は restoreSupersededBy を実装している。
   supportsRestoreSupersededBy: true,
+  // Issue #515: InMemoryMemoryStore は previewRestoreSupersededBy を実装している。
+  supportsPreviewRestoreSupersededBy: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり

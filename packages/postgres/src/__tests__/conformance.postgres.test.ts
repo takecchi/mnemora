@@ -92,6 +92,8 @@ describeMemoryStoreConformance({
   supportsResolveContestedPair: true,
   // 本 PR: PostgresMemoryStore は restoreSupersededBy を実装している。
   supportsRestoreSupersededBy: true,
+  // Issue #515: PostgresMemoryStore は previewRestoreSupersededBy を実装している。
+  supportsPreviewRestoreSupersededBy: true,
 });
 
 describeEventStoreConformance({

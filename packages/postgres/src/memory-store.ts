@@ -1795,6 +1795,65 @@ export class PostgresMemoryStore implements MemoryStore {
     const restored = result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
     return { restored };
   }
+
+  /**
+   * `restoreSupersededBy` を実際に呼ぶ**前**に見るための読み取り専用の口
+   * （Issue #515、ADR 0237。契約は `MemoryStore.previewRestoreSupersededBy`（`@mnemora/core`）
+   * 側にある——ここはクエリの実装のみ）。
+   *
+   * `target` の `WHERE` は `restoreSupersededBy` の `target` CTE と**1文字も違わない**
+   * ——同じ部分索引 `idx_memories_superseded_by` をそのまま使う。`UPDATE`/`INSERT` を
+   * 一切持たない `SELECT` のみの文であり、`restoreSupersededBy` と違って
+   * トランザクションを開始する必要も無い（読み取りが1文で完結する）。
+   *
+   * `latest_superseded_event` は、対象ごとに直近の `kind = 'superseded'` の
+   * `memory_events` 行を1件選ぶ（`DISTINCT ON (memory_id) ... ORDER BY memory_id,
+   * at DESC`）。**新しい索引を足していない**——`idx_memory_events_by_memory`
+   * （`tenant_id, memory_id, at`）が `memory_id = 対象` を絞る側をそのまま担い、
+   * `kind = 'superseded'` は結果に対する追加のフィルタ（この列だけを絞る索引は無いが、
+   * 対象がまず `target` で絞られているため、走査量は「群のサイズ」に比例する——
+   * テナント全体の `memory_events` を走査しない）。`meta->>'reason'` が無い
+   * （行はあるが `reason` キーが無い）場合は SQL の `->>` が `NULL` を返し、
+   * 対象について一致する行が1件も無い場合は `LEFT JOIN` により `NULL` になる——
+   * この2つを呼び出し側から区別する必要は無い（`MemoryStore.previewRestoreSupersededBy`
+   * の doc コメント「取れないことを正直に返す」参照。どちらも「取れない」の一種）。
+   */
+  async previewRestoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    if (!isUuidLike(supersededById)) {
+      return { candidates: [] };
+    }
+
+    const result = await this.db.execute(sql`
+      WITH target AS (
+        SELECT id FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND superseded_by_id = ${supersededById}
+          AND status = 'superseded'
+      ),
+      latest_superseded_event AS (
+        SELECT DISTINCT ON (me.memory_id) me.memory_id, me.meta ->> 'reason' AS reason
+        FROM memory_events me
+        JOIN target t ON t.id = me.memory_id
+        WHERE me.tenant_id = ${ctx.tenantId}
+          AND me.kind = 'superseded'
+        ORDER BY me.memory_id, me.at DESC
+      )
+      SELECT t.id, lse.reason
+      FROM target t
+      LEFT JOIN latest_superseded_event lse ON lse.memory_id = t.id
+      ORDER BY t.id ASC
+    `);
+
+    return {
+      candidates: result.rows.map((row) => {
+        const r = row as unknown as { id: string; reason: string | null };
+        return { memoryId: r.id as MemoryId, supersededReason: r.reason };
+      }),
+    };
+  }
 }
 
 /**
