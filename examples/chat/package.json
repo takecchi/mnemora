@@ -25,7 +25,9 @@
     "record": "tsx src/cli.ts record retrieval",
     "verify": "tsx src/cli.ts verify retrieval",
     "record:compare": "tsx src/cli.ts record compare",
-    "verify:compare": "tsx src/cli.ts verify compare"
+    "verify:compare": "tsx src/cli.ts verify compare",
+    "record:answer": "tsx src/cli.ts record answer",
+    "verify:answer": "tsx src/cli.ts verify answer"
   },
   "dependencies": {
     "@mnemora/core": "workspace:*",

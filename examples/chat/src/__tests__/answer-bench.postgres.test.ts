@@ -32,6 +32,7 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
         handle.runtime,
         handle.llmProvider,
         handle.embeddingProvider,
+        handle.judgeLLMProvider,
         answerCase,
         "answer-bench-test-wiring",
       );
@@ -56,10 +57,24 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
       expect(result.mnemora.answer).toBe(result.mnemora.promptSpec.messages[0]?.content);
 
       // 追加費用: ingest は抽出(completeStructured)を最低1回発生させ、embed も最低1回発生する。
-      // 回答生成(complete())は naive 1回 + mnemora 1回 = 2回で固定。
+      // 回答生成(complete())は naive 1回 + mnemora 1回 = 2回で固定
+      // ——judge も complete() を呼ぶが、`judgeLLMProvider` という別インスタンスの
+      // snapshot 差分で数えるため、この値には混ざらない(`answerLLMCalls` の docstring)。
       expect(result.cost.extractionLLMCalls).toBeGreaterThanOrEqual(1);
       expect(result.cost.embeddingCalls).toBeGreaterThanOrEqual(1);
       expect(result.cost.answerLLMCalls).toBe(2);
+      // judge の呼び出し回数(naive 採点1回 + mnemora 採点1回)は別勘定で2固定。
+      expect(result.cost.judgeLLMCalls).toBe(2);
+
+      // deterministic の judge も complete() の応答(プロンプト全文のエコー)をそのまま
+      // 受け取るので、`判定:` 行を含まずパースに失敗し、必ず indeterminate になる
+      // (`parseAnswerJudgeResponse` 設計上の必須事項2)。
+      expect(result.naive.judgement?.outcome).toBe("indeterminate");
+      expect(result.mnemora.judgement?.outcome).toBe("indeterminate");
+      // 一次判定(pass/fail のどちらか)と二次観測(indeterminate)は食い違うので、
+      // 突き合わせは必ず indeterminate になる(`reconcileVerdicts`)。
+      expect(result.naive.reconciled).toBe("indeterminate");
+      expect(result.mnemora.reconciled).toBe("indeterminate");
     } finally {
       await handle.close();
     }
@@ -77,6 +92,7 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
         handle.runtime,
         handle.llmProvider,
         handle.embeddingProvider,
+        handle.judgeLLMProvider,
         first!,
         "answer-bench-test-isolation",
       );
@@ -84,6 +100,7 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
         handle.runtime,
         handle.llmProvider,
         handle.embeddingProvider,
+        handle.judgeLLMProvider,
         second!,
         "answer-bench-test-isolation",
       );
@@ -111,6 +128,7 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
         handle.runtime,
         handle.llmProvider,
         handle.embeddingProvider,
+        handle.judgeLLMProvider,
         answerCase,
         "answer-bench-test-quality-gate",
       );
@@ -124,6 +142,9 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
       });
       expect(json.qualityClaimable).toBe(false);
       expect(json.summary).toBeUndefined();
+      // `inputReduction` は qualityClaimable に関係なく常に出る(入力量は品質の主張ではない)。
+      expect(json.inputReduction).toBeDefined();
+      expect(json.inputReduction.naiveInputChars).toBeGreaterThan(0);
 
       const table = formatAnswerTable([result], handle.llmMode);
       expect(table).not.toMatch(/✅|❌|❓/);

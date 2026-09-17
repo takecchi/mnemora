@@ -6,9 +6,18 @@
 //
 // ここでは、その食い違いを**検査の時点で**捕まえる。DB も API キーも要らない。
 
-import { embeddingCassetteKey } from "@mnemora/testkit";
+import { embeddingCassetteKey, llmCassetteKey } from "@mnemora/testkit";
 import { describe, expect, it } from "vitest";
-import { COMPARE_CASSETTE_PATH, cassetteExists, loadCassette } from "../cassette-io.js";
+import {
+  ANSWER_CASSETTE_PATH,
+  COMPARE_CASSETTE_PATH,
+  cassetteExists,
+  loadCassette,
+} from "../cassette-io.js";
+import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
+import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
+import { buildNaiveAnswerPromptSpec } from "../answer-bench.js";
+import { OPENAI_LLM_MODEL } from "../providers.js";
 import { DEFAULT_HAYSTACK_SIZE, PROBES, buildProbeSetConversation } from "../probe-set.js";
 import { DEFAULT_COMPARE_SEQUENCE } from "../compare.js";
 import { buildConversation } from "../scenario.js";
@@ -88,5 +97,61 @@ describe("compare のカセットと会話生成の対応（ADR 0052）", () => 
     const totalCalls = DEFAULT_COMPARE_SEQUENCE.reduce((sum, n) => sum + n + 1, 0);
     expect(entries.length).toBeLessThan(totalCalls);
     expect(totalCalls).toBe(657);
+  });
+});
+
+describe("`answer` のカセットと評価ケース集合の対応（Issue #498 / #506、ADR 0051）", () => {
+  const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+
+  it("カセットがリポジトリに存在する", () => {
+    expect(cassetteExists(ANSWER_CASSETTE_PATH)).toBe(true);
+  });
+
+  it("形式検査に通る", () => {
+    expect(() => loadCassette(ANSWER_CASSETTE_PATH)).not.toThrow();
+  });
+
+  it("記録元は、いま使っている埋め込み空間と同じである", () => {
+    expect(loadCassette(ANSWER_CASSETTE_PATH).embedding.space).toEqual({
+      provider: "openai",
+      model: "text-embedding-3-small",
+      dimensions: 256,
+    });
+  });
+
+  it("記録元の LLM は、いま使っているモデルと同じである", () => {
+    expect(loadCassette(ANSWER_CASSETTE_PATH).llm.model).toBe(OPENAI_LLM_MODEL);
+  });
+
+  it("すべてのケースの質問文が埋め込みとして記録されている（ケースを足したら録り直す）", () => {
+    // `queryRecall` は `conversation.query`（＝ ケースの `question`）を埋め込む。
+    const { entries } = loadCassette(ANSWER_CASSETTE_PATH).embedding;
+    const missing = cases
+      .filter((c) => entries[embeddingCassetteKey(c.question)] === undefined)
+      .map((c) => c.id);
+    expect(missing).toEqual([]);
+  });
+
+  it("🔴 すべてのケースの naive（全文経路）回答プロンプトが記録されている", () => {
+    // ⭐ naive 側のプロンプトは**ケースの定義だけから決まる**（recall に依らない）ので、
+    // ここで完全に組み立て直して鍵を引ける——ケースの会話・質問を1文字でも変えて
+    // 録り直しを忘れたら、実行の数分後ではなく**この検査の時点で**赤くなる。
+    // ⛔ mnemora 側は `recall()` の結果に依るため、ここからは組み立てられない。
+    const { entries } = loadCassette(ANSWER_CASSETTE_PATH).llm;
+    const missing = cases
+      .filter((c) => entries[llmCassetteKey(buildNaiveAnswerPromptSpec(c))] === undefined)
+      .map((c) => c.id);
+    expect(missing).toEqual([]);
+  });
+
+  it("🔴 記録は入力の種類ぶんしか無い——実行時の呼び出し回数とは一致しない（ADR 0052 の代償）", () => {
+    // ⚠ `answer` の評価ケース12件は同じフィラー発話を共有しており、同じ抽出プロンプトが
+    // 1回の記録の中で複数回現れる。**記録器はそれを memo として1回しか叩かない**
+    // （`RecordingLLMProvider`）——さもないと後勝ちで先の値が消え、記録が、記録を
+    // 作った実行そのものを再生できなくなる（本 PR の実測）。
+    const entries = Object.keys(loadCassette(ANSWER_CASSETTE_PATH).llm.entries);
+    // 回答生成24回 + judge 24回 + 抽出（会話ターンぶん）。
+    const answerAndJudgeCalls = cases.length * 4;
+    expect(entries.length).toBeGreaterThan(answerAndJudgeCalls);
   });
 });
