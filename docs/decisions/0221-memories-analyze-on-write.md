@@ -1,4 +1,4 @@
-# ADR 0220: `PostgresMemoryStore` の書き込み経路が閾値越えのときだけ `memories` を `ANALYZE` する — ADR 0194 と同じ設計を、JOIN の相手側にも入れる（Issue #269）
+# ADR 0221: `PostgresMemoryStore` の書き込み経路が閾値越えのときだけ `memories` を `ANALYZE` する — ADR 0194 と同じ設計を、JOIN の相手側にも入れる（Issue #269）
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-17

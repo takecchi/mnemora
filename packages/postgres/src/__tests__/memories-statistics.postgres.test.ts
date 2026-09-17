@@ -14,7 +14,7 @@ import { requireDatabaseUrl, seededRandom } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
- * Issue #269 / ADR 0220: ADR 0194 が `memory_embeddings_*` に入れた「等比の閾値越えの
+ * Issue #269 / ADR 0221: ADR 0194 が `memory_embeddings_*` に入れた「等比の閾値越えの
  * ときだけ ANALYZE を撃つ」自動発火を、JOIN の相手側である `memories` にも足す歯。
  *
  * ## なぜこの歯が要るか(実測は Issue #269 / #418)

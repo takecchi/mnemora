@@ -6,7 +6,7 @@ import {
 } from "./analyze-threshold.js";
 
 /**
- * Issue #269 / ADR 0220: ADR 0194 が `memory_embeddings_*` に入れた「書き込み経路からの
+ * Issue #269 / ADR 0221: ADR 0194 が `memory_embeddings_*` に入れた「書き込み経路からの
  * 自動 ANALYZE」を、同じ JOIN の相手側である `memories` にも入れる。
  *
  * ## なぜ `memories` にも要るか
@@ -19,7 +19,7 @@ import {
  * （「CI が実際に教えたこと」節）と、Issue #269 / #418 の実測（4,000行、
  * 約10〜30倍遅い）がこれを裏付けている。
  *
- * ## この対処の形（Issue #269 の実測に基づく。ADR 0220 参照）
+ * ## この対処の形（Issue #269 の実測に基づく。ADR 0221 参照）
  *
  * `embedding-statistics.ts`（ADR 0194）と**同じ設計**——このプロセスが `memories` に
  * 書き込んだ行数を数え、等比の閾値ちょうどで `pg_class.reltuples` を1回読み、
@@ -41,7 +41,7 @@ import {
  * - `createMemoryWithOutbox`: トランザクションが `created: true` を返したときだけ、
  *   **トランザクションの外側で**呼ぶ（`ANALYZE` 自体はトランザクション内でも実行できるが、
  *   トランザクションが保持する行ロックと `ShareUpdateExclusiveLock` を無用に重ねない
- *   ため。ADR 0220 参照）。
+ *   ため。ADR 0221 参照）。
  *
  * ON CONFLICT で既存行を返しただけの呼び出し（新しい行を書いていない）はカウントしない
  * ——`embedding-statistics.ts` の `upsert`（常に書き込む）とはこの点だけ違う。
