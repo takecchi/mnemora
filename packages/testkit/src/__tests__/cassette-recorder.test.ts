@@ -46,7 +46,11 @@ class NondeterministicLLMProvider implements LLMProvider {
 
 /** 呼ばれるたびに違うベクトルを返す偽 embedding——ADR 0051 が実測した揺れを模す。 */
 class NondeterministicEmbeddingProvider implements EmbeddingProvider {
-  readonly space: EmbeddingSpaceId = { model: "fake-embedding", dimensions: 2 };
+  readonly space: EmbeddingSpaceId = {
+    provider: "openai",
+    model: "fake-embedding",
+    dimensions: 2,
+  };
   calls = 0;
   embeddedTexts: string[][] = [];
 
