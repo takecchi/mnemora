@@ -6,6 +6,14 @@ ADR (Architecture Decision Record) として記録する。`docs/architecture.md
 ここでは各決定について、検討した選択肢・却下した理由・引き受ける負債・覆る条件までを
 1ファイルにまとめる。**決定そのものをやり直す場ではなく、決定を記録する場である。**
 
+**⛔ 採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する。**
+**理由は上の1文である**——ここは記録の場であり、**間違え方それ自体が記録だからである。**
+本文を直すと「何をどう判断して外したか」が消え、**訂正を積んだ経緯も追えなくなる。**
+（**この作法は実際に繰り返し採られている**——根拠と反例は
+[ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) 決定1。
+⚠ **まだ採用されていない初稿はこの限りではない。**そして
+**`docs/north-star.md` は別の規律で守られている**——`AGENTS.md` を見ること。）
+
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
@@ -215,5 +223,27 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0205](./0205-local-embedding-pipeline-required-interface.md) | `LocalEmbeddingPipeline` を必須 interface にし、ADR 0090 決定4「引き受けた負債1」を塞ぐ（Issue #137 案 (a)） | 採用 (2026-09) |
 | [0206](./0206-outbox-concurrent-claim-conformance.md) | 同時 claim の適合テストを `supportsRealConcurrency` で切り替える（Issue #205 の1本目） | 採用 (2026-09) |
 | [0207](./0207-dry-run-reads-existence-and-coverage-degrades-silently.md) | 予行は registry の「既に在るか」を読む — そして予行の網羅性は、木の版と registry の関係で黙って落ちる | 採用 (2026-09) |
+| [0208](./0208-outbox-skip-locked-non-blocking-tooth.md) | `SKIP LOCKED` が「詰まらないこと」を守っている、という主張に歯を足す（ADR 0206 の宿題） | 採用 (2026-09) |
+| [0209](./0209-dry-run-short-circuit-predates-adr-0207-and-is-counted-by-machine.md) | 予行の短絡は 2026-09-08 に既に起きていた — ADR 0207 決定2 の【受】を訂正し、「何本が経路を通ったか」を機械に数えさせる | 採用 (2026-09) |
+| [0210](./0210-root-test-gate-runs-all-stages-regardless-of-failure.md) | ルートの `test` 門は、前段が落ちても後段を必ず起動する（Issue #453） | 採用 (2026-09) |
+| [0211](./0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md) | PR タイトル/本文が付け替え後の古い ADR 番号を名指ししていないかを CI が検査する — 本文は誰も警告していなかった | 採用 (2026-09) |
+| [0212](./0212-local-embedding-size-noun-correspondence-tooth.md) | local-embedding のサイズ表記(36MB/42MB)が名詞と正しく対応していることを歯で縛る — 「値の一致」だけでなく「向き」を見る | 採用 (2026-09) |
+| [0213](./0213-live-docs-cite-adrs-by-anchor-not-line-number.md) | 行番号での引用は、この repo 自身の「ADR は書き換えず追記する」作法によって腐る — 生きた文書はアンカーで指し、歯で止める | 採用 (2026-09) |
+| [0214](./0214-release-candidates-lists-not-judges.md) | リリース当日に「載せるべき候補」をその場で出す道具 — ⛔ 判定ではなく一覧である | 採用 (2026-09) |
+| [0215](./0215-ci-green-check-lower-bound-from-required-status-checks.md) | 「CI が緑」の下限を、branch protection の required status checks から取る（Issue #477 と同じ族） | 採用 (2026-09) |
+| [0216](./0216-north-star-shipped-only-measurement.md) | 北極星の7項目を「出荷物だけ」でどう測るか — ⛔ 物差しは1本では作れない。文面の向きで3類に割り、1類は機械に載せない | 採用 (2026-09) |
+| [0217](./0217-provenance-naming-lost-in-duplication-swept-from-the-population.md) | 「確かめていない主張が、名乗りを落としたまま複製されていないか」を `docs/` 220本の母集合から測った — 複製で名乗りが落ちた例は2件、うち1件は3文書に跨っていた | 採用 (2026-09) |
+| [0218](./0218-shipping-security-claims-checked-against-primary-sources.md) | 出荷文書の「セキュリティの主張」に一次情報を当てた — CVE 番号は実在した（引く先が違っただけ）。ただし推奨下限は「既知の CVE が残らない下限」ではない | 採用 (2026-09) |
+| [0219](./0219-adr-corpus-swept-for-unsourced-assertions.md) | ADR 208本を逆向きに掃いた — 母集合 59,554行から候補171件、残った未裏づけの断定は17件。その3/4は「外部の挙動」だった | 採用 (2026-09) |
+| [0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md) | OPEN な ISSUE のコメント投稿者名は、オーナーと担い手（エージェント）を見分けない — 見分けられるのは本文中の逐語の名乗りだけである | 採用 (2026-09) |
+| [0221](./0221-memories-analyze-on-write.md) | `PostgresMemoryStore` の書き込み経路が閾値越えのときだけ `memories` を `ANALYZE` する — ADR 0194 と同じ設計を、JOIN の相手側にも入れる（Issue #269） | 採用 (2026-09) |
+| [0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md) | ⭐門 `compare` は、実測と基準値の `turnCount` 集合が一致したときだけ判定する（Issue #477） | 採用 (2026-09) |
+| [0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) | 繰り返し採られているのに入口の文書に書かれていない判断の規律を、ADR 211本の母集合から抽出した — 残ったのは10。最頻出は「採用済み ADR の本文を書き換えない」で 46/211 | 採用 (2026-09) |
+| [0224](./0224-quality-evaluation-and-acceptance-criteria.md) | 品質評価の証明範囲と合格基準の変更を、自律作業の条件にする | 採用 (2026-09) |
+| [0225](./0225-supersede-with-new-memories-analyze-hook.md) | `supersedeWithNewMemories` にも ADR 0221 の書き込み時 `ANALYZE` フックを足す — 残っていた3本目の経路（Issue #269） | 採用 (2026-09) |
+| [0226](./0226-compare-provenance-reached-vs-information-retained.md) | `compare` の `factStatementSurvived` が測るのは出典到達だけである — 欄名は⭐門の契約として据え置き、意味の是正はコメント・表示・文書で行う（Issue #496） | 採用 (2026-09) |
+| [0227](./0227-fixed-retrieval-probe-gold-presence-gate.md) | 固定した probe ごとの gold 到達を、`example-chat` の必須 CI へ直接繋ぐ回帰ゲート（Issue #497） | 採用 (2026-09) |
+| [0228](./0228-accept-the-extra-ci-round-for-adr-pull-requests.md) | ADR を持つ PR が CI をもう1周する費用を受容する — 方向4 を選び直す（Issue #267） | 採用 (2026-09) |
+| [0229](./0229-answer-bench-compares-final-answers-with-a-ground-truth-bench-quality-not-yet-claimed.md) | 全文経路と記憶経路の最終回答を、正解集合を持つ器で比較する（品質の主張はまだしない、Issue #506 / 親 #498） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

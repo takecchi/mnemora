@@ -40,6 +40,7 @@ import type {
   ScopeAggregate,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
   isUuidLike,
   parsePgTimestamp,
@@ -225,6 +226,10 @@ export class PostgresMemoryStore implements MemoryStore {
       RETURNING *
     `);
     if (inserted.rows.length > 0) {
+      // Issue #269: 統計が実態から遅れているときだけ ANALYZE memories を撃つ
+      // (詳細は ./memories-statistics.ts のファイル doc)。新しい行を実際に書いた
+      // ときだけ数える——下の ON CONFLICT で既存行を返しただけの呼び出しは数えない。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
       return rowToMemory(inserted.rows[0] as unknown as MemoryRow);
     }
 
@@ -258,7 +263,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
 
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO memories (
           id, tenant_id, subject_id,
@@ -328,6 +333,16 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       return { memory, created: true, jobs };
     });
+
+    if (result.created) {
+      // Issue #269: `createMemory` と同じ理由で ANALYZE の要否を判定する。
+      // トランザクションの**外側**で呼ぶ——`ANALYZE` はトランザクション内でも
+      // 実行できるが、上のトランザクションが保持する行ロックと
+      // `ShareUpdateExclusiveLock`（ADR 0143 決定3）を無用に重ねないため
+      // （詳細は ./memories-statistics.ts のファイル doc）。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
+    }
+    return result;
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
@@ -582,7 +597,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
     }
 
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
       for (const { input, jobKinds } of news) {
@@ -717,6 +732,22 @@ export class PostgresMemoryStore implements MemoryStore {
 
       return { created, superseded, conflicted };
     });
+
+    if (result.created.some((entry) => entry.created)) {
+      // Issue #269（2026-09-17 コメント）: `createMemory` / `createMemoryWithOutbox` と
+      // 同じ理由で ANALYZE の要否を判定する。`news` は複数件渡せるため、`created` 配列の
+      // どれか1件でも実際に新しい行を書いていれば呼ぶ——`ON CONFLICT` で既存行を
+      // 返しただけの要素（`created: false`）だけの呼び出しでは数えない
+      // （`createMemory` の doc コメントと同じ判定。詳細は ./memories-statistics.ts の
+      // ファイル doc）。
+      //
+      // トランザクションの**外側**で呼ぶ——`createMemoryWithOutbox` と同じ理由
+      // （上のコメント参照）: `ANALYZE` はトランザクション内でも実行できるが、
+      // 上のトランザクションが保持する行ロックと `ShareUpdateExclusiveLock`
+      // （ADR 0143 決定3）を無用に重ねないため。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
+    }
+    return result;
   }
 
   /**

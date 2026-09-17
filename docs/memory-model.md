@@ -355,6 +355,10 @@ relaxed_order`）は、**「WHERE フィルタ下での recall（再現率）改
 ### partial index についての注意
 
 partial index は**離散値・低カーディナリティ**のフィルタに向く（PostgreSQL 公式の推奨）。
+
+> ⚠ **2026-09-17 訂正。**「PostgreSQL 公式の推奨」の主体・出典は未検証。
+> 逐語・判定・他文書との突き合わせは [ADR 0004](./decisions/0004-decay-at-query-time.md) の
+> 同日の追記が正規の置き場である。そちらを見ること。
 `decay_floor_at > now()` のような連続値・高カーディナリティの範囲条件を partial index の
 **述語**に使うのは向かない（`now()` は immutable ではなく、固定した時刻を述語にしても
 すぐ陳腐化する）。実際に使うのは次の形——**離散値（`status`）を partial 述語にし、
@@ -601,6 +605,71 @@ NOT NULL とし、全ての一意制約・索引の先頭列に置く**（[ADR 0
   フィルタ問題対処に必要なため。
 - **`>= 0.8.2` を推奨**とする（2026-02-26 リリース。CVE-2026-3172 のバッファオーバーフロー
   修正を含む）。
+  > **⚠ 2026-09-17 追記（名乗りの復元。上の行は書き換えていない）。**
+  > 上の1行は **同一文言が3箇所に在る**（この節 / [ADR 0002](./decisions/0002-embedding-space-tables.md) /
+  > [`docs/roadmap.md`](./roadmap.md) §4 の技術リスク表）が、**どこにも一次情報への出典が無かった。**
+  > **【実測 2026-09-17、`gh api repos/pgvector/pgvector/...` で上流を引いた】**:
+  > - ⭐ **「0.8.2 がバッファオーバーフローを直した」は裏が取れた。** 上流の `CHANGELOG.md` に
+  >   `## 0.8.2 (2026-02-25)` / **`Fixed buffer overflow with parallel HNSW index build`**
+  >   （[pgvector#959](https://github.com/pgvector/pgvector/issues/959)）と在る。
+  > - ⭐ **日付のずれは矛盾ではない。** tag `v0.8.2` は commit `cab9da72`、`2026-02-25T18:46:57Z`
+  >   ＝ **JST では 2026-02-26 03:46** なので、本文の「2026-02-26」は JST 読みと整合する。
+  > - ⛔ **`CVE-2026-3172` という番号だけは裏が取れていない。** 上流の `CHANGELOG.md` は CVE 番号を
+  >   1つも書いておらず、GitHub の advisory database をこの CVE ID で引いても該当0件だった。
+  >   ⚠ **「存在しない」とは言えない**（CVE データベースを直接当てていない）。**未確認である、と読むこと。**
+  > - ⚠ **`>= 0.8.2` という推奨の下限は、2026-09-17 時点では古い。** 上流の最新 tag は `v0.8.6` で、
+  >   `0.8.3 (2026-06-17)` が **`Fixed possible index corruption with HNSW vacuuming`** を直している。
+  >   ⛔ **この追記では下限の数字を書き換えない**（数字を直してもまた腐る）。**引くときに上流の
+  >   `CHANGELOG.md` を見ること。**
+  >
+  > **⭐ 2026-09-17 追記2（一次情報を当て直した。本文も上の追記1も書き換えていない）。**
+  > ⭐ **`CVE-2026-3172` は実在し、内容も本文の記述と一致する。** 追記1 の「未確認」は**解消した。**
+  > **【実測 2026-09-17】当てた先と、返ってきたもの:**
+  >
+  > | 当てた先 | 返ってきたもの |
+  > |---|---|
+  > | MITRE CVE Services `https://cveawg.mitre.org/api/cve/CVE-2026-3172` | **HTTP 200 / `state: PUBLISHED`**。採番者は **PostgreSQL**（`assignerShortName`）。`datePublished` `2026-02-25T20:59:10Z` |
+  > | NVD `https://services.nvd.nist.gov/rest/json/cves/2.0?cveId=CVE-2026-3172` | **HTTP 200 / `totalResults: 1`**。`vulnStatus: Deferred`、CVSS v3.1 **8.1 HIGH**（`AV:N/AC:L/PR:L/UI:N/S:U/C:H/I:N/A:H`）、CWE-191 / CWE-787 |
+  > | GitHub advisory database `gh api "/advisories?cve_id=CVE-2026-3172"` | **該当1件** — [`GHSA-789c-mgqf-5hwx`](https://github.com/advisories/GHSA-789c-mgqf-5hwx) |
+  > | 上流 issue | [pgvector#959](https://github.com/pgvector/pgvector/issues/959) *"Buffer overflow with parallel HNSW index build"*（closed、`2026-02-25T18:58:14Z`） |
+  >
+  > - ⭐ **表題も影響範囲も本文と一致する。** MITRE の `title` は
+  >   **"pgvector buffer overflow in parallel HNSW index build"**、`affected` は
+  >   **`0.6.0` 以上 `0.8.2` 未満**（`lessThan: "0.8.2"`）。NVD の説明文は逐語で
+  >   *"Buffer overflow in parallel HNSW index build in pgvector 0.6.0 through 0.8.1 allows a database
+  >   user to leak sensitive data from other relations or crash the database server."*
+  >   ⟹ ⭐ **「0.8.2 が `CVE-2026-3172` を直した」も「だから `>= 0.8.2`」も、この CVE に関する限り正しい。**
+  > - ⚠ **追記1 が「該当0件」になったのは、番号が無いからではなく引き方である。**
+  >   `GHSA-789c-mgqf-5hwx` は **`type: unreviewed` かつ `vulnerabilities: []`**
+  >   （＝ ecosystem / package への対応付けを持たない）。⟹ **`affects=` や `ecosystem=` で絞る引き方では
+  >   届かない。`cve_id=` で引けば出る。**
+  >   ⭐ **「引けなかった」を「存在しない」と書かなかった追記1 の線は、正しかった。**
+  >
+  > **⚠ 下限 `>= 0.8.2` を動かすかどうかの判断材料**（⛔ **この追記でも数字は書き換えていない**。ADR 0217 決定3）。
+  > **【実測 2026-09-17、上流 `CHANGELOG.md` と NVD `keywordSearch=pgvector`（`totalResults: 6`、うち pgvector 本体は2件）】**
+  >
+  > | 版 | 直したもの | セキュリティ採番 |
+  > |---|---|---|
+  > | `0.8.2` (2026-02-25) | buffer overflow with parallel HNSW index build（[#959](https://github.com/pgvector/pgvector/issues/959)） | **`CVE-2026-3172`** CVSS 8.1 HIGH。**システムを問わない** |
+  > | `0.8.3` (2026-06-17) | possible index corruption with HNSW vacuuming ／ PG18 での Hamming・Jaccard 距離の性能退行 | **無し**（＝正しさの修正であって、採番された脆弱性ではない） |
+  > | `0.8.4` (2026-06-30) | `hnsw graph not repaired` ／ vacuuming 中の insert ／ IVFFlat 構築の `maintenance_work_mem` 超過 | **無し** |
+  > | `0.8.5` (2026-07-08) | 小さいテーブルの IVFFlat 構築のメモリ使用量 | **無し** |
+  > | `0.8.6` (2026-07-29) | buffer overflow with IVFFlat index build on 32-bit systems（[#1006](https://github.com/pgvector/pgvector/issues/1006)）ほか2件 | **`CVE-2026-18022`** CVSS 8.8 HIGH。⚠ **32bit システムのみ** |
+  >
+  > - 🔴 **`>= 0.8.2` は「既知の CVE が1つも残らない下限」ではない。** `CVE-2026-18022` の
+  >   MITRE `affected` は **`lessThan: "0.8.6"` / `version: "0"`** ＝ **`0.8.6` 未満のすべて**である。
+  > - ⭐ **ただし `CVE-2026-18022` は 32bit システムにしか効かない。** MITRE 逐語:
+  >   *"Integer wraparound in IVFFlat index build in pgvector before 0.8.6 allows a database user to
+  >   write data out-of-bounds, which could lead to arbitrary code execution. **Only 32-bit systems are
+  >   affected.**"* ⟹ **64bit だけを対象に置くなら、`>= 0.8.2` のままでも既知の CVE は残らない。**
+  > - ⛔ **mnemora が 32bit を対象に含めるかは製品判断であり、ここでは決めない。**
+  >   ⭐ **決めるのに要る材料を並べただけである。**
+  > - ⚠ **`0.8.3` が直した index corruption は、脆弱性としては採番されていない**（＝追記1 が
+  >   「下限が古い」の根拠に挙げた項目は、**セキュリティ上の根拠ではない**）。下限を動かす理由になるとすれば
+  >   正しさの側である。
+  > - ⚠ **上流の最新リリースは `v0.8.6`**（`CHANGELOG.md` 上 `0.8.7` は unreleased）。
+  > - ⭐ **この表が腐ったかは、上流の `CHANGELOG.md` と
+  >   `https://services.nvd.nist.gov/rest/json/cves/2.0?keywordSearch=pgvector` で引き直せる。**
 - **確かめていないこと**: マネージド Postgres 各社（RDS / Cloud SQL / Supabase 等）が
   実際に提供している pgvector のバージョンは確認していない。導入環境ごとに
   `SELECT * FROM pg_available_extensions WHERE name = 'vector';` で確認すること。
@@ -976,7 +1045,7 @@ Issue #198 / ADR 0124 で実装済みである。**図そのもの（遷移の�
 | 5 | active → superseded | 抽出・統合パイプラインが置換を機械的に決定 | 判定ロジック自体は非同期でよいが、書き込み（旧行の `status`/`superseded_by_id` 更新と新 Memory の作成）は1トランザクションで完結させる | `status='superseded'`、`superseded_by_id` | `superseded` |
 | 6 | active → contested | 判定できない対向を検出。実装は `Runtime.markContested(ctx, firstId, secondId)`（Issue #197、[ADR 0134](./decisions/0134-mark-contested-explicit-operation.md)）——**この口は矛盾かどうかを自分で判定しない。**判定は呼び出し側が持つ | 同上（`MemoryStore.markContestedPair` が1トランザクションで両側を書く） | 両側の `status='contested'`、`contested_with_id` を相互に設定 | `updated`（`meta.reason='contested'`） |
 | 7 | contested → active \| superseded | 新しい証拠・人手の訂正により解決。実装は `Runtime.resolveContested(ctx, firstId, secondId, resolution)`（Issue #197、[ADR 0150](./decisions/0150-resolve-contested-explicit-operation.md)）。`resolution` は `{kind:'supersede', winnerId}`（負けた側が出る）か `{kind:'both_active'}`（**対向ではなかったと分かった決着。負けた側が居ない**——この行の「（負けた側は）」という括弧書きに対応する）の2つ。⚠ **「統合により解決」だけは今日も実装が無い**（ADR 0150 負債3） | 判定は非同期でよいが書き込みは1トランザクション（`MemoryStore.resolveContestedPair`）。**適格性は両側 `status='contested'` かつ `contested_with_id` が相互に成立していること**——片方向の対は解決させない（ADR 0046 の対不変条件を、解決側から壊さないため） | `status` を確定、`contested_with_id` をクリア、（負けた側は）`superseded_by_id` を設定 | 勝った側 `updated` / 負けた側 `superseded`（`both_active` なら両側 `updated`）。どちらも `meta.reason='contested_resolved'`、`meta.resolution` に決着の種類 |
-| 8 | active/superseded/contested → archived | `decay_floor_at < now()` を検出する低頻度の掃引、または明示的なアーカイブ操作 | 非同期（定期ジョブ。全件走査ではなく `decay_floor_at` の範囲走査） | `status='archived'` | `archived` |
+| 8 | active/superseded/contested → archived | `decay_floor_at < now()` を検出する低頻度の掃引、または明示的なアーカイブ操作。🔴 **⚠ 2026-09-17 注記: 実装はこの3起点のうち `active` しか掃いていない。**[ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md) **決定2**（逐語「対象は `status = 'active'` のみ。`superseded`/`contested` はこの口では触らない」）が、**この行との食い違いを自覚したうえで**意図的に狭めたものである。⛔ **だからこの行を `active` だけに縮めないこと**——同 ADR の**引き受けた負債1**（逐語「`superseded`/`contested` な Memory は `decay_floor_at` を過ぎても掃かれない」）が帳簿に載せた事実が、表から消えるため。⚠ **同 ADR の「これが覆るとしたら」は2つとも既に発火している**（`contested` の解決規則＝[ADR 0150](./decisions/0150-resolve-contested-explicit-operation.md) の `resolveContested`、`archived` からの復元＝[ADR 0122](./decisions/0122-restore-archived-memory.md) の `restoreArchived`。**どちらも実装済み**）が、**掃引を広げるかは一度も再検討されていない。**⟹ **この行を実装に合わせるか実装をこの行に合わせるかは、文書を直す作業ではなく新しい判断である**（[Issue #465](https://github.com/takecchi/mnemora/issues/465)） | 非同期（定期ジョブ。全件走査ではなく `decay_floor_at` の範囲走査） | `status='archived'` | `archived` |
 | 9 | 任意 → forgotten | `forget(ctx, target)` 呼び出し | 同期（`EventStore` への追記と同一トランザクション） | `status='forgotten'` | `forgotten` |
 | 10 | forgotten → purged（実装済み。Issue #198 / ADR 0124） | `purge(ctx, target)` 呼び出し（法的要求） | 同期 | `content`/`digest` をトゥームストーンで上書き、`purged_at` 設定 | `purged` |
 | 11 | (memory_events の掃除) | `MemoryStore.purgeExpiredEvents?` の明示呼び出し（任意メソッド。Issue #210 / [ADR 0115](./decisions/0115-event-retention-purge.md)）。定期実行そのものは呼び出し側（運用のスクリプト・cron）の責務——`tick()`/`observe()` には配線しない | 非同期（保守ジョブ。`EventStore` interface は経由しない） | `memory_events` から古い行を DELETE | `events_purged`（件数・期間のみ。削除対象の詳細は残さない） |
