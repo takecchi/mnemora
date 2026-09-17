@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import type { Ctx, Memory, MemoryStore, Observation } from "@mnemora/core";
+import type { Ctx, Memory, MemoryStore, Observation, RecallResult } from "@mnemora/core";
 import { resultContainsObservation } from "../provenance-trace.js";
+import { buildMnemoraPrompt } from "../mnemora-path.js";
 
 /**
  * Issue #496 完了条件3: 「同じ出典から答えの情報を欠く digest を作るケースで、出典到達が
@@ -108,5 +109,94 @@ describe("resultContainsObservation: 出典到達は digest の中身に依ら�
         TARGET_EXTERNAL_ID,
       ),
     ).resolves.toBe(false);
+  });
+});
+
+/**
+ * Issue #498 完了条件4: 「同じ出典のまま答えの情報を欠落させた場合に、内容保持または
+ * 回答評価が失敗することを確認する」。**逐語は選言（or）である。**
+ *
+ * ⭐ **示すもの（本題）**: `resultContainsObservation`（層1・出典到達）が `true` の
+ * ままでも、`buildMnemoraPrompt`（`../mnemora-path.js`。`recall.memories[].digest` を
+ * 並べるだけの純関数——LLM も DB も呼ばない）が実際に組み立てる、**モデルへ渡る文**
+ * からは答えの語が落ちうる。出典到達（層1）と内容保持（層2）は別の検査でなければ
+ * 区別できない、という Issue #498 の完了条件2 と同じ主張を、変異の形で固定する。
+ *
+ * ⛔ **示さないもの**: **評価器（`gradeAnswer`/judge）がこの欠落を捕まえられること。**
+ * それが Issue #498 設計コメント §7 が意図した「回答評価が失敗する」側の陽性対照
+ * であり、**この検査は judge を1度も走らせていない**。理由は機構的である
+ * （`examples/chat/cassettes/answer.json` の `llm.entries` 67件は抽出26 + 回答生成24
+ * （相異なる質問12件 × {naive, mnemora} の対、余り0件）+ judge17 に分かれ、回答生成の
+ * 24件には変異後のプロンプトが1件も記録されていない——`packages/testkit/src/__fixtures__/cassette.ts`
+ * の `llmCassetteKey` は `{system, messages}` を正準化した SHA-256 なので、`digest` を
+ * 変異させれば鍵が変わり、`recorded` provider は例外を投げる。記録し直すには実 API と
+ * 鍵が要り、それはオーナーの判断である——詳細は
+ * [ADR 0234](../../../docs/decisions/0234-answer-retention-mutation-tested-not-recorded.md)）。
+ * ⟹ 内容保持の側だけがこの検査の対象であり、**#498 はこれで閉じない。**
+ *
+ * ⛔ **もう一つ正直に書く**: 下の3番目のアサーション（`buildMnemoraPrompt` の出力に
+ * 答えの語が無い）は、**それ単独ではほぼ同語反復である**——答えを含まない digest を
+ * 渡せば答えを含まない文字列が返るのは、`buildMnemoraPrompt` が `digest` を
+ * そのまま並べる純関数である以上ほぼ自明である。**この検査に値打ちを持たせているのは、
+ * 2番目（層1は true のまま）との対比だけである。**「出典には届いているのに、
+ * モデルへ渡る文からは答えが消えている」という食い違いこそが、Issue #496/#498 が
+ * 指摘した「出典到達は情報保持の証明ではない」の実演になる。
+ */
+describe("buildMnemoraPrompt vs resultContainsObservation: 出典到達は内容保持を保証しない（Issue #498 完了条件4・内容保持の側）", () => {
+  const ANSWER_WORD = "青";
+  const DIGEST_WITH_ANSWER = `私の好きな色は${ANSWER_WORD}です。`;
+  const DIGEST_INFO_LOST = "[要約失敗。内容は保持していません]";
+  const MEMORY_ID = "mem-answer-retention";
+
+  function buildFakeRecall(digest: string): RecallResult {
+    return {
+      recallId: "recall-answer-retention-test",
+      memories: [
+        {
+          memoryId: MEMORY_ID,
+          digest,
+          retrievedVia: "ann",
+        },
+      ],
+      omitted: [],
+      index: { groups: [], totalInScope: 1, countKind: "exact" },
+      usage: {},
+      explain: { stages: [] },
+    } as unknown as RecallResult;
+  }
+
+  it("digest から答えの語を落としても層1(出典到達)は true のままで、しかしモデルへ渡る文からは答えが消え、復元すると戻る", async () => {
+    // 同じ memoryId・同じ sourceObservationId を保ったまま、digest だけを
+    // 「情報を保持したまま」と「情報を欠落させた」の2通り用意する。
+    const memoryStore = buildFakeMemoryStore(
+      {
+        [MEMORY_ID]: { digest: DIGEST_INFO_LOST, sourceObservationId: "obs-target" },
+      },
+      {
+        "obs-target": { externalId: TARGET_EXTERNAL_ID },
+      },
+    );
+
+    const recallInfoLost = buildFakeRecall(DIGEST_INFO_LOST);
+    const recallInfoKept = buildFakeRecall(DIGEST_WITH_ANSWER);
+
+    // 1 & 2. 層1（出典到達）: digest から答えの語を落としても、
+    // sourceObservationId が変わっていなければ true のまま。
+    // ⟹ 出典到達は情報保持の証明ではない（本題）。
+    await expect(
+      resultContainsObservation(memoryStore, ctx, recallInfoLost.memories, TARGET_EXTERNAL_ID),
+    ).resolves.toBe(true);
+
+    // 3. モデルへ渡る文（buildMnemoraPrompt の出力）には答えの語が無い。
+    // ⛔ これ単独では同語反復に近い——値打ちは直前の(true のまま)との対比にある。
+    expect(buildMnemoraPrompt(recallInfoLost)).not.toContain(ANSWER_WORD);
+
+    // 4. 復元（digest に答えの語を戻す）すると、モデルへ渡る文にも答えが戻る。
+    // ⟹ 緑に戻ることの確認。層1は最初から一貫して true のままである
+    //   （情報の有無で出典到達の判定は動いていない）。
+    expect(buildMnemoraPrompt(recallInfoKept)).toContain(ANSWER_WORD);
+    await expect(
+      resultContainsObservation(memoryStore, ctx, recallInfoKept.memories, TARGET_EXTERNAL_ID),
+    ).resolves.toBe(true);
   });
 });
