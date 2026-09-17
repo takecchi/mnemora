@@ -7,7 +7,7 @@
 > - 「**一部のベクトル DB 製品はメタデータとベクトル距離を組み合わせたスコアリングを提供する**」
 >   【受・未検証】 製品名が1つも書かれていないため、裏の取りようが無い。
 > - 「**partial index は離散値・低カーディナリティのフィルタに公式に推奨されている**」
->   【受・未検証】 同種の主張は本 ADR のほか [`docs/memory-model.md`](../memory-model.md)「前提: pgvector のバージョン」付近
+>   【受・未検証】 同種の主張は本 ADR のほか [`docs/memory-model.md`](../memory-model.md)「partial index についての注意」
 >   （「**PostgreSQL 公式の推奨**」）と [`docs/recall.md`](../recall.md)（「**pgvector 公式の推奨**」）にも在る。
 >   ⚠ **3箇所で「誰の公式か」がずれている**——本 ADR は主体を書かず、`memory-model.md` は PostgreSQL、
 >   `recall.md` は pgvector と、それぞれ別の主体を名指ししている。3つが同じ主張の言い換えなら、
