@@ -116,6 +116,21 @@ LLM へ送る」ベンチである**（`buildMnemoraPrompt(recall)` → `complet
 非決定的な偽 provider を食わせ、**記録が、記録を作った実行そのものを再生できる**ことを
 固定する。**【実測】memo を外すと2本が赤くなり、戻すと緑に戻ることを確認した。**
 
+#### 公開 API 表面の変化（ADR 0178 の門）
+
+**`CassetteRecorder` に公開メソッドが2本増えた**——`lookupLLM` / `lookupEmbedding`。
+記録用のデコレータが「もう録ったか」を問い合わせるための口である。
+
+⛔ **破壊的変更ではない**——**追加のみで、削除も署名の変更も無い**
+（`scripts/__snapshots__/public-api/testkit.d.ts` の差分が、この2本と、それに伴う
+型 import 1行だけであることを確認した）。⚠ `@mnemora/testkit` は適合テストと擬似物を
+提供するパッケージであり、この2本は**記録器を自作したい呼び出し側が使える口**として
+意図的に公開する（`embeddingCount` / `llmCount` が既に同じ層で公開されているのと同じ扱い）。
+
+⚠ **snapshot を更新する前に `pnpm run build` で dist を作り直した**——この歯は
+`packages/<name>/dist` の `.d.ts` を読むので、dist が古いまま `--write` すると
+**他人が入れた変更を snapshot から消してしまう**（歯を無効化する。ADR 0178 の注意書き）。
+
 ### 2. 二次観測（LLM 採点）は `complete()` ＋厳格パースで実装し、一次判定を上書きしない
 
 Issue #506 の未達1件。完了条件の逐語【現物】:

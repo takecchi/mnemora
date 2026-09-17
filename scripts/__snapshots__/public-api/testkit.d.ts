@@ -1,6 +1,6 @@
 // ===== dist/__fixtures__/cassette-recorder.d.ts =====
 import type { Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
-import type { Cassette } from "./cassette.js";
+import type { Cassette, EmbeddingCassetteEntry } from "./cassette.js";
 export declare class CassetteRecorder {
     private readonly embeddingEntries;
     private readonly llmEntries;
@@ -10,6 +10,11 @@ export declare class CassetteRecorder {
     recordLLM(model: string, prompt: PromptSpec, value: unknown): void;
     get embeddingCount(): number;
     get llmCount(): number;
+    lookupLLM(prompt: PromptSpec): {
+        prompt: PromptSpec;
+        value: unknown;
+    } | undefined;
+    lookupEmbedding(text: string): EmbeddingCassetteEntry | undefined;
     toCassette(now?: Date): Cassette;
 }
 export declare class RecordingEmbeddingProvider implements EmbeddingProvider {
