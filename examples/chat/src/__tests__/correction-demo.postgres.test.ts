@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from "vitest";
+import type { RecallRecordMemory } from "@mnemora/core";
 import {
   checkCorrectionDemo,
   checkCorrectionOmission,
@@ -88,6 +89,49 @@ describe("examples/chat: correction（markContested → resolveContested、本�
       expect(result.afterResolve!.omitted).toContainEqual(
         expect.objectContaining({ kind: "filtered", condition: "superseded" }),
       );
+
+      // 🔴 Issue #369 チェックボックス: 選んだ根拠(recallId・順位・候補の数・どちらへ
+      // 倒したか)が、実際に memory_events.meta.note へ届いていることを、本物の
+      // EventStore.list() で読み戻して検査する(「渡した」ではなく「残った」を測る)。
+      const ctx = { tenantId: "example-chat-correction-test" };
+      const originalEvents = await handle.eventStore.list(ctx, { memoryId: result.originalId });
+      // markContested(kind='updated', meta.reason='contested') と
+      // resolveContested(kind='superseded', meta.reason='contested_resolved')の
+      // 2件がoriginalId側に積まれているはず(original は resolveContested の敗者)。
+      expect(originalEvents.length).toBeGreaterThanOrEqual(2);
+      const contestedEvent = originalEvents.find((e) => e.meta.reason === "contested");
+      const resolvedEvent = originalEvents.find((e) => e.meta.reason === "contested_resolved");
+      expect(contestedEvent).toBeDefined();
+      expect(resolvedEvent).toBeDefined();
+
+      for (const event of [contestedEvent, resolvedEvent]) {
+        const note = event!.meta.note;
+        expect(typeof note).toBe("string");
+        expect(note as string).toContain(`recallId=${result.discovery.recallId}`);
+        expect(note as string).toContain(`chosenRecallRank=${result.chosenRecallRank}`);
+        expect(note as string).toContain(`candidates=${result.discovery.candidates.length}`);
+        expect(note as string).toContain("winner=correction");
+      }
+
+      // 🔴 「両方から辿れる」の橋を実際に渡る: meta.note から recallId を取り出し、
+      // Runtime.getRecall へ渡すと RecallResult.explain と同じ形(stages)が引ける。
+      const noteText = contestedEvent!.meta.note as string;
+      const bridgedRecallId = /recallId=([^ /]+)/.exec(noteText)?.[1];
+      expect(bridgedRecallId).toBe(result.discovery.recallId);
+      const record = await handle.runtime.getRecall(ctx, bridgedRecallId!);
+      expect(record).not.toBeNull();
+      expect(Array.isArray(record!.explain.stages)).toBe(true);
+
+      // 🔴 チェックボックスの逐語は「スコア・順位・候補の数・どちらへ倒したか」である。
+      // 順位/候補の数/どちらへ倒したかは meta.note が直接持つ(上)。⭐ スコアは meta.note には
+      // 載せず、この橋の先から引く(ADR の「score.total を載せない」判断)。⟹ その「引ける」を
+      // 主張のままにせず実測する——さもないと逐語の4つのうち1つが測られていないまま残る。
+      expect(record!.returnedMemories.breakdownCaptured).toBe(true);
+      const chosenInRecall = record!.returnedMemories.memories.find(
+        (m) => m.memoryId === result.chosenId,
+      );
+      expect(chosenInRecall).toBeDefined();
+      expect(typeof (chosenInRecall as RecallRecordMemory).score.total).toBe("number");
     } finally {
       await handle.close();
     }

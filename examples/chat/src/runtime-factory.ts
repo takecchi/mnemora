@@ -63,6 +63,15 @@ export interface ExampleRuntimeHandle {
    * （`@mnemora/core`）を通してのみ行う——生 SQL の UPSERT は増やさない。
    */
   tenantSettingsStore: PostgresTenantSettingsStore;
+  /**
+   * Issue #369 チェックボックス（選んだ根拠を `memory_events.meta.note` から辿れるように
+   * する）の歯が公開する。**`packages/core`/`packages/postgres` は変更していない**——
+   * `PostgresEventStore` は元から公開の class であり、これまで `createExampleRuntime`
+   * の返り値に含めていなかっただけ（`memoryStore`/`tenantSettingsStore` を足したときと
+   * 同じ理由）。`correction-demo.postgres.test.ts` が `memory_events` を読み戻して
+   * `meta.note` に選んだ根拠が実際に届いているかを検査するために使う。
+   */
+  eventStore: PostgresEventStore;
   close(): Promise<void>;
 }
 
@@ -107,12 +116,13 @@ export async function createExampleRuntime(
 
   const memoryStore = new PostgresMemoryStore(client.db);
   const tenantSettingsStore = new PostgresTenantSettingsStore(client.db);
+  const eventStore = new PostgresEventStore(client.db);
   const runtime = createRuntime({
     memoryStore,
     outboxStore: new PostgresOutboxStore(client.db),
     vectorStore: new PostgresVectorStore(client.db),
     lexicalStore: new PostgresLexicalStore(client.db),
-    eventStore: new PostgresEventStore(client.db),
+    eventStore,
     tenantSettingsStore,
     llmProvider,
     embeddingProvider,
@@ -128,6 +138,7 @@ export async function createExampleRuntime(
     ...(usageMeter !== undefined ? { usageMeter } : {}),
     memoryStore,
     tenantSettingsStore,
+    eventStore,
     embeddingProvider,
     pool: client.pool,
     close: () => closePostgresClient(client),
