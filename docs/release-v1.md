@@ -1610,6 +1610,12 @@ publish そのものは通っている。dist-tag は Release が pre-release �
 
 1. **provenance の確認方法の具体的なコマンド・画面**（§5.2）。過去の ADR は
    「付いた」という結果だけを記録しており、確認手順そのものは記録されていない。
+
+   **⭐ 追記（2026-09-17）— 埋まった。⛔ もう一度書き起こさないこと。**§5.2 の追記が
+   `npm view <spec> --json` の `dist.attestations.provenance.predicateType` と
+   `_npmUser.trustedPublisher.id`、および `npm audit signatures` の両方を【実測】で
+   記録している。**さらに §5.4 が、それを6本ぶんまとめて打って判定する形にしている**
+   （当日の正規経路）。⟹ **この項目はもう「分からなかった点」ではない。**
 2. **信頼発行元（Trusted Publisher）の現在の設定状態。**この作業者は npmjs.com の
    画面を一度も見ていない。6パッケージ全部で「org/repo/workflow filename/直接publish許可」
    が正しく設定されているかは、**オーナーが当日 npm の画面で確認する必要がある**
