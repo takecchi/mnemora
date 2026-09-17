@@ -142,61 +142,66 @@ describe("resultContainsObservation: 出典到達は digest の中身に依ら�
  * モデルへ渡る文からは答えが消えている」という食い違いこそが、Issue #496/#498 が
  * 指摘した「出典到達は情報保持の証明ではない」の実演になる。
  */
-describe("buildMnemoraPrompt vs resultContainsObservation: 出典到達は内容保持を保証しない（Issue #498 完了条件4・内容保持の側）", () => {
-  const ANSWER_WORD = "青";
-  const DIGEST_WITH_ANSWER = `私の好きな色は${ANSWER_WORD}です。`;
-  const DIGEST_INFO_LOST = "[要約失敗。内容は保持していません]";
-  const MEMORY_ID = "mem-answer-retention";
+describe(
+  "buildMnemoraPrompt vs resultContainsObservation: 出典到達は内容保持を保証しない" +
+    "（Issue #498 完了条件4・内容保持の側。⛔ 回答評価は測らない——評価器(gradeAnswer/judge)を" +
+    "1度も走らせていないため、§7 が意図した陽性対照は未達のままである）",
+  () => {
+    const ANSWER_WORD = "青";
+    const DIGEST_WITH_ANSWER = `私の好きな色は${ANSWER_WORD}です。`;
+    const DIGEST_INFO_LOST = "[要約失敗。内容は保持していません]";
+    const MEMORY_ID = "mem-answer-retention";
 
-  function buildFakeRecall(digest: string): RecallResult {
-    return {
-      recallId: "recall-answer-retention-test",
-      memories: [
+    function buildFakeRecall(digest: string): RecallResult {
+      return {
+        recallId: "recall-answer-retention-test",
+        memories: [
+          {
+            memoryId: MEMORY_ID,
+            digest,
+            retrievedVia: "ann",
+          },
+        ],
+        omitted: [],
+        index: { groups: [], totalInScope: 1, countKind: "exact" },
+        usage: {},
+        explain: { stages: [] },
+      } as unknown as RecallResult;
+    }
+
+    it("digest から答えの語を落としても層1(出典到達)は true のままで、しかしモデルへ渡る文からは答えが消え、復元すると戻る", async () => {
+      // 同じ memoryId・同じ sourceObservationId を保ったまま、digest だけを
+      // 「情報を保持したまま」と「情報を欠落させた」の2通り用意する。
+      const memoryStore = buildFakeMemoryStore(
         {
-          memoryId: MEMORY_ID,
-          digest,
-          retrievedVia: "ann",
+          [MEMORY_ID]: { digest: DIGEST_INFO_LOST, sourceObservationId: "obs-target" },
         },
-      ],
-      omitted: [],
-      index: { groups: [], totalInScope: 1, countKind: "exact" },
-      usage: {},
-      explain: { stages: [] },
-    } as unknown as RecallResult;
-  }
+        {
+          "obs-target": { externalId: TARGET_EXTERNAL_ID },
+        },
+      );
 
-  it("digest から答えの語を落としても層1(出典到達)は true のままで、しかしモデルへ渡る文からは答えが消え、復元すると戻る", async () => {
-    // 同じ memoryId・同じ sourceObservationId を保ったまま、digest だけを
-    // 「情報を保持したまま」と「情報を欠落させた」の2通り用意する。
-    const memoryStore = buildFakeMemoryStore(
-      {
-        [MEMORY_ID]: { digest: DIGEST_INFO_LOST, sourceObservationId: "obs-target" },
-      },
-      {
-        "obs-target": { externalId: TARGET_EXTERNAL_ID },
-      },
-    );
+      const recallInfoLost = buildFakeRecall(DIGEST_INFO_LOST);
+      const recallInfoKept = buildFakeRecall(DIGEST_WITH_ANSWER);
 
-    const recallInfoLost = buildFakeRecall(DIGEST_INFO_LOST);
-    const recallInfoKept = buildFakeRecall(DIGEST_WITH_ANSWER);
+      // 1 & 2. 層1（出典到達）: digest から答えの語を落としても、
+      // sourceObservationId が変わっていなければ true のまま。
+      // ⟹ 出典到達は情報保持の証明ではない（本題）。
+      await expect(
+        resultContainsObservation(memoryStore, ctx, recallInfoLost.memories, TARGET_EXTERNAL_ID),
+      ).resolves.toBe(true);
 
-    // 1 & 2. 層1（出典到達）: digest から答えの語を落としても、
-    // sourceObservationId が変わっていなければ true のまま。
-    // ⟹ 出典到達は情報保持の証明ではない（本題）。
-    await expect(
-      resultContainsObservation(memoryStore, ctx, recallInfoLost.memories, TARGET_EXTERNAL_ID),
-    ).resolves.toBe(true);
+      // 3. モデルへ渡る文（buildMnemoraPrompt の出力）には答えの語が無い。
+      // ⛔ これ単独では同語反復に近い——値打ちは直前の(true のまま)との対比にある。
+      expect(buildMnemoraPrompt(recallInfoLost)).not.toContain(ANSWER_WORD);
 
-    // 3. モデルへ渡る文（buildMnemoraPrompt の出力）には答えの語が無い。
-    // ⛔ これ単独では同語反復に近い——値打ちは直前の(true のまま)との対比にある。
-    expect(buildMnemoraPrompt(recallInfoLost)).not.toContain(ANSWER_WORD);
-
-    // 4. 復元（digest に答えの語を戻す）すると、モデルへ渡る文にも答えが戻る。
-    // ⟹ 緑に戻ることの確認。層1は最初から一貫して true のままである
-    //   （情報の有無で出典到達の判定は動いていない）。
-    expect(buildMnemoraPrompt(recallInfoKept)).toContain(ANSWER_WORD);
-    await expect(
-      resultContainsObservation(memoryStore, ctx, recallInfoKept.memories, TARGET_EXTERNAL_ID),
-    ).resolves.toBe(true);
-  });
-});
+      // 4. 復元（digest に答えの語を戻す）すると、モデルへ渡る文にも答えが戻る。
+      // ⟹ 緑に戻ることの確認。層1は最初から一貫して true のままである
+      //   （情報の有無で出典到達の判定は動いていない）。
+      expect(buildMnemoraPrompt(recallInfoKept)).toContain(ANSWER_WORD);
+      await expect(
+        resultContainsObservation(memoryStore, ctx, recallInfoKept.memories, TARGET_EXTERNAL_ID),
+      ).resolves.toBe(true);
+    });
+  },
+);
