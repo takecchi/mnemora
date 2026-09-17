@@ -95,6 +95,7 @@ import { ANSWER_CASE_SET_EVAL } from "./answer-case-set.eval.js";
 import { buildAnswerJson } from "./answer-json.js";
 import {
   formatAnswerCostTable,
+  formatAnswerInputReduction,
   formatAnswerQualityBanner,
   formatAnswerTable,
 } from "./answer-format.js";
@@ -750,6 +751,75 @@ async function recordCompare(
 }
 
 /**
+ * `answer` を実 API で走らせて記録する（Issue #506 / 親 #498。ADR 0051）。
+ *
+ * **再生する当のもの（`runAnswer` と同じ実行経路）をそのまま走らせて録る。**
+ * 「必要そうな入力を列挙する」形は採らない——`runRecord` docstring と同じ規律。
+ * ここでは `createAnswerBenchRuntime` に `MNEMORA_LLM=openai`/`MNEMORA_EMBEDDING=openai`
+ * を明示で渡し、`ANSWER_CASE_SET_DEV` + `ANSWER_CASE_SET_EVAL` の全12件を
+ * `runAnswerBench` に通す（judge の呼び出しも同じ経路で記録される）。
+ *
+ * ⚠ **tenantPrefix に `runId` を含め、毎回新しいテナントにする。** `observe()` は
+ * `externalId` で重複排除するため、既に取り込み済みのテナントで録ると抽出も埋め込みも
+ * 呼ばれず「空のカセット」で `CassetteRecorder.toCassette()` が落ちる（ADR 0051
+ * 「引き受けた負債4」——`recordRetrieval`/`recordCompare` と同じ既知の事故を踏まない）。
+ */
+async function recordAnswer(
+  databaseUrl: string,
+  recorder: CassetteRecorder,
+  runId: number,
+): Promise<void> {
+  console.log("\n########## 記録中: answer ##########");
+  const measuredAt = new Date();
+  const commit = tryGitRevParseHead(process.cwd());
+  const handle = await createAnswerBenchRuntime(
+    databaseUrl,
+    { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
+    { recorder },
+  );
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+    const results = await runAnswerBench(
+      handle.runtime,
+      handle.llmProvider,
+      handle.embeddingProvider,
+      handle.judgeLLMProvider,
+      cases,
+      `answer-record-${runId}`,
+    );
+
+    // 記録しながら実測もできてしまうので、その場で出す（`recordCompare` と同じ規律）。
+    console.log(`\n${formatAnswerTable(results, handle.llmMode)}`);
+    console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
+    console.log(formatAnswerCostTable(results));
+    console.log(`\n${formatAnswerInputReduction(results)}`);
+    if (handle.usageMeter) {
+      console.log(`\n${handle.usageMeter.formatReport()}`);
+    }
+
+    // ⭐ `record answer` でも `MNEMORA_ANSWER_JSON` が設定されていれば書き出す
+    // ——記録と同時に実測結果を機械可読な形でも取りたい、という要望への対応。
+    // `llmMode`/`embeddingMode` はここで実際に走った値（`handle.llmMode`/`handle.embeddingMode`、
+    // 常に `"openai"`）を使う。
+    const jsonPath = process.env.MNEMORA_ANSWER_JSON;
+    if (jsonPath) {
+      const json = buildAnswerJson({
+        results,
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        measuredAt,
+        commit,
+      });
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(`\n[answer] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * 実 API の応答を記録してカセットに書き出す（ADR 0051 / 0052）。
  *
  * **再生する当のものをそのまま走らせて録る。**probe set や会話生成を読んで
@@ -775,8 +845,10 @@ async function runRecord(target: CassetteTarget): Promise<void> {
 
   if (target === "retrieval") {
     await recordRetrieval(databaseUrl, recorder, runId);
-  } else {
+  } else if (target === "compare") {
     await recordCompare(databaseUrl, recorder, runId);
+  } else {
+    await recordAnswer(databaseUrl, recorder, runId);
   }
 
   const cassette = recorder.toCassette();
@@ -1518,9 +1590,11 @@ async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): P
  *
  * **provider は `compare`/`retrieval` と同じ規律**(`createAnswerBenchRuntime` 内部の
  * `createProviders` が、`MNEMORA_LLM`/`MNEMORA_EMBEDDING` の明示指定か、
- * 無指定なら `OPENAI_API_KEY` の有無で決める)。⛔ **本 PR ではカセットを新規に
- * 記録していない**——`MNEMORA_LLM=recorded` を指定しても、カセットが無いので
- * `createProviders` の `requireCassette` がそのまま落ちる(既存の挙動のまま)。
+ * 無指定なら `OPENAI_API_KEY` の有無で決める)。**`record answer`（`recordAnswer`）で
+ * カセットを作れる**——作った後は `MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded`
+ * を明示すれば、実 API を叩かずに記録を再生できる(ADR 0051)。カセットが無い状態で
+ * `MNEMORA_LLM=recorded` を指定すると、既存の挙動どおり `createProviders` の
+ * `requireCassette` がそのまま落ちる。
  *
  * `runtime-factory.ts` の `createExampleRuntime` を使わない理由は
  * `answer-bench.ts` の `createAnswerBenchRuntime` の docstring を見ること
@@ -1530,7 +1604,16 @@ async function runAnswer(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   const measuredAt = new Date();
   const commit = tryGitRevParseHead(process.cwd());
-  const handle = await createAnswerBenchRuntime(databaseUrl, process.env);
+  // ⭐ `compare`/`retrieval` と同じ配線でカセットを解決する——`MNEMORA_LLM=recorded` を
+  // 指定したときに `createProviders` の `requireCassette` が落ちていたのは、ここで読んで
+  // 渡していなかったからである（器が着地した時点では `answer` 用のカセットが存在せず、
+  // この口を繋ぐ相手が無かった。Issue #506 / 親 #498）。
+  const cassette = resolveCassetteForRun("answer");
+  const handle = await createAnswerBenchRuntime(
+    databaseUrl,
+    process.env,
+    cassette ? { cassette } : {},
+  );
   // ⭐ 品質を主張できないモードでは、stdout の先頭で目立たせる(AGENTS.md §5)。
   const banner = formatAnswerQualityBanner(handle.llmMode);
   if (banner) {
@@ -1548,6 +1631,7 @@ async function runAnswer(): Promise<void> {
       handle.runtime,
       handle.llmProvider,
       handle.embeddingProvider,
+      handle.judgeLLMProvider,
       cases,
       "answer-bench",
     );
@@ -1555,6 +1639,7 @@ async function runAnswer(): Promise<void> {
     console.log(formatAnswerTable(results, handle.llmMode));
     console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
     console.log(formatAnswerCostTable(results));
+    console.log(`\n${formatAnswerInputReduction(results)}`);
 
     // `MNEMORA_ANSWER_JSON` が設定されたときだけ書く。未設定なら1バイトも挙動を
     // 変えない(既存の `MNEMORA_COMPARE_JSON` 等と同じ規約)。
@@ -1691,9 +1776,13 @@ function printHelp(): void {
       "                                                                      # retrieval の応答を記録する(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",
       "                                                                      # compare の応答を記録する(ADR 0052。657回・8〜15分・約$0.023)",
+      "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer",
+      "                                                                      # answer(naive/mnemora の最終回答 + judge)の応答を記録する(Issue #506。MNEMORA_ANSWER_JSON も書ける)",
       "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify   # retrieval の記録と実 API の乖離を測る",
       "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:compare",
       "                                                                      # compare の記録と実 API の乖離を測る",
+      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer",
+      "                                                                      # answer の記録と実 API の乖離を測る",
       "",
       "  MNEMORA_PROVIDER_SOURCE=recorded|openai  # retrieval/compare で「キーがあれば実API」を明示的に上書きする(ADR 0068)",
       "                                                                      #   recorded: キーが在ってもカセットを再生する(誤って課金しない)",

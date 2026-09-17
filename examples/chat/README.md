@@ -1478,22 +1478,41 @@ Memory を1件も作らない・ラウンドを反復しない**（1回 sweep �
 
 ## `answer`: naive と mnemora の最終回答・入力量を対で出す（Issue #506 / 親 #498）
 
-⭐ **この器は回答品質をまだ測っていない。** 同じ会話・同じ質問・同じ回答モデル・同じ採点
-基準で、naive（会話ログ全文）経路と mnemora（記憶の列）経路を両方回し、最終回答と
-`complete()` へ渡した入力量（chars・`heuristicTokenCounter` の概算トークン）を対で出す
-——ここまでが本コマンドの範囲である。
+⭐ **この器は naive（会話ログ全文）経路と mnemora（記憶の列）経路を、同じ会話・同じ質問・
+同じ回答モデル・同じ採点基準で両方回し、最終回答と `complete()` へ渡した入力量
+（chars・`heuristicTokenCounter` の概算トークン）を対で出す。**
+
+一次判定（`gradeAnswer`、文字列の包含判定、LLM を呼ばない）に加えて、**二次観測**
+（同じ回答を LLM 自身にも採点させる `judgeAnswer`、`src/answer-judge.ts`）を持つ。
+二次観測は一次判定を上書きしない——`reconcileVerdicts` が一次と二次を突き合わせ、
+一致すればその値を、食い違えば `"indeterminate"` を返す（ADR 0222 の三分割に倣う）。
 
 🔴 **これは配線の検査であって、回答品質の測定ではない。** `answerQualityClaimable(llmMode)`
-が `false`（`llmMode=deterministic`）のときは、正誤の列を `—` にし、集計（何件中何件
-pass）も出さない。`deterministic` の LLM（`@mnemora/testkit` の `DeterministicLLMProvider`）
-は意味を持たない stub——`complete()` は渡した最後のメッセージをそのままエコーするだけで、
-質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけであり、
-`answer` 用のカセットは本 PR ではまだ記録していない（`docs/decisions/` に追加した ADR の
-「引き受けた負債」参照）。
+が `false`（`llmMode=deterministic`）のときは、正誤・二次観測・突き合わせのすべての列を
+`—` にし、集計（何件中何件 pass、二次観測の集計、突き合わせ後の集計）も出さない。
+`deterministic` の LLM（`@mnemora/testkit` の `DeterministicLLMProvider`）は意味を
+持たない stub——`complete()` は渡した最後のメッセージをそのままエコーするだけで、
+質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけである。
 
 ```
 DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer
 MNEMORA_ANSWER_JSON=/tmp/answer.json DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer
+```
+
+**`answer` 用のカセットは `record answer` で作る（ADR 0051）。**
+
+```
+DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer
+```
+
+`ANSWER_CASE_SET_DEV`/`ANSWER_CASE_SET_EVAL` の全12件を、`runAnswer` と同じ実行経路
+（naive/mnemora の回答生成 + judge の採点）でそのまま走らせて記録する——記録も
+`MNEMORA_ANSWER_JSON` に対応しており、記録と同時に実測結果の JSON も書き出せる。
+記録した後は、鍵を外して次のように再生できる:
+
+```
+DATABASE_URL=... MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded pnpm --filter @mnemora/example-chat run answer
+OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer   # 記録と実 API の乖離を測る
 ```
 
 - ケース集合は `src/answer-case-set.dev.ts`（development、調整に使ってよい）と
@@ -1503,8 +1522,15 @@ MNEMORA_ANSWER_JSON=/tmp/answer.json DATABASE_URL=... pnpm --filter @mnemora/exa
 - 一次判定（`gradeAnswer`、`src/answer-case.ts`）は文字列の包含判定であり、LLM を
   呼ばない。**`digest`（自由な要約）への文字列一致ではない**——対象は「答えが短く
   閉じる質問への最終回答」だけであり、評価ケースはその制約とセットでのみ成立する。
-- 追加費用（取り込み時の抽出 LLM 呼び出し・埋め込み呼び出し・回答生成の LLM 呼び出し）は
-  別ブロックで出す。⛔ 削減率からは差し引かない。
+- 二次観測（`judgeAnswer`、`src/answer-judge.ts`）は `complete()`（素のテキスト）＋
+  厳格パースで、パースできない応答は必ず `indeterminate` にする（既定で `pass`/`fail`
+  へ倒さない）。**`expected.accept`/`expected.reject` は judge に渡さない**——独立した
+  観測でなくなるため（`docs/autonomy.md` §2.2 決定5）。judge の呼び出し回数は
+  `answerLLMCalls` とは別勘定（`judgeLLMCalls`）で数える。
+- 追加費用（取り込み時の抽出 LLM 呼び出し・埋め込み呼び出し・回答生成の LLM 呼び出し・
+  judge の LLM 呼び出し）は別ブロックで出す。⛔ 削減率からは差し引かない。
+- **入力量の削減率は `qualityClaimable` に関係なく常に出す**（`inputReduction`、
+  JSON では `AnswerRunJson.inputReduction`）——入力量そのものは品質の主張ではない。
 
 ---
 

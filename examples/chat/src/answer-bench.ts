@@ -26,11 +26,14 @@ import {
 } from "@mnemora/postgres";
 import type { AnswerCase, AnswerVerdict } from "./answer-case.js";
 import { gradeAnswer } from "./answer-case.js";
+import type { AnswerJudgement } from "./answer-judge.js";
+import { judgeAnswer, reconcileVerdicts } from "./answer-judge.js";
 import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
 import { naivePrompt } from "./naive-path.js";
 import type { CreateProvidersOptions, EnvLike, ProviderMode } from "./providers.js";
 import { createProviders } from "./providers.js";
 import type { Conversation, ConversationTurn } from "./scenario.js";
+import type { UsageMeter } from "./usage-meter.js";
 
 /**
  * `answer` サブコマンドの本体（Issue #506 / 親 #498）。
@@ -166,6 +169,25 @@ export interface AnswerBenchRuntimeHandle {
   embeddingMode: ProviderMode;
   llmProvider: CountingLLMProvider;
   embeddingProvider: CountingEmbeddingProvider;
+  /**
+   * judge（`answer-judge.ts`）専用の呼び出し回数カウンタ。**`llmProvider` とは別の
+   * `CountingLLMProvider` インスタンスである**——ただし同じ生の `created.llmProvider`
+   * （実 API / 記録の再生 / deterministic のいずれか）を包むだけの薄いデコレータなので、
+   * 2つに分けても届く先は完全に同じ1個の provider である。
+   *
+   * **これが要る理由**: `CountingLLMProvider.complete()` は呼ぶたびに
+   * `answerCalls` を1増やす。judge も `complete()` を呼ぶ（`answer-judge.ts` 設計上の
+   * 必須事項1）ため、もし judge が `llmProvider`（回答生成と同じインスタンス）を経由すると
+   * `answerLLMCalls`（「回答生成のみで常に2」という既存の契約・`answer-bench.postgres.test.ts`
+   * の固定 assertion）が 2 から 4 に化ける。**呼び出し先を分けるのではなく、数える
+   * デコレータのインスタンスを分けることで、既存の `answerLLMCalls` の意味を1バイトも
+   * 変えずに judge の呼び出し回数を独立に数えられる**——`llmCassetteKey` はプロンプト内容の
+   * ハッシュで引くため（`packages/testkit/src/__fixtures__/cassette.ts`）、どちらの
+   * デコレータ経由で呼んだかは記録・再生のどちらにも影響しない。
+   */
+  judgeLLMProvider: CountingLLMProvider;
+  /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する（`Providers.usageMeter` と同じ規約）。 */
+  usageMeter?: UsageMeter;
   close(): Promise<void>;
 }
 
@@ -179,6 +201,8 @@ export async function createAnswerBenchRuntime(
 
   const created = createProviders(env, providerOptions);
   const llmProvider = new CountingLLMProvider(created.llmProvider);
+  // ⭐ 同じ生の provider を、judge 専用の別インスタンスでもう一度包む(上記 docstring)。
+  const judgeLLMProvider = new CountingLLMProvider(created.llmProvider);
   const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
   await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
@@ -200,6 +224,8 @@ export async function createAnswerBenchRuntime(
     embeddingMode: created.embeddingMode,
     llmProvider,
     embeddingProvider,
+    judgeLLMProvider,
+    ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
     close: () => closePostgresClient(client),
   };
 }
@@ -235,6 +261,17 @@ export interface AnswerPathMeasurement {
    * （純関数なので害は無い）——表示・集計を止めるのは呼び出し側（`answer-format.ts`/
    * `answer-json.ts`）の役目である。 */
   verdict: AnswerVerdict;
+  /**
+   * 二次観測（LLM 採点、`answer-judge.ts`）。**一次判定 `verdict` を上書きしない**——
+   * 別欄として持つだけである。呼び出し側が judge を走らせなかった run では `undefined`。
+   */
+  judgement?: AnswerJudgement;
+  /**
+   * `verdict` と `judgement.outcome` を `reconcileVerdicts`（`answer-judge.ts`）で
+   * 突き合わせた結果。一致すれば `verdict` と同じ値、食い違えば `"indeterminate"`。
+   * `judgement` が無ければこちらも無い。
+   */
+  reconciled?: AnswerVerdict;
 }
 
 export interface AnswerCaseCost {
@@ -244,6 +281,12 @@ export interface AnswerCaseCost {
   embeddingCalls: number;
   /** この1ケースの回答生成（naive 1回 + mnemora 1回）の LLM 呼び出し回数。常に2。 */
   answerLLMCalls: number;
+  /**
+   * この1ケースの judge 呼び出し回数（naive 採点1回 + mnemora 採点1回。常に2）。
+   * ⛔ `answerLLMCalls` には混ぜない——`judgeLLMProvider` という別インスタンスの
+   * snapshot 差分で数える（`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring）。
+   */
+  judgeLLMCalls: number;
 }
 
 export interface AnswerCaseRunResult {
@@ -258,6 +301,24 @@ function buildPromptMessage(content: string): PromptMessage {
 }
 
 /**
+ * naive（全文経路）の `PromptSpec` を、**ケースの定義だけから**組み立てる。
+ *
+ * ⭐ `recall()` に依らないので、DB も provider も無しに再現できる——
+ * カセット被覆の歯（`__tests__/cassette-coverage.test.ts`）が、この関数を呼んで
+ * 「ケースを変えたのに録り直していない」を**実行の数分後ではなく検査の時点で**捕まえる。
+ * ⛔ プロンプトの組み立てをテスト側へ写さない（二重定義にしない）ため、ここに1つだけ置く。
+ */
+export function buildNaiveAnswerPromptSpec(answerCase: AnswerCase): PromptSpec {
+  const conversation = toConversation(answerCase);
+  return {
+    system: ANSWER_SYSTEM_PROMPT,
+    messages: [
+      buildPromptMessage(`${naivePrompt(conversation)}${buildQuestionSuffix(answerCase.question)}`),
+    ],
+  };
+}
+
+/**
  * 1ケースを両経路に通す。
  *
  * - **取り込み**: `ingestConversation`（`mnemora-path.ts`）を再利用する。ケースごとに
@@ -266,10 +327,29 @@ function buildPromptMessage(content: string): PromptMessage {
  * - **記憶の列**: `buildMnemoraPrompt`（`mnemora-path.ts`）を再利用する（新しく書かない）。
  * - **system 文・質問文・`complete()` の呼び方**は両経路で完全に同一。
  */
+/**
+ * `grounds.turnIndex` を `answerCase.conversation` の本文へ写す。`unknown` 類では
+ * `turnIndex` が空配列なので、結果も空配列になる（`answer-judge.ts` の
+ * `AnswerJudgeInput.groundTurnTexts` の docstring 参照）。
+ */
+function resolveGroundTurnTexts(answerCase: AnswerCase): string[] {
+  return answerCase.grounds.turnIndex.map((index) => {
+    const turn = answerCase.conversation[index];
+    if (turn === undefined) {
+      throw new Error(
+        `resolveGroundTurnTexts: case "${answerCase.id}" の grounds.turnIndex=${index} が ` +
+          "conversation の範囲外である。",
+      );
+    }
+    return turn.text;
+  });
+}
+
 export async function runAnswerCase(
   runtime: Runtime,
   llmProvider: CountingLLMProvider,
   embeddingProvider: CountingEmbeddingProvider,
+  judgeLLMProvider: CountingLLMProvider,
   answerCase: AnswerCase,
   tenantPrefix: string,
 ): Promise<AnswerCaseRunResult> {
@@ -287,10 +367,7 @@ export async function runAnswerCase(
   const recall = await queryRecall(runtime, ctx, conversation);
   const afterRecallEmb = embeddingProvider.snapshot();
 
-  const naivePromptSpec: PromptSpec = {
-    system: ANSWER_SYSTEM_PROMPT,
-    messages: [buildPromptMessage(`${naivePrompt(conversation)}${questionSuffix}`)],
-  };
+  const naivePromptSpec: PromptSpec = buildNaiveAnswerPromptSpec(answerCase);
   const mnemoraPromptSpec: PromptSpec = {
     system: ANSWER_SYSTEM_PROMPT,
     messages: [buildPromptMessage(`${buildMnemoraPrompt(recall)}${questionSuffix}`)],
@@ -304,8 +381,35 @@ export async function runAnswerCase(
   const naiveSerialized = serializePromptSpec(naivePromptSpec);
   const mnemoraSerialized = serializePromptSpec(mnemoraPromptSpec);
 
+  const naiveVerdict = gradeAnswer(naiveResponse.content, answerCase.expected);
+  const mnemoraVerdict = gradeAnswer(mnemoraResponse.content, answerCase.expected);
+
+  // ---------------------------------------------------------------------------
+  // 二次観測（judge）。`llmProvider` ではなく `judgeLLMProvider`（別インスタンス）を
+  // 経由する——`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring 参照。
+  // ⛔ `expected.accept`/`expected.reject` を渡さない（渡せない——`AnswerJudgeInput` の形）。
+  // ---------------------------------------------------------------------------
+  const groundTurnTexts = resolveGroundTurnTexts(answerCase);
+  const beforeJudgeLLM = judgeLLMProvider.snapshot();
+  const naiveJudgement = await judgeAnswer(judgeLLMProvider, ctx, {
+    question: answerCase.question,
+    expectedKind: answerCase.expected.kind,
+    rationale: answerCase.grounds.rationale,
+    groundTurnTexts,
+    answer: naiveResponse.content,
+  });
+  const mnemoraJudgement = await judgeAnswer(judgeLLMProvider, ctx, {
+    question: answerCase.question,
+    expectedKind: answerCase.expected.kind,
+    rationale: answerCase.grounds.rationale,
+    groundTurnTexts,
+    answer: mnemoraResponse.content,
+  });
+  const afterJudgeLLM = judgeLLMProvider.snapshot();
+
   const extractionDiff = diffCounts(beforeIngestLLM, afterIngestLLM);
   const answerDiff = diffCounts(beforeAnswerLLM, afterAnswerLLM);
+  const judgeDiff = diffCounts(beforeJudgeLLM, afterJudgeLLM);
 
   return {
     case: answerCase,
@@ -314,19 +418,24 @@ export async function runAnswerCase(
       inputChars: naiveSerialized.length,
       inputEstimatedTokens: heuristicTokenCounter.count(naiveSerialized).tokens,
       answer: naiveResponse.content,
-      verdict: gradeAnswer(naiveResponse.content, answerCase.expected),
+      verdict: naiveVerdict,
+      judgement: naiveJudgement,
+      reconciled: reconcileVerdicts(naiveVerdict, naiveJudgement.outcome),
     },
     mnemora: {
       promptSpec: mnemoraPromptSpec,
       inputChars: mnemoraSerialized.length,
       inputEstimatedTokens: heuristicTokenCounter.count(mnemoraSerialized).tokens,
       answer: mnemoraResponse.content,
-      verdict: gradeAnswer(mnemoraResponse.content, answerCase.expected),
+      verdict: mnemoraVerdict,
+      judgement: mnemoraJudgement,
+      reconciled: reconcileVerdicts(mnemoraVerdict, mnemoraJudgement.outcome),
     },
     cost: {
       extractionLLMCalls: extractionDiff.extractionCalls,
       embeddingCalls: afterRecallEmb - beforeIngestEmb,
       answerLLMCalls: answerDiff.answerCalls,
+      judgeLLMCalls: judgeDiff.answerCalls,
     },
   };
 }
@@ -335,13 +444,21 @@ export async function runAnswerBench(
   runtime: Runtime,
   llmProvider: CountingLLMProvider,
   embeddingProvider: CountingEmbeddingProvider,
+  judgeLLMProvider: CountingLLMProvider,
   cases: readonly AnswerCase[],
   tenantPrefix: string,
 ): Promise<AnswerCaseRunResult[]> {
   const results: AnswerCaseRunResult[] = [];
   for (const answerCase of cases) {
     results.push(
-      await runAnswerCase(runtime, llmProvider, embeddingProvider, answerCase, tenantPrefix),
+      await runAnswerCase(
+        runtime,
+        llmProvider,
+        embeddingProvider,
+        judgeLLMProvider,
+        answerCase,
+        tenantPrefix,
+      ),
     );
   }
   return results;

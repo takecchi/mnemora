@@ -46,6 +46,20 @@ export class CassetteRecorder {
   }
 
   /**
+   * 既に記録済みの応答を引く（{@link RecordingLLMProvider} が同じプロンプトを
+   * 二度叩かないために使う）。⛔ 再生用の口ではない——再生は
+   * `RecordedLLMProvider` の役目である。
+   */
+  lookupLLM(prompt: PromptSpec): { prompt: PromptSpec; value: unknown } | undefined {
+    return this.llmEntries.get(llmCassetteKey(prompt));
+  }
+
+  /** 既に記録済みのベクトルを引く（{@link RecordingEmbeddingProvider} 用）。 */
+  lookupEmbedding(text: string): EmbeddingCassetteEntry | undefined {
+    return this.embeddingEntries.get(embeddingCassetteKey(text));
+  }
+
+  /**
    * 記録をカセットに固める。
    *
    * **一度も記録が無い節があれば落とす。**空の節を持つカセットを書き出すと、
@@ -94,24 +108,62 @@ export class RecordingEmbeddingProvider implements EmbeddingProvider {
   }
 
   async embed(ctx: Ctx, texts: string[]): Promise<number[][]> {
-    const vectors = await this.delegate.embed(ctx, texts);
-    if (vectors.length !== texts.length) {
-      throw new Error(
-        "RecordingEmbeddingProvider: 委譲先が入力と違う件数を返した" +
-          `（入力 ${texts.length} 件 / 出力 ${vectors.length} 件）。記録できない。`,
-      );
-    }
-    texts.forEach((text, i) => {
-      const vector = vectors[i];
-      if (vector !== undefined) {
-        this.recorder.recordEmbedding(this.space, text, vector);
+    // ⭐ **一度録った入力は二度叩かない**（`RecordingLLMProvider` と同じ理由——
+    // そちらの docstring 参照）。実 API の埋め込みはビット単位では再現しないため
+    // （ADR 0051 の実測、最小コサイン 0.998647）、同じ文を録り直すと記録と、
+    // その記録が作られた実行そのものがずれる。
+    const missing = texts.filter((text) => this.recorder.lookupEmbedding(text) === undefined);
+    const uniqueMissing = [...new Set(missing)];
+    if (uniqueMissing.length > 0) {
+      const vectors = await this.delegate.embed(ctx, uniqueMissing);
+      if (vectors.length !== uniqueMissing.length) {
+        throw new Error(
+          "RecordingEmbeddingProvider: 委譲先が入力と違う件数を返した" +
+            `（入力 ${uniqueMissing.length} 件 / 出力 ${vectors.length} 件）。記録できない。`,
+        );
       }
+      uniqueMissing.forEach((text, i) => {
+        const vector = vectors[i];
+        if (vector !== undefined) {
+          this.recorder.recordEmbedding(this.space, text, vector);
+        }
+      });
+    }
+    return texts.map((text) => {
+      const entry = this.recorder.lookupEmbedding(text);
+      if (entry === undefined) {
+        throw new Error(
+          "RecordingEmbeddingProvider: 記録した直後の入力を引けない。記録器が壊れている。",
+        );
+      }
+      return entry.vector;
     });
-    return vectors;
   }
 }
 
-/** 実 `LLMProvider` を包み、プロンプトと応答の対応を記録する。 */
+/**
+ * 実 `LLMProvider` を包み、プロンプトと応答の対応を記録する。
+ *
+ * 🔴 **同じプロンプトを二度は叩かない。一度録った鍵は、記録済みの値をそのまま返す。**
+ *
+ * **理由**（Issue #498 / #506 の記録で実際に踏んだ）: カセットの鍵は
+ * プロンプトのハッシュであり（{@link llmCassetteKey}）、**1つの鍵は1つの値しか持てない。**
+ * 一方、実 LLM は同じプロンプトに対して毎回違う応答を返す。⟹ 同じプロンプトが
+ * 1回の記録の中で複数回現れると、`Map.set` の**後勝ちで先の値が消え**、
+ * **その記録は、記録を作った実行そのものを再生できなくなる。**
+ *
+ * 実例: `answer` ベンチの評価ケース12件のうち3件が同じフィラー発話
+ * （「今日はいい天気ですね。」）を含む。実 `gpt-4o-mini` はその同一の抽出プロンプトに
+ * 対して digest を `今日はいい天気` / `今日はいい天気である。` / `今日はいい天気です。`
+ * と3通りに返した。記録に残るのは最後の1つだけなので、再生時に先の2ケースが組み立てる
+ * 回答プロンプトは記録と食い違い、`RecordedLLMProvider` が「記録に無い」で落ちた。
+ *
+ * ⟹ **記録器が memo として振る舞うことで、記録は自分自身と矛盾しなくなる。**
+ * 副次的に、繰り返し分の API 呼び出しと課金も消える。
+ *
+ * ⛔ **これは再生（`RecordedLLMProvider`）の代わりではない。**memo は1回の記録セッション
+ * の中でしか効かず、プロセスを跨がない。
+ */
 export class RecordingLLMProvider implements LLMProvider {
   constructor(
     private readonly delegate: LLMProvider,
@@ -120,12 +172,22 @@ export class RecordingLLMProvider implements LLMProvider {
   ) {}
 
   async complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
+    const recorded = this.recorder.lookupLLM(req);
+    if (recorded !== undefined) {
+      return recorded.value as LLMResponse;
+    }
     const response = await this.delegate.complete(ctx, req);
     this.recorder.recordLLM(this.model, req, response);
     return response;
   }
 
   async completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
+    const recorded = this.recorder.lookupLLM(req.prompt);
+    if (recorded !== undefined) {
+      // 記録済みの値も、呼び出し側の `schema` で検証し直す——`RecordedLLMProvider`
+      // と同じ規律（鍵にスキーマを含めていないため）。
+      return req.schema.parse(recorded.value);
+    }
     const value = await this.delegate.completeStructured(ctx, req);
     // **検証後の値を記録する。**再生側も同じ `schema` で検証し直すため、
     // ここで検証前の生 JSON を持っても意味が無く、むしろ形が二重になる。
