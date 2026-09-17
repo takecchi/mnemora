@@ -245,5 +245,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0227](./0227-fixed-retrieval-probe-gold-presence-gate.md) | 固定した probe ごとの gold 到達を、`example-chat` の必須 CI へ直接繋ぐ回帰ゲート（Issue #497） | 採用 (2026-09) |
 | [0228](./0228-accept-the-extra-ci-round-for-adr-pull-requests.md) | ADR を持つ PR が CI をもう1周する費用を受容する — 方向4 を選び直す（Issue #267） | 採用 (2026-09) |
 | [0229](./0229-answer-bench-compares-final-answers-with-a-ground-truth-bench-quality-not-yet-claimed.md) | 全文経路と記憶経路の最終回答を、正解集合を持つ器で比較する（品質の主張はまだしない、Issue #506 / 親 #498） | 採用 (2026-09) |
+| [0230](./0230-restore-superseded-recovery-path.md) | `superseded → active` の復旧口を作る — オーナーの判定のうち、⛔ **復旧口だけ**を着地させる（Issue #369 / PR #464） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

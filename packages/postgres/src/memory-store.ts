@@ -14,6 +14,7 @@ import type {
   ArchiveDecayedResult,
   Ctx,
   EmbeddingStatus,
+  EventActor,
   Memory,
   MemoryEvent,
   MemoryId,
@@ -1731,6 +1732,68 @@ export class PostgresMemoryStore implements MemoryStore {
         events: [firstEvent, secondEvent] as [MemoryEvent, MemoryEvent],
       };
     });
+  }
+
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
+   * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここはクエリの
+   * 実装のみ。
+   *
+   * `archiveDecayed`（ADR 0114、本ファイル上部）と同じ理由で、UPDATE と INSERT を
+   * 単一の `WITH ... UPDATE ... INSERT ... SELECT` 文にまとめてある——1文なら、
+   * 明示的な `BEGIN`/`COMMIT` を書かなくても両方が同じトランザクションに入る
+   * （「片方だけ起きる」を構造的に作れない）。
+   *
+   * `target` の `WHERE` は既存の部分索引 `idx_memories_superseded_by`
+   * （`tenant_id, superseded_by_id`、`migrations/0001_init.sql`）がそのまま担う——
+   * 新しい索引は足していない。`AND status = 'superseded'` を等値条件として含めている
+   * ことが、`superseded_by_id` は非 `null` のまま `status` が `archived`/`forgotten` へ
+   * さらに進んだ行を巻き込まないための唯一の防波堤である（interface 側の契約節参照）。
+   *
+   * `digest_snapshot` には（変更しない）現在の `digest` を入れる——`archiveDecayed`/
+   * `forget` と同じ規約。`meta` は `{ reason, supersededById }`——`reason` は
+   * 呼び出し側が渡した値、省略時は固定タグ `'unsuperseded'`（`updateStatusWithEvent`
+   * を経由する操作の「省略時はキー自体を持たせない」規律とはここだけ意図的に違う。
+   * interface 側の契約節参照）。
+   */
+  async restoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+  ): Promise<{ restored: Memory[] }> {
+    if (!isUuidLike(supersededById)) {
+      return { restored: [] };
+    }
+    const actor = event.actor ?? { type: "system" };
+    const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+
+    const result = await this.db.execute(sql`
+      WITH target AS (
+        SELECT id FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND superseded_by_id = ${supersededById}
+          AND status = 'superseded'
+      ),
+      restored AS (
+        UPDATE memories m
+        SET status = 'active', superseded_by_id = NULL, updated_at = now()
+        FROM target t
+        WHERE m.id = t.id
+        RETURNING m.*
+      ),
+      inserted_events AS (
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        SELECT
+          gen_random_uuid(), ${ctx.tenantId}, r.id, 'unsuperseded', ${event.at},
+          ${JSON.stringify(actor)}::jsonb, r.digest, NULL, ${JSON.stringify(meta)}::jsonb
+        FROM restored r
+        RETURNING memory_id
+      )
+      SELECT * FROM restored ORDER BY id ASC
+    `);
+
+    const restored = result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
+    return { restored };
   }
 }
 

@@ -206,6 +206,22 @@ export interface MemoryStoreConformanceOptions {
    * ——`it.skip` にはしない。
    */
   supportsResolveContestedPair: boolean;
+  /**
+   * 本 PR: 対象の `MemoryStore` 実装が `restoreSupersededBy`（任意メソッド、
+   * `docs/memory-model.md` §11 行15「`superseded → active`」）を実装しているかどうか。
+   * **必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsPurgeMemory`/`supportsMarkContestedPair`/
+   * `supportsResolveContestedPair` と同じ判断——省略可にしない。`true` なら契約の歯
+   * （`tenant_id` + `superseded_by_id` が一致し `status='superseded'` の行だけを
+   * 対象にする、成功すると `status='active'`・`superseded_by_id=null` になる、
+   * `memory_events` に `kind='unsuperseded'` が対象件数ぶん積まれる、
+   * `status='superseded'` でない行（`archived` 等）は `superseded_by_id` が
+   * 一致していても巻き込まれない、対象0件でも例外を投げない、テナント分離）を
+   * 実行する。`false` なら `expect(store.restoreSupersededBy).toBeUndefined()` を
+   * 積極的に assert する——`it.skip` にはしない。
+   */
+  supportsRestoreSupersededBy: boolean;
 }
 
 /**
@@ -241,6 +257,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsPurgeMemory,
     supportsMarkContestedPair,
     supportsResolveContestedPair,
+    supportsRestoreSupersededBy,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -3784,6 +3801,204 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const events = await listEventsForMemory(ctx, memory.id);
       expect(events).toEqual([]);
     });
+
+    // -------------------------------------------------------------------
+    // restoreSupersededBy（superseded → active。本 PR、任意メソッド）
+    //
+    // `updateStatusWithEvent` に収まった `restoreArchived` とは違い、この操作は
+    // (1) 「置き換えた側の id」から群を選ぶ範囲走査であり、(2) `superseded_by_id` を
+    // `NULL` へ戻す経路が `updateStatusWithEvent` に無いため、新しい任意メソッドが要る
+    // （`MemoryStore.restoreSupersededBy` の doc コメント参照）。
+    // -------------------------------------------------------------------
+
+    if (supportsRestoreSupersededBy) {
+      it("restoreSupersededBy は status='superseded' かつ superseded_by_id が一致する行だけを active に戻し、superseded_by_id を null にし、unsuperseded イベントを積む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "restore-superseded-anchor" }),
+        );
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-a",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-b",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const now = new Date("2026-06-01T00:00:00.000Z");
+
+        const result = await store.restoreSupersededBy!(ctx, anchor.id, { at: now });
+
+        expect(new Set(result.restored.map((m) => m.id))).toEqual(new Set([a.id, b.id]));
+        for (const memory of result.restored) {
+          expect(memory.status).toBe("active");
+          expect(memory.supersededById).toBeNull();
+        }
+
+        const aAfter = await store.get(ctx, a.id);
+        const bAfter = await store.get(ctx, b.id);
+        expect(aAfter?.status).toBe("active");
+        expect(aAfter?.supersededById).toBeNull();
+        expect(bAfter?.status).toBe("active");
+        expect(bAfter?.supersededById).toBeNull();
+
+        const aEvents = await listEventsForMemory(ctx, a.id);
+        expect(aEvents.map((e) => e.kind)).toEqual(["unsuperseded"]);
+        expect(aEvents[0]?.meta).toEqual({ reason: "unsuperseded", supersededById: anchor.id });
+        const bEvents = await listEventsForMemory(ctx, b.id);
+        expect(bEvents.map((e) => e.kind)).toEqual(["unsuperseded"]);
+
+        // 置き換えた側（anchor）は一切触られない。
+        const anchorAfter = await store.get(ctx, anchor.id);
+        expect(anchorAfter?.status).toBe("active");
+        expect(await listEventsForMemory(ctx, anchor.id)).toEqual([]);
+      });
+
+      it("restoreSupersededBy に reason を渡すと meta.reason に入る", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-reason-anchor",
+          }),
+        );
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-reason-target",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        await store.restoreSupersededBy!(ctx, anchor.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+          reason: "問い合わせで必要になった",
+        });
+
+        const [event] = await listEventsForMemory(ctx, memory.id);
+        expect(event?.meta).toEqual({
+          reason: "問い合わせで必要になった",
+          supersededById: anchor.id,
+        });
+      });
+
+      it("restoreSupersededBy は status='superseded' でない行を、superseded_by_id が一致していても巻き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-guard-anchor",
+          }),
+        );
+        const progressed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-guard-progressed",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        // `superseded_by_id` が anchor を指したまま、さらに status だけが進んだ行
+        // （`purge`/`sweepArchive` 等、superseded_by_id を消さない別の遷移を経由した行）
+        // を模す。
+        await store.updateStatus(ctx, progressed.id, "archived");
+
+        const result = await store.restoreSupersededBy!(ctx, anchor.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+        });
+
+        expect(result.restored).toEqual([]);
+        const after = await store.get(ctx, progressed.id);
+        expect(after?.status).toBe("archived"); // 触られていない
+        expect(after?.supersededById).toBe(anchor.id); // 触られていない
+        expect(await listEventsForMemory(ctx, progressed.id)).toEqual([]);
+      });
+
+      it("restoreSupersededBy は別テナントの行を巻き込まない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const anchorA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "restore-superseded-tenant-anchor",
+          }),
+        );
+        const supersededA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "restore-superseded-tenant-a",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+        // 別テナントの行が、たまたま同じ id を `superseded_by_id` に持つ（FK は
+        // テナントをまたいでも成立する——`superseded_by_id` は `memories(id)` への
+        // 参照であり `tenant_id` を条件にしない）。
+        const supersededB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "restore-superseded-tenant-b",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+
+        const result = await store.restoreSupersededBy!(ctxA, anchorA.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+        });
+
+        expect(result.restored.map((m) => m.id)).toEqual([supersededA.id]);
+        const bAfter = await store.get(ctxB, supersededB.id);
+        expect(bAfter?.status).toBe("superseded"); // 触られていない
+        expect(bAfter?.supersededById).toBe(anchorA.id);
+      });
+
+      it("restoreSupersededBy は対象が無くても例外を投げない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-empty-anchor",
+          }),
+        );
+
+        const result = await store.restoreSupersededBy!(ctx, anchor.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+        });
+
+        expect(result.restored).toEqual([]);
+      });
+    } else {
+      it("restoreSupersededBy は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.restoreSupersededBy).toBeUndefined();
+      });
+    }
 
     // -------------------------------------------------------------------
     // aggregateScope（docs/recall.md §5 目次帯・第3階・「スコープの外延」マネージャー決定）

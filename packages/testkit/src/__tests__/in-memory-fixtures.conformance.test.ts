@@ -103,6 +103,8 @@ describeMemoryStoreConformance({
   supportsMarkContestedPair: true,
   // Issue #197 / ADR 0150: InMemoryMemoryStore は resolveContestedPair を実装している。
   supportsResolveContestedPair: true,
+  // 本 PR: InMemoryMemoryStore は restoreSupersededBy を実装している。
+  supportsRestoreSupersededBy: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり

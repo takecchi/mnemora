@@ -99,7 +99,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -212,6 +212,13 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             MemoryEvent,
             MemoryEvent
         ];
+    }>;
+    restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
+        reason?: string;
+        actor?: EventActor;
+        at: Date;
+    }): Promise<{
+        restored: Memory[];
     }>;
     private extractionKey;
 }
@@ -374,6 +381,7 @@ export interface MemoryStoreConformanceOptions {
     supportsPurgeMemory: boolean;
     supportsMarkContestedPair: boolean;
     supportsResolveContestedPair: boolean;
+    supportsRestoreSupersededBy: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 

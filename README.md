@@ -248,21 +248,22 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 `RecallQuery.limit`（既定 10）の内側から取るので、`limit` が天井になる（同 README /
 [docs/recall.md](./docs/recall.md) §9.2）。
 
-### `Runtime` の残り9個 — 中核を守る3つの層
+### `Runtime` の残り10個 — 中核を守る3つの層
 
-**`Runtime` には他に9個のメソッドがある**（`tick` / `getRecall` / `reextract` / `reembed` /
-`sweepArchive` / `restoreArchived` / `purge` / `markContested` / `resolveContested`）。
-これらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ出した口**であり、
-3つに分かれる（詳細と検討過程は [ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
+**`Runtime` には他に10個のメソッドがある**（`tick` / `getRecall` / `reextract` / `reembed` /
+`sweepArchive` / `restoreArchived` / `restoreSuperseded` / `purge` / `markContested` /
+`resolveContested`）。これらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ
+出した口**であり、3つに分かれる（詳細と検討過程は
+[ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない（`sweepArchive` の doc コメント自身が
   「呼び出し側が明示的にこれを呼んだときだけ走る保守操作である」と書いている）。
-- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` / `purge`）——
-  呼び出し側（人・上位のアプリケーション層・将来の自動検出）が既に下した判断
-  （矛盾の指摘・決着・復帰・完全削除）を、決められた形で書き込む口。
-  どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も持たない**——
-  下の「⚠ mnemora が保証していないこと」の節を見ること。
+- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` /
+  `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・将来の
+  自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
+  書き込む口。どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も
+  持たない**——下の「⚠ mnemora が保証していないこと」の節を見ること。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口
   （`docs/north-star.md`「目指す姿」の3番目）。
 

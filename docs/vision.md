@@ -66,18 +66,18 @@ forget(ctx, target)      // -> ForgetResult
 
 ### 中核を守る3つの層
 
-`Runtime`（`@mnemora/core` の実装）には、上の5つ以外にも9個のメソッドがある
+`Runtime`（`@mnemora/core` の実装）には、上の5つ以外にも10個のメソッドがある
 （`tick` / `getRecall` / `reextract` / `reembed` / `sweepArchive` / `restoreArchived` /
-`purge` / `markContested` / `resolveContested`）。これらは「6つ目の動詞」ではなく、
-中核を5つに保つために別の層へ出した口であり、3つに分かれる
+`restoreSuperseded` / `purge` / `markContested` / `resolveContested`）。これらは
+「6つ目の動詞」ではなく、中核を5つに保つために別の層へ出した口であり、3つに分かれる
 （検討過程は [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md)）。
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない。
-- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` / `purge`）——
-  呼び出し側（人・上位のアプリケーション層・将来の自動検出）が既に下した判断
-  （矛盾の指摘・決着・復帰・完全削除）を、決められた形で書き込む口。どちらが正しいかを
-  mnemora 自身は判定しない。
+- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` /
+  `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・将来の
+  自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
+  書き込む口。どちらが正しいかを mnemora 自身は判定しない。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口。
 
 **この分類が守っているのは「中核は増やさない」という制約そのものである。**新しく何かを
