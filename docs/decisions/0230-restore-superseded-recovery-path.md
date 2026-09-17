@@ -66,6 +66,75 @@
 
 ---
 
+## 🔴🔴 訂正2（2026-09-18）—— **この ADR は、自分が入れた破壊的変更に一度も触れていない**
+
+⛔ **本文は1バイトも書き換えていない**（上の訂正1 と同じ規律）。**この追記が優先する。**
+
+### 何が抜けていたか
+
+この ADR が着地させた PR #464 は、**公開契約に必須メンバを2つ足している**:
+
+| 契約 | package | 形 |
+|---|---|---|
+| **`Runtime.restoreSuperseded`** | `@mnemora/core` | `interface` の**必須メソッド**（`?` 無し） |
+| **`MemoryStoreConformanceOptions.supportsRestoreSupersededBy: boolean`** | `@mnemora/testkit` | **必須フィールド**（`?` 無し） |
+
+🔴 **どちらも、この ADR の本文には出てこない。**【実測 2026-09-18】この ADR に対する
+`grep -c 破壊的` は **0** である。⟹ **この ADR を読んでも、破壊的変更が入ったことに気づけない。**
+
+⚠ **`@mnemora/testkit` は出荷対象である**——`scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 6本の1つで、
+`package.json` に `private` が無く、【実測 2026-09-18】`npm view @mnemora/testkit dist-tags` は `latest: 0.3.0`。
+⟹ **「repo の中だけで使う道具」ではない。**
+
+🔴 **そして2件とも `v0.3.0` で既に出荷されている**（【実測】`npm view @mnemora/core dist-tags` = `latest: 0.3.0`）。
+
+### ⛔ これは新しい判定基準ではない
+
+**この repo は既に同じ形を破壊的と数えている。**【現物】`docs/migration-v1.md` の
+「破壊的変更（v0.1.9 → v0.2.0）」節:
+
+- **1.** `MemoryStore.getRecall` が必須メソッドになった
+- **5.** ⭐ `Runtime.getRecall` が必須メソッドになった
+- **6.** ⭐ `TenantSettingsStoreConformanceOptions.supportsDecayClock`（`@mnemora/testkit`）が必須フィールドになった
+
+⟹ **6 は、この ADR が入れた `supportsRestoreSupersededBy` と同じ型の変更である。**
+**基準は既に在った。この ADR が当てなかっただけである。**
+
+### ⭐ ここがいちばん記録する価値のあるところ —— **非対称**
+
+**同じ repo の、同じ種類の変更で、扱いが割れている:**
+
+| ADR | 同じ形の変更 | 破壊的だと自分で書いたか |
+|---|---|---|
+| **この ADR（0230）** | `Runtime.restoreSuperseded` 必須化 / `supportsRestoreSupersededBy` 必須化 | ⛔ **一言も書いていない**（`grep -c 破壊的` = 0） |
+| [ADR 0232](./0232-correction-candidates-returned-not-chosen.md) | `Runtime.findCorrectionCandidates` 必須化 | ✅ **自分で書いた**——【逐語】「⚠ **`Runtime` interface にメソッドを足すのは、interface を自分で実装している側には破壊的である。** 直前の `main` に入った `Runtime.restoreSuperseded`（ADR 0230）と同じ立場である。」 |
+| [ADR 0237](./0237-restore-superseded-dry-run-preview.md) | `supportsPreviewRestoreSupersededBy` 必須化 | ⚠ **同じ節の中で自己矛盾していた**（結論行「追加のみで、破壊的変更ではない。」／4番目の箇条書き「これは…破壊的」）。2026-09-18 に訂正済み（PR #526） |
+
+🔴 **ADR 0232 は、この ADR を「同じ立場である」と名指ししている。** ⟹ **後から書いた人は気づいていた。
+気づいていなかったのは、先に書いたこの ADR のほうである。**
+
+### ⟹ これは書き手の注意力の問題ではなく、規律の穴である
+
+3本のうち**自分で正しく申告できたのは1本だけ**だった。⟹ ⛔ **「次からは気をつける」では塞がらない。**
+
+⭐ **次に ADR を書く人へ**: **`interface` に必須メンバ（`?` の無いメソッド・フィールド）を足したら、
+それは出荷対象パッケージにとって破壊的変更である。** ⟹ **ADR に「破壊的変更かどうか」の節を置き、
+そこで名指しすること。** ⚠ **`@mnemora/testkit` も出荷対象である**——`packages/core` だけを見ると落ちる。
+
+⚠ **数え方の注意**: ⛔ **`packages/*/src` の差分で数えないこと。** 【現物】`docs/release-v1.md` が逐語で
+「⛔ **この確認を「`src` を触った commit を数える」に置き換えないこと。**」と警告している。
+⟹ **公開 API の実 diff（`scripts/__snapshots__/public-api/*.d.ts`）から数えること。**
+
+### この訂正が着地させないもの
+
+- ⛔ **`interface` の必須メンバ追加を機械的に検出して ADR に書かせる門は、足していない。**
+  `scripts/check-public-api-surface.mjs` は公開 API の差分を検出するが、**それを「ADR に破壊的だと書いたか」とは
+  突き合わせていない。** ⟹ **この訂正が買ったのは記録であって、再発防止ではない。**
+- ⛔ **外部に `Runtime` / `MemoryStoreConformanceOptions` を自前実装している利用者が実在するかは確かめていない**
+  （この repo の中からは検証できない）。**プロジェクトが 1・5・6 で既に採った基準をそのまま当てている。**
+
+---
+
 ## ⭐ 追記（2026-09-17）—— **(α)/(β) の出所を3段に分ける**
 
 **本文「決定」節は「問いの本文が在る場所」として Issue #197 のコメントを挙げているが、
