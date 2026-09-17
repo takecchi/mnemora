@@ -79,16 +79,35 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
 describe("ルートの test 門の配線", () => {
   /**
    * 上の2つの歯は DB 段そのものを測る。**段が門に繋がっていること**は別の話で、
-   * 繋がりが外れれば（`&& node scripts/run-db-tests.mjs` を消せば）DB は再び黙って
-   * 未実行になる——それが元の欠陥そのものである。だからここで配線を釘付けにする。
+   * 繋がりが外れれば DB は再び黙って未実行になる——それが元の欠陥そのものである。
+   * だからここで配線を釘付けにする。
+   *
+   * ⚠ **配線の場所が変わった（Issue #453 / ADR 0209）。** 以前はルートの
+   * `package.json` の `test` が `&&` で3段を直接連結しており、この歯もそれを
+   * `split("&&")` して検査していた。いまは `package.json` の `test` は
+   * `node scripts/run-root-test-gate.mjs` を呼ぶだけで、3段の配線は
+   * `scripts/run-root-test-gate.mjs` の中に在る（前段の成否に関わらず全部
+   * 起動するため、shell の `&&` では表現できない）。⟹ **検査対象をそちらへ移す。**
    */
-  it("ルートの test は、パッケージのテストのあとに DB 段を呼ぶ", () => {
+  it("ルートの test は run-root-test-gate.mjs を呼ぶ", () => {
     const manifest = JSON.parse(
       readFileSync(fileURLToPath(new URL("../../package.json", import.meta.url)), "utf8"),
     );
-    const stages = manifest.scripts.test.split("&&").map((stage) => stage.trim());
+    expect(manifest.scripts.test).toBe("node scripts/run-root-test-gate.mjs");
+  });
 
-    expect(stages).toContain("pnpm -r --if-present run test");
-    expect(stages).toContain("node scripts/run-db-tests.mjs");
+  it("run-root-test-gate.mjs は、vitest → pnpm -r --no-bail run test → run-db-tests.mjs の順に呼ぶ", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../run-root-test-gate.mjs", import.meta.url)),
+      "utf8",
+    );
+
+    const vitestIndex = source.indexOf("vitest");
+    const noBailIndex = source.indexOf("--no-bail");
+    const dbStageIndex = source.lastIndexOf("run-db-tests.mjs");
+
+    expect(vitestIndex).toBeGreaterThan(-1);
+    expect(noBailIndex).toBeGreaterThan(vitestIndex);
+    expect(dbStageIndex).toBeGreaterThan(noBailIndex);
   });
 });
