@@ -14,6 +14,14 @@ ADR (Architecture Decision Record) として記録する。`docs/architecture.md
 ⚠ **まだ採用されていない初稿はこの限りではない。**そして
 **`docs/north-star.md` は別の規律で守られている**——`AGENTS.md` を見ること。）
 
+**⚠ ADR 本文に現れる識別子名（関数名・ファイル名・型名）は、その ADR が書かれた時点のものである。現在の名前とは限らない。**
+現在の名前は現物を引くこと。**⛔ 名前が変わるたびに、既存 ADR へ追記して回らないこと。**
+[ADR 0213](./0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5 の 2026-09-17 の追記が、
+**「いまの状態を指すポインタ」は直し、「当時の観測・当時の状態を書き留めた記録」は直さない**と
+線を引いている——ADR 本文は後者である。**旧名から現在の名前へ辿れる形は、名前を変えた側の
+ADR が持つ**（例: [ADR 0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md)
+決定1 と、同 ADR「引き受けた負債」節の逐語「**旧名を追う人は、この ADR の決定1へ辿り着くこと**」）。
+
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
@@ -249,6 +257,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0231](./0231-compare-baseline-omitted-measured-update-and-freshness.md) | `compare-baseline.json` の `omitted` を CI の artifact で実測更新し、基準値の鮮度を毎 run 名乗らせる（⛔ 門にはしない）（Issue #403） | 採用 (2026-09) |
 | [0232](./0232-correction-candidates-returned-not-chosen.md) | 訂正の相手は mnemora が選ばない — **候補を返し、採用者が選ぶ**（Issue #369 (C)） | 採用 (2026-09) |
 | [0233](./0233-answer-quality-measured-once-against-the-real-api.md) | 回答品質を実 API で1回測り、記録で再生できる形にする — 記録器が同じ鍵を二度録っていた穴を塞ぐ（Issue #498 / #506） | 採用 (2026-09) |
+| [0235](./0235-correction-demo-explicit-choice.md) | 訂正の相手は `examples/chat` でも人が指名する — `findCorrectionCandidates` を本番コードの経路に立てる（Issue #369 (C) / 北極星 項目5） | **草案 (2026-09)** |
 | [0236](./0236-answer-retention-mutation-tested-not-recorded.md) | Issue #498 完了条件4を内容保持の側だけで満たす — 回答評価側の陽性対照は実 API での記録追加を要するため未達のまま残す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

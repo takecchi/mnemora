@@ -81,6 +81,7 @@ import {
   formatCorrectionDemo,
   runCorrectionDemo,
 } from "./correction-demo.js";
+import { CORRECTION_SCENARIO } from "./correction-scenario.js";
 import { formatScopeDemo, runScopeDemo } from "./scope.js";
 import { formatRecallExplainDemo, runRecallExplainDemo } from "./recall-explain.js";
 import { createMutableClock } from "./mutable-clock.js";
@@ -348,16 +349,23 @@ async function runBackfill(): Promise<void> {
 }
 
 /**
- * 訂正を含む会話シナリオを実演するデモ(`src/correction-demo.ts`、Issue #303)。
+ * 訂正を含む会話シナリオを実演するデモ(`src/correction-demo.ts`、Issue #303 / Issue #369 (C))。
  *
- * 北極星「間違いを正すと、古いほうが先に出てこなくなる」を、`markContested`
- * （ADR 0134）→`recall`（両方隣接して出る）→`resolveContested`（ADR 0150）→`recall`
- * （古いほうが消える）の一巡で実演する。`Runtime.markContested`/`resolveContested` は
- * `examples/chat` からこれまで一度も呼ばれていなかった（Issue #303 本文）。
+ * 北極星「間違いを正すと、古いほうが先に出てこなくなる」を、`findCorrectionCandidates`
+ * （発見の段、ADR 0232）→ 指名の照合（選択の段）→`markContested`（ADR 0134）→`recall`
+ * （両方隣接して出る）→`resolveContested`（ADR 0150）→`recall`（古いほうが消える）の
+ * 一巡で実演する。`Runtime.markContested`/`resolveContested` は `examples/chat` から
+ * これまで一度も呼ばれていなかった（Issue #303 本文）。`Runtime.findCorrectionCandidates`
+ * も、ADR 0232 が着地させた時点では本番コードから呼ぶ経路が無かった
+ * （[ADR 0235](../../../docs/decisions/0235-correction-demo-explicit-choice.md)
+ * がその経路を立てる）。
  *
  * **どの2件が対向し、どちらが勝つかは `correction-scenario.ts` が構造として宣言する。**
- * このコマンドは判定をせず、宣言をそのまま渡すだけ。北極星の主測定(`compare`/`retrieval`)
- * には触れない、独立したデモ実行。
+ * **どの候補を訂正の相手として指名するかは、この CLI が `CorrectionChoice` として明示的に
+ * 渡す**——`scenario.contestedPair.firstExternalId`（「記録済みの採用者の判断」）を渡すだけで、
+ * `findCorrectionCandidates` が返した候補の並びからは一切導かない。このコマンドは判定を
+ * せず、宣言をそのまま渡すだけ。北極星の主測定(`compare`/`retrieval`)には触れない、
+ * 独立したデモ実行。
  *
  * **⚠ Issue #374: 印字するだけでなく、実際に assert する。** このコマンドの
  * dispatch（`main()` の `command === "correction"` 分岐）は、足すまで CI から
@@ -387,11 +395,25 @@ async function runCorrection(): Promise<void> {
   try {
     const ctx = { tenantId: `example-chat-correction-${Date.now()}` };
     console.log(
-      "\n最初に事実を表明し、後から訂正する会話を observe() し、markContested → recall → " +
-        "resolveContested → recall で「間違いを正すと古いほうが出てこなくなる」ことを実演する。\n",
+      "\n最初に事実を表明し、後から訂正する会話を observe() し、findCorrectionCandidates(発見) → " +
+        "指名の照合(選択) → markContested → recall → resolveContested → recall で" +
+        "「間違いを正すと古いほうが出てこなくなる」ことを実演する。\n",
     );
-    const result = await runCorrectionDemo(handle.runtime, ctx);
+    // 🔴 ここで渡す choice は「記録済みの採用者の判断」であり、findCorrectionCandidates が
+    // 返す候補の並びからは一切導いていない(candidates[0]を機械的に採らないことの実演)。
+    const result = await runCorrectionDemo(handle.runtime, ctx, CORRECTION_SCENARIO, {
+      chosenExternalId: CORRECTION_SCENARIO.contestedPair.firstExternalId,
+    });
     console.log(formatCorrectionDemo(result));
+
+    if (result.outcome !== "resolved") {
+      console.error(
+        `\n🔴 correction デモが outcome="${result.outcome}" で停止した` +
+          "(書き込みに進んでいない。指名または候補の対応を確認すること)。",
+      );
+      process.exitCode = 1;
+      return;
+    }
 
     const check = checkCorrectionDemo(result);
     const omissionCheck = checkCorrectionOmission(result);

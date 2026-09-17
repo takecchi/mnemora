@@ -37,9 +37,25 @@ describe("examples/chat: correction（markContested → resolveContested、本�
     try {
       expect(handle.mode).toBe("deterministic");
 
-      const result = await runCorrectionDemo(handle.runtime, {
-        tenantId: "example-chat-correction-test",
-      });
+      const result = await runCorrectionDemo(
+        handle.runtime,
+        { tenantId: "example-chat-correction-test" },
+        CORRECTION_SCENARIO,
+        // 🔴 「記録済みの採用者の判断」——findCorrectionCandidates が返す候補の並びから
+        // 導いたものではない(ADR 0232 引き受けた負債1への応答)。
+        { chosenExternalId: CORRECTION_SCENARIO.contestedPair.firstExternalId },
+      );
+
+      // 【発見の段】本物の Postgres + pgvector + 決定的 provider に対して実際に
+      // findCorrectionCandidates を呼んでいる。書き込み・LLM は起きない
+      // (findCorrectionCandidates 自身の契約、ADR 0232)。指名(original)が候補に
+      // 実際に見つかったので、選択の段が resolved まで進む。
+      expect(result.outcome).toBe("resolved");
+      expect(result.discovery.candidates.length).toBeGreaterThan(0);
+      expect(result.chosenId).toBe(result.originalId);
+      expect(result.chosenRecallRank).not.toBeNull();
+      expect(result.discovery.candidates.some((c) => c.memoryId === result.originalId)).toBe(true);
+
       const check = checkCorrectionDemo(result);
 
       // 前提: markContested/resolveContested がそもそも対応している(supported)こと。
@@ -52,7 +68,7 @@ describe("examples/chat: correction（markContested → resolveContested、本�
       // 段2で limit に自然に残らなかったほう(まだ勝敗は付いていない——両方 contested。
       // どちらが残るかはスコアのランキング次第であり、resolveContested の勝者とは無関係)は
       // mandatory_companion として強制的に連れてこられる(ADR 0162 決定5)。
-      expect(result.beforeMark.memories.length).toBeGreaterThan(0);
+      expect(result.beforeMark!.memories.length).toBeGreaterThan(0);
       expect(check.afterMarkBothPresent).toBe(true);
       expect(check.afterMarkCompanionRetrieval).toBe(true);
       expect(check.afterMarkCompanionOfOther).toBe(true);
@@ -61,7 +77,7 @@ describe("examples/chat: correction（markContested → resolveContested、本�
       // 二度と recall に出てこない。
       expect(check.afterResolveOriginalAbsent).toBe(true);
       expect(check.afterResolveCorrectionPresent).toBe(true);
-      expect(result.afterResolve.memories.length).toBe(1);
+      expect(result.afterResolve!.memories.length).toBe(1);
 
       // 🔴 Issue #374: 「消えた」(machine の都合で superseded として棚上げされた)と
       // 「最初から無かった」を区別する(北極星 項目6)。`afterResolveOriginalAbsent` は
@@ -69,9 +85,40 @@ describe("examples/chat: correction（markContested → resolveContested、本�
       // 実際に `condition: "superseded"` が記録されていることまで見る。
       const omissionCheck = checkCorrectionOmission(result);
       expect(omissionCheck.afterResolveOriginalOmittedAsSuperseded).toBe(true);
-      expect(result.afterResolve.omitted).toContainEqual(
+      expect(result.afterResolve!.omitted).toContainEqual(
         expect.objectContaining({ kind: "filtered", condition: "superseded" }),
       );
+    } finally {
+      await handle.close();
+    }
+  });
+
+  it("choice を渡さない ⟹ outcome=awaiting_choice、書き込み0件(markContested/resolveContestedのどちらも呼ばれない)", async () => {
+    await resetTestDatabase();
+    await getTestClient();
+    const handle = await createExampleRuntime(requireDatabaseUrl(), {});
+    try {
+      const ctx = { tenantId: "example-chat-correction-test-no-choice" };
+      const result = await runCorrectionDemo(handle.runtime, ctx);
+
+      expect(result.outcome).toBe("awaiting_choice");
+      expect(result.chosenId).toBeNull();
+      expect(result.beforeMark).toBeNull();
+      expect(result.afterMark).toBeNull();
+      expect(result.afterResolve).toBeNull();
+
+      // 🔴 候補は本物の recall から実際に返っている(棄権していない)——それでも
+      // 書き込みには進んでいない。B群の危険をそのまま体現する経路。
+      expect(result.discovery.candidates.length).toBeGreaterThan(0);
+
+      // markContested が一度も呼ばれていないことを、広い limit で改めて recall して
+      // 確認する——markContested を呼んでいれば、対は「両方 contested」になり、
+      // limit を超えて強制的に連れてこられる(mandatory_companion)。呼んでいなければ、
+      // 2件はただ独立に自然な順位で出るだけで、どちらも mandatory_companion にはならない。
+      const recheck = await handle.runtime.recall(ctx, { text: result.scenario.query, limit: 10 });
+      const recheckIds = recheck.memories.map((m) => m.memoryId).sort();
+      expect(recheckIds).toEqual([result.originalId, result.correctionId].sort());
+      expect(recheck.memories.every((m) => m.retrievedVia !== "mandatory_companion")).toBe(true);
     } finally {
       await handle.close();
     }
@@ -104,12 +151,16 @@ describe("examples/chat: correction（markContested → resolveContested、本�
         handle.runtime,
         { tenantId: "example-chat-correction-test-reversed" },
         reversedScenario,
+        // 指名は変わらず「original 側」——ここでは reversedScenario.contestedPair
+        // .firstExternalId が指す reversed-original の externalId(記録済みの判断)。
+        { chosenExternalId: reversedScenario.contestedPair.firstExternalId },
       );
 
+      expect(result.outcome).toBe("resolved");
       // observe() の順序は変わらない(original が先に呼ばれる)。
       expect(result.originalId).toBeDefined();
       // それでも、宣言どおり original が生き残る。
-      const finalIds = result.afterResolve.memories.map((m) => m.memoryId);
+      const finalIds = result.afterResolve!.memories.map((m) => m.memoryId);
       expect(finalIds).toContain(result.originalId);
       expect(finalIds).not.toContain(result.correctionId);
     } finally {
