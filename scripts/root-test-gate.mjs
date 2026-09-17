@@ -46,6 +46,29 @@
 const BANNER = "─".repeat(72);
 
 /**
+ * 門が起動する3段の定義（**この配列が配線そのものである**）。
+ *
+ * ⭐ **なぜ CLI ではなくこちら側に置くか**: 配線を釘付けにする歯
+ * （`scripts/__tests__/run-db-tests.test.mjs` の「ルートの test 門の配線」）が、
+ * **本物のデータを測れるようにするため。**`scripts/run-root-test-gate.mjs` は
+ * import された時点で3段を起動してしまうので、歯から import できない
+ * ——そちらに配列を置くと、歯はソースを文字列として読むしかなくなり、
+ * **冒頭のコメントに同じ語が同じ順で並んでいるだけで緑になる。**
+ * ⟹ 副作用の無いこのファイルに置き、歯はここを import する。
+ *
+ * @type {{ name: string; command: string; args: string[] }[]}
+ */
+export const STAGES = [
+  { name: "vitest run", command: "pnpm", args: ["exec", "vitest", "run"] },
+  {
+    name: "pnpm -r --if-present --no-bail run test",
+    command: "pnpm",
+    args: ["-r", "--if-present", "--no-bail", "run", "test"],
+  },
+  { name: "run-db-tests（ADR 0015）", command: "node", args: ["scripts/run-db-tests.mjs"] },
+];
+
+/**
  * 各段の結果から、1画面で読める要約テキストを作る。
  *
  * ⭐ **この門が解こうとしている問題は「赤1件の裏に未起動の段が在る」ことなので**、

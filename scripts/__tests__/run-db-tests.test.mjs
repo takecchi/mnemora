@@ -3,6 +3,8 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
+import { STAGES } from "../root-test-gate.mjs";
+
 /**
  * `scripts/run-db-tests.mjs`（ルートの `test` 門の DB 段）の歯。
  *
@@ -96,18 +98,25 @@ describe("ルートの test 門の配線", () => {
     expect(manifest.scripts.test).toBe("node scripts/run-root-test-gate.mjs");
   });
 
-  it("run-root-test-gate.mjs は、vitest → pnpm -r --no-bail run test → run-db-tests.mjs の順に呼ぶ", () => {
-    const source = readFileSync(
-      fileURLToPath(new URL("../run-root-test-gate.mjs", import.meta.url)),
-      "utf8",
-    );
+  /**
+   * ⛔ **ソースを文字列として読んで語の並び順を見る形にしないこと。**
+   * `run-root-test-gate.mjs` の冒頭コメントには3段が同じ順で表になって書いてあるので、
+   * `indexOf` で順序を測ると**コードを並べ替えても緑のまま**になる。
+   * ⟹ 配線の実体（`STAGES`）を import して、そのものを測る。
+   */
+  it("門は、vitest → pnpm -r --no-bail run test → run-db-tests.mjs の順に3段を起動する", () => {
+    const commandLines = STAGES.map((stage) => [stage.command, ...stage.args].join(" "));
 
-    const vitestIndex = source.indexOf("vitest");
-    const noBailIndex = source.indexOf("--no-bail");
-    const dbStageIndex = source.lastIndexOf("run-db-tests.mjs");
+    expect(commandLines).toEqual([
+      "pnpm exec vitest run",
+      "pnpm -r --if-present --no-bail run test",
+      "node scripts/run-db-tests.mjs",
+    ]);
+  });
 
-    expect(vitestIndex).toBeGreaterThan(-1);
-    expect(noBailIndex).toBeGreaterThan(vitestIndex);
-    expect(dbStageIndex).toBeGreaterThan(noBailIndex);
+  it("段2には --no-bail が在る（1パッケージ落ちても残りのパッケージを起動し続ける）", () => {
+    const packageStage = STAGES.find((stage) => stage.args.includes("-r"));
+
+    expect(packageStage?.args).toContain("--no-bail");
   });
 });

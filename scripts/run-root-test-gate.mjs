@@ -23,24 +23,14 @@
  */
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { gateExitCode, summarizeStages } from "./root-test-gate.mjs";
+import { STAGES, gateExitCode, summarizeStages } from "./root-test-gate.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
-
-const stages = [
-  { name: "vitest run", command: "pnpm", args: ["exec", "vitest", "run"] },
-  {
-    name: "pnpm -r --if-present --no-bail run test",
-    command: "pnpm",
-    args: ["-r", "--if-present", "--no-bail", "run", "test"],
-  },
-  { name: "run-db-tests（ADR 0015）", command: "node", args: ["scripts/run-db-tests.mjs"] },
-];
 
 /** @type {import("./root-test-gate.mjs").StageResult[]} */
 const results = [];
 
-for (const stage of stages) {
+for (const stage of STAGES) {
   const run = spawnSync(stage.command, stage.args, { cwd: repoRoot, stdio: "inherit" });
   results.push({
     name: stage.name,

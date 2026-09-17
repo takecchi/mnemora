@@ -129,6 +129,19 @@ run test`）≈ 10秒、段3（`node scripts/run-db-tests.mjs`）≈ 0秒
 **門そのもの（`scripts/run-root-test-gate.mjs`）を子プロセスとして起動する歯は
 置かない**——段2が `pnpm -r run test` を呼ぶため、歯の中から起動すると再帰する。
 
+⭐ **配線の実体（`STAGES` 配列）も、この純関数側に置く。**`run-root-test-gate.mjs` は
+import された時点で3段を起動してしまうので、**歯から import できない。**配線を
+そちらに置くと、配線を釘付けにする歯（`scripts/__tests__/run-db-tests.test.mjs` の
+「ルートの test 門の配線」）は**ソースを文字列として読むしかなくなる**——そして
+`run-root-test-gate.mjs` の冒頭コメントには3段が同じ順で表になって書いてあるため、
+⛔ **`indexOf` で順序を測る歯は、コードを並べ替えても緑のままになる。**
+⟹ 副作用の無い `root-test-gate.mjs` に `STAGES` を置き、歯はそれを import して
+**データそのものを測る。**
+
+**【実測】この歯が本当に噛むことを、変異を当てて確かめた**（2026-09-17、手元）:
+段2から `--no-bail` を落とすと2件、段3（`run-db-tests.mjs`）を配列から消すと1件が
+赤くなり、戻すと5件とも緑に戻った。
+
 ### 4. 数え直した族のうち、直すのは1番・2番だけ
 
 上の表の通り。3番（`run-db-tests.mjs` の早期 exit）・4番・5番（`typecheck` /
