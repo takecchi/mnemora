@@ -215,5 +215,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0205](./0205-local-embedding-pipeline-required-interface.md) | `LocalEmbeddingPipeline` を必須 interface にし、ADR 0090 決定4「引き受けた負債1」を塞ぐ（Issue #137 案 (a)） | 採用 (2026-09) |
 | [0206](./0206-outbox-concurrent-claim-conformance.md) | 同時 claim の適合テストを `supportsRealConcurrency` で切り替える（Issue #205 の1本目） | 採用 (2026-09) |
 | [0207](./0207-dry-run-reads-existence-and-coverage-degrades-silently.md) | 予行は registry の「既に在るか」を読む — そして予行の網羅性は、木の版と registry の関係で黙って落ちる | 採用 (2026-09) |
+| [0209](./0209-root-test-gate-runs-all-stages-regardless-of-failure.md) | ルートの `test` 門は、前段が落ちても後段を必ず起動する（Issue #453） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
