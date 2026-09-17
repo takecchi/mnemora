@@ -1080,6 +1080,47 @@ export interface MemoryStore {
     supersededById: MemoryId,
     event: { reason?: string; actor?: EventActor; at: Date },
   ): Promise<{ restored: Memory[] }>;
+  /**
+   * `restoreSupersededBy?` を実際に呼ぶ**前**に、その群に何が入っているかを見るための
+   * 読み取り専用の口（[Issue #515](https://github.com/takecchi/mnemora/issues/515)、
+   * ADR 0237。ADR 0230 冒頭の訂正が挙げた「群＝1回の操作ではない」を埋める。
+   * `Runtime.restoreSuperseded` の `opts.dryRun` から呼ばれる）。
+   *
+   * 🔴 **`restoreSupersededBy?` の既存の振る舞いは1バイトも変えない。** この口は
+   * 別に足す任意メソッドであり、`restoreSupersededBy?` を呼ばずには済まない既定
+   * （実際に戻す）はそのまま残る——[ADR 0100](../../../../docs/decisions/0100-supersede-with-new-memories.md)
+   * 決定1と同じ「既存必須/既存契約は壊さない」判断を、ここでは「既存の任意メソッドの
+   * 意味も変えない」まで広げている。
+   *
+   * **対象の選び方は `restoreSupersededBy?` の `WHERE` と完全に一致させる**——
+   * `tenant_id = ctx.tenantId AND superseded_by_id = supersededById AND
+   * status = 'superseded'`。ここが2つの口でずれると、「戻る前に見たものと、実際に
+   * 戻ったものが違う」という、この口を作った理由そのものを裏切る不整合になる。
+   * 適合テスト（`packages/testkit` の `memory-store-conformance.ts`）はこの一致を
+   * 両方の口を同じ入力で呼んで比較することで検査する。
+   *
+   * **書き込みは一切行わない**——`memories` の `UPDATE` も `memory_events` への
+   * `INSERT` も無い。`SELECT` だけで完結する（費用の見立ては ADR 本文参照）。
+   *
+   * **`supersededReason`**: 対象の Memory について、`status` を `'superseded'` に
+   * した直近の `memory_events` 行（`kind = 'superseded'`、`memory_id` が一致する
+   * 行のうち `at` が最大のもの）の `meta.reason` をそのまま運ぶ。⚠ **これは
+   * 「なぜその群に入っているか」を*厳密に型付けした*分類ではない**——`meta.reason`
+   * は `Runtime` の3つの書き手（`reextract` は `"reextract_superseded"`、
+   * `consolidate` は `"consolidated"`、`resolveContested` は `"contested_resolved"`）
+   * が自由文として積んだ値をそのまま読むだけであり、この口はそれを解釈も変換もしない。
+   * 一致する `memory_events` 行が無い場合（この adapter が対象について1件も
+   * `kind: 'superseded'` を積んでいない、または将来別の書き手が `reason` を
+   * 省略した場合）は `null`。
+   *
+   * - 対象が0件なら `{ candidates: [] }`（`restoreSupersededBy?` の「対象0件なら
+   *   例外にしない」規律と同じ）。
+   * - 返す順序は adapter に委ねる（`restoreSupersededBy?` の `restored` と同じ規律）。
+   */
+  previewRestoreSupersededBy?(
+    ctx: Ctx,
+    supersededById: MemoryId,
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
 }
 
 /**
