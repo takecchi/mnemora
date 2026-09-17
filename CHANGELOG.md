@@ -96,6 +96,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### 追加
 
+⚠ **次の1件は、この節が pin している `v0.2.0`…`4b92134` の範囲の*外*である**（`4b92134` より後に着地した）。
+⟹ ⛔ **上の「利用者に見える PR は8本」「項目の件数は9件」という数は、この1件を含んでいない。**
+**数を書き換えるのではなく、含んでいないことを名乗る**（数字は `main` が動けば必ず腐るため。[#433](https://github.com/takecchi/mnemora/issues/433)）。
+
+- **`Runtime.restoreSuperseded`**（および `MemoryStore.restoreSupersededBy` — 任意メソッド）。
+  `superseded` になった Memory を `active` へ戻す**復旧口**。粒度は群単位で、
+  `target: { supersededById }`（置き換えた側の id）で指定する。
+  `memory_events.kind` に `unsuperseded` が増え、**マイグレーション `0018` を流す必要がある**
+  （[#369](https://github.com/takecchi/mnemora/issues/369) / [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
+  ⚠ **これは北極星 項目5（間違いを正すと、古いほうが先に出てこなくなる）を満たすものではない**——
+  訂正の口そのものは入っていない
+
 - **`TenantSettingsStore.setDefaultHalfLifeRecalls`**（任意メソッド）。テナント既定の
   半減期を「recall 回数」で設定する本番の経路（[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
   ⭕ **任意メソッドなので、この追加そのものは後方互換**——実装していない adapter は従来どおり動く。
