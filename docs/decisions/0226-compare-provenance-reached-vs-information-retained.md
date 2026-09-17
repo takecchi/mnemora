@@ -45,9 +45,10 @@
 - `examples/chat/compare-baseline.json`（⭐門、ADR 0133）——全12行が `factStatementSurvived`
   というキーを持つ。この ADR は本文にも `_readme` にも触れていない（Issue #499 の領域、
   下記「範囲外」参照）。
-- `scripts/compare-summary-lib.mjs` の `computeRegressions`——基準値との比較で
-  `factStatementSurvived` の `true → false` 退行を⭐門の判定条件の1つにしている
-  （ADR 0133 決定3）。
+- `scripts/compare-summary-lib.mjs` の `computeComparison`/`evaluateCompare`——基準値との
+  比較で `factStatementSurvived` の `true → false` 退行を⭐門の判定条件の1つにしている
+  （ADR 0133 決定3、[ADR 0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md)
+  が判定を3値化した後も同じ欄名を使い続けている）。
 - `scripts/__tests__/compare-summary-lib.test.mjs` / `compare-summary.test.mjs`——
   文字列 `"factStatementSurvived"` を直接アサートしている。
 
@@ -159,6 +160,11 @@
   この ADR の作業では検証していない（読む人を使った検証は行っていない）。
 - **DB を要する検査**（`examples/chat` の postgres 系テスト・`compare` 本体の実行）は、
   この作業環境に `DATABASE_URL` が無いため実行していない。PR 本文参照。
+- **「何が公開契約になっているか」節が指す `scripts/compare-summary-lib.mjs` の関数名
+  （`computeComparison`/`evaluateCompare`）は、この ADR を着地させる時点の現物
+  （`grep -n "^export function" scripts/compare-summary-lib.mjs`）で確認したが、⭐門の
+  実際の終了コードの挙動（pass→0/fail→1/indeterminate→2、ADR 0222 決定5）は、この
+  作業環境に `DATABASE_URL` が無いため実際には走らせていない。**
 
 ## 人から受け取った前提（出所付き）
 

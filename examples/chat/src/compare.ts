@@ -127,7 +127,7 @@ export interface CompareOptions {
   /** テナントIDの接頭辞。テスト側から重複を避けるために差し替えられるようにしてある。 */
   tenantPrefix?: string;
   /**
-   * 冒頭の事実が残ったかを `sourceObservationId` で辿るために必要（ADR 0052）。
+   * 冒頭の事実の出典に到達したかを `sourceObservationId` で辿るために必要（ADR 0052）。
    *
    * **省略可能にしていない。**省略を許すと文字列一致へ倒れる経路が残り、
    * 「どちらの判定で出た ❌ なのか」が表から読めなくなる。
