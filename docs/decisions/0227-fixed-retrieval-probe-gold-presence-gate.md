@@ -216,6 +216,44 @@ ADR 0224 §2.2 の2番に従い、3つを区別する:
 「順位が正しい」ことは何も言っていない。見ているのは「必要な記憶が候補集合の中に
 存在するか」だけである。
 
+### ⛔ この歯は時間項（`decay` / `freshness`）の退行を検出できない
+
+上の3分類（出典への到達／情報の保持／最終回答の正しさ）とは**別の軸**として、
+明示的に名乗る——**これはトレードオフであって、書き忘れていた副作用ではない。**
+
+上の「ADR 0223 決定3への答え」(i) で述べた「時刻由来の揺れを消す機序」を、
+現物で検算した:
+
+- `packages/core/src/runtime.ts` の `handleExtractableObservation` は
+  `recordedAt: clock.now()` を書く（`observe()` のたびに注入した `Clock` を読む）。
+  【現物】
+- `packages/core/src/recall-runtime.ts` は `const now = deps.clock.now();` を
+  1回だけ読み、`defaultScoringStrategy` の全候補に同じ `now` を渡す。【現物】
+- `packages/core/src/strategies/scoring.ts`/`decay.ts` は、`decay` の起点を
+  `lastReinforcedAt ?? recordedAt`、`freshness` の起点を `occurredAt ?? recordedAt`
+  とし、`elapsed = now - 起点` から `decayFactor(elapsed, halfLifeHours) =
+  0.5 ** (elapsed / halfLifeHours)` を計算する。【現物】
+
+この bench は `recall_usages`/`reinforce` を一度も呼ばない（`lastReinforcedAt` は
+常に null）、`observe()` に `occurredAt` を渡さない（常に null）——⟹ `decay`/
+`freshness` はどちらも起点 = `recordedAt` になる。`fixedClock` により
+**全観測の `recordedAt` と recall 時の `now` が同一の Date インスタンス**になるため、
+`elapsed` は**すべての候補で厳密に 0**、`decayFactor(0, halfLifeHours) = 1`——
+**`decay`/`freshness` は候補間で差がつく余地が無いだけでなく、常に定数 `1` になる。**
+
+**⟹ `decay`/`freshness` の計算式が丸ごと壊れて別の値（負の値・`NaN`・常に0など）を
+返すようになっても、全候補が同じように壊れる限り相対順位は変わらず、この歯は
+検出できない。** 揺れを消したのと同じ機序（`elapsed` をゼロへ固定する）が、
+同時にこの2項に対する検出力をゼロにしている——これは意図した設計上のトレードオフ
+であり、見落としではない。
+
+時間項の振る舞いは、この歯とは別に **`time-term` ジョブ**（`.github/workflows/ci.yml`
+の `time-term:` ジョブ、`deterministic` provider・`MutableClock` で `decay`/
+`freshness` を分離して測る。ADR 0058）が既に走っている。【現物】
+ただし branch protection の required checks（6件、`gh api
+repos/takecchi/mnemora/branches/main/protection/required_status_checks` で確認）に
+`time-term` は含まれておらず、**required ではない。**【実測】
+
 ## 記録再生の射程
 
 ADR 0224 §2.2 の6番に従う。この歯は `examples/chat/cassettes/retrieval.json` に
@@ -353,3 +391,10 @@ gold/distractor には触れていない）。**この歯は緑のまま**だっ
   直積が枯渇する規模までテナントが育つ、等）が入ったら、上の「引き受けた負債」1番
   の tie-break 負債が顕在化する可能性がある——そのときは ADR 0170/0167 と同じ形で
   tie-break の決定性を別途固定する必要が生じる。
+- **時間項（`decay`/`freshness`）の退行を門で守りたくなったら**、この歯とは別に、
+  **候補間で経過時間に差がつく固定ケース**（例えば probe ごとに `occurredAt`/
+  ingest のタイミングをずらし、相対的な時刻差を持たせた固定入力）が要る——
+  `fixedClock` で全候補の `elapsed` を 0 に揃える、という本 ADR の機序そのものが
+  時間項の検出力を消しているため、この歯を拡張するのではなく**別の固定ケースを
+  新設する**形になる。その設計（何を固定し、何を差分として残すか）は本 ADR の
+  射程外である。
