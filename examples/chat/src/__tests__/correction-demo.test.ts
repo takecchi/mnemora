@@ -1,4 +1,9 @@
-import type { CorrectionCandidate, Runtime } from "@mnemora/core";
+import type {
+  CorrectionCandidate,
+  MarkContestedOptions,
+  ResolveContestedOptions,
+  Runtime,
+} from "@mnemora/core";
 import { describe, expect, it } from "vitest";
 import type { CorrectionScenario } from "../correction-scenario.js";
 import { CORRECTION_SCENARIO } from "../correction-scenario.js";
@@ -36,6 +41,10 @@ interface FakeRuntimeCalls {
   observedExternalIds: string[];
   markContestedArgs: [string, string] | null;
   resolveContestedArgs: [string, string, unknown] | null;
+  /** `markContested` に渡った `opts`（4番目の引数）。Issue #369 チェックボックスの歯用。 */
+  markContestedOpts: MarkContestedOptions | undefined;
+  /** `resolveContested` に渡った `opts`（5番目の引数)。同上。 */
+  resolveContestedOpts: ResolveContestedOptions | undefined;
   recallCallCount: number;
   /**
    * `recall()` に実際に渡ったクエリを、呼ばれた順にすべて記録する。
@@ -58,6 +67,8 @@ function emptyCalls(): FakeRuntimeCalls {
     observedExternalIds: [],
     markContestedArgs: null,
     resolveContestedArgs: null,
+    markContestedOpts: undefined,
+    resolveContestedOpts: undefined,
     recallCallCount: 0,
     recallQueries: [],
     findCorrectionCandidatesCallCount: 0,
@@ -215,8 +226,9 @@ function buildFakeRuntime(
     } as unknown as Awaited<ReturnType<Runtime["recall"]>>;
   };
 
-  const markContested: Runtime["markContested"] = async (_ctx, firstId, secondId) => {
+  const markContested: Runtime["markContested"] = async (_ctx, firstId, secondId, opts) => {
     calls.markContestedArgs = [String(firstId), String(secondId)];
+    calls.markContestedOpts = opts;
     return {
       supported: true,
       outcome: { kind: "contested" },
@@ -228,8 +240,10 @@ function buildFakeRuntime(
     firstId,
     secondId,
     resolution,
+    opts,
   ) => {
     calls.resolveContestedArgs = [String(firstId), String(secondId), resolution];
+    calls.resolveContestedOpts = opts;
     return {
       supported: true,
       outcome: { kind: "resolved" },
@@ -410,6 +424,63 @@ describe("🔴🔴 採用者の指名が候補1位ではないケース: candida
     expect(calls.resolveContestedArgs?.[0]).toBe(originalId);
     expect(calls.resolveContestedArgs?.[1]).toBe(correctionId);
     expect(JSON.stringify(calls.resolveContestedArgs)).not.toContain(decoyId);
+  });
+});
+
+/**
+ * 🔴 Issue #369 チェックボックス: 選んだ根拠（スコア・順位・候補の数・どちらへ倒したか）を
+ * `memory_events.meta.note` から辿れるようにする——`markContested`/`resolveContested` の
+ * `opts.reason` に実際に載ることを実測する（`meta.note` へ実際に届いたかは DB を要求する
+ * ため `correction-demo.postgres.test.ts` 側で見る。ここでは「呼び出しの引数として
+ * 渡ったか」までを見る）。
+ */
+describe("🔴 選んだ根拠が opts.reason 経由で markContested/resolveContested へ渡る(Issue #369)", () => {
+  it("候補2位を指名したケース: reason に recallId・chosenRecallRank(=2)・candidates件数・winner が載り、markContested と resolveContested の両方に同じ reason が渡る", async () => {
+    const calls = emptyCalls();
+    const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
+    const decoyId = "decoy-memid-for-reason-test";
+    const discoveryCandidates: CorrectionCandidate[] = [
+      {
+        memoryId: decoyId,
+        digest: "無関係な既存の記憶",
+        recallRank: 1,
+        score: fakeScore(0.95),
+        retrievedVia: "ann",
+      } as unknown as CorrectionCandidate,
+      {
+        memoryId: originalId,
+        digest: "青",
+        recallRank: 2,
+        score: fakeScore(0.87),
+        retrievedVia: "ann",
+      } as unknown as CorrectionCandidate,
+    ];
+    const runtime = buildFakeRuntime(calls, discoveryCandidates);
+
+    const result = await runCorrectionDemo(
+      runtime,
+      { tenantId: "t" },
+      CORRECTION_SCENARIO,
+      recordedChoice(),
+    );
+
+    expect(result.outcome).toBe("resolved");
+    expect(result.chosenRecallRank).toBe(2);
+
+    // 🔴 片方だけにしない: markContested と resolveContested の両方に reason が届く。
+    expect(calls.markContestedOpts?.reason).toBeDefined();
+    expect(calls.resolveContestedOpts?.reason).toBeDefined();
+    expect(calls.markContestedOpts?.reason).toBe(calls.resolveContestedOpts?.reason);
+
+    const reason = calls.markContestedOpts?.reason ?? "";
+    expect(reason).toContain("chosenRecallRank=2");
+    expect(reason).toContain(`candidates=${discoveryCandidates.length}`);
+    expect(reason).toContain("recallId=correction-candidates-recall");
+    expect(reason).toContain("winner=correction");
+
+    // 🔴 選んだ根拠にスコアの生値(score.total)は載せない設計判断(ADR 参照)。
+    expect(reason).not.toContain("0.87");
+    expect(reason).not.toContain("0.95");
   });
 });
 

@@ -261,5 +261,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0235](./0235-correction-demo-explicit-choice.md) | 訂正の相手は `examples/chat` でも人が指名する — `findCorrectionCandidates` を本番コードの経路に立てる（Issue #369 (C) / 北極星 項目5） | **草案 (2026-09)** |
 | [0236](./0236-answer-retention-mutation-tested-not-recorded.md) | Issue #498 完了条件4を内容保持の側だけで満たす — 回答評価側の陽性対照は実 API での記録追加を要するため未達のまま残す | 採用 (2026-09) |
 | [0237](./0237-restore-superseded-dry-run-preview.md) | `restoreSuperseded` に下見（`dryRun`）を足す — 方向3「戻す前に何が戻るかを返す」を実装する（Issue #515） | 採用 (2026-09) |
+| [0238](./0238-correction-choice-rationale-in-events.md) | 訂正の相手を選んだ根拠を、イベントに残す — `meta.note` と `RecallResult.explain` の両方から辿れるようにする（Issue #369 チェックボックス / 北極星 問い3） | **草案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

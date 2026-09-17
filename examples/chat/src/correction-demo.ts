@@ -39,6 +39,14 @@ import { CORRECTION_SCENARIO } from "./correction-scenario.js";
  * 指名するかは呼び出し側が持つ**（このファイルは `CorrectionChoice` を受け取るだけで、
  * `turns` の並び順や `recordedAt` の大小・candidates の順位からは何も導かない）。
  *
+ * **🔴 `markContested`/`resolveContested` には `opts.reason`（`buildCorrectionReason` が
+ * 組む）を必ず渡す**——選んだ根拠（`discovery.recallId`・選んだ候補の `recallRank`・
+ * 候補の件数・どちらへ倒したか）を `memory_events.meta.note` に残す（Issue #369
+ * チェックボックス、[ADR 0238-correction-choice-rationale-in-events](../../../docs/decisions/0238-correction-choice-rationale-in-events.md)）。
+ * `meta.note` に載る `recallId` が `RecallResult.explain`（`Runtime.getRecall` 経由）への
+ * 橋になる——**記録そのものが、`candidates[0]` を機械的に採る実装への退行を後から
+ * 検出できるようにする歯の一種**（同 ADR 参照）。
+ *
  * **⚠ 北極星の主測定（`compare`/`retrieval`）には一切関わらない。**`compare.ts`/
  * `compare-json.ts`/`scenario.ts`/`probe-set.ts`/`naive-path.ts` のいずれも import しない
  * （`scope.ts`/`backfill.ts` と同じ規律）。
@@ -152,6 +160,36 @@ function buildExternalIdIndex(
  */
 function buildRecallQuery(scenario: CorrectionScenario): { text: string; limit: number } {
   return { text: scenario.query, limit: 1 };
+}
+
+/**
+ * `markContested`/`resolveContested` の `opts.reason` へ渡す文字列を組み立てる
+ * （Issue #369 チェックボックス「選んだ根拠（スコア・順位・候補の数・どちらへ倒したか）を
+ * `memory_events.meta.note` と `RecallResult.explain` の両方から辿れるようにする」）。
+ *
+ * **機械で読み返せる `key=value` の並びにしつつ、人にも読める形にする**（形式は自由文字列
+ * ——値は decisions ADR 参照)。`recallId` が
+ * `RecallResult.explain` 側への橋になる: この文字列から `recallId=...` を取り出し
+ * `Runtime.getRecall(ctx, recallId)` に渡せば、その recall の `explain.stages` を
+ * 後から引ける（`FindCorrectionCandidatesResult.recallId` の doc コメント / `getRecall`
+ * の doc コメント参照）。
+ *
+ * ⚠ **`score.total` は載せない。** ADR 0232 が実測した通り、スコアの閾値は
+ * A群（訂正すべき）と B群（訂正してはいけない）を分離しない——スコアは「なぜこの候補を
+ * 選んだか」の理由になっていない。この記録に生スコアを載せると、後から読む側に
+ * 「スコアが高かったから選んだ」という誤った説明を与えてしまう。載せるのは、この経路が
+ * 実際に守っている契約（候補[0]を機械的に採らない）を後から検証できる最小の情報
+ * ——候補の件数・選んだ候補の順位・どちらへ倒したか・recall への橋——だけである。
+ */
+function buildCorrectionReason(
+  discovery: FindCorrectionCandidatesResult,
+  chosenRecallRank: number,
+  winnerSide: "original" | "correction",
+): string {
+  return (
+    `chosenRecallRank=${chosenRecallRank} / candidates=${discovery.candidates.length} / ` +
+    `recallId=${discovery.recallId} / winner=${winnerSide}`
+  );
 }
 
 /** `outcome !== "resolved"` のときの、書き込み段を持たない結果を組み立てる共通部分。 */
@@ -288,17 +326,32 @@ export async function runCorrectionDemo(
     );
   }
 
+  // 🔴 Issue #369 チェックボックス: 選んだ根拠(recallId・順位・候補の数・どちらへ倒したか)を
+  // memory_events.meta.note から辿れるようにする。markContested/resolveContested の
+  // 両方に同じ reason を渡す(片方だけにしない)。
+  const winnerSide: "original" | "correction" =
+    winnerId === correctionId ? "correction" : "original";
+  const correctionReason = buildCorrectionReason(discovery, chosenCandidate.recallRank, winnerSide);
+
   const recallQuery = buildRecallQuery(scenario);
   const beforeMark = await runtime.recall(ctx, recallQuery);
 
-  const markResult = await runtime.markContested(ctx, chosenId, correctionId);
+  const markResult = await runtime.markContested(ctx, chosenId, correctionId, {
+    reason: correctionReason,
+  });
 
   const afterMark = await runtime.recall(ctx, recallQuery);
 
-  const resolveResult = await runtime.resolveContested(ctx, chosenId, correctionId, {
-    kind: "supersede",
-    winnerId,
-  });
+  const resolveResult = await runtime.resolveContested(
+    ctx,
+    chosenId,
+    correctionId,
+    {
+      kind: "supersede",
+      winnerId,
+    },
+    { reason: correctionReason },
+  );
 
   const afterResolve = await runtime.recall(ctx, recallQuery);
 
