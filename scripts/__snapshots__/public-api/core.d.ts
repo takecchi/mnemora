@@ -26,6 +26,34 @@ import type { Clock } from "./interfaces/clock.js";
 export declare const systemClock: Clock;
 export declare function fixedClock(at: Date): Clock;
 
+// ===== dist/correction-candidates.d.ts =====
+import type { MemoryId, RecallId } from "./ids.js";
+import type { Omission, RecalledMemory, ScoreBreakdown, StageTrace } from "./recall.js";
+export declare const DEFAULT_CORRECTION_CANDIDATE_LIMIT = 3;
+export interface FindCorrectionCandidatesInput {
+    text: string;
+    limit?: number;
+    excludeMemoryIds?: readonly MemoryId[];
+}
+export interface CorrectionCandidate {
+    memoryId: MemoryId;
+    digest: string;
+    recallRank: number;
+    score: ScoreBreakdown;
+    retrievedVia: RecalledMemory["retrievedVia"];
+}
+export interface FindCorrectionCandidatesResult {
+    recallId: RecallId;
+    candidates: CorrectionCandidate[];
+    omitted: Omission[];
+    explain: {
+        stages: StageTrace[];
+    };
+    outcome: "candidates" | "no_candidates";
+    recalledCount: number;
+    excludedCount: number;
+}
+
 // ===== dist/ctx.d.ts =====
 import { z } from "zod";
 export interface Ctx {
@@ -299,6 +327,7 @@ export * from "./provenance.js";
 export * from "./observation.js";
 export * from "./memory.js";
 export * from "./recall.js";
+export * from "./correction-candidates.js";
 export * from "./digest-band.js";
 export * from "./ann-truncation.js";
 export * from "./recall-footprint.js";
@@ -2220,6 +2249,7 @@ export declare const NOT_INDEXED_REASONS: readonly NotIndexedReason[];
 
 // ===== dist/runtime.d.ts =====
 import type { Clock } from "./interfaces/clock.js";
+import type { FindCorrectionCandidatesInput, FindCorrectionCandidatesResult } from "./correction-candidates.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor } from "./event.js";
 import type { ExtractionFailure, ExtractionOutcome } from "./extraction.js";
@@ -2641,6 +2671,7 @@ export interface Runtime {
     tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
     recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult>;
     getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
+    findCorrectionCandidates(ctx: Ctx, input: FindCorrectionCandidatesInput): Promise<FindCorrectionCandidatesResult>;
     reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
     reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
     sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult>;

@@ -45,6 +45,16 @@ import {
   buildMeasuredIdentifierProbeJson,
   buildWeightsUnavailableIdentifierProbeJson,
 } from "./identifier-json.js";
+import {
+  formatCorrectionCandidateReport,
+  runCorrectionCandidateArm,
+  summarizeCorrectionCandidateReport,
+} from "./correction-candidate-arm.js";
+import { CORRECTION_CASE_SET_DEV } from "./correction-case-set.dev.js";
+import {
+  CORRECTION_ABSTAIN_CASE_SET_EVAL,
+  CORRECTION_HIT_CASE_SET_EVAL,
+} from "./correction-case-set.eval.js";
 import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
 import { buildMnemoraPrompt, ingestConversation, reportMemoryUsage } from "./mnemora-path.js";
 import { TINY_BUDGET_CHARS, runBudgetDemo } from "./budget-demo.js";
@@ -1650,6 +1660,81 @@ async function runAnswer(): Promise<void> {
   }
 }
 
+/**
+ * Issue #369 (C)「訂正の口」の相手探しの精度を測る（`correction-candidate-arm.ts`）。
+ *
+ * **provider は `identifier-probes` と同じ組み合わせに固定する**——LLM は
+ * `deterministic`、埋め込みは `local`（ONNX の実推論）。⛔ **鍵を要求しない。**
+ * ⚠ `recorded` は使えない——この器のケースはカセットに記録が無い入力であり、
+ * `recorded` provider は記録に無い入力を例外にする（ADR 0051）。
+ *
+ * ⚠ **順位を決めているのは埋め込み（`local` ＝ 実推論）であり、`deterministic` が
+ * 掛かるのは抽出側である。**`docs/autonomy.md` §2.2 決定3 の「意味的品質を測るときに
+ * `deterministic` stub へ置き換えない」は、この配線では埋め込み側に掛かる
+ * （`identifier-probes`/`association-probes`/`consolidation-cost` と同じ前提）。
+ *
+ * **`warmup()` を明示的に呼び、失敗を区別する**（`identifier-probes` と同じ理由）
+ * ——「重みを取得できなかった」が「相手探しの精度が低い」に見えてはならない。
+ *
+ * `-- --dev` を付けると開発用ケース集合で走る（⛔ その結果を「未使用の評価」として
+ * 報告しないこと。`docs/autonomy.md` §2.2 決定5）。
+ */
+async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const runToken = newRunToken();
+  const handle = await createExampleRuntime(databaseUrl, {
+    ...process.env,
+    MNEMORA_LLM: "deterministic",
+    MNEMORA_EMBEDDING: "local",
+  });
+  printProviderMode(handle.llmMode, handle.embeddingMode);
+  try {
+    console.log(
+      "\n[correction-candidates] warmup() でモデルの読み込みを先に済ませる" +
+        "(取得に失敗したら、ここでメトリクスを出さずに打ち切る)…",
+    );
+    const warmup = await warmupLocalEmbedding(handle.embeddingProvider);
+    if (!warmup.ok) {
+      console.error(`\n🔴 ${warmup.detail}`);
+      console.error(
+        "  メトリクスは1件も測っていない(前回の値・既定値・0 へは倒さない)。" +
+          "ネットワーク・Hugging Face repo の状態を確認し、再実行すること。",
+      );
+      process.exitCode = 1;
+      return;
+    }
+    const label = useDevSet ? "dev" : "eval";
+    console.log(
+      `\n[correction-candidates] ケース集合 = ${label}` +
+        (useDevSet
+          ? "（⛔ 調整に使ってよい側。未使用の評価として報告しないこと）"
+          : "（held-out）"),
+    );
+    const report = await runCorrectionCandidateArm({
+      tenantId: `correction-candidates-${label}-${runToken}`,
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+      llmMode: handle.llmMode,
+      embeddingMode: handle.embeddingMode,
+      hitCases: useDevSet ? CORRECTION_CASE_SET_DEV : CORRECTION_HIT_CASE_SET_EVAL,
+      abstainCases: useDevSet ? [] : CORRECTION_ABSTAIN_CASE_SET_EVAL,
+    });
+    if (report.ingestDrain.totalFailed > 0) {
+      console.error(
+        `\n🔴 embed に失敗した件がある(${String(report.ingestDrain.totalFailed)}件)。⛔ この数字は使えない。`,
+      );
+      process.exitCode = 1;
+      return;
+    }
+    console.log("");
+    console.log(
+      formatCorrectionCandidateReport(report, summarizeCorrectionCandidateReport(report)),
+    );
+  } finally {
+    await handle.close();
+  }
+}
+
 function printHelp(): void {
   console.log(
     [
@@ -1681,6 +1766,9 @@ function printHelp(): void {
       "                                                                      # 掃引(Runtime.sweepArchive)が「載る量」/hit@k をどう動かすかを実測する(Issue #209)",
       "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_ARCHIVE_SWEEP_JSON で機械可読出力",
       "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction-candidates",
+      "                                                                      # 訂正の相手探しの精度(Issue #369 (C))を測る。hit@k/distractor逆転率/誤爆率/棄権率",
+      "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。-- --dev で開発用ケース集合",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer      # naive/mnemora の最終回答・入力量を対で出す(Issue #506)",
       "                                                                      #   🔴 配線の検査であり、回答品質は測っていない(llmMode=deterministic のとき集計を出さない)",
       "                                                                      #   MNEMORA_ANSWER_JSON で機械可読出力",
@@ -1732,6 +1820,8 @@ async function main(): Promise<void> {
     await runConsolidationCostCommand();
   } else if (command === "archive-sweep-cost") {
     await runArchiveSweepCostCommand(parseDecayClockFlag(process.argv.slice(3)));
+  } else if (command === "correction-candidates") {
+    await runCorrectionCandidates(process.argv.slice(3).includes("--dev"));
   } else if (command === "answer") {
     await runAnswer();
   } else if (command === "record") {
