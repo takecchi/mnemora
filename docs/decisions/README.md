@@ -6,6 +6,14 @@ ADR (Architecture Decision Record) として記録する。`docs/architecture.md
 ここでは各決定について、検討した選択肢・却下した理由・引き受ける負債・覆る条件までを
 1ファイルにまとめる。**決定そのものをやり直す場ではなく、決定を記録する場である。**
 
+**⛔ 採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する。**
+**理由は上の1文である**——ここは記録の場であり、**間違え方それ自体が記録だからである。**
+本文を直すと「何をどう判断して外したか」が消え、**訂正を積んだ経緯も追えなくなる。**
+（**この作法は実際に繰り返し採られている**——根拠と反例は
+[ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) 決定1。
+⚠ **まだ採用されていない初稿はこの限りではない。**そして
+**`docs/north-star.md` は別の規律で守られている**——`AGENTS.md` を見ること。）
+
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
@@ -231,5 +239,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0221](./0221-memories-analyze-on-write.md) | `PostgresMemoryStore` の書き込み経路が閾値越えのときだけ `memories` を `ANALYZE` する — ADR 0194 と同じ設計を、JOIN の相手側にも入れる（Issue #269） | 採用 (2026-09) |
 | [0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md) | ⭐門 `compare` は、実測と基準値の `turnCount` 集合が一致したときだけ判定する（Issue #477） | 採用 (2026-09) |
 | [0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) | 繰り返し採られているのに入口の文書に書かれていない判断の規律を、ADR 211本の母集合から抽出した — 残ったのは10。最頻出は「採用済み ADR の本文を書き換えない」で 46/211 | 採用 (2026-09) |
+| [0224](./0224-quality-evaluation-and-acceptance-criteria.md) | 品質評価の証明範囲と合格基準の変更を、自律作業の条件にする | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
