@@ -487,7 +487,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **この数え方は思いつきではなく、2026-09-16 に実際に採ったものである**——[Issue #284](https://github.com/takecchi/mnemora/issues/284) の棚卸しが「**型と文書が揃っていても、それを書くコードが1行も無いなら『在る』と数えていない**」という4欄（設計文書 / 型 / 実装 / 歯）の判定を導入し、[#283](https://github.com/takecchi/mnemora/pull/283) / [#290](https://github.com/takecchi/mnemora/pull/290) の着地判定でもそのまま使った。
 
-**「物差しが緑のまま」の中身**: `compare` の⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）。判定は `scripts/compare-summary-lib.mjs` の `computeRegressions` で、**①`mnemoraShareOfNaiveChars` が基準値より増加 ②`factStatementSurvived` が `true`→`false`** のどちらかで赤くなる。⚠ **この門の存在が、v1.0 の残作業の順序を決めている**（§7.5）。
+**「物差しが緑のまま」の中身**: `compare` の⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）。判定は `scripts/compare-summary-lib.mjs` が持ち、**①`mnemoraShareOfNaiveChars` が基準値より増加 ②`factStatementSurvived` が `true`→`false`** のどちらかで赤くなる。🔴 **ただし「赤ではない」は「退行が無い」ではない**——実測と基準値で `turnCount` の集合が食い違うと、門は退行を判定せず**「判定していない」**で終わる（[ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md) 決定5 / [Issue #477](https://github.com/takecchi/mnemora/issues/477)）。⛔ **これを緑と同じ顔で読まないこと。**⚠ **この門の存在が、v1.0 の残作業の順序を決めている**（§7.5）。
 ### 7.3 ⛔ この日付は「門」ではない —— **警報**である
 
 ⚠ **追記（2026-09-17）— この節の日付は、`v1.0.0` をいつ出すかというオーナーの決定
@@ -765,6 +765,8 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）は退行ゼロ。** `origin/main` の CI run 35053218224（`9fcd47c`、ジョブ `examples/chat`）の成果物 `compare.json` と `examples/chat/compare-baseline.json` を突き合わせると、**12行すべてで `mnemoraShareOfNaiveChars` が基準値と完全一致し、`factStatementSurvived` は12行とも `true`** 【実測】。判定は `scripts/compare-summary-lib.mjs:246-269` の `computeRegressions` で、①`mnemoraShareOfNaiveChars > 基準値`（**epsilon 無しの厳密比較。許容幅はゼロ**）②`factStatementSurvived` が `true`→`false`、の片側2条件のみ。
 
+⚠ **2026-09-17 訂正（⛔ 上の段落は書き換えない。当時の記録である）**: 上が名指ししている `computeRegressions` は、**いまの現物には無い**——[ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md)（[PR #493](https://github.com/takecchi/mnemora/pull/493)）が廃し、門の判定を **退行あり / 退行なし / 判定していない** の3値にした（上に付いている行番号つきのソース引用も、同じ理由でもう別の関数を指している）。⭐ **①②の2条件で赤くなること自体は、いまの現物でも変わっていない**【実測 2026-09-17、`main` = `3d30402`】。⛔ **変わったのは「赤ではない」の読み方である**——`turnCount` の集合が食い違うと門は退行を判定しないので、**「赤ではない」＝「退行が無い」とは言えない**（§7.2）。⟹ ⭐ **当時の【実測】（12行すべてが基準値と一致）そのものは、この訂正では動かない。**
+
 ⚠ **「緑」の余裕は「一致」であって「下回っている」ではない。**⟹ `examples/chat` の出力を1文字でも増やす変更は、その場で赤くなる。
 
 ⚠ **⭐門の基準値には触れていない**（本 PR は `docs/roadmap.md` の1ファイルのみ）。
@@ -811,6 +813,8 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 ⭕ **`status` は渡っているので `superseded` は連想枠から戻らない**（`recall-runtime.ts:1057`）⟹ **項目5 は無事である。**破れるのは項目1 の*緩い側*（沈んだはずのものが出る）・項目6（名乗らずに出る）・`validAt` ゲートの3つ。
 
 ⚠ **修正の見当は小さい**（filter に3欄を足し、後置ループで `survivesDecayGate()` と `validAt` を見る）**が、⭐門の `mnemoraShareOfNaiveChars` を動かしうる**——連想枠から返る件数が減る方向なので**基準値より小さくなる側**であり、`computeRegressions` は片側判定（増加のみ赤）なので**赤にはならない**が、基準値の更新は要る。⟹ §7.5 の「直列化が要る」の対象である。
+
+⚠ **2026-09-17 訂正（⛔ 上の段落は書き換えない。当時の記録である）**: `computeRegressions` は [ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md) が廃した。⭐ **ただし「片側判定（増加のみ赤）」という性質は、いまの現物でも変わっていない**【実測 2026-09-17、`main` = `3d30402`】⟹ **「赤にはならない」という上の見立ての根拠は、名前が変わっても生きている。**（外れたのは別の箇所である——すぐ下の 🔴 を見ること。）
 
 ⚠ **これに対応する issue 番号は確かめていない**（既存の issue に同じ指摘が無いことを `#329`・`#340`・`#342`・`#345`・`#338`・`#337` の本文について確認しただけで、**全 issue を検索していない**）。
 
