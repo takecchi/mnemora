@@ -101,7 +101,9 @@ Issue #267 は「考えられる方向」を4つ並べ、⛔ **「本 issue は�
 
 【実測】`gh api repos/takecchi/mnemora --jq '{visibility, private}'` → `{"visibility":"public","private":false}`。
 
-【実測】`.github/workflows/ci.yml` と `.github/workflows/publish.yml` の `runs-on` は **13箇所すべてが `ubuntu-latest`** である（`grep -rn "runs-on" .github/workflows/` → `ubuntu-latest` が13）。⟹ **larger runner を使っていない。**
+【実測】`.github/workflows/ci.yml` と `.github/workflows/publish.yml` の `runs-on` は **13箇所すべてが `ubuntu-latest`** である（`grep -rn "runs-on" .github/workflows/` → `ubuntu-latest` が13、他は無し）。⟹ **larger runner を使っていない。**
+
+⚠ **この「13」を、下の「13ジョブ」と同じ数だと読まないこと。**こちらは `runs-on` の**出現箇所**（`ci.yml` の12ジョブ + `publish.yml` の1ジョブ）であり、下の13は `ci.yml` の `postgres` を matrix の2脚に展開した**ジョブ数**である。⟹ **一致しているのは偶然である。**
 
 【現物】GitHub の課金文書（`https://docs.github.com/en/billing/concepts/product-billing/github-actions`、2026-09-17 に取得）の逐語:
 
@@ -208,6 +210,40 @@ Issue #267 の「確かめていないこと」も、ADR 0183 の「確かめて
 - 【現物】GitHub の課金文書を 2026-09-17 に取得し、「標準ランナーは無料」の箇条と larger runner の1文を引いた。⚠ **ここで一度、引用を間違えかけた**——要約器を通した取得が「`GitHub Actions usage is free for self-hosted runners and for public repositories that use standard GitHub-hosted runners.`」という1文を逐語として返したが、**生の HTML を `curl` で取って `grep` すると、その文はページに存在しなかった。**⟹ **本 ADR に載せたのは、生の HTML で当てた方だけである。**
 - 【実測】Issue #267 の本文・追記と、コメント6本（`5685342808` / `5699992661` / `5701649704` / `5711844321` / `5712642668` / `5713231796`）を `gh api` で取得して読んだ。⚠ **本文とコメントは別々に取得した**——`gh issue view --comments` は本文を出さないためである。
 - ⛔ **`pnpm run test` の全体実行はしていない**（この器の規律。`docs/autonomy.md` §4 の表）。**本 ADR は文書を1ファイル足すだけであり、コードに触っていない。**
+
+## ⭐ 本 ADR 自身が、この周回を実際に踏んだ【実測】
+
+**本 ADR を出す PR（[#510](https://github.com/takecchi/mnemora/pull/510)）は、CI を2周した。**⟹ **書いている当の現象を、書いて出す過程でそのまま踏んだ。**
+
+### 1周目 —— ADR を1本足しただけの push
+
+| | |
+|---|---|
+| **何の push か** | ADR ファイルを1本追加しただけ。⛔ **索引（`docs/decisions/README.md`）は触っていない**（ADR 0137 決定1） |
+| **head sha** | `03f0c60e3747ead275e3cc54b56f275d87d01fc7` |
+| **ジョブ数** | **13**（上の表で数えた13と一致した） |
+| **壁時計** | `2026-09-17T11:08:53Z` → `11:13:02Z` ＝ **4分09秒**。最長は `ルートの test 門の DB 段` |
+| **結果** | 🔴 `typecheck / lint / test / build` が **`conclusion: failure`**。他の12ジョブは `success` |
+
+🔴 **その赤は「壊れている」ではない。**【実測】check-run の注釈は、索引の鮮度の歯**1件だけ**だった（逐語）:
+
+```
+AssertionError: docs/decisions/README.md が陳腐化している: 索引に無い ADR: ["0228"]
+```
+
+⟹ ⭐ **ADR 0192 の仕掛けが、本 ADR にも効いた。**0192 も同じことを自分の PR（#398）で記録している。⟹ **`docs/autonomy.md` §4.0 が言う「まず失敗メッセージを読む」を踏み、他の故障が混ざっていないことを確かめてから次へ進んだ。**
+
+### 2周目 —— マージする側による索引再生成の push
+
+**本 ADR のこのコミット自身が、その2周目の push である。**
+
+⟹ 🔴 **だから、2周目の run の数字（sha・ジョブ数・壁時計）は、原理的にこの本文へ書けない。**書こうとすれば、それを書き足す push が**3周目**になるからである。
+
+⭐ **これが Issue #267 が費用として挙げているものであり、本 ADR が受容すると決めたものである。**⟹ **受容の対象は、抽象的な見積もりではなく、この2周目そのものである。**
+
+⚠ **マージ後に `main` で走る push の run は、この2周とは別である**——Issue #267 の本文が逐語でそう断っている:
+
+> ⚠ **`push`（`main` への着地後の run）は、この費用とは別である。**上表の `push` 行はマージ後に `main` で走るもので、索引再生成の有無にかかわらず起きる。
 
 ## 確かめていないこと
 
