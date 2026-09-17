@@ -1,5 +1,11 @@
 import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
+import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "./correction-candidates.js";
+import type {
+  CorrectionCandidate,
+  FindCorrectionCandidatesInput,
+  FindCorrectionCandidatesResult,
+} from "./correction-candidates.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
 import {
@@ -1317,6 +1323,68 @@ export interface Runtime {
    * ADR 0161 の「検討して採らなかった案」を参照。
    */
   getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
+  /**
+   * [Issue #369](https://github.com/takecchi/mnemora/issues/369) (C)「訂正の口」:
+   * 採用側が「これは訂正だ」と明示的に宣言したとき、mnemora 側が**既存の recall で
+   * 相手の候補を探す**ための口。[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)。
+   *
+   * 🔴 **測定の結果、「機械が相手を選んでそのまま `supersede` する」という形は採らないと
+   * 決まった**——訂正してはいけない8ケース中6ケースで、失効させてはいけない事実を
+   * 1位に置いてしまい、閾値をどこに引いても「訂正すべき」と「訂正してはいけない」を
+   * 分離できなかった（実測、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。**⟹ この口は「候補を返すところまで」である。**
+   *
+   * この口が**やらないこと**（設計の芯。曲げない）:
+   * - ⛔ **書き込みを1件もしない。** `Memory` の `status` を一切動かさない。
+   *   `memory_events` に一切積まない。**`markContested`/`resolveContested` の
+   *   *前*に立つ**——「訂正の相手をこれに決めて、実際に対にする／置き換える」という
+   *   確定と書き込みは、常に採用側が `markContested`/`resolveContested`/
+   *   `reextract` 等の既存の書き込み口を明示的に呼んで行う。この口はその前段の
+   *   「相手を探す」だけを引き受ける。
+   * - ⛔ **LLM を1回も呼ばない。** 相手探しは既存の `recall()`（ANN + 既存のスコア
+   *   `strategies/scoring.ts`）だけで行う——訂正かどうかの判定・相手の良し悪しの
+   *   判定のどちらにも LLM を使わない。
+   * - ⛔ **新しい閾値を置かない。** 候補の足切りは `recall()` の段2が使う既存の
+   *   `RecallQuery.scoreThreshold`（既定 `DEFAULT_SCORE_THRESHOLD` = 0.1）を
+   *   そのまま通すだけであり、この口専用の閾値（「これ以上のスコアなら訂正の
+   *   相手として妥当」）は発明しない。**理由は上記の測定そのもの**——閾値では
+   *   「訂正すべき」と「訂正してはいけない」を分離できないことが分かっているので、
+   *   分離できない閾値を1つ増やしても北極星の問い3（説明できるか）に答えられる
+   *   ものにならない。
+   * - ⛔ **新しい探索を書かない。** 既存の `recall(ctx, { text: input.text })` を
+   *   **1回だけ**呼ぶ——`consolidate`/`reflect` の `{ seedMemoryId }` 形が
+   *   「新しい『似ている』の判定を作らない」ために採った作法と同じ（`ConsolidateTarget`
+   *   の doc コメント参照）。`text` 以外のフィールド（`limit`/`channels`/
+   *   `overFetchFactor`/`scoreThreshold` 等）は一切変えず、`recall()` の既定に委ねる。
+   *
+   * ⭐ **`CorrectionCandidate.recallRank` は `excludeMemoryIds` で除外した後に詰め
+   * 直さない。** `recall()` が返した並びでの、1始まりの順位をそのまま運ぶ——
+   * 採用側が「これは recall の何位だった候補か」を、除外の有無に関係なく説明できる
+   * ようにするため（北極星の問い3）。1位を自己除外で落としても、次に残る候補の
+   * `recallRank` は「2」のままである。
+   *
+   * ⛔ **この口には「探していない」状態が無い。** `findCorrectionCandidates` を呼んだら
+   * 必ず `recall()` を1回呼ぶ——`limit` の検証で早期に `RangeError` を投げる場合を除き、
+   * 呼び出しが成立した以上、探索そのものをスキップする経路は無い。「見つからなかった」は
+   * `FindCorrectionCandidatesResult.outcome: "no_candidates"` と、`recall()` から
+   * そのまま運ばれる `omitted`（「候補はあったが除外条件で落ちた」等の内訳）の
+   * **両方**で説明される——`ConsolidateOutcome`/`ReflectOutcome` と同じ「無い」の
+   * 分類（ADR 0008）の適用。
+   *
+   * ⚠ **`tick()`/`observe()` からは一度も呼ばれない。** `markContested` と同じ立場——
+   * 呼び出し側が明示的に呼んだときだけ動く。「訂正の口」は Phase 1 の自動化（背景で
+   * 勝手に走る訂正）を意図しておらず、採用側が UI・ワークフローの中で明示的に
+   * 「これは訂正だ」と宣言した瞬間にだけ動く。
+   *
+   * 実装（`createRuntime` 内）: `input.limit` が指定されていて整数でない・`1` 未満なら
+   * `RangeError` を投げる（`markContested` の `firstId === secondId` と同じ位置づけ——
+   * 書き込みも `recall()` も試みる前に落とす）。そうでなければ
+   * `recall(ctx, { text: input.text })` を1回呼び、`excludeMemoryIds` を `Set` にして
+   * 除外し、`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切って返す。
+   */
+  findCorrectionCandidates(
+    ctx: Ctx,
+    input: FindCorrectionCandidatesInput,
+  ): Promise<FindCorrectionCandidatesResult>;
   /**
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
@@ -2673,6 +2741,55 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return deps.memoryStore.getRecall(ctx, recallId);
   }
 
+  /**
+   * `Runtime.findCorrectionCandidates` の実装（Issue #369 (C)、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。doc コメントは
+   * interface 側（`findCorrectionCandidates` の JSDoc）にある——ここはアルゴリズムそのもの
+   * だけ。`consolidate` の `{ seedMemoryId }` 形と同じく、`recall()` を1回呼ぶだけで
+   * 新しい「似ている」の判定を作らない。
+   */
+  async function findCorrectionCandidates(
+    ctx: Ctx,
+    input: FindCorrectionCandidatesInput,
+  ): Promise<FindCorrectionCandidatesResult> {
+    if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
+      throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
+    }
+    const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
+
+    // `text` 以外のフィールドを一切渡さない——閾値・limit・channels・overFetchFactor は
+    // すべて recall() の既定に委ねる（interface 側の doc コメント参照）。
+    const recallResult = await recall(ctx, { text: input.text });
+
+    const excludeSet = new Set(input.excludeMemoryIds ?? []);
+    // recallRank は「recall() が返した並びでの、1始まりの順位」——除外の前に固定する。
+    const ranked = recallResult.memories.map((memory, index) => ({
+      memory,
+      recallRank: index + 1,
+    }));
+    const remaining = ranked.filter(({ memory }) => !excludeSet.has(memory.memoryId));
+    const excludedCount = ranked.length - remaining.length;
+
+    const candidates: CorrectionCandidate[] = remaining
+      .slice(0, limit)
+      .map(({ memory, recallRank }) => ({
+        memoryId: memory.memoryId,
+        digest: memory.digest,
+        recallRank,
+        score: memory.score,
+        retrievedVia: memory.retrievedVia,
+      }));
+
+    return {
+      recallId: recallResult.recallId,
+      candidates,
+      omitted: recallResult.omitted,
+      explain: recallResult.explain,
+      outcome: candidates.length > 0 ? "candidates" : "no_candidates",
+      recalledCount: recallResult.memories.length,
+      excludedCount,
+    };
+  }
+
   async function reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
     return deps.memoryStore.requeueEmbedJobs(ctx, opts);
   }
@@ -3981,6 +4098,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     tick,
     recall,
     getRecall,
+    findCorrectionCandidates,
     reextract,
     reembed,
     sweepArchive,
