@@ -23,7 +23,7 @@
 | 0.2 | `pnpm run pack:check` | **exit 0**・違反0件（**DB 不要**。当日その場で走らせられる） |
 | 0.3 | ADR 索引 | `node scripts/generate-adr-index.mjs --check` が **exit 0** |
 | 0.4 | `package.json` の `version` | 6本とも**同じ値**で `0.0.0` でない（**いまは `0.1.1`。これでよい**） |
-| 0.5 | 🔴 未検証のまま残る3つ | **通過条件が無い。**⛔ 緑にできない項目である——当日の判断材料として読む |
+| 0.5 | 🔴 未検証のまま残るもの | **通過条件が無い。**⛔ 緑にできない項目である——当日の判断材料として読む |
 | 0.6 | 版 | Release の tag 名が**ちょうど `v1.0.0`**、pre-release チェックを**入れない** |
 | 0.7 | いま出ている版 | **通過条件は無い。**⚠ **2026-09-16 に `v0.2.0` が出ており、npm の `latest` は6パッケージとも `0.2.0` である**——当日の判断材料として読む |
 | 0.8 | `CHANGELOG.md` の `[1.0.0]` 節 | **人間が読んで、`origin/main` の現在地に対して古くないと判断したこと**（⛔ コマンドでは判定できない。⚠ **`packages/*/src` の差分を数えると、マイグレーションの追加のように `src` を触らない変更を取りこぼす**） |
@@ -43,7 +43,7 @@ node scripts/ci-green-check.mjs --sha <(a) の sha> --repo takecchi/mnemora
 
 **通過条件**: (b) が **exit 0** で終わり、`status=green — N件すべてが completed かつ success`
 と出ること。終了コードは `0`=green / `1`=red / `2`=pending（まだ判定できない）/
-`3`=`gh` 呼び出し等の失敗（`scripts/ci-green-check.mjs:34-35`。【読んで確かめた】）。
+`3`=`gh` 呼び出し等の失敗（`scripts/ci-green-check.mjs` の docstring「終了コード: `0` = green」の行。【読んで確かめた】）。
 ⛔ **`2`（pending）は通過ではない。**「まだ分からない」であって「緑」ではない。
 
 **「何本中何本が緑ならよいか」**: **通過条件は「N 件すべて」であって「13件」ではない。**
@@ -118,7 +118,7 @@ node scripts/generate-adr-index.mjs
 
 **通過条件**: `--check` が **exit 0** で `docs/decisions/README.md は最新です（ADR N 本）。` と
 出ること。陳腐化していれば **exit 1** で「…と一致していません。」が出る
-（`scripts/generate-adr-index.mjs:14-21,45-62`。【読んで確かめた】）。
+（`scripts/generate-adr-index.mjs` の `main()` — `--check` の分岐。【読んで確かめた】）。
 
 **【実測】2026-09-16、この器の作業ツリー（ブランチ `docs/v1-release-decision`）で `--check` を走らせ、
 `docs/decisions/README.md は最新です（ADR 169 本）。`・exit 0 だった。**
@@ -141,6 +141,21 @@ node scripts/generate-adr-index.mjs
 `main` では `ci.yml` の `typecheck / lint / test / build` ジョブの `pnpm run test` の中で走る。
 ⟹ **0.1 が緑なら、その sha の索引は最新である。**この項目を別に立てるのは、
 **tag を切る直前に手元で1本のコマンドとして確かめられるようにするためである。**
+
+🔴 **訂正の追記（2026-09-17、[ADR 0213](./decisions/0213-live-docs-cite-adrs-by-anchor-not-line-number.md)）— すぐ上の「`main` に限って」は誤りである。**
+⚠ **上の記述は消していない**（この文書の作法。ADR 0064）。
+
+**【現物】**`scripts/adr-index-freshness-branch-lib.mjs` は逐語でこう書いている:
+
+> ADR 0192 で「CI の `pull_request` でも有効にする」を足した結果、両者はもう同じ問いではない。
+> **`pull_request` の CI は `main` ブランチではない**（GitHub は `GITHUB_REF` を
+> `refs/pull/<n>/merge` にする）が、この歯は有効にしたい。
+
+⟹ **この歯は `main` だけでなく、CI の `pull_request` でも有効である**（ADR 0192）。
+⭐ **上の結論（「0.1 が緑なら、その sha の索引は最新である」）は変わらない**——
+**網羅範囲はむしろ広い。**⛔ **だが理由が違う。**
+⚠ **手元（`GITHUB_REF` が無い）では、いまも「git のブランチ名が `main` か」だけで判定する**
+⟹ **手元が緑でも、CI のこの歯は赤くなりうる**（`docs/autonomy.md` §4.0）。
 
 ### 0.4 `git` 上の `version` が `0.1.1` のままでよいこと（⚠ 異常ではない）
 
@@ -171,7 +186,7 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 ⟹ **git 上の `0.1.1` と npm 上の `0.2.0` が食い違っているが、これは上のとおり正常である。**
 ⛔ **この食い違いを見て `package.json` を `0.2.0` へ揃えようとしないこと。**
 
-### 0.5 🔴 未検証のまま残るもの（⛔ この3つは、ここでは緑にできない）
+### 0.5 🔴 未検証のまま残るもの（⛔ ここでは緑にできない項目である）
 
 **⚠ 0.1〜0.4 がすべて通っても、次の3つは何も確かめられていない。**
 **当日の判断材料として読むための再掲であり、通過条件は無い。**
@@ -191,9 +206,9 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 
 1. **`npm publish --provenance` が通ること自体**（`publish.yml:227`）。
    **本番 tag を打つまで分からない。**⟹ **予行（`workflow_dispatch` / `dry_run: true`）が
-   全ステップ success でも、これは何も保証しない**——`--dry-run` は書き込みの要求を投げないので、
+   緑でも、これは何も保証しない**——`--dry-run` は書き込みの要求を投げないので、
    認証・認可・存在検査・サーバ側の検証を**構造的に**見られない（ADR 0067 逐語。**§2.2**）。
-   実測の裏付けも §2.2 に在る（予行は全ステップ success、同じ commit の本番は
+   実測の裏付けも §2.2 に在る（予行は緑、同じ commit の本番は
    `npm error 403 … OIDC permission denied for this action` で failure）。
 
    **⭐ 追記（2026-09-17）— 「本番 tag を打つまで分からない」はもう正しくない。**
@@ -487,8 +502,16 @@ git ls-tree --name-only origin/main docs/ | grep release-notes
 | 書き方 | 何の番号か | 誰が使っているか |
 |---|---|---|
 | **「段N」** | **Actions の画面に出る段番号**（⭐ **正典**） | **当日、画面を見ながら段を探すときはこれ。**§2.2 の追記と [ADR 0207](./decisions/0207-dry-run-reads-existence-and-coverage-degrades-silently.md) もこれを使っている |
-| 「N番ステップ」「N番目のステップ」「上表のN」 | **下の表の `#` 列**（この文書が独自に振った番号） | §2.1・§3.1・§3.2・§3.4 の既存の記述が指している先 |
+| 「N番ステップ」「N番目のステップ」「上表のN」 | **下の表の `#` 列**（この文書が独自に振った番号） | §1.4・§2.1・§2.2・§3.1・§3.2・§3.3 の記述が指している先（2026-09-17 に拾い直した） |
 | 「段階N」 | **§1.1 の三段階**（tag を切る / Release を published にする / `publish.yml` が走る） | ⚠ 上の2つとは別物。この節の見出しの「段階3」もこれ |
+| 「step N」（英語） | **「段N」と同じもの**（Actions の画面の段番号） | §3.0 と §3.4 の追記が使っている。⚠ **表記が揺れているだけで、指す先は「段N」と同じ**——見つけても読み替えてよい |
+
+⚠ **ADR 側に、これらとは無関係な「段0〜段3」が在る。**[ADR 0066](./decisions/0066-start-publishing-with-oidc.md) /
+[ADR 0067](./decisions/0067-dry-run-fail-open-and-does-not-verify-trusted-publisher.md) /
+[ADR 0096](./decisions/0096-bootstrap-local-embedding-onto-npm.md) は、**OIDC の導入手順**を
+「段0（手元からの初回 publish）→ 段1（信頼発行元の設定）→ 段2（直接 publish 許可）→ 段3（本番）」と
+数えている。⛔ **上の表のどれとも別物である**——**「段0」は Actions の画面には存在しない**
+（画面の最小は段1 = `Set up job`）。⟹ **ADR とこの文書を行き来するときは、どちらの「段」かを先に決めること。**
 
 **⭐ 正典を Actions の画面の番号にした理由**: この節の「見る場所」が示すとおり、
 **当日この表を引く人は Actions の画面を開いている。**画面に出ていない番号で段を探させない。
@@ -569,11 +592,11 @@ git ls-tree --name-only origin/main docs/ | grep release-notes
 `pnpm pack` は「その時点で作業ツリーに書かれている版」を見て `workspace:^` を解決するため
 （ADR 0070「測ったこと1」で実測: `v9.9.9` で `apply-release-version.mjs` を走らせたところ、
 tarball 内の `version` が `9.9.9`、`@mnemora/core` への依存が `^9.9.9` になった。
-【読んで確かめた】`docs/decisions/0070-version-comes-from-the-release-tag.md:66-78`）。
+【読んで確かめた】ADR 0070「⭐ 測ったこと1 — `workspace:^` は書き込んだ版で解決される（この設計の要）」）。
 
 **なぜ `pnpm` でなければならないか**: `npm pack` は `workspace:*`/`workspace:^` を
 置換せず、素の consumer の `npm install` が `EUNSUPPORTEDPROTOCOL` で落ちる
-（実測。`docs/decisions/0060-publish-with-pnpm-four-packages-at-0-1-0.md:54-66`。
+（実測。ADR 0060「2. `npm pack` は `workspace:*` を置換しない。`pnpm pack` は置換する。」。
 【読んで確かめた】）。だから梱包（`pack`）は pnpm、アップロード（`npm publish <tarball>`）は
 npm、という分担になっている（ADR 0066 決定2。`npm publish <tarball>` は解決済みの
 manifest を持つ tarball を上げるだけなので `workspace:` を見ることが無い）。
@@ -647,7 +670,7 @@ Actions → `Publish` → `Run workflow` → `dry_run` を `true`（既定）の
 - 6パッケージの梱包（`pnpm pack`）が成功し、`workspace:` が解決されること
 - OIDC のトークン取得・payload の組み立てまで（`--dry-run` は「梱包・認証トークンの取得・
   payload の組み立ては行うが、実際の書き込み `PUT` は行わない」という npm 自身の設計。
-  ADR 0067、124-130行。【読んで確かめた】）
+  ADR 0067「⭐ (B) の一般化 — この ADR の芯」。【読んで確かめた】）
 
 ⭐ **追記（2026-09-17）— `dry_run: false` での `workflow_dispatch` は、この repo で
 一度も実行されたことがない。**【実測】`gh run list --workflow=publish.yml --limit 30` を
@@ -679,8 +702,9 @@ gh api "repos/takecchi/mnemora/actions/workflows/publish.yml/runs?per_page=100" 
 **⟹ 上の「当日この経路を使わないこと」という戒めは、そのまま生きている。**
 
 **2. 🔴 「唯一の違いは12番目のステップで `npm publish` に `--dry-run` が付くことだけ」は誤りである。**
-**予行では、次の2段も走らない**（どちらも `if: github.event_name == 'release'`。
-**上表の6番・7番＝ Actions の画面の段7・段8。**呼び分けは §1.2 の冒頭）:
+**予行では、`if: github.event_name == 'release'` が付いた段が走らない**——
+**この版ではそれが2段である**（上表の6番・7番＝ Actions の画面の段7・段8。
+呼び分けは §1.2 の冒頭）:
 
 - **「Release の tag が main の履歴上に在ることを確かめる」**
 - **「Release の tag の版を package.json へ書き込む（ADR 0070）」**
@@ -690,9 +714,18 @@ gh api "repos/takecchi/mnemora/actions/workflows/publish.yml/runs?per_page=100" 
 ⟹ **版を決める経路が予行で一度も走らない**ことの意味は §2.2 の追記3 と ADR 0207 決定3。
 ⟹ **だから「予行が緑」は、版の決定について何も言っていない。**
 
+🔴 **⛔ この訂正を、過去の run にそのまま当てないこと。**
+**「2段」「6番・7番」「段7・段8」は、いま木に在る `publish.yml` の構造に依存している。**
+**【実測】**2026-09-08 の予行（run `34262743432` / `34248494960`）の段を引くと、
+当時の `publish.yml` は全12段で、`if: release` が付いた段は**1つだけ**であり、
+いま在る「予行のときは package.json の版をそのまま使う」「予行か本番かを決める」の
+2段は**まだ存在しない**。
+⟹ ⭐ **普遍なのは「`if: github.event_name == 'release'` が付いた段は予行で `skipped` になる」という
+性質のほうだけである。**過去の run を読み直すときは、**その run の時点の `publish.yml` を見ること。**
+
 ### 2.2 🔴 何が本番 tag まで分からないか（ADR 0067、逐語）
 
-**ADR 0067 の核心をそのまま引く**（`docs/decisions/0067-dry-run-fail-open-and-does-not-verify-trusted-publisher.md:118-134`）:
+**ADR 0067 の核心をそのまま引く**（ADR 0067「⭐ (B) の一般化 — この ADR の芯」）:
 
 > 「本番と同じ経路を、副作用だけ止めて走らせる」形の検査は、副作用の直前で判定される
 > 条件を検出できない。
@@ -709,10 +742,18 @@ gh api "repos/takecchi/mnemora/actions/workflows/publish.yml/runs?per_page=100" 
 > 何も読み取れない。
 
 **実測での裏付け**: 信頼発行元（Trusted Publisher）が未設定のまま `workflow_dispatch`
-の予行を走らせたところ**全ステップ success**で終わったが、同じ commit・同じ workflow の
+の予行を走らせたところ**緑で終わった**が、同じ commit・同じ workflow の
 `release` 契機（本番）は同じ `npm publish` 段で
 `npm error 403 ... OIDC permission denied for this action` により failure になった
-（run `34262743432` と `34254090760`。ADR 0067、82-114行。【読んで確かめた（ADR 0067の作業者による実測の記録）】）。
+（run `34262743432` と `34254090760`。ADR 0067「(B) 🔴 予行は、信頼発行元の設定を検算していない」。【読んで確かめた（ADR 0067の作業者による実測の記録）】）。
+
+⚠ **訂正の追記（2026-09-17）— ADR 0067 も、この節も「全ステップ success」と書いていたが、それは誤りである。**
+**【実測】**run `34262743432` と `34248494960`（2026-09-08 の予行2件）の段を引くと、
+**どちらも「Release の tag が main の履歴上に在ることを確かめる」段が `skipped`** である
+（`gh api repos/takecchi/mnemora/actions/jobs/<job id>` の `steps[].conclusion`）。
+⟹ **緑ではあるが「全ステップ success」ではない。**
+⛔ **上の記述は消していない**（この文書の作法）。**崩れたのは「全ステップ success」という言い方だけで、
+(B) の結論（予行は信頼発行元の状態を検算していない）は崩れていない。**
 
 **⟹ 予行が緑でも、次のことは何も保証されていない**:
 - npm 側で信頼発行元（org / repo / workflow ファイル名）が正しく設定されていること
@@ -840,7 +881,8 @@ elif echo "${OUT}" | grep -q "cannot publish over the previously published"; the
 
 **3. ⚠ 「全14段 success」は誤りである。**
 
-**【実測】**run `35169553262` の step は **2つが `skipped`** である（上の §2.1 の訂正2 と同じ2段）。
+**【実測】**run `35169553262` の step は **2つが `skipped`** である（上の §2.1 の訂正2 と同じ2段。
+⚠ **この「2つ」はこの run の時点の `publish.yml` の話である**——§2.1 の訂正2 の末尾の但し書きを見ること）。
 ⚠ 上の追記3 は **`apply-release-version.mjs` の段だけ**を `skipped` と書いており、
 **「Release の tag が main の履歴上に在ることを確かめる」段を落としている。**
 🔴 **`docs/autonomy.md` §2.1 が逐語で「`skipped`…はどれも緑ではない」と定めている。**
@@ -852,8 +894,17 @@ elif echo "${OUT}" | grep -q "cannot publish over the previously published"; the
 ⟹ [ADR 0209](./decisions/0209-dry-run-short-circuit-predates-adr-0207-and-is-counted-by-machine.md) が、**その数え上げを機械に移した**（ADR 0207 が「引き受けた負債」に設計だけ書いて置かなかった歯）。
 
 ```bash
+# <run id> は Publish ワークフローの run 一覧から取る（tag が displayTitle に出るので、
+# 狙った Release の run かをその場で確かめられる）
+gh run list --repo takecchi/mnemora --workflow publish.yml --event release --limit 3 \
+  --json databaseId,displayTitle,conclusion \
+  --jq '.[] | "\(.databaseId)  \(.conclusion)  \(.displayTitle)"'
+
 node scripts/check-publish-run-coverage.mjs <run id>
 ```
+
+⚠ **予行（`workflow_dispatch`）の run を対象にするときは `--event release` を
+`--event workflow_dispatch` に替えること。**
 
 publish 段のログを引き、**`PUBLISH_TARGETS` の各本について「publish した / 飛ばした / 失敗 / ログに無い」を
 出し、全本が経路を通っていなければ非0 で終わる。**
@@ -887,7 +938,7 @@ publish 段のログを引き、**`PUBLISH_TARGETS` の各本について「publ
 - **型の互換性。**「`main`/`types`/`bin`/`exports` の指す先が tarball 内に実在するか」までで、
   **`import` して実際に動くか・型が consumer 側で正しく解決されるかは見ていない**
   （ADR 0060「引き受けた負債」に明記: 「その門は『main/types/binの指す先が在るか』までで、
-  importして動くかは見ていない」。`docs/decisions/0060-....md:140`）。
+  importして動くかは見ていない」。【読んで確かめた】）。
 - **registry の状態。**信頼発行元の設定・パッケージの存在・直接 publish の許可の有無・
   version の衝突——これらは registry に問い合わせて初めて分かるが、`pack:check` は
   一切 registry に触れない（現物にネットワーク呼び出しが無いことを確認した）。
@@ -1133,7 +1184,7 @@ done
 `for` ループは既存の記録として残す。
 
 **⚠ 直後は遅れる。時間を置いて引き直すこと。**
-`docs/autonomy.md` §4 はこう戒めている（`docs/autonomy.md:232`。【読んで確かめた】、逐語）:
+`docs/autonomy.md` §4 はこう戒めている（同 §4 の表の「`npm view` で publish の成否を判断する」の行。【読んで確かめた】、逐語）:
 
 > **`npm view` で publish の成否を判断する** | registry の読み取り側は書き込みに数分遅れ、
 > **CDN を迂回する `?write=true` でも 404 を返す**（ADR 0066 測ったこと8） |
@@ -1239,7 +1290,7 @@ fi
   ⟹ **版ずれは「同じ版のままでは解消できない」のは正しいが、「新しい版を切れば
   必ず揃う」という設計になっている**——ADR 0060/0066/0070 が実際に辿った
   `0.1.0`（4本のみ・欠陥あり）→`0.1.1`（4本を版ごと出し直して解消）という前例が、
-  まさにこの形である（`docs/decisions/0070-....md:139-142`。【読んで確かめた（過去の実例）】）。
+  まさにこの形である（ADR 0070「npm 上の `0.1.0` がどの commit とも一致しない」。【読んで確かめた（過去の実例）】）。
 - **オーナーの理解のうち「一時的な失敗は re-run で回復し、コード起因の失敗は
   新しい版を要求する」の部分は現物と一致する。**「恒久的に残りうる」の部分は、
   **「次のリリースを出すまでは残る」という意味であれば正しいが、「出しても直らない」
@@ -1353,8 +1404,7 @@ publish する。**
 
 **実例（【読んで確かめた】）**: `@mnemora/core` を含む4パッケージの `0.1.0` は、
 中身に不備（`postgres@0.1.0` に migration `0004`/`0005` が欠けていた等）があると
-分かった後も、**上書きできず、そのまま残っている**（`docs/decisions/0066-....md:11,
-241-267`）。解消は `0.1.1` を新しく publish することで行われた——`0.1.0` 自体は
+分かった後も、**上書きできず、そのまま残っている**（ADR 0066「⭐ 測ったこと10 — npm 上の `0.1.0` は、この ADR が入る commit と一致しない」）。解消は `0.1.1` を新しく publish することで行われた——`0.1.0` 自体は
 今も欠陥入りのまま registry に存在する。
 
 **⟹ v1.0.0 で何か問題が見つかっても、「直して `v1.0.0` を出し直す」ことはできない。
@@ -1385,7 +1435,7 @@ npm error 403 Forbidden - PUT https://registry.npmjs.org/@mnemora%2fcore
           - OIDC permission denied for this action
 ```
 
-（`docs/decisions/0070-....md:113-116`。【読んで確かめた（過去の実測ログ）】）。
+（ADR 0070「npm error 403 Forbidden - PUT https://registry.npmjs.org/@mnemora%2fcore」。【読んで確かめた（過去の実測ログ）】）。
 このエラーは `npm publish` を呼ぶステップ（12番）で、該当パッケージの `::group::` の
 中に出る。
 
@@ -1394,17 +1444,17 @@ npm error 403 Forbidden - PUT https://registry.npmjs.org/@mnemora%2fcore
 1. **信頼発行元そのものが未設定**（ADR 0067測ったこと。予行では検出できない。§2.2）。
 2. **信頼発行元は設定済みだが「直接 `npm publish`」の権限が不許可のまま**
    （npm の既定。2026-09-03以降に作成した信頼発行元は「npm publish で直接publishできる」を
-   既定で不許可にする。ADR 0070「測ったこと3」、`docs/decisions/0070-....md:122-131`）。
+   既定で不許可にする。ADR 0070「⭐ 測ったこと3 — Trusted Publishing (OIDC) と provenance が実際に通った」）。
    このときのエラー文言も同じ `OIDC permission denied for this action` だった
    （**この作業者はこの2つを、エラー文言だけからは区別できないと明記されている点に注意**
    ——ADR 0067自身が「repo名・workflowファイル名の食い違いなど、設定は在るが誤っている
    場合でも同じ `OIDC permission denied` が返る可能性を排除できていない」と書いている。
-   `docs/decisions/0067-....md:100-103`）。
+   ADR 0067「同じ `OIDC permission denied` が返る可能性を、この作業者は排除できていない」）。
 
 **リポジトリ名やworkflowファイル名が信頼発行元の設定と食い違う場合**:
 **この器では確認できなかった**——ADR 0070測ったこと3は「不一致なら npm は404を返す。
 今回は403（PUTまで到達）だったので不一致ではないと判断した」という**消去法の記録**であり、
-実際に不一致を起こしてエラーを観測したものではない（`docs/decisions/0070-....md:118-121`）。
+実際に不一致を起こしてエラーを観測したものではない（ADR 0070「不一致なら npm は 404 を返す」）。
 **⟹ 404が返ったら「repo名かworkflowファイル名の不一致」を疑う、という以上のことは
 この文書からは言えない。**
 
@@ -1424,7 +1474,7 @@ npm error 403 Forbidden - PUT https://registry.npmjs.org/@mnemora%2fcore
 | **Workflow filename** | **`publish.yml`**（一致必須。改名すると403で止まる。`publish.yml:3-6` にも明記） |
 | 「直接 `npm publish` を許可」 | **許可する**（既定は不許可。ADR 0070測ったこと3で実際にこれが原因で403になった） |
 
-**⚠ npm は保存時にこれらの値を検証しない**（ADR 0066、391行に明記。誤っていても保存でき、
+**⚠ npm は保存時にこれらの値を検証しない**（ADR 0066「⚠ npm は保存時に設定を検証しない」に明記。誤っていても保存でき、
 publish を打った瞬間に初めて分かる）。
 
 **6パッケージすべてで確認すること。**特に `@mnemora/anthropic` と `@mnemora/local-embedding`
@@ -1449,7 +1499,7 @@ publish を打った瞬間に初めて分かる）。
 
 **理由**: GitHub Actions の `actions/setup-node@v6` が入れる Node 22 には npm 10.x系が
 同梱されており、Trusted Publishing（OIDC）の交換ロジックを実装していない
-（ADR 0066決定3の表、`docs/decisions/0066-....md:131`。【読んで確かめた】）。
+（ADR 0066「Node 22 同梱の npm 10.x では OIDC の交換を実装しておらず」の表。【読んで確かめた】）。
 これを飛ばすと、npm は「認証トークンが見つからない」という**別の理由の顔をした401**を
 返す——**OIDCが機能していないことを名指しでは教えてくれない**、という点が実務上の罠である。
 
@@ -1508,7 +1558,7 @@ done
 **過去の実例**では、OIDC 経由で publish された版に2件の attestation
 （`https://github.com/npm/attestation/tree/main/specs/publish/v0.1` と
 `https://slsa.dev/provenance/v1`）が付いたと記録されている
-（`docs/decisions/0070-....md:138`。【読んで確かめた（過去の記録）】）。
+（ADR 0070「attestation 2件」。【読んで確かめた（過去の記録）】）。
 
 **⚠ この記録は「付いた」という結果を書いているだけで、当時どのコマンド・どの画面で
 確認したかをこの作業者は現物から特定できなかった。**⟹ 一般的な npm CLI の機能として
@@ -1591,7 +1641,8 @@ npm audit signatures
 
 ⚠ **この節が見ているのは registry の側である。**「その run の publish 段を、6本とも最後まで
 通ったか」は run の側の話であり、**`node scripts/check-publish-run-coverage.mjs <run id>` が見る**
-（[ADR 0209](./decisions/0209-dry-run-short-circuit-predates-adr-0207-and-is-counted-by-machine.md)。説明は §2.2 の末尾に在る——ここには重複させない）。
+（[ADR 0209](./decisions/0209-dry-run-short-circuit-predates-adr-0207-and-is-counted-by-machine.md)。
+**説明と、`<run id>` の取り方は §2.2 の末尾に在る**——ここには重複させない）。
 **両方見ること**——registry に版が在っても、その run が上げたとは限らない（§3.4 の実例）。
 
 **当日はここ（§5.4）だけ打てばよい。**§5.1〜5.3 は、ここで `✗` が出た箇所を
@@ -1749,7 +1800,7 @@ publish そのものは通っている。dist-tag は Release が pre-release �
 3. **`npm publish --tag ""`（NPM_TAG が空文字列）の挙動。**`publish.yml` はこれを
    手前で検査して落とすようになっているが（213-216行）、それは「確かめていないことを
    通さない」という設計であって「確かめた」わけではない、と ADR 0070 自身が明記している
-   （`docs/decisions/0070-....md:174-175`）。
+   （ADR 0070「`npm publish --tag ""` の挙動をこの器で確かめていない」）。
 4. **`npm publish` ループの途中で1本だけが「再実行しても直らない」形で失敗する
    具体的な原因の実例。**この repo の ADR には、そのような失敗が実際に起きた記録が無い
    （起きたのは「信頼発行元の権限不足」という**全パッケージに一様に効く**種類の失敗だけで、
@@ -1818,3 +1869,8 @@ publish そのものは通っている。dist-tag は Release が pre-release �
    ため、現時点の registry の実際の値は確認していない。**v1.0.0 を出す前に、
    まず `npm view @mnemora/core version` 等で「今どこから上げることになるか」を
    確認することを勧める。
+
+   **⭐ 追記（2026-09-17）— 埋まった。**この文書の §0.7・§3.1・§5.1・§5.4 が、
+   **いずれも `npm view` を実際に打った記録を持っている**（6パッケージぶん）。
+   ⟹ **「registry の現在地を誰も見ていない」はもう正しくない。**
+   ⚠ **ただし、その値をここには書かない**——書けば腐る。**当日は §5.4 を打って数え直すこと。**
