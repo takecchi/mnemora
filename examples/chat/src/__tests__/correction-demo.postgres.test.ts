@@ -110,7 +110,11 @@ describe("examples/chat: correction（markContested → resolveContested、本�
         expect(note as string).toContain(`recallId=${result.discovery.recallId}`);
         expect(note as string).toContain(`chosenRecallRank=${result.chosenRecallRank}`);
         expect(note as string).toContain(`candidates=${result.discovery.candidates.length}`);
-        expect(note as string).toContain("winner=correction");
+        // ⚠ ADR 0242: `buildCorrectionReason` が `packages/core` へ持ち上がったことで
+        // winner の語彙が ADR 0238 のデモ語彙(`original`/`correction`)から汎用語彙
+        // (`corrected`/`correcting`)へ変わった。このシナリオは `correction`(訂正する側)が
+        // 常に勝つので `winner=correcting` になる。
+        expect(note as string).toContain("winner=correcting");
       }
 
       // 🔴 「両方から辿れる」の橋を実際に渡る: meta.note から recallId を取り出し、

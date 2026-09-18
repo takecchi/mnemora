@@ -21,6 +21,47 @@ export interface DecideAnnTruncationInput {
 }
 export declare function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncationVerdict;
 
+// ===== dist/apply-correction.d.ts =====
+import type { MemoryId } from "./ids.js";
+import type { EventActor } from "./event.js";
+import type { FindCorrectionCandidatesResult } from "./correction-candidates.js";
+import type { ContestedResolution, MarkContestedResult, ResolveContestedResult } from "./runtime.js";
+export interface ApplyCorrectionInput {
+    discovery: FindCorrectionCandidatesResult;
+    correctedId?: MemoryId;
+    correctingId: MemoryId;
+    resolution?: ContestedResolution;
+    reason?: string;
+    actor?: EventActor;
+}
+export type ApplyCorrectionResult = {
+    kind: "awaiting_choice";
+} | {
+    kind: "not_a_candidate";
+    correctedId: MemoryId;
+} | {
+    kind: "contested";
+    correctedId: MemoryId;
+    correctingId: MemoryId;
+    chosenRecallRank: number;
+    markResult: MarkContestedResult;
+} | {
+    kind: "resolved";
+    correctedId: MemoryId;
+    correctingId: MemoryId;
+    chosenRecallRank: number;
+    markResult: MarkContestedResult;
+    resolveResult: ResolveContestedResult;
+};
+export interface CorrectionReasonInput {
+    discovery: FindCorrectionCandidatesResult;
+    chosenRecallRank: number;
+    correctedId: MemoryId;
+    correctingId: MemoryId;
+    resolution: ContestedResolution | null;
+}
+export declare function buildCorrectionReason(input: CorrectionReasonInput): string;
+
 // ===== dist/clock.d.ts =====
 import type { Clock } from "./interfaces/clock.js";
 export declare const systemClock: Clock;
@@ -328,6 +369,7 @@ export * from "./observation.js";
 export * from "./memory.js";
 export * from "./recall.js";
 export * from "./correction-candidates.js";
+export * from "./apply-correction.js";
 export * from "./digest-band.js";
 export * from "./ann-truncation.js";
 export * from "./recall-footprint.js";
@@ -2256,6 +2298,7 @@ export declare const NOT_INDEXED_REASONS: readonly NotIndexedReason[];
 // ===== dist/runtime.d.ts =====
 import type { Clock } from "./interfaces/clock.js";
 import type { FindCorrectionCandidatesInput, FindCorrectionCandidatesResult } from "./correction-candidates.js";
+import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor } from "./event.js";
 import type { ExtractionFailure, ExtractionOutcome } from "./extraction.js";
@@ -2693,6 +2736,7 @@ export interface Runtime {
     purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
     markContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, opts?: MarkContestedOptions): Promise<MarkContestedResult>;
     resolveContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, resolution: ContestedResolution, opts?: ResolveContestedOptions): Promise<ResolveContestedResult>;
+    applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
     consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
     reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
 }
