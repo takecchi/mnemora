@@ -13,6 +13,109 @@
 
 ---
 
+## ⭐ 追記（2026-09-18、着地の翌日）—— **変異が required ジョブの非成功へ伝わるところを、CI の実機で観測した**（PR #538）
+
+**担当: 自動化された担い手（クローンのマネージャーのセッション）。⛔ オーナー本人の判定ではない**
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+⛔ **本文は1バイトも書き換えていない。**下に在るのは、この ADR を書いた時点では
+まだ観測していなかった1点を、後から埋めた記録である
+（`docs/decisions/README.md` の規律——**間違え方それ自体が記録だからである**）。
+
+### 何が足りていなかったか
+
+本 ADR と PR #509 が示していたのは3つである——(a) 歯が CI で実際に実行され通ったこと、
+(b) 変異でその歯が**手元で**赤くなること、(c) 経路に `continue-on-error` が無いこと。
+⟹ **鎖は「原理的に伝わる」までしか示されておらず、「伝わるのを観測した」ではなかった。**
+Issue #497 の受け入れ条件は逐語で「**検査の失敗がジョブの非成功に伝わることを確認する**」である。
+
+### 観測（【実測 2026-09-18】、PR #538）—— 2段に分けた
+
+#### 第1段: 製品側の変異（本 ADR「変異試験」節の陽性と同一）
+
+commit `d38a1e0` / run <https://github.com/takecchi/mnemora/actions/runs/35355454950>
+
+`examples/chat/src/probe-set.ts` の `buildProbeSetConversation` が `family` probe の
+gold utterance を投入しないよう変異させた。結果:
+
+| | 結果 |
+|---|---|
+| `examples/chat (本物の Postgres + pgvector、擬似 provider)`（**required**） | 🔴 fail（[job](https://github.com/takecchi/mnemora/actions/runs/35355454950/job/105633589881)） |
+| `ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）`（**required**） | 🔴 fail（[job](https://github.com/takecchi/mnemora/actions/runs/35355454950/job/105633590028)） |
+| 他の required 4本 | ✅ pass |
+| 非 required の測定ジョブ7本 | ✅ pass |
+
+歯の失敗メッセージ（逐語）:
+
+```
+FAIL src/__tests__/retrieval-quality-regression.postgres.test.ts > … >
+PROBES の全7件で、gold が recall() の既定候補(limit=10)に入っている
+AssertionError: probe "family" の gold が recall() の既定候補(limit=10)から落ちた(goldRank=null)。
+…: expected null not to be null
+```
+
+🔴 **ただし、この段は分離になっていない。**同じジョブの中で **6 test file・7件**が落ちた:
+
+| test file | 落ちた理由 |
+|---|---|
+| `archive-sweep-cost.postgres.test.ts`（2件） | `activeCount` 20→19 / 17→16（総件数のハードコード） |
+| `cassette-coverage.test.ts` | LLM 記録件数の期待長 73 に対し実測 74 |
+| `consolidation-cost.postgres.test.ts` | `activeCount` 20→19 |
+| `retrieval-quality-ingest-honesty.postgres.test.ts` | `extractionCounts.ok` 69→68 |
+| `retrieval-quality.postgres.test.ts` | 同上 |
+| **`retrieval-quality-regression.postgres.test.ts`** | **狙った歯** |
+
+いずれも「gold 発話が1本減って、件数のハードコードがずれた」ためである。
+⟹ ⛔ **この段だけでは「この歯が無くてもジョブは赤くなった」を排除できない。ジョブの赤が過剰決定されている。**
+
+#### 第2段: この歯だけが落ちる変異（分離）
+
+commit `be4d79b` / run <https://github.com/takecchi/mnemora/actions/runs/35356503449>
+
+`probe-set.ts` を `origin/main` と同一に戻し（`git diff origin/main -- examples/chat/src/probe-set.ts`
+が空であることを確認）、代わりに**歯自身の `fixedClock` を `2030-01-01` から `2026-01-01`**——
+本 ADR のファイル doc が逐語で警告している踏み穴——へ変えた。結果:
+
+| | 結果 |
+|---|---|
+| required 6本のうち 🔴 fail | `examples/chat …`（[job](https://github.com/takecchi/mnemora/actions/runs/35356503449/job/105637047867)）と `ルートの test 門の DB 段 …`（[job](https://github.com/takecchi/mnemora/actions/runs/35356503449/job/105637047555)）の **2本だけ** |
+| 他の required 4本・非 required の測定ジョブ | ✅ 全て pass |
+| 落ちた test file | **`retrieval-quality-regression.postgres.test.ts` の1本だけ**（`Test Files 1 failed \| 60 passed (61)` / `Tests 1 failed \| 513 passed (514)`） |
+
+```
+AssertionError: probe "color" の gold が recall() の既定候補(limit=10)から落ちた(goldRank=null)。
+…: expected null not to be null
+```
+
+⟹ ⭐ **この段で「この歯の失敗だけで required ジョブが非成功になる」が分離して観測できた。**
+
+### ⭐ 副産物 —— 本 ADR の「無音の緑を作らない」が CI 実機で裏づけられた
+
+ファイル doc の「⚠ `fixedClock` は実行時点より確実に未来の日付にすること」は、本 ADR の時点では
+**手元の観測**だった。第2段はそれを CI 実機で再現し、**過去日付を踏んだときに静かに緑で通るのではなく、
+歯自身が赤くなる**ことを示した。
+
+### ⛔ この観測が言っていないこと
+
+- **第1段は分離を証明していない**（上記の過剰決定）。分離を示しているのは第2段だけである。
+- **第2段で「7 probe 全件が `goldRank=null` だった」ことは確認していない。** soft assertion では
+  ないため、最初に落ちた probe `"color"` の時点で vitest が止まっている。ログの recall 出力には
+  `goldRank=(無し)` が並んでいるが、**直接の確認ではない。**
+- **観測したのは PR の run であり、`main` への push の run ではない。** required status check は
+  PR に対して評価されるためこの観測で受け入れ条件には足りるが、`main` 側の push 経路で同じ歯が
+  赤くなるところは見ていない。
+- **branch protection が「required が赤いときに実際にマージを拒む」ところは見ていない。**
+  PR #538 は変異を戻して全 required が緑になってからマージした。
+- **各段とも1 run であり、分布・再現性は測っていない**（本 ADR「実行費用」節の 1058ms と同じ限界）。
+
+### ⚠ この2 run は意図的な赤である
+
+PR #538 の run `35355454950` と `35356503449` は、観測のために狙って赤くしたものである。
+**将来 CI failure を母集合から数える人**（[Issue #483](https://github.com/takecchi/mnemora/issues/483)
+が `main` への push の CI failure を数えた前例がある）は、**この2 run を母数から除外すること。**
+
+---
+
 ## 結論（先に）
 
 `examples/chat/src/__tests__/retrieval-quality-regression.postgres.test.ts` に、
