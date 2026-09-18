@@ -68,11 +68,17 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⛔ **どれもまだ出荷されていない。**`v0.3.0` より後に着地したものである。
 
-⭐ **壊れ方は1つの形に揃っている**——**`interface` に必須メンバが増えた**。
+⚠ **壊れ方は2つの形に分かれる。**
+
+**1つ目は「`interface` に必須メンバが増えた」形**（項目 **12**〜**16**）。
 ⟹ ⭕ **`createRuntime()` が返すものを使っているだけなら、何もしなくてよい。**
 壊れるのは、**自分で `Runtime` を実装している側**と、**`@mnemora/testkit` の適合テストを
 呼んでいる側**だけである。⚠ これは新しい判定基準ではない——`[0.2.0]` の Breaking 表
 **1**・**5**・**6** が同じ理由で破壊的と数えられている。
+
+🔴 **2つ目は「union に値が増えた」形**（項目 **17**）。⟹ **壊れるのは実装する側ではなく、消費する側である。**
+⭕ **値を読むだけ・比較するだけなら非破壊**——`never` で網羅性を検査しているコードだけが壊れる。
+⚠ これも新しい判定基準ではない——`[0.2.0]` の Breaking 表 **4** が同じ形で数えられている。
 
 - **`Runtime` に必須メソッド `restoreSuperseded` が増えた**（`@mnemora/core`）。
   ⟹ [docs/migration-v1.md](./docs/migration-v1.md) の項目 **12**
@@ -96,6 +102,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `markContested` → `resolveContested` の書き込みまでを1つの口にまとめる。⟹ 項目 **16**
   （[#369](https://github.com/takecchi/mnemora/issues/369) /
   [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)、PR #537）
+- 🔴 **`MemoryEventKind` の union に `"unsuperseded"` が増えた**（`@mnemora/core`）。
+  **12**・**13** と同じ PR #464 で入っている。⟹ 項目 **17**
+  （[ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)）。
+  ⚠ **届く経路は `EventStore` である**——`MemoryEvent.kind` は必須フィールドで、
+  `EventStore.append`/`.get`/`.list` が返す。⟹ ⭕ **`Runtime` の口からは届かない**ので、
+  **5つの動詞だけを使う利用者には影響しない。**
+  ⚠ **同じ形に対する扱いがこの repo に2つ在り、線は引かれていない**——
+  [#541](https://github.com/takecchi/mnemora/issues/541) を見ること
 
 ⚠ **移行手順は複製しない**——直し方は
 [docs/migration-v1.md](./docs/migration-v1.md) の各項目を見ること。

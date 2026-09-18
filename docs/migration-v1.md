@@ -543,7 +543,7 @@ interface 側は `?` 付きの追加、`PostgresTenantSettingsStore` はメソ�
 
 ---
 
-## 🔴 破壊的変更 —— **11〜16。⚠ `v0.3.0` で出荷済みなのは 11 だけ。12 以降は未リリース**
+## 🔴 破壊的変更 —— **11〜17。⚠ `v0.3.0` で出荷済みなのは 11 だけ。12 以降は未リリース**
 
 ⚠ **世代の境目はこの節の中に在る**——**11 は `v0.2.0` → `v0.3.0`（出荷済み）**、
 **12 以降が `v0.3.0` → `v1.0.0`（未リリース）**である。
@@ -568,7 +568,7 @@ interface 側は `?` 付きの追加、`PostgresTenantSettingsStore` はメソ�
 
 **何が変わったか**: 呼び出し可能な関数型だったものが、`countTokens` / `embed` / `maxInputTokens` を
 要求する `interface` になった（[#137](https://github.com/takecchi/mnemora/issues/137) /
-[ADR 0205](./decisions/0205-local-embedding-pipeline-interface.md)、PR #446）。
+[ADR 0205](./decisions/0205-local-embedding-pipeline-required-interface.md)、PR #446）。
 
 **どう直すか**: 関数を1つ渡していた箇所を、3つのメンバを持つオブジェクトに置き換える。
 ⚠ **引数を直すだけでは足りない**——渡すものの形が変わっている。詳細は ADR 0205 を見ること。
@@ -640,6 +640,50 @@ interface 側は `?` 付きの追加、`PostgresTenantSettingsStore` はメソ�
 ⭐ **ADR 0242 自身が破壊性を申告している**——逐語「**`Runtime` を自前で実装している側には
 破壊的変更である**」。⚠ **同 ADR は「この ADR では `CHANGELOG.md`/`docs/migration-v1.md` を
 一切変更していない」とも書いている**——⟹ **この項目は、そこで先送りされた分をここへ積んだものである。**
+
+### 17. `MemoryEventKind` の union に `"unsuperseded"` が増えた（`@mnemora/core`）
+
+**⛔ まだ出荷されていない**（`v0.3.0` より後）。**12・13 と同じ PR #464（`ba9f9a1`）で入っている。**
+**【実測 2026-09-19、`main` = `41b07fd`】**
+
+```diff
+-export type MemoryEventKind = "created" | … | "restored";
++export type MemoryEventKind = "created" | … | "restored" | "unsuperseded";
+```
+
+⚠ **12〜16 とは壊れ方が違う**——あちらは「`interface` に必須メンバが増えた」形で、
+**実装する側**だけが壊れた。**こちらは union に値が増えた形で、消費する側が壊れる。**
+
+**誰が影響を受けるか**: **`MemoryEvent.kind` を網羅的に分岐している側**
+（`switch` の `default` で `const _x: never = event.kind` を書いているコード）。
+⭕ **値を読むだけ・比較するだけなら非破壊。**
+
+⟹ **経路は公開面に在る**【実測】:
+`MemoryEvent.kind` は**必須**フィールドであり、`EventStore.append` / `.get` / `.list` が
+`MemoryEvent` / `MemoryEvent[]` を返す（`scripts/__snapshots__/public-api/core.d.ts`）。
+そして `RuntimeDeps.eventStore: EventStore` なので、**`createRuntime()` を呼ぶ利用者は
+必ず `EventStore` を自分で組み立てて握っている**（`@mnemora/postgres` は
+`PostgresEventStore` を export しており、`.list()` の返り値がそのまま届く）。
+⚠ **`Runtime` の口からは届かない**——【実測】`Runtime` の17メンバに `MemoryEvent` を返すものは1つも無い。
+⟹ ⭐ **「5つの動詞だけを使う利用者」には影響しない。**
+
+**どう直すか**: `"unsuperseded"` の分岐を足す。
+`Runtime.restoreSuperseded` が `superseded` を `active` へ戻したときに積む種別である
+（[ADR 0230](./decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
+⚠ **`MemoryEventKindSchema`（export された zod enum）にも同じ値が増えている**
+——この schema で `parse` している側は、**新しい値を通すようになる。**
+
+**⚠ この項目を立てた根拠と、確かめていないこと**:
+⭐ **同じ形を `[0.2.0]` の Breaking 表 `4`（`FilteredOmission.condition` の union 拡張）が
+破壊的と数えている**——どちらも**出力側の型の union に値が増えた**形で、向きが同じである。
+🔴 **⚠ だが同じ `[0.2.0]` は、`TICK_SUPPORTED_JOB_KINDS` の2値→4値を
+「Changed（後方互換だが挙動が変わりうるもの）」に置いている**——逐語で
+「**網羅性検査（`never`）をしているコードは壊れる**」と書きながら、である。
+⟹ ⛔ **この repo には、同じ形に対する扱いが2つ在り、線は引かれていない。**
+この項目は**前者（Breaking 側）に揃えた**が、**その線そのものは
+[Issue #541](https://github.com/takecchi/mnemora/issues/541) に残っている。**
+⛔ **外部の利用者が実際に網羅的分岐を書いているかは観測していない**——
+これは 12〜16 を破壊的と数えている前提（`Runtime` を自前実装している人が居るか）と同じ限界である。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
