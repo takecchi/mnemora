@@ -405,7 +405,7 @@ jobs:
         # 1つでも false なら非0で終わる。
         run: pnpm --filter @mnemora/example-chat run correction
 
-      - name: 北極星の物差し（会話ログを全部積むのをやめても答えが残るか）を compare で実測しログに残す
+      - name: 北極星の物差し（会話ログを全部積むのをやめてもどれだけ削れたか・冒頭の事実の出典に到達できるか）を compare で実測しログに残す
         # 🔴 このステップは `OPENAI_API_KEY` を設定していないが、**擬似(deterministic)
         # provider では走らない**——`examples/chat/cassettes/compare.json`
         # （ADR 0052 の `record:compare`）が存在するため、`resolveCassetteForRun`
@@ -420,7 +420,8 @@ jobs:
         # 「⭐ 削減率だけでは意味を持たない——答えが残っているか」節）。
         # これまでこの数値は手元で測ったきり CI では実測していなかった
         # （ADR 0021 参照）——このステップはそれを埋め、以後の変更で
-        # 「削れたが答えが落ちた」への回帰をログから読めるようにする。
+        # 「削れたが出典に到達できなくなった」への回帰をログから読めるようにする
+        # （情報保持・最終回答の正誤はこのステップでは測っていない。ADR 0226）。
         #
         # 🔴 Issue #242 / ADR 0133: `MNEMORA_COMPARE_JSON` で機械可読な出力口を足した
         # （`retrieval`/`time-term` と同じ規約、`examples/chat/src/compare-json.ts`）。
