@@ -141,7 +141,14 @@ function extractShellOverrides(text) {
 }
 
 const runBlocks = extractRunBlocks(workflow);
-const gateBlock = runBlocks.find((block) => /pnpm run typecheck\b/.test(block.body));
+// ⛔ 門ステップを「`pnpm run typecheck` を含むブロック」で探さない——script 名を歯へ
+//    焼き込むことになり、名前が変わったときに「門が消えた」と誤診する
+//    （`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」。名前も `main` が動けば変わる側である）。
+// ⟹ **形だけで選ぶ**: 「`pnpm run` の行が2本以上並ぶ `run: |` ブロック」。
+//    【実測 2026-09-19 / `publish.yml`】この形に当たるブロックは門ステップ1つだけである
+//    ——2つ以上に増えたら `it` 2 が曖昧として赤くなる（黙ってどちらかを選ばない）。
+const gateCandidates = runBlocks.filter((block) => extractPnpmRunNames(block.body).length >= 2);
+const gateBlock = gateCandidates.length === 1 ? gateCandidates[0] : undefined;
 const gateCommandNames = gateBlock ? extractPnpmRunNames(gateBlock.body) : [];
 const shellOverrides = extractShellOverrides(workflow);
 
@@ -169,10 +176,13 @@ describe(".github/workflows/publish.yml の門ステップが既定シェル（b
 
   it("門ステップ（非 DB の門を全部通す段）が実在し、1つの run ブロックに複数のコマンドが並んでいる", () => {
     expect(
-      gateBlock,
-      "publish.yml に pnpm run typecheck を含む run: | ブロックが無い" +
-        "——門ステップの形が変わった可能性がある",
-    ).toBeDefined();
+      gateCandidates.length,
+      "pnpm run の行が2本以上並ぶ run: | ブロックが、publish.yml にちょうど1つ在ることを期待した" +
+        `（見つかった数: ${gateCandidates.length}）——0 なら門ステップの形が変わった。` +
+        "2以上なら、どれが門ステップかをこの歯が決められない" +
+        "（⛔ 黙ってどちらかを選ばない。取り出し方のほうを直すこと）",
+    ).toBe(1);
+    expect(gateBlock, "門ステップの run: | ブロックを取り出せなかった").toBeDefined();
     // 🔑 なぜ2本以上が要るか: 1本しか無いなら「前段の失敗が後段の起動を止める」
     // という性質そのものが意味を持たない。⟹ この歯が守っている前提
     // （既定シェルの -e）が現に効いていることの確認である。
