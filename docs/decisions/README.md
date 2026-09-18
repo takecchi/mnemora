@@ -268,5 +268,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0242](./0242-runtime-apply-correction.md) | `Runtime.applyCorrection` — 北極星 項目5を「出荷される面」から駆動できるようにする（Issue #369） | **草案 (2026-09)** |
 | [0243](./0243-changelog-lists-publish-targets-only.md) | `CHANGELOG.md` が載せるのは publish 対象パッケージの変更だけである — `examples/chat` は出荷される面の外なので載せない（Issue #536） | 採用 (2026-09) |
 | [0244](./0244-runtime-method-doc-correspondence-tooth.md) | `Runtime` のメソッドが3文書（README/vision/architecture）で名指しされていることを歯で縛る（Issue #518） | **草案 (2026-09)** |
+| [0245](./0245-publish-gate-shell-default-pinned.md) | `publish.yml` の門ステップが既定シェル（`bash -e`）で走るという前提を歯で縛る（Issue #476） | **草案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
