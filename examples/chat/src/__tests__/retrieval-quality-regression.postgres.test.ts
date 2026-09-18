@@ -66,8 +66,9 @@ describe(
 
       const cassette = loadCassette(cassettePathFor("retrieval"));
 
+      // ⛔ 意図的な変異(Issue #497 の陽性対照・第2段)。次の commit で必ず戻す。
       // 実行時点(2026年台)より確実に未来の固定時刻。理由は上のファイル doc を参照。
-      const clock = fixedClock(new Date("2030-01-01T00:00:00.000Z"));
+      const clock = fixedClock(new Date("2026-01-01T00:00:00.000Z"));
 
       const handle = await createExampleRuntime(
         requireDatabaseUrl(),
