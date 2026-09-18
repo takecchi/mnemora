@@ -264,6 +264,12 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 （[Issue #518](https://github.com/takecchi/mnemora/issues/518)）。⛔ **書き込まない口**なので、
 少なくとも「是正・取り消し」（**書き込む**口）ではない。
 
+⚠ **`applyCorrection`（[ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)）も、
+どの層にも置かれていない。**ただし `findCorrectionCandidates` と同じ理由では説明できない
+——`applyCorrection` は `markContested`/`resolveContested` を呼んで実際に書き込む口である
+（ADR 0242 決定3）。**「書き込まないから」という除外は使えない**以上、どの層に当たるかは
+依然として意味の判定であり、この一覧はそれを決めていない（Issue #518）。
+
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない（`sweepArchive` の doc コメント自身が
   「呼び出し側が明示的にこれを呼んだときだけ走る保守操作である」と書いている）。
