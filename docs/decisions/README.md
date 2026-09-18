@@ -264,5 +264,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0238](./0238-correction-choice-rationale-in-events.md) | 訂正の相手を選んだ根拠を、イベントに残す — `meta.note` と `RecallResult.explain` の両方から辿れるようにする（Issue #369 チェックボックス / 北極星 問い3） | **草案 (2026-09)** |
 | [0239](./0239-live-doc-source-line-citations-no-machine-line.md) | 生きた文書のソース行番号引用は、**凍結記録と生きた散文を機械で見分けられない** — 射程を広げない（Issue #512） | 採用 (2026-09) |
 | [0240](./0240-freshness-wiring-gate-corrects-issue-521.md) | Issue #521「時間項への検出力ゼロ」を訂正する — 穴は計算式ではなく `freshness`/`decay` の配線だった。`total` への配線を守る歯を1本足す | 採用 (2026-09) |
+| [0241](./0241-migration-guide-is-a-live-doc-not-an-adr.md) | `docs/migration-v1.md` は ADR ではなく生きた文書である — 「本文を書き換えず訂正を積む」作法の対象外とする（Issue #532） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
