@@ -266,5 +266,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0240](./0240-freshness-wiring-gate-corrects-issue-521.md) | Issue #521「時間項への検出力ゼロ」を訂正する — 穴は計算式ではなく `freshness`/`decay` の配線だった。`total` への配線を守る歯を1本足す | 採用 (2026-09) |
 | [0241](./0241-migration-guide-is-a-live-doc-not-an-adr.md) | `docs/migration-v1.md` は ADR ではなく生きた文書である — 「本文を書き換えず訂正を積む」作法の対象外とする（Issue #532） | 採用 (2026-09) |
 | [0242](./0242-runtime-apply-correction.md) | `Runtime.applyCorrection` — 北極星 項目5を「出荷される面」から駆動できるようにする（Issue #369） | **草案 (2026-09)** |
+| [0243](./0243-changelog-lists-publish-targets-only.md) | `CHANGELOG.md` が載せるのは publish 対象パッケージの変更だけである — `examples/chat` は出荷される面の外なので載せない（Issue #536） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

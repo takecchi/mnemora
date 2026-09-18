@@ -25,84 +25,162 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 無差別に列挙する）との意図的な違いである。各項目は1〜2行の要約と ADR/Issue へのリンクに
 留め、詳細は複製しない（`AGENTS.md` の反重複規律）。
 
+⭐ **`[0.3.0]` 以降は、publish 対象のパッケージの変更だけを載せる。**出所は
+`scripts/publish-targets.mjs` の `PUBLISH_TARGETS` である（⛔ **本数も名前もここに写さない**
+——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。⟹ **`examples/chat` は `private` であり、
+出荷される面の外なので載せない。**
+
+⚠ **これは途中で変わった形である。**【現物】`[0.2.0]` 節は `### Added` に `examples/chat` の
+項目を2つ持っている（`memory_usage` 報告の実践 / 想起経路が連想枠を既定で使うようになった）。
+⛔ **その2項目は書き換えていない**——当時の記録である（`AGENTS.md`）。
+⟹ ⭐ **`[0.3.0]` 以降で `examples/chat` の変更が載っていないのは、書き漏れではなく方針である。**
+理由・採らなかった案・引き受けた負債は
+[ADR 0243](./docs/decisions/0243-changelog-lists-publish-targets-only.md)。
+
 ---
 
 ## [1.0.0] - 未リリース
 
 ⛔ **`v1.0.0` の tag はまだ切られていない。**
-🔴 **⚠ だが `v0.2.0` も最新ではない。****【実測 2026-09-18、`main` = `93a083eb41eb480121ff897f8bbbd80d10631b12`】** **`v0.3.0` が 2026-09-17 にリリースされており**
-（`gh release list` の最新は `v0.3.0`、npm の `latest` は publish 対象6本とも `0.3.0`）、
-⛔ **このファイルには `[0.3.0]` の節が無い**——`v0.3.0` のリリースノートは、まだここに
-書き起こされていない。
 
-**この節は `0.2.0` からの差分を対象とする。**
-🔴 **⟹ この節を「`v0.3.0` からの差分」「次のリリースで初めて効くもの」と読まないこと。**
-下に並ぶ項目の一部は、**既に `v0.3.0` で出荷済み**である。
-⭐ **「`v1.0.0` へ上げるときに何が壊れるか」の正本は
-[docs/migration-v1.md](./docs/migration-v1.md) である**——**あちらは世代ごとに分けてある。**
+**この節は `v0.3.0` からの差分を対象とする。**⭐ **`v0.2.0` → `v0.3.0` の分は、下の `[0.3.0]` 節に在る**
+——⛔ **この節へ混ぜない。**⟹ **この節に並ぶものは、1件も出荷されていない。**
 
-⭐ **数えた基準を明記する。**この節の数字は `v0.2.0` … **`4b92134`** の範囲を数えたものである。
-⟹ 🔴 **`origin/main` がこれより進んでいたら、この節は腐っている可能性がある**——読む人が
-`git log --oneline 4b92134..origin/main` で自分で判定できる。**数字を焼き込む以上、`main` が動けば
-必ず腐る**（`docs/roadmap.md` §7.0 と同じ規律を、この節にも掛ける）。
-
-🔴 **その鮮度は、実際に切れている。****【実測 2026-09-18、`main` = `93a083eb41eb480121ff897f8bbbd80d10631b12`】**
-`git rev-list --count 4b92134..v0.3.0` = **65**、`git rev-list --count 4b92134..HEAD` = **83**。
-⟹ ⛔ **この pin は、既に出た `v0.3.0` より 65 commit 手前を指している。**
-⚠ **それでも pin は消さない**——「どこまで数えたか」を名乗るためのものであり、
-`scripts/release-candidates.mjs` もここから基準 sha を読む
+⭐ **数えた基準を明記する。**この節は `v0.3.0` … **`434e663`** の範囲を数えたものである。
+⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
+⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
+増えただけである。**読む人は `git log --oneline 434e663..origin/main` で、その増分を自分で見られる。
+🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
+⛔ **ここに件数を書かないこと**——書いた瞬間、次の1件が着地した時点で腐る
+（[#433](https://github.com/takecchi/mnemora/issues/433) /
+[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+**数えるなら、下の項目そのものを数えること。**
+⚠ **この pin は `scripts/release-candidates.mjs` の入力でもある**
 （[ADR 0214](./docs/decisions/0214-release-candidates-lists-not-judges.md) 決定5。⛔ 道具は書き換えない）。
 
-【実測】`git rev-list --count v0.2.0..4b92134` は **36**、
-うち `feat`/`fix` は **13本**。冒頭「何を載せるか」の除外規則（docs のみ・テスト追加のみ・
-内部スクリプト・ADR 索引の再生成は載せない）に当てると、**利用者に見える PR は8本**である。
-⚠ **項目の件数は9件で、PR の本数と一致しない**——PR #416 が「後方互換の追加」と「破壊的変更」を
-**両方**持つため、下では2項目に分けて書いている。⟹ **PR の本数と項目の件数を同じ数だと思わないこと。**
-
-⚠ **「`packages/*/src` を触ったか」で数えないこと。**この規則とずれる例が両方向に在る——
-`0016`/`0017` のマイグレーション追加（PR #396）は `src` を1行も触らないが**載せる**（利用者が
-マイグレーションを流す必要がある）。逆に PR #383 は `packages/*/src` を触っているが
-**doc コメントのみで実行コードに差分が無い**ので**載せない**。
+⭐ **「`v1.0.0` へ上げるときに何が壊れるか」の正本は
+[docs/migration-v1.md](./docs/migration-v1.md) である**——**あちらは世代ごとに分けてある。**
+下の「変更（破壊的）」の各項目には、**同文書の番号付き一覧での番号を添えてある。**
+⚠ **この節が数えた範囲（`434e663` まで）より後に足された番号は、当然ここには無い。**
+⟹ ⭐ **数え直すときは、あちらの一覧を数えること。**
 
 ### 変更（破壊的）
 
-⚠ **3件ある**——ただし **この節が pin している `v0.2.0`…`4b92134` の範囲の中では**、である。
+⛔ **どれもまだ出荷されていない。**`v0.3.0` より後に着地したものである。
 
-🔴 **3件とも、既に `v0.3.0` で出荷済みである。**⛔ **「`v1.0.0` へ上げるときに初めて壊れるもの」ではない。**
-そして **`v1.0.0` へ上げるときに壊れるものの一覧は、この節には無い**——pin より後に着地した
-破壊的変更を、この節は1件も持っていないからである。
-⟹ ⭐ **[docs/migration-v1.md](./docs/migration-v1.md) を見ること**（世代ごとに分けてある）。
+⭐ **壊れ方は1つの形に揃っている**——**`interface` に必須メンバが増えた**。
+⟹ ⭕ **`createRuntime()` が返すものを使っているだけなら、何もしなくてよい。**
+壊れるのは、**自分で `Runtime` を実装している側**と、**`@mnemora/testkit` の適合テストを
+呼んでいる側**だけである。⚠ これは新しい判定基準ではない——`[0.2.0]` の Breaking 表
+**1**・**5**・**6** が同じ理由で破壊的と数えられている。
 
-**1件目・2件目と、3件目とで壊れ方が違う。**
+- **`Runtime` に必須メソッド `restoreSuperseded` が増えた**（`@mnemora/core`）。
+  ⟹ [docs/migration-v1.md](./docs/migration-v1.md) の項目 **12**
+  （[#369](https://github.com/takecchi/mnemora/issues/369) /
+  [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
+  ⚠ **ADR 0230 の本文だけを読むと、これが破壊的であることに気づけない**——
+  2026-09-18 に冒頭への追記で名指しされた
+- **`MemoryStoreConformanceOptions.supportsRestoreSupersededBy` が必須フィールドになった**
+  （`@mnemora/testkit`）。**12 と同じ PR #464 で入っている。**
+  ⟹ 項目 **13**（[ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)）。
+  🔴 **この項目は 2026-09-18 まで、CHANGELOG にも ADR にも一度も書かれていなかった**
+- **`Runtime` に必須メソッド `findCorrectionCandidates` が増えた**（`@mnemora/core`）。
+  ⟹ 項目 **14**（[#369](https://github.com/takecchi/mnemora/issues/369) /
+  [ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)、PR #517）
+- **`MemoryStoreConformanceOptions.supportsPreviewRestoreSupersededBy` が必須フィールドになった**
+  （`@mnemora/testkit`）。⟹ 項目 **15**
+  （[#515](https://github.com/takecchi/mnemora/issues/515) /
+  [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md)、PR #524）
+- **`Runtime` に必須メソッド `applyCorrection` が増えた**（`@mnemora/core`）。
+  `findCorrectionCandidates` が返した候補の中から**人が選んだ1件**を受け取り、
+  `markContested` → `resolveContested` の書き込みまでを1つの口にまとめる。⟹ 項目 **16**
+  （[#369](https://github.com/takecchi/mnemora/issues/369) /
+  [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)、PR #537）
 
-**1件目・2件目は「返り値の型に必須フィールドが増えた」形**である。⟹ **読むだけの利用者は影響を受けない。**
-**自分で組み立てている側**（独自 adapter・テストダブル）だけが型エラーになる。
+⚠ **移行手順は複製しない**——直し方は
+[docs/migration-v1.md](./docs/migration-v1.md) の各項目を見ること。
 
-🔴 **3件目は「公開クラスのメソッドの署名が変わった」形**である。⟹ **呼んでいる側が壊れる。**
-同期から `Promise` へ変わったので、**引数を直しただけでは足りない**（`await` が要る）。
+### 追加
 
-- `FilteredOmission` に必須フィールド `scopeRelation` が増えた。`decayed` だけが
-  `totalInScope` の**内側**を数えるという非対称を、契約として明示するもの
-  （[#352](https://github.com/takecchi/mnemora/issues/352) / [ADR 0174](./docs/decisions/0174-filtered-omission-scope-relation.md)、PR #376）
-- `Omission` の `over_limit` に `stage` が増えた。連想枠（段3.5）の `maxCount` 切り捨てを
-  段1 の打ち切りと区別して名乗るため（[#375](https://github.com/takecchi/mnemora/issues/375) /
-  [ADR 0188](./docs/decisions/0188-association-over-limit-omission.md)、PR #391）
-- 🔴 **`@mnemora/testkit` の `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` の署名が変わった。**
-  `(tenantId: string, recalls: number): void` → **`(ctx: Ctx, recalls: number): Promise<void>`**。
-  ADR 0197 が `TenantSettingsStore` interface に同名の**本番**メソッドを足したため名前が衝突し、
-  **テスト専用フックのほうを消して本番の口だけを残した**
-  （[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
-  ⟹ 呼んでいた側は **`store.setDefaultHalfLifeRecalls({ tenantId }, recalls)` へ書き換え、
-  返り値を `await` する**必要がある。
-  ⚠ **これは `@mnemora/testkit/fixtures` の公開型である**——`packages/testkit/src/fixtures.ts` は
-  `v0.2.0` の時点で既に `InMemoryTenantSettingsStore` を export しており、
-  `@mnemora/testkit` は publish 対象6本の1つである。
-  ⟹ ⭐ **`@mnemora/core` だけを見て数えると、この1件は落ちる。**
-  ⚠ **移行手順は複製しない**——[docs/migration-v1.md](./docs/migration-v1.md)
-  「8. `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（`@mnemora/testkit`）の
-  シグネチャが変わった」を見ること
+- **`Runtime.restoreSuperseded`**（および `MemoryStore.restoreSupersededBy` — **任意**メソッド）。
+  `superseded` になった Memory を `active` へ戻す**復旧口**。粒度は群単位で、
+  `target: { supersededById }`（置き換えた側の id）で指定する
+  （[#369](https://github.com/takecchi/mnemora/issues/369) /
+  [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
+  ⚠ **これは北極星 項目5（間違いを正すと、古いほうが先に出てこなくなる）を満たすものではない**——
+  訂正の口そのものは入っていない
+- **`restoreSuperseded` の dry-run**（および `MemoryStore.previewRestoreSupersededBy` — **任意**メソッド）。
+  **戻す前に、何が戻るかを返す**（[#515](https://github.com/takecchi/mnemora/issues/515) /
+  [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md)、PR #524）
+- **`Runtime.findCorrectionCandidates`** — 訂正の相手の**候補を返す**口。
+  ⛔ **mnemora は選ばない。書き込みを1件もせず、LLM を1回も呼ばない**
+  （[ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)、PR #517）
+- **`Runtime.applyCorrection`** — 訂正の**選択**の段を、出荷される面へ持ち上げた口。
+  ⭐ **選ぶのは人である**——候補を返す `findCorrectionCandidates` と、書き込む
+  `markContested`/`resolveContested` のあいだを繋ぐ
+  （[ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)、PR #537）
+- **`CassetteRecorder.lookupLLM` / `lookupEmbedding`**（`@mnemora/testkit`）— 記録した
+  カセットを照会する口。⭕ **追加のみで後方互換**
+  （[ADR 0233](./docs/decisions/0233-answer-quality-measured-once-against-the-real-api.md)、PR #514）
 
-### 変更（挙動）
+### DB
+
+- **マイグレーション `0018` が増えた。**`memory_events.kind` の CHECK 制約の許容値に
+  `unsuperseded` を足す（[ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
+  ⟹ **上げるときに `pnpm --filter @mnemora/postgres run migrate` が要る。**
+  🔴 **「新機能を使うときだけ要る」ものではない**——`Runtime.restoreSuperseded` は
+  `kind = 'unsuperseded'` の `memory_events` 行を積むので、**流さずにこの口を呼ぶと
+  CHECK 制約で書き込みが落ちる。**
+  手順は [docs/migration-v1.md](./docs/migration-v1.md)
+  「v0.3.0 → v1.0.0 で追加されたマイグレーション（`0018`）」を見ること
+
+⚠ **`v1.0.0` をいつ切るかは、この節を書いた時点で決まっていない。**7項目の現在地は
+[docs/roadmap.md](./docs/roadmap.md) §7.13 に在る。
+
+---
+
+## [0.3.0] - 2026-09-17
+
+**Release**: [v0.3.0](https://github.com/takecchi/mnemora/releases/tag/v0.3.0)（pre-release ではない）。
+**tag が指すのは `6851629`**、**前の版は `v0.2.0`**（`c52be47`）。⟹ **この節は
+`v0.2.0` → `v0.3.0` の差分である**（【実測】`git rev-list --count v0.2.0..v0.3.0` = 101）。
+
+⚠ **GitHub の Release `v0.3.0` の本文は自動生成であり、101 commit を無差別に1行ずつ
+並べたものである**【実測】（`gh release view v0.3.0 --json body -q .body | grep -c '^\* '` = 101）。
+⟹ ⭐ **分類も、docs のみ・テストのみの除外も、この節が初めて与える。**
+
+対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
+`@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
+**破壊的変更は `@mnemora/core` / `@mnemora/testkit` / `@mnemora/local-embedding` の3本に在る**
+（`@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/postgres` に破壊的変更は無い）。
+🔴 **⚠ `@mnemora/local-embedding` を落とさないこと**——この repo は 2026-09-18 まで
+「`@mnemora/local-embedding` に破壊的変更は無い」と書いており、**それは誤りだった**
+（[Issue #532](https://github.com/takecchi/mnemora/issues/532)）。
+
+**postgres 利用者へ**: 新しいマイグレーション（`0016`/`0017`）が増えている。
+⟹ **`v0.2.0` から上げるなら `pnpm --filter @mnemora/postgres run migrate` が要る。**
+適用手順・破壊的変更ごとの対応方法は [docs/migration-v1.md](./docs/migration-v1.md) を見ること
+——このファイルには詳細を複製しない。
+
+### Breaking
+
+⭐ **4件である。**⭕ **`v0.2.0` と `v0.3.0` の両端が tag で閉じているので、`main` が動いてもこの数は変わらない。**
+⚠ **正本は [docs/migration-v1.md](./docs/migration-v1.md) の番号付き一覧の 8〜11 であり、
+下の表はその写しである**——**`#` 欄はあちらの通し番号で、この表の中での連番ではない。**
+
+| # | 変更 | 誰が影響を受けるか | 根拠 |
+|---|---|---|---|
+| 8 | `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（`@mnemora/testkit`）の署名が `(tenantId: string, recalls: number): void` → `(ctx: Ctx, recalls: number): Promise<void>` へ変わった。ADR 0197 が `TenantSettingsStore` に同名の**本番**メソッドを足して名前が衝突したため、テスト専用フックのほうを消した | 🔴 **旧署名で呼んでいた側。⛔ 引数を直すだけでは足りない**——同期から `Promise` へ変わったので `await` が要る。構築して渡すだけなら影響なし | [ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)（PR #416） |
+| 9 | `FilteredOmission` に必須フィールド `scopeRelation` が増えた（`@mnemora/core`）。`decayed` だけが `totalInScope` の**内側**を数えるという非対称を、契約として明示するもの | **返り値の型なので、読むだけの利用者には非破壊。** `FilteredOmission` を自分で組み立てている側（独自 adapter の `aggregateScope` 実装・テストダブル）だけ | [ADR 0174](./docs/decisions/0174-filtered-omission-scope-relation.md) / [#352](https://github.com/takecchi/mnemora/issues/352)（PR #376） |
+| 10 | `Omission` の `over_limit` に必須フィールド `stage` が増えた（`@mnemora/core`）。連想枠（段3.5）の `maxCount` 切り捨てを段1 の打ち切りと区別して名乗るため | **9 と同じ形**——`omission.count` を読むだけなら非破壊。`OverLimitOmission` を自分で組み立てている側だけ | [ADR 0188](./docs/decisions/0188-association-over-limit-omission.md) / [#375](https://github.com/takecchi/mnemora/issues/375)（PR #391） |
+| 11 | 🔴 `LocalEmbeddingPipeline`（`@mnemora/local-embedding`）が呼び出し可能な関数型から、`countTokens` / `embed` / `maxInputTokens` を要求する必須 `interface` になった | 🔴 **呼んでいる側と、自前で渡していた側の両方**——この4件で唯一「呼ぶだけの側も壊れる」形である。⛔ **渡すものの形そのものが変わっている** | [ADR 0205](./docs/decisions/0205-local-embedding-pipeline-required-interface.md) / [#137](https://github.com/takecchi/mnemora/issues/137)（PR #446） |
+
+⚠ **`@mnemora/core` だけを見て数えると、8 と 11 が落ちる**——`@mnemora/testkit` と
+`@mnemora/local-embedding` も publish 対象である。
+⚠ **移行手順は複製しない**——直し方は [docs/migration-v1.md](./docs/migration-v1.md) の
+同じ番号の項目を見ること。
+
+### Changed（後方互換だが挙動が変わりうる）
 
 - **`ann_unreached` が「窓が満杯のときにも」鳴るようになった。**従来は
   `annHits.length < kPrime` のときだけ鳴っていたため、**近似索引が取りこぼしたのに窓は満杯**
@@ -111,59 +189,40 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`sweepArchive` が `opts.clock` 省略時に `tenant_settings.decay_clock` へ従うようになった。**
   従来は掃引だけが常に壁時計で動いていたため、`decay_clock = activity`/`either` を選んだ
   テナントで「想起では生きている記憶が archive される」ことがあった
-  （[#364](https://github.com/takecchi/mnemora/issues/364) / [ADR 0186](./docs/decisions/0186-sweep-archive-follows-decay-clock.md)、PR #379）
+  （[#364](https://github.com/takecchi/mnemora/issues/364) /
+  [ADR 0186](./docs/decisions/0186-sweep-archive-follows-decay-clock.md)、PR #379）
 - **語彙チャンネルの `search()` に決定的な最終キーが入った。**同点の候補の順序が
   呼び出しごとに変わりうる状態を解消（[#345](https://github.com/takecchi/mnemora/issues/345) /
   [ADR 0175](./docs/decisions/0175-lexical-search-tiebreak-nondeterminism.md)、PR #390）
-
-### 追加
-
-⚠ **次の1件は、この節が pin している `v0.2.0`…`4b92134` の範囲の*外*である**（`4b92134` より後に着地した）。
-⟹ ⛔ **上の「利用者に見える PR は8本」「項目の件数は9件」という数は、この1件を含んでいない。**
-**数を書き換えるのではなく、含んでいないことを名乗る**（数字は `main` が動けば必ず腐るため。[#433](https://github.com/takecchi/mnemora/issues/433)）。
-
-- **`Runtime.restoreSuperseded`**（および `MemoryStore.restoreSupersededBy` — 任意メソッド）。
-  `superseded` になった Memory を `active` へ戻す**復旧口**。粒度は群単位で、
-  `target: { supersededById }`（置き換えた側の id）で指定する。
-  `memory_events.kind` に `unsuperseded` が増え、**マイグレーション `0018` を流す必要がある**
-  （[#369](https://github.com/takecchi/mnemora/issues/369) / [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
-  ⚠ **これは北極星 項目5（間違いを正すと、古いほうが先に出てこなくなる）を満たすものではない**——
-  訂正の口そのものは入っていない
-  🔴 **⚠ そしてこれは「追加」だけではない。破壊的変更でもある。**`Runtime` の**必須**メソッド
-  （`?` 無し）なので、**`Runtime` を自前実装している側は壊れる**——この repo は同じ形を
-  上の `[0.2.0]` の Breaking 表 **1**・**5**・**6** で既に破壊的と数えている。
-  🔴 **同じ PR #464 は、もう1件の破壊的変更も持っている**——
-  `MemoryStoreConformanceOptions.supportsRestoreSupersededBy`（`@mnemora/testkit`）が
-  **必須フィールド**になった。⛔ **この2件は、どちらもまだ出荷されていない**
-  （**【実測 2026-09-18、`main` = `93a083eb41eb480121ff897f8bbbd80d10631b12`】**
-  `git merge-base --is-ancestor ba9f9a1 v0.3.0` は**偽**）。
-  ⟹ **移行手順は複製しない**——[docs/migration-v1.md](./docs/migration-v1.md) の項目 **12**・**13** を見ること。
-
-- **`TenantSettingsStore.setDefaultHalfLifeRecalls`**（任意メソッド）。テナント既定の
-  半減期を「recall 回数」で設定する本番の経路（[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
-  ⭕ **任意メソッドなので、この追加そのものは後方互換**——実装していない adapter は従来どおり動く。
-  ⚠ **ただし同じ PR #416 は破壊的変更も1件持っている**（上「変更（破壊的）」の3件目。
-  `@mnemora/testkit` の `InMemoryTenantSettingsStore` の同名メソッドの署名）。
-  ⟹ **「任意メソッドだから丸ごと後方互換」と読まないこと。**
-
-### 変更（性能）
-
 - **`PostgresVectorStore.upsert` が、閾値を越えたときだけ埋め込み表を `ANALYZE` するようになった。**
   新しい埋め込み空間へ大量投入した直後は統計が無く、**HNSW 索引が選ばれない窓**が在った
   （[#360](https://github.com/takecchi/mnemora/issues/360) /
-  [ADR 0194](./docs/decisions/0194-embedding-space-analyze-threshold.md)、PR #406）
+  [ADR 0194](./docs/decisions/0194-embedding-space-analyze-threshold.md)、PR #406）。
+  ⭕ **公開 API は変わっていない**——変わるのは実行計画である
+- **`memories` への書き込み経路にも、同じ閾値つき `ANALYZE` のフックが入った**
+  （[#269](https://github.com/takecchi/mnemora/issues/269) /
+  [ADR 0221](./docs/decisions/0221-memories-analyze-on-write.md)、PR #492）。
+  ⚠ **`supersedeWithNewMemories` だけが取り残されていたので、後から塞いだ**
+  （[ADR 0225](./docs/decisions/0225-supersede-with-new-memories-analyze-hook.md)、PR #502）
 
-### DB
+### Added
 
-- **マイグレーションが2本増えた（`0016` / `0017`）。**`memories.provenance_kind` と
-  `provenance->>kind` の一致を `CHECK` 制約で強制する
-  （[#273](https://github.com/takecchi/mnemora/issues/273) / [ADR 0182](./docs/decisions/0182-provenance-kind-matches-provenance-check.md)、PR #396）。
-  ⟹ **上げるときに `pnpm --filter @mnemora/postgres run migrate` が要る。**
-  手順と、既存行の走査を `NOT VALID` で切り離した理由は
-  [docs/migration-v1.md](./docs/migration-v1.md)「v0.2.0 以降に追加されたマイグレーション」を見ること
+- **`TenantSettingsStore.setDefaultHalfLifeRecalls`**（**任意**メソッド）。テナント既定の
+  半減期を「recall 回数」で設定する本番の経路
+  （[ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)、PR #416）。
+  ⭕ **任意メソッドなので、この追加そのものは後方互換**——実装していない adapter は従来どおり動く。
+  ⚠ **ただし同じ PR #416 は破壊的変更も1件持っている**（上の表の **8**）。
+  ⟹ **「任意メソッドだから丸ごと後方互換」と読まないこと。**
+- **`OutboxStoreConformanceOptions.supportsRealConcurrency`**（`@mnemora/testkit`、**任意**フィールド）。
+  adapter 作者が「同時 `claimBatch` を本物の並行で検査してよいか」を自己申告できる
+  （[ADR 0206](./docs/decisions/0206-outbox-concurrent-claim-conformance.md)、PR #450）
 
-⚠ **`v1.0.0` をいつ切るかは、この節を書いた時点で決まっていない。**7項目の現在地は
-[docs/roadmap.md](./docs/roadmap.md) §7.13 に在る。
+### Fixed
+
+- **`recall()` の返り値で `memories` と `omitted` が排他であることを、契約として明示して直した。**
+  同じ Memory が両方に現れうる状態を塞いだ（[#421](https://github.com/takecchi/mnemora/issues/421) /
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md)、PR #435）。
+  ⭕ **公開型は変えていない**——変わったのは返る中身である
 
 ---
 
