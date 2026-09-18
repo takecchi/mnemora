@@ -6,6 +6,7 @@ import type {
   FindCorrectionCandidatesInput,
   FindCorrectionCandidatesResult,
 } from "./correction-candidates.js";
+import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
 import {
@@ -1893,6 +1894,75 @@ export interface Runtime {
     opts?: ResolveContestedOptions,
   ): Promise<ResolveContestedResult>;
   /**
+   * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
+   * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
+   * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
+   * （書き込み、ADR 0134/ADR 0150）の**間**——「選択」の段（Issue #369、
+   * [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+   *
+   * 実体は `examples/chat/src/correction-demo.ts` に**だけ**あった3態の状態機械
+   * （選択待ち／候補外／解決）を、`packages/core` の公開 API へ持ち上げたものである
+   * ——`examples/chat` は `private: true` であり出荷されない。⟹ この口が無い間、
+   * 北極星 項目5 は「出荷される面」からは一度も駆動できなかった。
+   *
+   * ⛔ **この口も「相手を選ぶ」ことは一切しない。** {@link ApplyCorrectionInput.correctedId}
+   * は必ず呼び出し側が渡す——`discovery.candidates[0]` を自動的に採る経路は無い。
+   * この設計は [ADR 0134](../../../docs/decisions/0134-mark-contested-explicit-operation.md)
+   * 決定2・[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
+   * の核心（「機械は選ばない」）をそのまま引き継ぐ——ADR 0232 が実測した危険
+   * （B群: 訂正してはいけない8件中、棄権率 0/8・深い誤爆 6/8。閾値は分離できない）が、
+   * この口を足したことで再び現れることはない。
+   *
+   * 手順（`createRuntime` 内の実装。他に判定は無い——ここが実装の全体である）:
+   * 1. `input.correctedId` が `undefined` なら、何も呼ばずに
+   *    `{ kind: "awaiting_choice" }` を返す。
+   * 2. `input.discovery.candidates` から `memoryId === input.correctedId` を探す。
+   *    見つからなければ、何も呼ばずに
+   *    `{ kind: "not_a_candidate", correctedId: input.correctedId }` を返す。
+   * 3. 見つかれば `markContested(ctx, input.correctedId, input.correctingId, {
+   *    actor: input.actor, reason: input.reason })` を呼ぶ。
+   * 4. `input.resolution` が `undefined` なら、ここで止まり
+   *    `{ kind: "contested", ..., markResult }` を返す——`resolveContested` は
+   *    一度も呼ばない。
+   * 5. `input.resolution` があれば、続けて `resolveContested(ctx, input.correctedId,
+   *    input.correctingId, input.resolution, { actor: input.actor, reason: input.reason })`
+   *    を呼び、`{ kind: "resolved", ..., markResult, resolveResult }` を返す。
+   *
+   * ⛔ **`markContested`/`resolveContested` 自身の失敗（`ineligible`/`conflict`/
+   * `not_attempted`）を握り潰さない。** {@link MarkContestedResult}/{@link ResolveContestedResult}
+   * をそのまま `markResult`/`resolveResult` として運ぶ——`applyCorrection` はそれらを
+   * 別の顔（例外・`boolean`）に変換しない。`kind: "resolved"` は「`resolveContested` まで
+   * 呼んだ」ことだけを意味し、実際に解決が成功したことは `resolveResult.outcome.kind`
+   * を見て判断すること。
+   *
+   * ⛔ **この口自身は監査理由を自動生成しない。** `input.reason` は
+   * {@link buildCorrectionReason}（ADR 0238 が定めた形を `packages/core` へ持ち上げたもの）
+   * で呼び出し側が組み立てた文字列、またはその他の自由文をそのまま `markContested`/
+   * `resolveContested` の両方へ渡すだけである——`meta.note` に載る `recallId` が
+   * `RecallResult.explain`（`getRecall` 経由）への橋になる、という ADR 0238 の形は
+   * 変わらない。
+   *
+   * ⭐ **`markContested` だけを呼んだ後（`resolution` を渡さない呼び出し）、別の
+   * `applyCorrection` 呼び出しで改めて `resolution` を渡す、という2段の使い方ができる。**
+   * `applyCorrection` は呼び出しの間で状態を持たない——2回目の呼び出しでも手順3で
+   * `markContested` は呼ばれるが、対象は既に `status: 'contested'` なので
+   * {@link MarkContestedResult} は書き込み無しで `ineligible` を返すだけであり、続く
+   * `resolveContested` は正常に解決へ進む。`examples/chat/src/correction-demo.ts` の
+   * `runCorrectionDemo` がこの2段呼び出しを使い、`markContested` 相当の直後に
+   * `recall()` で対（mandatory companion）を見せてから解決へ進む、という Issue #303
+   * 由来の実演を保っている。
+   *
+   * ⚠ **`correctedId === correctingId` を特別扱いしない。** 手順2の照合を通り抜けた場合
+   * （呼び出し側が `excludeMemoryIds` で自己除外していない等）、`markContested` 自身が
+   * `firstId === secondId` の `RangeError` を投げる——`applyCorrection` はそれを
+   * 捕まえない（`markContested`/`resolveContested` の「開く前に落とす」位置をそのまま
+   * 引き継ぐ、呼び手のバグ）。
+   *
+   * ⚠ **`tick()`/`observe()` からは一度も呼ばれない。** `markContested`/`resolveContested`
+   * と同じ立場——呼び出し側が明示的に呼んだときだけ動く。
+   */
+  applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
+  /**
    * Issue #103（ADR 0089）: 複数の Memory を1件に統合する（docs/vision.md「5動詞」の1つ）。
    *
    * **`forget`/`purge`/減衰のどれでもない、第4の位置——`status: 'superseded'`
@@ -3584,6 +3654,61 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `Runtime.applyCorrection` の実装（Issue #369、[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+   * doc コメントは interface 側（`applyCorrection` の JSDoc）にある——ここは手順そのもの
+   * だけ。`markContested`/`resolveContested` を呼ぶだけの薄い orchestration であり、
+   * それ自身の CAS・イベント・「無い」の分類は一切増やさない。
+   */
+  async function applyCorrection(
+    ctx: Ctx,
+    input: ApplyCorrectionInput,
+  ): Promise<ApplyCorrectionResult> {
+    if (input.correctedId === undefined) {
+      return { kind: "awaiting_choice" };
+    }
+    const correctedId = input.correctedId;
+
+    // ⛔ 相手を選ばない: discovery.candidates[0] は一切見ない。ここでやっているのは
+    // 「呼び出し側が指名した correctedId が候補一覧に居るかどうか」の照合だけである。
+    const candidate = input.discovery.candidates.find((c) => c.memoryId === correctedId);
+    if (candidate === undefined) {
+      return { kind: "not_a_candidate", correctedId };
+    }
+
+    const markResult = await markContested(ctx, correctedId, input.correctingId, {
+      actor: input.actor,
+      reason: input.reason,
+    });
+
+    if (input.resolution === undefined) {
+      return {
+        kind: "contested",
+        correctedId,
+        correctingId: input.correctingId,
+        chosenRecallRank: candidate.recallRank,
+        markResult,
+      };
+    }
+
+    const resolveResult = await resolveContested(
+      ctx,
+      correctedId,
+      input.correctingId,
+      input.resolution,
+      { actor: input.actor, reason: input.reason },
+    );
+
+    return {
+      kind: "resolved",
+      correctedId,
+      correctingId: input.correctingId,
+      chosenRecallRank: candidate.recallRank,
+      markResult,
+      resolveResult,
+    };
+  }
+
+  /**
    * `Runtime.consolidate` の実装（Issue #103、ADR 0089）。doc コメントは interface 側
    * （`consolidate` の JSDoc）にある——ここはアルゴリズムそのものだけ。
    */
@@ -4175,6 +4300,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     purge,
     markContested,
     resolveContested,
+    applyCorrection,
     consolidate,
     reflect,
   };

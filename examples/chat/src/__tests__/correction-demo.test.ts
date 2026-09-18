@@ -1,9 +1,4 @@
-import type {
-  CorrectionCandidate,
-  MarkContestedOptions,
-  ResolveContestedOptions,
-  Runtime,
-} from "@mnemora/core";
+import type { CorrectionCandidate, Runtime } from "@mnemora/core";
 import { describe, expect, it } from "vitest";
 import type { CorrectionScenario } from "../correction-scenario.js";
 import { CORRECTION_SCENARIO } from "../correction-scenario.js";
@@ -25,26 +20,32 @@ import {
  *   1回だけ呼ぶこと。
  * - 【選択の段】`choice`（呼び出し側の明示的な指名）を**候補の並びから一切導かず**、
  *   指名が候補に居るかどうかの照合にしか候補を使わないこと。
- * - `choice` が無い・指名が候補に無い、の2ケースで**書き込みを1件もしない**こと。
- * - `markContested`/`resolveContested` に*どの id を*渡すか——
- *   `scenario.contestedPair` の宣言（`firstExternalId`/`secondExternalId`/
- *   `winnerExternalId`）が、`turns` の並び順や「後に observe したほうが勝つ」という
- *   順序規則を経由せず、**そのまま**呼び出しの引数に反映されることを実測する。
+ * - `choice` が無い・指名が候補に無い、の2ケースで**書き込みを1件もしない**こと
+ *   （`applyCorrection` を一度も呼ばない——[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+ * - `applyCorrection` に*どの id を*渡すか——`scenario.contestedPair` の宣言
+ *   （`firstExternalId`/`secondExternalId`/`winnerExternalId`）が、`turns` の並び順や
+ *   「後に observe したほうが勝つ」という順序規則を経由せず、**そのまま**呼び出しの
+ *   引数に反映されることを実測する。
  *
- * **測っていないもの**: `markContested`/`resolveContested`/`recall`/
- * `findCorrectionCandidates` 自体の実装の正しさ（それは `packages/core`/
- * `packages/postgres` の領分であり、この歯の偽 Runtime は固定の戻り値を返すだけ）。
- * 実際の Postgres に対する一巡の実測は `correction-demo.postgres.test.ts` で行う。
+ * **測っていないもの**: `applyCorrection`/`recall`/`findCorrectionCandidates` 自体の
+ * 実装の正しさ（それは `packages/core`/`packages/postgres` の領分であり、この歯の
+ * 偽 Runtime は固定の戻り値を返すだけ）。実際の Postgres に対する一巡の実測は
+ * `correction-demo.postgres.test.ts` で行う。
  */
 
 interface FakeRuntimeCalls {
   observedExternalIds: string[];
-  markContestedArgs: [string, string] | null;
-  resolveContestedArgs: [string, string, unknown] | null;
-  /** `markContested` に渡った `opts`（4番目の引数）。Issue #369 チェックボックスの歯用。 */
-  markContestedOpts: MarkContestedOptions | undefined;
-  /** `resolveContested` に渡った `opts`（5番目の引数)。同上。 */
-  resolveContestedOpts: ResolveContestedOptions | undefined;
+  /**
+   * `applyCorrection` に渡った入力を、呼ばれた順にすべて記録する
+   * （`runCorrectionDemo` は最大2回呼ぶ——[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)
+   * の2段呼び出し。1回目は `resolution` 無し、2回目は `resolution` 付き）。
+   */
+  applyCorrectionCalls: Array<{
+    correctedId: string | null;
+    correctingId: string;
+    resolution: unknown;
+    reason: string | undefined;
+  }>;
   recallCallCount: number;
   /**
    * `recall()` に実際に渡ったクエリを、呼ばれた順にすべて記録する。
@@ -65,10 +66,7 @@ interface FakeRuntimeCalls {
 function emptyCalls(): FakeRuntimeCalls {
   return {
     observedExternalIds: [],
-    markContestedArgs: null,
-    resolveContestedArgs: null,
-    markContestedOpts: undefined,
-    resolveContestedOpts: undefined,
+    applyCorrectionCalls: [],
     recallCallCount: 0,
     recallQueries: [],
     findCorrectionCandidatesCallCount: 0,
@@ -226,28 +224,51 @@ function buildFakeRuntime(
     } as unknown as Awaited<ReturnType<Runtime["recall"]>>;
   };
 
-  const markContested: Runtime["markContested"] = async (_ctx, firstId, secondId, opts) => {
-    calls.markContestedArgs = [String(firstId), String(secondId)];
-    calls.markContestedOpts = opts;
+  /**
+   * `applyCorrection` の偽物（[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+   * `packages/core` の実装（`correctedId` が `discoveryCandidates` に居るかどうかの照合・
+   * `resolution` の有無での分岐）と**同じ形の分岐**を最小限に再現するだけで、CAS・
+   * イベント書き込みそのものは持たない——`markContested`/`resolveContested` 自体の
+   * 実装の正しさは `packages/core`（`apply-correction.test.ts` 等）の領分であり、
+   * ここで測るのは `runCorrectionDemo` が正しい引数でこの口を呼ぶかどうかだけである。
+   */
+  const applyCorrection: Runtime["applyCorrection"] = async (_ctx, input) => {
+    calls.applyCorrectionCalls.push({
+      correctedId: input.correctedId === undefined ? null : String(input.correctedId),
+      correctingId: String(input.correctingId),
+      resolution: input.resolution,
+      reason: input.reason,
+    });
+    if (input.correctedId === undefined) {
+      return { kind: "awaiting_choice" } as unknown as Awaited<
+        ReturnType<Runtime["applyCorrection"]>
+      >;
+    }
+    const candidate = discoveryCandidates.find((c) => c.memoryId === input.correctedId);
+    if (candidate === undefined) {
+      return { kind: "not_a_candidate", correctedId: input.correctedId } as unknown as Awaited<
+        ReturnType<Runtime["applyCorrection"]>
+      >;
+    }
+    const markResult = { supported: true, outcome: { kind: "contested" } };
+    if (input.resolution === undefined) {
+      return {
+        kind: "contested",
+        correctedId: input.correctedId,
+        correctingId: input.correctingId,
+        chosenRecallRank: candidate.recallRank,
+        markResult,
+      } as unknown as Awaited<ReturnType<Runtime["applyCorrection"]>>;
+    }
+    const resolveResult = { supported: true, outcome: { kind: "resolved" } };
     return {
-      supported: true,
-      outcome: { kind: "contested" },
-    } as unknown as Awaited<ReturnType<Runtime["markContested"]>>;
-  };
-
-  const resolveContested: Runtime["resolveContested"] = async (
-    _ctx,
-    firstId,
-    secondId,
-    resolution,
-    opts,
-  ) => {
-    calls.resolveContestedArgs = [String(firstId), String(secondId), resolution];
-    calls.resolveContestedOpts = opts;
-    return {
-      supported: true,
-      outcome: { kind: "resolved" },
-    } as unknown as Awaited<ReturnType<Runtime["resolveContested"]>>;
+      kind: "resolved",
+      correctedId: input.correctedId,
+      correctingId: input.correctingId,
+      chosenRecallRank: candidate.recallRank,
+      markResult,
+      resolveResult,
+    } as unknown as Awaited<ReturnType<Runtime["applyCorrection"]>>;
   };
 
   return {
@@ -255,8 +276,7 @@ function buildFakeRuntime(
     tick,
     findCorrectionCandidates,
     recall,
-    markContested,
-    resolveContested,
+    applyCorrection,
   } as unknown as Runtime;
 }
 
@@ -265,8 +285,8 @@ function recordedChoice(scenario: CorrectionScenario = CORRECTION_SCENARIO) {
   return { chosenExternalId: scenario.contestedPair.firstExternalId };
 }
 
-describe("runCorrectionDemo: markContested/resolveContested に渡す id は 指名(choice) と scenario.contestedPair.winnerExternalId の宣言どおり", () => {
-  it("既定シナリオ: choice=firstExternalId(original) ⟹ resolveContested に correction の memoryId が winnerId として渡る", async () => {
+describe("runCorrectionDemo: applyCorrection に渡す id は 指名(choice) と scenario.contestedPair.winnerExternalId の宣言どおり", () => {
+  it("既定シナリオ: choice=firstExternalId(original) ⟹ 2回目の applyCorrection に correction の memoryId が winnerId として渡る", async () => {
     const calls = emptyCalls();
     const runtime = buildFakeRuntime(calls);
 
@@ -291,15 +311,23 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は 指
     expect(result.chosenId).toBe(originalId);
     expect(result.chosenRecallRank).toBe(1);
 
-    // markContested は指名(chosenId)と correction の2件で呼ばれる。
-    expect(calls.markContestedArgs).toEqual([originalId, correctionId]);
+    // applyCorrection は2回呼ばれる(ADR 0242): 1回目は resolution 無し、2回目は
+    // resolution 付き。どちらも指名(chosenId)と correction の2件で呼ばれる。
+    expect(calls.applyCorrectionCalls).toHaveLength(2);
+    expect(calls.applyCorrectionCalls[0]).toMatchObject({
+      correctedId: originalId,
+      correctingId: correctionId,
+      resolution: undefined,
+    });
 
-    // 🔑 resolveContested の winnerId は contestedPair.winnerExternalId(=correction)が
+    // 🔑 2回目の resolution.winnerId は contestedPair.winnerExternalId(=correction)が
     // 指す memoryId であり、これは「あとから observe した」からではなく宣言だからである
     // (下の「宣言を逆にすると勝敗も入れ替わる」の歯が、これを順序と切り分けて示す)。
-    expect(calls.resolveContestedArgs?.[0]).toBe(originalId);
-    expect(calls.resolveContestedArgs?.[1]).toBe(correctionId);
-    expect(calls.resolveContestedArgs?.[2]).toEqual({ kind: "supersede", winnerId: correctionId });
+    expect(calls.applyCorrectionCalls[1]).toMatchObject({
+      correctedId: originalId,
+      correctingId: correctionId,
+      resolution: { kind: "supersede", winnerId: correctionId },
+    });
 
     expect(result.originalId).toBe(originalId);
     expect(result.correctionId).toBe(correctionId);
@@ -327,7 +355,10 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は 指
 
     // observe() の呼び出し順は変わらない(original が先) — それでも winnerId は original。
     expect(calls.observedExternalIds[0]).toBe(CORRECTION_SCENARIO.original.externalId);
-    expect(calls.resolveContestedArgs?.[2]).toEqual({ kind: "supersede", winnerId: originalId });
+    expect(calls.applyCorrectionCalls[1]?.resolution).toEqual({
+      kind: "supersede",
+      winnerId: originalId,
+    });
   });
 
   it("🔑 3回の recall() はすべて limit: 1 で呼ばれる — 段3の必須同伴取得を発火させる条件そのもの(ADR 0162 決定5)", async () => {
@@ -371,18 +402,17 @@ describe("runCorrectionDemo: markContested/resolveContested に渡す id は 指
  * 深い誤爆 75% はそのまま再現する」への応答）。
  *
  * `findCorrectionCandidates` の候補1位を decoy にし、指名(choice)は候補2位の
- * originalId にする。`candidates[0]` を採る実装なら、`markContested`/
- * `resolveContested` は decoy に対して呼ばれてしまうはずである——この歯はそれが
- * **起きないこと**を実測する。
+ * originalId にする。`candidates[0]` を採る実装なら、`applyCorrection` は decoy に
+ * 対して呼ばれてしまうはずである——この歯はそれが**起きないこと**を実測する。
  *
  * ⚠ この歯だけでは「decoy が active のまま残る」ことを DB レベルでは確かめられない
  * （偽 Runtime は状態を持たない）。ここで実測しているのは「decoy の memoryId が
- * markContested/resolveContested の引数に一度も現れない」ことであり、
- * `examples/chat` の書き込み口を偽 Runtime で置き換えている以上、これが
- * 「decoy に触れていない」ことの実測できる範囲である。
+ * applyCorrection の引数に一度も現れない」ことであり、`examples/chat` の書き込み口を
+ * 偽 Runtime で置き換えている以上、これが「decoy に触れていない」ことの実測できる範囲
+ * である。
  */
 describe("🔴🔴 採用者の指名が候補1位ではないケース: candidates[0]実装なら赤くなる歯", () => {
-  it("指名(originalId)は候補2位。候補1位のdecoyはmarkContested/resolveContestedの引数に一度も現れない", async () => {
+  it("指名(originalId)は候補2位。候補1位のdecoyはapplyCorrectionの引数に一度も現れない", async () => {
     const calls = emptyCalls();
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
     const correctionId = memoryIdFor(CORRECTION_SCENARIO.correction.externalId);
@@ -417,25 +447,27 @@ describe("🔴🔴 採用者の指名が候補1位ではないケース: candida
     expect(result.chosenRecallRank).toBe(2);
     expect(result.chosenId).toBe(originalId);
 
-    // 🔴 本体: markContested/resolveContested は指名(originalId)に対して呼ばれ、
+    // 🔴 本体: applyCorrection は2回とも指名(originalId)に対して呼ばれ、
     // 候補1位のdecoyは一度も引数に現れない。
-    expect(calls.markContestedArgs).toEqual([originalId, correctionId]);
-    expect(calls.markContestedArgs).not.toContain(decoyId);
-    expect(calls.resolveContestedArgs?.[0]).toBe(originalId);
-    expect(calls.resolveContestedArgs?.[1]).toBe(correctionId);
-    expect(JSON.stringify(calls.resolveContestedArgs)).not.toContain(decoyId);
+    expect(calls.applyCorrectionCalls).toHaveLength(2);
+    for (const call of calls.applyCorrectionCalls) {
+      expect(call.correctedId).toBe(originalId);
+      expect(call.correctingId).toBe(correctionId);
+    }
+    expect(JSON.stringify(calls.applyCorrectionCalls)).not.toContain(decoyId);
   });
 });
 
 /**
  * 🔴 Issue #369 チェックボックス: 選んだ根拠（スコア・順位・候補の数・どちらへ倒したか）を
- * `memory_events.meta.note` から辿れるようにする——`markContested`/`resolveContested` の
- * `opts.reason` に実際に載ることを実測する（`meta.note` へ実際に届いたかは DB を要求する
- * ため `correction-demo.postgres.test.ts` 側で見る。ここでは「呼び出しの引数として
- * 渡ったか」までを見る）。
+ * `memory_events.meta.note` から辿れるようにする——`applyCorrection` の `reason` に
+ * 実際に載ることを実測する（`meta.note` へ実際に届いたかは DB を要求するため
+ * `correction-demo.postgres.test.ts` 側で見る。ここでは「呼び出しの引数として渡ったか」
+ * までを見る）。`reason` は `buildCorrectionReason`（`@mnemora/core` の公開 export、
+ * [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）で組み立てる。
  */
-describe("🔴 選んだ根拠が opts.reason 経由で markContested/resolveContested へ渡る(Issue #369)", () => {
-  it("候補2位を指名したケース: reason に recallId・chosenRecallRank(=2)・candidates件数・winner が載り、markContested と resolveContested の両方に同じ reason が渡る", async () => {
+describe("🔴 選んだ根拠が reason 経由で applyCorrection へ渡る(Issue #369)", () => {
+  it("候補2位を指名したケース: reason に recallId・chosenRecallRank(=2)・candidates件数・winner が載り、applyCorrection の2回の呼び出しに同じ reason が渡る", async () => {
     const calls = emptyCalls();
     const originalId = memoryIdFor(CORRECTION_SCENARIO.original.externalId);
     const decoyId = "decoy-memid-for-reason-test";
@@ -467,16 +499,18 @@ describe("🔴 選んだ根拠が opts.reason 経由で markContested/resolveCon
     expect(result.outcome).toBe("resolved");
     expect(result.chosenRecallRank).toBe(2);
 
-    // 🔴 片方だけにしない: markContested と resolveContested の両方に reason が届く。
-    expect(calls.markContestedOpts?.reason).toBeDefined();
-    expect(calls.resolveContestedOpts?.reason).toBeDefined();
-    expect(calls.markContestedOpts?.reason).toBe(calls.resolveContestedOpts?.reason);
+    // 🔴 片方だけにしない: applyCorrection の1回目(mark相当)・2回目(resolve相当)の
+    // 両方に同じ reason が届く。
+    expect(calls.applyCorrectionCalls).toHaveLength(2);
+    expect(calls.applyCorrectionCalls[0]?.reason).toBeDefined();
+    expect(calls.applyCorrectionCalls[1]?.reason).toBeDefined();
+    expect(calls.applyCorrectionCalls[0]?.reason).toBe(calls.applyCorrectionCalls[1]?.reason);
 
-    const reason = calls.markContestedOpts?.reason ?? "";
+    const reason = calls.applyCorrectionCalls[0]?.reason ?? "";
     expect(reason).toContain("chosenRecallRank=2");
     expect(reason).toContain(`candidates=${discoveryCandidates.length}`);
     expect(reason).toContain("recallId=correction-candidates-recall");
-    expect(reason).toContain("winner=correction");
+    expect(reason).toContain("winner=correcting");
 
     // 🔴 選んだ根拠にスコアの生値(score.total)は載せない設計判断(ADR 参照)。
     expect(reason).not.toContain("0.87");
@@ -511,7 +545,7 @@ describe("発見の段: findCorrectionCandidates は text=訂正の発話・excl
 });
 
 describe("選択を渡さない・指名が候補に無い: 書き込み0件で停止する(ADR 0232 B群の危険を可視化する経路)", () => {
-  it("choice が undefined ⟹ outcome=awaiting_choice、markContested/resolveContested/recallは一度も呼ばれない(書き込み0件)", async () => {
+  it("choice が undefined ⟹ outcome=awaiting_choice、applyCorrection/recallは一度も呼ばれない(書き込み0件)", async () => {
     const calls = emptyCalls();
     const runtime = buildFakeRuntime(calls);
 
@@ -526,9 +560,8 @@ describe("選択を渡さない・指名が候補に無い: 書き込み0件で�
     expect(result.resolveOutcomeKind).toBeNull();
     expect(result.afterResolve).toBeNull();
 
-    // 🔴 書き込み0件: markContested/resolveContested はそもそも呼ばれない。
-    expect(calls.markContestedArgs).toBeNull();
-    expect(calls.resolveContestedArgs).toBeNull();
+    // 🔴 書き込み0件: applyCorrection はそもそも呼ばれない。
+    expect(calls.applyCorrectionCalls).toHaveLength(0);
     // 🔴 recall() (beforeMark/afterMark/afterResolve用)も一度も呼ばれない
     // — イベントが増えない・どの Memory の状態も変わらないことの代理指標。
     expect(calls.recallCallCount).toBe(0);
@@ -566,8 +599,7 @@ describe("選択を渡さない・指名が候補に無い: 書き込み0件で�
     expect(result.afterMark).toBeNull();
     expect(result.afterResolve).toBeNull();
 
-    expect(calls.markContestedArgs).toBeNull();
-    expect(calls.resolveContestedArgs).toBeNull();
+    expect(calls.applyCorrectionCalls).toHaveLength(0);
     expect(calls.recallCallCount).toBe(0);
   });
 
