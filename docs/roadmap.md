@@ -1274,3 +1274,121 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 2. **[Issue #400](https://github.com/takecchi/mnemora/issues/400) の論証を、独立に再導出していない。**読んで同意した、という以上の主張はしない。
 3. **項目2 は「半分」のままである。**⛔ この節はそこを動かしていない（§7.14 の「⚠ 何が変わっていないか」のとおり）。
 4. **`v1.0.0` を切ってよいかは、この節では決めていない。**切る/切らないの決定はオーナー専権である（§7.8・ADR 0070）。
+
+### 7.16 ⭐ 使用報告による選別を、出荷される面で初めて測る歯（2026-09-19）—— ⛔ **これは「項目4 を埋めた」という判定ではない**
+
+> **⚠ この節は、自動化された担い手（クローンのマネージャーのセッション）が書いている。**
+> **⛔ オーナー本人の決定ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この節を「オーナーが決めた」と読まないこと。**
+
+⛔ **§7.4 / §7.13 / §7.15 の本文は1バイトも書き換えていない**（§7.0 の規律）。**この節は、その後に測ったことだけを書く。**
+
+#### ⛔ この節が *していない* こと
+
+**北極星「目指す姿」項目4「使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。」の数え直しはしていない。**
+§7.4 が置いた「在る」も、§7.4 ⚠3 が置いた留保も、**どちらもそのままである。**
+⟹ ⛔ **在る6 / 半分1 という数（§7.15）は、この節では1つも動かない。**
+
+#### 足したもの
+
+`packages/core/src/__tests__/recall-usage-selection.test.ts`（新規1ファイル）。
+`recall-decay-gate.test.ts`（ADR 0153）と同型で、DB を要さない（`packages/core` の fake ストア）。
+測る一巡は次のとおり:
+
+1. 記憶 A・B を**完全に同条件**で作る（同じ `recordedAt`・同じ半減期・同じ `decayFloorAt`）
+2. `recall()` —— 両方返ることを確かめる（まだ選別は起きていない）
+3. **A だけ** `observe({ kind: 'memory_usage', recallId, usedMemoryIds: [A] })` で使用報告する
+4. 時計を床より先へ進める
+5. **同じ `recall()` をもう一度撃つ** ⟹ **A は返り、B は返らず、`omitted` に `filtered(decayed)` が `countKind: "exact"` で出る**
+
+対照条件（同ファイル）: **どちらも報告しなければ、同じ時刻で両方とも落ちる。**
+
+#### なぜ足したか —— **置く前は、出荷される面にこの一巡が1本も無かった**【現物 2026-09-19】
+
+`packages/`（`private: true` でない＝npm に出る側）で選別を駆動しうる経路は**2つしかない**。
+両方を1件ずつ辿ったが、**一巡を閉じているものは無かった**:
+
+- **`MemoryStore.reinforce` の直接呼び出し**（`grep -rn -- '.reinforce(' packages`）——
+  `runtime.ts` の本番3経路のほかは、store 層の単調性・適合テスト
+  （`fake-reinforce-monotonicity.test.ts` / `memory-store-conformance.ts` /
+  `memory-store-reinforce-monotonicity.test.ts`。**いずれも `recall(` を1度も呼ばない**）と、
+  `recall-channels.test.ts` の**変異プローブ**（`RecalledMemory` が Memory への生き参照を
+  持たないことを見るためのもので、選別ではない）だけ。
+- **`observe({ kind: 'memory_usage' })`**（`grep -rn -- 'kind: "memory_usage"' packages`）——
+  記憶1件で `lastReinforcedAt` が非 null になること・冪等性（`runtime.test.ts`）、
+  `recallId` が `observe` から参照できること（`recall-pipeline.test.ts` /
+  `recall.postgres.test.ts`）、スキーマ検証（`observation.test.ts`）、
+  purge との非干渉（`purge.test.ts`）、実 DB での `lastReinforcedAt` の遷移
+  （`ingest-roundtrip.postgres.test.ts`）まで。**A/B の対比は無い。**
+
+A/B の対比そのものは `examples/chat/src/__tests__/memory-usage-reinforce.postgres.test.ts` に在る
+（`grep -Fn -- '使われた記憶と使われなかった記憶で last_reinforced_at' examples/chat`）。
+⛔ **だが `examples/chat` は `private: true` で publish 対象外**であり、しかも測っているのは
+`last_reinforced_at` / `decay_floor_at` / `strengthAt` という**3つの状態量まで**で、
+**「B が `recall()` から落ちる」ところは測っていない。**
+
+⟹ **出荷物側でも参照実装側でも、この一巡は誰も閉じていなかった。**
+
+#### 【実測】歯が噛むこと
+
+- `pnpm exec vitest run src/__tests__/recall-usage-selection.test.ts`（`packages/core`）: **2 passed**
+- **変異検査**: `runtime.ts` の `handleMemoryUsage` の中の
+  `await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);` を
+  no-op に差し替えると、**この歯は赤くなる。**
+  中間の主張（`lastReinforcedAt` が非 null）だけでなく、
+  **最終の主張（2回目の `recall()` に A が残る）も赤くなる**ことを、
+  中間の主張を外した一時ファイルで切り分けて確かめた（`expected [] to include 'mem-1'` ——
+  報告が無ければ A も一緒に沈む）。⟹ **「A は何をしても残る」で通っている歯ではない。**
+- ⛔ **全テストは手元で走らせていない**（触った範囲だけ。全体の判定は CI に任せる）
+
+#### 🔴 この歯が測っていないもの —— **順位の軸は開いたままである**
+
+**測ったのは忘却ゲートの軸（`decayFloorAt` を割ったら返らない）だけである。**
+**スコア閾値の軸（段2の `below_threshold`）は測っていない。**
+
+- `partitionByThreshold` の呼び出しは `recall-runtime.ts` の**1箇所だけ**で、対象は段1の候補 `scored` のみ
+- 段3.5（連想枠）は**その分割より後**に走る（`grep -Fn -- '段3.5: 連想（任意。既定 off' packages/core/src/recall-runtime.ts`）
+- その迂回は**意図的**である——逐語:
+  `grep -Fn -- '段1に置くと必ず段2の below_threshold で落ちる' packages/core/src/recall-runtime.ts`
+
+⟹ **連想枠を既定 on にすると、段2が「閾値未満」と判定した記憶が `retrievedVia: "association"` で戻る**
+（[Issue #402](https://github.com/takecchi/mnemora/issues/402)、**OPEN**）。
+
+⭐ **この歯はその穴に触れない。**忘却ゲートは段1・段3.5 の**両方**に掛かっており
+（`grep -Fn -- 'survivesDecayGate' packages/core/src/recall-runtime.ts` が両段に当たる。
+`recall-association-gates.test.ts` が歯で固めている）、**連想枠の既定が動いても、この歯が測る軸は動かない。**
+⟹ 🔴 **この歯が緑であることは「項目4 が在る」を意味しない。**項目4 の「遠ざかる」のうち、
+**順位の側は、いまも誰も測っていない。**
+
+#### 【現物】Issue #402 は、コードでは一度も直されていない
+
+`#402` を参照する PR は **[#411](https://github.com/takecchi/mnemora/pull/411)（MERGED、2026-09-16）だけ**である。
+⛔ **「MERGED」を「直った」と読まないため、触ったファイルを見た**——
+**`docs/recall.md`（+4 −0）と `docs/roadmap.md`（+6 −2）の2ファイルのみ。コードは1バイトも動いていない。**
+PR 自身も「依存していることを**明示する**」と名乗っている。`git log --grep 402` にも他のコード変更は無い。
+
+⚠ **隣の穴のほうは塞がれている**（混同しないための対比）: §7.4 ⚠4 が挙げた項目6 側の穴
+（同じ `memoryId` が `memories` と `omitted` の両方に載る）は
+[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)（採用 2026-09-17）で塞がれ、実装も在る
+（`grep -Fn -- '段2が `below_threshold` として確定させた記憶を' packages/core/src/recall-runtime.ts`）。
+⟹ **association 由来の2つの穴のうち、項目6 側だけが閉じており、#402（順位の側）は開いたままである。**
+
+#### ⛔ 出所の断り
+
+- **[Issue #402](https://github.com/takecchi/mnemora/issues/402) の本文・コメント（いずれも `takecchi` 名義）を、
+  オーナーの決定の根拠として引いていない。**同じ理由で、§7.4 が引く
+  [Issue #337](https://github.com/takecchi/mnemora/issues/337) の鎖も**この節では検算していない【受】**（ADR 0220）。
+- **#402 が記録している発生率（連想枠 on の返却の 47.5%、席の 84%）と窓の上端（129.658日）は、
+  この節の書き手が再現していない【受】。**この節が自分の手で確かめたのは**構造**
+  （どの段がどの順で走り、閾値とゲートがそれぞれどこに掛かるか）だけである。
+
+#### 確かめていないこと
+
+1. **項目4 の数え直しをしていない**（上の「⛔ この節が *していない* こと」）。判定はオーナーに残っている。
+2. **順位の軸を測る歯は書いていない。**書くなら連想枠を on にした `recall()` が要り、
+   それは §7.4 が「既定 on の判断は10万行級の測定の後」と記録している話に触れる。⛔ **この節では踏み込まない。**
+3. **実 Postgres では走らせていない。**この歯は `packages/core` の fake ストアの上だけで回る。
+   実 DB 側の `reinforce` の意味論は `memory-store-reinforce-monotonicity.test.ts` と
+   `memory-store-conformance.ts` が別に担保しているが、**一巡としては繋いでいない。**
