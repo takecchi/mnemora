@@ -8,6 +8,7 @@ export * from "./observation.js";
 export * from "./memory.js";
 export * from "./recall.js";
 export * from "./correction-candidates.js";
+export * from "./apply-correction.js";
 export * from "./digest-band.js";
 export * from "./ann-truncation.js";
 export * from "./recall-footprint.js";
