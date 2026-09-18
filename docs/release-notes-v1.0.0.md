@@ -1,0 +1,157 @@
+# `v1.0.0` の Release 本文（草稿）
+
+> **⚠ この文書は、自動化された担い手（クローンのマネージャーのセッション）が書いたものである。**
+> **⛔ オーナー本人の文章ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この文書を「オーナーが書いた」と読まないこと。**⛔ **そのまま貼る前に、下の「貼る前に確かめること」を必ず踏むこと。**
+
+**⛔ この文書は手順ではない。「Release を作るときに GitHub の本文へ貼るテキスト」の草稿である。**
+
+**なぜ独立した文書なのか**: `.github/workflows/publish.yml` の引き金は `release: types: [published]` であり、同ファイルが逐語で「**Release を作る行為が『npm へ出してよい』の表明**であり、その表明が**リリースノートと一緒に GitHub 上に残る**」と書いている。⟹ **本文は当日の成果物である。**当日の手順そのものは [`release-v1.md`](./release-v1.md) に在り、**この文書はそこから独立している**（手順と成果物を同じ文書に混ぜない）。
+
+---
+
+## ⚠ この文書の腐りの判定条件
+
+**`docs/roadmap.md` §7.0 と同じ形を持たせる**——日付と数字を持つ文書は放っておけば必ず腐るので、読む人が自分で判定できるようにする。
+
+| | |
+|---|---|
+| **書いた日** | **2026-09-19**（`main` = `e7f9b41` の木で書いた） |
+| **書いた人** | **担い手。オーナーではない。**（冒頭のバナー） |
+| **正はどれか** | ⛔ **この草稿ではない。**7項目は [`roadmap.md`](./roadmap.md) **§7.15**、変更一覧は [`CHANGELOG.md`](../CHANGELOG.md)、**破壊的変更の一覧と番号は [`migration-v1.md`](./migration-v1.md) の番号付き一覧**、弱さは各 Issue が正である |
+| **腐りの判定** | **下の「7項目の現在地」が `roadmap.md` §7.15 の数と食い違っていたら腐っている。**そのときは §7.15 を信じること |
+
+⚠ **この文書は、正典の内容を意図的に複製している。**`AGENTS.md` の反重複規律に反するように見えるが、**理由が在る**——**Release 本文を読むのは repo の外に居る採用者**であり、リンクだけでは「何ができて何ができないか」が伝わらない。⟹ **複製を許す代わりに、上の「正はどれか」を必ず添えること。**
+
+🔴 **⛔ この草稿に、未リリース世代の破壊的変更の件数を書かないこと。** `v0.3.0` → `v1.0.0` は **`v1.0.0` の tag がまだ切られていない**ので、`main` に1件着地するたびに写した数が腐る（[#433](https://github.com/takecchi/mnemora/issues/433) / [ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md) / [ADR 0241](./decisions/0241-migration-guide-is-a-live-doc-not-an-adr.md)）。⟹ **数えるなら [`migration-v1.md`](./migration-v1.md) の番号付き一覧を数えること。**⭕ **両端が tag で閉じた世代（`v0.1.9`→`v0.2.0`、`v0.2.0`→`v0.3.0`）だけ、件数を書いてよい。**
+
+---
+
+## 貼る前に確かめること
+
+1. **7項目の数が [`roadmap.md`](./roadmap.md) §7.15 と一致しているか。**食い違っていたら §7.15 を信じて直す。
+   ⚠ **§7.15 だけを読まないこと**——§7.12（項目2 は「半分」のまま切る）・§7.13（数の訂正）・§7.14（項目5 も埋めてから出す）が前に在り、**§7.15 はそれらの本文を1バイトも書き換えずに、後から決まったことだけを積んでいる。**
+2. 🔴 **`v0.3.0` → `v1.0.0` の破壊的変更を、当日 [`migration-v1.md`](./migration-v1.md) の番号付き一覧で数え直すこと。**
+   ⛔ **この草稿に写した番号（`12` 以降）を信じないこと**——`main` が動けば増える。
+3. **`v0.2.0` → `v0.3.0` の「4件」が、[`migration-v1.md`](./migration-v1.md) の **8**〜**11** と一致しているか。**
+   ⭕ **こちらは両端が tag で閉じているので、`main` が動いても変わらない。**
+4. **マイグレーションの本数が `packages/postgres/migrations/` と一致しているか。**
+   ⚠ **どの版から上げるかで要る本数が違う**——下の本文はそれを分けて書いてある。
+5. **「既知の弱さ」の各行が引く Issue が、まだ OPEN か。**⛔ **CLOSED になっているものを「弱さ」として出さないこと。**
+   ⚠ **これは実際に起きた**——2026-09-19 時点の草稿は [#421](https://github.com/takecchi/mnemora/issues/421) を「まだ壊れている」前提で引いていたが、**`v0.3.0` で直っていた**（[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md) / PR #435、`355aa1d`）。
+6. **項目2 の「半分」の扱いが §7.12 のままか。**⛔ **この草稿に、既定が off である技術的な理由づけを書き足さないこと**——理由は下の該当節に書いてある。
+
+---
+
+## 草稿（ここから下を貼る）
+
+> ## mnemora v1.0.0
+>
+> **mnemora は、LLM アプリケーションに「思い出す」を与えようとしています。「保存する」ではなく。**
+>
+> 物差しは1つだけです——**使う側が、会話ログを全部プロンプトへ積むのをやめられたか。**
+>
+> ### ⚠ どの版から上げるかで、読む場所が変わります
+>
+> **`v0.3.0` は 2026-09-17 に出ています。** ⟹ **`v0.2.0` から直接 `v1.0.0` へ上げる人は、`v0.3.0` の分も一緒に踏みます。**
+>
+> | いまの版 | 読むもの |
+> |---|---|
+> | **`v0.3.0`** | この本文の「`v0.3.0` からの変更」だけ |
+> | **`v0.2.0`** | この本文 **＋** [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の **`[0.3.0]`** 節 |
+> | `v0.1.x` | 上に加えて `[0.2.0]` 節。⚠ **破壊的変更が3世代分あります** |
+>
+> **変更の一覧とそれぞれの根拠 ADR は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) が正です。**
+> **破壊的変更の一覧と直し方は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) が正です**——世代ごとに分けて、通し番号を振ってあります。
+>
+> ### `v0.3.0` からの変更
+>
+> 🔴 **破壊的変更があります。**一覧は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の番号付き一覧の **`12` 以降**です。⛔ **この本文に件数は書きません**——`v1.0.0` を切るまで増えうるので、**数えるならあちらの一覧を数えてください。**
+>
+> ⭐ **壊れ方は2つの形しかありません。**
+>
+> - **`interface` に必須メンバが増えた**形 — ⭕ **`createRuntime()` が返すものを使っているだけなら、何もしなくてよい。**壊れるのは、**自分で `Runtime` を実装している側**と、**`@mnemora/testkit` の適合テストを呼んでいる側**だけです。
+> - **union に値が増えた**形 — ⭕ **値を読むだけ・比較するだけなら非破壊。**`never` で網羅性を検査しているコードだけが壊れます。
+>
+> ⟹ ⭐ **`observe` / `recall` / `reflect` / `consolidate` / `forget` の5つの動詞だけを使っているなら、コードの変更は要りません。**
+>
+> 🔴 **ただし DB マイグレーションは要ります**（`0018` の1本）。
+>
+> ```
+> pnpm --filter @mnemora/postgres run migrate
+> ```
+>
+> ⚠ **「新機能を使うときだけ要る」ものではありません**——`Runtime.restoreSuperseded` が `kind = 'unsuperseded'` の行を積むので、流さずにその口を呼ぶと CHECK 制約で書き込みが落ちます。
+>
+> ### `v0.2.0` から上げる人へ — `v0.3.0` の分
+>
+> **破壊的変更は4件です**（[docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の **8**〜**11**）。⭕ **両端が tag で閉じている世代なので、この数は動きません。**
+>
+> - **3件は `@mnemora/core` / `@mnemora/testkit` の型の話**です（`FilteredOmission.scopeRelation` / `Omission` の `over_limit.stage` / `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`）。
+> - 🔴 **1件は `@mnemora/local-embedding` です**——`LocalEmbeddingPipeline` が呼び出し可能な関数型から、`countTokens` / `embed` / `maxInputTokens` を要求する**必須 `interface`** になりました。⟹ **呼んでいる側と、自前で渡していた側の両方が壊れます。**⛔ **渡すものの形そのものが変わっています。**
+>
+> **マイグレーションは `0016` / `0017` が追加で要ります**（`0018` と合わせて3本）。
+>
+> ### 🔴 いま何ができて、何ができないか
+>
+> **正典 [`docs/north-star.md`](https://github.com/takecchi/mnemora/blob/main/docs/north-star.md) の「目指す姿」7項目に、自分で当てた結果を隠さずに書きます。**
+>
+> **現在地: 在る6 / 半分1。**
+>
+> | | 目指す姿 | |
+> |---|---|---|
+> | 1 | 言ったことを、次の日も覚えている | ⭕ |
+> | 2 | **聞かれていないことを、自分から思い出す** | 🔴 **半分**（⭐ **決定の上での「半分」です。下記**） |
+> | 3 | なぜそれを思い出したのかを、後から説明できる | ⭕ |
+> | 4 | 使われない記憶が、静かに遠ざかる | ⭕ |
+> | 5 | **間違いを正すと、古いほうが先に出てこなくなる** | ⭕ |
+> | 6 | 知らないことを、知らないと言える | ⭕ |
+> | 7 | どれだけ載せるかを、使う側が決められる | ⭕ |
+>
+> #### 項目5 について — この版で埋めました
+>
+> **訂正の「選択」の段が、出荷される面に出ました。**`Runtime.findCorrectionCandidates` が**候補を返し**、`Runtime.applyCorrection` が**人が選んだ1件**を受け取って `markContested` → `resolveContested` の書き込みまでを行います。⟹ **敗者は `recall()` の候補から落ちます。**
+>
+> ⭐ **選ぶのは人です。**⛔ **mnemora は訂正の相手を自分で選びません**——`findCorrectionCandidates` は書き込みを1件もせず、LLM を1回も呼びません。
+>
+> ⚠ **この「⭕」の根拠は、repo の中で完全には閉じていません。**判定の経緯と、**何を確かめていないか**は [`docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/main/docs/roadmap.md) §7.15 に書いてあります。⛔ **「基準を満たしたから ⭕ にした」とは書いていません。**そのまま読んでください。
+>
+> #### 項目2 が「半分」である理由 — ⭐ これは未達ではなく、**決定**です
+>
+> **連想枠（`RecallQuery.association`）は既定 off で出します。**渡さない限り、連想は一切走りません。
+>
+> ⛔ **実装が無いからではありません。**機構は `@mnemora/core` に入っており、`association` を渡せば動きます。**「既定 off のまま `v1.0.0` を出す」ことを、そう決めたのです。**
+>
+> **決定の出所は [`docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/main/docs/roadmap.md) §7.12 です。**⟹ 既定を変えるかどうかは、**10万行級で測ってから判断する**という順序が決まっています（測定が先・判断が後）。
+>
+> ⟹ **連想を使いたい場合は、`recall()` に `association` を明示的に渡してください。**⚠ **そのとき知っておくべきことが2つあります。**
+>
+> 🔴 **1つ目: 規模が大きいと届きにくい。**連想のアンカー窓は既定 `anchorCount=3` で、**規模に追随しません。**【実測】1万件では、探している記憶自身のアンカーがクエリ上位3件から押し出され、**12件中5件しか上位3件に入りません**（本番既定）。⟹ **「渡せば効く」とは書けません。**[#377](https://github.com/takecchi/mnemora/issues/377)
+>
+> 🔴 **2つ目: 回避策も、`anchorCount` だけを上げても効かない。**アンカーは `RecallQuery.limit`（既定 10）の**内側に入った候補からしか**取られないので、**`limit` が `anchorCount` の天井になります。**実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` です。⟹ **`limit` を超えた分は「届きにくい」のではなく、必ず起点になりません。**【実測】`limit=10` のまま `anchorCount=40` にしてもアンカーは **10** で止まり、`limit=40 / anchorCount=40` では 40 になります。**裾野を広げたいなら `limit` と `anchorCount` の両方**を上げてください。⚠ ただし `limit` を上げると段1の取り込み幅も一緒に広がるので、**費用は連想枠だけの話では済みません。**詳細は [docs/recall.md](https://github.com/takecchi/mnemora/blob/main/docs/recall.md) §9.2
+>
+> ### ⚠ 既知の弱さ（隠さずに書きます）
+>
+> これは「バグ報告が無い」という意味ではなく、**私たちが知っていて、まだ直していないもの**です。
+>
+> ⭐ **並べる順に意味があります。上ほど「踏む確率が高く、しかも自分では気づきにくい」ものです。**上5つは**使っていれば踏み**、⛔ **踏んでも「弱さ」の顔をしません**（「予算を絞ったのに減らない」「ただ遅い」「毎回出ているので異常に見えない」「ただ行が増えるだけ」）。下2つは運用中に壊れるものではなく、**採用を決めるときに知っておくべきこと**です。
+>
+> | | 中身 |
+> |---|---|
+> | **目次帯が返却量の大半を占める** | 【実測】既定（`limit=10`・`budget` 未指定）で、返る文字数の **90.7%** が目次帯（`IndexBand`）です。⚠ **`budget` では1文字も削れません**——予算が縛るのは `memories` tier だけです。削るなら `digestBandLimit` を使ってください。[#413](https://github.com/takecchi/mnemora/issues/413) |
+> | **テナント全体の `recall()` は10万行で重い** | `recall()` は `aggregateScope` を無条件に呼びます。【実測】10万行・1テナントで **165.1ms**。`ctx.subjectId` を指定すると **1.3〜4.0ms**（**約41倍**の差）。⚠ **`ctx.subjectId` は任意フィールドで、意識して足さないと付きません。**詳細は [docs/recall.md](https://github.com/takecchi/mnemora/blob/main/docs/recall.md) |
+> | **`superseded` / `contested` になった記憶は、製品の口では減らせません** | 統合（`consolidate`）や再抽出（`reextract`）で置き換えられた記憶は `superseded` になりますが、**アーカイブ掃引（`sweepArchive`）はこれを一度も対象にしません**——掃くのは `active` だけです。⛔ **そして公開 API には、それらを一覧する口も、行を消す口もありません。**`forget` で状態は倒せますが、**`purge` は本文をトゥームストーンで上書きするだけで、行そのものは残ります。**⟹ **長期運用で行数を減らしたくなったら、生 SQL が要ります。**⚠ **recall の結果は汚れません**（候補生成の status ゲートに入らないため）——効いてくるのは**行数が増えたとき**で、その先は上の「テナント全体の `recall()` は10万行で重い」と同じ話になります。⭐ **これは隠れた欠陥ではなく、[ADR 0114](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0114-archive-sweep-for-decayed-memories.md) が「引き受けた負債」として帳簿に載せたものです。**回収経路の棚卸し・累積の実測・**確かめていないこと**は [#465](https://github.com/takecchi/mnemora/issues/465) にあります |
+> | **近似索引が完全一致を取りこぼしうる** | HNSW は近似索引なので、クエリと完全一致する記憶を候補窓に入れられないことがあります。【実測】10万行で **62件中13件が実損**、うち2件は1位を失います。⭕ **取りこぼした可能性は `omitted` の `ann_unreached` として名乗ります**（`v0.3.0` で、窓が満杯のときにも鳴るようになりました）⟹ **黙って落ちることはありません。**⛔ **取りこぼしそのものは残っています。**⚠ **その名乗りをどう読むかは、次の行と必ず一緒に読んでください。**[#361](https://github.com/takecchi/mnemora/issues/361) |
+> | **`ann_unreached` は「今回取りこぼした」の合図ではありません** | この札の意味は「**近似索引が scope の候補を拾いきったとは言えない**」であって、「**取りこぼした**」ではありません。🔴 **そして、規模のあるテナントでは構造上ほぼ毎回立ちます。**近似検索が見る窓は `kPrime`（= `limit` × `overFetchFactor`、既定 **40**）件までなので、**scope 内の候補がそれを超えていれば、実際に何が起きたかに関わらず必ず立ちます**（算数の話で、索引の出来とは無関係です）。【実測】1万件のテナントで **12回の `recall()` すべてで立ち、実際に取りこぼしていたのは1回**でした。対照に候補30件（40 以下）のテナントでは **3回とも立ちませんでした。**⟹ ⛔ **個別の異常の合図としては読めません。**「このテナントでは近似検索の窓が scope 全体に届いていない」という**常態の表示**として読んでください。⚠ **窓を広げたい場合は `limit` か `overFetchFactor` を上げることになりますが、それは取ってくる量を増やすことでもあります。**[#361](https://github.com/takecchi/mnemora/issues/361) |
+> | **実 API に一度も当てていない** | CI に OpenAI / Anthropic の鍵が無いため、**適合テストは実 API を一度も叩いていません**。想起の質も回答の質も「記録した実 API の応答の再生」で測っています——擬似物ではありませんが、**記録した時点のもの**です。⭕ **回答の質については、この版で実 API に1回だけ当てて記録を取りました**（[ADR 0233](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0233-answer-quality-measured-once-against-the-real-api.md)）。⛔ **それは「1回測った」であって、適合テストが実 API を叩くようになった、という意味ではありません。**🔴 **この未検証は、想起の質だけの話ではありません**——**埋め込みの入力が上限（OpenAI は 8191 トークン）を超えたときに何が起きるかも、確かめられていません。**`@mnemora/openai` の `embed()` は**入力長を一切検査せず**、そのまま OpenAI へ送ります。⟹ **安全は「サーバ側が拒否してくれる」という前提に乗っており、その前提はこのリポジトリで一度も検算されていません**（[ADR 0090](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0090-embedding-input-token-limit.md) §7 が逐語で「**実 API で確かめていない**」と書いています）。⚠ **前提が正しければ例外で鳴りますが、誤っていれば正常な顔のベクトルが返り、成功と見分けがつきません。**[#142](https://github.com/takecchi/mnemora/issues/142) |
+> | **`LLMProvider` の適合テストが存在しない** | `@mnemora/testkit` に `describeLLMProviderConformance` は**ありません**。⟹ `@mnemora/anthropic` と `@mnemora/openai` の `LLMProvider` は、**契約そのものを検査する歯を持たないまま publish されています**（`@mnemora/anthropic` は publish 対象6本の1つです）。`provider-parity.test.ts` は2実装を突き合わせる歯であって、契約の歯ではありません。[#389](https://github.com/takecchi/mnemora/issues/389) |
+>
+> ⚠ **連想枠（`association`）を使う場合は、ここにもう2つ弱さがあります**——アンカー窓と `limit` の天井です。上の「項目2 が『半分』である理由」に書きました。⛔ **この表に再掲していないのは、隠すためではなく、回避策を説明している場所から離さないためです。**
+>
+> ### 何を「やらない」と決めているか
+>
+> 独自 LLM / 独自 Embedding Model の学習、GPU 基盤の構築、LangGraph の代替、汎用 Workflow Engine、完全な AGI シミュレーション、人間の脳の忠実な再現、複雑な感情シミュレーション、3D Avatar、Voice Interface。
+>
+> 出所と理由は [`docs/north-star.md`](https://github.com/takecchi/mnemora/blob/main/docs/north-star.md)「やらないこと」に在ります。
