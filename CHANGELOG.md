@@ -46,10 +46,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 **この節は `v0.3.0` からの差分を対象とする。**⭐ **`v0.2.0` → `v0.3.0` の分は、下の `[0.3.0]` 節に在る**
 ——⛔ **この節へ混ぜない。**⟹ **この節に並ぶものは、1件も出荷されていない。**
 
-⭐ **数えた基準を明記する。**この節は `v0.3.0` … **`e561f4c`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v0.3.0` … **`434e663`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
-増えただけである。**読む人は `git log --oneline e561f4c..origin/main` で、その増分を自分で見られる。
+増えただけである。**読む人は `git log --oneline 434e663..origin/main` で、その増分を自分で見られる。
 🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**——書いた瞬間、次の1件が着地した時点で腐る
 （[#433](https://github.com/takecchi/mnemora/issues/433) /
@@ -61,7 +61,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⭐ **「`v1.0.0` へ上げるときに何が壊れるか」の正本は
 [docs/migration-v1.md](./docs/migration-v1.md) である**——**あちらは世代ごとに分けてある。**
 下の「変更（破壊的）」の各項目には、**同文書の番号付き一覧での番号を添えてある。**
-⚠ **この節が数えた範囲（`e561f4c` まで）より後に足された番号は、当然ここには無い。**
+⚠ **この節が数えた範囲（`434e663` まで）より後に足された番号は、当然ここには無い。**
 ⟹ ⭐ **数え直すときは、あちらの一覧を数えること。**
 
 ### 変更（破壊的）
@@ -91,6 +91,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   （`@mnemora/testkit`）。⟹ 項目 **15**
   （[#515](https://github.com/takecchi/mnemora/issues/515) /
   [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md)、PR #524）
+- **`Runtime` に必須メソッド `applyCorrection` が増えた**（`@mnemora/core`）。
+  `findCorrectionCandidates` が返した候補の中から**人が選んだ1件**を受け取り、
+  `markContested` → `resolveContested` の書き込みまでを1つの口にまとめる。⟹ 項目 **16**
+  （[#369](https://github.com/takecchi/mnemora/issues/369) /
+  [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)、PR #537）
 
 ⚠ **移行手順は複製しない**——直し方は
 [docs/migration-v1.md](./docs/migration-v1.md) の各項目を見ること。
@@ -110,6 +115,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`Runtime.findCorrectionCandidates`** — 訂正の相手の**候補を返す**口。
   ⛔ **mnemora は選ばない。書き込みを1件もせず、LLM を1回も呼ばない**
   （[ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)、PR #517）
+- **`Runtime.applyCorrection`** — 訂正の**選択**の段を、出荷される面へ持ち上げた口。
+  ⭐ **選ぶのは人である**——候補を返す `findCorrectionCandidates` と、書き込む
+  `markContested`/`resolveContested` のあいだを繋ぐ
+  （[ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)、PR #537）
 - **`CassetteRecorder.lookupLLM` / `lookupEmbedding`**（`@mnemora/testkit`）— 記録した
   カセットを照会する口。⭕ **追加のみで後方互換**
   （[ADR 0233](./docs/decisions/0233-answer-quality-measured-once-against-the-real-api.md)、PR #514）
