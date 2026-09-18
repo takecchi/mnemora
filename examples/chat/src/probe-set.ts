@@ -258,12 +258,17 @@ export function buildProbeSetConversation(
 ): ProbeUtterance[] {
   const utterances: ProbeUtterance[] = [];
   for (const probe of PROBES) {
-    utterances.push({
-      externalId: goldExternalId(probe.id),
-      text: probe.fact,
-      kind: "gold",
-      probeId: probe.id,
-    });
+    // ⛔ 意図的な変異（Issue #497 の陽性対照の観測）。この commit は CI を赤くするためのものであり、
+    // 次の commit で必ず戻す。probe "family" のときだけ gold 発話を push しない
+    // （ADR 0227 が手元で行った変異と同じもの）。distractor と haystack はそのまま。
+    if (probe.id !== "family") {
+      utterances.push({
+        externalId: goldExternalId(probe.id),
+        text: probe.fact,
+        kind: "gold",
+        probeId: probe.id,
+      });
+    }
     utterances.push({
       externalId: distractorExternalId(probe.id),
       text: probe.distractor,
