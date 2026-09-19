@@ -46,10 +46,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 **この節は `v0.4.0` からの差分を対象とする。**⭐ **`v0.3.0` → `v0.4.0` の分は、下の `[0.4.0]` 節に在る**
 ——⛔ **この節へ混ぜない。**⟹ **この節に並ぶものは、1件も出荷されていない。**
 
-⭐ **数えた基準を明記する。**この節は `v0.4.0` … **`420e0f4`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v0.4.0` … **`f298d9b`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
-増えただけである。**読む人は `git log --oneline 420e0f4..origin/main` で、その増分を自分で見られる。
+増えただけである。**読む人は `git log --oneline f298d9b..origin/main` で、その増分を自分で見られる。
 🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**——書いた瞬間、次の1件が着地した時点で腐る
 （[#433](https://github.com/takecchi/mnemora/issues/433) /
@@ -58,21 +58,45 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⚠ **この pin は `scripts/release-candidates.mjs` の入力でもある**
 （[ADR 0214](./docs/decisions/0214-release-candidates-lists-not-judges.md) 決定5。⛔ 道具は書き換えない）。
 
-### ⭐ この pin の時点で、載せる変更は見つかっていない
+### Breaking
 
-**【実測 2026-09-19、`origin/main` = `420e0f4`】**
+⛔ **件数をここに書かない**——`v1.0.0` の tag はまだ切られておらず、`main` が動けば増えるためである。
+⟹ **数えるなら、下の項目そのものを数えること。**
+⚠ **正本は [docs/migration-v1.md](./docs/migration-v1.md) の番号付き一覧であり、下の表はその写しである**
+——**`#` 欄はあちらの通し番号で、この表の中での連番ではない。**
 
-```
-$ git rev-list --count v0.4.0..420e0f4                                  → 1
-$ git diff --stat v0.4.0..420e0f4 -- scripts/__snapshots__/public-api/  → （差分なし）
-$ git diff --stat v0.4.0..420e0f4 -- packages/postgres/migrations/      → （差分なし）
-```
+🔴 **この世代は、`[0.4.0]` までと壊れ方の種類が違う**——**型ではなく実行時に壊れる。**
+【実測 2026-09-19】`git diff --stat v0.4.0..f298d9b -- scripts/__snapshots__/public-api/` は
+**差分を返さない** ⟹ ⭕ **公開 API の型は1バイトも動いていない。**
+⚠ それでも破壊的として数えるのは、移行ガイドの定義が逐語で
+「**既存の利用者のコードが型検査 *または実行時* に壊れる変更**」だからである。
 
-範囲内の1件は `test(scripts)`（PR #546）であり、**このファイルが載せると決めている
-「利用者に見える変更」に当たらない**（上の「何を載せるか」／
-[ADR 0243](./docs/decisions/0243-changelog-lists-publish-targets-only.md)）。
+| # | 変更 | 誰が影響を受けるか | 根拠 |
+|---|---|---|---|
+| 18 | `LocalEmbeddingProvider` のコンストラクタが、**既定と異なる `repo` を `modelId` 無しで渡された宣言**を `throw` で落とすようになった（`@mnemora/local-embedding`） | 🔴 **`repo` を既定以外にし、かつ `modelId` を渡していなかった人だけ。**⭕ `repo` を渡していないなら影響なし。⚠ **該当していた人は元から壊れていた側である**——`repo` は `space.model` に反映されず、別モデルのベクトルが同じ space へ静かに混ざっていた | [ADR 0247](./docs/decisions/0247-local-embedding-repo-model-id-declaration-guard.md) / [#142](https://github.com/takecchi/mnemora/issues/142)（PR #550） |
 
-⛔ **これを「`v1.0.0` には何も載らない」と読まないこと。**⭐ **pin より後は、まだ数えていない。**
+⚠ **移行手順は複製しない**——直し方は [docs/migration-v1.md](./docs/migration-v1.md) の項目 **18** を見ること。
+⛔ **これを「#142 が解決した」と読まないこと**——#142 は2件を名指ししており、
+**「実 API に一度も当てていない」ほうは手つかずで残っている**（同 Issue はいまも OPEN）。
+
+### Changed（後方互換だが挙動が変わりうる）
+
+- **連想枠（段3.5）の席が、減衰を含む順位で埋まるようになった**（`@mnemora/core`）。
+  順位キーは `hit.similarity * score.total`（＝ `anchorSimilarity × decay × tagMatch × freshness × strength`）で、
+  `maxCount` を超える候補が在るときに**席に座る記憶が変わる**
+  （[ADR 0246](./docs/decisions/0246-association-rank-includes-decay.md) /
+  [#402](https://github.com/takecchi/mnemora/issues/402)、PR #549）。
+
+  ⚠ **以下は [ADR 0246](./docs/decisions/0246-association-rank-includes-decay.md)「誰が壊れうるか」からの逐語である**
+  ——**この節の書き手はこの変更を作っておらず、自分で測り直してもいない**【受】:
+
+  > **`RecallQuery.association` を渡している呼び手の、返る記憶の顔ぶれが変わりうる。**
+  > … **型は1バイトも変わらない。**新しい欄も新しいつまみも無い ⟹ **破壊的変更ではない。**
+  > … **既定 off なので、`association` を渡していない呼び手は1バイトも影響を受けない。**
+
+---
+
+⛔ **この節に並ぶものが全部だとは読まないこと。**⭐ **pin より後は、まだ数えていない。**
 ⟹ `v1.0.0` を切る側は、**切る直前にこの pin から数え直すこと**
 （道具は `node scripts/release-candidates.mjs --since v0.4.0`。
 ⚠ **`--since` を省くと最新リリースの tag が入るので、この pin と一致するとは限らない**）。
