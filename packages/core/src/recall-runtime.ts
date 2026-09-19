@@ -1148,7 +1148,7 @@ export async function runRecall(
             });
           }
         }
-        // アンカーとの類似度降順に並べ、maxCount 件まで採る（docs/recall.md §9.2 手順6）。
+        // アンカーとの類似度降順に並べる（docs/recall.md §9.2 手順6 の土台）。
         //
         // ⚠ **同点（similarity が完全一致）のときの並びは、意図して明示のタイブレークを
         // 足さず、`vectorStore.search()` が返す順序にそのまま委ねている**（Issue #339 /
@@ -1167,43 +1167,59 @@ export async function runRecall(
         // `lexical` チャンネルの adapter 側の tie-break が不完全なままなので
         // 多層防御を足したが、こちらは Memory を取得する前で `occurredAt`/`recordedAt`
         // を持たず、同じ多層防御を足すには追加の DB 往復が要る。ADR 0170「採らなかった案」）。
+        //
+        // ⭐ Issue #402（正典項目4「使われない記憶が、静かに遠ざかる」）: この枠は席
+        // （`maxCount`）をアンカー類似度だけで埋めていたため、decay/strength/freshness/
+        // tagMatch が席の取り合いに一切効いていなかった。**この sort 自体は変えない**
+        // ——(a) 下の過取得の前置きを決める順序であり、(b) 上のコメントの通り同点時に
+        // adapter の順序へ委ねる ADR 0170 の規律の土台でもあるからである。**席をどう
+        // 埋めるかは、この sort の"後"で決める**（下）。
         associationHits.sort((a, b) => b.similarity - a.similarity);
-        const selectedHits = associationHits.slice(0, associationQuery.maxCount);
-        // maxCount で切り捨てた分を over_limit として名乗る（Issue #375 / ADR 0188）。
-        // 段2の `passed.slice(limit)`（上、`stage: "rescore"`）と同じ形——ここまでの
-        // `associationHits` は既に忘却/validAt ゲート・除外集合・minSimilarity を
-        // 通過し、類似度降順に並び終えた「連想枠の候補集合」そのものであり、この
-        // slice は DB へ戻って何かを問い合わせ直すものではない。⟹ 捨てた件数は
-        // JS 側で既に確定しており、`countKind: "exact"`（段2の `rescoreCountKind` が
-        // `scored`（全数）から出るのと同じ理由）。
-        // ⚠ 直前の `slice` を境に選ばれなかった側だけを数える——`selectedHits` 側は
-        // この後さらに多層防御（subjectId/period/excludeKinds/両ゲート）を通るが、
-        // それは「一度選んだのに落ちる」既存の負債であり本 PR の射程外（下の
-        // `survivesValidityGate`/`survivesDecayGate` 呼び出し直前のコメントが、
-        // その分を数えない理由を説明している。二重計上を避けるため、ここでは触れない）。
-        const overLimitAssociationHits = associationHits.slice(associationQuery.maxCount);
-        if (overLimitAssociationHits.length > 0) {
-          omitted.push({
-            kind: "over_limit",
-            stage: "association",
-            count: overLimitAssociationHits.length,
-            countKind: "exact",
-          });
-        }
+        // 席を埋める前に、まず過取得する——段1の kPrime と同じ理由・同じ係数
+        // （`overFetchFactor`、既に上のスコープに在る）で、新しい係数は定義しない。
+        // `Math.max` で下限を `maxCount` に留めるのは、`overFetchFactor < 1` を
+        // 渡されたときに返る件数が減る退行を防ぐため。
+        const rankFetchCount = Math.max(
+          associationQuery.maxCount,
+          Math.round(associationQuery.maxCount * overFetchFactor),
+        );
+        const rankFetchHits = associationHits.slice(0, rankFetchCount);
         const associationMemories =
-          selectedHits.length > 0
+          rankFetchHits.length > 0
             ? await deps.memoryStore.getMany(
                 ctx,
-                selectedHits.map((h) => h.memoryId),
+                rankFetchHits.map((h) => h.memoryId),
               )
             : [];
         const associationMemoriesById = new Map(associationMemories.map((m) => [m.id, m]));
-        for (const hit of selectedHits) {
+        // ⭐ Issue #402: 席は「アンカー類似度 × decay × tagMatch × freshness × strength」の
+        // 順位で埋める。`rankedCandidates` は「多層防御（下）を生き延び、順位が組める」候補
+        // だけを持つ——`hit.similarity`（この段の錨との近さ）と `score.total`（下で計算する
+        // decay/tagMatch/freshness/strength の合成）を掛けた値を順位キーにする。
+        const rankedCandidates: {
+          hit: (typeof rankFetchHits)[number];
+          memory: Memory;
+          score: ScoreBreakdown;
+          rankKey: number;
+        }[] = [];
+        for (const hit of rankFetchHits) {
           const memory = associationMemoriesById.get(hit.memoryId);
-          if (!memory) continue; // getMany は存在しない/クロステナントの id を静かに落とす契約。
+          // getMany は存在しない/クロステナントの id を静かに落とす契約。スコアを
+          // 組めない（順位キーが作れない）ので、この候補は順位にも載せない（Issue #402）。
+          if (!memory) continue;
           // 多層防御（段1の後で withinLimit を組み立てるのと同じ理由、ADR 0034/0056/0059）:
           // VectorFilter の各フィールドは adapter が実際に適用しなければならない契約だが、
-          // ここでも改めて見る。
+          // ここでも改めて見る。述語も順番も変えていない。
+          //
+          // ⚠ **ただし、この防御が「席が決まった後」から「席が決まる前」へ移ったことの
+          // 副作用が1つある**（Issue #402 の修理で、対象が旧 `selectedHits`（maxCount 件）
+          // から `rankFetchHits`（過取得した件数）へ広がったため）。修理前は、ここで
+          // 落ちた候補の席は**空いたまま**返っていた（「一度選んだのに落ちる」負債）。
+          // 修理後は席が確定するのがこのループの後なので、**落ちた分は別の候補が埋める。**
+          // ⟹ 連想枠が返す件数が、修理前より増えることがある（`maxCount` は超えない）。
+          // ⛔ **これを「負債を返した」とは書かない**——この防御が実際に落とすのは
+          // adapter が ADR 0034 の契約を破ったときだけであり（下のコメント）、その場合に
+          // 何件増えるかは**測っていない。**
           if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
           if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
@@ -1255,20 +1271,77 @@ export async function runRecall(
             halfLifeHours: memory.halfLifeHours,
             ...decayScoringExtras(memory),
           });
+          // ⭐ Issue #402: 席の取り合いは `hit.similarity`（アンカーとの近さ）と
+          // `score.total`（decay/tagMatch/freshness/strength の合成）を掛けた値で決める。
+          // **この掛け算の結果は `score`（返り値の `ScoreBreakdown`）には一切出さない**
+          // ——上のコメントの通り、`score.similarity` を偽ることは禁じられている。
+          // 掛けた値を保つのはこのローカルな `rankKey` だけであり、下で計算済みの
+          // `score` をそのまま再利用する（同じ `now` で二度計算しない）。
+          rankedCandidates.push({ hit, memory, score, rankKey: hit.similarity * score.total });
+        }
+        // 順位キー（similarity × score.total）で並べ替え、maxCount 件だけ席を埋める。
+        // `Array.prototype.sort` は安定——同点は `rankFetchHits` の順（アンカー類似度
+        // 降順、同点はさらに adapter の順序、上のコメントの通り）を保つ。decay が高い・
+        // 最近強化された記憶が先に座り、使われていない記憶は decay が効いて後ろへ
+        // 回る——これが正典項目4をこの枠にも適用したところである。
+        rankedCandidates.sort((a, b) => b.rankKey - a.rankKey);
+        const selectedCandidates = rankedCandidates.slice(0, associationQuery.maxCount);
+        // 席に着けなかった分を over_limit として名乗る（Issue #375 / ADR 0188）。
+        // 段2の `passed.slice(limit)`（上、`stage: "rescore"`）と同じ形——`associationHits`
+        // は既に忘却/validAt ゲート・除外集合・minSimilarity を通過した「連想枠の候補集合」
+        // そのものであり、ここは DB へ戻って何かを問い合わせ直すものではない。⟹ 捨てた
+        // 件数は JS 側で既に確定しており、`countKind: "exact"`（段2の `rescoreCountKind`
+        // が `scored`（全数）から出るのと同じ理由）。
+        //
+        // 🔴 **Issue #402 の修理で、この数を「`associationHits.slice(maxCount)` の長さ」
+        // （＝類似度順で maxCount 位より後ろ）のままにできなくなった。**席を
+        // `similarity × score.total` の順位で埋めるようになったので、**類似度順では
+        // maxCount 位より後ろに居た候補が席に着くことがある**——その形のまま数えると、
+        // **返した記憶を「席に着けなかった」と名乗る**ことになる。これは ADR 0203 が
+        // `below_threshold` について閉じた穴と同族である（⚠ `over_limit` は memoryId を
+        // 持たないので個体単位では検出できない。だからこそ、数え方の側で閉じる）。
+        //
+        // ⟹ **数えるのは次の2つの和である**:
+        //   (a) 過取得の窓の外に居た候補（`associationHits.length - rankFetchHits.length`）
+        //       ——一度も順位付けの土俵に上がらなかった分。
+        //   (b) 土俵に上がって席を競り負けた分（`rankedCandidates.length -
+        //       selectedCandidates.length`）。
+        // ⛔ **多層防御（上の `survivesValidityGate`/`survivesDecayGate` ほか）で落ちた分は
+        // どちらにも入らない。**その分は段5の `aggregateScope` が `filtered(...)` として
+        // 数えており（Issue #329 / ADR 0173）、ここで足すと二重計上になる
+        // （ADR 0172 決めたこと3 と同じ線）。
+        // ⚠ **多層防御が1件も落とさない通常の場合、この和は修理前と同じ値になる**
+        // ——`(N - F) + (F - maxCount) = N - maxCount`。
+        const overLimitAssociationCount =
+          associationHits.length -
+          rankFetchHits.length +
+          (rankedCandidates.length - selectedCandidates.length);
+        if (overLimitAssociationCount > 0) {
+          omitted.push({
+            kind: "over_limit",
+            stage: "association",
+            count: overLimitAssociationCount,
+            countKind: "exact",
+          });
+        }
+        for (const candidate of selectedCandidates) {
           associationUnits.push({
             members: [
               {
-                memory,
+                memory: candidate.memory,
                 retrievedVia: "association" as const,
-                associationOf: hit.anchorId,
-                score,
+                associationOf: candidate.hit.anchorId,
+                score: candidate.score,
               },
             ],
             // 予算（段4）が「スコアの低いものから落とす」既定に従っても連想が
             // 最初に落ちるよう、`units`（クエリで引けた本体）の後ろに必ず並ぶ配列
-            // として連結する（下記）。rankScore 自体は連想候補どうしの順序
-            // （類似度降順で既に並んでいる）を保つためだけに使う。
-            rankScore: score.total,
+            // として連結する（下記）。rankScore はこの席順（similarity × score.total、
+            // 降順で既に並んでいる）をそのまま渡す——`units` 側（段2のスコア降順で
+            // `units.sort` が走る、上）と違い、association 側は allUnits 連結後に
+            // 再ソートされないので、この配列への push 順そのものが budget 切り詰め時に
+            // 落ちる順を決める。
+            rankScore: candidate.rankKey,
           });
         }
       }
