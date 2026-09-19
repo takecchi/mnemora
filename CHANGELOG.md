@@ -43,13 +43,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⛔ **`v1.0.0` の tag はまだ切られていない。**
 
-**この節は `v0.3.0` からの差分を対象とする。**⭐ **`v0.2.0` → `v0.3.0` の分は、下の `[0.3.0]` 節に在る**
+**この節は `v0.4.0` からの差分を対象とする。**⭐ **`v0.3.0` → `v0.4.0` の分は、下の `[0.4.0]` 節に在る**
 ——⛔ **この節へ混ぜない。**⟹ **この節に並ぶものは、1件も出荷されていない。**
 
-⭐ **数えた基準を明記する。**この節は `v0.3.0` … **`434e663`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v0.4.0` … **`420e0f4`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
-増えただけである。**読む人は `git log --oneline 434e663..origin/main` で、その増分を自分で見られる。
+増えただけである。**読む人は `git log --oneline 420e0f4..origin/main` で、その増分を自分で見られる。
 🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**——書いた瞬間、次の1件が着地した時点で腐る
 （[#433](https://github.com/takecchi/mnemora/issues/433) /
@@ -58,15 +58,74 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⚠ **この pin は `scripts/release-candidates.mjs` の入力でもある**
 （[ADR 0214](./docs/decisions/0214-release-candidates-lists-not-judges.md) 決定5。⛔ 道具は書き換えない）。
 
+### ⭐ この pin の時点で、載せる変更は見つかっていない
+
+**【実測 2026-09-19、`origin/main` = `420e0f4`】**
+
+```
+$ git rev-list --count v0.4.0..420e0f4                                  → 1
+$ git diff --stat v0.4.0..420e0f4 -- scripts/__snapshots__/public-api/  → （差分なし）
+$ git diff --stat v0.4.0..420e0f4 -- packages/postgres/migrations/      → （差分なし）
+```
+
+範囲内の1件は `test(scripts)`（PR #546）であり、**このファイルが載せると決めている
+「利用者に見える変更」に当たらない**（上の「何を載せるか」／
+[ADR 0243](./docs/decisions/0243-changelog-lists-publish-targets-only.md)）。
+
+⛔ **これを「`v1.0.0` には何も載らない」と読まないこと。**⭐ **pin より後は、まだ数えていない。**
+⟹ `v1.0.0` を切る側は、**切る直前にこの pin から数え直すこと**
+（道具は `node scripts/release-candidates.mjs --since v0.4.0`。
+⚠ **`--since` を省くと最新リリースの tag が入るので、この pin と一致するとは限らない**）。
+
 ⭐ **「`v1.0.0` へ上げるときに何が壊れるか」の正本は
 [docs/migration-v1.md](./docs/migration-v1.md) である**——**あちらは世代ごとに分けてある。**
-下の「変更（破壊的）」の各項目には、**同文書の番号付き一覧での番号を添えてある。**
-⚠ **この節が数えた範囲（`434e663` まで）より後に足された番号は、当然ここには無い。**
-⟹ ⭐ **数え直すときは、あちらの一覧を数えること。**
+🔴 **`v0.3.0` からの利用者が受ける破壊的変更は、この節ではなく下の `[0.4.0]` 節に在る**
+——**`v0.4.0` で出荷済みだからである。**
 
-### 変更（破壊的）
+⚠ **`v1.0.0` をいつ切るかは、この節を書いた時点で決まっていない。**7項目の現在地は
+[docs/roadmap.md](./docs/roadmap.md) **§7.15** に在る（⚠ **§7.13 ではない**——§7.15 が、
+§7.13 の本文を書き換えずに後から決まったことを積んでいる）。
+**Release 本文の草稿は [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。**
+⛔ **どちらも件数をここへ写さない**——正は各文書である。
 
-⛔ **どれもまだ出荷されていない。**`v0.3.0` より後に着地したものである。
+---
+
+## [0.4.0] - 2026-09-19
+
+**Release**: [v0.4.0](https://github.com/takecchi/mnemora/releases/tag/v0.4.0)（pre-release ではない）。
+**tag が指すのは `3cf2663`**、**前の版は `v0.3.0`**（`6851629`）。⟹ **この節は
+`v0.3.0` → `v0.4.0` の差分である**（【実測】`git rev-list --count v0.3.0..v0.4.0` = 27）。
+⚠ **published は `2026-09-18T20:36:04Z`（UTC）である**——**見出しの日付は JST**（この repo の
+commit の日付と同じ `+0900`）。⟹ **UTC で読むと1日ずれる。**
+
+⚠ **GitHub の Release `v0.4.0` の本文は自動生成であり、27 commit を無差別に1行ずつ
+並べたものである**【実測】（`gh release view v0.4.0 --json body -q .body | grep -c '^\* '` = 27）。
+⟹ ⭐ **分類も、docs のみ・テストのみの除外も、この節が初めて与える。**
+
+🔴 **この節は、出荷に遅れて起こしたものである。**`v0.4.0` が published された時点では、
+中身は `[1.0.0]`（未リリース）の節に置かれたままで、同節は逐語で「**この節に並ぶものは、
+1件も出荷されていない**」と名乗っていた。⚠ **同じ形の遅れは `v0.3.0` でも起きている**
+（[Issue #536](https://github.com/takecchi/mnemora/issues/536) /
+[ADR 0243](./docs/decisions/0243-changelog-lists-publish-targets-only.md)）⟹ **2回目である。**
+経緯と、3回目を防ぐ手の検討は
+[ADR 0248](./docs/decisions/0248-changelog-and-migration-guide-follow-the-release.md)。
+
+対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
+`@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
+**破壊的変更は `@mnemora/core` / `@mnemora/testkit` の2本に在る**
+（`@mnemora/postgres` / `@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding` に
+破壊的変更は無い）。
+
+**postgres 利用者へ**: 新しいマイグレーション（`0018`）が増えている。
+⟹ **`v0.3.0` から上げるなら `pnpm --filter @mnemora/postgres run migrate` が要る。**
+🔴 **「新機能を使うときだけ要る」ものではない**——理由と適用手順は
+[docs/migration-v1.md](./docs/migration-v1.md) を見ること。このファイルには複製しない。
+
+### Breaking
+
+⭐ **6件である。**⭕ **`v0.3.0` と `v0.4.0` の両端が tag で閉じているので、`main` が動いてもこの数は変わらない。**
+⚠ **正本は [docs/migration-v1.md](./docs/migration-v1.md) の番号付き一覧の 12〜17 であり、
+下の表はその写しである**——**`#` 欄はあちらの通し番号で、この表の中での連番ではない。**
 
 ⚠ **壊れ方は2つの形に分かれる。**
 
@@ -80,41 +139,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⭕ **値を読むだけ・比較するだけなら非破壊**——`never` で網羅性を検査しているコードだけが壊れる。
 ⚠ これも新しい判定基準ではない——`[0.2.0]` の Breaking 表 **4** が同じ形で数えられている。
 
-- **`Runtime` に必須メソッド `restoreSuperseded` が増えた**（`@mnemora/core`）。
-  ⟹ [docs/migration-v1.md](./docs/migration-v1.md) の項目 **12**
-  （[#369](https://github.com/takecchi/mnemora/issues/369) /
-  [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
-  ⚠ **ADR 0230 の本文だけを読むと、これが破壊的であることに気づけない**——
-  2026-09-18 に冒頭への追記で名指しされた
-- **`MemoryStoreConformanceOptions.supportsRestoreSupersededBy` が必須フィールドになった**
-  （`@mnemora/testkit`）。**12 と同じ PR #464 で入っている。**
-  ⟹ 項目 **13**（[ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)）。
-  🔴 **この項目は 2026-09-18 まで、CHANGELOG にも ADR にも一度も書かれていなかった**
-- **`Runtime` に必須メソッド `findCorrectionCandidates` が増えた**（`@mnemora/core`）。
-  ⟹ 項目 **14**（[#369](https://github.com/takecchi/mnemora/issues/369) /
-  [ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)、PR #517）
-- **`MemoryStoreConformanceOptions.supportsPreviewRestoreSupersededBy` が必須フィールドになった**
-  （`@mnemora/testkit`）。⟹ 項目 **15**
-  （[#515](https://github.com/takecchi/mnemora/issues/515) /
-  [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md)、PR #524）
-- **`Runtime` に必須メソッド `applyCorrection` が増えた**（`@mnemora/core`）。
-  `findCorrectionCandidates` が返した候補の中から**人が選んだ1件**を受け取り、
-  `markContested` → `resolveContested` の書き込みまでを1つの口にまとめる。⟹ 項目 **16**
-  （[#369](https://github.com/takecchi/mnemora/issues/369) /
-  [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)、PR #537）
-- 🔴 **`MemoryEventKind` の union に `"unsuperseded"` が増えた**（`@mnemora/core`）。
-  **12**・**13** と同じ PR #464 で入っている。⟹ 項目 **17**
-  （[ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)）。
-  ⚠ **届く経路は `EventStore` である**——`MemoryEvent.kind` は必須フィールドで、
-  `EventStore.append`/`.get`/`.list` が返す。⟹ ⭕ **`Runtime` の口からは届かない**ので、
-  **5つの動詞だけを使う利用者には影響しない。**
-  ⚠ **同じ形に対する扱いがこの repo に2つ在り、線は引かれていない**——
-  [#541](https://github.com/takecchi/mnemora/issues/541) を見ること
+| # | 変更 | 誰が影響を受けるか | 根拠 |
+|---|---|---|---|
+| 12 | `Runtime` に必須メソッド `restoreSuperseded` が増えた（`@mnemora/core`） | `Runtime` を自分で実装している側だけ。`createRuntime()` が返すものを使っているなら影響なし | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #464）。⚠ **ADR 0230 の本文だけを読むと、これが破壊的であることに気づけない**——2026-09-18 に冒頭への追記で名指しされた |
+| 13 | `MemoryStoreConformanceOptions.supportsRestoreSupersededBy` が必須フィールドになった（`@mnemora/testkit`）。**12 と同じ PR #464 で入っている** | `describeMemoryStoreConformance` を呼んでいる側だけ | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)（PR #464）。🔴 **この項目は 2026-09-18 まで、CHANGELOG にも ADR にも一度も書かれていなかった** |
+| 14 | `Runtime` に必須メソッド `findCorrectionCandidates` が増えた（`@mnemora/core`） | **12 と同じ** | [ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #517） |
+| 15 | `MemoryStoreConformanceOptions.supportsPreviewRestoreSupersededBy` が必須フィールドになった（`@mnemora/testkit`） | **13 と同じ** | [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md) / [#515](https://github.com/takecchi/mnemora/issues/515)（PR #524） |
+| 16 | `Runtime` に必須メソッド `applyCorrection` が増えた（`@mnemora/core`）。`findCorrectionCandidates` が返した候補の中から**人が選んだ1件**を受け取り、`markContested` → `resolveContested` の書き込みまでを1つの口にまとめる | **12 と同じ** | [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #537） |
+| 17 | 🔴 `MemoryEventKind` の union に `"unsuperseded"` が増えた（`@mnemora/core`）。**12・13 と同じ PR #464 で入っている** | ⚠ **届く経路は `EventStore` である**——`MemoryEvent.kind` は必須フィールドで、`EventStore.append`/`.get`/`.list` が返す。⟹ ⭕ **`Runtime` の口からは届かない**ので、**5つの動詞だけを使う利用者には影響しない。**⚠ **同じ形に対する扱いがこの repo に2つ在り、線は引かれていない**——[#541](https://github.com/takecchi/mnemora/issues/541) を見ること | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)（PR #464） |
 
 ⚠ **移行手順は複製しない**——直し方は
-[docs/migration-v1.md](./docs/migration-v1.md) の各項目を見ること。
+[docs/migration-v1.md](./docs/migration-v1.md) の同じ番号の項目を見ること。
 
-### 追加
+### Added
 
 - **`Runtime.restoreSuperseded`**（および `MemoryStore.restoreSupersededBy` — **任意**メソッド）。
   `superseded` になった Memory を `active` へ戻す**復旧口**。粒度は群単位で、
@@ -136,23 +173,6 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`CassetteRecorder.lookupLLM` / `lookupEmbedding`**（`@mnemora/testkit`）— 記録した
   カセットを照会する口。⭕ **追加のみで後方互換**
   （[ADR 0233](./docs/decisions/0233-answer-quality-measured-once-against-the-real-api.md)、PR #514）
-
-### DB
-
-- **マイグレーション `0018` が増えた。**`memory_events.kind` の CHECK 制約の許容値に
-  `unsuperseded` を足す（[ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)、PR #464）。
-  ⟹ **上げるときに `pnpm --filter @mnemora/postgres run migrate` が要る。**
-  🔴 **「新機能を使うときだけ要る」ものではない**——`Runtime.restoreSuperseded` は
-  `kind = 'unsuperseded'` の `memory_events` 行を積むので、**流さずにこの口を呼ぶと
-  CHECK 制約で書き込みが落ちる。**
-  手順は [docs/migration-v1.md](./docs/migration-v1.md)
-  「v0.3.0 → v1.0.0 で追加されたマイグレーション（`0018`）」を見ること
-
-⚠ **`v1.0.0` をいつ切るかは、この節を書いた時点で決まっていない。**7項目の現在地は
-[docs/roadmap.md](./docs/roadmap.md) **§7.15** に在る（⚠ **§7.13 ではない**——§7.15 が、
-§7.13 の本文を書き換えずに後から決まったことを積んでいる）。
-**Release 本文の草稿は [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。**
-⛔ **どちらも件数をここへ写さない**——正は各文書である。
 
 ---
 
