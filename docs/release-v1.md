@@ -25,7 +25,7 @@
 | 0.4 | `package.json` の `version` | 6本とも**同じ値**で `0.0.0` でない（**いまは `0.1.1`。これでよい**） |
 | 0.5 | 🔴 未検証のまま残るもの | **通過条件が無い。**⛔ 緑にできない項目である——当日の判断材料として読む |
 | 0.6 | 版 | Release の tag 名が**ちょうど `v1.0.0`**、pre-release チェックを**入れない** |
-| 0.7 | いま出ている版 | **通過条件は無い。**⛔ **版をここに書かない**——Release が出るたびに腐る（版の権威は Release の tag である。[ADR 0070](./decisions/0070-version-comes-from-the-release-tag.md)）。⟹ **当日その場で `gh release list --limit 5` と、publish 対象6本の `npm view @mnemora/<pkg> dist-tags` を引くこと。**⚠ **`v1.0.0` は `v0.1.9` の次ではない**——間に `v0.2.0`・`v0.3.0` が出ている——当日の判断材料として読む |
+| 0.7 | いま出ている版 | **通過条件は無い。**⛔ **版をここに書かない**——Release が出るたびに腐る（版の権威は Release の tag である。[ADR 0070](./decisions/0070-version-comes-from-the-release-tag.md)）。⟹ **当日その場で `gh release list --limit 5` と、publish 対象6本の `npm view @mnemora/<pkg> dist-tags` を引くこと。**⚠ **`v1.0.0` は `v0.1.9` の次ではない**——間に版がいくつか出ている（⛔ **何が出ているかもここに書かない**。0.7 の手順で引くこと。[ADR 0249](./decisions/0249-release-day-procedure-holds-no-rotting-facts.md)）——当日の判断材料として読む |
 | 0.8 | `CHANGELOG.md` の `[1.0.0]` 節 | **人間が読んで、`origin/main` の現在地に対して古くないと判断したこと**（⛔ コマンドでは判定できない。⚠ **`packages/*/src` の差分を数えると、マイグレーションの追加のように `src` を触らない変更を取りこぼす**） |
 | 0.9 | `docs/release-notes-v1.0.0.md` | **`origin/main` に在り**、人間が読んで**いま切る tag と合っている**と判断したこと（⛔ 0.8 とは別物。⚠ **GitHub Release の本文に貼る元がこれである**） |
 
@@ -198,6 +198,12 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 ⟹ **git 上の `0.1.1` と npm 上の `0.2.0` が食い違っているが、これは上のとおり正常である。**
 ⛔ **この食い違いを見て `package.json` を `0.2.0` へ揃えようとしないこと。**
 
+> **⚠ 訂正（2026-09-19 追記。⛔ 上の本文は書き換えていない）。**
+> 【実測 2026-09-19、`main` = `420e0f4`】**npm の `latest` は publish 対象6本とも `0.4.0` である。**
+> ⟹ **上の `0.2.0` は 2026-09-16 の値である。**⭐ **論旨は変わらない**——
+> **git 上の値と npm 上の最新版が食い違うのは正常**であり、それは `0.2.0` でも `0.4.0` でも同じである。
+> ⛔ **版そのものをここへ書き足さないこと**（§0.7 の訂正と同じ理由）。
+
 ### 0.5 🔴 未検証のまま残るもの（⛔ ここでは緑にできない項目である）
 
 **⚠ 0.1〜0.4 がすべて通っても、次の3つは何も確かめられていない。**
@@ -313,9 +319,30 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 それは §7.2 の定義を満たしたという意味ではない。**このリストが見ているのは
 **「出す仕掛けが壊れていないか」だけ**である。
 
-### 0.7 ⚠ いま出ている版は `v0.2.0` である（通過条件は無い。読むだけ）
+### 0.7 いま出ている版を、その場で引く（通過条件は無い。読むだけ）
 
-**【実測】2026-09-16、この器で確かめた事実だけを書く。**
+🔴 **⛔ この節に「いま出ている版は vX である」と書かないこと。**⟹ **当日その場で引くこと。**
+
+```bash
+# (a) GitHub 側の最新 Release
+gh release list --limit 5
+
+# (b) npm 側の latest（publish 対象6本。⛔ 1本だけ見て代表させない）
+node -e 'import("./scripts/publish-targets.mjs").then(m=>{for(const p of m.PUBLISH_TARGETS)console.log(p.name)})' \
+  | xargs -I{} sh -c 'printf "%-28s " {}; npm view {} dist-tags --json'
+```
+
+**読み方**: **(a) の最新 tag と (b) の `latest` が揃っているか**を見る。⟹ **次に `v1.0.0` を切れば `latest` は `1.0.0` へ上がる**（dist-tag の決まり方は §1.5 / §1.6。**経路は版が何であっても変わらない**）。
+⚠ **`v1.0.0` は `v0.1.9` の次ではない**——間に版がいくつか出ている。**何が出ているかも (a) で見ること。**
+
+> **⚠ 訂正（2026-09-19 追記。⛔ 下の本文は書き換えていない）。**
+> **この節は、書かれてから2回腐った。**
+> 【実測 2026-09-19、`main` = `420e0f4`】**`v0.3.0`（2026-09-17）と `v0.4.0`（2026-09-18T20:36:04Z、tag が指すのは `3cf2663`）が出ている。**
+> ⟹ **下の表の「最新は `v0.2.0`」「6本とも `latest: 0.2.0`」は、いずれも当時の値である。**
+> 🔴 **腐ったのは値ではなく形である**——**「いま出ている版」を本文に書けば、Release が出るたびに必ず腐る。**
+> ⟹ **上の手順へ置き換えた。**⛔ **下の表は 2026-09-16 の【実測】の記録として残す**（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」/ [ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)、[ADR 0249](./decisions/0249-release-day-procedure-holds-no-rotting-facts.md)）。
+
+**【実測】2026-09-16、この器で確かめた事実だけを書く（⚠ 当時の記録である。上の訂正を先に読むこと）。**
 
 | 引いたもの | 返ってきた値 |
 |---|---|
@@ -348,15 +375,29 @@ tag から `scripts/apply-release-version.mjs` が runner の作業ツリー上�
 # ⚠ (a) も (b) も origin/main の中身を見る。手元の作業ツリーを読まない
 git fetch origin main
 
-# (a) [1.0.0] 節が、どの sha を基準に書かれていると宣言しているか
-git show origin/main:CHANGELOG.md | grep -n '実測' | head
+# (a)(b)(c) をまとめて出す。⛔ 基準 sha を手で grep しないこと（下の「⚠ 手で拾わない」）
+node scripts/release-candidates.mjs
 
-# (b) いまの origin/main の先頭
+# (b) だけを単独で見たいとき
 git rev-parse origin/main
-
-# (c) (a) の sha から (b) までに何が入ったか
-git log --oneline <a の sha>..origin/main
 ```
+
+#### ⚠ 手で拾わない —— 基準 sha の読み取りは `release-candidates.mjs` が持っている
+
+> **⚠ 訂正（2026-09-19 追記。⛔ 下の本文は書き換えていない）。**
+> **この手順の (a) は、かつて `git show origin/main:CHANGELOG.md | grep -n '実測' | head` だった。**
+> 🔴 **【実測 2026-09-19、`main` = `420e0f4`】そのまま打つと、基準 sha を1行も拾えない**
+> ——返るのは `[0.3.0]` / `[0.2.0]` 節の別の数字であり、`grep -c` で基準 sha を数えると **0** である。
+> **原因**: [PR #540](https://github.com/takecchi/mnemora/pull/540) が `[1.0.0]` 節の pin 行を書き直したとき、
+> **その行に `【実測】` を付けなかった。**⟹ **手順が、本文の書き方に依存していた。**
+> 🔴 **`grep` のパターンを直すだけでは、次に誰かが書き方を変えたらまた壊れる。**
+> ⟹ ⭐ **読み取りを持っている場所へ一本化した**——`scripts/release-candidates-lib.mjs` の
+> `extractChangelogBaseSha` が唯一の抽出器であり、**`scripts/__tests__/release-candidates-lib.test.mjs` が
+> それを歯で縛っている。**⟹ **書き方が変わったら直すのは1箇所で、そこには歯が在る。**
+> ⚠ **読み取れなかったときは黙らない**——道具は逐語「**`CHANGELOG.md` から基準 sha を読み取れなかった**」と出力する
+> （【読んで確かめた】`scripts/release-candidates.mjs` の `describeChangelogFreshness()`）。
+> ⟹ **その出力が出たら、それ自体がこの項目の不通過である。**
+> 詳細は [ADR 0249](./decisions/0249-release-day-procedure-holds-no-rotting-facts.md)。
 
 ⚠ **(a) が素の `grep ... CHANGELOG.md` ではなく `git show origin/main:CHANGELOG.md` なのは、
 手元の作業ツリーではなく `origin/main` の中身を見るためである。**
@@ -371,7 +412,7 @@ git log --oneline <a の sha>..origin/main
 
 **(a) と (b) が離れていたら、(c) に並ぶものが `[1.0.0]` 節に反映されているかを人間が見る。**
 
-#### ⭐ (a)(b)(c) を1コマンドで出す（**当日の正規経路**、[ADR 0214](./decisions/0214-release-candidates-lists-not-judges.md)）
+#### ⭐ (a)(b)(c) を1コマンドで出す（⛔ **正本ではない。門でもない**。[ADR 0214](./decisions/0214-release-candidates-lists-not-judges.md)）
 
 ```bash
 node scripts/release-candidates.mjs
@@ -412,6 +453,21 @@ node scripts/release-candidates.mjs
 
 ⟹ **数え方の問題ではなく、「利用者に見えるか」で判断すること**
 （`CHANGELOG.md`「何を載せるか」・[ADR 0169](./decisions/0169-changelog-hand-curated.md)）。
+
+#### ⭐ 破壊的変更の正本は `docs/migration-v1.md` である（2026-09-19 追記）
+
+⛔ **`CHANGELOG.md` を破壊的変更の正本として読まないこと。**
+**一覧と通し番号を持っているのは [docs/migration-v1.md](./migration-v1.md) の番号付き一覧であり、
+`CHANGELOG.md` の各節はその写しである。**【現物】同文書自身が逐語でこう書いている——
+「⭐ **一覧と根拠 ADR は、この文書の番号付きの項目そのものが正本である。**」/
+「**正本は一覧のほうである**」。⚠ **あの文書は ADR ではなく生きた文書なので、誤りは本文が直る**
+（[ADR 0241](./decisions/0241-migration-guide-is-a-live-doc-not-an-adr.md)）⟹ **当日その場で読むこと。**
+⟹ **当日「何が壊れるか」を数えるなら、あちらの一覧を数えること。**
+
+⚠ **世代ごとに分かれている。**⭕ **両端が tag で閉じた世代（例: `v0.1.9`→`v0.2.0`）は件数が書いてあり、`main` が動いても変わらない。**
+🔴 ⛔ **未リリース世代（`vX`→`v1.0.0`）には件数が書かれていない**——**`main` に1件着地するたびに腐るからである**
+（[#433](https://github.com/takecchi/mnemora/issues/433) / [ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⟹ ⛔ **その件数をこの手順書へ写さないこと。当日あちらを数えること。**
 
 #### なぜ機械で判定しないか
 
@@ -490,6 +546,13 @@ git ls-tree --name-only origin/main docs/ | grep release-notes
 
 ⟹ **相対リンクを張ると、着地するまで壊れたリンクになる。**だからパスを
 インラインコードで書くに留めてある。**#417 が着地したら、リンクに直してよい。**
+
+> **⚠ 訂正（2026-09-19 追記。⛔ 上の本文は書き換えていない）。**
+> 🔴 **この引き金は、もう来ない。**【実測 2026-09-19】**PR #417 は CLOSED**（着地していない）。
+> ⭕ **[docs/release-notes-v1.0.0.md](./release-notes-v1.0.0.md) は `main` に在る**
+> ——着地させたのは [PR #544](https://github.com/takecchi/mnemora/pull/544)（`3cf2663`）である。
+> ⟹ **この項目の通過条件は、いま満たしうる。**上の `ls-tree` を当日も打って、**在ることを目で見ること。**
+> ⚠ **在ることと、いま切る tag と合っていることは別である**——中身は同文書自身の「貼る前に確かめること」に従って読むこと。
 
 ⛔ **この文書からそのファイルの中身に踏み込まない**——**何を書くかは、それを書く担い手の判断である。**
 ここで確かめるのは「**在るか**」と「**いま切る tag と合っているか**」の2点だけである。
