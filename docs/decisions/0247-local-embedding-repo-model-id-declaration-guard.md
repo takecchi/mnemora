@@ -192,6 +192,32 @@ build`）に素直に乗る。⛔ 新しい CI ジョブは足さない。
 
 ### 測ったこと
 
+#### 🔴 ⭐ **ADR 0212 の歯が、この PR の初稿を止めた**【実測 2026-09-19】
+
+**初稿は、歯のファイルの docstring に「42MB のダウンロード」「42MB のモデル取得」と書いていた。**
+⟹ CI の `typecheck / lint / test / build` が赤くなった。落ちたのは
+[ADR 0212](./0212-local-embedding-size-noun-correspondence-tooth.md) の歯
+（`scripts/__tests__/local-embedding-size-noun-correspondence.test.mjs`）で、逐語:
+
+```
+AssertionError: packages/local-embedding/src/__tests__/repo-model-id-declaration-guard.test.ts:16
+  — "42MB" が「重み」文脈(期待値 36MB)に付いている
+```
+
+⭐ **あの歯は「値の一致」ではなく「向き」を見る**——「一式＝42 / 重み＝36」の対応である。
+「モデル取得」「ダウンロード」という語の近くに `42MB` を置いたため、**重み文脈と読まれた。**
+
+⟹ **直し方は「数字を書き換える」ではなく「数字を書かない」**
+（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。docstring から MB の数字を落とし、
+**サイズの正本は ADR 0212 とその歯が持つ**と書くだけにした。
+
+⚠ **この ADR 本文に残っている MB の記述は、そのままにしてある**——
+ADR 0212 の歯は `docs/decisions/` を走査対象から除外している（ADR 本文は書き換えない規律のため）。
+⛔ **「歯が見ていないから書いてよい」ではない。**ここに残すのは、**何が起きたかの記録**だからである。
+
+⭐ **副産物**: Issue #455 は「既に判定が着地した台帳」として意図的に開いているが、
+**その歯はいまも生きて噛む**ことが、この PR で実測された。
+
 - 【現物】`local-embedding-provider.ts` の `this.space = Object.freeze(...)` が
   `options.modelId` からしか `model` を作らないこと。
 - 【現物】`LocalEmbeddingProviderOptions` が `repo` / `modelId` を独立した公開オプション
