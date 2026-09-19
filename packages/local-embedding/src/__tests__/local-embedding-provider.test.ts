@@ -440,7 +440,14 @@ describe("読み込み失敗のメッセージ", () => {
   }
 
   it("実際に使った repo 名が入る（既定値ではなく）", async () => {
-    const error = await loadFailure({ repo: "someone/my-own-conversion", createPipeline: failing });
+    // ⚠ modelId も明示する——既定と異なる repo だけを渡すと、コンストラクタの
+    // repo/modelId 宣言食い違い検査（Issue #142 / ADR 0247）が先に throw する。
+    // この歯自体は repo-model-id-declaration-guard.test.ts が別に測る。
+    const error = await loadFailure({
+      repo: "someone/my-own-conversion",
+      modelId: "someone-custom-model",
+      createPipeline: failing,
+    });
     expect(error.message).toContain("someone/my-own-conversion");
     expect(error.message).not.toContain("sirasagi62/ruri-v3-30m-ONNX");
   });
@@ -678,8 +685,12 @@ describe("モデル指定が createPipeline へ届く（配線）", () => {
 
   it("差し替えた値がそのまま渡る", async () => {
     const recorder = createRecordingPipeline();
+    // ⚠ modelId も明示する——既定と異なる repo だけを渡すと、コンストラクタの
+    // repo/modelId 宣言食い違い検査（Issue #142 / ADR 0247）が先に throw する。
+    // この歯自体は repo-model-id-declaration-guard.test.ts が別に測る。
     const provider = new LocalEmbeddingProvider({
       repo: "someone/other-onnx",
+      modelId: "someone-custom-model",
       dtype: "fp32",
       cacheDir: "/tmp/mnemora-models",
       numThreads: 1,
