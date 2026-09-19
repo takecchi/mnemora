@@ -13,7 +13,10 @@ import { isLocalEmbeddingProviderError } from "./errors.js";
  *
  * 契約は `packages/core/src/interfaces/embedding-provider.ts` のまま——
  * 1インスタンス = 1 `EmbeddingSpaceId` に固定し、次元をモデルに応じて動的に変えない。
- * このクラスはその契約に**実行時の歯**を1本足す（`embed()` の次元検査。下記）。
+ * このクラスはその契約に**実行時の歯**を2本足す:
+ * コンストラクタでの repo/modelId 宣言食い違い検査（下記。Issue #142 / ADR 0247）と、
+ * `embed()` の次元検査（下記）。前者は宣言そのものの食い違いを、後者は宣言と実物の
+ * 食い違いを落とす——両者は落とすタイミングも対象も別である。
  */
 
 /** `space.provider`。**プロセス内推論であること**を表す。 */
@@ -202,6 +205,42 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   #ready: Promise<LocalEmbeddingPipeline> | null = null;
 
   constructor(options: LocalEmbeddingProviderOptions = {}) {
+    // ⭐ **宣言（repo と modelId）が食い違ったまま space が確定するのを、ここで落とす。**
+    //
+    // `embed()` の次元検査（このファイル下部、`vector.length !== this.space.dimensions`）は
+    // **宣言した次元と実物が食い違ったとき**にしか鳴らない歯である。**あちらは次元が
+    // 変わったときしか鳴らない。**⟹ 次元が同じまま重みだけ入れ替わる場合
+    // （`repo` だけ差し替えて `modelId` は既定のまま、という組み合わせ）は、あちらを
+    // 素通りする。**ここはその手前——宣言そのものの食い違いを、`embed()` を待たずに
+    // コンストラクタで落とす。**
+    //
+    // 下の `this.space = Object.freeze(...)` が示す通り、`space.model` は
+    // `options.modelId` からしか作られず、**`options.repo` は一度も効かない。**
+    // ⟹ 採用者が `repo` だけ差し替えると、別のモデルのベクトルが同じ space
+    // （`EmbeddingSpaceId`、テーブル名スラグの導出元）へ静かに混ざる。
+    // 混ざったものは後から分けられない。
+    //
+    // 逃げ道は残す: `modelId` を明示すれば通る（同じ重みの私設ミラーを使う場合など、
+    // 「何を名乗るか」を宣言させる契約である）。
+    // ⛔ `dtype` はここでは対象にしない（この PR の範囲外。ADR 0247 に負債として記録）。
+    if (
+      options.repo !== undefined &&
+      options.repo !== DEFAULT_LOCAL_EMBEDDING_REPO &&
+      options.modelId === undefined
+    ) {
+      throw new Error(
+        `LocalEmbeddingProvider: repo に既定（${DEFAULT_LOCAL_EMBEDDING_REPO}）と異なる値` +
+          `（${options.repo}）が渡されたが、modelId は指定されていない` +
+          `（既定の ${DEFAULT_LOCAL_EMBEDDING_MODEL_ID} のまま）。` +
+          `space.model は modelId からしか作られず repo は反映されないため、このままでは` +
+          `別モデルのベクトルが同じ space（EmbeddingSpaceId。テーブル名スラグの導出元）へ` +
+          `混ざる——混ざったものは後から分けられない。` +
+          `options.modelId に、そのモデルを名乗る別の id を渡すこと` +
+          `（同じ重みの私設ミラーであれば、既定と同じ modelId` +
+          `（${DEFAULT_LOCAL_EMBEDDING_MODEL_ID}）を明示的に渡せば通る）。`,
+      );
+    }
+
     this.#spec = Object.freeze({
       repo: options.repo ?? DEFAULT_LOCAL_EMBEDDING_REPO,
       dtype: options.dtype ?? DEFAULT_LOCAL_EMBEDDING_DTYPE,
