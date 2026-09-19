@@ -895,14 +895,31 @@ Issue #200 は**2つの読み方**を挙げていた。
    実装の単一の出所は `recall-runtime.ts` の `gateVectorFilterFields` である。
    後置フィルタも段1と同じ述語（`survivesDecayGate` / `survivesValidityGate`）を呼ぶ。
 5. 既に返る集合・アンカー自身・`minSimilarity` 未満を除く。
-6. 残りを `maxCount` 件まで採り、`retrievedVia: 'association'` と
-   `associationOf: <アンカーの memoryId>` を立てる。**`maxCount` を超えた分は
+6. 残りを**アンカー類似度の降順で過取得**し（`max(maxCount, round(maxCount × overFetchFactor))` 件。
+   段1の `kPrime` と同じ係数を流用する）、Memory を引いてスコアを組み、
+   **`アンカー類似度 × decay × tagMatch × freshness × strength` の降順**で `maxCount` 件まで採る。
+   採った候補に `retrievedVia: 'association'` と `associationOf: <アンカーの memoryId>` を立てる。
+   ⭐ **順位に `decay` が入っているのは意図である**（2026-09-19 追記、
+   [Issue #402](https://github.com/takecchi/mnemora/issues/402) /
+   [ADR 0246](./decisions/0246-association-rank-includes-decay.md)）——ここを
+   アンカー類似度だけで切ると、**使われた記憶と使われなかった記憶が、この枠の中で
+   順位として一切分かれない**（正典「目指す姿」項目4「使われない記憶が、静かに遠ざかる」）。
+   ⛔ **掛け合わせた値は `ScoreBreakdown` に出さない**——`score.similarity` は**クエリとの**
+   類似度の枠であり、そこへアンカーとの類似度を入れない（§9.4、ADR 0151）。
+   ⚠ **同点のときの並びは、これまでどおり前置き（アンカー類似度降順、さらに adapter の順序）に
+   委ねる**——`Array.prototype.sort` は安定であり、[ADR 0170](./decisions/0170-association-search-tiebreak-nondeterminism.md)
+   が決めた「この段で再タイブレークを重ねない」形は破れていない。
+   **席に着けなかった分は
    `omitted { kind: 'over_limit', stage: 'association', count, countKind: 'exact' }`
    として報告する**（2026-09-17 追記、[Issue #375](https://github.com/takecchi/mnemora/issues/375) /
-   [ADR 0188](./decisions/0188-association-over-limit-omission.md)）——この手順4〜5を
-   通過した時点で候補は既にゲート・除外・類似度の条件を満たしており、単に `maxCount`
-   で切っただけである。段2の `passed.slice(limit)`（§7）が `over_limit` を積むのと
-   同じ形。
+   [ADR 0188](./decisions/0188-association-over-limit-omission.md)）——手順4〜5を
+   通過した時点で候補は既にゲート・除外・類似度の条件を満たしており、単に席の数
+   （`maxCount`）で切っただけである。段2の `passed.slice(limit)`（§7）が `over_limit` を積むのと
+   同じ形。⚠ **数えるのは「過取得の窓の外に居た分」＋「窓の中で席を競り負けた分」であって、
+   多層防御で落ちた分は含まない**（2026-09-19 追記、ADR 0246）——後者は段5の
+   `aggregateScope` が `filtered(...)` として数えており、ここで足すと二重計上になる。
+   🔴 **順位で席を埋めるようになった以上、「アンカー類似度で `maxCount` 位より後ろ」を
+   そのまま数えることはできない**——それだと**席に着いた記憶を「着けなかった」と数えうる。**
 
 **⚠ `anchorCount` の天井は `RecallQuery.limit` である**（2026-09-17 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377)）——
 手順3のアンカーは「段3までに残った候補」全部からではなく、**そのうち `limit` の内側に入った分**から取る
@@ -983,6 +1000,20 @@ Issue #200 は**2つの読み方**を挙げていた。
   段3.5 は**意図的にスコア閾値の外**に在る——`partitionByThreshold` の呼び出しは `recall-runtime.ts` の1箇所だけで対象は段1の候補のみであり、**段3.5 はその後に走る**（[ADR 0172](./decisions/0172-association-passes-decay-and-validity-gates.md)「段3.5 の候補は段2の閾値分割を通らない」がこの非対称を逐語で自認している）。
   ⟹ **段2が `below_threshold` で棄却した記憶が、連想枠 on では `retrievedVia: 'association'` で返る** 【実測 2026-09-17: 窓は「その記憶が段2から落ちた日 → 129.658日」。合成コーパス217件では**連想枠 on の返却の 47.5% が窓の中の記憶**だった】。
   ⛔ **⟹ 既定を on にするときは、物差しが動くかだけでなく、正典項目4 の判定が崩れないかも見ること。**⭐ **忘却ゲートの側は破れていない**——#348（ADR 0172）が段3.5 にも通しており、実測でも 140日では off / on どちらでも返らない。**破れるのは順位の側だけである。**
+  ⭐ **2026-09-19 追記（[ADR 0246](./decisions/0246-association-rank-includes-decay.md)）: その「順位の側」を直した。**
+  連想枠の席（`maxCount`）は、いまは**アンカー類似度だけ**ではなく
+  **`アンカー類似度 × decay × tagMatch × freshness × strength`** の順位で埋まる（§9.2 手順6）。
+  ⟹ **使用報告された記憶が席を取り、されなかった記憶は decay が効いて押し出される。**
+  歯は `packages/core/src/__tests__/recall-association-usage-ranking.test.ts`（DB 不要）。
+  ⛔ **ただし、この修理が変えていないものが3つある。混ぜて読まないこと。**
+  (a) **段3.5 が段2の閾値分割を通らないという構造そのもの**——上の逐語のとおりで、
+  §9.8 が書くように「段2で落ちた記憶こそが連想枠の主な獲物」だからである。
+  (b) **絶対の線は引いていない。**段1／段2 は絶対閾値、段3.5 は相対順位のみ、という非対称は残る
+  （ADR 0246「⛔ これが閉じないもの」1）。
+  (c) **連想枠が返す `score.total` が `affinity` 抜きで組まれていること**（§9.4 の帰結）は
+  そのままである——段2が棄却したときの `total` より高く見えうる。**これは順位ではなく説明可能性の軸**であり、
+  [Issue #548](https://github.com/takecchi/mnemora/issues/548) へ割ってある（ADR 0246「⛔ これが閉じないもの」2）。
+  ⛔ **そして、正典項目4 の判定（`docs/roadmap.md` §7.4 の「在る」）を数え直してはいない。**
 - **`examples/chat` の `compare` ベンチは、連想枠の便益を測れない**
   ——想起側の指標 `factStatementSurvived` は基準値の全12行で既に `true` であり、**伸びる余地が無い。**
   測るべき器は `retrieval` ベンチ（`hit@k` / MRR）だが、**それは⭐門ではない**（ADR 0133）。
