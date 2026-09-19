@@ -269,5 +269,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0243](./0243-changelog-lists-publish-targets-only.md) | `CHANGELOG.md` が載せるのは publish 対象パッケージの変更だけである — `examples/chat` は出荷される面の外なので載せない（Issue #536） | 採用 (2026-09) |
 | [0244](./0244-runtime-method-doc-correspondence-tooth.md) | `Runtime` のメソッドが3文書（README/vision/architecture）で名指しされていることを歯で縛る（Issue #518） | **草案 (2026-09)** |
 | [0245](./0245-publish-gate-shell-default-pinned.md) | `publish.yml` の門ステップが既定シェル（`bash -e`）で走るという前提を歯で縛る（Issue #476） | **草案 (2026-09)** |
+| [0246](./0246-association-rank-includes-decay.md) | 連想枠（段3.5）の席を、減衰を含む順位で埋める —— 正典項目4「使われない記憶が、静かに遠ざかる」の順位軸（Issue #402） | **草案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
