@@ -225,3 +225,55 @@ stderr には**比較できなかった `turnCount` を名指しで**出す。
   測ったのは lib への直接呼び出しと、`ci.yml` のコマンド行をそのまま起動する歯
   （`ci-yml-compare-wiring.test.mjs`）までである。
 - **`scripts/` 配下の検査を全部は走らせていない**（上に挙げた範囲だけである）。
+
+---
+
+## ⭐ 追記（2026-09-21、Issue [#547](https://github.com/takecchi/mnemora/issues/547)）—— **「確かめていないこと」の1本目を、前段を再現して埋めた**
+
+⛔ **本文は1バイトも書き換えていない。**上に在るのは、この門を入れた時点（2026-09-17）の記録である
+（`docs/decisions/README.md`「⛔ 採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」）。
+
+**誰が・いつ・どの sha で**: この追記を書いた担い手が、**2026-09-21**、`main = 25d61da` を基準に、
+**手元に専用の Postgres 17 + pgvector を立てて**（`AGENTS.md`「手元で Postgres を立てる」節。
+自分専用ポート・自分の作業ディレクトリ下の `PGDATA`/socket）実際に走らせた。
+⚠ **`takecchi` 名義で作業しているが、オーナー本人ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+### 何が埋まったか
+
+上の「確かめていないこと」1本目は、**`example-chat` ジョブの前段（`compare` の実行）を再現していない**ことを
+名乗っていた。⟹ **その前段を再現した。**`OPENAI_API_KEY` を持たない器で
+`pnpm --filter @mnemora/example-chat run compare` を走らせ（`[cassette] provider source: recorded(理由:
+OPENAI_API_KEY が無いため記録を再生)` を実測。ADR 0051）、**そこから出た本物の実測 JSON**
+（`commit=25d61da…`、`rows` 12件）を `compare-summary.mjs` に食わせた。
+
+⛔ **`examples/chat/compare-baseline.json` は一切書き換えていない。**退行は**入力（measured）側の複製**に入れた。
+
+| 入力（measured 側） | 終了コード【実測】 |
+|---|---|
+| 実測 JSON をそのまま | **0**（`pass`。12会話長すべて一致） |
+| `mnemoraShareOfNaiveChars`（`turnCount=642`）を基準値より悪化させる | **1**（`fail`） |
+| `factStatementSurvived`（`turnCount=82`）を `true`→`false` | **1**（`fail`） |
+| `rows` から `turnCount=322` の行を落とす | **2**（`indeterminate`） |
+
+⟹ **決定5 の三値が、合成の入力ではなく「この門が本番で受け取る形の入力」に対して成り立つことを実測した。**
+
+### ⚠ それでも残る未評価 —— **本番ジョブ自身の発火**
+
+🔴 **`.github/workflows/ci.yml` の `example-chat` ジョブが、実運用で `1` または `2` を出したことがあるか**は、
+**いまも確かめていない。**上で再現したのは「同じコマンド行を、同じ provider 層で、手元で打った」ところまでである。
+⛔ **これを踏むには `main` の基準値か測定そのものを意図的に壊す必要があり、Issue #547 はそれを範囲に入れていない。**
+
+⭐ **⟹ 「歯で測れている」と「本番ジョブで起きたことがある」は別である。**この追記が上げたのは前者の確度であって、
+後者ではない。
+
+### ⚠ 採らなかった案 —— 実測由来の fixture を歯に足す
+
+**実測 JSON から作った fixture を commit して、それに対する `exit 1`/`exit 2` を歯にする案**は採らなかった。
+終了コードそのものは `scripts/__tests__/compare-summary.test.mjs` の20本が既に
+**本物の CLI を子プロセスで起動して**覆っており（`exit 1` が2本・`exit 2` が3本）、増えるのは
+**入力が本物由来であること**だけである。
+
+⭐ **その差に独立の価値はある**——合成入力しか通っていない歯は、**現物の JSON の形が変わったときに鳴らない。**
+⚠ **だが小さい**: `validateMeasured` が形を検査しており、形が変われば `compare-json.ts` 側の歯が先に鳴る。
+⟹ **この追記が「実測 JSON に対して 0/1/1/2 を測った」という記録を残すことで、その役を代える**と判断した。
+⛔ **「重複だから要らない」ではない。「価値は在るが小さく、記録で足りる」である。**
