@@ -380,6 +380,43 @@ jobs:
       - name: Run examples/chat の observe→recall 往復・量の比較テストを本物の DB に対して実行
         run: pnpm --filter @mnemora/example-chat run test:db
 
+      - name: local-embedding が実際に読み込んだ重みファイルは、宣言された Hugging Face repo が今まさに持っているものと一致しているか(⭐ 門)
+        # 🔴 なぜここか: 直前の test:db ステップが(cache がヒットしていればキャッシュから、
+        # ミスしていれば Hugging Face から)local-embedding のモデル一式を既に読み込み
+        # 終えている。⟹ ここで改めてファイルを取りに行く必要は無く、追加のネットワーク
+        # 費用は Hugging Face の tree API を1回(+再試行)引くだけでほぼ無い。
+        # `scripts/check-local-embedding-fingerprint.mjs` の docstring の判定表のとおり、
+        # exit 0=一致 / 1=不一致(赤) / 2=保留(HF API に届かない) / 3=実行時エラー。
+        #
+        # ⛔ `continue-on-error: true` は使わない——それだと exit 1(不一致)まで
+        # 素通りしてしまい、この段が門でなくなる。
+        # 🔴 exit 2(保留)だけはジョブを落とさない——落とすと exit 1(赤)と区別が
+        # 付かなくなる(スクリプト側の判定表が空文になる)。だから shell 側で終了コードを
+        # 見て分岐する(`publish.yml` の `set +e` → `STATUS=$?` → `set -e` と同じ形。
+        # ci.yml の shell は既定の `bash -e` である——ADR 0245)。
+        # ⭐ 一致・保留のどちらでも Job Summary に1行残す——「何も出ていない」を
+        # 「ステップが走らなかった」と区別できるようにするため。
+        env:
+          MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+        run: |
+          set +e
+          node scripts/check-local-embedding-fingerprint.mjs \
+            --cache-dir "${MNEMORA_LOCAL_EMBEDDING_CACHE_DIR}"
+          CODE=$?
+          set -e
+          case "${CODE}" in
+            0)
+              echo "🟢 local-embedding fingerprint: 宣言された repo の内容と一致した" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            2)
+              echo "::warning::local-embedding fingerprint の判定を保留した(Hugging Face API に届かなかった)——一致も不一致も確認していない。"
+              echo "🟡 local-embedding fingerprint: 判定していない(Hugging Face API に届かなかった。上の warning 参照)" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              exit "${CODE}"
+              ;;
+          esac
+
       - name: "correction サブコマンド(cli.ts の dispatch 行)を実際に実行し、recall 段3(矛盾の解決と必須の同伴取得)が本番経路で発火することを CI が判定する(Issue #374 / ADR 0190)"
         # 🔴 Issue #374: `grep -c "correction" .github/workflows/ci.yml` が 0 だった
         # ——`examples/chat/src/cli.ts` の `command === "correction"` という
