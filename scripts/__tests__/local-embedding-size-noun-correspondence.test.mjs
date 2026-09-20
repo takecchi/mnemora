@@ -75,9 +75,15 @@ import { describe, expect, it } from "vitest";
  *
  * ## 確かめていないこと
  *
- * - 単位表記の揺れ(`42 MB`のような半角スペース入り、`42.0MB`のような小数、全角数字)
- *   のうち、実際に`main`に存在しない形は検査対象にしていない——存在しない形が今後
- *   増えたとき、この歯は「見えない」まま緑を返す(誤検知ではなく検出漏れ)。
+ * 🔴 **2026-09-21 追記(Issue #455 続き): `SIZE_RE` の射程を広げた。** 経緯と
+ * 【実測】の詳細は ADR 0212 の追記を見ること。ここでは残った検出漏れだけを書く。
+ *
+ * - `42 メガバイト`(単位が漢字)・`0.042GB`(別の単位で書かれた同じ量)・
+ *   `42Mb`(メガビット。大文字/小文字を区別しているため意図的に射程外)・
+ *   1桁/3桁の誤記(`4MB`/`420MB`のような、そもそも別の値に見えるもの)は、
+ *   引き続き検出できない(⭐ `describe("SIZE_RE が意図的に検出しない残存の穴")`
+ *   に、消えない形の試験として残してある)。これは**受け入れた盲点**であって、
+ *   直近で塞ぐ計画は無い。
  * - `docs/release-v1.md` / `CHANGELOG.md` / `docs/release-notes-v1.0.0.md` は
  *   スキャン対象から除外していない(現状これらに local-embedding のサイズ言及は無い
  *   ため実害は無いが、将来言及が増えたときにこの歯が触れてよいかは未検討——
@@ -125,8 +131,52 @@ const WEIGHT_NOUNS = ["重み本体", "重み", "model_quantized.onnx", "ONNXモ
 /** 前後何文字を「近傍」とみなすか。実測(下記)では最大でも15文字程度で足りている。 */
 const CONTEXT_WINDOW = 50;
 
-/** 単独の `36`/`42` + `MB`(前後が数字・英字でないこと)を拾う。 */
-const SIZE_RE = /(?<![0-9])(36|42)\s?MB(?![0-9A-Za-z])/g;
+/**
+ * 単独の `36`/`42` + `MB`(前後が数字・英字でないこと)を拾う。
+ *
+ * 🔴 **ADR 0212 の「負債3」の訂正**: `\s?` は最初から半角スペース1個(`42 MB`)・
+ * NBSP・タブ・改行を拾えていた——負債3は「半角スペース入りも検出漏れ」と読める
+ * 書き方をしていたが、これは過小申告だった(詳細は ADR 0212 追記)。
+ *
+ * ここで射程を広げたのは次の5形(2026-09-21時点、`main` に実例は無い——予防的拡大):
+ *
+ * - 連続する空白(`\s?` → `\s*`。`42  MB` のような2連スペース)
+ * - 小数第1位が `0` のみの表記(`42.0MB` / `42.00MB` / 全角ピリオド `42．0MB`)。
+ *   ⚠ `41.9MB` のような**別の値**を拾わないよう、小数部は `0` 以外を許さない
+ *   (`[.．]0+` — `.`/`．` の後ろが1個以上の半角 `0` であること)。
+ * - 全角数字(`４２` / `３６`)。数値リテラル自体を `36|42|３６|４２` で明示的に
+ *   列挙している(桁数ベースの汎用マッチにしていない)ため、`142MB` のような
+ *   無関係な数字を拾う心配が無い。
+ * - `MiB` 表記
+ * - 全角の `ＭＢ` / `ＭｉＢ`
+ *
+ * 🔴 **全角数字は `match[1]` に生のまま(`４２`)入るため、下流の `matched !== "42"`
+ * 比較が壊れる。** {@link toHalfWidthDigits} で半角へ正規化した値を `matched` に
+ * 入れ、エラーメッセージ用には生のマッチ文字列を別フィールド `rawMatched` に
+ * 持たせる(`scanSizeMentions` を参照)。
+ *
+ * 引き続き miss しなければならないもの(【実測】現在も miss することを
+ * `describe("SIZE_RE の射程")` で検査している): `142MB`(2桁前置の誤検出)・
+ * `1042MB`・`42MBps`(単位の後ろに英字が続く)・`4.2MB`(そもそも `42` が
+ * 連続した部分文字列として現れない)・`42Mb`(小文字の `b` = メガビットは別単位、
+ * 射程外)。
+ */
+const SIZE_RE =
+  /(?<![0-9０-９])(36|42|３６|４２)(?:[.．]0+)?\s*(MB|MiB|ＭＢ|ＭｉＢ)(?![0-9A-Za-z])/g;
+
+/**
+ * 全角数字(０-９)を半角数字へ正規化する。
+ *
+ * `SIZE_RE` が全角数字(`４２`/`３６`)も拾うようになったため、`match[1]` は
+ * 生のままだと `"42"`/`"36"` という半角の期待値と文字列比較できない
+ * (`"４２" !== "42"`)。この小さなヘルパで正規化してから比較・格納する。
+ *
+ * @param {string} str
+ * @returns {string}
+ */
+function toHalfWidthDigits(str) {
+  return str.replace(/[０-９]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xfee0));
+}
 
 /**
  * `ADR (docs/decisions/**) と publish 経路を除いた、git 管理下の全ファイル一覧。
@@ -170,7 +220,7 @@ function nearestNounDistance(before, after, nouns) {
 }
 
 /**
- * @typedef {{ file: string, line: number, matched: string, context: "total" | "weight" | "none", snippet: string }} SizeMention
+ * @typedef {{ file: string, line: number, matched: string, rawMatched: string, context: "total" | "weight" | "none", snippet: string }} SizeMention
  */
 
 /**
@@ -205,7 +255,8 @@ function scanSizeMentions() {
       mentions.push({
         file: relPath,
         line,
-        matched: match[1],
+        matched: toHalfWidthDigits(match[1]),
+        rawMatched: match[0],
         context,
         snippet: `${before}[${match[0]}]${after}`.replace(/\s+/g, " "),
       });
@@ -248,7 +299,7 @@ describe("local-embedding のサイズ表記(36MB/42MB)が、名詞と正しく�
       .filter((m) => (m.context === "total" ? m.matched !== "42" : m.matched !== "36"))
       .map(
         (m) =>
-          `${m.file}:${m.line} — "${m.matched}MB" が「${
+          `${m.file}:${m.line} — "${m.rawMatched}"(数字=${m.matched}) が「${
             m.context === "total" ? "一式" : "重み"
           }」文脈(期待値 ${m.context === "total" ? "42" : "36"}MB)に付いている: ...${m.snippet}...`,
       );
@@ -259,7 +310,7 @@ describe("local-embedding のサイズ表記(36MB/42MB)が、名詞と正しく�
     const unresolved = mentions
       .filter((m) => m.context === "none")
       .map(
-        (m) => `${m.file}:${m.line} — "${m.matched}MB" の文脈を判定できない: ...${m.snippet}...`,
+        (m) => `${m.file}:${m.line} — "${m.rawMatched}" の文脈を判定できない: ...${m.snippet}...`,
       );
     expect(
       unresolved,
@@ -267,5 +318,121 @@ describe("local-embedding のサイズ表記(36MB/42MB)が、名詞と正しく�
         "\n",
       )}\n⟹ 新しい言い回しが TOTAL_NOUNS/WEIGHT_NOUNS のどちらにも一致しない。名詞集合を見直すか、書き方を既存の形に揃えること。`,
     ).toEqual([]);
+  });
+});
+
+/**
+ * 🔴 **この `describe` を別ファイルへ切り出さないこと。**
+ *
+ * この歯(`listScannableFiles()`)は `git ls-files` の全ファイルを走査し、
+ * **`selfPath`(このファイル自身)だけ**を除外している。もし `42.0MB` のような
+ * 表記揺れの例示文字列を*別の*テストファイルに書くと、その新しいファイルは
+ * `selfPath` の除外対象ではないため `listScannableFiles()` に拾われ、
+ * 例示文字列が「一式/重み の名詞が近傍に無い」= 未判定(`none`) として
+ * `scanSizeMentions()` に引っかかり、この歯自身が赤くなる。**これは実際に
+ * PR #468 で踏まれた自己参照バグと同じ形である**(ADR 0212 決定2)。
+ * ⟹ **表記揺れの例示は、必ずこの同一ファイル内(スキャン対象から除外される側)に
+ * 置くこと。**
+ */
+describe("SIZE_RE の射程(表記揺れ) — ADR 0212 追記(2026-09-21)", () => {
+  /**
+   * `SIZE_RE` はモジュール内で共有された `g` フラグ付き正規表現であり、
+   * `lastIndex` を使い回すと呼び出し順に依存する誤判定を招く。呼び出しごとに
+   * 新しいインスタンスを作ってから使う。
+   *
+   * @param {string} text
+   * @returns {{ raw: string, num: string }[]}
+   */
+  function extractSizeMatches(text) {
+    const re = new RegExp(SIZE_RE.source, SIZE_RE.flags);
+    const out = [];
+    let m;
+    while ((m = re.exec(text)) !== null) {
+      out.push({ raw: m[0], num: toHalfWidthDigits(m[1]) });
+    }
+    return out;
+  }
+
+  it("HIT する(拾えるべき)表記をすべて拾う(既存5形+今回広げた5形)", () => {
+    const cases = [
+      // 🔴 既存(ADR 0212 決定2 の時点で `\s?` が既に拾えていた形。負債3の過小申告の訂正)
+      ["42MB", "42"],
+      ["42 MB", "42"], // 半角スペース1個
+      ["42 MB", "42"], // NBSP
+      ["42\tMB", "42"],
+      ["42\nMB", "42"],
+      ["36MB", "36"],
+      ["36 MB", "36"],
+      // 今回射程を広げた5形(予防的拡大。2026-09-21時点の `main` に実例は無い)
+      ["42  MB", "42"], // 連続空白(2個以上)
+      ["42.0MB", "42"], // 小数(.0)
+      ["42.00MB", "42"], // 小数(.00)
+      ["42．0MB", "42"], // 全角ピリオド
+      ["４２MB", "42"], // 全角数字
+      ["３６MB", "36"], // 全角数字
+      ["42MiB", "42"], // MiB表記
+      ["42ＭＢ", "42"], // 全角MB
+      ["42ＭｉＢ", "42"], // 全角MiB
+    ];
+    for (const [text, expectedNum] of cases) {
+      const matches = extractSizeMatches(text);
+      expect(matches, `"${text}" が拾えない(HITするはずの形)`).toHaveLength(1);
+      expect(matches[0].num, `"${text}" から読んだ数字`).toBe(expectedNum);
+    }
+  });
+
+  it("miss しなければならない(誤って拾ってはいけない)表記を拾わない", () => {
+    const cases = [
+      "142MB", // 前置に別の数字(2桁前置の誤検出)
+      "1042MB",
+      "42MBps", // 単位の後ろに英字が続く(別の単位の略語の一部)
+      "4.2MB", // "42" が連続した部分文字列として現れない
+      "42Mb", // 小文字の b = メガビット(射程外)
+      "41.9MB", // 36/42 とは別の値
+    ];
+    for (const text of cases) {
+      expect(extractSizeMatches(text), `"${text}" を誤って拾った(missするはずの形)`).toEqual([]);
+    }
+  });
+
+  it("全角数字が半角へ正規化される(matched)。エラーメッセージ用には生のマッチ文字列(rawMatched)が残る", () => {
+    expect(toHalfWidthDigits("４２")).toBe("42");
+    expect(toHalfWidthDigits("３６")).toBe("36");
+    expect(toHalfWidthDigits("42")).toBe("42"); // 半角はそのまま
+
+    const matches = extractSizeMatches("実行時に４２MBを落とす");
+    expect(matches).toHaveLength(1);
+    expect(matches[0].raw, "rawMatched相当は生の文字列を保つ").toBe("４２MB");
+    expect(matches[0].num, "matched相当は正規化後の値").toBe("42");
+  });
+
+  /**
+   * ⭐ **いまも残る検出漏れを、消えない形の試験として書く**(依頼元の指示)。
+   *
+   * ⚠ **これらは「見落とし」ではなく「受け入れた盲点」である。** 塞ぐ計画は無い
+   * ——詳細と理由は ADR 0212 追記、および本ファイル冒頭 docstring の
+   * 「確かめていないこと」節を見ること。この `describe` の役目は、
+   * この穴を「暗黙のうちに塞がっていた」と誤解されないよう、失敗しない形で
+   * 固定しておくことである(拾えないことを assert している。将来 `SIZE_RE` を
+   * 直してこれらを拾えるようにしたときは、この `it` 側を書き換えること)。
+   */
+  describe("SIZE_RE が意図的に検出しない残存の穴(⚠ 受け入れた盲点。埋める計画は無い)", () => {
+    it("「42 メガバイト」のような漢字単位は拾えない", () => {
+      expect(extractSizeMatches("実行時に42 メガバイトを落とす")).toEqual([]);
+    });
+
+    it("「0.042GB」のような別単位への換算は拾えない", () => {
+      expect(extractSizeMatches("実行時に0.042GBを落とす")).toEqual([]);
+    });
+
+    it("「42Mb」(メガビット、小文字b)は意図的に射程外——別の単位", () => {
+      expect(extractSizeMatches("回線速度は42Mbps")).toEqual([]);
+      expect(extractSizeMatches("42Mb")).toEqual([]);
+    });
+
+    it("2桁以外の誤記(1桁・3桁)は、そもそも36/42という値として扱われない", () => {
+      expect(extractSizeMatches("4MB")).toEqual([]);
+      expect(extractSizeMatches("420MB")).toEqual([]);
+    });
   });
 });
