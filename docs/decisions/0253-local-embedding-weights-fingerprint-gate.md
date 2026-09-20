@@ -398,6 +398,43 @@ labels は両方 `ubuntu-latest`、起動は `19:44:01Z` / `19:44:02Z`。
 両ジョブのログに `Cache hit for: local-embedding-ruri-v3-30m-q8-v1` →
 `Cache restored from key: …`。
 
+**7. ⭐ 歯が実際に噛むことを、変異試験で示した**【実測】
+
+**この ADR の書き手自身が7本すべてを走らせた**（実装者の報告を運んでいない）。
+⛔ `git checkout <file>` は使わず、**退避コピーから戻した**（`AGENTS.md`）。
+
+| | 壊したもの | 出た判定 | exit |
+|---|---|---|---|
+| 正常系 | — | 一致: 手元の 4 本すべてが一致 | `0` |
+| A | `config.json` に1バイト足す | hash 食い違い 1 本（期待 `fa0cbd5b…` / 実物 `7e506d23…`） | `1` |
+| B | 素性不明のファイルを1本置く | 素性不明 1 本（`unknown_file.bin`） | `1` |
+| C | 空のディレクトリを指す | 検査対象のファイルが1本も無い | `1` |
+| D | `--cache-dir` も env も渡さない | キャッシュの場所が指定されていない | `1` |
+| E | HF に届かない（`--api-base http://127.0.0.1:1`） | **保留**（3回試して取得できなかった） | **`2`** |
+| ⭐ F | **宣言された repo を別物に変える**（`Xenova/all-MiniLM-L6-v2`） | **その repo を問い合わせに行き**、手元に無いので赤 | `1` |
+| ⭐ G | 宣言のリテラルを関数呼び出しにして正規表現を外す | 宣言の唯一の出所が読めない | `1` |
+
+🔴 **F が、この ADR の核心の実証である。** 宣言を書き換えたら、道具は
+**`Xenova/all-MiniLM-L6-v2` を問い合わせ、`<cacheDir>/Xenova/all-MiniLM-L6-v2/` を探しに行った**
+——⟹ **repo 名も hash も、どこにも焼き込まれていない。**
+⛔ **焼き込んでいたら、F は「一致」のまま緑だったはずである。**
+
+**戻した後、同じ実行が緑に戻ることまで実測した**（`git status --porcelain` に
+`local-embedding-provider.ts` が出ない状態で `EXIT=0`）。
+
+**8. 静的検査と歯**【実測】
+
+```
+$ npx vitest run scripts/__tests__/check-local-embedding-fingerprint-lib.test.mjs \
+                 scripts/__tests__/ci-yml-local-embedding-fingerprint-wiring.test.mjs
+ Test Files  2 passed (2)
+      Tests  21 passed (21)
+$ npx prettier --check <触った4ファイル>   → All matched files use Prettier code style!
+$ pnpm run lint                             → 無出力（緑）
+```
+
+⛔ **手元の全体テストは走らせていない**（DB 段を実行しないため根拠にならない。ADR 0015 / 0195）。
+
 ### 確かめていないこと
 
 1. 🔴 **将来の偽陽性率は断定できない。標本は n=1 repo・静穏期1本である。**
@@ -416,6 +453,18 @@ labels は両方 `ubuntu-latest`、起動は `19:44:01Z` / `19:44:02Z`。
    確かめていない（キャッシュ鍵が同一なので同じ blob のはずである、という推定にとどまる）。
 8. **(a′) が `onnxruntime-web` の内部パスに触れずに実現できるか**は確かめていない。
    別の ONNX パーサの要否は未調査である。
+9. **`ci.yml` の `case` 分岐を GitHub Actions 上で実際に走らせて確認していない。**
+   手元で同内容をシェルに切り出して exit 0/1/2/3 を模擬実行しただけである【受: 実装者の報告】
+   ——ランナー環境固有の差異は未確認。
+10. **`.github/workflows/ci.yml` の YAML 構文としての妥当性を機械的に検査していない。**
+   この器に YAML パーサが無い（`yaml` / `js-yaml` / `python` のいずれも不在を実測）。
+   ⟹ **CI が実際に起動することをもって検証する**——壊れていれば必須 check が揃わず、
+   `ci-green-check.mjs` は緑を出さない。
+11. **`--api-base` は今回新設した注入点であり、既定（HF）以外の実運用実績が無い。**
+   変異試験 E 以外では使っていない。
+12. **HF が `type: "file"` でありながら `oid` も `lfs.oid` も持たない応答を返す場合**は、
+   実データで観測していない（単体試験では合成データで `null` に落ちることを確認済み）。
+13. **Windows のパス区切りの変換は Linux 上でしか検証していない**（CI は `ubuntu-latest`）。
 
 ### ⚠ 探り棒の記録（同じ形の見落としが他に残っていないとは言えない）
 
