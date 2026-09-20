@@ -1227,17 +1227,24 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 実装のみ。`archiveDecayed`（直上ではなく本クラス冒頭寄りのメソッド）と同じ
    * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
    * 追記を行うことで、postgres 実装の単一トランザクションを模す。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: 指定すると、選定条件に
+   * `onlyMemoryIds.includes(m.id)` を積集合として足す——`packages/postgres` の
+   * `AND id = ANY(...)` と同じ意味。
    */
   async restoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
     event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
         m.supersededById === supersededById &&
-        m.status === "superseded",
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
     );
 
     const actor = event.actor ?? { type: "system" };
@@ -1271,16 +1278,22 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `this.events`（`InMemoryEventStore` と共有する配列、ファイル冒頭の doc コメント
    * 参照）から、対象ごとに直近の `kind: 'superseded'` イベントを探して
    * `meta.reason` を運ぶ——見つからなければ `null`。書き込みは一切行わない。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy` と
+   * 同じ意味の積集合フィルタ——対象の選び方を完全に一致させる。
    */
   async previewRestoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
         m.supersededById === supersededById &&
-        m.status === "superseded",
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
     );
 
     const candidates = targets.map((memory) => {

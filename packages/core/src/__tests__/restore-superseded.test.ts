@@ -586,6 +586,114 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
   });
 });
 
+describe("runtime.restoreSuperseded — target.onlyMemoryIds（Issue #515 方向①、ADR 0252）", () => {
+  /**
+   * 🔴 ここでも「往復」の構え——申告ではなく実行で示す。`consolidate` で実際に
+   * 群（2件）を作り、`onlyMemoryIds` で片方だけを指定して、指定した側だけが戻り、
+   * もう片方は触られないことを確認する。
+   */
+  it("onlyMemoryIds を指定すると、群のうちその id 集合だけが戻り、対象外は触られない", async () => {
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後の本文" }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const consolidateResult = await runtime.consolidate(ctx, {
+      target: { memoryIds: [a.id, b.id] },
+    });
+    const consolidatedId = consolidateResult.consolidatedMemoryId!;
+
+    const result = await runtime.restoreSuperseded(ctx, {
+      supersededById: consolidatedId,
+      onlyMemoryIds: [a.id],
+    });
+
+    expect(result.supported).toBe(true);
+    expect(result.outcomes).toHaveLength(1);
+    expect(result.outcomes[0]?.memoryId).toBe(a.id);
+    expect(result.outcomes[0]?.kind).toBe("restored");
+
+    const aAfter = await stores.memoryStore.get(ctx, a.id);
+    const bAfter = await stores.memoryStore.get(ctx, b.id);
+    expect(aAfter?.status).toBe("active");
+    expect(bAfter?.status).toBe("superseded"); // 対象外——触られていない
+    expect(bAfter?.supersededById).toBe(consolidatedId);
+    expect(unsupersededEvents(stores, a.id)).toHaveLength(1);
+    expect(unsupersededEvents(stores, b.id)).toHaveLength(0);
+  });
+
+  it("onlyMemoryIds を省略すると、この機能を足す前と同じく群全体が対象になる（既定は1バイトも変えない）", async () => {
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const consolidateResult = await runtime.consolidate(ctx, {
+      target: { memoryIds: [a.id, b.id] },
+    });
+    const consolidatedId = consolidateResult.consolidatedMemoryId!;
+
+    const result = await runtime.restoreSuperseded(ctx, { supersededById: consolidatedId });
+
+    expect(new Set(result.outcomes.map((o) => o.memoryId))).toEqual(new Set([a.id, b.id]));
+  });
+
+  it("onlyMemoryIds は dryRun: true と組み合わせても同じ積集合に絞る（previewRestoreSupersededBy へも素通しする）", async () => {
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const consolidateResult = await runtime.consolidate(ctx, {
+      target: { memoryIds: [a.id, b.id] },
+    });
+    const consolidatedId = consolidateResult.consolidatedMemoryId!;
+
+    const preview = await runtime.restoreSuperseded(
+      ctx,
+      { supersededById: consolidatedId, onlyMemoryIds: [b.id] },
+      { dryRun: true },
+    );
+
+    expect(preview.outcomes).toHaveLength(1);
+    expect(preview.outcomes[0]?.memoryId).toBe(b.id);
+    expect(preview.outcomes[0]?.kind).toBe("would_restore");
+    // 書き込みは一切起きていない。
+    const bAfter = await stores.memoryStore.get(ctx, b.id);
+    expect(bAfter?.status).toBe("superseded");
+  });
+
+  it("onlyMemoryIds に空配列を渡すと対象0件になる", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+    await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
+    );
+
+    const result = await runtime.restoreSuperseded(ctx, {
+      supersededById: anchor.id,
+      onlyMemoryIds: [],
+    });
+
+    expect(result).toEqual({ supported: true, supersedingMemoryId: anchor.id, outcomes: [] });
+  });
+
+  it("onlyMemoryIds に群に含まれない id を渡しても例外にせず、対象0件になる", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await stores.memoryStore.createMemory(ctx, newMemory({ content: "anchor" }));
+    await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "source", status: "superseded", supersededById: anchor.id }),
+    );
+    const unrelated = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "unrelated" }),
+    );
+
+    const result = await runtime.restoreSuperseded(ctx, {
+      supersededById: anchor.id,
+      onlyMemoryIds: [unrelated.id],
+    });
+
+    expect(result).toEqual({ supported: true, supersedingMemoryId: anchor.id, outcomes: [] });
+  });
+});
+
 describe("runtime.restoreSuperseded — reinforce が失敗しても status の復帰は握り潰さない（ADR 0153 と同じ規律）", () => {
   it("reinforce が例外を投げても outcome は 'restored' のままで、reinforceError にメッセージが入る。status は active のまま", async () => {
     const { runtime, stores } = buildRuntime();

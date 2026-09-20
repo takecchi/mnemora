@@ -1074,11 +1074,25 @@ export interface MemoryStore {
    * - 🔴 **原子性の証拠ではない。**`markContestedPair`/`supersedeWithNewMemories` の
    *   doc コメントと同じ注意——この口が在ることは adapter がこの口を実装したことしか
    *   意味しない。実際に原子性を測るのは適合テストと `packages/postgres` の並行の歯である。
+   *
+   * ⭐ **`filter?.onlyMemoryIds`（[Issue #515](https://github.com/takecchi/mnemora/issues/515)
+   * 方向①、[ADR 0252](../../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:**
+   * 指定すると、上記の対象（`tenant_id`/`superseded_by_id`/`status` の3条件）に加えて
+   * **`id` がこの配列に含まれること**を条件に足す（積集合）。**省略時は従来どおり——
+   * この任意引数を追加する前の振る舞いを1バイトも変えない。**空配列を渡すと対象0件
+   * （`id = ANY('{}')` は常に偽であるため、0件は「対象が無かった」と同じ扱いで
+   * 例外にしない）。この任意メソッドを実装している adapter が `filter` パラメータ
+   * 自体（またはその中の `onlyMemoryIds`）を実装するかどうかは、さらに独立した
+   * 適合フラグ（`MemoryStoreConformanceOptions.supportsOnlyMemoryIdsFilter?`、
+   * `@mnemora/testkit`）で検査する——**未指定なら「検査していない」と名乗る**
+   * （PR #524 が `supportsPreviewRestoreSupersededBy` を必須にして破壊的だった
+   * 前例、ADR 0237 冒頭の訂正、を踏まえ、この新フラグは任意にした）。
    */
   restoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
     event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }>;
   /**
    * `restoreSupersededBy?` を実際に呼ぶ**前**に、その群に何が入っているかを見るための
@@ -1116,10 +1130,17 @@ export interface MemoryStore {
    * - 対象が0件なら `{ candidates: [] }`（`restoreSupersededBy?` の「対象0件なら
    *   例外にしない」規律と同じ）。
    * - 返す順序は adapter に委ねる（`restoreSupersededBy?` の `restored` と同じ規律）。
+   *
+   * ⭐ **`filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy?`
+   * の同名パラメータと完全に同じ意味・同じ `WHERE` 条件を追加する。**この口が
+   * `restoreSupersededBy?` と「対象の選び方が1文字も違わない」という既存の契約
+   * （上記）を守るには、`filter` の扱いも両者で一致させる必要がある——適合テストは
+   * 両方の口へ同じ `filter` を渡して結果を突き合わせることでこれを検査する。
    */
   previewRestoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
 }
 

@@ -191,10 +191,14 @@ export declare class PostgresMemoryStore implements MemoryStore {
         reason?: string;
         actor?: EventActor;
         at: Date;
+    }, filter?: {
+        onlyMemoryIds?: MemoryId[];
     }): Promise<{
         restored: Memory[];
     }>;
-    previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId): Promise<{
+    previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId, filter?: {
+        onlyMemoryIds?: MemoryId[];
+    }): Promise<{
         candidates: Array<{
             memoryId: MemoryId;
             supersededReason: string | null;

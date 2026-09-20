@@ -281,6 +281,39 @@ MNEMORA_LIVE_LOCAL_EMBEDDING=1 pnpm --filter @mnemora/local-embedding test
 
 ---
 
+## 9. 任意の適合フラグ — 「検査した」「検査していない」を区別する（Issue #515 方向①、ADR 0252）
+
+**この文書の冒頭が掲げる問い**（「何が緑になったのか」は suite ごと・呼び出し元ごとに違う）
+に対する、`MemoryStoreConformanceOptions` 側からの答えの1つ。
+
+`supportsSupersedeWithNewMemories` 〜 `supportsPreviewRestoreSupersededBy` の8本は
+**すべて必須**（`: boolean`、`?` 無し）——省略できないので、呼び出し元は必ずどちらかを
+明示する。**`false` を選ぶと、`it.skip` ではなく「メソッド自体が無いことを積極的に
+assert する」歯が走る**（例: `expect(store.restoreSupersededBy).toBeUndefined()`）。
+
+**⚠ `supportsOnlyMemoryIdsFilter?`（`onlyMemoryIds` フィルタ、ADR 0252）だけは違う。**
+[PR #524](https://github.com/takecchi/mnemora/pull/524) が
+`supportsPreviewRestoreSupersededBy` を必須にしたことが「`@mnemora/testkit` を使う側に
+対して破壊的だった」と訂正された前例（[ADR 0237](./decisions/0237-restore-superseded-dry-run-preview.md)
+冒頭の訂正、[PR #526](https://github.com/takecchi/mnemora/pull/526)）と同じ轍を踏まない
+ため、**この1本だけ任意にした。**⟹ 3状態になる:
+
+| 値 | 走る歯 | 意味 |
+|---|---|---|
+| `true` | 契約の歯本体（積集合・省略時は群全体・両口の一致・テナント分離・対象0件） | **検査した緑** |
+| `false` | 「フィルタを渡しても無視される」ことを積極的に assert する歯 | **検査した緑**（「実装していない」ことを確認した） |
+| **省略（`undefined`）** | ⛔ `it.skip` ではなく、**常に実行され常に緑で終わる named it を1本**——テスト名の文字列そのもの（`"⚠ 未検査: supportsOnlyMemoryIdsFilter が指定されていない — adapter \"<name>\" に対して onlyMemoryIds フィルタの歯は検査していない"`）が唯一の情報を運ぶ | **検査していない**——`it.skip` にすると、他の理由での skip（`maybeIt` の自動 skip・§3 の live gate）と出力上区別が付かなくなるため避けた |
+
+【実測 2026-09-21】`packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts`・
+`packages/postgres/src/__tests__/conformance.postgres.test.ts` はどちらも `true` を渡している
+——この2つの adapter は「検査した緑」である。`supportsOnlyMemoryIdsFilter` を渡さない
+第三者の `MemoryStoreConformanceOptions` 呼び出し（`@mnemora/testkit` を使う側、外部の
+adapter 実装者を含む）は、コンパイルエラーにならずそのまま動き続け（型が壊れない）、
+実行すると上表の「省略」行の named it が1本増えるだけである——**これが型を必須にせずに
+「検査していない」を可視化する形**。
+
+---
+
 ## 出所について
 
 - **§1・§2・§3・§5 の住所と本数**は `main` = `18a8a09` を読んで数えた【現物】。

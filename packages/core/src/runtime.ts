@@ -904,7 +904,7 @@ export interface RestoreArchivedResult {
  * `runtime.restoreSuperseded` の対象（`docs/memory-model.md` §11 行15
  * 「`superseded → active`」を書き込む口）。
  *
- * 🔴 **粒度は「群」だけであり、個別の Memory id を渡す形は無い。**`ForgetTarget`/
+ * 🔴 **粒度の既定は「群」であり、個別の Memory id を渡す形は無い。**`ForgetTarget`/
  * `RestoreArchivedTarget` の `{ memoryId } | { memoryIds }` という二形は、ここでは
  * 意図的に採らない。
  *
@@ -913,14 +913,155 @@ export interface RestoreArchivedResult {
  * `docs/recall.md` §2 段0「スコープの外延」）。⟹ **呼び出し側は「戻したい Memory の id」を
  * そもそも知る手段を持たない**——`restoreArchived` の呼び出し側が辿れる「recall で
  * 見つからないものを id で名指しする」という経路が、ここには無い。手元にある唯一の
- * 取っ手は「置き換えた側（supersede した側）」の id である。そして `superseded_by_id` は、
- * 1回の `consolidate`（N件の統合元 → 1件の統合先）・1回の `reextract`・1回の
- * `resolveContested` が作った「群」とちょうど一致する——既存の部分索引
- * `idx_memories_superseded_by`（`tenant_id, superseded_by_id`、
- * `WHERE superseded_by_id IS NOT NULL`、`migrations/0001_init.sql`）もその群を単位に
- * 張られている。`MemoryStore.restoreSupersededBy?` の doc コメントも参照。
+ * 取っ手は「置き換えた側（supersede した側）」の id である。
+ *
+ * 🔴 **⚠ `superseded_by_id` が作る群は「1回の操作」とちょうど一致するとは限らない**
+ * （[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md) 冒頭の
+ * 訂正1・訂正4）。`resolveContested` の勝者は前から在る Memory であり、`reextract` の
+ * アンカーも冪等な `ON CONFLICT` 経由で前から在る Memory に解決されることがある——
+ * どちらも「同じ id の下に別々の操作の敗者が積み上がる」余地を残す。`consolidate` の
+ * 統合先だけが常に新規作成である（構造的な保証。下記 `onlyMemoryIds` の doc コメント
+ * 参照）。
  */
-export type RestoreSupersededTarget = { supersededById: MemoryId };
+export type RestoreSupersededTarget = {
+  supersededById: MemoryId;
+  /**
+   * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+   * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:
+   * 群を「1回の操作」単位に絞るための**任意の**フィルタ。指定すると、対象は
+   * `superseded_by_id = supersededById` の群のうち、このリストに含まれる
+   * `memoryId` だけへ絞られる（積集合）。**省略時は従来どおり群全体が対象**
+   * ——既定は1バイトも変えない。空配列を渡すと対象0件になる（`id = ANY('{}')`
+   * は常に偽であるため、特別扱いのコードは無い）。
+   *
+   * 🔴 **どの id をまとめて渡すかは、mnemora 自身は判定しない**
+   * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+   * 決定2「機械は検出まで」）。呼び出し側の責務:
+   *
+   * `opts.dryRun: true` で `previewRestoreSupersededBy?` を呼び、返る
+   * `candidates[].supersededReason` を見て「どの `memoryId` が同じ操作に
+   * 属するか」を自分で決めてから、ここへ渡す。ADR 0252 が実測した非対称:
+   *
+   * - `supersededReason === "consolidated"`: 同じ reason の候補は、1アンカーの
+   *   下で高々1つの群にしかならない（`consolidate` は統合先の
+   *   `sourceObservationId` を常に `null` にするため、`createMemory` の冪等
+   *   `ON CONFLICT`〔`WHERE source_observation_id IS NOT NULL`〕の対象に
+   *   一度も入らず、統合先は必ず新規作成される——構造的な保証）。
+   *   ⟹ 同じ reason の候補全部をまとめて渡せば、それが1回の操作である。
+   * - `supersededReason === "contested_resolved"`: **1件 = 1回の操作**
+   *   （`resolveContested` は呼び出し1回につきちょうど1件の敗者しか作らない
+   *   ——`packages/core/src/__tests__/resolve-contested-loser-invariant.test.ts`
+   *   の歯が固定する）。⟹ **1件ずつ**渡すこと。まとめて渡すと、同じ勝者が
+   *   複数回勝った別々の操作を、1回の呼び出しで混ぜて戻すことになる。
+   * - 🔴 `supersededReason === "reextract_superseded"` と `null`
+   *   （由来不明）: **既存の情報だけでは操作単位に分割できないことがある。
+   *   ⛔ 割れるという顔をしない。**`reextract` のアンカーは候補列の先頭
+   *   （`memoryIds[0]`）を位置で選ぶだけであり、その候補が冪等な
+   *   `ON CONFLICT` 経由で既存の Memory に解決されると、複数回の別々の
+   *   `reextract` 呼び出しが同じアンカーを共有しうる——このとき
+   *   `meta.reason`/`sourceObservationId`/`extractorVersion` は複数回の
+   *   呼び出しの間で完全に一致しうるため区別できない（ADR 0230 訂正4、
+   *   ADR 0252）。まとめて渡すことは「同じ操作だと確認した」ではなく
+   *   「確認できていないが、たまたま1回の操作かもしれない」という賭けである。
+   *
+   * {@link groupSupersededCandidatesByOperation} が、この判断を機械的に
+   * 補助する任意の純関数として在る——ただし判定はしない・"unknown" を
+   * 隠さない（同関数の doc コメント参照）。
+   */
+  onlyMemoryIds?: MemoryId[];
+};
+
+/**
+ * {@link groupSupersededCandidatesByOperation} が返す1グループ。
+ * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+ * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）。
+ */
+export type SupersededOperationGroup = {
+  supersededReason: string | null;
+  memoryIds: MemoryId[];
+  /**
+   * この `memoryIds` の区切りが、1回の操作と一致することをどこまで
+   * 保証できるかを正直に示す。⛔ **`"unknown"` は「安全」の意味ではない**
+   * ——「同じ操作かもしれないし、別の操作かもしれない。mnemora はこれを
+   * 区別する情報を持たない」という宣言である。
+   *
+   * - `"structural"`: `consolidate` が作る群。統合先は常に新規作成される
+   *   という構造的な保証により、同じ reason の候補は必ず1操作分である。
+   * - `"per_item"`: `resolveContested` が作る群。1件が必ず1操作
+   *   （`resolve-contested-loser-invariant.test.ts` の歯が固定する不変条件）
+   *   ——このとき `memoryIds` は常にちょうど1件になる。
+   * - `"unknown"`: `reextract` が作る群、または `supersededReason` が
+   *   取れなかった候補。既存の情報だけでは1回の操作と一致するかを
+   *   判定できない（ADR 0230 訂正4、ADR 0252）。
+   */
+  boundaryConfidence: "structural" | "per_item" | "unknown";
+};
+
+/**
+ * `previewRestoreSupersededBy?` が返す候補を、推定される「1回の操作」単位へ
+ * グルーピングする補助（[Issue #515](https://github.com/takecchi/mnemora/issues/515)
+ * 方向①、[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）。
+ *
+ * 🔴 **これは検出だけである。書き込みには一切触れない**
+ * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+ * 決定2「機械は検出まで」）。**どのグループを実際に `restoreSuperseded` の
+ * `onlyMemoryIds` へ渡すかは、呼び出し側が決める**——この関数はその判断を
+ * 代行しない。
+ *
+ * グルーピングの規則（`RestoreSupersededTarget.onlyMemoryIds` の doc
+ * コメント参照。ここでは要約だけ）:
+ * - `supersededReason === "consolidated"`: 同じ reason の候補をまとめて
+ *   1グループにする。`boundaryConfidence: "structural"`。
+ * - `supersededReason === "contested_resolved"`: 1件ずつ別グループにする
+ *   （`memoryIds` は常に1件）。`boundaryConfidence: "per_item"`。
+ * - それ以外（`"reextract_superseded"` を含む未知の reason、および
+ *   `null`）: **同じ `supersededReason` の値ごとにまとめて返す**——
+ *   ⛔ **1件ずつには分割しない。**分割すると「1件ずつが別操作である」という
+ *   *偽の構造*を呼び出し側に与える——分けるのは「分からない」を「分かって
+ *   いる」に化けさせる操作であり、`docs/north-star.md` の問い3（この記憶が
+ *   選ばれた理由を、後から説明できるか）に反する。`boundaryConfidence:
+ *   "unknown"` を付けたうえで、まとめた配列をそのまま返す。
+ *
+ * 入力の順序は保持しない（`supersededReason` の初出順にグループを並べる）。
+ * 空配列を渡すと空配列を返す。
+ */
+export function groupSupersededCandidatesByOperation(
+  candidates: ReadonlyArray<{ memoryId: MemoryId; supersededReason: string | null }>,
+): SupersededOperationGroup[] {
+  const groups: SupersededOperationGroup[] = [];
+  const byReason = new Map<string | null, SupersededOperationGroup>();
+
+  for (const candidate of candidates) {
+    const { memoryId, supersededReason } = candidate;
+
+    if (supersededReason === "contested_resolved") {
+      groups.push({
+        supersededReason,
+        memoryIds: [memoryId],
+        boundaryConfidence: "per_item",
+      });
+      continue;
+    }
+
+    const confidence: SupersededOperationGroup["boundaryConfidence"] =
+      supersededReason === "consolidated" ? "structural" : "unknown";
+
+    const existing = byReason.get(supersededReason);
+    if (existing !== undefined) {
+      existing.memoryIds.push(memoryId);
+      continue;
+    }
+    const group: SupersededOperationGroup = {
+      supersededReason,
+      memoryIds: [memoryId],
+      boundaryConfidence: confidence,
+    };
+    byReason.set(supersededReason, group);
+    groups.push(group);
+  }
+
+  return groups;
+}
 
 /** `runtime.restoreSuperseded` の任意オプション。 */
 export interface RestoreSupersededOptions {
@@ -1566,12 +1707,21 @@ export interface Runtime {
    * `active`）で埋める——`restoreArchived`（ADR 0122）が `sweepArchive`（ADR 0114）に
    * 対して果たしたのと同じ役割を、`superseded` という別の起点に対して果たす。
    *
-   * 🔴 **粒度は「群」だけである。**`target: { supersededById }` は、置き換えた側
-   * （新しいほう）の id を指す——個別の Memory id を渡す形は無い。理由は
-   * {@link RestoreSupersededTarget} の doc コメントを参照（要約: `superseded` な
-   * Memory は `recall()` に出てこないため、呼び出し側は戻したい id を知る手段を
-   * そもそも持たない。手元にある唯一の取っ手が「置き換えた側」であり、
-   * `superseded_by_id` はちょうど1回の統合操作が作った群と一致する）。
+   * 🔴 **粒度の既定は「群」である。**`target: { supersededById }` は、置き換えた側
+   * （新しいほう）の id を指す——`target.onlyMemoryIds` を省略した場合、個別の
+   * Memory id を渡す形は無い。理由は {@link RestoreSupersededTarget} の doc
+   * コメントを参照（要約: `superseded` な Memory は `recall()` に出てこないため、
+   * 呼び出し側は戻したい id を知る手段をそもそも持たない。手元にある唯一の
+   * 取っ手が「置き換えた側」である）。
+   *
+   * ⭐ **[Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+   * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:
+   * `target.onlyMemoryIds` を指定すると、群のうちこの id 集合だけに対象を絞る。**
+   * 省略時は従来どおり群全体——**既定は1バイトも変えない。**`MemoryStore.
+   * restoreSupersededBy?`/`previewRestoreSupersededBy?` の `filter.onlyMemoryIds`
+   * へそのまま素通しする（下の手順2参照）。どの id をまとめて渡すべきかは
+   * {@link RestoreSupersededTarget.onlyMemoryIds} の doc コメントを参照——
+   * mnemora 自身はこの判断をしない。
    *
    * 🔴 **`MemoryStore` に新しい任意メソッド `restoreSupersededBy?` を足している。**
    * `restoreArchived` が `updateStatusWithEvent`（既存の必須メソッド）にそのまま
@@ -1600,10 +1750,11 @@ export interface Runtime {
    * 手順:
    * 1. `deps.memoryStore.restoreSupersededBy` が無ければ
    *    `{ supported: false, supersedingMemoryId: target.supersededById, outcomes: [] }`。
-   * 2. 在れば `restoreSupersededBy(ctx, target.supersededById, { reason, actor, at: now })`
-   *    を呼ぶ——store 側が1トランザクションで対象行（`status = 'superseded'` かつ
-   *    `superseded_by_id = target.supersededById`）を選び、`status='active'`・
-   *    `superseded_by_id=null` へ更新し、行ごとに `memory_events` へ
+   * 2. 在れば `restoreSupersededBy(ctx, target.supersededById, { reason, actor, at: now },
+   *    { onlyMemoryIds: target.onlyMemoryIds })` を呼ぶ——store 側が1トランザクションで
+   *    対象行（`status = 'superseded'` かつ `superseded_by_id = target.supersededById`、
+   *    `target.onlyMemoryIds` が在れば追加で `id` がその集合に含まれる行）を選び、
+   *    `status='active'`・`superseded_by_id=null` へ更新し、行ごとに `memory_events` へ
    *    `kind: 'unsuperseded'` を積んで、戻した `Memory[]` を返す。
    * 3. `status` の復帰に成功した各対象について、続けて `MemoryStore.reinforce` を
    *    呼ぶ——理由は `restoreArchived` と同じ「ADR 0153 の忘却ゲート」だが、
@@ -3111,6 +3262,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         deps.memoryStore,
         ctx,
         supersedingMemoryId,
+        { onlyMemoryIds: target.onlyMemoryIds },
       );
       return {
         supported: true,
@@ -3139,6 +3291,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         actor,
         at: clock.now(),
       },
+      { onlyMemoryIds: target.onlyMemoryIds },
     );
 
     if (restored.length === 0) {

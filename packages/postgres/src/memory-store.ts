@@ -1755,17 +1755,28 @@ export class PostgresMemoryStore implements MemoryStore {
    * 呼び出し側が渡した値、省略時は固定タグ `'unsuperseded'`（`updateStatusWithEvent`
    * を経由する操作の「省略時はキー自体を持たせない」規律とはここだけ意図的に違う。
    * interface 側の契約節参照）。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: 指定すると `target` CTE に
+   * `AND id = ANY(...)::uuid[]` を1行足すだけ——`digestBand.excludeMemoryIds`
+   * （本ファイル上部、除外方向の同型パターン）を包含方向に転用しただけであり、
+   * **新しい索引は要らない**（`memories.id` は既に `PRIMARY KEY`。
+   * `idx_memories_superseded_by` による絞り込みの上に PK 条件を重ねるだけ）。
    */
   async restoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
     event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
     if (!isUuidLike(supersededById)) {
       return { restored: [] };
     }
     const actor = event.actor ?? { type: "system" };
     const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+    const onlyMemoryIdsClause =
+      filter?.onlyMemoryIds !== undefined
+        ? sql`AND id = ANY(${sql.param([...filter.onlyMemoryIds])}::uuid[])`
+        : sql``;
 
     const result = await this.db.execute(sql`
       WITH target AS (
@@ -1773,6 +1784,7 @@ export class PostgresMemoryStore implements MemoryStore {
         WHERE tenant_id = ${ctx.tenantId}
           AND superseded_by_id = ${supersededById}
           AND status = 'superseded'
+          ${onlyMemoryIdsClause}
       ),
       restored AS (
         UPDATE memories m
@@ -1817,14 +1829,23 @@ export class PostgresMemoryStore implements MemoryStore {
    * 対象について一致する行が1件も無い場合は `LEFT JOIN` により `NULL` になる——
    * この2つを呼び出し側から区別する必要は無い（`MemoryStore.previewRestoreSupersededBy`
    * の doc コメント「取れないことを正直に返す」参照。どちらも「取れない」の一種）。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy` と
+   * **1文字も違わない** `AND id = ANY(...)::uuid[]` を `target` CTE に足す——
+   * 「対象の選び方を完全に一致させる」という既存の契約をここでも守る。
    */
   async previewRestoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
     if (!isUuidLike(supersededById)) {
       return { candidates: [] };
     }
+    const onlyMemoryIdsClause =
+      filter?.onlyMemoryIds !== undefined
+        ? sql`AND id = ANY(${sql.param([...filter.onlyMemoryIds])}::uuid[])`
+        : sql``;
 
     const result = await this.db.execute(sql`
       WITH target AS (
@@ -1832,6 +1853,7 @@ export class PostgresMemoryStore implements MemoryStore {
         WHERE tenant_id = ${ctx.tenantId}
           AND superseded_by_id = ${supersededById}
           AND status = 'superseded'
+          ${onlyMemoryIdsClause}
       ),
       latest_superseded_event AS (
         SELECT DISTINCT ON (me.memory_id) me.memory_id, me.meta ->> 'reason' AS reason

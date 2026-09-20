@@ -626,10 +626,14 @@ export interface MemoryStore {
         reason?: string;
         actor?: EventActor;
         at: Date;
+    }, filter?: {
+        onlyMemoryIds?: MemoryId[];
     }): Promise<{
         restored: Memory[];
     }>;
-    previewRestoreSupersededBy?(ctx: Ctx, supersededById: MemoryId): Promise<{
+    previewRestoreSupersededBy?(ctx: Ctx, supersededById: MemoryId, filter?: {
+        onlyMemoryIds?: MemoryId[];
+    }): Promise<{
         candidates: Array<{
             memoryId: MemoryId;
             supersededReason: string | null;
@@ -2564,7 +2568,17 @@ export interface RestoreArchivedResult {
 }
 export type RestoreSupersededTarget = {
     supersededById: MemoryId;
+    onlyMemoryIds?: MemoryId[];
 };
+export type SupersededOperationGroup = {
+    supersededReason: string | null;
+    memoryIds: MemoryId[];
+    boundaryConfidence: "structural" | "per_item" | "unknown";
+};
+export declare function groupSupersededCandidatesByOperation(candidates: ReadonlyArray<{
+    memoryId: MemoryId;
+    supersededReason: string | null;
+}>): SupersededOperationGroup[];
 export interface RestoreSupersededOptions {
     reason?: string;
     actor?: EventActor;

@@ -1063,17 +1063,22 @@ export class FakeMemoryStore implements MemoryStore {
    * 追記を行うことで、postgres 実装の単一トランザクションを模す
    * （`packages/testkit` の `InMemoryMemoryStore.restoreSupersededBy` と同じ形だが、
    * ファイル冒頭のコメントの通り意図的に独立している）。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: 積集合フィルタ。
    */
   async restoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
     event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.backing.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
         m.supersededById === supersededById &&
-        m.status === "superseded",
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
     );
 
     const actor = event.actor ?? { type: "system" };
@@ -1106,16 +1111,22 @@ export class FakeMemoryStore implements MemoryStore {
    * と同じ形——対象の選び方は `restoreSupersededBy` と同じ filter を使い、
    * `this.backing.events` から対象ごとに直近の `kind: 'superseded'` イベントを探して
    * `meta.reason` を運ぶ。書き込みは一切行わない。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy` と
+   * 同じ積集合フィルタ。
    */
   async previewRestoreSupersededBy(
     ctx: Ctx,
     supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
     const targets = [...this.backing.memories.values()].filter(
       (m) =>
         m.tenantId === ctx.tenantId &&
         m.supersededById === supersededById &&
-        m.status === "superseded",
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
     );
 
     const candidates = targets.map((memory) => {
