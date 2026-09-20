@@ -320,6 +320,34 @@ squash commit の本文）か」である。**新しく作る道具が repo の�
 機械が確定・書き込みまで担ってよい余地がある（ADR 0179 の実例）。**GitHub 側の
 取り消しにくい面へは、検出までに留め、確定と実行を人に残す**（ADR 0211 の実例）。
 
+### ⚠ 偽陽性率に上限を置けない検査は門にしない
+
+**門（落とす検査）にしてよいのは、偽陽性率に上限を置けると実測できたものだけである。**
+⟹ **置けないなら門にせず、代わりに置いたもの（観測口・警告・候補一覧・人手監査）を
+同じ場所に明記する。**
+
+**同じ形を、設計案を選ぶ問いとして先に持っているのが
+[docs/north-star.md](./docs/north-star.md)「迷ったときの問い」と
+「この問いが、実際に案を落とすことの確認」である**（ここには写さない）。**この節が足すのは、
+設計案を選ぶ問いではなく、CI に置く*機械の門*そのものについての版である。**
+
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定3 に在る**（ここには写さない）。
+
+#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例
+
+**偽陽性率に上限を置けない検査は門にしない。⚠ ただし
+[ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) は偽陽性を承知で門にしている。
+どちらに倒すかの線は、いまのところ書けていない —— 判断するときは両方の ADR
+（[ADR 0088](./docs/decisions/0088-retrieval-quality-measured-in-ci.md) /
+[ADR 0094](./docs/decisions/0094-identifier-probes-local-embedding.md) と
+[ADR 0178](./docs/decisions/0178-public-api-surface-gate.md)）を読むこと。**
+
+経緯・測ったこと・線がまだ書けない理由は
+[ADR 0254](./docs/decisions/0254-no-gate-without-a-false-positive-ceiling.md) に在る
+（ここには写さない）。
+
 ### ⚠ 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧で出す
 
 **取りこぼしがゼロにならないと分かっている道具に、「これが全部です」と名乗らせないこと。**
