@@ -30,8 +30,51 @@
  * | `prerelease` の Release | **`CHANGELOG.md` は prerelease の節を持たない**（`v1.0.0-rc.1` のような版に `## [1.0.0-rc.1]` は起こさない） |
  *
  * ⛔ **この2つ以外の除外を足さないこと。**足すたびに、門が「何を主張しているか」が薄まる。
+ *
+ * ## 🔴 「節が在る」は「*出した版の*節が在る」である —— 未リリース節は数えない
+ *
+ * ⚠ **2026-09-21 追記。**この門は当初「`## [X.Y.Z]` という見出しが在るか」だけを見ていた。
+ * 🔴 **それだと `v1.0.0` を出すときに穴が開く**——`CHANGELOG.md` の**未リリース節の名前が
+ * `## [1.0.0]` である**ため、**未リリース節のまま出しても通ってしまう。**
+ * ⟹ ⭐ **見出しが `- YYYY-MM-DD` で終わることまでを要求する。**
+ *
+ * ⭐ **なぜ「`- 未リリース` で終わらないこと」という否定形にしなかったか**——**壊れたときに倒れる向きが逆だからである**:
+ *
+ * | 述語 | 表記が変わったとき | 倒れる向き |
+ * |---|---|---|
+ * | 否定形（`- 未リリース` で終わらない） | 未リリース節を別の言葉（`- TBD` 等）で書くと**通す** | 🔴 **緑の側（静かに緩む）** |
+ * | ⭐ 肯定形（`- YYYY-MM-DD` で終わる） | released 節の日付を書き忘れると**鳴る** | ⭕ **赤の側（気づける）** |
+ *
+ * ⟹ `AGENTS.md`「**機械が判定できなかったときは、従来どおりに倒さず赤／保留で止める**」の適用である。
+ * ⚠ **この述語は `CHANGELOG.md` の見出しの形に依存する。**⟹ **その形そのものを歯で縛ってある**
+ * （`scripts/__tests__/changelog-released-heading-format.test.mjs`）。
+ *
+ * ⛔ **これは述語を「広げた」のではない**——**門の目的は「*出した版の*節が在ること」の保証であり、
+ * 「未リリース」と書かれた節は出した版の節ではない。**⟹ **形の上で取りこぼしていたものを塞いだ、と読む。**
+ * ⚠ **この読み方は、そう決めた側に都合がよい読み方でもありうる。**両方の読みは
+ * `docs/decisions/0252-release-changelog-section-is-a-publish-gate.md` の追記に並べてある。
  */
 import { findChangelogSection, versionFromTagName } from "./release-changelog-section-lib.mjs";
+
+/**
+ * **released の節の見出しの形**。`## [0.5.0] - 2026-09-21` に当たり、
+ * `## [1.0.0] - 未リリース` には当たらない。
+ *
+ * ⚠ **日付が実在するか（13月・32日でないか）は見ていない。**見たいのは
+ * 「**未リリース節と区別できるか**」であって、日付の妥当性ではない
+ * ——厳しくすると、正しい節を誤って落とす側の危険が増える。
+ */
+const RELEASED_HEADING = /^##\s+\[[^\]]+\]\s+-\s+\d{4}-\d{2}-\d{2}\s*$/;
+
+/**
+ * 見出し1行が「released の節」の形をしているか。
+ *
+ * @param {unknown} line
+ * @returns {boolean}
+ */
+export function isReleasedHeading(line) {
+  return RELEASED_HEADING.test(String(line ?? ""));
+}
 
 /**
  * ワークフローから渡る `prerelease` 欄を読む。
@@ -142,6 +185,34 @@ export function decideReleaseChangelogGate({
   }
 
   const hit = findChangelogSection(text, version);
+
+  // 🔴 見出しは在るが、released の形（`- YYYY-MM-DD`）をしていない
+  // ——`## [1.0.0] - 未リリース` がこれに当たる。⛔ 通さない。
+  if (hit.found && !isReleasedHeading(hit.line)) {
+    return {
+      applies: true,
+      ok: false,
+      exitCode: 1,
+      reason: "section-not-released",
+      version,
+      lineNumber: hit.lineNumber,
+      lines: [
+        ...notes,
+        `🔴 \`## [${version}]\` の見出しは在るが、**出した版の節の形をしていない**` +
+          `（${source} の ${hit.lineNumber} 行目: \`${String(hit.line ?? "").trim()}\`）。`,
+        "",
+        "⚠ **これは「未リリース節がそのまま残っている」形である。**",
+        `⟹ **その節を「出した版の節」へ起こしてから出すこと**——見出しを \`## [${version}] - YYYY-MM-DD\` にする。`,
+        "",
+        "**⟹ npm へは出さない。**",
+        "",
+        "**直し方**:",
+        `1. \`CHANGELOG.md\` の \`## [${version}]\` を released の節へ起こし（日付を入れ）、新しい未リリース節を別に開ける PR を \`main\` へマージする。`,
+        "2. この Publish の run を**再実行**する（`npm publish` の段は冪等である）。",
+      ],
+    };
+  }
+
   if (hit.found) {
     return {
       applies: true,
@@ -152,7 +223,7 @@ export function decideReleaseChangelogGate({
       lineNumber: hit.lineNumber,
       lines: [
         ...notes,
-        `⭕ \`## [${version}]\` の節が在る（出所: \`${source}\` の ${hit.lineNumber} 行目）。`,
+        `⭕ \`## [${version}]\` の節が在り、released の形をしている（出所: \`${source}\` の ${hit.lineNumber} 行目）。`,
         "⛔ **節の中身が正しいかは見ていない。**⛔ `docs/migration-v1.md` の世代も見ていない。",
         "⟹ **そこは人が見る**（`docs/release-v1.md`）。",
       ],
