@@ -278,5 +278,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0252](./0252-release-changelog-section-is-a-publish-gate.md) | 出す版の節が `CHANGELOG.md` に無ければ `npm publish` を止める — 🔴 **門にする。⭐ 巻き添えを「確実さを下げる」ではなく「置き場所」で解いた** | 採用 (2026-09) |
 | [0253](./0253-local-embedding-weights-fingerprint-gate.md) | 読み込んだ重みの指紋を、期待値を1つも焼き込まずに照合する門（Issue #142 ②） | 採用 (2026-09) |
 | [0254](./0254-no-gate-without-a-false-positive-ceiling.md) | 偽陽性率に上限を置けない検査は門にしない — ADR 0223 決定3 の射程を `AGENTS.md` へ広げる。🔴 ただし線は引けない（Issue #505） | 採用 (2026-09) |
+| [0255](./0255-tools-output-candidates-not-verdicts.md) | 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧として出す。ADR 0223 決定5 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
