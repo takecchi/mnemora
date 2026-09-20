@@ -146,8 +146,38 @@
   🔴 **⛔ ただし「数え上げ切った」とは言っていない。**数え上げたのは
   **この門の入力（引き金 / prerelease 欄 / tag 名 / CHANGELOG の中身）から書き手が思いついた組み合わせ**であり、
   **網羅の証明ではない。**⟹ **次に同じことをする人は、ここに無い経路から探すこと。**
-- ⚠ **A-2（released が上・未リリース節が下）は、門では止まらないまま残してある。**
-  塞いだのは歯の側である ⟹ **PR を経ずに `main` が動く経路が在れば、そこは守られていない。**
+- 🔴 **A-2（released が上・未リリース節が下）は、門では止まらないまま残してある。**塞いだのは歯の側である。
+  **【実測 2026-09-21、書き手自身が `gh api repos/takecchi/mnemora/branches/main/protection` を叩いた】**
+
+  ```
+  required_pull_request_reviews:   null    ← 🔴 PR を経ることを強制する設定が無い
+  restrictions:                    null
+  enforce_admins:                  true
+  allow_force_pushes:              false
+  allow_deletions:                 false
+  required_status_checks.strict:   false
+  required_status_checks.contexts: 6件
+  ```
+
+  ⟹ 🔴 **「PR を経ること」は、機械で強制されていない。**
+  ⟹ ⭐ **歯は PR でのみ働き、門は publish の瞬間にのみ働き、その門は A-2 を素通りする述語である。**
+  ⟹ **⟹ A-2 が PR を経ずに `main` へ入った場合、どちらも止めない。**
+
+  ⚠ **⛔ ただし「`main` へ直接 push できる」とまでは確かめていない。**
+  **`required_status_checks` が6件設定されており、GitHub の仕様では required status checks が
+  直接 push にも掛かりうる**（push しようとした commit に必要な check の結果がまだ無いため弾かれる形）。
+  🔴 **確かめるには実際に `main` へ push するしかなく、⛔ それはやらない。**
+  ⟹ ⭐ **この節が言えるのは「PR を経ることは機械で強制されていない」までである。**
+  ⛔ **「直接 push が通る」と読まないこと**——**それは測っていない。**
+
+  ⭐ **別の角度からの検算**【実測】: `origin/main` の直近80本の commit は、**80本すべてが `(#NNN)` で終わる**
+  （GitHub の squash merge が書く形）⟹ **運用としては 80/80 で PR を経ている。**
+  ⟹ 🔴 **だが「いま誰も直接 push していない」は「将来もしない」を意味しない。**
+  ⭐ **これは [Issue #426](https://github.com/takecchi/mnemora/issues/426)（必須の check が13本中6本しかない）と同じ形である**
+  ——**いま無いことは確かめられても、将来も無いことは門でしか保証できない。**
+
+  ⛔ **branch protection を変えるべきかは、ここでは決めていない。**
+  **repo の設定変更はオーナーの領域であり、`gh api` で*読めた*ことは*変えてよい*の根拠にならない。**
 
 > **⚠ この ADR を書いたのは、自動化された担い手（クローンのマネージャーのセッション）である。**
 > ⭐ **「門にする」「(ii) 先に書く形にする」を決めたのは、クローン（マネージャーの上位）である**
