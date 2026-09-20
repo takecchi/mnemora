@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
+import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import type { AnswerCase, AnswerVerdict } from "../answer-case.js";
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
 import type { AnswerJudgeInput, AnswerJudgeOutcome } from "../answer-judge.js";
 import {
   buildAnswerJudgePromptSpec,
+  judgeAnswer,
   parseAnswerJudgeResponse,
   reconcileVerdicts,
 } from "../answer-judge.js";
@@ -202,5 +204,84 @@ describe("buildAnswerJudgePromptSpec: naive/mnemora で同一の書式（設計�
       answer: "分かりません。",
     });
     expect(spec.messages[0]?.content).toContain("(根拠となる発言なし)");
+  });
+});
+
+describe("judgeAnswer: 3段を結んだ結合体が「赤」を通る（Issue #558）", () => {
+  /**
+   * `judgeAnswer` は `buildAnswerJudgePromptSpec` → `llmProvider.complete()` →
+   * `parseAnswerJudgeResponse` の3段を結ぶだけの関数である。**その結合体を通して
+   * `fail` が出る経路は、この repo のどの試験でも踏まれていなかった**（Issue #558）——
+   * 唯一 `judgeAnswer` を通していた `answer-bench.postgres.test.ts` は `env: {}` で
+   * `deterministic` を強制しており、judge は必ず `indeterminate` に落ちる設計である。
+   *
+   * 🔴 **これは Issue #498 の残り（実 API の陽性対照）ではない。**#498 で鍵が要るのは
+   * 「`digest` から答えの語を落としたとき、**実 LLM が生成した回答**を層3が赤と判定する」
+   * 経路であって、ここで見ているパーサの結線ではない。⛔ この歯が緑であることを、
+   * #498 完了条件4「回答評価」側の充足として数えないこと。
+   *
+   * **鍵不要・DB 不要**——フェイクの `LLMProvider` を渡すだけで、外部呼び出しは無い。
+   */
+  const ctx: Ctx = { tenantId: "answer-judge-red-path-test" };
+
+  const input: AnswerJudgeInput = {
+    question: "次の歯医者の予約はいつですか?",
+    expectedKind: "closed-value",
+    rationale: "会話で25日に延ばしたと言っている。",
+    groundTurnTexts: ["歯医者、25日に延ばしたよ"],
+    answer: "18日です。",
+  };
+
+  /**
+   * 最小のフェイク `LLMProvider`。`complete()` が返す本文だけを差し替え、渡された
+   * `PromptSpec` を記録する。
+   *
+   * ⛔ **`completeStructured` は投げる。**`judgeAnswer` は `complete()` だけを使う
+   * （`answer-judge.ts` の設計上の必須事項1）——この `throw` 自体が、その必須事項を
+   * 機械で縛る歯である。`judgeAnswer` が structured へ移れば、この試験は例外で落ちる。
+   */
+  function fakeLLM(content: string): LLMProvider & { seen: PromptSpec[] } {
+    const provider = {
+      seen: [] as PromptSpec[],
+      async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
+        provider.seen.push(req);
+        return { content };
+      },
+      async completeStructured<T>(_ctx: Ctx, _req: StructuredRequest<T>): Promise<T> {
+        throw new Error(
+          "judgeAnswer は completeStructured を使わない（answer-judge.ts 設計上の必須事項1）",
+        );
+      },
+    };
+    return provider;
+  }
+
+  it("⭐ provider が FAIL を返せば outcome=fail（結合体が赤を通る）", async () => {
+    const judgement = await judgeAnswer(
+      fakeLLM("判定: FAIL\n理由: 誤った値を断定している"),
+      ctx,
+      input,
+    );
+    expect(judgement.outcome).toBe("fail");
+    expect(judgement.reason).toBe("誤った値を断定している");
+  });
+
+  it("同じ input でも provider が PASS を返せば outcome=pass（上の赤が空虚でないこと）", async () => {
+    // ⚠ この1本が無いと、`judgeAnswer` が provider を無視して `fail` を返す実装でも
+    // 上の歯は通ってしまう——**応答が結果を決めている**ことをここで固定する。
+    const judgement = await judgeAnswer(
+      fakeLLM("判定: PASS\n理由: 根拠と一致している"),
+      ctx,
+      input,
+    );
+    expect(judgement.outcome).toBe("pass");
+  });
+
+  it("provider へ渡るのは buildAnswerJudgePromptSpec(input) そのもの（3段の結線）", async () => {
+    const provider = fakeLLM("判定: FAIL\n理由: 誤った値を断定している");
+    await judgeAnswer(provider, ctx, input);
+    // 1ケース1回だけ呼ぶ（設計上の必須事項5: 呼び出し回数を数える側の前提）。
+    expect(provider.seen).toHaveLength(1);
+    expect(provider.seen[0]).toEqual(buildAnswerJudgePromptSpec(input));
   });
 });
