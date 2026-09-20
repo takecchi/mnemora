@@ -281,7 +281,7 @@ MNEMORA_LIVE_LOCAL_EMBEDDING=1 pnpm --filter @mnemora/local-embedding test
 
 ---
 
-## 9. 任意の適合フラグ — 「検査した」「検査していない」を区別する（Issue #515 方向①、ADR 0252）
+## 9. 任意の適合フラグ — 「検査した」「検査していない」を区別する（Issue #515 方向①、ADR 0258）
 
 **この文書の冒頭が掲げる問い**（「何が緑になったのか」は suite ごと・呼び出し元ごとに違う）
 に対する、`MemoryStoreConformanceOptions` 側からの答えの1つ。
@@ -291,7 +291,7 @@ MNEMORA_LIVE_LOCAL_EMBEDDING=1 pnpm --filter @mnemora/local-embedding test
 明示する。**`false` を選ぶと、`it.skip` ではなく「メソッド自体が無いことを積極的に
 assert する」歯が走る**（例: `expect(store.restoreSupersededBy).toBeUndefined()`）。
 
-**⚠ `supportsOnlyMemoryIdsFilter?`（`onlyMemoryIds` フィルタ、ADR 0252）だけは違う。**
+**⚠ `supportsOnlyMemoryIdsFilter?`（`onlyMemoryIds` フィルタ、ADR 0258）だけは違う。**
 [PR #524](https://github.com/takecchi/mnemora/pull/524) が
 `supportsPreviewRestoreSupersededBy` を必須にしたことが「`@mnemora/testkit` を使う側に
 対して破壊的だった」と訂正された前例（[ADR 0237](./decisions/0237-restore-superseded-dry-run-preview.md)

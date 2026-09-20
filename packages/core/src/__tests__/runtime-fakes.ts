@@ -1064,7 +1064,7 @@ export class FakeMemoryStore implements MemoryStore {
    * （`packages/testkit` の `InMemoryMemoryStore.restoreSupersededBy` と同じ形だが、
    * ファイル冒頭のコメントの通り意図的に独立している）。
    *
-   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: 積集合フィルタ。
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: 積集合フィルタ。
    */
   async restoreSupersededBy(
     ctx: Ctx,
@@ -1112,7 +1112,7 @@ export class FakeMemoryStore implements MemoryStore {
    * `this.backing.events` から対象ごとに直近の `kind: 'superseded'` イベントを探して
    * `meta.reason` を運ぶ。書き込みは一切行わない。
    *
-   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy` と
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy` と
    * 同じ積集合フィルタ。
    */
   async previewRestoreSupersededBy(

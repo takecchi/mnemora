@@ -198,7 +198,7 @@
 が作った単位とちょうど一致する」）のうち、**`resolveContested` の行だけを偽と訂正した。**
 
 🔴 **`reextract` の行も偽である。**[Issue #515](https://github.com/takecchi/mnemora/issues/515)
-方向①（[ADR 0252](./0252-restore-superseded-operation-scope.md)）を設計・実装する過程で、
+方向①（[ADR 0258](./0258-restore-superseded-operation-scope.md)）を設計・実装する過程で、
 別の作業者が実測し、両 adapter（インメモリ・本物の Postgres）で再現した【受】。
 
 ### なぜ偽か —— **`resolveContested` とは違う機序で、同じ結論に落ちる**
@@ -243,7 +243,7 @@
 ### この訂正が着地させるもの・着地させないもの
 
 - ⭐ **[Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
-  （[ADR 0252](./0252-restore-superseded-operation-scope.md)）は、この事実を織り込んで
+  （[ADR 0258](./0258-restore-superseded-operation-scope.md)）は、この事実を織り込んで
   設計されている**——`reextract_superseded` を由来とする候補は、`consolidated`
   （構造的に1操作と一致することが保証される）とも `contested_resolved`
   （1件が必ず1操作であることを歯で固定している）とも扱いを分け、
@@ -251,7 +251,7 @@
   として扱う。⛔ **割れるという顔をしない。**
 - ⛔ **`reextract` のアンカー選定を変える案（`created === true` の候補を優先する等）は、
   この訂正では実装しない。**出荷済みの `reextract` の挙動を変えるうえ、
-  「全候補が既存解決になる」縮退ケースが未検証であるため——ADR 0252 の
+  「全候補が既存解決になる」縮退ケースが未検証であるため——ADR 0258 の
   「確かめていないこと」を見ること。
 - ⛔ **実装は1行も変えていない。**訂正1〜3 と同じ規律。
 

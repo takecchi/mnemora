@@ -94,7 +94,7 @@ describeMemoryStoreConformance({
   supportsRestoreSupersededBy: true,
   // Issue #515: PostgresMemoryStore は previewRestoreSupersededBy を実装している。
   supportsPreviewRestoreSupersededBy: true,
-  // Issue #515 方向①、ADR 0252: PostgresMemoryStore は onlyMemoryIds フィルタを
+  // Issue #515 方向①、ADR 0258: PostgresMemoryStore は onlyMemoryIds フィルタを
   // 実装している。
   supportsOnlyMemoryIdsFilter: true,
 });

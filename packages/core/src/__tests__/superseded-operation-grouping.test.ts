@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { groupSupersededCandidatesByOperation } from "../runtime.js";
 
 /**
- * `groupSupersededCandidatesByOperation`（Issue #515 方向①、ADR 0252）の歯。
+ * `groupSupersededCandidatesByOperation`（Issue #515 方向①、ADR 0258）の歯。
  *
  * 🔴 これは検出だけの純関数——`previewRestoreSupersededBy?` が返した候補を、
  * 推定される「1回の操作」単位へグルーピングする補助である。書き込みには
@@ -16,7 +16,7 @@ import { groupSupersededCandidatesByOperation } from "../runtime.js";
  * - それ以外（`"reextract_superseded"` を含む未知の reason、`null`）は
  *   **同じ reason ごとにまとめる**が `boundaryConfidence: "unknown"`——
  *   ⛔ 1件ずつには分割しない（分割すると「1件ずつが別操作」という偽の構造を
- *   与えるため。ADR 0252 決定）。
+ *   与えるため。ADR 0258 決定）。
  */
 
 describe("groupSupersededCandidatesByOperation — consolidated は reason ごとにまとめて structural", () => {

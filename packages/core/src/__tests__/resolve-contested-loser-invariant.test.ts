@@ -10,7 +10,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * 🔴 この歯が守っているのは `resolveContested` の実装の詳細ではない。
  *
  * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
- * （[ADR 0252](../../../../docs/decisions/0252-restore-superseded-operation-scope.md)）
+ * （[ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)）
  * ——`restoreSuperseded` を「1回の操作」単位に絞る設計——は、次の前提の上に立っている:
  *
  * > `resolveContested(ctx, firstId, secondId, { kind: "supersede", winnerId })` は、
@@ -28,7 +28,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * 依存している契約」である。**この歯が赤くなったら、実装のバグではなく、上の
  * 前提そのものを変える設計判断をしている**——その変更をするときは、この歯を
  * 直すだけでなく `RestoreSupersededTarget.onlyMemoryIds` の doc コメントと
- * ADR 0252 も見直すこと。
+ * ADR 0258 も見直すこと。
  *
  * `previewRestoreSupersededBy` には依存しない——これから実装する機能（方向①）が、
  * その機能が守るべき前提を検査することになり循環するため。`stores.eventStore.events`

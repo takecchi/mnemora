@@ -1076,7 +1076,7 @@ export interface MemoryStore {
    *   意味しない。実際に原子性を測るのは適合テストと `packages/postgres` の並行の歯である。
    *
    * ⭐ **`filter?.onlyMemoryIds`（[Issue #515](https://github.com/takecchi/mnemora/issues/515)
-   * 方向①、[ADR 0252](../../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:**
+   * 方向①、[ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:**
    * 指定すると、上記の対象（`tenant_id`/`superseded_by_id`/`status` の3条件）に加えて
    * **`id` がこの配列に含まれること**を条件に足す（積集合）。**省略時は従来どおり——
    * この任意引数を追加する前の振る舞いを1バイトも変えない。**空配列を渡すと対象0件
@@ -1131,7 +1131,7 @@ export interface MemoryStore {
    *   例外にしない」規律と同じ）。
    * - 返す順序は adapter に委ねる（`restoreSupersededBy?` の `restored` と同じ規律）。
    *
-   * ⭐ **`filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy?`
+   * ⭐ **`filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy?`
    * の同名パラメータと完全に同じ意味・同じ `WHERE` 条件を追加する。**この口が
    * `restoreSupersededBy?` と「対象の選び方が1文字も違わない」という既存の契約
    * （上記）を守るには、`filter` の扱いも両者で一致させる必要がある——適合テストは

@@ -239,7 +239,7 @@ export interface MemoryStoreConformanceOptions {
   supportsPreviewRestoreSupersededBy: boolean;
   /**
    * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
-   * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:
+   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
    * 対象の `MemoryStore` 実装が `restoreSupersededBy?`/`previewRestoreSupersededBy?`
    * の `filter.onlyMemoryIds`（群を「1回の操作」単位に絞る任意フィルタ）を実装して
    * いるかどうか。
@@ -4216,7 +4216,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     }
 
     // -------------------------------------------------------------------
-    // onlyMemoryIds フィルタ（Issue #515 方向①、ADR 0252。restoreSupersededBy?/
+    // onlyMemoryIds フィルタ（Issue #515 方向①、ADR 0258。restoreSupersededBy?/
     // previewRestoreSupersededBy? の filter.onlyMemoryIds——群を操作単位に絞る任意の
     // 積集合フィルタ）
     //

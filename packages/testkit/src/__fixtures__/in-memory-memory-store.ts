@@ -1228,7 +1228,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
    * 追記を行うことで、postgres 実装の単一トランザクションを模す。
    *
-   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: 指定すると、選定条件に
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: 指定すると、選定条件に
    * `onlyMemoryIds.includes(m.id)` を積集合として足す——`packages/postgres` の
    * `AND id = ANY(...)` と同じ意味。
    */
@@ -1279,7 +1279,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 参照）から、対象ごとに直近の `kind: 'superseded'` イベントを探して
    * `meta.reason` を運ぶ——見つからなければ `null`。書き込みは一切行わない。
    *
-   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0252）: `restoreSupersededBy` と
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy` と
    * 同じ意味の積集合フィルタ——対象の選び方を完全に一致させる。
    */
   async previewRestoreSupersededBy(

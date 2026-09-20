@@ -586,7 +586,7 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
   });
 });
 
-describe("runtime.restoreSuperseded — target.onlyMemoryIds（Issue #515 方向①、ADR 0252）", () => {
+describe("runtime.restoreSuperseded — target.onlyMemoryIds（Issue #515 方向①、ADR 0258）", () => {
   /**
    * 🔴 ここでも「往復」の構え——申告ではなく実行で示す。`consolidate` で実際に
    * 群（2件）を作り、`onlyMemoryIds` で片方だけを指定して、指定した側だけが戻り、

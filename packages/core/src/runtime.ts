@@ -927,7 +927,7 @@ export type RestoreSupersededTarget = {
   supersededById: MemoryId;
   /**
    * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
-   * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:
+   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
    * 群を「1回の操作」単位に絞るための**任意の**フィルタ。指定すると、対象は
    * `superseded_by_id = supersededById` の群のうち、このリストに含まれる
    * `memoryId` だけへ絞られる（積集合）。**省略時は従来どおり群全体が対象**
@@ -940,7 +940,7 @@ export type RestoreSupersededTarget = {
    *
    * `opts.dryRun: true` で `previewRestoreSupersededBy?` を呼び、返る
    * `candidates[].supersededReason` を見て「どの `memoryId` が同じ操作に
-   * 属するか」を自分で決めてから、ここへ渡す。ADR 0252 が実測した非対称:
+   * 属するか」を自分で決めてから、ここへ渡す。ADR 0258 が実測した非対称:
    *
    * - `supersededReason === "consolidated"`: 同じ reason の候補は、1アンカーの
    *   下で高々1つの群にしかならない（`consolidate` は統合先の
@@ -961,7 +961,7 @@ export type RestoreSupersededTarget = {
    *   `reextract` 呼び出しが同じアンカーを共有しうる——このとき
    *   `meta.reason`/`sourceObservationId`/`extractorVersion` は複数回の
    *   呼び出しの間で完全に一致しうるため区別できない（ADR 0230 訂正4、
-   *   ADR 0252）。まとめて渡すことは「同じ操作だと確認した」ではなく
+   *   ADR 0258）。まとめて渡すことは「同じ操作だと確認した」ではなく
    *   「確認できていないが、たまたま1回の操作かもしれない」という賭けである。
    *
    * {@link groupSupersededCandidatesByOperation} が、この判断を機械的に
@@ -974,7 +974,7 @@ export type RestoreSupersededTarget = {
 /**
  * {@link groupSupersededCandidatesByOperation} が返す1グループ。
  * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
- * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）。
+ * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
  */
 export type SupersededOperationGroup = {
   supersededReason: string | null;
@@ -992,7 +992,7 @@ export type SupersededOperationGroup = {
    *   ——このとき `memoryIds` は常にちょうど1件になる。
    * - `"unknown"`: `reextract` が作る群、または `supersededReason` が
    *   取れなかった候補。既存の情報だけでは1回の操作と一致するかを
-   *   判定できない（ADR 0230 訂正4、ADR 0252）。
+   *   判定できない（ADR 0230 訂正4、ADR 0258）。
    */
   boundaryConfidence: "structural" | "per_item" | "unknown";
 };
@@ -1000,7 +1000,7 @@ export type SupersededOperationGroup = {
 /**
  * `previewRestoreSupersededBy?` が返す候補を、推定される「1回の操作」単位へ
  * グルーピングする補助（[Issue #515](https://github.com/takecchi/mnemora/issues/515)
- * 方向①、[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）。
+ * 方向①、[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
  *
  * 🔴 **これは検出だけである。書き込みには一切触れない**
  * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
@@ -1715,7 +1715,7 @@ export interface Runtime {
    * 取っ手が「置き換えた側」である）。
    *
    * ⭐ **[Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
-   * （[ADR 0252](../../../docs/decisions/0252-restore-superseded-operation-scope.md)）:
+   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
    * `target.onlyMemoryIds` を指定すると、群のうちこの id 集合だけに対象を絞る。**
    * 省略時は従来どおり群全体——**既定は1バイトも変えない。**`MemoryStore.
    * restoreSupersededBy?`/`previewRestoreSupersededBy?` の `filter.onlyMemoryIds`
