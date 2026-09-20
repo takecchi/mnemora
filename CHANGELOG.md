@@ -58,17 +58,25 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⚠ **この pin は `scripts/release-candidates.mjs` の入力でもある**
 （[ADR 0214](./docs/decisions/0214-release-candidates-lists-not-judges.md) 決定5。⛔ 道具は書き換えない）。
 
-### 🔴 この pin は、`v0.5.0` の tag と同じ commit を指している
+### 🔴 この pin を置いた時点で、`v0.5.0` と `origin/main` は同じ commit だった
 
-**【実測 2026-09-21、`origin/main` = `509f4e7`】**
+**【実測 2026-09-21】**pin を置いた時点では `git rev-parse origin/main v0.5.0^{commit}` が
+2行とも `509f4e739ca1ad017876a5b661062d23c2ead773` を返し、
+`git rev-list --count v0.5.0..origin/main` は **0** だった。
+⟹ **この節が空なのは、まだ数えていないからではなく、数える範囲そのものが空だったからである。**
+
+🔴 **⛔ ただし、その2つのコマンドを「この節が今も空か」の検査に使わないこと。**
+**どちらも docs だけの commit で動く**——**実際、この節を書いた commit 自身が `main` を1本進めた。**
+⟹ ⭐ **「利用者に届く変更が在るか」を見たいなら、出荷される面を直接当てること:**
 
 ```
-$ git rev-parse origin/main v0.5.0^{commit}   → 2行とも 509f4e739ca1ad017876a5b661062d23c2ead773
-$ git rev-list --count v0.5.0..origin/main    → 0
+$ git diff --stat v0.5.0..origin/main -- packages/                      → （差分なし）
+$ git diff --stat v0.5.0..origin/main -- scripts/__snapshots__/public-api/  → （差分なし）
 ```
 
-⟹ 🔴 **`v0.5.0` と `origin/main` のあいだに commit が1本も無い。****この節が空なのは、
-まだ数えていないからではなく、数える範囲そのものが空だからである。**
+⚠ **この2本も「利用者に見える変更が無い」の証明ではない**——**publish 対象の外の `scripts/` や
+`examples/` は当たらないし、`packages/` の差分がテストだけのこともある。**
+⟹ ⭐ **下の「数え直すこと」に従って、その場で一覧を出すこと。**
 ⛔ **これは「`v1.0.0` には何も載らない」という予告ではない**——**`main` が動けば増える。**
 ⟹ `v1.0.0` を切る側は、**切る直前にこの pin から数え直すこと**
 （道具は `node scripts/release-candidates.mjs --since v0.5.0`。
