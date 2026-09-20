@@ -54,6 +54,26 @@ describe("🔴 門が前提にしている CHANGELOG.md の見出しの形（ADR
     expect(versionHeadings.some((line) => isReleasedHeading(line))).toBe(true);
   });
 
+  it("🔴 同じ版の見出しが2本在る、ということは無い（起こし損ねの検出）", () => {
+    /**
+     * ⚠ **リリース当日に直接効く。**未リリース節を *起こす* のではなく、
+     * released の節を *足して* しまうと、同じ版の見出しが2本になる。
+     * 🔴 **並びによっては門が通る**（released が上に在ると、門は最初の一致を読んで通す）。
+     * ⟹ **PR の時点でここが赤くなるようにしておく。**
+     */
+    const seen = new Map();
+    for (const line of versionHeadings) {
+      const version = line.match(/^##\s+\[([^\]]+)\]/)[1];
+      seen.set(version, (seen.get(version) ?? 0) + 1);
+    }
+    const duplicated = [...seen.entries()].filter(([, n]) => n > 1).map(([v]) => v);
+    expect(
+      duplicated,
+      "同じ版の見出しが2本在る。未リリース節を『起こす』のではなく『足して』いないか確かめること" +
+        "——並びによっては publish の門が通ってしまう。",
+    ).toEqual([]);
+  });
+
   it("⚠ 『未リリース』と名乗る見出しは、released の形をしていない（両方に読めない）", () => {
     const both = versionHeadings.filter(
       (line) => line.includes("未リリース") && isReleasedHeading(line),
