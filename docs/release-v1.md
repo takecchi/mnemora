@@ -28,6 +28,7 @@
 | 0.7 | いま出ている版 | **通過条件は無い。**⛔ **版をここに書かない**——Release が出るたびに腐る（版の権威は Release の tag である。[ADR 0070](./decisions/0070-version-comes-from-the-release-tag.md)）。⟹ **当日その場で `gh release list --limit 5` と、publish 対象6本の `npm view @mnemora/<pkg> dist-tags` を引くこと。**⚠ **`v1.0.0` は `v0.1.9` の次ではない**——間に版がいくつか出ている（⛔ **何が出ているかもここに書かない**。0.7 の手順で引くこと。[ADR 0249](./decisions/0249-release-day-procedure-holds-no-rotting-facts.md)）——当日の判断材料として読む |
 | 0.8 | `CHANGELOG.md` の `[1.0.0]` 節 | **人間が読んで、`origin/main` の現在地に対して古くないと判断したこと**（⛔ コマンドでは判定できない。⚠ **`packages/*/src` の差分を数えると、マイグレーションの追加のように `src` を触らない変更を取りこぼす**） |
 | 0.9 | `docs/release-notes-v1.0.0.md` | **`origin/main` に在り**、人間が読んで**いま切る tag と合っている**と判断したこと（⛔ 0.8 とは別物。⚠ **GitHub Release の本文に貼る元がこれである**） |
+| 0.10 | 🔴 `CHANGELOG.md` の **出す版**の節 | `origin/main` の `CHANGELOG.md` に `## [X.Y.Z]` の節が**在る**（⚠ **§5.5 から移した項目**。⛔ ここを通さないと `npm publish` が門で止まる。[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)） |
 
 ### 0.1 `origin/main` の CI が緑であること
 
@@ -556,6 +557,52 @@ git ls-tree --name-only origin/main docs/ | grep release-notes
 
 ⛔ **この文書からそのファイルの中身に踏み込まない**——**何を書くかは、それを書く担い手の判断である。**
 ここで確かめるのは「**在るか**」と「**いま切る tag と合っているか**」の2点だけである。
+
+---
+
+### 0.10 🔴 **出す版の節が `CHANGELOG.md` に在ること**（⚠ §5 から移した項目）
+
+> ⚠ **この項目は、もともと §5.5（リリース後の確認）に在った。**
+> 🔴 **移した理由は1つである——後ろに在ったから、3回とも読まれなかった。**
+> （`v0.3.0` / `v0.4.0` / `v0.5.0`。[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md) 決定4）
+> ⛔ **「あったほうがよい」から前へ出したのではない。**⭐ **確認は、直せる時点に置かなければ働かない。**
+
+**通過条件**: これから切る tag `vX.Y.Z` について、**`origin/main` の `CHANGELOG.md` に
+`## [X.Y.Z]` の節が在ること。**
+
+```bash
+# ⚠ 手元の作業木ではなく origin/main を見る
+git fetch origin main
+TAG=v1.0.0   # ← これから切る tag
+git show origin/main:CHANGELOG.md | grep -n "^## \[${TAG#v}\]" || echo "✗ 節が無い"
+```
+
+#### 🔴 ここを通さないと、`npm publish` が止まる
+
+**同じ述語が `.github/workflows/publish.yml` の門になっている**
+（[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）。
+⟹ **節が無いまま Release を作ると、GitHub Release は公開されるが `npm publish` は落ちる。**
+
+⭐ **落ちても回復できる**: 節を `main` へ入れる PR をマージし、**その Publish の run を再実行する。**
+`npm publish` の段は冪等である（既に上がっている版は飛ばす）⟹ 途中から再開できる。
+⛔ **だが、そこまで行かせないためにこの項目が在る。**
+
+⚠ **節は Release を作る*前*に起こす。**後からしか分からない事実（`published` の時刻・Release へのリンク・
+自動生成本文の行数）は**後から埋めてよい**——**門が見るのは節の存在だけである。**
+
+#### ⚠ §0.8 との違い —— 別の問いである
+
+- **§0.8**: **未リリース節**（`[1.0.0]`）が `origin/main` の現在地に追従しているか。
+- **§0.10**: **出す版の節**（`[X.Y.Z]`）が起きているか。
+
+⟹ ⛔ **§0.8 を通したことは、§0.10 を通したことにならない。**`v0.4.0` は実際にそうなった
+（未リリース節は追従していたが、出した後に誰もその節を `[0.4.0]` へ起こさなかった）。
+
+#### ⛔ 世代（`docs/migration-v1.md`）は、この項目ではない
+
+**移したのは (a)（`CHANGELOG.md` の節）だけである。**
+**(b)（`docs/migration-v1.md` の世代がその版で閉じているか）は §5.5 に残っている**
+——⛔ **機械が見ていない項目であり、出した後にしか確かめられない形のままだからである。**
 
 ---
 
@@ -1941,11 +1988,17 @@ publish そのものは通っている。dist-tag は Release が pre-release �
 
 ### 5.5 ⭐ 出した版に、`CHANGELOG.md` の節と `docs/migration-v1.md` の世代が追随していること
 
+⚠ **【2026-09-21】(a) はこの節から §0.10（tag を切る直前の最終確認リスト）へ移った。**
+🔴 **理由は1つである——後ろに在ったから、3回とも読まれなかった**（`v0.3.0` / `v0.4.0` / `v0.5.0`）。
+⟹ **同じ述語が `publish.yml` の門にもなっている**
+（[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）。
+⛔ **下の記録（「2回続けて落ちている」の表）は書き換えていない**——**当時そう数えたという記録である。**
+
 **通過条件**: 出した tag `vX.Y.Z` について、次の2つが揃っていること。
 
 | | 見るもの | 誰が見るか |
 |---|---|---|
-| **(a)** | `CHANGELOG.md` に **`## [X.Y.Z]` の節が在る** | 機械が通知する（下記）＋人 |
+| **(a)** | ⚠ **この項目は §0.10（tag を切る直前）へ移った** | ⛔ **ここでは見ない**（下記） |
 | **(b)** | `docs/migration-v1.md` の**世代表がその版で閉じている**——出荷済みの破壊的変更が「⛔ まだ出荷されていない」のまま残っていない | 🔴 **人だけ**（機械は見ていない） |
 
 #### 🔴 これは「あったほうがよい」ではない —— **2回続けて落ちている**
@@ -1959,13 +2012,11 @@ publish そのものは通っている。dist-tag は Release が pre-release �
 
 #### 打つもの
 
-```bash
-# (a) 出した版の節が在るか。⚠ 手元ではなく origin/main を見る
-git fetch origin main
-TAG=$(gh release view --repo takecchi/mnemora --json tagName -q .tagName)
-git show origin/main:CHANGELOG.md | grep -n "^## \[${TAG#v}\]" || echo "✗ 節が無い"
+⚠ **(a) のコマンドはここには無い。**⟹ **§0.10 に在る**（tag を切る*前*に打つ項目へ移したため）。
 
+```bash
 # (b) 「未リリース」と名乗っている箇所を全部出す。⭐ 出た版より前の世代に残っていたら不通過
+git fetch origin main
 git show origin/main:docs/migration-v1.md | grep -n "未リリース"
 ```
 
@@ -1989,6 +2040,12 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
   **止まらないから、この §5.5 が要る。**
 - ⛔ **(b) は機械が見ていない。**移行ガイドの項目番号と commit を機械可読に結ぶものが無いためである。
   ⟹ **(b) を「通知が出なかったから大丈夫」と読まないこと。**
+
+⚠ **【2026-09-21 追記】(a) については、別に門が在る。**
+`.github/workflows/publish.yml` が **`npm publish` の前**で同じ述語を当てて落とす
+（[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）。
+⛔ **上の「終了コードは常に 0」は、いまも*通知*についての記述である**——**門は別の道具である。**
+⟹ ⭐ **(a) を通すのは §0.10（tag を切る前）であり、門はその取りこぼしを最後に止めるものである。**
 
 ---
 

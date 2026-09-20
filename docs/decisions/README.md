@@ -275,5 +275,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0249](./0249-release-day-procedure-holds-no-rotting-facts.md) | 当日の手順書は、腐る事実を本文に持たない — その場で引く手順と、抽出を持っている道具への一本化だけを持つ | 採用 (2026-09) |
 | [0250](./0250-machines-detect-humans-confirm-and-write.md) | 機械には「検出」までを担わせる。「確定」と「書き込み」は人に残す — ADR 0223 決定2 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 | [0251](./0251-release-follow-up-notice-not-a-gate.md) | リリース後に「出した版の節が在るか」を通知する — ⛔ 門にはしない。⭐ 分けた線は「確実さ」ではなく「外したときに誰が巻き添えになるか」である | 採用 (2026-09) |
+| [0252](./0252-release-changelog-section-is-a-publish-gate.md) | 出す版の節が `CHANGELOG.md` に無ければ `npm publish` を止める — 🔴 **門にする。⭐ 巻き添えを「確実さを下げる」ではなく「置き場所」で解いた** | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
