@@ -4,6 +4,10 @@
  *
  * ## 🔴 これは門である —— 節が無ければ非 0 で落ちる
  *
+ * ⚠ **「節が在る」は「*出した版の*節が在る」である。**`## [X.Y.Z] - 未リリース` は通さない
+ * ——理由と、否定形ではなく肯定形（`- YYYY-MM-DD` で終わること）にした理由は
+ * `release-changelog-gate-lib.mjs` の docstring に在る。
+ *
  * ⚠ **同じ名前で始まる `check-release-changelog-section.mjs` は門ではない**（終了コードが常に 0 の
  * 通知。[ADR 0251](../docs/decisions/0251-release-follow-up-notice-not-a-gate.md)）。
  * ⛔ **取り違えないこと。**⭐ **述語は同じもの**を使い回している（`release-changelog-gate-lib.mjs` の
