@@ -43,13 +43,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⛔ **`v1.0.0` の tag はまだ切られていない。**
 
-**この節は `v0.4.0` からの差分を対象とする。**⭐ **`v0.3.0` → `v0.4.0` の分は、下の `[0.4.0]` 節に在る**
+**この節は `v0.5.0` からの差分を対象とする。**⭐ **`v0.4.0` → `v0.5.0` の分は、下の `[0.5.0]` 節に在る**
 ——⛔ **この節へ混ぜない。**⟹ **この節に並ぶものは、1件も出荷されていない。**
 
-⭐ **数えた基準を明記する。**この節は `v0.4.0` … **`420e0f4`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v0.5.0` … **`509f4e7`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
-増えただけである。**読む人は `git log --oneline 420e0f4..origin/main` で、その増分を自分で見られる。
+増えただけである。**読む人は `git log --oneline 509f4e7..origin/main` で、その増分を自分で見られる。
 🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**——書いた瞬間、次の1件が着地した時点で腐る
 （[#433](https://github.com/takecchi/mnemora/issues/433) /
@@ -58,35 +58,142 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ⚠ **この pin は `scripts/release-candidates.mjs` の入力でもある**
 （[ADR 0214](./docs/decisions/0214-release-candidates-lists-not-judges.md) 決定5。⛔ 道具は書き換えない）。
 
-### ⭐ この pin の時点で、載せる変更は見つかっていない
+### 🔴 この pin は、`v0.5.0` の tag と同じ commit を指している
 
-**【実測 2026-09-19、`origin/main` = `420e0f4`】**
+**【実測 2026-09-21、`origin/main` = `509f4e7`】**
 
 ```
-$ git rev-list --count v0.4.0..420e0f4                                  → 1
-$ git diff --stat v0.4.0..420e0f4 -- scripts/__snapshots__/public-api/  → （差分なし）
-$ git diff --stat v0.4.0..420e0f4 -- packages/postgres/migrations/      → （差分なし）
+$ git rev-parse origin/main v0.5.0^{commit}   → 2行とも 509f4e739ca1ad017876a5b661062d23c2ead773
+$ git rev-list --count v0.5.0..origin/main    → 0
 ```
 
-範囲内の1件は `test(scripts)`（PR #546）であり、**このファイルが載せると決めている
-「利用者に見える変更」に当たらない**（上の「何を載せるか」／
-[ADR 0243](./docs/decisions/0243-changelog-lists-publish-targets-only.md)）。
-
-⛔ **これを「`v1.0.0` には何も載らない」と読まないこと。**⭐ **pin より後は、まだ数えていない。**
+⟹ 🔴 **`v0.5.0` と `origin/main` のあいだに commit が1本も無い。****この節が空なのは、
+まだ数えていないからではなく、数える範囲そのものが空だからである。**
+⛔ **これは「`v1.0.0` には何も載らない」という予告ではない**——**`main` が動けば増える。**
 ⟹ `v1.0.0` を切る側は、**切る直前にこの pin から数え直すこと**
-（道具は `node scripts/release-candidates.mjs --since v0.4.0`。
+（道具は `node scripts/release-candidates.mjs --since v0.5.0`。
 ⚠ **`--since` を省くと最新リリースの tag が入るので、この pin と一致するとは限らない**）。
+
+⚠ **⟹ いまこの瞬間に `v1.0.0` を切ると、`v0.5.0` の利用者に届く変更は1件も無い。**
+**その場合 `v1.0.0` が節目なのは、コードが変わったからではない。**理由は
+[docs/roadmap.md](./docs/roadmap.md) の §7 と
+[docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。
 
 ⭐ **「`v1.0.0` へ上げるときに何が壊れるか」の正本は
 [docs/migration-v1.md](./docs/migration-v1.md) である**——**あちらは世代ごとに分けてある。**
-🔴 **`v0.3.0` からの利用者が受ける破壊的変更は、この節ではなく下の `[0.4.0]` 節に在る**
-——**`v0.4.0` で出荷済みだからである。**
+🔴 **`v0.4.0` からの利用者が受ける破壊的変更は、この節ではなく下の `[0.5.0]` 節に在る**
+——**`v0.5.0` で出荷済みだからである。**
 
 ⚠ **`v1.0.0` をいつ切るかは、この節を書いた時点で決まっていない。**7項目の現在地は
-[docs/roadmap.md](./docs/roadmap.md) **§7.15** に在る（⚠ **§7.13 ではない**——§7.15 が、
-§7.13 の本文を書き換えずに後から決まったことを積んでいる）。
+[docs/roadmap.md](./docs/roadmap.md) の **§7 の末尾の節**に在る
+（⛔ **節番号を固定で信じないこと**——同文書は前の節を書き換えず、後から決まったことを
+新しい節として積む。⟹ `grep -nE '^### 7\.[0-9]+ ' docs/roadmap.md` の末尾を見ること）。
 **Release 本文の草稿は [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。**
 ⛔ **どちらも件数をここへ写さない**——正は各文書である。
+
+---
+
+## [0.5.0] - 2026-09-21
+
+**Release**: [v0.5.0](https://github.com/takecchi/mnemora/releases/tag/v0.5.0)（pre-release ではない）。
+**tag が指すのは `509f4e7`**、**前の版は `v0.4.0`**（`3cf2663`）。⟹ **この節は
+`v0.4.0` → `v0.5.0` の差分である**（【実測】`git rev-list --count v0.4.0..v0.5.0` = 8）。
+⚠ **published は `2026-09-20T15:25:56Z`（UTC）である**——**見出しの日付は JST**（この repo の
+commit の日付と同じ `+0900`）。🔴 **この版は UTC と JST で日付が1日ずれる**
+——UTC では 9/20、JST では 9/21（00:25）である。⚠ **tag が指す commit 自体の日付は
+`2026-09-19 13:42 +0900` で、さらに前である**——**commit の日と出荷の日は別物である。**
+
+⚠ **GitHub の Release `v0.5.0` の本文は自動生成であり、8 commit を無差別に1行ずつ
+並べたものである**【実測】（`gh release view v0.5.0 --json body -q .body | grep -c '^\* '` = 8）。
+⟹ ⭐ **分類も、docs のみ・テストのみの除外も、この節が初めて与える。**
+
+🔴 **この節も、出荷に遅れて起こしたものである。これで3回目である。**
+`v0.5.0` が published された時点では、`[1.0.0]`（未リリース）の節が逐語で
+「**この節に並ぶものは、1件も出荷されていない**」と名乗り、pin を `v0.4.0 … 420e0f4` に置いていた
+——**どちらも、その時点で既に偽だった。**
+⚠ **同じ形は `v0.3.0`（[Issue #536](https://github.com/takecchi/mnemora/issues/536)）と
+`v0.4.0`（[ADR 0248](./docs/decisions/0248-changelog-and-migration-guide-follow-the-release.md)）でも起きている。**
+⭐ **ただし今回は、リリース直後に機械が名指しで知らせていた**——
+[ADR 0251](./docs/decisions/0251-release-follow-up-notice-not-a-gate.md) の
+「Release follow-up notice」が `v0.5.0` の tag で走り、逐語で
+「**🔴 CHANGELOG.md に `## [0.5.0]` の節が無い。**」と出力して終わっている（⛔ **門ではないので、何も止めていない**）。
+🔴 **⟹ 3回目は「気づけなかった」ではなく「知らされたが、追随が遅れた」である。**
+
+対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
+`@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
+**破壊的変更は `@mnemora/local-embedding` の1本だけに在る**
+（`@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` / `@mnemora/openai` /
+`@mnemora/anthropic` に破壊的変更は無い）。
+
+**postgres 利用者へ**: ⭕ **新しいマイグレーションは無い。**
+【実測】`git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/` は**差分を返さない**。
+⟹ **`v0.4.0` から `v0.5.0` へ上げるのに `migrate` は要らない**
+（⚠ **`v0.3.0` 以前から上げるなら要る**——`0018` が `v0.4.0` に在る。
+[docs/migration-v1.md](./docs/migration-v1.md) を見ること）。
+
+### ⭐ この節が数えた範囲の全体（⛔ 見落としが無いことを、後から検算できる形で残す）
+
+**【実測 2026-09-21】出荷される面のソースを触ったのは、次の2ファイルだけである。**
+
+```
+$ git diff --name-only v0.4.0..v0.5.0 \
+    | grep -E '^(packages|examples|scripts)/' \
+    | grep -vE '__tests__|\.test\.ts|__fixtures__'
+packages/core/src/recall-runtime.ts
+packages/local-embedding/README.md
+packages/local-embedding/src/local-embedding-provider.ts
+scripts/check-release-changelog-section.mjs
+scripts/release-changelog-section-lib.mjs
+
+$ git diff --stat v0.4.0..v0.5.0 -- scripts/__snapshots__/public-api/   → （差分なし）
+$ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/       → （差分なし）
+```
+
+⟹ **`scripts/` の2本は publish 対象の外**（出所は `scripts/publish-targets.mjs` の
+`PUBLISH_TARGETS`。⛔ **本数も名前もここに写さない**——`AGENTS.md`）、
+**`README.md` は挙動ではない** ⟹ ⭐ **残る2ファイルが、下に載せた2件に1対1で対応する。**
+🔴 **そして公開 API の型スナップショットは1バイトも動いていない**
+⟹ ⭐ **「型が変わったのに載っていない」形の見落としは、この世代には無い。**
+⛔ **これは「利用者に見える変更が2件しか在りえない」の証明ではない**——
+**型に現れない挙動の変更は、この2つのコマンドでは捕まらない。**上の一覧を人が読んで分類した。
+
+### Breaking
+
+⭐ **1件である。**⭕ **`v0.4.0` と `v0.5.0` の両端が tag で閉じているので、`main` が動いてもこの数は変わらない。**
+⚠ **正本は [docs/migration-v1.md](./docs/migration-v1.md) の番号付き一覧の 18 であり、
+下の表はその写しである**——**`#` 欄はあちらの通し番号で、この表の中での連番ではない。**
+
+🔴 **この世代は、`[0.4.0]` までと壊れ方の種類が違う**——**型ではなく実行時に壊れる。**
+【実測 2026-09-21】`git diff --stat v0.4.0..v0.5.0 -- scripts/__snapshots__/public-api/` は
+**差分を返さない** ⟹ ⭕ **公開 API の型は1バイトも動いていない。**
+⚠ それでも破壊的として数えるのは、移行ガイドの定義が逐語で
+「**既存の利用者のコードが型検査 *または実行時* に壊れる変更**」だからである。
+
+| # | 変更 | 誰が影響を受けるか | 根拠 |
+|---|---|---|---|
+| 18 | `LocalEmbeddingProvider` のコンストラクタが、**既定と異なる `repo` を `modelId` 無しで渡された宣言**を `throw` で落とすようになった（`@mnemora/local-embedding`） | 🔴 **`repo` を既定以外にし、かつ `modelId` を渡していなかった人だけ。**⭕ `repo` を渡していないなら影響なし。⚠ **該当していた人は元から壊れていた側である**——`repo` は `space.model` に反映されず、別モデルのベクトルが同じ space へ静かに混ざっていた | [ADR 0247](./docs/decisions/0247-local-embedding-repo-model-id-declaration-guard.md) / [#142](https://github.com/takecchi/mnemora/issues/142)（PR #550） |
+
+⚠ **移行手順は複製しない**——直し方は [docs/migration-v1.md](./docs/migration-v1.md) の項目 **18** を見ること。
+⛔ **これを「#142 が解決した」と読まないこと**——#142 は2件を名指ししており、
+**「実 API に一度も当てていない」ほうは手つかずで残っている**（同 Issue はいまも OPEN）。
+
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **連想枠（段3.5）の席が、減衰を含む順位で埋まるようになった**（`@mnemora/core`）。
+  順位キーは `hit.similarity * score.total`（＝ `anchorSimilarity × decay × tagMatch × freshness × strength`）で、
+  `maxCount` を超える候補が在るときに**席に座る記憶が変わる**
+  （[ADR 0246](./docs/decisions/0246-association-rank-includes-decay.md) /
+  [#402](https://github.com/takecchi/mnemora/issues/402)、PR #549）。
+
+  ⚠ **以下は [ADR 0246](./docs/decisions/0246-association-rank-includes-decay.md)「誰が壊れうるか」からの逐語である**
+  ——**この節の書き手はこの変更を作っておらず、自分で測り直してもいない**【受】:
+
+  > **`RecallQuery.association` を渡している呼び手の、返る記憶の顔ぶれが変わりうる。**
+  > … **型は1バイトも変わらない。**新しい欄も新しいつまみも無い ⟹ **破壊的変更ではない。**
+  > … **既定 off なので、`association` を渡していない呼び手は1バイトも影響を受けない。**
+
+  🔴 **この変更は、正典項目4 の判定にも効いている**——経緯は
+  [docs/roadmap.md](./docs/roadmap.md) §7.17 と §7.18 に在る。
 
 ---
 
