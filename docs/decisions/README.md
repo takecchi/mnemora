@@ -280,5 +280,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0254](./0254-no-gate-without-a-false-positive-ceiling.md) | 偽陽性率に上限を置けない検査は門にしない — ADR 0223 決定3 の射程を `AGENTS.md` へ広げる。🔴 ただし線は引けない（Issue #505） | 採用 (2026-09) |
 | [0255](./0255-tools-output-candidates-not-verdicts.md) | 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧として出す。ADR 0223 決定5 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 | [0256](./0256-positive-control-before-claiming-absence.md) | 「出なかった」は「無い」の証明にならない — 先に陽性対照を示す。ADR 0223 決定6 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
+| [0257](./0257-searched-and-found-nothing-versus-did-not-search.md) | 「探したが無かった」と「探していない」を分ける —— 向きが逆の版を書き手自身の調査手続きへ当て直す。ADR 0223 決定10 の射程を `AGENTS.md` へ広げる（Issue #505） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
