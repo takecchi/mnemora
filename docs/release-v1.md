@@ -96,7 +96,11 @@ pnpm run pack:check
 ```
 
 **通過条件**: **exit 0**・違反0件で、6パッケージとも通って
-`✔ publish 梱包の門を通りました。` で終わること。**この門の中身は §2.3 が詳しい。**
+`✔ publish 梱包の門を通りました。` が出ること。**この門の中身は §2.3 が詳しい。**
+⚠ **その後ろに `⚠ この門が見ていない範囲:` の段が続くが、これは赤ではない**——対象が固定リスト
+（`scripts/publish-targets.mjs`）であり、その外の publish 対象には気づけないという断りである
+（[ADR 0259](./decisions/0259-gate-runtime-output-names-its-blind-spot.md)。以前はこの断りが
+doc コメントにしか無かった）。
 
 **DB は要らない。**`pack:check` は registry にもネットワークにも触れず、`spawnSync` で呼ぶのは
 `pnpm pack` と `tar xzf` だけである（§2.3。【読んで確かめた】）。§2.3 の「実際に走らせた結果【実測】」は

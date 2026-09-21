@@ -130,6 +130,36 @@ console.log(
   ].join("\n"),
 );
 
+/**
+ * ⚠ この門が見ていない範囲（ADR 0255「名乗れないものを道具に名乗らせない」への
+ * 反例として ADR 0255 自身が名指しし、成文化した規律に射程通りに違反したまま
+ * 引き受けていた負債。ADR 0259 決定A/B/C/D。Issue #580）。
+ *
+ * **対象は固定リストであり、この門はそのリストの中しか見ていない**——上の冒頭の
+ * doc コメント「対象は固定リストである（動的に発見しない）」が認めている取りこぼしを、
+ * 実行時の出力（成功・失敗どちらの分岐）にも焼く。マーカー行
+ * `⚠ この門が見ていない範囲` は `scripts/check-pr-adr-reference.mjs` と逐語で揃える
+ * （grep 可能にするため。ADR 0259「決定C」）。
+ *
+ * 「いま見た${N}パッケージ」は `PUBLISH_TARGETS` から動的に作る——数を直書きしない
+ * （ADR 0234 決定9・AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。
+ */
+const SCOPE_CAVEAT_MARKER = "⚠ この門が見ていない範囲:";
+
+/** @param {{ name: string; dir: string }[]} targets */
+function buildScopeCaveat(targets) {
+  const names = targets.map((t) => t.name).join(" / ");
+  return [
+    "",
+    SCOPE_CAVEAT_MARKER,
+    "  対象は scripts/publish-targets.mjs の PUBLISH_TARGETS（固定リスト・手で保守）である。",
+    `  いま見たのは ${targets.length} パッケージ（${names}）だけで、`,
+    "  このリストに載っていない publish 対象が在っても、この門は気づけない",
+    "  （publish 対象と非対象を分ける機械的な目印が無い。ADR 0066 / ADR 0255）。",
+    "",
+  ].join("\n");
+}
+
 /** @type {string[]} */
 const violations = [];
 /** @type {{ name: string; version: string }[]} */
@@ -251,7 +281,9 @@ if (violations.length > 0) {
       "",
     ].join("\n"),
   );
+  console.log(buildScopeCaveat(PUBLISH_TARGETS));
   process.exit(1);
 }
 
 console.log(["", BANNER, "✔ publish 梱包の門を通りました。", BANNER, ""].join("\n"));
+console.log(buildScopeCaveat(PUBLISH_TARGETS));
