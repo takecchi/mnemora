@@ -26,6 +26,8 @@ export interface ExampleRuntimeHandle {
   embeddingMode: ProviderMode;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
+  /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
+  cassetteIgnored: boolean;
   /**
    * retrieval-quality（PR 本文 (D)）が memory → observation の系譜を辿るために公開する。
    * `packages/core`/`packages/postgres` は変更していない——`MemoryStore` は元から
@@ -110,8 +112,15 @@ export async function createExampleRuntime(
   const client = createPostgresClient(databaseUrl);
   await runMigrations(client.pool);
 
-  const { llmProvider, embeddingProvider, mode, llmMode, embeddingMode, usageMeter } =
-    createProviders(env, providerOptions);
+  const {
+    llmProvider,
+    embeddingProvider,
+    mode,
+    llmMode,
+    embeddingMode,
+    usageMeter,
+    cassetteIgnored,
+  } = createProviders(env, providerOptions);
   await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
   const memoryStore = new PostgresMemoryStore(client.db);
@@ -135,6 +144,7 @@ export async function createExampleRuntime(
     mode,
     llmMode,
     embeddingMode,
+    cassetteIgnored,
     ...(usageMeter !== undefined ? { usageMeter } : {}),
     memoryStore,
     tenantSettingsStore,

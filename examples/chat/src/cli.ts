@@ -2,6 +2,7 @@
 import { writeFileSync } from "node:fs";
 import type { DecayClock } from "@mnemora/core";
 import { DEFAULT_RECALL_LIMIT, heuristicTokenCounter } from "@mnemora/core";
+import type { Cassette } from "@mnemora/testkit";
 import { CassetteRecorder } from "@mnemora/testkit";
 import { runAssociationArm } from "./association-arm.js";
 import { formatAssociationProbeRunReport } from "./association-format.js";
@@ -59,7 +60,7 @@ import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
 import { buildMnemoraPrompt, ingestConversation, reportMemoryUsage } from "./mnemora-path.js";
 import { TINY_BUDGET_CHARS, runBudgetDemo } from "./budget-demo.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
-import type { ProviderMode } from "./providers.js";
+import type { CreateProvidersOptions, ProviderMode } from "./providers.js";
 import { decideProviderSource, describeProviderSourceReason } from "./providers.js";
 import { buildRetrievalQualityJson } from "./retrieval-json.js";
 import {
@@ -147,23 +148,66 @@ function describeMode(mode: ProviderMode): string {
  * という原則の適用)。`MNEMORA_LLM`/`MNEMORA_EMBEDDING` で LLM と embedding を別々に
  * 上書きできるようになったため、`mode` 1個ではなく `llmMode`/`embeddingMode` を
  * それぞれ表示する。
+ *
+ * ⭐ **`cassetteIgnored` を引数に畳み込む。オプショナルにしない・既定値を持たせない。**
+ * 理由: 「カセットを渡したのに使わなかった」を開示せずに provider バナーを出せる経路を
+ * 作らないため（AGENTS.md「形で塞ぐ」）。呼び出し側は必ず自分の handle
+ * （`ExampleRuntimeHandle`/`AnswerBenchRuntimeHandle`）が持つ `cassetteIgnored` を渡す
+ * ——`providers.ts` の `Providers.cassetteIgnored` の docstring参照。
  */
-function printProviderMode(llmMode: ProviderMode, embeddingMode: ProviderMode): void {
-  console.log(`[provider] LLM       : ${describeMode(llmMode)}`);
-  console.log(`[provider] Embedding : ${describeMode(embeddingMode)}`);
-  if (embeddingMode === "deterministic") {
+function printProviderMode(modes: {
+  llmMode: ProviderMode;
+  embeddingMode: ProviderMode;
+  cassetteIgnored: boolean;
+}): void {
+  console.log(`[provider] LLM       : ${describeMode(modes.llmMode)}`);
+  console.log(`[provider] Embedding : ${describeMode(modes.embeddingMode)}`);
+  if (modes.embeddingMode === "deterministic") {
     console.log(
       "  ⚠ 擬似 embedding は意味的な類似度を表現しないため、このモードでは recall の" +
         "関連度そのものは評価できない（examples/chat/README.md「正直に書くべき限界」参照）。",
     );
   }
+  if (modes.cassetteIgnored) {
+    console.log(
+      "  ⚠ 読み込んだカセットは、この実行では使っていない" +
+        '（llmMode/embeddingMode のどちらも "recorded" でない）。',
+    );
+  }
+}
+
+/**
+ * `resolveRecordedRun` の返り値。**カセットを受け取る唯一の経路が、倒した env を必ず
+ * 一緒に返す**——「名乗ったのに倒し忘れる」形を書けなくする（Issue #577）。
+ */
+interface RecordedRunPlan {
+  /**
+   * provider を構築するときに渡す env。カセットを読めたら `MNEMORA_LLM`/
+   * `MNEMORA_EMBEDDING` を `"recorded"` へ倒してある。カセットを読めなかった
+   * （`decideProviderSource` が `"openai"` を選んだ）ときは `process.env` そのまま。
+   */
+  env: NodeJS.ProcessEnv;
+  /** `createProviders` に渡す options。カセットが無ければ空オブジェクト。 */
+  providerOptions: CreateProvidersOptions;
+  /** カセットを読めたか（呼び出し側が arm を組むときに使う。`runRetrieval` が使う）。 */
+  cassette: Cassette | undefined;
 }
 
 /**
  * この実行が実 API を使うのか、記録の再生を使うのかを決める（ADR 0051 / 0052 / 0068 ③）。
  *
  * **判定そのものは `decideProviderSource`（`providers.ts`）に委ねる**——ここは
- * その結果を画面へ出し、`"recorded"` ならカセットを読むだけの薄い配線に留める。
+ * その結果を画面へ出し、`"recorded"` ならカセットを読んで、それを実際に使うために
+ * 必要な env（`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を `"recorded"` へ倒したもの）まで
+ * 一緒に組み立てる薄い配線に留める。
+ *
+ * ⭐ **名乗ることと env を倒すことを、この関数の中で分離できない形にする（Issue #577）。**
+ * 以前の `resolveCassetteForRun` は「記録した応答を再生する」と画面に出しながら
+ * `Cassette | undefined` だけを返し、それを実際に `"recorded"` として使うための
+ * env の書き換えは呼び出し側の手作業に委ねていた——3箇所の呼び出しのうち `runAnswer`
+ * だけがその手作業を忘れ、画面には再生の宣言を出しながら実際には `deterministic` の
+ * 擬似 provider で走っていた。`RecordedRunPlan.env` を返り値に含めることで、
+ * 呼び出し側が env を組み立て直す必要そのものが無くなる。
  *
  * ⚠ **かつては「キーが在れば無条件に実 API」だった**（`process.env.OPENAI_API_KEY` を
  * 直接見ていた）。そのため `MNEMORA_PROVIDER_SOURCE=recorded` を指定しても、環境に
@@ -171,15 +215,15 @@ function printProviderMode(llmMode: ProviderMode, embeddingMode: ProviderMode): 
  * 使える口」がどこにも無かった(ADR 0068 の背景3)。`decideProviderSource` が
  * `MNEMORA_PROVIDER_SOURCE` を最優先で見るようになったことで、この口が塞がる。
  *
- * 返り値が `undefined` なら実 API を使う、という意味である（挙動は変えていない）。
+ * `cassette` が `undefined` なら実 API を使う、という意味である（挙動は変えていない）。
  */
-function resolveCassetteForRun(target: CassetteTarget) {
+function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
   const decision = decideProviderSource(process.env);
   console.log(
     `[cassette] provider source: ${decision.source}(理由: ${describeProviderSourceReason(decision)})`,
   );
   if (decision.source === "openai") {
-    return undefined;
+    return { env: process.env, providerOptions: {}, cassette: undefined };
   }
   const path = cassettePathFor(target);
   if (!cassetteExists(path)) {
@@ -196,12 +240,16 @@ function resolveCassetteForRun(target: CassetteTarget) {
   console.log(
     "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること。",
   );
-  return cassette;
+  return {
+    env: { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
+    providerOptions: { cassette },
+    cassette,
+  };
 }
 
 async function runChat(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const ctx = { tenantId: `example-chat-${Date.now()}` };
     const conversation = buildConversation(DEFAULT_CHAT_FILLER_PAIRS);
@@ -282,7 +330,7 @@ async function runChat(): Promise<void> {
  */
 async function runScope(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const tenantId = `example-chat-scope-${Date.now()}`;
     const otherTenantId = `${tenantId}-other`;
@@ -307,7 +355,7 @@ async function runScope(): Promise<void> {
  */
 async function runExplain(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const tenantId = `example-chat-explain-${Date.now()}`;
     console.log(
@@ -331,7 +379,7 @@ async function runExplain(): Promise<void> {
  */
 async function runBackfill(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const base = `example-chat-backfill-${Date.now()}`;
     console.log(
@@ -391,7 +439,7 @@ async function runBackfill(): Promise<void> {
  */
 async function runCorrection(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const ctx = { tenantId: `example-chat-correction-${Date.now()}` };
     console.log(
@@ -455,16 +503,11 @@ function printDecayClockNotice(decayClock: DecayClock | undefined): void {
 async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   // `retrieval` と同じ規律（ADR 0051）: キーがあれば実 API、無ければ記録の再生。
-  // **どちらで走ったかは必ず画面に出す。**
-  const cassette = resolveCassetteForRun("compare");
-  const handle = await createExampleRuntime(
-    databaseUrl,
-    cassette
-      ? { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" }
-      : process.env,
-    cassette ? { cassette } : {},
-  );
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  // **どちらで走ったかは必ず画面に出す。**`resolveRecordedRun` が名乗りと env の
+  // 倒しを一緒に返すため、ここでは三項演算子で env を組み立て直す必要が無い。
+  const plan = resolveRecordedRun("compare");
+  const handle = await createExampleRuntime(databaseUrl, plan.env, plan.providerOptions);
+  printProviderMode(handle);
   printDecayClockNotice(decayClock);
   try {
     console.log(
@@ -601,14 +644,14 @@ async function runRetrieval(): Promise<void> {
 
   // **キーがあれば本物、無ければ記録の再生。どちらで走ったかは必ず画面に出す**
   // （黙って別のものへ倒れない、という既存の規律の適用。ADR 0051）。
-  // 判定は `compare` と同じ `resolveCassetteForRun` に寄せてある（ADR 0052 / 0068 ③）。
-  const cassette = resolveCassetteForRun("retrieval");
+  // 判定は `compare` と同じ `resolveRecordedRun` に寄せてある（ADR 0052 / 0068 ③）。
+  const plan = resolveRecordedRun("retrieval");
   // **実行ごとに新しい tenantId を使う（ADR 0068）。**通常利用で2回続けて走らせても、
   // 2回目が DB に残った前回の記憶を「取り込み済み」として素通りし、`ingest` の欄が
   // 逆の結論を印字しないようにするための唯一の直し方——冪等性(externalId の重複排除)
   // 自体は製品として正しい挙動であり、崩さない。
   const runToken = newRunToken();
-  const armSpecs = buildArmSpecs(cassette ? "recorded" : "openai", runToken);
+  const armSpecs = buildArmSpecs(plan.cassette ? "recorded" : "openai", runToken);
 
   // **`MNEMORA_BENCH_CHANNELS` を選べるようにする（ADR 0148、Issue #179）。**
   // 未指定なら `undefined`——`runRetrievalQualityArm` は `channels` を渡さず、
@@ -629,13 +672,13 @@ async function runRetrieval(): Promise<void> {
     const handle = await createExampleRuntime(
       databaseUrl,
       {
-        ...process.env,
+        ...plan.env,
         MNEMORA_LLM: arm.llmOverride,
         MNEMORA_EMBEDDING: arm.embeddingOverride,
       },
-      cassette ? { cassette } : {},
+      plan.providerOptions,
     );
-    printProviderMode(handle.llmMode, handle.embeddingMode);
+    printProviderMode(handle);
     try {
       const report = await runRetrievalQualityArm({
         armLabel: arm.armLabel,
@@ -674,8 +717,8 @@ async function runRetrieval(): Promise<void> {
   if (retrievalJsonPath) {
     const json = buildRetrievalQualityJson({
       reports,
-      providerSource: cassette ? "recorded" : "openai",
-      cassette,
+      providerSource: plan.cassette ? "recorded" : "openai",
+      cassette: plan.cassette,
       measuredAt: new Date(),
       commit: tryGitRevParseHead(process.cwd()),
     });
@@ -718,7 +761,7 @@ async function recordRetrieval(
       { ...process.env, MNEMORA_LLM: arm.llmOverride, MNEMORA_EMBEDDING: arm.embeddingOverride },
       { recorder },
     );
-    printProviderMode(handle.llmMode, handle.embeddingMode);
+    printProviderMode(handle);
     try {
       await runRetrievalQualityArm({
         armLabel: arm.armLabel,
@@ -753,7 +796,7 @@ async function recordCompare(
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
     { recorder },
   );
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const rows = await runComparison(handle.runtime, {
       fillerPairsSequence: DEFAULT_COMPARE_SEQUENCE,
@@ -799,7 +842,7 @@ async function recordAnswer(
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
     { recorder },
   );
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
     const results = await runAnswerBench(
@@ -1015,7 +1058,7 @@ async function runTimeTerm(): Promise<void> {
     {},
     clock,
   );
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     console.log(
       "\n「内容は同一・occurredAt/recordedAt だけ違う」ペアで、" +
@@ -1066,7 +1109,7 @@ async function runValidity(): Promise<void> {
     MNEMORA_LLM: process.env.MNEMORA_LLM ?? "deterministic",
     MNEMORA_EMBEDDING: process.env.MNEMORA_EMBEDDING ?? "deterministic",
   });
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     console.log(
       "\n「内容は同一・validFrom/validUntil だけ違う」ペアで、" +
@@ -1137,7 +1180,7 @@ async function runIdentifierProbes(): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
 
   try {
     console.log(
@@ -1332,7 +1375,7 @@ async function runAssociationProbes(): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
 
   try {
     console.log(
@@ -1453,7 +1496,7 @@ async function runConsolidationCostCommand(): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     console.log(
       "\n[consolidation-cost] warmup() でモデルの読み込みを先に済ませる" +
@@ -1538,7 +1581,7 @@ async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): P
     {},
     clock,
   );
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   printDecayClockNotice(decayClock);
   try {
     console.log(
@@ -1610,13 +1653,24 @@ async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): P
  * 同じ回答モデル・同じ採点基準で、naive(全文経路)と mnemora(記憶経路)の最終回答と
  * 入力量を対で出す——着地しても回答品質は未評価のままである(`AGENTS.md` 冒頭)。
  *
- * **provider は `compare`/`retrieval` と同じ規律**(`createAnswerBenchRuntime` 内部の
- * `createProviders` が、`MNEMORA_LLM`/`MNEMORA_EMBEDDING` の明示指定か、
- * 無指定なら `OPENAI_API_KEY` の有無で決める)。**`record answer`（`recordAnswer`）で
- * カセットを作れる**——作った後は `MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded`
- * を明示すれば、実 API を叩かずに記録を再生できる(ADR 0051)。カセットが無い状態で
- * `MNEMORA_LLM=recorded` を指定すると、既存の挙動どおり `createProviders` の
+ * **provider は `compare`/`retrieval` と同じ規律である**——`resolveRecordedRun` が
+ * 名乗り（画面表示）と env の倒し（`MNEMORA_LLM`/`MNEMORA_EMBEDDING` を `"recorded"`
+ * へ倒すこと）を一緒に返すため、この関数はその返り値をそのまま
+ * `createAnswerBenchRuntime` へ渡すだけでよい。**`record answer`（`recordAnswer`）で
+ * カセットを作れる**——作った後は、キーが環境に無ければ自動的に記録を再生する
+ * （`decideProviderSource` が `no-key` を選ぶ）。`MNEMORA_LLM=recorded
+ * MNEMORA_EMBEDDING=recorded` の明示指定も引き続き効く——`decideProviderSource` は
+ * `MNEMORA_PROVIDER_SOURCE` を見るだけで、`MNEMORA_LLM`/`MNEMORA_EMBEDDING` の
+ * 個別指定を上書きしない（`selectLLMMode`/`selectEmbeddingMode` 参照）。カセットが
+ * 無い状態で `MNEMORA_LLM=recorded` を指定すると、既存の挙動どおり `createProviders` の
  * `requireCassette` がそのまま落ちる。
+ *
+ * ⚠ **かつてはここが `resolveCassetteForRun` の返り値（`Cassette | undefined`）だけを
+ * 読み、env を倒す作業を自分の手で書き忘れていた**（`process.env` をそのまま渡していた）
+ * ——画面には「記録した応答を再生する」と出しながら、実際には `deterministic` の
+ * 擬似 provider で走っていた（Issue #577）。`resolveRecordedRun` に改名し、
+ * `RecordedRunPlan.env` を返り値に含めたことで、この「名乗ったのに倒し忘れる」形は
+ * 書けなくなった。
  *
  * `runtime-factory.ts` の `createExampleRuntime` を使わない理由は
  * `answer-bench.ts` の `createAnswerBenchRuntime` の docstring を見ること
@@ -1626,22 +1680,19 @@ async function runAnswer(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   const measuredAt = new Date();
   const commit = tryGitRevParseHead(process.cwd());
-  // ⭐ `compare`/`retrieval` と同じ配線でカセットを解決する——`MNEMORA_LLM=recorded` を
-  // 指定したときに `createProviders` の `requireCassette` が落ちていたのは、ここで読んで
-  // 渡していなかったからである（器が着地した時点では `answer` 用のカセットが存在せず、
-  // この口を繋ぐ相手が無かった。Issue #506 / 親 #498）。
-  const cassette = resolveCassetteForRun("answer");
-  const handle = await createAnswerBenchRuntime(
-    databaseUrl,
-    process.env,
-    cassette ? { cassette } : {},
-  );
+  // ⭐ `compare`/`retrieval` と同じ配線でカセットを解決する——`resolveRecordedRun` が
+  // 名乗りと env の倒しを一緒に返すため、ここで env を組み立て直す必要が無い
+  // （Issue #577。以前はここで `process.env` をそのまま渡していたために、
+  // 「記録した応答を再生する」と画面に出しながら実際には `deterministic` の
+  // 擬似 provider で走っていた）。
+  const plan = resolveRecordedRun("answer");
+  const handle = await createAnswerBenchRuntime(databaseUrl, plan.env, plan.providerOptions);
   // ⭐ 品質を主張できないモードでは、stdout の先頭で目立たせる(AGENTS.md §5)。
   const banner = formatAnswerQualityBanner(handle.llmMode);
   if (banner) {
     console.log(banner);
   }
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     console.log(
       "\n同じ会話・同じ質問・同じ回答モデル・同じ採点基準で、naive(全文経路)と" +
@@ -1709,7 +1760,7 @@ async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle.llmMode, handle.embeddingMode);
+  printProviderMode(handle);
   try {
     console.log(
       "\n[correction-candidates] warmup() でモデルの読み込みを先に済ませる" +

@@ -93,6 +93,28 @@ export interface Providers {
   embeddingProvider: EmbeddingProvider;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
+  /**
+   * 渡されたカセット（`CreateProvidersOptions.cassette`）が、この実行では
+   * 一度も使われなかったかどうか。
+   *
+   * ⭐ **`requireCassette` の鏡像である。**`requireCassette` は「`recorded` を
+   * 指定したのにカセットが無い」を例外にする——**その逆（カセットを渡したのに
+   * `llmMode`/`embeddingMode` のどちらも `"recorded"` を選ばなかった）は例外にできない。**
+   *
+   * 理由: `cli.ts` の `runRetrieval` の arm A（`llmOverride`/`embeddingOverride` とも
+   * `"deterministic"`）は、`resolveRecordedRun` が返したカセットを**全 arm に**渡す
+   * 配線の下で走る——これは現物を読んで確かめた既存の正当な経路であり（⛔ 走らせて
+   * 確かめてはいない）、arm A がカセットを使わないのは壊れているからではない
+   * （対照群として意図的に擬似 provider のままにしている）。⟹ ここを例外にすると、
+   * いま緑の対照 arm がそのまま落ちる。
+   *
+   * ⟹ 判定（例外）ではなく、出力に焼く候補の一覧として扱う
+   * （ADR 0255 / ADR 0223 決定5「取りこぼしがゼロにならないと分かっている道具に
+   * 『これが全部です』と名乗らせない」の適用——ここでの取りこぼしは「例外にできない
+   * 正当な無視のケースがある」こと自体を指す）。`cli.ts` の `printProviderMode` が
+   * これを画面の警告行として開示する。
+   */
+  cassetteIgnored: boolean;
 }
 
 /** 本物の OpenAI を使う場合のモデル選定。サンプルアプリの裁量値であり、強い根拠は無い。 */
@@ -386,12 +408,18 @@ export function createProviders(
   const llmProvider = buildLLM();
   const embeddingProvider = buildEmbedding();
 
+  // `requireCassette` の鏡像（`Providers.cassetteIgnored` の docstring参照）。
+  // 例外にはできない——`Providers.cassetteIgnored` の docstring の arm A を見ること。
+  const cassetteIgnored =
+    cassette !== undefined && llmMode !== "recorded" && embeddingMode !== "recorded";
+
   return {
     mode,
     llmMode,
     embeddingMode,
     llmProvider,
     embeddingProvider,
+    cassetteIgnored,
     ...(usageMeter !== undefined ? { usageMeter } : {}),
   };
 }

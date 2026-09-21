@@ -205,6 +205,53 @@ describe("createProviders — recorded モード（ADR 0051）", () => {
 });
 
 /**
+ * `Providers.cassetteIgnored`（Issue #577 の増分）。
+ *
+ * **`requireCassette` の鏡像。**`requireCassette` は「`recorded` を指定したのに
+ * カセットが無い」を例外にするが、**その逆（カセットを渡したのに一度も `recorded`
+ * を選ばなかった）は例外にできない**——`cli.ts` の `runRetrieval` の arm A は
+ * `llmOverride`/`embeddingOverride` とも `"deterministic"` のまま、全 arm に同じ
+ * カセットを渡す配線で正しく動いている既存の経路であり、例外にすると arm A が
+ * 落ちる。⟹ ここでは例外を投げないことそのものを固定する。
+ */
+describe("createProviders — cassetteIgnored（ADR 0255 / ADR 0223 決定5の適用。例外にしない）", () => {
+  it("両モードとも recorded なら cassetteIgnored=false（カセットは実際に使われている）", () => {
+    const providers = createProviders(
+      { MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
+      { cassette: minimalCassette() },
+    );
+    expect(providers.cassetteIgnored).toBe(false);
+  });
+
+  it("⭐ 両モードとも deterministic（retrieval の arm A と同じ形）なら cassetteIgnored=true、かつ例外を投げない", () => {
+    expect(() =>
+      createProviders(
+        { MNEMORA_LLM: "deterministic", MNEMORA_EMBEDDING: "deterministic" },
+        { cassette: minimalCassette() },
+      ),
+    ).not.toThrow();
+    const providers = createProviders(
+      { MNEMORA_LLM: "deterministic", MNEMORA_EMBEDDING: "deterministic" },
+      { cassette: minimalCassette() },
+    );
+    expect(providers.cassetteIgnored).toBe(true);
+  });
+
+  it("片方だけ recorded なら cassetteIgnored=false（一部でも使われていれば無視ではない）", () => {
+    const providers = createProviders(
+      { MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "deterministic" },
+      { cassette: minimalCassette() },
+    );
+    expect(providers.cassetteIgnored).toBe(false);
+  });
+
+  it("カセットを渡さなければ cassetteIgnored=false（渡していないものは「無視した」とは言わない）", () => {
+    const providers = createProviders({});
+    expect(providers.cassetteIgnored).toBe(false);
+  });
+});
+
+/**
  * `localEmbeddingCacheDirEnv`（Issue #164 続き）。
  *
  * リテラルの env オブジェクトを `createExampleRuntime` に渡す呼び出し

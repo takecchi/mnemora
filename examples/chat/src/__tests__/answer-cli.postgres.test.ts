@@ -31,6 +31,12 @@ import { requireDatabaseUrl } from "./test-db.js";
  * `retrieval-json-cli-wiring.postgres.test.ts` と同じ規律）。再生元は
  * `examples/chat/cassettes/answer.json`（ADR 0051 / PR #514）。
  *
+ * ⛔ **ただし「既定の道」を測る歯（Issue #577）だけは、塞ぎが1枚しかない。**
+ * あちらが測るのは `MNEMORA_*` を**一切指定しない**ときの挙動であり、
+ * `MNEMORA_PROVIDER_SOURCE=recorded` を置いた時点でその経路ではなくなる。
+ * ⟹ **`OPENAI_API_KEY` を消すことだけが実 API を止めている。**
+ * これは測る対象から来る制約であって、規律を緩めたのではない——**そう名乗っておく。**
+ *
  * ## 🔴 この歯が**主張しないこと** —— ケースごとの正誤を固定しない
  *
  * ⛔ **`summary` の pass/fail の件数も、特定ケースの `verdict` も assert しない。**
@@ -103,14 +109,17 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
         ...process.env,
         DATABASE_URL: requireDatabaseUrl(),
         MNEMORA_PROVIDER_SOURCE: "recorded",
-        // 🔴 **`answer` では `MNEMORA_PROVIDER_SOURCE` だけでは再生にならない。**
-        // `runCompare` は カセットを取れたら `MNEMORA_LLM`/`MNEMORA_EMBEDDING` を
-        // `"recorded"` へ倒してから `createExampleRuntime` を呼ぶが、`runAnswer` は
-        // `process.env` をそのまま `createAnswerBenchRuntime` へ渡すため、モードを
-        // 明示しないと `selectProviderMode` が `deterministic` を返す
-        // (`OPENAI_API_KEY` が無いので)。⟹ `runAnswer()` の docstring が
-        // 「`MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded` を明示すれば」と
-        // 書いているのは、この差のことである。**明示する側が、記録を再生する道である。**
+        // ⚠ **この明示指定は、もう「再生するために要るもの」ではない**（Issue #577 の
+        // 直しより後）。`resolveRecordedRun` がカセットを取れたら `MNEMORA_LLM`/
+        // `MNEMORA_EMBEDDING` を `"recorded"` へ自分で倒すため、指定しなくても再生になる
+        // ——それを固定するのが下の「MNEMORA_* を一切指定しなくても」の歯である。
+        // ⟹ ここに残してあるのは、**明示指定の道も引き続き効くこと**を測るためである
+        // （`resolveRecordedRun` が倒した値と、利用者が明示した値が一致する側）。
+        //
+        // 🔴 **かつてはこれが必須だった。** `runAnswer` が `process.env` をそのまま
+        // `createAnswerBenchRuntime` へ渡していたため、明示しないと `selectProviderMode`
+        // が `deterministic` を返し（`OPENAI_API_KEY` が無いので）、画面には
+        // 「記録した応答を再生する」と出ながら擬似 provider で走っていた（Issue #577）。
         MNEMORA_LLM: "recorded",
         MNEMORA_EMBEDDING: "recorded",
       };
@@ -187,6 +196,76 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
       ).toBe(0);
       expect(withoutEnv.stdout).not.toContain("[answer] 機械可読な結果を書き出した");
       expect(existsSync(rmJsonPath)).toBe(false);
+    },
+    CLI_TIMEOUT_MS,
+  );
+
+  /**
+   * ⭐ Issue #577 の直しそのものを、既定の道（明示指定なし）で固定する歯。
+   *
+   * **上のケースとの違いは1点だけ**: `MNEMORA_LLM`/`MNEMORA_EMBEDDING`/
+   * `MNEMORA_PROVIDER_SOURCE` の**どれも指定しない**。`DATABASE_URL` だけを渡し、
+   * `OPENAI_API_KEY` は（実行環境に在ると実 API に倒れてしまうため）明示的に落とす。
+   * `resolveRecordedRun` は `decideProviderSource` が `OPENAI_API_KEY` 無しから
+   * 導く `{ source: "recorded", reason: "no-key" }` を読んでカセットを解決し、
+   * `MNEMORA_LLM`/`MNEMORA_EMBEDDING` を自分で `"recorded"` へ倒す——**この経路が
+   * 直る前は、`runAnswer()` がその倒した env を使わず `process.env` をそのまま
+   * 渡していたため、画面には「記録した応答を再生する」と出ながら実際には
+   * `deterministic` の擬似 provider で走っていた（Issue #577 の芯）。**
+   *
+   * ⟹ ここで確かめるのは「画面の主張」と「実際に走った provider」が一致すること
+   * ——`[cassette]` の宣言だけでなく、`[provider] LLM` 行が擬似 provider を
+   * 名乗っていないこと、そして `MNEMORA_ANSWER_JSON` の `llmMode`/`embeddingMode`
+   * が実際に `"recorded"` であることを、直接見る。
+   *
+   * ⚠ **tenant の干渉について検討した結果**: `runAnswerCase` の tenant は
+   * `${tenantPrefix}-${answerCase.id}`（`tenantPrefix="answer-bench"`固定）で、
+   * この歯は上のケースと**同じ tenant** を使う。上のケースの docstring（45-54行）が
+   * 警告する干渉は「同じ DB に別の埋め込みモードで先に走らせてある」場合——
+   * だがこの歯は明示指定を一切しないだけで、(お) の直しにより実際に選ばれる
+   * embeddingMode は上のケースと同じ `"recorded"`（256次元）になる。⟹ **モードが
+   * 一致しているため、実行順に関わらず干渉しない**（上のケースの「⭐ 同じモードでの
+   * 連続実行は冪等である」実測がそのまま当てはまる）。この歯を後から走らせても、
+   * 先に走らせても、埋め込みモードが変わらない限り壊れない。
+   */
+  it(
+    "MNEMORA_* を一切指定しなくても recorded で走り、画面と実際の provider が一致する（Issue #577）",
+    () => {
+      workDir = mkdtempSync(join(tmpdir(), "answer-cli-default-env-"));
+      const jsonPath = join(workDir, "answer.json");
+
+      const env: Record<string, string | undefined> = {
+        ...process.env,
+        DATABASE_URL: requireDatabaseUrl(),
+        MNEMORA_ANSWER_JSON: jsonPath,
+      };
+      // 🔴 **ここでは `OPENAI_API_KEY` を消すことだけが実 API を止めている**
+      // ——`MNEMORA_PROVIDER_SOURCE=recorded` を置けば二重に塞げるが、それを置くと
+      // 「既定の道」ではなくなり、この歯が測ろうとしているものが消える（冒頭 docstring）。
+      // `MNEMORA_LLM`/`MNEMORA_EMBEDDING`/`MNEMORA_PROVIDER_SOURCE` は、実行環境から
+      // 紛れ込むと既定の道でなくなるため、明示的に落とす。
+      delete env.OPENAI_API_KEY;
+      delete env.MNEMORA_LLM;
+      delete env.MNEMORA_EMBEDDING;
+      delete env.MNEMORA_PROVIDER_SOURCE;
+
+      const result = runAnswerCli(env);
+      expect(result.status, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`).toBe(0);
+
+      // 🔴 画面は「記録の再生」を宣言している。
+      expect(result.stdout).toContain("[cassette] 記録した応答を再生する");
+
+      // 🔴 これが Issue #577 の芯——画面の provider 行が、宣言と矛盾する
+      // 「決定的な擬似 provider」を名乗っていないこと。
+      expect(result.stdout).toContain(
+        "[provider] LLM       : 記録した実 API 応答の再生（ADR 0051）",
+      );
+      expect(result.stdout).not.toContain("決定的な擬似 provider");
+
+      const json = JSON.parse(readFileSync(jsonPath, "utf8"));
+      expect(json.qualityClaimable).toBe(true);
+      expect(json.llmMode).toBe("recorded");
+      expect(json.embeddingMode).toBe("recorded");
     },
     CLI_TIMEOUT_MS,
   );
