@@ -1544,11 +1544,10 @@ jobs:
               exit "${CODE}"
               ;;
           esac
-
-      - name: Job Summary の現物をログへ出す(観測のため)
-        if: always()
-        run: |
-          echo "----- GITHUB_STEP_SUMMARY の中身 -----"
+          # ⚠ ここで読むこと。$GITHUB_STEP_SUMMARY は**ステップごとに別ファイル**であり、
+          # 後続の別ステップから cat しても、この段が書いた行は見えない(1回目の観測で
+          # 実際に空が出た)。
+          echo "----- この段が書いた GITHUB_STEP_SUMMARY の中身 -----"
           cat "$GITHUB_STEP_SUMMARY"
           echo "----- ここまで -----"
 
@@ -1589,10 +1588,6 @@ jobs:
               exit "${CODE}"
               ;;
           esac
-
-      - name: Job Summary の現物をログへ出す(観測のため)
-        if: always()
-        run: |
-          echo "----- GITHUB_STEP_SUMMARY の中身 -----"
-          cat "$GITHUB_STEP_SUMMARY"
-          echo "----- ここまで -----"
+          # ⛔ ここには到達しない(上の case が exit する)。⟹ 赤の枝は Job Summary に
+          # 1行も書かない設計であり、$GITHUB_STEP_SUMMARY はステップごとに別ファイルなので
+          # 別ステップから覗いても何も分からない。
