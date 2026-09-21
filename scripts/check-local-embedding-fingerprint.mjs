@@ -40,12 +40,30 @@
  * | (2) | tree API に届かない（再試行3回を尽くしてもネットワーク失敗） | 保留 | `2` |
  * | (2) | 🔴 **tree API が非2xx（404 を含む）を返す** | **保留** | **`2`** |
  * | (2) | 🔴 **tree API が 200 を返したが、応答が配列でない** | **保留** | **`2`** |
+ * | (2) | 🔴 **tree のエントリから hash を取れない（`oid` も `lfs.oid` も無い）** | **判定は変えない。⚠ 理由を必ず印字** | — |
+ * | (2) | 🔴 **tree のエントリが file でも directory でもない（type/path が想定と違う）** | **判定は変えない。⚠ 理由を必ず印字** | — |
  * | — | この CLI 自身のバグ・想定外の例外・不明な引数 | 実行時エラー | `3` |
  *
- * 🔴 **下2行は、2026-09-21 まで判定表に行が無かった**（Issue #586）。**実装は最初から
- * そう倒れていたのに、表がそれを書いていなかった。** ⟹ **表が実装の射程を覆って
- * いなかったのであって、実装が勝手に振る舞っていたのではない。** 行を足したのは
- * 「何が保留になるか」を読む人が表だけで知れるようにするためである。
+ * 🔴 **tree API の非2xx／応答が配列でない の2行は、2026-09-21 まで判定表に行が
+ * 無かった**（Issue #586 発見1）。**実装は最初からそう倒れていたのに、表がそれを
+ * 書いていなかった。** ⟹ **表が実装の射程を覆っていなかったのであって、実装が
+ * 勝手に振る舞っていたのではない。**
+ *
+ * ## ⚠ 「判定は変えない。理由を必ず印字」の2行について（Issue #586 発見2）
+ *
+ * **これらは exit コードを持たない。** {@link buildExpectedByPath} が読み飛ばすので、
+ * **対応する手元のファイルが在れば `unknownOnDisk`（素性不明）として赤になり、
+ * 無ければ判定は動かない。** ⟹ **結果として fail-safe である（黙って緑にならない）。**
+ *
+ * 🔴 **だが 2026-09-21 まで、読み飛ばしたこと自体がどこにも出ていなかった。** 出るのは
+ * 「素性不明（HF の tree に無い）」だけで、**読んだ人は「キャッシュが汚れた」と読む——
+ * 真因（HF の応答の形が変わった）に辿り着けない。** ⟹ {@link formatSkippedTreeEntries}
+ * が件数と理由を必ず印字するようにした。⛔ **判定は1つも変えていない。変えたのは診断だけ。**
+ *
+ * ⭐ **なぜ「全件読み飛ばし」を保留にしないか**: 保留は「HF に届かない／tree を読めない」
+ * に取ってある。**配列は届いていて、中身も数えられている**——読めなかったのではなく、
+ * **知っている形と違った**のである。⟹ そこを保留に倒すと、#586 が名指しした
+ * 「黙って緑に近い状態で通る」を、別の入口から作り直すことになる。**赤のままにする。**
  *
  * ## ⭐ 保留（exit 2）に倒してよいものの境界
  *
@@ -252,24 +270,86 @@ async function fetchTreeWithRetry(url) {
 
 /**
  * HF の tree エントリの配列から `path -> {algorithm, hex}` の Map を作る。
- * `type: "directory"` の要素・oid が取れない要素は無視する
- * （`expectedHashOfTreeEntry` が `null` を返すもの）。
+ *
+ * 🔴 **読み飛ばしたものを黙って捨てない**（Issue #586 発見2、ADR 0253 追記2）。
+ *
+ * 以前はここが `if (expected)` で **oid を取れないエントリを無言で落としていた。**
+ * ⟹ HF が `oid` / `lfs.oid` の返し方を変えると、そのエントリが期待値から消え、
+ * 対応する手元のファイルが `unknownOnDisk`（素性不明）として**赤**になる。
+ * ⭕ **赤になること自体は正しい**（fail-safe。黙って緑にはならない）。
+ * 🔴 **だが出る文面が「素性不明（HF の tree に無い）」だったので、読んだ人は
+ * 「キャッシュが汚れた」と読む——真因（HF の応答の形が変わった）に辿り着けない。**
+ *
+ * ⟹ **読み飛ばした件数と理由を持ち回り、呼び出し側が文面に出す。**
+ * ⛔ **判定（verdict）は変えていない**——変えるのは診断だけである。
+ *
+ * ⚠ **`type: "directory"` は正常なので数えない。** 数えるのは次の2つだけ:
+ *
+ * - `noOid`: `type: "file"` で `path` も在るのに、`oid` も `lfs.oid` も取れない
+ *   （{@link expectedHashOfTreeEntry} が `null` を返す）。**HF が hash の返し方を
+ *   変えた**ときにここが増える。
+ * - `unrecognized`: オブジェクトではあるが、file でも directory でもない／`path` が
+ *   無い。**HF がフィールド名そのものを変えた**ときにここが増える。
  *
  * @param {unknown[]} entries
- * @returns {Map<string, { algorithm: string, hex: string }>}
+ * @returns {{ map: Map<string, { algorithm: string, hex: string }>, noOid: string[], unrecognized: number }}
  */
 function buildExpectedByPath(entries) {
   const map = new Map();
+  const noOid = [];
+  let unrecognized = 0;
   for (const entry of entries) {
-    if (!entry || typeof entry !== "object" || entry.type !== "file" || !entry.path) {
+    if (!entry || typeof entry !== "object") {
+      unrecognized += 1;
+      continue;
+    }
+    if (entry.type === "directory") {
+      // 正常。tree にはディレクトリも並ぶ。
+      continue;
+    }
+    if (entry.type !== "file" || !entry.path) {
+      unrecognized += 1;
       continue;
     }
     const expected = expectedHashOfTreeEntry(entry);
     if (expected) {
       map.set(entry.path, expected);
+    } else {
+      noOid.push(entry.path);
     }
   }
-  return map;
+  return { map, noOid, unrecognized };
+}
+
+/**
+ * 読み飛ばしたエントリを、人が真因に辿り着ける文面にする。読み飛ばしが無ければ空配列。
+ *
+ * ⭐ **緑のときにも出す。** 「手元に対応するファイルが無かったので赤にならなかった」
+ * だけかもしれず、**そのときこそ黙ってはいけない**（形の変化の予兆である）。
+ *
+ * @param {{ noOid: string[], unrecognized: number }} skipped
+ * @returns {string[]}
+ */
+function formatSkippedTreeEntries(skipped) {
+  const lines = [];
+  if (skipped.noOid.length > 0) {
+    lines.push(
+      `⚠ HF の tree に、hash を取れないエントリが ${skipped.noOid.length} 件あった` +
+        "（oid も lfs.oid も無い）。⟹ **Hugging Face の応答の形が変わった可能性がある。**" +
+        "これらは期待値を作れないので照合の対象から外れている——" +
+        "対応する手元のファイルは「素性不明」として数えられる。",
+    );
+    for (const path of skipped.noOid) {
+      lines.push(`  hash を取れなかった tree エントリ: ${path}`);
+    }
+  }
+  if (skipped.unrecognized > 0) {
+    lines.push(
+      `⚠ HF の tree に、file でも directory でもないエントリが ${skipped.unrecognized} 件あった` +
+        "（type/path が想定と違う）。⟹ **Hugging Face の応答の形が変わった可能性がある。**",
+    );
+  }
+  return lines;
 }
 
 /**
@@ -391,7 +471,11 @@ async function main() {
     return;
   }
 
-  const expectedByPath = buildExpectedByPath(treeResult.entries);
+  const { map: expectedByPath, ...skipped } = buildExpectedByPath(treeResult.entries);
+  // 🔴 読み飛ばしは、緑でも赤でも必ず出す（Issue #586 発見2）。⛔ 判定は変えない。
+  for (const line of formatSkippedTreeEntries(skipped)) {
+    console.error(line);
+  }
   const repoDir = join(cacheDir, repo);
   const { actual, unreadable } = collectActualFiles(repoDir, expectedByPath);
 
@@ -410,7 +494,11 @@ async function main() {
 
   if (args.json) {
     console.log(
-      JSON.stringify({ repo, cacheDir, repoDir, apiBase, unreadable, ...result }, null, 2),
+      JSON.stringify(
+        { repo, cacheDir, repoDir, apiBase, unreadable, skippedTreeEntries: skipped, ...result },
+        null,
+        2,
+      ),
     );
   }
 
