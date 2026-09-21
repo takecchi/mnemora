@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -679,6 +679,13 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
   });
 });
 
+/**
+ * ⚠ **失敗（EXIT=1）側の実行時出力を測る歯は、このファイルではなく
+ * `scripts/__tests__/check-publish-pack-failure-output.test.mjs` に在る**
+ * ——理由はそちらのファイル冒頭に書いた（このファイルは
+ * `scripts/__tests__/publish-targets.test.mjs` にソースを走査されており、
+ * publish 対象の形をしたリテラルを増やせない）。
+ */
 describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起動する）", () => {
   it("本物どおり起動すると EXIT=0 になる", () => {
     const result = spawnSync(process.execPath, [gate], {
@@ -713,68 +720,4 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
       expect(output).toContain(target.name);
     }
   }, 120_000);
-});
-
-/**
- * ⚠ この門が見ていない範囲——失敗（EXIT=1）側の実行時出力を測る歯。
- *
- * `scripts/__tests__/check-pr-adr-reference.test.mjs` と同じ形（本物の `.mjs` を
- * 一時ディレクトリへコピーし、合成環境で動かす）を踏襲する。`publish-targets.mjs` を
- * 「存在しないディレクトリを指す1パッケージだけの合成版」へ差し替えると、
- * `pnpm pack` の spawn 自体が ENOENT で失敗し（`cwd` が存在しないため）、
- * `packOne()` が投げた例外を `violations` へ積んで exit 1 になる——本物の
- * `pnpm pack` プロセスは1つも起動しないので速い（手元で実測 約40ms）。
- */
-describe("scripts/check-publish-pack.mjs（合成 publish-targets.mjs で失敗分岐を実行時に測る）", () => {
-  /** @type {string | undefined} */
-  let workDir;
-
-  afterEach(() => {
-    if (workDir) {
-      rmSync(workDir, { recursive: true, force: true });
-      workDir = undefined;
-    }
-  });
-
-  function buildBrokenTargetFixture() {
-    workDir = mkdtempSync(join(tmpdir(), "check-publish-pack-broken-target-"));
-    const scriptsDir = join(workDir, "scripts");
-    mkdirSync(scriptsDir, { recursive: true });
-    copyFileSync(
-      fileURLToPath(new URL("../check-publish-pack.mjs", import.meta.url)),
-      join(scriptsDir, "check-publish-pack.mjs"),
-    );
-    copyFileSync(
-      fileURLToPath(new URL("../publish-pack-checks.mjs", import.meta.url)),
-      join(scriptsDir, "publish-pack-checks.mjs"),
-    );
-    writeFileSync(
-      join(scriptsDir, "publish-targets.mjs"),
-      [
-        "// 合成フィクスチャ: 実在しないディレクトリを指す唯一の publish 対象。",
-        "export const PUBLISH_TARGETS = [",
-        '  { name: "@mnemora/does-not-exist", dir: "packages/does-not-exist" },',
-        "];",
-        "",
-      ].join("\n"),
-    );
-    return workDir;
-  }
-
-  it("EXIT=1 になり、失敗時の実行時出力にも同じ断りが焼かれている", () => {
-    const dir = buildBrokenTargetFixture();
-    const result = spawnSync(process.execPath, [join(dir, "scripts", "check-publish-pack.mjs")], {
-      cwd: dir,
-      encoding: "utf8",
-    });
-    const output = `${result.stdout}${result.stderr}`;
-
-    expect(result.status, `EXIT=1 を期待した。出力:\n${output}`).toBe(1);
-    expect(output).toContain("✗ 違反が");
-    expect(output).toContain("⚠ この門が見ていない範囲:");
-    expect(output).toContain("scripts/publish-targets.mjs の PUBLISH_TARGETS");
-    expect(output).toContain("固定リスト");
-    expect(output).toContain("いま見たのは 1 パッケージ");
-    expect(output).toContain("@mnemora/does-not-exist");
-  });
 });

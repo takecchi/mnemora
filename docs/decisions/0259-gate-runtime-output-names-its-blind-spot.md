@@ -105,6 +105,14 @@ $ node scripts/check-publish-pack.mjs   # 合成 publish-targets.mjs 使用
 - **`publish-targets.mjs` の対象を機械的に発見する目印が将来見つかったとき。**⟹ `check-publish-pack.mjs` の断りは「機械的な目印が無い」という前提を失う。
 - **他の門にも同じ形の欠落が見つかり、3本目以降が同じマーカー行を使い始めたとき。**⟹ 「2本で共有モジュールを作らない」という決定D の理由（109〜131行目の引用保護）は3本目には当てはまらない可能性があり、そのときは共有モジュール化を検討し直す価値がある。
 
+### 4. 🔴 歯を置く場所が、別のファイルの歯とぶつかった（CI が最初に見つけた）【実測】
+
+**失敗分岐の歯を `scripts/__tests__/check-publish-pack.test.mjs` の中へ書いたところ、`scripts/__tests__/publish-targets.test.mjs` が赤くなった。** 同ファイルは **`check-publish-pack.test.mjs` のソースを正規表現で走査し、直書きされた `{ name: "@mnemora/…", dir: "packages/…" }` の件数が `PUBLISH_TARGETS` と一致すること**を測っている（写しが2つ在ることを承知のうえで、ずれたまま気づかないのを防ぐ歯）。⟹ 合成フィクスチャの1件が7件目として数えられ、`expected 7 to be 6` で落ちた。
+
+**採った直し方**: **走査の対象ではない別ファイル（`scripts/__tests__/check-publish-pack-failure-output.test.mjs`）へ移した。** ⛔ **走査される側の書き方を変えて避ける道は採らない**——リテラルの形を崩して正規表現に当たらなくするのは、**既存の歯の目をくぐる形**であり、次に本物の7本目が同じ書き方で足されたときに気づけなくなる。
+
+⚠ **この衝突は、変更したファイルを名指しした手元の実行では出なかった。CI が最初に見つけた。** ⟹ 🔴 **「自分が変えたファイルの歯」を走らせるだけでは足りない——*自分が変えたファイルを読んでいる他のファイルの歯*が在りうる。**この repo では `grep -rln "<変えたファイル名>" scripts/__tests__/` でその結合を先に洗える（この ADR の後半でそう洗い直した）。
+
 ## 確かめたこと
 
 - **【実測】`ls docs/decisions/ | sort` の最大が `0257`、`node scripts/adr-renumber.mjs --next` が `0259`、`gh pr list --state open` が主張する最大の ADR 番号が `0258`（PR #573 のタイトル）であることを確認した。** 3つの答えは食い違った——単純な「最大+1」（`0258`）は、まだ `main` に着地していない open PR が既に取っている番号と衝突する。`adr-renumber.mjs --next` は open PR の主張を内部で勘定に入れたうえで `0259` を返しており、これは `gh pr list` の実測と整合する。⟹ **一番大きい数（0258 が使用中）の次である `0259` を採った。**
@@ -112,7 +120,8 @@ $ node scripts/check-publish-pack.mjs   # 合成 publish-targets.mjs 使用
 - **【実測】`scripts/check-pr-adr-reference.mjs` の成功時・失敗時の両方で、実行時出力に断りが出ることを、`scripts/__tests__/check-pr-adr-reference.test.mjs` と同じ合成 git 履歴フィクスチャで確認した。**
 - **【実測】`sed -n '109,131p' scripts/check-publish-pack.mjs` を変更前後で比較し、この範囲が文字単位で同一であることを確認した。**
 - **【実測】5種の変異試験**（(a) 成功分岐の断りを消す (b) 失敗分岐の断りを消す（`check-publish-pack.mjs`） (c) 成功分岐の断りを消す (d) 失敗分岐の断りを消す（`check-pr-adr-reference.mjs`） (e) マーカー行の文言を片方だけ変える）**を、それぞれ `cp` で退避 → 変異 → 対象の歯だけ実行 → `cp` で復元 → `git status --porcelain` で意図した差分のみに戻ったことを確認する手順で行い、狙った歯だけが red になり、復元後に green へ戻ることを確認した**（詳細はマネージャーへの報告に記録。`git checkout` は使っていない）。
-- **【実測】`pnpm exec prettier --check` と、変更した3本のテストファイル + `scripts/__tests__/adr-citation.test.mjs` + `scripts/__tests__/adr-duplicate-number.test.mjs` を対象を名指しして実行し、全て green であることを確認した。**
+- **【実測】`grep -rln` で、変更したファイル名を読んでいる歯を洗い直し（`adr-citation` / `adr-renumber-lib` / `check-cjs-transpile-parse` / `check-pr-adr-reference-lib` / `publish-targets` / `local-embedding-size-noun-correspondence`）、`scripts/__tests__` 配下をまとめて走らせて green を確認した。**
+- **【実測】`pnpm exec prettier --check` と、変更した4本のテストファイル + `scripts/__tests__/adr-citation.test.mjs` + `scripts/__tests__/adr-duplicate-number.test.mjs` を対象を名指しして実行し、全て green であることを確認した。**
 - **【実測】`git diff --name-only origin/main...HEAD` を `packages/` に絞って確認し、該当が無いことを確認した。**
 - **【実測】この2本の出力の逐語を引いている生きた文書を `grep` で洗い直した**（`grep -rn "publish 梱包の門を通りました" docs/`）。当たったのは `docs/release-v1.md` の4箇所と ADR 5本（0115 / 0138 / 0150 / 0181 / 0205。**この ADR 自身の4箇所は除く**——この文を書いた後に自分も当たるようになった）。⟹ **うち「通過条件」として*これから*の実行に当てているのは `docs/release-v1.md` §0.2 の1箇所だけ**（残りは過去の実行の記録であり、当時の出力としては真のまま）。その1箇所を直した（決定D）。**陽性対照**: 同じ `grep` は ADR 0138 / 0150 / 0181 / 0205 / 0115 にも当たっており、0件ではない——探し方は生きている（[ADR 0257](./0257-searched-and-found-nothing-versus-did-not-search.md)）。
 
