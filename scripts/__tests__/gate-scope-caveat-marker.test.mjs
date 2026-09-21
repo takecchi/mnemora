@@ -6,9 +6,10 @@ import { describe, expect, it } from "vitest";
  * `scripts/check-publish-pack.mjs` と `scripts/check-pr-adr-reference.mjs` は、
  * ADR 0255「名乗れないものを道具に名乗らせない」への反例として ADR 0255 自身が
  * 名指しした2本である（決定5「測ったこと」2節）。ADR 0259 が両方の実行時出力へ
- * 断りを焼いたが、**2本のあいだで共有モジュールは作らない**（`scripts/check-publish-pack.mjs`
- * の冒頭バナー — `docs/release-v1.md:1119` が行番号で引用している 109〜131行目 — より
- * 上に import を1行も足せないため。ADR 0259「決定D」）。
+ * 断りを焼いたが、**2本のあいだで共有モジュールは作らない**——`docs/release-v1.md` が
+ * `scripts/check-publish-pack.mjs` の冒頭バナーを**行番号つきで**引用しているため、
+ * バナーより上に import を1行も足せない（行番号は動くので、ここには写さない。
+ * 現物を見ること。ADR 0234 決定9 / ADR 0259「決定D」）。
  *
  * その代わりに、**マーカー行だけを逐語で揃える**（`grep` で横断できるように。
  * ADR 0259「決定C」）。この歯は、2本のソースにそれぞれ持たせた

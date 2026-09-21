@@ -73,13 +73,14 @@ $ node scripts/check-publish-pack.mjs   # 合成 publish-targets.mjs 使用
 - `check-publish-pack.mjs` の成功行 `✔ publish 梱包の門を通りました。` はそのまま残す——`docs/release-v1.md` ほか複数の ADR がこの文字列を逐語で引用している。新しい行はその**後**に足した。
 - `check-pr-adr-reference.mjs` の `OK: …` 行も残し、後ろに足した。
 - **`check-publish-pack.mjs` の冒頭バナーの `console.log(` は 109〜131行目に在り、`docs/release-v1.md` がその行番号でこのバナーを引用している。** ⟹ **109行目より上に1行も足していない**（import も含む）。新しい定数（`SCOPE_CAVEAT_MARKER` / `buildScopeCaveat`）は131行目の `);` より下、`violations` 配列の定義の手前に置いた。実装後に `sed -n '109,131p' scripts/check-publish-pack.mjs` を実行し、この範囲が変更前と文字単位で同一であることを確認した（下の「確かめたこと」）。
+- 🔴 **ただし `docs/release-v1.md` §0.2 の「通過条件」は、この変更で偽になった**——「`✔ publish 梱包の門を通りました。` で*終わる*こと」と書かれており、断りを判定の後ろへ置いた以上、もう最後の行ではない。⟹ **同節を「が出ること」へ直し、後ろに続く断りが赤ではないことを明記した。**⭐ **出力を変える変更は、その出力を逐語で引いている生きた文書の主張を偽にしうる**——引用元を `grep` で洗い直してから直した（`docs/release-v1.md` の他3箇所は過去の実行の記録であり、当時の出力としては依然として真なので触っていない）。
 - **この制約から、2本で共有するモジュールは作らなかった。**モジュールを切り出すと `check-publish-pack.mjs` の import 行が増え、109行目より上が動く。各スクリプトにローカルな `SCOPE_CAVEAT_MARKER` 定数を持たせ、**文言の一致は歯で縛る**（決定C）ことで、行番号を動かさずに書式を揃えた。
 
 ### 決定E. 各ファイルの断りの中身
 
 **`check-publish-pack.mjs`**: 対象が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS`（固定リスト・手で保守）であること、いま見たパッケージ数と名前一覧、このリストに載っていない publish 対象には気づけないこと。**パッケージ数と名前一覧は `PUBLISH_TARGETS` から動的に組み立て、数を直書きしていない**（[ADR 0234](./0234-bake-no-numbers-into-tools-and-artifacts.md) 決定9・`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」への自己適用）。
 
-**`check-pr-adr-reference.mjs`**: 見たのが「この CI 実行を起こした push の時点」の PR タイトル・本文だけであること、最後の緑の push の後にタイトル・本文を編集すると検査が効かないこと（`ci.yml` の `pull_request` トリガーに `edited` を足していないため）、直してから push し直すという儀式の順序に依拠していること。**失敗分岐に既に在った同趣旨の段落（マーカー行を持たない自由文）は、重複させず、この共通マーカー行を持つ1ブロックへ書き換えて統合した**（「直し方: gh pr edit …」の指示部分は変更していない）。
+**`check-pr-adr-reference.mjs`**: 見たのが「この CI 実行を起こした push の時点」の PR タイトル・本文だけであること、最後の緑の push の後にタイトル・本文を編集すると検査が効かないこと（`ci.yml` の `pull_request` トリガーに `edited` を足していないため）、直してから push し直すという儀式の順序に依拠していること。**失敗分岐に既に在った同趣旨の段落（マーカー行を持たない自由文）は、2つに分けた**——(1) 「この門が見ていない範囲」（push の後の編集は見ていない）は共通マーカー行を持つブロックへ、(2) 「なぜ *いま* 直す必要があるか」（squash merge のタイトル・本文はマージ実行時点の PR タイトル・本文からそのまま作られ、マージ後は履歴になって直せない）は「直し方:」の側へ残した。⭐ **この2つは別の事実である**——前者はこの道具の取りこぼし、後者は直す動機であり、後者を落とすと失敗出力だけを読む人が「なぜ赤なのか」を失う。
 
 ## 検討して採らなかった案
 
@@ -96,7 +97,7 @@ $ node scripts/check-publish-pack.mjs   # 合成 publish-targets.mjs 使用
 - **[ADR 0255](./0255-tools-output-candidates-not-verdicts.md)「引き受けた負債」の1点目（この2本の欠落）はこの ADR で解消した。**同 ADR の残り3点（決定3/6/10 は別担当・「書けば守られるとは限らない」という留保・線が機械的でないという限界）はこの ADR の対象外のまま残る。
 - **この2本以外に、同じ形（doc コメントには断りが在るが実行時出力には出ていない）の門が `scripts/` 配下に他に在るかは、全ファイルを1本ずつ通読して確かめていない。**ADR 0255 の反例探しが名指しした4本（`check-public-api-surface.mjs` / `check-pr-adr-reference.mjs` / `check-publish-pack.mjs` / `check-cjs-transpile-parse.mjs`）のうち後者2本は「対象の外の宣言で足りる」側だと ADR 0255 が既に判定しており、この ADR もその判定を検算し直していない。
 - **「取りこぼしが検査の対象の中で構造的か、対象の外の宣言で足りるか」という線（ADR 0255 決定2）は、依然として機械的ではない。**この ADR が2本の実装を直したことは、線そのものを機械で判定できるようにはしていない——次に似た穴が見つかったときも、人が読んで判断する必要がある。
-- **`check-pr-adr-reference.mjs` の失敗分岐から削った旧文言**（`squash_merge_commit_title=PR_TITLE` 等、squash merge の具体的な設定値への言及）**は、共通マーカー行のブロックには含めていない。**この情報は [docs/autonomy.md](../autonomy.md) と [ADR 0211](./0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md) に既に在る（本 ADR の「測ったこと」3節で確認済み）ため重複を避けたが、CLI の出力だけを読む人がこの詳細を失うという小さな後退ではある。
+- **`check-pr-adr-reference.mjs` の失敗出力は、旧文言を2つに分けた結果、旧版より1行ぶん長い。**同じ事実を2箇所で言わない形にはしたが（決定E）、**失敗時の出力が短くなったわけではない。**⚠ うるささへの手当ては「1回の実行につき断りのブロックは1つ」までであり、失敗出力全体の長さは測っていない。
 
 ## これが覆るとしたら
 
@@ -113,10 +114,10 @@ $ node scripts/check-publish-pack.mjs   # 合成 publish-targets.mjs 使用
 - **【実測】5種の変異試験**（(a) 成功分岐の断りを消す (b) 失敗分岐の断りを消す（`check-publish-pack.mjs`） (c) 成功分岐の断りを消す (d) 失敗分岐の断りを消す（`check-pr-adr-reference.mjs`） (e) マーカー行の文言を片方だけ変える）**を、それぞれ `cp` で退避 → 変異 → 対象の歯だけ実行 → `cp` で復元 → `git status --porcelain` で意図した差分のみに戻ったことを確認する手順で行い、狙った歯だけが red になり、復元後に green へ戻ることを確認した**（詳細はマネージャーへの報告に記録。`git checkout` は使っていない）。
 - **【実測】`pnpm exec prettier --check` と、変更した3本のテストファイル + `scripts/__tests__/adr-citation.test.mjs` + `scripts/__tests__/adr-duplicate-number.test.mjs` を対象を名指しして実行し、全て green であることを確認した。**
 - **【実測】`git diff --name-only origin/main...HEAD` を `packages/` に絞って確認し、該当が無いことを確認した。**
+- **【実測】この2本の出力の逐語を引いている生きた文書を `grep` で洗い直した**（`grep -rn "publish 梱包の門を通りました" docs/`）。当たったのは `docs/release-v1.md` の4箇所と ADR 5本（0115 / 0138 / 0150 / 0181 / 0205。**この ADR 自身の4箇所は除く**——この文を書いた後に自分も当たるようになった）。⟹ **うち「通過条件」として*これから*の実行に当てているのは `docs/release-v1.md` §0.2 の1箇所だけ**（残りは過去の実行の記録であり、当時の出力としては真のまま）。その1箇所を直した（決定D）。**陽性対照**: 同じ `grep` は ADR 0138 / 0150 / 0181 / 0205 / 0115 にも当たっており、0件ではない——探し方は生きている（[ADR 0257](./0257-searched-and-found-nothing-versus-did-not-search.md)）。
 
 ## 確かめていないこと
 
 - ⛔ **`scripts/` 配下の全ファイルを1本ずつ通読して、この2本以外に同型の欠落（doc コメントには断りが在るが実行時出力には無い）が在るかどうかは確かめていない。**ADR 0255 が名指しした4本だけを踏まえている。
-- ⛔ **`gh search issues` で、この2本についての既存 ISSUE の有無を検索していない**（ADR 0255「確かめていないこと」と同じ限界を引き継いでいる）。Issue #580 がその個別対応そのものなので、この ADR の範囲では影響しない。
+- ⚠ **【受】この2本についての既存 ISSUE の有無（ADR 0255 が「確かめていない」と残した点）は、依頼元（マネージャー）が `gh search issues --repo takecchi/mnemora` を `check-publish-pack` / `check-pr-adr-reference` / `取りこぼし` の3語で open に当て、「#580 だけで重複は無い」と報告したものである。書き手はこの検索を再実行していない。**
 - ⛔ **この ADR の判断（決定A〜E、線の当て方）は、依頼元（マネージャー）の設計指示をそのまま実装したものであり、そこからの逸脱は無いと書き手は認識しているが、オーナー本人には確認していない。**
-- ⛔ **`check-pr-adr-reference.mjs` の失敗分岐から削った squash merge の具体的な設定値への言及が、CLI の出力だけを読む運用者にとって実際に不便かどうかは、運用実績で確かめていない。**

@@ -196,6 +196,11 @@ function main() {
     '  gh pr edit <このPRの番号> --title "..." --body "..." で、上の古い番号を、' +
       "いま追加している番号（上に列挙）へ書き換えること。",
   );
+  console.error(
+    "  ⚠ このリポジトリは squash merge のタイトル・本文を、マージ実行時点の PR タイトル・本文から" +
+      "そのまま作る（squash_merge_commit_title=PR_TITLE / squash_merge_commit_message=PR_BODY）。" +
+      "⟹ マージした後は履歴になり、gh でも直せない。",
+  );
   console.error(buildScopeCaveatLines().join("\n"));
   process.exit(1);
 }

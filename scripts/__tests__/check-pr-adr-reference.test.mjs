@@ -205,6 +205,10 @@ describe("scripts/check-pr-adr-reference.mjs（本物の git 履歴に対して�
     expect(result.stderr).toContain("0199");
     expect(result.stderr).toContain("0200");
     expect(result.stderr).toContain("gh pr edit");
+    // ⭐ 「なぜ *いま* 直すのか」（squash merge のタイトル・本文はマージ実行時点の PR から
+    // そのまま作られ、マージ後は履歴になる）も失敗出力に残っていること。ADR 0259 決定E で
+    // 「見ていない範囲」の断りと2つに分けた側であり、分けた拍子に落ちても気づけるように縛る。
+    expect(result.stderr).toContain("squash_merge_commit_title=PR_TITLE");
   });
 
   /**
