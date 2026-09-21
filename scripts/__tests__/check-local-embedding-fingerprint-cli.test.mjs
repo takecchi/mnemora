@@ -429,3 +429,122 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 前段「宣言が指�
     },
   );
 });
+
+describe("check-local-embedding-fingerprint.mjs（CLI）: tree の形が変わったときの診断（Issue #586 発見2 / ADR 0253 追記2）", () => {
+  /**
+   * ⭐ **ここは文面そのものを assert する。**
+   *
+   * この検査が守っているのは exit コードではない——**判定は1つも変えていない**。
+   * 守っているのは「赤くなったときに、読んだ人が真因に辿り着けるか」である。
+   * ⟹ **赤の逐語は、欠陥の中身を人間の言葉で残す唯一の場所**なので、そこを固定する。
+   *
+   * 🔴 **以前の文面は「素性不明（HF の tree に無い）」だけで、読んだ人を
+   * 「キャッシュが汚れた」へ誘導していた**（真因は HF の応答の形の変化）。
+   */
+
+  it.concurrent(
+    "⭐ oid も lfs.oid も無いエントリが在ると、件数と『応答の形が変わった可能性』を印字する",
+    async () => {
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n' },
+          // HF が hash の返し方を変えた状況: path は在るが oid が無い。
+          respond: (entries) => ({
+            status: 200,
+            body: entries.map(({ oid, ...rest }) => ({ ...rest, sha: oid })),
+          }),
+        },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stderr).toContain("hash を取れないエントリが 1 件あった");
+          expect(r.stderr).toContain("Hugging Face の応答の形が変わった可能性がある");
+          expect(r.stderr).toContain("hash を取れなかった tree エントリ: config.json");
+          // ⛔ 判定は変えていない。手元のファイルが素性不明になるので、従来どおり赤。
+          expect(r.stdout).toContain("素性不明（HF の tree に無い）: config.json");
+          expect(r.code).toBe(1);
+        },
+      );
+    },
+  );
+
+  it.concurrent(
+    "⭐ file でも directory でもないエントリが在ると、その件数も印字する（HF がフィールド名を変えた場合）",
+    async () => {
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n' },
+          respond: (entries) => ({
+            status: 200,
+            body: [...entries, { kind: "blob", name: "x" }, { kind: "blob", name: "y" }],
+          }),
+        },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stderr).toContain("file でも directory でもないエントリが 2 件あった");
+          expect(r.stderr).toContain("Hugging Face の応答の形が変わった可能性がある");
+          // 手元のファイルは正しく一致しているので、判定は緑のまま。
+          expect(r.code).toBe(0);
+        },
+      );
+    },
+  );
+
+  it.concurrent(
+    "🔴 緑のときでも黙らない: 手元に対応するファイルが無い tree エントリの hash が取れなくても印字する",
+    async () => {
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n' },
+          respond: (entries) => ({
+            status: 200,
+            // 手元に無いファイル（onnx/model.onnx）のほうだけ oid を落とす。
+            body: [...entries, { type: "file", path: "onnx/model.onnx" }],
+          }),
+        },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          // ⭐ 判定は緑（手元の1本は一致している）。それでも理由は出る。
+          expect(r.code).toBe(0);
+          expect(r.stderr).toContain("hash を取れないエントリが 1 件あった");
+          expect(r.stderr).toContain("hash を取れなかった tree エントリ: onnx/model.onnx");
+        },
+      );
+    },
+  );
+
+  it.concurrent("⚠ 陰性対照: 形が正常なら、読み飛ばしの文面は1行も出ない", async () => {
+    await withFixture(
+      {
+        files: { "config.json": '{"ok":true}\n' },
+        // ⭐ directory エントリは正常なので、数に入ってはならない。
+        respond: (entries) => ({
+          status: 200,
+          body: [...entries, { type: "directory", path: "onnx" }],
+        }),
+      },
+      async (f) => {
+        const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+        expect(r.code).toBe(0);
+        expect(r.stderr).not.toContain("応答の形が変わった可能性がある");
+        expect(r.stderr).not.toContain("エントリが");
+      },
+    );
+  });
+
+  it.concurrent("--json に読み飛ばしの内訳が載る", async () => {
+    await withFixture(
+      {
+        files: { "config.json": '{"ok":true}\n' },
+        respond: (entries) => ({
+          status: 200,
+          body: entries.map(({ oid, ...rest }) => ({ ...rest, sha: oid })),
+        }),
+      },
+      async (f) => {
+        const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin, "--json"]);
+        const parsed = JSON.parse(r.stdout.slice(r.stdout.indexOf("{")));
+        expect(parsed.skippedTreeEntries).toEqual({ noOid: ["config.json"], unrecognized: 0 });
+      },
+    );
+  });
+});
