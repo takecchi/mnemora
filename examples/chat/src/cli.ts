@@ -60,8 +60,18 @@ import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
 import { buildMnemoraPrompt, ingestConversation, reportMemoryUsage } from "./mnemora-path.js";
 import { TINY_BUDGET_CHARS, runBudgetDemo } from "./budget-demo.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
-import type { CreateProvidersOptions, ProviderMode } from "./providers.js";
-import { decideProviderSource, describeProviderSourceReason } from "./providers.js";
+import type {
+  CreateProvidersOptions,
+  PlannedProviderSource,
+  ProviderMode,
+  ProviderSourceDecision,
+} from "./providers.js";
+import {
+  decideProviderSource,
+  describePlanActualMismatch,
+  describeProviderSourceReason,
+  detectPlanActualMismatch,
+} from "./providers.js";
 import { buildRetrievalQualityJson } from "./retrieval-json.js";
 import {
   armHeadline,
@@ -155,11 +165,14 @@ function describeMode(mode: ProviderMode): string {
  * （`ExampleRuntimeHandle`/`AnswerBenchRuntimeHandle`）が持つ `cassetteIgnored` を渡す
  * ——`providers.ts` の `Providers.cassetteIgnored` の docstring参照。
  */
-function printProviderMode(modes: {
-  llmMode: ProviderMode;
-  embeddingMode: ProviderMode;
-  cassetteIgnored: boolean;
-}): void {
+function printProviderMode(
+  modes: {
+    llmMode: ProviderMode;
+    embeddingMode: ProviderMode;
+    cassetteIgnored: boolean;
+  },
+  plannedSource: PlannedProviderSource,
+): void {
   console.log(`[provider] LLM       : ${describeMode(modes.llmMode)}`);
   console.log(`[provider] Embedding : ${describeMode(modes.embeddingMode)}`);
   if (modes.embeddingMode === "deterministic") {
@@ -173,6 +186,13 @@ function printProviderMode(modes: {
       "  ⚠ 読み込んだカセットは、この実行では使っていない" +
         '（llmMode/embeddingMode のどちらも "recorded" でない）。',
     );
+  }
+  // 🔴 **Issue #594。** 上の `cassetteIgnored` は `cassette !== undefined` を前提に持つため、
+  // `resolveRecordedRun` の `openai` 枝（カセットを読まずに即 return する）を**原理的に見ない**。
+  // ⟹ 予定と実測の食い違いは、カセットとは別の検出器で開示する。
+  const mismatch = detectPlanActualMismatch(plannedSource, modes);
+  if (mismatch !== undefined) {
+    console.log(describePlanActualMismatch(mismatch));
   }
 }
 
@@ -191,6 +211,15 @@ interface RecordedRunPlan {
   providerOptions: CreateProvidersOptions;
   /** カセットを読めたか（呼び出し側が arm を組むときに使う。`runRetrieval` が使う）。 */
   cassette: Cassette | undefined;
+  /**
+   * ⭐ **画面に名乗った「予定」そのもの（Issue #594）。**
+   *
+   * `resolveRecordedRun` は `[cassette] provider source の予定: …` を**必ず**画面へ出す。
+   * ⟹ **その予定を返り値に含めることで、呼び出し側が `printProviderMode` へ渡し忘れる
+   * 経路を無くす**——`RecordedRunPlan.env` が Issue #577 に対して同じ形で効いたのと
+   * 同じ理由である（名乗ることと、名乗りを検査へ渡すことを、分離できない形にする）。
+   */
+  plannedSource: ProviderSourceDecision["source"];
 }
 
 /**
@@ -230,7 +259,12 @@ function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
     `[cassette] provider source の予定: ${decision.source}(理由: ${describeProviderSourceReason(decision)})`,
   );
   if (decision.source === "openai") {
-    return { env: process.env, providerOptions: {}, cassette: undefined };
+    return {
+      env: process.env,
+      providerOptions: {},
+      cassette: undefined,
+      plannedSource: decision.source,
+    };
   }
   const path = cassettePathFor(target);
   if (!cassetteExists(path)) {
@@ -277,12 +311,13 @@ function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
     },
     providerOptions: { cassette },
     cassette,
+    plannedSource: decision.source,
   };
 }
 
 async function runChat(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const ctx = { tenantId: `example-chat-${Date.now()}` };
     const conversation = buildConversation(DEFAULT_CHAT_FILLER_PAIRS);
@@ -363,7 +398,7 @@ async function runChat(): Promise<void> {
  */
 async function runScope(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const tenantId = `example-chat-scope-${Date.now()}`;
     const otherTenantId = `${tenantId}-other`;
@@ -388,7 +423,7 @@ async function runScope(): Promise<void> {
  */
 async function runExplain(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const tenantId = `example-chat-explain-${Date.now()}`;
     console.log(
@@ -412,7 +447,7 @@ async function runExplain(): Promise<void> {
  */
 async function runBackfill(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const base = `example-chat-backfill-${Date.now()}`;
     console.log(
@@ -472,7 +507,7 @@ async function runBackfill(): Promise<void> {
  */
 async function runCorrection(): Promise<void> {
   const handle = await createExampleRuntime(requireDatabaseUrl());
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const ctx = { tenantId: `example-chat-correction-${Date.now()}` };
     console.log(
@@ -540,7 +575,7 @@ async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
   // 倒しを一緒に返すため、ここでは三項演算子で env を組み立て直す必要が無い。
   const plan = resolveRecordedRun("compare");
   const handle = await createExampleRuntime(databaseUrl, plan.env, plan.providerOptions);
-  printProviderMode(handle);
+  printProviderMode(handle, plan.plannedSource);
   printDecayClockNotice(decayClock);
   try {
     console.log(
@@ -711,7 +746,7 @@ async function runRetrieval(): Promise<void> {
       },
       plan.providerOptions,
     );
-    printProviderMode(handle);
+    printProviderMode(handle, plan.plannedSource);
     try {
       const report = await runRetrievalQualityArm({
         armLabel: arm.armLabel,
@@ -794,7 +829,7 @@ async function recordRetrieval(
       { ...process.env, MNEMORA_LLM: arm.llmOverride, MNEMORA_EMBEDDING: arm.embeddingOverride },
       { recorder },
     );
-    printProviderMode(handle);
+    printProviderMode(handle, null);
     try {
       await runRetrievalQualityArm({
         armLabel: arm.armLabel,
@@ -829,7 +864,7 @@ async function recordCompare(
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
     { recorder },
   );
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const rows = await runComparison(handle.runtime, {
       fillerPairsSequence: DEFAULT_COMPARE_SEQUENCE,
@@ -875,7 +910,7 @@ async function recordAnswer(
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
     { recorder },
   );
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
     const results = await runAnswerBench(
@@ -1091,7 +1126,7 @@ async function runTimeTerm(): Promise<void> {
     {},
     clock,
   );
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     console.log(
       "\n「内容は同一・occurredAt/recordedAt だけ違う」ペアで、" +
@@ -1142,7 +1177,7 @@ async function runValidity(): Promise<void> {
     MNEMORA_LLM: process.env.MNEMORA_LLM ?? "deterministic",
     MNEMORA_EMBEDDING: process.env.MNEMORA_EMBEDDING ?? "deterministic",
   });
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     console.log(
       "\n「内容は同一・validFrom/validUntil だけ違う」ペアで、" +
@@ -1213,7 +1248,7 @@ async function runIdentifierProbes(): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle);
+  printProviderMode(handle, null);
 
   try {
     console.log(
@@ -1408,7 +1443,7 @@ async function runAssociationProbes(): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle);
+  printProviderMode(handle, null);
 
   try {
     console.log(
@@ -1529,7 +1564,7 @@ async function runConsolidationCostCommand(): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     console.log(
       "\n[consolidation-cost] warmup() でモデルの読み込みを先に済ませる" +
@@ -1614,7 +1649,7 @@ async function runArchiveSweepCostCommand(decayClock: DecayClock | undefined): P
     {},
     clock,
   );
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   printDecayClockNotice(decayClock);
   try {
     console.log(
@@ -1725,7 +1760,7 @@ async function runAnswer(): Promise<void> {
   if (banner) {
     console.log(banner);
   }
-  printProviderMode(handle);
+  printProviderMode(handle, plan.plannedSource);
   try {
     console.log(
       "\n同じ会話・同じ質問・同じ回答モデル・同じ採点基準で、naive(全文経路)と" +
@@ -1793,7 +1828,7 @@ async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
-  printProviderMode(handle);
+  printProviderMode(handle, null);
   try {
     console.log(
       "\n[correction-candidates] warmup() でモデルの読み込みを先に済ませる" +
