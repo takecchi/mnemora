@@ -348,6 +348,51 @@ function resolveGroundTurnTexts(answerCase: AnswerCase): string[] {
   });
 }
 
+/**
+ * `EmbeddingSpaceId`（`provider`/`model`/`dimensions`）から、tenantId に埋め込める
+ * 英数字とハイフンだけの短いスラグを作る（Issue #583）。
+ *
+ * ⭐ **なぜ埋め込み空間を tenant に含めるのか**——実測した壊れ方: `observations` は
+ * `ON CONFLICT (tenant_id, external_id) DO NOTHING` の冪等 insert であり、埋め込みは
+ * `(provider, model, dimensions)` ごとに別テーブルに分かれる（`packages/postgres`の
+ * `embeddingSpaceTableName`、ADR 0002 D8）。⟹ **`deterministic`（8次元）がその tenant で
+ * 先に抽出を走らせると、後から既定（`recorded`/256次元）で走ったとき、抽出が冪等
+ * スキップされて 256次元テーブルが0行のまま recall が走り、「スコープ内 N 件のうち
+ * 0 件を提示」というカセットに無いプロンプトが組まれて `RecordedLLMProvider` が
+ * 例外を投げる**（exit 1、実測済み。Issue #583）。tenant に埋め込み空間のスラグを
+ * 挟めば、空間が変われば tenant も変わり、この冪等スキップの土台（同一 tenant への
+ * 二重 observe）自体が起きなくなる。
+ *
+ * ⛔ **`packages/postgres` の `embeddingSpaceTableName` は import しない**——
+ * あちらは PostgreSQL 識別子（63バイト上限・ハッシュ衝突回避）という別の制約から
+ * 逆算した命名規則であり、ここが要るのは tenantId（`z.string().min(1)` 以外に上限が
+ * 無い、`packages/core` の `CtxSchema`）に挟める短い文字列だけである。両者を結合する
+ * 理由が無いので、`examples/chat` 側の関心事として自前で持つ。
+ *
+ * ⛔ **`runId` を入れる案（`cli.ts` の `recordAnswer` が `answer-record-${runId}` で
+ * 採っている形に揃える案）は採らなかった。** `recordAnswer` は**毎回新しい記録を作る**
+ * のが仕事なので、実行ごとに新しい tenant が要る（`recordAnswer` の docstring
+ * 「⚠ tenantPrefix に runId を含め、毎回新しいテナントにする」・`observe()` の
+ * `externalId` 冪等排除が理由として明記されている）。一方この関数が使われる
+ * `runAnswer`（`cli.ts`）は**同じ入力で同じ結果が出る**ことが仕事であり——
+ * `answer-cli.postgres.test.ts` 冒頭の docstring が「⭐ 同じモードでの連続実行は
+ * 冪等である【実測 2026-09-21】——2回続けて走らせて `measuredAt` を除く JSON が
+ * 完全一致した」と実測して固定している——tenant は**入力（ここでは埋め込み空間）で
+ * 決まるべきで、実行ごとに変わってはいけない**。実行ごとに変えると、この歯
+ * （2回続けて走らせて同じ結果が出ることを測る歯）が意味を失い、かつ tenant が
+ * 無限に積み上がる（掃除の口が無い）。
+ */
+export function embeddingSpaceSlug(space: EmbeddingSpaceId): string {
+  const sanitize = (value: string): string =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  return [sanitize(space.provider), sanitize(space.model), String(space.dimensions)]
+    .filter((part) => part.length > 0)
+    .join("-");
+}
+
 export async function runAnswerCase(
   runtime: Runtime,
   llmProvider: CountingLLMProvider,
@@ -356,7 +401,8 @@ export async function runAnswerCase(
   answerCase: AnswerCase,
   tenantPrefix: string,
 ): Promise<AnswerCaseRunResult> {
-  const ctx: Ctx = { tenantId: `${tenantPrefix}-${answerCase.id}` };
+  const embeddingSpace = embeddingSpaceSlug(embeddingProvider.space);
+  const ctx: Ctx = { tenantId: `${tenantPrefix}-${embeddingSpace}-${answerCase.id}` };
   const conversation = toConversation(answerCase);
   const questionSuffix = buildQuestionSuffix(answerCase.question);
 
@@ -368,6 +414,25 @@ export async function runAnswerCase(
   // 連想枠（`DEFAULT_MNEMORA_PATH_ASSOCIATION`）は既定のまま渡す——`queryRecall` の
   // 既定と同じ規律をこの bench でも保つ（明示的に外していない）。
   const recall = await queryRecall(runtime, ctx, conversation);
+
+  // ⚠ 「記憶は在るが、この空間のベクトルが0件」を名乗る（Issue #583）。
+  // 🔴 例外にしない・落ちるのを防がない——「なぜ落ちたか」が画面に出ることだけが目的。
+  // ⚠ 判定ではなく候補の一覧として出す（ADR 0223 決定5 / ADR 0255）——
+  // このログ1行だけでは、原因が (1)(2) のどちらかは決まらない。
+  if (recall.index.totalInScope > 0 && recall.memories.length === 0) {
+    console.log(
+      [
+        `⚠ [answer-bench] ${ctx.tenantId}: スコープ内 ${recall.index.totalInScope} 件の記憶が在るのに、0 件しか提示されていない。`,
+        `  この実行の埋め込み空間: ${embeddingSpace}`,
+        "  ⚠ **これは判定ではない。候補である**:",
+        "   (1) 同じ tenant に別の埋め込み空間で先に記憶が入っており、この空間のベクトルが0件",
+        "       （observations は (tenant_id, external_id) で冪等なので、2回目の抽出は走らない。Issue #583）",
+        "   (2) 予算・減衰・validAt ゲートで候補が落ちた",
+        "  ⛔ どちらかは、この行だけでは決まらない。",
+      ].join("\n"),
+    );
+  }
+
   const afterRecallEmb = embeddingProvider.snapshot();
 
   const naivePromptSpec: PromptSpec = buildNaiveAnswerPromptSpec(answerCase);
