@@ -88,7 +88,7 @@ const repo = declaredRepoIndependently();
  * 並行にすると `afterEach` は他のテストが使っている最中の資源まで畳みうるので、
  * **後始末はテストごとに `finally` で閉じる。**
  *
- * @param {{ files?: Record<string,string>, respond: (entries: object[]) => { status: number, body: unknown } }} setup
+ * @param {{ files?: Record<string,string>, respond: (entries: object[], url: string) => { status: number, body: unknown } }} setup
  */
 async function withFixture(setup, fn) {
   const state = { hits: 0, paths: [] };
@@ -104,7 +104,7 @@ async function withFixture(setup, fn) {
   const server = createServer((req, res) => {
     state.hits += 1;
     state.paths.push(req.url);
-    const { status, body } = setup.respond(entries);
+    const { status, body } = setup.respond(entries, req.url);
     res.writeHead(status, { "content-type": "application/json" });
     res.end(JSON.stringify(body));
   });
@@ -152,12 +152,20 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 宣言された repo �
     },
   );
 
-  it.concurrent("問い合わせ先の URL に、宣言された repo と tree API のパスが載る", async () => {
-    await withFixture({ files: { "config.json": "{}\n" }, respond: fixed(200, []) }, async (f) => {
-      await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-      expect(f.state.paths[0]).toBe(`/api/models/${repo}/tree/main?recursive=1&expand=1`);
-    });
-  });
+  it.concurrent(
+    "問い合わせは2段になる: 先に存在確認（モデル情報 API）、次に tree API",
+    async () => {
+      await withFixture(
+        { files: { "config.json": "{}\n" }, respond: fixed(200, []) },
+        async (f) => {
+          await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          // ⭐ Issue #586 / ADR 0253 追記1 で前段が入った。1本目が「在るか」、2本目が「読めたか」。
+          expect(f.state.paths[0]).toBe(`/api/models/${repo}`);
+          expect(f.state.paths[1]).toBe(`/api/models/${repo}/tree/main?recursive=1&expand=1`);
+        },
+      );
+    },
+  );
 });
 
 describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ごとの終了コード", () => {
@@ -168,7 +176,9 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
         const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
         expect(r.stdout).toContain("一致: 手元の 1 本すべてが宣言された repo の内容と一致した。");
         expect(r.code).toBe(0);
-        expect(f.state.hits).toBe(1);
+        // ⭐ 存在確認1回 ＋ tree 1回。**正常系で増える往復はちょうど1回である**
+        // （200 を見た時点で返すので、前段の再試行の待ち時間は発生しない）。
+        expect(f.state.hits).toBe(2);
       },
     );
   });
@@ -199,7 +209,7 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
   });
 
   it.concurrent(
-    "🔴 404 ⟹ **保留（exit 2）**。⛔ これは現状の固定であって、あるべき姿ではない（Issue #586）",
+    "⭐ 404（宣言された repo が存在しない）⟹ **赤（exit 1）**。⛔ 保留にしない（Issue #586 / ADR 0253 追記1）",
     async () => {
       await withFixture(
         {
@@ -208,10 +218,15 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
         },
         async (f) => {
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-          // ⚠ 「届いている」のに保留になる——これが #586 の芯である。
-          expect(r.stderr).toContain("保留（undetermined）");
-          expect(r.stderr).toContain("HTTP 404");
-          expect(r.code).toBe(2);
+          // 🔴 **この期待値は 2026-09-21 に 2 から 1 へ意図して書き換えた。**
+          // 元は「届いているのに保留になる」という #586 が名指ししたずれを固定していた。
+          // ⟹ その決定（ADR 0253 追記1）が入ったので、歯もそれに合わせた。
+          // ⛔ **黙って直したのではない。**
+          expect(r.stderr).toContain("赤（mismatch）");
+          expect(r.stderr).toContain("Hugging Face に存在しない");
+          expect(r.code).toBe(1);
+          // 前段が3回とも 404 を見て初めて赤になる（一過性の 404 で必須ジョブを止めない）。
+          expect(f.state.hits).toBe(3);
         },
       );
     },
@@ -277,18 +292,22 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: tree API の応答ご�
 });
 
 describe("check-local-embedding-fingerprint.mjs（CLI）: 再試行", () => {
-  it.concurrent("失敗する応答に対してちょうど3回叩く", async () => {
-    await withFixture(
-      { files: { "config.json": "{}\n" }, respond: fixed(503, { error: "unavailable" }) },
-      async (f) => {
-        const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
-        expect(r.code).toBe(2);
-        // CLI の RETRY_ATTEMPTS = 3。⚠ 本数を焼き込んでいるのはここだけで、
-        // 変えたときに鳴るのが狙いである（変えるなら判定表の文言も一緒に見ること）。
-        expect(f.state.hits).toBe(3);
-      },
-    );
-  });
+  it.concurrent(
+    "503 のとき tree API をちょうど3回叩く（前段は 404 でないので1回で抜ける）",
+    async () => {
+      await withFixture(
+        { files: { "config.json": "{}\n" }, respond: fixed(503, { error: "unavailable" }) },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.code).toBe(2);
+          // CLI の RETRY_ATTEMPTS = 3。前段1回（503 ⟹「在るか」に答えない・再試行しない）
+          // ＋ tree 3回 = 4。⚠ 本数を焼き込んでいるのはここだけで、変えたときに鳴るのが
+          // 狙いである（変えるなら判定表の文言も一緒に見ること）。
+          expect(f.state.hits).toBe(4);
+        },
+      );
+    },
+  );
 
   it.concurrent(
     "⚠ 陰性対照: 一致する応答では1回しか叩かない（回数の主張が空回りしていないこと）",
@@ -298,7 +317,7 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 再試行", () => {
         async (f) => {
           const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
           expect(r.code).toBe(0);
-          expect(f.state.hits).toBe(1);
+          expect(f.state.hits).toBe(2);
         },
       );
     },
@@ -334,4 +353,79 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: HF へ問い合わせ�
     expect(r.stderr).toContain("不明な引数: --no-such-flag");
     expect(r.code).toBe(3);
   });
+});
+
+describe("check-local-embedding-fingerprint.mjs（CLI）: 前段「宣言が指す先が在るか」（Issue #586 / ADR 0253 追記1）", () => {
+  /** モデル情報 API と tree API で別々の応答を返す respond。 */
+  const byPath = (info, tree) => (entries, url) =>
+    url.includes("/tree/") ? tree(entries) : info(entries);
+
+  it.concurrent(
+    "⭐ 前段が 200・tree が 404 ⟹ **保留（exit 2）のまま**。repo は在るので、tree だけの 404 は外部要因である",
+    async () => {
+      await withFixture(
+        {
+          files: { "config.json": "{}\n" },
+          respond: byPath(
+            () => ({ status: 200, body: { id: repo } }),
+            () => ({ status: 404, body: { error: "not found" } }),
+          ),
+        },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stderr).toContain("保留（undetermined）");
+          expect(r.code).toBe(2);
+        },
+      );
+    },
+  );
+
+  it.concurrent(
+    "🔴 前段が 429 ⟹ 赤にしない（「在るか」に答えていない）。続行して tree 側の判定に委ねる",
+    async () => {
+      await withFixture(
+        {
+          files: { "config.json": "{}\n" },
+          respond: fixed(429, { error: "Too Many Requests" }),
+        },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          // ⛔ 429 を赤にしてはならない——外部要因で必須ジョブを止めることになる。
+          expect(r.stderr).not.toContain("Hugging Face に存在しない");
+          expect(r.stdout).toContain("宣言された repo の存在確認: undetermined（HTTP 429）");
+          expect(r.code).toBe(2);
+        },
+      );
+    },
+  );
+
+  it.concurrent("前段が 200 なら、存在確認は present として印字される", async () => {
+    await withFixture(
+      {
+        files: { "config.json": '{"ok":true}\n' },
+        respond: byPath(
+          () => ({ status: 200, body: { id: repo } }),
+          (entries) => ({ status: 200, body: entries }),
+        ),
+      },
+      async (f) => {
+        const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+        expect(r.stdout).toContain("宣言された repo の存在確認: present（HTTP 200）");
+        expect(r.code).toBe(0);
+      },
+    );
+  });
+
+  it.concurrent(
+    "⚠ 陰性対照: 前段が 404 なら tree を1度も叩かない（前段で止まっていることの根拠）",
+    async () => {
+      await withFixture(
+        { files: { "config.json": "{}\n" }, respond: fixed(404, { error: "nope" }) },
+        async (f) => {
+          await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(f.state.paths.filter((u) => u.includes("/tree/"))).toEqual([]);
+        },
+      );
+    },
+  );
 });
