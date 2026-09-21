@@ -220,7 +220,14 @@ interface RecordedRunPlan {
 function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
   const decision = decideProviderSource(process.env);
   console.log(
-    `[cassette] provider source: ${decision.source}(理由: ${describeProviderSourceReason(decision)})`,
+    // 🔴 **この行が名乗るのは「どの source を選んだか」までである（Issue #589）。**
+    // `decideProviderSource` は env だけを見る判定であり、**`createProviders` は
+    // この判定を一度も読まない**（あちらが見るのは `MNEMORA_LLM`/`MNEMORA_EMBEDDING` と
+    // 鍵の有無である）。⟹ **両者は食い違いうる。**【実測】鍵を置いたうえで
+    // `MNEMORA_LLM=deterministic` を明示すると、この行は `openai(理由: …実 API)` と出るが、
+    // 実際には擬似 provider で走る——**ADR 0068 が自分で踏んだと記録している状態である。**
+    // ⟹ だから「予定」と明示し、断定は `printProviderMode` の実測へ寄せる。
+    `[cassette] provider source の予定: ${decision.source}(理由: ${describeProviderSourceReason(decision)})`,
   );
   if (decision.source === "openai") {
     return { env: process.env, providerOptions: {}, cassette: undefined };
@@ -236,9 +243,21 @@ function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
     );
   }
   const cassette = loadCassette(path);
-  console.log(`[cassette] 記録した応答を再生する: ${describeCassette(cassette)}`);
+  // 🔴 **この行は「読んだ」までしか名乗らない（Issue #589）。**
+  // かつては `[cassette] 記録した応答を再生する` と書いていた——**だがこの時点では
+  // provider をまだ1つも組んでおらず、「再生する」は測っていない予告だった。**
+  // ⟹ 実際、`MNEMORA_LLM=deterministic` を明示した実行（ADR 0260 追記で正規の道に
+  // なった）では、カセットを読んでも使わない。そこで画面は「再生する」と名乗りながら
+  // 擬似 provider で走っていた——**Issue #577 が報告した欠陥そのものである。**
+  // ⟹ **名乗ってよいのは、ここで実際に確かめたこと（ファイルを読めた・中身が何件か）
+  // だけである。** 「何で走るか」は `printProviderMode` が構築後の実測から出す。
+  console.log(`[cassette] カセットを読んだ: ${describeCassette(cassette)}`);
   console.log(
     "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること。",
+  );
+  console.log(
+    "  ⚠ この行は「読めた」ことだけを言う。この実行が実際に何で走るかは、下の " +
+      "[provider] 行が構築後の実測から出す（ADR 0223 決定5 / Issue #589）。",
   );
   return {
     // 🔴 **明示が在るときは倒さない（Issue #577 続き / ADR 0068）。**
