@@ -20,25 +20,48 @@
  * にある——ファイル I/O・ネットワークを持たない純関数の側であり、ここ（CLI）は
  * それを呼ぶだけの薄い層である（`scripts/ci-green-check.mjs` と同じ分担）。
  *
- * ## 判定表（この CLI はゲートである。⭐ 保留にできるのは HF API 到達失敗だけ）
+ * ## 判定表（この CLI はゲートである）
  *
- * | 事象 | 判定 | exit |
- * |---|---|---|
- * | 全ファイル一致 | match | `0` |
- * | ハッシュが食い違う | 赤 | `1` |
- * | 手元に在るが HF の tree に無いファイルが在る | 赤 | `1` |
- * | `cacheDir` が引けない（`--cache-dir` も env も無い） | 赤 | `1` |
- * | 宣言された repo（`DEFAULT_LOCAL_EMBEDDING_REPO`）を読み取れない | 赤 | `1` |
- * | 手元のファイルが読めない（I/O エラー） | 赤 | `1` |
- * | `<cacheDir>/<repo>/` にファイルが1本も無い | 赤 | `1` |
- * | HF API に届かない（再試行3回を尽くしてもネットワーク失敗） | 保留 | `2` |
+ * ⭐ **問いは2つに割れている**（Issue #586 / ADR 0253 追記1）——
+ * **(1) 宣言が指す先が在るか**（{@link checkDeclaredRepoExists}）と
+ * **(2) その中身を読めたか**（{@link fetchTreeWithRetry} 以降）。
  *
- * ⭐ **保留（exit 2）に倒してよいのは HF API への到達失敗ただ1つである。** この
- * リポジトリの管理が及ばない外部要因であり、偽陽性率に上限が置けないため、
- * それ以外は門にできない。**それ以外の事象はすべて赤——CI に置くこの門は、
+ * | # | 事象 | 判定 | exit |
+ * |---|---|---|---|
+ * | — | 宣言された repo（`DEFAULT_LOCAL_EMBEDDING_REPO`）を読み取れない | 赤 | `1` |
+ * | — | `cacheDir` が引けない（`--cache-dir` も env も無い） | 赤 | `1` |
+ * | **(1)** | 🔴 **宣言された repo が存在しない（モデル情報 API が再試行3回とも 404）** | **赤** | **`1`** |
+ * | **(1)** | モデル情報 API が 404 以外の非2xx／到達しない ⟹ **「在るか」に答えない。(2) へ続行** | — | — |
+ * | (2) | 全ファイル一致 | match | `0` |
+ * | (2) | ハッシュが食い違う | 赤 | `1` |
+ * | (2) | 手元に在るが HF の tree に無いファイルが在る | 赤 | `1` |
+ * | (2) | 手元のファイルが読めない（I/O エラー） | 赤 | `1` |
+ * | (2) | `<cacheDir>/<repo>/` にファイルが1本も無い | 赤 | `1` |
+ * | (2) | tree API に届かない（再試行3回を尽くしてもネットワーク失敗） | 保留 | `2` |
+ * | (2) | 🔴 **tree API が非2xx（404 を含む）を返す** | **保留** | **`2`** |
+ * | (2) | 🔴 **tree API が 200 を返したが、応答が配列でない** | **保留** | **`2`** |
+ * | — | この CLI 自身のバグ・想定外の例外・不明な引数 | 実行時エラー | `3` |
+ *
+ * 🔴 **下2行は、2026-09-21 まで判定表に行が無かった**（Issue #586）。**実装は最初から
+ * そう倒れていたのに、表がそれを書いていなかった。** ⟹ **表が実装の射程を覆って
+ * いなかったのであって、実装が勝手に振る舞っていたのではない。** 行を足したのは
+ * 「何が保留になるか」を読む人が表だけで知れるようにするためである。
+ *
+ * ## ⭐ 保留（exit 2）に倒してよいものの境界
+ *
+ * **「この repo が直せないもの」だけである。** ⟹ **(2) の失敗はすべて保留でよい**
+ * ——tree が読めないのは HF 側の事情であり、偽陽性率に上限を置けない。
+ *
+ * 🔴 **だが「宣言された repo 名が何も指していない」は、この repo が直せる。**
+ * ⟹ **それだけを (1) として切り出し、赤にした。** ⛔ **(1) に 429 や 5xx を
+ * 混ぜないこと**——それらは「在るか」に答えていないので、赤の根拠にならない。
+ *
+ * ⚠ **なぜ (2) の 404 は保留のままか**: (1) を通った時点で「repo は在る」ので、
+ * tree だけが 404 を返すのは HF 側の事情（API の形の変更等）である。⟹ 外部要因。
+ *
+ * **それ以外（`cacheDir`／repo 宣言／ファイルの不在）はすべて赤**——CI に置くこの門は、
  * モデルのキャッシュ鍵が存在する（＝置き場所が決まっている）ことを前提にしており、
- * `cacheDir`/repo 宣言/ファイルの不在は「判定を保留する」話ではなく「設定が
- * 壊れている」話だからである。**
+ * それらは「判定を保留する」話ではなく「**設定が壊れている**」話だからである。
  *
  * ⛔ **ハッシュの選び分けはファイル名や拡張子で分岐しない。** HF API の応答に
  * `lfs` が在るかどうかだけで分岐する（`expectedHashOfTreeEntry` の戻り値の
@@ -139,6 +162,59 @@ function readDeclaredRepo() {
   }
   const matched = /export const DEFAULT_LOCAL_EMBEDDING_REPO\s*=\s*"([^"]+)"/.exec(source);
   return matched ? matched[1] : null;
+}
+
+/**
+ * ⭐ **前段: 「宣言が指す先が在るか」だけを問う**（Issue #586、ADR 0253 追記1）。
+ *
+ * 🔴 **この問いは 404 か否かの2値に留める。⛔ ここに 429 や 5xx を混ぜないこと。**
+ *
+ * **なぜ分けるか**: 元の形は、tree API から返ったあらゆる非2xx を `fetchTreeWithRetry`
+ * が1つの `{ok:false}` に畳み、CLI がそれを**すべて保留（exit 2）**にしていた。
+ * ⟹ 判定表が逐語で「保留に倒してよいのは **HF API への到達失敗ただ1つ**である。この
+ * **リポジトリの管理が及ばない外部要因**であり（…）」と書いていた論拠が、
+ * **404（＝宣言された repo 名が何も指していない。この repo が直せる）を覆っていなかった。**
+ *
+ * ⟹ **問いを2つに割る。** 「宣言が指す先が在るか」（ここ。404 なら赤）と
+ * 「その中身を読めたか」（{@link fetchTreeWithRetry}。失敗は従来どおり保留）。
+ * ⭐ **前者には「赤／答えない」の2値しかなく、それ以上分ける先が無い**——だから
+ * 再帰しない。⛔ **答えられないときは答えない**（`"undetermined"` を返して続行する）
+ * ——ここで黙って赤にすると、外部要因を内部起因として扱うことになる。
+ *
+ * 🔴 **404 は再試行して確かめる。** 404 を1回で赤にすると、HF の一過性の不調が
+ * **必須ジョブを止める**。⟹ {@link RETRY_ATTEMPTS} 回すべてが 404 のときだけ
+ * `"missing"` を名乗る。⭐ **正常系（200）では追加の HTTP 往復はちょうど1回である**
+ * ——200 を見た時点で即座に返すので、再試行の待ち時間は発生しない。
+ *
+ * ⛔ **429 / 5xx / 到達失敗は `"undetermined"` である。** それらは「在るか」に
+ * 答えていない。⟹ 続行して、tree 側の判定（保留）に委ねる。
+ *
+ * @param {string} apiBase
+ * @param {string} repo
+ * @returns {Promise<{ verdict: "missing" | "present" | "undetermined", url: string, detail: string }>}
+ */
+async function checkDeclaredRepoExists(apiBase, repo) {
+  const url = `${apiBase}/api/models/${repo}`;
+  for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
+    let status;
+    try {
+      status = (await fetch(url)).status;
+    } catch (error) {
+      // 到達していない ⟹ 「在るか」に答えていない。
+      return { verdict: "undetermined", url, detail: String(error?.message ?? error) };
+    }
+    if (status !== 404) {
+      return {
+        verdict: status >= 200 && status < 300 ? "present" : "undetermined",
+        url,
+        detail: `HTTP ${status}`,
+      };
+    }
+    if (attempt < RETRY_ATTEMPTS) {
+      await new Promise((resolve) => setTimeout(resolve, RETRY_DELAY_MS));
+    }
+  }
+  return { verdict: "missing", url, detail: `HTTP 404（${RETRY_ATTEMPTS} 回とも）` };
 }
 
 /**
@@ -288,6 +364,21 @@ async function main() {
   console.log(`キャッシュの場所: ${cacheDir}`);
 
   const apiBase = args.apiBase ?? DEFAULT_HF_API_BASE;
+
+  // 🔴 判定表（前段）: 宣言された repo が存在しない ⟹ 赤。⛔ 保留にしない。
+  // ⭐ この段が答えるのは「在るか」だけである。答えられないときは続行する。
+  const existence = await checkDeclaredRepoExists(apiBase, repo);
+  if (existence.verdict === "missing") {
+    red(
+      `宣言された repo（${repo}）が Hugging Face に存在しない（${existence.url} が ` +
+        `${existence.detail}）。⟹ 宣言の書き間違い・repo の改名・上流での削除を疑うこと。` +
+        "⛔ これは保留にしない——「宣言が何も指していない」は、判定を待つ話ではなく " +
+        "設定が壊れている話である（ADR 0253 追記1 / Issue #586）。",
+    );
+    return;
+  }
+  console.log(`宣言された repo の存在確認: ${existence.verdict}（${existence.detail}）`);
+
   const treeUrl = `${apiBase}/api/models/${repo}/tree/main?recursive=1&expand=1`;
   const treeResult = await fetchTreeWithRetry(treeUrl);
   if (!treeResult.ok) {
