@@ -64,7 +64,16 @@
 >
 > ### 🔴 まず — **`v0.5.0` を使っている方へ**
 >
-> **`v1.0.0` は、`v0.5.0` とコードが同一です。**【実測 2026-09-21】`git diff --stat v0.5.0..main -- packages/` は**差分を返しません**——**出荷される6パッケージに1バイトの違いもありません。**
+> **`v1.0.0` は、`v0.5.0` とコードが同一です。**【実測 2026-09-21、`main` = `89f8dd5`】`git diff --stat v0.5.0..main -- packages/` は**差分を返しません**——**出荷される6パッケージを1本ずつ当てても、全部 0 件です。**公開 API の型スナップショット（`scripts/__snapshots__/public-api/`）も**差分を返しません。**
+>
+> 🔴 **⚠ ただし、これは「npm から落とす tarball が byte 一致する」という意味ではありません。**⛔ **そこには必ず違いがあります:**
+>
+> - **`package.json` の `version`** —— `0.5.0` → **`1.0.0`** に必ず変わります（版の権威は Release の tag です。[ADR 0070](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0070-version-comes-from-the-release-tag.md)）。
+> - **パッケージ間の依存レンジ** —— `@mnemora/testkit` / `@mnemora/openai` / `@mnemora/postgres` / `@mnemora/anthropic` / `@mnemora/local-embedding` が持つ `@mnemora/core` への依存が、`^0.5.0` → **`^1.0.0`** になります。
+>
+> ⛔ **そして `npm pack` 相当の突き合わせは、誰も実施していません。**
+>
+> ⟹ ⭐ **正確に言えるのは、ここまでです**: **`v1.0.0` の tarball は、`package.json` の `version` と `@mnemora/core` 依存レンジを除いて、`v0.5.0` と同じ入力から作られる。ソースと公開 API の型は1バイトも違わない。**
 >
 > ⟹ ⭕ **`v0.5.0` からの移行手順はありません。**破壊的変更も、新しいマイグレーションも、挙動の変更も **1件もありません。**
 >
