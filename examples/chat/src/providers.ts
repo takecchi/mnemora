@@ -307,6 +307,97 @@ export function describeProviderSourceReason(decision: ProviderSourceDecision): 
   }
 }
 
+/**
+ * 「予定」を名乗った経路だけが持つ値。**名乗っていない経路は `null` を渡す**
+ * （省略できない・既定値を持たない）。
+ *
+ * ⭐ **省略可能にしない理由は `Providers.cassetteIgnored` と同じである**——
+ * 「予定を名乗ったのに、食い違いを開示しないまま provider バナーを出す」経路を
+ * 書けなくするため（AGENTS.md「形で塞ぐ」）。`cli.ts` の `printProviderMode` は
+ * これを必須の引数で受け取る。
+ *
+ * ⛔ **`null` は「食い違っていない」ではない。「予定を名乗っていない」である。**
+ * `chat` / `scope` / `backfill` などは `[cassette]` 行を1行も出さない——
+ * 名乗っていない予定と食い違うことはできない。
+ */
+export type PlannedProviderSource = ProviderSourceDecision["source"] | null;
+
+/**
+ * `decideProviderSource` が名乗った「予定」と、`createProviders` が実際に組んだ
+ * 「実測」の食い違い（Issue #594）。
+ */
+export interface PlanActualMismatch {
+  plannedSource: ProviderSourceDecision["source"];
+  llmMode: ProviderMode;
+  embeddingMode: ProviderMode;
+  llmDiffers: boolean;
+  embeddingDiffers: boolean;
+}
+
+/**
+ * 画面に並ぶ2行——`[cassette] provider source の予定`（構築の**前**、
+ * `decideProviderSource`）と `[provider] LLM / Embedding`（構築の**後**、
+ * `createProviders`）——が食い違っているかを判定する（Issue #594）。
+ *
+ * 🔴 **なぜ `Providers.cassetteIgnored` では足りないか。** あちらは
+ * `cassette !== undefined` を前提に持つ——**`cli.ts` の `resolveRecordedRun` は
+ * `decision.source === "openai"` の枝でカセットを読まずに即 return する**ので、
+ * `openai` 経路では `cassetteIgnored` を `true` にできる枝が1つも無い。
+ * ⟹ **この経路の食い違いを、あの検出器は原理的に見ない。**
+ * 【実測】`plan-actual-mismatch.test.ts` の陽性対照が、この盲点そのものを固定している。
+ *
+ * ⭐⭐ **これは判定ではなく開示である。⛔ 例外にはできない。**
+ * `cli.ts` の `buildArmSpecs` が組む `retrieval` の arm A（擬似LLM+擬似埋め込み）と
+ * arm B（擬似LLM+本物の埋め込み）は、**意図して**予定と食い違わせる対照群である。
+ * ⟹ 食い違いそのものは欠陥とは限らず、**正当な食い違いと事故の食い違いを、
+ * この関数は区別しない（区別できない）。** `Providers.cassetteIgnored` が
+ * 例外になれないのと同じ理由であり、ADR 0255 / ADR 0223 決定5 の適用である。
+ */
+export function detectPlanActualMismatch(
+  plannedSource: PlannedProviderSource,
+  modes: { llmMode: ProviderMode; embeddingMode: ProviderMode },
+): PlanActualMismatch | undefined {
+  if (plannedSource === null) {
+    return undefined;
+  }
+  const llmDiffers = modes.llmMode !== plannedSource;
+  const embeddingDiffers = modes.embeddingMode !== plannedSource;
+  if (!llmDiffers && !embeddingDiffers) {
+    return undefined;
+  }
+  return {
+    plannedSource,
+    llmMode: modes.llmMode,
+    embeddingMode: modes.embeddingMode,
+    llmDiffers,
+    embeddingDiffers,
+  };
+}
+
+/**
+ * `detectPlanActualMismatch` の結果を、画面に焼く行にする。
+ *
+ * ⭐ **予定の値と実測の値を、どちらも逐語で出す**——読み手に2行を突き合わせさせない、
+ * というのが Issue #594 の芯である。⛔ **どちらが正しいかは名乗らない**
+ * （上の「判定ではなく開示である」を参照）。
+ *
+ * ⚠ **`describeMode`（`cli.ts`）の長い説明文ではなく `ProviderMode` の値そのものを出す。**
+ * この行の役目は2行の**突き合わせ**であり、突き合わせる相手は
+ * `MNEMORA_LLM` / `MNEMORA_EMBEDDING` に書く値だからである。
+ */
+export function describePlanActualMismatch(mismatch: PlanActualMismatch): string {
+  const differing = [
+    ...(mismatch.llmDiffers ? [`LLM=${mismatch.llmMode}`] : []),
+    ...(mismatch.embeddingDiffers ? [`Embedding=${mismatch.embeddingMode}`] : []),
+  ].join(", ");
+  return (
+    `  ⚠ 上の [cassette] 行が名乗った予定（source=${mismatch.plannedSource}）と、` +
+    `この実測が食い違っている（${differing}）。\n` +
+    "    これは開示であって判定ではない——retrieval の arm A / arm B のように、" +
+    "意図して食い違わせる正当な経路がある（Issue #594）。"
+  );
+}
+
 export interface CreateProvidersOptions {
   /**
    * `"recorded"` モードで再生に使うカセット（ADR 0051）。`"recorded"` を選んだのに
