@@ -284,5 +284,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0259](./0259-gate-runtime-output-names-its-blind-spot.md) | `check-publish-pack.mjs` / `check-pr-adr-reference.mjs` の実行時出力に、doc コメントにしか無かった断りを焼く（Issue #580） | 採用 (2026-09) |
 | [0260](./0260-answer-names-what-it-actually-runs.md) | `answer` が「記録した応答を再生する」と名乗りながら擬似 provider で走るのをやめる —— 名乗る関数と実態を倒す関数を1つにし、使われなかったカセットを出力に焼く（Issue #577） | **提案 (2026-09)** |
 | [0261](./0261-answer-bench-tenant-keyed-by-embedding-space.md) | `answer` ベンチの tenant を埋め込み空間で分ける —— 「抽出の冪等スキップ」がモードを跨ぐと、記憶とベクトルの整合が壊れる（Issue #583） | **提案 (2026-09)** |
+| [0262](./0262-cli-names-the-plan-as-a-plan.md) | `examples/chat` の `[cassette]` 行は「予定」を予定として名乗る —— 測っていない予告を、実測と同じ口調で出さない（Issue #589） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

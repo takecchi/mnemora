@@ -140,7 +140,7 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
 
       // 🔴 記録の再生で走ったこと自体を、出力から確かめる——実 API に倒れていたら
       // この行は出ない（`providers.ts` の `describeProviderSource`）。
-      expect(withEnv.stdout).toContain("provider source: recorded");
+      expect(withEnv.stdout).toContain("provider source の予定: recorded");
       expect(withEnv.stdout).toContain("[answer] 機械可読な結果を書き出した");
       expect(existsSync(jsonPath), "MNEMORA_ANSWER_JSON を設定したのにファイルが無い").toBe(true);
 
@@ -255,8 +255,12 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
       const result = runAnswerCli(env);
       expect(result.status, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`).toBe(0);
 
-      // 🔴 画面は「記録の再生」を宣言している。
-      expect(result.stdout).toContain("[cassette] 記録した応答を再生する");
+      // 🔴 画面が名乗るのは「読めた」までである（Issue #589）。
+      expect(result.stdout).toContain("[cassette] カセットを読んだ");
+      // ⛔ 「再生する」という予告は、もう画面に出ない——provider を組む前に
+      // 「この実行は再生になる」と断定していた行を落とした（Issue #589）。
+      expect(result.stdout).not.toContain("記録した応答を再生する");
+      // ⭐ 代わりに、構築後の実測がそれを名乗る（この直後の [provider] 行）。
 
       // 🔴 これが Issue #577 の芯——画面の provider 行が、宣言と矛盾する
       // 「決定的な擬似 provider」を名乗っていないこと。
@@ -335,6 +339,14 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
       // ⭐ (か) がここで鳴る——カセットは読まれたが、この実行では使われていない。
       // **食い違いが沈黙しないことそのものを固定する。**
       expect(result.stdout).toContain("読み込んだカセットは、この実行では使っていない");
+
+      // 🔴 **Issue #589 の芯。** この実行はカセットを読むが**再生しない**。
+      // ⟹ 画面が「再生する」と名乗ってはならない——かつてはここで
+      // 「[cassette] 記録した応答を再生する」と出しながら擬似 provider で
+      // 走っており、2行下の [provider] 行と矛盾していた。
+      expect(result.stdout).not.toContain("記録した応答を再生する");
+      // ⭐ 「読めた」という実測された事実のほうは、出てよい（実際に読んでいる）。
+      expect(result.stdout).toContain("[cassette] カセットを読んだ");
 
       const json = JSON.parse(readFileSync(jsonPath, "utf8"));
       expect(json.qualityClaimable).toBe(false);
