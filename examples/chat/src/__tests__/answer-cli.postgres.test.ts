@@ -269,4 +269,76 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
     },
     CLI_TIMEOUT_MS,
   );
+
+  /**
+   * 🔴 **陽性対照の CLI 側（Issue #577 の続き）——明示指定が勝つことを固定する。**
+   *
+   * 上の2本は「カセットを取れたら再生になる」を測る。**この歯はその逆側**——
+   * **利用者が `MNEMORA_LLM`/`MNEMORA_EMBEDDING` を明示したら、そちらが勝つ**
+   * ことを測る。⟹ `deterministic` を明示した実行では、⛔⛔⛔ バナーが
+   * **依然として出る**。
+   *
+   * ⚠ **これが無いと、既定の道でバナーが出ないこと（上の歯）は
+   * 「バナーを廃止した」でも同じ結果になる。** 表示層そのものの生存は
+   * `answer-format.test.ts`（DB 不要）が別に固定しているが、**CLI を通した
+   * 実行でも出ること**はここでしか測れない。
+   *
+   * 🔴 **この歯は ADR 0260 の決定 (お) を限定する。** `resolveRecordedRun` が
+   * 無条件に `"recorded"` を焼き込む形だと、利用者の明示が黙って上書きされ、
+   * **ADR 0068 の「明示した source と、実際に使われる provider が食い違う経路を
+   * 作らない」に反する**——#577 と同じ形の欠陥を、向きを変えて作ることになる。
+   * ⟹ **明示が在るときは倒さない。**
+   *
+   * ⚠ **この歯は describe の最後に置く。** `runAnswerCase` の tenant は
+   * `answer-bench-${caseId}` の固定値（Issue #583）で、この歯だけが
+   * `deterministic`（擬似 embedding）で走る。埋め込み空間ごとにテーブルが
+   * 分かれる（ADR 0002）ので上の2本の記憶は読まないが、**順序を入れ替えると
+   * 上の2本が落ちうる**（冒頭 docstring の「手元で混ぜたときだけ落ちる」）。
+   * ⟹ 上の2本が終わった後に走らせる。
+   *
+   * ⛔ **回答の中身は一切 assert しない。** `qualityClaimable === false` の実行
+   * であり、この歯が測るのは「どのモードで走ったか」と「画面が何を名乗ったか」
+   * だけである。
+   */
+  it(
+    "⭐ MNEMORA_LLM/MNEMORA_EMBEDDING に deterministic を明示したら、明示が勝ち ⛔⛔⛔ バナーが出続ける（Issue #577 / ADR 0068）",
+    () => {
+      workDir = mkdtempSync(join(tmpdir(), "answer-cli-explicit-deterministic-"));
+      const jsonPath = join(workDir, "answer.json");
+
+      const env: Record<string, string | undefined> = {
+        ...process.env,
+        DATABASE_URL: requireDatabaseUrl(),
+        MNEMORA_ANSWER_JSON: jsonPath,
+        MNEMORA_LLM: "deterministic",
+        MNEMORA_EMBEDDING: "deterministic",
+      };
+      // 実 API に倒れないように落とす。⚠ `MNEMORA_PROVIDER_SOURCE` は落とす——
+      // 実行環境から紛れ込むと、この歯が測りたい「明示指定だけを置いた形」で
+      // なくなる。
+      delete env.OPENAI_API_KEY;
+      delete env.MNEMORA_PROVIDER_SOURCE;
+
+      const result = runAnswerCli(env);
+      expect(result.status, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`).toBe(0);
+
+      // 🔴 バナーは生きている。既定の道から消えたのは、条件が偽になったからである。
+      expect(result.stdout).toContain("回答品質は測っていない");
+
+      // 🔴 明示が勝っている——画面の provider 行が擬似 provider を名乗る。
+      expect(result.stdout).toContain(
+        "[provider] LLM       : @mnemora/testkit の決定的な擬似 provider",
+      );
+
+      // ⭐ (か) がここで鳴る——カセットは読まれたが、この実行では使われていない。
+      // **食い違いが沈黙しないことそのものを固定する。**
+      expect(result.stdout).toContain("読み込んだカセットは、この実行では使っていない");
+
+      const json = JSON.parse(readFileSync(jsonPath, "utf8"));
+      expect(json.qualityClaimable).toBe(false);
+      expect(json.llmMode).toBe("deterministic");
+      expect(json.embeddingMode).toBe("deterministic");
+    },
+    CLI_TIMEOUT_MS,
+  );
 });
