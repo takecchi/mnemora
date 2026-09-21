@@ -188,6 +188,8 @@ export interface AnswerBenchRuntimeHandle {
   judgeLLMProvider: CountingLLMProvider;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する（`Providers.usageMeter` と同じ規約）。 */
   usageMeter?: UsageMeter;
+  /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
+  cassetteIgnored: boolean;
   close(): Promise<void>;
 }
 
@@ -225,6 +227,7 @@ export async function createAnswerBenchRuntime(
     llmProvider,
     embeddingProvider,
     judgeLLMProvider,
+    cassetteIgnored: created.cassetteIgnored,
     ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
     close: () => closePostgresClient(client),
   };
