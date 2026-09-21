@@ -1491,3 +1491,108 @@ jobs:
           name: validity
           path: ${{ github.workspace }}/validity.json
           if-no-files-found: ignore
+
+  # ==========================================================================
+  # ⚠⚠ ここから下の2ジョブは【観測用の使い捨て】である（Issue #574）。
+  # ⛔ この PR はマージしない。⛔ この2ジョブを main へ入れない。
+  #
+  # 🔴 `tmp574-red-branch` が赤くなるのは**意図した結果**である。
+  # ADR 0253 の門は、本番の CI で exit 0（一致）の枝しか通っていない
+  # ——「門が*止める*ところ」を一度も見ていない。ここでそれを1回だけ通す。
+  #
+  # ⭐ `case` 分岐の本文は `example-chat` ジョブの門ステップから**逐語で写した**。
+  # 変えたのは script へ渡す引数だけである（枝を選ぶために必要な差分）。
+  # ⛔ env の `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` は意図的に使っていない——
+  # 使うと `ci-yml-local-embedding-cache-wiring.test.mjs`（全ジョブを走査し、
+  # cache 段の path 集合と env の値集合の一致を要求する）が赤くなり、
+  # **観測したい赤とは別の理由の赤**が混ざるからである。
+  # ==========================================================================
+  tmp574-hold-branch:
+    name: "⚠観測用(使い捨て/Issue #574) exit 2(保留)の枝 — ⭐このジョブは緑で終わるのが期待値"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: local-embedding fingerprint の門を、HF API に届かない状態で走らせる(exit 2 を狙う)
+        # `--api-base http://127.0.0.1:1` は script の docstring が
+        # 「exit 2 の経路を、実際のネットワーク障害を待たずに再現するための注入点」
+        # として用意しているもの。重みは1バイトも落とさない。
+        run: |
+          set +e
+          node scripts/check-local-embedding-fingerprint.mjs \
+            --cache-dir "${{ github.workspace }}/.cache/local-embedding" \
+            --api-base http://127.0.0.1:1
+          CODE=$?
+          set -e
+          echo "観測: script の終了コードは ${CODE} だった"
+          case "${CODE}" in
+            0)
+              echo "🟢 local-embedding fingerprint: 宣言された repo の内容と一致した" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            2)
+              echo "::warning::local-embedding fingerprint の判定を保留した(Hugging Face API に届かなかった)——一致も不一致も確認していない。"
+              echo "🟡 local-embedding fingerprint: 判定していない(Hugging Face API に届かなかった。上の warning 参照)" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              exit "${CODE}"
+              ;;
+          esac
+
+      - name: Job Summary の現物をログへ出す(観測のため)
+        if: always()
+        run: |
+          echo "----- GITHUB_STEP_SUMMARY の中身 -----"
+          cat "$GITHUB_STEP_SUMMARY"
+          echo "----- ここまで -----"
+
+  tmp574-red-branch:
+    name: "⚠観測用(使い捨て/Issue #574) exit 1(赤)の枝 — 🔴このジョブが赤くなるのは意図した結果"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: local-embedding fingerprint の門を、検査対象が1本も無い状態で走らせる(exit 1 を狙う)
+        # 存在しない `--cache-dir` を渡す（Issue #574 本文の案1）。HF の API は
+        # 本物を引く（tree を1回）が、重みは1バイトも落とさない。
+        # ⚠ もし HF に届かなければ script は exit 2 に倒れ、このジョブは緑になる
+        # ——そのときは「赤の枝を通した」と名乗れない。ログの「観測:」行で見分ける。
+        run: |
+          set +e
+          node scripts/check-local-embedding-fingerprint.mjs \
+            --cache-dir "${{ github.workspace }}/.cache/this-path-does-not-exist"
+          CODE=$?
+          set -e
+          echo "観測: script の終了コードは ${CODE} だった"
+          case "${CODE}" in
+            0)
+              echo "🟢 local-embedding fingerprint: 宣言された repo の内容と一致した" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            2)
+              echo "::warning::local-embedding fingerprint の判定を保留した(Hugging Face API に届かなかった)——一致も不一致も確認していない。"
+              echo "🟡 local-embedding fingerprint: 判定していない(Hugging Face API に届かなかった。上の warning 参照)" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              exit "${CODE}"
+              ;;
+          esac
+
+      - name: Job Summary の現物をログへ出す(観測のため)
+        if: always()
+        run: |
+          echo "----- GITHUB_STEP_SUMMARY の中身 -----"
+          cat "$GITHUB_STEP_SUMMARY"
+          echo "----- ここまで -----"
