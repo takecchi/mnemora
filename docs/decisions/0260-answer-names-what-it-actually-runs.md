@@ -219,3 +219,70 @@ ADR 0068 決定3 の逐語【現物】:
 - 🔴 **引き受けた負債1（tenant の `runId`）は【推論・未検算】である。** 例外が実際に起きることを確かめていない。
 - **決定2 が既存の利用者の手元で何を壊すかは、測っていない。** `examples/chat` は `PUBLISH_TARGETS` に無く出荷面ではない【現物】が、⛔ **「出荷面でない」は「誰も使っていない」を意味しない。**
 - **決定4 の警告行が `retrieval` の他の出力（JSON・基準値突き合わせ）に影響しないことは、読解で判断した**【推論・未検算】。stdout にしか足していない。
+
+---
+
+## 🔴 追記（2026-09-21、着地当日）—— **決定1 が、塞いだはずの欠陥を向きだけ変えて作り直していた**
+
+**⚠ この追記を書いたのも、自動化された担い手である**（ADR 0220）。⛔ **上の本文は1バイトも書き換えていない**（`docs/decisions/README.md`「⛔ 採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」）。
+
+### 何が起きたか【現物】
+
+決定1 の `resolveRecordedRun` は、カセットを読めたとき無条件にこう返していた:
+
+```ts
+env: { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
+```
+
+⟹ 🔴 **利用者が `MNEMORA_LLM=deterministic` を明示していても、黙って上書きする。**
+
+**【実測】CI で当てた**（PR #587、sha `4a60543`、`examples/chat` ジョブ）。`MNEMORA_LLM=deterministic MNEMORA_EMBEDDING=deterministic` を明示して `answer` を起動した実行の出力（逐語）:
+
+```
+- Expected: [provider] LLM       : @mnemora/testkit の決定的な擬似 provider
++ Received: [provider] LLM       : 記録した実 API 応答の再生（ADR 0051）
+```
+
+⟹ ⛔ **[ADR 0068](./0068-the-bench-must-not-lie-about-what-it-measured.md) の逐語「⟹「明示した source と、実際に使われる provider が食い違う経路を作らない」」に正面から反する。**
+⟹ 🔴 **この ADR が Issue #577 で塞いだ欠陥（画面の名乗りと実際の provider がずれる）を、向きだけ変えて作り直していた。**
+
+⚠ **`compare` / `retrieval` には、改名前から同じ上書きが在った**【現物】。決定1 が新たに作ったのは `answer` 経路の分だけである。⛔ **だが「元から在る」は「正しい」を意味しない** ⟹ 3経路とも直す。
+
+### 決定1 を限定する —— **明示が無いときだけ倒す**
+
+```ts
+env: {
+  ...process.env,
+  MNEMORA_LLM: process.env.MNEMORA_LLM || "recorded",
+  MNEMORA_EMBEDDING: process.env.MNEMORA_EMBEDDING || "recorded",
+},
+```
+
+⚠ **`??` ではなく `||`。** `providers.ts` の `parseModeOverride` が**空文字を「未指定」として扱う**【現物】ため、`??` だと `MNEMORA_LLM=""` が「明示」扱いになり、あちらの規約とずれる。
+
+⭐ **1箇所の変更で3経路とも直る。** これは決定1（名乗る関数と倒す関数を1つにした）の構造がそのまま効いている——**限定もまた、1箇所で入る。**
+
+### ⭐ この形の射程 —— **どこまでを塞いだか**
+
+🔴 **「形で塞いだ」と書くなら、どこまでを塞いだのかを同じ場所に書く。** 書かないと、後から読む人が「`cli.ts` の env は全部この形で守られている」と読む。
+
+- ⭕ **守るのは `resolveRecordedRun` を通る3経路**（`runCompare` / `runRetrieval` / `runAnswer`）。
+- ⛔ **`runAssociationProbes` / `runIdentifierProbes` / `runConsolidationCostCommand` 等は、`resolveRecordedRun` を通らず `cli.ts` 内でモードを直接指定しており、この形の外に在る**【現物】。
+  ⭐ **ただし「外に在る」と「同じ欠陥を持つ」は別である**——それらは**カセットを解決せず、「記録した応答を再生する」と名乗りもしない** ⟹ Issue #577 の形（予告と実測の食い違い）は構造的に成立しない。`printProviderMode` が実測を出すだけである。
+  ⚠ **`ci.yml:950` の `MNEMORA_EMBEDDING: local`（step env）は `runAssociationProbes` 内のリテラルに上書きされて意味を持たない**【現物】。⛔ これは**重複した指定**であって**食い違った名乗り**ではない（画面は実測を出す）。⟹ 本 ADR の範囲外。
+- ⚠ **`runRetrieval` は、この限定の後も arm の値で無条件に上書きする**【現物】。⟹ **利用者が `retrieval` で `MNEMORA_LLM` を明示しても arm の指定が勝つ。** ⭐ これは `buildArmSpecs` の意味（3本の対照群を回す）そのものであり、意図した上書きである。⛔ **直していない。**
+
+### 歯 —— **順序が証拠を作った**
+
+⚠ **既定の道でバナーが出ないこと（決定6 の歯）だけでは、「バナーを廃止した」と区別できない。** ⟹ 2本足した:
+
+1. **`answer-format.test.ts`（新規・DB 不要）** — `deterministic` では ⛔⛔⛔ バナーが**出る**、`recorded`/`openai` では出ない。
+   **【実測】変異で鳴ることを確かめた**: `formatAnswerQualityBanner` を常に空文字へ変異させると、⭐ **`deterministic では ⛔⛔⛔ バナーが出る` だけが赤くなり、他2本は緑のまま**（`AssertionError: expected '' not to be ''`）。⟹ **主張そのものを反証する側だけが鳴る。**
+2. **`answer-cli.postgres.test.ts`（追記・DB 要）** — CLI を通した明示指定。
+   **【実測】赤 → 緑の遷移を CI で観測した。** 歯だけを先に push した sha `4a60543` で、⭐ **`MNEMORA_LLM/MNEMORA_EMBEDDING に deterministic を明示したら、明示が勝ち ⛔⛔⛔ バナーが出続ける` の1本だけが赤くなった**（上の逐語）。この限定を入れた後に緑になる。
+
+### 確かめていないこと
+
+- **この追記の書き手も、`answer` を1回も走らせていない。** 赤も緑も **CI でしか見ていない。**
+- **`runRetrieval` の arm 上書きが利用者を困らせるかは、測っていない。** ⛔ 直すべきかの判断もしていない。
+- **`||` と `??` の違いが実際に効く入力（`MNEMORA_LLM=""`）を、走らせて確かめていない**【推論・未検算】——`parseModeOverride` の現物読解に基づく。

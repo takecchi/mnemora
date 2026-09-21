@@ -241,7 +241,21 @@ function resolveRecordedRun(target: CassetteTarget): RecordedRunPlan {
     "  ⚠ これは記録した時点の API の姿である。実 API との乖離は `verify` で確かめること。",
   );
   return {
-    env: { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
+    // 🔴 **明示が在るときは倒さない（Issue #577 続き / ADR 0068）。**
+    // 当初この行は無条件に `"recorded"` を焼き込んでいた——**利用者が
+    // `MNEMORA_LLM=deterministic` を明示しても黙って上書きし、画面は
+    // 「記録した実 API 応答の再生」と名乗って走った。**⟹ ADR 0068 の
+    // 「明示した source と、実際に使われる provider が食い違う経路を作らない」に
+    // 反しており、#577 が塞いだ欠陥を向きだけ変えて作り直していた。
+    //
+    // ⚠ **`??` ではなく `||` を使う。**`providers.ts` の `parseModeOverride` が
+    // **空文字を「未指定」として扱う**ため、`??` だと `MNEMORA_LLM=""` が
+    // 「明示」扱いになり、あちらの規約とずれる。
+    env: {
+      ...process.env,
+      MNEMORA_LLM: process.env.MNEMORA_LLM || "recorded",
+      MNEMORA_EMBEDDING: process.env.MNEMORA_EMBEDDING || "recorded",
+    },
     providerOptions: { cassette },
     cassette,
   };
