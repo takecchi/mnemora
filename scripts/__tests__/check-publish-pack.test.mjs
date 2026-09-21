@@ -1,5 +1,5 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -690,4 +690,91 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
     expect(result.status, `期待した EXIT=0 にならなかった。出力:\n${output}`).toBe(0);
     expect(output).toContain("publish 梱包の門を通りました");
   }, 120_000);
+
+  /**
+   * ⚠ この門が見ていない範囲（ADR 0255 が反例として名指しし、ADR 0259 が実行時出力へ
+   * 焼いた断り）。**成功（EXIT=0）のときにも出ることを、実行時出力そのもので測る**
+   * ——ADR 0255「決定A」（成功側が本体。「通った＝安全」と読ませないため）。
+   */
+  it("成功時の実行時出力に「⚠ この門が見ていない範囲」の断りが焼かれている（固定リストの取りこぼしを名乗る）", () => {
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).toBe(0);
+    expect(output).toContain("⚠ この門が見ていない範囲:");
+    expect(output).toContain("scripts/publish-targets.mjs の PUBLISH_TARGETS");
+    expect(output).toContain("固定リスト");
+    // ⭐ 数を直書きしない（ADR 0234 決定9）——PUBLISH_TARGETS の実件数から動的に出る。
+    expect(output).toContain(`いま見たのは ${PUBLISH_TARGETS.length} パッケージ`);
+    for (const target of PUBLISH_TARGETS) {
+      expect(output).toContain(target.name);
+    }
+  }, 120_000);
+});
+
+/**
+ * ⚠ この門が見ていない範囲——失敗（EXIT=1）側の実行時出力を測る歯。
+ *
+ * `scripts/__tests__/check-pr-adr-reference.test.mjs` と同じ形（本物の `.mjs` を
+ * 一時ディレクトリへコピーし、合成環境で動かす）を踏襲する。`publish-targets.mjs` を
+ * 「存在しないディレクトリを指す1パッケージだけの合成版」へ差し替えると、
+ * `pnpm pack` の spawn 自体が ENOENT で失敗し（`cwd` が存在しないため）、
+ * `packOne()` が投げた例外を `violations` へ積んで exit 1 になる——本物の
+ * `pnpm pack` プロセスは1つも起動しないので速い（手元で実測 約40ms）。
+ */
+describe("scripts/check-publish-pack.mjs（合成 publish-targets.mjs で失敗分岐を実行時に測る）", () => {
+  /** @type {string | undefined} */
+  let workDir;
+
+  afterEach(() => {
+    if (workDir) {
+      rmSync(workDir, { recursive: true, force: true });
+      workDir = undefined;
+    }
+  });
+
+  function buildBrokenTargetFixture() {
+    workDir = mkdtempSync(join(tmpdir(), "check-publish-pack-broken-target-"));
+    const scriptsDir = join(workDir, "scripts");
+    mkdirSync(scriptsDir, { recursive: true });
+    copyFileSync(
+      fileURLToPath(new URL("../check-publish-pack.mjs", import.meta.url)),
+      join(scriptsDir, "check-publish-pack.mjs"),
+    );
+    copyFileSync(
+      fileURLToPath(new URL("../publish-pack-checks.mjs", import.meta.url)),
+      join(scriptsDir, "publish-pack-checks.mjs"),
+    );
+    writeFileSync(
+      join(scriptsDir, "publish-targets.mjs"),
+      [
+        "// 合成フィクスチャ: 実在しないディレクトリを指す唯一の publish 対象。",
+        "export const PUBLISH_TARGETS = [",
+        '  { name: "@mnemora/does-not-exist", dir: "packages/does-not-exist" },',
+        "];",
+        "",
+      ].join("\n"),
+    );
+    return workDir;
+  }
+
+  it("EXIT=1 になり、失敗時の実行時出力にも同じ断りが焼かれている", () => {
+    const dir = buildBrokenTargetFixture();
+    const result = spawnSync(process.execPath, [join(dir, "scripts", "check-publish-pack.mjs")], {
+      cwd: dir,
+      encoding: "utf8",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status, `EXIT=1 を期待した。出力:\n${output}`).toBe(1);
+    expect(output).toContain("✗ 違反が");
+    expect(output).toContain("⚠ この門が見ていない範囲:");
+    expect(output).toContain("scripts/publish-targets.mjs の PUBLISH_TARGETS");
+    expect(output).toContain("固定リスト");
+    expect(output).toContain("いま見たのは 1 パッケージ");
+    expect(output).toContain("@mnemora/does-not-exist");
+  });
 });

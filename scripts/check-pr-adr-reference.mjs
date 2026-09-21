@@ -124,6 +124,31 @@ function loadAddedNumbers() {
   return adrNumbersFromPaths(splitLines(out));
 }
 
+/**
+ * ⚠ この門が見ていない範囲（ADR 0255「名乗れないものを道具に名乗らせない」への
+ * 反例として ADR 0255 自身が名指しし、成文化した規律に射程通りに違反したまま
+ * 引き受けていた負債。ADR 0259 決定A/B/C/D。Issue #580）。
+ *
+ * ファイル冒頭の doc コメント「## 🔴 残る穴（塞いでいない）」が認めている、
+ * 最後の緑の push の「後」にタイトル・本文を編集すると効かないという穴を、
+ * 実行時の出力（成功・失敗どちらの分岐）にも焼く。マーカー行
+ * `⚠ この門が見ていない範囲` は `scripts/check-publish-pack.mjs` と逐語で揃える
+ * （grep 可能にするため。ADR 0259「決定C」）。
+ */
+const SCOPE_CAVEAT_MARKER = "⚠ この門が見ていない範囲:";
+
+function buildScopeCaveatLines() {
+  return [
+    "",
+    SCOPE_CAVEAT_MARKER,
+    "  見たのは、この CI 実行を起こした push の時点の PR タイトル・本文だけである。",
+    "  最後の緑の push の「後」にタイトル・本文を編集すると、この検査は効かない",
+    "  （ci.yml の pull_request トリガーに edited を足していない）。",
+    "  ⟹ 直してから push し、緑を引き直してからマージすること（儀式の順序への依拠であって検査ではない）。",
+    "",
+  ];
+}
+
 function main() {
   const prTitle = process.env.PR_TITLE ?? "";
   const prBody = process.env.PR_BODY ?? "";
@@ -145,6 +170,7 @@ function main() {
         `[${addedNumbers.join(", ") || "無し"}]、捨てた番号は [${abandonedNumbers.join(", ") || "無し"}]。` +
         "PR タイトル・本文のどちらにも捨てた番号への参照は見つかりませんでした。",
     );
+    console.log(buildScopeCaveatLines().join("\n"));
     process.exit(0);
   }
 
@@ -170,19 +196,7 @@ function main() {
     '  gh pr edit <このPRの番号> --title "..." --body "..." で、上の古い番号を、' +
       "いま追加している番号（上に列挙）へ書き換えること。",
   );
-  console.error("");
-  console.error(
-    "⭐ 直すのは「最後の push の前」であること。squash merge のタイトル・本文は、マージ実行時点の",
-  );
-  console.error(
-    "PR タイトル・本文からそのまま作られます（このリポジトリは squash_merge_commit_title=PR_TITLE /",
-  );
-  console.error(
-    "squash_merge_commit_message=PR_BODY）。push の後にタイトル・本文だけを編集しても、この CI は",
-  );
-  console.error(
-    "再実行されません——タイトル・本文を直してから push し、緑を引き直してからマージすること。",
-  );
+  console.error(buildScopeCaveatLines().join("\n"));
   process.exit(1);
 }
 

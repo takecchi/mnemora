@@ -207,6 +207,23 @@ describe("scripts/check-pr-adr-reference.mjs（本物の git 履歴に対して�
     expect(result.stderr).toContain("gh pr edit");
   });
 
+  /**
+   * ⚠ この門が見ていない範囲（ADR 0255 が反例として名指しし、ADR 0259 が実行時出力へ
+   * 焼いた断り）。失敗（EXIT=1）時の実行時出力に出ることを測る——ADR 0255「決定A」の
+   * 理由(1)「✗ 違反が…件」も暗に完全性を主張していること、の裏返し。
+   */
+  it("失敗時の実行時出力に「⚠ この門が見ていない範囲」の断りが焼かれている（push 後の編集は効かない旨）", () => {
+    const dir = buildFixtureRepo();
+    const result = runCheck(dir, {
+      prTitle: "adr-renumber.mjs が付け替えを促す（ADR 0199）",
+      prBody: "",
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("⚠ この門が見ていない範囲:");
+    expect(result.stderr).toContain("push の時点の PR タイトル・本文だけ");
+    expect(result.stderr).toContain("edited");
+  });
+
   it("PR 本文が捨てた番号（0199）を名乗っていたら赤で終わる（aacb982e が実際に踏んだ形）", () => {
     const dir = buildFixtureRepo();
     const result = runCheck(dir, {
@@ -226,6 +243,22 @@ describe("scripts/check-pr-adr-reference.mjs（本物の git 履歴に対して�
     });
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("OK");
+  });
+
+  /**
+   * ⚠ この門が見ていない範囲——成功（EXIT=0）時にも同じ断りが出ることを測る歯。
+   * ADR 0255「決定A」: 成功側が本体（「通った＝安全」と読ませないため）。
+   */
+  it("成功時の実行時出力にも「⚠ この門が見ていない範囲」の断りが焼かれている", () => {
+    const dir = buildFixtureRepo();
+    const result = runCheck(dir, {
+      prTitle: "adr-renumber.mjs が付け替えを促す（ADR 0200）",
+      prBody: "ADR 0200 を追加した。",
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("⚠ この門が見ていない範囲:");
+    expect(result.stdout).toContain("push の時点の PR タイトル・本文だけ");
+    expect(result.stdout).toContain("edited");
   });
 
   it("PR_BODY が未定義でも落ちない", () => {
