@@ -5,11 +5,13 @@ import { defineConfig } from "vitest/config";
 // @mnemora/openai も devDependency（provider-parity.test.ts が両方の provider を並べて検査する
 // ためだけに使う）なので、同じ理由で openai/src も直接参照する——CI の
 // typecheck → lint → test → build の順では、test の時点で openai の dist が無い前提になる。
+// @mnemora/testkit も同じ理由（llm-provider.conformance.test.ts が使う）。
 export default defineConfig({
   resolve: {
     alias: {
       "@mnemora/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
       "@mnemora/openai": fileURLToPath(new URL("../openai/src/index.ts", import.meta.url)),
+      "@mnemora/testkit": fileURLToPath(new URL("../testkit/src/index.ts", import.meta.url)),
     },
   },
 });

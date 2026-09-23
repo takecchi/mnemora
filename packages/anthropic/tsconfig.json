@@ -5,7 +5,8 @@
     "baseUrl": ".",
     "paths": {
       "@mnemora/core": ["../core/src/index.ts"],
-      "@mnemora/openai": ["../openai/src/index.ts"]
+      "@mnemora/openai": ["../openai/src/index.ts"],
+      "@mnemora/testkit": ["../testkit/src/index.ts"]
     }
   },
   "include": ["src"]

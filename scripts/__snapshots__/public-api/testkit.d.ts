@@ -346,6 +346,7 @@ export { InMemoryTenantSettingsStore } from "./__fixtures__/in-memory-tenant-set
 export * from "./memory-store-conformance.js";
 export * from "./vector-store-conformance.js";
 export * from "./embedding-provider-conformance.js";
+export * from "./llm-provider-conformance.js";
 export * from "./lexical-store-conformance.js";
 export * from "./event-store-conformance.js";
 export * from "./outbox-store-conformance.js";
@@ -376,6 +377,28 @@ export interface LexicalStoreConformanceOptions {
     prepareMemory: (ctx: Ctx, attrs: PrepareLexicalMemoryAttrs) => Promise<MemoryId> | MemoryId;
 }
 export declare function describeLexicalStoreConformance(options: LexicalStoreConformanceOptions): void;
+
+// ===== dist/llm-provider-conformance.d.ts =====
+import type { z } from "zod";
+import type { Ctx, LLMProvider, PromptSpec } from "@mnemora/core";
+export interface LLMProviderFailureHarness {
+    readonly provider: LLMProvider;
+    callCount(): number;
+}
+export interface LLMProviderConformanceOptions<T> {
+    name: string;
+    createProvider: () => LLMProvider | Promise<LLMProvider>;
+    deterministic: boolean;
+    prompt: PromptSpec;
+    structured: {
+        prompt: PromptSpec;
+        schema: z.ZodType<T>;
+    };
+    createFailing: ((error: unknown) => LLMProviderFailureHarness | Promise<LLMProviderFailureHarness>) | null;
+    ctx?: Ctx;
+    timeout?: number;
+}
+export declare function describeLLMProviderConformance<T>(options: LLMProviderConformanceOptions<T>): void;
 
 // ===== dist/memory-store-conformance.d.ts =====
 import type { Ctx, MemoryEvent, MemoryId, MemoryStore, OutboxJobRecord, RecallId } from "@mnemora/core";
