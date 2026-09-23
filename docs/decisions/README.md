@@ -290,5 +290,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0266](./0266-llm-provider-conformance.md) | `LLMProvider` の適合 suite を新設し、`@mnemora/anthropic` と `@mnemora/openai` の両方に当てる（Issue #389） | 採用 (2026-09) |
 | [0267](./0267-withdraw-the-release-changelog-publish-gate.md) | 出す版の節を要求する publish の門を撤回する —— 🔴 **門は正しく鳴っていた。外すのはオーナーの判断であって、門の欠陥ではない** | 採用 (2026-09) |
 | [0268](./0268-living-doc-judgment-pointer-repointed-to-605.md) | 生きた文書3本の「判断の置き場」ポインタを #518 から #605 へ付け替え、その一致を歯で縛る（Issue #518） | **草案 (2026-09)** |
+| [0269](./0269-port-interface-doc-correspondence-sweep.md) | `Runtime` 以外の port interface（`MemoryStore` など）も、`docs/architecture.md` §5 の写しが実体とずれている — どちらが正本かは決めない（Issue #604） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
