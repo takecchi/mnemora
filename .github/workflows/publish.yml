@@ -139,12 +139,17 @@ jobs:
         # ——service container を立てる必要があり、同じ commit に対して main の CI が
         # すでに走っている（上の ancestor 検査がその前提を押さえている）。
         # ルートの `pnpm run test` は DB 段について「実行していません」と明示的に告知する（ADR 0015）。
+        #
+        # ⚠ 直す前はここに `pnpm run typecheck` 〜 `build` の5行を並べ、既定シェル
+        # （bash -e）に任せていた——1本目が落ちた時点でステップ全体が止まり、
+        # 2〜5本目が実際に壊れているかどうかはその回では一度も分からなかった
+        # （ADR 0210 が数え直した族の6番、Issue #476）。
+        # scripts/run-publish-gates.mjs が、ADR 0210 の scripts/run-root-test-gate.mjs と
+        # 同じ形（判定は scripts/publish-gates.mjs の純関数）で、5段を前段の成否に関わらず
+        # 全部起動し、どれか1本でも失敗・未起動なら最後に非0で終わる。落ちた段の名前は
+        # 出力に名指しで出る（詳細は ADR 0210 の 2026-09-24 追記、Issue #476）。
         run: |
-          pnpm run typecheck
-          pnpm run lint
-          pnpm run format:check
-          pnpm run test
-          pnpm run build
+          node scripts/run-publish-gates.mjs
 
       - name: publish 梱包の門（tarball の中身を検査する）
         run: pnpm run pack:check

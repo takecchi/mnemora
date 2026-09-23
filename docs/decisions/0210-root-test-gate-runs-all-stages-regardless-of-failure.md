@@ -194,3 +194,147 @@ import された時点で3段を起動してしまうので、**歯から import
   段2・段3が起動されること」を手元で変異試験することは行っていない
   （ローカルで全テストを走らせることを避けたため）。CI 上でこの門自体が実行される
   ことをもって、配線が壊れていないことの実測に代える。
+
+## 追記（2026-09-24、Issue #476）: 族の6番（`publish.yml` の門ステップ）も同じ形で直した
+
+⛔ **本文は書き換えていない。** 上の「数え直した結果」の表・6番と「4. 数え直した族の
+うち、直すのは1番・2番だけ」は、この追記を書いた時点でもなお**当時の判断の記録として
+正しい**——当時は「リリース直前に出荷経路へ手を入れない」という依頼者の明示指示により、
+6番（`.github/workflows/publish.yml` の門ステップ）は意図的に対象から外されていた。
+[Issue #476](https://github.com/takecchi/mnemora/issues/476) は、この6番に「族に属する
+ことは記録するが、直す判断はここでは行わない」という住所を与えるために立てられ、
+2026-09-17 の判定コメントは「⭕ `v1.0.0` を止めない」——理由は「`bash -e` が既定な
+限り、偽陽性の緑（壊れているのに通る）は起きない。失われるのは診断の解像度だけ」
+であり、`v1.0.0` の後に改めて判断する対象として残っていた。
+
+**この追記の時点で、`v1.0.0` の tag 待ちが外れ、`publish.yml` の門ステップに手を
+入れる作業が明示的に依頼された。**⟹ 族の6番を、1番・2番と同じ形で直した。
+
+### 直した形 —— 1番・2番とまったく同じ形
+
+`.github/workflows/publish.yml` の門ステップ（直す前、`bash -e` の既定に任せた5行）:
+
+```yaml
+run: |
+  pnpm run typecheck
+  pnpm run lint
+  pnpm run format:check
+  pnpm run test
+  pnpm run build
+```
+
+これを、`scripts/publish-gates.mjs`（判定・副作用なし）と `scripts/run-publish-gates.mjs`
+（CLI 入口）に切り出した——**本体（1番。`scripts/root-test-gate.mjs` /
+`scripts/run-root-test-gate.mjs`）と同じ「判定関数と実行部を分ける」形**を、意図的に
+コードは共有せずに踏襲している（理由は `scripts/publish-gates.mjs` の docstring
+に書いた——本体側は「歯から `run-root-test-gate.mjs` を子プロセスとして起動しない
+（段2の `pnpm -r run test` が再帰するため）」という固有の制約を抱えており、この
+制約をこちらへ持ち込みたくなかった）。5段を前段の成否に関わらず全部起動し、
+どれか1本でも失敗・未起動なら最後に非ゼロで終わる。落ちた段の名前は要約に
+名指しで出る（`summarizeStages()` が「N/5 段が実際に走りました」「失敗した段: …」
+を出す——本体の `summarizeStages()` と同じ書式）。`publish.yml` 側は
+`node scripts/run-publish-gates.mjs` を1行呼ぶだけになった。
+
+### 既存の「`-e` を保つ」歯（`publish-yml-gate-shell-wiring.test.mjs`）との関係
+
+Issue #476 の 2026-09-18 のコメントが置いた歯
+（`scripts/__tests__/publish-yml-gate-shell-wiring.test.mjs`。ADR 0245 / Issue #476）は、
+「門ステップが `bash -e` で走ること」——`shell:` の上書きで `-e` が失われていないこと
+——を縛っていた。**この歯は消していない。** ただし、この追記の変更により
+偽陽性の緑を防ぐ責務の主体が移ったため、次の2点を直した:
+
+1. **門ステップの検出方法**を「`pnpm run` の行が2本以上並ぶブロック」から
+   「`run-publish-gates.mjs` を含むブロック」に変えた（旧方式は、門ステップが
+   `node scripts/run-publish-gates.mjs` の1行だけになった時点で、候補が0件に
+   なってしまうため）。
+2. **「2本以上のコマンドが並ぶこと」を測っていた `it` を、「`node
+   scripts/run-publish-gates.mjs` の1行だけであり、`|| true` のような終了コードを
+   握り潰す尾が付いていないこと」を測る `it` に置き換えた。**
+
+歯自身の**意図**（偽陽性の緑を出さない）は変えていない——変えたのは、その意図を
+どの層で果たすかである。単一コマンドの `run:` は、`-e` の有無に関わらず
+その終了コードがそのままステップの終了コードになるため、偽陽性の緑を防ぐ主な
+責務はいまや `scripts/publish-gates.mjs` の `gateExitCode()`（歯:
+`scripts/__tests__/publish-gates.test.mjs` / `run-publish-gates.test.mjs`）が持つ。
+それでも `-e` を保つ確認自体は残した——将来この `run: |` へ行が足されたときの
+回帰を捕まえるのは、この歯だけだからである（防御の重ね掛け。詳細は同ファイルの
+docstring）。
+
+### 歯
+
+- `scripts/__tests__/publish-gates.test.mjs`（判定関数の純関数試験。本体の
+  `root-test-gate.test.mjs` と同じ形）
+- `scripts/__tests__/run-publish-gates.test.mjs`（CLI を実プロセスとして起動する試験。
+  `MNEMORA_PUBLISH_GATE_STAGES_JSON` というテスト専用の環境変数で、本物の
+  `pnpm run typecheck` 等を一切起動せずに、偽の段（成功・失敗を選べる
+  `node -e "process.exit(N)"`）に差し替える）
+- `scripts/__tests__/publish-yml-gates-wiring.test.mjs`（配線の歯。`publish.yml` から
+  実際の起動コマンドを取り出し、偽の段に差し替えてそのまま子プロセスとして起動する
+  ——`publish-yml-dry-run-wiring.test.mjs` と同じ形）
+- `scripts/__tests__/publish-yml-gate-shell-wiring.test.mjs`（既存の歯を上記のとおり
+  改修）
+
+**【実測】変異試験**: `scripts/run-publish-gates.mjs` / `scripts/publish-gates.mjs` を
+`cp` で退避したうえで、3種の変異を1つずつ当てた。
+
+1. `-e` のまま（段の実行を、前段が失敗した時点で `break` する形に変える）→
+   「2本目が失敗 ⟹ 3〜5本目も走る」の歯が赤くなった（3〜5本目に相当する偽の段の
+   名前が出力に出なかった）。
+2. **やりすぎた変異**（`gateExitCode()` を「全部走らせても常に0を返す」に書き換える）
+   → 「2本目が失敗」「最後の1本だけ失敗」の歯、および純関数側の `gateExitCode` の
+   歯4件が赤くなった。
+3. 落ちた段の名前を出力しない（`summarizeStages()` から「失敗した段: …」の行を
+   削る）→ 「2本目が失敗」の歯が赤くなった。
+
+3種とも、`cp` で退避しておいた原本に戻し、`diff` で1バイトも差が無いことと、
+対象の歯がすべて緑に戻ることを確認した。
+
+### ⭐ テスト専用の差し替え口は、publish の workflow の中では断る
+
+`scripts/run-publish-gates.mjs` は、歯が本物の `pnpm run test` / `build` を起動しないように、
+環境変数 `MNEMORA_PUBLISH_GATE_STAGES_JSON` で段を偽の段へ差し替えられる。**リリースの門に
+抜け道を残さないため、`GITHUB_WORKFLOW` が `Publish`（`publish.yml` の `name:`）のときは、
+偽の段を1本も走らせずに exit 3 で断る。** 差し替えたときは「本物の門ではない」と出力で名乗る。
+
+⚠ **`publish.yml` の門そのものが `pnpm run test` でこの歯を走らせる**ので、publish の job の中では
+親の `GITHUB_WORKFLOW` が `Publish` になる。歯は子プロセスの `GITHUB_WORKFLOW` を明示的に
+上書きして起動する（上書きを外すと、`GITHUB_WORKFLOW=Publish` の下で歯が4件赤になり、publish を
+止めることを手元で確かめた）。
+
+### ⛔ 確かめていないこと —— 本番の `publish.yml`（`workflow_dispatch` の `dry_run`）は走らせていない
+
+**この追記を書いた担い手は、`gh workflow run` 等で `publish.yml` を GitHub 上で
+一度も起動していない。予行（`workflow_dispatch` の `dry_run: true`）も含めて、
+本番の Actions ランナー上でこの変更が動くことは実測していない。**
+
+**理由**: **クローン（miku）の判断である**（2026-09-24）——予行（`dry_run: true`）で
+あっても、publish の実行経路（Trusted Publishing / OIDC・tag の ancestor 検査・
+`npm publish` まで含む一連）を担い手の手に置かない。これは `docs/autonomy.md` §3
+「してはいけないこと」が挙げる「npm への publish・Release の作成・npm 側の設定」
+そのものではないが、**同じ経路を1個の workflow ファイルの中で実際に動かす行為**
+だからである。オーナー本人の判定ではない。
+
+**代わりに何で確かめたか**: 上の「歯」節の4本（うち3本は本物の子プロセスとして
+`node` を実際に起動する）と、`pnpm run lint` / `pnpm run format:check`。特に
+`scripts/__tests__/publish-yml-gates-wiring.test.mjs` は、`publish.yml` のテキストから
+実際に取り出した起動コマンド（`node scripts/run-publish-gates.mjs`）を、偽の段に
+差し替えてそのまま子プロセスとして起動しており、「yml に書いてある文字列が、
+確かに動く実行可能ファイルを指している」ことまでは実測している。**それでも、
+GitHub Actions のランナー環境（`actions/checkout` 後の作業ディレクトリ・
+`actions/setup-node` が整えた `PATH`・OIDC の `id-token` 等）の中でこの script が
+実際に動くことは、この実測の範囲外である。**
+
+⟹ **この変更を含む次の Release 作業（`v*` の Release を作る、または
+`workflow_dispatch` の予行を走らせる）で、この門ステップが初めて本番の
+Actions ランナー上を通る。** そのとき緑になることをもって、ここでの実測を
+補うこと。赤くなった場合は、上の歯がすべて緑であるにも関わらず本番だけ落ちた
+ことになるので、GitHub Actions のランナー環境固有の要因（`PATH` に `pnpm` /
+`node` が無い等）を疑うこと。
+
+### ADR 索引の再生成
+
+この追記は既存 ADR（0210）への追記であり、新しい ADR ファイルを増やしていない
+——ファイル名・1行目の見出し・状態欄はどれも変えていないため、
+`docs/decisions/README.md` の生成済み索引（ADR 0137）は影響を受けない。
+**【実測】`node scripts/generate-adr-index.mjs --check` を走らせ、再生成不要
+（差分なし）であることを確認した。**
