@@ -304,5 +304,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0277](./0277-adr-renumber-detects-unrewritten-chain-references.md) | `adr-renumber.mjs` は、`ADR NNNN / MMMM` という略記の連なりで書き換えられずに残った参照を検出する — 書き換えの射程は広げない | **提案 (2026-09)** |
 | [0278](./0278-architecture-section5-port-interface-correspondence-tooth.md) | `docs/architecture.md` §5 の port interface が実体とずれたら落ちる歯を置く（Issue #604、ADR 0269、ADR 0273） | **提案 (2026-09)** |
 | [0279](./0279-required-status-checks-declaration-and-check.md) | required status check の「正本＋突き合わせ」を足す — 宣言は `.github/required-status-checks.json`、判定は三値、CI には繋がない | **提案 (2026-09)** |
+| [0281](./0281-ci-green-check-empty-check-runs-reason-dirty.md) | `total === 0` の *理由* を `mergeable_state` で切り分ける——緑の根拠は変えない（Issue #615） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
