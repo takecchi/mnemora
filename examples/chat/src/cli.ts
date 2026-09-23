@@ -1426,6 +1426,21 @@ async function runIdentifierProbes(): Promise<void> {
  * フォローアップ)。arm 間の汚染を断つため、テナントは `buildArmTenantId` で
  * 必ず別々にする(`retrieval-quality.ts` の先例と同じ理由)。
  *
+ * ⚠ **テナントを分けても、埋め込みのテーブルは分かれていない**(Issue #363)。
+ * 4つの arm は同じ埋め込み空間(同じ `memory_embeddings_*` テーブル)へ同じ会話を
+ * ingest するので、テーブルの中に互いのほぼ同じ行(near-duplicate)を持つ。
+ * ⟹ **起こりうる機構**: プランナが HNSW の索引スキャンを選んだ場合、`tenant_id` の
+ * 絞り込みは索引スキャンの後に効く。そのとき `hnsw.ef_search` の候補の窓が
+ * 他テナントの near-duplicate で埋まり、この arm の行が窓に入らなくなりうる。
+ * ⛔ **これは測っていない。** ADR 0111 の実測では、テナントで絞る実際のクエリ形に
+ * 対して、本番規模では既定のプランナが Seq Scan を選び(このとき窓の問題は起きない)、
+ * **同じテナントが10万行に育ったときに初めて自然に HNSW を選んだ。**このベンチの規模で
+ * プランナがどちらを選ぶのか、HNSW が選ばれたときに窓が実際に食われるのかは確かめて
+ * いない——ADR 0111 の実測と本 Issue の機構の、**どちらが当てはまるかは未確定**である。
+ * ⟹ このベンチの `goldReturnedCount` などを arm 間で比べるときは、この構造を前提に
+ * 読むこと。構造を直す案(arm ごとに別の埋め込み空間にする等)は Issue #363 に在り、
+ * まだ決めていない。
+ *
  * **`warmup()` を明示的に呼び、失敗を区別する**(`identifier-probes` と同じ理由)。
  * `ok: false` なら、メトリクスを1つも出さずに打ち切る——この bench の
  * `AssociationProbeRunJson`(`./association-json.js`)は4 arm・3 delta を持つ形で
