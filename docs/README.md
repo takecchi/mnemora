@@ -37,7 +37,9 @@
 ## 外から見える API
 
 **記憶そのものを動かす中核**は `observe()` / `recall()` / `reflect()` / `consolidate()` /
-`forget()` の5つ。**ここは増やさない。**`Runtime` には他に9個のメソッドがあるが、
+`forget()` の5つ。**ここは増やさない。**`Runtime` には他にもメソッドがあるが、⭐ **何が
+在るかの正本は `packages/core/src/runtime.ts` の `export interface Runtime` であり、
+⛔ ここに個数を写さない**（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。それらは
 保守操作・是正取り消し・説明の3層に分かれる（[docs/vision.md](./vision.md)「外から見える
 API」、[ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md)）。
 
