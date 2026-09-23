@@ -58,9 +58,16 @@ export const normalizeDashes = (s) =>
     .replaceAll(/\s+/g, "");
 /** 段5: 句読点・鉤括弧・見出し記号。 */
 export const normalizePunctuation = (s) =>
-  normalizeDashes(s).replaceAll(/[「」『』、。,.]/g, "").replaceAll("#", "");
+  normalizeDashes(s)
+    .replaceAll(/[「」『』、。,.]/g, "")
+    .replaceAll("#", "");
 
-const STAGES = [normalizeLinksAndLines, normalizeNestedQuotes, normalizeDashes, normalizePunctuation];
+const STAGES = [
+  normalizeLinksAndLines,
+  normalizeNestedQuotes,
+  normalizeDashes,
+  normalizePunctuation,
+];
 
 /**
  * `quote` が `agentsMdText` に実在するかを、段階的に正規化しながら当てる。

@@ -42,7 +42,8 @@ describe("引用の取り出し（入れ子の鉤括弧に対応する）", () =
   });
 
   it("帰属から離れた鉤括弧は、狭い窓には入れない（門を広げない）", () => {
-    const text = "`AGENTS.md`「⚠ 数を」に照らすと、同じ節が明記する通り「一覧そのものを持つ」は許容。";
+    const text =
+      "`AGENTS.md`「⚠ 数を」に照らすと、同じ節が明記する通り「一覧そのものを持つ」は許容。";
     expect(findNarrowAgentsMdQuotes(text)).toEqual([{ quote: "⚠ 数を" }]);
     expect(findWideAgentsMdQuotes(text)).toEqual([{ quote: "一覧そのものを持つ" }]);
   });
@@ -51,7 +52,8 @@ describe("引用の取り出し（入れ子の鉤括弧に対応する）", () =
 describe("⭐ 陽性対照 —— 既存の `anchorExistsInTarget` が落とす形を、この歯は捕まえる", () => {
   // 現物から出た形。`AGENTS.md:361` は
   // `#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-...md) が反例`
-  const target = "#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例";
+  const target =
+    "#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例";
   const quote = "🔴 線は引けない — ADR 0178 が反例";
 
   it("🔴 既存は「原典に無い」と判定する（markdown リンクを外さないため）", () => {
@@ -63,7 +65,7 @@ describe("⭐ 陽性対照 —— 既存の `anchorExistsInTarget` が落とす�
   });
 
   it("⭕ 入れ子作法で括弧が変わった形も当たる（原典 `「検出」` / 引用 `『検出』`）", () => {
-    const heading = '### ⚠ 機械には「検出」まで — 確定と書き込みは人に残す';
+    const heading = "### ⚠ 機械には「検出」まで — 確定と書き込みは人に残す";
     expect(anchorExistsInTarget("⚠ 機械には『検出』まで", heading)).toBe(false);
     expect(quoteExistsInAgentsMd("⚠ 機械には『検出』まで", heading).exists).toBe(true);
   });
