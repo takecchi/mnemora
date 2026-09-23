@@ -39,9 +39,13 @@
  */
 
 import { anchorExistsInTarget } from "./adr-citation-lib.mjs";
+import { delinkMarkdown } from "./markdown-link-lib.mjs";
 
-/** markdown リンク `[表示](url)` を表示文字だけにする。原典側がリンクだと逐語比較が空振りする。 */
-const delink = (s) => s.replaceAll(/\[([^\]]*)\]\([^)]*\)/g, "$1");
+/**
+ * markdown リンク `[表示](url)` を表示文字だけにする。原典側がリンクだと逐語比較が空振りする。
+ * ⛔ 置換をここに書かない——定義は `markdown-link-lib.mjs` だけに在る（Issue #646）。
+ */
+const delink = delinkMarkdown;
 /** 行送りで割れた語をつなぐ。引用側・原典側の両方で起きる。 */
 const joinLines = (s) => s.replaceAll(/\n\s*/g, "");
 const stripDecoration = (s) => s.replaceAll("**", "").replaceAll("`", "");
