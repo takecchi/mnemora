@@ -393,3 +393,91 @@ docs/architecture.md`（`getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;`
   ことは確認していない（「⚠ 偽陽性の条件」節に明記）。
 - ⛔ **他パッケージ（`packages/postgres` 等）の公開 interface に同じ形の焼き込みが
   在るかは掃いていない**（ADR 0269 決定1 が既に範囲外とした限界を、本 ADR も埋めていない）。
+
+---
+
+## 🔴 追記1（2026-09-23、着地後）—— **この歯は、自分自身に対する陽性対照を、作らずに踏んだ**
+
+⛔ **本節より上は1バイトも書き換えていない**（`AGENTS.md`「ADR は書き換えず追記して積む」）。
+
+### 何が在ったか【実測】
+
+**この歯の it 名は、着地した時点で件数を名乗っていた:**
+
+```
+it("本体: 14個の interface/type（ScoringStrategy を除く）は、…")
+it("対象14個すべての宣言が、…")
+```
+
+🔴 **前者は誤りである。**【実測】`TARGET_INTERFACE_NAMES` の実数は **13** であり、
+**`ScoringStrategy` を「除く」と書きながら、除けば 13 になる。**
+（13 + `ScoringStrategy` = 14 は、後者の it の側の数である。後者は正しい。）
+
+⟹ **自己矛盾したまま、緑だった。誰も落ちなかった。**
+
+### なぜ残すか —— **作り物でない陽性対照であり、しかも自己言及の形をしている**
+
+**`AGENTS.md`「⚠ 『出なかった』を、事象が無いことの証明にしない —— 先に陽性対照を示す」は、
+検査を置くなら「本当に赤くなる入力」を先に見せろ、と要求している。**
+⟹ **本 ADR の「赤 → 緑」節は、その陽性対照を *人工的に作って* 示している**
+（`getRecall` の行をわざと消す、対象一覧に `RelationStore` を混ぜる）。
+
+🔴 **ところがこの1件は、作っていない。**——**件数の焼き込みを検出するために書いている歯が、
+自分自身の it 名に件数を焼き込み、しかもそれを実数とずらしたまま通っていた。**
+
+⟹ ⭐⭐ **この歯が存在する理由が、この歯自身の中で実証された。**
+⟹ ⭐ **人工の変異より強い**——**規律を作っている当人が、その規律を、作っている最中に破った実例**だからである。
+
+⚠ **恥ずかしいから削る、をしない。**⟹ **削れば、次に同じことをする者が同じ日数を使う。**
+
+### ⚠ 本題は「誰も落ちなかった」ほうである
+
+**本歯は `docs/architecture.md` の焼き込みは捕まえるが、*自分の中の* 焼き込みは捕まえない。**
+⟹ **それを捕まえるものは、いまこの repo に無い**（[Issue #606](https://github.com/takecchi/mnemora/issues/606)
+が「生きた文書の『数』の焼き込みを一般形で一度も掃いていない」として、道具と生成物の側を掃く球を
+既に立てている）。
+⟹ ⛔ **本 ADR はその一般形を作らない**——**射程外であり、偽陽性率の見積りが別に要る**
+（`AGENTS.md`「⚠ 偽陽性率に上限を置けない検査は門にしない」）。
+⭐ **記録するのは「この形の穴は実在し、実際に1回踏まれた」という事実だけである。**
+
+### 直したこと
+
+**it 名と doc コメントから件数を落とした**（⭐ **一覧そのものは残した**——**決定4 の
+「一覧として持ち、件数は書かない」の適用である**）。
+⛔ **判定の中身は1バイトも変えていない。**
+⚠ **上の「赤の逐語」は、この変更より *前* に走らせた出力である。**⟹ **いま同じ変異を当てると、
+it 名の部分だけがこの記録と違って出る。**⛔ **逐語は書き換えない。**
+
+---
+
+## ⚠ 追記2（2026-09-23、着地後）—— **「採らなかった案3」に、実測の反例を足す**
+
+**上の「採らなかった案 3.（対象一覧を `docs/architecture.md` §5 から動的に導出する）」の
+却下理由は、原理論（機械に意味の判定を持たせない）だけだった。**⟹ **現物の形としても
+成り立たないことを、実測で足す。**
+
+**【実測 2026-09-23、PR #622 着地後】** §5 の code block から `interface` / `type` / `class` の
+宣言を機械的に抜くと、次が出る:
+
+```
+Ctx, MemoryStore, MemoryStatus, VectorStore, EmbeddingSpaceId, VectorEntry, LexicalStore,
+RelationStore, RelationKind, LLMProvider, EmbeddingProvider, Scheduler, ScoringStrategy,
+DecayStrategy, EventStore, TokenCounter, Clock, ClaimOutboxJobsOptions,
+OutboxLeaseConflictError, OutboxStore, TenantSettingsStore, EventRetention,
+EventRetentionSetting, DecayClock, Sensor, SpeechPolicy
+```
+
+**本歯の対象（決定4 の一覧＋`ScoringStrategy`）と「予告」の3個を除くと、次が残る**:
+`MemoryStatus` / `EmbeddingSpaceId` / `VectorEntry` / `RelationKind` /
+`ClaimOutboxJobsOptions` / `OutboxLeaseConflictError` / `EventRetention` /
+`EventRetentionSetting` / `DecayClock`。
+**これらは port interface そのものではなく、その宣言を読むために併記されている付随の型である。**
+
+⟹ **動的導出は、これらを即座に拾う。** そして `MemoryStatus` / `EmbeddingSpaceId` /
+`DecayClock` のような**文字列 union の型エイリアスには「メンバー集合」という概念が無い**
+——本歯の比較をそのまま当てると、**空集合どうしが一致して緑になる**（＝何も検査していないのに
+通る）か、**偽陽性になる**かのどちらかである。
+
+⟹ ⭐ **「意味の判定を機械へ持たせない」という理由とは独立に、比較の形そのものが成り立たない。**
+⚠ **これらを除外する一覧を別に持てば動くが、それは「対象の一覧を手で持つ」ことと費用が変わらない**
+——**手で持つ一覧が1本から2本へ増えるだけである。**
