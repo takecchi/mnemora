@@ -298,6 +298,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0272](./0272-runtime-method-count-notation-sweep.md) | `Runtime` の非中核メソッド件数を検出する歯を、表記の軸だけ広げる（漢数字・「N つ」等）——主語の錨は外さない（ADR 0270 引き受けた負債、Issue #606 の材料） | **提案 (2026-09)** |
 | [0273](./0273-architecture-section5-is-a-copy.md) | `docs/architecture.md` §5 は「写した側」である — ADR 0269 決定2 の保留に答える（Issue #604） | **提案 (2026-09)** |
 | [0274](./0274-required-check-context-name-is-frozen-annotate-dont-rename.md) | required status check の文脈名は凍結する — 腐っていても改名せず、名指しで訂正を積む | **提案 (2026-09)** |
-| [0275](./0275-retrieval-quality-shadow-verdict-stage1.md) | MRR/hit@1 の判定を「門ではなく並走」で足す — Issue #572 段1 | 採用 (2026-09) |
+| [0275](./0275-runtime-three-layer-assignment-recheck.md) | `Runtime` の3層振り分けが、いま正しいかを検算する — 棚卸しの範囲に限る（Issue #605） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
