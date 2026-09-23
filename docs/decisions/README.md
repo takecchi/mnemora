@@ -303,5 +303,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0276](./0276-retrieval-quality-shadow-verdict-stage1.md) | MRR/hit@1 の判定を「門ではなく並走」で足す — Issue #572 段1 | 採用 (2026-09) |
 | [0277](./0277-adr-renumber-detects-unrewritten-chain-references.md) | `adr-renumber.mjs` は、`ADR NNNN / MMMM` という略記の連なりで書き換えられずに残った参照を検出する — 書き換えの射程は広げない | **提案 (2026-09)** |
 | [0278](./0278-architecture-section5-port-interface-correspondence-tooth.md) | `docs/architecture.md` §5 の port interface が実体とずれたら落ちる歯を置く（Issue #604、ADR 0269、ADR 0273） | **提案 (2026-09)** |
+| [0279](./0279-required-status-checks-declaration-and-check.md) | required status check の「正本＋突き合わせ」を足す — 宣言は `.github/required-status-checks.json`、判定は三値、CI には繋がない | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
