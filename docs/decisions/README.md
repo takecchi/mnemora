@@ -281,6 +281,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0255](./0255-tools-output-candidates-not-verdicts.md) | 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧として出す。ADR 0223 決定5 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 | [0256](./0256-positive-control-before-claiming-absence.md) | 「出なかった」は「無い」の証明にならない — 先に陽性対照を示す。ADR 0223 決定6 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 | [0257](./0257-searched-and-found-nothing-versus-did-not-search.md) | 「探したが無かった」と「探していない」を分ける —— 向きが逆の版を書き手自身の調査手続きへ当て直す。ADR 0223 決定10 の射程を `AGENTS.md` へ広げる（Issue #505） | **提案 (2026-09)** |
+| [0258](./0258-restore-superseded-operation-scope.md) | `restoreSuperseded` を「1回の操作」単位に絞る（方向①）—— 鍵は新設せず、既にある情報で絞る | 採用 (2026-09) |
 | [0259](./0259-gate-runtime-output-names-its-blind-spot.md) | `check-publish-pack.mjs` / `check-pr-adr-reference.mjs` の実行時出力に、doc コメントにしか無かった断りを焼く（Issue #580） | 採用 (2026-09) |
 | [0260](./0260-answer-names-what-it-actually-runs.md) | `answer` が「記録した応答を再生する」と名乗りながら擬似 provider で走るのをやめる —— 名乗る関数と実態を倒す関数を1つにし、使われなかったカセットを出力に焼く（Issue #577） | **提案 (2026-09)** |
 | [0261](./0261-answer-bench-tenant-keyed-by-embedding-space.md) | `answer` ベンチの tenant を埋め込み空間で分ける —— 「抽出の冪等スキップ」がモードを跨ぐと、記憶とベクトルの整合が壊れる（Issue #583） | **提案 (2026-09)** |

@@ -187,6 +187,76 @@
 
 ---
 
+## 🔴🔴 訂正4（2026-09-21）—— **「設計で選んだこと 1」の根拠は、`reextract` についても偽だった**
+
+⛔ **本文は1バイトも書き換えていない**（訂正1〜3 と同じ規律）。**この追記が優先する。**
+
+### 何が誤っていたか
+
+訂正1 は、本文「設計で選んだこと 1（粒度は「群」だけ）」の根拠
+（「`superseded_by_id` が作る群は、1回の `consolidate`/`reextract`/`resolveContested`
+が作った単位とちょうど一致する」）のうち、**`resolveContested` の行だけを偽と訂正した。**
+
+🔴 **`reextract` の行も偽である。**[Issue #515](https://github.com/takecchi/mnemora/issues/515)
+方向①（[ADR 0258](./0258-restore-superseded-operation-scope.md)）を設計・実装する過程で、
+別の作業者が実測し、両 adapter（インメモリ・本物の Postgres）で再現した【受】。
+
+### なぜ偽か —— **`resolveContested` とは違う機序で、同じ結論に落ちる**
+
+⚠ **取り違えないこと**: `resolveContested` が壊す理由（勝者が前から在る Memory を
+使い回す）と、`reextract` が壊す理由（下記）は**別の機序**である。たまたま同じ
+「群が1回の操作と一致しない」という結論に落ちるだけで、原因は共有していない。
+
+1. 【現物】`packages/postgres/src/memory-store.ts` の `createMemoryWithOutbox` の
+   INSERT は `ON CONFLICT (tenant_id, source_observation_id, extractor_version,
+   content_hash) WHERE source_observation_id IS NOT NULL DO NOTHING` を持ち
+   （このチェックアウトでの行番号は :635 付近）、衝突時（`inserted.rows.length === 0`）は
+   既存行を `SELECT` して `created: false` で返す——**新規作成ではなく、前から在る
+   Memory への解決になる。**
+2. 【現物】`packages/core/src/runtime.ts` の `reextract` は、`memoryIds.push(memory.id)`
+   を**`created` の真偽に関わらず**行い（:2635 付近）、最後に
+   `supersededById = memoryIds[0]!`（:2643 付近）でアンカーを取る——**位置で選ぶだけ**
+   であり、`created === true`（今回新規作成した）かどうかを見ない。
+3. ⟹ **今回の再抽出でも内容が変わらなかった候補が候補列の先頭に来ると、アンカーは
+   「今回作った新しい Memory」ではなく「前から在った Memory」になる。**この Memory が
+   別の（過去または将来の）`reextract` 呼び出しでも同じ理由でアンカーに選ばれると、
+   複数回の別々の呼び出しが同じアンカーを共有し、それぞれの敗者が同じ
+   `superseded_by_id` の下に積み上がる。
+
+### 【受】実測（両 adapter で再現）
+
+このチェックアウトを書いている作業者自身は再現していない——別の作業者からの報告として
+受け取った。生の `memory_events` の一致（両方の呼び出しで `reason`・
+`sourceObservationId`・`extractorVersion` の3つとも完全一致し、既存の情報からは
+どちらの呼び出しの敗者かを区別できなかった）が根拠として示されている。
+
+### ⚠ `consolidate` の行は崩れていない（構造的な理由つき、こちらは自分で確かめた）
+
+【現物・自分で確認】`packages/core/src/strategies/consolidate.ts` は統合先の
+`sourceObservationId: null` を設定する（:128 付近）。上記1の部分索引は
+`WHERE source_observation_id IS NOT NULL` を述語に持つため、この述語を満たさない
+新規行（`source_observation_id` が `null`）はそもそもこの索引の対象に入らない
+——標準的な Postgres の部分索引の挙動として、`ON CONFLICT` はこの索引を仲裁者として
+使えず、衝突判定自体が起こらない。⟹ **`consolidate` の統合先は常に新規作成され、
+この訂正の対象ではない。**
+
+### この訂正が着地させるもの・着地させないもの
+
+- ⭐ **[Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+  （[ADR 0258](./0258-restore-superseded-operation-scope.md)）は、この事実を織り込んで
+  設計されている**——`reextract_superseded` を由来とする候補は、`consolidated`
+  （構造的に1操作と一致することが保証される）とも `contested_resolved`
+  （1件が必ず1操作であることを歯で固定している）とも扱いを分け、
+  `boundaryConfidence: "unknown"`（既存の情報では操作単位に分割できるとは断言できない）
+  として扱う。⛔ **割れるという顔をしない。**
+- ⛔ **`reextract` のアンカー選定を変える案（`created === true` の候補を優先する等）は、
+  この訂正では実装しない。**出荷済みの `reextract` の挙動を変えるうえ、
+  「全候補が既存解決になる」縮退ケースが未検証であるため——ADR 0258 の
+  「確かめていないこと」を見ること。
+- ⛔ **実装は1行も変えていない。**訂正1〜3 と同じ規律。
+
+---
+
 ## ⭐ 追記（2026-09-17）—— **(α)/(β) の出所を3段に分ける**
 
 **本文「決定」節は「問いの本文が在る場所」として Issue #197 のコメントを挙げているが、

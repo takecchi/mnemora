@@ -222,10 +222,14 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         reason?: string;
         actor?: EventActor;
         at: Date;
+    }, filter?: {
+        onlyMemoryIds?: MemoryId[];
     }): Promise<{
         restored: Memory[];
     }>;
-    previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId): Promise<{
+    previewRestoreSupersededBy(ctx: Ctx, supersededById: MemoryId, filter?: {
+        onlyMemoryIds?: MemoryId[];
+    }): Promise<{
         candidates: Array<{
             memoryId: MemoryId;
             supersededReason: string | null;
@@ -417,6 +421,7 @@ export interface MemoryStoreConformanceOptions {
     supportsResolveContestedPair: boolean;
     supportsRestoreSupersededBy: boolean;
     supportsPreviewRestoreSupersededBy: boolean;
+    supportsOnlyMemoryIdsFilter?: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
