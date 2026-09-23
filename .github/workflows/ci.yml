@@ -528,6 +528,27 @@ jobs:
             --baseline examples/chat/compare-baseline.json \
             >> "$GITHUB_STEP_SUMMARY"
 
+      - name: 'omitted' の stage 集合が基準値から動いたら、PR に申告を要求する（Issue #403）
+        # 🔴 これは「落とす門」ではなく「**申告を強制する門**」である。
+        # `stage` 集合が動く理由には「退行」と「意図した仕様変更」の両方が在り、
+        # 機械にはその2つを区別できない ⟹ AGENTS.md「⚠ 偽陽性率に上限を置けない検査は
+        # 門にしない」に当たるため、⭐門（`compare-summary.mjs` の `GATE_FIELDS`）には足さない。
+        # 代わりに「動いたこと自体」を検出し、PR 本文に一行の申告を要求する
+        # ——偽陽性の代償が「PR が赤になる」から「一行書く」に変わるので、門にできる。
+        # 判定は scripts/compare-omitted-stage-declaration-lib.mjs の純関数が持つ。
+        #
+        # ⚠ `PR_BODY` は利用者が書く自由記述なので `${{ }}` の展開を run: の中へ
+        # 直接置かず、env 経由で渡す（上の check-pr-adr-reference と同じ線）。
+        # ⚠ push（main）では `PR_BODY` が空になり、この門は判定せず緑で通る
+        # ——「動いていない」ではなく「判定していない」である（CLI がそう出力する）。
+        if: always()
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          node scripts/check-compare-omitted-stage-declaration.mjs \
+            --measured "${{ github.workspace }}/compare.json" \
+            --baseline examples/chat/compare-baseline.json
+
       - name: compare の実測値そのもの（機械可読）を成果物として残す
         if: always()
         uses: actions/upload-artifact@v6
