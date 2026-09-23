@@ -467,6 +467,61 @@ jobs:
               ;;
           esac
 
+      - name: "固定入力に対する embedding 出力を測り、sha256・次元数・lscpu を残す(測るだけ、門にはしない。Issue #565 / ADR 0253 追記)"
+        # 🔴 [Issue #565](https://github.com/takecchi/mnemora/issues/565) が
+        # 「採るとしたら何が要るか」として挙げた4項目のうち、(1)固定入力に対する
+        # embed() の sha256、(3)lscpu、を満たす(比較段(4)は別ジョブ、
+        # 既存の3段の形への合流(2)は下2ステップ)。
+        #
+        # ⛔ **これは門ではない。** 一致・不一致のどちらでも、この段は exit 0 のまま
+        # である(`scripts/measure-embedding-output-fingerprint.mjs` 参照)。
+        #
+        # 🔑 **モデルの読み込みを既存の段と共有する**: 直前の test:db ステップが
+        # 既に @mnemora/local-embedding のモデル一式をディスクキャッシュ
+        # (`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`)へ読み込み終えている。ここで
+        # `warmup()` を呼び直しても、ネットワークへは行かずディスクキャッシュから
+        # 読むだけである——追加費用は推論1回(数秒)のみ。
+        #
+        # ⚠ **2つのコマンドを順に走らせるが、片方が失敗しても後段を必ず試す**
+        # (`local-embedding が実際に読み込んだ重み...` ステップと同じ
+        # `set +e`/`STATUS=$?`/`set -e` の形、ADR 0245)。重みを取得できなかった
+        # (embedding-fingerprint が exit 1)場合でも、その事実を測定 JSON へ
+        # 残すところまでは行う——ただし段全体の exit code は最初のコマンドの
+        # 失敗を引き継ぐ(このジョブが赤くなること自体は仕様。identifier-probes
+        # ジョブ等と同じ規律)。
+        env:
+          MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON: ${{ github.workspace }}/embedding-fingerprint-raw.json
+          MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+        run: |
+          set +e
+          pnpm --filter @mnemora/example-chat run embedding-fingerprint
+          EMBED_STATUS=$?
+          node scripts/measure-embedding-output-fingerprint.mjs \
+            --raw "${{ github.workspace }}/embedding-fingerprint-raw.json" \
+            --out "${{ github.workspace }}/embedding-fingerprint.json" \
+            --runner-name "${{ runner.name }}"
+          MEASURE_STATUS=$?
+          set -e
+          if [ "${EMBED_STATUS}" -ne 0 ]; then
+            exit "${EMBED_STATUS}"
+          fi
+          exit "${MEASURE_STATUS}"
+
+      - name: "実測値を Job Summary に残す(⛔ 門ではない。Issue #565)"
+        if: always()
+        run: |
+          node scripts/embedding-output-fingerprint-summary.mjs \
+            --measured "${{ github.workspace }}/embedding-fingerprint.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "固定入力の embedding 出力の指紋を成果物として残す(Issue #565)"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: embedding-output-fingerprint-example-chat
+          path: ${{ github.workspace }}/embedding-fingerprint.json
+          if-no-files-found: ignore
+
       - name: "correction サブコマンド(cli.ts の dispatch 行)を実際に実行し、recall 段3(矛盾の解決と必須の同伴取得)が本番経路で発火することを CI が判定する(Issue #374 / ADR 0190)"
         # 🔴 Issue #374: `grep -c "correction" .github/workflows/ci.yml` が 0 だった
         # ——`examples/chat/src/cli.ts` の `command === "correction"` という
@@ -707,6 +762,80 @@ jobs:
             echo "DB 段が未実行の側へ落ちた" >&2
             exit 1
           fi
+
+      - name: "固定入力に対する embedding 出力を測り、sha256・次元数・lscpu を残す(測るだけ、門にはしない。Issue #565 / ADR 0253 追記)"
+        # `example-chat` ジョブの同名ステップと対になる(ci-green-check.mjs が挙げた
+        # 「本物の重みで本物の推論を通す2ジョブ」のもう一方)。理由・費用・門にしない
+        # 判断は、あちらのコメントを参照——ここでは重複させない。
+        #
+        # 🔑 **モデルの読み込みを既存の段と共有する**: 直前の「ルートの門の DB 段」
+        # ステップが `run-db-tests.mjs` 経由で `examples/chat` の `test:db` を実行し、
+        # 既に @mnemora/local-embedding のモデル一式をディスクキャッシュ
+        # (`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR`、このジョブの job-level env)へ
+        # 読み込み終えている。
+        env:
+          MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON: ${{ github.workspace }}/embedding-fingerprint-raw.json
+        run: |
+          set +e
+          pnpm --filter @mnemora/example-chat run embedding-fingerprint
+          EMBED_STATUS=$?
+          node scripts/measure-embedding-output-fingerprint.mjs \
+            --raw "${{ github.workspace }}/embedding-fingerprint-raw.json" \
+            --out "${{ github.workspace }}/embedding-fingerprint.json" \
+            --runner-name "${{ runner.name }}"
+          MEASURE_STATUS=$?
+          set -e
+          if [ "${EMBED_STATUS}" -ne 0 ]; then
+            exit "${EMBED_STATUS}"
+          fi
+          exit "${MEASURE_STATUS}"
+
+      - name: "実測値を Job Summary に残す(⛔ 門ではない。Issue #565)"
+        if: always()
+        run: |
+          node scripts/embedding-output-fingerprint-summary.mjs \
+            --measured "${{ github.workspace }}/embedding-fingerprint.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "固定入力の embedding 出力の指紋を成果物として残す(Issue #565)"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: embedding-output-fingerprint-root-gate-db-stage
+          path: ${{ github.workspace }}/embedding-fingerprint.json
+          if-no-files-found: ignore
+
+  embedding-output-fingerprint-compare:
+    name: "固定入力に対する embedding 出力の指紋を2ジョブ間で突き合わせる(測るだけ。門にはしない。Issue #565 / ADR 0253 追記)"
+    needs: [example-chat, root-gate-db-stage]
+    # 🔴 `postgres-regime-coverage` ジョブと同じ理由——`example-chat` /
+    # `root-gate-db-stage` のどちらかが(重み取得失敗などで)落ちても、
+    # このジョブは必ず走る。落ちた側の artifact が無ければ
+    # `compare-embedding-output-fingerprints.mjs` が「比較できなかった」と
+    # 名乗るだけであり(一致とも不一致とも言わない)、それ自体はこのジョブを
+    # 落とさない(⛔ 門ではない)。
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: "両ジョブが残した embedding-output-fingerprint-* artifact を集める(無ければ無いまま——このジョブは落とさない。Issue #565)"
+        uses: actions/download-artifact@v6
+        with:
+          pattern: embedding-output-fingerprint-*
+          path: ${{ github.workspace }}/embedding-fingerprint-artifacts
+
+      - name: "2ジョブの指紋を突き合わせ、一致・不一致・比較できなかったを Job Summary に残す(⛔ 門ではない。常に exit 0。Issue #565)"
+        run: |
+          node scripts/compare-embedding-output-fingerprints.mjs \
+            --artifacts-dir "${{ github.workspace }}/embedding-fingerprint-artifacts" \
+            >> "$GITHUB_STEP_SUMMARY"
 
   retrieval-quality:
     name: 想起の質を実 embedding（記録の再生）で実測し、値を残す（ADR 0088）
