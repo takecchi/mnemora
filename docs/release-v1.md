@@ -28,7 +28,7 @@
 | 0.7 | いま出ている版 | **通過条件は無い。**⛔ **版をここに書かない**——Release が出るたびに腐る（版の権威は Release の tag である。[ADR 0070](./decisions/0070-version-comes-from-the-release-tag.md)）。⟹ **当日その場で `gh release list --limit 5` と、publish 対象6本の `npm view @mnemora/<pkg> dist-tags` を引くこと。**⚠ **`v1.0.0` は `v0.1.9` の次ではない**——間に版がいくつか出ている（⛔ **何が出ているかもここに書かない**。0.7 の手順で引くこと。[ADR 0249](./decisions/0249-release-day-procedure-holds-no-rotting-facts.md)）——当日の判断材料として読む |
 | 0.8 | `CHANGELOG.md` の `[1.0.0]` 節 | **人間が読んで、`origin/main` の現在地に対して古くないと判断したこと**（⛔ コマンドでは判定できない。⚠ **`packages/*/src` の差分を数えると、マイグレーションの追加のように `src` を触らない変更を取りこぼす**） |
 | 0.9 | `docs/release-notes-v1.0.0.md` | **`origin/main` に在り**、人間が読んで**いま切る tag と合っている**と判断したこと（⛔ 0.8 とは別物。⚠ **GitHub Release の本文に貼る元がこれである**） |
-| 0.10 | 🔴 `CHANGELOG.md` の **出す版**の節 | `origin/main` の `CHANGELOG.md` に `## [X.Y.Z]` の節が**在る**（⚠ **§5.5 から移した項目**。⛔ ここを通さないと `npm publish` が門で止まる。[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)） |
+| 0.10 | 🔴 `CHANGELOG.md` の **出す版**の節 | `origin/main` の `CHANGELOG.md` に `## [X.Y.Z]` の節が**在る**（⚠ **§5.5 から移した項目**。🔴 **2026-09-23 以降、これを外しても機械は止めない**——門は撤回された。[ADR 0267](./decisions/0267-withdraw-the-release-changelog-publish-gate.md)） |
 
 ### 0.1 `origin/main` の CI が緑であること
 
@@ -581,15 +581,21 @@ TAG=v1.0.0   # ← これから切る tag
 git show origin/main:CHANGELOG.md | grep -n "^## \[${TAG#v}\]" || echo "✗ 節が無い"
 ```
 
-#### 🔴 ここを通さないと、`npm publish` が止まる
+#### 🔴🔴 2026-09-23 —— **ここを通さなくても、`npm publish` はもう止まらない**
 
-**同じ述語が `.github/workflows/publish.yml` の門になっている**
-（[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）。
-⟹ **節が無いまま Release を作ると、GitHub Release は公開されるが `npm publish` は落ちる。**
+⚠ **この節は、もともと「同じ述語が `.github/workflows/publish.yml` の門になっている
+（[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）」と書いていた。**
+🔴 **その門は撤回された**（[ADR 0267](./decisions/0267-withdraw-the-release-changelog-publish-gate.md)）。
+⟹ **節が無いまま Release を作っても、`npm publish` は通る。**
 
-⭐ **落ちても回復できる**: 節を `main` へ入れる PR をマージし、**その Publish の run を再実行する。**
-`npm publish` の段は冪等である（既に上がっている版は飛ばす）⟹ 途中から再開できる。
-⛔ **だが、そこまで行かせないためにこの項目が在る。**
+🔴 **⟹ この項目は、いま「人が見るしかない項目」である。**
+⛔ **通さなくても赤くならない。**⟹ **飛ばした瞬間に、`v0.3.0` / `v0.4.0` / `v0.5.0` で
+3回続けて起きた「Release は出たのに節が無い」へ戻る。**
+
+⭐ **残っている機械側の補助は、ADR 0251 の*通知*だけである**
+（`.github/workflows/release-followup-notice.yml`、終了コードは常に 0）。
+⚠ **その通知は、上の3回とも動いていて、3回とも読まれなかった**（ADR 0252 決定4 / ADR 0267 決定5）。
+⟹ ⛔ **「通知が在るから大丈夫」と読まないこと。**
 
 ⚠ **節は Release を作る*前*に起こす。**後からしか分からない事実（`published` の時刻・Release へのリンク・
 自動生成本文の行数）は**後から埋めてよい**——**門が見るのは節の存在だけである。**
@@ -1994,8 +2000,9 @@ publish そのものは通っている。dist-tag は Release が pre-release �
 
 ⚠ **【2026-09-21】(a) はこの節から §0.10（tag を切る直前の最終確認リスト）へ移った。**
 🔴 **理由は1つである——後ろに在ったから、3回とも読まれなかった**（`v0.3.0` / `v0.4.0` / `v0.5.0`）。
-⟹ **同じ述語が `publish.yml` の門にもなっている**
-（[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）。
+⚠ **【2026-09-23】ここには「同じ述語が `publish.yml` の門にもなっている」と書いてあった。**
+🔴 **その門は撤回された**（[ADR 0267](./decisions/0267-withdraw-the-release-changelog-publish-gate.md)）。
+⟹ **(a) を機械が止めることは、もう無い。**
 ⛔ **下の記録（「2回続けて落ちている」の表）は書き換えていない**——**当時そう数えたという記録である。**
 
 **通過条件**: 出した tag `vX.Y.Z` について、次の2つが揃っていること。
@@ -2050,6 +2057,12 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
 （[ADR 0252](./decisions/0252-release-changelog-section-is-a-publish-gate.md)）。
 ⛔ **上の「終了コードは常に 0」は、いまも*通知*についての記述である**——**門は別の道具である。**
 ⟹ ⭐ **(a) を通すのは §0.10（tag を切る前）であり、門はその取りこぼしを最後に止めるものである。**
+
+🔴🔴 **【2026-09-23 追記】上の門は撤回された**
+（[ADR 0267](./decisions/0267-withdraw-the-release-changelog-publish-gate.md)）。
+⛔ **直前の 2026-09-21 の追記は書き換えていない**——当時そう在ったという記録である。
+⟹ **いま (a) に効く機械は、この節の頭に書いた*通知*だけである**——**終了コードは常に 0。**
+🔴 **⟹ 「止まらないから、この §5.5 が要る」は、(a) についても、もう一度そのまま当たる。**
 
 ---
 

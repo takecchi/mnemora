@@ -63,14 +63,14 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 ⚠ **上の列挙は ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
 実際に `findCorrectionCandidates`（[ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md)）は
 どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
-（[Issue #518](https://github.com/takecchi/mnemora/issues/518)）。⛔ **書き込まない口**なので、
+（[Issue #605](https://github.com/takecchi/mnemora/issues/605)）。⛔ **書き込まない口**なので、
 少なくとも「是正・取り消し」（**書き込む**口）ではない。
 
 ⚠ **`applyCorrection`（[ADR 0242](./decisions/0242-runtime-apply-correction.md)）も、
 どの層にも置かれていない。**ただし `findCorrectionCandidates` と同じ理由では説明できない
 ——`applyCorrection` は `markContested`/`resolveContested` を呼んで実際に書き込む口である
 （ADR 0242 決定3）。**「書き込まないから」という除外は使えない**以上、どの層に当たるかは
-依然として意味の判定であり、この一覧はそれを決めていない（Issue #518）。
+依然として意味の判定であり、この一覧はそれを決めていない（Issue #605）。
 
 以下はこの中核5動詞それぞれが Runtime 内部でどの部品を通るかで分類する。
 

@@ -287,5 +287,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0262](./0262-cli-names-the-plan-as-a-plan.md) | `examples/chat` の `[cassette]` 行は「予定」を予定として名乗る —— 測っていない予告を、実測と同じ口調で出さない（Issue #589） | **提案 (2026-09)** |
 | [0263](./0263-cache-key-carries-the-model-revision.md) | CI のモデルキャッシュ鍵に、HF の revision を入れる —— 手で版を振った固定文字列は、HF が動いても古い重みを配り続ける（Issue #564） | **提案 (2026-09)** |
 | [0264](./0264-cli-names-the-mismatch-between-plan-and-actual.md) | `examples/chat` は「予定」と「実測」が食い違ったとき、画面にそれを名指しさせる —— 読み手に2行の突き合わせを任せない（Issue #594） | **提案 (2026-09)** |
+| [0267](./0267-withdraw-the-release-changelog-publish-gate.md) | 出す版の節を要求する publish の門を撤回する —— 🔴 **門は正しく鳴っていた。外すのはオーナーの判断であって、門の欠陥ではない** | 採用 (2026-09) |
+| [0268](./0268-living-doc-judgment-pointer-repointed-to-605.md) | 生きた文書3本の「判断の置き場」ポインタを #518 から #605 へ付け替え、その一致を歯で縛る（Issue #518） | **草案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

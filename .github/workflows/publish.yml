@@ -149,40 +149,6 @@ jobs:
       - name: publish 梱包の門（tarball の中身を検査する）
         run: pnpm run pack:check
 
-      - name: 出す版の節が CHANGELOG.md に在ることを確かめる（🔴 門。無ければ npm へ出さない）
-        # **3回続けて「リリースは出たのに CHANGELOG.md の節が無い」が起きた**
-        # （v0.3.0 / v0.4.0 / v0.5.0）。ADR 0251 の非ブロッキング通知は3回とも動いていたが、
-        # **読まれなかった** —— 落ちたのは検出ではなく、検出を受けて計上する側である。
-        # ⟹ ここで止める。決定と、採らなかった置き場所の比較は
-        # docs/decisions/0252-release-changelog-section-is-a-publish-gate.md。
-        #
-        # 🔴 **見るのは origin/main の CHANGELOG.md であって、checkout された tag の木ではない。**
-        # tag の木に節がまだ無い瞬間は正常でありうる（節は main 側の PR で入る）。
-        # ⟹ 落ちたときの回復は「節を main へ入れて、この run を再実行する」である
-        # ——下の npm publish の段は冪等（既に上がっている版は飛ばす）なので途中から再開できる。
-        #
-        # ⚠ この段は pack より後・publish より前に置く。前に置いても構わないが、
-        # **publish より後には決して置かないこと**——止める意味が無くなる。
-        #
-        # ⛔ prerelease の Release では当てない（CHANGELOG.md は prerelease の節を持たない）。
-        # ⛔ workflow_dispatch の予行でも当てない（出す版が存在しない）。
-        # **除外はこの2つだけである。**増やすときは上の ADR を読むこと。
-        if: github.event_name == 'release' && github.event.release.prerelease == false
-        env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
-        run: |
-          set -euo pipefail
-          # 上の ancestor 検査と同じ理由で、origin/main を明示的に取り直す
-          # （この段だけを別の場所へ動かしても壊れないようにしておく）。
-          git fetch origin main
-          git show origin/main:CHANGELOG.md > "${RUNNER_TEMP}/changelog-main.md"
-          node scripts/check-release-changelog-section-gate.mjs \
-            --tag "${RELEASE_TAG}" \
-            --event-name "${GITHUB_EVENT_NAME}" \
-            --prerelease "${RELEASE_PRERELEASE}" \
-            --changelog-file "${RUNNER_TEMP}/changelog-main.md"
-
       - name: "pnpm pack（workspace: を実版へ置換できるのは pnpm だけ）"
         # 梱包は pnpm、アップロードは npm に分ける（ADR 0066）。
         # `npm pack` は `workspace:*` を tarball に残し、素の consumer の install が
