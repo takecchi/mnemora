@@ -356,11 +356,24 @@ function stripTrailingIndex(quote) {
  * どちらも**中身は一致しているのに記法の飾りだけがずれている**ケースであり、
  * 太字とインラインコードの記号を両側から取り除いてから比較すれば解決する。
  *
+ * 3. 🔴 **markdown リンク `[表示](url)` も表示文字だけにする**（あとから実測で足した）。
+ *    `AGENTS.md` の見出し `#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-...md) が反例` を
+ *    ADR 0278 は「🔴 線は引けない — ADR 0178 が反例」と引く。リンクを外さないと、
+ *    target 側・引用側のどちらにリンクがあっても偽の「不在」になっていた（PR #639 の陽性対照が
+ *    この穴を「正解」として固定していた）。⟹ 外すのは記号と url だけで、表示文字は比較に残る
+ *    ——**偽の「在る」は作れない**（偽陰性を減らす向きだけの変更）。
+ *
+ * ⚠ 同じリンク置換は `agents-md-quote-attribution-lib.mjs` の `delink` と、
+ * 下の `normalizeForAdrDecisionReferences` にも別々に在る（一元化は別 Issue）。
+ *
  * @param {string} value
  * @returns {string}
  */
 function stripMarkdownDecoration(value) {
-  return value.replaceAll("**", "").replaceAll("`", "");
+  return value
+    .replaceAll(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replaceAll("**", "")
+    .replaceAll("`", "");
 }
 
 /**
@@ -369,7 +382,7 @@ function stripMarkdownDecoration(value) {
  * 4段階で試す（どれか1つでも一致すれば実在とみなす）:
  * 1. 生のままの部分文字列比較。
  * 2. 末尾の素の数字（「Nつ目」索引）を取り除いた形。
- * 3. 太字 `**`・インラインコード `` ` `` を両側から取り除いた形
+ * 3. 太字 `**`・インラインコード `` ` ``・リンク `[表示](url)` の記法を両側から取り除いた形
  *    （`stripMarkdownDecoration` を参照。記法の飾りだけがずれている場合を拾う）。
  * 4. 3に加えて末尾索引も取り除いた形。
  *
@@ -492,7 +505,7 @@ export function anchorExistsInTarget(quote, targetText) {
  * 改行を含む全空白を1個の半角空白へ正規化する。
  *
  * 「ADR 決定」参照だけに絞った軽量な正規化であり、`anchorExistsInTarget` 側が使う
- * `stripMarkdownDecoration`（`**`・バッククォートだけを外す、部分文字列比較用）とは別物。
+ * `stripMarkdownDecoration`（`**`・バッククォート・リンクだけを外す、部分文字列比較用）とは別物。
  * こちらは「参照そのものの検出」に使うため、検出後に元テキストの行番号を引けるよう
  * `indexMap`（正規化後の各文字が、元テキストのどの位置から来たか）も返す。
  *
