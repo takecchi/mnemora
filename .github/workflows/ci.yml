@@ -1512,3 +1512,56 @@ jobs:
           name: validity
           path: ${{ github.workspace }}/validity.json
           if-no-files-found: ignore
+
+  required-status-checks-observe:
+    name: "required status checks の宣言と branch protection を突き合わせる（観測。非 required。ADR 0277）"
+    runs-on: ubuntu-latest
+    # ⛔ **非 required。** このジョブが赤くても PR のマージは止まらない——
+    # `.github/required-status-checks.json` の `contexts`（required 6件）には
+    # このジョブ自身を足していない（依頼「新しい歯を required contexts に
+    # 入れないこと」）。
+    #
+    # このジョブの目的は2つある:
+    # 1. `pnpm check:required-status-checks`（scripts/check-required-status-checks.mjs、
+    #    ADR 0277）を実際の CI 環境で走らせ、宣言と branch protection の required
+    #    status checks がずれていないかを観測する。
+    # 2. 🔴 **本 PR 自身で「CI の既定の GITHUB_TOKEN が branch protection を
+    #    読めるか」を実測する。** branch protection の required_status_checks の
+    #    読み出しは administration 相当の権限を要求するとされており（姉妹 repo
+    #    alteroid の同種の道具の doc、実測 2026-09-11 付）、この repo の既定
+    #    workflow permissions は "read"（`gh api
+    #    repos/takecchi/mnemora/actions/permissions/workflow` で確認済み）——
+    #    読めない可能性が高いが、**机上の類推では決めない**。このジョブの
+    #    結果そのものが実測であり、結果は ADR 0277 に転記する。
+    #
+    # ⛔ **読めなかった場合にもこのジョブ・workflow 全体を赤くしない**
+    # （`continue-on-error: true`）——読めるかどうかそのものが測りたい値であり、
+    # 「読めなかった」は失敗ではなく観測結果の1つである（`AGENTS.md`「⚠ 偽陽性率に
+    # 上限を置けない検査は門にしない」と同じ向き——この観測は門にしていない）。
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: 宣言（.github/required-status-checks.json）と branch protection を突き合わせる（GITHUB_TOKEN で読めるかの実測を兼ねる）
+        id: check
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/check-required-status-checks.mjs
+
+      - name: 実測結果を Job Summary に残す（exit code が唯一の権威。上のステップの色は continue-on-error で握りつぶしている）
+        if: always()
+        run: |
+          echo "### required-status-checks 観測（ADR 0277）" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "\`check\` ステップの outcome: \`${{ steps.check.outcome }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- outcome が \`success\`: GITHUB_TOKEN で branch protection を読め、宣言と一致した" >> "$GITHUB_STEP_SUMMARY"
+          echo "- outcome が \`failure\`: スクリプトが exit 1（ずれている）または exit 2（読めなかった）で終了した。上のステップのログで exit code と本文を見ること" >> "$GITHUB_STEP_SUMMARY"
