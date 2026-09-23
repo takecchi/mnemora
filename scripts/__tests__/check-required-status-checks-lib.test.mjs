@@ -12,10 +12,10 @@ import {
  * `scripts/check-required-status-checks-lib.mjs` の純関数の歯。
  *
  * ⚠ このファイルはネットワークにも `gh` にも触れない。本物の branch protection と
- * 一致しているかは `pnpm check:required-status-checks` の仕事であり（ADR 0277）、
+ * 一致しているかは `pnpm check:required-status-checks` の仕事であり（ADR 0278）、
  * **ここで測るのは突き合わせの判定ロジックだけである。**
  *
- * 🔴 4つを必ず固定する（依頼の要求。ADR 0277「決めたこと」）:
+ * 🔴 4つを必ず固定する（依頼の要求。ADR 0278「決めたこと」）:
  * 1. 宣言と protection が一致 → match
  * 2. 1本ずれている → mismatch（不足・余分・文字違いの3形）
  * 3. protection が読めない → undetermined（match へ倒れない）

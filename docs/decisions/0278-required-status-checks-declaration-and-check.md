@@ -1,4 +1,4 @@
-# ADR 0277: required status check の「正本＋突き合わせ」を足す — 宣言は `.github/required-status-checks.json`、判定は三値、CI には繋がない
+# ADR 0278: required status check の「正本＋突き合わせ」を足す — 宣言は `.github/required-status-checks.json`、判定は三値、CI には繋がない
 
 - **状態**: 提案 (2026-09-23)
 - **日付**: 2026-09-23

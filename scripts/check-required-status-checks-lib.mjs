@@ -8,7 +8,7 @@
  * と同じ分担・同じ理由である。本物の GitHub API を叩かずに、合成した応答で
  * 突き合わせだけを単体試験できる（`scripts/__tests__/check-required-status-checks-lib.test.mjs`）。
  *
- * ## 何を塞ぐために在るか（Issue #617、ADR 0274、ADR 0277）
+ * ## 何を塞ぐために在るか（Issue #617、ADR 0274、ADR 0278）
  *
  * ADR 0274 は、required status check の文脈名 `examples/chat (本物の Postgres +
  * pgvector、擬似 provider)` が**中身と食い違って腐っていた**のを直した——ジョブの
@@ -124,7 +124,7 @@ function sameSet(a, b) {
  * 6本の required check を持つことを前提にした門であり**、宣言が空という
  * 状態そのものが「宣言ファイルが壊れている」ことを意味する——だから
  * `declared` が空である事実**だけ**を理由に、`live` を見る前に `mismatch`
- * で止める（この判断の理由は ADR 0277「決めたこと」参照）。
+ * で止める（この判断の理由は ADR 0278「決めたこと」参照）。
  *
  * @param {string[]} declared
  * @param {{ names: string[], disagreement: { contexts: string[], checks: string[] } | null } | null} live
@@ -153,7 +153,7 @@ export function compareRequiredStatusChecks(declared, live) {
       reason:
         "宣言（.github/required-status-checks.json の contexts）が空である。" +
         "この repo は常に required status check を持つ前提の門であり、空の宣言は" +
-        "「一致した」ではなく「宣言ファイルが壊れている」として扱う（ADR 0277）。",
+        "「一致した」ではなく「宣言ファイルが壊れている」として扱う（ADR 0278）。",
     };
   }
 
