@@ -240,7 +240,7 @@ describe("buildNewMemoryFromCandidate", () => {
    * 「候補が subjectId を持たない（省略・undefined）」＝**未指定**として従来どおり
    * observation の値へ落ちる。「候補が明示的に null を持つ」＝**主題なしを明示**として、
    * observation の値があっても null で上書きする。この線引きの理由・採らなかった案
-   * （null を「未指定」と読む案）は ADR <割り当て予定> を見ること。
+   * （null を「未指定」と読む案）は ADR 0269 を見ること。
    */
   describe("candidate.subjectId（Issue #608 項目①）", () => {
     it("候補が subjectId を持てば、observation の値より優先される", () => {
