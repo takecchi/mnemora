@@ -580,3 +580,7 @@ GitHub 上の `takecchi` は人間と担い手の両方である）。
 ⛔ **本文を書き換えないのは ADR の作法による**（この規律の出所は `AGENTS.md` ではなく
 [ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) 決定1 である——
 上の②と同じ誤りを、この追記自身が繰り返さないために明記しておく）。
+
+## 追記4（2026-09-24、Issue #628）—— 歯の名前への本数の焼き込みを、もう1件外した
+
+Issue #628 の掃引（2026-09-23）で、repo の実数を歯の名前に焼き込んでいたのは実質1件（`scripts/__tests__/ci-yml-measurement-jobs-wiring.test.mjs` の「7本の測定ジョブ」、`describe` 3つと `it` 1つの名前と `toHaveLength(7)`）だった。名前は「Issue #426 が名指しした測定ジョブ（`MEASUREMENT_JOB_IDS`）」へ、本数は `MEASUREMENT_JOB_IDS` の1箇所へ寄せた。`toHaveLength(7)` は、直前の `toEqual([...MEASUREMENT_JOB_IDS])` と重なっていたので外した。⛔ 本文は書き換えていない（`docs/decisions/README.md`）。

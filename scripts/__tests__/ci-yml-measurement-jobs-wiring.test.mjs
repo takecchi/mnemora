@@ -237,13 +237,15 @@ describe("ci.yml/publish.yml/release-followup-notice.yml の on: に paths:/path
   });
 });
 
-describe("ci.yml に7本の測定ジョブが存在する(Issue #426 検査2)", () => {
+describe("ci.yml に、Issue #426 が名指しした測定ジョブ(MEASUREMENT_JOB_IDS)が全部存在する(Issue #426 検査2)", () => {
   const workflow = readFileSync(CI_WORKFLOW_PATH, "utf8");
 
-  it("7本ちょうど見つかる(空回り防止——1本でも見つからなければこの歯は的を外している)", () => {
+  it("名指しした全部が見つかる(空回り防止——1本でも見つからなければこの歯は的を外している)", () => {
     const found = MEASUREMENT_JOB_IDS.filter((jobId) => extractJobBlock(workflow, jobId) !== null);
     expect(found).toEqual([...MEASUREMENT_JOB_IDS]);
-    expect(found).toHaveLength(7);
+    // **本数を名前にも assertion にも焼き込まない**（ADR 0278 の追記、Issue #628）。
+    // 本数は `MEASUREMENT_JOB_IDS` の1箇所が持つ。上の `toEqual` が、1本でも
+    // 見つからなければ赤くなることを既に固定している。
   });
 
   it("extractJobBlock が合成テキストからも job を正しく切り出す(取り出し方自体の確認)", () => {
@@ -274,7 +276,7 @@ describe("ci.yml に7本の測定ジョブが存在する(Issue #426 検査2)", 
   });
 });
 
-describe("7本の測定ジョブに job レベルの if: が無い(Issue #426 検査3)", () => {
+describe("名指しした測定ジョブに job レベルの if: が無い(Issue #426 検査3)", () => {
   const workflow = readFileSync(CI_WORKFLOW_PATH, "utf8");
 
   it.each(MEASUREMENT_JOB_IDS)("%s に job レベルの if: が無い", (jobId) => {
@@ -287,7 +289,7 @@ describe("7本の測定ジョブに job レベルの if: が無い(Issue #426 �
     ).toBe(false);
   });
 
-  it("🔴 ステップレベルの if: always() は7本の中に多数あり、正当なので誤検出しない(空回り防止でもある)", () => {
+  it("🔴 ステップレベルの if: always() は名指しした測定ジョブの中に多数あり、正当なので誤検出しない(空回り防止でもある)", () => {
     // ⭐ 「0件だった」だけでは検査が動いている証明にならない——7本の中に実際に
     // step レベルの if: always() が複数在ることを先に確かめる(下限を固定)。
     let stepLevelIfCount = 0;
@@ -343,7 +345,7 @@ describe("7本の測定ジョブに job レベルの if: が無い(Issue #426 �
   });
 });
 
-describe("7本の測定ジョブに continue-on-error: が無い(Issue #426 検査4)", () => {
+describe("名指しした測定ジョブに continue-on-error: が無い(Issue #426 検査4)", () => {
   const workflow = readFileSync(CI_WORKFLOW_PATH, "utf8");
   const { text: blankedWorkflow, unhandled } = blankOutWorkflowComments(workflow);
 
@@ -351,7 +353,7 @@ describe("7本の測定ジョブに continue-on-error: が無い(Issue #426 検�
     expect(unhandled).toEqual([]);
   });
 
-  it("🔴🔴 陽性対照: コメント潰し前は、7本のうち複数本で continue-on-error: が(コメントの引用として)見つかる", () => {
+  it("🔴🔴 陽性対照: コメント潰し前は、名指しした測定ジョブのうち複数本で continue-on-error: が(コメントの引用として)見つかる", () => {
     // ⭐ **これは同時に「コメント除去が効いていることの陽性対照」である。**
     // `ci.yml` には `continue-on-error` という文字列が6箇所出てくるが、全部
     // 「⛔ continue-on-error: true は使わない」という注意書きのコメントの中である。
