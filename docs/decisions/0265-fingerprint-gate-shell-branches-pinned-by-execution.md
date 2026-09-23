@@ -1,6 +1,6 @@
 # ADR 0265: `local-embedding` fingerprint 門の `case` 分岐を、`bash` で実際に実行して固定する（Issue #574 後半）
 
-- **状態**: 草案（`docs/decisions/README.md` は触っていない——ADR 0137 決定2。索引はマージする側が直前に再生成する）
+- **状態**: 採用 (2026-09-22。[ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) で担い手が「草案」から倒した——オーナー本人の判定ではない)
 - **日付**: 2026-09-22
 
 > **⚠ この判定は、自動化された担い手（クローンのセッション）のものである。**
