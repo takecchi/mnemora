@@ -51,7 +51,7 @@ import { describe, expect, it } from "vitest";
  *   `RelationStore`/`Sensor`/`SpeechPolicy` は**1件も現れない**
  *   （`grep -c "RelationStore\|Sensor\|SpeechPolicy"` が0件）——実体を持たないこの3つは
  *   ビルドしても `.d.ts` に出てこないので、**category 2 が snapshot に混じる心配はそもそも無い**。
- * - 【実測】14個の対象名（`Ctx`/`MemoryStore`/`VectorStore`/`LexicalStore`/`LLMProvider`/
+ * - 【実測】対象名（`Ctx`/`MemoryStore`/`VectorStore`/`LexicalStore`/`LLMProvider`/
  *   `EmbeddingProvider`/`Scheduler`/`DecayStrategy`/`EventStore`/`TokenCounter`/`Clock`/
  *   `OutboxStore`/`TenantSettingsStore`/`ScoringStrategy`）は、いずれも snapshot に
  *   ちょうど1回だけ出現する（`grep -cE`で確認済み）。
@@ -317,7 +317,7 @@ describe("docs/architecture.md §5 の port interface が、公開 API snapshot�
     }
   });
 
-  it("対象14個すべての宣言が、docs/architecture.md §5 と snapshot の両方でちょうど1回ずつ見つかる（空回り防止）", () => {
+  it("対象一覧のすべての宣言が、docs/architecture.md §5 と snapshot の両方でちょうど1回ずつ見つかる（空回り防止）", () => {
     const docSpan = section5Span(architectureText);
     for (const name of TARGET_INTERFACE_NAMES) {
       expect(
@@ -337,7 +337,7 @@ describe("docs/architecture.md §5 の port interface が、公開 API snapshot�
     ).not.toThrow();
   });
 
-  it("本体: 14個の interface/type（ScoringStrategy を除く）は、メンバー名の集合が docs/architecture.md §5 と実体（公開 API snapshot）で一致する", () => {
+  it("本体: 対象の interface（ScoringStrategy を除く）は、メンバー名の集合が docs/architecture.md §5 と実体（公開 API snapshot）で一致する", () => {
     const docSpan = section5Span(architectureText);
 
     /** @type {string[]} */
