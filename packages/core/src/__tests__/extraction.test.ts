@@ -233,6 +233,56 @@ describe("buildNewMemoryFromCandidate", () => {
       observation.recordedAt.toISOString(),
     );
   });
+
+  /**
+   * Issue #608 項目①: 抽出候補ごとに `subjectId` を持てるようにする。
+   *
+   * 「候補が subjectId を持たない（省略・undefined）」＝**未指定**として従来どおり
+   * observation の値へ落ちる。「候補が明示的に null を持つ」＝**主題なしを明示**として、
+   * observation の値があっても null で上書きする。この線引きの理由・採らなかった案
+   * （null を「未指定」と読む案）は ADR 0271 を見ること。
+   */
+  describe("candidate.subjectId（Issue #608 項目①）", () => {
+    it("候補が subjectId を持てば、observation の値より優先される", () => {
+      const observation = makeObservation({ subjectId: "user-observation" });
+      const memory = buildNewMemoryFromCandidate({
+        ...baseParams,
+        observation,
+        candidate: { content: "本文", provenanceKind: "stated", subjectId: "user-candidate" },
+      });
+      expect(memory.subjectId).toBe("user-candidate");
+    });
+
+    it("候補の subjectId が明示的に null なら、observation の値があっても『主題なし』にする", () => {
+      const observation = makeObservation({ subjectId: "user-observation" });
+      const memory = buildNewMemoryFromCandidate({
+        ...baseParams,
+        observation,
+        candidate: { content: "本文", provenanceKind: "stated", subjectId: null },
+      });
+      expect(memory.subjectId).toBeNull();
+    });
+
+    it("候補が subjectId を持たない（未指定）なら、従来どおり observation の値へ落ちる", () => {
+      const observation = makeObservation({ subjectId: "user-observation" });
+      const memory = buildNewMemoryFromCandidate({
+        ...baseParams,
+        observation,
+        candidate: { content: "本文", provenanceKind: "stated" },
+      });
+      expect(memory.subjectId).toBe("user-observation");
+    });
+
+    it("候補が subjectId を持たず、observation にも無ければ null になる（既存の振る舞い）", () => {
+      const observation = makeObservation({ subjectId: null });
+      const memory = buildNewMemoryFromCandidate({
+        ...baseParams,
+        observation,
+        candidate: { content: "本文", provenanceKind: "stated" },
+      });
+      expect(memory.subjectId).toBeNull();
+    });
+  });
 });
 
 /**

@@ -289,6 +289,7 @@ export declare const ExtractedMemoryCandidateSchema: z.ZodObject<{
     content: z.ZodString;
     digest: z.ZodOptional<z.ZodString>;
     tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     provenanceKind: z.ZodEnum<{
         stated: "stated";
         inferred: "inferred";
@@ -301,6 +302,7 @@ export declare const ExtractionResultSchema: z.ZodObject<{
         content: z.ZodString;
         digest: z.ZodOptional<z.ZodString>;
         tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         provenanceKind: z.ZodEnum<{
             stated: "stated";
             inferred: "inferred";
