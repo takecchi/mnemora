@@ -134,9 +134,9 @@ describe("findDeclaration", () => {
     const onlyExample = [
       "この門は次の形の行を要求します:",
       "",
-      "\`\`\`",
+      "```",
       "Compare-Omitted-Stage: <なぜ動いたのか。意図した仕様変更なら、その出所>",
-      "\`\`\`",
+      "```",
       "",
       "以上。",
     ].join("\n");
@@ -145,9 +145,9 @@ describe("findDeclaration", () => {
 
   it("コード片の外に本物の申告が在れば、そちらを拾う", () => {
     const both = [
-      "\`\`\`",
+      "```",
       "Compare-Omitted-Stage: <例>",
-      "\`\`\`",
+      "```",
       "Compare-Omitted-Stage: ADR 0188 が stage を足したため",
     ].join("\n");
     expect(findDeclaration(both)?.reason).toBe("ADR 0188 が stage を足したため");
