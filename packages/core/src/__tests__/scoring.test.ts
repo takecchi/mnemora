@@ -106,6 +106,52 @@ describe("defaultScoringStrategy", () => {
 });
 
 /**
+ * `ScoreBreakdown.affinityMeasured`（Issue #548 方向1、ADR 0282）の歯。
+ *
+ * 連想枠（段3.5）は `similarity`/`lexicalMatch` のどちらも渡さずに
+ * `defaultScoringStrategy` を呼ぶため、`affinity` が中立の `1` に退化する
+ * （`strategies/scoring.ts` 冒頭 doc）。この退化が起きたかどうかを、
+ * 呼び出し側が `similarity`/`lexicalMatch` の undefined 判定を自分で
+ * 再現しなくても分かるようにするための欄——**両方が undefined のときだけ `false`**、
+ * それ以外は `true` になる。`defaultScoringStrategy` は常にこの欄を埋める
+ * （`similarity`/`lexicalMatch` と違い、値がある場合だけ足す形にはしない——
+ * 「欄が無い」を「独自の ScoringStrategy が埋めていない」の専用の合図として
+ * 残すため。ADR 0282「引き受けた負債」参照）。
+ */
+describe("defaultScoringStrategy: affinityMeasured（Issue #548 方向1、ADR 0282）", () => {
+  it("similarity も lexicalMatch も無いとき affinityMeasured は false（affinity が中立の1に退化した合図）", () => {
+    const score = defaultScoringStrategy(baseInput());
+    expect(score.affinityMeasured).toBe(false);
+  });
+
+  it("similarity だけあるとき affinityMeasured は true", () => {
+    const score = defaultScoringStrategy({ ...baseInput(), similarity: 0.3 });
+    expect(score.affinityMeasured).toBe(true);
+  });
+
+  it("lexicalMatch だけあるとき affinityMeasured は true", () => {
+    const score = defaultScoringStrategy({ ...baseInput(), lexicalMatch: 0.6 });
+    expect(score.affinityMeasured).toBe(true);
+  });
+
+  it("similarity と lexicalMatch の両方があるとき affinityMeasured は true", () => {
+    const score = defaultScoringStrategy({
+      ...baseInput(),
+      similarity: 0.3,
+      lexicalMatch: 0.6,
+    });
+    expect(score.affinityMeasured).toBe(true);
+  });
+
+  it("similarity が負の値でも（0 ではなく）在ることに変わりはないので affinityMeasured は true", () => {
+    // affinity 自体は similarity ?? 1 に退化しない——「値が在る」ことと「値が0/負」は別軸。
+    const score = defaultScoringStrategy({ ...baseInput(), similarity: -0.2 });
+    expect(score.affinityMeasured).toBe(true);
+    expect(score.similarity).toBe(-0.2);
+  });
+});
+
+/**
  * docs/memory-model.md §3「三つの時計」の中心的な要求:
  * **鮮度は `occurred_at ?? recorded_at` を使い、減衰は `last_reinforced_at` を使う。**
  * この2つを混ぜると「昔起きたが最近よく使う記憶」と「最近起きたが一度も使われていない記憶」を
