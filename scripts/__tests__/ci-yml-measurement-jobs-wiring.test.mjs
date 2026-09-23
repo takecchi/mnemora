@@ -293,6 +293,12 @@ describe("7本の測定ジョブに job レベルの if: が無い(Issue #426 �
     let stepLevelIfCount = 0;
     for (const jobId of MEASUREMENT_JOB_IDS) {
       const block = extractJobBlock(workflow, jobId);
+      // ⛔ この番人を外さないこと。外すと block が null のとき `.split` が TypeError を
+      // 投げ、**「job が消えた」という本物の欠陥が「この歯の実装が壊れた」ように見える**
+      // ——失敗の宛先が付け替わる。歯の結果は 一致 / 不一致 / 読めない の3つに分かれ、
+      // 「読めない」は 🔴 赤として名指しで出すこと(⛔ 握り潰して緑へ倒さない)。
+      // 同じ形が検査3・検査4 の it.each にも在る(この歯の流儀)。
+      expect(block, `ci.yml に \`  ${jobId}:\` ジョブが無い`).not.toBeNull();
       const stepLevelLines = block
         .split("\n")
         .filter((line) => /^\s+if:/.test(line) && !/^ {4}if:/.test(line));
