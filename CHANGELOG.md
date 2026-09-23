@@ -93,8 +93,14 @@ $ git diff --stat v0.5.0..origin/main -- scripts/__snapshots__/public-api/  → 
 （道具は `node scripts/release-candidates.mjs --since v0.5.0`。
 ⚠ **`--since` を省くと最新リリースの tag が入るので、この pin と一致するとは限らない**）。
 
-⚠ **⟹ いまこの瞬間に `v1.0.0` を切ると、`v0.5.0` の利用者に届く変更は1件も無い。**
-**その場合 `v1.0.0` が節目なのは、コードが変わったからではない。**理由は
+⚠ **【2026-09-23 追記】上の「0件」は、この pin を置いた時点（`v0.5.0` … `509f4e7`）の話である。**
+**この節を書いた後に、下の `### Added` へ1件足された**（Issue #608 項目①、非破壊）。
+⛔ **件数はここに書かない**——**`### Added` の一覧そのものを数えること**（このファイル冒頭
+「何を載せるか」と `AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+**破壊的変更が無いことは変わらない**——足したのは `### Added` であって `### Breaking` ではない。
+
+**その場合 `v1.0.0` が節目なのは、コードが変わったからではない、とは言えなくなる可能性がある**
+——**下の `### Added` を見ること。**理由は
 [docs/roadmap.md](./docs/roadmap.md) の §7 と
 [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。
 
@@ -109,6 +115,15 @@ $ git diff --stat v0.5.0..origin/main -- scripts/__snapshots__/public-api/  → 
 新しい節として積む。⟹ `grep -nE '^### 7\.[0-9]+ ' docs/roadmap.md` の末尾を見ること）。
 **Release 本文の草稿は [docs/release-notes-v1.0.0.md](./docs/release-notes-v1.0.0.md) に在る。**
 ⛔ **どちらも件数をここへ写さない**——正は各文書である。
+
+### Added
+
+- **`ExtractedMemoryCandidate.subjectId`**（`@mnemora/core`）——抽出候補ごとに主題を持てる。
+  `buildNewMemoryFromCandidate` は、候補が `subjectId` を持てばそれを優先し、
+  省略（`undefined`）なら従来どおり observation の値へ落ちる。**追加のみで後方互換**
+  （既存の LLM 応答・既存の呼び出し側は1バイトも挙動が変わらない）
+  （[#608](https://github.com/takecchi/mnemora/issues/608) 項目① /
+  [ADR 0269](./docs/decisions/0269-extraction-candidate-subject-id-overrides-observation.md)）
 
 ---
 
