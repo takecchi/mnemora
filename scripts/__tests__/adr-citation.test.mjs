@@ -821,11 +821,26 @@ describe("classifyAdrDecisionCitation（fixture）", () => {
  *
  * ## 門の射程 —— ⛔ `docs/decisions/`（ADR 本体）は対象外
  *
- * mnemora の ADR は**当時の記録であり本文を書き換えない**（`AGENTS.md`「採用済み ADR の
- * 本文は書き換えない」/ ADR 0223 決定1）。⟹ **ADR 本文の誤引用を赤にすると、
- * 「直せないものを門にする」ことになり構造的に緑にできない。**
- * `adr-citation-lib.mjs` の他の2つの歯（行番号引用・アンカー引用）も同じ線を引いている
- * （「生きた文書（`docs/decisions/` を除いた…）」の定義を参照）——**その先例に倣う。**
+ * **ADR 本文を門から外すのは「採用済み ADR の本文は書き換えない」ためである**
+ * （`docs/decisions/README.md:9`「⛔ 採用済み ADR の本文は書き換えない。訂正が要るなら、
+ * その場に追記する。」）。
+ *
+ * ⚠ **ただしこれは無条件ではない。**同 `:14`「⚠ まだ採用されていない初稿はこの限りではない」
+ * ——**規約上は、非採用の初稿（`- **状態**: 草案`/`提案`）の本文を直接直してよい。**
+ * ⛔ **にもかかわらず、この歯は `docs/decisions/` を状態を問わず一律で門から外している。**
+ * 理由: **採用状態で門の対象を切り替えると、門の射程が ADR の状態に依存して揺れる**
+ * （草案のときは赤くなるのに、採用された瞬間に同じ参照が門の外へ消える、という不安定さを
+ * 抱え込む）。⟹ **一律で `docs/decisions/` を外すほうが、射程が状態遷移で動かない分だけ
+ * 単純で説明しやすい。**
+ *
+ * ⭐ **【実測】今回の訂正対象5本（`0242`/`0250`/`0254`/`0256`/`0259`）のうち、
+ * `0250`/`0254`/`0256`/`0259` は採用済みで、`0242` は草案だった**
+ * （`grep -m1 "状態" docs/decisions/<file>` で確認）。⟹ **もし門を「採用済みだけ対象外」に
+ * 絞っていたら、`0242` は規約上は本文を直接直せていたことになる**が、
+ * この歯は上の理由により、その1本にも一律で追記のみの扱いを適用している。
+ *
+ * `adr-citation-lib.mjs` の他の2つの歯（行番号引用・アンカー引用）も、`docs/decisions/` を
+ * 除いた「生きた文書」という同じ射程の切り方を採っている——この歯もその先例に倣った。
  *
  * ⟹ **ADR 本文の違反は、この歯を赤くしない。**代わりに件数を一覧として出力へ残す
  * （下の2つ目の `it`）。
@@ -917,22 +932,22 @@ describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生き�
   });
 
   it("⭐ mutation guard（規則A）: 実物の ADR 本文に残る、決定セクション不在の参照を正しく拾う", () => {
-    // `docs/decisions/0278-....md` は自身の末尾の訂正追記で、0273 を指す「決定2」という
-    // 書き方を誤りだと説明しているが、⛔ 本文（訂正追記より上）は書き換えていないので、
-    // この参照そのものは repo に残り続ける——歯が生きていることの canary として使える。
+    // ⭐ canary に `0254`（**採用済み**）を選んでいる理由:
+    // 採用済み ADR の本文は書き換えない（`docs/decisions/README.md`）⟹ **この参照は
+    // repo に残り続ける**。末尾の訂正追記で「誤りである」とは説明したが、本文は直していない。
+    // ⛔ **提案中の ADR を canary にしない**——別の担い手が本文を直せる状態に在り
+    // （同 README「まだ採用されていない初稿はこの限りではない」）、直された瞬間に
+    // この歯は「何も見つけられない」まま緑になる。
     const text = readFileSync(
-      path.join(
-        REPO_ROOT,
-        "docs/decisions/0278-architecture-section5-port-interface-correspondence-tooth.md",
-      ),
+      path.join(REPO_ROOT, "docs/decisions/0254-no-gate-without-a-false-positive-ceiling.md"),
       "utf8",
     );
     const refs = findAdrDecisionReferences(text).filter(
-      (r) => r.adrNumber === "0273" && r.decisionNumber === "2",
+      (r) => r.adrNumber === "0234" && r.decisionNumber === "9",
     );
     expect(refs.length).toBeGreaterThan(0);
-    const numbers = findAdrDecisionSectionNumbers(getAdrText("0273"));
-    expect(numbers.has("2")).toBe(false);
+    const numbers = findAdrDecisionSectionNumbers(getAdrText("0234"));
+    expect(numbers.has("9")).toBe(false);
   });
 
   it("⭐ mutation guard（規則B）: 実物の ADR 本文に残る、曖昧な着地略記を正しく拾う", () => {
