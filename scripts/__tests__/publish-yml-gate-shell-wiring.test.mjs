@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
@@ -7,25 +7,42 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
  *
  * **`.github/workflows/publish.yml` の門ステップ（「Typecheck / Lint / Format /
- * Test / Build（非 DB の門を全部通す）」段）が、GitHub Actions の既定シェル
- * （`bash -e`）で走るという前提が、`shell:` の上書きで黙って崩されていないこと。**
+ * Test / Build（非 DB の門を全部通す）」段）が、`scripts/run-publish-gates.mjs` を
+ * 呼んでいること、そして `shell:` の上書きで既定シェル（`bash -e`）の保証が
+ * 黙って崩されていないこと。**
  *
- * ⚠ **なぜこれが要るか（Issue #476）**
+ * ⚠ **なぜこれが要るか（Issue #476、2026-09-24 追記で前提が変わった）**
  *
- * Issue #476 の判定「⭕ `v1.0.0` を止めない（偽陽性の緑は起きない）」は、
- * **門ステップが `bash -e` で走ること**に全面的に依存している。だが本文・判定
- * コメントとも、逐語で「`.github/workflows/publish.yml` を読んでいない」と
- * 名乗っている——この判定は現物ではなく ADR 0210 の記述の上に立っていた。
- * ⟹ **この歯が、その前提を初めて現物の上で確かめ、以後は縛る。**
- * `shell: bash {0}`（`-e` を含まない自前テンプレート）を1行足すだけで、
- * 前段が落ちてもステップが緑のまま終わりうる——リリース経路に偽陽性の緑が
- * 戻る。この歯はそれを赤くする。
+ * この歯は元々、Issue #476 の判定「⭕ `v1.0.0` を止めない（偽陽性の緑は起きない）」が
+ * **門ステップが `bash -e` で走ること**に全面的に依存していたことを受けて置かれた
+ * ——`shell: bash {0}`（`-e` を含まない自前テンプレート）を1行足すだけで偽陽性の緑が
+ * 戻る、という穴を縛っていた。
  *
- * ⚠ **`scripts/__tests__/publish-yml-dry-run-wiring.test.mjs` の重複ではない。**
- * あちらは「判定（`decideDryRun()`）が `publish.yml` に実際に配線されているか」
- * （dry-run 判定のステップ間の受け渡し）を測る——`shell:` は1バイトも見ない。
- * こちらは**シェルの意味論**（既定シェルの `-e` が保たれているか）だけを測る。
+ * **2026-09-24（Issue #476、ADR 0210 追記）に、門ステップの中身そのものを直した**
+ * ——5行の `pnpm run …` を `bash -e` に任せる形をやめ、`scripts/run-publish-gates.mjs`
+ * （ADR 0210 の `scripts/run-root-test-gate.mjs` と同じ形。5段を前段の成否に関わらず
+ * 全部起動し、どれか1本でも失敗・未起動なら最後に非0で終わる）を1行だけ呼ぶ形に
+ * 変えた。**この歯の役割はそれに応じて2つに分かれた**:
+ *
+ * 1. **門ステップが実際に `scripts/run-publish-gates.mjs` を1行だけ呼んでいること**
+ *    （前後に他のコマンドが繋がっていないこと——`|| true` のような、終了コードを
+ *    握り潰す尾を許さない）。この配線が保たれている限り、偽陽性の緑を防ぐ主な責務は
+ *    **`scripts/publish-gates.mjs` の `gateExitCode()`**（歯:
+ *    `scripts/__tests__/publish-gates.test.mjs` / `run-publish-gates.test.mjs`）が持つ
+ *    ——単一コマンドの終了コードがそのままステップの終了コードになるので、`-e` の
+ *    有無そのものにはもう依存しない。
+ * 2. **それでも `-e` を保つ確認は消さない**（防御の重ね掛け）。将来この `run: |` へ
+ *    別の行が足されたとき（例えば呼び出しの前後にログ出力を1行足す等）、`-e` が
+ *    失われていれば同じ族の欠陥が再発しうる——その回帰を捕まえるのはこの歯だけである。
+ *
+ * ⚠ **`scripts/__tests__/publish-yml-gates-wiring.test.mjs` の重複ではない。**
+ * あちらは「`scripts/run-publish-gates.mjs` が実在し、yml に書いてある通りの形で
+ * 起動すると実際に動く（偽の段を差し替えて子プロセスとして起動する）」ことを測る。
+ * こちらは**シェルの意味論と、余計な尾が付いていないこと**だけを測る。
  * 両者は独立した主張であり、どちらか一方が緑でも他方の保証にはならない。
+ *
+ * ⚠ **`scripts/__tests__/publish-yml-dry-run-wiring.test.mjs` の重複でもない。**
+ * あちらは dry-run 判定のステップ間の受け渡しを測る——`shell:` は1バイトも見ない。
  *
  * ⚠ **YAML は構造として解析していない（文字列で見ている）。** 既存の workflow
  * 検査の歯（`publish-yml-dry-run-wiring.test.mjs` / `ci-yml-postgres-regime-
@@ -43,25 +60,20 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
  * 空であることも確かめる。
  *
  * 🔴 **この歯が捕まえないもの:**
- * - **`run:` の中身が正しいかは見ていない。** 門の並び順・過不足（`typecheck` /
- *   `lint` / `format:check` / `test` / `build` の内容そのもの）は縛らない。
- * - **`ci.yml` 側との一致は見ていない。** ADR 0210 が数え直した「族」（6箇所）
- *   そのものを塞ぐわけではない——**塞いでいるのは「Issue #476 の判定の前提が
- *   黙って崩れること」だけである。**
- * - **GitHub Actions が将来 `bash` / `sh` の既定から `-e` を外したら、この歯は
- *   嘘になる。** ⟹ 前提は「2026-09 時点の GitHub の既定」
- *   （`bash --noprofile --norc -eo pipefail {0}` / `sh -e {0}`）である。
+ * - **`scripts/run-publish-gates.mjs` の中身が正しいかは見ていない。** それは
+ *   `scripts/__tests__/publish-gates.test.mjs` / `run-publish-gates.test.mjs` /
+ *   `publish-yml-gates-wiring.test.mjs` が見る。
+ * - **`ci.yml` 側との一致は見ていない。**
+ * - **GitHub Actions が将来 `bash` / `sh` の既定から `-e` を外したら、この歯の
+ *   2番目の役割（防御の重ね掛け）は嘘になる。** ⟹ 前提は「2026-09 時点の GitHub の
+ *   既定」（`bash --noprofile --norc -eo pipefail {0}` / `sh -e {0}`）である。
  */
 
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/publish.yml", import.meta.url));
-const packageJsonPath = fileURLToPath(new URL("../../package.json", import.meta.url));
+const runPublishGatesPath = fileURLToPath(new URL("../run-publish-gates.mjs", import.meta.url));
 
 const workflowRaw = readFileSync(workflowPath, "utf8");
 const { text: workflow, unhandled: commentUnhandled } = blankOutWorkflowComments(workflowRaw);
-
-/** @type {{ scripts?: Record<string, string> }} */
-const rootPackageJson = JSON.parse(readFileSync(packageJsonPath, "utf8"));
-const rootScriptNames = new Set(Object.keys(rootPackageJson.scripts ?? {}));
 
 /**
  * `run: |` ブロックを yml から切り出す。**`steps:` の構造は仮定しない**
@@ -104,17 +116,6 @@ function extractRunBlocks(text) {
 }
 
 /**
- * `run:` ブロックの本文から `pnpm run <名前>` の行を抽出する。
- * ⛔ 本数・名前の一覧はここに焼き込まない（呼び出し側が数だけを見る）。
- *
- * @param {string} body
- * @returns {string[]}
- */
-function extractPnpmRunNames(body) {
-  return [...body.matchAll(/pnpm run ([^\s"'|&;]+)/g)].map((m) => m[1]);
-}
-
-/**
  * 本文全体から `shell:` の値をすべて抽出する（行番号つき）。
  * ⚠ 値の前後の引用符（`"…"` / `'…'`）は剥がす。
  *
@@ -141,15 +142,13 @@ function extractShellOverrides(text) {
 }
 
 const runBlocks = extractRunBlocks(workflow);
-// ⛔ 門ステップを「`pnpm run typecheck` を含むブロック」で探さない——script 名を歯へ
-//    焼き込むことになり、名前が変わったときに「門が消えた」と誤診する
-//    （`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」。名前も `main` が動けば変わる側である）。
-// ⟹ **形だけで選ぶ**: 「`pnpm run` の行が2本以上並ぶ `run: |` ブロック」。
-//    【実測 2026-09-19 / `publish.yml`】この形に当たるブロックは門ステップ1つだけである
-//    ——2つ以上に増えたら `it` 2 が曖昧として赤くなる（黙ってどちらかを選ばない）。
-const gateCandidates = runBlocks.filter((block) => extractPnpmRunNames(block.body).length >= 2);
+// 門ステップを「`run-publish-gates.mjs` を含む run: | ブロック」で探す
+// （ADR 0265 の `ci-yml-local-embedding-fingerprint-shell.test.mjs` と同じ形の選び方
+// ——ステップ名には依存しない）。
+// 【実測 2026-09-24 / `publish.yml`】この形に当たるブロックは門ステップ1つだけである
+// ——2つ以上に増えたら下の `it` が曖昧として赤くなる（黙ってどちらかを選ばない）。
+const gateCandidates = runBlocks.filter((block) => block.body.includes("run-publish-gates.mjs"));
 const gateBlock = gateCandidates.length === 1 ? gateCandidates[0] : undefined;
-const gateCommandNames = gateBlock ? extractPnpmRunNames(gateBlock.body) : [];
 const shellOverrides = extractShellOverrides(workflow);
 
 /**
@@ -174,23 +173,25 @@ describe(".github/workflows/publish.yml の門ステップが既定シェル（b
     ).toEqual([]);
   });
 
-  it("門ステップ（非 DB の門を全部通す段）が実在し、1つの run ブロックに複数のコマンドが並んでいる", () => {
+  it("門ステップ（非 DB の門を全部通す段）が実在し、run-publish-gates.mjs をちょうど1回だけ、余計な尾を付けずに呼んでいる", () => {
     expect(
       gateCandidates.length,
-      "pnpm run の行が2本以上並ぶ run: | ブロックが、publish.yml にちょうど1つ在ることを期待した" +
-        `（見つかった数: ${gateCandidates.length}）——0 なら門ステップの形が変わった。` +
+      "run-publish-gates.mjs を含む run: | ブロックが、publish.yml にちょうど1つ在ることを期待した" +
+        `（見つかった数: ${gateCandidates.length}）——0 なら門ステップが script 呼び出しに` +
+        "なっていない（bash -e に任せるインライン実装へ戻った可能性がある)。" +
         "2以上なら、どれが門ステップかをこの歯が決められない" +
         "（⛔ 黙ってどちらかを選ばない。取り出し方のほうを直すこと）",
     ).toBe(1);
     expect(gateBlock, "門ステップの run: | ブロックを取り出せなかった").toBeDefined();
-    // 🔑 なぜ2本以上が要るか: 1本しか無いなら「前段の失敗が後段の起動を止める」
-    // という性質そのものが意味を持たない。⟹ この歯が守っている前提
-    // （既定シェルの -e）が現に効いていることの確認である。
+    // 🔑 呼び出しの前後に何も無いこと（`|| true` のような、終了コードを握り潰す尾を
+    // 許さない）。単一コマンドの終了コードがそのままステップの終了コードになる、
+    // という 2026-09-24 追記の主張そのものを検査している。
     expect(
-      gateCommandNames.length,
-      `門ステップから pnpm run の行を2本以上取り出せなかった` +
-        `（取り出せた: ${JSON.stringify(gateCommandNames)}）`,
-    ).toBeGreaterThanOrEqual(2);
+      gateBlock.body.trim(),
+      "門ステップの run: | ブロックが node scripts/run-publish-gates.mjs 単独の1行になっていない" +
+        `（実際の中身: ${JSON.stringify(gateBlock.body)}）——前後に余計なコマンドが繋がっていると、` +
+        "run-publish-gates.mjs の終了コードがステップの終了コードとしてそのまま使われる保証が崩れる",
+    ).toBe("node scripts/run-publish-gates.mjs");
   });
 
   it("workflow 全体に defaults: ブロックが無い（既定シェルを黙って差し替えていない）", () => {
@@ -219,21 +220,11 @@ describe(".github/workflows/publish.yml の門ステップが既定シェル（b
     expect(offending, message).toEqual([]);
   });
 
-  it("この歯が読んでいる publish.yml が、門を実際に走らせる段を持っている", () => {
+  it("門ステップが呼ぶ scripts/run-publish-gates.mjs が実在する（パスの書き間違いで静かに空回りしない）", () => {
     expect(
       gateBlock,
       "門ステップが無いので、走らせる段の実在性そのものを確認できない",
     ).toBeDefined();
-    expect(
-      gateCommandNames.length,
-      "門ステップから pnpm run のコマンド名を1つも取り出せなかった",
-    ).toBeGreaterThan(0);
-    for (const name of gateCommandNames) {
-      expect(
-        rootScriptNames.has(name),
-        `package.json の scripts に "${name}" が無い` +
-          "——パスの書き間違いで、この段が静かに空回りしている可能性がある",
-      ).toBe(true);
-    }
+    expect(existsSync(runPublishGatesPath), `${runPublishGatesPath} が無い`).toBe(true);
   });
 });
