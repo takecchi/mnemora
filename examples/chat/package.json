@@ -17,6 +17,7 @@
     "retrieval": "tsx src/cli.ts retrieval",
     "time-term": "tsx src/cli.ts time-term",
     "validity": "tsx src/cli.ts validity",
+    "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
     "identifier-probes": "tsx src/cli.ts identifier-probes",
     "association-probes": "tsx src/cli.ts association-probes",
     "consolidation-cost": "tsx src/cli.ts consolidation-cost",

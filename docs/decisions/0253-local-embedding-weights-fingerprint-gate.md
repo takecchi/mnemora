@@ -757,3 +757,94 @@ tree だけが非2xx を返すのは HF 側の事情**（API の形の変更等�
 
 **`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** 足したのは `scripts/` と
 ADR の追記だけで、`packages/` には1バイトも触れていない。**要否は判断者に委ねる。**
+
+---
+
+## 追記 (2026-09-24、Issue #565): 「推論出力そのものを指紋にする」案(採らなかった案(c))を、測るだけの段として足した——門にはしていない
+
+**⚠ 状態欄も本文も書き換えていない**（追記1・追記2 と同じ扱い）。**⛔ これは担い手が書いた**
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+### 何を足したか
+
+**「採らなかった案」(c)（推論出力そのものを指紋にする）は、いまも採っていない。**
+却下の理由（いま測る経路が1本も無い／偽陽性率に上限を置けない、n=2・同一 run・
+起動時刻差1秒）は本文のまま有効である。
+
+[Issue #565](https://github.com/takecchi/mnemora/issues/565) が「採るとしたら何が要るか」
+として挙げた4項目のうち、**測る側の3項目だけを案A（測るだけ。門にはしない）として実装した**:
+
+1. 固定の既知入力（DB の状態にもタイムスタンプにも依存しない、決まった文字列の
+   小さい集合。`examples/chat/src/embedding-fingerprint.ts` の
+   `FIXED_EMBEDDING_FINGERPRINT_INPUTS`）に対して `embed()` を呼び、結果のベクトルの
+   `sha256`（と次元数）を出す。
+2. 既存の3段の形（測定 JSON → summary → `if: always()` で artifact）に載せる
+   （`scripts/measure-embedding-output-fingerprint.mjs` →
+   `scripts/embedding-output-fingerprint-summary.mjs` → `actions/upload-artifact@v6`）。
+3. `lscpu`（無ければ `/proc/cpuinfo`）の要点を、同じ段で記録する
+   （`scripts/measure-embedding-output-fingerprint-lib.mjs` の `parseLscpuText` /
+   `parseProcCpuinfoText`）。
+4. 2ジョブ（`example-chat` / `root-gate-db-stage`——本文「測ったこと5」が名指しした、
+   本物の重みで本物の推論を通す2ジョブ）の値を突き合わせる比較段
+   （`embedding-output-fingerprint-compare` ジョブ、
+   `scripts/compare-embedding-output-fingerprints.mjs`）。
+
+### ⛔ 門にはしていない
+
+**比較段は、一致・不一致のどちらでも exit 0 のまま終わる。** 片方の artifact が
+無い（測定段が重み取得に失敗した等）ときは、「一致」でも「不一致」でもなく
+「比較できなかった」と名乗る——「出なかった」を「一致した」の証拠にしない
+（`AGENTS.md`「⚠『出なかった』を、事象が無いことの証明にしない」の適用）。
+
+**この判断は本文の却下理由をそのまま引き継いでいる。** n=2・同一 run という条件下の
+1回の観測を積み重ねても、ランナー間の再現性を一般に証明・反証したことにはならない
+——`AGENTS.md`「⚠ 偽陽性率に上限を置けない検査は門にしない」。
+
+### #565 は閉じない
+
+**この追記は #565 を閉じない。** #565 が測るべきだとしていたのは「ランナー間の
+再現性」であり、それは**複数の workflow run にまたがって n が溜まって初めて
+言えること**である。この PR が足すのは1 run あたり1回の観測点にすぎない。
+
+**⟹ #565 は、n が溜まり、偽陽性率が測れるようになるまで開けておく。** 門にするか
+どうかは、そのときに改めて判断する——**いまは判断しない。判断できる材料が無い。**
+
+### 測ったこと（追記3 の分）
+
+- **実装前に、歯1〜3 に当たる歯（当時はまだ script 自体が無い）を走らせ、
+  `Cannot find module` で赤いことを確認した**（`npx vitest run
+  scripts/__tests__/measure-embedding-output-fingerprint-lib.test.mjs
+  scripts/__tests__/compare-embedding-output-fingerprints-lib.test.mjs
+  scripts/__tests__/compare-embedding-output-fingerprints-cli.test.mjs
+  scripts/__tests__/embedding-output-fingerprint-summary-lib.test.mjs
+  scripts/__tests__/ci-yml-embedding-output-fingerprint-wiring.test.mjs`）。
+- **実装後、同じコマンドが green である**（5 test files / 58 tests、本物のモデルは
+  一度も呼んでいない——固定のベクトルを直接渡した歯である）。
+- **変異試験3本**（退避コピーから復元。`git checkout` は使っていない）:
+  1. 比較 CLI が不一致で `process.exit(1)` する変異 → `compare-embedding-output-
+     fingerprints-cli.test.mjs` の「不一致でも exit 0」の it が赤になった。
+  2. `compareFingerprints` が片方の artifact 不在時に `"match"` を返す変異 →
+     `compare-embedding-output-fingerprints-lib.test.mjs` の歯3(陽性対照)の it が
+     複数赤になった。
+  3. `serializeVectorsToBytes` が成分をソートしてから hash する変異 →
+     `measure-embedding-output-fingerprint-lib.test.mjs` の「成分の順序を入れ替えると
+     違う sha256 になる」it が赤になった。
+  **3本とも、戻した後に同じ it が緑に戻ることまで確認した。**
+
+### 確かめていないこと（追記3 の分）
+
+- 🔴 **本番の CI でこの3段・比較段が実際に走るところを見ていない。** ローカルの
+  `vitest` と手元の変異試験でしか確かめていない——本 PR の CI 自身が最初の実測になる。
+- **ランナー間で実際に sha256 が一致するか不一致かは、まだ1回も観測していない。**
+  この追記は「測る仕組みを足した」だけであり、測った*結果*は含まない。
+- **`lscpu` が全ての `ubuntu-latest` ランナーで同じ形式の出力を返すかは確かめていない。**
+  `parseProcCpuinfoText` へのフォールバックが実際に使われる経路も未確認。
+- **偽陽性率・n が何件溜まれば門にできるかの基準は、決めていない。** それ自体が
+  この追記の外側にある、今後の判断事項である。
+
+### 未計上であることの明記（追記3 の分）
+
+**`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** 足したのは
+`examples/chat/src/embedding-fingerprint.ts`・`scripts/` の新規ファイル6本・
+`.github/workflows/ci.yml` の3段+1ジョブだけで、`packages/` には1バイトも
+触れていない（⟹ 出荷される公開 API は変わらない）。**要否は判断者に委ねる。**

@@ -57,6 +57,7 @@ import {
   CORRECTION_HIT_CASE_SET_EVAL,
 } from "./correction-case-set.eval.js";
 import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
+import { runEmbeddingFingerprint } from "./embedding-fingerprint.js";
 import { buildMnemoraPrompt, ingestConversation, reportMemoryUsage } from "./mnemora-path.js";
 import { TINY_BUDGET_CHARS, runBudgetDemo } from "./budget-demo.js";
 import { measureNaive, naivePrompt } from "./naive-path.js";
@@ -1909,6 +1910,9 @@ function printHelp(): void {
       "                                                                      #   既定は擬似 provider(similarity が構成上定数になるため provider に依らない)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run validity  # validAt ゲート(Issue #280)が候補の有無をどう動かすかを測る",
       "                                                                      #   既定は擬似 provider。MNEMORA_VALIDITY_JSON で機械可読出力",
+      "  pnpm --filter @mnemora/example-chat run embedding-fingerprint",
+      "                                                                      # 固定入力に対する embed() の結果を書き出す(DB 不要。Issue #565)",
+      "                                                                      #   MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON で機械可読出力(sha256/lscpuの合成は scripts/measure-embedding-output-fingerprint.mjs が別途行う)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes",
       "                                                                      # ASCII識別子・固有名詞を含む probe(Issue #109)を@mnemora/local-embeddingで測る",
       "                                                                      #   鍵・カセット不要。日本語意味probe7件・識別子probe30件(sparse/dense haystack)を別々に集計する",
@@ -1968,6 +1972,8 @@ async function main(): Promise<void> {
     await runTimeTerm();
   } else if (command === "validity") {
     await runValidity();
+  } else if (command === "embedding-fingerprint") {
+    await runEmbeddingFingerprint();
   } else if (command === "identifier-probes") {
     await runIdentifierProbes();
   } else if (command === "association-probes") {
