@@ -296,5 +296,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0270](./0270-runtime-method-count-bake-detection-tooth.md) | `Runtime` の非中核メソッド「件数」が生きた文書へ焼き込まれることを検出する歯を足す — 値ではなく形を見る（ADR 0269 引き受けた負債） | **提案 (2026-09)** |
 | [0271](./0271-extraction-candidate-subject-id-overrides-observation.md) | 抽出候補ごとに `subjectId` を持てるようにし、候補の値が observation の値より優先する（Issue #608 項目①） | **提案 (2026-09)** |
 | [0272](./0272-runtime-method-count-notation-sweep.md) | `Runtime` の非中核メソッド件数を検出する歯を、表記の軸だけ広げる（漢数字・「N つ」等）——主語の錨は外さない（ADR 0270 引き受けた負債、Issue #606 の材料） | **提案 (2026-09)** |
+| [0273](./0273-architecture-section5-is-a-copy.md) | `docs/architecture.md` §5 は「写した側」である — ADR 0269 決定2 の保留に答える（Issue #604） | **提案 (2026-09)** |
+| [0274](./0274-required-check-context-name-is-frozen-annotate-dont-rename.md) | required status check の文脈名は凍結する — 腐っていても改名せず、名指しで訂正を積む | **提案 (2026-09)** |
+| [0275](./0275-runtime-three-layer-assignment-recheck.md) | `Runtime` の3層振り分けが、いま正しいかを検算する — 棚卸しの範囲に限る（Issue #605） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
