@@ -108,6 +108,8 @@
  * （構造化されたリスト項番の解析が要るため、この検出器のスコープ外）。
  */
 
+import { delinkMarkdown, matchMarkdownLinkAt } from "./markdown-link-lib.mjs";
+
 /**
  * @typedef {{
  *   index: number,
@@ -363,17 +365,15 @@ function stripTrailingIndex(quote) {
  *    この穴を「正解」として固定していた）。⟹ 外すのは記号と url だけで、表示文字は比較に残る
  *    ——**偽の「在る」は作れない**（偽陰性を減らす向きだけの変更）。
  *
- * ⚠ 同じリンク置換は `agents-md-quote-attribution-lib.mjs` の `delink` と、
- * 下の `normalizeForAdrDecisionReferences` にも別々に在る（一元化は別 Issue）。
+ * ⛔ リンクの置換はここに書かない——定義は `markdown-link-lib.mjs` だけに在り、
+ * `agents-md-quote-attribution-lib.mjs` の `delink` と下の `normalizeForAdrDecisionReferences` も
+ * 同じものを使う（Issue #646）。
  *
  * @param {string} value
  * @returns {string}
  */
 function stripMarkdownDecoration(value) {
-  return value
-    .replaceAll(/\[([^\]]*)\]\([^)]*\)/g, "$1")
-    .replaceAll("**", "")
-    .replaceAll("`", "");
+  return delinkMarkdown(value).replaceAll("**", "").replaceAll("`", "");
 }
 
 /**
@@ -516,18 +516,18 @@ export function normalizeForAdrDecisionReferences(text) {
   const outChars = [];
   const indexMap = [];
   const n = text.length;
-  const linkRe = /^\[([^\]\n]*)\]\(([^)\n]*)\)/;
   let i = 0;
   while (i < n) {
-    const linkMatch = linkRe.exec(text.slice(i));
+    // ⛔ リンクの形はここに書かない——`markdown-link-lib.mjs` だけに在る（Issue #646）。
+    const linkMatch = text[i] === "[" ? matchMarkdownLinkAt(text, i) : null;
     if (linkMatch) {
-      const display = linkMatch[1];
+      const display = linkMatch.display;
       const displayStart = i + 1; // '[' の次から表示文字が始まる
       for (let k = 0; k < display.length; k++) {
         outChars.push(display[k]);
         indexMap.push(displayStart + k);
       }
-      i += linkMatch[0].length;
+      i += linkMatch.length;
       continue;
     }
     const ch = text[i];
