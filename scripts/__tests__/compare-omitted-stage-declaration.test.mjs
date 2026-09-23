@@ -220,6 +220,24 @@ describe("evaluate / exitCodeFor", () => {
     expect(exitCodeFor(result.status)).toBe(code);
   });
 
+  it.each([
+    ["未設定", undefined],
+    ["空文字列（GitHub Actions が push で渡す形）", ""],
+    ["空白だけ", "  \n\t "],
+  ])("🔴 PR 本文が「無い」(%s) なら判定しない", (_label, prBody) => {
+    // ⚠ 実際に踏んだ形【実測 2026-09-23】——ADR 0280 の初版は `typeof prBody === "string"`
+    // だけを見ていた。GitHub Actions は push でも空文字列を渡すので、`main` で stage 集合が
+    // 動いた瞬間に「申告が無い」で赤くなる——そして `main` には申告を書く場所が無い。
+    // ⟹ 満たしようのない門になっていた。
+    const result = evaluate({
+      measuredRows: HISTORICAL_MEASURED_ROWS,
+      baselineRows: HISTORICAL_BASELINE_ROWS,
+      prBody,
+    });
+    expect(result.status).toBe("skipped");
+    expect(exitCodeFor(result.status)).toBe(0);
+  });
+
   it("🔴 判定不能は、申告の有無より先に立つ（申告で黙らせられない）", () => {
     const result = evaluate({
       measuredRows: [{ turnCount: 1 }],

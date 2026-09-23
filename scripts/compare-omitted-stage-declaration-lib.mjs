@@ -138,17 +138,37 @@ export function findDeclaration(prBody) {
 }
 
 /**
+ * 🔴 **PR 本文が「在る」か。**
+ *
+ * ⚠ **未設定（`undefined`）だけでなく、空・空白だけの文字列も「無い」として扱う**【実測 2026-09-23】——
+ * GitHub Actions は `push`（`main`）でも `env: PR_BODY: \${{ github.event.pull_request.body }}`
+ * を**空文字列として渡す。**⟹ `typeof prBody === "string"` は真になる。
+ *
+ * ⛔ **これを「本文が在る」と読むと、`main` で `stage` 集合が動いた瞬間に
+ * 「申告が無い」で赤くなる——そして `main` には申告を書く場所（PR 本文）が存在しない。**
+ * ⟹ **満たしようのない門になる。**
+ *
+ * **【実測】ADR 0280 の初版はこの形で着地し、`main` の post-merge で
+ * `no_change`（たまたま集合が動いていなかった）を出していた**
+ * ——⛔ **`skipped` ではなかった。**ADR 0280 の本文が「`main` への push では `skipped`」と
+ * 書いていたのは**誤りだった。**（ADR 0280 追記1）
+ */
+function hasPrBody(prBody) {
+  return typeof prBody === "string" && prBody.trim() !== "";
+}
+
+/**
  * 判定本体。
  *
  * 返す `status`:
- * - `skipped` — PR 本文が無い（`main` への push 等）⟹ 判定しない
+ * - `skipped` — PR 本文が無い（未設定・空・空白だけ。`main` への push 等）⟹ 判定しない
  * - `unmeasurable` — `turnCount` 集合が食い違う ⟹ 判定不能
  * - `no_change` — `stage` 集合が1行も動いていない
  * - `declared` — 動いたが、申告が在る
  * - `undeclared` — 動いたのに、申告が無い（⟹ 赤）
  */
 export function evaluate({ measuredRows, baselineRows, prBody }) {
-  if (typeof prBody !== "string") {
+  if (!hasPrBody(prBody)) {
     return { status: "skipped", changed: [], declaration: null };
   }
   const mismatch = turnCountMismatch(measuredRows, baselineRows);
