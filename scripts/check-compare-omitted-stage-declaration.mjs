@@ -17,6 +17,9 @@
  * `${{ github.event.pull_request.body }}` を渡す）。**`PR_BODY` が無ければ判定しない**
  * ——`main` への push には PR 本文が無いためである。
  *
+ * 🔴 **「無い」は未設定だけではない。**GitHub Actions は `push` でも `PR_BODY` を
+ * **空文字列として渡す** ⟹ 空・空白だけも「無い」として扱う（ADR 0280 追記1）。
+ *
  * ## 終了コード
  *
  * - `0` — 動いていない / 申告が在る / 判定しない（PR 本文が無い）
@@ -64,7 +67,7 @@ const result = evaluate({
 
 if (result.status === "skipped") {
   console.log(
-    "⊘ PR 本文が無いので判定していません（`PR_BODY` が未設定）。⛔ 「動いていない」ではありません。",
+    "⊘ PR 本文が無いので判定していません（`PR_BODY` が未設定・空・空白だけ）。⛔ 「動いていない」ではありません。",
   );
 } else if (result.status === "unmeasurable") {
   console.error(
