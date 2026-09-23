@@ -846,7 +846,16 @@ describe("classifyAdrDecisionCitation（fixture）", () => {
  * （下の2つ目の `it`）。
  */
 describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生きたコード・生きた文書に無いこと（実物）", () => {
-  const GATED_SOURCE_EXTENSIONS = new Set([".md", ".mjs", ".cjs", ".js", ".ts", ".tsx", ".yml", ".yaml"]);
+  const GATED_SOURCE_EXTENSIONS = new Set([
+    ".md",
+    ".mjs",
+    ".cjs",
+    ".js",
+    ".ts",
+    ".tsx",
+    ".yml",
+    ".yaml",
+  ]);
   const EXCLUDED_DIR_NAMES = new Set([
     "node_modules",
     ".git",
