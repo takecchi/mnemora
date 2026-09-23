@@ -30,6 +30,11 @@ export interface LocalEmbeddingModelSpec {
   readonly cacheDir: string | undefined;
   /** onnxruntime の intra-op スレッド数。 */
   readonly numThreads: number;
+  /**
+   * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら `pipeline()` へ渡さない**
+   * ——transformers.js の既定（`"main"`）のまま、いまと同じ呼び出しになる（Issue #597）。
+   */
+  readonly revision?: string | undefined;
 }
 
 /**
@@ -237,6 +242,8 @@ export const createLocalEmbeddingPipeline: CreateLocalEmbeddingPipeline = async 
   const extractor = await pipeline("feature-extraction", spec.repo, {
     dtype: spec.dtype,
     ...(spec.cacheDir !== undefined ? { cache_dir: spec.cacheDir } : {}),
+    // Issue #597: 指定されたときだけ渡す。未指定なら鍵ごと渡さず、いまと同じ呼び出しにする。
+    ...(spec.revision !== undefined ? { revision: spec.revision } : {}),
     // 32コア機での実測: 既定（コア数まかせ）819 文/秒 に対し、4スレッドで 985 文/秒。
     // スレッドを増やすほど速くなるわけではない——オーバーサブスクリプションのほうが高くつく。
     session_options: { intraOpNumThreads: spec.numThreads, interOpNumThreads: 1 },

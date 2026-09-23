@@ -150,6 +150,16 @@ export interface LocalEmbeddingProviderOptions {
   /** onnxruntime の intra-op スレッド数。既定 `4`。 */
   numThreads?: number;
   /**
+   * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら transformers.js の既定
+   * （`"main"`）のままで、この option を足す前と同じ呼び出しになる**（Issue #597）。
+   *
+   * ⚠ **渡したときの実挙動は、本物のモデルを落として確かめていない。**
+   * ⚠ **キャッシュ鍵（ADR 0263）と、読み込んだ重みの指紋の照合（ADR 0253）が、固定した
+   * revision をどう扱うかは決めていない**（Issue #597 の「先に決めるべきこと」のうち、
+   * 決めたのは「既定値は変えない」だけである）。
+   */
+  revision?: string;
+  /**
    * モデルを読み込む関数。**テストで本物のモデルを落とさないための注入点である**
    * （`packages/openai` の `client` と同じ役目）。未指定なら transformers.js を使う。
    */
@@ -246,6 +256,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       dtype: options.dtype ?? DEFAULT_LOCAL_EMBEDDING_DTYPE,
       cacheDir: options.cacheDir,
       numThreads: options.numThreads ?? DEFAULT_LOCAL_EMBEDDING_NUM_THREADS,
+      revision: options.revision,
     });
     this.#prefix = options.prefix ?? DEFAULT_LOCAL_EMBEDDING_PREFIX;
     this.#createPipeline = options.createPipeline ?? createLocalEmbeddingPipeline;

@@ -43,6 +43,7 @@ export interface LocalEmbeddingProviderOptions {
     prefix?: string;
     cacheDir?: string;
     numThreads?: number;
+    revision?: string;
     createPipeline?: CreateLocalEmbeddingPipeline;
     retry?: LocalEmbeddingRetryOptions;
     sleep?: (ms: number) => Promise<void>;
@@ -62,6 +63,7 @@ export interface LocalEmbeddingModelSpec {
     readonly dtype: LocalEmbeddingDtype;
     readonly cacheDir: string | undefined;
     readonly numThreads: number;
+    readonly revision?: string | undefined;
 }
 export interface LocalEmbeddingPipeline {
     readonly maxInputTokens: number;
