@@ -294,3 +294,29 @@ Test Files  2 failed | 63 passed (65)
 
 ⚠ これはクローンの委譲で走っている担い手の検算であって、オーナー本人の決定ではない
 （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。Issue #636。
+
+---
+
+## 追記（2026-09-24）: 本文が指示した `CHANGELOG.md` の追記先は、`v1.0.0` のリリースで無くなった —— 次の版が決まったら追記する
+
+⛔ **本節より上は書き換えていない。状態は「提案」のまま置く。**
+⚠ **これはクローン（miku）の判断であり、オーナー本人の決定ではない**
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+- 本文（前提3）は「`CHANGELOG.md` の `[1.0.0]`（未リリース）節の `### Added` に足す」と指示している。
+  この追記は【現物】されていない。
+  [ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) はこの ADR を
+  「ADR 自身が指示した CHANGELOG の追記だけが欠けている」として提案のまま残している。
+- 🔴 **この変更（#612、commit `02020e1`、2026-09-23 10:35 JST）は `v1.0.0` に入っていない。**
+  `v1.0.0` のタグは同じ日の 05:31 JST である。
+  `CHANGELOG.md` の `## [1.0.0] - 2026-09-23` はリリース済みの節になっており、未リリースの節は1つも無い。
+  ⟹ **指示どおりに `[1.0.0]` の節へ書くと、「`v1.0.0` に入っている」という誤りになる。**
+- **未リリースの節を起こして書く案は採らなかった。**`CHANGELOG.md` の見出しの形の歯
+  （`scripts/__tests__/changelog-released-heading-format.test.mjs`）と候補一覧
+  （`scripts/changelog-candidates-summary-lib.mjs` の `UNRELEASED_HEADING_RE`）が読める
+  未リリース節の見出しは、`## [x.y.z] - 未リリース` の形だけである。
+  Keep a Changelog 式の `## [Unreleased]` は「未リリース」を含まないので、見出しの形の歯で赤になる【現物】。
+  ⟹ **節を起こすことは、次の版番号（`1.0.1` か `1.1.0` か）を決めることになる。**
+  次の版番号は、この ADR が決めてよい範囲を越える。
+- ⟹ **次の版の未リリース節が起こされたら、その `### Added` に本 ADR の変更を1行足す。**
+  それまでは ADR 0283 の条件（決定が要求する実体が main に在る）を満たさない。したがって状態は倒さない。
