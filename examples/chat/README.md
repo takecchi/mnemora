@@ -39,6 +39,13 @@ pnpm --filter @mnemora/example-chat run chat
 # 会話の長さを変えて、経路A/経路Bの量を実測する（このサンプルの主目的）
 pnpm --filter @mnemora/example-chat run compare
 
+# 最初のデータ投入（上の chat / compare）が終わったら、一度だけ memories の統計を更新する
+#   何度打っても安全（冪等）。理由は packages/postgres/README.md
+#   「⚠ 新規インストール後、最初のデータ投入が終わったら --analyze-memories を実行すること」
+#   ⚠ `run migrate -- --analyze-memories` と書くと `--` がそのまま渡り、
+#      「unknown option: --」で止まる。`run migrate --analyze-memories` と書くこと
+pnpm --filter @mnemora/postgres run migrate --analyze-memories
+
 # tenantId/subjectId のスコープを実演する（後述「scope」節）
 pnpm --filter @mnemora/example-chat run scope
 
