@@ -1016,6 +1016,27 @@ export interface ScoreBreakdown {
   freshness: number;
   strength: number;
   total: number;
+  /**
+   * 🔴 **`total` の比較可能性を名乗る欄**（Issue #548 方向1、
+   * [ADR 0282](../../../docs/decisions/0282-score-breakdown-affinity-measured.md)）。
+   *
+   * **`similarity`/`lexicalMatch` のどちらか一方でも在れば `true`。両方とも無いときだけ
+   * `false`。** `total` は `affinity × decay × tagMatch × freshness × strength` の積で
+   * （`strategies/scoring.ts` 冒頭 doc）、`affinity` は `similarity`/`lexicalMatch` の
+   * どちらも無いとき中立の `1` に退化する——クエリとの関連度を一切測っていないのに、
+   * 積の他の項次第で `total` が高く見えることがある（連想枠。ADR 0246「⛔ これが閉じないもの」2）。
+   * ⟹ **この欄が `false` の記憶の `total` を、`true` の記憶の `total` と比較しないこと。**
+   * 同じ `false`（あるいは同じ `true`）どうしの比較は妨げない。
+   *
+   * ⚠ **`undefined`（欄が無いこと）は「関連度を測っていない」ことを意味しない。**
+   * `defaultScoringStrategy` は常にこの欄を埋める（`true`/`false` のどちらか）ので、
+   * `undefined` は「`defaultScoringStrategy` を経由していない」——独自の
+   * `ScoringStrategy`（`strategies/scoring.ts` の公開拡張点）がこの欄を埋めていない、
+   * という別の意味になる。**この2つは型の上では区別できない**——`undefined` を見たら
+   * 「関連度を測ったかどうか分からない」としてのみ扱い、比較可能とも不可能とも仮定しないこと
+   * （ADR 0282「引き受けた負債」）。
+   */
+  affinityMeasured?: boolean;
 }
 
 export const ScoreBreakdownSchema = z.object({
@@ -1026,6 +1047,7 @@ export const ScoreBreakdownSchema = z.object({
   freshness: z.number(),
   strength: z.number(),
   total: z.number(),
+  affinityMeasured: z.boolean().optional(),
 }) satisfies z.ZodType<ScoreBreakdown>;
 
 export interface RecalledMemory {

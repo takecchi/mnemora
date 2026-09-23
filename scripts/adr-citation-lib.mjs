@@ -403,3 +403,364 @@ export function anchorExistsInTarget(quote, targetText) {
   }
   return false;
 }
+
+/**
+ * ## 3つ目の歯 —「ADR X 決定N」への参照が、機械で追える形か
+ *
+ * ここまでの2つ（行番号引用・アンカー引用）は「引用先の場所が動いたら壊れる」形を検出した。
+ * この3つ目が検出するのは別の壊れ方——**「ADR X 決定N」という書き方そのものが、
+ * 曖昧または実在しない先を指してしまう2つの規則**である（マネージャーの作業指示）。
+ *
+ * ### 背景 — Issue #505 が生んだ略記
+ *
+ * Issue #505 は、ある ADR（以下「元 ADR」）の複数の決定を、1本ずつ別の ADR（以下「着地先」）へ
+ * 分けて成文化した。着地先の見出し（h1）は自分を次の逐語の形で名乗る:
+ *
+ * `# ADR <着地先番号>: … — ADR <元番号> 決定<N> の射程を \`AGENTS.md\` へ広げる（Issue #505）`
+ *
+ * ⟹ 書き手は「`ADR <元番号> 決定<N>` を着地させた `ADR <着地先番号>`」を、
+ * **`ADR <着地先番号> 決定<N>`** と縮めて呼ぶことが実地で何度も起きている。
+ * ⛔ **これは誤字ではなく体系的な略記である**——「着地先の ADR 番号」と「元 ADR の決定番号」を
+ * そのまま並べてしまう。
+ *
+ * ### 規則A（死んだポインタ）
+ *
+ * 参照 `ADR X 決定N` について、**X 自身の決定セクションに `決定N` が無ければ違反**。
+ * （`findAdrDecisionSectionNumbers` が返す集合に `N` が入っているかで判定する。）
+ *
+ * ### 規則B（曖昧な略記）
+ *
+ * X の h1 が「ADR S 決定N の射程を…へ広げる」と名乗っている（＝ X は元 ADR S の決定N の
+ * 着地先である）とき、**`ADR X 決定N`（同じ番号）という参照は曖昧であり違反**。
+ * 正しくは `ADR S 決定N`（`ADR X` で着地、のように書く）である。
+ * （`findAdrLandingClaim` が返す `{ sourceAdrNumber, decisionNumber }` の `decisionNumber` と
+ * 参照側の decisionNumber が一致するかで判定する。）
+ *
+ * ⭐ **どちらの規則も、対応表（「決定2→0250」のような固定リスト）をコードに焼かない。**
+ * 両側（参照元の文字列・指し先 ADR の実物）を実行時に repo から読んで突き合わせる
+ * （`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」/ ADR 0223 決定9 の自己適用）。
+ *
+ * ### ⭐ なぜ2つの規則が別々に要るか —— 【実測】着地先が h1 で出自を名乗らないと、規則Bが効かない
+ *
+ * **【実測】`ADR 0223 決定N` の着地先6本（`0250`/`0254`/`0255`/`0256`/`0257`/`0234`）のうち、
+ * h1 で「`ADR 0223 決定N` の射程を広げる」と名乗っていないのは `0234` だけであり、
+ * `ADR <着地先> 決定<N>` の形で誤引用されたのも `0234` が最多だった**
+ * （`scripts/__tests__/adr-citation.test.mjs` の実行結果と報告の集計より）。
+ * ⛔ **標本が6本と小さいので、これ以上は断定しない**——「h1 で出自を名乗らない ADR は
+ * 誤引用が増える」という一般則までは主張しない。**実測はここまでである。**
+ *
+ * ⟹ この観測は、**規則Bだけでは足りない理由**そのものでもある。`0234` は h1 で
+ * 「ADR 0223 決定9 の射程を…へ広げる」と名乗っていない（`findAdrLandingClaim` が `null` を
+ * 返す）ため、`0234` を決定9として指す誤引用は**規則B（着地先の名乗りから導出する）では
+ * 捕まらない**。この誤引用を捕まえているのは**規則A**（`0234` 自身の決定セクションに
+ * `決定9` が無いことを直接見る）のほうである。⟹ **2つの規則は独立に要る**
+ * ——規則Bは「着地先が h1 で自分の出自を名乗っている」ときにしか効かない後ろ盾であり、
+ * 規則Aは着地先が出自を名乗るかどうかに関わらず効く、より根本的な検査である。
+ *
+ * ### 🔴 この歯が止めないもの —— 番号は合っているが中身が別の節にある形
+ *
+ * この歯は **`ADR X 決定N` という文字列の形**しか見ない。`X` の決定セクションに `決定N` という
+ * *見出しが実在する*ことまでは確認するが、**引用者がその参照に帰している主張の中身が、
+ * 本当にその決定Nの節に書いてあるかは検証していない**——これは逐語照合でしか見えず、
+ * 構造化された「どの見出しが何を主張しているか」の解析はこの歯のスコープ外である。
+ * 【実測】`ADR 0201 決定3` を名指しする既存の2箇所は、`0201` に
+ * `### 3. CI ジョブは増やさない` という見出しが実在するため、この歯では「正常」と分類される
+ * ——だが、その参照が実際に帰している主張が本当にその節の話かどうかは、この歯は見ていない。
+ * これは Issue #634 が報告している形そのものであり、⛔ **この歯はそれを検出しない。**
+ *
+ * ### 🔴 実装で必ず守る2つの細部
+ *
+ * ① **記法を外してから当てる。** 素の文字列一致・素の正規表現は次のようなずれで空振りする:
+ * `[表示文字](url)` というリンク記法、`*`/`_`/`` ` ``/`~`/`\` の装飾、表の `|`、
+ * そして**改行を含む空白**（`ADR <番号>` と `決定<N>` が行をまたぐ実例が在る）。
+ * ⟹ `normalizeForAdrDecisionReferences` がこれを1回で正規化してから探す。
+ *
+ * ② 🔴 **見出しの行頭に空白と `- + * >` を許すこと。**
+ * ⛔ **見出し検出を `^#{2,4}` と決め打つと、箇条書きの中に字下げして置かれた
+ * `  ## 決定` を1つも拾えない。** 実地で `0087`/`0089`/`0091`/`0114`/`0119`/`0155` などが
+ * この形（`- **決定**:` の直下に、字下げした `## 決定N: …` が続く）を持ち、
+ * 【実測】この罠を踏むと**参照の25.4%（119/468）が静かに「判定不能」になった**。
+ * ⚠ **これを知らない次の人が `^#{2,4}` に戻したら、この歯は緑のまま無力化する**
+ * ——`HEADING_LINE_RE` の定義に、この段落と同じ警告を逐語で繰り返して残す。
+ */
+
+/**
+ * `[表示文字](url)` を表示文字へ、`*`/`_`/`` ` ``/`~`/`\` を除去、表の `|` を空白へ、
+ * 改行を含む全空白を1個の半角空白へ正規化する。
+ *
+ * 「ADR 決定」参照だけに絞った軽量な正規化であり、`anchorExistsInTarget` 側が使う
+ * `stripMarkdownDecoration`（`**`・バッククォートだけを外す、部分文字列比較用）とは別物。
+ * こちらは「参照そのものの検出」に使うため、検出後に元テキストの行番号を引けるよう
+ * `indexMap`（正規化後の各文字が、元テキストのどの位置から来たか）も返す。
+ *
+ * @param {string} text
+ * @returns {{ normalized: string, indexMap: number[] }}
+ */
+export function normalizeForAdrDecisionReferences(text) {
+  const outChars = [];
+  const indexMap = [];
+  const n = text.length;
+  const linkRe = /^\[([^\]\n]*)\]\(([^)\n]*)\)/;
+  let i = 0;
+  while (i < n) {
+    const linkMatch = linkRe.exec(text.slice(i));
+    if (linkMatch) {
+      const display = linkMatch[1];
+      const displayStart = i + 1; // '[' の次から表示文字が始まる
+      for (let k = 0; k < display.length; k++) {
+        outChars.push(display[k]);
+        indexMap.push(displayStart + k);
+      }
+      i += linkMatch[0].length;
+      continue;
+    }
+    const ch = text[i];
+    if (ch === "*" || ch === "_" || ch === "`" || ch === "~" || ch === "\\") {
+      i += 1;
+      continue;
+    }
+    if (ch === "|") {
+      outChars.push(" ");
+      indexMap.push(i);
+      i += 1;
+      continue;
+    }
+    if (ch === " " || ch === "\t" || ch === "\n" || ch === "\r" || ch === "\f" || ch === "\v") {
+      const start = i;
+      while (i < n && /\s/.test(text[i])) {
+        i += 1;
+      }
+      outChars.push(" ");
+      indexMap.push(start);
+      continue;
+    }
+    outChars.push(ch);
+    indexMap.push(i);
+    i += 1;
+  }
+  return { normalized: outChars.join(""), indexMap };
+}
+
+/** @typedef {{ index: number, line: number, raw: string, adrNumber: string, decisionNumber: string }} AdrDecisionReference */
+
+const ADR_DECISION_REF_RE = /ADR ?(\d{4}) ?決定 ?(\d+)/g;
+
+/**
+ * 正規化したテキストから `ADR X 決定N` 形の参照を全部見つけて返す
+ * （見つけたもの全部——生きたコード・生きた文書・ADR 本体を問わない。除外は呼び出し側が決める）。
+ *
+ * `index`/`line` は**正規化前の元テキスト**での位置（`indexMap` で引き戻す）。
+ *
+ * @param {string} text
+ * @returns {AdrDecisionReference[]}
+ */
+export function findAdrDecisionReferences(text) {
+  const { normalized, indexMap } = normalizeForAdrDecisionReferences(text);
+  /** @type {AdrDecisionReference[]} */
+  const citations = [];
+  ADR_DECISION_REF_RE.lastIndex = 0;
+  let m;
+  while ((m = ADR_DECISION_REF_RE.exec(normalized))) {
+    const originalIndex = indexMap[m.index] ?? 0;
+    citations.push({
+      index: originalIndex,
+      line: lineNumberAt(text, originalIndex),
+      raw: m[0],
+      adrNumber: m[1],
+      decisionNumber: m[2],
+    });
+  }
+  return citations;
+}
+
+/**
+ * 見出し行を判定する。
+ *
+ * 🔴 **行頭に空白と `- + * >` を許すこと。** `^#{2,4}` に戻すと、箇条書きの中に字下げして
+ * 置かれた見出し（実地で `0087`/`0089`/`0091`/`0114`/`0119`/`0155` などに在る
+ * `- **決定**:` の直下の字下げ `## 決定N: …` の形）を1つも拾えなくなり、
+ * 【実測】参照の約25%（119/468）が静かに「判定不能」になる。⚠ **この正規表現を
+ * 書き直すときは、必ずこの段落を読み直すこと。**
+ *
+ * @param {string} line
+ * @returns {{ level: number, text: string } | null}
+ */
+const HEADING_LINE_RE = /^[ \t]*(?:[-+*>][ \t]*)*(#{2,4})[ \t]+(.*)$/;
+function matchHeadingLine(line) {
+  const m = HEADING_LINE_RE.exec(line);
+  if (!m) {
+    return null;
+  }
+  return { level: m[1].length, text: m[2] };
+}
+
+/** 見出しテキストから、絵文字・太字・インラインコードの装飾を外す。 */
+function stripHeadingDecoration(text) {
+  return text
+    .replace(/[⭐🔴⚠⛔⭕🟢🔵💡]/gu, "")
+    .replace(/\*\*/g, "")
+    .replace(/`/g, "")
+    .trim();
+}
+
+/** 決定セクションの「見出し語」（コンテナ側）。 */
+const DECISION_SECTION_TITLES = new Set(["決めたこと", "決定", "決めること", "結論"]);
+
+/**
+ * ADR 本文から、その ADR が自前で持つ「決定N」の番号の集合を返す。
+ *
+ * 2種類の書き方を認識する（マネージャーの実地調査）:
+ *
+ * 1. **見出し自身が決定を名乗る形**（`### 決定N. …` / 字下げした `## 決定N: …` を含む）。
+ *    これは見出しテキストが「決定」に続けて数字を持つので、コンテナの有無を問わず
+ *    どこに在っても安全に決定Nとして数えられる。
+ * 2. **コンテナ配下の番号だけの項**（`### N.` 見出し／箇条書きの `N. `／太字段落の
+ *    `**N. …**`／表の `| N |`）。こちらは番号だけでは何の一覧か分からないため、
+ *    直前に開いた「決定セクションのコンテナ」の配下に在るときだけ数える。
+ *
+ *    ⚠ **コンテナの開き方は2種類ある**（実地の ADR corpus に両方が実在する）:
+ *    - **見出し型**: `## 決定` / `## 決めたこと` 等（`DECISION_SECTION_TITLES`）そのものが
+ *      見出し。次に**同レベル以下**の見出しが来たら閉じる（後続の `### 決定1.` のような
+ *      見出しは上の1.が拾うので、コンテナ判定には関与しない）。
+ *    - **太字箇条書きラベル型**（古い ADR、例: `0060`）: `- **決定**:` のように、
+ *      見出しではなく箇条書きの1項目としてラベルが在り、配下は**字下げした段落**として
+ *      `**1. 本文…**` の形で番号付き決定が並ぶ（見出しも `N.` 箇条書きも使わない）。
+ *      次に**同じかそれより浅い字下げの箇条書き行**（例: 兄弟の `- **採らなかった案**:`）
+ *      か、**見出し行**が来たら閉じる。
+ *
+ * @param {string} adrText
+ * @returns {Set<string>}
+ */
+export function findAdrDecisionSectionNumbers(adrText) {
+  const lines = adrText.split("\n");
+  const numbers = new Set();
+  /** @type {{ kind: "heading", level: number } | { kind: "bullet", indent: number } | null} */
+  let container = null;
+
+  const BULLET_LABEL_RE = /^([ \t]*)[-+*]\s+\*\*(決めたこと|決定|決めること|結論)\*\*\s*:?\s*$/;
+  const BULLET_ITEM_RE = /^[ \t]*[-+*]\s/;
+
+  for (const line of lines) {
+    const heading = matchHeadingLine(line);
+    if (heading) {
+      const headingText = stripHeadingDecoration(heading.text);
+
+      const directMatch = headingText.match(/^決定\s*(\d+)/);
+      if (directMatch) {
+        numbers.add(directMatch[1]);
+        // 太字箇条書きラベル型コンテナは、見出しが出てきた時点で構造が変わったとみなし閉じる
+        // （見出し自身は上ですでに拾っているので、閉じても取りこぼしは無い）。
+        if (container?.kind === "bullet") {
+          container = null;
+        }
+        continue;
+      }
+
+      if (DECISION_SECTION_TITLES.has(headingText)) {
+        container = { kind: "heading", level: heading.level };
+        continue;
+      }
+
+      if (container?.kind === "heading" && heading.level > container.level) {
+        const bareMatch = headingText.match(/^(\d+)\./);
+        if (bareMatch) {
+          numbers.add(bareMatch[1]);
+        }
+        continue;
+      }
+
+      // コンテナと同じか、より浅い見出しが来たら（見出し型・箇条書き型どちらも）閉じる。
+      container = null;
+      continue;
+    }
+
+    const bulletLabel = line.match(BULLET_LABEL_RE);
+    if (bulletLabel) {
+      container = { kind: "bullet", indent: bulletLabel[1].length };
+      continue;
+    }
+
+    if (container === null) {
+      continue;
+    }
+
+    if (container.kind === "bullet") {
+      const siblingBullet = line.match(BULLET_ITEM_RE);
+      if (siblingBullet) {
+        const indent = line.match(/^[ \t]*/)[0].length;
+        if (indent <= container.indent) {
+          container = null;
+          continue;
+        }
+      }
+    }
+
+    const boldParagraphMatch = line.match(/^[ \t]*\*\*(\d+)\.\s/);
+    if (boldParagraphMatch) {
+      numbers.add(boldParagraphMatch[1]);
+      continue;
+    }
+    const bulletMatch = line.match(/^[ \t]*(\d+)\.\s/);
+    if (bulletMatch) {
+      numbers.add(bulletMatch[1]);
+      continue;
+    }
+    const tableMatch = line.match(/^[ \t]*\|\s*(\d+)\s*\|/);
+    if (tableMatch) {
+      numbers.add(tableMatch[1]);
+    }
+  }
+
+  return numbers;
+}
+
+const ADR_LANDING_CLAIM_RE = /ADR ?(\d{4}) ?決定 ?(\d+) の射程を[^\n]*?へ広げる/;
+
+/**
+ * ADR の h1（1行目）が「この ADR は元 ADR S の決定N の射程を広げたものである」と
+ * 名乗っているかを判定する。名乗っていれば `{ sourceAdrNumber, decisionNumber }` を、
+ * 名乗っていなければ `null` を返す。
+ *
+ * ⚠ **リンク記法・改行をまたぐ書き方は想定しない**（h1 は1行の見出しであり、この一族の
+ * 実例はすべて素の `ADR NNNN 決定N の射程を…へ広げる` という同一行の文言である）。
+ * ⟹ ここでは正規化を掛けない素の h1 テキストに直接当てる。
+ *
+ * @param {string} adrText
+ * @returns {{ sourceAdrNumber: string, decisionNumber: string } | null}
+ */
+export function findAdrLandingClaim(adrText) {
+  const firstLine = adrText.split("\n", 1)[0] ?? "";
+  const m = ADR_LANDING_CLAIM_RE.exec(firstLine);
+  if (!m) {
+    return null;
+  }
+  return { sourceAdrNumber: m[1], decisionNumber: m[2] };
+}
+
+/**
+ * 規則A・規則Bを判定する（純関数——ファイルは読まない）。呼び出し側が、参照先 ADR
+ * （`ADR X 決定N` の `X`）について `findAdrDecisionSectionNumbers`/`findAdrLandingClaim`
+ * を実行した結果を渡す。`targetSectionNumbers` が `null` なら「X という ADR 自体が
+ * 存在しない」を表す。
+ *
+ * 🔴 **規則Bは「番号が一致するときだけ」曖昧である。** X が何らかの着地先であること
+ * 自体は違反ではない——**同じ番号を使い回したときだけ**曖昧になる。番号が違えば
+ * （例: X の自前の決定1 を指す場合）、X が別の決定Nの着地先であっても曖昧ではない。
+ * ⛔ **この「番号が一致するときだけ」を外して `Boolean(targetLandingClaim)` にすると、
+ * X が何かの着地先でありさえすれば毎回 ruleB が立つ、という過剰実装になる**
+ * ——`adr-citation.test.mjs` の対応する fixture がこの過剰実装を赤で検出する。
+ *
+ * @param {string} decisionNumber
+ * @param {{ targetSectionNumbers: Set<string> | null, targetLandingClaim: { sourceAdrNumber: string, decisionNumber: string } | null }} target
+ * @returns {{ ruleA: boolean, ruleB: boolean }}
+ */
+export function classifyAdrDecisionCitation(decisionNumber, target) {
+  if (target.targetSectionNumbers === null) {
+    return { ruleA: true, ruleB: false };
+  }
+  const ruleA = !target.targetSectionNumbers.has(decisionNumber);
+  const ruleB = Boolean(
+    target.targetLandingClaim && target.targetLandingClaim.decisionNumber === decisionNumber,
+  );
+  return { ruleA, ruleB };
+}

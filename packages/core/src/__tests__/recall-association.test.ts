@@ -158,6 +158,8 @@ describe("recall() — 連想枠（association、既定 off）", () => {
 
     const anchorEntry = result.memories.find((m) => m.memoryId === anchor.id);
     expect(anchorEntry?.retrievedVia).toBe("ann");
+    // クエリとの類似度で拾われた側は affinityMeasured: true（Issue #548 方向1、ADR 0282）。
+    expect(anchorEntry?.score.affinityMeasured).toBe(true);
 
     const assocEntry = result.memories.find((m) => m.memoryId === associated.id);
     expect(assocEntry).toBeDefined();
@@ -165,6 +167,9 @@ describe("recall() — 連想枠（association、既定 off）", () => {
     expect(assocEntry?.associationOf).toBe(anchor.id);
     // ⛔ アンカーとの類似度を score.similarity（クエリとの類似度の枠）に入れない。
     expect(assocEntry?.score.similarity).toBeUndefined();
+    // ⟹ affinity が中立の1に退化しているので、この記憶の score.total は
+    // affinityMeasured: true の記憶と比較可能ではない（Issue #548 方向1、ADR 0282）。
+    expect(assocEntry?.score.affinityMeasured).toBe(false);
 
     // 既定 off のときには出ない stage_skipped が、ここでも出ていないこと
     // （実行して収穫が有った run では stage_skipped を積まない）。

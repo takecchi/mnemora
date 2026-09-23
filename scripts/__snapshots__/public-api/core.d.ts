@@ -1823,6 +1823,7 @@ export interface ScoreBreakdown {
     freshness: number;
     strength: number;
     total: number;
+    affinityMeasured?: boolean;
 }
 export declare const ScoreBreakdownSchema: z.ZodObject<{
     similarity: z.ZodOptional<z.ZodNumber>;
@@ -1832,6 +1833,7 @@ export declare const ScoreBreakdownSchema: z.ZodObject<{
     freshness: z.ZodNumber;
     strength: z.ZodNumber;
     total: z.ZodNumber;
+    affinityMeasured: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export interface RecalledMemory {
     memoryId: MemoryId;
@@ -1868,6 +1870,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
         freshness: z.ZodNumber;
         strength: z.ZodNumber;
         total: z.ZodNumber;
+        affinityMeasured: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>;
 }, z.core.$strip>;
 export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
@@ -2044,6 +2047,7 @@ export declare const RecallResultSchema: z.ZodObject<{
             freshness: z.ZodNumber;
             strength: z.ZodNumber;
             total: z.ZodNumber;
+            affinityMeasured: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>;
     }, z.core.$strip>>;
     omitted: z.ZodArray<z.ZodDiscriminatedUnion<[

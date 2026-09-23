@@ -63,7 +63,7 @@ import { CORRECTION_SCENARIO } from "./correction-scenario.js";
  * `resolveContested` 相当まで進める。**2回目の呼び出しでも内部で `markContested` は
  * もう一度呼ばれるが、対象は既に `contested` なので書き込みは起きない**（ADR 0242 の
  * doc コメント参照）——`markOutcomeKind`/`resolveOutcomeKind` はそれぞれ1回目・2回目の
- * 結果を運ぶ。**両方の呼び出しに同じ `reason` を渡す**（ADR 0238 決定2）。
+ * 結果を運ぶ。**両方の呼び出しに同じ `reason` を渡す**（ADR 0238「同じ文字列を渡す」）。
  *
  * **⚠ 北極星の主測定（`compare`/`retrieval`）には一切関わらない。**`compare.ts`/
  * `compare-json.ts`/`scenario.ts`/`probe-set.ts`/`naive-path.ts` のいずれも import しない
@@ -325,7 +325,7 @@ export async function runCorrectionDemo(
   // 今日は `@mnemora/core` の公開 export(ADR 0242)。このシナリオは勝者(winnerId)を
   // あらかじめ知っている(`contestedPair.winnerExternalId`)ので、まだ `resolution` を
   // 渡していない1回目の `applyCorrection` 呼び出しから、同じ reason を組み立てて
-  // 両方に渡す(ADR 0238 決定2「同じ文字列を渡す」)。
+  // 両方に渡す(ADR 0238「同じ文字列を渡す」)。
   const resolution = { kind: "supersede" as const, winnerId };
   const correctionReason = buildCorrectionReason({
     discovery,

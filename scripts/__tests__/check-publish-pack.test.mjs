@@ -714,7 +714,7 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
     expect(output).toContain("⚠ この門が見ていない範囲:");
     expect(output).toContain("scripts/publish-targets.mjs の PUBLISH_TARGETS");
     expect(output).toContain("固定リスト");
-    // ⭐ 数を直書きしない（ADR 0234 決定9）——PUBLISH_TARGETS の実件数から動的に出る。
+    // ⭐ 数を直書きしない（ADR 0223 決定9（ADR 0234 で着地））——PUBLISH_TARGETS の実件数から動的に出る。
     expect(output).toContain(`いま見たのは ${PUBLISH_TARGETS.length} パッケージ`);
     for (const target of PUBLISH_TARGETS) {
       expect(output).toContain(target.name);

@@ -365,6 +365,9 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           digest: "D",
           retrievedVia: "ann",
           provenanceKind: "imported",
+          // affinityMeasured: Issue #548 方向1 / ADR 0282 で足した欄。この歯と同じ形の
+          // 「増えたのはこの1欄だけであることをリテラルで固定し直す」規律（すぐ上の
+          // outputValidation のコメント参照）——similarity が在るので true。
           score: {
             similarity: 1,
             decay: 1,
@@ -372,6 +375,7 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
             freshness: 1,
             strength: 1,
             total: 1,
+            affinityMeasured: true,
           },
         },
       ],

@@ -371,3 +371,29 @@ docs/decisions/0178-public-api-surface-gate.md` はどちらも「費用」と�
 - [ADR 0178](./0178-public-api-surface-gate.md) —— 🔴 反例。偽陽性を承知で門にした実例。
 - [ADR 0200](./0200-adr-renumber-warns-when-titles-need-fixing.md) / [ADR 0214](./0214-release-candidates-lists-not-judges.md) / [ADR 0216](./0216-north-star-shipped-only-measurement.md) —— 同じ線を独立に採った実例。
 - [ADR 0251](./0251-release-follow-up-notice-not-a-gate.md) / [ADR 0252](./0252-release-changelog-section-is-a-publish-gate.md) —— 決定3 の個別適用（0252 は明確、0251 は弱い）。
+
+## 🔴 訂正の追記（2026-09-23）—— `:182` / `:207` / `:249` の略記を、着地元の番号へ揃える
+
+> **⚠ この追記は、自動化された担い手（クローンのマネージャーから切り出された worker セッション）のものである。**
+> **⛔ オーナー本人の判定ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。⟹ **この追記を「オーナーが決めた」と読まないこと。**
+
+⛔ **本節より上は1バイトも書き換えていない**（ADR 0223 決定1）。
+
+**何が壊れているか**: [Issue #505](https://github.com/takecchi/mnemora/issues/505) の一族
+（[ADR 0250](./0250-machines-detect-humans-confirm-and-write.md) /
+[ADR 0234](./0234-bake-no-numbers-into-tools-and-artifacts.md) 等）は、
+「[ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) の決定N を
+着地させた ADR X」を `ADR X 決定N` と縮めて書く癖が体系的に生じている。⛔ **これは略記であり、
+着地先 ADR 自身が同じ番号の決定を持つとは限らない。**
+
+- `:182`「ADR 0234 決定9」—— [ADR 0234](./0234-bake-no-numbers-into-tools-and-artifacts.md)
+  自身の決定は1〜4であり、決定9は無い（決定9は ADR 0223 のものであり、0234 はその着地先）。
+  正しくは **ADR 0223 決定9（ADR 0234 で着地）**。
+- `:207` / `:249`「ADR 0250 決定2」—— [ADR 0250](./0250-machines-detect-humans-confirm-and-write.md)
+  は自分の決定2を持つが（h1 が「ADR 0223 決定2 の射程を `AGENTS.md` へ広げる」と名乗る通り、
+  それは ADR 0223 決定2 の射程を広げたもの）、**同じ番号で `ADR 0250 決定2` と書くと**、
+  「ADR 0223 決定2」を指しているのか「0250 が自前で足した決定2（線の中身）」を指しているのかが
+  曖昧になる。この2箇所はどちらも前者（ADR 0223 決定2 そのもの）を指す文脈である。
+  正しくは **ADR 0223 決定2（ADR 0250 で着地）**。
+
+⛔ **本文 `:182` / `:207` / `:249` は書き換えない。** 検算のためにここへ書き残す。
