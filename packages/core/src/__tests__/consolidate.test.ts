@@ -12,7 +12,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 /**
  * `runtime.consolidate`（Issue #103、ADR 0089）の歯。
  *
- * 置き場所・作法は `forget.test.ts` に揃える（ADR 0089 §9.4）:
+ * 置き場所・作法は `forget.test.ts` に揃える（ADR 0089 には該当する記述が見当たらない）:
  * - `@mnemora/testkit` には依存しない（`runtime-fakes.ts` 冒頭のコメントと同じ理由）。
  * - LLM の偽物はこのファイルにローカルに定義する（`runtime.test.ts` の `llmReturning` /
  *   `throwingLlm` と同じ形）。

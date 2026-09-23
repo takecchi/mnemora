@@ -4197,7 +4197,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     // 8. 統合先は既に作られている——途中で supersede が打ち切られても outcome は変わらない
-    // （ADR 0089 §3 手順8）。
+    // （ADR 0089 決定5）。
     return {
       outcome: "consolidated",
       nothingReason: null,

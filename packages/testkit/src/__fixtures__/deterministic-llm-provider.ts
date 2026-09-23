@@ -20,7 +20,7 @@ import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } fro
  * ⚠ **既存の extraction / consolidation 経路のふるまいは1ミリも変えていない**——下の分岐は
  * 「まず extraction の形を試し、通ればそのまま返る。通らなければ consolidation の形を試す」
  * という元のコードパスをそのまま保ち、どちらも通らなかった場合にだけ reflection の形を試す
- * **新しい分岐を足しただけ**である（ADR 0089 §9.3 と同じ形の拡張）。
+ * **新しい分岐を足しただけ**である（ADR 0089 決定8 と同じ形の拡張）。
  */
 export class DeterministicLLMProvider implements LLMProvider {
   async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
@@ -47,7 +47,7 @@ export class DeterministicLLMProvider implements LLMProvider {
       return extractionParsed.data;
     }
 
-    // ADR 0089 §9.3: extraction の形にマッチしなかった場合だけ、統合の形を決定的に試す。
+    // ADR 0089 決定8: extraction の形にマッチしなかった場合だけ、統合の形を決定的に試す。
     // 渡された Memory の content を連結した userText を、そのまま統合結果の content として
     // 返す——意味を持たせない決定的な stub である（`deterministic` 層の役割はあくまで
     // 配線・契約の検査。AGENTS.md「provider は3層ある」参照）。
