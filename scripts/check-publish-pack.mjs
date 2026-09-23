@@ -142,7 +142,7 @@ console.log(
  * （grep 可能にするため。ADR 0259「決定C」）。
  *
  * 「いま見た${N}パッケージ」は `PUBLISH_TARGETS` から動的に作る——数を直書きしない
- * （ADR 0234 決定9・AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。
+ * （ADR 0223 決定9（ADR 0234 で着地）・AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。
  */
 const SCOPE_CAVEAT_MARKER = "⚠ この門が見ていない範囲:";
 
