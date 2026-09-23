@@ -72,7 +72,7 @@ repos/takecchi/mnemora/branches/main/protection/required_status_checks` の
 `contexts` に逐語で入っている）、変えると required check が「見つからない」
 状態になる（branch protection 側の設定変更はオーナー領分）。**訂正は
 ジョブ名の直上のコメントに積んである**（同ファイル、`example-chat:` の直下）。
-経緯は [ADR 0273](./docs/decisions/0273-required-check-context-name-is-frozen-annotate-dont-rename.md)。
+経緯は [ADR 0274](./docs/decisions/0274-required-check-context-name-is-frozen-annotate-dont-rename.md)。
 
 **provider は4層ある**（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)が
 `deterministic`/`recorded`/`openai` の3層を、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)

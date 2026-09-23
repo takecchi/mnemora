@@ -305,7 +305,7 @@ jobs:
     #     が「no-key」理由で `recorded` を選ぶ——「擬似物」ではない
     #     (`AGENTS.md`「⚠『実 API を叩かない』は『擬似物で走る』と同じではない」、
     #     下の compare ステップのコメント参照)。
-    # ⟹ 直せるのは名前ではなく名指しの精度のほうである、という判断と経緯は ADR 0273。
+    # ⟹ 直せるのは名前ではなく名指しの精度のほうである、という判断と経緯は ADR 0274。
     name: examples/chat (本物の Postgres + pgvector、擬似 provider)
     runs-on: ubuntu-latest
     # roadmap.md 段階7の完了条件: 「サンプルアプリが observe → recall の往復を実演し、
