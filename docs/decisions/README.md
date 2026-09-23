@@ -295,5 +295,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0269](./0269-port-interface-doc-correspondence-sweep.md) | `Runtime` 以外の port interface（`MemoryStore` など）も、`docs/architecture.md` §5 の写しが実体とずれている — どちらが正本かは決めない（Issue #604） | **提案 (2026-09)** |
 | [0270](./0270-runtime-method-count-bake-detection-tooth.md) | `Runtime` の非中核メソッド「件数」が生きた文書へ焼き込まれることを検出する歯を足す — 値ではなく形を見る（ADR 0269 引き受けた負債） | **提案 (2026-09)** |
 | [0271](./0271-extraction-candidate-subject-id-overrides-observation.md) | 抽出候補ごとに `subjectId` を持てるようにし、候補の値が observation の値より優先する（Issue #608 項目①） | **提案 (2026-09)** |
+| [0272](./0272-runtime-method-count-notation-sweep.md) | `Runtime` の非中核メソッド件数を検出する歯を、表記の軸だけ広げる（漢数字・「N つ」等）——主語の錨は外さない（ADR 0270 引き受けた負債、Issue #606 の材料） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
