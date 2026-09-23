@@ -242,6 +242,29 @@ repos/takecchi/mnemora/actions/permissions/workflow` → `{"default_workflow_per
 ——required を増やす判断は branch protection の変更そのものであり、オーナー領分
 だからである（`docs/autonomy.md` §3「してはいけないこと」）。
 
+#### ⚠ いま何が守っていて、何が守っていないか
+
+**【実測 2026-09-23】required contexts は6本であり、本 ADR が足した歯はそこに入っていない。**
+そして**恒久的に生えた新しいジョブ名も無い**——決定5 で足した観測ジョブは、実測した
+あと同じ PR の中で削除した（`git diff origin/main...HEAD -- .github/workflows/` が空で
+あることで確かめられる）。
+
+⚠ **ただし、その観測ジョブは一度だけ走っており、その名前は GitHub の check-run の
+履歴に残っている**（commit `3a3126b`、名前は
+`required status checks の宣言と branch protection を突き合わせる（観測。非 required。ADR 0277）`
+——⚠ **番号も古い**）。**branch protection の UI は、最近の check-run に現れた名前を
+required の候補として出す。**⟹ **repo のファイルからは消えていても、UI からは
+しばらく required に *追加できる* 状態である。**
+
+⟹ **これを望まないなら、そう決めておく必要がある**（決定として書くか、
+`.github/required-status-checks.json` に「入れない」と明記するか）。
+⛔ **本 ADR はそこまで決めていない。**⟹ 🔴 **決めるのはオーナーの領分である**
+——required を増やすことは branch protection の変更そのものだからである
+（`docs/autonomy.md` §3「してはいけないこと」）。
+
+⛔ **この歯を required に入れても、決定5 の実測（`GITHUB_TOKEN` は protection を
+読めない）は変わらない。**⟹ 入れれば `undetermined`（exit 2）を返し続ける門になる。
+
 ---
 
 ## 検討して採らなかった案
