@@ -50,18 +50,21 @@ describe("引用の取り出し（入れ子の鉤括弧に対応する）", () =
 });
 
 describe("⭐ 陽性対照 —— 既存の `anchorExistsInTarget` が落とす形を、この歯は捕まえる", () => {
-  // 現物から出た形。`AGENTS.md:361` は
+  // 現物から出た形。AGENTS.md の見出し
   // `#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-...md) が反例`
+  // ⚠ 当初（PR #639）はここで `anchorExistsInTarget` が `false` を返し、この歯は段2で当てていた。
+  // それは `stripMarkdownDecoration` がリンクを外さない穴であり、その穴を塞いだので
+  // いまは段1（`anchorExistsInTarget`）で当たる。⟹ 「穴がある」を正解として固定しないこと。
   const target =
     "#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例";
   const quote = "🔴 線は引けない — ADR 0178 が反例";
 
-  it("🔴 既存は「原典に無い」と判定する（markdown リンクを外さないため）", () => {
-    expect(anchorExistsInTarget(quote, target)).toBe(false);
+  it("⭕ 既存もリンクを外して当てるので「在る」と判定する", () => {
+    expect(anchorExistsInTarget(quote, target)).toBe(true);
   });
 
-  it("⭕ この歯はリンクを外して当てるので「在る」と判定する", () => {
-    expect(quoteExistsInAgentsMd(quote, target)).toEqual({ exists: true, stage: 2 });
+  it("⭕ この歯は段1（既存）で当てる", () => {
+    expect(quoteExistsInAgentsMd(quote, target)).toEqual({ exists: true, stage: 1 });
   });
 
   it("⭕ 入れ子作法で括弧が変わった形も当たる（原典 `「検出」` / 引用 `『検出』`）", () => {

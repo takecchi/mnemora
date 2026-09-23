@@ -365,6 +365,35 @@ describe("findAdrAnchorCitations + anchorExistsInTarget（fixture）", () => {
       ).toBe(true);
     });
 
+    it("引用先が markdown リンク `[表示](url)` を含んでいても、表示文字で一致すれば拾う（target 側）", () => {
+      // 実地の例: AGENTS.md の見出し `#### 🔴 線は引けない — [ADR 0178](...) が反例` を、
+      // ADR 0278 は「🔴 線は引けない — ADR 0178 が反例」と引く（PR #639 の陽性対照）。
+      expect(
+        anchorExistsInTarget(
+          "🔴 線は引けない — ADR 0178 が反例",
+          "#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例",
+        ),
+      ).toBe(true);
+    });
+
+    it("引用側が markdown リンクを含んでいても、表示文字で一致すれば拾う（anchor 側）", () => {
+      expect(
+        anchorExistsInTarget(
+          "🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例",
+          "#### 🔴 線は引けない — ADR 0178 が反例",
+        ),
+      ).toBe(true);
+    });
+
+    it("リンクを外しても表示文字が違えば false のまま（url の中身では一致させない）", () => {
+      expect(
+        anchorExistsInTarget(
+          "線は引けない — ADR 0179 が反例",
+          "#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0179-foo.md) が反例",
+        ),
+      ).toBe(false);
+    });
+
     it("記法を揃えても中身が違えば false のまま（ニックネーム/言い換えは実在しないと判定する）", () => {
       // 実地の例: 複数の ADR が「ADR 0008「無いには種類がある」」という形で ADR 0008 を
       // 指すが、これは ADR 0008（見出し「「無い」を分類して返す」）の趣旨を要約した
