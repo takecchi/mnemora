@@ -1,4 +1,4 @@
-# ADR 0276: `adr-renumber.mjs` は、`ADR NNNN / MMMM` という略記の連なりで書き換えられずに残った参照を検出する — 書き換えの射程は広げない
+# ADR 0277: `adr-renumber.mjs` は、`ADR NNNN / MMMM` という略記の連なりで書き換えられずに残った参照を検出する — 書き換えの射程は広げない
 
 - **状態**: 提案 (2026-09-23)
 - **日付**: 2026-09-23
@@ -366,7 +366,7 @@ AssertionError: expected [ Array(1) ] to deeply equal []
 - 【実測】`pnpm exec prettier --check` / `pnpm exec eslint` — 変更した3ファイル
   （`scripts/adr-renumber-lib.mjs` / `scripts/adr-renumber.mjs` /
   `scripts/__tests__/adr-renumber-lib.test.mjs`）とも緑。
-- 【実測】`node scripts/adr-renumber.mjs --next` → `0276`（`origin/main` の ADR 数
+- 【実測】`node scripts/adr-renumber.mjs --next` → `0276`（⚠ **これは仮番号を取った時点の出力である。**その後 `main` 側で別の PR が 0276 を取ったため、マージ直前の `adr-renumber.mjs` が本 ADR を **0277 へ付け替えた** ——ADR 0179 が設計どおりに働いた実例であり、⭐ **本 ADR が足した検知は、この付け替えで1件も発火しなかった**〔連なりの2番目以降に旧番号 `0276` を含む箇所が無かったため〕）（`origin/main` の ADR 数
   265、他のリモートブランチ24本、open な PR 3本の ADR 主張を見た上での楽観的な
   次の番号。**この ADR のファイル名の番号はこの実測を根拠にした仮番号であり、
   マージ直前に `adr-renumber.mjs` の既定動作が確定させる**——ADR 0179 の設計通り）。
