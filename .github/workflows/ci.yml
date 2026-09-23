@@ -528,7 +528,7 @@ jobs:
             --baseline examples/chat/compare-baseline.json \
             >> "$GITHUB_STEP_SUMMARY"
 
-      - name: 'omitted' の stage 集合が基準値から動いたら、PR に申告を要求する（Issue #403）
+      - name: "compare の omitted の stage 集合が基準値から動いたら、PR に申告を要求する（Issue #403）"
         # 🔴 これは「落とす門」ではなく「**申告を強制する門**」である。
         # `stage` 集合が動く理由には「退行」と「意図した仕様変更」の両方が在り、
         # 機械にはその2つを区別できない ⟹ AGENTS.md「⚠ 偽陽性率に上限を置けない検査は
