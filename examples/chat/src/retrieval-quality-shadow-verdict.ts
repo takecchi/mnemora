@@ -1,6 +1,6 @@
 /**
  * `retrieval-quality-regression.postgres.test.ts`(ADR 0227)と*並走*させる、
- * MRR / hit@1 の閾値判定を切り出した純関数(Issue #572「段1」、ADR 0274)。
+ * MRR / hit@1 の閾値判定を切り出した純関数(Issue #572「段1」、ADR 0275)。
  *
  * **これは門ではない。**このモジュールが返すのは「合否」ではなく「合否*相当*の値」
  * であり、呼び出し側(`__tests__/retrieval-quality-shadow-verdict.postgres.test.ts`)は
@@ -37,7 +37,7 @@
  * 実測順位のベクトル(`1,1,2,6,1,1,2`)や probe 件数(7)を書き写したものではなく、
  * **人(この場合はクローン)が下した「この基準で判定する」という決定そのもの**である。
  * 実測値の写しと決定した基準は別物だ、という区別は
- * [ADR 0274](../../../docs/decisions/0274-retrieval-quality-shadow-verdict-stage1.md)
+ * [ADR 0275](../../../docs/decisions/0275-retrieval-quality-shadow-verdict-stage1.md)
  * に明記してある——ここでは繰り返さない。
  *
  * ⛔ **probe の件数(7)は焼き込まない。**`SHADOW_HIT1_MIN` の分母は、呼び出し側が
@@ -47,7 +47,7 @@
  * ### ⚠ この判定がまだ答えていないこと
  *
  * - **測ったのは合成ノイズに対する偽陽性であって、「正当な変更」に対する偽陽性ではない**
- *   ([ADR 0274](../../../docs/decisions/0274-retrieval-quality-shadow-verdict-stage1.md)
+ *   ([ADR 0275](../../../docs/decisions/0275-retrieval-quality-shadow-verdict-stage1.md)
  *   「測定の射程」)。
  * - **n=7 のままである**——`hit@1` が 4/7 → 3/7 へ動く「1つ分の余裕」を、この関数の
  *   `SHADOW_HIT1_MIN = 3` は明示的に飲み込んでいる。ADR 0088 §2.1 / ADR 0033 §3 の
