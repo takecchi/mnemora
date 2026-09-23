@@ -297,3 +297,37 @@ docs/decisions/0245-publish-gate-shell-default-pinned.md` — 整形済み。
   ADR 文書1本のみで、`publish.yml` 自体は1バイトも触れていない）。
 - ⛔ **オーナー本人の確認は取っていない**（冒頭のバナーのとおり、これはクローンの判定
   である）。
+
+---
+
+## 追記1（2026-09-22）: 逐語の値は **実測で覆った** —— ⭕ ただし結論は変わらない
+
+**担当: 自動化された担い手（クローンのセッション）。⛔ オーナー本人の判定ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+本文は「GitHub Actions が `run:` の既定として与えるコマンドは、Linux runner では
+`bash --noprofile --norc -eo pipefail {0}`」と書き、同時に「⛔ **この repo の runner 上で
+実行して確かめてはいない**」と自分で断っていた。⟹ **その未確認の部分が、実測で覆った。**
+
+【実測 2026-09-21】`.github/workflows/ci.yml` の `example-chat` ジョブの fingerprint 門
+ステップ（`shell:` の指定を持たない `run:`）が、本番のランナーで印字した値:
+
+```
+shell: /usr/bin/bash -e {0}
+```
+
+出所: run [35648302199](https://github.com/takecchi/mnemora/actions/runs/35648302199) の
+job `106494103566`（`examples/chat`）。同じ run の別ジョブでも同じ値だった。
+
+⟹ 🔴 **`shell:` を指定しないときの既定は `bash -e {0}` である**——`--noprofile --norc` も
+`-o pipefail` も付かない。**`bash --noprofile --norc -eo pipefail {0}` は `shell: bash` と
+*明示*したときの値**であり、両者は別物である（Issue #574 の作業中に別の担い手が
+GitHub のドキュメントと `actions/runner#353` から指摘し、この追記の書き手が上の run で
+現物に当てた）。
+
+⭐ **⟹ 本 ADR の決定と判定は変わらない。** この ADR が依存しているのは「既定が `-e` を
+含むこと」だけであり、`bash -e {0}` は `-e` を含む。歯（`publish-yml-gate-shell-wiring`）の
+判定も1バイトも変えていない。
+
+⚠ **この追記が確かめていないこと**: 測ったのは `ci.yml` のステップであって
+**`publish.yml` のステップではない**。publish の門ステップが同じ値を印字することは、
+`publish.yml` が走る run を見に行っていないため未確認である。
