@@ -157,8 +157,13 @@ API キーは要らない——**実 API が返した埋め込みの記録を再
 - **順位を実際に決めているのは `similarity` ただ1項である**
   （[ADR 0109](./docs/decisions/0109-which-score-terms-actually-rank.md)）。
   スコアは5項あるが、**このベンチでは残り4項が順位を動かしていない。**
-- **probe 7件は意図して凍結されている。**時間項を定数に保つための統制条件であり
-  （[ADR 0058](./docs/decisions/0058-measure-the-time-term-in-a-separate-arm.md) §1.4）、
+- **probe 7件は意図して凍結されている。**時間項を定数に保つ統制条件（既存 probe に時刻を
+  書き込まない）は [ADR 0058](./docs/decisions/0058-measure-the-time-term-in-a-separate-arm.md) §1.4
+  が置いたもので、1件も足さない・変えない扱いは
+  [ADR 0227](./docs/decisions/0227-fixed-retrieval-probe-gold-presence-gate.md) の「決定」節の2番が
+  敷いている。件数を足すとカセットを実 API で録り直すことになり、課金と、過去の実測との
+  比較の系列が切れることを伴う
+  （[ADR 0276](./docs/decisions/0276-retrieval-quality-shadow-verdict-stage1.md)「検討して採らなかった案」の案1）。
   gold/distractor の14件は変更しない。
   **⟹ ゴールデンセットを増やすときは、この集合を書き換えず別の集合を作る**（ADR 0094 がその形）。
 
