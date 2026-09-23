@@ -487,7 +487,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **この数え方は思いつきではなく、2026-09-16 に実際に採ったものである**——[Issue #284](https://github.com/takecchi/mnemora/issues/284) の棚卸しが「**型と文書が揃っていても、それを書くコードが1行も無いなら『在る』と数えていない**」という4欄（設計文書 / 型 / 実装 / 歯）の判定を導入し、[#283](https://github.com/takecchi/mnemora/pull/283) / [#290](https://github.com/takecchi/mnemora/pull/290) の着地判定でもそのまま使った。
 
-**「物差しが緑のまま」の中身**: `compare` の⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）。判定は `scripts/compare-summary-lib.mjs` が持ち、**①`mnemoraShareOfNaiveChars` が基準値より増加 ②`factStatementSurvived` が `true`→`false`** のどちらかで赤くなる。🔴 **ただし「赤ではない」は「退行が無い」ではない**——実測と基準値で `turnCount` の集合が食い違うと、門は退行を判定せず**「判定していない」**で終わる（[ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md) 決定5 / [Issue #477](https://github.com/takecchi/mnemora/issues/477)）。⛔ **これを緑と同じ顔で読まないこと。**⚠ **この門の存在が、v1.0 の残作業の順序を決めている**（§7.5）。
+**「物差しが緑のまま」の中身**: `compare` の⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）。判定は `scripts/compare-summary-lib.mjs` が持ち、**①`mnemoraShareOfNaiveChars` が基準値より増加 ②`factStatementSurvived` が `true`→`false`** のどちらかで赤くなる。🔴 **ただし「赤ではない」は「退行が無い」ではない**——実測と基準値で `turnCount` の集合が食い違うと、門は退行を判定せず**「判定していない」**で終わる（[ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md) 決定3・決定5 / [Issue #477](https://github.com/takecchi/mnemora/issues/477)）。⛔ **これを緑と同じ顔で読まないこと。**⚠ **この門の存在が、v1.0 の残作業の順序を決めている**（§7.5）。
 ### 7.3 ⛔ この日付は「門」ではない —— **警報**である
 
 ⚠ **追記（2026-09-17）— この節の日付は、`v1.0.0` をいつ出すかというオーナーの決定

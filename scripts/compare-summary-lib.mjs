@@ -82,7 +82,7 @@
  * 母集合の正体は `examples/chat/src/compare.ts` の `DEFAULT_COMPARE_SEQUENCE`(12点)
  * だが、それは TypeScript であり `scripts/*.mjs` から素直に import できない。
  * ⟹ **引かない。** 下限は上の2集合から取る(件数をこのファイルに書かない。
- * ADR 0215 決定4 と同じ「下限を実測側の集合から取る」形)。
+ * ADR 0215 決定1・案D と同じ「下限を実測側の集合から取る」形)。
  */
 
 const REQUIRED_TOP_STRING_FIELDS = ["llmMode", "embeddingMode"];
