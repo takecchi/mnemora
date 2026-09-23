@@ -362,7 +362,7 @@ describe("buildCorrectionReason — winner ラベル（pending/both_active/corre
     expect(reason).toContain("winner=corrected");
   });
 
-  it("score.total は載せない(ADR 0238 決定1)", () => {
+  it("score.total は載せない(ADR 0238)", () => {
     const reason = buildCorrectionReason({
       discovery,
       chosenRecallRank: 2,

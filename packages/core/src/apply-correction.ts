@@ -63,7 +63,7 @@ export interface ApplyCorrectionInput {
   resolution?: ContestedResolution;
   /**
    * `markContested`/`resolveContested` の**両方**に、`opts.reason` としてそのまま渡す
-   * （ADR 0238 決定2「同じ文字列を渡す」をこの口でも保つ）。
+   * （ADR 0238「同じ文字列を渡す」をこの口でも保つ）。
    *
    * ⛔ **この口は監査理由を自動生成しない。** 呼び出し側が {@link buildCorrectionReason}
    * を使って組み立てた文字列（または任意の自由文）をそのまま渡す——`applyCorrection`
@@ -159,7 +159,7 @@ export interface CorrectionReasonInput {
  * - `resolution.kind === "supersede"` → `winnerId === correctingId` なら `"correcting"`、
  *   そうでなければ `"corrected"`。
  *
- * ⚠ **`score.total` は載せない**（ADR 0238 決定1と同じ理由——スコアの閾値は ADR 0232 が
+ * ⚠ **`score.total` は載せない**（ADR 0238「score.total は載せない」と同じ理由——スコアの閾値は ADR 0232 が
  * 実測した通り「訂正すべき」と「訂正してはいけない」を分離しない。生スコアを載せると
  * 「スコアが高かったから選ばれた」という誤った説明を後から読む側に与えてしまう）。
  * スコアの実際の値は `recallId` を辿って `RecallRecord.returnedMemories` から読む。

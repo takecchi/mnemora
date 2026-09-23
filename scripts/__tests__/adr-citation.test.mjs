@@ -4,10 +4,31 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   anchorExistsInTarget,
+  classifyAdrDecisionCitation,
   findAdrAnchorCitations,
+  findAdrDecisionReferences,
+  findAdrDecisionSectionNumbers,
+  findAdrLandingClaim,
   findAdrLineNumberCitations,
   lineNumberAt,
+  normalizeForAdrDecisionReferences,
 } from "../adr-citation-lib.mjs";
+
+/**
+ * ⚠ **なぜここで文字列を組み立てるか**: この下のフィクスチャは「壊れた `ADR X 決定N` 参照」を
+ * 意図的に作るため、`"ADR"` と数字と `"決定"` を1本の文字列リテラルとして*このファイルの
+ * ソーステキストに*書きたくない——書けば、この歯自身が「生きたコード」としてこのテスト
+ * ファイルを走査したときに、フィクスチャを本物の壊れた参照として検出してしまう
+ * （このテストファイルは `scripts/__tests__/` 配下にあり、下の「🔴 本物の歯」が
+ * 実際にスキャンする対象に含まれる）。⟹ **実行時にだけ組み立て、ソースの字面には
+ * 連続した形を残さない。**
+ *
+ * @param {string} adrNumber
+ * @param {string} decisionNumber
+ */
+function cite(adrNumber, decisionNumber) {
+  return "ADR" + " " + adrNumber + " " + "決定" + decisionNumber;
+}
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -547,5 +568,383 @@ describe("🔴 移行の検算: この PR が入れたアンカーが、引用�
     expect(
       anchorExistsInTarget("この文字列はどの ADR にも実在しない架空のアンカー_QA9Z", targetText),
     ).toBe(false);
+  });
+});
+
+/**
+ * ⭐ 3つ目の歯: 「ADR X 決定N」参照の検出（`normalizeForAdrDecisionReferences` /
+ * `findAdrDecisionReferences` / `findAdrDecisionSectionNumbers` / `findAdrLandingClaim`）。
+ *
+ * ## この歯が止めるもの
+ * 1. **規則A（死んだポインタ）**: `ADR X 決定N` の X に、決定N が実在しない。
+ * 2. **規則B（曖昧な着地略記）**: X の h1 が「ADR S 決定N の射程を…へ広げる」と名乗っている
+ *    （X は S の決定N の着地先）のに、同じ番号で `ADR X 決定N` と書いている。
+ *    正しくは `ADR S 決定N`（`X` で着地、のように書く）。
+ *
+ * ## 🔴 この歯が止めないもの
+ * **番号は実在するが、引用者が帰している主張の中身が本当にその節の話かどうか**は、
+ * 逐語照合でしか見えず、この歯のスコープ外である（Issue #634 が報告している形。
+ * 詳細は `adr-citation-lib.mjs` の当該コメントと報告に書く）。
+ */
+describe("normalizeForAdrDecisionReferences（fixture）", () => {
+  it("markdown リンク記法を表示文字へ外す", () => {
+    const text = "[" + "ADR 0067" + "](./0067-x.md) 決定" + "3";
+    const { normalized } = normalizeForAdrDecisionReferences(text);
+    expect(normalized).toBe(cite("0067", "3"));
+  });
+
+  it("太字・インラインコード・打ち消し線・バックスラッシュを除去する", () => {
+    const text = "**ADR** `0067` ~決定~\\3";
+    const { normalized } = normalizeForAdrDecisionReferences(text);
+    expect(normalized).toBe(cite("0067", "3"));
+  });
+
+  it("表の `|` を空白として扱う", () => {
+    const text = "|ADR 0067|決定3|";
+    const { normalized } = normalizeForAdrDecisionReferences(text);
+    expect(normalized).toContain(cite("0067", "3"));
+  });
+
+  it("改行を含む全空白を1個の半角空白へ潰す（0234 と 決定9 が行をまたぐ実例がある）", () => {
+    const text = "ADR\n  0234\n決定9";
+    const { normalized } = normalizeForAdrDecisionReferences(text);
+    expect(normalized).toBe(cite("0234", "9"));
+  });
+
+  it("indexMap は正規化後の各文字が元テキストのどこから来たかを保つ", () => {
+    const text = "先頭\nADR 0067 決定3";
+    const { normalized, indexMap } = normalizeForAdrDecisionReferences(text);
+    const at = normalized.indexOf("ADR");
+    expect(text.slice(indexMap[at], indexMap[at] + 3)).toBe("ADR");
+  });
+});
+
+describe("findAdrDecisionReferences（fixture）", () => {
+  it("素の形を1件見つける", () => {
+    const text = "詳細は" + cite("0100", "3") + "を見ること。";
+    const hits = findAdrDecisionReferences(text);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ adrNumber: "0100", decisionNumber: "3" });
+  });
+
+  it("行番号（line）は正規化前の元テキストの行を指す", () => {
+    const text = "1行目\n2行目\n" + cite("0100", "3") + " が3行目に在る";
+    const hits = findAdrDecisionReferences(text);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].line).toBe(3);
+  });
+
+  it("[表示文字](url) のリンク記法をまたいでも見つける", () => {
+    const text = "[" + "ADR 0100" + "](./0100-x.md) 決定3 を見ること。";
+    const hits = findAdrDecisionReferences(text);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ adrNumber: "0100", decisionNumber: "3" });
+  });
+
+  it("改行をまたぐ形も見つける（🔴 実測: 素の grep では拾えない実例）", () => {
+    const text = "ADR\n0100\n決定\n3";
+    const hits = findAdrDecisionReferences(text);
+    expect(hits).toHaveLength(1);
+    expect(hits[0]).toMatchObject({ adrNumber: "0100", decisionNumber: "3" });
+  });
+
+  it("複数の参照が混在してもすべて見つける", () => {
+    const text = [cite("0100", "1"), "本文", cite("0200", "9")].join("\n");
+    const hits = findAdrDecisionReferences(text);
+    expect(hits.map((h) => `${h.adrNumber}/${h.decisionNumber}`)).toEqual(["0100/1", "0200/9"]);
+  });
+
+  it("「決定」を含まない ADR への素の言及は拾わない", () => {
+    const text = "ADR 0100 を読むこと。";
+    expect(findAdrDecisionReferences(text)).toEqual([]);
+  });
+});
+
+describe("findAdrDecisionSectionNumbers（fixture）", () => {
+  it("見出し型コンテナ（## 決定）+ ### 決定N. 見出し", () => {
+    const text = ["## 決定", "", "### 決定1. 最初の決定", "本文", "", "### 決定2. 次の決定"].join(
+      "\n",
+    );
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1", "2"]));
+  });
+
+  it("見出し型コンテナ（## 決めたこと）+ 番号だけの見出し（### N.）", () => {
+    const text = ["## 決めたこと", "", "### 1. 最初", "", "### 2. 次"].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1", "2"]));
+  });
+
+  it("見出し型コンテナ + 箇条書きの `N. `", () => {
+    const text = ["## 決定", "", "1. 最初の決定", "", "2. 次の決定"].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1", "2"]));
+  });
+
+  it("見出し型コンテナ + 表の `| N |`", () => {
+    const text = ["## 決定", "", "| N | 内容 |", "|---|---|", "| 1 | 最初 |", "| 2 | 次 |"].join(
+      "\n",
+    );
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1", "2"]));
+  });
+
+  it("🔴 罠②の回帰: 字下げした見出し（`- **決定**:` の直下に字下げした `## 決定N:`）も拾う", () => {
+    // 実地の例（0119 等）: 箇条書きラベルの直下に、字下げした見出しとして決定項目が並ぶ。
+    // ⛔ 見出し検出を `^#{2,4}` に戻すと、この字下げのせいで1つも拾えなくなる
+    // （報告済みの実測: 参照の25.4%が静かに判定不能になった）。
+    const text = [
+      "- **決定**:",
+      "",
+      "  ## 決定1: 最初の決定",
+      "",
+      "  本文がここに続く",
+      "",
+      "  ## 決定2: 次の決定",
+    ].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1", "2"]));
+  });
+
+  it("太字箇条書きラベル型コンテナ（`- **決定**:`）+ 太字段落 `**N. …**`（0060 等、古い ADR の形）", () => {
+    const text = [
+      "- **決定**:",
+      "",
+      "  **1. 最初の決定。**",
+      "",
+      "  補足の本文。",
+      "",
+      "  **2. 次の決定。**",
+      "",
+      "- **採らなかった案**:",
+      "",
+      "  | 案 | 理由 |",
+      "  |---|---|",
+      "  | 3. これは決定ではない | 却下 |",
+    ].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1", "2"]));
+  });
+
+  it("コンテナが閉じたあとの番号付きリストは数えない（無関係な章との混同防止）", () => {
+    const text = [
+      "## 決定",
+      "",
+      "### 決定1. 唯一の決定",
+      "",
+      "## 採らなかった案",
+      "",
+      "1. これは決定ではない",
+      "2. これも決定ではない",
+    ].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["1"]));
+  });
+
+  it("直接見出し型（`決定N.`）は、コンテナの外でも拾う", () => {
+    const text = ["## 文脈", "", "### 決定9. 唐突に出てくる決定", "本文"].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set(["9"]));
+  });
+
+  it("決定セクションが無ければ空集合", () => {
+    const text = ["## 文脈", "", "### 1. これは決定ではない", "", "## 引き受けた負債"].join("\n");
+    expect(findAdrDecisionSectionNumbers(text)).toEqual(new Set());
+  });
+});
+
+describe("findAdrLandingClaim（fixture）", () => {
+  it("h1 が「ADR S 決定N の射程を…へ広げる」と名乗っていれば検出する", () => {
+    const h1 =
+      "# ADR 0250: 機械には「検出」までを担わせる — " +
+      cite("0223", "2") +
+      " の射程を `AGENTS.md` へ広げる（Issue #505）";
+    expect(findAdrLandingClaim(h1)).toEqual({ sourceAdrNumber: "0223", decisionNumber: "2" });
+  });
+
+  it("名乗っていなければ null", () => {
+    const h1 = "# ADR 0234: 「焼き込んだ数字は腐る」の道具・生成物版を `AGENTS.md` へ置く";
+    expect(findAdrLandingClaim(h1)).toBeNull();
+  });
+
+  it("本文中に同じ文言があっても、h1（1行目）以外は見ない", () => {
+    const text = ["# ADR 0999: 無関係な見出し", "本文に" + cite("0223", "2") + " の射程を"].join(
+      "\n",
+    );
+    expect(findAdrLandingClaim(text)).toBeNull();
+  });
+});
+
+describe("classifyAdrDecisionCitation（fixture）", () => {
+  it("X が存在しなければ規則A（死んだポインタ）", () => {
+    expect(
+      classifyAdrDecisionCitation("9", { targetSectionNumbers: null, targetLandingClaim: null }),
+    ).toEqual({ ruleA: true, ruleB: false });
+  });
+
+  it("X の決定セクションに N が無ければ規則A", () => {
+    expect(
+      classifyAdrDecisionCitation("9", {
+        targetSectionNumbers: new Set(["1", "2", "3", "4"]),
+        targetLandingClaim: null,
+      }),
+    ).toEqual({ ruleA: true, ruleB: false });
+  });
+
+  it("X が自前の決定Nを持ち、着地先でもなければどちらの規則も違反しない", () => {
+    expect(
+      classifyAdrDecisionCitation("1", {
+        targetSectionNumbers: new Set(["1", "2"]),
+        targetLandingClaim: null,
+      }),
+    ).toEqual({ ruleA: false, ruleB: false });
+  });
+
+  it("X が同じ番号Nの着地先なら規則B（曖昧な略記）", () => {
+    expect(
+      classifyAdrDecisionCitation("2", {
+        targetSectionNumbers: new Set(["1", "2"]),
+        targetLandingClaim: { sourceAdrNumber: "0223", decisionNumber: "2" },
+      }),
+    ).toEqual({ ruleA: false, ruleB: true });
+  });
+
+  it("🔴 過剰実装への歯止め: X が『別の番号』の着地先でも、番号が違えば規則Bは立たない", () => {
+    // X = 着地先ADR。X 自身の決定1（自前）を指しているだけであり、X が
+    // 「ADR 0223 決定2」の着地先であることとは無関係——番号が違うので曖昧ではない。
+    // ⛔ ここで `targetLandingClaim` の有無だけを見て（番号の一致を見ずに）規則Bを
+    // 立てる実装に変異させると、この it が唯一赤くなる（報告の変異試験ログを参照）。
+    expect(
+      classifyAdrDecisionCitation("1", {
+        targetSectionNumbers: new Set(["1", "2"]),
+        targetLandingClaim: { sourceAdrNumber: "0223", decisionNumber: "2" },
+      }),
+    ).toEqual({ ruleA: false, ruleB: false });
+  });
+});
+
+/**
+ * 🔴 本物の歯3: 「ADR X 決定N」参照が、生きたコード・スクリプト・生きた文書のどこにも
+ * 壊れた形で残っていないこと（実物）。
+ *
+ * ## 門の射程 —— ⛔ `docs/decisions/`（ADR 本体）は対象外
+ *
+ * mnemora の ADR は**当時の記録であり本文を書き換えない**（`AGENTS.md`「採用済み ADR の
+ * 本文は書き換えない」/ ADR 0223 決定1）。⟹ **ADR 本文の誤引用を赤にすると、
+ * 「直せないものを門にする」ことになり構造的に緑にできない。**
+ * `adr-citation-lib.mjs` の他の2つの歯（行番号引用・アンカー引用）も同じ線を引いている
+ * （「生きた文書（`docs/decisions/` を除いた…）」の定義を参照）——**その先例に倣う。**
+ *
+ * ⟹ **ADR 本文の違反は、この歯を赤くしない。**代わりに件数を一覧として出力へ残す
+ * （下の2つ目の `it`）。
+ */
+describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生きたコード・生きた文書に無いこと（実物）", () => {
+  const GATED_SOURCE_EXTENSIONS = new Set([".md", ".mjs", ".cjs", ".js", ".ts", ".tsx", ".yml", ".yaml"]);
+  const EXCLUDED_DIR_NAMES = new Set([
+    "node_modules",
+    ".git",
+    "dist",
+    "build",
+    ".turbo",
+    "coverage",
+  ]);
+
+  /** 除外ディレクトリを避けつつ、対象拡張子のファイルを repo 全体から再帰的に集める。 */
+  function collectAllSourceFiles(dir, acc = []) {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (EXCLUDED_DIR_NAMES.has(entry.name)) {
+        continue;
+      }
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        collectAllSourceFiles(full, acc);
+      } else if (GATED_SOURCE_EXTENSIONS.has(path.extname(entry.name))) {
+        acc.push(full);
+      }
+    }
+    return acc;
+  }
+
+  const adrFileIndexAll = buildAdrFileIndex();
+  const adrTextCache = new Map();
+  /** @param {string} adrNumber @returns {string | null} */
+  function getAdrText(adrNumber) {
+    if (!adrFileIndexAll.has(adrNumber)) {
+      return null;
+    }
+    if (!adrTextCache.has(adrNumber)) {
+      adrTextCache.set(adrNumber, readFileSync(adrFileIndexAll.get(adrNumber), "utf8"));
+    }
+    return adrTextCache.get(adrNumber);
+  }
+
+  /**
+   * 規則A（死んだポインタ）・規則B（曖昧な着地略記）の両方を判定する。
+   * ⛔ `{決定2→0250, …}` のような対応表は持たない——両側を実行時に repo から読んで
+   * 突き合わせるだけである（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+   */
+  function classifyCitation(adrNumber, decisionNumber) {
+    const targetText = getAdrText(adrNumber);
+    return classifyAdrDecisionCitation(decisionNumber, {
+      targetSectionNumbers: targetText === null ? null : findAdrDecisionSectionNumbers(targetText),
+      targetLandingClaim: targetText === null ? null : findAdrLandingClaim(targetText),
+    });
+  }
+
+  const allFiles = collectAllSourceFiles(REPO_ROOT).map(toRepoRelative);
+  const gatedViolations = [];
+  const ungatedViolations = [];
+
+  for (const file of allFiles) {
+    const isAdrBody = file.startsWith("docs/decisions/");
+    const text = readFileSync(path.join(REPO_ROOT, file), "utf8");
+    for (const ref of findAdrDecisionReferences(text)) {
+      const { ruleA, ruleB } = classifyCitation(ref.adrNumber, ref.decisionNumber);
+      if (!ruleA && !ruleB) {
+        continue;
+      }
+      const entry = { file, line: ref.line, raw: ref.raw, ruleA, ruleB };
+      (isAdrBody ? ungatedViolations : gatedViolations).push(entry);
+    }
+  }
+
+  it("生きたコード・生きた文書に、規則A（死んだポインタ）・規則B（曖昧な着地略記）の違反が無い", () => {
+    expect(gatedViolations).toEqual([]);
+  });
+
+  it(`⛔ 門ではない一覧: docs/decisions/ 配下の ADR 本文にも同型の参照が ${ungatedViolations.length} 件見つかっている（この件数では赤くしない）`, () => {
+    // ⛔ これは歯ではない。ADR 本文は書き換えない記録なので、ここで赤くすると
+    // 「直せないものを門にする」ことになる。件数と内訳を出力へ残すためだけの it。
+    if (ungatedViolations.length > 0) {
+      console.log(
+        "docs/decisions/ 配下で見つかった「ADR X 決定N」の壊れた参照（門の対象外・訂正は追記で対応済み/対応中）:",
+        JSON.stringify(ungatedViolations, null, 2),
+      );
+    }
+    expect(Array.isArray(ungatedViolations)).toBe(true);
+  });
+
+  it("⭐ mutation guard（規則A）: 実物の ADR 本文に残る、決定セクション不在の参照を正しく拾う", () => {
+    // `docs/decisions/0278-....md` は自身の末尾の訂正追記で、0273 を指す「決定2」という
+    // 書き方を誤りだと説明しているが、⛔ 本文（訂正追記より上）は書き換えていないので、
+    // この参照そのものは repo に残り続ける——歯が生きていることの canary として使える。
+    const text = readFileSync(
+      path.join(
+        REPO_ROOT,
+        "docs/decisions/0278-architecture-section5-port-interface-correspondence-tooth.md",
+      ),
+      "utf8",
+    );
+    const refs = findAdrDecisionReferences(text).filter(
+      (r) => r.adrNumber === "0273" && r.decisionNumber === "2",
+    );
+    expect(refs.length).toBeGreaterThan(0);
+    const numbers = findAdrDecisionSectionNumbers(getAdrText("0273"));
+    expect(numbers.has("2")).toBe(false);
+  });
+
+  it("⭐ mutation guard（規則B）: 実物の ADR 本文に残る、曖昧な着地略記を正しく拾う", () => {
+    const text = readFileSync(
+      path.join(REPO_ROOT, "docs/decisions/0254-no-gate-without-a-false-positive-ceiling.md"),
+      "utf8",
+    );
+    const refs = findAdrDecisionReferences(text).filter(
+      (r) => r.adrNumber === "0250" && r.decisionNumber === "2",
+    );
+    expect(refs.length).toBeGreaterThan(0);
+    const claim = findAdrLandingClaim(getAdrText("0250"));
+    expect(claim).toEqual({ sourceAdrNumber: "0223", decisionNumber: "2" });
   });
 });

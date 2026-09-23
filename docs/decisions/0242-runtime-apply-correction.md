@@ -464,3 +464,24 @@ ADR 0134/ADR 0150 の時点で決まっている。
 見せてきた「`markContested` 直後、対が隣接して recall に出る」という実演
 （Issue #197/ADR 0134 の核心の1つ）を、`applyCorrection` 経由では二度と見せられなくなる。
 `resolution` を任意にし、2段呼び出しを明示的に許すことで、この実演を失わずに済ませた。
+
+## 🔴 訂正の追記（2026-09-23）—— `:175` の「ADR 0238 決定2」は番号付き決定を指していない
+
+> **⚠ この追記は、自動化された担い手（クローンのマネージャーから切り出された worker セッション）のものである。**
+> **⛔ オーナー本人の判定ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。⟹ **この追記を「オーナーが決めた」と読まないこと。**
+
+⛔ **本節より上は1バイトも書き換えていない**（ADR 0223 決定1「採用済み ADR の本文は書き換えない」）。
+
+**何が壊れているか**: 本文 `:175`「**両方に同じ reason を渡す**（ADR 0238 決定2）」は、
+[ADR 0238](./0238-correction-choice-rationale-in-events.md) の「決定」節（`## 決定`、単一の
+段落で番号付きの決定を持たない）ではなく、**別の見出し「## 設計で選んだこと」の
+`### 2. \`markContested\` と \`resolveContested\` に同じ文字列を渡す` 節を指している**。
+⟹ `ADR 0238 決定2` という書き方は、`ADR 0238` に実在しない番号付き決定を指しており、
+機械的な検査（`scripts/adr-citation-lib.mjs` の `findAdrDecisionSectionNumbers`）では
+「決定セクションに 決定2 が無い」と判定される。
+
+**正しい指し先**: `ADR 0238「\`markContested\` と \`resolveContested\` に同じ文字列を渡す」`
+（見出しの逐語を引用符で指す——`docs/release-v1.md` 等がすでに使っているアンカー引用の形。
+[ADR 0213](./0213-live-docs-cite-adrs-by-anchor-not-line-number.md)）。
+
+⛔ **本文 `:175` は書き換えない。** 検算のためにここへ書き残す。
