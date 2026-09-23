@@ -64,6 +64,16 @@
 **`recorded`（記録した実 API の応答の再生）**で走る——
 **鍵は要らないが、擬似物でもない。**下の4層の表で、どのジョブがどの層かを見分けること。
 
+**⚠ `.github/workflows/ci.yml` の `example-chat` ジョブの `name:`（"examples/chat
+（本物の Postgres + pgvector、擬似 provider）"）は、この段落が警告している読み違い
+そのものを名乗っている——だが**直せない**。この文字列は branch protection の
+required status check の*文脈名*であり（【実測】`gh api
+repos/takecchi/mnemora/branches/main/protection/required_status_checks` の
+`contexts` に逐語で入っている）、変えると required check が「見つからない」
+状態になる（branch protection 側の設定変更はオーナー領分）。**訂正は
+ジョブ名の直上のコメントに積んである**（同ファイル、`example-chat:` の直下）。
+経緯は [ADR 0274](./docs/decisions/0274-required-check-context-name-is-frozen-annotate-dont-rename.md)。
+
 **provider は4層ある**（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)が
 `deterministic`/`recorded`/`openai` の3層を、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)
 が4層目の `local` を導入している）。**用途で使い分けること。**

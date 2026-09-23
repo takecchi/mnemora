@@ -289,13 +289,32 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
   example-chat:
+    # 🔴🔴 ⛔ 直上の `name:` は変えない —— この文字列は branch protection の
+    # required status check の*文脈名*そのものである【実測、2026-09-23】:
+    #   gh api repos/takecchi/mnemora/branches/main/protection/required_status_checks
+    # の `contexts`（6件）に、この文字列が逐語で入っている。ここを書き換えると
+    # required check が「見つからない」状態になり、branch protection 側の設定変更
+    # （オーナー領分）が要る。
+    #
+    # 🔴 そして「擬似 provider」は、このジョブ全体の名乗りとしては不正確——ステップ
+    # ごとに層が混在している(下記、各ステップの env・コメントで実測。推測ではない):
+    #   - `test:db` / `correction` ステップ: `deterministic`(意味を持たない stub。
+    #     OPENAI_API_KEY 未設定、MNEMORA_LLM/MNEMORA_EMBEDDING の override も無し)
+    #   - `compare` ステップ: **`recorded`**(記録した実 API 応答の再生)。
+    #     `examples/chat/cassettes/compare.json` が在るため `decideProviderSource`
+    #     が「no-key」理由で `recorded` を選ぶ——「擬似物」ではない
+    #     (`AGENTS.md`「⚠『実 API を叩かない』は『擬似物で走る』と同じではない」、
+    #     下の compare ステップのコメント参照)。
+    # ⟹ 直せるのは名前ではなく名指しの精度のほうである、という判断と経緯は ADR 0274。
     name: examples/chat (本物の Postgres + pgvector、擬似 provider)
     runs-on: ubuntu-latest
     # roadmap.md 段階7の完了条件: 「サンプルアプリが observe → recall の往復を実演し、
     # omitted と usage を画面またはログに可視化する」。PR 本文「サンプルアプリ自体が
-    # 壊れていないことを CI で検査する」——LLM/Embedding は @mnemora/testkit の決定的な
-    # 擬似 provider（OPENAI_API_KEY を設定しない）で置き換えるが、DB は擬似物で
-    # 代替しない。本物の Postgres の service container に対して実行する。
+    # 壊れていないことを CI で検査する」——LLM/Embedding は既定で @mnemora/testkit の
+    # provider に置き換わる(OPENAI_API_KEY を設定しない)が、**ステップごとに層が違う**
+    # (`test:db`/`correction` は `deterministic`、`compare` は `recorded`——直上の
+    # `name:` の注記参照)。DB は擬似物で代替しない。本物の Postgres の
+    # service container に対して実行する。
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -332,11 +351,13 @@ jobs:
       # 🔑 `identifier-probes`/`consolidation-cost`/`root-gate-db-stage` と
       # **同じキー空間を意図的に共有する**(下の cache 段の `key` を参照。同じモデル
       # `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い)。
-      # ⚠ この job-level env は後段の `compare` ステップにも見えるが、`compare` は
-      # `deterministic` provider で走るため読まれない
+      # ⚠ この job-level env は後段の `compare` ステップにも見えるが、`compare` では
+      # 読まれない
       # (`examples/chat/src/providers.ts` は `embeddingMode === "local"` のときだけ
       # `LocalEmbeddingProvider` へ `cacheDir` を渡す。このジョブの `compare` は
-      # OPENAI_API_KEY 無しの擬似 provider であり `embeddingMode` は `"local"` ではない)。
+      # `embeddingMode` が `"local"` ではないため——ただし `"deterministic"` でもなく
+      # **`"recorded"`** である。以前ここは「OPENAI_API_KEY 無しの擬似 provider」と
+      # 書いていたが、それは誤りだった。下の `compare` ステップのコメント参照)。
       MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
     steps:
       - name: Checkout

@@ -297,5 +297,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0271](./0271-extraction-candidate-subject-id-overrides-observation.md) | 抽出候補ごとに `subjectId` を持てるようにし、候補の値が observation の値より優先する（Issue #608 項目①） | **提案 (2026-09)** |
 | [0272](./0272-runtime-method-count-notation-sweep.md) | `Runtime` の非中核メソッド件数を検出する歯を、表記の軸だけ広げる（漢数字・「N つ」等）——主語の錨は外さない（ADR 0270 引き受けた負債、Issue #606 の材料） | **提案 (2026-09)** |
 | [0273](./0273-architecture-section5-is-a-copy.md) | `docs/architecture.md` §5 は「写した側」である — ADR 0269 決定2 の保留に答える（Issue #604） | **提案 (2026-09)** |
+| [0274](./0274-required-check-context-name-is-frozen-annotate-dont-rename.md) | required status check の文脈名は凍結する — 腐っていても改名せず、名指しで訂正を積む | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
