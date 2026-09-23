@@ -74,6 +74,19 @@ repos/takecchi/mnemora/branches/main/protection/required_status_checks` の
 ジョブ名の直上のコメントに積んである**（同ファイル、`example-chat:` の直下）。
 経緯は [ADR 0274](./docs/decisions/0274-required-check-context-name-is-frozen-annotate-dont-rename.md)。
 
+**required status check（上の6件）が branch protection の側で実際に何を指しているかは、
+`.github/required-status-checks.json` に宣言（写し）として在り、
+`pnpm check:required-status-checks` が突き合わせる**
+（[ADR 0279](./docs/decisions/0279-required-status-checks-declaration-and-check.md)）。
+**⚠ この突き合わせは CI に繋がっていない——手で実行すること。** 理由は実測済み:
+CI の既定の `GITHUB_TOKEN` は `contents: read` / `metadata: read` しか持たず、
+`gh api repos/takecchi/mnemora/branches/main/protection` は `HTTP 403 Resource not
+accessible by integration` で失敗する（本 PR 自身の CI ジョブでの実測。詳細は
+ADR 0279）。**branch protection の設定が変わったかもしれないと疑ったら、
+自分の `gh` 認証（`gh auth status`）で手元から `pnpm check:required-status-checks`
+を実行すること。** 一致すれば exit 0、ずれていれば exit 1（どちらが正しいかは
+道具には決められない——人間が判断する）、読めなければ exit 2。
+
 **provider は4層ある**（[ADR 0051](./docs/decisions/0051-recorded-provider-cassette.md)が
 `deterministic`/`recorded`/`openai` の3層を、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)
 が4層目の `local` を導入している）。**用途で使い分けること。**
