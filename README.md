@@ -111,8 +111,14 @@ API キーは要らない——**実 API が返した埋め込みの記録を再
 | ジョブ（[.github/workflows/ci.yml](./.github/workflows/ci.yml)、`jobs.<キー>`） | 何を測るか | 埋め込み |
 |---|---|---|
 | 想起の質（[ADR 0088](./docs/decisions/0088-retrieval-quality-measured-in-ci.md)）`retrieval-quality` | 意味的関連性 probe **7件**の `hit@1` / `hit@10` / MRR | 記録の再生 |
-| 識別子・固有名詞 probe（[ADR 0094](./docs/decisions/0094-identifier-probes-local-embedding.md)）`identifier-probes` | 識別子・固有名詞 probe **12件** | `@mnemora/local-embedding`（プロセス内推論） |
+| 識別子・固有名詞 probe（[ADR 0094](./docs/decisions/0094-identifier-probes-local-embedding.md)）`identifier-probes` | 識別子・固有名詞 probe **30件**（`examples/chat/src/identifier-probe-set.ts` の `IDENTIFIER_PROBES`） | `@mnemora/local-embedding`（プロセス内推論） |
 | 統合の費用（[ADR 0101](./docs/decisions/0101-how-to-measure-whether-consolidate-moved-the-north-star.md)）`consolidation-cost` | `consolidate()` が「載る量」に効いたか | 同上 |
+
+**⚠ この表は、`ci.yml` の測定系ジョブの全部ではない。**上の3つのほかに
+`association-probes`（連想枠が想起の質を動かすか）・`archive-sweep-cost`（掃引が「載る量」/ hit@k に
+効くか）・`time-term`（時間項が順位を動かすか）・`validity`（`validAt` ゲートが候補の有無を動かすか）が
+**同じく毎 PR 走っている。**⟹ **ここに挙げていないジョブが無いとは読まないこと**——
+一覧は `.github/workflows/ci.yml` の `jobs` を直接見ること。
 
 **⚠ 行番号ではなくジョブ名（`jobs.<キー>`）で引く。**ジョブが増減すると行番号は動くが、
 ジョブ名は動かない——`.github/workflows/ci.yml` の該当ジョブを `grep -n "^  <ジョブ名>:"`
@@ -238,28 +244,47 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 ⟹ **npm から入れたままの既定の振る舞いは「聞かれたことにしか答えない」。**
 渡し方・各フィールドの既定値・渡したときの実測値は
 [packages/core/README.md](./packages/core/README.md) を見ること。
+⚠ **渡すとき、`anchorCount` だけを上げても連想の裾野は広がらない**——連想の起点は
+`RecallQuery.limit`（既定 10）の内側から取るので、`limit` が天井になる（同 README /
+[docs/recall.md](./docs/recall.md) §9.2）。
 
-### `Runtime` の残り9個 — 中核を守る3つの層
+### `Runtime` の中核5動詞以外 — 中核を守る3つの層
 
-**`Runtime` には他に9個のメソッドがある**（`tick` / `getRecall` / `reextract` / `reembed` /
-`sweepArchive` / `restoreArchived` / `purge` / `markContested` / `resolveContested`）。
-これらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ出した口**であり、
-3つに分かれる（詳細と検討過程は [ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
+**`Runtime` には、中核5動詞のほかにもメソッドがある。**⭐ **何が在るかの正本は
+`packages/core/src/runtime.ts` の `export interface Runtime` である**——⛔ **ここに個数を写さない**
+（写せば `Runtime` にメソッドが1本増えるたびに腐る。`AGENTS.md`「⚠ 数を、道具と生成物に
+焼き込まない」と [ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+それらは「6つ目の動詞」ではなく、**中核を狭く保つために別の層へ出した口**であり、
+3つに分かれる（詳細と検討過程は
+[ADR 0171](./docs/decisions/0171-five-verbs-plus-three-layers.md)）。
+
+⚠ **下の3層の列挙は、ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
+実際に `findCorrectionCandidates`（[ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md)）は
+どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
+（[Issue #605](https://github.com/takecchi/mnemora/issues/605)）。⛔ **書き込まない口**なので、
+少なくとも「是正・取り消し」（**書き込む**口）ではない。
+
+⚠ **`applyCorrection`（[ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)）も、
+どの層にも置かれていない。**ただし `findCorrectionCandidates` と同じ理由では説明できない
+——`applyCorrection` は `markContested`/`resolveContested` を呼んで実際に書き込む口である
+（ADR 0242 決定3）。**「書き込まないから」という除外は使えない**以上、どの層に当たるかは
+依然として意味の判定であり、この一覧はそれを決めていない（Issue #605）。
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない（`sweepArchive` の doc コメント自身が
   「呼び出し側が明示的にこれを呼んだときだけ走る保守操作である」と書いている）。
-- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` / `purge`）——
-  呼び出し側（人・上位のアプリケーション層・将来の自動検出）が既に下した判断
-  （矛盾の指摘・決着・復帰・完全削除）を、決められた形で書き込む口。
-  どちらが正しいかを mnemora 自身は判定しない。
+- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` /
+  `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・将来の
+  自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
+  書き込む口。どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も
+  持たない**——下の「⚠ mnemora が保証していないこと」の節を見ること。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口
   （`docs/north-star.md`「目指す姿」の3番目）。
 
 **この分類の要点は、歯止めが *どこに* 効くかである。**新しく何かを足したくなったとき、
 それが記憶そのものを動かす操作（中核5動詞と同じ性質）なら、足せない。保守・是正・説明の
 どれかに当たるなら、その層の性格に合っているかを問う——**「分類できるから足してよい」では
-ない。**3層はあくまで既存の9個を説明する後付けの整理であり、新しい口を作る免罪符には
+ない。**3層はあくまで**既に在る口**を説明する後付けの整理であり、新しい口を作る免罪符には
 しない。
 
 ### 「mnemora を使うべきか」を判定する（動詞ではない）
@@ -339,6 +364,23 @@ const recalled = await recall(ctx, { text: "..." })
 
 詳細は [docs/vision.md](./docs/vision.md) の「Tenant と Subject を混同しない」と
 [docs/architecture.md](./docs/architecture.md) §3.7。
+
+**⚠ もう1つある: 矛盾の検出も、mnemora は行わない。**
+`markContested` / `resolveContested` は **「この2件は対向する」と*既に決まっている*ものを
+書き込む口**であり（上の「是正・取り消し」）、**会話の中から矛盾を*見つける*処理は
+`@mnemora/core` に存在しない**（[ADR 0134](./docs/decisions/0134-mark-contested-explicit-operation.md)
+決定1・[Issue #197](https://github.com/takecchi/mnemora/issues/197)）。
+
+**⟹ npm から入れたままの既定の振る舞いは「訂正しても、古いほうが出続ける」。**
+古いほうを遠ざけるには、**採用側が「どの2件が矛盾しているか」を決めて
+`markContested` を呼び、決着を `resolveContested` で渡す**必要がある。
+⛔ **どちらが正しいかも、どちらが新しいかも、mnemora は判定しない。**
+
+⚠ **これは `docs/north-star.md`「目指す姿」の項目5「間違いを正すと、古いほうが先に
+出てこなくなる」が、出荷物の既定では*まだ*満たされていないということである**
+（[docs/roadmap.md](./docs/roadmap.md) §7.13）。**検出の設計は
+[PR #366](https://github.com/takecchi/mnemora/pull/366)（ADR 0185 の草案）で検討中。
+⚠ まだマージされていない。**
 
 ---
 

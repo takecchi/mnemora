@@ -14,6 +14,7 @@ import {
   ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
+  FILTERED_CONDITION_SCOPE_RELATION,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
 } from "@mnemora/core";
@@ -205,6 +206,67 @@ export interface MemoryStoreConformanceOptions {
    * ——`it.skip` にはしない。
    */
   supportsResolveContestedPair: boolean;
+  /**
+   * 本 PR: 対象の `MemoryStore` 実装が `restoreSupersededBy`（任意メソッド、
+   * `docs/memory-model.md` §11 行15「`superseded → active`」）を実装しているかどうか。
+   * **必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsPurgeMemory`/`supportsMarkContestedPair`/
+   * `supportsResolveContestedPair` と同じ判断——省略可にしない。`true` なら契約の歯
+   * （`tenant_id` + `superseded_by_id` が一致し `status='superseded'` の行だけを
+   * 対象にする、成功すると `status='active'`・`superseded_by_id=null` になる、
+   * `memory_events` に `kind='unsuperseded'` が対象件数ぶん積まれる、
+   * `status='superseded'` でない行（`archived` 等）は `superseded_by_id` が
+   * 一致していても巻き込まれない、対象0件でも例外を投げない、テナント分離）を
+   * 実行する。`false` なら `expect(store.restoreSupersededBy).toBeUndefined()` を
+   * 積極的に assert する——`it.skip` にはしない。
+   */
+  supportsRestoreSupersededBy: boolean;
+  /**
+   * Issue #515、ADR 0237: 対象の `MemoryStore` 実装が `previewRestoreSupersededBy`
+   * （任意メソッド、`restoreSupersededBy` を実際に呼ぶ**前**に群の内容を見る
+   * 読み取り専用の口）を実装しているかどうか。**必須。**
+   *
+   * `supportsRestoreSupersededBy` と**独立した**フラグである——2つは独立した
+   * 任意メソッドであり、片方だけを実装した adapter があり得る
+   * （`MemoryStore.previewRestoreSupersededBy` の doc コメント参照）。`true` なら
+   * 契約の歯（対象の選び方が `restoreSupersededBy` と完全に一致する、書き込みを
+   * 一切起こさない、`superseded` イベントの `meta.reason` を `supersededReason` として
+   * 運ぶ・無ければ `null`、対象0件でも例外を投げない、テナント分離）を実行する。
+   * `false` なら `expect(store.previewRestoreSupersededBy).toBeUndefined()` を
+   * 積極的に assert する——`it.skip` にはしない。
+   */
+  supportsPreviewRestoreSupersededBy: boolean;
+  /**
+   * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
+   * 対象の `MemoryStore` 実装が `restoreSupersededBy?`/`previewRestoreSupersededBy?`
+   * の `filter.onlyMemoryIds`（群を「1回の操作」単位に絞る任意フィルタ）を実装して
+   * いるかどうか。
+   *
+   * ⚠ **既存の同種フラグ8本（`supportsSupersedeWithNewMemories` 〜
+   * `supportsPreviewRestoreSupersededBy`）と違い、任意である。必須にしない。**
+   * [PR #524](https://github.com/takecchi/mnemora/pull/524) が
+   * `supportsPreviewRestoreSupersededBy` を必須にしたことが「`@mnemora/testkit` を
+   * 使う側に対して破壊的だった」と訂正された前例
+   * （[ADR 0237](../../../docs/decisions/0237-restore-superseded-dry-run-preview.md)
+   * 冒頭の訂正、[PR #526](https://github.com/takecchi/mnemora/pull/526)）と同じ轍を
+   * 踏まない。
+   *
+   * - `true`: 契約の歯（`onlyMemoryIds` を渡すと積集合に絞られる、省略時は従来どおり
+   *   群全体、`restoreSupersededBy?`/`previewRestoreSupersededBy?` の絞り込み結果が
+   *   一致する、テナント分離、空配列で対象0件）を実行する。
+   * - `false`: `onlyMemoryIds` を渡しても無視され、従来どおり群全体が対象になることを
+   *   積極的に assert する——`supportsRestoreSupersededBy: false` 等の「メソッド自体が
+   *   無いことを assert する」形とは違う（ここでは `restoreSupersededBy?` 自体は
+   *   存在しうるため、「フィルタが効かない」ことを確認する）。
+   * - **省略（`undefined`）**: この adapter に対してこの歯を検査していない、という
+   *   意思表示。⛔ **黙って何も登録しない、にはしない**——常に green で終わる
+   *   named `it` を1本登録し、テスト名で「検査していない」ことを明示する
+   *   （`docs/decisions/0015-root-test-gate-reports-skipped-db-tests.md` と同じ規律
+   *   ——走らなかったことと走って通ったことを、出力の上で区別できる形にする）。
+   */
+  supportsOnlyMemoryIdsFilter?: boolean;
 }
 
 /**
@@ -240,6 +302,9 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsPurgeMemory,
     supportsMarkContestedPair,
     supportsResolveContestedPair,
+    supportsRestoreSupersededBy,
+    supportsPreviewRestoreSupersededBy,
+    supportsOnlyMemoryIdsFilter,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -3785,6 +3850,671 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // restoreSupersededBy（superseded → active。本 PR、任意メソッド）
+    //
+    // `updateStatusWithEvent` に収まった `restoreArchived` とは違い、この操作は
+    // (1) 「置き換えた側の id」から群を選ぶ範囲走査であり、(2) `superseded_by_id` を
+    // `NULL` へ戻す経路が `updateStatusWithEvent` に無いため、新しい任意メソッドが要る
+    // （`MemoryStore.restoreSupersededBy` の doc コメント参照）。
+    // -------------------------------------------------------------------
+
+    if (supportsRestoreSupersededBy) {
+      it("restoreSupersededBy は status='superseded' かつ superseded_by_id が一致する行だけを active に戻し、superseded_by_id を null にし、unsuperseded イベントを積む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "restore-superseded-anchor" }),
+        );
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-a",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-b",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const now = new Date("2026-06-01T00:00:00.000Z");
+
+        const result = await store.restoreSupersededBy!(ctx, anchor.id, { at: now });
+
+        expect(new Set(result.restored.map((m) => m.id))).toEqual(new Set([a.id, b.id]));
+        for (const memory of result.restored) {
+          expect(memory.status).toBe("active");
+          expect(memory.supersededById).toBeNull();
+        }
+
+        const aAfter = await store.get(ctx, a.id);
+        const bAfter = await store.get(ctx, b.id);
+        expect(aAfter?.status).toBe("active");
+        expect(aAfter?.supersededById).toBeNull();
+        expect(bAfter?.status).toBe("active");
+        expect(bAfter?.supersededById).toBeNull();
+
+        const aEvents = await listEventsForMemory(ctx, a.id);
+        expect(aEvents.map((e) => e.kind)).toEqual(["unsuperseded"]);
+        expect(aEvents[0]?.meta).toEqual({ reason: "unsuperseded", supersededById: anchor.id });
+        const bEvents = await listEventsForMemory(ctx, b.id);
+        expect(bEvents.map((e) => e.kind)).toEqual(["unsuperseded"]);
+
+        // 置き換えた側（anchor）は一切触られない。
+        const anchorAfter = await store.get(ctx, anchor.id);
+        expect(anchorAfter?.status).toBe("active");
+        expect(await listEventsForMemory(ctx, anchor.id)).toEqual([]);
+      });
+
+      it("restoreSupersededBy に reason を渡すと meta.reason に入る", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-reason-anchor",
+          }),
+        );
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-reason-target",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        await store.restoreSupersededBy!(ctx, anchor.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+          reason: "問い合わせで必要になった",
+        });
+
+        const [event] = await listEventsForMemory(ctx, memory.id);
+        expect(event?.meta).toEqual({
+          reason: "問い合わせで必要になった",
+          supersededById: anchor.id,
+        });
+      });
+
+      it("restoreSupersededBy は status='superseded' でない行を、superseded_by_id が一致していても巻き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-guard-anchor",
+          }),
+        );
+        const progressed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-guard-progressed",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        // `superseded_by_id` が anchor を指したまま、さらに status だけが進んだ行
+        // （`purge`/`sweepArchive` 等、superseded_by_id を消さない別の遷移を経由した行）
+        // を模す。
+        await store.updateStatus(ctx, progressed.id, "archived");
+
+        const result = await store.restoreSupersededBy!(ctx, anchor.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+        });
+
+        expect(result.restored).toEqual([]);
+        const after = await store.get(ctx, progressed.id);
+        expect(after?.status).toBe("archived"); // 触られていない
+        expect(after?.supersededById).toBe(anchor.id); // 触られていない
+        expect(await listEventsForMemory(ctx, progressed.id)).toEqual([]);
+      });
+
+      it("restoreSupersededBy は別テナントの行を巻き込まない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const anchorA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "restore-superseded-tenant-anchor",
+          }),
+        );
+        const supersededA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "restore-superseded-tenant-a",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+        // 別テナントの行が、たまたま同じ id を `superseded_by_id` に持つ（FK は
+        // テナントをまたいでも成立する——`superseded_by_id` は `memories(id)` への
+        // 参照であり `tenant_id` を条件にしない）。
+        const supersededB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "restore-superseded-tenant-b",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+
+        const result = await store.restoreSupersededBy!(ctxA, anchorA.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+        });
+
+        expect(result.restored.map((m) => m.id)).toEqual([supersededA.id]);
+        const bAfter = await store.get(ctxB, supersededB.id);
+        expect(bAfter?.status).toBe("superseded"); // 触られていない
+        expect(bAfter?.supersededById).toBe(anchorA.id);
+      });
+
+      it("restoreSupersededBy は対象が無くても例外を投げない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "restore-superseded-empty-anchor",
+          }),
+        );
+
+        const result = await store.restoreSupersededBy!(ctx, anchor.id, {
+          at: new Date("2026-06-01T00:00:00.000Z"),
+        });
+
+        expect(result.restored).toEqual([]);
+      });
+    } else {
+      it("restoreSupersededBy は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.restoreSupersededBy).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // previewRestoreSupersededBy（Issue #515。restoreSupersededBy を実際に呼ぶ前に
+    // 群の内容を見る読み取り専用の口。restoreSupersededBy とは独立した任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsPreviewRestoreSupersededBy) {
+      it("previewRestoreSupersededBy は restoreSupersededBy と同じ対象を選ぶが、一切書き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-restore-anchor" }),
+        );
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-restore-a",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-restore-b",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        expect(new Set(preview.candidates.map((c) => c.memoryId))).toEqual(new Set([a.id, b.id]));
+
+        // 一切書き込んでいない——status/supersededById は不変、イベントも0件。
+        const aAfter = await store.get(ctx, a.id);
+        const bAfter = await store.get(ctx, b.id);
+        expect(aAfter?.status).toBe("superseded");
+        expect(aAfter?.supersededById).toBe(anchor.id);
+        expect(bAfter?.status).toBe("superseded");
+        expect(bAfter?.supersededById).toBe(anchor.id);
+        expect(await listEventsForMemory(ctx, a.id)).toEqual([]);
+        expect(await listEventsForMemory(ctx, b.id)).toEqual([]);
+      });
+
+      it("previewRestoreSupersededBy は対象の直近の superseded イベントの meta.reason を supersededReason として運ぶ。無ければ null", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-reason-anchor" }),
+        );
+        // `withReason` は consolidate/reextract と同じ形で作る——`active` から
+        // `updateStatusWithEvent` で `superseded` へ CAS しつつ、実際に `kind:
+        // 'superseded'` のイベントを1件積む。`withoutReason` は最初から `superseded`
+        // として作り、イベントは一切積まない——「対象は在るが由来は取れない」を
+        // 意図的に作る。
+        const withReason = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-reason-with" }),
+        );
+        await store.updateStatusWithEvent(
+          ctx,
+          withReason.id,
+          "superseded",
+          { supersededById: anchor.id, expectedStatus: "active" },
+          {
+            tenantId: ctx.tenantId,
+            memoryId: withReason.id,
+            kind: "superseded",
+            actor: { type: "system" },
+            digestSnapshot: withReason.digest,
+            meta: { reason: "consolidated" },
+          },
+        );
+        const withoutReason = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-reason-without",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        const byId = new Map(preview.candidates.map((c) => [c.memoryId, c.supersededReason]));
+        expect(byId.get(withReason.id)).toBe("consolidated");
+        expect(byId.get(withoutReason.id)).toBeNull();
+      });
+
+      it("previewRestoreSupersededBy は status='superseded' でない行を巻き込まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-guard-anchor" }),
+        );
+        const progressed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "preview-guard-progressed",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        await store.updateStatus(ctx, progressed.id, "archived");
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        expect(preview.candidates).toEqual([]);
+      });
+
+      it("previewRestoreSupersededBy は別テナントの行を巻き込まない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const anchorA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "preview-tenant-anchor" }),
+        );
+        const supersededA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "preview-tenant-a",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+        await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "preview-tenant-b",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctxA, anchorA.id);
+
+        expect(preview.candidates.map((c) => c.memoryId)).toEqual([supersededA.id]);
+      });
+
+      it("previewRestoreSupersededBy は対象が無くても例外を投げない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "preview-empty-anchor" }),
+        );
+
+        const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id);
+
+        expect(preview.candidates).toEqual([]);
+      });
+    } else {
+      it("previewRestoreSupersededBy は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.previewRestoreSupersededBy).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // onlyMemoryIds フィルタ（Issue #515 方向①、ADR 0258。restoreSupersededBy?/
+    // previewRestoreSupersededBy? の filter.onlyMemoryIds——群を操作単位に絞る任意の
+    // 積集合フィルタ）
+    //
+    // ⚠ `supportsOnlyMemoryIdsFilter` は既存の8本と違い**任意**である。3状態を
+    // 区別する（ADR 0015 と同じ規律——走らなかったことと走って通ったことを、
+    // 出力の上で区別できる形にする）。
+    // -------------------------------------------------------------------
+
+    if (supportsOnlyMemoryIdsFilter === true) {
+      if (supportsRestoreSupersededBy) {
+        it("restoreSupersededBy に onlyMemoryIds を渡すと、その積集合だけが戻る", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const anchor = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "only-ids-restore-anchor" }),
+          );
+          const a = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-restore-a",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+          const b = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-restore-b",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+          const now = new Date("2026-06-01T00:00:00.000Z");
+
+          const result = await store.restoreSupersededBy!(
+            ctx,
+            anchor.id,
+            { at: now },
+            { onlyMemoryIds: [a.id] },
+          );
+
+          expect(result.restored.map((m) => m.id)).toEqual([a.id]);
+          const bAfter = await store.get(ctx, b.id);
+          expect(bAfter?.status).toBe("superseded");
+          expect(bAfter?.supersededById).toBe(anchor.id);
+        });
+
+        it("restoreSupersededBy は onlyMemoryIds を省略すると従来どおり群全体が対象になる", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const anchor = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-restore-omit-anchor",
+            }),
+          );
+          const a = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-restore-omit-a",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+          const now = new Date("2026-06-01T00:00:00.000Z");
+
+          const result = await store.restoreSupersededBy!(ctx, anchor.id, { at: now });
+
+          expect(result.restored.map((m) => m.id)).toEqual([a.id]);
+        });
+
+        it("restoreSupersededBy に空配列の onlyMemoryIds を渡すと対象0件になる", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const anchor = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-restore-empty-anchor",
+            }),
+          );
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-restore-empty-a",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+          const now = new Date("2026-06-01T00:00:00.000Z");
+
+          const result = await store.restoreSupersededBy!(
+            ctx,
+            anchor.id,
+            { at: now },
+            { onlyMemoryIds: [] },
+          );
+
+          expect(result.restored).toEqual([]);
+        });
+      }
+
+      if (supportsPreviewRestoreSupersededBy) {
+        it("previewRestoreSupersededBy に onlyMemoryIds を渡すと、restoreSupersededBy と同じ積集合を返す", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const anchor = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "only-ids-preview-anchor" }),
+          );
+          const a = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-preview-a",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "only-ids-preview-b",
+              status: "superseded",
+              supersededById: anchor.id,
+            }),
+          );
+
+          const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id, {
+            onlyMemoryIds: [a.id],
+          });
+
+          expect(preview.candidates.map((c) => c.memoryId)).toEqual([a.id]);
+          // 書き込みは一切起きていない。
+          const aAfter = await store.get(ctx, a.id);
+          expect(aAfter?.status).toBe("superseded");
+        });
+
+        if (supportsRestoreSupersededBy) {
+          it("restoreSupersededBy と previewRestoreSupersededBy は、同じ onlyMemoryIds に対して同じ対象を選ぶ", async () => {
+            const store = await createStore();
+            const ctx: Ctx = { tenantId: "tenant-1" };
+            const anchor = await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "only-ids-parity-anchor",
+              }),
+            );
+            const a = await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "only-ids-parity-a",
+                status: "superseded",
+                supersededById: anchor.id,
+              }),
+            );
+            await store.createMemory(
+              ctx,
+              buildNewMemoryFixture({
+                tenantId: "tenant-1",
+                contentHash: "only-ids-parity-b",
+                status: "superseded",
+                supersededById: anchor.id,
+              }),
+            );
+
+            const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id, {
+              onlyMemoryIds: [a.id],
+            });
+            const now = new Date("2026-06-01T00:00:00.000Z");
+            const result = await store.restoreSupersededBy!(
+              ctx,
+              anchor.id,
+              { at: now },
+              { onlyMemoryIds: [a.id] },
+            );
+
+            expect(preview.candidates.map((c) => c.memoryId)).toEqual(
+              result.restored.map((m) => m.id),
+            );
+          });
+        }
+      }
+
+      it("onlyMemoryIds はテナントをまたいで漏らさない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const anchorA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "only-ids-tenant-anchor-a" }),
+        );
+        const supersededA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            contentHash: "only-ids-tenant-a",
+            status: "superseded",
+            supersededById: anchorA.id,
+          }),
+        );
+        // tenant-b の Memory の id を tenant-a の呼び出しへ onlyMemoryIds として
+        // 渡しても、tenant-a 側の対象には影響しない（tenant_id の等値条件が先に効く）。
+        const anchorB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({ tenantId: "tenant-b", contentHash: "only-ids-tenant-anchor-b" }),
+        );
+        const supersededB = await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            contentHash: "only-ids-tenant-b",
+            status: "superseded",
+            supersededById: anchorB.id,
+          }),
+        );
+
+        if (supportsPreviewRestoreSupersededBy) {
+          const preview = await store.previewRestoreSupersededBy!(ctxA, anchorA.id, {
+            onlyMemoryIds: [supersededA.id, supersededB.id],
+          });
+          expect(preview.candidates.map((c) => c.memoryId)).toEqual([supersededA.id]);
+        }
+      });
+    } else if (supportsOnlyMemoryIdsFilter === false) {
+      it("onlyMemoryIds フィルタは実装していない——渡しても無視され、従来どおり群全体が対象になる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const anchor = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "only-ids-unsupported-anchor",
+          }),
+        );
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "only-ids-unsupported-a",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "only-ids-unsupported-b",
+            status: "superseded",
+            supersededById: anchor.id,
+          }),
+        );
+
+        if (supportsRestoreSupersededBy) {
+          const now = new Date("2026-06-01T00:00:00.000Z");
+          const result = await store.restoreSupersededBy!(
+            ctx,
+            anchor.id,
+            { at: now },
+            { onlyMemoryIds: [a.id] },
+          );
+          expect(new Set(result.restored.map((m) => m.id))).toEqual(new Set([a.id, b.id]));
+        } else if (supportsPreviewRestoreSupersededBy) {
+          const preview = await store.previewRestoreSupersededBy!(ctx, anchor.id, {
+            onlyMemoryIds: [a.id],
+          });
+          expect(new Set(preview.candidates.map((c) => c.memoryId))).toEqual(new Set([a.id, b.id]));
+        } else {
+          // 群を選ぶメソッド自体が無い adapter——フィルタの有無を測る土台がない。
+          expect(store.restoreSupersededBy).toBeUndefined();
+          expect(store.previewRestoreSupersededBy).toBeUndefined();
+        }
+      });
+    } else {
+      // `supportsOnlyMemoryIdsFilter` を省略した adapter。
+      //
+      // ⛔ `it.skip` にしない——`it.skip` は vitest の要約で「skipped」件数に紛れ、
+      // 他の理由での skip（`maybeIt` による自動 skip・live gate 系）と区別が
+      // 付かなくなる（docs/conformance.md 参照）。代わりに、常に実行され常に緑で
+      // 終わる named it を1本登録し、**test 名の文字列そのもの**で「検査していない」
+      // ことを表す——CI のログ・vitest の出力・GitHub Actions の summary のどれを
+      // 見ても、この名前がそのまま出る。
+      it(`⚠ 未検査: supportsOnlyMemoryIdsFilter が指定されていない — adapter "${name}" に対して onlyMemoryIds フィルタの歯は検査していない`, () => {
+        expect(supportsOnlyMemoryIdsFilter).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
     // aggregateScope（docs/recall.md §5 目次帯・第3階・「スコープの外延」マネージャー決定）
     // -------------------------------------------------------------------
 
@@ -4455,6 +5185,184 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.filteredExpired.count).toBe(1);
       expect(aggregate.filteredDecayed.count).toBe(1);
       expect(aggregate.totalInScope).toBe(1);
+    });
+
+    // -------------------------------------------------------------------
+    // ⭐ 被覆の算術（Issue #352 / ADR 0174）
+    //
+    // `FilteredOmission.condition` は2群に分かれる——(甲) スコープを定義するゲートで
+    // 落ちた＝`totalInScope` の**外**（`scopeRelation: "outside_scope"`。
+    // archived/superseded/forgotten/period/expired/not_yet_valid）と、
+    // (乙) スコープ内に居るまま到達しなかった＝`totalInScope` の**内**
+    // （`scopeRelation: "within_scope"`。decayed）。
+    //
+    // **2群を名乗るだけでは、札と実際の数え方がずれても誰も気づかない。**
+    // 型（`FILTERED_CONDITION_SCOPE_RELATION`）が「decayed は within_scope」と
+    // 名乗っていても、`aggregateScope` の実装が実際にそう数えているかは別の検査を
+    // 要る——ここではその**算術**を、既知の内訳を持つ fixture で検査する:
+    //
+    //   1. (乙) within_scope の filtered 件数は `totalInScope` の**部分集合**である
+    //      （`count <= totalInScope`、かつ引くと実際に返りうる件数になる）。
+    //   2. テナント内の全件数 = `totalInScope` + Σ(`outside_scope` の filtered 件数)。
+    //
+    // 各群を1件以上踏ませる（スコープ内で減衰していないもの5件・減衰しきったもの4件・
+    // expired 3件・archived 2件・superseded/forgotten/period/not_yet_valid 各1件）。
+    // -------------------------------------------------------------------
+
+    it("⭐ 被覆の算術: within_scope(decayed) は totalInScope の部分集合、outside_scope の総和 + totalInScope = テナント全件数", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const decayGate = new Date("2026-06-01T00:00:00.000Z");
+      const validAt = new Date("2026-06-01T00:00:00.000Z");
+      const periodCutoff = new Date("2026-01-01T00:00:00.000Z");
+      const inPeriod = new Date("2026-03-01T00:00:00.000Z");
+
+      // (甲) outside_scope 群 — スコープを定義するゲートで落ちる。
+      const ARCHIVED_N = 2;
+      for (let i = 0; i < ARCHIVED_N; i += 1) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            status: "archived",
+            occurredAt: inPeriod,
+            contentHash: `coverage-archived-${i}`,
+          }),
+        );
+      }
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          status: "superseded",
+          occurredAt: inPeriod,
+          contentHash: "coverage-superseded",
+        }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          status: "forgotten",
+          occurredAt: inPeriod,
+          contentHash: "coverage-forgotten",
+        }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          occurredAt: new Date("2020-01-01T00:00:00.000Z"), // periodCutoff より前 ⟹ 外
+          contentHash: "coverage-period",
+        }),
+      );
+      const EXPIRED_N = 3;
+      for (let i = 0; i < EXPIRED_N; i += 1) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            occurredAt: inPeriod,
+            validUntil: new Date(validAt.getTime() - 1000),
+            contentHash: `coverage-expired-${i}`,
+          }),
+        );
+      }
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          occurredAt: inPeriod,
+          validFrom: new Date(validAt.getTime() + 1000),
+          contentHash: "coverage-not-yet-valid",
+        }),
+      );
+
+      // (乙) within_scope 群 — スコープ内に居るまま、到達しにくさ（decayed）で落ちる。
+      const DECAYED_N = 4;
+      for (let i = 0; i < DECAYED_N; i += 1) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            occurredAt: inPeriod,
+            decayFloorAt: new Date(decayGate.getTime() - 1000),
+            contentHash: `coverage-decayed-${i}`,
+          }),
+        );
+      }
+      // スコープ内で、減衰していない（まだ生きている）記憶。
+      const ALIVE_N = 5;
+      for (let i = 0; i < ALIVE_N; i += 1) {
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            occurredAt: inPeriod,
+            decayFloorAt: new Date(decayGate.getTime() + 1000),
+            contentHash: `coverage-alive-${i}`,
+          }),
+        );
+      }
+
+      const TOTAL_CREATED =
+        ARCHIVED_N +
+        1 /* superseded */ +
+        1 /* forgotten */ +
+        1 /* period */ +
+        EXPIRED_N +
+        1 /* not_yet_valid */ +
+        DECAYED_N +
+        ALIVE_N; // = 18
+
+      const aggregate = await store.aggregateScope(ctx, {
+        occurredAfter: periodCutoff,
+        validAt,
+        decayFloorAtAfter: decayGate,
+      });
+
+      // 前提: 各群が実際に1件以上踏まれていること（fixture がずれていないことの検算）。
+      expect(aggregate.filteredArchived.count).toBe(ARCHIVED_N);
+      expect(aggregate.filteredSuperseded.count).toBe(1);
+      expect(aggregate.filteredForgotten.count).toBe(1);
+      expect(aggregate.filteredPeriod.count).toBe(1);
+      expect(aggregate.filteredExpired.count).toBe(EXPIRED_N);
+      expect(aggregate.filteredNotYetValid.count).toBe(1);
+      expect(aggregate.filteredDecayed.count).toBe(DECAYED_N);
+      expect(aggregate.totalInScope).toBe(DECAYED_N + ALIVE_N);
+
+      // --- 1. (乙) within_scope: filteredDecayed は totalInScope の部分集合 ---
+      expect(FILTERED_CONDITION_SCOPE_RELATION.decayed).toBe("within_scope");
+      expect(aggregate.filteredDecayed.count).toBeLessThanOrEqual(aggregate.totalInScope);
+      // 引くと、実際に返りうる件数（=生きている記憶の件数）になる。
+      const aliveInScope = aggregate.totalInScope - aggregate.filteredDecayed.count;
+      expect(aliveInScope).toBe(ALIVE_N);
+
+      // --- 2. (甲) outside_scope: totalInScope + Σ(outside_scope の filtered 件数) = 全件数 ---
+      const OUTSIDE_SCOPE_COUNTS: Record<
+        "archived" | "superseded" | "forgotten" | "period" | "expired" | "not_yet_valid",
+        number
+      > = {
+        archived: aggregate.filteredArchived.count,
+        superseded: aggregate.filteredSuperseded.count,
+        forgotten: aggregate.filteredForgotten.count,
+        period: aggregate.filteredPeriod.count,
+        expired: aggregate.filteredExpired.count,
+        not_yet_valid: aggregate.filteredNotYetValid.count,
+      };
+      for (const condition of Object.keys(
+        OUTSIDE_SCOPE_COUNTS,
+      ) as (keyof typeof OUTSIDE_SCOPE_COUNTS)[]) {
+        // この等式は、各 condition が実際に "outside_scope" を名乗っている前提の上でだけ成り立つ
+        // ——`FILTERED_CONDITION_SCOPE_RELATION` の値を1つでも取り違えると、この前提が崩れる
+        // ことをまず固定してから、和を取る。
+        expect(FILTERED_CONDITION_SCOPE_RELATION[condition]).toBe("outside_scope");
+      }
+      const outsideScopeTotal = Object.values(OUTSIDE_SCOPE_COUNTS).reduce(
+        (sum, count) => sum + count,
+        0,
+      );
+      expect(aggregate.totalInScope + outsideScopeTotal).toBe(TOTAL_CREATED);
     });
 
     it("aggregateScope は notIndexed を理由ごと（pending/failed/skipped）に分けて数え、totalInScope からは除かない", async () => {

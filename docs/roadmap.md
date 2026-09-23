@@ -148,7 +148,7 @@ Phase 1 で入れた土台が、後続フェーズをどう安くしているか
 
 **⚠ 2026-09-16 追加訂正（Issue #282）: 上の表の「忘却の実処理（`decay_floor_at` を使った検索時フィルタとアーカイブ掃引）」は、束ねられた二つの機構のうち片方だけが前倒しされている。**
 
-- **アーカイブ掃引**は前倒しで実装済み（[ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md)、PR #214、2026-09-15）。`MemoryStore.archiveDecayed?`（任意メソッド）を `Runtime.sweepArchive` がそのまま素通しし、`decay_floor_at <= now()` の範囲走査で `active`/`contested` を `archived` へ倒す。**ただし `tick()`/`observe()` には配線しておらず、呼び出し側が明示的に呼んだときだけ走る**（`packages/core/src/runtime.ts` の doc コメントが「🔴 この掃引は自動では一度も走らない」と明記している）。
+- **アーカイブ掃引**は前倒しで実装済み（[ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md)、PR #214、2026-09-15）。`MemoryStore.archiveDecayed?`（任意メソッド）を `Runtime.sweepArchive` がそのまま素通しし、`decay_floor_at <= now()` の範囲走査で **`active` だけ**を `archived` へ倒す（⚠ **2026-09-17 訂正**: この行は当初「`active`/`contested`」と書いていたが、**現物は `active` のみである**——[ADR 0114](./decisions/0114-archive-sweep-for-decayed-memories.md) 決定2 が逐語で「対象は `status = 'active'` のみ。`superseded`/`contested` はこの口では触らない」と決めており、適合テストの `archiveDecayed は active 以外（contested/superseded/forgotten/既に archived）を対象にしない` が両 adapter でそれを固定している。[Issue #465](https://github.com/takecchi/mnemora/issues/465)）。**ただし `tick()`/`observe()` には配線しておらず、呼び出し側が明示的に呼んだときだけ走る**（`packages/core/src/runtime.ts` の doc コメントが「🔴 この掃引は自動では一度も走らない」と明記している）。
 - **検索時フィルタ**（本文が言う `WHERE decay_floor_at > now()` 側）は**依然として未実装のままである**。`VectorFilter.decayFloorAtAfter` という口自体は在る（`packages/core/src/interfaces/vector-store.ts`）が、`recall-runtime.ts` は「ADR 0011: `decayFloorAtAfter` は Phase 1 では読み取りフィルタに使わない」というコメントのとおり実際には値を渡していない。【実測】2026-09-16、`grep -rn "decayFloorAtAfter:" packages/core/src packages/postgres/src` はテストを除いて0件。
 
 **⟹ この行は「部分的に前倒し」である**（アーカイブ掃引は済み・検索時フィルタは未着手）。
@@ -200,7 +200,7 @@ Phase 1 で入れた土台が、後続フェーズをどう安くしているか
 | Drizzle 公式ガイドの例（`1 - cosineDistance(...)` を降順で並べる書き方）では HNSW 索引が効かない可能性がある | `EXPLAIN` で Seq Scan が出る、recall のレイテンシがデータ量に比例して悪化する | 規約として、`ORDER BY` には距離演算子の結果をそのまま昇順で書き、式にしない。`testkit` に `EXPLAIN` で索引が使われることを確認する検査を含める（段階2の完了条件と同じもの）。 |
 | `drizzle-kit push` が生成する HNSW の DDL に operator class が欠落する不具合が報告されている | `push` で作成した索引が `EXPLAIN` で使われない、または `CREATE INDEX` の operator class が想定と違う | ベクトル索引の DDL は手書きのマイグレーションで管理し、`push` に任せない。 |
 | フィルタ問題（`tenant_id` / `status` / `decay_floor_at > now()`）とスコア問題（減衰・タグ・鮮度を掛ける再スコア）を混同して対処を誤る | `hnsw.iterative_scan` を有効にしたのにスコアの取りこぼしが直らない（あるいはその逆） | 二つを明確に分けて扱う。フィルタ問題には iterative index scan と `hnsw.ef_search` の調整、スコア問題には over-fetch と段2の再スコアで対処する。片方の対処でもう片方が直ると期待しない。 |
-| pgvector のバージョン要件（iterative scan は 0.8.0 以降、CVE-2026-3172 の修正は 0.8.2） | マネージド Postgres の環境で `hnsw.iterative_scan` が使えない、または既知の脆弱性が残ったバージョンが動いている | `SELECT * FROM pg_available_extensions WHERE name = 'vector'` で各環境のバージョンを確認する運用手順をドキュメントに明記する。要件を `>= 0.8.0`、推奨を `>= 0.8.2` として明文化する。**マネージド Postgres 各社が実際に提供するバージョンは確認できていない**（§6 参照）。 |
+| pgvector のバージョン要件（iterative scan は 0.8.0 以降、CVE-2026-3172 の修正は 0.8.2） | マネージド Postgres の環境で `hnsw.iterative_scan` が使えない、または既知の脆弱性が残ったバージョンが動いている | `SELECT * FROM pg_available_extensions WHERE name = 'vector'` で各環境のバージョンを確認する運用手順をドキュメントに明記する。要件を `>= 0.8.0`、推奨を `>= 0.8.2` として明文化する。**マネージド Postgres 各社が実際に提供するバージョンは確認できていない**（§6 参照）。⭐ **`CVE-2026-3172` は実在し、内容も一致する**（**2026-09-17 訂正**。それ以前この欄は「番号自体も裏が取れていない」と書いていたが、同日 MITRE CVE Services・NVD・GitHub advisory database（`cve_id=` で引くと [`GHSA-789c-mgqf-5hwx`](https://github.com/advisories/GHSA-789c-mgqf-5hwx)）を当てて**解消した**）。⚠ **ただし `>= 0.8.2` は「既知の CVE が1つも残らない下限」ではない**——`CVE-2026-18022`（CVSS 8.8 HIGH、⚠ **32bit システムのみ**）が `0.8.6` 未満のすべてに効く。⛔ **下限を動かすかは製品判断としてここでは決めていない。** 逐語・当てた先の一覧・判断材料は [`docs/memory-model.md`「前提: pgvector のバージョン」](./memory-model.md#前提-pgvector-のバージョン)の 2026-09-17 追記にまとめた。 |
 | 「計測を見せれば行動が変わる」という前提が、実は未検証のまま採用されてしまう | `usage` を返しているにもかかわらず、呼び出し側のプロンプトが肥大し続ける | 下記「計測と抑止を混同しない」を参照。 |
 
 ### 計測と抑止を混同しない
@@ -487,8 +487,14 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **この数え方は思いつきではなく、2026-09-16 に実際に採ったものである**——[Issue #284](https://github.com/takecchi/mnemora/issues/284) の棚卸しが「**型と文書が揃っていても、それを書くコードが1行も無いなら『在る』と数えていない**」という4欄（設計文書 / 型 / 実装 / 歯）の判定を導入し、[#283](https://github.com/takecchi/mnemora/pull/283) / [#290](https://github.com/takecchi/mnemora/pull/290) の着地判定でもそのまま使った。
 
-**「物差しが緑のまま」の中身**: `compare` の⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）。判定は `scripts/compare-summary-lib.mjs` の `computeRegressions` で、**①`mnemoraShareOfNaiveChars` が基準値より増加 ②`factStatementSurvived` が `true`→`false`** のどちらかで赤くなる。⚠ **この門の存在が、v1.0 の残作業の順序を決めている**（§7.5）。
+**「物差しが緑のまま」の中身**: `compare` の⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）。判定は `scripts/compare-summary-lib.mjs` が持ち、**①`mnemoraShareOfNaiveChars` が基準値より増加 ②`factStatementSurvived` が `true`→`false`** のどちらかで赤くなる。🔴 **ただし「赤ではない」は「退行が無い」ではない**——実測と基準値で `turnCount` の集合が食い違うと、門は退行を判定せず**「判定していない」**で終わる（[ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md) 決定5 / [Issue #477](https://github.com/takecchi/mnemora/issues/477)）。⛔ **これを緑と同じ顔で読まないこと。**⚠ **この門の存在が、v1.0 の残作業の順序を決めている**（§7.5）。
 ### 7.3 ⛔ この日付は「門」ではない —— **警報**である
+
+⚠ **追記（2026-09-17）— この節の日付は、`v1.0.0` をいつ出すかというオーナーの決定
+（**§7.14**）より前に書かれたものであり、**その決定を反映していない。**
+⛔ **日付は直していない**——§7.0 の4条件（立てた日 / 満了する日 / 正は日報だという明示 /
+腐りの判定条件）を持たない日付を足さないためである。
+⟹ **この表を「いまの予定」として読まないこと。**`v1.0.0` をいつ出すかは **§7.14** が決めている。
 
 **⭐ オーナーの指示（2026-09-16、逐語）:**
 
@@ -528,6 +534,12 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 ### 7.4 充足状況（2026-09-16 再監査、現物のコードから）
 
+⭐ **追記（2026-09-17）: この表の数は訂正された** —— **在る6 / 半分1 ではなく、在る5 / 半分2 である**（項目5 が「在る」ではなく「半分」）。⛔ **以下の本文と表は、2026-09-16 にそう判定したという記録として書き換えない**（§7.0 の規律）。**訂正の中身と理由は §7.13 に書く。**
+
+⭐ **追記（2026-09-21）: 下の ⚠3 の留保は解かれた** —— **オーナー（takecchi）の決定（2026-09-19）により、項目4 の「在る」は `association`（段3.5 連想枠）が既定 off であることに依存しない。**🔴 **これはオーナーの決定であって、担い手が技術的に検証して得た結論ではない。**⛔ **以下の本文と ⚠3 は、2026-09-16 / 2026-09-17 にそう測ったという記録として書き換えない**（§7.0 の規律）。**決定の中身・出所・そして「解かれていないもの」は §7.18 に書く。**⚠ **解かれたのは ⚠3 だけである**——**⚠4（項目6 の排他性）はそのまま残っている。**
+
+⭐ **追記（2026-09-21・上の ⚠3 とは別件）: 項目2 を「在る」と数えなかった理由の3点と、項目5 の根拠欄について、後から分かったことが在る** —— ①**理由2 は理由1 の言い換えである**（「唯一の on が出荷されない」と「出荷物の既定が off」は同じ事実の裏表）⟹ **独立した根拠として数えるのは水増しである。**⛔ **偽ではない。**②**理由3 の「項目2 だけは `examples/chat` が無いと項目が立たない」は、⭐ いまは真である**——⚠ **§7.13 の時点では一度偽になっていた**（項目5 も同じ位置だった）が、**§7.15 が項目5 を「埋めた」と数えたことで戻った。**③**項目5 の根拠欄が指す呼び出しの形**（`correction-demo.ts` の `:142` `runtime.markContested` 直接呼び出し）**は、現物には無い**——ADR 0242 で `applyCorrection` 経由の2段に変わった。⛔ **以下の本文と表は書き換えない**（§7.0 の規律。⚠ **行番号のポインタも直さない**——[PR #479](https://github.com/takecchi/mnemora/pull/479) がそれをやって [PR #481](https://github.com/takecchi/mnemora/pull/481) で取り消されている）。**中身は §7.19 に書く。**⛔ **項目2 の判定（半分）も項目5 の判定も、これで動かない。**
+
 **⛔ 文書・型・ADR ではなく、「本番コード（`__tests__` / `__fixtures__` / `*.test.ts` を除く）から誰が呼んでいるか」を軸に数えた。**
 
 **⚠ この表は 05:00 JST 版（`main = 8ae7750`）を、v1.0 スコープの実装が全部着地した後に当て直したものである。**⛔ **コードを読んだのは `main = 9fcd47c` 時点である。**その後 `main` は [#344](https://github.com/takecchi/mnemora/pull/344)（`ea7b4e3`）・[#341](https://github.com/takecchi/mnemora/pull/341)（`3b1cf27`）まで進んだが、**どちらも `docs/` と `scripts/publish-targets.mjs` しか触っておらず、`packages/` と `examples/chat/src` に差分は無い** 【実測: `git diff --stat 9fcd47c..3b1cf27`】⟹ **下の判定は現在の `main` でもそのまま成り立つ。**⛔ **前版の判定をそのまま引き継いでいない**——7項目すべて、`grep -n` で呼び出しの鎖をたどり直した。**動いた行は「どちらへ動いたか」を行内に書く。**
@@ -537,9 +549,9 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 | 1 | 言ったことを、次の日も覚えている | **在る**（既定の `wall` 時計） | 書き: `runtime.ts:1802` `buildNewMemoriesForCandidates` → `extraction.ts:272` `defaultDecayStrategy.floorAt()` → `extraction.ts:311` が `NewMemory.decayFloorAt` に載せる（`strategies/reflect.ts:143` / `strategies/consolidate.ts:105` も同型）。読み: `recall-runtime.ts:344` `decayGateActive`（**既定 on の opt-out**）→ `:490` で段1の ANN へ押し下げ → `:680` で全チャンネル共通の後置 `survivesDecayGate()`（`:387`）。余裕は `strategies/decay.ts:23` `DEFAULT_DECAY_THRESHOLD = 0.05` × `interfaces/tenant-settings-store.ts:9` `DEFAULT_HALF_LIFE_HOURS = 720` ⟹ `720 × log2(1/0.05)` = **3111.79時間 = 約129.66日** 【実測: node で評価】。⭐ **05:00 版の「本物の Postgres で日をまたいで測る歯は無い」は解消した**——`packages/postgres/src/__tests__/recall-decay-cross-day.postgres.test.ts:98`（+24h で返る）/ `:146`（+約129.6日で落ちる）、[#324](https://github.com/takecchi/mnemora/pull/324) | 🔴 **`decay_clock: 'activity'` を選んだテナントでは破れる**（[#338](https://github.com/takecchi/mnemora/issues/338)、下の⚠1）。⚠ 上の歯は `DATABASE_URL` が無いと走らない |
 | 2 | 聞かれていないことを、自分から思い出す | **半分**（⛔ 動いていない） | 機構は在り、非テストの経路から実際に走る: `examples/chat/src/mnemora-path.ts:22` `DEFAULT_MNEMORA_PATH_ASSOCIATION = { maxCount: 10 }` → `:112` `queryRecall()` の `:118-119` が `opts.association` 省略時にこれを渡す → `runtime.recall()` → `recall-runtime.ts:988` 以降の段3.5。`chat`（`cli.ts:204` → `budget-demo.ts:51`）と `compare`（`compare.ts:154` → `mnemora-path.ts:135`）の両方が通り、**CI も毎回 `compare` を回す**（`.github/workflows/ci.yml:361`）。🔴 **だが `packages/core` の既定は off のまま**——`recall.ts:1104` が `association?:` の optional で既定値の代入が無く、`recall-runtime.ts:988` の `if (associationQuery !== undefined)` が off の実体。⟹ **npm から `@mnemora/core` を入れた利用者に届く既定の振る舞いは「聞かれたことしか返さない」**。on にしている唯一の呼び手 `examples/chat` は `package.json:4` で `"private": true`、`scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 6件に**入っていない** | 🔴 **下の「⛔ 項目2 を『在る』と数えなかった理由」を参照。オーナー判断が要る** |
 | 3 | なぜそれを思い出したのかを、後から説明できる | **在る**（⭐ 半分 → 在る） | `cli.ts:1503` `command === "explain"` → `:1504` `runExplain()`（`:282`）→ `:293` `runRecallExplainDemo()` → `recall-explain.ts:128` **`runtime.getRecall(ctx, recallId)`** → `runtime.ts:2463`（口の宣言は `:1205`、公開は `:3685`）→ `packages/postgres/src/memory-store.ts:1208` → `mapping.ts:265` `rowToRecallRecord`。内訳は**毎回実計算して書く**: `recall-runtime.ts:1484` `createRecall()` の `:1497-1503` が `finalMemories` から `score` / `retrievedVia` / `companionOf` / `associationOf` を写し、`score` の出どころは `strategies/scoring.ts` の `total = affinity × decay × tagMatch × freshness × strength`（定数の詰め物ではない）。`recall-explain.ts:132` は存在しない `recallId` で `null` 経路も実演する。[#328](https://github.com/takecchi/mnemora/pull/328) | ⚠ `digest` は `recalls` に載らない（`recall-runtime.ts:1493-1496`）⟹ `recall-explain.ts:134-142` が `memoryStore.get` を併用している。**`Runtime` だけでは本文が戻らない**。⚠ `mapping.ts:276` は `returned_memories` を zod 検証せず素通し |
-| 4 | 使われない記憶が、静かに遠ざかる | **在る**（⭐ 半分 → 在る） | 呼び手が**2本**（どちらもテスト外）: ①`cli.ts:217`（`runChat()` の会話ループ）②`compare.ts:161`（**北極星の主測定そのもの**）。どちらも `mnemora-path.ts:181` `reportMemoryUsage()` → `:190-194` `runtime.observe(ctx, {kind:"memory_usage", recallId, usedMemoryIds})` → `runtime.ts:2251` → `:2147` `handleMemoryUsage` → `:2162` `memoryStore.recordUsage`（`packages/postgres/src/memory-store.ts:943`、`ON CONFLICT DO NOTHING` で冪等）→ `:2171-2173` `memoryStore.reinforce`（`memory-store.ts:866`）が `last_reinforced_at` と `decay_floor_at` を進める（`:926-937`、巻き戻しを WHERE 句で防ぐ）。効き先は2つ: 段2のスコア（`recall-runtime.ts:726` → `strategies/scoring.ts:215` `computeDecay`）と、段1の忘却ゲート（`recall-runtime.ts:490` / `:680`）。[#332](https://github.com/takecchi/mnemora/pull/332) | ⚠ **効いているのは「最後に使われた時刻」の1点だけ**——`recall_usages` は**書き込み専用**で、SELECT する本番コードが0件（`memory-store.ts:952` の INSERT のみ）⟹ 使用*回数*は順位にも掃引にも効かない。⚠ `strength` は候補集合の上で**常に 1** で、`total` の乗算因子として順位にゼロ寄与（`reinforce` の SET 句に `strength` が無い）。内訳に印字されるので効いて見える |
+| 4 | 使われない記憶が、静かに遠ざかる | **在る**（⭐ 半分 → 在る） | 呼び手が**2本**（どちらもテスト外）: ①`cli.ts:217`（`runChat()` の会話ループ）②`compare.ts:161`（**北極星の主測定そのもの**）。どちらも `mnemora-path.ts:181` `reportMemoryUsage()` → `:190-194` `runtime.observe(ctx, {kind:"memory_usage", recallId, usedMemoryIds})` → `runtime.ts:2251` → `:2147` `handleMemoryUsage` → `:2162` `memoryStore.recordUsage`（`packages/postgres/src/memory-store.ts:943`、`ON CONFLICT DO NOTHING` で冪等）→ `:2171-2173` `memoryStore.reinforce`（`memory-store.ts:866`）が `last_reinforced_at` と `decay_floor_at` を進める（`:926-937`、巻き戻しを WHERE 句で防ぐ）。効き先は2つ: 段2のスコア（`recall-runtime.ts:726` → `strategies/scoring.ts:215` `computeDecay`）と、段1の忘却ゲート（`recall-runtime.ts:490` / `:680`）。[#332](https://github.com/takecchi/mnemora/pull/332) | 🔴 **判定「在る」は `association`（段3.5 連想枠）が既定 off であることに依存している**（[#402](https://github.com/takecchi/mnemora/issues/402)、下の⚠3）。⚠ **効いているのは「最後に使われた時刻」の1点だけ**——`recall_usages` は**書き込み専用**で、SELECT する本番コードが0件（`memory-store.ts:952` の INSERT のみ）⟹ 使用*回数*は順位にも掃引にも効かない。⚠ `strength` は候補集合の上で**常に 1** で、`total` の乗算因子として順位にゼロ寄与（`reinforce` の SET 句に `strength` が無い）。内訳に印字されるので効いて見える |
 | 5 | 間違いを正すと、古いほうが先に出てこなくなる | **在る**（⭐ 半分 → 在る） | `cli.ts:1507` `command === "correction"` → `:1508` `runCorrection()`（`:337`）→ `:346` `runCorrectionDemo()`（`correction-demo.ts:111`）→ `:142` `runtime.markContested` → `:146` `runtime.resolveContested(..., {kind:"supersede", winnerId})` → `runtime.ts:2970` の `:3063-3070` が敗者を `status:"superseded"` + `supersededById` にし、`packages/postgres/src/memory-store.ts:1518` `resolveContestedPair` が **CAS + 1トランザクション**で書く。**recall に効く経路**: `recall-runtime.ts:474`（ANN）/ `:550`（語彙）/ `:1057`（連想枠）の filter がいずれも `status: ["active","contested"]` 固定 ⟹ **`superseded` は段1の SQL から外れ、候補にすら上がらない**。訂正前の `contested` 段階では `:851-856` の段3（`contradiction_resolution`）が対向を `limit` 無視で強制同伴する（`:884` `retrievedVia:"mandatory_companion"`）——`correction-demo.ts:94` の `limit: 1` は**この段3 を実際に発火させるため**（既定 `limit: 10` だと2件とも自然に枠内に入り、段3 が一度も鳴らない）。消えた側は `omitted` に出る（`memory-store.ts:1142` `filteredSuperseded` → `recall-runtime.ts:1284-1290`）。[#331](https://github.com/takecchi/mnemora/pull/331) | ⚠ **デモは Memory 2件の箱庭**——`CORRECTION_SCENARIO.turns`（filler 込み12発話）は本番コードから一度も使われず、`observe()` するのは `original` / `correction` の2件だけ（`correction-demo.ts:116-127`）。⚠ **`correction` サブコマンドに CI の歯が無い**（`ci.yml` に `run correction` が0件）⟹ `cli.ts:1507` の dispatch 行が消えても CI は緑。歯が守るのは `test:db` が拾う `__tests__/correction-demo.postgres.test.ts` だけで、そこも `omitted` を一度も assert していない |
-| 6 | 知らないことを、知らないと言える | **在る**（⛔ 在る → 半分 → **在るへ戻した**） | `Omission.kind` **11種すべてに本番の生成箇所が在る**（種ごとに数え直した）。網羅の歯も在る: `examples/chat/src/compare.ts:193` `formatOmittedSummary` の `switch` が11種を列挙し `:226` `const exhaustive: never = o;`（[#325](https://github.com/takecchi/mnemora/pull/325)）。⭐ **そして 2026-09-16 に [#351](https://github.com/takecchi/mnemora/pull/351)（[Issue #329](https://github.com/takecchi/mnemora/issues/329) / ADR 0173）が、この項目を半分にしていた唯一の穴を塞いだ** —— `condition:"decayed"` は `recall-runtime.ts:1434` で **段5の集約から** push されるようになり、`archived`(`:1371`) / `superseded`(`:1383`) / `forgotten`(`:1391`) / `period`(`:1399`) / `expired`(`:1410`) / `not_yet_valid`(`:1418`) と**同じ場所・同じ形**になった。⟹ **既定経路（ANN 1本）で鳴る。**`countKind` も `"exact"`（`packages/postgres/src/memory-store.ts:1211`、in-memory は `:908`）で、従来の `lower_bound` より1段強い。後置の計数は消えた（`decayFilteredCount` の grep が0件）⟹ **二重計上しない** 【実測: `main = 0b47e84` で `grep` して数え直した】 | ⚠ `condition` の9値のうち `tenant` と `taxonomy` は本番の生成箇所が **0件**（`recall.ts:578` の1件は doc コメントで、「値は在るが生成されない」と自ら明記している）。⛔ **これは項目6 を下げない**——`tenant` は越境そのものが不可視であるべきで、生成したら漏洩である。`taxonomy` は次元が未実装。どちらも `packages/core/src/__tests__/unreachable-union-values.test.ts` が機械的に見張っている |
+| 6 | 知らないことを、知らないと言える | **在る**（⛔ 在る → 半分 → **在るへ戻した**） | `Omission.kind` **11種すべてに本番の生成箇所が在る**（種ごとに数え直した）。網羅の歯も在る: `examples/chat/src/compare.ts:193` `formatOmittedSummary` の `switch` が11種を列挙し `:226` `const exhaustive: never = o;`（[#325](https://github.com/takecchi/mnemora/pull/325)）。⭐ **そして 2026-09-16 に [#351](https://github.com/takecchi/mnemora/pull/351)（[Issue #329](https://github.com/takecchi/mnemora/issues/329) / ADR 0173）が、この項目を半分にしていた唯一の穴を塞いだ** —— `condition:"decayed"` は `recall-runtime.ts:1434` で **段5の集約から** push されるようになり、`archived`(`:1371`) / `superseded`(`:1383`) / `forgotten`(`:1391`) / `period`(`:1399`) / `expired`(`:1410`) / `not_yet_valid`(`:1418`) と**同じ場所・同じ形**になった。⟹ **既定経路（ANN 1本）で鳴る。**`countKind` も `"exact"`（`packages/postgres/src/memory-store.ts:1211`、in-memory は `:908`）で、従来の `lower_bound` より1段強い。後置の計数は消えた（`decayFilteredCount` の grep が0件）⟹ **二重計上しない** 【実測: `main = 0b47e84` で `grep` して数え直した】 | 🔴 **判定「在る」は `Omission.kind` の**網羅性**についてであり、`memories` と `omitted` の**排他性**は含んでいない——`association` を on にすると同じ記憶が両方に載る**（下の⚠4）。⚠ `condition` の9値のうち `tenant` と `taxonomy` は本番の生成箇所が **0件**（`recall.ts:578` の1件は doc コメントで、「値は在るが生成されない」と自ら明記している）。⛔ **これは項目6 を下げない**——`tenant` は越境そのものが不可視であるべきで、生成したら漏洩である。`taxonomy` は次元が未実装。どちらも `packages/core/src/__tests__/unreachable-union-values.test.ts` が機械的に見張っている |
 | 7 | どれだけ載せるかを、使う側が決められる | **在る** | ①`recall-runtime.ts:238-245` `effectiveTokenBudget()` に**既定値を入れる分岐が存在しない**（`budget` が無ければ `undefined`）。段4本体も `:1165-1166` `let keptUnits = allUnits; if (budget) {...}` ⟹ 未指定なら切り詰めブロックに入らない。trace は `:1197-1200` が `budgetApplied: false` を外へ出す ②指定すれば `:1180-1186` で後ろから削り `:1192` `budget_dropped` に出る ③連想枠は**予算の内側**で、`:1163` `[...units, ...associationUnits]` の後ろに連結されるので**最初に落ちる** ⭐ **05:00 版の「対比デモが `__tests__` の外で、消えても CI が緑」は解消した**——`examples/chat/src/__tests__/budget-demo.postgres.test.ts` が3ケースを実 Postgres で検査し、`ci.yml:334` の `test:db` が拾う。特に `budget-demo.ts:87-94` `withoutBudgetHasNoAppliedTruncation` が「隠れた既定上限が無い」を名指しで検査する。[#330](https://github.com/takecchi/mnemora/pull/330) | ⚠ **`estimateRecallFootprint` は本番の呼び手が0件**（`recall-footprint.ts:454`。呼ぶのは同ファイル `:606` の `compareWithFullLog` と、テスト2本だけ）⟹ #284 の数え方では**この関数は「在る」に数えていない**。項目7 が立っているのは `budget` 経路であって footprint ではない。⚠ **「量」の隠れ上限は無いが「件数」の既定は在る**（`:329` `DEFAULT_RECALL_LIMIT` = 10）。⚠ `budget: {}` は `budgetApplied: true` と名乗るが1件も落とさない |
 
 **在る6（項目1・3・4・5・6・7）/ 半分1（項目2）/ 無い0。**⭐ **2026-09-16 中の修正で、項目6 が半分から在るへ戻った**（[#351](https://github.com/takecchi/mnemora/pull/351)）。⛔ **残る半分は項目2 だけであり、それはコードの残量ではない**（下の「項目2 を『在る』と数えなかった理由」）。
@@ -549,6 +561,10 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 **⚠1 項目1 の例外（[#338](https://github.com/takecchi/mnemora/issues/338)）は、コード上妥当である** 【実測】。`interfaces/tenant-settings-store.ts:139` `DEFAULT_HALF_LIFE_RECALLS = 720` × `strategies/decay.ts:138` `activityFloorAt()` の `:143` ⟹ 床は **`baseSeq + 3112`**（`ceil(720 × log2(1/0.05))` を node で評価）。時計を進めるのは **recall 1回につき +1**（`recall-runtime.ts:1508` → `packages/postgres/src/memory-store.ts:1186-1199` が `createRecall` と同一トランザクションで `activity_seq + 1`）。`decayClock === "activity"` のとき `recall-runtime.ts:388` は**壁時計の軸を一切見ない** ⟹ **そのテナントで recall が 3112回起きた時点で、壁時計で何時間しか経っていなくても沈む**（1日3112回 = 約27.8秒に1回）。⛔ **既定は `wall` なので、既定の利用者には影響しない。**到達経路は `cli.ts:1500` / `:1522` → `decay-clock-options.ts:28` `parseDecayClockFlag` → `compare.ts:150` / `archive-sweep-cost.ts:260` `writeDecayClock` のみ。**`3112` を検算する歯はリポジトリ全体で0件**（`grep -rn "3112" --include=*.ts` が0ヒット）。
 
 **⚠2 この再監査で新しく見つけたもの（既存の issue に無かった）: 連想枠が忘却ゲートと `validAt` ゲートを両方すり抜けていた。**⭐ **[Issue #347](https://github.com/takecchi/mnemora/issues/347) として起票し、[#348](https://github.com/takecchi/mnemora/pull/348)（ADR 0172）で塞いだ**（2026-09-16 着地）。**見つけた時点の姿**: 連想用 `vectorStore.search()` の filter が `tenantId` / `status` / `subjectId` / `excludeProvenanceKinds` / `occurredAfter` / `occurredBefore` **だけ**で、`decayFloorAtAfter` / `decayFloorSeqAfter` / `validAt` を渡さず、後置ループも `survivesDecayGate()` を呼んでいなかった ⟹ **減衰しきった記憶と、期限切れ／未発効の記憶が、連想枠から黙って返りうる状態だった。**⛔ **しかも [#336](https://github.com/takecchi/mnemora/pull/336) 以降これは既定経路だった。**⭕ `status` は渡っていたので `superseded` は戻らず、項目5 は無事だった。**塞いだ形**: 3欄を足すのではなく、ゲートの欄を `recall-runtime.ts:472` の `gateVectorFilterFields` に集約し、段1（`:575`）と段3.5（`:1128`）が同じものを撒く。後置も両段で共有する（`:744`/`:757` と `:1211`/`:1212`）。⟹ **ゲートを増やす手順が `RecallScope` → `gateVectorFilterFields` → `aggregateScope` の3点セットに定まった**（ADR 0173 の「ADR 0172 との合流」節）。⚠ **[#334](https://github.com/takecchi/mnemora/pull/334) と [#336](https://github.com/takecchi/mnemora/pull/336) が同じ日に着地して噛み合っていなかった**という経緯は、ADR 0172 に記録してある。🔴 **⚠ そしてこの節は当初「修正は ⭐門の基準値を動かす」と書いていた——外れた。**実測では `compare` の12行が基準値と**バイト単位で一致**した（手元3回 + CI 3 head）。理由は、`compare` のシナリオが `validFrom`/`validUntil` を使わず、既定 `halfLifeHours=720` で**ベンチ実行中に1件も減衰しきらない**ため、**落とすべきものが0件**だったからである。⟹ **外した予測を消さずに残す**（§7.0 の規律）。
+
+**⚠3 項目4 の判定「在る」は、`association`（段3.5 連想枠）が既定 off であることに依存している** 【実測 2026-09-17、[Issue #402](https://github.com/takecchi/mnemora/issues/402)】。⭐ **上の根拠の鎖に段3.5 が一行も出てこないのは書き漏らしではない——既定 off なら鎖に要らないからである。**⛔ **既定が動けば要る。**⚠2 が塞いだのはゲートの側であり、**こちらは順位の側で、まだ開いている。****なぜ開くか**: 段3.5 は**意図的にスコア閾値の外**に置かれている（`recall-runtime.ts:1042` 以降の冒頭コメントが逐語で「連想の候補は定義上クエリに当たらないのだから、段1に置くと必ず段2の `below_threshold` で落ちる。『スコアに関係なく候補へ足す』経路は既に段3（必須の同伴取得）が持っており、連想はその一般化である」と書いている）。`partitionByThreshold` の呼び出しは `recall-runtime.ts:805` の**1箇所だけ**で対象は段1の候補 `scored` のみ、**段3.5 は `:1042` 以降で閾値分割より後に走る。**[ADR 0172](./decisions/0172-association-passes-decay-and-validity-gates.md)「段3.5 の候補は段2の閾値分割を通らない」がこの非対称を逐語で自認している——「段3.5 の候補は段2の閾値分割を通らない（`associationUnits` は閾値の後に連結される）」。🔴 **⟹ 窓が開く** 【実測】: **段2が `below_threshold` で棄却したその記憶が、連想枠 on では `retrievedVia: "association"` で返る。**窓は「**その記憶が段2から落ちた日 → 129.658日**」。上端は永続化された `decay_floor_at` からの直読（`720 × log2(1/0.05)` 時間）。下端は `total = affinity × decay × tagMatch × freshness × strength`（`strategies/scoring.ts:272`）で決まり、⚠ **`occurredAt` 未指定・未 reinforce という既定では `freshness` が `decay` と同じ値になるため実質 `similarity × decay²`** ⟹ similarity 1.0 で約49.8日 / 0.7 で約42.1日（⛔ **`decay` 単独が閾値を割る約99.7日ではない**——この逆算は実測前に崩れた）。**独立した2つの場（`packages/core` の fake ストア / 本物の Postgres + pgvector）で全点再現した。****発生率** 【実測、合成コーパス217件・クエリ35本、[#402 の追記](https://github.com/takecchi/mnemora/issues/402#issuecomment-5701589039)】: **連想枠 on の返却の 47.5%（294/619）が窓の中の記憶**で、`maxCount=10` の席の **84%**（294/350）がそれで埋まった。off 325件 → on 619件と返却量が約90%増え、**その増分は全件が窓の中だった。**⛔ **合成コーパスの数字であり「実運用でこうなる」ではない**（射程の断り書きは #402 の追記に分けて書いてある）。⭐ **そして、次に読む人にいちばん効く切り分けはこれである——破れているのは順位（スコア閾値）の側だけで、忘却ゲートの側は破れていない。**⚠2 が集約した `gateVectorFilterFields` は段1と段3.5 に同一のものが撒かれ、後置 `survivesDecayGate` も両段に在る ⟹ **実測でも 140日では off / on どちらでも返らず `omitted` が完全一致し、復活した294件のうち129日超は0件だった。[#348](https://github.com/takecchi/mnemora/pull/348) は完全である。**⟹ ⭐ **既定を on にする提案を見たら、まずここを読むこと。**「費用がかかる」ではなく「**出荷既定を on にすると正典項目4 が出荷物の中で破れる**」という形の話である（2026-09-17、この実測を受けて [#386](https://github.com/takecchi/mnemora/pull/386) をマージしない判断が下され、draft へ戻された）。
+
+**⚠4 項目6 にも、段3.5 を勘定に入れていない箇所が1つある（⚠3 と同じ形）** 【実測 2026-09-17】。上の根拠は「`Omission.kind` 11種すべてに本番の生成箇所が在る」という **kind 単位の網羅性**であり、**これは段3.5 が無くても真である**（`stage_skipped` / `over_limit` は段2側にも独立した生成箇所を持つ——`recall-runtime.ts:535` / `:549` / `:833`）。⛔ **だが `omitted` の契約は kind の網羅性だけではない。**[docs/recall.md](./recall.md) の `RecallResult` の定義は `omitted` を逐語で「**返らなかったものの分類**」と書いている。🔴 **実測**: `association` を on にすると、**同一の `recall()` の中で、同じ `memoryId` が `result.memories`（`retrievedVia: "association"`）と `result.omitted`（`below_threshold` の `nearMisses`）の両方に載る**——窓の中の全点（実測では45〜129日）で再現した。**なぜそうなるか**: 段2は `recall-runtime.ts:805` の閾値分割の直後に `below_threshold` を確定させ、`docs/recall.md` の規約どおり**以降の段は「これを積み上げるだけ」で取り直さない**。連想枠（`:1042` 以降）が候補へ足し直すのはその**後**であり、`:1096` の除外集合は「既に返る集合（`withinLimit` + `companions`）」を除くだけで、⛔ **`omitted` に既に載った記憶は除かない。**⟹ **返した記憶について「閾値未満で落ちた」と名乗り続ける。**⭐ **これは正典項目6「『見つからなかった』と『探していない』を、同じ顔で返さない」の、もう一つの読みに当たる**——**落ちていないものを落ちたと名乗るのは、分類が嘘をつくことである。**⚠ **段2の三分割そのものは破れていない**（`scored = passed + below_threshold + score_not_comparable`、[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）——破れているのは `memories` と `omitted` の排他性である。⛔ **そしてその排他性は、どの ADR も明示的に決めていない**（`recall.ts` の `BelowThresholdOmission` の doc にも `Omission` の総論にも、排他性の言明が無いことを現物で確認した）。⟹ **既定 off である限りこれは起きない**——連想枠だけがこの経路を作る。**既定を on にするなら、①`omitted` から取り下げる ②連想の除外集合に `omitted` を足す ③排他性を契約として持たないと明示する——のどれかを決める必要がある。**⛔ **どれを選ぶかはここでは決めない**（測っただけである）。
 
 #### ⛔ 項目2 を「在る」と数えなかった理由
 
@@ -666,7 +682,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **北極星の問い2 に (乙) を当てても落ちない。**⛔ **これは本節の判定ではなく、[ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) が既に実施済みである**——逐語「**成立する。**`markContested` は明示的な呼び出しでしか動かない。…**呼ばなければ、今日と全く同じ挙動が続く**」。
 
-**⭐ そして (乙) は既に実践されている。**`examples/chat/src/archive-sweep-cost.ts:290` が `runtime.sweepArchive()` を実際に呼んでおり、**ADR の上書きを一度も必要としていない。**
+**⭐ そして (乙) は既に実践されている。**`examples/chat/src/archive-sweep-cost.ts` の `const sweepResult = await options.runtime.sweepArchive(ctx, {` が実際に呼んでおり、**ADR の上書きを一度も必要としていない。**
 
 **⚠ ただし (甲) を採るなら、話は別である。**その場合は **ADR の上書きという費用が要り、本 §7 の予定はそれを数え落としている**——§7.9 の延びる条件にも入っていない。⛔ **この警告は、いま (乙) を採るからといって消さないこと。**将来 (甲) を検討する人が、同じ調査をゼロからやり直さずに済むようにするためである。
 
@@ -753,6 +769,8 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **⭐門（[ADR 0133](./decisions/0133-compare-baseline-and-gate.md) 決定3）は退行ゼロ。** `origin/main` の CI run 35053218224（`9fcd47c`、ジョブ `examples/chat`）の成果物 `compare.json` と `examples/chat/compare-baseline.json` を突き合わせると、**12行すべてで `mnemoraShareOfNaiveChars` が基準値と完全一致し、`factStatementSurvived` は12行とも `true`** 【実測】。判定は `scripts/compare-summary-lib.mjs:246-269` の `computeRegressions` で、①`mnemoraShareOfNaiveChars > 基準値`（**epsilon 無しの厳密比較。許容幅はゼロ**）②`factStatementSurvived` が `true`→`false`、の片側2条件のみ。
 
+⚠ **2026-09-18 訂正（⛔ 上の段落は書き換えない。当時の記録である）**: 上が名指ししている `computeRegressions` は、**いまの現物には無い**——[ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md)（[PR #493](https://github.com/takecchi/mnemora/pull/493)）が廃し、門の判定を **退行あり / 退行なし / 判定していない** の3値にした（上に付いている行番号つきのソース引用も、同じ理由でもう別の関数を指している）。⭐ **①②の2条件で赤くなること自体は、いまの現物でも変わっていない**【実測 2026-09-18 JST、`main` = `3d30402`】。⛔ **変わったのは「赤ではない」の読み方である**——`turnCount` の集合が食い違うと門は退行を判定しないので、**「赤ではない」＝「退行が無い」とは言えない**（§7.2）。⟹ ⭐ **当時の【実測】（12行すべてが基準値と一致）そのものは、この訂正では動かない。**
+
 ⚠ **「緑」の余裕は「一致」であって「下回っている」ではない。**⟹ `examples/chat` の出力を1文字でも増やす変更は、その場で赤くなる。
 
 ⚠ **⭐門の基準値には触れていない**（本 PR は `docs/roadmap.md` の1ファイルのみ）。
@@ -774,7 +792,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 | # | 何か | 判定 | 根拠 |
 |---|---|---|---|
-| [#340](https://github.com/takecchi/mnemora/issues/340) | footprint 推定器の検算の余裕（許容 2.5%） | ⭕ **止めない** | **内部の歯だけの話で、利用者に見える挙動は何も変わらない。**破れても赤くなるのは `example-chat` ジョブ（`ci.yml:334` が拾う `examples/chat/src/__tests__/recall-footprint-baseline.test.ts:76` `ACCURACY_TOLERANCE = 0.025`）であり、⭐門とは別の歯である。⚠ **依頼時の「2.304%」は ADR 0170 前の `mnemoraChars = 4558` で計算された値**で、現在の基準値（322行 = 4547）では **約 2.068%**。⛔ **ただしこの 2.068% は担い手が推定器を別実装して出した数字であり、CI が出力した数字ではない**（`pnpm install` をしていないので本物の歯は走らせていない）⟹ **確かめていない。** |
+| [#340](https://github.com/takecchi/mnemora/issues/340) | footprint 推定器の検算の余裕（許容 2.5%） | ⭕ **止めない** | **内部の歯だけの話で、利用者に見える挙動は何も変わらない。**破れても赤くなるのは `example-chat` ジョブ（`ci.yml:334` が拾う `examples/chat/src/__tests__/recall-footprint-baseline.test.ts:76` `ACCURACY_TOLERANCE = 0.025`）であり、⭐門とは別の歯である。⚠ **依頼時の「2.304%」は ADR 0170 前の `mnemoraChars = 4558` で計算された値**で、現在の基準値（322行 = 4547）では **約 2.068%**。⚠ **依頼時点では「担い手が推定器を別実装して出した数字であり、CI が出力した数字ではない ⟹ 確かめていない」と書いていた。** 【実測】2026-09-17、**`main` が `12abe48` の時点で測った**（⚠ **「測ったと書いてある」と「いまの実装を測ってある」は別である。この行の数字を引くときは、`main` がここから動いていないかを見ること**）。**本物の歯（`recall-footprint-baseline.test.ts`）を3回走らせて3回とも緑（23 tests）**であること、および `@mnemora/core` の `calibrateRecallFootprint` / `estimateRecallFootprint`（歯が呼ぶのと同じ公開関数）で12行を計算し直して **322行 = 2.068%** が3回とも桁まで一致することを確認した（**この歯は DB も API キーも要らない**——commit 済みの `compare-baseline.json` を読む純粋計算である）。⟹ **数字は確かめた。**⚠ ただし `compare-baseline.json` の `mnemoraChars = 4547` 自体を live な `compare` 実行で再現したわけではない（ADR 0170 / PR #336 の記録に依拠している）。詳細は [ADR 0166](./decisions/0166-recall-footprint-association-term.md) の「2026-09-17 訂正」節。 |
 | [#345](https://github.com/takecchi/mnemora/issues/345) | 語彙チャンネルに、#339 と同族のタイブレーク欠陥 | ⭕ **止めない**（⚠ 既知の問題として出す） | 欠陥の形は現物で確認した——`packages/postgres/src/lexical-store.ts:138` は `ORDER BY coverage DESC, rank DESC` で、**決定的な最終キーが無い**（ANN 側が ADR 0170 で採ったのは「距離 → `recorded_at DESC` → `memory_id`」の3段）。**だが既定の recall は ANN 1本**（`packages/core/src/recall.ts:1130` `DEFAULT_RECALL_CHANNELS = ["ann"]`）⟹ **⭐門もこの経路を踏まない。**影響は語彙チャンネルを明示的に選ぶ呼び手に限られる。⚠ **実際に非決定が起きることを誰も測っていない**（issue 自身が明記。担い手も測っていない）。⚠ **⭐門が緑であることは、この欠陥について何も言っていない。** |
 | [#342](https://github.com/takecchi/mnemora/issues/342) | 破壊的変更2件が、根拠 ADR に破壊性の記載が無いまま着地 | ⭕ **止めない** | **破壊性そのものは現物で確認した**——`packages/core/src/runtime.ts:1205` `getRecall(...)`（`?` 無し＝必須）と `packages/testkit/src/tenant-settings-store-conformance.ts:48` `supportsDecayClock: boolean`（同）。自前実装している側は型エラーになる。⛔ **しかし利用者への告知の穴は [#341](https://github.com/takecchi/mnemora/pull/341) の着地で閉じた**——`CHANGELOG.md:42`（項目5）・`:43`（項目6）が両方を挙げ、**根拠 ADR に破壊性の言及が無いことまで ⚠ 付きで名指ししており**、`docs/migration-v1.md:178`（§5）・`:202`（§6）に移行手順が在る。ADR 0165 の誤記載も #341 で訂正済み。⟹ 残るのは ADR 0161 への追記という**文書の負債**であり、v1.0 を止めない。⚠ **「2件」は v0.1.9→main の18コミットしか見ていない範囲の数字で、総数ではない**（issue 自己申告）。 |
 | [#338](https://github.com/takecchi/mnemora/issues/338) | `activity` 時計で項目1 が破れる | ⭕ **止めない**（⚠ 既知の制約として出す） | **逆算は式の上で正しい**（§7.4 の ⚠1）。⛔ **だが既定は `wall` である**——`packages/core/src/interfaces/tenant-settings-store.ts:125` `DEFAULT_DECAY_CLOCK: DecayClock = "wall"`、`packages/postgres/migrations/0015_decay_activity_clock.sql:92` の `NOT NULL DEFAULT 'wall'`、`readDecayClock`（`:293`）も `getDecayClock` を持たない adapter では `'wall'` へ倒す。⟹ **既定の利用者には今日壊れているものが無い。**到達には `decay_clock` を明示的に `activity`/`either` へ変え、かつ recall 頻度が高いことが要る。⚠ **`3112` は逆算であって実測ではなく、実運用の recall 頻度の数字は1つも無い。**⚠ **守る歯も、採用者が境界に気づく仕組みも無い。** |
@@ -800,6 +818,8 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 ⚠ **修正の見当は小さい**（filter に3欄を足し、後置ループで `survivesDecayGate()` と `validAt` を見る）**が、⭐門の `mnemoraShareOfNaiveChars` を動かしうる**——連想枠から返る件数が減る方向なので**基準値より小さくなる側**であり、`computeRegressions` は片側判定（増加のみ赤）なので**赤にはならない**が、基準値の更新は要る。⟹ §7.5 の「直列化が要る」の対象である。
 
+⚠ **2026-09-18 訂正（⛔ 上の段落は書き換えない。当時の記録である）**: `computeRegressions` は [ADR 0222](./decisions/0222-compare-gate-judges-only-when-turncount-sets-match.md) が廃した。⭐ **ただし「片側判定（増加のみ赤）」という性質は、いまの現物でも変わっていない**【実測 2026-09-18 JST、`main` = `3d30402`】⟹ **「赤にはならない」という上の見立ての根拠は、名前が変わっても生きている。**（外れたのは別の箇所である——すぐ下の 🔴 を見ること。）
+
 ⚠ **これに対応する issue 番号は確かめていない**（既存の issue に同じ指摘が無いことを `#329`・`#340`・`#342`・`#345`・`#338`・`#337` の本文について確認しただけで、**全 issue を検索していない**）。
 
 ⭐ **結果（2026-09-16、同日中）: [#348](https://github.com/takecchi/mnemora/pull/348) が塞いだ。**⛔ **3欄を足す形では採らなかった**——「足すだけでは、次にゲートが増えたときまた同じ形で漏れる」ため、ゲートの欄を `recall-runtime.ts:472` の `gateVectorFilterFields` に集約し、段1（`:575`）と段3.5（`:1128`）が同じものを撒く形にした。後置も両段で共有する。歯は core のユニット17本と実 Postgres 7本。**変異試験でバグの状態へ戻すと、ユニット8本／実 Postgres 3本が赤になった** ⟹ **この欠陥は擬似物の産物ではなく、本物の Postgres でも再現した。**⚠ **実 Postgres の歯は押し下げ単体を切り分けない**（後置が救うため）——切り分けは core の**配線**の歯（段1と段3.5 の filter の4欄一致）が持つ。**この非対称は ADR 0172 に明記してある。**
@@ -822,6 +842,20 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 ### 7.11 [#349](https://github.com/takecchi/mnemora/issues/349)（段1の tie-break の費用）の材料 —— ⭕ **判定: v1.0 を止めない**
 
 **この節は数字を置くだけの節だった。**⭐ **2026-09-16、オーナーがこの数字を読んで「v1.0 を止めない」と判定した**（根拠は §7.10 の #349 の行）。⛔ **新しい測定はしていない**——[#329](https://github.com/takecchi/mnemora/issues/329) のコスト実測の中で、比較対象として `ORDER BY` を振ったときに出た数字である。⛔ **「問題ではない」と判定されたのではない。**2.3 ms も `Incremental Sort` の挟まりも実在する。**直すかどうかは別の判断として開いている。**
+
+⚠ **追記（2026-09-17）: この節は、行番号をいつの木で読んだものか名乗っていない。**
+⛔ **本文と表は書き換えない**——**上の数字は 2026-09-16 の測定の記録である。**
+🔴 **【現物】`main = 53e7d57` の木で引き直すと、この節が引く3つはすべて動いている**:
+
+| この節の引用 | 何を指していたか | `main = 53e7d57` での位置【現物】 |
+|---|---|---|
+| `packages/postgres/src/vector-store.ts:172` | 現物の3段の `ORDER BY` | **176行** `ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id` |
+| `vector-store.ts:150-175`（手で書き写した SQL の窓） | `PostgresVectorStore.search()` の SQL 文 | SQL 文はいま **171–178行**（`this.db.execute(sql` で始まる template literal の全体）。⚠ **いまの木で 150-175 を開くと、この節の主題である `ORDER BY`（176行）が窓の外に落ちる** |
+| `packages/core/src/recall-runtime.ts:1335` | `aggregateScope` を分岐なしで呼ぶ経路 | **1411行** `const aggregate = await deps.memoryStore.aggregateScope(ctx, scope, {`（`memoryStore.aggregateScope(` の実呼び出しはこの1箇所だけ） |
+
+⭐ **測定そのものは動いていない**（median 3.002 ms → 0.700 ms、段5 の 150.6 ms）。**動いたのは位置だけである。**
+⛔ **行番号は直さない。**⟹ §7.4 冒頭（「**コードを読んだのは `main = 9fcd47c` 時点である**」）と §7.13 が採っているのと同じ形にした
+——**本文の行番号は当時の記録として残し、いまどこに在るかを追記で足す**（[ADR 0213](./decisions/0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5 の適用条件、[#484](https://github.com/takecchi/mnemora/pull/484)）。
 
 | 問い | 答え |
 |---|---|
@@ -938,3 +972,786 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 ⛔ **`v1.0.0` をいつ切るか・何を入れるかは、この節を書いた時点で決まっていない。**⛔ **この節はそれを決めない。**
 
 ⚠ **`v0.2.0` が出たことで、CHANGELOG と移行ガイドの基準線が動いた。**`v0.1.9` → `c52be47` の差分が、そのまま `v0.2.0` として出荷された ⟹ **[`CHANGELOG.md`](../CHANGELOG.md) の破壊的変更・新機能の一覧は `0.2.0` の節に在る**（v1.0.0 の節ではない）。**[`docs/migration-v1.md`](./migration-v1.md) も同じ理由で「v0.1.9 → v0.2.0」である**（ファイル名は、この節を含む既存の記録から参照されているため据え置いた）。
+
+⭐ **追記（2026-09-17）— この決定は、その後に覆っている。**(A) のうち
+**「7項目が揃うのを待たずに出す」という部分は維持されていない** ⟹ **§7.14** を見ること。
+⛔ **上の「決定」節は1バイトも書き換えていない**（§7.0 の規律）。
+
+### 7.13 ⭐ 7項目の数の訂正（2026-09-17）—— **在る6 / 半分1 ではなく、在る5 / 半分2 である**
+
+⭐ **追記（2026-09-21）: この節が項目5 に挙げた3つの根拠のうち、(a)(b) は当てると落ちる** —— ⟹ **根拠として使えるのは「3つ目の弱点」1つだけである。**⛔ **判定（項目5 は「半分」）は、それでも当時のまま成り立っていた**——落ちたのは根拠の本数であって、結論ではない。⚠ **そして、この見出しが名乗る数「在る5 / 半分2」は、いま古い**——項目5 はその後 **§7.15** で「埋めた」と数え直され、**在る6 / 半分1** になっている。⛔ **以下の本文と表は、2026-09-17 にそう判定したという記録として書き換えない**（§7.0 の規律。⚠ **(a) の証拠として引いた「呼び出している行は1つも無い」も、いまは真でないが直さない**）。**当て直しの中身は §7.19 に書く**（[Issue #400](https://github.com/takecchi/mnemora/issues/400)）。
+
+⛔ **§7.4 の表は1バイトも書き換えていない。**あそこに在るのは 2026-09-16 にそう判定したという**記録**である（§7.0 の規律）。**この節は、その後に分かったことだけを足す。**
+
+#### 何が変わったか
+
+| | §7.4（2026-09-16） | **いま（2026-09-17）** |
+|---|---|---|
+| 7項目 | 在る6 / 半分1 | **在る5 / 半分2** |
+| 半分なのは | 項目2 | **項目2・項目5** |
+| 物差し（⭐門） | 緑 | **緑**（変わっていない） |
+
+**動いたのは項目5「間違いを正すと、古いほうが先に出てこなくなる」だけである。**§7.4 はこれを **在る**（⭐ 半分 → 在る）と数えていた。
+
+#### 🔴 なぜ変わったか —— **新しい規律を持ち込んだのではない**
+
+**§7.4 が項目2 を「在る」に数えなかったときに使った2点を、項目5 にそのまま当て直しただけである。**
+
+§7.4「⛔ 項目2 を『在る』と数えなかった理由」の逐語:
+
+> **⛔ それでも「在る」に数えなかったのは、#284 が*下限*だからである。**#284 を通ることは「機構が空振りしていない」ことしか言わない。§7.2 が要求しているのは **「目指す姿が*外から見て*満たされる」**ことであり、ライブラリの「外」は**それを入れた利用者**である。
+
+| §7.4 が項目2 に当てた理由 | 項目5 での対応物 | 【実測】2026-09-17 |
+|---|---|---|
+| **出荷物の既定が反対を向いている** | `@mnemora/core` を入れた利用者が `markContested` を自分で呼ばない限り、`contested` は永久に立たない。既定の振る舞いは「訂正しても古いほうが出続ける」 | `rg "markContested" --glob '!**/__tests__/**' --glob '!**/*.test.ts' packages` が当たるのは**型定義・実装・適合テスト・コメントの6ファイルだけで、呼び出している行は1つも無い**（`interfaces/memory-store.ts` の型、`runtime.ts` の実装、`postgres/src/memory-store.ts` の実装、`testkit` の適合テストと in-memory 実装、`recall-runtime.ts` のコメント） |
+| **on にしている唯一の呼び手が出荷されない** | 呼び手は `examples/chat` の `correction` サブコマンド1本のみ | `examples/chat/package.json:4` `"private": true`。`scripts/publish-targets.mjs` の `PUBLISH_TARGETS` は core / testkit / openai / postgres / anthropic / local-embedding の**6件で、`@mnemora/example-chat` は入っていない**（同ファイル `:15` が publish 非対象として名指ししている） |
+
+🔴 **そして、項目5 には項目2 に無い3つ目の弱点がある。これがいちばん重い。**
+
+**項目2 の `examples/chat` は「core が端から端まで実装している機構の既定を裏返しているだけ」だが、項目5 の `examples/chat` は「core に無い判定を、ハードコードで肩代わりしている」。**
+
+`examples/chat/src/correction-scenario.ts:14-15` が逐語でそう書いている:
+
+> ⟹ `contestedPair` は「どちらの externalId とどちらの externalId が対向するか」を**書いた時点で固定された宣言**として持つ。LLM にもヒューリスティクスにも聞かない。
+
+⟹ **採用者が `examples/chat` をそっくり写しても、項目5 は立たない**——写せるのは「答えを知っている前提のコード」だからである。**項目2 は写せば立つ。**
+
+⟹ **#284 の規律の*字義*では項目5 は落ちない**（`correction-demo.ts` は `__tests__` でも `*.test.ts` でもない）。**⛔ だが §7.2 の「外から見て満たされる」では落ちる。**§7.4 自身が項目2 でその差を使い分けている以上、**項目5 だけ字義で通すのは一貫しない。**
+
+#### ⛔ §7.2 の定義は書き換えない
+
+**§7.2（v1.0 = 7項目が*外から見て*満たされ、物差しが緑のまま）の文言は1バイトも変えていない。**
+
+⟹ **「満たしたことにした」のではない。**§7.12 が立てた3つ目の道——逐語「**基準はそのまま、届いていないことも書いたまま、切る**」——を、**項目5 についても守るということである。**
+
+🔴 **この訂正は、オーナーの決定 (A) を覆すものではない。**⛔ **決定の前提を直すものである。**オーナーは 2026-09-16 に「在る6 / 半分1」という数を前提に (A)（項目2 は半分のまま `v1.0.0` を出す）を選んだ（§7.12）。**その数が違うなら、違う情報の上で決めたことになる。**⟹ **覆すかどうかはオーナーが決める。この節は決めない。**
+
+⭐ **追記（2026-09-17）— 決まった。**オーナーは「**項目5 も埋めてから出す**」と回答した
+（**§7.14**）。⟹ **上の一文は「その時点では未決だった」という記録である。**
+
+#### v1.0.0 を止めるか —— ⭕ **止めない**
+
+⛔ **判定の基準は §7.10 と揃えた**（「§7.2 の定義どおりに切ることを妨げるか」。「あったほうがよい」では止めない）。
+
+1. **`v1.0.0` は既に §7.2 を満たさないまま切ることが決まっている**（§7.12）⟹ **「7項目が全部揃うまで切らない」という門は既に存在しない。**項目5 は**新しい種類の障害ではなく、同じ種類の2件目**である。
+2. **物差しは緑である。**検出が無いことは、積む量を1バイトも増やしていない。
+3. **今日壊れているものが無い。**返るのは「訂正しても古いほうが出続ける」という**不足**であって、**故障ではない**（比較: [#347](https://github.com/takecchi/mnemora/issues/347) は「期限切れの記憶が黙って返る」という**故障**だったので §7.10 は止めた）。
+4. **実装の残量では詰まらない。**検出の設計は [PR #366](https://github.com/takecchi/mnemora/pull/366)（ADR 0185 の草案。⚠ **まだマージされていない**）で扱っており、鎖は3段以上ある。⟹ **`v1.0.0` の前に入れようとすると、急いで間違った形を入れることになる。**
+
+⭐ **止めないための条件2つは、この PR で満たした**: ①この節（数の訂正）②`README.md`「⚠ mnemora が保証していないこと」に「矛盾の検出は採用側の責務である」を明記した。
+
+🔴 **追記（2026-09-17）— この判定は覆った。**オーナーの決定により、**項目5 は `v1.0.0` を止める**
+（**§7.14**）。⛔ **上の4点と「⭕ 止めない」という結論は1バイトも書き換えていない**
+——当時そう判定したことは記録である（§7.0 の規律）。
+⟹ **いまの答えは「⭕ 止めない」ではなく「🔴 止める」である。**
+
+#### 🔴 同じ形が3回目である —— **出荷される既定が、北極星と反対を向く**
+
+⛔ **項目5 の「半分」を、個別の不足として片付けない。**
+
+| # | 何が | 出荷される既定 | 結果 |
+|---|---|---|---|
+| 1 | **連想枠**（項目2） | **off**（`packages/core` の `recall()` は `association` 省略時に連想を走らせない） | 半分 |
+| 2 | **矛盾の検出**（項目5） | **検出が無い**（`packages/` に `markContested` の呼び手0件） | 半分 |
+| 3 | **連想枠の `omitted`**（項目6） | 【受】**別の担い手が 2026-09-17 に見つけたと受け取った。⛔ この作業者は現物を確認していない** | — |
+
+**⟹ 共通の形は「機構が無い」ではない。「機構は在るが、出荷される既定がそれを使わない」である。**
+
+🔴 **この形は [#284](https://github.com/takecchi/mnemora/issues/284) の規律では捕まらない。**#284 が問うのは「**それを書くコードが1行でも在るか**」であり、**在れば通る。**⟹ `examples/chat` に1本在れば字義では「在る」になる。⛔ **だが `examples/chat` は出荷されない** ⟹ **利用者には1バイトも届かない。**
+
+**⟹ #284 は「機構が空振りしていないか」を測る歯であって、「利用者に届いているか」を測る歯ではない。**§7.2 が要求しているのは後者である。**この2つを同じ歯で測ろうとしたことが、3回とも同じ形の誤判定を生んでいる。**
+
+⚠ **この節はこの癖を直さない。名指しするだけである。**直すなら「`packages/` の外に唯一の呼び手が在る」を機械的に検出する歯が要り、それは別の主張である。
+
+#### 確かめていないこと
+
+1. **項目1・3・4・6・7 は数え直していない。**「在る5」の5 の側は §7.4 の判定をそのまま引いている【受】。**自分で数え直したのは項目5 だけである。**（⚠ 別の担い手が ISSUE の棚卸しの中で数え直しを進めていると受け取っている【受】。**この節はその結果を待っていない。**）
+2. **上の表の3件目（連想枠の `omitted`）は現物を確認していない**【受】。
+3. **テストを1本も走らせていない。**この作業環境には `DATABASE_URL` も `OPENAI_API_KEY` も無い。走らせたのは `git` / `grep` / `ls` だけである。
+
+### 7.14 ⭐ v1.0.0 をいつ切るか —— **オーナーの決定（2026-09-17）: 項目5 も埋めてから出す**
+
+⛔ **§7.12 と §7.13 の本文は1バイトも書き換えていない。**当時そう決めた・そう判定したことは
+**記録**である（§7.0 の規律）。**この節は、その後に決まったことだけを書く。**
+
+#### 決定
+
+| | |
+|---|---|
+| **決めた人** | **オーナー** |
+| **決めた日** | **2026-09-17** |
+| **逐語** | > **(い) 項目5 も埋めてから出す でおねがいします** |
+| **何を決めたか** | **`v1.0.0` は、北極星 項目5（間違いを正すと、古いほうが先に出てこなくなる）を埋めてから出す** |
+
+⚠ **担い手の手元に届いたのは、上の逐語と、「それが §7.13 の数の訂正（在る6/半分1 →
+在る5/半分2）を受けた問いへの回答である」という経緯だけである。**⛔ **オーナーへ提示された
+選択肢の全文（(ろ) 以降が何だったか）も、問いの原文も確かめていない。**
+——**人から受け取った前提である**（§7.12 の「決定」節が同じ限界を持っているのと同じ形）。
+
+⭐ **追記（2026-09-17）——「原文を誰も見ていない」わけではない。**
+
+⛔ **上の ⚠ は1バイトも書き換えていない**（§7.0 の規律）。あれは**この節を書いた担い手から見た
+限界**の記録であり、その時点では正しかった。**この追記が足すのは、その後に分かったことだけである。**
+
+**上の「逐語」欄の文字列は、オーナーの回答の全文である。**上位の担い手がオーナーの回答を
+**直接**受け取っており、**省略も要約もしていない。**⟹ ⭕ **鎖の途中に伝聞は挟まっていない。**
+
+🔴 **だから、この逐語を「出所が辿れないもの」として扱わないこと。**——この追記は、
+**次に読む人が、在る材料を「無い」と思って再確認に走るのを止めるために在る。**
+
+⚠ **この追記そのものの出所を、正直に書いておく。**——**上位の担い手がそう述べた**、という
+形で受け取ったものである。⛔ **リポジトリの中の現物から検算できる事実ではない**
+（オーナーの回答が届く経路は、この repo の外に在る）。⟹ **【受】の印が付く種類の記述である。**
+**それでも書くのは、「限界がある」と「材料が無い」を混同させないためである。**
+
+⛔ **そして、下の「確かめていないこと」1番・2番は、これによって1つも解消しない**
+——**全文が届いていることと、そこに書かれていないことが決まっていることは、別である。**
+**逐語は項目5 しか名指ししていない。**
+
+#### 🔴 これが覆すもの
+
+| 節 | そこに書いてあること | **いまはどうか** |
+|---|---|---|
+| **§7.12** | **(A)＝項目2 は「半分」のまま `v1.0.0` を出す** | ⛔ **維持されていない。**(A) は「7項目が揃うのを待たずに出す」という形だったが、**項目5 は待つことになった** |
+| **§7.13**「この訂正は…覆すものではない」 | 「**覆すかどうかはオーナーが決める。この節は決めない。**」 | ⭕ **決まった。**⟹ あの一文は「その時点では未決だった」という記録である |
+| **§7.13**「v1.0.0 を止めるか —— ⭕ **止めない**」 | 項目5 は `v1.0.0` を止めない | 🔴 **止める。**判定は覆った |
+| **§7.10** | 「**残っているのは、オーナーの判断1件だけである**」 | ⛔ **もう真ではない。**判断は済んだ ⟹ **残っているのは項目5 の実装である** |
+
+#### ⚠ 何が変わっていないか —— ここを取り違えないこと
+
+- ⛔ **項目2 が「半分」であること自体は、1ミリも変わっていない。**§7.12 の
+  「項目2 が『半分』である理由は、そのまま生きている」の3点も、§7.13 の数
+  （**在る5 / 半分2**）も、そのままである。
+- **変わったのは「半分のまま出すか」という問いへの答えのほうである。**
+  ⟹ **項目5 については「埋めてから出す」。**
+- ⛔ **§7.2 の v1.0 の定義は1バイトも書き換えていない**（§7.12 / §7.13 と同じ）。
+- ⛔ **項目2 を `v1.0.0` の前に埋めるかどうかは、この回答からは分からない。**
+  受け取った逐語は**項目5 しか名指ししていない。**⟹ **この節はそれを決めない**
+  （下の「確かめていないこと」1番）。
+
+  ⭐ **追記（2026-09-17）— 分かった。前段が2つ在った。**
+  ① 先に **(A)（項目2 は「半分」のまま `v1.0.0` を出す）**という決定が在り（§7.12）、
+  ② その後「前提が動いた。判断を変えるか」という問いが
+  **(あ) (A) のまま進める（半分2つのまま出す）／(い) 項目5 も埋めてから出す**
+  の形で立てられて、オーナーは **(い)** を選んだ。
+  ⟹ **(い) は「項目5 *も* 埋める」であって「項目2 *も* 埋める」ではない。**
+  ⛔ **(A) のうち、項目2 に関する部分は覆されていない。**
+  ⟹ ⭐ **`v1.0.0` のスコープは「項目2 は『半分』のまま ＋ 項目5 は埋める」である。**
+  ⚠ **これは「項目2 は埋めない」という新しい決定ではない**
+  ——**既に在る (A) の射程を明示しているだけである。**
+  ⚠ **上の「決定」節と同じ限界が掛かる**: 担い手は**問いの原文も選択肢の全文も見ていない。
+  人から受け取った前提である。**
+
+#### ⟹ 当日の手順書への影響
+
+**[docs/release-v1.md](./release-v1.md) の本文は書き換えていない。**同文書 §0.6 が自分で
+「⛔ **このリストが全部緑になっても、それは §7.2 の定義を満たしたという意味ではない。**
+このリストが見ているのは**「出す仕掛けが壊れていないか」だけ**である」と書いており、
+**「いつ出してよいか」を決めるのは、この §7 の側だからである。**
+
+⚠ **ただし §0.6 は §7.12 を指している。**⟹ **§7.12 だけを読むと (A) が生きているように
+読める。**その導線には、この節への参照を1行足した。
+
+#### 確かめていないこと
+
+1. **項目2 を `v1.0.0` の前に埋めるかどうか。**受け取った逐語は項目5 しか名指ししていない。
+   ⛔ **「項目2 も埋める」とも「項目2 は半分のまま出す」とも読まないこと。**
+   ⭐ **追記（2026-09-17）— 解けた。**この問いには前段が2つ在り、**(A) のうち項目2 に
+   関する部分は覆されていない**と分かった。上の「⚠ 何が変わっていないか」の
+   ⭐ 追記を見ること。⟹ **この項目はもう開いていない。**
+2. **「項目5 を埋めた」と言える水準。**検出の設計は
+   [PR #366](https://github.com/takecchi/mnemora/pull/366)（ADR 0185 の草案。
+   ⚠ **この節を書いた時点でまだマージされていない**）で扱われているが、
+   **どこまで実装すれば項目5 が「在る」になるかは、この節では決めていない。**
+   判定の基準そのものは §7.13「なぜ変わったか」の2点
+   （**出荷物の既定が反対を向いていないか** / **on にしている呼び手が出荷されるか**）である。
+3. ⭐ **解消した（2026-09-17）**——**上の逐語はオーナーの回答の全文である**（上の「⭐ 追記」）。
+   ⛔ **この行は、当時そう書いたという記録として残す。**
+   ⚠ **解消したのは「逐語そのもの」だけである**——**オーナーへ提示された選択肢の全文（(ろ) 以降）と、
+   問いの原文は、いまも確かめていない。**上の ⚠ のその部分は生きている。
+4. **日別予定（§7.3、満了 2026-09-20）がこの決定でどう動くか。**⛔ **書いていない**
+   ——§7.0 の4条件を持たない日付をここに足さないためである。
+
+### 7.15 ⭐ 項目5 の判定（2026-09-18）—— **「埋めた」と数える。⛔ ただし根拠は「基準①を満たしたから」ではない**
+
+> **⚠ この判定は、自動化された担い手（クローンのマネージャーのセッション）のものである。**
+> **⛔ オーナー本人の決定ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この節を「オーナーが決めた」と読まないこと。**方向そのものの変更が要るなら、
+> オーナー本人に問い直すこと。
+
+⛔ **§7.13 と §7.14 の本文は1バイトも書き換えていない。**当時そう判定した・そう決めたことは
+**記録**である（§7.0 の規律）。**この節は、その後に決まったことだけを書く。**
+
+⭐ **追記（2026-09-21）: この節が [Issue #400](https://github.com/takecchi/mnemora/issues/400) から引いた要旨のうち、2番目の*反例の当て先*が違う** —— 逐語「同じ形を `observe()` に当てると**項目1 も落ちてしまう。**」は、**現物に支えられていない。**§7.4 は項目1 を `observe()` の呼び手では立てておらず、鎖は `packages/core` の中で閉じている ⟹ **字義で当てて落ちるのは項目4（と項目3）である。**⛔ **この節が採った判断（基準②は「証明しすぎる」ので採らない）は動かない**——当て先が替わっても「1本の物差しを全項目に当てると証明しすぎる」という形は同じである。⚠ **この訂正は #400 自身の独立検算（2026-09-17、この節の着地より前）が既に到達していた**——⟹ **この節は、訂正前の形を引いていた。**⛔ **以下の本文は書き換えない**（§7.0 の規律）。**訂正の中身は §7.19 に書く。**
+
+#### 決定
+
+**北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、「埋めた」と数える。**
+⟹ §7.13 の「**在る5 / 半分2**」は、**在る6 / 半分1**（半分なのは項目2 だけ）になる。
+
+【現物】判定の対象になった実装は
+[#537](https://github.com/takecchi/mnemora/pull/537)（[ADR 0242](./decisions/0242-runtime-apply-correction.md)、
+`main` = `dc995fa`）——`Runtime.applyCorrection` が、**発見**（`findCorrectionCandidates`）と
+**書き込み**（`markContested` / `resolveContested`）の間に在った「**選択**」の段を
+`packages/core` の公開 API へ持ち上げ、`packages/core` のテストが
+発見 → 選択 → `markContested` → `resolveContested` の一巡を駆動して
+**敗者が `recall()` から実際に落ちること**を測っている。
+
+#### 🔴 根拠 —— **基準①を論で閉じたのではない。基準①②のほうを採らなかった**
+
+⛔ **「訂正は明示操作であるという設計上の決定だから、基準①（出荷物の既定が反対を向いている）とは
+別物である」という論は、採らなかった。**
+
+理由: この判定を下した側は「**前例は、規律の着地時刻より *後* のものだけが重い**」という則を持つ。
+【実測 2026-09-18】**[ADR 0134](./decisions/0134-mark-contested-explicit-operation.md)（「`markContested` は明示操作」）は
+`main` に 2026-09-15 15:26:32 JST に着地（PR #245）し、基準① がこの文言で初めて着地したのは
+2026-09-16 13:22:53 JST（PR #346）である**——**ADR 0134 のほうが約22時間*早い*。**
+⟹ **規律より前に在る前例なので、この則の下では重みを持たない。**
+
+⭐ **代わりに採ったのは、[Issue #400](https://github.com/takecchi/mnemora/issues/400)（OPEN）の論証である。**
+逐語ではなく要旨（⚠ 原文は #400 を見ること）:
+
+1. **基準①（出荷物の既定が反対を向いている）を項目5 に当てると落ちる**——
+   これは**すべての公開 API に当てはまる**（ライブラリは自分の公開 API を自分で呼ばない、
+   [Issue #387](https://github.com/takecchi/mnemora/issues/387)）ので、欠陥の証拠にならない。
+2. **基準②（on にしている唯一の呼び手が出荷されない）も落ちる。証明しすぎる**——
+   同じ形を `observe()` に当てると**項目1 も落ちてしまう。**
+3. ⟹ **§7.13 が項目5 に挙げた3つの根拠のうち、有効なのは3つ目だけ**
+   （＝**判定をハードコードで肩代わりしている。採用者が `examples/chat` をそっくり写しても項目5 は立たない**）。
+
+**この形は [ADR 0216](./decisions/0216-north-star-shipped-only-measurement.md) 自身の警告**
+（「**1本の物差しを全項目に当てると、証明しすぎるか、何も証明しない**」）**と同じものである。**
+
+⟹ **#537 が動かしたのは、まさにその「残る3つ目」である。**選択の段と監査理由の組み立てが
+`examples/chat`（`private: true`、`PUBLISH_TARGETS` 6件に入らない）にしか無かった状態が解消し、
+**採用者が写せるのは「答えを知っている前提のコード」ではなくなった。**⟹ **埋まった。**
+
+#### ⚠ Issue #400 の扱い —— **「repo の決定」として引かないこと**
+
+🔴 **#400 は OPEN であり、その判定が誰の手によるものかは確かめられていない**
+（repo 上の `takecchi` はオーナー本人と歴代の担い手の両方を指しうる。[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+⟹ ⛔ **この節は #400 を「決定」としては引いていない。**
+**クローンが #400 の論証を読んで同意し、自分の判定として採った**——それがこの節の立場である。
+
+#### 🔴 埋まっていないもの —— **同じ場所に置く**
+
+⛔ **「埋めた」とだけ書くのは嘘である。**次の3つは、この判定と同時に**残っている。**
+
+1. 🔴 **基準①「出荷物の既定が反対を向いている」は、1ミリも動いていない。**
+   採用側が「これは訂正である」と言わない限り `contested` は立たない。
+   **動かせるのは矛盾の自動検出（[PR #366](https://github.com/takecchi/mnemora/pull/366) の ADR 0185 草案が
+   (B)「主張キー」と呼んだ道）だけであり、それは
+   [Issue #534](https://github.com/takecchi/mnemora/issues/534) として `v1.0.0` の後へ繰り延べた**
+   （理由: 抽出プロンプトを変えるとカセットが全滅し〔`compare` 657回 / `retrieval` 74回〕、
+   録り直しに `OPENAI_API_KEY` が要り、⭐門の基準値の動きが未予測。**設計上の却下ではない**）。
+   ⚠ **上の「根拠」節は、基準① が物差しとして弱いと言っているのであって、
+   「既定が反対を向いていない」と言っているのではない。混同しないこと。**
+2. 🔴 **[ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md) が実測した B群の危険は、1ポイントも下がっていない**
+   ——**訂正してはいけない8件に対して、棄権率 0/8・深い誤爆 6/8。**
+   #537 はこれを**改善していない**（`applyCorrection` も相手を選ばないので、悪化もしていない）。
+3. 🔴 **実 API 経路での `applyCorrection` は一度も走らせていない。**
+   検査は全て `deterministic`（配線・契約）と記録の再生である。
+
+#### ⚠ §7.14 の「オーナーの決定」の鎖は、repo の中では途切れている
+
+**【実測 2026-09-18】**§7.14 は3本の PR で積み上がっており、**git 上の author / committer は
+全部 `Takeaki Kobayashi <takecchi.kobayashi@gmail.com>` で、人間かクローンかは署名から判別できない。**
+
+| 何を足したか | PR | 着地 |
+|---|---|---|
+| §7.14 新設。「⚠ 担い手の手元に届いたのは、上の逐語と…経緯だけである」 | [#440](https://github.com/takecchi/mnemora/pull/440) | 2026-09-17 08:26 JST |
+| 「前段が2つ在った」の追記 | [#442](https://github.com/takecchi/mnemora/pull/442) | 2026-09-17 08:41 JST |
+| **「上位の担い手がオーナーの回答を直接受け取っており」の追記** | [#445](https://github.com/takecchi/mnemora/pull/445) | 2026-09-17 08:51 JST |
+
+⟹ **§7.14 を最初に書いた担い手自身は、原文を見ていない**（#440 の PR 本文が逐語で
+「担い手はマージ経由で逐語と経緯を受け取っただけで、提示された選択肢の全文も問いの原文も見ていない」）。
+**「上位の担い手が直接受け取った」は2本後（#445）の追記**であり、
+**#445 自身がその出所を「リポジトリの中の現物から検算できる事実ではない」「【受】の印が付く種類の記述である」と書いている。**
+
+⟹ **オーナー本人の一次ソースは、repo の中に無い。**
+
+⛔ **これを理由に §7.14 を否定しない。**§7.14 の決定（項目5 も埋めてから出す）は**そのまま生きている。**
+**この節が置いているのは「そう書いてあるが、repo からは検算できない」という事実だけである。**
+
+#### 確かめていないこと
+
+1. **項目1・3・4・6・7 は数え直していない。**「在る6」のうち項目5 以外は §7.4 / §7.13 の判定をそのまま引いている【受】。
+2. **[Issue #400](https://github.com/takecchi/mnemora/issues/400) の論証を、独立に再導出していない。**読んで同意した、という以上の主張はしない。
+3. **項目2 は「半分」のままである。**⛔ この節はそこを動かしていない（§7.14 の「⚠ 何が変わっていないか」のとおり）。
+4. **`v1.0.0` を切ってよいかは、この節では決めていない。**切る/切らないの決定はオーナー専権である（§7.8・ADR 0070）。
+
+### 7.16 ⭐ 使用報告による選別を、出荷される面で初めて測る歯（2026-09-19）—— ⛔ **これは「項目4 を埋めた」という判定ではない**
+
+> **⚠ この節は、自動化された担い手（クローンのマネージャーのセッション）が書いている。**
+> **⛔ オーナー本人の決定ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この節を「オーナーが決めた」と読まないこと。**
+
+⛔ **§7.4 / §7.13 / §7.15 の本文は1バイトも書き換えていない**（§7.0 の規律）。**この節は、その後に測ったことだけを書く。**
+
+#### ⛔ この節が *していない* こと
+
+**北極星「目指す姿」項目4「使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。」の数え直しはしていない。**
+§7.4 が置いた「在る」も、§7.4 ⚠3 が置いた留保も、**どちらもそのままである。**
+⟹ ⛔ **在る6 / 半分1 という数（§7.15）は、この節では1つも動かない。**
+
+#### 足したもの
+
+`packages/core/src/__tests__/recall-usage-selection.test.ts`（新規1ファイル）。
+`recall-decay-gate.test.ts`（ADR 0153）と同型で、DB を要さない（`packages/core` の fake ストア）。
+測る一巡は次のとおり:
+
+1. 記憶 A・B を**完全に同条件**で作る（同じ `recordedAt`・同じ半減期・同じ `decayFloorAt`）
+2. `recall()` —— 両方返ることを確かめる（まだ選別は起きていない）
+3. **A だけ** `observe({ kind: 'memory_usage', recallId, usedMemoryIds: [A] })` で使用報告する
+4. 時計を床より先へ進める
+5. **同じ `recall()` をもう一度撃つ** ⟹ **A は返り、B は返らず、`omitted` に `filtered(decayed)` が `countKind: "exact"` で出る**
+
+対照条件（同ファイル）: **どちらも報告しなければ、同じ時刻で両方とも落ちる。**
+
+#### なぜ足したか —— **置く前は、出荷される面にこの一巡が1本も無かった**【現物 2026-09-19】
+
+`packages/`（`private: true` でない＝npm に出る側）で選別を駆動しうる経路は**2つしかない**。
+両方を1件ずつ辿ったが、**一巡を閉じているものは無かった**:
+
+- **`MemoryStore.reinforce` の直接呼び出し**（`grep -rn -- '.reinforce(' packages`）——
+  `runtime.ts` の本番3経路のほかは、store 層の単調性・適合テスト
+  （`fake-reinforce-monotonicity.test.ts` / `memory-store-conformance.ts` /
+  `memory-store-reinforce-monotonicity.test.ts`。**いずれも `recall(` を1度も呼ばない**）と、
+  `recall-channels.test.ts` の**変異プローブ**（`RecalledMemory` が Memory への生き参照を
+  持たないことを見るためのもので、選別ではない）だけ。
+- **`observe({ kind: 'memory_usage' })`**（`grep -rn -- 'kind: "memory_usage"' packages`）——
+  記憶1件で `lastReinforcedAt` が非 null になること・冪等性（`runtime.test.ts`）、
+  `recallId` が `observe` から参照できること（`recall-pipeline.test.ts` /
+  `recall.postgres.test.ts`）、スキーマ検証（`observation.test.ts`）、
+  purge との非干渉（`purge.test.ts`）、実 DB での `lastReinforcedAt` の遷移
+  （`ingest-roundtrip.postgres.test.ts`）まで。**A/B の対比は無い。**
+
+A/B の対比そのものは `examples/chat/src/__tests__/memory-usage-reinforce.postgres.test.ts` に在る
+（`grep -Fn -- '使われた記憶と使われなかった記憶で last_reinforced_at' examples/chat`）。
+⛔ **だが `examples/chat` は `private: true` で publish 対象外**であり、しかも測っているのは
+`last_reinforced_at` / `decay_floor_at` / `strengthAt` という**3つの状態量まで**で、
+**「B が `recall()` から落ちる」ところは測っていない。**
+
+⟹ **出荷物側でも参照実装側でも、この一巡は誰も閉じていなかった。**
+
+#### 【実測】歯が噛むこと
+
+- `pnpm exec vitest run src/__tests__/recall-usage-selection.test.ts`（`packages/core`）: **2 passed**
+- **変異検査**: `runtime.ts` の `handleMemoryUsage` の中の
+  `await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);` を
+  no-op に差し替えると、**この歯は赤くなる。**
+  中間の主張（`lastReinforcedAt` が非 null）だけでなく、
+  **最終の主張（2回目の `recall()` に A が残る）も赤くなる**ことを、
+  中間の主張を外した一時ファイルで切り分けて確かめた（`expected [] to include 'mem-1'` ——
+  報告が無ければ A も一緒に沈む）。⟹ **「A は何をしても残る」で通っている歯ではない。**
+- ⛔ **全テストは手元で走らせていない**（触った範囲だけ。全体の判定は CI に任せる）
+
+#### 🔴 この歯が測っていないもの —— **順位の軸は開いたままである**
+
+**測ったのは忘却ゲートの軸（`decayFloorAt` を割ったら返らない）だけである。**
+**スコア閾値の軸（段2の `below_threshold`）は測っていない。**
+
+- `partitionByThreshold` の呼び出しは `recall-runtime.ts` の**1箇所だけ**で、対象は段1の候補 `scored` のみ
+- 段3.5（連想枠）は**その分割より後**に走る（`grep -Fn -- '段3.5: 連想（任意。既定 off' packages/core/src/recall-runtime.ts`）
+- その迂回は**意図的**である——逐語:
+  `grep -Fn -- '段1に置くと必ず段2の below_threshold で落ちる' packages/core/src/recall-runtime.ts`
+
+⟹ **連想枠を既定 on にすると、段2が「閾値未満」と判定した記憶が `retrievedVia: "association"` で戻る**
+（[Issue #402](https://github.com/takecchi/mnemora/issues/402)、**OPEN**）。
+
+⭐ **この歯はその穴に触れない。**忘却ゲートは段1・段3.5 の**両方**に掛かっており
+（`grep -Fn -- 'survivesDecayGate' packages/core/src/recall-runtime.ts` が両段に当たる。
+`recall-association-gates.test.ts` が歯で固めている）、**連想枠の既定が動いても、この歯が測る軸は動かない。**
+⟹ 🔴 **この歯が緑であることは「項目4 が在る」を意味しない。**項目4 の「遠ざかる」のうち、
+**順位の側は、いまも誰も測っていない。**
+
+#### 【現物】Issue #402 は、コードでは一度も直されていない
+
+`#402` を参照する PR は **[#411](https://github.com/takecchi/mnemora/pull/411)（MERGED、2026-09-16）だけ**である。
+⛔ **「MERGED」を「直った」と読まないため、触ったファイルを見た**——
+**`docs/recall.md`（+4 −0）と `docs/roadmap.md`（+6 −2）の2ファイルのみ。コードは1バイトも動いていない。**
+PR 自身も「依存していることを**明示する**」と名乗っている。`git log --grep 402` にも他のコード変更は無い。
+
+⚠ **隣の穴のほうは塞がれている**（混同しないための対比）: §7.4 ⚠4 が挙げた項目6 側の穴
+（同じ `memoryId` が `memories` と `omitted` の両方に載る）は
+[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)（採用 2026-09-17）で塞がれ、実装も在る
+（`grep -Fn -- '段2が `below_threshold` として確定させた記憶を' packages/core/src/recall-runtime.ts`）。
+⟹ **association 由来の2つの穴のうち、項目6 側だけが閉じており、#402（順位の側）は開いたままである。**
+
+#### ⛔ 出所の断り
+
+- **[Issue #402](https://github.com/takecchi/mnemora/issues/402) の本文・コメント（いずれも `takecchi` 名義）を、
+  オーナーの決定の根拠として引いていない。**同じ理由で、§7.4 が引く
+  [Issue #337](https://github.com/takecchi/mnemora/issues/337) の鎖も**この節では検算していない【受】**（ADR 0220）。
+- **#402 が記録している発生率（連想枠 on の返却の 47.5%、席の 84%）と窓の上端（129.658日）は、
+  この節の書き手が再現していない【受】。**この節が自分の手で確かめたのは**構造**
+  （どの段がどの順で走り、閾値とゲートがそれぞれどこに掛かるか）だけである。
+
+#### 確かめていないこと
+
+1. **項目4 の数え直しをしていない**（上の「⛔ この節が *していない* こと」）。判定はオーナーに残っている。
+2. **順位の軸を測る歯は書いていない。**書くなら連想枠を on にした `recall()` が要り、
+   それは §7.4 が「既定 on の判断は10万行級の測定の後」と記録している話に触れる。⛔ **この節では踏み込まない。**
+3. **実 Postgres では走らせていない。**この歯は `packages/core` の fake ストアの上だけで回る。
+   実 DB 側の `reinforce` の意味論は `memory-store-reinforce-monotonicity.test.ts` と
+   `memory-store-conformance.ts` が別に担保しているが、**一巡としては繋いでいない。**
+
+### 7.17 ⭐ 順位の軸を閉じた（2026-09-19）—— ⛔ **これも「項目4 を埋めた」という判定ではない**
+
+> **⚠ この節は、自動化された担い手（クローンのマネージャーのセッション）が書いている。**
+> **⛔ オーナー本人の決定ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この節を「オーナーが決めた」と読まないこと。**
+
+⛔ **§7.4 / §7.13 / §7.15 / §7.16 の本文は1バイトも書き換えていない**（§7.0 の規律）。**この節は、その後にやったことだけを書く。**
+
+#### ⛔ この節が *していない* こと
+
+**北極星「目指す姿」項目4 の数え直しはしていない。**§7.4 の「在る」も、§7.4 ⚠3 の留保も、**どちらもそのままである。**
+⟹ ⛔ **在る N / 半分 M という数は、この節では1つも動かない。**
+**§7.16 の「確かめていないこと」1番と同じ線である**——判定はオーナーに残っている。
+
+#### 🔴 §7.16 のうち、真でなくなった1行
+
+§7.16 は逐語でこう書いていた:
+
+> 項目4 の「遠ざかる」のうち、**順位の側は、いまも誰も測っていない。**
+
+**⟹ この1行は、この節の後では真でない。**⛔ **§7.16 の本文は書き換えない**（§7.0）。**ここに差分を置く。**
+
+#### 何が開いていたのか —— ⭐ **「閾値を迂回している」ではなかった**
+
+[Issue #402](https://github.com/takecchi/mnemora/issues/402) は「段3.5 がスコア閾値を通らない」と書いており、
+§7.16 もその読みを引いている。**着手して現物に当てた結果、その形では直せないことが分かった** 【現物 2026-09-19】:
+
+- [docs/recall.md](./recall.md) §9.8 が逐語で「**段2で落ちた記憶こそが連想枠の主な獲物であり、除外すると連想枠の意味がほぼ無くなる**」。
+- [ADR 0151](./decisions/0151-recall-association-unprompted.md)「採らなかった案」が、連想を段1のチャンネルにする案を逐語で「**段2で再スコアされ、クエリに当たらないのだから必ず `below_threshold` に落ちる**」として落としている。
+
+⟹ **クエリとの類似度で閾値を掛ければ連想枠は全滅し、連想枠のスコア（`affinity` が中立の 1 に退化する）で掛ければ素通りする。**
+⟹ ⛔ **「閾値を掛ける」はどちらの向きでも解にならない。**
+
+**実際に開いていたのは、その内側である** 【現物】——**席（`maxCount`）の取り合いに、減衰が一切効いていなかった。**
+段3.5 は席をアンカー類似度だけで埋め、スコア（`decay` を含む）を計算するのは**選別が終わった後**で、
+その使い道は段4 の予算順だけだった。⟹ 🔴 **連想枠の中では、使用報告された記憶とされなかった記憶が、順位として一切分かれていなかった。**
+
+#### 直したこと
+
+[ADR 0246](./decisions/0246-association-rank-includes-decay.md)。席を
+**`アンカー類似度 × decay × tagMatch × freshness × strength`** の順位で埋める（段2 と同じ積の形）。
+順位を組むために候補を過取得してから並べ替える——**段1 が `kPrime` で過取得してから段2 で並べ替えるのと同じ形**であり、
+既に在る `overFetchFactor` を流用して新しい係数を定義していない。
+⛔ **掛け合わせた値は `ScoreBreakdown` に出さない**（ADR 0151 が問い3・問い4 で落とした案を覆さない）。
+⛔ **既定は1バイトも動かしていない**——`RecallQuery.association` は任意フィールドのままで、
+[Issue #337](https://github.com/takecchi/mnemora/issues/337)（既定 on にするかのオーナー判断）には触れていない。
+
+#### 足した歯
+
+`packages/core/src/__tests__/recall-association-usage-ranking.test.ts`（新規1ファイル、DB を要さない）。
+**A・B をアンカー類似度が完全に同値になるよう作り、`decay` 以外の差を残さない。**測る一巡:
+
+1. **A だけ**使用報告する ⟹ `maxCount: 1` の席は **A** が取り、B は返らない
+2. ⭐ **B だけ**使用報告する（器も作成順も 1 と同一） ⟹ 席は **B** が取る。**＝ 勝者が入れ替わる**
+3. **対照**: どちらも報告しなければ、席は前置きの順（＝先に作った A）のまま
+4. `maxCount: 2` で両方返るとき、**報告した側（＝後から作った B）が前に並ぶ**
+
+#### 【実測】歯が噛むこと
+
+- `pnpm --filter @mnemora/core exec vitest run src/__tests__/recall-association-usage-ranking.test.ts`: **4 passed**
+- **変異検査**: 順位キーを元の「アンカー類似度だけ」に戻すと、**上の 2 と 4 が赤くなる。**
+  - 2: `expected [ 'mem-7', 'mem-8' ] to include 'mem-9'` ——**席の勝者そのもの**への assert
+  - 4: `expected 2 to be less than 1` ——**並びそのもの**への assert
+  - **1 と 3 は緑のまま**である ⟹ **配線（アンカーが選ばれた・`over_limit` が積まれた）が壊れたのではなく、狙った順位の機構だけが壊れた。**
+  - ⚠ **1 と 3 が緑のままなのは意図どおりである**——1 は報告した側が挿入順と一致する正例、3 は報告しない対照であり、**どちらも順位キーに依存しない。**
+  - ⭐ **4 は最初、変異を素通ししていた** 【実測】——報告先が A（挿入順で先）だったため、順位キーが退化しても A が前に並んだ。**報告先を B に倒して初めて噛むようになった。**
+- ⛔ **全テストは手元で走らせていない**（触った範囲だけ。全体の判定は CI に任せる）
+
+#### ⭐【実測】`association-probes` の数字は動かなかった
+
+本リポジトリで `association` を渡す本番の呼び手は `examples/chat` の `association-probes` サブコマンドだけである【現物】。
+⚠ **このジョブは門ではない**（相違が出ても `exit 0`）ので CI の緑とは無関係だが、
+[Issue #337](https://github.com/takecchi/mnemora/issues/337) の材料になっている arm の到達率が動くかは別の問いである。
+⟹ **同じ base（`main` = `420e0f4`）の CI run と、この枝の CI run の同じジョブを突き合わせた**:
+
+| arm | `main` | この枝 |
+|---|---|---|
+| off | 0/12（MRR 0.000） | 0/12（MRR 0.000） |
+| on `maxCount=3` | 9/12（MRR 0.065） | 9/12（MRR 0.065） |
+| on `maxCount=5` | 10/12（MRR 0.071） | 10/12（MRR 0.071） |
+| on `maxCount=10` | 12/12（MRR 0.081） | 12/12（MRR 0.081） |
+
+⟹ **4 arm すべて一致した。この修理は #337 の材料を動かしていない。**
+⛔ **これを「順位キーが効いていない」と読まないこと**——この probe set は `haystackSize=62` で gold が1件しか無く、
+`maxCount` の席が gold で埋まるかを見る器である ⟹ **席の取り合いが起きる規模ではない**（そこで順位が現れる）。
+⚠ **席の取り合いが起きる規模での挙動は、この一致からは何も言えない。**
+
+#### 🔴 この修理が閉じていないもの
+
+1. **絶対の線は引いていない。**段1／段2 は絶対閾値、段3.5 は相対順位のみ、という**非対称は残る。**
+   ⛔ **黙って埋めていない**——任意の閾値つまみを足す案とその落とした理由は ADR 0246「採らなかった案」に在る。
+2. **札（`score.total`）は直していない。**連想枠が返す `total` は `affinity` が中立の 1 に退化しており、
+   **段2 がその記憶を棄却したときの `total` より高く見えうる。**⛔ **これは順位ではなく説明可能性（項目3）の軸**であり、
+   直すには `ScoreBreakdown` の破壊的変更が要る ⟹ [Issue #548](https://github.com/takecchi/mnemora/issues/548) へ割り、`v1.0.0` の後に持つ。
+3. **実 Postgres では走らせていない。**歯は `packages/core` の fake ストアの上だけで回る（§7.16 と同じ断り）。
+4. **費用を測っていない。**`getMany` の幅が広がる分のレイテンシは未測定である。
+5. **項目4 の数え直しをしていない**（上の「⛔ この節が *していない* こと」）。
+
+#### ⛔ 出所の断り
+
+- **[Issue #402](https://github.com/takecchi/mnemora/issues/402) の本文・コメント（いずれも `takecchi` 名義）を、オーナーの決定の根拠として引いていない**（ADR 0220。§7.16 と同じ線）。
+- **#402 が記録している発生率（47.5% / 席の 84%）と窓の上端（129.658日）は、この節の書き手が再現していない【受】。**
+  この節が自分の手で確かめたのは**構造**（どの段がどの順で走り、席が何で決まるか）と、**上の歯の実測**だけである。
+
+---
+
+### 7.18 ⭐ 正典項目4 の留保を解く（オーナー決定 2026-09-19）—— 🔴 **担い手が検証して得た結論ではない**
+
+> **⚠ この節は、自動化された担い手（クローンのマネージャーのセッション）が書いている。**
+> **⛔ オーナー本人の文章ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この節の*文章*を「オーナーが書いた」と読まないこと。**⭐ **ただし下の表が記録している*決定*は、オーナー本人のものである**——その区別がこの節の要点である。
+
+⛔ **§7.4 / §7.13 / §7.15 / §7.16 / §7.17 の本文は1バイトも書き換えていない**（§7.0 の規律）。
+**§7.4 の冒頭に、この節を指す追記を1行だけ足した**——⭐ **同§が 2026-09-17 の訂正で既に採っている形と同じである。**
+
+#### 🔴 決定そのもの —— 出所を先に書く
+
+| | |
+|---|---|
+| **決めた人** | 🔴 **オーナー（takecchi）本人** |
+| **決めた日時** | **2026-09-19T22:42Z**（UTC。JST では 2026-09-20 07:42） |
+| **経路** | クローンが `ask_human` で問い、**オーナー本人が答えた**（回答 id `29bf959c`、選ばれたのは選択肢「(あ)」）。⛔ **問いと選択肢の全文は、この repo の中には無い** |
+| **決定の中身** | **§7.4 の ⚠3 の留保を解き、§7.17 の差分をもって正典「目指す姿」項目4「使われない記憶が、静かに遠ざかる」を満たしたとする** |
+| 🔴 **出所の性質** | **これはオーナーの決定である。⛔ 担い手が技術的に検証して得た結論ではない。**この節の書き手は、⚠3 が記録した窓（129.658日 / 連想枠 on の返却の 47.5%）も、§7.17 の修理がその窓を閉じたことも、**自分で測り直していない**【受】 |
+| ⛔ **repo からの検算** | **できない。**GitHub 上の `takecchi` は**オーナー本人とクローンの両方**であり、署名から区別が付かない（ADR 0220）⟹ ⛔ **repo 上のコメントを、この決定の根拠として引いていない。**根拠は上の `ask_human` の回答だけである |
+
+#### ⭐ この決定が動かすもの / 動かさないもの —— **動くのは留保だけで、数は動かない**
+
+**§7.4 の表は、最初から項目4 を「在る」と書いている。**⚠3 は、その「在る」に付いていた**条件**
+——「`association`（段3.5 連想枠）が既定 off であることに依存している」——である。
+
+⟹ ⭐ **この決定が外したのは、その*条件*のほうである。**⛔ **「半分」を「在る」へ上げたのではない。**
+⟹ ⛔ **この節でも「在る N / 半分 M」という数は1つも動かない**（§7.16 / §7.17 と同じ線）。
+**数を読みたい人は、§7.13（数の訂正）と §7.15（項目5 の判定）を順に読むこと。**⛔ **ここに写さない。**
+
+⭐ **⟹ 変わったのは、こう言えるようになったことである**: **項目4 の「在る」は、いまは
+「既定が off である限り」という但し書きを持たない。**
+
+#### ⛔ この決定が *解いていない* こと —— **4つ残っている**
+
+1. **⚠4（項目6 の排他性）は残っている。**⚠3 と ⚠4 は同じ形（段3.5 を勘定に入れていない）だが、
+   **オーナーが解いたのは ⚠3 だけである。**⛔ **⚠4 まで解かれたと読まないこと。**
+2. **§7.17 が自分で「閉じていない」と挙げた5件は、1件も閉じていない**——
+   絶対の線を引いていない / 札（`score.total`）を直していない（[#548](https://github.com/takecchi/mnemora/issues/548)）/
+   実 Postgres で走らせていない / 費用を測っていない / 項目4 の数え直しをしていない。
+   ⭐ **5番目は、この節によって「担い手がしない」から「オーナーが決めた」へ変わった。⛔ 残り4件はそのままである。**
+3. **既定は off のままである。**⟹ **出荷される `@mnemora/core` の既定の振る舞いは、この決定では1バイトも動いていない。**
+   ⭐ **既定を on にする提案を見たら、⚠3 と ⚠4 を先に読むこと**——⚠3 の留保が解かれても、
+   **⚠4 が記録した「同じ `memoryId` が `memories` と `omitted` の両方に載る」は測った事実として残っている。**
+4. **[Issue #402](https://github.com/takecchi/mnemora/issues/402) が CLOSED であることは、この決定の根拠ではない**
+   ——#402 を閉じたのは PR #549（コードの修理）であり、**項目4 を数えてよいかの判断は別である**（§7.17 がその区別を書いている）。
+
+#### ⚠ この留保に依存している記述が、他に4箇所ある（⛔ どれも書き換えていない）
+
+| どこ | なぜ書き換えないか |
+|---|---|
+| §7.16（本文中の「§7.4 ⚠3 が置いた留保も、どちらもそのままである」） | **2026-09-19 にそう書いたという記録である**（§7.0 の規律） |
+| §7.17（「§7.4 ⚠3 の留保も、どちらもそのままである」） | **同上** |
+| [docs/recall.md](./recall.md) §9.7 | **生きた文書だが、この節の担当の外である**——⚠ **ここを直すかは別に判断すること** |
+| [ADR 0246](./decisions/0246-association-rank-includes-decay.md)（「§7.4 ⚠3 の留保にも、手を触れていない」） | 🔴 **ADR は書き換えず、追記で積む規律である**（`AGENTS.md` / `docs/decisions/README.md`）⟹ **触らない** |
+
+⟹ ⭐ **読む人へ**: **上の4箇所が「留保はそのままである」と書いていても、それは*その時点の*記録である。**
+**⚠3 の現在地は、この節が正である。**
+
+#### ⛔ 出所の断り
+
+- **この節は ADR を起こしていない。**⭐ **新しい*設計*の決定が1件も無いからである**
+  ——決まったのは「既に在る留保を解く」ことだけで、採る案も、採らなかった案も、引き受けた負債も新たに生じていない
+  （`AGENTS.md`「**重大な設計判断は ADR に残す**」の裏返しである）。
+  ⚠ **そして `AGENTS.md` は「オーナーの判断を待っている点は `docs/roadmap.md` に集めてある」と書いている**
+  ⟹ **降りた判断も、同じ文書に積むのが筋である。**
+- **[Issue #402](https://github.com/takecchi/mnemora/issues/402) の本文・コメント（いずれも `takecchi` 名義）を、オーナーの決定の根拠として引いていない**（ADR 0220。§7.16 / §7.17 と同じ線）。
+- **⚠3 が記録している発生率（47.5% / 席の 84%）と窓の上端（129.658日）は、この節の書き手が再現していない**【受】。
+
+### 7.19 ⭐ §7.13 が項目5 に挙げた根拠の当て直し（2026-09-21）—— ⛔ **判定は動かない。動くのは「根拠が何本か」と「反例の当て先」である**
+
+> **⚠ この当て直しは、自動化された担い手（クローンのマネージャーのセッション）のものである。**
+> **⛔ オーナー本人の決定ではない。**
+> **理由**: クローンの署名は repo 上では `takecchi` になり、**オーナー本人と区別が付かない**
+> （[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⟹ **この節を「オーナーが決めた」と読まないこと。**
+
+⛔ **§7.4 / §7.12 / §7.13 / §7.15 の本文は1バイトも書き換えていない。**当時そう判定した・そう測ったことは
+**記録**である（§7.0 の規律）。**この節は、その後に分かったことだけを書く。**
+
+#### これは何か
+
+**[Issue #400](https://github.com/takecchi/mnemora/issues/400) が「直すときにやること」として置いたチェックリストを、`main = 89f8dd5` の現物に当て直して着地させる。**
+
+⛔ **判定（項目5 が「在る」か「半分」か）は、この節では動かさない。**それは **§7.15** が既に決めている（「埋めた」＝ **在る6 / 半分1**）。
+⟹ **この節が触るのは「§7.13 が根拠として挙げた3点のうち、何本が根拠として使えるか」だけである。**
+
+#### 1. (a)(b) は当てると落ちる。使えるのは「3つ目の弱点」1つだけである
+
+| §7.13 が挙げたもの | 当てた結果 | 理由 |
+|---|---|---|
+| **(a) 出荷物の既定が反対を向いている** | 🔴 **根拠として落ちる** | **これはすべての公開 API に当てはまる。**[Issue #387](https://github.com/takecchi/mnemora/issues/387) が測って書いた一般則「**ライブラリは、自分の公開 API を自分で呼ばない**」により、「内部から呼ばれていない」は公開 API では**既定の状態**であって異常ではない ⟹ **項目5 を他の動詞から区別しない。**⚠ **事実の記述（呼ばなければ古いほうが出続ける）そのものは落ちていない**——落ちたのは、それを「半分」の根拠として使う形である |
+| **(b) on にしている唯一の呼び手が出荷されない** | 🔴 **根拠として落ちる。証明しすぎる** | **(b) の文面は「*on にしている*」＝トグルの存在を前提にしている。**⟹ `markContested` に**トグルは無い**（`RuntimeConfig` に `contested` の欄が1つも無い）ので、**そもそも適用できない。**⟹ 字義で当てると**項目5 を特定できない**（当て先は下の2） |
+| **(c)（§7.13 の語では「3つ目の弱点」）判定をハードコードで肩代わりしている** | ⭕ **使える** | ⚠ **ただし線を1段絞る必要がある**（下の4） |
+
+⭐ **§7.13 自身の表の列見出しが「§7.4 が項目2 に当てた*理由* | 項目5 での対応物」である。**
+⟹ **(a)(b) は §7.13 が独自に立てた根拠ではなく、項目2 の理由を項目5 へ写したものだと、§7.13 自身が書いている。**
+⟹ 🔴 **落ちたのは「写した」ことである**——項目2 で (a)(b) を支えている具体物（既定 off の実体・doc の逐語・歯）が、項目5 には無かった。
+
+#### 2. 🔴 反例の当て先は項目1 ではない —— **項目4（と項目3）である**
+
+**#400 の本文は「(b) を字義で当てると*項目1 も落ちる*」と書いた。**⛔ **これは現物に支えられていない。**
+（⚠ **#400 自身の独立検算コメント〔2026-09-17〕が既に同じ訂正に到達している。**この節はそれを自分で当て直した。）
+
+**【実測 2026-09-21 / `main = 89f8dd5`】**
+
+| | §7.4 の根拠の鎖の起点 | (b) を字義で当てると |
+|---|---|---|
+| **項目1** | 🔴 **`observe()` が1度も出てこない。**書きは `runtime.ts` `buildNewMemoriesForCandidates` → `extraction.ts:272` `defaultDecayStrategy.floorAt()` → `:311` が `NewMemory.decayFloorAt` に載せる、読みは `recall-runtime.ts:312` `decayGateActive`（**既定 on の opt-out**）——**すべて `packages/core/src` の中で閉じている** | ⛔ **落ちない** |
+| **項目3** | `cli.ts` の `command === "explain"` ⟹ **`examples/chat`** | 🔴 **落ちる** |
+| **項目4** | `cli.ts`（会話ループ）と `compare.ts` の2本 → `mnemora-path.ts:181` `reportMemoryUsage()` → `:190` `runtime.observe(ctx, {kind:"memory_usage", …})` ⟹ **どちらも `examples/chat`** | 🔴 **落ちる** |
+
+⟹ ⭐ **「(b) は証明しすぎる」という結論は動かない。当て先が項目1 ではなく項目4・項目3 だというだけである。**
+
+⛔ **これは項目4・項目3 の判定を動かす主張ではない。**（#400 本文が「項目1 が『半分』だとは言っていない」と書いたのと同じ線である。）
+**#400 のコメント群は、項目3 が「`explain` は必須フィールド・`createRecall` は無条件」、項目4 が「`examples/chat` が渡すのは*データ*であって*答え*ではない」という具体物に支えられていることを、別途当てて確かめている**【受・この節では再現していない】。
+
+#### 3. ⚠ (a) が証拠として引いた数は、いまは真でない
+
+**§7.13 は (a) の証拠として逐語「`markContested` …**呼び出している行は1つも無い**」と書いた。**
+**【実測 2026-09-21 / `main = 89f8dd5`】いまは1件在る**——`packages/core/src/runtime.ts:3678`、**`applyCorrection` の実装の中**である
+（[PR #537](https://github.com/takecchi/mnemora/pull/537) / [ADR 0242](./decisions/0242-runtime-apply-correction.md)）。
+
+⚠ **同じ理由で、§7.4 の項目5 の根拠欄が指す*呼び出しの形*も、現物には無い。**逐語で「`:142` `runtime.markContested`」と書いているが、
+**`examples/chat/src/correction-demo.ts` が呼ぶのは `runtime.applyCorrection` の2回**（`:343` / `:363`）で、`markContested` はその内側から呼ばれる。
+⟹ **行番号のドリフトではなく、経路そのものの変更である。**
+
+⛔ **どちらも直さない。**§7.4 と §7.13 の行番号・件数は「**当時こう読んだ**」という記録の側であり、住所ではない。
+**[PR #479](https://github.com/takecchi/mnemora/pull/479) が §7.4 の行番号を「腐ったポインタ」として直し、[PR #481](https://github.com/takecchi/mnemora/pull/481) が「§7.4 が時点を名乗って凍結している記録だった」として取り消している**
+——[ADR 0213](./decisions/0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5「ポインタは直す。主張は追記で訂正する」は、**この節の対象には適用されない。**
+
+⭐ **そしてこれは (a) の結論を変えない。**1件の呼び手は **`packages/core` が自分の別の公開 API の中から呼んでいるもの**であって、**採用者が呼んでいるものではない。**⟹ 「利用者が呼ばない限り立たない」という事実はそのままである。
+
+#### 4. ⭐ (c) が耐えるための線は、[ADR 0216](./decisions/0216-north-star-shipped-only-measurement.md) に既に入っている
+
+**(c) を「採用側が渡すのは、mnemora の出力を読んで作るものか」と読むと、⛔ これも証明しすぎる**
+——項目4 の `usedMemoryIds` は逐語 `recall.memories.map((m) => m.memoryId)` であり、**mnemora の出力からしか作れない。**
+
+⟹ **線は1段絞る必要がある**: **「mnemora が原理的に持てない情報（発話・どれを実際に使ったか）か / mnemora が返すべき結論（どちらが誤りか）か」。**
+**【実測】この線は ADR 0216 が 2026-09-17 に物差しの候補として取り込み済みである**（同 ADR の「#400 の独立検算が到達した線を、そのまま物差しにする」の表。⚠ **同 ADR 決定4 は逐語「**この候補は、歯にはしない。人手の監査の物差しとして文書に置く。**」としている**）。
+
+#### 5. §7.4 の項目2 の理由3点について（#400 のコメントが置いた宿題）
+
+**【実測 2026-09-21 / `main = 89f8dd5`、逐語は §7.4 の 3点】**
+
+1. ⚠ **理由2 は理由1 の言い換えである。**「on にしている唯一の呼び手が出荷されない」と「出荷物の既定が off」は**同じ事実の裏表**である ⟹ **独立した根拠として数えるのは、やや水増しである。**⛔ **偽ではない。**
+2. 🔴 **理由3 の「項目2 だけは `examples/chat` が無いと項目が立たない」は、⭐ いまは真である。**⚠ **しかし途中で一度偽になっている**——§7.13（2026-09-17）が「項目5 も `examples/chat` が無いと立たない」を示した時点では **「項目2 と項目5」**だった。⟹ その後 [PR #537](https://github.com/takecchi/mnemora/pull/537)（ADR 0242）が選択の段を `packages/core` へ持ち上げ、**§7.15 が項目5 を「埋めた」と数えた**ことで、**また「項目2 だけ」に戻った。**
+   ⛔ **だから、この行に「項目5 も同じ位置である」と注記してはいけない**——**#400 のコメントが 2026-09-17 に置いた宿題は、いま字義どおりに実行すると偽になる。**
+3. ⚠ **同じ3点の圧縮版が §7.12 にも写っている。**⛔ **そちらには注記を足していない**——§7.12 は**オーナーの決定（2026-09-16）の記録**であり、この節が正である。
+
+⛔ **①②③のどれも、項目2 の判定（半分）を動かさない。**#400 のコメントが**項目2 の (a)(b) は具体物（既定 off の実体・doc の逐語・`recall-association.test.ts` の歯）に支えられている**ことを別途当てている【受・この節では再現していない】。
+
+#### 🔴 動いていないもの
+
+1. **7項目の数は 在る6 / 半分1 である**（§7.15）。⛔ **この節は数を動かしていない。**
+2. **項目2 は「半分」のままである。**
+3. **§7.15 が「埋まっていないもの」として同じ場所に置いた3点**（基準①は1ミリも動いていない / [ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md) の B群の危険 / 実 API 経路で `applyCorrection` を一度も走らせていない）**は、1つも解消していない。**
+
+#### ⛔ 出所の断り
+
+- **この節は ADR を起こしていない。**⭐ **新しい*設計*の決定が1件も無いからである**——決まったのは
+  「既に在る根拠のうち何本が使えるか」だけで、採る案も、採らなかった案も、引き受けた負債も新たに生じていない
+  （§7.18 の「出所の断り」と同じ線）。
+- **[Issue #400](https://github.com/takecchi/mnemora/issues/400) の本文・コメント（いずれも `takecchi` 名義）を「repo の決定」として引いていない**（ADR 0220）。
+  ⟹ **1 と 2 は、この節の書き手が `main = 89f8dd5` の現物に当て直した結果である。**【受】と印を付けた箇所だけが、再現していない引用である。
+- ⭐ **#400 が「いま直さない」理由に挙げていたオーナー判断2件は、既に降りている**
+  ——[ADR 0230](./decisions/0230-restore-superseded-recovery-path.md) に逐語「**αで復旧口を作るでお願いします**」、
+  決めた人「**オーナー本人**」、決めた日「**2026-09-17**」、出所「**`ask_human 1b53aa2b-4653-4736-bdf9-648b7f5d6cfc` への回答**」が在る【実測】。
+  ⟹ **着手を止めていた理由は解けている。**
+
+#### 確かめていないこと
+
+1. **テストを1本も走らせていない。**この作業環境には `DATABASE_URL` も `OPENAI_API_KEY` も無い。走らせたのは `git` / `grep` / `sed` だけである。
+2. **「(b) を字義で当てると項目4・項目3 が落ちる」は、テキスト上の当てはめである**——挙動を走らせて確かめたものではない。
+3. **項目1・3・4・6・7 の判定は数え直していない。**§7.4 / §7.13 / §7.15 の判定をそのまま引いている【受】。
+   ⟹ **自分で当て直したのは「根拠の鎖の起点が `packages/` の中か `examples/chat` か」という1点だけである。**
+4. **§7.4 の行番号のドリフトは、項目1・3・4・5 の鎖について部分的にしか当て直していない**（当て直した範囲でも、`extraction.ts:272` / `:311` は一致し、`runtime.ts:1802` / `recall-runtime.ts:344` はずれていた）。⛔ **どれも直していない。**
+5. **`markContested` の呼び手「1件」は、`packages/` 配下・`__tests__` / `*.test.ts` / `__fixtures__` を除いた `.ts` の静的検索での1件である**（陽性対照: 同じ範囲・同じ道具で `.recall(` が **17件**引けることを確かめた）。**別名経路・生 SQL は見ていない。**
+
+#### ⭐ 追記（2026-09-23）: `main = 3875a05` へ当て直した —— **上の主張は1つも落ちていない**
+
+**上の本文は `main = 89f8dd5` に当てて書かれたが、この節を着地させる PR を起票する時点で `main` は
+[#585](https://github.com/takecchi/mnemora/pull/585) 〜 [#607](https://github.com/takecchi/mnemora/pull/607) の
+**13コミット**進んで `3875a05` になっていた。**⟹ **当て直した。**⛔ **本文は1バイトも書き換えていない**（§7.0 の規律）。
+
+**【実測 2026-09-23 / `main = 3875a05`】**
+
+| 上の節が主張しているもの | 当て直した結果 |
+|---|---|
+| `markContested` の呼び手は1件、`runtime.ts:3678`（`applyCorrection` の中） | ⭕ **件数も行番号も一致** |
+| `RuntimeConfig` に `contested` の欄が無い | ⭕ **いまも無い** |
+| `correction-demo.ts` が呼ぶのは `applyCorrection` の `:343` / `:363` の2回 | ⭕ **一致。`markContested` の直呼びは 0件**（出るのは JSDoc だけ） |
+| 項目1 の鎖（`extraction.ts:272` / `:311` → `recall-runtime.ts:312 decayGateActive`）、`observe()` は不在 | ⭕ **行番号まで一致。`packages/core/src` の中で閉じたまま** |
+| 項目4 の鎖（`mnemora-path.ts:181 reportMemoryUsage()` → `:190 runtime.observe(ctx, {kind:"memory_usage", …})`） | ⭕ **一致**（`mnemora-path.ts` は13コミットで無変更） |
+| 項目4 の `usedMemoryIds` は逐語 `recall.memories.map((m) => m.memoryId)` | ⭕ **一致**（`mnemora-path.ts:186`） |
+| §7.4 の項目5 の根拠欄の逐語「`:142` `runtime.markContested`」 | ⭕ **いまも `docs/roadmap.md` に在る**（凍結された記録として） |
+| ADR 0213 決定5 / ADR 0216 決定4 の逐語 | ⭕ **一致** |
+| 7項目の数は **在る6 / 半分1** | ⭕ **いま `main` が名乗る数は これ1つだけ。**他の数は「当時の記録」として凍結された過去の値としてしか出てこない |
+| §7.15 の「埋まっていないもの」3点 | ⭕ **1つも解消していない。**⚠ 3点目（実 API 経路で `applyCorrection` を一度も走らせていない）は、13コミットが歯を4本増やしているので特に疑ったが、**`applyCorrection` を参照する新しい歯は 0件**だった |
+
+⚠ **唯一動いたのは `examples/chat/src/cli.ts` である**——13コミットのうち [#587](https://github.com/takecchi/mnemora/pull/587) / [#593](https://github.com/takecchi/mnemora/pull/593) / [#598](https://github.com/takecchi/mnemora/pull/598)（ADR 0260 / 0262 / 0264）が provider mode の表示に **+97/-29** を入れており、`command === "explain"` の位置が **`:1876` → `:1944`（+68）**へ動いた。
+⛔ **上の本文はこの箇所に行番号を付けていない**（ファイル名と逐語だけを引いている）⟹ **訂正すべき主張は無い。**⭐ **分岐そのものは無傷である。**
+
+#### 🔴 追記（2026-09-23）: 上の「出所の断り」3点目の印を正す —— **【実測】ではなく、`ADR 0230` の【受】を継承する**
+
+**上で「オーナー判断2件は既に降りている」の根拠として引いた4要素（逐語・決めた人・決めた日・`ask_human` の id）は、
+`ADR 0230` に文字どおり実在する**【実測 2026-09-23】。**#400 の言う2件（正典の「先に」の読み／`superseded → active` の復旧口を作るか）は、
+同 ADR の「問いは2つあり、どちらにも答えが出ている」の表のとおり、この1本の逐語が両方に同時に答えている。**
+
+🔴 **だが、`ADR 0230` 自身が「確かめていないこと」でこう断っている**（逐語）:
+
+> ⛔ **オーナーの承認キューを直接見ていない。逐語と `ask_human` の識別子は、上位の担い手から受け取ったものである【受】。⟹ この ADR は、その一次資料ではない。**
+
+⟹ ⭐ **実測したのは、その ADR にそう書いてあることである。**⛔ **オーナーがそう答えたところを、この節の書き手が見たのではない。**
+⛔ **上の【実測】の印は、この一段を落としている。**⟹ **正しい印は【受】である**（一次資料は repo の外に在り、repo からは検算できない。§7.18 の同種の記述と同じ線）。
+⛔ **これは「決定が降りていない」という主張ではない。**引用の**段数**を正すだけである。
+
+⚠ **同じ ADR が、符号 `(α)` / `(β)` 自体は担い手の定式化であってオーナーの言葉ではない、とも明記している**
+——⛔ **「オーナーが (α) という言葉を使った」と読まないこと。**
+
+#### この追記が確かめていないこと
+
+1. **テストを1本も走らせていない。**当て直しに使ったのは `git` / `grep` / `gh` だけである。
+2. **`ADR 0232` の B群の危険（実測値）を再現していない**【受】——見たのは `packages/core/src/__tests__/apply-correction.test.ts` が13コミットで無変更であることだけである。
+3. **`.recall(` が17件、という上の陽性対照を数え直していない。**
+4. **オーナーの承認キューそのものを見ていない**（上の 🔴 のとおり、repo の外に在る）。
+
+##### ⚠ さらに追記（2026-09-23、起票後）: **`main = bc60391` で、上の表の行番号が1つ動いた**
+
+**この節を PR にしてから CI が緑になるまでの間に、`main` は `3875a05` → `bc60391` まで**さらに6本**進んだ**
+（[#603](https://github.com/takecchi/mnemora/pull/603) / [#609](https://github.com/takecchi/mnemora/pull/609) / [#610](https://github.com/takecchi/mnemora/pull/610) / [#600](https://github.com/takecchi/mnemora/pull/600) / [#573](https://github.com/takecchi/mnemora/pull/573) / [#613](https://github.com/takecchi/mnemora/pull/613)）。
+**うち [#573](https://github.com/takecchi/mnemora/pull/573)（ADR 0258、`restoreSuperseded` を操作単位に絞る）が `packages/core/src/runtime.ts` を触っている。**
+
+**【実測 2026-09-23 / `main = bc60391`】**
+
+- **`markContested` の呼び手は、いまも 1件**（`packages/core/src/runtime.ts`）。⛔ **件数は動いていない。**
+- ⚠ **その行が `:3678` → `:3831` へ動いた**（`applyCorrection` の中であることも変わらない）。
+- **`ADR 0230` は +70行の追記を受けたが、上で引いた4要素（逐語・決めた人・決めた日・`ask_human` の id）と「確かめていないこと」の【受】は、1つも動いていない**【実測】。
+- **`extraction.ts` / `recall-runtime.ts` / `correction-demo.ts` / `mnemora-path.ts` / `docs/roadmap.md` は無変更。**
+- **`applyCorrection` を参照する `.ts` は 6本のまま**（うち歯は `apply-correction.test.ts` と `correction-demo.test.ts` の2本で、どちらも偽物を使う）⟹ **§7.15 の「埋まっていないもの」3点目は、いまも崩れていない。**
+- **7項目の数は、いまも 在る6 / 半分1 が唯一の現在形である。**
+
+⭐ **これはこの節の主張の反証ではなく、実例である。**——**行番号は住所ではなく、いつ読んだかの記録である。**
+⛔ **だから上の表の `:3678` も直さない**（[ADR 0213](./decisions/0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5 の「ポインタは直す」は、**時点を名乗って凍結している記録**には適用されない。[PR #479](https://github.com/takecchi/mnemora/pull/479) → [PR #481](https://github.com/takecchi/mnemora/pull/481) の往復がその線を引いている）。
+⟹ **代わりに、こうして「どこまで数えたか」を名乗り直す。**

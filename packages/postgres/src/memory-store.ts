@@ -14,6 +14,7 @@ import type {
   ArchiveDecayedResult,
   Ctx,
   EmbeddingStatus,
+  EventActor,
   Memory,
   MemoryEvent,
   MemoryId,
@@ -39,6 +40,7 @@ import type {
   ScopeAggregate,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
   isUuidLike,
   parsePgTimestamp,
@@ -224,6 +226,10 @@ export class PostgresMemoryStore implements MemoryStore {
       RETURNING *
     `);
     if (inserted.rows.length > 0) {
+      // Issue #269: 統計が実態から遅れているときだけ ANALYZE memories を撃つ
+      // (詳細は ./memories-statistics.ts のファイル doc)。新しい行を実際に書いた
+      // ときだけ数える——下の ON CONFLICT で既存行を返しただけの呼び出しは数えない。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
       return rowToMemory(inserted.rows[0] as unknown as MemoryRow);
     }
 
@@ -257,7 +263,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
 
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO memories (
           id, tenant_id, subject_id,
@@ -327,6 +333,16 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       return { memory, created: true, jobs };
     });
+
+    if (result.created) {
+      // Issue #269: `createMemory` と同じ理由で ANALYZE の要否を判定する。
+      // トランザクションの**外側**で呼ぶ——`ANALYZE` はトランザクション内でも
+      // 実行できるが、上のトランザクションが保持する行ロックと
+      // `ShareUpdateExclusiveLock`（ADR 0143 決定3）を無用に重ねないため
+      // （詳細は ./memories-statistics.ts のファイル doc）。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
+    }
+    return result;
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
@@ -581,7 +597,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
     }
 
-    return this.db.transaction(async (tx) => {
+    const result = await this.db.transaction(async (tx) => {
       const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
 
       for (const { input, jobKinds } of news) {
@@ -716,6 +732,22 @@ export class PostgresMemoryStore implements MemoryStore {
 
       return { created, superseded, conflicted };
     });
+
+    if (result.created.some((entry) => entry.created)) {
+      // Issue #269（2026-09-17 コメント）: `createMemory` / `createMemoryWithOutbox` と
+      // 同じ理由で ANALYZE の要否を判定する。`news` は複数件渡せるため、`created` 配列の
+      // どれか1件でも実際に新しい行を書いていれば呼ぶ——`ON CONFLICT` で既存行を
+      // 返しただけの要素（`created: false`）だけの呼び出しでは数えない
+      // （`createMemory` の doc コメントと同じ判定。詳細は ./memories-statistics.ts の
+      // ファイル doc）。
+      //
+      // トランザクションの**外側**で呼ぶ——`createMemoryWithOutbox` と同じ理由
+      // （上のコメント参照）: `ANALYZE` はトランザクション内でも実行できるが、
+      // 上のトランザクションが保持する行ロックと `ShareUpdateExclusiveLock`
+      // （ADR 0143 決定3）を無用に重ねないため。
+      await maybeAnalyzeMemoriesAfterWrite(this.db);
+    }
+    return result;
   }
 
   /**
@@ -1700,6 +1732,149 @@ export class PostgresMemoryStore implements MemoryStore {
         events: [firstEvent, secondEvent] as [MemoryEvent, MemoryEvent],
       };
     });
+  }
+
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
+   * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここはクエリの
+   * 実装のみ。
+   *
+   * `archiveDecayed`（ADR 0114、本ファイル上部）と同じ理由で、UPDATE と INSERT を
+   * 単一の `WITH ... UPDATE ... INSERT ... SELECT` 文にまとめてある——1文なら、
+   * 明示的な `BEGIN`/`COMMIT` を書かなくても両方が同じトランザクションに入る
+   * （「片方だけ起きる」を構造的に作れない）。
+   *
+   * `target` の `WHERE` は既存の部分索引 `idx_memories_superseded_by`
+   * （`tenant_id, superseded_by_id`、`migrations/0001_init.sql`）がそのまま担う——
+   * 新しい索引は足していない。`AND status = 'superseded'` を等値条件として含めている
+   * ことが、`superseded_by_id` は非 `null` のまま `status` が `archived`/`forgotten` へ
+   * さらに進んだ行を巻き込まないための唯一の防波堤である（interface 側の契約節参照）。
+   *
+   * `digest_snapshot` には（変更しない）現在の `digest` を入れる——`archiveDecayed`/
+   * `forget` と同じ規約。`meta` は `{ reason, supersededById }`——`reason` は
+   * 呼び出し側が渡した値、省略時は固定タグ `'unsuperseded'`（`updateStatusWithEvent`
+   * を経由する操作の「省略時はキー自体を持たせない」規律とはここだけ意図的に違う。
+   * interface 側の契約節参照）。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: 指定すると `target` CTE に
+   * `AND id = ANY(...)::uuid[]` を1行足すだけ——`digestBand.excludeMemoryIds`
+   * （本ファイル上部、除外方向の同型パターン）を包含方向に転用しただけであり、
+   * **新しい索引は要らない**（`memories.id` は既に `PRIMARY KEY`。
+   * `idx_memories_superseded_by` による絞り込みの上に PK 条件を重ねるだけ）。
+   */
+  async restoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
+  ): Promise<{ restored: Memory[] }> {
+    if (!isUuidLike(supersededById)) {
+      return { restored: [] };
+    }
+    const actor = event.actor ?? { type: "system" };
+    const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+    const onlyMemoryIdsClause =
+      filter?.onlyMemoryIds !== undefined
+        ? sql`AND id = ANY(${sql.param([...filter.onlyMemoryIds])}::uuid[])`
+        : sql``;
+
+    const result = await this.db.execute(sql`
+      WITH target AS (
+        SELECT id FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND superseded_by_id = ${supersededById}
+          AND status = 'superseded'
+          ${onlyMemoryIdsClause}
+      ),
+      restored AS (
+        UPDATE memories m
+        SET status = 'active', superseded_by_id = NULL, updated_at = now()
+        FROM target t
+        WHERE m.id = t.id
+        RETURNING m.*
+      ),
+      inserted_events AS (
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        SELECT
+          gen_random_uuid(), ${ctx.tenantId}, r.id, 'unsuperseded', ${event.at},
+          ${JSON.stringify(actor)}::jsonb, r.digest, NULL, ${JSON.stringify(meta)}::jsonb
+        FROM restored r
+        RETURNING memory_id
+      )
+      SELECT * FROM restored ORDER BY id ASC
+    `);
+
+    const restored = result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
+    return { restored };
+  }
+
+  /**
+   * `restoreSupersededBy` を実際に呼ぶ**前**に見るための読み取り専用の口
+   * （Issue #515、ADR 0237。契約は `MemoryStore.previewRestoreSupersededBy`（`@mnemora/core`）
+   * 側にある——ここはクエリの実装のみ）。
+   *
+   * `target` の `WHERE` は `restoreSupersededBy` の `target` CTE と**1文字も違わない**
+   * ——同じ部分索引 `idx_memories_superseded_by` をそのまま使う。`UPDATE`/`INSERT` を
+   * 一切持たない `SELECT` のみの文であり、`restoreSupersededBy` と違って
+   * トランザクションを開始する必要も無い（読み取りが1文で完結する）。
+   *
+   * `latest_superseded_event` は、対象ごとに直近の `kind = 'superseded'` の
+   * `memory_events` 行を1件選ぶ（`DISTINCT ON (memory_id) ... ORDER BY memory_id,
+   * at DESC`）。**新しい索引を足していない**——`idx_memory_events_by_memory`
+   * （`tenant_id, memory_id, at`）が `memory_id = 対象` を絞る側をそのまま担い、
+   * `kind = 'superseded'` は結果に対する追加のフィルタ（この列だけを絞る索引は無いが、
+   * 対象がまず `target` で絞られているため、走査量は「群のサイズ」に比例する——
+   * テナント全体の `memory_events` を走査しない）。`meta->>'reason'` が無い
+   * （行はあるが `reason` キーが無い）場合は SQL の `->>` が `NULL` を返し、
+   * 対象について一致する行が1件も無い場合は `LEFT JOIN` により `NULL` になる——
+   * この2つを呼び出し側から区別する必要は無い（`MemoryStore.previewRestoreSupersededBy`
+   * の doc コメント「取れないことを正直に返す」参照。どちらも「取れない」の一種）。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy` と
+   * **1文字も違わない** `AND id = ANY(...)::uuid[]` を `target` CTE に足す——
+   * 「対象の選び方を完全に一致させる」という既存の契約をここでも守る。
+   */
+  async previewRestoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    if (!isUuidLike(supersededById)) {
+      return { candidates: [] };
+    }
+    const onlyMemoryIdsClause =
+      filter?.onlyMemoryIds !== undefined
+        ? sql`AND id = ANY(${sql.param([...filter.onlyMemoryIds])}::uuid[])`
+        : sql``;
+
+    const result = await this.db.execute(sql`
+      WITH target AS (
+        SELECT id FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND superseded_by_id = ${supersededById}
+          AND status = 'superseded'
+          ${onlyMemoryIdsClause}
+      ),
+      latest_superseded_event AS (
+        SELECT DISTINCT ON (me.memory_id) me.memory_id, me.meta ->> 'reason' AS reason
+        FROM memory_events me
+        JOIN target t ON t.id = me.memory_id
+        WHERE me.tenant_id = ${ctx.tenantId}
+          AND me.kind = 'superseded'
+        ORDER BY me.memory_id, me.at DESC
+      )
+      SELECT t.id, lse.reason
+      FROM target t
+      LEFT JOIN latest_superseded_event lse ON lse.memory_id = t.id
+      ORDER BY t.id ASC
+    `);
+
+    return {
+      candidates: result.rows.map((row) => {
+        const r = row as unknown as { id: string; reason: string | null };
+        return { memoryId: r.id as MemoryId, supersededReason: r.reason };
+      }),
+    };
   }
 }
 

@@ -22,7 +22,7 @@ import type { NotIndexedReason } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
-import type { MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
+import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
   isEmbeddingStatusRollback,
@@ -1056,6 +1056,100 @@ export class FakeMemoryStore implements MemoryStore {
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
   }
+
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」。`archiveDecayed` と同じ
+   * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
+   * 追記を行うことで、postgres 実装の単一トランザクションを模す
+   * （`packages/testkit` の `InMemoryMemoryStore.restoreSupersededBy` と同じ形だが、
+   * ファイル冒頭のコメントの通り意図的に独立している）。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: 積集合フィルタ。
+   */
+  async restoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
+  ): Promise<{ restored: Memory[] }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
+    const targets = [...this.backing.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
+    );
+
+    const actor = event.actor ?? { type: "system" };
+    const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+
+    const restored: Memory[] = [];
+    for (const memory of targets) {
+      memory.status = "active";
+      memory.supersededById = null;
+      memory.updatedAt = new Date();
+      const storedEvent = buildStoredEvent(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "unsuperseded",
+        at: event.at,
+        actor,
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta,
+      });
+      this.backing.events.push(storedEvent);
+      restored.push(memory);
+    }
+    return { restored };
+  }
+
+  /**
+   * `restoreSupersededBy` を実際に呼ぶ**前**に見るための読み取り専用の口
+   * （Issue #515、ADR 0237）。`packages/testkit` の `InMemoryMemoryStore.previewRestoreSupersededBy`
+   * と同じ形——対象の選び方は `restoreSupersededBy` と同じ filter を使い、
+   * `this.backing.events` から対象ごとに直近の `kind: 'superseded'` イベントを探して
+   * `meta.reason` を運ぶ。書き込みは一切行わない。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy` と
+   * 同じ積集合フィルタ。
+   */
+  async previewRestoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
+    const targets = [...this.backing.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
+    );
+
+    const candidates = targets.map((memory) => {
+      let latest: MemoryEvent | undefined;
+      for (const event of this.backing.events) {
+        if (
+          event.tenantId === ctx.tenantId &&
+          event.memoryId === memory.id &&
+          event.kind === "superseded" &&
+          (latest === undefined || event.at.getTime() > latest.at.getTime())
+        ) {
+          latest = event;
+        }
+      }
+      const reason = latest?.meta?.["reason"];
+      return {
+        memoryId: memory.id,
+        supersededReason: typeof reason === "string" ? reason : null,
+      };
+    });
+
+    return { candidates };
+  }
 }
 
 export class FakeOutboxStore implements OutboxStore {
@@ -1572,11 +1666,15 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * `TenantSettingsStore` interface に `setDefaultHalfLifeRecalls` は無い
-   * （ADR 0165 決めたこと13 が足したのは読むだけの `getDefaultHalfLifeRecalls`）。
-   * テストが既定値を差し替えたいときのための、interface 外のテスト専用の口
-   * ——`getDefaultHalfLifeHours` がコンストラクタ引数で差し替えられるのと同じ役割を、
-   * テナントごとに持てるようにしたもの。
+   * ⚠ **この Fake は `TenantSettingsStore.setDefaultHalfLifeRecalls`（[ADR 0197]
+   * (../../../docs/decisions/0197-set-default-half-life-recalls.md) が足した、`?` 付きの
+   * 本番の書き込み口）を実装していない。**このメソッドは、interface のメソッドとは
+   * 別名の、テスト専用の口である——`getDefaultHalfLifeHours` がコンストラクタ引数で
+   * 差し替えられるのと同じ役割を、テナントごとに持てるようにしたもの。名前が違うのは
+   * 偶然ではなく、`packages/testkit` の `InMemoryTenantSettingsStore` が同じ理由
+   * （本番メソッドとの名前衝突）で同名のテスト専用フックを削除したのと対になる決定
+   * ——このファイルは適合スイートの対象外（上のコメント参照）なので衝突は起きないが、
+   * 読む側の混乱を避けるため命名だけ揃えた（ADR 0197「決めたこと」参照）。
    */
   setDefaultHalfLifeRecallsForTest(tenantId: string, value: number): void {
     this.halfLifeRecallsByTenant.set(tenantId, value);

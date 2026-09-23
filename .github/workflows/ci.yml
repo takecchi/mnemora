@@ -12,11 +12,48 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          # 下の「PR タイトル/本文が付け替え後の古い ADR 番号を名指ししていないか」の
+          # 検査に origin/main との差分・ログが要る。既定の shallow checkout では
+          # origin/main..HEAD が引けない。
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
           node-version: "22"
+
+      - name: "PR タイトル/本文が、このブランチが自分で名乗って自分で捨てた ADR 番号を名指ししていないか（Issue #405 の後始末・本文側）"
+        # `adr-renumber.mjs`（ADR 0179）はマージ直前に ADR 番号の衝突をファイル名・
+        # 参照ともに機械的に解消するが、PR タイトル・本文（GitHub 側の状態）は
+        # 書き換えられない。この repo は squash_merge_commit_title=PR_TITLE /
+        # squash_merge_commit_message=PR_BODY のため、直し忘れた古い番号はそのまま
+        # squash commit のタイトル・本文として main の履歴に永久に残る
+        # （実測: 0e287eb・aacb982e の2件。詳細は本 PR が足した ADR を見ること）。
+        #
+        # 判定は scripts/check-pr-adr-reference-lib.mjs の純関数が持ち、CLI 入口
+        # scripts/check-pr-adr-reference.mjs が git から「このブランチが名乗った
+        # 番号」「いま追加している番号」を集めて渡す。
+        #
+        # ⛔ このジョブは required check の文字列（`typecheck / lint / test / build`）
+        # そのものなので、新しいジョブにせず既存ジョブへステップを足す
+        # （下の pack:check ステップのコメントと同じ論拠）。
+        #
+        # `PR_TITLE` / `PR_BODY` は利用者が書く自由記述の文字列なので `${{ }}` の
+        # 直接展開ではなく `env:` 経由で渡す（`scripts/decide-publish-dry-run.mjs` /
+        # `publish.yml` の `dry_run` と同じ理由——shell への注入面を減らす）。
+        #
+        # `origin/main` を明示的に fetch し直す——`.github/workflows/publish.yml` の
+        # 「Release の tag が main の履歴上に在ることを確かめる」ステップと同じ形
+        # （fetch-depth: 0 だけでは、実行環境によっては origin/main という ref 名が
+        # 解決できるとは限らないため、念のため明示する）。
+        if: github.event_name == 'pull_request'
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          git fetch origin main
+          node scripts/check-pr-adr-reference.mjs
 
       - name: Enable corepack
         run: corepack enable
@@ -38,6 +75,15 @@ jobs:
 
       - name: Build
         run: pnpm run build
+
+      - name: "公開 API 表面の破壊的変更を検出する門（Issue #342 / ADR 0178）"
+        # 直前の Build ステップが作った packages/*/dist の .d.ts に依存する（自分では
+        # ビルドし直さない）。既存の6つ目の門（pack:check）と同じジョブへ足す理由は
+        # 直下の pack:check ステップのコメントと同じ——このジョブ名
+        # （`typecheck / lint / test / build`）は branch protection の
+        # required_status_checks に登録された文字列そのものであり、ジョブを分けると
+        # オーナー権限での branch protection 更新が要る（ADR 0138 と同じ論拠）。
+        run: pnpm run api:check
 
       - name: "配布物（packages/*/dist）が CommonJS として構文解析できること（Issue #110）"
         run: pnpm run check:cjs-parse
@@ -277,7 +323,8 @@ jobs:
       # 🔴 Issue #164 (1): `test:db`(= `vitest run`)は `root-gate-db-stage`
       # ジョブが `run-db-tests.mjs` 経由で走らせるのと**同じ**
       # `consolidation-cost.postgres.test.ts` を実行する——`warmupLocalEmbedding` が
-      # `@mnemora/local-embedding` のモデル重み(42MB)を Hugging Face から取得する。
+      # `@mnemora/local-embedding` のモデル一式(4ファイル計42MB、うち重み36MB)を
+      # Hugging Face から取得する。
       # 2026-09-12 の run 34699094705(14:25 UTC)では、このジョブ自身は
       # `✓ src/__tests__/consolidation-cost.postgres.test.ts (3 tests) 43228ms`
       # で成功していたが、同 run の `root-gate-db-stage` は重み取得が 429 になって
@@ -320,6 +367,22 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
+      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
+        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
+        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
+        #
+        # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
+        # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
+        # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        #
+        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
+        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
+        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
+        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
       - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
         # 🔴 ⛔ これは「取りに行く頻度」を下げる変更であって、「取れなかったときの
         # 倒れ方」は変えていない。リトライ・フォールバック・既定値・skip は
@@ -328,12 +391,74 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
-          key: local-embedding-ruri-v3-30m-q8-v1
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
       - name: Run examples/chat の observe→recall 往復・量の比較テストを本物の DB に対して実行
         run: pnpm --filter @mnemora/example-chat run test:db
 
-      - name: 北極星の物差し（会話ログを全部積むのをやめても答えが残るか）を compare で実測しログに残す
+      - name: local-embedding が実際に読み込んだ重みファイルは、宣言された Hugging Face repo が今まさに持っているものと一致しているか(⭐ 門)
+        # 🔴 なぜここか: 直前の test:db ステップが(cache がヒットしていればキャッシュから、
+        # ミスしていれば Hugging Face から)local-embedding のモデル一式を既に読み込み
+        # 終えている。⟹ ここで改めてファイルを取りに行く必要は無く、追加のネットワーク
+        # 費用は Hugging Face の tree API を1回(+再試行)引くだけでほぼ無い。
+        # `scripts/check-local-embedding-fingerprint.mjs` の docstring の判定表のとおり、
+        # exit 0=一致 / 1=不一致(赤) / 2=保留(HF API に届かない) / 3=実行時エラー。
+        #
+        # ⛔ `continue-on-error: true` は使わない——それだと exit 1(不一致)まで
+        # 素通りしてしまい、この段が門でなくなる。
+        # 🔴 exit 2(保留)だけはジョブを落とさない——落とすと exit 1(赤)と区別が
+        # 付かなくなる(スクリプト側の判定表が空文になる)。だから shell 側で終了コードを
+        # 見て分岐する(`publish.yml` の `set +e` → `STATUS=$?` → `set -e` と同じ形。
+        # ci.yml の shell は既定の `bash -e` である——ADR 0245)。
+        # ⭐ 一致・保留のどちらでも Job Summary に1行残す——「何も出ていない」を
+        # 「ステップが走らなかった」と区別できるようにするため。
+        env:
+          MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+        run: |
+          set +e
+          node scripts/check-local-embedding-fingerprint.mjs \
+            --cache-dir "${MNEMORA_LOCAL_EMBEDDING_CACHE_DIR}"
+          CODE=$?
+          set -e
+          case "${CODE}" in
+            0)
+              echo "🟢 local-embedding fingerprint: 宣言された repo の内容と一致した" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            2)
+              echo "::warning::local-embedding fingerprint の判定を保留した(Hugging Face API に届かなかった)——一致も不一致も確認していない。"
+              echo "🟡 local-embedding fingerprint: 判定していない(Hugging Face API に届かなかった。上の warning 参照)" >> "$GITHUB_STEP_SUMMARY"
+              ;;
+            *)
+              exit "${CODE}"
+              ;;
+          esac
+
+      - name: "correction サブコマンド(cli.ts の dispatch 行)を実際に実行し、recall 段3(矛盾の解決と必須の同伴取得)が本番経路で発火することを CI が判定する(Issue #374 / ADR 0190)"
+        # 🔴 Issue #374: `grep -c "correction" .github/workflows/ci.yml` が 0 だった
+        # ——`examples/chat/src/cli.ts` の `command === "correction"` という
+        # dispatch 行は、これまで CI から一度も実行されていなかった
+        # (`correction-demo.postgres.test.ts` は `runCorrectionDemo()` を直接
+        # import しており、この dispatch 行を経由しない)。⟹ その行が消えても
+        # CI は緑のままだった。既存のこのジョブに1ステップ足すだけで済ませる
+        # (`DATABASE_URL`・拡張・migrate は上のステップ群がすでに整えている——
+        # 新しいコンテナも install も migrate も増えない)。
+        #
+        # provider は `deterministic`(明示 override 無し、OPENAI_API_KEY 無し)。
+        # `recorded` にしない理由: `examples/chat/cassettes/` に correction 用の
+        # 記録が無く、`recorded` は記録に無い入力を例外にする(ADR 0051)。
+        # このデモが確かめる性質(mandatory companion retrieval・
+        # resolveContested のフィルタ)はスコアの質に依存しない構造的な検査なので
+        # `deterministic` で足りる(`examples/chat/src/cli.ts` の `runCorrection()`
+        # doc コメント参照)。
+        #
+        # `pnpm --filter @mnemora/example-chat run correction` は、印字するだけで
+        # 終わらない——`checkCorrectionDemo()` の7欄 + `checkCorrectionOmission()`
+        # (omitted に condition="superseded" が実際に記録されているか、北極星
+        # 項目6「消えた」と「最初から無かった」の区別)の1欄、計8欄を assert し、
+        # 1つでも false なら非0で終わる。
+        run: pnpm --filter @mnemora/example-chat run correction
+
+      - name: 北極星の物差し（会話ログを全部積むのをやめてもどれだけ削れたか・冒頭の事実の出典に到達できるか）を compare で実測しログに残す
         # 🔴 このステップは `OPENAI_API_KEY` を設定していないが、**擬似(deterministic)
         # provider では走らない**——`examples/chat/cassettes/compare.json`
         # （ADR 0052 の `record:compare`）が存在するため、`resolveCassetteForRun`
@@ -342,13 +467,14 @@ jobs:
         # 走る」と書いていたが、それは誤りだった——実測（ADR 0133）で判明し、この
         # コメントは実際の挙動に合わせて訂正した。`compare` は
         # 「量を削れたか」（naive/mnemora の文字数比）だけでなく、本 PR で追加した
-        # 「冒頭の事実が削った後にも残っているか」「スコープ内の何件が実際に ANN の
+        # 「冒頭の事実の出典に削った後にも到達できるか」「スコープ内の何件が実際に ANN の
         # 候補になれたか（= 何件と競って絞ったか）」を表にして出力する
         # （docs/north-star.md の物差し、examples/chat/README.md
         # 「⭐ 削減率だけでは意味を持たない——答えが残っているか」節）。
         # これまでこの数値は手元で測ったきり CI では実測していなかった
         # （ADR 0021 参照）——このステップはそれを埋め、以後の変更で
-        # 「削れたが答えが落ちた」への回帰をログから読めるようにする。
+        # 「削れたが出典に到達できなくなった」への回帰をログから読めるようにする
+        # （情報保持・最終回答の正誤はこのステップでは測っていない。ADR 0226）。
         #
         # 🔴 Issue #242 / ADR 0133: `MNEMORA_COMPARE_JSON` で機械可読な出力口を足した
         # （`retrieval`/`time-term` と同じ規約、`examples/chat/src/compare-json.ts`）。
@@ -366,8 +492,12 @@ jobs:
         # `measuredAt` を除いて完全一致した（ADR 0133「測ったこと」）ことを踏まえ、
         # `mnemoraShareOfNaiveChars` の悪化・`factStatementSurvived` の
         # true→false 退行を検知すると非0で終わる（`compare-summary-lib.mjs` の
-        # `computeRegressions`）。それ以外の入力異常（JSON が読めない/parse
-        # できない/形が想定と違う）でも非0になる。このステップは常に走る
+        # `evaluateCompare`）。それ以外の入力異常（JSON が読めない/parse
+        # できない/形が想定と違う）でも非0になる。
+        # 🔴 さらに Issue #477 から、**実測と基準値の turnCount 集合が一致しない**
+        # （比較していない会話長が在る）ときは exit 2（判定不能）で非0になる
+        # ——「比較していない」を「退行が無い」と同じ顔で緑にしないためである。
+        # このステップは常に走る
         # （`if: always()`）——`compare` 自体が壊れて JSON を書けなかった場合も、
         # その理由を Job Summary に残す。
         if: always()
@@ -438,8 +568,8 @@ jobs:
       # 🔴 Issue #164 (1): このジョブは `node scripts/run-db-tests.mjs` 経由で
       # `examples/chat` の `test:db`(= `vitest run`)を呼ぶ。その中の
       # `consolidation-cost.postgres.test.ts` が `warmupLocalEmbedding` を通じて
-      # `@mnemora/local-embedding` のモデル重み(42MB)を実際に Hugging Face から
-      # 取得する——`identifier-probes`/`consolidation-cost` ジョブと同じ理由で、
+      # `@mnemora/local-embedding` のモデル一式(4ファイル計42MB、うち重み36MB)を
+      # 実際に Hugging Face から取得する——`identifier-probes`/`consolidation-cost` ジョブと同じ理由で、
       # このジョブも「毎 run 素で重みを取りに行く」側だった。2026-09-12 の
       # run 34699094705(14:25 UTC)では、この重み取得が 429 になって1本の PR を
       # 止めた実測がある。
@@ -476,6 +606,22 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
+      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
+        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
+        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
+        #
+        # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
+        # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
+        # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        #
+        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
+        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
+        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
+        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
       - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
         # 🔴 ⛔ これは「取りに行く頻度」を下げる変更であって、「取れなかったときの
         # 倒れ方」は変えていない。リトライ・フォールバック・既定値・skip は
@@ -484,7 +630,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
-          key: local-embedding-ruri-v3-30m-q8-v1
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
       - name: ルートの門の DB 段を DATABASE_URL 在りで通す（順方向の実測）
         run: |
@@ -695,6 +841,22 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
+      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
+        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
+        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
+        #
+        # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
+        # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
+        # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        #
+        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
+        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
+        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
+        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
       - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
         # 実測（この作業を行った器）では transformers.js の既定キャッシュは
         # `node_modules/.pnpm/@huggingface+transformers@4.2.0/.../.cache/` に落ちた。
@@ -705,7 +867,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
-          key: local-embedding-ruri-v3-30m-q8-v1
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
       - name: 識別子・固有名詞 probe（#106）を @mnemora/local-embedding で実測する
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
@@ -814,6 +976,22 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
+      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
+        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
+        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
+        #
+        # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
+        # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
+        # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        #
+        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
+        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
+        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
+        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
       - name: モデル重みをキャッシュする（identifier-probes と同じ key を共有する）
         # 🔴 **`identifier-probes` ジョブが使うキャッシュキー
         # (`local-embedding-ruri-v3-30m-q8-v1`)をそのまま共有する。**同じモデル
@@ -825,7 +1003,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
-          key: local-embedding-ruri-v3-30m-q8-v1
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
       - name: "連想枠(Issue #291)を @mnemora/local-embedding で実測する"
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
@@ -941,13 +1119,29 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
+      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
+        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
+        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
+        #
+        # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
+        # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
+        # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        #
+        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
+        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
+        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
+        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
       - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
         # `identifier-probes` ジョブと同じキー空間を使う——同じモデル
         # （`sirasagi62/ruri-v3-30m-ONNX`、既定 dtype）を使うため、キャッシュを分ける理由が無い。
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
-          key: local-embedding-ruri-v3-30m-q8-v1
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
       - name: Runtime.consolidate() の「載る量」を実測する
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
@@ -1063,13 +1257,29 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
+      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+        # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
+        # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
+        # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
+        #
+        # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
+        # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
+        # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        #
+        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
+        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
+        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
+        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
       - name: モデル重みをキャッシュする（actions/cache。cacheDir を明示して場所を固定する）
         # `identifier-probes`/`consolidation-cost` ジョブと同じキー空間を使う——同じモデル
         # （`sirasagi62/ruri-v3-30m-ONNX`、既定 dtype）を使うため、キャッシュを分ける理由が無い。
         uses: actions/cache@v6
         with:
           path: ${{ github.workspace }}/.cache/local-embedding
-          key: local-embedding-ruri-v3-30m-q8-v1
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
       - name: 掃引(Runtime.sweepArchive)が「載る量」に効くかを実測する
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は

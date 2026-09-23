@@ -51,13 +51,28 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 
 ### 3.2 Runtime 内部 — 中核の5動詞がどこを通るか
 
-**記憶そのものを動かす中核操作**は5動詞に固定する（ここは増やさない）。`Runtime` には他に
-9個のメソッド（保守操作 `tick`/`reembed`/`reextract`/`sweepArchive`、是正・取り消し
-`markContested`/`resolveContested`/`restoreArchived`/`purge`、説明 `getRecall`）があるが、
-これらは中核を狭く保つために別の層へ出した口である——詳細は
+**記憶そのものを動かす中核操作**は5動詞に固定する（ここは増やさない）。`Runtime` には他にも
+メソッド（保守操作 `tick`/`reembed`/`reextract`/`sweepArchive`、是正・取り消し
+`markContested`/`resolveContested`/`restoreArchived`/`restoreSuperseded`/`purge`、説明
+`getRecall`）があるが、これらは中核を狭く保つために別の層へ出した口である——詳細は
 [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md) と
-[docs/vision.md](./vision.md)「外から見える API」を見ること。以下はこの中核5動詞それぞれが
-Runtime 内部でどの部品を通るかで分類する。
+[docs/vision.md](./vision.md)「外から見える API」を見ること。
+
+⭐ **何が在るかの正本は `packages/core/src/runtime.ts` の `export interface Runtime` であり、
+⛔ ここに個数を写さない**（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⚠ **上の列挙は ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
+実際に `findCorrectionCandidates`（[ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md)）は
+どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
+（[Issue #605](https://github.com/takecchi/mnemora/issues/605)）。⛔ **書き込まない口**なので、
+少なくとも「是正・取り消し」（**書き込む**口）ではない。
+
+⚠ **`applyCorrection`（[ADR 0242](./decisions/0242-runtime-apply-correction.md)）も、
+どの層にも置かれていない。**ただし `findCorrectionCandidates` と同じ理由では説明できない
+——`applyCorrection` は `markContested`/`resolveContested` を呼んで実際に書き込む口である
+（ADR 0242 決定3）。**「書き込まないから」という除外は使えない**以上、どの層に当たるかは
+依然として意味の判定であり、この一覧はそれを決めていない（Issue #605）。
+
+以下はこの中核5動詞それぞれが Runtime 内部でどの部品を通るかで分類する。
 
 **書き込み系 — `observe(ctx, input)`**
 
@@ -103,7 +118,9 @@ forget
       ── status 更新とイベント追記を 1呼び出し・1トランザクションで（「必ず残る」の強制。ADR 0031）
 ```
 
-`purge()`（物理削除）は Phase 2 以降。イベント種別だけは Phase 1 のスキーマに含める。
+`purge()`（物理削除）は Issue #198 / [ADR 0124](./decisions/0124-purge-physical-delete.md) で
+実装済み（⚠ 2026-09 訂正——ここは当初「Phase 2 以降」と書いていた）。イベント種別は
+既に Phase 1 のスキーマに含まれている。
 
 **実装済み**（[ADR 0087](./decisions/0087-runtime-forget-shape.md)、Issue #102）。
 `Runtime.forget(ctx, target, opts?)` は対象ごとに `ForgetOutcome` を返す——
@@ -225,10 +242,18 @@ interface StructuredRequest<T> {
 }
 
 interface LLMProvider {
-  complete(req: PromptSpec): Promise<LLMResponse>;
-  completeStructured<T>(req: StructuredRequest<T>): Promise<T>;
+  complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
+  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
 }
 ```
+
+**⚠ ここに載っているのは §5.4 と同じ1つの interface である**（`packages/core/src/interfaces/llm-provider.ts`）。
+**2箇所に書いてあるが、別物ではない。**この節が見せているのは「ベンダー固有の型が
+core に現れないこと」だけで、**契約の本体（例外を投げる・リトライを内蔵しない）は
+§5.4 にしか書いていない。**⟹ **契約を引くときは §5.4 を見ること。**
+
+⚠ **2026-09-17 まで、この節の署名だけ `ctx` が落ちていた**（Issue #389 / [ADR 0198](./decisions/0198-llm-provider-call-failure-tooth.md)）。
+§5.4 と現物は当時から `complete(ctx, req)` であり、**ずれていたのはこの節のほうである。**
 
 `packages/openai` と `packages/anthropic` はそれぞれ `LLMProvider` を実装し、内部で zod スキーマを
 各社の Structured Output 形式（OpenAI の `response_format: json_schema`、Anthropic の
@@ -295,6 +320,16 @@ Redis を単体で使う用途（キャッシュ等）は Phase 3 まで発生�
 これはオーナーの package 表への**事実訂正**である。Anthropic は埋め込み API を提供していない
 （公式には外部の埋め込みモデルの利用を案内している）。`packages/anthropic` は `LLMProvider` のみを
 実装する。埋め込みが要る構成では `openai` か将来追加される別 provider が必要になる。
+
+> **⚠ 2026-09-17 追記（名乗りの復元。上の記述は書き換えていない）。**
+> 「**Anthropic は埋め込み API を提供していない**」は **【未検証】** である。
+> ⛔ これは**外部ベンダーの API 提供状況についての経験的主張**であって、この repo のコードからも
+> 実測からも確かめられない。**公式ドキュメントへのリンクも、確認した日付も付いていない。**
+> ⚠ [ADR 0072](./decisions/0072-anthropic-llm-provider.md) がこの一文をブロック引用しているが、
+> それは `docs/architecture.md` を引いているだけで、**独立した裏づけにはなっていない**
+> （＝同じ未検証の主張が2箇所に在る）。
+> ⭐ **この記述に依存して設計を変えるなら、そのとき Anthropic の公式ドキュメントを自分で当て、
+> 当てた日付を添えること。**⛔ **「前からそう書いてある」を根拠にしないこと。**
 
 ### 依存方向
 
@@ -851,6 +886,14 @@ Issue #200 が挙げた2つの読み方のうち「mnemora が*話しかける*�
   `OutboxStore.claimBatch` の同時 claim 安全性（`FOR UPDATE SKIP LOCKED`）は
   `packages/postgres` 側で実装したが、複数ワーカーが実際に競合する状況を再現するテストは
   Phase 1 の時点では書いていない（単一プロセス内の逐次呼び出ししか検査していない）。
+  **2026-09-17 追記（[ADR 0206](./decisions/0206-outbox-concurrent-claim-conformance.md)）**:
+  適合テストに**並行 claim の歯を1本足した**——`supportsRealConcurrency: true` を渡した
+  adapter（いまは `packages/postgres` だけ）に対して、`Promise.all` で8並行に撃った
+  `claimBatch` が同じジョブを二重に claim しないことを検査する。渡さない adapter では
+  `it.skip` になる。⚠ **ただし測るのは単一プロセス内の複数接続までであり、
+  複数プロセスが実際にネットワーク越しに撃つ状況は、いまも測っていない。**
+  ⛔ **この歯が守っているのは `FOR UPDATE` の行ロックであって `SKIP LOCKED` ではない**
+  【実測】——`SKIP LOCKED` だけを外しても赤くならない。
 - **2026-09 追記（roadmap.md 段階3）**: `packages/openai` の `completeStructured` が
   OpenAI の strict モードで実際に「省略可能なフィールドを `null` として返す」という
   前提（ADR 0012 D-ingest-7）は、`OPENAI_API_KEY` が無い開発・CI 環境では検証できていない。

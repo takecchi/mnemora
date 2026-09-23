@@ -1,0 +1,533 @@
+import type {
+  Ctx,
+  EmbeddingProvider,
+  EmbeddingSpaceId,
+  LLMProvider,
+  LLMResponse,
+  PromptMessage,
+  PromptSpec,
+  Runtime,
+  StructuredRequest,
+} from "@mnemora/core";
+import { createRuntime, heuristicTokenCounter } from "@mnemora/core";
+import type { PostgresClient } from "@mnemora/postgres";
+import {
+  PostgresEventStore,
+  PostgresLexicalStore,
+  PostgresMemoryStore,
+  PostgresOutboxStore,
+  PostgresTenantSettingsStore,
+  PostgresVectorStore,
+  closePostgresClient,
+  createPostgresClient,
+  registerEmbeddingSpace,
+  runMigrations,
+  sha256Hex,
+} from "@mnemora/postgres";
+import type { AnswerCase, AnswerVerdict } from "./answer-case.js";
+import { gradeAnswer } from "./answer-case.js";
+import type { AnswerJudgement } from "./answer-judge.js";
+import { judgeAnswer, reconcileVerdicts } from "./answer-judge.js";
+import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
+import { naivePrompt } from "./naive-path.js";
+import type { CreateProvidersOptions, EnvLike, ProviderMode } from "./providers.js";
+import { createProviders } from "./providers.js";
+import type { Conversation, ConversationTurn } from "./scenario.js";
+import type { UsageMeter } from "./usage-meter.js";
+
+/**
+ * `answer` サブコマンドの本体（Issue #506 / 親 #498）。
+ *
+ * 🔴 **この器は配線の検査であって、回答品質の測定ではない**（`answer-case.ts` 冒頭・
+ * Issue #506 を参照）。1ケースにつき、naive（全文経路）と mnemora（記憶経路）を
+ * **同じ会話・同じ質問・同じ回答モデル・同じ採点基準**で両方回し、最終回答と
+ * 入力量を対で出す。
+ */
+
+// ---------------------------------------------------------------------------
+// system 文・質問文（両経路で完全に同一にする。§2.2 決定2）
+// ---------------------------------------------------------------------------
+
+export const ANSWER_SYSTEM_PROMPT =
+  "以下の会話ログだけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。";
+
+/** `question` を両経路で同じ形に組み立てる（`"\n\n質問: " + question`）。 */
+function buildQuestionSuffix(question: string): string {
+  return `\n\n質問: ${question}`;
+}
+
+/**
+ * `complete()` へ渡した `PromptSpec` を、system + messages をまとめた1つの文字列へ
+ * 直列化する。**両経路がこの同じ関数で入力量を測る**（§2.2 決定2「同じ採点基準」の
+ * 入力量版）。
+ *
+ * ⚠ `recall().usage.chars` を入力量として報告しない理由はここにある——`usage.chars`
+ * は `recall()` が返した量であって、`complete()` へ実際に渡した量ではない
+ * （`buildMnemoraPrompt` は目次帯の1行を足すため、両者は一致しない）。
+ */
+export function serializePromptSpec(spec: PromptSpec): string {
+  const parts: string[] = [];
+  if (spec.system !== undefined) {
+    parts.push(`system: ${spec.system}`);
+  }
+  for (const message of spec.messages) {
+    parts.push(`${message.role}: ${message.content}`);
+  }
+  return parts.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// 追加費用を数える decorator（実 OpenAI 専用の usage-meter.ts は使えない。ADR 無し・
+// 本 PR で新設する自前の薄い decorator）
+// ---------------------------------------------------------------------------
+
+export interface AnswerBenchCallCounts {
+  /** `completeStructured()` 呼び出し回数——`Runtime` が抽出に使う経路（取り込み）。 */
+  extractionCalls: number;
+  /** `complete()` 呼び出し回数——この bench が回答生成に使う経路。 */
+  answerCalls: number;
+}
+
+/**
+ * `LLMProvider` を呼び出し回数を数える decorator で包む。
+ *
+ * `packages/core` の `Runtime` は抽出に `completeStructured()` しか使わない
+ * （`runtime.ts` を実測済み——`llmProvider.complete(...)` を呼ぶ行は無い）。
+ * ⟹ **`complete()` と `completeStructured()` を別のカウンタにするだけで、
+ * 「取り込み（抽出）」と「回答生成」の呼び出し回数が自然に分かれる**——
+ * 同じ decorator インスタンスを `Runtime` にも、この bench 自身の回答生成にも渡せる。
+ *
+ * ⛔ **削減率から差し引かない。** `answer-json.ts`/`answer-format.ts` は
+ * この値を常に別ブロックとして出す。
+ */
+export class CountingLLMProvider implements LLMProvider {
+  private counts: AnswerBenchCallCounts = { extractionCalls: 0, answerCalls: 0 };
+
+  constructor(private readonly inner: LLMProvider) {}
+
+  async complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
+    this.counts.answerCalls += 1;
+    return this.inner.complete(ctx, req);
+  }
+
+  async completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
+    this.counts.extractionCalls += 1;
+    return this.inner.completeStructured(ctx, req);
+  }
+
+  /** 呼び出し側が差分を取れるよう、複製したスナップショットを返す。 */
+  snapshot(): AnswerBenchCallCounts {
+    return { ...this.counts };
+  }
+}
+
+/** `EmbeddingProvider` を呼び出し回数（`embed()` の回数）を数える decorator で包む。 */
+export class CountingEmbeddingProvider implements EmbeddingProvider {
+  readonly space: EmbeddingSpaceId;
+  private calls = 0;
+
+  constructor(private readonly inner: EmbeddingProvider) {
+    this.space = inner.space;
+  }
+
+  async embed(ctx: Ctx, texts: string[]): Promise<number[][]> {
+    this.calls += 1;
+    return this.inner.embed(ctx, texts);
+  }
+
+  snapshot(): number {
+    return this.calls;
+  }
+}
+
+function diffCounts(
+  before: AnswerBenchCallCounts,
+  after: AnswerBenchCallCounts,
+): AnswerBenchCallCounts {
+  return {
+    extractionCalls: after.extractionCalls - before.extractionCalls,
+    answerCalls: after.answerCalls - before.answerCalls,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Runtime の組み立て
+//
+// ⚠ **`runtime-factory.ts` の `createExampleRuntime` を再利用していない。**
+// 理由: 呼び出し回数を数える decorator（上記）は `createRuntime()` へ渡す**前**の
+// `LLMProvider`/`EmbeddingProvider` インスタンスを包む必要があるが、
+// `createExampleRuntime` は `createProviders()` の結果を内部で直接 `createRuntime()`
+// へ渡してしまい、呼び出し側が provider インスタンスを差し込む口が無い
+// （`ExampleRuntimeHandle` も `llmProvider` を公開していない）。既存ファイルの改変は
+// `cli.ts`/`package.json`/README に限る（Issue #506 の範囲）ため、`runtime-factory.ts`
+// 自体は変更せず、ここで同じ組み立て手順を独立に行う。
+// ---------------------------------------------------------------------------
+
+export interface AnswerBenchRuntimeHandle {
+  runtime: Runtime;
+  llmMode: ProviderMode;
+  embeddingMode: ProviderMode;
+  llmProvider: CountingLLMProvider;
+  embeddingProvider: CountingEmbeddingProvider;
+  /**
+   * judge（`answer-judge.ts`）専用の呼び出し回数カウンタ。**`llmProvider` とは別の
+   * `CountingLLMProvider` インスタンスである**——ただし同じ生の `created.llmProvider`
+   * （実 API / 記録の再生 / deterministic のいずれか）を包むだけの薄いデコレータなので、
+   * 2つに分けても届く先は完全に同じ1個の provider である。
+   *
+   * **これが要る理由**: `CountingLLMProvider.complete()` は呼ぶたびに
+   * `answerCalls` を1増やす。judge も `complete()` を呼ぶ（`answer-judge.ts` 設計上の
+   * 必須事項1）ため、もし judge が `llmProvider`（回答生成と同じインスタンス）を経由すると
+   * `answerLLMCalls`（「回答生成のみで常に2」という既存の契約・`answer-bench.postgres.test.ts`
+   * の固定 assertion）が 2 から 4 に化ける。**呼び出し先を分けるのではなく、数える
+   * デコレータのインスタンスを分けることで、既存の `answerLLMCalls` の意味を1バイトも
+   * 変えずに judge の呼び出し回数を独立に数えられる**——`llmCassetteKey` はプロンプト内容の
+   * ハッシュで引くため（`packages/testkit/src/__fixtures__/cassette.ts`）、どちらの
+   * デコレータ経由で呼んだかは記録・再生のどちらにも影響しない。
+   */
+  judgeLLMProvider: CountingLLMProvider;
+  /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する（`Providers.usageMeter` と同じ規約）。 */
+  usageMeter?: UsageMeter;
+  /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
+  cassetteIgnored: boolean;
+  close(): Promise<void>;
+}
+
+export async function createAnswerBenchRuntime(
+  databaseUrl: string,
+  env: EnvLike = process.env,
+  providerOptions: CreateProvidersOptions = {},
+): Promise<AnswerBenchRuntimeHandle> {
+  const client: PostgresClient = createPostgresClient(databaseUrl);
+  await runMigrations(client.pool);
+
+  const created = createProviders(env, providerOptions);
+  const llmProvider = new CountingLLMProvider(created.llmProvider);
+  // ⭐ 同じ生の provider を、judge 専用の別インスタンスでもう一度包む(上記 docstring)。
+  const judgeLLMProvider = new CountingLLMProvider(created.llmProvider);
+  const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
+  await registerEmbeddingSpace(client.pool, embeddingProvider.space);
+
+  const runtime = createRuntime({
+    memoryStore: new PostgresMemoryStore(client.db),
+    outboxStore: new PostgresOutboxStore(client.db),
+    vectorStore: new PostgresVectorStore(client.db),
+    lexicalStore: new PostgresLexicalStore(client.db),
+    eventStore: new PostgresEventStore(client.db),
+    tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
+    llmProvider,
+    embeddingProvider,
+    hashContent: sha256Hex,
+  });
+
+  return {
+    runtime,
+    llmMode: created.llmMode,
+    embeddingMode: created.embeddingMode,
+    llmProvider,
+    embeddingProvider,
+    judgeLLMProvider,
+    cassetteIgnored: created.cassetteIgnored,
+    ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
+    close: () => closePostgresClient(client),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 1ケースを両経路に通す
+// ---------------------------------------------------------------------------
+
+/** `AnswerCase.conversation` + `question` を、`ingestConversation`/`queryRecall` が
+ * 要求する `Conversation`（`scenario.ts`）へ写す。**会話を生成しない**——
+ * 手書きのケースの中身をそのまま並べ直すだけ。 */
+function toConversation(answerCase: AnswerCase): Conversation {
+  const turns: ConversationTurn[] = answerCase.conversation.map((turn, index) => ({
+    index,
+    role: turn.role,
+    text: turn.text,
+  }));
+  return {
+    turns,
+    userUtterances: turns.filter((t) => t.role === "user"),
+    query: answerCase.question,
+  };
+}
+
+export interface AnswerPathMeasurement {
+  promptSpec: PromptSpec;
+  /** `serializePromptSpec(promptSpec)` の文字数。 */
+  inputChars: number;
+  /** 同じ直列化文字列に対する `heuristicTokenCounter` の概算。 */
+  inputEstimatedTokens: number;
+  answer: string;
+  /** `gradeAnswer` の一次判定。**`answerQualityClaimable(llmMode) === false` でも計算はする**
+   * （純関数なので害は無い）——表示・集計を止めるのは呼び出し側（`answer-format.ts`/
+   * `answer-json.ts`）の役目である。 */
+  verdict: AnswerVerdict;
+  /**
+   * 二次観測（LLM 採点、`answer-judge.ts`）。**一次判定 `verdict` を上書きしない**——
+   * 別欄として持つだけである。呼び出し側が judge を走らせなかった run では `undefined`。
+   */
+  judgement?: AnswerJudgement;
+  /**
+   * `verdict` と `judgement.outcome` を `reconcileVerdicts`（`answer-judge.ts`）で
+   * 突き合わせた結果。一致すれば `verdict` と同じ値、食い違えば `"indeterminate"`。
+   * `judgement` が無ければこちらも無い。
+   */
+  reconciled?: AnswerVerdict;
+}
+
+export interface AnswerCaseCost {
+  /** この1ケースの ingest（`ingestConversation`）で発生した抽出 LLM 呼び出し回数。 */
+  extractionLLMCalls: number;
+  /** この1ケースの ingest + recall で発生した埋め込み呼び出し回数。 */
+  embeddingCalls: number;
+  /** この1ケースの回答生成（naive 1回 + mnemora 1回）の LLM 呼び出し回数。常に2。 */
+  answerLLMCalls: number;
+  /**
+   * この1ケースの judge 呼び出し回数（naive 採点1回 + mnemora 採点1回。常に2）。
+   * ⛔ `answerLLMCalls` には混ぜない——`judgeLLMProvider` という別インスタンスの
+   * snapshot 差分で数える（`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring）。
+   */
+  judgeLLMCalls: number;
+}
+
+export interface AnswerCaseRunResult {
+  case: AnswerCase;
+  naive: AnswerPathMeasurement;
+  mnemora: AnswerPathMeasurement;
+  cost: AnswerCaseCost;
+}
+
+function buildPromptMessage(content: string): PromptMessage {
+  return { role: "user", content };
+}
+
+/**
+ * naive（全文経路）の `PromptSpec` を、**ケースの定義だけから**組み立てる。
+ *
+ * ⭐ `recall()` に依らないので、DB も provider も無しに再現できる——
+ * カセット被覆の歯（`__tests__/cassette-coverage.test.ts`）が、この関数を呼んで
+ * 「ケースを変えたのに録り直していない」を**実行の数分後ではなく検査の時点で**捕まえる。
+ * ⛔ プロンプトの組み立てをテスト側へ写さない（二重定義にしない）ため、ここに1つだけ置く。
+ */
+export function buildNaiveAnswerPromptSpec(answerCase: AnswerCase): PromptSpec {
+  const conversation = toConversation(answerCase);
+  return {
+    system: ANSWER_SYSTEM_PROMPT,
+    messages: [
+      buildPromptMessage(`${naivePrompt(conversation)}${buildQuestionSuffix(answerCase.question)}`),
+    ],
+  };
+}
+
+/**
+ * 1ケースを両経路に通す。
+ *
+ * - **取り込み**: `ingestConversation`（`mnemora-path.ts`）を再利用する。ケースごとに
+ *   新しいテナントを使う（`compare.ts` の `runComparison` と同じやり方——
+ *   `recall()` のスコープはテナント単位であり、使い回すと前のケースの記憶を引きずる）。
+ * - **記憶の列**: `buildMnemoraPrompt`（`mnemora-path.ts`）を再利用する（新しく書かない）。
+ * - **system 文・質問文・`complete()` の呼び方**は両経路で完全に同一。
+ */
+/**
+ * `grounds.turnIndex` を `answerCase.conversation` の本文へ写す。`unknown` 類では
+ * `turnIndex` が空配列なので、結果も空配列になる（`answer-judge.ts` の
+ * `AnswerJudgeInput.groundTurnTexts` の docstring 参照）。
+ */
+function resolveGroundTurnTexts(answerCase: AnswerCase): string[] {
+  return answerCase.grounds.turnIndex.map((index) => {
+    const turn = answerCase.conversation[index];
+    if (turn === undefined) {
+      throw new Error(
+        `resolveGroundTurnTexts: case "${answerCase.id}" の grounds.turnIndex=${index} が ` +
+          "conversation の範囲外である。",
+      );
+    }
+    return turn.text;
+  });
+}
+
+/**
+ * `EmbeddingSpaceId`（`provider`/`model`/`dimensions`）から、tenantId に埋め込める
+ * 英数字とハイフンだけの短いスラグを作る（Issue #583）。
+ *
+ * ⭐ **なぜ埋め込み空間を tenant に含めるのか**——実測した壊れ方: `observations` は
+ * `ON CONFLICT (tenant_id, external_id) DO NOTHING` の冪等 insert であり、埋め込みは
+ * `(provider, model, dimensions)` ごとに別テーブルに分かれる（`packages/postgres`の
+ * `embeddingSpaceTableName`、ADR 0002 D8）。⟹ **`deterministic`（8次元）がその tenant で
+ * 先に抽出を走らせると、後から既定（`recorded`/256次元）で走ったとき、抽出が冪等
+ * スキップされて 256次元テーブルが0行のまま recall が走り、「スコープ内 N 件のうち
+ * 0 件を提示」というカセットに無いプロンプトが組まれて `RecordedLLMProvider` が
+ * 例外を投げる**（exit 1、実測済み。Issue #583）。tenant に埋め込み空間のスラグを
+ * 挟めば、空間が変われば tenant も変わり、この冪等スキップの土台（同一 tenant への
+ * 二重 observe）自体が起きなくなる。
+ *
+ * ⛔ **`packages/postgres` の `embeddingSpaceTableName` は import しない**——
+ * あちらは PostgreSQL 識別子（63バイト上限・ハッシュ衝突回避）という別の制約から
+ * 逆算した命名規則であり、ここが要るのは tenantId（`z.string().min(1)` 以外に上限が
+ * 無い、`packages/core` の `CtxSchema`）に挟める短い文字列だけである。両者を結合する
+ * 理由が無いので、`examples/chat` 側の関心事として自前で持つ。
+ *
+ * ⛔ **`runId` を入れる案（`cli.ts` の `recordAnswer` が `answer-record-${runId}` で
+ * 採っている形に揃える案）は採らなかった。** `recordAnswer` は**毎回新しい記録を作る**
+ * のが仕事なので、実行ごとに新しい tenant が要る（`recordAnswer` の docstring
+ * 「⚠ tenantPrefix に runId を含め、毎回新しいテナントにする」・`observe()` の
+ * `externalId` 冪等排除が理由として明記されている）。一方この関数が使われる
+ * `runAnswer`（`cli.ts`）は**同じ入力で同じ結果が出る**ことが仕事であり——
+ * `answer-cli.postgres.test.ts` 冒頭の docstring が「⭐ 同じモードでの連続実行は
+ * 冪等である【実測 2026-09-21】——2回続けて走らせて `measuredAt` を除く JSON が
+ * 完全一致した」と実測して固定している——tenant は**入力（ここでは埋め込み空間）で
+ * 決まるべきで、実行ごとに変わってはいけない**。実行ごとに変えると、この歯
+ * （2回続けて走らせて同じ結果が出ることを測る歯）が意味を失い、かつ tenant が
+ * 無限に積み上がる（掃除の口が無い）。
+ */
+export function embeddingSpaceSlug(space: EmbeddingSpaceId): string {
+  const sanitize = (value: string): string =>
+    value
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+  return [sanitize(space.provider), sanitize(space.model), String(space.dimensions)]
+    .filter((part) => part.length > 0)
+    .join("-");
+}
+
+export async function runAnswerCase(
+  runtime: Runtime,
+  llmProvider: CountingLLMProvider,
+  embeddingProvider: CountingEmbeddingProvider,
+  judgeLLMProvider: CountingLLMProvider,
+  answerCase: AnswerCase,
+  tenantPrefix: string,
+): Promise<AnswerCaseRunResult> {
+  const embeddingSpace = embeddingSpaceSlug(embeddingProvider.space);
+  const ctx: Ctx = { tenantId: `${tenantPrefix}-${embeddingSpace}-${answerCase.id}` };
+  const conversation = toConversation(answerCase);
+  const questionSuffix = buildQuestionSuffix(answerCase.question);
+
+  const beforeIngestLLM = llmProvider.snapshot();
+  const beforeIngestEmb = embeddingProvider.snapshot();
+  await ingestConversation(runtime, ctx, conversation);
+  const afterIngestLLM = llmProvider.snapshot();
+
+  // 連想枠（`DEFAULT_MNEMORA_PATH_ASSOCIATION`）は既定のまま渡す——`queryRecall` の
+  // 既定と同じ規律をこの bench でも保つ（明示的に外していない）。
+  const recall = await queryRecall(runtime, ctx, conversation);
+
+  // ⚠ 「記憶は在るが、この空間のベクトルが0件」を名乗る（Issue #583）。
+  // 🔴 例外にしない・落ちるのを防がない——「なぜ落ちたか」が画面に出ることだけが目的。
+  // ⚠ 判定ではなく候補の一覧として出す（ADR 0223 決定5 / ADR 0255）——
+  // このログ1行だけでは、原因が (1)(2) のどちらかは決まらない。
+  if (recall.index.totalInScope > 0 && recall.memories.length === 0) {
+    console.log(
+      [
+        `⚠ [answer-bench] ${ctx.tenantId}: スコープ内 ${recall.index.totalInScope} 件の記憶が在るのに、0 件しか提示されていない。`,
+        `  この実行の埋め込み空間: ${embeddingSpace}`,
+        "  ⚠ **これは判定ではない。候補である**:",
+        "   (1) 同じ tenant に別の埋め込み空間で先に記憶が入っており、この空間のベクトルが0件",
+        "       （observations は (tenant_id, external_id) で冪等なので、2回目の抽出は走らない。Issue #583）",
+        "   (2) 予算・減衰・validAt ゲートで候補が落ちた",
+        "  ⛔ どちらかは、この行だけでは決まらない。",
+      ].join("\n"),
+    );
+  }
+
+  const afterRecallEmb = embeddingProvider.snapshot();
+
+  const naivePromptSpec: PromptSpec = buildNaiveAnswerPromptSpec(answerCase);
+  const mnemoraPromptSpec: PromptSpec = {
+    system: ANSWER_SYSTEM_PROMPT,
+    messages: [buildPromptMessage(`${buildMnemoraPrompt(recall)}${questionSuffix}`)],
+  };
+
+  const beforeAnswerLLM = llmProvider.snapshot();
+  const naiveResponse = await llmProvider.complete(ctx, naivePromptSpec);
+  const mnemoraResponse = await llmProvider.complete(ctx, mnemoraPromptSpec);
+  const afterAnswerLLM = llmProvider.snapshot();
+
+  const naiveSerialized = serializePromptSpec(naivePromptSpec);
+  const mnemoraSerialized = serializePromptSpec(mnemoraPromptSpec);
+
+  const naiveVerdict = gradeAnswer(naiveResponse.content, answerCase.expected);
+  const mnemoraVerdict = gradeAnswer(mnemoraResponse.content, answerCase.expected);
+
+  // ---------------------------------------------------------------------------
+  // 二次観測（judge）。`llmProvider` ではなく `judgeLLMProvider`（別インスタンス）を
+  // 経由する——`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring 参照。
+  // ⛔ `expected.accept`/`expected.reject` を渡さない（渡せない——`AnswerJudgeInput` の形）。
+  // ---------------------------------------------------------------------------
+  const groundTurnTexts = resolveGroundTurnTexts(answerCase);
+  const beforeJudgeLLM = judgeLLMProvider.snapshot();
+  const naiveJudgement = await judgeAnswer(judgeLLMProvider, ctx, {
+    question: answerCase.question,
+    expectedKind: answerCase.expected.kind,
+    rationale: answerCase.grounds.rationale,
+    groundTurnTexts,
+    answer: naiveResponse.content,
+  });
+  const mnemoraJudgement = await judgeAnswer(judgeLLMProvider, ctx, {
+    question: answerCase.question,
+    expectedKind: answerCase.expected.kind,
+    rationale: answerCase.grounds.rationale,
+    groundTurnTexts,
+    answer: mnemoraResponse.content,
+  });
+  const afterJudgeLLM = judgeLLMProvider.snapshot();
+
+  const extractionDiff = diffCounts(beforeIngestLLM, afterIngestLLM);
+  const answerDiff = diffCounts(beforeAnswerLLM, afterAnswerLLM);
+  const judgeDiff = diffCounts(beforeJudgeLLM, afterJudgeLLM);
+
+  return {
+    case: answerCase,
+    naive: {
+      promptSpec: naivePromptSpec,
+      inputChars: naiveSerialized.length,
+      inputEstimatedTokens: heuristicTokenCounter.count(naiveSerialized).tokens,
+      answer: naiveResponse.content,
+      verdict: naiveVerdict,
+      judgement: naiveJudgement,
+      reconciled: reconcileVerdicts(naiveVerdict, naiveJudgement.outcome),
+    },
+    mnemora: {
+      promptSpec: mnemoraPromptSpec,
+      inputChars: mnemoraSerialized.length,
+      inputEstimatedTokens: heuristicTokenCounter.count(mnemoraSerialized).tokens,
+      answer: mnemoraResponse.content,
+      verdict: mnemoraVerdict,
+      judgement: mnemoraJudgement,
+      reconciled: reconcileVerdicts(mnemoraVerdict, mnemoraJudgement.outcome),
+    },
+    cost: {
+      extractionLLMCalls: extractionDiff.extractionCalls,
+      embeddingCalls: afterRecallEmb - beforeIngestEmb,
+      answerLLMCalls: answerDiff.answerCalls,
+      judgeLLMCalls: judgeDiff.answerCalls,
+    },
+  };
+}
+
+export async function runAnswerBench(
+  runtime: Runtime,
+  llmProvider: CountingLLMProvider,
+  embeddingProvider: CountingEmbeddingProvider,
+  judgeLLMProvider: CountingLLMProvider,
+  cases: readonly AnswerCase[],
+  tenantPrefix: string,
+): Promise<AnswerCaseRunResult[]> {
+  const results: AnswerCaseRunResult[] = [];
+  for (const answerCase of cases) {
+    results.push(
+      await runAnswerCase(
+        runtime,
+        llmProvider,
+        embeddingProvider,
+        judgeLLMProvider,
+        answerCase,
+        tenantPrefix,
+      ),
+    );
+  }
+  return results;
+}

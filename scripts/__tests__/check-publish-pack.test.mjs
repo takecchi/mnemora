@@ -679,6 +679,13 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
   });
 });
 
+/**
+ * ⚠ **失敗（EXIT=1）側の実行時出力を測る歯は、このファイルではなく
+ * `scripts/__tests__/check-publish-pack-failure-output.test.mjs` に在る**
+ * ——理由はそちらのファイル冒頭に書いた（このファイルは
+ * `scripts/__tests__/publish-targets.test.mjs` にソースを走査されており、
+ * publish 対象の形をしたリテラルを増やせない）。
+ */
 describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起動する）", () => {
   it("本物どおり起動すると EXIT=0 になる", () => {
     const result = spawnSync(process.execPath, [gate], {
@@ -689,5 +696,28 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
 
     expect(result.status, `期待した EXIT=0 にならなかった。出力:\n${output}`).toBe(0);
     expect(output).toContain("publish 梱包の門を通りました");
+  }, 120_000);
+
+  /**
+   * ⚠ この門が見ていない範囲（ADR 0255 が反例として名指しし、ADR 0259 が実行時出力へ
+   * 焼いた断り）。**成功（EXIT=0）のときにも出ることを、実行時出力そのもので測る**
+   * ——ADR 0255「決定A」（成功側が本体。「通った＝安全」と読ませないため）。
+   */
+  it("成功時の実行時出力に「⚠ この門が見ていない範囲」の断りが焼かれている（固定リストの取りこぼしを名乗る）", () => {
+    const result = spawnSync(process.execPath, [gate], {
+      cwd: repoRoot,
+      encoding: "utf8",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).toBe(0);
+    expect(output).toContain("⚠ この門が見ていない範囲:");
+    expect(output).toContain("scripts/publish-targets.mjs の PUBLISH_TARGETS");
+    expect(output).toContain("固定リスト");
+    // ⭐ 数を直書きしない（ADR 0234 決定9）——PUBLISH_TARGETS の実件数から動的に出る。
+    expect(output).toContain(`いま見たのは ${PUBLISH_TARGETS.length} パッケージ`);
+    for (const target of PUBLISH_TARGETS) {
+      expect(output).toContain(target.name);
+    }
   }, 120_000);
 });

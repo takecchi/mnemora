@@ -18,6 +18,7 @@ import type {
   ArchiveDecayedResult,
   Ctx,
   EmbeddingStatus,
+  EventActor,
   Memory,
   MemoryEvent,
   MemoryId,
@@ -1218,6 +1219,103 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
+
+  /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
+   * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここは選定・更新の
+   * 実装のみ。`archiveDecayed`（直上ではなく本クラス冒頭寄りのメソッド）と同じ
+   * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
+   * 追記を行うことで、postgres 実装の単一トランザクションを模す。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: 指定すると、選定条件に
+   * `onlyMemoryIds.includes(m.id)` を積集合として足す——`packages/postgres` の
+   * `AND id = ANY(...)` と同じ意味。
+   */
+  async restoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] },
+  ): Promise<{ restored: Memory[] }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
+    const targets = [...this.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
+    );
+
+    const actor = event.actor ?? { type: "system" };
+    const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+
+    const restored: Memory[] = [];
+    for (const memory of targets) {
+      memory.status = "active";
+      memory.supersededById = null;
+      memory.updatedAt = new Date();
+      const storedEvent = buildStoredMemoryEvent(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "unsuperseded",
+        at: event.at,
+        actor,
+        digestSnapshot: memory.digest,
+        sizeBeforeBytes: null,
+        meta,
+      });
+      this.events.push(storedEvent);
+      restored.push(memory);
+    }
+    return { restored };
+  }
+
+  /**
+   * `restoreSupersededBy` を実際に呼ぶ**前**に見るための読み取り専用の口
+   * （Issue #515、ADR 0237）。契約は `MemoryStore.previewRestoreSupersededBy`（`@mnemora/core`）
+   * 側にある——対象の選び方は `restoreSupersededBy` と同じ `filter` を使う。
+   * `this.events`（`InMemoryEventStore` と共有する配列、ファイル冒頭の doc コメント
+   * 参照）から、対象ごとに直近の `kind: 'superseded'` イベントを探して
+   * `meta.reason` を運ぶ——見つからなければ `null`。書き込みは一切行わない。
+   *
+   * `filter?.onlyMemoryIds`（Issue #515 方向①、ADR 0258）: `restoreSupersededBy` と
+   * 同じ意味の積集合フィルタ——対象の選び方を完全に一致させる。
+   */
+  async previewRestoreSupersededBy(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] },
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }> {
+    const onlyMemoryIds = filter?.onlyMemoryIds;
+    const targets = [...this.memories.values()].filter(
+      (m) =>
+        m.tenantId === ctx.tenantId &&
+        m.supersededById === supersededById &&
+        m.status === "superseded" &&
+        (onlyMemoryIds === undefined || onlyMemoryIds.includes(m.id)),
+    );
+
+    const candidates = targets.map((memory) => {
+      let latest: MemoryEvent | undefined;
+      for (const event of this.events) {
+        if (
+          event.tenantId === ctx.tenantId &&
+          event.memoryId === memory.id &&
+          event.kind === "superseded" &&
+          (latest === undefined || event.at.getTime() > latest.at.getTime())
+        ) {
+          latest = event;
+        }
+      }
+      const reason = latest?.meta?.["reason"];
+      return {
+        memoryId: memory.id,
+        supersededReason: typeof reason === "string" ? reason : null,
+      };
+    });
+
+    return { candidates };
   }
 
   private extractionKey(

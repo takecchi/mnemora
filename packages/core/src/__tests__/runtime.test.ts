@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
 import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
@@ -49,6 +49,7 @@ function llmReturning(
     digest?: string;
     provenanceKind: "stated" | "inferred";
     confidence?: number;
+    subjectId?: string | null;
   }[],
 ): LLMProvider {
   return {
@@ -816,6 +817,74 @@ describe("runtime.sweepArchive（ADR 0114: 減衰しきった Memory の掃引�
     const result = await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
 
     expect(result).toEqual({ supported: true, archived: [], reachedLimit: false });
+  });
+});
+
+/**
+ * Issue #364 / [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md):
+ * `sweepArchive` は `opts.clock` を省略されたとき `tenant_settings.decay_clock` へ従う。
+ *
+ * ここで検査しているのは「`Runtime.sweepArchive` が `MemoryStore.archiveDecayed` へ
+ * どんな `opts` を渡すか」であって、`FakeMemoryStore.archiveDecayed` 自身が `clock`/
+ * `nowSeq` に応じて対象を絞り込むかどうかではない（`FakeMemoryStore` は壁時計の
+ * `decayFloorAt` だけで絞る素朴な実装であり、本 Issue の対象外——ADR 0186 決めたことは
+ * 「どの引数を渡すか」であり、store 側の絞り込みは ADR 0165 が別途固定している）。
+ * `vi.spyOn` で `archiveDecayed`/`getActivitySeq` の呼び出しそのものを観測する。
+ */
+describe("runtime.sweepArchive が opts.clock 省略時に decay_clock へ従う（Issue #364 / ADR 0186）", () => {
+  const NOW = new Date("2026-06-01T00:00:00.000Z");
+
+  it("decay_clock='activity' のテナントでは、clock 省略時に store へ clock: 'activity' と数値の nowSeq が渡る", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
+    const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
+
+    await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
+
+    expect(archiveDecayedSpy).toHaveBeenCalledTimes(1);
+    const passedOpts = archiveDecayedSpy.mock.calls[0]?.[1];
+    expect(passedOpts?.clock).toBe("activity");
+    expect(typeof passedOpts?.nowSeq).toBe("number");
+  });
+
+  it("decay_clock 未設定（既定 'wall'）のテナントでは、clock: 'wall' 相当が渡り、tenant_activity（getActivitySeq）を読まない", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
+    const getActivitySeqSpy = vi.spyOn(stores.tenantSettingsStore, "getActivitySeq");
+
+    await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
+
+    expect(archiveDecayedSpy).toHaveBeenCalledTimes(1);
+    const passedOpts = archiveDecayedSpy.mock.calls[0]?.[1];
+    expect(passedOpts?.clock).toBe("wall");
+    expect(passedOpts?.nowSeq).toBeUndefined();
+    expect(getActivitySeqSpy).not.toHaveBeenCalled();
+  });
+
+  it("opts.clock を明示で渡したら、decay_clock（'activity'）の値に関わらずそちらが勝つ", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    await stores.tenantSettingsStore.setDecayClock(ctx, "activity");
+    const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
+
+    await runtime.sweepArchive(ctx, { now: NOW, limit: 10, clock: "wall" });
+
+    expect(archiveDecayedSpy).toHaveBeenCalledTimes(1);
+    const passedOpts = archiveDecayedSpy.mock.calls[0]?.[1];
+    expect(passedOpts?.clock).toBe("wall");
+    expect(passedOpts?.nowSeq).toBeUndefined();
+  });
+
+  it("decay_clock='either' でも数値の nowSeq が渡る", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    await stores.tenantSettingsStore.setDecayClock(ctx, "either");
+    const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
+
+    await runtime.sweepArchive(ctx, { now: NOW, limit: 10 });
+
+    expect(archiveDecayedSpy).toHaveBeenCalledTimes(1);
+    const passedOpts = archiveDecayedSpy.mock.calls[0]?.[1];
+    expect(passedOpts?.clock).toBe("either");
+    expect(typeof passedOpts?.nowSeq).toBe("number");
   });
 });
 
@@ -2007,5 +2076,46 @@ describe("observe の冪等な再送は、同時に別の観測が入っても�
       // fresh のぶんの1回だけ。再送は抽出を走らせない。
       llmCallsAddedByResendAndFresh: 1,
     });
+  });
+});
+
+/**
+ * Issue #608 項目①（核心）: `buildNewMemoriesForCandidates`（runtime.ts）は同じ observation を
+ * 全候補へ渡す。候補ごとに違う `subjectId` を持てるようになったことで、**1回の observe() から
+ * 複数の Memory が出て、それぞれ違う主題を持てる**ことを、runtime 経由（observe()）で縛る。
+ * `extraction.test.ts` の `buildNewMemoryFromCandidate` 単体の歯とは別に、
+ * `runtime.observe` → `buildNewMemoriesForCandidates` の配線そのものが崩れていないことを見る。
+ */
+describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項目①）", () => {
+  it("同じ observation から出た複数候補が、候補ごとに違う subjectId を持つ", async () => {
+    const { runtime, stores } = buildRuntime(
+      llmReturning([
+        { content: "Aさんは面白いと思った", provenanceKind: "stated", subjectId: "user:a" },
+        { content: "Bさんは面白いとは思わなかった", provenanceKind: "stated", subjectId: "user:b" },
+        // 明示的な null ＝ 主題なし（observation の subjectId があっても上書きする）。
+        { content: "映画をやっている", provenanceKind: "stated", subjectId: null },
+        // subjectId 省略 ＝ 未指定。従来どおり observation の値へ落ちる。
+        { content: "念のための第4の候補", provenanceKind: "stated" },
+      ]),
+    );
+
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "この前映画観に行ってきたけど面白かったよ／僕はあんまり合わなかったかも",
+      subjectId: "user:conversation-default",
+    });
+
+    expect(result.extraction).toBe("ok");
+    expect(result.memoryIds).toHaveLength(4);
+
+    const memories = await Promise.all(
+      result.memoryIds.map((id) => stores.memoryStore.get(ctx, id)),
+    );
+    expect(memories.map((m) => m?.subjectId)).toEqual([
+      "user:a",
+      "user:b",
+      null,
+      "user:conversation-default",
+    ]);
   });
 });

@@ -25,6 +25,19 @@ export const ExtractedMemoryCandidateSchema = z.object({
   digest: z.string().optional(),
   tags: z.array(z.string()).optional(),
   /**
+   * この候補の主題（Issue #608 項目①）。**省略（undefined）＝未指定**——`buildNewMemoryFromCandidate`
+   * が従来どおり `observation.subjectId` へ落ちる。**明示的な `null` ＝主題なしを明示**——
+   * observation 側が値を持っていても、それを上書きして主題を持たない Memory にする
+   * （Issue 本文の例:「Aさん『明日台風来るらしいよ』→ 明日台風が来る 主題 = なし」）。
+   * `Memory.subjectId` / `Observation.subjectId` と同じ `string | null | undefined` の型を使う
+   * （`memory.ts` / `observation.ts` の同名欄と同じ規約）。
+   *
+   * 1回の `observe()` から複数候補が抽出されると、**候補ごとに違う主題を持てる**——
+   * 同じ observation を全候補へ渡す `buildNewMemoriesForCandidates`（runtime.ts）の下でも、
+   * この欄だけは候補ごとに独立している。
+   */
+  subjectId: z.string().min(1).nullable().optional(),
+  /**
    * オーナーの原則7（AI の推論とユーザーが言った事実を区別する）。抽出結果は必ず
    * `stated`（本人が明示的に述べた事実）か `inferred`（LLM の推論）のどちらかを申告する。
    */
@@ -289,7 +302,13 @@ export function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMe
     : undefined;
   return {
     tenantId: params.ctx.tenantId,
-    subjectId: params.observation.subjectId ?? null,
+    // Issue #608 項目①: 候補の subjectId を優先する。`undefined`（省略・未指定）のときだけ
+    // 従来どおり observation の値へ落ちる。`null`（明示的な「主題なし」）は observation の値が
+    // あってもそのまま通す——上書きしてしまうと「主題なしを明示した」候補が書けなくなる。
+    subjectId:
+      params.candidate.subjectId !== undefined
+        ? params.candidate.subjectId
+        : (params.observation.subjectId ?? null),
     sourceObservationId: params.observation.id,
     extractorVersion: params.extractorVersion,
     content: params.candidate.content,

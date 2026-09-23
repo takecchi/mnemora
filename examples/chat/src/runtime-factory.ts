@@ -26,6 +26,8 @@ export interface ExampleRuntimeHandle {
   embeddingMode: ProviderMode;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
+  /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
+  cassetteIgnored: boolean;
   /**
    * retrieval-quality（PR 本文 (D)）が memory → observation の系譜を辿るために公開する。
    * `packages/core`/`packages/postgres` は変更していない——`MemoryStore` は元から
@@ -63,6 +65,15 @@ export interface ExampleRuntimeHandle {
    * （`@mnemora/core`）を通してのみ行う——生 SQL の UPSERT は増やさない。
    */
   tenantSettingsStore: PostgresTenantSettingsStore;
+  /**
+   * Issue #369 チェックボックス（選んだ根拠を `memory_events.meta.note` から辿れるように
+   * する）の歯が公開する。**`packages/core`/`packages/postgres` は変更していない**——
+   * `PostgresEventStore` は元から公開の class であり、これまで `createExampleRuntime`
+   * の返り値に含めていなかっただけ（`memoryStore`/`tenantSettingsStore` を足したときと
+   * 同じ理由）。`correction-demo.postgres.test.ts` が `memory_events` を読み戻して
+   * `meta.note` に選んだ根拠が実際に届いているかを検査するために使う。
+   */
+  eventStore: PostgresEventStore;
   close(): Promise<void>;
 }
 
@@ -101,18 +112,26 @@ export async function createExampleRuntime(
   const client = createPostgresClient(databaseUrl);
   await runMigrations(client.pool);
 
-  const { llmProvider, embeddingProvider, mode, llmMode, embeddingMode, usageMeter } =
-    createProviders(env, providerOptions);
+  const {
+    llmProvider,
+    embeddingProvider,
+    mode,
+    llmMode,
+    embeddingMode,
+    usageMeter,
+    cassetteIgnored,
+  } = createProviders(env, providerOptions);
   await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
   const memoryStore = new PostgresMemoryStore(client.db);
   const tenantSettingsStore = new PostgresTenantSettingsStore(client.db);
+  const eventStore = new PostgresEventStore(client.db);
   const runtime = createRuntime({
     memoryStore,
     outboxStore: new PostgresOutboxStore(client.db),
     vectorStore: new PostgresVectorStore(client.db),
     lexicalStore: new PostgresLexicalStore(client.db),
-    eventStore: new PostgresEventStore(client.db),
+    eventStore,
     tenantSettingsStore,
     llmProvider,
     embeddingProvider,
@@ -125,9 +144,11 @@ export async function createExampleRuntime(
     mode,
     llmMode,
     embeddingMode,
+    cassetteIgnored,
     ...(usageMeter !== undefined ? { usageMeter } : {}),
     memoryStore,
     tenantSettingsStore,
+    eventStore,
     embeddingProvider,
     pool: client.pool,
     close: () => closePostgresClient(client),

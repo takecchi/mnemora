@@ -1,5 +1,12 @@
 import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
+import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "./correction-candidates.js";
+import type {
+  CorrectionCandidate,
+  FindCorrectionCandidatesInput,
+  FindCorrectionCandidatesResult,
+} from "./correction-candidates.js";
+import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
 import {
@@ -894,6 +901,288 @@ export interface RestoreArchivedResult {
 }
 
 /**
+ * `runtime.restoreSuperseded` の対象（`docs/memory-model.md` §11 行15
+ * 「`superseded → active`」を書き込む口）。
+ *
+ * 🔴 **粒度の既定は「群」であり、個別の Memory id を渡す形は無い。**`ForgetTarget`/
+ * `RestoreArchivedTarget` の `{ memoryId } | { memoryIds }` という二形は、ここでは
+ * 意図的に採らない。
+ *
+ * **理由**: `superseded` な Memory は `recall()` に出てこない——段1の候補生成が使う
+ * status ゲートは `['active','contested']` 固定である（`recall-runtime.ts` の該当箇所。
+ * `docs/recall.md` §2 段0「スコープの外延」）。⟹ **呼び出し側は「戻したい Memory の id」を
+ * そもそも知る手段を持たない**——`restoreArchived` の呼び出し側が辿れる「recall で
+ * 見つからないものを id で名指しする」という経路が、ここには無い。手元にある唯一の
+ * 取っ手は「置き換えた側（supersede した側）」の id である。
+ *
+ * 🔴 **⚠ `superseded_by_id` が作る群は「1回の操作」とちょうど一致するとは限らない**
+ * （[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md) 冒頭の
+ * 訂正1・訂正4）。`resolveContested` の勝者は前から在る Memory であり、`reextract` の
+ * アンカーも冪等な `ON CONFLICT` 経由で前から在る Memory に解決されることがある——
+ * どちらも「同じ id の下に別々の操作の敗者が積み上がる」余地を残す。`consolidate` の
+ * 統合先だけが常に新規作成である（構造的な保証。下記 `onlyMemoryIds` の doc コメント
+ * 参照）。
+ */
+export type RestoreSupersededTarget = {
+  supersededById: MemoryId;
+  /**
+   * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
+   * 群を「1回の操作」単位に絞るための**任意の**フィルタ。指定すると、対象は
+   * `superseded_by_id = supersededById` の群のうち、このリストに含まれる
+   * `memoryId` だけへ絞られる（積集合）。**省略時は従来どおり群全体が対象**
+   * ——既定は1バイトも変えない。空配列を渡すと対象0件になる（`id = ANY('{}')`
+   * は常に偽であるため、特別扱いのコードは無い）。
+   *
+   * 🔴 **どの id をまとめて渡すかは、mnemora 自身は判定しない**
+   * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+   * 決定2「機械は検出まで」）。呼び出し側の責務:
+   *
+   * `opts.dryRun: true` で `previewRestoreSupersededBy?` を呼び、返る
+   * `candidates[].supersededReason` を見て「どの `memoryId` が同じ操作に
+   * 属するか」を自分で決めてから、ここへ渡す。ADR 0258 が実測した非対称:
+   *
+   * - `supersededReason === "consolidated"`: 同じ reason の候補は、1アンカーの
+   *   下で高々1つの群にしかならない（`consolidate` は統合先の
+   *   `sourceObservationId` を常に `null` にするため、`createMemory` の冪等
+   *   `ON CONFLICT`〔`WHERE source_observation_id IS NOT NULL`〕の対象に
+   *   一度も入らず、統合先は必ず新規作成される——構造的な保証）。
+   *   ⟹ 同じ reason の候補全部をまとめて渡せば、それが1回の操作である。
+   * - `supersededReason === "contested_resolved"`: **1件 = 1回の操作**
+   *   （`resolveContested` は呼び出し1回につきちょうど1件の敗者しか作らない
+   *   ——`packages/core/src/__tests__/resolve-contested-loser-invariant.test.ts`
+   *   の歯が固定する）。⟹ **1件ずつ**渡すこと。まとめて渡すと、同じ勝者が
+   *   複数回勝った別々の操作を、1回の呼び出しで混ぜて戻すことになる。
+   * - 🔴 `supersededReason === "reextract_superseded"` と `null`
+   *   （由来不明）: **既存の情報だけでは操作単位に分割できないことがある。
+   *   ⛔ 割れるという顔をしない。**`reextract` のアンカーは候補列の先頭
+   *   （`memoryIds[0]`）を位置で選ぶだけであり、その候補が冪等な
+   *   `ON CONFLICT` 経由で既存の Memory に解決されると、複数回の別々の
+   *   `reextract` 呼び出しが同じアンカーを共有しうる——このとき
+   *   `meta.reason`/`sourceObservationId`/`extractorVersion` は複数回の
+   *   呼び出しの間で完全に一致しうるため区別できない（ADR 0230 訂正4、
+   *   ADR 0258）。まとめて渡すことは「同じ操作だと確認した」ではなく
+   *   「確認できていないが、たまたま1回の操作かもしれない」という賭けである。
+   *
+   * {@link groupSupersededCandidatesByOperation} が、この判断を機械的に
+   * 補助する任意の純関数として在る——ただし判定はしない・"unknown" を
+   * 隠さない（同関数の doc コメント参照）。
+   */
+  onlyMemoryIds?: MemoryId[];
+};
+
+/**
+ * {@link groupSupersededCandidatesByOperation} が返す1グループ。
+ * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+ * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
+ */
+export type SupersededOperationGroup = {
+  supersededReason: string | null;
+  memoryIds: MemoryId[];
+  /**
+   * この `memoryIds` の区切りが、1回の操作と一致することをどこまで
+   * 保証できるかを正直に示す。⛔ **`"unknown"` は「安全」の意味ではない**
+   * ——「同じ操作かもしれないし、別の操作かもしれない。mnemora はこれを
+   * 区別する情報を持たない」という宣言である。
+   *
+   * - `"structural"`: `consolidate` が作る群。統合先は常に新規作成される
+   *   という構造的な保証により、同じ reason の候補は必ず1操作分である。
+   * - `"per_item"`: `resolveContested` が作る群。1件が必ず1操作
+   *   （`resolve-contested-loser-invariant.test.ts` の歯が固定する不変条件）
+   *   ——このとき `memoryIds` は常にちょうど1件になる。
+   * - `"unknown"`: `reextract` が作る群、または `supersededReason` が
+   *   取れなかった候補。既存の情報だけでは1回の操作と一致するかを
+   *   判定できない（ADR 0230 訂正4、ADR 0258）。
+   */
+  boundaryConfidence: "structural" | "per_item" | "unknown";
+};
+
+/**
+ * `previewRestoreSupersededBy?` が返す候補を、推定される「1回の操作」単位へ
+ * グルーピングする補助（[Issue #515](https://github.com/takecchi/mnemora/issues/515)
+ * 方向①、[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
+ *
+ * 🔴 **これは検出だけである。書き込みには一切触れない**
+ * （[ADR 0223](../../../docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+ * 決定2「機械は検出まで」）。**どのグループを実際に `restoreSuperseded` の
+ * `onlyMemoryIds` へ渡すかは、呼び出し側が決める**——この関数はその判断を
+ * 代行しない。
+ *
+ * グルーピングの規則（`RestoreSupersededTarget.onlyMemoryIds` の doc
+ * コメント参照。ここでは要約だけ）:
+ * - `supersededReason === "consolidated"`: 同じ reason の候補をまとめて
+ *   1グループにする。`boundaryConfidence: "structural"`。
+ * - `supersededReason === "contested_resolved"`: 1件ずつ別グループにする
+ *   （`memoryIds` は常に1件）。`boundaryConfidence: "per_item"`。
+ * - それ以外（`"reextract_superseded"` を含む未知の reason、および
+ *   `null`）: **同じ `supersededReason` の値ごとにまとめて返す**——
+ *   ⛔ **1件ずつには分割しない。**分割すると「1件ずつが別操作である」という
+ *   *偽の構造*を呼び出し側に与える——分けるのは「分からない」を「分かって
+ *   いる」に化けさせる操作であり、`docs/north-star.md` の問い3（この記憶が
+ *   選ばれた理由を、後から説明できるか）に反する。`boundaryConfidence:
+ *   "unknown"` を付けたうえで、まとめた配列をそのまま返す。
+ *
+ * 入力の順序は保持しない（`supersededReason` の初出順にグループを並べる）。
+ * 空配列を渡すと空配列を返す。
+ */
+export function groupSupersededCandidatesByOperation(
+  candidates: ReadonlyArray<{ memoryId: MemoryId; supersededReason: string | null }>,
+): SupersededOperationGroup[] {
+  const groups: SupersededOperationGroup[] = [];
+  const byReason = new Map<string | null, SupersededOperationGroup>();
+
+  for (const candidate of candidates) {
+    const { memoryId, supersededReason } = candidate;
+
+    if (supersededReason === "contested_resolved") {
+      groups.push({
+        supersededReason,
+        memoryIds: [memoryId],
+        boundaryConfidence: "per_item",
+      });
+      continue;
+    }
+
+    const confidence: SupersededOperationGroup["boundaryConfidence"] =
+      supersededReason === "consolidated" ? "structural" : "unknown";
+
+    const existing = byReason.get(supersededReason);
+    if (existing !== undefined) {
+      existing.memoryIds.push(memoryId);
+      continue;
+    }
+    const group: SupersededOperationGroup = {
+      supersededReason,
+      memoryIds: [memoryId],
+      boundaryConfidence: confidence,
+    };
+    byReason.set(supersededReason, group);
+    groups.push(group);
+  }
+
+  return groups;
+}
+
+/** `runtime.restoreSuperseded` の任意オプション。 */
+export interface RestoreSupersededOptions {
+  /**
+   * 監査ログ（`memory_events.meta.reason`）に残る自由文。
+   *
+   * ⚠ **省略時の規律が `RestoreArchivedOptions.reason`/`ForgetOptions.reason` とは
+   * 違う。**あちらは省略すると `meta` に `reason` キー自体を持たせないが、こちらは
+   * 省略すると固定タグ `"unsuperseded"` が入る（`MemoryStore.restoreSupersededBy` の
+   * 契約節、`meta` の doc 参照）。**この操作は群単位（複数の Memory にまたがる）
+   * であり、`meta.supersededById`（外した相手の id）と組み合わせて監査ログから
+   * 「どの群が、なぜ戻ったか」を引けるようにするには、`reason` キー自体が常に
+   * 存在するほうが検索・集計しやすい——1件ずつの CAS である `restoreArchived` とは
+   * 前提が違う、という判断。
+   */
+  reason?: string;
+  /** イベントの `actor`。省略時 `{ type: "system" }`。 */
+  actor?: EventActor;
+  /**
+   * 🔴 **下見（Issue #515、ADR 0237、方向3「戻す前に何が戻るかを返す」）。**
+   * `true` のとき、一切の書き込み（`memories` の `UPDATE`・`memory_events` への
+   * `INSERT`・`reinforce`）を行わず、「実際に呼べば何が戻るか」だけを
+   * {@link RestoreSupersededOutcome} の `"would_restore"` として返す。省略時 `false`
+   * ——⚠ **既定は変えていない。省略・`false` のどちらでも、この PR 以前と1バイトも
+   * 違わない「実際に戻す」経路を通る**（`PurgeOptions.dryRun` と同じ規律。あちらは
+   * 対象 id が既知だが、こちらは「群」を範囲走査で選ぶ点が違う——選ぶ内容は
+   * `MemoryStore.previewRestoreSupersededBy?` が `restoreSupersededBy?` と同じ
+   * `WHERE` で選ぶ。前者が無い adapter では `supported: false`）。
+   */
+  dryRun?: boolean;
+}
+
+/**
+ * `runtime.restoreSuperseded` が対象1件ごとに返す結果。
+ *
+ * `RestoreArchivedOutcome` と違い、`"not_found"`/`"status_not_archived"`/`"conflicted"`/
+ * `"not_attempted"` を持たない——このメソッドは個別 id への compare-and-swap ではなく、
+ * `MemoryStore.restoreSupersededBy` が1トランザクションで選んで戻した行の集合を
+ * そのまま返すだけである。`status = 'superseded'` を条件に含めた `WHERE` 句が選定
+ * そのものを兼ねるため、「対象ではあったが状態が違った」という分岐がそもそも
+ * 発生しない——一致しない行は最初から選ばれていない。
+ *
+ * - `"restored"`: `status` を `"superseded"` から `"active"` へ動かし、
+ *   `superseded_by_id` を `null` にし、`memory_events` に `kind: "unsuperseded"`
+ *   （`MemoryEventKind` が本 PR で足す新しい値）を1件積んだ。続けて試みた
+ *   `MemoryStore.reinforce` が失敗した場合だけ `reinforceError` が入る
+ *   （`RestoreArchivedOutcome.reinforceError` と同じ規律——status の復帰そのものは
+ *   reinforce の成否と無関係に確定している）。`decayFloorAt` は reinforce の
+ *   成否に関わらず、この呼び出しが最後に観測した値（reinforce が成功していれば
+ *   その結果、失敗していれば復帰直後の値）。
+ * - `"would_restore"`: **Issue #515、ADR 0237。**`opts.dryRun: true` のとき、`status = 'superseded'`
+ *   かつ `superseded_by_id` が対象と一致する行について、実際に呼べば `"restored"` に
+ *   なったはずであることを示す。**書き込みは一切起きていない**（`reinforce` も呼ばない）。
+ *   `supersededReason` は `MemoryStore.previewRestoreSupersededBy?` の doc コメント参照
+ *   ——「なぜその群に入っているか」を運ぶが、`memory_events` に一致する行が無ければ
+ *   `null`（**取れないことを `null` で正直に返す。取れるふりをしない**）。
+ * - `"failed"`: 🔴 **現在の実装では到達しない防御的な分類**（`PurgeOutcome.conflicted`
+ *   と同じ立場——`forget`/`restoreArchived` と同じ「上限の無い再試行にしない安全弁」の
+ *   一族だが、こちらは元になる並行の競合そのものが構造的に起こらない）。
+ *   `restoreSupersededBy` の1トランザクションが成功したあと、個々の Memory について
+ *   `Runtime` が行うのは `reinforce` の呼び出しだけであり、その失敗は必ず
+ *   `reinforceError` に運ぶ（`"failed"` には落ちない）。このメンバーは、将来 store 側が
+ *   行ごとの部分失敗を報告するようになったときのための予約であり、今日のコードパスからは
+ *   一度も生成されない。
+ */
+export type RestoreSupersededOutcome =
+  | {
+      memoryId: MemoryId;
+      kind: "restored";
+      previousStatus: "superseded";
+      decayFloorAt: Date;
+      reinforceError?: string;
+    }
+  | {
+      memoryId: MemoryId;
+      kind: "would_restore";
+      previousStatus: "superseded";
+      supersededReason: string | null;
+    }
+  | { memoryId: MemoryId; kind: "failed"; error: string };
+
+/**
+ * `runtime.restoreSuperseded` の結果。
+ *
+ * ⛔ `restoredCount` のような派生値を持たない（`RestoreArchivedResult`/`ForgetResult` と
+ * 同じ理由——`outcomes` を数えれば得られる値を欄として複製すると、片方だけ直して
+ * ずれるという、このリポジトリが繰り返し踏んできた欠陥を新しく作ることになる）。
+ */
+export interface RestoreSupersededResult {
+  /**
+   * `opts.dryRun` の有無で、見ている口が違う。**`dryRun` 省略・`false`**:
+   * `MemoryStore.restoreSupersededBy?` が実装されていたか。**`dryRun: true`**:
+   * `MemoryStore.previewRestoreSupersededBy?` が実装されていたか（Issue #515）
+   * ——2つの口は独立した任意メソッドであり、片方だけを実装した adapter があり得る。
+   * どちらの場合も `false` のとき `outcomes` は常に空配列**——`SweepArchiveResult.supported`
+   * と同じ規律（「対応していないので0件」であって「対応していて0件だった」ではない。
+   * 呼び出し側はこの2つを取り違えないよう、必ず `supported` を先に見ること）。
+   */
+  supported: boolean;
+  /**
+   * 置き換えた側（新しいほう）の id——`target.supersededById` をそのまま運ぶ。
+   *
+   * 🔴 **この操作は、この id が指す Memory に一切触れない。**消さない・`forget` しない・
+   * `status` を変えない。呼び出し側がそれを見落とさないよう、返り値自身にも明示的に
+   * 運ぶ——`recall()` は戻した直後、古いほう（`outcomes` に載る Memory）も新しいほう
+   * （この `supersedingMemoryId`）も両方 `active` として返しうる。始末したいなら
+   * 呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、あるいは
+   * `markContested` で対にすること——**この分岐をこのメソッドの `opts` には足さない**
+   * （`Runtime.restoreSuperseded` の doc コメント「やらないこと」参照）。
+   */
+  supersedingMemoryId: MemoryId;
+  /**
+   * `MemoryStore.restoreSupersededBy` が返した `restored` の順序をそのまま引き継ぐ
+   * （順序の契約は store 側に委ねる。`RestoreArchivedResult.outcomes` のような
+   * 「入力と同じ順序」という契約は無い——入力がそもそも id の配列ではなく単一の群
+   * 指定子であるため）。
+   */
+  outcomes: RestoreSupersededOutcome[];
+}
+
+/**
  * `runtime.purge` の対象（Issue #198、ADR 0124）。`ForgetTarget`/`RestoreArchivedTarget` と
  * 意図的に同じ形——`{ memoryId }`（単数）と `{ memoryIds }`（複数）のどちらでも同じ意味論であり、
  * 内部で `MemoryId[]` に正規化してから処理する。
@@ -1204,6 +1493,68 @@ export interface Runtime {
    */
   getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null>;
   /**
+   * [Issue #369](https://github.com/takecchi/mnemora/issues/369) (C)「訂正の口」:
+   * 採用側が「これは訂正だ」と明示的に宣言したとき、mnemora 側が**既存の recall で
+   * 相手の候補を探す**ための口。[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)。
+   *
+   * 🔴 **測定の結果、「機械が相手を選んでそのまま `supersede` する」という形は採らないと
+   * 決まった**——訂正してはいけない8ケース中6ケースで、失効させてはいけない事実を
+   * 1位に置いてしまい、閾値をどこに引いても「訂正すべき」と「訂正してはいけない」を
+   * 分離できなかった（実測、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。**⟹ この口は「候補を返すところまで」である。**
+   *
+   * この口が**やらないこと**（設計の芯。曲げない）:
+   * - ⛔ **書き込みを1件もしない。** `Memory` の `status` を一切動かさない。
+   *   `memory_events` に一切積まない。**`markContested`/`resolveContested` の
+   *   *前*に立つ**——「訂正の相手をこれに決めて、実際に対にする／置き換える」という
+   *   確定と書き込みは、常に採用側が `markContested`/`resolveContested`/
+   *   `reextract` 等の既存の書き込み口を明示的に呼んで行う。この口はその前段の
+   *   「相手を探す」だけを引き受ける。
+   * - ⛔ **LLM を1回も呼ばない。** 相手探しは既存の `recall()`（ANN + 既存のスコア
+   *   `strategies/scoring.ts`）だけで行う——訂正かどうかの判定・相手の良し悪しの
+   *   判定のどちらにも LLM を使わない。
+   * - ⛔ **新しい閾値を置かない。** 候補の足切りは `recall()` の段2が使う既存の
+   *   `RecallQuery.scoreThreshold`（既定 `DEFAULT_SCORE_THRESHOLD` = 0.1）を
+   *   そのまま通すだけであり、この口専用の閾値（「これ以上のスコアなら訂正の
+   *   相手として妥当」）は発明しない。**理由は上記の測定そのもの**——閾値では
+   *   「訂正すべき」と「訂正してはいけない」を分離できないことが分かっているので、
+   *   分離できない閾値を1つ増やしても北極星の問い3（説明できるか）に答えられる
+   *   ものにならない。
+   * - ⛔ **新しい探索を書かない。** 既存の `recall(ctx, { text: input.text })` を
+   *   **1回だけ**呼ぶ——`consolidate`/`reflect` の `{ seedMemoryId }` 形が
+   *   「新しい『似ている』の判定を作らない」ために採った作法と同じ（`ConsolidateTarget`
+   *   の doc コメント参照）。`text` 以外のフィールド（`limit`/`channels`/
+   *   `overFetchFactor`/`scoreThreshold` 等）は一切変えず、`recall()` の既定に委ねる。
+   *
+   * ⭐ **`CorrectionCandidate.recallRank` は `excludeMemoryIds` で除外した後に詰め
+   * 直さない。** `recall()` が返した並びでの、1始まりの順位をそのまま運ぶ——
+   * 採用側が「これは recall の何位だった候補か」を、除外の有無に関係なく説明できる
+   * ようにするため（北極星の問い3）。1位を自己除外で落としても、次に残る候補の
+   * `recallRank` は「2」のままである。
+   *
+   * ⛔ **この口には「探していない」状態が無い。** `findCorrectionCandidates` を呼んだら
+   * 必ず `recall()` を1回呼ぶ——`limit` の検証で早期に `RangeError` を投げる場合を除き、
+   * 呼び出しが成立した以上、探索そのものをスキップする経路は無い。「見つからなかった」は
+   * `FindCorrectionCandidatesResult.outcome: "no_candidates"` と、`recall()` から
+   * そのまま運ばれる `omitted`（「候補はあったが除外条件で落ちた」等の内訳）の
+   * **両方**で説明される——`ConsolidateOutcome`/`ReflectOutcome` と同じ「無い」の
+   * 分類（ADR 0008）の適用。
+   *
+   * ⚠ **`tick()`/`observe()` からは一度も呼ばれない。** `markContested` と同じ立場——
+   * 呼び出し側が明示的に呼んだときだけ動く。「訂正の口」は Phase 1 の自動化（背景で
+   * 勝手に走る訂正）を意図しておらず、採用側が UI・ワークフローの中で明示的に
+   * 「これは訂正だ」と宣言した瞬間にだけ動く。
+   *
+   * 実装（`createRuntime` 内）: `input.limit` が指定されていて整数でない・`1` 未満なら
+   * `RangeError` を投げる（`markContested` の `firstId === secondId` と同じ位置づけ——
+   * 書き込みも `recall()` も試みる前に落とす）。そうでなければ
+   * `recall(ctx, { text: input.text })` を1回呼び、`excludeMemoryIds` を `Set` にして
+   * 除外し、`limit` 件（既定 {@link DEFAULT_CORRECTION_CANDIDATE_LIMIT}）に切って返す。
+   */
+  findCorrectionCandidates(
+    ctx: Ctx,
+    input: FindCorrectionCandidatesInput,
+  ): Promise<FindCorrectionCandidatesResult>;
+  /**
    * ADR 0028: ADR 0013 が未解決のまま残した「失敗した抽出をやり直す」操作。
    * 指定した Observation に対してもう一度 `extractCandidates` を走らせ、成功したら
    * 同じ `(sourceObservationId, extractorVersion)` を持つ既存の `active` Memory のうち
@@ -1242,10 +1593,18 @@ export interface Runtime {
    * `docs/memory-model.md` §11 行8「`decay_floor_at < now()` を検出する低頻度の掃引…
    * → `status='archived'` + `archived` イベント」を実行する。
    *
-   * `MemoryStore.archiveDecayed`（任意メソッド）へそのまま素通しする——`reembed`
-   * （ADR 0079）と同じ形。この口自身は判定ロジックを持たない。引数の型
-   * {@link ArchiveDecayedOptions} を store 側とそのまま共有しているのも同じ理由
-   * （同じ形の型を2つ置くと片方だけ直したときに黙ってずれる）。
+   * `MemoryStore.archiveDecayed`（任意メソッド）へ素通しする——`reembed`（ADR 0079）と
+   * 同じ形。引数の型 {@link ArchiveDecayedOptions} を store 側とそのまま共有している
+   * のも同じ理由（同じ形の型を2つ置くと片方だけ直したときに黙ってずれる）。
+   *
+   * ⭐ **`opts.clock` を省略した場合に限り、この口が `tenant_settings.decay_clock` を
+   * 読んで補う**（Issue #364 /
+   * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
+   * `'wall'`（既定）なら `decayFloorAt <= now` のまま、`'activity'`/`'either'` なら
+   * `nowSeq`（`tenant_activity.activity_seq`）も併せて読んで store へ渡す。**`opts.clock`
+   * を明示で渡したときはそちらが勝ち、この口は `tenant_settings`/`tenant_activity` を
+   * 一切読まない。** `decay_clock` を設定していないテナントの挙動は本 ADR の前後で
+   * 1バイトも変わらない。
    *
    * store がこの口を実装していなければ `{ supported: false, archived: [], reachedLimit:
    * false }` を返す——黙って0件を返すのではなく「対応していない」と名指しする
@@ -1309,8 +1668,11 @@ export interface Runtime {
    * 別途呼ぶこと」だった。**この決定は ADR 0153 が覆した。** 理由は、ADR 0153 が
    * `recall()` に既定 ON の忘却ゲート（`decayFloorAt <= now` の Memory を候補から
    * 除外する）を導入したことで、上記の「引き受けた負債」が実害に変わったため——
-   * `sweepArchive` が `archived` にする選定条件はまさに `decayFloorAt <= now` であり、
-   * `restoreArchived` の対象は定義上すべてこの条件を満たす。⟹ `reinforce` を
+   * `sweepArchive` が `archived` にする選定条件は、テナントの `decay_clock`（既定
+   * `'wall'`）に従う——`'wall'` なら `decayFloorAt <= now`、`'activity'`/`'either'`
+   * なら `decayFloorSeq <= nowSeq` を軸に含む（Issue #364 /
+   * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
+   * `restoreArchived` の対象は定義上、いずれの軸であってもこの条件を満たす。⟹ `reinforce` を
    * 別途呼ばない限り、`status` は `"active"` に戻っても**既定では recall に二度と
    * 現れない**——呼び出し側から見ると「restored と言われたのに何も返ってこない」。
    * これは `docs/north-star.md`「目指す姿」の逐語「必要な場合だけ過去の記憶を
@@ -1339,11 +1701,119 @@ export interface Runtime {
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult>;
   /**
+   * `docs/memory-model.md` §11 行15「`superseded → active`」を、呼び出し側が
+   * **明示的に**取り戻す。`consolidate`/`reextract`/`resolveContested` が閉じる方向
+   * （`active` → `superseded`）だけを持っていた片道を、開く方向（`superseded` →
+   * `active`）で埋める——`restoreArchived`（ADR 0122）が `sweepArchive`（ADR 0114）に
+   * 対して果たしたのと同じ役割を、`superseded` という別の起点に対して果たす。
+   *
+   * 🔴 **粒度の既定は「群」である。**`target: { supersededById }` は、置き換えた側
+   * （新しいほう）の id を指す——`target.onlyMemoryIds` を省略した場合、個別の
+   * Memory id を渡す形は無い。理由は {@link RestoreSupersededTarget} の doc
+   * コメントを参照（要約: `superseded` な Memory は `recall()` に出てこないため、
+   * 呼び出し側は戻したい id を知る手段をそもそも持たない。手元にある唯一の
+   * 取っ手が「置き換えた側」である）。
+   *
+   * ⭐ **[Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
+   * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）:
+   * `target.onlyMemoryIds` を指定すると、群のうちこの id 集合だけに対象を絞る。**
+   * 省略時は従来どおり群全体——**既定は1バイトも変えない。**`MemoryStore.
+   * restoreSupersededBy?`/`previewRestoreSupersededBy?` の `filter.onlyMemoryIds`
+   * へそのまま素通しする（下の手順2参照）。どの id をまとめて渡すべきかは
+   * {@link RestoreSupersededTarget.onlyMemoryIds} の doc コメントを参照——
+   * mnemora 自身はこの判断をしない。
+   *
+   * 🔴 **`MemoryStore` に新しい任意メソッド `restoreSupersededBy?` を足している。**
+   * `restoreArchived` が `updateStatusWithEvent`（既存の必須メソッド）にそのまま
+   * 収まったのとは違う——理由は {@link MemoryStore.restoreSupersededBy} の doc
+   * コメントを参照（要約: (1) 個別 CAS ではなく群単位の範囲走査+一括更新であること、
+   * (2) `updateStatusWithEvent` には `superseded_by_id` を `NULL` へ戻す経路が
+   * 型にも SQL にも無いこと、の2点）。**adapter がこの口を実装していなければ
+   * `{ supported: false, supersedingMemoryId, outcomes: [] }` を返す**——
+   * `sweepArchive`/`archiveDecayed?` と同じ「対応していない、と名指しする」形
+   * （ADR 0082）。フォールバック経路は持たない。
+   *
+   * 🔴 **`opts.dryRun: true`（Issue #515、ADR 0237）は、ここまでの「実際に戻す」経路を
+   * 一切通らない別の枝である。**呼ぶのは `MemoryStore.previewRestoreSupersededBy?`
+   * （もう1つの新しい任意メソッド、`restoreSupersededBy?` とは独立）だけで、
+   * `memories` の更新も `memory_events` への追記も `reinforce` の呼び出しも起きない。
+   * 対象の選び方（`WHERE`）は `restoreSupersededBy?` と完全に一致させてあるので、
+   * `dryRun: true` で見た `outcomes`（`kind: "would_restore"`）の `memoryId` 集合は、
+   * 直後に `dryRun` 無しで呼んだときの `outcomes`（`kind: "restored"`）の `memoryId`
+   * 集合と一致する——**ただし「一致することを保証する仕組み」は無い**。2回の呼び出しの
+   * 間に別の書き込みが起きれば、当然ずれる（他の compare-and-swap 系メソッドと同じ、
+   * 「見てから呼ぶ」に内在する race）。`previewRestoreSupersededBy?` を実装しない
+   * adapter では `dryRun: true` も `{ supported: false, supersedingMemoryId,
+   * outcomes: [] }`——`restoreSupersededBy?` を実装済みでも、この2つは独立した
+   * 任意メソッドなので免除されない。
+   *
+   * 手順:
+   * 1. `deps.memoryStore.restoreSupersededBy` が無ければ
+   *    `{ supported: false, supersedingMemoryId: target.supersededById, outcomes: [] }`。
+   * 2. 在れば `restoreSupersededBy(ctx, target.supersededById, { reason, actor, at: now },
+   *    { onlyMemoryIds: target.onlyMemoryIds })` を呼ぶ——store 側が1トランザクションで
+   *    対象行（`status = 'superseded'` かつ `superseded_by_id = target.supersededById`、
+   *    `target.onlyMemoryIds` が在れば追加で `id` がその集合に含まれる行）を選び、
+   *    `status='active'`・`superseded_by_id=null` へ更新し、行ごとに `memory_events` へ
+   *    `kind: 'unsuperseded'` を積んで、戻した `Memory[]` を返す。
+   * 3. `status` の復帰に成功した各対象について、続けて `MemoryStore.reinforce` を
+   *    呼ぶ——理由は `restoreArchived` と同じ「ADR 0153 の忘却ゲート」だが、
+   *    **前提が違う**点に注意（下記「⚠ reinforce する理由」）。`reinforce` が
+   *    例外を投げても、既に成功した `status` の復帰は握り潰さない——`kind` は
+   *    `"restored"` のままで、失敗は `reinforceError` に運ぶ（`RestoreArchivedOutcome`
+   *    と同じ規律。`restoreArchived` の doc コメント参照）。
+   * 4. 対象が0件なら `{ supported: true, supersedingMemoryId, outcomes: [] }`。
+   *    **例外にしない。**
+   * 5. `target.supersededById` に実在しない・形式不正な id を渡しても例外にしない
+   *    （対象0件と同じ——`MemoryStore.restoreSupersededBy` の契約節参照）。
+   *
+   * ⚠ **reinforce する理由は `restoreArchived` と同じだが、前提は違う。** ADR 0153 が
+   * `recall()` に既定 ON の忘却ゲート（`decayFloorAt <= now` の Memory を候補から
+   * 除外する）を導入したため、`status` だけを戻しても `decayFloorAt` が過去のままなら
+   * recall に出てこない＝復旧になっていない、という事情は同じである。ADR 0048
+   * （`reinforce` は減衰の起点を巻き戻さない）により、床がまだ未来の Memory に対して
+   * 呼んでも縮まないため、無条件に呼んで安全であることも同じ。**しかし
+   * `restoreArchived` の対象（`sweepArchive` が `archived` にした行）は、掃引の選定
+   * 条件そのものにより床が必ず過去である**のに対し、**`superseded` な Memory の床は
+   * 過去とは限らない**——`consolidate`/`reextract` は「まだ活発に使われている
+   * Memory を統合する」ことを妨げておらず、統合された直後の Memory の
+   * `decayFloorAt` は先の未来を指しうる。⟹ **「`restoreArchived` と形を揃えた」から
+   * reinforce するのではなく、「recall の忘却ゲートが同じ土俵にある」から reinforce
+   * する**——床が既に未来を指す対象に対しても、ADR 0048 により安全に呼べるので、
+   * 呼ぶかどうかを対象ごとに出し分ける理由が無い。
+   *
+   * ⛔ **この操作が「やらないこと」（設計上、意図的に持たない機能）:**
+   * - **置き換えた側（`target.supersededById` が指す Memory）に一切触らない。**
+   *   消さない・`forget` しない・`status` を変えない。理由:
+   *   (1) `consolidate` の統合先は、supersede が誤りだったとしても中身自体は
+   *   正しいことがある——黙って消すと作業を破壊する。(2) `forget` が既に在る
+   *   ＝呼び出し側が明示的に選べる。(3) `docs/north-star.md` の迷ったときの問い3
+   *   （説明できるか）——操作1つにイベント1つのほうが後から辿れる。(4) 同じ問い4
+   *   （推論と事実を区別できるか）——統合先の `provenance.kind` は多くの場合
+   *   `'consolidated'`（推論由来）、戻す側は `'stated'` のことが多い。どちらを
+   *   残すかをこの枠組みが勝手に決めない。
+   * - ⟹ **戻した直後は、古いほう（`outcomes` に載る Memory）も新しいほう
+   *   （`supersedingMemoryId`）も両方 `active` であり、`recall()` は両方を返しうる。**
+   *   始末したいなら呼び出し側が `forget(ctx, supersedingMemoryId)` を別途呼ぶ、
+   *   あるいは `markContested` で対にすること。**この分岐をこのメソッドの `opts` には
+   *   足さない**——1つの操作が2つの意思決定（「戻す」と「置き換えた側をどうするか」）
+   *   を暗黙に束ねないため。
+   *
+   * `recall()` 自身は一切変更していない——`restoreArchived` と同じく、`status` が
+   * `'active'` へ戻った時点で既存の status ゲートへ他の `active` な Memory と全く
+   * 同じ経路で合流する。
+   */
+  restoreSuperseded(
+    ctx: Ctx,
+    target: RestoreSupersededTarget,
+    opts?: RestoreSupersededOptions,
+  ): Promise<RestoreSupersededResult>;
+  /**
    * Issue #102: Memory を**論理的に**忘れさせる。
    *
    * **行も `content` も消さない。**`status` を `'forgotten'` へ動かすだけで、
-   * 物理削除（`purge()`）は Phase 2 の別操作である（docs/memory-model.md
-   * 「forget() と purge() を分ける」）。`status` の更新と `memory_events` への
+   * 物理削除（`purge()`）は別操作である（{@link Runtime.purge}、Issue #198 / ADR 0124。
+   * docs/memory-model.md「forget() と purge() を分ける」）。`status` の更新と `memory_events` への
    * `kind: 'forgotten'` の追記は `MemoryStore.updateStatusWithEvent`
    * （ADR 0031）で**同一トランザクション**として行う——片方だけ起きることはない。
    *
@@ -1574,6 +2044,75 @@ export interface Runtime {
     resolution: ContestedResolution,
     opts?: ResolveContestedOptions,
   ): Promise<ResolveContestedResult>;
+  /**
+   * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
+   * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
+   * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
+   * （書き込み、ADR 0134/ADR 0150）の**間**——「選択」の段（Issue #369、
+   * [ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+   *
+   * 実体は `examples/chat/src/correction-demo.ts` に**だけ**あった3態の状態機械
+   * （選択待ち／候補外／解決）を、`packages/core` の公開 API へ持ち上げたものである
+   * ——`examples/chat` は `private: true` であり出荷されない。⟹ この口が無い間、
+   * 北極星 項目5 は「出荷される面」からは一度も駆動できなかった。
+   *
+   * ⛔ **この口も「相手を選ぶ」ことは一切しない。** {@link ApplyCorrectionInput.correctedId}
+   * は必ず呼び出し側が渡す——`discovery.candidates[0]` を自動的に採る経路は無い。
+   * この設計は [ADR 0134](../../../docs/decisions/0134-mark-contested-explicit-operation.md)
+   * 決定2・[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
+   * の核心（「機械は選ばない」）をそのまま引き継ぐ——ADR 0232 が実測した危険
+   * （B群: 訂正してはいけない8件中、棄権率 0/8・深い誤爆 6/8。閾値は分離できない）が、
+   * この口を足したことで再び現れることはない。
+   *
+   * 手順（`createRuntime` 内の実装。他に判定は無い——ここが実装の全体である）:
+   * 1. `input.correctedId` が `undefined` なら、何も呼ばずに
+   *    `{ kind: "awaiting_choice" }` を返す。
+   * 2. `input.discovery.candidates` から `memoryId === input.correctedId` を探す。
+   *    見つからなければ、何も呼ばずに
+   *    `{ kind: "not_a_candidate", correctedId: input.correctedId }` を返す。
+   * 3. 見つかれば `markContested(ctx, input.correctedId, input.correctingId, {
+   *    actor: input.actor, reason: input.reason })` を呼ぶ。
+   * 4. `input.resolution` が `undefined` なら、ここで止まり
+   *    `{ kind: "contested", ..., markResult }` を返す——`resolveContested` は
+   *    一度も呼ばない。
+   * 5. `input.resolution` があれば、続けて `resolveContested(ctx, input.correctedId,
+   *    input.correctingId, input.resolution, { actor: input.actor, reason: input.reason })`
+   *    を呼び、`{ kind: "resolved", ..., markResult, resolveResult }` を返す。
+   *
+   * ⛔ **`markContested`/`resolveContested` 自身の失敗（`ineligible`/`conflict`/
+   * `not_attempted`）を握り潰さない。** {@link MarkContestedResult}/{@link ResolveContestedResult}
+   * をそのまま `markResult`/`resolveResult` として運ぶ——`applyCorrection` はそれらを
+   * 別の顔（例外・`boolean`）に変換しない。`kind: "resolved"` は「`resolveContested` まで
+   * 呼んだ」ことだけを意味し、実際に解決が成功したことは `resolveResult.outcome.kind`
+   * を見て判断すること。
+   *
+   * ⛔ **この口自身は監査理由を自動生成しない。** `input.reason` は
+   * {@link buildCorrectionReason}（ADR 0238 が定めた形を `packages/core` へ持ち上げたもの）
+   * で呼び出し側が組み立てた文字列、またはその他の自由文をそのまま `markContested`/
+   * `resolveContested` の両方へ渡すだけである——`meta.note` に載る `recallId` が
+   * `RecallResult.explain`（`getRecall` 経由）への橋になる、という ADR 0238 の形は
+   * 変わらない。
+   *
+   * ⭐ **`markContested` だけを呼んだ後（`resolution` を渡さない呼び出し）、別の
+   * `applyCorrection` 呼び出しで改めて `resolution` を渡す、という2段の使い方ができる。**
+   * `applyCorrection` は呼び出しの間で状態を持たない——2回目の呼び出しでも手順3で
+   * `markContested` は呼ばれるが、対象は既に `status: 'contested'` なので
+   * {@link MarkContestedResult} は書き込み無しで `ineligible` を返すだけであり、続く
+   * `resolveContested` は正常に解決へ進む。`examples/chat/src/correction-demo.ts` の
+   * `runCorrectionDemo` がこの2段呼び出しを使い、`markContested` 相当の直後に
+   * `recall()` で対（mandatory companion）を見せてから解決へ進む、という Issue #303
+   * 由来の実演を保っている。
+   *
+   * ⚠ **`correctedId === correctingId` を特別扱いしない。** 手順2の照合を通り抜けた場合
+   * （呼び出し側が `excludeMemoryIds` で自己除外していない等）、`markContested` 自身が
+   * `firstId === secondId` の `RangeError` を投げる——`applyCorrection` はそれを
+   * 捕まえない（`markContested`/`resolveContested` の「開く前に落とす」位置をそのまま
+   * 引き継ぐ、呼び手のバグ）。
+   *
+   * ⚠ **`tick()`/`observe()` からは一度も呼ばれない。** `markContested`/`resolveContested`
+   * と同じ立場——呼び出し側が明示的に呼んだときだけ動く。
+   */
+  applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
   /**
    * Issue #103（ADR 0089）: 複数の Memory を1件に統合する（docs/vision.md「5動詞」の1つ）。
    *
@@ -2464,25 +3003,87 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return deps.memoryStore.getRecall(ctx, recallId);
   }
 
+  /**
+   * `Runtime.findCorrectionCandidates` の実装（Issue #369 (C)、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。doc コメントは
+   * interface 側（`findCorrectionCandidates` の JSDoc）にある——ここはアルゴリズムそのもの
+   * だけ。`consolidate` の `{ seedMemoryId }` 形と同じく、`recall()` を1回呼ぶだけで
+   * 新しい「似ている」の判定を作らない。
+   */
+  async function findCorrectionCandidates(
+    ctx: Ctx,
+    input: FindCorrectionCandidatesInput,
+  ): Promise<FindCorrectionCandidatesResult> {
+    if (input.limit !== undefined && (!Number.isInteger(input.limit) || input.limit < 1)) {
+      throw new RangeError("Runtime.findCorrectionCandidates: limit must be a positive integer");
+    }
+    const limit = input.limit ?? DEFAULT_CORRECTION_CANDIDATE_LIMIT;
+
+    // `text` 以外のフィールドを一切渡さない——閾値・limit・channels・overFetchFactor は
+    // すべて recall() の既定に委ねる（interface 側の doc コメント参照）。
+    const recallResult = await recall(ctx, { text: input.text });
+
+    const excludeSet = new Set(input.excludeMemoryIds ?? []);
+    // recallRank は「recall() が返した並びでの、1始まりの順位」——除外の前に固定する。
+    const ranked = recallResult.memories.map((memory, index) => ({
+      memory,
+      recallRank: index + 1,
+    }));
+    const remaining = ranked.filter(({ memory }) => !excludeSet.has(memory.memoryId));
+    const excludedCount = ranked.length - remaining.length;
+
+    const candidates: CorrectionCandidate[] = remaining
+      .slice(0, limit)
+      .map(({ memory, recallRank }) => ({
+        memoryId: memory.memoryId,
+        digest: memory.digest,
+        recallRank,
+        score: memory.score,
+        retrievedVia: memory.retrievedVia,
+      }));
+
+    return {
+      recallId: recallResult.recallId,
+      candidates,
+      omitted: recallResult.omitted,
+      explain: recallResult.explain,
+      outcome: candidates.length > 0 ? "candidates" : "no_candidates",
+      recalledCount: recallResult.memories.length,
+      excludedCount,
+    };
+  }
+
   async function reembed(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
     return deps.memoryStore.requeueEmbedJobs(ctx, opts);
   }
 
   /**
-   * `Runtime.sweepArchive` の実装（ADR 0114）。doc コメントは interface 側にある
-   * ——ここは「口が在るかどうかで分岐する」というアルゴリズムそのものだけ。
+   * `Runtime.sweepArchive` の実装（ADR 0114、Issue #364 /
+   * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
+   * doc コメントは interface 側にある——ここは「口が在るかどうかで分岐する」という
+   * アルゴリズムと、`opts.clock` 省略時の解決の2つだけ。
    *
    * `deps.memoryStore.archiveDecayed` を一度ローカル変数へ受けてから `undefined` を
    * 判定するのは、ADR 0100 の `supersedeWithNewMemories` 呼び出しと同じ作法——
    * `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す必要があるため
    * （分割代入したメソッドは `this` を失うので、呼び出し時に元のオブジェクトを渡す）。
+   *
+   * ADR 0186: `opts.clock` を省略したら `tenant_settings.decay_clock` に従う
+   * （`resolveActivityClockInputs`/`resolveReinforceNowSeq` と同じ `readDecayClock`/
+   * `readActivitySeq` を使う、同じ規律）。**`opts.clock` を明示で渡した呼び出し元の
+   * 挙動は変えない**（`??` で省略時だけ補う）。解決した `clock` が `'wall'` のときは
+   * `tenant_activity` を一度も読まない——`resolveActivityClockInputs` 等と同じ理由で、
+   * `decay_clock` を設定していないテナント（既定 `'wall'`）の挙動を1バイトも変えない。
    */
   async function sweepArchive(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<SweepArchiveResult> {
     const archiveDecayed = deps.memoryStore.archiveDecayed;
     if (archiveDecayed === undefined) {
       return { supported: false, archived: [], reachedLimit: false };
     }
-    const result = await archiveDecayed.call(deps.memoryStore, ctx, opts);
+    const clock = opts.clock ?? (await readDecayClock(deps.tenantSettingsStore, ctx));
+    const nowSeq =
+      opts.nowSeq ??
+      (clock === "wall" ? undefined : await readActivitySeq(deps.tenantSettingsStore, ctx));
+    const result = await archiveDecayed.call(deps.memoryStore, ctx, { ...opts, clock, nowSeq });
     return { supported: true, archived: result.archived, reachedLimit: result.reachedLimit };
   }
 
@@ -2630,6 +3231,110 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     return { outcomes };
+  }
+
+  /**
+   * `Runtime.restoreSuperseded` の実装。doc コメントは interface 側
+   * （`restoreSuperseded` の JSDoc）にある——ここはアルゴリズムそのものだけ。
+   *
+   * `sweepArchive` と同じ「口が在るかどうかで分岐する」骨格
+   * （`deps.memoryStore.restoreSupersededBy` を一度ローカル変数へ受けてから
+   * `undefined` を判定し、`.call(deps.memoryStore, ...)` で `this` を明示的に
+   * 束ね直す——分割代入したメソッドは `this` を失うため。ADR 0100 の
+   * `supersedeWithNewMemories` 呼び出しと同じ作法）。
+   */
+  async function restoreSuperseded(
+    ctx: Ctx,
+    target: RestoreSupersededTarget,
+    opts?: RestoreSupersededOptions,
+  ): Promise<RestoreSupersededResult> {
+    const supersedingMemoryId = target.supersededById;
+
+    // Issue #515、ADR 0237: `opts.dryRun` は既存の既定（省略時・false 時は実際に戻す）を
+    // 1バイトも変えない別の枝——別のメソッド（`previewRestoreSupersededBy?`）へ
+    // 分岐するだけで、下の「実際に戻す」経路には一切触れない。
+    if (opts?.dryRun === true) {
+      const previewRestoreSupersededBy = deps.memoryStore.previewRestoreSupersededBy;
+      if (previewRestoreSupersededBy === undefined) {
+        return { supported: false, supersedingMemoryId, outcomes: [] };
+      }
+      const { candidates } = await previewRestoreSupersededBy.call(
+        deps.memoryStore,
+        ctx,
+        supersedingMemoryId,
+        { onlyMemoryIds: target.onlyMemoryIds },
+      );
+      return {
+        supported: true,
+        supersedingMemoryId,
+        outcomes: candidates.map((c): RestoreSupersededOutcome => ({
+          memoryId: c.memoryId,
+          kind: "would_restore",
+          previousStatus: "superseded",
+          supersededReason: c.supersededReason,
+        })),
+      };
+    }
+
+    const restoreSupersededBy = deps.memoryStore.restoreSupersededBy;
+    if (restoreSupersededBy === undefined) {
+      return { supported: false, supersedingMemoryId, outcomes: [] };
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
+    const { restored } = await restoreSupersededBy.call(
+      deps.memoryStore,
+      ctx,
+      supersedingMemoryId,
+      {
+        reason: opts?.reason,
+        actor,
+        at: clock.now(),
+      },
+      { onlyMemoryIds: target.onlyMemoryIds },
+    );
+
+    if (restored.length === 0) {
+      return { supported: true, supersedingMemoryId, outcomes: [] };
+    }
+
+    // ADR 0165 決めたこと16 と同じ理由（`restoreArchived` の実装コメント参照）:
+    // この呼び出し全体で1回だけ読む。
+    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+
+    const outcomes: RestoreSupersededOutcome[] = [];
+    for (const memory of restored) {
+      // status の復帰は既に `restoreSupersededBy` の1トランザクションで成立している
+      // ——ここから先は `restoreArchived` と同じ「reinforce 専用の内側の try/catch」
+      // （復帰の成功を reinforce の失敗で握り潰さない）。
+      let decayFloorAt = memory.decayFloorAt;
+      let reinforceError: string | undefined;
+      try {
+        const reinforced = await deps.memoryStore.reinforce(
+          ctx,
+          memory.id,
+          clock.now(),
+          reinforceOpts,
+        );
+        decayFloorAt = reinforced.decayFloorAt;
+      } catch (err) {
+        reinforceError = err instanceof Error ? err.message : String(err);
+      }
+
+      outcomes.push(
+        reinforceError === undefined
+          ? { memoryId: memory.id, kind: "restored", previousStatus: "superseded", decayFloorAt }
+          : {
+              memoryId: memory.id,
+              kind: "restored",
+              previousStatus: "superseded",
+              decayFloorAt,
+              reinforceError,
+            },
+      );
+    }
+
+    return { supported: true, supersedingMemoryId, outcomes };
   }
 
   /**
@@ -3099,6 +3804,61 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       throw error;
     }
+  }
+
+  /**
+   * `Runtime.applyCorrection` の実装（Issue #369、[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
+   * doc コメントは interface 側（`applyCorrection` の JSDoc）にある——ここは手順そのもの
+   * だけ。`markContested`/`resolveContested` を呼ぶだけの薄い orchestration であり、
+   * それ自身の CAS・イベント・「無い」の分類は一切増やさない。
+   */
+  async function applyCorrection(
+    ctx: Ctx,
+    input: ApplyCorrectionInput,
+  ): Promise<ApplyCorrectionResult> {
+    if (input.correctedId === undefined) {
+      return { kind: "awaiting_choice" };
+    }
+    const correctedId = input.correctedId;
+
+    // ⛔ 相手を選ばない: discovery.candidates[0] は一切見ない。ここでやっているのは
+    // 「呼び出し側が指名した correctedId が候補一覧に居るかどうか」の照合だけである。
+    const candidate = input.discovery.candidates.find((c) => c.memoryId === correctedId);
+    if (candidate === undefined) {
+      return { kind: "not_a_candidate", correctedId };
+    }
+
+    const markResult = await markContested(ctx, correctedId, input.correctingId, {
+      actor: input.actor,
+      reason: input.reason,
+    });
+
+    if (input.resolution === undefined) {
+      return {
+        kind: "contested",
+        correctedId,
+        correctingId: input.correctingId,
+        chosenRecallRank: candidate.recallRank,
+        markResult,
+      };
+    }
+
+    const resolveResult = await resolveContested(
+      ctx,
+      correctedId,
+      input.correctingId,
+      input.resolution,
+      { actor: input.actor, reason: input.reason },
+    );
+
+    return {
+      kind: "resolved",
+      correctedId,
+      correctingId: input.correctingId,
+      chosenRecallRank: candidate.recallRank,
+      markResult,
+      resolveResult,
+    };
   }
 
   /**
@@ -3683,14 +4443,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     tick,
     recall,
     getRecall,
+    findCorrectionCandidates,
     reextract,
     reembed,
     sweepArchive,
     restoreArchived,
+    restoreSuperseded,
     forget,
     purge,
     markContested,
     resolveContested,
+    applyCorrection,
     consolidate,
     reflect,
   };

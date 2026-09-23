@@ -6,6 +6,22 @@ ADR (Architecture Decision Record) として記録する。`docs/architecture.md
 ここでは各決定について、検討した選択肢・却下した理由・引き受ける負債・覆る条件までを
 1ファイルにまとめる。**決定そのものをやり直す場ではなく、決定を記録する場である。**
 
+**⛔ 採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する。**
+**理由は上の1文である**——ここは記録の場であり、**間違え方それ自体が記録だからである。**
+本文を直すと「何をどう判断して外したか」が消え、**訂正を積んだ経緯も追えなくなる。**
+（**この作法は実際に繰り返し採られている**——根拠と反例は
+[ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) 決定1。
+⚠ **まだ採用されていない初稿はこの限りではない。**そして
+**`docs/north-star.md` は別の規律で守られている**——`AGENTS.md` を見ること。）
+
+**⚠ ADR 本文に現れる識別子名（関数名・ファイル名・型名）は、その ADR が書かれた時点のものである。現在の名前とは限らない。**
+現在の名前は現物を引くこと。**⛔ 名前が変わるたびに、既存 ADR へ追記して回らないこと。**
+[ADR 0213](./0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5 の 2026-09-17 の追記が、
+**「いまの状態を指すポインタ」は直し、「当時の観測・当時の状態を書き留めた記録」は直さない**と
+線を引いている——ADR 本文は後者である。**旧名から現在の名前へ辿れる形は、名前を変えた側の
+ADR が持つ**（例: [ADR 0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md)
+決定1 と、同 ADR「引き受けた負債」節の逐語「**旧名を追う人は、この ADR の決定1へ辿り着くこと**」）。
+
 alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確認済み/未確認を分けた
 一次調査の記録である [docs/alteroid-findings.md](../alteroid-findings.md) を参照する。
 
@@ -186,5 +202,99 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0171](./0171-five-verbs-plus-three-layers.md) | 「5つの動詞」の記述を実態（14メソッド）に合わせる — 中核の5動詞 + 3つの層 | 採用 (2026-09) |
 | [0172](./0172-association-passes-decay-and-validity-gates.md) | 連想枠（段3.5）にも忘却ゲートと `validAt` ゲートを通す — ゲートの欄を1箇所に集め、述語は段1と共有する（Issue #347） | 採用 (2026-09) |
 | [0173](./0173-decayed-omission-counted-by-aggregate-scope.md) | 忘却ゲートで落ちた件数を `aggregateScope` で厳密に数える — 押し下げは外さず、`countKind` を `lower_bound` から `exact` へ上げる | 採用 (2026-09) |
+| [0174](./0174-filtered-omission-scope-relation.md) | `FilteredOmission` に `scopeRelation` を足し、`decayed` の非対称を契約として確定させる | 採用 (2026-09) |
+| [0175](./0175-lexical-search-tiebreak-nondeterminism.md) | 語彙チャンネルの `search()` に決定的な最終キーを足す — ANN 側（ADR 0170）と同じ形で、同族の欠陥を塞ぐ（Issue #345） | 採用 (2026-09) |
+| [0177](./0177-fix-stage3-tooth-blind-asserts.md) | 段3の歯の「壊れても緑のままの assert」2件を直す — 変異試験で実測する（Issue #293） | 採用 (2026-09) |
+| [0178](./0178-public-api-surface-gate.md) | 公開 API 表面の破壊的変更を検出する歯を CI に足す | 採用 (2026-09) |
+| [0179](./0179-adr-number-assigned-at-merge.md) | ADR の番号は「マージ直前」に確定させる — 採番を、衝突しようがないタイミングまで遅らせる（Issue #295） | 採用 (2026-09) |
+| [0181](./0181-schema-type-equals-parity.md) | `satisfies` の片方向性を `Equals`/`MutualAssignable` の型検査で塞ぐ — `schema-type-equals-parity.test.ts`（Issue #272） | 採用 (2026-09) |
+| [0182](./0182-provenance-kind-matches-provenance-check.md) | `memories.provenance_kind` と `provenance->>'kind'` の一致を CHECK 制約で強制する — 生成列のほうが筋が良いが、いまは採らない | 採用 (2026-09) |
+| [0183](./0183-local-postgres-makes-postgres-mutation-testing-possible.md) | `packages/postgres` の変異試験を、CI のトリガを変えずに手元で成立させる — `initdb` で自分専用のインスタンスを立てる手順を `AGENTS.md` に置く | 採用 (2026-09) |
+| [0184](./0184-conformance-scope-documented-not-closed.md) | 適合テストが「何を保証していないか」を、塞ぐ前に名乗る — v1.0.0 は弱さを明示した状態で出す | 採用 (2026-09) |
+| [0186](./0186-sweep-archive-follows-decay-clock.md) | `sweepArchive` は `opts.clock` 省略時に `tenant_settings.decay_clock` へ従う — ADR 0165 決めたこと12 の数え漏れ（掃引）を埋める | 採用 (2026-09) |
+| [0188](./0188-association-over-limit-omission.md) | 連想枠（段3.5）の `maxCount` 切り捨てを `omitted` に名乗らせる — `over_limit` に `stage` を足す（Issue #375） | 採用 (2026-09) |
+| [0190](./0190-correction-cli-dispatch-ci-tooth.md) | `correction` サブコマンドを CI の歯にする — 既存ジョブへ相乗り・`deterministic` 層・`omitted` の `superseded` assert | 採用 (2026-09) |
+| [0191](./0191-ci-green-verdict-bound-to-sha.md) | 「CI が緑」の判定を sha に縛る——`gh pr merge --match-head-commit` を道具側で強制する（Issue #294） | 採用 (2026-09) |
+| [0192](./0192-adr-index-freshness-enforced-in-pull-request-ci.md) | ADR 索引の鮮度を、CI の `pull_request` でも強制する — 手順が守られたかを、注意力ではなく機構で確かめる（Issue #267） | 採用 (2026-09) |
+| [0193](./0193-ann-unreached-covers-full-window.md) | `ann_unreached` を「窓が満杯でも鳴る」形に直す — `ann-truncation.ts` の約束をようやく果たす | 採用 (2026-09) |
+| [0194](./0194-embedding-space-analyze-threshold.md) | `PostgresVectorStore.upsert` が閾値越えのときだけ埋め込み表を `ANALYZE` する — 新しい埋め込み空間の統計の窓を、プロセスローカルなカウンタと `pg_class.reltuples` の guard で閉じる | 採用 (2026-09) |
+| [0195](./0195-six-gates-verified-in-ci.md) | 6つの門の緑は CI で確かめる——手元で全体を走らせることを止まる条件にしない（Issue #407） | 採用 (2026-09) |
+| [0196](./0196-locale-c-is-encoding-agnostic.md) | `--locale=C` はどの encoding とも両立する — 表の誤りを実測で正し、`ANY_ENCODING` を入れる（Issue #395） | 採用 (2026-09) |
+| [0197](./0197-set-default-half-life-recalls.md) | `TenantSettingsStore` に `setDefaultHalfLifeRecalls` を本番の経路として足す | 採用 (2026-09) |
+| [0198](./0198-llm-provider-call-failure-tooth.md) | `LLMProvider` が逐語で約束していて一度も測られていなかった1行に、歯を置く — 適合 suite の設計判断には踏み込まない（Issue #389） | 採用 (2026-09) |
+| [0199](./0199-identifier-probes-readme-freshness-tooth.md) | `examples/chat/README.md` の `identifier-probes` 節と基準値 JSON の一致を、既存 vitest に相乗りする歯で見張る | 採用 (2026-09) |
+| [0200](./0200-adr-renumber-warns-when-titles-need-fixing.md) | `adr-renumber.mjs` は付け替えたときに PR タイトルの修正を促す警告を出す — 道具は `gh` を叩かない（Issue #405） | 採用 (2026-09) |
+| [0201](./0201-recall-footprint-char-margin-canary.md) | `recall-footprint` の許容誤差の余白を字数で見る歯を足す — hold-out 5行に限定し、閾値は較正係数から導く（Issue #410） | 採用 (2026-09) |
+| [0202](./0202-postgres-shared-db-object-names.md) | `packages/postgres` が作るオブジェクト名の一覧を README に置き、migrations と機械的に突き合わせる（Issue #168） | 採用 (2026-09) |
+| [0203](./0203-memories-omitted-exclusivity.md) | `result.memories` と `result.omitted` の排他性を契約にする — 段3.5 が昇格させた記憶を `below_threshold` から取り下げる（Issue #421） | 採用 (2026-09) |
+| [0204](./0204-postgres-object-names-cover-functions.md) | `packages/postgres` の共有オブジェクト名の歯を関数まで広げ、ADR 0202「引き受けた負債1」を解消する（Issue #168） | 採用 (2026-09) |
+| [0205](./0205-local-embedding-pipeline-required-interface.md) | `LocalEmbeddingPipeline` を必須 interface にし、ADR 0090 決定4「引き受けた負債1」を塞ぐ（Issue #137 案 (a)） | 採用 (2026-09) |
+| [0206](./0206-outbox-concurrent-claim-conformance.md) | 同時 claim の適合テストを `supportsRealConcurrency` で切り替える（Issue #205 の1本目） | 採用 (2026-09) |
+| [0207](./0207-dry-run-reads-existence-and-coverage-degrades-silently.md) | 予行は registry の「既に在るか」を読む — そして予行の網羅性は、木の版と registry の関係で黙って落ちる | 採用 (2026-09) |
+| [0208](./0208-outbox-skip-locked-non-blocking-tooth.md) | `SKIP LOCKED` が「詰まらないこと」を守っている、という主張に歯を足す（ADR 0206 の宿題） | 採用 (2026-09) |
+| [0209](./0209-dry-run-short-circuit-predates-adr-0207-and-is-counted-by-machine.md) | 予行の短絡は 2026-09-08 に既に起きていた — ADR 0207 決定2 の【受】を訂正し、「何本が経路を通ったか」を機械に数えさせる | 採用 (2026-09) |
+| [0210](./0210-root-test-gate-runs-all-stages-regardless-of-failure.md) | ルートの `test` 門は、前段が落ちても後段を必ず起動する（Issue #453） | 採用 (2026-09) |
+| [0211](./0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md) | PR タイトル/本文が付け替え後の古い ADR 番号を名指ししていないかを CI が検査する — 本文は誰も警告していなかった | 採用 (2026-09) |
+| [0212](./0212-local-embedding-size-noun-correspondence-tooth.md) | local-embedding のサイズ表記(36MB/42MB)が名詞と正しく対応していることを歯で縛る — 「値の一致」だけでなく「向き」を見る | 採用 (2026-09) |
+| [0213](./0213-live-docs-cite-adrs-by-anchor-not-line-number.md) | 行番号での引用は、この repo 自身の「ADR は書き換えず追記する」作法によって腐る — 生きた文書はアンカーで指し、歯で止める | 採用 (2026-09) |
+| [0214](./0214-release-candidates-lists-not-judges.md) | リリース当日に「載せるべき候補」をその場で出す道具 — ⛔ 判定ではなく一覧である | 採用 (2026-09) |
+| [0215](./0215-ci-green-check-lower-bound-from-required-status-checks.md) | 「CI が緑」の下限を、branch protection の required status checks から取る（Issue #477 と同じ族） | 採用 (2026-09) |
+| [0216](./0216-north-star-shipped-only-measurement.md) | 北極星の7項目を「出荷物だけ」でどう測るか — ⛔ 物差しは1本では作れない。文面の向きで3類に割り、1類は機械に載せない | 採用 (2026-09) |
+| [0217](./0217-provenance-naming-lost-in-duplication-swept-from-the-population.md) | 「確かめていない主張が、名乗りを落としたまま複製されていないか」を `docs/` 220本の母集合から測った — 複製で名乗りが落ちた例は2件、うち1件は3文書に跨っていた | 採用 (2026-09) |
+| [0218](./0218-shipping-security-claims-checked-against-primary-sources.md) | 出荷文書の「セキュリティの主張」に一次情報を当てた — CVE 番号は実在した（引く先が違っただけ）。ただし推奨下限は「既知の CVE が残らない下限」ではない | 採用 (2026-09) |
+| [0219](./0219-adr-corpus-swept-for-unsourced-assertions.md) | ADR 208本を逆向きに掃いた — 母集合 59,554行から候補171件、残った未裏づけの断定は17件。その3/4は「外部の挙動」だった | 採用 (2026-09) |
+| [0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md) | OPEN な ISSUE のコメント投稿者名は、オーナーと担い手（エージェント）を見分けない — 見分けられるのは本文中の逐語の名乗りだけである | 採用 (2026-09) |
+| [0221](./0221-memories-analyze-on-write.md) | `PostgresMemoryStore` の書き込み経路が閾値越えのときだけ `memories` を `ANALYZE` する — ADR 0194 と同じ設計を、JOIN の相手側にも入れる（Issue #269） | 採用 (2026-09) |
+| [0222](./0222-compare-gate-judges-only-when-turncount-sets-match.md) | ⭐門 `compare` は、実測と基準値の `turnCount` 集合が一致したときだけ判定する（Issue #477） | 採用 (2026-09) |
+| [0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) | 繰り返し採られているのに入口の文書に書かれていない判断の規律を、ADR 211本の母集合から抽出した — 残ったのは10。最頻出は「採用済み ADR の本文を書き換えない」で 46/211 | 採用 (2026-09) |
+| [0224](./0224-quality-evaluation-and-acceptance-criteria.md) | 品質評価の証明範囲と合格基準の変更を、自律作業の条件にする | 採用 (2026-09) |
+| [0225](./0225-supersede-with-new-memories-analyze-hook.md) | `supersedeWithNewMemories` にも ADR 0221 の書き込み時 `ANALYZE` フックを足す — 残っていた3本目の経路（Issue #269） | 採用 (2026-09) |
+| [0226](./0226-compare-provenance-reached-vs-information-retained.md) | `compare` の `factStatementSurvived` が測るのは出典到達だけである — 欄名は⭐門の契約として据え置き、意味の是正はコメント・表示・文書で行う（Issue #496） | 採用 (2026-09) |
+| [0227](./0227-fixed-retrieval-probe-gold-presence-gate.md) | 固定した probe ごとの gold 到達を、`example-chat` の必須 CI へ直接繋ぐ回帰ゲート（Issue #497） | 採用 (2026-09) |
+| [0228](./0228-accept-the-extra-ci-round-for-adr-pull-requests.md) | ADR を持つ PR が CI をもう1周する費用を受容する — 方向4 を選び直す（Issue #267） | 採用 (2026-09) |
+| [0229](./0229-answer-bench-compares-final-answers-with-a-ground-truth-bench-quality-not-yet-claimed.md) | 全文経路と記憶経路の最終回答を、正解集合を持つ器で比較する（品質の主張はまだしない、Issue #506 / 親 #498） | 採用 (2026-09) |
+| [0230](./0230-restore-superseded-recovery-path.md) | `superseded → active` の復旧口を作る — オーナーの判定のうち、⛔ **復旧口だけ**を着地させる（Issue #369 / PR #464） | 採用 (2026-09) |
+| [0231](./0231-compare-baseline-omitted-measured-update-and-freshness.md) | `compare-baseline.json` の `omitted` を CI の artifact で実測更新し、基準値の鮮度を毎 run 名乗らせる（⛔ 門にはしない）（Issue #403） | 採用 (2026-09) |
+| [0232](./0232-correction-candidates-returned-not-chosen.md) | 訂正の相手は mnemora が選ばない — **候補を返し、採用者が選ぶ**（Issue #369 (C)） | 採用 (2026-09) |
+| [0233](./0233-answer-quality-measured-once-against-the-real-api.md) | 回答品質を実 API で1回測り、記録で再生できる形にする — 記録器が同じ鍵を二度録っていた穴を塞ぐ（Issue #498 / #506） | 採用 (2026-09) |
+| [0234](./0234-bake-no-numbers-into-tools-and-artifacts.md) | 「焼き込んだ数字は腐る」の道具・生成物版を `AGENTS.md` へ置く — ⛔ 射程だけを広げず、**線**と**対象外**を同時に書く | 採用 (2026-09) |
+| [0235](./0235-correction-demo-explicit-choice.md) | 訂正の相手は `examples/chat` でも人が指名する — `findCorrectionCandidates` を本番コードの経路に立てる（Issue #369 (C) / 北極星 項目5） | **草案 (2026-09)** |
+| [0236](./0236-answer-retention-mutation-tested-not-recorded.md) | Issue #498 完了条件4を内容保持の側だけで満たす — 回答評価側の陽性対照は実 API での記録追加を要するため未達のまま残す | 採用 (2026-09) |
+| [0237](./0237-restore-superseded-dry-run-preview.md) | `restoreSuperseded` に下見（`dryRun`）を足す — 方向3「戻す前に何が戻るかを返す」を実装する（Issue #515） | 採用 (2026-09) |
+| [0238](./0238-correction-choice-rationale-in-events.md) | 訂正の相手を選んだ根拠を、イベントに残す — `meta.note` と `RecallResult.explain` の両方から辿れるようにする（Issue #369 チェックボックス / 北極星 問い3） | **草案 (2026-09)** |
+| [0239](./0239-live-doc-source-line-citations-no-machine-line.md) | 生きた文書のソース行番号引用は、**凍結記録と生きた散文を機械で見分けられない** — 射程を広げない（Issue #512） | 採用 (2026-09) |
+| [0240](./0240-freshness-wiring-gate-corrects-issue-521.md) | Issue #521「時間項への検出力ゼロ」を訂正する — 穴は計算式ではなく `freshness`/`decay` の配線だった。`total` への配線を守る歯を1本足す | 採用 (2026-09) |
+| [0241](./0241-migration-guide-is-a-live-doc-not-an-adr.md) | `docs/migration-v1.md` は ADR ではなく生きた文書である — 「本文を書き換えず訂正を積む」作法の対象外とする（Issue #532） | 採用 (2026-09) |
+| [0242](./0242-runtime-apply-correction.md) | `Runtime.applyCorrection` — 北極星 項目5を「出荷される面」から駆動できるようにする（Issue #369） | **草案 (2026-09)** |
+| [0243](./0243-changelog-lists-publish-targets-only.md) | `CHANGELOG.md` が載せるのは publish 対象パッケージの変更だけである — `examples/chat` は出荷される面の外なので載せない（Issue #536） | 採用 (2026-09) |
+| [0244](./0244-runtime-method-doc-correspondence-tooth.md) | `Runtime` のメソッドが3文書（README/vision/architecture）で名指しされていることを歯で縛る（Issue #518） | **草案 (2026-09)** |
+| [0245](./0245-publish-gate-shell-default-pinned.md) | `publish.yml` の門ステップが既定シェル（`bash -e`）で走るという前提を歯で縛る（Issue #476） | **草案 (2026-09)** |
+| [0246](./0246-association-rank-includes-decay.md) | 連想枠（段3.5）の席を、減衰を含む順位で埋める —— 正典項目4「使われない記憶が、静かに遠ざかる」の順位軸（Issue #402） | **草案 (2026-09)** |
+| [0247](./0247-local-embedding-repo-model-id-declaration-guard.md) | `repo` だけの差し替えが `modelId` を伴わないとき、コンストラクタで落とす（Issue #142） | **草案 (2026-09)** |
+| [0248](./0248-changelog-and-migration-guide-follow-the-release.md) | `v0.4.0` の出荷に `CHANGELOG.md` と `docs/migration-v1.md` が追随していなかった — 世代を閉じて pin を進める。⛔ 3回目を防ぐ仕掛けはここでは決めない | 採用 (2026-09) |
+| [0249](./0249-release-day-procedure-holds-no-rotting-facts.md) | 当日の手順書は、腐る事実を本文に持たない — その場で引く手順と、抽出を持っている道具への一本化だけを持つ | 採用 (2026-09) |
+| [0250](./0250-machines-detect-humans-confirm-and-write.md) | 機械には「検出」までを担わせる。「確定」と「書き込み」は人に残す — ADR 0223 決定2 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
+| [0251](./0251-release-follow-up-notice-not-a-gate.md) | リリース後に「出した版の節が在るか」を通知する — ⛔ 門にはしない。⭐ 分けた線は「確実さ」ではなく「外したときに誰が巻き添えになるか」である | 採用 (2026-09) |
+| [0252](./0252-release-changelog-section-is-a-publish-gate.md) | 出す版の節が `CHANGELOG.md` に無ければ `npm publish` を止める — 🔴 **門にする。⭐ 巻き添えを「確実さを下げる」ではなく「置き場所」で解いた** | 採用 (2026-09) |
+| [0253](./0253-local-embedding-weights-fingerprint-gate.md) | 読み込んだ重みの指紋を、期待値を1つも焼き込まずに照合する門（Issue #142 ②） | 採用 (2026-09) |
+| [0254](./0254-no-gate-without-a-false-positive-ceiling.md) | 偽陽性率に上限を置けない検査は門にしない — ADR 0223 決定3 の射程を `AGENTS.md` へ広げる。🔴 ただし線は引けない（Issue #505） | 採用 (2026-09) |
+| [0255](./0255-tools-output-candidates-not-verdicts.md) | 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧として出す。ADR 0223 決定5 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
+| [0256](./0256-positive-control-before-claiming-absence.md) | 「出なかった」は「無い」の証明にならない — 先に陽性対照を示す。ADR 0223 決定6 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
+| [0257](./0257-searched-and-found-nothing-versus-did-not-search.md) | 「探したが無かった」と「探していない」を分ける —— 向きが逆の版を書き手自身の調査手続きへ当て直す。ADR 0223 決定10 の射程を `AGENTS.md` へ広げる（Issue #505） | **提案 (2026-09)** |
+| [0258](./0258-restore-superseded-operation-scope.md) | `restoreSuperseded` を「1回の操作」単位に絞る（方向①）—— 鍵は新設せず、既にある情報で絞る | 採用 (2026-09) |
+| [0259](./0259-gate-runtime-output-names-its-blind-spot.md) | `check-publish-pack.mjs` / `check-pr-adr-reference.mjs` の実行時出力に、doc コメントにしか無かった断りを焼く（Issue #580） | 採用 (2026-09) |
+| [0260](./0260-answer-names-what-it-actually-runs.md) | `answer` が「記録した応答を再生する」と名乗りながら擬似 provider で走るのをやめる —— 名乗る関数と実態を倒す関数を1つにし、使われなかったカセットを出力に焼く（Issue #577） | **提案 (2026-09)** |
+| [0261](./0261-answer-bench-tenant-keyed-by-embedding-space.md) | `answer` ベンチの tenant を埋め込み空間で分ける —— 「抽出の冪等スキップ」がモードを跨ぐと、記憶とベクトルの整合が壊れる（Issue #583） | **提案 (2026-09)** |
+| [0262](./0262-cli-names-the-plan-as-a-plan.md) | `examples/chat` の `[cassette]` 行は「予定」を予定として名乗る —— 測っていない予告を、実測と同じ口調で出さない（Issue #589） | **提案 (2026-09)** |
+| [0263](./0263-cache-key-carries-the-model-revision.md) | CI のモデルキャッシュ鍵に、HF の revision を入れる —— 手で版を振った固定文字列は、HF が動いても古い重みを配り続ける（Issue #564） | **提案 (2026-09)** |
+| [0264](./0264-cli-names-the-mismatch-between-plan-and-actual.md) | `examples/chat` は「予定」と「実測」が食い違ったとき、画面にそれを名指しさせる —— 読み手に2行の突き合わせを任せない（Issue #594） | **提案 (2026-09)** |
+| [0265](./0265-fingerprint-gate-shell-branches-pinned-by-execution.md) | `local-embedding` fingerprint 門の `case` 分岐を、`bash` で実際に実行して固定する（Issue #574 後半） | **草案 (2026-09)** |
+| [0266](./0266-llm-provider-conformance.md) | `LLMProvider` の適合 suite を新設し、`@mnemora/anthropic` と `@mnemora/openai` の両方に当てる（Issue #389） | 採用 (2026-09) |
+| [0267](./0267-withdraw-the-release-changelog-publish-gate.md) | 出す版の節を要求する publish の門を撤回する —— 🔴 **門は正しく鳴っていた。外すのはオーナーの判断であって、門の欠陥ではない** | 採用 (2026-09) |
+| [0268](./0268-living-doc-judgment-pointer-repointed-to-605.md) | 生きた文書3本の「判断の置き場」ポインタを #518 から #605 へ付け替え、その一致を歯で縛る（Issue #518） | **草案 (2026-09)** |
+| [0269](./0269-port-interface-doc-correspondence-sweep.md) | `Runtime` 以外の port interface（`MemoryStore` など）も、`docs/architecture.md` §5 の写しが実体とずれている — どちらが正本かは決めない（Issue #604） | **提案 (2026-09)** |
+| [0270](./0270-runtime-method-count-bake-detection-tooth.md) | `Runtime` の非中核メソッド「件数」が生きた文書へ焼き込まれることを検出する歯を足す — 値ではなく形を見る（ADR 0269 引き受けた負債） | **提案 (2026-09)** |
+| [0271](./0271-extraction-candidate-subject-id-overrides-observation.md) | 抽出候補ごとに `subjectId` を持てるようにし、候補の値が observation の値より優先する（Issue #608 項目①） | **提案 (2026-09)** |
+| [0272](./0272-runtime-method-count-notation-sweep.md) | `Runtime` の非中核メソッド件数を検出する歯を、表記の軸だけ広げる（漢数字・「N つ」等）——主語の錨は外さない（ADR 0270 引き受けた負債、Issue #606 の材料） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

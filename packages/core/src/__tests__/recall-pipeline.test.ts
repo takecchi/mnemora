@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ZodError } from "zod";
 import type { Ctx } from "../ctx.js";
 import type { TokenCounter } from "../interfaces/token-counter.js";
 import type { VectorStore } from "../interfaces/vector-store.js";
@@ -194,6 +195,7 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "archived",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -217,12 +219,14 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "superseded",
+      scopeRelation: "outside_scope",
       count: 3,
       countKind: "exact",
     });
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "forgotten",
+      scopeRelation: "outside_scope",
       count: 5,
       countKind: "exact",
     });
@@ -249,6 +253,7 @@ describe("recall() — omitted.kind = 'filtered'（スコープを定義する�
     expect(result.omitted).toContainEqual({
       kind: "filtered",
       condition: "period",
+      scopeRelation: "outside_scope",
       count: 1,
       countKind: "exact",
     });
@@ -298,7 +303,12 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 10 });
     expect(result.memories).toHaveLength(1);
-    expect(result.omitted).toContainEqual({ kind: "over_limit", count: 1, countKind: "exact" });
+    expect(result.omitted).toContainEqual({
+      kind: "over_limit",
+      stage: "rescore",
+      count: 1,
+      countKind: "exact",
+    });
   });
 });
 
@@ -362,7 +372,7 @@ describe("recall() — omitted.kind = 'ann_truncated'（docs/recall.md §3、ADR
   });
 });
 
-describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR 0026 の決定）", () => {
+describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR 0026 の決定、ADR 0193 が発火条件を拡張）", () => {
   it("歯A（鳴る側）: scope に候補が多くあるのに ANN が eligible 未満しか返さないと ann_unreached が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(2);
     // 5件が scope 内・embeddingStatus='ready'（= eligible = 5）だが、ANN は2件しか返さない
@@ -388,15 +398,40 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
   });
 
-  it("歯C: ann_truncated が鳴る状況（hits == k'）では ann_unreached は同時に鳴らない", async () => {
+  it("🔴 歯C（ADR 0193、2026-09-17 に挙動が変わった）: 窓が満杯（hits == k'）でも、scope にまだ見えていない候補が残っていれば ann_truncated と ann_unreached は同時に鳴る", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
     await createEmbeddedMemory(stores, [1, 0.001]);
 
     // limit=1, overFetchFactor=1 -> k'=1。候補2件のうち1件しか返らない（＝窓が埋まる）。
+    // eligible=2 > hits=1 ⟹ scope にまだ見えていない候補（もう1件）が残っている。
     // **ADR 0069 以降、この状況で ann_truncated が鳴るかは「損しえたか」次第**なので、
-    // 鳴る側になる形（どの候補も持たないタグをクエリへ足す）で作る——
-    // **この歯の主題は「ann_unreached が同時に鳴らないこと」であって、ann_truncated の鳴り方ではない。**
+    // 鳴る側になる形（どの候補も持たないタグをクエリへ足す）で作る。
+    // **この歯の主題**: ADR 0193 より前はここで ann_unreached が鳴らなかった
+    // （旧条件 `annHits.length < kPrime` が窓の満杯を理由に除外していた）。
+    // いまは鳴る——`ann_truncated`（窓の外は証明できるか）と `ann_unreached`
+    // （近似索引は scope を拾いきったか）は別の問いに答えるので、同時に立ってよい。
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 1,
+      overFetchFactor: 1,
+      tags: ["どの候補も持っていないタグ"],
+    });
+    expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(true);
+    expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(true);
+    expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
+  });
+
+  it("⭐ 歯D（鳴ってはいけない側）: 窓が満杯でも scope の候補を全部拾いきっていれば ann_unreached は鳴らない（ADR 0193）", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0]);
+
+    // limit=1, overFetchFactor=1 -> k'=1。候補1件だけで hits=1（＝窓が埋まる）。
+    // eligible=1 == hits=1 ⟹ scope にまだ見えていない候補は無い——「窓が満杯なら常に鳴る」
+    // 側へ倒れていないことを確かめる歯（歯Bの「窓が満杯」版）。
+    // ann_truncated は鳴る側になる形（どの候補も持たないタグ）で作り、
+    // **この歯の主題が「ann_truncated の鳴り方」ではなく「ann_unreached が鳴らないこと」**
+    // だと分かるようにする。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 1,
@@ -801,6 +836,14 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
     const ids = result.memories.map((m) => m.memoryId);
     const indexA = ids.indexOf(a.id);
     const indexB = ids.indexOf(b.id);
+    // ⚠ Issue #293: `indexOf` は見つからないとき `-1` を返すため、片方だけが結果から
+    // 完全に消えた世界でも `Math.abs(indexA - indexB) === 1` が偶然成立しうる
+    // （例: a だけ残り b が消えると `Math.abs(0 - (-1)) === 1`）。この歯には
+    // （mark-contested.test.ts と違い）事前の `toContain` チェックも無いため、
+    // 隣接性の assert 単独が「両方本当に返ってきたか」の唯一の砦になっている。
+    // ⟹ 両方が実際に結果に含まれていること（`index >= 0`）を先に assert する。
+    expect(indexA).toBeGreaterThanOrEqual(0);
+    expect(indexB).toBeGreaterThanOrEqual(0);
     expect(Math.abs(indexA - indexB)).toBe(1);
   });
 
@@ -1496,15 +1539,21 @@ describe("recall() — status ゲート（段1と同じ status IN ('active','con
 describe("recall() — RecallQuerySchema による入力検証", () => {
   it("limit が非正の場合は zod のエラーで拒否する", async () => {
     const { runtime } = buildRuntime();
-    await expect(runtime.recall(ctx, { limit: 0 })).rejects.toThrow();
+    // テスト名が「zod のエラーで」と失敗理由を明示している——別の理由（例: 実装側の
+    // typo によるモジュール解決エラー）で失敗しても緑になってはいけないため、
+    // 例外の型を zod の ZodError に固定する（RecallQuerySchema.parse が投げるのはこれ）。
+    await expect(runtime.recall(ctx, { limit: 0 })).rejects.toThrow(ZodError);
   });
 
   it("excludeProvenanceKinds に未知の値を渡すと拒否する", async () => {
     const { runtime } = buildRuntime();
+    // 上と同じ RecallQuerySchema.parse の呼び出しが投げる ZodError を検証する
+    // （describe が「RecallQuerySchema による入力検証」であり、このテストも同じ
+    // 検証経路を通る——契約は「zod によって拒否されること」である）。
     await expect(
       // @ts-expect-error 意図的に不正な値を渡す
       runtime.recall(ctx, { excludeProvenanceKinds: ["fabricated"] }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(ZodError);
   });
 });
 

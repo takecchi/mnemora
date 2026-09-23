@@ -43,6 +43,40 @@ import { createUsageMeter } from "./usage-meter.js";
  * 他の未知の値と同じく例外になる（`parseModeOverride` 参照）。`MNEMORA_EMBEDDING=local`
  * だけが有効。
  */
+/**
+ * ⚠ **`anthropic` が無いのは書き忘れではない。** `packages/anthropic` は
+ * `LLMProvider` を実装しているが（ADR 0072）、**`examples/chat` には一度も配線されて
+ * いない**——`examples/chat/package.json` の依存に `@mnemora/anthropic` は無く、
+ * このファイルもそれを一度も import していない。`git log -S 'anthropic' --
+ * examples/chat/` は1件もヒットしない（配線してから外したのではなく、そもそも
+ * 触られたことが無い）。
+ *
+ * **理由は ADR 0072「引き受けた負債」3・4 に逐語で書かれている**
+ * （`docs/decisions/0072-anthropic-llm-provider.md`）:
+ *
+ * > 3. `packages/anthropic` は Phase 1 の完了条件に入っていない。
+ * >    `docs/roadmap.md` 段階6 は4パッケージを名指ししており、本 PR ではそこを
+ * >    直していない。Phase 1 の定義を動かすかはオーナーの判断である。
+ * > 4. 北極星の物差し（`examples/chat` の `retrieval` / `compare`）は、
+ * >    Anthropic では一度も走っていない。カセットも無い。
+ * >    ⟹ この PR は「Anthropic で想起の質がどうなるか」について何も言っていない。
+ * >    言えるのは「契約が揃っている」ことだけである。
+ *
+ * ⚠ **ADR 0072 決定1（`@mnemora/anthropic` が `EmbeddingProvider` を実装しない理由）
+ * と混同しないこと。**あちらは「Anthropic に埋め込み API が無い」というパッケージ内部
+ * の話であり、こちらは「`examples/chat` へまだ配線していない」という別の理由の
+ * スコープ外である。
+ *
+ * ⚠ **層が1つ足りない、という話でもない。**この repo の provider は4層
+ * （`deterministic`/`recorded`/`openai`/`local`。AGENTS.md）に分かれているが、
+ * その軸は実装の性質（意味を持たない stub／記録の再生／実 API／プロセス内 ONNX 推論）
+ * であってベンダーではない。`anthropic` を足すとしても5層目にはならない——`openai`
+ * と同じ「実 API」層の別ベンダーである。
+ *
+ * `MNEMORA_LLM=anthropic` / `MNEMORA_EMBEDDING=anthropic` は他の未知の値と同じく
+ * 例外になる（`parseModeOverride` 参照。`LLM_MODES`/`EMBEDDING_MODES` のどちらにも
+ * `"anthropic"` は無い）。
+ */
 export type ProviderMode = "openai" | "deterministic" | "recorded" | "local";
 
 export interface Providers {
@@ -59,6 +93,28 @@ export interface Providers {
   embeddingProvider: EmbeddingProvider;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
+  /**
+   * 渡されたカセット（`CreateProvidersOptions.cassette`）が、この実行では
+   * 一度も使われなかったかどうか。
+   *
+   * ⭐ **`requireCassette` の鏡像である。**`requireCassette` は「`recorded` を
+   * 指定したのにカセットが無い」を例外にする——**その逆（カセットを渡したのに
+   * `llmMode`/`embeddingMode` のどちらも `"recorded"` を選ばなかった）は例外にできない。**
+   *
+   * 理由: `cli.ts` の `runRetrieval` の arm A（`llmOverride`/`embeddingOverride` とも
+   * `"deterministic"`）は、`resolveRecordedRun` が返したカセットを**全 arm に**渡す
+   * 配線の下で走る——これは現物を読んで確かめた既存の正当な経路であり（⛔ 走らせて
+   * 確かめてはいない）、arm A がカセットを使わないのは壊れているからではない
+   * （対照群として意図的に擬似 provider のままにしている）。⟹ ここを例外にすると、
+   * いま緑の対照 arm がそのまま落ちる。
+   *
+   * ⟹ 判定（例外）ではなく、出力に焼く候補の一覧として扱う
+   * （ADR 0255 / ADR 0223 決定5「取りこぼしがゼロにならないと分かっている道具に
+   * 『これが全部です』と名乗らせない」の適用——ここでの取りこぼしは「例外にできない
+   * 正当な無視のケースがある」こと自体を指す）。`cli.ts` の `printProviderMode` が
+   * これを画面の警告行として開示する。
+   */
+  cassetteIgnored: boolean;
 }
 
 /** 本物の OpenAI を使う場合のモデル選定。サンプルアプリの裁量値であり、強い根拠は無い。 */
@@ -251,6 +307,97 @@ export function describeProviderSourceReason(decision: ProviderSourceDecision): 
   }
 }
 
+/**
+ * 「予定」を名乗った経路だけが持つ値。**名乗っていない経路は `null` を渡す**
+ * （省略できない・既定値を持たない）。
+ *
+ * ⭐ **省略可能にしない理由は `Providers.cassetteIgnored` と同じである**——
+ * 「予定を名乗ったのに、食い違いを開示しないまま provider バナーを出す」経路を
+ * 書けなくするため（AGENTS.md「形で塞ぐ」）。`cli.ts` の `printProviderMode` は
+ * これを必須の引数で受け取る。
+ *
+ * ⛔ **`null` は「食い違っていない」ではない。「予定を名乗っていない」である。**
+ * `chat` / `scope` / `backfill` などは `[cassette]` 行を1行も出さない——
+ * 名乗っていない予定と食い違うことはできない。
+ */
+export type PlannedProviderSource = ProviderSourceDecision["source"] | null;
+
+/**
+ * `decideProviderSource` が名乗った「予定」と、`createProviders` が実際に組んだ
+ * 「実測」の食い違い（Issue #594）。
+ */
+export interface PlanActualMismatch {
+  plannedSource: ProviderSourceDecision["source"];
+  llmMode: ProviderMode;
+  embeddingMode: ProviderMode;
+  llmDiffers: boolean;
+  embeddingDiffers: boolean;
+}
+
+/**
+ * 画面に並ぶ2行——`[cassette] provider source の予定`（構築の**前**、
+ * `decideProviderSource`）と `[provider] LLM / Embedding`（構築の**後**、
+ * `createProviders`）——が食い違っているかを判定する（Issue #594）。
+ *
+ * 🔴 **なぜ `Providers.cassetteIgnored` では足りないか。** あちらは
+ * `cassette !== undefined` を前提に持つ——**`cli.ts` の `resolveRecordedRun` は
+ * `decision.source === "openai"` の枝でカセットを読まずに即 return する**ので、
+ * `openai` 経路では `cassetteIgnored` を `true` にできる枝が1つも無い。
+ * ⟹ **この経路の食い違いを、あの検出器は原理的に見ない。**
+ * 【実測】`plan-actual-mismatch.test.ts` の陽性対照が、この盲点そのものを固定している。
+ *
+ * ⭐⭐ **これは判定ではなく開示である。⛔ 例外にはできない。**
+ * `cli.ts` の `buildArmSpecs` が組む `retrieval` の arm A（擬似LLM+擬似埋め込み）と
+ * arm B（擬似LLM+本物の埋め込み）は、**意図して**予定と食い違わせる対照群である。
+ * ⟹ 食い違いそのものは欠陥とは限らず、**正当な食い違いと事故の食い違いを、
+ * この関数は区別しない（区別できない）。** `Providers.cassetteIgnored` が
+ * 例外になれないのと同じ理由であり、ADR 0255 / ADR 0223 決定5 の適用である。
+ */
+export function detectPlanActualMismatch(
+  plannedSource: PlannedProviderSource,
+  modes: { llmMode: ProviderMode; embeddingMode: ProviderMode },
+): PlanActualMismatch | undefined {
+  if (plannedSource === null) {
+    return undefined;
+  }
+  const llmDiffers = modes.llmMode !== plannedSource;
+  const embeddingDiffers = modes.embeddingMode !== plannedSource;
+  if (!llmDiffers && !embeddingDiffers) {
+    return undefined;
+  }
+  return {
+    plannedSource,
+    llmMode: modes.llmMode,
+    embeddingMode: modes.embeddingMode,
+    llmDiffers,
+    embeddingDiffers,
+  };
+}
+
+/**
+ * `detectPlanActualMismatch` の結果を、画面に焼く行にする。
+ *
+ * ⭐ **予定の値と実測の値を、どちらも逐語で出す**——読み手に2行を突き合わせさせない、
+ * というのが Issue #594 の芯である。⛔ **どちらが正しいかは名乗らない**
+ * （上の「判定ではなく開示である」を参照）。
+ *
+ * ⚠ **`describeMode`（`cli.ts`）の長い説明文ではなく `ProviderMode` の値そのものを出す。**
+ * この行の役目は2行の**突き合わせ**であり、突き合わせる相手は
+ * `MNEMORA_LLM` / `MNEMORA_EMBEDDING` に書く値だからである。
+ */
+export function describePlanActualMismatch(mismatch: PlanActualMismatch): string {
+  const differing = [
+    ...(mismatch.llmDiffers ? [`LLM=${mismatch.llmMode}`] : []),
+    ...(mismatch.embeddingDiffers ? [`Embedding=${mismatch.embeddingMode}`] : []),
+  ].join(", ");
+  return (
+    `  ⚠ 上の [cassette] 行が名乗った予定（source=${mismatch.plannedSource}）と、` +
+    `この実測が食い違っている（${differing}）。\n` +
+    "    これは開示であって判定ではない——retrieval の arm A / arm B のように、" +
+    "意図して食い違わせる正当な経路がある（Issue #594）。"
+  );
+}
+
 export interface CreateProvidersOptions {
   /**
    * `"recorded"` モードで再生に使うカセット（ADR 0051）。`"recorded"` を選んだのに
@@ -352,12 +499,18 @@ export function createProviders(
   const llmProvider = buildLLM();
   const embeddingProvider = buildEmbedding();
 
+  // `requireCassette` の鏡像（`Providers.cassetteIgnored` の docstring参照）。
+  // 例外にはできない——`Providers.cassetteIgnored` の docstring の arm A を見ること。
+  const cassetteIgnored =
+    cassette !== undefined && llmMode !== "recorded" && embeddingMode !== "recorded";
+
   return {
     mode,
     llmMode,
     embeddingMode,
     llmProvider,
     embeddingProvider,
+    cassetteIgnored,
     ...(usageMeter !== undefined ? { usageMeter } : {}),
   };
 }

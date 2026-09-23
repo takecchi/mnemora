@@ -103,6 +103,13 @@ describeMemoryStoreConformance({
   supportsMarkContestedPair: true,
   // Issue #197 / ADR 0150: InMemoryMemoryStore は resolveContestedPair を実装している。
   supportsResolveContestedPair: true,
+  // 本 PR: InMemoryMemoryStore は restoreSupersededBy を実装している。
+  supportsRestoreSupersededBy: true,
+  // Issue #515: InMemoryMemoryStore は previewRestoreSupersededBy を実装している。
+  supportsPreviewRestoreSupersededBy: true,
+  // Issue #515 方向①、ADR 0258: InMemoryMemoryStore は onlyMemoryIds フィルタを
+  // 実装している。
+  supportsOnlyMemoryIdsFilter: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり
@@ -239,6 +246,12 @@ describeEventStoreConformance({
 // （`packages/postgres` が同じ理由で単一の共有 DB 接続を使い回すのと同じパターン）。
 let latestMemoryStoreForOutboxSeed: InMemoryMemoryStore | undefined;
 
+// ⛔ `supportsRealConcurrency` は**渡さない**（ADR 0206）——in-memory 実装の
+// `claimBatch` は本体に `await` を1つも含まないため、async 関数は最初の `await` まで
+// 同期実行される ⟹ `Promise.all` で並べても**完全に逐次化される。**渡すと
+// 「何も測っていないのに緑」になる。渡さないことで並行の歯は `it.skip` になり、
+// **測っていないことがログ上で skip として見える。**
+// 🔴 「in-memory でも通るように」とここへ `true` を足さないこと。
 describeOutboxStoreConformance({
   name: "in-memory placeholder",
   createStore: () => {
@@ -291,11 +304,15 @@ describeTenantSettingsStoreConformance({
   },
   // ADR 0165 決めたこと13: `InMemoryTenantSettingsStore` は4メソッドとも実装している。
   supportsDecayClock: true,
+  // ADR 0197: `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` は
+  // `TenantSettingsStore` interface の本番の書き込み口そのもの（`ctx`/`Promise` の形）に
+  // なったため、`setDefaultHalfLifeHours`（本番の口が無いため生の tenantId フックを呼ぶ）
+  // とは違い、ここは store のメソッドをそのまま呼ぶだけでよい。
   setDefaultHalfLifeRecalls: (ctx: Ctx, recalls: number) => {
     if (!latestTenantSettingsStore) {
       throw new Error("setDefaultHalfLifeRecalls より先に createStore() を呼ぶ必要がある");
     }
-    latestTenantSettingsStore.setDefaultHalfLifeRecalls(ctx.tenantId, recalls);
+    return latestTenantSettingsStore.setDefaultHalfLifeRecalls(ctx, recalls);
   },
   advanceActivitySeq: async (ctx: Ctx) => {
     if (!latestMemoryStoreForTenantSettingsFixtures) {

@@ -66,18 +66,30 @@ forget(ctx, target)      // -> ForgetResult
 
 ### 中核を守る3つの層
 
-`Runtime`（`@mnemora/core` の実装）には、上の5つ以外にも9個のメソッドがある
-（`tick` / `getRecall` / `reextract` / `reembed` / `sweepArchive` / `restoreArchived` /
-`purge` / `markContested` / `resolveContested`）。これらは「6つ目の動詞」ではなく、
-中核を5つに保つために別の層へ出した口であり、3つに分かれる
+`Runtime`（`@mnemora/core` の実装）には、上の5つ以外にもメソッドがある。⭐ **何が在るかの
+正本は `packages/core/src/runtime.ts` の `export interface Runtime` である**——⛔ **ここに個数を写さない**
+（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。これらは
+「6つ目の動詞」ではなく、中核を5つに保つために別の層へ出した口であり、3つに分かれる
 （検討過程は [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md)）。
+
+⚠ **下の3層の列挙は、ADR 0171 が分類した時点のものであり、⛔ いま在るものの全部ではない。**
+実際に `findCorrectionCandidates`（[ADR 0232](./decisions/0232-correction-candidates-returned-not-chosen.md)）は
+どの層にも置かれていない——どこへ置くかは意味の判定であり、機械には決まらない
+（[Issue #605](https://github.com/takecchi/mnemora/issues/605)）。⛔ **書き込まない口**なので、
+少なくとも「是正・取り消し」（**書き込む**口）ではない。
+
+⚠ **`applyCorrection`（[ADR 0242](./decisions/0242-runtime-apply-correction.md)）も、
+どの層にも置かれていない。**ただし `findCorrectionCandidates` と同じ理由では説明できない
+——`applyCorrection` は `markContested`/`resolveContested` を呼んで実際に書き込む口である
+（ADR 0242 決定3）。**「書き込まないから」という除外は使えない**以上、どの層に当たるかは
+依然として意味の判定であり、この一覧はそれを決めていない（Issue #605）。
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない。
-- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` / `purge`）——
-  呼び出し側（人・上位のアプリケーション層・将来の自動検出）が既に下した判断
-  （矛盾の指摘・決着・復帰・完全削除）を、決められた形で書き込む口。どちらが正しいかを
-  mnemora 自身は判定しない。
+- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` /
+  `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・将来の
+  自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
+  書き込む口。どちらが正しいかを mnemora 自身は判定しない。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口。
 
 **この分類が守っているのは「中核は増やさない」という制約そのものである。**新しく何かを

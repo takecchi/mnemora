@@ -23,6 +23,10 @@
 `CLAUDE.md` も同じ理由で `AGENTS.md` への symlink であり、独立した中身を持たない。
 **要約を置きたくなったら、代わりに北極星のほうを短くすること。**
 
+⭐ **同じ理由は、文書だけでなく道具（script・CI job）と生成物にも当たる。**
+そちらは下の「**⚠ 数を、道具と生成物に焼き込まない**」に書いてある——
+**ここには繰り返さない**（繰り返せば、この節自身が破っていることになる）。
+
 ### 正典と実装が食い違ったら
 
 **バグなのは実装のほうである。**
@@ -41,7 +45,8 @@
 | `packages/testkit` | adapter の適合テスト一式（conformance suite）とインメモリのプレースホルダ実装 |
 | `packages/postgres` | `MemoryStore` / `VectorStore` / `LexicalStore` / `EventStore` / `OutboxStore` / `TenantSettingsStore`。手書きマイグレーション |
 | `packages/openai` | `EmbeddingProvider` / `LLMProvider` |
-| `packages/local-embedding` | **外部サービスに繋がない `EmbeddingProvider`**。ONNX のモデルをプロセス内・CPU で推論する（[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)）。⚠ **鍵は要らないが、モデルの重み42MBを実行時に落とす** |
+| `packages/anthropic` | `LLMProvider` の Anthropic 実装。**`EmbeddingProvider` は実装しない**（Anthropic は埋め込み API を提供していないため。[ADR 0072](./docs/decisions/0072-anthropic-llm-provider.md)） |
+| `packages/local-embedding` | **外部サービスに繋がない `EmbeddingProvider`**。ONNX のモデルをプロセス内・CPU で推論する（[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)）。⚠ **鍵は要らないが、実行時に4ファイル計42MB（うち重み本体36MB）を落とす**（ADR 0085 決定7の実測） |
 | `examples/chat` | サンプル CLI と、**naive（会話ログ全部）と mnemora を実測比較する `compare`** |
 
 **Phase 1 に入っていないもの**は `docs/roadmap.md` §1.3 の通り（関係グラフ本体・reranking・
@@ -91,6 +96,101 @@
 
 ---
 
+## 手元で Postgres を立てる（`packages/postgres` の変異試験のため）
+
+**`docs/autonomy.md` §2 は PR を出す条件に「歯が実際に噛むことを、変異試験で示した」を挙げている。**
+`packages/postgres` の実装に対してこれを満たすには、**手元に本物の Postgres + pgvector が要る。**
+
+**⚠ `docker compose up` を実行できない担い手が居る**（[Issue #247](https://github.com/takecchi/mnemora/issues/247)
+が 2026-09-15 に実測。docker も podman も無い）。**そういう環境でも、`initdb` で自分専用の
+インスタンスを立てられることがある。**下はその手順である。
+
+**⚠ この手順は「どの担い手の環境でも通る」ことを主張しない。**
+【実測】2026-09-17、`initdb` と pgvector が在る器で通った、というだけである。
+**バイナリ自体が無い器では通らない**——その場合は Issue #247 の「考えられる方向」へ戻ること。
+
+### 在るかどうかを先に見る
+
+```bash
+ls /usr/lib/postgresql/*/bin/initdb          # サーバのバイナリ
+ls /usr/share/postgresql/*/extension/vector.control   # pgvector
+```
+
+**両方無ければ、この手順は使えない。**片方だけでも使えない（pgvector が無いと
+`0001_init.sql` が通らない）。
+
+### ⛔ 共有資源に触らない
+
+**他の担い手と同じ器を共有していることがある。**次を守ること:
+
+- **既定のポート 5432 を使わない。自分専用のポートにする。**
+- **`pg_ctlcluster` / システムのサービスを使わない。**既存のインスタンスを起動・停止しない。
+- **データディレクトリと socket ディレクトリを、自分の作業ディレクトリの下に作る。**
+
+### 手順
+
+```bash
+export PATH=/usr/lib/postgresql/17/bin:$PATH
+
+# ⚠ 3つとも自分専用の値にすること
+PGDATA=/path/to/your/work/pgdata
+PGPORT=<自分専用ポート>          # ⛔ 5432 は使わない
+PGSOCK=/path/to/your/work/pgsock
+
+mkdir -p "$PGSOCK"
+initdb -D "$PGDATA" -U worker --auth=trust --encoding=UTF8 --locale=C
+pg_ctl -D "$PGDATA" -l /path/to/your/work/pg.log \
+  -o "-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1" start
+
+createdb -h 127.0.0.1 -p "$PGPORT" -U worker mnemora_test
+psql -h 127.0.0.1 -p "$PGPORT" -U worker -d mnemora_test \
+  -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+  -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+  -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+export DATABASE_URL="postgresql://worker@127.0.0.1:${PGPORT}/mnemora_test"
+pnpm install --frozen-lockfile
+pnpm --filter @mnemora/core run build
+pnpm --filter @mnemora/postgres run build
+pnpm --filter @mnemora/postgres run migrate
+pnpm --filter @mnemora/postgres run test:db
+
+# 使い終わったら
+pg_ctl -D "$PGDATA" stop
+```
+
+**拡張の3本（`vector` / `btree_gin` / `pgcrypto`）は `.github/workflows/ci.yml` の
+`postgres` ジョブと同じである。**片方だけ増やさないこと。
+
+### 1本に絞って走らせる（変異試験はこちら）
+
+**`test:db` 全体は約4分かかる**【実測】。変異試験では毎回これを待たないこと:
+
+```bash
+pnpm --filter @mnemora/postgres exec vitest run \
+  src/__tests__/conformance.postgres.test.ts -t "<it の名前の一部>"
+```
+
+### ⛔ 変異を戻すのに `git checkout` を使わない
+
+**`git checkout <file>` は未コミットの編集も一緒に消す**（`docs/autonomy.md` の「穴」の表。
+実際に3ファイル失われている）。**`cp` で退避し、`cp` で戻すこと。**
+
+```bash
+cp packages/postgres/src/memory-store.ts /tmp/memory-store.ts.orig   # 退避
+# ... 変異を入れる → 狙った it が赤くなることを確認 ...
+cp /tmp/memory-store.ts.orig packages/postgres/src/memory-store.ts   # 戻す
+git status --porcelain                                                # 空になることを確認
+```
+
+**戻した後、同じ it が緑に戻ることまで実測すること。**「赤くなった」だけでは、
+壊したのが狙った歯なのか別のものなのかが分かれていない。
+
+**この手順で実際に何が測れたかは
+[ADR 0183](./docs/decisions/0183-local-postgres-makes-postgres-mutation-testing-possible.md)。**
+
+---
+
 ## 文書の地図
 
 | 文書 | 何が書いてあるか |
@@ -100,6 +200,7 @@
 | [docs/architecture.md](./docs/architecture.md) | 全体アーキテクチャ / package 構成 / 主要 interface |
 | [docs/memory-model.md](./docs/memory-model.md) | DB schema 案 / Memory lifecycle / provenance / 矛盾 / 忘却 / 監査ログ |
 | [docs/recall.md](./docs/recall.md) | Recall pipeline / 「無い」の分類 / 目次帯 / 量の計測と予算 |
+| [docs/conformance.md](./docs/conformance.md) | **適合テストが何を検証し、何を検証していないか** — 走らない歯 / 実 API に当てる手順 |
 | [docs/roadmap.md](./docs/roadmap.md) | Phase 1 実装計画 / リスク / **まだ判断が必要な点** |
 | [docs/alteroid-findings.md](./docs/alteroid-findings.md) | 設計の材料にした運用知見を、現物で検証した記録 |
 | [docs/autonomy.md](./docs/autonomy.md) | **自律作業の手引き** — 何を選ぶか / どこで止まるか / 何をしてはいけないか / 踏むと痛い穴 |
@@ -150,6 +251,187 @@
     GitHub のスカッシュが書くのは `Co-authored-by:` であり、`-i` を付けて数え直すと
     **162本中106本**、つまり**報告した向きと逆**だった。
     ⟹ **分布は何も決めていない。決めているのはこの節である。**
+
+### ⚠ 数を、道具と生成物に焼き込まない
+
+**`main` が動けば変わる数——件数・行番号・版・tag・sha——を、道具や生成物に写さないこと。**
+⟹ **唯一の出所をその場で引くか、指すだけにする。**
+⟹ **指せないものには、代わりに「どこまで数えたか」の鮮度を名乗らせる。**
+
+**理由は上の「⚠ ここに北極星の要約を置かない」と同じである**——**複製した瞬間から、正本と写しはずれ始める。**
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定9 に在る**（ここには写さない）。
+
+#### ⭐ 線は「`main` が動くと変わるか」である
+
+**焼き込んでよい数も在る。**
+[ADR 0212](./docs/decisions/0212-local-embedding-size-noun-correspondence-tooth.md) は
+`@mnemora/local-embedding` のモデルサイズを**歯で縛っている**——**そのサイズは `main` では動かない**
+（⭐ **数字そのものは ADR 0212 と歯が持つ。ここには写さない**——この節自身の適用である）。
+⟹ ⛔ **「数字が書いてある」だけを理由に直しにいかないこと。**先にこの線を当てる。
+
+#### ⛔ 対象外 —— **実測して repo にコミットした基準値**
+
+**CI の実測 artifact をそのまま基準値としてコミットしたものは、この規律の対象ではない。**
+**それは複製ではなく、測った記録そのものである**
+（[ADR 0119](./docs/decisions/0119-archive-sweep-cost-bench.md) 決定6 /
+[ADR 0121](./docs/decisions/0121-bench-baselines-from-ci-artifacts.md) 決定1 /
+[ADR 0133](./docs/decisions/0133-compare-baseline-and-gate.md) 決定1 /
+[examples/chat/README.md](./examples/chat/README.md)）。
+
+⚠ **この対象外が書かれていなかったために、実際に誤った判定が出ている**——
+[Issue #403](https://github.com/takecchi/mnemora/issues/403) で「基準値を実測で更新する案は
+この規律に反する」として一度却下され、後に撤回された。
+
+⭐ **見分ける問いは1つ**: **その数は、どこか別の場所に在る正本の*写し*か。
+それとも、それ自体が*測った記録*か。** ⟹ **写しなら指す。記録なら残す。**
+
+### ⚠ 機械には「検出」まで — 確定と書き込みは人に残す
+
+**歯（機械検査）の担当は「検出」までである。「確定」と「書き込み」は人に残す。**
+⟹ **機械が判定できなかったときは、従来どおりに倒さず赤／保留で止める。**
+
+**同じ理由を、担い手が打つコマンドの書き方として先に持っているのが
+[docs/autonomy.md](./docs/autonomy.md) §4.1「静かに失敗する道具」の
+「副作用のある手（`gh issue close`・`gh pr merge`・`git push`）を、判定と同じ行に繋がない。
+`if` で明示する」である**（ここには写さない）。**この節が足すのは、その一手のさらに手前
+——この repo で*新しく作る道具*（script・CI job）自体を、どこまで自動化してよいかという
+*設計*の規律である。**
+
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定2 に在る**（ここには写さない）。
+
+#### ⭐ 線は「repo の中（戻せる）か、GitHub 側の取り消しにくい面か」である
+
+**線は「機械が書き込むか」ではない。**
+[ADR 0179](./docs/decisions/0179-adr-number-assigned-at-merge.md) の `adr-renumber.mjs` は、
+ファイル名・見出し・このブランチが足した参照を機械的に書き換える——**機械が書き込む。**
+だがそれは repo の中の変更であり、`git mv` も含めて戻せる。
+
+[ADR 0211](./docs/decisions/0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md)
+が引いている線はもう一段外に在る——**PR タイトルと本文（squash commit のタイトルと本文）は
+機械が直せない。**だから同 ADR は検出して CI を赤にするところまでで止め、
+`gh pr edit --title / --body` を機械に打たせる案を退けている。
+
+⟹ **割れているのは「repo の中（戻せる）か、GitHub 側の取り消しにくい面（PR・issue の状態や
+squash commit の本文）か」である。**新しく作る道具が repo の中だけに書き込み、かつ戻せるなら、
+機械が確定・書き込みまで担ってよい余地がある（ADR 0179 の実例）。**GitHub 側の
+取り消しにくい面へは、検出までに留め、確定と実行を人に残す**（ADR 0211 の実例）。
+
+### ⚠ 偽陽性率に上限を置けない検査は門にしない
+
+**門（落とす検査）にしてよいのは、偽陽性率に上限を置けると実測できたものだけである。**
+⟹ **置けないなら門にせず、代わりに置いたもの（観測口・警告・候補一覧・人手監査）を
+同じ場所に明記する。**
+
+**同じ形を、設計案を選ぶ問いとして先に持っているのが
+[docs/north-star.md](./docs/north-star.md)「迷ったときの問い」と
+「この問いが、実際に案を落とすことの確認」である**（ここには写さない）。**この節が足すのは、
+設計案を選ぶ問いではなく、CI に置く*機械の門*そのものについての版である。**
+
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定3 に在る**（ここには写さない）。
+
+#### 🔴 線は引けない — [ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) が反例
+
+**偽陽性率に上限を置けない検査は門にしない。⚠ ただし
+[ADR 0178](./docs/decisions/0178-public-api-surface-gate.md) は偽陽性を承知で門にしている。
+どちらに倒すかの線は、いまのところ書けていない —— 判断するときは両方の ADR
+（[ADR 0088](./docs/decisions/0088-retrieval-quality-measured-in-ci.md) /
+[ADR 0094](./docs/decisions/0094-identifier-probes-local-embedding.md) と
+[ADR 0178](./docs/decisions/0178-public-api-surface-gate.md)）を読むこと。**
+
+経緯・測ったこと・線がまだ書けない理由は
+[ADR 0254](./docs/decisions/0254-no-gate-without-a-false-positive-ceiling.md) に在る
+（ここには写さない）。
+
+### ⚠ 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧で出す
+
+**取りこぼしがゼロにならないと分かっている道具に、「これが全部です」と名乗らせないこと。**
+⟹ **判定（exit 非0 を「これで全部」の主張として使う）ではなく一覧として出し、取りこぼす側と
+余計に拾う側の実例を、出力そのものに焼くこと。**
+
+**同じ規律を、人が書く報告について先に持っているのが、このすぐ上の「確かめていないことは
+「確かめていない」と書く」と [docs/autonomy.md](./docs/autonomy.md) §5「報告に必ず書くこと」
+である**（ここには写さない）。**この節が足すのは、宛先が人の文章から*道具の出力*へ
+移った版である。**
+
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定5 に在る**（ここには写さない）。
+
+#### ⭐ 線は「取りこぼしが検査の対象の中で構造的か、対象の外の宣言で足りるか」である
+
+**射程だけを広げると、対象を機械的に確定できる検査——2つのテキストの完全一致、実物の
+ファイルの構文解析のような、検査それ自体が対象の外延と一致するもの——まで、毎回の出力に
+取りこぼしの実例を焼くことを求めてしまう。**そこに構造的な取りこぼしは無い。**この種の
+検査が持つ「保証しない範囲」は対象の外に在る宣言であり、出力にではなくソースの説明
+（ADR やコード中の doc コメント）に書けば足りる**
+（[ADR 0184](./docs/decisions/0184-conformance-scope-documented-not-closed.md) の形）。
+
+**この節が求めるのは、検査の対象そのものが機械的に確定できないとき**——
+[ADR 0214](./docs/decisions/0214-release-candidates-lists-not-judges.md) の
+`release-candidates.mjs` がその実例——「どの commit が破壊的変更か」は commit の書き方
+だけでは決まらない。**そのときは exit を判定に使わず、取りこぼす側・余計に拾う側の実例を
+出力へ焼く。**
+
+### ⚠ 「出なかった」を、事象が無いことの証明にしない — 先に陽性対照を示す
+
+**「再現しなかった」「ヒットしなかった」を積み重ねても、事象が起きないことの証明にはならない。
+探り棒が弱いのか、事象が起きないのかが、分かれていないからである。**
+⟹ **先に、その事象を*意図的に起こして*、探り棒がそれを捕まえることを示す（陽性対照）。**
+
+**同じ理由を、変異試験という1本の手順に閉じた形で先に持っているのが、この文書自身の
+「⛔ 変異を戻すのに `git checkout` を使わない」節（上、「戻した後、同じ it が緑に戻ることまで
+実測すること。「赤くなった」だけでは、壊したのが狙った歯なのか別のものなのかが分かれていない」）と
+[docs/autonomy.md](./docs/autonomy.md) §2 の止まる条件（「歯が実際に噛むことを、変異試験で示した
+——壊した入力で赤く、直したら緑に戻る」）である**（ここには写さない）。**この節が足すのは、
+その手順のさらに手前——変異試験に限らず、「出なかった」を根拠に何かを主張するとき全般に
+当たる*一般則*である。**
+
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定6 に在る**（ここには写さない）。
+
+#### ⭐ 線は「『出なかった』を根拠にするときだけ」である
+
+**陽性対照が要るのは、「出なかった」を根拠にして何かを主張するときだけである。**
+「出た」を報告するときは要らない——**出たこと自体が、探り棒が生きていたことの証明になる。**
+⟹ **すべての報告に対照を要求しない。**
+
+### ⚠ 「無かった」と書く前に、探した場所を列挙する
+
+**「無い」「見つからなかった」と書く前に、探した場所（コマンドと対象）を列挙すること。**
+⟹ **列挙できないなら「当たった範囲での結果であり、断定ではない」と書く。**
+
+**入口に在るのは、この規律の向きが逆の版である**——
+[docs/north-star.md](./docs/north-star.md)「目指す姿」に在るのは、
+**`mnemora`（製品）が使う側に対して満たすべき姿**としての版である
+（⛔ ここには写さない——上の「⚠ ここに北極星の要約を置かない」と同じ理由）。
+**この節が足すのは、同じ規律を書き手・担い手が自分の調査手続きへ当て直した版である**
+——**同じ言葉が、別の宛先にも効くことを明示する。**
+
+**これは上の「確かめていないことは『確かめていない』と書く」とは別の規律である。**
+あちらは推測を事実の顔で書かないという一般則（肯定・否定どちらの主張にも効く）。
+こちらは「無かった」という**否定の主張**に対して**具体的にどこを当たったかを列挙する**、
+より狭く具体的な要求である。
+
+**この形を独立に採った ADR の一覧は
+[ADR 0223](./docs/decisions/0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+決定10 に在る**（ここには写さない）。
+
+#### ⚠ 例外 —— 列挙は網羅を示さない
+
+**列挙した探し先が網羅であることは、列挙しただけでは示せない。**
+[ADR 0140](./docs/decisions/0140-contested-write-side-companion-required.md) は、
+`grep` を横断して「対向無し `contested` 生成箇所は見つからなかった」と書いたあとで、
+その `grep` 自身が別の箇所を一度見落としていたことを自分で記録している——見落とした箇所は、
+CI の DB ジョブが実際に走って初めて表面化した。
+⟹ **「探した場所を書け」は「網羅を証明せよ」ではない。**書かないと、探索の報告が
+無限に重くなる。
 
 ---
 

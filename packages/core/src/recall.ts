@@ -51,6 +51,41 @@ export interface StageSkippedOmission {
     | "no_anchor";
 }
 
+/**
+ * `FilteredOmission.condition` が分かれる2つの群の名前（Issue #352 / ADR 0174）。
+ *
+ * **なぜ2群か（真偽値ではなく名前のある値にした理由も含む）**:
+ *
+ * - `"outside_scope"` — **問うている切り口そのものを定義するゲート**で落ちた。
+ *   `expired`/`not_yet_valid` は「その事実はいま真ではない」ことを言う。これは
+ *   `period`（いつ起きたか）・tenant/subject（誰について）と同じく、**問うている
+ *   切り口そのものを定義する次元**である。だから `IndexBand.totalInScope` から
+ *   **引かれる**。
+ * - `"within_scope"` — **スコープの中に居るまま、到達しにくさのゲート**で落ちた。
+ *   `decayed` は「その記憶は**まだ真**で、**まだ切り口の中に在る**が、遠ざかった」
+ *   ことを言う——**到達しにくさ**のゲートであって、切り口のゲートではない。だから
+ *   `totalInScope` から**引かれない**（内訳・部分集合として残る）。
+ *
+ *   **決め手は `docs/north-star.md`「目指す姿」の逐語である**:
+ *   > 使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。
+ *
+ *   `decayed` を `"outside_scope"` 側に置く（＝`totalInScope` から引く）と、
+ *   減衰した記憶は `totalInScope` からも目次帯からも消える（`digestEligible`/
+ *   `digests` は同じ述語に乗っている）。**呼び手から見て、減衰は削除と区別が
+ *   付かなくなる。**正典が名指しで否定した振る舞いになるため、この型は
+ *   `decayed` を `"within_scope"` 側に固定する。
+ *
+ * **真偽値にしない**——このリポジトリは `superseded`/`forgotten` を分けたときと
+ * 同じく、名前のある値を好む（ADR 0027）。`isOutsideScope: boolean` のような形は、
+ * 読み手が「true が何を意味するか」を毎回コードへ戻って確認する必要が生まれる。
+ */
+export type ScopeRelation = "outside_scope" | "within_scope";
+
+export const ScopeRelationSchema = z.enum([
+  "outside_scope",
+  "within_scope",
+]) satisfies z.ZodType<ScopeRelation>;
+
 export interface FilteredOmission {
   kind: "filtered";
   /**
@@ -101,6 +136,14 @@ export interface FilteredOmission {
    * **⚠ `"archived"` 等と違い、この件数は `IndexBand.totalInScope` から除かれていない**
    * ——減衰しきった Memory はスコープ内に在る（`ScopeAggregate.filteredDecayed` の doc）。
    *
+   * **`scopeRelation` は `"within_scope"` である（Issue #352 / ADR 0174）。**
+   * `decayed` は**スコープ内に在るまま到達しなかった側**である。`totalInScope` から
+   * 引かれない。引くと、正典が否定した「消える」になる——
+   * `docs/north-star.md`「目指す姿」の逐語:
+   * 「使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。」
+   * これに対し `"archived"`/`"expired"`/`"not_yet_valid"` は `scopeRelation:
+   * "outside_scope"` であり、`totalInScope` から引かれる（各条件の doc 参照）。
+   *
    * **`"expired"`/`"not_yet_valid"`（Issue #280、Issue #202 第2弾、マネージャー決定3）**:
    * `RecallQuery.validAt` ゲート（既定 `now`）が落とした Memory を名指しする。
    * - `"expired"`: `validUntil` が `validAt` 以前（`validUntil <= validAt`）——
@@ -114,11 +157,18 @@ export interface FilteredOmission {
    * **issue が禁じる「片方だけ名指しして残りが黙って減る」形になる**——
    * `"superseded"`/`"forgotten"` を分けた ADR 0027 と同じ判断。
    *
-   * **`count`/`countKind` は `"period"` と同じ扱い（`"decayed"` とは違う）**:
+   * **`count`/`countKind` は `"period"` と同じ扱い**:
    * 段1（ANN・語彙の両チャンネル）へ SQL の `WHERE` として押し下げているため
-   * （`VectorFilter.validAt`/`LexicalFilter.validAt`。`"decayed"` は ANN にしか
-   * 押し下げていないので `lower_bound` になるのと対照的）、`MemoryStore.aggregateScope`
+   * （`VectorFilter.validAt`/`LexicalFilter.validAt`）、`MemoryStore.aggregateScope`
    * の `count(*) FILTER` で厳密集計できる。⟹ `countKind` は常に `"exact"`。
+   *
+   * **⚠ 2026-09 訂正（Issue #352 / ADR 0174）**: 以前この段落は「`"decayed"` は ANN にしか
+   * 押し下げていないので `lower_bound` になるのと対照的」と書いていたが、これは
+   * ADR 0173（2026-09-16）で古くなっていた——`"decayed"` の `countKind` はその ADR で
+   * `"lower_bound"` から `"exact"` へ上がっている（`decayed` の doc 参照）。**`"expired"`/
+   * `"not_yet_valid"` と `"decayed"` の `countKind` は今日どちらも `"exact"` であり、
+   * 対照は無い。** 両者が実際に違うのは `countKind` ではなく `scopeRelation`
+   * （下記）である。
    */
   condition:
     | "tenant"
@@ -130,10 +180,61 @@ export interface FilteredOmission {
     | "decayed"
     | "expired"
     | "not_yet_valid";
+  /**
+   * この `condition` が `IndexBand.totalInScope` の内側と外側のどちらの群に属するかを
+   * 名乗る（Issue #352 / ADR 0174）。**どの条件がどちらかを決める唯一の場所は
+   * `FILTERED_CONDITION_SCOPE_RELATION` である**——ここでは決めない・重複させない
+   * （式を2箇所に書くと必ずずれる、ADR 0038 が実測した穴）。
+   */
+  scopeRelation: ScopeRelation;
   count: number;
   countKind: CountKind;
 }
 
+/**
+ * `FilteredOmission.condition` のどの値がどちらの `ScopeRelation` かを決める、
+ * **唯一の場所**（Issue #352 / ADR 0174）。`omitted` を組み立てる側
+ * （`recall-runtime.ts`）は、この定数から読むだけにする——式をここと組み立て側の
+ * 2箇所に書くと、どちらか一方だけ直して他方を直し忘れたときに黙ってずれる
+ * （ADR 0038 が実測した穴と同じ形）。
+ *
+ * `Record<FilteredOmission["condition"], ScopeRelation>` という型そのものが、
+ * `condition` の union に値を足したときにこの定数の更新漏れを型エラーにする
+ * （キー不足・キー余剰のどちらも赤くなる）。実行時にも網羅性を検査する歯が
+ * `packages/core/src/__tests__/` に在る（`OmissionSchema`/`condition` の enum と
+ * このオブジェクトのキー集合を突き合わせる、`omission-kind-generation.test.ts` と
+ * 同じ作法）。
+ *
+ * - `tenant`/`superseded`/`forgotten`/`archived`/`taxonomy`/`period`/`expired`/
+ *   `not_yet_valid` → `"outside_scope"`（スコープを定義するゲートで落ちた）。
+ * - `decayed` → `"within_scope"`（スコープ内に居るまま到達しなかった。`ScopeRelation`
+ *   の doc コメントに理由の全文がある）。
+ */
+export const FILTERED_CONDITION_SCOPE_RELATION: Record<
+  FilteredOmission["condition"],
+  ScopeRelation
+> = {
+  tenant: "outside_scope",
+  superseded: "outside_scope",
+  forgotten: "outside_scope",
+  archived: "outside_scope",
+  taxonomy: "outside_scope",
+  period: "outside_scope",
+  expired: "outside_scope",
+  not_yet_valid: "outside_scope",
+  decayed: "within_scope",
+};
+
+/**
+ * **排他性契約（Issue #421 / [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）:
+ * `nearMisses`（および `count` が数える集合）は、`RecallResult.memories` に実際に
+ * 返った memoryId を含まない。** 段2はこの Omission を「閾値未満で落ちた」候補から
+ * 確定させるが、段3.5（連想）や段3（必須の同伴取得）がその候補を後から
+ * `RecallResult.memories` へ昇格させることがある——その場合、昇格した分は `count`/
+ * `nearMisses` の両方から取り下げる（`recall-runtime.ts` の「排他性契約」ブロック）。
+ * ⟹ **`nearMisses` に載っている memoryId が、同じ `recall()` の `memories` に
+ * 同時に現れることは無い。**
+ */
 export interface BelowThresholdOmission {
   kind: "below_threshold";
   count: number;
@@ -141,8 +242,20 @@ export interface BelowThresholdOmission {
   nearMisses?: { memoryId: MemoryId; score: number }[];
 }
 
+/**
+ * **`stage`（Issue #375 / [ADR 0188](../../../docs/decisions/0188-association-over-limit-omission.md)）**:
+ * この上限切り捨てがどの段で起きたかを言う。次の一手を変える欄なので必須にした
+ * （`filtered.condition` と同じ理由——「どの上限を動かせばよいか」が段ごとに違う）。
+ *
+ * - `"rescore"` — 段2。`RecallQuery.limit` を超えた分（`docs/recall.md` §2 段2）。
+ *   次の一手: `limit` を増やす、あるいはページングする。
+ * - `"association"` — 段3.5。`RecallAssociationQuery.maxCount` を超えた分
+ *   （`docs/recall.md` §9）。次の一手: `maxCount` を増やす。**`limit` を増やしても
+ *   直らない**——連想枠の候補は段2の `limit` とは別の上限（`maxCount`）で切られる。
+ */
 export interface OverLimitOmission {
   kind: "over_limit";
+  stage: "rescore" | "association";
   count: number;
   countKind: CountKind;
 }
@@ -213,14 +326,29 @@ export interface AnnTruncatedOmission {
 }
 
 /**
- * ANR 索引が、scope 内にまだ見られていない候補を残したまま k' に届かなかったことの報告
+ * 近似索引（ANN）が、scope 内にまだ見られていない候補を残したことの報告
  * （[ADR 0025](../../../docs/decisions/0025-ann-underfill-is-not-reported-in-omitted.md) の
- * 実測、[ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md) の決定）。
+ * 実測、[ADR 0026](../../../docs/decisions/0026-ann-unreached-omission.md) の決定、
+ * [ADR 0193](../../../docs/decisions/0193-ann-unreached-covers-full-window.md) が
+ * 発火条件を拡張）。
  *
- * **`ann_truncated` に相乗りさせない。** over-fetch の打ち切り（k' に達した＝もっと在るはず
- * だが LIMIT で切った）と、この事象（k' に届く前に ANN が scope の他の場所へ行ってしまい、
- * この scope の候補に届かなかった）は**別の出来事**である。同じ札に潰すと、
- * ADR 0008 が禁じている「別の理由を同じ顔にする」を自分でやることになる。
+ * **`ann_truncated` とは別の問いに答える。** `ann_truncated`
+ * （[ADR 0069](../../../docs/decisions/0069-ann-truncated-says-nothing-about-loss.md)）は
+ * 「窓の外（k' 位より後ろ）は k 位を抜けないと証明できるか」に答える札であり、その証明は
+ * **窓の中身（`annHits`）が scope の真の上位 k' 件である**ことを前提にしている。
+ * `ann_unreached` は逆に「近似索引は scope の候補を拾いきったか」に答える札であり、
+ * **窓が満杯でも拾いきれているとは限らない**——近似索引は scope の他の場所へ辿って
+ * しまい、窓の中身自体が真の上位 k' 件からズレている（＝より近い候補を取りこぼしている）
+ * ことがありうる（`ann-truncation.ts` の doc コメント参照）。
+ *
+ * **🔴 ADR 0193 より前は `annHits.length < kPrime`（窓が埋まっていない）という条件が
+ * 付いており、`ann_truncated` と排反だった。** その条件は「窓が埋まっていれば scope の
+ * 候補を ANN が拾いきれている」という前提に立っていたが、その前提こそが
+ * `ann-truncation.ts` の doc コメントが明示的に否定している事象（近似索引が scope の
+ * 他所へ行った場合、窓が満杯でも上界は破れる）だった。ADR 0193 はこの条件を落とし、
+ * **窓の満杯/未満を問わず、scope 内にまだ見られていない候補が残っているかだけ**で
+ * 判定するよう直した。**⟹ 今日 `ann_truncated` と `ann_unreached` は同時に立ちうる**
+ * ——同じ事象の重複ではなく、別の問いにそれぞれ答えているだけである。
  *
  * **🔴 件数を持たせない。`countKind` は常に `'unknown'` である。**
  * 理由: この系は「何件取りこぼしたか」を原理的に知りようがない——ANN が触れなかった
@@ -341,6 +469,7 @@ const FilteredOmissionSchema = z.object({
     "expired",
     "not_yet_valid",
   ]),
+  scopeRelation: ScopeRelationSchema,
   count: z.number().int().nonnegative(),
   countKind: CountKindSchema,
 }) satisfies z.ZodType<FilteredOmission>;
@@ -354,6 +483,7 @@ const BelowThresholdOmissionSchema = z.object({
 
 const OverLimitOmissionSchema = z.object({
   kind: z.literal("over_limit"),
+  stage: z.enum(["rescore", "association"]),
   count: z.number().int().nonnegative(),
   countKind: CountKindSchema,
 }) satisfies z.ZodType<OverLimitOmission>;
@@ -407,6 +537,17 @@ const UnitAssemblyDroppedOmissionSchema = z.object({
   countKind: CountKindSchema,
 }) satisfies z.ZodType<UnitAssemblyDroppedOmission>;
 
+/**
+ * **2026-09-17 追記（Issue #272、[ADR 0181](../../../docs/decisions/0181-schema-type-equals-parity.md)）**:
+ * `satisfies z.ZodType<Omission>` を足した。この discriminated union は、11本の枝
+ * それぞれには `satisfies z.ZodType<XxxOmission>` が付いているのに、まとめのこの1行にだけ
+ * 付いていなかった（55箇所の `satisfies z.ZodType<...>` のうち、唯一この形の宣言が
+ * 欠けていた箇所）。**足しても `tsc` は緑のまま**——各枝が既に個別に検査されているため、
+ * 実質的な検査の追加ではないが、「まとめの discriminated union 自体は誰も見ていない」
+ * という読み手の誤解を防ぐ。`packages/core/src/__tests__/schema-type-equals-parity.test.ts`
+ * が、この1行が無くても `Equals<z.infer<typeof OmissionSchema>, Omission>` として
+ * 同じ検査をテスト側からも固定している（この行が万一巻き戻っても、あちらの歯が拾う）。
+ */
 export const OmissionSchema = z.discriminatedUnion("kind", [
   StageSkippedOmissionSchema,
   FilteredOmissionSchema,
@@ -419,7 +560,7 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
   LexicalTruncatedOmissionSchema,
   ScoreNotComparableOmissionSchema,
   UnitAssemblyDroppedOmissionSchema,
-]);
+]) satisfies z.ZodType<Omission>;
 
 // ---------------------------------------------------------------------------
 // 目次帯 / 被覆不変条件（docs/recall.md §5）
@@ -1209,8 +1350,24 @@ export interface RecallAssociationQuery {
    */
   maxCount: number;
   /**
-   * 起点にするアンカー（段3までに残った候補の上位何件を連想の起点にするか）の数。
-   * 既定 {@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}。
+   * 起点にするアンカーの数。既定 {@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}。
+   *
+   * **⚠ `RecallQuery.limit`（既定 {@link DEFAULT_RECALL_LIMIT} = 10）が天井になる。**
+   * アンカーは「段3までに残った候補」全部からではなく、**そのうち `limit` の内側に入った分**
+   * （`recall-runtime.ts` の `withinLimit = passed.slice(0, limit)`）から取る
+   * （`const anchors = withinLimit.slice(0, anchorCount)`）。
+   * ⟹ **`anchorCount` だけを上げても、`limit` を超えた候補は起点にならない。**
+   * 連想の裾野を広げたいなら `limit` と `anchorCount` の**両方**を上げること。
+   * ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`
+   * （= `limit` × {@link DEFAULT_OVER_FETCH_FACTOR}）も一緒に広がる——費用は連想枠だけの話では済まない。
+   *
+   * 【実測 2026-09-17、本物の Postgres + pgvector、`main` = `f8a8fa7`。単一話題90件を ingest し、
+   * 段2を通った候補が常に `limit` より多い状態で、段3.5 が `VectorStore.getVectors` へ渡した
+   * memoryId の件数を数えた（`packages/core` が `getVectors` を呼ぶのはこの1箇所だけである）】
+   * `limit:10 / anchorCount:3` → 3、**`limit:10 / anchorCount:40` → 10**、
+   * `limit:40 / anchorCount:40` → 40、**`limit:5 / anchorCount:40` → 5**、
+   * `limit:40 / anchorCount:3` → 3。
+   * すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
    */
   anchorCount?: number;
   /**
@@ -1390,6 +1547,16 @@ export interface RecallResult {
   /** 記録された recall の識別子。observe() の usage 報告で使う。 */
   recallId: RecallId;
   memories: RecalledMemory[];
+  /**
+   * **返さなかった記憶の分類（`docs/recall.md` §4）。** `memories` と memoryId で排他——
+   * ある memoryId が `memories` に載っているなら、この配列のどの Omission も
+   * その memoryId を名指しで含まない（Issue #421 /
+   * [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）。
+   * ただし memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり、
+   * この契約が**個体単位で検証できる**のもそこだけである——他の10種の `kind` は
+   * 件数（`count`）だけを持ち、どの記憶を指しているかを言わない
+   * （ADR 0203「引き受けた負債」参照）。
+   */
   omitted: Omission[];
   index: IndexBand;
   usage: RecallUsage;

@@ -295,6 +295,44 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill
 ここで見せたいのは「切り詰めずに、そのままだと何文字になるか」であり、強制ではなく
 計測の比較だからである（budget が実際に切り詰めることは `chat` サブコマンドの方で見せる）。
 
+### 基準値（`compare-baseline.json`）を更新する手順（⭐ 2回以上の run で一致を確かめてから採る）
+
+**`compare` は⭐門である**（[ADR 0133](../../docs/decisions/0133-compare-baseline-and-gate.md)）。
+基準値は `examples/chat/compare-baseline.json` にコミットされていて、**CI はこれを自動更新しない。**
+値が意図して動いたときは人が更新する——⭐ **その手間は目的である**（同じ規律の説明は
+本 README の `identifier-probes` 節「基準値との差分を Job Summary に出す」にある）。
+
+⛔ **手元で測った値を書かない。**[ADR 0121](../../docs/decisions/0121-bench-baselines-from-ci-artifacts.md)
+の表題が逐語で「基準値を、CI 初回実測の artifact から作る（**手元では書かない**）」であり、
+[ADR 0119](../../docs/decisions/0119-archive-sweep-cost-bench.md) 決定6 が
+「**実測せずに数値を書けば、それは捏造である。**」と書いている。⟹ **本体は CI の artifact を
+プログラムで読み込んで差し替える**（ADR 0133 決定1。形の実例は
+[ADR 0168](../../docs/decisions/0168-examples-chat-uses-association.md) 決定5）。
+
+⭐ **採る前に、2回以上の成功 run で一致することを確かめる**（[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md) 決定5。
+ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化されていなかった規律である）。
+
+1. 更新を含む PR を立て、**その PR 自身の CI（`example-chat` ジョブ）**を走らせる。
+2. artifact を **2本以上**取る。同一 commit で同じジョブを再実行した2本が最も強い
+   （`gh run rerun <run-id> --job <job-id>`。前例は [ADR 0170](../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md) の3本）。
+
+   ```bash
+   gh run download <run-id> -R takecchi/mnemora -n compare -D <dir>
+   ```
+
+3. **`measuredAt` と `commit` を除いて `rows` がバイト単位で一致すること**を確かめる。
+   ⛔ **一致しなければ基準値を更新しない**——先に直すべきは値ではなく非決定である
+   （前例: ADR 0170。基準値に採った値が、実は run ごとに揺れる3値のうちの1点だった）。
+4. 一致したら、artifact を**プログラムで読み込んで** `llmMode`/`embeddingMode`/`rowCount`/`rows`
+   を差し替える。⛔ 手で数値を打たない。
+5. `provenance` に `commit`/`measuredAt`/`ciJob`/`repeatRuns` と、**なぜ値が動いたか**の `note` を書く。
+6. PR 本文に **「旧基準での結果」「新基準での結果」「変更理由」「失う保証」を分けて**書く
+   （`docs/autonomy.md` §2.2）。
+
+⚠ **Job Summary の「基準値の鮮度」節は、⭐門が見ない欄（`omitted` 等）の食い違いを毎 run 名乗る**
+（[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md)）。⛔ **これは門ではない**——ジョブは落ちない。
+**古いことに気づかせるためだけに在る。**
+
 ### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
 `compare`/`archive-sweep-cost` は `--decay-clock <wall|activity|either>` を受け付ける。
@@ -491,6 +529,16 @@ Actions run 34006151739、head `e87da3b`）で `compare` を走らせたとこ�
 
 そこで、冒頭で一度だけ表明した事実（`FACT_STATEMENT` = 「私の好きな色は青です。……」）が、
 絞り込みの後にも `recall()` の返り値に残っているかを、全ての会話長で確認する。
+
+> **⚠⚠⚠ 2026-09-17 追記（Issue #496、元の記述は書き換えていない）。**
+> 上の「答えが、削られた後にも残っている」「事実が…残っているか」という言い方は、
+> **実際の判定方法（`sourceObservationId` を辿って `externalId` を照合する系譜追跡、
+> ADR 0052）よりも強いことを言っている。**この判定が証明するのは**出典への到達だけ**
+> である——`digest` の中身は一切見ないため、要約で答えの情報が失われていても、
+> 出典が同じなら ✅ になる。⟹ **「情報が残った」「全文なしで答えられた」ことの
+> 証明にはならない。**区別の根拠は `docs/autonomy.md` §2.2 の2番・ADR 0224、
+> 是正の詳細は [ADR 0226](../../docs/decisions/0226-compare-provenance-reached-vs-information-retained.md)。
+> 情報保持・最終回答の品質そのものを測る評価は、この Issue の範囲ではなく #498 が追う。
 
 **⚠⚠⚠ 2026-09-06 追記（本 PR）: 下の表は、それ以前にあった「全行 ✅・3列」の表を
 実測値で置き換えたものである。** [ADR 0021](../../docs/decisions/0021-drain-embed-ticks-in-ingest.md)
@@ -998,6 +1046,10 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
 
 - Issue #106 が名指しした5領域（人名・チャンネル名・社内システム名・案件コード・
   チケット番号）を、まず**12件**（領域あたり2〜3件）で覆う。
+  ⟹ その後 2026-09-13（Issue #109、`3350e18`）に**領域あたり6件・計30件**へ拡張した
+  （内訳: project-code 2→6 / ticket 2→6 / system 2→6 / channel 3→6 / person 3→6。
+  `identifier-probe-baseline.json` の `provenance.probeSetGrowth`）。**以下の実測は
+  この30件時点のものである。**
 - **既存 `probe-set.ts` と probe の設計が「逆」である。**既存は gold の質問が
   gold の事実と内容語を共有しない（本物の埋め込みでしか引けないことを確かめるため）。
   `identifier-probes` は**query に識別子そのものを含める**——「その文字列を含むか」で
@@ -1017,29 +1069,43 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
     （`findIdentifierTopicKeywordViolations`。違反があれば例外——`probe-set.ts` の
     `findTopicKeywordViolations` と同じ作法）。
 
-### 3群を別々に集計する（⛔ 混ぜた単一の MRR にしない）
+### 5群を別々に集計する（⛔ 混ぜた単一の MRR にしない）
 
 `identifier-probes` は擬似LLM（`DeterministicLLMProvider`）＋ローカル埋め込みで、
-3群を走らせる。LLM 層は `retrieval` の arm B と同一——差は埋め込みだけであり、
+5群を走らせる。LLM 層は `retrieval` の arm B と同一——差は埋め込みだけであり、
 `@mnemora/local-embedding` の README が「確かめていないこと」として名指しした
 「`@mnemora/openai` と比べて想起の質がどうなるか」を、ここで初めて測る。
+
+⚠ **後発の2群（`japaneseNamesSparse`/`japaneseNamesDense`）は、2026-09-13
+（Issue #109、`4602678`）に足された**——ASCII の識別子だけでなく、**日本語の
+固有名詞**（人名・組織名・製品名・地名）を埋め込みが弁別できるかを測るためである。
 
 | 群 | probe | haystack | 直接比較できる相手 |
 |---|---|---|---|
 | `japanese` | 既存の日本語意味 probe 7件（`probe-set.ts`、変更していない） | sparse | `retrieval` の arm B（embedding=recorded、実質 `text-embedding-3-small`/256次元） |
-| `identifiersSparse` | ASCII 識別子 probe 12件 | sparse（識別子0件） | `identifiersDense`（同じ12 probe、haystack だけが違う） |
-| `identifiersDense` | 同じ12 probe | dense（識別子60件） | `identifiersSparse` |
+| `identifiersSparse` | ASCII 識別子 probe **30件**（領域あたり6件） | sparse（識別子0件） | `identifiersDense`（同じ30 probe、haystack だけが違う） |
+| `identifiersDense` | 同じ30 probe | dense（識別子60件） | `identifiersSparse` |
+| `japaneseNamesSparse` | 日本語固有名詞 probe 12件（person4/org3/product3/place2） | sparse（固有名詞0件） | `japaneseNamesDense`（同じ12 probe、haystack だけが違う） |
+| `japaneseNamesDense` | 同じ12 probe | dense（固有名詞60件、密度5:1） | `japaneseNamesSparse` |
 
-### 実測結果（2026-09-10、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
+### 実測結果（[identifier-probe-baseline.json](./identifier-probe-baseline.json)、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
 
 🔴 **数字には必ず arm 名・`(provider, model, dimensions)`・haystack 条件を添える**
 （この repo で「条件を落とした数字」が実際に3度壊れているため。ADR 0068・ADR 0081 §3.2）。
 
+**provenance**: commit `3350e18`（identifiersSparse/Dense を30件へ拡張した時点）、
+`measuredAt` **2026-09-13T14:08:56.811Z**。⚠ **`japaneseNamesSparse`/`japaneseNamesDense`
+の2群は、この commit を土台にした未コミットの作業ツリー上で測定されている**
+（`identifier-probe-baseline.json` の `provenance.note`）——`japanese`/`identifiersSparse`/
+`identifiersDense` の3群の値は、その拡張以降1バイトも動いていない。
+
 | 群 | `(provider, model, dimensions)` | haystack | MRR | hit@1 | hit@10 |
 |---|---|---|---|---|---|
 | `japanese`(7件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **0.810** | 5/7 | 7/7 |
-| `identifiersSparse`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **1.000** | 12/12 | 12/12 |
-| `identifiersDense`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **1.000** | 12/12 | 12/12 |
+| `identifiersSparse`(30件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **1.000** | 30/30 | 30/30 |
+| `identifiersDense`(30件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **1.000** | 30/30 | 30/30 |
+| 🔴 `japaneseNamesSparse`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **0.958** | 11/12 | 12/12 |
+| 🔴 `japaneseNamesDense`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **0.958** | 11/12 | 12/12 |
 
 比較のため、既存 `retrieval` の基準値（[retrieval-baseline.json](./retrieval-baseline.json)、
 再掲）:
@@ -1053,7 +1119,7 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
 （2回実行し、`measuredAt` を除いて完全一致した——ただし ADR 0088 §2 と同じ理由で
 「決定的である」の証明ではない）。
 
-#### 読み方: `identifiersSparse` の hit@1=12/12 を「易しすぎた」と即断しない
+#### 読み方: `identifiersSparse` の hit@1=30/30 を「易しすぎた」と即断しない
 
 `TICKET-48213`/`TICKET-48214` は1文字違いで、query は両者と「不具合の報告」という
 語彙を共有しており、識別子だけが弁別子である——それを正しく1位にできたのは実際の発見。
@@ -1061,10 +1127,29 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
 報告した「同じ形式の識別子が多数居て埋もれる」状況を表していない。**`dense` 条件は、
 易しくした/難しくした値を見てから作ったものではない**——`identifiersSparse` の実測後に
 1度だけ設計し、1度だけ測った（識別子は既存24件と衝突しない値を選び、構築時の
-機械的検査で衝突が無いことを確認済み）。結果は `identifiersSparse` と同じく
-hit@1=12/12・`distractorBeatsGold` 0件——**密な haystack でも gold は常に1位のままだった。**
+機械的検査で衝突が無いことを確認済み。⚠ この「24件」は `identifiersSparse`/`identifiersDense`
+がまだ各12 probe だった設計当時の数——後日 30件へ拡張したときも haystack の識別子60件は
+増やしていない）。結果は `identifiersSparse` と同じく
+hit@1=30/30・`distractorBeatsGold` 0件——**密な haystack でも gold は常に1位のままだった。**
 distractor の順位そのものは密度の影響を受けている（例:
 `channel-c` の `distractorRank` は sparse で2位、dense で8位）。
+
+#### 🔴 読み方: `japaneseNamesSparse`/`japaneseNamesDense` は「12/12で完璧」ではない
+
+**上の識別子2群（ASCII）と違い、日本語固有名詞の2群には天井に張り付いていない実データがある。**
+`identifier-probe-baseline.json` の `japaneseNamesSparse` の `description` を逐語で引く:
+
+> hit@1=11/12。外したのは org-b（「開発一課」対「開発二課」）で、`distractorBeatsGold=true`
+> ——1文字違いの日本語組織名を弁別できていない。
+
+`japaneseNamesDense` でも同じ1件（org-b）が落ちる——**haystack を疎にしても密にしても
+結果は変わらない**（`description` 逐語:「密度を上げても下げても同じ1件が落ちる」）。
+一方で ASCII 側の1文字違い（`TICKET-48213` 対 `TICKET-48214` 等）は30件すべて hit@1 である。
+⟹ **「1文字違いが弁別できない」のではなく、「日本語の1文字違いが弁別できない」。**
+
+⚠ **標本は12件である**（下記「このベンチが測れないこと」参照）。ここから「日本語の
+固有名詞全般が弱い」と一般化しない——言えるのは「この12件のうち、org-bという1件が
+この埋め込みでは distractor に負けた」までである。
 
 ### 🔴 このベンチが測れないこと（正直に書く）
 
@@ -1072,10 +1157,11 @@ distractor の順位そのものは密度の影響を受けている（例:
   埋め込み空間が違えば、同じ MRR の値でも意味が違う（`local`/`ruri-v3-30m/sym`/256次元 と
   `openai`/`text-embedding-3-small`/256次元は、次元数が同じでも別の空間である）。
 - **`identifiersSparse`/`identifiersDense` の probe は `openai`/`text-embedding-3-small`
-  では測れない。**`retrieval` のカセット（`cassettes/retrieval.json`）にこの12 probe の
+  では測れない。**`retrieval` のカセット（`cassettes/retrieval.json`）にこの30 probe の
   記録が無いため、`RecordedEmbeddingProvider` は例外を投げる。**⟹「OpenAI の埋め込みなら
   失敗する／成功する」はこのベンチからは一切言えない。**
-- **標本は7件・12件である**（[ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) §3）。
+- **標本は7件・30件・12件である**（`japanese`・`identifiersSparse`/`identifiersDense`・
+  `japaneseNamesSparse`/`japaneseNamesDense` の順。[ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) §3）。
   ここから失敗率・成功率を統計的に主張しない——言えるのは「今回、この母数のうち
   何件引けたか」までである。
 - **埋め込みは否定・時制・矛盾を解かない**
@@ -1099,8 +1185,8 @@ probe を増やす・haystack を変える判断をするときは、必ずこ�
 
 ### 「重みを取得できなかった」と「測ったが値が悪かった」を区別する
 
-`@mnemora/local-embedding` はモデルの重み（初回のみ、約42MB）を Hugging Face から
-取得する。取得に失敗した状態と、取得できて測った値が悪い状態を同じ顔で返すと、
+`@mnemora/local-embedding` はモデル一式（初回のみ、4ファイル計約42MB。うち重み本体約36MB）を
+Hugging Face から取得する。取得に失敗した状態と、取得できて測った値が悪い状態を同じ顔で返すと、
 「HF から取れなかった」が「想起の質が下がった」に見えてしまう。
 
 `identifier-probes` は arm を走らせる前に必ず `embeddingProvider.warmup()` を呼ぶ
@@ -1387,6 +1473,64 @@ Memory を1件も作らない・ラウンドを反復しない**（1回 sweep �
 ——この作業を行った環境に `DATABASE_URL` が無く、実測せずに数値を書くのは捏造になるため。
 `archive-sweep-cost-summary.mjs` は `--baseline` を省略しても動く。初回 CI の artifact を
 後続の PR で基準値にする想定である。
+
+---
+
+## `answer`: naive と mnemora の最終回答・入力量を対で出す（Issue #506 / 親 #498）
+
+⭐ **この器は naive（会話ログ全文）経路と mnemora（記憶の列）経路を、同じ会話・同じ質問・
+同じ回答モデル・同じ採点基準で両方回し、最終回答と `complete()` へ渡した入力量
+（chars・`heuristicTokenCounter` の概算トークン）を対で出す。**
+
+一次判定（`gradeAnswer`、文字列の包含判定、LLM を呼ばない）に加えて、**二次観測**
+（同じ回答を LLM 自身にも採点させる `judgeAnswer`、`src/answer-judge.ts`）を持つ。
+二次観測は一次判定を上書きしない——`reconcileVerdicts` が一次と二次を突き合わせ、
+一致すればその値を、食い違えば `"indeterminate"` を返す（ADR 0222 の三分割に倣う）。
+
+🔴 **これは配線の検査であって、回答品質の測定ではない。** `answerQualityClaimable(llmMode)`
+が `false`（`llmMode=deterministic`）のときは、正誤・二次観測・突き合わせのすべての列を
+`—` にし、集計（何件中何件 pass、二次観測の集計、突き合わせ後の集計）も出さない。
+`deterministic` の LLM（`@mnemora/testkit` の `DeterministicLLMProvider`）は意味を
+持たない stub——`complete()` は渡した最後のメッセージをそのままエコーするだけで、
+質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけである。
+
+```
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer
+MNEMORA_ANSWER_JSON=/tmp/answer.json DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer
+```
+
+**`answer` 用のカセットは `record answer` で作る（ADR 0051）。**
+
+```
+DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer
+```
+
+`ANSWER_CASE_SET_DEV`/`ANSWER_CASE_SET_EVAL` の全12件を、`runAnswer` と同じ実行経路
+（naive/mnemora の回答生成 + judge の採点）でそのまま走らせて記録する——記録も
+`MNEMORA_ANSWER_JSON` に対応しており、記録と同時に実測結果の JSON も書き出せる。
+記録した後は、鍵を外して次のように再生できる:
+
+```
+DATABASE_URL=... MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded pnpm --filter @mnemora/example-chat run answer
+OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer   # 記録と実 API の乖離を測る
+```
+
+- ケース集合は `src/answer-case-set.dev.ts`（development、調整に使ってよい）と
+  `src/answer-case-set.eval.ts`（held-out、⛔ 見て調整しない）の2ファイルに手書きで
+  分けてある。6類（好み・予定変更・否定・別人の事実・別期間の事実・未知の質問）を
+  それぞれ最低1件ずつ持つ。
+- 一次判定（`gradeAnswer`、`src/answer-case.ts`）は文字列の包含判定であり、LLM を
+  呼ばない。**`digest`（自由な要約）への文字列一致ではない**——対象は「答えが短く
+  閉じる質問への最終回答」だけであり、評価ケースはその制約とセットでのみ成立する。
+- 二次観測（`judgeAnswer`、`src/answer-judge.ts`）は `complete()`（素のテキスト）＋
+  厳格パースで、パースできない応答は必ず `indeterminate` にする（既定で `pass`/`fail`
+  へ倒さない）。**`expected.accept`/`expected.reject` は judge に渡さない**——独立した
+  観測でなくなるため（`docs/autonomy.md` §2.2 決定5）。judge の呼び出し回数は
+  `answerLLMCalls` とは別勘定（`judgeLLMCalls`）で数える。
+- 追加費用（取り込み時の抽出 LLM 呼び出し・埋め込み呼び出し・回答生成の LLM 呼び出し・
+  judge の LLM 呼び出し）は別ブロックで出す。⛔ 削減率からは差し引かない。
+- **入力量の削減率は `qualityClaimable` に関係なく常に出す**（`inputReduction`、
+  JSON では `AnswerRunJson.inputReduction`）——入力量そのものは品質の主張ではない。
 
 ---
 

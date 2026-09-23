@@ -95,7 +95,12 @@ const recalled = await runtime.recall(ctx, {
 
 - `maxCount` — **必須。既定値は無い**（「量の上限を呼び出し側に必ず明示させる」ため）
 - `anchorCount?` — 段3までに残った上位何件を連想の起点（アンカー）にするか。
-  既定 `DEFAULT_ASSOCIATION_ANCHOR_COUNT` = 3
+  既定 `DEFAULT_ASSOCIATION_ANCHOR_COUNT` = 3。
+  **⚠ `limit`（既定 10）が天井になる**——アンカーは段2で `limit` の内側に入った候補から取るので、
+  **`anchorCount` だけを上げても効かない。**裾野を広げたいなら `limit` と両方上げること
+  （【実測 2026-09-17】`limit:10 / anchorCount:40` で実際に起点になったアンカーは **10件**、
+  `limit:40 / anchorCount:40` では 40件。
+  [docs/recall.md](../../docs/recall.md) §9.2「⚠ `anchorCount` の天井」）
 - `minSimilarity?` — アンカーとの**生のコサイン類似度**の下限。
   既定 `DEFAULT_ASSOCIATION_MIN_SIMILARITY` = 0.5（`scoreThreshold` とは尺度が違う別の値）
 
@@ -112,6 +117,37 @@ const recalled = await runtime.recall(ctx, {
 渡しても連想は走らない**——走らなかったことは
 `stage_skipped { stage: 'association', reason: 'vector_store_lacks_get_vectors' }` として
 `omitted` に名乗る（[docs/recall.md](../../docs/recall.md) §9）。
+
+## ⚠ `ctx.subjectId` を省略すると「テナント全体」になる（既定はそちら）
+
+**`subjectId` は `recall()` の引数ではない。`Ctx` の任意欄である。**
+
+```ts
+const ctx = { tenantId: "tenant-1" };                        // ⟹ テナント全体が対象
+const scoped = { tenantId: "tenant-1", subjectId: "user-1" }; // ⟹ この subject だけが対象
+```
+
+⟹ **すべてのメソッドの第一引数に載る任意欄なので、意識して足さないかぎり付かない。**
+
+**段5（目次帯の集計、`MemoryStore.aggregateScope`）のコストが、ここで大きく変わる**
+【実測 2026-09-17、PostgreSQL 17.11 + pgvector 0.8.0、並列無効、`digestBand` あり、n=20 の中央値】:
+
+| 行数（1テナント） | `subjectId` 無し | `subjectId` あり（絞り先 ≈1%） | `subjectId` あり（絞り先 10行） |
+|---:|---:|---:|---:|
+| 1,000 | 3.5ms | 1.5ms | 1.5ms |
+| 10,000 | 17.0ms | 1.5ms | 1.4ms |
+| **100,000** | **165.1ms** | **4.0ms** | **1.3ms** |
+
+**絞ったときのコストは、テナント総行数ではなく絞り先の大きさに比例する**——10行の subject なら、
+テナントが 1,000行でも 100,000行でも 1.3〜1.5ms で変わらない。
+
+**⛔ 「だから絞れ」とは言っていない。**`subjectId` は隔離境界ではなく**整理の単位**であり、
+絞れば当然、他の subject の記憶は返らない。**どちらを選ぶかは使う側が決めることである。**
+
+**⚠ 段5 は `recall()` から無条件に呼ばれる**（渡さなくても走る）。
+詳しい実測・測っていないこと・上の数字と
+[docs/recall.md](../../docs/recall.md) §5 の古い表（100,000行で 45.8ms）との差は、
+同 §5「**`subjectId` を省略すると何が起きるか**」を見ること。
 
 ## 単体で呼べる純関数（動く最小の例）
 

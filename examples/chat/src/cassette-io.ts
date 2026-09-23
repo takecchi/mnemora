@@ -18,34 +18,42 @@ const here = dirname(fileURLToPath(import.meta.url));
 /**
  * カセットは**サブコマンドごとに別ファイル**にする（ADR 0052）。
  *
- * `retrieval` と `compare` は入力の集合が別物（probe set / 合成会話）であり、費用も桁が違う
- * （74回 対 657回の LLM 呼び出し）。1つのファイルにまとめると、片方を録り直すたびに
- * もう片方まで録り直すか、`recordedAt` が中身と食い違うかのどちらかになる。
+ * `retrieval`・`compare`・`answer` は入力の集合が別物（probe set / 合成会話 / 手書きの
+ * 回答ケース集合）であり、費用も桁が違う（例: retrieval 74回 対 compare 657回の LLM
+ * 呼び出し）。1つのファイルにまとめると、どれかを録り直すたびに他も録り直すか、
+ * `recordedAt` が中身と食い違うかのどちらかになる。
  */
 export const RETRIEVAL_CASSETTE_PATH = join(here, "..", "cassettes", "retrieval.json");
 export const COMPARE_CASSETTE_PATH = join(here, "..", "cassettes", "compare.json");
+export const ANSWER_CASSETTE_PATH = join(here, "..", "cassettes", "answer.json");
 
 /** `record` / `verify` / 再生が対象にできるカセット。 */
-export type CassetteTarget = "retrieval" | "compare";
+export type CassetteTarget = "retrieval" | "compare" | "answer";
 
-export const CASSETTE_TARGETS: readonly CassetteTarget[] = ["retrieval", "compare"];
+export const CASSETTE_TARGETS: readonly CassetteTarget[] = ["retrieval", "compare", "answer"];
+
+const CASSETTE_PATH_BY_TARGET: Record<CassetteTarget, string> = {
+  retrieval: RETRIEVAL_CASSETTE_PATH,
+  compare: COMPARE_CASSETTE_PATH,
+  answer: ANSWER_CASSETTE_PATH,
+};
 
 export function cassettePathFor(target: CassetteTarget): string {
-  return target === "retrieval" ? RETRIEVAL_CASSETTE_PATH : COMPARE_CASSETTE_PATH;
+  return CASSETTE_PATH_BY_TARGET[target];
 }
 
 /**
  * 引数の文字列を対象として解釈する。**既定値を持たせない**——`record` を対象なしで
- * 叩いたときに、黙ってどちらか一方を録り始めることをしない（費用が桁で違うため、
+ * 叩いたときに、黙ってどれか1つを録り始めることをしない（費用が桁で違うため、
  * 取り違えは実害になる）。
  */
 export function parseCassetteTarget(value: string | undefined): CassetteTarget {
-  if (value === "retrieval" || value === "compare") {
+  if (value === "retrieval" || value === "compare" || value === "answer") {
     return value;
   }
   throw new Error(
     `対象を明示すること: ${CASSETTE_TARGETS.join(" | ")}（実際: ${JSON.stringify(value ?? null)}）。` +
-      "既定値は用意していない——retrieval と compare では実 API の費用が桁で違う（ADR 0052）。",
+      "既定値は用意していない——retrieval・compare・answer では実 API の費用が桁で違う（ADR 0052）。",
   );
 }
 
