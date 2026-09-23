@@ -281,15 +281,17 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0255](./0255-tools-output-candidates-not-verdicts.md) | 名乗れないものを道具に名乗らせない — 判定ではなく候補の一覧として出す。ADR 0223 決定5 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 | [0256](./0256-positive-control-before-claiming-absence.md) | 「出なかった」は「無い」の証明にならない — 先に陽性対照を示す。ADR 0223 決定6 の射程を `AGENTS.md` へ広げる（Issue #505） | 採用 (2026-09) |
 | [0257](./0257-searched-and-found-nothing-versus-did-not-search.md) | 「探したが無かった」と「探していない」を分ける —— 向きが逆の版を書き手自身の調査手続きへ当て直す。ADR 0223 決定10 の射程を `AGENTS.md` へ広げる（Issue #505） | **提案 (2026-09)** |
+| [0258](./0258-restore-superseded-operation-scope.md) | `restoreSuperseded` を「1回の操作」単位に絞る（方向①）—— 鍵は新設せず、既にある情報で絞る | 採用 (2026-09) |
 | [0259](./0259-gate-runtime-output-names-its-blind-spot.md) | `check-publish-pack.mjs` / `check-pr-adr-reference.mjs` の実行時出力に、doc コメントにしか無かった断りを焼く（Issue #580） | 採用 (2026-09) |
 | [0260](./0260-answer-names-what-it-actually-runs.md) | `answer` が「記録した応答を再生する」と名乗りながら擬似 provider で走るのをやめる —— 名乗る関数と実態を倒す関数を1つにし、使われなかったカセットを出力に焼く（Issue #577） | **提案 (2026-09)** |
 | [0261](./0261-answer-bench-tenant-keyed-by-embedding-space.md) | `answer` ベンチの tenant を埋め込み空間で分ける —— 「抽出の冪等スキップ」がモードを跨ぐと、記憶とベクトルの整合が壊れる（Issue #583） | **提案 (2026-09)** |
 | [0262](./0262-cli-names-the-plan-as-a-plan.md) | `examples/chat` の `[cassette]` 行は「予定」を予定として名乗る —— 測っていない予告を、実測と同じ口調で出さない（Issue #589） | **提案 (2026-09)** |
 | [0263](./0263-cache-key-carries-the-model-revision.md) | CI のモデルキャッシュ鍵に、HF の revision を入れる —— 手で版を振った固定文字列は、HF が動いても古い重みを配り続ける（Issue #564） | **提案 (2026-09)** |
 | [0264](./0264-cli-names-the-mismatch-between-plan-and-actual.md) | `examples/chat` は「予定」と「実測」が食い違ったとき、画面にそれを名指しさせる —— 読み手に2行の突き合わせを任せない（Issue #594） | **提案 (2026-09)** |
+| [0265](./0265-fingerprint-gate-shell-branches-pinned-by-execution.md) | `local-embedding` fingerprint 門の `case` 分岐を、`bash` で実際に実行して固定する（Issue #574 後半） | **草案 (2026-09)** |
 | [0266](./0266-llm-provider-conformance.md) | `LLMProvider` の適合 suite を新設し、`@mnemora/anthropic` と `@mnemora/openai` の両方に当てる（Issue #389） | 採用 (2026-09) |
 | [0267](./0267-withdraw-the-release-changelog-publish-gate.md) | 出す版の節を要求する publish の門を撤回する —— 🔴 **門は正しく鳴っていた。外すのはオーナーの判断であって、門の欠陥ではない** | 採用 (2026-09) |
 | [0268](./0268-living-doc-judgment-pointer-repointed-to-605.md) | 生きた文書3本の「判断の置き場」ポインタを #518 から #605 へ付け替え、その一致を歯で縛る（Issue #518） | **草案 (2026-09)** |
-| [0269](./0269-extraction-candidate-subject-id-overrides-observation.md) | 抽出候補ごとに `subjectId` を持てるようにし、候補の値が observation の値より優先する（Issue #608 項目①） | **提案 (2026-09)** |
+| [0269](./0269-port-interface-doc-correspondence-sweep.md) | `Runtime` 以外の port interface（`MemoryStore` など）も、`docs/architecture.md` §5 の写しが実体とずれている — どちらが正本かは決めない（Issue #604） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

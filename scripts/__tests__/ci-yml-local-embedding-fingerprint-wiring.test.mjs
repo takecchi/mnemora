@@ -41,8 +41,9 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
  * - **`run:` の中身に埋め込んだ `case` 文が、exit コードごとに判定表どおりに
  *   分岐するか（exit 2 だけをジョブ失敗にせず飲み込むか）は、この歯では
  *   シェルとして実行して確かめていない。** 静的なテキスト検査（このファイル）と、
- *   依頼者が手元で行ったシェルスクリプトの直接実行による確認（報告に記載）とで
- *   役割を分けている。
+ *   **`ci-yml-local-embedding-fingerprint-shell.test.mjs`**（`run:` 本文を
+ *   `ci.yml` から逐語で取り出し、実際に `bash` へ食わせて `exit 0/1/2/3` の
+ *   4分岐を固定する歯。Issue #574）とで役割を分けている。
  */
 
 const workflowPath = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
