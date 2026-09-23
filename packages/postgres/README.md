@@ -100,6 +100,19 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
   採らなかった案・確かめていないことは
   [ADR 0143](../../docs/decisions/0143-analyze-memories-after-seed.md) 参照。
 
+> **⚠ 追記（2026-09-24、[Issue #269](https://github.com/takecchi/mnemora/issues/269) 方向4）— 書き込み経路の自動 `ANALYZE` との関係**:
+>
+> その後、`PostgresMemoryStore` を通る書き込み（`createMemory` / `createMemoryWithOutbox` /
+> `supersedeWithNewMemories`）は、統計が実態より遅れているときだけ `ANALYZE memories` を
+> 自分で打つようになった（[ADR 0221](../../docs/decisions/0221-memories-analyze-on-write.md)・
+> [ADR 0225](../../docs/decisions/0225-supersede-with-new-memories-analyze-hook.md)）。
+> ⟹ **`--analyze-memories` が要らなくなったのではない。** `PostgresMemoryStore` を通らない
+> 一括投入（SQL を直接流す・`pg_restore`・`INSERT ... SELECT` など）には、自動の判定は
+> 効かない。**初回の投入の後に一度打つ手順は、これまでどおり残すこと。** 何度打っても
+> 安全なので、デプロイの手順やデプロイ後フックに入れておけば、どの経路で投入したかを
+> 気にしなくてよい（例示は下の `scripts` と、[`examples/chat`](../../examples/chat/README.md)
+> の導入手順）。
+
 ### 専用スキーマを指定する（`--schema` / `--extension-schema`）
 
 共有 DB に他システム（例: Prisma が管理する `public`）が同居していて、mnemora の
@@ -136,10 +149,14 @@ npx mnemora-postgres-migrate --help
 ```json
 {
   "scripts": {
-    "migrate": "mnemora-postgres-migrate"
+    "migrate": "mnemora-postgres-migrate",
+    "migrate:analyze": "mnemora-postgres-migrate --analyze-memories"
   }
 }
 ```
+
+`migrate:analyze` は、初回のデータ投入が終わった後と、デプロイの最後に打つ（上の
+「⚠ 新規インストール後、最初のデータ投入が終わったら `--analyze-memories` を実行すること」）。
 
 ## 動く最小の例（型検査のみ確認・DB へは未実行）
 
