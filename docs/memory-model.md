@@ -1067,6 +1067,37 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
 駆動しない**——Background Cognition の実運用（スケジューラによる自動起動）は Phase 1 の
 範囲外であり（`docs/roadmap.md` §1.3）、呼び出し側が明示的に呼んだときだけ動く。
 
+
+### ⚠ `superseded` / `contested` の行は溜まる —— 容量の見積もり（2026-09-24 追記、[Issue #567](https://github.com/takecchi/mnemora/issues/567)）
+
+**`superseded` と `contested` の行は、製品の口では一度も減らない。**上の表の遷移のうち、これらの行を片付けるものは無い。
+
+- **掃引（行8）は `active` だけを対象にする。**`MemoryStore.archiveDecayed` の SQL は `AND status = 'active'` で絞っている。
+- **`purge`（行10）は行を消さない。**本文をトゥームストーンで上書きするだけである。`forget` → `purge` をすべて通しても、行数は1行も減らない。
+- **`memories` から `DELETE` する SQL は、公開 API にもマイグレーションにも無い。**
+- **`superseded` の行を一覧する公開 API も無い**（`recall()` に出てこないため）。
+
+**溜まる速さと、効いてくる場所**（⚠ **どちらも 2026-09-17 に別の担い手が取った観測の【受】であり、再測定していない**。当時の `main` は今と違う。出所は [Issue #465](https://github.com/takecchi/mnemora/issues/465) のコメントで、[Issue #567](https://github.com/takecchi/mnemora/issues/567) に移してある）:
+
+| 観測 | 値 | 限定 |
+|---|---|---|
+| `consolidate` を3ラウンド回したあとの行数 | `active` 74 → 15、`superseded` 0 → 75（`active` の**約5倍**） | haystack 60〜74件の小標本 |
+| `aggregateScope`（`recall()` の段5。毎回走る）の計画。`active` 1,000件で固定し、`superseded` の件数だけを変えた | 0件: Index Only Scan・2.007 ms／5,000件: Index Only Scan・1.960 ms／**50,000件: Seq Scan・13.881 ms** | 3点だけ。**計画が倒れる閾値は測っていない**。逐語の SQL ではなく、形を写したクエリ |
+
+⟹ **容量の見積もりの目安**: `consolidate` や `reextract` を定期的に回す運用では、`superseded` の行が `active` の数倍に積み上がると見ておくこと。
+
+**どこに効き、どこに効かないか**:
+
+- **段1（候補の生成）には効かない。**`idx_memories_recall_gate`（活動時計側の `idx_memories_recall_gate_seq` も同じ）は `WHERE status IN ('active', 'contested')` の部分索引なので、`superseded` の行は索引の実体に載らない。⟹ **recall の結果は汚れない。**
+- **段5（`aggregateScope`）には効く。**この集計は `superseded` / `archived` / `forgotten` の件数も数える（`count(*) FILTER (WHERE status = 'superseded')`）ので、テナントの全状態の行を読む。⟹ 行数が増えるほど重くなり、ある点で計画が Seq Scan へ倒れる。
+- ⚠ **`contested` は事情が違う。**部分索引に載るので、段1 の候補に入り続ける。解消の口は `resolveContested`（行7）だけで、対の id を呼び出し側が知っている必要がある。
+
+⛔ **消す手順（生 SQL）は、ここに書かない。**`memories` の行を SQL で直接消すと、次の2つを迂回する。
+- `memory_events` に跡が残らない（§9 の監査ログの担保を外れる）。
+- `restoreSuperseded`（行15）で戻せる窓が、黙って閉じる。
+
+⟹ 回収の経路を入れるか、入れるならどの形にするかは、[Issue #567](https://github.com/takecchi/mnemora/issues/567) が持っている（復旧口と一緒に設計する必要がある）。⚠ **この追記はクローン（miku）の判断で、オーナー本人の決定ではない**（[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。この節の前提（掃引の絞り、部分索引、段5 の数え方、`DELETE` が無いこと）は、`scripts/__tests__/memory-model-superseded-accumulation-premises.test.mjs` が現物に当てて縛っている。
+
 ---
 
 ## 確かめていないこと（本書内で参照した範囲の一覧）
