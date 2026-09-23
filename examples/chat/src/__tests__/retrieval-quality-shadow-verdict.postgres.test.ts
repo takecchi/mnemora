@@ -13,7 +13,7 @@ import { closeTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-d
 
 /**
  * `retrieval-quality-regression.postgres.test.ts`(ADR 0227)と*並走*させる、
- * MRR / hit@1 の閾値判定(Issue #572「段1」、ADR 0275)。
+ * MRR / hit@1 の閾値判定(Issue #572「段1」、ADR 0276)。
  *
  * 🔴 **これは門ではない。⛔ `retrieval-quality-regression.postgres.test.ts` は
  * 1バイトも変えていない**——こちらは新しい別ファイルであり、既存の歯の assert・
@@ -34,7 +34,7 @@ import { closeTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-d
  */
 describe(
   "examples/chat: retrieval の MRR/hit@1 影分身判定(門ではない・記録のみ。" +
-    "Issue #572 段1、ADR 0275)",
+    "Issue #572 段1、ADR 0276)",
   () => {
     it("MRR/hit@1 を測り、影分身判定の結果を記録する(⛔ 落とさない)", async () => {
       await resetTestDatabase();

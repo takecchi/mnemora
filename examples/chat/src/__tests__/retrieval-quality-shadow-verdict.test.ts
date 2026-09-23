@@ -6,7 +6,7 @@ import {
 } from "../retrieval-quality-shadow-verdict.js";
 
 /**
- * `decideRetrievalQualityShadowVerdict()` そのものの歯(Issue #572「段1」、ADR 0275)。
+ * `decideRetrievalQualityShadowVerdict()` そのものの歯(Issue #572「段1」、ADR 0276)。
  *
  * **DB もカセットも要らない。**判定を純関数として切り出した理由がこれである
  * (`../retrieval-quality-shadow-verdict.ts` のファイル doc 参照)。
