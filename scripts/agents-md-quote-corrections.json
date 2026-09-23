@@ -1,1 +1,69 @@
-{ "note": "⛔ まだ何も宣言していない（歯を先に入れて赤を見せるため）。", "corrections": [] }
+{
+  "note": "ADR 本文が `AGENTS.md` の言明として括って引いているが、いまの `AGENTS.md` に実在しない引用の一覧（Issue #636）。⛔ ADR の本文は当時の記録であり書き換えない ⟹ 代わりに『どこで訂正済みか』を住所として持つ。🔴 『無視する』一覧ではない。",
+  "howVerified": "歯（scripts/__tests__/agents-md-quote-attribution.test.mjs）が、各項目の `correctedIn.file` を実際に読み、`correctedIn.anchor` がその中に実在するかを毎回当てる。⟹ 訂正の節が消えたり改名されたら赤くなる。⭐ 宣言と現物の両方を実行時に取るので、腐る期待値が無い。",
+  "corrections": [
+    {
+      "file": "0121-bench-baselines-from-ci-artifacts.md",
+      "quote": "ついでに直さない",
+      "trueSource": "docs/autonomy.md:136「⚠ 「ついでに直す」をしない。」",
+      "correctedIn": {
+        "file": "docs/decisions/0121-bench-baselines-from-ci-artifacts.md",
+        "anchor": "⚠ 訂正（2026-09-23）: `AGENTS.md`「ついでに直さない」の帰属"
+      }
+    },
+    {
+      "file": "0264-cli-names-the-mismatch-between-plan-and-actual.md",
+      "quote": "形で塞ぐ",
+      "trueSource": "ADR 0068:241「⛔ 注意書きは足さない。注意書きは検査されない。形で塞ぐ。」",
+      "correctedIn": {
+        "file": "docs/decisions/0264-cli-names-the-mismatch-between-plan-and-actual.md",
+        "anchor": "⚠ 訂正（2026-09-23）: `AGENTS.md`「形で塞ぐ」の帰属"
+      }
+    },
+    {
+      "file": "0271-extraction-candidate-subject-id-overrides-observation.md",
+      "quote": "⚠ 『ついでに直す』をしない",
+      "trueSource": "docs/autonomy.md:136「⚠ 「ついでに直す」をしない。」",
+      "correctedIn": {
+        "file": "docs/decisions/0271-extraction-candidate-subject-id-overrides-observation.md",
+        "anchor": "⚠ 訂正（2026-09-23）: `AGENTS.md`「⚠ 『ついでに直す』をしない」の帰属"
+      }
+    },
+    {
+      "file": "0278-architecture-section5-port-interface-correspondence-tooth.md",
+      "quote": "古い `dist/` のまま `check-public-api-surface.mjs --write`を打つ",
+      "trueSource": "不明。`AGENTS.md` に該当する記述が無い（`grep -nE \"dist/|public-api|--write\" AGENTS.md` のヒットは ADR 0178 へのリンク3行だけ）。⛔ 正しい帰属は特定していない。",
+      "correctedIn": {
+        "file": "docs/decisions/0278-architecture-section5-port-interface-correspondence-tooth.md",
+        "anchor": "追記2（2026-09-23、着地後）"
+      }
+    },
+    {
+      "file": "0278-architecture-section5-port-interface-correspondence-tooth.md",
+      "quote": "古い `dist/` のまま `check-public-api-surface.mjs --write` を打つ",
+      "trueSource": "同上（同じ引用が本文中に2箇所ある。空白の有無だけが違う）。",
+      "correctedIn": {
+        "file": "docs/decisions/0278-architecture-section5-port-interface-correspondence-tooth.md",
+        "anchor": "追記2（2026-09-23、着地後）"
+      }
+    },
+    {
+      "file": "0278-architecture-section5-port-interface-correspondence-tooth.md",
+      "quote": "ADR は書き換えず追記して積む",
+      "trueSource": "ADR 0223 決定1（`AGENTS.md` には「追記」「書き換えず」のどちらもヒット0）。⚠ ADR 0278 の追記2 自身がこの帰属を明記している。",
+      "correctedIn": {
+        "file": "docs/decisions/0278-architecture-section5-port-interface-correspondence-tooth.md",
+        "anchor": "追記2（2026-09-23、着地後）"
+      }
+    },
+    {
+      "file": "0278-architecture-section5-port-interface-correspondence-tooth.md",
+      "quote": "ADR は書き換えず追記して積む",
+      "trueSource": "同上（同じ引用が本文中に2箇所ある）。",
+      "correctedIn": {
+        "file": "docs/decisions/0278-architecture-section5-port-interface-correspondence-tooth.md",
+        "anchor": "追記2（2026-09-23、着地後）"
+      }
+    }
+  ]
+}

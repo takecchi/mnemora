@@ -120,3 +120,51 @@ describe("門: ADR が `AGENTS.md` を括って引いた文は、いまの `AGEN
     expect(Array.isArray(wide)).toBe(true);
   });
 });
+
+/**
+ * 🔴 宣言ファイル自身が *腐る期待値* にならないようにする。
+ *
+ * 「どこで訂正済みか」を住所として持つのは良いが、**その住所が実在するかを誰も
+ * 確かめていない**と、訂正の節が消えたり改名されたりしても宣言は残り、歯は緑のままになる
+ * ⟹ **腐りが静かに復活する。**⟹ これはこの歯が扱っている「在るものと名乗りがずれる」の
+ * 同族であり、⛔ **自分が作る歯で同じ罪を犯さない。**
+ *
+ * ⟹ ⭕ **宣言と現物の両方を実行時に取る**（`AGENTS.md` の引用と同じ手）。
+ */
+describe("宣言ファイルの住所も、実行時に当てる", () => {
+  const readCorrected = (c) => readFileSync(path.join(REPO_ROOT, c.correctedIn.file), "utf8");
+
+  it("`correctedIn.file` が実在し、`correctedIn.anchor` がその中に実在する", () => {
+    const broken = CORRECTIONS.corrections
+      .filter((c) => !anchorExistsInTarget(c.correctedIn.anchor, readCorrected(c)))
+      .map((c) => `${c.correctedIn.file} に「${c.correctedIn.anchor}」が無い`);
+    expect(
+      broken,
+      [
+        "🔴 宣言ファイルが指す訂正の住所が、現物に見つかりません。",
+        "⟹ 訂正の節が消えたか、改名されたか、宣言のほうが古いかのどれかです。",
+        "⛔ どちらなのかは機械には分かりません——人が見て、宣言か訂正のどちらかを直してください。",
+      ].join("\n"),
+    ).toEqual([]);
+  });
+
+  it("⭐ 陽性対照: 存在しない住所を宣言したら赤くなる", () => {
+    const fake = {
+      correctedIn: {
+        file: "docs/decisions/0121-bench-baselines-from-ci-artifacts.md",
+        anchor: "⚠ 訂正（1970-01-01）: この節は存在しない",
+      },
+    };
+    expect(anchorExistsInTarget(fake.correctedIn.anchor, readCorrected(fake))).toBe(false);
+  });
+
+  it("⛔ 余分な宣言を残さない —— 宣言した引用は、実際に原典に無いものだけである", () => {
+    const stale = CORRECTIONS.corrections
+      .filter((c) => quoteExistsInAgentsMd(c.quote, AGENTS_MD).exists)
+      .map((c) => `${c.file}「${c.quote}」は、いまの AGENTS.md に実在する`);
+    expect(
+      stale,
+      "🔴 もう腐っていない引用が宣言に残っています（`AGENTS.md` 側が変わった可能性）。宣言から外してください。",
+    ).toEqual([]);
+  });
+});

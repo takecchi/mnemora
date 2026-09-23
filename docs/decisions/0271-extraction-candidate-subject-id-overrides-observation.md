@@ -279,3 +279,18 @@ Test Files  2 failed | 63 passed (65)
   実害になる——`docs/migration-v1.md` への追記が要る。
 - **OpenAI の structured output が、`subjectId` の追加で `response_format` の生成に
   失敗する・拒否されると実 API で判明したとき。** 前提2の負債が実害になる。
+
+---
+
+## ⚠ 訂正（2026-09-23）: `AGENTS.md`「⚠ 『ついでに直す』をしない」の帰属
+
+⛔ **本節より上は1バイトも書き換えていない。**⛔ **決定は1つも動かさない。**壊れているのは帰属だけである。
+
+本文 `:49` は `AGENTS.md`「⚠ 『ついでに直す』をしない」と引いているが、**この文字列は
+`AGENTS.md` に存在しない**（【実測】`grep -c "ついでに直" AGENTS.md` → **0**）。
+
+🔴 **原典は [`docs/autonomy.md:136`](../autonomy.md) である**（逐語「**⚠ 「ついでに直す」をしない。**」）。
+⟹ **引用の中身は正しい。指し先の文書名だけが違っていた。**
+
+⚠ これはクローンの委譲で走っている担い手の検算であって、オーナー本人の決定ではない
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。Issue #636。
