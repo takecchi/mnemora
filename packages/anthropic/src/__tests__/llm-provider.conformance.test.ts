@@ -127,6 +127,47 @@ describe("適合テストの前提: 足場が歯を空回りさせていない",
   });
 });
 
+/**
+ * 🔴 **リポ内の歯（ADR 0266 負債7）: `completeStructured` は、schema が宣言した欄を落とさない。**
+ *
+ * 適合 suite の歯2 は「返り値の欄が schema の宣言に収まっている」を `Object.keys(result)` の
+ * 走査として書いているため、`result` が `{}` なら一度も検査せずに緑になる。
+ * ⟹ **欄が落ちる変異は、歯2 を素通りする。**ここで「在るべき欄が同じ値で在る」を別に測る。
+ *
+ * ⚠ **公開 suite（`@mnemora/testkit`）には足していない。**公開 suite の歯を締めると、利用者の
+ * 自作 adapter のテストが更新しただけで赤になりうる——`docs/migration-v1.md` は公開 suite の
+ * 変更（6・13・15。いずれも必須オプションの追加）を破壊的変更に数えており、同じ害の形である。
+ * ⟹ **公開 suite の空振りそのものは残っている**（ADR 0266 追記）。
+ */
+describe("リポ内の歯（ADR 0266 負債7）: completeStructured は schema が宣言した欄を落とさない", () => {
+  const declared = Object.keys(structuredSchema.shape) as (keyof typeof structuredSchema.shape)[];
+
+  it("前提: 偽応答の JSON は、schema が宣言した欄をすべて持つ（持たなければこの歯は空振りする）", () => {
+    for (const key of declared) {
+      expect(structuredPayloadWithVendorField).toHaveProperty(key);
+    }
+  });
+
+  it("返り値は、schema が宣言した欄をすべて、偽応答と同じ値で持つ", async () => {
+    const provider = new AnthropicLLMProvider({
+      model: "claude-test",
+      client: createSuccessClient(),
+    });
+
+    const result = await provider.completeStructured(
+      { tenantId: "llm-provider-required-fields" },
+      {
+        prompt: { messages: [{ role: "user", content: "hi, structured" }] },
+        schema: structuredSchema,
+      },
+    );
+
+    for (const key of declared) {
+      expect(result).toHaveProperty(key, structuredPayloadWithVendorField[key]);
+    }
+  });
+});
+
 describeLLMProviderConformance({
   name: "AnthropicLLMProvider",
   createProvider: () =>

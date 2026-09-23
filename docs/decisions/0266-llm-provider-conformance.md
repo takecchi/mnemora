@@ -382,3 +382,53 @@ try {
 - [ADR 0198](./0198-llm-provider-call-failure-tooth.md) — Issue #389 の一部を先に測った ADR。
   「案A」として suite の新設を採らなかった記録・既存4本×2ファイルとの引っ越しの指示の出所
 - [docs/conformance.md](../conformance.md) — 適合テストが何を検証し、何を検証していないか
+
+---
+
+## 追記（2026-09-24）: 負債7 —— 公開 suite は締めず、リポ内の2本にだけ「欄が落ちていない」の歯を足した
+
+⛔ **本節より上は書き換えていない**（`docs/decisions/README.md`）。**負債7 は返済していない。**
+公開 suite（`describeLLMProviderConformance`）の歯2 は、いまも `{}` に対して空振りで緑になる。
+
+⚠ **これはクローン（miku）の判断であり、オーナー本人の決定ではない**
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+### 何をしたか
+
+- `packages/anthropic/src/__tests__/llm-provider.conformance.test.ts` と
+  `packages/openai/src/__tests__/llm-provider.conformance.test.ts` に、describe
+  「リポ内の歯（ADR 0266 負債7）: completeStructured は schema が宣言した欄を落とさない」を足した。
+  - 前提の歯: 偽応答の JSON が、`structuredSchema` が宣言した欄をすべて持つこと（持たなければ本体の歯が空振りする）。
+  - 本体の歯: `completeStructured` の返り値が、宣言された欄をすべて、偽応答と同じ値で持つこと。
+- **`packages/testkit/src/llm-provider-conformance.ts` は触っていない。**
+
+### なぜ公開 suite を締めなかったか
+
+`@mnemora/testkit` は公開される（`package.json` に `"private"` が無い）。歯2 は
+`packages/testkit/src/index.ts` の `export * from "./llm-provider-conformance.js";` で外へ出ている。
+⟹ **公開 suite の歯を締めると、自作 `LLMProvider` のテストからこの suite を呼んでいる利用者が、更新しただけで赤になりうる。**
+
+`docs/migration-v1.md` は、公開の適合 suite の変更を破壊的変更に数えている
+（6・13・15。`describeTenantSettingsStoreConformance` / `describeMemoryStoreConformance`）。
+⚠ **ただし、この前例はいずれも「必須オプションの追加」であって、「歯を締めた」ものではない。**
+歯を締めた前例は【現物】見当たらない。**害の形（利用者の緑が更新だけで赤になる）が同じなので、
+破壊的とみなして保留した。**この保留は v2.0.0 の判断（オーナー）の側に置く。
+
+### 測ったこと（【実測】2026-09-24。`cp` で退避 → 変異 → 実行 → `cp` で戻す。戻した直後に `git status --porcelain` で差分が消えたことを確かめた）
+
+ベースライン: 両ファイルとも 12 passed（元の 10 本 + 足した 2 本）。
+
+| 変異（`completeStructured` の `return` 行）                                                 | anthropic            | openai               | 落ちた歯                                                                                                                                            |
+| ------------------------------------------------------------------------------------------- | -------------------- | -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- |
+| M5: `return {} as T;`（欄が全部落ちる）                                                     | 1 failed / 11 passed | 1 failed / 11 passed | **足した本体の歯だけ。公開 suite の歯2 は緑のまま**——負債7 の空振りを実測で確かめた                                                                 |
+| M6: `digest` だけ落として返す（任意欄の欠落）                                               | 1 failed / 11 passed | 1 failed / 11 passed | 足した本体の歯                                                                                                                                      |
+| M7（やりすぎ）: `schema.parse` をやめ、素のキャストで返す（余計な欄 `vendorNote` まで返す） | 1 failed / 11 passed | 1 failed / 11 passed | **公開 suite の歯2 だけ。**足した歯は緑——足した歯は「在るべき欄が在る」だけを見ており、「余計な欄が無い」は歯2 に任せている（役割が重なっていない） |
+| 足場の変異: 偽応答の JSON から `digest` を消す（anthropic のみ）                            | 2 failed / 10 passed | —                    | 前提の歯と本体の歯                                                                                                                                  |
+
+コマンド: `pnpm --filter @mnemora/<pkg> exec vitest run src/__tests__/llm-provider.conformance.test.ts`
+
+### まだ残っていること
+
+- **公開 suite の歯2 の空振り**（負債7 そのもの）。締めるなら v2.0.0 に載せる破壊的変更として扱う。
+- **足した歯は、この repo の2実装だけを見る。**`DeterministicLLMProvider` と `RecordedLLMProvider`
+  には当てていない。利用者の自作実装にはもちろん届かない。
