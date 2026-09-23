@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -875,6 +876,15 @@ describe("classifyAdrDecisionCitation（fixture）", () => {
  * （下の2つ目の `it`）。
  */
 describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生きたコード・生きた文書に無いこと（実物）", () => {
+  /**
+   * `.json` / `.sql` / `.mts` / `.cts` は Issue #652 で足した。足す前は、この4つに在る参照
+   * （基準値ファイルの `_readme` / `provenance`、migration のコメント等）を1件も見ていなかった。
+   *
+   * ⚠ **基準値ファイル（`examples/chat/*-baseline.json`）も除外しない。**数値の本体は CI の
+   * artifact の写しだが、ADR を名指ししている参照はすべて人が書き足した `_readme` /
+   * `provenance` の欄に在る（ADR 0121 決定1「`provenance`/`_readme` を足しただけである」）。
+   * ⟹ 「実測の写しだから門の外に置く」という理由は、この参照には当たらない。
+   */
   const GATED_SOURCE_EXTENSIONS = new Set([
     ".md",
     ".mjs",
@@ -882,8 +892,12 @@ describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生き�
     ".js",
     ".ts",
     ".tsx",
+    ".mts",
+    ".cts",
     ".yml",
     ".yaml",
+    ".json",
+    ".sql",
   ]);
   const EXCLUDED_DIR_NAMES = new Set([
     "node_modules",
@@ -936,26 +950,59 @@ describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生き�
     });
   }
 
-  const allFiles = collectAllSourceFiles(REPO_ROOT).map(toRepoRelative);
-  const gatedViolations = [];
-  const ungatedViolations = [];
-
-  for (const file of allFiles) {
-    const isAdrBody = file.startsWith("docs/decisions/");
-    const text = readFileSync(path.join(REPO_ROOT, file), "utf8");
-    for (const ref of findAdrDecisionReferences(text)) {
-      const { ruleA, ruleB } = classifyCitation(ref.adrNumber, ref.decisionNumber);
-      if (!ruleA && !ruleB) {
-        continue;
+  /**
+   * `rootDir` の下を集めて、違反を「門の対象」と「ADR 本文（門の対象外）」に分けて返す。
+   * 実物の repo と、下の陽性対照の一時ディレクトリの両方が、この同じ関数を通る。
+   *
+   * @param {string} rootDir
+   */
+  function collectDecisionCitationViolations(rootDir) {
+    const gated = [];
+    const ungated = [];
+    for (const full of collectAllSourceFiles(rootDir)) {
+      const file = path.relative(rootDir, full).split(path.sep).join("/");
+      const isAdrBody = file.startsWith("docs/decisions/");
+      const text = readFileSync(full, "utf8");
+      for (const ref of findAdrDecisionReferences(text)) {
+        const { ruleA, ruleB } = classifyCitation(ref.adrNumber, ref.decisionNumber);
+        if (!ruleA && !ruleB) {
+          continue;
+        }
+        const entry = { file, line: ref.line, raw: ref.raw, ruleA, ruleB };
+        (isAdrBody ? ungated : gated).push(entry);
       }
-      const entry = { file, line: ref.line, raw: ref.raw, ruleA, ruleB };
-      (isAdrBody ? ungatedViolations : gatedViolations).push(entry);
     }
+    return { gated, ungated };
   }
+
+  const { gated: gatedViolations, ungated: ungatedViolations } =
+    collectDecisionCitationViolations(REPO_ROOT);
 
   it("生きたコード・生きた文書に、規則A（死んだポインタ）・規則B（曖昧な着地略記）の違反が無い", () => {
     expect(gatedViolations).toEqual([]);
   });
+
+  it.each([".json", ".sql", ".mts", ".cts"])(
+    "⭐ 陽性対照（Issue #652）: %s のファイルに置いた死んだポインタを、門が違反として拾う",
+    (extension) => {
+      // 前提: ADR 0201 に決定99 は無い（無ければ、下の参照は規則Aの違反になる）。
+      expect(findAdrDecisionSectionNumbers(getAdrText("0201")).has("99")).toBe(false);
+
+      // 連結して組み立てる——このファイル自身も門の対象なので、素で書くと自分が赤くなる。
+      const deadRef = "ADR 0201 決定" + "99";
+      const dir = mkdtempSync(path.join(tmpdir(), "adr-citation-ext-"));
+      try {
+        const fileName = `dead-pointer${extension}`;
+        writeFileSync(path.join(dir, fileName), `-- ${deadRef} を参照する\n`);
+        const { gated } = collectDecisionCitationViolations(dir);
+        expect(gated).toEqual([
+          { file: fileName, line: 1, raw: deadRef, ruleA: true, ruleB: false },
+        ]);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   it(`⛔ 門ではない一覧: docs/decisions/ 配下の ADR 本文にも同型の参照が ${ungatedViolations.length} 件見つかっている（この件数では赤くしない）`, () => {
     // ⛔ これは歯ではない。ADR 本文は書き換えない記録なので、ここで赤くすると
