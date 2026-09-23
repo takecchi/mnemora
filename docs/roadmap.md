@@ -1736,3 +1736,22 @@ PR 自身も「依存していることを**明示する**」と名乗ってい�
 2. **`ADR 0232` の B群の危険（実測値）を再現していない**【受】——見たのは `packages/core/src/__tests__/apply-correction.test.ts` が13コミットで無変更であることだけである。
 3. **`.recall(` が17件、という上の陽性対照を数え直していない。**
 4. **オーナーの承認キューそのものを見ていない**（上の 🔴 のとおり、repo の外に在る）。
+
+##### ⚠ さらに追記（2026-09-23、起票後）: **`main = bc60391` で、上の表の行番号が1つ動いた**
+
+**この節を PR にしてから CI が緑になるまでの間に、`main` は `3875a05` → `bc60391` まで**さらに6本**進んだ**
+（[#603](https://github.com/takecchi/mnemora/pull/603) / [#609](https://github.com/takecchi/mnemora/pull/609) / [#610](https://github.com/takecchi/mnemora/pull/610) / [#600](https://github.com/takecchi/mnemora/pull/600) / [#573](https://github.com/takecchi/mnemora/pull/573) / [#613](https://github.com/takecchi/mnemora/pull/613)）。
+**うち [#573](https://github.com/takecchi/mnemora/pull/573)（ADR 0258、`restoreSuperseded` を操作単位に絞る）が `packages/core/src/runtime.ts` を触っている。**
+
+**【実測 2026-09-23 / `main = bc60391`】**
+
+- **`markContested` の呼び手は、いまも 1件**（`packages/core/src/runtime.ts`）。⛔ **件数は動いていない。**
+- ⚠ **その行が `:3678` → `:3831` へ動いた**（`applyCorrection` の中であることも変わらない）。
+- **`ADR 0230` は +70行の追記を受けたが、上で引いた4要素（逐語・決めた人・決めた日・`ask_human` の id）と「確かめていないこと」の【受】は、1つも動いていない**【実測】。
+- **`extraction.ts` / `recall-runtime.ts` / `correction-demo.ts` / `mnemora-path.ts` / `docs/roadmap.md` は無変更。**
+- **`applyCorrection` を参照する `.ts` は 6本のまま**（うち歯は `apply-correction.test.ts` と `correction-demo.test.ts` の2本で、どちらも偽物を使う）⟹ **§7.15 の「埋まっていないもの」3点目は、いまも崩れていない。**
+- **7項目の数は、いまも 在る6 / 半分1 が唯一の現在形である。**
+
+⭐ **これはこの節の主張の反証ではなく、実例である。**——**行番号は住所ではなく、いつ読んだかの記録である。**
+⛔ **だから上の表の `:3678` も直さない**（[ADR 0213](./decisions/0213-live-docs-cite-adrs-by-anchor-not-line-number.md) 決定5 の「ポインタは直す」は、**時点を名乗って凍結している記録**には適用されない。[PR #479](https://github.com/takecchi/mnemora/pull/479) → [PR #481](https://github.com/takecchi/mnemora/pull/481) の往復がその線を引いている）。
+⟹ **代わりに、こうして「どこまで数えたか」を名乗り直す。**
