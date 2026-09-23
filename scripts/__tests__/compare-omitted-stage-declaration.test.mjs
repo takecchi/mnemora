@@ -127,6 +127,32 @@ describe("findDeclaration", () => {
     expect(findDeclaration("> - Compare-Omitted-Stage: 理由")?.reason).toBe("理由");
   });
 
+  it("🔴 囲み付きコード片の中の「書き方の例」は申告として数えない", () => {
+    // ⚠ 実際に踏んだ形【実測 2026-09-23】——この門を入れた PR 自身の本文が、
+    // 使い方を示すためにコード片の中へ例を書いており、それが申告に一致していた。
+    // ⟹ 説明を書くほど門が緩む向きになる。
+    const onlyExample = [
+      "この門は次の形の行を要求します:",
+      "",
+      "\`\`\`",
+      "Compare-Omitted-Stage: <なぜ動いたのか。意図した仕様変更なら、その出所>",
+      "\`\`\`",
+      "",
+      "以上。",
+    ].join("\n");
+    expect(findDeclaration(onlyExample)).toBeNull();
+  });
+
+  it("コード片の外に本物の申告が在れば、そちらを拾う", () => {
+    const both = [
+      "\`\`\`",
+      "Compare-Omitted-Stage: <例>",
+      "\`\`\`",
+      "Compare-Omitted-Stage: ADR 0188 が stage を足したため",
+    ].join("\n");
+    expect(findDeclaration(both)?.reason).toBe("ADR 0188 が stage を足したため");
+  });
+
   it("PR 本文が文字列でなければ null", () => {
     expect(findDeclaration(undefined)).toBeNull();
     expect(findDeclaration(null)).toBeNull();

@@ -113,12 +113,24 @@ export function turnCountMismatch(measuredRows, baselineRows) {
  */
 export const DECLARATION_PATTERN = /^[ \t>*-]*Compare-Omitted-Stage:[ \t]*(\S.*?)[ \t]*$/m;
 
+/**
+ * 🔴 **囲み付きコード片（\`\`\` … \`\`\`）を落とす。**
+ *
+ * ⚠ **これが無いと、「書き方の例」が申告として通る**【実測 2026-09-23】——
+ * この門を入れた PR 自身の本文が、使い方を示すために
+ * \`\`\` の中へ `Compare-Omitted-Stage: <なぜ動いたのか…>` と書いており、
+ * **その例示が申告に一致していた。**⟹ **説明を書くほど門が緩む**という向きになる。
+ */
+function stripFencedCode(text) {
+  return text.replace(/^[ \t]*```[^\n]*\n[\s\S]*?^[ \t]*```[^\n]*$/gm, "");
+}
+
 /** PR 本文から申告を取り出す。無ければ `null`。 */
 export function findDeclaration(prBody) {
   if (typeof prBody !== "string") {
     return null;
   }
-  const match = DECLARATION_PATTERN.exec(prBody);
+  const match = DECLARATION_PATTERN.exec(stripFencedCode(prBody));
   if (match === null) {
     return null;
   }
