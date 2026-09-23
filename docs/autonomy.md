@@ -220,6 +220,37 @@ success なら緑になる。⛔ **「残り7本は見なくてよい」では�
 待っていない」である。** ⚠ なお「登録された check は全部 success」は required かどうかに
 関わらず要求し続ける（旧来どおり）——required でない check が `failure` なら `red` になる。
 
+**⭐ 8. `total === 0`（check-runs が0件）の *理由* を、`mergeable_state` で切り分ける**
+（Issue #615・ADR 0281〔仮番号。マージ時に確定〕）。🔴 **これは判定を緩める話ではない**
+——`total === 0` はこれまでどおり常に `pending` である。変わるのは添えられる**理由の文言**
+だけであり、緑の*根拠*には一切使わない（3番「`mergeStateStatus` を判定に使わない」は
+そのまま——ここで使うのは根拠ではなく「0件の理由」の切り分けである。**この2つを混ぜないこと**
+——混ぜると3番を緩める話に見える）。
+
+**機序**: base と衝突している（`mergeable_state: "dirty"`）と、GitHub は merge ref
+（`refs/pull/<N>/merge`）を作れず、`pull_request` の workflow run が**永久に**作られない
+——待っても来ない。旧来の理由「まだ登録されていない可能性がある」は、この場合には
+「待て」という誤った次の一手を勧めてしまう。【実測】起票者が `d03a4a0` で20分・
+`3d551ab` で22分、**計42分**を来ない run に使った（Issue #615）。
+
+⟹ `ci-green-check.mjs` は `--pr` 実行時、`total === 0` のときだけ PR の REST
+`mergeable_state`（`gh api repos/<owner>/<repo>/pulls/<番号> -q .mergeable_state`。
+上の1番が引く `gh pr view --json mergeStateStatus` の GraphQL enum とは**別物**で、
+値は小文字の `"dirty"`/`"unknown"`/`"clean"` 等）を引き直し、理由を次のように分岐する:
+
+- `"dirty"`: 理由を「base と衝突しており、merge ref が作れないため run が作られない。
+  待っても来ない。base を取り込み直して衝突を解くこと」に置き換える。
+- `"unknown"`（GitHub が mergeability を計算中）: 🔴 **`dirty` と同じ扱いにしない**
+  ——`unknown` のときに run が作られるかは確かめていない。安全側に、従来の理由のまま
+  留める。
+- それ以外の値・取得できなかった場合（`--sha` 直指定で PR が無いときを含む）: **従来どおり
+  の理由のまま**（劣化を黙ってやらない）。
+
+⚠ **`mergeable_state` と「run が作られない」の対応は n=2 の観測でしか裏づけられていない。**
+経緯・確かめたこと・引き受けた負債・この決定が覆るとしたら何が起きたときかは
+[ADR 0281](./decisions/0281-ci-green-check-empty-check-runs-reason-dirty.md)
+（⚠ ファイル名・番号は仮。マージ時に `adr-renumber.mjs` が確定する）。
+
 ### 2.1.1 いつ引き直すか（Issue #294）
 
 **上の1〜7は「どう引くか」だけを定めている。**「CI が緑である」は**その sha に紐づく事実**

@@ -60,6 +60,55 @@ describe("verdict", () => {
     expect(result.reason).toContain("check-runs が0件");
   });
 
+  describe("total===0 の理由分岐（mergeable_state, Issue #615）", () => {
+    // 背景: base と衝突している（mergeable_state=dirty）と、GitHub は merge ref を
+    // 作れず pull_request の run が永久に作られない。旧来の理由「まだ登録されていない
+    // 可能性がある」は「待て」と読めるが、dirty のときは待っても来ない
+    // （Issue #615 実測: d03a4a0 で20分・3d551ab で22分、待っても0件のままだった）。
+
+    it("⭕ dirty: 待てと読める文言を含まず、衝突を名指しする。status は pending のまま", () => {
+      const result = verdict([], ["a"], "dirty");
+      expect(result.status).toBe("pending");
+      expect(result.reason).not.toContain("まだ登録されていない");
+      expect(result.reason).not.toContain("可能性がある");
+      expect(result.reason).toContain("衝突");
+      expect(result.reason).toContain("Issue #615");
+    });
+
+    it("⛔ やりすぎの側: unknown は dirty と同じ扱いにしない（衝突と言い切らない）", () => {
+      const result = verdict([], ["a"], "unknown");
+      expect(result.status).toBe("pending");
+      expect(result.reason).not.toContain("衝突");
+      expect(result.reason).toContain("まだ登録されていない");
+    });
+
+    it("⭕ mergeable_state を渡さない（省略）なら、いまの理由のまま", () => {
+      const result = verdict([], ["a"]);
+      expect(result.reason).toContain("まだ登録されていない");
+      expect(result.reason).not.toContain("衝突");
+    });
+
+    it("⭕ mergeable_state が null（取得できなかった）なら、いまの理由のまま", () => {
+      const result = verdict([], ["a"], null);
+      expect(result.reason).toContain("まだ登録されていない");
+      expect(result.reason).not.toContain("衝突");
+    });
+
+    it("⭕ 緑の判定は変わらない: total>0 のときは mergeable_state=dirty を渡しても green のまま", () => {
+      const result = verdict(
+        [
+          { name: "a", status: "completed", conclusion: "success" },
+          { name: "b", status: "completed", conclusion: "success" },
+        ],
+        ["a", "b"],
+        "dirty",
+      );
+      expect(result.status).toBe("green");
+      expect(result.reason).toContain("completed かつ success");
+      expect(result.reason).not.toContain("衝突");
+    });
+  });
+
   it("未完了が在れば pending", () => {
     const result = verdict([{ name: "a", status: "in_progress", conclusion: null }], ["a"]);
     expect(result.status).toBe("pending");

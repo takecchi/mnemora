@@ -238,6 +238,36 @@ function fetchCheckRuns(repo, sha) {
 }
 
 /**
+ * PR の REST `mergeable_state` を取る（Issue #615）。
+ *
+ * ⚠ **これは `resolvePrHead` が取る `mergeStateStatus`（GraphQL の enum。大文字、
+ * `gh pr view --json mergeStateStatus`）とは別物である。**こちらは REST
+ * `GET /repos/{owner}/{repo}/pulls/{pr}` が返す小文字の enum
+ * （`"dirty"` / `"unknown"` / `"blocked"` / `"clean"` 等）で、Issue #615 の実測
+ * （`gh api repos/.../pulls/612 --jq '{mergeable, mergeable_state}'` が
+ * `{"mergeable":false,"mergeable_state":"dirty"}` を返した）はこちらの形である。
+ *
+ * ⛔ **緑の判定には使わない。**`verdict()` に渡すのは「`total === 0` の理由」の
+ * 切り分けのためだけであり、`describeEmptyCheckRunsReason` 以外のどの分岐にも
+ * 影響しない。
+ *
+ * 取得に失敗した（`gh` のエラー・空応答等）場合は `null` を返す——呼び出し側は
+ * `null` を「取得できなかった」として扱い、`verdict()` は従来どおりの理由を返す
+ * （劣化を黙ってやらない。取得できなかったならそう扱うだけで、衝突と決めつけない）。
+ *
+ * @returns {string | null}
+ */
+function fetchMergeableState(repo, prNumber) {
+  try {
+    const out = run("gh", ["api", `repos/${repo}/pulls/${prNumber}`, "-q", ".mergeable_state"]);
+    const state = out.trim();
+    return state.length > 0 && state !== "null" ? state : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * 呼び出し側の作業木（`import.meta.url` から見た repo ルート）の
  * `docs/decisions/README.md` が `docs/decisions/*.md` と一致しているかを見る
  * （ADR 0192）。読めない・生成に失敗する等は `null`（判定不能）にして
@@ -354,7 +384,15 @@ function main() {
     process.exit(3);
     return;
   }
-  const v1 = verdict(checkRuns1, requiredContexts);
+  let v1 = verdict(checkRuns1, requiredContexts);
+  if (v1.status === "pending" && v1.summary.total === 0 && args.pr) {
+    // total === 0 の *理由* を切り分けるためだけに、PR の REST mergeable_state を引く
+    // （Issue #615）。⛔ 緑の判定には使わない——verdict() を呼び直しても status は
+    // "pending" のまま変わらず、reason の文言だけが変わりうる。`--sha` 直指定のときは
+    // PR が無いので取りようが無く、この分岐に入らない（従来どおりの理由のまま）。
+    const mergeableState = fetchMergeableState(repo, args.pr);
+    v1 = verdict(checkRuns1, requiredContexts, mergeableState);
+  }
   printVerdict("1st poll", v1);
 
   let finalVerdict = v1;

@@ -75,11 +75,48 @@ export function summarizeRequiredContexts(checkRuns, requiredContexts) {
 }
 
 /**
+ * `total === 0` の *理由* を、`mergeable_state`（REST API の PR フィールド。小文字の
+ * enum: `"dirty"` / `"unknown"` / `"blocked"` / `"clean"` 等）に応じて切り分ける
+ * （Issue #615）。
+ *
+ * ⛔ **これは緑の判定に使う情報ではない。**`verdict()` の他の分岐（`green`/`red` になる
+ * 条件）は一切参照しない——ここで変わるのは「0件である理由」の説明文だけであり、
+ * `status` は `total === 0` である限り常に `pending` のままである。
+ *
+ * - `"dirty"`: base と衝突しており、GitHub が merge ref を作れないため run 自体が
+ *   作られない。**待っても来ない**——だから「まだ登録されていない可能性がある」という
+ *   「待て」と読める文言を使わず、衝突を名指しする（Issue #615 実測: 起票者が
+ *   `d03a4a0`/`3d551ab` の2件で `mergeable_state=dirty` のまま計42分ポーリングし、
+ *   check-runs は0件のまま変わらなかった）。
+ * - `"unknown"`（GitHub がまだ mergeability を計算中）: 🔴 **`"dirty"` と同じ扱いに
+ *   しない。**`unknown` のときに run が作られるかどうかは確かめていない
+ *   （Issue #615 が「確かめていないこと」として明記）——安全側に、従来どおり
+ *   「まだ登録されていない可能性がある」に留める。
+ * - それ以外の値・未取得（`null`/`undefined`）: 従来どおりの理由（劣化を黙ってやらない
+ *   ——取得できなかったときは何も変えず、これまでの理由をそのまま返す）。
+ *
+ * @param {string | null | undefined} mergeableState
+ * @returns {string}
+ */
+function describeEmptyCheckRunsReason(mergeableState) {
+  if (mergeableState === "dirty") {
+    return (
+      "check-runs が0件——base と衝突しており（mergeable_state=dirty）、GitHub が merge ref を" +
+      "作れないため run 自体が作られない（Issue #615 実測）。待っても来ない——base を" +
+      "取り込み直して衝突を解くこと。"
+    );
+  }
+  return "check-runs が0件——まだ登録されていない可能性がある（Issue #228 観測1）";
+}
+
+/**
  * 「CI が緑か」を1つの判定に落とす。
  *
  * - `total === 0` は `pending` として扱う（まだ check-runs が1件も登録されていない可能性が
  *   あり、Issue #228 観測1 が示す通り「登録されていない ⟹ まだ緑ではない」——0件を
- *   「対象が無いから緑」と読まない）。
+ *   「対象が無いから緑」と読まない）。**理由の文言だけは `mergeableState` で切り分ける**
+ *   （`describeEmptyCheckRunsReason` を参照。Issue #615）——⛔ **判定（`pending` である
+ *   こと自体）は変えない。**
  * - **`skipped`/`neutral`/`cancelled`/`timed_out`/`action_required` はどれも `success` では
  *   ないので `red` 側に入る**（issue が名指しした「`skipped` は緑ではない」の一般化）。
  * - **下限は branch protection の required status checks に縛る（ADR 0215）。**
@@ -95,9 +132,12 @@ export function summarizeRequiredContexts(checkRuns, requiredContexts) {
  *   required status checks の名前集合。**省略できない**——省略可能にすると
  *   「取得できなかったから従来どおり」で下限が静かに無効化されるため、呼び出し側は
  *   常に明示的に `null`（取得不能）または実際の配列を渡す。
+ * @param {string | null | undefined} mergeableState PR の REST `mergeable_state`
+ *   （省略可。**`total === 0` のときの理由の文言だけに使う**——`green`/`red` の判定条件には
+ *   一切混ぜない。詳細は `describeEmptyCheckRunsReason` を参照。Issue #615）
  * @returns {{ status: "pending" | "red" | "green", reason: string, summary: ReturnType<typeof summarizeCheckRuns>, required: { contexts: string[] | null, missing: string[], pending: string[], nonSuccess: {name:string,conclusion:string|null}[] } }}
  */
-export function verdict(checkRuns, requiredContexts) {
+export function verdict(checkRuns, requiredContexts, mergeableState) {
   const summary = summarizeCheckRuns(checkRuns);
 
   if (!Array.isArray(requiredContexts)) {
@@ -123,7 +163,7 @@ export function verdict(checkRuns, requiredContexts) {
   if (summary.total === 0) {
     return {
       status: "pending",
-      reason: "check-runs が0件——まだ登録されていない可能性がある（Issue #228 観測1）",
+      reason: describeEmptyCheckRunsReason(mergeableState),
       summary,
       required,
     };
