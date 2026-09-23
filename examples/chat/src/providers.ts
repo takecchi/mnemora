@@ -62,7 +62,7 @@ import { createUsageMeter } from "./usage-meter.js";
  * >    ⟹ この PR は「Anthropic で想起の質がどうなるか」について何も言っていない。
  * >    言えるのは「契約が揃っている」ことだけである。
  *
- * ⚠ **ADR 0072 決定1（`@mnemora/anthropic` が `EmbeddingProvider` を実装しない理由）
+ * ⚠ **ADR 0072 決定1（`@mnemora/anthropic` が `EmbeddingProvider` を実装しない。理由は同 ADR「設計としては既に決まっていた」の節）
  * と混同しないこと。**あちらは「Anthropic に埋め込み API が無い」というパッケージ内部
  * の話であり、こちらは「`examples/chat` へまだ配線していない」という別の理由の
  * スコープ外である。

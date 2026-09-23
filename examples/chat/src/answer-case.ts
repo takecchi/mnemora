@@ -109,7 +109,7 @@ export function normalizeForGrading(input: string): string {
  * ⚠ **これは `digest`（自由な要約）への文字列一致ではない。**ADR 0052 決定4 が
  * 削除したのはそちらである——`compare.ts` の `factStatementSurvived` が、擬似 LLM の
  * digest が発話そのものだった時代の産物として文字列一致を使っていたのを、系譜の追跡
- * （`sourceObservationId` を辿る）へ置き換えた決定である。
+ * （`sourceObservationId` を辿る）へ置き換えた決定である（経緯は同 ADR「まず、カセットを足す前に直す必要があったもの」の節）。
  * ここが対象にするのは**答えが短く閉じる質問への最終回答**であり、言い換えの自由度が
  * 構造的に小さい。⟹ **評価ケースは「答えが短く閉じる質問」だけで構成する、という
  * 制約とセットでのみ成立する**（`answer-case-set.*.ts` が `kind: "closed-value" |

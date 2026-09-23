@@ -152,7 +152,7 @@ describeEmbeddingProviderConformance({
   // 同じ入力に同じ記録を返すのだから、この構成は定義上決定的である——が、
   // **実 API が決定的かどうかは、ここでは一切測っていない。**それを問うのは
   // `./live.openai.test.ts` 側で、そちらは `deterministic: false` を宣言している
-  // （私たちは実 API の再現性の保証を持っていない。ADR 0095 決定1 の却下理由）。
+  // （私たちは実 API の再現性の保証を持っていない。ADR 0095「3.1 決定性を無条件に要求する」の却下理由）。
   deterministic: true,
   texts: { a, b, c },
 });
