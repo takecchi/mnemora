@@ -306,5 +306,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0279](./0279-required-status-checks-declaration-and-check.md) | required status check の「正本＋突き合わせ」を足す — 宣言は `.github/required-status-checks.json`、判定は三値、CI には繋がない | **提案 (2026-09)** |
 | [0280](./0280-compare-omitted-stage-declaration-gate.md) | `compare` の `omitted` の `stage` 集合が動いたら、申告を要求する門を置く（Issue #403） | **提案 (2026-09)** |
 | [0281](./0281-ci-green-check-empty-check-runs-reason-dirty.md) | `total === 0` の *理由* を `mergeable_state` で切り分ける——緑の根拠は変えない（Issue #615） | 採用 (2026-09) |
+| [0282](./0282-score-breakdown-affinity-measured.md) | `ScoreBreakdown` に `affinityMeasured?: boolean` を追加のみで足す —— Issue #548 方向1（非破壊）を採る | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

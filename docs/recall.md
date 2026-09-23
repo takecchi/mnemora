@@ -974,6 +974,15 @@ Issue #200 は**2つの読み方**を挙げていた。
 **⚠ `associationOf` はアンカーを1つしか指さない。**複数のアンカーから同じ記憶が浮上したとき、
 記録されるのは1つだけである（ADR 0151 の負債4）。
 
+⭐ **2026-09-23 追記（Issue #548 方向1、[ADR 0282](./decisions/0282-score-breakdown-affinity-measured.md)）:**
+上の段落の `score.semanticSimilarity` という表記は、この節が書かれた時点の旧称のまま残っている
+——**実フィールド名は `ScoreBreakdown.similarity` である**（`packages/core/src/recall.ts`）。
+この節はそのずれ自体を直すものではない（射程外）。
+本追記が足すのは別のものである: `ScoreBreakdown` に `affinityMeasured?: boolean` を追加のみで足し、
+**`total` が `affinity`（`similarity`/`lexicalMatch` のどちらかから来る、クエリ関連度の量）抜きで
+組まれているかどうかを、呼び手が `similarity`/`lexicalMatch` の undefined 判定を自分で
+再現しなくても分かるようにした**（§9.7(c) の追記も見ること）。
+
 ### 9.5 予算 — ⭐ 北極星の問い1の関門
 
 **連想枠は、量を増やす方向の機能である。**素朴に入れれば北極星の**問い1**
@@ -1026,6 +1035,12 @@ Issue #200 は**2つの読み方**を挙げていた。
   ⭐ **2026-09-21 追記: いまも数え直されていない。**⚠ ⛔ **だが「だから留保が残っている」と読まないこと**
   ——§7.18 は逐語で「**この節でも「在る N / 半分 M」という数は1つも動かない**」と書いており、
   **動いたのは数ではなく留保のほうである。**
+  ⭐ **2026-09-23 追記（Issue #548 方向1、[ADR 0282](./decisions/0282-score-breakdown-affinity-measured.md)）:**
+  (c) の穴——`total` が `affinity` 抜きで組まれていることが呼び手から見えない——は、
+  `ScoreBreakdown` に `affinityMeasured?: boolean` を**追加のみで**（型は1バイトも変えず、
+  欄を1つ足す形で）足すことで埋めた。**`affinityMeasured: false` の記憶の `total` は、
+  `true` の記憶の `total` と比較可能ではない**——これが (c) の穴に対する契約である。
+  ⛔ **(a)・(b) はそのまま残る**（本節の直前の記述のとおり）。
 - **`examples/chat` の `compare` ベンチは、連想枠の便益を測れない**
   ——想起側の指標 `factStatementSurvived` は基準値の全12行で既に `true` であり、**伸びる余地が無い。**
   測るべき器は `retrieval` ベンチ（`hit@k` / MRR）だが、**それは⭐門ではない**（ADR 0133）。
