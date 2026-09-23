@@ -10,7 +10,8 @@
  *
  * ## ⛔ 門にしない。ただし基準値とは比べる
  *
- * ADR 0088 §3 が確立した形をそのまま踏襲する: 基準値と diff を取って Job Summary に出し、
+ * ADR 0088 §3(基準値との diff を Job Summary に出す)と、同 ADR「決めたこと」4番・§2.1
+ * (相違では落とさない)が確立した形をそのまま踏襲する: 基準値と diff を取って Job Summary に出し、
  * **かつ**相違では落とさない(exit 0)。標本は probe 7件であり
  * (`docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md` §3)、
  * 閾値の門を置くには足りない。非0になるのは入力そのものが壊れているときだけ。

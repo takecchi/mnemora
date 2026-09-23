@@ -1145,7 +1145,7 @@ async function runTimeTerm(): Promise<void> {
 
     // Issue #217: `MNEMORA_TIME_TERM_JSON` が設定されているときだけ機械可読な結果を書く
     // （`retrieval`/`identifier-probes`/`consolidation-cost` と同じ、未設定なら挙動を
-    // 変えない規約。ADR 0088 §2）。
+    // 変えない規約。ADR 0088「決めたこと」2番）。
     const jsonPath = process.env.MNEMORA_TIME_TERM_JSON;
     if (jsonPath) {
       const json = buildTimeTermJson({ report, measuredAt, commit });
@@ -1194,7 +1194,7 @@ async function runValidity(): Promise<void> {
     console.log(formatValidityReport(report));
 
     // `MNEMORA_VALIDITY_JSON` が設定されているときだけ機械可読な結果を書く
-    // （`time-term`/`retrieval` と同じ、未設定なら挙動を変えない規約。ADR 0088 §2）。
+    // （`time-term`/`retrieval` と同じ、未設定なら挙動を変えない規約。ADR 0088「決めたこと」2番）。
     const jsonPath = process.env.MNEMORA_VALIDITY_JSON;
     if (jsonPath) {
       const json = buildValidityJson({ report, measuredAt, commit });

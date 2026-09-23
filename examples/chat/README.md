@@ -1205,7 +1205,9 @@ transformers.js の既定キャッシュ場所は環境によって変わりう�
 
 ⚠ **「⛔ 門にしない」と「⛔ 基準値と比べない」は別のことである**
 （[ADR 0094](../../docs/decisions/0094-identifier-probes-local-embedding.md) §8。
-[ADR 0088](../../docs/decisions/0088-retrieval-quality-measured-in-ci.md) §3 は
+差分を Job Summary に出すのは
+[ADR 0088](../../docs/decisions/0088-retrieval-quality-measured-in-ci.md) §3、
+相違では落とさないのは同 ADR「決めたこと」4番・§2.1——
 **両方を同時にやっている**）。基準値ファイルがコミットされているのに誰もそれと
 比べないなら、値が動いても誰も気づかず、誰も基準値を更新せず、**新しい値が PR の
 diff に現れる輪が閉じない。**

@@ -21,7 +21,7 @@
  * あり、[ADR 0033](../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md)
  * §3 の規律(標本7件からは失敗率も成功率も統計的に主張しない)に照らして、
  * 閾値判定の門を置くには足りない標本である——`identifier-probes`/`retrieval-quality`
- * と同じ判断(ADR 0088 §3)。
+ * と同じ判断(ADR 0088 §2.1)。
  *
  * **非0になるのは、JSON が読めない・parse できない・必須項目が無い・型が違う・
  * 参照整合性が壊れている(例: `deltas[].baselineArmLabel` が `arms[].armLabel` の

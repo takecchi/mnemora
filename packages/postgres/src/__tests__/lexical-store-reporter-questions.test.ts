@@ -289,8 +289,8 @@ describe("PostgresLexicalStore.search — Issue #106 の報告者が挙げた5�
       "The gurumi-chan-backend deploy failed twice this week.",
     );
     // 🔴 識別子を1つも共有しない。共有するのは "deploy" という**ありふれた語1つ**だけ。
-    // ⚠ 'simple' 辞書は語幹処理もストップワード除去もしない（ADR 0084 §2 が
-    // 'simple' を選んだ理由そのもの）ため、この語は確実に語彙になる。
+    // ⚠ 'simple' 辞書は語幹処理もストップワード除去もしない（ADR 0084 はこの理由を
+    // 書いていない）ため、この語は確実に語彙になる。
     const noise = await createMemory(
       memoryStore,
       ctx,
