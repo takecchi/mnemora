@@ -211,6 +211,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0182](./0182-provenance-kind-matches-provenance-check.md) | `memories.provenance_kind` と `provenance->>'kind'` の一致を CHECK 制約で強制する — 生成列のほうが筋が良いが、いまは採らない | 採用 (2026-09) |
 | [0183](./0183-local-postgres-makes-postgres-mutation-testing-possible.md) | `packages/postgres` の変異試験を、CI のトリガを変えずに手元で成立させる — `initdb` で自分専用のインスタンスを立てる手順を `AGENTS.md` に置く | 採用 (2026-09) |
 | [0184](./0184-conformance-scope-documented-not-closed.md) | 適合テストが「何を保証していないか」を、塞ぐ前に名乗る — v1.0.0 は弱さを明示した状態で出す | 採用 (2026-09) |
+| [0185](./0185-contradiction-detection-path.md) | 矛盾の検出経路 — 「誰が矛盾だと決めるか」と「誰が相手を探すか」を2軸に分け、段階で埋める（Issue #197 の設計） | **提案 (2026-09)** |
 | [0186](./0186-sweep-archive-follows-decay-clock.md) | `sweepArchive` は `opts.clock` 省略時に `tenant_settings.decay_clock` へ従う — ADR 0165 決めたこと12 の数え漏れ（掃引）を埋める | 採用 (2026-09) |
 | [0188](./0188-association-over-limit-omission.md) | 連想枠（段3.5）の `maxCount` 切り捨てを `omitted` に名乗らせる — `over_limit` に `stage` を足す（Issue #375） | 採用 (2026-09) |
 | [0190](./0190-correction-cli-dispatch-ci-tooth.md) | `correction` サブコマンドを CI の歯にする — 既存ジョブへ相乗り・`deterministic` 層・`omitted` の `superseded` assert | 採用 (2026-09) |
@@ -299,5 +300,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0273](./0273-architecture-section5-is-a-copy.md) | `docs/architecture.md` §5 は「写した側」である — ADR 0269 決定2 の保留に答える（Issue #604） | **提案 (2026-09)** |
 | [0274](./0274-required-check-context-name-is-frozen-annotate-dont-rename.md) | required status check の文脈名は凍結する — 腐っていても改名せず、名指しで訂正を積む | **提案 (2026-09)** |
 | [0275](./0275-runtime-three-layer-assignment-recheck.md) | `Runtime` の3層振り分けが、いま正しいかを検算する — 棚卸しの範囲に限る（Issue #605） | **提案 (2026-09)** |
+| [0276](./0276-retrieval-quality-shadow-verdict-stage1.md) | MRR/hit@1 の判定を「門ではなく並走」で足す — Issue #572 段1 | 採用 (2026-09) |
+| [0277](./0277-adr-renumber-detects-unrewritten-chain-references.md) | `adr-renumber.mjs` は、`ADR NNNN / MMMM` という略記の連なりで書き換えられずに残った参照を検出する — 書き換えの射程は広げない | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

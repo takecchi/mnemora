@@ -59,6 +59,24 @@
  * いないかを見る）。ただしそれも「最後の push の後にタイトル・本文だけを編集した」
  * 場合までは捕捉できない——この警告はその手前（付け替え直後・push 前）で人に
  * 気づかせるための、独立した一手である。
+ *
+ * ## 🔴 付け替えられずに残った参照の検出（Issue #615 のあと、PR #614/#618 の事故を受けて）
+ *
+ * `rewriteReferencesInText` は「`ADR ` に直接続く旧番号」しか書き換えない
+ * ——`ADR 0270 / 0271` のような略記の連なりでは、2番目以降（`0271`）に
+ * `ADR ` が直接続いていないため、対象の oldNumber であっても書き換わらない
+ * （`adr-renumber-lib.mjs` の `findUnrewrittenAdrReferences` docstring 参照）。
+ * **これは想像ではなく、PR #614（`74c5295`）が実際に踏み、PR #618（`bf6e9e7`）で
+ * 人が事後に直した事故である。**
+ *
+ * `performRenumber()` は、書き換えの走査と同じループの中で
+ * `findUnrewrittenAdrReferences` を全ての追加行に当て、残った旧番号があれば
+ * `file:line` と該当行を名指しして標準エラーへ出し、**`process.exitCode = 1`
+ * で終わる**。⛔ **この道具はそれを書き換えない**——射程を広げて「連なりの
+ * 2番目以降」まで機械的に書き換えると、無関係な4桁数字を巻き込む危険が増える
+ * （`AGENTS.md`「⚠ 偽陽性率に上限を置けない検査は門にしない」と同じ形の判断。
+ * 詳細は `findUnrewrittenAdrReferences` docstring の「採らなかった案」）。
+ * ⟹ **確定と書き込みは人に残す。**
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -67,6 +85,7 @@ import { fileURLToPath } from "node:url";
 import { isAdrFilename } from "./generate-adr-index-lib.mjs";
 import {
   addedLineNumbers,
+  findUnrewrittenAdrReferences,
   parseAdrFilename,
   pickNextFreeNumber,
   planRenumbering,
@@ -310,6 +329,12 @@ function performRenumber() {
     .filter((l) => l.length > 0);
 
   let touchedFiles = 0;
+  // 🔴 `rewriteReferencesInText` が構造的に届かない位置（`ADR NNNN / MMMM` の
+  // ような略記の連なりの2番目以降）に残った旧番号を、付け替えと同じ走査の中で
+  // 集める（`findUnrewrittenAdrReferences` の docstring・Issue #615 参照）。
+  // ⛔ ここでは書き換えない——検出して人に渡すだけ（AGENTS.md「⚠ 機械には
+  // 『検出』まで」）。
+  const unrewrittenHits = [];
   for (const relPath of changedFiles) {
     const absPath = join(repoRoot, relPath);
     let buf;
@@ -330,6 +355,13 @@ function performRenumber() {
       const idx = lineNo - 1;
       if (idx < 0 || idx >= lines.length) continue;
       const { text: newLine, changes } = rewriteReferencesInText(lines[idx], renames);
+      // 書き換えの成否に関わらず、この行に「rewriteReferencesInText が届かない
+      // 位置の旧番号」が残っていないかを見る——PR #614 の事故は、まさに
+      // changes.length === 0（この行では何も書き換わらなかった）のまま
+      // `0271` が残ったケースだった。
+      for (const hit of findUnrewrittenAdrReferences(newLine, renames)) {
+        unrewrittenHits.push({ file: relPath, lineNo, lineText: newLine, ...hit });
+      }
       if (changes.length === 0) continue;
       lines[idx] = newLine;
       fileChanges.push(...changes);
@@ -354,6 +386,22 @@ function performRenumber() {
   const warning = renumberedReferenceWarning(conflicts);
   if (warning) {
     console.error(warning);
+  }
+
+  if (unrewrittenHits.length > 0) {
+    console.error(
+      `\n🔴 付け替えられずに残った参照が ${unrewrittenHits.length} 件あります` +
+        "（`ADR NNNN / MMMM` のような略記の連なりの2番目以降は、この道具の書き換えが構造的に届きません）。",
+    );
+    for (const h of unrewrittenHits) {
+      console.error(`  ${h.file}:${h.lineNo}: ADR ${h.oldNumber} が残っています —— ${h.match}`);
+      console.error(`    ${h.lineText.trim()}`);
+    }
+    console.error(
+      "\n⟹ 機械はここまでしか見ません。上の行を人が読んで、正しい新番号へ手で直してください" +
+        "（この道具は書き換えません——AGENTS.md「⚠ 機械には『検出』まで」）。",
+    );
+    process.exitCode = 1;
   }
 }
 

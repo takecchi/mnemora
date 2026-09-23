@@ -409,18 +409,93 @@ interface MemoryStore {
     event: NewMemoryEvent
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
   setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
-  reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory>;
+  reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
   recordUsage(
     ctx: Ctx,
     recallId: RecallId,
     memoryIds: MemoryId[]
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
-  aggregateScope(ctx: Ctx, scope: RecallScope): Promise<ScopeAggregate>;
+  aggregateScope(
+    ctx: Ctx,
+    scope: RecallScope,
+    opts?: AggregateScopeOptions
+  ): Promise<ScopeAggregate>;
   createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
+  getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;
+  requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult>;
+  supersedeWithNewMemories?(
+    ctx: Ctx,
+    news: ReadonlyArray<{ input: NewMemory; jobKinds: OutboxJobKind[] }>,
+    supersede: ReadonlyArray<{
+      id: MemoryId;
+      supersededByIndex: number;
+      expectedStatus?: MemoryStatus;
+      event: NewMemoryEvent;
+    }>
+  ): Promise<{
+    created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }>;
+    superseded: MemoryEvent[];
+    conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
+  }>;
+  purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+  archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
+  purgeMemory?(
+    ctx: Ctx,
+    id: MemoryId,
+    tombstone: { content: string; digest: string },
+    event: NewMemoryEvent
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
+  markContestedPair?(
+    ctx: Ctx,
+    first: { id: MemoryId; event: NewMemoryEvent },
+    second: { id: MemoryId; event: NewMemoryEvent }
+  ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  resolveContestedPair?(
+    ctx: Ctx,
+    first: {
+      id: MemoryId;
+      status: 'active' | 'superseded';
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    },
+    second: {
+      id: MemoryId;
+      status: 'active' | 'superseded';
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }
+  ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  restoreSupersededBy?(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    event: { reason?: string; actor?: EventActor; at: Date },
+    filter?: { onlyMemoryIds?: MemoryId[] }
+  ): Promise<{ restored: Memory[] }>;
+  previewRestoreSupersededBy?(
+    ctx: Ctx,
+    supersededById: MemoryId,
+    filter?: { onlyMemoryIds?: MemoryId[] }
+  ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
 }
 
 type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgotten';
 ```
+
+> **docs/604-sync-architecture-section5（2026-09-23、[ADR 0273](./decisions/0273-architecture-section5-is-a-copy.md) の実装）**:
+> 上のコード片を `packages/core/src/interfaces/memory-store.ts` の現物へ同期し直した
+> （ADR 0273「3つに割る」1番: この interface は実体が正本であり、drift が見つかったら
+> 文書側を直す。⛔ 実装は疑わない）。それまで欠けていた必須の `getRecall`/
+> `requeueEmbedJobs` と、任意の `supersedeWithNewMemories?`/`purgeExpiredEvents?`/
+> `archiveDecayed?`/`purgeMemory?`/`markContestedPair?`/`resolveContestedPair?`/
+> `restoreSupersededBy?`/`previewRestoreSupersededBy?` を足し、`reinforce` の第4引数
+> `opts?: ReinforceOptions`（ADR 0165）を反映した。**この同期の作業中に見つけた、
+> [Issue #604](https://github.com/takecchi/mnemora/issues/604) の掃引（ADR 0269）が
+> 挙げていなかった追加の drift**: `aggregateScope` も文書は2引数のままだったが、実体は
+> 3引数目に `opts?: AggregateScopeOptions`（目次帯 `digestBand` 用、下記契約参照）を持つ
+> ——これも同じ理由で足した。各メソッドの詳しい契約・経緯（ADR 番号）は
+> `packages/core/src/interfaces/memory-store.ts` の doc コメントを参照すること
+> ——ここには再掲しない（同じ理由の繰り返しは AGENTS.md「⚠ ここに北極星の要約を置かない」
+> と同型であり、複製すればまた次の1口でずれる）。
 
 > **roadmap.md 段階3（2026-09 追記、ADR 0012 D-ingest-1）**: `getObservation` /
 > `createObservationWithOutbox` / `createMemoryWithOutbox` / `setEmbeddingStatus` を
@@ -513,6 +588,11 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
   必ず伴う（[docs/recall.md](./recall.md) の目次帯）。Phase 1 の実装は常に厳密集計であり、
   近似経路（例えば `pg_stats`/`reltuples` に基づく安価な推定）は実装していない
   （PR 本文「設計上の疑義」参照）。
+- `aggregateScope` の第3引数 `opts?: AggregateScopeOptions`（`{ digestBand?: { limit: number;
+  excludeMemoryIds: readonly MemoryId[] } }`）は任意——渡すと `ScopeAggregate.digests`/
+  `digestEligible` も同じ集約クエリから埋めて返す（[ADR 0073](./decisions/0073-digest-band-bounded-without-taxonomy.md)、
+  [docs/recall.md](./recall.md) §5）。省略時は `digests: []`・
+  `digestEligible: { count: 0, countKind: 'exact' }` を返し、実装は帯のための追加の仕事をしない。
 - テナント分離: すべてのメソッドは `ctx.tenantId` に一致しない行を返してはならない。
   `testkit` は2テナントを同時に投入し、クロステナントの取得が0件になることを検査する。
 
@@ -528,12 +608,18 @@ interface VectorStore {
     opts: { limit: number; filter: VectorFilter }
   ): Promise<VectorHit[]>;
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
+  getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }
 
 interface EmbeddingSpaceId {
   provider: string;
   model: string;
   dimensions: number;
+}
+
+interface VectorEntry {
+  memoryId: MemoryId;
+  vector: number[];
 }
 ```
 
@@ -544,6 +630,13 @@ interface EmbeddingSpaceId {
 > 使う可能性がある以上（例: 将来 OpenAI 以外が同名のモデル名を使う場合）、テーブル名スラグの
 > 導出元と `EmbeddingSpaceId` の中身は一致しているべきであり、`memory_model.md` 側ではなく
 > こちらを直した。
+
+> **docs/604-sync-architecture-section5（2026-09-23、ADR 0273 の実装）**: `getVectors?`
+> （任意メソッド）を足した——連想枠（Issue #200）がアンカーの Memory のベクトルをまとめて
+> 取得するための口で、`packages/core/src/interfaces/vector-store.ts` には既に実装されていたが
+> この節には反映されていなかった。任意メソッドである理由・契約の詳細（存在しない
+> `memoryId` は黙って結果から落とす・tenant 境界を必ず掛ける等）はソースの doc コメントを
+> 参照すること。
 
 契約:
 - **`MemoryStore` が真実の源(source of truth)であり、`VectorStore` は再構築可能な派生索引である。**
@@ -682,7 +775,7 @@ interface Scheduler {
 ### 5.7 ScoringStrategy / DecayStrategy — Phase 1・純関数
 
 ```ts
-type ScoringStrategy = (candidate: ScoringInput) => Score;
+type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
 
 type DecayStrategy = {
   strengthAt(now: Date, params: DecayParams): number;
@@ -690,6 +783,14 @@ type DecayStrategy = {
   floorAt(params: DecayParams, threshold?: number): Date;
 };
 ```
+
+> **docs/604-sync-architecture-section5（2026-09-23、ADR 0273 の実装）**: 戻り値の型名を
+> `Score` から `ScoreBreakdown`（`packages/core/src/strategies/scoring.ts` の実体）へ直した。
+> 【実測、ADR 0273 §3】実装側で `Score` → `ScoreBreakdown` という改名が起きたわけではない
+> ——`ScoreBreakdown` は最初の実装コミットから今日までこの名前のままである。`Score` は
+> 実装より前の設計スケッチ（PR #1）で使われた仮の型名が、以後一度もこの節で揃え直されて
+> いなかったもの。第一引数の仮引数名も実体（`input`）に合わせた（実体では `candidate` という
+> 名は使われていない）。
 
 契約:
 - **両方とも純関数であり、状態を保存しない。** `DecayStrategy.strengthAt` の結果はどこにも
@@ -834,14 +935,43 @@ transactional outbox の「書く」側だとすれば、`OutboxStore` は `runt
 ```ts
 interface TenantSettingsStore {
   getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
+  getEventRetention(ctx: Ctx): Promise<EventRetention>;
+  setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
+  getDecayClock?(ctx: Ctx): Promise<DecayClock>;
+  setDecayClock?(ctx: Ctx, clock: DecayClock): Promise<void>;
+  getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
+  setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
+  getActivitySeq?(ctx: Ctx): Promise<number>;
 }
+
+type EventRetention = { kind: 'unset' } | { kind: 'unlimited' } | { kind: 'days'; days: number };
+
+type EventRetentionSetting = Exclude<EventRetention, { kind: 'unset' }>;
+
+type DecayClock = 'wall' | 'activity' | 'either';
 ```
+
+> **docs/604-sync-architecture-section5（2026-09-23、ADR 0273 の実装）**: この節は当初
+> `getDefaultHalfLifeHours` のみを載せていたが、`packages/core/src/interfaces/tenant-settings-store.ts`
+> の実体は既に必須の `getEventRetention`/`setEventRetention`（[ADR 0050](./decisions/0050-tenant-event-retention.md)）
+> と任意の `getDecayClock?`/`setDecayClock?`/`getDefaultHalfLifeRecalls?`/`setDefaultHalfLifeRecalls?`/
+> `getActivitySeq?`（[ADR 0165](./decisions/0165-decay-activity-clock.md) 決めたこと13、
+> [ADR 0197](./decisions/0197-set-default-half-life-recalls.md)）へ拡張されており、この節が
+> 追随していなかった。全メソッドを実体へ合わせて足した。なぜ任意メソッドが `?` 付きか
+> （`@mnemora/core` は npm 公開済みであり、必須化すると外部 adapter が壊れる）等の詳細は
+> ソースの doc コメントを参照すること。
 
 契約:
 - テナントに `tenant_settings` 行が無い場合は `DEFAULT_HALF_LIFE_HOURS`（720、DB 側の
   `default_half_life_hours DEFAULT 720` と同じ値）を返す（エラーにしない）。
-- `tenant_settings` の他の列（`event_retention_days`・`taxonomy_mode`）の読み書きは
-  この interface の範囲外（ADR 0012 D-ingest-3）。
+- `tenant_settings` の他の列（`taxonomy_mode`）の読み書きはこの interface の範囲外
+  （ADR 0012 D-ingest-3）。
+- `getEventRetention`/`setEventRetention` は**必須**メソッドである——オーナー決定
+  「監査ログの保持期間を短縮できる口は必須」（`docs/roadmap.md` §5.4、ADR 0050）による。
+- `getDecayClock?`/`setDecayClock?`/`getDefaultHalfLifeRecalls?`/`setDefaultHalfLifeRecalls?`/
+  `getActivitySeq?` は**任意**メソッドである。省略時のフォールバック（`readDecayClock`/
+  `readActivitySeq`/`readDefaultHalfLifeRecalls`）は `packages/core` 側の1箇所に閉じ込めてあり、
+  呼び出し側には散らさない。
 
 ### 5.13 Sensor / SpeechPolicy — Phase 3、形のみ
 
