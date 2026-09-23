@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addedLineNumbers,
+  findUnrewrittenAdrReferences,
   parseAdrFilename,
   pickNextFreeNumber,
   planRenumbering,
@@ -256,5 +257,79 @@ describe("renumberedReferenceWarning — 付け替えたときだけ PR タイ�
   it("scripts/check-pr-adr-reference.mjs が CI で本文も検査することを警告文が指す", () => {
     const warning = renumberedReferenceWarning([{ oldNumber: "0199", newNumber: "0200" }]);
     expect(warning).toContain("check-pr-adr-reference.mjs");
+  });
+});
+
+describe("findUnrewrittenAdrReferences — rewriteReferencesInText が届かない略記の連なりを検出する", () => {
+  // 🔴 陽性対照: PR #614 が実際に `main`（74c5295）へ焼いた文字列そのもの。
+  // 事後に PR #618（bf6e9e7）が人手で 0271 -> 0272 に直すまで、無関係な
+  // ADR 0271（Issue #608 項目①、PR #612）を指したまま残っていた。
+  const bakedLine1 = "（ADR 0269 の対象外、ADR 0270 / 0271 も引き継がない）。";
+  const bakedLine2 =
+    'describe("Runtime の非中核メソッド件数が、生きた文書に焼き込まれていない（ADR 0269 引き受けた負債、ADR 0270 / 0271）", () => {';
+  const renames0271to0272 = [
+    { oldNumber: "0271", newNumber: "0272", slug: "runtime-method-count-notation-sweep" },
+  ];
+
+  it("🔴 陽性対照1: 「ADR 0270 / 0271」の地の文で、0271 が付け替えられずに残った参照として報告される", () => {
+    const hits = findUnrewrittenAdrReferences(bakedLine1, renames0271to0272);
+    expect(hits).toEqual(expect.arrayContaining([expect.objectContaining({ oldNumber: "0271" })]));
+    expect(hits.length).toBeGreaterThan(0);
+  });
+
+  it("🔴 陽性対照2: 同じ略記が describe の題に出てきても報告される", () => {
+    const hits = findUnrewrittenAdrReferences(bakedLine2, renames0271to0272);
+    expect(hits).toEqual(expect.arrayContaining([expect.objectContaining({ oldNumber: "0271" })]));
+  });
+
+  it("rewriteReferencesInText を先に通してから当てても、同じ0271が残っている（実際の配線と同じ順序）", () => {
+    const { text: rewritten } = rewriteReferencesInText(bakedLine1, renames0271to0272);
+    // rewriteReferencesInText 自体は「ADR 」に直接続く1個目（0270）しか見ないので、
+    // このケースでは何も変わらない——0270 は renames の対象外だから。
+    expect(rewritten).toBe(bakedLine1);
+    const hits = findUnrewrittenAdrReferences(rewritten, renames0271to0272);
+    expect(hits.map((h) => h.oldNumber)).toContain("0271");
+  });
+
+  it("⛔ 巻き込まない1: ADR の連なりの外に在る裸の4桁数字は報告しない", () => {
+    const text = "2026年、issue 0271 は関係ない番号として登場する（日付でも起票番号でもない）。";
+    expect(findUnrewrittenAdrReferences(text, renames0271to0272)).toEqual([]);
+  });
+
+  it("⛔ 巻き込まない2: 既に ADR 0272 の形で付け替え済みのものを二重に報告しない", () => {
+    const text = "（ADR 0269 の対象外、ADR 0270 / 0272 も引き継がない）。";
+    expect(findUnrewrittenAdrReferences(text, renames0271to0272)).toEqual([]);
+  });
+
+  it("⛔ 巻き込まない3: 連なりの中の、付け替え対象でない番号（他人の ADR）は報告しない", () => {
+    // renames は 0271 -> 0272 だけを付け替えている。連なりの中の 0270 は
+    // 誰も付け替えていない他人の ADR なので、報告に混ざってはいけない。
+    const hits = findUnrewrittenAdrReferences(bakedLine1, renames0271to0272);
+    expect(hits.map((h) => h.oldNumber)).not.toContain("0270");
+    expect(hits.map((h) => h.oldNumber)).not.toContain("0269");
+  });
+
+  it("⛔ 巻き込まない4: 連なりが無い単独の「ADR NNNN」は rewriteReferencesInText 自身の射程なので報告しない", () => {
+    const text = "ADR 0271 を見ること。";
+    expect(findUnrewrittenAdrReferences(text, renames0271to0272)).toEqual([]);
+  });
+
+  it("空振り防止: 3連・4連の略記でも、途中に挟まった対象番号を拾う", () => {
+    const text = "ADR 0011/0271/0028 と ADR 0011 / 0028 / 0271 の両方。";
+    const hits = findUnrewrittenAdrReferences(text, renames0271to0272);
+    expect(hits.length).toBe(2);
+    expect(hits.every((h) => h.oldNumber === "0271")).toBe(true);
+  });
+
+  it("空振り防止: renames が空なら何も報告しない", () => {
+    expect(findUnrewrittenAdrReferences(bakedLine1, [])).toEqual([]);
+  });
+
+  it("oldNumber === newNumber（衝突していない）の rename は対象にしない", () => {
+    const text = "ADR 0270 / 0271 を見ること。";
+    const hits = findUnrewrittenAdrReferences(text, [
+      { oldNumber: "0271", newNumber: "0271", slug: "x" },
+    ]);
+    expect(hits).toEqual([]);
   });
 });

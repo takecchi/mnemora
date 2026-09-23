@@ -218,6 +218,91 @@ export function rewriteReferencesInText(text, renames) {
 }
 
 /**
+ * `ADR ` を主語に持つ*略記の連なり*（`ADR NNNN / MMMM`、3連・4連…）の中で、
+ * `rewriteReferencesInText` が構造的に届かない位置に残った旧番号を検出する
+ * （[Issue #615](https://github.com/takecchi/mnemora/issues/615) が指す「衝突した
+ * *あと*」側の穴。⚠ **同 issue が扱う「衝突そのものを直列化する」話ではない**）。
+ *
+ * ## なぜ要るか（自分の手で踏んだ実例）
+ *
+ * `rewriteReferencesInText` の `adrRe`（`ADR ${oldNumber}(?!\d)`）は、
+ * **「`ADR ` の直後」という1箇所しか見ない。**⟹ `ADR 0270 / 0271` のように
+ * `/` で連なる略記では、**連なりの2番目以降（この例では `0271`）は
+ * `ADR ` の直後ではないので、対象が同じ oldNumber であっても一切書き換わらない。**
+ *
+ * これは想像ではない——PR #614（`74c5295`）が実際に踏んだ。ADR 0271 が別の PR に
+ * 取られて 0271 → 0272 へ付け替わった際、`scripts/__tests__/runtime-method-count-not-baked.test.mjs`
+ * の2箇所（doc コメントと `describe` の題）にあった `ADR 0270 / 0271` という地の文の
+ * 略記が、`0271` だけ旧番号のまま `main`（`74c5295`）へ焼かれた。**焼かれた `0271` は
+ * 無関係な ADR 0271（Issue #608 項目①、PR #612）を指す状態になり**、事後に PR #618
+ * （`bf6e9e7`）で人が読んで直すまでそのままだった。
+ *
+ * ## 採らなかった案 —— `rewriteReferencesInText` の書き換え射程を広げる
+ *
+ * ⛔ **この関数は何も書き換えない。**`rewriteReferencesInText` 側の正規表現を
+ * 「連なりの2番目以降も拾う」形に広げれば、この事故そのものは機械的に直せる
+ * ように*見える*。**だが広げなかった**——`AGENTS.md`「⚠ 機械には『検出』まで
+ * ——確定と書き込みは人に残す」の「⭐ 線は『repo の中（戻せる）か、GitHub 側の
+ * 取り消しにくい面か』である」節が言う通り、`adr-renumber.mjs` は既に repo の
+ * 中に書き込む道具（ADR 0179）だが、**書き込む道具は、間違えたときに*静かに*
+ * 壊れる**——無関係な4桁数字を書き換えてもエラーは出ない。射程を広げるほど、
+ * 「たまたま `ADR NNNN / MMMM` の形をした、無関係な MMMM」まで巻き込む危険が
+ * 増える（`AGENTS.md`「⚠ 偽陽性率に上限を置けない検査は門にしない」と同じ形の
+ * 判断）。⟹ **検出（この関数）なら、偽陽性が出ても「人が確認する」だけで済む。**
+ * `rewriteReferencesInText` 自身の docstring が宣言する射程（「`ADR ` に続く旧番号」
+ * だけ、「裸の4桁数字は一切触らない」）は、この関数を足しても1バイトも変えない。
+ *
+ * ## 射程 —— 主語の錨は「`ADR` という語」、区切りは実在するものだけ
+ *
+ * 【実測】`git grep -hoE "ADR [0-9]{4}( ?[/・,、及びと] ?[0-9]{4})+"` をこの repo に
+ * 当てると、**実在する区切りは `/` だけ**である（`ADR NNNN/NNNN` や
+ * `ADR NNNN / NNNN` が多数、3連・4連…10連まで実在する。`・` や `,` の実例は無い）。
+ * ⟹ この関数が見るのは `ADR \d{4}` に `/` 区切りの4桁数字が1回以上続く形だけ。
+ * **`/` の前後の空白は有り無し両方を許す**（両方が実測で実在するため）。
+ *
+ * 連なりの**1番目**（`ADR ` に直接続く数字）は、`rewriteReferencesInText` の
+ * `adrRe` が構造的に届く位置なので、この関数は見ない（`.slice(1)`）——**この関数が
+ * 報告するのは、既存の書き換えが届かない位置だけである。**
+ *
+ * ## この検出が捕まえないもの（⛔ 対象外）
+ *
+ * - **`ADR` の錨が無い裸の4桁数字**（日付・issue番号等）。
+ * - **`/` 以外の区切り**（実測で実在しないため対象にしていない——広げるなら
+ *   新しい実例が出てから）。
+ * - **PR タイトル・本文**——それは `scripts/check-pr-adr-reference.mjs`
+ *   （[ADR 0211](../docs/decisions/0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md)）
+ *   の担当であり、repo 内のファイルではない。
+ * - **今日の実例（`runtime-method-count-not-baked.test.mjs`）以外に、同種の
+ *   取りこぼしが既に `main` に在るかは、この関数を書いた時点では掃いていない。**
+ *
+ * @param {string} text
+ * @param {{ oldNumber: string, newNumber: string }[]} renames
+ * @returns {{ oldNumber: string, match: string }[]}
+ */
+const ADR_CHAIN_RE = /ADR \d{4}(?:[ \t]*\/[ \t]*\d{4})+/g;
+
+export function findUnrewrittenAdrReferences(text, renames) {
+  const oldNumbers = new Set(
+    (renames ?? []).filter((r) => r.oldNumber !== r.newNumber).map((r) => r.oldNumber),
+  );
+  if (oldNumbers.size === 0) return [];
+
+  const results = [];
+  for (const chainMatch of text.matchAll(ADR_CHAIN_RE)) {
+    const chain = chainMatch[0];
+    const numbers = chain.match(/\d{4}/g) ?? [];
+    // 1番目（"ADR " に直接続く数字）は rewriteReferencesInText 自身の射程なので
+    // 対象から外す——ここで見るのは、その先の位置だけ。
+    for (const number of numbers.slice(1)) {
+      if (oldNumbers.has(number)) {
+        results.push({ oldNumber: number, match: chain });
+      }
+    }
+  }
+  return results;
+}
+
+/**
  * `adr-renumber.mjs`（引数無し）が ADR 番号を実際に付け替えたときに表示する
  * 警告文を作る（[Issue #405](https://github.com/takecchi/mnemora/issues/405)）。
  *
