@@ -1,6 +1,6 @@
 # ADR 0279: required status check の「正本＋突き合わせ」を足す — 宣言は `.github/required-status-checks.json`、判定は三値、CI には繋がない
 
-- **状態**: 提案 (2026-09-23)
+- **状態**: 採用 (2026-09-23。[ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) で担い手が「提案」から倒した——オーナー本人の判定ではない)
 - **日付**: 2026-09-23
 
 **⚠ 各主張の出所を分ける**（ADR 0222 / 0253 / 0274 の体裁を踏む）。

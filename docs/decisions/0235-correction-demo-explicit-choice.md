@@ -1,6 +1,6 @@
 # ADR 0235: 訂正の相手は `examples/chat` でも人が指名する — `findCorrectionCandidates` を本番コードの経路に立てる（Issue #369 (C) / 北極星 項目5）
 
-- **状態**: 草案（`docs/decisions/README.md` は触っていない——ADR 0137 決定2。索引はマージする側が直前に再生成する）
+- **状態**: 採用 (2026-09-18。[ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) で担い手が「草案」から倒した——オーナー本人の判定ではない)
 - **日付**: 2026-09-18
 
 **⚠ 各主張の出所を分ける**（ADR 0232 の体裁を踏む）。

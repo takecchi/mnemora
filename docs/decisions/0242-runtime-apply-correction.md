@@ -1,6 +1,6 @@
 # ADR 0242: `Runtime.applyCorrection` — 北極星 項目5を「出荷される面」から駆動できるようにする（Issue #369）
 
-- **状態**: 草案（`docs/decisions/README.md` は触っていない——ADR 0137 決定2。索引はマージする側が直前に再生成する）
+- **状態**: 採用 (2026-09-18。[ADR 0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) で担い手が「草案」から倒した——オーナー本人の判定ではない)
 - **日付**: 2026-09-18
 - **採番**: 元は `0241` として書いたが、`origin/main` に PR #535（ADR 0241「`docs/migration-v1.md` は ADR ではなく生きた文書である」）が先に着地したため、`0242` へ付け替えた（`scripts/adr-renumber.mjs`、ADR 0179）。
 
