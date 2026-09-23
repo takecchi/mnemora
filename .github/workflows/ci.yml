@@ -55,6 +55,19 @@ jobs:
           git fetch origin main
           node scripts/check-pr-adr-reference.mjs
 
+      - name: "CHANGELOG 載せ漏れの候補を PR の Job Summary に出す（⛔ 判定ではない。Issue #433 方向B2 / ADR 0214 追記）"
+        # publish される中身（packages/*/src、`scripts/release-candidates-lib.mjs` の
+        # isPackageSrcPath() を再利用——書き起こさない）を触った PR が、CHANGELOG.md の
+        # 未リリース節にこの PR で追加した行を持っているかを見て、無ければ「候補」として
+        # 触ったファイルを列挙するだけの観測口。判定ではない——終了コードは常に 0 であり
+        # （scripts/changelog-candidates-summary.mjs 冒頭の doc コメント参照）、
+        # continue-on-error は要らない（付けると二重の安全策になる。理由は同スクリプトの
+        # doc コメントと同じ）。
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin main
+          node scripts/changelog-candidates-summary.mjs
+
       - name: Enable corepack
         run: corepack enable
 
