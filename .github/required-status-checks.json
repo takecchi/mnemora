@@ -1,0 +1,13 @@
+{
+  "note": "main のブランチ保護（branch protection）で required になっている status check の文脈名（contexts）の写し。⭐ これは宣言であって設定ではない —— このファイルを書き換えても branch protection そのものは1バイトも変わらない。ずれていないかは `pnpm check:required-status-checks`（scripts/check-required-status-checks.mjs）が gh api で実際の protection を読み、突き合わせる。⚠ 読むには administration 権限のあるトークンが要る（GitHub Actions の既定の GITHUB_TOKEN には無い可能性が高い——理由は scripts/check-required-status-checks-lib.mjs の doc と ADR 0279 を見ること）。⛔ どちらが正しいか（この宣言が古いのか、protection の側が意図せず変わったのか）は、このファイルにも突き合わせにも書けない——それは人間が決める。",
+  "observedAt": "2026-09-23T02:37:33Z",
+  "observedBy": "gh api repos/takecchi/mnemora/branches/main/protection/required_status_checks -q '.contexts[]'",
+  "contexts": [
+    "examples/chat (本物の Postgres + pgvector、擬似 provider)",
+    "typecheck / lint / test / build",
+    "ルートの test 門の DB 段（DATABASE_URL 在りで順方向に実測、ADR 0015）",
+    "packages/postgres (本物の Postgres + pgvector, server_encoding=UTF8)",
+    "packages/postgres (本物の Postgres + pgvector, server_encoding=SQL_ASCII)",
+    "両方の server_encoding regime が実際に走ったことを測る (Issue #155)"
+  ]
+}
