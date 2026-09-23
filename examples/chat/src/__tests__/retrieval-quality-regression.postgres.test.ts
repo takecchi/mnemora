@@ -19,8 +19,9 @@ import { closeTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-d
  * **固定する3つ**: provider = `recorded`(カセット再生。ADR 0051。`deterministic` には
  * しない——意味的品質を測るという ADR 0088/ADR 0224 §2.2 の要求による)、
  * 時計 = `fixedClock`(下のコメント参照)、入力 = 既存の `probe-set.ts` の
- * `PROBES`/`buildProbeSetConversation`(seed 固定・ADR 0058 §1.4 で凍結済み。1件も
- * 足さない・変えない)。
+ * `PROBES`/`buildProbeSetConversation`(seed 固定。1件も足さない・変えない——凍結の扱いは
+ * ADR 0227 の「決定」節の2番が敷いたもの。ADR 0058 §1.4 が言うのは、既存 probe に時刻を
+ * 書き込まない統制のほうである)。
  *
  * **守る振る舞い**: 各 probe について、probe 定義の時点で決まっている gold
  * (`probe.fact`)が `recall()` の返す既定候補(limit=10)に入っていること。

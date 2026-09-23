@@ -213,6 +213,14 @@ embed ジョブは3 tick で処理しきり（`totalProcessed=75`、`firstTickPr
    `fixedClock(new Date("2030-01-01T00:00:00.000Z"))`（実行時点より確実に未来。
    理由は上の「現物と食い違った点」節）、入力 = `probe-set.ts` の `PROBES`/
    `buildProbeSetConversation`（ADR 0058 §1.4 で凍結済み。1件も足さない・変えない）。
+
+   > **追記（2026-09-23、Issue #649）—— 上の「ADR 0058 §1.4 で凍結済み」は帰属を誤っている。**
+   > ADR 0058 §1.4 が言っているのは「既存 probe に時刻を書き込まない（時間項の統制を
+   > 外さない）」ことであり、「件数を足さない・変えない」ことではない。1件も足さない・
+   > 変えない扱いは、この項がここで敷いたものである（その前に ADR 0135 が、マネージャーの
+   > 指示として同じ扱いを記録している）。件数を足すことの代償（カセットの録り直し・課金・
+   > 系列の切断）は ADR 0276「検討して採らなかった案」の案1 に在る。
+   > ⛔ 本文は書き換えない（`docs/decisions/README.md`）。
 3. **守る振る舞い**: probe ごとに、`probe.fact`（gold）が `recall()` の返す既定候補
    （`limit=10`）に入っていること。**測定用ベンチ**（`retrieval` サブコマンド・
    `scripts/retrieval-quality-summary.mjs`・`retrieval-baseline.json`・
