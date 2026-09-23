@@ -271,12 +271,19 @@ const scoreWithDefaultStrategy: ScoringStrategy = (input) => {
 
   const total = affinity * decay * tagMatch * freshness * input.strength;
 
+  // Issue #548 方向1 / ADR 0282: affinity が中立の1に退化したか（＝関連度を測っていないか）を
+  // 名乗る欄。similarity/lexicalMatch と違い、値がある場合だけ足す形にはしない——
+  // 「欄が無いこと」を「defaultScoringStrategy を経由していない」の専用の合図として残すため
+  // （`ScoreBreakdown.affinityMeasured` の doc コメント参照）。
+  const affinityMeasured = similarity !== undefined || lexicalMatch !== undefined;
+
   const score: ScoreBreakdown = {
     decay,
     tagMatch,
     freshness,
     strength: input.strength,
     total,
+    affinityMeasured,
   };
   if (similarity !== undefined) {
     score.similarity = similarity;
