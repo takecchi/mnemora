@@ -187,6 +187,16 @@ ADR 0122 は `restoreArchived` について「`status` を1つ動かし、同一
 
 **採らなかった案**: `digestSource`（`'llm' | 'fallback'`）にも `'purged'` 相当の値を足す。却下——digest の内容がトゥームストーンに変わったことを `digestSource` にも反映したくなるが、これは union への値追加であり、[ADR 0122](./0122-restore-archived-memory.md) 決定3が慎重に検討した「外部の網羅的 switch を壊しうる」判断を、今度は理由なく（`MemoryEventKind` の場合のような「union は育つ前提の型」という積極的な理由を持たずに）繰り返すことになる。`digestSource` は purge 後は意味を失う（元々どう作られた digest だったかの記録に過ぎず、購入後に何かを保証する値ではない）と割り切り、**変更しない**——「引き受けた負債」節に記録する。
 
+> **追記（2026-09-23、Issue #634）—— 上の「ADR 0122 決定3」は決定3と負債節の両方を
+> 指すべきところ、決定3だけに帰属させている。**`memory_events.kind` へ `"restored"` を
+> 追加するという結論自体は決定3「`memory_events.kind` へ `"restored"` を追加する
+> （`MemoryEventKind` union の拡張）」に在るが、「破壊的変更にならない」という判断を
+> 「慎重に検討した」中身（`grep`/`rg` の射程が `packages/*/src` に限られ、`@mnemora/core`
+> を消費する repo の外側の利用者は見ていない・見られない、という限界の自認）は、
+> 決定3の節ではなく、番号を持たない ADR 0122「引き受けた負債」の6番に在る——逐語
+> 「決定3の『破壊的変更にならない』という判断は、この repo の中でしか検証していない」。
+> ⛔ 本文は書き換えない（`docs/decisions/README.md`）。
+
 ### 決定5: `VectorStore.delete` はベストエフォート。失敗しても `"purged"` の判定を変えない
 
 `Runtime.purge` は `purgeMemory` の成功後、`deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)` を呼ぶ。

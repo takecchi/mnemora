@@ -62,9 +62,28 @@ ADR 0151（連想枠の実装）・ADR 0158（測る器を作った）・ADR 016
 | `archive-sweep-cost.ts` | `runtime.recall(ctx, { text[, limit, budget] })` | `archive-sweep-cost` | **触れない。`archive-sweep-baseline.json` は動かない** |
 | `association-arm.ts` | `runtime.recall(ctx, { text, association? })`。**arm 自身が on/off を明示的に切り替える測定器** | `association-probes` | **⛔ 意図して触れない**（基準値ファイル無し、ADR 0158 決定3・4） |
 
+> **追記（2026-09-23、Issue #634）—— 上の表の「ADR 0158 決定3・4」は指し先を誤っている。**
+> `association-arm.ts` に触れないという結論自体は決定3（「`compare` の⭐門・
+> `compare-baseline.json`・既存 probe 集合4ファイルには1文字も触らない」）と決定4
+> （「⛔ `association-probes` ジョブを required（門）にしない」）に在るが、括弧内で
+> 名指しされている理由「基準値ファイル無し」は決定3・4のどちらにも書かれておらず、
+> 番号を持たない ADR 0158「引き受けた負債 / 開いている穴」の3番
+> 「`association-baseline.json`（基準値ファイル）を置いていない」に在る。
+> ⛔ 本文は書き換えない（`docs/decisions/README.md`）。
+
 **⟹ 影響するのは `compare-baseline.json` の1本だけである。**理由は構造的なもの——`retrieval-quality.ts`/`identifier-arm.ts`/`time-term-arm.ts`/`consolidation-cost.ts`/`archive-sweep-cost.ts` はいずれも「`recall()` にはこの欄以外を渡さない」という明示的な規律を持つ独立した測定器であり、他の欄（`channels`/`budget`/`limit` 以外）を増やすこと自体がその規律を破る。**5本のベンチの既存の規律を保つ**ことを、この ADR は意図して選んだ——`docs/autonomy.md`§3.1「どちらを選んでも技術的には成立するが」に該当するので、ここに理由を書く:
 
 - **もし5本にも association を混ぜていたら**: 「順位が変わったのは連想枠のせいか、チャンネル/予算/limit のせいか」を切り分けられなくなる。ADR 0151/0158 が「連想枠は既存の測定に混ぜない」ために独立した `association-probes` を新設した理由（ADR 0158 決定3「既存 probe 集合に混ぜる案を却下」）と、まったく同じ理由がここにも刺さる。
+
+  > **追記（2026-09-23、Issue #634）—— 上の「ADR 0158 決定3」（「既存 probe 集合に混ぜる案を
+  > 却下」）は指し先を誤っている。**ADR 0158 の番号付きの決定3は「`compare` の⭐門・
+  > `compare-baseline.json`・既存 probe 集合4ファイルには1文字も触らない。別ファイル・
+  > 別 arm・別 JSON スキーマにする」であり、取った行動を述べるのみで代替案の却下理由は
+  > 書いていない。「既存 probe 集合に混ぜる案を却下」した理由は、番号を持たない
+  > ADR 0158「検討して採らなかった案」表の1行目「既存 `retrieval` の probe 集合（7件）に
+  > 連想枠用の probe を混ぜる」に在る（却下理由: 「母数の異なる数字が同じ基準値ファイル・
+  > 同じ表に同居することになる」）。⛔ 本文は書き換えない（`docs/decisions/README.md`）。
+
 - **`examples/chat` を「呼び手」として見たとき、実際にアプリの応答生成に相当する経路は `mnemora-path.ts` の `queryRecall` である**——このファイルの既存の docstring 自身が「経路B（mnemora）の想起段」「呼び出し側が実際にプロンプトへ積むのは…」と明記しており、5本のベンチ（測定器）とは役割が違う。
 
 **`budget-demo.ts`（`chat` サブコマンドの一部）も `queryRecall` を経由するため影響を受ける**が、基準値ファイルを持たない（本物の Postgres に対する postgres test が3本あるのみ）。**実測してこの3本が壊れないことを確認した**（下記「測ったこと」）。
@@ -119,6 +138,17 @@ ADR 0151 は北極星の問い1で「既定 on」を明示的に落としてい�
 | 5本のベンチ arm にも `association` を混ぜる | 上記§1のとおり、各ベンチが持つ「この欄以外を渡さない」という既存の規律を破り、何が順位を動かしたかの切り分けを壊す |
 | `association-probes` ベンチ自身の on/off 既定を変える | ADR 0158 決定3・4が明示的に禁じている——on/off比較器の意味が壊れる |
 | 環境変数で `maxCount` を上書き可能にする（例 `MNEMORA_CHAT_ASSOCIATION_MAX_COUNT`） | 検討したが採らなかった。`MnemoraPathOptions.association` という呼び出し側のプログラム的な上書き口は既に用意した（テスト・将来の呼び出し側のため）。環境変数までは今回のスコープでは要らないと判断した——使う場面（`examples/chat` を CLI から動かす人が値を変えたい場面）が今のところ無く、「念のため」で選択肢を増やすことは避けた（`docs/autonomy.md`「やりすぎない」規律）。要る場面が具体化したら追加する |
+
+> **追記（2026-09-23、Issue #634）—— 上の表の「ADR 0158 決定3・4が明示的に禁じている」は
+> 出典を確かめられなかった。**ADR 0158 の決定3（「`compare` の⭐門・
+> `compare-baseline.json`・既存 probe 集合4ファイルには1文字も触らない」）にも決定4
+> （「⛔ `association-probes` ジョブを required（門）にしない」）にも、他のどの節にも、
+> 「`association-probes` ベンチ自身の on/off 既定を変えることを禁じる」という趣旨の
+> 記述は見当たらない（`grep -n "禁\|on/off\|既定" docs/decisions/0158-association-probes-bench.md`
+> で全文を検索したが、無関係な3箇所（`limit` 既定10の話、required 化を禁じる話、
+> Issue #317 が「場を弱める方向の変更」を禁じる話）にしか当たらなかった）。
+> ⛔ 推測で別の指し先を作らない。どこから来た主張かは特定できていない。
+> ⛔ 本文は書き換えない（`docs/decisions/README.md`）。
 
 ---
 

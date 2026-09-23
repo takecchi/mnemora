@@ -98,6 +98,15 @@
   `memoryId` 欠落や参照先の Memory 欠落を `unsupported` にせず投げて `failed` にするのと
   同じ扱いである。
 
+  > **追記（2026-09-23、Issue #634）—— 上の「ADR 0082 決定1」は指し先を誤っている。**
+  > ADR 0082 の番号付きの決定1「`TickResult` に `unsupported` を足す」の本文は
+  > `unsupported` フィールドの構造・扱い（`failed` の内訳・既定空配列・`jobId` を
+  > 載せる理由）を述べるのみで、「`tick` がその kind を処理する分岐を持っていなかった」
+  > という定義文言は無い。その文言は番号を持たない ADR 0082「文脈」節に在る——
+  > 逐語「`OutboxJobKind` に `"consolidate"` / `"reflect"` が名指しで在るのに、`tick` に
+  > 分岐が無い」、および同節の表の行「`tick` がその kind を処理できなかった」。
+  > ⛔ 本文は書き換えない（`docs/decisions/README.md`）。
+
   ### `seedMemoryId` が指す Memory が見つからない場合は、投げない
 
   これは `processEmbedJob` と**意図的に違う**。`embed` には「対象が無かった」を表す正規の

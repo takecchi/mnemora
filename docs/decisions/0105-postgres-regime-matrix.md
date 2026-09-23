@@ -41,6 +41,14 @@ ADR 0106 は「`POSTGRES_INITDB_ARGS` が実際に pgvector イメージへ効�
 一致してしまう。** これまで `UTF8` の宣言でしか走らせていなかったので、この区別が
 一度もついていなかった。
 
+> **追記（2026-09-23、Issue #634）—— 上の見出し「ADR 0106 決定4の『負債4』」は指し先を
+> 誤っている。**ADR 0106 の番号付きの決定4は「6本の宣言が同一であることを歯で固定する」
+> であり、`POSTGRES_INITDB_ARGS` が実際に pgvector イメージへ効くこと自体をこの PR の CI が
+> 初めて確かめる、という未解決の負債は、番号を持たない ADR 0106「引き受けた負債」の4番目
+> 「`POSTGRES_INITDB_ARGS` が実際に pgvector イメージへ効くこと自体も、この PR の CI が
+> 初めて確かめる」に在る。決定4（宣言の同一性を歯で固定する話）とは別の節である。
+> ⛔ 本文は書き換えない（`docs/decisions/README.md`）。
+
 ### 2. 【現物】6本のうち matrix にするのは `postgres` の1本だけ
 
 `.github/workflows/ci.yml` で `pgvector/pgvector:pg17` を services に持つジョブは
