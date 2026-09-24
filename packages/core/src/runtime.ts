@@ -2268,13 +2268,15 @@ export interface Runtime {
 function extractObservationPayload(
   input: ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput,
 ): unknown {
+  const context =
+    input.extractionContext === undefined ? {} : { extractionContext: input.extractionContext };
   switch (input.kind) {
     case "utterance":
-      return { text: input.text, speaker: input.speaker };
+      return { text: input.text, speaker: input.speaker, ...context };
     case "event":
-      return { name: input.name, data: input.data ?? {} };
+      return { name: input.name, data: input.data ?? {}, ...context };
     case "document":
-      return { title: input.title, content: input.content };
+      return { title: input.title, content: input.content, ...context };
     default: {
       const exhaustive: never = input;
       throw new Error(`unreachable observe input kind: ${String(exhaustive)}`);

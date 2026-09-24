@@ -6,8 +6,8 @@ import type { AnswerExpectation } from "./answer-case.js";
  * 🔴 **既存の `answer` ベンチ（`answer-case.ts`）とは何を測るかが違う。** あちらは
  * 「naive と mnemora の回答を、同じ質問・同じ会話で比べる」——**取り込み直後に
  * `recall()` する**ため、時間項（`decay`/`freshness`）はほぼ1に張り付き、
- * `RecallQuery.timeWeighting`（`"legacy"` | `"eventAwareFreshness"`、ADR 0299）の
- * 違いは出ない（`docs/decisions/0299-time-weighting-policy-opt-in.md` §1 の
+ * `RecallQuery.timeWeighting`（`"legacy"` | `"eventAwareFreshness"`、ADR 0300）の
+ * 違いは出ない（`docs/decisions/0300-time-weighting-policy-opt-in.md` §1 の
  * 「occurredAt の無い記憶への freshness の二重減衰」は、時間が経ってから初めて起きる）。
  *
  * このベンチは**時間を実際に進める**——各ケースは、記憶を直接（抽出 LLM を通さず）
@@ -23,9 +23,9 @@ import type { AnswerExpectation } from "./answer-case.js";
  * - `"reinforced-fact-vs-fresh-weak"`（類型A）: 古く記録され最近 reinforce された
  *   恒常的な事実（`occurredAt` 無し）が、新しく記録されたが弱い（一度も reinforce
  *   されていない）競合記憶に埋もれてはいけない。**legacy はここで失敗しうる**——
- *   ADR 0299 が直そうとしている二重減衰そのものが起きる場面。
+ *   ADR 0300 が直そうとしている二重減衰そのものが起きる場面。
  * - `"old-event-not-outrank-new"`（類型B）: 両方の記憶に `occurredAt` がある場合、
- *   古い出来事が新しい出来事より上位に来てはいけない。ADR 0299 の式は
+ *   古い出来事が新しい出来事より上位に来てはいけない。ADR 0300 の式は
  *   `occurredAt` が在るとき `legacy`/`eventAwareFreshness` で1文字も変わらない
  *   （`scoring.ts` の `computeFreshness` docstring）——⟹ **この類型は regression
  *   guard であり、どちらの方針でも同じく正しく答えられるはずである。**
@@ -37,7 +37,7 @@ import type { AnswerExpectation } from "./answer-case.js";
  *
  * **類型B'/C'（段2a、マネージャー決定、`time-weighting-case-set.eval-undated.ts` 専用）**:
  * 類型B/Cは両方の記憶に`occurredAt`（C は `validUntil` も）を持たせており、
- * ADR 0299 の式のとおり legacy/eventAwareFreshness で数式レベルの不変条件が
+ * ADR 0300 の式のとおり legacy/eventAwareFreshness で数式レベルの不変条件が
  * 効くため「新方針で退行するか」を測れない。**本当に危ないのは、抽出が
  * 出来事時刻・期限を捉えられず（`occurredAt`/`validUntil` が無い）、その記憶が
  * 実質「古い出来事・期限切れの予定」であるのに、eventAwareFreshness が

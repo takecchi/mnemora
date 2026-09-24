@@ -161,13 +161,13 @@ describe("`answer` のカセットと評価ケース集合の対応（Issue #498
 });
 
 // ---------------------------------------------------------------------------
-// answer-time-weighting のカセット（Issue #690、ADR 0299、段3b）
+// answer-time-weighting のカセット（Issue #690、ADR 0300、段3b）
 //
 // `answer` と違い、会話も抽出も無い——記憶を直接書くため、埋め込みの対象は
 // (1) 各ケースの質問文と (2) 各ケースが直接書く記憶の content の2種類だけである。
 // ---------------------------------------------------------------------------
 
-describe("`answer-time-weighting` のカセットとケース集合の対応（Issue #690、ADR 0299）", () => {
+describe("`answer-time-weighting` のカセットとケース集合の対応（Issue #690、ADR 0300）", () => {
   const cases = [
     ...TIME_WEIGHTING_CASE_SET_DEV,
     ...TIME_WEIGHTING_CASE_SET_EVAL,

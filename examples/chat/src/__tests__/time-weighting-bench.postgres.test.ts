@@ -75,7 +75,7 @@ describe("examples/chat: answer-time-weighting（本物の Postgres、配線検�
       // 0.1(既定 scoreThreshold)を超えないことは freshness だけで保証される）。
       expect(legacyFreshness).toBeLessThan(0.01);
       // eventAwareFreshness は occurredAt が無い記憶の freshness を厳密に1へ固定する
-      // （`computeFreshness` の doc コメント、ADR 0299 §2）。
+      // （`computeFreshness` の doc コメント、ADR 0300 §2）。
       expect(eventAwareFreshness).toBe(1);
       expect(eventAwareFreshness).toBeGreaterThan(legacyFreshness);
     } finally {
@@ -83,7 +83,7 @@ describe("examples/chat: answer-time-weighting（本物の Postgres、配線検�
     }
   });
 
-  it("occurredAt が在る記憶: legacy と eventAwareFreshness で freshness が1文字も変わらない（ADR 0299 §2 の不変条件）", async () => {
+  it("occurredAt が在る記憶: legacy と eventAwareFreshness で freshness が1文字も変わらない（ADR 0300 §2 の不変条件）", async () => {
     await resetTestDatabase();
     await getTestClient();
     const handle = await createTimeWeightingBenchRuntime(requireDatabaseUrl(), {});

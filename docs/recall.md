@@ -865,19 +865,19 @@ Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.m
 
 **「なぜこれが返ったか」は自然文ではなく構造で返す。** `explain.stages` と `RecalledMemory.score` を組み合わせれば「段1でベクトル距離0.12として拾われ、段2で decay 0.9 × tagMatch 1.2 × freshness 1.0 × strength 0.8 を掛けて total 0.83 になり、k=10 の9位で予算内に収まった」という説明を機械的に再構成できる。この構造から自然文の説明文を組み立てるのは呼び出し側の仕事であり、mnemora の仕事ではない。理由は §6 で述べたのと同じ——mnemora はどんな言語で・どんなトーンで・誰に向けて説明するかを知らない。mnemora が保証するのは、説明を組み立てるために必要な材料が欠けていないことだけである。
 
-### 7.1 `timeWeighting` — 恒常的な記憶と出来事の鮮度を分ける（任意、既定は従来どおり。Issue #690、[ADR 0299](./decisions/0299-time-weighting-policy-opt-in.md)）
+### 7.1 `timeWeighting` — 恒常的な記憶と出来事の鮮度を分ける（任意、既定は従来どおり。Issue #690、[ADR 0300](./decisions/0300-time-weighting-policy-opt-in.md)）
 
 `freshness` は既定（`"legacy"`）では `occurredAt ?? recordedAt` を起点にした減衰係数であり、`decay`（`lastReinforcedAt` 起点。`reinforce` するたびに若返る）と**同じ半減期**を使う。**`occurredAt` が無い記憶**（`docs/memory-model.md` §3 の定義上、特定の出来事時刻を持たない「恒常的な事実・好み」であることが多い）は、`freshness` の起点が `recordedAt`（記録した時刻）にフォールバックする——⟹ **使われ続けている（`reinforce` されている）恒常的な事実でも、`recordedAt` が古いというだけで `freshness` が沈み続け、`total` を引きずり下ろす。** これが「時間の二重減衰」である。
 
 `RecallQuery.timeWeighting?: "legacy" | "eventAwareFreshness"` を渡すと、`occurredAt` が無い記憶に限って `freshness` を 1（`MAX_FRESHNESS`、ADR 0036 の上限そのもの）に固定できる。`occurredAt` が在る記憶（実際に出来事時刻を持つもの——「来月の出張」「先月の会議」等）は、`"legacy"` と完全に同じ式のままであり、事件の順位付けは1文字も変わらない。
 
-**省略時は `"legacy"`。** この欄を渡さない呼び出しは `recall()` の結果が1バイトも変わらない——既定を新方針にするかどうかはオーナー判断として開いたままである（ADR 0299 §7）。
+**省略時は `"legacy"`。** この欄を渡さない呼び出しは `recall()` の結果が1バイトも変わらない——既定を新方針にするかどうかはオーナー判断として開いたままである（ADR 0300 §7）。
 
 **⛔ 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート（`includeOutsideValidity`）とは独立である。** `timeWeighting` は段2（再スコア、この節が扱う話）だけに効き、段1の候補生成ゲート・後置フィルタの述語には一切渡らない——期限切れの予定は、`timeWeighting` の値に関係なく引き続き除外される。
 
-比較実測・検討した他の案（テナント設定にする・`Memory` に明示フラグを足す・半減期を分ける、等）は ADR 0299 を参照。
+比較実測・検討した他の案（テナント設定にする・`Memory` に明示フラグを足す・半減期を分ける、等）は ADR 0300 を参照。
 
-**⚠ 取り引き（トレードオフ）**: `eventAwareFreshness` は「`occurredAt` が無い恒常的な事実を正しく持ち上げる」ことと表裏で、「`occurredAt`・`validFrom`・`validUntil` のいずれも持たない（＝抽出が出来事時刻・期限を構造化できなかった）記憶」を一律「恒常的な事実」として扱う——それが実際には古びた・期限切れの情報であっても、`freshness` を 1 に固定して持ち上げてしまう。実測（Issue #690 実 API 評価、ADR 0299 §6.4）では、この方針は `occurredAt`/validity 列を一切持たず直近に `reinforce` された古い予定を、`recall()` のスコアリング上つねに最上位・文脈入りさせた——最終的な回答が誤るかどうかは LLM 側の頑健さに依存し実行ごとに揺れたが、この検索側の性質自体は複数回の実測で一貫して再現した。**⟹ `eventAwareFreshness` を選ぶことは「恒常的な事実の埋没」と「未構造化の古い情報の持ち上げ」のどちらの誤りを引き受けるかという取り引きであり、どちらか一方だけを直す方法ではない。**
+**⚠ 取り引き（トレードオフ）**: `eventAwareFreshness` は「`occurredAt` が無い恒常的な事実を正しく持ち上げる」ことと表裏で、「`occurredAt`・`validFrom`・`validUntil` のいずれも持たない（＝抽出が出来事時刻・期限を構造化できなかった）記憶」を一律「恒常的な事実」として扱う——それが実際には古びた・期限切れの情報であっても、`freshness` を 1 に固定して持ち上げてしまう。実測（Issue #690 実 API 評価、ADR 0300 §6.4）では、この方針は `occurredAt`/validity 列を一切持たず直近に `reinforce` された古い予定を、`recall()` のスコアリング上つねに最上位・文脈入りさせた——最終的な回答が誤るかどうかは LLM 側の頑健さに依存し実行ごとに揺れたが、この検索側の性質自体は複数回の実測で一貫して再現した。**⟹ `eventAwareFreshness` を選ぶことは「恒常的な事実の埋没」と「未構造化の古い情報の持ち上げ」のどちらの誤りを引き受けるかという取り引きであり、どちらか一方だけを直す方法ではない。**
 
 ---
 

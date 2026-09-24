@@ -13,6 +13,29 @@ npm i @mnemora/core
 
 ## 前提
 
+### 文脈を使う抽出
+
+単独では意味が決まらない返答には、`observe` の `extractionContext` を渡せます。
+文脈は観測と一緒に保存され、非同期抽出や `reextract` でも使われます。
+
+```ts
+await runtime.observe(ctx, {
+  kind: "utterance",
+  text: "それでお願いします。明日使います",
+  speaker: "田中",
+  occurredAt: new Date("2026-01-01T23:00:00Z"),
+  extractionContext: {
+    messages: [{ speaker: "assistant", text: "会議室は青葉でよいですか？" }],
+    timeZone: "Asia/Tokyo",
+  },
+});
+```
+
+入力上限は公開 `ExtractionContextSchema` を参照してください。必要な文脈は呼び手が選びます。
+空の `{}` でも話者・日時を渡す経路を有効にできます。省略時は従来の単独本文の抽出です。
+`occurredAt` と `timeZone` が揃わなければ、相対日付の確定は指示しません。
+文脈を渡しても意味の解釈はモデル依存です。DBの有効期間は従来どおり `validFrom/validUntil` で明示します。
+
 - Node.js >= 22（`package.json` の `engines`）
 - **ESM のみ**（`"type": "module"`）。CommonJS からは Node 22.12 以降の
   `require(esm)` で読み込める（TypeScript は `moduleResolution` が `node10` か

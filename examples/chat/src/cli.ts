@@ -1979,7 +1979,7 @@ function parseTimeWeightingTemperature(argv: readonly string[]): number | undefi
  * `answer-time-weighting` サブコマンド（Issue #690 / PR #697）。
  *
  * 🔴 **`answer` サブコマンドとは測る問いが違う。** `answer` は naive/mnemora の配線
- * 検査、こちらは `RecallQuery.timeWeighting`（ADR 0299）を**回答の正誤**で比べる——
+ * 検査、こちらは `RecallQuery.timeWeighting`（ADR 0300）を**回答の正誤**で比べる——
  * 記憶を抽出 LLM を通さず直接書き、reinforce し、壁時計を進めてから、同じ質問を
  * `legacy`/`eventAwareFreshness` の両方で recall→回答生成→採点する
  * （`time-weighting-bench.ts` の docstring参照）。
@@ -2167,7 +2167,7 @@ function printHelp(): void {
       "                                                                      #   🔴 配線の検査であり、回答品質は測っていない(llmMode=deterministic のとき集計を出さない)",
       "                                                                      #   MNEMORA_ANSWER_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer-time-weighting",
-      "                                                                      # RecallQuery.timeWeighting(legacy/eventAwareFreshness、Issue #690・ADR 0299)を回答の正誤で比べる",
+      "                                                                      # RecallQuery.timeWeighting(legacy/eventAwareFreshness、Issue #690・ADR 0300)を回答の正誤で比べる",
       "                                                                      #   -- --trials=N(既定1)・-- --temperature=N(既定は未指定)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
       "                                                                      # retrieval の応答を記録する(ADR 0051)",

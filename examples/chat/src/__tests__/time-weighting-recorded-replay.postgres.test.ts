@@ -22,7 +22,7 @@ import {
 
 /**
  * `answer-time-weighting` のカセット再生検査（本物の Postgres、**鍵不要**、決定的。
- * 段3b（Issue #690、ADR 0299）。
+ * 段3b（Issue #690、ADR 0300）。
  *
  * `compare`/`answer` の再生検査と同じ規律——`examples/chat/cassettes/
  * answer-time-weighting.json`（`record:answer-time-weighting`、temperature=0で記録済み）
@@ -31,7 +31,7 @@ import {
  *
  * 🔴 **正誤を「期待どおり」に固定する。取り引きを隠さない**（マネージャー決定）:
  * 類型A（`reinforced-fact-vs-fresh-weak`）は **legacy が構造的に失敗し、
- * eventAwareFreshness が直す**——これは ADR 0299 が意図した改善そのものである。
+ * eventAwareFreshness が直す**——これは ADR 0300 が意図した改善そのものである。
  * 類型B/C/B'/C' は両方針とも成功するはずである（regression guard）。
  *
  * ⚠ **`eval-undated-c1-seat-floor-reinforced` について**: 段3a の切り分け
@@ -126,7 +126,7 @@ describe("examples/chat: answer-time-weighting カセット再生（本物の Po
     }
   });
 
-  it("🔴 既知の取り引き: eventAwareFreshness は occurredAt/validFrom/validUntil の無い、reinforce 済みの古い予定を常に rank1・文脈入りさせる（ADR 0299）", async () => {
+  it("🔴 既知の取り引き: eventAwareFreshness は occurredAt/validFrom/validUntil の無い、reinforce 済みの古い予定を常に rank1・文脈入りさせる（ADR 0300）", async () => {
     // この検査は gradeAnswer の正誤（LLM の応答テキストに依存し、揺れうる）ではなく、
     // recall() のスコアリングという決定的な事実だけを見る——段3aの切り分け・段3b-1の
     // 本評価の取り直しの両方で、この事実だけは100%再現している
@@ -167,7 +167,7 @@ describe("examples/chat: answer-time-weighting カセット再生（本物の Po
       expect(legacyOld!.rank).not.toBe(1);
 
       // eventAwareFreshness: freshness=1に固定され、reinforce済みで decay も高いため、
-      // 常に rank1・文脈入りする——これが ADR 0299 の取り引きそのものである。
+      // 常に rank1・文脈入りする——これが ADR 0300 の取り引きそのものである。
       expect(eventAwareOld!.enteredContext).toBe(true);
       expect(eventAwareOld!.rank).toBe(1);
     } finally {

@@ -1,4 +1,4 @@
-# ADR 0299: 既定スコアの時間二重減衰を分ける — `occurredAt` が無い記憶には `freshness` を掛けない明示的 opt-in を `RecallQuery` に足す（Issue #690）
+# ADR 0300: 既定スコアの時間二重減衰を分ける — `occurredAt` が無い記憶には `freshness` を掛けない明示的 opt-in を `RecallQuery` に足す（Issue #690）
 
 - **状態**: 提案 (2026-09)
 - **日付**: 2026-09-25

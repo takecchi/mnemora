@@ -77,7 +77,7 @@ export const TIME_WEIGHTING_CASE_SET_DEV: TimeWeightingCase[] = [
 
   // ---------------------------------------------------------------------
   // 類型B: 両方とも occurredAt を持つ。古い出来事が新しい出来事より上位に来てはいけない。
-  // ADR 0299 により occurredAt が在るとき freshness は legacy/eventAwareFreshness で
+  // ADR 0300 により occurredAt が在るとき freshness は legacy/eventAwareFreshness で
   // 同じ式——regression guard（どちらの方針でも同じく正しく答えられるはず）。
   // ---------------------------------------------------------------------
   {
@@ -104,7 +104,7 @@ export const TIME_WEIGHTING_CASE_SET_DEV: TimeWeightingCase[] = [
     expected: { kind: "closed-value", accept: ["Galaxy"], reject: ["Xperia"] },
     rationale:
       "old-event は出来事時刻が400日前、new-event は2時間前。両方とも occurredAt を持つため、" +
-      "freshness の式は legacy/eventAwareFreshness で1文字も変わらない（ADR 0299）——" +
+      "freshness の式は legacy/eventAwareFreshness で1文字も変わらない（ADR 0300）——" +
       "old-event は古びて below_threshold で落ち、new-event だけが残るはずで、これは" +
       "どちらの方針でも同じでなければならない。",
     tuningUse: "development",

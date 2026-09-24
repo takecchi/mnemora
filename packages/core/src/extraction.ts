@@ -4,6 +4,7 @@ import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./strategies
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
 import type { DigestSource, NewMemory } from "./memory.js";
 import type { Observation } from "./observation.js";
+import { ExtractionContextSchema } from "./observation.js";
 import type { Provenance } from "./provenance.js";
 
 /**
@@ -122,15 +123,69 @@ export function buildExtractionPrompt(
   // `EXTRACTION_PROMPT_SYSTEM_BASE` と1バイトも違わない文面のはずが、空の一覧文言
   // （`候補一覧が渡されています: `）を余計に足してしまう。
   const hasCandidates = subjectCandidates !== undefined && subjectCandidates.length > 0;
-  const system = hasCandidates
+  let system = hasCandidates
     ? `${EXTRACTION_PROMPT_SYSTEM_BASE} ${buildSubjectCandidateInstruction(subjectCandidates)}`
     : EXTRACTION_PROMPT_SYSTEM_BASE;
+  const payload = observation.payload;
+  const rawContext =
+    payload && typeof payload === "object" && !Array.isArray(payload)
+      ? (payload as Record<string, unknown>).extractionContext
+      : undefined;
+  let content = observationPayloadText(observation);
+  if (rawContext !== undefined) {
+    const context = ExtractionContextSchema.parse(rawContext);
+    system +=
+      " 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、" +
+      "他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、" +
+      "分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。" +
+      "相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。" +
+      "記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。";
+    system += " digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。";
+    const localDate =
+      observation.occurredAt && context.timeZone
+        ? new Intl.DateTimeFormat("en-CA", {
+            timeZone: context.timeZone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+          }).format(observation.occurredAt)
+        : null;
+    const relativeDates =
+      localDate === null
+        ? null
+        : Object.fromEntries(
+            [
+              ["昨日", -1],
+              ["今日", 0],
+              ["明日", 1],
+              ["明後日", 2],
+            ].map(([label, offset]) => [
+              label,
+              new Date(Date.parse(`${localDate}T00:00:00Z`) + Number(offset) * 86400000)
+                .toISOString()
+                .slice(0, 10),
+            ]),
+          );
+    content = JSON.stringify({
+      observation: {
+        text: content,
+        speaker: observationSpeaker(observation) ?? null,
+        subjectId: observation.subjectId ?? null,
+        occurredAt: observation.occurredAt?.toISOString() ?? null,
+        recordedAt: observation.recordedAt.toISOString(),
+        observedLocalDate: localDate,
+        relativeDates,
+      },
+      context: context.messages ?? [],
+      timeZone: context.timeZone ?? null,
+    });
+  }
   return {
     system,
     messages: [
       {
         role: "user",
-        content: observationPayloadText(observation),
+        content,
       },
     ],
   };
