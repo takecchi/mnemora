@@ -56,7 +56,11 @@ import type {
   ObserveUtteranceInput,
   ObserveInputKind,
 } from "./observation.js";
-import { ObserveInputSchema, observeInputKindToObservationKind } from "./observation.js";
+import {
+  ObserveInputSchema,
+  observeInputKindToObservationKind,
+  SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX,
+} from "./observation.js";
 import type { NewObservation, Observation } from "./observation.js";
 import type { OutboxJobRecord } from "./outbox.js";
 import { runRecall } from "./recall-runtime.js";
@@ -236,6 +240,26 @@ export interface ObserveResult {
    * ことを防ぐ。
    */
   extractionFailure: ExtractionFailure | null;
+  /**
+   * Issue #608 項目②(b): この呼び出しで `subjectCandidates` を渡したとき、LLM が返した
+   * `subjectId` のうち**一覧に無かった**ため弾いた値（弾いた順、`ExtractCandidatesResult.
+   * rejectedSubjectIds` の写し）。弾かれた候補自体は observation の `subjectId` へ
+   * フォールバックして作られており（`sanitizeCandidateSubjectId`、extraction.ts）、
+   * **この欄が無くても Memory は正しく作られる**——ここは「黙って戻さない」ための
+   * 監査用の記録に過ぎない。
+   *
+   * ⛔ **省略可能にする（既存の `ObserveResult` の他の欄と違う規律）。** 理由は逆——
+   * 他の欄と同じく必須にすると、この PR より前に `ObserveResult` を自前で組み立てている
+   * 呼び出し側（本 repo の外を含む）のリテラルがコンパイルを通らなくなる。**新しい任意
+   * プロパティの追加**（`docs/decisions/0178-public-api-surface-gate.md` が semver 的に
+   * 安全と定める形）に留めるため、あえて必須にしない。
+   *
+   * - **`subjectCandidates` を渡さなかった（省略・空配列）呼び出しでは、この欄は無い**
+   *   （`undefined`）——「候補一覧を渡していないので判定していない」ことと「渡したが
+   *   0件だった」ことを、キーの有無で区別する。
+   * - **渡した場合は常に配列**（弾いた候補が無ければ `[]`）。
+   */
+  rejectedSubjectIds?: string[];
 }
 
 /**
@@ -2438,25 +2462,40 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     return { memoryIds, contentHashes };
   }
 
-  /** 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。 */
+  /**
+   * 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。
+   *
+   * `subjectCandidates`（Issue #608 項目②(b)）は `handleExtractableObservation` の sync
+   * 経路からだけ渡る——`processExtractJob`（deferred 側）は渡さない。渡す先が無いのは
+   * 「保存していないから」であって「対応していないから」ではない（`SubjectCandidatesInput`
+   * の doc コメント、observation.ts 参照）。`reextract` も同じ理由でこの引数を使わない。
+   */
   async function runExtraction(
     ctx: Ctx,
     observation: Observation,
+    subjectCandidates?: readonly string[],
   ): Promise<{
     memoryIds: MemoryId[];
     outcome: ExtractionOutcome;
     failure: ExtractionFailure | null;
+    rejectedSubjectIds: string[];
   }> {
-    const { candidates, usedWholeObservationFallback, failure } = await extractCandidates(
-      deps.llmProvider,
-      ctx,
-      observation,
-    );
+    const {
+      candidates,
+      usedWholeObservationFallback,
+      failure,
+      rejectedSubjectIds: rawRejectedSubjectIds,
+    } = await extractCandidates(deps.llmProvider, ctx, observation, subjectCandidates);
+    // `ExtractCandidatesResult.rejectedSubjectIds` は型としては optional
+    // （`docs/decisions/0178-public-api-surface-gate.md` 対応。extraction.ts の doc
+    // コメント参照）だが、`extractCandidates` の両方の経路が必ず値を埋めるため、
+    // 実際には常に配列——ここでの `?? []` は型を合わせるためだけの防御。
+    const rejectedSubjectIds = rawRejectedSubjectIds ?? [];
     const outcome: ExtractionOutcome = usedWholeObservationFallback
       ? "llm_failed_whole_observation"
       : "ok";
     if (candidates.length === 0) {
-      return { memoryIds: [], outcome, failure };
+      return { memoryIds: [], outcome, failure, rejectedSubjectIds };
     }
     const { memoryIds } = await createMemoriesFromCandidates(
       ctx,
@@ -2465,7 +2504,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       outcome,
       failure,
     );
-    return { memoryIds, outcome, failure };
+    return { memoryIds, outcome, failure, rejectedSubjectIds };
   }
 
   /**
@@ -2769,7 +2808,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     // extract: 'sync' — その場で抽出する（docs/architecture.md §3.2）。
-    const { memoryIds, outcome, failure } = await runExtraction(ctx, observation);
+    // Issue #608 項目②(b): `input.subjectCandidates` はここでだけ使う——deferred 側
+    // （上の早期 return・`processExtractJob`）には渡らない。`observe()` が deferred と
+    // 同時に渡された組み合わせを先に弾いているため、ここに来る時点で
+    // `extractMode === 'sync'` であることは保証済み。
+    const { memoryIds, outcome, failure, rejectedSubjectIds } = await runExtraction(
+      ctx,
+      observation,
+      input.subjectCandidates,
+    );
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
       // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
@@ -2782,6 +2829,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       memoryIds,
       extraction: outcome,
       extractionFailure: failure,
+      // Issue #608 項目②(b): `subjectCandidates` を渡した呼び出しだけ、この欄を持たせる
+      // （ObserveResult.rejectedSubjectIds の doc コメント参照。空配列＝渡していないと
+      // 同じ規約、observation.ts の `SubjectCandidatesInput` 参照）。
+      ...(input.subjectCandidates !== undefined && input.subjectCandidates.length > 0
+        ? { rejectedSubjectIds }
+        : {}),
     };
   }
 
@@ -2789,6 +2842,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const parsed = ObserveInputSchema.parse(input);
     if (parsed.kind === "memory_usage") {
       return handleMemoryUsage(ctx, parsed);
+    }
+    // Issue #608 項目②(b): `extract: 'deferred'` と `subjectCandidates` の組み合わせは
+    // 検証の段（DB へ何も書く前）で明示的に落とす——`subjectCandidates` はどこにも
+    // 永続化されないため、deferred 側の実行時（`processExtractJob`）はこの一覧を
+    // 構造的に見られない。「渡されたのに黙って落とす」と、呼び出し側は候補一覧が
+    // 効いたと思い込む（`SubjectCandidatesInput` の doc コメント、observation.ts 参照）。
+    const extractMode = parsed.extract ?? "sync";
+    if (
+      extractMode === "deferred" &&
+      parsed.subjectCandidates !== undefined &&
+      parsed.subjectCandidates.length > 0
+    ) {
+      throw new Error(
+        SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX +
+          "pass extract: 'sync' (or omit extract), or drop subjectCandidates",
+      );
     }
     return handleExtractableObservation(ctx, parsed);
   }

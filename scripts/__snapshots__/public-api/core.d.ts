@@ -311,7 +311,7 @@ export declare const ExtractionResultSchema: z.ZodObject<{
     }, z.core.$strip>>;
 }, z.core.$strip>;
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
-export declare function buildExtractionPrompt(observation: Observation): PromptSpec;
+export declare function buildExtractionPrompt(observation: Observation, subjectCandidates?: readonly string[]): PromptSpec;
 export declare function truncateForFallbackDigest(content: string, maxLength: number): string;
 export interface ResolvedDigest {
     digest: string;
@@ -328,8 +328,13 @@ export interface ExtractCandidatesResult {
     candidates: ExtractedMemoryCandidate[];
     usedWholeObservationFallback: boolean;
     failure: ExtractionFailure | null;
+    rejectedSubjectIds?: string[];
 }
-export declare function extractCandidates(llmProvider: LLMProvider, ctx: Ctx, observation: Observation): Promise<ExtractCandidatesResult>;
+export declare function sanitizeCandidateSubjectId(subjectId: string | null | undefined, allowedSubjectCandidates: readonly string[] | undefined): {
+    subjectId: string | null | undefined;
+    rejected: boolean;
+};
+export declare function extractCandidates(llmProvider: LLMProvider, ctx: Ctx, observation: Observation, subjectCandidates?: readonly string[]): Promise<ExtractCandidatesResult>;
 export interface BuildNewMemoryParams {
     ctx: Ctx;
     observation: Observation;
@@ -1054,7 +1059,9 @@ export declare const ExtractModeSchema: z.ZodEnum<{
     sync: "sync";
     deferred: "deferred";
 }>;
+export declare const SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX = "runtime.observe: subjectCandidates is not supported with extract: 'deferred' (subjectCandidates is never persisted, so deferred extraction cannot see it): ";
 export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "document";
+export type SubjectCandidatesInput = string[];
 export interface ObserveUtteranceInput {
     kind: "utterance";
     subjectId?: string;
@@ -1063,6 +1070,7 @@ export interface ObserveUtteranceInput {
     validFrom?: Date;
     validUntil?: Date;
     extract?: ExtractMode;
+    subjectCandidates?: SubjectCandidatesInput;
     speaker?: string;
     text: string;
 }
@@ -1074,6 +1082,7 @@ export interface ObserveEventInput {
     validFrom?: Date;
     validUntil?: Date;
     extract?: ExtractMode;
+    subjectCandidates?: SubjectCandidatesInput;
     name: string;
     data?: Record<string, unknown>;
 }
@@ -1085,6 +1094,7 @@ export interface ObserveDocumentInput {
     validFrom?: Date;
     validUntil?: Date;
     extract?: ExtractMode;
+    subjectCandidates?: SubjectCandidatesInput;
     title?: string;
     content: string;
 }
@@ -1106,6 +1116,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             sync: "sync";
             deferred: "deferred";
         }>>;
+        subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
     }, z.core.$strip>,
@@ -1120,6 +1131,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             sync: "sync";
             deferred: "deferred";
         }>>;
+        subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     }, z.core.$strip>,
@@ -1134,6 +1146,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             sync: "sync";
             deferred: "deferred";
         }>>;
+        subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
     }, z.core.$strip>,
@@ -2370,6 +2383,7 @@ export interface ObserveResult {
     memoryIds: MemoryId[];
     extraction: ExtractionOutcome;
     extractionFailure: ExtractionFailure | null;
+    rejectedSubjectIds?: string[];
 }
 export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_attempted";
 export interface ReextractResult {

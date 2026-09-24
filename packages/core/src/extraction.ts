@@ -80,13 +80,53 @@ function observationSpeaker(observation: Observation): string | undefined {
   return undefined;
 }
 
+/**
+ * 抽出プロンプトの system 文面の基底部分。**この定数の文字列は Issue #608 項目②(b) の
+ * 前後で1バイトも変えていない**——`buildExtractionPrompt` は `subjectCandidates` が
+ * 渡されなかった（省略・空配列）呼び出しでは、この文字列をそのまま返す。カセット
+ * （ADR 0051）の照合鍵 `llmCassetteKey` は `PromptSpec`（`system` + `messages`）だけで
+ * 決まるため、既存の呼び出し（`subjectCandidates` を渡さない全ての録音済みシナリオ）の
+ * 鍵はこの変更で動かない（Issue #370/#371 への配慮。ADR 0271 前提1と同じ実測手順で
+ * 確かめている——本 PR の ADR 参照）。
+ */
+const EXTRACTION_PROMPT_SYSTEM_BASE =
+  "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。" +
+  "本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は " +
+  "'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。";
+
+/**
+ * Issue #608 項目②(b): 候補一覧が渡されたときだけ、system 文面へ足す指示。
+ *
+ * ADR 0271「引き受けた負債1」の申し送り——「②を実装する側は、プロンプトが
+ * 『主題が無いなら明示的に `null` を返せ』と指示する形にする必要がある」——を
+ * そのまま実装する。**候補一覧を書く（表記ゆれを止める、Issue 本文の目的）**のと、
+ * **`null` を明示させる（①の `null`/`undefined` の線引きを実地で踏ませる）**のと、
+ * 両方を1つの指示にまとめる。
+ */
+function buildSubjectCandidateInstruction(subjectCandidates: readonly string[]): string {
+  return (
+    `この観測には主題（subjectId）の候補一覧が渡されています: ${subjectCandidates.join(", ")}。` +
+    "各記憶候補の subjectId には、この一覧の中から最も当てはまるものを1つだけ設定してください。" +
+    "一覧のどれにも当てはまらない場合、またはその記憶が主題を持たない場合は、" +
+    "その候補の subjectId に明示的に null を設定してください（省略しないでください）。"
+  );
+}
+
 /** `completeStructured` へ渡すプロンプト。文面はこの PR の裁量であり、契約はスキーマ側にある。 */
-export function buildExtractionPrompt(observation: Observation): PromptSpec {
+export function buildExtractionPrompt(
+  observation: Observation,
+  subjectCandidates?: readonly string[],
+): PromptSpec {
+  // Issue #608 項目②(b): 空配列は「渡していない」と同じ——`SubjectCandidatesInput` の
+  // doc コメント（observation.ts）参照。ここで弾かないと、空配列を渡しただけで
+  // `EXTRACTION_PROMPT_SYSTEM_BASE` と1バイトも違わない文面のはずが、空の一覧文言
+  // （`候補一覧が渡されています: `）を余計に足してしまう。
+  const hasCandidates = subjectCandidates !== undefined && subjectCandidates.length > 0;
+  const system = hasCandidates
+    ? `${EXTRACTION_PROMPT_SYSTEM_BASE} ${buildSubjectCandidateInstruction(subjectCandidates)}`
+    : EXTRACTION_PROMPT_SYSTEM_BASE;
   return {
-    system:
-      "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。" +
-      "本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は " +
-      "'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。",
+    system,
     messages: [
       {
         role: "user",
@@ -200,6 +240,82 @@ export interface ExtractCandidatesResult {
    * 失敗経路（`usedWholeObservationFallback: true`）は必ず非 `null`。
    */
   failure: ExtractionFailure | null;
+  /**
+   * Issue #608 項目②(b): `subjectCandidates` が渡されたとき、LLM が返した `subjectId` の
+   * うち**一覧に無かった文字列**（弾く前の値、弾いた順）。`sanitizeCandidateSubjectId` が
+   * 弾いた候補は `candidates` の該当要素の `subjectId` から既に取り除かれている（`undefined`
+   * ＝未指定へ戻り、`buildNewMemoryFromCandidate` が observation の値へフォールバックする）
+   * ——**この欄は「黙って戻さない」ための記録専用**であり、`candidates` の中身には影響しない。
+   *
+   * **本ファイル内の2箇所（成功経路・失敗経路）は、この PR で両方とも必ず値を埋める**
+   * ため、実際に `undefined` になることは無い（渡さなかった・空配列だった・何も弾かれ
+   * なかった、いずれも `[]`）。⚠ **型としては optional にする**——`docs/decisions/
+   * 0178-public-api-surface-gate.md` が「新しい任意プロパティの追加」だけを semver 的に
+   * 安全と定めているため、既存の型（`ExtractCandidatesResult`）に**必須**プロパティを
+   * 足すと、この型を自前で実装している外部コード（`extractCandidates` を模す独自の
+   * テストダブル等）がコンパイルできなくなる可能性がある。ADR 0271 が
+   * `ExtractedMemoryCandidateSchema.subjectId` を同じ理由で optional にしたのと同じ判断。
+   */
+  rejectedSubjectIds?: string[];
+}
+
+/**
+ * Issue #608 項目②(b): LLM が返した1候補の `subjectId` を、呼び出し側が渡した
+ * `subjectCandidates` に照らして検証する。
+ *
+ * - `subjectId` が `undefined`（省略）または `null`（明示的な「主題なし」）なら、
+ *   一覧の有無に関わらず常に有効——`null` は「一覧のどれか」ではなく「主題を持たない」
+ *   という別の値であり、一覧に含まれている必要が無い。
+ * - `allowedSubjectCandidates` が `undefined` または空配列なら、検証しようがないので
+ *   常に有効（`SubjectCandidatesInput` の「空配列＝渡していないと同じ」規約、
+ *   observation.ts 参照）。**この分岐により `reextract`（候補一覧を持たない）や
+ *   ①だけの既存呼び出しは、この関数を通しても1バイトも挙動が変わらない。**
+ * - それ以外（一覧が渡されていて、`subjectId` が非 null 文字列）は、一覧に含まれるかを
+ *   検査する。含まれていれば有効。**含まれていなければ弾き、`undefined`（未指定）を返す**
+ *   ——①の「省略」経路と同じ着地点で、`buildNewMemoryFromCandidate` が
+ *   `observation.subjectId` へフォールバックする。
+ */
+export function sanitizeCandidateSubjectId(
+  subjectId: string | null | undefined,
+  allowedSubjectCandidates: readonly string[] | undefined,
+): { subjectId: string | null | undefined; rejected: boolean } {
+  if (subjectId === undefined || subjectId === null) {
+    return { subjectId, rejected: false };
+  }
+  if (allowedSubjectCandidates === undefined || allowedSubjectCandidates.length === 0) {
+    return { subjectId, rejected: false };
+  }
+  if (allowedSubjectCandidates.includes(subjectId)) {
+    return { subjectId, rejected: false };
+  }
+  return { subjectId: undefined, rejected: true };
+}
+
+/**
+ * `extractCandidates` の成功経路が返す前に、LLM の生の応答（`result.memories`）へ
+ * `sanitizeCandidateSubjectId` を適用する（Issue #608 項目②(b)）。
+ *
+ * `usedWholeObservationFallback: true`（LLM 呼び出し自体が失敗し、
+ * `fallbackWholeObservationCandidate` を使う経路）はここを通らない——安全弁で作る
+ * 候補は `subjectId` を持たない（`fallbackWholeObservationCandidate` 参照）ため、
+ * 検証する対象が無い。
+ */
+function sanitizeExtractionCandidates(
+  candidates: ExtractedMemoryCandidate[],
+  subjectCandidates: readonly string[] | undefined,
+): { candidates: ExtractedMemoryCandidate[]; rejectedSubjectIds: string[] } {
+  const rejectedSubjectIds: string[] = [];
+  const sanitized = candidates.map((candidate) => {
+    const result = sanitizeCandidateSubjectId(candidate.subjectId, subjectCandidates);
+    if (!result.rejected) {
+      return candidate;
+    }
+    // `candidate.subjectId` はここでは非 null 文字列であることが確定している
+    // （`sanitizeCandidateSubjectId` が `rejected: true` を返すのはその場合だけ）。
+    rejectedSubjectIds.push(candidate.subjectId as string);
+    return { ...candidate, subjectId: result.subjectId };
+  });
+  return { candidates: sanitized, rejectedSubjectIds };
 }
 
 /**
@@ -209,23 +325,35 @@ export interface ExtractCandidatesResult {
  * 正常な抽出結果であり、これを「失敗」として無理に1件作ると、北極星の物差し（毎回渡す量を
  * 減らす方向に働くか）に反するゴミ記憶を増やす。フォールバックの対象はあくまで
  * **LLM 呼び出し自体が失敗した場合**（ネットワークエラー・タイムアウト・スキーマ不整合等）。
+ *
+ * `subjectCandidates`（Issue #608 項目②(b)）を渡すと、`buildExtractionPrompt` の文面に
+ * 候補一覧と null の指示が足され、LLM の応答は `sanitizeExtractionCandidates` で検証
+ * された後に返る。省略・空配列なら、プロンプトも検証も従来どおり（1バイトも変わらない）。
  */
 export async function extractCandidates(
   llmProvider: LLMProvider,
   ctx: Ctx,
   observation: Observation,
+  subjectCandidates?: readonly string[],
 ): Promise<ExtractCandidatesResult> {
   try {
     const result = await llmProvider.completeStructured(ctx, {
-      prompt: buildExtractionPrompt(observation),
+      prompt: buildExtractionPrompt(observation, subjectCandidates),
       schema: ExtractionResultSchema,
     });
-    return { candidates: result.memories, usedWholeObservationFallback: false, failure: null };
+    const sanitized = sanitizeExtractionCandidates(result.memories, subjectCandidates);
+    return {
+      candidates: sanitized.candidates,
+      usedWholeObservationFallback: false,
+      failure: null,
+      rejectedSubjectIds: sanitized.rejectedSubjectIds,
+    };
   } catch (error) {
     return {
       candidates: [fallbackWholeObservationCandidate(observation)],
       usedWholeObservationFallback: true,
       failure: describeExtractionFailure(error),
+      rejectedSubjectIds: [],
     };
   }
 }
