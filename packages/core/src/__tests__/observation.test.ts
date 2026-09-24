@@ -112,6 +112,57 @@ describe("ObserveInputSchema — 各 kind ごとに 1 本ずつ", () => {
   });
 });
 
+/**
+ * Issue #608 項目②(b): `subjectCandidates` はスキーマの時点では素通しする
+ * （空配列の意味づけ・deferred との組み合わせの検証は `runtime.observe` 側の責務。
+ * `runtime.test.ts`「observe: subjectCandidates（Issue #608 項目②(b)）」参照）。
+ */
+describe("ObserveInputSchema — subjectCandidates（Issue #608 項目②(b)）", () => {
+  it("utterance / event / document のいずれでも省略できる（既定は undefined）", () => {
+    for (const input of [
+      { kind: "utterance", text: "hi" },
+      { kind: "event", name: "signed_up" },
+      { kind: "document", content: "本文" },
+    ] as const) {
+      const result = ObserveInputSchema.safeParse(input);
+      expect(result.success).toBe(true);
+      if (result.success && result.data.kind !== "memory_usage") {
+        expect(result.data.subjectCandidates).toBeUndefined();
+      }
+    }
+  });
+
+  it("空配列を受け付ける", () => {
+    const result = ObserveInputSchema.safeParse({
+      kind: "utterance",
+      text: "hi",
+      subjectCandidates: [],
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("非空の候補一覧を受け付ける", () => {
+    const result = ObserveInputSchema.safeParse({
+      kind: "utterance",
+      text: "hi",
+      subjectCandidates: ["user:a", "user:b"],
+    });
+    expect(result.success).toBe(true);
+    if (result.success && result.data.kind === "utterance") {
+      expect(result.data.subjectCandidates).toEqual(["user:a", "user:b"]);
+    }
+  });
+
+  it("空文字の候補は、他の subject 系文字列欄と同じ min(1) 規約で弾く", () => {
+    const result = ObserveInputSchema.safeParse({
+      kind: "utterance",
+      text: "hi",
+      subjectCandidates: [""],
+    });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("observeInputKindToObservationKind — 4つの分岐すべて", () => {
   it("'utterance' -> 'utterance'", () => {
     expect(observeInputKindToObservationKind("utterance")).toBe("utterance");

@@ -72,6 +72,20 @@ export type ExtractMode = "sync" | "deferred";
 
 export const ExtractModeSchema = z.enum(["sync", "deferred"]) satisfies z.ZodType<ExtractMode>;
 
+/**
+ * `runtime.observe` が投げるエラーの接頭辞（Issue #608 項目②(b)）。
+ *
+ * `extract: 'deferred'` と `subjectCandidates`（{@link SubjectCandidatesInput}、下記）は
+ * 同時に渡せない——deferred 抽出は `outbox` 経由で `Observation` を経由してから後で
+ * 実行されるが、`subjectCandidates` はどこにも永続化されない（`SubjectCandidatesInput`
+ * の doc コメント参照）ため、deferred 側は渡された候補一覧を**構造的に見られない**。
+ * 「渡されたのに黙って落とす」と、呼び出し側は候補一覧が効いたと思い込むので、
+ * 検証の段（`runtime.observe`、DB へ何も書く前）で明示的に例外にする——
+ * `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`（recall.ts）と同じ「黙って無視しない」規律。
+ */
+export const SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX =
+  "runtime.observe: subjectCandidates is not supported with extract: 'deferred' (subjectCandidates is never persisted, so deferred extraction cannot see it): ";
+
 /** `observe()` の入力ユニオンの判別子（DB 上は `kind = 'usage'` に対応する点に注意）。 */
 export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "document";
 
@@ -86,6 +100,39 @@ export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "documen
  * から複数の Memory 候補が抽出されると、**全候補が同じ `validFrom`/`validUntil` を
  * 共有する**——`occurredAt` が既に抱えている限界と同型（ADR 0037 が受け入れ済み）。
  */
+/**
+ * Issue #608 項目②(b): 呼び出し側が既存の subject 台帳から候補一覧を渡し、抽出器（LLM）に
+ * その中から選ばせる口。**mnemora は subject の台帳を持たない**（`ctx.ts` 冒頭のコメント、
+ * `docs/architecture.md` §3.7）ので、台帳そのものは呼び出し側が持ち、ここには「今回の
+ * observe() に関係しそうな候補」だけを渡す。
+ *
+ * - **渡す（`subjectCandidates: [...]`、要素は1件以上）**: `buildExtractionPrompt`
+ *   （extraction.ts）が候補一覧と「候補の中から選べ。無ければ `subjectId: null` を
+ *   明示せよ」という指示をプロンプトへ足す。抽出後、runtime は各候補の `subjectId` が
+ *   この一覧に含まれるかを検証する（`null` は一覧に無くても常に有効——「主題なし」は
+ *   「一覧のどれか」とは別の値であるため）。一覧に無い文字列が返ってきたら、runtime は
+ *   その値を弾き、`undefined`（未指定）へ戻す——① (ADR 0271) の「省略」経路と同じ
+ *   着地点で、observation の `subjectId` へフォールバックする。
+ * - **渡さない（省略・`undefined`）**: 従来どおり。`buildExtractionPrompt` の文面は
+ *   1バイトも変わらない（カセットの鍵が動かない、Issue #370/#371 への配慮）。
+ * - **空配列（`[]`）**: **「渡していない」と同じ**に扱う——検証しようのない空の一覧を
+ *   渡された runtime が「一覧外は全部弾く」という極端な挙動（＝LLM が返す `subjectId` を
+ *   常に無効化する）に倒れるのを避けるため。プロンプトも変えず、検証もしない
+ *   （`extraction.ts` の `sanitizeCandidateSubjectId` 参照）。
+ *
+ * ⚠ **`reextract` はこの欄を使わない。**`Observation`（上記）にも `observations` テーブルにも
+ * 持たせていない——`extractObservationPayload`（runtime.ts）は種類ごとに固定欄だけを
+ * ペイロードへ書き出しており、`subjectCandidates` はそこに無い。`reextract` は
+ * `MemoryStore.getObservation` で**DB から読み直した** `Observation` しか持たないため、
+ * 元の `ObserveXxxInput.subjectCandidates` はとうに失われている。⟹ 新しい DB 列や
+ * マイグレーションを増やさずに済ませるための、意図的な非対称である。
+ *
+ * ⛔ **`extract: 'deferred'` と同時に渡すとエラーになる**（`runtime.observe` が検証段で
+ * 投げる。`SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX` 参照）。deferred 抽出は
+ * `Observation` を経由するため、この欄を「渡されたのに黙って落とす」ことは行わない。
+ */
+export type SubjectCandidatesInput = string[];
+
 export interface ObserveUtteranceInput {
   kind: "utterance";
   subjectId?: string;
@@ -94,6 +141,8 @@ export interface ObserveUtteranceInput {
   validFrom?: Date;
   validUntil?: Date;
   extract?: ExtractMode;
+  /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
+  subjectCandidates?: SubjectCandidatesInput;
   speaker?: string;
   text: string;
 }
@@ -106,6 +155,8 @@ export interface ObserveEventInput {
   validFrom?: Date;
   validUntil?: Date;
   extract?: ExtractMode;
+  /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
+  subjectCandidates?: SubjectCandidatesInput;
   name: string;
   data?: Record<string, unknown>;
 }
@@ -118,6 +169,8 @@ export interface ObserveDocumentInput {
   validFrom?: Date;
   validUntil?: Date;
   extract?: ExtractMode;
+  /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
+  subjectCandidates?: SubjectCandidatesInput;
   title?: string;
   content: string;
 }
@@ -136,6 +189,14 @@ export interface ObserveMemoryUsageInput {
 export type ObserveInput =
   ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput | ObserveMemoryUsageInput;
 
+/**
+ * {@link SubjectCandidatesInput} の zod 表現。要素は `z.string().min(1)`——空文字は
+ * 候補として無意味（`subjectId`/`Memory.subjectId` 等、他の subject 系文字列欄と
+ * 同じ `min(1)` の規約）。配列自体は空でもよい（doc コメントの「空配列」節参照——
+ * 空配列は「渡していない」と同じに扱われる。zod の時点では弾かない）。
+ */
+const SubjectCandidatesInputSchema = z.array(z.string().min(1)).optional();
+
 const ObserveUtteranceInputSchema = z.object({
   kind: z.literal("utterance"),
   subjectId: z.string().min(1).optional(),
@@ -144,6 +205,7 @@ const ObserveUtteranceInputSchema = z.object({
   validFrom: z.date().optional(),
   validUntil: z.date().optional(),
   extract: ExtractModeSchema.optional(),
+  subjectCandidates: SubjectCandidatesInputSchema,
   speaker: z.string().min(1).optional(),
   text: z.string().min(1),
 }) satisfies z.ZodType<ObserveUtteranceInput>;
@@ -156,6 +218,7 @@ const ObserveEventInputSchema = z.object({
   validFrom: z.date().optional(),
   validUntil: z.date().optional(),
   extract: ExtractModeSchema.optional(),
+  subjectCandidates: SubjectCandidatesInputSchema,
   name: z.string().min(1),
   data: z.record(z.string(), z.unknown()).optional(),
 }) satisfies z.ZodType<ObserveEventInput>;
@@ -168,6 +231,7 @@ const ObserveDocumentInputSchema = z.object({
   validFrom: z.date().optional(),
   validUntil: z.date().optional(),
   extract: ExtractModeSchema.optional(),
+  subjectCandidates: SubjectCandidatesInputSchema,
   title: z.string().min(1).optional(),
   content: z.string().min(1),
 }) satisfies z.ZodType<ObserveDocumentInput>;

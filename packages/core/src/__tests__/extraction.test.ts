@@ -1,16 +1,36 @@
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import {
+  buildExtractionPrompt,
   buildNewMemoryFromCandidate,
   describeExtractionFailure,
   extractCandidates,
   resolveDigest,
+  sanitizeCandidateSubjectId,
   truncateForFallbackDigest,
   type ExtractedMemoryCandidate,
 } from "../extraction.js";
 import { z } from "zod";
-import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
+import type { LLMProvider, PromptSpec, StructuredRequest } from "../interfaces/llm-provider.js";
 import type { Observation } from "../observation.js";
+
+/**
+ * `llmCassetteKey`（`packages/testkit/src/__fixtures__/cassette.ts`）と同じ
+ * 正規化・ハッシュ手順のローカル再実装。**core は testkit に devDependency を持てない**
+ * （`dependency-boundary.test.ts` が「dependencies のキーは ['zod'] のみ」と機械的に
+ * 検査しており、`testkit` は `core` に依存する側なので循環になる）ため、ここでは
+ * `node:crypto` だけで同じ手順を再現し、「`PromptSpec` が1バイトも変わらなければ
+ * 鍵も変わらない」ことを、鍵そのものの計算で確かめる（Issue #608 項目②(b)、
+ * ADR 0271 前提1と同じ検証手順）。
+ */
+function llmCassetteKeyLocal(prompt: PromptSpec): string {
+  const canonical = JSON.stringify({
+    system: prompt.system ?? null,
+    messages: prompt.messages.map((m) => ({ role: m.role, content: m.content })),
+  });
+  return createHash("sha256").update(canonical).digest("hex");
+}
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 
@@ -347,5 +367,188 @@ describe("describeExtractionFailure", () => {
     const result = describeExtractionFailure({ someField: "value" });
     expect(result.kind).toBeNull();
     expect(result.message).toBe(String({ someField: "value" }));
+  });
+});
+
+/**
+ * Issue #608 項目②(b): 呼び出し側が subject の候補一覧を渡し、抽出器（LLM）に選ばせる口。
+ * `buildExtractionPrompt` の文面がどう変わるか／変わらないかを固定する
+ * （ADR 0NNN 変異試験1・2 に対応）。
+ */
+describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
+  const BASE_SYSTEM =
+    "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。" +
+    "本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は " +
+    "'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。";
+
+  it("subjectCandidates を渡さなければ、PromptSpec は①以前の文面と1バイトも違わない", () => {
+    const observation = makeObservation();
+    const prompt = buildExtractionPrompt(observation);
+    expect(prompt).toEqual({
+      system: BASE_SYSTEM,
+      messages: [{ role: "user", content: "明日は東京に出張する予定です" }],
+    });
+  });
+
+  it("subjectCandidates: undefined と省略は、同じ PromptSpec になる", () => {
+    const observation = makeObservation();
+    expect(buildExtractionPrompt(observation, undefined)).toEqual(
+      buildExtractionPrompt(observation),
+    );
+  });
+
+  it("subjectCandidates: [] （空配列）は『渡していない』と同じ PromptSpec になる", () => {
+    const observation = makeObservation();
+    expect(buildExtractionPrompt(observation, [])).toEqual(buildExtractionPrompt(observation));
+  });
+
+  it("subjectCandidates 省略時の鍵（llmCassetteKey 相当）は固定値のまま動かない", () => {
+    const observation = makeObservation();
+    const key = llmCassetteKeyLocal(buildExtractionPrompt(observation));
+    // 2026-09-24、subjectCandidates を足す前の文面から計算した鍵をそのまま固定する。
+    // この値が変わったら、既存の録音済みカセット（examples/chat/cassettes/*.json）の
+    // 照合鍵と食い違う——このテストが赤くなれば、それが実際に壊れた合図になる。
+    expect(key).toBe("7f158f7ed09fdfd049d8b833e53e8a2c8d550edf8c621bb20d5b99039c1e02f6");
+  });
+
+  it("subjectCandidates を渡すと、候補一覧と null の指示の両方が system に足される", () => {
+    const observation = makeObservation();
+    const prompt = buildExtractionPrompt(observation, ["user:a", "user:b"]);
+    // ベースの文面はそのまま残る（先頭に含まれる）——足すだけで、削ったり書き換えたり
+    // しないことを固定する。
+    expect(prompt.system?.startsWith(BASE_SYSTEM)).toBe(true);
+    expect(prompt.system).toContain("user:a");
+    expect(prompt.system).toContain("user:b");
+    // ADR 0271「引き受けた負債1」の申し送り: 一覧に無い・主題が無いなら null を明示させる。
+    expect(prompt.system).toContain("null");
+    // messages（ユーザー発話本文）は候補一覧の影響を受けない。
+    expect(prompt.messages).toEqual([{ role: "user", content: "明日は東京に出張する予定です" }]);
+  });
+
+  it("subjectCandidates を渡すと、鍵（llmCassetteKey 相当）は渡さない場合と異なる", () => {
+    const observation = makeObservation();
+    const withoutCandidates = llmCassetteKeyLocal(buildExtractionPrompt(observation));
+    const withCandidates = llmCassetteKeyLocal(buildExtractionPrompt(observation, ["user:a"]));
+    expect(withCandidates).not.toBe(withoutCandidates);
+  });
+});
+
+describe("sanitizeCandidateSubjectId（Issue #608 項目②(b)）", () => {
+  it("一覧に含まれる文字列は、そのまま有効", () => {
+    expect(sanitizeCandidateSubjectId("user:a", ["user:a", "user:b"])).toEqual({
+      subjectId: "user:a",
+      rejected: false,
+    });
+  });
+
+  it("一覧に無い文字列は弾かれ、undefined（未指定）へ戻る", () => {
+    expect(sanitizeCandidateSubjectId("user:c", ["user:a", "user:b"])).toEqual({
+      subjectId: undefined,
+      rejected: true,
+    });
+  });
+
+  it("null は一覧に無くても常に有効（『主題なし』は一覧の値とは別のもの）", () => {
+    expect(sanitizeCandidateSubjectId(null, ["user:a"])).toEqual({
+      subjectId: null,
+      rejected: false,
+    });
+    expect(sanitizeCandidateSubjectId(null, [])).toEqual({ subjectId: null, rejected: false });
+    expect(sanitizeCandidateSubjectId(null, undefined)).toEqual({
+      subjectId: null,
+      rejected: false,
+    });
+  });
+
+  it("undefined（省略）は一覧の有無に関わらず常に有効", () => {
+    expect(sanitizeCandidateSubjectId(undefined, ["user:a"])).toEqual({
+      subjectId: undefined,
+      rejected: false,
+    });
+  });
+
+  it("一覧が undefined なら、どんな文字列も検証せず素通しする（① だけの既存呼び出しと同じ）", () => {
+    expect(sanitizeCandidateSubjectId("user:anything", undefined)).toEqual({
+      subjectId: "user:anything",
+      rejected: false,
+    });
+  });
+
+  it("一覧が空配列なら、『渡していない』と同じで素通しする", () => {
+    expect(sanitizeCandidateSubjectId("user:anything", [])).toEqual({
+      subjectId: "user:anything",
+      rejected: false,
+    });
+  });
+});
+
+describe("extractCandidates × subjectCandidates（Issue #608 項目②(b)）", () => {
+  it("一覧内の subjectId はそのまま候補に残る", async () => {
+    const provider = llmProviderReturning([
+      { content: "Aさんは面白いと思った", provenanceKind: "stated", subjectId: "user:a" },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation(), ["user:a", "user:b"]);
+    expect(result.candidates[0]?.subjectId).toBe("user:a");
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it("一覧外の subjectId は弾かれ、未指定（undefined）になる。弾いた値は rejectedSubjectIds に残る", async () => {
+    const provider = llmProviderReturning([
+      { content: "Cさんは...", provenanceKind: "stated", subjectId: "user:c" },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation(), ["user:a", "user:b"]);
+    expect(result.candidates[0]?.subjectId).toBeUndefined();
+    expect(result.rejectedSubjectIds).toEqual(["user:c"]);
+  });
+
+  it("null（主題なし）は一覧外でも弾かれない", async () => {
+    const provider = llmProviderReturning([
+      { content: "主題なしの記憶", provenanceKind: "stated", subjectId: null },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation(), ["user:a"]);
+    expect(result.candidates[0]?.subjectId).toBeNull();
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it("subjectCandidates を渡さなければ、①の挙動（検証なし）のまま", async () => {
+    const provider = llmProviderReturning([
+      { content: "任意の主題", provenanceKind: "stated", subjectId: "anything-goes" },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation());
+    expect(result.candidates[0]?.subjectId).toBe("anything-goes");
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it("空配列を渡した場合も、①の挙動（検証なし）のまま", async () => {
+    const provider = llmProviderReturning([
+      { content: "任意の主題", provenanceKind: "stated", subjectId: "anything-goes" },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation(), []);
+    expect(result.candidates[0]?.subjectId).toBe("anything-goes");
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it("複数候補が混在しても、候補ごとに独立して検証される", async () => {
+    const provider = llmProviderReturning([
+      { content: "Aさん", provenanceKind: "stated", subjectId: "user:a" },
+      { content: "一覧外", provenanceKind: "stated", subjectId: "user:z" },
+      { content: "主題なし", provenanceKind: "stated", subjectId: null },
+      { content: "省略", provenanceKind: "stated" },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation(), ["user:a"]);
+    expect(result.candidates.map((c) => c.subjectId)).toEqual([
+      "user:a",
+      undefined,
+      null,
+      undefined,
+    ]);
+    expect(result.rejectedSubjectIds).toEqual(["user:z"]);
+  });
+
+  it("LLM 呼び出しが失敗した場合（全文フォールバック）は、rejectedSubjectIds は空配列", async () => {
+    const provider = throwingLlmProvider();
+    const result = await extractCandidates(provider, ctx, makeObservation(), ["user:a"]);
+    expect(result.usedWholeObservationFallback).toBe(true);
+    expect(result.rejectedSubjectIds).toEqual([]);
   });
 });

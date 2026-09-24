@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
 import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
+import { SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX } from "../observation.js";
 import {
   TICK_SUPPORTED_JOB_KINDS,
   UNSUPPORTED_KIND_ERROR_PREFIX,
@@ -2117,5 +2118,196 @@ describe("observe: 抽出候補ごとに subjectId を持てる（Issue #608 項
       null,
       "user:conversation-default",
     ]);
+  });
+});
+
+/**
+ * Issue #608 項目②(b): 呼び出し側が subject の候補一覧を渡し、抽出器に選ばせる口。
+ * `buildExtractionPrompt` の文面自体（候補一覧・null の指示が載るか）は
+ * `extraction.test.ts` が縛る——ここでは `runtime.observe` を通した配線
+ * （ObserveXxxInput.subjectCandidates → Memory.subjectId、一覧外の値の runtime 検証、
+ * deferred との組み合わせの検証エラー、reextract がこの欄を使わないこと）を縛る。
+ */
+describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
+  it("一覧内の subjectId は、そのまま Memory の subjectId になる", async () => {
+    const { runtime, stores } = buildRuntime(
+      llmReturning([{ content: "Aさんの話", provenanceKind: "stated", subjectId: "user:a" }]),
+    );
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "Aさんが話した",
+      subjectId: "user:conversation-default",
+      subjectCandidates: ["user:a", "user:b"],
+    });
+    expect(result.extraction).toBe("ok");
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    expect(memory?.subjectId).toBe("user:a");
+    // 何も弾かれていないので、rejectedSubjectIds は空配列で「渡した・0件弾いた」を示す。
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it("一覧外の subjectId は弾かれ、observation の subjectId へ戻る。弾いたことが ObserveResult から見える", async () => {
+    const { runtime, stores } = buildRuntime(
+      llmReturning([
+        { content: "一覧に無い主題の話", provenanceKind: "stated", subjectId: "user:ghost" },
+      ]),
+    );
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "誰かが話した",
+      subjectId: "user:conversation-default",
+      subjectCandidates: ["user:a", "user:b"],
+    });
+    expect(result.extraction).toBe("ok");
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    // ①の「省略」経路と同じ着地点——observation の subjectId へフォールバックする。
+    expect(memory?.subjectId).toBe("user:conversation-default");
+    // 黙って戻さない: 弾いた値が ObserveResult に残る。
+    expect(result.rejectedSubjectIds).toEqual(["user:ghost"]);
+  });
+
+  it("null（主題なし）は一覧外でも弾かれず、observation の subjectId があっても上書きする", async () => {
+    const { runtime, stores } = buildRuntime(
+      llmReturning([{ content: "主題なしの話", provenanceKind: "stated", subjectId: null }]),
+    );
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "誰かが話した",
+      subjectId: "user:conversation-default",
+      subjectCandidates: ["user:a", "user:b"],
+    });
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    expect(memory?.subjectId).toBeNull();
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it("subjectCandidates を渡さなければ ObserveResult に rejectedSubjectIds が無い（渡した場合とキーの有無で区別する）", async () => {
+    const { runtime } = buildRuntime(
+      llmReturning([{ content: "任意の主題", provenanceKind: "stated", subjectId: "anything" }]),
+    );
+    const result = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+    expect("rejectedSubjectIds" in result).toBe(false);
+  });
+
+  it("空配列（[]）を渡した場合も『渡していない』と同じ——検証されず、rejectedSubjectIds も無い", async () => {
+    const { runtime, stores } = buildRuntime(
+      llmReturning([{ content: "任意の主題", provenanceKind: "stated", subjectId: "anything" }]),
+    );
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      subjectCandidates: [],
+    });
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    expect(memory?.subjectId).toBe("anything");
+    expect("rejectedSubjectIds" in result).toBe(false);
+  });
+
+  it("extract: 'deferred' と subjectCandidates を同時に渡すとエラーになる（検証段、黙って捨てない）", async () => {
+    const { runtime } = buildRuntime(llmReturning([]));
+    await expect(
+      runtime.observe(ctx, {
+        kind: "utterance",
+        text: "発話",
+        extract: "deferred",
+        subjectCandidates: ["user:a"],
+      }),
+    ).rejects.toThrow(SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX);
+  });
+
+  it("extract: 'deferred' と空配列の subjectCandidates は、エラーにならない（空配列＝渡していないと同じ）", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      extract: "deferred",
+      subjectCandidates: [],
+    });
+    expect(result.extraction).toBe("skipped");
+    // deferred なので observation は作られるが、抽出はまだ実行されない。
+    const observation = await stores.memoryStore.getObservation(ctx, result.observationId);
+    expect(observation).not.toBeNull();
+  });
+
+  it("deferred と subjectCandidates の組み合わせエラーは、observation を書き込む前に投げる（副作用を残さない）", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    await expect(
+      runtime.observe(ctx, {
+        kind: "utterance",
+        text: "検証段で落ちるはずの発話",
+        extract: "deferred",
+        subjectCandidates: ["user:a"],
+      }),
+    ).rejects.toThrow();
+    // `runtime.observe` が投げる前に何かを書いていれば、ここに行が残ってしまう。
+    // `FakeMemoryStore` は observation を連番 id で払い出すため、1件も無いことを
+    // 「obs-1 が無い」で確かめる（この歯だけがこのテストで observe を呼んでいる）。
+    const observation = await stores.memoryStore.getObservation(ctx, "obs-1");
+    expect(observation).toBeNull();
+  });
+
+  it("event / document でも subjectCandidates が同じように効く", async () => {
+    const { runtime: eventRuntime, stores: eventStores } = buildRuntime(
+      llmReturning([{ content: "ログインした", provenanceKind: "stated", subjectId: "user:a" }]),
+    );
+    const eventResult = await eventRuntime.observe(ctx, {
+      kind: "event",
+      name: "login",
+      subjectCandidates: ["user:a"],
+    });
+    const eventMemory = await eventStores.memoryStore.get(ctx, eventResult.memoryIds[0]!);
+    expect(eventMemory?.subjectId).toBe("user:a");
+
+    const { runtime: docRuntime, stores: docStores } = buildRuntime(
+      llmReturning([{ content: "文書の要点", provenanceKind: "stated", subjectId: "user:z" }]),
+    );
+    const docResult = await docRuntime.observe(ctx, {
+      kind: "document",
+      content: "本文",
+      subjectCandidates: ["user:a"],
+    });
+    const docMemory = await docStores.memoryStore.get(ctx, docResult.memoryIds[0]!);
+    expect(docMemory?.subjectId).toBeNull(); // observation.subjectId も無いので null（①の既存の振る舞い）
+    expect(docResult.rejectedSubjectIds).toEqual(["user:z"]);
+  });
+
+  it("reextract は候補一覧を使わない（保存されていないため）——observe() 時点では弾かれたはずの値が、reextract では素通りする", async () => {
+    const { runtime, stores } = buildRuntime(
+      llmReturning([{ content: "初回の抽出", provenanceKind: "stated", subjectId: "user:a" }]),
+    );
+    const observeResult = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      subjectId: "user:conversation-default",
+      subjectCandidates: ["user:a"], // "user:ghost" はこの一覧に無い
+    });
+    expect(observeResult.extraction).toBe("ok");
+
+    // reextract 用に、別の LLM 応答（一覧外だったはずの値）を返す runtime を同じ stores で作る。
+    const reextractRuntime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: llmReturning([
+        { content: "やり直した抽出", provenanceKind: "stated", subjectId: "user:ghost" },
+      ]),
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    const reextractResult = await reextractRuntime.reextract(ctx, observeResult.observationId);
+    expect(reextractResult.extraction).toBe("ok");
+    const newMemoryId = reextractResult.memoryIds.find(
+      (id) => !observeResult.memoryIds.includes(id),
+    );
+    const newMemory = await stores.memoryStore.get(ctx, newMemoryId!);
+    // subjectCandidates は Observation にも DB にも保存されていないため、reextract は
+    // これを検証しようがなく、LLM が返した値をそのまま使う——observe() 時点なら
+    // 「一覧外」として弾かれていたはずの "user:ghost" が、ここではそのまま通る。
+    expect(newMemory?.subjectId).toBe("user:ghost");
+    // `ReextractResult` に `rejectedSubjectIds` は無い（候補一覧を扱わないため、
+    // そもそも運ぶものが無い）。
+    expect("rejectedSubjectIds" in reextractResult).toBe(false);
   });
 });

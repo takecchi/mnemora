@@ -286,6 +286,21 @@ Structured Output は次の4箇所で強く使う方針とする:
 memoryIds/observationIds）を伴う。**根拠を欠いた推論をそのまま提示しない**——原則の姿2の適用
 （詳細は [docs/memory-model.md](./memory-model.md)）。
 
+**抽出の主題（`subjectId`）は、呼び出し側から2段階で渡せる**（[Issue #608](https://github.com/takecchi/mnemora/issues/608)）:
+
+1. **候補ごとの上書き**（`ExtractedMemoryCandidate.subjectId`、[ADR 0271](./decisions/0271-extraction-candidate-subject-id-overrides-observation.md)）——
+   1回の `observe()` から複数の Memory 候補が出たとき、候補ごとに違う主題を持てる。
+2. **候補一覧を渡して選ばせる**（`ObserveUtteranceInput`/`ObserveEventInput`/
+   `ObserveDocumentInput` の任意欄 `subjectCandidates?: string[]`、
+   [ADR 0287](./decisions/0287-extraction-subject-candidates-caller-supplied.md)）——
+   渡すと `buildExtractionPrompt` が候補一覧と「一覧に無い・主題が無いなら `subjectId: null`
+   を明示せよ」という指示をプロンプトへ足す。runtime は返ってきた `subjectId` を一覧に
+   照らして検証し、一覧に無い文字列は弾いて未指定（observation の主題）へ戻す
+   （`null` は一覧に無くても常に有効）。**渡さなければ（省略・空配列）、プロンプトの
+   文面は1バイトも変わらない**——カセット（ADR 0051）の照合鍵がこの欄の有無で動くことは
+   無い。`subjectCandidates` はどこにも永続化しない（新しい列・マイグレーションは無い）ため、
+   `extract: 'deferred'` との併用はエラーにし、`reextract` はこの欄を使わない。
+
 ---
 
 ## 4. package 構成
