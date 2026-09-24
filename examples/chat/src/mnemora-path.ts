@@ -215,13 +215,38 @@ function contradictionSegment(
 }
 
 /**
- * 記録時刻欄（Issue #691 の子、Issue #702、ADR 0298）。`recordedAt` が
- * `undefined`（そもそも欄を渡さなかった呼び出し側）なら欄を出さない。値があれば
- * ミリ秒精度の ISO 8601（`Date#toISOString()`）で出す——`occurredAt`（下）とは
- * 別の名前（「記録時刻」）を使い、2つの時計を読み手に混同させない。
+ * `recall.memories` を `recordedAt` の昇順で並べ替えた順位（1始まり）を返す
+ * （Issue #691 の子、Issue #702、ADR 0298）。
+ *
+ * 🔴 **生の ISO 8601 ではなく、この順位を描画に使う。** 実 API（gpt-4o-mini）での
+ * dev 対照で、生のタイムスタンプを行末に付けると `schedule-change-meeting-day`
+ * （「金曜→水曜」の訂正が後続するケース）の正答率が 5/5 → 1/5 に落ちることを実測した
+ * ——ISO 文字列どうしの日時比較より、小さい整数の大小関係のほうがモデルに
+ * 読み取らせやすいと考えられる（数値・他の描画候補との比較は ADR 0295 の追記、
+ * PR #698 本文を参照）。
+ *
+ * `recordedAt` が `undefined`（そもそも欄を渡さなかった呼び出し側）の要素は
+ * 順位付けの対象から外す。同じ `recordedAt`（同一ミリ秒）の要素は、`all` に現れた
+ * 元の順序で安定的にタイブレークする——`Array.prototype.sort` が安定ソートである
+ * ことに依拠する（ECMA-262 の要件、Node.js の V8 実装も安定）。
  */
-function recordedAtSegment(m: RecalledMemory): string | undefined {
-  return m.recordedAt !== undefined ? `[記録時刻:${m.recordedAt.toISOString()}]` : undefined;
+function recordedOrderById(all: readonly RecalledMemory[]): ReadonlyMap<string, number> {
+  const withRecordedAt = all.filter(
+    (m): m is RecalledMemory & { recordedAt: Date } => m.recordedAt !== undefined,
+  );
+  const sorted = [...withRecordedAt].sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime());
+  const order = new Map<string, number>();
+  sorted.forEach((m, index) => order.set(m.memoryId, index + 1));
+  return order;
+}
+
+/**
+ * 記録順欄。`recordedOrderById` が順位を持たない（`recordedAt` が `undefined`）
+ * 要素には欄を出さない。
+ */
+function recordedOrderSegment(m: RecalledMemory, order: ReadonlyMap<string, number>): string | undefined {
+  const rank = order.get(m.memoryId);
+  return rank !== undefined ? `[記録順:${rank}]` : undefined;
 }
 
 /**
@@ -239,15 +264,19 @@ function occurredAtSegment(m: RecalledMemory): string | undefined {
 
 /**
  * 1件の `RecalledMemory` を1行に描画する。
- * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 記録時刻 → 出来事時刻 → digest。
+ * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 記録順 → 出来事時刻 → digest。
  */
-function renderRecalledMemoryLine(m: RecalledMemory, all: readonly RecalledMemory[]): string {
+function renderRecalledMemoryLine(
+  m: RecalledMemory,
+  all: readonly RecalledMemory[],
+  order: ReadonlyMap<string, number>,
+): string {
   const segments = [
     `[由来:${m.provenanceKind}]`,
     speakerSegment(m),
     subjectSegment(m),
     contradictionSegment(m, all),
-    recordedAtSegment(m),
+    recordedOrderSegment(m, order),
     occurredAtSegment(m),
   ].filter((s): s is string => s !== undefined);
   return `- ${segments.join(" ")} ${m.digest}`;
@@ -268,8 +297,9 @@ function renderRecalledMemoryLine(m: RecalledMemory, all: readonly RecalledMemor
  * 「`answer`」節・本変更の PR 本文を参照。
  */
 export function buildMnemoraPrompt(recall: RecallResult): string {
+  const order = recordedOrderById(recall.memories);
   const digestLines = recall.memories
-    .map((m) => renderRecalledMemoryLine(m, recall.memories))
+    .map((m) => renderRecalledMemoryLine(m, recall.memories, order))
     .join("\n");
   const indexLine = `(索引: スコープ内 ${recall.index.totalInScope} 件のうち ${recall.memories.length} 件を提示)`;
   return [digestLines, indexLine].filter((s) => s.length > 0).join("\n");
