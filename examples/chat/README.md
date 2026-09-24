@@ -367,7 +367,7 @@ B群（⛔ 訂正してはいけない——否定・曖昧・別人・別期間
 測る。** 件数は [`src/correction-case-set.eval.ts`](./src/correction-case-set.eval.ts)
 （held-out）/[`src/correction-case-set.dev.ts`](./src/correction-case-set.dev.ts)（開発用）を
 見ること——ここには焼き込まない（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」。
-ADR 0291 決定3 がこの件数を将来増やす拡張を設計済みであり、動く数だからである）。
+ADR 0291 §4 の項3 がこの件数を将来増やす拡張を設計済みであり、動く数だからである）。
 hit@k・distractor 逆転率・誤爆率・棄権率を出す。鍵・カセット不要
 （deterministic LLM + `@mnemora/local-embedding` の実推論）。
 
