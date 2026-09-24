@@ -593,9 +593,9 @@ export async function runRecall(
   // 複数チャンネルを走らせたときだけ要素が増え、各要素の detail.channel が出所を名乗る。
   // ⚠ ADR 0285 / Issue #671: `annStageTrace` に参照を残しておく。この時点では `eligible`
   // （段5の `aggregate` が要る）がまだ計算できないので detail をここで確定できない
-  // ——段5の後、既存の `ann_unreached` 判定の直後で同じオブジェクトへ1キーだけ追記する
-  // （下の `annWindowHadNoInScopeCandidates` 参照）。push する場所・順序・他のキーは
-  // 1つも変えない。
+  // ——段5の後、既存の `ann_unreached` 判定の直後で同じオブジェクトへキーを追記する
+  // （下の `annReturnedFewerThanReachable`／ADR 0285 追記参照）。push する場所・順序・
+  // 他のキーは1つも変えない。
   let annStageTrace: StageTrace | undefined;
   if (wantsAnn) {
     annStageTrace = {
@@ -1662,7 +1662,7 @@ export async function runRecall(
   // 上の `ann_unreached` は「scope 内にまだ見られていない候補が残っている」という
   // 1つの条件（`annHits.length < eligible`）で、正常時（窓は満杯だが scope の候補は
   // 一部拾えている）と全滅時（窓が他 scope の行だけで埋まり、scope 内の候補が1件も
-  // 入らなかった）の両方で同じ形で鳴る（ADR 0193 が意図的に広げた条件——ADR 0285 は
+  // 入らなかった）の両方で同じ形で鳴る（ADR 0193 が意図的に広げた条件——この節は
   // その挙動を1バイトも変えない）。⟹ 「見つからなかった」（真に0件）と「探していない」
   // （scope の候補を一度も見ていない）が、同じ `ann_unreached` の顔で返ってしまう。
   //
@@ -1670,34 +1670,90 @@ export async function runRecall(
   // §2.2 の b-1）は、Issue #541 の判断（union 拡張を破壊的変更として扱うかの線引き）に
   // 依存するため、ADR 0285 はこの PR の射程外としてオーナーへ送った（見送りであって
   // 却下ではない）。代わりに、型を変えずに済む `StageTrace.detail`（型無しの診断欄）へ
-  // 1キーだけ足し、ANN が「scope 内の候補を1件も見ていない」ことを補助的に名乗らせる。
-  // 詳細・採らなかった案・引き受けた負債は ADR 0285 参照。
+  // 1キーだけ足し、ANN が「scope 内の、実際に検索した候補を取りこぼした」ことを補助的に
+  // 名乗らせる。詳細・採らなかった案・引き受けた負債は ADR 0285（本節の追記を含む）参照。
+  //
+  // 🔴 ADR 0285 追記（本節、Issue #671 続報）: 当初の実装（`annWindowHadNoInScopeCandidates`、
+  // 条件 `eligible > 0 && annHits.length === 0`）には偽陽性があった——`eligible`
+  // （= `aggregate.totalInScope - notIndexedTotal`）は「scope 内で埋め込みがある行」の
+  // 件数だが、ANN の `search()`（`vector-store.ts`）の WHERE は**忘却ゲートも適用する**。
+  // ADR 0173 は意図的に「decayed はスコープ内に留まる」と決めており（`totalInScope` から
+  // 引かれない）、`eligible` はこのゲートを一切知らない。⟹ scope 内で埋め込みのある行が
+  // 全て decayed で、ANN が「正しく」0件を返した場合でも、`eligible > 0 &&
+  // annHits.length === 0` は真になり、"scope 内の候補を1件も見ていない" という誤った
+  // 主張をしていた（正常な忘却を「探していない」と混同する偽陽性）。
+  //
+  // **正しい分母**は「scope 内・埋め込みあり・忘却ゲートを通る行」＝ ANN が実際に
+  // 検索した母数である。この母数を `eligible` から算術で導こうとすると、以下の2点で
+  // 崩れる（`packages/postgres/src/memory-store.ts` の `aggregateScope`・
+  // `packages/testkit/src/__fixtures__/in-memory-memory-store.ts`・
+  // `packages/core/src/__tests__/runtime-fakes.ts` の3実装いずれも同じ形）:
+  //
+  //   1. `aggregate.filteredDecayed`（`decayed_filtered`）は embedding_status を問わず
+  //      scope 内の decayed 行を数える——埋め込みが無い（pending/failed/skipped）行が
+  //      decayed であってもここに数えられる。`eligible - filteredDecayed` は、
+  //      「未索引かつ decayed」の行を二重に引くことになり、真の母数を過小に見積もる。
+  //   2. `VectorFilter.excludeProvenanceKinds`（`search()` の WHERE に在る）は
+  //      `aggregateScope`/`ScopeAggregate` に一度も渡っていない——この次元は集約に
+  //      まったく現れない。
+  //
+  // どちらの補正も、正確な値を得るには `MemoryStore`/`ScopeAggregate` の契約
+  // （新しい集計欄、あるいは `excludeProvenanceKinds` を受け取る新しい
+  // `AggregateScopeOptions`）を変える必要があり、この PR の射程外——マネージャー決定
+  // により、契約は変えず「分母を信頼できないときは判定しない（鳴らさない）」側に倒す
+  // （揃っていない次元の詳細は本 PR 本文の表、ADR 0285 の本追記を参照）。
+  //
+  // `denominatorTrusted` が真であることが構造的に保証されるのは:
+  //   - `aggregate.filteredDecayed.count === 0`（scope 内に decayed 行が無い。
+  //     忘却ゲートが無効 [`includeFullyDecayed: true`] のときも常に0と定義されている
+  //     ——`memory-store.ts` の `aggregateScope` doc）——このときに限り、`eligible` の
+  //     中に decayed 行が1件も混ざっていないことが保証され、`eligible` がそのまま
+  //     正しい母数になる。
+  //   - `excludeProvenanceKinds` が指定されていない（未指定または空配列）——ANN 側の
+  //     絞りが集約側の絞りと完全に一致する。
+  // の両方が真のときだけ。
   //
   // 条件は `ann_unreached` の前提（candidateGenerationExecuted && kPrime > 0）と揃え、
-  // それに「eligible > 0（scope は空ではない）」と「annHits.length === 0（ANN が
-  // 本当に1件も返さなかった）」を足したもの——`ann_unreached` より狭い。eligible=0
-  // （scope 自体が空）のときは「探していない」ではなく「探す対象が無かった」なので
-  // 対象外。新しい SQL は足さない——`eligible` と `annHits.length` は既存の計算をそのまま使う。
+  // 「母数が信頼できる（denominatorTrusted）」「母数 > 0（scope に実際に探す対象がある）」
+  // 「ANN が母数（と kPrime の小さいほう）に届かなかった」を足す——`annHits.length === 0`
+  // という真の0件だけでなく、天井（`hnsw.max_scan_tuples` 等）で途中打ち切られた場合も
+  // 同じ形で捕まえる（旧条件より広い。理由は下）。
   //
-  // 🔴 ADR 0285 追記（PR #672 の CI 実測、2026-09-24）: 当初は「キーは常に出す
-  // （true/false）」としていたが、これは ADR 0084 §6 の既存の歯②
-  // 「既定（channels 未指定）は ADR 0084 以前と1バイトも変わらない」
-  // （`packages/core/src/__tests__/recall-channels.test.ts` の `toEqual`）と衝突する
-  // ——既定経路では常に `false` が増えるため、detail の形そのものが変わってしまい、
-  // 「1バイトも変わらない」という既存の決定が破れる。**ADR 0084 の歯②が先にある決定
-  // であり、ADR 0285 側が合わせる。** ⟹ 条件が真のときだけキーを足し、偽のときは
-  // detail に触れない（キー自体を出さない）。既存の歯②は書き換えていない
-  // （書き換えたのはこの ADR 0285 の側）。
+  // ⚠ **旧条件（`annHits.length === 0`）を落とし、`annHits.length < min(kPrime,
+  // denominator)` に一般化した。** 旧条件は「真に0件」のときしか名乗らなかったが、
+  // 索引が天井に当たって `kPrime` 未満・母数未満の件数で打ち切られた場合も、
+  // 「索引が、実際に在る候補を返しきれなかった」という同じ事象である——0件かどうかは
+  // 本質ではない。
+  //
+  // 新しい SQL は足さない——`aggregate.filteredDecayed`・`eligible`・
+  // `validatedQuery.excludeProvenanceKinds`・`annHits.length` は既存の計算・既存の
+  // クエリ結果をそのまま再利用する。
+  //
+  // キー名も改めた——`annWindowHadNoInScopeCandidates`（「0件だった」を主張する名前）は、
+  // 一般化した条件（0件とは限らない）の下では中身と食い違う。`annReturnedFewerThanReachable`
+  // （「ANN が、到達可能な母数より少ない件数しか返さなかった」）に変える。値は
+  // 引き続き条件が真のときだけ足す（ADR 0084 §6 の歯②——`recall-channels.test.ts` の
+  // `toEqual`——との衝突を避けるため。理由は変わっていない）。加えて `annReachablePool`
+  // （その時点の母数）も同時に足す——診断に使う数を、後から `eligible` を読み直さずに
+  // 得られるようにするため（`detail` は型無しの診断欄なので、欄を増やしても公開型は
+  // 動かない。ADR 0285 §7 実測）。
+  const denominatorTrusted =
+    aggregate.filteredDecayed.count === 0 &&
+    (validatedQuery.excludeProvenanceKinds === undefined ||
+      validatedQuery.excludeProvenanceKinds.length === 0);
+  const reachablePool = eligible;
   if (
     annStageTrace !== undefined &&
     candidateGenerationExecuted &&
     kPrime > 0 &&
-    eligible > 0 &&
-    annHits.length === 0
+    denominatorTrusted &&
+    reachablePool > 0 &&
+    annHits.length < Math.min(kPrime, reachablePool)
   ) {
     annStageTrace.detail = {
       ...annStageTrace.detail,
-      annWindowHadNoInScopeCandidates: true,
+      annReturnedFewerThanReachable: true,
+      annReachablePool: reachablePool,
     };
   }
 

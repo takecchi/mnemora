@@ -444,7 +444,7 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
   });
 });
 
-describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindowHadNoInScopeCandidates（ADR 0285 / Issue #671）", () => {
+describe("recall() — explain.stages[candidate_generation(ann)].detail.annReturnedFewerThanReachable（ADR 0285 / Issue #671 続報）", () => {
   // Issue #671: 他テナントの near-duplicate が HNSW の候補枠（k'）を埋めると、ANN は
   // scope 内の候補を1件も返さずに0件になる。既存の `ann_unreached`（上の describe）は
   // 「scope 内にまだ見られていない候補が残っている」という同じ条件（annHits.length <
@@ -453,17 +453,33 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
   //
   // 公開型の `Omission` union は変えず（`kind` を増やさない。理由は ADR 0285 §2.2、
   // および #541 の判断待ち）、`explain.stages` の ann チャンネルの trace に
-  // 診断用の detail キーを1つだけ足す。ここではその detail キーだけを検査する
+  // 診断用の detail キーを足す。ここではその detail キーだけを検査する
   // ——`ann_unreached` 自体の挙動（上の歯A〜D）は1つも変えていない。詳細は ADR 0285。
   //
-  // 🔴 ADR 0285 追記（PR #672 の CI 実測、2026-09-24）: 当初は「キーを常に出す
-  // （true/false）」だったが、これは上の describe とは別の既存の歯——
-  // `recall-channels.test.ts` の歯②「既定（channels 未指定）は ADR 0084 以前と
-  // 1バイトも変わらない」——と衝突していた。既定経路は常に `annHits.length > 0`
-  // か `eligible === 0` のどちらかであり、旧実装はそこへ常に `false` を足すので、
-  // 歯②の厳密な `toEqual` が「1バイトも変わらない」という既存の決定によって落ちる。
-  // ⟹ **条件が真のときだけキーを足し、偽のときはキー自体を出さない**側へ直した。
-  // 対照A・対照Bは「値が `false`」ではなく「キーが無い」ことを確かめる形に変える。
+  // 🔴 ADR 0285 追記（本 describe、Issue #671 続報）: 初版（PR #672）が足した
+  // `annWindowHadNoInScopeCandidates`（条件 `eligible > 0 && annHits.length === 0`）には
+  // **偽陽性があった**——`eligible` は忘却ゲート（ADR 0173）を知らないため、scope 内で
+  // 埋め込みのある行が全て decayed で ANN が「正しく」0件を返した場合にも、この条件は
+  // 真になっていた（下の「偽陽性の対照」がこれを赤で確かめる）。原因・分母の再定義・
+  // 一般化した条件・キー名を変えた理由は `recall-runtime.ts` の同キー周辺のコメントと
+  // ADR 0285 の追記を見よ。要旨:
+  //   - 正しい分母（「scope 内・埋め込みあり・忘却ゲートを通る行」）を `eligible` から
+  //     算術で求めようとすると、`aggregate.filteredDecayed` が embedding_status を
+  //     問わず decayed 行を数えている（未索引かつ decayed の行を二重に引く）ことと、
+  //     `excludeProvenanceKinds` が `aggregateScope` に届いていないことの2点で崩れる。
+  //   - どちらの補正も `MemoryStore`/`ScopeAggregate` の契約を変える必要があるため、
+  //     この PR では契約を変えず、**分母を信頼できないとき（decayed 行が1件でも
+  //     あるとき／`excludeProvenanceKinds` が指定されているとき）は判定しない**
+  //     （鳴らさない）側に倒した——「知らないことは知らないと言う」を、過大主張では
+  //     なく沈黙で守る。
+  //   - 条件を `annHits.length === 0` から `annHits.length < min(kPrime, 分母)` に
+  //     一般化した——天井（`hnsw.max_scan_tuples` 等）で `kPrime` 未満・分母未満の
+  //     件数に打ち切られた場合も「索引が在る候補を返しきれなかった」という同じ事象
+  //     である。
+  //   - キー名を `annReturnedFewerThanReachable` に変えた——「0件だった」を主張する
+  //     旧名は、0件とは限らない一般化した条件の下では中身と食い違う。値は引き続き
+  //     条件が真のときだけ足す（ADR 0084 §6 の歯②との衝突を避けるため）。あわせて
+  //     `annReachablePool`（その時点の分母）も足す。
 
   function findAnnDetail(result: RecallResult) {
     const trace = result.explain.stages.find(
@@ -472,10 +488,11 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     return trace?.detail;
   }
 
-  it("陽性: ANN が0件を返し、eligible が0件より多いとき、annWindowHadNoInScopeCandidates: true が付く", async () => {
+  it("陽性1（他テナント占拠を模す）: ANN が0件を返し、分母が0件より多いとき、annReturnedFewerThanReachable: true が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(0);
-    // 3件が scope 内・embeddingStatus='ready'（= eligible = 3）だが、ANN は0件しか返さない
-    // （CappedVectorStore(cap=0) が「候補枠が他 scope の行だけで埋まった」状況を模する）。
+    // 3件が scope 内・embeddingStatus='ready'・非 decayed（= 分母 = 3）だが、
+    // ANN は0件しか返さない（CappedVectorStore(cap=0) が「候補枠が他 scope の行だけで
+    // 埋まった」状況を模する）。
     for (let i = 0; i < 3; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -484,10 +501,70 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     expect(result.memories).toEqual([]);
     // 既存の ann_unreached は変わらず鳴る（対照——この歯の主題ではない）。
     expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
-    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: true });
+    expect(findAnnDetail(result)).toMatchObject({
+      annReturnedFewerThanReachable: true,
+      annReachablePool: 3,
+    });
   });
 
-  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が候補を返す）にはキー自体が付かない", async () => {
+  it("陽性2（天井打ち切りを模す）: ANN が kPrime 未満・分母未満の件数で打ち切られたとき、annReturnedFewerThanReachable: true が付く", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(2);
+    // 5件が scope 内・embeddingStatus='ready'・非 decayed（= 分母 = 5）。
+    // CappedVectorStore(cap=2) が「索引は本当は5件届くのに、天井で2件しか返さない」
+    // ——`hits === 0` ではない——状況を模する。旧条件（`annHits.length === 0`）では
+    // ここは鳴らなかった（この歯が一般化そのものを検査する）。
+    for (let i = 0; i < 5; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const detail = findAnnDetail(result);
+    expect(detail).toMatchObject({
+      hits: 2,
+      annReturnedFewerThanReachable: true,
+      annReachablePool: 5,
+    });
+  });
+
+  it("偽陽性の対照（鳴ってはいけない側）: scope 内の埋め込みがある行が全て decayed のとき、annReturnedFewerThanReachable は付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 3件とも embeddingStatus='ready' だが decayFloorAt が過去（NOW より前）——
+    // 忘却ゲートで ANN からも aggregate の filteredDecayed からも同じ述語で落ちる
+    // （ADR 0173）。ANN は「正しく」0件を返す——探していないのではなく、探して
+    // 何も無かった（すべて遠ざかった）。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], {
+        decayFloorAt: new Date("2020-01-01T00:00:00.000Z"),
+      });
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.memories).toEqual([]);
+    const detail = findAnnDetail(result);
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+    expect(Object.keys(detail ?? {})).not.toContain("annReachablePool");
+  });
+
+  it("揃っていない次元の対照（鳴ってはいけない側）: excludeProvenanceKinds が指定されているとき、annReturnedFewerThanReachable は付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 3件とも embeddingStatus='ready'・非 decayed だが、provenance kind 'imported'
+    // （`newMemory` の既定）を丸ごと除外するクエリ——ANN は「正しく」0件を返すが、
+    // `excludeProvenanceKinds` は `aggregateScope`/`ScopeAggregate` に届いていない
+    // ため、集約側からはこの絞りが見えない（本 describe 冒頭のコメント参照）。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      excludeProvenanceKinds: ["imported"],
+    });
+    expect(result.memories).toEqual([]);
+    const detail = findAnnDetail(result);
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+  });
+
+  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が分母まで拾いきる）にはキー自体が付かない", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
 
@@ -495,19 +572,20 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     expect(result.memories).toHaveLength(1);
     const detail = findAnnDetail(result);
     // `false` を確かめるのではなく、キーそのものの不在を確かめる——
-    // `{ annWindowHadNoInScopeCandidates: undefined, ... }` という壊れた実装も
+    // `{ annReturnedFewerThanReachable: undefined, ... }` という壊れた実装も
     // 後者でなければ通ってしまう（②-c の `lexicalMatch` の歯と同じ形）。
-    expect(Object.keys(detail ?? {})).not.toContain("annWindowHadNoInScopeCandidates");
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+    expect(Object.keys(detail ?? {})).not.toContain("annReachablePool");
   });
 
-  it("やりすぎの対照B（鳴ってはいけない側）: eligible が0件（scope が空）のときもキー自体が付かない", async () => {
+  it("やりすぎの対照B（鳴ってはいけない側）: 分母が0件（scope が空）のときもキー自体が付かない", async () => {
     const { runtime } = buildRuntime();
-    // scope に Memory を1件も作らない ⟹ eligible = 0。ANN も0件を返すが、
+    // scope に Memory を1件も作らない ⟹ 分母 = 0。ANN も0件を返すが、
     // 「探していない」ではなく「探す対象自体が無い」なので対象外——鳴ってはいけない。
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toEqual([]);
     const detail = findAnnDetail(result);
-    expect(Object.keys(detail ?? {})).not.toContain("annWindowHadNoInScopeCandidates");
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
   });
 });
 
