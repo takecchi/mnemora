@@ -16,10 +16,41 @@ describe("buildConversation", () => {
     expect(conversation.userUtterances).toHaveLength(1 + 5);
   });
 
-  it("filler の行は用意した候補を巡回して使う（同じ会話を2回作れば同じ文字列になる=決定的）", () => {
+  it("filler の行は話題×述語の直積で機械的に決まる（同じ会話を2回作れば同じ文字列になる=決定的）", () => {
     const a = buildConversation(20);
     const b = buildConversation(20);
     expect(a.turns.map((t) => t.text)).toEqual(b.turns.map((t) => t.text));
+  });
+
+  /**
+   * Issue #340: 以前は filler の user 発話が12文を `i % 12` で巡回していたため、
+   * `fillerPairs=160`（`turnCount=322`）のような長い会話で同じ文が約13回重複し、
+   * 連想枠の tie-break を非決定にした（ADR 0170 §3）。ここでは
+   * `DEFAULT_COMPARE_SEQUENCE`（`compare.ts`）の最大 `fillerPairs=320` 分、
+   * user・assistant それぞれの filler がすべて相異なることを機械的に固定する。
+   */
+  it("filler の user 発話は fillerPairs=320 まですべて相異なる（Issue #340）", () => {
+    const conversation = buildConversation(320);
+    const fillerUserTexts = conversation.userUtterances.slice(1).map((t) => t.text);
+    expect(fillerUserTexts).toHaveLength(320);
+    expect(new Set(fillerUserTexts).size).toBe(320);
+  });
+
+  it("filler の assistant 発話も fillerPairs=320 まですべて相異なる（Issue #340）", () => {
+    const conversation = buildConversation(320);
+    const fillerAssistantTexts = conversation.turns
+      .filter((t) => t.role === "assistant")
+      .slice(1)
+      .map((t) => t.text);
+    expect(fillerAssistantTexts).toHaveLength(320);
+    expect(new Set(fillerAssistantTexts).size).toBe(320);
+  });
+
+  it("filler の user 発話は FACT_STATEMENT / QUERY_TEXT のいずれとも衝突しない", () => {
+    const conversation = buildConversation(320);
+    const fillerUserTexts = new Set(conversation.userUtterances.slice(1).map((t) => t.text));
+    expect(fillerUserTexts.has(FACT_STATEMENT)).toBe(false);
+    expect(fillerUserTexts.has(QUERY_TEXT)).toBe(false);
   });
 
   it("turn の index は 0 始まりの連番", () => {
