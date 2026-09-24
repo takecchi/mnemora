@@ -6,6 +6,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { embeddingSpaceTableName } from "../embedding-space-table.js";
 import {
+  captureClientQuery,
   closeTestClient,
   getTestClient,
   resetTestDatabase,
@@ -103,32 +104,19 @@ describe("PostgresVectorStore.search と HNSW 索引", () => {
     const ctx: Ctx = { tenantId: TENANT };
     await seed(memoryStore, vectorStore, ctx, pool);
 
-    let capturedText: string | undefined;
-    let capturedParams: unknown[] | undefined;
-    const originalQuery = pool.query.bind(pool);
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    (pool as any).query = (...args: unknown[]) => {
-      const [config, params] = args as [string | { text: string }, unknown[] | undefined];
-      const text = typeof config === "string" ? config : config.text;
-      if (text.includes(TABLE) && /order by/i.test(text)) {
-        capturedText = text;
-        capturedParams = params;
-      }
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      return (originalQuery as any)(...args);
-    };
+    const captured = await captureClientQuery(
+      (text) => text.includes(TABLE) && /order by/i.test(text),
+      () =>
+        vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0.5, 0.5, 0.5], {
+          limit: 10,
+          filter: { tenantId: TENANT },
+        }),
+    );
 
-    try {
-      await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0.5, 0.5, 0.5], {
-        limit: 10,
-        filter: { tenantId: TENANT },
-      });
-    } finally {
-      pool.query = originalQuery;
-    }
-
-    expect(capturedText).toBeDefined();
-    const explainResult = await pool.query(`EXPLAIN (FORMAT TEXT) ${capturedText}`, capturedParams);
+    const explainResult = await pool.query(
+      `EXPLAIN (FORMAT TEXT) ${captured.text}`,
+      captured.params,
+    );
     const plan = explainResult.rows
       .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
       .join("\n");

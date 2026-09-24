@@ -1,3 +1,4 @@
+import { Client } from "pg";
 import type { EmbeddingSpaceId } from "@mnemora/core";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { runMigrations } from "../migrate.js";
@@ -103,4 +104,49 @@ export function seededRandom(seed: number): () => number {
     t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
+}
+
+/**
+ * `matcher` に一致する SQL のテキスト/パラメータを、実際に発行された生の pg クエリから
+ * 捕まえる（`vector-search-hnsw.test.ts` 等が「`EXPLAIN` に掛けたいクエリそのものを
+ * 実装から捕捉する」ために使う手法を1箇所にまとめたもの）。
+ *
+ * ⚠ **`pool.query` ではなく `Client.prototype.query` をパッチする**（ADR 0284）。
+ * `db.transaction()` を使うコード（`PostgresVectorStore.search()` が ADR 0284 以降
+ * そう）は `pool.connect()` が返す生の `pg.Client` の上で `BEGIN`・本体のクエリ・
+ * `COMMIT` を発行し、`pool.query()` を経由しない。`pool.query()` 自身も内部では
+ * 同じ `client.query()` を呼ぶだけの薄いラッパー（`pg-pool` の実装）なので、
+ * `Client.prototype.query` を1箇所パッチすれば、`pool.query()` 経由・
+ * `db.transaction()` 経由のどちらの発行元でも同じ場所で拾える。
+ * 【実測】旧実装（`pool.query` をパッチする版）は `db.transaction()` に変わった
+ * `search()` を「一致するクエリが観測されなかった」で捕まえ損ねた
+ * （`vector-search-hnsw.test.ts` 等が実際にこの形で落ちた）。
+ */
+export async function captureClientQuery(
+  matcher: (text: string) => boolean,
+  fn: () => Promise<unknown>,
+): Promise<{ text: string; params: unknown[] }> {
+  let capturedText: string | undefined;
+  let capturedParams: unknown[] | undefined;
+  const originalQuery = Client.prototype.query;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
+    const [config, params] = args as [string | { text: string }, unknown[] | undefined];
+    const text = typeof config === "string" ? config : config.text;
+    if (matcher(text)) {
+      capturedText = text;
+      capturedParams = params;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalQuery as any).apply(this, args);
+  };
+  try {
+    await fn();
+  } finally {
+    Client.prototype.query = originalQuery;
+  }
+  if (capturedText === undefined) {
+    throw new Error("captureClientQuery: matcher に一致するクエリが観測されなかった");
+  }
+  return { text: capturedText, params: capturedParams ?? [] };
 }

@@ -13,7 +13,7 @@ import {
   INITIAL_ANALYZE_THRESHOLD,
   resetMemoriesWriteCounterForTesting,
 } from "../memories-statistics.js";
-import { requireDatabaseUrl, seededRandom } from "./test-db.js";
+import { captureClientQuery, requireDatabaseUrl, seededRandom } from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
@@ -76,39 +76,11 @@ async function disableAutovacuum(pool: Pool, table: string): Promise<void> {
   await pool.query(`ALTER TABLE ${table} SET (autovacuum_enabled = false)`);
 }
 
-/**
- * `pool.query` を一時的に監視し、`matcher` に一致した最初のクエリのテキスト/パラメータを
- * 捕まえる(`scale-bench.ts` / `vector-search-subject.test.ts` の手法をそのまま踏襲)。
- */
-async function captureQuery(
-  pool: Pool,
-  matcher: (text: string) => boolean,
-  fn: () => Promise<unknown>,
-): Promise<{ text: string; params: unknown[] }> {
-  let capturedText: string | undefined;
-  let capturedParams: unknown[] | undefined;
-  const originalQuery = pool.query.bind(pool);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (pool as any).query = (...args: unknown[]) => {
-    const [config, params] = args as [string | { text: string }, unknown[] | undefined];
-    const text = typeof config === "string" ? config : config.text;
-    if (matcher(text)) {
-      capturedText = text;
-      capturedParams = params;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (originalQuery as any)(...args);
-  };
-  try {
-    await fn();
-  } finally {
-    pool.query = originalQuery;
-  }
-  if (capturedText === undefined) {
-    throw new Error("captureQuery: matcher に一致するクエリが観測されなかった");
-  }
-  return { text: capturedText, params: capturedParams ?? [] };
-}
+// `captureQuery` はかつてこのファイル固有のローカル関数だったが、`Client.prototype.query`
+// をパッチする版（`captureClientQuery`、ADR 0284）へ寄せて test-db.ts に集約した——
+// `pool.query` をパッチする旧実装は、ADR 0284 で `db.transaction()` 経由に変わった
+// `PostgresVectorStore.search()` のクエリを「観測されなかった」で捕まえ損ねる
+// （`pool.connect()` が返す生の `pg.Client` の上で発行されるため）。
 
 describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火(Issue #269)", () => {
   let client: PostgresClient | undefined;
@@ -167,8 +139,7 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
     // JOIN を含む本物の search() SQL を捕まえて EXPLAIN する(#418/ADR 0194 が壊れると
     // 実測した、まさにその形)。
     const queryVector = [0.5, 0.5, 0.5];
-    const captured = await captureQuery(
-      pool,
+    const captured = await captureClientQuery(
       (text) => text.includes(table) && /order by/i.test(text),
       () =>
         vectorStore.search(ctx, space, queryVector, {
@@ -329,8 +300,7 @@ describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 
 
     // JOIN を含む本物の search() SQL を捕まえて EXPLAIN する((甲) と同じ検査)。
     const queryVector = [0.5, 0.5, 0.5];
-    const captured = await captureQuery(
-      pool,
+    const captured = await captureClientQuery(
       (text) => text.includes(table) && /order by/i.test(text),
       () =>
         vectorStore.search(ctx, space, queryVector, {
