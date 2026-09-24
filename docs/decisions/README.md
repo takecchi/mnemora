@@ -319,5 +319,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0292](./0292-relation-graph-table-depth-omitted-design.md) | 関係グラフ本体（Issue #207）の段0 — テーブル形・探索の深さ上限・`omitted` への出し方を決める（設計のみ） | **提案 (2026-09)** |
 | [0293](./0293-remove-pr-text-checks-and-release-followup-notice.md) | PR タイトル/本文を見る CI ステップ3本と、リリース後の追随通知ワークフローを削除する | 採用 (2026-09) |
 | [0294](./0294-lexical-tie-density-bench.md) | `retrieval` ベンチの語彙チャンネル構成（ADR 0148）でタイ密度を測るベンチを足す — 測るだけで、Issue #394 の取り扱いには何も答えない | 採用 (2026-09) |
+| [0295](./0295-extraction-context.md) | 抽出文脈を観測と保存し、相対日付の暦計算をモデルから分ける | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
