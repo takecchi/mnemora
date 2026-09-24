@@ -455,6 +455,15 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
   // および #541 の判断待ち）、`explain.stages` の ann チャンネルの trace に
   // 診断用の detail キーを1つだけ足す。ここではその detail キーだけを検査する
   // ——`ann_unreached` 自体の挙動（上の歯A〜D）は1つも変えていない。詳細は ADR 0285。
+  //
+  // 🔴 ADR 0285 追記（PR #672 の CI 実測、2026-09-24）: 当初は「キーを常に出す
+  // （true/false）」だったが、これは上の describe とは別の既存の歯——
+  // `recall-channels.test.ts` の歯②「既定（channels 未指定）は ADR 0084 以前と
+  // 1バイトも変わらない」——と衝突していた。既定経路は常に `annHits.length > 0`
+  // か `eligible === 0` のどちらかであり、旧実装はそこへ常に `false` を足すので、
+  // 歯②の厳密な `toEqual` が「1バイトも変わらない」という既存の決定によって落ちる。
+  // ⟹ **条件が真のときだけキーを足し、偽のときはキー自体を出さない**側へ直した。
+  // 対照A・対照Bは「値が `false`」ではなく「キーが無い」ことを確かめる形に変える。
 
   function findAnnDetail(result: RecallResult) {
     const trace = result.explain.stages.find(
@@ -478,22 +487,27 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: true });
   });
 
-  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が候補を返す）には付かない", async () => {
+  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が候補を返す）にはキー自体が付かない", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toHaveLength(1);
-    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: false });
+    const detail = findAnnDetail(result);
+    // `false` を確かめるのではなく、キーそのものの不在を確かめる——
+    // `{ annWindowHadNoInScopeCandidates: undefined, ... }` という壊れた実装も
+    // 後者でなければ通ってしまう（②-c の `lexicalMatch` の歯と同じ形）。
+    expect(Object.keys(detail ?? {})).not.toContain("annWindowHadNoInScopeCandidates");
   });
 
-  it("やりすぎの対照B（鳴ってはいけない側）: eligible が0件（scope が空）のときも付かない", async () => {
+  it("やりすぎの対照B（鳴ってはいけない側）: eligible が0件（scope が空）のときもキー自体が付かない", async () => {
     const { runtime } = buildRuntime();
     // scope に Memory を1件も作らない ⟹ eligible = 0。ANN も0件を返すが、
     // 「探していない」ではなく「探す対象自体が無い」なので対象外——鳴ってはいけない。
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toEqual([]);
-    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: false });
+    const detail = findAnnDetail(result);
+    expect(Object.keys(detail ?? {})).not.toContain("annWindowHadNoInScopeCandidates");
   });
 });
 

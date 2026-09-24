@@ -1679,14 +1679,25 @@ export async function runRecall(
   // （scope 自体が空）のときは「探していない」ではなく「探す対象が無かった」なので
   // 対象外。新しい SQL は足さない——`eligible` と `annHits.length` は既存の計算をそのまま使う。
   //
-  // ⚠ キーは常に出す（true/false）。条件が偽でも省略しない——同じ段の他の detail
-  // （`decayGate`・`validityGate`・budget_truncation の `budgetApplied` 等)が
-  // 「値の有無」ではなく「値そのもの」で状態を名乗る作法を採っているのに揃える。
-  if (annStageTrace !== undefined) {
+  // 🔴 ADR 0285 追記（PR #672 の CI 実測、2026-09-24）: 当初は「キーは常に出す
+  // （true/false）」としていたが、これは ADR 0084 §6 の既存の歯②
+  // 「既定（channels 未指定）は ADR 0084 以前と1バイトも変わらない」
+  // （`packages/core/src/__tests__/recall-channels.test.ts` の `toEqual`）と衝突する
+  // ——既定経路では常に `false` が増えるため、detail の形そのものが変わってしまい、
+  // 「1バイトも変わらない」という既存の決定が破れる。**ADR 0084 の歯②が先にある決定
+  // であり、ADR 0285 側が合わせる。** ⟹ 条件が真のときだけキーを足し、偽のときは
+  // detail に触れない（キー自体を出さない）。既存の歯②は書き換えていない
+  // （書き換えたのはこの ADR 0285 の側）。
+  if (
+    annStageTrace !== undefined &&
+    candidateGenerationExecuted &&
+    kPrime > 0 &&
+    eligible > 0 &&
+    annHits.length === 0
+  ) {
     annStageTrace.detail = {
       ...annStageTrace.detail,
-      annWindowHadNoInScopeCandidates:
-        candidateGenerationExecuted && kPrime > 0 && eligible > 0 && annHits.length === 0,
+      annWindowHadNoInScopeCandidates: true,
     };
   }
 

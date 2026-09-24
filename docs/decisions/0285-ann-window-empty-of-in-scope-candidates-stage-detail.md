@@ -29,8 +29,8 @@ near-duplicate が HNSW の候補枠（既定 `kPrime == hnsw.ef_search == 40`�
 
 **この ADR の決定は、`Omission` union（`packages/core/src/recall.ts`）に新しい
 `kind` を足さず、`RecallResult.explain.stages` の ANN チャンネルの
-`StageTrace.detail`（型無しの診断欄）へ `annWindowHadNoInScopeCandidates: boolean`
-を1つ足すことである。** 条件は
+`StageTrace.detail`（型無しの診断欄）へ `annWindowHadNoInScopeCandidates: true` を、
+**条件が真のときだけ**足すことである（偽のときはキー自体を出さない）。条件は
 `candidateGenerationExecuted && kPrime > 0 && eligible > 0 && annHits.length === 0`
 ——`ann_unreached` の前提（`candidateGenerationExecuted && kPrime > 0`）と揃え、
 それに「scope は空ではない（`eligible > 0`）」「ANN が本当に1件も返さなかった
@@ -38,6 +38,18 @@ near-duplicate が HNSW の候補枠（既定 `kPrime == hnsw.ef_search == 40`�
 は足していない**——`eligible` と `annHits.length` は既存の計算（段5の
 `aggregateScope` と ANN 段の `search()` 結果）をそのまま再利用する。**既存の
 `ann_unreached` の発火条件・意味は1バイトも変えていない。**
+
+**⚠ 「条件が真のときだけキーを出す」は、当初案（常に真偽値を出す）から PR の CI
+実測を受けて直した設計である。**[ADR 0084](./0084-lexical-recall-channel.md) §6
+は「既定（ANN 1本）のとき、`explain.stages` は ADR 0084 以前と1要素も1バイトも
+変わらない」ことを明示的な決定として持ち（「新しい欄を常に足す案を落とした結果
+である——足すと既定の `explain` が変わってしまう」、同 ADR 逐語）、
+`packages/core/src/__tests__/recall-channels.test.ts` の歯②がこれを厳密な
+`toEqual` で固定している。当初案（偽のときも `false` を出す）は既定経路の detail
+に `annWindowHadNoInScopeCandidates: false` を常に足すため、既定経路の
+`explain.stages` の形そのものを変え、歯②を機械的に壊す
+——**ADR 0084 §6 が先にある決定であり、この ADR の側が合わせた。**詳細は §5
+「引き受けた負債」4番。
 
 ---
 
@@ -81,7 +93,7 @@ Issue #671 である。
 `RecallStageName = 'candidate_generation' | ...` の ANN チャンネルの trace
 （`detail.channel === 'ann'`）は既に `kPrime`・`hits`・`decayGate`・`clock`・
 `validityGate` を持つ型無しの診断欄である（ADR 0084 §6）。ここへ
-`annWindowHadNoInScopeCandidates: boolean` を足すことは:
+`annWindowHadNoInScopeCandidates: true` を、条件が真のときだけ足すことは:
 
 - **公開型（`Omission` union・`RecalledMemory`・`RecallResult` の他のフィールド）
   を1つも変えない。** `StageTrace.detail?: Record<string, unknown>` は元々
@@ -89,6 +101,14 @@ Issue #671 である。
   （実測は §7「測ったこと」）。
 - **`ann_unreached` の意味論・発火条件を変えない。** 別の判定として並べて
   いるだけで、既存の歯（ADR 0026 の歯B、ADR 0193 の歯C/D）は無傷のまま通る。
+- **既定経路（channels 未指定・全滅していない通常の recall）の `explain.stages`
+  を1バイトも変えない。** ADR 0084 §6 が「既定のとき `explain.stages` は
+  ADR 0084 以前と1バイトも変わらない」ことを明示的に決定しており、
+  `recall-channels.test.ts` の歯②がこれを厳密な `toEqual` で固定している
+  ——**キーを条件付きで出す**（真のときだけ）ことで、全滅していない限り
+  この決定と衝突しない。当初は「常に出す（false も出す）」案を採っていたが、
+  歯②の CI 実測で衝突が判明し、この形へ直した（下の「これが覆るとしたら」
+  ではなく、この ADR 自身の初稿の誤りの訂正である）。
 - **⚠ 型無しの診断欄なので、`RecallOutputValidationMode`（`recall-output-validation.ts`）
   のような公開契約の対象にはならない。**呼び出し側がこのキーに依存するコードを
   書いても、`RecallResult` の zod スキーマはこれを検証しない——**「型で守られた
@@ -166,12 +186,12 @@ Issue #671 である。
 
 `ann_unreached` 単体では、この2つが同じ顔（`omitted` に `ann_unreached` だけ）
 で返る（§1）。本 ADR は `explain.stages` にもう1段深い顔を用意した——
-`annWindowHadNoInScopeCandidates: true` は「探していない」（scope の候補を
-ANN が一度も見ていない）の側を、`ann_unreached` はあっても `false` の側は
-「見つかったが `eligible` に届かない」（正常時、または `eligible == 0` で
-そもそも探す対象が無かった）の側を指す。**ただし ADR 0193 §8 と同じ限界を
-引き継ぐ**——`explain.stages` を読まない呼び出し側にとっては、依然として
-`ann_unreached` だけが見える顔のままである（§5「引き受けた負債」）。
+`annWindowHadNoInScopeCandidates: true` が**在れば**「探していない」（scope の
+候補を ANN が一度も見ていない）の側を指し、**キー自体が無ければ**「見つかったが
+`eligible` に届かない」（正常時、または `eligible == 0` でそもそも探す対象が
+無かった）の側を指す。**ただし ADR 0193 §8 と同じ限界を引き継ぐ**——
+`explain.stages` を読まない呼び出し側にとっては、依然として `ann_unreached`
+だけが見える顔のままである（§5「引き受けた負債」）。
 
 ---
 
@@ -216,13 +236,22 @@ ANN が一度も見ていない）の側を、`ann_unreached` はあっても `f
    長期間決まらなければ、この情報は `explain.stages` に留め置かれたままになる。**
    §4-1 の「これが覆るとしたら」が実現しない限り、呼び出し側にとっての
    発見しやすさは今のままである。
-4. **「常に出す（false も出す）」という選択が、`detail` のペイロードを
-   ANN チャンネルの trace 1件につき常に数バイト増やす。** ADR 0193 §8-4 が
-   `recall-footprint.ts`・`examples/chat` の費用への影響が無いことを確認した
-   のと同じ理由（`omitted`/`ann_unreached`/`ann_truncated` を参照する経路のみが
-   費用計算に影響し、`explain.stages` の detail は参照されない）で、本 ADR でも
-   影響は無いと考えているが、**この ADR の作業では `recall-footprint.ts` を
-   改めて読み直していない**——ADR 0193 の実測からの外挿であり、確かめていない
+4. **「キーが在れば true、無ければ偽」という表現は、同じ ANN チャンネルの trace が
+   既に持つ他の欄（`decayGate`・`validityGate` は常に在り、値そのもので状態を
+   名乗る）と作法が非対称である。** ADR 0084 §6 の「既定経路は1バイトも変わら
+   ない」という決定を優先した結果、この欄だけ「値の有無」で状態を名乗る形に
+   なった——呼び出し側が `detail.annWindowHadNoInScopeCandidates === false` を
+   期待するコードを書くと、全滅していない場合に `undefined` を受け取り、
+   期待どおりには判定できない（`!== true` あるいは `?? false` で読む必要が
+   ある）。この非対称は正直に負債として残す——ADR 0084 §6 と両立する形を
+   優先した結果であり、解消していない。
+5. **`detail` のペイロードが増えるのは全滅時（`annWindowHadNoInScopeCandidates: true`
+   が付く経路）に限られる。** ADR 0193 §8-4 が `recall-footprint.ts`・
+   `examples/chat` の費用への影響が無いことを確認したのと同じ理由
+   （`omitted`/`ann_unreached`/`ann_truncated` を参照する経路のみが費用計算に
+   影響し、`explain.stages` の detail は参照されない）で、本 ADR でも影響は
+   無いと考えているが、**この ADR の作業では `recall-footprint.ts` を改めて
+   読み直していない**——ADR 0193 の実測からの外挿であり、確かめていない
    （§7「確かめていないこと」）。
 
 ---
@@ -231,12 +260,13 @@ ANN が一度も見ていない）の側を、`ann_unreached` はあっても `f
 
 1. `packages/core/src/recall-runtime.ts`: ANN チャンネルの `candidate_generation`
    trace を `let annStageTrace: StageTrace | undefined` に保持し、既存の
-   `ann_unreached` 判定の直後で、その判定を変えずに
-   `annStageTrace.detail.annWindowHadNoInScopeCandidates` を追記する。
-   push する場所・順序・既存の detail キーは1つも変えない。
+   `ann_unreached` 判定の直後で、その判定を変えずに、**条件が真のときだけ**
+   `annStageTrace.detail.annWindowHadNoInScopeCandidates = true` を追記する
+   （偽のときは detail に触れない）。push する場所・順序・既存の detail キーは
+   1つも変えない。
 2. `packages/core/src/__tests__/recall-pipeline.test.ts`: 新しい `describe` を
-   1本追加——陽性（ANN 0件・`eligible > 0`）、対照A（正常時）、対照B
-   （`eligible == 0`）の3歯。
+   1本追加——陽性（ANN 0件・`eligible > 0`、キーが `true`）、対照A（正常時、
+   キー自体が無い）、対照B（`eligible == 0`、キー自体が無い）の3歯。
 3. `docs/recall.md` の `ann_unreached` の説明（行377付近）に、この ADR を指す
    追記を足す（型例・既存の記述は書き換えない）。
 4. `CHANGELOG.md` の既存の未リリース節に1行足す（新しい版の節は起こさない）。
@@ -250,19 +280,40 @@ ANN が一度も見ていない）の側を、`ann_unreached` はあっても `f
 packages/core/src/__tests__/recall-pipeline.test.ts`: 差分無し。
 - 【実測】`npx prettier --check` 同2ファイル: 差分無し。
 - 【実測】`pnpm --filter @mnemora/core exec vitest run
-src/__tests__/recall-pipeline.test.ts`: 75/75 緑（新規3歯を含む）。
+src/__tests__/recall-pipeline.test.ts src/__tests__/recall-channels.test.ts`:
+  2ファイル・92件すべて緑。
 - 【実測】公開 API 表面の門（[ADR 0178](./0178-public-api-surface-gate.md)、
   `node scripts/check-public-api-surface.mjs`）: 6パッケージすべて build した
   うえで実行し、`@mnemora/core` を含む全パッケージが「差分なし」。
   `StageTrace.detail` は元々 `Record<string, unknown>` 型であり、キーの追加は
   `.d.ts` シグネチャに現れないことを、この実測で裏付けた。
-- 【実測】変異試験（`git checkout` は使わず、`cp` で退避・復元）:
-  1. **変異1**（常に `true` に固定）: 対照A・対照Bの2歯が赤くなった
-     （`expected false to be true`）。
-  2. **変異2**（常に `false` に固定）: 陽性の歯が赤くなった
-     （`expected true to be false`）。
-  3. 各変異後 `cp` で復元し、`git status --porcelain` が空になることと、
-     復元後に該当する歯が緑に戻ることを確認した。
+- 【実測】**当初案（常に真偽値を出す）は、CI の実際の赤で見つかった。**
+  PR #672 の CI 実行（`typecheck / lint / test / build` ジョブ）が
+  `packages/core/src/__tests__/recall-channels.test.ts:452`・`:480`
+  （歯②「既定は ADR 0084 以前と1バイトも変わらない」、厳密な `toEqual`）で
+  落ちた。原因は当初案が既定経路の ANN detail に
+  `annWindowHadNoInScopeCandidates: false` を常に足していたことで、
+  この2箇所を個別に実行して再現を確認した後、§2.1 の決定（条件が真のときだけ
+  キーを出す）へ直した。**この PR 自身のローカル実行（`vitest run
+recall-pipeline.test.ts`）は元々この衝突を検出していなかった**
+  ——`recall-channels.test.ts` を一緒に走らせていなかったため。⟹ 「関係する
+  テストファイルを個別に走らせる」だけでは、**どのファイルが『関係する』かの
+  見積もりを誤ると取りこぼす**という実例がここに残る（下の「これが覆るとしたら」
+  ではなく §8「確かめていないこと」に近い教訓——網羅を主張しない）。
+- 【実測】変異試験（`git checkout` は使わず、`cp` で退避・復元。直した後の形で
+  やり直した）:
+  1. **変異1**（ガードを `annStageTrace !== undefined` だけに緩め、常に
+     `true` を足す）: `recall-pipeline.test.ts` の対照A・対照Bが赤くなった
+     （`expected [...] to not include 'annWindowHadNoInScopeCandidates'`）。
+     **併せて** `recall-channels.test.ts` の歯②2本（`:452`・`:480`）も赤く
+     なることを確認した——CI が実際に検出した経路と同じ歯が、変異試験でも
+     同じ理由で落ちることを裏付けた。
+  2. **変異2**（`if` の条件を `if (false)` に固定し、キーを一切出さない）:
+     `recall-pipeline.test.ts` の陽性が赤くなった
+     （`expected {...} to match object {annWindowHadNoInScopeCandidates: true}`）。
+  3. 各変異後 `cp` で復元し、`diff` で1バイトも残っていないことと、
+     `git status --porcelain` が空になることを確認したうえで、対象の歯が
+     緑に戻ることを実測した。
 
 ---
 
