@@ -6,6 +6,7 @@ import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { heuristicTokenCounter } from "../heuristic-token-counter.js";
 import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
+import type { RecallResult } from "../recall.js";
 import { createRuntime } from "../runtime.js";
 import { RecallOutputValidationError } from "../recall-output-validation.js";
 import type { RecallOutputValidationMode } from "../recall-output-validation.js";
@@ -440,6 +441,59 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(true);
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+  });
+});
+
+describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindowHadNoInScopeCandidates（ADR 0285 / Issue #671）", () => {
+  // Issue #671: 他テナントの near-duplicate が HNSW の候補枠（k'）を埋めると、ANN は
+  // scope 内の候補を1件も返さずに0件になる。既存の `ann_unreached`（上の describe）は
+  // 「scope 内にまだ見られていない候補が残っている」という同じ条件（annHits.length <
+  // eligible）で正常時にも鳴るため、この全滅状態と正常時を区別できない
+  // （北極星33行目「『見つからなかった』と『探していない』を、同じ顔で返さない」）。
+  //
+  // 公開型の `Omission` union は変えず（`kind` を増やさない。理由は ADR 0285 §2.2、
+  // および #541 の判断待ち）、`explain.stages` の ann チャンネルの trace に
+  // 診断用の detail キーを1つだけ足す。ここではその detail キーだけを検査する
+  // ——`ann_unreached` 自体の挙動（上の歯A〜D）は1つも変えていない。詳細は ADR 0285。
+
+  function findAnnDetail(result: RecallResult) {
+    const trace = result.explain.stages.find(
+      (s) => s.stage === "candidate_generation" && s.detail?.channel === "ann",
+    );
+    return trace?.detail;
+  }
+
+  it("陽性: ANN が0件を返し、eligible が0件より多いとき、annWindowHadNoInScopeCandidates: true が付く", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(0);
+    // 3件が scope 内・embeddingStatus='ready'（= eligible = 3）だが、ANN は0件しか返さない
+    // （CappedVectorStore(cap=0) が「候補枠が他 scope の行だけで埋まった」状況を模する）。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.memories).toEqual([]);
+    // 既存の ann_unreached は変わらず鳴る（対照——この歯の主題ではない）。
+    expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
+    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: true });
+  });
+
+  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が候補を返す）には付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.memories).toHaveLength(1);
+    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: false });
+  });
+
+  it("やりすぎの対照B（鳴ってはいけない側）: eligible が0件（scope が空）のときも付かない", async () => {
+    const { runtime } = buildRuntime();
+    // scope に Memory を1件も作らない ⟹ eligible = 0。ANN も0件を返すが、
+    // 「探していない」ではなく「探す対象自体が無い」なので対象外——鳴ってはいけない。
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.memories).toEqual([]);
+    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: false });
   });
 });
 

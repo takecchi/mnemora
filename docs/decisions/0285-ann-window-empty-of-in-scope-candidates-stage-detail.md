@@ -1,0 +1,288 @@
+# ADR 0285: ANN の候補枠が scope 内の候補を1件も拾えなかったことを stage detail に名乗らせる — `Omission` union は変えない（Issue #671）
+
+- **状態**: 採用 (2026-09)
+- **日付**: 2026-09-24
+
+**⚠ 各主張の出所を分ける**（ADR 0111 / 0188 / 0193 の体裁を踏む）。
+
+- **【現物】** — この repo のコード・文書を、書き手が自分の手で読んで確かめた。
+- **【実測】** — この書き手が自分の手で `git`/`vitest`/`tsc`/`eslint`/`prettier` 等を
+  走らせて確かめた。
+- **【受】** — Issue #671 に記録された実測（PostgreSQL 17.11 + pgvector 0.8.0 での
+  HNSW 候補枠占有の再現）を、そのまま引用した（本 ADR の作業では再測していない）。
+
+---
+
+## 結論（先に）
+
+[Issue #671](https://github.com/takecchi/mnemora/issues/671) は、他テナントの
+near-duplicate が HNSW の候補枠（既定 `kPrime == hnsw.ef_search == 40`）を
+埋め尽くすと、`runtime.recall()` が自テナントの候補を1件も見ないまま0件を返す
+ことを実測している。このとき `omitted` に積まれるのは `ann_unreached` だけであり、
+**`ann_unreached` は正常時（窓は満杯だが scope の候補は一部拾えている）にも
+同じ形で鳴る**（[ADR 0193](./0193-ann-unreached-covers-full-window.md) が意図的に
+広げた発火条件）。⟹ 「見つからなかった」（scope に本当に候補が無い）と
+「探していない」（scope の候補を ANN が一度も見ていない）が、同じ `ann_unreached`
+の顔で返る。これは `docs/north-star.md` 33行目「知らないことを、知らないと
+言える。——『見つからなかった』と『探していない』を、同じ顔で返さない。」と
+正面から食い違う。
+
+**この ADR の決定は、`Omission` union（`packages/core/src/recall.ts`）に新しい
+`kind` を足さず、`RecallResult.explain.stages` の ANN チャンネルの
+`StageTrace.detail`（型無しの診断欄）へ `annWindowHadNoInScopeCandidates: boolean`
+を1つ足すことである。** 条件は
+`candidateGenerationExecuted && kPrime > 0 && eligible > 0 && annHits.length === 0`
+——`ann_unreached` の前提（`candidateGenerationExecuted && kPrime > 0`）と揃え、
+それに「scope は空ではない（`eligible > 0`）」「ANN が本当に1件も返さなかった
+（`annHits.length === 0`）」を足した、`ann_unreached` より狭い条件。**新しい SQL
+は足していない**——`eligible` と `annHits.length` は既存の計算（段5の
+`aggregateScope` と ANN 段の `search()` 結果）をそのまま再利用する。**既存の
+`ann_unreached` の発火条件・意味は1バイトも変えていない。**
+
+---
+
+## 1. 何が起きているか（Issue #671 の実測、抜粋）
+
+【受、Issue #671】環境: PostgreSQL 17.11 + pgvector 0.8.0、GUC は既定
+（`hnsw.ef_search=40` / `hnsw.iterative_scan=off` / `hnsw.max_scan_tuples=20000`）。
+クエリ対象テナント（home）が10万行に育ちプランナが自然に HNSW を選ぶ規模で、
+他テナントが gold より近い near-duplicate を40件（`kPrime` と同数）以上持つと:
+
+| 条件                 | `memories` | gold     | `omitted`                                  |
+| -------------------- | ---------- | -------- | ------------------------------------------ |
+| near-dup 0件（正常） | 10件       | 10/10    | `over_limit(rescore, 30)`、`ann_unreached` |
+| **near-dup 60件**    | **0件**    | **0/10** | **`ann_unreached` のみ**                   |
+
+`tenant_id` の絞り込みは索引スキャンの**後**に効くため、HNSW が返す上位40件が
+すべて他テナントの行だと、自テナントの候補は1件も窓に残らない。この状態と
+「正常に探して本当に0件だった」状態は、`omitted` を見る限り**見分けが付かない**
+——どちらも `ann_unreached` だけが積まれる。
+
+`ann_unreached` の発火条件（`packages/core/src/recall-runtime.ts`、ADR 0193 で
+拡張済み）:
+
+```ts
+candidateGenerationExecuted && kPrime > 0 && annHits.length < eligible;
+```
+
+`annHits.length < eligible` は「scope 内にまだ見られていない候補が残っている」
+を意味する。**全滅時（`annHits.length === 0`）も正常時（`annHits.length > 0`
+だが `eligible` に届かない）も、この1条件では区別できない。** ADR 0193 §8
+「引き受けた負債」1番が既に指摘していた「`eligible` が `kPrime` を超えると
+`ann_unreached` は実質毎回鳴る定型文になる」という懸念の、具体的な最悪ケースが
+Issue #671 である。
+
+---
+
+## 2. 採った案・採らなかった案
+
+### 2.1 採った案: `StageTrace.detail` へ診断キーを足す
+
+`RecallStageName = 'candidate_generation' | ...` の ANN チャンネルの trace
+（`detail.channel === 'ann'`）は既に `kPrime`・`hits`・`decayGate`・`clock`・
+`validityGate` を持つ型無しの診断欄である（ADR 0084 §6）。ここへ
+`annWindowHadNoInScopeCandidates: boolean` を足すことは:
+
+- **公開型（`Omission` union・`RecalledMemory`・`RecallResult` の他のフィールド）
+  を1つも変えない。** `StageTrace.detail?: Record<string, unknown>` は元々
+  形の定まらない欄であり、キーの増減は型シグネチャに現れない
+  （実測は §7「測ったこと」）。
+- **`ann_unreached` の意味論・発火条件を変えない。** 別の判定として並べて
+  いるだけで、既存の歯（ADR 0026 の歯B、ADR 0193 の歯C/D）は無傷のまま通る。
+- **⚠ 型無しの診断欄なので、`RecallOutputValidationMode`（`recall-output-validation.ts`）
+  のような公開契約の対象にはならない。**呼び出し側がこのキーに依存するコードを
+  書いても、`RecallResult` の zod スキーマはこれを検証しない——**「型で守られた
+  契約」ではなく「デバッグ・監視のための添え書き」**である。この性質は
+  `contradiction_resolution` の `detail.companionsAdded`（`docs/recall.md` 850行目）
+  と同じ扱いに揃えている。
+
+### 2.2 採らなかった案 (b-1): `Omission` union に新しい `kind` を足す
+
+`Omission`（`packages/core/src/recall.ts:435` 付近）に、例えば
+`{ kind: 'ann_window_exhausted_by_out_of_scope_rows', countKind: 'unknown' }`
+のような新しい判別子を足し、呼び出し側が型で判定できるようにする案。
+
+**却下（この ADR の範囲では）。**
+
+- `Omission` は判別共用体（discriminated union）であり、新しい `kind` を足す
+  ことは既存の網羅的な `switch`/`if` チェーンを壊しうる——これは
+  [Issue #541](https://github.com/takecchi/mnemora/issues/541) が指摘している、
+  **union 拡張を破壊的変更として数えるかどうかという未決の線**に直接依存する
+  （#541 は `MemoryEventKind` の union 拡張が破壊的変更として一貫して数えられて
+  いない非対称を指摘している——同じ論点が `Omission` にも当たる）。
+- **この ADR は「バグ修正・診断の追加」の範囲に留め、公開 union の拡張方針という
+  別の判断（#541 の線引き）にオーナー判断を仰ぐ方を選んだ。** 見送りであって
+  却下ではない——§4「これが覆るとしたら」参照。
+- ADR 0173 / ADR 0188 が採ってきた「次の一手が変わらない区別は増やさない」
+  という基準にも照らした: `annWindowHadNoInScopeCandidates` が教える一手
+  （「別の subject へ絞る」「厳密検索へフォールバックする」「近隣の
+  near-duplicate を疑う」）は、公開 `Omission` の新しい `kind` にしなくても
+  `explain.stages` を読めば得られる——**呼び出し側の主経路（`memories`/`omitted`
+  を見るだけの経路）を壊さずに、詳しく見たい側にだけ手を伸ばさせる**設計に
+  倒した。
+
+### 2.3 採らなかった案: store 側（`VectorStore.search()`）で「絞り込みで落とした件数」を返す
+
+`PostgresVectorStore.search()` が、ANN の候補枠のうち何件が scope 外（他
+テナント等）の行に占められたかを実測して返す案。
+
+**却下。**
+
+- [ADR 0011](./0011-no-window-count-in-ann-stage.md) が実測している通り、
+  HNSW の索引スキャン中に「窓の中身のうち scope 外が何件か」を厳密に数えようと
+  すると、`count(*) OVER ()` と同じ事故になる——プランナは索引を捨てて
+  Seq Scan + WindowAgg へ倒れるか（ADR 0011 分岐B）、索引を保てば返る件数は
+  データと無関係な `hnsw.ef_search` 依存の値になる（ADR 0011 分岐A）。
+  どちらも「正確な件数を安く得る」という前提を満たさない。
+- [ADR 0024](./0024-remove-exact-counts-option.md) が同じ理由で
+  `RecallQuery.exactCounts` を「予約」として残さず削除している——**測る手段が
+  無いまま欄だけを用意すると、名乗りどおりの値を持たない欄が残る**という同じ
+  失敗パターンになる。
+- 本 ADR が採った条件（`eligible > 0 && annHits.length === 0`）は、**store を
+  一切変えず**、core 側が既に持っている値（段1の ANN 結果件数、段5の scope
+  集約）の比較だけで導ける。「scope 外の行が何件窓を占めたか」という**正確な
+  内訳**は引き続き分からないままだが（ADR 0011 の限界そのもの）、
+  「scope 内の候補が1件も窓に入らなかったか」という**2値の判定**には
+  内訳を数える必要が無い——ここが store 側の変更を避けられた理由である。
+
+---
+
+## 3. 北極星の5つの問いに当てた結果
+
+| 問い                                      | この判断にどう当たったか                                                                                                                                     |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **1**（量を減らす方向か）                 | `explain.stages` に真偽値1つが増えるだけ。`memories`/`omitted` の量・形は変わらない。                                                                        |
+| **2**（無効にしても成立するか）           | 該当しない——`wantsAnn` が真の通常経路でしか関与せず、オプトインの機構を増減させない。既存の呼び出し側（このキーを読まないコード）は1バイトも影響を受けない。 |
+| **3**（選ばれた理由を後から説明できるか） | **これが本題**。全滅と正常時の混同を、公開型を壊さずに説明可能にした。ただし「型で守られた契約ではない」という限界は §5 に明記する。                         |
+| **4**（推論と事実を区別しているか）       | 該当する——`annWindowHadNoInScopeCandidates` は `eligible`/`annHits.length` という実測済みの件数の比較から導く事実の申告であり、推測を含まない。              |
+| **5**（LLM を呼ばずに済ませられないか）   | 既存の比較演算を1つ足しただけ。DB 往復も LLM 呼び出しも増えない。                                                                                            |
+
+### `docs/north-star.md`「目指す姿」6番目との対応
+
+逐語（[docs/north-star.md](../north-star.md) 33行目）:
+
+> **知らないことを、知らないと言える。**——「見つからなかった」と「探していない」を、
+> 同じ顔で返さない。
+
+`ann_unreached` 単体では、この2つが同じ顔（`omitted` に `ann_unreached` だけ）
+で返る（§1）。本 ADR は `explain.stages` にもう1段深い顔を用意した——
+`annWindowHadNoInScopeCandidates: true` は「探していない」（scope の候補を
+ANN が一度も見ていない）の側を、`ann_unreached` はあっても `false` の側は
+「見つかったが `eligible` に届かない」（正常時、または `eligible == 0` で
+そもそも探す対象が無かった）の側を指す。**ただし ADR 0193 §8 と同じ限界を
+引き継ぐ**——`explain.stages` を読まない呼び出し側にとっては、依然として
+`ann_unreached` だけが見える顔のままである（§5「引き受けた負債」）。
+
+---
+
+## 4. これが覆るとしたら
+
+1. **[Issue #541](https://github.com/takecchi/mnemora/issues/541) の線引き
+   （union 拡張を破壊的変更としてどう扱うか）が決まったとき。** 決まった線が
+   「診断的な `kind` の追加は許容範囲」だと判断されれば、`annWindowHadNoInScopeCandidates`
+   相当の情報を `Omission` の新しい `kind`（b-1）へ昇格させる方が、呼び出し側に
+   とって `explain.stages` を読まなくてよい分だけ発見しやすくなる。**この ADR の
+   決定はそのときのための土台**——条件式（`eligible > 0 && annHits.length === 0`）
+   は既にここで確定しているので、昇格する際に新しい判定ロジックを作り直す
+   必要は無い。
+2. **`explain.stages` を読む呼び出し側が実際に現れ、`detail` の型無し性
+   （zod で検証されない）が実運用で問題になったとき。** そのときは
+   `StageTrace.detail` 全体、あるいは ANN チャンネルの detail だけでも
+   型付きスキーマへ昇格する設計判断が要る——本 ADR の範囲外。
+3. **store 側（`PostgresVectorStore`）で「窓の内訳」を安価に数える手段が
+   新しく見つかったとき**（例えば pgvector 側の将来のバージョンが
+   `EXPLAIN` 相当の情報を安価に返す拡張を持つ場合）。そのときは §2.3 の
+   却下理由（ADR 0011 の実測）自体を作り直す必要がある——現時点ではその
+   手段は無い。
+
+---
+
+## 5. 誰が壊れうるか / 引き受けた負債
+
+**⛔ 以下は「問題ない」と断定しない。正直に負債として書く。**
+
+1. **`explain.stages` を読まない既存の呼び出し側（`memories`/`omitted` だけを
+   見る経路）にとっては、Issue #671 の全滅と正常時は依然として区別できない
+   ままである。** 本 ADR は「区別する手段を追加した」のであって、「既定で
+   区別が見える」ようにはしていない——`omitted` だけを見る呼び出し側（例えば
+   `examples/chat`）は、この ADR の後もこの区別を利用しない。
+2. **`StageTrace.detail` は zod で検証されない型無しの欄である。**
+   `annWindowHadNoInScopeCandidates` というキー名の綴りや値の形（boolean）が
+   将来変わっても、`RecallOutputValidationMode` はそれを検出しない——公開型の
+   破壊的変更としては現れないが、**事実上の契約変更が静かに起こりうる**という
+   一般的なリスクを、この欄の性質としてそのまま引き継ぐ（`companionsAdded` と
+   同じ性質、新しく持ち込んだものではない）。
+3. **b-1（`Omission` の新しい `kind`）を見送ったことで、Issue #541 の線引きが
+   長期間決まらなければ、この情報は `explain.stages` に留め置かれたままになる。**
+   §4-1 の「これが覆るとしたら」が実現しない限り、呼び出し側にとっての
+   発見しやすさは今のままである。
+4. **「常に出す（false も出す）」という選択が、`detail` のペイロードを
+   ANN チャンネルの trace 1件につき常に数バイト増やす。** ADR 0193 §8-4 が
+   `recall-footprint.ts`・`examples/chat` の費用への影響が無いことを確認した
+   のと同じ理由（`omitted`/`ann_unreached`/`ann_truncated` を参照する経路のみが
+   費用計算に影響し、`explain.stages` の detail は参照されない）で、本 ADR でも
+   影響は無いと考えているが、**この ADR の作業では `recall-footprint.ts` を
+   改めて読み直していない**——ADR 0193 の実測からの外挿であり、確かめていない
+   （§7「確かめていないこと」）。
+
+---
+
+## 6. 決めたこと（実装）
+
+1. `packages/core/src/recall-runtime.ts`: ANN チャンネルの `candidate_generation`
+   trace を `let annStageTrace: StageTrace | undefined` に保持し、既存の
+   `ann_unreached` 判定の直後で、その判定を変えずに
+   `annStageTrace.detail.annWindowHadNoInScopeCandidates` を追記する。
+   push する場所・順序・既存の detail キーは1つも変えない。
+2. `packages/core/src/__tests__/recall-pipeline.test.ts`: 新しい `describe` を
+   1本追加——陽性（ANN 0件・`eligible > 0`）、対照A（正常時）、対照B
+   （`eligible == 0`）の3歯。
+3. `docs/recall.md` の `ann_unreached` の説明（行377付近）に、この ADR を指す
+   追記を足す（型例・既存の記述は書き換えない）。
+4. `CHANGELOG.md` の既存の未リリース節に1行足す（新しい版の節は起こさない）。
+
+---
+
+## 7. 測ったこと
+
+- 【実測】`pnpm --filter @mnemora/core run typecheck`: 緑。
+- 【実測】`npx eslint packages/core/src/recall-runtime.ts
+packages/core/src/__tests__/recall-pipeline.test.ts`: 差分無し。
+- 【実測】`npx prettier --check` 同2ファイル: 差分無し。
+- 【実測】`pnpm --filter @mnemora/core exec vitest run
+src/__tests__/recall-pipeline.test.ts`: 75/75 緑（新規3歯を含む）。
+- 【実測】公開 API 表面の門（[ADR 0178](./0178-public-api-surface-gate.md)、
+  `node scripts/check-public-api-surface.mjs`）: 6パッケージすべて build した
+  うえで実行し、`@mnemora/core` を含む全パッケージが「差分なし」。
+  `StageTrace.detail` は元々 `Record<string, unknown>` 型であり、キーの追加は
+  `.d.ts` シグネチャに現れないことを、この実測で裏付けた。
+- 【実測】変異試験（`git checkout` は使わず、`cp` で退避・復元）:
+  1. **変異1**（常に `true` に固定）: 対照A・対照Bの2歯が赤くなった
+     （`expected false to be true`）。
+  2. **変異2**（常に `false` に固定）: 陽性の歯が赤くなった
+     （`expected true to be false`）。
+  3. 各変異後 `cp` で復元し、`git status --porcelain` が空になることと、
+     復元後に該当する歯が緑に戻ることを確認した。
+
+---
+
+## 8. 確かめていないこと
+
+- **Issue #671 の実測（HNSW の候補枠が他テナントの行で埋まり全滅する）そのものを、
+  本 ADR の作業で再現していない。** Issue #671 の実測をそのまま引用した
+  （【受】）——本 ADR が足すのは `annWindowHadNoInScopeCandidates` という
+  診断キーであり、Issue #671 が指摘する根本原因（`hnsw.iterative_scan` の
+  既定値、`kPrime == ef_search` の余裕の無さ）には触れない。根本原因側の
+  対応は PR 1（`hnsw.iterative_scan=relaxed_order` を `search()` に入れる案、
+  ADR 0284（PR 1、未マージ）が検討している）の射程であり、**本 ADR の決定は
+  PR 1 の有無に関係なく単独で成り立つ**——`annWindowHadNoInScopeCandidates` は
+  `hnsw.iterative_scan` の設定値に依存せず、`eligible`/`annHits.length` の
+  比較だけで決まる。
+- **`recall-footprint.ts`・`examples/chat` への費用影響**——ADR 0193 §8-4 の
+  実測（`omitted`/`ann_unreached`/`ann_truncated` を参照する経路のみが影響し
+  `explain.stages` の detail は参照されない）からの外挿であり、本 ADR の
+  作業で `recall-footprint.ts` を改めて read し直してはいない。
+- **本番規模での `eligible > 0 && annHits.length === 0` の発生頻度**——
+  Issue #671 は合成データでの最悪ケースを実測しているが、実際のテナントの
+  scope 分布でこの条件がどれだけ発生するかは測っていない（ADR 0193 §10 と
+  同じ限界）。
