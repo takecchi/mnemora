@@ -315,5 +315,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0288](./0288-ann-unreached-severity.md) | `AnnUnreachedOmission` に `severity?: AnnUnreachedSeverity` を追加のみで足す（Issue #361、ADR 0193 §7-1 の再検討） | 採用 (2026-09) |
 | [0289](./0289-recalled-memory-speaker-subject.md) | `RecalledMemory` に `speaker`/`subjectId` を任意欄として足す —— Issue #579 案D を、型ではなく runtime の保証で守る（非破壊） | 採用 (2026-09) |
 | [0290](./0290-activity-seq-read-path-documented-not-implemented.md) | Issue #338 案2（`activity_seq` の進みから recall 頻度を測る）の段0 — 読み口は既に在ったので、実装はせず文書化だけを足す | 採用 (2026-09) |
+| [0291](./0291-remove-pr-text-checks-and-release-followup-notice.md) | PR タイトル/本文を見る CI ステップ3本と、リリース後の追随通知ワークフローを削除する | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

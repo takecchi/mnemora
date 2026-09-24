@@ -594,7 +594,7 @@ git show origin/main:CHANGELOG.md | grep -n "^## \[${TAG#v}\]" || echo "✗ 節�
 
 ⛔ **機械側の補助は無い。**ADR 0251 の*通知*（`.github/workflows/release-followup-notice.yml`）は
 上の3回とも動いていて3回とも読まれなかったため（ADR 0252 決定4 / ADR 0267 決定5）、
-オーナーの判断で削除した（ADR 0290）。
+オーナーの判断で削除した（ADR 0291）。
 
 ⚠ **節は Release を作る*前*に起こす。**後からしか分からない事実（`published` の時刻・Release へのリンク・
 自動生成本文の行数）は**後から埋めてよい**——**門が見るのは節の存在だけである。**
@@ -2045,7 +2045,7 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
 
 かつて `.github/workflows/release-followup-notice.yml` が **(a) だけ**を通知していたが
 （[ADR 0251](./decisions/0251-release-follow-up-notice-not-a-gate.md)）、
-オーナーの判断で削除した（[ADR 0290](./decisions/0290-remove-pr-text-checks-and-release-followup-notice.md)）。
+オーナーの判断で削除した（[ADR 0291](./decisions/0291-remove-pr-text-checks-and-release-followup-notice.md)）。
 ⟹ **(a) も (b) も、この §5.5 を人が通すことだけが頼りである。**
 
 ⚠ **【2026-09-21 追記】(a) については、別に門が在る。**
