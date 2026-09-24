@@ -1,0 +1,72 @@
+
+########## stage3a-isolation: temperature=unspecified（llmMode=openai） ##########
+  trial 1/20: legacy=pass eventAwareFreshness=fail
+  trial 2/20: legacy=pass eventAwareFreshness=pass
+  trial 3/20: legacy=pass eventAwareFreshness=fail
+  trial 4/20: legacy=pass eventAwareFreshness=fail
+  trial 5/20: legacy=pass eventAwareFreshness=fail
+  trial 6/20: legacy=pass eventAwareFreshness=pass
+  trial 7/20: legacy=pass eventAwareFreshness=fail
+  trial 8/20: legacy=pass eventAwareFreshness=pass
+  trial 9/20: legacy=pass eventAwareFreshness=pass
+  trial 10/20: legacy=pass eventAwareFreshness=fail
+  trial 11/20: legacy=pass eventAwareFreshness=fail
+  trial 12/20: legacy=pass eventAwareFreshness=fail
+  trial 13/20: legacy=pass eventAwareFreshness=fail
+  trial 14/20: legacy=pass eventAwareFreshness=pass
+  trial 15/20: legacy=pass eventAwareFreshness=fail
+  trial 16/20: legacy=pass eventAwareFreshness=pass
+  trial 17/20: legacy=pass eventAwareFreshness=pass
+  trial 18/20: legacy=pass eventAwareFreshness=fail
+  trial 19/20: legacy=pass eventAwareFreshness=fail
+  trial 20/20: legacy=pass eventAwareFreshness=fail
+
+--- OpenAI API 実測（usage-meter） ---
+chat.completions.create: 呼び出し 40 回 / prompt_tokens=4440 / completion_tokens=182
+embeddings.create      : 呼び出し 120 回 / prompt_tokens=2160
+費用（2026-09 時点の公開価格表による概算。OpenAI の請求 API から取得した実額ではない）:
+  LLM input  : $0.000666
+  LLM output : $0.000109
+  Embedding  : $0.000043
+  合計       : $0.000818
+
+########## stage3a-isolation: temperature=zero（llmMode=openai） ##########
+  trial 1/20: legacy=pass eventAwareFreshness=fail
+  trial 2/20: legacy=pass eventAwareFreshness=fail
+  trial 3/20: legacy=pass eventAwareFreshness=fail
+  trial 4/20: legacy=pass eventAwareFreshness=fail
+  trial 5/20: legacy=pass eventAwareFreshness=fail
+  trial 6/20: legacy=pass eventAwareFreshness=fail
+  trial 7/20: legacy=pass eventAwareFreshness=fail
+  trial 8/20: legacy=pass eventAwareFreshness=fail
+  trial 9/20: legacy=pass eventAwareFreshness=fail
+  trial 10/20: legacy=pass eventAwareFreshness=fail
+  trial 11/20: legacy=pass eventAwareFreshness=fail
+  trial 12/20: legacy=pass eventAwareFreshness=fail
+  trial 13/20: legacy=pass eventAwareFreshness=fail
+  trial 14/20: legacy=pass eventAwareFreshness=fail
+  trial 15/20: legacy=pass eventAwareFreshness=fail
+  trial 16/20: legacy=pass eventAwareFreshness=fail
+  trial 17/20: legacy=pass eventAwareFreshness=fail
+  trial 18/20: legacy=pass eventAwareFreshness=fail
+  trial 19/20: legacy=pass eventAwareFreshness=fail
+  trial 20/20: legacy=pass eventAwareFreshness=fail
+
+--- OpenAI API 実測（usage-meter） ---
+chat.completions.create: 呼び出し 40 回 / prompt_tokens=4440 / completion_tokens=180
+embeddings.create      : 呼び出し 120 回 / prompt_tokens=2160
+費用（2026-09 時点の公開価格表による概算。OpenAI の請求 API から取得した実額ではない）:
+  LLM input  : $0.000666
+  LLM output : $0.000108
+  Embedding  : $0.000043
+  合計       : $0.000817
+
+--- 集計: temperature=unspecified ---
+  legacy: gradeAnswer pass=20/20, 古い予定(old-seat-undated) rank1=0/20, 文脈に入った=0/20
+  eventAwareFreshness: gradeAnswer pass=7/20, 古い予定(old-seat-undated) rank1=20/20, 文脈に入った=20/20
+
+--- 集計: temperature=zero ---
+  legacy: gradeAnswer pass=20/20, 古い予定(old-seat-undated) rank1=0/20, 文脈に入った=0/20
+  eventAwareFreshness: gradeAnswer pass=0/20, 古い予定(old-seat-undated) rank1=20/20, 文脈に入った=20/20
+
+書き出した: /tmp/mgr-026e33d5/mnemora/examples/chat/bench-results/answer-time-weighting-stage3a-isolation.json
