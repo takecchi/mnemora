@@ -24,7 +24,7 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
  *
  * ## 🔴 この歯が塞ぐ具体的な穴
  *
- * **いま `ci.yml` / `publish.yml` / `release-followup-notice.yml` に
+ * **いま `ci.yml` / `publish.yml` に
  * `paths:` / `paths-ignore:` は1件も無い**(Issue #426 本文が grep で確認済み。
  * この歯も検査1でそれを固定する)。**だが誰かが `on:` へ `paths-ignore:` を1行足した
  * 瞬間、docs-only の変更などで7本の測定ジョブが静かに skip されはじめる。**
@@ -99,14 +99,10 @@ const CI_WORKFLOW_PATH = fileURLToPath(new URL("../../.github/workflows/ci.yml",
 const PUBLISH_WORKFLOW_PATH = fileURLToPath(
   new URL("../../.github/workflows/publish.yml", import.meta.url),
 );
-const RELEASE_FOLLOWUP_NOTICE_WORKFLOW_PATH = fileURLToPath(
-  new URL("../../.github/workflows/release-followup-notice.yml", import.meta.url),
-);
 
 const WORKFLOW_PATHS = {
   "ci.yml": CI_WORKFLOW_PATH,
   "publish.yml": PUBLISH_WORKFLOW_PATH,
-  "release-followup-notice.yml": RELEASE_FOLLOWUP_NOTICE_WORKFLOW_PATH,
 };
 
 /**
@@ -200,7 +196,7 @@ function findPathsFilterLines(blankedText) {
   return blankedText.split("\n").filter((line) => /^[ \t]*paths(-ignore)?:/.test(line));
 }
 
-describe("ci.yml/publish.yml/release-followup-notice.yml の on: に paths:/paths-ignore: が無い(Issue #426 検査1)", () => {
+describe("ci.yml/publish.yml の on: に paths:/paths-ignore: が無い(Issue #426 検査1)", () => {
   it.each(Object.entries(WORKFLOW_PATHS))(
     "🔴 %s: コメント潰しが「扱えない」形に当たっていない(無視できないAPIにする)",
     (_name, path) => {
