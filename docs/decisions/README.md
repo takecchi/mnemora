@@ -311,5 +311,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0284](./0284-hnsw-iterative-scan-relaxed-order-adopted.md) | 段1の `search()` に `hnsw.iterative_scan = relaxed_order` を採用する — 他テナントの near-duplicate が候補枠を独占して全滅する問題を塞ぐ（ADR 0063 決定1を覆す、Issue #671） | 採用 (2026-09) |
 | [0285](./0285-ann-window-empty-of-in-scope-candidates-stage-detail.md) | ANN の候補枠が scope 内の候補を1件も拾えなかったことを stage detail に名乗らせる — `Omission` union は変えない（Issue #671） | 採用 (2026-09) |
 | [0286](./0286-recall-include-subjectless.md) | `recall()` に `includeSubjectless` を足し、「subject X、または主題なし」を1回で引けるようにする（Issue #608 項目③(b)） | 採用 (2026-09) |
+| [0287](./0287-extraction-subject-candidates-caller-supplied.md) | 呼び出し側が subject 候補一覧を渡し、抽出器に選ばせる口を足す（Issue #608 項目②(b)） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
