@@ -323,5 +323,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0296](./0296-answer-content-preservation-layer2-indicator.md) | `answer` に層2（回答に必要な情報の保持）の決定的な指標を足す — 出典到達・回答正誤とは別欄、記録カセットの録り直しを要求しない（Issue #693、親 #498） | 採用 (2026-09) |
 | [0297](./0297-answer-retention-judge-positive-control-recorded.md) | 完了条件4「回答評価」側の陽性対照を実 API で記録し、カセット再生の歯として固定する（Issue #498） | **提案 (2026-09)** |
 | [0298](./0298-recalled-memory-recorded-occurred-at.md) | `RecalledMemory` に `recordedAt`/`occurredAt` を任意欄として足す —— Issue #691 の子（Issue #702）、「後で訂正された」を読むための時点（非破壊） | 採用 (2026-09) |
+| [0299](./0299-extraction-context.md) | 抽出文脈を観測と保存し、相対日付の暦計算をモデルから分ける | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

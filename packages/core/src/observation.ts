@@ -133,7 +133,37 @@ export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "documen
  */
 export type SubjectCandidatesInput = string[];
 
+/** Bounded, caller-selected context for extraction. Persisted with the observation.
+ * An empty object opts into metadata-aware extraction without preceding messages.
+ * Context is evidence for resolving references, not additional observations to extract.
+ */
+export const ExtractionContextSchema = z.object({
+  messages: z
+    .array(
+      z.object({
+        text: z.string().min(1).max(2000),
+        speaker: z.string().min(1).max(200).optional(),
+      }),
+    )
+    .max(8)
+    .optional(),
+  timeZone: z
+    .string()
+    .min(1)
+    .refine((value) => {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: value });
+        return true;
+      } catch {
+        return false;
+      }
+    }, "Invalid IANA time zone")
+    .optional(),
+});
+export type ExtractionContext = z.infer<typeof ExtractionContextSchema>;
+
 export interface ObserveUtteranceInput {
+  extractionContext?: ExtractionContext;
   kind: "utterance";
   subjectId?: string;
   externalId?: string;
@@ -148,6 +178,7 @@ export interface ObserveUtteranceInput {
 }
 
 export interface ObserveEventInput {
+  extractionContext?: ExtractionContext;
   kind: "event";
   subjectId?: string;
   externalId?: string;
@@ -162,6 +193,7 @@ export interface ObserveEventInput {
 }
 
 export interface ObserveDocumentInput {
+  extractionContext?: ExtractionContext;
   kind: "document";
   subjectId?: string;
   externalId?: string;
@@ -198,6 +230,7 @@ export type ObserveInput =
 const SubjectCandidatesInputSchema = z.array(z.string().min(1)).optional();
 
 const ObserveUtteranceInputSchema = z.object({
+  extractionContext: ExtractionContextSchema.optional(),
   kind: z.literal("utterance"),
   subjectId: z.string().min(1).optional(),
   externalId: z.string().min(1).optional(),
@@ -211,6 +244,7 @@ const ObserveUtteranceInputSchema = z.object({
 }) satisfies z.ZodType<ObserveUtteranceInput>;
 
 const ObserveEventInputSchema = z.object({
+  extractionContext: ExtractionContextSchema.optional(),
   kind: z.literal("event"),
   subjectId: z.string().min(1).optional(),
   externalId: z.string().min(1).optional(),
@@ -224,6 +258,7 @@ const ObserveEventInputSchema = z.object({
 }) satisfies z.ZodType<ObserveEventInput>;
 
 const ObserveDocumentInputSchema = z.object({
+  extractionContext: ExtractionContextSchema.optional(),
   kind: z.literal("document"),
   subjectId: z.string().min(1).optional(),
   externalId: z.string().min(1).optional(),
