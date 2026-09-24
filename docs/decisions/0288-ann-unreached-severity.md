@@ -193,12 +193,12 @@ annHits.length < eligible`）は変更していない。`severity` はその内�
 
 ### 4. 既定の `kPrime`（`DEFAULT_OVER_FETCH_FACTOR`）・`hnsw.ef_search` は変えない
 
-ADR 0193 §7-4・オーナー承認の推奨案（「既定の kPrime/ef_search は上げない」）のとおり。
+ADR 0193 §7-4・オーナーの委任を受けたクローンが決めた推奨案（「既定の kPrime/ef_search は上げない」）のとおり。
 本番の探索パラメータの見直しは、この ADR の範囲外——ADR 0111 の測定を伴う別の判断。
 
 ### 5. `omitted`/`recall-footprint`/`examples/chat` からこの札を間引かない
 
-オーナー承認の推奨案（「札を要約から間引かない」）のとおり。`recall-footprint.ts` は
+オーナーの委任を受けたクローンが決めた推奨案（「札を要約から間引かない」）のとおり。`recall-footprint.ts` は
 `ann_unreached` を元々参照していない（ADR 0193 §8-4 の実測どおり不変）。`examples/chat`
 の `formatOmittedSummary`（`compare.ts`）は `case "ann_unreached": return "ann_unreached";`
 のまま変更していない——`severity` を表示に含めるかどうかは呼び手側の判断に委ね、
@@ -310,7 +310,7 @@ pnpm --filter @mnemora/core exec vitest run \
    doc コメントに明記したが、**呼び出し側のコード・ドキュメントを横断して「`"info"` は
    無視してよい」という誤読が広まらないかは検査していない。**
 4. **`examples/chat`/`compare.ts` の出力に `severity` を実際に反映するかどうかは、
-   この ADR では決めていない**（オーナー承認の推奨案は「間引かない」までで、
+   この ADR では決めていない**（オーナーの委任を受けたクローンが決めた推奨案は「間引かない」までで、
    「表示に severity を使うか」までは指示していない）。`formatOmittedSummary` は
    1バイトも変えていない——`severity` を読みたい呼び手は `Omission` を直接見ることになる。
 5. **ADR 0193 §5.3 の「見た目の矛盾」**（`ann_truncated` が不在でも `ann_unreached` が
