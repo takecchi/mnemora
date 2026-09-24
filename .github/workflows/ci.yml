@@ -562,7 +562,7 @@ jobs:
           path: ${{ github.workspace }}/compare.json
           if-no-files-found: ignore
 
-      - name: RecallQuery.timeWeighting（legacy/eventAwareFreshness、Issue #690・ADR 0300）を answer-time-weighting で再生し、正誤の表をログへ残す
+      - name: "RecallQuery.timeWeighting（legacy/eventAwareFreshness、Issue #690・ADR 0300）を answer-time-weighting で再生し、正誤の表をログへ残す"
         # 🔴 このステップも `OPENAI_API_KEY` を設定していないが、`compare` と同じ理由で
         # 擬似(deterministic) provider では走らない——`examples/chat/cassettes/
         # answer-time-weighting.json`（段3b-2、`record:answer-time-weighting` を
