@@ -187,11 +187,11 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
     kind: "builtin_default",
     measuredFrom:
       "examples/chat/compare-baseline.json（CI の example-chat ジョブが実測し repo に commit した値。" +
-      "llmMode=recorded / embeddingMode=recorded、provenance commit a55c7ba。ADR 0298 / Issue #340" +
+      "llmMode=recorded / embeddingMode=recorded、provenance commit a55c7ba。ADR 0299 / Issue #340" +
       "——filler の重複を無くすため scenario.ts を直し、この基準値を録り直した後の値）の12点のうち、" +
       "目次帯が空の8点（totalInScope <= DEFAULT_RECALL_LIMIT）だけを使った最小二乗。" +
       "帯のある4点は較正に使っていない（hold-out）。" +
-      "⚠ 2026-09-24訂正（ADR 0298）: hold-in/hold-out の内訳は以前「7点/5点」だったが、" +
+      "⚠ 2026-09-24訂正（ADR 0299）: hold-in/hold-out の内訳は以前「7点/5点」だったが、" +
       "filler の内容が変わったことで各 turnCount の totalInScope 自体が動き、いまは「8点/4点」" +
       "（turnCount=42 行が hold-out から hold-in 側へ移った）。",
     measuredUnder: {
@@ -220,7 +220,7 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
  * 較正していない環境・外挿の領域ではもっと外れうる——そのことは
  * `origin` と `RecallFootprintEstimate.extrapolated` が名乗る。
  *
- * ### ⚠ 2026-09-24 訂正（ADR 0298・Issue #340）
+ * ### ⚠ 2026-09-24 訂正（ADR 0299・Issue #340）
  *
  * 上の「最大残差 1.56%（hold-out側1.28%）」「charsPerDigest=15.458 /
  * fixedIndexChars=170.881」は、**`examples/chat/scenario.ts` の filler が12文の固定配列を

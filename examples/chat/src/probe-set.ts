@@ -89,7 +89,7 @@ export const PROBES: Probe[] = [
  * 文を作る——同じ文が繰り返されると擬似 embedding が同一ベクトルになり、順位付けの
  * 試験にならないため、この benchmark では巡回ではなく直積で一意性を作る(`scenario.ts`
  * の filler も、当初は固定12行を `i % 12` で巡回していたが、320往復の会話で重複が
- * 連想枠の tie-break を非決定にしたため(ADR 0170)、Issue #340/ADR 0298 で
+ * 連想枠の tie-break を非決定にしたため(ADR 0170)、Issue #340/ADR 0299 で
  * ここと同じ「話題×述語の直積」方式に直した——2箇所が独立に同じ結論へ収束した形)。
  */
 const HAYSTACK_TIME_CONTEXT = [
