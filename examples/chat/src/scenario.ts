@@ -48,6 +48,27 @@ export const QUERY_TEXT = "ところで、わたしの好きな色を覚えて�
  * （`mnemora-path.ts`）は `userUtterances`（user 発話のみ）しか `observe()` しないため
  * assistant の重複はこのバグに関与しないが、対称な規則にしておくほうが「なぜ片方だけ
  * 一意にしたか」を説明する負担が無い。
+ *
+ * ### ⚠ 訂正: `fillerIndex` から (話題, 述語) を選ぶ順序（1回目の録音後に直した）
+ *
+ * 話題・述語の**内容**（何文字・どんな文か）は録音前に決めて以降変えていない。
+ * **変えたのは、`fillerIndex` を (topicIndex, predicateIndex) に分解する順序（実装の
+ * 都合で選んだ軸の速さ）だけである**——最初は話題を速く（`fillerIndex %
+ * FILLER_TOPICS.length`）・述語を遅く回していた。1回目の録音（実 API）を検算した
+ * ところ、この順序では `fillerPairs` が20増えるごとにしか述語が切り替わらず、
+ * **1つの述語が20個の話題すべてに対して連続して使われる**ことが分かった。
+ * 述語には「これは記憶に値する事実か」を本物の LLM が判定する上で強く効くものが
+ * あり（例: 「〜に取り組んでみようと思っています。」はほぼ毎回抽出されるが、
+ * 「〜について話したいです。」は一度も抽出されない——20話題全部で確認した）、
+ * **述語が遅く変わる順序では、`fillerPairs` の小さい範囲がまるごと同じ述語だけに
+ * 支配され、スコープ内件数が「しばらく増えない→段差で急に増える」という不自然な
+ * 階段状になった**（`totalInScope` が `fillerPairs<=20` の全域で一定のまま、
+ * `fillerPairs=40` で急増）。これは**内容の選び方の問題ではなく、列挙順序という
+ * 実装細部の問題**だったため、話題・述語の文面には一切手を触れず、
+ * `fillerLine()` の軸の速さだけを入れ替えた（述語を速く・話題を遅く）——
+ * 述語が20個変わるほうが先に一巡するので、`fillerPairs` が小さい範囲でも
+ * 抽出されやすい述語・されにくい述語が早期に混ざる。この訂正のために
+ * カセットを録り直した（PR 本文の実測回数を参照）。
  */
 const FILLER_TOPICS = [
   "天気",
@@ -140,8 +161,8 @@ function fillerLine(
         "FILLER_TOPICS か述語の数を増やすこと。",
     );
   }
-  const topic = FILLER_TOPICS[fillerIndex % FILLER_TOPICS.length]!;
-  const predicate = predicates[Math.floor(fillerIndex / FILLER_TOPICS.length) % predicates.length]!;
+  const predicate = predicates[fillerIndex % predicates.length]!;
+  const topic = FILLER_TOPICS[Math.floor(fillerIndex / predicates.length) % FILLER_TOPICS.length]!;
   return predicate(topic);
 }
 
