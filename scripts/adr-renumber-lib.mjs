@@ -269,9 +269,9 @@ export function rewriteReferencesInText(text, renames) {
  * - **`ADR` の錨が無い裸の4桁数字**（日付・issue番号等）。
  * - **`/` 以外の区切り**（実測で実在しないため対象にしていない——広げるなら
  *   新しい実例が出てから）。
- * - **PR タイトル・本文**——それは `scripts/check-pr-adr-reference.mjs`
- *   （[ADR 0211](../docs/decisions/0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md)）
- *   の担当であり、repo 内のファイルではない。
+ * - **PR タイトル・本文**——repo 内のファイルではない。かつて CI で検査していた
+ *   `scripts/check-pr-adr-reference.mjs`（[ADR 0211](../docs/decisions/0211-check-pr-adr-reference-catches-abandoned-numbers-in-title-and-body.md)）
+ *   はオーナーの判断で削除した ⟹ **いまは人が目で見るしかない。**
  * - **今日の実例（`runtime-method-count-not-baked.test.mjs`）以外に、同種の
  *   取りこぼしが既に `main` に在るかは、この関数を書いた時点では掃いていない。**
  *
@@ -327,10 +327,8 @@ export function findUnrewrittenAdrReferences(text, renames) {
  * #436](https://github.com/takecchi/mnemora/pull/436)、`aacb982e`）自身が
  * 実際に踏んでいる——タイトルは正しく直したが、本文中の6箇所は旧番号のまま
  * `main` に着地した。この関数はその実例を受けて、本文についても同じ強さで警告する
- * ように直した。機械的な検査（読み飛ばされない門）は
- * `scripts/check-pr-adr-reference.mjs` が CI で持つ——ただしそれも
- * 「最後の push の後にタイトル・本文だけを編集した」場合までは捕捉できない
- * （同スクリプトの docstring 参照）。
+ * ように直した。かつて CI にあった機械的な検査（`scripts/check-pr-adr-reference.mjs`）は
+ * オーナーの判断で削除した ⟹ **この警告を読んで人が直すことだけが残っている。**
  *
  * @param {{ oldNumber: string, newNumber: string }[]} renames 実際に付け替えた
  *   ADR の一覧（`planRenumbering` が返す配列のうち `renamed: true` のもの）
@@ -344,8 +342,7 @@ export function renumberedReferenceWarning(renames) {
     "PR タイトルと本文——squash commit のタイトルと本文の両方——は機械が直せません" +
       "（このリポジトリは squash_merge_commit_title=PR_TITLE / squash_merge_commit_message=PR_BODY）。",
     'マージ前に次を実行して両方直すこと: gh pr edit <PR番号> --title "...（ADR <新番号>）" --body "..."',
-    "本文が旧番号を名指ししたまま残っていないかは scripts/check-pr-adr-reference.mjs が CI で検査します" +
-      "（ただしこの push の後にタイトル・本文だけを編集した場合は、次に push するまで検査されません）。",
+    "⚠ 本文が旧番号を名指ししたまま残っていないかは、CI では検査していません。目で確かめること。",
   ].join("\n");
 }
 

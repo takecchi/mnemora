@@ -592,10 +592,9 @@ git show origin/main:CHANGELOG.md | grep -n "^## \[${TAG#v}\]" || echo "✗ 節�
 ⛔ **通さなくても赤くならない。**⟹ **飛ばした瞬間に、`v0.3.0` / `v0.4.0` / `v0.5.0` で
 3回続けて起きた「Release は出たのに節が無い」へ戻る。**
 
-⭐ **残っている機械側の補助は、ADR 0251 の*通知*だけである**
-（`.github/workflows/release-followup-notice.yml`、終了コードは常に 0）。
-⚠ **その通知は、上の3回とも動いていて、3回とも読まれなかった**（ADR 0252 決定4 / ADR 0267 決定5）。
-⟹ ⛔ **「通知が在るから大丈夫」と読まないこと。**
+⛔ **機械側の補助は無い。**ADR 0251 の*通知*（`.github/workflows/release-followup-notice.yml`）は
+上の3回とも動いていて3回とも読まれなかったため（ADR 0252 決定4 / ADR 0267 決定5）、
+オーナーの判断で削除した（ADR 0290）。
 
 ⚠ **節は Release を作る*前*に起こす。**後からしか分からない事実（`published` の時刻・Release へのリンク・
 自動生成本文の行数）は**後から埋めてよい**——**門が見るのは節の存在だけである。**
@@ -2042,15 +2041,12 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
 ⟹ ⛔ **§0.8 を通したことは、§5.5 を通したことにならない。**`v0.4.0` は実際にそうなった
 （未リリース節は追従していたが、出した後に誰もその節を `[0.4.0]` へ起こさなかった）。
 
-#### ⭐ 機械側の補助（⛔ 門ではない）
+#### ⛔ 機械側の補助は無い
 
-`.github/workflows/release-followup-notice.yml` が、Release を publish した瞬間に
-**(a) だけ**を通知する（[ADR 0251](./decisions/0251-release-follow-up-notice-not-a-gate.md)）。
-
-- 🔴 **終了コードは常に 0 で、required にも載せていない。**⟹ **見落としても何も止まらない。**
-  **止まらないから、この §5.5 が要る。**
-- ⛔ **(b) は機械が見ていない。**移行ガイドの項目番号と commit を機械可読に結ぶものが無いためである。
-  ⟹ **(b) を「通知が出なかったから大丈夫」と読まないこと。**
+かつて `.github/workflows/release-followup-notice.yml` が **(a) だけ**を通知していたが
+（[ADR 0251](./decisions/0251-release-follow-up-notice-not-a-gate.md)）、
+オーナーの判断で削除した（[ADR 0290](./decisions/0290-remove-pr-text-checks-and-release-followup-notice.md)）。
+⟹ **(a) も (b) も、この §5.5 を人が通すことだけが頼りである。**
 
 ⚠ **【2026-09-21 追記】(a) については、別に門が在る。**
 `.github/workflows/publish.yml` が **`npm publish` の前**で同じ述語を当てて落とす

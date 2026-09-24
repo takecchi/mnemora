@@ -254,9 +254,9 @@ describe("renumberedReferenceWarning — 付け替えたときだけ PR タイ�
     expect(typeof warning).toBe("string");
   });
 
-  it("scripts/check-pr-adr-reference.mjs が CI で本文も検査することを警告文が指す", () => {
+  it("本文を CI で検査していないこと（目で確かめること）を警告文が名乗る", () => {
     const warning = renumberedReferenceWarning([{ oldNumber: "0199", newNumber: "0200" }]);
-    expect(warning).toContain("check-pr-adr-reference.mjs");
+    expect(warning).toContain("CI では検査していません");
   });
 });
 
