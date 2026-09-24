@@ -357,11 +357,38 @@ export interface AnnTruncatedOmission {
  * だから新しい語彙（例えば独自の "unreachable" カウント種別）を作らず、既にある
  * `CountKind` の `'unknown'` で「取りこぼしたのは確かだが、何件かは分からない」とだけ言う。
  * （`AnnTruncatedOmission` が同じ形をしているのに倣った。）
+ *
+ * **`severity?: AnnUnreachedSeverity`（[ADR 0288](../../../docs/decisions/0288-ann-unreached-severity.md)、
+ * Issue #361）。**ADR 0193 §8-1 が引き受けた負債（`eligible > kPrime` のテナントでは
+ * この札が実質すべての `recall()` で鳴る「常時オン」になる）に対して、呼び手が
+ * 「構造上いつも鳴る札」と「実損の兆候がある札」を濾せるようにするために足した。
+ *
+ * **任意（`?`）にする理由**: `docs/migration-v1.md` 項目9・10 と ADR 0178 は
+ * 返り値型への**必須**フィールドの追加を破壊的変更に数える。v1.0.0 出荷済みの
+ * この repo で破壊的変更を出さないため、[ADR 0282](../../../docs/decisions/0282-score-breakdown-affinity-measured.md)
+ * （`affinityMeasured?: boolean`）と同じ形——**型は任意だが、runtime は必ず値を入れる**
+ * ——に揃えた。値の作り方・偽陰性の射程は ADR 0288 参照。
  */
 export interface AnnUnreachedOmission {
   kind: "ann_unreached";
   countKind: "unknown";
+  severity?: AnnUnreachedSeverity;
 }
+
+/**
+ * {@link AnnUnreachedOmission.severity} の値（[ADR 0288](../../../docs/decisions/0288-ann-unreached-severity.md)、Issue #361）。
+ *
+ * - `"warning"`: 同じ recall で、ANN 窓が実際に到達可能な下限（ADR 0285 追記の
+ *   `annReturnedFewerThanReachable` が真になる条件——`annStageTrace.detail` の
+ *   同じキーと**同じ式**から引く）に届かなかった。
+ * - `"info"`: それ以外——窓は満杯で、`eligible > kPrime` という構造だけで鳴っている
+ *   （ADR 0193 §8-1 が「常時オン」と名指しした状態そのもの）。
+ *
+ * **⚠ `"info"` は「損が無い」の保証ではない。** ANN の近似探索が窓を満杯にしたまま
+ * 真の近傍を取りこぼす事象（`ann-truncation.ts` の doc コメント参照）はこの値の外に
+ * 居る——ADR 0288「射程」参照。
+ */
+export type AnnUnreachedSeverity = "info" | "warning";
 
 /**
  * 段2の閾値比較が**どちらにも決まらなかった**候補
@@ -515,9 +542,16 @@ const AnnTruncatedOmissionSchema = z.object({
   undecidableReason: z.string().optional(),
 }) satisfies z.ZodType<AnnTruncatedOmission>;
 
+export const AnnUnreachedSeveritySchema = z.enum([
+  "info",
+  "warning",
+]) satisfies z.ZodType<AnnUnreachedSeverity>;
+
 const AnnUnreachedOmissionSchema = z.object({
   kind: z.literal("ann_unreached"),
   countKind: z.literal("unknown"),
+  // ADR 0288: 任意欄——非破壊（docs/migration-v1.md 項目9・10、ADR 0178）。
+  severity: AnnUnreachedSeveritySchema.optional(),
 }) satisfies z.ZodType<AnnUnreachedOmission>;
 
 const LexicalTruncatedOmissionSchema = z.object({

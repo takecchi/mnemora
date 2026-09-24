@@ -1499,7 +1499,9 @@ export interface AnnTruncatedOmission {
 export interface AnnUnreachedOmission {
     kind: "ann_unreached";
     countKind: "unknown";
+    severity?: AnnUnreachedSeverity;
 }
+export type AnnUnreachedSeverity = "info" | "warning";
 export interface ScoreNotComparableOmission {
     kind: "score_not_comparable";
     count: number;
@@ -1515,6 +1517,10 @@ export interface LexicalTruncatedOmission {
     countKind: "unknown";
 }
 export type Omission = StageSkippedOmission | FilteredOmission | BelowThresholdOmission | OverLimitOmission | BudgetDroppedOmission | NotIndexedOmission | AnnTruncatedOmission | AnnUnreachedOmission | LexicalTruncatedOmission | ScoreNotComparableOmission | UnitAssemblyDroppedOmission;
+export declare const AnnUnreachedSeveritySchema: z.ZodEnum<{
+    info: "info";
+    warning: "warning";
+}>;
 export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
     z.ZodObject<{
         kind: z.ZodLiteral<"stage_skipped">;
@@ -1618,6 +1624,10 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
     z.ZodObject<{
         kind: z.ZodLiteral<"ann_unreached">;
         countKind: z.ZodLiteral<"unknown">;
+        severity: z.ZodOptional<z.ZodEnum<{
+            info: "info";
+            warning: "warning";
+        }>>;
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"lexical_truncated">;
@@ -2172,6 +2182,10 @@ export declare const RecallResultSchema: z.ZodObject<{
         z.ZodObject<{
             kind: z.ZodLiteral<"ann_unreached">;
             countKind: z.ZodLiteral<"unknown">;
+            severity: z.ZodOptional<z.ZodEnum<{
+                info: "info";
+                warning: "warning";
+            }>>;
         }, z.core.$strip>,
         z.ZodObject<{
             kind: z.ZodLiteral<"lexical_truncated">;

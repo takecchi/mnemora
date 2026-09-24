@@ -9,6 +9,7 @@ import type {
   NotIndexedReasonSchema,
   OmissionSchema,
   ScopeRelationSchema,
+  AnnUnreachedSeveritySchema,
   GroupCountSchema,
   DigestEntrySchema,
   DigestBandLimitedBySchema,
@@ -39,6 +40,7 @@ import type {
   NotIndexedOmission,
   AnnTruncatedOmission,
   AnnUnreachedOmission,
+  AnnUnreachedSeverity,
   LexicalTruncatedOmission,
   ScoreNotComparableOmission,
   UnitAssemblyDroppedOmission,
@@ -489,6 +491,15 @@ type _p58_Ctx = Expect<Equals<z.infer<typeof CtxSchema>, Ctx>>;
 
 type _p59_ScopeRelation = Expect<Equals<z.infer<typeof ScopeRelationSchema>, ScopeRelation>>;
 
+// ADR 0288 / Issue #361: `AnnUnreachedOmission.severity?: AnnUnreachedSeverity` を足した。
+// `_p11_AnnUnreachedOmission`（上）は discriminated union の枝全体（`countKind`/`kind` も
+// 含む）を見ているので、`severity` が両側で一致していれば自動的に緑になる——
+// それとは別に、`AnnUnreachedSeveritySchema` 自身に `satisfies z.ZodType<...>` を足した
+// ので、ここにも対応するペアを登録する（このファイル冒頭のコメントの規律どおり）。
+type _p60_AnnUnreachedSeverity = Expect<
+  Equals<z.infer<typeof AnnUnreachedSeveritySchema>, AnnUnreachedSeverity>
+>;
+
 // =============================================================================
 // 実行時の存在証明
 //
@@ -506,7 +517,7 @@ type _p59_ScopeRelation = Expect<Equals<z.infer<typeof ScopeRelationSchema>, Sco
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
-const EXPECTED_PAIR_COUNT = 59;
+const EXPECTED_PAIR_COUNT = 60;
 
 /**
  * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
@@ -527,10 +538,11 @@ describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
       "`type _pNN_...` 宣言を数え直したところ期待値と食い違った。" +
       "ペアを足した／消したなら、この EXPECTED_PAIR_COUNT を更新すること。" +
       "そうでないなら、番号の重複・欠番（コピペミス等）を疑うこと。" +
-      "内訳: 55本が本来の55ペア（`satisfies` 宣言との1対1対応）、" +
+      "内訳: 56本が本来の56ペア（`satisfies` 宣言との1対1対応）、" +
       "3本（_p03 Omission_whole / _p34 ObserveInput_whole / _p40 Provenance_whole）が" +
       "discriminated union 自体の全体一致、1本（_p59 ScopeRelation）が `main` から" +
-      "取り込んだ分（Issue #272 / ADR 0181 参照）。";
+      "取り込んだ分、1本（_p60 AnnUnreachedSeverity、ADR 0288 / Issue #361）が" +
+      "`AnnUnreachedOmission.severity` 追加分（Issue #272 / ADR 0181 参照）。";
 
     expect(numbers.length, howToFix).toBe(EXPECTED_PAIR_COUNT);
 
@@ -577,7 +589,7 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-const EXPECTED_SATISFIES_COUNT = 59;
+const EXPECTED_SATISFIES_COUNT = 60;
 
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
   it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件`, () => {
@@ -599,7 +611,8 @@ describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強
     }
     // 55（issue #272 の調査で数えたペア）+ 3（OmissionSchema・ProvenanceSchema・
     // ObserveInputSchema。いずれも discriminated union のまとめに足りなかった1行、
-    // ADR 0181「決定」参照）+ 1（`ScopeRelationSchema`、`main` から取り込んだ分）= 59。
+    // ADR 0181「決定」参照）+ 1（`ScopeRelationSchema`、`main` から取り込んだ分）
+    // + 1（`AnnUnreachedSeveritySchema`、ADR 0288 / Issue #361）= 60。
     expect(
       count,
       "packages/core/src の satisfies z.ZodType<...> の出現数が期待値と食い違った。" +
