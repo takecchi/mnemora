@@ -1062,7 +1062,16 @@ export declare const ExtractModeSchema: z.ZodEnum<{
 export declare const SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX = "runtime.observe: subjectCandidates is not supported with extract: 'deferred' (subjectCandidates is never persisted, so deferred extraction cannot see it): ";
 export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "document";
 export type SubjectCandidatesInput = string[];
+export declare const ExtractionContextSchema: z.ZodObject<{
+    messages: z.ZodOptional<z.ZodArray<z.ZodObject<{
+        text: z.ZodString;
+        speaker: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>>;
+    timeZone: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
+export type ExtractionContext = z.infer<typeof ExtractionContextSchema>;
 export interface ObserveUtteranceInput {
+    extractionContext?: ExtractionContext;
     kind: "utterance";
     subjectId?: string;
     externalId?: string;
@@ -1075,6 +1084,7 @@ export interface ObserveUtteranceInput {
     text: string;
 }
 export interface ObserveEventInput {
+    extractionContext?: ExtractionContext;
     kind: "event";
     subjectId?: string;
     externalId?: string;
@@ -1087,6 +1097,7 @@ export interface ObserveEventInput {
     data?: Record<string, unknown>;
 }
 export interface ObserveDocumentInput {
+    extractionContext?: ExtractionContext;
     kind: "document";
     subjectId?: string;
     externalId?: string;
@@ -1106,6 +1117,13 @@ export interface ObserveMemoryUsageInput {
 export type ObserveInput = ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput | ObserveMemoryUsageInput;
 export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
     z.ZodObject<{
+        extractionContext: z.ZodOptional<z.ZodObject<{
+            messages: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                text: z.ZodString;
+                speaker: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>>;
+            timeZone: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
         kind: z.ZodLiteral<"utterance">;
         subjectId: z.ZodOptional<z.ZodString>;
         externalId: z.ZodOptional<z.ZodString>;
@@ -1121,6 +1139,13 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         text: z.ZodString;
     }, z.core.$strip>,
     z.ZodObject<{
+        extractionContext: z.ZodOptional<z.ZodObject<{
+            messages: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                text: z.ZodString;
+                speaker: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>>;
+            timeZone: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
         kind: z.ZodLiteral<"event">;
         subjectId: z.ZodOptional<z.ZodString>;
         externalId: z.ZodOptional<z.ZodString>;
@@ -1136,6 +1161,13 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     }, z.core.$strip>,
     z.ZodObject<{
+        extractionContext: z.ZodOptional<z.ZodObject<{
+            messages: z.ZodOptional<z.ZodArray<z.ZodObject<{
+                text: z.ZodString;
+                speaker: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>>;
+            timeZone: z.ZodOptional<z.ZodString>;
+        }, z.core.$strip>>;
         kind: z.ZodLiteral<"document">;
         subjectId: z.ZodOptional<z.ZodString>;
         externalId: z.ZodOptional<z.ZodString>;

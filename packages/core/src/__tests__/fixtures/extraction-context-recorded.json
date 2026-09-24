@@ -1,0 +1,342 @@
+{
+  "model": "gpt-4.1-mini-2025-04-14",
+  "recordedAt": "2026-09-24T15:31:14.151Z",
+  "kind": "development measurement; not held-out",
+  "reservedUsd": 0.028504,
+  "rows": [
+    {
+      "id": "reference",
+      "enabled": false,
+      "expected": "会議室として青葉を選ぶ。候補を提案しただけのassistantを選択者にしない。",
+      "observation": {
+        "id": "reference",
+        "tenantId": "context-eval",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "occurredAt": "2026-01-01T23:00:00.000Z",
+        "recordedAt": "2026-01-10T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中"
+        }
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "それでお願いします"
+          }
+        ]
+      },
+      "response": {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"memories\":[]}",
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      },
+      "usage": {
+        "prompt_tokens": 212,
+        "completion_tokens": 5,
+        "total_tokens": 217,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "reference",
+      "enabled": true,
+      "expected": "会議室として青葉を選ぶ。候補を提案しただけのassistantを選択者にしない。",
+      "observation": {
+        "id": "reference",
+        "tenantId": "context-eval",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "occurredAt": "2026-01-01T23:00:00.000Z",
+        "recordedAt": "2026-01-10T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "会議室は青葉でよいですか？"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        }
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-01-01T23:00:00.000Z\",\"recordedAt\":\"2026-01-10T00:00:00.000Z\",\"observedLocalDate\":\"2026-01-02\",\"relativeDates\":{\"昨日\":\"2026-01-01\",\"今日\":\"2026-01-02\",\"明日\":\"2026-01-03\",\"明後日\":\"2026-01-04\"}},\"context\":[{\"text\":\"会議室は青葉でよいですか？\",\"speaker\":\"assistant\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "response": {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"memories\":[{\"content\":\"会議室は青葉にすることを田中が了承した。\",\"digest\":\"田中が会議室青葉を了承\",\"tags\":[\"会議室\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      },
+      "usage": {
+        "prompt_tokens": 585,
+        "completion_tokens": 65,
+        "total_tokens": 650,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "relative-date",
+      "enabled": false,
+      "expected": "日本時間の2026-01-02に発話した明日なので、出張日は2026-01-03。",
+      "observation": {
+        "id": "relative-date",
+        "tenantId": "context-eval",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "occurredAt": "2026-01-01T23:00:00.000Z",
+        "recordedAt": "2026-01-10T00:00:00.000Z",
+        "payload": {
+          "text": "明日は大阪へ出張します",
+          "speaker": "田中"
+        }
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "明日は大阪へ出張します"
+          }
+        ]
+      },
+      "response": {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"memories\":[{\"content\":\"ユーザーは明日大阪へ出張する。\",\"digest\":\"user-going-to-osaka-on-business-tomorrow\",\"tags\":[\"出張\",\"大阪\",\"予定\"],\"subjectId\":null,\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      },
+      "usage": {
+        "prompt_tokens": 216,
+        "completion_tokens": 62,
+        "total_tokens": 278,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "relative-date",
+      "enabled": true,
+      "expected": "日本時間の2026-01-02に発話した明日なので、出張日は2026-01-03。",
+      "observation": {
+        "id": "relative-date",
+        "tenantId": "context-eval",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "occurredAt": "2026-01-01T23:00:00.000Z",
+        "recordedAt": "2026-01-10T00:00:00.000Z",
+        "payload": {
+          "text": "明日は大阪へ出張します",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [],
+            "timeZone": "Asia/Tokyo"
+          }
+        }
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"明日は大阪へ出張します\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-01-01T23:00:00.000Z\",\"recordedAt\":\"2026-01-10T00:00:00.000Z\",\"observedLocalDate\":\"2026-01-02\",\"relativeDates\":{\"昨日\":\"2026-01-01\",\"今日\":\"2026-01-02\",\"明日\":\"2026-01-03\",\"明後日\":\"2026-01-04\"}},\"context\":[],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "response": {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"memories\":[{\"content\":\"2026-01-03に大阪へ出張します。\",\"digest\":\"田中さんは2026年1月3日に大阪へ出張する予定がある。\",\"tags\":[\"出張\",\"大阪\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      },
+      "usage": {
+        "prompt_tokens": 569,
+        "completion_tokens": 71,
+        "total_tokens": 640,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "other-speaker",
+      "enabled": false,
+      "expected": "対象話者の田中の好みは紅茶。他人のコーヒーの好みを田中の記憶として抽出しない。",
+      "observation": {
+        "id": "other-speaker",
+        "tenantId": "context-eval",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "occurredAt": "2026-01-01T23:00:00.000Z",
+        "recordedAt": "2026-01-10T00:00:00.000Z",
+        "payload": {
+          "text": "私は紅茶が好きです",
+          "speaker": "田中"
+        }
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "私は紅茶が好きです"
+          }
+        ]
+      },
+      "response": {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"memories\":[{\"content\":\"私は紅茶が好きである。\",\"digest\":null,\"tags\":[\"嗜好\",\"飲み物\"],\"subjectId\":null,\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      },
+      "usage": {
+        "prompt_tokens": 215,
+        "completion_tokens": 49,
+        "total_tokens": 264,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    },
+    {
+      "id": "other-speaker",
+      "enabled": true,
+      "expected": "対象話者の田中の好みは紅茶。他人のコーヒーの好みを田中の記憶として抽出しない。",
+      "observation": {
+        "id": "other-speaker",
+        "tenantId": "context-eval",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "occurredAt": "2026-01-01T23:00:00.000Z",
+        "recordedAt": "2026-01-10T00:00:00.000Z",
+        "payload": {
+          "text": "私は紅茶が好きです",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "佐藤",
+                "text": "私はコーヒーが好きです"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        }
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"私は紅茶が好きです\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-01-01T23:00:00.000Z\",\"recordedAt\":\"2026-01-10T00:00:00.000Z\",\"observedLocalDate\":\"2026-01-02\",\"relativeDates\":{\"昨日\":\"2026-01-01\",\"今日\":\"2026-01-02\",\"明日\":\"2026-01-03\",\"明後日\":\"2026-01-04\"}},\"context\":[{\"text\":\"私はコーヒーが好きです\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "response": {
+        "index": 0,
+        "message": {
+          "role": "assistant",
+          "content": "{\"memories\":[{\"content\":\"田中さんは紅茶が好きです。\",\"digest\":\"田中の嗜好: 紅茶好き\",\"tags\":[\"嗜好\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+          "refusal": null,
+          "annotations": []
+        },
+        "logprobs": null,
+        "finish_reason": "stop"
+      },
+      "usage": {
+        "prompt_tokens": 585,
+        "completion_tokens": 58,
+        "total_tokens": 643,
+        "prompt_tokens_details": {
+          "cached_tokens": 0,
+          "audio_tokens": 0
+        },
+        "completion_tokens_details": {
+          "reasoning_tokens": 0,
+          "audio_tokens": 0,
+          "accepted_prediction_tokens": 0,
+          "rejected_prediction_tokens": 0
+        }
+      }
+    }
+  ]
+}
