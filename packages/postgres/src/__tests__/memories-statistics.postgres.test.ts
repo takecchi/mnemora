@@ -152,8 +152,8 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
           filter: { tenantId: TENANT },
         }),
     );
-    // 本番と同じ transaction の文脈（SET LOCAL hnsw.iterative_scan = relaxed_order,
-    // ADR 0284）で EXPLAIN する（test-db.ts の explainCaptured の doc コメント参照）。
+    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
+    // （test-db.ts の explainCaptured の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);
@@ -309,8 +309,8 @@ describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 
           filter: { tenantId: TENANT },
         }),
     );
-    // 本番と同じ transaction の文脈（SET LOCAL hnsw.iterative_scan = relaxed_order,
-    // ADR 0284）で EXPLAIN する（test-db.ts の explainCaptured の doc コメント参照）。
+    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
+    // （test-db.ts の explainCaptured の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);

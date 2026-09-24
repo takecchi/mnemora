@@ -113,8 +113,8 @@ export interface CapturedQuery {
   /**
    * 捕まえたクエリと**同じ接続の、同じトランザクション内**で、そのクエリより前に
    * 発行された `SET LOCAL ...` 文（発行順）。`PostgresVectorStore.search()` が
-   * `db.transaction()` 内で `SET LOCAL hnsw.iterative_scan = relaxed_order` を
-   * 発行してから SELECT する形（ADR 0284）を EXPLAIN でも再現するために持つ
+   * `db.transaction()` 内で ADR 0284 の `SET LOCAL`（`hnsw.iterative_scan` を
+   * 対象にした1文）を発行してから SELECT する形を EXPLAIN でも再現するために持つ
    * （`explainCaptured` 参照）。`BEGIN` を観測するたびにリセットするため、
    * 前のトランザクション（プールの使い回しで同じ `Client` に残ったもの）の
    * `SET LOCAL` は混ざらない。
@@ -197,10 +197,11 @@ export async function captureClientQuery(
  * ## 何のためか
  *
  * `PostgresVectorStore.search()` は ADR 0284 以降、`db.transaction()` の中で
- * `SET LOCAL hnsw.iterative_scan = relaxed_order` を発行してから SELECT する。
- * ところが `captureClientQuery` で捕まえた SELECT を、素の `pool.query("EXPLAIN ...")`
- * に渡すだけでは、その `EXPLAIN` は**別の・SET LOCAL の効いていないトランザクション**
- * （実質 `hnsw.iterative_scan = off`、Postgres のセッション既定値）で実行される。
+ * ADR 0284 の `SET LOCAL`（`hnsw.iterative_scan` を対象にした1文）を発行してから
+ * SELECT する。ところが `captureClientQuery` で捕まえた SELECT を、素の
+ * `pool.query("EXPLAIN ...")` に渡すだけでは、その `EXPLAIN` は**別の・SET LOCAL の
+ * 効いていないトランザクション**（実質 `hnsw.iterative_scan` がセッション既定値の
+ * ままの状態）で実行される。
  * ⟹ 4つの歯（`vector-search-hnsw.test.ts` / `vector-search-subject.test.ts` /
  * `recall.postgres.test.ts` / `memories-statistics.postgres.test.ts`）が実際に
  * 見ていたのは本番のプランではなく、本番では起こらない設定でのプランだった。

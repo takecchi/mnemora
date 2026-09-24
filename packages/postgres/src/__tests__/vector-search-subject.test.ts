@@ -228,9 +228,9 @@ describe("PostgresVectorStore.search — subject_id を足すとプランナが�
         }),
     );
 
-    // 本番と同じ transaction の文脈（SET LOCAL hnsw.iterative_scan = relaxed_order,
-    // ADR 0284）で EXPLAIN する。素の pool.query だと SET LOCAL の効いていない
-    // 別トランザクションでプランを読むことになる（test-db.ts の doc コメント参照）。
+    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する。
+    // 素の pool.query だと SET LOCAL の効いていない別トランザクションでプランを
+    // 読むことになる（test-db.ts の doc コメント参照）。
     const plan = await explainCaptured(pool, captured);
     // 上の「再現用の等価クエリ」と同じ経路になることを、実際に発行されるクエリでも押さえる
     //（歯Bの docstring 参照。実測 run 34007687930 で確定）。

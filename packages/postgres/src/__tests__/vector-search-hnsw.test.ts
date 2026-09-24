@@ -115,10 +115,10 @@ describe("PostgresVectorStore.search と HNSW 索引", () => {
     );
 
     // ⚠ `pool.query("EXPLAIN ...")` で素朴に EXPLAIN しない——`search()` は
-    // `db.transaction()` の中で `SET LOCAL hnsw.iterative_scan = relaxed_order` を
-    // 発行してから SELECT する（ADR 0284）。`explainCaptured` は捕まえた
-    // `SET LOCAL` を同じ transaction の文脈で再生してから EXPLAIN するので、
-    // 本番と同じプランナ設定でプランを読む（詳細は test-db.ts の doc コメント）。
+    // `db.transaction()` の中で ADR 0284 の `SET LOCAL` を発行してから SELECT する。
+    // `explainCaptured` は捕まえた `SET LOCAL` を同じ transaction の文脈で再生して
+    // から EXPLAIN するので、本番と同じプランナ設定でプランを読む
+    // （詳細は test-db.ts の doc コメント）。
     const plan = await explainCaptured(pool, captured);
     // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
     //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
