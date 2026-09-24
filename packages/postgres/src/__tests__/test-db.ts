@@ -1,4 +1,4 @@
-import { Client } from "pg";
+import { Client, type Pool } from "pg";
 import type { EmbeddingSpaceId } from "@mnemora/core";
 import { createPostgresClient, type PostgresClient } from "../client.js";
 import { runMigrations } from "../migrate.js";
@@ -106,6 +106,22 @@ export function seededRandom(seed: number): () => number {
   };
 }
 
+/** `captureClientQuery` が返す値。`explainCaptured` に渡して EXPLAIN する。 */
+export interface CapturedQuery {
+  text: string;
+  params: unknown[];
+  /**
+   * 捕まえたクエリと**同じ接続の、同じトランザクション内**で、そのクエリより前に
+   * 発行された `SET LOCAL ...` 文（発行順）。`PostgresVectorStore.search()` が
+   * `db.transaction()` 内で `SET LOCAL hnsw.iterative_scan = relaxed_order` を
+   * 発行してから SELECT する形（ADR 0284）を EXPLAIN でも再現するために持つ
+   * （`explainCaptured` 参照）。`BEGIN` を観測するたびにリセットするため、
+   * 前のトランザクション（プールの使い回しで同じ `Client` に残ったもの）の
+   * `SET LOCAL` は混ざらない。
+   */
+  precedingSetLocalStatements: string[];
+}
+
 /**
  * `matcher` に一致する SQL のテキスト/パラメータを、実際に発行された生の pg クエリから
  * 捕まえる（`vector-search-hnsw.test.ts` 等が「`EXPLAIN` に掛けたいクエリそのものを
@@ -121,21 +137,40 @@ export function seededRandom(seed: number): () => number {
  * 【実測】旧実装（`pool.query` をパッチする版）は `db.transaction()` に変わった
  * `search()` を「一致するクエリが観測されなかった」で捕まえ損ねた
  * （`vector-search-hnsw.test.ts` 等が実際にこの形で落ちた）。
+ *
+ * ⚠ **`SET LOCAL` も同じ場所で観測して `precedingSetLocalStatements` に積む**
+ * （後述 ADR）。`EXPLAIN` は独立したクエリなので、これを持ち帰らないと
+ * `explainCaptured` は `SET LOCAL` の効いていないセッション既定値（`hnsw.iterative_scan
+ * = off`）でプランを読むことになり、本番（`relaxed_order`）とは違う文脈を見てしまう。
  */
 export async function captureClientQuery(
   matcher: (text: string) => boolean,
   fn: () => Promise<unknown>,
-): Promise<{ text: string; params: unknown[] }> {
+): Promise<CapturedQuery> {
   let capturedText: string | undefined;
   let capturedParams: unknown[] | undefined;
+  let precedingSetLocalStatements: string[] = [];
+  // 接続（`Client` インスタンス）ごとに、直近の `BEGIN` 以降に見た `SET LOCAL` を積む。
+  const setLocalHistoryByClient = new WeakMap<Client, string[]>();
   const originalQuery = Client.prototype.query;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
     const [config, params] = args as [string | { text: string }, unknown[] | undefined];
     const text = typeof config === "string" ? config : config.text;
+    if (/^\s*begin\b/i.test(text)) {
+      // 新しいトランザクションの開始——このクライアントの SET LOCAL 履歴をリセットする
+      // （プールが同じ Client を使い回すと、前のトランザクションの SET LOCAL が
+      // 残っていることがあるが、それは既に COMMIT/ROLLBACK で失効している）。
+      setLocalHistoryByClient.set(this, []);
+    } else if (/^\s*set\s+local\s/i.test(text)) {
+      const history = setLocalHistoryByClient.get(this) ?? [];
+      history.push(text);
+      setLocalHistoryByClient.set(this, history);
+    }
     if (matcher(text)) {
       capturedText = text;
       capturedParams = params;
+      precedingSetLocalStatements = setLocalHistoryByClient.get(this) ?? [];
     }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     return (originalQuery as any).apply(this, args);
@@ -148,5 +183,54 @@ export async function captureClientQuery(
   if (capturedText === undefined) {
     throw new Error("captureClientQuery: matcher に一致するクエリが観測されなかった");
   }
-  return { text: capturedText, params: capturedParams ?? [] };
+  return {
+    text: capturedText,
+    params: capturedParams ?? [],
+    precedingSetLocalStatements,
+  };
+}
+
+/**
+ * `captureClientQuery` が捕まえたクエリを、**捕まえたのと同じ transaction の文脈**で
+ * `EXPLAIN` する（Issue #671 / ADR 0284 追記）。
+ *
+ * ## 何のためか
+ *
+ * `PostgresVectorStore.search()` は ADR 0284 以降、`db.transaction()` の中で
+ * `SET LOCAL hnsw.iterative_scan = relaxed_order` を発行してから SELECT する。
+ * ところが `captureClientQuery` で捕まえた SELECT を、素の `pool.query("EXPLAIN ...")`
+ * に渡すだけでは、その `EXPLAIN` は**別の・SET LOCAL の効いていないトランザクション**
+ * （実質 `hnsw.iterative_scan = off`、Postgres のセッション既定値）で実行される。
+ * ⟹ 4つの歯（`vector-search-hnsw.test.ts` / `vector-search-subject.test.ts` /
+ * `recall.postgres.test.ts` / `memories-statistics.postgres.test.ts`）が実際に
+ * 見ていたのは本番のプランではなく、本番では起こらない設定でのプランだった。
+ *
+ * ## どう直すか
+ *
+ * 専用の接続を1本 `pool.connect()` で取り、`BEGIN` → `captured.precedingSetLocalStatements`
+ * を発行順に再生 → `EXPLAIN (FORMAT TEXT) captured.text` → `ROLLBACK` の順に発行する。
+ * `SET LOCAL` の値をこの関数にハードコードしない——`captureClientQuery` が実際に観測した
+ * 文をそのまま再生するので、`vector-store.ts` の実装が `SET LOCAL` をやめる／値を変える
+ * ように直っても、この歯は自動的に追従する（歯自身が `relaxed_order` を書いていた場合、
+ * 実装側の変更を見逃してしまう——それを避けるための設計）。
+ *
+ * `ROLLBACK` で終える（`COMMIT` しない）——`EXPLAIN`（`ANALYZE` オプション無し）は
+ * 何も書き込まないため、コミットする理由が無い。
+ */
+export async function explainCaptured(pool: Pool, captured: CapturedQuery): Promise<string> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const statement of captured.precedingSetLocalStatements) {
+      await client.query(statement);
+    }
+    const explainResult = await client.query(
+      `EXPLAIN (FORMAT TEXT) ${captured.text}`,
+      captured.params,
+    );
+    return explainResult.rows.map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"]).join("\n");
+  } finally {
+    await client.query("ROLLBACK");
+    client.release();
+  }
 }
