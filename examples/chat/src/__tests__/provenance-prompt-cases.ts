@@ -69,6 +69,42 @@ import type { RecalledMemory } from "@mnemora/core";
  *    1つに畳まない（読み手が「たまたま同じ」と「同じ欄」を区別できなくなるのを
  *    避ける）。
  *
+ * ## 追記（Issue #691 継続回・値が無い欄の固定費を減らす）
+ *
+ * 上位の判断: 「欠落値を推測しない」（項目1・完了条件1）は「値を推測で埋めない」
+ * という意味であって、「値が無い欄を必ず『不明』/『なし』と明示的に書く」ことまでは
+ * 求めていない。**欄そのものを省くことは推測ではない**——推測は「別の値で埋める」
+ * ときにだけ起きる。answer ベンチ14件の合計で、`occurredAt` が常に `null` になる
+ * このベンチでは、全行に固定で `[出来事時刻:不明]` が付き、記憶経路の入力量
+ * （chars）が naive を上回っていた（4,475 vs 3,924、削減率 -14.0%）。これを踏まえ、
+ * 「値が無い欄は省く」方向へ以下のとおり見直す。
+ *
+ * 10. **`occurredAt` が `null` のときも、欄そのものを省く**（項目8の「不明」明示は
+ *     やめる。`undefined` の扱いと統一する）。`RecalledMemory.occurredAt` は
+ *     `recall-runtime.ts` が値か `null` しか書かない（`undefined` は手組みの
+ *     入力にしか出ない、`packages/core/src/recall.ts` の docstring）ので、
+ *     実運用では「省かれた欄」は常に「値が無い」を意味し、「頼んだが無かった」と
+ *     「頼んでいない」を読み手が取り違える心配は無い。
+ * 11. **`subjectId` が `null` のときも、欄そのものを省く**（項目3の「なし」明示は
+ *     やめる）。`subjectId` も runtime は値か `null` しか書かない（`speaker` と
+ *     同じ保証、同docstring）ので、10 と同じ理由で安全——矛盾候補欄（項目4・5、
+ *     元々「相手が居なければ出さない」だった）と同じ規律に揃えるだけであり、
+ *     新しい区別を失わない。
+ * 12. **`speaker`（話者）は `stated` + `null` のときも「[話者:不明]」を残す
+ *     （ここは省かない）。** 項目2が守ろうとした区別——「null（頼んだが分から
+ *     なかった）」と「その kind は話者という概念を持たない」を同じ見た目で
+ *     潰さない——は、`由来` タグ（例: `由来:stated` 対 `由来:inferred`）だけでも
+ *     機械的には見分けが付く。それでも明示を残すのは、この欄が北極星の問い4
+ *     「AI の推論とユーザーが言った事実を区別する」に直結し、`stated`（本人の
+ *     発言）なのに話者欄が消えると「言った人が分からない」のか「そもそも
+ *     推論由来だから話者欄が無い」のかを、読み手（回答モデル）が `由来` タグの
+ *     読み飛ばし1つで誤読しうる——固定費の削減額も `speaker` は `stated` の
+ *     ときにしか出ないため 10・11 ほど大きくなく、この欄でリスクを取ってまで
+ *     削る理由が無いと判断した。10・11 は下記 dev 対照で検証したが、この欄には
+ *     手を付けていない（未評価のまま残す）。
+ * 13. 記録順（`[記録順:N]`）は変更しない——`recordedAt` が無い（`undefined`）
+ *     要素は元から欄を出していない（項目7）。
+ *
  * ## この定義が実装前であることの確認
  *
  * `provenance-prompt-contract.test.ts` は、このケース集合を読んで
@@ -113,7 +149,8 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
   {
     id: "stated-speaker-null",
     description:
-      "stated + 話者null: 「頼んだが分からなかった」ことを明示する（'user' 等で埋めない）",
+      "stated + 話者null・主題null: 話者は「頼んだが分からなかった」ことを明示する" +
+      "（'user' 等で埋めない）。主題は値が無い欄なので出さない（項目11、Issue #691 継続回）",
     memories: [
       {
         memoryId: "m-stated-nullspeaker",
@@ -125,7 +162,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
         score: SCORE,
       },
     ],
-    expectedLines: ["- [由来:stated] [話者:不明] [主題:なし] 何かを言った"],
+    expectedLines: ["- [由来:stated] [話者:不明] 何かを言った"],
   },
   {
     id: "inferred-has-no-speaker-field",
@@ -146,7 +183,8 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
   },
   {
     id: "reflected-no-subject",
-    description: "reflected + subjectIdなし: 話者欄なし・主題は「なし」",
+    description:
+      "reflected + subjectIdなし: 話者欄なし・主題欄も省く（値が無い欄はどちらも出さない、項目11）",
     memories: [
       {
         memoryId: "m-reflected",
@@ -158,12 +196,13 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
         score: SCORE,
       },
     ],
-    expectedLines: ["- [由来:reflected] [主題:なし] 内省の結果"],
+    expectedLines: ["- [由来:reflected] 内省の結果"],
   },
   {
     id: "consolidated-subject-lost",
     description:
-      "consolidated + subjectIdがnull（統合でsubjectをまたいだケース）: 主題は「なし」であって、勝手な代表値を出さない",
+      "consolidated + subjectIdがnull（統合でsubjectをまたいだケース）: 主題欄を省く" +
+      "（値が無い欄は出さない、項目11。勝手な代表値も出さない）",
     memories: [
       {
         memoryId: "m-consolidated",
@@ -175,7 +214,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
         score: SCORE,
       },
     ],
-    expectedLines: ["- [由来:consolidated] [主題:なし] 複数の発話を統合した要約"],
+    expectedLines: ["- [由来:consolidated] 複数の発話を統合した要約"],
   },
   {
     id: "imported-with-subject",
@@ -342,7 +381,8 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
     id: "temporal-occurred-null",
     description:
       "occurredAt が null（出来事の時点が分からない）: 記録順はそのまま出し、" +
-      "occurredAt は recordedAt の値で埋めずに「不明」と明示する",
+      "occurredAt は recordedAt の値で埋めず、欄そのものを省く" +
+      "（項目10、Issue #691 継続回。'不明'の明示から'欄を省く'へ変更）",
     memories: [
       {
         memoryId: "m-temporal-occurred-null",
@@ -356,16 +396,15 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
         occurredAt: null,
       },
     ],
-    expectedLines: [
-      "- [由来:stated] [話者:次郎] [主題:user-1] [記録順:1] [出来事時刻:不明] 予定は未定",
-    ],
+    expectedLines: ["- [由来:stated] [話者:次郎] [主題:user-1] [記録順:1] 予定は未定"],
   },
   {
     id: "temporal-order-tie",
     description:
       "2件が同じ recordedAt（同一ミリ秒）: 記録順が同じ値に潰れず、recall.memories に" +
       "現れた元の順序で 1, 2 とタイブレークする（安定ソート）。occurredAt はそれぞれ" +
-      "独立の値のまま——記録順と出来事時刻の欄を1つに畳まない",
+      "独立の値のまま——記録順と出来事時刻の欄を1つに畳まない。前者は occurredAt が" +
+      "null なので出来事時刻欄を省き、後者は値があるので ISO のまま出す（項目10）",
     memories: [
       {
         memoryId: "m-tie-a",
@@ -391,7 +430,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       },
     ],
     expectedLines: [
-      "- [由来:stated] [話者:花子] [主題:user-1] [記録順:1] [出来事時刻:不明] 先に並んでいる方",
+      "- [由来:stated] [話者:花子] [主題:user-1] [記録順:1] 先に並んでいる方",
       "- [由来:stated] [話者:花子] [主題:user-1] [記録順:2] " +
         "[出来事時刻:2026-01-05T09:00:00.123Z] 後に並んでいる方",
     ],
@@ -400,7 +439,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
     id: "temporal-occurred-undefined",
     description:
       "occurredAt が undefined（頼んでいない・手組みの入力）: occurredAt 欄そのものを出さない。" +
-      "recordedAt は値があれば記録順を出す",
+      "subjectId も null なので主題欄を省く（項目11）。recordedAt は値があれば記録順を出す",
     memories: [
       {
         memoryId: "m-temporal-occurred-undefined",
@@ -413,7 +452,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
         recordedAt: new Date("2026-01-05T09:00:00.123Z"),
       },
     ],
-    expectedLines: ["- [由来:inferred] [主題:なし] [記録順:1] 本文のみ"],
+    expectedLines: ["- [由来:inferred] [記録順:1] 本文のみ"],
   },
   {
     id: "temporal-order-multi-out-of-array-order",
@@ -446,8 +485,29 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       },
     ],
     expectedLines: [
-      "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:2] [出来事時刻:不明] 配列では先だが、記録は後",
-      "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:1] [出来事時刻:不明] 配列では後だが、記録は先",
+      "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:2] 配列では先だが、記録は後",
+      "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:1] 配列では後だが、記録は先",
     ],
+  },
+  {
+    id: "stated-null-speaker-omits-subject-and-occurred-but-keeps-speaker-marker",
+    description:
+      "stated + 話者null + 主題null + occurredAtがnull（Issue #691 継続回の境界確認）: " +
+      "話者だけ明示的に「不明」を残し、主題・出来事時刻の欄は両方省く。" +
+      "記録順は値があるのでそのまま出す",
+    memories: [
+      {
+        memoryId: "m-null-speaker-omit-others",
+        digest: "何かがあった",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: null,
+        subjectId: null,
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.000Z"),
+        occurredAt: null,
+      },
+    ],
+    expectedLines: ["- [由来:stated] [話者:不明] [記録順:1] 何かがあった"],
   },
 ];
