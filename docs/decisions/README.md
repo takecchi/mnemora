@@ -308,5 +308,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0281](./0281-ci-green-check-empty-check-runs-reason-dirty.md) | `total === 0` の *理由* を `mergeable_state` で切り分ける——緑の根拠は変えない（Issue #615） | 採用 (2026-09) |
 | [0282](./0282-score-breakdown-affinity-measured.md) | `ScoreBreakdown` に `affinityMeasured?: boolean` を追加のみで足す —— Issue #548 方向1（非破壊）を採る | 採用 (2026-09) |
 | [0283](./0283-adopt-merged-adrs-whose-decision-is-on-main.md) | 決定が main で現に採られているのに「草案」「提案」のまま残った ADR 18本を「採用」へ倒す——状態の語を定義する（Issue #641） | 採用 (2026-09) |
+| [0285](./0285-ann-window-empty-of-in-scope-candidates-stage-detail.md) | ANN の候補枠が scope 内の候補を1件も拾えなかったことを stage detail に名乗らせる — `Omission` union は変えない（Issue #671） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
