@@ -464,3 +464,31 @@
   - **埋め込みテーブルだけは手書きした**（`memory_embeddings_bench`）。本番では
     `registerEmbeddingSpace()` がテーブル名を決めて作る。DDL は `vector-space.ts` から
     書き写した。
+
+---
+
+## 追記（2026-09-24）: **決定1（`hnsw.iterative_scan` を有効にしない）は、[ADR 0284](./0284-hnsw-iterative-scan-relaxed-order-adopted.md) で覆した**
+
+**この節から上は当時の決定・実測の記録のまま書き換えていない。** 以下は事後の訂正である。
+
+決定1は、当時の書き手が「home 単一テナント・`period` の狭い窓で HNSW 経由に落ちたとき、
+`relaxed_order` は `recall@40` を 0.500 / 0.350 までしか上げず、正しさを大きくは
+買わない」という実測に基づいて下した。この実測自体は誤っていない——上の表は今も正しい。
+
+**しかし [Issue #671](https://github.com/takecchi/mnemora/issues/671) が、この ADR が
+測っていなかった別の組み合わせを見つけた**: クエリ対象テナントが自然に HNSW を選ぶ規模
+（10万行）に育ち、かつ**他テナント**に gold より近い near-duplicate を `ef_search`
+（既定40）件以上置くと、HNSW の候補枠が他テナントの行で独占され、自テナントの候補を
+1件も見ないまま `runtime.recall()` が0件を返す（`recall@40` が 0.500 に留まるのではなく、
+**0.000 になる**）。この場合の `relaxed_order` は「遠い候補で水増しする」のではなく、
+「そもそも見ていなかった自テナントの近傍を初めて見る」ように働き、10/10 まで回復する。
+
+ADR 0284 が決定1を覆し、`packages/postgres/src/vector-store.ts` の `search()` で
+`SET LOCAL hnsw.iterative_scan = relaxed_order` を1トランザクション内で発行するように
+実装した。詳細・一次実測・引き受けた負債は ADR 0284 を見ること。
+
+**⟹ 「iterative_scan は正しさを大きくは買わない」という決定1の結論は、ADR 0063 が
+測った条件（同一テナント内の period 窓）の範囲では今も成り立つ。覆ったのは
+「だから有効にしない」という決定であり、その決定が対処範囲としていなかった
+別の故障モード（テナント越境の候補枠独占）で、`relaxed_order` が異なる価値を
+持つことが分かったためである。**

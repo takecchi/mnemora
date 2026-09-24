@@ -168,14 +168,26 @@ export class PostgresVectorStore implements VectorStore {
     // `m.recorded_at` はテナント内の処理順に紐づく値であり、fresh ingest をまたいでも
     // **相対順序が再現する**ため、これを第2キーに昇格する。`e.memory_id` は
     // `recorded_at` まで完全一致したときだけ効く最終フォールバックとして残す。
-    const result = await this.db.execute(sql`
-      SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance
-      FROM ${sql.identifier(table)} e
-      JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-      WHERE ${whereClause}
-      ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id
-      LIMIT ${opts.limit}
-    `);
+    // ADR 0284: `hnsw.iterative_scan = relaxed_order` を、この SELECT だけを対象に
+    // `SET LOCAL` で有効にする。ADR 0063 決定1（有効にしない）を覆す——理由・実測・
+    // 覆した経緯は ADR 0284 を見ること。`SET LOCAL` はトランザクション内でしか効かず、
+    // かつ pool の同一コネクションを次のクエリが再利用しても漏れない（トランザクション終了で
+    // 自動的に既定へ戻る）ため、`db.transaction()` で BEGIN してから発行する。
+    // ⚠ `SET LOCAL` の値はプレースホルダで束縛できない（Postgres が `SET` の引数に
+    // パラメータ化を許さない）——固定の識別子リテラルとして埋め込む。
+    // `hnsw.max_scan_tuples` は既定のまま触らない(Issue #671 が記録した天井は、
+    // このADRでは引き受けた負債として残す)。
+    const result = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
+      return tx.execute(sql`
+        SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance
+        FROM ${sql.identifier(table)} e
+        JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+        WHERE ${whereClause}
+        ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id
+        LIMIT ${opts.limit}
+      `);
+    });
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; distance: number };
       return { memoryId: r.memory_id, distance: r.distance };

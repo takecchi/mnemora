@@ -14,7 +14,7 @@ import { DEFAULT_OVER_FETCH_FACTOR, DEFAULT_RECALL_LIMIT } from "@mnemora/core";
  *
  * **向き**: いま赤くて直したら緑、ではない。**いま緑で、前提が黙って変わったら赤。**
  *
- * ## 背景（ADR 0011 → ADR 0111）
+ * ## 背景（ADR 0011 → ADR 0111 → ADR 0284）
  *
  * [ADR 0011](../../../../docs/decisions/0011-no-window-count-in-ann-stage.md) は
  * 「HNSW の索引スキャンは `hnsw.ef_search` 件までしか下流に行を渡さない」ことを
@@ -22,6 +22,16 @@ import { DEFAULT_OVER_FETCH_FACTOR, DEFAULT_RECALL_LIMIT } from "@mnemora/core";
  * は同じ現象を PostgreSQL 17.11 上で再現し、かつ「テナントが10万行に育つと、
  * プランナが GUC 無しで自然に HNSW を選ぶ」ことを実測した——その領域では
  * ANN 段の窓（`kPrime`）は `hnsw.ef_search` を超えて広げても、超えた分は黙って効かない。
+ *
+ * **⚠ 検査2は ADR 0284 で前提が変わった。**[ADR 0063](../../../../docs/decisions/0063-hnsw-iterative-scan-not-adopted.md)
+ * 決定1（`hnsw.iterative_scan` を有効にしない）は、Issue #671（他テナントの near-duplicate
+ * が `ef_search` の候補枠を独占し、自テナントの候補がゼロになって `recall` が全滅する）を受けて
+ * [ADR 0284](../../../../docs/decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md) が覆した。
+ * いまは `vector-store.ts` の `search()` が、1トランザクション内で
+ * `SET LOCAL hnsw.iterative_scan = relaxed_order` を発行してから SELECT する
+ * ——「1つも SET していない」から「`search()` の1箇所だけが SET している」へ、
+ * 検査の向きそのものが変わった。**検査1（`ef_search` の天井）は変えていない**
+ * ——ADR 0284 は `hnsw.ef_search` にも `hnsw.max_scan_tuples` にも触れていない。
  */
 
 describe("検査1: kPrime は pgvector の hnsw.ef_search 既定値を超えない（ADR 0111）", () => {
@@ -82,8 +92,8 @@ describe("検査2: 本番経路は hnsw.ef_search / hnsw.iterative_scan を SET 
   /** `SET` / `SET LOCAL` で `hnsw.ef_search` を設定している箇所（値を捕捉する）。 */
   const SET_EF_SEARCH = /SET\s+(?:LOCAL\s+)?hnsw\.ef_search\s*=\s*(\d+)/g;
 
-  /** `SET` / `SET LOCAL` で `hnsw.iterative_scan` を設定している箇所。 */
-  const SET_ITERATIVE_SCAN = /SET\s+(?:LOCAL\s+)?hnsw\.iterative_scan\s*=\s*\S+/g;
+  /** `SET` / `SET LOCAL` で `hnsw.iterative_scan` を設定している箇所（値を捕捉する）。 */
+  const SET_ITERATIVE_SCAN = /SET\s+(?:LOCAL\s+)?hnsw\.iterative_scan\s*=\s*([a-z_]+)/g;
 
   it("`SET ... hnsw.ef_search` の出現は __tests__/count-over-window.test.ts の1箇所だけであり、値は既定値と同じ40である", () => {
     const files = readAllSourceFiles();
@@ -114,23 +124,27 @@ describe("検査2: 本番経路は hnsw.ef_search / hnsw.iterative_scan を SET 
     ).toEqual([{ file: "__tests__/count-over-window.test.ts", value: "40" }]);
   });
 
-  it("`hnsw.iterative_scan` を SET している箇所は1つも無い", () => {
+  it("`hnsw.iterative_scan` を SET している箇所は vector-store.ts の search() 1箇所だけであり、値は relaxed_order である（ADR 0284）", () => {
     const files = readAllSourceFiles();
-    const offenders: string[] = [];
+    const occurrences: { file: string; value: string }[] = [];
 
     for (const { file, source } of files) {
-      if (SET_ITERATIVE_SCAN.test(source)) {
-        offenders.push(file);
+      for (const match of source.matchAll(SET_ITERATIVE_SCAN)) {
+        const value = match[1];
+        if (value !== undefined) {
+          occurrences.push({ file, value });
+        }
       }
-      SET_ITERATIVE_SCAN.lastIndex = 0; // .test() はグローバルフラグで lastIndex を動かす
     }
 
     expect(
-      offenders,
-      "hnsw.iterative_scan を SET している箇所が見つかった。" +
-        "ADR 0111 の測定は `hnsw.iterative_scan = off` を前提にしている——" +
-        "触るなら、同じ変更の中で ADR 0111 の測定を引き直すこと。",
-    ).toEqual([]);
+      occurrences,
+      "hnsw.iterative_scan を SET している箇所が想定と違う。" +
+        "ADR 0284 の決定により、本番経路では vector-store.ts の search() だけが " +
+        "`SET LOCAL hnsw.iterative_scan = relaxed_order` を1トランザクション内で発行する " +
+        "——それ以外の場所で SET しているか、値が relaxed_order 以外なら、" +
+        "ADR 0284 の射程を超えている。触るなら、同じ変更の中で ADR 0284 の測定を引き直すこと。",
+    ).toEqual([{ file: "vector-store.ts", value: "relaxed_order" }]);
   });
 
   it("`CREATE INDEX ... USING hnsw` に m / ef_construction の指定が無い", () => {
