@@ -1009,10 +1009,15 @@ async function recordTimeWeighting(
   runId: number,
 ): Promise<void> {
   console.log("\n########## 記録中: answer-time-weighting ##########");
+  // 🔴 マネージャー決定（段3b）: この記録は temperature=0 で固定する——段3a の
+  // 切り分け（`bench-results/STAGE3A-NOTES.txt`）で、temperature 未指定（既定1.0）は
+  // 同じ入力でも gradeAnswer の正誤が run ごとに揺れることを実測した。カセットは
+  // 「記録した時点の応答」を固定して再生するものなので、揺れの少ない temperature=0 で
+  // 録ることで、再生（CI・cassette-coverage）の判定が安定する。
   const handle = await createTimeWeightingBenchRuntime(
     databaseUrl,
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
-    { recorder },
+    { recorder, llmTemperature: 0 },
   );
   printProviderMode(handle, null);
   try {
@@ -1953,6 +1958,24 @@ function parseTimeWeightingTrials(argv: readonly string[]): number {
 }
 
 /**
+ * `--temperature=N` を argv から読む。省略時は `undefined`（既定は渡さない——
+ * `OpenAILLMProvider`/`CreateProvidersOptions` の既定と同じ規律。`llmMode !== "openai"`
+ * のときは無視される）。段3b でこの run 自身を temperature=0 に固定して再現性を
+ * 上げるために使う（`bench-results/STAGE3A-NOTES.txt` 参照）。
+ */
+function parseTimeWeightingTemperature(argv: readonly string[]): number | undefined {
+  const flag = argv.find((a) => a.startsWith("--temperature="));
+  if (flag === undefined) {
+    return undefined;
+  }
+  const value = Number(flag.slice("--temperature=".length));
+  if (!Number.isFinite(value)) {
+    throw new Error(`--temperature は数値であること（実際: ${flag}）。`);
+  }
+  return value;
+}
+
+/**
  * `answer-time-weighting` サブコマンド（Issue #690 / PR #697）。
  *
  * 🔴 **`answer` サブコマンドとは測る問いが違う。** `answer` は naive/mnemora の配線
@@ -1972,9 +1995,14 @@ async function runTimeWeighting(): Promise<void> {
   const argv = process.argv.slice(3);
   const trials = parseTimeWeightingTrials(argv);
   const useDevOnly = argv.includes("--dev");
+  const temperature = parseTimeWeightingTemperature(argv);
 
   const plan = resolveRecordedRun("answer-time-weighting");
-  const handle = await createTimeWeightingBenchRuntime(databaseUrl, plan.env, plan.providerOptions);
+  const providerOptions =
+    temperature !== undefined
+      ? { ...plan.providerOptions, llmTemperature: temperature }
+      : plan.providerOptions;
+  const handle = await createTimeWeightingBenchRuntime(databaseUrl, plan.env, providerOptions);
   const banner = formatTimeWeightingQualityBanner(handle.llmMode);
   if (banner) {
     console.log(banner);
@@ -1983,7 +2011,8 @@ async function runTimeWeighting(): Promise<void> {
   try {
     console.log(
       "\n記憶を直接書き、reinforce し、壁時計を進めてから、同じ質問を legacy/" +
-        `eventAwareFreshness の両方で recall→回答生成→採点する（trials=${trials}）。\n` +
+        `eventAwareFreshness の両方で recall→回答生成→採点する（trials=${trials}` +
+        `${temperature !== undefined ? `, temperature=${temperature}` : ""}）。\n` +
         (useDevOnly
           ? "⛔ --dev: 開発用ケース集合のみ（調整に使ってよい側。未使用の評価として報告しないこと）。\n"
           : ""),
@@ -2139,7 +2168,7 @@ function printHelp(): void {
       "                                                                      #   MNEMORA_ANSWER_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer-time-weighting",
       "                                                                      # RecallQuery.timeWeighting(legacy/eventAwareFreshness、Issue #690・ADR 0299)を回答の正誤で比べる",
-      "                                                                      #   -- --trials=N(既定1)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
+      "                                                                      #   -- --trials=N(既定1)・-- --temperature=N(既定は未指定)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
       "                                                                      # retrieval の応答を記録する(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",
