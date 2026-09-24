@@ -17,9 +17,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -27,20 +25,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -121,9 +113,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -131,20 +121,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -225,9 +209,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -235,20 +217,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -329,9 +305,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -339,20 +313,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -433,9 +401,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -443,20 +409,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -537,9 +497,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -547,20 +505,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -641,9 +593,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -651,20 +601,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -745,9 +689,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -755,20 +697,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -849,9 +785,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -859,20 +793,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -953,9 +881,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -963,20 +889,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1057,9 +977,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1067,20 +985,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1161,9 +1073,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1171,20 +1081,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1265,9 +1169,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1275,20 +1177,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1369,9 +1265,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1379,20 +1273,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1473,9 +1361,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1483,20 +1369,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1577,9 +1457,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1587,20 +1465,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1681,9 +1553,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1691,20 +1561,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1785,9 +1649,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1795,20 +1657,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1889,9 +1745,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -1899,20 +1753,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -1993,9 +1841,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2003,20 +1849,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2103,9 +1943,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2113,20 +1951,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2207,9 +2039,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2217,20 +2047,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2311,9 +2135,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2321,20 +2143,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2415,9 +2231,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2425,20 +2239,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2519,9 +2327,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2529,20 +2335,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2623,9 +2423,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2633,20 +2431,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2727,9 +2519,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2737,20 +2527,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2831,9 +2615,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2841,20 +2623,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -2935,9 +2711,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -2945,20 +2719,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3039,9 +2807,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3049,20 +2815,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3143,9 +2903,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3153,20 +2911,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3247,9 +2999,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3257,20 +3007,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3351,9 +3095,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3361,20 +3103,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3455,9 +3191,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3465,20 +3199,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3559,9 +3287,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3569,20 +3295,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3663,9 +3383,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3673,20 +3391,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3767,9 +3479,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3777,20 +3487,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3871,9 +3575,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3881,20 +3583,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -3975,9 +3671,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -3985,20 +3679,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
@@ -4079,9 +3767,7 @@
                 "localId": "old-seat-undated",
                 "content": "オフィスの座席は3階です。",
                 "recordedAt": "2025-10-05T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-30T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
               },
               {
                 "localId": "current-seat",
@@ -4089,20 +3775,14 @@
                 "occurredAt": "2026-07-26T09:00:00.000Z",
                 "recordedAt": "2026-07-26T09:00:00.000Z",
                 "validFrom": "2026-07-26T09:00:00.000Z",
-                "reinforceAt": [
-                  "2026-07-26T09:00:00.000Z"
-                ]
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
               }
             ],
             "question": "いまのオフィスの座席は何階ですか?",
             "expected": {
               "kind": "closed-value",
-              "accept": [
-                "5階"
-              ],
-              "reject": [
-                "3階"
-              ]
+              "accept": ["5階"],
+              "reject": ["3階"]
             },
             "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
             "tuningUse": "held-out"
