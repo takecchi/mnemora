@@ -337,7 +337,7 @@ git status --porcelain                                                # 空に�
 が引いている線はもう一段外に在る——**PR タイトルと本文（squash commit のタイトルと本文）は
 機械が直せない。**だから同 ADR は検出して CI を赤にするところまでで止め、
 `gh pr edit --title / --body` を機械に打たせる案を退けている
-（⚠ その検出の道具自体は、後にオーナーの判断で CI ごと削除した——[ADR 0292](./docs/decisions/0292-remove-pr-text-checks-and-release-followup-notice.md)。
+（⚠ その検出の道具自体は、後にオーナーの判断で CI ごと削除した——[ADR 0293](./docs/decisions/0293-remove-pr-text-checks-and-release-followup-notice.md)。
 線の引き方の実例としては今も有効である）。
 
 ⟹ **割れているのは「repo の中（戻せる）か、GitHub 側の取り消しにくい面（PR・issue の状態や
