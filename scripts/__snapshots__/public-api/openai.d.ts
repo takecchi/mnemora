@@ -52,10 +52,12 @@ export interface OpenAILLMProviderOptions {
     apiKey?: string;
     model: string;
     client?: Pick<OpenAI, "chat">;
+    temperature?: number;
 }
 export declare class OpenAILLMProvider implements LLMProvider {
     private readonly client;
     private readonly model;
+    private readonly temperature?;
     constructor(options: OpenAILLMProviderOptions);
     complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
     completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
