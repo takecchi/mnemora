@@ -143,7 +143,11 @@ export async function runMnemoraPath(
 // ケース定義・決めたことの詳細は
 // `__tests__/provenance-prompt-cases.ts` の冒頭コメントを参照。要点だけ:
 // - null（頼んだが無かった）と「その kind は欄を持ちようが無い」を別の表現にする。
-// - 欠落値を推測で埋めない（"user" 等を書かない）。
+// - 欠落値を推測で埋めない（"user" 等を書かない）——ただし「埋めない」は「欄を省く」
+//   ことまで禁じるものではない（Issue #691 継続回の決定、上記ケースファイル冒頭
+//   「追記」節）。`subjectId`/`occurredAt` は null のとき欄そのものを省く。
+//   `speaker` は stated+null のときだけ、北極星の問い4（AI の推論とユーザーが言った
+//   事実を区別する）に関わるため引き続き「不明」を明示する（同節、項目12）。
 // - 矛盾関係は recall.memories 全体を見て、companionOf の向き先・向かれ元の
 //   両方に対称な印を出す。中身は相手の memoryId ではなく相手の digest 本文。
 // ---------------------------------------------------------------------------
@@ -164,14 +168,17 @@ function speakerSegment(m: RecalledMemory): string | undefined {
 
 /**
  * 主題欄。`subjectId` はどの `provenanceKind` でも持ちうる欄なので、kind に関わらず
- * 常に出す。値が無ければ（例: 統合で subject をまたいだ）「なし」と明示する
- * ——他の主題を代表値として埋めない。
+ * 値があれば出す。値が無ければ（例: 統合で subject をまたいだ）欄そのものを省く
+ * ——他の主題を代表値として埋めないのはもちろん、「なし」という文言でも埋めない
+ * （Issue #691 継続回、`__tests__/provenance-prompt-cases.ts` 冒頭「追記」節の項目11）。
+ * `recall-runtime.ts` は `subjectId` に値か `null` しか書かない（`undefined` を
+ * 呼び出し側へ渡さない保証、`packages/core/src/recall.ts` の docstring）ので、
+ * 欄が無いことは常に「値が無い」を意味し、「頼んだが無かった」と「頼んでいない」を
+ * 読み手が取り違える余地は無い。
  */
-function subjectSegment(m: RecalledMemory): string {
+function subjectSegment(m: RecalledMemory): string | undefined {
   const subjectId = m.subjectId;
-  return typeof subjectId === "string" && subjectId.length > 0
-    ? `[主題:${subjectId}]`
-    : "[主題:なし]";
+  return typeof subjectId === "string" && subjectId.length > 0 ? `[主題:${subjectId}]` : undefined;
 }
 
 /**
@@ -255,16 +262,22 @@ function recordedOrderSegment(
 }
 
 /**
- * 出来事時刻欄（Issue #691 の子、Issue #702、ADR 0298）。`occurredAt` は3値ある:
- * `undefined`（頼んでいない・欄を出さない）／`null`（頼んだが無かった・
- * `recordedAt` の値で埋めずに「不明」と明示する——`speaker` の `null` と同じ規律）／
- * `Date`（値がある・ISO 8601 で出す）。
+ * 出来事時刻欄（Issue #691 の子、Issue #702、ADR 0298。継続回で欄の省略へ変更）。
+ * `occurredAt` は `undefined`（頼んでいない）と `null`（頼んだが無かった。
+ * `recordedAt` の値で埋めない——2つの時計は意味が違う）のどちらでも欄そのものを
+ * 省く。値（`Date`）があるときだけ ISO 8601 で出す。
+ *
+ * 🔴 以前は `null` を「[出来事時刻:不明]」と明示していたが、answer ベンチ14件の
+ * 合計で `occurredAt` が常に `null` になり、全行に固定費として乗ることを実測した
+ * （記憶経路の入力が naive を上回る一因、chars 削減率 -14.0%）。「欠落値を推測しない」
+ * は「値を推測で埋めない」の意味であり「欄を必ず明示する」ことまでは求めていない
+ * ——`recall-runtime.ts` は `occurredAt` に値か `null` しか書かない（`undefined` は
+ * 呼び出し側へ渡さない保証、`packages/core/src/recall.ts` の docstring）ので、
+ * 欄の省略は「頼んだが無かった」と「頼んでいない」の取り違えを生まない
+ * （`__tests__/provenance-prompt-cases.ts` 冒頭「追記」節の項目10）。
  */
 function occurredAtSegment(m: RecalledMemory): string | undefined {
-  if (m.occurredAt === undefined) {
-    return undefined;
-  }
-  return m.occurredAt === null ? "[出来事時刻:不明]" : `[出来事時刻:${m.occurredAt.toISOString()}]`;
+  return m.occurredAt != null ? `[出来事時刻:${m.occurredAt.toISOString()}]` : undefined;
 }
 
 /**
