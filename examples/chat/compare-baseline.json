@@ -1,17 +1,18 @@
 {
-  "_readme": "compare ベンチ(examples/chat の `compare` サブコマンド、北極星の物差し=mnemora/naive比)の基準値。scripts/compare-summary.mjs --baseline がこれを読む。retrieval-baseline.json / time-term-baseline.json と同じ考え方(『基準値をrepoにコミットし出所を添える』)を踏襲している。⚠ このベンチは他5本と違い、実測で2回のCI run(同一commit)が measuredAt を除いて完全一致したため(ADR 0133「測ったこと」)、⭐ 門にしている——mnemoraShareOfNaiveCharsの悪化とfactStatementSurvivedの退行(true→false)を検知すると赤くなる。⚠ 判定の規則と終了コードはここに写さない(ADR 0223 決定9『焼き込んだ数字は腐る。唯一の出所を指すだけにする』)——唯一の出所は scripts/compare-summary-lib.mjs の evaluateCompare であり、この行が以前名指ししていた computeRegressions は ADR 0222 が廃した。⭐ 1つだけ写す: 判定は3値であり、exit 2 は「判定していない」(実測と基準値の turnCount 集合が一致せず、比較していない会話長が在る)であって「失敗」ではない(ADR 0222 決定5・Issue #477)。⚠ CIのジョブがこのファイルを更新することはない(意図的な手作業のみ)。⚠ この行は以前『ADR 0133参照』と指していたが、ADR 0133 本文に「手作業」の語は1度も無い——主張自体は ADR 0121 決定1『手で数値を書いた欄は無い』と ADR 0119 決定6『実測せずに数値を書けば、それは捏造である』が支えているので、指し先だけをそちらへ差し替えた(ADR 0231 決定6)。更新手順は examples/chat/README.md の compare 節。🔴 2026-09-16 追記(ADR 0168・Issue #291): examples/chat が recall() の連想枠を既定で使うようになったため、この基準値を更新した。値が退行に見えても、それはこの意図した変更の反映であり、bugではない——詳細は provenance.note と ADR 0168 を見ること。🔴🔴 2026-09-16 追記2(ADR 0170・Issue #339): turnCount=322 の行が、この直前の更新の時点では非決定だった(同一commitのCI再実行で mnemoraChars が 4481/4555/4558 と揺れる。ADR 0168 が固定した 4558 はその揺れの中の1点に過ぎなかった)。原因を直し(ADR 0170)、322行を再実測した値に差し替えた。他の11行は不変。🔴🔴🔴 2026-09-17 追記3(ADR 0231・Issue #403): omitted 欄が main 上で陳腐化していた(12行中5行が相違)のを、この PR 自身の CI の artifact で実測更新した。⭐門が見る2欄は12行すべて不変であり、⟹ 退行ではない。理由は ADR 0188(over_limit に stage)と ADR 0193(ann_unreached が窓満杯でも鳴る)の2本である——詳細は provenance.thirdUpdate と ADR 0231。⚠ 併せて、⭐門が見ない欄の食い違いを Job Summary が毎 run 名乗るようにした(ADR 0231 決定3)。⛔ それは門ではない——ジョブは落ちない。",
+  "_readme": "compare ベンチ(examples/chat の `compare` サブコマンド、北極星の物差し=mnemora/naive比)の基準値。scripts/compare-summary.mjs --baseline がこれを読む。retrieval-baseline.json / time-term-baseline.json と同じ考え方(『基準値をrepoにコミットし出所を添える』)を踏襲している。⚠ このベンチは他5本と違い、実測で2回のCI run(同一commit)が measuredAt を除いて完全一致したため(ADR 0133「測ったこと」)、⭐ 門にしている——mnemoraShareOfNaiveCharsの悪化とfactStatementSurvivedの退行(true→false)を検知すると赤くなる。⚠ 判定の規則と終了コードはここに写さない(ADR 0223 決定9『焼き込んだ数字は腐る。唯一の出所を指すだけにする』)——唯一の出所は scripts/compare-summary-lib.mjs の evaluateCompare であり、この行が以前名指ししていた computeRegressions は ADR 0222 が廃した。⭐ 1つだけ写す: 判定は3値であり、exit 2 は「判定していない」(実測と基準値の turnCount 集合が一致せず、比較していない会話長が在る)であって「失敗」ではない(ADR 0222 決定5・Issue #477)。⚠ CIのジョブがこのファイルを更新することはない(意図的な手作業のみ)。⚠ この行は以前『ADR 0133参照』と指していたが、ADR 0133 本文に「手作業」の語は1度も無い——主張自体は ADR 0121 決定1『手で数値を書いた欄は無い』と ADR 0119 決定6『実測せずに数値を書けば、それは捏造である』が支えているので、指し先だけをそちらへ差し替えた(ADR 0231 決定6)。更新手順は examples/chat/README.md の compare 節。🔴 2026-09-16 追記(ADR 0168・Issue #291): examples/chat が recall() の連想枠を既定で使うようになったため、この基準値を更新した。値が退行に見えても、それはこの意図した変更の反映であり、bugではない——詳細は provenance.note と ADR 0168 を見ること。🔴🔴 2026-09-16 追記2(ADR 0170・Issue #339): turnCount=322 の行が、この直前の更新の時点では非決定だった(同一commitのCI再実行で mnemoraChars が 4481/4555/4558 と揺れる。ADR 0168 が固定した 4558 はその揺れの中の1点に過ぎなかった)。原因を直し(ADR 0170)、322行を再実測した値に差し替えた。他の11行は不変。🔴🔴🔴 2026-09-17 追記3(ADR 0231・Issue #403): omitted 欄が main 上で陳腐化していた(12行中5行が相違)のを、この PR 自身の CI の artifact で実測更新した。⭐門が見る2欄は12行すべて不変であり、⟹ 退行ではない。理由は ADR 0188(over_limit に stage)と ADR 0193(ann_unreached が窓満杯でも鳴る)の2本である——詳細は provenance.thirdUpdate と ADR 0231。⚠ 併せて、⭐門が見ない欄の食い違いを Job Summary が毎 run 名乗るようにした(ADR 0231 決定3)。⛔ それは門ではない——ジョブは落ちない。 🔴🔴🔴🔴 2026-09-24 追記4(ADR 0298・Issue #340): scenario.ts の filler user/assistant 発話が12文の固定配列を i%12 で巡回していたため、320往復の会話で同じ文が最大約27回重複し、連想枠のtie-break(ADR 0170 §3)に紛れ込んでいた——重複を無くすため filler を話題×述語の直積による一意な生成へ直し、examples/chat/cassettes/compare.json を実 API で録り直した上で、この基準値をこの PR(#701)自身の CI artifact で実測更新した。12行すべての値が動いている(filler の内容が変われば naiveChars 等も連鎖して動くため——ADR 0298 参照)。詳細は provenance.fourthUpdate。",
   "schemaVersion": 1,
   "provenance": {
-    "commit": "f6059c7fefd5d8c692554e6dbd162736fd3db792",
-    "measuredAt": "2026-09-17T13:02:11.883Z",
-    "how": "gh run download / gh api で、この PR(#513, ADR 0231)自身の CI(example-chat ジョブ、run 35224407070)が生成した artifact compare を取得し、node で読み込んで llmMode/embeddingMode/rowCount/rows をそのまま複製した(ADR 0133 決定1 / ADR 0168 決定5 と同じ手順)。⛔ 手で数値を書いた欄は無い。⚠ この作業環境には DATABASE_URL が無く、compare ベンチ自体は一度も実行していない——使ったのは CI の artifact だけである(ADR 0121『手元では書かない』/ ADR 0119 決定6)。⚠ 上の commit は pull_request の CI が checkout するマージプレビュー(refs/pull/513/merge)の sha であり、PR ブランチの head(2ac6989a43738662037219e3ec2ae76c4760f24a)そのものではない。",
-    "ciJob": "example-chat(pgvector/pgvector:pg17 の service container 上、PR #513 の CI run 35224407070。attempt 1 = Artifact ID 10498937273 / attempt 2 = Artifact ID 10498309325)",
+    "commit": "a55c7bae82d727036b688101f57abab301ed6daa",
+    "measuredAt": "2026-09-24T20:44:30.982Z",
+    "how": "gh run download / gh api で、この PR(#701, ADR 0298)自身の CI(example-chat ジョブ、run 36056651196)が生成した artifact compare を取得し、node で読み込んで llmMode/embeddingMode/rowCount/rows をそのまま複製した(ADR 0133 決定1 / ADR 0168 決定5と同じ手順)。⛔ 手で数値を書いた欄は無い。詳細は provenance.fourthUpdate。",
+    "ciJob": "example-chat(pgvector/pgvector:pg17 の service container 上、PR #701 の CI run 36056651196。attempt 1 = Artifact ID 10833100840 / attempt 2 = Artifact ID 10832593674)",
     "providers": "llmMode=recorded / embeddingMode=recorded（ADR 0133 で確定した通り、examples/chat/cassettes/compare.json の再生。deterministic ではない）。",
     "repeatRuns": 2,
     "note": "ADR 0168(Issue #291)により、queryRecall(mnemora-path.ts、compare/chat が使う想起経路)が既定で RecallQuery.association(maxCount=10)を渡すようになった。この基準値はその変更後の値である。旧値との対比: turnCount<=22の6行は不変(over_limitが起きないため連想枠は何も拾わない)。42/82/162ターンはmnemoraSharOfNaiveCharsが改善(61.7%→55.6%/74.5%→65.2%/84.7%→75.3%、目次帯の1件63字の固定費より本体への昇格コストが安いため)。322/642ターンは悪化(53.0%→56.0%/26.5%→27.6%、除外候補が目次帯の上限50件を超え連想枠が純追加になるため)——これがこの PR で唯一 ⭐ 門を赤くした理由であり、ADR 0168 が意図した変更である。再現性はこのPRのCI run 1回と、書き手が別環境(ローカルPostgres)で独立に走らせた測定の一致で確認した(ADR 0133 が行ったような同一commitのCI2回reRunは行っていない——1回のCI run + 独立環境での一致確認、という異なる形の裏取りである)。",
     "reconfirmedAfterMainMerge": "2026-09-16: このブランチへ origin/main を2回取り込んだ(8e11663=PR #334 validAtゲート/Issue #280/ADR 0164、1021a93=PR #335 decay活動時計/Issue #305/ADR 0165、いずれも migration を含む)後、この PR 自身の CI run 35045819349(head 3b854e3、example-chat ジョブ)が生成した compare.json artifact を取得し、rows 12件を measuredAt を除いて突き合わせたところ、上記の値と1バイトも違わなかった(node で JSON.stringify した各フィールドをrow単位で比較)。⟹ #334/#335 は compare の実測値を動かしていない(validAt ゲートは valid_from/valid_until を使わないシナリオでは効かず、decay 活動時計は既定 'wall' で非破壊のため)。この事実確認のためだけであり、rows 自体はどちらの CI run(35040893466 / 35045819349)から取っても同じなので更新していない——ADR 0133 決定1が言う『CI artifact をそのまま基準値の本体にする』の対象は変わらず ADR 0168 が最初に固定した35040893466のままで正しい。",
     "secondUpdate": "2026-09-16(ADR 0170・Issue #339): 上記の 322 行(4558)は、実は同一commitのCI再実行で 4481/4555/4558 と揺れる非決定値だった——ADR 0168 はこの揺れを検知しないまま最初に観測した値をそのまま基準値にしていた。原因(PostgresVectorStore.searchのORDER BYがADR 0167で足したmemory_id tie-breakに依存しており、memory_idがingestのたびに振り直されるランダムなUUIDであるため、重複コンテンツの多いこのベンチでfresh ingestごとに勝者が変わっていた)をADR 0170で直した。この PR 自身の CI run 35050847242 に対し、同一 job(examples/chat)を gh run rerun --job で2回追加実行し(計3回、attempt 1/2/3)、artifact ID直指定(10428986922 / 10429345663 / 10429615448)でそれぞれ取得した——measuredAt(2026-09-16T03:13:12.136Z / T03:20:28.517Z / T03:23:51.317Z、3つとも別物であることを確認済み)を除いて rows 12件すべてが3回ともバイト単位で一致した(node でJSON.stringifyしたrows配列をdiff)。⟹ 322行を新しい値(mnemoraChars=4547、mnemoraShareOfNaiveChars=0.5590115564298008)に差し替えた。他11行(642行を含む)はこのCI run群でも1バイトも変わっていない——642行はmnemoraCharsの値としては修正前後で不変だが、連想枠の中身(externalIdの集合)は修正前は非決定だったことをローカル実測で別途確認している(ADR 0170参照。この基準値ファイルはmnemoraCharsしか持たないため、その事実はここには現れない)。",
-    "thirdUpdate": "2026-09-17(ADR 0231・Issue #403): omitted 欄が main 上で陳腐化していたのを、CI の artifact で実測更新した。⭐ 動いたのは omitted だけである——⭐門が見る2欄(mnemoraShareOfNaiveChars / factStatementSurvived)は12行すべてで不変であり、この更新で門の検知力は下がらない。値が動いた理由は2本の ADR である: (1) ADR 0188 が over_limit に stage を足した(turnCount=42/82 はこれだけで説明が付く。count は不変)。(2) ADR 0193 が ann_unreached を『窓が満杯でも鳴る』形に直した——旧条件 annHits.length < kPrime が ann_truncated の判定が動く場合を構造的に除外していたため一度も鳴りようがなく、0193 が条件を広げて初めて鳴り始めた(turnCount=162/322/642 に新しく現れた ann_unreached はこれである)。⭐ 採る前に一致を確かめた(ADR 0231 決定5、ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化されていなかった規律): (a) 同一 commit(f6059c7f、refs/pull/513/merge)で example-chat ジョブを2回実行し、artifact ID 直指定(10498937273 / 10498309325)で取得したところ、measuredAt(2026-09-17T13:02:11.883Z / T13:09:10.138Z)を除いて全欄がバイト単位で一致した。(b) さらに main の成功 run 8本(35208811254 / 35210285638 / 35212209546 / 35213802314 / 35214441665 / 35215295404 / 35215408232 / 35216005498。head は8つの別 commit)の artifact とも rows が1バイトも違わなかった。⟹ 計10 run で一致している。⚠ この10本は 2026-09-17 の約2時間の窓のものであり、それ以前の run は見ていない。"
+    "thirdUpdate": "2026-09-17(ADR 0231・Issue #403): omitted 欄が main 上で陳腐化していたのを、CI の artifact で実測更新した。⭐ 動いたのは omitted だけである——⭐門が見る2欄(mnemoraShareOfNaiveChars / factStatementSurvived)は12行すべてで不変であり、この更新で門の検知力は下がらない。値が動いた理由は2本の ADR である: (1) ADR 0188 が over_limit に stage を足した(turnCount=42/82 はこれだけで説明が付く。count は不変)。(2) ADR 0193 が ann_unreached を『窓が満杯でも鳴る』形に直した——旧条件 annHits.length < kPrime が ann_truncated の判定が動く場合を構造的に除外していたため一度も鳴りようがなく、0193 が条件を広げて初めて鳴り始めた(turnCount=162/322/642 に新しく現れた ann_unreached はこれである)。⭐ 採る前に一致を確かめた(ADR 0231 決定5、ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化されていなかった規律): (a) 同一 commit(f6059c7f、refs/pull/513/merge)で example-chat ジョブを2回実行し、artifact ID 直指定(10498937273 / 10498309325)で取得したところ、measuredAt(2026-09-17T13:02:11.883Z / T13:09:10.138Z)を除いて全欄がバイト単位で一致した。(b) さらに main の成功 run 8本(35208811254 / 35210285638 / 35212209546 / 35213802314 / 35214441665 / 35215295404 / 35215408232 / 35216005498。head は8つの別 commit)の artifact とも rows が1バイトも違わなかった。⟹ 計10 run で一致している。⚠ この10本は 2026-09-17 の約2時間の窓のものであり、それ以前の run は見ていない。",
+    "fourthUpdate": "2026-09-24(ADR 0298・Issue #340): scenario.ts の filler(examples/chat/src/scenario.ts の FILLER_USER_PREDICATES/FILLER_TOPICS)を、12文の固定配列を i%12 で巡回する方式から、話題×述語の直積(容量20×20=400、うち320往復までで実際に使うのは述語20種すべて×話題16種)で fillerIndex ごとに一意な文を生成する方式へ直した(320往復まで重複なし。歯は examples/chat/src/__tests__/scenario.test.ts)。旧方式は320往復の会話で同じ文が最大約27回重複し、本物の embedding が bit-for-bit 一致するベクトルを返すため、連想枠(maxCount)の tie-break に紛れ込んで turnCount=322 行の mnemoraChars を非決定にしていた(ADR 0170 §3)。examples/chat/cassettes/compare.json を実 API で2回録り直した(1回目: gpt-4o-mini 321回・text-embedding-3-small 137回・$0.015521。1回目の録音を検算したところ、fillerIndex を (話題,述語)に分解する列挙順序(話題を速く・述語を遅く回す)が原因で、totalInScope がfillerPairs<=20の全域で一定のまま fillerPairs=40で段差状に急増する不自然な形になっていた——原因は列挙順序であり文面ではないため、話題・述語の文面は変えずに軸の速さだけ入れ替え(述語を速く・話題を遅く)、2回目を録音した: gpt-4o-mini 321回・text-embedding-3-small 144回・$0.015610。実 API 費用の合計は約$0.0311)。この基準値は、この PR(#701)自身の CI run(36056651196、head 242cf7d、example-chat ジョブ)が生成した compare.json artifact を、measuredAt/commit を除いて同一 run 内の2回実行(attempt 1 = Artifact ID 10833100840・measuredAt 2026-09-24T20:44:30.982Z / attempt 2 = Artifact ID 10832593674・measuredAt 2026-09-24T20:51:07.549Z)がバイト単位で一致することを確認した上で(node で JSON.stringify を比較)、artifact を node で読み込んで llmMode/embeddingMode/rowCount/rows をそのまま複製した(ADR 0133 決定1 / ADR 0168 決定5 と同じ手順)。⛔ 手で数値を書いた欄は無い。commit 欄の a55c7bae82d727036b688101f57abab301ed6daa は pull_request の CI が checkout するマージプレビュー(refs/pull/701/merge)の sha であり、PR ブランチの head(242cf7d435c86931ed4afd4b13205b7a1357cf43)そのものではない。⭐ mnemoraShareOfNaiveChars / factStatementSurvived を含む12行すべての値が旧基準値から動いている——filler の文面と列挙順序を変えたことで、全会話長の naiveChars・extraction の対象・件数が連鎖して変わるため、『322行だけを直した』とは言えない(scenario.ts のコメント参照)。factStatementSurvived は12行すべて true のまま(退行なし)。誤差(推定器との比較)の前後・42行の字数余白の前後は recall-footprint-baseline.test.ts のコメントと PR #701 本文を参照。"
   },
   "llmMode": "recorded",
   "embeddingMode": "recorded",
@@ -22,9 +23,9 @@
       "turnCount": 2,
       "naiveChars": 49,
       "naiveTokens": 32,
-      "mnemoraChars": 205,
-      "mnemoraTokens": 60,
-      "mnemoraShareOfNaiveChars": 4.183673469387755,
+      "mnemoraChars": 207,
+      "mnemoraTokens": 62,
+      "mnemoraShareOfNaiveChars": 4.224489795918367,
       "totalInScope": 2,
       "omitted": [],
       "returnedCount": 2,
@@ -34,25 +35,25 @@
     {
       "fillerPairs": 1,
       "turnCount": 4,
-      "naiveChars": 97,
-      "naiveTokens": 62,
-      "mnemoraChars": 216,
-      "mnemoraTokens": 70,
-      "mnemoraShareOfNaiveChars": 2.2268041237113403,
-      "totalInScope": 3,
+      "naiveChars": 99,
+      "naiveTokens": 64,
+      "mnemoraChars": 207,
+      "mnemoraTokens": 62,
+      "mnemoraShareOfNaiveChars": 2.090909090909091,
+      "totalInScope": 2,
       "omitted": [],
-      "returnedCount": 3,
-      "annCandidateCount": 3,
+      "returnedCount": 2,
+      "annCandidateCount": 2,
       "factStatementSurvived": true
     },
     {
       "fillerPairs": 2,
       "turnCount": 6,
-      "naiveChars": 150,
-      "naiveTokens": 98,
-      "mnemoraChars": 216,
-      "mnemoraTokens": 70,
-      "mnemoraShareOfNaiveChars": 1.44,
+      "naiveChars": 152,
+      "naiveTokens": 100,
+      "mnemoraChars": 226,
+      "mnemoraTokens": 79,
+      "mnemoraShareOfNaiveChars": 1.486842105263158,
       "totalInScope": 3,
       "omitted": [],
       "returnedCount": 3,
@@ -62,11 +63,11 @@
     {
       "fillerPairs": 3,
       "turnCount": 8,
-      "naiveChars": 197,
-      "naiveTokens": 128,
-      "mnemoraChars": 216,
-      "mnemoraTokens": 70,
-      "mnemoraShareOfNaiveChars": 1.0964467005076142,
+      "naiveChars": 199,
+      "naiveTokens": 130,
+      "mnemoraChars": 226,
+      "mnemoraTokens": 79,
+      "mnemoraShareOfNaiveChars": 1.135678391959799,
       "totalInScope": 3,
       "omitted": [],
       "returnedCount": 3,
@@ -76,11 +77,25 @@
     {
       "fillerPairs": 4,
       "turnCount": 10,
-      "naiveChars": 243,
-      "naiveTokens": 157,
-      "mnemoraChars": 232,
-      "mnemoraTokens": 85,
-      "mnemoraShareOfNaiveChars": 0.9547325102880658,
+      "naiveChars": 251,
+      "naiveTokens": 164,
+      "mnemoraChars": 226,
+      "mnemoraTokens": 79,
+      "mnemoraShareOfNaiveChars": 0.900398406374502,
+      "totalInScope": 3,
+      "omitted": [],
+      "returnedCount": 3,
+      "annCandidateCount": 3,
+      "factStatementSurvived": true
+    },
+    {
+      "fillerPairs": 5,
+      "turnCount": 12,
+      "naiveChars": 301,
+      "naiveTokens": 197,
+      "mnemoraChars": 242,
+      "mnemoraTokens": 94,
+      "mnemoraShareOfNaiveChars": 0.8039867109634552,
       "totalInScope": 4,
       "omitted": [],
       "returnedCount": 4,
@@ -88,109 +103,90 @@
       "factStatementSurvived": true
     },
     {
-      "fillerPairs": 5,
-      "turnCount": 12,
-      "naiveChars": 294,
-      "naiveTokens": 190,
-      "mnemoraChars": 249,
-      "mnemoraTokens": 100,
-      "mnemoraShareOfNaiveChars": 0.8469387755102041,
-      "totalInScope": 5,
-      "omitted": [],
-      "returnedCount": 5,
-      "annCandidateCount": 5,
-      "factStatementSurvived": true
-    },
-    {
       "fillerPairs": 10,
       "turnCount": 22,
-      "naiveChars": 552,
-      "naiveTokens": 361,
-      "mnemoraChars": 295,
-      "mnemoraTokens": 142,
-      "mnemoraShareOfNaiveChars": 0.5344202898550725,
-      "totalInScope": 8,
+      "naiveChars": 556,
+      "naiveTokens": 364,
+      "mnemoraChars": 262,
+      "mnemoraTokens": 112,
+      "mnemoraShareOfNaiveChars": 0.4712230215827338,
+      "totalInScope": 6,
       "omitted": [],
-      "returnedCount": 8,
-      "annCandidateCount": 8,
+      "returnedCount": 6,
+      "annCandidateCount": 6,
       "factStatementSurvived": true
     },
     {
       "fillerPairs": 20,
       "turnCount": 42,
-      "naiveChars": 1048,
-      "naiveTokens": 684,
-      "mnemoraChars": 583,
-      "mnemoraTokens": 277,
-      "mnemoraShareOfNaiveChars": 0.5562977099236641,
-      "totalInScope": 14,
-      "omitted": [
-        {
-          "kind": "over_limit",
-          "stage": "rescore",
-          "count": 4,
-          "countKind": "exact"
-        }
-      ],
-      "returnedCount": 11,
-      "annCandidateCount": 14,
+      "naiveChars": 1094,
+      "naiveTokens": 725,
+      "mnemoraChars": 312,
+      "mnemoraTokens": 158,
+      "mnemoraShareOfNaiveChars": 0.2851919561243144,
+      "totalInScope": 9,
+      "omitted": [],
+      "returnedCount": 9,
+      "annCandidateCount": 9,
       "factStatementSurvived": true
     },
     {
       "fillerPairs": 40,
       "turnCount": 82,
-      "naiveChars": 2064,
-      "naiveTokens": 1351,
-      "mnemoraChars": 1345,
-      "mnemoraTokens": 587,
-      "mnemoraShareOfNaiveChars": 0.6516472868217055,
-      "totalInScope": 25,
+      "naiveChars": 2179,
+      "naiveTokens": 1455,
+      "mnemoraChars": 499,
+      "mnemoraTokens": 286,
+      "mnemoraShareOfNaiveChars": 0.22900413033501607,
+      "totalInScope": 18,
       "omitted": [
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 15,
+          "count": 8,
           "countKind": "exact"
         }
       ],
-      "returnedCount": 13,
-      "annCandidateCount": 25,
+      "returnedCount": 17,
+      "annCandidateCount": 18,
       "factStatementSurvived": true
     },
     {
       "fillerPairs": 80,
       "turnCount": 162,
-      "naiveChars": 4083,
-      "naiveTokens": 2674,
-      "mnemoraChars": 3075,
-      "mnemoraTokens": 1272,
-      "mnemoraShareOfNaiveChars": 0.7531227038941954,
-      "totalInScope": 49,
+      "naiveChars": 4389,
+      "naiveTokens": 2950,
+      "mnemoraChars": 1806,
+      "mnemoraTokens": 796,
+      "mnemoraShareOfNaiveChars": 0.41148325358851673,
+      "totalInScope": 37,
       "omitted": [
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 30,
+          "count": 27,
           "countKind": "exact"
         },
         {
-          "kind": "ann_unreached",
-          "countKind": "unknown"
+          "kind": "over_limit",
+          "stage": "association",
+          "count": 1,
+          "countKind": "exact"
         }
       ],
-      "returnedCount": 16,
-      "annCandidateCount": 49,
+      "returnedCount": 20,
+      "annCandidateCount": 37,
       "factStatementSurvived": true
     },
     {
       "fillerPairs": 160,
       "turnCount": 322,
-      "naiveChars": 8134,
-      "naiveTokens": 5332,
-      "mnemoraChars": 4547,
-      "mnemoraTokens": 1875,
-      "mnemoraShareOfNaiveChars": 0.5590115564298008,
-      "totalInScope": 95,
+      "naiveChars": 9009,
+      "naiveTokens": 6120,
+      "mnemoraChars": 4481,
+      "mnemoraTokens": 1815,
+      "mnemoraShareOfNaiveChars": 0.4973914973914974,
+      "totalInScope": 73,
       "omitted": [
         {
           "kind": "over_limit",
@@ -201,27 +197,28 @@
         {
           "kind": "over_limit",
           "stage": "association",
-          "count": 7,
+          "count": 3,
           "countKind": "exact"
         },
         {
           "kind": "ann_unreached",
-          "countKind": "unknown"
+          "countKind": "unknown",
+          "severity": "info"
         }
       ],
       "returnedCount": 20,
-      "annCandidateCount": 95,
+      "annCandidateCount": 73,
       "factStatementSurvived": true
     },
     {
       "fillerPairs": 320,
       "turnCount": 642,
-      "naiveChars": 16223,
-      "naiveTokens": 10636,
-      "mnemoraChars": 4476,
-      "mnemoraTokens": 1850,
-      "mnemoraShareOfNaiveChars": 0.2759045799174012,
-      "totalInScope": 189,
+      "naiveChars": 18329,
+      "naiveTokens": 12532,
+      "mnemoraChars": 4435,
+      "mnemoraTokens": 1813,
+      "mnemoraShareOfNaiveChars": 0.2419662829396039,
+      "totalInScope": 148,
       "omitted": [
         {
           "kind": "over_limit",
@@ -232,16 +229,17 @@
         {
           "kind": "over_limit",
           "stage": "association",
-          "count": 21,
+          "count": 2,
           "countKind": "exact"
         },
         {
           "kind": "ann_unreached",
-          "countKind": "unknown"
+          "countKind": "unknown",
+          "severity": "info"
         }
       ],
       "returnedCount": 20,
-      "annCandidateCount": 189,
+      "annCandidateCount": 148,
       "factStatementSurvived": true
     }
   ]

@@ -110,6 +110,41 @@ function associationCountForRow(row: BaselineRow): number {
  *
  * ⚠ **許容誤差 `0.025` はこの訂正でも動かしていない**——#340・#410・ADR 0166 が
  * いずれも「通すために緩める」形を名指しで却下している。
+ *
+ * ### ⚠ 2026-09-24 訂正（ADR 0298・Issue #340）: `compare-baseline.json` を録り直した
+ *
+ * 上の2026-09-17時点の表（322行が最大誤差2.068%・余裕17%・字数余白20.14字、42行が
+ * hold-out中最小の字数余白11.15字）は、**`scenario.ts` の filler が12文の固定配列を
+ * `i % 12` で巡回していた時点の `compare-baseline.json` に対する値である。**
+ *
+ * filler の重複（320往復の会話で同じ文が最大約27回重複）が、連想枠の `maxCount` による
+ * tie-break に紛れ込み、322ターン行の `mnemoraChars` を非決定にしていた
+ * （[ADR 0170](../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md) §3）。
+ * この重複を無くすため filler を話題×述語の直積による一意な生成へ直し（`scenario.ts`）、
+ * `compare.json`（カセット）を実 API で録り直した上で、`compare-baseline.json` を
+ * この PR 自身の CI artifact で実測更新した（ADR 0298）。
+ *
+ * **filler の内容が変われば、12行すべての `naiveChars`/`mnemoraChars`/`totalInScope` が
+ * 連鎖して動く**——「322行だけを直した」とは言えない。特に、各 turnCount で
+ * 実際に何件の filler が「記憶に値する」と real LLM に判定されるかが変わったため、
+ * **hold-in（`totalInScope <= 10`）/hold-out の内訳自体が「7行/5行」から「8行/4行」へ
+ * 変わった**（turnCount=42 行が `totalInScope=9` になり hold-out から hold-in 側へ移った）。
+ *
+ * | | 旧（12文巡回、2026-09-17時点） | 新（話題×述語の直積、2026-09-24） |
+ * |---|---|---|
+ * | hold-in/hold-out の内訳 | 7行/5行 | **8行/4行** |
+ * | 較正係数 | charsPerDigest≒15.458 / fixedIndexChars≒170.881 | **charsPerDigest=14.45 / fixedIndexChars=180.7** |
+ * | 12行全体の最大誤差 | 2.068%（322ターン行） | **2.061%（22ターン行）** |
+ * | hold-out側の最大誤差 | 2.068%（322ターン行） | **1.982%（322ターン行）** |
+ * | 2.5%に対する余裕（百分率、全体最大） | (2.5−2.068)/2.5 ≒ 17% | **(2.5−2.061)/2.5 ≒ 17.6%** |
+ *
+ * ⟹ **推定器の形・重み（自由係数2つという構造）は変えていない**——係数の値そのものは
+ * 「入力（`compare-baseline.json`）が変わったので再較正した結果」であり、それ自体は
+ * この ADR が意図して動かしたものではない。`ACCURACY_TOLERANCE`（0.025）も
+ * `DEFAULT_FOOTPRINT_TOLERANCE`（`packages/core`、0.05）も動かしていない。
+ *
+ * 🔴 **字数の余白は次の「字数で見た誤差の余白」の訂正節を見ること**——42行が
+ * hold-in側へ移ったため、いちばん狭い行が変わっている。
  */
 const ACCURACY_TOLERANCE = 0.025;
 
@@ -121,16 +156,22 @@ function relativeError(estimatedChars: number, actualChars: number): number {
 }
 
 describe("compare-baseline.json — 前提（行数が変わっていないこと）", () => {
-  it("12行のうち、目次帯が空の(totalInScope <= DEFAULT_RECALL_LIMIT)行が7行、そうでない行が5行", () => {
+  // ⚠ 2026-09-24訂正（ADR 0298・Issue #340）: hold-in/hold-out の内訳は「7行/5行」だったが、
+  // filler を録り直した結果、turnCount=42 行が hold-out から hold-in 側へ移り「8行/4行」に
+  // なった（このファイル冒頭の docstring 参照）。
+  it("12行のうち、目次帯が空の(totalInScope <= DEFAULT_RECALL_LIMIT)行が8行、そうでない行が4行", () => {
     expect(rows).toHaveLength(12);
-    expect(holdInRows).toHaveLength(7);
-    expect(holdOutRows).toHaveLength(5);
+    expect(holdInRows).toHaveLength(8);
+    expect(holdOutRows).toHaveLength(4);
   });
 });
 
-describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
-  // 目次帯が空の7行だけを標本にする。これらは totalInScope <= DEFAULT_RECALL_LIMIT なので
-  // 全件が返り、目次帯に載る候補が無い(bandEntryCount=0)。
+describe("calibrateRecallFootprint — hold-in 8行での較正", () => {
+  // ⚠ 2026-09-24訂正（ADR 0298・Issue #340）: 以前は「目次帯が空の7行だけ」だったが、
+  // filler を録り直した結果 turnCount=42 行が hold-in 側へ移り、いまは8行（このファイル
+  // 冒頭の docstring 参照）。目次帯が空の8行だけを標本にする。これらは
+  // totalInScope <= DEFAULT_RECALL_LIMIT なので全件が返り、目次帯に載る候補が無い
+  // (bandEntryCount=0)。
   const samples: RecallFootprintSample[] = holdInRows.map((row) => ({
     totalChars: row.mnemoraChars,
     memoryCount: row.returnedCount,
@@ -138,15 +179,18 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
   }));
   const calibrated = calibrateRecallFootprint(samples);
 
-  it("borrowedFromDefault が空(7行に memoryCount の広がりがあるため両係数とも決まる)", () => {
+  it("borrowedFromDefault が空(8行に memoryCount の広がりがあるため両係数とも決まる)", () => {
     if (calibrated.origin.kind !== "calibrated") throw new Error("unreachable");
     expect(calibrated.origin.borrowedFromDefault).toEqual([]);
-    expect(calibrated.origin.sampleCount).toBe(7);
+    expect(calibrated.origin.sampleCount).toBe(8);
   });
 
-  it("較正した係数がオーナーの実測(charsPerDigest≒15.458 / fixedIndexChars≒170.881)に一致する", () => {
-    expect(calibrated.charsPerDigest).toBeCloseTo(15.458, 2);
-    expect(calibrated.fixedIndexChars).toBeCloseTo(170.881, 2);
+  // ⚠ 2026-09-24訂正（ADR 0298・Issue #340）: 以前は charsPerDigest≒15.458 /
+  // fixedIndexChars≒170.881 だった。filler を録り直した結果の再較正値に更新した
+  // （`packages/core` の BUILTIN_RECALL_FOOTPRINT_PROFILE も同じ値に更新済み）。
+  it("較正した係数がオーナーの実測(charsPerDigest=14.45 / fixedIndexChars=180.7)に一致する", () => {
+    expect(calibrated.charsPerDigest).toBeCloseTo(14.45, 2);
+    expect(calibrated.fixedIndexChars).toBeCloseTo(180.7, 2);
   });
 
   describe("較正済みプロファイルで12行すべての mnemoraChars を予測する", () => {
@@ -162,7 +206,7 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
       },
     );
 
-    it("12行全体(較正に使った7行 + hold-outの5行)の最大誤差が許容誤差以内", () => {
+    it("12行全体(較正に使った8行 + hold-outの4行)の最大誤差が許容誤差以内", () => {
       const errors = rows.map((row) => {
         const est = estimateRecallFootprint(
           { memoryCountInScope: row.totalInScope, associationCount: associationCountForRow(row) },
@@ -176,18 +220,23 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
   });
 
   /**
-   * ⚠ **`too_close_to_call` が出る行がありうる。** 実測では:
-   * - `totalInScope=4`（10ターン行）: `mnemoraShareOfNaiveChars` ≒ 0.9547（95.5%）。
-   *   これは既定許容誤差(5%)の内側に落ち、実際に `too_close_to_call` になる。
-   * - `totalInScope=3` のうち `naiveChars=197` の行（8ターン行）: 実測 ≒ 1.0964（109.6%）。
-   *   1 には近いが、誤差は約10.3%あり、既定許容誤差(5%)の**外**——`too_close_to_call` には
-   *   ならない。
+   * ⚠ **`too_close_to_call` が出る行がありうる。**
+   *
+   * ### ⚠ 2026-09-24訂正（ADR 0298・Issue #340）
+   *
+   * 以前（filler 12文巡回時点）は `totalInScope=4`（10ターン行）の
+   * `mnemoraShareOfNaiveChars` ≒ 0.9547（95.5%）が既定許容誤差(5%)の内側に落ち、
+   * `too_close_to_call` になっていた。filler を録り直した結果、10ターン行は
+   * `totalInScope=3`・`mnemoraShareOfNaiveChars` ≒ 0.9004（90.0%）——既定許容誤差(5%)の
+   * **外**（約10%乖離）になり、`too_close_to_call` ではなく `mnemora_smaller` になった。
+   * 【実測】12行を通して `too_close_to_call` になる行は無い——`TOO_CLOSE_TO_CALL_TURN_COUNTS`
+   * を空集合にした（値を削除するのではなく、経緯をこの節に残す）。
    *
    * `too_close_to_call` は「見積もりが誤差の幅の中に居るのでどちらとも言えない」という
    * 積極的な申告であり、これを「判定を外した」と数えるのは誤り
    * （`recall-footprint.ts` の `FullLogVerdict` の doc）。
    */
-  const TOO_CLOSE_TO_CALL_TURN_COUNTS = new Set<number>([10]);
+  const TOO_CLOSE_TO_CALL_TURN_COUNTS = new Set<number>([]);
 
   describe("compareWithFullLog — 12行すべてで判定の向きが実測と一致する(too_close_to_callは除く)", () => {
     it.each(rows)(
@@ -213,7 +262,10 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
       },
     );
 
-    it("8ターン行(totalInScope=3, naiveChars=197, 実測109.6%)は1に近いが許容誤差の外なので full_log_smaller のまま", () => {
+    // ⚠ 2026-09-24訂正（ADR 0298・Issue #340）: 以前は naiveChars=197・実測109.6%だった。
+    // filler を録り直した結果 naiveChars=199・実測113.6%に動いたが、既定許容誤差(5%)の
+    // 外という結論(full_log_smallerのまま)は変わっていない。
+    it("8ターン行(totalInScope=3, naiveChars=199, 実測113.6%)は1に近いが許容誤差の外なので full_log_smaller のまま", () => {
       const row = rows.find((r) => r.turnCount === 8);
       if (!row) throw new Error("baseline row not found: turnCount=8");
       const result = compareWithFullLog({
@@ -258,7 +310,7 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
     );
 
     expect(maxErrDefault).toBeLessThanOrEqual(ACCURACY_TOLERANCE);
-    // 既定プロファイル自身がこの7行から測ったものである(recall-footprint.ts の
+    // 既定プロファイル自身がこの8行から測ったものである(recall-footprint.ts の
     // BUILTIN_RECALL_FOOTPRINT_PROFILE.origin.measuredFrom を見よ)以上、この歯が
     // hold-in較正し直した値とほぼ一致するはず。ずれるなら既定プロファイルの係数が
     // 古い(誰かが構造定数を変えたのに測り直していない)ということなので、その場合は
@@ -271,7 +323,7 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
  * Issue #410 対処候補3: 「歯の余白は字数で見るとどれだけ狭いか」を、百分率ではなく
  * 字数で見える形にする。
  *
- * ⚠ **対象は hold-out 5行だけであり、hold-in 7行は含めない。**理由は自己参照——
+ * ⚠ **対象は hold-out 行だけであり、hold-in 行は含めない。**理由は自己参照——
  * hold-in 行（`totalInScope <= DEFAULT_RECALL_LIMIT`）は `calibrateRecallFootprint` の
  * 較正標本そのものである（上の `samples` が `row.mnemoraChars` を直接使う）。ある
  * hold-in 行の実測が変われば、その行の「実測」だけでなく較正係数
@@ -279,8 +331,8 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
  * 「この行がどこまでずれたら赤くなるか」を計算しても、実際にその行が動いたときの
  * 挙動を正しく予測しない。
  *
- * hold-out 5行（322ターン行を含む）は較正標本に入らない——`calibrateRecallFootprint`
- * は hold-in 7行だけから決まるので、hold-out 行の実測がいくら動いても較正係数は
+ * hold-out 行（322ターン行を含む）は較正標本に入らない——`calibrateRecallFootprint`
+ * は hold-in 行だけから決まるので、hold-out 行の実測がいくら動いても較正係数は
  * 変わらない。⟹ hold-out 行だけは「この行の実測が[下限,上限]の外に出たら赤くなる」
  * という境界を、較正を固定したまま正しく計算できる。ADR 0201「検討して採らなかった案」に
  * hold-in 行を含めなかった理由の詳細がある。
@@ -295,8 +347,35 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
  * その正当な変更のたびに意味なく赤くなる）。半digest分は「digestの内容がわずかに
  * 変わっただけで境界に触れる」水準を表す、較正そのものから導いた閾値であり、
  * 較正係数が動けば閾値も追随する。
+ *
+ * ### 🔴 2026-09-24訂正（ADR 0298・Issue #340）: hold-out は5行→4行になり、
+ * 最も狭い行が42行→82行に変わった。**この歯はいま実際に赤い。**
+ *
+ * `scenario.ts` の filler を録り直した結果（このファイル冒頭の docstring 参照）、
+ * turnCount=42 行は `totalInScope=9` になり hold-in 側へ移った——hold-out は
+ * 82/162/322/642 の4行になった。42行が抜けたことで「いちばん狭い行」の候補も
+ * 入れ替わり、【実測】いちばん狭いのは **82ターン行の下側で 6.51字**
+ * （旧: 42ターン行の上側で11.15字）。**これは FLOOR（半digest分 = 7.225字）を
+ * 下回っている**——⟹ 下の `it` は緑ではなく赤で終わる。
+ *
+ * | | 旧（2026-09-17時点、42行が最狭） | 新（2026-09-24、82行が最狭） |
+ * |---|---|---|
+ * | hold-out 行数 | 5行 | 4行 |
+ * | 最も狭い行 | 42ターン行・上側 | **82ターン行・下側** |
+ * | 最小余白 | 11.15字 | **6.51字** |
+ * | FLOOR（半digest分） | 7.73字 | 7.225字 |
+ * | 判定 | 余白 > FLOOR（緑） | **余白 < FLOOR（赤）** |
+ *
+ * ⛔ **`ACCURACY_TOLERANCE`・`FLOOR_CHARS` の式（`charsPerDigest/2`）・推定器の形は
+ * 1つも動かしていない**——ADR 0201 が却下した「固定した実測値を閾値にする」も
+ * 「通すために閾値を動かす」も採っていない。ADR 0201 自身の「これが覆るとしたら」1項
+ * （較正標本の取り方・入力が変わって hold-out 行の誤差が動いたとき）がまさに起きた
+ * 状態であり、**この歯が意図通り「境界に近づいたら知らせる」役割を果たして赤くなって
+ * いる**。⟹ **この赤を、この PR の中で消していない**——`ACCURACY_TOLERANCE` を
+ * 緩める・FLOOR の式を変えるといった手段は AGENTS.md／ADR 0201 の規律に反するため
+ * 採らず、オーナーの判断を仰ぐ（PR 本文「未評価の残り」参照）。
  */
-describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん狭い行を明示する(Issue #410)", () => {
+describe("字数で見た誤差の余白 — hold-out 4行のうちいちばん狭い行を明示する(Issue #410)", () => {
   const samples: RecallFootprintSample[] = holdInRows.map((row) => ({
     totalChars: row.mnemoraChars,
     memoryCount: row.returnedCount,

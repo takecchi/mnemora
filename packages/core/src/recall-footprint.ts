@@ -187,9 +187,13 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
     kind: "builtin_default",
     measuredFrom:
       "examples/chat/compare-baseline.json（CI の example-chat ジョブが実測し repo に commit した値。" +
-      "llmMode=recorded / embeddingMode=recorded、provenance commit d6a0092）の12点のうち、" +
-      "目次帯が空の7点（totalInScope <= DEFAULT_RECALL_LIMIT）だけを使った最小二乗。" +
-      "帯のある5点は較正に使っていない（hold-out）。",
+      "llmMode=recorded / embeddingMode=recorded、provenance commit a55c7ba。ADR 0298 / Issue #340" +
+      "——filler の重複を無くすため scenario.ts を直し、この基準値を録り直した後の値）の12点のうち、" +
+      "目次帯が空の8点（totalInScope <= DEFAULT_RECALL_LIMIT）だけを使った最小二乗。" +
+      "帯のある4点は較正に使っていない（hold-out）。" +
+      "⚠ 2026-09-24訂正（ADR 0298）: hold-in/hold-out の内訳は以前「7点/5点」だったが、" +
+      "filler の内容が変わったことで各 turnCount の totalInScope 自体が動き、いまは「8点/4点」" +
+      "（turnCount=42 行が hold-out から hold-in 側へ移った）。",
     measuredUnder: {
       defaultRecallLimit: 10,
       defaultDigestBandLimit: 50,
@@ -199,22 +203,33 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
       digestBandEntrySeparatorChars: 1,
     },
   },
-  charsPerDigest: 15.458,
-  fixedIndexChars: 170.881,
+  charsPerDigest: 14.45,
+  fixedIndexChars: 180.7,
 };
 
 /**
  * 見積もりの許容誤差の既定値（`compareWithFullLog` が `'too_close_to_call'` を返す幅）。
  *
- * **出所**: 上の既定プロファイル（帯が空の7点だけで較正）で
- * `compare-baseline.json` の12点すべてを予測したときの**最大残差 1.56%**
- * （帯のある5点＝ hold-out 側の最大は 1.28%）。
+ * **出所**: 上の既定プロファイル（帯が空の8点だけで較正）で
+ * `compare-baseline.json` の12点すべてを予測したときの**最大残差 2.061%**
+ * （帯のある4点＝ hold-out 側の最大は 1.982%）。
  * **その実測に余裕を見て 5% に置いている。**
  *
  * ⚠ **この値は「この関数の精度が常に5%以内である」ことを意味しない。**
- * 意味するのは「**このリポジトリのベンチの12点では 1.56% だった**」ことだけである。
+ * 意味するのは「**このリポジトリのベンチの12点では 2.061% だった**」ことだけである。
  * 較正していない環境・外挿の領域ではもっと外れうる——そのことは
  * `origin` と `RecallFootprintEstimate.extrapolated` が名乗る。
+ *
+ * ### ⚠ 2026-09-24 訂正（ADR 0298・Issue #340）
+ *
+ * 上の「最大残差 1.56%（hold-out側1.28%）」「charsPerDigest=15.458 /
+ * fixedIndexChars=170.881」は、**`examples/chat/scenario.ts` の filler が12文の固定配列を
+ * `i % 12` で巡回していた時点の値である。** filler の重複が320往復の会話で連想枠の
+ * tie-break を非決定にしていたため（ADR 0170 §3）、filler を話題×述語の直積による
+ * 一意な生成へ直し、`compare-baseline.json` を実 API で録り直した——その結果、
+ * この既定プロファイルの係数も新しい基準値から較正し直した値（本文参照）に更新した。
+ * **`DEFAULT_FOOTPRINT_TOLERANCE`（0.05）自体は動かしていない**——新しい最大残差
+ * （2.061%）も引き続き5%の内側であり、緩める理由が無い。
  */
 export const DEFAULT_FOOTPRINT_TOLERANCE = 0.05;
 
