@@ -1155,6 +1155,28 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
     expect(m!.speaker).toBeNull();
   });
 
+  it("kind !== 'stated' の provenance がたまたま speaker という名のプロパティを持っていても無視する（kind を見ずに provenance.speaker を読む実装を拒む）", async () => {
+    // ⚠ StatedProvenance 以外は今日 speaker という名の欄を持たない——それだけでは
+    // 「kind を見ずに provenance から speaker を読む」実装は検出できない（挙動が同じに
+    // 見えてしまう）。将来どこかの provenance 枝が偶然 speaker という名を持ったときにも
+    // 正しく null を返すことを、型を迂回して構築した fixture で先取りして固定する。
+    const { runtime, stores } = buildRuntime();
+    const leaked = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "imported だが speaker という名の余計なプロパティを持つ",
+      provenance: {
+        kind: "imported",
+        batchId: "fixture",
+        speaker: "漏れてはいけない値",
+      } as unknown as NewMemory["provenance"],
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === leaked.id);
+    expect(Object.hasOwn(m!, "speaker")).toBe(true);
+    expect(m!.speaker).not.toBeUndefined();
+    expect(m!.speaker).toBeNull();
+  });
+
   it("subjectId が在ればその値、null ならそのまま null、Memory 側で undefined でも null に揃える", async () => {
     const { runtime, stores } = buildRuntime();
     const withSubject = await createEmbeddedMemory(stores, [1, 0], {
@@ -1167,8 +1189,13 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
     });
     const undefinedSubject = await createEmbeddedMemory(stores, [0.98, 0.02], {
       digest: "subject undefined",
-      subjectId: undefined,
     });
+    // ⚠ `FakeMemoryStore.createMemory` 自身が `input.subjectId ?? null` で正規化するため
+    // （`runtime-fakes.ts`）、`{ subjectId: undefined }` を渡すだけでは
+    // `recall-runtime.ts` 側の `?? null` 防御を通らない（保存済みの Memory は既に `null`）。
+    // 同じ参照を直接書き換えて、Memory.subjectId が本当に `undefined` の状態を作る
+    // （`createMemoryIdempotent` は同じオブジェクト参照を backing map に格納している）。
+    undefinedSubject.subjectId = undefined;
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
     const byId = new Map(result.memories.map((m) => [m.memoryId, m]));

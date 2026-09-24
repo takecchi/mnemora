@@ -945,8 +945,8 @@ export declare const NewMemorySchema: z.ZodObject<{
     sourceObservationId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     digest: z.ZodString;
     strength: z.ZodNumber;
-    tags: z.ZodArray<z.ZodString>;
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    tags: z.ZodArray<z.ZodString>;
     tenantId: z.ZodString;
     extractorVersion: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     content: z.ZodString;
@@ -1868,6 +1868,8 @@ export interface RecalledMemory {
     associationOf?: MemoryId;
     provenanceKind: ProvenanceKind;
     score: ScoreBreakdown;
+    speaker?: string | null;
+    subjectId?: string | null;
 }
 export declare const RecalledMemorySchema: z.ZodObject<{
     memoryId: z.ZodString;
@@ -1897,6 +1899,8 @@ export declare const RecalledMemorySchema: z.ZodObject<{
         total: z.ZodNumber;
         affinityMeasured: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>;
+    speaker: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
 }, z.core.$strip>;
 export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
 export interface StageTrace {
@@ -2078,6 +2082,8 @@ export declare const RecallResultSchema: z.ZodObject<{
             total: z.ZodNumber;
             affinityMeasured: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>;
+        speaker: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     }, z.core.$strip>>;
     omitted: z.ZodArray<z.ZodDiscriminatedUnion<[
         z.ZodObject<{

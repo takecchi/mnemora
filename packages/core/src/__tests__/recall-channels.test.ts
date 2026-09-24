@@ -377,6 +377,11 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
             total: 1,
             affinityMeasured: true,
           },
+          // speaker/subjectId: Issue #579 案D / ADR 0289 で足した欄。同じ「増えたのは
+          // この2欄だけであることをリテラルで固定し直す」規律——imported provenance には
+          // speaker が無く、fixture は subjectId を指定していないので両方 null。
+          speaker: null,
+          subjectId: null,
         },
       ],
       omitted: [],
