@@ -164,6 +164,10 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
         [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL].map((c) => c.id).sort(),
       );
 
+      const originalCasesById = new Map(
+        [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL].map((c) => [c.id, c]),
+      );
+
       for (const answerCase of json.cases) {
         // ⭐ 対で出すことがこの口の主張である(`runAnswer()` の docstring)——
         // 片方だけが埋まっている形は、配線が壊れている。
@@ -174,10 +178,44 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
           expect(typeof path.answer).toBe("string");
           // ⛔ どの値かは問わない。三値のどれかであることだけを見る。
           expect(["pass", "fail", "indeterminate"]).toContain(path.verdict);
+          // 層2（回答に必要な情報の保持、Issue #693 / 親 #498）。形だけをここで見る
+          // ——値そのものは下の専用ブロックで固定する。
+          expect(typeof path.contentPreservation.applicable).toBe("boolean");
+          expect(typeof path.contentPreservation.preserved).toBe("boolean");
+          expect(Array.isArray(path.contentPreservation.matchedAcceptTerms)).toBe(true);
         }
         // 追加費用は別ブロックで数えられている(ADR 0233。削減率から差し引かない)。
         expect(answerCase.cost.answerLLMCalls).toBeGreaterThan(0);
         expect(answerCase.cost.judgeLLMCalls).toBeGreaterThan(0);
+      }
+
+      // ⭐ Issue #693 完了条件2 の実データ側（固定条件の回帰検査。CI が毎回 recorded
+      // カセットを再生するこの歯の中で走る）: closed-value の全ケースについて、
+      // mnemora 経路の digest に `expected.accept` が実際に残っていること（層2）を
+      // 固定する。カセットは 2026-09-17 に gpt-4o-mini/text-embedding-3-small で
+      // 記録されたものであり（`examples/chat/cassettes/answer.json` の
+      // `recordedAt`/`llm.model`）、この歯は録り直しを要求しない
+      // ——既存の記録済み digest 文字列を決定的に読むだけである。
+      // 🔴 **これは回答が正しいことを主張しない。** `schedule-change-deadline`
+      // （`answer-case-set.eval.ts`、ADR 0233 が見つけた自然発生の fail）は、
+      // digest に `25日`（accept）が実際に残っている（層2 preserved=true）まま、
+      // 実際の回答は撤回済みの `20日`（reject）を答える（層3 fail）——層2 と層3 が
+      // 独立であることを、この歯と `verdict` の食い違いが実データで示す。
+      for (const answerCase of json.cases) {
+        const original = originalCasesById.get(answerCase.id);
+        expect(original, `${answerCase.id}: ケース集合に見つからない`).toBeDefined();
+        if (original === undefined || original.expected.kind !== "closed-value") {
+          continue;
+        }
+        expect(
+          answerCase.mnemora.contentPreservation.applicable,
+          `${answerCase.id}: closed-value なので applicable=true のはず`,
+        ).toBe(true);
+        expect(
+          answerCase.mnemora.contentPreservation.preserved,
+          `${answerCase.id}: mnemora の digest に expected.accept が残っているはず` +
+            `（残っていなければ、記録済みカセットの digest が変わった——録り直しを検討すること）`,
+        ).toBe(true);
       }
 
       // 入力量の削減は naive/mnemora の合計から導かれている——こちらは品質ではなく量なので

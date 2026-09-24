@@ -106,7 +106,9 @@ import { createAnswerBenchRuntime, runAnswerBench } from "./answer-bench.js";
 import { ANSWER_CASE_SET_DEV } from "./answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "./answer-case-set.eval.js";
 import { buildAnswerJson } from "./answer-json.js";
+import { recordRetentionMutationPositiveControl } from "./answer-retention-mutation.js";
 import {
+  formatAnswerContentPreservation,
   formatAnswerCostTable,
   formatAnswerInputReduction,
   formatAnswerQualityBanner,
@@ -928,6 +930,30 @@ async function recordAnswer(
     console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
+    console.log(formatAnswerContentPreservation(results));
+
+    // ⭐ Issue #498 完了条件4・「回答評価」側の陽性対照（ADR 0236 が未達のまま残した
+    // 半分）を、この全置換の記録の一部として毎回追記する——`recordAnswer` は毎回空の
+    // `CassetteRecorder` から始まる全置換なので、この呼び出しをここに置かないと、
+    // 次に誰かが素の `record answer` を走らせた瞬間にこの陽性対照の2エントリだけが
+    // 新しいカセットから消える（`answer-retention-mutation.ts` の docstring参照）。
+    const retentionMutation = await recordRetentionMutationPositiveControl(
+      handle.runtime,
+      handle.llmProvider,
+      handle.embeddingProvider,
+      handle.judgeLLMProvider,
+      cases,
+      `answer-record-${runId}`,
+    );
+    console.log(
+      "\n--- Issue #498 完了条件4・回答評価の陽性対照（変異: digest から答えの語を落とす） ---",
+    );
+    console.log(
+      `  ケース: ${retentionMutation.caseId} / 変異後の回答: "${retentionMutation.mutatedAnswer}"\n` +
+        `  一次判定: ${retentionMutation.mutatedVerdict} / 二次観測(judge): ` +
+        `${retentionMutation.mutatedJudgement.outcome}`,
+    );
+
     if (handle.usageMeter) {
       console.log(`\n${handle.usageMeter.formatReport()}`);
     }
@@ -1828,6 +1854,7 @@ async function runAnswer(): Promise<void> {
     console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
+    console.log(formatAnswerContentPreservation(results));
 
     // `MNEMORA_ANSWER_JSON` が設定されたときだけ書く。未設定なら1バイトも挙動を
     // 変えない(既存の `MNEMORA_COMPARE_JSON` 等と同じ規約)。

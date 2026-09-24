@@ -30,7 +30,8 @@
     "record:compare": "tsx src/cli.ts record compare",
     "verify:compare": "tsx src/cli.ts verify compare",
     "record:answer": "tsx src/cli.ts record answer",
-    "verify:answer": "tsx src/cli.ts verify answer"
+    "verify:answer": "tsx src/cli.ts verify answer",
+    "record:answer-retention-mutation": "tsx src/scripts/record-answer-retention-mutation.ts"
   },
   "dependencies": {
     "@mnemora/core": "workspace:*",

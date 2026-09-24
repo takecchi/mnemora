@@ -946,6 +946,8 @@ export declare const NewMemorySchema: z.ZodObject<{
     digest: z.ZodString;
     strength: z.ZodNumber;
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    recordedAt: z.ZodDate;
+    occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     tags: z.ZodArray<z.ZodString>;
     tenantId: z.ZodString;
     extractorVersion: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -985,8 +987,6 @@ export declare const NewMemorySchema: z.ZodObject<{
             batchId: z.ZodString;
         }, z.core.$strip>
     ], "kind">;
-    occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
-    recordedAt: z.ZodDate;
     lastReinforcedAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validFrom: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validUntil: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
@@ -1046,8 +1046,8 @@ export declare const ObservationSchema: z.ZodObject<{
 export declare const NewObservationSchema: z.ZodObject<{
     kind: z.ZodString;
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
-    tenantId: z.ZodString;
     occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    tenantId: z.ZodString;
     validFrom: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validUntil: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     externalId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -1902,6 +1902,8 @@ export interface RecalledMemory {
     score: ScoreBreakdown;
     speaker?: string | null;
     subjectId?: string | null;
+    recordedAt?: Date;
+    occurredAt?: Date | null;
 }
 export declare const RecalledMemorySchema: z.ZodObject<{
     memoryId: z.ZodString;
@@ -1933,6 +1935,8 @@ export declare const RecalledMemorySchema: z.ZodObject<{
     }, z.core.$strip>;
     speaker: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+    recordedAt: z.ZodOptional<z.ZodDate>;
+    occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
 }, z.core.$strip>;
 export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
 export interface StageTrace {
@@ -2116,6 +2120,8 @@ export declare const RecallResultSchema: z.ZodObject<{
         }, z.core.$strip>;
         speaker: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
+        recordedAt: z.ZodOptional<z.ZodDate>;
+        occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     }, z.core.$strip>>;
     omitted: z.ZodArray<z.ZodDiscriminatedUnion<[
         z.ZodObject<{
