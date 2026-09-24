@@ -1287,6 +1287,151 @@ describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () =>
   });
 });
 
+describe("recall() — recordedAt/occurredAt（Issue #691 の子、Issue #702、ADR 0298）", () => {
+  // 常に値か null を入れる——キー自体が無い/undefined になる経路が無いことを
+  // Object.hasOwn と not.toBeUndefined() で固定する（ADR 0289 の speaker/subjectId と
+  // 同じ規律。toEqual は undefined のキーと無いキーを同じに扱うので使わない）。
+
+  it("recordedAt は Memory.recordedAt をそのまま名乗る（Memory 側は必須なので常に値）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const recordedAt = new Date("2026-05-20T00:00:00.000Z");
+    const memory = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "recordedAt あり",
+      recordedAt,
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === memory.id);
+    expect(m).toBeDefined();
+    expect(Object.hasOwn(m!, "recordedAt")).toBe(true);
+    expect(m!.recordedAt).not.toBeUndefined();
+    expect(m!.recordedAt).toEqual(recordedAt);
+  });
+
+  it("occurredAt が在れば、その値をそのまま名乗る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const occurredAt = new Date("2026-05-01T00:00:00.000Z");
+    const memory = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "occurredAt あり",
+      occurredAt,
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === memory.id);
+    expect(m).toBeDefined();
+    expect(Object.hasOwn(m!, "occurredAt")).toBe(true);
+    expect(m!.occurredAt).not.toBeUndefined();
+    expect(m!.occurredAt).toEqual(occurredAt);
+  });
+
+  it("occurredAt が無ければ null（キー自体は在る。newMemory の既定どおり occurredAt: null）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await createEmbeddedMemory(stores, [1, 0], { digest: "occurredAt なし" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === memory.id);
+    expect(Object.hasOwn(m!, "occurredAt")).toBe(true);
+    expect(m!.occurredAt).not.toBeUndefined();
+    expect(m!.occurredAt).toBeNull();
+  });
+
+  it("Memory.occurredAt が undefined でも null に揃える（subjectId と同じ防御）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await createEmbeddedMemory(stores, [1, 0], { digest: "occurredAt undefined" });
+    // ⚠ `FakeMemoryStore` 自身が `occurredAt` を渡した値のまま持つ（`subjectId` と違って
+    // `?? null` 正規化をしない）ため、直接書き換えて Memory.occurredAt を本当に
+    // `undefined` にする（`createMemoryIdempotent` が同じ参照を backing map に格納する
+    // ことを使う。ADR 0289 の subjectId undefined テストと同じ手口）。
+    memory.occurredAt = undefined;
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === memory.id);
+    expect(Object.hasOwn(m!, "occurredAt")).toBe(true);
+    expect(m!.occurredAt).not.toBeUndefined();
+    expect(m!.occurredAt).toBeNull();
+  });
+
+  it("recordedAt が異なる2件は、区別できる値を持つ（『後で訂正された』を読むための前提。Issue #691 背景）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const earlier = new Date("2026-05-01T10:00:00.000Z");
+    const later = new Date("2026-05-01T10:05:00.000Z");
+    const first = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "来週の定例会議は金曜日にある。",
+      recordedAt: earlier,
+    });
+    const second = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "定例会議は水曜日に移動する必要がある。",
+      recordedAt: later,
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const m1 = result.memories.find((x) => x.memoryId === first.id)!;
+    const m2 = result.memories.find((x) => x.memoryId === second.id)!;
+    expect(m1.recordedAt).toEqual(earlier);
+    expect(m2.recordedAt).toEqual(later);
+    expect(m2.recordedAt!.getTime()).toBeGreaterThan(m1.recordedAt!.getTime());
+  });
+
+  it("同伴取得（mandatory_companion）でも recordedAt/occurredAt は対向の Memory 自身の値を名乗る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const companionRecordedAt = new Date("2026-04-01T00:00:00.000Z");
+    const companion = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        status: "contested",
+        digest: "B".repeat(20),
+        recordedAt: companionRecordedAt,
+        provenance: {
+          kind: "inferred",
+          model: "gpt-4o-mini",
+          promptVersion: "v1",
+          basis: { memoryIds: [], observationIds: ["obs-1"] },
+          confidence: 0.4,
+        },
+      }),
+    );
+    const ownerRecordedAt = new Date("2026-04-02T00:00:00.000Z");
+    const owner = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: companion.id,
+      digest: "A".repeat(5),
+      recordedAt: ownerRecordedAt,
+      provenance: {
+        kind: "stated",
+        sourceObservationId: "obs-1",
+        at: NOW.toISOString(),
+        speaker: "本人",
+      },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const returnedCompanion = result.memories.find((m) => m.memoryId === companion.id)!;
+    const returnedOwner = result.memories.find((m) => m.memoryId === owner.id)!;
+
+    expect(returnedCompanion.retrievedVia).toBe("mandatory_companion");
+    expect(Object.hasOwn(returnedCompanion, "recordedAt")).toBe(true);
+    expect(returnedCompanion.recordedAt).toEqual(companionRecordedAt);
+    expect(Object.hasOwn(returnedOwner, "recordedAt")).toBe(true);
+    expect(returnedOwner.recordedAt).toEqual(ownerRecordedAt);
+  });
+
+  it("usage.chars は recordedAt/occurredAt を数に入れない（ADR 0035 §2・ADR 0289 の実測を踏襲）", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], {
+      digest: "digest-1",
+      recordedAt: new Date("2026-05-01T00:00:00.000Z"),
+      occurredAt: new Date("2026-04-01T00:00:00.000Z"),
+    });
+    await createEmbeddedMemory(stores, [0.99, 0.01], { digest: "digest-22" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const digestChars = result.memories.reduce((sum, m) => sum + m.digest.length, 0);
+    expect(result.memories).toHaveLength(2);
+    expect(result.usage.byTier.digest).toBe(digestChars);
+    expect(result.usage.chars).toBe(digestChars + result.usage.indexChars);
+  });
+});
+
 describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/recall.md §8）", () => {
   async function setupContestedPair(stores: ReturnType<typeof createFakeRuntimeStores>) {
     // b を先に作り、a から b を指す(一対一の対向関係。docs/memory-model.md §5)。

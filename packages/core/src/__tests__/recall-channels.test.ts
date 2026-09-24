@@ -382,6 +382,11 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           // speaker が無く、fixture は subjectId を指定していないので両方 null。
           speaker: null,
           subjectId: null,
+          // recordedAt/occurredAt: Issue #691 の子 / Issue #702 / ADR 0298 で足した欄。
+          // 同じ「増えたのはこの2欄だけであることをリテラルで固定し直す」規律——
+          // fixture の recordedAt は既定 NOW、occurredAt は既定 null。
+          recordedAt: NOW.toISOString(),
+          occurredAt: null,
         },
       ],
       omitted: [],

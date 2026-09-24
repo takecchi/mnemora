@@ -589,6 +589,54 @@ describe("RecalledMemorySchema — speaker/subjectId（Issue #579 案D、ADR 028
   });
 });
 
+describe("RecalledMemorySchema — recordedAt/occurredAt（Issue #691 の子、Issue #702、ADR 0298）", () => {
+  // ADR 0289 と同じ規律: 「無い（null）」と「頼まなかった／入れ忘れた（undefined/欠落）」を
+  // 混ぜない。toEqual ではなく safeParse の success/data を直接見る。
+  const base = {
+    memoryId: "mem-1",
+    digest: "digest",
+    retrievedVia: "ann",
+    provenanceKind: "stated",
+    score: { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 },
+  };
+  const aDate = new Date("2026-06-01T00:00:00.000Z");
+
+  it("accepts recordedAt/occurredAt を両方とも欠く RecalledMemory（後方互換——省略可能欄なので必須化していない）", () => {
+    const result = RecalledMemorySchema.safeParse(base);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts recordedAt: Date", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, recordedAt: aDate });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects recordedAt: string（ISO 文字列を渡してしまう取り違えを弾く。Date 型のみ受ける）", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, recordedAt: aDate.toISOString() });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects recordedAt: null（recordedAt は Memory 側が必須の欄なので、null にはならない）", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, recordedAt: null });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts occurredAt: Date", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, occurredAt: aDate });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts occurredAt: null", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, occurredAt: null });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects occurredAt: string（異型）", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, occurredAt: aDate.toISOString() });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("RecallResultSchema", () => {
   it("accepts 0件の recall（index だけが在る、という形）", () => {
     const result = RecallResultSchema.safeParse({
