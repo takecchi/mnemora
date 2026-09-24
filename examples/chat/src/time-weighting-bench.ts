@@ -1,5 +1,6 @@
 import type { Ctx, LLMProvider, NewMemory, Runtime } from "@mnemora/core";
 import {
+  DEFAULT_SCORE_THRESHOLD,
   TIME_WEIGHTING_POLICIES,
   createRuntime,
   heuristicTokenCounter,
@@ -213,6 +214,43 @@ function buildQuestionSuffix(question: string): string {
   return `\n\n質問: ${question}`;
 }
 
+/**
+ * `runTimeWeightingPolicy` の診断専用 `recall()` が使う `scoreThreshold`
+ * （段3a、マネージャー指示「recall で文脈に入った記憶を毎回記録する出力を足せ」）。
+ *
+ * **実際の回答生成に使う `recall()`（既定の `scoreThreshold`、`DEFAULT_SCORE_THRESHOLD`
+ * = 0.1）とは別の、2回目の呼び出しにだけ使う。** 診断の目的は「ケースの各記憶が
+ * スコアの上でどう並んだか」を、実際に候補から落ちたかどうかに関わらず**全件**
+ * 見えるようにすることであり、極端に低い閾値を渡すことで below_threshold ゲートに
+ * よる除外を実質無効化する（`__tests__/time-weighting-bench.postgres.test.ts` が
+ * 同じ手法で `score.freshness` を読んでいるのと同じ考え方）。
+ * ⛔ **回答生成に使う `recall()` 呼び出し自体はこの閾値を使わない**——プロンプトへ
+ * 実際に積まれる記憶の集合は、この診断とは無関係に既定のまま決まる。
+ */
+const DIAGNOSTIC_SCORE_THRESHOLD = -1_000_000;
+
+/**
+ * 診断専用 `recall()` が返した1件の記憶の順位・スコア内訳（段3a）。
+ *
+ * `localId` は `TimeWeightingMemorySeed.localId`（例: `"old-seat-undated"` /
+ * `"current-seat"`）——どちらが「古い予定」でどちらが「現行の予定」かは、この
+ * 文字列そのものが名乗る（ケース集合の localId 命名がその説明を兼ねる。新しい
+ * enum 欄は足さない）。
+ */
+export interface TimeWeightingContextDiagnosticEntry {
+  localId: string;
+  memoryId: string;
+  /** 診断用 `recall()`（`DIAGNOSTIC_SCORE_THRESHOLD`）が返した順序での1始まりの順位。 */
+  rank: number;
+  total: number;
+  freshness: number;
+  decay: number;
+  /** `total < DEFAULT_SCORE_THRESHOLD`——既定の閾値なら below_threshold で落ちるか。 */
+  belowThreshold: boolean;
+  /** `!belowThreshold` の別名。「文脈に入ったか」をそのまま読める形で持つ。 */
+  enteredContext: boolean;
+}
+
 export interface TimeWeightingPolicyResult {
   policy: TimeWeightingPolicy;
   answer: string;
@@ -223,6 +261,51 @@ export interface TimeWeightingPolicyResult {
   prompt: string;
   inputChars: number;
   inputEstimatedTokens: number;
+  /**
+   * 段3a: このケースの記憶（`localIdByMemoryId` に載っている全件）の順位・スコア内訳。
+   * 診断専用の2回目の `recall()`（`DIAGNOSTIC_SCORE_THRESHOLD`）から得る——実際の
+   * 回答生成に使った `recall()`（1回目、既定の `scoreThreshold`）の結果には影響しない。
+   */
+  contextDiagnostics: TimeWeightingContextDiagnosticEntry[];
+}
+
+/**
+ * 診断専用の2回目の `recall()` を呼び、`localIdByMemoryId` に載っている記憶それぞれの
+ * 順位・スコア内訳を返す（段3a）。
+ */
+async function collectContextDiagnostics(
+  runtime: Runtime,
+  ctx: Ctx,
+  question: string,
+  policy: TimeWeightingPolicy,
+  localIdByMemoryId: ReadonlyMap<string, string>,
+): Promise<TimeWeightingContextDiagnosticEntry[]> {
+  const diagnosticRecall = await runtime.recall(ctx, {
+    text: question,
+    timeWeighting: policy,
+    scoreThreshold: DIAGNOSTIC_SCORE_THRESHOLD,
+  });
+  const entries: TimeWeightingContextDiagnosticEntry[] = [];
+  diagnosticRecall.memories.forEach((m, index) => {
+    const localId = localIdByMemoryId.get(m.memoryId);
+    if (localId === undefined) {
+      // このケースが直接書いた記憶ではない（連想枠等、既定では起きない経路）。
+      // 診断の対象外として黙って飛ばす——診断は「このケースの記憶」だけを見る。
+      return;
+    }
+    const belowThreshold = m.score.total < DEFAULT_SCORE_THRESHOLD;
+    entries.push({
+      localId,
+      memoryId: m.memoryId,
+      rank: index + 1,
+      total: m.score.total,
+      freshness: m.score.freshness,
+      decay: m.score.decay,
+      belowThreshold,
+      enteredContext: !belowThreshold,
+    });
+  });
+  return entries;
 }
 
 /**
@@ -241,6 +324,7 @@ async function runTimeWeightingPolicy(
   question: string,
   expected: TimeWeightingCase["expected"],
   policy: TimeWeightingPolicy,
+  localIdByMemoryId: ReadonlyMap<string, string>,
 ): Promise<TimeWeightingPolicyResult> {
   const recall = await runtime.recall(ctx, { text: question, timeWeighting: policy });
   const prompt = `${buildMnemoraPrompt(recall)}${buildQuestionSuffix(question)}`;
@@ -249,6 +333,13 @@ async function runTimeWeightingPolicy(
     messages: [{ role: "user", content: prompt }],
   });
   const verdict = gradeAnswer(response.content, expected);
+  const contextDiagnostics = await collectContextDiagnostics(
+    runtime,
+    ctx,
+    question,
+    policy,
+    localIdByMemoryId,
+  );
   return {
     policy,
     answer: response.content,
@@ -257,6 +348,7 @@ async function runTimeWeightingPolicy(
     prompt,
     inputChars: prompt.length,
     inputEstimatedTokens: heuristicTokenCounter.count(prompt).tokens,
+    contextDiagnostics,
   };
 }
 
@@ -310,12 +402,15 @@ export async function runTimeWeightingCase(
     ),
   };
 
-  await seedTimeWeightingMemories(
+  const memoryIdByLocalId = await seedTimeWeightingMemories(
     handle.memoryStore,
     handle.runtime,
     handle.clock,
     ctx,
     timeWeightingCase.memories,
+  );
+  const localIdByMemoryId = new Map<string, string>(
+    [...memoryIdByLocalId.entries()].map(([localId, memoryId]) => [memoryId, localId]),
   );
 
   // recall() の decay/freshness/decayFloor ゲートが読む「いま」をここで確定させる。
@@ -332,6 +427,7 @@ export async function runTimeWeightingCase(
       timeWeightingCase.question,
       timeWeightingCase.expected,
       policy,
+      localIdByMemoryId,
     );
   }
 

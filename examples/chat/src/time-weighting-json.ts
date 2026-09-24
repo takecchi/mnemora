@@ -1,6 +1,7 @@
 import type { TimeWeightingPolicy } from "@mnemora/core";
 import type {
   TimeWeightingAggregateCell,
+  TimeWeightingContextDiagnosticEntry,
   TimeWeightingTrialResult,
 } from "./time-weighting-bench.js";
 import { answerQualityClaimable } from "./answer-case.js";
@@ -22,6 +23,8 @@ export interface TimeWeightingTrialJson {
   recallMemoryCount: number;
   inputChars: number;
   inputEstimatedTokens: number;
+  /** 段3a: このケースの記憶の順位・スコア内訳（`time-weighting-bench.ts` 参照）。 */
+  contextDiagnostics: TimeWeightingContextDiagnosticEntry[];
 }
 
 export interface TimeWeightingAggregateJson {
@@ -67,6 +70,7 @@ export function buildTimeWeightingJson(opts: BuildTimeWeightingJsonOptions): Tim
         recallMemoryCount: p.recallMemoryCount,
         inputChars: p.inputChars,
         inputEstimatedTokens: p.inputEstimatedTokens,
+        contextDiagnostics: p.contextDiagnostics,
       });
     }
   }
