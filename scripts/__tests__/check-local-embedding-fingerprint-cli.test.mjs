@@ -54,6 +54,21 @@ const script = fileURLToPath(new URL("../check-local-embedding-fingerprint.mjs",
 const providerSource = fileURLToPath(
   new URL("../../packages/local-embedding/src/local-embedding-provider.ts", import.meta.url),
 );
+const pinnedRevisionDeclaration = fileURLToPath(
+  new URL("../local-embedding-pinned-revision.json", import.meta.url),
+);
+
+/**
+ * 固定した revision を、CLI（`readPinnedRevisionForCacheLayout`）とは別のやり方
+ * （`JSON.parse` を直接呼ぶだけ）で読む。
+ */
+function pinnedRevisionIndependently() {
+  const parsed = JSON.parse(readFileSync(pinnedRevisionDeclaration, "utf8"));
+  if (typeof parsed?.sha !== "string" || parsed.sha.length === 0) {
+    throw new Error(`${pinnedRevisionDeclaration} に sha が無い`);
+  }
+  return parsed.sha;
+}
 
 /**
  * 宣言された repo 名を、**CLI とは別のやり方で**読む。
@@ -78,6 +93,7 @@ function gitBlobSha1(bytes) {
 }
 
 const repo = declaredRepoIndependently();
+const pinnedRevision = pinnedRevisionIndependently();
 
 /**
  * 手元の HTTP スタブと一時キャッシュを1組だけ用意して `fn` に渡し、**必ず後始末する。**
@@ -167,6 +183,98 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 宣言された repo �
           // 見ない**。⟹ ここが `tree/main` のリテラルのままであることが、その決定の歯である
           // ——固定した revision へ差し替えると、上流の `main` が動いても門が黙ってしまう。
           expect(f.state.paths[1]).toBe(`/api/models/${repo}/tree/main?recursive=1&expand=1`);
+        },
+      );
+    },
+  );
+});
+
+/**
+ * `<repo>/<revision>/<filename>` というキャッシュの置き場所（Issue #597 案(a)、
+ * ADR 0253 追記5）の正規化。
+ *
+ * 【背景・実測】CI run 35953212055 で、`examples/chat` が固定した revision を渡す
+ * ようになった結果、`@huggingface/transformers` の `FileCache` がこの配置でファイルを
+ * 書くようになり、この門が「素性不明」を報告して赤くなった。ここでは
+ * `withFixture` の `setup.files`（`repoDir` 直下へ書く）を使わず、`f.cacheDir` へ
+ * 直接、revision サブディレクトリを掘って書く——**HF の tree（模擬）の `path` は
+ * プレフィックス無しのまま**にすることで、「照合対象は変えていない」ことを歯自体でも
+ * 固定する。
+ */
+describe("check-local-embedding-fingerprint.mjs（CLI）: revision サブディレクトリの正規化（Issue #597 案(a)、ADR 0253 追記5）", () => {
+  it.concurrent(
+    "@huggingface/transformers が revision 指定時に書く <repo>/<revision>/<filename> の配置でも一致する",
+    async () => {
+      const contents = Buffer.from('{"ok":true}\n', "utf8");
+      const oid = gitBlobSha1(contents);
+      await withFixture(
+        { files: {}, respond: fixed(200, [{ type: "file", path: "config.json", oid }]) },
+        async (f) => {
+          const nestedPath = join(f.cacheDir, repo, pinnedRevision, "config.json");
+          mkdirSync(dirname(nestedPath), { recursive: true });
+          writeFileSync(nestedPath, contents);
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stdout).toContain("一致: 手元の 1 本すべてが宣言された repo の内容と一致した。");
+          expect(r.code).toBe(0);
+        },
+      );
+    },
+  );
+
+  it.concurrent(
+    "フラット配置（revision=main）と revision サブディレクトリ配置が同居していても、両方一致として数える" +
+      "（CI の example-chat ジョブで実際に起きている形——embedding-fingerprint サブコマンドは" +
+      "revision を渡さず、test:db は渡すため、同じキャッシュディレクトリに両方の配置が並ぶ）",
+    async () => {
+      const contents = Buffer.from('{"ok":true}\n', "utf8");
+      const oid = gitBlobSha1(contents);
+      await withFixture(
+        {
+          files: { "config.json": '{"ok":true}\n' },
+          respond: fixed(200, [{ type: "file", path: "config.json", oid }]),
+        },
+        async (f) => {
+          const nestedPath = join(f.cacheDir, repo, pinnedRevision, "config.json");
+          mkdirSync(dirname(nestedPath), { recursive: true });
+          writeFileSync(nestedPath, contents);
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stdout).toContain("一致: 手元の 2 本すべてが宣言された repo の内容と一致した。");
+          expect(r.code).toBe(0);
+        },
+      );
+    },
+  );
+
+  it.concurrent(
+    "⚠ 陰性対照: 宣言と違う revision のサブディレクトリは正規化されず、素性不明のまま赤になる",
+    async () => {
+      const contents = Buffer.from('{"ok":true}\n', "utf8");
+      const oid = gitBlobSha1(contents);
+      const wrongRevision = "0".repeat(40);
+      await withFixture(
+        { files: {}, respond: fixed(200, [{ type: "file", path: "config.json", oid }]) },
+        async (f) => {
+          const nestedPath = join(f.cacheDir, repo, wrongRevision, "config.json");
+          mkdirSync(dirname(nestedPath), { recursive: true });
+          writeFileSync(nestedPath, contents);
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stdout).toContain("素性不明");
+          expect(r.code).toBe(1);
+        },
+      );
+    },
+  );
+
+  it.concurrent(
+    "CLI は固定した revision の宣言を印字する（キャッシュの置き場所の解釈にのみ使うことの開示）",
+    async () => {
+      await withFixture(
+        { files: { "config.json": '{"ok":true}\n' }, respond: (e) => ({ status: 200, body: e }) },
+        async (f) => {
+          const r = await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
+          expect(r.stdout).toContain(
+            `固定した revision の宣言（キャッシュの置き場所の解釈にのみ使う。照合対象は main のまま）: ${pinnedRevision}`,
+          );
         },
       );
     },

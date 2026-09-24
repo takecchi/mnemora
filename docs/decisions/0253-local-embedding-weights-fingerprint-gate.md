@@ -916,6 +916,11 @@ revision に差し替えると、この門は「repo の*今*」ではなく「�
 4. **門**（`scripts/check-local-embedding-fingerprint.mjs`）: **コードは変えていない**
    （tree URL は `tree/main` のまま）。赤くなったときのメッセージにだけ、「固定した
    revision の宣言を更新することを検討せよ」という案内を足した。
+   ⚠ **この4番は誤りを含んでいた——追記5（下）を見ること。**
+   CI に実際に流した結果、「コードは変えていない」は「照合対象（tree URL）は変えて
+   いない」の意味では正しいが、「この門は固定した revision の宣言を一切読まない」は
+   誤りだった——手元のファイルを tree のパスへ対応づける部分（キャッシュの置き場所の
+   解釈）を直す必要があった。
 
 ### 歯と変異試験
 
@@ -953,3 +958,134 @@ revision に差し替えると、この門は「repo の*今*」ではなく「�
 新規ファイル1本（JSON）・既存 `scripts/`2本の内部実装・`examples/chat/src/providers.ts`・
 `.github/workflows/ci.yml` のコメント/ステップ名だけで、`packages/` には1バイトも
 触れていない（公開 API 表面の門の差分は0——上記）。**要否は判断者に委ねる。**
+
+## 追記5 (2026-09-24、Issue #597 案(a)。CI run 35953212055 で赤くなった): キャッシュの置き場所の解釈を直した
+
+> **⚠ このコメントは、自動化された担い手（クローンのマネージャーのセッション）が書いた。**
+> **⛔ オーナー本人が決めたのではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **⚠ 状態欄も本文も書き換えていない**（追記1〜追記4 と同じ扱い）。
+
+### 何が起きたか（【実測】）
+
+追記4 をマージした PR（#678）の CI で、`examples/chat (本物の Postgres + pgvector、擬似
+provider)` ジョブが赤くなった（run `35953212055`、head `0fc1efd`）。門の出力（逐語）:
+
+```
+不一致: 一致 4 本 / hash 食い違い 0 本 / 素性不明 4 本。
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/config.json
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/tokenizer.json
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/tokenizer_config.json
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/onnx/model_quantized.onnx
+```
+
+### なぜ起きたか（【実測】、手元で再現・特定した）
+
+`@huggingface/transformers`（`node_modules/@huggingface/transformers/src/utils/hub.js`
+の `buildResourcePaths`）は、`FileCache` のキャッシュキーをこう組み立てる（逐語）:
+
+```js
+const proposedCacheKey =
+  cache instanceof FileCache
+    ? revision === 'main'
+      ? requestURL
+      : pathJoin(path_or_repo_id, revision, filename)
+    : remoteURL;
+```
+
+⟹ **`revision` が `"main"` 以外だと、ファイルは `<repo>/<revision>/<filename>` という
+revision 名のサブディレクトリに置かれる。** revision が既定の `"main"` のときだけ
+`<repo>/<filename>` というフラットな配置になる。
+
+**手元で実際に確かめた**（`LocalEmbeddingProvider` に revision を渡す/渡さないで、
+それぞれ一時 `cacheDir` へ本物のモデル一式を落とし、`find` で比較した）:
+
+```
+revision 無し: <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/config.json
+              <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/onnx/model_quantized.onnx
+              ...
+revision 在り: <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/cdf9391f.../config.json
+              <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/cdf9391f.../onnx/model_quantized.onnx
+              ...
+```
+
+**CI のログの「素性不明」のパスと完全に一致した。** さらに、この門をこの2つの
+キャッシュディレクトリそれぞれに対して手元で走らせ、CI と同じ「不一致」（revision 在り
+側）・同じ「一致」（revision 無し側）を再現した。
+
+⭐ **CI では「一致4本／素性不明4本」だった理由**: `example-chat` ジョブは
+`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を、revision を渡さない
+`examples/chat/src/embedding-fingerprint.ts`（`embedding-fingerprint` サブコマンド）と、
+Issue #597 で revision を渡すようになった `examples/chat/src/providers.ts`
+（`test:db` が使う）とで**共有している**。⟹ 同じキャッシュディレクトリに、フラットな
+配置（4本、main の tree と一致）と revision サブディレクトリの配置（4本、パスが
+違うので「素性不明」）が同居していた。
+
+### 直したこと —— 対応づけ（キャッシュの置き場所の解釈）だけを直した。照合の意味は変えていない
+
+**⛔ この門が「何と照合するか」（`main` の tree）は変えていない。** 変えたのは
+「手元のどのファイルが、tree のどのパスに対応するか」という解釈だけである
+（クローンの決定どおり）。
+
+- `scripts/check-local-embedding-fingerprint-lib.mjs` に純関数 `normalizeActualPath(relPath,
+  pinnedRevision)` を追加した。`pinnedRevision` の名前のサブディレクトリで relPath が
+  始まっていれば、そのプレフィックスを剥がす。`pinnedRevision` が無い（宣言が読めない）
+  場合は何もしない——**この正規化は追加のフォールバックであり、無くても
+  （revision=main のフラットな配置しか扱わない、この変更より前の挙動のまま）動く。**
+- `scripts/check-local-embedding-fingerprint.mjs` に `readPinnedRevisionForCacheLayout()`
+  を足した。**`scripts/local-embedding-pinned-revision.json`（唯一の宣言）を読む——
+  ただし「キャッシュの置き場所の解釈にのみ使う」**。`collectActualFiles` がこれを
+  受け取り、各ファイルの相対パスを正規化してから `expectedByPath` と突き合わせる。
+  CLI の標準出力に、読んだ値（または読めなかった旨）を必ず印字する
+  （黙って解釈を変えない）。
+- フラット配置と revision サブディレクトリ配置が同じキャッシュディレクトリに同居する
+  ケース（CI の実際の形）も扱う——両方が正規化後に同じ論理パスへ写れば、両方とも
+  `matched` に数えられる（重複を「不一致」にはしない）。
+
+### 訂正: 追記4「4. 門」は「この門は revision を読まない」と書いたが、それは誤りだった
+
+追記4 は「⛔ この門自身が固定した revision を読んだり、自動で更新したりはしない」と
+書いた。**この文は誤りだった**——正しくは「この門は、固定した revision の宣言を
+**キャッシュの置き場所の解釈にのみ**読む。**照合対象（tree URL）は今も `main` のまま**
+であり、そこは変えていない」である。「読むか読まないか」ではなく「**何のために読むか**」
+が本 ADR の決定1（番犬の役目）を守る境界線だった。
+
+### 歯と変異試験
+
+- `scripts/__tests__/check-local-embedding-fingerprint-lib.test.mjs` に
+  `normalizeActualPath` の歯5本（プレフィックスを剥がす／別 revision は剥がさない／
+  前方一致だけでは剥がさない／pinnedRevision が無ければ何もしない／フラット配置は
+  そのまま）を追加。
+- `scripts/__tests__/check-local-embedding-fingerprint-cli.test.mjs` に、
+  revision サブディレクトリ配置での一致・フラット配置との同居・別 revision での
+  不一致・宣言の印字を確かめる歯4本を追加（`setup.files` を使わず、`f.cacheDir` へ
+  直接ネストしたファイルを書く——HF の tree（模擬）の `path` はプレフィックス無しの
+  ままにして、「照合対象は変えていない」ことを歯自体でも固定した）。
+- **変異試験**（`cp` で退避・復元。`git checkout` は不使用。戻した後に元のテストが
+  緑に戻ることまで確認した）:
+  1. `normalizeActualPath` を no-op に変異させる ⟹ 新設した歯3本が赤になった。
+  2. `collectActualFiles` の呼び出しで `pinnedRevision` の代わりに `null` を渡す
+     （配線忘れの再現） ⟹ 新設したCLI歯2本が赤になった。
+- **手元で本物のモデルを使って再現・確認したこと**（ネットワーク到達可能な環境で実施。
+  4ファイル計42MB を2回落とした）:
+  1. revision 無し／revision 在りで、それぞれ別の一時 `cacheDir` へ実際に落とし、
+     配置の違いを `find` で確認した（上記）。
+  2. 直す前のコードをそれぞれの `cacheDir` に対して走らせ、revision 無し側は一致・
+     revision 在り側は CI と同じ「素性不明」で不一致になることを確認した。
+  3. 直した後のコードで、両方とも一致することを確認した。
+  4. 両方の `cacheDir` の中身を1つのディレクトリへ合成し（CI の実際の共有キャッシュを
+     模す）、直した後のコードで「一致8本」（4+4が正規化後に同じ4つの論理パスへ
+     写り、それぞれ2本ずつ数えられる）になることを確認した。
+
+### 確かめていないこと
+
+- **`@huggingface/transformers` の将来のバージョンで、このキャッシュキーの組み立て方
+  （`buildResourcePaths`）が変わらないかは確かめていない。** 変われば、この正規化も
+  また合わせて直す必要がある。
+- **revision サブディレクトリの名前が、常に渡した `revision` 文字列そのままになるか**
+  （URL エンコードなどの変換が入らないか）は、今回試した1つの sha 形式の revision
+  でしか確認していない。
+
+### 未計上であることの明記（追記5 の分）
+
+**`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** `packages/` には1バイトも
+触れていない。**要否は判断者に委ねる。**
