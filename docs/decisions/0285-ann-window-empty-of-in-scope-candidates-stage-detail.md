@@ -337,3 +337,269 @@ recall-pipeline.test.ts`）は元々この衝突を検出していなかった**
   Issue #671 は合成データでの最悪ケースを実測しているが、実際のテナントの
   scope 分布でこの条件がどれだけ発生するかは測っていない（ADR 0193 §10 と
   同じ限界）。
+
+---
+
+## 追記（2026-09-24 その2）: **`eligible` に偽陽性があった — 分母を下限で再定義し、契約は変えずに条件を一般化する（Issue #671 続報）**
+
+**⚠ 本追記は本文（§1〜8）を書き換えない。上の決定・実測・負債はすべて当時のまま残す。**
+ここは新しく見つかった事実と、その上に積んだ決定である。
+
+### 何が見つかったか
+
+本文の条件（`candidateGenerationExecuted && kPrime > 0 && eligible > 0 &&
+annHits.length === 0`）には**偽陽性がある**。
+
+- `eligible`（`packages/core/src/recall-runtime.ts:1632` 付近、
+  `= aggregate.totalInScope - notIndexedTotal`）は「scope 内で埋め込みがある行」の
+  件数である。
+- `aggregate.totalInScope` は、忘却ゲートで落ちた行（decayed）を**意図的に**
+  引いていない——ADR 0173 が「decayed はスコープ内に留まる」と決めており
+  （`packages/core/src/recall.ts` の `ScopeAggregate.filteredDecayed` doc、
+  および `docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md`）、
+  `filteredDecayed` は `totalInScope` の内訳（部分集合）であって除外分ではない。
+- 一方、ANN の `search()`（`packages/postgres/src/vector-store.ts` の
+  `decayFloorAtCondition`/`decayFloorSeqCondition`、106〜132行目付近）は
+  忘却ゲートを WHERE として適用する。
+- ⟹ **scope 内で埋め込みのある行が全て decayed のとき**、ANN は0件を「正しく」
+  返すが、`eligible > 0` は変わらず真であり、旧条件はここで真になっていた
+  ——正常な忘却を「探していない」と誤って報告する偽陽性。
+
+【実測】この偽陽性を、本追記の作業時点の `main`（旧条件のまま）に対して直接再現した:
+`packages/core/src/recall-runtime.ts` を一時的に旧条件へ戻し、scope 内の
+embeddingStatus='ready' な Memory 3件全てに過去の `decayFloorAt` を与えて
+`recall()` を呼ぶと、`explain.stages` の ann チャンネルの detail に
+`annWindowHadNoInScopeCandidates: true` が実際に付いた（この赤を確認してから
+下の修正へ進んだ）。
+
+### 分母（denominator）の再定義と、他の絞り込みとの突き合わせ
+
+正しい分母は「scope 内・埋め込みがあり・忘却ゲートを通る行」＝ ANN が実際に
+検索した母数である。この母数を `eligible` から算術で導けるかを、
+`VectorFilter`（`packages/core/src/interfaces/vector-store.ts`）が
+`search()` の WHERE に持つ絞り込みを1本ずつ、`ScopeAggregate`/`totalInScope`
+の数え方と突き合わせて確かめた:
+
+| `VectorFilter` の次元                                        | ANN `search()` での適用                              | `ScopeAggregate`/`totalInScope` での扱い                                                                                                                                                                                                                                                                                                                                                                                                                        | 揃っているか                                                                                                                            |
+| ------------------------------------------------------------ | ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `tenantId`                                                   | WHERE（`vector-store.ts`）                           | `aggregateScope` の `WHERE tenant_id = ...`                                                                                                                                                                                                                                                                                                                                                                                                                     | 揃っている                                                                                                                              |
+| `status`（`['active','contested']`）                         | WHERE（呼び出し側が同じリテラルを渡す）              | `totalInScope` の定義そのもの                                                                                                                                                                                                                                                                                                                                                                                                                                   | 揃っている（両者とも `recall-runtime.ts` が同じ2値のリテラルを渡す配線に依存——動的なパラメータではない）                                |
+| `subjectId`                                                  | WHERE                                                | `subjectFilter`                                                                                                                                                                                                                                                                                                                                                                                                                                                 | 揃っている（`aggregateScope` と ANN の両方が同じ `scope: RecallScope` オブジェクトから作られる。`recall-runtime.ts:1491` 付近）         |
+| `occurredAfter`/`occurredBefore`（period）                   | WHERE                                                | `inPeriod` → `filteredPeriod` として除外                                                                                                                                                                                                                                                                                                                                                                                                                        | 揃っている（同上、同じ `scope` 由来）                                                                                                   |
+| `validAt`                                                    | WHERE（`gateVectorFilterFields`）                    | `isValid` → `filteredExpired`/`filteredNotYetValid` として除外                                                                                                                                                                                                                                                                                                                                                                                                  | 揃っている（同上）                                                                                                                      |
+| `decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis` | WHERE（`gateVectorFilterFields`、同じ `scope` 由来） | `isDecayed` → `filteredDecayed` として**数える（除外ではなく内訳）**。かつ `embedding_status` を問わず数える（`packages/postgres/src/memory-store.ts:1189` の `decayed_filtered` FILTER に `embedding_status` 条件が無い。`packages/testkit/src/__fixtures__/in-memory-memory-store.ts:855`・`packages/core/src/__tests__/runtime-fakes.ts:734` も同型——`isDecayedForScope` の判定が `embeddingStatus` のチェックより前に行われ、両者は独立したカウンタである） | **揃っていない**——`filteredDecayed` は「埋め込みが無く、かつ decayed」の行も含むため、`eligible - filteredDecayed` は二重に引く（下記） |
+| `excludeProvenanceKinds`                                     | WHERE（`recall-runtime.ts:567`・`641`・`1139`）      | **どこにも無い**——`AggregateScopeOptions`（`packages/core/src/interfaces/memory-store.ts:214`）は `digestBand` しか持たず、`aggregateScope` にこの次元を渡す経路が存在しない                                                                                                                                                                                                                                                                                    | **揃っていない**——この次元は集約に一切現れない                                                                                          |
+
+**`filteredDecayed` が埋め込みの無い行を含むかの結論: 含む。** 3実装
+（`packages/postgres/src/memory-store.ts`・`packages/testkit/src/__fixtures__/in-memory-memory-store.ts`・
+`packages/core/src/__tests__/runtime-fakes.ts`）を読んで確認した——
+`decayed_filtered`／`filteredDecayed` のカウンタは `embedding_status`
+（`embeddingStatus`）を一度も参照しない。⟹ `eligible - filteredDecayed` は
+「未索引かつ decayed」の行を、`notIndexedTotal` による除外と `filteredDecayed`
+による除外の両方で二重に引いてしまい、真の母数を過小に見積もる。
+
+**具体例（過小評価が偽陰性を生むことの確認）**: `totalInScope=10`、
+`notIndexed.pending=2`（うち1件が decayed）、`embedding_status='ready'` の
+行が8件（うち3件が decayed・5件が生存）とすると、`filteredDecayed = 1 + 3 = 4`、
+`eligible = 10 - 2 = 8`。真の母数（ready かつ非 decayed）は `5` だが、
+`eligible - filteredDecayed = 8 - 4 = 4`——1件過小。この母数を使って
+「ANN が4件返せば正常」と判定すると、索引が本当は5件目を取りこぼしていても
+検知できない（偽陰性）。⟹ **単純な減算補正は、偽陽性を消す代わりに別の偽陰性を
+持ち込む**——放置してよい誤差ではない。
+
+### 採った決定（コーディネーターのレビューを受けて改訂）: 契約は変えず、「下限（lower bound）で判定する」
+
+上の2つの未整合（decayed の embedding_status 非依存・excludeProvenanceKinds の
+不在）を算術で正確に補正するには、次のいずれかで `MemoryStore`/`ScopeAggregate`
+の**公開契約**を変える必要がある:
+
+- `ScopeAggregate` に新しい集計欄（例:「埋め込みがあり、かつ decayed」の件数）を足す。
+- `AggregateScopeOptions` に `excludeProvenanceKinds` を受け取る欄を足し、
+  対応する新しい集計欄も足す。
+
+どちらも `packages/core/src/interfaces/memory-store.ts`・`recall.ts` の公開型
+（`@mnemora/core` の index からエクスポートされている——`packages/core/src/index.ts`
+9・20行目）を変え、3つの実装（postgres・testkit・core のテスト fake）と
+conformance suite を揃って直す必要がある**契約変更**である。**この契約変更は
+実装しない——判断はオーナー・[Issue #541](https://github.com/takecchi/mnemora/issues/541)
+の線引きに送る。**
+
+**初版（本追記、当初案）は「`filteredDecayed.count === 0` でなければ判定しない」
+という形を採っていたが、これはコーディネーターのレビューで**過剰な保守化**だと
+指摘された——本番のテナントでは古い記憶が decayed になっているのが正常な運用
+状態であり、scope に1件でも decayed 行があれば診断が恒久的に沈黙する。
+Issue #671 の規模（10万行）でも、decayed 行が1件でもあれば黙る計算であり、
+この診断が実運用でほぼ機能しない設計になっていた。
+
+**⟹ 改訂: 「判定しない」ではなく「下限（lower bound）で判定する」に直す。**
+
+```
+reachableLowerBound = max(0, eligible - aggregate.filteredDecayed.count)
+```
+
+**下限が健全（sound）であることの論証**: 真の分母を
+`trueReachable = eligible - X` と置く（`X` = scope 内で「埋め込みあり かつ
+decayed」の行数——これが実際に知りたい値だが、直接は数えられない）。
+`aggregate.filteredDecayed.count` は embedding_status を問わず decayed 行を
+数えるため、`X` はその部分集合であり、常に
+
+```
+0 <= X <= aggregate.filteredDecayed.count
+```
+
+が成り立つ。⟹
+
+```
+trueReachable = eligible - X >= eligible - aggregate.filteredDecayed.count
+```
+
+右辺を0で下から丸めたものが `reachableLowerBound` であり、**`X` の実際の値を
+知らなくても** `reachableLowerBound <= trueReachable` が常に成り立つ
+（`eligible`・`filteredDecayed.count` はどちらも非負整数の集計値であるため、
+この不等式が崩れる余地が無い）。⟹
+`min(kPrime, reachableLowerBound) <= min(kPrime, trueReachable)` なので、
+
+```
+annHits.length < min(kPrime, reachableLowerBound)
+    ⟹ annHits.length < min(kPrime, trueReachable)
+```
+
+が必ず成り立つ——**下限で判定する限り、偽陽性は原理的に出ない。**
+
+**`excludeProvenanceKinds` はこの論証の外に居る。** 指定されると、真の分母は
+さらに「除外した provenance kind に一致しない」行だけに絞られる。`aggregate`
+はこの絞りを一切知らないため、`reachableLowerBound` が `trueReachable` を
+**上回る**方向にも動きうる（`reachableLowerBound <= trueReachable` の保証が
+崩れる）。⟹ 指定されているときは下限すら引けない——引き続き判定しない
+（`lowerBoundUsable`、`packages/core/src/recall-runtime.ts` の同キー周辺）。
+
+### 条件の一般化とキー名の変更
+
+条件を `annHits.length === 0` から `annHits.length < Math.min(kPrime,
+reachableLowerBound)` に一般化した。旧条件は「真に0件」しか捕まえなかったが、
+天井（`hnsw.max_scan_tuples` 等）で `kPrime` 未満・下限未満の件数に
+打ち切られた場合も、「索引が、実際に在る候補を返しきれなかった」という
+同じ事象である——0件かどうかは本質ではない。前提
+（`candidateGenerationExecuted && kPrime > 0`）はそのまま揃え、
+`lowerBoundUsable && reachableLowerBound > 0` を足す。
+
+キー名 `annWindowHadNoInScopeCandidates`（「0件だった」という事実を主張する
+名前）は、一般化した条件（0件とは限らない）の下では中身と食い違う。
+`annReturnedFewerThanReachable`（「ANN が、到達可能な下限より少ない件数しか
+返さなかった」）に変え、あわせて `annReachableLowerBound: number`（その時点の
+下限——「正確な分母」ではなく「下限」であることを名前自体で示す。初版が
+足していた `annReachablePool` という名前は「これが正確な母数である」と
+読めてしまうため改めた）も足す。**条件が真のときだけキーを足す作法は
+変えていない**（ADR 0084 §6 の歯②——`recall-channels.test.ts`——との衝突を
+避けるため。理由は本文§2.1と同じ）。
+
+### 公開型・公開 API への影響
+
+`StageTrace.detail` は本文§2.1・§7が実測したとおり `Record<string, unknown>`
+型であり、キーの追加・改名は `.d.ts` シグネチャに現れない。⟹ **今回のキー改名も
+公開 API 表面の門（`node scripts/check-public-api-surface.mjs`、ADR 0178）には
+現れない**——本追記の作業でも実測し直した（下の「測ったこと」）。`docs/recall.md`
+の該当1行も、新しい名前・新しい条件に揃えて追記した（既存の記述は書き換えず、
+追記として足した）。
+
+### 歯（`packages/core/src/__tests__/recall-pipeline.test.ts` の当該 describe を全面改訂）
+
+1. **陽性1**（他テナント占拠を模す。`CappedVectorStore(cap=0)`）: ANN が0件、
+   分母3件（decayed 無し）⟹ `annReturnedFewerThanReachable: true`・
+   `annReachableLowerBound: 3`。
+2. **陽性2**（天井打ち切りを模す。`CappedVectorStore(cap=2)`、分母5件、decayed
+   無し）: ANN が2件（0件ではない）で打ち切られても鳴る——**一般化そのものを
+   検査する歯**。旧条件（`annHits.length === 0`）ではここは鳴らなかった。
+3. **陽性3**（新設。decayed が一部あっても下限で名乗る）: ready 10件のうち
+   3件が decayed（7件生存）。`reachableLowerBound = max(0, 10 - 3) = 7`。
+   `CappedVectorStore(cap=2)` で ANN を2件に切り詰めると `2 < min(kPrime, 7)`
+   で鳴る——**「decayed が1件でもあれば鳴らさない」という初版の旧い形では、
+   ここは恒久的に鳴らなかった**（本番のテナントで実際に起きていた過剰な
+   保守化そのものを、この歯が再現している）。
+4. **偽陽性の対照**（既存）: scope 内の embedding_status='ready' な行が
+   全て decayed のとき、鳴らない（`reachableLowerBound = max(0, 3 - 3) = 0`）。
+   **旧コード（本文の初版条件）では赤くなることを先に確認した**（上
+   「何が見つかったか」の【実測】）。
+5. **見逃しの対照**（新設。既知の限界を固定する）: 未索引かつ decayed の行が
+   1件あると、下限が真の分母より小さくなり、実際の索引の取りこぼしを
+   見逃しうる——`pending` かつ decayed 1件 + `ready`（1件 decayed・3件生存）
+   4件、`CappedVectorStore(cap=2)`。`eligible=4`、`filteredDecayed=2`
+   （pending-decayed 1件 + ready-decayed 1件）⟹ `reachableLowerBound=2`。
+   真の分母（ready かつ生存）は3——索引は本当は3件に届くはずが2件しか
+   返せていない（実際の取りこぼし）にもかかわらず、下限もちょうど2なので
+   `2 < min(kPrime, 2)` は偽——**鳴らない。** 偶然の赤ではなく、下限方式が
+   引き受けた既知の限界として固定する歯である。
+6. **揃っていない次元の対照**（既存）: `excludeProvenanceKinds` を指定すると
+   ANN は0件を返すが（この次元が集約に見えないため下限は引けない）、
+   鳴らない。
+7. **やりすぎの対照A**（既存）: 正常時（ANN が下限まで拾いきる）は鳴らない。
+8. **やりすぎの対照B**（既存）: 分母が0件（scope が空）のときも鳴らない。
+9. `recall-channels.test.ts` の歯②（`toEqual` 2箇所）は無変更のまま緑
+   （本追記の作業でも実測し直した）。
+
+### 測ったこと
+
+- 【実測】`pnpm --filter @mnemora/core run typecheck`: 緑。
+- 【実測】`npx eslint packages/core/src/recall-runtime.ts
+packages/core/src/__tests__/recall-pipeline.test.ts`: 差分無し。
+- 【実測】`npx prettier --check` 同2ファイル: 差分無し。
+- 【実測】`pnpm --filter @mnemora/core exec vitest run
+src/__tests__/recall-pipeline.test.ts src/__tests__/recall-channels.test.ts`:
+  2ファイル・97件すべて緑（旧92件 + 新設5件 [陽性3・見逃しの対照を含む]）。
+- 【実測】偽陽性の再現（上「何が見つかったか」）: 本文の初版条件（旧条件、
+  `eligible > 0 && annHits.length === 0`）に対して「scope 内の ready な行が
+  全て decayed」の入力を与えると、`annWindowHadNoInScopeCandidates: true`
+  が実際に付くことを確認した（`cp` で退避・復元。`git checkout` は
+  使っていない）。
+- 【実測】変異試験（`cp` で退避・復元。復元後に対象の歯が緑へ戻ることまで
+  確認した）:
+  1. 条件全体を `if (true)` に固定: 対照系の4歯が赤くなった。**併せて**
+     `recall-channels.test.ts` の歯②も7件中7件が赤くなることを確認した
+     （`annStageTrace` が `undefined` の経路で `TypeError` になるケースを
+     含む）。
+  2. 条件全体を `if (false)` に固定: 陽性系の3歯だけが赤くなり、対照系は
+     緑のまま——一般化前後で陽性・対照の切り分けが意図どおりであることを
+     裏付けた。
+  3. `reachableLowerBound` の計算を `eligible - aggregate.filteredDecayed.count`
+     から素の `eligible` に戻す（下限による安全側の丸めを外す）変異:
+     **「偽陽性の対照」が赤くなった**——下限を外すと、この対照が偽陽性を
+     出す側に戻ることを確認した（付随して他の歯の期待値も変わり、計3歯が
+     赤くなった。狙った歯が含まれていることが本質）。
+  4. `lowerBoundUsable` の定義に `aggregate.filteredDecayed.count === 0 &&`
+     を足し戻す（初版の「decayed が1件でもあれば鳴らさない」という古い
+     ゲートに戻す）変異: **「陽性3」だけ**が赤くなり、他8歯は緑のまま——
+     この mutant が、直したかった「過剰な保守化」そのものを再現し、狙った
+     歯だけに当たることを確認した。
+     各変異後 `diff` で `/tmp` に退避した原本と1バイトも違わないことを確認して
+     から復元し、`git status --porcelain` が意図したファイルの変更だけである
+     ことを確認した。
+- 【実測】公開 API 表面の門（`node scripts/check-public-api-surface.mjs`、
+  ADR 0178、6パッケージを build した上で実行）: 全パッケージ「差分なし」。
+
+### これが覆るとしたら（本追記の分）
+
+1. **`MemoryStore`/`ScopeAggregate` の契約を変える判断がオーナーから下りたとき。**
+   そのときは `reachableLowerBound` という下からの近似を、正確な集計欄に
+   基づく厳密な分母へ置き換えられる——`annHits.length < min(kPrime,
+分母)` という条件式自体は変わらず、分母の出し方だけが厳密になる。
+2. **`excludeProvenanceKinds` を指定する呼び出しが実運用で頻出すると分かったとき。**
+   現状はこの次元を指定すると診断キーが恒久的に出なくなる——実運用で
+   `excludeProvenanceKinds` が常用されるなら、この診断の実効カバレッジは
+   低いままになる。
+
+### 引き受けた負債（本追記の分。本文§5の負債に積む）
+
+6. **`reachableLowerBound` は「未索引かつ decayed」の行の分だけ、真の分母
+   より小さくなりうる**（`X < aggregate.filteredDecayed.count` のとき）。
+   ⟹ 索引が実際には取りこぼしていても、`annHits.length` がたまたま
+   `reachableLowerBound` 以上（かつ `trueReachable` 未満）に収まると、この
+   診断は鳴らない——**見逃しがありうる**（`recall-pipeline.test.ts` の
+   「見逃しの対照」がこの境界を固定する）。**当初案（decayed が1件でも
+   あれば判定しない）よりは厳密に良い**——decayed 行の一部だけが未索引と
+   重なる、という実際にはまれな重なりのときだけ見逃しが起き、decayed 行が
+   在るというだけで恒久的に沈黙することは無くなった。偽陽性を出さないことを
+   優先し（下限方式は健全性を保つ）、見逃しの縮小は次点に置いた——直って
+   いない。
+7. **`excludeProvenanceKinds` を指定した recall では、この診断キーは
+   ANN が実際に候補を取りこぼしていても一切鳴らない。** 契約変更（§「これが
+   覆るとしたら」1番）までこの制約は残る。

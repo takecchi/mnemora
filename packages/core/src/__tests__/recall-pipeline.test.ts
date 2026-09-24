@@ -444,7 +444,7 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
   });
 });
 
-describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindowHadNoInScopeCandidates（ADR 0285 / Issue #671）", () => {
+describe("recall() — explain.stages[candidate_generation(ann)].detail.annReturnedFewerThanReachable（ADR 0285 / Issue #671 続報）", () => {
   // Issue #671: 他テナントの near-duplicate が HNSW の候補枠（k'）を埋めると、ANN は
   // scope 内の候補を1件も返さずに0件になる。既存の `ann_unreached`（上の describe）は
   // 「scope 内にまだ見られていない候補が残っている」という同じ条件（annHits.length <
@@ -453,17 +453,41 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
   //
   // 公開型の `Omission` union は変えず（`kind` を増やさない。理由は ADR 0285 §2.2、
   // および #541 の判断待ち）、`explain.stages` の ann チャンネルの trace に
-  // 診断用の detail キーを1つだけ足す。ここではその detail キーだけを検査する
+  // 診断用の detail キーを足す。ここではその detail キーだけを検査する
   // ——`ann_unreached` 自体の挙動（上の歯A〜D）は1つも変えていない。詳細は ADR 0285。
   //
-  // 🔴 ADR 0285 追記（PR #672 の CI 実測、2026-09-24）: 当初は「キーを常に出す
-  // （true/false）」だったが、これは上の describe とは別の既存の歯——
-  // `recall-channels.test.ts` の歯②「既定（channels 未指定）は ADR 0084 以前と
-  // 1バイトも変わらない」——と衝突していた。既定経路は常に `annHits.length > 0`
-  // か `eligible === 0` のどちらかであり、旧実装はそこへ常に `false` を足すので、
-  // 歯②の厳密な `toEqual` が「1バイトも変わらない」という既存の決定によって落ちる。
-  // ⟹ **条件が真のときだけキーを足し、偽のときはキー自体を出さない**側へ直した。
-  // 対照A・対照Bは「値が `false`」ではなく「キーが無い」ことを確かめる形に変える。
+  // 🔴 ADR 0285 追記（本 describe、Issue #671 続報）: 初版（PR #672）が足した
+  // `annWindowHadNoInScopeCandidates`（条件 `eligible > 0 && annHits.length === 0`）には
+  // **偽陽性があった**——`eligible` は忘却ゲート（ADR 0173）を知らないため、scope 内で
+  // 埋め込みのある行が全て decayed で ANN が「正しく」0件を返した場合にも、この条件は
+  // 真になっていた（下の「偽陽性の対照」がこれを赤で確かめる）。
+  //
+  // 🔴 追記その2（本 describe、コーディネーターのレビューを受けた訂正）: 追記その1が
+  // 採った「decayed 行が1件でもあれば判定しない」は、本番のテナントではほぼ常に
+  // 真になり（古い記憶が decayed なのは正常運用）、診断が恒久的に沈黙してしまう
+  // ——過剰な保守化だった。⟹ **「判定しない」ではなく「下限（lower bound）で
+  // 判定する」に直した**:
+  //   `reachableLowerBound = max(0, eligible - aggregate.filteredDecayed.count)`
+  // `aggregate.filteredDecayed` は「埋め込みあり かつ decayed」の真の件数の**上界**
+  // なので（embedding_status を問わず数えるため）、この引き算は**下から丸める**
+  // ——`reachableLowerBound <= 真の母数` が構造的に保証される（証明は
+  // `recall-runtime.ts` の同キー周辺のコメント）。⟹ `annHits.length <
+  // min(kPrime, reachableLowerBound)` で判定する限り**偽陽性は出ない**。
+  // `excludeProvenanceKinds` はこの不等式の外に居る（下限の保証が崩れる）ため、
+  // 指定されているときは引き続き判定しない。
+  //
+  // 条件を `annHits.length === 0` から `annHits.length < min(kPrime,
+  // reachableLowerBound)` に一般化した——天井（`hnsw.max_scan_tuples` 等）で
+  // `kPrime` 未満・下限未満の件数に打ち切られた場合も「索引が在る候補を返しきれ
+  // なかった」という同じ事象である。キー名を `annReturnedFewerThanReachable` に
+  // 変えた——「0件だった」を主張する旧名は、0件とは限らない一般化した条件の下では
+  // 中身と食い違う。値は引き続き条件が真のときだけ足す（ADR 0084 §6 の歯②との
+  // 衝突を避けるため）。あわせて `annReachableLowerBound`（その時点の下限——
+  // 「正確な母数」ではなく「下限」であることを名前自体で示す）も足す。
+  //
+  // **引き受けた負債**: 下限は「未索引かつ decayed」の分だけ真の母数より小さく
+  // なりうるため、索引が実際には取りこぼしていても `annHits.length` がたまたま
+  // 下限以上に収まると鳴らない——「見逃しの対照」がこの境界を固定する。
 
   function findAnnDetail(result: RecallResult) {
     const trace = result.explain.stages.find(
@@ -472,10 +496,11 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     return trace?.detail;
   }
 
-  it("陽性: ANN が0件を返し、eligible が0件より多いとき、annWindowHadNoInScopeCandidates: true が付く", async () => {
+  it("陽性1（他テナント占拠を模す）: ANN が0件を返し、分母が0件より多いとき、annReturnedFewerThanReachable: true が付く", async () => {
     const { runtime, stores } = buildRuntimeWithCappedAnn(0);
-    // 3件が scope 内・embeddingStatus='ready'（= eligible = 3）だが、ANN は0件しか返さない
-    // （CappedVectorStore(cap=0) が「候補枠が他 scope の行だけで埋まった」状況を模する）。
+    // 3件が scope 内・embeddingStatus='ready'・非 decayed（= 分母 = 3）だが、
+    // ANN は0件しか返さない（CappedVectorStore(cap=0) が「候補枠が他 scope の行だけで
+    // 埋まった」状況を模する）。
     for (let i = 0; i < 3; i += 1) {
       await createEmbeddedMemory(stores, [1, 0]);
     }
@@ -484,10 +509,135 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     expect(result.memories).toEqual([]);
     // 既存の ann_unreached は変わらず鳴る（対照——この歯の主題ではない）。
     expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
-    expect(findAnnDetail(result)).toMatchObject({ annWindowHadNoInScopeCandidates: true });
+    expect(findAnnDetail(result)).toMatchObject({
+      annReturnedFewerThanReachable: true,
+      annReachableLowerBound: 3,
+    });
   });
 
-  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が候補を返す）にはキー自体が付かない", async () => {
+  it("陽性2（天井打ち切りを模す）: ANN が kPrime 未満・分母未満の件数で打ち切られたとき、annReturnedFewerThanReachable: true が付く", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(2);
+    // 5件が scope 内・embeddingStatus='ready'・非 decayed（= 分母 = 5）。
+    // CappedVectorStore(cap=2) が「索引は本当は5件届くのに、天井で2件しか返さない」
+    // ——`hits === 0` ではない——状況を模する。旧条件（`annHits.length === 0`）では
+    // ここは鳴らなかった（この歯が一般化そのものを検査する）。
+    for (let i = 0; i < 5; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const detail = findAnnDetail(result);
+    expect(detail).toMatchObject({
+      hits: 2,
+      annReturnedFewerThanReachable: true,
+      annReachableLowerBound: 5,
+    });
+  });
+
+  it("陽性3（decayed が一部あっても下限で名乗る）: ready 10件中3件が decayed でも、下限(7) > hits なら annReturnedFewerThanReachable: true が付く", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(2);
+    // ready 10件のうち3件を decayed にする（7件は生存）。
+    //   eligible = 10（全件 ready）、filteredDecayed = 3（embedding_status を問わず
+    //   decayed を数えるが、ここでは decayed 行はどれも ready なので過大には
+    //   ならない）⟹ reachableLowerBound = max(0, 10 - 3) = 7。
+    // CappedVectorStore(cap=2) で ANN の返り件数を2件に切り詰める——
+    // 「decayed が1件でもあれば判定しない」という追記その1の旧い形では、ここは
+    // 恒久的に鳴らなかった（本番のテナントで実際に起きていた過剰な保守化そのもの）。
+    for (let i = 0; i < 7; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], {
+        decayFloorAt: new Date("2020-01-01T00:00:00.000Z"),
+      });
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const detail = findAnnDetail(result);
+    expect(detail).toMatchObject({
+      hits: 2,
+      annReturnedFewerThanReachable: true,
+      annReachableLowerBound: 7,
+    });
+  });
+
+  it("偽陽性の対照（鳴ってはいけない側）: scope 内の埋め込みがある行が全て decayed のとき、annReturnedFewerThanReachable は付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 3件とも embeddingStatus='ready' だが decayFloorAt が過去（NOW より前）——
+    // 忘却ゲートで ANN からも aggregate の filteredDecayed からも同じ述語で落ちる
+    // （ADR 0173）。ANN は「正しく」0件を返す——探していないのではなく、探して
+    // 何も無かった（すべて遠ざかった）。下限 = max(0, 3 - 3) = 0 なので鳴らない。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], {
+        decayFloorAt: new Date("2020-01-01T00:00:00.000Z"),
+      });
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.memories).toEqual([]);
+    const detail = findAnnDetail(result);
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+    expect(Object.keys(detail ?? {})).not.toContain("annReachableLowerBound");
+  });
+
+  it("見逃しの対照（既知の限界。鳴らないことを固定する）: 未索引かつ decayed の行があると、下限が真の母数より小さくなり、実際の取りこぼしを見逃しうる", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(2);
+    // 1件: embeddingStatus='pending'（未索引）かつ decayed（vectorStore へは
+    // upsert しない——未索引の Memory は現実の DB でも埋め込みを持たない）。
+    // 4件: embeddingStatus='ready'。うち1件は decayed、3件は生存。
+    //
+    //   totalInScope = 5、notIndexed.pending = 1 ⟹ eligible = 4。
+    //   filteredDecayed は embedding_status を問わず数えるので
+    //   1（pending かつ decayed）+ 1（ready かつ decayed）= 2。
+    //   ⟹ reachableLowerBound = max(0, 4 - 2) = 2。
+    //   真の母数（ready かつ生存）は3——下限は真の値より1小さい
+    //   （「未索引かつ decayed」の1件を二重に引いた分）。
+    //
+    // CappedVectorStore(cap=2) で ANN の返り件数を2件に切り詰める——
+    // 索引は本当は3件（生存する ready 全件）に届くはずが2件しか返せていない
+    // ＝ 実際の取りこぼしがある。だが下限もちょうど2なので
+    // `annHits.length(2) < min(kPrime, reachableLowerBound=2)` は偽——
+    // **この診断は鳴らない。** これは ADR 0285 追記その3が引き受けた負債
+    // （下限による判定は、未索引かつ decayed の分だけ見逃しうる）そのものであり、
+    // 偶然の赤ではなく既知の限界として固定する。
+    await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ decayFloorAt: new Date("2020-01-01T00:00:00.000Z") }),
+    );
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+    await createEmbeddedMemory(stores, [1, 0], {
+      decayFloorAt: new Date("2020-01-01T00:00:00.000Z"),
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const detail = findAnnDetail(result);
+    expect(detail).toMatchObject({ hits: 2 });
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+    expect(Object.keys(detail ?? {})).not.toContain("annReachableLowerBound");
+  });
+
+  it("揃っていない次元の対照（鳴ってはいけない側）: excludeProvenanceKinds が指定されているとき、annReturnedFewerThanReachable は付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 3件とも embeddingStatus='ready'・非 decayed だが、provenance kind 'imported'
+    // （`newMemory` の既定）を丸ごと除外するクエリ——ANN は「正しく」0件を返すが、
+    // `excludeProvenanceKinds` は `aggregateScope`/`ScopeAggregate` に届いていない
+    // ため、集約側からはこの絞りが見えない（本 describe 冒頭のコメント参照）。
+    for (let i = 0; i < 3; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      excludeProvenanceKinds: ["imported"],
+    });
+    expect(result.memories).toEqual([]);
+    const detail = findAnnDetail(result);
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+  });
+
+  it("やりすぎの対照A（鳴ってはいけない側）: 正常時（ANN が分母まで拾いきる）にはキー自体が付かない", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0]);
 
@@ -495,19 +645,20 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annWindo
     expect(result.memories).toHaveLength(1);
     const detail = findAnnDetail(result);
     // `false` を確かめるのではなく、キーそのものの不在を確かめる——
-    // `{ annWindowHadNoInScopeCandidates: undefined, ... }` という壊れた実装も
+    // `{ annReturnedFewerThanReachable: undefined, ... }` という壊れた実装も
     // 後者でなければ通ってしまう（②-c の `lexicalMatch` の歯と同じ形）。
-    expect(Object.keys(detail ?? {})).not.toContain("annWindowHadNoInScopeCandidates");
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
+    expect(Object.keys(detail ?? {})).not.toContain("annReachableLowerBound");
   });
 
-  it("やりすぎの対照B（鳴ってはいけない側）: eligible が0件（scope が空）のときもキー自体が付かない", async () => {
+  it("やりすぎの対照B（鳴ってはいけない側）: 分母が0件（scope が空）のときもキー自体が付かない", async () => {
     const { runtime } = buildRuntime();
-    // scope に Memory を1件も作らない ⟹ eligible = 0。ANN も0件を返すが、
+    // scope に Memory を1件も作らない ⟹ 分母 = 0。ANN も0件を返すが、
     // 「探していない」ではなく「探す対象自体が無い」なので対象外——鳴ってはいけない。
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toEqual([]);
     const detail = findAnnDetail(result);
-    expect(Object.keys(detail ?? {})).not.toContain("annWindowHadNoInScopeCandidates");
+    expect(Object.keys(detail ?? {})).not.toContain("annReturnedFewerThanReachable");
   });
 });
 
