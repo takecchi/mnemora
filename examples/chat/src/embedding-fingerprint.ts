@@ -2,6 +2,7 @@ import { writeFileSync } from "node:fs";
 import type { Ctx } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "@mnemora/local-embedding";
 import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
+import { localEmbeddingPinnedRevision } from "./providers.js";
 
 /**
  * `embedding-fingerprint` サブコマンド（Issue #565、ADR 0253 追記）。
@@ -37,6 +38,15 @@ import { warmupLocalEmbedding } from "./local-embedding-warmup.js";
  * ⚠ **`warmup()` は推論しない**（`local-embedding-provider.ts` の docstring）——
  * ウォームアップの直後に置くだけでは推論は起きない、という Issue #565 が名指しした穴を
  * 避けるため、ここでは `warmup()` の後に明示的に `embed()` を呼ぶ。
+ *
+ * ⭐ **`revision` も固定する（Issue #597 案(a)、ADR 0253 追記5）。** `providers.ts` の
+ * `buildEmbedding` の `local` 分岐と同じ `localEmbeddingPinnedRevision()` を渡す
+ * ——**使う側はすべて同じ宣言を見る**という決定の対象に、この経路も含まれる。
+ * ⚠ **この修正の前は revision を渡していなかった**——`example-chat` ジョブが
+ * `MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を `providers.ts`（revision 有り）とこの
+ * ファイル（revision 無し＝`main`）とで共有していたため、同じキャッシュディレクトリに
+ * フラット配置と revision サブディレクトリ配置が同居していた（ADR 0253 追記5、CI run
+ * 35953212055 で発覚）。この修正でその同居は無くなる。
  */
 
 /**
@@ -74,7 +84,10 @@ export async function runEmbeddingFingerprint(): Promise<void> {
   }
 
   const cacheDir = process.env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
-  const provider = new LocalEmbeddingProvider(cacheDir ? { cacheDir } : {});
+  const provider = new LocalEmbeddingProvider({
+    ...(cacheDir ? { cacheDir } : {}),
+    revision: localEmbeddingPinnedRevision(),
+  });
 
   console.log(
     "\n[embedding-fingerprint] warmup() でモデルの読み込みを先に済ませる" +

@@ -1041,6 +1041,53 @@ Issue #597 で revision を渡すようになった `examples/chat/src/providers
   ケース（CI の実際の形）も扱う——両方が正規化後に同じ論理パスへ写れば、両方とも
   `matched` に数えられる（重複を「不一致」にはしない）。
 
+### もう1箇所——`examples/chat/src/embedding-fingerprint.ts` も revision を渡していなかった
+
+**クローンからの指摘で発覚**: 上の「同居」は、この門の直し方（キャッシュの置き場所の
+解釈）だけでは対症療法だった。**根本原因は、`examples/chat` 側に `LocalEmbeddingProvider`
+を作る箇所が2つあり、片方（`providers.ts` の `buildEmbedding`）だけが revision を
+渡し、もう片方（`embedding-fingerprint.ts` の `runEmbeddingFingerprint`。Issue #565 の
+固定入力測定が使う）が渡していなかったことである。** `example-chat` ジョブは
+`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` をこの2箇所で共有しているため、フラット配置
+（`embedding-fingerprint.ts` が `main` で落とす）と revision サブディレクトリ配置
+（`providers.ts` が固定 revision で落とす）が同居していた——これが実際の「同居」の
+発生源である。
+
+⟹ **`embedding-fingerprint.ts` にも `localEmbeddingPinnedRevision()` を渡した**
+（クローンの決定「使う側はすべて固定する」の対象に、この経路も含まれる）。
+
+**grep で全数を確認した**（テストを除く `.ts`/`.mjs`/`.js` から
+`new LocalEmbeddingProvider(` を検索）: 実物の呼び出しは
+`examples/chat/src/providers.ts` と `examples/chat/src/embedding-fingerprint.ts` の
+**ちょうど2箇所**であり、両方とも固定 revision を渡すようになった。この事実を固定する
+歯として `examples/chat/src/__tests__/local-embedding-revision-wiring.test.ts` を
+新設した——特定のファイル名を決め打ちせず、`examples/chat/src` 直下の `.ts` を
+機械的に全部走査して `new LocalEmbeddingProvider(` の呼び出しを拾い、
+（1）呼び出しがちょうど2箇所であること（3つ目が増えたら要更新という陽性対照）、
+（2）すべてが `revision: localEmbeddingPinnedRevision()` を渡していること、の両方を
+assert する。変異試験（`cp` で退避・復元）: `embedding-fingerprint.ts` 側だけ
+revision を外す ⟹ 新設した歯が赤になった。戻すと緑に戻ることを確認した。
+
+⟹ **CI では、もうこの「同居」は起きなくなる。** `example-chat` ジョブの2つの
+呼び出し経路が、どちらも同じ固定 revision で重みを落とすため、キャッシュディレクトリの
+中身は revision サブディレクトリ配置だけになる（フラット配置は、旧いキャッシュが
+残っている場合にだけ現れうる）。
+
+⛔ **それでも、門の「フラットと revision サブディレクトリの同居」を扱う歯・正規化は
+残す。** 理由: (1) 旧いキャッシュ（この修正より前に作られたもの）が `actions/cache`
+に残っている間の後方互換のため。(2) 手元で誰かが `revision` を渡さずに
+`LocalEmbeddingProvider` を直接使い、同じ `cacheDir` を指す場合にも通用させるため。
+——**キャッシュ鍵（ADR 0263）が変わるので、この修正のマージ後の最初の run では
+どのみち温かいキャッシュを失う**（新しいキャッシュ鍵の下には、両方とも revision
+サブディレクトリ配置のファイルしか入らない）。
+
+⭐ **[Issue #565](https://github.com/takecchi/mnemora/issues/565) の測定（固定入力に
+対する `embed()` 出力の sha256・次元数・lscpu）の値が、この修正で「固定 revision の
+重みに対する出力」になる。** 直す前は `main` の重みに対する出力だった。sha が同じ
+（固定した時点で `main` と内容が一致することを確認済み——上記「sha の出所」参照）なので
+**出力される値そのものは変わらないはずである**が、`main` が将来動いても、この測定は
+追随せず固定した版のままになる、という点は変わる。
+
 ### 訂正: 追記4「4. 門」は「この門は revision を読まない」と書いたが、それは誤りだった
 
 追記4 は「⛔ この門自身が固定した revision を読んだり、自動で更新したりはしない」と
