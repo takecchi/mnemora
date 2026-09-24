@@ -119,6 +119,7 @@ import {
 } from "./time-weighting-bench.js";
 import { TIME_WEIGHTING_CASE_SET_DEV } from "./time-weighting-case-set.dev.js";
 import { TIME_WEIGHTING_CASE_SET_EVAL } from "./time-weighting-case-set.eval.js";
+import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "./time-weighting-case-set.eval-undated.js";
 import { buildTimeWeightingJson } from "./time-weighting-json.js";
 import {
   formatTimeWeightingKindSummary,
@@ -989,7 +990,11 @@ async function recordTimeWeighting(
   );
   printProviderMode(handle, null);
   try {
-    const cases = [...TIME_WEIGHTING_CASE_SET_DEV, ...TIME_WEIGHTING_CASE_SET_EVAL];
+    const cases = [
+      ...TIME_WEIGHTING_CASE_SET_DEV,
+      ...TIME_WEIGHTING_CASE_SET_EVAL,
+      ...TIME_WEIGHTING_CASE_SET_EVAL_UNDATED,
+    ];
     const results = await runTimeWeightingBench(
       handle,
       cases,
@@ -1958,7 +1963,11 @@ async function runTimeWeighting(): Promise<void> {
     );
     const cases = useDevOnly
       ? TIME_WEIGHTING_CASE_SET_DEV
-      : [...TIME_WEIGHTING_CASE_SET_DEV, ...TIME_WEIGHTING_CASE_SET_EVAL];
+      : [
+          ...TIME_WEIGHTING_CASE_SET_DEV,
+          ...TIME_WEIGHTING_CASE_SET_EVAL,
+          ...TIME_WEIGHTING_CASE_SET_EVAL_UNDATED,
+        ];
     const results = await runTimeWeightingBench(handle, cases, "answer-time-weighting", trials);
     const aggregate = aggregateTimeWeightingResults(results);
 
