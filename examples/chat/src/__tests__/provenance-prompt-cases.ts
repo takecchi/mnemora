@@ -41,12 +41,32 @@ import type { RecalledMemory } from "@mnemora/core";
  *    渡された、想定外の入力）場合は、本文を**捏造しない**——`memoryId` と
  *    「本文未取得」という印だけを出す。
  *
+ * ## `recordedAt`/`occurredAt`（Issue #691 の子、Issue #702、ADR 0298）
+ *
+ * 6. **`recordedAt`（取り込んだ壁時計の時刻）と `occurredAt`（出来事自身の時刻）は
+ *    別の名前で出す**——`occurredAt` が `null`（出来事の時点が分からない・述べられて
+ *    いない）でも `recordedAt` の値で埋めない（`RecalledMemory.occurredAt` の
+ *    docstring「2つの時計は意味が違う」・ADR 0298「決めなかったこと」）。
+ * 7. `recordedAt` が `undefined`（手組みの `RecalledMemory` 等、そもそも欄を渡さな
+ *    かった呼び出し側）なら記録時刻の欄そのものを出さない。値があればミリ秒精度の
+ *    ISO 8601（`Date#toISOString()`）で出す。
+ * 8. `occurredAt` は3値ある: `undefined`（頼んでいない・欄を出さない）／`null`
+ *    （頼んだが無かった・「不明」と明示する——`speaker` の「null」と同じ扱い）／
+ *    `Date`（値がある・ISO 8601 で出す）。
+ * 9. `recordedAt` と `occurredAt` が同じ時刻を指していても、2つの欄を1つに畳まない
+ *    （読み手が「たまたま同じ」と「同じ欄」を区別できなくなるのを避ける）。
+ *
  * ## この定義が実装前であることの確認
  *
  * `provenance-prompt-contract.test.ts` は、このケース集合を読んで
  * `buildMnemoraPrompt` の実際の出力と1行ずつ比較する。本コミットの時点では
  * `buildMnemoraPrompt` はまだ digest だけを箇条書きにする実装のままなので、
  * 次のコミット（テストを足すコミット）は **赤**になることが期待される。
+ *
+ * **2026-09（`recordedAt`/`occurredAt` を足す回）**: 末尾4件（`temporal-*`）を
+ * 追加した時点でも同じ規律を守る——このコミットの時点では
+ * `buildMnemoraPrompt`/`renderRecalledMemoryLine` はまだ `recordedAt`/`occurredAt` を
+ * 描画しないので、この4件だけが赤になることが期待される（既存9件は無関係のまま緑）。
  */
 
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
@@ -280,6 +300,94 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
     ],
     expectedLines: [
       "- [由来:stated] [話者:三郎] [主題:user-1] [矛盾候補:memoryId=m-missing（本文未取得）] 矛盾する主張",
+    ],
+  },
+  {
+    id: "temporal-both-present",
+    description:
+      "recordedAt/occurredAt が両方とも値を持つ: それぞれ別名のミリ秒精度ISOタグとして出す",
+    memories: [
+      {
+        memoryId: "m-temporal-both",
+        digest: "会議は10時から",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "太郎",
+        subjectId: "user-1",
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.123Z"),
+        occurredAt: new Date("2026-01-01T00:00:00.000Z"),
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:太郎] [主題:user-1] " +
+        "[記録時刻:2026-01-05T09:00:00.123Z] [出来事時刻:2026-01-01T00:00:00.000Z] 会議は10時から",
+    ],
+  },
+  {
+    id: "temporal-occurred-null",
+    description:
+      "occurredAt が null（出来事の時点が分からない）: recordedAt はそのまま出し、" +
+      "occurredAt は recordedAt の値で埋めずに「不明」と明示する",
+    memories: [
+      {
+        memoryId: "m-temporal-occurred-null",
+        digest: "予定は未定",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "次郎",
+        subjectId: "user-1",
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.123Z"),
+        occurredAt: null,
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:次郎] [主題:user-1] " +
+        "[記録時刻:2026-01-05T09:00:00.123Z] [出来事時刻:不明] 予定は未定",
+    ],
+  },
+  {
+    id: "temporal-same-instant",
+    description:
+      "recordedAt と occurredAt が同じ時刻: 一致していても2つの欄を1つに畳まない",
+    memories: [
+      {
+        memoryId: "m-temporal-same",
+        digest: "同時刻のケース",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "花子",
+        subjectId: "user-1",
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.123Z"),
+        occurredAt: new Date("2026-01-05T09:00:00.123Z"),
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:花子] [主題:user-1] " +
+        "[記録時刻:2026-01-05T09:00:00.123Z] [出来事時刻:2026-01-05T09:00:00.123Z] 同時刻のケース",
+    ],
+  },
+  {
+    id: "temporal-occurred-undefined",
+    description:
+      "occurredAt が undefined（頼んでいない・手組みの入力）: occurredAt 欄そのものを出さない。" +
+      "recordedAt は値があればそのまま出す",
+    memories: [
+      {
+        memoryId: "m-temporal-occurred-undefined",
+        digest: "本文のみ",
+        retrievedVia: "ann",
+        provenanceKind: "inferred",
+        speaker: null,
+        subjectId: null,
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.123Z"),
+      },
+    ],
+    expectedLines: [
+      "- [由来:inferred] [主題:なし] [記録時刻:2026-01-05T09:00:00.123Z] 本文のみ",
     ],
   },
 ];
