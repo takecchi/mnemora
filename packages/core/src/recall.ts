@@ -1169,6 +1169,43 @@ export interface RecalledMemory {
    * （`speaker` と同じ保証。ADR 0289 参照）。
    */
   subjectId?: string | null;
+  /**
+   * この記憶を取り込んだ壁時計の時刻（Issue #691 の子、Issue #702、
+   * [ADR 0298](../../../docs/decisions/0298-recalled-memory-recorded-occurred-at.md)）。
+   *
+   * **`Memory.recordedAt` をそのまま引き継ぐ。**`Memory.recordedAt` は `Date`
+   * （必須・`null` になりようが無い）なので、この欄は runtime が書く限り常に値を持つ。
+   *
+   * 🔴 **型の上では省略可能（`?`）だが、`recall-runtime.ts` は常にこの欄へ値を書く**
+   * ——`undefined` にもキー省略にもしない（`speaker`/`subjectId` と同じ保証。
+   * ADR 0289 の runtime 保証をこの欄にも当てた。ADR 0298 参照）。
+   *
+   * **並び替え（複数件の `recall()` の中でどれが後の発言か）に使う想定の欄。**
+   * `occurredAt`（下）が無い記憶でも、`recordedAt` は必ず在る——観測（会話のターン）を
+   * 取り込んだ順序を表す。
+   */
+  recordedAt?: Date;
+  /**
+   * この記憶が指す出来事・事実が実際にいつのものか（Issue #691 の子、Issue #702、
+   * ADR 0298）。
+   *
+   * **その Memory 自身の `occurredAt` をそのまま引き継ぐ。**`Memory.occurredAt?: Date | null`
+   * が `undefined` のときも `null` に揃える（`undefined` を呼び出し側へ渡さない——
+   * 「述べられていない」を `null` として正直に伝える。`memory.ts:95` 以降の
+   * `occurredAt`/`recordedAt` の区別、[ADR 0145](../../../docs/decisions/0145-valid-from-until-storage.md)
+   * を参照）。
+   *
+   * 🔴 **`null` は「出来事の時点が分からない・述べられていない」ことを表す。**
+   * この欄が `null` だからといって `recordedAt` で埋めない——2つの時計は意味が違う
+   * （`memory.ts` の `occurredAt` doc コメント参照）。**呼び出し側が「訂正の順序」を
+   * 読みたい場合、この欄が `null` なら `recordedAt` へフォールバックするかどうかは
+   * 呼び出し側の判断であり、この core の型・runtime は代わりに埋めない**
+   * （ADR 0298「決めなかったこと」参照）。
+   *
+   * 🔴 **型の上では省略可能だが、`recall-runtime.ts` は常にこの欄へ値か `null` を書く**
+   * （`speaker`/`subjectId` と同じ保証）。
+   */
+  occurredAt?: Date | null;
 }
 
 export const RecalledMemorySchema = z.object({
@@ -1181,6 +1218,8 @@ export const RecalledMemorySchema = z.object({
   score: ScoreBreakdownSchema,
   speaker: z.string().min(1).nullable().optional(),
   subjectId: z.string().min(1).nullable().optional(),
+  recordedAt: z.date().optional(),
+  occurredAt: z.date().nullable().optional(),
 }) satisfies z.ZodType<RecalledMemory>;
 
 // ---------------------------------------------------------------------------

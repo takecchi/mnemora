@@ -1463,6 +1463,12 @@ export async function runRecall(
             : null,
         // subjectId は Memory 自身の欄をそのまま引き継ぐ。undefined も null に揃える。
         subjectId: member.memory.subjectId ?? null,
+        // Issue #691 の子（Issue #702、ADR 0298）: recordedAt/occurredAt も同じ規律で
+        // 常に値か null を書く。Memory.recordedAt は必須欄なので常に値。
+        recordedAt: member.memory.recordedAt,
+        // occurredAt は Memory 自身の欄をそのまま引き継ぐ。undefined も null に揃える
+        // （「述べられていない」を推測で埋めない——ADR 0298「決めなかったこと」参照）。
+        occurredAt: member.memory.occurredAt ?? null,
       };
       if (member.companionOf !== undefined) {
         recalled.companionOf = member.companionOf;
