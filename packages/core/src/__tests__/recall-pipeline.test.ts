@@ -384,7 +384,14 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     }
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
-    expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
+    // ADR 0288: eligible(5) - filteredDecayed(0) = reachableLowerBound(5) に対して
+    // hits(2) < min(kPrime(40), 5) なので severity は "warning"（ANN 窓が実際に
+    // 到達可能な下限に届かなかった）。
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "warning",
+    });
   });
 
   it("歯B（⭐ 鳴ってはいけない側。オーナー名指し）: scope の候補を全部 ANN が返した場合は ann_unreached が鳴らない", async () => {
@@ -420,7 +427,14 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(true);
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(true);
-    expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
+    // ADR 0288: 窓は満杯（hits(1) == kPrime(1)）なので、reachableLowerBound(2) との
+    // min は kPrime(1) 側になり、hits(1) < 1 は偽——severity は "info"（実損の兆候では
+    // なく、eligible(2) > kPrime(1) という構造だけで鳴っている）。
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "info",
+    });
   });
 
   it("⭐ 歯D（鳴ってはいけない側）: 窓が満杯でも scope の候補を全部拾いきっていれば ann_unreached は鳴らない（ADR 0193）", async () => {
@@ -441,6 +455,53 @@ describe("recall() — omitted.kind = 'ann_unreached'（ADR 0025 の実測、ADR
     });
     expect(result.omitted.some((o) => o.kind === "ann_truncated")).toBe(true);
     expect(result.omitted.some((o) => o.kind === "ann_unreached")).toBe(false);
+  });
+
+  // ---------------------------------------------------------------------
+  // ADR 0288 / Issue #361: `AnnUnreachedOmission.severity`（任意欄）。
+  //
+  // 値は ADR 0285 追記が定義する `annReturnedFewerThanReachable`（stage detail の
+  // 診断キー）と**同じ式**から引く——2箇所に条件を書き写さない
+  // （`recall-runtime.ts` 該当コメント参照）。
+  //   - "warning": 同じ recall で ANN 窓が到達可能な下限（reachableLowerBound）に
+  //     届かなかった。
+  //   - "info": それ以外（窓は満杯で、eligible > kPrime という構造だけで鳴っている）。
+  // ---------------------------------------------------------------------
+  it("歯E（severity: 'info'）: 窓が満杯（hits == kPrime）で、eligible > kPrime という構造だけで鳴っているときは info", async () => {
+    const { runtime, stores } = buildRuntime();
+    // kPrime = limit(10) * overFetchFactor(4) = 40。候補41件（全件 embeddingStatus='ready'・
+    // 非 decayed）を作ると、既定の FakeVectorStore は search の limit（=kPrime=40）まで
+    // 律儀に返す ⟹ hits=40=kPrime（窓は満杯）。eligible=41、
+    // reachableLowerBound = 41 - filteredDecayed(0) = 41。
+    // hits(40) < min(kPrime(40), reachableLowerBound(41)) = 40 → 偽 ⟹ info。
+    for (let i = 0; i < 41; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "info",
+    });
+  });
+
+  it("歯F（severity: 'warning'）: ANN 窓が到達可能な下限に届かなかったときは warning", async () => {
+    const { runtime, stores } = buildRuntimeWithCappedAnn(3);
+    // 10件が scope 内・embeddingStatus='ready'・非 decayed（= eligible = 10）だが、
+    // CappedVectorStore(cap=3) で ANN の返り件数を3件に切り詰める。
+    // reachableLowerBound = 10 - filteredDecayed(0) = 10。
+    // hits(3) < min(kPrime(40), reachableLowerBound(10)) = 10 → 真 ⟹ warning。
+    for (let i = 0; i < 10; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0]);
+    }
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "warning",
+    });
   });
 });
 
@@ -508,7 +569,13 @@ describe("recall() — explain.stages[candidate_generation(ann)].detail.annRetur
     const result = await runtime.recall(ctx, { vector: [1, 0] });
     expect(result.memories).toEqual([]);
     // 既存の ann_unreached は変わらず鳴る（対照——この歯の主題ではない）。
-    expect(result.omitted).toContainEqual({ kind: "ann_unreached", countKind: "unknown" });
+    // ADR 0288: ここは annReturnedFewerThanReachable も真になる同じ状況なので、
+    // severity は "warning"。
+    expect(result.omitted).toContainEqual({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "warning",
+    });
     expect(findAnnDetail(result)).toMatchObject({
       annReturnedFewerThanReachable: true,
       annReachableLowerBound: 3,

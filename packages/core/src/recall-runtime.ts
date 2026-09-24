@@ -1681,6 +1681,24 @@ export async function runRecall(
   // ⟹ **`ann_truncated` と同時に立ちうる**（もう排反ではない）。2つは別の問いに答えている
   // ——`ann_truncated` は「窓の外は k 位を抜けないと証明できるか」、`ann_unreached` は
   // 「近似索引は scope の候補を拾いきったか」——ので、同時に立っても顔が潰れない。
+  //
+  // ADR 0288 / Issue #361: `severity`（"info" | "warning"）をここで一緒に決める。
+  // 値は下の ADR 0285 追記が定義する `annReturnedFewerThanReachable`（stage detail の
+  // 診断キー）と**同じ式**でなければならない——2箇所に条件を書き写すと食い違いうる
+  // （ADR 0011 と同じ理由）。そのため、下のブロックが本来ここより後ろで計算していた
+  // `lowerBoundUsable`/`reachableLowerBound` をここへ引き上げ、真偽値
+  // `annWindowUnderfilled` として先に確定させる。式そのものの由来・健全性の証明・
+  // 引き受けた負債は、下の ADR 0285 追記のコメント（変えていない）を見ること。
+  const lowerBoundUsable =
+    validatedQuery.excludeProvenanceKinds === undefined ||
+    validatedQuery.excludeProvenanceKinds.length === 0;
+  const reachableLowerBound = Math.max(0, eligible - aggregate.filteredDecayed.count);
+  const annWindowUnderfilled =
+    candidateGenerationExecuted &&
+    kPrime > 0 &&
+    lowerBoundUsable &&
+    reachableLowerBound > 0 &&
+    annHits.length < Math.min(kPrime, reachableLowerBound);
   if (
     candidateGenerationExecuted &&
     kPrime > 0 &&
@@ -1691,7 +1709,14 @@ export async function runRecall(
     // `annHits.length >= eligible`（scope の候補を全部拾いきった）なら鳴らない。
     annHits.length < eligible
   ) {
-    omitted.push({ kind: "ann_unreached", countKind: "unknown" });
+    omitted.push({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      // ADR 0288: 同じ recall で ANN 窓が到達可能な下限（reachableLowerBound）に
+      // 届かなかった（`annWindowUnderfilled`）なら "warning"。それ以外（窓は満杯で
+      // `eligible > kPrime` という構造だけで鳴っている）は "info"。
+      severity: annWindowUnderfilled ? "warning" : "info",
+    });
   }
 
   // -------------------------------------------------------------------
@@ -1809,18 +1834,12 @@ export async function runRecall(
   // 「これが正確な母数である」と読めてしまうため、下限であることが名前自体から
   // 分かるよう改めた）。`detail` は型無しの診断欄なので、欄名の変更・追加は公開型を
   // 動かさない（ADR 0285 §7 実測）。
-  const lowerBoundUsable =
-    validatedQuery.excludeProvenanceKinds === undefined ||
-    validatedQuery.excludeProvenanceKinds.length === 0;
-  const reachableLowerBound = Math.max(0, eligible - aggregate.filteredDecayed.count);
-  if (
-    annStageTrace !== undefined &&
-    candidateGenerationExecuted &&
-    kPrime > 0 &&
-    lowerBoundUsable &&
-    reachableLowerBound > 0 &&
-    annHits.length < Math.min(kPrime, reachableLowerBound)
-  ) {
+  //
+  // ADR 0288: `lowerBoundUsable`・`reachableLowerBound`・条件そのもの
+  // （`annWindowUnderfilled`）は、上の `ann_unreached` の直前へ引き上げ済み
+  // （`severity` が同じ式を要るため）。ここでは、その真偽値へ
+  // `annStageTrace !== undefined`（detail を書き込める先が実在するか）だけを重ねる。
+  if (annStageTrace !== undefined && annWindowUnderfilled) {
     annStageTrace.detail = {
       ...annStageTrace.detail,
       annReturnedFewerThanReachable: true,

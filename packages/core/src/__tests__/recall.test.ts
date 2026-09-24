@@ -255,6 +255,41 @@ describe("OmissionSchema — 10 の kind すべて", () => {
     expect(result.success).toBe(false);
   });
 
+  // ADR 0288 / Issue #361: `severity` は任意欄として足した（既存の必須フィールドは
+  // 1つも増やしていない——非破壊。docs/migration-v1.md 項目9・10 は必須フィールドの
+  // 追加だけを破壊的変更に数えている）。
+  it("accepts 'ann_unreached' without severity（後方互換: 省略できる）", () => {
+    const result = OmissionSchema.safeParse({ kind: "ann_unreached", countKind: "unknown" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts 'ann_unreached' with severity: 'info'", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "info",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts 'ann_unreached' with severity: 'warning'", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "warning",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects 'ann_unreached' の severity が未知の値", () => {
+    const result = OmissionSchema.safeParse({
+      kind: "ann_unreached",
+      countKind: "unknown",
+      severity: "critical",
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("rejects 未知の kind", () => {
     const result = OmissionSchema.safeParse({ kind: "vanished" });
     expect(result.success).toBe(false);
