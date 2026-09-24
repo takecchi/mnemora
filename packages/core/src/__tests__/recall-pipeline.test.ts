@@ -1081,6 +1081,212 @@ describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答�
   });
 });
 
+describe("recall() — speaker/subjectId（Issue #579 案D、ADR 0289）", () => {
+  // 常に値か null を入れる——キー自体が無い/undefined になる経路が無いことを
+  // Object.hasOwn と not.toBeUndefined() で固定する（toEqual は undefined のキーと
+  // 無いキーを同じに扱うので使わない）。
+
+  it("stated かつ speaker が在れば、その値をそのまま名乗る（ANN 経由）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const stated = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "speaker あり",
+      provenance: {
+        kind: "stated",
+        sourceObservationId: "obs-1",
+        at: NOW.toISOString(),
+        speaker: "田中さん",
+      },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === stated.id);
+    expect(m).toBeDefined();
+    expect(Object.hasOwn(m!, "speaker")).toBe(true);
+    expect(m!.speaker).not.toBeUndefined();
+    expect(m!.speaker).toBe("田中さん");
+  });
+
+  it("stated だが speaker が無ければ null（キー自体は在る）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const stated = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "speaker なし",
+      provenance: { kind: "stated", sourceObservationId: "obs-1", at: NOW.toISOString() },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === stated.id);
+    expect(m).toBeDefined();
+    expect(Object.hasOwn(m!, "speaker")).toBe(true);
+    expect(m!.speaker).not.toBeUndefined();
+    expect(m!.speaker).toBeNull();
+  });
+
+  it("inferred は speaker を持ちようが無いので null（StatedProvenance にしか speaker が無い）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const inferred = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "inferred",
+      provenance: {
+        kind: "inferred",
+        model: "gpt-4o-mini",
+        promptVersion: "v1",
+        basis: { memoryIds: [], observationIds: ["obs-1"] },
+        confidence: 0.7,
+      },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === inferred.id);
+    expect(Object.hasOwn(m!, "speaker")).toBe(true);
+    expect(m!.speaker).not.toBeUndefined();
+    expect(m!.speaker).toBeNull();
+  });
+
+  it("consolidated は speaker を持ちようが無いので null", async () => {
+    const { runtime, stores } = buildRuntime();
+    const consolidated = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "consolidated",
+      provenance: { kind: "consolidated", sources: ["mem-a", "mem-b"] },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === consolidated.id);
+    expect(Object.hasOwn(m!, "speaker")).toBe(true);
+    expect(m!.speaker).not.toBeUndefined();
+    expect(m!.speaker).toBeNull();
+  });
+
+  it("kind !== 'stated' の provenance がたまたま speaker という名のプロパティを持っていても無視する（kind を見ずに provenance.speaker を読む実装を拒む）", async () => {
+    // ⚠ StatedProvenance 以外は今日 speaker という名の欄を持たない——それだけでは
+    // 「kind を見ずに provenance から speaker を読む」実装は検出できない（挙動が同じに
+    // 見えてしまう）。将来どこかの provenance 枝が偶然 speaker という名を持ったときにも
+    // 正しく null を返すことを、型を迂回して構築した fixture で先取りして固定する。
+    const { runtime, stores } = buildRuntime();
+    const leaked = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "imported だが speaker という名の余計なプロパティを持つ",
+      provenance: {
+        kind: "imported",
+        batchId: "fixture",
+        speaker: "漏れてはいけない値",
+      } as unknown as NewMemory["provenance"],
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const m = result.memories.find((x) => x.memoryId === leaked.id);
+    expect(Object.hasOwn(m!, "speaker")).toBe(true);
+    expect(m!.speaker).not.toBeUndefined();
+    expect(m!.speaker).toBeNull();
+  });
+
+  it("subjectId が在ればその値、null ならそのまま null、Memory 側で undefined でも null に揃える", async () => {
+    const { runtime, stores } = buildRuntime();
+    const withSubject = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "subject あり",
+      subjectId: "user:a",
+    });
+    const nullSubject = await createEmbeddedMemory(stores, [0.99, 0.01], {
+      digest: "subject null",
+      subjectId: null,
+    });
+    const undefinedSubject = await createEmbeddedMemory(stores, [0.98, 0.02], {
+      digest: "subject undefined",
+    });
+    // ⚠ `FakeMemoryStore.createMemory` 自身が `input.subjectId ?? null` で正規化するため
+    // （`runtime-fakes.ts`）、`{ subjectId: undefined }` を渡すだけでは
+    // `recall-runtime.ts` 側の `?? null` 防御を通らない（保存済みの Memory は既に `null`）。
+    // 同じ参照を直接書き換えて、Memory.subjectId が本当に `undefined` の状態を作る
+    // （`createMemoryIdempotent` は同じオブジェクト参照を backing map に格納している）。
+    undefinedSubject.subjectId = undefined;
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const byId = new Map(result.memories.map((m) => [m.memoryId, m]));
+
+    const a = byId.get(withSubject.id)!;
+    expect(Object.hasOwn(a, "subjectId")).toBe(true);
+    expect(a.subjectId).not.toBeUndefined();
+    expect(a.subjectId).toBe("user:a");
+
+    const b = byId.get(nullSubject.id)!;
+    expect(Object.hasOwn(b, "subjectId")).toBe(true);
+    expect(b.subjectId).not.toBeUndefined();
+    expect(b.subjectId).toBeNull();
+
+    const c = byId.get(undefinedSubject.id)!;
+    expect(Object.hasOwn(c, "subjectId")).toBe(true);
+    expect(c.subjectId).not.toBeUndefined();
+    expect(c.subjectId).toBeNull();
+  });
+
+  it("同伴取得（mandatory_companion）でも speaker/subjectId は対向の Memory 自身の値を名乗る", async () => {
+    const { runtime, stores } = buildRuntime();
+    const companion = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        status: "contested",
+        digest: "B".repeat(20),
+        subjectId: "user:companion",
+        provenance: {
+          kind: "inferred",
+          model: "gpt-4o-mini",
+          promptVersion: "v1",
+          basis: { memoryIds: [], observationIds: ["obs-1"] },
+          confidence: 0.4,
+        },
+      }),
+    );
+    const owner = await createEmbeddedMemory(stores, [1, 0], {
+      status: "contested",
+      contestedWithId: companion.id,
+      digest: "A".repeat(5),
+      subjectId: "user:owner",
+      provenance: {
+        kind: "stated",
+        sourceObservationId: "obs-1",
+        at: NOW.toISOString(),
+        speaker: "本人",
+      },
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const returnedCompanion = result.memories.find((m) => m.memoryId === companion.id)!;
+    const returnedOwner = result.memories.find((m) => m.memoryId === owner.id)!;
+
+    expect(returnedCompanion.retrievedVia).toBe("mandatory_companion");
+    expect(Object.hasOwn(returnedCompanion, "speaker")).toBe(true);
+    expect(returnedCompanion.speaker).toBeNull(); // inferred には speaker が無い
+    expect(Object.hasOwn(returnedCompanion, "subjectId")).toBe(true);
+    expect(returnedCompanion.subjectId).toBe("user:companion");
+
+    expect(Object.hasOwn(returnedOwner, "speaker")).toBe(true);
+    expect(returnedOwner.speaker).toBe("本人");
+    expect(Object.hasOwn(returnedOwner, "subjectId")).toBe(true);
+    expect(returnedOwner.subjectId).toBe("user:owner");
+  });
+
+  it("usage.chars は speaker/subjectId を数に入れない（ADR 0035 §2 の実測を踏襲）", async () => {
+    // speaker/subjectId は score/retrievedVia/companionOf と同じ**付加情報**であり、
+    // digest tier には入らない。⟹ 欄を2つ増やしても usage.chars は動かない、
+    // という不変条件をここで押さえる（プロンプトへ積む量は北極星の物差し）。
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], {
+      digest: "digest-1",
+      subjectId: "user:with-a-fairly-long-subject-id-value",
+      provenance: {
+        kind: "stated",
+        sourceObservationId: "obs-1",
+        at: NOW.toISOString(),
+        speaker: "とても長い名前の話者ラベルをここに置いてみる",
+      },
+    });
+    await createEmbeddedMemory(stores, [0.99, 0.01], { digest: "digest-22" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10 });
+    const digestChars = result.memories.reduce((sum, m) => sum + m.digest.length, 0);
+    expect(result.memories).toHaveLength(2);
+    expect(result.usage.byTier.digest).toBe(digestChars);
+    expect(result.usage.chars).toBe(digestChars + result.usage.indexChars);
+  });
+});
+
 describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/recall.md §8）", () => {
   async function setupContestedPair(stores: ReturnType<typeof createFakeRuntimeStores>) {
     // b を先に作り、a から b を指す(一対一の対向関係。docs/memory-model.md §5)。

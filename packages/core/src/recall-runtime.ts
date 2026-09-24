@@ -1453,6 +1453,16 @@ export async function runRecall(
         // リテラル固定のまま出どころだけ変わって嘘になった件（ADR 0011）の裏返しである。
         provenanceKind: member.memory.provenance.kind,
         score: member.score,
+        // Issue #579 案D（ADR 0289）: 常に値か null を書く。undefined にもキー省略にも
+        // しない——「無い（null）」と「頼まなかった／書き忘れた（undefined）」を実行時に
+        // 混ぜないための保証（ADR 0257 の考え方をこの欄に当てたもの）。
+        // speaker は StatedProvenance にしか無い欄なので、それ以外の kind では常に null。
+        speaker:
+          member.memory.provenance.kind === "stated"
+            ? (member.memory.provenance.speaker ?? null)
+            : null,
+        // subjectId は Memory 自身の欄をそのまま引き継ぐ。undefined も null に揃える。
+        subjectId: member.memory.subjectId ?? null,
       };
       if (member.companionOf !== undefined) {
         recalled.companionOf = member.companionOf;

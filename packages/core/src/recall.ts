@@ -1139,6 +1139,36 @@ export interface RecalledMemory {
    */
   provenanceKind: ProvenanceKind;
   score: ScoreBreakdown;
+  /**
+   * この記憶を実際に述べた人（Issue #579 案D、[ADR 0289](../../../docs/decisions/0289-recalled-memory-speaker-subject.md)）。
+   *
+   * **`provenance.kind === "stated"` のときだけ在りうる**（`speaker` は
+   * `StatedProvenance` にしか存在しない欄——`provenance.ts` 参照）。`stated` でも
+   * `speaker` を述べていなければ `null`。`inferred`/`consolidated`/`reflected`/`imported`
+   * は常に `null`（この欄を持ちようが無い）。
+   *
+   * 🔴 **型の上では省略可能（`?`）だが、`recall-runtime.ts` は常にこの欄へ値か `null` を
+   * 書く——`undefined` にもキー自体を省くこともしない。**「無い（`null`）」と
+   * 「頼まなかった・書き忘れた（`undefined`）」を実行時に混ぜないための runtime 側の保証であり、
+   * [ADR 0257](../../../docs/decisions/0257-searched-and-found-nothing-versus-did-not-search.md)
+   * （「探したが無かった」と「探していない」を分ける）の考え方をこの欄に当てたものである。
+   * 型を必須にしなかった理由・runtime が保証する理由は ADR 0289 を参照。
+   */
+  speaker?: string | null;
+  /**
+   * この記憶が「誰との」やり取りに紐づくか（Issue #579 案D、ADR 0289）。
+   *
+   * **その Memory 自身の `subjectId` をそのまま引き継ぐ**——`Memory.subjectId?: string | null`
+   * が `undefined` のときも `null` に揃える（`undefined` と `null` を呼び出し側へ
+   * 混ぜて渡さない）。統合（`consolidate`）が subject をまたいだ場合、この欄は
+   * `Memory.subjectId` と同じく `null` になる——**この欄は Issue #579 の困りごと1
+   * （統合で帰属が消える）を直すものではない**。困りごと3（recall の場で speaker/subjectId が
+   * 見えない）にだけ答える。
+   *
+   * 🔴 **型の上では省略可能だが、`recall-runtime.ts` は常にこの欄へ値か `null` を書く**
+   * （`speaker` と同じ保証。ADR 0289 参照）。
+   */
+  subjectId?: string | null;
 }
 
 export const RecalledMemorySchema = z.object({
@@ -1149,6 +1179,8 @@ export const RecalledMemorySchema = z.object({
   associationOf: z.string().min(1).optional(),
   provenanceKind: ProvenanceKindSchema,
   score: ScoreBreakdownSchema,
+  speaker: z.string().min(1).nullable().optional(),
+  subjectId: z.string().min(1).nullable().optional(),
 }) satisfies z.ZodType<RecalledMemory>;
 
 // ---------------------------------------------------------------------------
