@@ -319,6 +319,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0292](./0292-relation-graph-table-depth-omitted-design.md) | 関係グラフ本体（Issue #207）の段0 — テーブル形・探索の深さ上限・`omitted` への出し方を決める（設計のみ） | **提案 (2026-09)** |
 | [0293](./0293-remove-pr-text-checks-and-release-followup-notice.md) | PR タイトル/本文を見る CI ステップ3本と、リリース後の追随通知ワークフローを削除する | 採用 (2026-09) |
 | [0294](./0294-lexical-tie-density-bench.md) | `retrieval` ベンチの語彙チャンネル構成（ADR 0148）でタイ密度を測るベンチを足す — 測るだけで、Issue #394 の取り扱いには何も答えない | 採用 (2026-09) |
+| [0295](./0295-answer-prompt-provenance-rendering.md) | 回答プロンプトに由来・話者・主題・矛盾関係を描画する形式を決める（Issue #691、`examples/chat` 限定・非破壊） | 採用 (2026-09) |
 | [0296](./0296-answer-content-preservation-layer2-indicator.md) | `answer` に層2（回答に必要な情報の保持）の決定的な指標を足す — 出典到達・回答正誤とは別欄、記録カセットの録り直しを要求しない（Issue #693、親 #498） | 採用 (2026-09) |
 | [0297](./0297-answer-retention-judge-positive-control-recorded.md) | 完了条件4「回答評価」側の陽性対照を実 API で記録し、カセット再生の歯として固定する（Issue #498） | **提案 (2026-09)** |
 | [0298](./0298-recalled-memory-recorded-occurred-at.md) | `RecalledMemory` に `recordedAt`/`occurredAt` を任意欄として足す —— Issue #691 の子（Issue #702）、「後で訂正された」を読むための時点（非破壊） | 採用 (2026-09) |

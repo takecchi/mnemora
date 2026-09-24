@@ -1655,6 +1655,29 @@ ADR 0296 の作業時点（2026-09-25、8日後）で `verify:answer`（記録�
 赤くなることの確認）は、変異後のプロンプトの記録追加を要するため未達のまま——鍵の判断は
 オーナーの領分であり、Issue #498 側の残作業として残っている（重複させない）。
 
+### `buildMnemoraPrompt` は由来・話者・主題・矛盾関係を描画する（Issue #691、ADR 0295）
+
+mnemora 経路の回答プロンプト（`mnemora-path.ts` の `buildMnemoraPrompt`）は、
+digest 本文だけでなく `RecalledMemory` の `provenanceKind`（由来）・`speaker`
+（話者、`stated` のときだけ）・`subjectId`（主題）・矛盾関係（`companionOf`/
+`retrievedVia`、対向記憶の相手の digest 本文を埋め込む）を1行ずつタグとして
+描画する。欠落値（`speaker`/`subjectId` が `null`）は「不明」/「なし」と明示し、
+他の値で埋めない。決めたことの詳細・ケース定義・変異試験の結果は
+[ADR 0295](../../docs/decisions/0295-answer-prompt-provenance-rendering.md) を参照。
+
+⚠ **`compare` の `mnemoraChars` はこの増分を反映しない**——`mnemoraChars` は
+`recall.usage.chars`（`recall()` 自身が返す量）であり、`buildMnemoraPrompt` が
+呼び出し側で組み立てる文字列とは元から別の数え方だった（`docs/recall.md` §6）。
+この PR 以降、両者の乖離はさらに広がる（フィクスチャでの実測比較は ADR 0295 §3）。
+
+⚠ **記録済みカセット（`cassettes/answer.json`、2026-09-17 録画）の再生が壊れる。**
+`buildMnemoraPrompt` の出力を変えたことで、mnemora 経路の回答生成プロンプトの
+ハッシュ鍵（`llmCassetteKey`）が変わり、`recorded` モードでの再生
+（`MNEMORA_LLM=recorded`/`MNEMORA_PROVIDER_SOURCE=recorded`、`answer-cli.postgres.test.ts`
+が使う経路）は12ケース全てで「記録に無い」例外になる見込み（ADR 0295 §4 で実測）。
+録り直すには `OPENAI_API_KEY` を使った `record:answer` の再実行（実 API 呼び出し・
+課金）が必要——実行するかどうかはオーナーの判断である。
+
 ---
 
 ## この会話生成（`src/scenario.ts`）について
