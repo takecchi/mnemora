@@ -4577,6 +4577,86 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.totalInScope).toBe(1);
     });
 
+    // -------------------------------------------------------------------
+    // scope.includeSubjectless（Issue #608 項目③(b) / ADR 0286）: `subjectId` の等値絞りを
+    // `subject_id IS NULL`（主題なし）まで広げる opt-in。
+    // -------------------------------------------------------------------
+
+    it("aggregateScope の scope.includeSubjectless: true なら、一致する subject と主題なし（null）の両方を totalInScope に含める", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: null }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-2" }),
+      );
+
+      const aggregate = await store.aggregateScope(ctx, {
+        subjectId: "user-1",
+        includeSubjectless: true,
+      });
+      expect(aggregate.totalInScope).toBe(2);
+      expect(aggregate.groups).toContainEqual(
+        expect.objectContaining({ axis: "subject", key: "user-1", count: 1 }),
+      );
+      expect(aggregate.groups).toContainEqual(
+        expect.objectContaining({ axis: "subject", key: null, count: 1 }),
+      );
+      expect(aggregate.groups).not.toContainEqual(
+        expect.objectContaining({ axis: "subject", key: "user-2" }),
+      );
+    });
+
+    it("aggregateScope の scope.includeSubjectless: 省略/false なら、主題なし（null）は今日どおり totalInScope に含めない（回帰）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: null }),
+      );
+
+      const omitted = await store.aggregateScope(ctx, { subjectId: "user-1" });
+      const explicitFalse = await store.aggregateScope(ctx, {
+        subjectId: "user-1",
+        includeSubjectless: false,
+      });
+
+      expect(omitted.totalInScope).toBe(1);
+      expect(explicitFalse.totalInScope).toBe(1);
+    });
+
+    it("aggregateScope の scope.includeSubjectless: subjectId 無しで true が渡っても、テナント全体（絞りなし）と同じになる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: "user-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", subjectId: null }),
+      );
+
+      const tenantWide = await store.aggregateScope(ctx, {});
+      const withIncludeSubjectlessButNoSubjectId = await store.aggregateScope(ctx, {
+        includeSubjectless: true,
+      });
+
+      expect(withIncludeSubjectlessButNoSubjectId.totalInScope).toBe(tenantWide.totalInScope);
+      expect(tenantWide.totalInScope).toBe(2);
+    });
+
     it("aggregateScope は status='archived' を totalInScope に含めず filteredArchived に計上する", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

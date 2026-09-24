@@ -1033,8 +1033,15 @@ export class PostgresMemoryStore implements MemoryStore {
     scope: RecallScope,
     opts?: AggregateScopeOptions,
   ): Promise<ScopeAggregate> {
+    // Issue #608 項目③(b) / ADR 0286: 段1（ANN・語彙）の押し下げと同じ opt-in。
+    // `scope.subjectId` が無ければこの欄自体を見ない——「テナント全体」は定義上すでに
+    // 主題なしを含む上位集合であり、広げる余地が無い。
     const subjectFilter =
-      scope.subjectId !== undefined ? sql`AND subject_id = ${scope.subjectId}` : sql``;
+      scope.subjectId !== undefined
+        ? scope.includeSubjectless === true
+          ? sql`AND (subject_id = ${scope.subjectId} OR subject_id IS NULL)`
+          : sql`AND subject_id = ${scope.subjectId}`
+        : sql``;
     const occurredAfter = scope.occurredAfter ?? null;
     const occurredBefore = scope.occurredBefore ?? null;
 

@@ -52,6 +52,23 @@ export interface VectorFilter {
    */
   subjectId?: string;
   /**
+   * **`subjectId` の等値絞りを、`subject_id IS NULL`（主題なし）まで広げる opt-in**
+   * （Issue #608 項目③(b)、[ADR 0286](../../../../docs/decisions/0286-recall-include-subjectless.md)）。
+   *
+   * **契約: `subjectId` が渡されているときだけ効く。** `true` なら述語は
+   * `subject_id = ${subjectId} OR subject_id IS NULL` になる——`subjectId` 単体の等値比較
+   * （上）を狭めるのではなく**広げる**。`subjectId` が `undefined`（テナント全体）のときは
+   * この欄も無視してよい（テナント全体は定義上すでに `subject_id IS NULL` を含む）。
+   *
+   * **追加のみの欄である**——この欄を知らない adapter は無視してよく（省略した場合と
+   * 同じ、既定 `false`/`undefined` は今日どおり `subjectId` の厳密一致のまま）、無視しても
+   * 「主題なしの Memory を取りこぼす」だけで、**別の subject の Memory を混ぜて返す
+   * 経路にはならない**（`packages/core/src/recall-runtime.ts` の全チャンネル共通の
+   * 後置フィルタが、adapter がこの欄を守らなかった場合の多層防御になっている——
+   * `decayFloorAtAfter` 等と同じ規律）。
+   */
+  includeSubjectless?: boolean;
+  /**
    * **除外**の列挙である（ADR 0056）。**上の `status` とは向きが逆**——`status` は
    * 「この配列に*在る*ものだけ通す」包含の列挙だが、`excludeProvenanceKinds` は
    * 「この配列に*在る*ものを落とす」除外の列挙。`RecallQuery.excludeProvenanceKinds`

@@ -1297,6 +1297,32 @@ export interface RecallQuery {
    * 詳細は {@link RecallAssociationQuery} と `recall-runtime.ts` の段3.5の doc を参照。
    */
   association?: RecallAssociationQuery;
+  /**
+   * **`ctx.subjectId` の等値絞りを、明示的な `null`（主題なし）まで広げる opt-in**
+   * （Issue #608 項目③(b)、[ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
+   *
+   * `subjectId` は `RecallQuery` の欄ではなく `Ctx` の任意欄である（`docs/recall.md` §「⚠
+   * `subjectId` を省略すると何が起きるか」）。**この欄は `ctx.subjectId` を置き換えない**——
+   * 述語を `subject_id = X` から `subject_id = X OR subject_id IS NULL` へ広げるだけで、
+   * 「X について」という絞り自体は変わらない。
+   *
+   * **既定（省略・`false`）では、この欄が無かった時点の挙動と1バイトも変わらない**——
+   * `subjectId: null` の Memory（主題を持たない記憶）は、`ctx.subjectId` を指定した
+   * recall からは今日どおり見えない。
+   *
+   * **`true` を渡すと**、`ctx.subjectId` と一致する Memory に加え、`subjectId: null` の
+   * Memory も候補に含める。**`ctx.subjectId` 自体を省略した呼び出し（テナント全体）では
+   * この欄は無視される**——テナント全体は定義上すでに主題なしの Memory を含む上位集合
+   * であり、この欄が広げる余地が無い（ADR 0286「決めたこと」参照）。
+   *
+   * **段1（ANN・語彙の両チャンネル）へ `VectorFilter.includeSubjectless`/
+   * `LexicalFilter.includeSubjectless` として押し下げ、段5の `MemoryStore.aggregateScope`
+   * にも同じ意味で渡る**（`RecallScope.includeSubjectless` 経由）。全チャンネル共通の
+   * 後置フィルタ（段1・段3.5）も同じ述語を見る——adapter がこの欄を無視しても
+   * （追加のみの契約なので無視してよい）、後置フィルタが取りこぼすことはあっても
+   * **別の subject の Memory を混ぜることはない**（ADR 0286「採らなかった案」）。
+   */
+  includeSubjectless?: boolean;
 }
 
 /**
@@ -1456,6 +1482,7 @@ export const RecallQuerySchema = z.object({
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),
   association: RecallAssociationQuerySchema.optional(),
+  includeSubjectless: z.boolean().optional(),
 }) satisfies z.ZodType<RecallQuery>;
 
 /**
@@ -1507,6 +1534,18 @@ export interface RecallScope {
    * （`ArchiveDecayedOptions.clock` の doc「⭐」）。ここはゲート側なので OR。
    */
   decayFloorAnyAxis?: boolean;
+  /**
+   * `RecallQuery.includeSubjectless` がそのまま入る（Issue #608 項目③(b)、
+   * [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
+   *
+   * `true` なら、`subjectId` の等値絞りに `subject_id IS NULL` を OR で足す——
+   * `VectorFilter.includeSubjectless`/`LexicalFilter.includeSubjectless` へそのまま渡り、
+   * `MemoryStore.aggregateScope` にも同じ `scope` が渡る（段1の押し下げと段5の集約が
+   * 同じ述語を見る、という他の欄と同じ規律）。`subjectId` が `undefined`（テナント全体）
+   * のときは無視される——テナント全体は定義上すでに主題なし（`subjectId: null`）の
+   * Memory を含む上位集合であり、この欄が広げる余地が無い。
+   */
+  includeSubjectless?: boolean;
 }
 
 export const RecallScopeSchema = z.object({
@@ -1517,6 +1556,7 @@ export const RecallScopeSchema = z.object({
   decayFloorAtAfter: z.date().optional(),
   decayFloorSeqAfter: z.number().optional(),
   decayFloorAnyAxis: z.boolean().optional(),
+  includeSubjectless: z.boolean().optional(),
 }) satisfies z.ZodType<RecallScope>;
 
 /**

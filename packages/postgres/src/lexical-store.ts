@@ -80,8 +80,14 @@ export function buildLexicalSearchSelect(
   if (opts.filter.status !== undefined) {
     conditions.push(sql`status = ANY(${sql.param(opts.filter.status)}::text[])`);
   }
+  // Issue #608 項目③(b) / ADR 0286: `PostgresVectorStore.search`（vector-store.ts）と
+  // 同じ形・同じ意味（`LexicalFilter` の doc「`VectorFilter` と同じ絞りを、同じ意味で持つ」）。
   if (opts.filter.subjectId !== undefined) {
-    conditions.push(sql`subject_id = ${opts.filter.subjectId}`);
+    conditions.push(
+      opts.filter.includeSubjectless === true
+        ? sql`(subject_id = ${opts.filter.subjectId} OR subject_id IS NULL)`
+        : sql`subject_id = ${opts.filter.subjectId}`,
+    );
   }
   // ADR 0039: 実効時刻は COALESCE(occurred_at, recorded_at)。両端とも包含（>=/<=）
   // ——`PostgresVectorStore.search`（vector-store.ts）の period 絞りと同じ境界。

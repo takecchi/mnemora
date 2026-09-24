@@ -633,6 +633,36 @@ PostgreSQL 17 + pgvector、`packages/postgres/src/bench/scale-bench.ts`、擬似
 [ADR 0011](./decisions/0011-no-window-count-in-ann-stage.md) が同一スナップショットのために
 選んだ設計である。**分ければ別スナップショットになる。**
 
+### `includeSubjectless` — subject X または主題なしを1回の recall で引く（Issue #608 項目③(b) / [ADR 0286](./decisions/0286-recall-include-subjectless.md)）
+
+上の節は「`subjectId` を省略すると『テナント全体』になる」という**2値**（絞る/絞らない）
+を扱っていた。**`RecallQuery.includeSubjectless?: boolean` は、その中間——「X について
+絞りつつ、主題を持たない記憶（`subjectId: null`）も一緒に引く」——を可能にする第3の形。**
+
+- **既定（省略・`false`）では、この欄が無かった時点の挙動と1バイトも変わらない**——
+  `ctx.subjectId` を指定した recall は、今日どおり `subjectId: null` の Memory を返さない。
+- **`true` を渡すと**、`ctx.subjectId` と一致する Memory に加え、`subjectId: null` の
+  Memory も候補に含める。述語は `subject_id = X` から `subject_id = X OR subject_id IS
+  NULL` へ広がる——`X` 以外の別 subject が混ざることは無い。
+- **`ctx.subjectId` を省略した呼び出し（テナント全体）では、この欄は無視される**——
+  テナント全体は定義上すでに `subject_id: null` の Memory を含む上位集合であり、
+  広げる余地が無い。エラーにはならない。
+- **段1（ANN・語彙の両チャンネル）へ `VectorFilter.includeSubjectless`/
+  `LexicalFilter.includeSubjectless` として押し下げ**、`MemoryStore.aggregateScope`
+  にも `RecallScope.includeSubjectless` として同じ意味で渡る。段1・段3.5（連想枠）の
+  後置フィルタも同じ述語を共有する——`subjectId` の絞り自体が段1・段5・後置フィルタの
+  3点セットに揃っているのと同じ規律（このドキュメントの他の欄と同じ形）。
+- **adapter がこの欄を実装していなくても安全**——`subjectId` の厳密一致だけを見る
+  adapter は、`subjectId: null` の Memory を取りこぼすだけで、別の subject の Memory を
+  混ぜて返すことは無い（追加のみの契約。ADR 0286「決めたこと」参照）。
+
+`decayFloorSeq` が `NULL` を「この軸には床が無い」として素通しする（上の
+`aggregateScope` の節、および [ADR 0165](./decisions/0165-decay-activity-clock.md)
+決めたこと4）のとは**別の理由**で、`subject_id` の等値フィルタは既定で `NULL` を
+通さない——`decayFloorSeq` の `NULL` は「機構がまだ計算していない」を表す内部状態だが、
+`subject_id` の `NULL` は「主題を持たない記憶」という、それ自体で完結した値である。
+詳細は ADR 0286 を参照。
+
 ### Phase 1 の範囲
 
 **Phase 1 では第3階(群カウント)のみを実装する。digest 帯(第2階)は Phase 2 に送る。** 理由は、digest 帯が taxonomy(分類語彙)を要するのに対し、群カウントは `subject` 単位だけでも成立するからである。Phase 1 の `IndexBand.groups` の既定 `axis` は `'subject'` とする。`taxonomy` 軸によるグルーピングは、taxonomy の `registered` / `proposed` 状態(`./memory-model.md` の taxonomy strict/open の節を参照)を扱う必要があり、digest 帯と合わせて Phase 2 に含める。**`time_window` 軸は当時型として持っていたが、生成するコードが一度も無く、[ADR 0144](./decisions/0144-drop-unreachable-classification-3-union-values.md)（2026-09-16）で型からも落とした。**
