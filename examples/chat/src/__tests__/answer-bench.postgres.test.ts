@@ -75,6 +75,22 @@ describe("examples/chat: answer（本物の Postgres、配線検査）", () => {
       // 突き合わせは必ず indeterminate になる(`reconcileVerdicts`)。
       expect(result.naive.reconciled).toBe("indeterminate");
       expect(result.mnemora.reconciled).toBe("indeterminate");
+
+      // 層2（回答に必要な情報の保持、Issue #693 / 親 #498）。LLM を呼ばない決定的な指標
+      // ——deterministic でも計算そのものは行う（`AnswerPathMeasurement.contentPreservation`
+      // docstring）。
+      // ⭐ naive 経路は全文をそのまま含む（`answerCase.id` は closed-value）ので、
+      // `expected.accept` は必ず入力に残っている——ここは値まで固定してよい
+      // （ケース authoring 自体の歯、`answer-content-preservation.test.ts` の
+      // 「naive 経路は常に保持される」と同じ主張）。
+      expect(answerCase.expected.kind).toBe("closed-value");
+      expect(result.naive.contentPreservation.applicable).toBe(true);
+      expect(result.naive.contentPreservation.preserved).toBe(true);
+      // mnemora 経路は recall() の選定次第であり、この歯（deterministic・配線検査）は
+      // それを固定しない——**形だけ**を見る。値は
+      // `answer-cli.postgres.test.ts`（recorded カセットの再生）が固定している。
+      expect(typeof result.mnemora.contentPreservation.applicable).toBe("boolean");
+      expect(typeof result.mnemora.contentPreservation.preserved).toBe("boolean");
     } finally {
       await handle.close();
     }

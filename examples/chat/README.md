@@ -287,6 +287,101 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill
 
 ---
 
+## `correction`: 訂正の発見→選択→書き込みを実演する（Issue #303 / Issue #369 (C) / Issue #692）
+
+```bash
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction
+```
+
+**「好きな色は青です」→「訂正します、赤でした」という2発話を `observe()` し、
+`findCorrectionCandidates`（発見）→ 指名の照合（選択）→ `applyCorrection`
+（`markContested`→`recall`→`resolveContested`→`recall`）まで、本物の `Runtime`
+（Postgres 配線）に対して一巡させる**（実装は
+[`src/correction-demo.ts`](./src/correction-demo.ts)、`Runtime.applyCorrection` は
+[ADR 0242](../../docs/decisions/0242-runtime-apply-correction.md)）。
+
+**⚠ このコマンドは常に指名（`CorrectionChoice`）を渡して走る**——`outcome` は必ず
+`"resolved"` になる。「選ばなければ何も起きない」（`awaiting_choice`）と「指名が候補に
+居なければ書き込まない」（`choice_not_in_candidates`）の2つの保留経路は、この CLI では
+実演しない（`choice` を渡す/渡さないを分岐させるオプションが無いため）——**その2つは
+[`__tests__/apply-correction.test.ts`](../../packages/core/src/__tests__/apply-correction.test.ts)
+と [`__tests__/correction-demo.test.ts`](./src/__tests__/correction-demo.test.ts) が
+書き込み0件を実測している**（トップレベルの
+[README.md](../../README.md)「訂正の境界」節も参照）。
+
+### 出力の読み方（実測、2026-09-25、deterministic provider）
+
+```
+元の発話: "私の好きな色は青です。" (memoryId=a72fa827-...)
+訂正の発話: "訂正します。よく考えたら、好きな色は青ではなく赤でした。" (memoryId=4dd8ae47-...)
+
+--- 0. 発見の段: findCorrectionCandidates(text: 訂正の発話, excludeMemoryIds: [訂正自身]) ---
+outcome=candidates / 候補1件
+  - #2位 "私の好きな色は青です。" (memoryId=a72fa827-..., score.total=0.80518)
+⟹ この候補一覧は棄権しない(ADR 0232 実測: B群8件中0件が棄権)。
+
+問い合わせ: recall({ text: "わたしの好きな色を覚えていますか?", limit: 1 })
+
+--- 1. markContested 前（まだ対向として宣言していない） ---
+件数: 1
+  - "私の好きな色は青です。" (retrievedVia=ann)
+
+--- 2. markContested(指名, 訂正) ⟹ outcome=contested ---
+件数: 2
+  - "私の好きな色は青です。" (retrievedVia=ann)
+  - "訂正します。よく考えたら、好きな色は青ではなく赤でした。"
+    (retrievedVia=mandatory_companion, companionOf=a72fa827-...)
+
+--- 3. resolveContested(supersede, winner=correction) ⟹ outcome=resolved ---
+件数: 1
+  - "訂正します。よく考えたら、好きな色は青ではなく赤でした。" (retrievedVia=ann)
+⟹ 古いほうが消えた: はい / omitted に "superseded" として記録された: はい
+```
+
+**段1（`markContested` 前）が、`observe()` を2回呼んだだけの状態と実質的に同じである
+ことに注意**——`findCorrectionCandidates` は読み取り専用で DB を書き換えないため、
+この時点の `recall()` の答え（`"私の好きな色は青です。"`、古い値が単独で返る、印も無い）が
+「`observe()` だけをしたらどうなるか」の実演になっている。段2/3が、そこから明示的な
+`applyCorrection` を経て初めて古い値が消えることを見せる。
+
+### 🔴 このコマンドが測っていないこと
+
+**`findCorrectionCandidates` が返す候補一覧の精度**（1位が本当に相手か、否定/曖昧/別人/
+別期間を誤って候補に乗せていないか）は、このコマンドの範囲外——それは
+`correction-candidates` コマンド（下記）の仕事である。このコマンドはあくまで
+「発見→選択→書き込み」という*配線*が一巡することの実演であり、選択の段の指名
+（`CorrectionChoice`）は台本（`src/correction-scenario.ts`）に書かれた「人が前もって
+選んだ判断」を渡しているだけである。
+
+---
+
+## `correction-candidates`: 訂正の相手探しの精度を測る（Issue #369 (C)）
+
+```bash
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction-candidates
+# -- --dev で開発用ケース集合（held-out ではなく調整用）を使う
+```
+
+**`findCorrectionCandidates` の関連度ランキングが、A群（訂正すべき相手が実在する）と
+B群（⛔ 訂正してはいけない——否定・曖昧・別人・別期間の4分類）をどれだけ分離できているかを
+測る。** 件数は [`src/correction-case-set.eval.ts`](./src/correction-case-set.eval.ts)
+（held-out）/[`src/correction-case-set.dev.ts`](./src/correction-case-set.dev.ts)（開発用）を
+見ること——ここには焼き込まない（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」。
+ADR 0291 §4 の項3 がこの件数を将来増やす拡張を設計済みであり、動く数だからである）。
+hit@k・distractor 逆転率・誤爆率・棄権率を出す。鍵・カセット不要
+（deterministic LLM + `@mnemora/local-embedding` の実推論）。
+
+**この数字自体は [ADR 0232](../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
+が測定・記録したものであり、このコマンドはその再現・継続監視のための道具である**
+（`main` の変更でこのコマンドの出力が動くことはあっても、ADR 0232 本文の数字自体は
+その時点の記録として書き換えない——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+**CI には配線していない**——`examples/chat/README.md` のこの節時点では手で走らせる
+道具のままである（継続計測への拡張は
+[ADR 0291](../../docs/decisions/0291-primary-probe-coverage-map-correction-candidate-domain.md)
+が設計のみ済ませている。実装は別issue）。
+
+---
+
 ## `compare`: 量の比較（このサンプルの主目的）
 
 会話の長さ（filler の往復数）を `[0, 1, 2, 3, 4, 5, 10, 20, 40, 80, 160, 320, 642(turns)]`
@@ -1540,6 +1635,48 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer   # 記
   judge の LLM 呼び出し）は別ブロックで出す。⛔ 削減率からは差し引かない。
 - **入力量の削減率は `qualityClaimable` に関係なく常に出す**（`inputReduction`、
   JSON では `AnswerRunJson.inputReduction`）——入力量そのものは品質の主張ではない。
+
+**⭐ 追記（Issue #693 / 親 #498、ADR 0296）: 層2（回答に必要な情報の保持）の決定的な指標。**
+出典への到達（`compare` の `factStatementSurvived`）・最終回答の正しさ（`verdict`/
+`judgement`）とは別に、`src/answer-content-preservation.ts` の `checkContentPreserved` が
+「モデルへ実際に渡す文字列に、答えに要る情報（`expected.accept`）が部分文字列として
+残っているか」を LLM を呼ばずに判定する。`AnswerPathJson.contentPreservation`（ケースごと）・
+`AnswerRunJson.contentPreservation`（集計）として出力する——`schemaVersion` は 2→3。
+`must-abstain` 類（`category: "unknown"`）は保持すべき事実自体が無いため `applicable: false`
+になる。⚠ **これは回答が正しいことを主張しない**——`schedule-change-deadline`
+（held-out、ADR 0233 が見つけた自然発生の fail）は、digest に正解（`25日`）が実際に
+残っている（層2は真）まま、実際の回答は撤回済みの値（`20日`）だった（層3は偽）。
+層2と層3が別物であることの実例である。
+
+⚠ **カセットの鮮度**: `examples/chat/cassettes/answer.json` は 2026-09-17 に
+`gpt-4o-mini`（LLM）/ `text-embedding-3-small`・256次元（embedding）で記録されたもの。
+ADR 0296 の作業時点（2026-09-25、8日後）で `verify:answer`（記録と実 API の乖離を測る）は
+実行していない——鍵が無い作業環境のため。層3の回答評価側の陽性対照（同じ変異で judge が
+赤くなることの確認）は、変異後のプロンプトの記録追加を要するため未達のまま——鍵の判断は
+オーナーの領分であり、Issue #498 側の残作業として残っている（重複させない）。
+
+### `buildMnemoraPrompt` は由来・話者・主題・矛盾関係を描画する（Issue #691、ADR 0295）
+
+mnemora 経路の回答プロンプト（`mnemora-path.ts` の `buildMnemoraPrompt`）は、
+digest 本文だけでなく `RecalledMemory` の `provenanceKind`（由来）・`speaker`
+（話者、`stated` のときだけ）・`subjectId`（主題）・矛盾関係（`companionOf`/
+`retrievedVia`、対向記憶の相手の digest 本文を埋め込む）を1行ずつタグとして
+描画する。欠落値（`speaker`/`subjectId` が `null`）は「不明」/「なし」と明示し、
+他の値で埋めない。決めたことの詳細・ケース定義・変異試験の結果は
+[ADR 0295](../../docs/decisions/0295-answer-prompt-provenance-rendering.md) を参照。
+
+⚠ **`compare` の `mnemoraChars` はこの増分を反映しない**——`mnemoraChars` は
+`recall.usage.chars`（`recall()` 自身が返す量）であり、`buildMnemoraPrompt` が
+呼び出し側で組み立てる文字列とは元から別の数え方だった（`docs/recall.md` §6）。
+この PR 以降、両者の乖離はさらに広がる（フィクスチャでの実測比較は ADR 0295 §3）。
+
+⚠ **記録済みカセット（`cassettes/answer.json`、2026-09-17 録画）の再生が壊れる。**
+`buildMnemoraPrompt` の出力を変えたことで、mnemora 経路の回答生成プロンプトの
+ハッシュ鍵（`llmCassetteKey`）が変わり、`recorded` モードでの再生
+（`MNEMORA_LLM=recorded`/`MNEMORA_PROVIDER_SOURCE=recorded`、`answer-cli.postgres.test.ts`
+が使う経路）は12ケース全てで「記録に無い」例外になる見込み（ADR 0295 §4 で実測）。
+録り直すには `OPENAI_API_KEY` を使った `record:answer` の再実行（実 API 呼び出し・
+課金）が必要——実行するかどうかはオーナーの判断である。
 
 ---
 

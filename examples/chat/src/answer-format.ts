@@ -118,6 +118,26 @@ export function formatAnswerCostTable(results: readonly AnswerCaseRunResult[]): 
 }
 
 /**
+ * 層2（回答に必要な情報の保持）の集計を1行で出す。**`qualityClaimable` に関係なく
+ * 常に出す**——LLM を呼ばない決定的な指標であり、層3（最終回答の正しさ）の集計とは
+ * 独立している（`answer-json.ts` の `AnswerRunJson.contentPreservation` docstring）。
+ * `applicable` は `must-abstain` 類を除いた分母。
+ */
+export function formatAnswerContentPreservation(results: readonly AnswerCaseRunResult[]): string {
+  const tally = (pick: (r: AnswerCaseRunResult) => { applicable: boolean; preserved: boolean }) => {
+    const values = results.map(pick).filter((v) => v.applicable);
+    return { applicable: values.length, preserved: values.filter((v) => v.preserved).length };
+  };
+  const naive = tally((r) => r.naive.contentPreservation);
+  const mnemora = tally((r) => r.mnemora.contentPreservation);
+  return (
+    "層2(回答に必要な情報の保持。LLM を呼ばない決定的な指標。⛔ 最終回答の正誤とは別欄): " +
+    `naive ${naive.preserved}/${naive.applicable} 件 / mnemora ${mnemora.preserved}/${mnemora.applicable} 件` +
+    `（分母は must-abstain 類を除いた ${naive.applicable} 件）`
+  );
+}
+
+/**
  * 入力量の削減率を1行で出す。**`qualityClaimable` に関係なく常に出す**
  * ——入力量は品質の主張ではない（`answer-json.ts` の `AnswerInputReductionJson`
  * docstring 参照）。計算は `computeInputReduction`（`answer-json.ts`）に委ね、
