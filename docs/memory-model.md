@@ -386,6 +386,78 @@ docs/decisions/0011-no-window-count-in-ann-stage.md を参照。）
 明示的に「既存の記憶にも新しい half-life を適用したい」と要求した場合のみ、低頻度のバッチとして
 実行する（Phase 1 の必須機能ではない）。
 
+### 活動時計の読み口 — `getActivitySeq` と、そこから測れること（2026-09-24 追記、Issue #338 案2 の段0）
+
+上の節は壁時計（`decay_floor_at`）だけを扱っている。**[ADR 0165](./decisions/0165-decay-activity-clock.md)
+はもう1本、活動時計（`decay_floor_seq`）を足しており、その「いま」は `tenant_activity`
+（テナントごとに1行、列は `tenant_id` / `activity_seq` / `updated_at` の3つだけ——上の
+DDL は §10 参照）が持つ。** `activity_seq` は `decay_clock` を `'wall'` 以外に設定した
+テナントで、`recall()` が1回起きるたびに `MemoryStore.createRecall` と同一トランザクションで
++1 される単調増加のカウンタである（`observe()` は数えない）。
+
+**この値を読む公開の口は、この追記より前から既に在る。** 新しい実装はしていない——ここは
+[Issue #338](https://github.com/takecchi/mnemora/issues/338) 案2（「`activity_seq` の進みから
+実際の recall 頻度を測る」）のための、**既存の読み口の使い方と限界を文書化するだけの追記**である。
+
+- `TenantSettingsStore.getActivitySeq?(ctx): Promise<number>`
+  （`packages/core/src/interfaces/tenant-settings-store.ts`、ADR 0165 決めたこと13）。
+  **読み出し専用**——書き込む口はこの interface には無い。
+- `packages/postgres` に実装済み（`PostgresTenantSettingsStore.getActivitySeq`、
+  `tenant_activity` を `SELECT` するだけ）。`packages/testkit` の in-memory fixture、
+  および両方の適合テスト（`describeTenantSettingsStoreConformance` の
+  `supportsDecayClock` 配下）にも揃っている。
+- 省略可能（`?` 付き）な理由は `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`
+  と同じ——`@mnemora/core` は npm 公開済みであり、必須メソッドにすると外部の
+  `TenantSettingsStore` 実装が軒並みコンパイルできなくなる（ADR 0165 決めたこと13）。
+  未実装の adapter では `readActivitySeq()`（同ファイル）が `0` へ倒す。
+
+**測り方（案2 そのもの）**: `getActivitySeq(ctx)` を2つの時点でサンプルし、差分を
+「その間に起きた `recall()` の回数」として読む。
+
+```
+n0 = await tenantSettingsStore.getActivitySeq(ctx)   // t0 の時点
+// ... 時間が経つ ...
+n1 = await tenantSettingsStore.getActivitySeq(ctx)   // t1 の時点
+// [t0, t1) の間に起きた recall() の回数 ≒ n1 - n0
+```
+
+サンプル間隔（1時間ごと・1日ごと等）・保存・閾値判定・アラートは、**すべて呼び出し側の
+責務である**。mnemora 自身はスケジューラも保存先も持たない——`writeDecayClock` のような
+「省略時の既定動作」を1箇所に閉じ込める規律（ADR 0165 決めたこと13）は、**読み出し専用の
+`getActivitySeq` には最初から無い。**
+
+**⚠ 限界（正直に書く）**:
+
+1. **累積カウンタなので、過去の日ごとの回数は後から読めない。** `tenant_activity` は
+   「いまの値」しか持たない——1テナント1行で、それ以前の値の履歴は保存されない
+   （上の DDL のとおり）。⟹ **この読み口で測れるのは、自分がサンプルを取り始めた
+   時点より後の頻度だけである。** 「先週の recall 頻度」を遡って知る手段はない。
+   これを可能にするには日次の履歴テーブルのような新しいスキーマが要り、それは
+   マイグレーションを伴う——本追記の段0では行わない（ADR 0290「検討した代替案」参照）。
+2. **テナント全体のカウンタであり、`subject` 単位でも Memory 単位でもない。**
+   別の `subject`・別のクエリの `recall()` でも同じカウンタが進む（ADR 0165 本文が
+   確認している実測）。⟹ 「そのテナントに何人の利用者がいて、それぞれ何回
+   `recall()` したか」は、この値だけからは分からない。分かるのは
+   「そのテナント全体で `recall()` が何回起きたか」だけである。
+   `subject` 単位のカウンタにする変種は、ADR 0165「これが覆るとしたら」1 が
+   「オーナーの判断を要する種類の分岐」と明記しており、本追記では踏み込まない。
+3. **`decay_clock` を一度も `'wall'` 以外に設定していないテナントでは、`activity_seq`
+   は常に `0` のままである**（ADR 0165 決めたこと5）。⟹ この読み口で頻度を測れるのは
+   `'activity'`/`'either'` を選んだテナントだけであり、既定（`'wall'`）のテナントに
+   対してこの方法で recall 頻度を測ることはできない。
+4. **`getActivitySeq` を持たない adapter（`readActivitySeq()` が `0` へ倒す）では、
+   差分が常に `0` になる。** 「頻度がゼロだった」のか「そもそも測れていない」のかを、
+   呼び出し側は `store.getActivitySeq !== undefined` を自分で見て区別する必要がある
+   ——`readActivitySeq()` はこの区別を潰す（未実装も `0` として返す）ので、
+   頻度測定の用途ではヘルパを経由せず `store.getActivitySeq` を直接呼ぶこと。
+
+⟹ 案2 が答えるのは「[ADR 0165](./decisions/0165-decay-activity-clock.md) の逆算どおり、
+1日3112回を超えて `recall()` するテナントが実在するか」という Issue #338 の問いに対して、
+**採用者ごとに、いま以降を自分で観測する手段**である。**この repo 自身が全採用者の頻度を
+集約して見張る機構ではない**（そのような機構は本追記の範囲外——ADR 0290 参照）。
+既定 `720`（Issue #338 案3）や `subject` 単位カウンタへの変種は、依然としてオーナー判断の
+範囲であり、この追記も踏み込まない。
+
 ---
 
 ## 8. taxonomy の strict / open
