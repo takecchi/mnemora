@@ -1,31 +1,43 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
+import { readFileSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { buildCacheKeySuffix, slugForCacheKey } from "../print-local-embedding-cache-key-lib.mjs";
 
 /**
  * `scripts/print-local-embedding-cache-key.mjs`（CI のモデルキャッシュ鍵を決める CLI）と、
- * `.github/workflows/ci.yml` 側の配線の歯（Issue #564 / ADR 0263）。
+ * `.github/workflows/ci.yml` 側の配線の歯（Issue #564 / ADR 0263、Issue #597 案(a) による
+ * ADR 0263 追記）。
  *
  * ⭐ **鍵そのものを assert する。** 鍵は「何が変われば取り直すか」を決めている値であり、
  * **そこが静かにずれると、CI は古い重みを配り続けても緑のまま**になる——それが
  * Issue #564 の本題だった。⟹ **値の形を歯で固定する。**
  *
- * ⭐ **フォールバックの文面も assert する。** HF に届かないときにジョブを落とさない
- * 設計なので、**出るのは `::warning::` の文面だけ**である。⟹ そこが消えたら、
- * 「revision を入れられなかった」ことが誰にも届かなくなる。
+ * 🔴 **2026-09-24 追記（Issue #597 案(a)）**: revision はもう Hugging Face の `main` から
+ * 引かない——`scripts/local-embedding-pinned-revision.json`（唯一の宣言）に固定した sha を
+ * 使う。⟹ **この CLI はもう Hugging Face に問い合わせない。** 以前あった `--api-base`
+ * （HF スタブへ向ける注入点）は無くなった——**「不明な引数」になること自体が、
+ * 旧い（HF に問い合わせる）形へ戻っていないことの歯である。**
  *
- * ⚠ 測り方は `check-local-embedding-fingerprint-cli.test.mjs` と同じ——CLI が用意して
- * いる `--api-base` の注入点へ**手元の HTTP スタブ**を向ける。⟹ Hugging Face にも
- * 4ファイル計42MB のモデル一式にも触らない。
+ * ⭐ **フォールバックの文面も assert する。** 宣言（repo/dtype/固定revision）を読めない
+ * ときにジョブを落とさない設計なので、**出るのは `::warning::` の文面だけ**である。
+ * ⟹ そこが消えたら、「宣言を読めなかった」ことが誰にも届かなくなる。
+ *
+ * ⚠ **固定 revision の宣言ファイルの場所は `--declaration-path` で差し替えられる**
+ * ——本物の `scripts/local-embedding-pinned-revision.json` を書き換えずに
+ * 「宣言が読めない」を歯から再現するため（`packages/openai` の `client` 注入と同じ役目）。
  */
 
 const script = fileURLToPath(new URL("../print-local-embedding-cache-key.mjs", import.meta.url));
 const workflow = fileURLToPath(new URL("../../.github/workflows/ci.yml", import.meta.url));
 const providerSource = fileURLToPath(
   new URL("../../packages/local-embedding/src/local-embedding-provider.ts", import.meta.url),
+);
+const pinnedRevisionDeclaration = fileURLToPath(
+  new URL("../local-embedding-pinned-revision.json", import.meta.url),
 );
 
 /** 宣言を、CLI とは別のやり方（行を探して引用符の中を取る）で読む。 */
@@ -37,34 +49,33 @@ function declaredIndependently(name) {
   return line.split('"')[1];
 }
 
+/**
+ * 固定 revision の宣言を、CLI（`readPinnedRevision`）とは別のやり方
+ * （`JSON.parse` を直接呼ぶだけ）で読む。**両者が同じ値を見ていることの独立した証人。**
+ */
+function pinnedRevisionIndependently() {
+  const parsed = JSON.parse(readFileSync(pinnedRevisionDeclaration, "utf8"));
+  if (typeof parsed?.sha !== "string" || parsed.sha.length === 0) {
+    throw new Error(`${pinnedRevisionDeclaration} に sha が無い`);
+  }
+  return parsed.sha;
+}
+
 const repo = declaredIndependently("DEFAULT_LOCAL_EMBEDDING_REPO");
 const dtype = declaredIndependently("DEFAULT_LOCAL_EMBEDDING_DTYPE");
+const pinnedSha = pinnedRevisionIndependently();
 
 /**
  * 🔴 **revision を入れる前に `ci.yml` が持っていた鍵。**
- * HF に届かなかったときの落ち先が、`ci.yml` の接頭辞と繋いでこれと一致することを
- * 下で確かめる——一致していないと、**HF 障害中に温かいキャッシュを外して
- * 4ファイル計42MB のモデル一式を取りに行かせる**ことになる。
+ * 宣言（repo/dtype/固定revision）のどれかが読めなかったときの落ち先が、`ci.yml` の
+ * 接頭辞と繋いでこれと一致することを下で確かめる——一致していないと、**宣言が
+ * 壊れている間に温かいキャッシュを外して 4ファイル計42MB のモデル一式を取りに行かせる**
+ * ことになる。
  */
 const KEY_BEFORE_THIS_CHANGE = "local-embedding-ruri-v3-30m-q8-v1";
 
 /** `ci.yml` 側がリテラルで持つ接頭辞（下の「配線」の `describe` が現物と突き合わせる）。 */
 const PREFIX_IN_WORKFLOW = "local-embedding-";
-
-async function withStub(handler, fn) {
-  const state = { hits: 0, paths: [] };
-  const server = createServer((req, res) => {
-    state.hits += 1;
-    state.paths.push(req.url);
-    handler(req, res);
-  });
-  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
-  try {
-    return await fn({ origin: `http://127.0.0.1:${server.address().port}`, state });
-  } finally {
-    await new Promise((resolve) => server.close(() => resolve()));
-  }
-}
 
 function runCli(args) {
   return new Promise((resolve) => {
@@ -77,10 +88,19 @@ function runCli(args) {
   });
 }
 
-const json = (status, body) => (_req, res) => {
-  res.writeHead(status, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
-};
+/** `--declaration-path` を、一時ディレクトリに書いた壊れた/正しい宣言へ向けて走らせる。 */
+async function withDeclarationFile(content, fn) {
+  const dir = mkdtempSync(join(tmpdir(), "local-embedding-pinned-revision-"));
+  const path = join(dir, "local-embedding-pinned-revision.json");
+  if (content !== null) {
+    writeFileSync(path, content);
+  }
+  try {
+    return await fn(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
 
 describe("print-local-embedding-cache-key.mjs: 鍵の接尾辞の組み立て（純関数）", () => {
   it("repo / dtype / sha が全部入る", () => {
@@ -113,64 +133,67 @@ describe("print-local-embedding-cache-key.mjs: 鍵の接尾辞の組み立て（
 });
 
 describe("print-local-embedding-cache-key.mjs: CLI", () => {
-  it.concurrent("⭐ HF が sha を返すと、宣言と sha から組み立てた鍵を印字する", async () => {
-    await withStub(json(200, { id: repo, sha: "deadbeef" }), async (s) => {
-      const r = await runCli(["--api-base", s.origin, "--plain"]);
-      expect(r.stdout).toBe(buildCacheKeySuffix({ repo, dtype, sha: "deadbeef" }));
-      expect(r.code).toBe(0);
-      expect(s.state.paths[0]).toBe(`/api/models/${repo}`);
-    });
+  it("⭐ 固定した revision の宣言から組み立てた鍵を印字する（Issue #597 案(a)）", async () => {
+    const r = await runCli(["--plain"]);
+    expect(r.stdout).toBe(buildCacheKeySuffix({ repo, dtype, sha: pinnedSha }));
+    expect(r.code).toBe(0);
   });
 
-  it.concurrent("既定では $GITHUB_OUTPUT の行形式（key=…）で出す", async () => {
-    await withStub(json(200, { id: repo, sha: "deadbeef" }), async (s) => {
-      const r = await runCli(["--api-base", s.origin]);
-      expect(r.stdout).toBe(`key=${buildCacheKeySuffix({ repo, dtype, sha: "deadbeef" })}`);
-    });
+  it("既定では $GITHUB_OUTPUT の行形式（key=…）で出す", async () => {
+    const r = await runCli([]);
+    expect(r.stdout).toBe(`key=${buildCacheKeySuffix({ repo, dtype, sha: pinnedSha })}`);
+    expect(r.code).toBe(0);
   });
 
-  it.concurrent(
-    "🔴 HF に届かないと、**revision を入れる前の鍵**へ落ちる。⛔ ジョブを落とさない（exit 0）",
+  it(
+    "🔴 --api-base は不明な引数である —— Hugging Face に問い合わせる旧い形へ戻って" +
+      "いないことの歯（旧い形なら --api-base は既知の引数になる）",
     async () => {
       const r = await runCli(["--api-base", "http://127.0.0.1:1", "--plain"]);
-      // 🔴 ここが一致していないと、HF 障害中に温かいキャッシュを外すことになる。
-      expect(PREFIX_IN_WORKFLOW + r.stdout).toBe(KEY_BEFORE_THIS_CHANGE);
-      expect(r.code).toBe(0);
+      expect(r.code).toBe(3);
+      expect(r.stderr).toContain("不明な引数: --api-base");
     },
   );
 
-  it.concurrent(
-    "⭐ 落ちるときは黙らない: ::warning:: に理由と「前と同じ振る舞い」を書く",
+  it(
+    "🔴 固定 revision の宣言が読めなければ、**revision を入れる前の鍵**へ落ちる。" +
+      "⛔ ジョブを落とさない（exit 0）",
     async () => {
-      const r = await runCli(["--api-base", "http://127.0.0.1:1", "--plain"]);
-      expect(r.stderr).toContain("::warning::キャッシュ鍵:");
-      expect(r.stderr).toContain("revision を引けなかった");
-      expect(r.stderr).toContain("この変更の前と同じ振る舞いになる");
-    },
-  );
-
-  it.concurrent(
-    "応答に sha が無いときも、落ちずにフォールバックする（HF の形が変わった場合）",
-    async () => {
-      await withStub(json(200, { id: repo }), async (s) => {
-        const r = await runCli(["--api-base", s.origin, "--plain"]);
+      await withDeclarationFile(null, async (path) => {
+        const r = await runCli(["--declaration-path", path, "--plain"]);
+        // 🔴 ここが一致していないと、宣言が壊れている間に温かいキャッシュを外すことになる。
         expect(PREFIX_IN_WORKFLOW + r.stdout).toBe(KEY_BEFORE_THIS_CHANGE);
-        expect(r.stderr).toContain("応答に sha が無かった");
         expect(r.code).toBe(0);
       });
     },
   );
 
-  it.concurrent("404 でも落ちない（鍵を決めるだけで、門ではない）", async () => {
-    await withStub(json(404, { error: "no" }), async (s) => {
-      const r = await runCli(["--api-base", s.origin, "--plain"]);
+  it("⭐ 落ちるときは黙らない: ::warning:: に理由を書く（宣言が読めない場合）", async () => {
+    await withDeclarationFile(null, async (path) => {
+      const r = await runCli(["--declaration-path", path, "--plain"]);
+      expect(r.stderr).toContain("::warning::キャッシュ鍵:");
+      expect(r.stderr).toContain("固定した revision の宣言");
+      expect(r.stderr).toContain(path);
+    });
+  });
+
+  it("JSON が壊れていても、落ちずにフォールバックする", async () => {
+    await withDeclarationFile("{ not valid json", async (path) => {
+      const r = await runCli(["--declaration-path", path, "--plain"]);
       expect(PREFIX_IN_WORKFLOW + r.stdout).toBe(KEY_BEFORE_THIS_CHANGE);
-      expect(r.stderr).toContain("HTTP 404");
       expect(r.code).toBe(0);
     });
   });
 
-  it.concurrent("不明な引数 ⟹ 実行時エラー（exit 3）", async () => {
+  it("sha が無い（別の形の JSON）ときも、落ちずにフォールバックする", async () => {
+    await withDeclarationFile(JSON.stringify({ notSha: "x" }), async (path) => {
+      const r = await runCli(["--declaration-path", path, "--plain"]);
+      expect(PREFIX_IN_WORKFLOW + r.stdout).toBe(KEY_BEFORE_THIS_CHANGE);
+      expect(r.code).toBe(0);
+    });
+  });
+
+  it("不明な引数 ⟹ 実行時エラー（exit 3）", async () => {
     const r = await runCli(["--nope"]);
     expect(r.stderr).toContain("不明な引数: --nope");
     expect(r.code).toBe(3);
@@ -239,5 +262,11 @@ describe("ci.yml の配線（Issue #564）", () => {
 
   it("⚠ 陰性対照: 架空のステップ id では見つからない（検査が常に true に退化していない）", () => {
     expect(yml).not.toContain("steps.no-such-cache-key-step.outputs.key");
+  });
+});
+
+describe("固定した revision の宣言（Issue #597 案(a)）", () => {
+  it("scripts/local-embedding-pinned-revision.json が sha を持つ", () => {
+    expect(pinnedSha).toMatch(/^[0-9a-f]{40}$/);
   });
 });

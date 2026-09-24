@@ -62,6 +62,44 @@ export function expectedHashOfTreeEntry(entry) {
 }
 
 /**
+ * 手元で見つかったファイルの相対パスを、HF の tree のパス空間へ正規化する
+ * （Issue #597 案(a) の追加分、ADR 0253 追記5）。
+ *
+ * 🔴 **なぜ要るか（実測、CI run 35953212055 で赤くなって判明）**:
+ * `@huggingface/transformers` の `FileCache` は、`revision` を `"main"` 以外の値で
+ * 渡すと、`<repo>/<revision>/<filename>` という**revision 名のサブディレクトリ**に
+ * ファイルを置く（`revision` が既定の `"main"` のときだけ `<repo>/<filename>` という
+ * フラットな配置になる——`node_modules/@huggingface/transformers/src/utils/hub.js`
+ * の `buildResourcePaths` が `proposedCacheKey` を組み立てる箇所で確認した）。
+ *
+ * Issue #597 案(a) で `examples/chat` が固定した revision を渡すようになったため、
+ * CI のキャッシュには `<cacheDir>/<repo>/<固定revision>/<filename>` という配置で
+ * ファイルが置かれる。この門は HF の tree のパス（`config.json` / `onnx/model_quantized.onnx`
+ * のようにサブディレクトリを持たない）と突き合わせるので、正規化しないと**手元に
+ * ファイルが実在するのに「素性不明」として不一致になる**（実際に CI でそう壊れた）。
+ *
+ * 🔴 **この関数は「照合する対象」を変えない。** 変えるのは「手元のどのファイルが、
+ * tree のどのパスに対応するか」という*解釈*だけである——この門はいまも
+ * `main` の tree と照合し続ける（クローンの決定。ADR 0253 追記4）。
+ *
+ * ⚠ **`pinnedRevision` が無い（宣言が読めない）場合は何もしない。** revision=main の
+ * フラットな配置しか扱わない、この変更より前の挙動そのままになる——**この正規化は
+ * 追加のフォールバック**であり、無くても（今までどおり）動く形を壊さない。
+ *
+ * @param {string} relPath repoDir からの相対パス（`/` 区切り）
+ * @param {string | null} pinnedRevision 固定した revision（`scripts/local-embedding-pinned-revision.json`）。
+ *   読めなければ `null` を渡すこと。
+ * @returns {string} 正規化した相対パス（プレフィックスが無ければそのまま返す）
+ */
+export function normalizeActualPath(relPath, pinnedRevision) {
+  if (!pinnedRevision) {
+    return relPath;
+  }
+  const prefix = `${pinnedRevision}/`;
+  return relPath.startsWith(prefix) ? relPath.slice(prefix.length) : relPath;
+}
+
+/**
  * 手元に実在するファイルの hash と、HF の tree から作った期待値を突き合わせる。
  *
  * 🔴 **HF の tree に在るが手元に無いファイルは、不一致にしない。**

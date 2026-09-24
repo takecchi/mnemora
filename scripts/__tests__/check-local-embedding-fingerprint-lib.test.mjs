@@ -4,6 +4,7 @@ import {
   expectedHashOfTreeEntry,
   formatFingerprintReport,
   gitBlobSha1Hex,
+  normalizeActualPath,
 } from "../check-local-embedding-fingerprint-lib.mjs";
 
 /**
@@ -112,6 +113,53 @@ describe("compareFingerprints", () => {
     expect(result.matched).toEqual(["onnx/model_quantized.onnx"]);
     expect(result.mismatched).toEqual([]);
     expect(result.unknownOnDisk).toEqual([]);
+  });
+});
+
+/**
+ * `normalizeActualPath`（Issue #597 案(a) の追加分、ADR 0253 追記5）。
+ *
+ * 【背景・実測】CI run 35953212055 で、`examples/chat` が固定した revision を
+ * `LocalEmbeddingProvider` へ渡すようになった結果、`@huggingface/transformers` の
+ * `FileCache` が `<repo>/<revision>/<filename>` というサブディレクトリにファイルを
+ * 置くようになり、この門が「素性不明」を4本報告して赤くなった
+ * （`不一致: 一致 4 本 / hash 食い違い 0 本 / 素性不明 4 本`）。
+ */
+describe("normalizeActualPath", () => {
+  const REVISION = "cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0";
+
+  it("pinnedRevision が null なら、相対パスをそのまま返す（revision=main のフラットな配置）", () => {
+    expect(normalizeActualPath("config.json", null)).toBe("config.json");
+    expect(normalizeActualPath("onnx/model_quantized.onnx", null)).toBe(
+      "onnx/model_quantized.onnx",
+    );
+  });
+
+  it("pinnedRevision のサブディレクトリで始まっていれば、そのプレフィックスを剥がす", () => {
+    expect(normalizeActualPath(`${REVISION}/config.json`, REVISION)).toBe("config.json");
+    expect(normalizeActualPath(`${REVISION}/onnx/model_quantized.onnx`, REVISION)).toBe(
+      "onnx/model_quantized.onnx",
+    );
+  });
+
+  it("⚠ 陰性対照: 別の revision のサブディレクトリでは剥がさない（別物として素性不明のままにする）", () => {
+    expect(
+      normalizeActualPath("0000000000000000000000000000000000000000/config.json", REVISION),
+    ).toBe("0000000000000000000000000000000000000000/config.json");
+  });
+
+  it("⚠ 陰性対照: プレフィックスの後に `/` が無い（たまたま前方一致するだけのファイル名）は剥がさない", () => {
+    // 例: revision 名そのものをファイル名の先頭に持つ、たまたまの一致。
+    expect(normalizeActualPath(`${REVISION}not-a-directory.json`, REVISION)).toBe(
+      `${REVISION}not-a-directory.json`,
+    );
+  });
+
+  it("プレフィックスの無いフラットな配置は、pinnedRevision が在っても変わらない", () => {
+    // revision=main で落とした（フラットな）ファイルと、revision 指定で落とした
+    // （ネストした）ファイルが同じキャッシュディレクトリに同居するケース
+    // （CI の example-chat ジョブで実際に起きている——本文参照）。
+    expect(normalizeActualPath("config.json", REVISION)).toBe("config.json");
   });
 });
 

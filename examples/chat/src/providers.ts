@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import type { EmbeddingProvider, LLMProvider } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "@mnemora/local-embedding";
 import { OpenAIEmbeddingProvider, OpenAILLMProvider } from "@mnemora/openai";
@@ -217,6 +219,56 @@ export function selectEmbeddingMode(env: EnvLike): ProviderMode {
 export function localEmbeddingCacheDirEnv(source: EnvLike = process.env): EnvLike {
   const value = source.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
   return value === undefined || value === "" ? {} : { MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: value };
+}
+
+/**
+ * `LocalEmbeddingProvider` へ渡す固定した Hugging Face revision（Issue #597 案(a)）。
+ *
+ * 🔴 **クローン（miku）の決定**: 上流の repo 消失・ミラー汚染を予防するため、CI が
+ * **使う側**（ここと `scripts/print-local-embedding-cache-key.mjs` のキャッシュ鍵）だけを
+ * 採用時の sha に固定する。⛔ **`scripts/check-local-embedding-fingerprint.mjs`（指紋門）は
+ * 固定しない**——`main` を照合し続ける番犬として残り、上流の `main` が動いて門が赤くなったら、
+ * それがこの固定値を更新せよという合図になる（ADR 0253 追記）。
+ *
+ * 唯一の宣言は `scripts/local-embedding-pinned-revision.json`（scripts 側。
+ * `@mnemora/local-embedding` の公開 API には足していない——`DEFAULT_LOCAL_EMBEDDING_REVISION`
+ * のような公開 export は作らない、という決定である）。`print-local-embedding-cache-key.mjs`
+ * が同じファイルを読んでおり、**同じ宣言を見ていることが、両者が食い違わない根拠である。**
+ *
+ * ⛔ **読めなければ投げる。** 黙って `revision: undefined`（transformers.js の既定 `"main"`）
+ * へ戻すと、固定したはずの CI が実は固定されていない、という一番気づきにくい壊れ方になる
+ * ——`parseModeOverride`/`decideProviderSource` が未知の値で例外にするのと同じ作法。
+ */
+export function localEmbeddingPinnedRevision(
+  declarationPath: string = fileURLToPath(
+    new URL("../../../scripts/local-embedding-pinned-revision.json", import.meta.url),
+  ),
+): string {
+  let source: string;
+  try {
+    source = readFileSync(declarationPath, "utf8");
+  } catch (error) {
+    throw new Error(
+      `localEmbeddingPinnedRevision: 固定した revision の宣言（${declarationPath}）を` +
+        `読めなかった（Issue #597 案(a)）。原因: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(source);
+  } catch (error) {
+    throw new Error(
+      `localEmbeddingPinnedRevision: ${declarationPath} の JSON が壊れている。` +
+        `原因: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  const sha = (parsed as { sha?: unknown } | null)?.sha;
+  if (typeof sha !== "string" || sha.length === 0) {
+    throw new Error(`localEmbeddingPinnedRevision: ${declarationPath} に sha（文字列）が無い。`);
+  }
+  return sha;
 }
 
 // ---------------------------------------------------------------------------
@@ -481,8 +533,18 @@ export function createProviders(
       // `actions/cache` でモデル重みをキャッシュする場所を固定するために使う——
       // transformers.js の既定（`~/.cache/huggingface`）は環境によって場所が変わりうる
       // ため、明示したパスのほうが「次の実行でも同じ場所を見る」ことを保証しやすい。
+      //
+      // `revision` も渡す（Issue #597 案(a)）。CI が使う側（ここと
+      // `scripts/print-local-embedding-cache-key.mjs` のキャッシュ鍵）だけを、採用時の
+      // sha に固定する——`scripts/local-embedding-pinned-revision.json` が唯一の宣言。
+      // ⛔ `@mnemora/local-embedding` 自体の既定は変えていない（`revision` を渡さなければ
+      // transformers.js の既定 `"main"` のまま）。ここは「examples/chat が渡す値」を
+      // 固定するだけである。
       const cacheDir = env.MNEMORA_LOCAL_EMBEDDING_CACHE_DIR;
-      return new LocalEmbeddingProvider(cacheDir ? { cacheDir } : {});
+      return new LocalEmbeddingProvider({
+        ...(cacheDir ? { cacheDir } : {}),
+        revision: localEmbeddingPinnedRevision(),
+      });
     }
     if (embeddingMode !== "openai") {
       return new DeterministicEmbeddingProvider(DETERMINISTIC_EMBEDDING_SPACE);

@@ -848,3 +848,291 @@ ADR の追記だけで、`packages/` には1バイトも触れていない。**�
 `examples/chat/src/embedding-fingerprint.ts`・`scripts/` の新規ファイル6本・
 `.github/workflows/ci.yml` の3段+1ジョブだけで、`packages/` には1バイトも
 触れていない（⟹ 出荷される公開 API は変わらない）。**要否は判断者に委ねる。**
+
+## 追記4 (2026-09-24、Issue #597 案(a)): 「使う側」だけを固定した。この門は `main` を見続ける番犬のまま残す
+
+> **⚠ このコメントは、自動化された担い手（クローンのマネージャーのセッション）が書いた。**
+> **⛔ オーナー本人が決めたのではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **⚠ 状態欄も本文も書き換えていない**（追記1・追記2・追記3 と同じ扱い）。
+
+### 「採らなかった案 (d)」の「未判断」が、ここで決まった
+
+本文の「採らなかった案」(d) は、**revision を固定して落とす案**をこう書いていた（逐語）:
+
+> そして**決定1によって、(d)は(a)の前提条件ではなくなった**——期待値をHFからその場で引く
+> 以上、revisionを固定しなくても期待値は腐らない。⟹ ⛔ **この PR には混ぜない。**
+> [Issue #564] に「(a)とは別の価値（repo消失・ミラー汚染への予防）が在る。未判断」として残した。
+
+**その「未判断」を、クローン（miku）が決めた**——[Issue #597](https://github.com/takecchi/mnemora/issues/597) 案(a) を採る。**ただし、この門は `main` を見続ける（決定は下記）。**
+
+### 決定: 固定するのは「使う側」だけ。門は固定しない
+
+- **固定する**: `scripts/print-local-embedding-cache-key.mjs`（CI のキャッシュ鍵）と
+  `examples/chat/src/providers.ts`（`local` embedding が `LocalEmbeddingProvider` へ渡す
+  `revision`）。どちらも、採用時の sha（`cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0`。
+  出所は下記）を、`scripts/local-embedding-pinned-revision.json`（唯一の宣言）から読む。
+- **固定しない**: この門（`scripts/check-local-embedding-fingerprint.mjs`）。
+  **tree URL の `main` は変えていない。** ⟹ 上流の `main` が動いて、固定した revision の
+  中身と食い違えば、この門が赤くなる——それが「固定した revision を更新するかどうか、
+  人間が判断する」合図になる。
+
+**なぜ門を固定しなかったか**: 本 ADR 決定1 の核心は「**期待値を1つも焼き込まず、毎回
+Hugging Face の*その瞬間*の内容を期待値にする**」ことである。門の tree URL を固定した
+revision に差し替えると、この門は「repo の*今*」ではなく「固定した版の*今*（普段は
+同じ）」としか照合しなくなり、**上流 `main` のドリフトを検知する能力そのものを失う**
+——それは本 ADR が最初に建てた番犬の役目と矛盾する。⟹ **番犬は `main` を見続け、
+使う側だけを固定する**という非対称な形にした。
+
+### sha の出所（【実測】）
+
+- **取得元**: `GET https://huggingface.co/api/models/sirasagi62/ruri-v3-30m-ONNX`
+- **取得日時**: 2026-09-24T03:21:02Z
+- **値**: `sha` = `cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0`（`lastModified` =
+  `2025-10-09T06:35:18.000Z`）
+- **tree の突き合わせ**【実測、同日】: `GET .../tree/main?recursive=1&expand=1` と
+  `GET .../tree/cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0?recursive=1&expand=1` を両方引き、
+  各エントリの `path`/`type`/`oid`/`lfs.oid`（この門が実際に読むフィールドのみ）を
+  比較した——**17件全件で完全一致**。差分はHFのセキュリティスキャン状態
+  （`securityFileStatus`。この門は読まない）のみだった。⟹ **固定時点で `main` と
+  固定 revision は同じ中身であることを確認済み。**
+
+### 実装
+
+1. **宣言**: `scripts/local-embedding-pinned-revision.json`（`sha`・`capturedAt`・
+   `capturedFrom`・`note` を持つ）。⛔ **`@mnemora/local-embedding` の公開 API には
+   足していない**——`DEFAULT_LOCAL_EMBEDDING_REVISION` のような公開 export は作らない
+   という決定である（`packages/local-embedding` の公開面は1バイトも触っていない。
+   `scripts/check-public-api-surface.mjs` の差分は6パッケージとも0——PR 本文に記録）。
+2. **キャッシュ鍵**（`scripts/print-local-embedding-cache-key.mjs`）: 宣言から
+   `repo`/`dtype`/固定 `revision` を読んで鍵を組み立てる。**もう Hugging Face に
+   問い合わせない**——ADR 0263 追記を参照。
+3. **渡す側**（`examples/chat/src/providers.ts`）: 新しい関数
+   `localEmbeddingPinnedRevision()` が同じ宣言を読み、`local` embedding 分岐の
+   `new LocalEmbeddingProvider({ …, revision })` へ渡す。⛔ **`@mnemora/local-embedding`
+   自体の既定は変えていない**——`revision` を渡さない呼び出しは、いままで通り
+   transformers.js の既定 `"main"` のままである（Issue #597 の「先に決めるべきこと」の
+   うち「既定値をどうするか」は、PR #664 が既に「既定値は変えない」と決めている。
+   この PR はそれを変えていない）。
+4. **門**（`scripts/check-local-embedding-fingerprint.mjs`）: **コードは変えていない**
+   （tree URL は `tree/main` のまま）。赤くなったときのメッセージにだけ、「固定した
+   revision の宣言を更新することを検討せよ」という案内を足した。
+   ⚠ **この4番は誤りを含んでいた——追記5（下）を見ること。**
+   CI に実際に流した結果、「コードは変えていない」は「照合対象（tree URL）は変えて
+   いない」の意味では正しいが、「この門は固定した revision の宣言を一切読まない」は
+   誤りだった——手元のファイルを tree のパスへ対応づける部分（キャッシュの置き場所の
+   解釈）を直す必要があった。
+
+### 歯と変異試験
+
+- **固定した歯**: `scripts/__tests__/local-embedding-cache-key.test.mjs` に、CLI の出力が
+  宣言（`scripts/local-embedding-pinned-revision.json`）の `sha` と一致することを、
+  テスト自身が独立に `JSON.parse` した値と突き合わせて確かめる歯。
+  `examples/chat/src/__tests__/providers.test.ts` に、`localEmbeddingPinnedRevision()` が
+  同じ宣言と一致することを確かめる歯、および `buildEmbedding` の `local` 分岐が
+  `localEmbeddingPinnedRevision()` の戻り値を実際に渡している（ハードコードしていない）
+  ことをソーステキストで確かめる歯。既存の `check-local-embedding-fingerprint-cli.test.mjs`
+  の「問い合わせは2段になる」歯（`tree/main` を literal で assert する）に、この決定の
+  契約であることを示す注記を足した。
+- **変異試験**（`cp` で退避・復元。`git checkout` は使っていない。3本とも、戻した後に
+  元のテストが緑に戻ることまで確認した）:
+  1. `examples/chat/src/providers.ts` の `local` 分岐で `revision` をハードコードした
+     literal に差し替える ⟹ 新設した「ハードコードしていない」歯が赤になった。
+  2. `scripts/print-local-embedding-cache-key.mjs` を、この変更前の実装（HF の `main` の
+     sha を毎回取りに行く形。`git show HEAD:...` で取得）に戻す ⟹ 5本が赤になった
+     （`--api-base` が既知の引数に戻ること自体を含む）。
+  3. `scripts/check-local-embedding-fingerprint.mjs` の tree URL を `main` から固定した
+     revision へ差し替える ⟹ 既存の「問い合わせは2段になる」歯が赤になった。
+
+### 確かめていないこと
+
+- **本番の CI で、キャッシュ鍵が実際に変わって温かいキャッシュを外すところは見ていない。**
+  この PR のマージ後の最初の run が最初の実測になる——初回はキャッシュを取り直す
+  （PR 本文に警告として明記）。
+- **固定した sha が、将来 HF 側で削除・改名された場合の挙動は変えていない。**
+  transformers.js が revision 指定で 404 を返した場合の挙動（Issue #597 本文が
+  最初から「確かめていないこと」として挙げていたもの）は、この PR でも確かめていない。
+
+### 未計上であることの明記（追記4 の分）
+
+**`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** 足したのは `scripts/` の
+新規ファイル1本（JSON）・既存 `scripts/`2本の内部実装・`examples/chat/src/providers.ts`・
+`.github/workflows/ci.yml` のコメント/ステップ名だけで、`packages/` には1バイトも
+触れていない（公開 API 表面の門の差分は0——上記）。**要否は判断者に委ねる。**
+
+## 追記5 (2026-09-24、Issue #597 案(a)。CI run 35953212055 で赤くなった): キャッシュの置き場所の解釈を直した
+
+> **⚠ このコメントは、自動化された担い手（クローンのマネージャーのセッション）が書いた。**
+> **⛔ オーナー本人が決めたのではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **⚠ 状態欄も本文も書き換えていない**（追記1〜追記4 と同じ扱い）。
+
+### 何が起きたか（【実測】）
+
+追記4 をマージした PR（#678）の CI で、`examples/chat (本物の Postgres + pgvector、擬似
+provider)` ジョブが赤くなった（run `35953212055`、head `0fc1efd`）。門の出力（逐語）:
+
+```
+不一致: 一致 4 本 / hash 食い違い 0 本 / 素性不明 4 本。
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/config.json
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/tokenizer.json
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/tokenizer_config.json
+  素性不明（HF の tree に無い）: cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0/onnx/model_quantized.onnx
+```
+
+### なぜ起きたか（【実測】、手元で再現・特定した）
+
+`@huggingface/transformers`（`node_modules/@huggingface/transformers/src/utils/hub.js`
+の `buildResourcePaths`）は、`FileCache` のキャッシュキーをこう組み立てる（逐語）:
+
+```js
+const proposedCacheKey =
+  cache instanceof FileCache
+    ? revision === 'main'
+      ? requestURL
+      : pathJoin(path_or_repo_id, revision, filename)
+    : remoteURL;
+```
+
+⟹ **`revision` が `"main"` 以外だと、ファイルは `<repo>/<revision>/<filename>` という
+revision 名のサブディレクトリに置かれる。** revision が既定の `"main"` のときだけ
+`<repo>/<filename>` というフラットな配置になる。
+
+**手元で実際に確かめた**（`LocalEmbeddingProvider` に revision を渡す/渡さないで、
+それぞれ一時 `cacheDir` へ本物のモデル一式を落とし、`find` で比較した）:
+
+```
+revision 無し: <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/config.json
+              <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/onnx/model_quantized.onnx
+              ...
+revision 在り: <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/cdf9391f.../config.json
+              <cacheDir>/sirasagi62/ruri-v3-30m-ONNX/cdf9391f.../onnx/model_quantized.onnx
+              ...
+```
+
+**CI のログの「素性不明」のパスと完全に一致した。** さらに、この門をこの2つの
+キャッシュディレクトリそれぞれに対して手元で走らせ、CI と同じ「不一致」（revision 在り
+側）・同じ「一致」（revision 無し側）を再現した。
+
+⭐ **CI では「一致4本／素性不明4本」だった理由**: `example-chat` ジョブは
+`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` を、revision を渡さない
+`examples/chat/src/embedding-fingerprint.ts`（`embedding-fingerprint` サブコマンド）と、
+Issue #597 で revision を渡すようになった `examples/chat/src/providers.ts`
+（`test:db` が使う）とで**共有している**。⟹ 同じキャッシュディレクトリに、フラットな
+配置（4本、main の tree と一致）と revision サブディレクトリの配置（4本、パスが
+違うので「素性不明」）が同居していた。
+
+### 直したこと —— 対応づけ（キャッシュの置き場所の解釈）だけを直した。照合の意味は変えていない
+
+**⛔ この門が「何と照合するか」（`main` の tree）は変えていない。** 変えたのは
+「手元のどのファイルが、tree のどのパスに対応するか」という解釈だけである
+（クローンの決定どおり）。
+
+- `scripts/check-local-embedding-fingerprint-lib.mjs` に純関数 `normalizeActualPath(relPath,
+  pinnedRevision)` を追加した。`pinnedRevision` の名前のサブディレクトリで relPath が
+  始まっていれば、そのプレフィックスを剥がす。`pinnedRevision` が無い（宣言が読めない）
+  場合は何もしない——**この正規化は追加のフォールバックであり、無くても
+  （revision=main のフラットな配置しか扱わない、この変更より前の挙動のまま）動く。**
+- `scripts/check-local-embedding-fingerprint.mjs` に `readPinnedRevisionForCacheLayout()`
+  を足した。**`scripts/local-embedding-pinned-revision.json`（唯一の宣言）を読む——
+  ただし「キャッシュの置き場所の解釈にのみ使う」**。`collectActualFiles` がこれを
+  受け取り、各ファイルの相対パスを正規化してから `expectedByPath` と突き合わせる。
+  CLI の標準出力に、読んだ値（または読めなかった旨）を必ず印字する
+  （黙って解釈を変えない）。
+- フラット配置と revision サブディレクトリ配置が同じキャッシュディレクトリに同居する
+  ケース（CI の実際の形）も扱う——両方が正規化後に同じ論理パスへ写れば、両方とも
+  `matched` に数えられる（重複を「不一致」にはしない）。
+
+### もう1箇所——`examples/chat/src/embedding-fingerprint.ts` も revision を渡していなかった
+
+**クローンからの指摘で発覚**: 上の「同居」は、この門の直し方（キャッシュの置き場所の
+解釈）だけでは対症療法だった。**根本原因は、`examples/chat` 側に `LocalEmbeddingProvider`
+を作る箇所が2つあり、片方（`providers.ts` の `buildEmbedding`）だけが revision を
+渡し、もう片方（`embedding-fingerprint.ts` の `runEmbeddingFingerprint`。Issue #565 の
+固定入力測定が使う）が渡していなかったことである。** `example-chat` ジョブは
+`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` をこの2箇所で共有しているため、フラット配置
+（`embedding-fingerprint.ts` が `main` で落とす）と revision サブディレクトリ配置
+（`providers.ts` が固定 revision で落とす）が同居していた——これが実際の「同居」の
+発生源である。
+
+⟹ **`embedding-fingerprint.ts` にも `localEmbeddingPinnedRevision()` を渡した**
+（クローンの決定「使う側はすべて固定する」の対象に、この経路も含まれる）。
+
+**grep で全数を確認した**（テストを除く `.ts`/`.mjs`/`.js` から
+`new LocalEmbeddingProvider(` を検索）: 実物の呼び出しは
+`examples/chat/src/providers.ts` と `examples/chat/src/embedding-fingerprint.ts` の
+**ちょうど2箇所**であり、両方とも固定 revision を渡すようになった。この事実を固定する
+歯として `examples/chat/src/__tests__/local-embedding-revision-wiring.test.ts` を
+新設した——特定のファイル名を決め打ちせず、`examples/chat/src` 直下の `.ts` を
+機械的に全部走査して `new LocalEmbeddingProvider(` の呼び出しを拾い、
+（1）呼び出しがちょうど2箇所であること（3つ目が増えたら要更新という陽性対照）、
+（2）すべてが `revision: localEmbeddingPinnedRevision()` を渡していること、の両方を
+assert する。変異試験（`cp` で退避・復元）: `embedding-fingerprint.ts` 側だけ
+revision を外す ⟹ 新設した歯が赤になった。戻すと緑に戻ることを確認した。
+
+⟹ **CI では、もうこの「同居」は起きなくなる。** `example-chat` ジョブの2つの
+呼び出し経路が、どちらも同じ固定 revision で重みを落とすため、キャッシュディレクトリの
+中身は revision サブディレクトリ配置だけになる（フラット配置は、旧いキャッシュが
+残っている場合にだけ現れうる）。
+
+⛔ **それでも、門の「フラットと revision サブディレクトリの同居」を扱う歯・正規化は
+残す。** 理由: (1) 旧いキャッシュ（この修正より前に作られたもの）が `actions/cache`
+に残っている間の後方互換のため。(2) 手元で誰かが `revision` を渡さずに
+`LocalEmbeddingProvider` を直接使い、同じ `cacheDir` を指す場合にも通用させるため。
+——**キャッシュ鍵（ADR 0263）が変わるので、この修正のマージ後の最初の run では
+どのみち温かいキャッシュを失う**（新しいキャッシュ鍵の下には、両方とも revision
+サブディレクトリ配置のファイルしか入らない）。
+
+⭐ **[Issue #565](https://github.com/takecchi/mnemora/issues/565) の測定（固定入力に
+対する `embed()` 出力の sha256・次元数・lscpu）の値が、この修正で「固定 revision の
+重みに対する出力」になる。** 直す前は `main` の重みに対する出力だった。sha が同じ
+（固定した時点で `main` と内容が一致することを確認済み——上記「sha の出所」参照）なので
+**出力される値そのものは変わらないはずである**が、`main` が将来動いても、この測定は
+追随せず固定した版のままになる、という点は変わる。
+
+### 訂正: 追記4「4. 門」は「この門は revision を読まない」と書いたが、それは誤りだった
+
+追記4 は「⛔ この門自身が固定した revision を読んだり、自動で更新したりはしない」と
+書いた。**この文は誤りだった**——正しくは「この門は、固定した revision の宣言を
+**キャッシュの置き場所の解釈にのみ**読む。**照合対象（tree URL）は今も `main` のまま**
+であり、そこは変えていない」である。「読むか読まないか」ではなく「**何のために読むか**」
+が本 ADR の決定1（番犬の役目）を守る境界線だった。
+
+### 歯と変異試験
+
+- `scripts/__tests__/check-local-embedding-fingerprint-lib.test.mjs` に
+  `normalizeActualPath` の歯5本（プレフィックスを剥がす／別 revision は剥がさない／
+  前方一致だけでは剥がさない／pinnedRevision が無ければ何もしない／フラット配置は
+  そのまま）を追加。
+- `scripts/__tests__/check-local-embedding-fingerprint-cli.test.mjs` に、
+  revision サブディレクトリ配置での一致・フラット配置との同居・別 revision での
+  不一致・宣言の印字を確かめる歯4本を追加（`setup.files` を使わず、`f.cacheDir` へ
+  直接ネストしたファイルを書く——HF の tree（模擬）の `path` はプレフィックス無しの
+  ままにして、「照合対象は変えていない」ことを歯自体でも固定した）。
+- **変異試験**（`cp` で退避・復元。`git checkout` は不使用。戻した後に元のテストが
+  緑に戻ることまで確認した）:
+  1. `normalizeActualPath` を no-op に変異させる ⟹ 新設した歯3本が赤になった。
+  2. `collectActualFiles` の呼び出しで `pinnedRevision` の代わりに `null` を渡す
+     （配線忘れの再現） ⟹ 新設したCLI歯2本が赤になった。
+- **手元で本物のモデルを使って再現・確認したこと**（ネットワーク到達可能な環境で実施。
+  4ファイル計42MB を2回落とした）:
+  1. revision 無し／revision 在りで、それぞれ別の一時 `cacheDir` へ実際に落とし、
+     配置の違いを `find` で確認した（上記）。
+  2. 直す前のコードをそれぞれの `cacheDir` に対して走らせ、revision 無し側は一致・
+     revision 在り側は CI と同じ「素性不明」で不一致になることを確認した。
+  3. 直した後のコードで、両方とも一致することを確認した。
+  4. 両方の `cacheDir` の中身を1つのディレクトリへ合成し（CI の実際の共有キャッシュを
+     模す）、直した後のコードで「一致8本」（4+4が正規化後に同じ4つの論理パスへ
+     写り、それぞれ2本ずつ数えられる）になることを確認した。
+
+### 確かめていないこと
+
+- **`@huggingface/transformers` の将来のバージョンで、このキャッシュキーの組み立て方
+  （`buildResourcePaths`）が変わらないかは確かめていない。** 変われば、この正規化も
+  また合わせて直す必要がある。
+- **revision サブディレクトリの名前が、常に渡した `revision` 文字列そのままになるか**
+  （URL エンコードなどの変換が入らないか）は、今回試した1つの sha 形式の revision
+  でしか確認していない。
+
+### 未計上であることの明記（追記5 の分）
+
+**`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** `packages/` には1バイトも
+触れていない。**要否は判断者に委ねる。**

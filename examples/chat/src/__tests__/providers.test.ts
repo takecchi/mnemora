@@ -1,4 +1,6 @@
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { LocalEmbeddingProvider } from "@mnemora/local-embedding";
@@ -19,6 +21,7 @@ import {
   decideProviderSource,
   describeProviderSourceReason,
   localEmbeddingCacheDirEnv,
+  localEmbeddingPinnedRevision,
   selectEmbeddingMode,
   selectLLMMode,
   selectProviderMode,
@@ -475,6 +478,93 @@ describe("createProviders — local モード（Issue #109、@mnemora/local-embe
 
   it('MNEMORA_LLM="local" は createProviders でも例外になる', () => {
     expect(() => createProviders({ MNEMORA_LLM: "local" })).toThrow(/MNEMORA_LLM/);
+  });
+});
+
+/**
+ * `localEmbeddingPinnedRevision`（Issue #597 案(a)）。
+ *
+ * ⭐ **`scripts/print-local-embedding-cache-key.mjs` と、同じ唯一の宣言
+ * （`scripts/local-embedding-pinned-revision.json`）を見ていることを、両者から
+ * それぞれ独立に読んだ値と突き合わせて確かめる**——このテストファイル自身が
+ * `JSON.parse` で直接読む「独立した証人」を用意し、そこと突き合わせる
+ * （`readDeclared`/`declaredIndependently` と同じ二重確認の作法）。
+ *
+ * ⚠ **これが崩れる歯（変異試験で確かめたこと）**は PR 本文に記録した:
+ * - `localEmbeddingPinnedRevision` がこの宣言と違う値を返す ⟹ 下の
+ *   「examples 側が読む revision は、宣言と一致する」が赤くなる。
+ * - 宣言ファイルが読めない・JSON が壊れている・`sha` が無い ⟹
+ *   「宣言が読めなければ例外を投げる」系の3本が赤くなる。
+ */
+describe("localEmbeddingPinnedRevision — 固定した Hugging Face revision（Issue #597 案(a)）", () => {
+  function pinnedRevisionIndependently(): string {
+    const url = new URL(
+      "../../../../scripts/local-embedding-pinned-revision.json",
+      import.meta.url,
+    );
+    const parsed = JSON.parse(readFileSync(fileURLToPath(url), "utf-8")) as { sha?: unknown };
+    if (typeof parsed.sha !== "string" || parsed.sha.length === 0) {
+      throw new Error(`${fileURLToPath(url)} に sha が無い`);
+    }
+    return parsed.sha;
+  }
+
+  it("examples 側が読む revision は、宣言（scripts/local-embedding-pinned-revision.json）と一致する", () => {
+    expect(localEmbeddingPinnedRevision()).toBe(pinnedRevisionIndependently());
+  });
+
+  it("40桁 hex（git の commit sha の形）である", () => {
+    expect(localEmbeddingPinnedRevision()).toMatch(/^[0-9a-f]{40}$/);
+  });
+
+  it("宣言ファイルが無ければ例外を投げる（黙って undefined へ戻さない）", () => {
+    expect(() =>
+      localEmbeddingPinnedRevision("/nonexistent/local-embedding-pinned-revision.json"),
+    ).toThrow(/読めなかった/);
+  });
+
+  it("JSON が壊れていれば例外を投げる", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pinned-revision-"));
+    const path = join(dir, "broken.json");
+    writeFileSync(path, "{ not valid json");
+    try {
+      expect(() => localEmbeddingPinnedRevision(path)).toThrow(/JSON が壊れている/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sha が無ければ例外を投げる", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pinned-revision-"));
+    const path = join(dir, "no-sha.json");
+    writeFileSync(path, JSON.stringify({ notSha: "x" }));
+    try {
+      expect(() => localEmbeddingPinnedRevision(path)).toThrow(/sha（文字列）が無い/);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('createProviders({ MNEMORA_EMBEDDING: "local" }) の LocalEmbeddingProvider は例外にならない（revision が渡っても既定の repo/dtype のままなら通る）', () => {
+    expect(() => createProviders({ MNEMORA_EMBEDDING: "local" })).not.toThrow();
+  });
+
+  /**
+   * 🔴 **`LocalEmbeddingProvider` の `revision` は private（`#spec`）なので、構築結果から
+   * 直接は読めない。** ⟹ 「`buildEmbedding` の `local` 分岐が `localEmbeddingPinnedRevision()`
+   * の戻り値を実際に渡しているか」を、上の「examples 側が読む revision は宣言と一致する」
+   * （`localEmbeddingPinnedRevision()` 単体の歯）だけでは検出できない——
+   * `buildEmbedding` 側がリテラルをハードコードしても、あちらは赤くならない。
+   * ⟹ `readProvidersSource`（下で定義済み。anthropic 非配線の歯と同じ手法）で
+   * ソーステキストを直接見て、ハードコードしていないことを確かめる。
+   */
+  it("buildEmbedding の local 分岐は、revision に localEmbeddingPinnedRevision() の戻り値を渡している（ハードコードしていない）", () => {
+    const source = readProvidersSource();
+    const localBranchStart = source.indexOf('if (embeddingMode === "local") {');
+    expect(localBranchStart).toBeGreaterThan(-1);
+    const localBranchEnd = source.indexOf("\n    }", localBranchStart);
+    const localBranch = source.slice(localBranchStart, localBranchEnd);
+    expect(localBranch).toContain("revision: localEmbeddingPinnedRevision()");
   });
 });
 

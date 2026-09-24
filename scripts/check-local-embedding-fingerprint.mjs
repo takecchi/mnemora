@@ -20,6 +20,25 @@
  * にある——ファイル I/O・ネットワークを持たない純関数の側であり、ここ（CLI）は
  * それを呼ぶだけの薄い層である（`scripts/ci-green-check.mjs` と同じ分担）。
  *
+ * ## ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記4・追記5）: この門は `main` を見続ける
+ *
+ * `scripts/print-local-embedding-cache-key.mjs`（CI のキャッシュ鍵）と
+ * `examples/chat/src/providers.ts`（`local` embedding が使う revision）は、
+ * `scripts/local-embedding-pinned-revision.json` に固定した revision（採用時の sha）を
+ * 使うようになった——**この門が「何と照合するか」はそちらへは切り替えない。**
+ *
+ * ⟹ **この門は引き続き `main`（tree URL の `main` は変えていない）を照合する番犬として
+ * 残る。** 上流の `main` が動いて、固定した revision の中身と食い違えば、この門が
+ * 赤くなる——それが「固定した revision を更新するかどうか、人間が判断する」合図になる。
+ *
+ * ⚠ **追記5（CI run 35953212055 で発覚）**: **この門は固定した revision の宣言を読む
+ * ようになった**——ただし「何と照合するか」のためではなく、「手元のファイルを tree の
+ * パス空間へどう対応づけるか」（キャッシュの置き場所の解釈）のためだけである。
+ * `@huggingface/transformers` は revision を `"main"` 以外で渡すと
+ * `<repo>/<revision>/<filename>` というサブディレクトリにファイルを置くため、
+ * 正規化しないと実在するファイルが「素性不明」になって不一致になる（実際に CI で
+ * そう壊れた）。`collectActualFiles`/`normalizeActualPath` の docstring 参照。
+ *
  * ## 判定表（この CLI はゲートである）
  *
  * ⭐ **問いは2つに割れている**（Issue #586 / ADR 0253 追記1）——
@@ -132,6 +151,7 @@ import {
   expectedHashOfTreeEntry,
   formatFingerprintReport,
   gitBlobSha1Hex,
+  normalizeActualPath,
 } from "./check-local-embedding-fingerprint-lib.mjs";
 
 const RETRY_ATTEMPTS = 3;
@@ -180,6 +200,42 @@ function readDeclaredRepo() {
   }
   const matched = /export const DEFAULT_LOCAL_EMBEDDING_REPO\s*=\s*"([^"]+)"/.exec(source);
   return matched ? matched[1] : null;
+}
+
+/**
+ * 固定した revision（`scripts/local-embedding-pinned-revision.json`）を読む。
+ * **キャッシュの置き場所の解釈にのみ使う**（Issue #597 案(a) の追加分、ADR 0253 追記5）。
+ *
+ * 🔴 **これは「何と照合するか」を変えない。** この門はいまも HF の `main` の tree と
+ * 照合し続ける——ここで読んだ値は、`collectActualFiles` が手元のファイルを tree の
+ * パス空間へ正規化する（`normalizeActualPath`）ためだけに使う。理由は
+ * `@huggingface/transformers` の `FileCache` が、revision を `"main"` 以外で渡すと
+ * `<repo>/<revision>/<filename>` というサブディレクトリにファイルを置くため
+ * （実測。`normalizeActualPath` の docstring 参照）。
+ *
+ * ⛔ **読めなくても赤にしない。** `null` を返し、呼び出し側は「正規化しない」
+ * （＝この変更より前の、revision=main のフラットな配置だけを扱う挙動）として扱う。
+ *
+ * @returns {string | null}
+ */
+function readPinnedRevisionForCacheLayout() {
+  const declarationPath = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "local-embedding-pinned-revision.json",
+  );
+  let source;
+  try {
+    source = readFileSync(declarationPath, "utf8");
+  } catch {
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = JSON.parse(source);
+  } catch {
+    return null;
+  }
+  return typeof parsed?.sha === "string" && parsed.sha.length > 0 ? parsed.sha : null;
 }
 
 /**
@@ -367,11 +423,18 @@ function formatSkippedTreeEntries(skipped) {
  * 区別できなくなる——読めなかった path を `unreadable` として返し、呼び出し側
  * （`main()`）が判定表どおり赤（exit 1）にする。
  *
+ * ⭐ **`pinnedRevision` が渡っていれば、相対パスを `normalizeActualPath` で正規化する**
+ * （Issue #597 案(a) の追加分、ADR 0253 追記5）。`@huggingface/transformers` が
+ * revision 指定時に `<repo>/<revision>/<filename>` というサブディレクトリへ書くため、
+ * 正規化しないと手元に実在するファイルが「素性不明」になる（CI run 35953212055 で
+ * 実際に踏んだ）。⛔ **これは「照合対象」を変えない**——tree は今も `main` のもの。
+ *
  * @param {string} repoDir
  * @param {Map<string, { algorithm: string, hex: string }>} expectedByPath
+ * @param {string | null} pinnedRevision
  * @returns {{ actual: { path: string, algorithm: string, hex: string }[], unreadable: { path: string, reason: string }[] }}
  */
-function collectActualFiles(repoDir, expectedByPath) {
+function collectActualFiles(repoDir, expectedByPath, pinnedRevision) {
   if (!existsSync(repoDir)) {
     return { actual: [], unreadable: [] };
   }
@@ -383,7 +446,8 @@ function collectActualFiles(repoDir, expectedByPath) {
     const parentPath = dirent.parentPath ?? dirent.path;
     const absPath = join(parentPath, dirent.name);
     // HF の path は常に `/` 区切り——Windows でも一致させるため sep を置換する。
-    const relPath = relative(repoDir, absPath).split(sep).join("/");
+    const rawRelPath = relative(repoDir, absPath).split(sep).join("/");
+    const relPath = normalizeActualPath(rawRelPath, pinnedRevision);
     const expected = expectedByPath.get(relPath);
     // ⛔ 拡張子・ファイル名では分岐しない——HF の応答（`expected.algorithm`）だけに従う。
     const algorithm = expected?.algorithm ?? "git-blob-sha1";
@@ -477,10 +541,36 @@ async function main() {
     console.error(line);
   }
   const repoDir = join(cacheDir, repo);
-  const { actual, unreadable } = collectActualFiles(repoDir, expectedByPath);
+  // ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記5）: キャッシュの置き場所の解釈
+  // にだけ、固定した revision の宣言を読む。⛔ 「何と照合するか」は変えない
+  // （tree は今も main のもの）——理由は collectActualFiles の docstring 参照。
+  const pinnedRevision = readPinnedRevisionForCacheLayout();
+  console.log(
+    pinnedRevision !== null
+      ? `固定した revision の宣言（キャッシュの置き場所の解釈にのみ使う。照合対象は main のまま）: ${pinnedRevision}`
+      : "固定した revision の宣言を読めなかった（キャッシュの置き場所は revision=main のフラットな配置として解釈する）",
+  );
+  const { actual, unreadable } = collectActualFiles(repoDir, expectedByPath, pinnedRevision);
 
   const result = compareFingerprints({ actual, expectedByPath });
   console.log(formatFingerprintReport(result));
+
+  // ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記4・追記5）: この門はいまも `main`
+  // を照合する番犬のままであり、**照合対象（tree の URL）は固定した宣言へ切り替えて
+  // いない**。固定した宣言（scripts/local-embedding-pinned-revision.json）は
+  // `collectActualFiles` の「キャッシュの置き場所の解釈」にのみ使う（上を参照）。
+  // ⟹ ここが不一致になったということは、宣言された repo の `main` が固定した時点から
+  // 動いた（可能性が高い）——固定revisionを更新するかどうかの判断は人間に委ねる。
+  // ⛔ 判定（verdict/exit code）はこのメッセージでは変えない。
+  if (result.verdict !== "match") {
+    console.error(
+      "⚠ この門は Hugging Face の `main` の tree と照合し続けている" +
+        "（固定した revision の宣言はキャッシュの置き場所の解釈にのみ使い、照合対象は変えていない）。" +
+        "不一致が「上流の main が動いたこと」によるものなら、CI が使う固定 revision の宣言" +
+        "（scripts/local-embedding-pinned-revision.json、Issue #597 案(a)）を新しい sha に" +
+        "更新することを検討すること。",
+    );
+  }
 
   // 🔴 判定表: 手元のファイルが読めない ⟹ 赤。`compareFingerprints` は読めた分だけを
   // 見て match を返しうるが、読めなかったファイルがある時点で「全ファイル一致」は
