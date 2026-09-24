@@ -10,6 +10,7 @@ import { embeddingCassetteKey, llmCassetteKey } from "@mnemora/testkit";
 import { describe, expect, it } from "vitest";
 import {
   ANSWER_CASSETTE_PATH,
+  ANSWER_TIME_WEIGHTING_CASSETTE_PATH,
   COMPARE_CASSETTE_PATH,
   cassetteExists,
   loadCassette,
@@ -21,6 +22,9 @@ import { OPENAI_LLM_MODEL } from "../providers.js";
 import { DEFAULT_HAYSTACK_SIZE, PROBES, buildProbeSetConversation } from "../probe-set.js";
 import { DEFAULT_COMPARE_SEQUENCE } from "../compare.js";
 import { buildConversation } from "../scenario.js";
+import { TIME_WEIGHTING_CASE_SET_DEV } from "../time-weighting-case-set.dev.js";
+import { TIME_WEIGHTING_CASE_SET_EVAL } from "../time-weighting-case-set.eval.js";
+import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "../time-weighting-case-set.eval-undated.js";
 
 describe("記録した応答のカセットと probe set の対応（ADR 0051）", () => {
   it("カセットがリポジトリに存在する", () => {
@@ -153,5 +157,62 @@ describe("`answer` のカセットと評価ケース集合の対応（Issue #498
     // 回答生成24回 + judge 24回 + 抽出（会話ターンぶん）。
     const answerAndJudgeCalls = cases.length * 4;
     expect(entries.length).toBeGreaterThan(answerAndJudgeCalls);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// answer-time-weighting のカセット（Issue #690、ADR 0299、段3b）
+//
+// `answer` と違い、会話も抽出も無い——記憶を直接書くため、埋め込みの対象は
+// (1) 各ケースの質問文と (2) 各ケースが直接書く記憶の content の2種類だけである。
+// ---------------------------------------------------------------------------
+
+describe("`answer-time-weighting` のカセットとケース集合の対応（Issue #690、ADR 0299）", () => {
+  const cases = [
+    ...TIME_WEIGHTING_CASE_SET_DEV,
+    ...TIME_WEIGHTING_CASE_SET_EVAL,
+    ...TIME_WEIGHTING_CASE_SET_EVAL_UNDATED,
+  ];
+
+  it("カセットがリポジトリに存在し、形式検査に通る", () => {
+    expect(cassetteExists(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).toBe(true);
+    expect(() => loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).not.toThrow();
+  });
+
+  it("記録元は、いま使っている埋め込み空間と同じである", () => {
+    expect(loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).embedding.space).toEqual({
+      provider: "openai",
+      model: "text-embedding-3-small",
+      dimensions: 256,
+    });
+  });
+
+  it("記録元の LLM は、いま使っているモデルと同じである", () => {
+    expect(loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).llm.model).toBe(OPENAI_LLM_MODEL);
+  });
+
+  it("すべてのケースの質問文が埋め込みとして記録されている（ケースを足したら録り直す）", () => {
+    const { entries } = loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).embedding;
+    const missing = cases
+      .filter((c) => entries[embeddingCassetteKey(c.question)] === undefined)
+      .map((c) => c.id);
+    expect(missing).toEqual([]);
+  });
+
+  it("すべてのケースが直接書く記憶の content が埋め込みとして記録されている（記憶を足したら録り直す）", () => {
+    // seedTimeWeightingMemories は seed.content をそのまま embed する
+    // （time-weighting-bench.ts の buildTimeWeightingNewMemory / drainEmbedTicks）。
+    const { entries } = loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).embedding;
+    const missing = cases.flatMap((c) =>
+      c.memories
+        .filter((m) => entries[embeddingCassetteKey(m.content)] === undefined)
+        .map((m) => `${c.id}/${m.localId}`),
+    );
+    expect(missing).toEqual([]);
+  });
+
+  it("LLM の記録が1件以上ある（record:answer-time-weighting を一度も実行していない空カセットではない）", () => {
+    const entries = Object.keys(loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).llm.entries);
+    expect(entries.length).toBeGreaterThan(0);
   });
 });
