@@ -9,6 +9,7 @@ import { embeddingSpaceTableName } from "../embedding-space-table.js";
 import {
   captureClientQuery,
   closeTestClient,
+  explainCaptured,
   getTestClient,
   resetTestDatabase,
   TEST_EMBEDDING_SPACE,
@@ -138,13 +139,9 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       () => runtime.recall(ctx, { vector: [0.5, 0.5, 0.5], limit: 10 }),
     );
 
-    const explainResult = await pool.query(
-      `EXPLAIN (FORMAT TEXT) ${captured.text}`,
-      captured.params,
-    );
-    const plan = explainResult.rows
-      .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
-      .join("\n");
+    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
+    // （test-db.ts の explainCaptured の doc コメント参照）。
+    const plan = await explainCaptured(pool, captured);
     // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
     //  測った版: **分からない**（この歯を足した PR #5 の本文は「PostgreSQL 18.6 + pgvector 0.8.6
     //    *相当*の環境」と書くのみで、この assert を通した CI run 番号も確定した版も記載が無い）。

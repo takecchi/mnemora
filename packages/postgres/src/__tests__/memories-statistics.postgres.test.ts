@@ -13,7 +13,12 @@ import {
   INITIAL_ANALYZE_THRESHOLD,
   resetMemoriesWriteCounterForTesting,
 } from "../memories-statistics.js";
-import { captureClientQuery, requireDatabaseUrl, seededRandom } from "./test-db.js";
+import {
+  captureClientQuery,
+  explainCaptured,
+  requireDatabaseUrl,
+  seededRandom,
+} from "./test-db.js";
 import { dropTempDatabase } from "./temp-database.js";
 
 /**
@@ -147,13 +152,9 @@ describe("PostgresMemoryStore.createMemory と memories の ANALYZE 自動発火
           filter: { tenantId: TENANT },
         }),
     );
-    const explainResult = await pool.query(
-      `EXPLAIN (FORMAT TEXT) ${captured.text}`,
-      captured.params,
-    );
-    const plan = explainResult.rows
-      .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
-      .join("\n");
+    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
+    // （test-db.ts の explainCaptured の doc コメント参照）。
+    const plan = await explainCaptured(pool, captured);
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);
   }, 180_000);
@@ -308,13 +309,9 @@ describe("PostgresMemoryStore.supersedeWithNewMemories と memories の ANALYZE 
           filter: { tenantId: TENANT },
         }),
     );
-    const explainResult = await pool.query(
-      `EXPLAIN (FORMAT TEXT) ${captured.text}`,
-      captured.params,
-    );
-    const plan = explainResult.rows
-      .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
-      .join("\n");
+    // 本番と同じ transaction の文脈（ADR 0284 の SET LOCAL）で EXPLAIN する
+    // （test-db.ts の explainCaptured の doc コメント参照）。
+    const plan = await explainCaptured(pool, captured);
     expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
     expect(plan).not.toMatch(/Seq Scan/);
   }, 180_000);

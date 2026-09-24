@@ -283,3 +283,47 @@ interface は変えていない。`packages/core/src/index.ts` と `packages/pos
 の export 一覧に差分は無い（`git diff` で確認）。`tsc --declaration` でビルドした
 `packages/postgres/dist/vector-store.d.ts` を変更前後で比較し、シグネチャの差分が
 無いことを確認した（詳細は本 PR の説明を参照）。
+
+---
+
+## 追記（2026-09-24）: 本 ADR が4ファイルへ寄せた `captureClientQuery` は、`SET LOCAL` を持ち帰らず、EXPLAIN が本番と違う文脈でプランを読んでいた
+
+**この節から上は当時の決定・実測の記録のまま書き換えていない。** 以下は事後の訂正である。
+
+**この節から上（「副次的な修正」節）は、`captureClientQuery` が捕まえた SELECT を
+そのまま `pool.query("EXPLAIN (FORMAT TEXT) " + captured.text, captured.params)` で
+EXPLAIN すれば十分だと前提していた。この前提は誤りだった**——`EXPLAIN` はそれ自体が
+独立した1本のクエリであり、`pool.query()` は新しい接続（少なくとも新しいトランザクション）
+の上で発行される。`search()` 本体が使う `SET LOCAL hnsw.iterative_scan = relaxed_order`
+（この ADR の主題そのもの）は `SET LOCAL` である以上、そのトランザクションの外へは
+一切漏れない。⟹ **本 ADR が「本番と同じクエリを EXPLAIN している」つもりで直した
+4ファイル（`vector-search-hnsw.test.ts` / `vector-search-subject.test.ts` /
+`recall.postgres.test.ts` / `memories-statistics.postgres.test.ts`、計5箇所）は、
+実際には `hnsw.iterative_scan = off`（セッション既定値）の文脈でプランを読んでいた。**
+
+マネージャーからの指摘で発覚し、`captureClientQuery` に
+`precedingSetLocalStatements`（捕まえた SELECT と同じ接続・同じトランザクション内で、
+それより前に発行された `SET LOCAL` 文の並び）を持ち帰らせ、新設した
+`explainCaptured(pool, captured)` が専用の接続で `BEGIN` → それを発行順に再生 →
+`EXPLAIN` → `ROLLBACK` する形に直した（`packages/postgres/src/__tests__/test-db.ts`）。
+`SET LOCAL` の値をテスト側にハードコードしていない——`vector-store.ts` の実装が
+`SET LOCAL` をやめる・値を変えるように直っても、この歯は自動的に追従する。
+
+**実測（自前の PostgreSQL 17.11 + pgvector 0.8.0）**:
+
+- 直した `explainCaptured` の中で `SHOW hnsw.iterative_scan` を実行すると `relaxed_order`
+  が返り、再生しない別トランザクションでは既定値 `off` が返ることを、scratch の歯
+  （このコミットには含めていない）で確認した。
+- **変異（`vector-store.ts` から `SET LOCAL` を外す）**: `captureClientQuery` が観測する
+  `precedingSetLocalStatements` は空になり、上の `SHOW` は `off` に変わった
+  （scratch の歯がこれを検出して赤くなることを確認し、`cp` で復元した）。
+- **同じ変異のもとで、直した4ファイル・24 test を実行しても全て green のままだった**
+  ——今のデータ規模・分布では、これら4ファイルが assert しているプラン選択
+  （HNSW を使うか／`idx_memories_by_subject` を使うか）は `hnsw.iterative_scan` の
+  on/off に左右されない。**⟹ 今日の時点では、この修正は「今赤いものを緑にする」もの
+  ではなく、将来の退行（EXPLAIN が読む文脈が本番と静かにずれること）を防ぐためのもの
+  である。**プラン選択そのものが `iterative_scan` に依存する将来のデータ・歯が
+  追加されたときに、初めてこの修正の有無が可視の差を生む。
+
+変更したファイルは `packages/postgres/src/__tests__/test-db.ts`
+（`captureClientQuery` の拡張・`explainCaptured` の新設）と、上に挙げた4ファイル。
