@@ -51,7 +51,15 @@ const TENANT_ID = "context-eval-independent";
 
 // 「文脈なし」ケースで捏造されていないかを確認するための、他ケース由来の固有名詞の
 // ブロックリスト（d4 で使う。d1/d2 は対になる a1/a2 の固有名詞だけを個別に禁止する）。
-const FABRICATION_BLOCKLIST = ["さくら亭", "19時", "19:00", "青葉", "会議室", "レストラン", "ホテル"];
+const FABRICATION_BLOCKLIST = [
+  "さくら亭",
+  "19時",
+  "19:00",
+  "青葉",
+  "会議室",
+  "レストラン",
+  "ホテル",
+];
 
 /** @type {EvalCase[]} */
 export const evalCases = [

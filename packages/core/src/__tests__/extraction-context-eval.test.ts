@@ -91,7 +91,10 @@ describe("Issue #689 independent semantic evaluation: mechanical judgment of the
       // it.fails は「このテストは失敗することを期待する」という明示であり、
       // it.skip のように検査そのものを消すのではない —— 実装が直って判定に
       // 通るようになったら、it.fails 自体が失敗としてテストスイートを赤くする。
-      it.fails(`${evalCase.id} (${evalCase.category}): KNOWN UNMET — ${evalCase.rationale}`, runJudgment);
+      it.fails(
+        `${evalCase.id} (${evalCase.category}): KNOWN UNMET — ${evalCase.rationale}`,
+        runJudgment,
+      );
     } else {
       it(`${evalCase.id} (${evalCase.category}): ${evalCase.rationale}`, runJudgment);
     }
