@@ -591,8 +591,14 @@ export async function runRecall(
   // **チャンネル1本につき trace を1つ積む**（ADR 0084 §6）。
   // ⟹ 既定（ANN 1本）のとき、この配列は ADR 0084 以前と1要素も1バイトも変わらない。
   // 複数チャンネルを走らせたときだけ要素が増え、各要素の detail.channel が出所を名乗る。
+  // ⚠ ADR 0285 / Issue #671: `annStageTrace` に参照を残しておく。この時点では `eligible`
+  // （段5の `aggregate` が要る）がまだ計算できないので detail をここで確定できない
+  // ——段5の後、既存の `ann_unreached` 判定の直後で同じオブジェクトへ1キーだけ追記する
+  // （下の `annWindowHadNoInScopeCandidates` 参照）。push する場所・順序・他のキーは
+  // 1つも変えない。
+  let annStageTrace: StageTrace | undefined;
   if (wantsAnn) {
-    stages.push({
+    annStageTrace = {
       stage: "candidate_generation",
       executed: candidateGenerationExecuted,
       // decayGate（ADR 0153）: ANN は段1の VectorFilter.decayFloorAtAfter へ押し下げる。
@@ -612,7 +618,8 @@ export async function runRecall(
         // ——decayGate と違い語彙側も SQL の WHERE で絞るので "post_filtered" は無い。
         validityGate: validityGateActive ? "pushed_down" : "disabled",
       },
-    });
+    };
+    stages.push(annStageTrace);
   }
 
   // -------------------------------------------------------------------
@@ -1646,6 +1653,52 @@ export async function runRecall(
     annHits.length < eligible
   ) {
     omitted.push({ kind: "ann_unreached", countKind: "unknown" });
+  }
+
+  // -------------------------------------------------------------------
+  // ADR 0285 / Issue #671 / 北極星33行目「知らないことを、知らないと言える。
+  // ——『見つからなかった』と『探していない』を、同じ顔で返さない。」:
+  //
+  // 上の `ann_unreached` は「scope 内にまだ見られていない候補が残っている」という
+  // 1つの条件（`annHits.length < eligible`）で、正常時（窓は満杯だが scope の候補は
+  // 一部拾えている）と全滅時（窓が他 scope の行だけで埋まり、scope 内の候補が1件も
+  // 入らなかった）の両方で同じ形で鳴る（ADR 0193 が意図的に広げた条件——ADR 0285 は
+  // その挙動を1バイトも変えない）。⟹ 「見つからなかった」（真に0件）と「探していない」
+  // （scope の候補を一度も見ていない）が、同じ `ann_unreached` の顔で返ってしまう。
+  //
+  // 公開型の `Omission` union（recall.ts）に `kind` を増やして名乗らせる案（ADR 0285
+  // §2.2 の b-1）は、Issue #541 の判断（union 拡張を破壊的変更として扱うかの線引き）に
+  // 依存するため、ADR 0285 はこの PR の射程外としてオーナーへ送った（見送りであって
+  // 却下ではない）。代わりに、型を変えずに済む `StageTrace.detail`（型無しの診断欄）へ
+  // 1キーだけ足し、ANN が「scope 内の候補を1件も見ていない」ことを補助的に名乗らせる。
+  // 詳細・採らなかった案・引き受けた負債は ADR 0285 参照。
+  //
+  // 条件は `ann_unreached` の前提（candidateGenerationExecuted && kPrime > 0）と揃え、
+  // それに「eligible > 0（scope は空ではない）」と「annHits.length === 0（ANN が
+  // 本当に1件も返さなかった）」を足したもの——`ann_unreached` より狭い。eligible=0
+  // （scope 自体が空）のときは「探していない」ではなく「探す対象が無かった」なので
+  // 対象外。新しい SQL は足さない——`eligible` と `annHits.length` は既存の計算をそのまま使う。
+  //
+  // 🔴 ADR 0285 追記（PR #672 の CI 実測、2026-09-24）: 当初は「キーは常に出す
+  // （true/false）」としていたが、これは ADR 0084 §6 の既存の歯②
+  // 「既定（channels 未指定）は ADR 0084 以前と1バイトも変わらない」
+  // （`packages/core/src/__tests__/recall-channels.test.ts` の `toEqual`）と衝突する
+  // ——既定経路では常に `false` が増えるため、detail の形そのものが変わってしまい、
+  // 「1バイトも変わらない」という既存の決定が破れる。**ADR 0084 の歯②が先にある決定
+  // であり、ADR 0285 側が合わせる。** ⟹ 条件が真のときだけキーを足し、偽のときは
+  // detail に触れない（キー自体を出さない）。既存の歯②は書き換えていない
+  // （書き換えたのはこの ADR 0285 の側）。
+  if (
+    annStageTrace !== undefined &&
+    candidateGenerationExecuted &&
+    kPrime > 0 &&
+    eligible > 0 &&
+    annHits.length === 0
+  ) {
+    annStageTrace.detail = {
+      ...annStageTrace.detail,
+      annWindowHadNoInScopeCandidates: true,
+    };
   }
 
   // -------------------------------------------------------------------
