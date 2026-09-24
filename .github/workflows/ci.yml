@@ -401,7 +401,7 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
-      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
         # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
         # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
         # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
@@ -409,11 +409,14 @@ jobs:
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        # revision は `scripts/local-embedding-pinned-revision.json`
+        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
+        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
         #
-        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
-        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
-        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
-        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
+        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
+        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
+        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -716,7 +719,7 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
-      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
         # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
         # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
         # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
@@ -724,11 +727,14 @@ jobs:
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        # revision は `scripts/local-embedding-pinned-revision.json`
+        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
+        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
         #
-        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
-        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
-        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
-        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
+        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
+        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
+        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -1025,7 +1031,7 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
-      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
         # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
         # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
         # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
@@ -1033,11 +1039,14 @@ jobs:
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        # revision は `scripts/local-embedding-pinned-revision.json`
+        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
+        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
         #
-        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
-        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
-        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
-        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
+        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
+        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
+        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -1161,7 +1170,7 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
-      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
         # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
         # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
         # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
@@ -1169,11 +1178,14 @@ jobs:
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        # revision は `scripts/local-embedding-pinned-revision.json`
+        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
+        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
         #
-        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
-        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
-        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
-        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
+        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
+        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
+        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -1304,7 +1316,7 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
-      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
         # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
         # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
         # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
@@ -1312,11 +1324,14 @@ jobs:
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        # revision は `scripts/local-embedding-pinned-revision.json`
+        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
+        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
         #
-        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
-        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
-        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
-        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
+        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
+        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
+        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 
@@ -1442,7 +1457,7 @@ jobs:
       - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
         run: pnpm --filter @mnemora/postgres run migrate
 
-      - name: "モデルの revision（HF の main の sha）を引いて cache 鍵を決める（Issue #564 / ADR 0263）"
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（Issue #564 / ADR 0263 追記）"
         # 🔴 以前この6箇所は `local-embedding-ruri-v3-30m-q8-v1` という**手で版を振った
         # 固定文字列**で、revision も hash も入っていなかった ⟹ **HF の `main` が動いても、
         # 誰かが `-v1` を手で上げるまで CI は古い重みを配り続けた**（Issue #564）。
@@ -1450,11 +1465,14 @@ jobs:
         # ⛔ **鍵の材料をここに書かない。**repo 名も dtype も、唯一の出所である
         # `packages/local-embedding/src/local-embedding-provider.ts` の宣言から
         # スクリプトが読む（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+        # revision は `scripts/local-embedding-pinned-revision.json`
+        # （Issue #597 案(a)の唯一の宣言）から読む——**この段はもう Hugging Face に
+        # 問い合わせない**（ADR 0263 追記。以前は毎回 HF の `main` の sha を引いていた）。
         #
-        # 🔴 **HF に届かなくてもジョブを落とさない。**この段は6ジョブで走り、うち2つは
-        # required な context である ⟹ 一過性の不調で必須の門を止めない。落ちる先は
-        # **revision を入れる前の鍵そのもの**なので、**HF 障害中の振る舞いは
-        # この変更の前と完全に同じ**になる（`::warning::` は出す。黙って落ちない）。
+        # ⚠ **この宣言が古くなっていないかを見張るのは、この段ではない。**
+        # `check-local-embedding-fingerprint.mjs`（下の「⭐ 門」ステップ）が
+        # 引き続き `main` を照合する番犬として残る——上流の `main` が動いて門が
+        # 赤くなったら、それがこの宣言を更新せよという合図になる（ADR 0253 追記）。
         id: local-embedding-cache-key
         run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
 

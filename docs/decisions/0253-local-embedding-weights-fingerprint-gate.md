@@ -848,3 +848,108 @@ ADR の追記だけで、`packages/` には1バイトも触れていない。**�
 `examples/chat/src/embedding-fingerprint.ts`・`scripts/` の新規ファイル6本・
 `.github/workflows/ci.yml` の3段+1ジョブだけで、`packages/` には1バイトも
 触れていない（⟹ 出荷される公開 API は変わらない）。**要否は判断者に委ねる。**
+
+## 追記4 (2026-09-24、Issue #597 案(a)): 「使う側」だけを固定した。この門は `main` を見続ける番犬のまま残す
+
+> **⚠ このコメントは、自動化された担い手（クローンのマネージャーのセッション）が書いた。**
+> **⛔ オーナー本人が決めたのではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **⚠ 状態欄も本文も書き換えていない**（追記1・追記2・追記3 と同じ扱い）。
+
+### 「採らなかった案 (d)」の「未判断」が、ここで決まった
+
+本文の「採らなかった案」(d) は、**revision を固定して落とす案**をこう書いていた（逐語）:
+
+> そして**決定1によって、(d)は(a)の前提条件ではなくなった**——期待値をHFからその場で引く
+> 以上、revisionを固定しなくても期待値は腐らない。⟹ ⛔ **この PR には混ぜない。**
+> [Issue #564] に「(a)とは別の価値（repo消失・ミラー汚染への予防）が在る。未判断」として残した。
+
+**その「未判断」を、クローン（miku）が決めた**——[Issue #597](https://github.com/takecchi/mnemora/issues/597) 案(a) を採る。**ただし、この門は `main` を見続ける（決定は下記）。**
+
+### 決定: 固定するのは「使う側」だけ。門は固定しない
+
+- **固定する**: `scripts/print-local-embedding-cache-key.mjs`（CI のキャッシュ鍵）と
+  `examples/chat/src/providers.ts`（`local` embedding が `LocalEmbeddingProvider` へ渡す
+  `revision`）。どちらも、採用時の sha（`cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0`。
+  出所は下記）を、`scripts/local-embedding-pinned-revision.json`（唯一の宣言）から読む。
+- **固定しない**: この門（`scripts/check-local-embedding-fingerprint.mjs`）。
+  **tree URL の `main` は変えていない。** ⟹ 上流の `main` が動いて、固定した revision の
+  中身と食い違えば、この門が赤くなる——それが「固定した revision を更新するかどうか、
+  人間が判断する」合図になる。
+
+**なぜ門を固定しなかったか**: 本 ADR 決定1 の核心は「**期待値を1つも焼き込まず、毎回
+Hugging Face の*その瞬間*の内容を期待値にする**」ことである。門の tree URL を固定した
+revision に差し替えると、この門は「repo の*今*」ではなく「固定した版の*今*（普段は
+同じ）」としか照合しなくなり、**上流 `main` のドリフトを検知する能力そのものを失う**
+——それは本 ADR が最初に建てた番犬の役目と矛盾する。⟹ **番犬は `main` を見続け、
+使う側だけを固定する**という非対称な形にした。
+
+### sha の出所（【実測】）
+
+- **取得元**: `GET https://huggingface.co/api/models/sirasagi62/ruri-v3-30m-ONNX`
+- **取得日時**: 2026-09-24T03:21:02Z
+- **値**: `sha` = `cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0`（`lastModified` =
+  `2025-10-09T06:35:18.000Z`）
+- **tree の突き合わせ**【実測、同日】: `GET .../tree/main?recursive=1&expand=1` と
+  `GET .../tree/cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0?recursive=1&expand=1` を両方引き、
+  各エントリの `path`/`type`/`oid`/`lfs.oid`（この門が実際に読むフィールドのみ）を
+  比較した——**17件全件で完全一致**。差分はHFのセキュリティスキャン状態
+  （`securityFileStatus`。この門は読まない）のみだった。⟹ **固定時点で `main` と
+  固定 revision は同じ中身であることを確認済み。**
+
+### 実装
+
+1. **宣言**: `scripts/local-embedding-pinned-revision.json`（`sha`・`capturedAt`・
+   `capturedFrom`・`note` を持つ）。⛔ **`@mnemora/local-embedding` の公開 API には
+   足していない**——`DEFAULT_LOCAL_EMBEDDING_REVISION` のような公開 export は作らない
+   という決定である（`packages/local-embedding` の公開面は1バイトも触っていない。
+   `scripts/check-public-api-surface.mjs` の差分は6パッケージとも0——PR 本文に記録）。
+2. **キャッシュ鍵**（`scripts/print-local-embedding-cache-key.mjs`）: 宣言から
+   `repo`/`dtype`/固定 `revision` を読んで鍵を組み立てる。**もう Hugging Face に
+   問い合わせない**——ADR 0263 追記を参照。
+3. **渡す側**（`examples/chat/src/providers.ts`）: 新しい関数
+   `localEmbeddingPinnedRevision()` が同じ宣言を読み、`local` embedding 分岐の
+   `new LocalEmbeddingProvider({ …, revision })` へ渡す。⛔ **`@mnemora/local-embedding`
+   自体の既定は変えていない**——`revision` を渡さない呼び出しは、いままで通り
+   transformers.js の既定 `"main"` のままである（Issue #597 の「先に決めるべきこと」の
+   うち「既定値をどうするか」は、PR #664 が既に「既定値は変えない」と決めている。
+   この PR はそれを変えていない）。
+4. **門**（`scripts/check-local-embedding-fingerprint.mjs`）: **コードは変えていない**
+   （tree URL は `tree/main` のまま）。赤くなったときのメッセージにだけ、「固定した
+   revision の宣言を更新することを検討せよ」という案内を足した。
+
+### 歯と変異試験
+
+- **固定した歯**: `scripts/__tests__/local-embedding-cache-key.test.mjs` に、CLI の出力が
+  宣言（`scripts/local-embedding-pinned-revision.json`）の `sha` と一致することを、
+  テスト自身が独立に `JSON.parse` した値と突き合わせて確かめる歯。
+  `examples/chat/src/__tests__/providers.test.ts` に、`localEmbeddingPinnedRevision()` が
+  同じ宣言と一致することを確かめる歯、および `buildEmbedding` の `local` 分岐が
+  `localEmbeddingPinnedRevision()` の戻り値を実際に渡している（ハードコードしていない）
+  ことをソーステキストで確かめる歯。既存の `check-local-embedding-fingerprint-cli.test.mjs`
+  の「問い合わせは2段になる」歯（`tree/main` を literal で assert する）に、この決定の
+  契約であることを示す注記を足した。
+- **変異試験**（`cp` で退避・復元。`git checkout` は使っていない。3本とも、戻した後に
+  元のテストが緑に戻ることまで確認した）:
+  1. `examples/chat/src/providers.ts` の `local` 分岐で `revision` をハードコードした
+     literal に差し替える ⟹ 新設した「ハードコードしていない」歯が赤になった。
+  2. `scripts/print-local-embedding-cache-key.mjs` を、この変更前の実装（HF の `main` の
+     sha を毎回取りに行く形。`git show HEAD:...` で取得）に戻す ⟹ 5本が赤になった
+     （`--api-base` が既知の引数に戻ること自体を含む）。
+  3. `scripts/check-local-embedding-fingerprint.mjs` の tree URL を `main` から固定した
+     revision へ差し替える ⟹ 既存の「問い合わせは2段になる」歯が赤になった。
+
+### 確かめていないこと
+
+- **本番の CI で、キャッシュ鍵が実際に変わって温かいキャッシュを外すところは見ていない。**
+  この PR のマージ後の最初の run が最初の実測になる——初回はキャッシュを取り直す
+  （PR 本文に警告として明記）。
+- **固定した sha が、将来 HF 側で削除・改名された場合の挙動は変えていない。**
+  transformers.js が revision 指定で 404 を返した場合の挙動（Issue #597 本文が
+  最初から「確かめていないこと」として挙げていたもの）は、この PR でも確かめていない。
+
+### 未計上であることの明記（追記4 の分）
+
+**`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** 足したのは `scripts/` の
+新規ファイル1本（JSON）・既存 `scripts/`2本の内部実装・`examples/chat/src/providers.ts`・
+`.github/workflows/ci.yml` のコメント/ステップ名だけで、`packages/` には1バイトも
+触れていない（公開 API 表面の門の差分は0——上記）。**要否は判断者に委ねる。**

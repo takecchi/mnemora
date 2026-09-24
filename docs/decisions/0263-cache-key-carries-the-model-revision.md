@@ -187,3 +187,45 @@ Error: process.exit unexpectedly called with "0"
 
 **`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** 足したのは `scripts/` と
 `.github/` と ADR だけで、`packages/` には1バイトも触れていない。**要否は判断者に委ねる。**
+
+## 追記1 (2026-09-24、Issue #597 案(a)): 鍵の revision は、もう Hugging Face から引かない——固定した宣言を読むだけになった
+
+> **⚠ このコメントは、自動化された担い手（クローンのマネージャーのセッション）が書いた。**
+> **⛔ オーナー本人が決めたのではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **⚠ 状態欄も本文も書き換えていない。**
+
+### 何が変わったか
+
+本文の決定1は「鍵に HF の revision（`main` の現在の commit sha）を入れる。**毎回
+Hugging Face に問い合わせる**」というものだった。[Issue #597](https://github.com/takecchi/mnemora/issues/597) 案(a) の決定（詳細は
+[ADR 0253 追記4](./0253-local-embedding-weights-fingerprint-gate.md) 参照）で、CI が使う
+revision を採用時の sha に固定したことに伴い、**`scripts/print-local-embedding-cache-key.mjs`
+はもう Hugging Face に一度も問い合わせない。**
+
+- **鍵の revision の出所**: `scripts/local-embedding-pinned-revision.json`
+  （固定した sha = `cdf9391f1ff2198daa8f63f7ccf97d7b3e7415a0`。出所・取得日時・tree の
+  突き合わせは ADR 0253 追記4 に記録済み）。
+- **HF API への問い合わせ（決定1・決定3が組んだ再試行・フォールバック）は無くなった。**
+  `--api-base` オプションも削除した（もう注入する対象のネットワーク呼び出しが無いため）。
+  宣言（repo/dtype/固定revision）のどれかが読めなかった場合のフォールバック（決定3の
+  「HF に届かなくてもジョブを落とさない」と同じ精神——**内部のファイル読み取り失敗も
+  同様に、ジョブを落とさずフォールバック鍵へ倒す**）は残した。落ちる先は変更前と同じ
+  `ruri-v3-30m-q8-v1`。
+
+### この追記が、決定3の前提にどう影響するか
+
+決定3（「HF に届かなくてもジョブを落とさない」）が引き受けていた負債1
+（「CI が HF API の可用性に、もう1箇所依存する」）は、**この鍵については解消された**
+——もう HF に問い合わせないので、HF の可用性に依存する箇所ではなくなった。
+⚠ **ただし、この門（`scripts/check-local-embedding-fingerprint.mjs`）は引き続き HF に
+依存している**（ADR 0253 決定3・追記4）。CI 全体で見れば HF 依存が0になったわけではない。
+
+### 歯・変異試験・確かめていないこと
+
+ADR 0253 追記4 に記録した（キャッシュ鍵と examples 側の渡す revision を同じ宣言に揃える
+歯、および3本の変異試験）。ここでは繰り返さない。
+
+### 未計上であることの明記（追記1 の分）
+
+**`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** `packages/` には1バイトも
+触れていない。**要否は判断者に委ねる。**

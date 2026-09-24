@@ -20,6 +20,18 @@
  * にある——ファイル I/O・ネットワークを持たない純関数の側であり、ここ（CLI）は
  * それを呼ぶだけの薄い層である（`scripts/ci-green-check.mjs` と同じ分担）。
  *
+ * ## ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記）: この門は `main` を見続ける
+ *
+ * `scripts/print-local-embedding-cache-key.mjs`（CI のキャッシュ鍵）と
+ * `examples/chat/src/providers.ts`（`local` embedding が使う revision）は、
+ * `scripts/local-embedding-pinned-revision.json` に固定した revision（採用時の sha）を
+ * 使うようになった——**この門はそちらへは切り替えない。**
+ *
+ * ⟹ **この門は引き続き `main`（tree URL の `main` は変えていない）を照合する番犬として
+ * 残る。** 上流の `main` が動いて、固定した revision の中身と食い違えば、この門が
+ * 赤くなる——それが「固定した revision を更新するかどうか、人間が判断する」合図になる。
+ * ⛔ **この門自身が固定した revision を読んだり、自動で更新したりはしない。**
+ *
  * ## 判定表（この CLI はゲートである）
  *
  * ⭐ **問いは2つに割れている**（Issue #586 / ADR 0253 追記1）——
@@ -481,6 +493,21 @@ async function main() {
 
   const result = compareFingerprints({ actual, expectedByPath });
   console.log(formatFingerprintReport(result));
+
+  // ⭐ 2026-09-24 追記（Issue #597 案(a)、ADR 0253 追記）: この門はいまも `main` を
+  // 照合する番犬のままであり、CI が使う revision を固定した宣言
+  // （scripts/local-embedding-pinned-revision.json）へは切り替えていない。
+  // ⟹ ここが不一致になったということは、宣言された repo の `main` が固定した時点から
+  // 動いた（可能性が高い）——固定revisionを更新するかどうかの判断は人間に委ねる。
+  // ⛔ 判定（verdict/exit code）はこのメッセージでは変えない。
+  if (result.verdict !== "match") {
+    console.error(
+      "⚠ この門は Hugging Face の `main` を照合し続けている（固定した revision の宣言は見ていない）。" +
+        "不一致が「上流の main が動いたこと」によるものなら、CI が使う固定 revision の宣言" +
+        "（scripts/local-embedding-pinned-revision.json、Issue #597 案(a)）を新しい sha に" +
+        "更新することを検討すること。",
+    );
+  }
 
   // 🔴 判定表: 手元のファイルが読めない ⟹ 赤。`compareFingerprints` は読めた分だけを
   // 見て match を返しうるが、読めなかったファイルがある時点で「全ファイル一致」は

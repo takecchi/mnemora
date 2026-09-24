@@ -161,6 +161,11 @@ describe("check-local-embedding-fingerprint.mjs（CLI）: 宣言された repo �
           await runCli(["--cache-dir", f.cacheDir, "--api-base", f.origin]);
           // ⭐ Issue #586 / ADR 0253 追記1 で前段が入った。1本目が「在るか」、2本目が「読めたか」。
           expect(f.state.paths[0]).toBe(`/api/models/${repo}`);
+          // 🔴 Issue #597 案(a)（ADR 0253 追記4）: この門は `main` を照合し続ける番犬として
+          // 残る決定である。CI が使う revision は
+          // `scripts/local-embedding-pinned-revision.json` に固定したが、**この門はそちらを
+          // 見ない**。⟹ ここが `tree/main` のリテラルのままであることが、その決定の歯である
+          // ——固定した revision へ差し替えると、上流の `main` が動いても門が黙ってしまう。
           expect(f.state.paths[1]).toBe(`/api/models/${repo}/tree/main?recursive=1&expand=1`);
         },
       );
