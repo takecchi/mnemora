@@ -214,13 +214,41 @@ function contradictionSegment(
   return `[矛盾候補:${parts.join("／")}]`;
 }
 
-/** 1件の `RecalledMemory` を1行に描画する。欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → digest。 */
+/**
+ * 記録時刻欄（Issue #691 の子、Issue #702、ADR 0298）。`recordedAt` が
+ * `undefined`（そもそも欄を渡さなかった呼び出し側）なら欄を出さない。値があれば
+ * ミリ秒精度の ISO 8601（`Date#toISOString()`）で出す——`occurredAt`（下）とは
+ * 別の名前（「記録時刻」）を使い、2つの時計を読み手に混同させない。
+ */
+function recordedAtSegment(m: RecalledMemory): string | undefined {
+  return m.recordedAt !== undefined ? `[記録時刻:${m.recordedAt.toISOString()}]` : undefined;
+}
+
+/**
+ * 出来事時刻欄（Issue #691 の子、Issue #702、ADR 0298）。`occurredAt` は3値ある:
+ * `undefined`（頼んでいない・欄を出さない）／`null`（頼んだが無かった・
+ * `recordedAt` の値で埋めずに「不明」と明示する——`speaker` の `null` と同じ規律）／
+ * `Date`（値がある・ISO 8601 で出す）。
+ */
+function occurredAtSegment(m: RecalledMemory): string | undefined {
+  if (m.occurredAt === undefined) {
+    return undefined;
+  }
+  return m.occurredAt === null ? "[出来事時刻:不明]" : `[出来事時刻:${m.occurredAt.toISOString()}]`;
+}
+
+/**
+ * 1件の `RecalledMemory` を1行に描画する。
+ * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 記録時刻 → 出来事時刻 → digest。
+ */
 function renderRecalledMemoryLine(m: RecalledMemory, all: readonly RecalledMemory[]): string {
   const segments = [
     `[由来:${m.provenanceKind}]`,
     speakerSegment(m),
     subjectSegment(m),
     contradictionSegment(m, all),
+    recordedAtSegment(m),
+    occurredAtSegment(m),
   ].filter((s): s is string => s !== undefined);
   return `- ${segments.join(" ")} ${m.digest}`;
 }
