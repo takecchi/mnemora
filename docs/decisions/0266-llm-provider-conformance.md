@@ -432,3 +432,130 @@ try {
 - **公開 suite の歯2 の空振り**（負債7 そのもの）。締めるなら v2.0.0 に載せる破壊的変更として扱う。
 - **足した歯は、この repo の2実装だけを見る。**`DeterministicLLMProvider` と `RecordedLLMProvider`
   には当てていない。利用者の自作実装にはもちろん届かない。
+
+---
+
+## 追記2（2026-09-24）: 負債1 を返す —— `RecordedLLMProvider` にも適合 suite を当てた
+
+⛔ **本節より上（追記1を含む）は書き換えていない。**
+
+⚠ **これはクローン（miku）の判断であり、オーナー本人の決定ではない**
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+### どの条件をどう満たしたか
+
+決定5「⛔ `RecordedLLMProvider` には当てない」は「却下」ではなく**負債1**として持ち越され、
+「これが覆るとしたら」節が自ら次の一手を名指ししていた（逐語、上の本文）:
+
+> `RecordedLLMProvider` 用のカセット fixture を用意したとき。負債1 を返す一手が
+> そのまま次に取れる（`packages/testkit/src/__tests__/llm-provider-conformance.test.ts` に
+> `RecordedLLMProvider` 向けの呼び出しを1本足すだけで済む形にしてある）。
+
+本追記はその条件を満たす。**`packages/testkit/src/__tests__/llm-provider-conformance.test.ts`**
+に、`RecordedLLMProvider`（ADR 0051）向けの `describeLLMProviderConformance` 呼び出しを1本
+足した。カセットは実 API を録ったものではなく、この suite のためだけに手で組み立てた
+インメモリの `LLMCassetteSection`（鍵は本物と同じ `llmCassetteKey` の導出を使う）。
+**新しいカセット JSON ファイルは作っていない**——「これが覆るとしたら」節が言う「fixture を
+用意する」を、JSON ファイルではなくテストファイル内のインメモリ値として満たした。
+
+⟹ **実質4つある `LLMProvider` 実装（`AnthropicLLMProvider` / `OpenAILLMProvider` /
+`DeterministicLLMProvider` / `RecordedLLMProvider`）のうち、残っていた1つが検査対象になった。
+負債1 は返済した。**
+
+### Recorded の宣言の内訳（理由込み）
+
+- **`deterministic: true`。** カセット再生は同じプロンプトに対して常に同じ記録値を返す
+  （`lookup` は同じ鍵に対して同じ entry を返すだけの純粋な参照）。⚠ 決定性を与えているのは
+  記録値の再生であって、記録元の実 API が決定的であったことの証明ではない
+  （`AnthropicLLMProvider`/`OpenAILLMProvider` 側の同名オプションの doc コメントと同じ非対称）。
+- **`createFailing: null`。** `RecordedLLMProvider` は下層 client を注入する口を持たない
+  （`__fixtures__/recorded-llm-provider.ts` 参照）。lookup 失敗の理由は「カセットに記録が無い」
+  であって「下層 SDK の呼び出しが失敗した」ではないため、ハーネスを組みようが無い
+  ——`DeterministicLLMProvider` と同じ理由。⟹ 歯5〜8 は消えず `it.skip` として名前だけ残る
+  （【実測】`10 passed | 8 skipped (18)`。うち4本が `DeterministicLLMProvider` の skip、
+  残り4本が `RecordedLLMProvider` の skip）。
+
+### ⚠ 正直に書くこと: 歯2 の意義が `RecordedLLMProvider` では薄い
+
+`AnthropicLLMProvider`/`OpenAILLMProvider` では、`completeStructured` が**自前で**
+`schema.parse(...)` を呼んでいる実装コードであり、歯2（余計な欄が漏れていない）はその呼び出しが
+消えていないかを検査する。`RecordedLLMProvider.completeStructured` も
+`req.schema.safeParse(entry.value)` を呼んではいるが、**余計な欄が消える理由は
+`RecordedLLMProvider` 固有のロジックではなく、zod の `z.object(...)` が既定で持つ
+「未知の欄は strip する」という振る舞いである。** ⟹ この歯がここで緑になることは
+「`RecordedLLMProvider` が漏れを防ぐコードを書いている」ことの証明ではなく、
+「zod の strip に乗っている」ことの反映にすぎない。下の変異試験 M2 が、`safeParse` を経由しない
+実装に変えると実際に歯2 が赤くなることで、この依存を裏付けている。
+
+### 測ったこと（変異試験、すべて【実測】2026-09-24）
+
+**全て `cp` で退避 → 変異 → 狙った歯が赤くなることを実測 → `cp` で戻す → `diff` で原本と
+完全一致することと `git status --porcelain` が該当ファイルについて空になったことを確認 →
+同じ歯が緑に戻ることを実測、という手順**（`AGENTS.md`「⛔ 変異を戻すのに `git checkout` を
+使わない」）。
+
+無変異のベースライン: `LLMProvider conformance (RecordedLLMProvider)` 4 passed / 4 skipped
+（suite 全体では `DeterministicLLMProvider` 分と合わせて `10 passed | 8 skipped (18)`）。
+
+対象ファイル: `packages/testkit/src/__fixtures__/recorded-llm-provider.ts`。
+コマンド: `pnpm --filter @mnemora/testkit exec vitest run src/__tests__/llm-provider-conformance.test.ts --reporter=verbose`
+
+| # | 変異 | 結果 | 落ちた歯 |
+|---|---|---|---|
+| M1 | `complete()` の返り値に余計な欄 `leaked` を混ぜる（`return { ...(entry.value as LLMResponse), leaked: true } as LLMResponse;`） | 1 failed / 9 passed / 8 skipped | 歯1（`Object.keys(response)` が `["content","leaked"]` になり `["content"]` と食い違う: `expected [ 'content', 'leaked' ] to deeply equal [ 'content' ]`） |
+| M2 | `completeStructured()` の `schema.safeParse` をやめ、`entry.value as T` の素通しに変える | 1 failed / 9 passed / 8 skipped | 歯2（`vendorNote` が漏れ、`allowed.has("vendorNote")` が `false`: `expected false to be true`） |
+| M3 | `complete()` の返り値に `Math.random()` を混ぜて非決定的にする（`return { content: \`${value.content}-${Math.random()}\` };`） | 1 failed / 9 passed / 8 skipped | 歯3（2回呼んだ `content` が食い違う: `expected 'recorded content-0.93…' to deeply equal 'recorded content-0.19…'`） |
+| M4 | `completeStructured()` の返り値に `Math.random()` の `nonce` 欄を混ぜる（`return { ...parsed.data, nonce: Math.random() } as T;`） | 2 failed / 8 passed / 8 skipped | 歯2（`nonce` が漏れる）と歯4（2回呼んだ値が食い違う）の**両方**——1つの変異が2つの独立した主張を同時に破ったので、両方赤くなるのは想定通り |
+
+**`DeterministicLLMProvider` 側の歯は、M1〜M4 のどの変異でも常に緑のままだった**
+（`RecordedLLMProvider` 固有のファイルしか変異させていないため）——狙った実装だけが
+壊れたことの傍証。
+
+### 公開 API 表面の門
+
+`pnpm run build` → `node scripts/check-public-api-surface.mjs`: **6パッケージすべて「差分なし」。**
+このPRはテストファイルのみの変更であり、新しい public export は足していない
+——`RecordedLLMProvider` / `llmCassetteKey` / `LLMCassetteSection` はいずれも ADR 0051 の時点で
+既に `@mnemora/testkit` の `index.ts` から export 済みであり（`export * from
+"./__fixtures__/cassette.js"` / `export * from "./__fixtures__/recorded-llm-provider.js"`）、
+テストファイルはそれを `../__fixtures__/*.js` から相対 import しているだけである。
+
+### 走らせたテスト・門（すべて緑）
+
+- `pnpm --filter @mnemora/testkit exec vitest run src/__tests__/llm-provider-conformance.test.ts`
+  → `10 passed | 8 skipped (18)`
+- `pnpm --filter @mnemora/testkit exec vitest run src/__tests__/cassette.test.ts`
+  → `17 passed`（`RecordedLLMProvider` を使う既存テストに回帰が無いことの確認）
+- `pnpm --filter @mnemora/anthropic exec vitest run src/__tests__/llm-provider.conformance.test.ts`
+  → `12 passed`（回帰なし）
+- `pnpm --filter @mnemora/openai exec vitest run src/__tests__/llm-provider.conformance.test.ts`
+  → `12 passed`（回帰なし）
+- `pnpm --filter @mnemora/testkit run typecheck` / `pnpm --filter @mnemora/testkit run build`
+  → 緑
+- `pnpm exec eslint packages/testkit/src/__tests__/llm-provider-conformance.test.ts` → 差分なし
+- `pnpm exec prettier --check packages/testkit/src/__tests__/llm-provider-conformance.test.ts`
+  → 緑
+- ⛔ **`pnpm run test`（全体）は走らせていない**（依頼の線どおり。触ったテストと関係する
+  既存テストだけを個別に走らせた）。
+
+### ②・③には触れていない
+
+- **負債2**（HTTP・認証・レート制限・実 API 自身の振る舞いは測っていない）はそのまま。
+- **負債3**（`complete()` の `?? ""` 空文字フォールバックの是非、ADR 0198・ADR 0072 負債2）は
+  そのまま——この追記でも踏み込んでいない。
+- **案A**（`refusal`/`truncated`/`no_content` の core 格上げ）・**案B**（空文字フォールバックを
+  直す）には触れていない。
+- **負債4**（`call-failure.test.ts` との重複）・**負債6**（SDK 既定リトライ未測定）・
+  **負債7**（公開 suite の歯2 の空振り）もそのまま。⚠ `RecordedLLMProvider` にも「歯2 が
+  `{}` に対して空振りで緑になる」という同じ形の弱さは理屈の上では当てはまるが、
+  `AnthropicLLMProvider`/`OpenAILLMProvider` に足したような「リポ内の歯（負債7 対応）」は
+  `RecordedLLMProvider` には足していない——理由: `RecordedLLMProvider.completeStructured` は
+  `schema.safeParse` を呼ぶだけで、anthropic/openai のような独自の抽出ロジックを持たない
+  ため、負債7 の読み替えが要るかどうかは未判断のまま残す。
+
+### まだ残っていること
+
+- **`RecordedLLMProvider` に対する負債7 相当の読み替え**（上記、未判断）。
+- **足した歯は、この repo の実装だけを見る。**利用者の自作 `LLMProvider` 実装や、
+  実カセット JSON ファイル（`examples/chat/cassettes/*.json`）に対しては検査していない
+  ——ここで使ったカセットはこのテストファイルのためだけに手で組み立てたインメモリ値である。
