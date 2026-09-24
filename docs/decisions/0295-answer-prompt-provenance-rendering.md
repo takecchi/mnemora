@@ -256,3 +256,94 @@ Issue #691 完了条件は「純粋な描画契約のテストと、誤帰属・
 - `docs/recall.md` §6（`usage.chars` の限界）・§8（矛盾の同伴取得）
 - ADR 0051（recorded カセットの設計、`llmCassetteKey` の鍵の作り方）
 - ADR 0236（同種の「録り直しはオーナー領分」の先例）
+
+---
+
+## 追記（2026-09-25、Issue #691 の子・Issue #702、ADR 0298 との接続）
+
+> **⚠ 本追記も自動化された担い手（マネージャーから委譲された作業者）が書いた。**
+> **⛔ オーナー本人の判定ではない。** 上記の断り書きと同じ規律に従う。
+
+[PR #703](https://github.com/takecchi/mnemora/pull/703)（ADR 0298、`RecalledMemory` に
+`recordedAt`（取り込んだ壁時計の時刻、常に値）・`occurredAt`（出来事自身の時刻、
+`Date | null | undefined`）を追加）が main にマージされたことを受け、この2欄を
+`buildMnemoraPrompt` へどう描画するかを、この追記の作業で決めた。
+
+### 7. `recordedAt` は生の ISO ではなく「記録順」の番号で出す【実測】
+
+Postgres（`postgres://postgres@localhost:55432/...`）と `OPENAI_API_KEY`
+（作業環境のログインシェルにのみ存在）が使える環境で、実 API（`gpt-4o-mini`、
+既定 temperature）による dev 対照を行った——**この対照は `answer-case-set.dev.ts`
+（development）だけで行い、`answer-case-set.eval.ts`（held-out）は一度も見ていない**
+（絶対の線）。
+
+手順: `ANSWER_CASE_SET_DEV` の6件を、`recorded`（`examples/chat/cassettes/answer.json`
+の抽出・埋め込みの記録を再生、費用ゼロ）で `ingestConversation`/`queryRecall` に通し、
+得られた同じ `recall.memories` から4通りの回答プロンプトを組み立てて、
+`ANSWER_SYSTEM_PROMPT` + 質問という同じ形で実 OpenAI に5回ずつ答えさせ、
+`gradeAnswer`（一次判定、文字列包含）の pass 数だけを数えた（回答文面そのものは
+読んでいない・保存していない）。対照した4通り:
+
+| 描画 | 内容 |
+| --- | --- |
+| 旧（digest-only） | Issue #691 以前の描画（由来等のタグを一切付けない、参照用） |
+| A（生ISO・採らなかった） | 本 PR が前のコミットまで実装していた形。各行に `[記録時刻:2026-...Z]` を付ける |
+| B（記録順・採用） | `recall.memories` を `recordedAt` 昇順に並べ替えた順位を `[記録順:N]` として付ける（行の並び自体は変えない） |
+| C（並べ替え+注記・採らなかった） | 行を `recordedAt` 昇順に並べ替え、冒頭に「記録した順に並べてある」旨の1行を足す（時刻タグは付けない） |
+
+結果（pass/5）:
+
+| ケース | 旧 | A（生ISO） | B（記録順） | C（並べ替え+注記） |
+| --- | --- | --- | --- | --- |
+| pref-tea-over-coffee | 5 | 5 | 5 | 5 |
+| **schedule-change-meeting-day** | **5** | **1** | **5** | **1** |
+| negation-moved-city | 5 | 5 | 5 | 5 |
+| other-person-birthday | 5 | 5 | 5 | 5 |
+| other-period-city-this-year | 5 | 5 | 5 | 5 |
+| unknown-blood-type | 5 | 5 | 5 | 5 |
+
+`schedule-change-meeting-day`（「来週の定例会議は金曜日」→「やはり水曜日に移してください、
+金曜日は都合が悪くなりました」という訂正が後続するケース）だけが割れた。**候補A（本 PR が
+それまで実装していた生ISOタグ）と候補C（並べ替え+注記）はどちらも 1/5 まで落ち、候補B
+（記録順の番号）だけが旧描画と同じ 5/5 を保った**——生の ISO 8601 どうしの日時比較や
+「並べ替えた」という宣言文よりも、小さい整数の順位のほうが「どちらが後の発言か」を
+モデルに読み取らせやすいと考えられる（推測であり、検証していない）。
+
+⟹ **決定: `recordedAt` は `[記録順:N]`（`recall.memories` を `recordedAt` 昇順に
+並べ替えた順位。行そのものの並びは変えない。同一ミリ秒は元の配列順で安定的に
+タイブレーク）として描画する。** §2 で決めた「由来・話者・主題・矛盾候補」の並びの
+直後、`occurredAt`（下記8）の直前に置く。`recordedAt` が `undefined`（そもそも
+欄を渡さなかった呼び出し側）の要素は順位付けの対象から外し、欄そのものを出さない
+（§2 決定1「欠落値を推測しない」と同じ規律の適用）。
+
+⚠ **採らなかった理由の記録**: 候補A（生ISO）は本 PR が最初に実装し、契約テスト
+（`__tests__/provenance-prompt-cases.ts` の `temporal-*`）も一度緑にした状態だったが、
+上記の dev 対照でこの退行が見つかったため、ケース・実装ともに `[記録順:N]` へ書き直した
+（該当コミットの履歴に「赤→緑」がそのまま残っている）。
+
+### 8. `occurredAt` の描画は変えない（未評価のまま残す）【現物】
+
+`occurredAt` は上記の対照でも ISO 8601 のまま描画した（`null` を `recordedAt` で
+埋めない・`undefined` なら欄を出さない、という規律は§7と同じ）。**この対照は
+`occurredAt` が常に `null`（`ingestConversation` が `occurredAt` を渡さないため、
+Issue #702 のマネージャー実測どおり）の下でしか行っていない**——`occurredAt` に
+実際の値が入ったときに同じ退行が起きるかどうかは未評価のまま残る。
+
+### 9. dev 対照の実 API 呼び出し・費用【実測】
+
+`chat.completions.create`: 120回（6ケース×4描画×5回）。`prompt_tokens=25270`・
+`completion_tokens=812`。`usage-meter.ts` の公開価格表（2026-09時点、OpenAI の
+請求 API から取得した実額ではない）による概算費用: 入力 $0.003791・出力 $0.000487・
+合計 **$0.004278**。embedding 呼び出しは0回（`recorded` で再生したため）。
+
+### 10. 引き受けた負債（追記分）
+
+1. **`occurredAt` に値がある場合の描画は未評価**（§8）。
+2. **候補は3つに絞った**（「多くて3つ」という制約）——生ISO・記録順・並べ替え+注記
+   以外の描画（例: 相対時間の自然文「3ターン前」等）は試していない。
+3. **dev 対照は `gpt-4o-mini`・既定 temperature・5回のみ**——モデルを変えた場合や
+   温度を変えた場合の頑健性は未検証。
+4. **`schedule-change-meeting-day` 以外の dev 5件は、そもそも由来タグ等の影響を
+   受けていなかった**（§2 の対照時点で判明済み、Issue #691 の子作業の対象外）ため、
+   本追記の対照でも退行が「無い」ことの確認に留まる——なぜ影響を受けないかの
+   構造的な理由は分析していない。
