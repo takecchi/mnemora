@@ -1,0 +1,72 @@
+answer-time-weighting 段3b-1: 本評価の取り直し（temperature=0、1回、Issue #690）。
+
+マネージャー指示により、全16ケース(dev6+eval6+eval-undated4) × legacy/
+eventAwareFreshness × trials=5 を temperature=0 で1回だけ実行した。生データ:
+answer-time-weighting-live-eval-temp0.json（標準出力そのまま:
+answer-time-weighting-live-eval-temp0.log）。temperature未指定の既存結果
+（answer-time-weighting-live-eval-run1.log / run2.json、段2b）は削除・上書き
+していない。
+
+## 正答数/5（全ケース）
+
+| kind | case | legacy | eventAwareFreshness |
+|---|---|---|---|
+| reinforced-fact-vs-fresh-weak (A, dev) | dev-a1-tea-over-coffee | 0/5 | 5/5 |
+| 〃 | dev-a2-remote-work-day | 0/5 | 5/5 |
+| old-event-not-outrank-new (B, dev) | dev-b1-phone-model | 5/5 | 5/5 |
+| 〃 | dev-b2-current-project | 5/5 | 5/5 |
+| expired-schedule-not-outrank-current (C, dev) | dev-c1-meeting-schedule | 5/5 | 5/5 |
+| 〃 | dev-c2-gym-plan | 5/5 | 5/5 |
+| A (eval) | eval-a1-window-seat | 0/5 | 5/5 |
+| 〃 | eval-a2-doc-tool | 0/5 | 5/5 |
+| B (eval) | eval-b1-pet | 5/5 | 5/5 |
+| 〃 | eval-b2-relocation | 5/5 | 5/5 |
+| C (eval) | eval-c1-internet-plan | 5/5 | 5/5 |
+| 〃 | eval-c2-work-shift | 5/5 | 5/5 |
+| old-event-undated-vs-new (B', eval-undated) | eval-undated-b1-department-reinforced | 5/5 | 5/5 |
+| 〃 | eval-undated-b2-hobby-not-reinforced | 5/5 | 5/5 |
+| expired-schedule-undated-vs-current (C', eval-undated) | eval-undated-c1-seat-floor-reinforced | 5/5 | **5/5**（⚠ 下記参照） |
+| 〃 | eval-undated-c2-standup-day-not-reinforced | 5/5 | 5/5 |
+
+## ⚠⚠ 重要な食い違い: eval-undated-c1-seat-floor-reinforced
+
+段3a（切り分け、temperature=0、20回）では eventAwareFreshness の gradeAnswer
+正答数が **0/20** だった。今回の「本評価の取り直し」（temperature=0、同じ
+ケース定義、trials=5）では **5/5（全問正解）**——真逆の結果である。
+
+**検索順位そのものは、両方の実行で完全に一致している**（contextDiagnostics
+を直接比較した）:
+- old-seat-undated（古い予定、occurredAt/validFrom/validUntil無し）は、
+  eventAwareFreshness では5 trialすべてで rank=1・enteredContext=true・
+  total=0.8031002918516041（5 trial ともビット単位で同一の値）。
+- legacy では5 trialすべてで rank=2・enteredContext=false・
+  total=0.0007842776287613322。
+- 実際の回答生成に使った recall()（診断用ではない1回目）でも、
+  eventAwareFreshness は毎回 recallMemoryCount=2（両方の記憶が文脈に入って
+  いる）——段3aの構造的な指摘（古い予定が常に rank1・文脈入りする）は
+  この回でも100%再現している。
+
+⟹ **検索順位（recall()のスコアリング）は temperature/実行に関係なく完全に
+決定的で、常に古い予定を rank1・文脈入りさせる。** ここは段3aの結論と
+1バイトも違わない。**variance があるのは、その後の LLM の回答テキスト
+そのもの**である——同一のプロンプト（同じ記憶・同じ質問・同じ
+system文・temperature=0）を投げても、実行のタイミング（別の日・別の
+API呼び出しセッション）によって回答が変わりうる。これは OpenAI が
+文書で認めている既知の制約（temperature=0 は「決定的に近づける」だけで、
+ビット単位の再現を保証しない）と整合する。
+
+⟹ **「eventAwareFreshness が legacy より劣る」という結論を、gradeAnswer の
+正答数だけから断定しない。** 断定できるのは「eventAwareFreshness は
+occurredAt/validFrom/validUntilを持たない古い予定を、reinforce済みなら
+常に文脈の最上位へ持ち上げる」という検索側の事実であり、それが最終的な
+誤答に繋がるかどうかは、LLM側の頑健さに依存し実行ごとに変わりうる。
+
+## 呼び出し回数・費用（この回のみ）
+- chat.completions.create: 160回
+- embeddings.create: 480回（診断用recallの追加分を含む——1ケース1trialにつき
+  legacy/eventAwareFreshnessそれぞれ「回答生成用recall + 診断用recall」の
+  2回ずつ embed するため、以前(段2b)の4回/trialから6回/trialに増えている）
+- 概算費用: $0.004576
+
+## 累計費用（段2b + 段3a + 段3b-1）
+$0.007671 + $0.001635 + $0.004576 = $0.013882（上限$1に対し十分小さい）
