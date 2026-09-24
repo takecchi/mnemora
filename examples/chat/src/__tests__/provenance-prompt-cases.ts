@@ -191,6 +191,49 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
     ],
   },
   {
+    id: "contradiction-pair-owner-not-first",
+    description:
+      "対向記憶（順序を崩す）: 無関係な記憶を先頭に置き、owner/companion を index 1・2にずらす。" +
+      "「先頭要素を相手だと取り違える」実装がここでだけ露見する——" +
+      "'contradiction-pair'（owner が index 0）だけでは、companionOf を正しく辿らず" +
+      "先頭要素を機械的に指す壊れた実装が、たまたま正解と同じ答えを出して見逃される",
+    memories: [
+      {
+        memoryId: "m-unrelated",
+        digest: "無関係な記憶",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "花子",
+        subjectId: "user-9",
+        score: SCORE,
+      },
+      {
+        memoryId: "m-owner-2",
+        digest: "会議は10時",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "太郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+      {
+        memoryId: "m-companion-2",
+        digest: "会議は11時",
+        retrievedVia: "mandatory_companion",
+        companionOf: "m-owner-2",
+        provenanceKind: "stated",
+        speaker: "次郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:花子] [主題:user-9] 無関係な記憶",
+      "- [由来:stated] [話者:太郎] [主題:user-1] [矛盾候補:「会議は11時」] 会議は10時",
+      "- [由来:stated] [話者:次郎] [主題:user-1] [矛盾候補:「会議は10時」] 会議は11時",
+    ],
+  },
+  {
     id: "same-digest-different-speaker",
     description:
       "同文で別話者: digest が同一でも、各行は自分自身の話者をそのまま出す（マージ・重複排除しない）",

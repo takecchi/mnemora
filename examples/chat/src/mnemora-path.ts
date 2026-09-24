@@ -2,6 +2,7 @@ import type {
   Ctx,
   RecallAssociationQuery,
   RecallBudget,
+  RecalledMemory,
   RecallResult,
   Runtime,
 } from "@mnemora/core";
@@ -136,13 +137,115 @@ export async function runMnemoraPath(
   return { recall };
 }
 
+// ---------------------------------------------------------------------------
+// buildMnemoraPrompt の各欄の描画（Issue #691）
+//
+// ケース定義・決めたことの詳細は
+// `__tests__/provenance-prompt-cases.ts` の冒頭コメントを参照。要点だけ:
+// - null（頼んだが無かった）と「その kind は欄を持ちようが無い」を別の表現にする。
+// - 欠落値を推測で埋めない（"user" 等を書かない）。
+// - 矛盾関係は recall.memories 全体を見て、companionOf の向き先・向かれ元の
+//   両方に対称な印を出す。中身は相手の memoryId ではなく相手の digest 本文。
+// ---------------------------------------------------------------------------
+
+/**
+ * 話者欄。`provenanceKind === "stated"` のときだけ出す
+ * （`RecalledMemory.speaker` の docstring・ADR 0289: 他の kind は「話者という概念が
+ * 無い」のであって「話者が分からない」のではない——同じ「不明」表示で潰さない）。
+ * `stated` で値が無ければ、値で埋めずに「不明」と明示する。
+ */
+function speakerSegment(m: RecalledMemory): string | undefined {
+  if (m.provenanceKind !== "stated") {
+    return undefined;
+  }
+  const speaker = m.speaker;
+  return typeof speaker === "string" && speaker.length > 0 ? `[話者:${speaker}]` : "[話者:不明]";
+}
+
+/**
+ * 主題欄。`subjectId` はどの `provenanceKind` でも持ちうる欄なので、kind に関わらず
+ * 常に出す。値が無ければ（例: 統合で subject をまたいだ）「なし」と明示する
+ * ——他の主題を代表値として埋めない。
+ */
+function subjectSegment(m: RecalledMemory): string {
+  const subjectId = m.subjectId;
+  return typeof subjectId === "string" && subjectId.length > 0
+    ? `[主題:${subjectId}]`
+    : "[主題:なし]";
+}
+
+/**
+ * `m` と矛盾関係にある相手の `memoryId` の集合。`RecalledMemory` 単体では非対称
+ * （`companionOf` を持つのは同伴取得された側だけ、`docs/recall.md` §8）なので、
+ * `all` 全体を見て逆向き（`m` が誰かの `companionOf` に指されている側）も拾う。
+ */
+function contradictionCounterpartIds(
+  m: RecalledMemory,
+  all: readonly RecalledMemory[],
+): string[] {
+  const ids = new Set<string>();
+  if (m.retrievedVia === "mandatory_companion" && m.companionOf !== undefined) {
+    ids.add(m.companionOf);
+  }
+  for (const other of all) {
+    if (other.companionOf === m.memoryId) {
+      ids.add(other.memoryId);
+    }
+  }
+  return [...ids];
+}
+
+/**
+ * 矛盾候補欄。相手が見つかれば相手の digest 本文を埋め込む（回答モデルは memoryId の
+ * 対応表を持たないため、id だけでは対立が読めない）。相手が `all` の中に見つからない
+ * （想定外の入力）場合は、本文を捏造せず `memoryId` と「本文未取得」を出す。
+ * 矛盾関係が無ければ欄そのものを出さない。
+ */
+function contradictionSegment(
+  m: RecalledMemory,
+  all: readonly RecalledMemory[],
+): string | undefined {
+  const counterpartIds = contradictionCounterpartIds(m, all);
+  if (counterpartIds.length === 0) {
+    return undefined;
+  }
+  const byId = new Map(all.map((x) => [x.memoryId, x] as const));
+  const parts = counterpartIds.map((id) => {
+    const counterpart = byId.get(id);
+    return counterpart !== undefined ? `「${counterpart.digest}」` : `memoryId=${id}（本文未取得）`;
+  });
+  return `[矛盾候補:${parts.join("／")}]`;
+}
+
+/** 1件の `RecalledMemory` を1行に描画する。欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → digest。 */
+function renderRecalledMemoryLine(m: RecalledMemory, all: readonly RecalledMemory[]): string {
+  const segments = [
+    `[由来:${m.provenanceKind}]`,
+    speakerSegment(m),
+    subjectSegment(m),
+    contradictionSegment(m, all),
+  ].filter((s): s is string => s !== undefined);
+  return `- ${segments.join(" ")} ${m.digest}`;
+}
+
 /**
  * mnemora path が実際にプロンプトへ積む文字列を、`recall()` の返り値だけから組み立てる。
  * `usage.chars` が数えているのと同じ材料（各 memory の digest + index band の JSON）を
  * 呼び出し側の視点で再現する——「mnemora はプロンプトを組み立てない」ことを実演する関数。
+ *
+ * **2026-09（Issue #691）**: digest だけでなく、由来（`provenanceKind`）・話者
+ * （`speaker`）・主題（`subjectId`）・矛盾関係（`companionOf`/`retrievedVia`）も
+ * 1行ずつ埋め込む。**`usage.chars` はこの追加分を数えていない**——`usage.chars` は
+ * `recall()` 自身の返り値の量であり、この関数が実際に文字列へ足す装飾（`[由来:...]`
+ * 等のタグ）は呼び出し側だけが知っている増分である。`compare` の `mnemoraChars`
+ * （`recall.usage.chars` をそのまま使う）とこの関数の出力文字数は、本 PR 以降
+ * さらに乖離する——詳細と実測は `docs/recall.md` §6・`examples/chat/README.md`
+ * 「`answer`」節・本変更の PR 本文を参照。
  */
 export function buildMnemoraPrompt(recall: RecallResult): string {
-  const digestLines = recall.memories.map((m) => `- ${m.digest}`).join("\n");
+  const digestLines = recall.memories
+    .map((m) => renderRecalledMemoryLine(m, recall.memories))
+    .join("\n");
   const indexLine = `(索引: スコープ内 ${recall.index.totalInScope} 件のうち ${recall.memories.length} 件を提示)`;
   return [digestLines, indexLine].filter((s) => s.length > 0).join("\n");
 }
