@@ -34,8 +34,8 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
  *
  * 🔴 **この歯が捕まえないもの:**
  * - **`CHANGELOG.md` の節が実際に在るか**は、もうどこも機械で止めていない。
- *   残っているのは ADR 0251 の**非門の通知**（`.github/workflows/release-followup-notice.yml`、
- *   終了コードは常に 0）だけである。⟹ **読まれなければ何も起きない。**
+ *   ADR 0251 の**非門の通知**（`.github/workflows/release-followup-notice.yml`）も
+ *   オーナーの判断で削除した。⟹ **いまは何も見ていない。**
  *   ⛔ **その限界は ADR 0267「引き受けた負債」に書いてある。ここで薄めないこと。**
  * - **`if:` の式を GitHub が本当にそう評価するか**は見ていない。
  */

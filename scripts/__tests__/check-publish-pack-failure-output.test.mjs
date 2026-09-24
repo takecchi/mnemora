@@ -24,8 +24,7 @@ import { afterEach, describe, expect, it } from "vitest";
 /**
  * ⚠ この門が見ていない範囲——失敗（EXIT=1）側の実行時出力を測る歯。
  *
- * `scripts/__tests__/check-pr-adr-reference.test.mjs` と同じ形（本物の `.mjs` を
- * 一時ディレクトリへコピーし、合成環境で動かす）を踏襲する。`publish-targets.mjs` を
+ * 本物の `.mjs` を一時ディレクトリへコピーし、合成環境で動かす。`publish-targets.mjs` を
  * 「存在しないディレクトリを指す1パッケージだけの合成版」へ差し替えると、
  * `pnpm pack` の spawn 自体が ENOENT で失敗し（`cwd` が存在しないため）、
  * `packOne()` が投げた例外を `violations` へ積んで exit 1 になる——本物の
