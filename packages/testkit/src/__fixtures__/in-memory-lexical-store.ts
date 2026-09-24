@@ -119,7 +119,13 @@ export class InMemoryLexicalStore implements LexicalStore {
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
       }
-      if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
+      // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、
+      // `subject_id IS NULL`（主題なし）も通す（`InMemoryVectorStore` と同じ意味論）。
+      const subjectMatches =
+        opts.filter.subjectId === undefined ||
+        memory.subjectId === opts.filter.subjectId ||
+        (opts.filter.includeSubjectless === true && memory.subjectId === null);
+      if (!subjectMatches) {
         continue;
       }
       // ADR 0056: 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op。

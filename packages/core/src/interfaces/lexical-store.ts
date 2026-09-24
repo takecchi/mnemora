@@ -25,6 +25,14 @@ export interface LexicalFilter {
   tenantId: string;
   status?: MemoryStatus[];
   subjectId?: string;
+  /**
+   * `VectorFilter.includeSubjectless` と同じ欄・同じ意味（Issue #608 項目③(b)、
+   * [ADR 0286](../../../../docs/decisions/0286-recall-include-subjectless.md)）——
+   * `subjectId` が渡されているときだけ効き、述語を `subject_id = ${subjectId} OR
+   * subject_id IS NULL` へ広げる。追加のみの欄であり、知らない adapter は無視してよい
+   * （`VectorFilter.includeSubjectless` の doc 参照）。
+   */
+  includeSubjectless?: boolean;
   excludeProvenanceKinds?: ProvenanceKind[];
   occurredAfter?: Date;
   occurredBefore?: Date;

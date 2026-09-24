@@ -341,6 +341,10 @@ export async function runRecall(
   // -------------------------------------------------------------------
   const scope: RecallScope = {
     subjectId: ctx.subjectId,
+    // Issue #608 項目③(b) / ADR 0286: `ctx.subjectId` が無ければ（テナント全体）
+    // 下流のどの利用箇所も `subjectId !== undefined` で先に無効化するため、ここで
+    // 特別扱いする必要は無い——渡すだけでよい。
+    includeSubjectless: validatedQuery.includeSubjectless,
     occurredAfter: validatedQuery.occurredAfter,
     occurredBefore: validatedQuery.occurredBefore,
     validAt: validityGateActive ? validAt : undefined,
@@ -431,6 +435,31 @@ export async function runRecall(
     if (memory.validFrom != null && memory.validFrom > scope.validAt) return false;
     if (memory.validUntil != null && memory.validUntil <= scope.validAt) return false;
     return true;
+  };
+
+  /**
+   * ⭐ `subjectId` の後置フィルタ述語（Issue #608 項目③(b)、
+   * [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。**段1の後置
+   * フィルタと段3.5（連想枠）の後置フィルタが、同じこの関数を呼ぶ**——`survivesDecayGate`/
+   * `survivesValidityGate` と同じ「1箇所に述語を置く」規律（ADR 0038 が測った「実装が
+   * 2つあると食い違う」穴を避けるため）。
+   *
+   * - `scope.subjectId` が `undefined`（テナント全体）なら常に真——絞りが無い。
+   * - `memory.subjectId` が `scope.subjectId` と一致すれば真（今日どおりの等値一致）。
+   * - `scope.includeSubjectless === true` かつ `memory.subjectId` が `null`（主題なし）
+   *   なら真——**ここが本 ADR の唯一の追加分岐である。**
+   * - それ以外（別の subject、または `includeSubjectless` が false/未指定の主題なし）は偽。
+   *
+   * **adapter がこの述語を実装していなくても安全な理由**: adapter は `VectorFilter.
+   * includeSubjectless`/`LexicalFilter.includeSubjectless` を無視してよく、その場合
+   * 段1の候補集合には `subjectId` と厳密一致する Memory しか来ない——ここでの後置フィルタは
+   * 「来た候補をさらに絞る」だけであり、**来ていない `subjectId: null` の Memory を
+   * 発生させることはない**（取りこぼしはあっても混入は起きない）。
+   */
+  const survivesSubjectFilter = (memory: Memory): boolean => {
+    if (scope.subjectId === undefined) return true;
+    if (memory.subjectId === scope.subjectId) return true;
+    return scope.includeSubjectless === true && memory.subjectId === null;
   };
 
   /**
@@ -564,6 +593,8 @@ export async function runRecall(
         tenantId: ctx.tenantId,
         status: ["active", "contested"],
         subjectId: scope.subjectId,
+        // Issue #608 項目③(b) / ADR 0286: `subjectId` が渡っているときだけ効く opt-in。
+        includeSubjectless: scope.includeSubjectless,
         excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
         occurredAfter: scope.occurredAfter,
         occurredBefore: scope.occurredBefore,
@@ -638,6 +669,8 @@ export async function runRecall(
           tenantId: ctx.tenantId,
           status: ["active", "contested"],
           subjectId: scope.subjectId,
+          // Issue #608 項目③(b) / ADR 0286: ANN チャンネルと同じ opt-in（上のコメント参照）。
+          includeSubjectless: scope.includeSubjectless,
           excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
           occurredAfter: scope.occurredAfter,
           occurredBefore: scope.occurredBefore,
@@ -740,7 +773,9 @@ export async function runRecall(
     // ADR 0056 で更新）。多層防御を残す理由そのものは変わっていない——上の
     // 現在の根拠に差し替えただけである。段1の絞りは正しさのためではなく、
     // over-fetch の窓（k'）を無駄にしないための最適化に過ぎない。
-    if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) continue;
+    // Issue #608 項目③(b) / ADR 0286: 述語は `survivesSubjectFilter` に1箇所へまとめてある
+    // （段3.5 の後置フィルタと共有——ここで書き直さない）。
+    if (!survivesSubjectFilter(memory)) continue;
     const effectiveTime = memory.occurredAt ?? memory.recordedAt;
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
     if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
@@ -1136,6 +1171,9 @@ export async function runRecall(
                 tenantId: ctx.tenantId,
                 status: ["active", "contested"],
                 subjectId: scope.subjectId,
+                // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
+                // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
+                includeSubjectless: scope.includeSubjectless,
                 excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
                 occurredAfter: scope.occurredAfter,
                 occurredBefore: scope.occurredBefore,
@@ -1227,7 +1265,8 @@ export async function runRecall(
           // ⛔ **これを「負債を返した」とは書かない**——この防御が実際に落とすのは
           // adapter が ADR 0034 の契約を破ったときだけであり（下のコメント）、その場合に
           // 何件増えるかは**測っていない。**
-          if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) continue;
+          // Issue #608 項目③(b) / ADR 0286: 段1と同じ述語を共有する（`survivesSubjectFilter`）。
+          if (!survivesSubjectFilter(memory)) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
           if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
           if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;

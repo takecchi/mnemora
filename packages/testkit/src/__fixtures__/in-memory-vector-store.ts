@@ -146,7 +146,14 @@ export class InMemoryVectorStore implements VectorStore {
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
       }
-      if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
+      // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、
+      // `subject_id IS NULL`（主題なし）も通す——`PostgresVectorStore.search`
+      // （`vector-store.ts` の `m.subject_id = ... OR m.subject_id IS NULL`）と同じ意味論。
+      const subjectMatches =
+        opts.filter.subjectId === undefined ||
+        memory.subjectId === opts.filter.subjectId ||
+        (opts.filter.includeSubjectless === true && memory.subjectId === null);
+      if (!subjectMatches) {
         continue;
       }
       // ADR 0165 決めたこと1・4・12（Issue #305）: 忘却ゲートの2軸。`decayFloorAnyAxis` が

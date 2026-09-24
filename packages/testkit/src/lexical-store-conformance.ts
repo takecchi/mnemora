@@ -352,6 +352,92 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
     });
 
     // -------------------------------------------------------------------
+    // filter.includeSubjectless（Issue #608 項目③(b) / ADR 0286）: `subjectId` の等値絞りを
+    // `subject_id IS NULL`（主題なし）まで広げる opt-in。
+    // -------------------------------------------------------------------
+
+    it("filter.includeSubjectless: true なら、一致する subject と主題なし（null）の両方が返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        subjectId: "subject-a",
+      });
+      const subjectlessId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        // subjectId 未指定 = 既定 null。
+      });
+      const otherId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        subjectId: "subject-b",
+      });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", subjectId: "subject-a", includeSubjectless: true },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).toContain(subjectlessId);
+      expect(ids).not.toContain(otherId);
+    });
+
+    it("filter.includeSubjectless: 省略/false なら、主題なし（null）は今日どおり返らない（回帰）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        subjectId: "subject-a",
+      });
+      const subjectlessId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+      });
+
+      const omitted = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", subjectId: "subject-a" },
+      });
+      const explicitFalse = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", subjectId: "subject-a", includeSubjectless: false },
+      });
+
+      for (const hits of [omitted, explicitFalse]) {
+        const ids = hits.map((hit) => hit.memoryId);
+        expect(ids).toContain(matchingId);
+        expect(ids).not.toContain(subjectlessId);
+      }
+    });
+
+    it("filter.includeSubjectless: subjectId 無しで true が渡っても、テナント全体（絞りなし）と同じになる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const subjectAId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        subjectId: "subject-a",
+      });
+      const subjectlessId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+      });
+
+      const tenantWide = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      const withIncludeSubjectlessButNoSubjectId = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", includeSubjectless: true },
+      });
+
+      const tenantWideIds = tenantWide.map((hit) => hit.memoryId).sort();
+      const otherIds = withIncludeSubjectlessButNoSubjectId.map((hit) => hit.memoryId).sort();
+      expect(otherIds).toEqual(tenantWideIds);
+      expect(tenantWideIds).toContain(subjectAId);
+      expect(tenantWideIds).toContain(subjectlessId);
+    });
+
+    // -------------------------------------------------------------------
     // filter.excludeProvenanceKinds（ADR 0056）。
     // -------------------------------------------------------------------
 

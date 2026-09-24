@@ -799,7 +799,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (memory.tenantId !== ctx.tenantId) {
         continue;
       }
-      if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) {
+      // Issue #608 項目③(b) / ADR 0286: `PostgresMemoryStore.aggregateScope`
+      // （`memory-store.ts` の `subjectFilter`）と同じ意味論——`includeSubjectless: true`
+      // のときだけ `subject_id IS NULL`（主題なし）も scope 内に含める。
+      const subjectMatches =
+        scope.subjectId === undefined ||
+        memory.subjectId === scope.subjectId ||
+        (scope.includeSubjectless === true && memory.subjectId === null);
+      if (!subjectMatches) {
         continue;
       }
 

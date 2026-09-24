@@ -124,8 +124,15 @@ export class PostgresVectorStore implements VectorStore {
         conditions.push(decayFloorSeqCondition);
       }
     }
+    // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、等値一致に
+    // `subject_id IS NULL`（主題なし）を OR で足す。`subjectId` が無ければこの欄自体を見ない
+    // ——「テナント全体」は定義上すでに主題なしを含む上位集合であり、広げる余地が無い。
     if (opts.filter.subjectId !== undefined) {
-      conditions.push(sql`m.subject_id = ${opts.filter.subjectId}`);
+      conditions.push(
+        opts.filter.includeSubjectless === true
+          ? sql`(m.subject_id = ${opts.filter.subjectId} OR m.subject_id IS NULL)`
+          : sql`m.subject_id = ${opts.filter.subjectId}`,
+      );
     }
     // ADR 0059: period の押し下げ。比較対象は COALESCE(occurred_at, recorded_at)
     // （ADR 0039 が定義した「実効時刻」——4箇所あった判定規則の5箇所目)。両端とも包含

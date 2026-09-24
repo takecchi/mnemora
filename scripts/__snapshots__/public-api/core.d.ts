@@ -445,6 +445,7 @@ export interface LexicalFilter {
     tenantId: string;
     status?: MemoryStatus[];
     subjectId?: string;
+    includeSubjectless?: boolean;
     excludeProvenanceKinds?: ProvenanceKind[];
     occurredAfter?: Date;
     occurredBefore?: Date;
@@ -777,6 +778,7 @@ export interface VectorFilter {
     status?: MemoryStatus[];
     decayFloorAtAfter?: Date;
     subjectId?: string;
+    includeSubjectless?: boolean;
     excludeProvenanceKinds?: ProvenanceKind[];
     occurredAfter?: Date;
     occurredBefore?: Date;
@@ -1909,6 +1911,7 @@ export interface RecallQuery {
     validAt?: Date;
     includeOutsideValidity?: boolean;
     association?: RecallAssociationQuery;
+    includeSubjectless?: boolean;
 }
 export declare const RECALL_CHANNELS: readonly [
     "ann",
@@ -1967,6 +1970,7 @@ export declare const RecallQuerySchema: z.ZodObject<{
         anchorCount: z.ZodOptional<z.ZodNumber>;
         minSimilarity: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
+    includeSubjectless: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;
@@ -1976,6 +1980,7 @@ export interface RecallScope {
     decayFloorAtAfter?: Date;
     decayFloorSeqAfter?: number;
     decayFloorAnyAxis?: boolean;
+    includeSubjectless?: boolean;
 }
 export declare const RecallScopeSchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodString>;
@@ -1985,6 +1990,7 @@ export declare const RecallScopeSchema: z.ZodObject<{
     decayFloorAtAfter: z.ZodOptional<z.ZodDate>;
     decayFloorSeqAfter: z.ZodOptional<z.ZodNumber>;
     decayFloorAnyAxis: z.ZodOptional<z.ZodBoolean>;
+    includeSubjectless: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export interface RecallOutputValidationIssue {
     path: string;
