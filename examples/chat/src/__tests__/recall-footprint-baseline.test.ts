@@ -110,6 +110,37 @@ function associationCountForRow(row: BaselineRow): number {
  *
  * ⚠ **許容誤差 `0.025` はこの訂正でも動かしていない**——#340・#410・ADR 0166 が
  * いずれも「通すために緩める」形を名指しで却下している。
+ *
+ * ### ⚠ 2026-09-24 訂正（Issue #340 案(ii) / ADR 0289）: 推定器の較正方法を変え、誤差の実体を減らした
+ *
+ * 上の表の「いま」列（2.068%・20.14字）は、`calibrateRecallFootprint` が
+ * hold-in 7行を**無加重**最小二乗で較正していた時点のものである。ADR 0289 は
+ * この較正を `memoryCount` で重み付けた最小二乗に変えた——**hold-in 7行という
+ * 較正の入力そのもの（`compare-baseline.json`）は1バイトも変えていない。**
+ * 変えたのは較正の式であり、`ACCURACY_TOLERANCE` も `compare-baseline.json` も
+ * 動かしていない（下記「測ったこと」参照）。
+ *
+ * 【実測】2026-09-24、`calibrateRecallFootprint`（`memoryCount` 加重）/
+ * `estimateRecallFootprint` を `node` で直接呼んで12行を再検算した（歯自体も
+ * 実行し緑）:
+ *
+ * | | 無加重（旧） | `memoryCount` 加重（いま） |
+ * |---|---|---|
+ * | 較正係数 | `charsPerDigest≒15.4583` / `fixedIndexChars≒170.8810` | `charsPerDigest≒15.5905` / `fixedIndexChars≒170.2390` |
+ * | 12行全体・hold-out 5行の最大誤差 | 2.068%（322ターン行） | **1.8787%（322ターン行）** |
+ * | 2.5%に対する余裕（百分率） | (2.5−2.068)/2.5 ≒ 17% | **(2.5−1.8787)/2.5 ≒ 24.9%** |
+ * | 42ターン行(upper)の字数の余白（Issue #410/ADR 0201の指標） | 11.15字 | **12.39字** |
+ *
+ * ⟹ **百分率・字数の両方の指標で、hold-out 側の最大誤差・最小余白がともに改善した。**
+ * `322`ターン行が依然として最大誤差の行であることは変わっていない——ADR 0170が
+ * 記録した「重複コンテンツの tie-break 依存の選択」（17字/19字の digest が混在し、
+ * どちらが選ばれるかで合計が変わる）という誤差の根はこの較正方法の変更では
+ * 消えない。減ったのは、この根から生じる誤差を推定器がどれだけ吸収できるかである。
+ *
+ * **なぜ `memoryCount` で重み付けると縮むか**、**逆向き（`1/memoryCount`）を
+ * 試して悪化したこと**、この経路で試して採らなかった他の案は
+ * `calibrateRecallFootprint` の doc（`packages/core/src/recall-footprint.ts`）と
+ * ADR 0289 を見ること。
  */
 const ACCURACY_TOLERANCE = 0.025;
 
@@ -144,9 +175,16 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
     expect(calibrated.origin.sampleCount).toBe(7);
   });
 
-  it("較正した係数がオーナーの実測(charsPerDigest≒15.458 / fixedIndexChars≒170.881)に一致する", () => {
-    expect(calibrated.charsPerDigest).toBeCloseTo(15.458, 2);
-    expect(calibrated.fixedIndexChars).toBeCloseTo(170.881, 2);
+  /**
+   * ⚠ 2026-09-24 訂正（Issue #340 案(ii) / ADR 0289）: この it が期待する係数は、
+   * `calibrateRecallFootprint` を無加重最小二乗から `memoryCount` で重み付けた
+   * 最小二乗へ変えたことで動いた（旧: `charsPerDigest≒15.458` / `fixedIndexChars≒170.881`）。
+   * 較正の入力（hold-in 7行）自体は1バイトも変えていない——変えたのは較正の**やり方**である。
+   * 詳細と、これによって hold-out 側の最大誤差がどう動いたかは ADR 0289「測ったこと」。
+   */
+  it("較正した係数が実測(charsPerDigest≒15.591 / fixedIndexChars≒170.239、memoryCount加重最小二乗)に一致する", () => {
+    expect(calibrated.charsPerDigest).toBeCloseTo(15.591, 2);
+    expect(calibrated.fixedIndexChars).toBeCloseTo(170.239, 2);
   });
 
   describe("較正済みプロファイルで12行すべての mnemoraChars を予測する", () => {

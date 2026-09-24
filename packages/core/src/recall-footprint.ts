@@ -188,7 +188,9 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
     measuredFrom:
       "examples/chat/compare-baseline.json（CI の example-chat ジョブが実測し repo に commit した値。" +
       "llmMode=recorded / embeddingMode=recorded、provenance commit d6a0092）の12点のうち、" +
-      "目次帯が空の7点（totalInScope <= DEFAULT_RECALL_LIMIT）だけを使った最小二乗。" +
+      "目次帯が空の7点（totalInScope <= DEFAULT_RECALL_LIMIT）だけを使った、" +
+      "memoryCount で重み付けた最小二乗（Issue #340 / ADR 0289「なぜ memoryCount で" +
+      "重み付けるか」。calibrateRecallFootprint と同じ式）。" +
       "帯のある5点は較正に使っていない（hold-out）。",
     measuredUnder: {
       defaultRecallLimit: 10,
@@ -199,8 +201,8 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
       digestBandEntrySeparatorChars: 1,
     },
   },
-  charsPerDigest: 15.458,
-  fixedIndexChars: 170.881,
+  charsPerDigest: 15.591,
+  fixedIndexChars: 170.239,
 };
 
 /**
@@ -261,6 +263,27 @@ export function footprintSampleFromRecall(result: RecallResult): RecallFootprint
  * **標本が足りないときに黙って既定値へ倒れない。**どの係数を借りたかは
  * `origin.borrowedFromDefault` に名前で出る（`FootprintProfileOrigin` の doc）。
  *
+ * ## 較正は `memoryCount` で重み付ける（Issue #340 / ADR 0289）
+ *
+ * **標本1件（1行）は、`memoryCount` 件の実 digest の合計である。**行を単位に
+ * 等しく重み付ける（無加重最小二乗）と、`memoryCount` が小さい標本
+ * （= 平均を均す digest が少なく、平均が最も揺れやすい標本）が、`memoryCount` が
+ * 大きい標本と同じ発言権を持ってしまう——**「行」ではなく、行が集約している
+ * 「digest」を単位にそろえる**ため、標本を `memoryCount` で重み付ける（頻度重み。
+ * 行 `i` は実質 `memoryCount_i` 件の digest 観測を持つので、その件数ぶんの
+ * 発言権を持つ）。`distinct === 1`（`memoryCount` が1種類しかない）のときは
+ * 全標本の重みが等しいため、加重平均は無加重平均と一致する——分岐を増やす必要はない。
+ *
+ * ⚠ **これは唯一の理屈ではない。** 標本ごとの残差分散が `memoryCount` に比例する
+ * という古典的な不均一分散（heteroscedasticity）の仮定に立つなら、逆に
+ * `1/memoryCount` で重み付けるべきである——実際に試したが、
+ * `examples/chat/compare-baseline.json` の hold-out 側の最大誤差が悪化した
+ * （ADR 0289「検討して採らなかった案」）。⟹ この標本の主な誤差要因は
+ * 「digest 1件ごとの独立なノイズ」ではなく、より構造的な要因
+ * （ADR 0170「なぜ非単調か」——重複する内容から生じる tie-break 依存の選択）
+ * だと読める。**上の頻度重みは「行ではなく digest を単位にそろえる」という
+ * 形自体の理屈で採っており、二乗誤差最小化の統計的最適性を主張しない。**
+ *
  * @param samples 較正の標本。`bandEntryCount === 0` のものだけが使われる。
  * @param fallback 決められなかった係数の借り元。既定は同梱プロファイル。
  */
@@ -281,15 +304,24 @@ export function calibrateRecallFootprint(
 
   const distinct = new Set(counts).size;
   if (distinct >= 2) {
-    // 2点以上で `memoryCount` が異なる ⟹ 傾きと切片の両方が決まる（最小二乗）。
-    const n = usable.length;
-    const sx = usable.reduce((a, s) => a + s.memoryCount, 0);
-    const sy = usable.reduce((a, s) => a + s.totalChars, 0);
-    const sxx = usable.reduce((a, s) => a + s.memoryCount * s.memoryCount, 0);
-    const sxy = usable.reduce((a, s) => a + s.memoryCount * s.totalChars, 0);
-    const denominator = n * sxx - sx * sx;
-    charsPerDigest = (n * sxy - sx * sy) / denominator;
-    fixedIndexChars = (sy - charsPerDigest * sx) / n;
+    // 2点以上で `memoryCount` が異なる ⟹ 傾きと切片の両方が決まる
+    // （`memoryCount` で重み付けた最小二乗。上の doc「較正は memoryCount で重み付ける」）。
+    let sw = 0;
+    let swx = 0;
+    let swy = 0;
+    let swxx = 0;
+    let swxy = 0;
+    for (const s of usable) {
+      const w = s.memoryCount;
+      sw += w;
+      swx += w * s.memoryCount;
+      swy += w * s.totalChars;
+      swxx += w * s.memoryCount * s.memoryCount;
+      swxy += w * s.memoryCount * s.totalChars;
+    }
+    const denominator = sw * swxx - swx * swx;
+    charsPerDigest = (sw * swxy - swx * swy) / denominator;
+    fixedIndexChars = (swy - charsPerDigest * swx) / sw;
   } else if (distinct === 1) {
     // `memoryCount` が1種類しかない ⟹ 切片は決まらない。切片を既定値から借りて、
     // 傾きだけを決める。**借りたことは名前で出す。**
