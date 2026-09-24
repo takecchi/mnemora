@@ -34,7 +34,7 @@
  * @property {string} input.text
  * @property {string|null} input.occurredAt ISO string、null なら observation.occurredAt を省略する
  * @property {string|null} input.timeZone null なら extractionContext.timeZone を省略する（extractionContext
- *   自体は常に存在させる。省略時と空の違いは ADR 0295 のケース4「文脈なし」と同じ ── `{}` も
+ *   自体は常に存在させる。省略時と空の違いは ADR 0299 のケース4「文脈なし」と同じ ── `{}` も
  *   明示的な有効化として扱う）
  * @property {ContextMessage[]|null} input.contextMessages null なら extractionContext.messages を省略する。
  *   [] なら空配列として明示する（b系: 相対日時だけを見たいので参照文脈は無くす）。値があれば

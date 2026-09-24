@@ -25,7 +25,7 @@ import recording from "./fixtures/extraction-context-recorded.eval.json" with { 
 // eval-a2-meeting-time-reference: 「それで大丈夫です」への同意を stated として拾えているが
 // (subjectId=tanaka, provenanceKind=stated)、digest/content のどちらにも具体的な対象
 // （"19時"）が残っていない。eval-a1（場所の参照解決）は通っているが、時刻の参照解決は
-// この録音では未達だった。ADR 0295「未評価の範囲」・PR #694 本文に明記する。
+// この録音では未達だった。ADR 0299「未評価の範囲」・PR #694 本文に明記する。
 const KNOWN_UNMET_CASE_IDS = new Set(["eval-a2-meeting-time-reference"]);
 
 function rowFor(id: string) {
