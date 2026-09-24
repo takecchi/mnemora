@@ -34,11 +34,31 @@ import type { AnswerExpectation } from "./answer-case.js";
  *   `timeWeighting` を一切参照しない（`ScoringInput.timeWeighting` docstring）
  *   ——⟹ **これも regression guard**——期限切れの記憶は方針に関係なく
  *   候補から除かれ続けるはずである。
+ *
+ * **類型B'/C'（段2a、マネージャー決定、`time-weighting-case-set.eval-undated.ts` 専用）**:
+ * 類型B/Cは両方の記憶に`occurredAt`（C は `validUntil` も）を持たせており、
+ * ADR 0295 の式のとおり legacy/eventAwareFreshness で数式レベルの不変条件が
+ * 効くため「新方針で退行するか」を測れない。**本当に危ないのは、抽出が
+ * 出来事時刻・期限を捉えられず（`occurredAt`/`validUntil` が無い）、その記憶が
+ * 実質「古い出来事・期限切れの予定」であるのに、eventAwareFreshness が
+ * freshness を1に固定して持ち上げてしまう場面である。**
+ * - `"old-event-undated-vs-new"`（類型B'）: 古い出来事が `occurredAt` 無しで
+ *   記録され、新しい出来事と競合する。legacy は `recordedAt` の古さで freshness を
+ *   沈めるが、eventAwareFreshness は freshness=1 に固定するため、`reinforce`
+ *   （最近その話題が出た）と組み合わさると `decay` も高いまま——**この組み合わせで
+ *   初めて、eventAwareFreshness が legacy より悪化しうる。**
+ * - `"expired-schedule-undated-vs-current"`（類型C'）: 期限切れの予定が
+ *   `occurredAt`/`validFrom`/`validUntil` のいずれも無く記録され（抽出が期限を
+ *   構造化できなかった）、`validAt` ゲートでは除かれない（`validFrom`/`validUntil`
+ *   が両方 null の記憶は「いつでも真」と扱われる、`recall.ts` の `validAt` docstring）。
+ *   ⟹ 除外の頼みの綱は freshness/decay だけになる——類型B'と同じ危険。
  */
 export type TimeWeightingCaseKind =
   | "reinforced-fact-vs-fresh-weak"
   | "old-event-not-outrank-new"
-  | "expired-schedule-not-outrank-current";
+  | "expired-schedule-not-outrank-current"
+  | "old-event-undated-vs-new"
+  | "expired-schedule-undated-vs-current";
 
 /**
  * 直接書き込む1件の記憶。**抽出 LLM を経由しない**——`time-weighting-bench.ts` の
