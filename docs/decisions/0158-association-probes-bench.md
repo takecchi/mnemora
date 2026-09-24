@@ -342,3 +342,126 @@ Issue #363 が挙げた構造を、ここに記録する。**この ADR の本�
 同じ注記を、ベンチの入口（`examples/chat/src/cli.ts` の `association-probes` サブコマンドの doc）にも置いた。
 
 Refs #363
+
+## 追記（Issue #671 / PR #673 の実測を受けての整理、2026-09-24）
+
+⛔ **本文、上の2026-09-16の追記、直前の2026-09-24の追記はいずれも書き換えていない。**
+直前の追記は「起こりうる機構」を「測っていない」「どちらが当てはまるかは未確定」
+「構造を直す案はまだ決めていない」と書いた。**その後 Issue #671（#363 のフォロー
+アップ）と PR #673（ADR 0284）が、この機構そのものを実測した。**本節はその結果を
+反映し、直前の追記が保留していた点に決着を付ける。
+
+**⚠ 各主張の出所を分ける。**
+
+- **【確認済み】** — 下に挙げる file:line を実際に読んで確かめた、またはコード上の
+  経路の積み重ねから機械的に導ける事実。
+- **【受】** — Issue #363 のコメント（`5804415910` / `5805043186`）・Issue #671・
+  PR #673（ADR 0284）に記録された、別の担い手の実測を報告として受け取り、
+  本 ADR の書き手が再導出していない。
+- **【推測】** — まだ実測していない見積もり。
+
+### 1. 4つの arm の埋め込みは、互いにビット単位で同じになる【確認済み】
+
+- `examples/chat/src/cli.ts:1457-1461` が `association-probes` を
+  `MNEMORA_LLM: "deterministic"` / `MNEMORA_EMBEDDING: "local"` 固定で走らせる。
+- 抽出は1:1: `packages/core/src/extraction.ts:84-97`（`buildExtractionPrompt`、
+  observation 1件をそのままプロンプトの本文にする）と、
+  `packages/testkit/src/__fixtures__/deterministic-llm-provider.ts:26-41`
+  （`completeStructured` が `content: userText` のメモリ1件を決定的に返す）を
+  合わせて読むと、同じ発話は常に同じ内容のメモリ1件になる。
+- embed job（`packages/core/src/runtime.ts:2818` の
+  `deps.embeddingProvider.embed(ctx, [memory.content])`）は `memory.content` だけを
+  埋め込みへ渡す。
+- local embedding の決定性（同じ入力に同じベクトル）は本物のモデルに対して実測されている
+  （`packages/local-embedding/src/__tests__/live.local-embedding.test.ts:358-365`:
+  同じ extractor に同じ3本を2回渡し、768成分を要素ごとに比較して不一致0件・最大絶対差0）。
+  ⚠ **この実測は CI では走らない**（`MNEMORA_LIVE_LOCAL_EMBEDDING` を設定するジョブが無い）。
+  **また同ファイル自身が「この器・この版で測ったら一致した、であって仕様の保証ではない」
+  と明記している**——別のハードウェア・別の dtype・別の onnxruntime 版での再現は
+  保証されない。
+- **1 arm は98行**（`examples/chat/src/association-probe-set.ts` の
+  `ASSOCIATION_HAYSTACK`（356-434行、62件——手書き60件+ Issue #317 追加2件）+
+  12 probe × 3（anchor/gold/distractor、`buildAssociationProbeSetConversation`、
+  457-505行）= 98。抽出が1:1 なので98メモリになる。
+
+⟹ **4つの arm へ ingest される内容は文字列として同一であり、同じ器（CI の実行環境）
+の中では埋め込みもビット単位で同一になる。** 上の「別のハードウェア等で崩れたら」の
+限定は、この bench にも同じ強さで掛かる——**CI の runner が変わらない前提での結論**
+であることに注意。
+
+### 2. 今の規模（1 arm 約100行）では、プランナは自然に HNSW を選ばない【受】
+
+Issue #363 のコメント `5804415910` の格子（セル1・2・2b、home=100行、他テナントに
+filler/near-dup を積んだ場合）は、いずれも自然なプランが Seq Scan だったと報告している。
+このベンチの1 arm（98行）はこの規模にほぼ一致する。
+
+⟹ **候補枠の食い潰しは、今のこの bench の規模では起きていない。**
+
+### 3. HNSW を選ばせるのはクエリ対象テナント自身の行数である。選ばれた後は他テナントの near-dup が候補枠を食う【受】
+
+- [ADR 0111](./0111-hnsw-window-shrinks-with-tenant-scale.md) §3.2 の実測（同一テナントが
+  10万行に育つと GUC 無しで自然に HNSW を選ぶ。別テナントに10万件の filler を積むだけでは
+  選ばれない）を、コメント `5804415910` のセル5・6が再現し、「判定1」として
+  **支持されたと報告している。**
+- 同コメントのセル4（home=100,000行 + filler + 他テナントの near-dup 60件）では、
+  自然に選ばれた HNSW の `ef_search=40` の候補枠が他テナントの重複行で埋まり、
+  gold が **10/10 → 0/10** になったと報告している（`Rows Removed by Filter: 40`）。
+- コメント `5805043186` の境界表（home=100,000行固定）は、既定の `iterative_scan=off`
+  のとき near-dup **N=31 から取りこぼしが始まり、N=40（`= kPrime = ef_search`）で
+  全滅する**と報告している。
+
+### 4. PR #673（ADR 0284）で `search()` は `relaxed_order` になった。天井には2桁の余裕があると見積もる（未測定）
+
+[ADR 0284](./0284-hnsw-iterative-scan-relaxed-order-adopted.md) は
+`PostgresVectorStore.search()` に `hnsw.iterative_scan = relaxed_order` を採用し、
+Issue #671 の全滅（近隣重複60件・既定 `off`）が `relaxed_order` で 10/10 に戻ることを
+独立に再現している。
+
+**【推測、未測定】** このベンチは同じベクトルが他3 arm に複製される構造であり、
+Issue #671 の near-dup（gold より近いが完全一致ではない偽者）とは違う——距離0の
+完全重複が3セット存在する形に近い。見積もりでは、1回の検索あたり読み捨てる件数は
+おおむね `3 × 40 = 120` 件程度で、`hnsw.max_scan_tuples`（既定20,000）の天井より
+2桁小さい。
+
+⚠ **「同じベクトル・10万行・4 arm」という組み合わせでの実測は無い。** 同じ距離の
+点が大量にあるときに HNSW（relaxed_order を含む）がどう振る舞うかは、ADR 0284 も
+Issue #671 も測っていない——完全重複は near-duplicate（eps=0.001）よりもさらに
+極端な入力であり、同じ結果になるとは限らない。
+
+### 5. CI の `association-probes` ジョブは専用の Postgres コンテナを使い、毎回作り直す【確認済み】
+
+`.github/workflows/ci.yml:1116-1130` が `services.postgres`（`image:
+pgvector/pgvector:pg17`）をこのジョブ専用に宣言しており、GitHub Actions の
+service container はジョブの実行のたびに新しく作られ、ジョブ終了後に破棄される。
+同ファイル `:1161`（`Run migrations`）が、その新しいコンテナに毎回マイグレーションを
+流し直す。
+
+⟹ **他の測定（他ジョブ・他 run）とデータベースを同居させていない。** Issue #671 が
+記録した「他テナントの near-duplicate を DELETE しても `VACUUM (INDEX_CLEANUP ON,
+ANALYZE)` で索引が掃除されるまで候補枠を食い続ける」という交絡は、コンテナが
+run のたびに空の状態から作り直される今の形では当たらない。
+
+### まとめ——「まだ決めていない」から「今は分けない」へ
+
+直前の2026-09-24追記の最終文「構造を直す案（arm ごとに別の埋め込み空間にする等）は
+Issue #363 に在り、まだ決めていない」を、次に置き換える:
+
+**Issue #671 / PR #673 が機構そのものを実測した結果、この bench の今の規模
+（1 arm 約100行）では候補枠の食い潰しは起きておらず、HNSW が自然に選ばれる規模まで
+育っても PR #673（ADR 0284）の `relaxed_order` が塞いでいる。⟹ 構造を分ける案
+（arm ごとに別の埋め込み空間にする等）は、今は要らない。**
+
+次のいずれかが起きたとき、この判断を開き直す:
+
+1. **1 arm の行数が、HNSW をプランナが自然に選ぶ規模（目安1万〜10万行、ADR 0111）に
+   近づいたとき。**
+2. **Issue #337 の測定で、同じベクトルでの取りこぼしが実際に見えたとき**
+   （上の§4「未測定」の穴が実データで埋まったとき）。
+3. **`search()` から `relaxed_order` が外れたとき**（ADR 0284 が覆ったとき）。
+4. **CI の `association-probes` ジョブが、コンテナを使い回す形に変わったとき**
+   （上の§5の前提——毎回作り直す使い捨てコンテナ——が崩れたとき）。
+
+同じ変更を、ベンチの入口（`examples/chat/src/cli.ts` の `association-probes`
+サブコマンドの doc）にも反映した。
+
+Refs #363, Refs #671
