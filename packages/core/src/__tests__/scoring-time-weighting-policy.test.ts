@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { defaultScoringStrategy } from "../strategies/scoring.js";
 
 /**
- * ケース表（Issue #690、ADR 0295 §2）の純関数レベルの歯。
+ * ケース表（Issue #690、ADR 0299 §2）の純関数レベルの歯。
  *
  * `defaultScoringStrategy` を直接呼び、`ScoringInput.timeWeighting` を省略した場合
  * （既定・"legacy"）と `"eventAwareFreshness"` を明示した場合を比較する。
@@ -27,7 +27,7 @@ function baseInput() {
     strength: 1,
     halfLifeHours: HALF_LIFE_HOURS,
     // similarity / lexicalMatch は渡さない ⟹ affinity は中立の1に退化する
-    // （同一関連度を保つための固定。ADR 0295 §2）。
+    // （同一関連度を保つための固定。ADR 0299 §2）。
   };
 }
 
@@ -65,7 +65,7 @@ describe("ケース A: 恒常的な好み（occurredAt 無し）を古く記録�
     lastReinforcedAt: new Date(NOW.getTime() - 1 * HOUR_MS),
   };
 
-  it("legacy: recordedAt の古さで freshness が沈み、total も沈む（ADR 0295 §1 が指摘する二重減衰）", () => {
+  it("legacy: recordedAt の古さで freshness が沈み、total も沈む（ADR 0299 §1 が指摘する二重減衰）", () => {
     const score = defaultScoringStrategy({ ...input, timeWeighting: "legacy" });
     expect(score.freshness).toBeLessThan(0.001);
     expect(score.total).toBeLessThan(0.001);

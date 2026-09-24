@@ -1432,7 +1432,7 @@ export interface RecallQuery {
   includeSubjectless?: boolean;
   /**
    * **段2（再スコア）の時間項の方針を明示的に選ぶ**
-   * （Issue #690、[ADR 0295](../../../docs/decisions/0295-time-weighting-policy-opt-in.md)）。
+   * （Issue #690、[ADR 0299](../../../docs/decisions/0299-time-weighting-policy-opt-in.md)）。
    *
    * **省略時は `"legacy"`**（{@link DEFAULT_TIME_WEIGHTING_POLICY}、`ScoringInput.timeWeighting`
    * と同じ既定）——この欄を渡さない呼び出しの `recall()` 結果は1バイトも変わらない。
@@ -1447,7 +1447,7 @@ export interface RecallQuery {
    * 1（頭打ちの上限、ADR 0036 の `MAX_FRESHNESS`）に固定する。`occurredAt` が在る記憶
    * （実際に出来事時刻を持つもの）は `"legacy"` と完全に同じ式のままであり、
    * 事件の順位付けは変わらない。詳細・比較実測は
-   * [ADR 0295](../../../docs/decisions/0295-time-weighting-policy-opt-in.md) を参照。
+   * [ADR 0299](../../../docs/decisions/0299-time-weighting-policy-opt-in.md) を参照。
    *
    * **⛔ 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート
    * （`includeOutsideValidity`）はこの欄と独立である。** どちらの値を渡しても、
@@ -1455,7 +1455,7 @@ export interface RecallQuery {
    * ——この欄が動かすのは段2の順位付けだけであり、段1の候補生成ゲートには一切渡らない。
    *
    * **既定を `"eventAwareFreshness"` にするかどうかはオーナー判断であり、本 ADR の
-   * 時点では決めていない**（ADR 0295 §7、`v2.0.0` の候補）。
+   * 時点では決めていない**（ADR 0299 §7、`v2.0.0` の候補）。
    */
   timeWeighting?: TimeWeightingPolicy;
 }
@@ -1618,7 +1618,7 @@ export const RecallQuerySchema = z.object({
   includeOutsideValidity: z.boolean().optional(),
   association: RecallAssociationQuerySchema.optional(),
   includeSubjectless: z.boolean().optional(),
-  // 一覧を書き写さない——TIME_WEIGHTING_POLICIES から導く（Issue #690、ADR 0295）。
+  // 一覧を書き写さない——TIME_WEIGHTING_POLICIES から導く（Issue #690、ADR 0299）。
   timeWeighting: z.enum(TIME_WEIGHTING_POLICIES).optional(),
 }) satisfies z.ZodType<RecallQuery>;
 

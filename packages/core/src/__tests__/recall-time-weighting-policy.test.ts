@@ -7,16 +7,16 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `RecallQuery.timeWeighting` の配線の歯（Issue #690、ADR 0295）。
+ * `RecallQuery.timeWeighting` の配線の歯（Issue #690、ADR 0299）。
  *
  * `scoring-time-weighting-policy.test.ts` が `defaultScoringStrategy` を直接呼んで
  * 計算式そのものを守るのに対し、このファイルは **`recall()` から先の配線** を守る:
  * - `RecallQuery.timeWeighting` を渡さない呼び出しは、既定（"legacy"）から1バイトも
- *   変わらない（ケース表・ADR 0295 §2 の陽性対照をここでも取る）。
+ *   変わらない（ケース表・ADR 0299 §2 の陽性対照をここでも取る）。
  * - `RecallQuery.timeWeighting` を渡すと、`recall()` が返す `memories`/`omitted` の
  *   件数（量）が変わりうる——ただし忘却ゲート・`validAt` ゲートは一切変わらない。
  * - ⭐ **期限切れの予定（ケース D）は、`timeWeighting` の値に関係なく常に除外される**
- *   （validity ゲートを弱めないことの本命の歯。ADR 0295 §8 の変異(c)が狙う対象）。
+ *   （validity ゲートを弱めないことの本命の歯。ADR 0299 §8 の変異(c)が狙う対象）。
  *
  * `recall-decay-gate.test.ts`/`recall-validity.test.ts` と同型: `packages/core` 自身の
  * テストなので `@mnemora/testkit` には依存しない。DB を要さないため手元で実行できる。
@@ -163,7 +163,7 @@ describe("recall() — RecallQuery.timeWeighting: 'eventAwareFreshness' を渡�
   });
 });
 
-describe("recall() — ⭐ 期限切れの予定は timeWeighting に関係なく常に除外される（validity ゲートを弱めない、ADR 0295 §8 変異(c)）", () => {
+describe("recall() — ⭐ 期限切れの予定は timeWeighting に関係なく常に除外される（validity ゲートを弱めない、ADR 0299 §8 変異(c)）", () => {
   it("legacy でも 'eventAwareFreshness' でも、validUntil を過ぎた記憶は memories に出ず、omitted に 'expired' で名指しされる", async () => {
     const { runtime, stores } = buildRuntime();
     const expiredAppointment = await createEmbeddedMemory(stores, [1, 0], {
