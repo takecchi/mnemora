@@ -181,6 +181,51 @@ describe("recall() — 連想枠（association、既定 off）", () => {
     expect(result.usage.byTier.association).toBe("連想本文".length);
   });
 
+  it("連想で拾った候補にも speaker/subjectId が在る（Issue #579 案D、ADR 0289。キーは常に在り、値は null になりうる）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
+      digest: "アンカー本文",
+      subjectId: "user:anchor",
+      provenance: {
+        kind: "stated",
+        sourceObservationId: "obs-1",
+        at: NOW.toISOString(),
+        speaker: "アンカーの話者",
+      },
+    });
+    const associated = await createEmbeddedMemory(stores, [0, 1], {
+      digest: "連想本文",
+      subjectId: "user:associated",
+      provenance: {
+        kind: "inferred",
+        model: "gpt-4o-mini",
+        promptVersion: "v1",
+        basis: { memoryIds: [], observationIds: ["obs-1"] },
+        confidence: 0.5,
+      },
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      association: { maxCount: 5, anchorCount: 1 },
+    });
+
+    const anchorEntry = result.memories.find((m) => m.memoryId === anchor.id)!;
+    expect(anchorEntry.retrievedVia).toBe("ann");
+    expect(Object.hasOwn(anchorEntry, "speaker")).toBe(true);
+    expect(anchorEntry.speaker).toBe("アンカーの話者");
+    expect(Object.hasOwn(anchorEntry, "subjectId")).toBe(true);
+    expect(anchorEntry.subjectId).toBe("user:anchor");
+
+    const assocEntry = result.memories.find((m) => m.memoryId === associated.id)!;
+    expect(assocEntry.retrievedVia).toBe("association");
+    expect(Object.hasOwn(assocEntry, "speaker")).toBe(true);
+    expect(assocEntry.speaker).not.toBeUndefined();
+    expect(assocEntry.speaker).toBeNull(); // inferred には speaker が無い
+    expect(Object.hasOwn(assocEntry, "subjectId")).toBe(true);
+    expect(assocEntry.subjectId).toBe("user:associated");
+  });
+
   it("既に返る集合（withinLimit）と重複しない", async () => {
     const { runtime, stores } = buildRuntime();
     const anchor = await createEmbeddedMemory(stores, [1, 0], { digest: "M1" });

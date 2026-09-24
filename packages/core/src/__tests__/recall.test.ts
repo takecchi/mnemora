@@ -540,6 +540,55 @@ describe("RecalledMemorySchema — provenanceKind（roadmap.md §5.5 のオー�
   });
 });
 
+describe("RecalledMemorySchema — speaker/subjectId（Issue #579 案D、ADR 0289）", () => {
+  // ⚠ `toEqual` は undefined のキーと無いキーを同じに扱うので使わない——
+  // 「キーは在るが値が undefined」と「キー自体が無い」を、この歯では区別する
+  // （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」節の隣、ADR 0257 の考え方の
+  // 適用: 「無い（null）」と「頼まなかった／入れ忘れた（undefined/欠落）」を混ぜない）。
+  const base = {
+    memoryId: "mem-1",
+    digest: "digest",
+    retrievedVia: "ann",
+    provenanceKind: "stated",
+    score: { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 },
+  };
+
+  it("accepts speaker/subjectId を両方とも欠く RecalledMemory（後方互換——省略可能欄なので必須化していない）", () => {
+    const result = RecalledMemorySchema.safeParse(base);
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts speaker: string", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, speaker: "田中さん" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts speaker: null", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, speaker: null });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects speaker: 空文字列でも rejects ではなく accepts しない——number 等の異型は reject する", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, speaker: 42 });
+    expect(result.success).toBe(false);
+  });
+
+  it("accepts subjectId: string", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, subjectId: "user:a" });
+    expect(result.success).toBe(true);
+  });
+
+  it("accepts subjectId: null", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, subjectId: null });
+    expect(result.success).toBe(true);
+  });
+
+  it("rejects subjectId が number（異型）", () => {
+    const result = RecalledMemorySchema.safeParse({ ...base, subjectId: 1 });
+    expect(result.success).toBe(false);
+  });
+});
+
 describe("RecallResultSchema", () => {
   it("accepts 0件の recall（index だけが在る、という形）", () => {
     const result = RecallResultSchema.safeParse({
