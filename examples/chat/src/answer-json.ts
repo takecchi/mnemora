@@ -1,6 +1,7 @@
 import type { AnswerCaseRunResult } from "./answer-bench.js";
 import type { AnswerCategory, AnswerVerdict } from "./answer-case.js";
 import { answerQualityClaimable } from "./answer-case.js";
+import type { ContentPreservationResult } from "./answer-content-preservation.js";
 import type { AnswerJudgement } from "./answer-judge.js";
 import type { ProviderMode } from "./providers.js";
 
@@ -30,6 +31,12 @@ export interface AnswerPathJson {
   judgement?: AnswerJudgementJson;
   /** 一次判定と二次観測を突き合わせた結果。`judgement` が無ければこちらも無い。 */
   reconciled?: AnswerVerdict;
+  /**
+   * 層2（回答に必要な情報の保持）。**`qualityClaimable` に関係なく常に出す**
+   * ——LLM を呼ばない決定的な指標であり、`verdict`/`judgement`（層3）とは独立の欄
+   * （`answer-bench.ts` の `AnswerPathMeasurement.contentPreservation` docstring参照）。
+   */
+  contentPreservation: ContentPreservationResult;
 }
 
 export interface AnswerCaseCostJson {
@@ -74,6 +81,15 @@ export interface AnswerSummaryJson {
   };
 }
 
+/** `applicable`/`preserved` は `checkContentPreserved` の集計。`must-abstain` 類は
+ * `applicable=false` なので分母（`applicable`）から自然に除かれる。 */
+export interface AnswerContentPreservationCountsJson {
+  /** `contentPreservation.applicable === true` のケース数（分母）。 */
+  applicable: number;
+  /** そのうち `contentPreservation.preserved === true` だったケース数。 */
+  preserved: number;
+}
+
 /**
  * 入力量の削減率。**`summary` とは別枠であり、`qualityClaimable` に関係なく常に出す**
  * ——入力量そのものは品質の主張ではない（回答が正しいかどうかと無関係に測れる）。
@@ -92,8 +108,13 @@ export interface AnswerInputReductionJson {
 }
 
 export interface AnswerRunJson {
-  /** この形が変わったら上げる。二次観測・突き合わせ・`inputReduction` を足して 1→2。 */
-  schemaVersion: 2;
+  /**
+   * この形が変わったら上げる。二次観測・突き合わせ・`inputReduction` を足して 1→2。
+   * Issue #693（親 #498）で層2（回答に必要な情報の保持）のケース別欄
+   * `cases[].naive/mnemora.contentPreservation` とその集計 `contentPreservation` を
+   * 足して 2→3。
+   */
+  schemaVersion: 3;
   measuredAt: string;
   commit: string | null;
   llmMode: ProviderMode;
@@ -106,6 +127,15 @@ export interface AnswerRunJson {
   summary?: AnswerSummaryJson;
   /** `qualityClaimable` に関係なく常に存在する（上記 docstring）。 */
   inputReduction: AnswerInputReductionJson;
+  /**
+   * 層2（回答に必要な情報の保持）の集計。**`qualityClaimable` に関係なく常に存在する**
+   * ——LLM を呼ばない決定的な指標であり、`summary`（層3・最終回答の正しさの集計）とは
+   * 独立している（`AnswerPathJson.contentPreservation` の docstring）。
+   */
+  contentPreservation: {
+    naive: AnswerContentPreservationCountsJson;
+    mnemora: AnswerContentPreservationCountsJson;
+  };
 }
 
 export interface BuildAnswerJsonOptions {
@@ -172,6 +202,18 @@ export function computeInputReduction(
   };
 }
 
+/** `checkContentPreserved` の結果を集計する。分母は `applicable` なケースだけ
+ * （`must-abstain` 類は分母から自然に除かれる——`AnswerContentPreservationCountsJson` docstring）。 */
+function tallyContentPreservation(
+  results: readonly ContentPreservationResult[],
+): AnswerContentPreservationCountsJson {
+  const applicable = results.filter((r) => r.applicable);
+  return {
+    applicable: applicable.length,
+    preserved: applicable.filter((r) => r.preserved).length,
+  };
+}
+
 function buildPathJson(path: {
   inputChars: number;
   inputEstimatedTokens: number;
@@ -179,6 +221,7 @@ function buildPathJson(path: {
   verdict: AnswerVerdict;
   judgement?: AnswerJudgement;
   reconciled?: AnswerVerdict;
+  contentPreservation: ContentPreservationResult;
 }): AnswerPathJson {
   return {
     inputChars: path.inputChars,
@@ -187,6 +230,7 @@ function buildPathJson(path: {
     verdict: path.verdict,
     ...(path.judgement !== undefined ? { judgement: path.judgement } : {}),
     ...(path.reconciled !== undefined ? { reconciled: path.reconciled } : {}),
+    contentPreservation: path.contentPreservation,
   };
 }
 
@@ -202,7 +246,7 @@ export function buildAnswerJson(options: BuildAnswerJsonOptions): AnswerRunJson 
   }));
 
   return {
-    schemaVersion: 2,
+    schemaVersion: 3,
     measuredAt: options.measuredAt.toISOString(),
     commit: options.commit,
     llmMode: options.llmMode,
@@ -210,6 +254,10 @@ export function buildAnswerJson(options: BuildAnswerJsonOptions): AnswerRunJson 
     qualityClaimable,
     caseCount: cases.length,
     cases,
+    contentPreservation: {
+      naive: tallyContentPreservation(options.results.map((r) => r.naive.contentPreservation)),
+      mnemora: tallyContentPreservation(options.results.map((r) => r.mnemora.contentPreservation)),
+    },
     ...(qualityClaimable
       ? {
           summary: {

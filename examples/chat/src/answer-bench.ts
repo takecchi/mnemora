@@ -26,6 +26,8 @@ import {
 } from "@mnemora/postgres";
 import type { AnswerCase, AnswerVerdict } from "./answer-case.js";
 import { gradeAnswer } from "./answer-case.js";
+import type { ContentPreservationResult } from "./answer-content-preservation.js";
+import { checkContentPreserved } from "./answer-content-preservation.js";
 import type { AnswerJudgement } from "./answer-judge.js";
 import { judgeAnswer, reconcileVerdicts } from "./answer-judge.js";
 import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
@@ -42,6 +44,11 @@ import type { UsageMeter } from "./usage-meter.js";
  * Issue #506 を参照）。1ケースにつき、naive（全文経路）と mnemora（記憶経路）を
  * **同じ会話・同じ質問・同じ回答モデル・同じ採点基準**で両方回し、最終回答と
  * 入力量を対で出す。
+ *
+ * Issue #693（親 #498）で、層2（回答に必要な情報の保持、`answer-content-preservation.ts`
+ * の `checkContentPreserved`）を `AnswerPathMeasurement.contentPreservation` として足した。
+ * 層1（出典到達、`provenance-trace.ts`）・層3（最終回答の正しさ、`verdict`/`judgement`）
+ * とは別の欄であり、どちらも上書きしない（`docs/autonomy.md` §2.2 決定2）。
  */
 
 // ---------------------------------------------------------------------------
@@ -275,6 +282,16 @@ export interface AnswerPathMeasurement {
    * `judgement` が無ければこちらも無い。
    */
   reconciled?: AnswerVerdict;
+  /**
+   * 層2（回答に必要な情報の保持）の決定的な指標（`answer-content-preservation.ts`、
+   * Issue #693 / 親 #498）。**`verdict`/`judgement`（層3・最終回答の正しさ）とは別物**
+   * ——LLM を呼ばない、`promptSpec` の直列化文字列と `expected.accept` だけを見た判定。
+   * `answerQualityClaimable(llmMode) === false` でも計算する（純関数なので害は無い。
+   * `verdict` と同じ扱い）——ただし `deterministic` の下では `digest` が本物の要約では
+   * ないため、この値は「配線」を測っているにすぎない（`answer-content-preservation.ts`
+   * の docstring 参照）。
+   */
+  contentPreservation: ContentPreservationResult;
 }
 
 export interface AnswerCaseCost {
@@ -452,6 +469,11 @@ export async function runAnswerCase(
   const naiveVerdict = gradeAnswer(naiveResponse.content, answerCase.expected);
   const mnemoraVerdict = gradeAnswer(mnemoraResponse.content, answerCase.expected);
 
+  // 層2（内容保持）: LLM を呼ばない決定的な指標。モデルへ実際に渡した直列化文字列
+  // （`naiveSerialized`/`mnemoraSerialized`、上ですでに計算済み）だけを見る。
+  const naiveContentPreservation = checkContentPreserved(naiveSerialized, answerCase.expected);
+  const mnemoraContentPreservation = checkContentPreserved(mnemoraSerialized, answerCase.expected);
+
   // ---------------------------------------------------------------------------
   // 二次観測（judge）。`llmProvider` ではなく `judgeLLMProvider`（別インスタンス）を
   // 経由する——`AnswerBenchRuntimeHandle.judgeLLMProvider` の docstring 参照。
@@ -489,6 +511,7 @@ export async function runAnswerCase(
       verdict: naiveVerdict,
       judgement: naiveJudgement,
       reconciled: reconcileVerdicts(naiveVerdict, naiveJudgement.outcome),
+      contentPreservation: naiveContentPreservation,
     },
     mnemora: {
       promptSpec: mnemoraPromptSpec,
@@ -498,6 +521,7 @@ export async function runAnswerCase(
       verdict: mnemoraVerdict,
       judgement: mnemoraJudgement,
       reconciled: reconcileVerdicts(mnemoraVerdict, mnemoraJudgement.outcome),
+      contentPreservation: mnemoraContentPreservation,
     },
     cost: {
       extractionLLMCalls: extractionDiff.extractionCalls,

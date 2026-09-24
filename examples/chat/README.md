@@ -1636,6 +1636,25 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer   # 記
 - **入力量の削減率は `qualityClaimable` に関係なく常に出す**（`inputReduction`、
   JSON では `AnswerRunJson.inputReduction`）——入力量そのものは品質の主張ではない。
 
+**⭐ 追記（Issue #693 / 親 #498、ADR 0296）: 層2（回答に必要な情報の保持）の決定的な指標。**
+出典への到達（`compare` の `factStatementSurvived`）・最終回答の正しさ（`verdict`/
+`judgement`）とは別に、`src/answer-content-preservation.ts` の `checkContentPreserved` が
+「モデルへ実際に渡す文字列に、答えに要る情報（`expected.accept`）が部分文字列として
+残っているか」を LLM を呼ばずに判定する。`AnswerPathJson.contentPreservation`（ケースごと）・
+`AnswerRunJson.contentPreservation`（集計）として出力する——`schemaVersion` は 2→3。
+`must-abstain` 類（`category: "unknown"`）は保持すべき事実自体が無いため `applicable: false`
+になる。⚠ **これは回答が正しいことを主張しない**——`schedule-change-deadline`
+（held-out、ADR 0233 が見つけた自然発生の fail）は、digest に正解（`25日`）が実際に
+残っている（層2は真）まま、実際の回答は撤回済みの値（`20日`）だった（層3は偽）。
+層2と層3が別物であることの実例である。
+
+⚠ **カセットの鮮度**: `examples/chat/cassettes/answer.json` は 2026-09-17 に
+`gpt-4o-mini`（LLM）/ `text-embedding-3-small`・256次元（embedding）で記録されたもの。
+ADR 0296 の作業時点（2026-09-25、8日後）で `verify:answer`（記録と実 API の乖離を測る）は
+実行していない——鍵が無い作業環境のため。層3の回答評価側の陽性対照（同じ変異で judge が
+赤くなることの確認）は、変異後のプロンプトの記録追加を要するため未達のまま——鍵の判断は
+オーナーの領分であり、Issue #498 側の残作業として残っている（重複させない）。
+
 ---
 
 ## この会話生成（`src/scenario.ts`）について
