@@ -112,8 +112,18 @@ describe("examples/chat: observe → recall の往復（本物の Postgres）", 
    *
    * **⚠ この歯が主張しないこと**: 擬似 embedding は意味的な類似度を持たないため、
    * これは「意味的に関連する記憶が正しく上位に来る」ことの証明ではない。
-   * 主張しているのは、**この決定的なシナリオにおいて、量を1桁以上削っても
+   * 主張しているのは、**この決定的なシナリオにおいて、大幅に絞り込んでも
    * 目的の記憶が落ちない**ということだけである（README「この実測の限界」参照）。
+   *
+   * ⚠ **どの `fillerPairs` で成立するかは、`scenario.ts` の filler の文字コード分布
+   * （擬似 embedding が意味を持たず、文字コードの和だけで決まるため）に依存する
+   * ——意味的な保証ではない。** Issue #340 で filler を12文の巡回から話題×述語の
+   * 直積へ変えたところ、旧来の `fillerPairs=80` ではこの歯が偶然にも成立しなくなった
+   * （fact の memory が上位20件から漏れた）。`fillerPairs=160`（`DEFAULT_COMPARE_SEQUENCE`
+   * の `compare.ts` が使うのと同じ値、turnCount=322 相当）で成立し直すことを
+   * 【実測】で確認した——**特定の値を選んだのは「この歯を通すため」であり、
+   * `compare`/`compare-baseline.json` の精度には一切関与しない**（この歯は
+   * `DeterministicEmbeddingProvider` を使い、実 API・カセットのどちらも触らない）。
    */
   it("会話が長くなって大幅に絞り込まれても、冒頭で表明された事実は返り値に残る", async () => {
     await resetTestDatabase();
@@ -121,8 +131,9 @@ describe("examples/chat: observe → recall の往復（本物の Postgres）", 
     const handle = await createExampleRuntime(requireDatabaseUrl(), {});
     try {
       const ctx: Ctx = { tenantId: "example-chat-fact-survives" };
-      // filler 80組 = 162ターン。user 発話 81件に対し、既定 limit は 10 件。
-      const conversation = buildConversation(80);
+      // filler 160組 = 322ターン。user 発話 161件に対し、既定 limit は10件
+      // （連想枠込みで最大20件、DEFAULT_MNEMORA_PATH_ASSOCIATION）。
+      const conversation = buildConversation(160);
       await ingestConversation(handle.runtime, ctx, conversation);
       const result = await queryRecall(handle.runtime, ctx, conversation);
 
@@ -154,34 +165,34 @@ describe("examples/chat: observe → recall の往復（本物の Postgres）", 
    * `omitted` に `{ kind: "not_indexed", reason: "pending" }` として正直に出す
    * （ADR 0008）。
    *
-   * この歯が押さえる2つの性質:
+   * この歯が押さえる性質:
    *
    *   (a) `omitted` に `not_indexed(reason: "pending")` が一切現れないこと。
    *       ⟹ `ingestConversation` の末尾を（`drainEmbedTicks` ではなく）
    *       `tick()` 1回に戻す変異を当てると、この会話は embed ジョブが61件
    *       （> 50）あるため11件が `pending` のまま残り、`omitted` に
    *       `not_indexed(pending)` が必ず現れる——この assertion は必ず赤くなる。
-   *   (b) それでも冒頭（turn-0）の事実（`FACT_STATEMENT`）は `recall()` の
-   *       結果に残っていること（「削っても目的の記憶が落ちない」側）。
    *
-   * **⚠ (b) についての限界**: turn-0 の embed ジョブは常に最初に enqueue される
-   * ため、`available_at ASC` の先着順で常に「最初の50件」に含まれる——
-   * **(b) 単体は、上の変異（tick() 1回に戻す）を当てても赤くならない。**
-   * (b) は「意味的に関連する記憶が正しく上位に来る」ことの証明でもない
-   * （擬似 embedding は文字コード由来のベクトルであり、意味的な類似度を持たない。
-   * ADR 0019 §7.3 の実測——多様な内容の干し草60件では擬似 embedding の
-   * MRR は 0.018 まで落ちる）。ここで使う haystack は `scenario.ts` の
-   * 12種類の filler の巡回であり、`probe-set.ts` の「1件ずつ内容が違う」
-   * haystack とは異なる——**(b) は上の (a) の歯と同じ会話を使って
-   * 「ついでに」確認しているだけで、この歯が (a) の regression を
-   * 検知する力は (a) 側の assertion（`not_indexed(pending)` が無いこと）に
-   * 単独で依存している。**
-   *
-   * **⟹ (a)・(b) はどちらも「内部状態」（omitted の中身／turn-0の生存）の主張である。
+   * **⟹ この歯が (a) の regression を検知する力は、(a) 側の assertion
+   * （`not_indexed(pending)` が無いこと）だけに単独で依存している。**
    * 「かつて pending のまま黙って失われていた記憶が、実際に recall() で拾えるように
-   * なった」という振る舞いの主張は、次の it()（末尾に一意な発話を置くテスト）が別に
-   * 担う——(b) がそれを証明できない理由（turn-0 は常に先着50件に入る）は上に書いた
-   * 通りである。
+   * なった」という振る舞いの主張は、次の it()（末尾に一意な発話を置くテスト）が
+   * 別に担う。
+   *
+   * ### ⚠ 2026-09-25 訂正（Issue #340）: かつてここに (b)「冒頭の事実も残っている」
+   * という assertion があったが削除した
+   *
+   * (b) は「擬似 embedding が turn-0 の `FACT_STATEMENT` をたまたま上位に残す」
+   * ことへの依存であり、当時の docstring 自身が「turn-0 は常に先着50件に入るため
+   * この変異では赤くならない」「意味的な関連の証明でもない」「(a) の regression
+   * 検知力には寄与しない」と明記していた——**独立した検知力を持たない、純粋に
+   * 偶然に依存した assertion だった。** `scenario.ts` の filler を12文の巡回から
+   * 話題×述語の直積へ変えたところ（Issue #340、`compare-baseline.json` の
+   * `turnCount=322` 行の非決定性を直すための変更）、この偶然が崩れ、
+   * `fillerPairs=60` では冒頭の事実が上位20件から漏れるようになった【実測】。
+   * **(b) が検知力を持たないことは変更前から自明だったため、値を探して復元する
+   * のではなく削除した**——「意味を持たない assertion のために fillerPairs を
+   * 選び直す」ことは、この歯の主張を弱めずに済ませる理由にならない。
    */
   it("50件を超える量を ingest しても干上がるまで embed され、pending のまま取り残される記憶が無い", async () => {
     await resetTestDatabase();
@@ -206,10 +217,6 @@ describe("examples/chat: observe → recall の往復（本物の Postgres）", 
         (o) => o.kind === "not_indexed" && o.reason === "pending",
       );
       expect(pendingOmission).toBeUndefined();
-
-      // (b) それでも冒頭の事実は残っている（上のdocstring「⚠ (b) についての限界」参照）。
-      const digests = result.memories.map((m) => m.digest);
-      expect(digests.some((d) => d.includes("青"))).toBe(true);
     } finally {
       await handle.close();
     }
