@@ -234,7 +234,9 @@ function recordedOrderById(all: readonly RecalledMemory[]): ReadonlyMap<string, 
   const withRecordedAt = all.filter(
     (m): m is RecalledMemory & { recordedAt: Date } => m.recordedAt !== undefined,
   );
-  const sorted = [...withRecordedAt].sort((a, b) => a.recordedAt.getTime() - b.recordedAt.getTime());
+  const sorted = [...withRecordedAt].sort(
+    (a, b) => a.recordedAt.getTime() - b.recordedAt.getTime(),
+  );
   const order = new Map<string, number>();
   sorted.forEach((m, index) => order.set(m.memoryId, index + 1));
   return order;
@@ -244,7 +246,10 @@ function recordedOrderById(all: readonly RecalledMemory[]): ReadonlyMap<string, 
  * 記録順欄。`recordedOrderById` が順位を持たない（`recordedAt` が `undefined`）
  * 要素には欄を出さない。
  */
-function recordedOrderSegment(m: RecalledMemory, order: ReadonlyMap<string, number>): string | undefined {
+function recordedOrderSegment(
+  m: RecalledMemory,
+  order: ReadonlyMap<string, number>,
+): string | undefined {
   const rank = order.get(m.memoryId);
   return rank !== undefined ? `[記録順:${rank}]` : undefined;
 }

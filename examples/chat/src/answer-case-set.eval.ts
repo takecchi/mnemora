@@ -193,7 +193,10 @@ export const ANSWER_CASE_SET_EVAL: AnswerCase[] = [
     id: "eval-misattribution-order-swapped",
     category: "other-person",
     conversation: [
-      { role: "user", text: "同僚の佐藤さんの好きな飲み物はコーヒーです。わたしの好きな飲み物は紅茶です。" },
+      {
+        role: "user",
+        text: "同僚の佐藤さんの好きな飲み物はコーヒーです。わたしの好きな飲み物は紅茶です。",
+      },
       { role: "assistant", text: "承知しました。" },
       { role: "user", text: "最近のニュースについてどう思いますか。" },
       { role: "assistant", text: "どのニュースのことでしょうか。" },
