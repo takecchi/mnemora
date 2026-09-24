@@ -285,7 +285,7 @@ total = affinity × decay × tagMatch × freshness × strength
 `ScopeAggregate`）は1件も変わらない（実測: 同じ歯の中で `omitted` の `filtered`/`decayed`/
 `expired` の件数がどちらの方針でも同一であることを確認する）。
 
-### 6.3 走らせなかったもの（回答品質・実 embedding）
+### 6.3 走らせなかったもの（実 embedding を要する既存ベンチ）
 
 - **`examples/chat` の `retrieval-quality`/`compare`/`association-probes` ベンチは
   走らせていない。** これらは実 Postgres + pgvector・埋め込み（`local`/`recorded`）を要し
@@ -294,10 +294,62 @@ total = affinity × decay × tagMatch × freshness × strength
   いない。⟹ **触れていない層のベンチを走らせても、本変更の効果は測れない**
   （変える対象が候補生成ではなく段2の再スコアであるため、`retrieval-quality` の
   `hit@1`/`MRR` は理論上動かないはずだが、**実測していない**——机上の推測にとどめる）。
-- **LLM を経由した回答品質は未評価。** [ADR 0233](./0233-answer-quality-measured-once-against-the-real-api.md)
-  の `answer-bench` は実 API 呼び出しを要し、本セッションでは叩いていない
-  （マネージャー指示「回答品質は実 API が要るので叩くな」）。
-  **⟹ 回答品質への影響は未評価のまま残す。**
+- **🔴 LLM を経由した回答品質は、当初この節で「未評価」としていたが、その後マネージャーの
+  追加指示により実 API で評価した（§6.4）。この段落は事実に合わせて訂正する**——
+  [ADR 0233](./0233-answer-quality-measured-once-against-the-real-api.md) の
+  `answer-bench` そのものは走らせていない（`answer-time-weighting` という専用のベンチを
+  新設して測った、§6.4 参照）。
+
+### 6.4 回答品質の実測（マネージャー追加指示、Issue #690 段2b/3a/3b）
+
+**新設した `answer-time-weighting` ベンチ**（`examples/chat/src/time-weighting-bench.ts`）で、
+記憶を抽出 LLM を通さず直接（明示の `recordedAt`/`occurredAt`/`validFrom`/`validUntil` で）
+書き、`reinforce` し、壁時計を進めてから、同じ質問を `legacy`/`eventAwareFreshness` の両方で
+`recall()` → 回答生成（`gpt-4o-mini`）→ `gradeAnswer`（文字列一致の一次判定）で比べた。
+ケースは3類型（A: 恒常的な事実 vs 弱い競合記憶、B: 出来事は両方 `occurredAt` を持つ
+regression guard、C: 期限切れの予定の regression guard）と、段2b で追加した2類型
+（B'/C': 古い記憶が `occurredAt`/validity 列のいずれも持たない危険な場面）、
+計16ケース（dev 6・eval 6・eval-undated 4）。詳細な生データは
+`examples/chat/bench-results/` に commit してある（`STAGE3A-NOTES.txt`・
+`STAGE3B-1-NOTES.txt`・各 `*.json`/`*.log`）。
+
+#### 取り引き（トレードオフ）
+
+- **類型A（`reinforced-fact-vs-fresh-weak`）**: `legacy` 0/5 → `eventAwareFreshness` 5/5
+  （dev・eval の4ケースすべてで一貫、temperature 未指定・0 の両方）。恒常的な事実
+  （`occurredAt` 無し、古く記録され直近 `reinforce`）が `legacy` では埋もれ、
+  `eventAwareFreshness` で正しく想起される——本 ADR が狙った改善そのものである。
+- **`eval-undated-c1-seat-floor-reinforced`（類型C'）**: 古い予定が `occurredAt`/
+  `validFrom`/`validUntil` のいずれも持たず、直近に `reinforce` されている場面。
+  段3a の切り分け（temperature=0・20回）では `eventAwareFreshness` の `gradeAnswer`
+  正答数が **0/20**（`legacy` は 20/20）。ところが段3b-1 の本評価の取り直し
+  （temperature=0・同じケース定義・trials=5）では **5/5**（全問正解）——真逆の結果に
+  なった。`contextDiagnostics`（この PR で新設した、`recall()` のスコア内訳を毎回記録する
+  診断ログ）で両方の実行を比較すると、**`recall()` のスコアリングそのものは完全に一致
+  している**——`eventAwareFreshness` では古い予定が常に `rank=1`・文脈入り
+  （`score.total=0.8031002918516041`、両実行でビット単位まで同一）、`legacy` では常に
+  `rank=2`・`below_threshold` で除外される。variance があるのは**その後の LLM の
+  回答テキストそのもの**であり、同一プロンプト・temperature=0 でも別セッションでは
+  変わりうる（OpenAI が文書で認めている既知の制約——temperature=0 は「決定的に近づける」
+  だけで、ビット単位の再現を保証しない）。
+  ⟹ **`eventAwareFreshness` には「`occurredAt` も validity も無い、古いが最近
+  `reinforce` された予定を持ち上げる」性質がある。これは「恒常的な事実を持ち上げる」
+  ことと表裏の、設計上の取り引きである。** 検索側の事実（古い予定を rank1・文脈入り
+  させること）は複数回の実測で100%再現する——それが最終的な誤答に繋がるかどうかは、
+  LLM の頑健さに依存し実行ごとに揺れる。
+- **他のケース**（類型B/C の残り4ケース、類型B'/C' の残り3ケース）は、`legacy`/
+  `eventAwareFreshness` のどちらでも一貫して同じ結果になった（差なし）——設計どおり
+  regression guard として機能している。
+
+#### 既定判断への含意
+
+**既定を新方針へ倒すかどうかは、引き続き §7 のとおり v2.0.0 側のオーナー判断に委ねる。**
+本節の実測が示したのは「動くこと」に加えて「どちらの向きにも取り引きがあること」
+（恒常的な事実の埋没を直す代わりに、未構造化の古い情報を持ち上げるリスクを引き受ける）
+までであり、**「どちらの取り引きを製品として選ぶか」はここでは判断しない。**
+
+呼び出し回数・費用の累計、実行した trial・temperature の設定は PR 本文を参照
+（`main` が動いても腐らないよう、この ADR 本文には焼き込まない——ADR 0223 決定9）。
 
 ## 7. これがオーナー判断であるとする点 — 既定を新方針へ倒すかどうか
 
@@ -340,7 +392,12 @@ total = affinity × decay × tagMatch × freshness × strength
 - **`occurredAt` の有無を「恒常的か出来事か」の代理指標として使うことの妥当性は、
   この ADR では検証していない。** `docs/memory-model.md` §3 の定義に基づく解釈であり、
   実データでの分布は見ていない。
-- **実 embedding・実 LLM での効果は未評価**（§6.3）。
+- **実 embedding・実 LLM での効果は、その後マネージャー追加指示により16件の手作りケースで
+  評価した（§6.4）。** ただし **実運用のクエリ分布・記憶分布での効果は未評価のまま**——
+  この16件は「危ない場面」を狙って手で設計したものであり、実際のテナントで
+  `occurredAt`/validity 列を欠く記憶がどれだけの割合を占めるか、`eventAwareFreshness` を
+  有効にしたテナント全体での回答品質がどう動くかは、別途 `retrieval-quality`/`compare` 相当の
+  実運用規模のベンチが要る（§6.3 が走らせていないと明記した理由と同じ）。
 - **`decayClock: 'either'` の経路は、本 ADR のケース表に含めていない。** ADR 0165/0246 が
   `'either'` を「両方の `Math.max`」として扱っており、`freshness` の方針とは独立な軸なので
   理論上は `'wall'`/`'activity'` の実測から自明に従うはずだが、**個別には測っていない。**
