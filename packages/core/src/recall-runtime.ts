@@ -1699,29 +1699,61 @@ export async function runRecall(
   //
   // どちらの補正も、正確な値を得るには `MemoryStore`/`ScopeAggregate` の契約
   // （新しい集計欄、あるいは `excludeProvenanceKinds` を受け取る新しい
-  // `AggregateScopeOptions`）を変える必要があり、この PR の射程外——マネージャー決定
-  // により、契約は変えず「分母を信頼できないときは判定しない（鳴らさない）」側に倒す
-  // （揃っていない次元の詳細は本 PR 本文の表、ADR 0285 の本追記を参照）。
+  // `AggregateScopeOptions`）を変える必要があり、この PR の射程外——契約を変える
+  // 判断はオーナー・Issue #541 の線引きに送る（揃っていない次元の詳細は本 PR 本文の表、
+  // ADR 0285 の本追記を参照）。
   //
-  // `denominatorTrusted` が真であることが構造的に保証されるのは:
-  //   - `aggregate.filteredDecayed.count === 0`（scope 内に decayed 行が無い。
-  //     忘却ゲートが無効 [`includeFullyDecayed: true`] のときも常に0と定義されている
-  //     ——`memory-store.ts` の `aggregateScope` doc）——このときに限り、`eligible` の
-  //     中に decayed 行が1件も混ざっていないことが保証され、`eligible` がそのまま
-  //     正しい母数になる。
-  //   - `excludeProvenanceKinds` が指定されていない（未指定または空配列）——ANN 側の
-  //     絞りが集約側の絞りと完全に一致する。
-  // の両方が真のときだけ。
+  // 🔴 ADR 0285 追記その3（本節、コーディネーターのレビューを受けた訂正）: 初版
+  // （その2）は「`filteredDecayed.count === 0` でなければ判定そのものをしない」と
+  // 決めていたが、これは**本番のテナントではほぼ常に真になる**——古い記憶が decayed に
+  // なっているのは正常な運用状態であり、scope に1件でも decayed 行があれば
+  // この診断が恒久的に沈黙する。Issue #671 の規模（10万行）では、まさにこの理由で
+  // 診断の実効カバレッジがほぼゼロになっていた（過剰な保守化）。
+  //
+  // ⟹ **「判定しない」ではなく「下限（lower bound）で判定する」に直す。**
+  //
+  //   `reachableLowerBound = max(0, eligible - aggregate.filteredDecayed.count)`
+  //
+  // **これが健全（sound）である証明**: 真の母数を
+  // `trueReachable = eligible - X`（`X` = scope 内で「埋め込みあり かつ decayed」の
+  // 行数、未知）と置く。`aggregate.filteredDecayed.count` は embedding_status を
+  // 問わず decayed 行を数えるため、`X` はその部分集合であり
+  // `0 <= X <= aggregate.filteredDecayed.count` が常に成り立つ。⟹
+  // `trueReachable = eligible - X >= eligible - aggregate.filteredDecayed.count`。
+  // 右辺を0で下から丸めたものが `reachableLowerBound` であり、
+  // `reachableLowerBound <= trueReachable` が常に成り立つ（`eligible`/
+  // `filteredDecayed.count` が非負整数である限り、`X` の実際の値を知らなくても
+  // この不等式は崩れない）。⟹ `min(kPrime, reachableLowerBound) <=
+  // min(kPrime, trueReachable)` なので、
+  // `annHits.length < min(kPrime, reachableLowerBound)` が真であれば
+  // `annHits.length < min(kPrime, trueReachable)` も必ず真——**下限で判定する限り、
+  // 偽陽性は出ない。**
+  //
+  // ⚠ `excludeProvenanceKinds` はこの不等式の外に居る。`excludeProvenanceKinds` が
+  // 指定されると、真の母数はさらに「除外した provenance kind に一致しない」行だけに
+  // 絞られる——`aggregate` はこの絞りを一切知らないため、`reachableLowerBound` が
+  // 真の母数を上回ってしまう可能性がある（`reachableLowerBound <= trueReachable` が
+  // 保証できなくなる）。⟹ この次元が指定されているときは、下限すら引けない
+  // ——引き続き判定しない（鳴らさない）。
+  //
+  // **引き受ける負債**: `reachableLowerBound` は「未索引かつ decayed」の行の分だけ
+  // 真の母数より小さくなりうる（`X < aggregate.filteredDecayed.count` のとき）。
+  // ⟹ 索引が実際には取りこぼしていても、`annHits.length` がたまたま
+  // `reachableLowerBound` 以上（かつ `trueReachable` 未満）に収まると、この診断は
+  // 鳴らない——**見逃しがありうる**（ADR 0285 追記その3「引き受けた負債」、
+  // `recall-pipeline.test.ts` の「見逃しの対照」がこの境界を固定する）。
+  // それでも「decayed が1件でもあれば恒久的に鳴らない」より厳密に良い——本番の
+  // 大半のテナント（decayed 行が一部だけ在る scope）でこの診断が機能するようになる。
   //
   // 条件は `ann_unreached` の前提（candidateGenerationExecuted && kPrime > 0）と揃え、
-  // 「母数が信頼できる（denominatorTrusted）」「母数 > 0（scope に実際に探す対象がある）」
-  // 「ANN が母数（と kPrime の小さいほう）に届かなかった」を足す——`annHits.length === 0`
+  // 「下限が使える（lowerBoundUsable）」「下限 > 0（scope に実際に探す対象がある）」
+  // 「ANN が下限（と kPrime の小さいほう）に届かなかった」を足す——`annHits.length === 0`
   // という真の0件だけでなく、天井（`hnsw.max_scan_tuples` 等）で途中打ち切られた場合も
   // 同じ形で捕まえる（旧条件より広い。理由は下）。
   //
   // ⚠ **旧条件（`annHits.length === 0`）を落とし、`annHits.length < min(kPrime,
-  // denominator)` に一般化した。** 旧条件は「真に0件」のときしか名乗らなかったが、
-  // 索引が天井に当たって `kPrime` 未満・母数未満の件数で打ち切られた場合も、
+  // reachableLowerBound)` に一般化した。** 旧条件は「真に0件」のときしか名乗らなかったが、
+  // 索引が天井に当たって `kPrime` 未満・下限未満の件数で打ち切られた場合も、
   // 「索引が、実際に在る候補を返しきれなかった」という同じ事象である——0件かどうかは
   // 本質ではない。
   //
@@ -1731,29 +1763,29 @@ export async function runRecall(
   //
   // キー名も改めた——`annWindowHadNoInScopeCandidates`（「0件だった」を主張する名前）は、
   // 一般化した条件（0件とは限らない）の下では中身と食い違う。`annReturnedFewerThanReachable`
-  // （「ANN が、到達可能な母数より少ない件数しか返さなかった」）に変える。値は
+  // （「ANN が、到達可能な下限より少ない件数しか返さなかった」）に変える。値は
   // 引き続き条件が真のときだけ足す（ADR 0084 §6 の歯②——`recall-channels.test.ts` の
-  // `toEqual`——との衝突を避けるため。理由は変わっていない）。加えて `annReachablePool`
-  // （その時点の母数）も同時に足す——診断に使う数を、後から `eligible` を読み直さずに
-  // 得られるようにするため（`detail` は型無しの診断欄なので、欄を増やしても公開型は
-  // 動かない。ADR 0285 §7 実測）。
-  const denominatorTrusted =
-    aggregate.filteredDecayed.count === 0 &&
-    (validatedQuery.excludeProvenanceKinds === undefined ||
-      validatedQuery.excludeProvenanceKinds.length === 0);
-  const reachablePool = eligible;
+  // `toEqual`——との衝突を避けるため。理由は変わっていない）。あわせて足す欄は
+  // `annReachableLowerBound`（その時点の下限——`annReachablePool` という以前の名前は
+  // 「これが正確な母数である」と読めてしまうため、下限であることが名前自体から
+  // 分かるよう改めた）。`detail` は型無しの診断欄なので、欄名の変更・追加は公開型を
+  // 動かさない（ADR 0285 §7 実測）。
+  const lowerBoundUsable =
+    validatedQuery.excludeProvenanceKinds === undefined ||
+    validatedQuery.excludeProvenanceKinds.length === 0;
+  const reachableLowerBound = Math.max(0, eligible - aggregate.filteredDecayed.count);
   if (
     annStageTrace !== undefined &&
     candidateGenerationExecuted &&
     kPrime > 0 &&
-    denominatorTrusted &&
-    reachablePool > 0 &&
-    annHits.length < Math.min(kPrime, reachablePool)
+    lowerBoundUsable &&
+    reachableLowerBound > 0 &&
+    annHits.length < Math.min(kPrime, reachableLowerBound)
   ) {
     annStageTrace.detail = {
       ...annStageTrace.detail,
       annReturnedFewerThanReachable: true,
-      annReachablePool: reachablePool,
+      annReachableLowerBound: reachableLowerBound,
     };
   }
 
