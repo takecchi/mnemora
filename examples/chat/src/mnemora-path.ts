@@ -179,10 +179,7 @@ function subjectSegment(m: RecalledMemory): string {
  * （`companionOf` を持つのは同伴取得された側だけ、`docs/recall.md` §8）なので、
  * `all` 全体を見て逆向き（`m` が誰かの `companionOf` に指されている側）も拾う。
  */
-function contradictionCounterpartIds(
-  m: RecalledMemory,
-  all: readonly RecalledMemory[],
-): string[] {
+function contradictionCounterpartIds(m: RecalledMemory, all: readonly RecalledMemory[]): string[] {
   const ids = new Set<string>();
   if (m.retrievedVia === "mandatory_companion" && m.companionOf !== undefined) {
     ids.add(m.companionOf);
