@@ -160,6 +160,12 @@ describe(
             memoryId: MEMORY_ID,
             digest,
             retrievedVia: "ann",
+            // Issue #691 以降、buildMnemoraPrompt は provenanceKind/speaker/subjectId も
+            // 描画する。この歯の本題（digest の中身と出典到達の対比）とは無関係だが、
+            // 実際の recall() が返す形（必須欄が値を持つ）に近づけておく。
+            provenanceKind: "stated",
+            speaker: null,
+            subjectId: null,
           },
         ],
         omitted: [],

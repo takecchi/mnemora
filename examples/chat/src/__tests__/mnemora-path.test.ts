@@ -97,11 +97,18 @@ describe("buildMnemoraPrompt", () => {
           digest: "テストの digest",
           retrievedVia: "ann",
           provenanceKind: "stated",
+          speaker: null,
+          subjectId: null,
           score: { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 },
         },
       ]),
     );
-    expect(prompt).toContain("- テストの digest");
+    // digest はそのまま含まれる（前に由来・話者・主題のタグが付く。
+    // Issue #691。タグの内容・組み合わせの網羅的な描画契約は
+    // `provenance-prompt-contract.test.ts` が持つ——ここでは配線が
+    // 生きていることだけを見る）。
+    expect(prompt).toContain("テストの digest");
+    expect(prompt).toContain("[由来:stated]");
     expect(prompt).toContain("1 件のうち 1 件");
   });
 });
