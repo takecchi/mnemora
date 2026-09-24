@@ -4,7 +4,7 @@ import { ObserveInputSchema } from "../observation.js";
 import type { PromptSpec, LLMProvider } from "../interfaces/llm-provider.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
-import recording from "./fixtures/extraction-context-recorded.json";
+import recording from "./fixtures/extraction-context-recorded.json" with { type: "json" };
 
 const ctx = { tenantId: "context-test" };
 const extractionContext = {
