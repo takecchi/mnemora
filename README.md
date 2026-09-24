@@ -374,18 +374,222 @@ const recalled = await recall(ctx, { text: "..." })
 `markContested` / `resolveContested` は **「この2件は対向する」と*既に決まっている*ものを
 書き込む口**であり（上の「是正・取り消し」）、**会話の中から矛盾を*見つける*処理は
 `@mnemora/core` に存在しない**（[ADR 0134](./docs/decisions/0134-mark-contested-explicit-operation.md)
-決定1・[Issue #197](https://github.com/takecchi/mnemora/issues/197)）。
+決定1・[Issue #197](https://github.com/takecchi/mnemora/issues/197)）。**これは
+`findCorrectionCandidates`/`applyCorrection`（ADR 0232/ADR 0242、下記）を挟んでも変わらない**
+——それらは「発見」と「呼び出し側が確定させた対を書き込む」口であり、「どれが訂正か」
+「関連度の高い候補が本当に相手か」の判定は依然として呼び出し側が持つ。
 
 **⟹ npm から入れたままの既定の振る舞いは「訂正しても、古いほうが出続ける」。**
 古いほうを遠ざけるには、**採用側が「どの2件が矛盾しているか」を決めて
-`markContested` を呼び、決着を `resolveContested` で渡す**必要がある。
+`markContested` を呼び、決着を `resolveContested` で渡す**必要がある
+（またはその2段を1つの口にまとめた `applyCorrection` を使う）。
 ⛔ **どちらが正しいかも、どちらが新しいかも、mnemora は判定しない。**
 
 ⚠ **これは `docs/north-star.md`「目指す姿」の項目5「間違いを正すと、古いほうが先に
 出てこなくなる」が、出荷物の既定では*まだ*満たされていないということである**
-（[docs/roadmap.md](./docs/roadmap.md) §7.13）。**検出の設計は
-[PR #366](https://github.com/takecchi/mnemora/pull/366)（ADR 0185 の草案）で検討中。
-⚠ まだマージされていない。**
+（[docs/roadmap.md](./docs/roadmap.md) §7.13）。**自動検出（会話から「これは訂正だ」を
+機械が判定する経路）の設計は [ADR 0185](./docs/decisions/0185-contradiction-detection-path.md)
+（状態: 提案）が2軸に分け、そのうち (B)「主張キー」方式は
+[Issue #534](https://github.com/takecchi/mnemora/issues/534) の判断により
+`v1.0.0` には入れていない**（設計上の却下ではなく、カセット全滅の実費と鍵の制約が理由。
+[#371](https://github.com/takecchi/mnemora/issues/371)/[#372](https://github.com/takecchi/mnemora/issues/372)
+がその段を引き継ぐ）。**この README はそれらの設計決定を上書きしない。**
+具体例と境界の契約は次の節を見ること。
+
+---
+
+## 訂正の境界: `observe()` と `applyCorrection()` は別操作である（Issue #692）
+
+**会話の中で「さっきのは間違いで、本当はこうでした」と言われたことを `observe()` に渡すことと、
+古い記憶を実際に失効させることは、別の操作である。自然な訂正の発話を `observe()` すれば
+自動で旧情報が消える、と受け取られうる誤解を、具体例で正す。**
+
+### (a) `observe()` だけの場合
+
+```ts
+await observe(ctx, { kind: "utterance", text: "私の好きな色は青です。", speaker: "user" });
+await observe(ctx, {
+  kind: "utterance",
+  text: "訂正します。よく考えたら、好きな色は青ではなく赤でした。",
+  speaker: "user",
+});
+
+const recalled = await recall(ctx, { text: "わたしの好きな色を覚えていますか?", limit: 1 });
+```
+
+**何が起きるか**: 2件とも独立した `Memory`（`status: "active"`）として保存される。
+**何が起きないか**: どちらの `status` も変わらない。`contestedWithId` / `supersededById` は
+どちらも `null` のまま。mnemora は2件の関係を一切記録していない——「これは訂正の発話だ」
+という判断そのものを `observe()` は行わない（`observe()` の契約に訂正の検出は無い）。
+
+**実測**（`examples/chat/src/correction-demo.ts` を実際に Postgres に対して走らせ、
+書き込み操作に一切進んでいない段階——`findCorrectionCandidates` は呼ばれているが、
+これは読み取り専用で DB を書き換えない——で `recall()` した結果。2026-09-25、
+deterministic provider、`pnpm --filter @mnemora/example-chat run correction`）:
+
+```
+問い合わせ: recall({ text: "わたしの好きな色を覚えていますか?", limit: 1 })
+件数: 1
+  - "私の好きな色は青です。" (retrievedVia=ann)
+```
+
+**⟹ 通常のランキング（`retrievedVia=ann`）だけで答えが決まり、しかもこの実行では
+「訂正済みのつもりの古い値」がそのまま単独で返っている。** `contested` / `superseded` の
+どちらの印も付いていない——`recall()` から見ると、これは「ただの `Memory`」でしかない。
+⚠ **どちらが上位に来るかは埋め込みの質に依存し、実行によって逆になりうる。**
+「新しいほうが自然に勝つ」という保証は無い、という契約そのものが本体であって、
+この実行での順位の向きは本題ではない。
+
+### (b) 候補探索 → 対象選択 → `applyCorrection`
+
+呼び出し側が「これは訂正だ」と判断したら、次の3段を明示的に踏む:
+
+```ts
+// 1. 発見: 既存の recall() を1回呼ぶだけ。書き込み・LLM 呼び出しは無い（ADR 0232）。
+const discovery = await runtime.findCorrectionCandidates(ctx, {
+  text: "訂正します。よく考えたら、好きな色は青ではなく赤でした。",
+  excludeMemoryIds: [correctionMemoryId],
+});
+// discovery.candidates は関連度順の一覧——mnemora はここでは何も選ばない。
+
+// 2. 選択: どの候補が「訂正される相手」かを、呼び出し側が決める。
+//    discovery.candidates[0] を機械的に採らない——下の「関連度だけで確定しない」を参照。
+const correctedId = /* 呼び出し側が選んだ memoryId（人が選ぶ・UI で選ばせる 等） */;
+
+// 3. 確定・書き込み: 選んだ相手が候補一覧に実在するかを照合してから markContested する。
+const marked = await runtime.applyCorrection(ctx, {
+  discovery,
+  correctedId,
+  correctingId: correctionMemoryId,
+});
+// marked.kind: "awaiting_choice" | "not_a_candidate" | "contested" | "resolved"
+```
+
+**実測**（同じ会話に対して、同じ `findCorrectionCandidates`/`applyCorrection` を実際に
+呼んだ結果。2026-09-25、deterministic provider、
+`pnpm --filter @mnemora/example-chat run correction`）:
+
+```
+--- 0. 発見の段: findCorrectionCandidates(text: 訂正の発話, excludeMemoryIds: [訂正自身]) ---
+outcome=candidates / 候補1件
+  - #2位 "私の好きな色は青です。" (memoryId=a72fa827-..., score.total=0.80518)
+⟹ この候補一覧は棄権しない(ADR 0232 実測: B群8件中0件が棄権)。
+   mnemora は候補を出す。だが選ぶのは人であり、人が選ばなければ何も起きない。
+
+--- 2. markContested(指名, 訂正) ⟹ outcome=contested ---
+件数: 2
+  - "私の好きな色は青です。" (retrievedVia=ann)
+  - "訂正します。よく考えたら、好きな色は青ではなく赤でした。"
+    (retrievedVia=mandatory_companion, companionOf=a72fa827-...)
+⟹ 両方出た: はい / mandatory_companion として出た: はい
+
+--- 3. resolveContested(supersede, winner=correction) ⟹ outcome=resolved ---
+件数: 1
+  - "訂正します。よく考えたら、好きな色は青ではなく赤でした。" (retrievedVia=ann)
+⟹ 古いほうが消えた: はい
+⟹ omitted に "superseded" として記録された(=最初から無かったのではなく消えた): はい
+```
+
+**⟹ ここで初めて、古い記憶が `recall()` から落ちる。** (a) との差は、mnemora が何かを
+賢く判定したことではない——**呼び出し側が `correctedId` を明示的に渡したこと**である。
+
+`applyCorrection` は `resolution` を渡さずに1回呼ぶと `markContested` 相当だけで止まり
+（`kind: "contested"`）、その `resolution` を渡した2回目の呼び出しで `resolveContested`
+相当まで進む、という2段呼び出しにも対応する（[ADR 0242](./docs/decisions/0242-runtime-apply-correction.md)
+決定3。上の実測もこの2段呼び出しで走っている）。
+
+### 関連度だけで対象を確定しない — 否定・曖昧・別人・別期間は失効させてはいけない
+
+**`findCorrectionCandidates` が返す候補は、関連度の高い順に並んでいるだけである。
+1位だから訂正の相手だとは限らない。**
+[ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md) が
+実測した数字（23件の手書きケース。⛔ 代表性は主張しない）:
+
+| 群 | 内容 | 結果 |
+|---|---|---|
+| A（15件、訂正すべき相手が実在） | hit@1 | **100%**（15/15 が1位） |
+| B（8件、⛔ 訂正してはいけない） | 棄権率（0件を返す） | **0%**（1件も止まらない） |
+| B（8件） | 深い誤爆（守るべき事実を1位に返す） | **75%**（6/8） |
+| A/B | score の分布 | **重なっており、閾値では分離できない** |
+
+**B群は次の4分類（`docs/autonomy.md` §2.2 決定1）——実例は
+[examples/chat/src/correction-case-set.eval.ts](./examples/chat/src/correction-case-set.eval.ts)
+にある held-out ケースから引く**（見て実装や閾値を調整していない集合）:
+
+- **否定**（negation）: 「今朝はジョギングをしませんでした。」——「毎朝6時に起きてジョギングを
+  しています」という**習慣**の記憶を失効させてはいけない。1日しなかったことは習慣の否定ではない。
+- **曖昧**（vague）: 「やっぱりさっきのは違ったかもしれません。」——何を指しているかが発話から
+  決まらない。どの候補を相手として選んでも、選んだ根拠が発話に無い。
+- **別人**（other_person、`speaker`/`subject` の違い）: 「訂正します。同僚が生まれ育ったのは
+  高知ではなく新潟でした。」——訂正の主語は同僚であり、**本人**の出身地
+  （「私が生まれ育ったのは高知です」）には掛からない。
+- **別期間**（other_period）: 「去年所属していたのは品質保証チームではなく開発支援チームでした。」
+  ——訂正しているのは**去年**の所属であり、「いま所属しているのは品質保証チームです」という
+  **現在**の記憶には掛からない。
+
+**この4分類はいずれも、埋め込みの関連度だけを見れば1位（またはそれに近い順位）で返ってくる**
+（ADR 0232 実測: 上表の「深い誤爆 75%」の内訳は、否定 2/2・別人 2/2・別期間 2/2・曖昧 0/2）。
+**⟹ `applyCorrection` に渡す `correctedId`（＝「これが相手だ」という確定）は、関連度の
+ランキングから機械的に導ってはいけない。**発話の主語・時制・法（肯定/否定/推量）まで読んだ
+上で、呼び出し側が決める。**mnemora 自身はこの読解を一切行わない**——`findCorrectionCandidates`
+は関連度で候補を並べるだけであり、`applyCorrection` は指名が候補一覧に実在するかしか見ない。
+
+### 自動検出は未提供 — どこが呼び出し側の責任か
+
+**mnemora は「この発話が訂正である」ことも、「関連度の高い候補が実際に訂正の相手である」ことも、
+自動では判定しない。** 提供しているのは次の2つの口だけである:
+
+1. **`findCorrectionCandidates`**（発見）— 呼び出し側が「これは訂正の発話だ」と*既に判断した*
+   `text` を渡すと、関連度順の候補を返す。⛔ 書き込まない・LLM を呼ばない。
+2. **`applyCorrection`**（確定・書き込み）— 呼び出し側が指名した `correctedId` が候補一覧に
+   実在するかを照合し、実在すれば `markContested`/`resolveContested` を呼ぶ。⛔ 相手を選ばない
+   （`discovery.candidates[0]` を一切参照しない）。
+
+**次の2つの判断は、mnemora が持たない責任範囲であり、呼び出し側（人・上位のアプリケーション層）
+が担う**:
+
+- 「この発話は訂正である」という分類（`findCorrectionCandidates` に渡すかどうかの判断）。
+- 「関連度の高い候補が、実際に訂正の相手であるか」という確定（`applyCorrection` に渡す
+  `correctedId` の選定。上の否定/曖昧/別人/別期間を踏まえる責任）。
+
+**自動検出（会話から訂正を見つけ、対象まで機械が決める経路）は、この issue の範囲外であり、
+実装していない。** 既存の関連 issue とその設計決定を上書きしない:
+
+- [#197](https://github.com/takecchi/mnemora/issues/197) — 矛盾の検出経路が1つも無い（親issue）。
+- [#371](https://github.com/takecchi/mnemora/issues/371) — (B) 第1段: 抽出に「主張キー」を
+  持たせる（検出はまだしない）。
+- [#372](https://github.com/takecchi/mnemora/issues/372) — (B) 第2段: 主張キー・重なる有効期間で
+  機械的に `contested` にする（`superseded` へは進めない）。
+- [#534](https://github.com/takecchi/mnemora/issues/534) — 自動検出（(B) 主張キー方式）は
+  `v1.0.0` に入れない（オーナー判断。設計上の却下ではなく、カセット全滅の実費と鍵の制約が理由）。
+
+⚠ **この節は、#371/#372 が引き継ぐ「主張キー」方式（(B)）の設計を一切変えていない。**
+決めているのは、その自動検出が着地するまでの間、**出荷物の既定の振る舞い（`observe()`
+だけでは何も失効しない）と、明示 API を使った安全な訂正フローが何か**だけである。
+**⛔ 本節は「文書によって自動理解を実現した」ことを主張しない**——上の (a)/(b) はどちらも
+呼び出し側の明示的な判断を前提にしている。
+
+### 実際に動くコード
+
+- [`examples/chat/src/correction-demo.ts`](./examples/chat/src/correction-demo.ts) — 上の
+  (a)/(b) を実際に `Runtime` に対して走らせる、本物の Postgres 向けデモ実装。実行手順・
+  成功/保留（`awaiting_choice`/`choice_not_in_candidates`）の扱いは
+  [examples/chat/README.md](./examples/chat/README.md) の `correction` 節を見ること。
+- [`examples/chat/src/correction-candidate-arm.ts`](./examples/chat/src/correction-candidate-arm.ts) —
+  上の A群/B群の数字を再現する評価アーム
+  （`pnpm --filter @mnemora/example-chat run correction-candidates`）。
+- 型と3態/4態の契約は
+  [`packages/core/src/apply-correction.ts`](./packages/core/src/apply-correction.ts) の
+  `ApplyCorrectionResult`（`"awaiting_choice" | "not_a_candidate" | "contested" | "resolved"`）。
+  歯は
+  [`packages/core/src/__tests__/apply-correction.test.ts`](./packages/core/src/__tests__/apply-correction.test.ts)
+  （成功・保留・失敗を握り潰さないことを実測。件数は `main` が動けば変わるためここには
+  写さない——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。`markContested`/`resolveContested`
+  自身が返す `conflict`（並行書き込み時の TOCTOU）は
+  [`mark-contested.test.ts`](./packages/core/src/__tests__/mark-contested.test.ts)/
+  [`resolve-contested.test.ts`](./packages/core/src/__tests__/resolve-contested.test.ts) が
+  検査済みであり、`applyCorrection` はその結果をそのまま運ぶだけで独自の分岐を持たない
+  （ADR 0242 決定3 のコメント「`markResult`/`resolveResult` は…そのまま運ぶ」）。
 
 ---
 
