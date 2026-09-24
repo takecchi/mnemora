@@ -226,6 +226,49 @@ describe("recall() — 連想枠（association、既定 off）", () => {
     expect(assocEntry.subjectId).toBe("user:associated");
   });
 
+  it("連想で拾った候補にも recordedAt/occurredAt が在る（Issue #691 の子、Issue #702、ADR 0298。キーは常に在り、occurredAt の値は null になりうる）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchorRecordedAt = new Date("2026-03-01T00:00:00.000Z");
+    const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
+      digest: "アンカー本文",
+      recordedAt: anchorRecordedAt,
+      occurredAt: new Date("2026-02-01T00:00:00.000Z"),
+    });
+    const associatedRecordedAt = new Date("2026-03-02T00:00:00.000Z");
+    const associated = await createEmbeddedMemory(stores, [0, 1], {
+      digest: "連想本文",
+      recordedAt: associatedRecordedAt,
+      provenance: {
+        kind: "inferred",
+        model: "gpt-4o-mini",
+        promptVersion: "v1",
+        basis: { memoryIds: [], observationIds: ["obs-1"] },
+        confidence: 0.5,
+      },
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      association: { maxCount: 5, anchorCount: 1 },
+    });
+
+    const anchorEntry = result.memories.find((m) => m.memoryId === anchor.id)!;
+    expect(anchorEntry.retrievedVia).toBe("ann");
+    expect(Object.hasOwn(anchorEntry, "recordedAt")).toBe(true);
+    expect(anchorEntry.recordedAt).toEqual(anchorRecordedAt);
+    expect(Object.hasOwn(anchorEntry, "occurredAt")).toBe(true);
+    expect(anchorEntry.occurredAt).toEqual(new Date("2026-02-01T00:00:00.000Z"));
+
+    const assocEntry = result.memories.find((m) => m.memoryId === associated.id)!;
+    expect(assocEntry.retrievedVia).toBe("association");
+    expect(Object.hasOwn(assocEntry, "recordedAt")).toBe(true);
+    expect(assocEntry.recordedAt).not.toBeUndefined();
+    expect(assocEntry.recordedAt).toEqual(associatedRecordedAt);
+    expect(Object.hasOwn(assocEntry, "occurredAt")).toBe(true);
+    expect(assocEntry.occurredAt).not.toBeUndefined();
+    expect(assocEntry.occurredAt).toBeNull(); // occurredAt を渡していないので既定 null
+  });
+
   it("既に返る集合（withinLimit）と重複しない", async () => {
     const { runtime, stores } = buildRuntime();
     const anchor = await createEmbeddedMemory(stores, [1, 0], { digest: "M1" });
