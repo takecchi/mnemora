@@ -831,6 +831,10 @@ export async function runRecall(
         lastReinforcedAt: memory.lastReinforcedAt,
         strength: memory.strength,
         halfLifeHours: memory.halfLifeHours,
+        // Issue #690 / ADR 0295: 省略時は undefined のまま渡り、defaultScoringStrategy 側
+        // （scoring.ts の DEFAULT_TIME_WEIGHTING_POLICY）が "legacy" に解決する——
+        // 既定値をここで二重に書かない（唯一の出所は scoring.ts）。
+        timeWeighting: validatedQuery.timeWeighting,
         ...decayScoringExtras(memory),
       });
       return {
@@ -987,6 +991,8 @@ export async function runRecall(
             lastReinforcedAt: companionMemory.lastReinforcedAt,
             strength: companionMemory.strength,
             halfLifeHours: companionMemory.halfLifeHours,
+            // Issue #690 / ADR 0295: 3箇所すべてで同じ値を渡す（唯一の出所は scoring.ts）。
+            timeWeighting: validatedQuery.timeWeighting,
             ...decayScoringExtras(companionMemory),
           });
           return {
@@ -1315,6 +1321,10 @@ export async function runRecall(
             lastReinforcedAt: memory.lastReinforcedAt,
             strength: memory.strength,
             halfLifeHours: memory.halfLifeHours,
+            // Issue #690 / ADR 0295: 連想枠（段3.5）の順位キーにも同じ方針を伝播させる
+            // （ADR 0246 決定1「新しい順位の定義を作らない」——同じ関数を呼ぶ構造がそのまま
+            // 本 ADR の伝播も引き受ける）。
+            timeWeighting: validatedQuery.timeWeighting,
             ...decayScoringExtras(memory),
           });
           // ⭐ Issue #402: 席の取り合いは `hit.similarity`（アンカーとの近さ）と

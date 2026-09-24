@@ -865,6 +865,18 @@ Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.m
 
 **「なぜこれが返ったか」は自然文ではなく構造で返す。** `explain.stages` と `RecalledMemory.score` を組み合わせれば「段1でベクトル距離0.12として拾われ、段2で decay 0.9 × tagMatch 1.2 × freshness 1.0 × strength 0.8 を掛けて total 0.83 になり、k=10 の9位で予算内に収まった」という説明を機械的に再構成できる。この構造から自然文の説明文を組み立てるのは呼び出し側の仕事であり、mnemora の仕事ではない。理由は §6 で述べたのと同じ——mnemora はどんな言語で・どんなトーンで・誰に向けて説明するかを知らない。mnemora が保証するのは、説明を組み立てるために必要な材料が欠けていないことだけである。
 
+### 7.1 `timeWeighting` — 恒常的な記憶と出来事の鮮度を分ける（任意、既定は従来どおり。Issue #690、[ADR 0295](./decisions/0295-time-weighting-policy-opt-in.md)）
+
+`freshness` は既定（`"legacy"`）では `occurredAt ?? recordedAt` を起点にした減衰係数であり、`decay`（`lastReinforcedAt` 起点。`reinforce` するたびに若返る）と**同じ半減期**を使う。**`occurredAt` が無い記憶**（`docs/memory-model.md` §3 の定義上、特定の出来事時刻を持たない「恒常的な事実・好み」であることが多い）は、`freshness` の起点が `recordedAt`（記録した時刻）にフォールバックする——⟹ **使われ続けている（`reinforce` されている）恒常的な事実でも、`recordedAt` が古いというだけで `freshness` が沈み続け、`total` を引きずり下ろす。** これが「時間の二重減衰」である。
+
+`RecallQuery.timeWeighting?: "legacy" | "eventAwareFreshness"` を渡すと、`occurredAt` が無い記憶に限って `freshness` を 1（`MAX_FRESHNESS`、ADR 0036 の上限そのもの）に固定できる。`occurredAt` が在る記憶（実際に出来事時刻を持つもの——「来月の出張」「先月の会議」等）は、`"legacy"` と完全に同じ式のままであり、事件の順位付けは1文字も変わらない。
+
+**省略時は `"legacy"`。** この欄を渡さない呼び出しは `recall()` の結果が1バイトも変わらない——既定を新方針にするかどうかはオーナー判断として開いたままである（ADR 0295 §7）。
+
+**⛔ 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート（`includeOutsideValidity`）とは独立である。** `timeWeighting` は段2（再スコア、この節が扱う話）だけに効き、段1の候補生成ゲート・後置フィルタの述語には一切渡らない——期限切れの予定は、`timeWeighting` の値に関係なく引き続き除外される。
+
+比較実測・検討した他の案（テナント設定にする・`Memory` に明示フラグを足す・半減期を分ける、等）は ADR 0295 を参照。
+
 ---
 
 ## 8. 矛盾がある場合の提示

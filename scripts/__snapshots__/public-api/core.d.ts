@@ -1431,6 +1431,7 @@ export {};
 import { z } from "zod";
 import type { MemoryId, RecallId } from "./ids.js";
 import type { ProvenanceKind } from "./provenance.js";
+import type { TimeWeightingPolicy } from "./strategies/scoring.js";
 export type CountKind = "exact" | "lower_bound" | "unknown";
 export declare const CountKindSchema: z.ZodEnum<{
     unknown: "unknown";
@@ -1939,6 +1940,7 @@ export interface RecallQuery {
     includeOutsideValidity?: boolean;
     association?: RecallAssociationQuery;
     includeSubjectless?: boolean;
+    timeWeighting?: TimeWeightingPolicy;
 }
 export declare const RECALL_CHANNELS: readonly [
     "ann",
@@ -1998,6 +2000,10 @@ export declare const RecallQuerySchema: z.ZodObject<{
         minSimilarity: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
     includeSubjectless: z.ZodOptional<z.ZodBoolean>;
+    timeWeighting: z.ZodOptional<z.ZodEnum<{
+        legacy: "legacy";
+        eventAwareFreshness: "eventAwareFreshness";
+    }>>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;
@@ -2931,8 +2937,15 @@ export interface ScoringInput {
     nowSeq?: number;
     decayBaseSeq?: number | null;
     halfLifeRecalls?: number | null;
+    timeWeighting?: TimeWeightingPolicy;
 }
 export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
+export declare const TIME_WEIGHTING_POLICIES: readonly [
+    "legacy",
+    "eventAwareFreshness"
+];
+export type TimeWeightingPolicy = (typeof TIME_WEIGHTING_POLICIES)[number];
+export declare const DEFAULT_TIME_WEIGHTING_POLICY: TimeWeightingPolicy;
 export declare const MAX_FRESHNESS = 1;
 export interface NonSimilarityBoundInput {
     queryTags: readonly string[];
