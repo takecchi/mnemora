@@ -1429,18 +1429,49 @@ async function runIdentifierProbes(): Promise<void> {
  *
  * ⚠ **テナントを分けても、埋め込みのテーブルは分かれていない**(Issue #363)。
  * 4つの arm は同じ埋め込み空間(同じ `memory_embeddings_*` テーブル)へ同じ会話を
- * ingest するので、テーブルの中に互いのほぼ同じ行(near-duplicate)を持つ。
- * ⟹ **起こりうる機構**: プランナが HNSW の索引スキャンを選んだ場合、`tenant_id` の
- * 絞り込みは索引スキャンの後に効く。そのとき `hnsw.ef_search` の候補の窓が
- * 他テナントの near-duplicate で埋まり、この arm の行が窓に入らなくなりうる。
- * ⛔ **これは測っていない。** ADR 0111 の実測では、テナントで絞る実際のクエリ形に
- * 対して、本番規模では既定のプランナが Seq Scan を選び(このとき窓の問題は起きない)、
- * **同じテナントが10万行に育ったときに初めて自然に HNSW を選んだ。**このベンチの規模で
- * プランナがどちらを選ぶのか、HNSW が選ばれたときに窓が実際に食われるのかは確かめて
- * いない——ADR 0111 の実測と本 Issue の機構の、**どちらが当てはまるかは未確定**である。
- * ⟹ このベンチの `goldReturnedCount` などを arm 間で比べるときは、この構造を前提に
- * 読むこと。構造を直す案(arm ごとに別の埋め込み空間にする等)は Issue #363 に在り、
- * まだ決めていない。
+ * ingest する。抽出は1:1(`packages/core/src/extraction.ts:84-97` の
+ * `buildExtractionPrompt` / `packages/testkit/src/__fixtures__/deterministic-llm-provider.ts:26-41` の
+ * 決定的な抽出)で、embed job は `memory.content` から決定的に埋め込む
+ * (`packages/core/src/runtime.ts:2818`)。この arm は `MNEMORA_LLM=deterministic` /
+ * `MNEMORA_EMBEDDING=local` 固定(下の `createExampleRuntime` 呼び出し)で、
+ * local embedding の決定性(同じ入力に同じベクトル)自体は本物のモデルに対して
+ * 実測されている(`packages/local-embedding/src/__tests__/live.local-embedding.test.ts:358-365`。
+ * ⚠ CI では走らない実測であり、別のハードウェア・別の onnxruntime 版での再現は
+ * 保証されない)。⟹ **4つの arm の埋め込みは、互いにビット単位で同じになる**
+ * (推測ではなく上の経路をたどって確認した。1 arm は98行——`ASSOCIATION_HAYSTACK`
+ * 62行 + 12 probe × 3、`association-probe-set.ts`)。
+ *
+ * **起こりうる機構そのものは Issue #671 / PR #673(ADR 0284)が実測で確かめている**:
+ * プランナが HNSW の索引スキャンを選んだ場合、`tenant_id` の絞り込みは索引スキャンの
+ * 後に効く。そのとき `hnsw.ef_search` の候補の窓が他テナントの重複行で埋まり、
+ * この arm の行が窓に入らなくなりうる。**ただし、今のこのベンチの規模(1 arm 約100行)
+ * では、この機構はまだ発火していない**——ADR 0111 の実測(home=100行に filler/near-dup
+ * を積んだセル)はいずれも自然なプランが Seq Scan であり、HNSW を選ばせるのは
+ * クエリ対象テナント*自身*の行数である(ADR 0111 §3.2。同じテナントが10万行に
+ * 育って初めて自然に HNSW を選ぶ)。⟹ **候補枠の食い潰しは、今のこの bench の
+ * 規模では起きていない。**
+ *
+ * HNSW が自然に選ばれる規模(home 10万行)まで育つと、既定の
+ * `hnsw.iterative_scan=off` では他テナントの near-duplicate が40件
+ * (`= kPrime = ef_search`)以上で全滅することが実測されている(Issue #671)。
+ * この故障は PR #673(ADR 0284)が `search()` に
+ * `hnsw.iterative_scan = relaxed_order` を採用したことで塞がれた——見積もり
+ * (⚠推測、未測定)では、このベンチのように同じベクトルが他3 arm に複製される
+ * 構造でも、読み捨てる件数は1回の検索あたり約 3×40=120件で、
+ * `hnsw.max_scan_tuples`(既定20,000)の天井より2桁小さい。
+ * ⚠ **ただし「同じベクトル・10万行・4 arm」の組み合わせは測っていない**——
+ * 同じ距離の点が大量にあるときの HNSW の振る舞い自体が未測定である。
+ *
+ * ⟹ **構造を分ける案(arm ごとに別の埋め込み空間にする等)は、今は要らない。**
+ * 次のいずれかが起きたときに開き直す: (a) 1 arm の行数が HNSW を自然に選ぶ規模
+ * (目安1万〜10万行)に近づいたとき、(b) #337 の測定で同じベクトルでの取りこぼしが
+ * 実際に見えたとき、(c) `search()` から `relaxed_order` が外れたとき(ADR 0284 が
+ * 覆ったとき)、(d) CI の `association-probes` ジョブがコンテナを使い回す形に
+ * 変わったとき(今は `.github/workflows/ci.yml:1116-1130` のジョブ専用の使い捨て
+ * Postgres コンテナを毎回作り直しており、同 `:1161` で毎回マイグレーションを
+ * 流している——他の測定との同居や、削除した行が VACUUM まで候補枠を食う交絡
+ * (Issue #671)は今の形では当たらない)。詳細と出典は ADR 0158 の
+ * 「追記(Issue #671 / PR #673 の実測を受けての整理)」を見ること。
  *
  * **`warmup()` を明示的に呼び、失敗を区別する**(`identifier-probes` と同じ理由)。
  * `ok: false` なら、メトリクスを1つも出さずに打ち切る——この bench の
