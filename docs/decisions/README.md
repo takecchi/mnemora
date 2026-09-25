@@ -340,9 +340,13 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0313](./0313-numeral-token-probes-ci-wiring-and-baseline-verification.md) | ADR 0135 §8 の残件1〜3を実装する — CI ジョブ・summary script・基準値ファイルを配線し、「sparse/dense が完全一致し margin の min が正」という基準値の見た目の不自然さを実測で検証する | 採用 (2026-09) |
 | [0314](./0314-recall-footprint-calibration-samples-need-ci-sourcing.md) | recall-footprint 較正の補助標本は作れる(実 API 不要)が、compare-baseline.json への昇格には CI artifact が要る — 別ファイルに留めた | 採用 (2026-09) |
 | [0315](./0315-claim-key-does-not-touch-extraction-cassettes.md) | 主張キー（(B) 第1段）は既定の抽出プロンプトを変えない — 候補群への別呼び出しで取り、カセットは書き換えず新規追加、⭐門は動かさない（Issue #370） | 採用 (2026-09) |
+<<<<<<< HEAD
 | [0316](./0316-openai-embedding-false-positive-ceiling.md) | OpenAI 実埋め込みの偽陽性率に上限を置けるかを実測する — Issue #109 後半（ADR 0094「これが覆るとしたら」第1項） | 採用 (2026-09) |
 | [0317](./0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md) | 自動経路の `consolidate` ジョブは、近傍探索を種の subject に絞る — 案 S を採る | 採用 (2026-09) |
 | [0318](./0318-taxonomy-labels.md) | taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201） | 採用 (2026-09) |
 | [0319](./0319-optional-trigram-lexical-store.md) | 日本語の語彙照合を、opt-in の `PostgresTrigramLexicalStore`（pg_trgm）として足す — Issue #278 への回答 | 採用 (2026-09) |
+=======
+| [0316](./0316-claim-key-field-implementation.md) | 主張キー（(B) 第1段）の実装 — `{subject, predicate}` を2列+部分索引で持ち、opt-inの別呼び出しで埋める（Issue #371） | 採用 (2026-09) |
+>>>>>>> 219432b (docs: add ADR 0316 for claim key implementation details, document claimKey in memory-model.md)
 
 <!-- ADR-INDEX:GENERATED:END -->
