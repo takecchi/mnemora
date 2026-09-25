@@ -1062,6 +1062,14 @@ Issue #200 が挙げた2つの読み方のうち「mnemora が*話しかける*�
   複数プロセスが実際にネットワーク越しに撃つ状況は、いまも測っていない。**
   ⛔ **この歯が守っているのは `FOR UPDATE` の行ロックであって `SKIP LOCKED` ではない**
   【実測】——`SKIP LOCKED` だけを外しても赤くならない。
+  **2026-09-25 追記（Issue #205 の2本目、[ADR 0325](./decisions/0325-bullmq-tick-driver.md)）**:
+  「複数プロセスが実際にネットワーク越しに撃つ状況」のうち、**同一ホスト上の複数 OS プロセス
+  （それぞれ自分専用の `pg.Pool`）** については測った——`packages/bullmq` の
+  `concurrent-tick.redis.test.ts` が、BullMQ 経由で駆動される複数プロセスの `runtime.tick()`
+  が同じ outbox ジョブを二重処理しないことを検査する（変異試験で最終的に12試行中12回検出、
+  ただし100%ではないと明記——ADR 0325「測ったこと」参照）。
+  ⚠ **別ホストの複数マシンが同じ Postgres に対して撃つ状況は、依然として測っていない**
+  ——ADR 0325「確かめていないこと」参照。
 - **2026-09 追記（roadmap.md 段階3）**: `packages/openai` の `completeStructured` が
   OpenAI の strict モードで実際に「省略可能なフィールドを `null` として返す」という
   前提（ADR 0012 D-ingest-7）は、`OPENAI_API_KEY` が無い開発・CI 環境では検証できていない。
