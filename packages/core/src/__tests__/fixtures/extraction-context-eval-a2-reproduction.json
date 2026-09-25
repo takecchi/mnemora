@@ -1,0 +1,81 @@
+{
+  "model": "gpt-4.1-mini-2025-04-14",
+  "caseId": "eval-a2-meeting-time-reference",
+  "recordedAt": "2026-09-25T01:00:42.693Z",
+  "kind": "reproducibility check on unmodified main buildExtractionPrompt (Issue #704, not a tuning run)",
+  "requests": 5,
+  "reservedUsd": 0.025199999999999997,
+  "survived": 5,
+  "rows": [
+    {
+      "run": 1,
+      "memories": [
+        {
+          "content": "次のミーティングは2026年4月10日19時からでいいです。",
+          "digest": "田中が次のミーティング開始時間を19時で了承",
+          "tags": ["ミーティング", "確認"],
+          "subjectId": "tanaka",
+          "provenanceKind": "stated",
+          "confidence": 1
+        }
+      ],
+      "passed": true
+    },
+    {
+      "run": 2,
+      "memories": [
+        {
+          "content": "次のミーティングは19時からで大丈夫である。",
+          "digest": "ミーティング時間の了承",
+          "tags": ["ミーティング"],
+          "subjectId": "tanaka",
+          "provenanceKind": "stated",
+          "confidence": 1
+        }
+      ],
+      "passed": true
+    },
+    {
+      "run": 3,
+      "memories": [
+        {
+          "content": "19時からの次のミーティングで大丈夫です。",
+          "digest": "田中が19時からの次のミーティングの時間を了承した",
+          "tags": ["ミーティング", "時間承認"],
+          "subjectId": "tanaka",
+          "provenanceKind": "stated",
+          "confidence": 1
+        }
+      ],
+      "passed": true
+    },
+    {
+      "run": 4,
+      "memories": [
+        {
+          "content": "次のミーティングは2026年4月10日の19時からで大丈夫です。",
+          "digest": "ミーティングの時間が2026/04/10の19時に決まったこと",
+          "tags": ["ミーティング予定"],
+          "subjectId": "tanaka",
+          "provenanceKind": "stated",
+          "confidence": 1
+        }
+      ],
+      "passed": true
+    },
+    {
+      "run": 5,
+      "memories": [
+        {
+          "content": "田中はミーティングが19時からで大丈夫だと言った。",
+          "digest": "ミーティングは19時からで良いと田中が了承",
+          "tags": ["ミーティング", "合意"],
+          "subjectId": "tanaka",
+          "provenanceKind": "stated",
+          "confidence": 1
+        }
+      ],
+      "passed": true
+    }
+  ]
+}
