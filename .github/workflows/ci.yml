@@ -257,7 +257,7 @@ jobs:
             >> "$GITHUB_STEP_SUMMARY"
 
   bullmq:
-    # Issue #205 の2本目（`packages/bullmq`、ADR 0321〔仮番号〕）。
+    # Issue #205 の2本目（`packages/bullmq`、ADR 0325）。
     #
     # 🔴 **required status check には入れていない。** `.github/required-status-checks.json`
     # の宣言（branch protection の写し）に本ジョブは無い——required にするかどうかは
@@ -331,7 +331,7 @@ jobs:
               -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
               -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
-      - name: "複数プロセス同時 tick が outbox ジョブを二重処理しないことを、本物の Postgres + 本物の Redis に対して検査する（ADR 0321〔仮番号〕）"
+      - name: "複数プロセス同時 tick が outbox ジョブを二重処理しないことを、本物の Postgres + 本物の Redis に対して検査する（ADR 0325）"
         # `packages/bullmq` の `test:redis` はマイグレーションも自前で行う
         # （`concurrent-tick.redis.test.ts` の `beforeAll` が `runMigrations`/
         # `registerEmbeddingSpace` を直接呼ぶ）——`@mnemora/postgres` の

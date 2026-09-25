@@ -1,10 +1,22 @@
-# ADR 0324: `@mnemora/bullmq` は `Scheduler` を実装せず、BullMQ で `runtime.tick()` を駆動する（Issue #205 の2本目）
+# ADR 0325: `@mnemora/bullmq` は `Scheduler` を実装せず、BullMQ で `runtime.tick()` を駆動する（Issue #205 の2本目）
 
-⚠ **この番号は仮である。** `node scripts/adr-renumber.mjs --next` が返した楽観的な次番号を
-そのまま使っている——**マージ直前に、マージする側が `adr-renumber.mjs`（引数無し）を実行して
-衝突が無いか確認し、衝突していれば付け替える**（ADR 0179。`docs/decisions/README.md` の
-「ADR を追加する PR の作成者は、原則としてこのスクリプトを実行しない」という規律により、
-この PR の作成者はここでは確定させない）。
+⚠ **この番号は 2026-09-25 時点で `node scripts/adr-renumber.mjs`（引数無し）を実行して
+確定させたものである。** 当初 `--next` が返した楽観的な次番号は `0324` だったが、
+`git merge origin/main` の後にこのブランチ上で `adr-renumber.mjs` を実行したところ、
+その間に別 PR（Issue #372、PR #745）が `ADR 0324`（`0324-claim-key-contested-detection.md`）
+を先に使っていたため衝突し、`0325` へ自動的に付け替わった（ファイル名・本ファイルの見出し・
+`docs/architecture.md`・`docs/roadmap.md`・`docs/decisions/0206-*.md` の参照を機械的に
+書き換えた。`packages/bullmq/**` と `.github/workflows/ci.yml` は対象外だったため手で直した
+——下の「引き受けた負債」参照）。
+
+**通常、ADR を追加する PR の作成者はこのスクリプトを実行しない**
+（`docs/decisions/README.md`「ADR を追加する PR の作成者は、原則としてこのスクリプトを
+実行しない」——並行 PR 間の索引の行衝突を防ぐ設計、ADR 0137）。**この PR に限っては、
+依頼元（クローン）の明示の指示により、Ready の前にこの担い手が実行した。**
+⚠ **それでもなお、実際にマージされる直前に再度衝突する可能性は残る**——この実行と
+実際のマージの間に、別の ADR PR が `0325` を先に取る形で着地すれば、再び付け替えが要る。
+その場合は同じ手順（`git fetch && git merge origin/main` → `adr-renumber.mjs` →
+`generate-adr-index.mjs`）をもう一度踏むこと。
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-25
@@ -191,19 +203,25 @@ ADR 0015）。**`test:db` という名前を使うと、Redis の無い既存ジ
 `packages/bullmq/src/__tests__/concurrent-tick.redis.test.ts`(親) +
 `concurrent-tick-child.ts`(子、`pnpm exec tsx` で spawn される別 OS プロセス)。
 
-- 親が N 本の Memory を `PostgresMemoryStore.createMemoryWithOutbox(..., ["embed"])` で作る
-  （`content` は一意な文字列——検査のキーそのものにする）。
 - K 個の子プロセスを実際に `node:child_process.spawn` で立てる。各子プロセスは
-  **自分専用の `pg.Pool`**（`createPostgresClient` を自分で呼ぶ）と
+  **自分専用の `pg.Pool`**（`createPostgresClient` を自分で呼ぶ、接続は事前に温める）と
   **自分専用の BullMQ `Worker`**（同じ `queueName` を共有）を持つ。
   `EmbeddingProvider` は「呼ばれた `texts` を記録するだけ」の fake
   （決定5「embedding provider 等は数を数える fake でよい」）。
-- BullMQ の Job Scheduler の発火間隔（`EVERY_MS`）を、fake `EmbeddingProvider` の遅延
-  （`EMBED_DELAY_MS`）より短くする——処理が間隔に追いつかず、複数の発火インスタンスが
-  積み上がり、複数プロセスの Worker が別インスタンスを同時に拾う。
-- 全子プロセスが embed した `content` を集め、**重複が0件であること**だけを検査する。
-  ⛔ **「合計が用意した本数と一致すること」は検査しない**（ADR 0206 決定2 と同じ理由——
-  `FOR UPDATE SKIP LOCKED` 相当の実装は競合下で拾い残しを設計上許容する。次の tick が拾う）。
+- 🔴 **2026-09-25 改訂（ADR 0206「測ったこと3」の知見に倣う）**: `it` の中で
+  **`ROUNDS` 回の独立したラウンド**を回す。各ラウンドで、親が**小さいバッチ**
+  （`BATCH_SIZE` 件）の Memory + embed ジョブを outbox へ積み、直後に BullMQ の
+  queue へ「起爆ジョブ」（中身は空。Worker は job の中身を見ず、発火のたびに
+  `runtime.tick()` を1回呼ぶだけ）を `BURST_SIZE`（≧ 全ワーカー数）件まとめて積む
+  （`queue.addBulk`）。**BullMQ の repeat ジョブ（背景の心拍、`EVERY_MS` は大きめ）は
+  今も動いているが、重なりを作る主因ではない**——主因はラウンドごとの
+  「まとめ撃ち」である（旧設計は repeat ジョブの発火間隔 `EVERY_MS` を embed 遅延
+  `EMBED_DELAY_MS` より短くして積み上げに頼っていたが、検出率が最終パラメータでも
+  8試行中7回に留まったため、この形に変えた——下の「測ったこと」参照）。
+- 全子プロセス・全ラウンドを通じて embed した `content` を集め、**重複が0件であること**
+  だけを検査する。⛔ **「合計が用意した本数と一致すること」は検査しない**（ADR 0206
+  決定2 と同じ理由——`FOR UPDATE SKIP LOCKED` 相当の実装は競合下で拾い残しを設計上
+  許容する。次の tick が拾う）。
 
 ---
 
@@ -269,6 +287,48 @@ image のベースである Debian bookworm の glibc より新しく、動的�
 本 ADR の歯で埋まる。** ただしネットワーク越しの複数マシンまでは測っていない
 （下の「確かめていないこと」参照）。
 
+### 2026-09-25 追記: ラウンドを複数回す形に改め、再測定した（見逃しを減らす）
+
+**上の表は書き換えていない。**依頼元（クローン）から「歯が1/8で見逃しているのは
+この PR の本体の価値にとって弱すぎる」という指摘を受け、ADR 0206「測ったこと3」の
+知見（ラウンド数を増やすと見逃しが消える）に倣って歯を改めた——`concurrent-tick.redis.test.ts`
+の `it` 1本の中で、**独立したラウンドを複数回す**形にした（決定5の改訂・設計は上記）。
+
+**設計の要点**: 子プロセス4本（`CONCURRENCY_PER_CHILD=4` → 全ワーカー数16）を先に起動し、
+`ROUNDS=10` 回、各ラウンドで `BATCH_SIZE=3` 件の Memory を積んだ直後に `BURST_SIZE=24`
+件の「起爆ジョブ」（中身は空、`runtime.tick()` を1回呼ぶだけ）を BullMQ の queue へ
+`queue.addBulk` でまとめて積む——ADR 0206 の `Promise.all`（同一プロセス内で8並行）を、
+複数 OS プロセスへそのまま翻訳した形である。ラウンドあたりの候補行（3件）はワーカー総数
+（16）よりずっと少なく、競合を厚くしてある。
+
+器: 同じ手元の PostgreSQL 17（専用ポート 55432）・Redis 7.4.11（専用ポート 46379）。
+**測ったときの `main` = `7987de4`**（`git merge origin/main` 後。旧「測ったこと」表の
+時点（`785221a`）より進んでいるが、`packages/postgres/src/outbox-store.ts` 自体は
+この間変わっていない——`git diff 785221a 7987de4 -- packages/postgres/src/outbox-store.ts`
+で確認済み、差分0）。
+
+| 変異 | パラメータ | 試行 | 結果 |
+|---|---|---|---|
+| （変異なし） | ラウンド版・最終パラメータ（ROUNDS=10・BATCH_SIZE=3・BURST_SIZE=24・TOTAL_WORKERS=16） | 6 | **6回とも GREEN（偽陽性0）** |
+| **(i) `FOR UPDATE SKIP LOCKED` を丸ごと削る** | 同上 | 12 | 🔴 **12回とも RED（見逃し0）** |
+| **(ii) `SKIP LOCKED` だけ外して `FOR UPDATE` を残す** | 同上 | 5 | **5回とも GREEN**（ADR 0206 と同じ結論、変わらず） |
+| （変異を戻した後の確認） | 同上 | 1 | GREEN |
+
+⟹ **見逃しは0になった**（旧パラメータの8試行中1回見逃し → 新パラメータで12試行中0回）。
+⚠ **「0になった」は「原理的に0%」の証明ではない**——12試行で観測されなかった、という
+以上の主張はしない（`AGENTS.md`「⚠『出なかった』を、事象が無いことの証明にしない」と
+対称の注意——ここでは逆に、出続けたことを根拠にしているが、母数は有限である）。
+より多くの試行を重ねれば、低確率の見逃しが観測される可能性は残る。
+
+**CI の所要時間の増え方**: 手元では、テスト本体の所要時間が旧パラメータ（1試行あたり
+約8.7〜10.5秒、ADR 0325 初版の実測）から新パラメータ（1試行あたり約11.3〜13.5秒、
+上記12+6+5+1=24試行の観測範囲）へ、**約25〜30%増えた**。
+**CI（GitHub Actions）側の実測**: 旧パラメータでの `packages/bullmq` job（PR #746、
+run 36107185178）は checkout〜test:redis まで含めて **45秒**（`07:21:05Z` 〜
+`07:21:50Z`、`gh api .../jobs` で実測）だった。新パラメータでの同 job の所要時間は、
+この変更を push した後の CI run で改めて実測し、PR 本文・コメントで報告する
+（本 ADR 本文はここで一旦区切る——実測が入り次第、この段落の下に追記する）。
+
 ### 貼ったテストの行
 
 ```
@@ -276,7 +336,7 @@ $ pnpm --filter @mnemora/bullmq run test
  Test Files  1 passed (1)
       Tests  4 passed (4)
 
-$ pnpm --filter @mnemora/bullmq run test:redis
+$ pnpm --filter @mnemora/bullmq run test:redis   # ラウンド版（改訂後）
  Test Files  1 passed (1)
       Tests  1 passed (1)
 ```
@@ -304,12 +364,18 @@ $ pnpm --filter @mnemora/bullmq run test:redis
 
 ## 引き受けた負債
 
-### 1. 変異試験の検出率は100%ではない（8試行中7回）
+### 1. 変異試験の検出率は100%であることを主張しない（改訂: 12試行中12回検出）
 
-⛔ **本 ADR の歯は「出なかった」を「起きない」の証明として使っていない**——検出できた
-という肯定的な実測（複数回の RED）を根拠にしている。だが見逃しが1試行につき約1/8の
-確率で起きることは、実測のまま残す。CI で偶然この歯が GREEN になった1回だけを見て
-「安全」と判定しないこと——複数回のうち大半が RED になることを踏まえて読む。
+🔴 **2026-09-25 改訂。** 初版（repeat ジョブの発火間隔に頼る設計）は最終パラメータでも
+8試行中7回の検出（1回見逃し）に留まっていた。ADR 0206「測ったこと3」の知見に倣い、
+`it` の中で独立したラウンドを複数回す設計に改めたところ（上の「測ったこと」2026-09-25
+追記参照）、**12試行中12回検出（見逃し0）**に改善した。
+
+⛔ **それでも「100%である」とは主張しない。** 本 ADR の歯は「出なかった」を
+「起きない」の証明として使っていない——検出できたという肯定的な実測（複数回の RED）を
+根拠にしている。12試行で見逃しが0だったことは、**その12試行では見逃さなかった**以上を
+主張しない——母数が有限である以上、より低い確率の見逃しが存在する可能性は排除できない。
+CI で偶然この歯が GREEN になった1回だけを見て「安全」と判定しないこと。
 
 ### 2. 複数マシン・ネットワーク越しの claim は測っていない
 
@@ -330,6 +396,36 @@ BullMQ 5.x 以前の `queue.add(..., { repeat })`/`queue.removeRepeatable(...)` 
 （型が合わずビルドが赤くなることで気づいた。【実測】）。`package.json` は `bullmq: "6.3.8"`
 に固定してある（`.npmrc` の `save-exact=true`）ため、この差異は今日のところ露出しないが、
 将来 BullMQ のメジャーバージョンを上げるときは API 差分を確認すること。
+
+### 5. `adr-renumber.mjs` は `packages/` 配下・`.github/workflows/` の参照を書き換えない【実測】
+
+2026-09-25、`git merge origin/main`（Issue #372 の PR #745 を取り込み、`ADR 0324` が
+既に使われている状態にした）の後で `node scripts/adr-renumber.mjs`（引数無し）を実行し、
+`0324 -> 0325` の付け替えを実際に観測した。**書き換えられたのは `docs/architecture.md`・
+`docs/roadmap.md`・`docs/decisions/0206-outbox-concurrent-claim-conformance.md`・
+ADR 自身のファイル名と見出しの4ファイルだけだった。** `packages/bullmq/**`（`tick-driver.ts`・
+`index.ts`・`package.json`・テストのコメント計8箇所）と `.github/workflows/ci.yml`
+（2箇所）に残っていた「ADR 0321〔仮番号〕」（旧い暫定表記——本 ADR が最終的に `0324` を
+経て `0325` になる前、依頼段階の仮の番号をそのまま書いてしまっていたもの）は、
+`adr-renumber.mjs` の実行では1バイトも変わらず、**この担い手が手で `grep -rn` して
+見つけ、個別に直した。**
+
+**原因はスキャン対象の絞り込みにある**——`scripts/adr-renumber.mjs` の
+`performRenumber()` は `git diff --name-only origin/main` で「origin/main に対して
+このブランチが変更した全ファイル」を対象にするが、**そのうえで実際に書き換えるのは
+`rewriteReferencesInText` が「`ADR ` に直接続く**付け替え対象の旧番号（このときは
+`0324`）**」を見つけた行だけである。** `packages/bullmq/**` の該当箇所はそもそも
+`0324` ではなく（依頼段階の指示の写しである）`0321` という**別の数字**を書いてしまって
+いたため、`0324 -> 0325` の付け替えの対象にすらならなかった——**ツールの不具合ではなく、
+この ADR の作成者（この担い手）が仮の番号を実コードへ先に書いてしまい、後で ADR 側だけ
+`0324` を経て確定させ、参照側の更新を1回忘れた、という書き手側の欠落である。**
+
+⟹ **`adr-renumber.mjs` は「ADR の番号」を指す参照の書き換えを、`docs/` 配下や
+参照を持つ `.md` ファイルに限定してはいない（`packages/` や `.github/` も対象になりうる）
+が、書き換えられるのはあくまで「診断対象の旧番号と一致する箇所」だけである。**
+的外れな番号（この場合の `0321`）を書いてしまった箇所は、どのみち機械では拾えない
+——**ADR を書く担い手自身が、コード側のプレースホルダ表記を確定番号へ揃える作業を、
+`adr-renumber.mjs` の実行に頼らず自分で行う必要がある。**
 
 ---
 

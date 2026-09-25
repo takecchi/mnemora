@@ -51,10 +51,11 @@ function sleep(ms: number): Promise<void> {
  * 呼ばれるたびに `texts` をそのまま記録するだけの `EmbeddingProvider`。
  * 「本物と偽物を分ける」のは Postgres と Redis であって embedding provider ではない
  * （本 PR の決定5「embedding provider 等は数を数える fake でよい」）。
- * `EMBED_DELAY_MS` を挟むのは、BullMQ の repeat ジョブが処理時間より短い間隔で
- * 発火し続けたときに複数インスタンスが積み上がり、複数プロセスの Worker が
- * 同時にそれらを拾う（＝同じテナントに対して複数の `runtime.tick()` が実際に重なる）
- * 状況を確実に作るため。
+ * `EMBED_DELAY_MS` は embed 処理に現実的な所要時間を持たせるだけの小さな遅延
+ * ——**「同時に tick が重なること」自体は、この遅延にはもう依存していない**
+ * （2026-09-25 追記。ADR 0325「測ったこと」参照）。重なりを作る主因は
+ * `concurrent-tick.redis.test.ts` がラウンドごとに BullMQ の queue へ明示的に
+ * まとめ撃ちする「起爆ジョブ」の束（`queue.addBulk`）である。
  */
 class RecordingEmbeddingProvider implements EmbeddingProvider {
   readonly space = CONCURRENCY_TEST_EMBEDDING_SPACE;

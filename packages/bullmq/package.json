@@ -3,7 +3,7 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "BullMQ で runtime.tick() を駆動する役（Issue #205 の2本目、ADR 0321〔仮番号〕案B）。outbox は Postgres のまま正本——BullMQ はジョブの中身を持たず、「いま tick して」の合図だけを運ぶ。",
+  "description": "BullMQ で runtime.tick() を駆動する役（Issue #205 の2本目、ADR 0325 案B）。outbox は Postgres のまま正本——BullMQ はジョブの中身を持たず、「いま tick して」の合図だけを運ぶ。",
   "license": "MIT",
   "engines": {
     "node": ">=22"

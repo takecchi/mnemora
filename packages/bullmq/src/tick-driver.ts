@@ -4,7 +4,7 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
 
 /**
  * `@mnemora/bullmq` — BullMQ で `runtime.tick()` を駆動する役（Issue #205 の2本目、
- * ADR 0321〔仮番号。マージ時に `adr-renumber.mjs` が確定する〕案B）。
+ * ADR 0325 案B）。
  *
  * 🔴 **この package は `@mnemora/core` の `Scheduler` interface を実装しない。**
  * `Scheduler.enqueue`（`packages/core/src/interfaces/scheduler.ts`）は本番コードの
@@ -17,7 +17,7 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * Redis 側のジョブが二重に帳簿を持つことはない。`docs/decisions/0005-job-queue-abstraction.md`
  * が書いた「実際のキューへは relay が outbox の未処理行を読んで渡す」という設計
  * （outbox → BullMQ へジョブそのものを運ぶ案）とは**別の形**であることに注意——
- * この package はその relay を実装しない（採らなかった理由は ADR 0321 決定・
+ * この package はその relay を実装しない（採らなかった理由は ADR 0325 決定・
  * 「採らなかった案」を見ること）。
  *
  * ## 使い方
@@ -51,7 +51,7 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * 防いでいるのは `packages/postgres` の `PostgresOutboxStore.claimBatch`
  * （`FOR UPDATE SKIP LOCKED`、ADR 0206）であって、この package や BullMQ 自身では
  * ない。**その主張を複数 OS プロセス・複数 `pg.Pool` に対して実測したのが
- * `src/__tests__/concurrent-tick.redis.test.ts`（ADR 0321「測ったこと」）。
+ * `src/__tests__/concurrent-tick.redis.test.ts`（ADR 0325「測ったこと」）。
  */
 export interface CreateBullmqTickDriverOptions {
   /** BullMQ の Redis 接続先。`bullmq` 自身の `ConnectionOptions`（ioredis 互換）をそのまま使う。 */

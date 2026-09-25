@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
+import { Queue } from "bullmq";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
   createPostgresClient,
@@ -14,7 +15,7 @@ import { CONCURRENCY_TEST_EMBEDDING_SPACE } from "./concurrent-tick-shared.js";
 import type { ChildEnvParams, ChildResult } from "./concurrent-tick-shared.js";
 
 /**
- * Issue #205 の2本目（`packages/bullmq`）本体の歯——ADR 0321〔仮番号〕「測ったこと」。
+ * Issue #205 の2本目（`packages/bullmq`）本体の歯——ADR 0325「測ったこと」。
  *
  * ## この歯が測っているもの
  *
@@ -27,12 +28,30 @@ import type { ChildEnvParams, ChildResult } from "./concurrent-tick-shared.js";
  * （同 ADR「引き受けた負債」2・`docs/architecture.md`「確かめていないこと」）。
  * **この歯はその先——複数 OS プロセス・複数 `pg.Pool`——を測る。**
  *
- * ## どうやって「同時」を作るか
+ * ## どうやって「同時」を作るか（2026-09-25 改訂。ADR 0325「測ったこと」参照）
  *
- * BullMQ の repeat ジョブは、処理時間が間隔（`everyMs`）より長いと、前の実行が
- * 終わる前に次のインスタンスがキューに積まれうる——複数プロセスの Worker が
- * 別々のインスタンスを同時に拾える。`EMBED_DELAY_MS`（fake の `EmbeddingProvider` が
- * 律儀に待つ）を `EVERY_MS` より長くし、この重なりを確実に起こす。
+ * **当初は BullMQ の repeat ジョブ（発火間隔 `EVERY_MS` < embed 処理の遅延
+ * `EMBED_DELAY_MS`）だけに頼っていたが、変異 (i) の検出率が最終パラメータでも
+ * 8試行中7回に留まった。** ADR 0206「測ったこと3」の知見（ラウンド数を増やすと
+ * 見逃しが消える）に倣い、**この `it` の中で独立したラウンドを複数回す**形に改めた:
+ *
+ * 1. 子プロセスは先に起動し、自分専用の `pg.Pool`（接続を事前に温め済み）と
+ *    BullMQ `Worker` を持って queue を listen し始める。
+ * 2. 親が `ROUNDS` 回、**小さいバッチ**（`BATCH_SIZE` 件）の Memory + embed ジョブを
+ *    outbox へ積み、**直後に** `queue.addBulk` で `BURST_SIZE`（≧ 全ワーカー数）件の
+ *    「起爆ジョブ」（中身は空。Worker 側は job の中身を見ず、発火するたびに
+ *    `runtime.tick()` を1回呼ぶだけ——`tick-driver.ts` 参照）を**まとめて**積む。
+ * 3. `BURST_SIZE` ≧ 全ワーカー数なので、そのラウンドの直後にほぼ全ワーカーが
+ *    同時に `claimBatch` を呼びに行く——ADR 0206 の `Promise.all`（同一プロセス内で
+ *    8並行）を、複数 OS プロセスへ翻訳した形である。ラウンドあたりの候補行
+ *    （`BATCH_SIZE`）はワーカー総数よりずっと少なくしてあり、競合を厚くする。
+ * 4. ラウンド間に短い休止（`PER_ROUND_PAUSE_MS`）を置き、最後に排水用の猶予
+ *    （`DRAIN_BUFFER_MS`）を置いてから子プロセスを終える。
+ *
+ * BullMQ の repeat ジョブ（`driver.start()`）自体は今も呼んでいる——ただし
+ * `EVERY_MS` を大きく（数秒）取り、**背景の心拍**として動くだけで、重なりを作る
+ * 主因はもう「起爆ジョブのまとめ撃ち」である。`EMBED_DELAY_MS` は embed 処理に
+ * 現実的な所要時間を持たせる小さな値に留めてある。
  *
  * ## 何を検査し、何を検査しないか（ADR 0206 決定2 と同じ線）
  *
@@ -74,6 +93,10 @@ const PACKAGE_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 function hashContent(content: string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 /** 子プロセスを1本立て、標準出力から結果行（RESULT_MARKER 付き）を取り出す。 */
@@ -123,55 +146,66 @@ afterAll(async () => {
 });
 
 describe("BullMQ 経由の複数プロセス同時 tick は outbox ジョブを二重処理しない", () => {
-  it("N 本の embed ジョブを、K 個の子プロセス（各自の pg.Pool + BullMQ Worker）が同時に tick しても、同じジョブが2プロセス以上に処理されない", async () => {
+  it("K 個の子プロセス（各自の pg.Pool + BullMQ Worker）に対し、ROUNDS 回の独立したラウンドで同時 tick を起こしても、同じジョブが2プロセス以上に処理されない", async () => {
     const runId = randomUUID();
     const tenantId = `bullmq-concurrency-${runId}`;
     const queueName = `mnemora-bullmq-concurrency-${runId}`;
 
-    // 🔴 これらの定数は変異試験で実測して決めた値である(ADR 0321〔仮番号〕「測ったこと」
-    // の表に試行回数つきで記録してある)。⚠ 減らすと ADR 0206「測ったこと3」と同型の
-    // 見逃しが起きる——`packages/postgres/src/outbox-store.ts` の `FOR UPDATE SKIP LOCKED`
-    // を丸ごと削る変異を入れても、偶然赤くならない試行が混ざる。**この歯は確率的である**
-    // ——本 PR の実測では最終パラメータでも 8 試行中 7 回の検出に留まる(100% ではない)。
-    // 見逃しても複数回撃てば拾える、という前提で読むこと。
-    const MEMORY_COUNT = 80;
+    // 🔴 これらの定数は変異試験で実測して決めた値である(ADR 0325「測ったこと」
+    // の表に試行回数つきで記録してある——2026-09-25 の改訂で「ラウンドを複数回す」
+    // 形に変えた経緯・前後の検出率の比較も同じ表にある)。
     const CHILD_COUNT = 4;
     const CONCURRENCY_PER_CHILD = 4;
-    const EVERY_MS = 10;
-    const EMBED_DELAY_MS = 200;
-    const DURATION_MS = 7_000;
+    const TOTAL_WORKERS = CHILD_COUNT * CONCURRENCY_PER_CHILD; // 16
+    // 背景の心拍(BullMQ repeat job)。重なりを作る主因ではないので大きめに取る
+    // (上の doc コメント「どうやって『同時』を作るか」2026-09-25 改訂 参照)。
+    const EVERY_MS = 3_000;
+    const EMBED_DELAY_MS = 30;
     const LEASE_MS = 5 * 60 * 1000;
-    // 🔴 1回の tick が拾う件数をわざと最小にする(limit=1)——MEMORY_COUNT を大きくしても
-    // limit が大きいと最初の数ラウンドで全件が捌けてしまい、「競争の窓」が
-    // 接続の温まっていない最初期だけに圧縮される(ADR 0206「案F」の実測と同じ形。
-    // ADR 0206 自身も同時 claim の歯を `limit: 1` で書いている)。
+    // 1回の tick が拾う件数をわざと最小にする(limit=1、ADR 0206 と同じ判断)。
     const TICK_LIMIT = 1;
 
-    // このテナント専用の一意な content を N 本用意する（重複検査のキー）。
+    // 🔴 ADR 0206「測ったこと3」に倣い、独立したラウンドを複数回す。
+    const ROUNDS = 10;
+    // ラウンドあたりの候補行は、全ワーカー数よりずっと少なくして競合を厚くする。
+    const BATCH_SIZE = 3;
+    // 起爆ジョブは全ワーカー数以上——ラウンド直後にほぼ全ワーカーが同時に
+    // claimBatch を呼びに行くようにする。
+    const BURST_SIZE = TOTAL_WORKERS + 8; // 24
+    const PER_ROUND_PAUSE_MS = 400;
+    const STARTUP_MARGIN_MS = 1_000;
+    const DRAIN_BUFFER_MS = 2_000;
+    const DURATION_MS = STARTUP_MARGIN_MS + ROUNDS * PER_ROUND_PAUSE_MS + DRAIN_BUFFER_MS + 1_500;
+
     const memoryStore = new PostgresMemoryStore(client.db);
     const expectedContents: string[] = [];
-    for (let i = 0; i < MEMORY_COUNT; i += 1) {
-      const content = `bullmq-concurrency-${runId}-${i}`;
-      expectedContents.push(content);
-      const input: NewMemory = {
-        tenantId,
-        content,
-        contentHash: hashContent(content),
-        digest: content.slice(0, 40),
-        digestSource: "fallback",
-        // 'imported' は memories.source_observation_id の NOT NULL 相当の CHECK
-        // （0001_init.sql: provenance_kind IN ('stated','inferred') のときだけ必須）
-        // に当たらないため、observations 行を用意しなくてよい。
-        provenance: { kind: "imported", batchId: "bullmq-concurrency-test" },
-        tags: [],
-        recordedAt: new Date(),
-        strength: 1,
-        halfLifeHours: 24,
-        decayFloorAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
-        embeddingStatus: "pending",
-      };
-      const { created } = await memoryStore.createMemoryWithOutbox({ tenantId }, input, ["embed"]);
-      expect(created).toBe(true);
+
+    async function seedRound(round: number): Promise<void> {
+      for (let i = 0; i < BATCH_SIZE; i += 1) {
+        const content = `bullmq-concurrency-${runId}-r${round}-${i}`;
+        expectedContents.push(content);
+        const input: NewMemory = {
+          tenantId,
+          content,
+          contentHash: hashContent(content),
+          digest: content.slice(0, 40),
+          digestSource: "fallback",
+          // 'imported' は memories.source_observation_id の NOT NULL 相当の CHECK
+          // （0001_init.sql: provenance_kind IN ('stated','inferred') のときだけ必須）
+          // に当たらないため、observations 行を用意しなくてよい。
+          provenance: { kind: "imported", batchId: `bullmq-concurrency-test-r${round}` },
+          tags: [],
+          recordedAt: new Date(),
+          strength: 1,
+          halfLifeHours: 24,
+          decayFloorAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000),
+          embeddingStatus: "pending",
+        };
+        const { created } = await memoryStore.createMemoryWithOutbox({ tenantId }, input, [
+          "embed",
+        ]);
+        expect(created).toBe(true);
+      }
     }
 
     const childEnvs: ChildEnvParams[] = Array.from({ length: CHILD_COUNT }, (_, i) => ({
@@ -189,7 +223,32 @@ describe("BullMQ 経由の複数プロセス同時 tick は outbox ジョブを�
       TICK_LIMIT: String(TICK_LIMIT),
     }));
 
-    const results = await Promise.all(childEnvs.map((env) => runChild(env)));
+    // 子プロセスを先に起動する（自分の接続を温めてから listen し始めるまでに
+    // STARTUP_MARGIN_MS だけ余裕を見る）。結果は最後に await する。
+    const childResultsPromise = Promise.all(childEnvs.map((env) => runChild(env)));
+
+    // 起爆ジョブ専用の Queue（親プロセス自身が持つ——子プロセスの Worker と
+    // 同じ queueName・同じ Redis を指すだけで、ジョブの中身は空でよい。
+    // `tick-driver.ts` の Worker は job の中身を見ず、発火のたびに
+    // `runtime.tick()` を1回呼ぶだけである）。
+    const tickQueue = new Queue(queueName, {
+      connection: { host: REDIS_HOST, port: Number(REDIS_PORT), maxRetriesPerRequest: null },
+    });
+
+    await sleep(STARTUP_MARGIN_MS);
+
+    for (let round = 0; round < ROUNDS; round += 1) {
+      await seedRound(round);
+      await tickQueue.addBulk(
+        Array.from({ length: BURST_SIZE }, () => ({ name: "mnemora-tick", data: {} })),
+      );
+      await sleep(PER_ROUND_PAUSE_MS);
+    }
+
+    await sleep(DRAIN_BUFFER_MS);
+    await tickQueue.close();
+
+    const results = await childResultsPromise;
 
     const allEmbedded = results.flatMap((r) => r.embeddedContents);
     const duplicates = allEmbedded.filter((c, i) => allEmbedded.indexOf(c) !== i);
@@ -219,13 +278,14 @@ describe("BullMQ 経由の複数プロセス同時 tick は outbox ジョブを�
       `同じ Memory が複数プロセスに処理された（二重 embed）: ${JSON.stringify(duplicates)}`,
     ).toEqual([]);
 
-    // ⛔ 合計が MEMORY_COUNT と一致することは検査しない（ADR 0206 決定2 と同じ理由、
-    // 上の doc コメント参照）。参考として出力だけしておく。
+    // ⛔ 合計が用意した本数(ROUNDS*BATCH_SIZE)と一致することは検査しない
+    // （ADR 0206 決定2 と同じ理由、上の doc コメント参照）。参考として出力だけする。
     console.log(
-      `[concurrent-tick] memories=${MEMORY_COUNT} embedded(total)=${allEmbedded.length} ` +
-        `tickCalls(total)=${totalTickCalls} duplicates=${duplicates.length}`,
+      `[concurrent-tick] rounds=${ROUNDS} batchSize=${BATCH_SIZE} memories=${expectedContents.length} ` +
+        `embedded(total)=${allEmbedded.length} tickCalls(total)=${totalTickCalls} ` +
+        `duplicates=${duplicates.length}`,
     );
   });
-  // ↑ 6秒 × 4子プロセスの起動オーバーヘッドを見込む。vitest.redis.config.mts の
-  // testTimeout（120秒）の範囲に収める。
+  // ↑ ROUNDS(10) × PER_ROUND_PAUSE_MS(400ms) + 起動/排水の余裕 ≈ 8秒 + 子プロセス4本の
+  // 起動オーバーヘッド。vitest.redis.config.mts の testTimeout（120秒）の範囲に収める。
 });
