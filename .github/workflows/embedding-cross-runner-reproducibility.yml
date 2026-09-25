@@ -38,19 +38,14 @@ name: "embedding 出力のランナー間再現性を測る（測るだけ。門
 on:
   workflow_dispatch: {}
   pull_request:
+    # ⛔ 他の PR で勝手に24脚が走らないよう、この workflow 自身と、この workflow だけが使う
+    # 新しい script に絞る（packages/ や examples/ の変更では走らない——既定の CI の振る舞いを
+    # 変えないため）。それ以外で測りたいときは workflow_dispatch で手動に起こす。
     paths:
       - ".github/workflows/embedding-cross-runner-reproducibility.yml"
       - "scripts/cross-runner-embedding-fingerprint-lib.mjs"
       - "scripts/measure-cross-runner-embedding-fingerprint.mjs"
       - "scripts/compare-cross-runner-embedding-fingerprints.mjs"
-      - "scripts/measure-embedding-output-fingerprint-lib.mjs"
-      - "scripts/compare-embedding-output-fingerprints-lib.mjs"
-      - "scripts/print-local-embedding-cache-key.mjs"
-      - "scripts/local-embedding-pinned-revision.json"
-      - "examples/chat/src/embedding-fingerprint.ts"
-      - "examples/chat/src/providers.ts"
-      - "examples/chat/src/local-embedding-warmup.ts"
-      - "packages/local-embedding/src/**"
 
 permissions:
   contents: read
