@@ -60,6 +60,11 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   `attempts` が一致しない場合にのみ** {@link OutboxLeaseConflictError} を投げる。
  *   行が存在し `attempts` が一致する場合は、対象が既に完了/失敗していても例外を投げない
  *   （同じ worker が同じ claim に対して `complete`/`fail` を再度呼ぶことは冪等）。
+ * - 🔴 **`complete`/`fail` は互いに排他でもある（Issue #826）。** `attempts` が一致して
+ *   いても、相手側の終端（`fail` から見た `completedAt`、`complete` から見た
+ *   `failedAt`）が既に付いていれば、先に付いた終端が勝つ——行を変えず、例外も投げない
+ *   （無言の no-op）。同じ claim（同じ `attempts`）のまま complete と fail の両方が
+ *   呼ばれても、両方の終端が同時に付くことはない。
  * - Phase 1 では失敗したジョブの自動リトライを行わない（`fail` は終端状態。本 PR の決定、
  *   PR 本文に記載）。
  */
