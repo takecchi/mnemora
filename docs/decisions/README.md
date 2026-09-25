@@ -334,5 +334,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0307](./0307-aggregate-scope-single-pass.md) | `aggregateScope` を単一パスの `GROUP BY` に書き換える — 同じ SQL 文・同じ返り値のまま、テナント全体の集計を約1.8倍速くする | 採用 (2026-09) |
 | [0308](./0308-lexical-rank-length-normalization.md) | `ts_rank_cd` の normalization に文書長のビットを足す — 語彙チャンネルの `rank` に内容由来の分解能を持たせる（Issue #394 案2） | 採用 (2026-09) |
 | [0309](./0309-answer-prompt-order-legend-and-cassette-migration.md) | `buildMnemoraPrompt` を `order-legend` 描画に確定し、`answer`/`answer-time-weighting` の再生カセットを新形式へ移行する（Issue #691 続き） | 採用 (2026-09) |
+| [0310](./0310-subject-crossing-consolidate-frequency-measured.md) | Issue #579 の頻度を測った — subject をまたぐ統合は近傍を種の subject に絞れば 0%、絞らなければ使い方しだいで 0〜100%。案 B は採らない | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

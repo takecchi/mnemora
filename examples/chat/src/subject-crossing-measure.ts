@@ -20,7 +20,7 @@ import { createExampleRuntime } from "./runtime-factory.js";
  * `null` に畳まれる（`packages/core/src/strategies/consolidate.ts`
  * `buildConsolidatedMemory`）——について、**案B（subjectId を集合にする。migration 要）を
  * やるかどうかの判断材料**として、「subject をまたぐ統合がどれくらいの頻度で起きるか」を
- * 測る。ADR 0309 が、この測定を踏まえて案B着手の判断を記録する（このファイル自身は
+ * 測る。ADR 0310 が、この測定を踏まえて案B着手の判断を記録する（このファイル自身は
  * 判断を持たない——測定だけ）。
  *
  * **測る経路は、呼び出し側が `{ memoryIds }` を自分で選ぶ形ではない。** 混在は呼び出し側の
