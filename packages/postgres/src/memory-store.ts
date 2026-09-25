@@ -1037,12 +1037,12 @@ export class PostgresMemoryStore implements MemoryStore {
    * `count(*) FILTER` の本数（最大10本強）だけ重複して評価していた。
    *
    * **新実装は各行の述語（`live`/`in_period`/`is_valid`/`is_expired`/`is_not_yet_valid`/
-   * `is_decayed`）を `scoped` CTE の中で1回だけ boolean として計算し、`GROUP BY subject_id`
+   * `is_decayed`）を `flags` CTE（`scoped` の素の射影の上に載る層）で1回だけ boolean として計算し、`GROUP BY subject_id`
    * で subject ごとの各カウンタ（`in_scope`・`not_indexed_*`・`archived`・`superseded`・
    * `forgotten`・`period_filtered`・`expired_filtered`・`not_yet_valid_filtered`・
    * `decayed_filtered`）を1パスで出す（`agg` CTE）。**
    *
-   * `scoped` は `agg` から1回だけ、`agg` は外側の集約から1回だけ参照されるので、
+   * `scoped` は `flags` から、`flags` は `agg` から、`agg` は外側の集約から各1回だけ参照されるので、
    * Postgres は既定でどちらも実体化せずインライン化する（PG12+ の「1回しか参照されない
    * 非再帰 CTE は自動的にインライン化される」という規則。`MATERIALIZED` を明示していない
    * ——実際に試したが採らなかった。理由は「単一パス書き換え」の実装コメント、ADR
@@ -1226,6 +1226,16 @@ export class PostgresMemoryStore implements MemoryStore {
     // ——【実測】インライン化 237ms 台 vs `MATERIALIZED` 254ms 台（ADR「測ったこと」）。
     const result = await this.db.execute(sql`
       WITH scoped AS (
+        SELECT subject_id, occurred_at, recorded_at, embedding_status, status,
+               valid_from, valid_until, decay_floor_at, decay_floor_seq
+        FROM memories
+        WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+      ),
+      -- 述語を1回だけ boolean にする層。scoped を素の射影のまま残すのは、ADR 0303 の
+      -- 前提の歯（scripts/__tests__/decay-floor-owner-premises.test.mjs）が scoped の本体を
+      -- 字句で読んで「status で絞らない」を検査しているため。どの CTE も1回しか参照されず
+      -- インライン化されるので、層を分けてもプランは変わらない。
+      flags AS (
         SELECT
           subject_id,
           status,
@@ -1236,8 +1246,7 @@ export class PostgresMemoryStore implements MemoryStore {
           (${isExpired}) AS is_expired,
           (${isNotYetValid}) AS is_not_yet_valid,
           (${isDecayed}) AS is_decayed
-        FROM memories
-        WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+        FROM scoped
       ),
       agg AS (
         SELECT
@@ -1267,7 +1276,7 @@ export class PostgresMemoryStore implements MemoryStore {
           count(*) FILTER (
             WHERE live AND in_period AND is_valid AND is_decayed
           )::int AS decayed_filtered
-        FROM scoped
+        FROM flags
         GROUP BY subject_id
       )
       SELECT

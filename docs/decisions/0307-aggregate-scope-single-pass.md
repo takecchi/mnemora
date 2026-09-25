@@ -48,11 +48,11 @@
 
 - **決めたこと**:
 
-  1. **各行の述語を `scoped` CTE の中で1回だけ boolean として計算する。** `live`
+  1. **各行の述語を `flags` CTE（`scoped` の素の射影の上に載る層）で1回だけ boolean として計算する。** `scoped` 自体は素の射影のまま残す——ADR 0303 の前提の歯（`scripts/__tests__/decay-floor-owner-premises.test.mjs`）が `scoped` の本体を字句で読んで「status で絞らない」を検査しているため。 `live`
      （`status IN ('active','contested')`）・`in_period`・`is_valid`・`is_expired`・
-     `is_not_yet_valid`・`is_decayed` の6列を `scoped` の projection に持ち、以後の
+     `is_not_yet_valid`・`is_decayed` の6列を `flags` の projection に持ち、以後の
      `count(*) FILTER` はこの列を参照するだけにする。**式そのもの
-     （`${x}::timestamptz IS NULL OR ...`）は `scoped` の中に1回しか書かない**
+     （`${x}::timestamptz IS NULL OR ...`）は `flags` の中に1回しか書かない**
      （旧実装は同じ式を最大10本強の `FILTER` に埋め込んでいた）。
 
   2. **`GROUP BY subject_id` で subject ごとの各カウンタを1パスで出す（`agg` CTE）。**
