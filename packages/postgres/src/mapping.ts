@@ -1,4 +1,5 @@
 import type {
+  ClaimKey,
   DigestSource,
   EmbeddingStatus,
   EventActor,
@@ -92,6 +93,12 @@ export interface MemoryRow {
   last_reinforced_at: string | null;
   valid_from: string | null;
   valid_until: string | null;
+  // Issue #371（ADR 0185/ADR 0315）: `Memory.claimKey` の doc コメント参照。
+  // 2列とも NULL＝鍵なし。`rowToMemory` がこの2列を1つの `ClaimKey` オブジェクトへ
+  // 組み立てる（`packages/postgres/migrations/0021_memories_claim_key.sql` の
+  // 「NULL の意味」参照）。
+  claim_key_subject: string | null;
+  claim_key_predicate: string | null;
   strength: number;
   half_life_hours: number;
   decay_floor_at: string;
@@ -127,6 +134,25 @@ export function parsePgBigint(value: string | number | null): number | null {
   return typeof value === "number" ? value : Number(value);
 }
 
+/**
+ * `memories.claim_key_subject`/`claim_key_predicate`（2列）を、`Memory.claimKey`
+ * （`{subject, predicate}` の組、または鍵なしの `null`）へ組み立てる。
+ *
+ * Issue #371: 契約上は両方 NULL か両方非 NULL のどちらかのはず（`0021_memories_claim_key.sql`
+ * の「NULL の意味」参照）だが、DB 側で CHECK 制約は強制していない。**片方だけ非 NULL の
+ * 行に出会っても例外にしない**——読み出し側（この関数）は「主語または述語のどちらかが
+ * 欠けているなら鍵なしとして扱う」という寛容な側へ倒す（`docs/autonomy.md` の「壊れている
+ * ものを直す」規律に反しない範囲で、読み出しを止めない）。
+ */
+function rowToClaimKey(
+  row: Pick<MemoryRow, "claim_key_subject" | "claim_key_predicate">,
+): ClaimKey | null {
+  if (row.claim_key_subject === null || row.claim_key_predicate === null) {
+    return null;
+  }
+  return { subject: row.claim_key_subject, predicate: row.claim_key_predicate };
+}
+
 export function rowToMemory(row: MemoryRow): Memory {
   return {
     id: row.id,
@@ -148,6 +174,7 @@ export function rowToMemory(row: MemoryRow): Memory {
     lastReinforcedAt: parsePgTimestamp(row.last_reinforced_at),
     validFrom: parsePgTimestamp(row.valid_from),
     validUntil: parsePgTimestamp(row.valid_until),
+    claimKey: rowToClaimKey(row),
     strength: row.strength,
     halfLifeHours: row.half_life_hours,
     decayFloorAt: parsePgTimestamp(row.decay_floor_at),
