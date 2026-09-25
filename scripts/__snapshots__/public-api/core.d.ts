@@ -1328,6 +1328,7 @@ export interface RecallFootprintSample {
     totalChars: number;
     memoryCount: number;
     bandEntryCount: number;
+    totalInScope?: number;
 }
 export declare function footprintSampleFromRecall(result: RecallResult): RecallFootprintSample;
 export declare function calibrateRecallFootprint(samples: readonly RecallFootprintSample[], fallback?: RecallFootprintProfile): RecallFootprintProfile;
