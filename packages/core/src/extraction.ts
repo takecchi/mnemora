@@ -329,6 +329,17 @@ export interface ExtractCandidatesResult {
  *   検査する。含まれていれば有効。**含まれていなければ弾き、`undefined`（未指定）を返す**
  *   ——①の「省略」経路と同じ着地点で、`buildNewMemoryFromCandidate` が
  *   `observation.subjectId` へフォールバックする。
+ * - **例外: 一覧が渡されていて、`subjectId` が文字列 `"null"`（ダブルクォート付きの
+ *   文字列であり JSON の `null` リテラルではない）で、かつ一覧そのものに `"null"` という
+ *   文字列が候補として含まれていないとき**は、弾かずに明示的な `null`（主題なし）として
+ *   扱う。【実測】gpt-4o-mini に実 API を当てたところ、`buildSubjectCandidateInstruction`
+ *   の「主題が無いなら明示的に null を設定してください」という指示に対し、モデルは
+ *   JSON の `null` ではなく文字列 `"null"` を5/5回返した（調査記録は
+ *   `docs/decisions/0304-subject-candidates-string-null-literal.md`）。この文字列を
+ *   そのまま「一覧外の値」として弾くと、Issue #608 の例2（「明日台風が来る 主題＝なし」）
+ *   が実 API 上ついに一度も再現できない。**一覧に `"null"` という文字列自体が候補として
+ *   含まれている場合はこの特例より前の「一覧内はそのまま」判定が先に真になるため、
+ *   この特例は「一覧に無い `"null"`」だけを拾う。**
  */
 export function sanitizeCandidateSubjectId(
   subjectId: string | null | undefined,
@@ -342,6 +353,9 @@ export function sanitizeCandidateSubjectId(
   }
   if (allowedSubjectCandidates.includes(subjectId)) {
     return { subjectId, rejected: false };
+  }
+  if (subjectId === "null") {
+    return { subjectId: null, rejected: false };
   }
   return { subjectId: undefined, rejected: true };
 }
@@ -362,12 +376,19 @@ function sanitizeExtractionCandidates(
   const rejectedSubjectIds: string[] = [];
   const sanitized = candidates.map((candidate) => {
     const result = sanitizeCandidateSubjectId(candidate.subjectId, subjectCandidates);
-    if (!result.rejected) {
+    if (result.rejected) {
+      // `candidate.subjectId` はここでは非 null 文字列であることが確定している
+      // （`sanitizeCandidateSubjectId` が `rejected: true` を返すのはその場合だけ）。
+      rejectedSubjectIds.push(candidate.subjectId as string);
+    }
+    // ⚠ `rejected: false` でも `result.subjectId` が `candidate.subjectId` と異なることがある
+    // ——文字列 `"null"` を明示的な `null` へ読み替える特例（上記 doc コメント）がその形。
+    // **常に `result.subjectId` を採用する**（`rejected` の真偽で分岐しない）。以前は
+    // `!result.rejected` のとき `candidate` をそのまま返しており、この読み替えが
+    // 反映されずに文字列 `"null"` が Memory まで素通りしていた。
+    if (result.subjectId === candidate.subjectId) {
       return candidate;
     }
-    // `candidate.subjectId` はここでは非 null 文字列であることが確定している
-    // （`sanitizeCandidateSubjectId` が `rejected: true` を返すのはその場合だけ）。
-    rejectedSubjectIds.push(candidate.subjectId as string);
     return { ...candidate, subjectId: result.subjectId };
   });
   return { candidates: sanitized, rejectedSubjectIds };

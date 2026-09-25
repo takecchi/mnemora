@@ -232,3 +232,20 @@
     不要」という前任からの伝聞は、この ADR を書く際に現物（`migrations/0001_init.sql:115-117`
     とそのコメント `:114`、および既存の `recall-gate-index.test.ts` 末尾のテスト）で検算し、
     真であることを確認した。** 出所: 前任の作業引き継ぎメモ（未検証のまま渡された）。
+
+## 追記（2026-09、[ADR 0303](./0303-superseded-contested-decay-floor-owner.md)、Issue #567）
+
+**「これが覆るとしたら」が挙げた2条件は、字面のとおりには両方とも鳴った**——
+`contested` の解決規則は [ADR 0150](./0150-resolve-contested-explicit-operation.md) で、
+`archived` からの復元は [ADR 0122](./0122-restore-archived-memory.md) で、それぞれ
+実装済みである。**しかし、鳴った条件は「掃引を `superseded`/`contested` へ広げる」という
+結論には繋がらなかった。** ADR 0303 が現物で確認したとおり、`resolveContested` は
+`contested` を掃引ではなく専用の解決口で片付ける設計であり、`restoreArchived` を
+掃引の対象拡大と組み合わせると「`active` なのに `superseded_by_id` を持つ」という、
+lifecycle 表のどの状態にも無い壊れた行を新しく作る（`updateStatusWithEvent` が
+`supersededById` を渡さない呼び出しでは既存の値をそのまま残すため）。
+
+**⟹ 負債1（`superseded`/`contested` は `decay_floor_at` を過ぎても掃かれない）は、
+「まだ実装していない」から「入れないと決めた」に変わった。** この節の本文自体は
+書き換えない（履歴を書き換えない）——決定の記録として当時の判断はそのまま残す。
+理由・現物調査・検討した代替案の詳細は ADR 0303 を参照。

@@ -2253,6 +2253,43 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const { created } = await store.createMemoryWithOutbox(ctx, newsInput, []);
         expect(created).toBe(true);
       });
+
+      // ADR 0303（Issue #567）決定1: `superseded` である間、`decay_floor_at` を読む者は
+      // 居ない（段1の部分索引にも段5の集計にも載らない）。⟹ superseded 化そのものは
+      // この列を動かさない——凍結する。戻す側（`restoreSuperseded`）が reinforce で
+      // 引き直すまで、書き込み時点の値のまま止まることを固定する。
+      it("supersedeWithNewMemories は旧行を superseded にしても decayFloorAt を動かさない（凍結。ADR 0303）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const decayFloorAt = new Date("2026-03-01T00:00:00.000Z");
+        const old = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "freeze-old", decayFloorAt }),
+        );
+
+        const result = await store.supersedeWithNewMemories!(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "freeze-new" }),
+              jobKinds: [],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: buildSupersedeEvent(ctx, old.id, old.digest),
+            },
+          ],
+        );
+
+        expect(result.superseded).toHaveLength(1);
+        const after = await store.get(ctx, old.id);
+        expect(after?.status).toBe("superseded");
+        expect(after?.decayFloorAt.getTime()).toBe(decayFloorAt.getTime());
+      });
     } else {
       it("supersedeWithNewMemories は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
