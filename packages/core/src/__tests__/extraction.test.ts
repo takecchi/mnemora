@@ -171,6 +171,15 @@ describe("truncateForFallbackDigest", () => {
   it("空文字（trim後）には固定のプレースホルダを返す（NOT NULL 制約を満たすため）", () => {
     expect(truncateForFallbackDigest("   ", 200)).toBe("（内容なし）");
   });
+
+  it("負数の maxLength を渡しても、切り詰め後の本文は空になる（末尾からの削除にならない）", () => {
+    // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
+    // 別の意味になる。`maxLength` は「安全弁」（docs/memory-model.md §4）として本文の
+    // 長さを抑える欄であり、負数は上限0（本文を残さない）の下限として扱うのが筋——
+    // ほぼ全文が残る結果は「安全弁」の契約と食い違う。
+    const long = "0123456789";
+    expect(truncateForFallbackDigest(long, -5)).toBe("…");
+  });
 });
 
 describe("buildNewMemoryFromCandidate", () => {

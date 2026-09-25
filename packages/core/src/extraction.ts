@@ -201,7 +201,11 @@ export function truncateForFallbackDigest(content: string, maxLength: number): s
   if (trimmed.length <= maxLength) {
     return trimmed.length > 0 ? trimmed : "（内容なし）";
   }
-  return `${trimmed.slice(0, maxLength)}…`;
+  // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
+  // 別の意味になる（先頭からの切り詰めにならない）。maxLength は「安全弁」
+  // （docs/memory-model.md §4）として本文の長さを抑える欄であり、負数は上限0
+  // （本文を残さない）の下限として扱う。
+  return `${trimmed.slice(0, Math.max(0, maxLength))}…`;
 }
 
 export interface ResolvedDigest {
