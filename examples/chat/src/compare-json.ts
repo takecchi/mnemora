@@ -33,6 +33,22 @@ export interface CompareRowJson {
   returnedCount: number;
   annCandidateCount: number;
   /**
+   * `ComparisonRow.bandEntryCount` をそのまま写す（Issue #340 フォローアップ、ADR 0314）。
+   *
+   * **省略可能欄にした理由は `retrieval-json.ts` の `lexicalMatchRows` と同じ**
+   * ——`CompareRunJson.schemaVersion` は既存の欄の意味を変えない追加のために上げていない
+   * （このファイル下部 `schemaVersion` の doc）。欄を持たない古い実測 JSON・
+   * `examples/chat/compare-baseline.json`（この欄をまだ持たない）は、
+   * `scripts/compare-summary-lib.mjs` の `validateMeasured`/`validateBaseline`
+   * （`REQUIRED_ROW_NUMBER_FIELDS` に含めていない）を引き続き通る。
+   */
+  bandEntryCount?: number;
+  /**
+   * `ComparisonRow.rawIndexJsonLength` をそのまま写す。**省略可能にした理由は
+   * `bandEntryCount` と同じ。**
+   */
+  rawIndexJsonLength?: number;
+  /**
    * 冒頭の事実表明の出典（`sourceObservationId` → `externalId`）に到達したかだけを
    * 測る。情報保持・最終回答の正誤はこの欄に含まれない（`ComparisonRow.factStatementSurvived`
    * の docstring、`docs/autonomy.md` §2.2 の2番、ADR 0226）。
@@ -46,7 +62,13 @@ export interface CompareRowJson {
 }
 
 export interface CompareRunJson {
-  /** この形が変わったら上げる。読み手（summary スクリプト）が形の変化を検知できるように。 */
+  /**
+   * この形が変わったら上げる。読み手（summary スクリプト）が形の変化を検知できるように。
+   *
+   * ⚠ `rows[].bandEntryCount`/`rows[].rawIndexJsonLength`（Issue #340 フォローアップ、
+   * ADR 0314）を足したときは上げていない——既存の欄の意味を変えない追加であり、
+   * `CompareRowJson.bandEntryCount` の doc と同じ理由（`retrieval-json.ts` の先例）。
+   */
   schemaVersion: 1;
   /** ISO 8601。JSON を組み立てた時刻——全会話長の実行が終わった後。 */
   measuredAt: string;
@@ -99,6 +121,8 @@ export function buildCompareJson(options: BuildCompareJsonOptions): CompareRunJs
       omitted: row.omitted.map((o) => ({ ...o })),
       returnedCount: row.returnedCount,
       annCandidateCount: row.annCandidateCount,
+      bandEntryCount: row.bandEntryCount,
+      rawIndexJsonLength: row.rawIndexJsonLength,
       factStatementSurvived: row.factStatementSurvived,
     })),
   };

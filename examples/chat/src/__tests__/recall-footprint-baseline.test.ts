@@ -19,10 +19,38 @@ import {
  *
  * ## この歯がやっていること
  *
- * `BUILTIN_RECALL_FOOTPRINT_PROFILE` は「12点のうち目次帯が空の7点（`totalInScope <=
- * DEFAULT_RECALL_LIMIT`）だけを使った最小二乗」だと自称している（`recall-footprint.ts` の
- * 該当コメント）。この歯は、**その主張を実際に自分で計算し直して検算する**
+ * `BUILTIN_RECALL_FOOTPRINT_PROFILE` は「`compare-baseline.json` の hold-in 7行
+ * （帯が空、`bandEntryCount === 0`）と、`recall-footprint-calibration-samples-baseline.json`
+ * の8行（同じく帯が空、`limit=20` で明示的に拡張した標本）を合わせた15点だけを使った
+ * 最小二乗」だと自称している（`recall-footprint.ts` の該当コメント、Issue #340
+ * フォローアップ・ADR 0306/0310）。この歯は、**その主張を実際に自分で計算し直して検算する**
  * ——同梱の既定プロファイルを信用せず、`calibrateRecallFootprint` を実際に呼ぶ。
+ *
+ * ## ⭐ hold-in/hold-out の分け方: `bandEntryCount === 0`（Issue #340 フォローアップ、ADR 0314）
+ *
+ * 旧い分け方 `totalInScope <= DEFAULT_RECALL_LIMIT` は、「目次帯が空である」ことの
+ * **代理指標**だった——`queryRecall`（`mnemora-path.ts`）が `limit` を明示的に渡さず、
+ * 既定 `DEFAULT_RECALL_LIMIT` のまま呼ぶ限り両者は常に一致する。ADR 0314 §2 が指摘した
+ * とおり、`limit` を明示的に上げる呼び出し（`recall-footprint-calibration-samples.ts`）が
+ * 増えると、この一致は構造的に崩れる（`totalInScope=14` でも `limit=20` なら帯は空）。
+ * ⟹ 代理指標ではなく、帯が実際に空かどうか（`RecallResult.index.digestBand?.length ?? 0
+ * === 0`、`compare.ts` の `ComparisonRow.bandEntryCount`）そのもので分ける。
+ *
+ * `examples/chat/compare-baseline.json` は CI artifact から実測更新され、`bandEntryCount`
+ * を持つ（Issue #340 フォローアップ）。⟹ `bandEntryCountOrThrow`（下）が例外を投げることは
+ * もう無い——欄が無いときに黙って旧条件へフォールバックしない、という設計はそのまま残す
+ * （将来また欄が失われたときに、黙って緑に倒れないようにするため）。
+ *
+ * ## ⭐ 較正標本を15点に拡張する（Issue #340 フォローアップ、ADR 0306/0310）
+ *
+ * hold-in 7行（`compare-baseline.json`）だけでは、目次帯が空のまま返る最大件数が
+ * `totalInScope=8`（22ターン行）に留まり、hold-out の82ターン行（`totalInScope=25`）まで
+ * 内挿で届かない。`recall-footprint-calibration-samples-baseline.json`
+ * （`RecallQuery.limit=20` を明示して帯を空に保った8点、CI artifact から実測、ADR 0314）を
+ * 較正標本へ足し、7+8=15点で較正する。標本には `totalInScope` を渡す
+ * （`calibrateRecallFootprint` が `indexBandStructuralTerms` で構造項を差し引いてから
+ * 最小二乗にかける、ADR 0306）——8点のうち7点は `totalInScope` が2桁（10〜19）であり、
+ * これを渡さないと桁上がり分が係数へ誤って吸い込まれる。
  */
 
 interface BaselineRow {
@@ -32,6 +60,8 @@ interface BaselineRow {
   mnemoraChars: number;
   mnemoraShareOfNaiveChars: number;
   returnedCount: number;
+  /** `ComparisonRow.bandEntryCount` — Issue #340 フォローアップ、ADR 0314。 */
+  bandEntryCount: number;
 }
 
 interface BaselineFile {
@@ -43,6 +73,35 @@ interface BaselineFile {
 const baselinePath = fileURLToPath(new URL("../../compare-baseline.json", import.meta.url));
 const baseline = JSON.parse(readFileSync(baselinePath, "utf8")) as BaselineFile;
 const rows = baseline.rows;
+
+/**
+ * `recall-footprint-calibration-samples-baseline.json` の8点（Issue #340 フォローアップ、
+ * ADR 0314）。CI artifact から実測更新した、目次帯が空のまま件数が10〜19件の較正標本。
+ * hold-in 7行（`compare-baseline.json`）とあわせて15点の較正標本になる（上のファイル
+ * 冒頭 docstring 参照）。
+ */
+interface CalibrationSampleBaselineRow {
+  fillerPairs: number;
+  recallLimit: number;
+  turnCount: number;
+  totalInScope: number;
+  returnedCount: number;
+  mnemoraChars: number;
+  bandEntryCount: number;
+}
+
+interface CalibrationSampleBaselineFile {
+  rowCount: number;
+  rows: CalibrationSampleBaselineRow[];
+}
+
+const calibrationSamplesPath = fileURLToPath(
+  new URL("../../recall-footprint-calibration-samples-baseline.json", import.meta.url),
+);
+const calibrationSamplesFile = JSON.parse(
+  readFileSync(calibrationSamplesPath, "utf8"),
+) as CalibrationSampleBaselineFile;
+const calibrationSampleRows = calibrationSamplesFile.rows;
 
 /**
  * ADR 0166: `queryRecall`（`mnemora-path.ts`）は連想枠を既定で使う（ADR 0168、`maxCount=10`）。
@@ -113,24 +172,90 @@ function associationCountForRow(row: BaselineRow): number {
  */
 const ACCURACY_TOLERANCE = 0.025;
 
-const holdInRows = rows.filter((r) => r.totalInScope <= DEFAULT_RECALL_LIMIT);
-const holdOutRows = rows.filter((r) => r.totalInScope > DEFAULT_RECALL_LIMIT);
+/**
+ * `row.bandEntryCount === 0`（目次帯が空、という一次指標そのもの）を返す。
+ *
+ * ⛔ **欄が無い（型として不正な）行が混じっていたら、黙って `0` や旧条件へフォールバック
+ * しない**——名指しのエラーで失敗する。`compare-baseline.json` は CI artifact 経由で
+ * `bandEntryCount` を持つように更新済みだが、この検査は残す（将来また欄が失われたときに
+ * 黙って緑に倒れないようにするため）。
+ */
+function bandEntryCountOrThrow(row: BaselineRow): number {
+  if (typeof row.bandEntryCount !== "number") {
+    throw new Error(
+      `compare-baseline.json の turnCount=${row.turnCount} 行に bandEntryCount が無い。` +
+        "hold-in/hold-out の分け方は bandEntryCount === 0 である(Issue #340 フォローアップ・" +
+        "ADR 0314)。基準値が壊れている可能性があるので、CI artifact から作り直すこと" +
+        "(examples/chat/README.md『基準値を更新する手順』)。",
+    );
+  }
+  return row.bandEntryCount;
+}
+
+const holdInRows = rows.filter((r) => bandEntryCountOrThrow(r) === 0);
+const holdOutRows = rows.filter((r) => bandEntryCountOrThrow(r) !== 0);
+
+/**
+ * ⭐ 較正に実際に使う標本(15点 = hold-in 7行 + 較正標本8点、Issue #340 フォローアップ、
+ * ADR 0306/0310)。**`totalInScope` を渡す**——`calibrateRecallFootprint` は
+ * `bandEntryCount === 0` の標本について `indexBandStructuralTerms` で構造項を計算し、
+ * 最小二乗にかける前に差し引く(ADR 0306)。渡さなければ構造項0として扱われ、較正標本8点の
+ * うち7点(`totalInScope` が2桁)で桁上がり分を誤って係数へ吸い込む。
+ */
+const calibrationSamples: RecallFootprintSample[] = [
+  ...holdInRows.map((row) => ({
+    totalChars: row.mnemoraChars,
+    memoryCount: row.returnedCount,
+    bandEntryCount: 0,
+    totalInScope: row.totalInScope,
+  })),
+  ...calibrationSampleRows.map((row) => ({
+    totalChars: row.mnemoraChars,
+    memoryCount: row.returnedCount,
+    bandEntryCount: row.bandEntryCount,
+    totalInScope: row.totalInScope,
+  })),
+];
 
 function relativeError(estimatedChars: number, actualChars: number): number {
   return Math.abs(estimatedChars - actualChars) / actualChars;
 }
 
 describe("compare-baseline.json — 前提（行数が変わっていないこと）", () => {
-  it("12行のうち、目次帯が空の(totalInScope <= DEFAULT_RECALL_LIMIT)行が7行、そうでない行が5行", () => {
+  it("12行のうち、目次帯が空の(bandEntryCount === 0)行が7行、そうでない行が5行", () => {
     expect(rows).toHaveLength(12);
     expect(holdInRows).toHaveLength(7);
     expect(holdOutRows).toHaveLength(5);
   });
 });
 
-describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
-  // 目次帯が空の7行だけを標本にする。これらは totalInScope <= DEFAULT_RECALL_LIMIT なので
-  // 全件が返り、目次帯に載る候補が無い(bandEntryCount=0)。
+/**
+ * ⭐ Issue #340 フォローアップ(ADR 0314)が明示的に要求した歯:
+ * 「既存の12行について、旧い条件（`totalInScope <= DEFAULT_RECALL_LIMIT`）と
+ * 新しい条件（`bandEntryCount === 0`）の分け方が1行も違わない」ことを検算する。
+ *
+ * ⚠ `holdInRows`/`holdOutRows`（上）は既に新条件で計算されている——`bandEntryCount`
+ * が無ければこのファイル自体が module 読み込み時点で例外を投げるため、この
+ * describe に実際に到達するのは、基準値が更新された後だけである。
+ */
+describe("hold-in/hold-out の分け方の移行 — bandEntryCount === 0 と旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)が1行も違わない（Issue #340 フォローアップ、ADR 0314）", () => {
+  it.each(rows)(
+    "turnCount=$turnCount: bandEntryCount===0 と totalInScope<=DEFAULT_RECALL_LIMIT の判定が一致する",
+    (row) => {
+      expect(bandEntryCountOrThrow(row) === 0).toBe(row.totalInScope <= DEFAULT_RECALL_LIMIT);
+    },
+  );
+});
+
+/**
+ * ⚠ **回帰の確認**: 7点だけ(`compare-baseline.json` の hold-in のみ、較正標本8点を
+ * 足さない)で較正すると、拡張前の値(`charsPerDigest≒15.458` / `fixedIndexChars≒170.881`)
+ * に一致し続けること。拡張後の較正(下のメインの `describe`)がこの値を上書きした
+ * わけではないことを確認する回帰の歯——ADR 0306 の「hold-in 7行では構造項が常に0」
+ * という主張の検算でもある(`totalInScope` を渡しても渡さなくても同じ、という歯は
+ * 下に別途ある)。
+ */
+describe("calibrateRecallFootprint — 7点だけ(拡張前)の較正は変更前の値に一致し続ける", () => {
   const samples: RecallFootprintSample[] = holdInRows.map((row) => ({
     totalChars: row.mnemoraChars,
     memoryCount: row.returnedCount,
@@ -138,15 +263,36 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
   }));
   const calibrated = calibrateRecallFootprint(samples);
 
-  it("borrowedFromDefault が空(7行に memoryCount の広がりがあるため両係数とも決まる)", () => {
+  it("borrowedFromDefault が空(7行に memoryCount の広がりがあるため両係数とも決まる)、sampleCount=7", () => {
     if (calibrated.origin.kind !== "calibrated") throw new Error("unreachable");
     expect(calibrated.origin.borrowedFromDefault).toEqual([]);
     expect(calibrated.origin.sampleCount).toBe(7);
   });
 
-  it("較正した係数がオーナーの実測(charsPerDigest≒15.458 / fixedIndexChars≒170.881)に一致する", () => {
+  it("較正した係数が変更前の値(charsPerDigest≒15.458 / fixedIndexChars≒170.881)に一致する", () => {
     expect(calibrated.charsPerDigest).toBeCloseTo(15.458, 2);
     expect(calibrated.fixedIndexChars).toBeCloseTo(170.881, 2);
+  });
+});
+
+describe("calibrateRecallFootprint — hold-in 15行(7+8)での較正", () => {
+  const calibrated = calibrateRecallFootprint(calibrationSamples);
+
+  it("borrowedFromDefault が空(15行に memoryCount の広がりがあるため両係数とも決まる)、sampleCount=15", () => {
+    if (calibrated.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(calibrated.origin.borrowedFromDefault).toEqual([]);
+    expect(calibrated.origin.sampleCount).toBe(15);
+  });
+
+  it("較正した係数が BUILTIN_RECALL_FOOTPRINT_PROFILE の新しい値(charsPerDigest≒16.175 / fixedIndexChars≒168.503)に一致する", () => {
+    expect(calibrated.charsPerDigest).toBeCloseTo(
+      BUILTIN_RECALL_FOOTPRINT_PROFILE.charsPerDigest,
+      2,
+    );
+    expect(calibrated.fixedIndexChars).toBeCloseTo(
+      BUILTIN_RECALL_FOOTPRINT_PROFILE.fixedIndexChars,
+      2,
+    );
   });
 
   describe("較正済みプロファイルで12行すべての mnemoraChars を予測する", () => {
@@ -162,7 +308,7 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
       },
     );
 
-    it("12行全体(較正に使った7行 + hold-outの5行)の最大誤差が許容誤差以内", () => {
+    it("12行全体(較正に使った7行 + hold-outの5行。較正標本自体は7+8=15点)の最大誤差が許容誤差以内", () => {
       const errors = rows.map((row) => {
         const est = estimateRecallFootprint(
           { memoryCountInScope: row.totalInScope, associationCount: associationCountForRow(row) },
@@ -230,13 +376,8 @@ describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
 });
 
 describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも同じ12行を予測する", () => {
-  it("既定プロファイルの最大誤差が許容誤差以内であり、hold-in較正済みプロファイルとほぼ同程度に当たる", () => {
-    const samples: RecallFootprintSample[] = holdInRows.map((row) => ({
-      totalChars: row.mnemoraChars,
-      memoryCount: row.returnedCount,
-      bandEntryCount: 0,
-    }));
-    const calibrated = calibrateRecallFootprint(samples);
+  it("既定プロファイルの最大誤差が許容誤差以内であり、hold-in較正(15点)とほぼ同程度に当たる", () => {
+    const calibrated = calibrateRecallFootprint(calibrationSamples);
 
     const maxErrDefault = Math.max(
       ...rows.map((row) => {
@@ -258,10 +399,11 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
     );
 
     expect(maxErrDefault).toBeLessThanOrEqual(ACCURACY_TOLERANCE);
-    // 既定プロファイル自身がこの7行から測ったものである(recall-footprint.ts の
-    // BUILTIN_RECALL_FOOTPRINT_PROFILE.origin.measuredFrom を見よ)以上、この歯が
-    // hold-in較正し直した値とほぼ一致するはず。ずれるなら既定プロファイルの係数が
-    // 古い(誰かが構造定数を変えたのに測り直していない)ということなので、その場合は
+    // 既定プロファイル自身がこの15点(hold-in 7行 + 較正標本8点)から測ったものである
+    // (recall-footprint.ts の BUILTIN_RECALL_FOOTPRINT_PROFILE.origin.measuredFrom を
+    // 見よ)以上、この歯がhold-in較正し直した値とほぼ一致するはず。ずれるなら既定
+    // プロファイルの係数が古い(誰かが構造定数を変えたのに測り直していない、または
+    // 較正標本を増やしたのにBUILTINを更新し忘れた)ということなので、その場合は
     // このテストの失敗をそのまま報告すること。
     expect(Math.abs(maxErrDefault - maxErrCalibrated)).toBeLessThan(0.005);
   });
@@ -271,16 +413,16 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
  * Issue #410 対処候補3: 「歯の余白は字数で見るとどれだけ狭いか」を、百分率ではなく
  * 字数で見える形にする。
  *
- * ⚠ **対象は hold-out 5行だけであり、hold-in 7行は含めない。**理由は自己参照——
- * hold-in 行（`totalInScope <= DEFAULT_RECALL_LIMIT`）は `calibrateRecallFootprint` の
- * 較正標本そのものである（上の `samples` が `row.mnemoraChars` を直接使う）。ある
- * hold-in 行の実測が変われば、その行の「実測」だけでなく較正係数
+ * ⚠ **対象は hold-out 5行だけであり、較正標本(hold-in 7行 + 較正標本8点=15点)は
+ * 含めない。**理由は自己参照——較正標本の各行は `calibrateRecallFootprint` の
+ * 入力そのものである（上の `calibrationSamples` が `row.mnemoraChars` を直接使う）。
+ * ある較正標本の実測が変われば、その行の「実測」だけでなく較正係数
  * （`charsPerDigest` / `fixedIndexChars`）自体も同時に動く——較正を固定したまま
  * 「この行がどこまでずれたら赤くなるか」を計算しても、実際にその行が動いたときの
  * 挙動を正しく予測しない。
  *
  * hold-out 5行（322ターン行を含む）は較正標本に入らない——`calibrateRecallFootprint`
- * は hold-in 7行だけから決まるので、hold-out 行の実測がいくら動いても較正係数は
+ * は較正標本15点だけから決まるので、hold-out 行の実測がいくら動いても較正係数は
  * 変わらない。⟹ hold-out 行だけは「この行の実測が[下限,上限]の外に出たら赤くなる」
  * という境界を、較正を固定したまま正しく計算できる。ADR 0201「検討して採らなかった案」に
  * hold-in 行を含めなかった理由の詳細がある。
@@ -289,20 +431,20 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
  * `est / (1 + ACCURACY_TOLERANCE)` が下限。上側の余白 = 上限 − 実測、
  * 下側の余白 = 実測 − 下限。
  *
- * FLOOR_CHARS は「半 digest 分（`charsPerDigest / 2`）」——⛔ **いまの余白の実測値
- * （例: 42ターン行の11.15字）をそのまま固定しない**（脆くなる。ADR 0201参照。
- * digest 1件の内容が変わるだけで正当に動きうる量を、赤の基準に固定すると、
- * その正当な変更のたびに意味なく赤くなる）。半digest分は「digestの内容がわずかに
- * 変わっただけで境界に触れる」水準を表す、較正そのものから導いた閾値であり、
- * 較正係数が動けば閾値も追随する。
+ * FLOOR_CHARS は「半 digest 分（`charsPerDigest / 2`）」——⛔ **いまの余白の実測値を
+ * そのまま固定しない**（脆くなる。ADR 0201参照。digest 1件の内容が変わるだけで
+ * 正当に動きうる量を、赤の基準に固定すると、その正当な変更のたびに意味なく赤くなる）。
+ * 半digest分は「digestの内容がわずかに変わっただけで境界に触れる」水準を表す、
+ * 較正そのものから導いた閾値であり、較正係数が動けば閾値も追随する。
+ *
+ * ⚠ **2026-09-25（Issue #340 フォローアップ、ADR 0306/0310）: 較正標本を15点へ拡張した
+ * ことで、この歯が実際に判定する対象（`calibrated`）が変わった。**7点だけの較正では
+ * turnCount=42 の上側で12.18字（緑）だったが、15点(構造項を正しく差し引いた較正、
+ * ADR 0306)では同じ行の下側で約9.39字になる——それでも FLOOR(半digest≒8.09字)を
+ * 上回り、緑のままである（詳細は ADR 0201 追記3・ADR 0314 訂正節）。
  */
-describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん狭い行を明示する(Issue #410)", () => {
-  const samples: RecallFootprintSample[] = holdInRows.map((row) => ({
-    totalChars: row.mnemoraChars,
-    memoryCount: row.returnedCount,
-    bandEntryCount: 0,
-  }));
-  const calibrated = calibrateRecallFootprint(samples);
+describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん狭い行を明示する(Issue #410、較正標本15点、ADR 0306/0310)", () => {
+  const calibrated = calibrateRecallFootprint(calibrationSamples);
 
   interface MarginInfo {
     turnCount: number;
@@ -385,15 +527,11 @@ describe("calibrateRecallFootprint — totalInScope を渡しても、hold-in 7�
     const withProfile = calibrateRecallFootprint(samplesWith);
     expect(Object.is(withProfile.charsPerDigest, withoutProfile.charsPerDigest)).toBe(true);
     expect(Object.is(withProfile.fixedIndexChars, withoutProfile.fixedIndexChars)).toBe(true);
-    // BUILTIN_RECALL_FOOTPRINT_PROFILE 自身の実測値とも一致すること(3桁目まで)——
-    // ADR 0302 の「較正係数は1つも動かしていない」という主張の、本 PR 版の確認。
-    expect(withProfile.charsPerDigest).toBeCloseTo(
-      BUILTIN_RECALL_FOOTPRINT_PROFILE.charsPerDigest,
-      2,
-    );
-    expect(withProfile.fixedIndexChars).toBeCloseTo(
-      BUILTIN_RECALL_FOOTPRINT_PROFILE.fixedIndexChars,
-      2,
-    );
+    // 変更前の値(7点だけの較正、charsPerDigest≒15.458 / fixedIndexChars≒170.881)とも
+    // 一致すること(3桁目まで)——BUILTIN_RECALL_FOOTPRINT_PROFILE は較正標本15点の値へ
+    // 更新済みなので、ここでは BUILTIN ではなく固定した旧い値と比較する
+    // (ADR 0302 の「較正係数は1つも動かしていない」という主張の、本 PR 版の確認)。
+    expect(withProfile.charsPerDigest).toBeCloseTo(15.458, 2);
+    expect(withProfile.fixedIndexChars).toBeCloseTo(170.881, 2);
   });
 });

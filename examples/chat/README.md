@@ -215,7 +215,7 @@ provider）。2件の事実（好きな食べ物・趣味）を observe して e
    を運ばない（ADR 0155 決定1。`digest` は `MemoryStore.get()` から再現できるため
    `recalls` へ複製していない）。
 4. `record.omitted` に、3件目（住んでいる街）が `{ kind: 'not_indexed', reason:
-   'pending' }` として現れる——索引に載っていないため候補にすらならなかったことを、
+'pending' }` として現れる——索引に載っていないため候補にすらならなかったことを、
    永続化された行から読める。
 5. 実在しない `recallId`（`crypto.randomUUID()` で作った値）で `getRecall` を呼ぶと
    `null` が返る——「見つからなかった」と画面に名指しで出る（`0件`や`空`とは
@@ -435,6 +435,40 @@ ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化
 （[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md)）。⛔ **これは門ではない**——ジョブは落ちない。
 **古いことに気づかせるためだけに在る。**
 
+### `recall-footprint-calibration-samples-baseline.json`: CI-sourced な較正の補助標本（Issue #340）
+
+`recall-footprint`（`packages/core`）の較正標本を増やす目的の**補助ファイル**（8点）。
+`examples/chat/src/recall-footprint-calibration-samples.ts` の `CALIBRATION_SAMPLE_DESIGN`
+（`fillerPairs`/`limit=20` の8点）を `example-chat` ジョブが実行し、`compare` ステップと
+並ぶ独立のステップでアップロードした artifact `recall-footprint-calibration-samples`
+（`.github/workflows/ci.yml`、`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON`）を、
+`compare-baseline.json` と**同じ CI-sourcing の門**（上の「基準値を更新する手順」・
+ADR 0119/0121/0133・2回以上の run の一致）を経て `_readme`/`provenance` 付きで
+コミットしたもの。`rawIndex`（生の `IndexBand`）まで含む。**`compare-baseline.json` の
+`rows` には混ぜない**——`rowCount`/12行を前提にした既存の歯・この README の表を
+壊さないための別ファイルのままである（ADR 0314 §2 の「別ファイル」方針を維持）。
+
+検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`（設計どおりに
+生成されていることの整合性検査）と `src/__tests__/recall-footprint-baseline.test.ts`
+（この8点を `compare-baseline.json` の hold-in 7行と合わせて15点の較正標本として使う、
+⭐門本体）。詳細・経緯は
+[ADR 0314](../../docs/decisions/0314-recall-footprint-calibration-samples-need-ci-sourcing.md)
+（当初は CI 経路が無く `.dev.json` 止まりだったこと、その後 CI 配線がこの artifact を
+生んだこと、構造項の二重計上を直した [ADR 0306](../../docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md)）。
+
+⚠ **この artifact 自身の Job Summary への要約**（`scripts/recall-footprint-calibration-samples-summary.mjs`）
+は `compare-summary.mjs` と違い**非ゲート**（相違があっても exit 0）のままである——
+CI が生成するのは生の artifact までで、基準値ファイルへの反映は上記の通り人が
+2回一致を確かめてから行う（`compare-baseline.json` と同じ規律、CIはこのファイルを
+自動更新しない）。
+
+🔴 **`recall-footprint-calibration-samples.dev.json` は削除した（2026-09-25、Issue #340
+フォローアップ）。**この artifact が `.dev.json` と rows が1バイトも違わないことを確認した
+うえで、CI-sourced な本ファイルへ役割を一本化した——`.dev.json` が示していた「実 API を
+叩かずに作れる」という事実は ADR 0314 に記録として残っており、ファイル自体を残す理由は
+無くなった。`recall-footprint-calibration-samples.test.ts` の `devSamples` は、この
+baseline ファイルを読むように差し替えてある。
+
 ### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
 `compare`/`archive-sweep-cost` は `--decay-clock <wall|activity|either>` を受け付ける。
@@ -463,14 +497,14 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost -- -
 表はどれも**使用報告（`memory_usage`）による強化が一度も起きない場合**である。`recall()` を
 呼ぶだけでは強化されない:
 
-| `decay_clock` | recall 頻度 | 強化が無い場合に沈むまで |
-|---|---|---|
-| `'wall'`（既定） | 無関係 | 約129.66日 |
-| `'activity'` | 1回/日 | 約3112日（約8.5年） |
-| `'activity'` | 100回/日 | 約31日 |
-| `'activity'` | 1000回/日 | 約3.1日 |
-| `'activity'` | 3112回/日 | ちょうど1日 ← ⚠ 「次の日も覚えている」の破れ目 |
-| `'either'` | 無関係 | 上の遅いほう（常に `'wall'` 以上） |
+| `decay_clock`    | recall 頻度 | 強化が無い場合に沈むまで                       |
+| ---------------- | ----------- | ---------------------------------------------- |
+| `'wall'`（既定） | 無関係      | 約129.66日                                     |
+| `'activity'`     | 1回/日      | 約3112日（約8.5年）                            |
+| `'activity'`     | 100回/日    | 約31日                                         |
+| `'activity'`     | 1000回/日   | 約3.1日                                        |
+| `'activity'`     | 3112回/日   | ちょうど1日 ← ⚠ 「次の日も覚えている」の破れ目 |
+| `'either'`       | 無関係      | 上の遅いほう（常に `'wall'` 以上）             |
 
 ⟹ **`'activity'` を選ぶなら、`half_life_recalls`
 （`tenant_settings.default_half_life_recalls`、既定 `720`）を自分のテナントの recall 頻度に
@@ -497,19 +531,19 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost -- -
 **`chars` の2列と `mnemora/naive (chars)` の列（＝北極星の主測定）はこの変更の影響を受けない。**
 
 | 会話ターン数 | naive chars | naive tokens(概算) | mnemora chars | mnemora tokens(概算) | mnemora/naive (chars) |
-|---|---|---|---|---|---|
-| 2 | 49 | 13 | 131 | 33 | **267.3%** |
-| 4 | 97 | 25 | 142 | 36 | **146.4%** |
-| 6 | 150 | 38 | 161 | 41 | **107.3%** |
-| 8 | 197 | 50 | 178 | 46 | 90.4% |
-| 10 | 243 | 61 | 193 | 50 | 79.4% |
-| 12 | 294 | 74 | 211 | 54 | 71.8% |
-| 22 | 552 | 138 | 288 | 75 | 52.2% |
-| 42 | 1048 | 262 | 292 | 76 | 27.9% |
-| 82 | 2064 | 516 | 310 | 80 | 15.0% |
-| 162 | 4083 | 1021 | 303 | 78 | 7.4% |
-| 322 | 8134 | 2034 | 303 | 78 | 3.7% |
-| 642 | 16223 | 4056 | 303 | 78 | 1.9% |
+| ------------ | ----------- | ------------------ | ------------- | -------------------- | --------------------- |
+| 2            | 49          | 13                 | 131           | 33                   | **267.3%**            |
+| 4            | 97          | 25                 | 142           | 36                   | **146.4%**            |
+| 6            | 150         | 38                 | 161           | 41                   | **107.3%**            |
+| 8            | 197         | 50                 | 178           | 46                   | 90.4%                 |
+| 10           | 243         | 61                 | 193           | 50                   | 79.4%                 |
+| 12           | 294         | 74                 | 211           | 54                   | 71.8%                 |
+| 22           | 552         | 138                | 288           | 75                   | 52.2%                 |
+| 42           | 1048        | 262                | 292           | 76                   | 27.9%                 |
+| 82           | 2064        | 516                | 310           | 80                   | 15.0%                 |
+| 162          | 4083        | 1021               | 303           | 78                   | 7.4%                  |
+| 322          | 8134        | 2034               | 303           | 78                   | 3.7%                  |
+| 642          | 16223       | 4056               | 303           | 78                   | 1.9%                  |
 
 **⚠ 2026-09-06 追記（本 PR）: 上の表のうち 322・642 ターン行の `mnemora chars`/`tokens` を
 実測値で更新した（305→303 / 79→78）。** CI（本物の PostgreSQL 17 + pgvector、擬似 provider、
@@ -561,20 +595,19 @@ Actions run 34006151739、head `e87da3b`）で `compare` を走らせたとこ�
 この擬似 provider に固有の数字であり、一般的な閾値として主張しない。** 会話の内容
 （filler の長さ・事実の長さ）や `recall()` のオプションを変えれば動く。
 
-
 ### 本物の OpenAI で走らせた実測（2026-09-06、`gpt-4o-mini` + `text-embedding-3-small`(256次元)）
 
 **所要 約11分 / 実費 約 3.2セント**（呼び出し 889回。内訳は
 [ADR 0019 §7.8](../../docs/decisions/0019-real-openai-measurement-cost.md)）。
 
 | 会話ターン数 | naive chars | mnemora chars（本物） | 比（本物） | 比（擬似・同日測定） |
-|---|---|---|---|---|
-| 2 | 49 | 125 | 255.1% | 222.4% |
-| 6 | 150 | 134 | **89.3%** | 72.7% |
-| 22 | 552 | 211 | 38.2% | 19.7% |
-| 82 | 2064 | 247 | 12.0% | 5.4% |
-| 322 | 8134 | 231 | 2.8% | 3.7% |
-| 642 | 16223 | **244** | **1.5%** | 1.9% |
+| ------------ | ----------- | --------------------- | ---------- | -------------------- |
+| 2            | 49          | 125                   | 255.1%     | 222.4%               |
+| 6            | 150         | 134                   | **89.3%**  | 72.7%                |
+| 22           | 552         | 211                   | 38.2%      | 19.7%                |
+| 82           | 2064        | 247                   | 12.0%      | 5.4%                 |
+| 322          | 8134        | 231                   | 2.8%       | 3.7%                 |
+| 642          | 16223       | **244**               | **1.5%**   | 1.9%                 |
 
 （全12行は [ADR 0019 §7.7](../../docs/decisions/0019-real-openai-measurement-cost.md)）
 
@@ -591,13 +624,13 @@ Actions run 34006151739、head `e87da3b`）で `compare` を走らせたとこ�
 **`sourceObservationId` を辿って `externalId` で照合する**形へ置き換え（`provenance-trace.ts`）、
 改めて実 API で測った（657回 / **10分49秒** / **$0.032075**）。
 
-| 会話ターン数 | スコープ内の Memory | 返った件数 | 冒頭の事実 | mnemora chars | 比 |
-|---|---|---|---|---|---|
-| 42 | 15 | 10 | ✅ | 250 | 23.9% |
-| 82 | 27 | 10 | ✅ | 244 | 11.8% |
-| 162 | 56 | 10 | ✅ | 229 | 5.6% |
-| 322 | **108** | 10 | **✅** | 227 | 2.8% |
-| 642 | **209** | 10 | **✅** | 184 | **1.1%** |
+| 会話ターン数 | スコープ内の Memory | 返った件数 | 冒頭の事実 | mnemora chars | 比       |
+| ------------ | ------------------- | ---------- | ---------- | ------------- | -------- |
+| 42           | 15                  | 10         | ✅         | 250           | 23.9%    |
+| 82           | 27                  | 10         | ✅         | 244           | 11.8%    |
+| 162          | 56                  | 10         | ✅         | 229           | 5.6%     |
+| 322          | **108**             | 10         | **✅**     | 227           | 2.8%     |
+| 642          | **209**             | 10         | **✅**     | 184           | **1.1%** |
 
 **⟹ 全12行が ✅。**下の「⭐ 削減率だけでは意味を持たない」節にある **322 / 642 の ❌ は、
 擬似 provider の産物だった。**642ターンでは 209件のスコープから10件だけを返して、なお
@@ -656,20 +689,20 @@ PostgreSQL 17 + pgvector、擬似 provider、GitHub Actions run 34006151739、he
 「`omitted` の内訳」の6列に広げた（以前は「スコープ内の Memory」「返った件数」「残っているか」
 の3列しか無く、ANN に実際に何件が候補として上がったかが見えなかった）。
 
-| 会話ターン数 | スコープ内の Memory | ANN の候補になれた件数 | 返った件数 | 冒頭の事実が残っているか | `omitted` の内訳 |
-|---|---|---|---|---|---|
-| 2 | 1 | 1 | 1 | ✅ | (無し) |
-| 4 | 2 | 2 | 2 | ✅ | (無し) |
-| 6 | 3 | 3 | 3 | ✅ | (無し) |
-| 8 | 4 | 4 | 4 | ✅ | (無し) |
-| 10 | 5 | 5 | 5 | ✅ | (無し) |
-| 12 | 6 | 6 | 6 | ✅ | (無し) |
-| 22 | 11 | 11 | 10 | ✅ | over_limit:1 |
-| 42 | 21 | 21 | 10 | ✅ | over_limit:11 |
-| 82 | 41 | 41 | 10 | ✅ | ann_truncated, over_limit:30 |
-| 162 | 81 | 81 | 10 | ✅ | ann_truncated, over_limit:30 |
-| 322 | 161 | 161 | 10 | ❌ | ann_truncated, over_limit:30 |
-| 642 | 321 | 321 | 10 | ❌ | ann_truncated, over_limit:30 |
+| 会話ターン数 | スコープ内の Memory | ANN の候補になれた件数 | 返った件数 | 冒頭の事実が残っているか | `omitted` の内訳             |
+| ------------ | ------------------- | ---------------------- | ---------- | ------------------------ | ---------------------------- |
+| 2            | 1                   | 1                      | 1          | ✅                       | (無し)                       |
+| 4            | 2                   | 2                      | 2          | ✅                       | (無し)                       |
+| 6            | 3                   | 3                      | 3          | ✅                       | (無し)                       |
+| 8            | 4                   | 4                      | 4          | ✅                       | (無し)                       |
+| 10           | 5                   | 5                      | 5          | ✅                       | (無し)                       |
+| 12           | 6                   | 6                      | 6          | ✅                       | (無し)                       |
+| 22           | 11                  | 11                     | 10         | ✅                       | over_limit:1                 |
+| 42           | 21                  | 21                     | 10         | ✅                       | over_limit:11                |
+| 82           | 41                  | 41                     | 10         | ✅                       | ann_truncated, over_limit:30 |
+| 162          | 81                  | 81                     | 10         | ✅                       | ann_truncated, over_limit:30 |
+| 322          | 161                 | 161                    | 10         | ❌                       | ann_truncated, over_limit:30 |
+| 642          | 321                 | 321                    | 10         | ❌                       | ann_truncated, over_limit:30 |
 
 ### ⚠ この結果は 2026-09-15 に古くなった——`compare` は今は `recorded` で走り、322/642 は ✅ になる
 
@@ -796,12 +829,12 @@ decay/freshness/strength の再スコアは考慮していない）。
 単調に「増える」ではない**——`examples/chat` 独自の発見であり、詳細は ADR 0168 を見ること:
 
 | 会話ターン数 | mnemora chars（旧） | mnemora chars（新） | mnemora/naive（旧→新） |
-|---|---|---|---|
-| 42 | 647 | 583 | 61.7% → 55.6%（改善） |
-| 82 | 1537 | 1345 | 74.5% → 65.2%（改善） |
-| 162 | 3459 | 3075 | 84.7% → 75.3%（改善） |
-| 322 | 4307 | 4558 | 53.0% → 56.0%（悪化） |
-| 642 | 4306 | 4476 | 26.5% → 27.6%（悪化） |
+| ------------ | ------------------- | ------------------- | ---------------------- |
+| 42           | 647                 | 583                 | 61.7% → 55.6%（改善）  |
+| 82           | 1537                | 1345                | 74.5% → 65.2%（改善）  |
+| 162          | 3459                | 3075                | 84.7% → 75.3%（改善）  |
+| 322          | 4307                | 4558                | 53.0% → 56.0%（悪化）  |
+| 642          | 4306                | 4476                | 26.5% → 27.6%（悪化）  |
 
 **42〜162ターンで減っているのは、想起が「悪化」したからではない。**目次帯
 （`IndexBand.digestBand`）の1件あたり固定費（`DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS`
@@ -853,6 +886,7 @@ decay/freshness/strength の再スコアは考慮していない）。
   （`compare` は検証していない／`retrieval` が検証する）はこの意味では変わっていない
   ——検証できるのは正解集合を持つ `retrieval` のほうである。
   **⚠ そして `retrieval` の標本は probe 7 件である**（ADR 0033 §3）——これは変わらない。
+
 - **naive path はシステムプロンプト・ツール定義を含まない生の transcript だけを測る。**
   実際のアプリケーションはこれらが上乗せされる分、絶対値としての削減幅はさらに
   大きくなりうる（逆に mnemora 側の固定費の比率は相対的に小さくなる）。
@@ -873,6 +907,7 @@ decay/freshness/strength の再スコアは考慮していない）。
   （[docs/recall.md §6](../../docs/recall.md) の2つの訂正節を参照）。
   「セッション全体でどれだけ削れたか」ではない（[docs/recall.md §6](../../docs/recall.md)
   「セッション基準値を持たない」を参照。mnemora はセッションという概念を持たない）。
+
 - この比較は**会話1本・固定のシナリオ**に基づく。実際の効果は会話の性質
   （どれだけ「思い出す価値のある事実」対「filler」の比率があるか）に強く依存する。
 
@@ -941,11 +976,11 @@ LLM と embedding を別々に選べる(`MNEMORA_LLM`/`MNEMORA_EMBEDDING`、`src
 ようにしたのはこのため——「順位が変わったのは embedding のせいか抽出のせいか」を
 切り分けられないと、どちらが効いたか言えない。
 
-| arm | LLM | Embedding |
-|---|---|---|
-| A | 擬似(`DeterministicLLMProvider`) | 擬似(`DeterministicEmbeddingProvider`) |
-| B | 擬似 | 本物(`text-embedding-3-small`) |
-| C | 本物(`gpt-4o-mini`) | 本物(`text-embedding-3-small`) |
+| arm | LLM                              | Embedding                              |
+| --- | -------------------------------- | -------------------------------------- |
+| A   | 擬似(`DeterministicLLMProvider`) | 擬似(`DeterministicEmbeddingProvider`) |
+| B   | 擬似                             | 本物(`text-embedding-3-small`)         |
+| C   | 本物(`gpt-4o-mini`)              | 本物(`text-embedding-3-small`)         |
 
 arm ごとに別テナントを使う。outbox は `tick()` の `processed === 0` まで繰り返して
 干上がらせる——haystack の既定件数(`DEFAULT_HAYSTACK_SIZE`)は `tick()` の既定 `limit`
@@ -981,10 +1016,10 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify
 **⚠ 再生が保証するのは「測定の再現性」であって「実 API との一致」ではない。**
 実際に測った差は次のとおり（**ADR 0051 に実測として記録した**）。
 
-| arm | 実 API | 再生 | |
-|---|---|---|---|
-| B: 擬似LLM+本物の埋め込み | 0.714 | **0.714** | ✅ 完全一致（probe 7件すべてで順位が一致） |
-| C: 本物LLM+本物の埋め込み | 0.714 | **0.738** | ❌ ずれる（`gpt-4o-mini` の応答が揺れるため） |
+| arm                       | 実 API | 再生      |                                               |
+| ------------------------- | ------ | --------- | --------------------------------------------- |
+| B: 擬似LLM+本物の埋め込み | 0.714  | **0.714** | ✅ 完全一致（probe 7件すべてで順位が一致）    |
+| C: 本物LLM+本物の埋め込み | 0.714  | **0.738** | ❌ ずれる（`gpt-4o-mini` の応答が揺れるため） |
 
 **カセットの arm C は「ある1回のサンプル」であり、「本物の LLM の実力」ではない。**
 
@@ -997,23 +1032,23 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify
 観測 74件（gold 7 + distractor 7 + haystack 60）。`recall()` は既定（`limit`=10）。
 **閾値・件数・over-fetch は一切いじっていない。**
 
-| arm | LLM | Embedding | MRR（全体） | MRR（対照群・語彙が重なる1件） | MRR（語彙が重ならない6件） |
-|---|---|---|---|---|---|
-| **A（＝ 当時の `compare` と同じ配置。⚠ 2026-09-15 現在は違う——下記参照）** | 擬似 | 擬似 | **0.018** | **0.000** | 0.021 |
-| **B** | 擬似 | 本物 | **0.714** | 1.000 | 0.667 |
-| **C（実運用の配置）** | 本物 | 本物 | **0.743** | 1.000 | 0.700 |
+| arm                                                                        | LLM  | Embedding | MRR（全体） | MRR（対照群・語彙が重なる1件） | MRR（語彙が重ならない6件） |
+| -------------------------------------------------------------------------- | ---- | --------- | ----------- | ------------------------------ | -------------------------- |
+| **A（＝ 当時の `compare` と同じ配置。⚠ 2026-09-15 現在は違う——下記参照）** | 擬似 | 擬似      | **0.018**   | **0.000**                      | 0.021                      |
+| **B**                                                                      | 擬似 | 本物      | **0.714**   | 1.000                          | 0.667                      |
+| **C（実運用の配置）**                                                      | 本物 | 本物      | **0.743**   | 1.000                          | 0.700                      |
 
 probe ごとの gold の順位（`(無し)` は `recall().memories` に返らなかったことを表す）:
 
-| probe | 語彙が重なるか | A | B | C | distractor が gold より上（C） |
-|---|---|---|---|---|---|
-| color（好きな色） | **重なる（対照群）** | **(無し)** | 1 | 1 | いいえ |
-| pet（ペット） | 重ならない | (無し) | 1 | 1 | いいえ |
-| exercise（運動の習慣） | 重ならない | (無し) | 2 | 2 | **はい** |
-| diet（避けるべき食べ物） | 重ならない | (無し) | **(無し)** | 5 | **はい** |
-| family（家族の居住地） | 重ならない | (無し) | 1 | 1 | いいえ |
-| language（好きな言語） | 重ならない | 8 | 1 | 1 | いいえ |
-| travel（次の行き先） | 重ならない | (無し) | 2 | 2 | **はい** |
+| probe                    | 語彙が重なるか       | A          | B          | C   | distractor が gold より上（C） |
+| ------------------------ | -------------------- | ---------- | ---------- | --- | ------------------------------ |
+| color（好きな色）        | **重なる（対照群）** | **(無し)** | 1          | 1   | いいえ                         |
+| pet（ペット）            | 重ならない           | (無し)     | 1          | 1   | いいえ                         |
+| exercise（運動の習慣）   | 重ならない           | (無し)     | 2          | 2   | **はい**                       |
+| diet（避けるべき食べ物） | 重ならない           | (無し)     | **(無し)** | 5   | **はい**                       |
+| family（家族の居住地）   | 重ならない           | (無し)     | 1          | 1   | いいえ                         |
+| language（好きな言語）   | 重ならない           | 8          | 1          | 1   | いいえ                         |
+| travel（次の行き先）     | 重ならない           | (無し)     | 2          | 2   | **はい**                       |
 
 #### 読み方1: 擬似 provider は、この物差しに対して目が見えていない
 
@@ -1062,11 +1097,11 @@ arm B → arm C（LLM も本物に）の上積みは 0.714 → 0.743 と小さ�
 
 **本物の埋め込みでも、7件中3件で distractor が gold より上に来た（hit@1 は 4/7）。**
 
-| probe | 質問 | 1位に来たもの（distractor） | gold |
-|---|---|---|---|
-| exercise | 「私の運動の習慣はどんなものでしたか?」 | **「父は毎晩ウォーキングをしています。」** | 「毎朝5時に起きてジョギングをしています。」（2位） |
-| diet | 「私が避けたほうがいい食べ物はありますか?」 | **「妻は卵アレルギーがあります。」** | 「牛乳を飲むとお腹を壊します。」（**5位**） |
-| travel | 「次の遠出の行き先はどこでしたか?」 | **「先月は大阪へ出張しました。」** | 「来月、京都へ出張します。」（2位） |
+| probe    | 質問                                        | 1位に来たもの（distractor）                | gold                                               |
+| -------- | ------------------------------------------- | ------------------------------------------ | -------------------------------------------------- |
+| exercise | 「私の運動の習慣はどんなものでしたか?」     | **「父は毎晩ウォーキングをしています。」** | 「毎朝5時に起きてジョギングをしています。」（2位） |
+| diet     | 「私が避けたほうがいい食べ物はありますか?」 | **「妻は卵アレルギーがあります。」**       | 「牛乳を飲むとお腹を壊します。」（**5位**）        |
+| travel   | 「次の遠出の行き先はどこでしたか?」         | **「先月は大阪へ出張しました。」**         | 「来月、京都へ出張します。」（2位）                |
 
 **⚠ この表は当時（ADR 0019）の実測値である。**本物の LLM が作る `content` は実行ごとに変わるため、
 **diet の goldRank は 4 / 5 / 7 / 9 と揺れる**（[ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) §2.3）。
@@ -1118,17 +1153,16 @@ arm B → arm C（LLM も本物に）の上積みは 0.714 → 0.743 と小さ�
 
 #### 実測した実費
 
-| arm | chat 呼び出し | LLM tokens (in/out) | embeddings 呼び出し | embed tokens | USD |
-|---|---|---|---|---|---|
-| A | 0（API を叩いていない） | — | 0 | — | $0 |
-| B | 0 | — | 81 | 2,154 | $0.000043 |
-| C | 74 | 15,968 / 3,433 | 83 | 1,790 | $0.004491 |
-| **合計** | 74 | | 164 | | **約 $0.0045（0.45セント）** |
+| arm      | chat 呼び出し           | LLM tokens (in/out) | embeddings 呼び出し | embed tokens | USD                          |
+| -------- | ----------------------- | ------------------- | ------------------- | ------------ | ---------------------------- |
+| A        | 0（API を叩いていない） | —                   | 0                   | —            | $0                           |
+| B        | 0                       | —                   | 81                  | 2,154        | $0.000043                    |
+| C        | 74                      | 15,968 / 3,433      | 83                  | 1,790        | $0.004491                    |
+| **合計** | 74                      |                     | 164                 |              | **約 $0.0045（0.45セント）** |
 
 3 arm 合わせて所要 約4分。**実費の 99% は LLM 抽出側であり、埋め込みは 1% に満たない。**
 費用の内訳と、`compare` を本物で走らせた場合の実費は
 [ADR 0019](../../docs/decisions/0019-real-openai-measurement-cost.md) にある。
-
 
 ---
 
@@ -1187,13 +1221,13 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
 （Issue #109、`4602678`）に足された**——ASCII の識別子だけでなく、**日本語の
 固有名詞**（人名・組織名・製品名・地名）を埋め込みが弁別できるかを測るためである。
 
-| 群 | probe | haystack | 直接比較できる相手 |
-|---|---|---|---|
-| `japanese` | 既存の日本語意味 probe 7件（`probe-set.ts`、変更していない） | sparse | `retrieval` の arm B（embedding=recorded、実質 `text-embedding-3-small`/256次元） |
-| `identifiersSparse` | ASCII 識別子 probe **30件**（領域あたり6件） | sparse（識別子0件） | `identifiersDense`（同じ30 probe、haystack だけが違う） |
-| `identifiersDense` | 同じ30 probe | dense（識別子60件） | `identifiersSparse` |
-| `japaneseNamesSparse` | 日本語固有名詞 probe 12件（person4/org3/product3/place2） | sparse（固有名詞0件） | `japaneseNamesDense`（同じ12 probe、haystack だけが違う） |
-| `japaneseNamesDense` | 同じ12 probe | dense（固有名詞60件、密度5:1） | `japaneseNamesSparse` |
+| 群                    | probe                                                        | haystack                       | 直接比較できる相手                                                                |
+| --------------------- | ------------------------------------------------------------ | ------------------------------ | --------------------------------------------------------------------------------- |
+| `japanese`            | 既存の日本語意味 probe 7件（`probe-set.ts`、変更していない） | sparse                         | `retrieval` の arm B（embedding=recorded、実質 `text-embedding-3-small`/256次元） |
+| `identifiersSparse`   | ASCII 識別子 probe **30件**（領域あたり6件）                 | sparse（識別子0件）            | `identifiersDense`（同じ30 probe、haystack だけが違う）                           |
+| `identifiersDense`    | 同じ30 probe                                                 | dense（識別子60件）            | `identifiersSparse`                                                               |
+| `japaneseNamesSparse` | 日本語固有名詞 probe 12件（person4/org3/product3/place2）    | sparse（固有名詞0件）          | `japaneseNamesDense`（同じ12 probe、haystack だけが違う）                         |
+| `japaneseNamesDense`  | 同じ12 probe                                                 | dense（固有名詞60件、密度5:1） | `japaneseNamesSparse`                                                             |
 
 ### 実測結果（[identifier-probe-baseline.json](./identifier-probe-baseline.json)、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
 
@@ -1206,21 +1240,21 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes
 （`identifier-probe-baseline.json` の `provenance.note`）——`japanese`/`identifiersSparse`/
 `identifiersDense` の3群の値は、その拡張以降1バイトも動いていない。
 
-| 群 | `(provider, model, dimensions)` | haystack | MRR | hit@1 | hit@10 |
-|---|---|---|---|---|---|
-| `japanese`(7件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **0.810** | 5/7 | 7/7 |
-| `identifiersSparse`(30件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **1.000** | 30/30 | 30/30 |
-| `identifiersDense`(30件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **1.000** | 30/30 | 30/30 |
-| 🔴 `japaneseNamesSparse`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **0.958** | 11/12 | 12/12 |
-| 🔴 `japaneseNamesDense`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **0.958** | 11/12 | 12/12 |
+| 群                             | `(provider, model, dimensions)`   | haystack | MRR       | hit@1 | hit@10 |
+| ------------------------------ | --------------------------------- | -------- | --------- | ----- | ------ |
+| `japanese`(7件)                | `local`/`ruri-v3-30m/sym`/256次元 | sparse   | **0.810** | 5/7   | 7/7    |
+| `identifiersSparse`(30件)      | `local`/`ruri-v3-30m/sym`/256次元 | sparse   | **1.000** | 30/30 | 30/30  |
+| `identifiersDense`(30件)       | `local`/`ruri-v3-30m/sym`/256次元 | dense    | **1.000** | 30/30 | 30/30  |
+| 🔴 `japaneseNamesSparse`(12件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse   | **0.958** | 11/12 | 12/12  |
+| 🔴 `japaneseNamesDense`(12件)  | `local`/`ruri-v3-30m/sym`/256次元 | dense    | **0.958** | 11/12 | 12/12  |
 
 比較のため、既存 `retrieval` の基準値（[retrieval-baseline.json](./retrieval-baseline.json)、
 再掲）:
 
-| arm | `(provider, model, dimensions)` | MRR | hit@1 | hit@10 |
-|---|---|---|---|---|
-| B: 擬似LLM+本物の埋め込み | `openai`/`text-embedding-3-small`/256次元(recorded再生) | 0.714 | 4/7 | 6/7 |
-| C: 本物LLM+本物の埋め込み | `openai`/`text-embedding-3-small`/256次元(recorded再生) | 0.738 | 4/7 | 7/7 |
+| arm                       | `(provider, model, dimensions)`                         | MRR   | hit@1 | hit@10 |
+| ------------------------- | ------------------------------------------------------- | ----- | ----- | ------ |
+| B: 擬似LLM+本物の埋め込み | `openai`/`text-embedding-3-small`/256次元(recorded再生) | 0.714 | 4/7   | 6/7    |
+| C: 本物LLM+本物の埋め込み | `openai`/`text-embedding-3-small`/256次元(recorded再生) | 0.738 | 4/7   | 7/7    |
 
 生の実測値は[identifier-probe-baseline.json](./identifier-probe-baseline.json)に置いてある
 （2回実行し、`measuredAt` を除いて完全一致した——ただし ADR 0088 §2 と同じ理由で
@@ -1341,7 +1375,6 @@ node scripts/identifier-probe-summary.mjs \
 **値が意図して動いたときは、基準値ファイルを手で更新すること**（CI は自動更新しない）。
 ⭐ **その手間は目的である**——更新しないと差分が Job Summary に出続け、
 更新すれば新しい値が PR の diff に必ず現れる。
-
 
 ---
 
@@ -1590,7 +1623,6 @@ budget に関係なく全件載っている**ことを意味する。この状�
 3. **件数が減ったこと自体は良し悪しを言わない。**`activeCount` が減っても
    `allContentChars`（active+superseded の合計）は増え続ける——「載る記憶の件数」と
    「実際に保持している文字量」は別の軸である。
-
 
 ---
 
