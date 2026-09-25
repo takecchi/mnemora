@@ -298,6 +298,8 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
 
 ### Fixed
 
+
+- **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
 - **`@mnemora/postgres` の段1 `search()` で、他テナントの near-duplicate が HNSW の候補窓
   （既定 `hnsw.ef_search`=40）を埋め尽くすと、自テナントの候補を1件も見ないまま `recall()` が
   0件を返すことがあった。** `PostgresVectorStore.search()` に

@@ -1837,10 +1837,25 @@ export class PostgresMemoryStore implements MemoryStore {
       // 存在しない場合に外部キー違反という別種の失敗になり、「memory not found」に
       // 揃わない。`supersedeWithNewMemories` が `supersededByIndex` の範囲検査を
       // 書き込み前に済ませるのと同じ理由）。
+      //
+      // ⚠ **`ORDER BY id ASC FOR UPDATE` で、両側の行ロックを呼び出し順ではなく
+      // 常に id 昇順で取る。** `markContestedPair(A, B)` と `markContestedPair(B, A)`
+      // （対を逆順で呼ぶ2つの並行呼び出し）が、もしそれぞれ「渡された引数の順」に
+      // 行ロックを取っていたら、片方が A→B、もう片方が B→A の順で行を掴み合い、
+      // 40P01（`deadlock detected`）で片方が落ちる——契約が約束する
+      // {@link MemoryStatusConflictError} ではなく、生の Postgres 例外が漏れる形になる
+      // （2接続での実測: `restore-superseded-concurrent-forget.postgres.test.ts` と同じ
+      // 構えの歯 `contested-pair-lock-order-concurrency.postgres.test.ts` 参照）。
+      // ロックを常に id 昇順で取れば、どちらの呼び出しも同じ順序でしか行を掴めないため
+      // 循環待ちが構造的に起きない——後から来たほうは先着の行ロックの解放待ちでブロック
+      // されるだけになり、解放後に読み直した `status` が `'active'` でなければ
+      // 下の CAS がそのまま {@link MemoryStatusConflictError} を投げる。
       const existing = await tx.execute(sql`
         SELECT id, status FROM memories
         WHERE tenant_id = ${ctx.tenantId}
           AND id = ANY(${sql.param([first.id, second.id])}::uuid[])
+        ORDER BY id ASC
+        FOR UPDATE
       `);
       const statusById = new Map(
         existing.rows.map((row) => {
@@ -2056,10 +2071,20 @@ export class PostgresMemoryStore implements MemoryStore {
       // 事前検証——存在確認。両方の UPDATE を撃つ前に済ませる（`markContestedPair` と
       // 同じ理由: 相手 id が存在しない場合を、外部キー違反ではなく「memory not found」に
       // 揃えるため）。ここで `contested_with_id` も読み、CAS（相互参照の成立）を判定する。
+      //
+      // ⚠ `markContestedPair` と同じ理由で `ORDER BY id ASC FOR UPDATE`——
+      // `resolveContestedPair(A, B)` と `resolveContestedPair(B, A)`（同じ対を逆順で
+      // 呼ぶ2つの並行呼び出し）が引数の順に行ロックを取ると、40P01（deadlock detected）
+      // で片方が落ち、契約が約束する {@link MemoryStatusConflictError} ではなく生の
+      // Postgres 例外が漏れる。常に id 昇順でロックを取れば循環待ちが構造的に起きない
+      // （`markContestedPair` の同じコメント、`contested-pair-lock-order-concurrency.postgres.test.ts`
+      // 参照）。
       const existing = await tx.execute(sql`
         SELECT id, status, contested_with_id FROM memories
         WHERE tenant_id = ${ctx.tenantId}
           AND id = ANY(${sql.param([first.id, second.id])}::uuid[])
+        ORDER BY id ASC
+        FOR UPDATE
       `);
       const rowById = new Map(
         existing.rows.map((row) => {
@@ -2161,9 +2186,25 @@ export class PostgresMemoryStore implements MemoryStore {
    *
    * `target` の `WHERE` は既存の部分索引 `idx_memories_superseded_by`
    * （`tenant_id, superseded_by_id`、`migrations/0001_init.sql`）がそのまま担う——
-   * 新しい索引は足していない。`AND status = 'superseded'` を等値条件として含めている
-   * ことが、`superseded_by_id` は非 `null` のまま `status` が `archived`/`forgotten` へ
-   * さらに進んだ行を巻き込まないための唯一の防波堤である（interface 側の契約節参照）。
+   * 新しい索引は足していない。`AND status = 'superseded'` を等値条件として含めている。
+   *
+   * ⚠ **`restored` の `UPDATE ... FROM target t WHERE m.id = t.id` に、`m.status =
+   * 'superseded' AND m.superseded_by_id = ${supersededById}` を明示的に重ねている
+   * （`t` ではなく `m`——生きている行に対する条件）。** `target` はこの文の先頭で1度
+   * 読んだスナップショットであり、READ COMMITTED の下では「`target` を読んでから
+   * `restored` の UPDATE が実際にその行をロックするまでの間」に、別のトランザクションが
+   * 同じ行を `superseded → forgotten`（`updateStatusWithEvent` 経由の forget 等）へ
+   * 進めてコミットしうる。`m.id = t.id` だけを条件にすると、Postgres は EvalPlanQual で
+   * 最新版の行を再取得したうえで**この UPDATE 自身の WHERE**を再評価するが、`target` の
+   * 条件（`status = 'superseded'`）はその再評価に含まれない——`t.id` は既に確定した
+   * 値の集合でしかないため。**その結果、直前に forget/purge でコミットされた行を
+   * `active` へ巻き戻し、`unsuperseded` イベントを誤って積みうる（2接続での実測は
+   * `packages/postgres/src/__tests__/restore-superseded-concurrent-forget.postgres.test.ts`）。**
+   * `m.status`/`m.superseded_by_id` を UPDATE 自身の WHERE に重ねることで、EvalPlanQual が
+   * 再評価する対象にこの2条件が入り、最新版の行が既に条件を満たさなくなっていれば
+   * その行は `restored` から自然に落ちる（`archiveDecayed`/`requeueEmbedJobs` の
+   * `FOR UPDATE SKIP LOCKED` とは別の形だが、狙いは同じ——「読んだ後に承知の外で
+   * 状態が変わった行を、確認せずに書き換えない」）。
    *
    * `digest_snapshot` には（変更しない）現在の `digest` を入れる——`archiveDecayed`/
    * `forget` と同じ規約。`meta` は `{ reason, supersededById }`——`reason` は
@@ -2206,6 +2247,8 @@ export class PostgresMemoryStore implements MemoryStore {
         SET status = 'active', superseded_by_id = NULL, updated_at = now()
         FROM target t
         WHERE m.id = t.id
+          AND m.status = 'superseded'
+          AND m.superseded_by_id = ${supersededById}
         RETURNING m.*
       ),
       inserted_events AS (
