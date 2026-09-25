@@ -175,7 +175,7 @@ describe("runMigrations の排他（advisory lock）", () => {
     }
 
     // DB は完全な状態に落ち着いている（10テーブル・台帳1行）。中途半端な状態が残らない。
-    // Issue #201 / ADR 0307: migrations/0019_taxonomy_labels.sql が labels/memory_labels
+    // Issue #201 / ADR 0308: migrations/0019_taxonomy_labels.sql が labels/memory_labels
     // を足したため 8→10 になった（回帰ではない）。
     const tables = await pool.query<{ tablename: string }>(
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename ASC",

@@ -97,7 +97,7 @@ describeMemoryStoreConformance({
   // Issue #515 方向①、ADR 0258: PostgresMemoryStore は onlyMemoryIds フィルタを
   // 実装している。
   supportsOnlyMemoryIdsFilter: true,
-  // Issue #201 / ADR 0307: PostgresMemoryStore は listLabels/registerLabel を
+  // Issue #201 / ADR 0308: PostgresMemoryStore は listLabels/registerLabel を
   // 実装している。
   supportsLabels: true,
 });
@@ -282,7 +282,7 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: true,
     });
   },
-  // Issue #201 / ADR 0307: PostgresTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
+  // Issue #201 / ADR 0308: PostgresTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
   // を実装している。
   supportsTaxonomyMode: true,
 });
