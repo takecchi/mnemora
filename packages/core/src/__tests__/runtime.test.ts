@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
+import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
 import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
 import { SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX } from "../observation.js";
@@ -580,6 +581,62 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
 
     const memory = await stores.memoryStore.get(ctx, memoryId);
     expect(memory?.embeddingStatus).toBe("failed");
+  });
+
+  /**
+   * Issue #449 / ADR 0304: 3段つながっての歯。
+   *
+   * 1. `observe({ kind: 'document' })` の `content` に上限は無い（`observation.ts` の
+   *    `.min(1)` のみ、`.max()` 無し）。
+   * 2. LLM 抽出が失敗すると `fallbackWholeObservationCandidate` が Observation の全文を
+   *    そのまま1件の候補にする（`extraction.ts`）。
+   * 3. その全文が `processEmbedJob` 経由で `embed(ctx, [memory.content])` へそのまま渡る。
+   *
+   * **この歯が固定するのは、3段がつながった先で `EmbeddingProvider` の契約
+   * （`embedding-provider.ts` の interface doc）どおりに reject する provider を
+   * 使ったとき、次の3つがすべて成り立つことである**——
+   * (a) Memory.content は全文のまま変わらない（黙って切り詰められない）、
+   * (b) embeddingStatus は 'failed' になる、
+   * (c) tick はそれを failed として数える（黙って ready にならない）。
+   *
+   * ⚠ **これは 既定の挙動を1つも変えていない**——`observe`/`extraction`/`processEmbedJob`
+   * のどれも本歯のために変更していない。固定しているのは「provider が契約どおりに
+   * reject したとき、その先の3段が正しく振る舞うこと」だけである。
+   */
+  it("LLM抽出が失敗して全文フォールバックになった Memory を、上限超過で reject する embeddingProvider に渡すと、content は全文のまま embeddingStatus が 'failed' になり、tick はそれを failed として数える（Issue #449）", async () => {
+    const hugeContent = "x".repeat(500);
+    const overLimitEmbeddingProvider: EmbeddingProvider = {
+      space: { provider: "fake-over-limit", model: "fake-over-limit-model", dimensions: 2 },
+      embed: async (_ctx, texts) => {
+        const tooLong = texts.find((text) => text.length > 100);
+        if (tooLong !== undefined) {
+          throw new Error("simulated input_too_long: input exceeds provider limit");
+        }
+        return texts.map(() => [0, 0]);
+      },
+    };
+    const { runtime, stores } = buildRuntime(throwingLlm(), {
+      embeddingProvider: overLimitEmbeddingProvider,
+    });
+
+    const observeResult = await runtime.observe(ctx, { kind: "document", content: hugeContent });
+    expect(observeResult.extraction).toBe("llm_failed_whole_observation");
+    const memoryId = observeResult.memoryIds[0]!;
+
+    // (a) 全文フォールバックの時点で、content は既に全文のまま。
+    const beforeTick = await stores.memoryStore.get(ctx, memoryId);
+    expect(beforeTick?.content).toBe(hugeContent);
+
+    const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
+
+    // (c) tick は failed として数える。黙って processed 側に入らない。
+    expect(tickResult).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
+
+    const afterTick = await stores.memoryStore.get(ctx, memoryId);
+    // (a) tick の後も content は全文のまま——黙って切り詰められていない。
+    expect(afterTick?.content).toBe(hugeContent);
+    // (b) embeddingStatus は 'failed'。黙って 'ready' にならない。
+    expect(afterTick?.embeddingStatus).toBe("failed");
   });
 });
 
