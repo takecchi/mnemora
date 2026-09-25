@@ -293,6 +293,33 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 （ユーザーが言った事実を消す側）へ進めてはならない。機構2が「判定できないときは
 `contested` に落とす」と既に定めている先の、まさにその一例として扱う。
 
+### ⚠ 2026-09 追記（Issue #372、(B) 第2段。[ADR 0321](./decisions/0321-claim-key-contested-detection.md)）: 検出を実装した——**列と索引だけで発火する。既定 off**
+
+上の追記が「今日まだ無い」と書いていた検出処理を実装した。`runtime.observe()` に
+`claimKey: { enabled: true, detectContested: true }` を渡したときだけ、新しく `active` に
+なった Memory ごとに、同じ `tenant_id`・同じ `subject_id`（`null` 同士も一致として扱う）・
+同じ claim key・有効期間（`validFrom`/`validUntil`）が重なる・`content_hash` が違う、
+他の `active` な Memory を `MemoryStore.findActiveByClaimKey?`（新設の任意メソッド、
+`idx_memories_claim_key` を使う）で探す。**LLM を一度も呼ばない。**
+
+- **相手がちょうど1件** ⟹ `Runtime.markContested` を呼ぶ（機構2そのもの）。根拠
+  （鍵・重なった有効期間・両側の `content_hash`）を `meta.note` に構造として載せる。
+- **相手が0件** ⟹ 何もしない。
+- **相手が2件以上** ⟹ **`markContested` を呼ばない。**[#207](https://github.com/takecchi/mnemora/issues/207)
+  （`memory_relations`、多対多）が無いと1対1の `contested_with_id` では表現できないため
+  ——`memory_events` へ根拠（鍵・関係する各 `id`/`content_hash`/有効期間・件数）を
+  `kind: 'updated'`・`meta.reason: 'claim_key_conflict_unresolved'`（`'contested'` とは
+  別のタグ）で1件だけ残し、件数を数えられるようにする。
+
+**`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
+（行6）までであり、`contested → active | superseded`（行7）は今日どおり
+`resolveContested` の明示呼び出しのみ。
+
+**既定は off のまま**（`detectContested` を渡さない・`enabled: false` の呼び出しは、
+`findActiveByClaimKey` を一度も呼ばない）。**既定を on にするかどうかは、この PR でも
+決めていない**（ADR 0185 決定7 が「#372 が着地して初めて意味を持つ」とした判断が、
+まさにこの PR の着地である——決定そのものはオーナー専権のまま）。
+
 ---
 
 ## 6. 強化 (Reinforcement)

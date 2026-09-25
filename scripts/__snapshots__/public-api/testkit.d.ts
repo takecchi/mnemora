@@ -104,7 +104,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -221,6 +221,14 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             MemoryEvent
         ];
     }>;
+    findActiveByClaimKey(ctx: Ctx, query: {
+        subjectId: string | null;
+        claimKey: ClaimKey;
+        excludeMemoryId: MemoryId;
+        contentHash: string;
+        validFrom: Date | null;
+        validUntil: Date | null;
+    }): Promise<Memory[]>;
     restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
         reason?: string;
         actor?: EventActor;
@@ -470,6 +478,7 @@ export interface MemoryStoreConformanceOptions {
     supportsPreviewRestoreSupersededBy: boolean;
     supportsOnlyMemoryIdsFilter?: boolean;
     supportsLabels: boolean;
+    supportsFindActiveByClaimKey: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
