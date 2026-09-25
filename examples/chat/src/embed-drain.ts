@@ -41,6 +41,41 @@ export interface DrainResult {
 }
 
 /**
+ * 直近に書いた outbox ジョブの `available_at`（Postgres の `now()`、マイクロ秒精度）を
+ * **確実に追い越す**、ミリ秒精度の `Date` を返す（Issue #719）。
+ *
+ * **背景**: `packages/postgres` の `claimBatch`（`outbox-store.ts`）は
+ * `available_at <= opts.now` で claim 可能かを判定する。`available_at` は SQL の
+ * `now()` で書かれるためマイクロ秒精度を持つが、`opts.now` は呼び出し側が渡す JS の
+ * `Date` であり、**ミリ秒精度——小数点以下は切り捨て（floor）**である。
+ * 直近の書き込みの実時刻を T1（マイクロ秒）、この関数を呼ぶ実時刻を T2 とすると、
+ * 書き込みの応答を受け取ってから呼ぶ限り T2 > T1 は保証される。しかし **T1 と T2 が
+ * 同じ 1ms の枠に収まった場合、`floor(T2)`（=素の `new Date()`）は `T1` 自身より
+ * 小さくなりうる**（`T1` の枠内の端数ぶんだけ）——そうなると
+ * `available_at(T1) <= opts.now(floor(T2))` が false になり、claim が1件も進まない
+ * （`drainEmbedTicks` は `processed === 0` を「もう無い」と解釈して静かに抜ける。
+ * 例外は投げない）。
+ *
+ * ⟹ **`floor(T2) + 1` を使う。** `floor(x) + 1 > x` は任意の実数 x に対して成り立つ
+ * 恒等式なので、`floor(T2) + 1 > T2 > T1` が常に成り立つ——同じ ms に収まったかどうか
+ * に関係なく、書き込みの応答を受け取った後に呼ぶ限り決定的に安全。
+ * 【実測】この関数を経由しない素の `new Date()` は、通常の DB 往復（この器で約1〜3ms）
+ * があるため自然にはほぼ再現しない（50回中0回）が、実際の `available_at` の生値と
+ * `floor(ms)` した同じ値を直接 `claimBatch` に渡す計装では30/30回とも claim が0件に
+ * なった——CI（Issue #719 の実際の赤）はこの器より往復が速い環境だったと考えられる。
+ *
+ * ⚠ **前提**: アプリ（Node プロセス）と Postgres サーバが同じホストの実時計を共有する
+ * こと。ホストを跨いでクロックスキューがある構成では、この保証は成り立たない
+ * （このベンチ・harness はどちらもローカル Postgres が前提であり、当てはまらない）。
+ *
+ * `nowMs` は既定で `Date.now()`——テスト（`__tests__/embed-drain-clock-margin.test.ts`）
+ * がこの引数を直接渡して、時刻の読み取りそのものをモックせずに境界条件を検査する。
+ */
+export function clockPastRecentDbWrites(nowMs: number = Date.now()): Date {
+  return new Date(nowMs + 1);
+}
+
+/**
  * `tick({kinds:['embed']})` を `processed === 0` になるまで繰り返す。
  *
  * **背景(docs/decisions/0019-real-openai-measurement-cost.md §5、
