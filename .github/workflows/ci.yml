@@ -576,11 +576,16 @@ jobs:
           MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON: ${{ github.workspace }}/recall-footprint-calibration-samples.json
         run: pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples
 
-      - name: 較正標本の8点を Job Summary に残す（⛔ 門ではない。基準値ファイルがまだ無いため）
+      - name: 較正標本の8点を Job Summary に残す（⛔ 門ではない。相違があっても exit 0、ADR 0310 §2）
+        # 基準値ファイル examples/chat/recall-footprint-calibration-samples-baseline.json
+        # が Issue #340 フォローアップで新設された（CI-sourcing 済み）。--baseline に渡すと
+        # 相違（設計点の欠落・値のずれ）が Job Summary に出るが、依然として非ゲートである
+        # （recall-footprint-calibration-samples-summary-lib.mjs 冒頭の doc）。
         if: always()
         run: |
           node scripts/recall-footprint-calibration-samples-summary.mjs \
             --measured "${{ github.workspace }}/recall-footprint-calibration-samples.json" \
+            --baseline examples/chat/recall-footprint-calibration-samples-baseline.json \
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: recall-footprint 較正の補助標本の実測値そのもの（機械可読、生の index を含む）を成果物として残す

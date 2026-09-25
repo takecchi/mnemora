@@ -4,6 +4,7 @@ import type {
   DecayClock,
   MemoryStore,
   Omission,
+  RecallResult,
   Runtime,
   TenantSettingsStore,
 } from "@mnemora/core";
@@ -40,6 +41,27 @@ function notIndexedCount(omitted: Omission[]): number {
   return omitted
     .filter((o): o is Extract<Omission, { kind: "not_indexed" }> => o.kind === "not_indexed")
     .reduce((sum, o) => sum + o.count, 0);
+}
+
+/**
+ * `ComparisonRow.bandEntryCount` / `ComparisonRow.rawIndexJsonLength` を `RecallResult` から
+ * 計算する（Issue #340 フォローアップ、ADR 0306/0310）。**純関数——DB もネットワークも
+ * 使わない。**`runComparison`（DB 必須）から計算だけを切り出してあるのは、
+ * `examples/chat/src/__tests__/compare-footprint-fields.test.ts` が Postgres なしで
+ * この2欄の計算そのものを検査できるようにするため。
+ *
+ * `bandEntryCount` は `footprintSampleFromRecall`（`@mnemora/core`）をそのまま呼ぶ
+ * （二重実装しない——ADR 0306 決定1が推定器/較正側で共有した設計を、この計測器側でも
+ * そのまま使う）。
+ */
+export function footprintFieldsFromRecall(
+  recall: RecallResult,
+): Pick<ComparisonRow, "bandEntryCount" | "rawIndexJsonLength"> {
+  const footprintSample = footprintSampleFromRecall(recall);
+  return {
+    bandEntryCount: footprintSample.bandEntryCount,
+    rawIndexJsonLength: JSON.stringify(recall.index).length,
+  };
 }
 
 /**
@@ -201,7 +223,6 @@ export async function runComparison(
     // ので、ここで呼んでもこの行の測定値(naiveChars/mnemoraChars/omitted/…)は
     // 一切変わらない——「報告は測定済みの recall の後」という配線方針そのもの。
     const usageReport = await reportMemoryUsage(runtime, ctx, recall);
-    const footprintSample = footprintSampleFromRecall(recall);
 
     rows.push({
       fillerPairs,
@@ -215,8 +236,7 @@ export async function runComparison(
       omitted: recall.omitted,
       returnedCount: recall.memories.length,
       annCandidateCount: recall.index.totalInScope - notIndexedCount(recall.omitted),
-      bandEntryCount: footprintSample.bandEntryCount,
-      rawIndexJsonLength: JSON.stringify(recall.index).length,
+      ...footprintFieldsFromRecall(recall),
       factStatementSurvived: survived,
       memoryUsageReported: usageReport.reported,
     });
