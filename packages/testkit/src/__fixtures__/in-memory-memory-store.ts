@@ -333,7 +333,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         lastReinforcedAt: input.lastReinforcedAt ?? null,
         validFrom: input.validFrom ?? null,
         validUntil: input.validUntil ?? null,
-        // Issue #371（ADR 0185/ADR 0312）: `undefined`/`null` はどちらも「鍵なし」
+        // Issue #371（ADR 0185/ADR 0314）: `undefined`/`null` はどちらも「鍵なし」
         // （`Memory.claimKey` の doc コメント参照）——`?? null` で転記しないと `undefined`
         // のまま消える。上の `decayBaseSeq` と同じ漏れを作らない。
         claimKey: input.claimKey ?? null,

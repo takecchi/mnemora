@@ -93,9 +93,9 @@ export interface MemoryRow {
   last_reinforced_at: string | null;
   valid_from: string | null;
   valid_until: string | null;
-  // Issue #371（ADR 0185/ADR 0312）: `Memory.claimKey` の doc コメント参照。
+  // Issue #371（ADR 0185/ADR 0314）: `Memory.claimKey` の doc コメント参照。
   // 2列とも NULL＝鍵なし。`rowToMemory` がこの2列を1つの `ClaimKey` オブジェクトへ
-  // 組み立てる（`packages/postgres/migrations/0019_memories_claim_key.sql` の
+  // 組み立てる（`packages/postgres/migrations/0021_memories_claim_key.sql` の
   // 「NULL の意味」参照）。
   claim_key_subject: string | null;
   claim_key_predicate: string | null;
@@ -138,7 +138,7 @@ export function parsePgBigint(value: string | number | null): number | null {
  * `memories.claim_key_subject`/`claim_key_predicate`（2列）を、`Memory.claimKey`
  * （`{subject, predicate}` の組、または鍵なしの `null`）へ組み立てる。
  *
- * Issue #371: 契約上は両方 NULL か両方非 NULL のどちらかのはず（`0019_memories_claim_key.sql`
+ * Issue #371: 契約上は両方 NULL か両方非 NULL のどちらかのはず（`0021_memories_claim_key.sql`
  * の「NULL の意味」参照）だが、DB 側で CHECK 制約は強制していない。**片方だけ非 NULL の
  * 行に出会っても例外にしない**——読み出し側（この関数）は「主語または述語のどちらかが
  * 欠けているなら鍵なしとして扱う」という寛容な側へ倒す（`docs/autonomy.md` の「壊れている
