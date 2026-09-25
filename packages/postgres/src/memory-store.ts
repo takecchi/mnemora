@@ -1207,6 +1207,18 @@ export class PostgresMemoryStore implements MemoryStore {
       scope.attributes !== undefined
         ? sql`AND attributes @> ${JSON.stringify(scope.attributes)}::jsonb`
         : sql``;
+    // Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+    // taxonomy は `attributes`/`subjectId` とは違う側——「スコープを定義する識別子の境界」
+    // ではなく「period/validity と同じ、filtered として報告されるゲート」である
+    // （`FILTERED_CONDITION_SCOPE_RELATION.taxonomy === 'outside_scope'` は ADR 0318 より
+    // 前から固定済み）。⟹ `scoped` の WHERE には入れず、`flags`/`agg` の中で boolean と
+    // して持つ（`isDecayed` と同じパターン）——`period_filtered`/`expired_filtered` と
+    // 同じ「直前までのゲートを通過し、このゲートだけで落ちた」件数を数えるため。
+    // `labels.name` は書き込み経路が `tags` からしか作らないため1対1で一致する
+    // （ADR 0323「決定1」）——`memory_labels`/`labels` を JOIN せず `tags` の配列の重なり
+    // だけで判定できる。
+    const hasQualifyingLabel =
+      scope.labels !== undefined ? sql`(tags && ${sql.param(scope.labels)}::text[])` : sql`true`;
     const occurredAfter = scope.occurredAfter ?? null;
     const occurredBefore = scope.occurredBefore ?? null;
 
@@ -1307,6 +1319,7 @@ export class PostgresMemoryStore implements MemoryStore {
             FROM memories
             WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+              AND ${hasQualifyingLabel}
               AND NOT (id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[]))
             ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC
             LIMIT ${digestBand.limit}
@@ -1318,10 +1331,45 @@ export class PostgresMemoryStore implements MemoryStore {
             FROM memories
             WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+              AND ${hasQualifyingLabel}
               AND id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[])
           ), 0)
         )::int AS digest_eligible_count`
       : sql``;
+
+    // Issue #201 PR-B（ADR 0323「決定5」）: `RecallQuery.taxonomyGroups: true` のときだけ
+    // 追加する——`scope.taxonomyGroupCandidates` が `undefined` なら SQL テキストにも
+    // 実行計画にも一切現れない（`digestBandColumns` と同じパターン）。`scoped`/`flags`/`agg`
+    // を経由せず、`memories` を直接（同じ WHERE で）再スキャンする——`unnest(tags)` を伴う
+    // `GROUP BY` は `agg` の `GROUP BY subject_id` と粒度が違うため、単一パスに混ぜない
+    // （ADR 0307 が `digestBand` について下した判断と同じ理由）。**`hasQualifyingLabel`
+    // （`RecallQuery.labels` による絞り込み、指定されていれば）の内側を数える**——
+    // グルーピングは「絞り込み済みの現在のスコープ」をテナントの語彙全体で内訳する。
+    const taxonomyGroupCandidates = scope.taxonomyGroupCandidates;
+    const taxonomyGroupColumns =
+      taxonomyGroupCandidates !== undefined
+        ? sql`,
+        (
+          SELECT coalesce(json_agg(json_build_object('key', tag, 'count', tag_count)), '[]'::json)
+          FROM (
+            SELECT tag, count(*)::int AS tag_count
+            FROM memories, unnest(tags) AS tag
+            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
+              AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+              AND ${hasQualifyingLabel}
+              AND tag = ANY(${sql.param([...taxonomyGroupCandidates])}::text[])
+            GROUP BY tag
+          ) t
+        ) AS taxonomy_label_groups,
+        (
+          SELECT count(*)::int
+          FROM memories
+          WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
+            AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+            AND ${hasQualifyingLabel}
+            AND NOT (tags && ${sql.param([...taxonomyGroupCandidates])}::text[])
+        ) AS taxonomy_residual_count`
+        : sql``;
 
     // Issue #355 / ADR 0307: 各行の述語を `scoped` の中で1回だけ boolean として
     // 計算し（`live`/`in_period`/`is_valid`/`is_expired`/`is_not_yet_valid`/`is_decayed`）、
@@ -1339,7 +1387,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const result = await this.db.execute(sql`
       WITH scoped AS (
         SELECT subject_id, occurred_at, recorded_at, embedding_status, status,
-               valid_from, valid_until, decay_floor_at, decay_floor_seq
+               valid_from, valid_until, decay_floor_at, decay_floor_seq, tags
         FROM memories
         WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
       ),
@@ -1357,21 +1405,27 @@ export class PostgresMemoryStore implements MemoryStore {
           (${isValid}) AS is_valid,
           (${isExpired}) AS is_expired,
           (${isNotYetValid}) AS is_not_yet_valid,
-          (${isDecayed}) AS is_decayed
+          (${isDecayed}) AS is_decayed,
+          (${hasQualifyingLabel}) AS has_qualifying_label
         FROM scoped
       ),
       agg AS (
         SELECT
           subject_id,
-          count(*) FILTER (WHERE live AND in_period AND is_valid)::int AS in_scope,
           count(*) FILTER (
-            WHERE live AND in_period AND is_valid AND embedding_status = 'pending'
+            WHERE live AND in_period AND is_valid AND has_qualifying_label
+          )::int AS in_scope,
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND has_qualifying_label
+              AND embedding_status = 'pending'
           )::int AS not_indexed_pending,
           count(*) FILTER (
-            WHERE live AND in_period AND is_valid AND embedding_status = 'failed'
+            WHERE live AND in_period AND is_valid AND has_qualifying_label
+              AND embedding_status = 'failed'
           )::int AS not_indexed_failed,
           count(*) FILTER (
-            WHERE live AND in_period AND is_valid AND embedding_status = 'skipped'
+            WHERE live AND in_period AND is_valid AND has_qualifying_label
+              AND embedding_status = 'skipped'
           )::int AS not_indexed_skipped,
           count(*) FILTER (WHERE status = 'archived')::int AS archived,
           count(*) FILTER (WHERE status = 'superseded')::int AS superseded,
@@ -1381,12 +1435,18 @@ export class PostgresMemoryStore implements MemoryStore {
           count(*) FILTER (
             WHERE live AND in_period AND is_not_yet_valid
           )::int AS not_yet_valid_filtered,
-          -- Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。in_scope と同じ絞り
-          -- (status + period + validity) の上に載る = in_scope の部分集合であり、
-          -- archived/period/expired のように in_scope から除かれた件数ではない。
-          -- 被覆不変条件 (群カウントの総和 = totalInScope) は動かない。
+          -- Issue #201 PR-B（ADR 0323）: taxonomy ゲートで落ちた件数。period_filtered/
+          -- expired_filtered と同じ「直前までのゲートを通過し、このゲートだけで落ちた」
+          -- 集計——in_scope から除かれる（decayed_filtered とは違う。下のコメント参照）。
           count(*) FILTER (
-            WHERE live AND in_period AND is_valid AND is_decayed
+            WHERE live AND in_period AND is_valid AND NOT has_qualifying_label
+          )::int AS taxonomy_filtered,
+          -- Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。in_scope と同じ絞り
+          -- (status + period + validity + taxonomy) の上に載る = in_scope の部分集合であり、
+          -- archived/period/expired/taxonomy のように in_scope から除かれた件数ではない。
+          -- 被覆不変条件 (axis: 'subject' の群カウントの総和 = totalInScope) は動かない。
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND has_qualifying_label AND is_decayed
           )::int AS decayed_filtered
         FROM flags
         GROUP BY subject_id
@@ -1409,8 +1469,10 @@ export class PostgresMemoryStore implements MemoryStore {
         coalesce(sum(period_filtered), 0)::int AS period_filtered,
         coalesce(sum(expired_filtered), 0)::int AS expired_filtered,
         coalesce(sum(not_yet_valid_filtered), 0)::int AS not_yet_valid_filtered,
+        coalesce(sum(taxonomy_filtered), 0)::int AS taxonomy_filtered,
         coalesce(sum(decayed_filtered), 0)::int AS decayed_filtered
         ${digestBandColumns}
+        ${taxonomyGroupColumns}
       FROM agg
     `);
 
@@ -1426,9 +1488,12 @@ export class PostgresMemoryStore implements MemoryStore {
       period_filtered: number;
       expired_filtered: number;
       not_yet_valid_filtered: number;
+      taxonomy_filtered: number;
       decayed_filtered: number;
       digests?: { memoryId: string; digest: string }[];
       digest_eligible_count?: number;
+      taxonomy_label_groups?: { key: string; count: number }[];
+      taxonomy_residual_count?: number;
     };
 
     const groups: ScopeAggregate["groups"] = (row.groups ?? []).map((g) => ({
@@ -1437,6 +1502,25 @@ export class PostgresMemoryStore implements MemoryStore {
       count: g.count,
       countKind: "exact" as const,
     }));
+
+    // Issue #201 PR-B（ADR 0323「決定5」）: `taxonomyGroupCandidates` が渡されたときだけ
+    // `axis: 'taxonomy'` の群を足す。カウント0のラベルは載らない（`GROUP BY` が自然に
+    // そうなる、`axis: 'subject'` の `in_scope > 0` フィルタと同じ規約）。残差
+    // （`key: null`）もカウントが0なら載せない（同じ規約をここにも揃える）。
+    if (taxonomyGroupCandidates !== undefined) {
+      for (const g of row.taxonomy_label_groups ?? []) {
+        groups.push({ axis: "taxonomy" as const, key: g.key, count: g.count, countKind: "exact" });
+      }
+      const residualCount = row.taxonomy_residual_count ?? 0;
+      if (residualCount > 0) {
+        groups.push({
+          axis: "taxonomy" as const,
+          key: null,
+          count: residualCount,
+          countKind: "exact",
+        });
+      }
+    }
 
     const digests: ScopeAggregate["digests"] = digestBand
       ? (row.digests ?? []).map((d) => ({
@@ -1463,6 +1547,7 @@ export class PostgresMemoryStore implements MemoryStore {
       filteredPeriod: { count: row.period_filtered, countKind: "exact" },
       filteredExpired: { count: row.expired_filtered, countKind: "exact" },
       filteredNotYetValid: { count: row.not_yet_valid_filtered, countKind: "exact" },
+      filteredTaxonomy: { count: row.taxonomy_filtered, countKind: "exact" },
       filteredDecayed: { count: row.decayed_filtered, countKind: "exact" },
       digests,
       digestEligible,

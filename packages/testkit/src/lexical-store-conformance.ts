@@ -34,6 +34,8 @@ export interface PrepareLexicalMemoryAttrs {
   validUntil?: Date | null;
   /** Issue #152/#153（ADR 0312）: `filter.attributes` の歯が使う。 */
   attributes?: Record<string, string>;
+  /** Issue #201 PR-B（ADR 0323）: `filter.labels` の歯が使う。 */
+  tags?: string[];
 }
 
 export interface LexicalStoreConformanceOptions {
@@ -632,6 +634,62 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
 
       expect(ids).toContain(matchingId);
       expect(ids).not.toContain(mismatchingId);
+    });
+
+    // -------------------------------------------------------------------
+    // filter.labels（Issue #201 PR-B、ADR 0323）: `vector-store-conformance.ts` と
+    // 同じ意味論（OR の集合絞り込み）。
+    // -------------------------------------------------------------------
+
+    it("filter.labels: 渡した名前のいずれかを tags に持つ Memory だけが返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        tags: ["alpha"],
+      });
+      const otherId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        tags: ["beta"],
+      });
+      const untaggedId = await prepareMemory(ctx, { content: "obsidian shards glimmer" });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", labels: ["alpha"] },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).not.toContain(otherId);
+      expect(ids).not.toContain(untaggedId);
+    });
+
+    it("filter.labels: 複数名は OR——いずれか1つでも一致すれば返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const alphaId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        tags: ["alpha"],
+      });
+      const betaId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        tags: ["beta"],
+      });
+      const gammaId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        tags: ["gamma"],
+      });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", labels: ["alpha", "beta"] },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(alphaId);
+      expect(ids).toContain(betaId);
+      expect(ids).not.toContain(gammaId);
     });
 
     it("filter は複数同時に渡すと AND になる（どれか1つが不一致なら返らない）", async () => {

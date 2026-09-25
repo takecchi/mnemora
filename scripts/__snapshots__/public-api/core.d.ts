@@ -505,6 +505,7 @@ export interface LexicalFilter {
     occurredBefore?: Date;
     validAt?: Date;
     attributes?: Attributes;
+    labels?: string[];
 }
 export interface LexicalHit {
     memoryId: MemoryId;
@@ -859,6 +860,7 @@ export interface VectorFilter {
     decayFloorAnyAxis?: boolean;
     validAt?: Date;
     attributes?: Attributes;
+    labels?: string[];
 }
 export interface VectorEntry {
     memoryId: MemoryId;
@@ -1934,6 +1936,10 @@ export interface ScopeAggregate {
         count: number;
         countKind: CountKind;
     };
+    filteredTaxonomy?: {
+        count: number;
+        countKind: CountKind;
+    };
     filteredDecayed: {
         count: number;
         countKind: CountKind;
@@ -2077,6 +2083,8 @@ export interface RecallQuery {
     vector?: number[];
     tags?: string[];
     attributes?: Attributes;
+    labels?: string[];
+    taxonomyGroups?: boolean;
     occurredAfter?: Date;
     occurredBefore?: Date;
     limit?: number;
@@ -2156,6 +2164,8 @@ export declare const RecallQuerySchema: z.ZodObject<{
         legacy: "legacy";
         eventAwareFreshness: "eventAwareFreshness";
     }>>;
+    labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    taxonomyGroups: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;
@@ -2167,6 +2177,8 @@ export interface RecallScope {
     decayFloorAnyAxis?: boolean;
     includeSubjectless?: boolean;
     attributes?: Attributes;
+    labels?: string[];
+    taxonomyGroupCandidates?: string[];
 }
 export declare const RecallScopeSchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodString>;
@@ -2178,6 +2190,8 @@ export declare const RecallScopeSchema: z.ZodObject<{
     decayFloorAnyAxis: z.ZodOptional<z.ZodBoolean>;
     includeSubjectless: z.ZodOptional<z.ZodBoolean>;
     attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    taxonomyGroupCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export interface RecallOutputValidationIssue {
     path: string;

@@ -419,6 +419,9 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
               // attributes: Issue #152/#153 / ADR 0312 で足した欄。fixture は
               // `RecallQuery.attributes` を渡していないので `null`（絞り込み無し）。
               attributes: null,
+              // labels: Issue #201 PR-B / ADR 0323 で足した欄。fixture は
+              // `RecallQuery.labels` を渡していないので `null`（絞り込み無し）。
+              labels: null,
             },
           },
           {

@@ -236,7 +236,11 @@ export interface AggregateScopeOptions {
  * - `status = 'contested'` の Memory を単独で返してはならない。対向する Memory を
  *   スコアに関係なく必ず一緒に取得できなければならない（mandatory companion retrieval）。
  * - `aggregateScope` の返り値は近似を許すが、`countKind` を必ず伴う（Phase 1 は常に厳密。
- *   PR 本文の「設計上の疑義」参照）。`groups` の総和は必ず `totalInScope` と一致する。
+ *   PR 本文の「設計上の疑義」参照）。**`axis: 'subject'` の `groups` の総和は必ず
+ *   `totalInScope` と一致する。**`axis: 'taxonomy'`（Issue #201 PR-B、
+ *   [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）は
+ *   ラベルの多対多により総和が一致しない——別の被覆保証（`GroupCount` の doc コメント）
+ *   を持つ。
  * - テナント分離: すべてのメソッドは `ctx.tenantId` に一致しない行を返してはならない。
  *   `testkit` は2テナントを同時に投入し、クロステナントの取得が0件になることを検査する。
  *
@@ -524,10 +528,13 @@ export interface MemoryStore {
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
   /**
    * roadmap.md 段階4/5: 群カウント・スコープ内総数・スコープを定義するフィルタ
-   * （status/period）で落ちた件数・not_indexed 件数を単一の集約クエリから返す
+   * （status/period/taxonomy）で落ちた件数・not_indexed 件数を単一の集約クエリから返す
    * （`ScopeAggregate` の doc コメント、docs/recall.md §5 参照）。
-   * 契約: 返り値の `groups` の総和は必ず `totalInScope` と一致する
+   * 契約: 返り値の `axis: 'subject'` の `groups` の総和は必ず `totalInScope` と一致する
    * （同一クエリから導出するため、並行する書き込みがあっても構造的に崩れない）。
+   * **`axis: 'taxonomy'`（`scope.taxonomyGroupCandidates` が在るときだけ生成、Issue #201
+   * PR-B、[ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）は
+   * この契約の対象外**——`GroupCount` の doc コメント参照。
    *
    * `opts.digestBand` を渡すと、`ScopeAggregate.digests`/`digestEligible` も
    * **同じ集約クエリから**埋めて返す（`ScopeAggregate` の doc コメント参照）。
