@@ -51,6 +51,19 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
+### Added
+
+- **`@mnemora/postgres` に opt-in の語彙ストア `PostgresTrigramLexicalStore` を足した**——
+  `pg_trgm` で日本語（非 ASCII）部分を照合する。`PostgresTrigramLexicalStore.create()` が拡張と
+  ロケール（`server_encoding`・日本語トライグラムの自己一致）を検査し、満たせなければ投げる
+  （黙って0件にしない）（[Issue #278](https://github.com/takecchi/mnemora/issues/278) /
+  [ADR 0319](./docs/decisions/0319-optional-trigram-lexical-store.md)、PR #738）。
+  ⭕ **既定は変えていない**——`PostgresLexicalStore`・`REQUIRED_EXTENSIONS`・migration は無変更で、
+  導入側が差し替えたときだけ効く。
+  ⚠ 選定に使っていない質問文での精度・閾値は測っていない（ADR 0319）。
+  ⚠ この項は上の数えた範囲（`8cf82b1`）の外の PR を個別に足したものであり、範囲の sha は
+  動かしていない——間の PR を数え直していないため。
+
 ### Fixed
 
 - **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
