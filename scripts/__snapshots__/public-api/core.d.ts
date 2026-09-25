@@ -72,6 +72,40 @@ export declare const ATTRIBUTE_VALUE_MAX_LENGTH = 256;
 export declare const AttributesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
 export declare const StoredAttributesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
 
+// ===== dist/claim-key.d.ts =====
+import { z } from "zod";
+import type { Ctx } from "./ctx.js";
+import type { ExtractionFailure } from "./extraction.js";
+import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
+export declare const ClaimKeySchema: z.ZodObject<{
+    subject: z.ZodString;
+    predicate: z.ZodString;
+}, z.core.$strip>;
+export type ClaimKey = z.infer<typeof ClaimKeySchema>;
+export declare function normalizeClaimKeyPart(value: string): string;
+export declare function normalizeClaimKey(key: ClaimKey): ClaimKey;
+export declare function buildClaimKeyPrompt(contents: readonly string[], knownPredicates?: readonly string[]): PromptSpec;
+export declare const ClaimKeyBatchResultSchema: z.ZodObject<{
+    claims: z.ZodArray<z.ZodObject<{
+        subject: z.ZodString;
+        predicate: z.ZodString;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type ClaimKeyBatchResult = z.infer<typeof ClaimKeyBatchResultSchema>;
+export interface DeriveClaimKeysResult {
+    claimKeys: (ClaimKey | null)[];
+    failure: ExtractionFailure | null;
+}
+export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[]): Promise<DeriveClaimKeysResult>;
+export interface ClaimKeyOptions {
+    enabled: boolean;
+    knownPredicates?: string[];
+}
+export declare const ClaimKeyOptionsSchema: z.ZodObject<{
+    enabled: z.ZodBoolean;
+    knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+
 // ===== dist/clock.d.ts =====
 import type { Clock } from "./interfaces/clock.js";
 export declare const systemClock: Clock;
@@ -291,6 +325,7 @@ export declare const EventFilterSchema: z.ZodObject<{
 
 // ===== dist/extraction.d.ts =====
 import { z } from "zod";
+import type { ClaimKey } from "./claim-key.js";
 import type { Ctx } from "./ctx.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
 import type { DigestSource, NewMemory } from "./memory.js";
@@ -358,6 +393,7 @@ export interface BuildNewMemoryParams {
     digestFallbackLength: number;
     activitySeq?: number;
     halfLifeRecalls?: number;
+    claimKey?: ClaimKey | null;
 }
 export declare function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMemory;
 
@@ -415,6 +451,7 @@ export * from "./heuristic-token-counter.js";
 export * from "./clock.js";
 export * from "./inline-scheduler.js";
 export * from "./extraction.js";
+export * from "./claim-key.js";
 export * from "./runtime.js";
 export * from "./recall-runtime.js";
 export * from "./recall-output-validation.js";
@@ -846,6 +883,7 @@ export interface VectorStore {
 // ===== dist/memory.d.ts =====
 import { z } from "zod";
 import type { Attributes } from "./attributes.js";
+import { type ClaimKey } from "./claim-key.js";
 import type { MemoryId, ObservationId } from "./ids.js";
 import { type Provenance } from "./provenance.js";
 export type MemoryStatus = "active" | "superseded" | "contested" | "archived" | "forgotten";
@@ -890,6 +928,7 @@ export interface Memory {
     lastReinforcedAt?: Date | null;
     validFrom?: Date | null;
     validUntil?: Date | null;
+    claimKey?: ClaimKey | null;
     strength: number;
     halfLifeHours: number;
     decayFloorAt: Date;
@@ -961,6 +1000,10 @@ export declare const MemorySchema: z.ZodObject<{
     lastReinforcedAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validFrom: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validUntil: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    claimKey: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        subject: z.ZodString;
+        predicate: z.ZodString;
+    }, z.core.$strip>>>;
     strength: z.ZodNumber;
     halfLifeHours: z.ZodNumber;
     decayFloorAt: z.ZodDate;
@@ -1028,6 +1071,10 @@ export declare const NewMemorySchema: z.ZodObject<{
     lastReinforcedAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validFrom: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validUntil: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    claimKey: z.ZodOptional<z.ZodNullable<z.ZodObject<{
+        subject: z.ZodString;
+        predicate: z.ZodString;
+    }, z.core.$strip>>>;
     halfLifeHours: z.ZodNumber;
     decayFloorAt: z.ZodDate;
     decayBaseSeq: z.ZodOptional<z.ZodNullable<z.ZodNumber>>;
@@ -1054,6 +1101,7 @@ export declare const NewMemorySchema: z.ZodObject<{
 // ===== dist/observation.d.ts =====
 import { z } from "zod";
 import type { Attributes } from "./attributes.js";
+import { type ClaimKeyOptions } from "./claim-key.js";
 import type { ObservationId } from "./ids.js";
 export interface Observation {
     id: ObservationId;
@@ -1102,6 +1150,7 @@ export declare const ExtractModeSchema: z.ZodEnum<{
     deferred: "deferred";
 }>;
 export declare const SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX = "runtime.observe: subjectCandidates is not supported with extract: 'deferred' (subjectCandidates is never persisted, so deferred extraction cannot see it): ";
+export declare const CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX = "runtime.observe: claimKey is not supported with extract: 'deferred' (claimKey is never persisted, so deferred extraction cannot see it): ";
 export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "document";
 export type SubjectCandidatesInput = string[];
 export declare const ExtractionContextSchema: z.ZodObject<{
@@ -1123,6 +1172,7 @@ export interface ObserveUtteranceInput {
     extract?: ExtractMode;
     subjectCandidates?: SubjectCandidatesInput;
     attributes?: Attributes;
+    claimKey?: ClaimKeyOptions;
     speaker?: string;
     text: string;
 }
@@ -1137,6 +1187,7 @@ export interface ObserveEventInput {
     extract?: ExtractMode;
     subjectCandidates?: SubjectCandidatesInput;
     attributes?: Attributes;
+    claimKey?: ClaimKeyOptions;
     name: string;
     data?: Record<string, unknown>;
 }
@@ -1151,6 +1202,7 @@ export interface ObserveDocumentInput {
     extract?: ExtractMode;
     subjectCandidates?: SubjectCandidatesInput;
     attributes?: Attributes;
+    claimKey?: ClaimKeyOptions;
     title?: string;
     content: string;
 }
@@ -1181,6 +1233,10 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         }>>;
         subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
         attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        claimKey: z.ZodOptional<z.ZodObject<{
+            enabled: z.ZodBoolean;
+            knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        }, z.core.$strip>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
     }, z.core.$strip>,
@@ -1204,6 +1260,10 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         }>>;
         subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
         attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        claimKey: z.ZodOptional<z.ZodObject<{
+            enabled: z.ZodBoolean;
+            knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        }, z.core.$strip>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     }, z.core.$strip>,
@@ -1227,6 +1287,10 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         }>>;
         subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
         attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        claimKey: z.ZodOptional<z.ZodObject<{
+            enabled: z.ZodBoolean;
+            knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        }, z.core.$strip>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
     }, z.core.$strip>,
@@ -2517,6 +2581,7 @@ export interface ObserveResult {
     extraction: ExtractionOutcome;
     extractionFailure: ExtractionFailure | null;
     rejectedSubjectIds?: string[];
+    claimKeyFailure?: ExtractionFailure | null;
 }
 export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_attempted";
 export interface ReextractResult {

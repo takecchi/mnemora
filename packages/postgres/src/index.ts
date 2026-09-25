@@ -5,6 +5,7 @@ export * from "./advisory-lock.js";
 export * from "./memory-store.js";
 export * from "./vector-store.js";
 export * from "./lexical-store.js";
+export * from "./trigram-lexical-store.js";
 export * from "./event-store.js";
 export * from "./outbox-store.js";
 export * from "./tenant-settings-store.js";

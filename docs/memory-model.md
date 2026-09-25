@@ -253,6 +253,46 @@ contested_with_id  uuid NULL REFERENCES memories(id),
 `memory_relations` を必要とし、Phase 1 では `contested_with_id` が指す1件を必須の道連れとして
 scoping する設計に留める。
 
+### ⚠ 2026-09 追記（Issue #371、(B) 第1段。[ADR 0185](./decisions/0185-contradiction-detection-path.md)/[ADR 0315](./decisions/0315-claim-key-does-not-touch-extraction-cassettes.md)）: `claimKey`（主張キー）を足した——**検出はまだ無い**
+
+`memories.claim_key_subject`/`claim_key_predicate`（`Memory.claimKey: {subject, predicate} | null`）
+を足した。**この節（矛盾の扱い）に書くのは、これが将来「判定できない対向を検出する」
+（機構2）の土台になることを意図しているからである。**⛔ **この2列は「何についての主張か」を
+持たせるだけで、同じ鍵を持つ2件を見つけて `contested` を立てる処理は今日まだ無い**
+（その検出は [Issue #372](https://github.com/takecchi/mnemora/issues/372) の範囲）。
+
+**なぜ `provenance` と別の欄か（北極星 問い4「AI の推論と、ユーザーが言った事実を区別する」）**:
+`claimKey` は LLM が作る ⟹ **推論である。**`provenance.kind`（`stated`/`inferred`）とは
+**別の軸**——`stated` な Memory にも `claimKey` は付く。「ユーザーが『好きな食べ物はラーメン』
+と言った」という事実そのものは stated でも、「これは "好きな食べ物" という属性についての
+主張だ」という分類は LLM の推論である。**この区別を型・列名の両方で表す**——`claimKey` を
+`provenance` のバリアントに混ぜず、独立した nullable な欄として持つ。
+
+**LLM の呼び出し回数は増えない既定を守る**（北極星 問い1・問い5）: `claimKey` は既定では
+一切埋まらない（`packages/core/src/claim-key.ts` の `deriveClaimKeys` は opt-in——
+`runtime.observe()` に `claimKey: { enabled: true }` を渡したときだけ、既存の抽出候補群へ
+候補群ぶん**1回（バッチ）**の別の構造化呼び出しを行う）。**既存の抽出プロンプト
+（`extraction.ts` の `buildExtractionPrompt`）は1バイトも変えていない**——カセットの
+照合鍵（`llmCassetteKey`）が変わらないことは `extraction.test.ts` の
+「subjectCandidates 省略時の鍵（llmCassetteKey 相当）は固定値のまま動かない」がそのまま
+固定している（この歯は claim key opt-in の追加でも1バイトも変わっていない）。
+
+```sql
+claim_key_subject    text NULL,
+claim_key_predicate  text NULL,
+```
+
+索引 `idx_memories_claim_key`（`(tenant_id, subject_id, claim_key_subject, claim_key_predicate)`、
+`WHERE claim_key_subject IS NOT NULL` の部分索引）を Phase 1 スキーマに足し、
+`#372` の検出クエリ（「同じテナント・同じ subject_id・同じ claim key を持つ他の `active` な
+Memory を探す」）が索引アクセスで済む形にしてある——`superseded_by_id`/`contested_with_id`
+と同じ「グラフ探索ではなく索引で引けるようにする」理由付けを踏襲した。
+
+**#372（検出）が実装されても、進める先は `contested` までである。**[ADR 0185](./decisions/0185-contradiction-detection-path.md)
+決定4: `claimKey` は推論から導かれる ⟹ 推論を根拠に `active → superseded`
+（ユーザーが言った事実を消す側）へ進めてはならない。機構2が「判定できないときは
+`contested` に落とす」と既に定めている先の、まさにその一例として扱う。
+
 ---
 
 ## 6. 強化 (Reinforcement)

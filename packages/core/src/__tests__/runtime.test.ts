@@ -3,7 +3,10 @@ import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
 import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
-import { SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX } from "../observation.js";
+import {
+  CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX,
+  SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX,
+} from "../observation.js";
 import {
   TICK_SUPPORTED_JOB_KINDS,
   UNSUPPORTED_KIND_ERROR_PREFIX,
@@ -70,6 +73,31 @@ function throwingLlm(): LLMProvider {
     },
     completeStructured: async () => {
       throw new Error("simulated LLM outage");
+    },
+  };
+}
+
+/**
+ * Issue #371: `completeStructured` 呼び出しの**回数**と**順序**を検査したいテスト用の
+ * fake。`responses[0]` が1回目の呼び出し（常に `extractCandidates` 由来）、`responses[1]`
+ * が2回目（opt-in が有効なら `deriveClaimKeys` 由来）に対応する——`runExtraction` が
+ * 常に「抽出 → (opt-inのときだけ)claim key」の順で呼ぶことを前提にした単純化。
+ * 設定した回数を超えて呼ばれたら例外を投げる（未設定の応答を勝手に補わない）。
+ */
+function sequencedLlm(responses: unknown[]): LLMProvider & { calls: StructuredRequest<unknown>[] } {
+  const calls: StructuredRequest<unknown>[] = [];
+  return {
+    calls,
+    complete: async () => {
+      throw new Error("not used");
+    },
+    completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
+      const index = calls.length;
+      calls.push(req as StructuredRequest<unknown>);
+      if (index >= responses.length) {
+        throw new Error(`sequencedLlm: no response configured for call #${index + 1}`);
+      }
+      return req.schema.parse(responses[index]) as T;
     },
   };
 }
@@ -2366,5 +2394,224 @@ describe("observe: subjectCandidates（Issue #608 項目②(b)）", () => {
     // `ReextractResult` に `rejectedSubjectIds` は無い（候補一覧を扱わないため、
     // そもそも運ぶものが無い）。
     expect("rejectedSubjectIds" in reextractResult).toBe(false);
+  });
+});
+
+describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2の(ii) separate）", () => {
+  it("既定（claimKey を渡さない）では、deriveClaimKeys は一度も呼ばれない。呼び出し回数は1のまま", async () => {
+    const llm = sequencedLlm([{ memories: [{ content: "発話", provenanceKind: "stated" }] }]);
+    const { runtime, stores } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+    expect(result.extraction).toBe("ok");
+    expect(llm.calls.length).toBe(1); // 抽出の1回だけ。claim key の呼び出しは無い。
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    expect(memory?.claimKey ?? null).toBeNull();
+    // 「渡していない」ので rejectedSubjectIds と同じ規約でキー自体が無い。
+    expect("claimKeyFailure" in result).toBe(false);
+  });
+
+  it("claimKey: { enabled: false } でも、既定と同じ——呼ばれない・キーも無い", async () => {
+    const llm = sequencedLlm([{ memories: [{ content: "発話", provenanceKind: "stated" }] }]);
+    const { runtime } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      claimKey: { enabled: false },
+    });
+    expect(llm.calls.length).toBe(1);
+    expect("claimKeyFailure" in result).toBe(false);
+  });
+
+  it("claimKey: { enabled: true } は、候補群をまとめて1回（バッチ）で問う——候補ごとに独立呼び出しにしない", async () => {
+    const llm = sequencedLlm([
+      {
+        memories: [
+          { content: "好きな食べ物はラーメン", provenanceKind: "stated" },
+          { content: "好きな色は青", provenanceKind: "stated" },
+        ],
+      },
+      {
+        claims: [
+          { subject: "user", predicate: "favorite_food" },
+          { subject: "user", predicate: "favorite_color" },
+        ],
+      },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン、好きな色は青",
+      claimKey: { enabled: true },
+    });
+    expect(result.extraction).toBe("ok");
+    expect(llm.calls.length).toBe(2); // 抽出1回 + claim key 1回（候補2件をまとめて）。
+    expect(result.memoryIds.length).toBe(2);
+
+    const first = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    const second = await stores.memoryStore.get(ctx, result.memoryIds[1]!);
+    expect(first?.claimKey).toEqual({ subject: "user", predicate: "favorite_food" });
+    expect(second?.claimKey).toEqual({ subject: "user", predicate: "favorite_color" });
+    // opt-in を使ったので claimKeyFailure キーは常に有る（成功時は null）。
+    expect(result.claimKeyFailure).toBeNull();
+  });
+
+  it("既定の抽出プロンプトは opt-in の有無で変わらない——2回目の呼び出しだけが増える", async () => {
+    // 1回目（抽出）の req.prompt を捕まえ、opt-in の有無で完全に同一であることを確認する。
+    const withoutOptIn = sequencedLlm([{ memories: [] }]);
+    const { runtime: runtimeA } = buildRuntime(withoutOptIn);
+    await runtimeA.observe(ctx, { kind: "utterance", text: "発話" });
+    const firstPromptWithoutOptIn: unknown = withoutOptIn.calls[0]!.prompt;
+
+    const withOptIn = sequencedLlm([{ memories: [] }]);
+    const { runtime: runtimeB } = buildRuntime(withOptIn);
+    await runtimeB.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      claimKey: { enabled: true },
+    });
+    const firstPromptWithOptIn: unknown = withOptIn.calls[0]!.prompt;
+
+    expect(firstPromptWithOptIn).toEqual(firstPromptWithoutOptIn);
+    // 候補0件なので claim key の呼び出しにも到達しない——どちらも呼び出しは1回だけ。
+    expect(withoutOptIn.calls.length).toBe(1);
+    expect(withOptIn.calls.length).toBe(1);
+  });
+
+  it("候補が0件なら、opt-in が有効でも claim key の呼び出しは起きない（+0回）", async () => {
+    const llm = sequencedLlm([{ memories: [] }]);
+    const { runtime, stores } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "何も記憶に値しない発話",
+      claimKey: { enabled: true },
+    });
+    expect(result.memoryIds).toEqual([]);
+    expect(llm.calls.length).toBe(1);
+    expect(result.claimKeyFailure).toBeNull();
+    void stores;
+  });
+
+  it("claim key の呼び出しが失敗しても、Memory の作成は止まらない——claimKey は null のまま、失敗は ObserveResult に残る", async () => {
+    // 2回目（claim key）の応答を設定しない ⟹ sequencedLlm が例外を投げる。
+    const llm = sequencedLlm([{ memories: [{ content: "発話", provenanceKind: "stated" }] }]);
+    const { runtime, stores } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      claimKey: { enabled: true },
+    });
+    expect(result.extraction).toBe("ok");
+    expect(result.memoryIds.length).toBe(1);
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    expect(memory?.claimKey ?? null).toBeNull();
+    expect(result.claimKeyFailure).not.toBeNull();
+  });
+
+  it("knownPredicates を渡すと、claim key 呼び出しの system プロンプトへ足される", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "発話", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      claimKey: { enabled: true, knownPredicates: ["favorite_food", "favorite_color"] },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).toContain("favorite_food");
+    expect(claimKeyCall.prompt.system).toContain("favorite_color");
+  });
+
+  it("extract: 'deferred' と claimKey を同時に渡すとエラーになる（検証段、黙って捨てない）", async () => {
+    const { runtime } = buildRuntime(llmReturning([]));
+    await expect(
+      runtime.observe(ctx, {
+        kind: "utterance",
+        text: "発話",
+        extract: "deferred",
+        claimKey: { enabled: true },
+      }),
+    ).rejects.toThrow(CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX);
+  });
+
+  it("deferred と claimKey の組み合わせエラーは、observation を書き込む前に投げる（副作用を残さない）", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    await expect(
+      runtime.observe(ctx, {
+        kind: "utterance",
+        text: "検証段で落ちるはずの発話",
+        extract: "deferred",
+        claimKey: { enabled: true },
+      }),
+    ).rejects.toThrow();
+    const observation = await stores.memoryStore.getObservation(ctx, "obs-1");
+    expect(observation).toBeNull();
+  });
+
+  it("event / document でも claimKey が同じように効く", async () => {
+    const eventLlm = sequencedLlm([
+      { memories: [{ content: "ログインした", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "login" }] },
+    ]);
+    const { runtime: eventRuntime, stores: eventStores } = buildRuntime(eventLlm);
+    const eventResult = await eventRuntime.observe(ctx, {
+      kind: "event",
+      name: "login",
+      claimKey: { enabled: true },
+    });
+    const eventMemory = await eventStores.memoryStore.get(ctx, eventResult.memoryIds[0]!);
+    expect(eventMemory?.claimKey).toEqual({ subject: "user", predicate: "login" });
+
+    const docLlm = sequencedLlm([
+      { memories: [{ content: "文書の要点", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "document_summary" }] },
+    ]);
+    const { runtime: docRuntime, stores: docStores } = buildRuntime(docLlm);
+    const docResult = await docRuntime.observe(ctx, {
+      kind: "document",
+      content: "本文",
+      claimKey: { enabled: true },
+    });
+    const docMemory = await docStores.memoryStore.get(ctx, docResult.memoryIds[0]!);
+    expect(docMemory?.claimKey).toEqual({ subject: "user", predicate: "document_summary" });
+  });
+
+  it("reextract は claimKey を使わない（保存されていないため）——opt-in していても呼び出しは抽出の1回だけ", async () => {
+    const observeLlm = sequencedLlm([
+      { memories: [{ content: "初回の抽出", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "topic" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(observeLlm);
+    const observeResult = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "発話",
+      claimKey: { enabled: true },
+    });
+    expect(observeResult.extraction).toBe("ok");
+
+    const reextractLlm = sequencedLlm([
+      { memories: [{ content: "やり直した抽出", provenanceKind: "stated" }] },
+    ]);
+    const reextractRuntime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: reextractLlm,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    const reextractResult = await reextractRuntime.reextract(ctx, observeResult.observationId);
+    expect(reextractResult.extraction).toBe("ok");
+    // reextract は claim key opt-in を渡す口を持たない ⟹ 呼び出しは抽出の1回だけ。
+    expect(reextractLlm.calls.length).toBe(1);
+    const newMemoryId = reextractResult.memoryIds.find(
+      (id) => !observeResult.memoryIds.includes(id),
+    );
+    const newMemory = await stores.memoryStore.get(ctx, newMemoryId!);
+    expect(newMemory?.claimKey ?? null).toBeNull();
+    expect("claimKeyFailure" in reextractResult).toBe(false);
   });
 });

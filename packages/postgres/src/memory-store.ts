@@ -262,7 +262,8 @@ export class PostgresMemoryStore implements MemoryStore {
     // ようになった（本 PR 以前は単発の INSERT 文、衝突時は単発の SELECT 文だった——
     // 返す値は変わらない。`inserted`/`existing`/`rowToMemory` の呼び方は1行も
     // 変えていない）。Issue #152/#153 / ADR 0312: `attributes` 列を INSERT に足した
-    // （PR #724 の追加をそのまま引き継ぐ）。
+    // （PR #724 の追加をそのまま引き継ぐ）。Issue #371: `claim_key_subject`/
+    // `claim_key_predicate` 列を足した（PR #736 の追加をそのまま引き継ぐ）。
     const result = await this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO memories (
@@ -273,6 +274,7 @@ export class PostgresMemoryStore implements MemoryStore {
           status, superseded_by_id, contested_with_id,
           tags,
           occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+          claim_key_subject, claim_key_predicate,
           strength, half_life_hours, decay_floor_at,
           decay_base_seq, decay_floor_seq, half_life_recalls,
           embedding_status,
@@ -287,6 +289,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${sql.param(input.tags)},
           ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
           ${input.validFrom ?? null}, ${input.validUntil ?? null},
+          ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
           ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
           ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
           ${input.embeddingStatus},
@@ -357,6 +360,7 @@ export class PostgresMemoryStore implements MemoryStore {
           status, superseded_by_id, contested_with_id,
           tags,
           occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+          claim_key_subject, claim_key_predicate,
           strength, half_life_hours, decay_floor_at,
           decay_base_seq, decay_floor_seq, half_life_recalls,
           embedding_status,
@@ -371,6 +375,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${sql.param(input.tags)},
           ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
           ${input.validFrom ?? null}, ${input.validUntil ?? null},
+          ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
           ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
           ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
           ${input.embeddingStatus},
@@ -704,6 +709,7 @@ export class PostgresMemoryStore implements MemoryStore {
             status, superseded_by_id, contested_with_id,
             tags,
             occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+            claim_key_subject, claim_key_predicate,
             strength, half_life_hours, decay_floor_at,
             decay_base_seq, decay_floor_seq, half_life_recalls,
             embedding_status,
@@ -718,6 +724,7 @@ export class PostgresMemoryStore implements MemoryStore {
             ${sql.param(input.tags)},
             ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
             ${input.validFrom ?? null}, ${input.validUntil ?? null},
+            ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
             ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
             ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
             ${input.embeddingStatus},

@@ -79,6 +79,9 @@ import type {
   ObserveMemoryUsageInput,
 } from "../observation.js";
 
+import type { ClaimKeyOptionsSchema } from "../claim-key.js";
+import type { ClaimKeyOptions } from "../claim-key.js";
+
 import type { ProvenanceKindSchema, ProvenanceSchema } from "../provenance.js";
 import type {
   ProvenanceKind,
@@ -509,6 +512,11 @@ type _p60_AnnUnreachedSeverity = Expect<
 
 type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attributes>>;
 
+// Issue #371（(B) 第1段、ADR 0185/0315）: `claim-key.ts` に `ClaimKeyOptionsSchema`
+// （`satisfies z.ZodType<...>`）を新設した。このファイル冒頭のコメントの規律どおり、
+// 対応するペアをここに登録する。
+type _p62_ClaimKeyOptions = Expect<Equals<z.infer<typeof ClaimKeyOptionsSchema>, ClaimKeyOptions>>;
+
 // =============================================================================
 // 実行時の存在証明
 //
@@ -526,7 +534,7 @@ type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attribute
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
-const EXPECTED_PAIR_COUNT = 61;
+const EXPECTED_PAIR_COUNT = 62;
 
 /**
  * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
@@ -551,7 +559,9 @@ describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
       "3本（_p03 Omission_whole / _p34 ObserveInput_whole / _p40 Provenance_whole）が" +
       "discriminated union 自体の全体一致、1本（_p59 ScopeRelation）が `main` から" +
       "取り込んだ分、1本（_p60 AnnUnreachedSeverity、ADR 0288 / Issue #361）が" +
-      "`AnnUnreachedOmission.severity` 追加分（Issue #272 / ADR 0181 参照）。";
+      "`AnnUnreachedOmission.severity` 追加分、1本（_p61 Attributes、Issue #152/#153 / " +
+      "ADR 0312）が `attributes.ts` の新設分、1本（_p62 ClaimKeyOptions、Issue #371 / " +
+      "ADR 0185・0315）が `claim-key.ts` の新設分（Issue #272 / ADR 0181 参照）。";
 
     expect(numbers.length, howToFix).toBe(EXPECTED_PAIR_COUNT);
 
@@ -598,7 +608,7 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-const EXPECTED_SATISFIES_COUNT = 61;
+const EXPECTED_SATISFIES_COUNT = 62;
 
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
   it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件`, () => {

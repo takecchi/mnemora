@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AttributesSchema, StoredAttributesSchema } from "./attributes.js";
 import type { Attributes } from "./attributes.js";
+import { ClaimKeyOptionsSchema, type ClaimKeyOptions } from "./claim-key.js";
 import type { ObservationId } from "./ids.js";
 
 /**
@@ -107,6 +108,17 @@ export const ExtractModeSchema = z.enum(["sync", "deferred"]) satisfies z.ZodTyp
 export const SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX =
   "runtime.observe: subjectCandidates is not supported with extract: 'deferred' (subjectCandidates is never persisted, so deferred extraction cannot see it): ";
 
+/**
+ * Issue #371（(B) 第1段）: `claimKey`（{@link ClaimKeyOptions}、下記）と `extract: 'deferred'`
+ * は同時に渡せない。理由は `subjectCandidates` と全く同じ——`claimKey` オプションはどこにも
+ * 永続化されず、`Observation` にも `observations` テーブルにも持たせていない
+ * （`SubjectCandidatesInput` の doc コメントに書いた非対称と同じ設計判断）ため、
+ * `extract: 'deferred'` 側（`processExtractJob`、`runtime.ts`）はこの口を構造的に見られない。
+ * 「渡されたのに黙って落とす」と、呼び出し側は claim key が取れたと思い込む。
+ */
+export const CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX =
+  "runtime.observe: claimKey is not supported with extract: 'deferred' (claimKey is never persisted, so deferred extraction cannot see it): ";
+
 /** `observe()` の入力ユニオンの判別子（DB 上は `kind = 'usage'` に対応する点に注意）。 */
 export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "document";
 
@@ -196,6 +208,9 @@ export interface ObserveUtteranceInput {
   subjectCandidates?: SubjectCandidatesInput;
   /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0312）。 */
   attributes?: Attributes;
+  /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
+   * `deriveClaimKeys` は一度も呼ばれない。 */
+  claimKey?: ClaimKeyOptions;
   speaker?: string;
   text: string;
 }
@@ -213,6 +228,9 @@ export interface ObserveEventInput {
   subjectCandidates?: SubjectCandidatesInput;
   /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0312）。 */
   attributes?: Attributes;
+  /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
+   * `deriveClaimKeys` は一度も呼ばれない。 */
+  claimKey?: ClaimKeyOptions;
   name: string;
   data?: Record<string, unknown>;
 }
@@ -230,6 +248,9 @@ export interface ObserveDocumentInput {
   subjectCandidates?: SubjectCandidatesInput;
   /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0312）。 */
   attributes?: Attributes;
+  /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
+   * `deriveClaimKeys` は一度も呼ばれない。 */
+  claimKey?: ClaimKeyOptions;
   title?: string;
   content: string;
 }
@@ -267,6 +288,7 @@ const ObserveUtteranceInputSchema = z.object({
   extract: ExtractModeSchema.optional(),
   subjectCandidates: SubjectCandidatesInputSchema,
   attributes: AttributesSchema.optional(),
+  claimKey: ClaimKeyOptionsSchema.optional(),
   speaker: z.string().min(1).optional(),
   text: z.string().min(1),
 }) satisfies z.ZodType<ObserveUtteranceInput>;
@@ -282,6 +304,7 @@ const ObserveEventInputSchema = z.object({
   extract: ExtractModeSchema.optional(),
   subjectCandidates: SubjectCandidatesInputSchema,
   attributes: AttributesSchema.optional(),
+  claimKey: ClaimKeyOptionsSchema.optional(),
   name: z.string().min(1),
   data: z.record(z.string(), z.unknown()).optional(),
 }) satisfies z.ZodType<ObserveEventInput>;
@@ -297,6 +320,7 @@ const ObserveDocumentInputSchema = z.object({
   extract: ExtractModeSchema.optional(),
   subjectCandidates: SubjectCandidatesInputSchema,
   attributes: AttributesSchema.optional(),
+  claimKey: ClaimKeyOptionsSchema.optional(),
   title: z.string().min(1).optional(),
   content: z.string().min(1),
 }) satisfies z.ZodType<ObserveDocumentInput>;

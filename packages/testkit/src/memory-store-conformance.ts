@@ -965,6 +965,100 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // claimKey（Issue #371、(B) 第1段。ADR 0185 決定2・決定3・決定4、ADR 0315）
+    //
+    // ⛔ この歯は検出を検査しない——「主張キーが書き込み・読み戻しできること」と
+    // 「鍵が無い行が壊れないこと」だけを見る（#372 の範囲外）。
+    // `validFrom`/`validUntil` の歯と同じ形（round-trip・省略時の既定値・他フィールドとの
+    // 取り違え検出）をここでも置く。
+    // -------------------------------------------------------------------
+
+    it("createMemory は claimKey を書き込み、読み戻す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+        }),
+      );
+      expect(created.claimKey).toEqual({ subject: "user", predicate: "favorite_food" });
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.claimKey).toEqual({ subject: "user", predicate: "favorite_food" });
+    });
+
+    it("createMemory は claimKey を省略すると null のまま保存・返却する（非破壊の既定値。既存の行・opt-in を使わない呼び出しが壊れない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1" }),
+      );
+      expect(created.claimKey ?? null).toBeNull();
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.claimKey ?? null).toBeNull();
+    });
+
+    it("createMemory は claimKey と subjectId を混同しない — 別々の値を渡すと、別々に返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          subjectId: "subject-abc",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+        }),
+      );
+
+      // ⚠ `Memory.subjectId`（この記憶が誰についてか）と `claimKey.subject`
+      // （主張の文法上の主語。この実験では常に `"user"` 相当）は別の軸である——
+      // 取り違える実装は、`subjectId` を `claimKey.subject` へエイリアスしたり、
+      // その逆をしたりする形で壊れうる。
+      expect(created.subjectId).toBe("subject-abc");
+      expect(created.claimKey?.subject).toBe("user");
+      expect(created.subjectId).not.toBe(created.claimKey?.subject);
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.subjectId).toBe("subject-abc");
+      expect(reread?.claimKey).toEqual({ subject: "user", predicate: "favorite_food" });
+    });
+
+    it("createMemory は同じ subjectId・違う predicate の claimKey を別々に保存する（#372 の索引アクセスが区別すべき最小の対）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const first = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "hash-claim-key-a",
+          subjectId: "subject-abc",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+        }),
+      );
+      const second = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "hash-claim-key-b",
+          subjectId: "subject-abc",
+          claimKey: { subject: "user", predicate: "favorite_color" },
+        }),
+      );
+
+      expect(first.id).not.toBe(second.id);
+      expect(first.claimKey?.predicate).toBe("favorite_food");
+      expect(second.claimKey?.predicate).toBe("favorite_color");
+    });
+
+    // -------------------------------------------------------------------
     // decayBaseSeq/decayFloorSeq/halfLifeRecalls（活動時計の3つ組、
     // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3、
     // Issue #305）
