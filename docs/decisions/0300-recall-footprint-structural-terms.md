@@ -151,6 +151,12 @@ hold-out 5行の誤差・余白（`ACCURACY_TOLERANCE=0.025`、`examples/chat/sr
 12行全体の最大誤差: **2.068% → 1.562%**（改善）。`recall-footprint-baseline.test.ts`
 （24歯）は修正前後とも全緑。
 
+この余白の変化（42行upper: 11.15→12.18字、+1.03字）は、[ADR 0201](./0201-recall-footprint-char-margin-canary.md)
+が「次に推定式が動いたときに、2件目の実測として数えること」と指示していたものに
+あたるため、ADR 0201 側に追記した（本 ADR の内容を貼り替えたのではなく、
+ADR 0201 の既存の記録形式に沿って追記——[docs/decisions/README.md](./README.md)
+「採用済み ADR の本文は書き換えない」の規律に従う）。
+
 ### 【実測】未マージ PR #701（`bench/340-unique-filler`）の基準値では 82 行が赤くなる
 
 `git show origin/bench/340-unique-filler:examples/chat/compare-baseline.json` を読み、
