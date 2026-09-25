@@ -496,6 +496,21 @@ export interface MemoryStore {
    * 「呼び出し側が省略可能な引数を渡さない」ことと「実装がその引数を最初から
    * 持たない」ことは区別されない。ADR 0165 決めたこと13 が
    * `TenantSettingsStore` の新メソッドを省略可能にしたのと同じ規律をここでも守る。
+   *
+   * **減衰の起点を巻き戻さない**（[ADR 0048](../../../../docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)/
+   * [ADR 0049](../../../../docs/decisions/0049-reinforce-monotonicity-in-pseudo-implementations.md)。
+   * ADR 0048「引き受けた負債」の、この doc への書き起こし）:
+   * - 書き込むのは、現在の `lastReinforcedAt` が `null` か、**`at` より狭義に古い**ときだけ。
+   * - **等しい `at`・古い `at` は no-op である**——例外にしない。何も書かず（`updatedAt` も
+   *   動かさず）、更新されなかった現在の行をそのまま返す。呼び出し側からは、書いたか
+   *   どうかは戻り値の `lastReinforcedAt` を見ないと分からない。
+   * - ⚠ **この比較は壁時計の `at` だけで行い、活動時計側の3列も同じ条件で守る**
+   *   （ADR 0165 決めたこと16「2軸とも同じ強化イベントの一部」）。⟹ **等しい `at` の
+   *   2回目は、`opts.nowSeq` が1回目より進んでいても `decayBaseSeq`/`decayFloorSeq` を
+   *   動かさない。**`runtime.observe` の使用報告は `at` を `clock.now()` から取るので、
+   *   同じミリ秒に2回の使用報告が来たときに当たる（Issue #730。実運用での頻度は
+   *   測っていない）。等しい `at` を書く側へ倒す・活動時計側だけ seq で比べる変更は、
+   *   適合テストの契約を変える破壊的変更であり、ここでは採っていない。
    */
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
   /**
