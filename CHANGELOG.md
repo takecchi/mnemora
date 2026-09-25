@@ -261,6 +261,19 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ統合が
   構造的に起きなくなる（実測は ADR 0310/0317）。
   明示的な `runtime.consolidate(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
+- **`@mnemora/postgres` の `runMigrations()` に、`schema` の違う呼び出しを同じ（まっさらな）
+  DB へ同時に流すと `CREATE EXTENSION IF NOT EXISTS` が `pg_extension_name_index`（拡張は
+  DB 全体に1つしか置けない）で衝突し、決定的にどちらかが落ちることがあった。** 拡張を
+  作る段だけを、schema に依らない共有の advisory lock（新設の `EXTENSION_LOCK_KEY`）で
+  追加に直列化した——schema ごとのロック（ADR 0057 決定6）はそのまま残し、取得順は常に
+  「schema ごとのロック → 共有の拡張ロック」に固定してある（逆順は無い）
+  （[Issue #757](https://github.com/takecchi/mnemora/issues/757) /
+  [ADR 0331](./docs/decisions/0331-extension-creation-shared-advisory-lock.md)、PR #780）。
+  ⭕ **公開型・既定値は変えていない**——`extensionMode: "verify"` はこの共有ロックも
+  一切参照しない。⚠ `schema` 未指定の経路は、初回適用時だけ advisory lock の制御用
+  クエリが2回増える（DDL・DML は1文字も変わらない。ADR 0057 決定2との関係は ADR 0331
+  参照）。
+
 - **`@mnemora/postgres` の `registerEmbeddingSpace()` に `dimensions > 2000` を渡すと、
   `CREATE TABLE IF NOT EXISTS` は成功するが続く HNSW 索引の作成が pgvector の `54000`
   （"column cannot have more than 2000 dimensions for hnsw index"）で失敗し、**テーブルだけが
