@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 /**
- * `association-scale-bench.ts` の段2（Issue #337）中に見つかった逆転
+ * `association-scale-bench.ts` の配置(A)（Issue #337）で見つかった逆転
  * ——1万行スケールで **on-3 だけ 4/12 届き、on-5/on-10 は 0/12**——を切り分ける、
- * 使い捨ての診断スクリプト（`pnpm --filter @mnemora/example-chat exec tsx
- * src/bench/association-scale-investigate.ts`）。
+ * 診断スクリプト（`pnpm --filter @mnemora/example-chat run association-scale-investigate`）。
+ * 測ったこと・全体像は [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md)
+ * （特に §4・§5）を見ること——このファイルは道具、ADR 0328 が記録。
  *
- * ⛔ **別データベースで走らせること。** `association-scale-bench.ts` の配置(A)が
- * 使っている DB（`TRUNCATE` を挟む）を壊さないため、`DATABASE_URL` は
- * `mnemora_investigate`（本スクリプト用に別途 `createdb` したもの）を指す。
+ * ⛔ **別データベースで走らせること。** `association-scale-bench.ts` の配置(A)/(B)/(R)が
+ * 使っている DB（`TRUNCATE` を挟む）を壊さないため、`DATABASE_URL` は専用に
+ * `createdb` した別名（例: `mnemora_investigate`）を指す。
  *
  * ## 何を見るか
  *
@@ -25,10 +26,17 @@
  *
  * ⟹ **`associationHits` 自体は `maxCount` に依らず同じ**(同じ3アンカー・同じ検索)。
  * `maxCount` が動かすのは (a) 母集合を先頭何件まで広げるか(`rankFetchCount`)、
- * (b) 実際に席に着ける件数、の2つだけ。**母集合が広がるほど、フィラー
- * （`buildDistinctFiller` のテンプレ生成、1万行なら9938件、corpus の99.6%）が
- * 混入する機会が増える**——これが「maxCount を増やすと届かなくなる」の
- * 仮説である。**本スクリプトはこれを実測で確かめる**(推測のままにしない)。
+ * (b) 実際に席に着ける件数、の2つだけ。
+ *
+ * 🔴 **当初の仮説（「フィラー混入がmaxCountとともに増えて gold を押し出す」）は、
+ * 実測で確認できなかった。** 単一 ingest（本スクリプト）で maxCount=3/5/10 を
+ * 振ったところ、逆転は再現せず **全 arm で 0/12（一様）だった**——(A)側の逆転は
+ * `maxCount` の因果効果ではなく、**(A)が arm ごとに独立 `TRUNCATE`+再ingestする
+ * こと自体が持ち込む非決定性**（`memory_id`/`recorded_at` の tie-break、または
+ * HNSW索引構築の非決定性——ADR 0328 §5.4、切り分けていない）が主要因である
+ * 可能性が高い、という**別の**発見をした。この docstring は当初の仮説を消さずに
+ * 残す——**外れた仮説も記録**（`docs/autonomy.md`「確かめていないことは確かめて
+ * いないと書く」の逆——「外れたと確かめたことも、外れたまま残す」）。
  *
  * ## 何を出すか(per-probe)
  *
@@ -42,9 +50,18 @@
  * - `result.omitted` のうち `kind==="over_limit", stage==="association"` の `count`
  *   ——`maxCount` が増えるにつれてどう動くか(母集合が広がれば増えるはず)。
  * - `dActualAnchor`(既存の spy 技法)——3アンカーが `maxCount` に依らず同一かを
- *   確認する(理論通りなら on-3/on-5/on-10 で完全一致するはず)。
+ *   確認する(理論通りなら on-3/on-5/on-10 で完全一致するはず——実測でも一致した)。
  *
  * ⛔ **これも測定であり判定ではない。** 見つかったことをそのまま出す。
+ *
+ * ## 残すか消すか（Issue #337 段2フォローアップでの判断）
+ *
+ * **残す。** 理由: (1) 単一 ingest で `maxCount` だけを振る、という
+ * `association-scale-bench.ts` の配置(R)には無い視点（per-probe の役割分類・
+ * `omitted` の直接観測）を持ち、(A)/(B)/(R)のどれとも役割が重ならない。
+ * (2) ADR 0328 §5の「独立ingest間の揺れ」を今後さらに切り分ける（§5.4の
+ * tie-break説とHNSW非決定性説のどちらが主要因か）ときの出発点になる。
+ * (3) 既に一度、当初の仮説を覆す発見をしており、道具として実証済み。
  */
 import type {
   Ctx,
@@ -52,7 +69,6 @@ import type {
   RecallAssociationQuery,
   RecalledMemory,
   Runtime,
-  VectorHit,
   VectorStore,
 } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
@@ -208,8 +224,6 @@ function classifyRole(
   if (externalId.startsWith("scale-assoc-filler-")) return "filler";
   return "unknown";
 }
-
-const PROBE_QUERY_BY_ID = new Map(ASSOCIATION_PROBES.map((p) => [p.id, p.query]));
 
 async function main(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();

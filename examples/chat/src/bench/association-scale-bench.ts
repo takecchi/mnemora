@@ -3,9 +3,10 @@
  * `association-scale` ベンチ（`pnpm --filter @mnemora/example-chat run association-scale-bench`）。
  *
  * [Issue #337](https://github.com/takecchi/mnemora/issues/337)「連想枠（段3.5、ADR 0151）を
- * 既定 on にするかを10万行級で測ってから判断する」の**段1**（62件の陽性対照 + 1万行）。
- * 10万行（段2）は本ベンチの対象外——`MNEMORA_ASSOC_SCALE_SCALES` に足せば同じコードで
- * 走らせられる作りにはしてあるが、実行はしていない（実行報告を見ること）。
+ * 既定 on にするかを10万行級で測ってから判断する」の測定本体（段1: 62件の陽性対照 +
+ * 1万行、段2: 10万行の配置(A)/(B)、反復(R)）。**測ったことの全体像・オーナーが判断する
+ * ための材料は [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md)
+ * にまとめてある——このファイルは道具、ADR 0328 が記録。**
  *
  * ## これは何を測るか
  *
@@ -45,16 +46,30 @@
  * テキスト→ベクトル（`local` / ruri-v3-30m の実 ONNX 推論）をファイルにキャッシュし、
  * 全 arm で共有する。詳細はそちらの docstring。
  *
- * ## 配置 — (A) と (B)
+ * ## 配置 — (A) / (B) / (R)（既定 `MNEMORA_ASSOC_SCALE_MODE`）
  *
- * - **(A) 「きれいな比較」**: scale ごとに、arm の数だけ `TRUNCATE` → 同じテナント
- *   （`scale-assoc`）へ ingest → 測定、を繰り返す（本ベンチの既定・本実行はこちらのみ）。
- *   4回の独立した ingest が**同じ埋め込みキャッシュ**を共有するので、DB へ実際に入った
- *   埋め込みが arm 間でビット単位（pgvector の float4 丸め後）で一致するはずである
- *   ——`hashArmEmbeddings()` で実際に確かめ、4 arm のハッシュが一致するかを結果に出す。
+ * - **(A) 「きれいな比較」**（既定、`MNEMORA_ASSOC_SCALE_MODE` 省略時）: scale ごとに、
+ *   arm の数だけ `TRUNCATE` → 同じテナント（`scale-assoc`）へ ingest → 測定、を
+ *   繰り返す。4回の独立した ingest が**同じ埋め込みキャッシュ**を共有するので、
+ *   DB へ実際に入った埋め込みが arm 間でビット単位（pgvector の float4 丸め後）で
+ *   一致するはずである——`hashArmEmbeddings()` で実際に確かめ、4 arm のハッシュが
+ *   一致するかを結果に出す。**⚠ (A) は arm ごとに独立 ingest するため、`maxCount` の
+ *   純粋比較にはならない**——`memory_id`（ingest のたびにランダムな UUID）・
+ *   `recorded_at`（wall-clock）が arm ごとに違い、pgvector の同点 tie-break や
+ *   HNSW 索引構築の非決定性を経由して、`maxCount` 以外の要因が結果に混ざりうる
+ *   （ADR 0328 実測、10万行では確認できなかったが1万行で確認された）。
  * - **(B) 「4 arm を4テナントとして同じ表に並べる」**（[#363 の閉じコメント](https://github.com/takecchi/mnemora/issues/363#issuecomment-5806513012)・
- *   #671「同じベクトル・relaxed_order」の確認用）: `runModeB()` に実装してあるが、
- *   **本実行では呼んでいない**——段1の依頼は「(A) だけでよいが (B) も走らせられる作りに」。
+ *   #671「同じベクトル・relaxed_order」の確認用、`MNEMORA_ASSOC_SCALE_MODE=B`）:
+ *   `runModeB()`。(A) と同じく4テナントはそれぞれ独立 ingest——`maxCount` の純粋比較
+ *   にはならない点は (A) と同じ。
+ * - **(R) 「反復」**（`MNEMORA_ASSOC_SCALE_MODE=R`）: `TRUNCATE` は最初の1回だけ、
+ *   単一の ingest に対して4 arm 全部を測る——`maxCount` の純粋比較になる（`off`/
+ *   `on-3`/`on-5`/`on-10` が全く同じ物理行を見る）。`association-scale-investigate.ts`
+ *   の「単一 ingest」設計を、本ベンチの計測一式（memoryChars・レイテンシ・
+ *   段3.5DBms・EXPLAIN・ビット同一性）に載せて再実装したもの。
+ *
+ * 測った結果・(A)/(B)/(R) の食い違いから何が言えるか・言えないかは
+ * [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md) 参照。
  *
  * ## 実行方法
  *
@@ -798,7 +813,7 @@ async function runScale(
 }
 
 // ---------------------------------------------------------------------------
-// (B) 4 arm を4テナントとして同じ表に並べる — 建てるだけ、本実行では呼ばない。
+// (B) 4 arm を4テナントとして同じ表に並べる。
 // ---------------------------------------------------------------------------
 
 /**
@@ -807,8 +822,10 @@ async function runScale(
  * #671「同じベクトル・relaxed_order」——複数テナントが同じ表を共有する状況で
  * tie-break・索引選択が (A) と違わないかを確かめるための器。
  *
- * ⛔ **Issue #337 段1では呼んでいない。** 呼び出し可能な形にしてあるだけ
- * （`MNEMORA_ASSOC_SCALE_MODE=B` で `main()` から到達できる)。
+ * Issue #337 段2で10万行×4テナント(計40万行)を実際に走らせた。結果は
+ * [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md) 参照
+ * ——`Rows Removed by Filter` が実測でき、ADR 0284 の `relaxed_order` が
+ * 他テナント混入を飛び越えて自テナントの候補で `LIMIT` を埋めていることを確認した。
  */
 async function runModeB(
   databaseUrl: string,
@@ -878,6 +895,81 @@ async function runModeB(
 }
 
 // ---------------------------------------------------------------------------
+// (R) 反復 — 単一 ingest に対して maxCount(off/on-3/on-5/on-10) だけを振る。
+// ADR 0328 §d が要求する「独立 ingest 間の揺れ」のサンプルをもう1つ取るための
+// mode（Issue #337 段2フォローアップ、マネージャー指示）。`association-scale
+// -investigate.ts` の「単一 ingest」設計を、本ベンチの計測一式
+// （memoryChars・レイテンシ・段3.5DBms・EXPLAIN・ビット同一性）に載せ替えたもの
+// ——投機スクリプトの再発明ではなく、同じ発見を本ベンチの計測フル装備で
+// 裏取りする位置づけ。
+// ---------------------------------------------------------------------------
+
+async function runModeR(
+  databaseUrl: string,
+  databaseName: string,
+  scale: number,
+  efLevels: number[],
+  repeat: number,
+  cache: FileEmbeddingCache,
+  realEmbeddingForPrecompute: EmbeddingProvider,
+): Promise<ScaleReport> {
+  const corpus = buildCorpus(scale);
+  const allTexts = [...corpus.base.map((u) => u.text), ...corpus.filler.map((f) => f.text)];
+  const precompute = await precomputeEmbeddingCache(realEmbeddingForPrecompute, cache, allTexts, {
+    batchSize: parseIntEnv("MNEMORA_ASSOC_SCALE_EMBED_BATCH", 64),
+    concurrency: parseIntEnv("MNEMORA_ASSOC_SCALE_EMBED_CONCURRENCY", 1),
+  });
+
+  const tenantId = "scale-assoc";
+  const handle = await createInstrumentedRuntime(databaseUrl, cache);
+  await truncateAll(handle.pool);
+  const ingest = await ingestCorpus(handle, tenantId, corpus);
+  const { hash, rowCount } = await hashArmEmbeddings(
+    handle.pool,
+    handle.cachingEmbeddingProvider.space,
+    ingest.memoryIdByExternalId,
+  );
+  await handle.close();
+
+  const arms = buildArms();
+  const armReports: ArmScaleReport[] = [];
+  for (const arm of arms) {
+    const efReports: ArmEfReport[] = [];
+    for (const ef of efLevels) {
+      const efHandle = await setEfSearchAndReconnect(databaseUrl, databaseName, ef, cache);
+      const report = await measureArmAtEf(
+        efHandle,
+        tenantId,
+        efHandle.cachingEmbeddingProvider.space,
+        arm,
+        ef,
+        ingest.anchorIds,
+        ingest.goldIds,
+        repeat,
+      );
+      efReports.push(report);
+      await efHandle.close();
+    }
+    armReports.push({
+      armLabel: arm.label,
+      ingestSeconds: ingest.ingestSeconds,
+      drainSeconds: ingest.drainSeconds,
+      embeddingRowCount: rowCount,
+      bitHash: hash,
+      efReports,
+    });
+  }
+
+  // 単一 ingest なので、全 arm が物理的に同じ行を見ている——ハッシュは構造的に
+  // 一致する（(A)/(B) と違い「独立ハッシュを計算して突き合わせる」意味は無いが、
+  // 呼び出し側が同じ形で読めるよう同じ構造で埋める）。
+  const bitHashByArm: Record<string, string> = {};
+  for (const arm of arms) bitHashByArm[arm.label] = hash;
+
+  return { scale, precompute, arms: armReports, bitIdentity: { byArm: bitHashByArm, allSame: true } };
+}
+
+// ---------------------------------------------------------------------------
 // レポート整形
 // ---------------------------------------------------------------------------
 
@@ -936,7 +1028,8 @@ async function main(): Promise<void> {
   const efLevels = parseIntListEnv("MNEMORA_ASSOC_SCALE_EF_SEARCH", [40, 120]);
   const repeat = parseIntEnv("MNEMORA_ASSOC_SCALE_LATENCY_REPEAT", 5);
   const cacheDir = process.env.MNEMORA_ASSOC_SCALE_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-scale-embcache";
-  const mode = process.env.MNEMORA_ASSOC_SCALE_MODE === "B" ? "B" : "A";
+  const modeEnv = process.env.MNEMORA_ASSOC_SCALE_MODE;
+  const mode = modeEnv === "B" ? "B" : modeEnv === "R" ? "R" : "A";
 
   console.log(`scales=${scales.join(",")} efLevels=${efLevels.join(",")} repeat=${repeat} mode=${mode}`);
   console.log(`cacheDir=${cacheDir}`);
@@ -972,7 +1065,9 @@ async function main(): Promise<void> {
     const report =
       mode === "B"
         ? await runModeB(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding)
-        : await runScale(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding);
+        : mode === "R"
+          ? await runModeR(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding)
+          : await runScale(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding);
     allReports.push(report);
     console.log(summarizeScale(report));
   }

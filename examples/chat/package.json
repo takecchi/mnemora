@@ -21,6 +21,7 @@
     "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
     "lexical-tie-density-bench": "tsx src/bench/lexical-tie-density-bench.ts",
     "association-scale-bench": "tsx src/bench/association-scale-bench.ts",
+    "association-scale-investigate": "tsx src/bench/association-scale-investigate.ts",
     "subject-crossing-cost": "tsx src/subject-crossing-measure.ts",
     "subject-crossing-summary": "tsx src/subject-crossing-summary.ts",
     "identifier-probes": "tsx src/cli.ts identifier-probes",
