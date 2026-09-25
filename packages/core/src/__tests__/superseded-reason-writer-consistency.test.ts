@@ -129,7 +129,11 @@ describe("書き手が積む meta.reason と groupSupersededCandidatesByOperatio
       { memoryId: b.id, supersededReason: reasonB },
     ]);
     expect(groups).toEqual([
-      { supersededReason: "consolidated", memoryIds: [a.id, b.id], boundaryConfidence: "structural" },
+      {
+        supersededReason: "consolidated",
+        memoryIds: [a.id, b.id],
+        boundaryConfidence: "structural",
+      },
     ]);
   });
 
