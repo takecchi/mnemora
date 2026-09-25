@@ -1145,6 +1145,21 @@ export async function runRecall(
           // 正しさ」ではなく「取り扱い（公開範囲など）の境界」を表すからである——
           // ADR 0312 決定6・「北極星との整合」参照。
           .filter((companionMemory) => survivesAttributesFilter(companionMemory))
+          // forget（ADR 0087 引き受けた負債1）や直接の status 書き換えで
+          // 対向が `contested` でなくなっていれば、companion として使わない
+          // ——「forget した記憶は recall に出ない」(ADR 0087 決定6) を段3も守る。
+          // 弾かれれば「対向が見つからなかった」と同じ扱いに倒れ（上のコメントと同じ経路、
+          // 新しい Omission は無い）、ADR 0312 9-a の `survivesAttributesFilter` と
+          // 同型の後置フィルタとして置く。
+          //
+          // ⚠ **`contestedWithId` が owner を指し返しているか（相互参照）は、ここでは
+          // 検査しない。** 段3のアルゴリズム自体が companion 側の `contestedWithId` を
+          // 一度も読まない（owner 側の `contestedWithId` だけを辿る設計、ADR 0136）ため、
+          // 既存の多数の歯（`recall-pipeline.test.ts` の `setupContestedPair` 等）が
+          // companion 側の `contestedWithId` を意図的に設定しない一方向の fixture を使う
+          // ——ここに相互参照を要求すると、それらは無関係に赤くなる。相互参照そのものの
+          // 不変条件は `contested-pair-invariant.test.ts`（ADR 0046）の管轄。
+          .filter((companionMemory) => companionMemory.status === "contested")
           .map((companionMemory) => {
             const owner = contestedNeedingCompanion.find(
               (c) => c.memory.contestedWithId === companionMemory.id,
@@ -1226,6 +1241,12 @@ export async function runRecall(
   // **`Runtime` 経由で作られた `contested` ペアが一対一を破ることは無い**——鎖
   // （A→B→C）や片方向（`contestedWithId` が対向を指し返さない）は `markContested` の
   // 書き込み経路からは構成できない。
+  // ⚠ **例外1つ**: `Runtime.forget()` は片側だけを `forgotten` にでき、対向の
+  // `contestedWithId`/`status: 'contested'` はそのまま残る（ADR 0087 引き受けた負債1）。
+  // この場合も候補としては壊れていない（生存側は普通の `contested`）——壊れているのは
+  // 段3が引く companion の側であり、上の `.filter` が「companion 自身の status が
+  // `contested` か」を検査して弾く。弾かれれば `companion === undefined` になり、
+  // この分岐（単独の contested を落とす）へ合流する。
   // ⟹ **今日この分岐が通るとすれば、それは `MemoryStore` を `Runtime` を経由せず直接
   // 叩いた場合に限る**（`docs/decisions/0046-contested-pair-invariant-tooth.md` が
   // 実測したとおり、`updateStatus(id, "contested")` 単体は今日も公開 interface から
