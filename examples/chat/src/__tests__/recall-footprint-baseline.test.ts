@@ -23,6 +23,23 @@ import {
  * DEFAULT_RECALL_LIMIT`）だけを使った最小二乗」だと自称している（`recall-footprint.ts` の
  * 該当コメント）。この歯は、**その主張を実際に自分で計算し直して検算する**
  * ——同梱の既定プロファイルを信用せず、`calibrateRecallFootprint` を実際に呼ぶ。
+ *
+ * ## ⭐ hold-in/hold-out の分け方: `bandEntryCount === 0`（Issue #340 フォローアップ、ADR 0310）
+ *
+ * 旧い分け方 `totalInScope <= DEFAULT_RECALL_LIMIT` は、「目次帯が空である」ことの
+ * **代理指標**だった——`queryRecall`（`mnemora-path.ts`）が `limit` を明示的に渡さず、
+ * 既定 `DEFAULT_RECALL_LIMIT` のまま呼ぶ限り両者は常に一致する。ADR 0310 §2 が指摘した
+ * とおり、`limit` を明示的に上げる呼び出し（`recall-footprint-calibration-samples.ts`）が
+ * 増えると、この一致は構造的に崩れる（`totalInScope=14` でも `limit=20` なら帯は空）。
+ * ⟹ 代理指標ではなく、帯が実際に空かどうか（`RecallResult.index.digestBand?.length ?? 0
+ * === 0`、`compare.ts` の `ComparisonRow.bandEntryCount`）そのもので分ける。
+ *
+ * ⚠ **`examples/chat/compare-baseline.json` はまだ `bandEntryCount` を持たない**
+ * （基準値の更新は CI artifact での2回一致を経て別の段で行う——ADR 0121/0133、
+ * このコミットでは基準値ファイルを1バイトも変更していない）。⟹ `bandEntryCountOrThrow`
+ * （下）は、欄が無い間**黙って旧条件へフォールバックしない**——このファイル全体が、
+ * 基準値が更新されるまで名指しのエラーで失敗し続ける。これは意図した挙動である
+ * （マネージャー指示「黙って緑に倒れる形にはしないこと」）。
  */
 
 interface BaselineRow {
@@ -32,6 +49,13 @@ interface BaselineRow {
   mnemoraChars: number;
   mnemoraShareOfNaiveChars: number;
   returnedCount: number;
+  /**
+   * `ComparisonRow.bandEntryCount` — Issue #340 フォローアップ、ADR 0310。
+   * **`compare-baseline.json` はまだこの欄を持たない**（次の段でCI artifact経由で
+   * 更新される）。ここで型に持たせているのは、更新された基準値を読めるようにするため
+   * であり、いまの基準値では常に `undefined` になる。
+   */
+  bandEntryCount?: number;
 }
 
 interface BaselineFile {
@@ -113,19 +137,59 @@ function associationCountForRow(row: BaselineRow): number {
  */
 const ACCURACY_TOLERANCE = 0.025;
 
-const holdInRows = rows.filter((r) => r.totalInScope <= DEFAULT_RECALL_LIMIT);
-const holdOutRows = rows.filter((r) => r.totalInScope > DEFAULT_RECALL_LIMIT);
+/**
+ * `row.bandEntryCount === 0`（目次帯が空、という一次指標そのもの）を返す。
+ *
+ * ⛔ **欄が無いとき、黙って `0` や旧条件へフォールバックしない**——名指しのエラーで
+ * 失敗する（このファイル冒頭の docstring「hold-in/hold-out の分け方」参照）。
+ * `compare-baseline.json` が CI artifact 経由で `bandEntryCount` を持つように
+ * 更新されるまで、このファイル全体（`holdInRows`/`holdOutRows` を読むすべての歯）が
+ * この1つのエラーで失敗し続ける——これは意図した挙動である。
+ */
+function bandEntryCountOrThrow(row: BaselineRow): number {
+  if (typeof row.bandEntryCount !== "number") {
+    throw new Error(
+      `compare-baseline.json の turnCount=${row.turnCount} 行に bandEntryCount が無い。` +
+        "hold-in/hold-out の分け方を bandEntryCount === 0 へ切り替えるには、先に基準値を" +
+        "CI artifact 経由で更新すること(ADR 0121/0133 の手順、Issue #340 フォローアップ・" +
+        "ADR 0310)。旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)に一時的に戻すには、" +
+        "この分け方の切り替えコミットを revert すること。",
+    );
+  }
+  return row.bandEntryCount;
+}
+
+const holdInRows = rows.filter((r) => bandEntryCountOrThrow(r) === 0);
+const holdOutRows = rows.filter((r) => bandEntryCountOrThrow(r) !== 0);
 
 function relativeError(estimatedChars: number, actualChars: number): number {
   return Math.abs(estimatedChars - actualChars) / actualChars;
 }
 
 describe("compare-baseline.json — 前提（行数が変わっていないこと）", () => {
-  it("12行のうち、目次帯が空の(totalInScope <= DEFAULT_RECALL_LIMIT)行が7行、そうでない行が5行", () => {
+  it("12行のうち、目次帯が空の(bandEntryCount === 0)行が7行、そうでない行が5行", () => {
     expect(rows).toHaveLength(12);
     expect(holdInRows).toHaveLength(7);
     expect(holdOutRows).toHaveLength(5);
   });
+});
+
+/**
+ * ⭐ Issue #340 フォローアップ(ADR 0310)が明示的に要求した歯:
+ * 「既存の12行について、旧い条件（`totalInScope <= DEFAULT_RECALL_LIMIT`）と
+ * 新しい条件（`bandEntryCount === 0`）の分け方が1行も違わない」ことを検算する。
+ *
+ * ⚠ `holdInRows`/`holdOutRows`（上）は既に新条件で計算されている——`bandEntryCount`
+ * が無ければこのファイル自体が module 読み込み時点で例外を投げるため、この
+ * describe に実際に到達するのは、基準値が更新された後だけである。
+ */
+describe("hold-in/hold-out の分け方の移行 — bandEntryCount === 0 と旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)が1行も違わない（Issue #340 フォローアップ、ADR 0310）", () => {
+  it.each(rows)(
+    "turnCount=$turnCount: bandEntryCount===0 と totalInScope<=DEFAULT_RECALL_LIMIT の判定が一致する",
+    (row) => {
+      expect(bandEntryCountOrThrow(row) === 0).toBe(row.totalInScope <= DEFAULT_RECALL_LIMIT);
+    },
+  );
 });
 
 describe("calibrateRecallFootprint — hold-in 7行での較正", () => {
