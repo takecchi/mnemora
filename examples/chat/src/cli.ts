@@ -2050,7 +2050,11 @@ async function runTimeWeighting(): Promise<void> {
     }
   } finally {
     await handle.close();
- * `answer-trials` サブコマンド（Issue #705、ADR 0300）。
+  }
+}
+
+/**
+ * `answer-trials` サブコマンド（Issue #705、ADR 0301）。
  *
  * 🔴 **`answer` とは別の器である。** `answer` は12ケースを1回ずつ回して naive/mnemora の
  * 最終回答・入力量を対で出す（配線の検査）。**この器は dev 6件だけを、`examples/chat/cassettes/answer.json`
@@ -2062,7 +2066,7 @@ async function runTimeWeighting(): Promise<void> {
  * （`answer-trials-material.ts` は DB・埋め込み・抽出・recall を一切 import しない）。
  *
  * ⛔ **CI の門にしない**（Issue #705 完了条件・#693 の線）。`.github/workflows/ci.yml` には
- * 配線しない——手元で回す観測用の CLI である（ADR 0300）。
+ * 配線しない——手元で回す観測用の CLI である（ADR 0301）。
  */
 async function runAnswerTrialsCommand(): Promise<void> {
   const result = await runAnswerTrials({ env: process.env });
@@ -2078,7 +2082,7 @@ async function runAnswerTrialsCommand(): Promise<void> {
 }
 
 /**
- * `answer-trials-compare` サブコマンド（Issue #705、ADR 0300）。
+ * `answer-trials-compare` サブコマンド（Issue #705、ADR 0301）。
  *
  * `answer-trials` の実行結果 JSON を2件以上突き合わせ、カセットの sha256 か
  * ケースごとの材料指紋が一致しなければ、どこがずれたかを表示して exit 1。一致すれば
@@ -2222,7 +2226,7 @@ function printHelp(): void {
       "                                                                      #   -- --trials=N(既定1)・-- --temperature=N(既定は未指定)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
       "  pnpm --filter @mnemora/example-chat run answer-trials",
       "                                                                      # 同じ記憶集合(examples/chat/cassettes/answer.json の記録済みプロンプト)で",
-      "                                                                      #   dev 6件 × 描画A(recorded)/B(digest-only) × n回の正答数を見る(Issue #705、ADR 0300)",
+      "                                                                      #   dev 6件 × 描画A(recorded)/B(digest-only) × n回の正答数を見る(Issue #705、ADR 0301)",
       "                                                                      #   DB 不要。OPENAI_API_KEY が無ければ実 API を叩かず『未評価』と明示して exit 0",
       "                                                                      #   MNEMORA_ANSWER_TRIALS_N(既定5)・MNEMORA_ANSWER_TRIALS_RENDERS(既定 recorded,digest-only)・MNEMORA_ANSWER_TRIALS_JSON",
       "  pnpm --filter @mnemora/example-chat run answer-trials-compare -- a.json b.json",

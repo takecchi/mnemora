@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { ANSWER_CASE_SET_DEV } from "./answer-case-set.dev.js";
 
 /**
- * Issue #705 / ADR 0300 の材料抽出器。
+ * Issue #705 / ADR 0301 の材料抽出器。
  *
  * 🔴 **この module は DB・埋め込み・抽出・recall を一切呼ばない（import もしない）。**
  * `examples/chat/cassettes/answer.json`（`record answer` が実 API で記録した既存のカセット、

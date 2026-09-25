@@ -21,11 +21,11 @@ import { createUsageMeter } from "./usage-meter.js";
  * がカセットから読む、DB・recall を一切やり直さない材料）に対して、描画 A/B を n 回ずつ回す。
  *
  * ⛔ **CI の門にしない**（Issue #705 の完了条件・#693 の線）。この器はあくまで手元で回す
- * 観測用の CLI であり、`.github/workflows/ci.yml` には配線しない（ADR 0300 決定）。
+ * 観測用の CLI であり、`.github/workflows/ci.yml` には配線しない（ADR 0301 決定）。
  *
  * ⛔ **開発ケースのみを扱う。** `ANSWER_CASE_SET_EVAL`（held-out）はこの module から一度も
  * 参照しない——`answer-trials-material.ts` が `ANSWER_CASE_SET_DEV` だけをカセットから
- * 引き当てる設計になっている（ADR 0300 決定「eval は今回は受け付けない」）。
+ * 引き当てる設計になっている（ADR 0301 決定「eval は今回は受け付けない」）。
  */
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 import type { CaseMaterial, MaterialMemoryLine } from "./answer-trials-material.js";
 
 /**
- * Issue #705 / ADR 0300 の描画器。`answer-trials-material.ts` が組んだ
+ * Issue #705 / ADR 0301 の描画器。`answer-trials-material.ts` が組んだ
  * {@link CaseMaterial}（1つの記憶集合）を、A/B 2通りのプロンプト文字列へ描画する。
  *
  * ⭐ **A/B は同じ `CaseMaterial` を読むだけである。** 別の記憶集合を取り直すことは

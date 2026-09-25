@@ -1680,7 +1680,7 @@ digest 本文だけでなく `RecalledMemory` の `provenanceKind`（由来）�
 
 ---
 
-## `answer-trials` / `answer-trials-compare`: 同じ記憶集合で n 回試行し、正答数で見る（Issue #705、ADR 0300）
+## `answer-trials` / `answer-trials-compare`: 同じ記憶集合で n 回試行し、正答数で見る（Issue #705、ADR 0301）
 
 🔴 **背景（ADR 0295 追記2）**: `answer` は1ケース1回しか試行しない。回答モデルの答えが
 揺れるケース（`schedule-change-meeting-day`）を1回だけ試したことで、PR #698 は
@@ -1733,7 +1733,7 @@ pnpm --filter @mnemora/example-chat run answer-trials-compare -- a.json b.json
 ずれたか（どのラベルがどの値か）を表示して exit 1。一致すれば正答数を並べて表示して
 exit 0。
 
-### 決めたこと（詳細は [ADR 0300](../../docs/decisions/0300-answer-trials-same-memory-set.md)）
+### 決めたこと（詳細は [ADR 0301](../../docs/decisions/0301-answer-trials-same-memory-set.md)）
 
 - **CI の門にしない。** `.github/workflows/ci.yml` には配線しない——揺れる意味評価を
   門にしないという Issue #693 の線をそのまま踏襲する。
