@@ -37,6 +37,16 @@ npm i @mnemora/postgres @mnemora/core
   日本語の語（人名を含む）を引けない。**日本語表記のチャンネル名・社内システム名に
   ついても、人名と同じ穴に落ちる可能性が高いが確かめていない
   （[ADR 0149](../../docs/decisions/0149-japanese-lexical-no-required-extension.md)）。
+  - **opt-in で `pg_trgm` を使う代替実装がある**（`PostgresTrigramLexicalStore`、
+    [ADR 0317](../../docs/decisions/0317-optional-trigram-lexical-store.md)、
+    Issue #278）。`REQUIRED_EXTENSIONS` には含まれない——`PostgresTrigramLexicalStore.create(db)`
+    を呼んだときだけ `pg_trgm` の `CREATE EXTENSION` を試みる。**前提が2つ要る**:
+    `server_encoding` が `UTF8` であること、かつ現在のロケールで日本語のトライグラムが
+    実際に作れること（`C` ロケールのクラスタでは `pg_trgm` 自体は入っても日本語の
+    トライグラムが黙って空になる——ADR 0084 §3.2）。前提を満たさなければ
+    `create()` が例外を投げる（黙って `PostgresLexicalStore` 相当に縮退しない）。
+    照合の精度・閾値の根拠、`retrieval` ベンチでの実測（悪化していないが、対象の
+    probe 集合は語彙的な重なりをほぼ持たない設計であることも含む）は ADR 0317 を見ること。
 - 接続文字列は環境変数 `DATABASE_URL` で渡す。
 
 ## マイグレーション（`mnemora-postgres-migrate`）
