@@ -328,5 +328,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0301](./0301-answer-trials-same-memory-set.md) | `answer` の回答評価を同じ記憶集合での n 回試行・正答数で見る器を作る（Issue #705） | 採用 (2026-09) |
 | [0302](./0302-recall-footprint-structural-terms.md) | `recall-footprint` の見積もりに、`indexBand` の実 JSON 構造から決まる4つの構造項を足す（Issue #340） | 採用 (2026-09) |
 | [0303](./0303-superseded-contested-decay-floor-owner.md) | `superseded` / `contested` の `decay_floor_at` の持ち主を決める — 回収の経路（案C）は v1.x で入れない | 採用 (2026-09) |
+| [0304](./0304-embedding-provider-input-limit-contract.md) | `EmbeddingProvider` の契約に「上限超過は例外」を明記する — Issue #449 の経路は塞がず、契約と歯で名乗らせる | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
