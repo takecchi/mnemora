@@ -560,6 +560,26 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(result.map((m) => m.id)).toEqual([memory.id]);
     });
 
+    // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引く
+    // （実測）——同じ id が `ids` に複数回含まれていても、一致する行は主キーの性質上
+    // 1回しか無いため、返る件数は一意な id の数にしかならない。素朴なループ実装は
+    // 同じ Memory オブジェクトを重複して返しうる。Postgres は `ORDER BY` を持たない
+    // ため順序は契約に無い——ここでは「一意な id の集合として一致する」ことだけを見る。
+    it("getMany は ids に同じ id が複数回含まれていても、一意な id の集合しか返さない（重複させない）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const other = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "getmany-dup-other" }),
+      );
+
+      const result = await store.getMany(ctx, [memory.id, memory.id, other.id]);
+
+      expect(result).toHaveLength(2);
+      expect(new Set(result.map((m) => m.id))).toEqual(new Set([memory.id, other.id]));
+    });
+
     // -------------------------------------------------------------------
     // getObservation / createObservationWithOutbox（roadmap.md 段階3・transactional outbox）
     // -------------------------------------------------------------------
