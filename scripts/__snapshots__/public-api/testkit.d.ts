@@ -482,8 +482,8 @@ export interface MemoryStoreConformanceOptions {
     supportsRestoreSupersededBy: boolean;
     supportsPreviewRestoreSupersededBy: boolean;
     supportsOnlyMemoryIdsFilter?: boolean;
-    supportsLabels: boolean;
-    supportsFindActiveByClaimKey: boolean;
+    supportsLabels?: boolean;
+    supportsFindActiveByClaimKey?: boolean;
     supportsListActiveClaimPredicates?: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
@@ -512,7 +512,7 @@ export interface TenantSettingsStoreConformanceOptions {
     supportsDecayClock: boolean;
     setDefaultHalfLifeRecalls?: (ctx: Ctx, recalls: number) => Promise<void> | void;
     advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
-    supportsTaxonomyMode: boolean;
+    supportsTaxonomyMode?: boolean;
 }
 export declare function describeTenantSettingsStoreConformance(options: TenantSettingsStoreConformanceOptions): void;
 

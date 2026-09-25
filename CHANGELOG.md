@@ -287,6 +287,17 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   ⭕ **公開型は変えていない**——新しいエラークラスは足さず、既存の dimensions バリデーション
   （`Number.isInteger(dimensions) && dimensions > 0`）と同じ流儀（`Error`）で拒否する。
   `dimensions <= 2000` の既存呼び出しの挙動は無変更。
+- **`@mnemora/testkit` の `TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`・
+  `MemoryStoreConformanceOptions.supportsLabels`/`supportsFindActiveByClaimKey` が、
+  v1.0.0 には無かったにもかかわらず必須の `boolean` として足され、v1.0.0 時点の
+  `describeTenantSettingsStoreConformance(...)`/`describeMemoryStoreConformance(...)`
+  呼び出しをコンパイルできなくしていた。** 3つとも `?: boolean` へ戻し、省略時は
+  該当する適合項目を実行しない（`false` 相当）
+  （[Issue #818](https://github.com/takecchi/mnemora/issues/818) /
+  [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記 /
+  [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md) 追記）。
+  ⭕ **この repo に同梱の実装（`packages/postgres`/`packages/testkit`）の呼び出しは
+  引き続き明示で `true` を渡しており、挙動は無変更。**
 
 ---
 
