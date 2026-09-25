@@ -109,6 +109,15 @@ export class InMemoryLexicalStore implements LexicalStore {
     // 同種の注記参照）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
     // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
     // ほぼ全件を静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
+    //
+    // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
+    // `Infinity`/非整数を渡すと Postgres は `invalid input syntax for type bigint: "NaN"`
+    // の形で例外を投げる（実測済み。in-memory-vector-store.ts の同種の注記参照）。
+    // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
+    // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`search: limit must be an integer (got ${opts.limit})`);
+    }
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
