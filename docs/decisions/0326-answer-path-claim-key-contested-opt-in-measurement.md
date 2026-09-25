@@ -1,4 +1,4 @@
-# ADR 0325: examples/chat の answer 経路に claimKey/detectContested を評価用 opt-in する — `[矛盾候補:]` が0件だった理由を実測する（Issue #691 続き）
+# ADR 0326: examples/chat の answer 経路に claimKey/detectContested を評価用 opt-in する — `[矛盾候補:]` が0件だった理由を実測する（Issue #691 続き）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25

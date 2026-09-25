@@ -350,5 +350,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0323](./0323-taxonomy-recall-filter.md) | taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き） | 採用 (2026-09) |
 | [0324](./0324-claim-key-contested-detection.md) | 主張キー（(B) 第2段）の検出実装 — 列と索引だけで衝突を見つけ、`contested` までで止める（Issue #372） | 採用 (2026-09) |
 | [0325](./0325-bullmq-tick-driver.md) | `@mnemora/bullmq` は `Scheduler` を実装せず、BullMQ で `runtime.tick()` を駆動する（Issue #205 の2本目） | 採用 (2026-09) |
+| [0326](./0326-answer-path-claim-key-contested-opt-in-measurement.md) | examples/chat の answer 経路に claimKey/detectContested を評価用 opt-in する — `[矛盾候補:]` が0件だった理由を実測する（Issue #691 続き） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
