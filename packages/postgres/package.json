@@ -41,7 +41,8 @@
     "prepack": "pnpm run build",
     "migrate": "tsx src/bin/migrate.ts",
     "test:db": "vitest run",
-    "bench:scale": "tsx src/bench/scale-bench.ts"
+    "bench:scale": "tsx src/bench/scale-bench.ts",
+    "bench:same-ms-usage": "tsx src/bench/same-ms-usage-bench.ts"
   },
   "dependencies": {
     "@mnemora/core": "workspace:^",
