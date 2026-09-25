@@ -34,10 +34,19 @@ function isPlainObject(value: unknown): value is JsonSchemaNode {
  * - `type` が単一の文字列なら `[type, "null"]` の配列にする。
  * - 既に `anyOf` を持つ（zod の union 等）なら `{ type: "null" }` を選択肢に足す。
  * - それ以外（`enum` のみ等、type を持たない形）は `anyOf: [元のスキーマ, { type: "null" }]` に包む。
+ *
+ * ⚠ `enum` / `const` は `type` と独立に値を縛る。`type` に "null" を足しただけでは null が
+ * `enum` / `const` で弾かれ、モデルは「省略」を表せない（任意の欄が実質必須に化ける）。
+ * ⟹ `const` を持つ形は `anyOf` に包み、`enum` を持つ形は `enum` にも null を足す。
  */
 function makeNullable(node: JsonSchemaNode): JsonSchemaNode {
+  if ("const" in node) {
+    return { anyOf: [node, { type: "null" }] };
+  }
   if (typeof node.type === "string") {
-    return { ...node, type: [node.type, "null"] };
+    return Array.isArray(node.enum)
+      ? { ...node, type: [node.type, "null"], enum: [...(node.enum as unknown[]), null] }
+      : { ...node, type: [node.type, "null"] };
   }
   if (Array.isArray(node.anyOf)) {
     return { ...node, anyOf: [...node.anyOf, { type: "null" }] };
