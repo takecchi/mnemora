@@ -195,3 +195,12 @@ scale=100000 cacheDir=/tmp/mgr-ffcce523/cache/embcache mode=order-scale
   [order-scale] 途中結果を書き出した(2件): /tmp/mgr-ffcce523/results/order-scale-100k.json
 
 ########## order-scale base-interleaved-rep1 (scale=100000) ##########
+  ingest=765.5s drain=761.2s
+  [base-interleaved-rep1] aRaw=10/12 到達(off/on-3/on-5/on-10)=0/12 7/12 7/12 7/12
+    explain hnsw=true seq=false
+  [base-interleaved-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(3件): /tmp/mgr-ffcce523/results/order-scale-100k.json
+
+[association-scale-nondeterminism] order-scaleモード完了: 3件 (/tmp/mgr-ffcce523/results/order-scale-100k.json)
+[2026-09-25T19:08:26Z] === Phase D done ===
+[2026-09-25T19:08:26Z] === ALL PHASES DONE ===
