@@ -429,15 +429,118 @@ regime」と名指ししている条件に一致したため（`server_encoding`
 **⟹ 変異試験そのものが、当初の歯の抜け（4番）を見つけ、直す機会になった**——
 これは `docs/autonomy.md` §2 が変異試験に期待している効果そのものである。
 
+### 4. real-fixture 実測【実測、2026-09-25、この作業者が自分の手で `gpt-4o-mini` に対して実行】
+
+**入力**: すべて既存フィクスチャ由来（合成していない）。ADR 0320 と同じ7話題
+（`examples/chat/src/probe-set.ts` の `PROBES`）の `fact`/`distractor` を、
+`examples/chat/cassettes/retrieval.json` に記録済みの**実際の抽出結果**へ差し替えて
+使った（1文字も生成していない、既存カセットからそのままコピー。ADR 0320 が「1回目の
+実行は方法論の誤りで失敗した」と記録した教訓——複数主張を含む生発話を渡すと
+claim key の対応付けが壊れる——をそのまま踏襲し、単一主張の抽出後 content だけを
+渡した）。加えて `examples/chat/src/correction-scenario.ts` の実訂正ペア（2発話）。
+計16件。
+
+**方式**: 本番コード（`packages/core/dist/runtime.js` の `Runtime.observe`（claim key
+派生＋検出の両方を含む本番の経路そのもの）、`packages/openai/dist/llm-provider.js` の
+`OpenAILLMProvider`）をそのまま使った。抽出ステップは固定応答のスタブに差し替えた
+（抽出そのものの安定性は ADR 0320 が既に測定済みであり、本 ADR の実測対象は
+「鍵が付いた後、検出が実際にどう振る舞うか」であるため、n=5 回とも同一の抽出結果に
+そろえて変数を1つ減らした——ADR 0301「抽出結果を固定し鍵の呼び出しだけ n 回」と
+同じ考え方）。claim key 派生の呼び出しは毎回実 API。**検出自体（`findActiveByClaimKey`・
+`markContested` の CAS・evidence イベント）は本番の in-memory 実装をそのまま経由し、
+LLM を一度も呼んでいない。**
+
+**語彙ヒント**（`knownPredicates`）: 7話題から作業者が作った7件
+（`favorite_color`/`pet_ownership`/`exercise_habit`/`food_intolerance`/
+`sibling_residence`/`programming_language_preference`/`business_trip`）。
+
+**有効期間**: `travel-fact`（来月の京都出張）に基準日+30日〜+31日、`travel-distractor`
+（先月の大阪出張）に基準日-30日〜-29日を明示的に設定し、重ならないようにした
+（他14件は `validFrom`/`validUntil` とも省略——常に重なる）。**この設定自体は
+作業者が仕込んだものであり、実データからの推測ではない**——ADR 0320 負債3「有効期間の
+重なり判定は実測していない」を埋めるための意図的な操作である。
+
+**結果**（n=5、`runtime.observe()` を通じた実行）:
+
+| 指標 | 値 |
+|---|---|
+| 真の訂正対（`correction-scenario.ts`、同じ subject・同じ predicate・違う値）の検出 | **5/5（100%）** ——毎回 `contested` になった |
+| 有効期間が重ならないペア（`travel`、同じ subject・同じ predicate だが期間が重ならない） | **5/5（100%）で `contested` にならなかった**——claim key 自体は5/5とも完全一致していたにもかかわらず、有効期間条件が正しく除外した |
+| 3件以上で保留になった件数 | **0/5**（同じ鍵が3件以上並ぶ状況が real-fixture に無いため。ADR 0320 負債2と同じ制約） |
+| 誤検出（無関係な話題間、`color`/`pet`/`exercise`/`diet`/`family`/`language` の fact対distractor、6話題×5回=30組） | **9/30（30%）** ——**すべて claim key の `subject` が実際には別人の発話（例:「妻」「姉」「同僚」）を `"user"` に誤帰属したことが原因**（`predicate` の一致は語彙ヒントで安定していたが、`subject` の弁別が topic によって大きく揺れた: `family` 4/5・`language` 3/5・`diet` 2/5・`color`/`pet`/`exercise`/`travel` 0/5） |
+| 検出そのものの追加 API 呼び出し | **0回**（`findActiveByClaimKey`/`markContested` は LLM を呼ばない。呼び出し回数はすべて claim key 派生の分） |
+| 呼び出し回数・費用 | 80回（16件 × n=5、claim key 派生のみ）、prompt tokens 30,825、completion tokens 1,218、**概算 $0.00535**（`examples/chat/src/usage-meter.ts` の `PRICING_USD_PER_MILLION_TOKENS["gpt-4o-mini"]` と同じ単価） |
+
+**観測1: 検出ロジック自体は規則どおりに動いた。** 上の数字はすべて「鍵が一致した
+ペアを検出が正しく処理したか」であり、`findActiveByClaimKey`/`markContested` が
+規則（同じ鍵・重なる有効期間・違う内容・両方 active）から外れた動きをしたケースは
+一度も無かった——**誤検出の原因は検出コードではなく、上流（#371/ADR 0320）の
+claim key 派生の `subject` 弁別の不安定性である。**
+
+**観測2: 有効期間条件は、real-fixture で初めて「効いた」ことが確認できた。**
+ADR 0320 負債3は「有効期間の重なり判定を実測していない」と明記していた——本 ADR は
+それを埋めた。`travel` の対は claim key が5/5とも完全一致する（`subject:"user",
+predicate:"business_trip"`）にもかかわらず、有効期間条件が無ければ5/5とも誤って
+`contested` になっていたはずである。**issue #372 本文が「これが無いと『去年の住所』と
+『今の住所』が矛盾になる」と警告した効果が、実データで実際に確認できた。**
+
+**観測3: 誤検出（30%）は、決定4（`contested` で止める）の限定が現実に効く場面である。**
+`family`/`language`/`diet` で実際に誤って `contested` になった9組はすべて、
+`docs/memory-model.md` §5 機構2 のとおり両方を隣接させて提示する状態になっただけであり、
+**片方が黙って消えたケースは1件も無い**（この PR は `superseded` へ一切進まないため、
+構造的に消えようがない）。⚠ **ただし30%という頻度は無視できない**——`markContested`
+自体は成功しており、この Memory は今後 `resolveContested` が明示的に呼ばれるまで
+`contested` のまま残り、recall のたびに対向を強制的に道連れにする（ADR 0134/0185 が
+問1に出した答えのとおり、この分だけ渡す量が増える）。
+
+**⚠ この実測は n=6話題・1モデル・1言語・16件という小さい範囲のものであり、本番規模の
+保証ではない**（ADR 0320 負債1と同じ限定）。特に「30%」という誤検出率は、この7話題の
+語彙選択（家族関係・同僚関係を扱う話題が相対的に多い）に強く依存しており、一般化は
+できない。
+
+再現手順は ADR 0315 と同じ形式（使い捨てスクリプト、リポジトリにはコミットしていない）
+——`packages/openai` ディレクトリで `@mnemora/core`/`@mnemora/testkit`（in-memory
+fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()` を
+`claimKey: { enabled: true, detectContested: true, knownPredicates }` 付きで16件
+呼ぶ、を n=5 回繰り返す。
+
+### 負債6: 🔴 real-fixture 実測で、誤検出（30%）のほぼ全量が claim key の `subject` 誤帰属だと分かった
+
+**実測（上記4節）**: 無関係な話題間の fact/distractor 30組中9組（30%）が誤って
+`contested` になった。**原因はすべて claim key 派生の `subject` が第三者の発話
+（「妻」「姉」「同僚」等）を `"user"` に誤帰属したことであり、検出コード（本 ADR の
+範囲）自体の欠陥ではない**——検出は渡された鍵に対して規則どおりに動いている。
+
+**この ADR はこれを塞がない**——`subject` 弁別の精度は #371（ADR 0320）の claim key
+派生ロジックの領分であり、本 ADR（検出）の変更では直せない。**ただし、この頻度
+（30%）は既定を on にするかどうかの判断材料として重い**——決定4（`contested` で
+止める）が誤検出の被害を「余分に1件出る」に限定しているとはいえ、3割という頻度は
+「余分に1件」が頻繁に起きることを意味し、recall のたびに無関係な対向が道連れに
+なる回数が無視できない可能性がある。
+
+**なぜここで塞がないか**: (a) 直すには claim key 派生プロンプト（`claim-key.ts` の
+`CLAIM_KEY_PROMPT_SYSTEM`）に「本文の主語が発話者以外なら、その人物を subject にする」
+という指示を足す必要があり、これは #371/ADR 0320 の変更であって #372（検出）の変更
+ではない。(b) 直す前に、この頻度が7話題という小さい範囲に固有のものか、より広い
+範囲でも同じ傾向を示すのかを確かめる必要がある——本 ADR の実測はその追加実験を
+行っていない。
+
+**⟹ Issue #371（またはその後継）に、この実測結果を持ち帰ることを推奨する**
+（この ADR はそれを issue 化する権限を持たないが、記録として残す）。
+
 ## 確かめていないこと
 
-- ⛔ **本番規模での効き目**（負債4）——「同じ鍵・重なる期間・違う内容」が実運用でどれだけ
-  当たるかは実データが無いと分からない。
+- ⚠ **本番規模での効き目**（負債4）——「同じ鍵・重なる期間・違う内容」が実運用でどれだけ
+  当たるかは実データが無いと分からない。**有効期間条件については本 ADR の実測4節が
+  小さい範囲で効き目を確認した**（travel の対、5/5で正しく除外）が、n=1対・合成した
+  有効期間であり、本番規模の保証ではない。
 - ⛔ **3件以上のケースの real-fixture での発火**（負債5）——既存フィクスチャに3回以上
-  言及される実データが無い。
+  言及される実データが無い。本 ADR の実測でも0/5のまま。
 - ⛔ **`reextract`/`consolidate`/`reflect` 経路との組み合わせ**（負債3）。
 - ⛔ **TOCTOU で `markContested` が ineligible/conflict になったときの監査ログの薄さが
   実運用でどれだけ問題になるか**（負債1）。
+- ⛔ **claim key の `subject` 誤帰属（負債6）が、7話題という範囲を超えても同じ頻度
+  （30%）で起きるか**——測っていない。
 
 ## これが覆るとしたら
 
@@ -446,7 +549,11 @@ regime」と名指ししている条件に一致したため（`server_encoding`
   `contested` 相当の状態に載せられる可能性がある。
 - **既定を on にする決定が下されたとき**（ADR 0185 決定7、オーナー専権）——`claimKey.
   enabled`/`detectContested` の既定値を変える必要がある。この PR はどちらを推奨するかを
-  決めない（マネージャーの判断）。
+  決めない（マネージャーの判断）。負債6の実測（誤検出30%）は、その判断の材料として
+  残す。
 - **`reextract`/`consolidate`/`reflect` にも claim key を持たせる決定が下されたとき**
   （負債3）——`detectClaimKeyContested` 自体は経路に依存しないため、呼び出し箇所を
   追加するだけで再利用できる見込み。
+- **claim key 派生の `subject` 弁別精度が改善されたとき**（負債6、#371/ADR 0320 側の
+  変更）——本 ADR の誤検出30%という数字は、その改善の効果を測る「改善前」の基準値
+  として使える。
