@@ -472,26 +472,24 @@ $ pnpm run typecheck   # 全パッケージ + examples/chat、エラー0件
 $ pnpm run lint        # エラー0件
 $ pnpm run format:check  # 4ファイルの指摘を `prettier --write` で解消、再チェック green
 $ pnpm run api:check
-✗ 違反が2件（@mnemora/core, @mnemora/testkit）——すべて任意フィールドの追加のみ
-  （`VectorFilter.labels?`/`LexicalFilter.labels?`/`ScopeAggregate.filteredTaxonomy`
-  （必須フィールドだが `ScopeAggregate` は「返り値」型であり、呼び出し側が構築する
-  必要はない——契約を満たすのは実装側だけ）/`RecallQuery.labels?`/`taxonomyGroups?`/
-  `RecallScope.labels?`/`taxonomyGroupCandidates?`/`PrepareMemoryIdAttrs.tags?`/
-  `PrepareLexicalMemoryAttrs.tags?`）。公開 union に値を足していない・既存フィールドの
-  型を変えていない・必須フィールドを呼び出し側の入力型に足していない。
+✗ 違反が2件（@mnemora/core, @mnemora/testkit）——差分は次の6つの**任意フィールドの追加**
+  だけである: `VectorFilter.labels?`/`LexicalFilter.labels?`/`RecallQuery.labels?`/
+  `taxonomyGroups?`/`RecallScope.labels?`/`taxonomyGroupCandidates?`（`@mnemora/core`）、
+  `PrepareMemoryIdAttrs.tags?`/`PrepareLexicalMemoryAttrs.tags?`（`@mnemora/testkit`）。
+  `ScopeAggregate.filteredTaxonomy` は当初 必須で足していたが、「決定4」の理由で
+  **任意（`?`）に直した**——最終差分には必須フィールドが1本も無い。
+  公開 union に値を足していない・既存フィールドの型を変えていない・
+  既存の必須フィールドを緩めた（必須→任意）以外に型を変えていない。
 $ pnpm run api:write   # snapshot 更新、api:check が green に戻ることを確認
 ```
 
-**⚠ `ScopeAggregate.filteredTaxonomy` は返り値型の必須フィールドである**——`aggregateScope`
-を実装する第三者 adapter（`packages/postgres`/`packages/testkit` 以外)は、この欄を
-追加しないと型検査で落ちる。これは `RecalledMemory` 等と違う——`ScopeAggregate` は
-「adapter が返す値」であり「呼び出し側が渡す値」ではないため、`digests`/`digestEligible`
-のような他の必須フィールドと同じ扱いである（[ADR 0073](./0073-digest-band-bounded-without-taxonomy.md)
-決定7 が `digests`/`digestEligible` を必須で足したときと同種の判断）。**破壊的変更である**
-——`MemoryStore` を自作する第三者 adapter は、この PR を取り込むと `aggregateScope` の
-返り値の型チェックが通らなくなる（実行時の挙動は変わらないが、コンパイルが壊れる）。
-`packages/core` は semver `0.x` であり ADR 0070 の versioning 方針の下で許容されるが、
-念のためここに明記する——`ADR 0156` は「明記の免除」を与えない。
+**この PR が `pnpm api:write` で更新した差分は、全項目が「任意フィールドの追加」または
+「（`filteredTaxonomy`）既存の必須フィールドを任意へ緩める」のどちらかであり、
+どちらも非破壊である**——前者は新しい欄を無視する既存コードを壊さず、後者は
+「今まで必須だった値を省略できるようになる」方向の変更であり、その値を**渡していた**
+既存コード（`packages/postgres`/`packages/testkit`)はそのまま型を満たし続ける。
+`@mnemora/core` の公開型に、必須フィールドの追加・公開 union への値の追加・
+既存フィールドの型変更は1件も無い。
 
 ### 確かめていないこと
 

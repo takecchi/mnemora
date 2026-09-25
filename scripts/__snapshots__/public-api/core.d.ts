@@ -1872,7 +1872,7 @@ export interface ScopeAggregate {
         count: number;
         countKind: CountKind;
     };
-    filteredTaxonomy: {
+    filteredTaxonomy?: {
         count: number;
         countKind: CountKind;
     };
