@@ -387,6 +387,10 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
           // fixture の recordedAt は既定 NOW、occurredAt は既定 null。
           recordedAt: NOW.toISOString(),
           occurredAt: null,
+          // attributes: Issue #152/#153 / ADR 0302 で足した欄。同じ「増えたのはこの1欄だけで
+          // あることをリテラルで固定し直す」規律——fixture は attributes を指定していない
+          // ので `{}`（runtime は常に `{}` 以上の値を書く。省略しない）。
+          attributes: {},
         },
       ],
       omitted: [],
@@ -412,6 +416,9 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
               occurredAfter: null,
               occurredBefore: null,
               validAt: NOW.toISOString(),
+              // attributes: Issue #152/#153 / ADR 0302 で足した欄。fixture は
+              // `RecallQuery.attributes` を渡していないので `null`（絞り込み無し）。
+              attributes: null,
             },
           },
           {

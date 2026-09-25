@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { AttributesSchema, StoredAttributesSchema } from "./attributes.js";
+import type { Attributes } from "./attributes.js";
 import type { ObservationId } from "./ids.js";
 
 /**
@@ -36,6 +38,21 @@ export interface Observation {
   validFrom?: Date | null;
   /** `validFrom` の doc コメント参照。対になる終点。 */
   validUntil?: Date | null;
+  /**
+   * Issue #152（ADR 0302）: 呼び手が申告した任意属性を `occurredAt`/`validFrom` と同じ経路
+   * （`ObserveXxxInput.attributes` → `Observation.attributes` → `buildNewMemoryFromCandidate`）
+   * で運ぶための永続列。**理由は `validFrom` の doc コメントと同じ**——`extract: 'deferred'`
+   * を選んだ場合、抽出は `outbox` 経由で後から `processExtractJob` が拾い、そこでは
+   * `getObservation` で DB から読み直した `Observation` しか手元に無い（元の
+   * `ObserveXxxInput` はとうに捨てられている）。
+   *
+   * **型としては省略可能だが、runtime（`handleExtractableObservation`）は常に `{}` 以上の
+   * 値を書く**——`undefined` は「この observe() 呼び出しより前に作られた行」または
+   * 「この型を自前で組み立てた既存の呼び出し元」だけが持ちうる状態であり、本 PR 以降の
+   * 書き込みでは常に値が入る（ADR 0289 が `speaker`/`subjectId` に採った runtime 保証と
+   * 同じ規律）。
+   */
+  attributes?: Attributes;
 }
 
 export type NewObservation = Omit<Observation, "id" | "recordedAt"> & {
@@ -54,6 +71,10 @@ export const ObservationSchema = z.object({
   // Issue #280: `Observation.validFrom`/`validUntil` の doc コメント参照。
   validFrom: z.date().nullable().optional(),
   validUntil: z.date().nullable().optional(),
+  // Issue #152（ADR 0302）: `Observation.attributes` の doc コメント参照。格納側は
+  // 検査をしない schema を使う（`AttributesSchema` は入力側専用。下記
+  // `ObserveXxxInputSchema` 参照）。
+  attributes: StoredAttributesSchema.optional(),
 }) satisfies z.ZodType<Observation>;
 
 export const NewObservationSchema = ObservationSchema.omit({
@@ -173,6 +194,8 @@ export interface ObserveUtteranceInput {
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
+  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0302）。 */
+  attributes?: Attributes;
   speaker?: string;
   text: string;
 }
@@ -188,6 +211,8 @@ export interface ObserveEventInput {
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
+  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0302）。 */
+  attributes?: Attributes;
   name: string;
   data?: Record<string, unknown>;
 }
@@ -203,6 +228,8 @@ export interface ObserveDocumentInput {
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
+  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0302）。 */
+  attributes?: Attributes;
   title?: string;
   content: string;
 }
@@ -239,6 +266,7 @@ const ObserveUtteranceInputSchema = z.object({
   validUntil: z.date().optional(),
   extract: ExtractModeSchema.optional(),
   subjectCandidates: SubjectCandidatesInputSchema,
+  attributes: AttributesSchema.optional(),
   speaker: z.string().min(1).optional(),
   text: z.string().min(1),
 }) satisfies z.ZodType<ObserveUtteranceInput>;
@@ -253,6 +281,7 @@ const ObserveEventInputSchema = z.object({
   validUntil: z.date().optional(),
   extract: ExtractModeSchema.optional(),
   subjectCandidates: SubjectCandidatesInputSchema,
+  attributes: AttributesSchema.optional(),
   name: z.string().min(1),
   data: z.record(z.string(), z.unknown()).optional(),
 }) satisfies z.ZodType<ObserveEventInput>;
@@ -267,6 +296,7 @@ const ObserveDocumentInputSchema = z.object({
   validUntil: z.date().optional(),
   extract: ExtractModeSchema.optional(),
   subjectCandidates: SubjectCandidatesInputSchema,
+  attributes: AttributesSchema.optional(),
   title: z.string().min(1).optional(),
   content: z.string().min(1),
 }) satisfies z.ZodType<ObserveDocumentInput>;

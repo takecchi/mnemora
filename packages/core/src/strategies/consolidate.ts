@@ -1,10 +1,41 @@
 import { z } from "zod";
+import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import { resolveDigest } from "../extraction.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import type { ScoreBreakdown } from "../recall.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
+
+/**
+ * `attributes` の積集合（ADR 0302 決定4）: `eligible` **全件**に同じキー・同じ値で
+ * 入っているものだけを残す。1件でも欠けている・値が違うキーは落ちる。
+ *
+ * `buildConsolidatedMemory`（下）と `buildReflectedMemory`（`reflect.ts`）が共有する
+ * 純関数——統合・反芻はどちらも「Observation に由来しない、複数の既存 Memory から
+ * 新しい Memory を組み立てる」という同じ形の操作であり（`buildReflectedMemory` の
+ * doc コメントが `buildConsolidatedMemory` の「双子」と呼ぶ関係）、`attributes` の
+ * 引き継ぎ方もこの2つの経路で意図的に揃える——本 PR（Issue #152/#153、ADR 0302）の
+ * 判断。理由: `attributes` は内容ではなく取り扱い（公開範囲など）を表す軸であり、
+ * 統合・反芻のどちらも「元の記憶の集合から新しい記憶を作る」という点で対称だから
+ * である（迷ったときは積集合＝落とす方向へ倒す、ADR 0302 決定4）。
+ *
+ * `eligible` が空なら `{}`（呼び出し側は必ず1件以上を渡す契約だが、空配列に対しても
+ * 安全に `{}` を返す）。
+ */
+export function intersectAttributes(eligible: ReadonlyArray<Pick<Memory, "attributes">>): Attributes {
+  if (eligible.length === 0) {
+    return {};
+  }
+  const [first, ...rest] = eligible;
+  const result: Attributes = {};
+  for (const [key, value] of Object.entries(first!.attributes ?? {})) {
+    if (rest.every((m) => (m.attributes ?? {})[key] === value)) {
+      result[key] = value;
+    }
+  }
+  return result;
+}
 
 /**
  * `runtime.consolidate`（Issue #103、ADR 0089）が LLM に返させる構造化スキーマ。
@@ -77,6 +108,7 @@ export interface BuildConsolidatedMemoryParams {
  * - `subjectId`: eligible 全件の `subjectId` が一致すればその値、割れていれば `null`。
  * - `provenance`: `{ kind: 'consolidated', sources: <eligible の memoryId> }`。
  * - `tags`: LLM が返した `tags` があればそれを使い、無ければ eligible の `tags` の和集合。
+ * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0302 決定4）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
  * - `sourceObservationId` / `extractorVersion`: 常に `null`（Observation 由来ではない）。
  */
@@ -133,6 +165,8 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
     digestSource,
     provenance: { kind: "consolidated", sources: eligible.map((m) => m.id) },
     tags,
+    // Issue #153（ADR 0302 決定4）: 積集合。`intersectAttributes`（上）参照。
+    attributes: intersectAttributes(eligible),
     occurredAt,
     recordedAt: now,
     lastReinforcedAt: null,

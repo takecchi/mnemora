@@ -1,3 +1,4 @@
+import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import type { MemoryId } from "../ids.js";
 import type { MemoryStatus } from "../memory.js";
@@ -43,6 +44,10 @@ export interface LexicalFilter {
    * 違い、この欄は語彙チャンネルの SQL にも直接効く。
    */
   validAt?: Date;
+  /**
+   * `VectorFilter.attributes` と同じ欄・同じ意味（Issue #152/#153、ADR 0302）。
+   */
+  attributes?: Attributes;
 }
 
 export interface LexicalHit {
