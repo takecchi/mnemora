@@ -1,4 +1,4 @@
-# ADR 0303: `RecallAssociationQuery.anchorPool` を任意欄として足す — アンカーの母集合を、既定を変えずに `limit` の外へ広げる（Issue #377）
+# ADR 0306: `RecallAssociationQuery.anchorPool` を任意欄として足す — アンカーの母集合を、既定を変えずに `limit` の外へ広げる（Issue #377）
 
 - **状態**: 提案 (2026-09)
 - **日付**: 2026-09-25

@@ -930,7 +930,7 @@ Issue #200 は**2つの読み方**を挙げていた。
    ——直後の「⚠ `anchorCount` の天井は `RecallQuery.limit` である」を見ること。
    `anchorPool: "passed"` を渡すと母集合が `passed`（`limit` で切り詰める前、段2の閾値を
    通った全候補）になり、`limit` を上げずにその天井を外せる——[Issue #377](https://github.com/takecchi/mnemora/issues/377) /
-   [ADR 0303](./decisions/0303-association-anchor-pool.md)。
+   [ADR 0306](./decisions/0306-association-anchor-pool.md)。
 4. アンカーのベクトルを `getVectors` で引き、**そのベクトルで** `VectorStore.search` を
    **段1の ANN 検索と同じ filter で**呼ぶ——scope（tenant/subject/status/period/
    `excludeProvenanceKinds`）**だけでなく、忘却ゲート（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md) /
@@ -993,7 +993,7 @@ Issue #200 は**2つの読み方**を挙げていた。
 ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`（= `limit × overFetchFactor`、§3）も一緒に広がる
 ——費用は連想枠だけの話では済まない。
 
-#### 9.2.1 `anchorPool` — `limit` を上げずに天井を外す（2026-09-25 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0303](./decisions/0303-association-anchor-pool.md)）
+#### 9.2.1 `anchorPool` — `limit` を上げずに天井を外す（2026-09-25 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0306](./decisions/0306-association-anchor-pool.md)）
 
 **上の「`limit` と `anchorCount` の両方を上げる」は、`limit` を上げた分だけ返す件数と
 段1の取り込み幅 `kPrime` も一緒に膨らむ**——アンカーの母集合だけを広げたい場合には、

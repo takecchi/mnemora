@@ -1463,7 +1463,7 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
 
 /**
  * 段3.5（連想）が実際に何件・どの memoryId をアンカーとして `getVectors` へ渡したかを記録する
- * spy（Issue #377 / ADR 0303 の歯用）。
+ * spy（Issue #377 / ADR 0306 の歯用）。
  *
  * `packages/core` が `getVectors` を呼ぶのは段3.5のこの1箇所だけである
  * （[ADR 0188](../../../../docs/decisions/0188-association-over-limit-omission.md) 等が

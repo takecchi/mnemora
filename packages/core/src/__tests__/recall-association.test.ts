@@ -449,7 +449,7 @@ describe("recall() — 連想枠: 複数アンカーが同じ候補を連想し�
   });
 });
 
-describe("recall() — 連想枠: anchorPool（規模への追随、Issue #377 / ADR 0303）", () => {
+describe("recall() — 連想枠: anchorPool（規模への追随、Issue #377 / ADR 0306）", () => {
   const deg = (d: number): number => (d * Math.PI) / 180;
 
   /**

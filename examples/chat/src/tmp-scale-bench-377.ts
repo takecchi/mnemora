@@ -3,7 +3,7 @@
  * ADR 0111「測定スクリプトをコミットしていない」と同じ扱い）。
  *
  * Issue #377（連想枠のアンカー窓 anchorCount=3 が規模に追随しない）の修正
- * （RecallAssociationQuery.anchorPool、ADR 0303）の前後を、1万件規模の合成 haystack で測る。
+ * （RecallAssociationQuery.anchorPool、ADR 0306）の前後を、1万件規模の合成 haystack で測る。
  *
  * 実行方法:
  *   DATABASE_URL=postgresql://worker@127.0.0.1:55437/mnemora_test \
