@@ -343,6 +343,8 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0316](./0316-openai-embedding-false-positive-ceiling.md) | OpenAI 実埋め込みの偽陽性率に上限を置けるかを実測する — Issue #109 後半（ADR 0094「これが覆るとしたら」第1項） | 採用 (2026-09) |
 | [0317](./0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md) | 自動経路の `consolidate` ジョブは、近傍探索を種の subject に絞る — 案 S を採る | 採用 (2026-09) |
 | [0318](./0318-taxonomy-labels.md) | taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201） | 採用 (2026-09) |
-| [0319](./0319-local-embedding-synthetic-noise-false-positive-counterfactual.md) | `local` 埋め込み5+2群に合成ノイズを注入し、ADR 0316 判定の偽陽性率を反実仮想として測る — Issue #109（ADR 0316「引き受けた負債」1番） | 採用 (2026-09) |
+| [0319](./0319-optional-trigram-lexical-store.md) | 日本語の語彙照合を、opt-in の `PostgresTrigramLexicalStore`（pg_trgm）として足す — Issue #278 への回答 | 採用 (2026-09) |
+| [0320](./0320-claim-key-field-implementation.md) | 主張キー（(B) 第1段）の実装 — `{subject, predicate}` を2列+部分索引で持ち、opt-inの別呼び出しで埋める（Issue #371） | 採用 (2026-09) |
+| [0321](./0321-correction-candidate-domain-implementation.md) | ADR 0291 §7 残件1〜4 を実装する — 訂正候補探索に30件のセルを追加し、margin/intrusionMargin を足し、CI ジョブを配線する | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

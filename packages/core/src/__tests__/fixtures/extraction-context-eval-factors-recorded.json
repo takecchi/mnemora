@@ -1,0 +1,2347 @@
+{
+  "model": "gpt-4.1-mini-2025-04-14",
+  "recordedAt": "2026-09-25T05:32:59.133Z",
+  "kind": "independent semantic evaluation, Issue #704 further follow-up (factor isolation for the long-context eval-l3 regression: wording/count/position, 2 topics x 6 variants); 5 runs per case for reproducibility",
+  "runsPerCase": 5,
+  "requests": 60,
+  "retries": 0,
+  "reservedUsd": 0.09383399999999996,
+  "cases": [
+    {
+      "id": "eval-m0-topicA-baseline",
+      "topic": "A-meeting-point",
+      "factorVariant": "m0-baseline",
+      "observation": {
+        "id": "eval-m0-topicA-baseline",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関にします"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、ありがとうございます"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "今日は暑いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、真夏日ですね"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"集合場所は正面玄関にします\",\"speaker\":\"assistant\"},{\"text\":\"了解です、ありがとうございます\",\"speaker\":\"佐藤\"},{\"text\":\"今日は暑いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、真夏日ですね\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中が「それでお願いします」と言った。\",\"digest\":\"田中の依頼の承諾\",\"tags\":[\"依頼承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 59,
+            "total_tokens": 681,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が何かの依頼や提案に対して了承した発言。\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 65,
+            "total_tokens": 687,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所は正面玄関にすることを田中が了承した。\",\"digest\":\"田中が集合場所の正面玄関を了承\",\"tags\":[\"集合場所\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 69,
+            "total_tokens": 691,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は『それでお願いします』と言った。\",\"digest\":\"田中の了承\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 50,
+            "total_tokens": 672,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中が何らかの提案や手配に対して『それでお願いします』と了承した。\",\"digest\":\"田中の了承（2026-04-10）\",\"tags\":[\"了承\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 76,
+            "total_tokens": 698,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m1-topicA-wording-question",
+      "topic": "A-meeting-point",
+      "factorVariant": "m1-wording",
+      "observation": {
+        "id": "eval-m1-topicA-wording-question",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関でいいですか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、ありがとうございます"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "今日は暑いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、真夏日ですね"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"集合場所は正面玄関でいいですか？\",\"speaker\":\"assistant\"},{\"text\":\"了解です、ありがとうございます\",\"speaker\":\"佐藤\"},{\"text\":\"今日は暑いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、真夏日ですね\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は集合場所を正面玄関でいいと了承した。\",\"digest\":\"田中が集合場所を正面玄関にすることを了承\",\"tags\":[\"集合場所\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 625,
+            "completion_tokens": 71,
+            "total_tokens": 696,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は『それでお願いします』と言って、提案を了承した。\",\"digest\":\"田中が提案を了承した発言\",\"tags\":[\"了承\",\"田中\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 625,
+            "completion_tokens": 67,
+            "total_tokens": 692,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は集合場所を正面玄関とすることに同意した。\",\"digest\":\"田中が正面玄関を集合場所に同意\",\"tags\":[\"同意\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 625,
+            "completion_tokens": 70,
+            "total_tokens": 695,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所は正面玄関でお願いします。\",\"digest\":\"田中は集合場所を正面玄関にすることを了承した。\",\"tags\":[\"集合場所\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 625,
+            "completion_tokens": 67,
+            "total_tokens": 692,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは集合場所を正面玄関にすることを了承した。\",\"digest\":\"田中さんが正面玄関を集合場所にすることを了承\",\"tags\":[\"集合場所\",\"承認\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 625,
+            "completion_tokens": 73,
+            "total_tokens": 698,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m2-topicA-count-fewer",
+      "topic": "A-meeting-point",
+      "factorVariant": "m2-count-fewer",
+      "observation": {
+        "id": "eval-m2-topicA-count-fewer",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関にします"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"集合場所は正面玄関にします\",\"speaker\":\"assistant\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは集合場所を正面玄関にすることを了承した。\",\"digest\":\"田中さんが集合場所を正面玄関にすることに同意した（2026-04-10）。\",\"tags\":[\"同意\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 582,
+            "completion_tokens": 83,
+            "total_tokens": 665,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所を正面玄関にすることに同意した。\",\"digest\":\"田中が集合場所を正面玄関に決定した同意\",\"tags\":[\"同意\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 582,
+            "completion_tokens": 72,
+            "total_tokens": 654,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所は正面玄関にすることに同意した。\",\"digest\":\"田中が集合場所を正面玄関にすることに同意\",\"tags\":[\"決定事項\",\"場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 582,
+            "completion_tokens": 72,
+            "total_tokens": 654,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は集合場所を正面玄関にすることを了承した。\",\"digest\":\"田中が正面玄関を集合場所にすることを了承\",\"tags\":[\"了承\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 582,
+            "completion_tokens": 72,
+            "total_tokens": 654,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中が集合場所を正面玄関にすることに同意した。\",\"digest\":\"田中が集合場所を正面玄関にすることに同意\",\"tags\":[\"同意\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 582,
+            "completion_tokens": 73,
+            "total_tokens": 655,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m3-topicA-count-more",
+      "topic": "A-meeting-point",
+      "factorVariant": "m3-count-more",
+      "observation": {
+        "id": "eval-m3-topicA-count-more",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関にします"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "今日は暑いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、真夏日ですね"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "最近忙しいですか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "そこそこですね"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "お昼は何を食べましたか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "コンビニのお弁当です"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "そうなんですね"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"集合場所は正面玄関にします\",\"speaker\":\"assistant\"},{\"text\":\"今日は暑いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、真夏日ですね\",\"speaker\":\"佐藤\"},{\"text\":\"最近忙しいですか？\",\"speaker\":\"鈴木\"},{\"text\":\"そこそこですね\",\"speaker\":\"佐藤\"},{\"text\":\"お昼は何を食べましたか？\",\"speaker\":\"鈴木\"},{\"text\":\"コンビニのお弁当です\",\"speaker\":\"佐藤\"},{\"text\":\"そうなんですね\",\"speaker\":\"鈴木\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言いました。\",\"digest\":\"田中さんの了承発言（2026-04-10）\",\"tags\":[\"了承\",\"依頼対応\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 683,
+            "completion_tokens": 66,
+            "total_tokens": 749,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中が「それでお願いします」と述べた。\",\"digest\":\"田中が同意の意思を示した発言。\",\"tags\":[\"同意\",\"依頼受付\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 683,
+            "completion_tokens": 65,
+            "total_tokens": 748,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中が集合場所を正面玄関にすることを承諾した。\",\"digest\":\"田中が正面玄関を集合場所にすることを了承\",\"tags\":[\"イベント\",\"集合場所\",\"承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 683,
+            "completion_tokens": 78,
+            "total_tokens": 761,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんがある提案に対して「それでお願いします」と同意したこと。\",\"tags\":[\"同意\",\"提案選択\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 683,
+            "completion_tokens": 73,
+            "total_tokens": 756,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が何かの提案に対して了承した発言\",\"tags\":[\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 683,
+            "completion_tokens": 64,
+            "total_tokens": 747,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m4-topicA-position-tail",
+      "topic": "A-meeting-point",
+      "factorVariant": "m4-position-tail",
+      "observation": {
+        "id": "eval-m4-topicA-position-tail",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "鈴木",
+                "text": "今日は暑いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、真夏日ですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、ありがとうございます"
+              },
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関にします"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"今日は暑いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、真夏日ですね\",\"speaker\":\"佐藤\"},{\"text\":\"了解です、ありがとうございます\",\"speaker\":\"佐藤\"},{\"text\":\"集合場所は正面玄関にします\",\"speaker\":\"assistant\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所は正面玄関にします。田中さんはそれでお願いしますと言いました。\",\"digest\":\"田中さんが集合場所を正面玄関にすることを了承した\",\"tags\":[\"集合場所\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 75,
+            "total_tokens": 697,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中の同意発言\",\"tags\":[\"同意\",\"依頼対応\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 58,
+            "total_tokens": 680,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは集合場所を正面玄関にすることを了承した。\",\"digest\":\"田中さんが正面玄関を集合場所にすることを了承した。2026-04-10\",\"tags\":[\"了承\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.8}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 82,
+            "total_tokens": 704,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんの了承発言（2026-04-10）\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 62,
+            "total_tokens": 684,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"2026年4月10日に、集合場所を正面玄関にする提案に同意した。\",\"digest\":\"田中が集合場所を正面玄関にする提案に同意（2026-04-10）\",\"tags\":[\"同意\",\"集合場所\",\"正面玄関\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 93,
+            "total_tokens": 715,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m5-topicA-position-middle",
+      "topic": "A-meeting-point",
+      "factorVariant": "m5-position-middle",
+      "observation": {
+        "id": "eval-m5-topicA-position-middle",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "鈴木",
+                "text": "今日は暑いですね"
+              },
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関にします"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、ありがとうございます"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、真夏日ですね"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"今日は暑いですね\",\"speaker\":\"鈴木\"},{\"text\":\"集合場所は正面玄関にします\",\"speaker\":\"assistant\"},{\"text\":\"了解です、ありがとうございます\",\"speaker\":\"佐藤\"},{\"text\":\"本当に、真夏日ですね\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は『それでお願いします』と述べた。\",\"digest\":\"田中の了承表明\",\"tags\":[\"了承\",\"確認\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 56,
+            "total_tokens": 678,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは『それでお願いします』と言った。\",\"digest\":\"田中さんが『それでお願いします』と言及。\",\"tags\":[\"同意\",\"決定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 63,
+            "total_tokens": 685,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が何かの提案に対して同意した。\",\"tags\":[\"同意\",\"提案承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 68,
+            "total_tokens": 690,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんが「それでお願いします」と言った（2026-04-10）。\",\"tags\":[\"依頼承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 72,
+            "total_tokens": 694,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と発言した。\",\"digest\":\"田中が注文・依頼を承諾したことを示す発言。\",\"tags\":[\"承諾\",\"依頼\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 71,
+            "total_tokens": 693,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m0-topicB-baseline",
+      "topic": "B-deadline",
+      "factorVariant": "m0-baseline",
+      "observation": {
+        "id": "eval-m0-topicB-baseline",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "締切は金曜日にします"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、よろしくお願いします"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "最近雨が多いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、傘が手放せません"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"締切は金曜日にします\",\"speaker\":\"assistant\"},{\"text\":\"了解です、よろしくお願いします\",\"speaker\":\"佐藤\"},{\"text\":\"最近雨が多いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、傘が手放せません\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは金曜日の締切でお願いしますと言いました。\",\"digest\":\"田中さんが締切を金曜日にすることを了承した\",\"tags\":[\"締切\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 68,
+            "total_tokens": 694,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは締切を金曜日にすることに同意した。\",\"digest\":\"田中が締切を金曜日にすることを了承。\",\"tags\":[\"締切\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 70,
+            "total_tokens": 696,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が依頼に同意した発言\",\"tags\":[\"同意\",\"依頼\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 61,
+            "total_tokens": 687,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が何らかの提案や内容に対し了承した発言。2026年4月10日。\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 73,
+            "total_tokens": 699,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんが「それでお願いします」と言った。\",\"digest\":\"田中さんの同意表現（2026-04-10）\",\"tags\":[\"同意\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 66,
+            "total_tokens": 692,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m1-topicB-wording-question",
+      "topic": "B-deadline",
+      "factorVariant": "m1-wording",
+      "observation": {
+        "id": "eval-m1-topicB-wording-question",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "締切は金曜日でいいですか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、よろしくお願いします"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "最近雨が多いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、傘が手放せません"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"締切は金曜日でいいですか？\",\"speaker\":\"assistant\"},{\"text\":\"了解です、よろしくお願いします\",\"speaker\":\"佐藤\"},{\"text\":\"最近雨が多いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、傘が手放せません\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"締切は金曜日でお願いします。\",\"digest\":\"田中が締切を金曜日にすることを了承しました\",\"tags\":[\"締切\",\"金曜日\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 629,
+            "completion_tokens": 61,
+            "total_tokens": 690,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"締切は金曜日でお願いします\",\"digest\":\"田中さんが締切を金曜日に設定することを了承した\",\"tags\":[\"締切\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 629,
+            "completion_tokens": 63,
+            "total_tokens": 692,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が提案を了承した発言\",\"tags\":[\"承諾\",\"依頼対応\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 629,
+            "completion_tokens": 62,
+            "total_tokens": 691,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と述べた。\",\"digest\":\"田中が同意を示した発言\",\"tags\":[\"同意\",\"依頼対応\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 629,
+            "completion_tokens": 62,
+            "total_tokens": 691,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が何かを了承した表現。\",\"tags\":[\"承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 629,
+            "completion_tokens": 59,
+            "total_tokens": 688,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m2-topicB-count-fewer",
+      "topic": "B-deadline",
+      "factorVariant": "m2-count-fewer",
+      "observation": {
+        "id": "eval-m2-topicB-count-fewer",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "締切は金曜日にします"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"締切は金曜日にします\",\"speaker\":\"assistant\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は締切を金曜日にする提案を承諾した。\",\"digest\":\"田中が締切を金曜日に承諾\",\"tags\":[\"締切\",\"承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 580,
+            "completion_tokens": 70,
+            "total_tokens": 650,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言って、何かの提案や条件に同意した。\",\"digest\":\"田中さんが同意を表明\",\"tags\":[\"同意\",\"提案承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 580,
+            "completion_tokens": 75,
+            "total_tokens": 655,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が提案に同意した\",\"tags\":[\"同意\",\"提案承認\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 580,
+            "completion_tokens": 61,
+            "total_tokens": 641,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は『それでお願いします』と言った。\",\"digest\":\"田中が『それでお願いします』と同意した。\",\"tags\":[\"選択同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 580,
+            "completion_tokens": 62,
+            "total_tokens": 642,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は締切を金曜日にすることを了承した。\",\"digest\":\"田中が締切を金曜日にすることを了承\",\"tags\":[\"締切\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 580,
+            "completion_tokens": 66,
+            "total_tokens": 646,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m3-topicB-count-more",
+      "topic": "B-deadline",
+      "factorVariant": "m3-count-more",
+      "observation": {
+        "id": "eval-m3-topicB-count-more",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "締切は金曜日にします"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "最近雨が多いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、傘が手放せません"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "週末は出かけましたか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "家でゆっくりしていました"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "映画とか見ましたか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "配信で一本見ました"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "そうなんですね"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"締切は金曜日にします\",\"speaker\":\"assistant\"},{\"text\":\"最近雨が多いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、傘が手放せません\",\"speaker\":\"佐藤\"},{\"text\":\"週末は出かけましたか？\",\"speaker\":\"鈴木\"},{\"text\":\"家でゆっくりしていました\",\"speaker\":\"佐藤\"},{\"text\":\"映画とか見ましたか？\",\"speaker\":\"鈴木\"},{\"text\":\"配信で一本見ました\",\"speaker\":\"佐藤\"},{\"text\":\"そうなんですね\",\"speaker\":\"鈴木\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんが何かを承諾して「それでお願いします」と言った。\",\"digest\":\"2026-04-10に田中さんが何かを了承した発話\",\"tags\":[\"承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 688,
+            "completion_tokens": 76,
+            "total_tokens": 764,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は何かを依頼または提案され、それを了承した。\",\"digest\":\"田中が依頼または提案を了承した（2026-04-10）\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 688,
+            "completion_tokens": 73,
+            "total_tokens": 761,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんはそれでお願いしますと返答した。\",\"digest\":\"田中さんが了承の意向を示した（2026-04-10）\",\"tags\":[\"了承\",\"返答\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 688,
+            "completion_tokens": 69,
+            "total_tokens": 757,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言いました。\",\"digest\":\"田中さんの了承表現\",\"tags\":[\"同意\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 688,
+            "completion_tokens": 57,
+            "total_tokens": 745,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中が同意した発言\",\"tags\":[\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 688,
+            "completion_tokens": 56,
+            "total_tokens": 744,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m4-topicB-position-tail",
+      "topic": "B-deadline",
+      "factorVariant": "m4-position-tail",
+      "observation": {
+        "id": "eval-m4-topicB-position-tail",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "鈴木",
+                "text": "最近雨が多いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、傘が手放せません"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、よろしくお願いします"
+              },
+              {
+                "speaker": "assistant",
+                "text": "締切は金曜日にします"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"最近雨が多いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、傘が手放せません\",\"speaker\":\"佐藤\"},{\"text\":\"了解です、よろしくお願いします\",\"speaker\":\"佐藤\"},{\"text\":\"締切は金曜日にします\",\"speaker\":\"assistant\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が何かを確認し、それを了承した発言。2026-04-10。\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 68,
+            "total_tokens": 694,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは 'それでお願いします' と言った。\",\"digest\":\"田中さんはある提案に対して了承した。\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 61,
+            "total_tokens": 687,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言いました。\",\"digest\":\"田中の同意表現（2026-04-10）\",\"tags\":[\"同意\",\"確定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 66,
+            "total_tokens": 692,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と述べてその内容を了承した。\",\"digest\":\"田中が了承した発言\",\"tags\":[\"了承\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 65,
+            "total_tokens": 691,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんが何かに同意したこと\",\"tags\":[\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 59,
+            "total_tokens": 685,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-m5-topicB-position-middle",
+      "topic": "B-deadline",
+      "factorVariant": "m5-position-middle",
+      "observation": {
+        "id": "eval-m5-topicB-position-middle",
+        "tenantId": "context-eval-factors",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "鈴木",
+                "text": "最近雨が多いですね"
+              },
+              {
+                "speaker": "assistant",
+                "text": "締切は金曜日にします"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、よろしくお願いします"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、傘が手放せません"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"最近雨が多いですね\",\"speaker\":\"鈴木\"},{\"text\":\"締切は金曜日にします\",\"speaker\":\"assistant\"},{\"text\":\"了解です、よろしくお願いします\",\"speaker\":\"佐藤\"},{\"text\":\"本当に、傘が手放せません\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんの同意表現\",\"tags\":[\"同意\",\"依頼\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 59,
+            "total_tokens": 685,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは『それでお願いします』と言った。\",\"digest\":\"田中さんが何かを承諾または依頼した表現。\",\"tags\":[\"了承\",\"依頼\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 68,
+            "total_tokens": 694,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が提案や案について了承した発言\",\"tags\":[\"同意\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 61,
+            "total_tokens": 687,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と発言した。\",\"digest\":\"田中さんの同意発言（2026-04-10）\",\"tags\":[\"同意\",\"発言\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 68,
+            "total_tokens": 694,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"締切は金曜日にします。\",\"digest\":\"締切を金曜日に設定したこと。\",\"tags\":[\"締切\",\"金曜日\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9},{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が提案に同意したこと。\",\"tags\":[\"同意\",\"依頼承諾\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 626,
+            "completion_tokens": 117,
+            "total_tokens": 743,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

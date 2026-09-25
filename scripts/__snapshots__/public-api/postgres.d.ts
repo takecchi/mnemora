@@ -57,6 +57,7 @@ export * from "./advisory-lock.js";
 export * from "./memory-store.js";
 export * from "./vector-store.js";
 export * from "./lexical-store.js";
+export * from "./trigram-lexical-store.js";
 export * from "./event-store.js";
 export * from "./outbox-store.js";
 export * from "./tenant-settings-store.js";
@@ -2162,6 +2163,49 @@ export declare class PostgresTenantSettingsStore implements TenantSettingsStore 
     getActivitySeq(ctx: Ctx): Promise<number>;
     getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
+}
+
+// ===== dist/trigram-lexical-store.d.ts =====
+import type { SQL } from "drizzle-orm";
+import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
+import type { Db } from "./client.js";
+export type TrigramLexicalUnavailableReason = "server_encoding_not_utf8" | "extension_unavailable" | "extension_create_denied" | "extension_create_failed" | "locale_no_japanese_trigrams";
+export interface TrigramLexicalProbeOk {
+    readonly ok: true;
+}
+export interface TrigramLexicalProbeUnavailable {
+    readonly ok: false;
+    readonly reason: TrigramLexicalUnavailableReason;
+    readonly detail?: string;
+}
+export type TrigramLexicalProbeResult = TrigramLexicalProbeOk | TrigramLexicalProbeUnavailable;
+export declare const TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX = "PostgresTrigramLexicalStore.create: pg_trgm \u3092\u65E5\u672C\u8A9E\u306E\u8A9E\u5F59\u7167\u5408\u306B\u4F7F\u3048\u308B\u72B6\u614B\u3067\u306F\u3042\u308A\u307E\u305B\u3093: ";
+export declare class TrigramLexicalStoreUnavailableError extends Error {
+    readonly reason: TrigramLexicalUnavailableReason;
+    readonly detail: string | undefined;
+    constructor(reason: TrigramLexicalUnavailableReason, detail?: string);
+}
+export declare function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult>;
+export declare const TRIGRAM_NOISE_STOPWORD_PATTERN: string;
+export declare function ensureTrigramLexicalFunctions(db: Db): Promise<void>;
+export declare function createOptionalTrigramIndex(db: Db): Promise<void>;
+export declare const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
+export declare function buildTrigramLexicalSearchSelect(query: string, opts: {
+    limit: number;
+    filter: LexicalFilter;
+    threshold: number;
+}): SQL;
+export declare class PostgresTrigramLexicalStore implements LexicalStore {
+    private readonly db;
+    private readonly threshold;
+    private constructor();
+    static create(db: Db, opts?: {
+        threshold?: number;
+    }): Promise<PostgresTrigramLexicalStore>;
+    search(_ctx: Ctx, query: string, opts: {
+        limit: number;
+        filter: LexicalFilter;
+    }): Promise<LexicalHit[]>;
 }
 
 // ===== dist/vector-space.d.ts =====
