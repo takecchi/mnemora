@@ -562,21 +562,21 @@ jobs:
           path: ${{ github.workspace }}/compare.json
           if-no-files-found: ignore
 
-      - name: recall-footprint 較正の補助標本（limit=20の8点、#340 フォローアップ・ADR 0310）を生成する
+      - name: recall-footprint 較正の補助標本（limit=20の8点、#340 フォローアップ・ADR 0313）を生成する
         # 🔴 `compare` ステップと同じ理由で `OPENAI_API_KEY` を設定していないが、
         # 同じ recorded カセット（`examples/chat/cassettes/compare.json`）を再生する
         # （`recall-footprint-calibration-samples.ts` 冒頭の doc が実測済みのとおり、
         # 抽出プロンプトの鍵は発話内容だけで決まるため、新しいカセットは要らない）。
         #
         # `compare-baseline.json`（⭐門）とは別物である——`rows` には混ぜない
-        # （ADR 0310 §2）。この標本を `compare-baseline.json` のような CI-sourcing の
+        # （ADR 0313 §2）。この標本を `compare-baseline.json` のような CI-sourcing の
         # 基準値へ昇格させる（同一 commit で本ジョブを2回以上実行し一致を確かめる）のは、
         # この配線を経た artifact が揃ってから行う、別の判断・別の PR である。
         env:
           MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON: ${{ github.workspace }}/recall-footprint-calibration-samples.json
         run: pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples
 
-      - name: 較正標本の8点を Job Summary に残す（⛔ 門ではない。相違があっても exit 0、ADR 0310 §2）
+      - name: 較正標本の8点を Job Summary に残す（⛔ 門ではない。相違があっても exit 0、ADR 0313 §2）
         # 基準値ファイル examples/chat/recall-footprint-calibration-samples-baseline.json
         # が Issue #340 フォローアップで新設された（CI-sourcing 済み）。--baseline に渡すと
         # 相違（設計点の欠落・値のずれ）が Job Summary に出るが、依然として非ゲートである

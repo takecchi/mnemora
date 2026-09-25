@@ -26,11 +26,11 @@ import {
  * フォローアップ・ADR 0306/0310）。この歯は、**その主張を実際に自分で計算し直して検算する**
  * ——同梱の既定プロファイルを信用せず、`calibrateRecallFootprint` を実際に呼ぶ。
  *
- * ## ⭐ hold-in/hold-out の分け方: `bandEntryCount === 0`（Issue #340 フォローアップ、ADR 0310）
+ * ## ⭐ hold-in/hold-out の分け方: `bandEntryCount === 0`（Issue #340 フォローアップ、ADR 0313）
  *
  * 旧い分け方 `totalInScope <= DEFAULT_RECALL_LIMIT` は、「目次帯が空である」ことの
  * **代理指標**だった——`queryRecall`（`mnemora-path.ts`）が `limit` を明示的に渡さず、
- * 既定 `DEFAULT_RECALL_LIMIT` のまま呼ぶ限り両者は常に一致する。ADR 0310 §2 が指摘した
+ * 既定 `DEFAULT_RECALL_LIMIT` のまま呼ぶ限り両者は常に一致する。ADR 0313 §2 が指摘した
  * とおり、`limit` を明示的に上げる呼び出し（`recall-footprint-calibration-samples.ts`）が
  * 増えると、この一致は構造的に崩れる（`totalInScope=14` でも `limit=20` なら帯は空）。
  * ⟹ 代理指標ではなく、帯が実際に空かどうか（`RecallResult.index.digestBand?.length ?? 0
@@ -46,7 +46,7 @@ import {
  * hold-in 7行（`compare-baseline.json`）だけでは、目次帯が空のまま返る最大件数が
  * `totalInScope=8`（22ターン行）に留まり、hold-out の82ターン行（`totalInScope=25`）まで
  * 内挿で届かない。`recall-footprint-calibration-samples-baseline.json`
- * （`RecallQuery.limit=20` を明示して帯を空に保った8点、CI artifact から実測、ADR 0310）を
+ * （`RecallQuery.limit=20` を明示して帯を空に保った8点、CI artifact から実測、ADR 0313）を
  * 較正標本へ足し、7+8=15点で較正する。標本には `totalInScope` を渡す
  * （`calibrateRecallFootprint` が `indexBandStructuralTerms` で構造項を差し引いてから
  * 最小二乗にかける、ADR 0306）——8点のうち7点は `totalInScope` が2桁（10〜19）であり、
@@ -60,7 +60,7 @@ interface BaselineRow {
   mnemoraChars: number;
   mnemoraShareOfNaiveChars: number;
   returnedCount: number;
-  /** `ComparisonRow.bandEntryCount` — Issue #340 フォローアップ、ADR 0310。 */
+  /** `ComparisonRow.bandEntryCount` — Issue #340 フォローアップ、ADR 0313。 */
   bandEntryCount: number;
 }
 
@@ -76,7 +76,7 @@ const rows = baseline.rows;
 
 /**
  * `recall-footprint-calibration-samples-baseline.json` の8点（Issue #340 フォローアップ、
- * ADR 0310）。CI artifact から実測更新した、目次帯が空のまま件数が10〜19件の較正標本。
+ * ADR 0313）。CI artifact から実測更新した、目次帯が空のまま件数が10〜19件の較正標本。
  * hold-in 7行（`compare-baseline.json`）とあわせて15点の較正標本になる（上のファイル
  * 冒頭 docstring 参照）。
  */
@@ -185,7 +185,7 @@ function bandEntryCountOrThrow(row: BaselineRow): number {
     throw new Error(
       `compare-baseline.json の turnCount=${row.turnCount} 行に bandEntryCount が無い。` +
         "hold-in/hold-out の分け方は bandEntryCount === 0 である(Issue #340 フォローアップ・" +
-        "ADR 0310)。基準値が壊れている可能性があるので、CI artifact から作り直すこと" +
+        "ADR 0313)。基準値が壊れている可能性があるので、CI artifact から作り直すこと" +
         "(examples/chat/README.md『基準値を更新する手順』)。",
     );
   }
@@ -230,7 +230,7 @@ describe("compare-baseline.json — 前提（行数が変わっていないこ�
 });
 
 /**
- * ⭐ Issue #340 フォローアップ(ADR 0310)が明示的に要求した歯:
+ * ⭐ Issue #340 フォローアップ(ADR 0313)が明示的に要求した歯:
  * 「既存の12行について、旧い条件（`totalInScope <= DEFAULT_RECALL_LIMIT`）と
  * 新しい条件（`bandEntryCount === 0`）の分け方が1行も違わない」ことを検算する。
  *
@@ -238,7 +238,7 @@ describe("compare-baseline.json — 前提（行数が変わっていないこ�
  * が無ければこのファイル自体が module 読み込み時点で例外を投げるため、この
  * describe に実際に到達するのは、基準値が更新された後だけである。
  */
-describe("hold-in/hold-out の分け方の移行 — bandEntryCount === 0 と旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)が1行も違わない（Issue #340 フォローアップ、ADR 0310）", () => {
+describe("hold-in/hold-out の分け方の移行 — bandEntryCount === 0 と旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)が1行も違わない（Issue #340 フォローアップ、ADR 0313）", () => {
   it.each(rows)(
     "turnCount=$turnCount: bandEntryCount===0 と totalInScope<=DEFAULT_RECALL_LIMIT の判定が一致する",
     (row) => {
@@ -441,7 +441,7 @@ describe("BUILTIN_RECALL_FOOTPRINT_PROFILE（既定プロファイル）でも�
  * ことで、この歯が実際に判定する対象（`calibrated`）が変わった。**7点だけの較正では
  * turnCount=42 の上側で12.18字（緑）だったが、15点(構造項を正しく差し引いた較正、
  * ADR 0306)では同じ行の下側で約9.39字になる——それでも FLOOR(半digest≒8.09字)を
- * 上回り、緑のままである（詳細は ADR 0201 追記3・ADR 0310 訂正節）。
+ * 上回り、緑のままである（詳細は ADR 0201 追記3・ADR 0313 訂正節）。
  */
 describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん狭い行を明示する(Issue #410、較正標本15点、ADR 0306/0310)", () => {
   const calibrated = calibrateRecallFootprint(calibrationSamples);

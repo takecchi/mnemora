@@ -6,7 +6,7 @@ import {
 } from "../recall-footprint-calibration-samples-summary-lib.mjs";
 
 /**
- * Issue #340 フォローアップ(ADR 0310): `recall-footprint-calibration-samples-summary-lib.mjs`
+ * Issue #340 フォローアップ(ADR 0313): `recall-footprint-calibration-samples-summary-lib.mjs`
  * (純関数の側)の歯。DB を要求しない。
  *
  * ⭐ **最重要の検査**: (fillerPairs, recallLimit) をキーに欄を比べること、⛔ 相違があっても

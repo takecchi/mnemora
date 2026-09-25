@@ -4,7 +4,7 @@ import { buildRecallFootprintCalibrationSamplesJson } from "../recall-footprint-
 import type { CalibrationSampleRow } from "../recall-footprint-calibration-samples.js";
 
 /**
- * Issue #340 フォローアップ（ADR 0310）: `recall-footprint-calibration-samples-json.ts` の
+ * Issue #340 フォローアップ（ADR 0313）: `recall-footprint-calibration-samples-json.ts` の
  * 出力口。DB もネットワークも要らない（純関数）。
  *
  * ⭐ **最重要の検査**: `CalibrationSampleRow[]` をそのまま写していること（集計を

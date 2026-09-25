@@ -664,13 +664,13 @@ async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
 }
 
 /**
- * Issue #340 フォローアップ（ADR 0310）: `recall-footprint` 較正の補助標本
+ * Issue #340 フォローアップ（ADR 0313）: `recall-footprint` 較正の補助標本
  * （`CALIBRATION_SAMPLE_DESIGN`、8点）を、`compare` と同じ recorded カセット
  * （`examples/chat/cassettes/compare.json`）に対して生成する。
  *
  * ⚠ **`compare` の代わりではない。** `compare-baseline.json`（⭐門）の `rows`
  * には混ぜない——`examples/chat/README.md`
- * 「recall-footprint-calibration-samples.dev.json」節・ADR 0310 §2 参照。
+ * 「recall-footprint-calibration-samples.dev.json」節・ADR 0313 §2 参照。
  * この関数は CI の `example-chat` ジョブに、`compare` ステップと並ぶ独立のステップとして
  * 配線される（`.github/workflows/ci.yml`）。
  *
@@ -2288,7 +2288,7 @@ function printHelp(): void {
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0052)",
       "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples",
-      "                                                                      # recall-footprint 較正の補助標本(limit=20の8点、Issue #340・ADR 0310)を生成する",
+      "                                                                      # recall-footprint 較正の補助標本(limit=20の8点、Issue #340・ADR 0313)を生成する",
       "                                                                      #   compare と同じ recorded カセットを再生。MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run explain    # recallId から Runtime.getRecall() で内訳を後から読み戻す(Issue #312)",

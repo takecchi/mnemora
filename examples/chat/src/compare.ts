@@ -110,18 +110,18 @@ export interface ComparisonRow {
    */
   annCandidateCount: number;
   /**
-   * `recall().index.digestBand?.length ?? 0`（Issue #340 フォローアップ、ADR 0310）。
+   * `recall().index.digestBand?.length ?? 0`（Issue #340 フォローアップ、ADR 0313）。
    *
    * `@mnemora/core` の `footprintSampleFromRecall` をそのまま呼んで導く
    * （二重実装しない——ADR 0306 決定1が推定器/較正側で共有した設計を、この計測器側でも
    * そのまま使う）。`recall-footprint` の hold-in/hold-out の分け方
    * （`totalInScope <= DEFAULT_RECALL_LIMIT` の代理指標 vs 帯が空そのもの）を、
-   * 代理指標を介さずこの生の値で判定できるようにするための追加——ADR 0310
+   * 代理指標を介さずこの生の値で判定できるようにするための追加——ADR 0313
    * 「引き受けた負債3」の続きに当たる。
    */
   bandEntryCount: number;
   /**
-   * `JSON.stringify(recall().index).length`（Issue #340 フォローアップ、ADR 0310）。
+   * `JSON.stringify(recall().index).length`（Issue #340 フォローアップ、ADR 0313）。
    *
    * `recall().index`（`IndexBand`）そのものを毎行 commit すると
    * `compare-baseline.json` が肥大化する（診断用の生データであり、⭐門の判定には

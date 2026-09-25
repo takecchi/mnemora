@@ -2,7 +2,7 @@
  * `scripts/recall-footprint-calibration-samples-summary.mjs`(CI の Job Summary に載せる
  * Markdown を組み立てる CLI)の純関数の側。ファイル I/O・`process.argv`・`process.exit` を
  * 一切持たない——`consolidation-cost-summary-lib.mjs`/`archive-sweep-cost-summary-lib.mjs`
- * と同じ分担(Issue #340 フォローアップ、ADR 0310)。
+ * と同じ分担(Issue #340 フォローアップ、ADR 0313)。
  *
  * `examples/chat` の `recall-footprint-calibration-samples` サブコマンド
  * (`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON` が吐く JSON、
@@ -12,10 +12,10 @@
  * ## ⛔ 門にしない(いまのところ基準値ファイルも無い)
  *
  * `compare`(ADR 0133)と違い、この bench はまだ CI で複数回一致することを実測して
- * いない——ADR 0310 §2 の決定どおり、`examples/chat/compare-baseline.json` のような
+ * いない——ADR 0313 §2 の決定どおり、`examples/chat/compare-baseline.json` のような
  * ⭐門の CI-sourcing 手順(ADR 0119/0121/0133、artifact を2回以上取り、一致した値だけを
  * 基準値にする)を、この bench ではまだ踏めていない(手元の作業環境から CI artifact を
- * 取得する経路が無い——ADR 0310「引き受けた負債2」)。⟹ 他5本(retrieval-quality等)と
+ * 取得する経路が無い——ADR 0313「引き受けた負債2」)。⟹ 他5本(retrieval-quality等)と
  * 同じ非ゲートの形を踏襲する: `--baseline` を渡しても相違では落とさない(exit 0)。
  * 非0になるのは入力そのものが壊れているときだけ。
  *
@@ -162,7 +162,7 @@ const DIFF_FIELDS = [
  */
 export function buildSummaryMarkdown({ measured, baseline }) {
   const lines = [];
-  lines.push("## recall-footprint 較正の補助標本(Issue #340 フォローアップ、ADR 0310)");
+  lines.push("## recall-footprint 較正の補助標本(Issue #340 フォローアップ、ADR 0313)");
   lines.push("");
   lines.push(
     `llmMode=${measured.llmMode} / embeddingMode=${measured.embeddingMode} / rowCount=${measured.rowCount}`,
@@ -184,7 +184,7 @@ export function buildSummaryMarkdown({ measured, baseline }) {
     lines.push("");
     lines.push(
       "⚠ `--baseline` が渡されていない——CI artifact での2回以上一致をまだ実測して" +
-        "いないため、この bench にはまだ基準値ファイルが無い(ADR 0310 §2)。",
+        "いないため、この bench にはまだ基準値ファイルが無い(ADR 0313 §2)。",
     );
     return lines.join("\n");
   }
