@@ -208,6 +208,92 @@ describe("createProviders — recorded モード（ADR 0051）", () => {
 });
 
 /**
+ * `CreateProvidersOptions.seedCassette`（Issue #691 続き）。
+ *
+ * **ここでは構築（同期処理）だけを検査する**——`complete()`/`embed()` を実際に
+ * 呼ぶ「種にある入力では real が呼ばれない」等の振る舞いは、real を差し替えられる
+ * `SeededLLMProvider`/`SeededEmbeddingProvider` 自身の歯として
+ * `packages/testkit/src/__tests__/seeded-provider.test.ts` に置いてある
+ * （`createProviders` は `OpenAILLMProvider`/`OpenAIEmbeddingProvider` をハードコードで
+ * 構築するため、ネットワークを叩かずに呼び出し挙動まで検査することはできない——
+ * `describe("createProviders")` の既存コメント「構築のみ。ネットワーク呼び出しはしない」
+ * と同じ区別）。
+ */
+describe("createProviders — 種カセット（Issue #691 続き）", () => {
+  it("seedCassette を渡さなければ readSeedUsage は無い（既存の挙動を変えない）", () => {
+    const providers = createProviders({ OPENAI_API_KEY: "sk-fake-for-test" });
+    expect(providers.readSeedUsage).toBeUndefined();
+  });
+
+  it("seedCassette を渡すと readSeedUsage が使え、構築直後はどちらも0件", () => {
+    const providers = createProviders(
+      { OPENAI_API_KEY: "sk-fake-for-test" },
+      { seedCassette: minimalCassette() },
+    );
+    expect(providers.readSeedUsage).toBeDefined();
+    expect(providers.readSeedUsage?.()).toEqual({
+      llm: { seeded: 0, real: 0 },
+      embedding: { seeded: 0, real: 0 },
+    });
+  });
+
+  it("recorder と組み合わせても、外側の provider は Recording* のまま（組み立て順の外形は変わらない）", () => {
+    const providers = createProviders(
+      { OPENAI_API_KEY: "sk-fake-for-test" },
+      { recorder: new CassetteRecorder(), seedCassette: minimalCassette() },
+    );
+    expect(providers.llmProvider).toBeInstanceOf(RecordingLLMProvider);
+    expect(providers.embeddingProvider).toBeInstanceOf(RecordingEmbeddingProvider);
+  });
+
+  it("種の LLM モデル名が今の設定と食い違えば、構築時に例外（黙って混ぜない）", () => {
+    const seedCassette = { ...minimalCassette(), llm: { model: "gpt-4o", entries: {} } };
+    expect(() => createProviders({ OPENAI_API_KEY: "sk-fake-for-test" }, { seedCassette })).toThrow(
+      /モデル/,
+    );
+  });
+
+  it("種の埋め込み空間が今の設定と食い違えば、構築時に例外（黙って混ぜない）", () => {
+    const seedCassette = {
+      ...minimalCassette(),
+      embedding: {
+        space: { provider: "openai", model: "text-embedding-3-large", dimensions: 256 },
+        entries: {},
+      },
+    };
+    expect(() => createProviders({ OPENAI_API_KEY: "sk-fake-for-test" }, { seedCassette })).toThrow(
+      /埋め込み空間/,
+    );
+  });
+
+  it("llmMode が openai でなければ、種の LLM 側の不一致は検査されない（Seeded で包まないため）", () => {
+    const seedCassette = { ...minimalCassette(), llm: { model: "gpt-4o", entries: {} } };
+    expect(() =>
+      createProviders(
+        { OPENAI_API_KEY: "sk-fake-for-test", MNEMORA_LLM: "deterministic" },
+        { seedCassette },
+      ),
+    ).not.toThrow();
+  });
+
+  it("embeddingMode が openai でなければ、種の埋め込み側の不一致は検査されない（Seeded で包まないため）", () => {
+    const seedCassette = {
+      ...minimalCassette(),
+      embedding: {
+        space: { provider: "openai", model: "text-embedding-3-large", dimensions: 256 },
+        entries: {},
+      },
+    };
+    expect(() =>
+      createProviders(
+        { OPENAI_API_KEY: "sk-fake-for-test", MNEMORA_EMBEDDING: "deterministic" },
+        { seedCassette },
+      ),
+    ).not.toThrow();
+  });
+});
+
+/**
  * `Providers.cassetteIgnored`（Issue #577 の増分）。
  *
  * **`requireCassette` の鏡像。**`requireCassette` は「`recorded` を指定したのに

@@ -32,7 +32,12 @@ import { drainEmbedTicks } from "./embed-drain.js";
 import { buildMnemoraPrompt } from "./mnemora-path.js";
 import { createMutableClock } from "./mutable-clock.js";
 import type { MutableClock } from "./mutable-clock.js";
-import type { CreateProvidersOptions, EnvLike, ProviderMode } from "./providers.js";
+import type {
+  CreateProvidersOptions,
+  EnvLike,
+  ProviderMode,
+  SeedUsageSummary,
+} from "./providers.js";
 import { createProviders } from "./providers.js";
 import type { TimeWeightingCase, TimeWeightingMemorySeed } from "./time-weighting-case.js";
 import { assertTimeWeightingCaseWellFormed } from "./time-weighting-case.js";
@@ -71,6 +76,8 @@ export interface TimeWeightingBenchRuntimeHandle {
   embeddingProvider: CountingEmbeddingProvider;
   usageMeter?: UsageMeter;
   cassetteIgnored: boolean;
+  /** `Providers.readSeedUsage` をそのまま通す（`providerOptions.seedCassette` を渡したときだけ存在する）。 */
+  readSeedUsage?: () => SeedUsageSummary;
   close(): Promise<void>;
 }
 
@@ -118,6 +125,7 @@ export async function createTimeWeightingBenchRuntime(
     embeddingProvider,
     cassetteIgnored: created.cassetteIgnored,
     ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
+    ...(created.readSeedUsage !== undefined ? { readSeedUsage: created.readSeedUsage } : {}),
     close: () => closePostgresClient(client),
   };
 }
