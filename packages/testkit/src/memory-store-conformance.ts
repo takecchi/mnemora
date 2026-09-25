@@ -426,6 +426,43 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
     });
 
+    // Issue #759 組B: `updateStatus` と同じクロステナント検査を `updateStatusWithEvent`
+    // （ADR 0031）にも当てる。上の `updateStatus` の検査は`updateStatusWithEvent`の
+    // UPDATE 文（tenant_id 条件）までは守っていない——実際に `packages/postgres` の
+    // 実装から `WHERE tenant_id = ...` を落としても、既存の `-t updateStatusWithEvent`
+    // 系テストは全て緑のままだった（手作業の変異試験で実測）。イベントが積まれていない
+    // ことまで確認する——status だけ見ると、他テナントの行を書き換えた上で
+    // イベントだけ積み忘れる、という別の壊れ方を見逃す。
+    it("クロステナントの updateStatusWithEvent は対象が無いものとして失敗し、イベントも積まれない", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const memoryA = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a" }),
+      );
+
+      const event: NewMemoryEvent = {
+        tenantId: ctxB.tenantId,
+        memoryId: memoryA.id,
+        kind: "archived",
+        actor: { type: "system" },
+        digestSnapshot: memoryA.digest,
+        sizeBeforeBytes: null,
+        meta: {},
+      };
+
+      await expect(
+        store.updateStatusWithEvent(ctxB, memoryA.id, "archived", {}, event),
+      ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+
+      // tenant-a 側から見ても、status もイベントも一切変わっていない。
+      const unchanged = await store.get(ctxA, memoryA.id);
+      expect(unchanged?.status).toBe("active");
+      const events = await listEventsForMemory(ctxA, memoryA.id);
+      expect(events).toEqual([]);
+    });
+
     // -------------------------------------------------------------------
     // createObservation の冪等性（docs/memory-model.md §10、observe() の再送）
     // -------------------------------------------------------------------
