@@ -41,27 +41,6 @@ export interface DrainResult {
 }
 
 /**
- * `tick({kinds:['embed']})` を `processed === 0` になるまで繰り返す。
- *
- * **背景(docs/decisions/0019-real-openai-measurement-cost.md §5、
- * docs/decisions/0021-drain-embed-ticks-in-ingest.md)**: `tick()` の既定 `limit` は
- * 50(`DEFAULT_TICK_LIMIT`、`packages/core/src/runtime.ts`)であり、embed ジョブは
- * `claimBatch` が `ORDER BY available_at ASC` で先着順に claim するため、
- * **記憶が50件を超える量を一度に ingest すると、51件目以降は埋め込まれないまま
- * `pending` に残り、`recall()` の ANN 候補にすらならない**(`omitted` には
- * `not_indexed(reason: "pending")` として現れる——`recall()` はこれを隠さず正直に
- * 出す。ADR 0008)。1回の `tick()` では「まだ残っているかもしれない」ことしか
- * 分からないため、`processed === 0`(=もう claim できるジョブが無い)になるまで
- * 呼び続けて初めて「干上がった」と言える。
- *
- * `examples/chat/src/mnemora-path.ts` の `ingestConversation`(`compare` が使う
- * 主測定の取り込み段)と `examples/chat/src/retrieval-quality.ts` の
- * `runRetrievalQualityArm` の両方がこれを使う——どちらも「まとまった量を一度に
- * ingest してから測る」バッチ的な呼び出し側であり、干上がるまで回す責任は
- * `packages/core`(単発の安全弁である `DEFAULT_TICK_LIMIT` を持つ側)ではなく、
- * こちら側にある(ADR 0021「採らなかった案」参照)。
- */
-/**
  * 直近に書いた outbox ジョブの `available_at`（Postgres の `now()`、マイクロ秒精度）を
  * **確実に追い越す**、ミリ秒精度の `Date` を返す（Issue #719）。
  *
@@ -96,6 +75,27 @@ export function clockPastRecentDbWrites(nowMs: number = Date.now()): Date {
   return new Date(nowMs + 1);
 }
 
+/**
+ * `tick({kinds:['embed']})` を `processed === 0` になるまで繰り返す。
+ *
+ * **背景(docs/decisions/0019-real-openai-measurement-cost.md §5、
+ * docs/decisions/0021-drain-embed-ticks-in-ingest.md)**: `tick()` の既定 `limit` は
+ * 50(`DEFAULT_TICK_LIMIT`、`packages/core/src/runtime.ts`)であり、embed ジョブは
+ * `claimBatch` が `ORDER BY available_at ASC` で先着順に claim するため、
+ * **記憶が50件を超える量を一度に ingest すると、51件目以降は埋め込まれないまま
+ * `pending` に残り、`recall()` の ANN 候補にすらならない**(`omitted` には
+ * `not_indexed(reason: "pending")` として現れる——`recall()` はこれを隠さず正直に
+ * 出す。ADR 0008)。1回の `tick()` では「まだ残っているかもしれない」ことしか
+ * 分からないため、`processed === 0`(=もう claim できるジョブが無い)になるまで
+ * 呼び続けて初めて「干上がった」と言える。
+ *
+ * `examples/chat/src/mnemora-path.ts` の `ingestConversation`(`compare` が使う
+ * 主測定の取り込み段)と `examples/chat/src/retrieval-quality.ts` の
+ * `runRetrievalQualityArm` の両方がこれを使う——どちらも「まとまった量を一度に
+ * ingest してから測る」バッチ的な呼び出し側であり、干上がるまで回す責任は
+ * `packages/core`(単発の安全弁である `DEFAULT_TICK_LIMIT` を持つ側)ではなく、
+ * こちら側にある(ADR 0021「採らなかった案」参照)。
+ */
 export async function drainEmbedTicks(runtime: Runtime, ctx: Ctx): Promise<DrainResult> {
   let ticks = 0;
   let totalProcessed = 0;
