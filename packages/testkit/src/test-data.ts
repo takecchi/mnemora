@@ -17,6 +17,25 @@ import type {
  * 決めたこと4）のままになる。壁時計の3つ組（`strength`/`halfLifeHours`/`decayFloorAt`）と
  * 違い、活動時計側は既定で「未使用」を表すのが正しい既定値であるため、計算済みの値を
  * `base` へ持たせない。
+ *
+ * ⚠ **既定の `recordedAt`（`2026-01-01T00:00:00.000Z` 固定）は、既定の `halfLifeHours`
+ * （720h）・`strength`（1）と組むと、`decayFloorAt` が `defaultDecayStrategy.floorAt`
+ * （`halfLifeHours × log2(strength / DEFAULT_DECAY_THRESHOLD)` = `720 × log2(1/0.05)`
+ * 時間後）で **`2026-05-10T15:47Z`** になる。**この既定値そのものは変えていない**——
+ * 固定日付であることに頼るテストがあり（[ADR 0104](../../../docs/decisions/0104-recall-gate-index-tooth-measures-applicability.md)
+ * 決定5）、testkit は publish 対象なので、既定を変えるのは公開面の変更になる（Issue #731）。
+ *
+ * ⟹ **その日以降に、実時計（あるいは今日の日付の偽時計）で `recall()` を通すと、
+ * 段1の忘却ゲート（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）で
+ * 候補が0件になる。** エラーにはならず、黙って0件で出る——`explain.stages
+ * .candidate_generation.hits: 0` を実際に読まない限り気づけない
+ * （[Issue #731](https://github.com/takecchi/mnemora/issues/731)・
+ * [ADR 0310](../../../docs/decisions/0310-subject-crossing-consolidate-frequency-measured.md)
+ * が実測で踏んだ経路）。
+ *
+ * ⟹ **実時計（あるいは今日付の偽時計）で `recall()` を通すフィクスチャは、
+ * `recordedAt`（必要なら `decayFloorAt` も）を明示して渡すこと。** 渡さなければ、
+ * この関数の既定値のまま床を越え、上の0件が起きる。
  */
 export function buildNewMemoryFixture(overrides: Partial<NewMemory> = {}): NewMemory {
   const recordedAt = overrides.recordedAt ?? new Date("2026-01-01T00:00:00.000Z");

@@ -4,9 +4,11 @@ import {
   DEFAULT_DECAY_CLOCK,
   DEFAULT_HALF_LIFE_HOURS,
   DEFAULT_HALF_LIFE_RECALLS,
+  DEFAULT_TAXONOMY_MODE,
   EVENT_RETENTION_DAYS_INVALID_MESSAGE,
+  TAXONOMY_MODE_INVALID_MESSAGE,
 } from "@mnemora/core";
-import type { Ctx, DecayClock, TenantSettingsStore } from "@mnemora/core";
+import type { Ctx, DecayClock, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
 
 /**
  * `setEventRetention` に不正な `days` を渡したときのメッセージが `EVENT_RETENTION_DAYS_INVALID_MESSAGE`
@@ -19,6 +21,11 @@ const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
  * 含むことを見る。`INVALID_DAYS_ERROR` と同じ理由・同じ形。
  */
 const INVALID_DECAY_CLOCK_ERROR = new RegExp(DECAY_CLOCK_INVALID_MESSAGE);
+/**
+ * `setTaxonomyMode` に不正な値を渡したときのメッセージが `TAXONOMY_MODE_INVALID_MESSAGE` を
+ * 含むことを見る。`INVALID_DECAY_CLOCK_ERROR` と同じ理由・同じ形（Issue #201、ADR 0318）。
+ */
+const INVALID_TAXONOMY_MODE_ERROR = new RegExp(TAXONOMY_MODE_INVALID_MESSAGE);
 
 export interface TenantSettingsStoreConformanceOptions {
   name: string;
@@ -72,6 +79,18 @@ export interface TenantSettingsStoreConformanceOptions {
    * `supportsDecayClock: true` だけで検査する）。
    */
   advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
+
+  /**
+   * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
+   * `getTaxonomyMode`/`setTaxonomyMode` を検査するかどうか。
+   *
+   * ⭐ **省略可にしない**——`supportsDecayClock` と同じ判断（このファイルの doc コメント
+   * 参照）。interface 上は任意（`?`、外部 adapter が壊れないための配慮）だが、この repo
+   * に同梱される2実装（`PostgresTenantSettingsStore`/`InMemoryTenantSettingsStore`）は
+   * どちらも実装している——呼び出し側に `true`/`false` を明示させることで、「実装したのに
+   * 配線を忘れて検査されていない」を歯で検出する。
+   */
+  supportsTaxonomyMode: boolean;
 }
 
 /**
@@ -89,6 +108,7 @@ export function describeTenantSettingsStoreConformance(
     supportsDecayClock,
     setDefaultHalfLifeRecalls,
     advanceActivitySeq,
+    supportsTaxonomyMode,
   } = options;
 
   describe(`TenantSettingsStore conformance (${name})`, () => {
@@ -338,6 +358,53 @@ export function describeTenantSettingsStoreConformance(
           await advanceActivitySeq(ctxB);
           expect(await store.getActivitySeq!(ctxA)).toBe(2);
           expect(await store.getActivitySeq!(ctxB)).toBe(1);
+        });
+      }
+    }
+
+    // -----------------------------------------------------------------
+    // getTaxonomyMode / setTaxonomyMode (Issue #201, ADR 0318)
+    //
+    // `supportsTaxonomyMode` の理由は `TenantSettingsStoreConformanceOptions` の doc
+    // コメント参照——`supportsDecayClock` と同じ判断。
+    // -----------------------------------------------------------------
+    if (supportsTaxonomyMode) {
+      it("getTaxonomyMode: 行が無いテナントには DEFAULT_TAXONOMY_MODE（'open'）を返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-taxonomy-mode-unset-${Math.random()}` };
+        expect(await store.getTaxonomyMode!(ctx)).toBe(DEFAULT_TAXONOMY_MODE);
+        expect(await store.getTaxonomyMode!(ctx)).toBe("open");
+      });
+
+      it("setTaxonomyMode/getTaxonomyMode: 設定した値を読み直せる（'open'/'strict' の2値）", async () => {
+        const store = await createStore();
+        const values: TaxonomyMode[] = ["open", "strict"];
+        for (const mode of values) {
+          const ctx: Ctx = { tenantId: `tenant-taxonomy-mode-${mode}-${Math.random()}` };
+          await store.setTaxonomyMode!(ctx, mode);
+          expect(await store.getTaxonomyMode!(ctx)).toBe(mode);
+        }
+      });
+
+      it("setTaxonomyMode: 2値のいずれでもない値を拒む", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-taxonomy-mode-invalid-${Math.random()}` };
+        await expect(
+          store.setTaxonomyMode!(ctx, "not-a-real-mode" as TaxonomyMode),
+        ).rejects.toThrow(INVALID_TAXONOMY_MODE_ERROR);
+      });
+
+      if (setDefaultHalfLifeHours) {
+        // ⭐ `setDefaultHalfLifeHours`（半減期だけを設定した行）が taxonomy_mode を
+        // 壊さないことの芯——`setDefaultHalfLifeRecalls` の「decay_clock を壊さない」歯と
+        // 同じ発想。他の列の UPSERT が `taxonomy_mode` を巻き込んでいないかを別の軸で見る。
+        it("⭐ setTaxonomyMode は他の列（default_half_life_hours）を壊さない、逆も同様", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: `tenant-taxonomy-mode-keeps-half-life-${Math.random()}` };
+          await setDefaultHalfLifeHours(ctx, 48);
+          await store.setTaxonomyMode!(ctx, "strict");
+          expect(await store.getDefaultHalfLifeHours(ctx)).toBe(48);
+          expect(await store.getTaxonomyMode!(ctx)).toBe("strict");
         });
       }
     }

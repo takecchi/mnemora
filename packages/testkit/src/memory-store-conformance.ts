@@ -267,6 +267,23 @@ export interface MemoryStoreConformanceOptions {
    *   ——走らなかったことと走って通ったことを、出力の上で区別できる形にする）。
    */
   supportsOnlyMemoryIdsFilter?: boolean;
+
+  /**
+   * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md): 対象の
+   * `MemoryStore` 実装が `listLabels`/`registerLabel`（任意メソッド）を実装しているか
+   * どうか。**必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsPurgeMemory` 等と同じ判断——省略可にしない。
+   * `true` なら契約の歯（`tags` を持つ Memory を作ると同じ名前の `proposed` ラベルが
+   * 自動でできる、同じ `tags` を複数 Memory へ使うと `proposedCount` が積み上がる、
+   * `tags` 内の重複は1 Memory につき1回だけ数える、`registerLabel` で `registered` へ
+   * 昇格できる、`registerLabel` は冪等、`registered` なラベルは以後 `tags` に使われても
+   * `proposedCount` が進まない、テナント分離、`tags` が空なら何もできない）を実行する。
+   * `false` なら `expect(store.listLabels).toBeUndefined()` /
+   * `expect(store.registerLabel).toBeUndefined()` を積極的に assert する——`it.skip`
+   * にはしない。
+   */
+  supportsLabels: boolean;
 }
 
 /**
@@ -305,6 +322,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsRestoreSupersededBy,
     supportsPreviewRestoreSupersededBy,
     supportsOnlyMemoryIdsFilter,
+    supportsLabels,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -1824,6 +1842,48 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
       expect(reinforced.lastReinforcedAt?.getTime()).toBe(at.getTime());
       expect(reinforced.decayFloorAt.getTime()).toBe(expectedDecayFloorAt.getTime());
+    });
+
+    it("⚠ reinforce は同じ at をもう一度渡すと、opts.nowSeq が進んでいても活動時計側を動かさない（2軸を同じ WHERE で守る、ADR 0048/0165。Issue #730）", async () => {
+      // ⚠ これは修正ではなく、今の契約を固定する歯である。活動時計側の3列は壁時計の
+      // `at` と同じ条件（狭義の `<`）で守られる——「seq が進んだから活動時計側だけ書く」
+      // 実装は2軸の起点をずらすので、この契約の下では誤り（`MemoryStore.reinforce` の doc）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          decayBaseSeq: 0,
+          decayFloorSeq: 10,
+          halfLifeRecalls: 360,
+        }),
+      );
+      const at = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
+      const firstSeq = 1000;
+      const secondSeq = 2000;
+
+      const first = await store.reinforce(ctx, memory.id, at, { nowSeq: firstSeq });
+      // 前提: 1回目は活動時計側も実際に進めている。
+      expect(first.decayBaseSeq).toBe(firstSeq);
+      // ⚠ プリミティブへ即座に写し取る（上の「同じ at は no-op」の歯と同じ理由——in-memory
+      // 実装は行オブジェクトへの参照を返すので、保持すると同じオブジェクトを2回見るだけになる）。
+      const firstDecayFloorSeq = first.decayFloorSeq;
+      const firstUpdatedAt = first.updatedAt.getTime();
+      // 書けば必ず updatedAt が変わる状況を作る（上の歯と同じ理由）。
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const again = await store.reinforce(ctx, memory.id, at, { nowSeq: secondSeq });
+      expect(again.decayBaseSeq).toBe(firstSeq);
+      expect(again.decayFloorSeq).toBe(firstDecayFloorSeq);
+      expect(again.halfLifeRecalls).toBe(360);
+      expect(again.updatedAt.getTime()).toBe(firstUpdatedAt);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.decayBaseSeq).toBe(firstSeq);
+      expect(reread?.decayFloorSeq).toBe(firstDecayFloorSeq);
+      expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
     });
 
     // -------------------------------------------------------------------
@@ -6616,5 +6676,188 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       const jobs = await claimEmbedJobs(ctx, new Date(Date.now() + CLAIM_NOW_SKEW_MS));
       expect(jobs.map((job) => job.payload.memoryId)).toEqual([memory.id, memory.id]);
     });
+
+    // -------------------------------------------------------------------
+    // listLabels / registerLabel（Issue #201、ADR 0318: taxonomy の語彙、任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsLabels) {
+      it("tags を持つ Memory を作ると、同じ名前の proposed ラベルが自動でできる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", tags: ["project/mnemora", "urgent"] }),
+        );
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels).toEqual([
+          { name: "project/mnemora", status: "proposed", proposedCount: 1, registeredAt: null },
+          { name: "urgent", status: "proposed", proposedCount: 1, registeredAt: null },
+        ]);
+      });
+
+      it("同じ tag を複数の Memory へ使うと proposedCount が積み上がる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "labels-count-1",
+            tags: ["shared-tag"],
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "labels-count-2",
+            tags: ["shared-tag"],
+          }),
+        );
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels).toEqual([
+          { name: "shared-tag", status: "proposed", proposedCount: 2, registeredAt: null },
+        ]);
+      });
+
+      it("1つの Memory の tags 内の重複は1回だけ数える", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", tags: ["dup", "dup", "dup"] }),
+        );
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels).toEqual([
+          { name: "dup", status: "proposed", proposedCount: 1, registeredAt: null },
+        ]);
+      });
+
+      it("tags が空配列なら、ラベルは1件もできない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1", tags: [] }));
+
+        expect(await store.listLabels!(ctx)).toEqual([]);
+      });
+
+      it("registerLabel: proposed なラベルを registered へ昇格できる（proposedCount は変えない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", tags: ["candidate"] }),
+        );
+
+        const registered = await store.registerLabel!(ctx, "candidate");
+        expect(registered.status).toBe("registered");
+        expect(registered.proposedCount).toBe(1);
+        expect(registered.registeredAt).not.toBeNull();
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels).toEqual([
+          {
+            name: "candidate",
+            status: "registered",
+            proposedCount: 1,
+            registeredAt: registered.registeredAt,
+          },
+        ]);
+      });
+
+      it("registerLabel: まだ誰も tags に使っていない名前も直接 registered として作れる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        const registered = await store.registerLabel!(ctx, "brand-new");
+        expect(registered).toEqual({
+          name: "brand-new",
+          status: "registered",
+          proposedCount: 0,
+          registeredAt: registered.registeredAt,
+        });
+        expect(registered.registeredAt).not.toBeNull();
+      });
+
+      it("registerLabel は冪等——2回呼んでも registeredAt は変わらない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        const first = await store.registerLabel!(ctx, "idempotent");
+        const second = await store.registerLabel!(ctx, "idempotent");
+
+        expect(second).toEqual(first);
+      });
+
+      it("registered に昇格した後は、同じ名前を tags に使っても proposedCount が進まない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "registered-no-count-1",
+            tags: ["promoted"],
+          }),
+        );
+        const registered = await store.registerLabel!(ctx, "promoted");
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "registered-no-count-2",
+            tags: ["promoted"],
+          }),
+        );
+
+        const labels = await store.listLabels!(ctx);
+        expect(labels).toEqual([
+          {
+            name: "promoted",
+            status: "registered",
+            proposedCount: 1,
+            registeredAt: registered.registeredAt,
+          },
+        ]);
+      });
+
+      it("テナント分離: 他テナントの tags からラベルはできない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+
+        await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", tags: ["only-in-a"] }),
+        );
+
+        expect(await store.listLabels!(ctxB)).toEqual([]);
+        expect(await store.listLabels!(ctxA)).toEqual([
+          { name: "only-in-a", status: "proposed", proposedCount: 1, registeredAt: null },
+        ]);
+      });
+
+      it("listLabels: ラベルが1件も無いテナントには空配列を返す（例外にしない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-no-labels-${Math.random()}` };
+        expect(await store.listLabels!(ctx)).toEqual([]);
+      });
+    } else {
+      it("listLabels/registerLabel は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.listLabels).toBeUndefined();
+        expect(store.registerLabel).toBeUndefined();
+      });
+    }
   });
 }

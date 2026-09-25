@@ -3,6 +3,7 @@ import type {
   EmbeddingStatus,
   EventActor,
   IndexBand,
+  LabelSummary,
   Memory,
   MemoryEvent,
   MemoryEventKind,
@@ -158,6 +159,28 @@ export function rowToMemory(row: MemoryRow): Memory {
     createdAt: parsePgTimestamp(row.created_at),
     updatedAt: parsePgTimestamp(row.updated_at),
     attributes: row.attributes,
+  };
+}
+
+/**
+ * Issue #201 / ADR 0318: `labels` テーブルの1行（`migrations/0020_taxonomy_labels.sql`）。
+ */
+export interface LabelRow {
+  id: string;
+  tenant_id: string;
+  name: string;
+  status: string;
+  proposed_count: number;
+  registered_at: string | null;
+  created_at: string;
+}
+
+export function rowToLabel(row: LabelRow): LabelSummary {
+  return {
+    name: row.name,
+    status: row.status as LabelSummary["status"],
+    proposedCount: row.proposed_count,
+    registeredAt: parsePgTimestamp(row.registered_at),
   };
 }
 

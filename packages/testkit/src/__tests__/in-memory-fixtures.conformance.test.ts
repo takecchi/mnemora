@@ -110,6 +110,9 @@ describeMemoryStoreConformance({
   // Issue #515 方向①、ADR 0258: InMemoryMemoryStore は onlyMemoryIds フィルタを
   // 実装している。
   supportsOnlyMemoryIdsFilter: true,
+  // Issue #201 / ADR 0318: InMemoryMemoryStore は listLabels/registerLabel を
+  // 実装している。
+  supportsLabels: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり
@@ -339,4 +342,7 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: true,
     });
   },
+  // Issue #201 / ADR 0318: InMemoryTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
+  // を実装している。
+  supportsTaxonomyMode: true,
 });
