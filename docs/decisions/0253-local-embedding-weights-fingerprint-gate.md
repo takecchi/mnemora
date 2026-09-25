@@ -1136,3 +1136,12 @@ revision を外す ⟹ 新設した歯が赤になった。戻すと緑に戻る
 
 **`CHANGELOG.md` / `docs/migration-v1.md` に計上していない。** `packages/` には1バイトも
 触れていない。**要否は判断者に委ねる。**
+
+## 追記6 (2026-09-25、Issue #565): 採らなかった案 (c) の再現性を測った——結果は ADR 0328（提案）
+
+**⚠ 状態欄も本文も書き換えていない。⛔ これは担い手が書いた**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+追記3 が残した測定と、新しい測定用 workflow の結果は、[ADR 0328](./0328-local-embedding-output-cross-runner-reproducibility-measured.md) に置いた。
+要点: x64 どうしは 484 観測すべてでビット一致した（CPU の型番と `numThreads` を問わない）。
+x64 と arm64 は、毎回同じ小さな差（最大の絶対差 2^-24）で不一致になった。
+**案 (c) は、いまも採っていない。**門にするかどうかは決めていない。
