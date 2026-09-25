@@ -829,6 +829,11 @@ describe("estimateRecallFootprint — 構造項をin-memory runtimeの実recall(
       vector: [1, 0],
       limit: sc.limit,
       digestBandLimit: sc.digestBandLimit,
+      // association: null — 連想枠は既定 on（ADR 0337）。この歯は footprint の構造項
+      // （帯・group・切り詰め）だけを検査する対象であり、連想が本体へ何件昇格するかは
+      // recall-footprint.ts の associationCount と同じ理由でこの歯の対象外——連想を
+      // 明示的に止めて基準線（構造項の実測値）を動かさない。
+      association: null,
     });
   }
 

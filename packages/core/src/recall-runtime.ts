@@ -20,6 +20,7 @@ import {
   ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE,
   DEFAULT_ASSOCIATION_ANCHOR_COUNT,
   DEFAULT_ASSOCIATION_MIN_SIMILARITY,
+  DEFAULT_RECALL_ASSOCIATION,
   DEFAULT_DIGEST_BAND_LIMIT,
   DEFAULT_OVER_FETCH_FACTOR,
   DEFAULT_RECALL_CHANNELS,
@@ -1276,7 +1277,8 @@ export async function runRecall(
   }
 
   // -------------------------------------------------------------------
-  // 段3.5: 連想（任意。既定 off。docs/recall.md §9、ADR 0151）
+  // 段3.5: 連想（既定 on。docs/recall.md §9、ADR 0151、既定は ADR 0337 が反転した
+  // ——採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
   //
   // 「聞かれていないことを、自分から思い出す」の実装。クエリで引けた記憶（アンカー）の
   // 近傍を、同じ埋め込み空間の二段目として引く——「何が似ているか」を新しく定義せず、
@@ -1286,13 +1288,21 @@ export async function runRecall(
   // クエリに対して再スコアされる。連想の候補は定義上クエリに当たらないのだから、
   // 段1に置くと必ず段2の below_threshold で落ちる。「スコアに関係なく候補へ足す」経路は
   // 既に段3（必須の同伴取得）が持っており、連想はその一般化である。
+  //
+  // **既定 on／`null` で明示的に off（ADR 0337）**: `validatedQuery.association` が
+  // `undefined`（省略）なら DEFAULT_RECALL_ASSOCIATION を使い、`null`（明示）なら
+  // この段全体を丸ごとスキップする——北極星の問い2（無効にしても成立するか）の
+  // 担保先が、ADR 0151 の「既定 off」から「`null` という明示の opt-out」へ移る。
   // -------------------------------------------------------------------
-  const associationQuery = validatedQuery.association;
+  const associationQuery =
+    validatedQuery.association === null
+      ? undefined
+      : (validatedQuery.association ?? DEFAULT_RECALL_ASSOCIATION);
   const associationUnits: Unit[] = [];
   if (associationQuery !== undefined) {
     if (deps.vectorStore.getVectors === undefined) {
       // 北極星の問い2（無効にしても成立するか）を型で担保する任意メソッドが無い。
-      // `query.association` を渡していても、連想は一切実行されない。
+      // 連想を求めている（既定 on、または明示の値）のに、adapter が対応していない。
       omitted.push({
         kind: "stage_skipped",
         stage: "association",
@@ -1765,9 +1775,11 @@ export async function runRecall(
     }
   }
 
-  // 連想枠（Issue #200、ADR 0151）が返した digest の合計文字数の内訳。`association` を
-  // 渡したときだけ usage.byTier に載せる（申告されていなければ欄自体が無い。`share`/
-  // `budgetExceeded` と同じ規約）——「呼び手が連想で何文字増えたか」を見られるようにする。
+  // 連想枠（Issue #200、ADR 0151）が返した digest の合計文字数の内訳。既定 on
+  // （ADR 0337）になったので、`associationQuery`（省略時は DEFAULT_RECALL_ASSOCIATION、
+  // `null` を渡したときだけ undefined）が undefined でない限り usage.byTier に載せる
+  // ——「連想を走らせなかった」のは `null` で明示した呼び出しだけである。
+  // 「呼び手が連想で何文字増えたか」を見られるようにする欄。
   const associationChars = finalMemories
     .filter((m) => m.retrievedVia === "association")
     .reduce((sum, m) => sum + m.digest.length, 0);

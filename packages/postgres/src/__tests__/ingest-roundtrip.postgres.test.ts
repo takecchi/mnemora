@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { sql } from "drizzle-orm";
-import type { Ctx } from "@mnemora/core";
+import type { Ctx, EmbeddingProvider } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import { DeterministicEmbeddingProvider, DeterministicLLMProvider } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -180,6 +180,106 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
 
     const after = await memoryStore.get(ctx, memoryId);
     expect(after?.lastReinforcedAt).not.toBeNull();
+  });
+});
+
+/**
+ * Issue #753（#449 の残り）: `RuntimeDeps.embeddingInput`（opt-in フック）が、本物の
+ * Postgres の `MemoryStore`/`VectorStore` に対しても同じ形で回復の口として働くことを
+ * 確認する。`packages/core/src/__tests__/runtime.test.ts` の「embeddingInput opt-in
+ * フック」節（擬似 store）と同じ筋を、実 DB で1本だけなぞる——ここでは配線の確認に
+ * 留め、境界条件（フックが例外を投げた場合の扱い等）は core 側の歯に任せる。
+ */
+class OverLimitEmbeddingProvider implements EmbeddingProvider {
+  readonly space = TEST_EMBEDDING_SPACE;
+  async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
+    const tooLong = texts.find((text) => text.length > 100);
+    if (tooLong !== undefined) {
+      throw new Error("simulated input_too_long: input exceeds provider limit");
+    }
+    return texts.map(() => [0, 0, 0]);
+  }
+}
+
+describe("embeddingInput opt-in フック（Issue #753、本物の Postgres）", () => {
+  it("上限超過で failed になった Memory は、embeddingInput フックを渡した runtime で reembed + tick すると ready になる。memories.content は全文のまま", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const ctx: Ctx = { tenantId: "tenant-embed-input-hook" };
+    const hugeContent = "x".repeat(500);
+    const provider = new OverLimitEmbeddingProvider();
+
+    const runtime = createRuntime({
+      memoryStore: new PostgresMemoryStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      vectorStore: new PostgresVectorStore(db),
+      eventStore: new PostgresEventStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+      llmProvider: new DeterministicLLMProvider(),
+      embeddingProvider: provider,
+      hashContent: sha256Hex,
+      // embeddingInput 省略——最初の observe/tick は今までどおり memory.content を
+      // そのまま送る（既定の挙動を確かめる側）。
+    });
+
+    const observeResult = await runtime.observe(ctx, { kind: "utterance", text: hugeContent });
+    expect(observeResult.extraction).toBe("ok");
+    const memoryId = observeResult.memoryIds[0]!;
+
+    const failedTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
+    expect(failedTick).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
+
+    const memoryStore = new PostgresMemoryStore(db);
+    const afterFailureStatus = (await memoryStore.get(ctx, memoryId))?.embeddingStatus;
+    expect(afterFailureStatus).toBe("failed");
+
+    // 運用側が opt-in フックを足した runtime を、同じ DB に対して新たに立てる
+    // （`ingest-roundtrip.postgres.test.ts` の他の it と同じく、runtime 自体は状態を
+    // 持たない——状態は DB 側にある）。
+    //
+    // 🔴 `clock` に 1 秒だけ未来を返す `Clock` を渡す——`PostgresMemoryStore.requeueEmbedJobs`
+    // が積む outbox 行の `available_at` は DB 側の `now()`（マイクロ秒精度）で書かれるのに
+    // 対し、`runtime.tick` の既定 `Clock`（`systemClock`）は JavaScript の `Date`
+    // （ミリ秒までしか持たない）を使う。この直後の `reembed()` → `tick()` のように
+    // 同じミリ秒の中で両方が起きると、`available_at = 12:00:00.123456` に対して
+    // `new Date()` が `12:00:00.123`（切り捨て）になり、**積んだばかりの行が
+    // `available_at <= now` を満たさず claim できない**——`packages/testkit` の
+    // `memory-store-conformance.ts`（`CLAIM_NOW_SKEW_MS` の doc コメント）が
+    // ADR 0079「測ったこと」4 として既に実測・記録している、同じ穴である
+    // （実際にこの it が CI の `server_encoding=UTF8` 脚だけで `processed: 0` になって
+    // 落ちた——ミリ秒の端数次第で結果が変わる、割れ方まで一致する）。
+    // 1秒は `leaseMs`（60秒）よりずっと小さいので、既に claim 済みの行がリース切れとして
+    // 再取得されることはない。
+    const healingRuntime = createRuntime({
+      memoryStore: new PostgresMemoryStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      vectorStore: new PostgresVectorStore(db),
+      eventStore: new PostgresEventStore(db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(db),
+      llmProvider: new DeterministicLLMProvider(),
+      embeddingProvider: provider,
+      hashContent: sha256Hex,
+      embeddingInput: (memory) => memory.content.slice(0, 50),
+      clock: { now: () => new Date(Date.now() + 1_000) },
+    });
+
+    const reembedResult = await healingRuntime.reembed(ctx, { statuses: ["failed"], limit: 10 });
+    expect(reembedResult).toEqual({ requeued: 1, memoryIds: [memoryId] });
+
+    const healingTick = await healingRuntime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
+    expect(healingTick).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const healed = await memoryStore.get(ctx, memoryId);
+    expect(healed?.embeddingStatus).toBe("ready");
+    // memories.content は全文のまま——フックは embed() へ送る文字列だけを差し替える。
+    expect(healed?.content).toBe(hugeContent);
+
+    const table = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
+    const embeddingRows = await db.execute(sql`
+      SELECT * FROM ${sql.identifier(table)}
+      WHERE tenant_id = ${ctx.tenantId} AND memory_id = ${memoryId}
+    `);
+    expect(embeddingRows.rows).toHaveLength(1);
   });
 });
 

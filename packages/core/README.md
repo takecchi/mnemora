@@ -99,15 +99,26 @@ const { observationId } = await runtime.observe(ctx, {
 配線をすぐ試したいだけなら、`@mnemora/postgres` と `@mnemora/openai` の README にある
 そのままの例をつなげば動く（`@mnemora/postgres` 側は本物の Postgres + pgvector が要る）。
 
-## ⚠ 連想枠（`recall()` の段3.5）は既定 off
+## ⚠ 連想枠（`recall()` の段3.5）は既定 on（[ADR 0337](../../docs/decisions/0337-recall-association-default-on.md)）
 
-**`recall()` は、`RecallQuery.association` を渡さないかぎり連想を一切走らせない。**
-⟹ **このパッケージを入れたままの既定の振る舞いは「聞かれたことにしか答えない」。**
-（`packages/core/src/recall.ts:1132` の doc コメント逐語「**省略時は連想を一切走らせない**（既定 off）」。
-off の実体は `packages/core/src/recall-runtime.ts:1049` の `if (associationQuery !== undefined)`。
-既定を off にした理由は [ADR 0151](../../docs/decisions/0151-recall-association-unprompted.md)）
+**`recall()` は、`RecallQuery.association` を省略すると `DEFAULT_RECALL_ASSOCIATION`
+（`{ maxCount: 10 }`）を適用して連想を走らせる。**
+⟹ **このパッケージを入れたままの既定の振る舞いは「聞かれたことに加えて、関連する記憶も添える」。**
+（`packages/core/src/recall.ts` の `RecallQuery.association` の doc コメント参照。
+[ADR 0151](../../docs/decisions/0151-recall-association-unprompted.md) が導入した「省略時は連想を
+一切走らせない」という既定 off は、[ADR 0337](../../docs/decisions/0337-recall-association-default-on.md)
+（2026-09-26、オーナーの決定）が反転させた）
 
-使うには、呼び出し側が明示的に渡す:
+一切走らせたくない呼び出しは `association: null` を明示的に渡す:
+
+```ts
+const recalled = await runtime.recall(ctx, {
+  text: "京都の予定は?",
+  association: null, // 明示的に off にする（省略すると DEFAULT_RECALL_ASSOCIATION が適用される）
+});
+```
+
+既定値ではなく自分で値を渡したいときは、`maxCount` を明示する:
 
 ```ts
 const recalled = await runtime.recall(ctx, {
@@ -116,7 +127,10 @@ const recalled = await runtime.recall(ctx, {
 });
 ```
 
-- `maxCount` — **必須。既定値は無い**（「量の上限を呼び出し側に必ず明示させる」ため）
+- `maxCount` — **必須。既定値は個別には無い**（`association` 自体を省略すると
+  `DEFAULT_RECALL_ASSOCIATION.maxCount = 10` が使われるが、`association` オブジェクトを
+  渡す場合は `maxCount` を呼び出し側が明示する必要がある——「量の上限を呼び出し側に
+  必ず明示させる」という ADR 0151 の設計は維持している）
 - `anchorCount?` — 段3までに残った上位何件を連想の起点（アンカー）にするか。
   既定 `DEFAULT_ASSOCIATION_ANCHOR_COUNT` = 3。
   **⚠ `limit`（既定 10）が天井になる**——アンカーは段2で `limit` の内側に入った候補から取るので、
