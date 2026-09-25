@@ -22,6 +22,18 @@ describe("resolveAnswerClaimKeyOptions", () => {
     expect(result && "knownPredicates" in result).toBe(false);
   });
 
+  it('MNEMORA_ANSWER_CLAIM_KEY="detect-known-predicates-from-store" なら knownPredicatesFromStore が true になる（Issue #691続き、ADR 0329）', () => {
+    const result = resolveAnswerClaimKeyOptions({
+      MNEMORA_ANSWER_CLAIM_KEY: "detect-known-predicates-from-store",
+    });
+    expect(result).toEqual({
+      enabled: true,
+      detectContested: true,
+      knownPredicatesFromStore: true,
+    });
+    expect(result && "knownPredicates" in result).toBe(false);
+  });
+
   it("未知の値は例外(黙って既定へ倒れない)", () => {
     expect(() => resolveAnswerClaimKeyOptions({ MNEMORA_ANSWER_CLAIM_KEY: "on" })).toThrow(
       /MNEMORA_ANSWER_CLAIM_KEY/,

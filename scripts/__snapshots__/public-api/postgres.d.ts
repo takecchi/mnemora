@@ -179,6 +179,10 @@ export declare class PostgresMemoryStore implements MemoryStore {
         validFrom: Date | null;
         validUntil: Date | null;
     }): Promise<Memory[]>;
+    listActiveClaimPredicates(ctx: Ctx, query: {
+        subjectId: string | null;
+        limit: number;
+    }): Promise<string[]>;
     resolveContestedPair(ctx: Ctx, first: {
         id: MemoryId;
         status: "active" | "superseded";

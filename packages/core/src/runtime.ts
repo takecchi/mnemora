@@ -9,7 +9,7 @@ import type {
 import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
-import { deriveClaimKeys } from "./claim-key.js";
+import { DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT, deriveClaimKeys } from "./claim-key.js";
 import type { ClaimKey, ClaimKeyOptions } from "./claim-key.js";
 import {
   buildNewMemoryFromCandidate,
@@ -2680,6 +2680,54 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * Issue #691続き（ADR 0326「採らなかった案B」の実装、ADR 0329）:
+   * `ClaimKeyOptions.knownPredicates`（呼び出し側が明示的に渡した語彙）と
+   * `ClaimKeyOptions.knownPredicatesFromStore`（store から動的に集める語彙）を合成する。
+   *
+   * - `knownPredicatesFromStore` が偽（省略/`false`）、または
+   *   `deps.memoryStore.listActiveClaimPredicates` が無い adapter では、
+   *   `claimKeyOptions.knownPredicates` をそのまま返す（**store を一度も読まない**——
+   *   opt-in していない呼び出しで既存の挙動を1バイトも変えないため）。
+   * - それ以外は `listActiveClaimPredicates` を1回呼び、**利用者の `knownPredicates` を
+   *   先に**、集めた一覧を**後ろに重複を除いて**連結する（ADR 0329 決定2）。
+   *   `subjectId` は `observation.subjectId ?? null`——1回の `observe()` 呼び出しが
+   *   持つ唯一の subjectId であり、候補ごとの `subjectId` 上書き（ADR 0271）は
+   *   `deriveClaimKeys` 呼び出しより後（`buildNewMemoryFromCandidate`）にしか
+   *   確定しないため、ここでは観測全体の既定値を使う（ADR 0329 決定3、確かめていないこと
+   *   参照）。
+   * - 合成の結果、一覧が空（利用者も渡さず、store にも1件も無い）なら `undefined` を返す
+   *   ——`deriveClaimKeys`/`buildClaimKeyPrompt` の「空配列＝渡していない」規約
+   *   （`buildKnownPredicateInstruction` の呼び出し条件）に合わせる。
+   */
+  async function resolveKnownPredicates(
+    ctx: Ctx,
+    observation: Observation,
+    claimKeyOptions: ClaimKeyOptions,
+  ): Promise<string[] | undefined> {
+    const callerKnown = claimKeyOptions.knownPredicates ?? [];
+    const fromStoreOption = claimKeyOptions.knownPredicatesFromStore;
+    const listActiveClaimPredicates = deps.memoryStore.listActiveClaimPredicates;
+    if (!fromStoreOption || listActiveClaimPredicates === undefined) {
+      return callerKnown.length > 0 ? callerKnown : undefined;
+    }
+    const limit =
+      typeof fromStoreOption === "object" && fromStoreOption.limit !== undefined
+        ? fromStoreOption.limit
+        : DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT;
+    const fromStore = await listActiveClaimPredicates.call(deps.memoryStore, ctx, {
+      subjectId: observation.subjectId ?? null,
+      limit,
+    });
+    const merged = [...callerKnown];
+    for (const predicate of fromStore) {
+      if (!merged.includes(predicate)) {
+        merged.push(predicate);
+      }
+    }
+    return merged.length > 0 ? merged : undefined;
+  }
+
+  /**
    * 1件の Observation に対して抽出を実行し、作られた（または冪等に既存の）Memory の id を返す。
    *
    * `subjectCandidates`（Issue #608 項目②(b)）は `handleExtractableObservation` の sync
@@ -2738,11 +2786,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     let claimKeys: (ClaimKey | null)[] | undefined;
     let claimKeyFailure: ExtractionFailure | null = null;
     if (claimKeyOptions?.enabled === true) {
+      const knownPredicates = await resolveKnownPredicates(ctx, observation, claimKeyOptions);
       const derived = await deriveClaimKeys(
         deps.llmProvider,
         ctx,
         candidates.map((candidate) => candidate.content),
-        claimKeyOptions.knownPredicates,
+        knownPredicates,
       );
       claimKeys = derived.claimKeys;
       claimKeyFailure = derived.failure;

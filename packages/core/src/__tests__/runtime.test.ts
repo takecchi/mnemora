@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.js";
@@ -2613,6 +2614,217 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
     const newMemory = await stores.memoryStore.get(ctx, newMemoryId!);
     expect(newMemory?.claimKey ?? null).toBeNull();
     expect("claimKeyFailure" in reextractResult).toBe(false);
+  });
+});
+
+describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 0326「採らなかった案B」の実装、ADR 0329）", () => {
+  /**
+   * `stores.memoryStore.listActiveClaimPredicates` の呼び出し回数・引数を捕まえる薄い
+   * ラッパー（`spyOnFindActiveByClaimKey` と同じ形——プロトタイプは変更しない）。
+   */
+  function spyOnListActiveClaimPredicates(memoryStore: FakeMemoryStore): {
+    calls: { subjectId: string | null; limit: number }[];
+  } {
+    const spy: { calls: { subjectId: string | null; limit: number }[] } = { calls: [] };
+    const original = memoryStore.listActiveClaimPredicates.bind(memoryStore);
+    memoryStore.listActiveClaimPredicates = (async (...args: Parameters<typeof original>) => {
+      spy.calls.push(args[1]);
+      return original(...args);
+    }) as typeof memoryStore.listActiveClaimPredicates;
+    return spy;
+  }
+
+  it("既定（knownPredicatesFromStore を渡さない）では、listActiveClaimPredicates は一度も呼ばれない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true },
+    });
+    expect(spy.calls).toEqual([]);
+  });
+
+  it("knownPredicatesFromStore: false は既定と同じ——呼ばれない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, knownPredicatesFromStore: false },
+    });
+    expect(spy.calls).toEqual([]);
+  });
+
+  it("候補が0件なら、knownPredicatesFromStore が有効でも listActiveClaimPredicates は呼ばれない（+0回）", async () => {
+    const llm = sequencedLlm([{ memories: [] }]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "何も記憶に値しない発話",
+      claimKey: { enabled: true, knownPredicatesFromStore: true },
+    });
+    expect(result.memoryIds).toEqual([]);
+    expect(spy.calls).toEqual([]);
+  });
+
+  it("store が listActiveClaimPredicates を実装しない adapter では、knownPredicatesFromStore: true でも静かに効かない——渡した knownPredicates だけが使われる", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    // `listActiveClaimPredicates` を持たない adapter を模す（既存の
+    // 「findActiveByClaimKey を実装しない adapter」の歯と同じ手法）。
+    // @ts-expect-error テスト用に任意メソッドを取り除く。
+    stores.memoryStore.listActiveClaimPredicates = undefined;
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: {
+        enabled: true,
+        knownPredicates: ["existing_hint"],
+        knownPredicatesFromStore: true,
+      },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).toContain("existing_hint");
+  });
+
+  it("knownPredicatesFromStore: true で、同じ subjectId の既存 active な claim key predicate が system プロンプトへ足される", async () => {
+    const seedLlm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(seedLlm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      subjectId: "user-1",
+      claimKey: { enabled: true },
+    });
+
+    const followUpLlm = sequencedLlm([
+      { memories: [{ content: "苦手な食べ物はパクチー", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "food_dislike" }] },
+    ]);
+    const runtime2 = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: followUpLlm,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    await runtime2.observe(ctx, {
+      kind: "utterance",
+      text: "苦手な食べ物はパクチー",
+      subjectId: "user-1",
+      claimKey: { enabled: true, knownPredicatesFromStore: true },
+    });
+    const claimKeyCall = followUpLlm.calls[1]!;
+    expect(claimKeyCall.prompt.system).toContain("favorite_food");
+  });
+
+  it("subjectId ごとに store を引く——observation.subjectId をそのまま listActiveClaimPredicates へ渡す", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      subjectId: "user-1",
+      claimKey: { enabled: true, knownPredicatesFromStore: true },
+    });
+    expect(spy.calls).toEqual([
+      { subjectId: "user-1", limit: DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT },
+    ]);
+  });
+
+  it("knownPredicatesFromStore: { limit } を渡すと、その件数を store へ渡す", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnListActiveClaimPredicates(stores.memoryStore);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, knownPredicatesFromStore: { limit: 3 } },
+    });
+    expect(spy.calls).toEqual([{ subjectId: null, limit: 3 }]);
+  });
+
+  it("利用者の knownPredicates を先に、store から集めた一覧を後ろに、重複を除いて連結する", async () => {
+    const seedLlm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな色は青", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_color" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(seedLlm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      subjectId: "user-1",
+      claimKey: { enabled: true },
+    });
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな色は青",
+      subjectId: "user-1",
+      claimKey: { enabled: true },
+    });
+
+    const followUpLlm = sequencedLlm([
+      { memories: [{ content: "苦手な食べ物はパクチー", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "food_dislike" }] },
+    ]);
+    const runtime2 = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: followUpLlm,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    await runtime2.observe(ctx, {
+      kind: "utterance",
+      text: "苦手な食べ物はパクチー",
+      subjectId: "user-1",
+      claimKey: {
+        enabled: true,
+        // 利用者が明示的に選んだ語彙——store 側にも同じ値 "favorite_food" が在るが、
+        // 重複せず1回だけ、かつ利用者の指定順が先頭に来ることを見る。
+        knownPredicates: ["user_chosen_hint", "favorite_food"],
+        knownPredicatesFromStore: true,
+      },
+    });
+    const claimKeyCall = followUpLlm.calls[1]!;
+    const system = claimKeyCall.prompt.system as string;
+    // 利用者指定分（"user_chosen_hint", "favorite_food"）の後ろに、store 分から
+    // 重複を除いた "favorite_color" だけが連結されている——"favorite_food" が
+    // 重複して並んでいれば、この厳密な部分文字列は一致しない。
+    expect(system).toContain(
+      "既知の predicate 候補一覧: user_chosen_hint, favorite_food, favorite_color。",
+    );
   });
 });
 

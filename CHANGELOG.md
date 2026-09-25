@@ -188,6 +188,13 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   `claimKey`（正規化済み）を持つ複数の Memory を検出する。既定では発火しない
   （[Issue #372](https://github.com/takecchi/mnemora/issues/372) /
   [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)、PR #745）。
+- **`MemoryStore` に任意メソッド `listActiveClaimPredicates?` を足し、`ClaimKeyOptions.
+  knownPredicatesFromStore?`（既定 off）で claim key 派生の語彙ヒントを店の既存 predicate
+  一覧から動的に集められるようにした**——ADR 0326「採らなかった案B」の実装。real データ
+  （`examples/chat` の `answer` 経路、n=3）で訂正の predicate 一致・`contested` 成立を
+  0/4→4/4 に改善したが、誤検出も1/14→3〜4/14 に増える副作用が実測された
+  （[Issue #691](https://github.com/takecchi/mnemora/issues/691) /
+  [ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md)、PR #750）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

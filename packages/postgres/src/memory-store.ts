@@ -1973,6 +1973,43 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装
+   * （interface 側の doc コメントに契約全体がある。ここはクエリの組み立てだけ）。
+   * `idx_memories_claim_key`（`(tenant_id, subject_id, claim_key_subject,
+   * claim_key_predicate)`、`migrations/0021_memories_claim_key.sql`）の先頭2列
+   * （`tenant_id`, `subject_id`）で絞り込み、`status`/`claim_key_predicate IS NOT NULL`
+   * を追加の `WHERE` で絞ったうえで `GROUP BY claim_key_predicate` して
+   * `MAX(created_at)` で新しい順に並べる。**新しい索引は足さない**——ADR 0329 決定4
+   * 参照（この口はテナントの1 subjectId に閉じた、既に小さい行数を前提にしている）。
+   *
+   * `subject_id` は `findActiveByClaimKey` と同じ `IS NOT DISTINCT FROM`
+   * （NULL 同士も一致として扱う）。
+   *
+   * `GROUP BY claim_key_predicate ORDER BY MAX(created_at) DESC` は「同じ predicate を
+   * 持つ行のうち最も新しい `created_at` で代表させ、その代表値で降順に並べる」という
+   * interface 側の契約をそのまま SQL に落としたもの——`DISTINCT ON` ではなく
+   * `GROUP BY` にしたのは、`DISTINCT ON` が「先頭1行を残す」ことしかせず、複数行にまたがる
+   * 集約（`MAX`）を表現できないため。
+   */
+  async listActiveClaimPredicates(
+    ctx: Ctx,
+    query: { subjectId: string | null; limit: number },
+  ): Promise<string[]> {
+    const result = await this.db.execute(sql`
+      SELECT claim_key_predicate AS predicate
+      FROM memories
+      WHERE tenant_id = ${ctx.tenantId}
+        AND subject_id IS NOT DISTINCT FROM ${query.subjectId}
+        AND status = 'active'
+        AND claim_key_predicate IS NOT NULL
+      GROUP BY claim_key_predicate
+      ORDER BY MAX(created_at) DESC
+      LIMIT ${query.limit}
+    `);
+    return result.rows.map((row) => (row as unknown as { predicate: string }).predicate);
+  }
+
+  /**
    * Issue #197 / ADR 0150: `markContestedPair` の解決側。両側とも `status = 'contested'`
    * かつ相互参照が成立していることを CAS で課したうえで、`contested_with_id` を両側とも
    * `NULL` に戻し、呼び出し側が指定した `status`（`'active'`/`'superseded'`）へ更新する

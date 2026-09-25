@@ -198,7 +198,25 @@ export async function deriveClaimKeys(
 }
 
 /**
- * `runtime.observe`（Observe*Input）の opt-in 口（Issue #371、Issue #372）。
+ * Issue #691 続き（`docs/decisions/0327-*.md`）: `ClaimKeyOptions.knownPredicatesFromStore`
+ * を `true`（オブジェクト形を渡さない場合）にしたときに使う既定の上限。
+ *
+ * **根拠**（ADR 0329 決定2の逐語）: ADR 0315/0320/0324 の語彙ヒント実験はいずれも
+ * 作業者が手で作った 5〜8 件の predicate で語彙ヒントの効果（安定性 74.1%→89.4%、
+ * 検出の predicate 弁別も含めて100%一致）を確認している——**この定数は、その実験規模の
+ * 2倍強を置くことで、実験で効果が確認された範囲を十分に覆いつつ、主題を持つ1人の
+ * 会話が現実的に蓄積する claim key predicate の語彙が数十件規模に増えても
+ * `deriveClaimKeys` の system プロンプトへ際限なく積み上がらないよう上限を切る、という
+ * 判断である。**「実測でこの値が最適」という測定結果ではない——単体テスト
+ * （`__tests__/runtime.test.ts` の「既定の上限」歯）で値を固定し、変えるときはその歯を
+ * 直すことで変更が見える形にする（`AGENTS.md`「数を、道具と生成物に焼き込まない」——
+ * この定数はどこか別の場所の写しではなく、ここが唯一の出所であるため対象外だが、
+ * 値そのものの妥当性は歯で縛る）。
+ */
+export const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
+
+/**
+ * `runtime.observe`（Observe*Input）の opt-in 口（Issue #371、Issue #372、Issue #691続き）。
  *
  * - **渡さない（省略）**: 既定の挙動。`deriveClaimKeys` は一度も呼ばれず、抽出プロンプト・
  *   カセット鍵・呼び出し回数は1バイトも変わらない。**検出（`detectContested`）も
@@ -214,6 +232,17 @@ export async function deriveClaimKeys(
  *   （`superseded` へは進めない）。**`enabled: false`（または省略）と組み合わせても
  *   何も起きない**——鍵が無いので検出のしようがない（`runtime.ts` の
  *   `detectClaimKeyContested` 参照）。
+ * - **`{ enabled: true, knownPredicatesFromStore: true }`**（Issue #691続き、ADR 0326
+ *   「採らなかった案B」の実装、ADR 0329）: `deriveClaimKeys` を呼ぶ**前**に、
+ *   `MemoryStore.listActiveClaimPredicates?`（任意メソッド）で「同じ tenant・同じ
+ *   `subjectId`・`active`」な既存 Memory の predicate 一覧を新しい順に集め、呼び出し側の
+ *   `knownPredicates`（渡していれば）の**後ろ**へ重複無く連結してから渡す
+ *   （`runtime.ts` の `runExtraction` 参照。「利用者の分を先に」——利用者が明示的に
+ *   選んだ語彙のほうを優先する）。**`enabled: false`/省略、または store がこの口を
+ *   実装していない adapter では、静かに効かない**——`detectContested` と同じ「渡された
+ *   が効かない」規約（`findActiveByClaimKey?` 系のフォールバック無し方針）。
+ *   `{ limit: number }` で件数の上限を指定できる。省略すると
+ *   {@link DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT} を使う。
  */
 export interface ClaimKeyOptions {
   enabled: boolean;
@@ -233,10 +262,22 @@ export interface ClaimKeyOptions {
    * が効かない」規約）。
    */
   detectContested?: boolean;
+  /**
+   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` から集めた
+   * predicate 一覧を、`knownPredicates` の語彙ヒントへ動的に足す。**既定 `false`
+   * （省略と同じ）。** `true` を渡すと {@link DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT}
+   * 件まで、`{ limit: number }` を渡すとその件数まで集める。`enabled: false`/省略、
+   * または store がこの口を実装していない adapter では静かに効かない（上のクラス doc
+   * コメント参照）。
+   */
+  knownPredicatesFromStore?: boolean | { limit?: number };
 }
 
 export const ClaimKeyOptionsSchema = z.object({
   enabled: z.boolean(),
   knownPredicates: z.array(z.string().min(1)).optional(),
   detectContested: z.boolean().optional(),
+  knownPredicatesFromStore: z
+    .union([z.boolean(), z.object({ limit: z.number().int().positive().optional() })])
+    .optional(),
 }) satisfies z.ZodType<ClaimKeyOptions>;

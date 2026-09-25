@@ -229,6 +229,10 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         validFrom: Date | null;
         validUntil: Date | null;
     }): Promise<Memory[]>;
+    listActiveClaimPredicates(ctx: Ctx, query: {
+        subjectId: string | null;
+        limit: number;
+    }): Promise<string[]>;
     restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
         reason?: string;
         actor?: EventActor;
@@ -480,6 +484,7 @@ export interface MemoryStoreConformanceOptions {
     supportsOnlyMemoryIdsFilter?: boolean;
     supportsLabels: boolean;
     supportsFindActiveByClaimKey: boolean;
+    supportsListActiveClaimPredicates?: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
