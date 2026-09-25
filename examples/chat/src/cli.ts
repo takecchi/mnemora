@@ -46,6 +46,11 @@ import {
   buildMeasuredIdentifierProbeJson,
   buildWeightsUnavailableIdentifierProbeJson,
 } from "./identifier-json.js";
+import { NUMERAL_TOKEN_PROBE_SET_SPEC } from "./numeral-token-probe-set.js";
+import {
+  buildMeasuredNumeralTokenProbeJson,
+  buildWeightsUnavailableNumeralTokenProbeJson,
+} from "./numeral-token-json.js";
 import {
   formatCorrectionCandidateReport,
   runCorrectionCandidateArm,
@@ -1540,6 +1545,137 @@ async function runIdentifierProbes(): Promise<void> {
 }
 
 /**
+ * `numeral-token-probes` サブコマンド(ADR 0135、Issue #109)。
+ *
+ * 「単独トークンの数詞・記号インデックス」(文字種×共有前置長の行列)を弁別軸とする
+ * 第4の probe 集合(`./numeral-token-probe-set.js`)を測る——`identifier-probes` が
+ * 確立した形(擬似LLM + `@mnemora/local-embedding`、鍵・カセット不要、`warmup()` を
+ * 明示的に呼んで失敗を区別、sparse/dense の2 haystack 条件を別々に集計、⛔ 門にしない)を
+ * そのまま踏襲する。**別の集合・別の arm 実行・別の JSON・別の CI ジョブ**であり、
+ * `identifier-probes` サブコマンド自体には1文字も触れていない
+ * (ADR 0135 §8-3「CLI サブコマンド・CI ジョブ・基準値ファイル・summary script の配線」)。
+ *
+ * **2群を別々に集計する。**⛔ 混ぜた単一の MRR を主たる数字にしない
+ * (`identifier-probes` と同じ規律)。
+ *   1. sparse: 数詞・記号索引を1件も含まない既定 haystack。
+ *   2. dense: 同じ9セルの索引が密な haystack(計90件)。
+ *
+ * **margin(ADR 0135 §5.5)を、hit@1/hit@10 と併記する。**`runIdentifierProbeArm` が
+ * 共有の arm として計算する(`./identifier-arm.js` の `marginStats`)——この集合の
+ * ために `identifier-arm.ts` へ足した機能だが、既存の識別子・日本語固有名詞集合の
+ * 挙動は変えていない(既存の歯は変異試験で緑のままであることを別途確認済み)。
+ */
+async function runNumeralTokenProbes(): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const runToken = newRunToken();
+  const measuredAt = new Date();
+  const commit = tryGitRevParseHead(process.cwd());
+
+  const handle = await createExampleRuntime(databaseUrl, {
+    ...process.env,
+    MNEMORA_LLM: "deterministic",
+    MNEMORA_EMBEDDING: "local",
+  });
+  printProviderMode(handle, null);
+
+  try {
+    console.log(
+      "\n[numeral-token-probes] warmup() でモデルの読み込みを先に済ませる" +
+        "(取得に失敗したら、ここでメトリクスを出さずに打ち切る)…",
+    );
+    const warmup = await warmupLocalEmbedding(handle.embeddingProvider);
+    const jsonPath = process.env.MNEMORA_NUMERAL_TOKEN_JSON;
+    if (!warmup.ok) {
+      console.error(`\n🔴 ${warmup.detail}`);
+      console.error(
+        "  メトリクスは1件も測っていない(前回の値・既定値・0 へは倒さない)。" +
+          "ネットワーク・Hugging Face repo の状態を確認し、再実行すること。",
+      );
+      process.exitCode = 1;
+      if (jsonPath) {
+        const json = buildWeightsUnavailableNumeralTokenProbeJson({
+          measuredAt,
+          commit,
+          detail: warmup.detail,
+        });
+        writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+        console.log(`\n[numeral-token-probes] 機械可読な結果(取得失敗)を書き出した: ${jsonPath}`);
+      }
+      return;
+    }
+    console.log(`  ${warmup.detail}`);
+
+    const embeddingSpace = handle.embeddingProvider.space;
+    console.log(
+      `[numeral-token-probes] embedding space: provider=${embeddingSpace.provider} ` +
+        `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}`,
+    );
+
+    console.log(
+      "\n=== 群1: 数詞・記号索引 probe 18件(./numeral-token-probe-set.js、haystack=sparse) ===",
+    );
+    const sparseReport = await runIdentifierProbeArm({
+      armLabel: `numeral-token-probes/sparse(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=sparse)`,
+      tenantId: buildArmTenantId("numeral-token-sparse", runToken),
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+      llmMode: handle.llmMode,
+      embeddingMode: handle.embeddingMode,
+      haystackKind: "sparse",
+      probeSet: NUMERAL_TOKEN_PROBE_SET_SPEC,
+    });
+    console.log(formatIdentifierArmReport(sparseReport));
+
+    console.log(
+      "\n=== 群2: 数詞・記号索引 probe 18件(./numeral-token-probe-set.js、haystack=dense) ===",
+    );
+    const denseReport = await runIdentifierProbeArm({
+      armLabel: `numeral-token-probes/dense(llm=${handle.llmMode}, embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, haystack=dense)`,
+      tenantId: buildArmTenantId("numeral-token-dense", runToken),
+      runtime: handle.runtime,
+      memoryStore: handle.memoryStore,
+      llmMode: handle.llmMode,
+      embeddingMode: handle.embeddingMode,
+      haystackKind: "dense",
+      probeSet: NUMERAL_TOKEN_PROBE_SET_SPEC,
+    });
+    console.log(formatIdentifierArmReport(denseReport));
+
+    console.log(
+      "\n=== まとめ(2群は別々——混ぜた単一の MRR は作らない) ===\n" +
+        `  数詞・記号索引probe(${sparseReport.probeCount}件, llm=${handle.llmMode}, ` +
+        `embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, ` +
+        `haystack=sparse): MRR=${sparseReport.mrrOverall.toFixed(3)} ` +
+        `hit@1=${sparseReport.hit1Count}/${sparseReport.probeCount} ` +
+        `hit@10=${sparseReport.hit10Count}/${sparseReport.probeCount}\n` +
+        `  数詞・記号索引probe(${denseReport.probeCount}件, llm=${handle.llmMode}, ` +
+        `embedding=${handle.embeddingMode}/${embeddingSpace.model}/${embeddingSpace.dimensions}次元, ` +
+        `haystack=dense): MRR=${denseReport.mrrOverall.toFixed(3)} ` +
+        `hit@1=${denseReport.hit1Count}/${denseReport.probeCount} ` +
+        `hit@10=${denseReport.hit10Count}/${denseReport.probeCount}`,
+    );
+    console.log(
+      `\n(注) ADR 0033 §3: 標本${sparseReport.probeCount}件からは失敗率も成功率も統計的に` +
+        "主張しない。ここで言えるのは「今回、この母数のうち何件引けたか」までである。",
+    );
+
+    if (jsonPath) {
+      const json = buildMeasuredNumeralTokenProbeJson({
+        sparseReport,
+        denseReport,
+        embeddingSpace,
+        measuredAt,
+        commit,
+      });
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(`\n[numeral-token-probes] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * `association-probes` サブコマンド(連想枠、ADR 0151、Issue #291)。
  *
  * **`identifier-probes` と同じ provider の組み合わせ**(`deterministic` LLM +
@@ -2240,6 +2376,9 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run identifier-probes",
       "                                                                      # ASCII識別子・固有名詞を含む probe(Issue #109)を@mnemora/local-embeddingで測る",
       "                                                                      #   鍵・カセット不要。日本語意味probe7件・識別子probe30件(sparse/dense haystack)を別々に集計する",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run numeral-token-probes",
+      "                                                                      # 単独トークンの数詞・記号インデックス(文字種×共有前置長の行列)を@mnemora/local-embeddingで測る(ADR 0135、Issue #109)",
+      "                                                                      #   鍵・カセット不要。sparse/dense haystackを別々に集計し、margin(gold-distractor similarity差)の分布も記録する。MNEMORA_NUMERAL_TOKEN_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run association-probes",
       "                                                                      # 連想枠(段3.5、ADR 0151、Issue #291)が想起の質を動かすかを、off/on(maxCount=3)/on(maxCount=5)の3armで比較",
       "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_ASSOCIATION_JSON で機械可読出力",
@@ -2315,6 +2454,8 @@ async function main(): Promise<void> {
     await runEmbeddingFingerprint();
   } else if (command === "identifier-probes") {
     await runIdentifierProbes();
+  } else if (command === "numeral-token-probes") {
+    await runNumeralTokenProbes();
   } else if (command === "association-probes") {
     await runAssociationProbes();
   } else if (command === "consolidation-cost") {

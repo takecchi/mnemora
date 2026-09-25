@@ -56,6 +56,69 @@ export interface IdentifierProbeOutcome {
   totalInScope: number;
   scoreDetails: ProbeScoreDetail[];
   termSpreads: TermSpread[];
+  /**
+   * `similarity(gold) − similarity(distractor)`(ADR 0135 §5.5)。
+   *
+   * **どちらかが `scoreDetails` に無ければ `null`**——gold/distractor が `limit` の外に
+   * 落ちて `scoreDetails` に現れなかった場合や、候補の `score.similarity` 自体が
+   * 無い場合(ANN 経由でない候補、`ScoreBreakdown.similarity` は optional)。
+   * 「差が0だった」と「測れなかった」を同じ顔にしない(ADR 0033 の「無いには種類がある」の
+   * この値への適用)。
+   *
+   * ⭐ **hit@1 と併記する。置き換えない**——hit@1 は「limit の窓に入ったか」という
+   * 別の情報を持ち、margin だけでは `omitted`(閾値落ち・窓落ち)を区別できない。
+   */
+  margin: number | null;
+}
+
+/**
+ * probe ごとの `margin` の分布を、arm 全体で要約したもの(ADR 0135 §5.5)。
+ * ADR 0110 §3 の Welch t 検定の表と同じ形の集約(平均・標準偏差・最小値)。
+ */
+export interface MarginStats {
+  /** margin が測れた(gold/distractor 双方に similarity があった) probe の件数。 */
+  count: number;
+  /** `count === 0` のときは null(平均を定義できない)。 */
+  mean: number | null;
+  /** 標本標準偏差(自由度 n−1)。`count < 2` のときは null(分散を定義できない)。 */
+  stdDev: number | null;
+  /** `count === 0` のときは null。 */
+  min: number | null;
+}
+
+/**
+ * probe ごとの `margin`(`number | null`)から `MarginStats` を作る純関数。
+ * `null`(測れなかった)は分母からも除く——0として数えると平均が偽って小さくなる。
+ */
+export function computeMarginStats(margins: readonly (number | null)[]): MarginStats {
+  const present = margins.filter((m): m is number => m !== null);
+  if (present.length === 0) {
+    return { count: 0, mean: null, stdDev: null, min: null };
+  }
+  const mean = present.reduce((sum, v) => sum + v, 0) / present.length;
+  const min = Math.min(...present);
+  let stdDev: number | null = null;
+  if (present.length >= 2) {
+    const variance =
+      present.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (present.length - 1);
+    stdDev = Math.sqrt(variance);
+  }
+  return { count: present.length, mean, stdDev, min };
+}
+
+/**
+ * gold/distractor の `scoreDetails` から margin を計算する純関数。
+ * `collectScoreDetails` が返す配列(役ごとに高々1件)から "gold"/"distractor" の役を
+ * 持つ要素を探し、両方に `score.similarity` があれば差を返す。片方でも無ければ `null`。
+ */
+export function computeMargin(scoreDetails: readonly ProbeScoreDetail[]): number | null {
+  const goldSimilarity = scoreDetails.find((d) => d.roles.includes("gold"))?.score.similarity;
+  const distractorSimilarity = scoreDetails.find((d) => d.roles.includes("distractor"))?.score
+    .similarity;
+  if (goldSimilarity === undefined || distractorSimilarity === undefined) {
+    return null;
+  }
+  return goldSimilarity - distractorSimilarity;
 }
 
 export interface IdentifierArmIngestSummary {
@@ -78,6 +141,16 @@ export interface IdentifierArmReport {
   hit1Count: number;
   hit10Count: number;
   probeCount: number;
+  /**
+   * probe ごとの `margin` の分布(ADR 0135 §5.5)。
+   *
+   * ⚠ **省略可能(optional)にしてある**——`runIdentifierProbeArm` は必ずこの欄を
+   * 埋めて返すが、型としては optional にすることで、この変更より前に書かれた
+   * `IdentifierArmReport` のオブジェクトリテラル(テストの fixture 等)が
+   * この欄を持たなくてもコンパイルが通る(後方互換)。ADR 0135 §8-2 が要求する
+   * 「既存2集合の report スキーマに影響するが、追加フィールドは任意にする」の実装。
+   */
+  marginStats?: MarginStats;
 }
 
 /**
@@ -170,6 +243,7 @@ export async function runIdentifierProbeArm(
     const distractorRank = distractorIndex === -1 ? null : distractorIndex + 1;
     const distractorBeatsGold =
       distractorRank !== null && (goldRank === null || distractorRank < goldRank);
+    const scoreDetails = collectScoreDetails(result.memories, { goldRank, distractorRank });
 
     probes.push({
       probeId: probe.id,
@@ -182,8 +256,9 @@ export async function runIdentifierProbeArm(
       reciprocalRank: goldRank !== null ? 1 / goldRank : 0,
       omittedKinds: result.omitted.map((o) => o.kind),
       totalInScope: result.index.totalInScope,
-      scoreDetails: collectScoreDetails(result.memories, { goldRank, distractorRank }),
+      scoreDetails,
       termSpreads: computeTermSpreads(result.memories),
+      margin: computeMargin(scoreDetails),
     });
   }
 
@@ -193,6 +268,7 @@ export async function runIdentifierProbeArm(
     llmMode: options.llmMode,
     embeddingMode: options.embeddingMode,
     haystackKind,
+    marginStats: computeMarginStats(probes.map((p) => p.margin)),
     ingest: {
       observationCount: utterances.length,
       drain,
@@ -211,6 +287,21 @@ export async function runIdentifierProbeArm(
 
 function formatRank(rank: number | null): string {
   return rank === null ? "(無し)" : String(rank);
+}
+
+function formatMargin(margin: number | null): string {
+  return margin === null ? "(測れず)" : margin.toExponential(6);
+}
+
+function formatMarginStats(stats: MarginStats): string {
+  if (stats.count === 0) {
+    return "(測れた probe が0件)";
+  }
+  const stdDevText = stats.stdDev === null ? "(n<2)" : stats.stdDev.toExponential(6);
+  return (
+    `n=${stats.count} mean=${stats.mean!.toExponential(6)} ` +
+    `stdDev=${stdDevText} min=${stats.min!.toExponential(6)}`
+  );
 }
 
 /** probe ごとの内訳と、arm 全体の MRR/hit@1/hit@10 を出す。 */
@@ -233,7 +324,7 @@ export function formatIdentifierArmReport(report: IdentifierArmReport): string {
       `  - ${p.probeId}[${p.category}]: goldRank=${formatRank(p.goldRank)} hit@1=${p.hit1} ` +
         `hit@10=${p.hit10} distractorRank=${formatRank(p.distractorRank)} ` +
         `distractorBeatsGold=${p.distractorBeatsGold} omitted=[${p.omittedKinds.join(",")}] ` +
-        `totalInScope=${p.totalInScope}`,
+        `totalInScope=${p.totalInScope} margin=${formatMargin(p.margin)}`,
     );
     lines.push(`      項ごとの値の幅(返った候補全体): ${formatTermSpreads(p.termSpreads)}`);
     for (const detail of p.scoreDetails) {
@@ -245,5 +336,8 @@ export function formatIdentifierArmReport(report: IdentifierArmReport): string {
       `hit@1=${report.hit1Count}/${report.probeCount} ` +
       `hit@10=${report.hit10Count}/${report.probeCount}`,
   );
+  if (report.marginStats) {
+    lines.push(`margin: ${formatMarginStats(report.marginStats)}`);
+  }
   return lines.join("\n");
 }
