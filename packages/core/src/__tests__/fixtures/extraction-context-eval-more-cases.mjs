@@ -174,9 +174,7 @@ export const moreEvalCases = [
       text: "承知しました",
       occurredAt: "2026-04-10T09:00:00.000Z",
       timeZone: "Asia/Tokyo",
-      contextMessages: [
-        { speaker: "担当者", text: "2名様か4名様、どちらかのお部屋になります" },
-      ],
+      contextMessages: [{ speaker: "担当者", text: "2名様か4名様、どちらかのお部屋になります" }],
     },
     expect: {
       includes: [],
