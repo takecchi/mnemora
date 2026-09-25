@@ -62,12 +62,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `consolidate()` を呼ぶように直した——種が見つからない、または種の `subjectId` が `null` の
   場合は今日どおり（[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
   [ADR 0310](./docs/decisions/0310-subject-crossing-consolidate-frequency-measured.md) /
-  [ADR 0315](./docs/decisions/0315-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)、
+  [ADR 0316](./docs/decisions/0316-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)、
   PR #733）。
   ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
   利用者には何も起きない。migration も不要。
   ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ統合が
-  構造的に起きなくなる（実測は ADR 0310/0315）。
+  構造的に起きなくなる（実測は ADR 0310/0316）。
   明示的な `runtime.consolidate(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
 
 ---

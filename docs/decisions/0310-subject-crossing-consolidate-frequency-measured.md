@@ -124,7 +124,7 @@ Issue #579 の要求を、自動経路でも構造的に満たせる。⚠ た�
 > **追記（2026-09-25、Issue #579）—— 上の「オーナーへ返すもの」は決着した。**
 > オーナーが 2026-09-24 に「決められるものは判断で進めてよい」と述べたことを受け、クローンが
 > **案 S を採る**と決めた。実装・歯・版の扱い（`[1.1.0]`）は
-> [ADR 0315](./0315-auto-consolidate-scopes-neighbor-search-to-seed-subject.md) に記録した
+> [ADR 0316](./0316-auto-consolidate-scopes-neighbor-search-to-seed-subject.md) に記録した
 > ——**本文（上）は当時の測定として書き換えない**（`docs/decisions/README.md`）。
 
 ## 検討した代替案

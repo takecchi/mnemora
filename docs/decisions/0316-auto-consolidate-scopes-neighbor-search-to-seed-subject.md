@@ -1,4 +1,4 @@
-# ADR 0315: 自動経路の `consolidate` ジョブは、近傍探索を種の subject に絞る — 案 S を採る
+# ADR 0316: 自動経路の `consolidate` ジョブは、近傍探索を種の subject に絞る — 案 S を採る
 
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-25
@@ -153,7 +153,7 @@ Issue #579 が名指ししているのが `consolidate()`（統合による帰�
 ## 歯（変異試験で分かったこと）
 
 `packages/core/src/__tests__/consolidate.test.ts` に describe
-「`runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0315）」」
+「`runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0316）」」
 を3本足した:
 
 1. `ctx.subjectId` 無しで `tick` を呼んでも、別 subject の高affinity近傍は混ざらない
