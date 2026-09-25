@@ -293,7 +293,7 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 （ユーザーが言った事実を消す側）へ進めてはならない。機構2が「判定できないときは
 `contested` に落とす」と既に定めている先の、まさにその一例として扱う。
 
-### ⚠ 2026-09 追記（Issue #372、(B) 第2段。[ADR 0323](./decisions/0323-claim-key-contested-detection.md)）: 検出を実装した——**列と索引だけで発火する。既定 off**
+### ⚠ 2026-09 追記（Issue #372、(B) 第2段。[ADR 0324](./decisions/0324-claim-key-contested-detection.md)）: 検出を実装した——**列と索引だけで発火する。既定 off**
 
 上の追記が「今日まだ無い」と書いていた検出処理を実装した。`runtime.observe()` に
 `claimKey: { enabled: true, detectContested: true }` を渡したときだけ、新しく `active` に
