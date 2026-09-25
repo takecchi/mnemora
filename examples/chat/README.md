@@ -444,7 +444,7 @@ ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化
 ADR 0119/0121/0133）を経ていない**——ファイル自身の `_readme`/`provenance` がそれを名乗る。
 検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`。詳細と、
 `compare-baseline.json` へ昇格させる条件は
-[ADR 0303](../../docs/decisions/0303-recall-footprint-calibration-samples-need-ci-sourcing.md)。
+[ADR 0307](../../docs/decisions/0307-recall-footprint-calibration-samples-need-ci-sourcing.md)。
 
 ### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
