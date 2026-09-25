@@ -454,9 +454,14 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run archive-sweep-cost -- -
 動く——`examples/chat/src/__tests__/compare-decay-clock.test.ts`・
 `archive-sweep-cost-decay-clock.test.ts` がこれを spy で固定している。
 
-⭐ **次の表は ADR 0165「引き受けた負債」7 の数字をそのまま引く。逆算であって実測ではない**
-——`half_life_hours`/`half_life_recalls` の既定値（どちらも 720）と、段1のゲートの閾値
-`0.05` から `node` で計算した値であり、実際に走らせて確かめてはいない:
+⭐ **次の表は ADR 0165「引き受けた負債」7 の数字をそのまま引く。**`half_life_hours`/`half_life_recalls`
+の既定値（どちらも 720）と、段1のゲートの閾値 `0.05` から計算した値である。`'activity'` の
+境界（3112回）は、本物の Postgres で実測して確かめてある（[ADR 0311](../../docs/decisions/0311-activity-clock-boundary-measured-soft-and-hard.md)）。
+⚠ **ただしこれは `scoreThreshold: 0` のときの上限である。** `scoreThreshold` を省略した
+既定の呼び方では、段2の足切り（`0.1`）が先に効く。既定 720 では最大 2392回で、問いが記憶に
+似ていないほど手前で返らなくなる（表の「ちょうど1日」は、既定の呼び方では約2392回/日で来る）。
+表はどれも**使用報告（`memory_usage`）による強化が一度も起きない場合**である。`recall()` を
+呼ぶだけでは強化されない:
 
 | `decay_clock` | recall 頻度 | 強化が無い場合に沈むまで |
 |---|---|---|
