@@ -262,10 +262,10 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     this.#createPipeline = options.createPipeline ?? createLocalEmbeddingPipeline;
     // `Math.max(1, ...)`: 0回以下の指定を「1回（実質リトライ無し）」に丸める。
     // 「一度も試さない」は #startLoad の for ループの前提を壊すので許さない。
-    this.#retryAttempts = Math.max(
-      1,
-      options.retry?.attempts ?? DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS,
-    );
+    // ⚠ `NaN` は `Math.max(1, NaN) === NaN` になり同じ前提を壊す（`for (attempt = 1;
+    // attempt <= NaN; …)` が一度も回らない）ので、0回以下と同じく1回に丸める。
+    const rawRetryAttempts = options.retry?.attempts ?? DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS;
+    this.#retryAttempts = Number.isNaN(rawRetryAttempts) ? 1 : Math.max(1, rawRetryAttempts);
     this.#retryDelayMs = options.retry?.delayMs ?? defaultLocalEmbeddingRetryDelayMs;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
     this.space = Object.freeze({
