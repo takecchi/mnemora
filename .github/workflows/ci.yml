@@ -1254,6 +1254,115 @@ jobs:
           path: ${{ github.workspace }}/numeral-token-probe-openai.json
           if-no-files-found: ignore
 
+  correction-candidate-probes:
+    name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測し、値を残す"
+    runs-on: ubuntu-latest
+    # ADR 0291 §7-3、ADR 0321。`identifier-probes`/`numeral-token-probes` ジョブと
+    # **同じ形**（実測値を Job Summary へ残す・落とすのは bench 自体が壊れたときだけ）を
+    # 踏襲する——**別のケース集合・別の arm 実行・別の JSON・別の基準値ファイル**であり、
+    # 既存2ジョブには1文字も触れていない。
+    #
+    # 🔑 **このジョブが返す一手**: ADR 0232「引き受けた負債」3番が「`correction-candidates`
+    # サブコマンドは手で走らせるものであり、CI ジョブを足していない」と名指しした残債を
+    # ここで返す（ADR 0291 §3.1 決定2）。
+    #
+    # ⚠ **なぜ閾値の門にしないか**: `identifier-probes`/`numeral-token-probes` と同じ理由
+    # ——この bench のケースは A群21件・B群32件であり、ADR 0033 §3 の規律に照らして
+    # 統計的な閾値判定に足る母数ではない（ADR 0291 §4 決定7、ADR 0232 決定文「n=8 では
+    # 偽陽性率に上限を置けない」）。
+    #
+    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
+    # ——`identifier-probes`/`numeral-token-probes` ジョブと同じ仕様（`warmup()` が
+    # 失敗したらメトリクスを1件も出さずに `process.exitCode = 1` で終わる）。measure
+    # ステップが失敗しても、後続の summary/artifact ステップは `if: always()` で必ず走る。
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
+      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
+      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
+      # 重みの cache 段の path と同じ値を job-level env に置く（`identifier-probes` と同じ形。
+      # scripts/__tests__/ci-yml-local-embedding-cache-wiring.test.mjs が両向きに検査する）。
+      MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
+        run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（identifier-probes と同じ手順）"
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: "モデル重みをキャッシュする（identifier-probes/numeral-token-probes と同じ key を共有する）"
+        # 🔴 **`identifier-probes`/`numeral-token-probes` ジョブが使うキャッシュキー空間を
+        # そのまま共有する**——同じモデル `sirasagi62/ruri-v3-30m-ONNX` を使うため
+        # 分ける理由が無い（`consolidation-cost`/`archive-sweep-cost` ジョブの先例と同じ判断）。
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
+
+      - name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測する"
+        # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` ジョブと同じ規律。
+        env:
+          MNEMORA_CORRECTION_CANDIDATE_JSON: ${{ github.workspace }}/correction-candidate-probe.json
+        run: pnpm --filter @mnemora/example-chat run correction-candidates
+
+      - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
+        # `identifier-probes`/`numeral-token-probes` ジョブと同じ規律——このステップは
+        # 常に走る（`if: always()`）。`correction-candidate-probe-summary.mjs` 自体は
+        # 「入力そのものが壊れている」ときだけ非0で終わる。相違しても exit 0(⛔ 門ではない)。
+        if: always()
+        run: |
+          node scripts/correction-candidate-probe-summary.mjs \
+            --measured "${{ github.workspace }}/correction-candidate-probe.json" \
+            --baseline examples/chat/correction-candidate-probe-baseline.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: correction-candidate-probe
+          path: ${{ github.workspace }}/correction-candidate-probe.json
+          if-no-files-found: ignore
+
   association-probes:
     name: "連想枠（ADR 0151 / Issue #291）が想起の質を動かすかを @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
