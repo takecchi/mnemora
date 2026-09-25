@@ -7,7 +7,12 @@ import {
   type TimeWeightingBenchRuntimeHandle,
 } from "../time-weighting-bench.js";
 import { clockPastRecentDbWrites } from "../embed-drain.js";
-import { closeTestClient, getTestClient, requireDatabaseUrl, resetTestDatabase } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  requireDatabaseUrl,
+  resetTestDatabase,
+} from "./test-db.js";
 
 /**
  * Issue #719 の決定的な回帰検査（本物の Postgres、鍵不要）。
