@@ -435,6 +435,17 @@ ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化
 （[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md)）。⛔ **これは門ではない**——ジョブは落ちない。
 **古いことに気づかせるためだけに在る。**
 
+### `recall-footprint-calibration-samples.dev.json`: `compare-baseline.json` とは別物（Issue #340）
+
+`recall-footprint`（`packages/core`）の較正標本を増やす目的の**補助ファイル**。
+`examples/chat/src/recall-footprint-calibration-samples.ts` の `generateCalibrationSamples()`
+をローカルの `recorded` provider（`compare` と同じカセット）に対して実行した記録であり、
+**`compare-baseline.json` のような CI-sourcing の門（上の「基準値を更新する手順」・
+ADR 0119/0121/0133）を経ていない**——ファイル自身の `_readme`/`provenance` がそれを名乗る。
+検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`。詳細と、
+`compare-baseline.json` へ昇格させる条件は
+[ADR 0303](../../docs/decisions/0303-recall-footprint-calibration-samples-need-ci-sourcing.md)。
+
 ### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
 `compare`/`archive-sweep-cost` は `--decay-clock <wall|activity|either>` を受け付ける。

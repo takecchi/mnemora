@@ -1,0 +1,241 @@
+{
+  "_readme": "Issue #340 案3(comment 5822837148 §4)向けの recall-footprint 較正の補助標本。⚠ これは examples/chat/compare-baseline.json とは別物であり、ADR 0119/0121/0133 が compare-baseline.json に課す『基準値はCI artifactからだけ作る、手元では書かない』という規律の対象では *ない* — compare-baseline.json 自身は1バイトも変更していない(rows/rowCount/schemaVersion とも既存のまま)。ここは compare-baseline.json の下位互換の hold-in 代替でも拡張でもなく、examples/chat/src/recall-footprint-calibration-samples.ts の CALIBRATION_SAMPLE_DESIGN(hold-outの推定誤差を見る前に固定した設計)を、ローカルの recorded カセット(examples/chat/cassettes/compare.json)+ ローカル Postgres に対して実行した記録である。correction-case-set.dev.ts の『dev(held-outではない、調整用)』という位置づけと同じ意味で、この rows は較正への追加投入の *候補* であり、compare-baseline.json のような ⭐ 門(CIの2回一致・PRのCI runからの取得)を経ていない。この値を recall-footprint-baseline.test.ts の ACCURACY_TOLERANCE/FLOOR_CHARS の歯や BUILTIN_RECALL_FOOTPRINT_PROFILE に反映するかどうかは、CI(example-chat job)でのバイト単位の再実測を経てから決めること — 手順は examples/chat/README.md の compare-baseline.json 節に倣う。",
+  "schemaVersion": 1,
+  "provenance": {
+    "how": "examples/chat/src/recall-footprint-calibration-samples.ts の generateCalibrationSamples() を、ローカルの recorded provider(MNEMORA_LLM=recorded, MNEMORA_EMBEDDING=recorded, examples/chat/cassettes/compare.json 再生)+ ローカル Postgres 17 + pgvector に対して実行した。実 API は一度も叩いていない(RecordedEmbeddingProvider/RecordedLLMProviderはカセットに無い入力で例外を投げる設計であり、生成中に一度も例外が出なかったことを実測で確認した)。",
+    "reproducedLocally": true,
+    "localRunsMatched": 2,
+    "note": "同じ設計を2回、独立に ingest(毎回新しい tenantId)して実行し、measuredAt を除いて rows がバイト単位で一致した。⚠ これは compare-baseline.json の更新手順(README『2回以上のCI run』)が要求する『同一commitのCI再実行2回』とは異なる— 同じマシン・同じプロセスでの2回の再実行であり、CI環境間の非決定性(例: ADR 0170が見つけたORDER BY起因の非決定)は検出できない。",
+    "llmMode": "recorded",
+    "embeddingMode": "recorded",
+    "designDecidedBeforeSeeingHoldOutErrors": true,
+    "measuredAt": "2026-09-25T02:07:51.391Z"
+  },
+  "rowCount": 8,
+  "rows": [
+    {
+      "fillerPairs": 12,
+      "recallLimit": 20,
+      "turnCount": 26,
+      "totalInScope": 9,
+      "returnedCount": 9,
+      "mnemoraChars": 319,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 9,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 9,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 191
+    },
+    {
+      "fillerPairs": 13,
+      "recallLimit": 20,
+      "turnCount": 28,
+      "totalInScope": 10,
+      "returnedCount": 10,
+      "mnemoraChars": 332,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 10,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 10,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    },
+    {
+      "fillerPairs": 16,
+      "recallLimit": 20,
+      "turnCount": 34,
+      "totalInScope": 11,
+      "returnedCount": 11,
+      "mnemoraChars": 348,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 11,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 11,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    },
+    {
+      "fillerPairs": 17,
+      "recallLimit": 20,
+      "turnCount": 36,
+      "totalInScope": 12,
+      "returnedCount": 12,
+      "mnemoraChars": 365,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 12,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 12,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    },
+    {
+      "fillerPairs": 19,
+      "recallLimit": 20,
+      "turnCount": 40,
+      "totalInScope": 13,
+      "returnedCount": 13,
+      "mnemoraChars": 380,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 13,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 13,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    },
+    {
+      "fillerPairs": 21,
+      "recallLimit": 20,
+      "turnCount": 44,
+      "totalInScope": 15,
+      "returnedCount": 15,
+      "mnemoraChars": 411,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 15,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 15,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    },
+    {
+      "fillerPairs": 25,
+      "recallLimit": 20,
+      "turnCount": 52,
+      "totalInScope": 17,
+      "returnedCount": 17,
+      "mnemoraChars": 446,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 17,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 17,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    },
+    {
+      "fillerPairs": 29,
+      "recallLimit": 20,
+      "turnCount": 60,
+      "totalInScope": 19,
+      "returnedCount": 19,
+      "mnemoraChars": 479,
+      "bandEntryCount": 0,
+      "rawIndex": {
+        "groups": [
+          {
+            "axis": "subject",
+            "key": null,
+            "count": 19,
+            "countKind": "exact"
+          }
+        ],
+        "totalInScope": 19,
+        "countKind": "exact",
+        "digestBand": [],
+        "digestBandCoverage": {
+          "shown": 0,
+          "eligible": 0,
+          "countKind": "exact"
+        }
+      },
+      "rawIndexJsonLength": 193
+    }
+  ]
+}
