@@ -9,7 +9,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `RecallQuery.attributes`（Issue #152/#153、ADR 0306）の歯。
+ * `RecallQuery.attributes`（Issue #152/#153、ADR 0307）の歯。
  *
  * `recall-subjectless-filter.test.ts`（ADR 0286）・`recall-validity.test.ts`（ADR 0164）と
  * 同型の構え:
@@ -17,7 +17,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * 2. 母集合を実際に減らす本命の歯——AND 等値、キー不一致・値不一致・キー不在のどれも落ちる。
  * 3. 空オブジェクトは「絞り込み無し」（省略と同じ）。
  * 4. `totalInScope` はこの絞り込みの内側だけを数える。**`omitted` には出ない**
- *    （`subjectId`/`tenant` と同じ「スコープの外側の境界」——ADR 0306 決定6）。
+ *    （`subjectId`/`tenant` と同じ「スコープの外側の境界」——ADR 0307 決定6）。
  * 5. `RecalledMemory.attributes` が返り値に載る。
  * 6. adapter が `attributes` を無視しても安全（取りこぼしはあるが混入は無い）——
  *    `AttributesFilterStrippingVectorStore` で段1の絞りを剥がし、後置フィルタ
@@ -215,7 +215,7 @@ describe("recall() — attributes が実際に候補を落とす（AND 等値、
     expect(ids).not.toContain(onlyOne.id);
   });
 
-  it("attributes で落ちた Memory は omitted に出ない（subjectId/tenant と同じスコープの外側、ADR 0306 決定6）", async () => {
+  it("attributes で落ちた Memory は omitted に出ない（subjectId/tenant と同じスコープの外側、ADR 0307 決定6）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], {
       digest: "matching",

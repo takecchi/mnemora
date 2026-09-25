@@ -128,7 +128,7 @@ export class InMemoryLexicalStore implements LexicalStore {
       if (!subjectMatches) {
         continue;
       }
-      // Issue #152/#153（ADR 0306）: AND 等値の絞り込み（`InMemoryVectorStore` と同じ意味論）。
+      // Issue #152/#153（ADR 0307）: AND 等値の絞り込み（`InMemoryVectorStore` と同じ意味論）。
       if (opts.filter.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};
         const attributesMatch = Object.entries(opts.filter.attributes).every(

@@ -45,7 +45,7 @@ export interface LexicalFilter {
    */
   validAt?: Date;
   /**
-   * `VectorFilter.attributes` と同じ欄・同じ意味（Issue #152/#153、ADR 0306）。
+   * `VectorFilter.attributes` と同じ欄・同じ意味（Issue #152/#153、ADR 0307）。
    */
   attributes?: Attributes;
 }

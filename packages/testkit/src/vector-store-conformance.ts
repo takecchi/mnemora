@@ -46,7 +46,7 @@ export interface PrepareMemoryIdAttrs {
   validFrom?: Date | null;
   /** Issue #280: `filter.validAt` の歯が使う。 */
   validUntil?: Date | null;
-  /** Issue #152/#153（ADR 0306）: `filter.attributes` の歯が使う。 */
+  /** Issue #152/#153（ADR 0307）: `filter.attributes` の歯が使う。 */
   attributes?: Record<string, string>;
 }
 
@@ -870,7 +870,7 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // filter.attributes（Issue #152/#153、ADR 0306）: AND 等値の絞り込み。
+    // filter.attributes（Issue #152/#153、ADR 0307）: AND 等値の絞り込み。
     // -------------------------------------------------------------------
 
     it("filter.attributes: 渡したキーと同じ値を持つ Memory だけが返る", async () => {

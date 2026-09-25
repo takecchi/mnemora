@@ -1,6 +1,6 @@
 -- 0019_observations_memories_attributes.sql
 --
--- Issue #152/#153（ADR 0306）: 呼び手が申告する任意属性 `attributes` を持たせる。
+-- Issue #152/#153（ADR 0307）: 呼び手が申告する任意属性 `attributes` を持たせる。
 --
 -- ## なぜ2テーブルとも要るか
 --
