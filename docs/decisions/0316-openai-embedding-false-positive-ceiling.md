@@ -332,3 +332,8 @@ API が返すベクトルの値に依存しない）: **61回の embed 呼び出
   見え方を確認していない**（手元の `tsx` 実行でのみ確認。§「測ったこと」参照）。
 
 Refs #109, ADR 0094, ADR 0254, ADR 0276, ADR 0313
+
+> **追記（2026-09-25、Issue #109）**: 識別子2群（`identifiersSparse`/`identifiersDense`）の
+判定基準（引き受けた負債2）について、margin基準・k-of-nの候補案を実測で比較した——
+[ADR 0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md)（状態:提案。門にする
+かの判断はまだ含まない）。

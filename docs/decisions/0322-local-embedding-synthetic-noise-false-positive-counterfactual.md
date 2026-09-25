@@ -544,3 +544,7 @@ round ごとに突き合わせた（2回の独立実行で下の数値は1件も
 - `examples/chat/local-noise-arm-candidate-diff.json`（実測結果、コミット済み）
 
 Refs #109
+
+> **追記（2026-09-25、Issue #109）**: この ADR の反実仮想データ（識別子2群の local
+counterfactual）を土台に、margin基準の判定候補を実測で比較した——
+[ADR 0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md)（状態:提案）。
