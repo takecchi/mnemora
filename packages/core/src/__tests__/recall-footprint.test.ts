@@ -12,6 +12,11 @@ import {
 } from "../recall-footprint.js";
 import { DEFAULT_RECALL_LIMIT } from "../recall.js";
 import type { DigestEntry, RecallResult, RecalledMemory } from "../recall.js";
+import type { Ctx } from "../ctx.js";
+import { defaultDecayStrategy } from "../strategies/decay.js";
+import type { NewMemory } from "../memory.js";
+import { createRuntime } from "../runtime.js";
+import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
  * `recall-footprint`（Issue #276）の歯。**DB もネットワークも要らない、純関数の検査のみ。**
@@ -96,8 +101,22 @@ describe("estimateRecallFootprint — 境界", () => {
   });
 });
 
-describe("estimateRecallFootprint — 帯が飽和した後は件数を増やしても chars が増えない（mnemora は頭打ち、の主張そのもの）", () => {
-  it("bandSaturated な状況で memoryCountInScope をさらに増やしても chars は変わらない", () => {
+/**
+ * ⚠ **主張を Issue #340（構造項、comment 5822837148）に合わせて言い直した歯**
+ * （元は「chars は完全に頭打ちで1バイトも動かない」という厳密な等値だったが、それは
+ * 誤りだった——`totalInScope`/`digestBandCoverage.eligible` は帯自体が飽和していても
+ * `JSON.stringify` 上の桁数が伸び続ける（構造項(b)/(c)、`O(log memoryCountInScope)`）。
+ * 帯（`bandEntries`・`byTier.digest`）と較正済みの2係数はここでも変わらないままで、
+ * **増える分は桁上がり構造項だけに限られる**——それを式から独立に導いて厳密一致で
+ * 検査する（数値を実測値へ貼り替えたのではなく、主張そのものを構造から導く形に直した）。
+ */
+describe("estimateRecallFootprint — 帯が飽和した後、chars の増分は totalInScope/eligible の桁上がり（構造項(b)/(c)）だけで説明できる", () => {
+  /** `recall-footprint.ts` の `extraDigitsBeyondOne` と同じ計算を、実装から独立に複製する。 */
+  function extraDigitsBeyondOne(n: number): number {
+    return Math.max(0, String(Math.max(0, Math.trunc(n))).length - 1);
+  }
+
+  it("bandSaturated な状況で memoryCountInScope を増やしても、band/digest tier 自体は変わらない", () => {
     const a = estimateRecallFootprint({ memoryCountInScope: 100, limit: 10 }, shapeTestProfile);
     const b = estimateRecallFootprint({ memoryCountInScope: 100_000, limit: 10 }, shapeTestProfile);
     expect(a.bandSaturated).toBe(true);
@@ -105,8 +124,34 @@ describe("estimateRecallFootprint — 帯が飽和した後は件数を増やし
     // 返る件数・帯の件数は、それぞれ limit / bandLimit で頭打ちになっているので同じ。
     expect(b.returnedMemories).toBe(a.returnedMemories);
     expect(b.bandEntries).toBe(a.bandEntries);
-    // ⭐ chars 自体が増えない（会話が伸びても mnemora 側は伸びないという主張の核）。
-    expect(b.chars).toBe(a.chars);
+    // digest tier は returnedMemories だけで決まるので、完全に不変（頭打ちの核はここ）。
+    expect(b.byTier.digest).toBe(a.byTier.digest);
+  });
+
+  it("chars の増分は、totalInScope・shown(bandEntries)・eligible(帯の資格件数) の桁上がりを式から計算した値と厳密に一致する", () => {
+    const a = estimateRecallFootprint({ memoryCountInScope: 100, limit: 10 }, shapeTestProfile);
+    const b = estimateRecallFootprint({ memoryCountInScope: 100_000, limit: 10 }, shapeTestProfile);
+
+    const bandEligibleA = 100 - a.returnedMemories; // = 90
+    const bandEligibleB = 100_000 - b.returnedMemories; // = 99,990
+
+    // 構造項(b): totalInScope の桁上がりは JSON 上 totalInScope 欄と(単一group想定の)
+    // groups[0].count 欄の両方に効くので 2倍。
+    const totalInScopeCarryDiff = 2 * (extraDigitsBeyondOne(100_000) - extraDigitsBeyondOne(100));
+    // 構造項(c): digestBandCoverage.shown(=bandEntries)・eligible(=帯の資格件数) の桁上がり。
+    // shown は a/b とも 50(2桁)で同じなので寄与0——それでも式には残し、
+    // 「たまたま0」であることを明示する。
+    const shownCarryDiff =
+      extraDigitsBeyondOne(b.bandEntries) - extraDigitsBeyondOne(a.bandEntries);
+    const eligibleCarryDiff =
+      extraDigitsBeyondOne(bandEligibleB) - extraDigitsBeyondOne(bandEligibleA);
+
+    const expectedCharsDiff = totalInScopeCarryDiff + shownCarryDiff + eligibleCarryDiff;
+
+    // 事前計算(検算用のドキュメント): 2×(5-2) + (1-1) + (4-1) = 6 + 0 + 3 = 9。
+    expect(expectedCharsDiff).toBe(9);
+    expect(b.byTier.index - a.byTier.index).toBe(expectedCharsDiff);
+    expect(b.chars - a.chars).toBe(expectedCharsDiff);
   });
 });
 
@@ -144,25 +189,62 @@ describe("estimateRecallFootprint — associationCount を渡さない呼び出�
     },
   );
 
-  it("省略時の見積もりは、ADR 0166 以前の式（returnedMemories = min(limit, memoryCountInScope)）と一致する", () => {
-    // ADR 0166 以前の式をそのままここに複製し、実装から独立に検算する。
-    function preAdr0166(shape: { memoryCountInScope: number; limit?: number }) {
+  /**
+   * ⚠ **主張を Issue #340（構造項、comment 5822837148）に合わせて言い直した歯**
+   * （元は「ADR 0166 以前の式（構造項を1つも知らない素朴な式）と一致する」だったが、
+   * それは Issue #340 で正しく直った側と食い違うようになった——だが崩れたのは
+   * 「association を渡さない後方互換」の主張ではなく、**この複製が構造項を知らない**
+   * ことのほうである。ADR 0166 が守っている本質（`returnedMemories`/`bandEntries` の
+   * 決め方——association を考慮しない `min(limit, memoryCountInScope)` 系の式——は
+   * このテストの `for` ループが個別に検査しており、今も揺らいでいない）。
+   *
+   * ⟹ **複製した式のほうに Issue #340 の構造項を足して**、実装が「ADR 0166 の
+   * association 非対応の骨格」と「Issue #340 の構造項」の両方を正しく組み合わせて
+   * いることを、独立な再実装との一致で検算する形に直した（数値を実測値へ貼り替えた
+   * のではなく、複製した式のほうを実装の現在の姿に追随させた——`shapeTestProfile`・
+   * `shapesWithoutAssociation` はどちらも変えていない）。
+   */
+  it("省略時の見積もりは、ADR 0166 以前の式（association 非対応）に Issue #340 の構造項を足したものと一致する", () => {
+    // ADR 0166 以前の式（association を知らない）に、Issue #340 の構造項(a)〜(d)を
+    // 実装から独立に足して複製する。
+    function preAdr0166WithStructuralTerms(shape: { memoryCountInScope: number; limit?: number }) {
       const inScope = Math.max(0, shape.memoryCountInScope);
       const limit = shape.limit ?? DEFAULT_RECALL_LIMIT;
       const bandLimit = 50; // DEFAULT_DIGEST_BAND_LIMIT
-      const returnedMemories = Math.min(limit, inScope);
+      const returnedMemories = Math.min(limit, inScope); // ADR 0166 以前: association を足さない
       const bandEligible = Math.max(0, inScope - returnedMemories);
       const bandEntries = Math.min(bandLimit, bandEligible);
       const perEntry = 63 + 1 + Math.min(shapeTestProfile.charsPerDigest, 120);
-      const bandChars = Math.min(bandEntries * perEntry, 4000);
+      const uncappedBandChars = bandEntries * perEntry;
+      const bandSaturated = uncappedBandChars >= 4000; // DIGEST_BAND_MAX_CHARS
+
+      // Issue #340 の構造項。`recall-footprint.ts` の実装と同じ式を、独立に複製する
+      // （このファイルの他の歯・上の「帯が飽和した後」の歯と同じ作法）。
+      function extraDigitsBeyondOne(n: number): number {
+        return Math.max(0, String(Math.max(0, Math.trunc(n))).length - 1);
+      }
+      const commaOvercount = !bandSaturated && bandEntries >= 1 ? 1 : 0; // 構造項(a)
+      const bandChars = Math.min(uncappedBandChars, 4000) - commaOvercount;
+      const totalInScopeDigitCarry = 2 * extraDigitsBeyondOne(inScope); // 構造項(b)
+      const bandCoverageDigitCarry =
+        extraDigitsBeyondOne(bandEntries) + extraDigitsBeyondOne(bandEligible); // 構造項(c)
+      const limitedByChars = !bandSaturated && bandEligible > bandEntries ? 26 : 0; // 構造項(d)
+
       const digestChars = returnedMemories * shapeTestProfile.charsPerDigest;
-      const indexChars = shapeTestProfile.fixedIndexChars + bandChars;
+      const indexChars =
+        shapeTestProfile.fixedIndexChars +
+        bandChars +
+        totalInScopeDigitCarry +
+        bandCoverageDigitCarry +
+        limitedByChars;
       return { returnedMemories, bandEntries, chars: digestChars + indexChars };
     }
 
     for (const shape of shapesWithoutAssociation) {
-      const expected = preAdr0166(shape);
+      const expected = preAdr0166WithStructuralTerms(shape);
       const actual = estimateRecallFootprint(shape, shapeTestProfile);
+      // ⭐ ADR 0166 の骨格（association を考慮しない returnedMemories/bandEntries の
+      // 決め方）は、この個別の一致で今も検査され続けている。
       expect(actual.returnedMemories).toBe(expected.returnedMemories);
       expect(actual.bandEntries).toBe(expected.bandEntries);
       expect(actual.chars).toBe(expected.chars);
@@ -408,13 +490,33 @@ describe("compareWithFullLog — 許容誤差の内側は too_close_to_call", ()
       charsPerDigest: 10,
       fixedIndexChars: 0,
     };
-    // memoryCountInScope=10, limit=既定(10) ⟹ 帯は空。chars = 10 * 10 = 100。
+    // memoryCountInScope=10, limit=既定(10) ⟹ 帯は空。digest tier = 10 * 10 = 100。
+    //
+    // ⚠ **主張を Issue #340（構造項、comment 5822837148）に合わせて言い直した歯**
+    // （元は「chars は厳密に100」という決め打ちだったが、それは誤りだった——
+    // `totalInScope=10` は最初から2桁であり、構造項(b)（`totalInScope`・単一group想定の
+    // `groups[0].count`の桁上がり、2×(桁数-1)=2×1=+2）が乗るので実際は102になる。
+    // この歯が検査したい本質は「境界（許容誤差の内と外）を正しくまたぐか」であって
+    // 「100という特定の数値」ではないので、期待値そのものを構造項込みの式から導く
+    // 形に直した——数値を実測値へ貼り替えたのではなく、主張を構造から導いている）。
+    function extraDigitsBeyondOne(n: number): number {
+      return Math.max(0, String(Math.max(0, Math.trunc(n))).length - 1);
+    }
+    const expectedChars =
+      10 * profile.charsPerDigest + profile.fixedIndexChars + 2 * extraDigitsBeyondOne(10);
     const est = estimateRecallFootprint({ memoryCountInScope: 10 }, profile);
-    expect(est.chars).toBe(100);
+    expect(est.chars).toBe(expectedChars); // = 100 + 0 + 2 = 102
 
-    // 100/103 ≈ 0.9709 ⟹ |0.9709 - 1| ≈ 0.0291 は既定許容誤差(0.05)の内側。
+    // fullLogChars は est.chars（構造項込みの見積もり）の1.03倍から導く——
+    // 「103」という固定の実測値ではなく、見積もりに対して常に約3%上振れた値にする
+    // ことで、est.chars が今後動いても「境界内(許容誤差5%の内側)にいる」という
+    // この歯の意図がそのまま保たれる。
+    const fullLogChars = Math.round(est.chars * 1.03);
+    const estimatedShare = est.chars / fullLogChars;
+    expect(Math.abs(estimatedShare - 1)).toBeLessThanOrEqual(0.05); // 既定許容誤差の内側
+
     const result = compareWithFullLog({
-      fullLogChars: 103,
+      fullLogChars,
       shape: { memoryCountInScope: 10 },
       profile,
     });
@@ -478,5 +580,266 @@ describe("footprintSampleFromRecall — RecallResult から3欄を取り出す",
     const result = makeRecallResult({ chars: 500, memoryCount: 5 });
     const sample = footprintSampleFromRecall(result);
     expect(sample.bandEntryCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// estimateRecallFootprint — 構造項（Issue #340 comment 5822837148 / 本 PR）
+//
+// `BUILTIN_RECALL_FOOTPRINT_PROFILE`（および `examples/chat/compare-baseline.json`
+// の hold-in 7行）は「目次帯が空・totalInScope/shown/eligible がすべて1桁」という
+// 特定の形からしか較正していない。その形から外れたときに実際の `recall()` の
+// `usage.chars`（= `JSON.stringify(indexBand)` の実バイト数を含む）と
+// `estimateRecallFootprint` の見積もりがどれだけずれるかを、in-memory の runtime
+// （`runtime-fakes.ts`、`@mnemora/testkit` には依存しない——このファイル群の作法）で
+// 実際に `recall()` を呼んで検算する。
+//
+// **DB もネットワークも要らない**——`createFakeRuntimeStores()` が組む in-memory 実装
+// に対して、`digest` の長さを固定した Memory を作り、`estimateRecallFootprint` に
+// 渡すプロファイルの `charsPerDigest` をその固定長に、`fixedIndexChars` を
+// 「帯が空・1桁」の基準シナリオで実測した値に、それぞれ合わせる
+// ——そうすれば残りの差はすべて構造項（帯のカンマ・桁上がり・limitedBy）だけになる。
+// ---------------------------------------------------------------------------
+
+describe("estimateRecallFootprint — 構造項をin-memory runtimeの実recall()に対して検算する（Issue #340）", () => {
+  const ctx: Ctx = { tenantId: "tenant-1" };
+  const NOW = new Date("2026-06-01T00:00:00.000Z");
+  const DIGEST_LEN = 10;
+  const DIGEST = "a".repeat(DIGEST_LEN);
+
+  function newTestMemory(overrides: Partial<NewMemory> = {}): NewMemory {
+    const recordedAt = overrides.recordedAt ?? NOW;
+    const strength = overrides.strength ?? 1;
+    const halfLifeHours = overrides.halfLifeHours ?? 24 * 365 * 10;
+    return {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: `hash-${Math.random()}`,
+      digest: DIGEST,
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      tags: [],
+      occurredAt: null,
+      recordedAt,
+      lastReinforcedAt: null,
+      strength,
+      halfLifeHours,
+      decayFloorAt: defaultDecayStrategy.floorAt({
+        recordedAt,
+        lastReinforcedAt: null,
+        strength,
+        halfLifeHours,
+      }),
+      embeddingStatus: "ready",
+      ...overrides,
+    };
+  }
+
+  function buildTestRuntime() {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+    });
+    return { runtime, stores };
+  }
+
+  /**
+   * `FakeMemoryStore`（`runtime-fakes.ts`）は id を `mem-<counter>` で振るため桁数が
+   * テスト内で伸び縮みする——本物（Postgres）は常に36字の UUID であり、
+   * `DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS`（63）はその36字を前提に実測した定数
+   * である。ここで id を強制的に36字へ揃えないと、id の桁の伸びという、この歯が
+   * 検査したい構造差とは無関係なノイズが紛れ込む。
+   *
+   * `FakeMemoryStore` の `backing` は TS 上は private だが実行時にはただのプロパティ
+   * なので、id を振り直すためだけにここで直接触る（このファイル内でしか使わない）。
+   */
+  function fixMemoryIdTo36Chars(
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+    memory: { id: string },
+    seq: number,
+  ): string {
+    const backing = (
+      stores.memoryStore as unknown as { backing: { memories: Map<string, unknown> } }
+    ).backing;
+    const newId = `m${seq.toString().padStart(35, "0")}`; // 常に36字
+    const existing = backing.memories.get(memory.id);
+    backing.memories.delete(memory.id);
+    backing.memories.set(newId, { ...(existing as object), id: newId });
+    return newId;
+  }
+
+  interface Scenario {
+    name: string;
+    count: number;
+    limit?: number;
+    digestBandLimit?: number;
+    multiGroup?: boolean;
+  }
+
+  async function recallFor(sc: Scenario): Promise<RecallResult> {
+    const { runtime, stores } = buildTestRuntime();
+    for (let i = 0; i < sc.count; i++) {
+      const memory = await stores.memoryStore.createMemory(
+        ctx,
+        newTestMemory({
+          subjectId: sc.multiGroup ? `subj-${i % 3}` : null,
+          recordedAt: new Date(NOW.getTime() - i * 1000),
+        }),
+      );
+      const fixedId = fixMemoryIdTo36Chars(stores, memory, i + 1);
+      await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, fixedId, [1, 0]);
+    }
+    return runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: sc.limit,
+      digestBandLimit: sc.digestBandLimit,
+    });
+  }
+
+  /**
+   * 基準シナリオ（帯が空・単一 group・totalInScope が1桁）で実測した `usage.chars` を、
+   * このブロックの `profile.fixedIndexChars` として使う。この形は
+   * `BUILTIN_RECALL_FOOTPRINT_PROFILE` の hold-in 標本（`totalInScope <=
+   * DEFAULT_RECALL_LIMIT` の7行、いずれも帯が空で1桁）と同じ形であり、
+   * ここでの構造項（すべてこの形からの「ずれ」として定義される）の基準点と一致する。
+   */
+  const REFERENCE: Scenario = { name: "基準(帯なし・単一group・1桁)", count: 5, limit: 10 };
+
+  it("基準シナリオでは fixedIndexChars をそのまま実測できる（帯なし・1桁なので構造項はすべて0）", async () => {
+    const result = await recallFor(REFERENCE);
+    // 帯が空・単一group・1桁 ⟹ どの構造項も効かない（このテストファイル冒頭の前提）。
+    expect(result.index.digestBand).toEqual([]);
+    expect(result.index.groups).toHaveLength(1);
+    expect(result.index.totalInScope).toBeLessThan(10);
+    expect(result.index.digestBandCoverage?.shown).toBeLessThan(10);
+    expect(result.index.digestBandCoverage?.eligible).toBeLessThan(10);
+  });
+
+  // 基準シナリオの実測値。上のテストが「本当に基準の形か」を検査している。
+  // ⚠ 値そのものは実装(recall-runtime.ts / digest-band.ts)の構造定数から決まる
+  // 実測値であり、ここで書き換えて歯を通すためのものではない
+  // ("なぜ191か"は下の `beforeAll` 相当の実測から来ている——`it.concurrent` は使わず
+  // 各テストが自分で `recallFor` を呼んで実測し直す)。
+
+  /**
+   * 構造項だけを検査するためのプロファイル。
+   * - `charsPerDigest` は固定した digest 長そのもの（切り詰めは起きない長さ）。
+   * - `fixedIndexChars` は基準シナリオの実測（band=0・単一group・1桁）。
+   *   `calibrateRecallFootprint` を経由しない直書きだが、値の出所は実測であり
+   *   歯の中で毎回検算する（下の `describe.each` の1本目が基準シナリオを兼ねる）。
+   */
+  let referenceFixedIndexChars: number | undefined;
+
+  async function profileFor(): Promise<RecallFootprintProfile> {
+    if (referenceFixedIndexChars === undefined) {
+      const result = await recallFor(REFERENCE);
+      referenceFixedIndexChars = result.usage.chars - result.memories.length * DIGEST_LEN;
+    }
+    return {
+      origin: {
+        kind: "calibrated",
+        sampleCount: 1,
+        observedMemoryCount: { min: 1, max: 1000 },
+        borrowedFromDefault: [],
+      },
+      charsPerDigest: DIGEST_LEN,
+      fixedIndexChars: referenceFixedIndexChars,
+    };
+  }
+
+  /**
+   * ⭐ 本体の歯: 単一 group・帯が飽和していない（`DIGEST_BAND_MAX_CHARS` に当たらない）
+   * 領域では、実際の `usage.chars` と `estimateRecallFootprint` の見積もりが
+   * **構造上ぴったり一致する**はずである（残差はすべて構造項として説明済みのため）。
+   *
+   * 実装前（構造項を足す前）はここが赤くなる——赤くなった実測は本 PR のコミットログ・
+   * 報告に記録してある(WIP コミット → 実装 → 緑、の順)。
+   */
+  const CLEAN_SCENARIOS: Scenario[] = [
+    { name: "帯=0(1桁)", count: 5, limit: 10 },
+    { name: "帯=1(1桁)", count: 6, limit: 5 },
+    { name: "帯=2(1桁)", count: 7, limit: 5 },
+    { name: "帯=多数、切り詰めなし(totalInScopeが2桁)", count: 30, limit: 10 },
+    {
+      name: "帯がentry_limitで切られる(totalInScopeが2桁)",
+      count: 30,
+      limit: 10,
+      digestBandLimit: 5,
+    },
+    {
+      name: "帯がentry_limitで切られる(totalInScopeが3桁)",
+      count: 150,
+      limit: 10,
+      digestBandLimit: 5,
+    },
+  ];
+
+  it.each(CLEAN_SCENARIOS)(
+    "$name: 実際のusage.charsとestimateRecallFootprintの見積もりが完全一致する",
+    async (sc) => {
+      const [result, profile] = await Promise.all([recallFor(sc), profileFor()]);
+      const est = estimateRecallFootprint(
+        { memoryCountInScope: sc.count, limit: sc.limit, digestBandLimit: sc.digestBandLimit },
+        profile,
+      );
+      expect(est.chars).toBe(result.usage.chars);
+    },
+  );
+
+  /**
+   * ⚠ 既知の残差・その1: 目次帯が**文字数上限**（`DIGEST_BAND_MAX_CHARS`）で
+   * 飽和する領域では、`estimateRecallFootprint` の `帯の件数`
+   * （`min(digestBandLimit, bandEligible)`——件数の上限だけを見る）が、実際の
+   * `packDigestBand`（文字数の上限にも当たったらそこで打ち切る）の打ち切り位置と
+   * 一致しない。これは本 PR が対象にする4つの構造項とは別の、既存の近似
+   * （`RecallFootprintEstimate.bandSaturated` の doc）であり、本 PR では直さない。
+   * ⟹ ここでは「一致しないこと」自体を歯にして、直したふりをしない。
+   */
+  it("既知の残差: 帯が文字数上限で飽和する領域では一致しない（既存の近似、本PRの対象外）", async () => {
+    const sc: Scenario = { name: "飽和", count: 150, limit: 10, digestBandLimit: 200 };
+    const [result, profile] = await Promise.all([recallFor(sc), profileFor()]);
+    expect(result.index.digestBandCoverage?.limitedBy).toBe("char_budget");
+    const est = estimateRecallFootprint(
+      { memoryCountInScope: sc.count, limit: sc.limit, digestBandLimit: sc.digestBandLimit },
+      profile,
+    );
+    expect(est.chars).not.toBe(result.usage.chars);
+  });
+
+  /**
+   * ⚠ 既知の残差・その2: `groups` が複数件になる場合、`totalInScope` の桁上がり項
+   * （構造項(b)）は「単一 group で `groups[0].count === totalInScope`」を仮定しており、
+   * 複数 group では成り立たない。`RecallFootprintShape` は group の内訳を持たない
+   * （持たせると公開シグネチャが変わる——本 PR の制約）ため、`estimateRecallFootprint`
+   * からは原理的に直せない。ここでは「一致しないこと」を明示し、将来
+   * `RecallFootprintShape` を拡張する判断の材料として残す。
+   */
+  it("既知の残差: groupsが複数件のときは一致しない（shapeがgroup内訳を持たないため原理的に直せない）", async () => {
+    const sc: Scenario = { name: "複数group", count: 6, limit: 10, multiGroup: true };
+    const [result, profile] = await Promise.all([recallFor(sc), profileFor()]);
+    expect(result.index.groups.length).toBeGreaterThan(1);
+    const est = estimateRecallFootprint(
+      { memoryCountInScope: sc.count, limit: sc.limit, digestBandLimit: sc.digestBandLimit },
+      profile,
+    );
+    expect(est.chars).not.toBe(result.usage.chars);
   });
 });

@@ -417,6 +417,45 @@ function bandEntryChars(charsPerDigest: number): number {
   );
 }
 
+// ---------------------------------------------------------------------------
+// 構造項（Issue #340 comment 5822837148 / 本 PR）
+//
+// `BUILTIN_RECALL_FOOTPRINT_PROFILE.fixedIndexChars` は「目次帯が空・
+// totalInScope が1桁（0〜9）・帯の shown/eligible も1桁」という**特定の形**の
+// `indexBand` を JSON.stringify した実測から較正した定数である
+// （`examples/chat/compare-baseline.json` の hold-in 7行がすべてこの形——
+// `recall-footprint-baseline.test.ts` の `holdInRows` フィルタが同じ条件を使っている）。
+//
+// その形から外れる（桁が増える・帯が伸びる・帯が entry_limit で切られる）と、
+// `JSON.stringify` の実バイト数は較正時の形からずれる。このずれは**データを
+// 見て決めた係数ではなく、JSON の構文そのものから決まる**——だから較正係数
+// （`charsPerDigest` / `fixedIndexChars`）を再較正するのではなく、ここで
+// **構造項として加算する**（Issue #340 の該当コメントが実測・整理したもの）。
+// ---------------------------------------------------------------------------
+
+/**
+ * 非負整数 `n` を10進表記したときの桁数が、1桁（0〜9）からいくつ増えたか。
+ *
+ * `BUILTIN_RECALL_FOOTPRINT_PROFILE` の較正標本（hold-in 7行）は `totalInScope`・
+ * `digestBandCoverage.shown`・`digestBandCoverage.eligible` のいずれも1桁だった
+ * ——「1桁」を基準に、それを超えた桁数だけ JSON 上のバイト数が増える。
+ */
+function extraDigitsBeyondOne(n: number): number {
+  const normalized = Math.max(0, Math.trunc(n));
+  return Math.max(0, String(normalized).length - 1);
+}
+
+/**
+ * `,"limitedBy":"entry_limit"` を `digestBandCoverage` に足したときの追加バイト数。
+ *
+ * 【実測】`JSON.stringify({shown:1,eligible:1,countKind:"exact",limitedBy:"entry_limit"})`
+ * と `limitedBy` 抜きの同じオブジェクトの差は26字（`packages/core/src/digest-band.ts`
+ * `DigestBandLimitedBy` の3値のうち `"entry_limit"`/`"char_budget"` は同じ11字なので
+ * 同じ26字になる——`"both"` だけ短い。ここで足すのは `"entry_limit"` 相当の場合のみ
+ * （下の `estimateRecallFootprint` の呼び出し条件を見よ）。
+ */
+const LIMITED_BY_LABEL_ADDED_CHARS = 26;
+
 /**
  * `recall()` が積むであろう文字数を見積もる。**LLM を呼ばない。DB も引かない。**
  *
@@ -428,10 +467,41 @@ function bandEntryChars(charsPerDigest: number): number {
  * 素の返る件数 = min(limit, memoryCountInScope)
  * 連想の件数   = min(associationCount, memoryCountInScope - 素の返る件数)
  * 返る件数     = 素の返る件数 + 連想の件数
- * 帯の件数     = min(digestBandLimit, memoryCountInScope - 返る件数)
- * 帯の費用     = min(帯の件数 × (63 + 1 + min(charsPerDigest, 120)), DIGEST_BAND_MAX_CHARS)
- * 合計         = fixedIndexChars + 返る件数 × charsPerDigest + 帯の費用
+ * 帯の資格件数 = memoryCountInScope - 返る件数
+ * 帯の件数     = min(digestBandLimit, 帯の資格件数)
+ * 帯の費用(素) = min(帯の件数 × (63 + 1 + min(charsPerDigest, 120)), DIGEST_BAND_MAX_CHARS)
+ * 帯の費用     = 帯の費用(素) + (帯の件数 >= 1 ? -1 : 0)                 … 構造項(a)
+ * 桁上がり     = 2×extraDigits(memoryCountInScope)                     … 構造項(b)
+ *             + extraDigits(帯の件数) + extraDigits(帯の資格件数)        … 構造項(c)
+ * limitedBy分 = (帯の資格件数 > 帯の件数 かつ 帯が文字数で飽和していない) ? 26 : 0  … 構造項(d)
+ * 合計         = fixedIndexChars + 返る件数 × charsPerDigest + 帯の費用 + 桁上がり + limitedBy分
  * ```
+ *
+ * ## 構造項（Issue #340 comment 5822837148 / 本 PR）
+ *
+ * `fixedIndexChars` は「目次帯が空・`totalInScope`/`shown`/`eligible` がすべて1桁」という
+ * **特定の形**の `indexBand` から較正した定数である（`BUILTIN_RECALL_FOOTPRINT_PROFILE.origin`
+ * の hold-in 7行はすべてこの形）。その形から外れると `JSON.stringify` の実バイト数が
+ * ずれる——このずれは**データではなく JSON の構文そのものから決まる**ので、係数を
+ * 再較正するのではなくここで構造項として加算する:
+ *
+ * - **(a) カンマ**: 帯の配列の要素区切りは `n` 件で `n-1` 個だが、`bandEntryChars` は
+ *   1件ごとに区切り1字を計上している（`n` 個分）ため、帯が非空なら常に1字だけ数えすぎる。
+ * - **(b)/(c) 桁上がり**: `totalInScope` は `IndexBand` に、**単一 group の想定**では
+ *   `groups[0].count`（= `totalInScope` と同値）にも現れる——1桁を超えた分だけ、
+ *   両方合わせて `2×extraDigits` バイト増える。`digestBandCoverage.shown`/`eligible` も
+ *   同様に1桁を超えた分だけ増える。⚠ **group が複数ある場合はこの想定が崩れる**
+ *   （`RecallFootprintShape` は group の内訳を持たないため、単一 group という
+ *   hold-in データの実際の形を仮定するしかない——`recall-footprint.test.ts` の
+ *   「複数 group」の歯が、この仮定が崩れたときの残差を明示的に記録している）。
+ * - **(d) limitedBy**: 帯が entry_limit（または char_budget。バイト数は同じ11字なので
+ *   区別不要）で切られたときだけ `digestBandCoverage.limitedBy` が足され、26字増える。
+ *   ⚠ **帯が文字数上限（`DIGEST_BAND_MAX_CHARS`）で飽和しているとき（`bandSaturated`）は
+ *   この項を足さない**——その領域では `帯の件数` 自体が実際の `packDigestBand` の
+ *   結果（文字数上限に当たった時点で打ち切り）と乖離する既存の近似
+ *   （`bandSaturated` の doc）が先に効いており、`limitedBy` がどの値になるかも
+ *   もはや `帯の件数`/`帯の資格件数` だけからは決まらない。ここで手を広げない
+ *   （既存のその近似自体は本 PR の対象外）。
  *
  * **連想の項に、新しい自由係数を1つも足していない**（ADR 0166「決めたこと」）。
  * 連想枠が実際にやっているのは「目次帯に載るはずだった候補を、`memories` tier へ
@@ -472,10 +542,32 @@ export function estimateRecallFootprint(
 
   const perEntry = bandEntryChars(profile.charsPerDigest);
   const uncappedBandChars = bandEntries * perEntry;
-  const bandChars = Math.min(uncappedBandChars, DIGEST_BAND_MAX_CHARS);
+  const bandSaturated = uncappedBandChars >= DIGEST_BAND_MAX_CHARS;
+  // 構造項(a): 配列の要素区切りは n 件で n-1 個。`bandEntryChars` は1件ごとに
+  // 区切り1字を計上しており(n個分)、帯が非空なら常に1字だけ数えすぎる。
+  // 飽和している領域では `帯の件数` 自体が実際の打ち切り位置と乖離する既存の
+  // 近似が先に効くため、ここでは手を出さない(上のdocの「(d) limitedBy」と同じ理由)。
+  const commaOvercount = !bandSaturated && bandEntries >= 1 ? DIGEST_BAND_ENTRY_SEPARATOR_CHARS : 0;
+  const bandChars = Math.min(uncappedBandChars, DIGEST_BAND_MAX_CHARS) - commaOvercount;
+
+  // 構造項(b)/(c): totalInScope・(単一groupを仮定した)groups[0].count・
+  // digestBandCoverage.shown/eligible の桁上がり。
+  const totalInScopeDigitCarry = 2 * extraDigitsBeyondOne(inScope);
+  const bandCoverageDigitCarry =
+    extraDigitsBeyondOne(bandEntries) + extraDigitsBeyondOne(bandEligible);
+
+  // 構造項(d): entry_limit/char_budget による打ち切りが起きたとき(かつ飽和していない
+  // とき)だけ digestBandCoverage.limitedBy が足される。
+  const limitedByChars =
+    !bandSaturated && bandEligible > bandEntries ? LIMITED_BY_LABEL_ADDED_CHARS : 0;
 
   const digestChars = returnedMemories * profile.charsPerDigest;
-  const indexChars = profile.fixedIndexChars + bandChars;
+  const indexChars =
+    profile.fixedIndexChars +
+    bandChars +
+    totalInScopeDigitCarry +
+    bandCoverageDigitCarry +
+    limitedByChars;
 
   const extrapolated =
     profile.origin.kind === "builtin_default" ||
@@ -489,7 +581,7 @@ export function estimateRecallFootprint(
     associationCount,
     bandEntries,
     memoriesCappedByLimit: inScope > limit,
-    bandSaturated: uncappedBandChars >= DIGEST_BAND_MAX_CHARS,
+    bandSaturated,
     extrapolated,
     profileOrigin: profile.origin,
   };
