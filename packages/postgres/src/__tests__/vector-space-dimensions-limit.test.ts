@@ -63,7 +63,7 @@ async function regclassExists(pool: Pool, name: string): Promise<boolean> {
     "SELECT to_regclass($1) IS NOT NULL AS exists",
     [name],
   );
-  return rows[0].exists;
+  return rows[0]!.exists;
 }
 
 describe("registerEmbeddingSpace の dimensions 上限検査（pgvector hnsw、ADR 0018 C-2）", () => {
