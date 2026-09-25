@@ -349,5 +349,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0322](./0322-local-embedding-synthetic-noise-false-positive-counterfactual.md) | `local` 埋め込み5+2群に合成ノイズを注入し、ADR 0316 判定の偽陽性率を反実仮想として測る — Issue #109（ADR 0316「引き受けた負債」1番） | 採用 (2026-09) |
 | [0323](./0323-taxonomy-recall-filter.md) | taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き） | 採用 (2026-09) |
 | [0324](./0324-claim-key-contested-detection.md) | 主張キー（(B) 第2段）の検出実装 — 列と索引だけで衝突を見つけ、`contested` までで止める（Issue #372） | 採用 (2026-09) |
+| [0325](./0325-answer-path-claim-key-contested-opt-in-measurement.md) | examples/chat の answer 経路に claimKey/detectContested を評価用 opt-in する — `[矛盾候補:]` が0件だった理由を実測する（Issue #691 続き） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
