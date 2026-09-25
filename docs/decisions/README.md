@@ -163,7 +163,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0132](./0132-ci-green-verdict-procedure.md) | 「CI が緑」の判定手順を自律作業の手引きに足す — head sha 明示・job 単位の conclusion・mergeStateStatus 不使用・安定性の再確認（Issue #228） | 採用 (2026-09) |
 | [0133](./0133-compare-baseline-and-gate.md) | `compare`(北極星の物差し)に基準値ファイルを足す — 実測で揺れなかったため、他5本と異なり⭐門にする | 採用 (2026-09) |
 | [0134](./0134-mark-contested-explicit-operation.md) | 矛盾の検出（第1弾）— `Runtime.markContested` という明示的操作で `contested_with_id` を初めて書く | 採用 (2026-09) |
-| [0135](./0135-numeral-token-discriminator-probe-domain-design.md) | 主測定の被覆を広げる設計（第1弾）— 「単独トークンの数詞・記号インデックス」を弁別軸とする第4の probe 集合を置く。件数は行列から導き、margin の分布で読む | **提案 (2026-09)** |
+| [0135](./0135-numeral-token-discriminator-probe-domain-design.md) | 主測定の被覆を広げる設計（第1弾）— 「単独トークンの数詞・記号インデックス」を弁別軸とする第4の probe 集合を置く。件数は行列から導き、margin の分布で読む | 採用 (2026-09) |
 | [0136](./0136-contested-lone-dropped-not-returned-alone.md) | 片側だけの `contested`（`contestedWithId=null`）を、読み取り側で単独返却させない | 採用 (2026-09) |
 | [0137](./0137-adr-index-generated-from-source.md) | ADR 索引（`docs/decisions/README.md`）を `docs/decisions/*.md` から生成する — 案A、行位置の衝突そのものを消す | 採用 (2026-09) |
 | [0138](./0138-pack-check-in-ci.md) | 六つの門の `pack:check` を、毎PRの `ci.yml` でも走らせる | 採用 (2026-09) |
