@@ -1149,6 +1149,266 @@ async function runRepeatEfMode(
 }
 
 // ---------------------------------------------------------------------------
+// order モード(マネージャー追加依頼、2026-09-26第2弾) —— base-last / interleaved
+//
+// 仮説: baseを先にfillerを後から逐次INSERTすると、HNSW構築時にfillerの近傍選択・
+// 刈り込みでbaseの島(anchor/gold/distractor + haystack)への辺が後から消え、
+// 入口点(entry point)からbaseの島へ辿り着けなくなる(ef を上げても戻らないことと
+// 整合)。I1〜I3(main)・I4〜I9(repeat-ef/ef-sweep)は全てbase-first(baseを先に
+// 挿入)だった——I3のfiller順反転はfillerどうしの相対順を変えただけで、
+// 「baseが最初」という構造自体は変えていない。この仮説を直接検査する:
+// P1(base-last)・P2(interleaved、固定間隔)でaRawが回復するか。
+// ---------------------------------------------------------------------------
+
+type IngestOrder = "base-first" | "base-last" | "base-interleaved";
+
+interface OrderedUtterance {
+  externalId: string;
+  text: string;
+  kind: string;
+  probeId?: string;
+}
+
+/**
+ * base(62件、anchor/gold/distractor/haystack)とfiller(scale-62件)を、指定した
+ * 順序で1本のingest順配列に組む。
+ *
+ * - `base-first`: これまでの全モードと同じ(baseを先に、fillerを後に)。対照。
+ * - `base-last`: fillerを先に、baseを最後にingestする。
+ * - `base-interleaved`: baseをfillerの間に**固定間隔**(`filler.length/base.length`
+ *   ≈161件おき)で均等に散らす。baseがingest全体を通して薄く分布する状況。
+ */
+function buildOrderedCorpus(scale: number, order: IngestOrder): OrderedUtterance[] {
+  const base = buildAssociationProbeSetConversation();
+  const filler: OrderedUtterance[] = buildDistinctFiller(scale - ASSOCIATION_HAYSTACK_SIZE, "forward").map(
+    (f) => ({ ...f, kind: "filler" }),
+  );
+  if (order === "base-first") {
+    return [...base, ...filler];
+  }
+  if (order === "base-last") {
+    return [...filler, ...base];
+  }
+  // base-interleaved: fillerを1件ずつ積みながら、固定比率でbaseを挟む。
+  const out: OrderedUtterance[] = [];
+  const ratio = filler.length / base.length;
+  let baseIdx = 0;
+  for (let i = 0; i < filler.length; i += 1) {
+    out.push(filler[i]!);
+    if (baseIdx < base.length && i + 1 >= Math.round((baseIdx + 1) * ratio)) {
+      out.push(base[baseIdx]!);
+      baseIdx += 1;
+    }
+  }
+  while (baseIdx < base.length) {
+    out.push(base[baseIdx]!);
+    baseIdx += 1;
+  }
+  if (out.length !== base.length + filler.length) {
+    throw new Error(
+      `buildOrderedCorpus: interleaveの結果件数(${out.length})がbase+filler` +
+        `(${base.length + filler.length})と一致しない`,
+    );
+  }
+  return out;
+}
+
+/**
+ * `ingestCorpus`の一般化版——base/fillerを分けず、渡された配列の**そのままの順**で
+ * 逐次observe()する。`base-last`/`base-interleaved`のような、base-firstを前提と
+ * しない挿入順を作るために要る(既存の`ingestCorpus`はbase→fillerの順が固定)。
+ */
+async function ingestOrderedCorpus(
+  handle: InstrumentedHandle,
+  tenantId: string,
+  utterances: OrderedUtterance[],
+): Promise<IngestResult> {
+  const ctx: Ctx = { tenantId };
+  const anchorIds = new Map<string, MemoryId>();
+  const goldIds = new Map<string, MemoryId>();
+
+  const tIngest0 = Date.now();
+  let expectedEmbedJobs = 0;
+
+  for (const utterance of utterances) {
+    const result = await handle.runtime.observe(ctx, {
+      kind: "utterance",
+      text: utterance.text,
+      externalId: utterance.externalId,
+    });
+    expectedEmbedJobs += result.memoryIds.length;
+    if (utterance.kind === "anchor" || utterance.kind === "gold") {
+      if (result.memoryIds.length !== 1) {
+        throw new Error(
+          `ingestOrderedCorpus: ${utterance.externalId} の sync 抽出が期待通りに1件の` +
+            `Memoryを作らなかった(${result.memoryIds.length}件)`,
+        );
+      }
+      const probeId = utterance.probeId!;
+      if (utterance.kind === "anchor") {
+        anchorIds.set(probeId, result.memoryIds[0]!);
+      } else {
+        goldIds.set(probeId, result.memoryIds[0]!);
+      }
+    }
+  }
+  if (anchorIds.size !== ASSOCIATION_PROBES.length || goldIds.size !== ASSOCIATION_PROBES.length) {
+    throw new Error(
+      `ingestOrderedCorpus: anchorIds(${anchorIds.size})/goldIds(${goldIds.size})が` +
+        `probe数(${ASSOCIATION_PROBES.length})と一致しない`,
+    );
+  }
+
+  const ingestSeconds = (Date.now() - tIngest0) / 1000;
+
+  const tDrain0 = Date.now();
+  await drainEmbedTicks(handle.runtime, ctx, { expectedProcessed: expectedEmbedJobs });
+  const drainSeconds = (Date.now() - tDrain0) / 1000;
+
+  await handle.pool.query("ANALYZE");
+
+  return { anchorIds, goldIds, ingestSeconds, drainSeconds };
+}
+
+interface OrderPointReport {
+  label: string;
+  order: IngestOrder;
+  ingestSeconds: number;
+  drainSeconds: number;
+  m0: MeasurementReport;
+  /** ef=400・本番形(JOIN込み)EXPLAINでHNSW索引が使われたか(索引が実際に検査対象に
+   *  入っていることの確認。ef-sweepモードの実測でef=400はまだ索引が使われる境界の
+   *  内側であることが分かっている)。 */
+  explain400: ExplainCapture;
+  /** P1の1回目だけ: 厳密探索(EXACT)。ingest順を変えても距離自体は変わらないはず、
+   *  という確認。 */
+  exact?: ExactMeasurementReport;
+}
+
+/**
+ * `MNEMORA_ASSOC_NONDET_MODE=order`。P1(base-last×2)・P2(base-interleaved×1)・
+ * 対照(base-first×1、既存モードと同じ型が再び~0/12になることの確認)を測る。
+ *
+ * ⚠ base の ingest 位置を変えると `recorded_at` の新旧関係が変わる(base-lastでは
+ * baseが最も新しい行になり、段2の並べ替え(freshness)が到達に影響しうる)——
+ * **aRaw(段1の生ANN、並べ替え前)を主指標として読む**、到達は参考値。
+ */
+async function runOrderExperimentMode(
+  databaseUrl: string,
+  databaseName: string,
+  scale: number,
+  cache: FileEmbeddingCache,
+): Promise<{ points: OrderPointReport[] }> {
+  const tenantId = "nondet-order";
+  const plans: { label: string; order: IngestOrder; withExact: boolean }[] = [
+    { label: "P1a-base-last", order: "base-last", withExact: true },
+    { label: "P1b-base-last", order: "base-last", withExact: false },
+    { label: "P2-base-interleaved", order: "base-interleaved", withExact: false },
+    { label: "control-base-first", order: "base-first", withExact: false },
+  ];
+
+  const points: OrderPointReport[] = [];
+
+  for (const plan of plans) {
+    console.log(`\n########## ${plan.label} (order=${plan.order}) ##########`);
+    const utterances = buildOrderedCorpus(scale, plan.order);
+
+    const handle = await createInstrumentedRuntime(databaseUrl, cache);
+    await truncateAll(handle.pool);
+    const ingest = await ingestOrderedCorpus(handle, tenantId, utterances);
+    console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+    const space = handle.cachingEmbeddingProvider.space;
+
+    const m0 = await buildMeasurementReport(
+      handle,
+      tenantId,
+      space,
+      ingest.anchorIds,
+      ingest.goldIds,
+      "M0",
+      ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+    );
+    console.log(summarizeMeasurement("M0", m0.probes));
+    for (const p of m0.probes) {
+      console.log(
+        `    ${p.probeId}: aRaw=${p.aRaw} rank=${p.aRawRank} off=${p.reachedOff} ` +
+          `on3=${p.reachedOn3} on10=${p.reachedOn10} dActual=${p.dActual}`,
+      );
+    }
+
+    let exact: ExactMeasurementReport | undefined;
+    if (plan.withExact) {
+      const exactHandle = await createInstrumentedRuntime(
+        databaseUrl,
+        cache,
+        "-c enable_indexscan=off -c enable_bitmapscan=off",
+      );
+      const exactBaseReport = await buildMeasurementReport(
+        exactHandle,
+        tenantId,
+        space,
+        ingest.anchorIds,
+        ingest.goldIds,
+        "EXACT",
+        ["SET LOCAL enable_indexscan = off", "SET LOCAL enable_bitmapscan = off"],
+      );
+      const exactRanks = await measureExactRanks(
+        exactHandle.pool,
+        space,
+        tenantId,
+        ingest.anchorIds,
+        exactHandle.cachingEmbeddingProvider,
+      );
+      console.log(summarizeMeasurement("EXACT", exactBaseReport.probes));
+      for (const r of exactRanks) {
+        console.log(`    exactRank[${r.probeId}] rank=${r.rank} distance=${r.distance}`);
+      }
+      exact = { ...exactBaseReport, exactRanks };
+      await exactHandle.close();
+    }
+
+    await handle.close();
+
+    // ef=400・本番形(JOIN込み)EXPLAINで索引使用を確認(索引がまだ効いている
+    // 境界の内側であることをef-sweepモードの実測から知っている値)。
+    const table = embeddingSpaceTableName(space);
+    assertSafeIdentifier(table);
+    const ef400Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 400, cache);
+    const repProbe = ASSOCIATION_PROBES[0]!;
+    const queryVector = await cachedVectorOrThrow(ef400Handle.cachingEmbeddingProvider, repProbe.query);
+    const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
+    const explain400 = await captureExplainAtProduction(
+      ef400Handle.pool,
+      table,
+      tenantId,
+      `${plan.label}(ef=400)`,
+      queryVector,
+      kPrime,
+      ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+    );
+    console.log(
+      `  [ef=400本番形EXPLAIN] hnsw=${explain400.hnswUsedHeuristic} seq=${explain400.seqScanHeuristic}`,
+    );
+    await ef400Handle.close();
+    const resetHandle = await createInstrumentedRuntime(databaseUrl, cache);
+    await resetHandle.pool.query(`ALTER DATABASE ${databaseName} RESET hnsw.ef_search`);
+    await resetHandle.close();
+
+    points.push({
+      label: plan.label,
+      order: plan.order,
+      ingestSeconds: ingest.ingestSeconds,
+      drainSeconds: ingest.drainSeconds,
+      m0,
+      explain400,
+      ...(exact ? { exact } : {}),
+    });
+  }
+
+  return { points };
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -1164,7 +1424,14 @@ async function main(): Promise<void> {
   const jsonPath = process.env.MNEMORA_ASSOC_NONDET_JSON;
   const tenantId = "nondet";
   const modeEnv = process.env.MNEMORA_ASSOC_NONDET_MODE;
-  const mode = modeEnv === "repeat-ef" ? "repeat-ef" : modeEnv === "ef-sweep" ? "ef-sweep" : "main";
+  const mode =
+    modeEnv === "repeat-ef"
+      ? "repeat-ef"
+      : modeEnv === "ef-sweep"
+        ? "ef-sweep"
+        : modeEnv === "order"
+          ? "order"
+          : "main";
 
   console.log(`scale=${scale} cacheDir=${cacheDir} mode=${mode}`);
 
@@ -1220,6 +1487,17 @@ async function main(): Promise<void> {
       mkdirSync(dirname(jsonPath), { recursive: true });
       writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
       console.log(`\n[association-scale-nondeterminism] ef-sweepモードの結果を書き出した: ${jsonPath}`);
+    }
+    return;
+  }
+
+  if (mode === "order") {
+    const report = await runOrderExperimentMode(databaseUrl, databaseName, scale, cache);
+    cache.close();
+    if (jsonPath) {
+      mkdirSync(dirname(jsonPath), { recursive: true });
+      writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+      console.log(`\n[association-scale-nondeterminism] orderモードの結果を書き出した: ${jsonPath}`);
     }
     return;
   }
