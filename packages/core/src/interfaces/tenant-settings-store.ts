@@ -189,7 +189,7 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
 
 /**
  * `tenant_settings.taxonomy_mode` が取りうる値（`migrations/0001_init.sql:223`、
- * Issue #201、[ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md)）。
+ * Issue #201、[ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md)）。
  *
  * `docs/memory-model.md` §8「二つのモードを二つの経路にしない。『ラベルの状態』一つで
  * 表す」——`strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できる
@@ -237,7 +237,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
  *
  * ⚠ **上の段落の「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」は
- * [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md)（Issue #201）で古くなった。**
+ * [ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md)（Issue #201）で古くなった。**
  * 本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
  * `decay_clock` と同じ「4メソッドは省略可能」の形でこの interface に加わった。
  *
@@ -367,7 +367,7 @@ export interface TenantSettingsStore {
   getActivitySeq?(ctx: Ctx): Promise<number>;
 
   /**
-   * Issue #201 / [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md):
+   * Issue #201 / [ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md):
    * `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`
    * （`'open'`）を返す（`getDecayClock?` と同じ規律）。
    *
@@ -375,12 +375,12 @@ export interface TenantSettingsStore {
    * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
    * 決めたこと13）。既定 `'open'` は「未実装の adapter でも今日と同じ挙動」に一致する
    * （`taxonomy_mode` を読む側自体がまだ存在しないため、`open`/`strict` のどちらであっても
-   * PR-A の時点では観測できる違いが無い——ADR 0314「決めたこと」参照）。
+   * PR-A の時点では観測できる違いが無い——ADR 0315「決めたこと」参照）。
    */
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
 
   /**
-   * Issue #201 / [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md):
+   * Issue #201 / [ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md):
    * `tenant_settings.taxonomy_mode` を設定する（UPSERT。行が無ければ作る）。`mode` が
    * `TaxonomyMode` の2値のいずれでもない場合は `TAXONOMY_MODE_INVALID_MESSAGE` を含む
    * `Error` で失敗する（`assertValidTaxonomyMode` 参照）。`setDecayClock?` と同じ形。
@@ -459,7 +459,7 @@ export async function writeDecayClock(
 /**
  * `setTaxonomyMode` を実装していない adapter へ書こうとしたときに投げる `Error` の
  * メッセージに必ず含める文字列（Issue #201、
- * [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md)。
+ * [ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md)。
  * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` と同じ形）。
  */
 export const TAXONOMY_MODE_UNSUPPORTED_MESSAGE =
@@ -467,7 +467,7 @@ export const TAXONOMY_MODE_UNSUPPORTED_MESSAGE =
 
 /**
  * `getTaxonomyMode` を持たない adapter では `DEFAULT_TAXONOMY_MODE`（`'open'`）へ倒す
- * （ADR 0314）。`readDecayClock` と同じ規律。
+ * （ADR 0315）。`readDecayClock` と同じ規律。
  */
 export async function readTaxonomyMode(
   store: TenantSettingsStore,

@@ -269,7 +269,7 @@ export interface MemoryStoreConformanceOptions {
   supportsOnlyMemoryIdsFilter?: boolean;
 
   /**
-   * Issue #201 / [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md): 対象の
+   * Issue #201 / [ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md): 対象の
    * `MemoryStore` 実装が `listLabels`/`registerLabel`（任意メソッド）を実装しているか
    * どうか。**必須。**
    *
@@ -6636,7 +6636,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // listLabels / registerLabel（Issue #201、ADR 0314: taxonomy の語彙、任意メソッド）
+    // listLabels / registerLabel（Issue #201、ADR 0315: taxonomy の語彙、任意メソッド）
     // -------------------------------------------------------------------
 
     if (supportsLabels) {
