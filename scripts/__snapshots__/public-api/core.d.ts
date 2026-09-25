@@ -647,6 +647,14 @@ export interface MemoryStore {
             supersededReason: string | null;
         }>;
     }>;
+    listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
+    registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
+}
+export interface LabelSummary {
+    name: string;
+    status: "registered" | "proposed";
+    proposedCount: number;
+    registeredAt: Date | null;
 }
 export interface ReinforceOptions {
     nowSeq?: number;
@@ -748,6 +756,10 @@ export declare const HALF_LIFE_RECALLS_INVALID_MESSAGE = "half life recalls must
 export declare function assertValidHalfLifeRecalls(value: number): void;
 export declare const DECAY_CLOCK_INVALID_MESSAGE = "decay clock must be 'wall', 'activity', or 'either'";
 export declare function assertValidDecayClock(value: string): asserts value is DecayClock;
+export type TaxonomyMode = "open" | "strict";
+export declare const DEFAULT_TAXONOMY_MODE: TaxonomyMode;
+export declare const TAXONOMY_MODE_INVALID_MESSAGE = "taxonomy mode must be 'open' or 'strict'";
+export declare function assertValidTaxonomyMode(value: string): asserts value is TaxonomyMode;
 export interface TenantSettingsStore {
     getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
     getEventRetention(ctx: Ctx): Promise<EventRetention>;
@@ -757,12 +769,17 @@ export interface TenantSettingsStore {
     getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq?(ctx: Ctx): Promise<number>;
+    getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
+    setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
 export declare const DECAY_CLOCK_UNSUPPORTED_MESSAGE = "this TenantSettingsStore does not support setDecayClock";
 export declare function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Promise<DecayClock>;
 export declare function readActivitySeq(store: TenantSettingsStore, ctx: Ctx): Promise<number>;
 export declare function readDefaultHalfLifeRecalls(store: TenantSettingsStore, ctx: Ctx): Promise<number>;
 export declare function writeDecayClock(store: TenantSettingsStore, ctx: Ctx, clock: DecayClock): Promise<void>;
+export declare const TAXONOMY_MODE_UNSUPPORTED_MESSAGE = "this TenantSettingsStore does not support setTaxonomyMode";
+export declare function readTaxonomyMode(store: TenantSettingsStore, ctx: Ctx): Promise<TaxonomyMode>;
+export declare function writeTaxonomyMode(store: TenantSettingsStore, ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 
 // ===== dist/interfaces/token-counter.d.ts =====
 export interface TokenCounter {

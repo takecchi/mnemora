@@ -104,7 +104,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -117,6 +117,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     readonly events: MemoryEvent[];
     readonly outboxJobs: OutboxJobRecord[];
     readonly activitySeq: Map<string, number>;
+    private readonly labels;
+    private labelKey;
+    private upsertProposedLabels;
     private createObservationIdempotent;
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
@@ -235,6 +238,8 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             supersededReason: string | null;
         }>;
     }>;
+    listLabels(ctx: Ctx): Promise<LabelSummary[]>;
+    registerLabel(ctx: Ctx, name: string): Promise<LabelSummary>;
     private extractionKey;
 }
 
@@ -249,7 +254,7 @@ export declare class InMemoryOutboxStore implements OutboxStore {
 }
 
 // ===== dist/__fixtures__/in-memory-tenant-settings-store.d.ts =====
-import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TenantSettingsStore } from "@mnemora/core";
+import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
 export declare class InMemoryTenantSettingsStore implements TenantSettingsStore {
     private readonly activitySeqBacking?;
     private readonly rows;
@@ -264,6 +269,8 @@ export declare class InMemoryTenantSettingsStore implements TenantSettingsStore 
     getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq(ctx: Ctx): Promise<number>;
+    getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
+    setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
 
 // ===== dist/__fixtures__/in-memory-vector-store.d.ts =====
@@ -422,6 +429,7 @@ export interface MemoryStoreConformanceOptions {
     supportsRestoreSupersededBy: boolean;
     supportsPreviewRestoreSupersededBy: boolean;
     supportsOnlyMemoryIdsFilter?: boolean;
+    supportsLabels: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
@@ -449,6 +457,7 @@ export interface TenantSettingsStoreConformanceOptions {
     supportsDecayClock: boolean;
     setDefaultHalfLifeRecalls?: (ctx: Ctx, recalls: number) => Promise<void> | void;
     advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
+    supportsTaxonomyMode: boolean;
 }
 export declare function describeTenantSettingsStoreConformance(options: TenantSettingsStoreConformanceOptions): void;
 
