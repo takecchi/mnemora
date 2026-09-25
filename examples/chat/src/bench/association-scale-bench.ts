@@ -494,6 +494,16 @@ function toVectorLiteral(vector: number[]): string {
   return `[${vector.join(",")}]`;
 }
 
+/**
+ * ADR 0284: 本番の `PostgresVectorStore.search()` は `SET LOCAL hnsw.iterative_scan
+ * = relaxed_order` を**トランザクション内**で無条件に有効にする（`vector-store.ts`
+ * の該当行）。この EXPLAIN 診断がそれを見ずに既定（`off`）のまま撃つと、実際に
+ * `recall()` が発行するのとは**別の**プランを見てしまう——`SET LOCAL` は
+ * トランザクション単位で効くため、`pool.query()`（呼ぶたびに別接続を借りうる）を
+ * 素朴に複数回叩いても scope が繋がらない。ここでは `pool.connect()` で1本の
+ * client を握り、`BEGIN`→`SET LOCAL`→`EXPLAIN`→`COMMIT` を同じ接続の上で行う
+ * （`vector-store.ts` の `db.transaction()` と同じ規律を、生 SQL 側で踏襲する）。
+ */
 async function captureExplain(
   pool: PostgresClient["pool"],
   space: EmbeddingSpaceId,
@@ -504,21 +514,30 @@ async function captureExplain(
 ): Promise<ExplainCapture> {
   const table = embeddingSpaceTableName(space);
   assertSafeIdentifier(table);
-  const { rows } = await pool.query(
-    `EXPLAIN (ANALYZE, BUFFERS)
-     SELECT e.memory_id, e.embedding <=> $1::vector AS distance
-     FROM ${table} e
-     WHERE e.tenant_id = $2
-     ORDER BY e.embedding <=> $1::vector
-     LIMIT $3`,
-    [toVectorLiteral(vector), tenantId, limit],
-  );
-  const text = rows.map((r: { "QUERY PLAN": string }) => r["QUERY PLAN"]).join("\n");
-  // ⚠ ヒューリスティック(文字列一致)。**判定ではなく手掛かり**——
-  // 「機械には検出まで」(AGENTS.md)。最終判断は report に載せる生の EXPLAIN テキストで
-  // 人が確かめること。
-  const hnswUsedHeuristic = /Index (Scan|Only Scan).*hnsw/i.test(text) || /idx_memory_embeddings_hnsw/i.test(text);
-  return { label, limit, text, hnswUsedHeuristic };
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SET LOCAL hnsw.iterative_scan = relaxed_order");
+    const { rows } = await client.query(
+      `EXPLAIN (ANALYZE, BUFFERS)
+       SELECT e.memory_id, e.embedding <=> $1::vector AS distance
+       FROM ${table} e
+       WHERE e.tenant_id = $2
+       ORDER BY e.embedding <=> $1::vector
+       LIMIT $3`,
+      [toVectorLiteral(vector), tenantId, limit],
+    );
+    await client.query("COMMIT");
+    const text = rows.map((r: { "QUERY PLAN": string }) => r["QUERY PLAN"]).join("\n");
+    // ⚠ ヒューリスティック(文字列一致)。**判定ではなく手掛かり**——
+    // 「機械には検出まで」(AGENTS.md)。最終判断は report に載せる生の EXPLAIN テキストで
+    // 人が確かめること。
+    const hnswUsedHeuristic =
+      /Index (Scan|Only Scan).*hnsw/i.test(text) || /idx_memory_embeddings_hnsw/i.test(text);
+    return { label, limit, text, hnswUsedHeuristic };
+  } finally {
+    client.release();
+  }
 }
 
 // ---------------------------------------------------------------------------
