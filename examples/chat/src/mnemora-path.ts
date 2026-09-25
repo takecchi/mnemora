@@ -150,8 +150,8 @@ export async function ingestConversation(
  * `packages/core` へ `association: null` をそのまま転送する**（[ADR
  * 0335](../../../docs/decisions/0335-recall-association-default-on.md) 前は、この関数は
  * `association` キー自体を省略して転送していた——`packages/core` の既定が off だったので
- * 「省略」が「off」と同じ効果だったからである。**ADR 0335（⛔ オーナーの回答待ちの
- * 提案）で `packages/core` の既定が on に変わると、この「省略」は意味が反転し、
+ * 「省略」が「off」と同じ効果だったからである。**ADR 0335（採用。オーナーが選択肢(あ)を
+ * 選んだ、ask_human ac5953d1、2026-09-25）で `packages/core` の既定が on に変わると、この「省略」は意味が反転し、
  * `opts.association: null` の呼び出しが黙って連想 on になってしまう**——実際に
  * `memory-usage-reinforce.postgres.test.ts` が「`packages/core` 既定の off のまま呼ぶ
  * 脱出口」という契約でこの経路に依存していた。⟹ ここでは省略ではなく `null` を

@@ -817,10 +817,11 @@ async function measureEfPoint(
     const goldId = goldIds.get(probe.id)!;
 
     handle.spy.reset();
-    // association: null — 明示的な off。`packages/core` の連想枠が既定 on になる提案
-    // （ADR 0335、⛔ オーナーの回答待ち）の後は、association キーを省略すると
-    // 既定 on を意味するようになる——ここは "off" の測定点なので、それに乗っ取られない
-    // よう明示する（association-scale-bench.ts の ArmConfig と同じ修正）。
+    // association: null — 明示的な off。`packages/core` の連想枠が既定 on になった
+    // （ADR 0335。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
+    // association キーを省略すると既定 on を意味するようになる——ここは "off" の
+    // 測定点なので、それに乗っ取られないよう明示する（association-scale-bench.ts の
+    // ArmConfig と同じ修正）。
     await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];

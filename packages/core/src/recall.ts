@@ -1205,8 +1205,8 @@ export interface RecalledMemory {
    *
    * **`"association"`（Issue #200）は「クエリに直接は当たらなかったが、クエリで
    * 引けた記憶（アンカー）の近傍として引いた」候補**（北極星「聞かれていないことを、
-   * 自分から思い出す」）。**既定 on**（[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)、
-   * ⛔ オーナーの回答待ちの提案）——`query.association` を省略した呼び出しでも
+   * 自分から思い出す」）。**既定 on**（[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
+   * 採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）——`query.association` を省略した呼び出しでも
    * {@link DEFAULT_RECALL_ASSOCIATION} で現れる。`query.association: null` を
    * 明示した呼び出しでは一度も現れない。
    * `recall-runtime.ts` の段3.5、`VectorStore.getVectors`（任意メソッド）を参照。
@@ -1633,8 +1633,8 @@ export interface RecallQuery {
    * **連想枠（Issue #200、北極星「聞かれていないことを、自分から思い出す」）。**
    *
    * **既定 on**（[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
-   * ADR 0151 が選んだ既定 off から反転する提案。⛔ **オーナーの回答（ask_human ac5953d1）
-   * 待ちの draft であり、まだ採用されていない**）——**省略すると
+   * ADR 0151 が選んだ既定 off から反転した決定——**採用。オーナーが選択肢(あ)を選んだ、
+   * ask_human ac5953d1、2026-09-25**）——**省略すると
    * {@link DEFAULT_RECALL_ASSOCIATION} が適用される。**明示的に off にしたいときは
    * **`null` を渡す**（`undefined` ＝省略、とは別の状態として区別する）。`null` を渡した
    * 呼び出しでは連想は一切走らず、`RecallUsage.byTier.association` も現れない——
@@ -1762,7 +1762,7 @@ export const DEFAULT_SCORE_THRESHOLD = 0.1;
 /**
  * `RecallQuery.association` の入力。**省略すると {@link DEFAULT_RECALL_ASSOCIATION} が
  * 適用される（既定 on。[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
- * ⛔ オーナーの回答待ちの提案——まだ採用されていない）。
+ * 採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）。
  * 一切走らせたくないときは `RecallQuery.association: null` を渡す**——北極星の問い2
  * 「これを無効にしても Memory Framework として成立するか」は、`null` という明示の
  * opt-out が型の上に在ることで担保する（既定 off で担保していた ADR 0151 から、
@@ -1843,19 +1843,22 @@ export const DEFAULT_ASSOCIATION_MIN_SIMILARITY = 0.5;
 /**
  * `RecallQuery.association` を省略したときに適用される既定値
  * （[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
- * ADR 0151 の既定 off から反転する提案。⛔ **オーナーの回答（ask_human ac5953d1）待ちの
- * draft であり、まだ採用されていない**）。
+ * ADR 0151 の既定 off から反転した決定——**採用。オーナーが選択肢(あ)を選んだ、
+ * ask_human ac5953d1、2026-09-25T21:11Z、[Issue #337](https://github.com/takecchi/mnemora/issues/337)
+ * の問いへの回答**）。
  *
- * ⛔⛔ **`maxCount: 10` は根拠のある選択ではない、いまの時点の仮値である。**
- * `examples/chat` の `association-probes` ベンチの実測（ADR 0168、Issue #291 の
+ * ⛔⛔ **`maxCount: 10` は10万行級で再検証された値ではない、いまの時点で最も根拠のある
+ * 仮値である。**`examples/chat` の `association-probes` ベンチの実測（ADR 0168、Issue #291 の
  * 2026-09-16 コメント）では、`haystackSize=62`（HNSW 未使用の小規模）で
  * `maxCount=10` のとき gold 到達 **12/12**（費用 `memoryChars` **+4.32%**）だった。
- * **[Issue #337](https://github.com/takecchi/mnemora/issues/337) はこの値を10万行級で
- * 測ってから既定 on を判断するようオーナーが指示しており、この issue はまだ OPEN
- * である。**[ADR 0332](../../../docs/decisions/0332-association-default-100k-measurement.md)
- * が10万行級の実測を行ったが、状態は「提案」のままで、判断は下していない
- * （追記(2)は、規模による到達の低下がベンチの base 挿入位置の産物である可能性を
- * 示したが、確定はしていない）。**⟹ 実運用の分布で見直すべき値であり、勘で変えない。**
+ * [Issue #337](https://github.com/takecchi/mnemora/issues/337) はこの値を10万行級で
+ * 測ってから既定 on を判断するようオーナーが指示しており、
+ * [ADR 0332](../../../docs/decisions/0332-association-default-100k-measurement.md)
+ * が10万行級の実測を行ったが、**その実測自体は規模による到達の低下がベンチの base
+ * 挿入位置の産物である可能性を示した（追記(2)）ものの確定しておらず、`maxCount=10` を
+ * 積極的に支持する新しい実測ではない**——オーナーは10万行級の実測が確定しない段階で
+ * 既定 on を選んだ（ask_human ac5953d1）。**⟹ 実運用の分布で見直すべき値であり、
+ * 勘で変えない。**
  *
  * **`examples/chat` はこの定数を継がない**——`examples/chat/src/mnemora-path.ts` の
  * `DEFAULT_MNEMORA_PATH_ASSOCIATION` は同じ値 `{ maxCount: 10 }` を独自に持つ

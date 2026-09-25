@@ -271,10 +271,11 @@ async function runOneProbe(
 
   // ⛔ `text` 以外を渡さない——既定の limit/閾値/overFetchFactor のまま測る
   // (既存 `runRetrievalQualityArm` と同じ規律)。
-  // association: null — `packages/core` の連想枠が既定 on になる提案（ADR 0335、
-  // ⛔ オーナーの回答待ち）が採用されても、この arm の基準線（時制の新旧判定）を
-  // 動かさないための唯一の例外。連想は on/off の判断そのものとは無関係な効果
-  // （近傍からの追加昇格）を持ち込むため、"text 以外を渡さない" の規律よりここを優先する。
+  // association: null — `packages/core` の連想枠が既定 on になった（ADR 0335。
+  // オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後も、この arm の
+  // 基準線（時制の新旧判定）を動かさないための唯一の例外。連想は on/off の判断
+  // そのものとは無関係な効果（近傍からの追加昇格）を持ち込むため、"text 以外を渡さない"
+  // の規律よりここを優先する。
   const result = await options.runtime.recall(ctx, { text: probe.query, association: null });
 
   const resolvedExternalIds = await Promise.all(

@@ -49,14 +49,15 @@ import type { RecallResult } from "./recall.js";
  * `RecallFootprintShape.associationCount` として引数で受け取る。
  *
  * ⚠⚠ **[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)
- * （⛔ オーナーの回答待ちの提案）が `recall()` 自身の連想枠の既定を on にしても、
- * この関数の `associationCount` の既定は `0` のまま据え置く（下の doc コメント参照）。**
+ * （採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）が `recall()`
+ * 自身の連想枠の既定を on にしても、この関数の `associationCount` の既定は `0` のまま
+ * 据え置く（下の doc コメント参照）。**
  * 理由——`maxCount` は連想枠が**試みる上限**であって、**実際に何件が本体へ昇格するか**
  * （ANN の近傍分布・`minSimilarity` の閾値に依存する、上のパラグラフの前提そのもの）とは
  * 無関係である。`maxCount` をそのまま `associationCount` の既定に流用すると、
  * 「呼び出し側にしか無い値」を `packages/core` が代わりに推測することになり、
  * この節が最初に立てた原則（ここで推定しない）を自ら破る。**⟹ `RecallQuery.association`
- * を省略した（＝ ADR 0335 が採用された場合、連想枠が既定 on で走る）呼び出しについて、
+ * を省略した（＝ ADR 0335 により、連想枠が既定 on で走る）呼び出しについて、
  * `associationCount` も同時に省略すると、この関数の見積もりは実際の `recall()` の出力を
  * 体系的に過小評価する**（北極星「目指す姿」6本目「知らないことを、知らないと言える」に
  * 照らすと、この過小評価は「探していない」を「見つからなかった」と同じ顔で返す形に近い）。
@@ -448,9 +449,9 @@ export interface RecallFootprintShape {
    * か、過去の実測から見積もった値を持っているときだけ渡すこと。
    *
    * ⚠⚠ **[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)
-   * （⛔ オーナーの回答待ちの提案）が `recall()` 自身の連想枠の既定を on にする場合、
-   * 「省略時は `0`」は「連想枠を一切使わない呼び出しと1バイトも変わらない」ことを
-   * **もう意味しなくなる**——`recall()` 自身の連想枠の既定が on になると、
+   * （採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）が `recall()`
+   * 自身の連想枠の既定を on にしたので、「省略時は `0`」は「連想枠を一切使わない呼び出しと
+   * 1バイトも変わらない」ことを**もう意味しない**——`recall()` 自身の連想枠の既定が on になると、
    * `RecallQuery.association` を省略した通常の呼び出しでも連想は走る。**この既定
    * （`0`）は意図して据え置く**（ADR 0166 以前の値のまま、`DEFAULT_RECALL_ASSOCIATION`
    * には連動させない）。⟹ `associationCount` を渡さずに見積もると、

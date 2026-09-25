@@ -605,11 +605,12 @@ interface ArmConfig {
   label: string;
   /**
    * `null` は明示的な off。**`undefined`（省略）ではない**——`packages/core` の
-   * 連想枠が既定 on になる提案（[ADR
-   * 0335](../../../../docs/decisions/0335-recall-association-default-on.md)、
-   * ⛔ オーナーの回答待ち）の後は、`association` キーを省略すると連想が既定で走って
-   * しまうため、"off" arm を「キーを渡さない」で作ると `packages/core` の既定に
-   * 静かに乗っ取られる（実際にこのバグが在った——下の `measureArmAtEf` は以前
+   * 連想枠が既定 on になった（[ADR
+   * 0335](../../../../docs/decisions/0335-recall-association-default-on.md)。
+   * オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
+   * `association` キーを省略すると連想が既定で走ってしまうため、"off" arm を
+   * 「キーを渡さない」で作ると `packages/core` の既定に静かに乗っ取られる
+   * （実際にこのバグが在った——下の `measureArmAtEf` は以前
    * `arm.association ? {...} : {}` で off を「渡さない」に変換していた）。
    */
   association: RecallAssociationQuery | null;
