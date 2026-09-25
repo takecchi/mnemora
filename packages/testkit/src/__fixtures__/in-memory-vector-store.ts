@@ -156,7 +156,7 @@ export class InMemoryVectorStore implements VectorStore {
       if (!subjectMatches) {
         continue;
       }
-      // Issue #152/#153（ADR 0308）: AND 等値の絞り込み——`PostgresVectorStore.search`
+      // Issue #152/#153（ADR 0310）: AND 等値の絞り込み——`PostgresVectorStore.search`
       // （`m.attributes @> ...::jsonb`）と同じ意味論。
       if (opts.filter.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};

@@ -504,7 +504,7 @@ type _p60_AnnUnreachedSeverity = Expect<
 >;
 
 // =============================================================================
-// packages/core/src/attributes.ts — 1ペア（Issue #152/#153、ADR 0308）
+// packages/core/src/attributes.ts — 1ペア（Issue #152/#153、ADR 0310）
 // =============================================================================
 
 type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attributes>>;

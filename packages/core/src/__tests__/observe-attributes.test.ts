@@ -5,7 +5,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * `ObserveXxxInput.attributes` の歯（Issue #152、ADR 0308）。
+ * `ObserveXxxInput.attributes` の歯（Issue #152、ADR 0310）。
  *
  * `recall-validity.test.ts`（ADR 0164）と同型: `packages/core` 自身のテストなので
  * `@mnemora/testkit` には依存しない。DB を要さないため手元で実行できる。
@@ -47,7 +47,7 @@ function buildRuntime(opts?: { llmFails?: boolean }) {
   return { runtime, stores };
 }
 
-describe("runtime.observe() — attributes が Memory まで素通しされる（Issue #152、ADR 0308）", () => {
+describe("runtime.observe() — attributes が Memory まで素通しされる（Issue #152、ADR 0310）", () => {
   it("observe({ kind: 'utterance', attributes }) が Memory.attributes に到達する", async () => {
     const { runtime, stores } = buildRuntime();
 
