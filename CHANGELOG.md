@@ -218,6 +218,18 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
   無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
   [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
+- **`deriveClaimKeys`/`buildClaimKeyPrompt` に任意の末尾引数 `knownPredicatesFromStore?:
+  readonly string[]` を足した**——`ClaimKeyOptions.knownPredicatesFromStore`（ADR 0329）が
+  店から集めた predicate は、呼び出し側が明示的に渡す `knownPredicates` とは別の・弱めた
+  文言（「同じ主題・同じ属性のときに限り再利用し、話題が違う・迷う場合は新しい predicate を
+  作る」）・別の見出しで system プロンプトへ足すようにした——ADR 0329 負債1（無関係な
+  filler 発話どうしが誤って同じ predicate に統合され `contested` になる）への対処を狙った
+  ものだが、real データ（n=3、6ケース）では訂正4件の predicate 一致が 4/4 のまま保たれない
+  run があり（3/4 が2回）、誤検出2件の成立も 2/2→1/2 に減る run はあるが 2/2 のままの run
+  もある——**明確な改善ではなくトレードオフ**であることを実測した。呼び出し側が明示的に
+  渡す `knownPredicates` だけの経路・opt-in でない経路のプロンプトは1バイトも変えていない
+  （[Issue #835](https://github.com/takecchi/mnemora/issues/835) /
+  [ADR 0338](./docs/decisions/0338-claim-key-known-predicates-from-store-wording.md)）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

@@ -116,8 +116,9 @@ function buildKnownPredicateInstruction(knownPredicates: readonly string[]): str
  * 単一の一覧の文言を書き換えていた——本関数の文言は ADR 0329 の v1 と意味的にほぼ同じ
  * （「同じ主体の同じ属性と確信できる場合に限り再利用」）である。**この文言変更が
  * `other-period-city-this-year`/`unknown-favorite-number` を実際に減らせるかは、
- * ADR 0329 の否定的結果を踏まえると懐疑的に見るべきである**——本 Issue の ADR
- * （`docs/decisions/` の Issue #835 対応）に実測結果を記録する。
+ * ADR 0329 の否定的結果を踏まえると懐疑的に見るべきである**——実際に実測するとトレード
+ * オフだった（訂正4件中 `negation-moved-job` の一致を3回中2回落とした）。詳細は
+ * [ADR 0338](../../../docs/decisions/0338-claim-key-known-predicates-from-store-wording.md) 参照。
  */
 function buildKnownPredicateFromStoreInstruction(
   knownPredicatesFromStore: readonly string[],
