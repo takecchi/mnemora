@@ -651,6 +651,55 @@ async function showEfSearch(pool: PostgresClient["pool"]): Promise<string> {
   return JSON.stringify(rows);
 }
 
+/**
+ * `captureExplainAt`と違い、`memories`へのJOINと3段tie-break（`vector-store.ts`の
+ * `search()`と1バイトも違わない形）を含む——**ef_searchが上がると、この JOIN
+ * 付きクエリと JOIN 無しの `captureExplainAt` とでプランナのコスト推定が乖離し、
+ * 索引を諦める閾値(Seq Scanへ切り替わるef値)がずれる**ことを実機で確認した
+ * (ef=400で`captureExplainAt`はSeq Scanと報告したが、この関数(JOIN付き、
+ * 本番と同形)ではef=500まで索引が使われ、ef=600以降でSeq Scanに切り替わった
+ * ——`/tmp/mgr-243b5dc9/`での実測、2026-09-26)。**aRaw/到達の実測値自体は
+ * `measureEfPoint`が本物の`runtime.recall()`(`PostgresVectorStore.search()`)を
+ * 経由するため、この関数の結果に依存せず正しい**——この関数は「その値が
+ * 本当に索引を使って得られたのか、それともプランナが黙って厳密探索へ
+ * 倒れた結果なのか」を切り分ける診断専用。
+ */
+async function captureExplainAtProduction(
+  pool: PostgresClient["pool"],
+  table: string,
+  tenantId: string,
+  label: string,
+  vector: number[],
+  limit: number,
+  setupSql: string[],
+): Promise<ExplainCapture> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const s of setupSql) {
+      await client.query(s);
+    }
+    const { rows } = await client.query(
+      `EXPLAIN (ANALYZE, BUFFERS)
+       SELECT e.memory_id AS memory_id, e.embedding <=> $1::vector AS distance
+       FROM ${table} e
+       JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+       WHERE e.tenant_id = $2
+       ORDER BY e.embedding <=> $1::vector, m.recorded_at DESC, e.memory_id
+       LIMIT $3`,
+      [toVectorLiteral(vector), tenantId, limit],
+    );
+    await client.query("COMMIT");
+    const text = rows.map((r: { "QUERY PLAN": string }) => r["QUERY PLAN"]).join("\n");
+    const hnswUsedHeuristic =
+      /Index (Scan|Only Scan).*hnsw/i.test(text) || /idx_memory_embeddings_hnsw/i.test(text);
+    const seqScanHeuristic = /Seq Scan/i.test(text);
+    return { label, text, hnswUsedHeuristic, seqScanHeuristic };
+  } finally {
+    client.release();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // 1測定点(M0/EXACT/R1..R3)ぶんのレポート型。
 // ---------------------------------------------------------------------------
@@ -902,7 +951,147 @@ interface RepeatEfReport {
   iterativeScanComparison: IterativeScanComparisonRow[];
 }
 
-const EF_SWEEP_VALUES = [40, 120, 400, 1000];
+// ⚠ [40,120,400,1000]の粗い掃引では「ef=1000で全回復」に見えたが、
+// `captureExplainAtProduction`による実機検証(2026-09-26)で、本番と同形のクエリは
+// ef=500まで索引を使い、ef=600以降でプランナがSeq Scan(厳密探索)へ切り替わる
+// ことが分かった——⟹ 1000は索引が効いていない領域。500近辺の解像度を上げて、
+// 「索引が効いている範囲内でaRawが改善するか」を見られるようにする。
+const EF_SWEEP_VALUES = [40, 120, 400, 500, 550, 600, 700, 1000];
+
+/**
+ * I4(または単独ingestのef-sweepモード)の索引をそのまま使い、ef_search掃引 +
+ * (余力)iterative_scan比較を行う。呼び出し側が既にingest済みのanchorIds/goldIds/
+ * spaceを渡す——**REINDEXもTRUNCATEもしない**(索引・行は不変のまま、ef_searchと
+ * iterative_scanという「検索時」パラメータだけを動かす)。
+ */
+async function runEfSweepAndIterativeScan(
+  databaseUrl: string,
+  databaseName: string,
+  cache: FileEmbeddingCache,
+  tenantId: string,
+  anchorIds: ReadonlyMap<string, MemoryId>,
+  goldIds: ReadonlyMap<string, MemoryId>,
+  space: EmbeddingSpaceId,
+): Promise<{ efSweep: EfSweepPoint[]; iterativeScanComparison: IterativeScanComparisonRow[] }> {
+  const table = embeddingSpaceTableName(space);
+  assertSafeIdentifier(table);
+  const efSweep: EfSweepPoint[] = [];
+
+  for (const ef of EF_SWEEP_VALUES) {
+    const efHandle = await setEfSearchAndReconnect(databaseUrl, databaseName, ef, cache);
+    const check = await efHandle.pool.query("show hnsw.ef_search");
+    const efSearchShown = JSON.stringify(check.rows);
+    const probes = await measureEfPoint(efHandle, tenantId, anchorIds, goldIds);
+    const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
+    const repProbe = ASSOCIATION_PROBES[0]!;
+    const queryVector = await cachedVectorOrThrow(efHandle.cachingEmbeddingProvider, repProbe.query);
+    // ⚠ 本番と同形(JOIN + 3段tie-break込み)のEXPLAINを撮る——`captureExplainAt`
+    // (JOIN無し)はef_searchが上がったときのプランナのコスト推定がずれ、
+    // 索引を諦める閾値を読み違える(2026-09-26の実機検証、上のコメント参照)。
+    const explainQuery = await captureExplainAtProduction(
+      efHandle.pool,
+      table,
+      tenantId,
+      `ef=${ef}`,
+      queryVector,
+      kPrime,
+      ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+    );
+    const aRawCount = probes.filter((p) => p.aRaw).length;
+    const on3Count = probes.filter((p) => p.reachedOn3).length;
+    const on10Count = probes.filter((p) => p.reachedOn10).length;
+    console.log(
+      `  [efSweep ef=${ef}] ef_search実測=${efSearchShown} aRaw=${aRawCount}/12 ` +
+        `到達on-3=${on3Count}/12 到達on-10=${on10Count}/12 ` +
+        `hnsw(本番形)=${explainQuery.hnswUsedHeuristic} seq(本番形)=${explainQuery.seqScanHeuristic}`,
+    );
+    for (const p of probes) {
+      console.log(
+        `    [ef=${ef}] ${p.probeId}: aRaw=${p.aRaw} rank=${p.aRawRank} on3=${p.reachedOn3} on10=${p.reachedOn10}`,
+      );
+    }
+    efSweep.push({ ef, efSearchShown, probes, explainQuery });
+    await efHandle.close();
+  }
+
+  // --- 余力: ef=40の上でiterative_scan=off vs relaxed_orderの比較(生SQL) ---
+  const ef40Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 40, cache);
+  const iterativeScanComparison = await runIterativeScanComparison(
+    ef40Handle.pool,
+    space,
+    tenantId,
+    anchorIds,
+    ef40Handle.cachingEmbeddingProvider,
+  );
+  const diffCount = iterativeScanComparison.filter((r) => r.aRawRelaxedOrder !== r.aRawOff).length;
+  console.log(`  [iterativeScan比較] relaxed_order vs off で差が出たprobe: ${diffCount}/12`);
+  for (const r of iterativeScanComparison) {
+    console.log(`    ${r.probeId}: relaxed_order=${r.aRawRelaxedOrder} off=${r.aRawOff}`);
+  }
+  await ef40Handle.close();
+
+  // ef_searchをDB既定へ戻す(呼び出し側の後続測定に漏れないように)。
+  const resetHandle = await createInstrumentedRuntime(databaseUrl, cache);
+  await resetHandle.pool.query(`ALTER DATABASE ${databaseName} RESET hnsw.ef_search`);
+  await resetHandle.close();
+
+  return { efSweep, iterativeScanComparison };
+}
+
+/** 単独ingest(I9)1回だけしてef-sweepを行う軽量モード(`MNEMORA_ASSOC_NONDET_MODE=ef-sweep`)。
+ * I4〜I8のM0反復(既に別実行で測定済み)を再実行せずに済ませるため。 */
+async function runEfSweepOnlyMode(
+  databaseUrl: string,
+  databaseName: string,
+  scale: number,
+  cache: FileEmbeddingCache,
+): Promise<{
+  ingest: { label: string; ingestSeconds: number; drainSeconds: number; m0: MeasurementReport };
+  efSweep: EfSweepPoint[];
+  iterativeScanComparison: IterativeScanComparisonRow[];
+}> {
+  const tenantId = "nondet-efsweep";
+  console.log(`\n########## I9 (fillerOrder=forward, ef-sweep単独モード) ##########`);
+  const corpus = buildCorpus(scale, "forward");
+  const handle = await createInstrumentedRuntime(databaseUrl, cache);
+  await truncateAll(handle.pool);
+  const ingest = await ingestCorpus(handle, tenantId, corpus);
+  console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+  const space = handle.cachingEmbeddingProvider.space;
+
+  const m0 = await buildMeasurementReport(
+    handle,
+    tenantId,
+    space,
+    ingest.anchorIds,
+    ingest.goldIds,
+    "M0",
+    ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+  );
+  console.log(summarizeMeasurement("M0", m0.probes));
+  await handle.close();
+
+  const { efSweep, iterativeScanComparison } = await runEfSweepAndIterativeScan(
+    databaseUrl,
+    databaseName,
+    cache,
+    tenantId,
+    ingest.anchorIds,
+    ingest.goldIds,
+    space,
+  );
+
+  return {
+    ingest: {
+      label: "I9",
+      ingestSeconds: ingest.ingestSeconds,
+      drainSeconds: ingest.drainSeconds,
+      m0,
+    },
+    efSweep,
+    iterativeScanComparison,
+  };
+}
 
 async function runRepeatEfMode(
   databaseUrl: string,
@@ -938,63 +1127,19 @@ async function runRepeatEfMode(
     repeats.push({ label, ingestSeconds: ingest.ingestSeconds, drainSeconds: ingest.drainSeconds, m0 });
 
     if (label === "I4") {
-      // --- I4の索引そのまま(REINDEXしない)でef_search掃引 ---
-      const table = embeddingSpaceTableName(space);
-      assertSafeIdentifier(table);
-      for (const ef of EF_SWEEP_VALUES) {
-        const efHandle = await setEfSearchAndReconnect(databaseUrl, databaseName, ef, cache);
-        const check = await efHandle.pool.query("show hnsw.ef_search");
-        const efSearchShown = JSON.stringify(check.rows);
-        const probes = await measureEfPoint(efHandle, tenantId, ingest.anchorIds, ingest.goldIds);
-        const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
-        const repProbe = ASSOCIATION_PROBES[0]!;
-        const queryVector = await cachedVectorOrThrow(efHandle.cachingEmbeddingProvider, repProbe.query);
-        const explainQuery = await captureExplainAt(
-          efHandle.pool,
-          table,
-          tenantId,
-          `ef=${ef}`,
-          queryVector,
-          kPrime,
-          ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
-        );
-        const aRawCount = probes.filter((p) => p.aRaw).length;
-        const on3Count = probes.filter((p) => p.reachedOn3).length;
-        const on10Count = probes.filter((p) => p.reachedOn10).length;
-        console.log(
-          `  [efSweep ef=${ef}] ef_search実測=${efSearchShown} aRaw=${aRawCount}/12 ` +
-            `到達on-3=${on3Count}/12 到達on-10=${on10Count}/12 ` +
-            `hnsw=${explainQuery.hnswUsedHeuristic} seq=${explainQuery.seqScanHeuristic}`,
-        );
-        for (const p of probes) {
-          console.log(`    [ef=${ef}] ${p.probeId}: aRaw=${p.aRaw} rank=${p.aRawRank} on3=${p.reachedOn3} on10=${p.reachedOn10}`);
-        }
-        efSweep.push({ ef, efSearchShown, probes, explainQuery });
-        await efHandle.close();
-      }
-
-      // --- 余力: I4・ef=40の上でiterative_scan=off vs relaxed_orderの比較(生SQL) ---
-      const ef40Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 40, cache);
-      iterativeScanComparison = await runIterativeScanComparison(
-        ef40Handle.pool,
-        space,
+      // --- I4の索引そのまま(REINDEXしない)でef_search掃引 + iterative_scan比較 ---
+      // (共通ロジックは runEfSweepAndIterativeScan、ef-sweep単独モードと共有)
+      const result = await runEfSweepAndIterativeScan(
+        databaseUrl,
+        databaseName,
+        cache,
         tenantId,
         ingest.anchorIds,
-        ef40Handle.cachingEmbeddingProvider,
+        ingest.goldIds,
+        space,
       );
-      const diffCount = iterativeScanComparison.filter(
-        (r) => r.aRawRelaxedOrder !== r.aRawOff,
-      ).length;
-      console.log(`  [iterativeScan比較] relaxed_order vs off で差が出たprobe: ${diffCount}/12`);
-      for (const r of iterativeScanComparison) {
-        console.log(`    ${r.probeId}: relaxed_order=${r.aRawRelaxedOrder} off=${r.aRawOff}`);
-      }
-      await ef40Handle.close();
-
-      // ef_searchをDB既定へ戻す(後続I5〜I8の測定に漏れないように)。
-      const resetHandle = await createInstrumentedRuntime(databaseUrl, cache);
-      await resetHandle.pool.query(`ALTER DATABASE ${databaseName} RESET hnsw.ef_search`);
-      await resetHandle.close();
+      efSweep = result.efSweep;
+      iterativeScanComparison = result.iterativeScanComparison;
     }
 
     await handle.close();
@@ -1018,7 +1163,8 @@ async function main(): Promise<void> {
     process.env.MNEMORA_ASSOC_NONDET_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-nondet-embcache";
   const jsonPath = process.env.MNEMORA_ASSOC_NONDET_JSON;
   const tenantId = "nondet";
-  const mode = process.env.MNEMORA_ASSOC_NONDET_MODE === "repeat-ef" ? "repeat-ef" : "main";
+  const modeEnv = process.env.MNEMORA_ASSOC_NONDET_MODE;
+  const mode = modeEnv === "repeat-ef" ? "repeat-ef" : modeEnv === "ef-sweep" ? "ef-sweep" : "main";
 
   console.log(`scale=${scale} cacheDir=${cacheDir} mode=${mode}`);
 
@@ -1063,6 +1209,17 @@ async function main(): Promise<void> {
       mkdirSync(dirname(jsonPath), { recursive: true });
       writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
       console.log(`\n[association-scale-nondeterminism] repeat-efモードの結果を書き出した: ${jsonPath}`);
+    }
+    return;
+  }
+
+  if (mode === "ef-sweep") {
+    const report = await runEfSweepOnlyMode(databaseUrl, databaseName, scale, cache);
+    cache.close();
+    if (jsonPath) {
+      mkdirSync(dirname(jsonPath), { recursive: true });
+      writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+      console.log(`\n[association-scale-nondeterminism] ef-sweepモードの結果を書き出した: ${jsonPath}`);
     }
     return;
   }
