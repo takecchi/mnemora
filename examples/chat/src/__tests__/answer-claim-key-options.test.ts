@@ -22,7 +22,7 @@ describe("resolveAnswerClaimKeyOptions", () => {
     expect(result && "knownPredicates" in result).toBe(false);
   });
 
-  it('MNEMORA_ANSWER_CLAIM_KEY="detect-known-predicates-from-store" なら knownPredicatesFromStore が true になる（Issue #691続き、ADR 0328）', () => {
+  it('MNEMORA_ANSWER_CLAIM_KEY="detect-known-predicates-from-store" なら knownPredicatesFromStore が true になる（Issue #691続き、ADR 0329）', () => {
     const result = resolveAnswerClaimKeyOptions({
       MNEMORA_ANSWER_CLAIM_KEY: "detect-known-predicates-from-store",
     });

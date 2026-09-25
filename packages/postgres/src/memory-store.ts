@@ -1973,13 +1973,13 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #691続き（ADR 0328）: `MemoryStore.listActiveClaimPredicates?` の実装
+   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装
    * （interface 側の doc コメントに契約全体がある。ここはクエリの組み立てだけ）。
    * `idx_memories_claim_key`（`(tenant_id, subject_id, claim_key_subject,
    * claim_key_predicate)`、`migrations/0021_memories_claim_key.sql`）の先頭2列
    * （`tenant_id`, `subject_id`）で絞り込み、`status`/`claim_key_predicate IS NOT NULL`
    * を追加の `WHERE` で絞ったうえで `GROUP BY claim_key_predicate` して
-   * `MAX(created_at)` で新しい順に並べる。**新しい索引は足さない**——ADR 0328 決定4
+   * `MAX(created_at)` で新しい順に並べる。**新しい索引は足さない**——ADR 0329 決定4
    * 参照（この口はテナントの1 subjectId に閉じた、既に小さい行数を前提にしている）。
    *
    * `subject_id` は `findActiveByClaimKey` と同じ `IS NOT DISTINCT FROM`

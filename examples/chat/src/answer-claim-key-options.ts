@@ -27,7 +27,7 @@ import type { EnvLike } from "./providers.js";
  * `knownPredicates` を渡さない**——語彙ヒント無しでの claim key の安定性・検出の
  * 当たりをそのまま観測する。
  *
- * `"detect-known-predicates-from-store"`（Issue #691続き、ADR 0328。ADR 0326
+ * `"detect-known-predicates-from-store"`（Issue #691続き、ADR 0329。ADR 0326
  * 「採らなかった案B」の実測）は、上の懸念（作業者が手で語彙を選ぶと正解が漏れる）を
  * 別の形で解く——**手で選んだ語彙は一切使わず**、`ClaimKeyOptions.
  * knownPredicatesFromStore: true` で `MemoryStore.listActiveClaimPredicates?` から

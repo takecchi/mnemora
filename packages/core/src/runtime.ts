@@ -2680,7 +2680,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * Issue #691続き（ADR 0326「採らなかった案B」の実装、ADR 0328）:
+   * Issue #691続き（ADR 0326「採らなかった案B」の実装、ADR 0329）:
    * `ClaimKeyOptions.knownPredicates`（呼び出し側が明示的に渡した語彙）と
    * `ClaimKeyOptions.knownPredicatesFromStore`（store から動的に集める語彙）を合成する。
    *
@@ -2689,11 +2689,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    *   `claimKeyOptions.knownPredicates` をそのまま返す（**store を一度も読まない**——
    *   opt-in していない呼び出しで既存の挙動を1バイトも変えないため）。
    * - それ以外は `listActiveClaimPredicates` を1回呼び、**利用者の `knownPredicates` を
-   *   先に**、集めた一覧を**後ろに重複を除いて**連結する（ADR 0328 決定2）。
+   *   先に**、集めた一覧を**後ろに重複を除いて**連結する（ADR 0329 決定2）。
    *   `subjectId` は `observation.subjectId ?? null`——1回の `observe()` 呼び出しが
    *   持つ唯一の subjectId であり、候補ごとの `subjectId` 上書き（ADR 0271）は
    *   `deriveClaimKeys` 呼び出しより後（`buildNewMemoryFromCandidate`）にしか
-   *   確定しないため、ここでは観測全体の既定値を使う（ADR 0328 決定3、確かめていないこと
+   *   確定しないため、ここでは観測全体の既定値を使う（ADR 0329 決定3、確かめていないこと
    *   参照）。
    * - 合成の結果、一覧が空（利用者も渡さず、store にも1件も無い）なら `undefined` を返す
    *   ——`deriveClaimKeys`/`buildClaimKeyPrompt` の「空配列＝渡していない」規約

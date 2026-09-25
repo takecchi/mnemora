@@ -1230,7 +1230,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #691続き（ADR 0328）: `MemoryStore.listActiveClaimPredicates?` の実装
+   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装
    * （`packages/testkit` の `InMemoryMemoryStore.listActiveClaimPredicates` と同じ
    * ロジック——このファイルは意図的に独立している、冒頭のコメント参照）。
    */

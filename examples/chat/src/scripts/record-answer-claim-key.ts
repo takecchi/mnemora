@@ -13,7 +13,7 @@ import {
 
 /**
  * Issue #691 続き（claimKey/detectContested の evaluate、ADR 0324 の続き。
- * ADR 0328 で条件（基準/新案）と保存先を選べる引数を追加）。
+ * ADR 0329 で条件（基準/新案）と保存先を選べる引数を追加）。
  *
  * **目的**: `examples/chat` の `answer` 経路（`answer-bench.ts`）だけで、
  * `MNEMORA_ANSWER_CLAIM_KEY=detect`（`answer-claim-key-options.ts`）を opt-in し、
@@ -26,7 +26,7 @@ import {
  * ときの既定の保存先・既定の条件（下記 `MNEMORA_RECORD_CONDITION` 省略時）は
  * この PR の変更前と完全に同じままである。
  *
- * **ADR 0328 が足した2つの環境変数**（両方省略すれば、この PR より前と1バイトも
+ * **ADR 0329 が足した2つの環境変数**（両方省略すれば、この PR より前と1バイトも
  * 変わらない挙動になる）:
  *
  * - `MNEMORA_RECORD_CONDITION`（`"baseline"` 省略時の既定 | `"known-predicates-from-store"`）:
@@ -35,7 +35,7 @@ import {
  *   knownPredicatesFromStore: true` を足した新案）。省略・`"baseline"` は従来どおり
  *   `"detect"`（`knownPredicatesFromStore` を渡さない基準）。
  * - `MNEMORA_RECORD_CASSETTE_PATH`（省略時の既定 = {@link ANSWER_CLAIM_KEY_CASSETTE_PATH}）:
- *   書き出し先を上書きする。ADR 0328 の測定は、条件×反復ごとに別ファイル
+ *   書き出し先を上書きする。ADR 0329 の測定は、条件×反復ごとに別ファイル
  *   （`examples/chat/cassettes/` の新しいファイル名）へ書く——このスクリプト自体は
  *   1本の記録しか行わないため、反復は呼び出し側（シェル）が複数回このスクリプトを
  *   別のパスで呼ぶことで実現する。
@@ -44,7 +44,7 @@ import {
  * どちらの条件でも、#748 の `answer.claim-key.json`（既に claimKey opt-in 込みで
  * 記録済み）を種にしない。#748 を種にすると、claim key 派生の呼び出し自体が
  * 「記録済みの応答の再生」になってしまい、実 API に落ちる対照にならないため
- * （ADR 0328 決定、マネージャー指示）。
+ * （ADR 0329 決定、マネージャー指示）。
  *
  * **なぜ `answer.order-legend.json` を種カセットにするか（ADR 0309 §4.5.2 の踏襲）**:
  * ADR 0315 決定1・決定2 により、抽出プロンプト（`extraction.ts`）はこの opt-in でも
@@ -110,7 +110,7 @@ async function main(): Promise<void> {
     throw new Error("OPENAI_API_KEY が無い。このスクリプトは実 API を叩く。");
   }
 
-  // ADR 0328: 条件（基準/新案）と保存先を env で選べる。両方省略すれば、この PR より前と
+  // ADR 0329: 条件（基準/新案）と保存先を env で選べる。両方省略すれば、この PR より前と
   // 完全に同じ挙動（"detect"、ANSWER_CLAIM_KEY_CASSETTE_PATH）になる。
   const condition = resolveRecordCondition(process.env.MNEMORA_RECORD_CONDITION);
   const answerClaimKeyMode =

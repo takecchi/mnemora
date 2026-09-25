@@ -299,7 +299,7 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsFindActiveByClaimKey: boolean;
   /**
-   * Issue #691続き（ADR 0328）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
+   * Issue #691続き（ADR 0329）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可）。
    *
    * `supportsOnlyMemoryIdsFilter` と同じく3状態を区別する——既存の外部 adapter の
@@ -1482,7 +1482,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     }
 
     // -------------------------------------------------------------------
-    // listActiveClaimPredicates（Issue #691続き、ADR 0328。任意メソッド）
+    // listActiveClaimPredicates（Issue #691続き、ADR 0329。任意メソッド）
     //
     // 契約: 同じ tenant・同じ subjectId・status='active'・claim key を持つ Memory から、
     // predicate を重複無く新しい順に、limit 件まで返す。

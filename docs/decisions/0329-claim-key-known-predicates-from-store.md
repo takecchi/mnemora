@@ -1,4 +1,4 @@
-# ADR 0328: `knownPredicates` を store の既存 predicate 一覧から動的に渡す — ADR 0326「採らなかった案B」を実装し、実測する（Issue #691 続き）
+# ADR 0329: `knownPredicates` を store の既存 predicate 一覧から動的に渡す — ADR 0326「採らなかった案B」を実装し、実測する（Issue #691 続き）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
@@ -10,9 +10,10 @@
 
 ⚠ **番号について**: この ADR は当初 `0327` を仮番号として想定していたが、着手中に
 `0327`（[Issue #207](https://github.com/takecchi/mnemora/issues/207) の `memory_relations`
-書き込み経路設計、別の担い手）が先に `main` へ着地した（PR #749）。⟹ **この PR は
-`0328` を仮番号として使う**（[ADR 0179](./0179-adr-number-assigned-at-merge.md) のとおり、
-最終番号はマージ直前にマネージャーが確定させる）。
+書き込み経路設計、別の担い手）が先に `main` へ着地した（PR #749）。続いて `0328` も
+Issue #565 の測定（PR #751）が先に着地したため、`node scripts/adr-renumber.mjs` で
+**`0329`** に振り直した（[ADR 0179](./0179-adr-number-assigned-at-merge.md) のとおり、
+最終番号はマージ直前に確定させる。この後さらに `main` が進めば再び振り直す）。
 
 ### 出所の凡例（ADR 0185/0315/0320/0324/0326 以降の作法）
 
@@ -448,4 +449,4 @@ claim key 付き記憶がある状況では、`deriveClaimKeys` の system プ�
   効果測定）・[ADR 0315](./0315-claim-key-does-not-touch-extraction-cassettes.md)
   （claimKey はカセットを壊さない、種カセットの推奨）
 - [ADR 0179](./0179-adr-number-assigned-at-merge.md)（ADR 番号はマージ直前に確定、本
-  ADR が `0327`→`0328` に振り直した経緯の根拠）
+  ADR が `0327`→`0328`→`0329` と振り直した経緯の根拠）

@@ -1380,7 +1380,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #691続き（ADR 0328）: `MemoryStore.listActiveClaimPredicates?` の実装（契約は
+   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装（契約は
    * interface 側の doc コメントにある）。`packages/postgres` の実装と同じ絞り込み
    * （`subjectId` は `null` 同士も一致・`status === "active"`・`claimKey` を持つ行のみ）
    * のうえで、predicate ごとに最も新しい `createdAt` を代表値にして降順ソートし、

@@ -2617,7 +2617,7 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
   });
 });
 
-describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 0326「採らなかった案B」の実装、ADR 0328）", () => {
+describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 0326「採らなかった案B」の実装、ADR 0329）", () => {
   /**
    * `stores.memoryStore.listActiveClaimPredicates` の呼び出し回数・引数を捕まえる薄い
    * ラッパー（`spyOnFindActiveByClaimKey` と同じ形——プロトタイプは変更しない）。

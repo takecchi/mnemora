@@ -201,7 +201,7 @@ export async function deriveClaimKeys(
  * Issue #691 続き（`docs/decisions/0327-*.md`）: `ClaimKeyOptions.knownPredicatesFromStore`
  * を `true`（オブジェクト形を渡さない場合）にしたときに使う既定の上限。
  *
- * **根拠**（ADR 0328 決定2の逐語）: ADR 0315/0320/0324 の語彙ヒント実験はいずれも
+ * **根拠**（ADR 0329 決定2の逐語）: ADR 0315/0320/0324 の語彙ヒント実験はいずれも
  * 作業者が手で作った 5〜8 件の predicate で語彙ヒントの効果（安定性 74.1%→89.4%、
  * 検出の predicate 弁別も含めて100%一致）を確認している——**この定数は、その実験規模の
  * 2倍強を置くことで、実験で効果が確認された範囲を十分に覆いつつ、主題を持つ1人の
@@ -233,7 +233,7 @@ export const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
  *   何も起きない**——鍵が無いので検出のしようがない（`runtime.ts` の
  *   `detectClaimKeyContested` 参照）。
  * - **`{ enabled: true, knownPredicatesFromStore: true }`**（Issue #691続き、ADR 0326
- *   「採らなかった案B」の実装、ADR 0328）: `deriveClaimKeys` を呼ぶ**前**に、
+ *   「採らなかった案B」の実装、ADR 0329）: `deriveClaimKeys` を呼ぶ**前**に、
  *   `MemoryStore.listActiveClaimPredicates?`（任意メソッド）で「同じ tenant・同じ
  *   `subjectId`・`active`」な既存 Memory の predicate 一覧を新しい順に集め、呼び出し側の
  *   `knownPredicates`（渡していれば）の**後ろ**へ重複無く連結してから渡す
@@ -263,7 +263,7 @@ export interface ClaimKeyOptions {
    */
   detectContested?: boolean;
   /**
-   * Issue #691続き（ADR 0328）: `MemoryStore.listActiveClaimPredicates?` から集めた
+   * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` から集めた
    * predicate 一覧を、`knownPredicates` の語彙ヒントへ動的に足す。**既定 `false`
    * （省略と同じ）。** `true` を渡すと {@link DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT}
    * 件まで、`{ limit: number }` を渡すとその件数まで集める。`enabled: false`/省略、
