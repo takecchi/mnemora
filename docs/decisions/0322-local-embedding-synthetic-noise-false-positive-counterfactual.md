@@ -1,4 +1,4 @@
-# ADR 0319: `local` 埋め込み5+2群に合成ノイズを注入し、ADR 0316 判定の偽陽性率を反実仮想として測る — Issue #109（ADR 0316「引き受けた負債」1番）
+# ADR 0322: `local` 埋め込み5+2群に合成ノイズを注入し、ADR 0316 判定の偽陽性率を反実仮想として測る — Issue #109（ADR 0316「引き受けた負債」1番）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
@@ -106,9 +106,8 @@
    `scripts/local-embedding-synthetic-noise-fp.ts`）が、既存の `ArmProbeSetSpec`
    （`identifier-arm.ts` が定義・`IDENTIFIER_PROBE_SET_SPEC`/`JAPANESE_NAME_PROBE_SET_SPEC`/
    `NUMERAL_TOKEN_PROBE_SET_SPEC` が実装）を import して使うだけである。
-7. **ADR 番号は 0319 とした**（マネージャー指示。現在の最大は 0317、#717 PR が 0318 を
-   使用中で in-flight。**この番号は仮であり、マージ時にマネージャーが振り直す**
-   ——[ADR 0179](./0179-adr-number-assigned-at-merge.md) の手順）。
+7. **ADR 番号は、作業中は仮に 0319 とし、マージ前に 0322 へ振り直した**（main で 0319〜0321 が
+   先に着地したため。`node scripts/adr-renumber.mjs` による——[ADR 0179](./0179-adr-number-assigned-at-merge.md) の手順）。
 
 ---
 
