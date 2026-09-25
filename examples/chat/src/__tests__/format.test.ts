@@ -70,6 +70,8 @@ function baseRow(overrides: Partial<ComparisonRow> = {}): ComparisonRow {
     omitted: [],
     returnedCount: 10,
     annCandidateCount: 321,
+    bandEntryCount: 0,
+    rawIndexJsonLength: 0,
     factStatementSurvived: true,
     memoryUsageReported: true,
     ...overrides,

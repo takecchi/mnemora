@@ -36,6 +36,8 @@ function makeRow(overrides: Partial<ComparisonRow> = {}): ComparisonRow {
     omitted: [],
     returnedCount: 8,
     annCandidateCount: 10,
+    bandEntryCount: 0,
+    rawIndexJsonLength: 42,
     factStatementSurvived: true,
     memoryUsageReported: true,
     ...overrides,
@@ -93,6 +95,8 @@ describe("buildCompareJson", () => {
       totalInScope: 90,
       returnedCount: 10,
       annCandidateCount: 90,
+      bandEntryCount: 13,
+      rawIndexJsonLength: 987,
       factStatementSurvived: false,
     });
     const json = buildCompareJson({
@@ -113,6 +117,8 @@ describe("buildCompareJson", () => {
     expect(written.totalInScope).toBe(90);
     expect(written.returnedCount).toBe(10);
     expect(written.annCandidateCount).toBe(90);
+    expect(written.bandEntryCount).toBe(13);
+    expect(written.rawIndexJsonLength).toBe(987);
     expect(written.factStatementSurvived).toBe(false);
   });
 
