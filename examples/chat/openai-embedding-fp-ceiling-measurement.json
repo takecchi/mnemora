@@ -1,0 +1,5713 @@
+{
+  "_readme": "Issue #109 後半——ADR 0094「これが覆るとしたら」第1項の実測記録。門ではない(この JSON を読んで CI を落とす歯は無い)。⛔ 実測値であり、main が動くと変わる——この JSON は「測った記録そのもの」であり(AGENTS.md 「⛔ 対象外——実測して repo にコミットした基準値」)、再計測は下の how の 手順を再実行すること。",
+  "measuredAt": "2026-09-25T03:11:27.104Z",
+  "commit": "ff325c6f8c1a7bad4a9b55329b8e2121959fef30",
+  "rounds": 59,
+  "alpha": 0.05,
+  "mrrDropThreshold": 0.01,
+  "verdictRule": "群ごとに、hit1Count が baseline(round 0)未満、または mrrOverall が baseline から mrrDropThreshold 以上落ちたら red。6群のいずれかが red ならその round は red (decideEmbeddingDriftVerdict、測定前に固定)。",
+  "baseline": {
+    "round": 0,
+    "metrics": [
+      {
+        "group": "identifiersSparse",
+        "mrrOverall": 0.84,
+        "hit1Count": 21,
+        "hit10Count": 30,
+        "probeCount": 30,
+        "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+        "embeddingModeLabel": "recorded"
+      },
+      {
+        "group": "identifiersDense",
+        "mrrOverall": 0.815,
+        "hit1Count": 20,
+        "hit10Count": 30,
+        "probeCount": 30,
+        "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+        "embeddingModeLabel": "recorded"
+      },
+      {
+        "group": "japaneseNamesSparse",
+        "mrrOverall": 0.9583333333333334,
+        "hit1Count": 11,
+        "hit10Count": 12,
+        "probeCount": 12,
+        "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+        "embeddingModeLabel": "recorded"
+      },
+      {
+        "group": "japaneseNamesDense",
+        "mrrOverall": 0.9583333333333334,
+        "hit1Count": 11,
+        "hit10Count": 12,
+        "probeCount": 12,
+        "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+        "embeddingModeLabel": "recorded"
+      },
+      {
+        "group": "numeralSparse",
+        "mrrOverall": 1,
+        "hit1Count": 18,
+        "hit10Count": 18,
+        "probeCount": 18,
+        "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+        "embeddingModeLabel": "recorded"
+      },
+      {
+        "group": "numeralDense",
+        "mrrOverall": 1,
+        "hit1Count": 18,
+        "hit10Count": 18,
+        "probeCount": 18,
+        "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+        "embeddingModeLabel": "recorded"
+      }
+    ]
+  },
+  "perRound": [
+    {
+      "round": 1,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 4,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 5,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 6,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 7,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 8,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 9,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 10,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 11,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 12,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 13,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 14,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 15,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 16,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 17,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 18,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 19,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 20,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 21,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 22,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 23,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 24,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 25,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 26,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 27,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 28,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 29,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 30,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 31,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 32,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 33,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 34,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 35,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 36,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 37,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 38,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 39,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 40,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 41,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 42,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 43,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 44,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 45,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 46,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 47,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 48,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 49,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 50,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 51,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 52,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 53,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 54,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 55,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 56,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 57,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 58,
+      "red": true,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": true,
+          "reasons": [
+            "hit@1 20/30 が基準値 21/30 を下回った",
+            "MRR 0.8233333333333334 が基準値 0.84 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "identifiersDense",
+          "red": true,
+          "reasons": [
+            "hit@1 19/30 が基準値 20/30 を下回った",
+            "MRR 0.7983333333333333 が基準値 0.815 から 0.016667 落ちた(閾値 0.01)"
+          ]
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.8233333333333334,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.7983333333333333,
+          "hit1Count": 19,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    },
+    {
+      "round": 59,
+      "red": false,
+      "groups": [
+        {
+          "group": "identifiersSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "identifiersDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "japaneseNamesDense",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralSparse",
+          "red": false,
+          "reasons": []
+        },
+        {
+          "group": "numeralDense",
+          "red": false,
+          "reasons": []
+        }
+      ],
+      "metrics": [
+        {
+          "group": "identifiersSparse",
+          "mrrOverall": 0.84,
+          "hit1Count": 21,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "identifiersDense",
+          "mrrOverall": 0.815,
+          "hit1Count": 20,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesSparse",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "japaneseNamesDense",
+          "mrrOverall": 0.9583333333333334,
+          "hit1Count": 11,
+          "hit10Count": 12,
+          "probeCount": 12,
+          "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralSparse",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+          "embeddingModeLabel": "recorded"
+        },
+        {
+          "group": "numeralDense",
+          "mrrOverall": 1,
+          "hit1Count": 18,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+          "embeddingModeLabel": "recorded"
+        }
+      ]
+    }
+  ],
+  "falsePositiveCeiling": {
+    "redCount": 11,
+    "trials": 59,
+    "redRate": 0.1864406779661017,
+    "clopperPearsonUpperBound95": 0.28968191528751286,
+    "note": "6群のいずれかが red だった round の割合(束ねた集計)。群ごとの内訳は perGroupFalsePositiveCeiling。"
+  },
+  "perGroupFalsePositiveCeiling": {
+    "identifiersSparse": {
+      "redCount": 11,
+      "trials": 59,
+      "redRate": 0.1864406779661017,
+      "clopperPearsonUpperBound95": 0.28968191528751286
+    },
+    "identifiersDense": {
+      "redCount": 11,
+      "trials": 59,
+      "redRate": 0.1864406779661017,
+      "clopperPearsonUpperBound95": 0.28968191528751286
+    },
+    "japaneseNamesSparse": {
+      "redCount": 0,
+      "trials": 59,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672
+    },
+    "japaneseNamesDense": {
+      "redCount": 0,
+      "trials": 59,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672
+    },
+    "numeralSparse": {
+      "redCount": 0,
+      "trials": 59,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672
+    },
+    "numeralDense": {
+      "redCount": 0,
+      "trials": 59,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672
+    }
+  },
+  "driftOneSample": {
+    "note": "1標本の乖離チェック(既存 examples/chat/cassettes/retrieval.json の録画時点 vs いま録り直した embedding。LLM 層は録り直さず既存の記録をそのまま再生する——乖離の対象を embedding だけに絞るため)。⛔ 統計的主張はしない(ADR 0033 §3、標本7件)。既存カセットは1バイトも書き換えていない(freshCassette は別のインメモリオブジェクト)。",
+    "shadowVerdictThresholds": {
+      "mrrThreshold": 0.65,
+      "hit1Min": 3
+    },
+    "cassetteRecordedAt": "2026-09-06T21:35:13.480Z",
+    "recorded": {
+      "hit1Count": 4,
+      "mrrOverall": 0.738095238095238,
+      "probeCount": 7,
+      "goldRanks": [
+        {
+          "probeId": "color",
+          "goldRank": 1
+        },
+        {
+          "probeId": "pet",
+          "goldRank": 1
+        },
+        {
+          "probeId": "exercise",
+          "goldRank": 2
+        },
+        {
+          "probeId": "diet",
+          "goldRank": 6
+        },
+        {
+          "probeId": "family",
+          "goldRank": 1
+        },
+        {
+          "probeId": "language",
+          "goldRank": 1
+        },
+        {
+          "probeId": "travel",
+          "goldRank": 2
+        }
+      ],
+      "shadowVerdict": {
+        "pass": true,
+        "reasons": []
+      }
+    },
+    "fresh": {
+      "hit1Count": 4,
+      "mrrOverall": 0.738095238095238,
+      "probeCount": 7,
+      "goldRanks": [
+        {
+          "probeId": "color",
+          "goldRank": 1
+        },
+        {
+          "probeId": "pet",
+          "goldRank": 1
+        },
+        {
+          "probeId": "exercise",
+          "goldRank": 2
+        },
+        {
+          "probeId": "diet",
+          "goldRank": 6
+        },
+        {
+          "probeId": "family",
+          "goldRank": 1
+        },
+        {
+          "probeId": "language",
+          "goldRank": 1
+        },
+        {
+          "probeId": "travel",
+          "goldRank": 2
+        }
+      ],
+      "shadowVerdict": {
+        "pass": true,
+        "reasons": []
+      }
+    }
+  },
+  "usage": {
+    "chatCalls": 0,
+    "chatPromptTokens": 0,
+    "chatCompletionTokens": 0,
+    "embeddingCalls": 61,
+    "embeddingPromptTokens": 738032
+  },
+  "cost": {
+    "llmInputUsd": 0,
+    "llmOutputUsd": 0,
+    "embeddingUsd": 0.01476064,
+    "totalUsd": 0.01476064
+  },
+  "limits": [
+    "K回の録り直しはすべて同日(数時間)以内に行っている——日〜週単位で起きるカセットの経年変化(記録から19日で完全一致率3.4%だったマネージャーの予備測定)はこの実測の対象外である。上のdriftOneSampleはその代わりの1標本であり、統計的主張ではない。",
+    "この上限は「同じモデル・同じコードでの独立な録り直し」に対するものであり、モデルの交代や大幅な経年には及ばない(下のADRを見ること)。",
+    "6群は互いに一部のテキスト(sparse haystack 60件)を共有するため、round間で完全に独立な標本ではない——ただし各groupのverdictはbaselineとの比較で決まるため、この共有は個々のgroupの判定を歪めない(sparse haystackの埋め込みは全groupで同一round内では同じ値)。"
+  ]
+}
