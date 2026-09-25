@@ -7,8 +7,10 @@ import {
   AdvisoryLockUnavailableError,
   DEFAULT_LOCK_TIMEOUT_MS,
   acquireAdvisoryLock,
+  acquireAdvisoryLockOnClient,
   deriveAdvisoryLockKey,
   releaseAdvisoryLock,
+  releaseAdvisoryLockOnClient,
 } from "./advisory-lock.js";
 import {
   DEFAULT_EXTENSION_SCHEMA,
@@ -62,6 +64,70 @@ interface AppliedMigration {
  * ため、ローリングデプロイ中の互換性が壊れる。変える理由が生まれたら ADR を書くこと。
  */
 export const MIGRATION_LOCK_KEY = 7190158676462701299n;
+
+/**
+ * 拡張（`REQUIRED_EXTENSIONS`）を作る段だけを直列化する、**schema に依らない共有の**
+ * advisory lock キー（Issue #757）。
+ *
+ * ## 直している壊れ方
+ *
+ * `pg_extension` の一意制約 `pg_extension_name_index` は **`extname` 単独**に張られている
+ * ——拡張は `search_path`/`schema` に関わらず**データベース全体に1つ**しか置けない
+ * （ADR 0057 の測定表）。一方 {@link migrationLockKeyFor} は ADR 0057 決定6により
+ * `schema` ごとに**別の**キーを返す。そのため、schema の違う `runMigrations` を
+ * 同じ（まっさらな）DB へ同時に流すと、互いの schema ロックは異なるので待ち合わず、
+ * `CREATE EXTENSION IF NOT EXISTS` 同士が `pg_extension_name_index` で衝突して
+ * どちらかが決定的に落ちる（Issue #757 の実測: 未指定+指定s1・指定s1+指定s2 とも
+ * 25/25 失敗）。
+ *
+ * ## このキーが守る範囲
+ *
+ * **「拡張を作る段」だけ**をこのキーで直列化する。schema ごとの排他
+ * （{@link migrationLockKeyFor} が返すキー）はそのまま残す——このキーはそれに
+ * *追加で*取る、2本目のロックである。取得順は常に「schema ごとのロック
+ * （既にこの関数の外側、`runMigrations` の冒頭で取得済み）→ この共有拡張ロック」
+ * で固定してある。**逆順で取る経路は無い**（デッドロックを避けるため、意図的に
+ * 一方向にしてある）。
+ *
+ * ⚠ **新しい接続は借りない。** schema ロックを保持している `lockClient` の**同じ
+ * セッション**上で、`pg_advisory_lock`/`pg_advisory_unlock` をもう1回撃つだけ
+ * （{@link acquireAdvisoryLockOnClient} / {@link releaseAdvisoryLockOnClient}）。
+ * 同一セッションが異なるキーの advisory lock を複数同時に保持することは
+ * PostgreSQL の仕様上問題ない。**新しい接続を pool から借りる実装を最初に試したが、
+ * `runMigrations` が同時に必要とする接続数が2本から3本に増え、`max: 2` で書かれた
+ * 既存の並行テスト（`migrate-concurrency.test.ts` 等）が接続を使い切ってデッドロック
+ * （3本目の `pool.connect()` が誰にも解決されないまま待ち続ける）することを実測して
+ * 差し戻した。**この実装なら `runMigrations` が同時に使う接続数は今日と同じ2本のまま
+ * （schema ロック用の `lockClient` 1本 + 個々のクエリ・マイグレーションのトランザクション
+ * 用にその都度借りる1本）。
+ *
+ * `extensionMode: "create"`（既定）のときだけ使う。`"verify"` は `CREATE EXTENSION` を
+ * 一切発行しないので、このキーも一切参照しない。
+ *
+ * ## 定常状態への影響
+ *
+ * `schema` を指定した経路は、既存の `CREATE EXTENSION ... WITH SCHEMA` ループの前後
+ * だけこのロックを持つ（ループはオートコミットの単発クエリの並びなので、ループの前後で
+ * 取得・解放すれば足りる）。`schema` 未指定の経路は、拡張が `migrations/0001_init.sql`
+ * の本文（トランザクション内）で作られるため、**未適用のファイルのうち
+ * `CREATE_EXTENSION_LINE_PATTERN` に一致する行を含むものを適用する間だけ**、
+ * トランザクション開始前から `COMMIT` の直後まで持つ。2回目以降の呼び出しでは
+ * 該当ファイルが既に適用済みでループに入らないため、**このロックは一切取得されない**
+ * ——`runMigrations` が定常状態で発行する SQL は今日と1文字も変わらない
+ * （新しい ADR の「決定2との関係」参照）。
+ *
+ * `MIGRATION_LOCK_KEY` / `REGISTER_EMBEDDING_SPACE_LOCK_KEY` と衝突しない値を選んである
+ * （固定文字列 `"mnemora:runMigrations:extension-lock"` の SHA-256 先頭8バイトを
+ * 符号付き64bit整数として解釈した値——導出手順は両定数と同一。
+ * `node -e 'const c=require("crypto");console.log(c.createHash("sha256").update("mnemora:runMigrations:extension-lock").digest().readBigInt64BE(0).toString())'`
+ * で再計算できる）。値そのものに意味は無く、衝突回避のためだけに存在する。
+ *
+ * `MIGRATION_LOCK_KEY` と同じ理由で、値を変えるとローリングデプロイ中の互換性が壊れる
+ * ——変える理由が生まれたら ADR を書くこと。**テスト用の上書き口（`options.lockKey`）は
+ * 持たない**——`options.lockKey` は schema ごとのロックだけに効く（doc は
+ * {@link RunMigrationsOptions.lockKey} 参照）。この共有ロックは常にこの定数を使う。
+ */
+export const EXTENSION_LOCK_KEY = -1670586062650017388n;
 
 /**
  * `REQUIRED_EXTENSIONS` を要求する DDL は `migrations/0001_init.sql` にも
@@ -200,9 +266,24 @@ async function verifyRequiredExtensions(
 }
 
 export interface RunMigrationsOptions extends SchemaNamespaceOptions {
-  /** advisory lock を待つ上限（ミリ秒）。既定は {@link DEFAULT_LOCK_TIMEOUT_MS}。 */
+  /**
+   * advisory lock を待つ上限（ミリ秒）。既定は {@link DEFAULT_LOCK_TIMEOUT_MS}。
+   * schema ごとのロックと、{@link EXTENSION_LOCK_KEY}（Issue #757）の共有拡張ロックの
+   * **両方に同じ値を使う**（1つの `runMigrations` 呼び出しが待ってよい上限は1つ、という
+   * 単純な線を優先した。2本のロックそれぞれに別の上限を持たせる需要はまだ無い）。
+   */
   lockTimeoutMs?: number;
-  /** advisory lock のキー。テスト以外で既定の {@link MIGRATION_LOCK_KEY} を変える理由は無い。 */
+  /**
+   * advisory lock のキー。テスト以外で既定の {@link MIGRATION_LOCK_KEY} を変える理由は無い。
+   *
+   * ⚠ **schema ごとのロック（`migrationLockKeyFor` が返すもの）だけに効く。**
+   * {@link EXTENSION_LOCK_KEY}（Issue #757、拡張を作る段の共有ロック）は常に固定の
+   * 定数を使い、この上書きの対象ではない——共有ロックはその性質上「schema を跨いで
+   * 全員が同じキーを見ること」自体が目的であり、呼び出しごとに差し替えられては
+   * 直列化そのものが崩れる。テストで共有ロックの挙動を検査したい場合は、
+   * `EXTENSION_LOCK_KEY` を直接使って別セッションから握る（`migrate-extension-lock-race.test.ts`
+   * のような形）。
+   */
   lockKey?: bigint;
   /**
    * 拡張（`REQUIRED_EXTENSIONS`）の用意のしかた。既定は `"create"`
@@ -324,6 +405,24 @@ async function releaseMigrationLock(client: PoolClient, lockKey: bigint): Promis
 }
 
 /**
+ * {@link EXTENSION_LOCK_KEY} を取得する（Issue #757）。エラーの語彙は schema ロックと
+ * 共有する——`MigrationLockTimeoutError` / `MigrationLockUnavailableError` をそのまま使う。
+ * 呼び出し側から見て「`runMigrations` の advisory lock が時間切れ／取得不能だった」という
+ * 観測できる事実は同じであり、どちらのロック（schema ごと／共有の拡張ロック）で
+ * 起きたかを型で分ける新しいエラークラスは作らない（この2本のロックは常に
+ * `lockTimeoutMs` を共用するため、呼び出し側の対処——待って再試行する／権限を見直す——も
+ * 変わらない）。
+ */
+async function acquireExtensionLock(lockClient: PoolClient): Promise<void> {
+  await acquireAdvisoryLockOnClient(lockClient, EXTENSION_LOCK_KEY, MIGRATION_LOCK_ERRORS);
+}
+
+/** `acquireExtensionLock` で取得したロックを、`lockClient` を解放せずに手放す。 */
+async function releaseExtensionLock(lockClient: PoolClient): Promise<void> {
+  await releaseAdvisoryLockOnClient(lockClient, EXTENSION_LOCK_KEY);
+}
+
+/**
  * 旧名の台帳 `_mnemo_migrations` を新名 `_mnemora_migrations` へ引き継ぐ。
  *
  * `mnemo` → `mnemora` の改名より前に作られた DB では、適用済みの記録が旧名のテーブルに
@@ -421,10 +520,26 @@ export function listMigrationFiles(migrationsDir: string): string[] {
  * - ロック取得の操作自体が失敗（権限不足・接続不可等） →
  *   {@link MigrationLockUnavailableError} を投げる（時間切れと取り違えない）
  *
+ * ## 拡張を作る段の共有ロック（Issue #757）
+ *
+ * 上の schema ごとのロックとは**別に**、`CREATE EXTENSION` を発行する段だけを
+ * {@link EXTENSION_LOCK_KEY}（schema に依らない固定の共有キー）で直列化する。
+ * 拡張は `search_path`/`schema` に関わらず**データベース全体に1つ**しか置けない
+ * （`pg_extension_name_index` は `extname` 単独）ため、schema ごとのロックだけでは
+ * 「schema の違う `runMigrations` 同士」が互いを待たず、`CREATE EXTENSION IF NOT EXISTS`
+ * が衝突して決定的に落ちる（Issue #757 の実測）。**取得順は常に「schema ごとのロック →
+ * この共有ロック」に固定してある**（逆順で取る経路は無い——デッドロックを避けるため）。
+ * `extensionMode: "verify"` では一切参照しない（`CREATE EXTENSION` を発行しないため）。
+ * 詳細と、`schema` 未指定の経路にだけ生じる小さな逸脱（決定2との関係）は
+ * {@link EXTENSION_LOCK_KEY} の doc と ADR 0331 参照。
+ *
  * ## `options.schema`（feat/dedicated-schema）
  *
  * **`schema` 未指定なら、このブロックの分岐は一切実行されない**——今日と同じ SQL が
- * 同じ順番で発行される。`schema` を指定すると:
+ * 同じ順番で発行される（発行する DDL・DML はこの意味で1文字も変わらない。ただし
+ * *初回*適用時だけ、上の共有ロックの `pg_advisory_lock`/`pg_advisory_unlock` が
+ * schema ロックを保持している同じ接続（`lockClient`）に対して増える——新しい接続は
+ * 増えない。ADR 0331「決定2との関係」）。`schema` を指定すると:
  *
  * 1. `assertSafeSchemaName` で `schema`（と、指定されていれば `extensionSchema`）を検証する。
  *    **これはロック取得より前に行う**（`registerEmbeddingSpace` がバリデーションを
@@ -498,10 +613,21 @@ export async function runMigrations(
       // `CREATE EXTENSION` を発行しない（それがこのモードの目的そのもの——
       // `CREATE EXTENSION` 権限を持たないロールでも呼べるようにする、ADR 0093）。
       if (extensionMode === "create") {
-        for (const ext of REQUIRED_EXTENSIONS) {
-          await pool.query(
-            `CREATE EXTENSION IF NOT EXISTS ${ext} WITH SCHEMA "${extensionSchema}"`,
-          );
+        // Issue #757: 拡張は schema ではなく DB 全体に1つしか置けない
+        // （`pg_extension_name_index` は `extname` 単独）。schema ごとのロック
+        // （このブロックの外側、`lockKey` で既に取得済み）は schema が違えば
+        // 互いを待たないため、この CREATE EXTENSION ループだけを
+        // {@link EXTENSION_LOCK_KEY} の共有ロックで追加に直列化する。
+        // オートコミットの単発クエリの並びなので、ループの前後だけ保持すれば足りる。
+        await acquireExtensionLock(lockClient);
+        try {
+          for (const ext of REQUIRED_EXTENSIONS) {
+            await pool.query(
+              `CREATE EXTENSION IF NOT EXISTS ${ext} WITH SCHEMA "${extensionSchema}"`,
+            );
+          }
+        } finally {
+          await releaseExtensionLock(lockClient);
         }
       }
     }
@@ -527,24 +653,49 @@ export async function runMigrations(
       // マイグレーションの結果（テーブル・索引等）は変わらない。
       const sql =
         extensionMode === "verify" ? stripCreateExtensionStatements(fileSql).sql : fileSql;
-      const client = await pool.connect();
+
+      // Issue #757: `schema` 未指定の経路は、拡張が *この* ファイル本文の
+      // トランザクション内（今のところ 0001_init.sql）で作られる。schema ごとの
+      // ロックは schema 未指定の呼び出し同士では同じキー（`MIGRATION_LOCK_KEY`）に
+      // 寄るため互いを待つが、schema を指定した別の呼び出し（別キー）とは待ち合わない
+      // ——そちらとの直列化を、このファイルを適用する間だけ共有の {@link EXTENSION_LOCK_KEY}
+      // で追加に取る。`extensionMode: "create"` かつ、このファイルが実際に
+      // `CREATE EXTENSION` 行を含む（既存の抽出規則 {@link matchCreateExtensionLines} を
+      // 再利用）ときだけ——**未適用のファイルにこの行を含むものが無ければ
+      // （2回目以降の定常状態）、このロックは一切取得されない。**
+      const needsSharedExtensionLock =
+        schema === undefined &&
+        extensionMode === "create" &&
+        matchCreateExtensionLines(fileSql).length > 0;
+      if (needsSharedExtensionLock) {
+        await acquireExtensionLock(lockClient);
+      }
       try {
-        await client.query("BEGIN");
-        if (schema !== undefined) {
-          await client.query(`SET LOCAL search_path TO ${searchPathFor(schema, extensionSchema!)}`);
+        const client = await pool.connect();
+        try {
+          await client.query("BEGIN");
+          if (schema !== undefined) {
+            await client.query(
+              `SET LOCAL search_path TO ${searchPathFor(schema, extensionSchema!)}`,
+            );
+          }
+          await client.query(sql);
+          await client.query(
+            `INSERT INTO ${qualify(schema, "_mnemora_migrations")} (name) VALUES ($1)`,
+            [file],
+          );
+          await client.query("COMMIT");
+          applied.push(file);
+        } catch (err) {
+          await client.query("ROLLBACK");
+          throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
+        } finally {
+          client.release();
         }
-        await client.query(sql);
-        await client.query(
-          `INSERT INTO ${qualify(schema, "_mnemora_migrations")} (name) VALUES ($1)`,
-          [file],
-        );
-        await client.query("COMMIT");
-        applied.push(file);
-      } catch (err) {
-        await client.query("ROLLBACK");
-        throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
       } finally {
-        client.release();
+        if (needsSharedExtensionLock) {
+          await releaseExtensionLock(lockClient);
+        }
       }
     }
     return { applied, lock: { waitedMs }, extensionCheck };

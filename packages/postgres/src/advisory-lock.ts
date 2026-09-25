@@ -100,43 +100,81 @@ export async function acquireAdvisoryLock(
     throw errors.unavailable(err);
   }
 
+  let waitedMs: number;
+  try {
+    waitedMs = await acquireAdvisoryLockOnClient(client, lockKey, errors);
+  } catch (err) {
+    await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
+    client.release();
+    throw err;
+  }
+
+  return { client, waitedMs };
+}
+
+/**
+ * **既に接続済みの `client`** の上で、`lockKey` の advisory lock を取得しようと試みる
+ * （feat/dedicated-schema・Issue #757）。
+ *
+ * `acquireAdvisoryLock`（pool から専用コネクションを借り切る版）から、
+ * 「`pg_advisory_lock` を撃ち、`55P03`（`lock_timeout` 超過）かそれ以外かで
+ * `errors.timeout`/`errors.unavailable` を投げ分ける」核だけを切り出したもの。
+ * **接続の確保・`lock_timeout` の設定・失敗時の解放は呼び出し側の責務**——
+ * これらを持たないのは、**既に他の advisory lock を保持したまま、同じセッションで
+ * もう1本ロックを取りたい**呼び出し元（`migrate.ts` の `EXTENSION_LOCK_KEY`、
+ * Issue #757）のためである。同一セッションが異なるキーの advisory lock を複数
+ * 同時に保持することは PostgreSQL の仕様上問題ない（`pg_advisory_lock` はキーごとに
+ * 独立したロックであり、セッション単位で重ねて持てる）——**新しい接続を pool から
+ * 借りる必要は無い**。実際、最初の実装は2本目の advisory lock 用に新しい接続を
+ * 借りていたが、`runMigrations` が同時に必要とする接続数が2本から3本に増え、
+ * `max: 2` で書かれた既存の並行テスト（`migrate-concurrency.test.ts` 等）が
+ * 接続を使い切ってデッドロック（3本目の `pool.connect()` が誰にも解決されない
+ * まま待ち続ける）することを実測して差し戻した。
+ *
+ * 🔴 `.code` の直読みが効く理由・drizzle では効かない理由・共有 helper を置かない
+ * 理由の注記は、元は `acquireAdvisoryLock` の catch 節にあったものをそのままここへ運んだ
+ * （中身は変えていない）。
+ *
+ * ⚠ **この `.code` の直読みが効くのは、生の `PoolClient.query()` を使っているからである。**
+ * 実測（PostgreSQL 17.9）: 生 query の例外は最初の1段目にそのまま `code` を持つ。
+ *
+ * ⚠ **drizzle の `db.execute()` では効かない。**あちらは pg のエラーを
+ * `Error: Failed query: ...` で包むので、`.code` の直読みは `undefined` になる。
+ * 実測では、1段目が包んだ `Error`、その `cause`（2段目）が pg のエラーで、
+ * `code` はそちらに在る。**⟹ `db.execute()` の失敗から SQLSTATE を読むなら、
+ * `cause` の連鎖を辿ること。**この形をそのままコピーすると静かに `undefined` になり、
+ * **誤りは必ず「その SQLSTATE ではなかった」の向きに倒れる**——つまり黙って通る。
+ * 辿る例は `foreign-key-violation.postgres.test.ts` の `sqlStateOf`。
+ *
+ * ⚠ **共有の helper は意図的に置いていない。**本番でこれを読む箇所はここ1つだけで、
+ * 候補として挙がった2つはどちらも repo の決定が需要を消している——アダプタ間で
+ * エラーの種別を揃えることは ADR 0047 が採らないと決めており（`memory-store-conformance.ts`
+ * の `.rejects.toThrow()` の doc を参照）、不正な uuid（`22P02`）は例外を分類せず
+ * `isUuidLike` の事前検査で弾く設計になっている。**必要になったら、そのとき作ればよい。**
+ * ⟹ これは「helper が抜けている」ではなく「置かないと決めた」である。
+ *
+ * ⚠ **この注意書きには歯を置いていない。**これは警告であって安全性の主張ではなく、
+ * drizzle が包み方を変えたら**この記述が古くなるだけで何も壊れない**。歯で固定すると
+ * 「drizzle の挙動を変えてはいけない」を意味してしまう。
+ * （なお `55P03` の側は歯が在る——定数が違えば `migrate-concurrency.test.ts` の
+ * `MigrationLockTimeoutError` 検査が赤くなる。あちらは事故で変わる前提なので固定してよい。）
+ */
+export async function acquireAdvisoryLockOnClient(
+  client: PoolClient,
+  lockKey: bigint,
+  errors: AdvisoryLockErrorFactories,
+): Promise<number> {
   const startedAt = Date.now();
   try {
     await client.query("SELECT pg_advisory_lock($1)", [lockKey.toString()]);
   } catch (err) {
-    await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
-    client.release();
-    // 🔴 **この `.code` の直読みが効くのは、生の `PoolClient.query()` を使っているからである。**
-    // 実測（PostgreSQL 17.9）: 生 query の例外は最初の1段目にそのまま `code` を持つ。
-    //
-    // ⚠ **drizzle の `db.execute()` では効かない。**あちらは pg のエラーを
-    // `Error: Failed query: ...` で包むので、`.code` の直読みは `undefined` になる。
-    // 実測では、1段目が包んだ `Error`、その `cause`（2段目）が pg のエラーで、
-    // `code` はそちらに在る。**⟹ `db.execute()` の失敗から SQLSTATE を読むなら、
-    // `cause` の連鎖を辿ること。**この形をそのままコピーすると静かに `undefined` になり、
-    // **誤りは必ず「その SQLSTATE ではなかった」の向きに倒れる**——つまり黙って通る。
-    // 辿る例は `foreign-key-violation.postgres.test.ts` の `sqlStateOf`。
-    //
-    // ⚠ **共有の helper は意図的に置いていない。**本番でこれを読む箇所はここ1つだけで、
-    // 候補として挙がった2つはどちらも repo の決定が需要を消している——アダプタ間で
-    // エラーの種別を揃えることは ADR 0047 が採らないと決めており（`memory-store-conformance.ts`
-    // の `.rejects.toThrow()` の doc を参照）、不正な uuid（`22P02`）は例外を分類せず
-    // `isUuidLike` の事前検査で弾く設計になっている。**必要になったら、そのとき作ればよい。**
-    // ⟹ これは「helper が抜けている」ではなく「置かないと決めた」である。
-    //
-    // ⚠ **この注意書きには歯を置いていない。**これは警告であって安全性の主張ではなく、
-    // drizzle が包み方を変えたら**この記述が古くなるだけで何も壊れない**。歯で固定すると
-    // 「drizzle の挙動を変えてはいけない」を意味してしまう。
-    // （なお `55P03` の側は歯が在る——定数が違えば `migrate-concurrency.test.ts` の
-    // `MigrationLockTimeoutError` 検査が赤くなる。あちらは事故で変わる前提なので固定してよい。）
     const code = (err as { code?: string }).code;
     if (code === PG_LOCK_TIMEOUT_SQLSTATE) {
       throw errors.timeout(Date.now() - startedAt, err);
     }
     throw errors.unavailable(err);
   }
-
-  return { client, waitedMs: Date.now() - startedAt };
+  return Date.now() - startedAt;
 }
 
 /**
@@ -160,10 +198,24 @@ export function deriveAdvisoryLockKey(seed: string): bigint {
   return createHash("sha256").update(seed).digest().readBigInt64BE(0);
 }
 
+/**
+ * **既に接続済みの `client`** の上で、`lockKey` の advisory lock を解放するだけの操作
+ * （`lock_timeout` のリセットもコネクションの `release()` もしない。feat/dedicated-schema・
+ * Issue #757）。`releaseAdvisoryLock`（下）の核であり、`acquireAdvisoryLockOnClient` と
+ * 対で、**他の advisory lock を保持したまま同じセッションで解放したい**呼び出し元
+ * （`migrate.ts` の `EXTENSION_LOCK_KEY`）のために切り出してある。
+ */
+export async function releaseAdvisoryLockOnClient(
+  client: PoolClient,
+  lockKey: bigint,
+): Promise<void> {
+  await client.query("SELECT pg_advisory_unlock($1)", [lockKey.toString()]);
+}
+
 /** advisory lock を解放し、`lock_timeout` を元に戻してからコネクションを pool へ返す。 */
 export async function releaseAdvisoryLock(client: PoolClient, lockKey: bigint): Promise<void> {
   try {
-    await client.query("SELECT pg_advisory_unlock($1)", [lockKey.toString()]);
+    await releaseAdvisoryLockOnClient(client, lockKey);
   } finally {
     await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
     client.release();

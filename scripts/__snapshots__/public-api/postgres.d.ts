@@ -15,7 +15,9 @@ export declare function acquireAdvisoryLock(pool: Pool, lockKey: bigint, lockTim
     client: PoolClient;
     waitedMs: number;
 }>;
+export declare function acquireAdvisoryLockOnClient(client: PoolClient, lockKey: bigint, errors: AdvisoryLockErrorFactories): Promise<number>;
 export declare function deriveAdvisoryLockKey(seed: string): bigint;
+export declare function releaseAdvisoryLockOnClient(client: PoolClient, lockKey: bigint): Promise<void>;
 export declare function releaseAdvisoryLock(client: PoolClient, lockKey: bigint): Promise<void>;
 
 // ===== dist/client.d.ts =====
@@ -232,6 +234,7 @@ import { AdvisoryLockTimeoutError, AdvisoryLockUnavailableError } from "./adviso
 import { type SchemaNamespaceOptions } from "./schema-namespace.js";
 export { DEFAULT_MIGRATIONS_DIR };
 export declare const MIGRATION_LOCK_KEY = 7190158676462701299n;
+export declare const EXTENSION_LOCK_KEY = -1670586062650017388n;
 export declare const REQUIRED_EXTENSIONS: readonly [
     "vector",
     "btree_gin",
