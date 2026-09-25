@@ -167,6 +167,14 @@ export class InMemoryVectorStore implements VectorStore {
           continue;
         }
       }
+      // Issue #201 PR-B（ADR 0320）: OR の集合絞り込み——`PostgresVectorStore.search`
+      // （`m.tags && ...::text[]`）と同じ意味論。
+      if (opts.filter.labels !== undefined) {
+        const labels = opts.filter.labels;
+        if (!memory.tags.some((tag) => labels.includes(tag))) {
+          continue;
+        }
+      }
       // ADR 0165 決めたこと1・4・12（Issue #305）: 忘却ゲートの2軸。`decayFloorAnyAxis` が
       // true かつ両方の境界が渡されているときだけ OR で結ぶ——`PostgresVectorStore.search`
       // （`packages/postgres/src/vector-store.ts`）と同じ意味論。それ以外は今日どおり

@@ -8,8 +8,10 @@ import type { LexicalStore, LexicalHit } from "./interfaces/lexical-store.js";
 import type { DecayClock, TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
 import {
   DEFAULT_DECAY_CLOCK,
+  DEFAULT_TAXONOMY_MODE,
   readActivitySeq,
   readDecayClock,
+  readTaxonomyMode,
 } from "./interfaces/tenant-settings-store.js";
 import type { MemoryId } from "./ids.js";
 import { NOT_INDEXED_REASONS } from "./recall.js";
@@ -328,6 +330,45 @@ export async function runRecall(
       ? undefined
       : await readActivitySeq(deps.tenantSettingsStore, ctx);
 
+  // Issue #201 PR-B（ADR 0320）: taxonomy の参加資格を1回だけ解決する。
+  // `RecallQuery.labels`（絞り込み）か `RecallQuery.taxonomyGroups`（群カウント）の
+  // どちらかが要求されたときだけ `listLabels?`/`getTaxonomyMode?` を読む——
+  // どちらも渡さない既存の呼び出しは、この2つの `await` を一切実行しない
+  // （decay_clock を常に読むのとは違う。taxonomy は新設の任意入力であり、
+  // 使わない呼び出しに新しいコストを持ち込まない）。
+  //
+  // **`deps.memoryStore.listLabels?` が無い adapter では、両方とも静かに無効化される**
+  // ——`resolvedLabelsFilter`/`resolvedTaxonomyGroupCandidates` は `undefined` のまま。
+  // ADR 0318 が確立した「任意メソッド未実装は機能が無いだけ」の規律（エラーにしない）。
+  const wantsLabelsFilter =
+    validatedQuery.labels !== undefined && validatedQuery.labels.length > 0;
+  const wantsTaxonomyGroups = validatedQuery.taxonomyGroups === true;
+  let resolvedLabelsFilter: string[] | undefined;
+  let resolvedTaxonomyGroupCandidates: string[] | undefined;
+  if (wantsLabelsFilter || wantsTaxonomyGroups) {
+    const taxonomyMode =
+      deps.tenantSettingsStore === undefined
+        ? DEFAULT_TAXONOMY_MODE
+        : await readTaxonomyMode(deps.tenantSettingsStore, ctx);
+    const allLabels = await deps.memoryStore.listLabels?.(ctx);
+    if (allLabels !== undefined) {
+      const qualifying = new Set(
+        allLabels
+          .filter((label) => label.status === "registered" || taxonomyMode === "open")
+          .map((label) => label.name),
+      );
+      if (wantsLabelsFilter) {
+        // ADR 0320「決定2」: 参加資格の無い名前は「条件にしていない」のと同じ扱いに
+        // なる——積のまとめが空になったら絞り込みそのものを無効化する（undefined）。
+        const effective = (validatedQuery.labels ?? []).filter((name) => qualifying.has(name));
+        resolvedLabelsFilter = effective.length > 0 ? effective : undefined;
+      }
+      if (wantsTaxonomyGroups) {
+        resolvedTaxonomyGroupCandidates = [...qualifying];
+      }
+    }
+  }
+
   // -------------------------------------------------------------------
   // 段0: スコープ確定（docs/recall.md §2 段0、マネージャー決定の「スコープの外延」）
   //
@@ -336,7 +377,9 @@ export async function runRecall(
   // スコープはその2軸を持って `MemoryStore.aggregateScope` へ渡らなければならない
   // ——`omitted.filtered(decayed)` の件数を、段1の押し下げと**同じ述語**で数えるためである。
   // **`stage: "scope"` の trace の内容も、stages 内の順序も1バイトも変わっていない**
-  // ——この塊より前にあるのは `decayGateActive` の定義と2つの `await` だけであり、
+  // ——この塊より前にあるのは `decayGateActive` の定義、decay_clock 関連の2つの
+  // `await`、および Issue #201 PR-B（ADR 0320）が足した taxonomy 解決（`labels`/
+  // `taxonomyGroups` のどちらかを渡したときだけ実行される最大2つの `await`）だけであり、
   // そのどれも `stages` を1つも積まない。
   // -------------------------------------------------------------------
   const scope: RecallScope = {
@@ -369,6 +412,10 @@ export async function runRecall(
       validatedQuery.attributes !== undefined && Object.keys(validatedQuery.attributes).length > 0
         ? validatedQuery.attributes
         : undefined,
+    // Issue #201 PR-B（ADR 0320）: 参加資格の解決は上（`resolvedLabelsFilter`/
+    // `resolvedTaxonomyGroupCandidates`）で1回だけ行い、ここではその結果を置くだけ。
+    labels: resolvedLabelsFilter,
+    taxonomyGroupCandidates: resolvedTaxonomyGroupCandidates,
   };
   stages.push({
     stage: "scope",
@@ -379,6 +426,7 @@ export async function runRecall(
       occurredBefore: scope.occurredBefore?.toISOString() ?? null,
       validAt: scope.validAt?.toISOString() ?? null,
       attributes: scope.attributes ?? null,
+      labels: scope.labels ?? null,
     },
   });
 
@@ -490,6 +538,33 @@ export async function runRecall(
     return Object.entries(scope.attributes).every(
       ([key, value]) => memoryAttributes[key] === value,
     );
+  };
+
+  /**
+   * ⭐ `labels`（taxonomy）の後置フィルタ述語（Issue #201 PR-B、
+   * [ADR 0320](../../../docs/decisions/0320-taxonomy-recall-filter.md)）。段1の後置フィルタと
+   * 段3.5（連想枠）の後置フィルタが、同じこの関数を呼ぶ——`survivesAttributesFilter` と同じ
+   * 「1箇所に述語を置く」規律。
+   *
+   * **OR**（`RecallQuery.labels`/`RecallScope.labels` の doc コメント参照）: `scope.labels`
+   * のいずれかが、その Memory の `tags` に含まれれば真。`scope.labels` は既に「現在の
+   * `taxonomy_mode` で参加資格がある」ことを解決済みの名前だけを持つ（`memory_labels` を
+   * 見ずに `tags` だけで判定できる根拠は ADR 0320「決定1」——`labels.name` は書き込み
+   * 経路が `tags` からしか作らないため1対1で一致する）。`scope.labels` が `undefined`
+   * （絞り込み無し）なら常に真。
+   *
+   * **adapter がこの述語を実装していなくても安全な理由**: `VectorFilter.labels`/
+   * `LexicalFilter.labels` を無視する adapter は候補を絞り損ねるだけであり、
+   * ここでの後置フィルタが「来た候補をさらに絞る」——`survivesAttributesFilter` と同じ
+   * 多層防御（取りこぼしはあっても混入は起きない）。
+   *
+   * **必須の同伴取得（段3）ではこの述語を呼ばない**——`tags` 自体が同伴取得を素通しする
+   * のと同じ理由（ADR 0320「決定3」）。
+   */
+  const survivesLabelsFilter = (memory: Memory): boolean => {
+    if (scope.labels === undefined) return true;
+    const labels = scope.labels;
+    return memory.tags.some((tag) => labels.includes(tag));
   };
 
   /**
@@ -628,6 +703,9 @@ export async function runRecall(
         // Issue #152/#153（ADR 0312）: AND 等値の絞り込み。`scope.attributes` が
         // `undefined`（絞り込み無し）なら no-op（`VectorFilter.attributes` の doc 参照）。
         attributes: scope.attributes,
+        // Issue #201 PR-B（ADR 0320）: OR の集合絞り込み。`scope.labels` が `undefined`
+        // なら no-op（`VectorFilter.labels` の doc 参照）。
+        labels: scope.labels,
         excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
         occurredAfter: scope.occurredAfter,
         occurredBefore: scope.occurredBefore,
@@ -706,6 +784,8 @@ export async function runRecall(
           includeSubjectless: scope.includeSubjectless,
           // Issue #152/#153（ADR 0312）: ANN チャンネルと同じ絞り込み（上のコメント参照）。
           attributes: scope.attributes,
+          // Issue #201 PR-B（ADR 0320）: ANN チャンネルと同じ絞り込み（上のコメント参照）。
+          labels: scope.labels,
           excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
           occurredAfter: scope.occurredAfter,
           occurredBefore: scope.occurredBefore,
@@ -813,6 +893,8 @@ export async function runRecall(
     if (!survivesSubjectFilter(memory)) continue;
     // Issue #152/#153（ADR 0312）: 同じ規律。`survivesAttributesFilter` に1箇所へまとめてある。
     if (!survivesAttributesFilter(memory)) continue;
+    // Issue #201 PR-B（ADR 0320）: 同じ規律。`survivesLabelsFilter` に1箇所へまとめてある。
+    if (!survivesLabelsFilter(memory)) continue;
     const effectiveTime = memory.occurredAt ?? memory.recordedAt;
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
     if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
@@ -1241,6 +1323,9 @@ export async function runRecall(
                 // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
                 // ——を繰り返さないための規律をそのまま適用する）。
                 attributes: scope.attributes,
+                // Issue #201 PR-B（ADR 0320）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+                // （ADR 0172 の見落としを繰り返さないための同じ規律）。
+                labels: scope.labels,
                 excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
                 occurredAfter: scope.occurredAfter,
                 occurredBefore: scope.occurredBefore,
@@ -1336,6 +1421,8 @@ export async function runRecall(
           if (!survivesSubjectFilter(memory)) continue;
           // Issue #152/#153（ADR 0312）: 段1と同じ述語を共有する（`survivesAttributesFilter`）。
           if (!survivesAttributesFilter(memory)) continue;
+          // Issue #201 PR-B（ADR 0320）: 段1と同じ述語を共有する（`survivesLabelsFilter`）。
+          if (!survivesLabelsFilter(memory)) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
           if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
           if (scope.occurredBefore && effectiveTime > scope.occurredBefore) continue;
@@ -1633,10 +1720,15 @@ export async function runRecall(
   // と同じ多層防御をここにも置く——`scope.attributes` が在るときだけ、帯に載る候補を
   // `getMany` で引き直して検査し、通らないもの・引けなかったもの（存在しない/クロス
   // テナント）を落とす（落とす方向に倒す）。
+  // Issue #201 PR-B（ADR 0320）: `scope.labels`（taxonomy の絞り込み）も同じ穴を持ちうる
+  // ——`survivesLabelsFilter` を同じ条件・同じループに足す。
   let scopedDigests = aggregate.digests;
   let digestEligibleCount = aggregate.digestEligible.count;
   let digestEligibleCountKind = aggregate.digestEligible.countKind;
-  if (scope.attributes !== undefined && aggregate.digests.length > 0) {
+  if (
+    (scope.attributes !== undefined || scope.labels !== undefined) &&
+    aggregate.digests.length > 0
+  ) {
     const digestMemoriesById = new Map(
       (
         await deps.memoryStore.getMany(
@@ -1647,7 +1739,9 @@ export async function runRecall(
     );
     scopedDigests = aggregate.digests.filter((d) => {
       const memory = digestMemoriesById.get(d.memoryId);
-      return memory !== undefined && survivesAttributesFilter(memory);
+      return (
+        memory !== undefined && survivesAttributesFilter(memory) && survivesLabelsFilter(memory)
+      );
     });
     const droppedCount = aggregate.digests.length - scopedDigests.length;
     if (droppedCount > 0) {
@@ -1749,6 +1843,18 @@ export async function runRecall(
       scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.not_yet_valid,
       count: aggregate.filteredNotYetValid.count,
       countKind: aggregate.filteredNotYetValid.countKind,
+    });
+  }
+  // Issue #201 PR-B（ADR 0320）: `RecallQuery.labels` による絞り込みで落ちた件数。
+  // `period`/`expired`/`not_yet_valid` と同じ扱い——`count === 0`（絞り込み無し、
+  // または落ちた Memory が0件）では積まない。
+  if (aggregate.filteredTaxonomy.count > 0) {
+    omitted.push({
+      kind: "filtered",
+      condition: "taxonomy",
+      scopeRelation: FILTERED_CONDITION_SCOPE_RELATION.taxonomy,
+      count: aggregate.filteredTaxonomy.count,
+      countKind: aggregate.filteredTaxonomy.countKind,
     });
   }
   // ⭐ Issue #329 / ADR 0173: 忘却ゲートが落とした件数も、他の `filtered` と同じく

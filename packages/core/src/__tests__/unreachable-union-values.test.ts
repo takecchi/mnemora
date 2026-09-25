@@ -41,6 +41,12 @@ import { describe, expect, it } from "vitest";
  * 違い、「まだ来ない値を監視し続ける」対象ではなくなった。**この歯がこれらの値について
  * 主張していたこと（「生成されない」）は、値そのものが型に無くなったことでより強く
  * 成立している**（型検査そのものが、これらの値を持つオブジェクトリテラルを拒む）。
+ *
+ * **2026-09-25 追記（Issue #201 PR-B、[ADR 0320](../../../../docs/decisions/0320-taxonomy-recall-filter.md)）**:
+ * `condition: "taxonomy"`（`FilteredOmission`）と `axis: "taxonomy"`（`GroupCount`）を
+ * 棚卸しの対象から外した——`RecallQuery.labels`/`taxonomyGroups` の実装により、
+ * どちらも実際に生成されるようになったため（`kind: "purged"` を外したときと同じ、
+ * 「実装漏れではなく実装完了を検知した」ケース）。
  */
 
 const PACKAGES_ROOT = join(__dirname, "../../../");
@@ -68,18 +74,6 @@ const UNREACHABLE_VALUES: {
     value: "tenant",
     declaredAt: "packages/core/src/recall.ts (FilteredOmission)",
     classification: "1: 意図的に発火しない",
-  },
-  {
-    field: "condition",
-    value: "taxonomy",
-    declaredAt: "packages/core/src/recall.ts (FilteredOmission)",
-    classification: "2: 後続 Phase 待ち",
-  },
-  {
-    field: "axis",
-    value: "taxonomy",
-    declaredAt: "packages/core/src/recall.ts (GroupCount)",
-    classification: "2: 後続 Phase 待ち",
   },
   {
     field: "kind",

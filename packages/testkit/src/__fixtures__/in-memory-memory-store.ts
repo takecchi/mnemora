@@ -834,6 +834,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     let filteredPeriod = 0;
     let filteredExpired = 0;
     let filteredNotYetValid = 0;
+    let filteredTaxonomy = 0;
     let filteredDecayed = 0;
     // 目次帯の候補（ADR 0073）: totalInScope に数える条件と**同じ条件**で in-scope の
     // Memory を集める。`digestBand` が要求されなかった場合はこの配列を使わない。
@@ -906,6 +907,18 @@ export class InMemoryMemoryStore implements MemoryStore {
           continue;
         }
       }
+      // Issue #201 PR-B（[ADR 0320](../../../../docs/decisions/0320-taxonomy-recall-filter.md)）:
+      // taxonomy ゲート。`attributes`（上）とは違い `period`/`validity` と同じ側
+      // ——`totalInScope` から除かれ、かつ `filtered*` に数えられる
+      // （`PostgresMemoryStore.aggregateScope` の `has_qualifying_label` と同じ意味論）。
+      if (scope.labels !== undefined) {
+        const labels = scope.labels;
+        const hasQualifyingLabel = memory.tags.some((tag) => labels.includes(tag));
+        if (!hasQualifyingLabel) {
+          filteredTaxonomy += 1;
+          continue;
+        }
+      }
 
       totalInScope += 1;
       // ⭐ Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。**`continue` しない**
@@ -932,6 +945,34 @@ export class InMemoryMemoryStore implements MemoryStore {
         countKind: "exact" as const,
       }),
     );
+
+    // Issue #201 PR-B（ADR 0320「決定5」）: `scope.taxonomyGroupCandidates` が渡された
+    // ときだけ `axis: 'taxonomy'` の群を足す——`PostgresMemoryStore.aggregateScope` の
+    // `taxonomy_label_groups`/`taxonomy_residual_count` と同じ意味論（`inScopeMemories` は
+    // 既に `has_qualifying_label` を含む最終スコープなので、`hasQualifyingLabel`
+    // フィルタと同じ内側を数える）。カウント0のラベル・残差は載せない
+    // （`axis: 'subject'` の `in_scope > 0` と同じ規約）。
+    if (scope.taxonomyGroupCandidates !== undefined) {
+      const candidates = scope.taxonomyGroupCandidates;
+      const perLabelCount = new Map<string, number>();
+      let residual = 0;
+      for (const memory of inScopeMemories) {
+        const matchingLabels = new Set(memory.tags.filter((tag) => candidates.includes(tag)));
+        if (matchingLabels.size === 0) {
+          residual += 1;
+          continue;
+        }
+        for (const label of matchingLabels) {
+          perLabelCount.set(label, (perLabelCount.get(label) ?? 0) + 1);
+        }
+      }
+      for (const [key, count] of perLabelCount) {
+        groups.push({ axis: "taxonomy" as const, key, count, countKind: "exact" as const });
+      }
+      if (residual > 0) {
+        groups.push({ axis: "taxonomy" as const, key: null, count: residual, countKind: "exact" as const });
+      }
+    }
 
     let digests: ScopeAggregate["digests"] = [];
     let digestEligible: ScopeAggregate["digestEligible"] = { count: 0, countKind: "exact" };
@@ -968,6 +1009,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       filteredPeriod: { count: filteredPeriod, countKind: "exact" },
       filteredExpired: { count: filteredExpired, countKind: "exact" },
       filteredNotYetValid: { count: filteredNotYetValid, countKind: "exact" },
+      filteredTaxonomy: { count: filteredTaxonomy, countKind: "exact" },
       filteredDecayed: { count: filteredDecayed, countKind: "exact" },
       digests,
       digestEligible,
