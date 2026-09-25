@@ -131,7 +131,9 @@ export async function captureGroupCandidates(
 
   const probes: CapturedProbeCandidates[] = [];
   for (const probe of group.probeSet.probes) {
-    const result = await runtime.recall(ctx, { text: probe.query });
+    // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+    // でも、この arm（局所ノイズが候補の並びに与える効果）の基準線を動かさない。
+    const result = await runtime.recall(ctx, { text: probe.query, association: null });
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(memoryStore, ctx, m.memoryId)),
     );

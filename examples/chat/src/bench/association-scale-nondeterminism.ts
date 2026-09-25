@@ -446,7 +446,9 @@ async function measureAllProbes(
 
     // off（同時に aRaw を測る — 段1のANN検索はarmに依らず同じkPrimeを使う）。
     handle.spy.reset();
-    const offResult = await handle.runtime.recall(ctx, { text: probe.query });
+    // association: null — 明示的な off。上の measureEfPoint と同じ理由
+    // （ADR 0335 で association 省略＝既定 on になり得るため、off の測定点を守る）。
+    const offResult = await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
     const aRawIdx = rawHits.findIndex((h) => h.memoryId === anchorId);
@@ -815,7 +817,11 @@ async function measureEfPoint(
     const goldId = goldIds.get(probe.id)!;
 
     handle.spy.reset();
-    await handle.runtime.recall(ctx, { text: probe.query });
+    // association: null — 明示的な off。`packages/core` の連想枠が既定 on になる提案
+    // （ADR 0335、⛔ オーナーの回答待ち）の後は、association キーを省略すると
+    // 既定 on を意味するようになる——ここは "off" の測定点なので、それに乗っ取られない
+    // よう明示する（association-scale-bench.ts の ArmConfig と同じ修正）。
+    await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
     const idx = rawHits.findIndex((h) => h.memoryId === anchorId);
@@ -1466,7 +1472,9 @@ async function measureOrderScaleProbes(
     const goldId = goldIds.get(probe.id)!;
 
     handle.spy.reset();
-    const offResult = await handle.runtime.recall(ctx, { text: probe.query });
+    // association: null — 明示的な off。上の measureEfPoint と同じ理由
+    // （ADR 0335 で association 省略＝既定 on になり得るため、off の測定点を守る）。
+    const offResult = await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
     const aRawIdx = rawHits.findIndex((h) => h.memoryId === anchorId);

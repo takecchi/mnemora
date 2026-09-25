@@ -239,7 +239,9 @@ export async function runIdentifierProbeArm(
   for (const probe of probeSet.probes) {
     // ⛔ `text` 以外を渡さない(既存 arm と同じ規律)——閾値・limit・overFetchFactor は
     // 一切変えない。
-    const result = await options.runtime.recall(ctx, { text: probe.query });
+    // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+    // でも、この arm（識別子の gold/distractor 順位）の基準線を動かさない。
+    const result = await options.runtime.recall(ctx, { text: probe.query, association: null });
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
     );

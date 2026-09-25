@@ -603,12 +603,21 @@ async function captureExplain(
 
 interface ArmConfig {
   label: string;
-  association?: RecallAssociationQuery;
+  /**
+   * `null` は明示的な off。**`undefined`（省略）ではない**——`packages/core` の
+   * 連想枠が既定 on になる提案（[ADR
+   * 0335](../../../../docs/decisions/0335-recall-association-default-on.md)、
+   * ⛔ オーナーの回答待ち）の後は、`association` キーを省略すると連想が既定で走って
+   * しまうため、"off" arm を「キーを渡さない」で作ると `packages/core` の既定に
+   * 静かに乗っ取られる（実際にこのバグが在った——下の `measureArmAtEf` は以前
+   * `arm.association ? {...} : {}` で off を「渡さない」に変換していた）。
+   */
+  association: RecallAssociationQuery | null;
 }
 
 function buildArms(): ArmConfig[] {
   return [
-    { label: "off", association: undefined },
+    { label: "off", association: null },
     { label: "on-3", association: { maxCount: 3 } },
     { label: "on-5", association: { maxCount: 5 } },
     { label: "on-10", association: { maxCount: 10 } },
@@ -669,7 +678,7 @@ async function measureProbeArm(
     const t0 = performance.now();
     const result = await handle.runtime.recall(ctx, {
       text: query,
-      ...(arm.association ? { association: arm.association } : {}),
+      association: arm.association,
     });
     times.push(performance.now() - t0);
     if (i === repeat - 1) {
@@ -687,7 +696,7 @@ async function measureProbeArm(
   );
   const getVectorsCalls = handle.spy.calls.filter((c) => c.kind === "getVectors");
   const dActualAnchor =
-    arm.association === undefined ? null : (getVectorsCalls[0]?.memoryIds ?? []).includes(anchorId);
+    arm.association === null ? null : (getVectorsCalls[0]?.memoryIds ?? []).includes(anchorId);
 
   const goldRank = indexOfMemory(result.memories, goldId);
   const goldMemory = goldRank === null ? null : result.memories[goldRank - 1]!;

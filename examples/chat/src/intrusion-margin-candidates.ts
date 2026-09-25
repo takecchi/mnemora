@@ -192,7 +192,9 @@ export async function measureIntrusionMarginCandidates(
   const measurements: AbstainCaseCandidateMeasurement[] = [];
 
   for (const c of options.abstainCases) {
-    const result = await options.runtime.recall(ctx, { text: c.utterance });
+    // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+    // でも、この bench（intrusion margin の候補生成）の基準線を動かさない。
+    const result = await options.runtime.recall(ctx, { text: c.utterance, association: null });
     const topMemory = result.memories[0];
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),

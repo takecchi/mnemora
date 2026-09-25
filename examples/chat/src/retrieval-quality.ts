@@ -533,9 +533,12 @@ export async function runRetrievalQualityArm(
 
   const probes: ProbeOutcome[] = [];
   for (const probe of PROBES) {
+    // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+    // でも、北極星の物差し（retrieval-quality）の基準線を動かさない。
     const result = await options.runtime.recall(ctx, {
       text: probe.query,
       ...(options.channels !== undefined ? { channels: [...options.channels] } : {}),
+      association: null,
     });
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),

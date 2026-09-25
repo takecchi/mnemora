@@ -306,16 +306,22 @@ async function collectContextDiagnostics(
   policy: TimeWeightingPolicy,
   localIdByMemoryId: ReadonlyMap<string, string>,
 ): Promise<TimeWeightingContextDiagnosticEntry[]> {
+  // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+  // でも、この bench（時間重み付け方針の比較）の基準線（recorded cassette への
+  // プロンプト・判定）を動かさない。
   const diagnosticRecall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
     scoreThreshold: DIAGNOSTIC_SCORE_THRESHOLD,
+    association: null,
   });
   const entries: TimeWeightingContextDiagnosticEntry[] = [];
   diagnosticRecall.memories.forEach((m, index) => {
     const localId = localIdByMemoryId.get(m.memoryId);
     if (localId === undefined) {
-      // このケースが直接書いた記憶ではない（連想枠等、既定では起きない経路）。
+      // このケースが直接書いた記憶ではない（連想枠等——この recall() 呼び出しは
+      // association: null で明示的に止めているので実際には起きない経路だが、
+      // 将来ここから null を外す変更が入っても黙って壊れないための防御として残す）。
       // 診断の対象外として黙って飛ばす——診断は「このケースの記憶」だけを見る。
       return;
     }
@@ -352,7 +358,10 @@ async function runTimeWeightingPolicy(
   policy: TimeWeightingPolicy,
   localIdByMemoryId: ReadonlyMap<string, string>,
 ): Promise<TimeWeightingPolicyResult> {
-  const recall = await runtime.recall(ctx, { text: question, timeWeighting: policy });
+  // association: null — 上の collectContextDiagnostics と同じ理由。この recall() の
+  // 結果がそのまま `buildMnemoraPrompt` を経て LLM プロンプトへ入るため、連想が
+  // 増やす候補は recorded cassette に無い入力を作りうる。
+  const recall = await runtime.recall(ctx, { text: question, timeWeighting: policy, association: null });
   const prompt = `${buildMnemoraPrompt(recall)}${buildQuestionSuffix(question)}`;
   const response = await llmProvider.complete(ctx, {
     system: ANSWER_SYSTEM_PROMPT,

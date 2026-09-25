@@ -117,9 +117,13 @@ async function measureProbe(
   budget: { maxMemoryTokens: number } | undefined,
   limit: number | undefined,
 ): Promise<RawProbeMeasurement> {
+  // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+  // でも、この bench（統合コスト・gold 順位）の基準線を動かさない。
   const result = await runtime.recall(
     ctx,
-    budget !== undefined ? { text: query, limit, budget } : { text: query },
+    budget !== undefined
+      ? { text: query, limit, budget, association: null }
+      : { text: query, association: null },
   );
   const resolvedExternalIds = await Promise.all(
     result.memories.map((m) => resolveExternalId(memoryStore, ctx, m.memoryId)),

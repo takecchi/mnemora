@@ -117,7 +117,9 @@ async function runOneProbe(
   const otherId = otherExternalId(probe.id);
 
   // 既定（validAt 省略 = いま）。
-  const atNow = await options.runtime.recall(ctx, { text: probe.query });
+  // association: null — 連想枠が既定 on になる提案（ADR 0335、⛔ オーナーの回答待ち）
+  // でも、この arm（validity ゲート）の基準線を動かさない（下2箇所も同じ理由）。
+  const atNow = await options.runtime.recall(ctx, { text: probe.query, association: null });
   const atNowExternalIds = await memoryIdsByExternalId(
     options.memoryStore,
     ctx,
@@ -131,7 +133,11 @@ async function runOneProbe(
   let historical: ValidityHistoricalCheck | null = null;
   const validAt = historicalValidAt(probe, now);
   if (validAt !== undefined) {
-    const atValidAt = await options.runtime.recall(ctx, { text: probe.query, validAt });
+    const atValidAt = await options.runtime.recall(ctx, {
+      text: probe.query,
+      validAt,
+      association: null,
+    });
     const atValidAtExternalIds = await memoryIdsByExternalId(
       options.memoryStore,
       ctx,
@@ -151,6 +157,7 @@ async function runOneProbe(
   const optOutResult = await options.runtime.recall(ctx, {
     text: probe.query,
     includeOutsideValidity: true,
+    association: null,
   });
   const optOutExternalIds = await memoryIdsByExternalId(
     options.memoryStore,
