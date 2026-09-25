@@ -155,4 +155,11 @@ describeEmbeddingProviderConformance({
   // （私たちは実 API の再現性の保証を持っていない。ADR 0095「3.1 決定性を無条件に要求する」の却下理由）。
   deterministic: true,
   texts: { a, b, c },
+  // ⚠ `overLimitText`（Issue #449 / ADR 0305）は渡さない。`createReplayClient` は
+  // `byText` の表引きであり、上限の概念を持たない——記録に無い入力は「記録に無い」という
+  // 別の理由で reject する（このファイル冒頭のコメントの規律と同じ）。渡しても上限検査
+  // そのものを測ったことにならない（vacuous な緑になる）。**`OpenAIEmbeddingProvider` が
+  // 実 API のサーバ拒否を握りつぶさずそのまま reject することは、
+  // `../embedding-provider.test.ts` の偽クライアント（400相当のエラーを投げる）で
+  // 別途測っている。**
 });

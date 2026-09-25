@@ -329,5 +329,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0302](./0302-recall-footprint-structural-terms.md) | `recall-footprint` の見積もりに、`indexBand` の実 JSON 構造から決まる4つの構造項を足す（Issue #340） | 採用 (2026-09) |
 | [0303](./0303-superseded-contested-decay-floor-owner.md) | `superseded` / `contested` の `decay_floor_at` の持ち主を決める — 回収の経路（案C）は v1.x で入れない | 採用 (2026-09) |
 | [0304](./0304-subject-candidates-string-null-literal.md) | `sanitizeCandidateSubjectId` は文字列 `"null"` を明示的な `null` として扱う（Issue #608 項目②(b) 追補、gpt-4o-mini 実測） | 採用 (2026-09) |
+| [0305](./0305-embedding-provider-input-limit-contract.md) | `EmbeddingProvider` の契約に「上限超過は例外」を明記する — Issue #449 の経路は塞がず、契約と歯で名乗らせる | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
