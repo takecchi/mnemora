@@ -182,3 +182,34 @@ export const tenantActivity = pgTable("tenant_activity", {
   activitySeq: bigint("activity_seq", { mode: "number" }).notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true, mode: "date" }).notNull(),
 });
+
+/**
+ * Issue #201 / ADR 0304: taxonomy の語彙（docs/memory-model.md §8、
+ * `migrations/0019_taxonomy_labels.sql`）。テナントごとの語彙名と、その状態
+ * （`registered` | `proposed`）を持つ。`UNIQUE (tenant_id, name)` は移行側で宣言する
+ * （drizzle-kit push には渡さないため、ここでは型のためだけの宣言。`./schema.ts` 冒頭の
+ * doc コメント参照）。
+ */
+export const labels = pgTable("labels", {
+  id: uuid("id").primaryKey(),
+  tenantId: text("tenant_id").notNull(),
+  name: text("name").notNull(),
+  status: text("status").notNull(),
+  proposedCount: integer("proposed_count").notNull(),
+  registeredAt: timestamp("registered_at", { withTimezone: true, mode: "date" }),
+  createdAt: timestamp("created_at", { withTimezone: true, mode: "date" }).notNull(),
+});
+
+/**
+ * Issue #201 / ADR 0304: Memory と label の多対多の結び付け
+ * （`migrations/0019_taxonomy_labels.sql`）。
+ */
+export const memoryLabels = pgTable(
+  "memory_labels",
+  {
+    tenantId: text("tenant_id").notNull(),
+    memoryId: uuid("memory_id").notNull(),
+    labelId: uuid("label_id").notNull(),
+  },
+  (table) => [primaryKey({ columns: [table.tenantId, table.memoryId, table.labelId] })],
+);

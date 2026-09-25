@@ -15,6 +15,7 @@ import type {
   Ctx,
   EmbeddingStatus,
   EventActor,
+  LabelSummary,
   Memory,
   MemoryEvent,
   MemoryId,
@@ -44,11 +45,13 @@ import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
   isUuidLike,
   parsePgTimestamp,
+  rowToLabel,
   rowToMemory,
   rowToMemoryEvent,
   rowToObservation,
   rowToOutboxJob,
   rowToRecallRecord,
+  type LabelRow,
   type MemoryEventRow,
   type MemoryRow,
   type ObservationRow,
@@ -65,8 +68,67 @@ import {
  * 既存行を取得する。`ON CONFLICT` の衝突検出はテーブルの一意索引そのものが担うため、
  * 同時実行でも正しく機能する（先に commit した側の行だけが見える）。
  */
+/**
+ * `db.transaction(async (tx) => ...)` に渡るコールバック引数と、トランザクションを
+ * 開いていない `this.db` の両方を受け付けるための構造的な最小 interface。
+ *
+ * 個々の `.execute(sql\`...\`)` 呼び出ししか使わない `upsertProposedLabels` にとっては、
+ * 呼び出し元が `Db`（`createMemory` のようにこのメソッド自身がトランザクションを開く場合）
+ * であろうと、`db.transaction` のコールバック引数（`createMemoryWithOutbox`/
+ * `supersedeWithNewMemories` のように、既に開いているトランザクションに相乗りする場合）
+ * であろうと違いが無い——両方とも `.execute` を持つ。
+ */
+type SqlExecutor = Pick<Db, "execute">;
+
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly db: Db) {}
+
+  /**
+   * Issue #201 / [ADR 0304](../../../docs/decisions/0304-taxonomy-labels.md):
+   * 新規作成された Memory の `tags` から `proposed` ラベルを作り・件数を数え、
+   * `memory_labels` で結び付ける。
+   *
+   * 🔴 **呼び出し元と同一トランザクションで実行すること。**`createMemory`/
+   * `createMemoryWithOutbox`/`supersedeWithNewMemories` のいずれも、この呼び出しは
+   * 「新しい Memory 行を実際に挿入した」ときだけ行う——冪等衝突で既存行を返した
+   * ときは呼ばない（`tags` は作成時にしか書けない列であり、既存行に対してラベルを
+   * 二重に数える理由が無い。`docs/memory-model.md` §8 にはこの区別についての明記は
+   * 無いが、`createMemoryWithOutbox` が冪等衝突時に outbox ジョブを積まないのと
+   * 同じ判断を踏襲する）。
+   *
+   * `tags` が空配列なら何もしない（ループが0回）。`tags` 内の重複は `Set` で1つに
+   * 潰してから数える——1回の Memory 作成につき、同じラベルの `proposedCount` を
+   * 1回だけ進める。`ON CONFLICT` は `status = 'proposed'` のときだけ
+   * `proposed_count` を進める——`registered` に昇格済みのラベルは、`tags` に
+   * 使われ続けても件数を増やさない（`listLabels?`/`registerLabel?` の doc コメント
+   * 「`registered` 昇格後の意味」参照。`docs/memory-model.md` §8「strict モードが
+   * 変えるのは検索側だけ」という決定と対称に、`registered` かどうかで書き込み側の
+   * 挙動を変えるのはこの1点だけである）。
+   */
+  private async upsertProposedLabels(
+    exec: SqlExecutor,
+    ctx: Ctx,
+    memoryId: MemoryId,
+    tags: readonly string[],
+  ): Promise<void> {
+    const uniqueNames = Array.from(new Set(tags));
+    for (const name of uniqueNames) {
+      const labelResult = await exec.execute(sql`
+        INSERT INTO labels (id, tenant_id, name, status, proposed_count)
+        VALUES (gen_random_uuid(), ${ctx.tenantId}, ${name}, 'proposed', 1)
+        ON CONFLICT (tenant_id, name) DO UPDATE
+          SET proposed_count = labels.proposed_count
+            + CASE WHEN labels.status = 'proposed' THEN 1 ELSE 0 END
+        RETURNING id
+      `);
+      const labelId = (labelResult.rows[0] as unknown as { id: string }).id;
+      await exec.execute(sql`
+        INSERT INTO memory_labels (tenant_id, memory_id, label_id)
+        VALUES (${ctx.tenantId}, ${memoryId}, ${labelId})
+        ON CONFLICT DO NOTHING
+      `);
+    }
+  }
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
     const externalId = input.externalId ?? null;
@@ -193,55 +255,72 @@ export class PostgresMemoryStore implements MemoryStore {
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
 
-    const inserted = await this.db.execute(sql`
-      INSERT INTO memories (
-        id, tenant_id, subject_id,
-        source_observation_id, extractor_version,
-        content, content_hash, digest, digest_source,
-        provenance_kind, provenance,
-        status, superseded_by_id, contested_with_id,
-        tags,
-        occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
-        strength, half_life_hours, decay_floor_at,
-        decay_base_seq, decay_floor_seq, half_life_recalls,
-        embedding_status,
-        created_at, updated_at
-      ) VALUES (
-        gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
-        ${sourceObservationId}, ${extractorVersion},
-        ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
-        ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
-        ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
-        ${sql.param(input.tags)},
-        ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
-        ${input.validFrom ?? null}, ${input.validUntil ?? null},
-        ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
-        ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
-        ${input.embeddingStatus},
-        now(), now()
-      )
-      ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
-        WHERE source_observation_id IS NOT NULL
-      DO NOTHING
-      RETURNING *
-    `);
-    if (inserted.rows.length > 0) {
+    // Issue #201 / ADR 0304: 新しく作った Memory の `tags` から `proposed` ラベルを
+    // 同一トランザクションで作るため、このメソッド自身がトランザクションを開く
+    // ようになった（本 PR 以前は単発の INSERT 文、衝突時は単発の SELECT 文だった——
+    // 返す値は変わらない。`inserted`/`existing`/`rowToMemory` の呼び方は1行も
+    // 変えていない）。
+    const result = await this.db.transaction(async (tx) => {
+      const inserted = await tx.execute(sql`
+        INSERT INTO memories (
+          id, tenant_id, subject_id,
+          source_observation_id, extractor_version,
+          content, content_hash, digest, digest_source,
+          provenance_kind, provenance,
+          status, superseded_by_id, contested_with_id,
+          tags,
+          occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+          strength, half_life_hours, decay_floor_at,
+          decay_base_seq, decay_floor_seq, half_life_recalls,
+          embedding_status,
+          created_at, updated_at
+        ) VALUES (
+          gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
+          ${sourceObservationId}, ${extractorVersion},
+          ${input.content}, ${input.contentHash}, ${input.digest}, ${input.digestSource},
+          ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
+          ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
+          ${sql.param(input.tags)},
+          ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
+          ${input.validFrom ?? null}, ${input.validUntil ?? null},
+          ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
+          ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
+          ${input.embeddingStatus},
+          now(), now()
+        )
+        ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
+          WHERE source_observation_id IS NOT NULL
+        DO NOTHING
+        RETURNING *
+      `);
+
+      if (inserted.rows.length === 0) {
+        const existing = await tx.execute(sql`
+          SELECT * FROM memories
+          WHERE tenant_id = ${ctx.tenantId}
+            AND source_observation_id = ${sourceObservationId}
+            AND extractor_version IS NOT DISTINCT FROM ${extractorVersion}
+            AND content_hash = ${input.contentHash}
+          LIMIT 1
+        `);
+        return { memory: rowToMemory(existing.rows[0] as unknown as MemoryRow), created: false };
+      }
+
+      const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+      await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
+      return { memory, created: true };
+    });
+
+    if (result.created) {
       // Issue #269: 統計が実態から遅れているときだけ ANALYZE memories を撃つ
       // (詳細は ./memories-statistics.ts のファイル doc)。新しい行を実際に書いた
-      // ときだけ数える——下の ON CONFLICT で既存行を返しただけの呼び出しは数えない。
+      // ときだけ数える——上の ON CONFLICT で既存行を返しただけの呼び出しは数えない。
+      // トランザクションの**外側**で呼ぶ——`createMemoryWithOutbox` と同じ理由
+      // （ANALYZE が保持する ShareUpdateExclusiveLock を、上のトランザクションが
+      // 保持する行ロックに無用に重ねないため）。
       await maybeAnalyzeMemoriesAfterWrite(this.db);
-      return rowToMemory(inserted.rows[0] as unknown as MemoryRow);
     }
-
-    const existing = await this.db.execute(sql`
-      SELECT * FROM memories
-      WHERE tenant_id = ${ctx.tenantId}
-        AND source_observation_id = ${sourceObservationId}
-        AND extractor_version IS NOT DISTINCT FROM ${extractorVersion}
-        AND content_hash = ${input.contentHash}
-      LIMIT 1
-    `);
-    return rowToMemory(existing.rows[0] as unknown as MemoryRow);
+    return result.memory;
   }
 
   /**
@@ -314,6 +393,10 @@ export class PostgresMemoryStore implements MemoryStore {
       }
 
       const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+      // Issue #201 / ADR 0304: 同一トランザクションで proposed ラベルを作る
+      // （冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない——`createMemory`
+      // の doc コメントと同じ判断）。
+      await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
       const jobs: OutboxJobRecord[] = [];
       for (const kind of jobKinds) {
         const jobResult = await tx.execute(sql`
@@ -656,6 +739,10 @@ export class PostgresMemoryStore implements MemoryStore {
         }
 
         const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
+        // Issue #201 / ADR 0304: `news` の各要素について、同一トランザクションで
+        // proposed ラベルを作る（`createMemory`/`createMemoryWithOutbox` と同じ判断
+        // ——冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない）。
+        await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
         const jobs: OutboxJobRecord[] = [];
         for (const kind of jobKinds) {
           const jobResult = await tx.execute(sql`
@@ -1882,6 +1969,37 @@ export class PostgresMemoryStore implements MemoryStore {
         return { memoryId: r.id as MemoryId, supersededReason: r.reason };
       }),
     };
+  }
+
+  /**
+   * Issue #201 / [ADR 0304](../../../docs/decisions/0304-taxonomy-labels.md):
+   * `listLabels?`（`@mnemora/core` の interface doc 参照）。
+   */
+  async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
+    const result = await this.db.execute(sql`
+      SELECT * FROM labels WHERE tenant_id = ${ctx.tenantId} ORDER BY name ASC
+    `);
+    return result.rows.map((row) => rowToLabel(row as unknown as LabelRow));
+  }
+
+  /**
+   * Issue #201 / [ADR 0304](../../../docs/decisions/0304-taxonomy-labels.md):
+   * `registerLabel?`（`@mnemora/core` の interface doc 参照）。行が無ければ
+   * `proposed_count: 0` の `registered` 行を作る。既に `proposed` なら `registered` へ
+   * 更新し `registered_at` を今にする。既に `registered` なら `registered_at` を
+   * 変えない——`COALESCE(labels.registered_at, now())` が「既存の値があればそれを保つ、
+   * 無ければ今にする」を1つの UPSERT で表す。
+   */
+  async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    const result = await this.db.execute(sql`
+      INSERT INTO labels (id, tenant_id, name, status, proposed_count, registered_at)
+      VALUES (gen_random_uuid(), ${ctx.tenantId}, ${name}, 'registered', 0, now())
+      ON CONFLICT (tenant_id, name) DO UPDATE
+        SET status = 'registered',
+            registered_at = COALESCE(labels.registered_at, now())
+      RETURNING *
+    `);
+    return rowToLabel(result.rows[0] as unknown as LabelRow);
   }
 }
 

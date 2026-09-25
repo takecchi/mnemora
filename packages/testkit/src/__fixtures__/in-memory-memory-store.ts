@@ -19,6 +19,7 @@ import type {
   Ctx,
   EmbeddingStatus,
   EventActor,
+  LabelSummary,
   Memory,
   MemoryEvent,
   MemoryId,
@@ -128,6 +129,40 @@ export class InMemoryMemoryStore implements MemoryStore {
    * の `FakeBackingStore.activitySeq` と同じ設計）。
    */
   readonly activitySeq = new Map<string, number>();
+
+  /**
+   * Issue #201 / ADR 0304: `labels` 相当のインメモリ表。key は `${tenantId}::${name}`。
+   * `PostgresMemoryStore.upsertProposedLabels`/`listLabels`/`registerLabel` と同じ意味論
+   * （`docs/memory-model.md` §8）を、`Map` の上でそのまま再現する。
+   */
+  private readonly labels = new Map<string, LabelSummary>();
+
+  private labelKey(tenantId: string, name: string): string {
+    return `${tenantId}::${name}`;
+  }
+
+  /**
+   * Issue #201 / ADR 0304: `PostgresMemoryStore.upsertProposedLabels` と同じ契約——
+   * 新しく作った Memory の `tags`（重複は `Set` で潰す）から `proposed` ラベルを作り・
+   * `proposedCount` を数える。`status === 'registered'` のラベルは件数を進めない。
+   * `createMemoryIdempotent` の「新しい行を実際に作った」分岐からだけ呼ぶ
+   * （冪等衝突では呼ばない——postgres 実装と同じ判断）。
+   */
+  private upsertProposedLabels(ctx: Ctx, tags: readonly string[]): void {
+    const uniqueNames = Array.from(new Set(tags));
+    for (const name of uniqueNames) {
+      const key = this.labelKey(ctx.tenantId, name);
+      const existing = this.labels.get(key);
+      if (existing === undefined) {
+        this.labels.set(key, { name, status: "proposed", proposedCount: 1, registeredAt: null });
+        continue;
+      }
+      if (existing.status === "proposed") {
+        this.labels.set(key, { ...existing, proposedCount: existing.proposedCount + 1 });
+      }
+      // status === 'registered' の場合は件数を進めない（postgres 実装と同じ）。
+    }
+  }
 
   /**
    * ADR 0054: 「既存を引く」と「挿入する」を1つの同期区間に閉じ、`created` をその判定
@@ -314,6 +349,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (input.sourceObservationId) {
         this.extractionIndex.set(idemKey, memory.id);
       }
+      // Issue #201 / ADR 0304: `createMemory`/`createMemoryWithOutbox`/
+      // `supersedeWithNewMemories` はすべてこの `createMemoryIdempotent` を通る
+      // （このファイル冒頭の doc コメント参照）——「新しい行を実際に作った」この分岐
+      // だけで1回呼べば3経路すべてを覆える。
+      this.upsertProposedLabels(ctx, memory.tags);
       return memory;
     });
   }
@@ -1323,6 +1363,39 @@ export class InMemoryMemoryStore implements MemoryStore {
     });
 
     return { candidates };
+  }
+
+  /**
+   * Issue #201 / [ADR 0304](../../../../docs/decisions/0304-taxonomy-labels.md):
+   * `listLabels?`（`PostgresMemoryStore.listLabels` と同じ契約）。
+   */
+  async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
+    const results: LabelSummary[] = [];
+    const prefix = `${ctx.tenantId}::`;
+    for (const [key, label] of this.labels) {
+      if (key.startsWith(prefix)) {
+        results.push(label);
+      }
+    }
+    results.sort((a, b) => a.name.localeCompare(b.name));
+    return results;
+  }
+
+  /**
+   * Issue #201 / [ADR 0304](../../../../docs/decisions/0304-taxonomy-labels.md):
+   * `registerLabel?`（`PostgresMemoryStore.registerLabel` と同じ契約）。
+   */
+  async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    const key = this.labelKey(ctx.tenantId, name);
+    const existing = this.labels.get(key);
+    const registered: LabelSummary = {
+      name,
+      status: "registered",
+      proposedCount: existing?.proposedCount ?? 0,
+      registeredAt: existing?.registeredAt ?? new Date(),
+    };
+    this.labels.set(key, registered);
+    return registered;
   }
 
   private extractionKey(
