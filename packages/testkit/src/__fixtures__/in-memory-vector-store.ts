@@ -120,6 +120,14 @@ export class InMemoryVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
+    // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
+    // （実測済み）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
+    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
+    // ほぼ全件を静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
+    if (opts.limit < 0) {
+      throw new Error(`search: limit must not be negative (got ${opts.limit})`);
+    }
     // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。
     // テナント分離は `opts.filter.tenantId` の一致だけで行う——これが
     // `VectorStore.search` の実際の契約（docs/architecture.md §5.2: filter は
