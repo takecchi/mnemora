@@ -271,33 +271,55 @@ export interface MemoryStoreConformanceOptions {
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md): 対象の
    * `MemoryStore` 実装が `listLabels`/`registerLabel`（任意メソッド）を実装しているか
-   * どうか。**必須。**
+   * どうか。**任意**（省略可、[Issue #818](https://github.com/takecchi/mnemora/issues/818)）。
    *
-   * `supportsArchiveDecayed`/`supportsPurgeMemory` 等と同じ判断——省略可にしない。
-   * `true` なら契約の歯（`tags` を持つ Memory を作ると同じ名前の `proposed` ラベルが
-   * 自動でできる、同じ `tags` を複数 Memory へ使うと `proposedCount` が積み上がる、
-   * `tags` 内の重複は1 Memory につき1回だけ数える、`registerLabel` で `registered` へ
-   * 昇格できる、`registerLabel` は冪等、`registered` なラベルは以後 `tags` に使われても
-   * `proposedCount` が進まない、テナント分離、`tags` が空なら何もできない）を実行する。
-   * `false` なら `expect(store.listLabels).toBeUndefined()` /
-   * `expect(store.registerLabel).toBeUndefined()` を積極的に assert する——`it.skip`
-   * にはしない。
+   * ⚠ **[Issue #818](https://github.com/takecchi/mnemora/issues/818)**: このフィールドは
+   * v1.0.0 の時点では存在しなかった。PR #717 (`ba6e5dd`) が「省略可にしない」判断で
+   * **必須**として足したため、v1.0.0 の利用者の `describeMemoryStoreConformance(...)`
+   * 呼び出しがコンパイルできなくなっていた——`supportsTaxonomyMode`
+   * （`tenant-settings-store-conformance.ts`）と同じ壊れ方・同じ直し方。**`?` を戻し、
+   * `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates`（このファイル）と
+   * 同じ3状態の書式に揃える**（クローン miku の判断——オーナーの判断ではない）。
+   *
+   * - `true`: 契約の歯（`tags` を持つ Memory を作ると同じ名前の `proposed` ラベルが
+   *   自動でできる、同じ `tags` を複数 Memory へ使うと `proposedCount` が積み上がる、
+   *   `tags` 内の重複は1 Memory につき1回だけ数える、`registerLabel` で `registered` へ
+   *   昇格できる、`registerLabel` は冪等、`registered` なラベルは以後 `tags` に
+   *   使われても `proposedCount` が進まない、テナント分離、`tags` が空なら何も
+   *   できない）を実行する。
+   * - `false`: `expect(store.listLabels).toBeUndefined()` /
+   *   `expect(store.registerLabel).toBeUndefined()` を積極的に assert する——`it.skip`
+   *   にはしない。
+   * - **省略（`undefined`）**: この adapter に対してこの歯を検査していない、という
+   *   意思表示。⛔ **黙って何も登録しない、にはしない**——`false` と同じ実装検査は
+   *   行わず、常に green で終わる named `it` を1本登録して「検査していない」ことを
+   *   テスト名で明示する（`supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates`
+   *   と同じ規律）。
    */
-  supportsLabels: boolean;
+  supportsLabels?: boolean;
   /**
    * Issue #372（(B) 第2段）: 対象の `MemoryStore` 実装が `findActiveByClaimKey`
-   * （任意メソッド）を実装しているかどうか。**必須。**
+   * （任意メソッド）を実装しているかどうか。**任意**（省略可、
+   * [Issue #818](https://github.com/takecchi/mnemora/issues/818)）。
    *
-   * `supportsArchiveDecayed`/`supportsMarkContestedPair`/`supportsLabels` 等と同じ
-   * 判断——省略可にしない。`true` なら契約の歯（同じ tenant・同じ subjectId・同じ
-   * claimKey・`status='active'`・`contentHash` が違う・有効期間が重なる行だけを返す、
-   * `subjectId` は `null` 同士も一致として扱う、`excludeMemoryId` に一致する行は
-   * 返さない、`contentHash` が同じ行は返さない、`status` が `active` でない行は
-   * 返さない、有効期間が重ならない行は返さない、テナント分離）を実行する。`false` なら
-   * `expect(store.findActiveByClaimKey).toBeUndefined()` を積極的に assert する
-   * ——`it.skip` にはしない。
+   * ⚠ **[Issue #818](https://github.com/takecchi/mnemora/issues/818)**: このフィールドは
+   * v1.0.0 の時点では存在しなかった。7987de4 (PR #745、
+   * [ADR 0324](../../../docs/decisions/0324-claim-key-contested-detection.md)) が
+   * `supportsLabels` と同じ「省略可にしない」判断で**必須**として足したため、v1.0.0 の
+   * 呼び出しがコンパイルできなくなっていた——直し方は `supportsLabels` と同じ
+   * （クローン miku の判断——オーナーの判断ではない）。
+   *
+   * - `true`: 契約の歯（同じ tenant・同じ subjectId・同じ claimKey・`status='active'`・
+   *   `contentHash` が違う・有効期間が重なる行だけを返す、`subjectId` は `null` 同士も
+   *   一致として扱う、`excludeMemoryId` に一致する行は返さない、`contentHash` が
+   *   同じ行は返さない、`status` が `active` でない行は返さない、有効期間が重ならない
+   *   行は返さない、テナント分離）を実行する。
+   * - `false`: `expect(store.findActiveByClaimKey).toBeUndefined()` を積極的に assert
+   *   する——`it.skip` にはしない。
+   * - **省略（`undefined`）**: `supportsLabels` の省略時と同じ規律——常に green で
+   *   終わる named `it` を1本登録し、「検査していない」ことをテスト名で明示する。
    */
-  supportsFindActiveByClaimKey: boolean;
+  supportsFindActiveByClaimKey?: boolean;
   /**
    * Issue #691続き（ADR 0329）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可）。
@@ -1133,7 +1155,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // ここでは「規則の各項をそれぞれ落とすと結果から消える」ことを1項ずつ検査する。
     // -------------------------------------------------------------------
 
-    if (supportsFindActiveByClaimKey) {
+    if (supportsFindActiveByClaimKey === true) {
       it("同じ tenant・同じ subjectId・同じ claimKey・有効期間が重なる・content_hash が違う active な Memory を返す", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -1511,10 +1533,17 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         });
         expect(matches).toEqual([]);
       });
-    } else {
+    } else if (supportsFindActiveByClaimKey === false) {
       it("findActiveByClaimKey は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.findActiveByClaimKey).toBeUndefined();
+      });
+    } else {
+      // `supportsFindActiveByClaimKey` を省略した adapter（Issue #818）。`it.skip` に
+      // しない理由は `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` の
+      // 同じ分岐を参照。
+      it(`⚠ 未検査: supportsFindActiveByClaimKey が指定されていない — adapter "${name}" に対して findActiveByClaimKey の歯は検査していない`, () => {
+        expect(supportsFindActiveByClaimKey).toBeUndefined();
       });
     }
 
@@ -7864,7 +7893,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // listLabels / registerLabel（Issue #201、ADR 0318: taxonomy の語彙、任意メソッド）
     // -------------------------------------------------------------------
 
-    if (supportsLabels) {
+    if (supportsLabels === true) {
       it("tags を持つ Memory を作ると、同じ名前の proposed ラベルが自動でできる", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -8035,11 +8064,17 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const ctx: Ctx = { tenantId: `tenant-no-labels-${Math.random()}` };
         expect(await store.listLabels!(ctx)).toEqual([]);
       });
-    } else {
+    } else if (supportsLabels === false) {
       it("listLabels/registerLabel は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.listLabels).toBeUndefined();
         expect(store.registerLabel).toBeUndefined();
+      });
+    } else {
+      // `supportsLabels` を省略した adapter（Issue #818）。`it.skip` にしない理由は
+      // `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsLabels が指定されていない — adapter "${name}" に対して listLabels/registerLabel の歯は検査していない`, () => {
+        expect(supportsLabels).toBeUndefined();
       });
     }
   });
