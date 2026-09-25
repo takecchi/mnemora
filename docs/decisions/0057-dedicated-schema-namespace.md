@@ -164,3 +164,5 @@
   - **確かめていない**: `schema` を指定した接続と指定しない接続を同じ DB に混ぜた場合の挙動。
   - **確かめていない**: 拡張が `public` 以外（例: `ext`）に既に在る DB で、
     `extensionSchema` を指定し忘れた場合の壊れ方。**`extensionSchema` はそのための口である。**
+
+> **追記（2026-09-25、Issue #757）**: 決定6の「schema ごとに別のロックキー」のもとで、拡張を作る段だけは schema に依らない共有キーで直列化するようにした（決定2への小さな逸脱を含む）——[ADR 0331](./0331-extension-creation-shared-advisory-lock.md)。
