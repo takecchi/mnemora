@@ -147,7 +147,7 @@ export class InMemoryVectorStore implements VectorStore {
     // 「filter.tenantId を無視しても壊れない」という誤ったプレースホルダになる。
     const prefix = `${space.provider}:${space.model}:${space.dimensions}:`;
     const memoryCtx: Ctx = { tenantId: opts.filter.tenantId };
-    const hits: VectorHit[] = [];
+    const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
       if (!key.startsWith(prefix)) {
         continue;
@@ -267,10 +267,26 @@ export class InMemoryVectorStore implements VectorStore {
           continue;
         }
       }
-      hits.push({ memoryId: entry.memoryId, distance: cosineDistance(query, entry.vector) });
+      hits.push({
+        memoryId: entry.memoryId,
+        distance: cosineDistance(query, entry.vector),
+        recordedAt: memory.recordedAt,
+      });
     }
-    hits.sort((a, b) => a.distance - b.distance);
-    return hits.slice(0, opts.limit);
+    // `PostgresVectorStore.search`（ADR 0170、Issue #339）と同じ3段 tie-break:
+    // 距離 → `recordedAt` DESC → `memoryId` 昇順。以前はここが距離だけのソートで、
+    // 同点の中身は `Array.prototype.sort` の安定性により**挿入順**（＝通常の呼び出し順では
+    // `recordedAt` が古いほうが先）に落ちていた——Postgres 側の「新しい方が先」とは
+    // 逆向きになり、`VectorStore.search` の doc が明記する「同点の順序も adapter の責務」
+    // （距離だけでなく完全なタイブレークまで含めて決定的な順序を返すこと）を満たしていなかった
+    // （`packages/testkit/src/__tests__/in-memory-vector-store-tiebreak.test.ts` が歯）。
+    hits.sort((a, b) => {
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      const recordedAtDiff = b.recordedAt.getTime() - a.recordedAt.getTime();
+      if (recordedAtDiff !== 0) return recordedAtDiff;
+      return a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0;
+    });
+    return hits.slice(0, opts.limit).map(({ memoryId, distance }) => ({ memoryId, distance }));
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
