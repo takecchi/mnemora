@@ -491,6 +491,8 @@ interface MemoryStore {
     supersededById: MemoryId,
     filter?: { onlyMemoryIds?: MemoryId[] }
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
+  listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
+  registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
 }
 
 type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgotten';
@@ -957,6 +959,8 @@ interface TenantSettingsStore {
   getDefaultHalfLifeRecalls?(ctx: Ctx): Promise<number>;
   setDefaultHalfLifeRecalls?(ctx: Ctx, recalls: number): Promise<void>;
   getActivitySeq?(ctx: Ctx): Promise<number>;
+  getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
+  setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
 
 type EventRetention = { kind: 'unset' } | { kind: 'unlimited' } | { kind: 'days'; days: number };
@@ -964,6 +968,8 @@ type EventRetention = { kind: 'unset' } | { kind: 'unlimited' } | { kind: 'days'
 type EventRetentionSetting = Exclude<EventRetention, { kind: 'unset' }>;
 
 type DecayClock = 'wall' | 'activity' | 'either';
+
+type TaxonomyMode = 'open' | 'strict';
 ```
 
 > **docs/604-sync-architecture-section5（2026-09-23、ADR 0273 の実装）**: この節は当初
@@ -976,11 +982,17 @@ type DecayClock = 'wall' | 'activity' | 'either';
 > （`@mnemora/core` は npm 公開済みであり、必須化すると外部 adapter が壊れる）等の詳細は
 > ソースの doc コメントを参照すること。
 
+> **2026-09-25 追記（Issue #201、[ADR 0306](./decisions/0306-taxonomy-labels.md)）**: 直下の
+> 「`tenant_settings` の他の列（`taxonomy_mode`）の読み書きはこの interface の範囲外」は
+> 古くなった。`getTaxonomyMode?`/`setTaxonomyMode?`（`getDecayClock?`/`setDecayClock?` と
+> 同じ形の任意メソッド）を足し、`taxonomy_mode` の読み書きをこの interface の範囲に含めた。
+> 上のコード片は実体に合わせて更新済み。
+
 契約:
 - テナントに `tenant_settings` 行が無い場合は `DEFAULT_HALF_LIFE_HOURS`（720、DB 側の
   `default_half_life_hours DEFAULT 720` と同じ値）を返す（エラーにしない）。
-- `tenant_settings` の他の列（`taxonomy_mode`）の読み書きはこの interface の範囲外
-  （ADR 0012 D-ingest-3）。
+- `tenant_settings.taxonomy_mode` の読み書きは `getTaxonomyMode?`/`setTaxonomyMode?`
+  （上記追記参照）。行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）を返す。
 - `getEventRetention`/`setEventRetention` は**必須**メソッドである——オーナー決定
   「監査ログの保持期間を短縮できる口は必須」（`docs/roadmap.md` §5.4、ADR 0050）による。
 - `getDecayClock?`/`setDecayClock?`/`getDefaultHalfLifeRecalls?`/`setDefaultHalfLifeRecalls?`/

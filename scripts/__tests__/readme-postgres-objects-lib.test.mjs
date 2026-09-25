@@ -121,7 +121,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル8・索引20・関数5になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル10・索引22・関数5になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -132,8 +132,11 @@ describe("deriveMigrationObjects", () => {
       .sort();
     const texts = fileNames.map((name) => readFileSync(`${migrationsDir}/${name}`, "utf8"));
     const result = deriveMigrationObjects(texts);
-    expect(result.tables).toHaveLength(8);
-    expect(result.indexes).toHaveLength(20);
+    // Issue #201 / ADR 0306: migrations/0019_taxonomy_labels.sql が `labels`/
+    // `memory_labels`（テーブル+2）と `idx_labels_by_status`/`idx_memory_labels_by_label`
+    // （索引+2）を足した。8→10・20→22 はその反映であり、回帰ではない。
+    expect(result.tables).toHaveLength(10);
+    expect(result.indexes).toHaveLength(22);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

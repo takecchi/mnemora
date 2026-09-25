@@ -65,7 +65,7 @@ const DOMAIN_TABLES = [
   // ADR 0165（Issue #305）: 活動カウンタ。忘れるとテスト間で activity_seq が汚染される
   // （`getActivitySeq`/`createRecall(advanceActivityClock: true)` の歯が偽陽性/偽陰性になる）。
   "tenant_activity",
-  // Issue #201 / ADR 0305: taxonomy の語彙。`memory_labels` は `memories`/`labels` の
+  // Issue #201 / ADR 0306: taxonomy の語彙。`memory_labels` は `memories`/`labels` の
   // どちらへの FK も持つため `CASCADE` で連れて消えるはずだが、`labels` 自体は他の
   // どのテーブルからも参照されていないため明示的に挙げないと残り、テスト間で
   // `proposedCount`/`status` が汚染される（実際に踏んだ——`listLabels` の歯が

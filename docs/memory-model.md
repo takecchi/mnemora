@@ -529,7 +529,7 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
   引き続き Phase 2 である。** `tags` が Phase 1 のスコアリングに参加することと、
   `labels` テーブルによる語彙管理が Phase 2 であることは別の軸であり、混同しない。
 
-**⚠ 2026-09-25 追記（Issue #201 PR-A、[ADR 0305](./decisions/0305-taxonomy-labels.md)）:
+**⚠ 2026-09-25 追記（Issue #201 PR-A、[ADR 0306](./decisions/0306-taxonomy-labels.md)）:
 `labels`/`memory_labels` を任意の追加として前倒しで実装した。** `migrations/0019_taxonomy_labels.sql`
 がこの節の SQL 案をほぼそのまま実装し、既存 `memories.tags` からの backfill も含む。
 `MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・
@@ -538,7 +538,7 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 
 **ただし、この節の冒頭が書いている「`strict` モードが変えるのは『`proposed` なラベルが
 検索の*フィルタ・加点*に参加できるか』だけである」のうち、*加点*の側は実装しない
-方針に変わった。** ADR 0305「決定5」参照——**上の「2026-09 訂正」段落が確立した既存の
+方針に変わった。** ADR 0306「決定5」参照——**上の「2026-09 訂正」段落が確立した既存の
 `tagMatch`（`tags` の生の一致数による加点、`recall.md` §7）は、`taxonomy_mode` の値に
 関わらず今日と同じ計算をし続ける。** 変えると、`strict` なテナントの既存スコアが
 本 PR によって動いてしまう（呼び出し側の挙動を1バイトも変えないという制約に反する）。
