@@ -128,6 +128,8 @@ import {
   formatTimeWeightingQualityBanner,
   formatTimeWeightingTable,
 } from "./time-weighting-format.js";
+import { runAnswerTrialsCompareFromFiles } from "./answer-trials-compare.js";
+import { formatAnswerTrialsReport, runAnswerTrials } from "./answer-trials.js";
 
 /** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
@@ -2052,6 +2054,62 @@ async function runTimeWeighting(): Promise<void> {
 }
 
 /**
+ * `answer-trials` サブコマンド（Issue #705、ADR 0301）。
+ *
+ * 🔴 **`answer` とは別の器である。** `answer` は12ケースを1回ずつ回して naive/mnemora の
+ * 最終回答・入力量を対で出す（配線の検査）。**この器は dev 6件だけを、`examples/chat/cassettes/answer.json`
+ * に記録済みの mnemora 経路プロンプトから読んだ**同じ記憶集合**の上で、描画 A（recorded）/
+ * B（digest-only）ごとに n 回ずつ答えさせ、正答数（`gradeAnswer` の pass/fail/indeterminate）
+ * で見る（ADR 0295 追記2 が見つけた「1回の試行では揺れが見えない」ことへの対応）。
+ *
+ * ⛔ **DB を使わない。** `DATABASE_URL` は不要——材料はカセットの静的な読み出しだけで作る
+ * （`answer-trials-material.ts` は DB・埋め込み・抽出・recall を一切 import しない）。
+ *
+ * ⛔ **CI の門にしない**（Issue #705 完了条件・#693 の線）。`.github/workflows/ci.yml` には
+ * 配線しない——手元で回す観測用の CLI である（ADR 0301）。
+ */
+async function runAnswerTrialsCommand(): Promise<void> {
+  const result = await runAnswerTrials({ env: process.env });
+  console.log(formatAnswerTrialsReport(result));
+
+  const jsonPath = process.env.MNEMORA_ANSWER_TRIALS_JSON;
+  if (jsonPath) {
+    writeFileSync(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
+    console.log(`\n[answer-trials] 機械可読な結果を書き出した: ${jsonPath}`);
+  }
+  // ⭐ 未評価（実 API が無い）は exit 0 のまま——「実行できなかった」ことを画面と JSON に
+  // 明示するのが目的であり、実行環境（鍵の有無）を落とす理由にしない（Issue #705 完了条件）。
+}
+
+/**
+ * `answer-trials-compare` サブコマンド（Issue #705、ADR 0301）。
+ *
+ * `answer-trials` の実行結果 JSON を2件以上突き合わせ、カセットの sha256 か
+ * ケースごとの材料指紋が一致しなければ、どこがずれたかを表示して exit 1。一致すれば
+ * 並べて表示して exit 0（Issue #705 完了条件2、ADR 0295 追記2 の見落としの再発防止）。
+ */
+async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
+  // `pnpm run answer-trials-compare -- a.json b.json` では pnpm が `--` をそのまま渡してくる
+  // （実測: `--` をファイルとして開こうとして ENOENT）。パスではないので落とす。
+  const paths = argv.filter((a) => a !== "--");
+  if (paths.length < 2) {
+    console.error(
+      "answer-trials-compare には比較対象の JSON パスを2件以上指定すること" +
+        "（例: answer-trials-compare a.json b.json）。",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const { ok, report } = runAnswerTrialsCompareFromFiles(paths);
+  console.log(report);
+  // ⭐ 副作用のある手（exit の判定）を判定と同じ行に繋がない——`ok` を見てから
+  // ここで明示的に立てる（docs/autonomy.md §4.1）。
+  if (!ok) {
+    process.exitCode = 1;
+  }
+}
+
+/**
  * Issue #369 (C)「訂正の口」の相手探しの精度を測る（`correction-candidate-arm.ts`）。
  *
  * **provider は `identifier-probes` と同じ組み合わせに固定する**——LLM は
@@ -2169,6 +2227,14 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer-time-weighting",
       "                                                                      # RecallQuery.timeWeighting(legacy/eventAwareFreshness、Issue #690・ADR 0300)を回答の正誤で比べる",
       "                                                                      #   -- --trials=N(既定1)・-- --temperature=N(既定は未指定)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
+      "  pnpm --filter @mnemora/example-chat run answer-trials",
+      "                                                                      # 同じ記憶集合(examples/chat/cassettes/answer.json の記録済みプロンプト)で",
+      "                                                                      #   dev 6件 × 描画A(recorded)/B(digest-only) × n回の正答数を見る(Issue #705、ADR 0301)",
+      "                                                                      #   DB 不要。OPENAI_API_KEY が無ければ実 API を叩かず『未評価』と明示して exit 0",
+      "                                                                      #   MNEMORA_ANSWER_TRIALS_N(既定5)・MNEMORA_ANSWER_TRIALS_RENDERS(既定 recorded,digest-only)・MNEMORA_ANSWER_TRIALS_JSON",
+      "  pnpm --filter @mnemora/example-chat run answer-trials-compare -- a.json b.json",
+      "                                                                      # answer-trials の結果 JSON を2件以上突き合わせ、カセット sha256・ケースごとの材料指紋が",
+      "                                                                      #   一致しなければどこがずれたかを表示して exit 1(Issue #705 完了条件2)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
       "                                                                      # retrieval の応答を記録する(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",
@@ -2229,6 +2295,10 @@ async function main(): Promise<void> {
     await runAnswer();
   } else if (command === "answer-time-weighting") {
     await runTimeWeighting();
+  } else if (command === "answer-trials") {
+    await runAnswerTrialsCommand();
+  } else if (command === "answer-trials-compare") {
+    await runAnswerTrialsCompareCommand(process.argv.slice(3));
   } else if (command === "record") {
     await runRecord(parseCassetteTarget(process.argv[3]));
   } else if (command === "verify") {

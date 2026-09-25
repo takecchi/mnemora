@@ -25,6 +25,8 @@
     "archive-sweep-cost": "tsx src/cli.ts archive-sweep-cost",
     "answer": "tsx src/cli.ts answer",
     "answer-time-weighting": "tsx src/cli.ts answer-time-weighting",
+    "answer-trials": "tsx src/cli.ts answer-trials",
+    "answer-trials-compare": "tsx src/cli.ts answer-trials-compare",
     "correction-candidates": "tsx src/cli.ts correction-candidates",
     "record": "tsx src/cli.ts record retrieval",
     "verify": "tsx src/cli.ts verify retrieval",
