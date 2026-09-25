@@ -85,11 +85,12 @@ export declare class PostgresLexicalStore implements LexicalStore {
 
 // ===== dist/memory-store.d.ts =====
 import type { SQL } from "drizzle-orm";
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresMemoryStore implements MemoryStore {
     private readonly db;
     constructor(db: Db);
+    private upsertProposedLabels;
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
     createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[]): Promise<{
@@ -204,6 +205,8 @@ export declare class PostgresMemoryStore implements MemoryStore {
             supersededReason: string | null;
         }>;
     }>;
+    listLabels(ctx: Ctx): Promise<LabelSummary[]>;
+    registerLabel(ctx: Ctx, name: string): Promise<LabelSummary>;
 }
 export declare function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL;
 export declare function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOptions): SQL | null;
@@ -1946,9 +1949,205 @@ export declare const tenantActivity: import("drizzle-orm/pg-core").PgTableWithCo
     };
     dialect: "pg";
 }>;
+export declare const labels: import("drizzle-orm/pg-core").PgTableWithColumns<{
+    name: "labels";
+    schema: undefined;
+    columns: {
+        id: import("drizzle-orm/pg-core").PgColumn<{
+            name: "id";
+            tableName: "labels";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        tenantId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "tenant_id";
+            tableName: "labels";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [
+                string,
+                ...string[]
+            ];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        name: import("drizzle-orm/pg-core").PgColumn<{
+            name: "name";
+            tableName: "labels";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [
+                string,
+                ...string[]
+            ];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        status: import("drizzle-orm/pg-core").PgColumn<{
+            name: "status";
+            tableName: "labels";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [
+                string,
+                ...string[]
+            ];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        proposedCount: import("drizzle-orm/pg-core").PgColumn<{
+            name: "proposed_count";
+            tableName: "labels";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        registeredAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "registered_at";
+            tableName: "labels";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "created_at";
+            tableName: "labels";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "pg";
+}>;
+export declare const memoryLabels: import("drizzle-orm/pg-core").PgTableWithColumns<{
+    name: "memory_labels";
+    schema: undefined;
+    columns: {
+        tenantId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "tenant_id";
+            tableName: "memory_labels";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [
+                string,
+                ...string[]
+            ];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        memoryId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "memory_id";
+            tableName: "memory_labels";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        labelId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "label_id";
+            tableName: "memory_labels";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "pg";
+}>;
 
 // ===== dist/tenant-settings-store.d.ts =====
-import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TenantSettingsStore } from "@mnemora/core";
+import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresTenantSettingsStore implements TenantSettingsStore {
     private readonly db;
@@ -1961,6 +2160,8 @@ export declare class PostgresTenantSettingsStore implements TenantSettingsStore 
     getDefaultHalfLifeRecalls(ctx: Ctx): Promise<number>;
     setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void>;
     getActivitySeq(ctx: Ctx): Promise<number>;
+    getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
+    setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
 
 // ===== dist/vector-space.d.ts =====

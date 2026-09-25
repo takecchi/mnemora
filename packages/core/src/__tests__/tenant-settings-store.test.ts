@@ -2,20 +2,27 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import {
   assertValidDecayClock,
+  assertValidTaxonomyMode,
   DECAY_CLOCK_INVALID_MESSAGE,
   DECAY_CLOCK_UNSUPPORTED_MESSAGE,
   DEFAULT_DECAY_CLOCK,
   DEFAULT_HALF_LIFE_RECALLS,
+  DEFAULT_TAXONOMY_MODE,
   isHalfLifeRecallsInRange,
   readActivitySeq,
   readDecayClock,
   readDefaultHalfLifeRecalls,
+  readTaxonomyMode,
+  TAXONOMY_MODE_INVALID_MESSAGE,
+  TAXONOMY_MODE_UNSUPPORTED_MESSAGE,
   writeDecayClock,
+  writeTaxonomyMode,
 } from "../interfaces/tenant-settings-store.js";
 import type {
   DecayClock,
   EventRetention,
   EventRetentionSetting,
+  TaxonomyMode,
   TenantSettingsStore,
 } from "../interfaces/tenant-settings-store.js";
 
@@ -58,6 +65,12 @@ function throwingStore(message: string): TenantSettingsStore {
       throw new Error(message);
     },
     async getActivitySeq(_ctx: Ctx): Promise<number> {
+      throw new Error(message);
+    },
+    async getTaxonomyMode(_ctx: Ctx): Promise<TaxonomyMode> {
+      throw new Error(message);
+    },
+    async setTaxonomyMode(_ctx: Ctx, _mode: TaxonomyMode): Promise<void> {
       throw new Error(message);
     },
   };
@@ -179,5 +192,71 @@ describe("isHalfLifeRecallsInRange（ADR 0125 と同じ値域、halfLifeHours �
     expect(isHalfLifeRecallsInRange(-1)).toBe(false);
     expect(isHalfLifeRecallsInRange(Number.NaN)).toBe(false);
     expect(isHalfLifeRecallsInRange(Number.POSITIVE_INFINITY)).toBe(false);
+  });
+});
+
+/**
+ * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md) の歯。
+ * `readDecayClock`/`writeDecayClock` の歯（このファイル冒頭）と同じ形——
+ * `readTaxonomyMode`/`writeTaxonomyMode` が `TenantSettingsStore` の2つの省略可能
+ * メソッドへ読み書きする唯一の通り道であることを固定する。
+ */
+describe("readTaxonomyMode", () => {
+  it("getTaxonomyMode を持たない adapter では DEFAULT_TAXONOMY_MODE（'open'）へ倒す", async () => {
+    const mode = await readTaxonomyMode(minimalStore(), ctx);
+    expect(mode).toBe(DEFAULT_TAXONOMY_MODE);
+    expect(mode).toBe("open");
+  });
+
+  it("getTaxonomyMode が在り成功すれば、その値をそのまま返す", async () => {
+    const store: TenantSettingsStore = {
+      ...minimalStore(),
+      async getTaxonomyMode(_ctx: Ctx): Promise<TaxonomyMode> {
+        return "strict";
+      },
+    };
+    expect(await readTaxonomyMode(store, ctx)).toBe("strict");
+  });
+
+  it("getTaxonomyMode が在って投げた場合は、既定へ倒さず素通しで投げる（「未実装」と「失敗」を混ぜない）", async () => {
+    await expect(readTaxonomyMode(throwingStore("db down"), ctx)).rejects.toThrow("db down");
+  });
+});
+
+describe("writeTaxonomyMode", () => {
+  it("setTaxonomyMode を持たない adapter では、既定へ倒さず TAXONOMY_MODE_UNSUPPORTED_MESSAGE を含む Error で明示的に失敗する", async () => {
+    await expect(writeTaxonomyMode(minimalStore(), ctx, "strict")).rejects.toThrow(
+      TAXONOMY_MODE_UNSUPPORTED_MESSAGE,
+    );
+  });
+
+  it("setTaxonomyMode が在り成功すれば、そのまま委譲する", async () => {
+    const written: TaxonomyMode[] = [];
+    const store: TenantSettingsStore = {
+      ...minimalStore(),
+      async setTaxonomyMode(_ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+        written.push(mode);
+      },
+    };
+    await writeTaxonomyMode(store, ctx, "strict");
+    expect(written).toEqual(["strict"]);
+  });
+
+  it("setTaxonomyMode が在って投げた場合は素通しで投げる", async () => {
+    await expect(writeTaxonomyMode(throwingStore("db down"), ctx, "strict")).rejects.toThrow(
+      "db down",
+    );
+  });
+});
+
+describe("assertValidTaxonomyMode", () => {
+  it("'open'/'strict' はどちらも通す", () => {
+    expect(() => assertValidTaxonomyMode("open")).not.toThrow();
+    expect(() => assertValidTaxonomyMode("strict")).not.toThrow();
+  });
+
+  it("それ以外の文字列は TAXONOMY_MODE_INVALID_MESSAGE を含む Error で失敗する", () => {
+    expect(() => assertValidTaxonomyMode("nonsense")).toThrow(TAXONOMY_MODE_INVALID_MESSAGE);
+    expect(() => assertValidTaxonomyMode("")).toThrow(TAXONOMY_MODE_INVALID_MESSAGE);
   });
 });

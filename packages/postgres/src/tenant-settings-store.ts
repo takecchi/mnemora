@@ -3,15 +3,18 @@ import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
   assertValidHalfLifeRecalls,
+  assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
   DEFAULT_HALF_LIFE_HOURS,
   DEFAULT_HALF_LIFE_RECALLS,
+  DEFAULT_TAXONOMY_MODE,
 } from "@mnemora/core";
 import type {
   Ctx,
   DecayClock,
   EventRetention,
   EventRetentionSetting,
+  TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
@@ -160,5 +163,40 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
     }
     const row = result.rows[0] as unknown as { activity_seq: string | number };
     return Number(row.activity_seq);
+  }
+
+  /**
+   * Issue #201 / ADR 0318: `tenant_settings.taxonomy_mode` の現在値。行が無ければ
+   * `DEFAULT_TAXONOMY_MODE`（`'open'`）——`getDecayClock` と同じ規律。
+   */
+  async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
+    const result = await this.db.execute(sql`
+      SELECT taxonomy_mode FROM tenant_settings WHERE tenant_id = ${ctx.tenantId} LIMIT 1
+    `);
+    if (result.rows.length === 0) {
+      return DEFAULT_TAXONOMY_MODE;
+    }
+    const row = result.rows[0] as unknown as { taxonomy_mode: string };
+    // DB 側の CHECK 制約（migrations/0001_init.sql）がこの列を2値に限定しているため、
+    // ここでの assert は「読み直した値が予期しない値だった」ことを検出する防御であって、
+    // 通常経路では常に通る（`getDecayClock` と同じ形）。
+    assertValidTaxonomyMode(row.taxonomy_mode);
+    return row.taxonomy_mode;
+  }
+
+  /**
+   * Issue #201 / ADR 0318: 不正な値は `assertValidTaxonomyMode`（core 共有）で拒む。
+   * `event_retention_days`/`default_half_life_hours`/`decay_clock`/
+   * `default_half_life_recalls` は指定しない——行が無い場合は DB 側の DEFAULT に任せる
+   * （`setDecayClock` と同じ形）。
+   */
+  async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+    assertValidTaxonomyMode(mode);
+    await this.db.execute(sql`
+      INSERT INTO tenant_settings (tenant_id, taxonomy_mode, updated_at)
+      VALUES (${ctx.tenantId}, ${mode}, now())
+      ON CONFLICT (tenant_id) DO UPDATE
+        SET taxonomy_mode = EXCLUDED.taxonomy_mode, updated_at = now()
+    `);
   }
 }
