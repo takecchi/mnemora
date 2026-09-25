@@ -104,6 +104,7 @@ import { buildTimeTermJson } from "./time-term-json.js";
 import { formatValidityReport, runValidityArm } from "./validity-arm.js";
 import { buildValidityJson } from "./validity-json.js";
 import { formatNoApiCallsNotice } from "./usage-meter.js";
+import { formatSeedUsageReport } from "./seed-usage.js";
 import { createAnswerBenchRuntime, runAnswerBench } from "./answer-bench.js";
 import { ANSWER_CASE_SET_DEV } from "./answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "./answer-case-set.eval.js";
@@ -966,6 +967,27 @@ async function recordCompare(
 }
 
 /**
+ * 「種カセット」（Issue #691 続き）を環境変数 `MNEMORA_RECORD_SEED_CASSETTE` から読む。
+ *
+ * **未設定なら `undefined`**——`recordAnswer`/`recordTimeWeighting` はその場合
+ * `providerOptions.seedCassette` を渡さず、既存の挙動を1バイトも変えない
+ * （`providers.ts` の `CreateProvidersOptions.seedCassette` docstring参照）。
+ *
+ * **何のためか**: 録り直すたびに抽出（`observe()`）が実 API でやり直され、記憶集合が
+ * 変わりうる。旧カセット（例: `examples/chat/cassettes/answer.json`）を種として渡すと、
+ * 同じ入力には記録済みの値を返す——記憶集合を旧カセットへ揃え、実 API を呼ぶ回数も
+ * 減らせる。`loadCassette` と同じ検査（形式版・必須欄）にそのまま通す。
+ */
+function loadRecordSeedCassette(): Cassette | undefined {
+  const path = process.env.MNEMORA_RECORD_SEED_CASSETTE;
+  if (!path) {
+    return undefined;
+  }
+  console.log(`[record] 種カセットを読む（MNEMORA_RECORD_SEED_CASSETTE）: ${path}`);
+  return loadCassette(path);
+}
+
+/**
  * `answer` を実 API で走らせて記録する（Issue #506 / 親 #498。ADR 0051）。
  *
  * **再生する当のもの（`runAnswer` と同じ実行経路）をそのまま走らせて録る。**
@@ -987,10 +1009,11 @@ async function recordAnswer(
   console.log("\n########## 記録中: answer ##########");
   const measuredAt = new Date();
   const commit = tryGitRevParseHead(process.cwd());
+  const seedCassette = loadRecordSeedCassette();
   const handle = await createAnswerBenchRuntime(
     databaseUrl,
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
-    { recorder },
+    { recorder, seedCassette },
   );
   printProviderMode(handle, null);
   try {
@@ -1036,6 +1059,10 @@ async function recordAnswer(
     if (handle.usageMeter) {
       console.log(`\n${handle.usageMeter.formatReport()}`);
     }
+    // usage-meter（実 API の実測）とは別枠で出す（マネージャー指示）。
+    if (handle.readSeedUsage) {
+      console.log(`\n${formatSeedUsageReport(handle.readSeedUsage())}`);
+    }
 
     // ⭐ `record answer` でも `MNEMORA_ANSWER_JSON` が設定されていれば書き出す
     // ——記録と同時に実測結果を機械可読な形でも取りたい、という要望への対応。
@@ -1079,10 +1106,11 @@ async function recordTimeWeighting(
   // 同じ入力でも gradeAnswer の正誤が run ごとに揺れることを実測した。カセットは
   // 「記録した時点の応答」を固定して再生するものなので、揺れの少ない temperature=0 で
   // 録ることで、再生（CI・cassette-coverage）の判定が安定する。
+  const seedCassette = loadRecordSeedCassette();
   const handle = await createTimeWeightingBenchRuntime(
     databaseUrl,
     { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
-    { recorder, llmTemperature: 0 },
+    { recorder, llmTemperature: 0, seedCassette },
   );
   printProviderMode(handle, null);
   try {
@@ -1102,6 +1130,10 @@ async function recordTimeWeighting(
     console.log(formatTimeWeightingKindSummary(aggregate, handle.llmMode));
     if (handle.usageMeter) {
       console.log(`\n${handle.usageMeter.formatReport()}`);
+    }
+    // usage-meter（実 API の実測）とは別枠で出す（マネージャー指示）。
+    if (handle.readSeedUsage) {
+      console.log(`\n${formatSeedUsageReport(handle.readSeedUsage())}`);
     }
   } finally {
     await handle.close();

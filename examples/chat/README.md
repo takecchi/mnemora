@@ -1709,18 +1709,88 @@ digest 本文だけでなく `RecalledMemory` の `provenanceKind`（由来）�
 他の値で埋めない。決めたことの詳細・ケース定義・変異試験の結果は
 [ADR 0295](../../docs/decisions/0295-answer-prompt-provenance-rendering.md) を参照。
 
+⚠ **行の並びは `recordedAt` 昇順、1件以上あれば先頭に凡例1行（Issue #691 続き、
+ADR 0309）**。ADR 0295 追記2 が見つけた `schedule-change-meeting-day`（「金曜→水曜」の
+訂正が後続するケース）の退行（同じ記憶集合の n=15 試行で 8/15 → 3/15）に対し、
+`recordedAt` を持つ行だけを昇順に並べ替え（持たない行は元の配列順のまま末尾に残す）、
+持つ行が1件以上あるときだけ本文の先頭に
+`(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)` を1行足す
+`order-legend` 描画を採用した（13/15 まで回復。由来・話者・主題・矛盾候補のタグは
+維持したまま）。候補比較（`recorded`/`digest-only`/並べ替えのみ/`order-legend`/
+タグを落として並べ替え+凡例だけにした案の5通り、n=15、dev 限定）・採らなかった案の
+理由・記憶集合が変わりうることの注記は
+[ADR 0309](../../docs/decisions/0309-answer-prompt-order-legend-and-cassette-migration.md)
+を参照。
+
 ⚠ **`compare` の `mnemoraChars` はこの増分を反映しない**——`mnemoraChars` は
 `recall.usage.chars`（`recall()` 自身が返す量）であり、`buildMnemoraPrompt` が
 呼び出し側で組み立てる文字列とは元から別の数え方だった（`docs/recall.md` §6）。
 この PR 以降、両者の乖離はさらに広がる（フィクスチャでの実測比較は ADR 0295 §3）。
 
-⚠ **記録済みカセット（`cassettes/answer.json`、2026-09-17 録画）の再生が壊れる。**
-`buildMnemoraPrompt` の出力を変えたことで、mnemora 経路の回答生成プロンプトの
-ハッシュ鍵（`llmCassetteKey`）が変わり、`recorded` モードでの再生
-（`MNEMORA_LLM=recorded`/`MNEMORA_PROVIDER_SOURCE=recorded`、`answer-cli.postgres.test.ts`
-が使う経路）は12ケース全てで「記録に無い」例外になる見込み（ADR 0295 §4 で実測）。
-録り直すには `OPENAI_API_KEY` を使った `record:answer` の再実行（実 API 呼び出し・
-課金）が必要——実行するかどうかはオーナーの判断である。
+⚠ **`answer`/`answer-time-weighting` の記録済みカセットの再生対象が新形式ファイルへ
+移った（ADR 0309）。** `buildMnemoraPrompt` の出力が変わったことで、mnemora 経路の
+回答生成プロンプトのハッシュ鍵（`llmCassetteKey`）が変わり、旧形式カセット
+（`cassettes/answer.json`、2026-09-17 録画 / `cassettes/answer-time-weighting.json`）
+の再生（`recorded` モード）はもう成立しない。**旧形式の2ファイルは1バイトも
+書き換えていない**——`record`/`verify`/CLI の再生対象を新形式ファイル
+（`cassettes/answer.order-legend.json`/`cassettes/answer-time-weighting.order-legend.json`、
+`cassette-io.ts`）へ向け直した。**新形式ファイルは、本変更の時点ではまだ実 API で
+記録していない**——`record:answer`/`record:answer-time-weighting`（`OPENAI_API_KEY` が
+必要、見込みの呼び出し回数は ADR 0309 §4.4）を実行するまで、`answer`/
+`answer-time-weighting` の `recorded` 再生・関連する CI ステップは意図して赤いまま
+である。`answer-trials`（下記セクション）が読む `cassettes/answer.json` は
+**旧形式のまま**変わらない——ADR 0301 の対照の基準として使い続けるため。
+
+#### 種カセットを渡して記録する（`MNEMORA_RECORD_SEED_CASSETTE`、Issue #691 続き、ADR 0309 §4.5.1）
+
+`record:answer`/`record:answer-time-weighting` は毎回、抽出（`observe()`）を実 API で
+やり直す。抽出は非決定的なため、素のまま録り直すと記憶集合が旧カセット
+（`cassettes/answer.json` の n=15 対照、ADR 0309 §2）と変わりうる——マネージャーが
+実 API で `record:answer` を一度走らせたところ、実際に digest が変わり、Issue #498
+完了条件4の陽性対照（`applyRetentionMutation`、`answer-retention-mutation.ts`）が
+「変異対象の部分文字列…が見つからない」で落ち、カセットを1件も書き出せなかった。
+
+`MNEMORA_RECORD_SEED_CASSETTE=<path>` に旧カセットを渡すと、LLM・埋め込みの
+どちらも、種カセットに同じ鍵（`llmCassetteKey`/`embeddingCassetteKey`、
+`@mnemora/testkit`——**既存の鍵の作り方をそのまま再利用しており、新しい鍵の作り方は
+増やしていない**）のエントリがあればそれを返し（実 API を呼ばない）、無ければ実 API
+を呼ぶ。**どちらの場合も新しいカセットへ記録する**——新しいカセットは自己完結し、
+種への参照は一切残らない（`SeededLLMProvider`/`SeededEmbeddingProvider` を real と
+`RecordingLLMProvider`/`RecordingEmbeddingProvider` の間に挟む組み立て順、
+`providers.ts`）。**種の LLM モデル名・埋め込み空間が今の設定と食い違えば、構築時に
+例外になる**——黙って混ぜない。
+
+```bash
+MNEMORA_RECORD_SEED_CASSETTE=cassettes/answer.json \
+  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer
+
+MNEMORA_RECORD_SEED_CASSETTE=cassettes/answer-time-weighting.json \
+  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer-time-weighting
+```
+
+記録の終わりに、usage-meter の実測（実際に叩いた回数・トークン・概算費用）とは別枠で、
+「種から再生した件数／実 API を呼んだ件数」を LLM・埋め込みそれぞれ画面に出す
+（`src/seed-usage.ts` の `formatSeedUsageReport`）。
+
+**種にヒットする見込み・しない見込み**（コードを読んで数えた見込みであり、実測では
+ない）: 抽出（`observe()` 側の `completeStructured`）は `buildMnemoraPrompt` を経由
+しないため、同じ会話入力なら種にヒットする見込みが高い——抽出が種から返れば、その
+digest 文字列は記録済みの値そのものになるため、そこから生まれる Memory の埋め込み・
+質問文の埋め込み（ケース定義から決まる固定文字列）も連鎖して種にヒットする見込みが
+高い。一方、**回答生成・judge・陽性対照の回答生成**は `buildMnemoraPrompt` が
+`order-legend` 描画に変わったことでプロンプトのハッシュ鍵が変わっており、
+**種にヒットしない見込み**（実 API を呼ぶ）。`answer-time-weighting` は `observe()`
+（抽出）を一度も通らない設計（記憶を直接書く、`time-weighting-bench.ts`）——ヒット
+しうるのは質問文・記憶本文の埋め込みだけで、回答生成（`legacy`/
+`eventAwareFreshness` の2方針、プロンプトに `order-legend` の描画を含む）は種に
+ヒットしない見込み。実際にどれだけヒットしたかは、記録を実行した本人が画面の実測
+（`formatSeedUsageReport` の出力）で確かめること。詳しい理由・変異試験・引き受けた
+負債は [ADR 0309](../../docs/decisions/0309-answer-prompt-order-legend-and-cassette-migration.md)
+§4.5.1 を参照。
+
+**種を渡さなければ、この機能自体が無かったときと1バイトも挙動が変わらない**——
+`MNEMORA_RECORD_SEED_CASSETTE` を設定しない限り、`record:answer`/
+`record:answer-time-weighting` は従来どおり全ケースを実 API で記録する。
 
 ---
 
@@ -1748,11 +1818,20 @@ MNEMORA_ANSWER_TRIALS_JSON=/tmp/answer-trials.json OPENAI_API_KEY=... pnpm --fil
   出来事時刻・digest の構造へ戻す。**この module は DB・埋め込み・抽出・recall を
   一切 import しない**——別の抽出・別の recall で「別の記憶集合」を作ってしまう経路が
   構造的に無い。
-- **描画 A（`recorded`）/ 描画 B（`digest-only`）は、同じ材料オブジェクトから作る**
-  （`src/answer-trials-render.ts`）。A は現行の `buildMnemoraPrompt` と同じ形を
-  再構成する——**再構成した内容がカセットの原文と完全一致することを毎回検査し、
-  ずれれば例外にする。** B は由来等のタグを一切付けない digest 行だけの描画（ADR 0295
-  追記2 の「digest のみ」列と同じ形）。
+- **描画 `recorded`/`digest-only`/`order-legend` は、同じ材料オブジェクトから作る**
+  （`src/answer-trials-render.ts`）。`recorded` は**カセットに記録された時点の生の形**
+  （由来・話者・主題・矛盾候補・記録順・出来事時刻のタグは付くが、行の並びは元の配列順の
+  まま・凡例も無い、PR #698 の書式）を再構成する——**再構成した内容がカセットの原文と
+  完全一致することを毎回検査し、ずれれば例外にする。** `digest-only` は由来等のタグを
+  一切付けない digest 行だけの描画（ADR 0295 追記2 の「digest のみ」列と同じ形）。
+  `order-legend` は `recordedAt` 昇順への並べ替え＋凡例1行を足した描画——**現行の
+  `buildMnemoraPrompt` と同じ規則**（`ORDER_LEGEND_LINE` を `mnemora-path.ts` から
+  import して1箇所にしている）。⚠ **`recorded` はもう現行の `buildMnemoraPrompt` の形
+  ではない**——ADR 0309 で `buildMnemoraPrompt` 自体が `order-legend` 相当の描画に
+  切り替わったため、`recorded` は「カセットが記録された時点の生の形」を指す名前として
+  残っている（採用前の候補比較で使った `order-sorted`（並べ替えのみ）・
+  `digest-order-legend`（タグを落として並べ替え+凡例）はレジストリから外した——数値・
+  採らなかった理由は [ADR 0309](../../docs/decisions/0309-answer-prompt-order-legend-and-cassette-migration.md) 参照）。
 - **材料指紋・カセットの sha256** を出力の先頭に必ず出す。`answer-trials-compare` は
   この2つを突き合わせ、一致しなければ exit 1 にする——「対照Aと対照Bが同じ記憶集合の
   上で回っている」ことを、ADR 0295 追記2 のように後から気づくのではなく、器自身に

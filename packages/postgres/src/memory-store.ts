@@ -1004,29 +1004,82 @@ export class PostgresMemoryStore implements MemoryStore {
    * 出すと、その間の書き込みで総和が一致しなくなる**——を、段5でも同じ形で守る。
    *
    * **本 PR（ADR 0073 決定7）で目次帯（`digests`/`digestEligible`）を同じクエリに
-   * 相乗りさせた。** `opts.digestBand` を渡すと、`WITH scoped AS (...)` の同じ CTE から
-   * (a) 群カウント (b) 帯の候補（決定的な順序で `limit` 件） (c) 帯の資格件数、の3つを
-   * 追加のスカラーサブクエリとして取り、全体を1つの SQL 文・1回の往復で返す
+   * 相乗りさせた。** `opts.digestBand` を渡すと、同じ SQL 文の中に追加のスカラー
+   * サブクエリを足し、全体を1つの SQL 文・1回の往復で返す
    * （`packages/postgres/src/__tests__/recall.postgres.test.ts` の
    * 「aggregateScope は単一の SQL 往復で完結する」がこれを構造的に検査している）。
    * 別クエリにすると群カウントと帯が別スナップショットになり、並行する書き込みの下で
    * 被覆不変条件が構造的に崩れる。
    *
    * **⭐ Issue #329 / [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md)
-   * で忘却ゲートの件数（`decayed_filtered`）を同じ CTE に相乗りさせた。** `scoped` の
-   * projection に `decay_floor_at`/`decay_floor_seq` を足し、`count(*) FILTER` を1本
-   * 増やしただけである——**別クエリで数えない。** 別クエリにすると (a) 往復が増え
-   * （【実測】2026-09-16、100k 行のローカル PG17: 別クエリ案は **Seq Scan で 24.6〜27.6ms**、
-   * 相乗りさせたこの案の増分は **+9.5ms**（median 150.6ms → 160.1ms、buffers は 6456 で同数）。
-   * ADR 0173「測ったこと」）、
-   * (b) 別スナップショットになって `totalInScope` と食い違いうる。ここは `digestBand` を
-   * 相乗りさせたのと同じ判断である。
+   * で忘却ゲートの件数（`decayed_filtered`）を同じ CTE に相乗りさせた。**
+   * **別クエリで数えない。** 別クエリにすると (a) 往復が増え、(b) 別スナップショットに
+   * なって `totalInScope` と食い違いうる。ここは `digestBand` を相乗りさせたのと
+   * 同じ判断である。
    *
    * `status` の4分岐（scope 内 / archived / superseded / forgotten）と period の内外は、
-   * すべて `FILTER (WHERE ...)` による条件付き集約として `scoped` CTE の1回のスキャンで
-   * 計算する。**superseded と forgotten は別々の列として数える**（ADR 0027）——前者は
+   * すべて `FILTER (WHERE ...)` による条件付き集約として1回のスキャンで計算する。
+   * **superseded と forgotten は別々の列として数える**（ADR 0027）——前者は
    * 機構の都合（より良い抽出への置き換え、または統合）、後者は製品の振る舞い（利用者が意図して
    * 忘れさせた）であり、束ねると呼び出し側がどちらだったか判定できない。
+   *
+   * ## 単一パス書き換え（Issue #355、[ADR 0307](../../../docs/decisions/0307-aggregate-scope-single-pass.md)）
+   *
+   * **旧実装は `WITH scoped AS (SELECT ... FROM memories WHERE tenant_id = $1 ...)` を
+   * 3回参照していた**（本体の `count(*) FILTER` 群・`groups` の `GROUP BY` サブクエリ・
+   * `digestBand` のサブクエリ）。3回参照される CTE は Postgres が実体化し（1回だけ実行して
+   * tuplestore に積み、以後はそこから読む）、しかも `scoped` の projection には `digest`
+   * （テキスト列）が含まれていたため、テナント全件（100k 行）の digest 本文ごと
+   * tuplestore に積まれ、`work_mem` を超えてディスクへ溢れていた（【実測】
+   * 100k 行で `temp read=2736 written=1368`、ADR 0307「測ったこと」）。
+   * 加えて `groups` は独立した `Sort` + `GroupAggregate` で `scoped` を再スキャンしており、
+   * `${'${x}'}::timestamptz IS NULL OR ...` 形の述語（`inPeriod`/`isValid` 等）を
+   * `count(*) FILTER` の本数（最大10本強）だけ重複して評価していた。
+   *
+   * **新実装は各行の述語（`live`/`in_period`/`is_valid`/`is_expired`/`is_not_yet_valid`/
+   * `is_decayed`）を `flags` CTE（`scoped` の素の射影の上に載る層）で1回だけ boolean として計算し、`GROUP BY subject_id`
+   * で subject ごとの各カウンタ（`in_scope`・`not_indexed_*`・`archived`・`superseded`・
+   * `forgotten`・`period_filtered`・`expired_filtered`・`not_yet_valid_filtered`・
+   * `decayed_filtered`）を1パスで出す（`agg` CTE）。**
+   *
+   * `scoped` は `flags` から、`flags` は `agg` から、`agg` は外側の集約から各1回だけ参照されるので、
+   * Postgres は既定でどちらも実体化せずインライン化する（PG12+ の「1回しか参照されない
+   * 非再帰 CTE は自動的にインライン化される」という規則。`MATERIALIZED` を明示していない
+   * ——実際に試したが採らなかった。理由は「単一パス書き換え」の実装コメント、ADR
+   * 0307「採らなかった案」参照。要点だけ書くと、`scoped` を `MATERIALIZED`
+   * すると、digest を持たない狭い行でも 100k 行では `work_mem`（既定 4MB。GUC は
+   * アプリの既定を変えるので変えない）を超えてディスクへ溢れ、インライン化のまま
+   * 述語を複数回再評価するより**遅くなった**（【実測】237ms 台 vs 254ms 台）。
+   * 述語自体は単純な比較演算であり、行数分の重複評価より、たとえ狭くてもディスクへの
+   * 実体化のほうが高くつく）。外側では `groups`（`in_scope > 0` の
+   * subject のみ、`json_agg(...) FILTER (WHERE in_scope > 0)`）と各合計
+   * （`coalesce(sum(...), 0)`——空テナントで `agg` が0行になっても `NULL` ではなく現物と
+   * 同じ `0` を返す）を1回の `Aggregate` ノードで取る。
+   *
+   * **`digestBand` は `scoped`/`agg` を経由せず、`memories` を直接（同じ `tenant_id`/
+   * `subjectFilter` の WHERE で）引くサブクエリにした。** `digests`（top-N の
+   * `ORDER BY eff_time DESC, id DESC LIMIT`）は digest 本文が要るので `memories` を
+   * 直接スキャンする——`scoped` に digest 列を持たせて共有する必要が無くなった。
+   * `digest_eligible_count` は `scoped`/`memories` を再スキャンせず、**集計側
+   * （`agg` の `in_scope` 合計）から、`excludeMemoryIds`（高々 digestBand.limit 件、
+   * テナント規模に応じて増えない）に該当する行のうち in_scope 条件を満たす件数を
+   * 引き算**して出す（`id = ANY(...)` は主キーに乗るので、この補正クエリはテナント規模に
+   * 依存しない定数コストである）。
+   *
+   * **`groups` の出現順序は契約ではない**（`packages/core/src/recall.ts` の
+   * `ScopeAggregate.groups` doc・`GroupCount` doc、いずれも順序に触れていない。
+   * `IndexBand.groups` へそのまま代入する `recall-runtime.ts` もソートしない。
+   * `packages/testkit` の適合テストも `Map`/`toContainEqual` で集合として比較しており、
+   * 配列全体を順序込みで比較していない——ADR 0307「確かめたこと」で
+   * 実際に確認した）。旧実装は `json_agg` に `ORDER BY` を持たず、`GroupAggregate` の
+   * 実行順（Postgres が選ぶプラン依存）に従っていた。新実装も同様に `ORDER BY` を
+   * 持たない——**返り値の意味は変わっていない**（呼び出し側は今日も順序に依存できない）。
+   *
+   * **等価性の歯**: `packages/postgres/src/__tests__/aggregate-scope-single-pass.postgres.test.ts`
+   * が、旧実装の SQL をテスト内に参照オラクルとして写し、新実装の `aggregateScope` と
+   * 完全一致することを、各 FILTER 枝・subject 有無・includeSubjectless・NULL subject・
+   * period/validAt/decayFloor* の組合せ・digestBand 有無・除外 id・空テナント・
+   * digest 同時刻 tie（id DESC）を踏むデータで検査する。
    */
   async aggregateScope(
     ctx: Ctx,
@@ -1120,9 +1173,13 @@ export class PostgresMemoryStore implements MemoryStore {
     const digestBand = opts?.digestBand;
     // `digestBand` が無ければ余計な仕事をしない（doc コメント・PR 指示のとおり）——
     // このサブクエリ群自体を SQL テキストに載せない。
-    const excludeFilter = digestBand
-      ? sql`AND NOT (id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[]))`
-      : sql``;
+    //
+    // Issue #355 / ADR 0307: `digestBand` は `scoped`/`agg` を経由せず、
+    // `memories` を直接（同じ tenant_id/subjectFilter の WHERE で）引く。digest 本文が
+    // 要る `digests` は仕方なく `memories` を再スキャンするが、`digest_eligible_count` は
+    // 再スキャンしない——`in_scope`（`agg` の合計）から、除外 id のうち in_scope 条件を
+    // 満たす件数（高々 `excludeMemoryIds.length` 件、主キー相当の `id` に乗るので
+    // テナント規模に依存しない）を引き算するだけで出す。
     const digestBandColumns = digestBand
       ? sql`,
         (
@@ -1135,67 +1192,114 @@ export class PostgresMemoryStore implements MemoryStore {
           )
           FROM (
             SELECT id, digest, COALESCE(occurred_at, recorded_at) AS eff_time
-            FROM scoped
-            WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid} ${excludeFilter}
+            FROM memories
+            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+              AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+              AND NOT (id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[]))
             ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC
             LIMIT ${digestBand.limit}
           ) band
         ) AS digests,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid} ${excludeFilter}
+        (
+          coalesce(sum(in_scope), 0) - coalesce((
+            SELECT count(*)
+            FROM memories
+            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+              AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
+              AND id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[])
+          ), 0)
         )::int AS digest_eligible_count`
       : sql``;
 
+    // Issue #355 / ADR 0307: 各行の述語を `scoped` の中で1回だけ boolean として
+    // 計算し（`live`/`in_period`/`is_valid`/`is_expired`/`is_not_yet_valid`/`is_decayed`）、
+    // `agg` で `GROUP BY subject_id` して subject ごとの各カウンタを1パスで出す。
+    // `scoped`・`agg` はどちらも1回しか参照されないので、Postgres は既定でどちらも
+    // インライン化する（`MATERIALIZED` を明示していない）。
+    //
+    // ⚠ **`MATERIALIZED` を試したが、採らなかった**（ADR 0307「採らなかった案」）。
+    // `scoped` は digest を持たない狭い行だが、`work_mem`（既定 4MB、GUC を変えない前提の
+    // もとでは動かせない）を100k行で超え、実体化そのものがディスクへ溢れる
+    // （`temp written` が実測で再発した）。**インライン化のままだと、`in_period`/`is_valid`
+    // 等の式は `agg` 側の複数の `FILTER` から参照されるたびに再評価されるが、
+    // これは単純な比較演算であり、`work_mem` を超えて生じるディスク書き込みより安い**
+    // ——【実測】インライン化 237ms 台 vs `MATERIALIZED` 254ms 台（ADR「測ったこと」）。
     const result = await this.db.execute(sql`
       WITH scoped AS (
-        SELECT id, subject_id, digest, occurred_at, recorded_at, embedding_status, status,
+        SELECT subject_id, occurred_at, recorded_at, embedding_status, status,
                valid_from, valid_until, decay_floor_at, decay_floor_seq
         FROM memories
         WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+      ),
+      -- 述語を1回だけ boolean にする層。scoped を素の射影のまま残すのは、ADR 0303 の
+      -- 前提の歯（scripts/__tests__/decay-floor-owner-premises.test.mjs）が scoped の本体を
+      -- 字句で読んで「status で絞らない」を検査しているため。どの CTE も1回しか参照されず
+      -- インライン化されるので、層を分けてもプランは変わらない。
+      flags AS (
+        SELECT
+          subject_id,
+          status,
+          embedding_status,
+          (status IN ('active', 'contested')) AS live,
+          (${inPeriod}) AS in_period,
+          (${isValid}) AS is_valid,
+          (${isExpired}) AS is_expired,
+          (${isNotYetValid}) AS is_not_yet_valid,
+          (${isDecayed}) AS is_decayed
+        FROM scoped
+      ),
+      agg AS (
+        SELECT
+          subject_id,
+          count(*) FILTER (WHERE live AND in_period AND is_valid)::int AS in_scope,
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND embedding_status = 'pending'
+          )::int AS not_indexed_pending,
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND embedding_status = 'failed'
+          )::int AS not_indexed_failed,
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND embedding_status = 'skipped'
+          )::int AS not_indexed_skipped,
+          count(*) FILTER (WHERE status = 'archived')::int AS archived,
+          count(*) FILTER (WHERE status = 'superseded')::int AS superseded,
+          count(*) FILTER (WHERE status = 'forgotten')::int AS forgotten,
+          count(*) FILTER (WHERE live AND NOT in_period)::int AS period_filtered,
+          count(*) FILTER (WHERE live AND in_period AND is_expired)::int AS expired_filtered,
+          count(*) FILTER (
+            WHERE live AND in_period AND is_not_yet_valid
+          )::int AS not_yet_valid_filtered,
+          -- Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。in_scope と同じ絞り
+          -- (status + period + validity) の上に載る = in_scope の部分集合であり、
+          -- archived/period/expired のように in_scope から除かれた件数ではない。
+          -- 被覆不変条件 (群カウントの総和 = totalInScope) は動かない。
+          count(*) FILTER (
+            WHERE live AND in_period AND is_valid AND is_decayed
+          )::int AS decayed_filtered
+        FROM flags
+        GROUP BY subject_id
       )
       SELECT
-        (
-          SELECT coalesce(json_agg(json_build_object('key', key, 'count', cnt)), '[]'::json)
-          FROM (
-            SELECT subject_id AS key, count(*)::int AS cnt
-            FROM scoped
-            WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
-            GROUP BY subject_id
-          ) g
+        -- 現物の groups と同じ集合（in_scope > 0 の subject のみ）。順序は契約ではない
+        -- （doc コメント「単一パス書き換え」節、旧実装も json_agg に ORDER BY を持たない）。
+        coalesce(
+          json_agg(json_build_object('key', subject_id, 'count', in_scope)) FILTER (WHERE in_scope > 0),
+          '[]'::json
         ) AS groups,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
-        )::int AS in_scope,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid} AND embedding_status = 'pending'
-        )::int AS not_indexed_pending,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid} AND embedding_status = 'failed'
-        )::int AS not_indexed_failed,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid} AND embedding_status = 'skipped'
-        )::int AS not_indexed_skipped,
-        count(*) FILTER (WHERE status = 'archived')::int AS archived,
-        count(*) FILTER (WHERE status = 'superseded')::int AS superseded,
-        count(*) FILTER (WHERE status = 'forgotten')::int AS forgotten,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND NOT (${inPeriod})
-        )::int AS period_filtered,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isExpired}
-        )::int AS expired_filtered,
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isNotYetValid}
-        )::int AS not_yet_valid_filtered,
-        -- Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。in_scope と同じ絞り
-        -- (status + period + validity) の上に載る = in_scope の部分集合であり、
-        -- archived/period/expired のように in_scope から除かれた件数ではない。
-        -- 被覆不変条件 (群カウントの総和 = totalInScope) は動かない。
-        count(*) FILTER (
-          WHERE status IN ('active', 'contested') AND ${inPeriod} AND ${isValid} AND ${isDecayed}
-        )::int AS decayed_filtered
+        -- 空テナント（agg が0行）でも NULL ではなく現物と同じ 0 を返す。
+        coalesce(sum(in_scope), 0)::int AS in_scope,
+        coalesce(sum(not_indexed_pending), 0)::int AS not_indexed_pending,
+        coalesce(sum(not_indexed_failed), 0)::int AS not_indexed_failed,
+        coalesce(sum(not_indexed_skipped), 0)::int AS not_indexed_skipped,
+        coalesce(sum(archived), 0)::int AS archived,
+        coalesce(sum(superseded), 0)::int AS superseded,
+        coalesce(sum(forgotten), 0)::int AS forgotten,
+        coalesce(sum(period_filtered), 0)::int AS period_filtered,
+        coalesce(sum(expired_filtered), 0)::int AS expired_filtered,
+        coalesce(sum(not_yet_valid_filtered), 0)::int AS not_yet_valid_filtered,
+        coalesce(sum(decayed_filtered), 0)::int AS decayed_filtered
         ${digestBandColumns}
-      FROM scoped
+      FROM agg
     `);
 
     const row = result.rows[0] as unknown as {

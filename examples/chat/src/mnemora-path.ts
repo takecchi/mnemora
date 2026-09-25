@@ -255,6 +255,45 @@ function recordedOrderSegment(
 }
 
 /**
+ * 行の並び順を「記録順」に揃える凡例（ADR 0309、Issue #691 の続き）。
+ *
+ * `sortMemoriesForDisplay` で行そのものを並べ替えたときにだけ、この1行を本文の
+ * 先頭へ足す——**`order-legend` という描画名で `examples/chat/src/answer-trials-render.ts`
+ * が測った候補と、一字一句同じ文字列**（同じ器で測った数値の裏付けを保つため、
+ * 2箇所に手で複製しない。あちらはこの定数を import する）。
+ */
+export const ORDER_LEGEND_LINE =
+  "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)";
+
+/**
+ * `recall.memories` を表示用に並べ替える（ADR 0309 が採用した `order-legend` 描画）。
+ *
+ * **`recordedAt` を持つ行（`order` に順位がある行）だけを昇順に並べ替える。**
+ * `recordedAt` が無い行（`order` に順位が無い行）は、並べ替えの対象にせず、
+ * 元の（`recall()` が返した、スコアによる）配列順のまま**末尾に**残す——
+ * 「無い」ものを先頭に回したり、他の値で埋めたりしない（欠落値を推測しない、
+ * Issue #691 完了条件1・ADR 0298 決定7と同じ規律）。
+ *
+ * ⚠ **`recall.memories` の元の並び（スコア降順、`docs/recall.md` §2）は、この並べ替えで
+ * 失われる。** `recordedOrderById`/`recordedOrderSegment` が付ける `[記録順:N]` タグは
+ * 元のスコア順を保ったまま添えるだけの注記だったが、この関数は行そのものの表示順序を
+ * 記録順へ差し替える——呼び出し側がスコア順を知りたい場合、この関数の出力からは
+ * 復元できない（`RecallResult.memories` 自体は変更していないので、`recall.memories`
+ * を直接見ればスコア順は残っている）。
+ */
+function sortMemoriesForDisplay(
+  all: readonly RecalledMemory[],
+  order: ReadonlyMap<string, number>,
+): RecalledMemory[] {
+  const withOrder = all.filter((m) => order.has(m.memoryId));
+  const withoutOrder = all.filter((m) => !order.has(m.memoryId));
+  const sortedWithOrder = [...withOrder].sort(
+    (a, b) => (order.get(a.memoryId) ?? 0) - (order.get(b.memoryId) ?? 0),
+  );
+  return [...sortedWithOrder, ...withoutOrder];
+}
+
+/**
  * 出来事時刻欄（Issue #691 の子、Issue #702、ADR 0298）。`occurredAt` は3値ある:
  * `undefined`（頼んでいない・欄を出さない）／`null`（頼んだが無かった・
  * `recordedAt` の値で埋めずに「不明」と明示する——`speaker` の `null` と同じ規律）／
@@ -300,14 +339,30 @@ function renderRecalledMemoryLine(
  * （`recall.usage.chars` をそのまま使う）とこの関数の出力文字数は、本 PR 以降
  * さらに乖離する——詳細と実測は `docs/recall.md` §6・`examples/chat/README.md`
  * 「`answer`」節・本変更の PR 本文を参照。
+ *
+ * **2026-09（ADR 0309、`order-legend` 描画）**: 行の並びを `recordedAt` の昇順
+ * （`sortMemoriesForDisplay`）へ差し替え、少なくとも1行が `[記録順:N]` を持つとき
+ * （＝ `order.size > 0`）だけ、本文の先頭に {@link ORDER_LEGEND_LINE} を1行足す。
+ * 記録順が1つも無い（`recordedAt` を誰も渡していない）呼び出しでは、並べ替えも
+ * 凡例も出さない——「並べてある」という文言を、並べ替えていないのに出さないため
+ * （n=15 の実測でこの描画（`schedule-change-meeting-day` 13/15）が、由来等の
+ * タグを保ったまま記録順だけ生ISOから並べ替え+凡例に変えた3候補中で最も高かった
+ * ことが根拠。ADR 0309 を参照。他候補・数値はそちらに集約し、ここには複製しない）。
+ *
+ * ⚠ **`recall.memories` の元のスコア順は、この並べ替えで失われる**
+ * （`sortMemoriesForDisplay` の doc を参照）。この関数の**出力文字列**からは
+ * 元のスコア順を復元できない——スコア順が要る呼び出し側は `recall.memories` を
+ * 直接見ること。
  */
 export function buildMnemoraPrompt(recall: RecallResult): string {
   const order = recordedOrderById(recall.memories);
-  const digestLines = recall.memories
+  const displayOrder = sortMemoriesForDisplay(recall.memories, order);
+  const digestLines = displayOrder
     .map((m) => renderRecalledMemoryLine(m, recall.memories, order))
     .join("\n");
   const indexLine = `(索引: スコープ内 ${recall.index.totalInScope} 件のうち ${recall.memories.length} 件を提示)`;
-  return [digestLines, indexLine].filter((s) => s.length > 0).join("\n");
+  const legendLine = order.size > 0 ? ORDER_LEGEND_LINE : "";
+  return [legendLine, digestLines, indexLine].filter((s) => s.length > 0).join("\n");
 }
 
 /**
