@@ -270,7 +270,7 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   対する HNSW 索引: "up to 2,000 dimensions"）と、手元の pgvector 0.8.0 に対する実測の
   両方で裏取りしている
   （[Issue #776](https://github.com/takecchi/mnemora/issues/776) /
-  ADR 0018 追記、PR #<PR_NUMBER>）。
+  ADR 0018 追記、PR #777）。
   ⭕ **公開型は変えていない**——新しいエラークラスは足さず、既存の dimensions バリデーション
   （`Number.isInteger(dimensions) && dimensions > 0`）と同じ流儀（`Error`）で拒否する。
   `dimensions <= 2000` の既存呼び出しの挙動は無変更。
