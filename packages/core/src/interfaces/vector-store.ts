@@ -1,3 +1,4 @@
+import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { MemoryId } from "../ids.js";
@@ -160,6 +161,13 @@ export interface VectorFilter {
    * （落ちる行）が少数であり、btree/部分索引でも計画が改善しない。
    */
   validAt?: Date;
+  /**
+   * **AND 等値の絞り込み**（Issue #152/#153、ADR 0312）。`RecallScope.attributes`/
+   * `RecallQuery.attributes` の doc コメント参照。`jsonb` の containment（`@>`）に
+   * 落ちる形——渡したキーすべてが、その Memory の `attributes` に同じ値で存在する
+   * 場合だけ通す。**未指定・空オブジェクトは no-op**（絞り込み無し）。
+   */
+  attributes?: Attributes;
 }
 
 /** `VectorStore.getVectors` が返す1件。 */

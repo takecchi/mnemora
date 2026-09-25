@@ -139,6 +139,7 @@ describeVectorStoreConformance({
         ...(attrs?.recordedAt !== undefined ? { recordedAt: attrs.recordedAt } : {}),
         ...(attrs?.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
         ...(attrs?.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
+        ...(attrs?.attributes !== undefined ? { attributes: attrs.attributes } : {}),
       }),
     );
     return memory.id;
@@ -187,6 +188,7 @@ describeLexicalStoreConformance({
         ...(attrs.recordedAt !== undefined ? { recordedAt: attrs.recordedAt } : {}),
         ...(attrs.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
         ...(attrs.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
+        ...(attrs.attributes !== undefined ? { attributes: attrs.attributes } : {}),
       }),
     );
     return memory.id;

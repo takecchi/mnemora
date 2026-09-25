@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { Ctx } from "../ctx.js";
+import { intersectAttributes } from "./consolidate.js";
 import { resolveDigest } from "../extraction.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
@@ -104,6 +105,7 @@ export interface BuildReflectedMemoryParams {
  * - `digest`: LLM が返した digest が空・欠落なら機械的フォールバックへ倒す
  *   （`resolveDigest`、extraction.ts / consolidate.ts と同じ安全弁）。
  * - `tags`: LLM が返した `tags` があればそれを使い、無ければ eligible の `tags` の和集合。
+ * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0312 決定4）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
  * - `halfLifeHours` / `decayFloorAt`: 呼び出し側（`runtime.reflect`）がテナント既定値から
  *   計算して渡す。`decayFloorAt` は `strength: 1` を前提に計算する（`consolidate` と同じ）。
@@ -170,6 +172,13 @@ export function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMem
     digestSource,
     provenance: { kind: "reflected", sources: eligible.map((m) => m.id) },
     tags,
+    // Issue #153（ADR 0312 決定4）: `consolidate` と同じ判断——積集合。
+    // `intersectAttributes` は `strategies/consolidate.ts` と共有する（`reflect`/
+    // `consolidate` は「複数の既存 Memory から新しい Memory を組み立てる」という
+    // 同じ形の操作であり、`attributes` の引き継ぎ方をこの2経路で意図的に揃えた
+    // ——本 PR の判断。同じ「似ている」の判定を発明しないのと同じ理由で、同じ
+    // 「積集合」の判定も1箇所に置く）。
+    attributes: intersectAttributes(eligible),
     occurredAt,
     recordedAt: now,
     lastReinforcedAt: null,

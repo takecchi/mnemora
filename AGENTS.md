@@ -96,9 +96,9 @@ ADR 0279）。**branch protection の設定が変わったかもしれないと�
 | `deterministic` | 意味を持たない stub（文字コードからベクトルを作る／発話を40字で切る） | 配線・契約・適合テスト |
 | `recorded` | 記録した実 API の応答の再生。**記録に無い入力は例外** | 北極星の物差し（`retrieval` / `compare`） |
 | `openai` | 実 API | 記録を録るとき・乖離を測るとき |
-| `local` | 外部サービスに繋がない、プロセス内 ONNX 推論（`@mnemora/local-embedding`、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)）。**擬似物ではなく実推論**。⚠ **embedding 専用——LLM 側に `local` は無い**（`examples/chat/src/providers.ts` の `ProviderMode`） | CI の `identifier-probes` / `consolidation-cost` / `archive-sweep-cost`（3ジョブとも `MNEMORA_EMBEDDING=local` を固定で使う） |
+| `local` | 外部サービスに繋がない、プロセス内 ONNX 推論（`@mnemora/local-embedding`、[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)）。**擬似物ではなく実推論**。⚠ **embedding 専用——LLM 側に `local` は無い**（`examples/chat/src/providers.ts` の `ProviderMode`） | CI の `identifier-probes` / `numeral-token-probes` / `consolidation-cost` / `archive-sweep-cost`（4ジョブとも `MNEMORA_EMBEDDING=local` を固定で使う） |
 
-**⚠ 上の3ジョブ（`identifier-probes` / `consolidation-cost` / `archive-sweep-cost`）の数字を
+**⚠ 上の4ジョブ（`identifier-probes` / `numeral-token-probes` / `consolidation-cost` / `archive-sweep-cost`）の数字を
 `deterministic` の行に当てはめないこと。**`local` は本物の ONNX 推論であり、
 「性能について何も言っていない」という次段の警告は `deterministic` にだけ掛かる。
 
