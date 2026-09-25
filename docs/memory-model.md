@@ -1170,6 +1170,8 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
 
 ⟹ 回収の経路を入れるか、入れるならどの形にするかは、[Issue #567](https://github.com/takecchi/mnemora/issues/567) が持っている（復旧口と一緒に設計する必要がある）。⚠ **この追記はクローン（miku）の判断で、オーナー本人の決定ではない**（[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。この節の前提（掃引の絞り、部分索引、段5 の数え方、`DELETE` が無いこと）は、`scripts/__tests__/memory-model-superseded-accumulation-premises.test.mjs` が現物に当てて縛っている。
 
+**⟹ 上の問い（回収の経路を入れるか）は [ADR 0303](./decisions/0303-superseded-contested-decay-floor-owner.md) が決着させた——`superseded`/`contested` それぞれの `decay_floor_at` の持ち主を現物で洗い出したうえで、v1.x では入れないと判断している（Issue #567 は開いたまま）。**
+
 ---
 
 ## 確かめていないこと（本書内で参照した範囲の一覧）
