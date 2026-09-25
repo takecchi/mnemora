@@ -195,6 +195,15 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   0/4→4/4 に改善したが、誤検出も1/14→3〜4/14 に増える副作用が実測された
   （[Issue #691](https://github.com/takecchi/mnemora/issues/691) /
   [ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md)、PR #750）。
+- **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
+  同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
+  `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
+  （`companionOf` の意味は無変更）。相手が budget 切り詰め後の最終的な結果集合に
+  含まれるときだけ付く（オーナーの決定、ask_human 327fd89b /
+  [Issue #691](https://github.com/takecchi/mnemora/issues/691) /
+  [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #TBD）。
+  ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
+  （ADR 0335「引き受けた負債」参照）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

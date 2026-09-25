@@ -2067,6 +2067,7 @@ export interface RecalledMemory {
     digest: string;
     retrievedVia: "ann" | "lexical" | "mandatory_companion" | "association";
     companionOf?: MemoryId;
+    contestedWith?: MemoryId;
     associationOf?: MemoryId;
     provenanceKind: ProvenanceKind;
     score: ScoreBreakdown;
@@ -2086,6 +2087,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
         mandatory_companion: "mandatory_companion";
     }>;
     companionOf: z.ZodOptional<z.ZodString>;
+    contestedWith: z.ZodOptional<z.ZodString>;
     associationOf: z.ZodOptional<z.ZodString>;
     provenanceKind: z.ZodEnum<{
         stated: "stated";
@@ -2289,6 +2291,7 @@ export declare const RecallResultSchema: z.ZodObject<{
             mandatory_companion: "mandatory_companion";
         }>;
         companionOf: z.ZodOptional<z.ZodString>;
+        contestedWith: z.ZodOptional<z.ZodString>;
         associationOf: z.ZodOptional<z.ZodString>;
         provenanceKind: z.ZodEnum<{
             stated: "stated";

@@ -40,6 +40,16 @@ import type { RecalledMemory } from "@mnemora/core";
  * 5. 相手が `recall.memories` に見つからない（budget 等で対になるはずの片方だけが
  *    渡された、想定外の入力）場合は、本文を**捏造しない**——`memoryId` と
  *    「本文未取得」という印だけを出す。
+ * 5'. 🔴 **`contestedWith`（Issue #691 続き、[ADR 0335](../../../../docs/decisions/0335-recalled-memory-contested-with.md)）
+ *    も同じ矛盾候補欄に合流する。** `companionOf`（`retrievedVia: "mandatory_companion"`
+ *    のときだけ在る）だけでは、矛盾する2件が同伴取得を経由せず `"ann"`/`"lexical"` で
+ *    自然に両方とも候補に入ったケースに印を出す手段が無かった（`recall-runtime.ts` の
+ *    段3、`docs/recall.md` §8）。`contestedWith` は取得経路を問わず、相手が同じ
+ *    recall 結果に含まれるときだけ core 側が付ける——`buildMnemoraPrompt` 側は
+ *    `companionOf` と同じ描画（相手の digest を埋め込む・見つからなければ
+ *    「本文未取得」）をそのまま再利用する。**欄が無ければ**（非 contested、または
+ *    contested でも相手が最終的な結果集合に含まれず core がこの欄を書かなかった場合）
+ *    印を出さない。
  *
  * ## `recordedAt`/`occurredAt`（Issue #691 の子、Issue #702、ADR 0298）
  *
@@ -110,6 +120,14 @@ import type { RecalledMemory } from "@mnemora/core";
  * の行順が入れ替わった分）。この5件の `expectedLines`/`expectedLegend` を新しい
  * 出力に合わせて更新した——**由来・話者・主題・矛盾関係だけを見る既存9件
  * （recordedAt を渡していない）は無関係のまま緑だった。**
+ *
+ * **2026-09（Issue #691 続き、ADR 0335、`contestedWith` を足す回）**: 末尾3件
+ * （`contested-with-*`）を追加した時点では、`buildMnemoraPrompt`/
+ * `contradictionCounterpartIds` はまだ `RecalledMemory.contestedWith` を読まないので、
+ * このうち印が出ることを期待する2件（`contested-with-natural-pair`・
+ * `contested-with-partner-missing`）だけが赤くなることが期待される
+ * （`contested-with-absent-no-mark` は元々印が出ない期待なので、実装前後どちらでも緑）。
+ * 既存14件（`temporal-*` を含む）は無関係のまま緑のはずである。
  */
 
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
@@ -529,5 +547,79 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       "- [由来:stated] [話者:太郎] [主題:user-1] 記録順を持たない行（配列では先頭）",
     ],
     expectedLegend: true,
+  },
+  {
+    id: "contested-with-natural-pair",
+    description:
+      "対向記憶（矛盾関係、contestedWith）: companionOf/mandatory_companion を経由せず、" +
+      "両方とも ann で自然に候補に入った場合も、両側に対称な矛盾候補印を出す" +
+      "（Issue #691 続き、ADR 0335）",
+    memories: [
+      {
+        memoryId: "m-natural-a",
+        digest: "休みは月曜",
+        retrievedVia: "ann",
+        contestedWith: "m-natural-b",
+        provenanceKind: "stated",
+        speaker: "太郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+      {
+        memoryId: "m-natural-b",
+        digest: "休みは火曜",
+        retrievedVia: "ann",
+        contestedWith: "m-natural-a",
+        provenanceKind: "stated",
+        speaker: "次郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:太郎] [主題:user-1] [矛盾候補:「休みは火曜」] 休みは月曜",
+      "- [由来:stated] [話者:次郎] [主題:user-1] [矛盾候補:「休みは月曜」] 休みは火曜",
+    ],
+  },
+  {
+    id: "contested-with-partner-missing",
+    description:
+      "contestedWith の相手が recall.memories に見つからない（core の契約上は本来起きないが、" +
+      "companion-counterpart-missing と同じく描画関数自身の防御を見る）: 本文を捏造せず、" +
+      "id と「本文未取得」を出す",
+    memories: [
+      {
+        memoryId: "m-contested-with-dangling",
+        digest: "矛盾する主張（contestedWith版）",
+        retrievedVia: "ann",
+        contestedWith: "m-cw-missing",
+        provenanceKind: "stated",
+        speaker: "四郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:四郎] [主題:user-1] [矛盾候補:memoryId=m-cw-missing（本文未取得）] 矛盾する主張（contestedWith版）",
+    ],
+  },
+  {
+    id: "contested-with-absent-no-mark",
+    description:
+      "contestedWith 欄が無い場合（非 contested、または contested でも相手が recall 結果に" +
+      "含まれず core がこの欄を書かなかった場合のどちらか——RecalledMemory 単体では" +
+      "区別できない）は矛盾候補の印を出さない",
+    memories: [
+      {
+        memoryId: "m-no-contested-with",
+        digest: "矛盾の印が無い記憶",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "五郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: ["- [由来:stated] [話者:五郎] [主題:user-1] 矛盾の印が無い記憶"],
   },
 ];
