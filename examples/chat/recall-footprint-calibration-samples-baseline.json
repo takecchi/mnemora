@@ -1,15 +1,15 @@
 {
-  "_readme": "Issue #340 案3(comment 5822837148 §4)向けの recall-footprint 較正の補助標本。⚠ これは examples/chat/compare-baseline.json とは別物であり、ADR 0119/0121/0133 が compare-baseline.json に課す『基準値はCI artifactからだけ作る、手元では書かない』という規律の対象では *ない* — compare-baseline.json 自身は1バイトも変更していない(rows/rowCount/schemaVersion とも既存のまま)。ここは compare-baseline.json の下位互換の hold-in 代替でも拡張でもなく、examples/chat/src/recall-footprint-calibration-samples.ts の CALIBRATION_SAMPLE_DESIGN(hold-outの推定誤差を見る前に固定した設計)を、ローカルの recorded カセット(examples/chat/cassettes/compare.json)+ ローカル Postgres に対して実行した記録である。correction-case-set.dev.ts の『dev(held-outではない、調整用)』という位置づけと同じ意味で、この rows は較正への追加投入の *候補* であり、compare-baseline.json のような ⭐ 門(CIの2回一致・PRのCI runからの取得)を経ていない。この値を recall-footprint-baseline.test.ts の ACCURACY_TOLERANCE/FLOOR_CHARS の歯や BUILTIN_RECALL_FOOTPRINT_PROFILE に反映するかどうかは、CI(example-chat job)でのバイト単位の再実測を経てから決めること — 手順は examples/chat/README.md の compare-baseline.json 節に倣う。",
+  "_readme": "recall-footprint(packages/core)較正の補助標本(8点、CALIBRATION_SAMPLE_DESIGN、examples/chat/src/recall-footprint-calibration-samples.ts)の基準値。examples/chat/compare-baseline.json と同じ考え方(『基準値をCI artifactからだけ作る、手元では書かない』ADR 0119/0121/0133)を踏襲しているが、⭐門ではない——このファイル単独では何も落とさない(recall-footprint-baseline.test.ts が読み、compare-baseline.jsonのhold-in 7行と合わせて15点の較正標本として使う。ADR 0306/0310)。この rows は compare.ts の DEFAULT_COMPARE_SEQUENCE には無い fillerPairs 値・limit=20 で recall() を実行した記録であり、生の RecallResult.index(rawIndex)まで含む。⚠ ADR 0310 決定2は当初このファイルをCI-sourcingできる経路が無いとして .dev.json 止まりにしていたが、その後 example-chat ジョブに独立ステップ(recall-footprint-calibration-samples)が配線され(examples/chat/README.md「CI artifact recall-footprint-calibration-samples」節)、このファイルはその artifact をそのまま写して新設した——README が予告していた「基準値へ昇格させる手順」を実行したもの。.dev.json(ローカル2回一致のみ、CI未経由)はこのファイルに役割を譲り、削除した——理由・経緯は git log と ADR 0310 訂正節を見よ。更新手順は examples/chat/README.md『CI artifact recall-footprint-calibration-samples』節。",
   "schemaVersion": 1,
   "provenance": {
-    "how": "examples/chat/src/recall-footprint-calibration-samples.ts の generateCalibrationSamples() を、ローカルの recorded provider(MNEMORA_LLM=recorded, MNEMORA_EMBEDDING=recorded, examples/chat/cassettes/compare.json 再生)+ ローカル Postgres 17 + pgvector に対して実行した。実 API は一度も叩いていない(RecordedEmbeddingProvider/RecordedLLMProviderはカセットに無い入力で例外を投げる設計であり、生成中に一度も例外が出なかったことを実測で確認した)。",
-    "reproducedLocally": true,
-    "localRunsMatched": 2,
-    "note": "同じ設計を2回、独立に ingest(毎回新しい tenantId)して実行し、measuredAt を除いて rows がバイト単位で一致した。⚠ これは compare-baseline.json の更新手順(README『2回以上のCI run』)が要求する『同一commitのCI再実行2回』とは異なる— 同じマシン・同じプロセスでの2回の再実行であり、CI環境間の非決定性(例: ADR 0170が見つけたORDER BY起因の非決定)は検出できない。",
-    "llmMode": "recorded",
-    "embeddingMode": "recorded",
+    "commit": "deecbd5f20ffeeb2454522a66b20e34c690795c7",
+    "measuredAt": "2026-09-25T03:41:00.853Z",
+    "ciJob": "example-chat(pgvector/pgvector:pg17 の service container 上、PR #728 の CI run 36090652846。attempt 1 = Artifact ID 10845602321 / attempt 2 = Artifact ID 10846036078)",
+    "providers": "llmMode=recorded / embeddingMode=recorded(examples/chat/cassettes/compare.json の再生)。",
+    "repeatRuns": 2,
     "designDecidedBeforeSeeingHoldOutErrors": true,
-    "measuredAt": "2026-09-25T02:07:51.391Z"
+    "how": "gh run download / gh api で、この PR(#728, Issue #340 フォローアップ)自身の CI(example-chat ジョブ、run 36090652846)が生成した artifact recall-footprint-calibration-samples を取得し、node で読み込んで llmMode/embeddingMode/rowCount/rows/designDecidedBeforeSeeingHoldOutErrors をそのまま複製した(compare-baseline.json と同じ手順)。⛔ 手で数値を書いた欄は無い。⚠ 上の commit は pull_request の CI が checkout するマージプレビュー(refs/pull/728/merge)の sha であり、PR ブランチの head(1b94f8a642bea9b87dc3730b4d7481fb56667d2d)そのものではない。",
+    "note": "採る前に2回一致を確かめた: 同一 commit(deecbd5f、refs/pull/728/merge)で example-chat ジョブを2回実行し、artifact ID 直指定(10845602321 / 10846036078)で取得したところ、measuredAt(2026-09-25T03:34:13.049Z / T03:41:00.853Z)を除いて全欄(rawIndexを含む)がバイト単位で一致した(node で JSON.stringify した rows 配列をdiff)。⟹ この8点は examples/chat/recall-footprint-calibration-samples.dev.json (ローカルのみで2回一致を確認していた記録)と rows が1バイトも違わない——ローカル実行とCI実行が同じ設計・同じカセットで同じ結果を返すことも、この一致で確認できた。"
   },
   "rowCount": 8,
   "rows": [

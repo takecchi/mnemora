@@ -435,51 +435,39 @@ ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化
 （[ADR 0231](../../docs/decisions/0231-compare-baseline-omitted-measured-update-and-freshness.md)）。⛔ **これは門ではない**——ジョブは落ちない。
 **古いことに気づかせるためだけに在る。**
 
-### `recall-footprint-calibration-samples.dev.json`: `compare-baseline.json` とは別物（Issue #340）
+### `recall-footprint-calibration-samples-baseline.json`: CI-sourced な較正の補助標本（Issue #340）
 
-`recall-footprint`（`packages/core`）の較正標本を増やす目的の**補助ファイル**。
-`examples/chat/src/recall-footprint-calibration-samples.ts` の `generateCalibrationSamples()`
-をローカルの `recorded` provider（`compare` と同じカセット）に対して実行した記録であり、
-**`compare-baseline.json` のような CI-sourcing の門（上の「基準値を更新する手順」・
-ADR 0119/0121/0133）を経ていない**——ファイル自身の `_readme`/`provenance` がそれを名乗る。
-検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`。詳細と、
-`compare-baseline.json` へ昇格させる条件は
-[ADR 0310](../../docs/decisions/0310-recall-footprint-calibration-samples-need-ci-sourcing.md)。
+`recall-footprint`（`packages/core`）の較正標本を増やす目的の**補助ファイル**（8点）。
+`examples/chat/src/recall-footprint-calibration-samples.ts` の `CALIBRATION_SAMPLE_DESIGN`
+（`fillerPairs`/`limit=20` の8点）を `example-chat` ジョブが実行し、`compare` ステップと
+並ぶ独立のステップでアップロードした artifact `recall-footprint-calibration-samples`
+（`.github/workflows/ci.yml`、`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON`）を、
+`compare-baseline.json` と**同じ CI-sourcing の門**（上の「基準値を更新する手順」・
+ADR 0119/0121/0133・2回以上の run の一致）を経て `_readme`/`provenance` 付きで
+コミットしたもの。`rawIndex`（生の `IndexBand`）まで含む。**`compare-baseline.json` の
+`rows` には混ぜない**——`rowCount`/12行を前提にした既存の歯・この README の表を
+壊さないための別ファイルのままである（ADR 0310 §2 の「別ファイル」方針を維持）。
 
-#### CI artifact `recall-footprint-calibration-samples`（Issue #340 フォローアップ）
+検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`（設計どおりに
+生成されていることの整合性検査）と `src/__tests__/recall-footprint-baseline.test.ts`
+（この8点を `compare-baseline.json` の hold-in 7行と合わせて15点の較正標本として使う、
+⭐門本体）。詳細・経緯は
+[ADR 0310](../../docs/decisions/0310-recall-footprint-calibration-samples-need-ci-sourcing.md)
+（当初は CI 経路が無く `.dev.json` 止まりだったこと、その後 CI 配線がこの artifact を
+生んだこと、構造項の二重計上を直した [ADR 0306](../../docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md)）。
 
-`.dev.json` はこの作業者が CI を持てなかった時点の記録である。**`example-chat` ジョブは
-これとは別に、`compare` ステップと並ぶ独立のステップで `recall-footprint-calibration-samples`
-サブコマンドを実行し、`recall-footprint-calibration-samples.json` を artifact として
-アップロードする**（`.github/workflows/ci.yml`、`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON`）。
-この artifact は `.dev.json` と同じ `CALIBRATION_SAMPLE_DESIGN`（8点）から生成され、
-`rawIndex`（生の `IndexBand`）まで含む。**`compare-baseline.json` の `rows` には混ぜない**
-——ADR 0310 §2 が決めた「別ファイル」の方針を、CI-sourcing できる形にしただけである
-（`rowCount`/12行を前提にした既存の歯・この README の表が壊れないようにするため）。
+⚠ **この artifact 自身の Job Summary への要約**（`scripts/recall-footprint-calibration-samples-summary.mjs`）
+は `compare-summary.mjs` と違い**非ゲート**（相違があっても exit 0）のままである——
+CI が生成するのは生の artifact までで、基準値ファイルへの反映は上記の通り人が
+2回一致を確かめてから行う（`compare-baseline.json` と同じ規律、CIはこのファイルを
+自動更新しない）。
 
-⚠ **この artifact 自身はまだ⭐門でも基準値でもない。**Job Summary への要約
-（`scripts/recall-footprint-calibration-samples-summary.mjs`）は
-`compare-summary.mjs` と違い**非ゲート**（相違があっても exit 0）——この bench が
-CI で複数回一致することを、まだ実測していないため（ADR 0133 が `compare` について
-行った再現性の実測を、この bench ではまだ行っていない）。
-
-**基準値へ昇格させる手順**（ADR 0121/0133 と同じ形。CI を2回以上走らせられる担い手が行う）:
-
-1. `gh run list --branch <branch> --json databaseId,headSha,conclusion` で
-   成功した run を確認する。
-2. `gh run download <run-id> -n recall-footprint-calibration-samples -D <dir>` で
-   artifact を取得する。同一 commit で `example-chat` ジョブを2回目実行
-   （`gh run rerun <run-id> --job <job-id>`）し、`measuredAt` を除いて `rows` が
-   バイト単位で一致することを確認する。
-3. 一致したら、`examples/chat/recall-footprint-calibration-samples-baseline.json`
-   （まだ存在しない——このステップで新設する）へ、artifact を**プログラムで**
-   読み込んで書き出す。手で数値を打たない。`_readme`/`provenance`
-   （`commit`/`measuredAt`/`ciJob`/`repeatRuns`）を足す。
-4. `examples/chat/src/__tests__/recall-footprint-calibration-samples.test.ts` の
-   `devSamples`（`.dev.json` を読む変数）を、新設した baseline ファイルを読むように
-   差し替える（または並置する）かは、そのときの担い手が判断する——`.dev.json` は
-   CI-sourced の baseline ができた時点で役目を終える（ローカル環境で「実 API を
-   叩かずに作れる」ことを示した記録としての価値だけが残る）。
+🔴 **`recall-footprint-calibration-samples.dev.json` は削除した（2026-09-25、Issue #340
+フォローアップ）。**この artifact が `.dev.json` と rows が1バイトも違わないことを確認した
+うえで、CI-sourced な本ファイルへ役割を一本化した——`.dev.json` が示していた「実 API を
+叩かずに作れる」という事実は ADR 0310 に記録として残っており、ファイル自体を残す理由は
+無くなった。`recall-footprint-calibration-samples.test.ts` の `devSamples` は、この
+baseline ファイルを読むように差し替えてある。
 
 ### `--decay-clock`: 減衰の時計を選ぶ（[ADR 0165](../../docs/decisions/0165-decay-activity-clock.md)）
 
