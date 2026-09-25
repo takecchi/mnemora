@@ -5,8 +5,8 @@
  * [Issue #337](https://github.com/takecchi/mnemora/issues/337)「連想枠（段3.5、ADR 0151）を
  * 既定 on にするかを10万行級で測ってから判断する」の測定本体（段1: 62件の陽性対照 +
  * 1万行、段2: 10万行の配置(A)/(B)、反復(R)）。**測ったことの全体像・オーナーが判断する
- * ための材料は [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md)
- * にまとめてある——このファイルは道具、ADR 0328 が記録。**
+ * ための材料は [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md)
+ * にまとめてある——このファイルは道具、ADR 0332 が記録。**
  *
  * ## これは何を測るか
  *
@@ -57,7 +57,7 @@
  *   純粋比較にはならない**——`memory_id`（ingest のたびにランダムな UUID）・
  *   `recorded_at`（wall-clock）が arm ごとに違い、pgvector の同点 tie-break や
  *   HNSW 索引構築の非決定性を経由して、`maxCount` 以外の要因が結果に混ざりうる
- *   （ADR 0328 実測、10万行では確認できなかったが1万行で確認された）。
+ *   （ADR 0332 実測、10万行では確認できなかったが1万行で確認された）。
  * - **(B) 「4 arm を4テナントとして同じ表に並べる」**（[#363 の閉じコメント](https://github.com/takecchi/mnemora/issues/363#issuecomment-5806513012)・
  *   #671「同じベクトル・relaxed_order」の確認用、`MNEMORA_ASSOC_SCALE_MODE=B`）:
  *   `runModeB()`。(A) と同じく4テナントはそれぞれ独立 ingest——`maxCount` の純粋比較
@@ -69,7 +69,7 @@
  *   段3.5DBms・EXPLAIN・ビット同一性）に載せて再実装したもの。
  *
  * 測った結果・(A)/(B)/(R) の食い違いから何が言えるか・言えないかは
- * [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md) 参照。
+ * [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md) 参照。
  *
  * ## 実行方法
  *
@@ -435,10 +435,7 @@ async function ingestCorpus(
 
 /** pgvector のテキスト表現("[1,2,3]")を `number[]` にパースする(`vector-store.ts` の逆変換と同じ形)。 */
 function parseVectorLiteral(literal: string): number[] {
-  return literal
-    .slice(1, -1)
-    .split(",")
-    .map(Number);
+  return literal.slice(1, -1).split(",").map(Number);
 }
 
 /**
@@ -645,9 +642,7 @@ async function measureProbeArm(
   );
   const getVectorsCalls = handle.spy.calls.filter((c) => c.kind === "getVectors");
   const dActualAnchor =
-    arm.association === undefined
-      ? null
-      : (getVectorsCalls[0]?.memoryIds ?? []).includes(anchorId);
+    arm.association === undefined ? null : (getVectorsCalls[0]?.memoryIds ?? []).includes(anchorId);
 
   const goldRank = indexOfMemory(result.memories, goldId);
   const goldMemory = goldRank === null ? null : result.memories[goldRank - 1]!;
@@ -727,7 +722,9 @@ async function measureArmAtEf(
 }
 
 async function cachedVectorOrThrow(handle: InstrumentedHandle, text: string): Promise<number[]> {
-  const vectors = await handle.cachingEmbeddingProvider.embed({ tenantId: "explain-probe" }, [text]);
+  const vectors = await handle.cachingEmbeddingProvider.embed({ tenantId: "explain-probe" }, [
+    text,
+  ]);
   return vectors[0]!;
 }
 
@@ -741,11 +738,10 @@ async function runScale(
   realEmbeddingForPrecompute: EmbeddingProvider,
 ): Promise<ScaleReport> {
   const corpus = buildCorpus(scale);
-  const allTexts = [
-    ...corpus.base.map((u) => u.text),
-    ...corpus.filler.map((f) => f.text),
-  ];
-  console.log(`\n=== scale=${scale}: 埋め込みキャッシュを埋める(${allTexts.length}件、重複除去後) ===`);
+  const allTexts = [...corpus.base.map((u) => u.text), ...corpus.filler.map((f) => f.text)];
+  console.log(
+    `\n=== scale=${scale}: 埋め込みキャッシュを埋める(${allTexts.length}件、重複除去後) ===`,
+  );
   const precompute = await precomputeEmbeddingCache(realEmbeddingForPrecompute, cache, allTexts, {
     batchSize: parseIntEnv("MNEMORA_ASSOC_SCALE_EMBED_BATCH", 64),
     concurrency: parseIntEnv("MNEMORA_ASSOC_SCALE_EMBED_CONCURRENCY", 1),
@@ -823,7 +819,7 @@ async function runScale(
  * tie-break・索引選択が (A) と違わないかを確かめるための器。
  *
  * Issue #337 段2で10万行×4テナント(計40万行)を実際に走らせた。結果は
- * [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md) 参照
+ * [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md) 参照
  * ——`Rows Removed by Filter` が実測でき、ADR 0284 の `relaxed_order` が
  * 他テナント混入を飛び越えて自テナントの候補で `LIMIT` を埋めていることを確認した。
  */
@@ -838,7 +834,12 @@ async function runModeB(
 ): Promise<ScaleReport> {
   const corpus = buildCorpus(scale);
   const allTexts = [...corpus.base.map((u) => u.text), ...corpus.filler.map((f) => f.text)];
-  const precompute = await precomputeEmbeddingCache(realEmbeddingForPrecompute, cache, allTexts, {});
+  const precompute = await precomputeEmbeddingCache(
+    realEmbeddingForPrecompute,
+    cache,
+    allTexts,
+    {},
+  );
 
   const arms = buildArms();
   const armReports: ArmScaleReport[] = [];
@@ -896,7 +897,7 @@ async function runModeB(
 
 // ---------------------------------------------------------------------------
 // (R) 反復 — 単一 ingest に対して maxCount(off/on-3/on-5/on-10) だけを振る。
-// ADR 0328 §d が要求する「独立 ingest 間の揺れ」のサンプルをもう1つ取るための
+// ADR 0332 §d が要求する「独立 ingest 間の揺れ」のサンプルをもう1つ取るための
 // mode（Issue #337 段2フォローアップ、マネージャー指示）。`association-scale
 // -investigate.ts` の「単一 ingest」設計を、本ベンチの計測一式
 // （memoryChars・レイテンシ・段3.5DBms・EXPLAIN・ビット同一性）に載せ替えたもの
@@ -966,7 +967,12 @@ async function runModeR(
   const bitHashByArm: Record<string, string> = {};
   for (const arm of arms) bitHashByArm[arm.label] = hash;
 
-  return { scale, precompute, arms: armReports, bitIdentity: { byArm: bitHashByArm, allSame: true } };
+  return {
+    scale,
+    precompute,
+    arms: armReports,
+    bitIdentity: { byArm: bitHashByArm, allSame: true },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -986,7 +992,9 @@ function summarizeScale(report: ScaleReport): string {
   for (const efIndex of report.arms[0]?.efReports.map((_, i) => i) ?? []) {
     const ef = report.arms[0]!.efReports[efIndex]!.ef;
     lines.push(`\n#### scale=${report.scale} ef_search=${ef}`);
-    lines.push("| arm | goldReturned | memoryCharsTotal | ΔmemoryChars% | latency中央値ms | Δlatencyms | 段3.5DBms |");
+    lines.push(
+      "| arm | goldReturned | memoryCharsTotal | ΔmemoryChars% | latency中央値ms | Δlatencyms | 段3.5DBms |",
+    );
     lines.push("|---|---|---|---|---|---|---|");
     const offEf = offArm?.efReports[efIndex];
     const offMemoryChars = offEf ? offEf.probes.reduce((s, p) => s + p.memoryChars, 0) : 0;
@@ -996,7 +1004,9 @@ function summarizeScale(report: ScaleReport): string {
       const goldCount = efReport.probes.filter((p) => p.goldReturned).length;
       const memoryChars = efReport.probes.reduce((s, p) => s + p.memoryChars, 0);
       const deltaPct =
-        offMemoryChars > 0 ? (((memoryChars - offMemoryChars) / offMemoryChars) * 100).toFixed(2) : "n/a";
+        offMemoryChars > 0
+          ? (((memoryChars - offMemoryChars) / offMemoryChars) * 100).toFixed(2)
+          : "n/a";
       const latency = median(efReport.probes.map((p) => p.latencyMedianMs));
       const deltaLatency = (latency - offLatency).toFixed(2);
       const stage35 = median(efReport.probes.map((p) => p.stage3_5DbMs)).toFixed(2);
@@ -1009,7 +1019,9 @@ function summarizeScale(report: ScaleReport): string {
     if (offEf) {
       const aCount = offEf.probes.filter((p) => p.aRawAnchor).length;
       const cCount = offEf.probes.filter((p) => p.cWithinLimitAnchor).length;
-      lines.push(`(a)raw=${aCount}/${ASSOCIATION_PROBES.length} (c)withinLimit相当=${cCount}/${ASSOCIATION_PROBES.length}`);
+      lines.push(
+        `(a)raw=${aCount}/${ASSOCIATION_PROBES.length} (c)withinLimit相当=${cCount}/${ASSOCIATION_PROBES.length}`,
+      );
     }
     lines.push("\nEXPLAIN の HNSW ヒューリスティック(offのみ抜粋):");
     if (offEf) {
@@ -1027,11 +1039,14 @@ async function main(): Promise<void> {
   const scales = parseIntListEnv("MNEMORA_ASSOC_SCALE_SCALES", [62, 10000]);
   const efLevels = parseIntListEnv("MNEMORA_ASSOC_SCALE_EF_SEARCH", [40, 120]);
   const repeat = parseIntEnv("MNEMORA_ASSOC_SCALE_LATENCY_REPEAT", 5);
-  const cacheDir = process.env.MNEMORA_ASSOC_SCALE_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-scale-embcache";
+  const cacheDir =
+    process.env.MNEMORA_ASSOC_SCALE_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-scale-embcache";
   const modeEnv = process.env.MNEMORA_ASSOC_SCALE_MODE;
   const mode = modeEnv === "B" ? "B" : modeEnv === "R" ? "R" : "A";
 
-  console.log(`scales=${scales.join(",")} efLevels=${efLevels.join(",")} repeat=${repeat} mode=${mode}`);
+  console.log(
+    `scales=${scales.join(",")} efLevels=${efLevels.join(",")} repeat=${repeat} mode=${mode}`,
+  );
   console.log(`cacheDir=${cacheDir}`);
 
   // ⚠ 【実測 2026-09-25】この器では `OPENAI_API_KEY` が環境に既に在り(他用途)、
@@ -1067,7 +1082,15 @@ async function main(): Promise<void> {
         ? await runModeB(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding)
         : mode === "R"
           ? await runModeR(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding)
-          : await runScale(databaseUrl, databaseName, scale, efLevels, repeat, cache, realEmbedding);
+          : await runScale(
+              databaseUrl,
+              databaseName,
+              scale,
+              efLevels,
+              repeat,
+              cache,
+              realEmbedding,
+            );
     allReports.push(report);
     console.log(summarizeScale(report));
   }
@@ -1075,7 +1098,10 @@ async function main(): Promise<void> {
   cache.close();
 
   // 後始末: ef_search をデータベース既定へ戻す。
-  const cleanupHandle = await createInstrumentedRuntime(databaseUrl, new FileEmbeddingCache(cacheDir, realEmbedding.space));
+  const cleanupHandle = await createInstrumentedRuntime(
+    databaseUrl,
+    new FileEmbeddingCache(cacheDir, realEmbedding.space),
+  );
   await cleanupHandle.pool.query(`ALTER DATABASE ${databaseName} RESET hnsw.ef_search`);
   await cleanupHandle.close();
 

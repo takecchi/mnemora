@@ -3,8 +3,8 @@
  * `association-scale-bench.ts` の配置(A)（Issue #337）で見つかった逆転
  * ——1万行スケールで **on-3 だけ 4/12 届き、on-5/on-10 は 0/12**——を切り分ける、
  * 診断スクリプト（`pnpm --filter @mnemora/example-chat run association-scale-investigate`）。
- * 測ったこと・全体像は [ADR 0328](../../../../docs/decisions/0328-association-default-100k-measurement.md)
- * （特に §4・§5）を見ること——このファイルは道具、ADR 0328 が記録。
+ * 測ったこと・全体像は [ADR 0332](../../../../docs/decisions/0332-association-default-100k-measurement.md)
+ * （特に §4・§5）を見ること——このファイルは道具、ADR 0332 が記録。
  *
  * ⛔ **別データベースで走らせること。** `association-scale-bench.ts` の配置(A)/(B)/(R)が
  * 使っている DB（`TRUNCATE` を挟む）を壊さないため、`DATABASE_URL` は専用に
@@ -33,7 +33,7 @@
  * 振ったところ、逆転は再現せず **全 arm で 0/12（一様）だった**——(A)側の逆転は
  * `maxCount` の因果効果ではなく、**(A)が arm ごとに独立 `TRUNCATE`+再ingestする
  * こと自体が持ち込む非決定性**（`memory_id`/`recorded_at` の tie-break、または
- * HNSW索引構築の非決定性——ADR 0328 §5.4、切り分けていない）が主要因である
+ * HNSW索引構築の非決定性——ADR 0332 §5.4、切り分けていない）が主要因である
  * 可能性が高い、という**別の**発見をした。この docstring は当初の仮説を消さずに
  * 残す——**外れた仮説も記録**（`docs/autonomy.md`「確かめていないことは確かめて
  * いないと書く」の逆——「外れたと確かめたことも、外れたまま残す」）。
@@ -59,7 +59,7 @@
  * **残す。** 理由: (1) 単一 ingest で `maxCount` だけを振る、という
  * `association-scale-bench.ts` の配置(R)には無い視点（per-probe の役割分類・
  * `omitted` の直接観測）を持ち、(A)/(B)/(R)のどれとも役割が重ならない。
- * (2) ADR 0328 §5の「独立ingest間の揺れ」を今後さらに切り分ける（§5.4の
+ * (2) ADR 0332 §5の「独立ingest間の揺れ」を今後さらに切り分ける（§5.4の
  * tie-break説とHNSW非決定性説のどちらが主要因か）ときの出発点になる。
  * (3) 既に一度、当初の仮説を覆す発見をしており、道具として実証済み。
  */
@@ -146,9 +146,15 @@ interface Handle {
 async function createHandle(databaseUrl: string, cache: FileEmbeddingCache): Promise<Handle> {
   const client = createPostgresClient(databaseUrl);
   await runMigrations(client.pool);
-  const { embeddingProvider: realEmbedding, llmProvider, llmMode } = createProviders(process.env, {});
+  const {
+    embeddingProvider: realEmbedding,
+    llmProvider,
+    llmMode,
+  } = createProviders(process.env, {});
   if (llmMode !== "deterministic") {
-    throw new Error(`association-scale-investigate: MNEMORA_LLM=deterministic を明示すること(実測: "${llmMode}")`);
+    throw new Error(
+      `association-scale-investigate: MNEMORA_LLM=deterministic を明示すること(実測: "${llmMode}")`,
+    );
   }
   if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
     throw new Error("association-scale-investigate: MNEMORA_EMBEDDING=local を指定すること");
@@ -194,13 +200,7 @@ async function truncateAll(pool: PostgresClient["pool"]): Promise<void> {
 }
 
 type Role =
-  | "own-gold"
-  | "own-anchor"
-  | "own-distractor"
-  | "other-probe"
-  | "haystack"
-  | "filler"
-  | "unknown";
+  "own-gold" | "own-anchor" | "own-distractor" | "other-probe" | "haystack" | "filler" | "unknown";
 
 function classifyRole(
   currentProbeId: string,
@@ -228,7 +228,8 @@ function classifyRole(
 async function main(): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   const scale = Number(process.env.MNEMORA_ASSOC_INVESTIGATE_SCALE ?? 10000);
-  const cacheDir = process.env.MNEMORA_ASSOC_SCALE_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-scale-embcache";
+  const cacheDir =
+    process.env.MNEMORA_ASSOC_SCALE_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-scale-embcache";
   const armsToRun = [3, 5, 10];
 
   const { embeddingProvider: realEmbedding, llmMode } = createProviders(process.env, {});
@@ -263,7 +264,11 @@ async function main(): Promise<void> {
 
   const tIngest0 = Date.now();
   for (const u of base) {
-    const r = await handle.runtime.observe(ctx, { kind: "utterance", text: u.text, externalId: u.externalId });
+    const r = await handle.runtime.observe(ctx, {
+      kind: "utterance",
+      text: u.text,
+      externalId: u.externalId,
+    });
     expectedEmbedJobs += r.memoryIds.length;
     if (u.kind === "anchor" || u.kind === "gold") {
       if (r.memoryIds.length !== 1) throw new Error(`${u.externalId}: sync抽出が1件を作らなかった`);
@@ -272,7 +277,11 @@ async function main(): Promise<void> {
     }
   }
   for (const f of filler) {
-    const r = await handle.runtime.observe(ctx, { kind: "utterance", text: f.text, externalId: f.externalId });
+    const r = await handle.runtime.observe(ctx, {
+      kind: "utterance",
+      text: f.text,
+      externalId: f.externalId,
+    });
     expectedEmbedJobs += r.memoryIds.length;
   }
   const ingestSeconds = (Date.now() - tIngest0) / 1000;
@@ -333,7 +342,9 @@ async function main(): Promise<void> {
 
       const actualAnchorMemoryIds = handle.spy.getVectorsCalls[0] ?? [];
       const actualAnchorExternalIds = await Promise.all(
-        actualAnchorMemoryIds.map(async (id) => (await resolveExternalId(handle.memoryStore, ctx, id)) ?? id),
+        actualAnchorMemoryIds.map(
+          async (id) => (await resolveExternalId(handle.memoryStore, ctx, id)) ?? id,
+        ),
       );
 
       details.push({
@@ -352,7 +363,9 @@ async function main(): Promise<void> {
 
   console.log("\n=== per-probe detail ===");
   for (const probe of ASSOCIATION_PROBES) {
-    console.log(`\n--- probe=${probe.id} (own-anchor=${associationAnchorExternalId(probe.id)}, own-gold=${associationGoldExternalId(probe.id)}) ---`);
+    console.log(
+      `\n--- probe=${probe.id} (own-anchor=${associationAnchorExternalId(probe.id)}, own-gold=${associationGoldExternalId(probe.id)}) ---`,
+    );
     for (const maxCount of armsToRun) {
       const d = byArm.get(maxCount)!.find((x) => x.probeId === probe.id)!;
       console.log(
@@ -370,7 +383,9 @@ async function main(): Promise<void> {
 
   console.log("\n=== summary: gold到達の推移(maxCount順) ===");
   for (const probe of ASSOCIATION_PROBES) {
-    const row = armsToRun.map((mc) => byArm.get(mc)!.find((x) => x.probeId === probe.id)!.goldReturned);
+    const row = armsToRun.map(
+      (mc) => byArm.get(mc)!.find((x) => x.probeId === probe.id)!.goldReturned,
+    );
     console.log(`${probe.id}: on-3=${row[0]} on-5=${row[1]} on-10=${row[2]}`);
   }
 

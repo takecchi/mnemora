@@ -1,4 +1,4 @@
-# ADR 0328: 連想枠の既定 on を10万行級で測る — 62件/1万行/10万行の実測記録（Issue #337、判定はしない）
+# ADR 0332: 連想枠の既定 on を10万行級で測る — 62件/1万行/10万行の実測記録（Issue #337、判定はしない）
 
 - **状態**: 提案 (2026-09)
 - **日付**: 2026-09-25
@@ -157,7 +157,7 @@ anchor が載っていたか。この2つは全測定で一致した（`recall-r
 
 ---
 
-## 4. 届いた gold は probe 自身の anchor ではなく filler 経由だった【実測】
+## 4. 切り分けの1回では、実際のアンカーも連想枠の着席も全部 filler だった——届いた gold の経路は辿れていない【実測】
 
 `association-scale-investigate.ts`（別 DB `mnemora_investigate`、1万行、単一 ingest、
 `TRUNCATE` を挟まず `maxCount` だけ振る）で、per-probe の `associationFrame`
@@ -175,20 +175,15 @@ anchor が載っていたか。この2つは全測定で一致した（`recall-r
 
 **⟹「連想でしか届かない gold の到達」という指標が意味すること・意味しないこと**:
 
-- **意味すること**: この指標が正の値（例: §2 の (A) 1万行 on-3 が 4/12）を示すとき、
-  それは「probe が設計した `query≈anchor→anchor≈gold` の経路」を辿った結果とは
-  **限らない**。実際、§2 の複数の実測（(A) 10万行の on-3 で aRaw=1/12、(R) の全 arm で
-  aRaw=11/12 だが gold到達は5〜6/12）を見る限り、**probe 自身の anchor が生き残って
-  いなくても、他の（fillerの）anchor経由で偶然 gold の近傍に届くことがある**——
-  これは probe が意図した三角形設計の効果ではなく、**corpus 全体の中で filler 同士が
-  作る偶発的な近さ**（`ASSOCIATION_HAYSTACK` の docstring が指摘する、テンプレ生成
-  filler の密なクラスタ化と同じ構造）が理由である可能性が高い。**切り分けていない
-  ——確かめていない。**
-- **意味しないこと**: 到達数が高いことは「連想枠が設計どおりに機能している」ことの
-  証明には**ならない**。§4の investigate 実測では、gold に届いた probe があっても、
-  その経路が「probe自身のanchor→gold」ではなく別の filler 経由だった可能性がある
-  （investigate では実際に届いた0件だったため、この点そのものは実測できていない
-  ——次に届いた回で辿り直す必要がある。**確かめていないこと**として明記する）。
+- **言えること**: この1回の ingest では、probe が設計した
+  `query≈anchor→anchor≈gold` の経路の起点（probe 自身の anchor）が、実際のアンカー
+  （上位3件）に1件も選ばれなかった。⟹ **この規模では、連想枠の起点が probe の意図と
+  無関係な filler になりうる**ことは実測した。
+- ⛔ **言えないこと**: §2 の正の到達（(A) 1万行 on-3 の 4/12、(R) の 5〜6/12、(B) の 6〜8/12）
+  が、probe 自身の anchor 経由か filler 経由かは**辿っていない**。切り分けの回は到達0件で
+  あり、届いた回では経路を記録していない。なお (R) では aRaw=11/12 なのに到達は 5〜6/12
+  であり、「anchor が窓に残れば届く」とも言えない（どこで落ちたかは未測定。#375 の
+  `slice` などが候補だが測っていない）。
 
 ---
 
@@ -386,8 +381,7 @@ on-3 = **+15.4/+14.2ms**（ef40/120）、on-5 = +15.1/+13.2ms、on-10 = +17.7/+1
   （§6.3）。実際の到達・memoryChars・latency には影響しない（recall() 本体は
   常に本物の `PostgresVectorStore.search()` を経由するため）ことは現物で確認した
   が、**EXPLAIN のプラン自体を修正後のコードで撮り直してはいない。**
-- ⛔ **§4（investigate）で「gold に届いた経路が filler 経由だったこと」は、
-  到達が0件だった1万行の回でしか確認していない。** 到達がある回（例: (A) の
+- ⛔ **§4（investigate）で分かったのは「到達0件の1万行の回で、実際のアンカーと着席が全部 filler だった」ことだけである。** 到達がある回（例: (A) の
   on-3=4/12、(R) の on-3=5/12）で、実際にどの経路（own-anchor か filler か）から
   gold に届いたかは、本 ADR のための追加実測をしていない
   （`association-scale-bench.ts` は現状この役割分類を出力しない設計——
@@ -403,7 +397,7 @@ on-3 = **+15.4/+14.2ms**（ef40/120）、on-5 = +15.1/+13.2ms、on-10 = +17.7/+1
 normalization に文書長のビットを足す、語彙チャンネルの話——Issue #394 案2、状態:
 採用）であり、連想枠・`anchorPool` とは無関係である。同様に「
 [association-anchor-pool-scale-bench.ts](https://github.com/takecchi/mnemora/blob/2675576edb966cd9a1b05484ee12b8760fb3ab43/examples/chat/src/bench/association-anchor-pool-scale-bench.ts)」
-も同じ枝にしか存在せず、`main` には無い。**この ADR（0328）が引く数字は、全て
+も同じ枝にしか存在せず、`main` には無い。**この ADR（0332）が引く数字は、全て
 `main` 上で実際に動く `association-scale-bench.ts`/`association-scale-investigate.ts`
 で本 ADR の書き手が実測したものであり、閉じた PR の枝には依存していない。**
 
@@ -485,7 +479,7 @@ pnpm --filter @mnemora/example-chat run association-scale-investigate
 
 - 62件・1万行・10万行（配置(A)/(B)/(R)）の到達・memoryChars・anchor位置・latency・
   段3.5DBms・EXPLAIN・ビット同一性ハッシュ（§2・§6）。
-- 1万行を別DBで単一ingestに切り分け、gold到達経路が filler 経由だったこと（§4）。
+- 1万行を別DBで単一ingestに切り分け、実際のアンカー・連想枠の着席が全部 filler だったこと（到達0件の回。§4）。
 - relaxed_order（ADR 0284）が配置(B)で他テナント混入を飛び越えて動作すること、
   ただし配置(A)の10万行EXPLAINだけは修正前のコードで撮ったこと（§6.3）。
 - 独立ingestごとに anchor位置(a)が0〜12/12まで揺れること（§5.3）。
