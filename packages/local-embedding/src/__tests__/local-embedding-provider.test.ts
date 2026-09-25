@@ -305,6 +305,27 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     expect(calls).toBe(5);
   });
 
+  /**
+   * `retry: { attempts: NaN }` を渡すと、コンストラクタの `Math.max(1, NaN)` が
+   * `NaN` のままになり、`#startLoad` の `for (attempt = 1; attempt <= NaN; …)` が
+   * 一度も回らない——`createPipeline` を一度も呼ばずに「モデルを読み込めなかった」が
+   * 投げられる（コンストラクタのコメントが明言している「一度も試さない、は許さない」への違反）。
+   * ⟹ 成功する pipeline を渡せば、`createPipeline` が最低1回呼ばれて `embed()` が通るはずである。
+   */
+  it("試行回数に NaN を渡しても、createPipeline は少なくとも1回は呼ばれる", async () => {
+    const recorder = createRecordingPipeline();
+    const provider = new LocalEmbeddingProvider({
+      createPipeline: recorder.createPipeline,
+      sleep: async () => {},
+      retry: { attempts: NaN },
+    });
+
+    const vectors = await provider.embed(ctx, ["テキスト"]);
+
+    expect(vectors).toHaveLength(1);
+    expect(recorder.calls).toBeGreaterThanOrEqual(1);
+  });
+
   it("失敗のたびに、指定した delayMs(attempt) の分だけ sleep する", async () => {
     const waited: number[] = [];
     const createPipeline: CreateLocalEmbeddingPipeline = async () => {
