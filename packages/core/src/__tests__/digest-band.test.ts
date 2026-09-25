@@ -131,6 +131,22 @@ describe("packDigestBand — band.length <= eligible の不変条件", () => {
   });
 });
 
+describe("packDigestBand — maxEntryChars が負数（境界値）", () => {
+  it("負数の maxEntryChars を渡しても、切り詰め後の digest 長は 0 を下回らない", () => {
+    // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
+    // 別の意味になる（先頭からの切り詰めにはならない）。maxEntryChars は「1件の digest の
+    // 文字数上限」であり、負数は「上限0（何も残さない）」の下限として扱うのが筋——
+    // 末尾から数文字だけ削った長い文字列を返すのは、この欄の契約と食い違う。
+    const candidates = [entry("m1", "0123456789")]; // 10文字
+    const { band } = packDigestBand(candidates, 1, {
+      limit: 10,
+      maxChars: 10_000,
+      maxEntryChars: -5,
+    });
+    expect(band).toEqual([{ memoryId: "m1", digest: "", truncated: true }]);
+  });
+});
+
 describe("packDigestBand — eligible が 0", () => {
   it("候補が無ければ空の帯を返し、limitedBy は付かない", () => {
     const result = packDigestBand([], 0, { limit: 10, maxChars: 10_000, maxEntryChars: 100 });
