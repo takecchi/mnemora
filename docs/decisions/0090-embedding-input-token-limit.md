@@ -454,3 +454,61 @@ CI は `test` を `build` より先に走らせるので `dist` が無い）。
 - **8192 トークンちょうどの入力が、モデルの中で本当に切られていないこと**は
   live テストの振る舞い（例外を投げず、ベクトルが返る）でしか見ていない。
   **トークン列を直接覗いて確認したわけではない。**
+
+---
+
+## 追記（2026-09-25、Issue #449 — §1.3 / §7 の【受領】「OpenAI はサーバが拒否する」を実 API で確かめた）
+
+この追記は、クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない（ADR 0220）。
+上の本文（§1〜§7）は書き換えず、ここに実測だけを積む。
+
+### 実測したもの【実測】
+
+2026-09-25、この器から実 API（`api.openai.com`）へ4回投げた。
+呼び方は `OpenAIEmbeddingProvider.embed()`（`packages/openai/src/embedding-provider.ts`）と同じ形——
+`packages/openai` と同じ `openai@7.10.0` の `client.embeddings.create({ model, input: [...], dimensions })`、
+`model: "text-embedding-3-small"`、`dimensions: 64`。
+上限の値は推測せず、OpenAI の埋め込みガイド（`developers.openai.com/api/docs/guides/embeddings`）の
+モデル表の欄 **「Max input」= 8192** から取った。入力のトークン数は `js-tiktoken` の `cl100k_base` で数え、
+成功した回はサーバの `usage.prompt_tokens` でも同じ値が返ることを見た。
+
+| # | 入力 | 手元のトークン数 | 結果 |
+|---|---|---|---|
+| A | `" hello".repeat(8192)` | 8192 | ⭕ 成功。`usage.prompt_tokens: 8192`・ベクトル 64 次元（**サーバ側でも切られていない**） |
+| B | `" hello".repeat(8193)` | 8193 | ❌ `BadRequestError`・HTTP **400**・`type: "invalid_request_error"`・`code: null`・`param: null`・文面 `Invalid 'input[0]': maximum input length is 8192 tokens.` |
+| C | `["mnemora", " hello".repeat(8193)]`（2件の batch） | 3, 8193 | ❌ B と同じ 400。文面は `input[1]`。**短いほうの 1 件も返らない——リクエスト全体が拒否される** |
+| D | かな 46 文字の巡回 30,000 字（`observe({ kind: 'document' })` の生テキストに近い形） | （数えていない） | ❌ B と同じ 400・同じ文面 |
+
+⟹ **§1.3 の【受領】「OpenAI は上限超過をサーバが拒否する」は、このモデル・この呼び方では成り立つ。**
+**「黙って切って成功の顔で返す」は観測されなかった**（上限ちょうどは切らずに通し、1 トークンでも超えれば 400）。
+
+### 🔴 訂正: 「OpenAI の上限は 8191 トークン」は、このモデルでは成り立たない
+
+§1.1・§1.3・§3.6・§7 の【受領】値 **8191** に対して、ドキュメントの表は **8192**、サーバも **8192 を受け付けて 8193 を拒否した**。
+⟹ §1.3 冒頭の「`ruri-v3-30m` の上限は OpenAI より 1 トークン広い」は成り立たない——**どちらも 8192 で、同じ幅である。**
+§1.3 の結論（「差は上限の値ではなく、上限に当たったときの振る舞い」）はこれで弱まらず、むしろ値の差が消えたぶん強くなる。
+
+### mnemora の側で起きること（コードと名指しのテスト）
+
+1. `OpenAIEmbeddingProvider.embed()` には `try/catch` が無く、SDK の `BadRequestError` がそのまま reject になる
+   ——`packages/openai/src/__tests__/embedding-provider.test.ts` の
+   「client が HTTP 400（入力トークン数の上限超過）を投げると、embed() はそれを握りつぶさず・切り詰めて再送もせず、そのまま reject する」
+   （ADR 0305 決定5。投げる例外の文面は上の B と逐語で一致する）。
+2. `openai@7.10.0` の `shouldRetry`（`client.js`）は 408 / 409 / 429 / 5xx か `x-should-retry: true` のときだけ再試行する。
+   ⟹ **400 は SDK の中でも再試行されない**（コードを読んだだけ。応答ヘッダは記録していない）。
+3. `processEmbedJob`（`packages/core/src/runtime.ts`）は catch で `setEmbeddingStatus(…, "failed")` にして再送出し、
+   `tick()` はそのジョブを `outboxStore.fail()` で**終端**に落とし `failed` に数える
+   ——`packages/core/src/__tests__/runtime.test.ts` の
+   「LLM抽出が失敗して全文フォールバックになった Memory を、上限超過で reject する embeddingProvider に渡すと、…（Issue #449）」。
+4. **自動の再試行は無い。** 終端の行は `claimBatch` に拾われず、`reembed()` で積み直すまで `failed` のまま
+   ——同ファイルの「provider が落ちている間に入った Memory は、tick を繰り返しても索引へ戻らない。…」。
+   ⚠ ただし上限超過の Memory は **`reembed()` しても同じ `content` を送るので、また 400 で `failed` に戻る。**
+   ⟹ Issue #449 の経路の結末は「黙って `ready`」ではなく「**鳴って `failed` のまま残る**」である。
+
+### 確かめていないこと
+
+- **`text-embedding-3-small` 以外**（`text-embedding-3-large`・`text-embedding-ada-002`・Azure OpenAI）。表の値は同じ 8192 だが、当てていない。
+- **将来 OpenAI がサーバの挙動を変えること。**この実測は歯ではない（CI から実 API は叩かない、ADR 0019 §5c）。
+  `packages/openai` は今日もサーバの拒否に全面的に依存している（ADR 0305 §4.3 の選択肢は未採用のまま）。
+- **応答ヘッダ・拒否された回が課金されたか。**費用は成功した A の 8,192 トークン分（`text-embedding-3-small` の単価で $0.001 未満）しか見積もっていない。
+- `" hello"` の繰り返しは不自然な文だが、判定はトークン数で行われる（B と D が同じ文面で拒否された）。自然文での 8192/8193 境界は当てていない。
