@@ -5,8 +5,10 @@ import {
   resolveAnswerClaimKeyOptions,
 } from "../answer-claim-key-options.js";
 import { createAnswerBenchRuntime, embeddingSpaceSlug, runAnswerCase } from "../answer-bench.js";
+import type { AnswerCase } from "../answer-case.js";
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
+import { ANSWER_CASE_SET_SEPARATE_TURN } from "../answer-case-set.separate-turn.js";
 import {
   ANSWER_CLAIM_KEY_CASSETTE_PATH,
   ANSWER_ORDER_LEGEND_CASSETTE_PATH,
@@ -77,6 +79,14 @@ import {
  * `claim_key_subject`/`claim_key_predicate`/`status`/`valid_from`/`valid_until`/
  * `content_hash` を出力する——「なぜ対にならなかったか」を (a)〜(g) の段で切り分ける
  * ための実データ。
+ *
+ * **`MNEMORA_ANSWER_CASE_SET`（ADR 0334 追記 2026-09-26（2）、Issue #372負債6の続き。
+ * opt-in、省略時は従来どおり）**: `"default"`（省略時の既定）| `"separate-turn"`。
+ * **既定は dev+eval 全14件（この env を足す前と1バイトも変わらない）。**
+ * `"separate-turn"` を指定すると、代わりに `ANSWER_CASE_SET_SEPARATE_TURN`
+ * （`answer-case-set.separate-turn.ts`、本人の事実と第三者の事実を意図的に別ターン
+ * ＝別の `observe()` 呼び出しに分けたケース集合）だけを走らせる——**既存14件の
+ * ケースセットは一切参照しない**（両方を混ぜて走らせる経路は無い）。
  */
 
 const RECORD_CONDITIONS = ["baseline", "known-predicates-from-store", "known-subjects"] as const;
@@ -95,6 +105,30 @@ function resolveRecordCondition(raw: string | undefined): RecordCondition {
   );
 }
 
+const ANSWER_CASE_SET_OPTIONS = ["default", "separate-turn"] as const;
+type AnswerCaseSetOption = (typeof ANSWER_CASE_SET_OPTIONS)[number];
+
+function resolveAnswerCaseSetOption(raw: string | undefined): AnswerCaseSetOption {
+  if (raw === undefined || raw === "") {
+    return "default";
+  }
+  if ((ANSWER_CASE_SET_OPTIONS as readonly string[]).includes(raw)) {
+    return raw as AnswerCaseSetOption;
+  }
+  throw new Error(
+    `MNEMORA_ANSWER_CASE_SET には ${ANSWER_CASE_SET_OPTIONS.map((s) => `"${s}"`).join(" / ")} の` +
+      `いずれかを指定すること（実際: "${raw}"）。`,
+  );
+}
+
+/** `caseSetOption` から実際に走らせるケース集合を選ぶ。既定は dev+eval の14件。 */
+function resolveAnswerCases(caseSetOption: AnswerCaseSetOption): AnswerCase[] {
+  if (caseSetOption === "separate-turn") {
+    return [...ANSWER_CASE_SET_SEPARATE_TURN];
+  }
+  return [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+}
+
 interface ObservedTurnDiagnostic {
   caseId: string;
   turnIndex: number;
@@ -109,6 +143,7 @@ const usage = () => {
     "使い方: DATABASE_URL=... OPENAI_API_KEY=... " +
       "[MNEMORA_RECORD_CONDITION=baseline|known-predicates-from-store|known-subjects] " +
       "[MNEMORA_RECORD_CASSETTE_PATH=...] " +
+      "[MNEMORA_ANSWER_CASE_SET=default|separate-turn] " +
       "tsx examples/chat/src/scripts/record-answer-claim-key.ts",
   );
 };
@@ -131,6 +166,9 @@ async function main(): Promise<void> {
     condition === "known-predicates-from-store" ? "detect-known-predicates-from-store" : "detect";
   const outputCassettePath =
     process.env.MNEMORA_RECORD_CASSETTE_PATH ?? ANSWER_CLAIM_KEY_CASSETTE_PATH;
+  // ADR 0334 追記 2026-09-26（2）: ケース集合を env で選べる。省略すれば従来どおり
+  // dev+eval の14件（この env を足す前と1バイトも変わらない）。
+  const caseSetOption = resolveAnswerCaseSetOption(process.env.MNEMORA_ANSWER_CASE_SET);
 
   const claimKeyOptions = resolveAnswerClaimKeyOptions({
     MNEMORA_ANSWER_CLAIM_KEY: answerClaimKeyMode,
@@ -140,7 +178,7 @@ async function main(): Promise<void> {
   }
   console.log(
     `[record-answer-claim-key] condition=${condition} claimKeyOptions = ${JSON.stringify(claimKeyOptions)} ` +
-      `outputCassettePath=${outputCassettePath}`,
+      `outputCassettePath=${outputCassettePath} caseSet=${caseSetOption}`,
   );
 
   const seedCassette = loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH);
@@ -160,7 +198,7 @@ async function main(): Promise<void> {
   const diagPool = createPostgresClient(databaseUrl);
 
   const diagnostics: ObservedTurnDiagnostic[] = [];
-  const allCases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+  const allCases = resolveAnswerCases(caseSetOption);
   const runId = Date.now();
   const tenantPrefix = `answer-claim-key-record-${condition}-${runId}`;
 
