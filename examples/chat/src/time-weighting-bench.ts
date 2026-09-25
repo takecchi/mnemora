@@ -361,7 +361,11 @@ async function runTimeWeightingPolicy(
   // association: null — 上の collectContextDiagnostics と同じ理由。この recall() の
   // 結果がそのまま `buildMnemoraPrompt` を経て LLM プロンプトへ入るため、連想が
   // 増やす候補は recorded cassette に無い入力を作りうる。
-  const recall = await runtime.recall(ctx, { text: question, timeWeighting: policy, association: null });
+  const recall = await runtime.recall(ctx, {
+    text: question,
+    timeWeighting: policy,
+    association: null,
+  });
   const prompt = `${buildMnemoraPrompt(recall)}${buildQuestionSuffix(question)}`;
   const response = await llmProvider.complete(ctx, {
     system: ANSWER_SYSTEM_PROMPT,
