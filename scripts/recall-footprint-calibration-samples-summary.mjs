@@ -3,7 +3,7 @@
  * `examples/chat` の `recall-footprint-calibration-samples` ベンチ
  * (`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON` が吐く JSON)を人が読める
  * Markdown へ変換し、CI の Job Summary(`$GITHUB_STEP_SUMMARY`)へ載せる CLI
- * (Issue #340 フォローアップ、ADR 0313)。
+ * (Issue #340 フォローアップ、ADR 0314)。
  *
  * 組み立ては `./recall-footprint-calibration-samples-summary-lib.mjs` の純関数に
  * 委ねる(`compare-summary.mjs`/`consolidation-cost-summary.mjs` と同じ分担)。ここは
@@ -19,7 +19,7 @@
  *   node scripts/recall-footprint-calibration-samples-summary.mjs --measured <path> [--baseline <path>]
  *
  * 🔴 **⛔ 門ではない。**`compare`(ADR 0133)と違い、この bench はまだ CI で複数回
- * 一致することを実測していない(ADR 0313 §2)。基準値ファイルと相違しても exit 0 の
+ * 一致することを実測していない(ADR 0314 §2)。基準値ファイルと相違しても exit 0 の
  * ままである。非0になるのは、入力そのものが壊れているとき
  * (measured の JSON が読めない・parse できない・rows が欠ける・必須項目が無い。
  * `--baseline` を指定していて、それが読めない/壊れている場合も含む)だけである。

@@ -214,11 +214,11 @@ const returnedMemories = baseReturnedMemories + associationCount;
 
 > **⚠ この追記は、自動化された担い手（マネージャーのセッションから切り出された worker セッション）が書いた。⛔ オーナー本人の判定ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
 
-[ADR 0313](./0313-recall-footprint-calibration-samples-need-ci-sourcing.md) §4 が、`recall-footprint` の較正標本を hold-in 7点（`compare-baseline.json`）から15点（+ `recall-footprint-calibration-samples-baseline.json` の8点）へ CI-sourcing 込みで拡張した。**上の「残る未確認」2番目（「hold-in 行が動いたときにFLOORと最小余白がどう連動するかは、この節では測っていない」）が指していた、まさにそのケースである**——1件目・2件目はどちらも hold-in 7行を固定したまま hold-out 側だけが動いた事象だったが、今回は較正標本そのもの（hold-in）が増え、`charsPerDigest`/`fixedIndexChars` 自体が動いた。
+[ADR 0314](./0314-recall-footprint-calibration-samples-need-ci-sourcing.md) §4 が、`recall-footprint` の較正標本を hold-in 7点（`compare-baseline.json`）から15点（+ `recall-footprint-calibration-samples-baseline.json` の8点）へ CI-sourcing 込みで拡張した。**上の「残る未確認」2番目（「hold-in 行が動いたときにFLOORと最小余白がどう連動するかは、この節では測っていない」）が指していた、まさにそのケースである**——1件目・2件目はどちらも hold-in 7行を固定したまま hold-out 側だけが動いた事象だったが、今回は較正標本そのもの（hold-in）が増え、`charsPerDigest`/`fixedIndexChars` 自体が動いた。
 
 ##### 測り方
 
-【実測】`examples/chat/src/__tests__/recall-footprint-baseline.test.ts` が実際に呼ぶのと同じ `calibrateRecallFootprint`/`estimateRecallFootprint`（`@mnemora/core`、変更なし）を、hold-in 7点（拡張前）と hold-in 15点（拡張後、`totalInScope` を渡し ADR 0306 の構造項差し引きを効かせる）の両方に対して実行し、hold-out 5行（`compare-baseline.json`、CI artifact で実測更新済み。⭐門が見る2欄は不変）の余白を再計算した。詳細・95%予測区間の半幅までの全体の表は [ADR 0313](./0313-recall-footprint-calibration-samples-need-ci-sourcing.md) §4「測ったこと」を参照——ここでは最小余白と係数だけを転記する。
+【実測】`examples/chat/src/__tests__/recall-footprint-baseline.test.ts` が実際に呼ぶのと同じ `calibrateRecallFootprint`/`estimateRecallFootprint`（`@mnemora/core`、変更なし）を、hold-in 7点（拡張前）と hold-in 15点（拡張後、`totalInScope` を渡し ADR 0306 の構造項差し引きを効かせる）の両方に対して実行し、hold-out 5行（`compare-baseline.json`、CI artifact で実測更新済み。⭐門が見る2欄は不変）の余白を再計算した。詳細・95%予測区間の半幅までの全体の表は [ADR 0314](./0314-recall-footprint-calibration-samples-need-ci-sourcing.md) §4「測ったこと」を参照——ここでは最小余白と係数だけを転記する。
 
 ##### 再導出した表
 

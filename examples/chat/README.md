@@ -446,13 +446,13 @@ ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化
 ADR 0119/0121/0133・2回以上の run の一致）を経て `_readme`/`provenance` 付きで
 コミットしたもの。`rawIndex`（生の `IndexBand`）まで含む。**`compare-baseline.json` の
 `rows` には混ぜない**——`rowCount`/12行を前提にした既存の歯・この README の表を
-壊さないための別ファイルのままである（ADR 0313 §2 の「別ファイル」方針を維持）。
+壊さないための別ファイルのままである（ADR 0314 §2 の「別ファイル」方針を維持）。
 
 検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`（設計どおりに
 生成されていることの整合性検査）と `src/__tests__/recall-footprint-baseline.test.ts`
 （この8点を `compare-baseline.json` の hold-in 7行と合わせて15点の較正標本として使う、
 ⭐門本体）。詳細・経緯は
-[ADR 0313](../../docs/decisions/0313-recall-footprint-calibration-samples-need-ci-sourcing.md)
+[ADR 0314](../../docs/decisions/0314-recall-footprint-calibration-samples-need-ci-sourcing.md)
 （当初は CI 経路が無く `.dev.json` 止まりだったこと、その後 CI 配線がこの artifact を
 生んだこと、構造項の二重計上を直した [ADR 0306](../../docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md)）。
 
@@ -465,7 +465,7 @@ CI が生成するのは生の artifact までで、基準値ファイルへの�
 🔴 **`recall-footprint-calibration-samples.dev.json` は削除した（2026-09-25、Issue #340
 フォローアップ）。**この artifact が `.dev.json` と rows が1バイトも違わないことを確認した
 うえで、CI-sourced な本ファイルへ役割を一本化した——`.dev.json` が示していた「実 API を
-叩かずに作れる」という事実は ADR 0313 に記録として残っており、ファイル自体を残す理由は
+叩かずに作れる」という事実は ADR 0314 に記録として残っており、ファイル自体を残す理由は
 無くなった。`recall-footprint-calibration-samples.test.ts` の `devSamples` は、この
 baseline ファイルを読むように差し替えてある。
 

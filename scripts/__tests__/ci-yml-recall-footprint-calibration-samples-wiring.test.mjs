@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  * **`.github/workflows/ci.yml` の `example-chat` ジョブが、実際に
  * `recall-footprint-calibration-samples` サブコマンドを実行し、その出力を
  * `scripts/recall-footprint-calibration-samples-summary.mjs` へ渡し、artifact として
- * アップロードしていること（Issue #340 フォローアップ、ADR 0313）。**
+ * アップロードしていること（Issue #340 フォローアップ、ADR 0314）。**
  *
  * ⚠ **これは `recall-footprint-calibration-samples-summary.test.mjs`/`-lib.test.mjs`
  * の重複ではない**（`ci-yml-compare-wiring.test.mjs` の docstring と同じ理由）。
@@ -24,7 +24,7 @@ import { describe, expect, it } from "vitest";
  * 配線が変わっていないなら取り出し方のほうを直すこと（歯を消さないこと）。
  *
  * 🔴 **`--baseline` は `examples/chat/recall-footprint-calibration-samples-baseline.json` へ渡っている**
- * （基準値ファイルは PR #728 の CI artifact で2回一致を経て作った。ADR 0313）。
+ * （基準値ファイルは PR #728 の CI artifact で2回一致を経て作った。ADR 0314）。
  * 以前この歯は「まだ渡していない」ことを固定していた。基準値ファイルができたので、
  * `ci-yml-time-term-wiring.test.mjs` が ADR 0121 決定5 で辿った道と同じように、
  * 「実在する基準値ファイルへ配線されている」ことを固定する歯へ置き換えた。
@@ -189,7 +189,7 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
     expect(summaryStepMeasuredPath()).toBe(benchStepJsonPath());
   });
 
-  it("--baseline が、実在する較正標本の基準値ファイルへ配線されている(ADR 0313)", () => {
+  it("--baseline が、実在する較正標本の基準値ファイルへ配線されている(ADR 0314)", () => {
     const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
     const baselinePath = matched?.[1] ?? matched?.[2];
     expect(baselinePath).toBe("examples/chat/recall-footprint-calibration-samples-baseline.json");

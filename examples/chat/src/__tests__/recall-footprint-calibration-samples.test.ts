@@ -9,7 +9,7 @@ import { CALIBRATION_SAMPLE_DESIGN } from "../recall-footprint-calibration-sampl
  *
  * **DB も API キーも要らない**——`recall-footprint-calibration-samples-baseline.json`
  * （CI の `example-chat` ジョブが実測し repo に commit した8点。`compare-baseline.json` と
- * 同じ CI-sourcing の門・2回一致を経ている。ADR 0313）と `compare-baseline.json`
+ * 同じ CI-sourcing の門・2回一致を経ている。ADR 0314）と `compare-baseline.json`
  * （⭐門、変更なし）を読むだけである。
  *
  * ⚠ **`compare-baseline.json` の `rows`/`rowCount`/hold-in・hold-out の分け方

@@ -33,7 +33,7 @@ export interface CompareRowJson {
   returnedCount: number;
   annCandidateCount: number;
   /**
-   * `ComparisonRow.bandEntryCount` をそのまま写す（Issue #340 フォローアップ、ADR 0313）。
+   * `ComparisonRow.bandEntryCount` をそのまま写す（Issue #340 フォローアップ、ADR 0314）。
    *
    * **省略可能欄にした理由は `retrieval-json.ts` の `lexicalMatchRows` と同じ**
    * ——`CompareRunJson.schemaVersion` は既存の欄の意味を変えない追加のために上げていない
@@ -66,7 +66,7 @@ export interface CompareRunJson {
    * この形が変わったら上げる。読み手（summary スクリプト）が形の変化を検知できるように。
    *
    * ⚠ `rows[].bandEntryCount`/`rows[].rawIndexJsonLength`（Issue #340 フォローアップ、
-   * ADR 0313）を足したときは上げていない——既存の欄の意味を変えない追加であり、
+   * ADR 0314）を足したときは上げていない——既存の欄の意味を変えない追加であり、
    * `CompareRowJson.bandEntryCount` の doc と同じ理由（`retrieval-json.ts` の先例）。
    */
   schemaVersion: 1;
