@@ -25,8 +25,11 @@ import { dropTempDatabase } from "./temp-database.js";
  * コメントを参照。advisory lock の名前空間がデータベースクラスタ全体で共有される
  * こと、既存の it() のロック残骸に当たるリスクを避けるためという理由は同じ）。
  *
- * オーナーが引いた線（3状態を混同しないこと）に対応する5本の歯:
+ * オーナーが引いた線（3状態を混同しないこと）に対応する6本の歯:
  * 1a. まっさらな DB へ N=4 同時: テーブル層（`pg_type_typname_nsp_index`）の衝突点を通る経路。
+ * 1a'. 同じ経路を N=8 で（Issue #755 追記。ADR 0018 の「N=8, 16 等は測っていない」を
+ *      実測で埋める。N=16/32 は歯までは足さず、ADR 0018 追記に測定結果のみ残した——
+ *      N が上がるほど1試行が遅くなるため、歯は N=8 に留めた）。
  * 1b. テーブルだけ先に1プロセスで直列に作っておき（索引は作らない）、N=4 同時に呼ぶ:
  *     索引層（`pg_class_relname_nsp_index`）の衝突点を通る経路。
  *
@@ -43,6 +46,7 @@ import { dropTempDatabase } from "./temp-database.js";
  */
 
 const DB_CONCURRENT_TABLE = "mnemora_vs_lock_concurrent_table";
+const DB_CONCURRENT_TABLE_N8 = "mnemora_vs_lock_concurrent_table_n8";
 const DB_CONCURRENT_INDEX = "mnemora_vs_lock_concurrent_index";
 const DB_WAITED = "mnemora_vs_lock_waited";
 const DB_TIMEOUT = "mnemora_vs_lock_timeout";
@@ -174,6 +178,32 @@ describe("registerEmbeddingSpace の排他（advisory lock）", () => {
     const pools = Array.from(
       { length: 4 },
       () => new Pool({ connectionString: connectionStringFor(DB_CONCURRENT_TABLE), max: 2 }),
+    );
+    openedPools.push(...pools);
+
+    const results = await Promise.all(pools.map((p) => registerEmbeddingSpace(p, SPACE)));
+
+    for (const r of results) {
+      expect(typeof r.lock.waitedMs).toBe("number");
+      expect(r.lock.waitedMs).toBeGreaterThanOrEqual(0);
+    }
+
+    const relations = await existingRelations(pool);
+    expect(relations.tables).toEqual([TABLE]);
+    expect(relations.indexes).toEqual([INDEX]);
+  }, 20_000);
+
+  // 歯1a'（Issue #755 追記）: 歯1a と同じ経路（テーブル層の衝突点）を、より高い並行度
+  // （N=8）で確認する。ADR 0018 の「確かめていないこと」——N=1/2/4 までしか測っていない
+  // ——を N=8 まで実測で埋める（ADR 0018 追記、2026-09-25、Issue #755）。
+  //
+  // **この歯に変異（ロックを外す）を当てると赤くなることを確認済み**（PR 本文に出力を記載。
+  // Issue #755 の測定では N=8/16/32 のいずれも同じ形で決定的に再現した）。
+  it("N=8プロセス相当が同時に registerEmbeddingSpace しても、全部成功しテーブル・索引が1組だけ出来ている", async () => {
+    const pool = await createMigratedDatabase(DB_CONCURRENT_TABLE_N8);
+    const pools = Array.from(
+      { length: 8 },
+      () => new Pool({ connectionString: connectionStringFor(DB_CONCURRENT_TABLE_N8), max: 2 }),
     );
     openedPools.push(...pools);
 
