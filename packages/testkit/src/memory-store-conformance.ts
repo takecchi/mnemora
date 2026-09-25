@@ -300,17 +300,18 @@ export interface MemoryStoreConformanceOptions {
   supportsFindActiveByClaimKey: boolean;
   /**
    * Issue #691続き（ADR 0328）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
-   * （任意メソッド）を実装しているかどうか。**必須。**
+   * （任意メソッド）を実装しているかどうか。**任意**（省略可）。
    *
-   * `supportsFindActiveByClaimKey` 等と同じ判断——省略可にしない。`true` なら契約の歯
+   * `supportsOnlyMemoryIdsFilter` と同じく3状態を区別する——既存の外部 adapter の
+   * 呼び出しを型エラーにしないため（公開 API の追加は任意項目に限る）。`true` なら契約の歯
    * （同じ tenant・同じ subjectId・`status='active'`・claim key を持つ行から predicate を
    * 重複無く新しい順に返す、`subjectId` は `null` 同士も一致として扱う、`limit` を
    * 超えない、`status` が `active` でない行は対象外、claim key を持たない行は対象外、
    * テナント分離）を実行する。`false` なら
    * `expect(store.listActiveClaimPredicates).toBeUndefined()` を積極的に assert する
-   * ——`it.skip` にはしない。
+   * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
    */
-  supportsListActiveClaimPredicates: boolean;
+  supportsListActiveClaimPredicates?: boolean;
 }
 
 /**
@@ -1487,7 +1488,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     // predicate を重複無く新しい順に、limit 件まで返す。
     // -------------------------------------------------------------------
 
-    if (supportsListActiveClaimPredicates) {
+    if (supportsListActiveClaimPredicates === true) {
       it("同じ tenant・同じ subjectId・active な Memory の predicate を、重複無く新しい順に返す", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -1655,10 +1656,16 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         });
         expect(predicates).toEqual([]);
       });
-    } else {
+    } else if (supportsListActiveClaimPredicates === false) {
       it("listActiveClaimPredicates は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.listActiveClaimPredicates).toBeUndefined();
+      });
+    } else {
+      // `supportsListActiveClaimPredicates` を省略した adapter。`it.skip` にしない理由は
+      // `supportsOnlyMemoryIdsFilter` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsListActiveClaimPredicates が指定されていない — adapter "${name}" に対して listActiveClaimPredicates の歯は検査していない`, () => {
+        expect(supportsListActiveClaimPredicates).toBeUndefined();
       });
     }
 

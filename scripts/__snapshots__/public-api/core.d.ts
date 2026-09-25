@@ -97,15 +97,25 @@ export interface DeriveClaimKeysResult {
     failure: ExtractionFailure | null;
 }
 export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[]): Promise<DeriveClaimKeysResult>;
+export declare const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
 export interface ClaimKeyOptions {
     enabled: boolean;
     knownPredicates?: string[];
     detectContested?: boolean;
+    knownPredicatesFromStore?: boolean | {
+        limit?: number;
+    };
 }
 export declare const ClaimKeyOptionsSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
     knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
     detectContested: z.ZodOptional<z.ZodBoolean>;
+    knownPredicatesFromStore: z.ZodOptional<z.ZodUnion<readonly [
+        z.ZodBoolean,
+        z.ZodObject<{
+            limit: z.ZodOptional<z.ZodNumber>;
+        }, z.core.$strip>
+    ]>>;
 }, z.core.$strip>;
 
 // ===== dist/clock.d.ts =====
@@ -692,6 +702,10 @@ export interface MemoryStore {
         validFrom: Date | null;
         validUntil: Date | null;
     }): Promise<Memory[]>;
+    listActiveClaimPredicates?(ctx: Ctx, query: {
+        subjectId: string | null;
+        limit: number;
+    }): Promise<string[]>;
     restoreSupersededBy?(ctx: Ctx, supersededById: MemoryId, event: {
         reason?: string;
         actor?: EventActor;
@@ -1248,6 +1262,12 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             enabled: z.ZodBoolean;
             knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
             detectContested: z.ZodOptional<z.ZodBoolean>;
+            knownPredicatesFromStore: z.ZodOptional<z.ZodUnion<readonly [
+                z.ZodBoolean,
+                z.ZodObject<{
+                    limit: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strip>
+            ]>>;
         }, z.core.$strip>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
@@ -1276,6 +1296,12 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             enabled: z.ZodBoolean;
             knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
             detectContested: z.ZodOptional<z.ZodBoolean>;
+            knownPredicatesFromStore: z.ZodOptional<z.ZodUnion<readonly [
+                z.ZodBoolean,
+                z.ZodObject<{
+                    limit: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strip>
+            ]>>;
         }, z.core.$strip>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -1304,6 +1330,12 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             enabled: z.ZodBoolean;
             knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
             detectContested: z.ZodOptional<z.ZodBoolean>;
+            knownPredicatesFromStore: z.ZodOptional<z.ZodUnion<readonly [
+                z.ZodBoolean,
+                z.ZodObject<{
+                    limit: z.ZodOptional<z.ZodNumber>;
+                }, z.core.$strip>
+            ]>>;
         }, z.core.$strip>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
