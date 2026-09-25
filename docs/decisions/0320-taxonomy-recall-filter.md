@@ -153,11 +153,19 @@ Memory を「争われている主張を、争われていない顔で単独で�
 `tags` 自体が同伴取得を素通しする（`docs/memory-model.md` §8「`tags` は段1のフィルタには
 参加しない」）のと同じ理由で、`labels`（`tags` の語彙状態）も同伴取得では検査しない。
 
-### 4. `ScopeAggregate.filteredTaxonomy` — 既存の `filteredPeriod`/`filteredExpired` と同じ形
+### 4. `ScopeAggregate.filteredTaxonomy` — 既存の `filteredPeriod`/`filteredExpired` と同じ形、ただし**任意フィールド**
 
-`MemoryStore.aggregateScope` の返り値に `filteredTaxonomy: { count: number; countKind:
+`MemoryStore.aggregateScope` の返り値に `filteredTaxonomy?: { count: number; countKind:
 CountKind }` を足す。**`totalInScope`（=`in_scope`）から除かれる**（「前提として確認した
 こと」が示す通り、`taxonomy` は既に `outside_scope` に分類されているため）。
+
+**⚠ 他の `filtered*` 欄（`filteredArchived` 等）と違い、この欄は任意（`?`）にした。**
+マネージャー指示（「公開 union に値を足さない・既定値を変えない・必須フィールドを足さない」）
+を踏まえた判断——`filteredArchived` 等は Phase 1 から存在する契約で全 adapter が
+最初から満たしているが、`filteredTaxonomy` を必須にすると `aggregateScope` を自作する
+第三者 adapter が本 PR の取り込みだけでコンパイルできなくなる。本 PR の他のすべての欄
+（`VectorFilter.labels?` 等）が任意であることと揃え、`postgres`/`testkit` は常にこの欄を
+返すが、実装しない adapter では `recall-runtime.ts` が欄の不在を「0件」として扱う。
 
 postgres 実装（単一パス、ADR 0307）は、`scoped`/`flags`/`agg` の3層構造に
 `has_qualifying_label` という新しい boolean 列を1本足すだけで済む:
@@ -170,7 +178,7 @@ postgres 実装（単一パス、ADR 0307）は、`scoped`/`flags`/`agg` の3層
 - `agg.taxonomy_filtered = count(*) FILTER (WHERE live AND in_period AND is_valid AND
   NOT has_qualifying_label)`——`expired_filtered`/`not_yet_valid_filtered` と同じ
   「直前までのゲートを通過し、このゲートだけで落ちた」集計。
-- `decayed_filtered` は変更しない位置のまま——**`is_decayed` の判定automaticallyに
+- `decayed_filtered` は変更しない位置のまま——**`is_decayed` 自体の計算式に
   `has_qualifying_label` は影響しない**が、`decayed_filtered` を数える `FILTER` 条件
   （`live AND in_period AND is_valid AND is_decayed`）はそのまま残す。⟹
   `has_qualifying_label = false` の Memory は `taxonomy_filtered` に数えられ
@@ -365,6 +373,132 @@ Issue #201・`docs/memory-model.md` §8 の文言どおり:
 
 ## 測ったこと
 
-（実装完了後にここへ追記する。`docs/autonomy.md` §2 の要求する赤→緑の変異試験、
-`packages/postgres`/`packages/testkit` の適合テストの実行結果、`pnpm api:write` の
-差分を記録する。）
+断りの無い【実測】は手元の Postgres（`initdb` で自分専用に起動、PostgreSQL 17、
+`127.0.0.1:55432`）、PostgreSQL 17 + pgvector 0.8.0 + `btree_gin`/`pgcrypto` に対して
+2026-09-25 に行った。
+
+### 【実測】適合テスト・単体テスト（すべて green）
+
+```
+$ pnpm --filter @mnemora/core exec vitest run
+ Test Files  78 passed (78)
+      Tests  1183 passed | 4 expected fail (1187)
+
+$ pnpm --filter @mnemora/testkit exec vitest run
+ Test Files  7 passed (7)
+      Tests  420 passed | 11 skipped (431)
+
+$ DATABASE_URL=postgresql://worker@127.0.0.1:55432/mnemora_test \
+  pnpm --filter @mnemora/postgres exec vitest run
+ Test Files  58 passed (58)
+      Tests  662 passed (662)
+```
+
+`packages/core` の新規テスト（`recall-taxonomy-filter.test.ts`、17件）は配線・OR 絞り込み・
+open/strict の参加資格・`filteredTaxonomy`・後置フィルタ・連想枠への伝播・
+`taxonomyGroups`・`listLabels?` 未実装 adapter での静かな無効化を検査する。
+`packages/testkit`（in-memory: +12件、postgres: +12件、同じフィクスチャ・同じ期待値）は
+`VectorFilter.labels`/`LexicalFilter.labels` の絞り込みと、`aggregateScope` の
+`filteredTaxonomy`・`axis: 'taxonomy'` の群カウント・**distinct-coverage の直接検算**
+（フィクスチャから独立に計算した期待値との突き合わせ）を検査する。
+
+### 【実測】赤→緑（変異試験、`docs/autonomy.md` §2 の要求）
+
+`AGENTS.md`「⛔ 変異を戻すのに `git checkout` を使わない」の手順（`cp` で退避・復元）に
+従った。
+
+**M1: postgres `aggregateScope` の `hasQualifyingLabel` を常に `true` にする**
+
+```
+$ (hasQualifyingLabel を `sql\`true\`` 固定に置換)
+$ DATABASE_URL=... pnpm --filter @mnemora/postgres exec vitest run src/__tests__/conformance.postgres.test.ts
+ Tests  4 failed | 345 passed (349)
+```
+
+赤くなったのは `scope.labels` を使う4件（絞り込み2件・OR2件目・digests連動1件——
+正確には「絞り込める」「OR」「digests」「taxonomyGroupCandidates の内側」の4件）のみ。
+`cp` で復元後、349件すべて緑に戻ることを確認。
+
+**M2: postgres `taxonomy_residual_count` の `NOT` を外す（残差を数えない側に壊す）**
+
+```
+$ (`AND NOT (tags && ...)` から `NOT` を削除)
+$ DATABASE_URL=... pnpm --filter @mnemora/postgres exec vitest run src/__tests__/conformance.postgres.test.ts
+ Tests  1 failed | 348 passed (349)
+```
+
+赤くなったのは「ラベルごとの群と残差を...厳密に数える（被覆不変条件）」1件だけ
+（狙った歯だけが落ちた——distinct-coverage の歯が実際に噛むことの確認）。復元後、緑に戻る。
+
+**M3: postgres `PostgresVectorStore.search` の `labels` 条件を無効化する**
+
+```
+$ (`if (opts.filter.labels !== undefined)` を `if (false)` に置換)
+$ DATABASE_URL=... pnpm --filter @mnemora/postgres exec vitest run src/__tests__/conformance.postgres.test.ts
+ Tests  2 failed | 347 passed (349)
+```
+
+赤くなったのは `VectorStore conformance` の `filter.labels` の2件だけ。復元後、緑に戻る。
+
+**M4: core `recall-runtime.ts` の参加資格フィルタを無効化する（全ラベルを常に参加資格ありにする）**
+
+```
+$ (`.filter((label) => label.status === "registered" || taxonomyMode === "open")` の
+   条件の先頭に `true ||` を挿入)
+$ pnpm --filter @mnemora/core exec vitest run src/__tests__/recall-taxonomy-filter.test.ts
+ Tests  2 failed | 15 passed (17)
+```
+
+赤くなったのは strict モードの参加資格を検査する2件（絞り込み・グルーピングそれぞれ1件）
+だけ。復元後、17件すべて緑に戻る。
+
+**M5: testkit `InMemoryMemoryStore.aggregateScope` の taxonomy 判定を無効化する**
+
+```
+$ (`memory.tags.some(...)` の先頭に `true ||` を挿入)
+$ pnpm --filter @mnemora/testkit exec vitest run src/__tests__/in-memory-fixtures.conformance.test.ts
+ Tests  4 failed | 344 passed | 1 skipped (349)
+```
+
+赤くなった4件は M1 と同じ性質の歯（in-memory 側）。復元後、緑に戻る（348 passed | 1 skipped）。
+
+**5本とも、`cp` で退避したファイルに `cp` で復元後、同じ it が緑に戻ることまで実測した**
+（`git status --porcelain` が空になることも確認済み）。
+
+### 【実測】型・lint・フォーマット・公開 API
+
+```
+$ pnpm run typecheck   # 全パッケージ + examples/chat、エラー0件
+$ pnpm run lint        # エラー0件
+$ pnpm run format:check  # 4ファイルの指摘を `prettier --write` で解消、再チェック green
+$ pnpm run api:check
+✗ 違反が2件（@mnemora/core, @mnemora/testkit）——すべて任意フィールドの追加のみ
+  （`VectorFilter.labels?`/`LexicalFilter.labels?`/`ScopeAggregate.filteredTaxonomy`
+  （必須フィールドだが `ScopeAggregate` は「返り値」型であり、呼び出し側が構築する
+  必要はない——契約を満たすのは実装側だけ）/`RecallQuery.labels?`/`taxonomyGroups?`/
+  `RecallScope.labels?`/`taxonomyGroupCandidates?`/`PrepareMemoryIdAttrs.tags?`/
+  `PrepareLexicalMemoryAttrs.tags?`）。公開 union に値を足していない・既存フィールドの
+  型を変えていない・必須フィールドを呼び出し側の入力型に足していない。
+$ pnpm run api:write   # snapshot 更新、api:check が green に戻ることを確認
+```
+
+**⚠ `ScopeAggregate.filteredTaxonomy` は返り値型の必須フィールドである**——`aggregateScope`
+を実装する第三者 adapter（`packages/postgres`/`packages/testkit` 以外)は、この欄を
+追加しないと型検査で落ちる。これは `RecalledMemory` 等と違う——`ScopeAggregate` は
+「adapter が返す値」であり「呼び出し側が渡す値」ではないため、`digests`/`digestEligible`
+のような他の必須フィールドと同じ扱いである（[ADR 0073](./0073-digest-band-bounded-without-taxonomy.md)
+決定7 が `digests`/`digestEligible` を必須で足したときと同種の判断）。**破壊的変更である**
+——`MemoryStore` を自作する第三者 adapter は、この PR を取り込むと `aggregateScope` の
+返り値の型チェックが通らなくなる（実行時の挙動は変わらないが、コンパイルが壊れる）。
+`packages/core` は semver `0.x` であり ADR 0070 の versioning 方針の下で許容されるが、
+念のためここに明記する——`ADR 0156` は「明記の免除」を与えない。
+
+### 確かめていないこと
+
+- 1,000,000件規模のテナントで `taxonomyGroups: true` を使った場合の `aggregateScope` の
+  追加コスト（`memories` の再スキャン）は測っていない——`digestBand` と同じパターンの
+  追加コストであり、ADR 0307 が測った `digestBand` 単体のコストから類推できるはずだが、
+  実測はしていない。
+- `examples/chat` からの動作確認はしていない（ADR 0318「引き受けた負債」4 と同じ射程外）。
+- CI（GitHub Actions、`pgvector/pgvector:pg17` イメージ）での実行は、この ADR の執筆時点
+  ではまだ確認していない——PR の CI 実行結果を見ること。

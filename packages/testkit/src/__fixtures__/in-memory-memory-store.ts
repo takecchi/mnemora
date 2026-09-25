@@ -970,7 +970,12 @@ export class InMemoryMemoryStore implements MemoryStore {
         groups.push({ axis: "taxonomy" as const, key, count, countKind: "exact" as const });
       }
       if (residual > 0) {
-        groups.push({ axis: "taxonomy" as const, key: null, count: residual, countKind: "exact" as const });
+        groups.push({
+          axis: "taxonomy" as const,
+          key: null,
+          count: residual,
+          countKind: "exact" as const,
+        });
       }
     }
 

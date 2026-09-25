@@ -1211,9 +1211,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // （ADR 0320「決定1」）——`memory_labels`/`labels` を JOIN せず `tags` の配列の重なり
     // だけで判定できる。
     const hasQualifyingLabel =
-      scope.labels !== undefined
-        ? sql`(tags && ${sql.param(scope.labels)}::text[])`
-        : sql`true`;
+      scope.labels !== undefined ? sql`(tags && ${sql.param(scope.labels)}::text[])` : sql`true`;
     const occurredAfter = scope.occurredAfter ?? null;
     const occurredBefore = scope.occurredBefore ?? null;
 
@@ -1508,7 +1506,12 @@ export class PostgresMemoryStore implements MemoryStore {
       }
       const residualCount = row.taxonomy_residual_count ?? 0;
       if (residualCount > 0) {
-        groups.push({ axis: "taxonomy" as const, key: null, count: residualCount, countKind: "exact" });
+        groups.push({
+          axis: "taxonomy" as const,
+          key: null,
+          count: residualCount,
+          countKind: "exact",
+        });
       }
     }
 

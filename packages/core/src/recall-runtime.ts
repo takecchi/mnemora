@@ -340,8 +340,7 @@ export async function runRecall(
   // **`deps.memoryStore.listLabels?` が無い adapter では、両方とも静かに無効化される**
   // ——`resolvedLabelsFilter`/`resolvedTaxonomyGroupCandidates` は `undefined` のまま。
   // ADR 0318 が確立した「任意メソッド未実装は機能が無いだけ」の規律（エラーにしない）。
-  const wantsLabelsFilter =
-    validatedQuery.labels !== undefined && validatedQuery.labels.length > 0;
+  const wantsLabelsFilter = validatedQuery.labels !== undefined && validatedQuery.labels.length > 0;
   const wantsTaxonomyGroups = validatedQuery.taxonomyGroups === true;
   let resolvedLabelsFilter: string[] | undefined;
   let resolvedTaxonomyGroupCandidates: string[] | undefined;
@@ -1847,8 +1846,11 @@ export async function runRecall(
   }
   // Issue #201 PR-B（ADR 0320）: `RecallQuery.labels` による絞り込みで落ちた件数。
   // `period`/`expired`/`not_yet_valid` と同じ扱い——`count === 0`（絞り込み無し、
-  // または落ちた Memory が0件）では積まない。
-  if (aggregate.filteredTaxonomy.count > 0) {
+  // または落ちた Memory が0件）では積まない。`aggregate.filteredTaxonomy` 自体が
+  // 任意フィールドである（`ScopeAggregate.filteredTaxonomy` の doc 参照）——実装しない
+  // adapter では欄そのものが無く、その場合は「0件」と同じ扱いにする（`labels`/
+  // `taxonomyGroups` を渡さない呼び出しと同じ「機能が無いだけ」の規律）。
+  if (aggregate.filteredTaxonomy !== undefined && aggregate.filteredTaxonomy.count > 0) {
     omitted.push({
       kind: "filtered",
       condition: "taxonomy",

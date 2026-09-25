@@ -31,6 +31,16 @@ import {
  * `PostgresMemoryStore.aggregateScope` の SQL を**そのまま書き写した**参照実装である。
  * ⛔ **この関数は書き換えない**——「旧実装が何を返していたか」の固定された記録として、
  * 新実装（`memory-store.ts`）の変更から独立に保つ。
+ *
+ * **⚠ 唯一の例外（2026-09-25、Issue #201 PR-B、
+ * [ADR 0320](../../../docs/decisions/0320-taxonomy-recall-filter.md)）**:
+ * `ScopeAggregate.filteredTaxonomy` が新設の**必須**フィールドになったため、
+ * この関数の返り値もこの型を満たすには何かを書かなければ型検査が通らない。
+ * **SQL・計算ロジックは1行も変えていない**——`filteredTaxonomy: { count: 0,
+ * countKind: 'exact' }` を返り値の末尾に固定値として足しただけである。当時の実装は
+ * taxonomy という概念自体を持たなかったので「0」以外の値を計算しようがない
+ * （この歯のどのフィクスチャも `scope.labels` を渡さないため、新実装側の
+ * `filteredTaxonomy.count` も常に0になり、比較は成立する）。
  */
 
 const TENANT = "agg-scope-oracle-tenant";
@@ -223,6 +233,8 @@ async function oracleAggregateScope(
     filteredExpired: { count: row.expired_filtered, countKind: "exact" },
     filteredNotYetValid: { count: row.not_yet_valid_filtered, countKind: "exact" },
     filteredDecayed: { count: row.decayed_filtered, countKind: "exact" },
+    // Issue #201 PR-B（ADR 0320）: クラス doc の「唯一の例外」参照。
+    filteredTaxonomy: { count: 0, countKind: "exact" },
     digests,
     digestEligible,
   };

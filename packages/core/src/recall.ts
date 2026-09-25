@@ -876,8 +876,19 @@ export interface ScopeAggregate {
    * **`filteredDecayed`（下）より先に評価される**——`decayed` はスコープ内に在る
    * Memory の到達しにくさのゲートであり、taxonomy で既に除外された Memory は
    * `filteredDecayed` の対象集合にも入らない（`aggregateScope` の実装コメント参照）。
+   *
+   * 🔴 **任意フィールドである。** `ScopeAggregate` の他の `filtered*` 欄
+   * （`filteredArchived` 等）は必須だが、それらは Phase 1 から存在する契約であり、
+   * `aggregateScope` を実装するすべての adapter が最初から満たしている。**この欄を
+   * 必須にすると、`aggregateScope` を自作する第三者 adapter（`@mnemora/core` は npm
+   * 公開済み）が本 PR の取り込みだけでコンパイルできなくなる**——`VectorFilter.labels?`/
+   * `RecallScope.labels?` 等、本 PR の他のすべての欄が任意である（新しい機能は追加のみ、
+   * 既存の実装を壊さない）のと不整合になる。`postgres`/`testkit` は常にこの欄を返すが、
+   * 実装しない adapter では `recall-runtime.ts` がこの欄の不在を「0件」として扱う
+   * （`labels`/`taxonomyGroups` を渡さない呼び出しと同じ「機能が無いだけ」の扱い、
+   * ADR 0318 が確立した規律）。
    */
-  filteredTaxonomy: { count: number; countKind: CountKind };
+  filteredTaxonomy?: { count: number; countKind: CountKind };
   /**
    * Issue #329 / [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
    * 忘却ゲート（`decay_floor_at` / `decay_floor_seq`）が落とした件数

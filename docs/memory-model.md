@@ -563,9 +563,8 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 （`migrations/0020_taxonomy_labels.sql`、既存 `memories.tags` からの backfill を含む）。
 `MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・`registered`
 への昇格ができ、`TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?`（任意メソッド）
-で `taxonomy_mode` を読み書きできる。**ただし前倒ししたのは保存・語彙の口だけであり、
-`labels` を使った recall の絞り込み（上の表が言う「段1への参加」に相当するもの）は
-まだ実装していない**（PR-B、未着地）——この点で `attributes` とはまだ非対称である。
+で `taxonomy_mode` を読み書きできる。**前倒ししたのは保存・語彙の口だけであり、
+`labels` を使った recall の絞り込みは PR-B（下記追記）で実装した。**
 
 **さらに、本節の冒頭が書いている「`strict` モードが変えるのは『`proposed` なラベルが
 検索の*フィルタ・加点*に参加できるか』だけである」のうち、*加点*の側は実装しない
@@ -573,8 +572,17 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 `tagMatch`（`tags` の生の一致数による加点、`recall.md` §7）は、`taxonomy_mode` の値に
 関わらず今日と同じ計算をし続ける。** 変えると、`strict` なテナントの既存スコアが
 この PR によって動いてしまう（呼び出し側の挙動を1バイトも変えないという制約に反する）。
-`strict` が実際に効くのは、`labels` を使った**新しい**絞り込み（PR-B、まだ実装していない）
-に対してだけになる予定である。
+`strict` が実際に効くのは、`labels` を使った**新しい**絞り込みに対してだけである
+（下記追記のとおり実装済み）。
+
+**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0320](./decisions/0320-taxonomy-recall-filter.md)）:
+上の「PR-B、まだ実装していない」は、本追記の時点で古い。** `RecallQuery.labels?`/
+`taxonomyGroups?` を実装した——recall の段1（ANN・語彙）・段3.5（連想枠）・
+`aggregateScope` への絞り込みの伝播、`taxonomy_mode` の参加資格（open: registered/proposed
+両方、strict: registered のみ）、`FilteredOmission.condition: 'taxonomy'` の報告、
+`GroupCount.axis: 'taxonomy'`（呼び手が明示したときだけ）のいずれも着地している。
+**`tagMatch`（上）は引き続き変えていない**——`docs/recall.md`「taxonomy によるラベルの
+絞り込みと群カウント」節、ADR 0320 を参照。
 
 ---
 
