@@ -1,0 +1,1835 @@
+{
+  "measuredAt": "2026-09-24T21:02:22.055Z",
+  "commit": "8142ae95dfec49011660fca18f986805e8d86d29",
+  "llmMode": "openai",
+  "embeddingMode": "openai",
+  "qualityClaimable": true,
+  "trials": [
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 142,
+      "inputEstimatedTokens": 115
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 216,
+      "inputEstimatedTokens": 177
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 142,
+      "inputEstimatedTokens": 115
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 216,
+      "inputEstimatedTokens": 177
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 142,
+      "inputEstimatedTokens": 115
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 216,
+      "inputEstimatedTokens": 177
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 142,
+      "inputEstimatedTokens": 115
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 216,
+      "inputEstimatedTokens": 177
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 142,
+      "inputEstimatedTokens": 115
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 216,
+      "inputEstimatedTokens": 177
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 105,
+      "inputEstimatedTokens": 81
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 167,
+      "inputEstimatedTokens": 133
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 105,
+      "inputEstimatedTokens": 81
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 167,
+      "inputEstimatedTokens": 133
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 105,
+      "inputEstimatedTokens": 81
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 167,
+      "inputEstimatedTokens": 133
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 105,
+      "inputEstimatedTokens": 81
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 167,
+      "inputEstimatedTokens": 133
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 105,
+      "inputEstimatedTokens": 81
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 167,
+      "inputEstimatedTokens": 133
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 100,
+      "inputEstimatedTokens": 69
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 102,
+      "inputEstimatedTokens": 76
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 106,
+      "inputEstimatedTokens": 82
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 113,
+      "inputEstimatedTokens": 89
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 169,
+      "inputEstimatedTokens": 135
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 113,
+      "inputEstimatedTokens": 89
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 169,
+      "inputEstimatedTokens": 135
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 113,
+      "inputEstimatedTokens": 89
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 169,
+      "inputEstimatedTokens": 135
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 113,
+      "inputEstimatedTokens": 89
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 169,
+      "inputEstimatedTokens": 135
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 113,
+      "inputEstimatedTokens": 89
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 169,
+      "inputEstimatedTokens": 135
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 115,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 181,
+      "inputEstimatedTokens": 130
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 115,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 181,
+      "inputEstimatedTokens": 130
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 115,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 181,
+      "inputEstimatedTokens": 130
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 115,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 181,
+      "inputEstimatedTokens": 130
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 2,
+      "inputChars": 115,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 181,
+      "inputEstimatedTokens": 130
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 83,
+      "inputEstimatedTokens": 62
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 61
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 118,
+      "inputEstimatedTokens": 93
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 99,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 76,
+      "inputEstimatedTokens": 55
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 108,
+      "inputEstimatedTokens": 80
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 76,
+      "inputEstimatedTokens": 55
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 108,
+      "inputEstimatedTokens": 80
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 76,
+      "inputEstimatedTokens": 55
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 108,
+      "inputEstimatedTokens": 80
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 76,
+      "inputEstimatedTokens": 55
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 108,
+      "inputEstimatedTokens": 80
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 76,
+      "inputEstimatedTokens": 55
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 108,
+      "inputEstimatedTokens": 80
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 93,
+      "inputEstimatedTokens": 71
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 59
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 114,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 59
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 114,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 59
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 114,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 59
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 114,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 82,
+      "inputEstimatedTokens": 59
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 4,
+      "inputChars": 114,
+      "inputEstimatedTokens": 83
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 97,
+      "inputEstimatedTokens": 74
+    }
+  ],
+  "aggregate": [
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    }
+  ]
+}

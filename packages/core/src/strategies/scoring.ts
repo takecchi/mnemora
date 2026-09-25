@@ -69,9 +69,61 @@ export interface ScoringInput {
   decayBaseSeq?: number | null;
   /** `Memory.halfLifeRecalls`。活動時計での Memory 単位の半減期。 */
   halfLifeRecalls?: number | null;
+  /**
+   * **段2の時間項の方針**（Issue #690、
+   * [ADR 0300](../../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
+   *
+   * **省略時は {@link DEFAULT_TIME_WEIGHTING_POLICY}（`"legacy"`）。**⟹ この欄を渡さない
+   * 呼び出しの `decay`/`freshness`/`total` は1バイトも変わらない
+   * （歯: `packages/core/src/__tests__/scoring-time-weighting-policy.test.ts`）。
+   *
+   * `"legacy"` と `"eventAwareFreshness"` の違いは `freshness` の計算にのみ現れる
+   * （{@link TimeWeightingPolicy} の doc 参照）。`decay`/`tagMatch`/`strength`/`affinity` は
+   * どちらの値でも同じ式で計算される——**時間の重み付けの方針が動かすのは `freshness` だけ**
+   * であり、忘却ゲート（`decay_floor_at`/`decay_floor_seq`）・`validAt` ゲートは
+   * この欄を一切参照しない（`recall-runtime.ts` の段1押し下げ・後置フィルタの述語を見ること）。
+   */
+  timeWeighting?: TimeWeightingPolicy;
 }
 
 export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
+
+/**
+ * **段2の時間項の方針**（Issue #690、
+ * [ADR 0300](../../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
+ *
+ * - `"legacy"`: 本 ADR より前の式そのまま。`freshness` は常に
+ *   `occurredAt ?? recordedAt` を起点にした減衰係数（`MAX_FRESHNESS` で頭打ち）。
+ *   `occurredAt` が無い記憶（恒常的な事実・好み）は `recordedAt`（記録した時刻）の
+ *   古さで沈み続ける——`decay`（`lastReinforcedAt` 起点。`reinforce` で若返る）と
+ *   同じ半減期を使うため、**使われ続けている記憶でも `freshness` だけが二重に
+ *   減衰する**（ADR 0300 §1 が指摘する現象）。
+ * - `"eventAwareFreshness"`: `occurredAt == null` のとき `freshness` を
+ *   `MAX_FRESHNESS`（1）に固定する。`occurredAt` が在るとき（＝実際に出来事時刻を
+ *   持つ記憶）は `"legacy"` と完全に同じ式を使う——**事件の順位付けは1文字も
+ *   変えない**（ADR 0300 §2 のケース B・C が陽性対照として `total` の完全一致を
+ *   固定している）。
+ *
+ * **⛔ どちらの値でも `decay` は変えない。**`decay`（使用の新しさ、`reinforce` で
+ * 若返る）と `freshness`（内容の新しさ、出来事時刻の古さ）は独立な軸のままである
+ * ——分離するはずの2軸を、別の形でまた結合しない（ADR 0300 §4.2 が「起点を
+ * 共有させる」案を却下した理由そのもの）。
+ *
+ * **⚠ 値の一覧をここに散文で二重に書かない。**唯一の出所は {@link TIME_WEIGHTING_POLICIES}
+ * である（`RecallQuerySchema` の `z.enum(TIME_WEIGHTING_POLICIES)` が読む。ADR 0082 が
+ * `TICK_SUPPORTED_JOB_KINDS` について引いた線と同じ）。
+ */
+export const TIME_WEIGHTING_POLICIES = ["legacy", "eventAwareFreshness"] as const;
+
+/** {@link TIME_WEIGHTING_POLICIES} の要素型。 */
+export type TimeWeightingPolicy = (typeof TIME_WEIGHTING_POLICIES)[number];
+
+/**
+ * `ScoringInput.timeWeighting` の既定値。**`"legacy"`**——本 ADR 以前の式そのもの。
+ * **この定数を書き換える PR は既定の挙動を変える**
+ * （ADR 0300 §7 が「オーナー判断」として開いたまま残している点）。
+ */
+export const DEFAULT_TIME_WEIGHTING_POLICY: TimeWeightingPolicy = "legacy";
 
 /**
  * `freshness` の上限（[ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md)）。
@@ -97,6 +149,32 @@ export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
  * 機械的に一貫する」という性質が壊れる。**戦略の側で頭打ちにし、減衰関数そのものは変えない。**
  */
 export const MAX_FRESHNESS = 1;
+
+/**
+ * `freshness` の計算そのもの（ADR 0036 の頭打ちに加え、Issue #690 / ADR 0300 の
+ * `timeWeighting` 分岐を1箇所に持つ）。
+ *
+ * - `"legacy"`（既定）: `occurredAt ?? recordedAt` を起点にした減衰係数を `MAX_FRESHNESS`
+ *   で頭打ちにする——本 ADR より前の式そのもの。
+ * - `"eventAwareFreshness"`: `occurredAt == null` のときだけ `MAX_FRESHNESS` を返す
+ *   （減衰式を呼ばない——起点が無いのだから、古びを測る対象そのものが無いという判断。
+ *   ADR 0300 §4.2 案(1)）。`occurredAt` が在るときは `"legacy"` と同じ式を通る。
+ */
+function computeFreshness(input: ScoringInput): number {
+  const timeWeighting = input.timeWeighting ?? DEFAULT_TIME_WEIGHTING_POLICY;
+  if (timeWeighting === "eventAwareFreshness" && input.occurredAt == null) {
+    return MAX_FRESHNESS;
+  }
+  return Math.min(
+    MAX_FRESHNESS,
+    defaultDecayStrategy.strengthAt(input.now, {
+      recordedAt: input.occurredAt ?? input.recordedAt,
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: input.halfLifeHours,
+    }),
+  );
+}
 
 function computeTagMatch(tags: string[], queryTags: string[]): number {
   const tagSet = new Set(tags);
@@ -245,16 +323,7 @@ function computeDecay(input: ScoringInput): number {
 
 const scoreWithDefaultStrategy: ScoringStrategy = (input) => {
   const decay = computeDecay(input);
-
-  const freshness = Math.min(
-    MAX_FRESHNESS,
-    defaultDecayStrategy.strengthAt(input.now, {
-      recordedAt: input.occurredAt ?? input.recordedAt,
-      lastReinforcedAt: null,
-      strength: 1,
-      halfLifeHours: input.halfLifeHours,
-    }),
-  );
+  const freshness = computeFreshness(input);
 
   const tagMatch = computeTagMatch(input.tags, input.queryTags);
   const similarity = input.similarity;

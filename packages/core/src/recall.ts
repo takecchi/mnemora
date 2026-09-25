@@ -2,6 +2,8 @@ import { z } from "zod";
 import type { MemoryId, RecallId } from "./ids.js";
 import { ProvenanceKindSchema } from "./provenance.js";
 import type { ProvenanceKind } from "./provenance.js";
+import { TIME_WEIGHTING_POLICIES } from "./strategies/scoring.js";
+import type { TimeWeightingPolicy } from "./strategies/scoring.js";
 
 /**
  * 件数そのものの「無いの種類」（docs/recall.md §4）。
@@ -1428,6 +1430,34 @@ export interface RecallQuery {
    * **別の subject の Memory を混ぜることはない**（ADR 0286「採らなかった案」）。
    */
   includeSubjectless?: boolean;
+  /**
+   * **段2（再スコア）の時間項の方針を明示的に選ぶ**
+   * （Issue #690、[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
+   *
+   * **省略時は `"legacy"`**（{@link DEFAULT_TIME_WEIGHTING_POLICY}、`ScoringInput.timeWeighting`
+   * と同じ既定）——この欄を渡さない呼び出しの `recall()` 結果は1バイトも変わらない。
+   *
+   * `"legacy"` の `freshness` は `occurredAt ?? recordedAt` を起点にした減衰係数であり、
+   * `decay`（`lastReinforcedAt` 起点、`reinforce` で若返る）と同じ半減期を使う。
+   * ⟹ `occurredAt` が無い記憶（恒常的な事実・好み）は、使われ続けていても
+   * `recordedAt` の古さで `freshness` だけが沈み続ける（Issue #690 が指摘した
+   * 「時間の二重減衰」）。
+   *
+   * **`"eventAwareFreshness"` を渡すと**、`occurredAt` が無い記憶の `freshness` を
+   * 1（頭打ちの上限、ADR 0036 の `MAX_FRESHNESS`）に固定する。`occurredAt` が在る記憶
+   * （実際に出来事時刻を持つもの）は `"legacy"` と完全に同じ式のままであり、
+   * 事件の順位付けは変わらない。詳細・比較実測は
+   * [ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md) を参照。
+   *
+   * **⛔ 忘却ゲート（`includeFullyDecayed`）・`validAt` ゲート
+   * （`includeOutsideValidity`）はこの欄と独立である。** どちらの値を渡しても、
+   * 期限切れ（`validUntil` を過ぎた）記憶・減衰しきった記憶は今までどおり除外される
+   * ——この欄が動かすのは段2の順位付けだけであり、段1の候補生成ゲートには一切渡らない。
+   *
+   * **既定を `"eventAwareFreshness"` にするかどうかはオーナー判断であり、本 ADR の
+   * 時点では決めていない**（ADR 0300 §7、`v2.0.0` の候補）。
+   */
+  timeWeighting?: TimeWeightingPolicy;
 }
 
 /**
@@ -1588,6 +1618,8 @@ export const RecallQuerySchema = z.object({
   includeOutsideValidity: z.boolean().optional(),
   association: RecallAssociationQuerySchema.optional(),
   includeSubjectless: z.boolean().optional(),
+  // 一覧を書き写さない——TIME_WEIGHTING_POLICIES から導く（Issue #690、ADR 0300）。
+  timeWeighting: z.enum(TIME_WEIGHTING_POLICIES).optional(),
 }) satisfies z.ZodType<RecallQuery>;
 
 /**

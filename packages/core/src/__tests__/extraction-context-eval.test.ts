@@ -26,6 +26,14 @@ import recording from "./fixtures/extraction-context-recorded.eval.json" with { 
 // (subjectId=tanaka, provenanceKind=stated)、digest/content のどちらにも具体的な対象
 // （"19時"）が残っていない。eval-a1（場所の参照解決）は通っているが、時刻の参照解決は
 // この録音では未達だった。ADR 0299「未評価の範囲」・PR #694 本文に明記する。
+//
+// ⚠ Issue #704 (branch fix/704-extraction-context-time) が同じ入力を無変更のコードに
+// 対して10回叩き直したところ、9/10 で「19時」が残った
+// （packages/core/src/__tests__/fixtures/extraction-context-eval-a2-reproduction.json、
+// ADR 0299 追記節）。この it.fails が指す「未達」は依然としてこの1回の記録の事実だが、
+// それを「プロンプトが時刻を系統的に落とす」という結論には広げないこと——再現性データは
+// むしろ逆（10回に1回程度の変動）を示している。ADR 0299 追記節に、それでもプロンプトを
+// 変えなかった理由（recorded development cases の道連れ破壊）を書いてある。
 const KNOWN_UNMET_CASE_IDS = new Set(["eval-a2-meeting-time-reference"]);
 
 function rowFor(id: string) {

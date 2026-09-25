@@ -1,0 +1,63 @@
+answer-time-weighting 段3a: 切り分け実験（Issue #690、マネージャー許可の1ケースのみ実API）。
+
+対象ケース: eval-undated-c1-seat-floor-reinforced（古い予定 old-seat-undated は
+occurredAt/validFrom/validUntilのいずれも持たず、直近に reinforce されている。
+現行の予定 current-seat は occurredAt/validFrom を持つ）。
+
+各方針20回 × 2通り（temperature未指定 / temperature=0）。生データ:
+answer-time-weighting-stage3a-isolation.json（TimeWeightingTrialResult[]、
+contextDiagnostics 込み）。標準出力そのまま:
+answer-time-weighting-stage3a-isolation.log。
+
+## (a) 古い予定(old-seat-undated)が文脈の上位に入った回数
+
+| policy | temperature | rank1(順位1位) | 文脈に入った(enteredContext) |
+|---|---|---|---|
+| legacy | 未指定 | 0/20 | 0/20 |
+| legacy | 0 | 0/20 | 0/20 |
+| eventAwareFreshness | 未指定 | 20/20 | 20/20 |
+| eventAwareFreshness | 0 | 20/20 | 20/20 |
+
+⟹ eventAwareFreshness は temperature に関係なく、古い予定(occurredAt/validFrom/
+validUntil無し・reinforce済み)を**常に**rank1・文脈入りさせる。これは
+recall()側の挙動であり、LLMのサンプリング（temperature）に一切依存しない
+——contextDiagnosticsは診断用recall()のスコア内訳から直接出しており、
+LLM呼び出しより前に決まっている。
+
+## (b) gradeAnswer での正答数
+
+| policy | temperature | pass/20 |
+|---|---|---|
+| legacy | 未指定 | 20/20 |
+| legacy | 0 | 20/20 |
+| eventAwareFreshness | 未指定 | 7/20 |
+| eventAwareFreshness | 0 | **0/20** |
+
+⟹ legacy は temperature に関係なく常に正答する（古い予定がそもそも文脈に
+入らないため）。eventAwareFreshness は、古い予定が常に文脈に入るにも関わらず、
+temperature未指定（既定1.0、サンプリングあり）では7/20（35%）は正答している
+——LLMが文脈中の「先週、座席が5階に移動した」という文面のほうを選んだ回が
+一定数あったことを示す。**しかし temperature=0（決定的サンプリング）では
+0/20——毎回同じ入力プロンプトに対して毎回同じ誤答をする、完全に再現する
+退行である。**
+
+## 呼び出し回数・費用（2設定合計）
+- chat.completions.create: 40回×2 = 80回
+- embeddings.create: 120回×2 = 240回
+- 概算費用: $0.000818（未指定）+ $0.000817（temperature=0）= $0.001635
+
+## 段2bからの累計費用
+段2b run1($0.003639) + run2($0.004032) + 段3a($0.001635) = $0.009306
+（上限$1に対し十分小さい）
+
+## 結論（データのみ。判断はマネージャーに委ねる）
+- この退行は「LLMのサンプリングの偶然」ではなく、**recall()のスコアリングが
+  構造的に古い予定を rank1・文脈入りさせ続ける**ことが根本原因である
+  （contextDiagnosticsが100%の再現率でそれを示している）。
+- gradeAnswerの正答率がtemperature未指定で7/20と完全な0ではなかったのは、
+  文脈に古い予定と新しい予定の両方が入っていて、LLM側の解釈でたまたま
+  正しいほうを選べていたケースがあったため（temperature=0でその偶然が
+  無くなり0/20になった）。
+- ⟹ eval-undated-c1-seat-floor-reinforced のシナリオ（occurredAt/validFrom/
+  validUntilを一切持たない、reinforce済みの古い予定）は、eventAwareFreshness
+  にとって設計上の弱点として実測で確認された。

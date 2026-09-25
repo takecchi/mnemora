@@ -24,6 +24,9 @@
     "consolidation-cost": "tsx src/cli.ts consolidation-cost",
     "archive-sweep-cost": "tsx src/cli.ts archive-sweep-cost",
     "answer": "tsx src/cli.ts answer",
+    "answer-time-weighting": "tsx src/cli.ts answer-time-weighting",
+    "answer-trials": "tsx src/cli.ts answer-trials",
+    "answer-trials-compare": "tsx src/cli.ts answer-trials-compare",
     "correction-candidates": "tsx src/cli.ts correction-candidates",
     "record": "tsx src/cli.ts record retrieval",
     "verify": "tsx src/cli.ts verify retrieval",
@@ -31,6 +34,8 @@
     "verify:compare": "tsx src/cli.ts verify compare",
     "record:answer": "tsx src/cli.ts record answer",
     "verify:answer": "tsx src/cli.ts verify answer",
+    "record:answer-time-weighting": "tsx src/cli.ts record answer-time-weighting",
+    "verify:answer-time-weighting": "tsx src/cli.ts verify answer-time-weighting",
     "record:answer-retention-mutation": "tsx src/scripts/record-answer-retention-mutation.ts"
   },
   "dependencies": {

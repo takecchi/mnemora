@@ -1680,6 +1680,73 @@ digest 本文だけでなく `RecalledMemory` の `provenanceKind`（由来）�
 
 ---
 
+## `answer-trials` / `answer-trials-compare`: 同じ記憶集合で n 回試行し、正答数で見る（Issue #705、ADR 0301）
+
+🔴 **背景（ADR 0295 追記2）**: `answer` は1ケース1回しか試行しない。回答モデルの答えが
+揺れるケース（`schedule-change-meeting-day`）を1回だけ試したことで、PR #698 は
+「退行は消えた」と誤判定した——実際には後で15回試行して初めて 3/15 まで割れることが
+分かった。**しかもその対照は、対照Aと対照Bが別々の抽出・recall で得た別の記憶集合の
+上で回っていた**——同じ記憶集合であることを器が確かめていなかった。
+
+`answer-trials` はこの2つの穴（1回しか試行しない・記憶集合が揃っているか確かめない）を
+埋める。
+
+```
+pnpm --filter @mnemora/example-chat run answer-trials
+MNEMORA_ANSWER_TRIALS_N=10 OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run answer-trials
+MNEMORA_ANSWER_TRIALS_JSON=/tmp/answer-trials.json OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run answer-trials
+```
+
+- ⛔ **DB を使わない。** `DATABASE_URL` は不要——`src/answer-trials-material.ts` が
+  `examples/chat/cassettes/answer.json`（`record answer` が実 API で記録済みのカセット）
+  から、dev 6件（`answer-case-set.dev.ts`。**eval は扱わない**——下記「決めたこと」参照）
+  それぞれの mnemora 経路の回答プロンプトを読み、由来・話者・主題・矛盾候補・記録順・
+  出来事時刻・digest の構造へ戻す。**この module は DB・埋め込み・抽出・recall を
+  一切 import しない**——別の抽出・別の recall で「別の記憶集合」を作ってしまう経路が
+  構造的に無い。
+- **描画 A（`recorded`）/ 描画 B（`digest-only`）は、同じ材料オブジェクトから作る**
+  （`src/answer-trials-render.ts`）。A は現行の `buildMnemoraPrompt` と同じ形を
+  再構成する——**再構成した内容がカセットの原文と完全一致することを毎回検査し、
+  ずれれば例外にする。** B は由来等のタグを一切付けない digest 行だけの描画（ADR 0295
+  追記2 の「digest のみ」列と同じ形）。
+- **材料指紋・カセットの sha256** を出力の先頭に必ず出す。`answer-trials-compare` は
+  この2つを突き合わせ、一致しなければ exit 1 にする——「対照Aと対照Bが同じ記憶集合の
+  上で回っている」ことを、ADR 0295 追記2 のように後から気づくのではなく、器自身に
+  確かめさせる。
+- n（既定5、`MNEMORA_ANSWER_TRIALS_N`）回ずつ答えさせ、ケースごと・描画ごとに
+  `gradeAnswer`（一次判定、LLM を呼ばない）の pass/fail/indeterminate 件数を数える。
+  モデル（`gpt-4o-mini`）・`temperature`（**プロバイダ既定のまま**——
+  `OpenAILLMProvider.complete` は `temperature` を一切渡していない。数値を捏造しない）・
+  トークン使用量・概算費用（`usage-meter.ts` を再利用。2026-09 時点の公開価格表による
+  概算であり、OpenAI の請求 API から取得した実額ではない）を出力する。
+- **`OPENAI_API_KEY` が無ければ実 API を一度も呼ばず、「未評価（実 API が無い）」と
+  明示して exit 0 にする。** `recorded` provider への黙ったフォールバックはしない——
+  描画 B（digest-only）はそもそも一度も記録されたことが無い入力であり、`recorded` は
+  記録に無い入力を例外にする（ADR 0051）。
+
+```
+pnpm --filter @mnemora/example-chat run answer-trials-compare -- a.json b.json
+```
+
+`answer-trials` の結果 JSON（`MNEMORA_ANSWER_TRIALS_JSON` で書き出したもの）を2件以上
+突き合わせる。カセットの sha256 かケースごとの材料指紋が一致しなければ、どこが
+ずれたか（どのラベルがどの値か）を表示して exit 1。一致すれば正答数を並べて表示して
+exit 0。
+
+### 決めたこと（詳細は [ADR 0301](../../docs/decisions/0301-answer-trials-same-memory-set.md)）
+
+- **CI の門にしない。** `.github/workflows/ci.yml` には配線しない——揺れる意味評価を
+  門にしないという Issue #693 の線をそのまま踏襲する。
+- **n 回の試行結果はカセットに記録として残さない。** カセット（ADR 0051）は「記録した
+  実 API の応答の再生」であり、この器の目的（揺れを毎回実測すること）とは相性が悪い
+  ——n 回の試行を1回だけ記録して再生すると、「揺れを見る」という器の目的を裏切る形で
+  「揺れない」ことになる。
+- **eval（`answer-case-set.eval.ts`）は今回は受け付けない。** 材料抽出器は
+  `ANSWER_CASE_SET_DEV` の6件だけをカセットから引き当てる設計になっている——
+  「明示フラグが無ければ使わない」より一歩進めて、そもそも配線していない。
+
+---
+
 ## この会話生成（`src/scenario.ts`）について
 
 `buildConversation(fillerPairs)` は乱数を使わない決定的な関数——同じ `fillerPairs` を

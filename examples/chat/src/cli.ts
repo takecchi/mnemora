@@ -114,6 +114,22 @@ import {
   formatAnswerQualityBanner,
   formatAnswerTable,
 } from "./answer-format.js";
+import {
+  aggregateTimeWeightingResults,
+  createTimeWeightingBenchRuntime,
+  runTimeWeightingBench,
+} from "./time-weighting-bench.js";
+import { TIME_WEIGHTING_CASE_SET_DEV } from "./time-weighting-case-set.dev.js";
+import { TIME_WEIGHTING_CASE_SET_EVAL } from "./time-weighting-case-set.eval.js";
+import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "./time-weighting-case-set.eval-undated.js";
+import { buildTimeWeightingJson } from "./time-weighting-json.js";
+import {
+  formatTimeWeightingKindSummary,
+  formatTimeWeightingQualityBanner,
+  formatTimeWeightingTable,
+} from "./time-weighting-format.js";
+import { runAnswerTrialsCompareFromFiles } from "./answer-trials-compare.js";
+import { formatAnswerTrialsReport, runAnswerTrials } from "./answer-trials.js";
 
 /** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
 const DEFAULT_CHAT_FILLER_PAIRS = 8;
@@ -980,6 +996,56 @@ async function recordAnswer(
 }
 
 /**
+ * `answer-time-weighting` の記録（Issue #690 / PR #697）。`recordAnswer` と同じ規律——
+ * 毎回新しい tenantId（`runId` を含める）で走らせる。
+ *
+ * ⚠ **trial は1回だけ記録する。** カセットは「プロンプトのハッシュ→応答」の連想配列
+ * なので、同じ質問・同じ記憶状態に対する複数 trial はどのみち同じ鍵に畳まれる
+ * （`answer-time-weighting-bench.ts` の docstring・マネージャー指示「trial 間で
+ * プロンプトが同じなら LLM 値もキャッシュ再生で同じになる」）——記録時に trial を
+ * 増やしても記録される内容は増えない。
+ */
+async function recordTimeWeighting(
+  databaseUrl: string,
+  recorder: CassetteRecorder,
+  runId: number,
+): Promise<void> {
+  console.log("\n########## 記録中: answer-time-weighting ##########");
+  // 🔴 マネージャー決定（段3b）: この記録は temperature=0 で固定する——段3a の
+  // 切り分け（`bench-results/STAGE3A-NOTES.txt`）で、temperature 未指定（既定1.0）は
+  // 同じ入力でも gradeAnswer の正誤が run ごとに揺れることを実測した。カセットは
+  // 「記録した時点の応答」を固定して再生するものなので、揺れの少ない temperature=0 で
+  // 録ることで、再生（CI・cassette-coverage）の判定が安定する。
+  const handle = await createTimeWeightingBenchRuntime(
+    databaseUrl,
+    { ...process.env, MNEMORA_LLM: "openai", MNEMORA_EMBEDDING: "openai" },
+    { recorder, llmTemperature: 0 },
+  );
+  printProviderMode(handle, null);
+  try {
+    const cases = [
+      ...TIME_WEIGHTING_CASE_SET_DEV,
+      ...TIME_WEIGHTING_CASE_SET_EVAL,
+      ...TIME_WEIGHTING_CASE_SET_EVAL_UNDATED,
+    ];
+    const results = await runTimeWeightingBench(
+      handle,
+      cases,
+      `answer-time-weighting-record-${runId}`,
+      1,
+    );
+    const aggregate = aggregateTimeWeightingResults(results);
+    console.log(`\n${formatTimeWeightingTable(aggregate, handle.llmMode)}`);
+    console.log(formatTimeWeightingKindSummary(aggregate, handle.llmMode));
+    if (handle.usageMeter) {
+      console.log(`\n${handle.usageMeter.formatReport()}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
  * 実 API の応答を記録してカセットに書き出す（ADR 0051 / 0052）。
  *
  * **再生する当のものをそのまま走らせて録る。**probe set や会話生成を読んで
@@ -1007,8 +1073,10 @@ async function runRecord(target: CassetteTarget): Promise<void> {
     await recordRetrieval(databaseUrl, recorder, runId);
   } else if (target === "compare") {
     await recordCompare(databaseUrl, recorder, runId);
-  } else {
+  } else if (target === "answer") {
     await recordAnswer(databaseUrl, recorder, runId);
+  } else {
+    await recordTimeWeighting(databaseUrl, recorder, runId);
   }
 
   const cassette = recorder.toCassette();
@@ -1876,6 +1944,172 @@ async function runAnswer(): Promise<void> {
 }
 
 /**
+ * `--trials=N` を argv から読む。省略時は1（マネージャー決定「既定1、評価は5」——
+ * この既定値そのものは変えない。評価時は呼び出し側が `--trials=5` を明示する）。
+ */
+function parseTimeWeightingTrials(argv: readonly string[]): number {
+  const flag = argv.find((a) => a.startsWith("--trials="));
+  if (flag === undefined) {
+    return 1;
+  }
+  const value = Number(flag.slice("--trials=".length));
+  if (!Number.isInteger(value) || value < 1) {
+    throw new Error(`--trials は1以上の整数であること（実際: ${flag}）。`);
+  }
+  return value;
+}
+
+/**
+ * `--temperature=N` を argv から読む。省略時は `undefined`（既定は渡さない——
+ * `OpenAILLMProvider`/`CreateProvidersOptions` の既定と同じ規律。`llmMode !== "openai"`
+ * のときは無視される）。段3b でこの run 自身を temperature=0 に固定して再現性を
+ * 上げるために使う（`bench-results/STAGE3A-NOTES.txt` 参照）。
+ */
+function parseTimeWeightingTemperature(argv: readonly string[]): number | undefined {
+  const flag = argv.find((a) => a.startsWith("--temperature="));
+  if (flag === undefined) {
+    return undefined;
+  }
+  const value = Number(flag.slice("--temperature=".length));
+  if (!Number.isFinite(value)) {
+    throw new Error(`--temperature は数値であること（実際: ${flag}）。`);
+  }
+  return value;
+}
+
+/**
+ * `answer-time-weighting` サブコマンド（Issue #690 / PR #697）。
+ *
+ * 🔴 **`answer` サブコマンドとは測る問いが違う。** `answer` は naive/mnemora の配線
+ * 検査、こちらは `RecallQuery.timeWeighting`（ADR 0300）を**回答の正誤**で比べる——
+ * 記憶を抽出 LLM を通さず直接書き、reinforce し、壁時計を進めてから、同じ質問を
+ * `legacy`/`eventAwareFreshness` の両方で recall→回答生成→採点する
+ * （`time-weighting-bench.ts` の docstring参照）。
+ *
+ * provider の解決は `answer`/`compare`/`retrieval` と同じ規律
+ * （`resolveRecordedRun`）。`--trials=N`（既定1）と `--dev`（開発用ケース集合に絞る。
+ * 既定は dev + eval の両方）を argv から読む。
+ */
+async function runTimeWeighting(): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const measuredAt = new Date();
+  const commit = tryGitRevParseHead(process.cwd());
+  const argv = process.argv.slice(3);
+  const trials = parseTimeWeightingTrials(argv);
+  const useDevOnly = argv.includes("--dev");
+  const temperature = parseTimeWeightingTemperature(argv);
+
+  const plan = resolveRecordedRun("answer-time-weighting");
+  const providerOptions =
+    temperature !== undefined
+      ? { ...plan.providerOptions, llmTemperature: temperature }
+      : plan.providerOptions;
+  const handle = await createTimeWeightingBenchRuntime(databaseUrl, plan.env, providerOptions);
+  const banner = formatTimeWeightingQualityBanner(handle.llmMode);
+  if (banner) {
+    console.log(banner);
+  }
+  printProviderMode(handle, plan.plannedSource);
+  try {
+    console.log(
+      "\n記憶を直接書き、reinforce し、壁時計を進めてから、同じ質問を legacy/" +
+        `eventAwareFreshness の両方で recall→回答生成→採点する（trials=${trials}` +
+        `${temperature !== undefined ? `, temperature=${temperature}` : ""}）。\n` +
+        (useDevOnly
+          ? "⛔ --dev: 開発用ケース集合のみ（調整に使ってよい側。未使用の評価として報告しないこと）。\n"
+          : ""),
+    );
+    const cases = useDevOnly
+      ? TIME_WEIGHTING_CASE_SET_DEV
+      : [
+          ...TIME_WEIGHTING_CASE_SET_DEV,
+          ...TIME_WEIGHTING_CASE_SET_EVAL,
+          ...TIME_WEIGHTING_CASE_SET_EVAL_UNDATED,
+        ];
+    const results = await runTimeWeightingBench(handle, cases, "answer-time-weighting", trials);
+    const aggregate = aggregateTimeWeightingResults(results);
+
+    console.log(formatTimeWeightingTable(aggregate, handle.llmMode));
+    console.log(formatTimeWeightingKindSummary(aggregate, handle.llmMode));
+    if (handle.usageMeter) {
+      console.log(`\n${handle.usageMeter.formatReport()}`);
+    }
+
+    const jsonPath = process.env.MNEMORA_TIME_WEIGHTING_JSON;
+    if (jsonPath) {
+      const json = buildTimeWeightingJson({
+        results,
+        aggregate,
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        measuredAt,
+        commit,
+      });
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(`\n[answer-time-weighting] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * `answer-trials` サブコマンド（Issue #705、ADR 0301）。
+ *
+ * 🔴 **`answer` とは別の器である。** `answer` は12ケースを1回ずつ回して naive/mnemora の
+ * 最終回答・入力量を対で出す（配線の検査）。**この器は dev 6件だけを、`examples/chat/cassettes/answer.json`
+ * に記録済みの mnemora 経路プロンプトから読んだ**同じ記憶集合**の上で、描画 A（recorded）/
+ * B（digest-only）ごとに n 回ずつ答えさせ、正答数（`gradeAnswer` の pass/fail/indeterminate）
+ * で見る（ADR 0295 追記2 が見つけた「1回の試行では揺れが見えない」ことへの対応）。
+ *
+ * ⛔ **DB を使わない。** `DATABASE_URL` は不要——材料はカセットの静的な読み出しだけで作る
+ * （`answer-trials-material.ts` は DB・埋め込み・抽出・recall を一切 import しない）。
+ *
+ * ⛔ **CI の門にしない**（Issue #705 完了条件・#693 の線）。`.github/workflows/ci.yml` には
+ * 配線しない——手元で回す観測用の CLI である（ADR 0301）。
+ */
+async function runAnswerTrialsCommand(): Promise<void> {
+  const result = await runAnswerTrials({ env: process.env });
+  console.log(formatAnswerTrialsReport(result));
+
+  const jsonPath = process.env.MNEMORA_ANSWER_TRIALS_JSON;
+  if (jsonPath) {
+    writeFileSync(jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf-8");
+    console.log(`\n[answer-trials] 機械可読な結果を書き出した: ${jsonPath}`);
+  }
+  // ⭐ 未評価（実 API が無い）は exit 0 のまま——「実行できなかった」ことを画面と JSON に
+  // 明示するのが目的であり、実行環境（鍵の有無）を落とす理由にしない（Issue #705 完了条件）。
+}
+
+/**
+ * `answer-trials-compare` サブコマンド（Issue #705、ADR 0301）。
+ *
+ * `answer-trials` の実行結果 JSON を2件以上突き合わせ、カセットの sha256 か
+ * ケースごとの材料指紋が一致しなければ、どこがずれたかを表示して exit 1。一致すれば
+ * 並べて表示して exit 0（Issue #705 完了条件2、ADR 0295 追記2 の見落としの再発防止）。
+ */
+async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
+  // `pnpm run answer-trials-compare -- a.json b.json` では pnpm が `--` をそのまま渡してくる
+  // （実測: `--` をファイルとして開こうとして ENOENT）。パスではないので落とす。
+  const paths = argv.filter((a) => a !== "--");
+  if (paths.length < 2) {
+    console.error(
+      "answer-trials-compare には比較対象の JSON パスを2件以上指定すること" +
+        "（例: answer-trials-compare a.json b.json）。",
+    );
+    process.exitCode = 1;
+    return;
+  }
+  const { ok, report } = runAnswerTrialsCompareFromFiles(paths);
+  console.log(report);
+  // ⭐ 副作用のある手（exit の判定）を判定と同じ行に繋がない——`ok` を見てから
+  // ここで明示的に立てる（docs/autonomy.md §4.1）。
+  if (!ok) {
+    process.exitCode = 1;
+  }
+}
+
+/**
  * Issue #369 (C)「訂正の口」の相手探しの精度を測る（`correction-candidate-arm.ts`）。
  *
  * **provider は `identifier-probes` と同じ組み合わせに固定する**——LLM は
@@ -1990,17 +2224,32 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer      # naive/mnemora の最終回答・入力量を対で出す(Issue #506)",
       "                                                                      #   🔴 配線の検査であり、回答品質は測っていない(llmMode=deterministic のとき集計を出さない)",
       "                                                                      #   MNEMORA_ANSWER_JSON で機械可読出力",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer-time-weighting",
+      "                                                                      # RecallQuery.timeWeighting(legacy/eventAwareFreshness、Issue #690・ADR 0300)を回答の正誤で比べる",
+      "                                                                      #   -- --trials=N(既定1)・-- --temperature=N(既定は未指定)・-- --dev で開発用ケース集合のみ。MNEMORA_TIME_WEIGHTING_JSON で機械可読出力",
+      "  pnpm --filter @mnemora/example-chat run answer-trials",
+      "                                                                      # 同じ記憶集合(examples/chat/cassettes/answer.json の記録済みプロンプト)で",
+      "                                                                      #   dev 6件 × 描画A(recorded)/B(digest-only) × n回の正答数を見る(Issue #705、ADR 0301)",
+      "                                                                      #   DB 不要。OPENAI_API_KEY が無ければ実 API を叩かず『未評価』と明示して exit 0",
+      "                                                                      #   MNEMORA_ANSWER_TRIALS_N(既定5)・MNEMORA_ANSWER_TRIALS_RENDERS(既定 recorded,digest-only)・MNEMORA_ANSWER_TRIALS_JSON",
+      "  pnpm --filter @mnemora/example-chat run answer-trials-compare -- a.json b.json",
+      "                                                                      # answer-trials の結果 JSON を2件以上突き合わせ、カセット sha256・ケースごとの材料指紋が",
+      "                                                                      #   一致しなければどこがずれたかを表示して exit 1(Issue #705 完了条件2)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record",
       "                                                                      # retrieval の応答を記録する(ADR 0051)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:compare",
       "                                                                      # compare の応答を記録する(ADR 0052。657回・8〜15分・約$0.023)",
       "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer",
       "                                                                      # answer(naive/mnemora の最終回答 + judge)の応答を記録する(Issue #506。MNEMORA_ANSWER_JSON も書ける)",
+      "  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer-time-weighting",
+      "                                                                      # answer-time-weighting の応答を記録する(Issue #690)",
       "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify   # retrieval の記録と実 API の乖離を測る",
       "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:compare",
       "                                                                      # compare の記録と実 API の乖離を測る",
       "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer",
       "                                                                      # answer の記録と実 API の乖離を測る",
+      "  OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer-time-weighting",
+      "                                                                      # answer-time-weighting の記録と実 API の乖離を測る",
       "",
       "  MNEMORA_PROVIDER_SOURCE=recorded|openai  # retrieval/compare で「キーがあれば実API」を明示的に上書きする(ADR 0068)",
       "                                                                      #   recorded: キーが在ってもカセットを再生する(誤って課金しない)",
@@ -2044,6 +2293,12 @@ async function main(): Promise<void> {
     await runCorrectionCandidates(process.argv.slice(3).includes("--dev"));
   } else if (command === "answer") {
     await runAnswer();
+  } else if (command === "answer-time-weighting") {
+    await runTimeWeighting();
+  } else if (command === "answer-trials") {
+    await runAnswerTrialsCommand();
+  } else if (command === "answer-trials-compare") {
+    await runAnswerTrialsCompareCommand(process.argv.slice(3));
   } else if (command === "record") {
     await runRecord(parseCassetteTarget(process.argv[3]));
   } else if (command === "verify") {

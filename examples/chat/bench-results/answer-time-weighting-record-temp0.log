@@ -1,0 +1,60 @@
+$ tsx src/cli.ts record answer-time-weighting
+
+########## 記録中: answer-time-weighting ##########
+[provider] LLM       : 本物の OpenAI
+[provider] Embedding : 本物の OpenAI
+
+| case | kind | policy | pass/trials |
+|---|---|---|---|
+| dev-a1-tea-over-coffee | reinforced-fact-vs-fresh-weak | eventAwareFreshness | 1/1 |
+| dev-a1-tea-over-coffee | reinforced-fact-vs-fresh-weak | legacy | 0/1 |
+| dev-a2-remote-work-day | reinforced-fact-vs-fresh-weak | eventAwareFreshness | 1/1 |
+| dev-a2-remote-work-day | reinforced-fact-vs-fresh-weak | legacy | 0/1 |
+| dev-b1-phone-model | old-event-not-outrank-new | eventAwareFreshness | 1/1 |
+| dev-b1-phone-model | old-event-not-outrank-new | legacy | 1/1 |
+| dev-b2-current-project | old-event-not-outrank-new | eventAwareFreshness | 1/1 |
+| dev-b2-current-project | old-event-not-outrank-new | legacy | 1/1 |
+| dev-c1-meeting-schedule | expired-schedule-not-outrank-current | eventAwareFreshness | 1/1 |
+| dev-c1-meeting-schedule | expired-schedule-not-outrank-current | legacy | 1/1 |
+| dev-c2-gym-plan | expired-schedule-not-outrank-current | eventAwareFreshness | 1/1 |
+| dev-c2-gym-plan | expired-schedule-not-outrank-current | legacy | 1/1 |
+| eval-a1-window-seat | reinforced-fact-vs-fresh-weak | eventAwareFreshness | 1/1 |
+| eval-a1-window-seat | reinforced-fact-vs-fresh-weak | legacy | 0/1 |
+| eval-a2-doc-tool | reinforced-fact-vs-fresh-weak | eventAwareFreshness | 1/1 |
+| eval-a2-doc-tool | reinforced-fact-vs-fresh-weak | legacy | 0/1 |
+| eval-b1-pet | old-event-not-outrank-new | eventAwareFreshness | 1/1 |
+| eval-b1-pet | old-event-not-outrank-new | legacy | 1/1 |
+| eval-b2-relocation | old-event-not-outrank-new | eventAwareFreshness | 1/1 |
+| eval-b2-relocation | old-event-not-outrank-new | legacy | 1/1 |
+| eval-c1-internet-plan | expired-schedule-not-outrank-current | eventAwareFreshness | 1/1 |
+| eval-c1-internet-plan | expired-schedule-not-outrank-current | legacy | 1/1 |
+| eval-c2-work-shift | expired-schedule-not-outrank-current | eventAwareFreshness | 1/1 |
+| eval-c2-work-shift | expired-schedule-not-outrank-current | legacy | 1/1 |
+| eval-undated-b1-department-reinforced | old-event-undated-vs-new | eventAwareFreshness | 1/1 |
+| eval-undated-b1-department-reinforced | old-event-undated-vs-new | legacy | 1/1 |
+| eval-undated-b2-hobby-not-reinforced | old-event-undated-vs-new | eventAwareFreshness | 1/1 |
+| eval-undated-b2-hobby-not-reinforced | old-event-undated-vs-new | legacy | 1/1 |
+| eval-undated-c1-seat-floor-reinforced | expired-schedule-undated-vs-current | eventAwareFreshness | 1/1 |
+| eval-undated-c1-seat-floor-reinforced | expired-schedule-undated-vs-current | legacy | 1/1 |
+| eval-undated-c2-standup-day-not-reinforced | expired-schedule-undated-vs-current | eventAwareFreshness | 1/1 |
+| eval-undated-c2-standup-day-not-reinforced | expired-schedule-undated-vs-current | legacy | 1/1 |
+
+--- 類型ごとの正答率（legacy vs eventAwareFreshness） ---
+  reinforced-fact-vs-fresh-weak: legacy=0/4, eventAwareFreshness=4/4
+  old-event-not-outrank-new: legacy=4/4, eventAwareFreshness=4/4
+  expired-schedule-not-outrank-current: legacy=4/4, eventAwareFreshness=4/4
+  old-event-undated-vs-new: legacy=2/2, eventAwareFreshness=2/2
+  expired-schedule-undated-vs-current: legacy=2/2, eventAwareFreshness=2/2
+
+--- OpenAI API 実測（usage-meter） ---
+chat.completions.create: 呼び出し 22 回 / prompt_tokens=3447 / completion_tokens=173
+embeddings.create      : 呼び出し 48 回 / prompt_tokens=1041
+費用（2026-09 時点の公開価格表による概算。OpenAI の請求 API から取得した実額ではない）:
+  LLM input  : $0.000517
+  LLM output : $0.000104
+  Embedding  : $0.000021
+  合計       : $0.000642
+
+書き出した: /tmp/mgr-026e33d5/mnemora/examples/chat/cassettes/answer-time-weighting.json
+  記録日時=2026-09-24T21:41:06.107Z LLM=gpt-4o-mini(22件) 埋め込み=text-embedding-3-small/256次元(48件)
+  ⚠ これはこの時点の API の姿の記録である。モデルが更新されても記録は変わらない——乖離は `verify` で確かめること（ADR 0051 の「引き受ける負債」）。
