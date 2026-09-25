@@ -2737,28 +2737,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * の `subject` 誤帰属だと分かった」）への対処、ADR 0333: `deriveClaimKeys` へ渡す
    * `knownSubjects` を決める。
    *
-   * `ClaimKeyOptions.knownSubjects`（呼び出し側が明示的に渡した語彙）を**優先**し、
-   * 省略されていれば `subjectCandidates`（Issue #608 項目②(b)、この observe() 呼び出しに
-   * 渡された抽出用の主題候補一覧）を**既定値として転用する**——ADR 0333 決定2。
+   * **`ClaimKeyOptions.knownSubjects`（呼び出し側が明示的に渡した語彙）だけを見る。**
+   * `subjectCandidates`（Issue #608 項目②(b)、この observe() 呼び出しに渡された抽出用の
+   * 主題候補一覧）への暗黙の転用は行わない——ADR 0333 追記（2026-09-26）参照。
+   *
+   * ⚠ **当初案は `knownSubjects` 省略時に `subjectCandidates` を既定値として転用して
+   * いたが、取り下げた。** `claimKey.enabled: true` と `subjectCandidates` を既存で
+   * 併用している呼び出し側が、この opt-in（`knownSubjects`）を一切選んでいないのに
+   * claim key プロンプト・カセット鍵が動いてしまう——「off のときのプロンプトは1バイトも
+   * 変えない」（`buildClaimKeyPrompt` の doc コメント）に反する。`subjectCandidates` を
+   * ヒントに転用したい呼び出し側は、同じ配列を明示的に `claimKeyOptions.knownSubjects`
+   * へ渡すこと。
    *
    * ⚠ **store から動的に集める版（`knownPredicatesFromStore` の対）は意図的に実装して
    * いない**（ADR 0333「採らなかった案」）。store が自己蓄積した `claim_key_subject` の
    * 値（LLM が自由記述で作った曖昧な値になりがち）を汎用語彙として横流しすると、
    * 無関係な話題の主張にまでその値が誤って使い回される汚染を実測で確認したため
    * （`claim-key.ts` の `ClaimKeyOptions.knownSubjects` doc コメント参照）。
-   * `subjectCandidates` は呼び出し側がその場で選ぶ**静的な**候補一覧であり、
-   * 店の履歴を自己蓄積したものではないため、この汚染は起きない（ADR 0333 決定2の
-   * ceiling 実測が根拠）。
    */
-  function resolveKnownSubjects(
-    claimKeyOptions: ClaimKeyOptions,
-    subjectCandidates: readonly string[] | undefined,
-  ): string[] | undefined {
+  function resolveKnownSubjects(claimKeyOptions: ClaimKeyOptions): string[] | undefined {
     if (claimKeyOptions.knownSubjects !== undefined && claimKeyOptions.knownSubjects.length > 0) {
       return claimKeyOptions.knownSubjects;
-    }
-    if (subjectCandidates !== undefined && subjectCandidates.length > 0) {
-      return [...subjectCandidates];
     }
     return undefined;
   }
@@ -2823,7 +2822,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     let claimKeyFailure: ExtractionFailure | null = null;
     if (claimKeyOptions?.enabled === true) {
       const knownPredicates = await resolveKnownPredicates(ctx, observation, claimKeyOptions);
-      const knownSubjects = resolveKnownSubjects(claimKeyOptions, subjectCandidates);
+      const knownSubjects = resolveKnownSubjects(claimKeyOptions);
       const derived = await deriveClaimKeys(
         deps.llmProvider,
         ctx,

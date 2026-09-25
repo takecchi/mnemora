@@ -1120,8 +1120,8 @@ export interface MemoryStore {
    * 横流しすると、無関係な話題の主張にまでその値が誤って使い回される汚染を実測で確認した
    * ——predicate 側で起きる語彙の使い回し（ADR 0329「負債1」）より一段深刻（別人の
    * claim key `subject` を取り違えて同一視しうる）。`ClaimKeyOptions.knownSubjects` は
-   * 呼び出し側が明示的に渡す静的な語彙（`runtime.observe` の `subjectCandidates` を既定値に
-   * 転用する）だけをサポートする——詳細は ADR 0333。
+   * 呼び出し側が明示的に渡す静的な語彙だけをサポートする（`subjectCandidates` への
+   * 暗黙の転用はしない——ADR 0333 追記〔2026-09-26〕）——詳細は ADR 0333。
    */
   listActiveClaimPredicates?(
     ctx: Ctx,

@@ -1,4 +1,4 @@
-# ADR 0333: claim key の `subject` 誤帰属を、`knownSubjects` 語彙ヒント（`subjectCandidates` 転用）で減らす — store 自己蓄積版は実測で汚染を確認し採らない（Issue #372負債6）
+# ADR 0333: claim key の `subject` 誤帰属を、明示的な `knownSubjects` 語彙ヒントで減らす — store 自己蓄積版・`subjectCandidates` への暗黙の転用は、いずれも実測・設計検討の末に採らない（Issue #372負債6）
 
 - **状態**: 採用 (2026-09-26)
 - **日付**: 2026-09-26
@@ -184,7 +184,7 @@ listActiveClaimSubjects?`）を実装し、**同じ手法で実測した**。
 **深刻**（別人の主張を同一人物のものとして扱う）であり、店が自己蓄積した曖昧値を
 無条件に横流しする設計のままでは出荷できないと判断した。
 
-### 決定4: 採用する形——`ClaimKeyOptions.knownSubjects`（明示）＋ `subjectCandidates` の自動転用
+### 決定4: 採用する形——`ClaimKeyOptions.knownSubjects`（呼び出し側が明示的に渡したときだけ効く）
 
 決定2・決定3を踏まえ、**呼び出し側が渡す静的な候補一覧**だけを対象にする:
 
@@ -194,24 +194,36 @@ listActiveClaimSubjects?`）を実装し、**同じ手法で実測した**。
   両方省略すれば `CLAIM_KEY_PROMPT_SYSTEM` は1バイトも変わらない**
   （`__tests__/claim-key.test.ts` に逐語の一致テストを追加）。
 - `ClaimKeyOptions.knownSubjects?: string[]`（`knownPredicates` と同型）を足した。
-- `runtime.ts` の `runExtraction`: `resolveKnownSubjects(claimKeyOptions,
-  subjectCandidates)` が、`claimKeyOptions.knownSubjects`（渡していれば最優先）→
-  それも無ければ `subjectCandidates`（Issue #608 項目②(b)、`runtime.observe` に
-  同じ呼び出しで渡された抽出用の主題候補一覧）を既定値として使う。**`subjectCandidates`
-  は呼び出し側がその場で選んだ静的な一覧であり、store の履歴を自己蓄積したもの
-  ではない**——決定3で確認した汚染は、値が「店に蓄積された、LLM 自身の過去の
-  自由記述」であることに起因しており、`subjectCandidates`（呼び出し側が最初から
-  持っている候補）には同じ経路で汚染が持ち込まれない（決定2の ON-ceiling 実測が
-  この設計の効き目を直接裏付ける——`subjectCandidates` を静的に渡す条件と ON-ceiling
-  条件は、値の出所が違うだけで機構は同一である）。
+- `runtime.ts` の `runExtraction`: `resolveKnownSubjects(claimKeyOptions)` は
+  **`claimKeyOptions.knownSubjects` だけを見る**。`subjectCandidates`（Issue #608
+  項目②(b)、`runtime.observe` に同じ呼び出しで渡された抽出用の主題候補一覧）が
+  渡されていても、`knownSubjects` を省略すればヒントには一切使わない。
+
+⚠ **当初案は `knownSubjects` 省略時に `subjectCandidates` を既定値として自動転用する
+設計だった（レビューで指摘を受け、この案は採らないことにした）。** 採らない理由:
+`claimKey.enabled: true` と `subjectCandidates` を**既に**併用している呼び出し側
+（Issue #608 項目②(b) の既存利用者）が、`knownSubjects` という**この ADR で新しく
+足す opt-in を一切選んでいない**のに、claim key 派生の system プロンプト・
+カセット鍵（`llmCassetteKey`）が動いてしまう——「既定 off のプロンプトは1バイトも
+変えない」（決定5、`buildClaimKeyPrompt` の doc コメント）という、この ADR 自身が
+掲げた制約に反する。**`subjectCandidates` と同じ語彙を claim key のヒントにも
+使いたい呼び出し側は、同じ配列を明示的に `claimKeyOptions.knownSubjects` へ渡す**
+——1行の追加で済み、かつ「この opt-in を選んだ」ことがコードから読み取れる
+（`__tests__/runtime.test.ts` の regression テスト「`subjectCandidates` あり・
+`knownSubjects` 省略」でプロンプトが完全に不変であることを固定した）。
+
+**決定2の ON-ceiling 実測（正解ラベルを `knownSubjects` に静的に渡す）は、この設計の
+効き目をそのまま裏付ける**——`subjectCandidates` を経由するかどうかに関わらず、
+`knownSubjects` に正確な語彙が渡ってさえいれば機構は同一である。
 
 ### 決定5: 既定・公開 API は変えない
 
 `ClaimKeyOptions.enabled`/`knownPredicates`/`detectContested`/`knownPredicatesFromStore`
-は1バイトも変えていない。`knownSubjects` は既定 `undefined`（省略）——渡さなければ、
-`subjectCandidates` も渡していない限り `deriveClaimKeys` の system プロンプトは
-決定4以前と1バイトも変わらない。公開 API の変更は次の2箇所だけで、いずれも**末尾へ
-の追加**（`node scripts/check-public-api-surface.mjs` の diff で確認、追加行のみ）:
+は1バイトも変えていない。`knownSubjects` は既定 `undefined`（省略）——**渡さなければ、
+`subjectCandidates` の有無・中身に関わらず** `deriveClaimKeys` の system プロンプトは
+決定4以前と1バイトも変わらない（決定4の「採らなかった当初案」を参照）。公開 API の
+変更は次の2箇所だけで、いずれも**末尾への追加**（`node scripts/
+check-public-api-surface.mjs` の diff で確認、追加行のみ）:
 
 - `buildClaimKeyPrompt`/`deriveClaimKeys` に任意の末尾引数 `knownSubjects` を追加。
 - `ClaimKeyOptions`/`ClaimKeyOptionsSchema` に任意フィールド `knownSubjects` を追加。
@@ -250,8 +262,9 @@ __tests__/runtime-fakes.ts` も同様）。
   既存17件 + 新規6件（off 時の逐語一致・`knownSubjects` の文言追加・空配列規約・
   predicate/subject 併用時の順序）で計23件、全通過。
 - `packages/core exec vitest run src/__tests__/runtime.test.ts` → 既存の claim key
-  関連テストに加え、`knownSubjects`/`subjectCandidates` 転用の6件を新規追加、
-  計127件、全通過（既存回帰なし）。
+  関連テストに加え、`knownSubjects`（明示のときだけ効く・`subjectCandidates` の
+  有無で system が動かない regression を含む）の5件を新規追加、計124件、全通過
+  （既存回帰なし）。
 - `packages/core exec vitest run src/__tests__/schema-type-equals-parity.test.ts` →
   4件、全通過（`ClaimKeyOptions`/`ClaimKeyOptionsSchema` の型一致）。
 - `packages/core exec vitest run src/__tests__/extraction.test.ts
@@ -291,10 +304,8 @@ system プロンプトを共有するため、「この候補だけ `subjectId: 
 使う」という per-item の伝達手段が無い。(b) `subjectCandidates` を渡さない呼び出し
 では `ExtractedMemoryCandidate.subjectId` はそもそも埋まらない（Issue #608 の既定
 挙動）ため、ADR 0324 の real-fixture 実測のような「`subjectCandidates` を渡さない」
-シナリオでは何も渡すものが無い。⟹ 決定4の「`subjectCandidates`（観測全体で共有する
-静的な一覧）をそのままバッチ全体のヒントに転用する」ほうが、既存の設計（ADR 0329
-決定4が `knownPredicates` の合成で `observation.subjectId` を観測全体の既定値として
-使ったのと同じ判断）と整合する。
+シナリオでは何も渡すものが無い。⟹ 呼び出し側が明示的に `knownSubjects` を渡す
+（決定4）ほうが単純であり、per-item の伝達手段が無いという制約にもぶつからない。
 
 ### 案C: 正規化の強化・類義統合（ADR 0320 案B相当）
 
@@ -304,20 +315,44 @@ system プロンプトを共有するため、「この候補だけ `subjectId: 
 
 ⛔ 既に却下済み。文脈節参照。
 
+### 案E: `knownSubjects` 省略時に `subjectCandidates` を既定値として自動転用する（当初案）
+
+決定4に書いたとおり、当初はこの案を採用していた——`subjectCandidates`（呼び出し側が
+その場で選ぶ静的な一覧、店の履歴を自己蓄積したものではない）は決定3で確認した汚染の
+経路（店の自己蓄積）に当たらないため、渡して問題無いと判断していた。**レビューで
+指摘を受け、この判断を覆した**。
+
+**採らない理由**: 「汚染が起きない」ことと「既定 off のプロンプトを変えない」こと
+は別の要求である。`subjectCandidates` は claim key とは独立した既存の口（Issue #608
+項目②(b)、ADR 0287）であり、**`claimKey.enabled: true` と `subjectCandidates` を
+既に併用している呼び出し側が実在しうる**（この ADR より前から両方渡している設計は
+何もおかしくない——`subjectCandidates` は抽出の `subjectId` 判定のために渡すもので
+あり、claim key のためではない）。その呼び出し側にとって、この ADR が足す
+`knownSubjects` という新しい opt-in は「存在すら知らない・選んでいない」機能である。
+にもかかわらず `subjectCandidates` を暗黙に読み替えると、**opt-in していないのに
+claim key 派生の system プロンプト・カセット鍵が動く**——「既定 off のプロンプトは
+1バイトも変えない」という、この ADR 自身の決定5・`buildClaimKeyPrompt` の doc
+コメントが掲げる制約に反する。`ClaimKeyOptions.knownPredicatesFromStore`（ADR 0329）
+も同様に「明示的に `true`/`{ limit }` を渡したときだけ効く」設計であり、既存の別の
+口（`subjectCandidates`）の値を読んで挙動を変える例は無い——本 ADR もその先例に揃える。
+
 ---
 
 ## 引き受けた負債
 
-### 負債1: `subjectCandidates` を渡さない呼び出しでは、この ADR は subject 誤帰属を一切改善しない
+### 負債1: `knownSubjects` を明示的に渡さない呼び出しでは、この ADR は subject 誤帰属を一切改善しない
 
-決定4の設計は `claimKeyOptions.knownSubjects`（明示）か `subjectCandidates`
-（Issue #608 項目②(b)）のどちらかが渡されて初めて効く。**ADR 0324 の real-fixture
-実測自体（`subjectCandidates` を渡さない `observe()` 呼び出し）は、この ADR の変更
-だけでは1件も直らない**——decision 2 の ON-ceiling 実測は「呼び出し側が正解を渡せば
-効く」ことを示しただけであり、「呼び出し側が正解を知らない・渡していない」cold
-start な状況（mnemora が subject の台帳を持たないという設計上の前提、
-`docs/architecture.md` §3.7）には効かない。この負債は ADR 0324 負債6が指摘した
-問題の一部だけに答えている。
+決定4の設計は `claimKeyOptions.knownSubjects` を**呼び出し側が明示的に**渡して
+初めて効く（`subjectCandidates` を渡していても、それだけでは効かない——決定4「採らな
+かった当初案」参照）。**ADR 0324 の real-fixture 実測自体（`knownSubjects` を渡さない
+`observe()` 呼び出し）は、この ADR の変更だけでは1件も直らない**——決定2の ON-ceiling
+実測は「呼び出し側が正解を `knownSubjects` に渡せば効く」ことを示しただけであり、
+「呼び出し側が正解を知らない・渡していない」cold start な状況（mnemora が subject の
+台帳を持たないという設計上の前提、`docs/architecture.md` §3.7）には効かない。この
+負債は ADR 0324 負債6が指摘した問題の一部だけに答えている——**しかもこの ADR は
+「`subjectCandidates` があれば自動で使う」という、より広く効く当初案をレビューで
+明示的に退けている**ため、この負債の射程は当初案より狭い（意図した狭さである、
+決定4参照）。
 
 ### 負債2: `answer` 経路（`examples/chat`）での /14・/4 の実測は行っていない
 
@@ -334,23 +369,26 @@ start な状況（mnemora が subject の台帳を持たないという設計上
 ケースセットに実在することは確認した（`examples/chat/src/answer-case-set.dev.ts`）
 ——次にこの ADR の効果を測るときの自然な入口として記録しておく。
 
-### 負債3: `subjectCandidates` を claim key ヒントへ転用することが、抽出そのものの `subjectId` 判定に副作用を持たないかは実測していない
+### 負債3: 呼び出し側が `subjectCandidates` と同じ配列を `knownSubjects` にも渡した場合、抽出そのものの `subjectId` 判定に副作用を持たないかは実測していない
 
-決定4は `subjectCandidates` を claim key 派生へ**追加で**渡すだけであり、
+決定4は `knownSubjects` を claim key 派生へ**追加で**渡すだけであり、
 `extraction.ts`/`buildExtractionPrompt` の呼び出しには一切触れていない
 （プロンプト・カセット鍵は不変、`__tests__/extraction.test.ts` の既存回帰テストで
-確認済み）。ただし「同じ `subjectCandidates` を2つの独立した LLM 呼び出し
-（抽出・claim key 派生）へ渡したときに、両者が独立に矛盾した判定をしないか」
-（例: 抽出は `subjectId: null` を返すが、claim key 派生は `subject: '妻'` を
-返す、といった不整合）は実測していない。
+確認済み）。**この ADR は `subjectCandidates` を自動では転用しない**（決定4）ため、
+既定では抽出と claim key 派生が別々に判定するだけで、この負債は「呼び出し側が
+意図的に同じ配列を両方へ渡した」場合に限って生じる。ただし「同じ語彙一覧を2つの
+独立した LLM 呼び出し（抽出・claim key 派生）へ渡したときに、両者が独立に矛盾した
+判定をしないか」（例: 抽出は `subjectId: null` を返すが、claim key 派生は
+`subject: '妻'` を返す、といった不整合）は実測していない。
 
-### 負債4: `subjectCandidates` に多数の候補が入っている場合の挙動は測っていない
+### 負債4: `knownSubjects` に多数の候補が入っている場合の挙動は測っていない
 
 決定2の ON-ceiling 実測は6件のラベルで行った。ADR 0329 決定5が predicate 側の
 `DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT` を「実験規模5〜8件の2倍強」として20に
 置いたのと同種の判断——本 ADR は subject 側の上限を一切設けていない（決定3で
 `knownSubjectsFromStore` 自体を採らなかったため、上限を要する動的な蓄積が無い）。
-`subjectCandidates` が数十件に膨らむ呼び出し側の使い方は想定していない・測っていない。
+`knownSubjects`（呼び出し側が明示的に渡す一覧、`subjectCandidates` 由来かどうかに
+関わらず）が数十件に膨らむ呼び出し側の使い方は想定していない・測っていない。
 
 ## 確かめていないこと
 
@@ -365,8 +403,9 @@ start な状況（mnemora が subject の台帳を持たないという設計上
 
 ## これが覆るとしたら
 
-- **`answer` harness が `subjectCandidates` を持てるようになったとき**（負債2）
-  ——`record-answer-claim-key.ts` 相当の実測でこの ADR の効果を検証できる。
+- **`answer` harness がケースへ `knownSubjects`（または `subjectCandidates`）を
+  渡せるようになったとき**（負債2）——`record-answer-claim-key.ts` 相当の実測で
+  この ADR の効果を検証できる。
 - **`knownSubjectsFromStore`（案A）の汚染を解消する設計変更が見つかったとき**
   ——決定3の判断を覆し、store 自己蓄積版を再検討できる。
 - **mnemora が subject の台帳を持つ設計に変わったとき**（`docs/architecture.md`
