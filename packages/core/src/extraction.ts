@@ -529,6 +529,11 @@ export function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMe
     // から複数候補が抽出されると、全候補が同じ区間を共有する（`occurredAt` と同型の限界）。
     validFrom: params.observation.validFrom ?? null,
     validUntil: params.observation.validUntil ?? null,
+    // Issue #152（ADR 0312）: 観測の attributes をそのまま継承する（フォールバック経路
+    // `fallbackWholeObservationCandidate` を含め、この関数を通る全候補が対象）。
+    // 「限定の出所から出た記憶は限定のまま」——落とす方向に倒す（`Memory.attributes` の
+    // doc コメント参照）。
+    attributes: params.observation.attributes ?? {},
     strength: 1,
     halfLifeHours: params.halfLifeHours,
     decayFloorAt,

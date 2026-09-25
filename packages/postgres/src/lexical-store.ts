@@ -111,6 +111,11 @@ export function buildLexicalSearchSelect(
         : sql`subject_id = ${opts.filter.subjectId}`,
     );
   }
+  // Issue #152/#153（ADR 0312）: `PostgresVectorStore.search`（vector-store.ts）と
+  // 同じ述語・同じ意味。
+  if (opts.filter.attributes !== undefined) {
+    conditions.push(sql`attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
+  }
   // ADR 0039: 実効時刻は COALESCE(occurred_at, recorded_at)。両端とも包含（>=/<=）
   // ——`PostgresVectorStore.search`（vector-store.ts）の period 絞りと同じ境界。
   if (opts.filter.occurredAfter !== undefined) {

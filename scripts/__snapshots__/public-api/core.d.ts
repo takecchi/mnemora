@@ -62,6 +62,16 @@ export interface CorrectionReasonInput {
 }
 export declare function buildCorrectionReason(input: CorrectionReasonInput): string;
 
+// ===== dist/attributes.d.ts =====
+import { z } from "zod";
+export type Attributes = Record<string, string>;
+export declare const ATTRIBUTES_MAX_KEYS = 16;
+export declare const ATTRIBUTE_KEY_MIN_LENGTH = 1;
+export declare const ATTRIBUTE_KEY_MAX_LENGTH = 64;
+export declare const ATTRIBUTE_VALUE_MAX_LENGTH = 256;
+export declare const AttributesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
+export declare const StoredAttributesSchema: z.ZodRecord<z.ZodString, z.ZodString>;
+
 // ===== dist/clock.d.ts =====
 import type { Clock } from "./interfaces/clock.js";
 export declare const systemClock: Clock;
@@ -371,6 +381,7 @@ export type RecallId = string;
 // ===== dist/index.d.ts =====
 export * from "./ctx.js";
 export * from "./ids.js";
+export * from "./attributes.js";
 export * from "./provenance.js";
 export * from "./observation.js";
 export * from "./memory.js";
@@ -442,6 +453,7 @@ export interface EventStore {
 }
 
 // ===== dist/interfaces/lexical-store.d.ts =====
+import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import type { MemoryId } from "../ids.js";
 import type { MemoryStatus } from "../memory.js";
@@ -455,6 +467,7 @@ export interface LexicalFilter {
     occurredAfter?: Date;
     occurredBefore?: Date;
     validAt?: Date;
+    attributes?: Attributes;
 }
 export interface LexicalHit {
     memoryId: MemoryId;
@@ -790,6 +803,7 @@ export interface TokenCounter {
 }
 
 // ===== dist/interfaces/vector-store.d.ts =====
+import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { MemoryId } from "../ids.js";
@@ -807,6 +821,7 @@ export interface VectorFilter {
     decayFloorSeqAfter?: number;
     decayFloorAnyAxis?: boolean;
     validAt?: Date;
+    attributes?: Attributes;
 }
 export interface VectorEntry {
     memoryId: MemoryId;
@@ -828,6 +843,7 @@ export interface VectorStore {
 
 // ===== dist/memory.d.ts =====
 import { z } from "zod";
+import type { Attributes } from "./attributes.js";
 import type { MemoryId, ObservationId } from "./ids.js";
 import { type Provenance } from "./provenance.js";
 export type MemoryStatus = "active" | "superseded" | "contested" | "archived" | "forgotten";
@@ -880,6 +896,7 @@ export interface Memory {
     halfLifeRecalls?: number | null;
     embeddingStatus: EmbeddingStatus;
     purgedAt?: Date | null;
+    attributes?: Attributes;
     createdAt: Date;
     updatedAt: Date;
 }
@@ -955,6 +972,7 @@ export declare const MemorySchema: z.ZodObject<{
         ready: "ready";
     }>;
     purgedAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     createdAt: z.ZodDate;
     updatedAt: z.ZodDate;
 }, z.core.$strip>;
@@ -965,6 +983,7 @@ export declare const NewMemorySchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     recordedAt: z.ZodDate;
     occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     tags: z.ZodArray<z.ZodString>;
     tenantId: z.ZodString;
     extractorVersion: z.ZodOptional<z.ZodNullable<z.ZodString>>;
@@ -1032,6 +1051,7 @@ export declare const NewMemorySchema: z.ZodObject<{
 
 // ===== dist/observation.d.ts =====
 import { z } from "zod";
+import type { Attributes } from "./attributes.js";
 import type { ObservationId } from "./ids.js";
 export interface Observation {
     id: ObservationId;
@@ -1044,6 +1064,7 @@ export interface Observation {
     recordedAt: Date;
     validFrom?: Date | null;
     validUntil?: Date | null;
+    attributes?: Attributes;
 }
 export type NewObservation = Omit<Observation, "id" | "recordedAt"> & {
     recordedAt?: Date;
@@ -1059,11 +1080,13 @@ export declare const ObservationSchema: z.ZodObject<{
     recordedAt: z.ZodDate;
     validFrom: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validUntil: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strip>;
 export declare const NewObservationSchema: z.ZodObject<{
     kind: z.ZodString;
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     tenantId: z.ZodString;
     validFrom: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     validUntil: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
@@ -1097,6 +1120,7 @@ export interface ObserveUtteranceInput {
     validUntil?: Date;
     extract?: ExtractMode;
     subjectCandidates?: SubjectCandidatesInput;
+    attributes?: Attributes;
     speaker?: string;
     text: string;
 }
@@ -1110,6 +1134,7 @@ export interface ObserveEventInput {
     validUntil?: Date;
     extract?: ExtractMode;
     subjectCandidates?: SubjectCandidatesInput;
+    attributes?: Attributes;
     name: string;
     data?: Record<string, unknown>;
 }
@@ -1123,6 +1148,7 @@ export interface ObserveDocumentInput {
     validUntil?: Date;
     extract?: ExtractMode;
     subjectCandidates?: SubjectCandidatesInput;
+    attributes?: Attributes;
     title?: string;
     content: string;
 }
@@ -1152,6 +1178,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             deferred: "deferred";
         }>>;
         subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
     }, z.core.$strip>,
@@ -1174,6 +1201,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             deferred: "deferred";
         }>>;
         subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
     }, z.core.$strip>,
@@ -1196,6 +1224,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
             deferred: "deferred";
         }>>;
         subjectCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
     }, z.core.$strip>,
@@ -1479,6 +1508,7 @@ export {};
 
 // ===== dist/recall.d.ts =====
 import { z } from "zod";
+import type { Attributes } from "./attributes.js";
 import type { MemoryId, RecallId } from "./ids.js";
 import type { ProvenanceKind } from "./provenance.js";
 import type { TimeWeightingPolicy } from "./strategies/scoring.js";
@@ -1923,6 +1953,7 @@ export interface RecalledMemory {
     subjectId?: string | null;
     recordedAt?: Date;
     occurredAt?: Date | null;
+    attributes?: Attributes;
 }
 export declare const RecalledMemorySchema: z.ZodObject<{
     memoryId: z.ZodString;
@@ -1956,6 +1987,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     recordedAt: z.ZodOptional<z.ZodDate>;
     occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strip>;
 export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
 export interface StageTrace {
@@ -1980,6 +2012,7 @@ export interface RecallQuery {
     text?: string;
     vector?: number[];
     tags?: string[];
+    attributes?: Attributes;
     occurredAfter?: Date;
     occurredBefore?: Date;
     limit?: number;
@@ -2023,6 +2056,7 @@ export declare const RecallQuerySchema: z.ZodObject<{
     text: z.ZodOptional<z.ZodString>;
     vector: z.ZodOptional<z.ZodArray<z.ZodNumber>>;
     tags: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     occurredAfter: z.ZodOptional<z.ZodDate>;
     occurredBefore: z.ZodOptional<z.ZodDate>;
     limit: z.ZodOptional<z.ZodNumber>;
@@ -2068,6 +2102,7 @@ export interface RecallScope {
     decayFloorSeqAfter?: number;
     decayFloorAnyAxis?: boolean;
     includeSubjectless?: boolean;
+    attributes?: Attributes;
 }
 export declare const RecallScopeSchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodString>;
@@ -2078,6 +2113,7 @@ export declare const RecallScopeSchema: z.ZodObject<{
     decayFloorSeqAfter: z.ZodOptional<z.ZodNumber>;
     decayFloorAnyAxis: z.ZodOptional<z.ZodBoolean>;
     includeSubjectless: z.ZodOptional<z.ZodBoolean>;
+    attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
 }, z.core.$strip>;
 export interface RecallOutputValidationIssue {
     path: string;
@@ -2146,6 +2182,7 @@ export declare const RecallResultSchema: z.ZodObject<{
         subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         recordedAt: z.ZodOptional<z.ZodDate>;
         occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
+        attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
     }, z.core.$strip>>;
     omitted: z.ZodArray<z.ZodDiscriminatedUnion<[
         z.ZodObject<{
@@ -2866,10 +2903,12 @@ export declare function createRuntime(deps: RuntimeDeps): Runtime;
 
 // ===== dist/strategies/consolidate.d.ts =====
 import { z } from "zod";
+import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import type { ScoreBreakdown } from "../recall.js";
+export declare function intersectAttributes(eligible: ReadonlyArray<Pick<Memory, "attributes">>): Attributes;
 export declare const ConsolidationLLMResultSchema: z.ZodObject<{
     content: z.ZodString;
     digest: z.ZodOptional<z.ZodString>;

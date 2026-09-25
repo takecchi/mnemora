@@ -105,6 +105,10 @@ export interface MemoryRow {
   purged_at: string | null;
   created_at: string;
   updated_at: string;
+  // Issue #152/#153（ADR 0312）: `jsonb NOT NULL DEFAULT '{}'`。`pg` は jsonb を
+  // パース済みオブジェクトとして返す（`provenance` 列と同じ扱い——`row.provenance` も
+  // 追加の変換なしに使っている）。
+  attributes: Record<string, string>;
 }
 
 /**
@@ -154,6 +158,7 @@ export function rowToMemory(row: MemoryRow): Memory {
     purgedAt: parsePgTimestamp(row.purged_at),
     createdAt: parsePgTimestamp(row.created_at),
     updatedAt: parsePgTimestamp(row.updated_at),
+    attributes: row.attributes,
   };
 }
 
@@ -190,6 +195,8 @@ export interface ObservationRow {
   recorded_at: string;
   valid_from: string | null;
   valid_until: string | null;
+  // Issue #152（ADR 0312）: `MemoryRow.attributes` の doc コメント参照。
+  attributes: Record<string, string>;
 }
 
 export function rowToObservation(row: ObservationRow): Observation {
@@ -204,6 +211,7 @@ export function rowToObservation(row: ObservationRow): Observation {
     recordedAt: parsePgTimestamp(row.recorded_at),
     validFrom: parsePgTimestamp(row.valid_from),
     validUntil: parsePgTimestamp(row.valid_until),
+    attributes: row.attributes,
   };
 }
 

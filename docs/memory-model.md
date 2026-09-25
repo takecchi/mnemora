@@ -536,31 +536,45 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
   引き続き Phase 2 である。** `tags` が Phase 1 のスコアリングに参加することと、
   `labels` テーブルによる語彙管理が Phase 2 であることは別の軸であり、混同しない。
 
-**⚠ 2026-09-25 追記（Issue #201 PR-A、[ADR 0310](./decisions/0310-taxonomy-labels.md)）:
-`labels`/`memory_labels` を任意の追加として前倒しで実装した。** `migrations/0020_taxonomy_labels.sql`
-がこの節の SQL 案をほぼそのまま実装し、既存 `memories.tags` からの backfill も含む。
-`MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・
-`registered` への昇格ができ、`TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?`
-（任意メソッド）で `taxonomy_mode` を読み書きできる。
+**⚠ 2026-09 追記（Issue #152/#153、[ADR 0312](./decisions/0312-observe-recall-caller-attributes.md)）:
+`memories.attributes`（呼び手が申告する任意属性）を足した。`tags`/`labels` と役割が
+重なって見えるが、3本は「誰が値を決めるか」で分かれている——統合するとむしろ
+北極星の問い4（AI の推論とユーザーが言った事実を区別する）に反する。**
 
-**ただし、この節の冒頭が書いている「`strict` モードが変えるのは『`proposed` なラベルが
+| 軸 | 何を入れるか | 誰が値を決めるか | Phase |
+|---|---|---|---|
+| `tags`（本節・上） | 話題・内容の要約 | **100% LLM の推論**（`buildExtractionPrompt` は語彙・粒度を指示しない） | Phase 1（段2の加点のみ、上記訂正） |
+| `attributes`（新設） | 公開範囲・区分などの**宣言された属性** | **100% 呼び手の申告**（抽出器は一度も読み書きしない） | Phase 1（段1の絞り込みに参加、[recall.md](./recall.md) §2 段0） |
+| `labels` / `memory_labels`（上記 SQL） | **統制語彙**（テナントが登録した語彙） | **repo（スキーマ）が決める語彙に、呼び手が当てる** | Phase 2（未着地） |
+
+**`attributes` は `tags` と違って段1（候補生成）に参加する**——ここが `tags` との
+決定的な違いである。`tags` を段1に混ぜない（本節の訂正）のは「LLM の推論で母集合を
+削ると北極星の問い4に反する」ためだが、`attributes` は呼び手が申告した事実そのもの
+なので、同じ懸念が当たらない。
+
+**⚠ Phase 2 の `labels` が着地したとき、`attributes` はその代わりにならない。**
+`labels` は「テナントが統制する語彙にどれだけ従っているか」を問うものであり、
+`attributes` は「呼び手が何を宣言したか」を問うものである——前者は repo 側が語彙を
+決め、後者は呼び手が値そのものを決める。この違いは `labels` が実装された後も残る。
+
+**⚠ 2026-09-25 追記（Issue #201 PR-A、[ADR 0310](./decisions/0310-taxonomy-labels.md)）:
+上の表の `labels`/`memory_labels` の Phase は「Phase 2（未着地）」と書いてあるが、
+本追記の時点で古い。** `labels`/`memory_labels` を任意の追加として前倒しで実装した
+（`migrations/0020_taxonomy_labels.sql`、既存 `memories.tags` からの backfill を含む）。
+`MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・`registered`
+への昇格ができ、`TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?`（任意メソッド）
+で `taxonomy_mode` を読み書きできる。**ただし前倒ししたのは保存・語彙の口だけであり、
+`labels` を使った recall の絞り込み（上の表が言う「段1への参加」に相当するもの）は
+まだ実装していない**（PR-B、未着地）——この点で `attributes` とはまだ非対称である。
+
+**さらに、本節の冒頭が書いている「`strict` モードが変えるのは『`proposed` なラベルが
 検索の*フィルタ・加点*に参加できるか』だけである」のうち、*加点*の側は実装しない
 方針に変わった。** ADR 0310「決定5」参照——**上の「2026-09 訂正」段落が確立した既存の
 `tagMatch`（`tags` の生の一致数による加点、`recall.md` §7）は、`taxonomy_mode` の値に
 関わらず今日と同じ計算をし続ける。** 変えると、`strict` なテナントの既存スコアが
-本 PR によって動いてしまう（呼び出し側の挙動を1バイトも変えないという制約に反する）。
-`strict` が実際に効くのは、labels を使った**新しい**絞り込み（PR-B、まだ実装していない）
-に対してだけになる予定である。**この段落は上の「決定」本文を書き換えるものではなく、
-実装が進んだことで判明した訂正である**（この文書自身の「訂正は追記する」規律どおり）。
-
-**`attributes`（PR #724、Issue #152/#153）との境界**: `labels` とは別の軸である。
-`attributes` は呼び手が申告する値（mnemora は意味を解釈しない）で、`recall()` の段1へ
-AND 等値で絞り込める。`labels` は `tags`（LLM の推論）に対してテナントが定める統制語彙
-（`registered`/`proposed`）である。「誰が値を決めるか」で3本（`tags`/`attributes`/
-`labels`）の役割が分かれる——詳細な対比表は
-[ADR 0310（本 ADR、taxonomy labels）](./decisions/0310-taxonomy-labels.md)「文脈」節、
-および PR #724 の ADR に置いた（PR #724 は本稿執筆時点でまだ `main` に未着地——
-着地後にこの節へ表を統合するかは、着地時の突き合わせで判断する）。
+この PR によって動いてしまう（呼び出し側の挙動を1バイトも変えないという制約に反する）。
+`strict` が実際に効くのは、`labels` を使った**新しい**絞り込み（PR-B、まだ実装していない）
+に対してだけになる予定である。
 
 ---
 

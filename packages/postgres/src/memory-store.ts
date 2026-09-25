@@ -133,7 +133,7 @@ export class PostgresMemoryStore implements MemoryStore {
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
     const externalId = input.externalId ?? null;
     const inserted = await this.db.execute(sql`
-      INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until)
+      INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
       VALUES (
         gen_random_uuid(),
         ${ctx.tenantId},
@@ -144,7 +144,8 @@ export class PostgresMemoryStore implements MemoryStore {
         ${input.occurredAt ?? null},
         ${input.recordedAt ?? new Date()},
         ${input.validFrom ?? null},
-        ${input.validUntil ?? null}
+        ${input.validUntil ?? null},
+        ${JSON.stringify(input.attributes ?? {})}::jsonb
       )
       ON CONFLICT (tenant_id, external_id) WHERE external_id IS NOT NULL
       DO NOTHING
@@ -193,7 +194,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const externalId = input.externalId ?? null;
     return this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
-        INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until)
+        INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
         VALUES (
           gen_random_uuid(),
           ${ctx.tenantId},
@@ -204,7 +205,8 @@ export class PostgresMemoryStore implements MemoryStore {
           ${input.occurredAt ?? null},
           ${input.recordedAt ?? new Date()},
           ${input.validFrom ?? null},
-          ${input.validUntil ?? null}
+          ${input.validUntil ?? null},
+          ${JSON.stringify(input.attributes ?? {})}::jsonb
         )
         ON CONFLICT (tenant_id, external_id) WHERE external_id IS NOT NULL
         DO NOTHING
@@ -259,7 +261,8 @@ export class PostgresMemoryStore implements MemoryStore {
     // 同一トランザクションで作るため、このメソッド自身がトランザクションを開く
     // ようになった（本 PR 以前は単発の INSERT 文、衝突時は単発の SELECT 文だった——
     // 返す値は変わらない。`inserted`/`existing`/`rowToMemory` の呼び方は1行も
-    // 変えていない）。
+    // 変えていない）。Issue #152/#153 / ADR 0312: `attributes` 列を INSERT に足した
+    // （PR #724 の追加をそのまま引き継ぐ）。
     const result = await this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO memories (
@@ -273,6 +276,7 @@ export class PostgresMemoryStore implements MemoryStore {
           strength, half_life_hours, decay_floor_at,
           decay_base_seq, decay_floor_seq, half_life_recalls,
           embedding_status,
+          attributes,
           created_at, updated_at
         ) VALUES (
           gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
@@ -286,6 +290,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
           ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
           ${input.embeddingStatus},
+          ${JSON.stringify(input.attributes ?? {})}::jsonb,
           now(), now()
         )
         ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
@@ -355,6 +360,7 @@ export class PostgresMemoryStore implements MemoryStore {
           strength, half_life_hours, decay_floor_at,
           decay_base_seq, decay_floor_seq, half_life_recalls,
           embedding_status,
+          attributes,
           created_at, updated_at
         ) VALUES (
           gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
@@ -368,6 +374,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
           ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
           ${input.embeddingStatus},
+          ${JSON.stringify(input.attributes ?? {})}::jsonb,
           now(), now()
         )
         ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
@@ -700,6 +707,7 @@ export class PostgresMemoryStore implements MemoryStore {
             strength, half_life_hours, decay_floor_at,
             decay_base_seq, decay_floor_seq, half_life_recalls,
             embedding_status,
+            attributes,
             created_at, updated_at
           ) VALUES (
             gen_random_uuid(), ${ctx.tenantId}, ${input.subjectId ?? null},
@@ -713,6 +721,7 @@ export class PostgresMemoryStore implements MemoryStore {
             ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
             ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
             ${input.embeddingStatus},
+            ${JSON.stringify(input.attributes ?? {})}::jsonb,
             now(), now()
           )
           ON CONFLICT (tenant_id, source_observation_id, extractor_version, content_hash)
@@ -1182,6 +1191,15 @@ export class PostgresMemoryStore implements MemoryStore {
           ? sql`AND (subject_id = ${scope.subjectId} OR subject_id IS NULL)`
           : sql`AND subject_id = ${scope.subjectId}`
         : sql``;
+    // Issue #152/#153（ADR 0312）: `attributes` も `subjectId` と同じくスコープの外側の
+    // 境界——`scoped` CTE の WHERE に足すことで、この絞り込みの外は `totalInScope` は
+    // もちろん `filtered*` のどの列にも数えない（`recall.ts` の `ScopeAggregate` doc
+    // 「2026-09 追記」参照）。`@>`（containment）は `idx_memories_attributes` の GIN 索引
+    // （`jsonb_path_ops`）が効く述語。
+    const attributesFilter =
+      scope.attributes !== undefined
+        ? sql`AND attributes @> ${JSON.stringify(scope.attributes)}::jsonb`
+        : sql``;
     const occurredAfter = scope.occurredAfter ?? null;
     const occurredBefore = scope.occurredBefore ?? null;
 
@@ -1280,7 +1298,7 @@ export class PostgresMemoryStore implements MemoryStore {
           FROM (
             SELECT id, digest, COALESCE(occurred_at, recorded_at) AS eff_time
             FROM memories
-            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
               AND NOT (id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[]))
             ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC
@@ -1291,7 +1309,7 @@ export class PostgresMemoryStore implements MemoryStore {
           coalesce(sum(in_scope), 0) - coalesce((
             SELECT count(*)
             FROM memories
-            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+            WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
               AND id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[])
           ), 0)
@@ -1316,7 +1334,7 @@ export class PostgresMemoryStore implements MemoryStore {
         SELECT subject_id, occurred_at, recorded_at, embedding_status, status,
                valid_from, valid_until, decay_floor_at, decay_floor_seq
         FROM memories
-        WHERE tenant_id = ${ctx.tenantId} ${subjectFilter}
+        WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
       ),
       -- 述語を1回だけ boolean にする層。scoped を素の射影のまま残すのは、ADR 0303 の
       -- 前提の歯（scripts/__tests__/decay-floor-owner-premises.test.mjs）が scoped の本体を

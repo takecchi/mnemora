@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { StoredAttributesSchema } from "./attributes.js";
+import type { Attributes } from "./attributes.js";
 import type { MemoryId, ObservationId } from "./ids.js";
 import { ProvenanceSchema, type Provenance } from "./provenance.js";
 
@@ -174,6 +176,30 @@ export interface Memory {
    */
   purgedAt?: Date | null;
 
+  /**
+   * Issue #152（ADR 0312）: 呼び手が申告した任意属性（公開範囲・区分など）。
+   *
+   * **`tags`（上）と役割が違う**: `tags` は 100% LLM の推論、`attributes` は 100% 呼び手の
+   * 申告——北極星の問い4（AI の推論とユーザーが言った事実を区別する）に沿って、抽出器は
+   * この欄を一度も読み書きしない。`attributes.ts` の doc コメント参照。
+   *
+   * **作成経路ごとの引き継ぎ方（ADR 0312 決定4、詳細は同 ADR の表）**:
+   * - 抽出（`buildNewMemoryFromCandidate`）: 観測（`Observation.attributes`）をそのまま
+   *   継承する（フォールバック経路も含む）——「限定の出所から出た記憶は限定のまま」。
+   * - 統合（`buildConsolidatedMemory`）・反芻（`buildReflectedMemory`）: 元の Memory
+   *   **全件**に同じキー・同じ値で入っている分だけを残す（積集合）。1件でも欠けている・
+   *   値が違うキーは落ちる——呼び手が申告していない値を、統合・反芻という推論の産物に
+   *   持ち込まないため。
+   *
+   * **型としては省略可能だが、上記いずれの経路も runtime は常に `{}` 以上の値を書く**
+   * （`Observation.attributes` の doc コメントと同じ runtime 保証、ADR 0289 の作法）。
+   * `undefined` はこの型を自前で組み立てている既存の呼び出し元・テストのフィクスチャ
+   * だけが持ちうる（省略可能にした理由は `purgedAt`/`validFrom` と同じ——`Memory` は
+   * `@mnemora/core` の公開型であり、必須にすると既存の呼び出し元すべてに新しい必須
+   * プロパティを強制する破壊的変更になる）。
+   */
+  attributes?: Attributes;
+
   createdAt: Date;
   updatedAt: Date;
 }
@@ -248,6 +274,10 @@ export const MemorySchema = z.object({
 
   // Issue #198（ADR 0124）: `Memory.purgedAt` の doc コメント参照。
   purgedAt: z.date().nullable().optional(),
+
+  // Issue #152（ADR 0312）: `Memory.attributes` の doc コメント参照。格納側は検査をしない
+  // schema を使う（`AttributesSchema` は `ObserveXxxInput`/`RecallQuery` 側専用）。
+  attributes: StoredAttributesSchema.optional(),
 
   createdAt: z.date(),
   updatedAt: z.date(),

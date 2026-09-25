@@ -191,6 +191,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         // Issue #280: `occurredAt` と同じ経路。
         validFrom: input.validFrom ?? null,
         validUntil: input.validUntil ?? null,
+        // Issue #152（ADR 0312）: 同じ経路。runtime は常に `{}` 以上の値を書く。
+        attributes: input.attributes ?? {},
       };
       this.observations.set(observation.id, observation);
       return observation;
@@ -342,6 +344,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         halfLifeRecalls: input.halfLifeRecalls ?? null,
         embeddingStatus: input.embeddingStatus,
         purgedAt: input.purgedAt ?? null,
+        // Issue #152/#153（ADR 0312）: runtime は常に `{}` 以上の値を書く。
+        attributes: input.attributes ?? {},
         createdAt: now,
         updatedAt: now,
       };
@@ -848,6 +852,17 @@ export class InMemoryMemoryStore implements MemoryStore {
         (scope.includeSubjectless === true && memory.subjectId === null);
       if (!subjectMatches) {
         continue;
+      }
+      // Issue #152/#153（ADR 0312）: `attributes` も `subjectId` と同じくスコープの外側の
+      // 境界——落ちた分は `filtered*` のどの列にも数えず、`totalInScope` にも入れない。
+      if (scope.attributes !== undefined) {
+        const memoryAttributes = memory.attributes ?? {};
+        const attributesMatch = Object.entries(scope.attributes).every(
+          ([key, value]) => memoryAttributes[key] === value,
+        );
+        if (!attributesMatch) {
+          continue;
+        }
       }
 
       if (memory.status === "archived") {
