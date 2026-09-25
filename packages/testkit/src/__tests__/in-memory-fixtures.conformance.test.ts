@@ -110,7 +110,7 @@ describeMemoryStoreConformance({
   // Issue #515 方向①、ADR 0258: InMemoryMemoryStore は onlyMemoryIds フィルタを
   // 実装している。
   supportsOnlyMemoryIdsFilter: true,
-  // Issue #201 / ADR 0304: InMemoryMemoryStore は listLabels/registerLabel を
+  // Issue #201 / ADR 0305: InMemoryMemoryStore は listLabels/registerLabel を
   // 実装している。
   supportsLabels: true,
 });
@@ -340,7 +340,7 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: true,
     });
   },
-  // Issue #201 / ADR 0304: InMemoryTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
+  // Issue #201 / ADR 0305: InMemoryTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
   // を実装している。
   supportsTaxonomyMode: true,
 });

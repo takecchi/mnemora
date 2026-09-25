@@ -196,7 +196,7 @@ describe("isHalfLifeRecallsInRange（ADR 0125 と同じ値域、halfLifeHours �
 });
 
 /**
- * Issue #201 / [ADR 0304](../../../docs/decisions/0304-taxonomy-labels.md) の歯。
+ * Issue #201 / [ADR 0305](../../../docs/decisions/0305-taxonomy-labels.md) の歯。
  * `readDecayClock`/`writeDecayClock` の歯（このファイル冒頭）と同じ形——
  * `readTaxonomyMode`/`writeTaxonomyMode` が `TenantSettingsStore` の2つの省略可能
  * メソッドへ読み書きする唯一の通り道であることを固定する。

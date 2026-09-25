@@ -158,7 +158,7 @@ export function rowToMemory(row: MemoryRow): Memory {
 }
 
 /**
- * Issue #201 / ADR 0304: `labels` テーブルの1行（`migrations/0019_taxonomy_labels.sql`）。
+ * Issue #201 / ADR 0305: `labels` テーブルの1行（`migrations/0019_taxonomy_labels.sql`）。
  */
 export interface LabelRow {
   id: string;

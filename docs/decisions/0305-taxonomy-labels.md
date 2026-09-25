@@ -1,4 +1,4 @@
-# ADR 0304: taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201）
+# ADR 0305: taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
