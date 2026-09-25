@@ -28,7 +28,7 @@ import {
   CountingLLMProvider,
   embeddingSpaceSlug,
 } from "./answer-bench.js";
-import { drainEmbedTicks } from "./embed-drain.js";
+import { clockPastRecentDbWrites, drainEmbedTicks } from "./embed-drain.js";
 import { buildMnemoraPrompt } from "./mnemora-path.js";
 import { createMutableClock } from "./mutable-clock.js";
 import type { MutableClock } from "./mutable-clock.js";
@@ -186,10 +186,30 @@ export async function seedTimeWeightingMemories(
   // （本 PR で実際に踏んだ——`totalProcessed` が常に0だった）。
   // ⟹ 埋め込みを処理する直前に `clock` を実時刻へ進めてから `drainEmbedTicks` を呼ぶ。
   // 呼び出し側（`runTimeWeightingCase`）がこの後で `recallAt` へ改めて `set()` する。
-  clock.set(new Date());
+  //
+  // 🔴 **Issue #719: 上の `new Date()` だけでは足りない。** `available_at`（Postgres の
+  // `now()`、マイクロ秒精度）に対し JS の `Date` はミリ秒精度（切り捨て）——seed 直後の
+  // 書き込みと同じ 1ms の枠内でこの時刻を読むと、`available_at <= now` が false になり
+  // claim が1件も進まない。詳細・実測・数学的な安全性の根拠は
+  // `clockPastRecentDbWrites`（`./embed-drain.js`）の docstring 参照。
+  clock.set(clockPastRecentDbWrites());
   // 埋め込みは全件書き終えた後にまとめて処理する——`ingestConversation` と同じ順序
   // （`mnemora-path.ts` の `drainEmbedTicks` 呼び出し）。
-  await drainEmbedTicks(runtime, ctx);
+  const drainResult = await drainEmbedTicks(runtime, ctx);
+  // 🔴 **Issue #719: 黙って0件のまま進まない歯。** 上の +1ms 対策が効かなかった
+  // （または将来また同じ形の競合を踏んだ）場合、`drainEmbedTicks` は
+  // `processed === 0` を「もう無い」と解釈してループを抜けるだけで、例外は投げない
+  // （`embed-drain.ts` の `drainEmbedTicks` 参照）。それを afterward の `recall()` が
+  // 「0件提示」として静かに飲み込むと、原因が分からないまま再生検査だけが赤くなる
+  // （実際に CI で踏んだ形）。⟹ **ここで、書いた seed 件数ぶん埋め込みが処理された
+  // ことを検査し、欠けたら明示的に例外にする。**
+  if (drainResult.totalProcessed !== seeds.length) {
+    throw new Error(
+      `seedTimeWeightingMemories: embed ジョブが ${seeds.length} 件のはずが ` +
+        `${drainResult.totalProcessed} 件しか処理されなかった（failed=${drainResult.totalFailed}, ` +
+        `ticks=${drainResult.ticks}）。outbox の available_at と clock の競合、または埋め込み自体の失敗を疑うこと。`,
+    );
+  }
 
   for (const seed of seeds) {
     const memoryId = memoryIdByLocalId.get(seed.localId);
