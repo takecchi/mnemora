@@ -480,6 +480,45 @@ describe("sanitizeCandidateSubjectId（Issue #608 項目②(b)）", () => {
       rejected: false,
     });
   });
+
+  /**
+   * 【実測】gpt-4o-mini に実 API を当てて確認した事象（調査タスク、コミットなし）:
+   * `subjectCandidates` を渡したときのプロンプト指示（「主題が無いなら明示的に null を
+   * 設定してください」）に対し、モデルは JSON の `null` リテラルではなく**文字列
+   * `"null"`（ダブルクォート付き）**を5/5回返した。この文字列は一覧に含まれないため、
+   * 修正前のコードでは「一覧外の値」として弾かれ（`rejected: true`）、
+   * `undefined`（未指定）へ戻り、observation の値へフォールバックしていた——
+   * Issue #608 の例2（「明日台風が来る 主題＝なし」）が実現できない、という形で現れる。
+   */
+  describe('文字列 "null"（LLM が JSON null の代わりに返す既知の事象）', () => {
+    it('一覧に "null" という文字列自体が候補として含まれていなければ、明示的な null（主題なし）として扱う', () => {
+      expect(sanitizeCandidateSubjectId("null", ["A", "B", "movie-1"])).toEqual({
+        subjectId: null,
+        rejected: false,
+      });
+    });
+
+    it('一覧に "null" という文字列自体が候補として含まれているなら、通常の一覧内の値として扱う（この規約が優先）', () => {
+      expect(sanitizeCandidateSubjectId("null", ["A", "null"])).toEqual({
+        subjectId: "null",
+        rejected: false,
+      });
+    });
+
+    it('一覧が undefined なら、文字列 "null" もただの文字列として素通しする（候補なし経路は1バイトも変えない）', () => {
+      expect(sanitizeCandidateSubjectId("null", undefined)).toEqual({
+        subjectId: "null",
+        rejected: false,
+      });
+    });
+
+    it('一覧が空配列なら、文字列 "null" もただの文字列として素通しする（候補なし経路は1バイトも変えない）', () => {
+      expect(sanitizeCandidateSubjectId("null", [])).toEqual({
+        subjectId: "null",
+        rejected: false,
+      });
+    });
+  });
 });
 
 describe("extractCandidates × subjectCandidates（Issue #608 項目②(b)）", () => {
@@ -506,6 +545,15 @@ describe("extractCandidates × subjectCandidates（Issue #608 項目②(b)）", 
       { content: "主題なしの記憶", provenanceKind: "stated", subjectId: null },
     ]);
     const result = await extractCandidates(provider, ctx, makeObservation(), ["user:a"]);
+    expect(result.candidates[0]?.subjectId).toBeNull();
+    expect(result.rejectedSubjectIds).toEqual([]);
+  });
+
+  it('LLM が文字列 "null" を返した場合（実 API の既知の事象）、一覧外でも弾かれず null（主題なし）になる', async () => {
+    const provider = llmProviderReturning([
+      { content: "明日台風が来るらしい", provenanceKind: "stated", subjectId: "null" },
+    ]);
+    const result = await extractCandidates(provider, ctx, makeObservation(), ["A", "B", "movie-1"]);
     expect(result.candidates[0]?.subjectId).toBeNull();
     expect(result.rejectedSubjectIds).toEqual([]);
   });
