@@ -124,4 +124,10 @@ describeEmbeddingProviderConformance({
   // **本物のモデルが決定的かどうかは `./live.local-embedding.test.ts` 側が測る。**
   deterministic: true,
   texts: { a, b, c },
+  // ⚠ `overLimitText`（Issue #449 / ADR 0305）は渡さない——`createReplayPipeline` の
+  // `maxInputTokens` はダミーの `Number.MAX_SAFE_INTEGER`（上記コメント参照）であり、
+  // `byText` の表引きに無い入力は「記録に無い」という別の理由で reject する。渡しても
+  // 上限検査そのものを測ったことにならない（vacuous な緑になる）。**本物の上限検査は
+  // `./input-token-limit.test.ts`（fake extractor）と `./live.local-embedding.test.ts`
+  // の歯1〜3（本物のモデル、opt-in）が既に測っている。**
 });

@@ -40,6 +40,24 @@ export interface EmbeddingProviderConformanceOptions {
   /** 省略時は `{ tenantId: "embedding-provider-conformance" }`。 */
   ctx?: Ctx;
   /**
+   * 🔴 **任意。渡すと、`EmbeddingProvider` の契約——「入力が実装の上限を超えたら
+   * `embed` は例外を投げる。黙って切り詰めてベクトルを返さない」（`embedding-provider.ts`
+   * の interface doc、ADR 0305・Issue #449）——を測る歯が1本増える: `embed(ctx,
+   * [overLimitText])` が reject することだけを見る。**
+   *
+   * ⚠ **この文字列がその実装の上限を実際に超えていることは、呼び出し側の責任である。**
+   * この suite は何が上限かを知らない（実装ごとに違う。トークナイザが要る実装もある）。
+   * 超えていない文字列を渡すと、この歯は「reject しなかった」で赤くなる——それは
+   * 歯の誤りではなく、渡した文字列が上限を超えていないことの検出である。
+   *
+   * `deterministic` と同じ理由で省略できるが、意味は違う。`deterministic` は
+   * 「決定的でない」と「宣言し忘れた」を区別するための**必須**の欄だが、こちらは
+   * **上限そのものを持たない実装（決定的な表引きの replay pipeline 等）が実在する**
+   * ため任意にしてある。省略時は `it.skip` として名前だけ残る——
+   * 「上限超過を測っていない」ことをテスト名で名乗る。
+   */
+  overLimitText?: string;
+  /**
    * 各 `it` のタイムアウト（ミリ秒）。**省略時は vitest の既定（5秒）。**
    *
    * **なぜ要るか**: この suite は本物の実装にも当たる（Issue #116 の残債）。
@@ -78,7 +96,15 @@ const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };
 export function describeEmbeddingProviderConformance(
   options: EmbeddingProviderConformanceOptions,
 ): void {
-  const { name, createProvider, deterministic, texts, ctx = defaultCtx, timeout } = options;
+  const {
+    name,
+    createProvider,
+    deterministic,
+    texts,
+    overLimitText,
+    ctx = defaultCtx,
+    timeout,
+  } = options;
   const { a, b, c } = texts;
 
   describe(`EmbeddingProvider conformance (${name})`, () => {
@@ -231,6 +257,21 @@ export function describeEmbeddingProviderConformance(
         expect(abc[0]).toEqual(bca[2]);
         expect(abc[1]).toEqual(bca[0]);
         expect(abc[2]).toEqual(bca[1]);
+      },
+      timeout,
+    );
+
+    // ⚠ `deterministic` の `maybeIt` とは独立の軸——上限を持たない実装（表引きの
+    // replay pipeline 等）と、決定的でない実装は別物である。`overLimitText` が
+    // 省略されたときは `it.skip` として名前だけ残る（`overLimitText` の doc 参照）。
+    const maybeOverLimitIt = overLimitText !== undefined ? it : it.skip;
+
+    maybeOverLimitIt(
+      "上限を超える入力を渡すと embed() が reject する（黙って切り詰めない。ADR 0305・Issue #449）",
+      async () => {
+        const provider = await createProvider();
+
+        await expect(provider.embed(ctx, [overLimitText as string])).rejects.toBeTruthy();
       },
       timeout,
     );
