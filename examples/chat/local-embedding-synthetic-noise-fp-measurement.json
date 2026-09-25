@@ -1,0 +1,906 @@
+{
+  "_readme": "🔴🔴 これは実際の偽陽性率ではない。local 埋め込みの揺れは観測されていない(ADR 0094 は2 run のビット一致)。ここにあるのは、スコアに合成ノイズが入ったとしたらという反実仮想の測定である。詳細は docs/decisions/ 新設 ADR と ../synthetic-score-noise.ts の doc コメントを見ること。",
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "99adbb44600f148a464397f6446baf0d4a3b1a99",
+    "measuredAt": "2026-09-25T05:27:32.729Z",
+    "embeddingSpace": {
+      "provider": "local",
+      "model": "ruri-v3-30m/sym",
+      "dimensions": 256
+    },
+    "sigmaGrid": [0.0025, 0.005, 0.01, 0.02, 0.04, 0.08, 0.12, 0.16, 0.24, 0.32, 0.48],
+    "seedCount": 15,
+    "mrrDropThreshold": 0.01
+  },
+  "groups": [
+    {
+      "group": "japanese",
+      "probeCount": 7,
+      "baseline": {
+        "group": "japanese",
+        "mrrOverall": 0.8095238095238095,
+        "hit1Count": 5,
+        "hit10Count": 7,
+        "probeCount": 7
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 0,
+          "seedCount": 15,
+          "mrrMin": 0.8061224489795918,
+          "mrrMedian": 0.8095238095238095,
+          "mrrMax": 0.8095238095238095,
+          "medianPreservesBaseline": true
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 0,
+          "seedCount": 15,
+          "mrrMin": 0.8035714285714286,
+          "mrrMedian": 0.8061224489795918,
+          "mrrMax": 0.8142857142857143,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 5,
+          "seedCount": 15,
+          "mrrMin": 0.7108843537414967,
+          "mrrMedian": 0.8035714285714286,
+          "mrrMax": 0.8142857142857143,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 10,
+          "seedCount": 15,
+          "mrrMin": 0.613095238095238,
+          "mrrMedian": 0.7321428571428571,
+          "mrrMax": 0.880952380952381,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 13,
+          "seedCount": 15,
+          "mrrMin": 0.5206349206349207,
+          "mrrMedian": 0.6587301587301587,
+          "mrrMax": 0.8333333333333334,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3013605442176871,
+          "mrrMedian": 0.5465986394557824,
+          "mrrMax": 0.7108843537414966,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.2727891156462585,
+          "mrrMedian": 0.4370748299319728,
+          "mrrMax": 0.5928571428571429,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.21921768707482994,
+          "mrrMedian": 0.38492063492063494,
+          "mrrMax": 0.5166666666666667,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.21468253968253972,
+          "mrrMedian": 0.35119047619047616,
+          "mrrMax": 0.5166666666666667,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.19580498866213153,
+          "mrrMedian": 0.3380952380952381,
+          "mrrMax": 0.5166666666666667,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.19325396825396826,
+          "mrrMedian": 0.3178571428571429,
+          "mrrMax": 0.44761904761904764,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [0.0025],
+        "redCount": 0,
+        "trials": 15
+      },
+      "bandUpperBound95": 0.1810362725220846,
+      "fullGridRedCount": 118,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.7727073564286815
+    },
+    {
+      "group": "identifiersSparse",
+      "probeCount": 30,
+      "baseline": {
+        "group": "identifiersSparse",
+        "mrrOverall": 1,
+        "hit1Count": 30,
+        "hit10Count": 30,
+        "probeCount": 30
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 1,
+          "seedCount": 15,
+          "mrrMin": 0.9833333333333333,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": true
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 8,
+          "seedCount": 15,
+          "mrrMin": 0.9833333333333333,
+          "mrrMedian": 0.9833333333333333,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 11,
+          "seedCount": 15,
+          "mrrMin": 0.9833333333333333,
+          "mrrMedian": 0.9833333333333333,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.9166666666666666,
+          "mrrMedian": 0.95,
+          "mrrMax": 0.9833333333333333,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.7833333333333332,
+          "mrrMedian": 0.8388888888888888,
+          "mrrMax": 0.8722222222222222,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.5966666666666668,
+          "mrrMedian": 0.6405555555555555,
+          "mrrMax": 0.6872222222222223,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.4978571428571427,
+          "mrrMedian": 0.5553174603174603,
+          "mrrMax": 0.6047619047619047,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.44142857142857134,
+          "mrrMedian": 0.4873412698412699,
+          "mrrMax": 0.5182275132275131,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.37854497354497346,
+          "mrrMedian": 0.41268518518518515,
+          "mrrMax": 0.4513756613756614,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.34740740740740744,
+          "mrrMedian": 0.3802645502645501,
+          "mrrMax": 0.40911375661375665,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.32263227513227516,
+          "mrrMedian": 0.3509259259259259,
+          "mrrMax": 0.38944444444444454,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [0.0025],
+        "redCount": 1,
+        "trials": 15
+      },
+      "bandUpperBound95": 0.2793961936128765,
+      "fullGridRedCount": 140,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.8924186273639214
+    },
+    {
+      "group": "identifiersDense",
+      "probeCount": 30,
+      "baseline": {
+        "group": "identifiersDense",
+        "mrrOverall": 1,
+        "hit1Count": 30,
+        "hit10Count": 30,
+        "probeCount": 30
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 1,
+          "seedCount": 15,
+          "mrrMin": 0.9833333333333333,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": true
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 8,
+          "seedCount": 15,
+          "mrrMin": 0.9833333333333333,
+          "mrrMedian": 0.9833333333333333,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 11,
+          "seedCount": 15,
+          "mrrMin": 0.9833333333333333,
+          "mrrMedian": 0.9833333333333333,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.9166666666666666,
+          "mrrMedian": 0.95,
+          "mrrMax": 0.9833333333333333,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.74,
+          "mrrMedian": 0.8027777777777777,
+          "mrrMax": 0.8444444444444444,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.5492063492063491,
+          "mrrMedian": 0.6058730158730158,
+          "mrrMax": 0.6511111111111113,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.4640079365079365,
+          "mrrMedian": 0.5025396825396825,
+          "mrrMax": 0.5397222222222221,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.40142857142857136,
+          "mrrMedian": 0.4409126984126985,
+          "mrrMax": 0.4901322751322751,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.35322751322751317,
+          "mrrMedian": 0.3735185185185184,
+          "mrrMax": 0.4198015873015873,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3346296296296296,
+          "mrrMedian": 0.3642592592592593,
+          "mrrMax": 0.3943518518518519,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.312037037037037,
+          "mrrMedian": 0.3406878306878306,
+          "mrrMax": 0.36462962962962975,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [0.0025],
+        "redCount": 1,
+        "trials": 15
+      },
+      "bandUpperBound95": 0.2793961936128765,
+      "fullGridRedCount": 140,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.8924186273639214
+    },
+    {
+      "group": "japaneseNamesSparse",
+      "probeCount": 12,
+      "baseline": {
+        "group": "japaneseNamesSparse",
+        "mrrOverall": 0.9583333333333334,
+        "hit1Count": 11,
+        "hit10Count": 12,
+        "probeCount": 12
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 0,
+          "seedCount": 15,
+          "mrrMin": 0.9583333333333334,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 0,
+          "seedCount": 15,
+          "mrrMin": 0.9583333333333334,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 1,
+          "seedCount": 15,
+          "mrrMin": 0.9166666666666666,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 5,
+          "seedCount": 15,
+          "mrrMin": 0.875,
+          "mrrMedian": 0.9583333333333334,
+          "mrrMax": 1,
+          "medianPreservesBaseline": true
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 11,
+          "seedCount": 15,
+          "mrrMin": 0.8333333333333334,
+          "mrrMedian": 0.875,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.6388888888888888,
+          "mrrMedian": 0.7291666666666666,
+          "mrrMax": 0.8333333333333334,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.5833333333333333,
+          "mrrMedian": 0.6583333333333333,
+          "mrrMax": 0.7916666666666666,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.5,
+          "mrrMedian": 0.623015873015873,
+          "mrrMax": 0.7388888888888889,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.36408730158730157,
+          "mrrMedian": 0.4591269841269842,
+          "mrrMax": 0.5652777777777778,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.334457671957672,
+          "mrrMedian": 0.41084656084656085,
+          "mrrMax": 0.5003306878306878,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.2856150793650794,
+          "mrrMedian": 0.3627314814814815,
+          "mrrMax": 0.4389880952380952,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [0.02],
+        "redCount": 5,
+        "trials": 15
+      },
+      "bandUpperBound95": 0.5774436628428428,
+      "fullGridRedCount": 107,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.7102618702589547
+    },
+    {
+      "group": "japaneseNamesDense",
+      "probeCount": 12,
+      "baseline": {
+        "group": "japaneseNamesDense",
+        "mrrOverall": 0.9583333333333334,
+        "hit1Count": 11,
+        "hit10Count": 12,
+        "probeCount": 12
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 0,
+          "seedCount": 15,
+          "mrrMin": 0.9583333333333334,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 0,
+          "seedCount": 15,
+          "mrrMin": 0.9583333333333334,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 1,
+          "seedCount": 15,
+          "mrrMin": 0.9166666666666666,
+          "mrrMedian": 1,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 5,
+          "seedCount": 15,
+          "mrrMin": 0.875,
+          "mrrMedian": 0.9583333333333334,
+          "mrrMax": 1,
+          "medianPreservesBaseline": true
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 11,
+          "seedCount": 15,
+          "mrrMin": 0.8333333333333334,
+          "mrrMedian": 0.875,
+          "mrrMax": 1,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.6388888888888888,
+          "mrrMedian": 0.7291666666666666,
+          "mrrMax": 0.8333333333333334,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.5416666666666666,
+          "mrrMedian": 0.6458333333333334,
+          "mrrMax": 0.7777777777777777,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.4424603174603175,
+          "mrrMedian": 0.5813492063492064,
+          "mrrMax": 0.6944444444444443,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3544973544973545,
+          "mrrMedian": 0.4305555555555556,
+          "mrrMax": 0.5555555555555556,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3316798941798942,
+          "mrrMedian": 0.380787037037037,
+          "mrrMax": 0.49338624338624343,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.2802910052910053,
+          "mrrMedian": 0.3627314814814815,
+          "mrrMax": 0.43320105820105814,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [0.02],
+        "redCount": 5,
+        "trials": 15
+      },
+      "bandUpperBound95": 0.5774436628428428,
+      "fullGridRedCount": 107,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.7102618702589547
+    },
+    {
+      "group": "numeralSparse",
+      "probeCount": 18,
+      "baseline": {
+        "group": "numeralSparse",
+        "mrrOverall": 0.9166666666666666,
+        "hit1Count": 15,
+        "hit10Count": 18,
+        "probeCount": 18
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 12,
+          "seedCount": 15,
+          "mrrMin": 0.8611111111111112,
+          "mrrMedian": 0.8888888888888888,
+          "mrrMax": 0.9166666666666666,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 10,
+          "seedCount": 15,
+          "mrrMin": 0.8611111111111112,
+          "mrrMedian": 0.8888888888888888,
+          "mrrMax": 0.9444444444444444,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 11,
+          "seedCount": 15,
+          "mrrMin": 0.8055555555555556,
+          "mrrMedian": 0.8796296296296295,
+          "mrrMax": 0.9444444444444444,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.7268518518518517,
+          "mrrMedian": 0.824074074074074,
+          "mrrMax": 0.8888888888888888,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.6018518518518517,
+          "mrrMedian": 0.7314814814814815,
+          "mrrMax": 0.7824074074074073,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.494047619047619,
+          "mrrMedian": 0.6055555555555555,
+          "mrrMax": 0.6935185185185185,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.38710317460317456,
+          "mrrMedian": 0.4972222222222222,
+          "mrrMax": 0.6430555555555555,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3446649029982363,
+          "mrrMedian": 0.4630291005291005,
+          "mrrMax": 0.5733686067019401,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.2971340388007055,
+          "mrrMedian": 0.39790564373897713,
+          "mrrMax": 0.4679012345679012,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.26556437389770726,
+          "mrrMedian": 0.37469135802469133,
+          "mrrMax": 0.44651675485008824,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.2169532627865961,
+          "mrrMedian": 0.34413580246913583,
+          "mrrMax": 0.4242283950617284,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [],
+        "redCount": 0,
+        "trials": 0
+      },
+      "bandUpperBound95": null,
+      "fullGridRedCount": 153,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.9575018896848275
+    },
+    {
+      "group": "numeralDense",
+      "probeCount": 18,
+      "baseline": {
+        "group": "numeralDense",
+        "mrrOverall": 0.9166666666666666,
+        "hit1Count": 15,
+        "hit10Count": 18,
+        "probeCount": 18
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "redCount": 12,
+          "seedCount": 15,
+          "mrrMin": 0.8611111111111112,
+          "mrrMedian": 0.8888888888888888,
+          "mrrMax": 0.9166666666666666,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.005,
+          "redCount": 10,
+          "seedCount": 15,
+          "mrrMin": 0.8611111111111112,
+          "mrrMedian": 0.8888888888888888,
+          "mrrMax": 0.9444444444444444,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.01,
+          "redCount": 11,
+          "seedCount": 15,
+          "mrrMin": 0.8055555555555556,
+          "mrrMedian": 0.8796296296296295,
+          "mrrMax": 0.9444444444444444,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.02,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.7268518518518517,
+          "mrrMedian": 0.824074074074074,
+          "mrrMax": 0.8888888888888888,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.04,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.6018518518518517,
+          "mrrMedian": 0.7314814814814815,
+          "mrrMax": 0.7824074074074073,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.08,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.494047619047619,
+          "mrrMedian": 0.6005291005291006,
+          "mrrMax": 0.6916666666666667,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.12,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3824735449735449,
+          "mrrMedian": 0.4925925925925925,
+          "mrrMax": 0.6032407407407407,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.16,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.3381834215167549,
+          "mrrMedian": 0.4496031746031746,
+          "mrrMax": 0.5668871252204586,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.24,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.281305114638448,
+          "mrrMedian": 0.37916666666666665,
+          "mrrMax": 0.4756172839506173,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.32,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.23547178130511467,
+          "mrrMedian": 0.3585537918871252,
+          "mrrMax": 0.44651675485008824,
+          "medianPreservesBaseline": false
+        },
+        {
+          "sigma": 0.48,
+          "redCount": 15,
+          "seedCount": 15,
+          "mrrMin": 0.20769400352733683,
+          "mrrMedian": 0.33487654320987653,
+          "mrrMax": 0.41959876543209873,
+          "medianPreservesBaseline": false
+        }
+      ],
+      "band": {
+        "bandSigmas": [],
+        "redCount": 0,
+        "trials": 0
+      },
+      "bandUpperBound95": null,
+      "fullGridRedCount": 153,
+      "fullGridTrials": 165,
+      "fullGridUpperBound95": 0.9575018896848275
+    }
+  ],
+  "positiveControl": {
+    "sigma": 5,
+    "note": "SIGMA_GRID(測定に使う11段)には含めない。探り棒(ノイズ注入→判定)が生きていることの確認専用——赤が1件も出なければ測定全体を疑う。",
+    "results": [
+      {
+        "group": "japanese",
+        "redCount": 15,
+        "seedCount": 15
+      },
+      {
+        "group": "identifiersSparse",
+        "redCount": 15,
+        "seedCount": 15
+      },
+      {
+        "group": "identifiersDense",
+        "redCount": 15,
+        "seedCount": 15
+      },
+      {
+        "group": "japaneseNamesSparse",
+        "redCount": 15,
+        "seedCount": 15
+      },
+      {
+        "group": "japaneseNamesDense",
+        "redCount": 15,
+        "seedCount": 15
+      },
+      {
+        "group": "numeralSparse",
+        "redCount": 15,
+        "seedCount": 15
+      },
+      {
+        "group": "numeralDense",
+        "redCount": 15,
+        "seedCount": 15
+      }
+    ]
+  }
+}
