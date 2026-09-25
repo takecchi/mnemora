@@ -205,11 +205,7 @@ function invertIncompleteBeta(q: number, a: number, b: number): number {
  * `successes === 0` の閉じた式 `U = 1 - alpha^(1/trials)` と一致することを
  * 歯（`openai-arm-verdict.test.ts`）で検算している。
  */
-export function clopperPearsonUpperBound(
-  successes: number,
-  trials: number,
-  alpha = 0.05,
-): number {
+export function clopperPearsonUpperBound(successes: number, trials: number, alpha = 0.05): number {
   if (!Number.isInteger(successes) || !Number.isInteger(trials) || trials <= 0) {
     throw new Error(
       `clopperPearsonUpperBound: successes/trials は正の整数であること(実際: ${successes}/${trials})`,

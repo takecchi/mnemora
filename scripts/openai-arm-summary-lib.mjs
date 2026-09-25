@@ -294,9 +294,13 @@ function buildShadowVerdictSection(measuredGroups, baselineGroups) {
       `${MRR_DROP_THRESHOLD} 以上落ちたら red。`,
     "",
   ];
-  lines.push(`${anyRed ? "🔴" : "✅"} ${verdicts.filter((v) => v.red).length}/${verdicts.length} 群が red。`);
+  lines.push(
+    `${anyRed ? "🔴" : "✅"} ${verdicts.filter((v) => v.red).length}/${verdicts.length} 群が red。`,
+  );
   for (const v of verdicts) {
-    lines.push(`- ${v.red ? "🔴" : "✅"} \`${v.group}\`${v.reasons.length > 0 ? `: ${v.reasons.join("; ")}` : ""}`);
+    lines.push(
+      `- ${v.red ? "🔴" : "✅"} \`${v.group}\`${v.reasons.length > 0 ? `: ${v.reasons.join("; ")}` : ""}`,
+    );
   }
   return lines.join("\n");
 }

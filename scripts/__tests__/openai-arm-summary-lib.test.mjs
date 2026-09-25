@@ -182,7 +182,10 @@ describe("buildSummaryMarkdown", () => {
   });
 
   it("baseline を渡さなければ比較節も並走の判定節も出さない", () => {
-    const markdown = buildSummaryMarkdown({ title: "テスト", measured: makeMeasured([makeGroup()]) });
+    const markdown = buildSummaryMarkdown({
+      title: "テスト",
+      measured: makeMeasured([makeGroup()]),
+    });
     expect(markdown).not.toContain("基準値との差分");
     expect(markdown).not.toContain("並走の判定");
   });

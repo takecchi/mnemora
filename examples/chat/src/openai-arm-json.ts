@@ -55,7 +55,11 @@ export interface OpenAiArmRunJson {
  * `numeralSparse`/`numeralDense`。`../openai-arm-probe-groups.ts` の `OpenAiArmGroupKey`）。
  */
 export function buildOpenAiArmRunJson(
-  groups: readonly { key: string; report: IdentifierArmReport; embeddingSpace: EmbeddingSpaceJson }[],
+  groups: readonly {
+    key: string;
+    report: IdentifierArmReport;
+    embeddingSpace: EmbeddingSpaceJson;
+  }[],
   measuredAt: Date,
   commit: string | null,
 ): OpenAiArmRunJson {

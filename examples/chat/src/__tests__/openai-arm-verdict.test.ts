@@ -75,7 +75,13 @@ describe("clopperPearsonUpperBound", () => {
 describe("decideEmbeddingDriftVerdict", () => {
   const baseline = [
     { group: "identifiersSparse", mrrOverall: 1, hit1Count: 30, hit10Count: 30, probeCount: 30 },
-    { group: "numeralSparse", mrrOverall: 0.9166666666666666, hit1Count: 15, hit10Count: 18, probeCount: 18 },
+    {
+      group: "numeralSparse",
+      mrrOverall: 0.9166666666666666,
+      hit1Count: 15,
+      hit10Count: 18,
+      probeCount: 18,
+    },
   ];
 
   it("基準値と完全一致なら green", () => {
@@ -109,7 +115,9 @@ describe("decideEmbeddingDriftVerdict", () => {
   });
 
   it("基準値に無い群は red にしない", () => {
-    const measured = [{ group: "unknownGroup", mrrOverall: 0, hit1Count: 0, hit10Count: 0, probeCount: 0 }];
+    const measured = [
+      { group: "unknownGroup", mrrOverall: 0, hit1Count: 0, hit10Count: 0, probeCount: 0 },
+    ];
     const verdict = decideEmbeddingDriftVerdict(measured, baseline);
     expect(verdict.red).toBe(false);
   });

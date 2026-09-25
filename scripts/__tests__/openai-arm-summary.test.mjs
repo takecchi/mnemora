@@ -39,7 +39,13 @@ function makeGroup(overrides = {}) {
 }
 
 function makeMeasured(groups) {
-  return { schemaVersion: 1, status: "measured", measuredAt: "2026-09-25T00:00:00.000Z", commit: "abc123", groups };
+  return {
+    schemaVersion: 1,
+    status: "measured",
+    measuredAt: "2026-09-25T00:00:00.000Z",
+    commit: "abc123",
+    groups,
+  };
 }
 
 let dir;
@@ -87,7 +93,14 @@ describe("openai-arm-summary.mjs(CLI)", () => {
     const group = makeGroup();
     const measuredPath = writeJson("measured.json", makeMeasured([group]));
     const baselinePath = writeJson("baseline.json", { groups: [group] });
-    const result = run(["--title", "テスト", "--measured", measuredPath, "--baseline", baselinePath]);
+    const result = run([
+      "--title",
+      "テスト",
+      "--measured",
+      measuredPath,
+      "--baseline",
+      baselinePath,
+    ]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("✅ 一致");
     expect(result.stdout).toContain("✅ 0/1 群が red");
@@ -97,7 +110,14 @@ describe("openai-arm-summary.mjs(CLI)", () => {
     dir = mkdtempSync(join(tmpdir(), "openai-arm-summary-"));
     const measuredPath = writeJson("measured.json", makeMeasured([makeGroup({ mrrOverall: 0.1 })]));
     const baselinePath = writeJson("baseline.json", { groups: [makeGroup()] });
-    const result = run(["--title", "テスト", "--measured", measuredPath, "--baseline", baselinePath]);
+    const result = run([
+      "--title",
+      "テスト",
+      "--measured",
+      measuredPath,
+      "--baseline",
+      baselinePath,
+    ]);
     expect(result.status).toBe(0);
     expect(result.stdout).toContain("🔴 1/1 群が red");
   });
@@ -107,7 +127,14 @@ describe("openai-arm-summary.mjs(CLI)", () => {
     const measuredPath = writeJson("measured.json", makeMeasured([makeGroup()]));
     const baselinePath = join(dir, "baseline.json");
     writeFileSync(baselinePath, "{not json");
-    const result = run(["--title", "テスト", "--measured", measuredPath, "--baseline", baselinePath]);
+    const result = run([
+      "--title",
+      "テスト",
+      "--measured",
+      measuredPath,
+      "--baseline",
+      baselinePath,
+    ]);
     expect(result.status).toBe(1);
   });
 });

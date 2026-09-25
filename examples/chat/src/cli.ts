@@ -58,11 +58,7 @@ import {
   NUMERAL_TOKEN_OPENAI_CASSETTE_PATH,
   loadOpenAiArmCassette,
 } from "./openai-arm-cassette.js";
-import {
-  buildArmLabel,
-  identifierArmGroups,
-  numeralArmGroups,
-} from "./openai-arm-probe-groups.js";
+import { buildArmLabel, identifierArmGroups, numeralArmGroups } from "./openai-arm-probe-groups.js";
 import { buildOpenAiArmRunJson } from "./openai-arm-json.js";
 import {
   formatCorrectionCandidateReport,
@@ -1663,7 +1659,11 @@ async function runIdentifierProbesOpenAiArm(
       `\n[identifier-probes/openai] embedding space: provider=${embeddingSpace.provider} ` +
         `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}(recorded 再生)`,
     );
-    const groupResults: { key: string; report: Awaited<ReturnType<typeof runIdentifierProbeArm>>; embeddingSpace: typeof embeddingSpace }[] = [];
+    const groupResults: {
+      key: string;
+      report: Awaited<ReturnType<typeof runIdentifierProbeArm>>;
+      embeddingSpace: typeof embeddingSpace;
+    }[] = [];
     for (const group of identifierArmGroups()) {
       const armLabel = buildArmLabel(group, {
         llmMode: handle.llmMode,
@@ -1861,7 +1861,11 @@ async function runNumeralTokenProbesOpenAiArm(
       `\n[numeral-token-probes/openai] embedding space: provider=${embeddingSpace.provider} ` +
         `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}(recorded 再生)`,
     );
-    const groupResults: { key: string; report: Awaited<ReturnType<typeof runIdentifierProbeArm>>; embeddingSpace: typeof embeddingSpace }[] = [];
+    const groupResults: {
+      key: string;
+      report: Awaited<ReturnType<typeof runIdentifierProbeArm>>;
+      embeddingSpace: typeof embeddingSpace;
+    }[] = [];
     for (const group of numeralArmGroups()) {
       const armLabel = buildArmLabel(group, {
         llmMode: handle.llmMode,

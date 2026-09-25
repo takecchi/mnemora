@@ -4,6 +4,7 @@ import { writeFileSync } from "node:fs";
 import type { Ctx } from "@mnemora/core";
 import { OpenAIEmbeddingProvider } from "@mnemora/openai";
 import { embeddingCassetteKey } from "@mnemora/testkit";
+import type { Cassette } from "@mnemora/testkit";
 import {
   IDENTIFIER_OPENAI_CASSETTE_PATH,
   NUMERAL_TOKEN_OPENAI_CASSETTE_PATH,
@@ -13,7 +14,6 @@ import {
 import {
   OPENAI_ARM_GROUPS,
   buildArmLabel,
-  buildGroupConversation,
   collectAllTexts,
   identifierArmGroups,
   numeralArmGroups,
@@ -27,7 +27,12 @@ import {
 import type { DriftVerdict, ProxyGroupMetrics } from "../openai-arm-verdict.js";
 import { createExampleRuntime } from "../runtime-factory.js";
 import { runIdentifierProbeArm } from "../identifier-arm.js";
-import { armHeadline, buildArmTenantId, newRunToken, runRetrievalQualityArm } from "../retrieval-quality.js";
+import {
+  armHeadline,
+  buildArmTenantId,
+  newRunToken,
+  runRetrievalQualityArm,
+} from "../retrieval-quality.js";
 import { OPENAI_EMBEDDING_DIMENSIONS, OPENAI_EMBEDDING_MODEL } from "../providers.js";
 import { createUsageMeter } from "../usage-meter.js";
 import { tryGitRevParseHead } from "../git-info.js";
@@ -84,18 +89,12 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 const CHAT_ROOT = join(here, "..", "..");
 
-const IDENTIFIER_OPENAI_BASELINE_PATH = join(
-  CHAT_ROOT,
-  "identifier-probe-baseline.openai.json",
-);
+const IDENTIFIER_OPENAI_BASELINE_PATH = join(CHAT_ROOT, "identifier-probe-baseline.openai.json");
 const NUMERAL_TOKEN_OPENAI_BASELINE_PATH = join(
   CHAT_ROOT,
   "numeral-token-probe-baseline.openai.json",
 );
-const FP_CEILING_MEASUREMENT_PATH = join(
-  CHAT_ROOT,
-  "openai-embedding-fp-ceiling-measurement.json",
-);
+const FP_CEILING_MEASUREMENT_PATH = join(CHAT_ROOT, "openai-embedding-fp-ceiling-measurement.json");
 
 const CTX: Ctx = { tenantId: "openai-arm-fp-ceiling-embed" };
 
@@ -113,7 +112,7 @@ function requireEnv(name: string): string {
  */
 async function measureGroup(
   databaseUrl: string,
-  cassette: import("@mnemora/testkit").Cassette,
+  cassette: Cassette,
   runToken: string,
   group: OpenAiArmGroupDescriptor,
 ): Promise<ProxyGroupMetrics & { label: string; embeddingModeLabel: string }> {
@@ -200,17 +199,12 @@ async function runRound(
  * 層だけを新しい値に差し替える**——マネージャーの依頼そのもの（「主測定7件の判定が
  * どう出るか」の対象は embedding の乖離であり、LLM 出力の乖離ではない）。
  */
-async function runDriftOneSample(
-  databaseUrl: string,
-  embeddingProvider: OpenAIEmbeddingProvider,
-) {
+async function runDriftOneSample(databaseUrl: string, embeddingProvider: OpenAIEmbeddingProvider) {
   const recorded = loadCassette(RETRIEVAL_CASSETTE_PATH);
   const texts = Object.values(recorded.embedding.entries).map((e) => e.text);
   const vectors = await embeddingProvider.embed(CTX, texts);
   if (vectors.length !== texts.length) {
-    throw new Error(
-      `drift-check: 入力件数と出力件数が違う(${texts.length} vs ${vectors.length})`,
-    );
+    throw new Error(`drift-check: 入力件数と出力件数が違う(${texts.length} vs ${vectors.length})`);
   }
   const freshEntries: Record<string, { text: string; vector: number[] }> = {};
   texts.forEach((text, i) => {
@@ -337,7 +331,9 @@ async function main(): Promise<void> {
   const baselineMetrics: ProxyGroupMetrics[] = round0.metrics;
   console.log(
     round0.metrics
-      .map((m) => `  ${m.group}: MRR=${m.mrrOverall.toFixed(4)} hit@1=${m.hit1Count}/${m.probeCount}`)
+      .map(
+        (m) => `  ${m.group}: MRR=${m.mrrOverall.toFixed(4)} hit@1=${m.hit1Count}/${m.probeCount}`,
+      )
       .join("\n"),
   );
 
@@ -470,7 +466,9 @@ async function main(): Promise<void> {
   );
 
   // --- 副産物: 既存カセットとの1標本の乖離チェック ---
-  console.log("\n[openai-embedding-fp-ceiling] 副産物: retrieval.json との1標本の乖離チェックを実行中…");
+  console.log(
+    "\n[openai-embedding-fp-ceiling] 副産物: retrieval.json との1標本の乖離チェックを実行中…",
+  );
   const driftOneSample = await runDriftOneSample(databaseUrl, embeddingProvider);
 
   const measurement = {
@@ -520,7 +518,9 @@ async function main(): Promise<void> {
     ],
   };
   writeFileSync(FP_CEILING_MEASUREMENT_PATH, `${JSON.stringify(measurement, null, 2)}\n`, "utf-8");
-  console.log(`\n[openai-embedding-fp-ceiling] 測定記録を書き出した: ${FP_CEILING_MEASUREMENT_PATH}`);
+  console.log(
+    `\n[openai-embedding-fp-ceiling] 測定記録を書き出した: ${FP_CEILING_MEASUREMENT_PATH}`,
+  );
   console.log(`\n${usageMeter.formatReport()}`);
 }
 
