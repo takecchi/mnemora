@@ -1,0 +1,76 @@
+association-order-scale 2026-09-26（完了）
+
+クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない（ADR 0220）。
+
+ADR 0332 追記「2026-09-26」A.2(3) が、base（anchor/gold 含む62文）の挿入位置
+（先頭/末尾/散らす）を1回ずつ振ったところ大きな差を見つけた（先頭 aRaw 0/12、
+末尾 12/12、散らす 10/12）。ただし反復は末尾2回・散らす1回のみ、規模は1万行のみ、
+HNSW構築パラメータは既定のみだった。本ディレクトリは、その効果を
+独立ingest3回以上・複数規模(1万/3万/10万行)・（部分的に）HNSWパラメータ違いで
+測り直した生データ。詳細・射程・確かめていないことは
+docs/decisions/0332-association-default-100k-measurement.md の「追記 2026-09-26 (2)」
+を参照。ここには要約だけを置く。
+
+道具: examples/chat/src/bench/association-scale-nondeterminism.ts の新モード
+MNEMORA_ASSOC_NONDET_MODE=order-scale（本PRで追加、既存モードは無変更）。
+
+## ファイル
+
+- order-scale-10k.json — 1万行、base-first/base-last/base-interleaved × 3反復、
+  HNSW既定(m=16, ef_construction=64)。
+- order-scale-30k.json — 3万行、同上。
+- order-scale-10k-hnsw-m32-efc128.json — 1万行、base-first/base-last × 2反復、
+  HNSW m=32/ef_construction=128。
+- order-scale-100k.json — 10万行、base-first/base-last/base-interleaved × 1反復
+  （参考値、反復不足であることに注意）。
+- battery.log — 上記4フェーズを直列実行したときの標準出力そのもの
+  （2026-09-25T16:00:38Z 〜 19:08:26Z、合計3時間7分48秒）。
+
+## 結果の要約（aRaw = probe自身のanchorが段1のANN窓kPrime=40に入った数/12）
+
+### 1万行・3万行（HNSW既定 m=16/ef_construction=64、各3反復）
+
+| scale | order | aRaw(3反復) | 中央値(範囲) | on-3(3反復) |
+|---|---|---|---|---|
+| 10k | base-first | 0,0,0 | 0 (0–0) | 0,0,0 |
+| 10k | base-last | 12,12,12 | 12 (12–12) | 9,9,9 |
+| 10k | base-interleaved | 11,11,11 | 11 (11–11) | 8,8,8 |
+| 30k | base-first | 0,0,0 | 0 (0–0) | 0,0,0 |
+| 30k | base-last | 12,12,12 | 12 (12–12) | 9,8,8 |
+| 30k | base-interleaved | 12,11,11 | 11 (11–12) | 8,7,7 |
+
+### 1万行、HNSW m=32/ef_construction=128（各2反復、base-first/base-lastのみ）
+
+| order | aRaw(2反復) | 中央値(範囲) |
+|---|---|---|
+| base-first | 2,0 | 1 (0–2) |
+| base-last | 12,12 | 12 (12–12) |
+
+⟹ m/ef_constructionを既定の2倍にしても、base-firstの取りこぼしは解消しない。
+
+### 10万行（既定パラメータ、各1反復、参考値・反復不足）
+
+| order | aRaw | on-3 |
+|---|---|---|
+| base-first | 0 | 0 |
+| base-last | 10 | 7 |
+| base-interleaved | 10 | 7 |
+
+### EXACT対照（enable_indexscan=off、各条件の1反復目）
+
+全条件でaRaw=12/12（厳密順位は挿入位置に依存しない）。on-3は規模で9〜10/12。
+
+### EXPLAIN
+
+測定した全25反復すべてで、本番と同形（JOIN + tie-break込み、既定ef_search=40）の
+EXPLAINがHNSW索引使用を示し、Seq Scanは1件も出なかった。
+
+## 結論（射程つき、既定on/offの判定はしない）
+
+base-firstの取りこぼし（aRaw 0〜2/12）とbase-last/interleavedの回復（10〜12/12）は、
+1万・3万・10万行を通して独立ingestのたびに安定して再現した——ADR 0332 A.2(3)の
+1回だけの観測が反復・規模を通して再現したことを意味する。この結果は「連想枠という
+スコアリング機構そのものが規模に弱い」という仮説より、「この合成filler・この挿入順
+でのHNSW構築のされ方」という仮説を支持する。射程: 合成filler・12 probe・この器・
+測った規模(1万/3万/10万行、10万行は反復1のみ)に限る。実運用の記憶投入パターンでの
+再現、pgvectorのグラフ構造そのものの機構は確かめていない。

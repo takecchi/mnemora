@@ -639,3 +639,235 @@ pnpm --filter @mnemora/example-chat run association-scale-nondeterminism
 【実測】偽の鍵（`sk-dummy-invalid`）を入れて起動すると、`precomputeEmbeddingCache` の中で
 api.openai.com から 401 が返った。`association-scale-investigate.ts` と新しいベンチは、
 通信の前に例外で止まる（同じく偽の鍵で確認）。
+
+⚠ 【現物・追記(2)時点】この穴はその後 PR #794（`association-scale-bench.ts` /
+`association-scale-investigate.ts` の起動時ガード追加）で塞がれた。追記(2)の測定は
+新しいベンチ（`association-scale-nondeterminism.ts`）だけを使っており、この穴の対象
+外だった——影響は無い。
+
+---
+
+## 追記 2026-09-26 (2): base の挿入位置を振った再測定（反復・規模・HNSWパラメータ）
+
+> **クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> 既定値・公開 API・既存ベンチは変えていない。⛔ 連想枠の既定 on/off の判定はしない
+> （Issue #337 はオーナー決定事項）。本文・上の「追記 2026-09-26」は書き換えていない。
+
+**背景**: 上の「追記 2026-09-26」A.2(3) が、base（anchor/gold を含む62文）の挿入位置
+（先頭/末尾/散らす）を1回ずつ振ったところ、先頭 aRaw 0/12 に対し末尾 12/12（2回）・
+散らす 10/12 と大きく回復することを見つけた。ただし反復は末尾2回・散らす1回だけ、
+規模は1万行のみ、HNSW構築パラメータ（m/ef_construction）は既定のままだった（A.6）。
+本追記は、この効果が**反復・規模を通して安定しているか**、**HNSW構築パラメータを
+上げても同じ形か**を、独立ingest3回以上・複数規模で測り直す。
+
+### B.1 設計 — 動かしたもの・固定したもの
+
+| 動かすもの | 値 |
+|---|---|
+| base の挿入位置 | 先頭(base-first、既存の全モードと同じ対照) / 末尾(base-last) / 散らす(base-interleaved、filler [scale/62]件おきに均等) |
+| 規模 | 1万行・3万行（各3型×3反復）／10万行（各3型×1反復、参考値・反復不足） |
+| HNSW構築パラメータ | 既定(m=16, ef_construction=64)／m=32,ef_construction=128（1万行のみ、先頭/末尾の2型×2反復） |
+
+固定したもの: probe 12件（`ASSOCIATION_PROBES`）、filler 生成規則
+（`buildDistinctFiller`、構成上ゼロ重複）、embedding（`local`/ruri-v3-30m/256次元、
+実 ONNX 推論）、LLM（`deterministic`）、`hnsw.ef_search`（既定40）、`anchorCount`
+（既定3、`maxCount` のみ振る）、器（PostgreSQL 17.11 + pgvector 0.8.0、`initdb` で
+自前構築）。
+
+**規模の選定について**: まず1万行を1回測ったところ ingest 82.1s + drain 69.3s
+（EXACT込み合計3分10秒）だった。10万行は §11（元ADR）の実測 ingest 平均760s・
+drain平均726s（計約24.6分/独立ingest）と近い値を本追記でも実測した（下表）ので、
+「10万行 × 3型 × 3反復 = 9独立ingest」は約3.7時間かかる見込みとなり、依頼が許す
+フォールバック（「1万行＋α、例: 3万行」）を主系列とし、10万行は**反復を1回に落とした
+参考値**として別枠で測った——これは依頼文の「まず1万行1回の所要を測ってから計画を
+決める」の指示どおりの判断である。
+
+**HNSW既定値の出所**【現物】: `packages/postgres/src/vector-space.ts` の
+`registerEmbeddingSpace()` が発行する `CREATE INDEX ... USING hnsw (embedding
+vector_cosine_ops)` に `WITH` 句が無い——pgvector 0.8.0 のコンパイル時既定
+（m=16, ef_construction=64）がそのまま使われる。migration・`registerEmbeddingSpace`
+自体は変更していない——`m`/`ef_construction` を振る条件だけ、ベンチが `TRUNCATE`
+直後の空テーブルに対して `DROP INDEX` → `CREATE INDEX ... WITH (m=.., ef_construction=..)`
+を1回発行し、以降の逐次 `observe()` がその索引に対して育つ（本番と同じ「逐次挿入で
+育つ」形。バルク構築ではない）。
+
+**道具**: `examples/chat/src/bench/association-scale-nondeterminism.ts` に新モード
+`MNEMORA_ASSOC_NONDET_MODE=order-scale` を追加した（本 PR）。**既存モード
+（main/repeat-ef/ef-sweep/order）のコード・挙動は1行も変えていない**——`order-scale`
+は完全に独立した新しい関数群（`runOrderScaleMode` 等）として追加した。新しい環境変数
+（すべて省略可）: `MNEMORA_ASSOC_NONDET_ORDER_TYPES`（既定
+`base-first,base-last,base-interleaved`）・`MNEMORA_ASSOC_NONDET_ORDER_REPEATS`
+（既定3）・`MNEMORA_ASSOC_NONDET_EXACT_REPEATS`（既定1、型ごとに何反復目まで
+EXACTも撮るか）・`MNEMORA_ASSOC_NONDET_HNSW_M`/`MNEMORA_ASSOC_NONDET_HNSW_EF_CONSTRUCTION`
+（両方指定したときだけ有効）。
+
+### B.2 結果 — aRaw・到達（型×規模×反復。中央値・範囲）
+
+**aRaw** = probe自身のanchorが段1の生ANN窓（kPrime=40）に入っていたか(/12)。
+**到達** = `maxCount` ごとの連想到達(/12)、既存ADRと同じ定義。全条件で到達off=0/12
+（連想を使わないarmなので当然、以後省略）。
+
+#### 1万行（HNSW既定 m=16/ef_construction=64、独立ingest3回）
+
+| order | aRaw(3反復) | 中央値(範囲) | on-3(3反復) | on-5(3反復) | on-10(3反復) |
+|---|---|---|---|---|---|
+| base-first | 0, 0, 0 | 0 (0–0) | 0,0,0 | 0,0,0 | 0,0,0 |
+| base-last | 12, 12, 12 | 12 (12–12) | 9,9,9 | 10,10,10 | 10,10,10 |
+| base-interleaved | 11, 11, 11 | 11 (11–11) | 8,8,8 | 9,9,9 | 9,9,9 |
+
+#### 3万行（HNSW既定、独立ingest3回）
+
+| order | aRaw(3反復) | 中央値(範囲) | on-3(3反復) | on-5(3反復) | on-10(3反復) |
+|---|---|---|---|---|---|
+| base-first | 0, 0, 0 | 0 (0–0) | 0,0,0 | 0,0,0 | 0,0,0 |
+| base-last | 12, 12, 12 | 12 (12–12) | 9,8,8 | 11,10,10 | 11,10,10 |
+| base-interleaved | 12, 11, 11 | 11 (11–12) | 8,7,7 | 9,8,8 | 9,8,8 |
+
+#### 1万行、HNSW m=32/ef_construction=128（独立ingest2回、先頭/末尾のみ）
+
+| order | aRaw(2反復) | 中央値(範囲) | on-3(2反復) | on-5(2反復) | on-10(2反復) |
+|---|---|---|---|---|---|
+| base-first | 2, 0 | 1 (0–2) | 0,0 | 0,0 | 0,0 |
+| base-last | 12, 12 | 12 (12–12) | 10,10 | 11,11 | 11,11 |
+
+#### 10万行（HNSW既定、独立ingest1回 — 参考値、反復不足）
+
+| order | aRaw | on-3 | on-5 | on-10 |
+|---|---|---|---|---|
+| base-first | 0 | 0 | 0 | 0 |
+| base-last | 10 | 7 | 9 | 9 |
+| base-interleaved | 10 | 7 | 7 | 7 |
+
+#### EXACT（`enable_indexscan=off`、各型・規模の1反復目のみ撮った対照）
+
+全条件で aRaw=12/12（厳密順位は挿入位置に依存しない——距離自体は挿入順で変わらない
+という既存ADR §Aの確認と一致）。on-3 は規模で9〜10/12・on-5/on-10は11/12（規模内で
+型による差は出なかった）。詳細は生JSONの`exact`フィールド。
+
+**⟹ B.2 の主要な読み: base-first は1万・3万・10万行の全反復で aRaw が 0〜2/12
+に沈み、base-last/base-interleaved は同じ反復・規模で 10〜12/12 まで回復する
+——この差は規模を通して安定しており、A.2(3)の1回だけの観測が反復・規模を通して
+再現した。** HNSW を m=32/ef_construction=128（既定の2倍）にしても base-first の
+沈み込みは解消しなかった（2反復とも1〜2/12以下）。
+
+### B.3 EXPLAIN の確認
+
+**測定した全25反復**（1万行9・3万行9・m32/efc128の4・10万行3）で、本番と同形
+（`memories`へのJOIN + 距離→`recorded_at` DESC→`memory_id`の3段tie-break込み、
+既定 `hnsw.ef_search=40`）の `EXPLAIN (ANALYZE, BUFFERS)` が
+`Index Scan using idx_memory_embeddings_hnsw_...` を示し、`Seq Scan` は1件も
+出なかった（`explainProduction.hnswUsedHeuristic=true` かつ
+`seqScanHeuristic=false` が全反復で成立、生JSONで確認可能）。ef_search は掃引して
+いない（既定40固定）——上の「追記 2026-09-26」A.2(2)がef=550以上でプランナが
+Seq Scanへ切り替わることを既に確認しているので、ここでは踏み込んでいない。
+
+### B.4 所要時間
+
+全4フェーズを直列で実行し、合計 **3時間7分48秒**（2026-09-25T16:00:38Z 〜
+19:08:26Z）。フェーズごと:
+
+| フェーズ | 内容 | 所要 |
+|---|---|---|
+| A | 1万行×3型×3反復 | 22分38秒 |
+| B | 3万行×3型×3反復 | 70分55秒 |
+| C | 1万行×2型×2反復、m32/efc128 | 11分54秒 |
+| D | 10万行×3型×1反復（参考値） | 82分21秒 |
+
+1反復あたりの ingest/drain 中央値: 1万行 ingest≈80s/drain≈68s、3万行
+ingest≈240s/drain≈219s、10万行 ingest≈779s/drain≈762s（元ADR §11の実測
+——ingest平均760s/drain平均726s——と近い値。この器・この日の負荷での再現）。
+m=32/ef_construction=128 では drain が既定より長い（1万行で≈95s、既定の≈68sより
++40%程度）——構築コストが上がった分、embed tick 処理中の索引挿入が重くなったと
+考えられるが、切り分けていない。
+
+### B.5 射程を付けた読み取り
+
+- **言えること（この器・この規模・この12 probe・この合成filler・独立ingest3回
+  という条件の中で）**: base-first の取りこぼし（aRaw 0〜2/12）は、1万・3万・10万行
+  を通して、独立ingestのたびに安定して再現する。base-last/base-interleaved の
+  回復（10〜12/12）も同様に安定している。HNSWパラメータを既定の2倍
+  （m=16→32、ef_construction=64→128）にしても、base-firstの取りこぼしは
+  1万行では解消しなかった。
+- **§2（元ADRの大規模測定）の数字の読み方への示唆**: §2の1万行(A)・10万行(A)は
+  いずれもbase-first型で測っている。本追記のbase-first(1万行、3反復ともaRaw=0/12)
+  は§2の1万行(A) off の aRaw=0/12(ef40)と一致する一方、§2の10万行(A) off の
+  aRaw=2/12・§5.3が記録した「1万行(A)の4回の独立ingestで0→9→1→0と揺れた」件とは
+  一致しない——**本追記の3反復(base-first)は毎回0/12で、§5.3ほど大きくは揺れな
+  かった。** この差の原因（filler生成の巡回参照パターン・embeddingキャッシュの
+  状態・pgvectorのビルド乱数のシード相当のものなど）は切り分けていない。
+  ⟹ **「base-firstなら常に0/12」とまでは言えない**——§5.3で観測された9/12・1/12
+  のような回復が、本追記の3反復では出なかったというだけである。
+- **HNSWパラメータについて**: m/ef_constructionを一段階上げただけでは
+  base-firstの取りこぼしを解消できないことを実測したが、**もっと大きな値
+  （例: m=64以上）やef_search側の掃引との組み合わせは測っていない。**
+- ⛔ **この結果から「連想枠が規模に弱い」のか「ベンチの作り（base先頭という
+  挿入順）の産物」なのかを一義に決めることはできない**——両方が同時に効いている
+  可能性を排除していない。ただし、**base-firstという挿入順を変えるだけで同じ
+  ベクトル集合・同じHNSWパラメータのまま大きく回復する**という本追記の実測は、
+  「連想枠というスコアリング機構そのものが規模に弱い」という仮説より、
+  「この合成filler・この挿入順でのHNSW構築のされ方」という仮説を強く支持する
+  （A.3と同じ向き、反復・規模で補強された）。**実運用の記憶投入パターン
+  （新しい記憶が継続的に積み重なる、base-lastに近い形が多いと推測されるが、
+  実測していない）でも同じ形になるかは測っていない。**
+
+### B.6 確かめていないこと
+
+- pgvectorのグラフ構造そのもの（辺・入口点・層）。機構は推測のまま（A.3と同じ）。
+- 10万行は各型1反復のみ——統計的な広がりは1万・3万行の水準では言えない。
+- HNSWパラメータは m=32/ef_construction=128の1点のみ、かつ1万行・先頭/末尾の
+  2型・2反復のみ（散らす型・他規模では未測定）。
+- ef_searchの掃引は行っていない（既定40固定）。
+- EXACTはメイン条件の1反復目のみ撮っている（残りの反復では厳密順位を確認して
+  いない——挿入順が距離自体を変えないことはA.2(1)で既に確認済みという前提を
+  置いている）。
+- 実運用に近い分布の文での再現（filler は合成テンプレートのまま）。
+- §5.3の「1万行(A)で0→9→1→0と揺れた」現象が、本追記のbase-first 3反復
+  （毎回0/12）となぜ揺れ幅が違うのかは切り分けていない。
+- base-interleavedの間隔は「[scale/62]件おきに均等」の1通りのみ（他の散らし方は
+  未測定）。
+
+### B.7 実行コマンド
+
+```bash
+export PATH=/usr/lib/postgresql/17/bin:$PATH
+# DB は用途ごとに createdb 済み: mnemora_10k / mnemora_30k / mnemora_10k_hnsw / mnemora_100k
+
+# 例: 1万行、3型×3反復、既定HNSWパラメータ（フェーズA相当）
+DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_10k \
+MNEMORA_LLM=deterministic MNEMORA_EMBEDDING=local \
+MNEMORA_ASSOC_NONDET_SCALE=10000 \
+MNEMORA_ASSOC_NONDET_MODE=order-scale \
+MNEMORA_ASSOC_NONDET_ORDER_TYPES=base-first,base-last,base-interleaved \
+MNEMORA_ASSOC_NONDET_ORDER_REPEATS=3 \
+MNEMORA_ASSOC_NONDET_EXACT_REPEATS=1 \
+MNEMORA_ASSOC_NONDET_EMBED_CACHE_DIR=<dir> \
+MNEMORA_ASSOC_NONDET_JSON=<path>/order-scale-10k.json \
+pnpm --filter @mnemora/example-chat run association-scale-nondeterminism
+
+# 例: 1万行、先頭/末尾×2反復、m=32/ef_construction=128（フェーズC相当）
+DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_10k_hnsw \
+MNEMORA_LLM=deterministic MNEMORA_EMBEDDING=local \
+MNEMORA_ASSOC_NONDET_SCALE=10000 \
+MNEMORA_ASSOC_NONDET_MODE=order-scale \
+MNEMORA_ASSOC_NONDET_ORDER_TYPES=base-first,base-last \
+MNEMORA_ASSOC_NONDET_ORDER_REPEATS=2 \
+MNEMORA_ASSOC_NONDET_HNSW_M=32 \
+MNEMORA_ASSOC_NONDET_HNSW_EF_CONSTRUCTION=128 \
+MNEMORA_ASSOC_NONDET_EMBED_CACHE_DIR=<dir> \
+MNEMORA_ASSOC_NONDET_JSON=<path>/order-scale-10k-hnsw-m32-efc128.json \
+pnpm --filter @mnemora/example-chat run association-scale-nondeterminism
+```
+
+生データ（4フェーズぶんのJSON・標準出力ログ）は
+`examples/chat/bench-results/association-order-scale-2026-09-26/` にコミットして
+ある（`NOTES.txt`に要約）。
+
+### B.8 これが覆るとしたら
+
+1. base-interleavedの間隔・m/ef_constructionのより広い掃引で、B.5の読みが崩れたとき。
+2. 実運用に近い分布のfillerで、base-first型の取りこぼしが起きない（または逆に
+   base-last型でも起きる）と分かったとき。
+3. pgvectorのグラフ構造を直接見て、A.3/B.5の「島への到達性」仮説が反証・確証
+   されたとき。
+

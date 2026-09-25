@@ -1,0 +1,206 @@
+[2026-09-25T16:00:38Z] === Phase A: 10k, base-first/base-last/base-interleaved x3 reps, m16/efc64 (default) ===
+$ tsx src/bench/association-scale-nondeterminism.ts
+scale=10000 cacheDir=/tmp/mgr-ffcce523/cache/embcache mode=order-scale
+モデルの読み込みに成功した(warmup() 完了)
+
+=== 埋め込みキャッシュを埋める(10036件、重複除去後) ===
+  precompute: unique=10036 hit=10036 miss=0 ms=0
+[order-scale] scale=10000 orderTypes=base-first,base-last,base-interleaved repeats=3 exactRepeats=1 hnswOverride=無(既定m=16,ef_construction=64)
+
+########## order-scale base-first-rep1 (scale=10000) ##########
+  ingest=80.6s drain=67.7s
+  [base-first-rep1] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [base-first-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(1件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-first-rep2 (scale=10000) ##########
+  ingest=79.0s drain=68.5s
+  [base-first-rep2] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(2件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-first-rep3 (scale=10000) ##########
+  ingest=80.4s drain=67.2s
+  [base-first-rep3] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(3件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-last-rep1 (scale=10000) ##########
+  ingest=78.8s drain=67.7s
+  [base-last-rep1] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 10/12 10/12
+    explain hnsw=true seq=false
+  [base-last-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(4件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-last-rep2 (scale=10000) ##########
+  ingest=78.1s drain=68.5s
+  [base-last-rep2] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 10/12 10/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(5件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-last-rep3 (scale=10000) ##########
+  ingest=81.5s drain=67.4s
+  [base-last-rep3] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 10/12 10/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(6件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-interleaved-rep1 (scale=10000) ##########
+  ingest=80.2s drain=68.7s
+  [base-interleaved-rep1] aRaw=11/12 到達(off/on-3/on-5/on-10)=0/12 8/12 9/12 9/12
+    explain hnsw=true seq=false
+  [base-interleaved-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(7件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-interleaved-rep2 (scale=10000) ##########
+  ingest=79.2s drain=67.3s
+  [base-interleaved-rep2] aRaw=11/12 到達(off/on-3/on-5/on-10)=0/12 8/12 9/12 9/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(8件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+########## order-scale base-interleaved-rep3 (scale=10000) ##########
+  ingest=80.2s drain=68.3s
+  [base-interleaved-rep3] aRaw=11/12 到達(off/on-3/on-5/on-10)=0/12 8/12 9/12 9/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(9件): /tmp/mgr-ffcce523/results/order-scale-10k.json
+
+[association-scale-nondeterminism] order-scaleモード完了: 9件 (/tmp/mgr-ffcce523/results/order-scale-10k.json)
+[2026-09-25T16:23:16Z] === Phase A done ===
+[2026-09-25T16:23:16Z] === Phase B: 30k, base-first/base-last/base-interleaved x3 reps, m16/efc64 (default) ===
+$ tsx src/bench/association-scale-nondeterminism.ts
+scale=30000 cacheDir=/tmp/mgr-ffcce523/cache/embcache mode=order-scale
+モデルの読み込みに成功した(warmup() 完了)
+
+=== 埋め込みキャッシュを埋める(30036件、重複除去後) ===
+  precompute: unique=30036 hit=10036 miss=20000 ms=69616
+[order-scale] scale=30000 orderTypes=base-first,base-last,base-interleaved repeats=3 exactRepeats=1 hnswOverride=無(既定m=16,ef_construction=64)
+
+########## order-scale base-first-rep1 (scale=30000) ##########
+  ingest=238.6s drain=222.0s
+  [base-first-rep1] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [base-first-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(1件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-first-rep2 (scale=30000) ##########
+  ingest=245.2s drain=220.2s
+  [base-first-rep2] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(2件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-first-rep3 (scale=30000) ##########
+  ingest=242.6s drain=219.7s
+  [base-first-rep3] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(3件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-last-rep1 (scale=30000) ##########
+  ingest=240.0s drain=218.4s
+  [base-last-rep1] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+    explain hnsw=true seq=false
+  [base-last-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(4件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-last-rep2 (scale=30000) ##########
+  ingest=237.2s drain=218.4s
+  [base-last-rep2] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 8/12 10/12 10/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(5件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-last-rep3 (scale=30000) ##########
+  ingest=236.9s drain=215.6s
+  [base-last-rep3] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 8/12 10/12 10/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(6件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-interleaved-rep1 (scale=30000) ##########
+  ingest=237.0s drain=217.6s
+  [base-interleaved-rep1] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 8/12 9/12 9/12
+    explain hnsw=true seq=false
+  [base-interleaved-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(7件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-interleaved-rep2 (scale=30000) ##########
+  ingest=236.1s drain=222.4s
+  [base-interleaved-rep2] aRaw=11/12 到達(off/on-3/on-5/on-10)=0/12 7/12 8/12 8/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(8件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+########## order-scale base-interleaved-rep3 (scale=30000) ##########
+  ingest=239.9s drain=218.1s
+  [base-interleaved-rep3] aRaw=11/12 到達(off/on-3/on-5/on-10)=0/12 7/12 8/12 8/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(9件): /tmp/mgr-ffcce523/results/order-scale-30k.json
+
+[association-scale-nondeterminism] order-scaleモード完了: 9件 (/tmp/mgr-ffcce523/results/order-scale-30k.json)
+[2026-09-25T17:34:11Z] === Phase B done ===
+[2026-09-25T17:34:11Z] === Phase C: 10k, base-first/base-last x2 reps, m32/efc128 (HNSW param variation) ===
+$ tsx src/bench/association-scale-nondeterminism.ts
+scale=10000 cacheDir=/tmp/mgr-ffcce523/cache/embcache mode=order-scale
+モデルの読み込みに成功した(warmup() 完了)
+
+=== 埋め込みキャッシュを埋める(10036件、重複除去後) ===
+  precompute: unique=10036 hit=10036 miss=0 ms=0
+[order-scale] scale=10000 orderTypes=base-first,base-last repeats=2 exactRepeats=1 hnswOverride={"m":32,"efConstruction":128}
+
+########## order-scale base-first-rep1 (scale=10000) ##########
+  ingest=78.3s drain=96.1s
+  [base-first-rep1] aRaw=2/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [base-first-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(1件): /tmp/mgr-ffcce523/results/order-scale-10k-hnsw-m32-efc128.json
+
+########## order-scale base-first-rep2 (scale=10000) ##########
+  ingest=78.2s drain=93.5s
+  [base-first-rep2] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(2件): /tmp/mgr-ffcce523/results/order-scale-10k-hnsw-m32-efc128.json
+
+########## order-scale base-last-rep1 (scale=10000) ##########
+  ingest=81.0s drain=94.0s
+  [base-last-rep1] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+    explain hnsw=true seq=false
+  [base-last-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(3件): /tmp/mgr-ffcce523/results/order-scale-10k-hnsw-m32-efc128.json
+
+########## order-scale base-last-rep2 (scale=10000) ##########
+  ingest=77.6s drain=97.5s
+  [base-last-rep2] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 10/12 11/12 11/12
+    explain hnsw=true seq=false
+  [order-scale] 途中結果を書き出した(4件): /tmp/mgr-ffcce523/results/order-scale-10k-hnsw-m32-efc128.json
+
+[association-scale-nondeterminism] order-scaleモード完了: 4件 (/tmp/mgr-ffcce523/results/order-scale-10k-hnsw-m32-efc128.json)
+[2026-09-25T17:46:05Z] === Phase C done ===
+[2026-09-25T17:46:05Z] === Phase D (stretch, reference only, 1 rep): 100k, base-first/base-last/base-interleaved ===
+$ tsx src/bench/association-scale-nondeterminism.ts
+scale=100000 cacheDir=/tmp/mgr-ffcce523/cache/embcache mode=order-scale
+モデルの読み込みに成功した(warmup() 完了)
+
+=== 埋め込みキャッシュを埋める(100036件、重複除去後) ===
+  precompute: unique=100036 hit=30036 miss=70000 ms=239940
+[order-scale] scale=100000 orderTypes=base-first,base-last,base-interleaved repeats=1 exactRepeats=1 hnswOverride=無(既定m=16,ef_construction=64)
+
+########## order-scale base-first-rep1 (scale=100000) ##########
+  ingest=779.0s drain=766.4s
+  [base-first-rep1] aRaw=0/12 到達(off/on-3/on-5/on-10)=0/12 0/12 0/12 0/12
+    explain hnsw=true seq=false
+  [base-first-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(1件): /tmp/mgr-ffcce523/results/order-scale-100k.json
+
+########## order-scale base-last-rep1 (scale=100000) ##########
+  ingest=792.4s drain=759.4s
+  [base-last-rep1] aRaw=10/12 到達(off/on-3/on-5/on-10)=0/12 7/12 9/12 9/12
+    explain hnsw=true seq=false
+  [base-last-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(2件): /tmp/mgr-ffcce523/results/order-scale-100k.json
+
+########## order-scale base-interleaved-rep1 (scale=100000) ##########
+  ingest=765.5s drain=761.2s
+  [base-interleaved-rep1] aRaw=10/12 到達(off/on-3/on-5/on-10)=0/12 7/12 7/12 7/12
+    explain hnsw=true seq=false
+  [base-interleaved-rep1-EXACT] aRaw=12/12 到達(off/on-3/on-5/on-10)=0/12 9/12 11/12 11/12
+  [order-scale] 途中結果を書き出した(3件): /tmp/mgr-ffcce523/results/order-scale-100k.json
+
+[association-scale-nondeterminism] order-scaleモード完了: 3件 (/tmp/mgr-ffcce523/results/order-scale-100k.json)
+[2026-09-25T19:08:26Z] === Phase D done ===
+[2026-09-25T19:08:26Z] === ALL PHASES DONE ===

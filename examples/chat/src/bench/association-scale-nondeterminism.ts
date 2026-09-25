@@ -1420,6 +1420,306 @@ async function runOrderExperimentMode(
 }
 
 // ---------------------------------------------------------------------------
+// order-scale モード（マネージャー追加依頼、2026-09-26第3弾） —— ADR 0332 追記(2)。
+//
+// 上の "order" モード（P1/P2/対照、各1〜2反復のみ・単一規模）は A.2(3) の1回きりの
+// 切り分けだった。このモードは同じ3型（base-first/base-last/base-interleaved）を、
+// **複数規模 × 独立ingest3回以上 ×（余力で）HNSWパラメータ**で振り直す——
+// 「base を末尾に入れると直る」が反復・規模を通して安定した効果か、1回だけの
+// 偶然かを見分けるため。
+//
+// ⛔ **"order" モード・他の既存モード（main/repeat-ef/ef-sweep）のコード・挙動は
+// 一切変えていない。** ここから下は完全に新しい関数だけを足す（既存関数は呼ぶだけで
+// 変更しない）。既定で `MNEMORA_ASSOC_NONDET_MODE` を指定しなければ、これまで通り
+// "main" モードが動く。
+//
+// 新しい環境変数（すべて省略可、省略時は下記の既定値）:
+// - `MNEMORA_ASSOC_NONDET_ORDER_TYPES`（既定 "base-first,base-last,base-interleaved"）
+// - `MNEMORA_ASSOC_NONDET_ORDER_REPEATS`（既定 3、型ごとの独立ingest回数）
+// - `MNEMORA_ASSOC_NONDET_EXACT_REPEATS`（既定 1、型ごとに何反復目までEXACTも撮るか）
+// - `MNEMORA_ASSOC_NONDET_HNSW_M` / `MNEMORA_ASSOC_NONDET_HNSW_EF_CONSTRUCTION`
+//   （両方指定したときだけ有効。指定が無ければ pgvector 既定（m=16, ef_construction=64
+//   ——`registerEmbeddingSpace` の `CREATE INDEX ... USING hnsw (...)` に `WITH` 句が
+//   無いことを現物で確認済み、`packages/postgres/src/vector-space.ts`）のまま）
+// ---------------------------------------------------------------------------
+
+interface OrderScaleProbeResult {
+  probeId: string;
+  aRaw: boolean;
+  aRawRank: number | null;
+  reachedOff: boolean;
+  reachedOn3: boolean;
+  reachedOn5: boolean;
+  reachedOn10: boolean;
+}
+
+async function measureOrderScaleProbes(
+  handle: InstrumentedHandle,
+  tenantId: string,
+  anchorIds: ReadonlyMap<string, MemoryId>,
+  goldIds: ReadonlyMap<string, MemoryId>,
+): Promise<OrderScaleProbeResult[]> {
+  const ctx: Ctx = { tenantId };
+  const out: OrderScaleProbeResult[] = [];
+  for (const probe of ASSOCIATION_PROBES) {
+    const anchorId = anchorIds.get(probe.id)!;
+    const goldId = goldIds.get(probe.id)!;
+
+    handle.spy.reset();
+    const offResult = await handle.runtime.recall(ctx, { text: probe.query });
+    const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
+    const rawHits = searchCalls[0]?.hits ?? [];
+    const aRawIdx = rawHits.findIndex((h) => h.memoryId === anchorId);
+    const aRaw = aRawIdx !== -1;
+    const reachedOff = offResult.memories.some(
+      (m) => m.memoryId === goldId && m.retrievedVia === "association",
+    );
+
+    const on3Result = await handle.runtime.recall(ctx, {
+      text: probe.query,
+      association: { maxCount: 3 },
+    });
+    const reachedOn3 = on3Result.memories.some(
+      (m) => m.memoryId === goldId && m.retrievedVia === "association",
+    );
+
+    const on5Result = await handle.runtime.recall(ctx, {
+      text: probe.query,
+      association: { maxCount: 5 },
+    });
+    const reachedOn5 = on5Result.memories.some(
+      (m) => m.memoryId === goldId && m.retrievedVia === "association",
+    );
+
+    const on10Result = await handle.runtime.recall(ctx, {
+      text: probe.query,
+      association: { maxCount: 10 },
+    });
+    const reachedOn10 = on10Result.memories.some(
+      (m) => m.memoryId === goldId && m.retrievedVia === "association",
+    );
+
+    out.push({
+      probeId: probe.id,
+      aRaw,
+      aRawRank: aRaw ? aRawIdx + 1 : null,
+      reachedOff,
+      reachedOn3,
+      reachedOn5,
+      reachedOn10,
+    });
+  }
+  return out;
+}
+
+function summarizeOrderScale(label: string, probes: OrderScaleProbeResult[]): string {
+  const n = probes.length;
+  const aRawCount = probes.filter((p) => p.aRaw).length;
+  const off = probes.filter((p) => p.reachedOff).length;
+  const on3 = probes.filter((p) => p.reachedOn3).length;
+  const on5 = probes.filter((p) => p.reachedOn5).length;
+  const on10 = probes.filter((p) => p.reachedOn10).length;
+  return (
+    `  [${label}] aRaw=${aRawCount}/${n} 到達(off/on-3/on-5/on-10)=` +
+    `${off}/${n} ${on3}/${n} ${on5}/${n} ${on10}/${n}`
+  );
+}
+
+/**
+ * HNSW 索引を DROP して、指定した `m`/`ef_construction` で作り直す。migration・
+ * `registerEmbeddingSpace` 自体は書き換えない——呼び出し側（このベンチ）が、
+ * 空になったテーブル（`truncateAll` 直後）に対して1回だけ呼ぶ。以降の `observe()`
+ * の逐次 INSERT が、この新しい索引に対して本番と同じ「逐次挿入で育つ」形で積まれる。
+ */
+async function recreateHnswIndexWithParams(
+  pool: PostgresClient["pool"],
+  space: EmbeddingSpaceId,
+  m: number,
+  efConstruction: number,
+): Promise<void> {
+  const table = embeddingSpaceTableName(space);
+  const index = embeddingSpaceIndexName(space);
+  assertSafeIdentifier(table);
+  assertSafeIdentifier(index);
+  if (!Number.isInteger(m) || m <= 0 || !Number.isInteger(efConstruction) || efConstruction <= 0) {
+    throw new Error(
+      `recreateHnswIndexWithParams: m(${m})/ef_construction(${efConstruction}) が不正`,
+    );
+  }
+  await pool.query(`DROP INDEX IF EXISTS ${index}`);
+  await pool.query(`
+    CREATE INDEX ${index}
+      ON ${table}
+      USING hnsw (embedding vector_cosine_ops)
+      WITH (m = ${m}, ef_construction = ${efConstruction})
+  `);
+}
+
+function parseOrderTypesEnv(name: string, fallback: IngestOrder[]): IngestOrder[] {
+  const raw = process.env[name];
+  if (!raw) return fallback;
+  const parts = raw
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const valid: IngestOrder[] = [];
+  for (const p of parts) {
+    if (p === "base-first" || p === "base-last" || p === "base-interleaved") {
+      valid.push(p);
+    } else {
+      throw new Error(`parseOrderTypesEnv(${name}): 不明な order 型 "${p}"`);
+    }
+  }
+  return valid.length > 0 ? valid : fallback;
+}
+
+interface OrderScaleIterationReport {
+  scale: number;
+  order: IngestOrder;
+  rep: number;
+  hnsw: { m: number; efConstruction: number; overridden: boolean };
+  ingestSeconds: number;
+  drainSeconds: number;
+  probes: OrderScaleProbeResult[];
+  /** 既定 ef_search（掃引しない）での、本番と同形（JOIN + 3段tie-break込み）の
+   *  EXPLAIN。HNSW 索引が実際に使われたことの確認用。 */
+  explainProduction: ExplainCapture;
+  exact?: { ranks: ExactRankResult[]; probes: OrderScaleProbeResult[] };
+}
+
+async function runOrderScaleMode(
+  databaseUrl: string,
+  scale: number,
+  cache: FileEmbeddingCache,
+  jsonPath: string | undefined,
+): Promise<OrderScaleIterationReport[]> {
+  const tenantId = "nondet-order-scale";
+  const orderTypes = parseOrderTypesEnv("MNEMORA_ASSOC_NONDET_ORDER_TYPES", [
+    "base-first",
+    "base-last",
+    "base-interleaved",
+  ]);
+  const repeats = parseIntEnv("MNEMORA_ASSOC_NONDET_ORDER_REPEATS", 3);
+  const exactRepeats = parseIntEnv("MNEMORA_ASSOC_NONDET_EXACT_REPEATS", 1);
+  const hnswMRaw = process.env.MNEMORA_ASSOC_NONDET_HNSW_M;
+  const hnswEfcRaw = process.env.MNEMORA_ASSOC_NONDET_HNSW_EF_CONSTRUCTION;
+  const hnswOverride =
+    hnswMRaw !== undefined && hnswEfcRaw !== undefined
+      ? { m: Number(hnswMRaw), efConstruction: Number(hnswEfcRaw) }
+      : undefined;
+
+  console.log(
+    `[order-scale] scale=${scale} orderTypes=${orderTypes.join(",")} repeats=${repeats} ` +
+      `exactRepeats=${exactRepeats} hnswOverride=${hnswOverride ? JSON.stringify(hnswOverride) : "無(既定m=16,ef_construction=64)"}`,
+  );
+
+  const results: OrderScaleIterationReport[] = [];
+  const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
+
+  for (const order of orderTypes) {
+    for (let rep = 1; rep <= repeats; rep += 1) {
+      const label = `${order}-rep${rep}`;
+      console.log(`\n########## order-scale ${label} (scale=${scale}) ##########`);
+      const utterances = buildOrderedCorpus(scale, order);
+
+      const handle = await createInstrumentedRuntime(databaseUrl, cache);
+      await truncateAll(handle.pool);
+      let hnswUsed = { m: 16, efConstruction: 64, overridden: false };
+      if (hnswOverride) {
+        await recreateHnswIndexWithParams(
+          handle.pool,
+          handle.cachingEmbeddingProvider.space,
+          hnswOverride.m,
+          hnswOverride.efConstruction,
+        );
+        hnswUsed = { ...hnswOverride, overridden: true };
+      }
+      const ingest = await ingestOrderedCorpus(handle, tenantId, utterances);
+      console.log(
+        `  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`,
+      );
+      const space = handle.cachingEmbeddingProvider.space;
+
+      const probes = await measureOrderScaleProbes(
+        handle,
+        tenantId,
+        ingest.anchorIds,
+        ingest.goldIds,
+      );
+      console.log(summarizeOrderScale(label, probes));
+
+      const table = embeddingSpaceTableName(space);
+      assertSafeIdentifier(table);
+      const repProbe = ASSOCIATION_PROBES[0]!;
+      const queryVector = await cachedVectorOrThrow(
+        handle.cachingEmbeddingProvider,
+        repProbe.query,
+      );
+      const explainProduction = await captureExplainAtProduction(
+        handle.pool,
+        table,
+        tenantId,
+        `${label}(本番ef)`,
+        queryVector,
+        kPrime,
+        ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+      );
+      console.log(
+        `    explain hnsw=${explainProduction.hnswUsedHeuristic} seq=${explainProduction.seqScanHeuristic}`,
+      );
+
+      let exact: { ranks: ExactRankResult[]; probes: OrderScaleProbeResult[] } | undefined;
+      if (rep <= exactRepeats) {
+        const exactHandle = await createInstrumentedRuntime(
+          databaseUrl,
+          cache,
+          "-c enable_indexscan=off -c enable_bitmapscan=off",
+        );
+        const exactProbes = await measureOrderScaleProbes(
+          exactHandle,
+          tenantId,
+          ingest.anchorIds,
+          ingest.goldIds,
+        );
+        const exactRanks = await measureExactRanks(
+          exactHandle.pool,
+          space,
+          tenantId,
+          ingest.anchorIds,
+          exactHandle.cachingEmbeddingProvider,
+        );
+        console.log(summarizeOrderScale(`${label}-EXACT`, exactProbes));
+        exact = { ranks: exactRanks, probes: exactProbes };
+        await exactHandle.close();
+      }
+
+      await handle.close();
+
+      results.push({
+        scale,
+        order,
+        rep,
+        hnsw: hnswUsed,
+        ingestSeconds: ingest.ingestSeconds,
+        drainSeconds: ingest.drainSeconds,
+        probes,
+        explainProduction,
+        ...(exact ? { exact } : {}),
+      });
+
+      // ⚠ 逐次書き出し —— 長時間測定の途中でプロセスが落ちても、それまでの分は残す。
+      if (jsonPath) {
+        mkdirSync(dirname(jsonPath), { recursive: true });
+        writeFileSync(jsonPath, `${JSON.stringify(results, null, 2)}\n`, "utf-8");
+        console.log(`  [order-scale] 途中結果を書き出した(${results.length}件): ${jsonPath}`);
+      }
+    }
+  }
+
+  return results;
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -1442,7 +1742,9 @@ async function main(): Promise<void> {
         ? "ef-sweep"
         : modeEnv === "order"
           ? "order"
-          : "main";
+          : modeEnv === "order-scale"
+            ? "order-scale"
+            : "main";
 
   console.log(`scale=${scale} cacheDir=${cacheDir} mode=${mode}`);
 
@@ -1518,6 +1820,17 @@ async function main(): Promise<void> {
         `\n[association-scale-nondeterminism] orderモードの結果を書き出した: ${jsonPath}`,
       );
     }
+    return;
+  }
+
+  if (mode === "order-scale") {
+    // runOrderScaleMode 自体が逐次 jsonPath へ書き出す(1件終わるごとに全体を上書き)。
+    const results = await runOrderScaleMode(databaseUrl, scale, cache, jsonPath);
+    cache.close();
+    console.log(
+      `\n[association-scale-nondeterminism] order-scaleモード完了: ${results.length}件` +
+        (jsonPath ? ` (${jsonPath})` : ""),
+    );
     return;
   }
 
