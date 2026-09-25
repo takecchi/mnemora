@@ -222,6 +222,37 @@ export interface RuntimeDeps {
    * `recall-runtime.js` の `RecallRuntimeDeps.outputValidation` へそのまま渡る。
    */
   outputValidation?: RecallOutputValidationMode;
+  /**
+   * `processEmbedJob` が `embed(ctx, [...])` へ送る文字列を、`Memory` から差し替える
+   * **任意**のフック（Issue #753、#449 の残り。ADR 0305 は「上限超過は例外」を契約に
+   * 明記したが、失敗した Memory を回復する口までは開けなかった——`reembed()`
+   * （ADR 0079）は failed を pending に戻して embed ジョブを積み直すだけで、次の
+   * `processEmbedJob` はまた同じ `memory.content` を送って同じ理由でまた failed に
+   * 戻る。このフックがその回復の口である）。
+   *
+   * **省略時は `memory.content` をそのまま `embed()` へ送る**——この欄の有無は
+   * 既定の挙動を1ビットも変えない（北極星の問い2、`docs/north-star.md`）。
+   * 指定すると `processEmbedJob` は `embed(ctx, [embeddingInput(memory)])` を呼ぶ。
+   * **`Memory.content` 自体はどちらの場合も変えない**——DB に書き戻る content は
+   * 常に元のままで、このフックは送る文字列だけを差し替える。
+   *
+   * 使い方の例: 上限超過で `embeddingStatus: 'failed'` になった Memory を、先頭を
+   * 切って短くする関数を渡し、`reembed({ statuses: ['failed'], limit })` →
+   * `tick({ kinds: ['embed'] })` の順に呼ぶと、対象は `'ready'` に戻る
+   * （`Memory.content` は全文のまま）。
+   *
+   * 🔴 **core はモデルごとの入力上限・トークン数を持たない**（ADR 0305 決定6 /
+   * ADR 0090 決定「3.6」と同じ理由——層が違う。core が特定モデルの数字を知ってはならない）。
+   * このフックが「何を・どれだけ切ったか」の印も core は残さない——残すには
+   * `Memory` に列を足す必要があり、それは migration を要する変更であって、この
+   * フック（純粋な関数の注入）の範囲を超える。印が要る呼び出し側は、自前の仕組み
+   * （別テーブル・ログ等）で残すこと。
+   *
+   * フックが例外を投げた場合、`processEmbedJob` は今までどおり
+   * `embeddingStatus` を `'failed'` にしてから再送出する——このフックのために
+   * 新しい throw の経路を既定側へ作らない。
+   */
+  embeddingInput?: (memory: Memory) => string;
 }
 
 export interface ObserveResult {
@@ -3231,6 +3262,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     await runExtraction(ctx, observation);
   }
 
+  /**
+   * Issue #753 / `RuntimeDeps.embeddingInput`: `deps.embeddingInput` が省略されていれば
+   * `memory.content` をそのまま返す——この関数の有無は既定の挙動を1ビットも変えない。
+   * 指定されていれば、その戻り値を `embed()` へ送る文字列として使う（`memory.content`
+   * 自体は変えない。呼び出し元の `try` の中で呼ぶので、フックが例外を投げても今までの
+   * `catch` がそのまま `embeddingStatus: 'failed'` にして再送出する）。
+   */
+  function resolveEmbeddingInput(memory: Memory): string {
+    return deps.embeddingInput ? deps.embeddingInput(memory) : memory.content;
+  }
+
   async function processEmbedJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
     const memoryId = job.payload.memoryId;
     if (typeof memoryId !== "string") {
@@ -3241,7 +3283,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new Error(`runtime.tick: embed job references missing memory: ${memoryId}`);
     }
     try {
-      const [vector] = await deps.embeddingProvider.embed(ctx, [memory.content]);
+      const [vector] = await deps.embeddingProvider.embed(ctx, [resolveEmbeddingInput(memory)]);
       if (!vector) {
         throw new Error("runtime.tick: embedding provider returned no vector");
       }

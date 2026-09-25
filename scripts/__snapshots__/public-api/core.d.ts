@@ -2629,6 +2629,7 @@ export interface RuntimeDeps {
     config?: RuntimeConfig;
     tokenCounter?: TokenCounter;
     outputValidation?: RecallOutputValidationMode;
+    embeddingInput?: (memory: Memory) => string;
 }
 export interface ObserveResult {
     observationId: ObservationId;

@@ -749,6 +749,118 @@ describe("runtime.reembed（ADR 0079: provider が直った後に、索引へ戻
 });
 
 /**
+ * Issue #753（#449 の残り、ADR 0305 決定4の歯の続き）: 上限超過で `failed` になった
+ * Memory には、ADR 0079 の `reembed()` だけでは回復手段が無かった——`requeueEmbedJobs`
+ * は failed を pending に戻して embed ジョブを積み直すだけで、次の `processEmbedJob` は
+ * 同じ `memory.content`（全文のまま）を再び `embed()` へ送るため、また同じ理由で
+ * `failed` に戻る。
+ *
+ * `RuntimeDeps.embeddingInput`（任意の opt-in フック）は、`processEmbedJob` が
+ * `embed()` へ送る文字列を差し替えられるようにする——`Memory.content` 自体は変えない。
+ *
+ * この節の2本は対になっている:
+ * - 1本目: フックを注入した runtime で `reembed()` → `tick()` すると `ready` になる
+ *   （フックが無いと直せない、を実際に直せることの陽性対照）。
+ * - 2本目: フックを渡さない今までどおりの runtime では、`reembed()` → `tick()` を
+ *   繰り返しても `failed` のまま（既定の挙動は1ビットも変わっていないことの固定）。
+ */
+describe("runtime.tick — processEmbedJob の embeddingInput opt-in フック（Issue #753）", () => {
+  function overLimitEmbeddingProvider(): EmbeddingProvider {
+    return {
+      space: { provider: "fake-over-limit", model: "fake-over-limit-model", dimensions: 2 },
+      embed: async (_ctx, texts) => {
+        const tooLong = texts.find((text) => text.length > 100);
+        if (tooLong !== undefined) {
+          throw new Error("simulated input_too_long: input exceeds provider limit");
+        }
+        return texts.map(() => [0, 0]);
+      },
+    };
+  }
+
+  it("embeddingInput フックを渡した runtime で reembed + tick すると、failed だった Memory は ready になる。content は全文のまま変わらない", async () => {
+    const hugeContent = "x".repeat(500);
+    const provider = overLimitEmbeddingProvider();
+    const { runtime, stores } = buildRuntime(throwingLlm(), { embeddingProvider: provider });
+
+    const observeResult = await runtime.observe(ctx, { kind: "document", content: hugeContent });
+    const memoryId = observeResult.memoryIds[0]!;
+
+    const failedTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
+    // ⚠ `FakeMemoryStore.get` は可変な Memory オブジェクトへの参照をそのまま返す
+    // （上の「runtime.reembed」describe の注意と同じ footgun）。ここで文字列として
+    // 値を取り出しておかないと、後続の `healingTick` の書き込みで「過去の観測」の
+    // つもりだった `afterFailure` まで "ready" に書き換わる。
+    const afterFailureStatus = (await stores.memoryStore.get(ctx, memoryId))?.embeddingStatus;
+
+    // 運用側が opt-in フックを足した runtime を、同じ store（同じ永続状態）に対して
+    // 新たに立てる——runtime 自身は状態を持たない関数の集合であり、状態は deps 側の
+    // store が持つ。既存の failed 行に対して「後からフックを足した runtime で reembed
+    // する」という、実際の復旧オペレーションをそのまま模している。
+    const healingRuntime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: throwingLlm(),
+      embeddingProvider: provider,
+      hashContent: (content: string) => `sha256(${content})`,
+      embeddingInput: (memory) => memory.content.slice(0, 50),
+    });
+
+    const reembedResult = await healingRuntime.reembed(ctx, { statuses: ["failed"], limit: 10 });
+    const healingTick = await healingRuntime.tick(ctx, {
+      kinds: ["embed"],
+      leaseMs: TEST_LEASE_MS,
+    });
+    const healed = await stores.memoryStore.get(ctx, memoryId);
+
+    expect({
+      failedTick,
+      afterFailureStatus,
+      reembedResult,
+      healingTick,
+      healedStatus: healed?.embeddingStatus,
+      healedContent: healed?.content,
+    }).toEqual({
+      failedTick: { processed: 0, failed: 1, unsupported: [], leaseConflicts: [] },
+      afterFailureStatus: "failed",
+      reembedResult: { requeued: 1, memoryIds: [memoryId] },
+      healingTick: { processed: 1, failed: 0, unsupported: [], leaseConflicts: [] },
+      healedStatus: "ready",
+      healedContent: hugeContent,
+    });
+  });
+
+  it("embeddingInput を渡さない runtime では、reembed + tick を繰り返しても同じ content をまた送ってしまい failed のまま（既定不変）", async () => {
+    const hugeContent = "x".repeat(500);
+    const provider = overLimitEmbeddingProvider();
+    const { runtime, stores } = buildRuntime(throwingLlm(), { embeddingProvider: provider });
+
+    const observeResult = await runtime.observe(ctx, { kind: "document", content: hugeContent });
+    const memoryId = observeResult.memoryIds[0]!;
+
+    await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
+    const reembedResult = await runtime.reembed(ctx, { statuses: ["failed"], limit: 10 });
+    const secondTick = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: TEST_LEASE_MS });
+    const stillFailed = await stores.memoryStore.get(ctx, memoryId);
+
+    expect({
+      reembedResult,
+      secondTick,
+      stillFailedStatus: stillFailed?.embeddingStatus,
+      stillFailedContent: stillFailed?.content,
+    }).toEqual({
+      reembedResult: { requeued: 1, memoryIds: [memoryId] },
+      secondTick: { processed: 0, failed: 1, unsupported: [], leaseConflicts: [] },
+      stillFailedStatus: "failed",
+      stillFailedContent: hugeContent,
+    });
+  });
+});
+
+/**
  * Issue #312 / [ADR 0161](../../../docs/decisions/0161-runtime-get-recall.md):
  * `Runtime.getRecall` は `MemoryStore.getRecall` への**素通し**である
  * （`reembed` と同じ形——`runtime.ts` の doc コメント参照）。ここで検査するのは
