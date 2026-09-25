@@ -32,6 +32,8 @@ export interface PrepareLexicalMemoryAttrs {
   validFrom?: Date | null;
   /** Issue #280: `filter.validAt` の歯が使う。 */
   validUntil?: Date | null;
+  /** Issue #152/#153（ADR 0302）: `filter.attributes` の歯が使う。 */
+  attributes?: Record<string, string>;
 }
 
 export interface LexicalStoreConformanceOptions {
@@ -603,6 +605,33 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       });
 
       expect(hits.map((hit) => hit.memoryId)).toContain(alwaysValidId);
+    });
+
+    // -------------------------------------------------------------------
+    // filter.attributes（Issue #152/#153、ADR 0302）: `vector-store-conformance.ts` と
+    // 同じ意味論（AND 等値）。
+    // -------------------------------------------------------------------
+
+    it("filter.attributes: 渡したキーと同じ値を持つ Memory だけが返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        attributes: { visibility: "internal" },
+      });
+      const mismatchingId = await prepareMemory(ctx, {
+        content: "obsidian shards glimmer",
+        attributes: { visibility: "public" },
+      });
+
+      const hits = await store.search(ctx, "obsidian shards", {
+        limit: 10,
+        filter: { tenantId: "tenant-1", attributes: { visibility: "internal" } },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).not.toContain(mismatchingId);
     });
 
     it("filter は複数同時に渡すと AND になる（どれか1つが不一致なら返らない）", async () => {

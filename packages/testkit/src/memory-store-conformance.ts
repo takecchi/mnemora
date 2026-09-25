@@ -823,6 +823,99 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // attributes（Issue #152/#153、ADR 0302）
+    // -------------------------------------------------------------------
+
+    it("createMemory は attributes を書き込み、読み戻す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", attributes: { visibility: "internal" } }),
+      );
+      expect(created.attributes).toEqual({ visibility: "internal" });
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.attributes).toEqual({ visibility: "internal" });
+    });
+
+    it("createMemory は attributes を省略すると {} のまま保存・返却する（非破壊の既定値）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1" }),
+      );
+      expect(created.attributes ?? {}).toEqual({});
+
+      const reread = await store.get(ctx, created.id);
+      expect(reread?.attributes ?? {}).toEqual({});
+    });
+
+    it("createObservation は attributes を書き込み、読み戻す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+
+      const created = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1", attributes: { visibility: "internal" } }),
+      );
+      expect(created.attributes).toEqual({ visibility: "internal" });
+
+      const reread = await store.getObservation(ctx, created.id);
+      expect(reread?.attributes).toEqual({ visibility: "internal" });
+    });
+
+    it("aggregateScope は scope.attributes で絞り込める。落ちた分は totalInScope から静かに除かれる（omitted 相当の報告は無い、ADR 0302 決定6）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", attributes: { visibility: "internal" } }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "fixture-hash-2",
+          attributes: { visibility: "public" },
+        }),
+      );
+
+      const aggregate = await store.aggregateScope(ctx, {
+        attributes: { visibility: "internal" },
+      });
+      expect(aggregate.totalInScope).toBe(1);
+    });
+
+    it("aggregateScope の scope.attributes: 複数キーは AND", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          attributes: { visibility: "internal", region: "jp" },
+        }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "fixture-hash-2",
+          attributes: { visibility: "internal", region: "us" },
+        }),
+      );
+
+      const aggregate = await store.aggregateScope(ctx, {
+        attributes: { visibility: "internal", region: "jp" },
+      });
+      expect(aggregate.totalInScope).toBe(1);
+    });
+
+    // -------------------------------------------------------------------
     // decayBaseSeq/decayFloorSeq/halfLifeRecalls（活動時計の3つ組、
     // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3、
     // Issue #305）

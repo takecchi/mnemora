@@ -156,6 +156,17 @@ export class InMemoryVectorStore implements VectorStore {
       if (!subjectMatches) {
         continue;
       }
+      // Issue #152/#153（ADR 0302）: AND 等値の絞り込み——`PostgresVectorStore.search`
+      // （`m.attributes @> ...::jsonb`）と同じ意味論。
+      if (opts.filter.attributes !== undefined) {
+        const memoryAttributes = memory.attributes ?? {};
+        const attributesMatch = Object.entries(opts.filter.attributes).every(
+          ([key, value]) => memoryAttributes[key] === value,
+        );
+        if (!attributesMatch) {
+          continue;
+        }
+      }
       // ADR 0165 決めたこと1・4・12（Issue #305）: 忘却ゲートの2軸。`decayFloorAnyAxis` が
       // true かつ両方の境界が渡されているときだけ OR で結ぶ——`PostgresVectorStore.search`
       // （`packages/postgres/src/vector-store.ts`）と同じ意味論。それ以外は今日どおり

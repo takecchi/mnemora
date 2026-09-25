@@ -134,6 +134,11 @@ export class PostgresVectorStore implements VectorStore {
           : sql`m.subject_id = ${opts.filter.subjectId}`,
       );
     }
+    // Issue #152/#153（ADR 0302）: AND 等値の絞り込み。`jsonb` の containment（`@>`）——
+    // `idx_memories_attributes`（`jsonb_path_ops`）が効く述語。未指定なら no-op。
+    if (opts.filter.attributes !== undefined) {
+      conditions.push(sql`m.attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
+    }
     // ADR 0059: period の押し下げ。比較対象は COALESCE(occurred_at, recorded_at)
     // （ADR 0039 が定義した「実効時刻」——4箇所あった判定規則の5箇所目)。両端とも包含
     // （`>=`/`<=`）——`VectorFilter.occurredAfter`/`occurredBefore` の doc、および

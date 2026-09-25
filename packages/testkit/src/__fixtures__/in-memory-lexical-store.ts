@@ -128,6 +128,16 @@ export class InMemoryLexicalStore implements LexicalStore {
       if (!subjectMatches) {
         continue;
       }
+      // Issue #152/#153（ADR 0302）: AND 等値の絞り込み（`InMemoryVectorStore` と同じ意味論）。
+      if (opts.filter.attributes !== undefined) {
+        const memoryAttributes = memory.attributes ?? {};
+        const attributesMatch = Object.entries(opts.filter.attributes).every(
+          ([key, value]) => memoryAttributes[key] === value,
+        );
+        if (!attributesMatch) {
+          continue;
+        }
+      }
       // ADR 0056: 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op。
       if (
         opts.filter.excludeProvenanceKinds !== undefined &&
