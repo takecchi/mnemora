@@ -480,6 +480,17 @@ interface MemoryStore {
       event: NewMemoryEvent;
     }
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  findActiveByClaimKey?(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    }
+  ): Promise<Memory[]>;
   restoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
