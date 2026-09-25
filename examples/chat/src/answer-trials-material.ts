@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ANSWER_CASE_SET_DEV } from "./answer-case-set.dev.js";
+import { ORDER_LEGEND_LINE } from "./mnemora-path.js";
 
 /**
  * Issue #705 / ADR 0301 の材料抽出器。
@@ -59,6 +60,17 @@ export interface CaseMaterial {
   totalInScope: number;
   presented: number;
   lines: MaterialMemoryLine[];
+  /**
+   * `rawContent` の本体が {@link ORDER_LEGEND_LINE}（ADR 0309 の凡例行）で始まって
+   * いたかどうか。**`lines` に `recordedOrder` を持つ行があるかどうかとは独立の
+   * 情報として保持する**——`examples/chat/cassettes/answer.json`（旧・凍結カセット、
+   * ADR 0301/0309 の対照の基準）は `[記録順:N]` タグは持つが凡例行を持たない
+   * （2026-09 の過渡期の記録形式、PR #703 直後・PR #716 より前）。`recordedRenderer`
+   * （`answer-trials-render.ts`）はこの欄を見て凡例行の有無を原文どおりに再現する
+   * ——`lines` から再導出すると `answer.json` の再構成検査が壊れる（この PR の
+   * 作業中に実際に踏んだ）。
+   */
+  hasOrderLegend: boolean;
   /** カセットに記録された、この case の mnemora 側 `messages[0].content` の原文そのまま。 */
   rawContent: string;
   /** 正規化した構造（`caseId`/`question`/`system`/`totalInScope`/`presented`/`lines`）の sha256。 */
@@ -271,6 +283,7 @@ export function parseMnemoraPromptBody(body: string): {
   totalInScope: number;
   presented: number;
   lines: MaterialMemoryLine[];
+  hasOrderLegend: boolean;
 } {
   const rawLines = body.split("\n");
   const indexLineRaw = rawLines[rawLines.length - 1];
@@ -285,14 +298,22 @@ export function parseMnemoraPromptBody(body: string): {
   }
   const totalInScope = Number(m[1]);
   const presented = Number(m[2]);
-  const memoryLines = rawLines.slice(0, rawLines.length - 1);
+  // ⭐ Issue #691 続き: `order-legend` 描画（ADR 0309）は、記録順を1件以上持つときだけ
+  // 本文の先頭に {@link ORDER_LEGEND_LINE} を足す（`mnemora-path.ts`
+  // `sortMemoriesForDisplay` docstring参照）。**この行は記憶の行ではない**——
+  // 残っていると `parseMemoryLine` が「"- " で始まっていない」で例外にする。
+  // `isMnemoraShapedContent` の3条件目（同ファイル）と対になる修正——あちらは
+  // 「候補として見つける」段、こちらは「見つけた後にパースする」段の同じ穴を塞ぐ。
+  const hasOrderLegend = rawLines[0] === ORDER_LEGEND_LINE;
+  const withoutLegend = hasOrderLegend ? rawLines.slice(1) : rawLines;
+  const memoryLines = withoutLegend.slice(0, withoutLegend.length - 1);
   const lines = memoryLines.map((line) => parseMemoryLine(line));
   if (lines.length !== presented) {
     throw new Error(
       `parseMnemoraPromptBody: 索引行の提示件数（${presented}）と実際の行数（${lines.length}）が一致しない。`,
     );
   }
-  return { totalInScope, presented, lines };
+  return { totalInScope, presented, lines, hasOrderLegend };
 }
 
 /**
@@ -345,8 +366,30 @@ function sha256OfText(text: string): string {
 // カセットからケース1件分を探す
 // ---------------------------------------------------------------------------
 
+/**
+ * ⭐ Issue #691 続き（claimKey 評価用カセットの材料化、ADR 0301 §4.5.2 の続き）:
+ * `content.startsWith(ORDER_LEGEND_LINE)` を追加した。ADR 0309 が採用した
+ * `order-legend` 描画（`buildMnemoraPrompt`）は、記録順タグを1件以上持つときだけ
+ * 本文の先頭に {@link ORDER_LEGEND_LINE} を足す（`mnemora-path.ts`
+ * `sortMemoriesForDisplay` docstring参照）——**この形の content は元の2条件
+ * （`"- [由来:"` 始まり・`"(索引:"` 始まり）のどちらにも当たらず、素通りしていた**。
+ * `loadAnswerTrialsMaterial()` の既定は今も `answer.json`（旧形式、凡例行を持たない）
+ * であり、この穴は顕在化していなかった——**`answer.order-legend.json` や、
+ * 本 PR が足す `answer.claim-key.json`（どちらも凡例行を持つ）を`cassettePath`に
+ * 明示して渡すと、`findMnemoraEntryContent` が「記憶経路の回答プロンプトが見つからない」
+ * という誤った例外を投げていた（この PR の作業中に実際に踏んだ）。**
+ *
+ * ⛔ **default 挙動は変えない**——`answer.json` の content は凡例行を持たない
+ * （`hasAnyRecordedOrder` が false の記録時点の描画、または #698 旧書式）ため、
+ * 3条件目が新たに真になることはない。追加した条件は純粋に「今まで弾かれていた
+ * 形を拾えるようにする」ものであり、既存の2条件が真になるケースの判定を変えない。
+ */
 function isMnemoraShapedContent(content: string): boolean {
-  return content.startsWith("- [由来:") || content.startsWith("(索引:");
+  return (
+    content.startsWith("- [由来:") ||
+    content.startsWith("(索引:") ||
+    content.startsWith(ORDER_LEGEND_LINE)
+  );
 }
 
 function findMnemoraEntryContent(
@@ -406,7 +449,7 @@ function buildCaseMaterial(
 ): CaseMaterial {
   const found = findMnemoraEntryContent(entries, caseId, question);
   const body = splitOffQuestionSuffix(found.content, question);
-  const { totalInScope, presented, lines } = parseMnemoraPromptBody(body);
+  const { totalInScope, presented, lines, hasOrderLegend } = parseMnemoraPromptBody(body);
   const fingerprint = computeFingerprint({
     caseId,
     question,
@@ -422,6 +465,7 @@ function buildCaseMaterial(
     totalInScope,
     presented,
     lines,
+    hasOrderLegend,
     rawContent: found.content,
     fingerprint,
   };

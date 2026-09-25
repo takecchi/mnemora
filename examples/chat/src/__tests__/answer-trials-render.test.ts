@@ -64,6 +64,7 @@ describe("digestOnlyRenderer", () => {
         { provenanceKind: "stated", subject: "なし", digest: "本文B" },
       ],
       rawContent: "(無視される。digest-only は rawContent と一致しなくてよい)",
+      hasOrderLegend: false,
       fingerprint: "dummy",
     };
     const rendered = digestOnlyRenderer.renderUserContent(material);
@@ -81,6 +82,7 @@ describe("digestOnlyRenderer", () => {
       presented: 0,
       lines: [],
       rawContent: "",
+      hasOrderLegend: false,
       fingerprint: "dummy",
     };
     const rendered = digestOnlyRenderer.renderUserContent(material);
@@ -224,6 +226,7 @@ describe(
           },
         ],
         rawContent: "",
+        hasOrderLegend: false,
         fingerprint: "dummy",
       };
       expect(() => materialToRecallResult(withContradiction)).toThrow(/矛盾候補/);

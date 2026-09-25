@@ -53,9 +53,21 @@ function renderLineAsRecorded(line: MaterialMemoryLine): string {
   return `- ${segments.join(" ")} ${line.digest}`;
 }
 
+/**
+ * ⭐ Issue #691 続き: **`recorded` 描画は元の並び順をそのまま再現するだけ**
+ * （並べ替えは `order-legend` 描画（下）だけの仕事）だが、カセットの原文と
+ * 一致させるには凡例行の有無も再現する必要がある。**`material.lines` から
+ * 再導出しない**——`examples/chat/cassettes/answer.json`（旧・凍結カセット）は
+ * `[記録順:N]` タグを持つ行があっても凡例行を持たない過渡期の記録であり
+ * （`CaseMaterial.hasOrderLegend` docstring参照）、`lines` の中身から
+ * 「凡例行があるべきか」を推測すると原文と食い違う（この PR の作業中に実際に
+ * 踏んだ）。代わりに `answer-trials-material.ts` の `parseMnemoraPromptBody` が
+ * 原文から直接読み取った `material.hasOrderLegend` をそのまま使う。
+ */
 function renderBodyAsRecorded(material: CaseMaterial): string {
   const digestLines = material.lines.map((l) => renderLineAsRecorded(l)).join("\n");
-  return joinBody(digestLines, indexLine(material));
+  const head = material.hasOrderLegend ? `${ORDER_LEGEND_LINE}\n` : "";
+  return `${head}${joinBody(digestLines, indexLine(material))}`;
 }
 
 /**
@@ -124,6 +136,10 @@ function sortByRecordedOrder(lines: readonly MaterialMemoryLine[]): MaterialMemo
 export const orderLegendRenderer: Renderer = {
   name: "order-legend",
   renderUserContent(material: CaseMaterial): string {
+    // ⚠ `material.hasOrderLegend`（recordedRenderer が使う、原文に凡例行が
+    // 実際にあったかどうか）とは別の判定——この描画は原文の形に関わらず、
+    // 記録順を1件以上持てば常に凡例行を足す（`mnemora-path.ts`
+    // `sortMemoriesForDisplay` と同じ規則をこの合成描画にも当てるだけ）。
     const hasAnyRecordedOrder = material.lines.some((l) => l.recordedOrder !== undefined);
     const lines = sortByRecordedOrder(material.lines)
       .map((l) => renderLineAsRecorded(l))
