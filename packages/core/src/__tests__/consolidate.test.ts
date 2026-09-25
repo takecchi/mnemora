@@ -670,7 +670,7 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
 });
 
 /**
- * Issue #579 / ADR 0316: `tick()` の `consolidate` ジョブハンドラ（`processConsolidateJob`）は、
+ * Issue #579 / ADR 0317: `tick()` の `consolidate` ジョブハンドラ（`processConsolidateJob`）は、
  * 種の `subjectId` を `ctx.subjectId` に置いてから `consolidate(ctx', { target: { seedMemoryId } })`
  * を呼ぶ——ADR 0310 が実測したとおり、`tick()` はジョブを subject で絞って claim できないため、
  * `ctx.subjectId`（呼び手が `tick()` に渡した値）と種の `subjectId` の食い違いが、subject を
@@ -682,7 +682,7 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
  * 制御できる、ADR 0310 決定2）。ここで測るのは、必ず `runtime.tick()` を経由する
  * `processConsolidateJob` の分岐だけである。
  */
-describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0316）", () => {
+describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0317）", () => {
   /**
    * 上のファイル共通の `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を
    * 注入している——`runtime.consolidate()` を直接呼ぶ既存の歯はこれで問題ない（`tick`

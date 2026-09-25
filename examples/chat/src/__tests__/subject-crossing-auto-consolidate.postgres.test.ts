@@ -10,7 +10,7 @@ import {
 } from "./test-db.js";
 
 /**
- * Issue #579 / ADR 0316: `tick()` の `consolidate` ジョブハンドラ（`processConsolidateJob`、
+ * Issue #579 / ADR 0317: `tick()` の `consolidate` ジョブハンドラ（`processConsolidateJob`、
  * `packages/core/src/runtime.ts`）は、種の `subjectId` を `ctx.subjectId` に置いてから
  * `consolidate()` を呼ぶ——`tick()` はジョブを subject で絞って claim できないため、
  * `ctx.subjectId`（呼び手が `tick()` に渡した値）と種の `subjectId` の食い違いが、subject を
@@ -30,7 +30,7 @@ import {
  * 種と近傍にまったく同じ `content`/`digest` を使い、affinity を意図的に 1.0 にする
  * ——ADR 0310 の shared 極、話題が重なる使い方に対応する）。
  */
-describe("processConsolidateJob は tick() 経由で種の subjectId に近傍探索を絞る（Issue #579 / ADR 0316、本物の Postgres）", () => {
+describe("processConsolidateJob は tick() 経由で種の subjectId に近傍探索を絞る（Issue #579 / ADR 0317、本物の Postgres）", () => {
   afterAll(async () => {
     await closeTestClient();
   });

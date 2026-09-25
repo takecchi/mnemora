@@ -127,7 +127,7 @@ export interface RuntimeConfig {
    *
    * 🔴 **`consolidate` 側だけ、渡された `ctx` そのままではない**
    * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
-   * [ADR 0316](../../../docs/decisions/0316-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
+   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
    * `processConsolidateJob` は種の Memory を読み、その `subjectId` が `null` でなければ
    * `ctx.subjectId` をそれで置き換えてから `consolidate()` を呼ぶ——`tick()` はジョブを
    * subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の
@@ -135,7 +135,7 @@ export interface RuntimeConfig {
    * 集めてしまい、統合後の `Memory.subjectId` が `null` に畳まれる（ADR 0310 実測）。
    * 種の `subjectId` が `null`、または種そのものが見つからない場合は、今日どおり
    * `tick()` に渡された `ctx` のまま呼ぶ。**`reflect` 側はこの変更の対象外**——
-   * `processReflectJob` は渡された `ctx` のまま `reflect()` を呼ぶ（ADR 0316「確かめて
+   * `processReflectJob` は渡された `ctx` のまま `reflect()` を呼ぶ（ADR 0317「確かめて
    * いないこと」）。**明示的に `runtime.consolidate(ctx, { target: { seedMemoryId } })`
    * を呼ぶ側の挙動はこの設定と無関係に変わらない**——呼び手は自分の `ctx.subjectId` で
    * 完全に制御できる（ADR 0310 決定2）。
@@ -2954,7 +2954,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    *
    * **種の `subjectId` を `ctx.subjectId` に置いてから `consolidate()` を呼ぶ**
    * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
-   * [ADR 0316](../../../docs/decisions/0316-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
+   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
    * `tick()` はジョブを subject で絞って claim できない（`ClaimOutboxJobsOptions` に
    * `subjectId` が無い）ため、`tick()` に渡された `ctx.subjectId` と種の `subjectId` が
    * 食い違うことが、subject をまたぐ統合（`consolidate()` 内の近傍探索が種と別の subject
