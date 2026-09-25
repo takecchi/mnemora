@@ -1399,6 +1399,54 @@ describe("OutboxStore.complete/fail の CAS（ADR 0142 / Issue #233、FakeOutbox
     expect(finalJob.completedAt).not.toBeNull();
     expect(finalJob.failedAt).toBeNull();
   });
+
+  // Issue #826: complete/fail は互いに排他。先に付いた終端が勝ち、後から来た呼び出しは
+  // 行を変えず、例外も投げない（`packages/testkit` の `InMemoryOutboxStore`・
+  // `PostgresOutboxStore` と同じ意味論。`FakeOutboxStore` はどちらの適合スイートの
+  // 対象でもないため、ここで別に検査する）。
+  it("逐次: complete → fail（同じ attempts）— completedAt は付いたまま、failedAt/lastError は null のまま（Issue #826）", async () => {
+    const { stores } = buildRuntime(llmReturning([]));
+    const jobId = await enqueueJob(stores);
+
+    const claimed = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(),
+      claimedBy: "worker-1",
+      leaseMs: TEST_LEASE_MS,
+    });
+    const job = claimed.find((j) => j.id === jobId)!;
+
+    await stores.outboxStore.complete(ctx, jobId, job.attempts);
+    await expect(
+      stores.outboxStore.fail(ctx, jobId, "should-not-be-recorded", job.attempts),
+    ).resolves.not.toThrow();
+
+    const finalJob = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobId)!;
+    expect(finalJob.completedAt).not.toBeNull();
+    expect(finalJob.failedAt).toBeNull();
+    expect(finalJob.lastError).toBeNull();
+  });
+
+  it("逐次: fail → complete（同じ attempts）— failedAt/lastError は保たれ、completedAt は付かない（Issue #826）", async () => {
+    const { stores } = buildRuntime(llmReturning([]));
+    const jobId = await enqueueJob(stores);
+
+    const claimed = await stores.outboxStore.claimBatch(ctx, {
+      limit: 10,
+      now: new Date(),
+      claimedBy: "worker-1",
+      leaseMs: TEST_LEASE_MS,
+    });
+    const job = claimed.find((j) => j.id === jobId)!;
+
+    await stores.outboxStore.fail(ctx, jobId, "boom", job.attempts);
+    await expect(stores.outboxStore.complete(ctx, jobId, job.attempts)).resolves.not.toThrow();
+
+    const finalJob = stores.outboxStore.listJobs(ctx).find((j) => j.id === jobId)!;
+    expect(finalJob.failedAt).not.toBeNull();
+    expect(finalJob.lastError).toBe("boom");
+    expect(finalJob.completedAt).toBeNull();
+  });
 });
 
 /**
