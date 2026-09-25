@@ -1,0 +1,308 @@
+{
+  "_readme": "Issue #109 残件「A」——既存の openai-embedding-fp-ceiling-measurement.json(ADR 0316 測定B、K=59)を読み、候補案2(k-of-n・sparse/dense一致)を、新しい実 API 呼び出し無しで評価した後処理。⛔ 入力ファイルは1バイトも書き換えていない。⛔ 門ではない。k-of-n は『N本の独立な録画を委託してCIに置いた場合』の実測/理論値であり、現状のCI(1本のカセットを再生するだけ)を変更するものではない——採用するなら録画コストがN倍になる(verdict-candidate-kofn.ts の doc コメント)。",
+  "measuredAt": "2026-09-25T14:42:22.521Z",
+  "commit": "81f774aa8b152ee81575a2c23a6ad2173ec4a4ae",
+  "inputFile": "openai-embedding-fp-ceiling-measurement.json",
+  "inputCommit": "ff325c6f8c1a7bad4a9b55329b8e2121959fef30",
+  "perGroup": [
+    {
+      "group": "identifiersSparse",
+      "trials": 59,
+      "redCount": 11,
+      "redRate": 0.1864406779661017,
+      "clopperPearsonUpperBound95": 0.28968191528751286,
+      "empirical": {
+        "twoOfTwo": {
+          "redWindowCount": 1,
+          "windowCount": 29,
+          "redRate": 0.034482758620689655,
+          "clopperPearsonUpperBound95": 0.15339202452618267
+        },
+        "threeOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "twoOfThree": {
+          "redWindowCount": 1,
+          "windowCount": 19,
+          "redRate": 0.05263157894736842,
+          "clopperPearsonUpperBound95": 0.22637424927237754
+        },
+        "fiveOfFive": {
+          "redWindowCount": 0,
+          "windowCount": 11,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.23840419038085264
+        }
+      },
+      "theoreticalUsingRedRate": {
+        "twoOfTwo": 0.03476012640045964,
+        "threeOfThree": 0.006480701532289085,
+        "twoOfThree": 0.09131897613680075,
+        "fiveOfFive": 0.00022527000442602106
+      },
+      "theoreticalUsingCpUpperBound": {
+        "twoOfTwo": 0.08391561204464178,
+        "threeOfThree": 0.024308835219615712,
+        "twoOfThree": 0.20312916569469391,
+        "fiveOfFive": 0.0020398907855463965
+      }
+    },
+    {
+      "group": "identifiersDense",
+      "trials": 59,
+      "redCount": 11,
+      "redRate": 0.1864406779661017,
+      "clopperPearsonUpperBound95": 0.28968191528751286,
+      "empirical": {
+        "twoOfTwo": {
+          "redWindowCount": 1,
+          "windowCount": 29,
+          "redRate": 0.034482758620689655,
+          "clopperPearsonUpperBound95": 0.15339202452618267
+        },
+        "threeOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "twoOfThree": {
+          "redWindowCount": 1,
+          "windowCount": 19,
+          "redRate": 0.05263157894736842,
+          "clopperPearsonUpperBound95": 0.22637424927237754
+        },
+        "fiveOfFive": {
+          "redWindowCount": 0,
+          "windowCount": 11,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.23840419038085264
+        }
+      },
+      "theoreticalUsingRedRate": {
+        "twoOfTwo": 0.03476012640045964,
+        "threeOfThree": 0.006480701532289085,
+        "twoOfThree": 0.09131897613680075,
+        "fiveOfFive": 0.00022527000442602106
+      },
+      "theoreticalUsingCpUpperBound": {
+        "twoOfTwo": 0.08391561204464178,
+        "threeOfThree": 0.024308835219615712,
+        "twoOfThree": 0.20312916569469391,
+        "fiveOfFive": 0.0020398907855463965
+      }
+    },
+    {
+      "group": "japaneseNamesSparse",
+      "trials": 59,
+      "redCount": 0,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672,
+      "empirical": {
+        "twoOfTwo": {
+          "redWindowCount": 0,
+          "windowCount": 29,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.09814462767729587
+        },
+        "threeOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "twoOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "fiveOfFive": {
+          "redWindowCount": 0,
+          "windowCount": 11,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.23840419038085264
+        }
+      },
+      "theoreticalUsingRedRate": {
+        "twoOfTwo": 0,
+        "threeOfThree": 0,
+        "twoOfThree": 0,
+        "fiveOfFive": 0
+      },
+      "theoreticalUsingCpUpperBound": {
+        "twoOfTwo": 0.0024510034368448444,
+        "threeOfThree": 0.0001213433219860175,
+        "twoOfThree": 0.007110323666562497,
+        "fiveOfFive": 2.9741289922589945e-7
+      }
+    },
+    {
+      "group": "japaneseNamesDense",
+      "trials": 59,
+      "redCount": 0,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672,
+      "empirical": {
+        "twoOfTwo": {
+          "redWindowCount": 0,
+          "windowCount": 29,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.09814462767729587
+        },
+        "threeOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "twoOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "fiveOfFive": {
+          "redWindowCount": 0,
+          "windowCount": 11,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.23840419038085264
+        }
+      },
+      "theoreticalUsingRedRate": {
+        "twoOfTwo": 0,
+        "threeOfThree": 0,
+        "twoOfThree": 0,
+        "fiveOfFive": 0
+      },
+      "theoreticalUsingCpUpperBound": {
+        "twoOfTwo": 0.0024510034368448444,
+        "threeOfThree": 0.0001213433219860175,
+        "twoOfThree": 0.007110323666562497,
+        "fiveOfFive": 2.9741289922589945e-7
+      }
+    },
+    {
+      "group": "numeralSparse",
+      "trials": 59,
+      "redCount": 0,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672,
+      "empirical": {
+        "twoOfTwo": {
+          "redWindowCount": 0,
+          "windowCount": 29,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.09814462767729587
+        },
+        "threeOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "twoOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "fiveOfFive": {
+          "redWindowCount": 0,
+          "windowCount": 11,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.23840419038085264
+        }
+      },
+      "theoreticalUsingRedRate": {
+        "twoOfTwo": 0,
+        "threeOfThree": 0,
+        "twoOfThree": 0,
+        "fiveOfFive": 0
+      },
+      "theoreticalUsingCpUpperBound": {
+        "twoOfTwo": 0.0024510034368448444,
+        "threeOfThree": 0.0001213433219860175,
+        "twoOfThree": 0.007110323666562497,
+        "fiveOfFive": 2.9741289922589945e-7
+      }
+    },
+    {
+      "group": "numeralDense",
+      "trials": 59,
+      "redCount": 0,
+      "redRate": 0,
+      "clopperPearsonUpperBound95": 0.04950760988822672,
+      "empirical": {
+        "twoOfTwo": {
+          "redWindowCount": 0,
+          "windowCount": 29,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.09814462767729587
+        },
+        "threeOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "twoOfThree": {
+          "redWindowCount": 0,
+          "windowCount": 19,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.1458685033122435
+        },
+        "fiveOfFive": {
+          "redWindowCount": 0,
+          "windowCount": 11,
+          "redRate": 0,
+          "clopperPearsonUpperBound95": 0.23840419038085264
+        }
+      },
+      "theoreticalUsingRedRate": {
+        "twoOfTwo": 0,
+        "threeOfThree": 0,
+        "twoOfThree": 0,
+        "fiveOfFive": 0
+      },
+      "theoreticalUsingCpUpperBound": {
+        "twoOfTwo": 0.0024510034368448444,
+        "threeOfThree": 0.0001213433219860175,
+        "twoOfThree": 0.007110323666562497,
+        "fiveOfFive": 2.9741289922589945e-7
+      }
+    }
+  ],
+  "sparseDenseAgreements": [
+    {
+      "pair": "identifiersSparse/identifiersDense",
+      "trials": 59,
+      "bothRed": 11,
+      "bothRedClopperPearsonUpperBound95": 0.28968191528751286,
+      "eitherRed": 11,
+      "exactlyOneRed": 0,
+      "note": "sparse/dense の red 集合は完全に一致した——一致条件(案2の一種)は、このデータでは偽陽性率を1件も下げない(束ねた集計・単独どちらと比べても同じ)"
+    },
+    {
+      "pair": "japaneseNamesSparse/japaneseNamesDense",
+      "trials": 59,
+      "bothRed": 0,
+      "bothRedClopperPearsonUpperBound95": 0.04950760988822672,
+      "eitherRed": 0,
+      "exactlyOneRed": 0,
+      "note": "sparse/dense の red 集合は完全に一致した——一致条件(案2の一種)は、このデータでは偽陽性率を1件も下げない(束ねた集計・単独どちらと比べても同じ)"
+    },
+    {
+      "pair": "numeralSparse/numeralDense",
+      "trials": 59,
+      "bothRed": 0,
+      "bothRedClopperPearsonUpperBound95": 0.04950760988822672,
+      "eitherRed": 0,
+      "exactlyOneRed": 0,
+      "note": "sparse/dense の red 集合は完全に一致した——一致条件(案2の一種)は、このデータでは偽陽性率を1件も下げない(束ねた集計・単独どちらと比べても同じ)"
+    }
+  ]
+}
