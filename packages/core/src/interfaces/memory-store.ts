@@ -1144,7 +1144,7 @@ export interface MemoryStore {
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
 
   /**
-   * Issue #201 / [ADR 0317](../../../../docs/decisions/0317-taxonomy-labels.md):
+   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * このテナントの taxonomy 語彙を一覧する（`labels` テーブル、
    * `docs/memory-model.md` §8）。
    *
@@ -1159,14 +1159,14 @@ export interface MemoryStore {
    *   近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』ではない**
    *   （対象の Memory が後から `forgotten`/`purged` になっても減らない。§8 の
    *   「昇格の候補として表に出る」ための目安であり、正確な現在数を保証する欄ではない。
-   *   詳細は ADR 0317「決めたこと」）。
+   *   詳細は ADR 0318「決めたこと」）。
    * - `registeredAt` は `status: 'registered'` のときだけ非 null。
    * - テナントに1件も無ければ空配列。例外にしない。
    */
   listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
 
   /**
-   * Issue #201 / [ADR 0317](../../../../docs/decisions/0317-taxonomy-labels.md):
+   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * 語彙を `registered` へ昇格する（`docs/memory-model.md` §8「テナントが語彙として
    * 登録すると `registered` になる」）。
    *
@@ -1186,13 +1186,13 @@ export interface MemoryStore {
 }
 
 /**
- * Issue #201 / [ADR 0317](../../../../docs/decisions/0317-taxonomy-labels.md): taxonomy
+ * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md): taxonomy
  * 語彙1件（`labels` テーブル1行、`docs/memory-model.md` §8）。
  *
  * ⚠ **`attributes`（Issue #152/#153、呼び手専用の別列）とは別物である。** `LabelSummary`
  * が指す「ラベル」は `memories.tags` に語彙の状態（`registered`/`proposed`）を持たせた
  * もの——mnemora 自身が解釈する語彙である。`attributes` は mnemora が解釈しない呼び手
- * 専用の値であり、ラベルの語彙登録の対象にはならない（ADR 0317「決めたこと」参照）。
+ * 専用の値であり、ラベルの語彙登録の対象にはならない（ADR 0318「決めたこと」参照）。
  */
 export interface LabelSummary {
   name: string;
