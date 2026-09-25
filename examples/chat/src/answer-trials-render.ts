@@ -8,7 +8,8 @@ import type { CaseMaterial, MaterialMemoryLine } from "./answer-trials-material.
  * 構造的にできない——`CaseMaterial` 以外の入力（DB・recall 等）を取らない。
  */
 
-export type RenderName = "recorded" | "digest-only";
+export type RenderName =
+  "recorded" | "digest-only" | "order-sorted" | "order-sorted-legend" | "digest-order-legend";
 
 export interface Renderer {
   readonly name: RenderName;
@@ -88,12 +89,52 @@ export const digestOnlyRenderer: Renderer = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Issue #691 の候補（記録順の見せ方だけを変える）。欠落値は埋めない——記録順を持たない行は
+// 並べ替えの末尾に元の順で残し、欄も足さない。
+// ---------------------------------------------------------------------------
+
+const ORDER_LEGEND = "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)";
+const SEQUENCE_LEGEND = "(行は記録の古い順に並べてある。下の行ほど後に記録された)";
+
+function sortByRecordedOrder(lines: readonly MaterialMemoryLine[]): MaterialMemoryLine[] {
+  const withOrder = lines.filter((l) => l.recordedOrder !== undefined);
+  const without = lines.filter((l) => l.recordedOrder === undefined);
+  return [
+    ...[...withOrder].sort((a, b) => (a.recordedOrder ?? 0) - (b.recordedOrder ?? 0)),
+    ...without,
+  ];
+}
+
+function sortedRenderer(name: RenderName, legend: boolean, digestOnly: boolean): Renderer {
+  return {
+    name,
+    renderUserContent(material: CaseMaterial): string {
+      const lines = sortByRecordedOrder(material.lines)
+        .map((l) => (digestOnly ? `- ${l.digest}` : renderLineAsRecorded(l)))
+        .join("\n");
+      const legendText = digestOnly ? SEQUENCE_LEGEND : ORDER_LEGEND;
+      const head = legend && material.lines.length > 0 ? `${legendText}\n` : "";
+      return `${head}${joinBody(lines, indexLine(material))}${questionSuffix(material.question)}`;
+    },
+  };
+}
+
 export const RENDERERS: Readonly<Record<RenderName, Renderer>> = {
   recorded: recordedRenderer,
   "digest-only": digestOnlyRenderer,
+  "order-sorted": sortedRenderer("order-sorted", false, false),
+  "order-sorted-legend": sortedRenderer("order-sorted-legend", true, false),
+  "digest-order-legend": sortedRenderer("digest-order-legend", true, true),
 };
 
-export const RENDER_NAMES: readonly RenderName[] = ["recorded", "digest-only"];
+export const RENDER_NAMES: readonly RenderName[] = [
+  "recorded",
+  "digest-only",
+  "order-sorted",
+  "order-sorted-legend",
+  "digest-order-legend",
+];
 
 export function isRenderName(value: string): value is RenderName {
   return (RENDER_NAMES as readonly string[]).includes(value);
