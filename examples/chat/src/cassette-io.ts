@@ -25,24 +25,70 @@ const here = dirname(fileURLToPath(import.meta.url));
  */
 export const RETRIEVAL_CASSETTE_PATH = join(here, "..", "cassettes", "retrieval.json");
 export const COMPARE_CASSETTE_PATH = join(here, "..", "cassettes", "compare.json");
+/**
+ * `answer` の**旧形式**カセット（記録済み・67件、`buildMnemoraPrompt` の #698 書式で
+ * 記録した実 API の応答）。
+ *
+ * ⛔ **ADR 0305（Issue #691 続き）以降、`record`/`verify`/CLI の `answer` 再生には
+ * もう使わない**——`buildMnemoraPrompt` が `order-legend` 描画に変わり、この記録に
+ * 入っているプロンプトの形（記録順タグ無し・凡例無し）とはもう一致しないため
+ * （`RecordedLLMProvider` は形が合わない入力を「記録に無い」として例外にする）。
+ * **1バイトも書き換えない**——`examples/chat/src/answer-trials-material.ts` が
+ * ADR 0301 の対照の基準として直接パスを指定して読み続ける（同じ記憶集合で描画だけを
+ * 差し替えて比べるため。`cassettePathFor`/`CASSETTE_PATH_BY_TARGET` 経由ではなく
+ * 自前でパスを組み立てているので、下の `answer` ターゲットの向き先を変えても影響しない）。
+ * `record:answer-retention-mutation`（`scripts/record-answer-retention-mutation.ts`）が
+ * この形式のまま追記対象にしていたのもこのファイルである——**そちらも同じ理由で
+ * 無効化した**（スクリプト側の docstring 参照）。
+ */
 export const ANSWER_CASSETTE_PATH = join(here, "..", "cassettes", "answer.json");
 /**
- * `answer-time-weighting` ベンチ（Issue #690 / PR #697、`timeWeighting` を回答の正誤で
- * 比較する器）専用のカセット。**`answer.json` とは別ファイルにする**——ADR 0052 と同じ
- * 理由（入力の集合が別物・費用が別勘定）に加え、こちらはケースごとに `recall()` を
- * `legacy`/`eventAwareFreshness` の2方針で呼ぶため、同じ質問でも記録の鍵（プロンプトの
- * ハッシュ）が `answer` ベンチとは異なる——1つのファイルにまとめる技術的な理由も無い。
+ * `answer` の**新形式**カセット（ADR 0305、`order-legend` 描画）。`record`/`verify`/CLI
+ * の `answer` 再生は、ここからこのファイルを読む——`CASSETTE_PATH_BY_TARGET` 参照。
  *
- * ⚠ 段1（本 commit）ではこのパスを**宣言するだけ**で、ファイル自体はまだ存在しない。
- * `record:answer-time-weighting`（実 API 必須）を実行して初めて作られる——
- * `answer.json` 等の既存カセットと同じく、手編集は禁止（`describeCassette` 等が
- * 前提にする形式検査 `assertCassette` を満たす保証が無くなる）。
+ * ⚠ **段1（本 commit）ではこのパスを宣言するだけで、ファイル自体はまだ存在しない。**
+ * `record:answer`（実 API 必須）を実行して初めて作られる——`recordAnswer`（`cli.ts`）は
+ * `ANSWER_CASE_SET_DEV`/`ANSWER_CASE_SET_EVAL` の全ケース＋ Issue #498 完了条件4の
+ * 陽性対照（変異、`recordRetentionMutationPositiveControl`）を1回の実行でまとめて
+ * 記録するので、この新形式カセット用に別スクリプトは要らない
+ * （`record-answer-retention-mutation.ts` の docstring 参照）。
+ */
+export const ANSWER_ORDER_LEGEND_CASSETTE_PATH = join(
+  here,
+  "..",
+  "cassettes",
+  "answer.order-legend.json",
+);
+/**
+ * `answer-time-weighting` ベンチ（Issue #690 / PR #697、`timeWeighting` を回答の正誤で
+ * 比較する器）専用の**旧形式**カセット（`buildMnemoraPrompt` の #698 書式で記録済み）。
+ * **`answer.json` とは別ファイルにする**——ADR 0052 と同じ理由（入力の集合が別物・
+ * 費用が別勘定）に加え、こちらはケースごとに `recall()` を `legacy`/`eventAwareFreshness`
+ * の2方針で呼ぶため、同じ質問でも記録の鍵（プロンプトのハッシュ）が `answer` ベンチとは
+ * 異なる——1つのファイルにまとめる技術的な理由も無い。
+ *
+ * ⛔ **ADR 0305 以降、`record`/`verify`/CLI の `answer-time-weighting` 再生にはもう
+ * 使わない**——理由は {@link ANSWER_CASSETTE_PATH} と同じ（`buildMnemoraPrompt` の形が
+ * 変わったため）。1バイトも書き換えない。
  */
 export const ANSWER_TIME_WEIGHTING_CASSETTE_PATH = join(
   here,
   "..",
   "cassettes",
   "answer-time-weighting.json",
+);
+/**
+ * `answer-time-weighting` の**新形式**カセット（ADR 0305、`order-legend` 描画）。
+ * `record`/`verify`/CLI の `answer-time-weighting` 再生は、ここからこのファイルを読む。
+ *
+ * ⚠ **段1（本 commit）ではこのパスを宣言するだけで、ファイル自体はまだ存在しない。**
+ * `record:answer-time-weighting`（実 API 必須）を実行して初めて作られる。
+ */
+export const ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH = join(
+  here,
+  "..",
+  "cassettes",
+  "answer-time-weighting.order-legend.json",
 );
 
 /** `record` / `verify` / 再生が対象にできるカセット。 */
@@ -55,11 +101,18 @@ export const CASSETTE_TARGETS: readonly CassetteTarget[] = [
   "answer-time-weighting",
 ];
 
+/**
+ * **ADR 0305（Issue #691 続き）**: `answer`/`answer-time-weighting` は、`buildMnemoraPrompt`
+ * が `order-legend` 描画に変わったことを受けて、新形式カセット（`*.order-legend.json`）へ
+ * 向け直した。旧形式（`ANSWER_CASSETTE_PATH`/`ANSWER_TIME_WEIGHTING_CASSETTE_PATH`）は
+ * 1バイトも書き換えず、`answer-trials-material.ts`（ADR 0301 の対照の基準）だけが
+ * 別経路（このマップを経由しない直接のパス指定）で読み続ける。
+ */
 const CASSETTE_PATH_BY_TARGET: Record<CassetteTarget, string> = {
   retrieval: RETRIEVAL_CASSETTE_PATH,
   compare: COMPARE_CASSETTE_PATH,
-  answer: ANSWER_CASSETTE_PATH,
-  "answer-time-weighting": ANSWER_TIME_WEIGHTING_CASSETTE_PATH,
+  answer: ANSWER_ORDER_LEGEND_CASSETTE_PATH,
+  "answer-time-weighting": ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH,
 };
 
 export function cassettePathFor(target: CassetteTarget): string {

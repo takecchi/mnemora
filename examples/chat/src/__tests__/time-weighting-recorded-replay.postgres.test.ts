@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 import {
-  ANSWER_TIME_WEIGHTING_CASSETTE_PATH,
+  ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH,
   cassetteExists,
   loadCassette,
 } from "../cassette-io.js";
@@ -25,9 +25,19 @@ import {
  * 段3b（Issue #690、ADR 0300）。
  *
  * `compare`/`answer` の再生検査と同じ規律——`examples/chat/cassettes/
- * answer-time-weighting.json`（`record:answer-time-weighting`、temperature=0で記録済み）
- * を `MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded` で再生する。CI の
- * `example-chat` ジョブがこのファイルを（`test:db` 経由で自動的に）実行する。
+ * answer-time-weighting.order-legend.json`（`record:answer-time-weighting`、
+ * temperature=0で記録）を `MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded` で再生する。
+ * CI の `example-chat` ジョブがこのファイルを（`test:db` 経由で自動的に）実行する。
+ *
+ * ⛔ **ADR 0305（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
+ * 変わったため、旧形式（`answer-time-weighting.json`、`ANSWER_TIME_WEIGHTING_CASSETTE_PATH`）
+ * はもう再生できない——このファイルはまだ実 API で記録していない
+ * （`cassette-coverage.test.ts` が「カセットが無い」で先に落ちる）。**記録し直したら、
+ * 下の `EXPECTED_VERDICT` を新しい記録のログからそのまま書き写すこと——旧記録の値を
+ * 使い回さない。** プロンプトの文言が変わるとモデルの実際の回答文字列も変わりうるため、
+ * `gradeAnswer` の正誤が今と同じである保証は無い（**特に legacy 4件——`schedule-change-
+ * meeting-day` 系と同様の「訂正の後続」を含むケースは、ADR 0305 の実測でも並べ替え・
+ * 凡例の有無で正答率が動いている——結果が変わる可能性が高い**）。
  *
  * 🔴 **正誤を「期待どおり」に固定する。取り引きを隠さない**（マネージャー決定）:
  * 類型A（`reinforced-fact-vs-fresh-weak`）は **legacy が構造的に失敗し、
@@ -85,13 +95,13 @@ const EXPECTED_VERDICT: Record<
 
 describe("examples/chat: answer-time-weighting カセット再生（本物の Postgres、鍵不要、決定的）", () => {
   it("カセットがリポジトリに存在する", () => {
-    expect(cassetteExists(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).toBe(true);
+    expect(cassetteExists(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH)).toBe(true);
   });
 
   it("全16ケース×2方針の gradeAnswer 正誤が、記録した時点と1バイトも変わらず再生される", async () => {
     await resetTestDatabase();
     await getTestClient();
-    const cassette = loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH);
+    const cassette = loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH);
     const handle = await createTimeWeightingBenchRuntime(
       requireDatabaseUrl(),
       { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
@@ -133,7 +143,7 @@ describe("examples/chat: answer-time-weighting カセット再生（本物の Po
     // （`bench-results/STAGE3A-NOTES.txt`・`STAGE3B-1-NOTES.txt` 参照）。
     await resetTestDatabase();
     await getTestClient();
-    const cassette = loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH);
+    const cassette = loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH);
     const handle = await createTimeWeightingBenchRuntime(
       requireDatabaseUrl(),
       { ...process.env, MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },

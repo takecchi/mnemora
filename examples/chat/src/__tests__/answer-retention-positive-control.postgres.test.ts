@@ -7,7 +7,7 @@ import {
   RETENTION_MUTATION_CASE_ID,
   applyRetentionMutation,
 } from "../answer-retention-mutation.js";
-import { ANSWER_CASSETTE_PATH, loadCassette } from "../cassette-io.js";
+import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette } from "../cassette-io.js";
 import {
   closeTestClient,
   getTestClient,
@@ -19,6 +19,18 @@ import {
  * Issue #498 完了条件4・「回答評価」側の陽性対照（設計コメント §7 の逐語どおりの形。
  * ADR 0236 / PR #523 が未達のまま残した半分）。**記録（カセット）の再生で回る**
  * ——鍵は要らない。
+ *
+ * ⛔ **ADR 0305（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
+ * 変わったため、再生元を `ANSWER_CASSETTE_PATH`（旧形式、`answer.json`）から
+ * `ANSWER_ORDER_LEGEND_CASSETTE_PATH`（新形式、`answer.order-legend.json`）へ向け直した。
+ * **このファイルはまだ実 API で記録していない**（`cassette-coverage.test.ts` が
+ * 「カセットが無い」で先に落ちる）。記録は `record:answer`（`recordAnswer`、`cli.ts`）
+ * 1回で足りる——`recordRetentionMutationPositiveControl` が同じ実行の中で変異分
+ * （下記「実 API の記録」節）も一緒に記録するため、旧形式のときのような専用の追記
+ * スクリプト（`record-answer-retention-mutation.ts`）はもう要らない。
+ * ⚠ **記録し直したら、下の【実測】コメント（`mutatedVerdict`/`mutatedJudgement.outcome`
+ * が両方 `"fail"` になる、という具体的な outcome）を新しい記録の実測値で書き直すこと**
+ * ——プロンプトの文言が変わるため、同じ outcome になる保証は無い。
  *
  * ## この歯が示すもの
  *
@@ -41,12 +53,16 @@ import {
  * という、Issue #498 設計コメント §7 が当初計画した陽性対照そのものを、初めて
  * `gradeAnswer`/judge を実際に走らせる形で固定する。
  *
- * ## 実 API の記録
+ * ## 実 API の記録（旧形式カセット、`answer.json`。当時の記録——書き換えない）
  *
  * 変異後の2エントリ（mnemora 回答生成1回＋judge 1回）は
  * `examples/chat/src/scripts/record-answer-retention-mutation.ts` で実 API から
  * 追加記録した——既存67件は1バイトも録り直していない（`recorder-answer-retention-mutation.ts`
  * の docstring、PR 本文参照）。
+ *
+ * **ADR 0305 以降、この節は歴史的な記録である。**新形式カセット
+ * （`answer.order-legend.json`）は、上の docstring が書いたとおり `record:answer` 1回で
+ * 変異分も含めて記録する——追記専用スクリプトを介さない全置換になる。
  *
  * ## 歯が噛むことの確認（手元でのみ実施——このファイルには残さない）
  *
@@ -63,7 +79,7 @@ describe("examples/chat answer: 回答評価の陽性対照（記録の再生、
     await resetTestDatabase();
     await getTestClient();
 
-    const cassette = loadCassette(ANSWER_CASSETTE_PATH);
+    const cassette = loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH);
     const handle = await createAnswerBenchRuntime(
       requireDatabaseUrl(),
       { MNEMORA_LLM: "recorded", MNEMORA_EMBEDDING: "recorded" },
