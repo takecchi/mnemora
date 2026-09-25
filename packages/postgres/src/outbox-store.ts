@@ -66,6 +66,12 @@ import { isUuidLike, rowToOutboxJob, type OutboxJobRow } from "./mapping.js";
  * 既に書いた終端状態を黙って上書きしない——`attempts` が一致しなければ
  * `OutboxLeaseConflictError` を投げる。詳細は `packages/core/src/interfaces/outbox-store.ts`
  * の doc と ADR 0142。
+ *
+ * 🔴 **`complete`/`fail` は互いに排他でもある（Issue #826）**——`attempts` が一致しても、
+ * 相手側の終端列（`completed_at`/`failed_at`）が既に付いていれば `UPDATE` の `WHERE` は
+ * 対象を0行にする。先に付いた終端が勝ち、後から来た呼び出しは行を変えず、例外も投げない
+ * （無言の no-op）。同じ `attempts` のまま complete → fail（逐次でも並行でも）を呼んでも、
+ * `completed_at`/`failed_at` の両方が付くことはない。
  */
 export class PostgresOutboxStore implements OutboxStore {
   constructor(private readonly db: Db) {}
@@ -107,10 +113,13 @@ export class PostgresOutboxStore implements OutboxStore {
     if (!isUuidLike(jobId)) {
       return;
     }
+    // Issue #826: 相手側の終端（fail）が既に付いていたら、この UPDATE は0行のまま
+    // 何も書かない（`failed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     const result = await this.db.execute(sql`
       UPDATE outbox
       SET completed_at = now()
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
+        AND failed_at IS NULL
       RETURNING id
     `);
     if (result.rows.length > 0) {
@@ -123,10 +132,13 @@ export class PostgresOutboxStore implements OutboxStore {
     if (!isUuidLike(jobId)) {
       return;
     }
+    // Issue #826: 相手側の終端（complete）が既に付いていたら、この UPDATE は0行のまま
+    // 何も書かない（`completed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     const result = await this.db.execute(sql`
       UPDATE outbox
       SET failed_at = now(), last_error = ${error}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
+        AND completed_at IS NULL
       RETURNING id
     `);
     if (result.rows.length > 0) {
@@ -136,12 +148,22 @@ export class PostgresOutboxStore implements OutboxStore {
   }
 
   /**
-   * `complete`/`fail` の CAS な `UPDATE` が0行だったときに呼ぶ（ADR 0142, Issue #233）。
-   * **0行になる理由は2つあり、区別する**——(a) その id の行がそもそも存在しない
-   * （べき等な no-op、既存契約）、(b) 行は存在するが `attempts` が一致しない
-   * （別のワーカーが既にこの行を再 claim している。{@link OutboxLeaseConflictError}）。
+   * `complete`/`fail` の CAS な `UPDATE` が0行だったときに呼ぶ（ADR 0142, Issue #233、
+   * Issue #826）。**0行になる理由は3つあり、区別する**——(a) その id の行がそもそも
+   * 存在しない（べき等な no-op、既存契約）、(b) 行は存在するが `attempts` が一致しない
+   * （別のワーカーが既にこの行を再 claim している。{@link OutboxLeaseConflictError}）、
+   * (c) 行は存在し `attempts` も一致するが、相手側の終端列が既に付いている
+   * （Issue #826: 先に付いた終端が勝つ、無言の no-op、例外にしない）。
+   *
+   * (b) と (c) の区別は、読み直した `attempts` が `expectedAttempts` と一致するかで
+   * 付く——`claimBatch` の `WHERE`（`completed_at IS NULL AND failed_at IS NULL`）は
+   * 一度終端化された行を二度と対象にしないため、終端化された行の `attempts` は
+   * その後永久に固定される（`packages/core/src/interfaces/outbox-store.ts` の doc
+   * 「理由」節と同じ論法）。したがって `attempts` が一致するのに0行だったなら、
+   * 唯一の残りの説明は「相手側の終端に弾かれた」（c）である。
+   *
    * 読み直しと実際に条件が破れた瞬間の間にも別の claim が割り込む余地があるため、
-   * `observedAttempts` は「弾かれた瞬間の値」の保証ではない（ADR 0030 の
+   * (b) で投げる `observedAttempts` は「弾かれた瞬間の値」の保証ではない（ADR 0030 の
    * `MemoryStatusConflictError` と同じ限界、doc コメント参照）。
    */
   private async raiseIfLeaseConflict(
@@ -157,6 +179,9 @@ export class PostgresOutboxStore implements OutboxStore {
       // 行が無い（既に存在しない/最初から無い）。べき等な no-op のまま、例外にしない。
       return;
     }
-    throw new OutboxLeaseConflictError(jobId, expectedAttempts, row.attempts);
+    if (row.attempts !== expectedAttempts) {
+      throw new OutboxLeaseConflictError(jobId, expectedAttempts, row.attempts);
+    }
+    // attempts は一致している——相手側の終端列に弾かれた（Issue #826）。無言の no-op。
   }
 }
