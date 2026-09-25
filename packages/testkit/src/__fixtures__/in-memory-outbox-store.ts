@@ -33,6 +33,15 @@ export class InMemoryOutboxStore implements OutboxStore {
     // （このクラスの doc が明言する「`PostgresOutboxStore` と一致させてある」という
     // 意図に反する）。クエリを投げる前に弾く Postgres 側に揃え、副作用が起きる前に
     // 例外を投げる。
+    //
+    // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
+    // `Infinity`/非整数を渡すと Postgres は `invalid input syntax for type bigint: "NaN"`
+    // の形で例外を投げる（実測済み。in-memory-vector-store.ts の同種の注記参照）。
+    // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
+    // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`claimBatch: limit must be an integer (got ${opts.limit})`);
+    }
     if (opts.limit < 0) {
       throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
     }
