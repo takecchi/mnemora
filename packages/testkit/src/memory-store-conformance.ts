@@ -1342,6 +1342,53 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(matches).toEqual([]);
       });
 
+      /**
+       * ⚠ 上のテスト（target が「今」・other が「去年」）だけでは、有効期間の重なり判定を
+       * 構成する2つの AND 節のうち片方だけが働いても green のままになる——
+       * `target.validFrom < other.validUntil` が単独で false になる配置だからである
+       * （【実測】この歯を書く過程で、`packages/postgres` の実装から2つ目の AND 節
+       * （`other.validFrom < target.validUntil`）を丸ごと削る変異を通したところ、
+       * 上のテストは検出できなかった）。この歯は逆向きの時系列（target が「去年」・
+       * other が「今」）を置き、**もう片方の AND 節だけが false になる配置**で
+       * 同じ規則を検査する——両方の節がそれぞれ実際に効いていることを、2本で初めて言える。
+       */
+      it("有効期間が重ならなければ返さない（逆向き: target が過去、other が現在）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "no-overlap-reversed-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "no-overlap-reversed-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2022-01-01T00:00:00.000Z"),
+            validUntil: new Date("2023-01-01T00:00:00.000Z"),
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches).toEqual([]);
+      });
+
       it("有効期間が重なれば返す（片方が無期限＝null でも重なる）", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };

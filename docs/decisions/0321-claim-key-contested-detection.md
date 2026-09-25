@@ -385,10 +385,49 @@ LLM を1箇所も呼ばない——列の等値比較・範囲比較・索引ア
 立て、`AGENTS.md`「手元で Postgres を立てる」手順どおりマイグレーション（0001〜0021、
 新しいマイグレーションは本 PR では追加していない——`findActiveByClaimKey` は既存の列・
 既存の索引だけで実装できた）を適用し、`conformance.postgres.test.ts` を実行した:
-**351 tests passed（0 failed）**。`findActiveByClaimKey` の契約の歯11件を含む。
-作業終了後、インスタンスは停止・データディレクトリごと削除した。
+**352 tests passed（0 failed）**。`findActiveByClaimKey` の契約の歯12件を含む
+（下記の変異試験で歯を1本追加したため351→352）。`test:db` フルスイートも実行し、
+本 PR に関係する範囲（`MemoryStore`/`EventStore`/`Runtime` 系）はすべて緑だった——
+唯一失敗したのは無関係な `trigram-lexical-store.postgres.test.ts`（Issue #278、
+ADR 0319）の4件で、原因はこの作業環境の `initdb --encoding=UTF8 --locale=C` という
+組み合わせが同ファイルの doc コメントが自ら「CI の2脚（UTF8/SQL_ASCII）には無い
+regime」と名指ししている条件に一致したため（`server_encoding` は UTF8 を通るが
+自己一致検査が0になり `locale_no_japanese_trigrams` になる）——本 PR の変更とは
+無関係。作業終了後、インスタンスは停止・データディレクトリごと削除した。
 
-（この節は PR 本文で更新する: 変異試験の結果、実 API を使った real-fixture 実測の結果。）
+### 3. 変異試験【実測】（`docs/autonomy.md` §2、`cp` での退避・復元。`git checkout` は使っていない）
+
+`packages/postgres/src/memory-store.ts`（本物の Postgres に対して）:
+
+1. `subject_id IS NOT DISTINCT FROM` → `subject_id =` に変異 ⟹ 「subjectId が null
+   同士でも一致として扱う」の歯が実際に赤くなった。復元後、緑に戻ることを確認した。
+2. `content_hash <> ${query.contentHash}` → `content_hash = content_hash`（恒真）に変異
+   ⟹ 「content_hash が同じ行は返さない」の歯が実際に赤くなった。復元後、緑に戻る
+   ことを確認した。
+3. `status = 'active'` → `status IN ('active', 'archived')` に変異 ⟹ 「status が active
+   でない行は返さない」の歯が実際に赤くなった。復元後、緑に戻ることを確認した。
+4. 有効期間の重なり判定の2つ目の `AND` 節（`valid_from IS NULL OR ... OR valid_from <
+   validUntil`）を丸ごと削る変異 ⟹ **既存の歯1本では検出できなかった**（下記参照）。
+   ⟹ **この変異試験自体が、歯の穴を見つけた**——「有効期間が重ならなければ返さない
+   （去年の住所と今の住所）」という1本だけでは、重なり判定を構成する2つの AND 節の
+   うち片方だけが働いても green のままになる配置だった（target が「今」・other が
+   「去年」という時系列では、1つ目の節（`target.validFrom < other.validUntil`）が
+   単独で false になり、2つ目の節が仕事をする機会が無かった）。**逆向きの時系列
+   （target が「過去」・other が「現在」）を置く歯を追加し**、この変異が実際に
+   その新しい歯を赤くすることを確認した上で、復元後に両方の歯が緑に戻ることを確認した。
+
+`packages/core/src/runtime.ts`（in-memory、`docs/autonomy.md` §2 の cp 退避・復元）:
+
+5. 検出の opt-in ゲート（`if (detectContested === true)`）を `if (true)` に変異 ⟹
+   「既定（detectContested を渡さない）では、findActiveByClaimKey は一度も呼ばれず、
+   1件も contested にならない」の歯が実際に赤くなった。復元後、緑に戻ることを確認した。
+6. 「ちょうど1件」の分岐条件（`matches.length === 1`）を `matches.length >= 1` に変異
+   ⟹ 「相手の active が2件以上（3件目以降）のときは markContested を呼ばず…」の歯が
+   実際に赤くなった（2件以上でも先頭の1件とだけ対になろうとしたため）。復元後、
+   `runtime.test.ts` の全111件が緑に戻ることを確認した。
+
+**⟹ 変異試験そのものが、当初の歯の抜け（4番）を見つけ、直す機会になった**——
+これは `docs/autonomy.md` §2 が変異試験に期待している効果そのものである。
 
 ## 確かめていないこと
 
