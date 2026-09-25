@@ -27,11 +27,16 @@
 **2026-09-18・2026-09-19・2026-09-21（2回目まで）の「訂正の履歴」と同じ形が、
 今回は文書の表題そのものが指す版で起きた**（経緯は下の「訂正の履歴」に畳む）。
 
-⚠ **`v1.0.0` より後に着地した変更を、この文書はまだ数えていない。**その1つ
-（`TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`）が破壊的変更として
-数えるべきものかどうかは、コード側とこの文書のどちらを直すかを含めて
-[Issue #818](https://github.com/takecchi/mnemora/issues/818) で検討中——**この文書は
-その結論が出るまで、次の世代の節をまだ起こさない**（詳しくは **6** の末尾）。
+⚠ **`v1.0.0` より後に着地した変更を、この文書はまだ数えていない。**そのうち3件
+（`TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`・
+`MemoryStoreConformanceOptions.supportsLabels`/`supportsFindActiveByClaimKey`）は、
+一時的に必須フィールドとして着地し v1.0.0 時点の呼び出しを壊していたが、
+[Issue #818](https://github.com/takecchi/mnemora/issues/818) の結果、3つとも
+`?: boolean`（省略時は該当する適合項目を実行しない）へ戻したため、**もう破壊的変更
+ではない**——次の世代の節に計上する対象からは外れた（詳しくは **6** の末尾、
+[ADR 0318](./decisions/0318-taxonomy-labels.md) / [ADR 0324](./decisions/0324-claim-key-contested-detection.md)
+の追記）。**この3件以外に、`v1.0.0` より後に着地してまだ数えていない変更が残っている
+かどうかは、別途棚卸しが要る**——次の世代の節はまだ起こさない。
 
 ⚠ **これは [Issue #532](https://github.com/takecchi/mnemora/issues/532) が指した腐り方と同じ形である**
 ——数を正しく直しても、次の破壊的変更が着地した時点でまた同じ場所が腐りうる。
@@ -200,13 +205,18 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 `## [1.0.0] - 2026-09-23` を既に持ち、追随済みだった。**この文書だけが追随していなかった。**
 
 ⚠ **`v1.0.0` より後に着地した変更を、この文書が数え直す作業はまだ終わっていない。**
-この移行ガイド自身の §6 の例を現行の `@mnemora/testkit` に対して型検査したところ、
+この移行ガイド自身の §6 の例を `@mnemora/testkit`（当時の `main`）に対して型検査したところ、
 `TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`（`?` の付かない必須フィールド、
-PR #717・commit `ba6e5dd`）が足りずコンパイルできなくなっていることが分かった——
-これが破壊的変更として次の世代の節に計上すべきものか、それとも `supportsDecayClock`
-とは違う扱いにすべきものかは [Issue #818](https://github.com/takecchi/mnemora/issues/818)
-で検討中である。**結論が出るまで、次の世代（`v1.0.0` より後）の節はまだ起こさない**
-——詳細は **6** の末尾。
+PR #717・commit `ba6e5dd`）が足りずコンパイルできなくなっていることが分かった——さらに
+棚卸しで `MemoryStoreConformanceOptions.supportsLabels`（同じ commit）・
+`supportsFindActiveByClaimKey`（PR #745・commit `7987de4`）も同じ壊れ方をしていたことが
+見つかった。[Issue #818](https://github.com/takecchi/mnemora/issues/818) の結果、
+3つとも `?: boolean` へ戻し、省略時は該当する適合項目を実行しないようにした
+（[ADR 0318](./decisions/0318-taxonomy-labels.md) /
+[ADR 0324](./decisions/0324-claim-key-contested-detection.md) の追記）——**破壊的変更として
+次の世代の節に計上する対象からは外れた。**§6 の例は再びそのままコンパイル・実行できる
+——詳細は **6** の末尾。**この3件以外に、`v1.0.0` より後に着地してまだ数えていない
+変更が残っているかどうかは、別途棚卸しが要る。**
 
 ---
 
@@ -262,8 +272,9 @@ PR #717・commit `ba6e5dd`）が足りずコンパイルできなくなってい
 書いている場合**」にだけ影響する。あなたが該当するかどうかは、次の表で判定できる
 （⚠ **`8`〜`11` が `v0.2.0` → `v0.3.0`、`12`〜`17` が `v0.3.0` → `v0.4.0`、`18` が `v0.4.0` → `v0.5.0` の分で、**
 **🔴 どれも出荷済みである。`v0.5.0` → `v1.0.0` の分は0件のまま出荷された**。`v1.0.0` より後に
-見つかった1件の扱いは [Issue #818](https://github.com/takecchi/mnemora/issues/818) で検討中——
-**6** の末尾を見ること）:
+一時的に必須化されていた3件（`supportsTaxonomyMode`/`supportsLabels`/
+`supportsFindActiveByClaimKey`）は [Issue #818](https://github.com/takecchi/mnemora/issues/818)
+の結果すべて任意へ戻したため、破壊的変更としては数えない——**6** の末尾を見ること）:
 
 | していること | 影響 |
 |---|---|
@@ -568,10 +579,14 @@ describeTenantSettingsStoreConformance({
   （`setDefaultHalfLifeRecalls`/`advanceActivitySeq`、いずれも任意）も検討する
   （`packages/testkit/src/tenant-settings-store-conformance.ts` の doc コメント参照）。
 
-⚠ **現行の `main`（未リリース）では `supportsTaxonomyMode` も必須になっており、この例は
-そのままではコンパイルできない。**扱い（破壊的変更として次の世代に計上するか、この
-フィールドを任意に戻すか）は [Issue #818](https://github.com/takecchi/mnemora/issues/818)
-で検討中。
+⚠ **2026-09-25〜26 の一時期、`main` 上で `supportsTaxonomyMode`・
+`@mnemora/testkit` の `MemoryStoreConformanceOptions.supportsLabels`（どちらも PR #717）と
+`supportsFindActiveByClaimKey`（PR #745）も必須になっており、この例やそれに類する
+呼び出しがコンパイルできなくなっていた。**[Issue #818](https://github.com/takecchi/mnemora/issues/818)
+の結果、3つとも `?: boolean` へ戻し、省略時は該当する適合項目を実行しないようにしたため
+（`false` 相当）、**この例は再びそのままコンパイル・実行できる**
+（[ADR 0318](./decisions/0318-taxonomy-labels.md) /
+[ADR 0324](./decisions/0324-claim-key-contested-detection.md) の追記）。
 
 ### 7. `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドになった
 
@@ -956,8 +971,11 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 上の「訂正の履歴」の「2026-09-21（2回目）の訂正」に残してある**（ここでは複製しない）。
 
 ⚠ **`v1.0.0` より後に着地した破壊的変更の節は、まだここに無い。**理由は冒頭と **6** の末尾に
-書いたとおり——`supportsTaxonomyMode` の扱いが
-[Issue #818](https://github.com/takecchi/mnemora/issues/818) で決まってから起こす。
+書いたとおり——一時的に必須化されていた3件（`supportsTaxonomyMode`/`supportsLabels`/
+`supportsFindActiveByClaimKey`）は [Issue #818](https://github.com/takecchi/mnemora/issues/818)
+の結果すべて任意へ戻したため、この3件を理由に次の節を起こす必要は無くなった。**この3件
+以外に `v1.0.0` より後に着地してまだ数えていない変更が残っているかどうかは、別途棚卸しが
+要る。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

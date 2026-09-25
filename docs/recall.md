@@ -1023,6 +1023,7 @@ type RecalledMemory = {
   digest: string
   retrievedVia: 'ann' | 'lexical' | 'mandatory_companion' | 'association'
   companionOf?: string          // 矛盾の相手として同伴取得された場合、その相手の memoryId
+  contestedWith?: string        // contested で、かつ相手が同じ recall 結果に含まれる場合、その相手の memoryId。retrievedVia を問わない（Issue #691 続き、ADR 0335）
   associationOf?: string        // retrievedVia: 'association' のときだけ在る。起点にしたアンカーの memoryId（§9）
   provenanceKind: ProvenanceKind // 本人が述べた事実か、AI の推論か（オーナーの原則7）
   score: ScoreBreakdown
@@ -1074,6 +1075,8 @@ Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.m
 段3(矛盾の解決と必須の同伴取得)が recall パイプライン上でどう働くかを述べる。データモデル側の詳細(`status` の遷移、`contradicts` の対向関係、`superseded_by_id` 列)は `./memory-model.md` に譲る。
 
 recall は既定で `status = 'active'` の Memory のみを候補にする。ただし `contested`(判定できない矛盾)の Memory は、候補になった時点で**単独では返さない**。対向する Memory(`contradicts` の相手)をスコアに関係なく候補集合へ追加する。これが段3の仕事であり、`RecalledMemory.retrievedVia = 'mandatory_companion'` として、それがスコアで選ばれたのではなく矛盾解決のために強制的に足されたことを型で示す。
+
+**対向する2件が、同伴取得を経由せずどちらも自然にスコアで候補に残ることもある**(Issue #691 続き、[ADR 0335](./decisions/0335-recalled-memory-contested-with.md))。この場合 `retrievedVia` はどちらも `'ann'`/`'lexical'` のままで `companionOf` も付かないが、`RecalledMemory.contestedWith` が両側に対称に付く——`retrievedVia` を問わず「矛盾の相手が同じ recall 結果に含まれるか」だけを見る欄である。相手が budget 切り詰め後の最終的な結果集合に含まれないとき(連想枠経由で単独候補になった場合など)は付かない。
 
 **予算(段4)と衝突したときの優先順位: 同伴を落とすくらいなら本体を落とす。** `contested` の Memory とその対向は必ずペアで扱い、ペアを分割して片方だけを予算内に残すことはしない。予算が両方を載せられない場合、そのペア全体を候補から外し、`Omission { kind: 'budget_dropped', ... }` に含める(あるいは、そのペアの片方だけを「争われている」という印を付けて残す設計も選択肢としてあり得るが、Phase 1 の既定は「両方落とす」とし、争われている主張を争われていない顔で出すという事故を避ける側に倒す)。**争われている主張を、争われていない顔で出すくらいなら、両方とも出さない**——これが原則1の recall パイプライン上の実装である。
 

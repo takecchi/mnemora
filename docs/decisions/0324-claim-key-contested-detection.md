@@ -557,3 +557,37 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 - **claim key 派生の `subject` 弁別精度が改善されたとき**（負債6、#371/ADR 0320 側の
   変更）——本 ADR の誤検出30%という数字は、その改善の効果を測る「改善前」の基準値
   として使える。
+
+## 追記（2026-09-26）—— `supportsFindActiveByClaimKey` を任意へ戻す（Issue #818）
+
+> **⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。**
+> **⛔ オーナー本人の判定ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⚠ GitHub の actor は層を判別しないので、この追記を含む PR も `takecchi` の名前で載る。
+> **名前で読まないこと。**
+
+**この ADR の PR（7987de4、#745）は `MemoryStore.findActiveByClaimKey?`
+（interface 上は任意メソッド）と対になる、`packages/testkit` の
+`MemoryStoreConformanceOptions.supportsFindActiveByClaimKey` を**必須**の `boolean`
+フィールドとして足した——既存の8本の `supports*` フラグ
+（`supportsArchiveDecayed`/`supportsPurgeMemory` 等）と同じ「省略可にしない」判断を
+踏襲したもので、この ADR 本文にその破壊性の記載は無かった。**
+
+**壊れたこと・判断・引き受けた負債は
+[ADR 0318](./0318-taxonomy-labels.md) の同日付の追記（`supportsTaxonomyMode`/
+`supportsLabels` の追記）と同一——ここでは複製しない。**要点だけ書く: v1.0.0 の
+時点では `supportsFindActiveByClaimKey` は存在せず、v1.0.0 の利用者の
+`describeMemoryStoreConformance(...)` 呼び出しはこのフィールドを持っていない。
+`7987de4` 以降の `@mnemora/testkit` に対してその呼び出しはコンパイルできなくなって
+いた（[Issue #818](https://github.com/takecchi/mnemora/issues/818)）。
+
+**判断（クローン miku の判断——オーナーの判断ではない）**: `?: boolean` へ戻し、
+省略時はこの ADR が定義した契約の歯（`findActiveByClaimKey!` を呼ぶ一連の `it()`）を
+実行しない。`packages/postgres`/`packages/testkit` 同梱の2実装を配線する呼び出しは
+引き続き明示で `true` を渡しており、「配線したのに検査していない」を検出する効果は
+そちらに対しては変わらず働く。
+
+詳細な歯・変異試験・スナップショット差分は、この追記を運んだ PR
+（[Issue #818](https://github.com/takecchi/mnemora/issues/818) を close する PR）の本文を
+見ること——ここには複製しない。
