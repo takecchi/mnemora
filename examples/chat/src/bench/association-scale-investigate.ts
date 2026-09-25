@@ -97,9 +97,44 @@ import {
 } from "../association-probe-set.js";
 import { drainEmbedTicks } from "../embed-drain.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
-import { createProviders } from "../providers.js";
+import { createProviders, selectEmbeddingMode, selectLLMMode } from "../providers.js";
 import { resolveExternalId } from "../provenance-trace.js";
 import { CachingEmbeddingProvider, FileEmbeddingCache } from "./embedding-cache.js";
+
+// ---------------------------------------------------------------------------
+// 歯 —— 何よりも先に置く（実 API を絶対に叩かないため）。
+//
+// ⚠ 【実測 2026-09-25、ADR 0332 追記 A.8】旧版は `createHandle()` の中でしか
+// `MNEMORA_EMBEDDING`（`instanceof LocalEmbeddingProvider`）を検査しておらず、
+// その手前で `createPostgresClient`/`runMigrations`（実 DB 接続）が走っていた。
+// `association-scale-nondeterminism.ts` の `requireGatesOrThrow()` と同じ形で、
+// provider を1つも構築せず・DB にも繋がず、文字列だけで先に検査する。
+// ---------------------------------------------------------------------------
+
+/**
+ * provider を1つも構築する前に、環境変数の**文字列**だけで判定する
+ * （`selectLLMMode`/`selectEmbeddingMode` は provider のインスタンスを作らない
+ * 純関数——`../providers.ts` 参照）。ここを通らない限り、後続のどのコードも
+ * 実行しない。
+ */
+function requireGatesOrThrow(): void {
+  const llmMode = selectLLMMode(process.env);
+  if (llmMode !== "deterministic") {
+    throw new Error(
+      `association-scale-investigate: MNEMORA_LLM=deterministic を明示すること` +
+        `(実測: "${llmMode}")。この器は OPENAI_API_KEY が既に設定されており、` +
+        "明示しないと黙って実 OpenAI API へ倒れる。",
+    );
+  }
+  const embeddingMode = selectEmbeddingMode(process.env);
+  if (embeddingMode !== "local") {
+    throw new Error(
+      `association-scale-investigate: MNEMORA_EMBEDDING=local を明示すること` +
+        `(実測: "${embeddingMode}")。` +
+        "省くと DB 接続(createHandle)より後まで検査が遅れる（ADR 0332 追記 A.8）。",
+    );
+  }
+}
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -226,6 +261,9 @@ function classifyRole(
 }
 
 async function main(): Promise<void> {
+  // ⛔ 何よりも先に。provider を1つも作らず、DB にも繋がない歯（ADR 0332 追記 A.8）。
+  requireGatesOrThrow();
+
   const databaseUrl = requireDatabaseUrl();
   const scale = Number(process.env.MNEMORA_ASSOC_INVESTIGATE_SCALE ?? 10000);
   const cacheDir =
