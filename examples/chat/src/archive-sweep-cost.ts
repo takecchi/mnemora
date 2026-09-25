@@ -173,9 +173,13 @@ async function measureProbe(
   budget: { maxMemoryTokens: number } | undefined,
   limit: number | undefined,
 ): Promise<RawArchiveSweepProbeMeasurement> {
+  // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+  // でも、この bench（archive sweep コスト・gold 順位）の基準線を動かさない。
   const result = await runtime.recall(
     ctx,
-    budget !== undefined ? { text: query, limit, budget } : { text: query },
+    budget !== undefined
+      ? { text: query, limit, budget, association: null }
+      : { text: query, association: null },
   );
   const resolvedExternalIds = await Promise.all(
     result.memories.map((m) => resolveExternalId(memoryStore, ctx, m.memoryId)),

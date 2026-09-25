@@ -31,9 +31,12 @@ export interface MnemoraPathOptions {
    * {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} を渡す**（ADR 0168。「聞かれていないことを、
    * 自分から思い出す」を実際に呼び手側で使う経路にするための既定）。
    * 連想枠そのものを止めたい呼び出し側（比較・検査のため）は `association: null` を
-   * 明示すること——`packages/core` 側の既定（省略時 off）とは別に、この関数だけの
-   * 既定を on にしている（ADR 0151「決定」の既定 off はそのまま——ここは
-   * `examples/chat` という一呼び手が、明示的にオプトインしている形である）。
+   * 明示すること——この関数は `null` を `packages/core` へそのまま転送する
+   * （`queryRecall` の doc 参照）。**この関数の既定（on、`DEFAULT_MNEMORA_PATH_ASSOCIATION`）
+   * は `packages/core` 側の既定が off だった ADR 0151 のときから独立に持っている値であり、
+   * `packages/core` 側の既定が [ADR 0337](../../../docs/decisions/0337-recall-association-default-on.md)
+   * で on に変わっても変えない**（`examples/chat` という一呼び手が、明示的に
+   * オプトインしている形であることに変わりはない）。
    */
   association?: RecallAssociationQuery | null;
 }
@@ -142,8 +145,18 @@ export async function ingestConversation(
  *
  * **既定で `association`（連想枠、ADR 0151・Issue #291・ADR 0168）を渡す**——
  * `opts.association` を省略すると {@link DEFAULT_MNEMORA_PATH_ASSOCIATION} が使われる。
- * 明示的に `association: null` を渡した呼び出しだけが、連想枠を持たない
- * `packages/core` の既定（off）のまま呼ぶ。
+ *
+ * ⚠ **`opts.association: null`（明示的に off にしたい呼び出し側の脱出口）は、
+ * `packages/core` へ `association: null` をそのまま転送する**（[ADR
+ * 0337](../../../docs/decisions/0337-recall-association-default-on.md) 前は、この関数は
+ * `association` キー自体を省略して転送していた——`packages/core` の既定が off だったので
+ * 「省略」が「off」と同じ効果だったからである。**ADR 0337（採用。オーナーが選択肢(あ)を
+ * 選んだ、ask_human ac5953d1、2026-09-25）で `packages/core` の既定が on に変わると、この「省略」は意味が反転し、
+ * `opts.association: null` の呼び出しが黙って連想 on になってしまう**——実際に
+ * `memory-usage-reinforce.postgres.test.ts` が「`packages/core` 既定の off のまま呼ぶ
+ * 脱出口」という契約でこの経路に依存していた。⟹ ここでは省略ではなく `null` を
+ * そのまま転送し、`packages/core` 側の既定が何であっても this 関数の
+ * `opts.association: null` が確実に off を意味するようにする。
  */
 export async function queryRecall(
   runtime: Runtime,
@@ -152,11 +165,11 @@ export async function queryRecall(
   opts: MnemoraPathOptions = {},
 ): Promise<RecallResult> {
   const association =
-    opts.association === null ? undefined : (opts.association ?? DEFAULT_MNEMORA_PATH_ASSOCIATION);
+    opts.association === null ? null : (opts.association ?? DEFAULT_MNEMORA_PATH_ASSOCIATION);
   return runtime.recall(ctx, {
     text: conversation.query,
     ...(opts.budget !== undefined ? { budget: opts.budget } : {}),
-    ...(association !== undefined ? { association } : {}),
+    association,
   });
 }
 
