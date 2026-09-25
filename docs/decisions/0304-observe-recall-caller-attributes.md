@@ -206,6 +206,85 @@ LLM の推論で母集合を削ることになり北極星の問い4に反する
 「テナントが統制する語彙にどれだけ従っているか」を問い、`attributes` は「呼び手が
 何を宣言したか」を問う。両方の doc（`docs/memory-model.md` §8）にこの表を置いた。
 
+### 9. 2026-09-25 追記（レビュー指摘）: `RecallResult` に Memory の中身が乗る経路を全部洗い、
+段3（必須の同伴取得）と段5（目次帯）にも同じ後置防御を足した
+
+⭐ **これは決定5（「runtime でも adapter から返った候補に後から検査を掛ける」）の射程を
+広げる追記であり、決定5自体を書き換えるものではない。** 実装当初、`survivesAttributesFilter`
+は段1（ANN・語彙の後置フィルタ）と段3.5（連想枠の後置フィルタ）にしか掛けていなかった
+——`RecallResult`（`memories`/`index.digestBand`）に Memory の中身（`digest`）が実際に
+乗る経路は、この2つだけではなかった。
+
+#### 監査: `RecallResult` に Memory の中身（digest・content・id）が入る経路
+
+| 経路 | Memory の中身が乗るか | `attributes` の検査 | 備考 |
+|---|---|---|---|
+| 段1 候補生成（ANN・語彙、`withinLimit`） | ⭕ `digest`（`RecalledMemory.digest`） | ⭕ 検査あり | adapter への押し下げ（`VectorFilter.attributes`/`LexicalFilter.attributes`、決定5）＋後置フィルタ（`survivesAttributesFilter`、実装当初から） |
+| **段3 必須の同伴取得（mandatory companion retrieval）** | ⭕ `digest` | 🔴 **当初は無し** → ✅ **本追記で追加** | `MemoryStore.getMany` の結果を検査せずそのまま同伴に使っていた。`subjectId`/`period`/`validAt`/`decayFloorAt` は元々検査していない（`docs/recall.md` §8「対向する Memory をスコアに関係なく候補集合へ追加する」という既存の設計——同伴取得はそれらの軸を最初から見ない。`attributes` だけをここで検査するのは、この軸が「内容の正しさ」ではなく「取り扱い（公開範囲など）の境界」だから。詳細は下記「なぜ attributes だけ検査するか」） |
+| 単位組み立て（unit assembly） | ⭕ `digest`（候補を経由するだけ） | ⭕ 検査あり（間接） | `withinLimit`/`companions` から作るだけで、新しい Memory を取得しない。上流（段1・段3）の検査を継承する |
+| 段3.5 連想枠（association） | ⭕ `digest` | ⭕ 検査あり | adapter への押し下げ（`VectorFilter.attributes`、決定5）＋後置フィルタ（`survivesAttributesFilter`、実装当初から。ADR 0172/Issue #347 の見落としを繰り返さないため元から掛けていた） |
+| 段4 予算切り詰め（budget truncation） | — （落とすだけ） | 対象外 | 新しい Memory を取得しない。単位を落とすか残すかだけを決める |
+| **段5 目次帯（`MemoryStore.aggregateScope` の `digests`）** | ⭕ `digest`（`DigestEntry.digest`） | 🔴 **当初は無し** → ✅ **本追記で追加** | `aggregate.digests` を検査せず `packDigestBand` にそのまま渡していた。`scope.attributes` を無視する自作 `MemoryStore` だと、絞り込みの外の `digest` が目次帯（LLM のプロンプトに載る帯）へ紛れ込む。`scope.attributes` が在るときだけ `getMany` で引き直して検査する（下記「決定9-b」） |
+| `groups`（第3階の群カウント） | ⛔ 無し（`{ axis, key: subjectId \| null, count }` のみ） | 対象外（件数のみ） | `key` は `subjectId` であって Memory の中身ではない。`count` も中身を持たない |
+| `totalInScope` | ⛔ 無し（数値のみ） | 対象外（件数のみ） | 決定6が既に「スコープの外側の境界」として扱っている対象 |
+| `RecallRecordMemory`（`recalls.returned_memories`、永続化） | ⛔ 無し（`memoryId`/`score`/`retrievedVia`/`companionOf`/`associationOf` のみ、`digest` を持たない——ADR 0155 決定1） | 対象外（`finalMemories` から作るだけで新しい Memory を取得しない） | `finalMemories` は既に段1〜4の検査を経ている。永続化層が別の Memory を取得することは無い |
+| `usage.byTier.association`（連想の digest 合計文字数） | ⛔ 無し（数値のみ、`finalMemories` から計算） | 対象外（件数のみ、かつ `finalMemories` を経由） | `finalMemories.filter(...).reduce((sum, m) => sum + m.digest.length, 0)`——中身ではなく長さの合計 |
+
+⭐ **「件数だけが adapter 任せになる箇所（`totalInScope`・`groups` の件数）は、中身が
+漏れないので許容する」**——決定6が `totalInScope` について既に取っている立場を、
+`groups` にもそのまま広げる。`groups[].key` は `subjectId` の値であり、`attributes` が
+守ろうとしている「内容（`digest`/`content`）の漏れ」には当たらない。
+
+#### 9-a. 段3（必須の同伴取得）の修正 —— なぜ `attributes` だけを検査するか
+
+`docs/recall.md` §8 は「対向する Memory（`contradicts` の相手）をスコアに関係なく候補集合へ
+追加する」と明記しており、`recall-pipeline.test.ts`「同伴取得（mandatory_companion）でも
+speaker/subjectId は対向の Memory 自身の値を名乗る」歯は、同伴が呼び出し側の
+`ctx.subjectId` と**異なる** `subjectId` を持ちうることを前提にしている。つまり
+**`subjectId`/`period`/`validAt`/`decayFloorAt` は、同伴取得の対象最初から見ない、
+という既存の設計判断**——「争われている主張を、争われていない顔で出すくらいなら、
+両方とも出さない」という原則1を実装するために、対向は無条件で取りに行く。
+
+`attributes` はこれらと性質が違う——**「その事実がいつ・誰について・まだ真か」という
+内容の軸ではなく、「この記憶をどう取り扱ってよいか」という境界の軸**である（決定8の表
+「誰が値を決めるか」と同じ切り口）。呼び手が `recall({ attributes: { visibility:
+"internal" } })` と明示した時点で、`visibility: "public"` の記憶は「この呼び出しの
+取り扱い範囲の外」であり、争いの内容がどうあれ見せてはならない——`subjectId`/`period`
+のような「この争いは誰・いつの話か」という内容の軸とは独立に効くべき境界である。
+⟹ **`attributes` だけをここで検査し、他の軸は既存の設計のまま変えない。**
+
+**落ちたときの振る舞い**: 対向が `attributes` の検査で落ちると、その `companionId` は
+`companions` に一度も現れない——単位組み立ての段から見れば「対向が見つからなかった
+`contested`」と区別が付かない。この場合、`contested` の候補自身も単位を組まずに
+`consumed` のまま落ちる（既存の分岐、`docs/decisions/0046-contested-pair-invariant-tooth.md`
+と同じ経路）。**新しい `Omission` の種類は発明していない**——既存の
+`unit_assembly_dropped`（[ADR 0043](./0043-unit-assembly-dropped-omission.md)）が
+自動的にこれを拾う（`unitAssemblyShortfall` は `allCandidates.length` から数えるため、
+`companions` が縮んだ分だけ候補数自体が減り、被覆の計算は崩れない）。
+
+#### 9-b. 段5（目次帯）の修正 —— `digestEligible.count`/`countKind` の扱い
+
+`scope.attributes` が在るときだけ、`aggregate.digests` の `memoryId` を `MemoryStore.getMany`
+で引き直し、`survivesAttributesFilter` を通らないもの・引けなかったもの（存在しない／
+クロステナント）を落とす。**落とす方向に倒す**——`getMany` が返さなかった
+（＝「存在しない」の一種として扱われる、`packages/postgres/src/mapping.ts` の
+`isUuidLike` の doc と同じ規約）ものも、内容を確認できない以上、帯には出さない。
+
+`digestEligible.count`（目次帯の資格件数、`ScopeAggregate.digestEligible`）は、この
+後置検査で何か1件でも落ちたときだけ `count` から落とした件数を引き、`countKind` を
+`'unknown'` に落とす。**理由**: `digestEligible.count` は adapter 自身の（もしかしたら
+`attributes` を無視した）ロジックが計算した総数であり、いま見えている `digests`
+（帯の候補ページ）の**外**にも同種の取りこぼしがあるかもしれない——引いた値は
+「少なくともこれだけ多く見積もっていた」ことしか保証せず、真の資格件数はそれより
+さらに小さい可能性がある。`'lower_bound'`（真の値はこれ以上、という意味で使われている
+既存の語彙、`docs/recall.md` §4 参照）は向きが逆になるため使えない。⟹ **`'unknown'`
+にして、正確さを僭称しない**（ADR 0008 の原則3）。
+
+**落ちなかったとき（`droppedCount === 0`）は `digestEligible.count`/`countKind` を
+一切触らない**——adapter が最初から正しく `attributes` を絞り込んでいれば、この後置
+検査は何も検出しない no-op であり、既存の挙動（`'exact'` を名乗る等）を1バイトも
+変えない。
+
 ---
 
 ## 北極星との整合（`docs/north-star.md`「迷ったときの問い」）
@@ -330,6 +409,17 @@ LLM の推論で母集合を削ることになり北極星の問い4に反する
    `speaker`/`subjectId`（ADR 0289 決定6）と同じ理由——`MemoryStore.get(memoryId)
    .attributes` から再現できるため。この判断自体は ADR 0289 の先例を踏襲しただけで、
    本 ADR 独自の検証は行っていない。
+6. **段3（必須の同伴取得）は `subjectId`/`period`/`validAt`/`decayFloorAt` を今回も
+   検査しない**（決定9-a）。この4軸は同伴取得がそもそも見ない既存の設計であり、
+   本 ADR の射程は `attributes` だけに絞った——`attributes` 以外の軸で同種の穴が
+   実際に問題になるかどうかは、確かめていない（そもそも既存の設計判断として意図的に
+   検査しない、という立場だが、その立場自体を再検証してはいない）。
+7. **段5の後置検査は `scope.attributes` が在るときだけ `MemoryStore.getMany` を
+   追加で1回呼ぶ**（決定9-b）。adapter が最初から正しく `attributes` を絞り込んで
+   いれば無駄な往復になる——**この往復が実際にどれだけの遅延を足すかは実測していない**。
+   `aggregate.digests` は既定 `DEFAULT_DIGEST_BAND_LIMIT`（50件）が上限なので、
+   最悪でも1回の `getMany` が最大50件を引くだけだが、体感レイテンシへの影響は
+   未計測。
 
 ---
 
@@ -446,20 +536,81 @@ attributes を書き込み、読み戻す` という conformance テストが実
 について既に文書化しているものと同型であり、「索引が使える」ことと「プランナが
 選ぶ」ことは別の主張である。
 
-### 【実測】6つの門のうち一部
+### 【実測】6つの門
 
 ```
-$ pnpm --filter @mnemora/core exec tsc --noEmit -p .       → exit=0
-$ pnpm --filter @mnemora/core exec eslint src              → exit=0
-$ pnpm --filter @mnemora/postgres exec tsc --noEmit -p .   → exit=0
-$ pnpm --filter @mnemora/postgres exec eslint src          → exit=0
-$ pnpm --filter @mnemora/testkit exec tsc --noEmit -p .    → exit=0
-$ pnpm --filter @mnemora/testkit exec eslint src           → exit=0
+$ pnpm run typecheck    （8 workspace すべて。examples/chat 含む）→ exit=0
+$ pnpm run lint          → exit=0
+$ pnpm run format:check  → exit=0
+$ pnpm run build         → exit=0
+$ pnpm api:check → api:write → api:check  → 緑（core.d.ts / testkit.d.ts のみ差分、全部追加）
+$ pnpm --filter @mnemora/postgres run test:db（実機、56ファイル・614件）→ 全緑（254.91秒）
 ```
 
-⚠ **ルートの `pnpm run typecheck`/`pnpm run lint`/`pnpm run build`/`pnpm run test`/
-`pnpm api:check`/`pnpm run format:check` は実行していない**（後続の作業・CI に委ねる。
-下記「確かめていないこと」参照）。
+（ルートの `pnpm run test`（3段ゲート）そのものは実行していない——`examples/chat` の
+実 API 依存テストを含み、core/postgres/testkit を個別に走らせた内容と重複が大きいため。
+下記「確かめていないこと」参照。）
+
+### 【実測】2026-09-25 追記（レビュー指摘の赤→緑） —— 段3・段5の後置防御
+
+レビュー（マネージャー経由）で、`survivesAttributesFilter` が段1・段3.5にしか
+掛かっておらず、段3（必須の同伴取得）と段5（目次帯）が素通りしていることを指摘された
+（上記「決定9」）。`packages/core/src/__tests__/recall-attributes-content-leak.test.ts`
+（新規）に5本の歯を足し、`cp` で退避・復元して実装前後の赤→緑を実測した
+（`git checkout` は使っていない）。
+
+**赤（`recall-runtime.ts` を退避前の状態、companion の `.filter(survivesAttributesFilter)`
+を除いた状態に戻して実行）**:
+
+```
+$ pnpm --filter @mnemora/core exec vitest run \
+  src/__tests__/recall-attributes-content-leak.test.ts -t "必須の同伴取得"
+ FAIL  ... 対向（companion）の attributes が絞り込みに一致しなければ、争っている側ごと結果から落ちる
+   AssertionError: expected [ 'mem-1', 'mem-2' ] to not include 'mem-2'
+ Tests  1 failed | 1 passed | 3 skipped (5)
+```
+
+**赤（目次帯の後置検査ブロックを丸ごと除いた状態で実行）**:
+
+```
+$ pnpm --filter @mnemora/core exec vitest run \
+  src/__tests__/recall-attributes-content-leak.test.ts -t "目次帯"
+ FAIL  ... scope.attributes を無視する MemoryStore.aggregateScope でも、digestBand に絞り込みの外の digest は乗らない
+   AssertionError: expected [ 'mem-2', 'mem-1' ] to not include 'mem-2'
+ FAIL  ... attributes で落ちた分だけ digestEligible.count を減らし、countKind を 'unknown' にする
+   AssertionError: expected 2 to be 1
+ Tests  2 failed | 1 passed | 2 skipped (5)
+```
+
+**緑（`cp` で復元後）**:
+
+```
+$ pnpm --filter @mnemora/core exec vitest run src/__tests__/recall-attributes-content-leak.test.ts
+ Test Files  1 passed (1)
+      Tests  5 passed (5)
+$ pnpm --filter @mnemora/core exec vitest run
+ Test Files  77 passed (77)
+      Tests  1145 passed | 4 expected fail (1149)
+```
+
+**testkit 適合テスト（新規、postgres と in-memory の両方で緑を確認）**:
+
+```
+$ pnpm --filter @mnemora/testkit exec vitest run \
+  src/__tests__/in-memory-fixtures.conformance.test.ts -t "digests（目次帯の候補）"
+ Tests  1 passed | 321 skipped (322)
+
+$ DATABASE_URL=postgresql://worker@127.0.0.1:<専用ポート>/mnemora_test \
+  pnpm --filter @mnemora/postgres exec vitest run \
+  src/__tests__/conformance.postgres.test.ts -t "digests（目次帯の候補）"
+ Tests  1 passed | 321 skipped (322)
+```
+
+（`aggregateScope の digests（目次帯の候補）も scope.attributes で絞られる` を
+`memory-store-conformance.ts` に追加——`InMemoryMemoryStore`/`PostgresMemoryStore` は
+どちらも `aggregateScope` の実装そのもので `digests` を絞っているため、この歯は
+実装当初から緑だった＝「adapter 側は最初から正しく、runtime 側の後置防御が
+無かった」ことの裏付けでもある。）
 
 ---
 
@@ -476,6 +627,8 @@ $ pnpm --filter @mnemora/testkit exec eslint src           → exit=0
 - [ADR 0174](./0174-filtered-omission-scope-relation.md) — `ScopeRelation`（`within_scope`/`outside_scope`）と `totalInScope` の数え方。決定6の土台
 - [ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md) 決定8 — 「区別を受け取った側が実行時に違う手を打てるか」。#152 単独では立たない、という判定の根拠
 - [ADR 0046](./0046-contested-pair-invariant-tooth.md) — 「いまは決めない」と名乗って測れる形を残す先例
+- [ADR 0043](./0043-unit-assembly-dropped-omission.md) — `unit_assembly_dropped`。決定9-a が段3の attributes 不一致をこの既存経路にそのまま乗せた
+- [ADR 0155](./0155-recall-score-breakdown-persisted.md) — `RecallRecordMemory` が「後から再現できないもの」だけを持つ設計。決定9 の監査表がこれを根拠に永続化経路を「対象外」と判定した
 - [ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md) — 本 ADR・issue コメントがいずれも自動化された担い手のものであり、オーナー本人の決定ではないことの根拠
 - [ADR 0289](./0289-recalled-memory-speaker-subject.md) — `RecalledMemory` に任意欄＋runtime 保証で足す形の直接の先例。決定7・引き受けた負債2の形はこれを踏襲した
 - `docs/migration-v1.md` — 破壊的変更の数え方。「非破壊の根拠」節

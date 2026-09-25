@@ -918,6 +918,34 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.totalInScope).toBe(1);
     });
 
+    it("aggregateScope の digests（目次帯の候補）も scope.attributes で絞られる（レビュー指摘、ADR 0304 追記）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matching = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", attributes: { visibility: "internal" } }),
+      );
+      const mismatching = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          contentHash: "fixture-hash-2",
+          attributes: { visibility: "public" },
+        }),
+      );
+
+      const aggregate = await store.aggregateScope(
+        ctx,
+        { attributes: { visibility: "internal" } },
+        { digestBand: { limit: 10, excludeMemoryIds: [] } },
+      );
+
+      const digestIds = aggregate.digests.map((d) => d.memoryId);
+      expect(digestIds).toContain(matching.id);
+      expect(digestIds).not.toContain(mismatching.id);
+      expect(aggregate.digestEligible.count).toBe(1);
+    });
+
     // -------------------------------------------------------------------
     // decayBaseSeq/decayFloorSeq/halfLifeRecalls（活動時計の3つ組、
     // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3、

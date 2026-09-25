@@ -1015,30 +1015,50 @@ export async function runRecall(
 
   const companions: ScoredCandidate[] =
     companionIds.length > 0
-      ? (await deps.memoryStore.getMany(ctx, companionIds)).map((companionMemory) => {
-          const owner = contestedNeedingCompanion.find(
-            (c) => c.memory.contestedWithId === companionMemory.id,
-          );
-          const score = defaultScoringStrategy({
-            now,
-            tags: companionMemory.tags,
-            queryTags,
-            occurredAt: companionMemory.occurredAt,
-            recordedAt: companionMemory.recordedAt,
-            lastReinforcedAt: companionMemory.lastReinforcedAt,
-            strength: companionMemory.strength,
-            halfLifeHours: companionMemory.halfLifeHours,
-            // Issue #690 / ADR 0300: 3箇所すべてで同じ値を渡す（唯一の出所は scoring.ts）。
-            timeWeighting: validatedQuery.timeWeighting,
-            ...decayScoringExtras(companionMemory),
-          });
-          return {
-            memory: companionMemory,
-            retrievedVia: "mandatory_companion" as const,
-            companionOf: owner?.memory.id,
-            score,
-          };
-        })
+      ? (await deps.memoryStore.getMany(ctx, companionIds))
+          // Issue #152/#153（ADR 0304 追記）: 必須の同伴取得（mandatory companion
+          // retrieval）は `getMany` だけで候補を取っており、他の段（ANN/語彙の後置
+          // フィルタ）が通す `survivesAttributesFilter` を一度も経由しない——`attributes`
+          // で絞り込んだ recall に、絞り込みの外に在る Memory の `digest` が同伴として
+          // 紛れ込む穴だった。ここで落とすと、その companion は `byId` に載らず、
+          // 下の単位組み立てが「対向が見つからない contested」と同じ扱いで**対象の
+          // contested 候補ごと**単位に含めない（既存の `unit_assembly_dropped`、
+          // ADR 0043 の経路にそのまま乗る——争われている主張を、争われていない顔で
+          // 単独で出さない、という既存原則と同じ結果になる）。
+          //
+          // ⚠ `subjectId`/`period`/`validAt`/`decayFloorAt` はここでは意図的に検査
+          // しない——同伴取得はそれらの軸を最初から見ない設計（`docs/recall.md` §8
+          // 「対向する Memory をスコアに関係なく候補集合へ追加する」、
+          // `recall-pipeline.test.ts` の「同伴取得でも speaker/subjectId は対向の
+          // Memory 自身の値を名乗る」歯が、companion が別 subjectId を持ちうることを
+          // 前提にしている）。`attributes` だけを検査するのは、この軸が「内容の
+          // 正しさ」ではなく「取り扱い（公開範囲など）の境界」を表すからである——
+          // ADR 0304 決定6・「北極星との整合」参照。
+          .filter((companionMemory) => survivesAttributesFilter(companionMemory))
+          .map((companionMemory) => {
+            const owner = contestedNeedingCompanion.find(
+              (c) => c.memory.contestedWithId === companionMemory.id,
+            );
+            const score = defaultScoringStrategy({
+              now,
+              tags: companionMemory.tags,
+              queryTags,
+              occurredAt: companionMemory.occurredAt,
+              recordedAt: companionMemory.recordedAt,
+              lastReinforcedAt: companionMemory.lastReinforcedAt,
+              strength: companionMemory.strength,
+              halfLifeHours: companionMemory.halfLifeHours,
+              // Issue #690 / ADR 0300: 3箇所すべてで同じ値を渡す（唯一の出所は scoring.ts）。
+              timeWeighting: validatedQuery.timeWeighting,
+              ...decayScoringExtras(companionMemory),
+            });
+            return {
+              memory: companionMemory,
+              retrievedVia: "mandatory_companion" as const,
+              companionOf: owner?.memory.id,
+              score,
+            };
+          })
       : [];
 
   stages.push({
@@ -1606,7 +1626,44 @@ export async function runRecall(
       excludeMemoryIds: finalMemories.map((m) => m.memoryId),
     },
   });
-  const packedDigestBand = packDigestBand(aggregate.digests, aggregate.digestEligible.count, {
+  // Issue #152/#153（ADR 0304 追記）: `MemoryStore.aggregateScope` の `digests` は
+  // adapter が組み立てる——`scope.attributes` を無視する自作 adapter だと、絞り込みの
+  // 外に在る Memory の digest（本文の要旨）が目次帯へ紛れ込み、LLM のプロンプトに
+  // 混ざる（#153 が防ぎたい当のもの）。段1・段3の後置フィルタ（`survivesAttributesFilter`）
+  // と同じ多層防御をここにも置く——`scope.attributes` が在るときだけ、帯に載る候補を
+  // `getMany` で引き直して検査し、通らないもの・引けなかったもの（存在しない/クロス
+  // テナント）を落とす（落とす方向に倒す）。
+  let scopedDigests = aggregate.digests;
+  let digestEligibleCount = aggregate.digestEligible.count;
+  let digestEligibleCountKind = aggregate.digestEligible.countKind;
+  if (scope.attributes !== undefined && aggregate.digests.length > 0) {
+    const digestMemoriesById = new Map(
+      (
+        await deps.memoryStore.getMany(
+          ctx,
+          aggregate.digests.map((d) => d.memoryId),
+        )
+      ).map((m) => [m.id, m]),
+    );
+    scopedDigests = aggregate.digests.filter((d) => {
+      const memory = digestMemoriesById.get(d.memoryId);
+      return memory !== undefined && survivesAttributesFilter(memory);
+    });
+    const droppedCount = aggregate.digests.length - scopedDigests.length;
+    if (droppedCount > 0) {
+      // `aggregate.digestEligible.count` は adapter 側の同じ絞り込みロジックが計算した
+      // 総数であり、この場に見えている `digests`（帯の候補ページ）の外にも同種の
+      // 取りこぼしが在るかもしれない——ここで検算できるのは見えている分だけなので、
+      // 引いた値は「少なくともこれだけ多く見積もっていた」ことしか言えず、真の資格件数
+      // より依然大きい可能性がある。⟹ 件数の正確さを僭称しない（ADR 0008 の原則3）
+      // ——`'unknown'` にする。件数そのものは内容を持たない（`totalInScope`/`groups` と
+      // 同じ「adapter 任せを許容する」対象、ADR 0304「北極星との整合」参照）ので、
+      // 落としたぶんだけ引いた値をベストエフォートとして残す。
+      digestEligibleCount = Math.max(0, aggregate.digestEligible.count - droppedCount);
+      digestEligibleCountKind = "unknown";
+    }
+  }
+  const packedDigestBand = packDigestBand(scopedDigests, digestEligibleCount, {
     limit: digestBandLimit,
     maxChars: DIGEST_BAND_MAX_CHARS,
     maxEntryChars: DIGEST_BAND_MAX_ENTRY_CHARS,
@@ -1618,8 +1675,8 @@ export async function runRecall(
     digestBand: packedDigestBand.band,
     digestBandCoverage: {
       shown: packedDigestBand.band.length,
-      eligible: aggregate.digestEligible.count,
-      countKind: aggregate.digestEligible.countKind,
+      eligible: digestEligibleCount,
+      countKind: digestEligibleCountKind,
       ...(packedDigestBand.limitedBy !== undefined
         ? { limitedBy: packedDigestBand.limitedBy }
         : {}),
