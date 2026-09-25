@@ -383,6 +383,189 @@ claim key 付き記憶がある状況では、`deriveClaimKeys` の system プ�
 （3〜4/14）が14ケースという小さい範囲に固有かどうかを確かめる必要がある——本 ADR の
 実測はその追加実験を行っていない。
 
+#### 追記（2026-09-25）: 負債1 を語彙ヒントの文言で塞ぐ試み（否定的結果）
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**
+（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**この追記に出てくる判断もすべて「委譲された担い手の判断（オーナーではない）」である。**
+
+負債1（(b)「直す前に、この頻度が14ケースという小さい範囲に固有かどうかを確かめる必要が
+ある」）を受け、`deriveClaimKeys`（`claim-key.ts`）の語彙ヒント文言
+（`buildKnownPredicateInstruction`）だけを変えて誤検出を減らせるか試みた。**結果は
+否定的である**——4種の文言のいずれも、旧文言（本 ADR、以下「基準」）の run 間の揺れの幅を
+超えて誤検出を下げつつ predicate 一致を保つことはできなかった。**この試みはコードへ
+反映していない**（`claim-key.ts`/`runtime.ts` は本 ADR の時点のまま）。
+
+##### 観測: force-fit の機構
+
+旧文言（本 ADR、`buildKnownPredicateInstruction`）:
+
+> 既知の predicate 候補一覧: {predicates}。この一覧に当てはまる場合は**必ずそのまま
+> 使い**、どれにも当てはまらない場合だけ新しい predicate を作ってください。
+
+「測ったこと」3節で観測した誤検出（`answer.claim-key.known-predicates-{1,2,3}.json` の
+claim-key 呼び出しを機械的に抽出して確認）は、次の機構で起きていた:
+
+1. filler 発話（「最近のニュースについての意見は述べていない。」「旅行の計画を
+   立てている」等、実質的な主張が薄い記憶）を claim key 化するとき、既知 predicate
+   一覧の中に**それ自体が過去の filler から生まれた汎用的・曖昧な predicate**
+   （例: `unrelated`、`news_opinion`、`intention_to_start_new_hobby`）が含まれている
+   ことがある。
+2. 「必ずそのまま使い」という強い指示のもとで、LLM はこの曖昧な predicate を
+   「なんでも当てはまるバケツ」として再利用する——例えば「最近のニュースについての
+   意見は述べていない。」と「ペットの調子があまり良くないため、心配している。」という
+   意味的に無関係な2つの filler が、どちらも predicate `unrelated` に落ちる
+   （`answer.claim-key.known-predicates-1.json` で実際に観測）。
+3. 同じ tenant・同じ subjectId で `active` な2件が同じ claim key（subject/predicate）を
+   持つと、`detectClaimKeyContested`（ADR 0324）が規則どおり `contested` を成立させる
+   ——検出コード自体の欠陥ではなく、渡された鍵が誤っていることの結果である。
+
+##### 試した4変種（`buildKnownPredicateInstruction` の store 経由分岐、逐語）
+
+いずれも実装は「`knownPredicatesFromStore` を実際に経由した呼び出しだけ」新しい文言を
+使う分岐（off path・利用者が明示的に渡す `knownPredicates` だけの経路は触れない）を
+想定して試作した。**リポジトリには反映していない**——下の文言は試作コードから
+そのまま転記した記録である。
+
+- **v1**:
+  > 既知の predicate 候補一覧（このテナント・主題について過去に使われたもの）:
+  > {predicates}。ある記憶が、一覧のいずれかと同じ主体の同じ属性について述べていると
+  > 確信できる場合に限り、その predicate をそのまま使ってください。話題が一覧の
+  > どれとも異なる場合や、記憶の内容が「言及していない」「特に述べていない」
+  > 「〜したいことがある」のように実質的な主張を持たない場合は、一覧を無理に
+  > 当てはめず、新しい predicate を作ってください。無関係な記憶どうしを同じ
+  > predicate にまとめないでください。
+- **v2**:
+  > 既知の predicate 候補一覧（このテナント・主題について過去に使われたもの）:
+  > {predicates}。ある記憶が、一覧のいずれかと同じ主体の同じ属性について具体的な値を
+  > 述べている場合に限り、その predicate をそのまま使ってください（値を更新する記憶・
+  > 以前の値を否定して新しい値に置き換える記憶も、同じ属性についてのものであれば
+  > 含みます）。記憶の話題が一覧のどれとも明らかに異なる場合、または記憶の内容が
+  > 「言及していない」「特に述べていない」のように具体的な値を伴わない場合は、一覧を
+  > 無理に当てはめず、新しい predicate を作ってください。無関係な記憶どうしを同じ
+  > predicate にまとめないでください。
+- **v3**:
+  > 既知の predicate 候補一覧（このテナント・主題について過去に使われたもの）:
+  > {predicates}。ある記憶が、一覧のいずれかと同じ主体の同じ属性について具体的な値を
+  > 述べている場合に限り、その predicate をそのまま使ってください（値を更新する記憶・
+  > 以前の値を否定して新しい値に置き換える記憶も、同じ属性についてのものであれば
+  > 含みます）。記憶の話題が一覧のどれとも明らかに異なる場合、または記憶の内容が
+  > 「言及していない」「特に述べていない」のように具体的な値を伴わない場合や、
+  > 「旅行の計画を立てている」「新しい趣味を始めようと思っている」のように具体的な
+  > 対象を挙げない漠然とした意向の表明である場合は、一覧を無理に当てはめず、新しい
+  > predicate を作ってください。特に、話題が異なる漠然とした意向どうしを同じ
+  > predicate にまとめないでください。
+- **v4**:
+  > 既知の predicate 候補一覧（このテナント・主題について過去に使われたもの）:
+  > {predicates}。ある記憶が、一覧のいずれかと同じ主体の同じ属性について述べていると
+  > 確信できる場合に限り、その predicate をそのまま使ってください。以前の値を否定して
+  > 新しい値に置き換える記憶（例:「エンジニアではなく、デザイナーとして働いている」）
+  > も、同じ属性について述べていれば含みます。話題が一覧のどれとも異なる場合や、
+  > 記憶の内容が「言及していない」「特に述べていない」「〜したいことがある」のように
+  > 実質的な主張を持たない場合は、一覧を無理に当てはめず、新しい predicate を作って
+  > ください。無関係な記憶どうしを同じ predicate にまとめないでください。
+
+##### 測ったこと【実測】
+
+2026-09-25、`gpt-4o-mini`、`examples/chat/src/answer-case-set.dev.ts`（6件）+
+`.eval.ts`（8件）の全14ケース、`initdb`（PostgreSQL 17、pgvector・btree_gin・pgcrypto、
+専用ポート・作業ツリー外）で立てた専用インスタンス。**同一セッション**（この追記の
+作業中、連続した実行）に、基準（本 ADR の文言、以下 before-on）と4変種
+（after-on-v1〜v4）を、それぞれ n=3 回、種は `answer.order-legend.json` だけを使って
+実行した。反復ごとに別のカセット
+（`examples/chat/cassettes/answer.claim-key.{before-on,after-on-v1,after-on-v2,after-on-v3,after-on-v4}-{1,2,3}.json`、
+新規ファイル）に記録した。誤検出したケース名は、記録した診断ログをスクリプトで
+機械的に集計した（手で転記していない）。
+
+| 条件 | run | predicate一致/4 | contested/4 | 誤検出/14 | 誤検出したケース |
+|---|---|---|---|---|---|
+| before-on | run1 | 4/4 | 4/4 | 3/14 | other-person-birthday, other-period-city-this-year, unknown-favorite-number |
+| before-on | run2 | 4/4 | 4/4 | 3/14 | other-person-birthday, other-period-city-this-year, unknown-favorite-number |
+| before-on | run3 | 4/4 | 4/4 | 2/14 | other-period-city-this-year, unknown-favorite-number |
+| after-on-v1 | run1 | **3/4** | **3/4** | 2/14 | other-period-city-this-year, unknown-favorite-number |
+| after-on-v1 | run2 | 4/4 | 4/4 | 2/14 | other-period-city-this-year, unknown-favorite-number |
+| after-on-v1 | run3 | 4/4 | 4/4 | 2/14 | other-period-city-this-year, unknown-favorite-number |
+| after-on-v2 | run1 | 4/4 | 4/4 | 3/14 | other-period-city-this-year, pref-window-seat, unknown-favorite-number |
+| after-on-v2 | run2 | 4/4 | 4/4 | 4/14 | other-person-birthday, other-period-city-this-year, unknown-favorite-number, eval-misattribution-order-swapped |
+| after-on-v2 | run3 | 4/4 | 4/4 | 2/14 | other-period-city-this-year, unknown-favorite-number |
+| after-on-v3 | run1 | 4/4 | 4/4 | 4/14 | other-person-birthday, other-period-city-this-year, pref-window-seat, unknown-favorite-number |
+| after-on-v3 | run2 | 4/4 | 4/4 | 3/14 | other-period-city-this-year, other-person-favorite-food, unknown-favorite-number |
+| after-on-v3 | run3 | 4/4 | 4/4 | 3/14 | other-period-city-this-year, other-person-favorite-food, unknown-favorite-number |
+| after-on-v4 | run1 | 4/4 | 4/4 | 2/14 | other-period-city-this-year, pref-window-seat |
+| after-on-v4 | run2 | 4/4 | 4/4 | 2/14 | other-period-city-this-year, unknown-favorite-number |
+| after-on-v4 | run3 | 4/4 | 4/4 | 3/14 | other-person-birthday, other-period-city-this-year, unknown-favorite-number |
+
+条件ごとの誤検出（run1, run2, run3・平均・範囲）:
+
+| 条件 | 誤検出/14（run1, run2, run3） | 平均 | 範囲 |
+|---|---|---|---|
+| before-on | 3, 3, 2 | 2.67 | 2〜3 |
+| after-on-v1 | 2, 2, 2 | 2.00 | 2〜2 |
+| after-on-v2 | 3, 4, 2 | 3.00 | 2〜4 |
+| after-on-v3 | 4, 3, 3 | 3.33 | 3〜4 |
+| after-on-v4 | 2, 2, 3 | 2.33 | 2〜3 |
+
+ケース別誤検出インシデンス（3回中何回）:
+
+| ケース | before-on | v1 | v2 | v3 | v4 |
+|---|---|---|---|---|---|
+| `other-period-city-this-year` | 3/3 | 3/3 | 3/3 | 3/3 | 3/3 |
+| `unknown-favorite-number` | 3/3 | 3/3 | 3/3 | 3/3 | 2/3 |
+| `other-person-birthday` | 2/3 | 0/3 | 1/3 | 1/3 | 1/3 |
+| `pref-window-seat` | 0/3 | 0/3 | 1/3 | 1/3 | 1/3 |
+| `other-person-favorite-food` | 0/3 | 0/3 | 0/3 | 2/3 | 0/3 |
+| `eval-misattribution-order-swapped` | 0/3 | 0/3 | 1/3 | 0/3 | 0/3 |
+
+##### 判定: 否定的結果
+
+**どの変種も、before-on の run 間の揺れの幅（2〜3/14）を明確に超えて誤検出を下げつつ、
+predicate 一致・`contested` 成立を4/4に保つことはできなかった**:
+
+- **v1**（誤検出は3回とも2/14で before-on の下限と同着）は、predicate 一致を3回に
+  1回落とした（`negation-moved-job`、否定を伴う訂正の取りこぼし）——マネージャー指示
+  「predicate 一致 4/4・`contested` 4/4 を落とさない」を満たさない。
+- **v2**（3, 4, 2）・**v3**（4, 3, 3）は predicate 一致を3回とも保ったが、誤検出は
+  before-on の平均（2.67）を**上回った**——「誤検出を減らす」という目的そのものを
+  達成できていない。
+- **v4**（2, 2, 3）は predicate 一致を3回とも保ち、誤検出の平均（2.33）は before-on
+  （2.67）よりわずかに低いが、**run3で3/14——before-on の run 間の揺れの範囲
+  （2〜3/14）に完全に収まっている**。差は「3回あたり誤検出1件」に相当し、統計的に
+  意味のある差と主張できる根拠が無い。**v4は4変種を実測した*あとで*、結果を見てから
+  選んだもの**（4変種を実測する前に「これを採用する」と決めていたわけではない）——
+  事後選択（post-hoc selection）であり、5番目の独立したサンプルで再現するかどうかは
+  確かめていない。
+- **v2〜v4はいずれも、before-on/v1では一度も観測されなかった新しい誤検出
+  `pref-window-seat` を誘発した**（v2: 1/3、v3: 1/3、v4: 1/3）。文言変更は「誤検出の
+  総数」を動かすだけでなく、「誤検出になるケースの集合」そのものを入れ替える副作用を
+  持つ——ある種の誤検出（`other-person-birthday`）を減らす代わりに、別の種類の誤検出を
+  稀に誘発する。
+- **`other-period-city-this-year` は全5条件・全15runで誤検出**——ADR 0326 (d) と
+  同一の構造的原因（`去年は札幌で働いていた。`/`今年は福岡で働いている。`の2文が、
+  語彙ヒントが影響する前の最初の `deriveClaimKeys` 呼び出しで、既に同じ predicate
+  `work_location` を割り当てられる。`validFrom`/`validUntil` を渡していないため
+  period が重ならず `contested` になる）——**本追記の対象外**（プロンプト文言変更が
+  触れる余地が無い）。
+
+**⟹ 結論: プロンプト文言の変更だけでは、この誤検出を「n=3程度の実測で有意に確認できる
+形で」減らせなかった。** 費用: 5条件 × n=3 = 679 chat 呼び出し、合計 $0.051076
+（gpt-4o-mini、上限 $0.50 の約10.2%）。
+
+##### 次の手がかり（未測定）
+
+- ⛔ **n=3を超える反復（例: n=10）で、v4 のような「僅かな改善に見える」変種が
+  統計的に有意な差として確認できるか。**本追記は試していない。
+- ⛔ **`unknown-favorite-number` 型の force-fit（旅行の計画↔新しい趣味のような、
+  具体的な対象を欠く漠然とした意向どうしの混同）に絞った、専用の判定ロジック**
+  （例: claim key 派生とは別に、記憶の「実質的な内容の有無」を判定する前段を挟む）
+  ——プロンプト文言の範囲を超えるため本追記は試していない。
+- ⛔ **`other-period-city-this-year`（ADR 0326 (d)）を先に直した場合、語彙ヒント文言の
+  効果測定がやり直しになるか。**(d) を直せば構造的な誤検出1件が消え、n=14ケース中の
+  誤検出率の分母・分子が変わるため、本追記の実測をそのまま使い回せない可能性がある。
+- ⛔ **本追記が試した4変種以外の方向**（例: 語彙ヒントを system prompt ではなく
+  user message 側へ移す、predicate ごとに個別の確信度を返させる等）。マネージャー
+  指示の範囲（プロンプト文言の変更のみ、正規化強化・埋め込み類似度統合は既に却下済み）
+  では、本追記が試した4変種が予算内で試した範囲のすべてである。
+
 ### 負債2: (g) が残る限り、predicate 一致の改善は `[矛盾候補:]` タグに届かない（ADR 0326 の仮説の再確認）
 
 「測ったこと」4節のとおり、訂正4ケースは6/6回とも `[矛盾候補:]` タグに到達しなかった。
