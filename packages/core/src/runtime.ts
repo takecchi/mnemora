@@ -2785,7 +2785,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // doc コメント参照。deferred 抽出でも値が残るよう Observation に持たせる）。
       validFrom: input.validFrom ?? null,
       validUntil: input.validUntil ?? null,
-      // Issue #152（ADR 0307）: 同じ経路。runtime は常に `{}` 以上の値を書く
+      // Issue #152（ADR 0308）: 同じ経路。runtime は常に `{}` 以上の値を書く
       // （`Observation.attributes` の doc コメント参照）。
       attributes: input.attributes ?? {},
     };

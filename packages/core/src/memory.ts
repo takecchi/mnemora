@@ -177,13 +177,13 @@ export interface Memory {
   purgedAt?: Date | null;
 
   /**
-   * Issue #152（ADR 0307）: 呼び手が申告した任意属性（公開範囲・区分など）。
+   * Issue #152（ADR 0308）: 呼び手が申告した任意属性（公開範囲・区分など）。
    *
    * **`tags`（上）と役割が違う**: `tags` は 100% LLM の推論、`attributes` は 100% 呼び手の
    * 申告——北極星の問い4（AI の推論とユーザーが言った事実を区別する）に沿って、抽出器は
    * この欄を一度も読み書きしない。`attributes.ts` の doc コメント参照。
    *
-   * **作成経路ごとの引き継ぎ方（ADR 0307 決定4、詳細は同 ADR の表）**:
+   * **作成経路ごとの引き継ぎ方（ADR 0308 決定4、詳細は同 ADR の表）**:
    * - 抽出（`buildNewMemoryFromCandidate`）: 観測（`Observation.attributes`）をそのまま
    *   継承する（フォールバック経路も含む）——「限定の出所から出た記憶は限定のまま」。
    * - 統合（`buildConsolidatedMemory`）・反芻（`buildReflectedMemory`）: 元の Memory
@@ -275,7 +275,7 @@ export const MemorySchema = z.object({
   // Issue #198（ADR 0124）: `Memory.purgedAt` の doc コメント参照。
   purgedAt: z.date().nullable().optional(),
 
-  // Issue #152（ADR 0307）: `Memory.attributes` の doc コメント参照。格納側は検査をしない
+  // Issue #152（ADR 0308）: `Memory.attributes` の doc コメント参照。格納側は検査をしない
   // schema を使う（`AttributesSchema` は `ObserveXxxInput`/`RecallQuery` 側専用）。
   attributes: StoredAttributesSchema.optional(),
 

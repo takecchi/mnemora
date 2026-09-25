@@ -121,7 +121,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル8・索引20・関数5になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル8・索引21・関数5になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -133,7 +133,7 @@ describe("deriveMigrationObjects", () => {
     const texts = fileNames.map((name) => readFileSync(`${migrationsDir}/${name}`, "utf8"));
     const result = deriveMigrationObjects(texts);
     expect(result.tables).toHaveLength(8);
-    expect(result.indexes).toHaveLength(20);
+    expect(result.indexes).toHaveLength(21);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

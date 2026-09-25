@@ -362,7 +362,7 @@ export async function runRecall(
         ? nowSeq
         : undefined,
     decayFloorAnyAxis: decayGateActive && decayClock === "either",
-    // Issue #152/#153（ADR 0307）: 空オブジェクトは「絞り込み無し」（`RecallQuery.attributes`
+    // Issue #152/#153（ADR 0308）: 空オブジェクトは「絞り込み無し」（`RecallQuery.attributes`
     // の doc コメント参照）——`undefined` に正規化して、以降すべての箇所（段1・段3.5・
     // `aggregateScope`・後置フィルタ）が同じ1つの「絞り込み無し」の形を見るようにする。
     attributes:
@@ -471,7 +471,7 @@ export async function runRecall(
   };
 
   /**
-   * ⭐ `attributes` の後置フィルタ述語（Issue #152/#153、ADR 0307）。段1の後置フィルタと
+   * ⭐ `attributes` の後置フィルタ述語（Issue #152/#153、ADR 0308）。段1の後置フィルタと
    * 段3.5（連想枠）の後置フィルタが、同じこの関数を呼ぶ——`survivesSubjectFilter` と同じ
    * 「1箇所に述語を置く」規律。
    *
@@ -625,7 +625,7 @@ export async function runRecall(
         subjectId: scope.subjectId,
         // Issue #608 項目③(b) / ADR 0286: `subjectId` が渡っているときだけ効く opt-in。
         includeSubjectless: scope.includeSubjectless,
-        // Issue #152/#153（ADR 0307）: AND 等値の絞り込み。`scope.attributes` が
+        // Issue #152/#153（ADR 0308）: AND 等値の絞り込み。`scope.attributes` が
         // `undefined`（絞り込み無し）なら no-op（`VectorFilter.attributes` の doc 参照）。
         attributes: scope.attributes,
         excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
@@ -704,7 +704,7 @@ export async function runRecall(
           subjectId: scope.subjectId,
           // Issue #608 項目③(b) / ADR 0286: ANN チャンネルと同じ opt-in（上のコメント参照）。
           includeSubjectless: scope.includeSubjectless,
-          // Issue #152/#153（ADR 0307）: ANN チャンネルと同じ絞り込み（上のコメント参照）。
+          // Issue #152/#153（ADR 0308）: ANN チャンネルと同じ絞り込み（上のコメント参照）。
           attributes: scope.attributes,
           excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
           occurredAfter: scope.occurredAfter,
@@ -811,7 +811,7 @@ export async function runRecall(
     // Issue #608 項目③(b) / ADR 0286: 述語は `survivesSubjectFilter` に1箇所へまとめてある
     // （段3.5 の後置フィルタと共有——ここで書き直さない）。
     if (!survivesSubjectFilter(memory)) continue;
-    // Issue #152/#153（ADR 0307）: 同じ規律。`survivesAttributesFilter` に1箇所へまとめてある。
+    // Issue #152/#153（ADR 0308）: 同じ規律。`survivesAttributesFilter` に1箇所へまとめてある。
     if (!survivesAttributesFilter(memory)) continue;
     const effectiveTime = memory.occurredAt ?? memory.recordedAt;
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
@@ -1016,7 +1016,7 @@ export async function runRecall(
   const companions: ScoredCandidate[] =
     companionIds.length > 0
       ? (await deps.memoryStore.getMany(ctx, companionIds))
-          // Issue #152/#153（ADR 0307 追記）: 必須の同伴取得（mandatory companion
+          // Issue #152/#153（ADR 0308 追記）: 必須の同伴取得（mandatory companion
           // retrieval）は `getMany` だけで候補を取っており、他の段（ANN/語彙の後置
           // フィルタ）が通す `survivesAttributesFilter` を一度も経由しない——`attributes`
           // で絞り込んだ recall に、絞り込みの外に在る Memory の `digest` が同伴として
@@ -1033,7 +1033,7 @@ export async function runRecall(
           // Memory 自身の値を名乗る」歯が、companion が別 subjectId を持ちうることを
           // 前提にしている）。`attributes` だけを検査するのは、この軸が「内容の
           // 正しさ」ではなく「取り扱い（公開範囲など）の境界」を表すからである——
-          // ADR 0307 決定6・「北極星との整合」参照。
+          // ADR 0308 決定6・「北極星との整合」参照。
           .filter((companionMemory) => survivesAttributesFilter(companionMemory))
           .map((companionMemory) => {
             const owner = contestedNeedingCompanion.find(
@@ -1237,7 +1237,7 @@ export async function runRecall(
                 // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
                 // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
                 includeSubjectless: scope.includeSubjectless,
-                // Issue #152/#153（ADR 0307）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+                // Issue #152/#153（ADR 0308）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
                 // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
                 // ——を繰り返さないための規律をそのまま適用する）。
                 attributes: scope.attributes,
@@ -1334,7 +1334,7 @@ export async function runRecall(
           // 何件増えるかは**測っていない。**
           // Issue #608 項目③(b) / ADR 0286: 段1と同じ述語を共有する（`survivesSubjectFilter`）。
           if (!survivesSubjectFilter(memory)) continue;
-          // Issue #152/#153（ADR 0307）: 段1と同じ述語を共有する（`survivesAttributesFilter`）。
+          // Issue #152/#153（ADR 0308）: 段1と同じ述語を共有する（`survivesAttributesFilter`）。
           if (!survivesAttributesFilter(memory)) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
           if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
@@ -1542,7 +1542,7 @@ export async function runRecall(
         // occurredAt は Memory 自身の欄をそのまま引き継ぐ。undefined も null に揃える
         // （「述べられていない」を推測で埋めない——ADR 0298「決めなかったこと」参照）。
         occurredAt: member.memory.occurredAt ?? null,
-        // Issue #152/#153（ADR 0307）: 常に `{}` 以上の値を書く（`undefined` にしない）
+        // Issue #152/#153（ADR 0308）: 常に `{}` 以上の値を書く（`undefined` にしない）
         // ——`Memory.attributes` が `undefined` の古い行・adapter でもここで `{}` に揃える
         // （`RecalledMemory.attributes` の doc コメント参照）。
         attributes: member.memory.attributes ?? {},
@@ -1626,7 +1626,7 @@ export async function runRecall(
       excludeMemoryIds: finalMemories.map((m) => m.memoryId),
     },
   });
-  // Issue #152/#153（ADR 0307 追記）: `MemoryStore.aggregateScope` の `digests` は
+  // Issue #152/#153（ADR 0308 追記）: `MemoryStore.aggregateScope` の `digests` は
   // adapter が組み立てる——`scope.attributes` を無視する自作 adapter だと、絞り込みの
   // 外に在る Memory の digest（本文の要旨）が目次帯へ紛れ込み、LLM のプロンプトに
   // 混ざる（#153 が防ぎたい当のもの）。段1・段3の後置フィルタ（`survivesAttributesFilter`）
@@ -1657,7 +1657,7 @@ export async function runRecall(
       // 引いた値は「少なくともこれだけ多く見積もっていた」ことしか言えず、真の資格件数
       // より依然大きい可能性がある。⟹ 件数の正確さを僭称しない（ADR 0008 の原則3）
       // ——`'unknown'` にする。件数そのものは内容を持たない（`totalInScope`/`groups` と
-      // 同じ「adapter 任せを許容する」対象、ADR 0307「北極星との整合」参照）ので、
+      // 同じ「adapter 任せを許容する」対象、ADR 0308「北極星との整合」参照）ので、
       // 落としたぶんだけ引いた値をベストエフォートとして残す。
       digestEligibleCount = Math.max(0, aggregate.digestEligible.count - droppedCount);
       digestEligibleCountKind = "unknown";

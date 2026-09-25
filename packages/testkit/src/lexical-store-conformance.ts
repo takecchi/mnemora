@@ -32,7 +32,7 @@ export interface PrepareLexicalMemoryAttrs {
   validFrom?: Date | null;
   /** Issue #280: `filter.validAt` の歯が使う。 */
   validUntil?: Date | null;
-  /** Issue #152/#153（ADR 0307）: `filter.attributes` の歯が使う。 */
+  /** Issue #152/#153（ADR 0308）: `filter.attributes` の歯が使う。 */
   attributes?: Record<string, string>;
 }
 
@@ -608,7 +608,7 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
     });
 
     // -------------------------------------------------------------------
-    // filter.attributes（Issue #152/#153、ADR 0307）: `vector-store-conformance.ts` と
+    // filter.attributes（Issue #152/#153、ADR 0308）: `vector-store-conformance.ts` と
     // 同じ意味論（AND 等値）。
     // -------------------------------------------------------------------
 

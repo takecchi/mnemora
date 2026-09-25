@@ -908,7 +908,7 @@ describe("buildConsolidatedMemory（純関数）", () => {
     expect(memory.digest.length).toBeLessThanOrEqual(11); // 10文字 + "…"
   });
 
-  // Issue #153（ADR 0307 決定4）: `attributes` は積集合。
+  // Issue #153（ADR 0308 決定4）: `attributes` は積集合。
   describe("attributes は eligible 全件に同じキー・同じ値で入っているものだけを残す（積集合）", () => {
     it("全件一致するキーだけが残る。値が割れているキー・一部にしか無いキーは落ちる", () => {
       const memory = buildConsolidatedMemory({
