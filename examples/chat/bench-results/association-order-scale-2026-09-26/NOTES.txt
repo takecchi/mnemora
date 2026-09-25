@@ -1,0 +1,66 @@
+association-order-scale 2026-09-26（WIP、測定は継続中）
+
+クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない（ADR 0220）。
+
+ADR 0332 追記「2026-09-26」A.2(3) が、base（anchor/gold 含む62文）の挿入位置
+（先頭/末尾/散らす）を1回ずつ振ったところ大きな差を見つけた（先頭 aRaw 0/12、
+末尾 12/12、散らす 10/12）。ただし反復は末尾2回・散らす1回のみ、規模は1万行のみ、
+HNSW構築パラメータは既定のみだった。本ディレクトリは、その効果を
+**独立ingest3回以上・複数規模・（部分的に）HNSWパラメータ違い**で測り直した生データ。
+
+道具: `examples/chat/src/bench/association-scale-nondeterminism.ts` の新モード
+`MNEMORA_ASSOC_NONDET_MODE=order-scale`（本PRで追加）。
+
+## ファイル
+
+- `order-scale-10k.json` — 1万行、base-first/base-last/base-interleaved × 3反復、
+  HNSW既定(m=16, ef_construction=64)。完了。
+- `order-scale-30k.json` — 3万行、同上。完了。
+- `order-scale-10k-hnsw-m32-efc128.json` — 1万行、base-first/base-last × 2反復、
+  HNSW m=32/ef_construction=128。完了。
+- `order-scale-100k.json` — 10万行、base-first/base-last/base-interleaved × 1反復
+  （参考値、反復不足）。**測定継続中——このコミット時点では base-first/base-last
+  までしか終わっていない可能性がある。最終版は後続コミットで上書きする。**
+- `battery.log` — 上記4フェーズを直列実行したときの標準出力そのもの。
+
+## 途中経過の要約（aRaw = probe自身のanchorが段1のANN窓kPrime=40に入った数/12）
+
+### 1万行・3万行（HNSW既定 m=16/ef_construction=64、各3反復）
+
+| scale | order | aRaw(3反復) | 到達on-3(3反復) |
+|---|---|---|---|
+| 10k | base-first | 0,0,0 /12 | 0,0,0 /12 |
+| 10k | base-last | 12,12,12 /12 | 9,9,9 /12 |
+| 10k | base-interleaved | 11,11,11 /12 | 8,8,8 /12 |
+| 30k | base-first | 0,0,0 /12 | 0,0,0 /12 |
+| 30k | base-last | 12,12,12 /12 | 9,8,8 /12 |
+| 30k | base-interleaved | 12,11,11 /12 | 8,7,7 /12 |
+
+⟹ 1万行・3万行とも、base-first は3反復とも aRaw=0/12 で完全に安定、base-last/
+base-interleaved は3反復ともほぼ完全に回復（11〜12/12）——ADR 0332 A.2(3) の
+1回だけの観測が、反復・規模を通して再現した。
+
+### 1万行、HNSW m=32/ef_construction=128（各2反復、base-first/base-lastのみ）
+
+| order | aRaw(2反復) |
+|---|---|
+| base-first | 2,0 /12 |
+| base-last | 12,12 /12 |
+
+⟹ m/ef_constructionを既定の2倍にしても、base-firstの取りこぼしは解消しない。
+
+### 10万行（既定パラメータ、各1反復、参考値）
+
+| order | aRaw | 到達on-3 |
+|---|---|---|
+| base-first | 0/12 | 0/12 |
+| base-last | 10/12 | 7/12 |
+
+(base-interleaved は測定継続中)
+
+全条件でEXPLAIN(本番形、JOIN込み、既定ef_search=40)がHNSW索引使用を示した
+(`explainHnsw=true`、`seq Scan`ではない)。EXACT(enable_indexscan=off)は
+全条件でaRaw=12/12——厳密順位は挿入位置に依存しない。
+
+⛔ 最終的な表・射程・確かめていないことは ADR 0332 の追記を参照
+（測定完了後に確定する。本 NOTES.txt は途中経過であり、最終版で上書きする）。
