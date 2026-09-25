@@ -388,6 +388,111 @@ describe("calibrateRecallFootprint — 3階建て", () => {
 });
 
 // ---------------------------------------------------------------------------
+// calibrateRecallFootprint — 構造項を差し引く（Issue #340 フォローアップ / ADR 0305）
+//
+// `estimateRecallFootprint` は `indexBand` の JSON 構造から決まる4つの構造項
+// （ADR 0302）を足す。ADR 0302 の hold-in 標本（`compare-baseline.json` の7行）は
+// すべて `totalInScope` が1桁だったので、この構造項は較正の段階では常に0であり、
+// 較正係数（`charsPerDigest`/`fixedIndexChars`）には混ざっていなかった。
+//
+// `totalInScope` が2桁以上の標本を較正に混ぜると、この前提が崩れる——桁上がり分が
+// 最小二乗の線形式（`totalChars = fixedIndexChars + memoryCount * charsPerDigest`）に
+// そのまま混ざり、係数が偏る。**その係数の上に、`estimateRecallFootprint` が同じ
+// 構造項をもう一度足す**ので、二重計上になる。
+//
+// この節は、**既知の真の係数**から構造項込みの合成標本を作り、
+// 「`totalInScope` を渡さなければ偏る／渡せば真の係数に戻る」ことを直接示す。
+// ---------------------------------------------------------------------------
+
+describe("calibrateRecallFootprint — 構造項を差し引く（Issue #340 フォローアップ / ADR 0305）", () => {
+  /**
+   * 既知の真の係数。**standard な値ではなく、丸め誤差と区別しやすいよう小数を選んだ。**
+   */
+  const TRUE_CHARS_PER_DIGEST = 12.3;
+  const TRUE_FIXED_INDEX_CHARS = 200.7;
+
+  /** テスト用の桁上がり計算——実装の `extraDigitsBeyondOne` とは独立に、素朴に数える。 */
+  function extraDigitsBeyondOneForTest(n: number): number {
+    return Math.max(0, String(n).length - 1);
+  }
+
+  /**
+   * `totalInScope=n` の合成標本を作る。**`memoryCount = n`（全件を返す想定）にして
+   * `bandEligible = totalInScope - memoryCount = 0` を保証する**——帯が常に空になり
+   * (a)カンマ/(d)limitedBy の構造項は常に0、効くのは(b)の桁上がりだけになる
+   * （`estimateRecallFootprint` が実際に計算する式と同じ形——本ブロックの前提節参照）。
+   *
+   * `totalChars` は「真の係数から決まる非構造の線形部分 + 構造項」として合成する——
+   * これは `estimateRecallFootprint` が既に主張している式そのものであり
+   * （`estimateRecallFootprint` の doc、構造項(b)）、ここで新しいモデルを持ち込んでは
+   * いない。
+   */
+  function syntheticSample(n: number, includeTotalInScope: boolean): RecallFootprintSample {
+    const structuralCarry = 2 * extraDigitsBeyondOneForTest(n);
+    const totalChars = TRUE_FIXED_INDEX_CHARS + TRUE_CHARS_PER_DIGEST * n + structuralCarry;
+    return {
+      totalChars,
+      memoryCount: n,
+      bandEntryCount: 0,
+      ...(includeTotalInScope ? { totalInScope: n } : {}),
+    };
+  }
+
+  // 1桁×2・2桁×2・3桁×2を混ぜる。
+  const SCOPE_COUNTS = [4, 8, 55, 91, 137, 480];
+
+  it("totalInScope を渡さなければ、2桁/3桁標本の桁上がりが係数に混ざり、真の係数から有意にずれる", () => {
+    const samples = SCOPE_COUNTS.map((n) => syntheticSample(n, false));
+    const profile = calibrateRecallFootprint(samples);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual([]);
+    // 【実測】(この歯を書いた時点、fix適用前後とも同じ合成標本で検算): 偏りは
+    // charsPerDigest で約+0.00754、fixedIndexChars で約+1.026——浮動小数点の丸め
+    // （1e-10のオーダー）よりずっと大きい。ここでは丸めとの取り違えを避けるため
+    // 十分小さい閾値(1e-4)だけを歯にする。
+    expect(Math.abs(profile.charsPerDigest - TRUE_CHARS_PER_DIGEST)).toBeGreaterThan(1e-4);
+    expect(Math.abs(profile.fixedIndexChars - TRUE_FIXED_INDEX_CHARS)).toBeGreaterThan(1e-4);
+  });
+
+  it("totalInScope を渡せば、2桁/3桁標本が混ざっても真の係数へ戻る（構造項を差し引いた最小二乗）", () => {
+    const samples = SCOPE_COUNTS.map((n) => syntheticSample(n, true));
+    const profile = calibrateRecallFootprint(samples);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual([]);
+    expect(profile.charsPerDigest).toBeCloseTo(TRUE_CHARS_PER_DIGEST, 8);
+    expect(profile.fixedIndexChars).toBeCloseTo(TRUE_FIXED_INDEX_CHARS, 6);
+  });
+
+  it("totalInScope を省略した標本は、構造項0として扱われる（既定値と1バイトも変わらない後方互換）", () => {
+    // 1桁のみの標本では、そもそも構造項が常に0なので、渡しても渡さなくても
+    // 結果は変わらないはず——後方互換の直接確認。
+    const singleDigitCounts = [3, 5, 7];
+    const withField = singleDigitCounts.map((n) => syntheticSample(n, true));
+    const withoutField = singleDigitCounts.map((n) => syntheticSample(n, false));
+    const profileWith = calibrateRecallFootprint(withField);
+    const profileWithout = calibrateRecallFootprint(withoutField);
+    expect(profileWith.charsPerDigest).toBe(profileWithout.charsPerDigest);
+    expect(profileWith.fixedIndexChars).toBe(profileWithout.fixedIndexChars);
+  });
+
+  it("2桁/3桁を含む標本でも、totalInScope を省略した呼び出し1本の結果はこれまでの実装と同じ式で再現できる（回帰防止）", () => {
+    // 「省略時は構造項0」という契約を、このテストファイル内の別の場所（3階建てテスト等）
+    // が使っている素朴な標本（totalInScope 無し）でも壊していないことの確認。
+    const samples: RecallFootprintSample[] = [
+      { totalChars: 300, memoryCount: 5, bandEntryCount: 0 },
+      { totalChars: 500, memoryCount: 10, bandEntryCount: 0 },
+      { totalChars: 700, memoryCount: 15, bandEntryCount: 0 },
+    ];
+    const profile = calibrateRecallFootprint(samples);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    // 素朴な厳密線形標本 (totalChars = 100 + 40*memoryCount) と同じ値——
+    // totalInScope を持たないので構造項の差し引きは一切効かない。
+    expect(profile.charsPerDigest).toBeCloseTo(40, 9);
+    expect(profile.fixedIndexChars).toBeCloseTo(100, 9);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // compareWithFullLog
 // ---------------------------------------------------------------------------
 
@@ -543,6 +648,7 @@ function makeRecallResult(overrides: {
   chars: number;
   memoryCount: number;
   digestBand?: DigestEntry[];
+  totalInScope?: number;
 }): RecallResult {
   return {
     recallId: "r1",
@@ -550,7 +656,7 @@ function makeRecallResult(overrides: {
     omitted: [],
     index: {
       groups: [],
-      totalInScope: overrides.memoryCount,
+      totalInScope: overrides.totalInScope ?? overrides.memoryCount,
       countKind: "exact",
       ...(overrides.digestBand !== undefined ? { digestBand: overrides.digestBand } : {}),
     },
@@ -573,13 +679,25 @@ describe("footprintSampleFromRecall — RecallResult から3欄を取り出す",
     ];
     const result = makeRecallResult({ chars: 999, memoryCount: 3, digestBand });
     const sample = footprintSampleFromRecall(result);
-    expect(sample).toEqual({ totalChars: 999, memoryCount: 3, bandEntryCount: 2 });
+    expect(sample).toEqual({
+      totalChars: 999,
+      memoryCount: 3,
+      bandEntryCount: 2,
+      totalInScope: 3,
+    });
   });
 
   it("index.digestBand が無ければ bandEntryCount は 0", () => {
     const result = makeRecallResult({ chars: 500, memoryCount: 5 });
     const sample = footprintSampleFromRecall(result);
     expect(sample.bandEntryCount).toBe(0);
+  });
+
+  it("totalInScope は index.totalInScope をそのまま写す（memoryCount とは独立）", () => {
+    const result = makeRecallResult({ chars: 500, memoryCount: 5, totalInScope: 42 });
+    const sample = footprintSampleFromRecall(result);
+    expect(sample.totalInScope).toBe(42);
+    expect(sample.memoryCount).toBe(5);
   });
 });
 
@@ -841,5 +959,54 @@ describe("estimateRecallFootprint — 構造項をin-memory runtimeの実recall(
       profile,
     );
     expect(est.chars).not.toBe(result.usage.chars);
+  });
+
+  /**
+   * ⭐ 較正側の歯（Issue #340 フォローアップ / ADR 0305）: `footprintSampleFromRecall` で
+   * **実際の `recall()`（1桁・2桁・3桁の `totalInScope`、すべて帯が空）**から標本を取り、
+   * `calibrateRecallFootprint` で較正し、その較正済みプロファイルが
+   * **held-out シナリオ**（帯が非空のものを含む）の実測 `usage.chars` と一致することを示す。
+   *
+   * `HOLD_IN_SCENARIOS` はすべて帯が空（`limit` が `count` 以上）になるよう選んである
+   * ——`calibrateRecallFootprint` が使えるのはその形の標本だけであるため
+   * （`calibrateRecallFootprint` の doc「使うのは bandEntryCount === 0 の標本だけ」）。
+   * 2桁・3桁を混ぜているのが本 PR 以前との違いである——**総本 PR 以前は `totalInScope` を
+   * 標本が持たなかったので、この較正は桁上がり分を係数に吸い込んでいた。**
+   */
+  it("較正の歯: 実recall()（1/2/3桁、帯なし）から footprintSampleFromRecall→calibrateRecallFootprint で較正すると、held-outの実測(帯ありを含む)と一致する", async () => {
+    const HOLD_IN_SCENARIOS: Scenario[] = [
+      { name: "帯なし(1桁)", count: 5, limit: 10 },
+      { name: "帯なし(1桁,別件数)", count: 9, limit: 10 },
+      { name: "帯なし(2桁)", count: 42, limit: 50 },
+      { name: "帯なし(3桁)", count: 137, limit: 200 },
+    ];
+    const holdInResults = await Promise.all(HOLD_IN_SCENARIOS.map((sc) => recallFor(sc)));
+    for (const result of holdInResults) {
+      // この歯の前提: 帯が実際に空であること(calibrateRecallFootprintが使う条件)。
+      expect(result.index.digestBand).toEqual([]);
+    }
+    const samples = holdInResults.map((r) => footprintSampleFromRecall(r));
+    // 2桁・3桁の totalInScope が実際に混ざっていること(この歯が検算したい形)。
+    expect(samples.some((s) => (s.totalInScope ?? 0) >= 10)).toBe(true);
+    expect(samples.some((s) => (s.totalInScope ?? 0) >= 100)).toBe(true);
+
+    const calibrated = calibrateRecallFootprint(samples);
+    if (calibrated.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(calibrated.origin.borrowedFromDefault).toEqual([]);
+
+    // 較正した digest 長は、実際に固定した DIGEST_LEN と一致するはず——
+    // 構造項を正しく差し引けていれば、桁上がりに惑わされず真の傾きが出る。
+    expect(calibrated.charsPerDigest).toBeCloseTo(DIGEST_LEN, 6);
+
+    // held-out: CLEAN_SCENARIOS(帯ありを含む)の実測と、この較正済みプロファイルの
+    // 見積もりが一致することを確認する。
+    for (const sc of CLEAN_SCENARIOS) {
+      const result = await recallFor(sc);
+      const est = estimateRecallFootprint(
+        { memoryCountInScope: sc.count, limit: sc.limit, digestBandLimit: sc.digestBandLimit },
+        calibrated,
+      );
+      expect(est.chars, `scenario=${sc.name}`).toBeCloseTo(result.usage.chars, 6);
+    }
   });
 });
