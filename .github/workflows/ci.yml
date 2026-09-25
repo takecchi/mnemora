@@ -1068,6 +1068,110 @@ jobs:
           path: ${{ github.workspace }}/identifier-probe.json
           if-no-files-found: ignore
 
+  numeral-token-probes:
+    name: "単独トークンの数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測し、値を残す"
+    runs-on: ubuntu-latest
+    # ADR 0135 §8-3。`identifier-probes` ジョブと**同じ形**（実測値を Job Summary へ残す・
+    # 落とすのは bench 自体が壊れたときだけ）を踏襲する——**別の probe 集合・別の arm
+    # 実行・別の JSON・別の基準値ファイル**であり、`identifier-probes` ジョブ自体には
+    # 1文字も触れていない。
+    #
+    # ⚠ **なぜ閾値の門にしないか**: `identifier-probes` と同じ理由——この bench の
+    # probe は18件であり、ADR 0033 §3 の規律に照らして統計的な閾値判定に足る母数では
+    # ない（ADR 0135 §4-8）。
+    #
+    # 🔴 **ただし「重みを取得できなかった」ときは、このジョブ自体を意図して失敗させる**
+    # ——`identifier-probes` ジョブと同じ仕様（`warmup()` が失敗したらメトリクスを1件も
+    # 出さずに `process.exitCode = 1` で終わる）。measure ステップが失敗しても、
+    # 後続の summary/artifact ステップは `if: always()` で必ず走る。
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
+      # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
+      # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
+        run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（identifier-probes と同じ手順）"
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: "モデル重みをキャッシュする（identifier-probes と同じ key を共有する）"
+        # 🔴 **`identifier-probes` ジョブが使うキャッシュキー空間をそのまま共有する**
+        # ——同じモデル `sirasagi62/ruri-v3-30m-ONNX` を使うため分ける理由が無い
+        # （`consolidation-cost`/`archive-sweep-cost` ジョブの先例と同じ判断）。
+        # ⚠ **ジョブをまたいで共有されるので、`identifier-probes` が先に走って作った
+        # キャッシュをこのジョブが再利用できる**（逆方向も同様）。
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
+
+      - name: 数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測する
+        # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` ジョブと同じ規律。
+        env:
+          MNEMORA_NUMERAL_TOKEN_JSON: ${{ github.workspace }}/numeral-token-probe.json
+          MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+        run: pnpm --filter @mnemora/example-chat run numeral-token-probes
+
+      - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
+        # `identifier-probes` ジョブと同じ規律——このステップは常に走る（`if: always()`）。
+        # `numeral-token-probe-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
+        # 非0で終わる。相違しても exit 0（⛔ 門ではない）。
+        if: always()
+        run: |
+          node scripts/numeral-token-probe-summary.mjs \
+            --measured "${{ github.workspace }}/numeral-token-probe.json" \
+            --baseline examples/chat/numeral-token-probe-baseline.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: numeral-token-probe
+          path: ${{ github.workspace }}/numeral-token-probe.json
+          if-no-files-found: ignore
+
   association-probes:
     name: "連想枠（ADR 0151 / Issue #291）が想起の質を動かすかを @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
