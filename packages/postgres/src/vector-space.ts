@@ -42,6 +42,27 @@ import {
  */
 export const REGISTER_EMBEDDING_SPACE_LOCK_KEY = -4359922960011245935n;
 
+/**
+ * pgvector の hnsw 索引が `vector` 型に対して受け付ける次元数の上限（ADR 0018 C-2 →
+ * Issue #776 で直した）。
+ *
+ * **出典**:
+ * - pgvector の README（`vector` 型に対する HNSW 索引の節）: "up to 2,000 dimensions"
+ *   （`halfvec` は 4,000、`sparsevec` は 1,000 と別の上限を持つが、`registerEmbeddingSpace`
+ *   が発行する DDL は常に `vector` 型・`hnsw` 索引で、分岐は無い——下の `CREATE TABLE` /
+ *   `CREATE INDEX ... USING hnsw` を参照。この上限がそのまま当たる）。
+ * - 実測（手元の pgvector 0.8.0、ADR 0018 C-2 追記と同じ形）: `dimensions=2000` は
+ *   `CREATE TABLE` / `CREATE INDEX ... USING hnsw` とも成功し、`dimensions=2001` は
+ *   索引作成が `54000`（"column cannot have more than 2000 dimensions for hnsw index"）
+ *   で失敗する（`__tests__/vector-space-dimensions-limit.test.ts` が固定）。
+ *
+ * **この値は pgvector 側のコンパイル時定数に由来し、mnemora の `main` が動いても変わらない**
+ * ——AGENTS.md「数を、道具と生成物に焼き込まない」の対象外（`embedding-space-table.ts` の
+ * `MAX_IDENTIFIER_BYTES`、PostgreSQL の `NAMEDATALEN` 由来の定数と同じ形）。将来 pgvector が
+ * この上限を変えたら、実測し直してここを直すこと。
+ */
+const HNSW_VECTOR_INDEX_MAX_DIMENSIONS = 2000;
+
 export interface RegisterEmbeddingSpaceOptions extends SchemaNamespaceOptions {
   /** advisory lock を待つ上限（ミリ秒）。既定は {@link DEFAULT_LOCK_TIMEOUT_MS}。 */
   lockTimeoutMs?: number;
@@ -174,6 +195,17 @@ export async function registerEmbeddingSpace(
 ): Promise<RegisterEmbeddingSpaceResult> {
   if (!Number.isInteger(space.dimensions) || space.dimensions <= 0) {
     throw new Error(`invalid embedding space dimensions: ${space.dimensions}`);
+  }
+  // ADR 0018 C-2: pgvector の hnsw 索引は vector 型に対して2000次元までしか受け付けない
+  // （HNSW_VECTOR_INDEX_MAX_DIMENSIONS のコメントに出典）。テーブルを作る前に、この上限を
+  // ロック取得より前で検査して拒否する——検査しないと、テーブルだけ作られて索引作成が
+  // `54000` で落ち、テーブルが残ったまま失敗する（ADR 0018 C-2 が N=1 で実測済み）。
+  if (space.dimensions > HNSW_VECTOR_INDEX_MAX_DIMENSIONS) {
+    throw new Error(
+      `invalid embedding space dimensions: ${space.dimensions} ` +
+        `(pgvector の hnsw 索引は vector 型に対して最大 ${HNSW_VECTOR_INDEX_MAX_DIMENSIONS} ` +
+        `次元までしか受け付けない。テーブルは作成していない)`,
+    );
   }
 
   const { schema } = options;
