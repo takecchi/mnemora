@@ -985,11 +985,13 @@ export interface RecallUsage {
      * 加算するものではない——「呼び手が連想で何文字増えたか」を見られるようにするための
      * 内訳の欄である。
      *
-     * **存在条件は `RecallQuery.association` を渡したかどうか**（`share`/`budgetExceeded`
-     * と同じ規約——申告されていなければ欄自体が無い）。`association` を渡さない
-     * 呼び出しではこの欄が無いままなので、`byTier` の形は1バイトも変わらない
-     * （既定 off の証明そのもの）。渡していれば、連想が実際には0件だった run でも
-     * `0` として現れる——「連想を走らせたが0件だった」と「連想を走らせなかった」を
+     * **存在条件は「連想枠を実際に走らせたか」**（[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)
+     * で既定 on になったため、`RecallQuery.association` を渡したかどうかとは**もう
+     * 一致しない**）。連想は既定で走るので、**`association` を省略した通常の呼び出しでも
+     * この欄は在る。**欄が無いのは `RecallQuery.association: null` を明示して連想を
+     * 止めた呼び出しだけである——`byTier` の形が変わらないのは、今度は明示的な
+     * opt-out 側になる。連想が実際には0件だった run でも `0` として現れる——
+     * 「連想を走らせたが0件だった」と「連想を走らせなかった（= `null` で止めた）」を
      * 同じ顔にしない、という `docs/recall.md` の原則をここでも守る。
      */
     association?: number;
@@ -1203,7 +1205,10 @@ export interface RecalledMemory {
    *
    * **`"association"`（Issue #200）は「クエリに直接は当たらなかったが、クエリで
    * 引けた記憶（アンカー）の近傍として引いた」候補**（北極星「聞かれていないことを、
-   * 自分から思い出す」）。`query.association` を渡したときだけ現れる（既定 off）。
+   * 自分から思い出す」）。**既定 on**（[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)、
+   * ⛔ オーナーの回答待ちの提案）——`query.association` を省略した呼び出しでも
+   * {@link DEFAULT_RECALL_ASSOCIATION} で現れる。`query.association: null` を
+   * 明示した呼び出しでは一度も現れない。
    * `recall-runtime.ts` の段3.5、`VectorStore.getVectors`（任意メソッド）を参照。
    *
    * **⚠ 公開 API の破壊的変更である**——この union を網羅的に `switch` している
@@ -1627,11 +1632,20 @@ export interface RecallQuery {
   /**
    * **連想枠（Issue #200、北極星「聞かれていないことを、自分から思い出す」）。**
    *
-   * **省略時は連想を一切走らせない**（既定 off）——`association` を渡さない呼び出しの
-   * 結果は1バイトも変わらない（歯: `packages/core/src/__tests__/recall-association.test.ts`）。
+   * **既定 on**（[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
+   * ADR 0151 が選んだ既定 off から反転する提案。⛔ **オーナーの回答（ask_human ac5953d1）
+   * 待ちの draft であり、まだ採用されていない**）——**省略すると
+   * {@link DEFAULT_RECALL_ASSOCIATION} が適用される。**明示的に off にしたいときは
+   * **`null` を渡す**（`undefined` ＝省略、とは別の状態として区別する）。`null` を渡した
+   * 呼び出しでは連想は一切走らず、`RecallUsage.byTier.association` も現れない——
+   * ADR 0151 以前の挙動そのものに戻る（歯: `packages/core/src/__tests__/recall-association.test.ts`）。
+   *
+   * ⚠ **`DEFAULT_RECALL_ASSOCIATION.maxCount` はいまの時点で最も根拠のある仮値であって、
+   * 確定値ではない。**根拠・値を変えるときに直す箇所は ADR 0335「これが覆るとしたら」を参照。
+   *
    * 詳細は {@link RecallAssociationQuery} と `recall-runtime.ts` の段3.5の doc を参照。
    */
-  association?: RecallAssociationQuery;
+  association?: RecallAssociationQuery | null;
   /**
    * **`ctx.subjectId` の等値絞りを、明示的な `null`（主題なし）まで広げる opt-in**
    * （Issue #608 項目③(b)、[ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
@@ -1746,8 +1760,13 @@ export const DEFAULT_SCORE_THRESHOLD = 0.1;
 // ---------------------------------------------------------------------------
 
 /**
- * `RecallQuery.association` の入力。**任意フィールド。省略時は連想を一切走らせない
- * （既定 off——北極星の問い2「これを無効にしても Memory Framework として成立するか」）。**
+ * `RecallQuery.association` の入力。**省略すると {@link DEFAULT_RECALL_ASSOCIATION} が
+ * 適用される（既定 on。[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
+ * ⛔ オーナーの回答待ちの提案——まだ採用されていない）。
+ * 一切走らせたくないときは `RecallQuery.association: null` を渡す**——北極星の問い2
+ * 「これを無効にしても Memory Framework として成立するか」は、`null` という明示の
+ * opt-out が型の上に在ることで担保する（既定 off で担保していた ADR 0151 から、
+ * 担保する手段だけを乗り換える）。
  *
  * 「何が似ているか」を新しく定義しない——ANN が既に使っているコサイン類似度そのものを、
  * クエリの代わりにアンカー（クエリで引けた記憶）を起点に使うだけである
@@ -1821,6 +1840,36 @@ export const DEFAULT_ASSOCIATION_ANCHOR_COUNT = 3;
  */
 export const DEFAULT_ASSOCIATION_MIN_SIMILARITY = 0.5;
 
+/**
+ * `RecallQuery.association` を省略したときに適用される既定値
+ * （[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)。
+ * ADR 0151 の既定 off から反転する提案。⛔ **オーナーの回答（ask_human ac5953d1）待ちの
+ * draft であり、まだ採用されていない**）。
+ *
+ * ⛔⛔ **`maxCount: 10` は根拠のある選択ではない、いまの時点の仮値である。**
+ * `examples/chat` の `association-probes` ベンチの実測（ADR 0168、Issue #291 の
+ * 2026-09-16 コメント）では、`haystackSize=62`（HNSW 未使用の小規模）で
+ * `maxCount=10` のとき gold 到達 **12/12**（費用 `memoryChars` **+4.32%**）だった。
+ * **[Issue #337](https://github.com/takecchi/mnemora/issues/337) はこの値を10万行級で
+ * 測ってから既定 on を判断するようオーナーが指示しており、この issue はまだ OPEN
+ * である。**[ADR 0332](../../../docs/decisions/0332-association-default-100k-measurement.md)
+ * が10万行級の実測を行ったが、状態は「提案」のままで、判断は下していない
+ * （追記(2)は、規模による到達の低下がベンチの base 挿入位置の産物である可能性を
+ * 示したが、確定はしていない）。**⟹ 実運用の分布で見直すべき値であり、勘で変えない。**
+ *
+ * **`examples/chat` はこの定数を継がない**——`examples/chat/src/mnemora-path.ts` の
+ * `DEFAULT_MNEMORA_PATH_ASSOCIATION` は同じ値 `{ maxCount: 10 }` を独自に持つ
+ * （ADR 0168）。値が同じなので挙動は変わらないが、**どちらかを直したら他方も直すか
+ * 検討すること**——ADR 0335「examples/chat の独自既定を維持した理由」参照。
+ *
+ * **この値を変えるときは、この1箇所を直せば済む**——`anchorCount`/`minSimilarity` は
+ * 個別の既定（{@link DEFAULT_ASSOCIATION_ANCHOR_COUNT}/
+ * {@link DEFAULT_ASSOCIATION_MIN_SIMILARITY}）に委ね、ここでは上書きしない。
+ */
+export const DEFAULT_RECALL_ASSOCIATION: RecallAssociationQuery = {
+  maxCount: 10,
+};
+
 /** RecallQuery.limit の既定値。 */
 export const DEFAULT_RECALL_LIMIT = 10;
 
@@ -1845,7 +1894,10 @@ export const RecallQuerySchema = z.object({
   includeFullyDecayed: z.boolean().optional(),
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),
-  association: RecallAssociationQuerySchema.optional(),
+  // .nullable() は明示的な off（ADR 0335）。.optional() は省略——省略時は
+  // recall-runtime.ts が DEFAULT_RECALL_ASSOCIATION を適用する。zod で null と
+  // undefined を区別できることは歯（recall-association.test.ts）で固定してある。
+  association: RecallAssociationQuerySchema.nullable().optional(),
   includeSubjectless: z.boolean().optional(),
   // 一覧を書き写さない——TIME_WEIGHTING_POLICIES から導く（Issue #690、ADR 0300）。
   timeWeighting: z.enum(TIME_WEIGHTING_POLICIES).optional(),

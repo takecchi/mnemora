@@ -46,8 +46,24 @@ import type { RecallResult } from "./recall.js";
  *
  * **同じ理由で、連想枠（`RecallQuery.association`、ADR 0151）が実際に何件を
  * 本体へ昇格させるかも、`packages/core` は知りようがない**（ADR 0166）——
- * `RecallFootprintShape.associationCount` として引数で受け取る。省略すれば
- * 連想枠を使わない呼び出しと1バイトも変わらない。
+ * `RecallFootprintShape.associationCount` として引数で受け取る。
+ *
+ * ⚠⚠ **[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)
+ * （⛔ オーナーの回答待ちの提案）が `recall()` 自身の連想枠の既定を on にしても、
+ * この関数の `associationCount` の既定は `0` のまま据え置く（下の doc コメント参照）。**
+ * 理由——`maxCount` は連想枠が**試みる上限**であって、**実際に何件が本体へ昇格するか**
+ * （ANN の近傍分布・`minSimilarity` の閾値に依存する、上のパラグラフの前提そのもの）とは
+ * 無関係である。`maxCount` をそのまま `associationCount` の既定に流用すると、
+ * 「呼び出し側にしか無い値」を `packages/core` が代わりに推測することになり、
+ * この節が最初に立てた原則（ここで推定しない）を自ら破る。**⟹ `RecallQuery.association`
+ * を省略した（＝ ADR 0335 が採用された場合、連想枠が既定 on で走る）呼び出しについて、
+ * `associationCount` も同時に省略すると、この関数の見積もりは実際の `recall()` の出力を
+ * 体系的に過小評価する**（北極星「目指す姿」6本目「知らないことを、知らないと言える」に
+ * 照らすと、この過小評価は「探していない」を「見つからなかった」と同じ顔で返す形に近い）。
+ * 正確に見積もりたい呼び出し側は、`footprintSampleFromRecall` による較正か、過去の実測
+ * （例: `association-probes` ベンチ・ADR 0168。`maxCount=10` でスコープ内から実際に
+ * 昇格する件数は12件の probe で0〜10件、単調ではない）から見積もった値を明示的に渡すこと。
+ * 詳細と、この判断の理由・危険は ADR 0335 を参照。
  */
 
 // ---------------------------------------------------------------------------
@@ -420,8 +436,7 @@ export interface RecallFootprintShape {
   digestBandLimit?: number;
   /**
    * 連想枠（`RecallQuery.association`、ADR 0151）が実際に **本体（memories tier）へ
-   * 昇格させると見込む件数**。省略時は `0`（＝連想枠を一切使わない、これまでの呼び出しと
-   * 1バイトも変わらない。ADR 0166「後方互換」）。
+   * 昇格させると見込む件数**。省略時は `0`。
    *
    * ⚠⚠ **これは `association.maxCount` ではない。**`packages/core` は「連想枠が実際に
    * 何件を本体へ昇格させるか」を `memoryCountInScope` や `maxCount` だけから知りようがない
@@ -431,6 +446,17 @@ export interface RecallFootprintShape {
    * が「呼び出し側にしか無い値」として引数で渡されるのと同じ理由付けである
    * ——ここで推定しない。呼び出し側が実測（`footprintSampleFromRecall` を使った較正）
    * か、過去の実測から見積もった値を持っているときだけ渡すこと。
+   *
+   * ⚠⚠ **[ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)
+   * （⛔ オーナーの回答待ちの提案）が `recall()` 自身の連想枠の既定を on にする場合、
+   * 「省略時は `0`」は「連想枠を一切使わない呼び出しと1バイトも変わらない」ことを
+   * **もう意味しなくなる**——`recall()` 自身の連想枠の既定が on になると、
+   * `RecallQuery.association` を省略した通常の呼び出しでも連想は走る。**この既定
+   * （`0`）は意図して据え置く**（ADR 0166 以前の値のまま、`DEFAULT_RECALL_ASSOCIATION`
+   * には連動させない）。⟹ `associationCount` を渡さずに見積もると、
+   * `RecallQuery.association: null` で明示的に止めた場合を除き、**見積もりは実際より
+   * 小さく出る**（構造上の上限で切り詰められるため過大評価にはならない。過小評価に
+   * のみ倒れる）。据え置く理由と、この過小評価の危険は ADR 0335 に書いてある。
    *
    * **構造上の上限**: `memoryCountInScope - min(limit, memoryCountInScope)`
    * （＝ `limit` の外に居る候補の総数）を超える分は、渡しても切り詰められる
