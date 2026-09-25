@@ -68,21 +68,40 @@
 
 ### Issue #152/#153（呼び手の属性）とは別設計 ⟹ 混ぜない
 
-【受】[Issue #152 のコメント](https://github.com/takecchi/mnemora/issues/152#issuecomment)
-で確定した設計は「案A: 呼び手専用の別列 `attributes?: Record<string, string>`」であり、
-**mnemora はその値を解釈しない**（フィルタにも加点にも使わない、語彙登録の対象にしない）。
+**⚠ 2026-09-25 訂正・拡充**: 本節は当初【受】として「`attributes` はフィルタにも加点にも
+使わない」と書いていたが、これは PR #724（Issue #152/#153、`packages/core/src/attributes.ts`、
+本稿執筆時点ではまだ `main` に未着地）の確定した設計と食い違っていた——PR #724 の
+[ADR（`docs/decisions/0310-observe-recall-caller-attributes.md`、PR #724 のブランチ上）]
+(https://github.com/takecchi/mnemora/pull/724) 決定5は、**`attributes` を段1（ANN・語彙・
+連想の3チャンネル）へ AND 等値の絞り込みとして押し下げる**——「フィルタに使わない」は
+誤りだった。本節はその訂正を反映する（本 ADR 自身がまだ採用前の初稿であるため、
+書き換えて良い——ADR 0223 決定1「まだ採用されていない初稿はこの限りではない」）。
 
-**本 ADR のラベルは違う概念である**:
+PR #724 の決定8が確定した3本の役割分担の表（逐語ではなく本 ADR の言葉で写す。
+`tags`/`labels` の記述は本 ADR の決定と一致することを確認済み）:
 
-| | `labels`（本 ADR） | `attributes`（#152/#153） |
-|---|---|---|
-| 出所 | `memories.tags`（呼び手が渡す） | 呼び手が渡す別の入力 |
-| 誰が解釈するか | **mnemora 自身**（`registered`/`proposed` の語彙状態を持つ） | **mnemora は解釈しない** |
-| 検索への関与 | tagMatch 加点（既存、Phase 1）、将来はラベルでの絞り込み（PR-B） | 無し（呼び手が読み戻すだけ） |
-| 語彙登録の対象か | **はい**（`registerLabel?` で `registered` へ昇格） | いいえ |
+| 軸 | 何を入れるか | 誰が値を決めるか | 段1（候補生成）に参加するか |
+|---|---|---|---|
+| `tags`（Phase 1、既存） | 話題・内容の要約 | **100% LLM の推論**（抽出プロンプトは語彙・粒度を指示しない） | ⛔ しない（段2の加点のみ、`tagMatch`） |
+| `attributes`（PR #724、Issue #152/#153） | 公開範囲・区分などの**宣言された属性** | **100% 呼び手の申告**。mnemora は値の意味を解釈しない | ⭕ する（AND 等値の絞り込み。`RecallQuery.attributes?`） |
+| `labels`/`memory_labels`（本 ADR、Issue #201） | **統制語彙**（テナントが登録した語彙に `tags` が当たるかどうか） | **repo（スキーマ）が定める状態（`registered`/`proposed`）に、既存の `tags` の値が当たる** | PR-A（本 PR）は不参加。PR-B で「ラベルでの絞り込み」を足す予定（strict/open の分岐はここにだけ効く。「決定5」参照） |
 
-⟹ **ラベルは `attributes` から作らない。`attributes` は語彙登録の対象にしない。** 2つの
-機構は保存先も意味論も独立している——同じ PR・同じテーブルに混ぜない。
+⟹ **3本とも「誰が値を決めるか」が違う——LLM の推論（`tags`）／呼び手の申告
+（`attributes`）／repo が定める統制語彙への適合（`labels`）。統合すると、この区別
+（北極星の問い4「AI の推論と、ユーザーが言った事実を、区別しているか」）を捨てることに
+なる。** ⟹ **ラベルは `attributes` から作らない**（`attributes` は 100% 呼び手申告であり
+LLM の推論ではないため、taxonomy の語彙登録が想定する「テナントが `tags` の語彙に対して
+`registered`/`proposed` を決める」という枠に馴染まない）。**`attributes` は語彙登録の
+対象にしない**（`registerLabel?` は `labels` テーブルのみを操作し、`attributes` を
+読み書きしない）。2つの機構は保存先・migration・検索への関与のしかたが全部独立している
+——同じ PR・同じテーブルに混ぜない。
+
+**PR 間の整合について（マネージャー指示、2026-09-25）**: PR #724 が `main` へ着地した後、
+本 PR は `main` を取り込んで migration 番号（`0019` は PR #724 が
+`observations_memories_attributes` として使用済みのため、本 PR の migration は
+`0020_taxonomy_labels.sql` へ付け替えた）と ADR 番号を再度確認する。`docs/memory-model.md`
+§8 に PR #724 が同じ3本の役割分担の表を追記する見込みであり、本 PR がそこへ重複した
+表を追記しないよう、取り込み時に突き合わせて調整する（下記「決定7」参照）。
 
 ### ADR 0289 が確立した「任意の追加は非破壊」という数え方を踏む
 
@@ -100,7 +119,7 @@ ADR 0100 決定1・ADR 0165 決めたこと13 が繰り返し確立した理由�
 
 ## 決定
 
-### 1. migration `0019_taxonomy_labels.sql` — `docs/memory-model.md` §8 の SQL 案をそのまま採用
+### 1. migration `0020_taxonomy_labels.sql` — `docs/memory-model.md` §8 の SQL 案をそのまま採用
 
 `labels`（`id`/`tenant_id`/`name`/`status`/`proposed_count`/`registered_at`/`created_at`、
 `UNIQUE (tenant_id, name)`）と `memory_labels`（`tenant_id`/`memory_id`/`label_id`、
@@ -132,7 +151,7 @@ tenant-x に4件の Memory: tags=[alpha,beta] / [alpha] / [alpha,alpha,gamma] / 
 **⚠ `proposed_count` は同一 Memory 内の重複タグを潰さずに数える**（`unnest` が展開した
 ままを `count(*)` する）。書き込み経路（下記「決定2」）は `Set` で1 Memory あたり1回に
 潰して数えるため、**backfill とその後の増分で数え方が完全には一致しない**——起動時点の
-近似値を揃えるだけであり、厳密な一意カウントを契約しない（`0019_taxonomy_labels.sql`
+近似値を揃えるだけであり、厳密な一意カウントを契約しない（`0020_taxonomy_labels.sql`
 本文と `LabelSummary.proposedCount` の doc コメントに明記した）。
 
 ### 2. 書き込み経路 — 新しい interface メソッドを増やさず、既存3メソッドの内部実装に足す
@@ -459,7 +478,7 @@ $ pnpm --filter @mnemora/core exec vitest run
 
 `labels`/`memory_labels`/`memories` を `TRUNCATE` した上で、`tags` を持つ Memory 4件
 （うち1件は空配列、1件は同一タグの重複あり）を生 SQL で直接挿入し、
-`0019_taxonomy_labels.sql` の backfill 部分の SQL をそのまま実行:
+`0020_taxonomy_labels.sql` の backfill 部分の SQL をそのまま実行:
 
 ```
 tenant-x: alpha(proposed_count=4) / beta(1) / gamma(1)、memory_labels 5行

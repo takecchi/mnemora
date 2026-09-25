@@ -1,4 +1,4 @@
--- 0019_taxonomy_labels.sql
+-- 0020_taxonomy_labels.sql
 --
 -- Issue #201 / ADR 0310（案(1)）: taxonomy の語彙管理（labels / memory_labels）を
 -- Phase 2 の予定から、任意の追加として前倒しで実装する PR-A。

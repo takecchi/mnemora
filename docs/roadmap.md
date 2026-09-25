@@ -165,7 +165,7 @@ Phase 1 で入れた土台が、後続フェーズをどう安くしているか
 されている」は、この PR 以前は成り立っていなかった。** `labels`/`memory_labels`
 テーブル自体が存在せず（`0001_init.sql:6`「Phase 2 のテーブルはここに含めない」）、
 `tags` を書いても `proposed` ラベルとして記録される先が無かった。**本 PR
-（migration `0019_taxonomy_labels.sql`）が `labels`/`memory_labels` を実装し、
+（migration `0020_taxonomy_labels.sql`）が `labels`/`memory_labels` を実装し、
 既存 `memories.tags` からの backfill も行ったことで、初めてこの一文が成り立つ。**
 `taxonomy` の語彙登録・昇格フロー自体（`registered`/`proposed` の状態遷移、
 `MemoryStore.listLabels?`/`registerLabel?`）はこの PR で実装済みだが、**digest 帯・

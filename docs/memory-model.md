@@ -537,7 +537,7 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
   `labels` テーブルによる語彙管理が Phase 2 であることは別の軸であり、混同しない。
 
 **⚠ 2026-09-25 追記（Issue #201 PR-A、[ADR 0310](./decisions/0310-taxonomy-labels.md)）:
-`labels`/`memory_labels` を任意の追加として前倒しで実装した。** `migrations/0019_taxonomy_labels.sql`
+`labels`/`memory_labels` を任意の追加として前倒しで実装した。** `migrations/0020_taxonomy_labels.sql`
 がこの節の SQL 案をほぼそのまま実装し、既存 `memories.tags` からの backfill も含む。
 `MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・
 `registered` への昇格ができ、`TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?`
@@ -552,6 +552,15 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 `strict` が実際に効くのは、labels を使った**新しい**絞り込み（PR-B、まだ実装していない）
 に対してだけになる予定である。**この段落は上の「決定」本文を書き換えるものではなく、
 実装が進んだことで判明した訂正である**（この文書自身の「訂正は追記する」規律どおり）。
+
+**`attributes`（PR #724、Issue #152/#153）との境界**: `labels` とは別の軸である。
+`attributes` は呼び手が申告する値（mnemora は意味を解釈しない）で、`recall()` の段1へ
+AND 等値で絞り込める。`labels` は `tags`（LLM の推論）に対してテナントが定める統制語彙
+（`registered`/`proposed`）である。「誰が値を決めるか」で3本（`tags`/`attributes`/
+`labels`）の役割が分かれる——詳細な対比表は
+[ADR 0310（本 ADR、taxonomy labels）](./decisions/0310-taxonomy-labels.md)「文脈」節、
+および PR #724 の ADR に置いた（PR #724 は本稿執筆時点でまだ `main` に未着地——
+着地後にこの節へ表を統合するかは、着地時の突き合わせで判断する）。
 
 ---
 
