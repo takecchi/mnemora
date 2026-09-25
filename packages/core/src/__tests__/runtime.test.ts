@@ -2828,6 +2828,112 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
   });
 });
 
+describe("observe: claimKey knownSubjects は subjectCandidates を既定値に転用する（Issue #372負債6、ADR 0333）", () => {
+  /**
+   * ⚠ ADR 0333「採らなかった案」: `knownPredicatesFromStore` と対になる
+   * `knownSubjectsFromStore`（store が自己蓄積した claim key subject を語彙ヒントに
+   * 動的に足す版）は実装していない——store 分は LLM が自由記述で作った曖昧な値
+   * （例: `'sibling'`）になりがちで、それを汎用語彙として横流しすると無関係な話題の
+   * 主張にまで誤って使い回される汚染を実測で確認したため（`claim-key.ts` の
+   * `ClaimKeyOptions.knownSubjects` doc コメント、ADR 0333 決定3参照）。この describe
+   * が検査するのは、代わりに採用した「呼び出し側が明示的に渡した `subjectCandidates`
+   * （Issue #608 項目②(b)）を、`knownSubjects` の既定値として転用する」経路である。
+   */
+
+  it("knownSubjects も subjectCandidates も渡さなければ、system に既知の subject 候補一覧の文言が無い", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      claimKey: { enabled: true },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).not.toContain("既知の subject 候補一覧");
+  });
+
+  it("claimKeyOptions.knownSubjects を渡すと、その語彙が system へ足される", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      claimKey: { enabled: true, knownSubjects: ["user", "姉"] },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).toContain("既知の subject 候補一覧: user, 姉。");
+  });
+
+  it("claimKeyOptions.knownSubjects を省略し、subjectCandidates を渡すと、それが knownSubjects の既定値として使われる", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      subjectCandidates: ["user", "姉", "同僚"],
+      claimKey: { enabled: true },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).toContain("既知の subject 候補一覧: user, 姉, 同僚。");
+  });
+
+  it("claimKeyOptions.knownSubjects と subjectCandidates の両方を渡すと、knownSubjects が優先され subjectCandidates は使われない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      subjectCandidates: ["user", "ignored_candidate"],
+      claimKey: { enabled: true, knownSubjects: ["user", "姉"] },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    const system = claimKeyCall.prompt.system as string;
+    expect(system).toContain("既知の subject 候補一覧: user, 姉。");
+    expect(system).not.toContain("ignored_candidate");
+  });
+
+  it("subjectCandidates が空配列なら、knownSubjects の既定値としても『渡していない』と同じ", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      subjectCandidates: [],
+      claimKey: { enabled: true },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).not.toContain("既知の subject 候補一覧");
+  });
+
+  it("候補が0件なら、subjectCandidates を渡していても claim key 派生自体が呼ばれない（+0回、既存の「候補0件」規約のまま）", async () => {
+    const llm = sequencedLlm([{ memories: [] }]);
+    const { runtime } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "何も記憶に値しない発話",
+      subjectCandidates: ["user", "姉"],
+      claimKey: { enabled: true },
+    });
+    expect(result.memoryIds).toEqual([]);
+    expect(llm.calls.length).toBe(1);
+  });
+});
+
 describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2・決定4）", () => {
   /**
    * `stores.memoryStore.findActiveByClaimKey` の呼び出し回数を数える薄いラッパーを
