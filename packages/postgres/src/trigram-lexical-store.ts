@@ -6,7 +6,7 @@ import type { Db } from "./client.js";
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
  * [ADR 0149](../../../docs/decisions/0149-japanese-lexical-no-required-extension.md) §6、
- * ADR 0317）。
+ * ADR 0319）。
  *
  * ⚠ **この ADR/実装はクローン miku の判断であり、オーナー本人の判断ではない**
  * （[ADR 0220](../../../docs/decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
@@ -33,7 +33,7 @@ import type { Db } from "./client.js";
  * いない。切り出すと `lexical-store.ts` の diff が増え、⛔「既定の実装を変えない」の
  * 確認コストが上がる（実際に挙動が変わっていないことをレビューする面積が広がる）。
  * **この PR ではファイルを触らない方を優先し、フィルタ条件を複製した。**
- * 複製の負債（両者が将来ずれる可能性）は引き受けた——ADR 0317「引き受けた負債」参照。
+ * 複製の負債（両者が将来ずれる可能性）は引き受けた——ADR 0319「引き受けた負債」参照。
  *
  * ## ASCII 部分の意味論（`buildLexicalSearchSelect` と同じ）
  *
@@ -122,7 +122,7 @@ import type { Db } from "./client.js";
  * **⟹ この実測4件だけを見れば、閾値 0.3 は target を通し noise を通さない。**
  * {@link DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD} をこの値にした根拠はこれだけであり、
  * **サンプル数は小さい（人手で作った4文+7 probe）。** 一般化を主張しない
- * （ADR 0317「確かめていないこと」参照）。
+ * （ADR 0319「確かめていないこと」参照）。
  *
  * ### ⚠ この緩和策は retrieval-quality の probe set をほぼ素通りする
  *
@@ -135,7 +135,7 @@ import type { Db } from "./client.js";
  * この trigram チャンネルにも及ぶ）。**`color` 1件は fact/distractor の両方が「色」を
  * 含むため、coverage が同点になり、順位を決めるのは decay/freshness だけになる**
  * （ADR 0084 §5.1/§8 が ASCII 語彙で警告した「低選択率」と同じ形の負債）。
- * 詳細な数字は ADR 0317 §測定を見ること。
+ * 詳細な数字は ADR 0319 §測定を見ること。
  *
  * ## 静かな0件を潰す — {@link probeTrigramLexicalSupport}
  *
@@ -395,7 +395,7 @@ export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
  * `EXPLAIN` すると、`Bitmap Index Scan` が選ばれることを確認した（`tenant_id`/`content`
  * の両方が `Index Cond` に入る）。**索引が無い場合との実行時間の比較（`EXPLAIN ANALYZE`）は
  * 測っていない**——プランがビットマップ索引スキャンに変わることまでは実測したが、
- * 秒単位の速度差は確かめていない（ADR 0317「確かめていないこと」）。
+ * 秒単位の速度差は確かめていない（ADR 0319「確かめていないこと」）。
  *
  * `CONCURRENTLY` は付けない——`packages/postgres` の migration がトランザクション内で
  * 各ファイルを実行するのと同じ理由がここにも当たる可能性があるため、呼び出し側が

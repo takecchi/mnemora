@@ -13,7 +13,7 @@ import {
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * `PostgresTrigramLexicalStore`（Issue #278、ADR 0317）の DB 段の歯。
+ * `PostgresTrigramLexicalStore`（Issue #278、ADR 0319）の DB 段の歯。
  *
  * **⚠ この歯は `server_encoding` に依って前提が変わる**
  * （[ADR 0103](../../../docs/decisions/0103-negative-tooth-declares-its-precondition.md)の
@@ -37,12 +37,12 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * 自己一致検査が 0 になり `locale_no_japanese_trigrams` で弾かれる
  * （[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §3.2 の「`C`
  * ロケールで黙って0件になる」の再現）。CI の2脚には無い regime のため、この
- * postgres.test.ts には歯を足していない——ADR 0317「測定」節に手順を書いてある。
+ * postgres.test.ts には歯を足していない——ADR 0319「測定」節に手順を書いてある。
  */
 
 const TENANT = "trigram-lexical-tenant";
 
-describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278, ADR 0317)", () => {
+describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278, ADR 0319)", () => {
   beforeEach(async () => {
     await resetTestDatabase();
   });
@@ -227,7 +227,7 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
       });
 
       // 閾値0なら「田中さん」を含まない一般的な日本語文もノイズとして拾ってしまう
-      // （このファイル冒頭で参照している ADR 0317 の実測どおり）。既定の閾値では拾わない。
+      // （このファイル冒頭で参照している ADR 0319 の実測どおり）。既定の閾値では拾わない。
       expect(permissiveHits.length).toBeGreaterThan(defaultHits.length);
     } else {
       expect(probe.reason).toBe("server_encoding_not_utf8");

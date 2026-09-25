@@ -24,7 +24,7 @@ const LEXICAL_STORE_MODES = ["default", "trigram"] as const;
 export type LexicalStoreMode = (typeof LEXICAL_STORE_MODES)[number];
 
 /**
- * `MNEMORA_LEXICAL_STORE` を読む（Issue #278, ADR 0317）。**空文字・未指定は `"default"`**
+ * `MNEMORA_LEXICAL_STORE` を読む（Issue #278, ADR 0319）。**空文字・未指定は `"default"`**
  * （`selectLLMMode`/`selectEmbeddingMode`「空文字は未指定」と同じ作法、`providers.ts`）。
  *
  * ⛔ **既定を変えない**: この環境変数を一切設定しない既存の呼び出しは
@@ -52,7 +52,7 @@ export interface ExampleRuntimeHandle {
   mode: ProviderMode;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
-  /** `selectLexicalStoreMode(env)` の結果（Issue #278, ADR 0317）。既定は `"default"`。 */
+  /** `selectLexicalStoreMode(env)` の結果（Issue #278, ADR 0319）。既定は `"default"`。 */
   lexicalStoreMode: LexicalStoreMode;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
@@ -132,7 +132,7 @@ export interface ExampleRuntimeHandle {
  *   1バイトも変えない**（`RecallQuery.channels` の既定は `DEFAULT_RECALL_CHANNELS`
  *   = `["ann"]` のまま、`packages/core` 側も変更していない）。**`channels` を明示して
  *   `"lexical"` を含めた呼び出し側だけが、この配線の効果を受け取る。**
- * - **`MNEMORA_LEXICAL_STORE=trigram`（Issue #278、ADR 0317）で opt-in の
+ * - **`MNEMORA_LEXICAL_STORE=trigram`（Issue #278、ADR 0319）で opt-in の
  *   `PostgresTrigramLexicalStore` に差し替えられる**（{@link selectLexicalStoreMode}）。
  *   **未設定・空文字は今日どおり `PostgresLexicalStore`**——既定は1バイトも変わらない。
  *   `"trigram"` を指定すると `PostgresTrigramLexicalStore.create()` を呼ぶ——拡張・ロケール

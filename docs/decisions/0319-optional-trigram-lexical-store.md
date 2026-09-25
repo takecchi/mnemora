@@ -1,4 +1,4 @@
-# ADR 0317: 日本語の語彙照合を、opt-in の `PostgresTrigramLexicalStore`（pg_trgm）として足す — Issue #278 への回答
+# ADR 0319: 日本語の語彙照合を、opt-in の `PostgresTrigramLexicalStore`（pg_trgm）として足す — Issue #278 への回答
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
