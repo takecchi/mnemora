@@ -124,6 +124,21 @@ export interface RuntimeConfig {
    * 新しい payload 形は発明していない）。`tick()` はその2種を
    * `consolidate(ctx, { target: { seedMemoryId: memoryId } })` /
    * `reflect(ctx, { target: { seedMemoryId: memoryId } })` として処理する。
+   *
+   * 🔴 **`consolidate` 側だけ、渡された `ctx` そのままではない**
+   * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
+   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
+   * `processConsolidateJob` は種の Memory を読み、その `subjectId` が `null` でなければ
+   * `ctx.subjectId` をそれで置き換えてから `consolidate()` を呼ぶ——`tick()` はジョブを
+   * subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の
+   * `subjectId` が食い違うと、近傍探索（`recall()`）が種と別の subject から候補を
+   * 集めてしまい、統合後の `Memory.subjectId` が `null` に畳まれる（ADR 0310 実測）。
+   * 種の `subjectId` が `null`、または種そのものが見つからない場合は、今日どおり
+   * `tick()` に渡された `ctx` のまま呼ぶ。**`reflect` 側はこの変更の対象外**——
+   * `processReflectJob` は渡された `ctx` のまま `reflect()` を呼ぶ（ADR 0317「確かめて
+   * いないこと」）。**明示的に `runtime.consolidate(ctx, { target: { seedMemoryId } })`
+   * を呼ぶ側の挙動はこの設定と無関係に変わらない**——呼び手は自分の `ctx.subjectId` で
+   * 完全に制御できる（ADR 0310 決定2）。
    */
   autoQueueConsolidateReflectOnExtract?: boolean;
 }
@@ -2936,10 +2951,41 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 例外にしているのとは事情が違う（embed には「対象が無かった」を表す正規の結末が無い）。
    * `consolidate()` が投げるのは LLM/store が本当に失敗したときだけであり、その例外は
    * そのまま伝播させて `tick()` に `fail()` させる。
+   *
+   * **種の `subjectId` を `ctx.subjectId` に置いてから `consolidate()` を呼ぶ**
+   * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
+   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
+   * `tick()` はジョブを subject で絞って claim できない（`ClaimOutboxJobsOptions` に
+   * `subjectId` が無い）ため、`tick()` に渡された `ctx.subjectId` と種の `subjectId` が
+   * 食い違うことが、subject をまたぐ統合（`consolidate()` 内の近傍探索が種と別の subject
+   * から候補を拾い、統合後の `Memory.subjectId` が `null` に畳まれる）の主な経路だった
+   * （ADR 0310 実測）。種の `subjectId` を優先すれば、近傍探索は
+   * `recall(ctx, { text: seed.digest })` の scope が種と同じ subject に絞られ、
+   * 混在は構造的に 0% になる（ADR 0310 §「近傍探索を種の subject に絞れば 0%」）。
+   *
+   * 種が見つからない、または種の `subjectId` が `null`（帰属が割れて畳まれた統合済みの
+   * 記憶を種にした場合など）のときは、**今日どおり** `tick()` に渡された `ctx` のまま
+   * `consolidate()` を呼ぶ——ここで新しい判定を発明しない。
+   *
+   * ⚠ **`deps.memoryStore.get()` をここで1回呼ぶのは、`consolidate()` が
+   * `{ seedMemoryId }` 分岐の中でも同じ id を `get()` する（`runtime.ts` の
+   * `consolidate()` 手順1）ため、1件の自動ジョブにつき `get()` が2回になる。**
+   * わざと避けていない——`MemoryStore.get` は主キー1件の索引読みで安価であり、
+   * この経路はそもそも opt-in（`autoQueueConsolidateReflectOnExtract`、既定 `false`）
+   * の内側だけで、かつ同じジョブが既に払っている代償（近傍探索の `recall()` 1回・
+   * 再埋め込み1回、条件により LLM 呼び出し1回、ADR 0152/0157 の負債）に比べて小さい。
+   * `consolidate()` の内部関数へ `ctx` と一緒に「既に読んだ種」を渡す形（二重読みを
+   * 避ける）は、`consolidate()` 本体の手順1を分岐ごとに割る変更になり、`{ memoryIds }`/
+   * `{ query }` 分岐に触らずに済ませられる範囲を超えるため、今回は採らない。
    */
   async function processConsolidateJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
     const seedMemoryId = readSeedMemoryIdFromPayload(job);
-    await consolidate(ctx, { target: { seedMemoryId } });
+    const seed = await deps.memoryStore.get(ctx, seedMemoryId);
+    const scopedCtx: Ctx =
+      seed !== null && typeof seed.subjectId === "string"
+        ? { ...ctx, subjectId: seed.subjectId }
+        : ctx;
+    await consolidate(scopedCtx, { target: { seedMemoryId } });
   }
 
   /**
