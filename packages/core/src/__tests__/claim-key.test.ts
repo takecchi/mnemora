@@ -196,7 +196,9 @@ describe("deriveClaimKeys（Issue #371、ADR 0185/0315 決定2 の (ii) separate
       },
       completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
         capturedSystem = req.prompt.system;
-        return req.schema.parse({ claims: [{ subject: "姉", predicate: "sibling_residence" }] }) as T;
+        return req.schema.parse({
+          claims: [{ subject: "姉", predicate: "sibling_residence" }],
+        }) as T;
       },
     };
     await deriveClaimKeys(provider, ctx, ["姉は福岡で働いています。"], undefined, ["user", "姉"]);
