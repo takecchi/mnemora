@@ -166,7 +166,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * Issue #201 / ADR 0316: `tenant_settings.taxonomy_mode` の現在値。行が無ければ
+   * Issue #201 / ADR 0317: `tenant_settings.taxonomy_mode` の現在値。行が無ければ
    * `DEFAULT_TAXONOMY_MODE`（`'open'`）——`getDecayClock` と同じ規律。
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
@@ -185,7 +185,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * Issue #201 / ADR 0316: 不正な値は `assertValidTaxonomyMode`（core 共有）で拒む。
+   * Issue #201 / ADR 0317: 不正な値は `assertValidTaxonomyMode`（core 共有）で拒む。
    * `event_retention_days`/`default_half_life_hours`/`decay_clock`/
    * `default_half_life_recalls` は指定しない——行が無い場合は DB 側の DEFAULT に任せる
    * （`setDecayClock` と同じ形）。
