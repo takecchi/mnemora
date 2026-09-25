@@ -437,3 +437,52 @@ probe数が少ない群では同型の弱点が起こりうる。`stdDevMultipli
 ---
 
 Refs #109, ADR 0094, ADR 0220, ADR 0254, ADR 0274, ADR 0291, ADR 0316, ADR 0321, ADR 0322
+
+---
+
+## 追記（2026-09-26）: A・C の推奨を「影で並べた」——状態は提案のまま
+
+> **⚠ クローン miku の判断（オーナーではない）。**この追記は採用の決定ではない。
+> **この ADR の状態は「提案」のままである。**採用へ倒すかは次の判断として残す。
+
+§4 の推奨を、**既存の判定・既定値・公開 API・required checks を1つも変えずに**、
+既存の値の隣へ並べて出す形で入れた（§2.6・§3.2 の「並走の判定として追加」「案2」の形）。
+
+**A（margin 基準、`stdDevMultiplier=3`・`minShrunkProbes=2`）**:
+
+- `scripts/openai-arm-summary-lib.mjs` の Job Summary に、既存の「並走の判定」（ADR 0316
+  のまま）の直後へ「**参考: margin基準の判定候補**」節を足した。**参考であり判定には
+  使っていない**と節の中に明記した。`decideShadowVerdict`・`MRR_DROP_THRESHOLD`・
+  `DIFF_FIELDS`・exit code は変えていない。
+- 判定に要る probe ごとの margin は、既存の CI artifact には無かった（群集約の
+  `marginStats` だけ）。そこで `openai-arm-json.ts` の群 JSON に `probeMargins` を追記し、
+  2つの基準値 `*-baseline.openai.json` に `marginStats`・`probeMargins` を**追記**した。
+  値は**コミット済みカセットを `recorded` で再生して**得たもの（`env -u OPENAI_API_KEY
+  MNEMORA_LLM=deterministic`、実 API 不使用）。再生で得た既存フィールド（MRR・hit@1・
+  hit@10・probe 件数）はコミット済み基準値と全群一致した。§2.0 が指摘した「ADR 0316 本文の
+  `marginStats` が基準値に無い」食い違いは、この追記で基準値側に値が入った（経緯は
+  確かめていない）。
+- **正本は `examples/chat/src/verdict-candidate-margin.ts`**（`decideMarginDropVerdict`・
+  `DEFAULT_MARGIN_DROP_OPTIONS`）。`.mjs` は `tsx` を通さないため手複製になる——
+  ADR 0316 側（`decideShadowVerdict`）と同じ二重管理である。ただし今回は、同じ入力を
+  両方に通して結果が一致するかを見る歯（`scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs`）
+  を足した。ADR 0316 側の手複製にはこの歯が無い。無理に統合はしていない。
+
+**C（案2: `protectionMargin` を別名で新設、`intrusionMargin` は凍結）**:
+
+- `correction-candidate-arm.ts` に `protectionMargin = protectedFactScore − topNonProtectedScore`
+  を別フィールドとして足し、`correction-candidate-json.ts`（probe ごとの値と
+  `summary.protectionMarginStats`）・`correction-candidate-probe-summary-lib.mjs`
+  （Job Summary で `intrusionMargin` の隣に表示＋基準値との「参考」節）・
+  `correction-candidate-probe-baseline.json`（追記のみ）・`examples/chat/README.md` に出した。
+- **`intrusionMargin` の定義・値と ADR 0321 の回帰テスト（`correction-candidate-arm-margin.test.ts`）は
+  変えていない。**`protectionMargin` は `DIFF_FIELDS` に入れていないため、既存の
+  一致/相違の判定は変わらない。
+- 本物の Postgres 17 + pgvector と `@mnemora/local-embedding` で再測定した分布は、§3.1 と
+  一致した（n=24、深い誤爆20件は全件正、誤爆(浅)4件は全件負）。
+- §3.5 の限界（`protectedFacts` が複数件のとき）は残ったままである。`protectionMarginBest`
+  は実装していない。
+
+**確かめていないこと**: CI 実機での Job Summary の見え方（手元で summary スクリプトを
+直接走らせて確かめただけ）。`intrusionMargin` をいつ消すか（非推奨運用）。§2.4 の
+`japanese` 群の感度の弱点。
