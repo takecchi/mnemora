@@ -319,6 +319,43 @@ export declare class RecordedLLMProvider implements LLMProvider {
     completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
 }
 
+// ===== dist/__fixtures__/seeded-provider.d.ts =====
+import type { Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { EmbeddingCassetteSection, LLMCassetteSection } from "./cassette.js";
+export interface SeedUsageCounts {
+    seeded: number;
+    real: number;
+}
+export interface SeededLLMProviderOptions {
+    seed: LLMCassetteSection;
+    expectedModel: string;
+}
+export declare class SeededLLMProvider implements LLMProvider {
+    private readonly delegate;
+    private readonly entries;
+    private seededCalls;
+    private realCalls;
+    constructor(delegate: LLMProvider, options: SeededLLMProviderOptions);
+    get usage(): SeedUsageCounts;
+    private lookup;
+    complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
+    completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+}
+export interface SeededEmbeddingProviderOptions {
+    seed: EmbeddingCassetteSection;
+    expectedSpace: EmbeddingSpaceId;
+}
+export declare class SeededEmbeddingProvider implements EmbeddingProvider {
+    private readonly delegate;
+    readonly space: EmbeddingSpaceId;
+    private readonly entries;
+    private seededCalls;
+    private realCalls;
+    constructor(delegate: EmbeddingProvider, options: SeededEmbeddingProviderOptions);
+    get usage(): SeedUsageCounts;
+    embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
+}
+
 // ===== dist/embedding-provider-conformance.d.ts =====
 import type { Ctx, EmbeddingProvider } from "@mnemora/core";
 export interface EmbeddingProviderConformanceTexts {
@@ -370,6 +407,7 @@ export * from "./__fixtures__/cassette.js";
 export * from "./__fixtures__/recorded-llm-provider.js";
 export * from "./__fixtures__/recorded-embedding-provider.js";
 export * from "./__fixtures__/cassette-recorder.js";
+export * from "./__fixtures__/seeded-provider.js";
 
 // ===== dist/lexical-store-conformance.d.ts =====
 import type { Ctx, LexicalStore, MemoryId, MemoryStatus, ProvenanceKind } from "@mnemora/core";

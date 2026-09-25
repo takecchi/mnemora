@@ -29,3 +29,8 @@ export * from "./__fixtures__/cassette.js";
 export * from "./__fixtures__/recorded-llm-provider.js";
 export * from "./__fixtures__/recorded-embedding-provider.js";
 export * from "./__fixtures__/cassette-recorder.js";
+
+// Issue #691 続き: 「種カセット」から再生し、種に無い入力だけ実 API へ流す provider。
+// `record` サブコマンドが、記憶集合を旧カセットへ揃えるために使う（上の
+// `Recorded*`/`Recording*` とは逆方向——記録に無い入力を例外にせず、delegate へ流す）。
+export * from "./__fixtures__/seeded-provider.js";

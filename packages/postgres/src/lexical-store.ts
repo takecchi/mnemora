@@ -4,16 +4,38 @@ import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core
 import type { Db } from "./client.js";
 
 /**
- * `ts_rank_cd` の normalization 引数。PostgreSQL のドキュメント
- * （textsearch-controls）のビットの組み合わせのうち `32`（rank を `rank / (rank + 1)` で
- * 割って (0, 1) の範囲へ押し込める）だけを立てる。マネージャー指定。
+ * `ts_rank_cd` の normalization 引数。PostgreSQL のドキュメント（textsearch-controls）の
+ * ビットの組み合わせのうち `32`（rank を `rank / (rank + 1)` で割って (0, 1) の範囲へ
+ * 押し込める。読みやすさのためだけであり比較可能性を作るためではない）と `1`
+ * （rank を `1 + ln(文書の長さ)` で割る）を足した `33`。
  *
- * `LexicalHit.rank` は「adapter ごとに尺度が違う、同一クエリ・同一 adapter 内でしか
- * 比較できない値」（`@mnemora/core` の `LexicalHit.rank` の doc、ADR 0084 §5）なので、
- * この正規化の有無は契約上どちらでもよい——ここでは (0, 1) に収まる読みやすさのために
- * 選んでいるだけで、比較可能性を作るためではない。
+ * **`1` を足した理由（[Issue #394](../../../docs/decisions/0308-lexical-rank-length-normalization.md)、
+ * ADR 0308）**: `32` だけだと `rank` に**内容由来の分解能が無い**——クエリ語が本文中の
+ * 同じ相対位置（隣接）で一致する限り、周囲にどれだけ無関係な語が続いても cover density
+ * は変わらない。【実測】`"obsidian shards"`（15字）と、同じ2語を含むが292字ある散漫な
+ * 英文とで、`32` だけでは `rank` が完全に同点（`0.16666667`）だった。`1` を足すと
+ * 文書の長さ（lexeme 数）で割るため、短く焦点の合った文のほうが高い `rank` を持つ
+ * ようになる（ADR 0308「測定」節）。
+ *
+ * **`2`（文書長そのもので割る）ではなく `1`（対数）を選んだ理由**: `2` は長い文書を
+ * 線形に近い強さで罰する（実測で短文と292字の文の比が約22倍に開いた）。`1` は対数
+ * なので同じ対比較で約3.5倍に収まる——`rank` は依然として「同一クエリ・同一 adapter
+ * 内でのタイブレークにしか使わない値」（`LexicalHit.rank` の doc）であり、極端な傾斜を
+ * 持ち込む理由が無い。ADR 0308「測定」節に、この2案を含む実測値を残してある。
+ *
+ * **⚠ これでも割れない同点が残る**——内容が真に同一な行（`content` が一致する行）は
+ * 文書長も同一なので今も同点のままである（ADR 0175 の tie-break がその残余を拾う）。
+ * `packages/postgres/src/__tests__/lexical-store-index.test.ts` の20,000行 seed（末尾の
+ * 整数だけが違うテンプレート文）も、`to_tsvector` が末尾の整数を桁数に関わらず1語彙と
+ * 数えるため文書長（lexeme 数）が変わらず、同点のまま残る——これは「直っていない」
+ * ことを歯（`lexical-rank-resolution.test.ts`）で明示的に確認しており、退化ではない。
+ *
+ * `LexicalHit.rank` は「adapter ごとに尺度が違い、同一クエリ・同一 adapter 内でしか
+ * 比較できない値」（`@mnemora/core` の `LexicalHit.rank` の doc、ADR 0084 §5）であり、
+ * `recall` の段2 スコアには一切入らない——この定数は SQL の `ORDER BY`/`LIMIT`
+ * （`opts.limit` による切り詰め）でのみ効く。
  */
-const TS_RANK_CD_NORMALIZATION = 32;
+const TS_RANK_CD_NORMALIZATION = 32 | 1;
 
 /**
  * `PostgresLexicalStore.search` が実際に打つ `SELECT` を組み立てる。

@@ -11,12 +11,23 @@ import { ANSWER_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io
  * Issue #498 完了条件4・「回答評価」側の陽性対照を、実 API で**変異分だけ**追加記録する
  * ——**既存の `examples/chat/cassettes/answer.json`（67件）を1バイトも録り直さずに**。
  *
+ * ⛔ **ADR 0309（Issue #691 続き）以降、このスクリプトは事実上使われなくなった。**
+ * 下の段落が予告していた「`answer.json` を近く全体で録り直す」は、実際には
+ * **採らなかった**——`buildMnemoraPrompt` の描画が変わった（`order-legend`）ときの
+ * 方針は「既存カセットは1バイトも書き換えず、新しいファイル
+ * （`answer.order-legend.json`、`cassette-io.ts` の `ANSWER_ORDER_LEGEND_CASSETTE_PATH`）
+ * を足す」に決まった（ADR 0309）。`answer.json` は今後も `answer-trials-material.ts`
+ * （ADR 0301 の対照の基準）が読み続けるので、**このスクリプトが対象にしていた67件も
+ * 変異2件も、このまま歴史的な記録として残る。** 新形式カセットへ変異分を記録するときは、
+ * 下の段落と同じ理由でこのスクリプトを使い回さない——`recordAnswer`（`record:answer`）が
+ * 毎回全置換で `recordRetentionMutationPositiveControl` を呼ぶので、新形式カセットは
+ * その1回で変異分も含めて揃う（このスクリプトが要る場面自体が生じない）。
+ *
  * ⭐ **通常はこのスクリプトを直接使う必要は無い。** 変異の記録は
  * `recordRetentionMutationPositiveControl`（`../answer-retention-mutation.ts`）として
  * `cli.ts` の `recordAnswer`（＝ `pnpm --filter @mnemora/example-chat run record:answer`）
  * に組み込んである——**以後、誰かが `record answer` を素で（全置換で）走らせれば、
- * この変異分は自動的に一緒に録り直される。** Issue #691/#693 が `answer.json` を
- * 近く全体で録り直す予定であることが分かっているので、この組み込みが本命である。
+ * この変異分は自動的に一緒に録り直される。**
  *
  * **このスクリプトが要るのは、全12ケース×2経路（24回答生成＋24 judge、約 $0.003）を
  * 録り直さずに、変異分（chat 2回だけ）を既存カセットへ追記したいときだけ**——
