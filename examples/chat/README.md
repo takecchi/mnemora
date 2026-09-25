@@ -1345,6 +1345,96 @@ node scripts/identifier-probe-summary.mjs \
 
 ---
 
+## `numeral-token-probes`: 単独トークンの数詞・記号索引の弁別（ADR 0135、Issue #109）
+
+[ADR 0110](../../docs/decisions/0110-single-char-token-discriminator.md) は、
+`japanese-name-probe-set.ts` の `org-b`（「開発一課」対「開発二課」）が落ちる理由を
+「弁別部分が単独1文字のトークン1個に割られ、かつ mean pooling が長い共有前置で
+それを薄めたとき」と特定したが、常設した probe にはしなかった（1文の反実仮想で
+確かめただけ）。`numeral-token-probes` はこの現象を、**文字種（漢数字/算用数字/
+アルファベット）×共有前置長（長い/中間/短い）の3×3=9セル**として、意図して
+系統的に再現可能な形へ格上げする。設計の全経緯（3.3節の「n=1の罠」の実測を含む）は
+[ADR 0135](../../docs/decisions/0135-numeral-token-discriminator-probe-domain-design.md)
+にある——ここでは実行方法と実測結果だけを書く。
+
+```bash
+DATABASE_URL=... pnpm --filter @mnemora/example-chat run numeral-token-probes
+```
+
+`identifier-probes` と同じ組み合わせ（擬似LLM `DeterministicLLMProvider` +
+**`@mnemora/local-embedding`**。鍵もカセットも要らない）を使う。
+
+### 何を測るか(`src/numeral-token-probe-set.ts`・`src/identifier-arm.ts`)
+
+- 9セル×**2インスタンス**（同じ構造・違う語彙）= **18件**。1インスタンスだけでは
+  ADR 0135 §3.3 が実測した「長い前置+漢数字」という2要因だけで失敗を予測できない
+  n=1 の罠を再現しうるため、セルあたり最低2件を置いた。
+- `identifier-probes`/日本語固有名詞集合と同じ立場——**query は索引そのものを含める**
+  （「短い索引を embedding がどれだけ精密に区別できるか」を測るのが狙いであり、
+  言い換えクイズにしない）。
+- haystack は sparse（`probe-set.ts` の既定、索引0件）/dense（同じ9セルの索引が密、
+  probe とは重ならない値域で計90件）の2条件。
+- **`margin`（gold と distractor の `similarity` の差）を、hit@1/hit@10 と併記する**
+  （ADR 0135 §5.5）——`identifier-arm.ts` の共有 arm に足したフィールドで、
+  `identifier-probes`/日本語固有名詞集合の既存の歯・基準値には影響しない
+  （report 上は optional なフィールドとして足している）。
+
+### 実測結果（[numeral-token-probe-baseline.json](./numeral-token-probe-baseline.json)、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
+
+| 群 | `(provider, model, dimensions)` | haystack | MRR | hit@1 | hit@10 | margin(n/mean/stdDev/min) |
+|---|---|---|---|---|---|---|
+| `sparse`(18件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **0.917** | 15/18 | 18/18 | n=18 mean=+3.75e-2 stdDev=1.90e-2 min=+1.05e-2 |
+| `dense`(18件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **0.917** | 15/18 | 18/18 | n=18 mean=+3.75e-2 stdDev=1.90e-2 min=+1.05e-2 |
+
+生の実測値は
+[numeral-token-probe-baseline.json](./numeral-token-probe-baseline.json)に置いてある
+（2回実行し、`measuredAt` を除いて完全一致した）。
+
+#### 🔴 読み方: sparse と dense が完全一致するのは haystack が効いていないからではない
+
+外した3件（`kanji-medium-a`/`kanji-short-a`/`kanji-short-b`）は、**登録した
+distractor に負けたのではない**——`distractorBeatsGold` はこの3件を含め18件すべてで
+`false` であり、margin（gold−登録distractorの similarity 差）も18件全部が正
+（最小 `+1.05e-2`）。実際に1位を取ったのは、**同じ会話に同居する別セルの「兄弟」
+probe**（例: `kanji-medium-a` の1位は、ほぼ同じ語幹を持つ `arabic-medium-a` の
+gold 文）である。この兄弟 probe は sparse でも dense でも常に会話に居るため
+（haystack の違いはこの3件の勝敗を動かさない）、2群の数字がビット一致する。
+⟹ **hit@1 は「名指ししていない近傍」に敏感だが、margin（登録した gold/distractor
+対の差）は健全**——ADR 0135 §5.5 が二値と分布を併記する理由そのものの実例が、
+初回実測で出た（`numeral-token-probe-baseline.json` の `provenance.note` に詳細）。
+
+### 🔴 このベンチが測れないこと（正直に書く）
+
+- **標本は18件である**（[ADR 0033](../../docs/decisions/0033-what-decided-the-rank-in-the-retrieval-bench.md) §3）。
+  ここから失敗率・成功率を統計的に主張しない。
+- **文字種×共有前置長の2軸だけでは「いつ壊れるか」を予測できない**
+  （ADR 0135 §3.3 の実測。「長い前置+漢数字」の別語彙インスタンスは健全だった）。
+  この行列は「壊れる条件を狙い撃つ」ためではなく、margin がどう分布するかを
+  観測するための実験計画である。
+- **本番（Postgres + pgvector / HNSW）での実測はまだ無い**——ここまでの実測は
+  すべて `@mnemora/local-embedding` のプロセス内推論に対するものである
+  （ANN のインデックス構造は本ベンチの対象外）。
+- CI ジョブ（`numeral-token-probes`）はこのベンチを門にしていない。基準値と違っても
+  落ちない——落ちるのは「重みを取得できなかった」ときだけであり、
+  `identifier-probes` と同じ規律・同じ扱いである。
+
+### 基準値との差分を Job Summary に出す（⛔ 門ではない）
+
+CI は毎回こう打つ（`identifier-probes` と同じ形、[ADR 0088](../../docs/decisions/0088-retrieval-quality-measured-in-ci.md) §3）:
+
+```bash
+node scripts/numeral-token-probe-summary.mjs \
+  --measured <MNEMORA_NUMERAL_TOKEN_JSON の書き先> \
+  --baseline examples/chat/numeral-token-probe-baseline.json \
+  >> "$GITHUB_STEP_SUMMARY"
+```
+
+一致していれば1行で黙り、違うときだけ内訳を展開する。⛔ 相違では落ちない
+（`exit 0`）——非0になるのは入力そのものが壊れているときだけである。
+**値が意図して動いたときは、基準値ファイルを手で更新すること**（CI は自動更新しない）。
+
+---
+
 ## `time-term`: 時間項(freshness/decay)を意味的類似度から分離して測る(Issue #217)
 
 **何を測るか**は [ADR 0058](../../docs/decisions/0058-measure-the-time-term-in-a-separate-arm.md)
