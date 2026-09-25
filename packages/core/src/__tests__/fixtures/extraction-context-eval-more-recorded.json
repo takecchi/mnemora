@@ -1,0 +1,2236 @@
+{
+  "model": "gpt-4.1-mini-2025-04-14",
+  "recordedAt": "2026-09-25T05:03:21.792Z",
+  "kind": "independent semantic evaluation, Issue #704 follow-up (contextual reference: time/date/quantity/location; ambiguous reference: time/quantity; complex relative date: month-crossing/range/recurring; long-context variants of eval-h1); 5 runs per case for reproducibility",
+  "runsPerCase": 5,
+  "requests": 60,
+  "retries": 0,
+  "reservedUsd": 0.30455400000000005,
+  "cases": [
+    {
+      "id": "eval-i1-time-reference-variant",
+      "category": "i-context-reference",
+      "observation": {
+        "id": "eval-i1-time-reference-variant",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それで結構です",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "担当者",
+                "text": "次回の商談は15時からでいかがでしょうか？"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それで結構です\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"次回の商談は15時からでいかがでしょうか？\",\"speaker\":\"担当者\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは、次回の商談を15時からで了承した。\",\"digest\":\"田中さんが次回商談15時了承\",\"tags\":[\"商談\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 69,
+            "total_tokens": 661,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は次回の商談が15時からであることに同意した。\",\"digest\":\"田中が次回商談15時からを了承\",\"tags\":[\"agreement\",\"appointment\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 69,
+            "total_tokens": 661,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は担当者の提案した次回の商談が15時からであることに同意した。\",\"digest\":\"田中が次回商談15時開始に同意\",\"tags\":[\"同意\",\"商談\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 78,
+            "total_tokens": 670,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は次回の商談が15時からであることに同意した。\",\"digest\":\"田中の次回商談時間同意\",\"tags\":[\"同意\",\"次回商談\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 71,
+            "total_tokens": 663,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"2026年4月10日の商談は15時からであることに田中さんは同意した。\",\"digest\":\"田中さんは2026-04-10の商談15時開始を承諾\",\"tags\":[\"商談\",\"承認\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 84,
+            "total_tokens": 676,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-i2-absolute-date-reference",
+      "category": "i-context-reference",
+      "observation": {
+        "id": "eval-i2-absolute-date-reference",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "大丈夫です",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "担当者",
+                "text": "納品日は4月20日でよろしいですか？"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"大丈夫です\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"納品日は4月20日でよろしいですか？\",\"speaker\":\"担当者\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"納品日は4月20日でよい。\",\"digest\":\"田中さんが4月10日に納品日を4月20日で問題ないと言った\",\"tags\":[\"納品日\",\"承認\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.8}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 588,
+            "completion_tokens": 74,
+            "total_tokens": 662,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"納品日は4月20日でよい。\",\"digest\":\"田中が納品日を4月20日で了承した\",\"tags\":[\"納品日了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 588,
+            "completion_tokens": 65,
+            "total_tokens": 653,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"納品日は4月20日でよい。\",\"digest\":\"田中は納品日が4月20日でよいと述べた。\",\"tags\":[\"納品日\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 588,
+            "completion_tokens": 70,
+            "total_tokens": 658,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは大丈夫だと言った。\",\"digest\":\"田中さんが2026年4月10日に「大丈夫」と発言\",\"tags\":[\"発言\",\"大丈夫\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 588,
+            "completion_tokens": 66,
+            "total_tokens": 654,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は納品日の4月20日について問題ないと述べた。\",\"digest\":\"田中が納品日4月20日に問題なしと回答\",\"tags\":[\"納品日\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 588,
+            "completion_tokens": 71,
+            "total_tokens": 659,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-i3-quantity-reference",
+      "category": "i-context-reference",
+      "observation": {
+        "id": "eval-i3-quantity-reference",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "はい、それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "店員",
+                "text": "本日のランチは3人分でよろしいですか？"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"はい、それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"本日のランチは3人分でよろしいですか？\",\"speaker\":\"店員\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは本日のランチを3人分注文することに同意した。\",\"digest\":\"田中が本日のランチ3人分に同意\",\"tags\":[\"ランチ注文\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 590,
+            "completion_tokens": 70,
+            "total_tokens": 660,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは本日のランチを3人分注文することに同意した。\",\"digest\":\"田中が本日のランチ3人分を注文に同意\",\"tags\":[\"注文\",\"ランチ\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 590,
+            "completion_tokens": 73,
+            "total_tokens": 663,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは本日のランチを3人分注文することに同意した。\",\"digest\":\"田中さんがランチ3人分を注文することに同意した。\",\"tags\":[\"注文\",\"ランチ\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 590,
+            "completion_tokens": 76,
+            "total_tokens": 666,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは本日のランチを3人分注文することに同意した。\",\"digest\":\"田中が3人分のランチ注文を同意した2026-04-10\",\"tags\":[\"注文\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 590,
+            "completion_tokens": 78,
+            "total_tokens": 668,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は本日のランチを3人分注文することを了承した。\",\"digest\":\"田中は2026-04-10にランチ3人分を注文了承。\",\"tags\":[\"注文\",\"ランチ\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 590,
+            "completion_tokens": 80,
+            "total_tokens": 670,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-i4-location-reference-variant",
+      "category": "i-context-reference",
+      "observation": {
+        "id": "eval-i4-location-reference-variant",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "はい、そこで",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "担当者",
+                "text": "打ち合わせは3階の第二会議室でよろしいですか？"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"はい、そこで\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"打ち合わせは3階の第二会議室でよろしいですか？\",\"speaker\":\"担当者\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は打ち合わせは3階の第二会議室で行うことに同意した。\",\"digest\":\"田中が3階第二会議室での打ち合わせを同意\",\"tags\":[\"打ち合わせ\",\"会議室\",\"合意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 84,
+            "total_tokens": 676,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは、打ち合わせ場所が『そこ』であることを了承した。おそらく『3階の第二会議室』での打ち合わせである。\",\"digest\":\"田中さんが打ち合わせ場所を了承（2026-04-10）\",\"tags\":[\"打ち合わせ場所了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 100,
+            "total_tokens": 692,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は打ち合わせの場所として3階の第二会議室を指定した。\",\"digest\":\"田中が3階の第二会議室を打ち合わせ場所として指定（2026-04-10）。\",\"tags\":[\"場所指定\",\"打ち合わせ\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 85,
+            "total_tokens": 677,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は打ち合わせ場所として3階の第二会議室を指定した。\",\"digest\":\"田中が打ち合わせ場所を3階第二会議室に指定（2026-04-10）\",\"tags\":[\"打ち合わせ場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 81,
+            "total_tokens": 673,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は打ち合わせ場所として3階の第二会議室を指定した。\",\"digest\":\"打ち合わせ場所は3階の第二会議室（田中指定）\",\"tags\":[\"会議\",\"場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 74,
+            "total_tokens": 666,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-j1-ambiguous-time-two-candidates",
+      "category": "j-ambiguous-reference",
+      "observation": {
+        "id": "eval-j1-ambiguous-time-two-candidates",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "承知しました",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "担当者",
+                "text": "14時か16時、どちらか空いている方でご案内します"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"承知しました\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"14時か16時、どちらか空いている方でご案内します\",\"speaker\":\"担当者\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 5,
+            "total_tokens": 597,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 5,
+            "total_tokens": 597,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 5,
+            "total_tokens": 597,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 5,
+            "total_tokens": 597,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 592,
+            "completion_tokens": 5,
+            "total_tokens": 597,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-j2-ambiguous-quantity-two-candidates",
+      "category": "j-ambiguous-reference",
+      "observation": {
+        "id": "eval-j2-ambiguous-quantity-two-candidates",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "承知しました",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "担当者",
+                "text": "2名様か4名様、どちらかのお部屋になります"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"承知しました\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"2名様か4名様、どちらかのお部屋になります\",\"speaker\":\"担当者\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 589,
+            "completion_tokens": 5,
+            "total_tokens": 594,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 589,
+            "completion_tokens": 5,
+            "total_tokens": 594,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 589,
+            "completion_tokens": 5,
+            "total_tokens": 594,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 589,
+            "completion_tokens": 5,
+            "total_tokens": 594,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 589,
+            "completion_tokens": 5,
+            "total_tokens": 594,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-k1-week-after-next-monday-crossing-month",
+      "category": "k-complex-relative-date",
+      "observation": {
+        "id": "eval-k1-week-after-next-monday-crossing-month",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "再来週の月曜日に歯医者の予約を入れました",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-29T00:30:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"再来週の月曜日に歯医者の予約を入れました\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-29T00:30:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-29\",\"relativeDates\":{\"昨日\":\"2026-04-28\",\"今日\":\"2026-04-29\",\"明日\":\"2026-04-30\",\"明後日\":\"2026-05-01\"}},\"context\":[],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中が2026年5月11日（月曜日）に歯医者の予約を入れた。\",\"digest\":\"田中の2026年5月11日の歯医者予約\",\"tags\":[\"予約\",\"歯医者\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 579,
+            "completion_tokens": 80,
+            "total_tokens": 659,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"2026年5月11日の月曜日に歯医者の予約を田中が入れました。\",\"digest\":\"田中さんは2026年5月11日に歯医者の予約を入れている。\",\"tags\":[\"予約\",\"歯医者\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 579,
+            "completion_tokens": 86,
+            "total_tokens": 665,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは2026年5月11日の月曜日に歯医者の予約を入れました。\",\"digest\":\"田中さんの歯医者予約は2026/05/11月曜日\",\"tags\":[\"予約\",\"歯医者\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 579,
+            "completion_tokens": 83,
+            "total_tokens": 662,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは2026年5月11日月曜日に歯医者の予約を入れました。\",\"digest\":\"2026年5月11日に田中の歯医者予約\",\"tags\":[\"予約\",\"歯医者\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 579,
+            "completion_tokens": 80,
+            "total_tokens": 659,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"2026年5月11日（月曜日）に歯医者の予約を入れた。\",\"digest\":\"田中さんが2026年5月11日に歯医者の予約を入れた。\",\"tags\":[\"予約\",\"歯医者\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 579,
+            "completion_tokens": 84,
+            "total_tokens": 663,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-k2-date-range-across-month",
+      "category": "k-complex-relative-date",
+      "observation": {
+        "id": "eval-k2-date-range-across-month",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "来月3日から5日まで大阪へ出張します",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-05-20T00:30:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"来月3日から5日まで大阪へ出張します\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-05-20T00:30:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-05-20\",\"relativeDates\":{\"昨日\":\"2026-05-19\",\"今日\":\"2026-05-20\",\"明日\":\"2026-05-21\",\"明後日\":\"2026-05-22\"}},\"context\":[],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは2026年6月3日から6月5日まで大阪へ出張します。\",\"digest\":\"田中さんは2026年6月3日から6月5日まで大阪出張予定\",\"tags\":[\"出張\",\"大阪\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 575,
+            "completion_tokens": 82,
+            "total_tokens": 657,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は2026年6月3日から6月5日まで大阪へ出張する。\",\"digest\":\"田中の2026年6月3-5日の大阪出張\",\"tags\":[\"出張\",\"大阪\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 575,
+            "completion_tokens": 75,
+            "total_tokens": 650,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは2026年6月3日から6月5日まで大阪へ出張します。\",\"digest\":\"田中さんの2026年6月3日から6月5日の大阪出張予定\",\"tags\":[\"出張\",\"大阪\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 575,
+            "completion_tokens": 81,
+            "total_tokens": 656,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は2026年6月3日から6月5日まで大阪へ出張する。\",\"digest\":\"田中の大阪出張予定（2026年6月3-5日）\",\"tags\":[\"出張\",\"大阪\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 575,
+            "completion_tokens": 78,
+            "total_tokens": 653,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは2026年6月3日から6月5日まで大阪へ出張します。\",\"digest\":\"田中さんは2026年6月3日-5日に大阪出張\",\"tags\":[\"出張\",\"大阪\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 575,
+            "completion_tokens": 80,
+            "total_tokens": 655,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-k3-recurring-weekly",
+      "category": "k-complex-relative-date",
+      "observation": {
+        "id": "eval-k3-recurring-weekly",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "毎週水曜日にヨガ教室に通っています",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-15T00:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"毎週水曜日にヨガ教室に通っています\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-15T00:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-15\",\"relativeDates\":{\"昨日\":\"2026-04-14\",\"今日\":\"2026-04-15\",\"明日\":\"2026-04-16\",\"明後日\":\"2026-04-17\"}},\"context\":[],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは毎週水曜日にヨガ教室に通っています。\",\"digest\":\"田中さんは毎週水曜日にヨガ教室に通う事実\",\"tags\":[\"ヨガ教室\",\"習い事\",\"定期的\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 574,
+            "completion_tokens": 81,
+            "total_tokens": 655,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは毎週水曜日にヨガ教室に通っている。\",\"digest\":\"田中さんが毎週水曜日ヨガに通う（2026-04-15付）\",\"tags\":[\"趣味\",\"健康\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 574,
+            "completion_tokens": 78,
+            "total_tokens": 652,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは毎週水曜日にヨガ教室に通っています。\",\"digest\":\"田中さん 毎週水曜日 ヨガ教室 通う\",\"tags\":[\"ヨガ\",\"習い事\",\"スケジュール\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 574,
+            "completion_tokens": 77,
+            "total_tokens": 651,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは毎週水曜日にヨガ教室に通っています。\",\"digest\":\"毎週水曜日にヨガ教室に通う田中さん\",\"tags\":[\"習い事\",\"ヨガ\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 574,
+            "completion_tokens": 72,
+            "total_tokens": 646,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは毎週水曜日にヨガ教室に通っている。\",\"digest\":\"田中さんの毎週水曜日のヨガ教室参加情報\",\"tags\":[\"趣味\",\"健康\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 574,
+            "completion_tokens": 71,
+            "total_tokens": 645,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-l1-length8-position3-budget",
+      "category": "l-long-context-variant",
+      "observation": {
+        "id": "eval-l1-length8-position3-budget",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "鈴木",
+                "text": "来月のイベント、予算はどれくらいですか？"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "備品費も入れて相談中です"
+              },
+              {
+                "speaker": "assistant",
+                "text": "予算は50万円で確定します"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "承知しました、ありがとうございます"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "会場はもう押さえてありますか"
+              },
+              {
+                "speaker": "assistant",
+                "text": "会場は来週中に確保します"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "楽しみですね"
+              },
+              {
+                "speaker": "assistant",
+                "text": "他に確認したいことはありますか？"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"来月のイベント、予算はどれくらいですか？\",\"speaker\":\"鈴木\"},{\"text\":\"備品費も入れて相談中です\",\"speaker\":\"佐藤\"},{\"text\":\"予算は50万円で確定します\",\"speaker\":\"assistant\"},{\"text\":\"承知しました、ありがとうございます\",\"speaker\":\"鈴木\"},{\"text\":\"会場はもう押さえてありますか\",\"speaker\":\"佐藤\"},{\"text\":\"会場は来週中に確保します\",\"speaker\":\"assistant\"},{\"text\":\"楽しみですね\",\"speaker\":\"鈴木\"},{\"text\":\"他に確認したいことはありますか？\",\"speaker\":\"assistant\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"来月のイベントの予算は50万円で確定しました。\",\"digest\":\"来月イベントの予算50万円確定\",\"tags\":[\"イベント\",\"予算\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9},{\"content\":\"来週中に会場を確保します。\",\"digest\":\"来週中に会場確保予定\",\"tags\":[\"イベント\",\"会場\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 700,
+            "completion_tokens": 119,
+            "total_tokens": 819,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"予算は50万円で確定した。\",\"digest\":\"田中さんが予算50万円で確定したことを了承した。\",\"tags\":[\"予算\",\"イベント\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 700,
+            "completion_tokens": 67,
+            "total_tokens": 767,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"来月のイベントの予算は50万円で確定した。\",\"digest\":\"イベント予算50万円確定\",\"tags\":[\"予算\",\"イベント\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9},{\"content\":\"来週中に会場を確保する予定である。\",\"digest\":\"来週中会場確保予定\",\"tags\":[\"会場\",\"予定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 700,
+            "completion_tokens": 118,
+            "total_tokens": 818,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは来月のイベントの予算が50万円で確定していることを了承した。\",\"digest\":\"田中さんがイベント予算50万円を了承\",\"tags\":[\"イベント\",\"予算\",\"合意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 700,
+            "completion_tokens": 78,
+            "total_tokens": 778,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は予算50万円の来月のイベントについて「それでお願いします」と了承した。\",\"digest\":\"田中が来月のイベントの予算50万円で了承したこと\",\"tags\":[\"イベント\",\"予算\",\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 700,
+            "completion_tokens": 79,
+            "total_tokens": 779,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-l2-length8-position6-product-name",
+      "category": "l-long-context-variant",
+      "observation": {
+        "id": "eval-l2-length8-position6-product-name",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "佐藤",
+                "text": "新商品の件、進捗どうですか"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "候補名を3つ出しています"
+              },
+              {
+                "speaker": "assistant",
+                "text": "良い候補ですね、決めましょうか"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "そうですね、そろそろ決めたいです"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "デザインの方はほぼ完成しています"
+              },
+              {
+                "speaker": "assistant",
+                "text": "新商品の名称は『そよ風』に決定します"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "いいですね、決まってよかったです"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "発表が楽しみです"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"新商品の件、進捗どうですか\",\"speaker\":\"佐藤\"},{\"text\":\"候補名を3つ出しています\",\"speaker\":\"鈴木\"},{\"text\":\"良い候補ですね、決めましょうか\",\"speaker\":\"assistant\"},{\"text\":\"そうですね、そろそろ決めたいです\",\"speaker\":\"佐藤\"},{\"text\":\"デザインの方はほぼ完成しています\",\"speaker\":\"鈴木\"},{\"text\":\"新商品の名称は『そよ風』に決定します\",\"speaker\":\"assistant\"},{\"text\":\"いいですね、決まってよかったです\",\"speaker\":\"佐藤\"},{\"text\":\"発表が楽しみです\",\"speaker\":\"鈴木\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"新商品の名称は『そよ風』に決定した。\",\"digest\":\"新商品『そよ風』に決定\",\"tags\":[\"商品名決定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 708,
+            "completion_tokens": 64,
+            "total_tokens": 772,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"新商品の名称は『そよ風』に決定した。\",\"digest\":\"新商品の名称決定『そよ風』\",\"tags\":[\"新商品\",\"名称\",\"決定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 708,
+            "completion_tokens": 67,
+            "total_tokens": 775,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"新商品の名称は『そよ風』に決定した。\",\"digest\":\"新商品の名称は『そよ風』に決定\",\"tags\":[\"新商品\",\"名称決定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 708,
+            "completion_tokens": 66,
+            "total_tokens": 774,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"新商品の名称は『そよ風』に決定した。\",\"digest\":\"新商品の名称決定『そよ風』\",\"tags\":[\"商品情報\",\"名称決定\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9},{\"content\":\"『そよ風』という名称で新商品を進めることに同意した。\",\"digest\":\"新商品名称『そよ風』で進める同意\",\"tags\":[\"同意\",\"商品情報\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":0.95}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 708,
+            "completion_tokens": 135,
+            "total_tokens": 843,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"新商品の名称は『そよ風』に決定することに同意した。\",\"digest\":\"新商品の名称は『そよ風』に決定することに同意した。田中が2026-04-10に発言。\",\"tags\":[\"商品名称\",\"合意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 708,
+            "completion_tokens": 90,
+            "total_tokens": 798,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "eval-l3-length4-position1-meeting-point",
+      "category": "l-long-context-variant",
+      "observation": {
+        "id": "eval-l3-length4-position1-meeting-point",
+        "tenantId": "context-eval-more",
+        "kind": "utterance",
+        "subjectId": "tanaka",
+        "recordedAt": "2026-04-15T00:00:00.000Z",
+        "payload": {
+          "text": "それでお願いします",
+          "speaker": "田中",
+          "extractionContext": {
+            "messages": [
+              {
+                "speaker": "assistant",
+                "text": "集合場所は正面玄関にします"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "了解です、ありがとうございます"
+              },
+              {
+                "speaker": "鈴木",
+                "text": "今日は暑いですね"
+              },
+              {
+                "speaker": "佐藤",
+                "text": "本当に、真夏日ですね"
+              }
+            ],
+            "timeZone": "Asia/Tokyo"
+          }
+        },
+        "occurredAt": "2026-04-10T09:00:00.000Z"
+      },
+      "prompt": {
+        "system": "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。本人が明示的に述べた事実は provenanceKind: 'stated' として、それ以外の推論は 'inferred' として区別してください。何も記憶に値しない場合は空配列を返してください。 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。 digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。",
+        "messages": [
+          {
+            "role": "user",
+            "content": "{\"observation\":{\"text\":\"それでお願いします\",\"speaker\":\"田中\",\"subjectId\":\"tanaka\",\"occurredAt\":\"2026-04-10T09:00:00.000Z\",\"recordedAt\":\"2026-04-15T00:00:00.000Z\",\"observedLocalDate\":\"2026-04-10\",\"relativeDates\":{\"昨日\":\"2026-04-09\",\"今日\":\"2026-04-10\",\"明日\":\"2026-04-11\",\"明後日\":\"2026-04-12\"}},\"context\":[{\"text\":\"集合場所は正面玄関にします\",\"speaker\":\"assistant\"},{\"text\":\"了解です、ありがとうございます\",\"speaker\":\"佐藤\"},{\"text\":\"今日は暑いですね\",\"speaker\":\"鈴木\"},{\"text\":\"本当に、真夏日ですね\",\"speaker\":\"佐藤\"}],\"timeZone\":\"Asia/Tokyo\"}"
+          }
+        ]
+      },
+      "runs": [
+        {
+          "run": 1,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所は正面玄関にすることに同意した\",\"digest\":\"田中さんが集合場所を正面玄関にすることに同意した（2026-04-10）\",\"tags\":[\"同意\",\"集合場所\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"inferred\",\"confidence\":0.9}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 81,
+            "total_tokens": 703,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 2,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"集合場所は正面玄関にすることに田中が同意した。\",\"digest\":\"田中が集合場所について「それでお願いします」と同意。\",\"tags\":[\"集合場所\",\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 71,
+            "total_tokens": 693,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 3,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中は「それでお願いします」と言った。\",\"digest\":\"田中が同意した発言。\",\"tags\":[\"同意\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 56,
+            "total_tokens": 678,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 4,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんが「それでお願いします」と同意した。\",\"tags\":[\"同意\",\"依頼\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 64,
+            "total_tokens": 686,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        },
+        {
+          "run": 5,
+          "response": {
+            "index": 0,
+            "message": {
+              "role": "assistant",
+              "content": "{\"memories\":[{\"content\":\"田中さんは「それでお願いします」と言った。\",\"digest\":\"田中さんが了承の意を示した発話。\",\"tags\":[\"了承\"],\"subjectId\":\"tanaka\",\"provenanceKind\":\"stated\",\"confidence\":1}]}",
+              "refusal": null,
+              "annotations": []
+            },
+            "logprobs": null,
+            "finish_reason": "stop"
+          },
+          "usage": {
+            "prompt_tokens": 622,
+            "completion_tokens": 60,
+            "total_tokens": 682,
+            "prompt_tokens_details": {
+              "cached_tokens": 0,
+              "audio_tokens": 0
+            },
+            "completion_tokens_details": {
+              "reasoning_tokens": 0,
+              "audio_tokens": 0,
+              "accepted_prediction_tokens": 0,
+              "rejected_prediction_tokens": 0
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

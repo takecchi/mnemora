@@ -236,10 +236,12 @@ CI で赤くなったら、コードではなくこの一覧のほうを直す�
 [ADR 0204](../../docs/decisions/0204-postgres-object-names-cover-functions.md) が
 ADR 0202 の「引き受けた負債1」を解消した）。
 
-### テーブル（8）
+### テーブル（10）
 
+- `labels`
 - `memories`
 - `memory_events`
+- `memory_labels`
 - `observations`
 - `outbox`
 - `recall_usages`
@@ -247,8 +249,9 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `tenant_activity`
 - `tenant_settings`
 
-### 索引（21）
+### 索引（23）
 
+- `idx_labels_by_status`
 - `idx_memories_attributes`
 - `idx_memories_by_subject`
 - `idx_memories_contested`
@@ -264,6 +267,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `idx_memory_events_by_kind`
 - `idx_memory_events_by_memory`
 - `idx_memory_events_by_retention`
+- `idx_memory_labels_by_label`
 - `idx_observations_by_subject`
 - `idx_outbox_claimable`
 - `idx_outbox_pending`

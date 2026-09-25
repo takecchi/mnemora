@@ -188,6 +188,44 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
 }
 
 /**
+ * `tenant_settings.taxonomy_mode` が取りうる値（`migrations/0001_init.sql:223`、
+ * Issue #201、[ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)）。
+ *
+ * `docs/memory-model.md` §8「二つのモードを二つの経路にしない。『ラベルの状態』一つで
+ * 表す」——`strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できる
+ * か」だけであり、書き込みは `open`/`strict` に関わらず常に自由である。**この2値が
+ * recall のフィルタ・加点へ実際に反映される経路（PR-B）は、この型を追加した時点では
+ * まだ実装されていない**——この型と読み書きの口だけを先に用意する。
+ */
+export type TaxonomyMode = "open" | "strict";
+
+/**
+ * `tenant_settings.taxonomy_mode` の DB 側デフォルト（`migrations/0001_init.sql:223`
+ * の `DEFAULT 'open'`）と一致させる、テナント設定行が存在しない場合のフォールバック値。
+ * `DEFAULT_DECAY_CLOCK` と同じ規律。
+ */
+export const DEFAULT_TAXONOMY_MODE: TaxonomyMode = "open";
+
+/**
+ * `setTaxonomyMode` に不正な値（`TaxonomyMode` の2値のいずれでもない文字列）を渡したときに
+ * 両実装が投げる `Error` のメッセージに必ず含める文字列（`DECAY_CLOCK_INVALID_MESSAGE` と
+ * 同じ形）。
+ */
+export const TAXONOMY_MODE_INVALID_MESSAGE = "taxonomy mode must be 'open' or 'strict'";
+
+/**
+ * `value` が `TaxonomyMode` の2値のいずれかであることを検査する。不正なら
+ * `TAXONOMY_MODE_INVALID_MESSAGE` を含む `Error` で失敗する。`assertValidDecayClock` と
+ * 同じ形——`packages/postgres`・`packages/testkit` の両方の `setTaxonomyMode` 実装が
+ * この関数を呼ぶことで、検査の種類を1箇所に固定する。
+ */
+export function assertValidTaxonomyMode(value: string): asserts value is TaxonomyMode {
+  if (value !== "open" && value !== "strict") {
+    throw new Error(TAXONOMY_MODE_INVALID_MESSAGE);
+  }
+}
+
+/**
  * TenantSettingsStore — Phase 1（当初は `getDefaultHalfLifeHours` のみで追加。
  * `getEventRetention`/`setEventRetention` は `docs/roadmap.md` §5.4 のオーナー決定
  * 「監査ログの既定保持期間は無期限。テナント単位で短縮できる口は必須」を満たすために
@@ -196,9 +234,12 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
  *
  * `docs/memory-model.md` §10 の `tenant_settings` テーブルのうち、取り込み
  * （roadmap.md 段階3）が必要とする「Memory 作成時の既定 half-life」の読み出しと、
- * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。`taxonomy_mode` の
- * 読み書きは引き続き本 interface の範囲外である（オーナーが「必須」と決めたのは
- * 保持期間だけであり、`taxonomy_mode` を動かす根拠が無い）。
+ * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
+ *
+ * ⚠ **上の段落の「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」は
+ * [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)（Issue #201）で古くなった。**
+ * 本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
+ * `decay_clock` と同じ「4メソッドは省略可能」の形でこの interface に加わった。
  *
  * 契約:
  * - テナントに `tenant_settings` 行が無い場合、`getDefaultHalfLifeHours` は
@@ -324,6 +365,27 @@ export interface TenantSettingsStore {
    * （`advanceActivityClock: true`）だけである。
    */
   getActivitySeq?(ctx: Ctx): Promise<number>;
+
+  /**
+   * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
+   * `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`
+   * （`'open'`）を返す（`getDecayClock?` と同じ規律）。
+   *
+   * ⭐ **`decay_clock` と同じ理由で `?` 付き（省略可能）にする**——`@mnemora/core` は npm
+   * 公開済みであり、必須化すると外部の adapter が軒並みコンパイルできなくなる（ADR 0165
+   * 決めたこと13）。既定 `'open'` は「未実装の adapter でも今日と同じ挙動」に一致する
+   * （`taxonomy_mode` を読む側自体がまだ存在しないため、`open`/`strict` のどちらであっても
+   * PR-A の時点では観測できる違いが無い——ADR 0318「決めたこと」参照）。
+   */
+  getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
+
+  /**
+   * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
+   * `tenant_settings.taxonomy_mode` を設定する（UPSERT。行が無ければ作る）。`mode` が
+   * `TaxonomyMode` の2値のいずれでもない場合は `TAXONOMY_MODE_INVALID_MESSAGE` を含む
+   * `Error` で失敗する（`assertValidTaxonomyMode` 参照）。`setDecayClock?` と同じ形。
+   */
+  setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
 }
 
 /**
@@ -392,4 +454,43 @@ export async function writeDecayClock(
     throw new Error(DECAY_CLOCK_UNSUPPORTED_MESSAGE);
   }
   await store.setDecayClock(ctx, clock);
+}
+
+/**
+ * `setTaxonomyMode` を実装していない adapter へ書こうとしたときに投げる `Error` の
+ * メッセージに必ず含める文字列（Issue #201、
+ * [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)。
+ * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` と同じ形）。
+ */
+export const TAXONOMY_MODE_UNSUPPORTED_MESSAGE =
+  "this TenantSettingsStore does not support setTaxonomyMode";
+
+/**
+ * `getTaxonomyMode` を持たない adapter では `DEFAULT_TAXONOMY_MODE`（`'open'`）へ倒す
+ * （ADR 0318）。`readDecayClock` と同じ規律。
+ */
+export async function readTaxonomyMode(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+): Promise<TaxonomyMode> {
+  if (store.getTaxonomyMode === undefined) {
+    return DEFAULT_TAXONOMY_MODE;
+  }
+  return await store.getTaxonomyMode(ctx);
+}
+
+/**
+ * `setTaxonomyMode` を持たない adapter では `TAXONOMY_MODE_UNSUPPORTED_MESSAGE` を含む
+ * `Error` で**明示的に失敗する**（`writeDecayClock` と同じ理由——書き込みは既定へ倒せない。
+ * 倒すと「設定したのに効かない」が黙って成立する）。
+ */
+export async function writeTaxonomyMode(
+  store: TenantSettingsStore,
+  ctx: Ctx,
+  mode: TaxonomyMode,
+): Promise<void> {
+  if (store.setTaxonomyMode === undefined) {
+    throw new Error(TAXONOMY_MODE_UNSUPPORTED_MESSAGE);
+  }
+  await store.setTaxonomyMode(ctx, mode);
 }

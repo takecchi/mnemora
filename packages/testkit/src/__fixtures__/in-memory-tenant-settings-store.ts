@@ -2,9 +2,11 @@ import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
   assertValidHalfLifeRecalls,
+  assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
   DEFAULT_HALF_LIFE_HOURS,
   DEFAULT_HALF_LIFE_RECALLS,
+  DEFAULT_TAXONOMY_MODE,
   isHalfLifeHoursInRange,
 } from "@mnemora/core";
 import type {
@@ -12,6 +14,7 @@ import type {
   DecayClock,
   EventRetention,
   EventRetentionSetting,
+  TaxonomyMode,
   TenantSettingsStore,
 } from "@mnemora/core";
 
@@ -35,6 +38,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
       eventRetentionDays: number | null;
       decayClock: DecayClock;
       defaultHalfLifeRecalls: number;
+      taxonomyMode: TaxonomyMode;
     }
   >();
 
@@ -58,6 +62,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     eventRetentionDays: number | null;
     decayClock: DecayClock;
     defaultHalfLifeRecalls: number;
+    taxonomyMode: TaxonomyMode;
   } {
     let row = this.rows.get(tenantId);
     if (!row) {
@@ -66,6 +71,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
         eventRetentionDays: null,
         decayClock: DEFAULT_DECAY_CLOCK,
         defaultHalfLifeRecalls: DEFAULT_HALF_LIFE_RECALLS,
+        taxonomyMode: DEFAULT_TAXONOMY_MODE,
       };
       this.rows.set(tenantId, row);
     }
@@ -170,5 +176,22 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    */
   async getActivitySeq(ctx: Ctx): Promise<number> {
     return this.activitySeqBacking?.get(ctx.tenantId) ?? 0;
+  }
+
+  /**
+   * Issue #201 / ADR 0318: 行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）——
+   * `getDecayClock` と同じ規律。
+   */
+  async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
+    return this.rows.get(ctx.tenantId)?.taxonomyMode ?? DEFAULT_TAXONOMY_MODE;
+  }
+
+  /**
+   * 不正な値は `assertValidTaxonomyMode`（core 共有、`PostgresTenantSettingsStore
+   * .setTaxonomyMode` と同じ検証関数）で拒む——`setDecayClock` と同じ形。
+   */
+  async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+    assertValidTaxonomyMode(mode);
+    this.ensureRow(ctx.tenantId).taxonomyMode = mode;
   }
 }

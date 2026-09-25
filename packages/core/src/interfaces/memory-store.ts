@@ -1157,6 +1157,68 @@ export interface MemoryStore {
     supersededById: MemoryId,
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
+
+  /**
+   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
+   * このテナントの taxonomy 語彙を一覧する（`labels` テーブル、
+   * `docs/memory-model.md` §8）。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`docs/autonomy.md`「して
+   * はいけないこと」表の「公開 API の破壊的変更」、ADR 0100 決定1と同じ理由）。
+   *
+   * 契約:
+   * - `name` 昇順で返す。並び順の保証はこの1点のみ。
+   * - `status` は `'registered'` か `'proposed'` のいずれか。
+   * - `proposedCount` は「この名前を `tags` に含む Memory が新規作成された回数」の
+   *   近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』ではない**
+   *   （対象の Memory が後から `forgotten`/`purged` になっても減らない。§8 の
+   *   「昇格の候補として表に出る」ための目安であり、正確な現在数を保証する欄ではない。
+   *   詳細は ADR 0318「決めたこと」）。
+   * - `registeredAt` は `status: 'registered'` のときだけ非 null。
+   * - テナントに1件も無ければ空配列。例外にしない。
+   */
+  listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
+
+  /**
+   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
+   * 語彙を `registered` へ昇格する（`docs/memory-model.md` §8「テナントが語彙として
+   * 登録すると `registered` になる」）。
+   *
+   * 🔴 **任意メソッドである。**理由は `listLabels?` と同じ。
+   *
+   * 契約:
+   * - 対象の `name` が `labels` にまだ存在しなければ、`proposedCount: 0` の新しい行を
+   *   `registered` として作る——「まだ誰も `tags` に使っていない語彙を先に登録する」
+   *   という運用（§8 が想定する語彙管理）を妨げない。
+   * - 既に `proposed` として存在すれば、`status` を `registered` に更新し
+   *   `registeredAt` を現在時刻にする。`proposedCount` は変えない。
+   * - 既に `registered` であれば、`registeredAt` を変えずに現在の行をそのまま返す
+   *   （何度呼んでも同じ結果になる——冪等）。
+   * - 戻り値は更新後の `LabelSummary`。
+   */
+  registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
+}
+
+/**
+ * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md): taxonomy
+ * 語彙1件（`labels` テーブル1行、`docs/memory-model.md` §8）。
+ *
+ * ⚠ **`attributes`（Issue #152/#153、呼び手専用の別列）とは別物である。** `LabelSummary`
+ * が指す「ラベル」は `memories.tags` に語彙の状態（`registered`/`proposed`）を持たせた
+ * もの——mnemora 自身が解釈する語彙である。`attributes` は mnemora が解釈しない呼び手
+ * 専用の値であり、ラベルの語彙登録の対象にはならない（ADR 0318「決めたこと」参照）。
+ */
+export interface LabelSummary {
+  name: string;
+  status: "registered" | "proposed";
+  /**
+   * この名前を `tags` に含む Memory が新規作成された回数の近似値。
+   * `listLabels?`/`registerLabel?` の doc コメント参照——正確な現在数の契約ではない。
+   */
+  proposedCount: number;
+  /** `status === 'registered'` のときだけ非 null。 */
+  registeredAt: Date | null;
 }
 
 /**

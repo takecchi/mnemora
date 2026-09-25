@@ -557,6 +557,25 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 `attributes` は「呼び手が何を宣言したか」を問うものである——前者は repo 側が語彙を
 決め、後者は呼び手が値そのものを決める。この違いは `labels` が実装された後も残る。
 
+**⚠ 2026-09-25 追記（Issue #201 PR-A、[ADR 0318](./decisions/0318-taxonomy-labels.md)）:
+上の表の `labels`/`memory_labels` の Phase は「Phase 2（未着地）」と書いてあるが、
+本追記の時点で古い。** `labels`/`memory_labels` を任意の追加として前倒しで実装した
+（`migrations/0020_taxonomy_labels.sql`、既存 `memories.tags` からの backfill を含む）。
+`MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・`registered`
+への昇格ができ、`TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?`（任意メソッド）
+で `taxonomy_mode` を読み書きできる。**ただし前倒ししたのは保存・語彙の口だけであり、
+`labels` を使った recall の絞り込み（上の表が言う「段1への参加」に相当するもの）は
+まだ実装していない**（PR-B、未着地）——この点で `attributes` とはまだ非対称である。
+
+**さらに、本節の冒頭が書いている「`strict` モードが変えるのは『`proposed` なラベルが
+検索の*フィルタ・加点*に参加できるか』だけである」のうち、*加点*の側は実装しない
+方針に変わった。** ADR 0318「決定5」参照——**上の「2026-09 訂正」段落が確立した既存の
+`tagMatch`（`tags` の生の一致数による加点、`recall.md` §7）は、`taxonomy_mode` の値に
+関わらず今日と同じ計算をし続ける。** 変えると、`strict` なテナントの既存スコアが
+この PR によって動いてしまう（呼び出し側の挙動を1バイトも変えないという制約に反する）。
+`strict` が実際に効くのは、`labels` を使った**新しい**絞り込み（PR-B、まだ実装していない）
+に対してだけになる予定である。
+
 ---
 
 ## 9. 監査ログ
