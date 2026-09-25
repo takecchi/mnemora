@@ -1,9 +1,8 @@
+import { randomUUID } from "node:crypto";
 import type { Pool } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
-import { PostgresMemoryStore } from "../memory-store.js";
-import { PostgresVectorStore } from "../vector-store.js";
 import { embeddingSpaceTableName } from "../embedding-space-table.js";
 import {
   closeTestClient,
@@ -22,6 +21,11 @@ import {
  * 成立しない（`docs/decisions/0011-no-window-count-in-ann-stage.md` 参照）。
  * このテストはその事実そのものを検査する——ADR の主張が将来ひとりでに腐らないための歯。
  *
+ * ⚠ **このテスト自身が走る環境は、上の実測環境（18.6）とは別。** CI では
+ * `.github/workflows/ci.yml` の `postgres` ジョブ（`pgvector/pgvector:pg17` イメージ、
+ * PostgreSQL 17系）でこのファイルが走る。18.6 は ADR 0011 が根拠にした元の実測環境で
+ * あって、このテストが今実際に走っている環境ではない——両者を混同しないこと。
+ *
  * 二つの分岐:
  * - 分岐B（既定のプランナ挙動）: `count(*) OVER ()` を入れると HNSW が捨てられ、
  *   Seq Scan + WindowAgg に落ちる（件数は正しいが索引を殺す）。
@@ -33,21 +37,152 @@ import {
 const TENANT = "count-over-window-tenant";
 const TABLE = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
 
-async function seed(
-  memoryStore: PostgresMemoryStore,
-  vectorStore: PostgresVectorStore,
-  ctx: Ctx,
-  count: number,
-  pool: Pool,
-) {
-  const rand = seededRandom(20260905);
-  for (let i = 0; i < count; i += 1) {
-    const memory = await memoryStore.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: ctx.tenantId }),
+/** 1回の INSERT 文で送る行数の目安（数百〜1000行）。 */
+const BULK_INSERT_CHUNK_SIZE = 1000;
+
+/**
+ * `memories` へ、`buildNewMemoryFixture({ tenantId })` と同じ列値を一括 INSERT する。
+ * `PostgresMemoryStore.createMemory`（`../memory-store.ts`）が書く列・既定値
+ * （`input.xxx ?? null` の形の既定を含む）と1対1で対応させている——`tags` から
+ * `proposed` ラベルを作る副作用（`upsertProposedLabels`）は無い（このテストの
+ * `tags` は常に空配列なので、元々そのループは0回だった）。`buildNewMemoryFixture` は
+ * 乱数にも現在時刻にも依存しない純関数なので、1回だけ呼んで得た値を全行で使い回せる。
+ *
+ * `id` だけ `createMemory` と手段が違う（`gen_random_uuid()` ではなく `randomUUID()`
+ * で呼び出し側が払い出す）。`memory_embeddings_<space>` 側が同じ id を外部キーとして
+ * 参照するため、呼び出し側で id を先に確定させる必要がある。
+ */
+async function insertMemoriesBulk(pool: Pool, ctx: Ctx, ids: readonly string[]): Promise<void> {
+  const fixture = buildNewMemoryFixture({ tenantId: ctx.tenantId });
+  const fixedParams = [
+    ctx.tenantId,
+    fixture.subjectId ?? null,
+    fixture.sourceObservationId ?? null,
+    fixture.extractorVersion ?? null,
+    fixture.content,
+    fixture.contentHash,
+    fixture.digest,
+    fixture.digestSource,
+    fixture.provenance.kind,
+    JSON.stringify(fixture.provenance),
+    fixture.status ?? "active",
+    fixture.supersededById ?? null,
+    fixture.contestedWithId ?? null,
+    fixture.tags,
+    fixture.occurredAt ?? null,
+    fixture.recordedAt,
+    fixture.lastReinforcedAt ?? null,
+    fixture.validFrom ?? null,
+    fixture.validUntil ?? null,
+    fixture.claimKey?.subject ?? null,
+    fixture.claimKey?.predicate ?? null,
+    fixture.strength,
+    fixture.halfLifeHours,
+    fixture.decayFloorAt,
+    fixture.decayBaseSeq ?? null,
+    fixture.decayFloorSeq ?? null,
+    fixture.halfLifeRecalls ?? null,
+    fixture.embeddingStatus,
+    JSON.stringify(fixture.attributes ?? {}),
+  ];
+  for (let start = 0; start < ids.length; start += BULK_INSERT_CHUNK_SIZE) {
+    const chunk = ids.slice(start, start + BULK_INSERT_CHUNK_SIZE);
+    await pool.query(
+      `
+      INSERT INTO memories (
+        id, tenant_id, subject_id,
+        source_observation_id, extractor_version,
+        content, content_hash, digest, digest_source,
+        provenance_kind, provenance,
+        status, superseded_by_id, contested_with_id,
+        tags,
+        occurred_at, recorded_at, last_reinforced_at, valid_from, valid_until,
+        claim_key_subject, claim_key_predicate,
+        strength, half_life_hours, decay_floor_at,
+        decay_base_seq, decay_floor_seq, half_life_recalls,
+        embedding_status,
+        attributes,
+        created_at, updated_at
+      )
+      SELECT
+        m.id, $2, $3,
+        $4, $5,
+        $6, $7, $8, $9,
+        $10, $11::jsonb,
+        $12, $13, $14,
+        $15::text[],
+        $16, $17, $18, $19, $20,
+        $21, $22,
+        $23, $24, $25,
+        $26, $27, $28,
+        $29,
+        $30::jsonb,
+        now(), now()
+      FROM unnest($1::uuid[]) AS m(id)
+      `,
+      [chunk, ...fixedParams],
     );
-    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, memory.id, [rand(), rand(), rand()]);
   }
+}
+
+/**
+ * `memory_embeddings_<space>` へ、`vectorStore.upsert`（`../vector-store.ts`）が書くのと
+ * 同じ列を一括 INSERT する。`ON CONFLICT` は無い——`memories` 同様、常に新規行しか
+ * 作らないため不要。
+ *
+ * `rand` は呼び出し元と共有する `seededRandom(20260905)` のインスタンスそのもの——
+ * 1行につき3回、**`ids` と同じ順**で消費する（元の1行ずつのループが
+ * `vectorStore.upsert` の直前で呼んでいたのと同じ消費順）。
+ *
+ * HNSW は逐次挿入で索引を作るため、`memory_embeddings_<space>` への物理的な挿入順が
+ * 元の実装と同じであることが重要。`unnest($1::uuid[], $2::vector[])` は2つの配列を
+ * 位置で対にして、配列の順序どおりに行を生成する（`memory-store.ts` の
+ * `recordUsage`・`contested-with-index.test.ts` の `seedContestedMemories` が
+ * 同じ `unnest` の使い方をしている）。チャンクも `ids` の先頭から順に処理するので、
+ * 全体として `ids[0], ids[1], ...` の順で INSERT される——この順序保存は、手元の
+ * Postgres で `ORDER BY ctid`（新規テーブルでは物理挿入順を反映する）を使って
+ * 実測で確認済み（Issue #758）。
+ */
+async function insertEmbeddingsBulk(
+  pool: Pool,
+  ctx: Ctx,
+  ids: readonly string[],
+  rand: () => number,
+): Promise<void> {
+  for (let start = 0; start < ids.length; start += BULK_INSERT_CHUNK_SIZE) {
+    const chunk = ids.slice(start, start + BULK_INSERT_CHUNK_SIZE);
+    const vectors = chunk.map(() => `[${rand()},${rand()},${rand()}]`);
+    await pool.query(
+      `
+      INSERT INTO ${TABLE} (tenant_id, memory_id, embedding, model, created_at)
+      SELECT $1, t.memory_id, t.embedding, $4, now()
+      FROM unnest($2::uuid[], $3::vector[]) AS t(memory_id, embedding)
+      `,
+      [ctx.tenantId, chunk, vectors, TEST_EMBEDDING_SPACE.model],
+    );
+  }
+}
+
+/**
+ * Issue #758: 元は `memoryStore.createMemory` / `vectorStore.upsert` を1行ずつ
+ * `count` 回呼ぶ実装だった。実測したところ、`分岐A`（3,000件→9,000件の
+ * 2段 seed）の it 全体の時間のうち99.8%以上が seed に費やされ、そのほぼ全部がこの
+ * 1行ずつの往復だった（3,000件で約20秒、9,000件で約60秒。クエリ本体
+ * `countWithSeqScanDisabled` は数ミリ秒、`resetTestDatabase` も高々百数十ミリ秒）。
+ *
+ * このテストが検査したいのはプランナ／HNSW 索引の性質（ADR 0011 の主張）であって、
+ * `PostgresMemoryStore`/`PostgresVectorStore` の書き込み経路そのものではない——
+ * 書き込み経路の契約は `conformance.postgres.test.ts`（`@mnemora/testkit` の
+ * `describeMemoryStoreConformance`/`describeVectorStoreConformance` を Postgres 実装に
+ * 対して回す）が別途検査している。そのため、ここでは store を経由せず `memories` /
+ * `memory_embeddings_<space>` へ直接一括 INSERT する——生成される行・挿入順が
+ * 1行ずつの旧実装と同じであることは実測で確認済み（Issue #758）。
+ */
+async function seed(ctx: Ctx, count: number, pool: Pool): Promise<void> {
+  const rand = seededRandom(20260905);
+  const ids: string[] = Array.from({ length: count }, () => randomUUID());
+  await insertMemoriesBulk(pool, ctx, ids);
+  await insertEmbeddingsBulk(pool, ctx, ids, rand);
   // 統計情報が無いと、プランナが誤った行数見積もりで意図しない索引を選んでしまう。
   await pool.query(`ANALYZE ${TABLE}`);
   await pool.query("ANALYZE memories");
@@ -96,12 +231,10 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
   });
 
   it("分岐B: count(*) OVER () を含めると、既定のプランナは HNSW を捨てて Seq Scan + WindowAgg を選ぶ", async () => {
-    const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
+    const { pool } = await getTestClient();
     const ctx: Ctx = { tenantId: TENANT };
     const rowCount = 3000;
-    await seed(memoryStore, vectorStore, ctx, rowCount, pool);
+    await seed(ctx, rowCount, pool);
 
     // count(*) OVER () を含めない場合: HNSW 索引を使う。
     const withoutWindow = await pool.query(
@@ -150,20 +283,18 @@ describe("count(*) OVER () は HNSW 上で成立しない（ADR 0011）", () => 
   }, 120_000);
 
   it("分岐A: 索引を強制すると、返る件数は真の総件数ではなく ANN の探索設定に固定される", async () => {
-    const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
+    const { pool } = await getTestClient();
     const ctx: Ctx = { tenantId: TENANT };
 
     const smallCount = 3000;
-    await seed(memoryStore, vectorStore, ctx, smallCount, pool);
+    await seed(ctx, smallCount, pool);
     const smallCapped = await countWithSeqScanDisabled(pool);
     // 真のデータ件数と一致しない（打ち切りが起きている）。
     expect(smallCapped).toBeLessThan(smallCount);
 
     await resetTestDatabase();
     const largeCount = 9000;
-    await seed(memoryStore, vectorStore, ctx, largeCount, pool);
+    await seed(ctx, largeCount, pool);
     const largeCapped = await countWithSeqScanDisabled(pool);
     expect(largeCapped).toBeLessThan(largeCount);
 
