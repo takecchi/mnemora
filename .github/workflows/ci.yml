@@ -1255,9 +1255,9 @@ jobs:
           if-no-files-found: ignore
 
   correction-candidate-probes:
-    name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0320）を @mnemora/local-embedding で実測し、値を残す"
+    name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測し、値を残す"
     runs-on: ubuntu-latest
-    # ADR 0291 §7-3、ADR 0320。`identifier-probes`/`numeral-token-probes` ジョブと
+    # ADR 0291 §7-3、ADR 0321。`identifier-probes`/`numeral-token-probes` ジョブと
     # **同じ形**（実測値を Job Summary へ残す・落とすのは bench 自体が壊れたときだけ）を
     # 踏襲する——**別のケース集合・別の arm 実行・別の JSON・別の基準値ファイル**であり、
     # 既存2ジョブには1文字も触れていない。
@@ -1296,6 +1296,9 @@ jobs:
       # `LocalEmbeddingProvider` はモデル重みの取得先を選ぶ鍵を要求しない
       # (`@mnemora/local-embedding` は外部サービスへ繋がない、ADR 0085)——
       # `MNEMORA_PROVIDER_SOURCE`/`OPENAI_API_KEY` はこのジョブに関係が無い。
+      # 重みの cache 段の path と同じ値を job-level env に置く（`identifier-probes` と同じ形。
+      # scripts/__tests__/ci-yml-local-embedding-cache-wiring.test.mjs が両向きに検査する）。
+      MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -1335,7 +1338,7 @@ jobs:
           path: ${{ github.workspace }}/.cache/local-embedding
           key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
-      - name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0320）を @mnemora/local-embedding で実測する"
+      - name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測する"
         # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` ジョブと同じ規律。
         env:
           MNEMORA_CORRECTION_CANDIDATE_JSON: ${{ github.workspace }}/correction-candidate-probe.json
