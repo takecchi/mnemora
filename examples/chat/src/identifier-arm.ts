@@ -99,8 +99,7 @@ export function computeMarginStats(margins: readonly (number | null)[]): MarginS
   const min = Math.min(...present);
   let stdDev: number | null = null;
   if (present.length >= 2) {
-    const variance =
-      present.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (present.length - 1);
+    const variance = present.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (present.length - 1);
     stdDev = Math.sqrt(variance);
   }
   return { count: present.length, mean, stdDev, min };

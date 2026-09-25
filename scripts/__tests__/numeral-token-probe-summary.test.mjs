@@ -24,7 +24,8 @@ const script = fileURLToPath(new URL("../numeral-token-probe-summary.mjs", impor
 
 function makeGroup(overrides = {}) {
   return {
-    label: "numeral-token-probes/sparse(llm=deterministic, embedding=local/ruri-v3-30m/sym/256次元, haystack=sparse)",
+    label:
+      "numeral-token-probes/sparse(llm=deterministic, embedding=local/ruri-v3-30m/sym/256次元, haystack=sparse)",
     llmMode: "deterministic",
     embeddingMode: "local",
     embeddingSpace: { provider: "local", model: "ruri-v3-30m/sym", dimensions: 256 },
