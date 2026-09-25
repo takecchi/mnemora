@@ -123,6 +123,9 @@ import type { EmbeddingSpaceId } from "../embedding.js";
 import type { CtxSchema } from "../ctx.js";
 import type { Ctx } from "../ctx.js";
 
+import type { AttributesSchema } from "../attributes.js";
+import type { Attributes } from "../attributes.js";
+
 /**
  * Issue #272: `satisfies z.ZodType<T>` は片方向の代入可能性
  * （「zod が推論する型 → 手書きの型 T」への代入可能性）しか見ない。
@@ -501,6 +504,12 @@ type _p60_AnnUnreachedSeverity = Expect<
 >;
 
 // =============================================================================
+// packages/core/src/attributes.ts — 1ペア（Issue #152/#153、ADR 0312）
+// =============================================================================
+
+type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attributes>>;
+
+// =============================================================================
 // 実行時の存在証明
 //
 // 上の `type _pNN_... = Expect<Equals<...>>` は、`Equals<A,B>` が `false` になった
@@ -517,7 +526,7 @@ type _p60_AnnUnreachedSeverity = Expect<
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
-const EXPECTED_PAIR_COUNT = 60;
+const EXPECTED_PAIR_COUNT = 61;
 
 /**
  * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
@@ -589,7 +598,7 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-const EXPECTED_SATISFIES_COUNT = 60;
+const EXPECTED_SATISFIES_COUNT = 61;
 
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
   it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件`, () => {

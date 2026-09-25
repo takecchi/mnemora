@@ -5,8 +5,8 @@ import type { LLMProvider, StructuredRequest } from "../interfaces/llm-provider.
 import type { MemoryStore } from "../interfaces/memory-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { ConsolidationLLMResultSchema } from "../strategies/consolidate.js";
-import { ReflectionLLMResultSchema } from "../strategies/reflect.js";
-import type { NewMemory } from "../memory.js";
+import { buildReflectedMemory, ReflectionLLMResultSchema } from "../strategies/reflect.js";
+import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
 import {
   createRuntime,
   DEFAULT_CONSOLIDATE_MIN_AFFINITY,
@@ -812,5 +812,73 @@ describe("3つの LLM スキーマ（extraction / consolidation / reflection）�
    */
   it("[既知の非対称] reflected 候補は outcome を剥がされて consolidation のスキーマにも一致する", () => {
     expect(ConsolidationLLMResultSchema.safeParse(reflectedCandidate).success).toBe(true);
+  });
+});
+
+describe("buildReflectedMemory（純関数） — attributes は積集合（Issue #153、ADR 0312）", () => {
+  function fixtureMemory(overrides: Partial<Memory> = {}): Memory {
+    const recordedAt = overrides.recordedAt ?? NOW;
+    const strength = overrides.strength ?? 1;
+    const halfLifeHours = overrides.halfLifeHours ?? 24 * 365 * 10;
+    return {
+      id: overrides.id ?? `mem-${Math.random()}`,
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "hash",
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      status: "active" as MemoryStatus,
+      supersededById: null,
+      contestedWithId: null,
+      tags: [],
+      occurredAt: null,
+      recordedAt,
+      lastReinforcedAt: null,
+      strength,
+      halfLifeHours,
+      decayFloorAt: defaultDecayStrategy.floorAt({
+        recordedAt,
+        lastReinforcedAt: null,
+        strength,
+        halfLifeHours,
+      }),
+      embeddingStatus: "pending",
+      createdAt: recordedAt,
+      updatedAt: recordedAt,
+      ...overrides,
+    };
+  }
+
+  it("全件一致するキーだけが残る。値が割れているキー・一部にしか無いキーは落ちる", () => {
+    const memory = buildReflectedMemory({
+      ctx,
+      eligible: [
+        fixtureMemory({ id: "m1", attributes: { visibility: "internal", region: "jp" } }),
+        fixtureMemory({ id: "m2", attributes: { visibility: "internal", region: "us" } }),
+      ],
+      llmResult: { outcome: "reflected", content: "反芻結果" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.attributes).toEqual({ visibility: "internal" });
+  });
+
+  it("eligible がどちらも attributes を持たなければ {}（推論の産物へ何も持ち込まない）", () => {
+    const memory = buildReflectedMemory({
+      ctx,
+      eligible: [fixtureMemory({ id: "m1" }), fixtureMemory({ id: "m2" })],
+      llmResult: { outcome: "reflected", content: "反芻結果" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.attributes).toEqual({});
   });
 });

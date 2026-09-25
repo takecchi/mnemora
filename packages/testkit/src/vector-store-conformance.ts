@@ -46,6 +46,8 @@ export interface PrepareMemoryIdAttrs {
   validFrom?: Date | null;
   /** Issue #280: `filter.validAt` の歯が使う。 */
   validUntil?: Date | null;
+  /** Issue #152/#153（ADR 0312）: `filter.attributes` の歯が使う。 */
+  attributes?: Record<string, string>;
 }
 
 export interface VectorStoreConformanceOptions {
@@ -865,6 +867,62 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       });
 
       expect(hits.map((hit) => hit.memoryId)).toContain(alwaysValidId);
+    });
+
+    // -------------------------------------------------------------------
+    // filter.attributes（Issue #152/#153、ADR 0312）: AND 等値の絞り込み。
+    // -------------------------------------------------------------------
+
+    it("filter.attributes: 渡したキーと同じ値を持つ Memory だけが返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemoryId(ctx, {
+        attributes: { visibility: "internal" },
+      });
+      const mismatchingId = await prepareMemoryId(ctx, {
+        attributes: { visibility: "public" },
+      });
+      const missingId = await prepareMemoryId(ctx, {});
+
+      await store.upsert(ctx, space, matchingId, [1, 0, 0]);
+      await store.upsert(ctx, space, mismatchingId, [1, 0, 0]);
+      await store.upsert(ctx, space, missingId, [1, 0, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1", attributes: { visibility: "internal" } },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).not.toContain(mismatchingId);
+      expect(ids).not.toContain(missingId);
+    });
+
+    it("filter.attributes: 複数キーは AND——すべて一致する Memory だけが残る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const bothId = await prepareMemoryId(ctx, {
+        attributes: { visibility: "internal", region: "jp" },
+      });
+      const onlyOneId = await prepareMemoryId(ctx, {
+        attributes: { visibility: "internal", region: "us" },
+      });
+
+      await store.upsert(ctx, space, bothId, [1, 0, 0]);
+      await store.upsert(ctx, space, onlyOneId, [1, 0, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: {
+          tenantId: "tenant-1",
+          attributes: { visibility: "internal", region: "jp" },
+        },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(bothId);
+      expect(ids).not.toContain(onlyOneId);
     });
 
     it("filter は複数同時に渡すと AND になる（どれか1つが不一致なら返らない）", async () => {
