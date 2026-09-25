@@ -1,0 +1,162 @@
+# 🔴🔴 ⛔ **この workflow は required status check ではない。** `.github/workflows/ci.yml`・
+# `.github/required-status-checks.json`・branch protection のどれにも触れていない
+# （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」節・ADR 0279 の対象外——required
+# check の一覧はこの workflow を持たない）。
+#
+# ## 何を測るか（Issue #565「採るとしたら何が要るか」の測定を、複数 runner へ広げる）
+#
+# `examples/chat` の `embedding-fingerprint` サブコマンド（固定入力3件に対して
+# `@mnemora/local-embedding` の `embed()` を呼ぶ）を、
+#
+# - **runner**（`CROSS_RUNNER_RUNNERS`、`scripts/cross-runner-embedding-fingerprint-lib.mjs`）
+#   × **numThreads**（`CROSS_RUNNER_NUM_THREADS`）× **rep**（`CROSS_RUNNER_REPS`、同一設定の
+#   反復——同じジョブ内で2回推論するのではなく、**別ジョブ＝別 VM の反復**）
+#
+# の全組み合わせ（24脚）で走らせ、比較ジョブが基準脚（`ubuntu-latest` /
+# `numThreads=4` / `rep=1`）に対する各脚の一致・不一致・比較できなかった、および
+# 群（同 arch 内 / arch 間 / numThreads 間 / 同条件 rep 間）ごとの要約を Job Summary へ残す。
+#
+# ⚠ **matrix の値（`runner:` / `numThreads:` / `rep:`）は
+# `scripts/cross-runner-embedding-fingerprint-lib.mjs` の `CROSS_RUNNER_RUNNERS` /
+# `CROSS_RUNNER_NUM_THREADS` / `CROSS_RUNNER_REPS` と二重管理である。** ずれたら
+# `scripts/__tests__/embedding-cross-runner-reproducibility-workflow-wiring.test.mjs` が
+# 赤くなる（`EMBEDDING_FINGERPRINT_JOBS` と ci.yml の関係と同じ形）。
+#
+# ⛔ **`ubuntu-22.04` / `ubuntu-22.04-arm` は非推奨（deprecation 開始 2026-09-17、完全終了
+# 2027-04-17。brownout は 2027-03-23〜2027-04-13 の予定——2026-09-25 現在は影響しない）。**
+# この measurement は一回性の観測であり、恒久的な CI ジョブではないため、期限切れ前の
+# runner を使うこと自体は問題にしない。ただし **2027年に入ってこの workflow を再実行する
+# 場合は、この2ラベルが生きているかを先に確認すること。**
+#
+# ⛔ **`onnxruntime-node`（`@huggingface/transformers` の依存）が linux/arm64 の CPU
+# バイナリを実際に同梱していることは、`npm pack onnxruntime-node@<version>` で
+# 手元で確認済み**（`bin/napi-v6/linux/arm64/onnxruntime_binding.node` /
+# `libonnxruntime.so.1` が実在する）——ARM runner を候補から外す理由には**ならない**。
+# 実際に動くかどうかは、この workflow 自身の ARM 脚が判定する。
+name: "embedding 出力のランナー間再現性を測る（測るだけ。門にはしない。Issue #565）"
+
+on:
+  workflow_dispatch: {}
+  pull_request:
+    paths:
+      - ".github/workflows/embedding-cross-runner-reproducibility.yml"
+      - "scripts/cross-runner-embedding-fingerprint-lib.mjs"
+      - "scripts/measure-cross-runner-embedding-fingerprint.mjs"
+      - "scripts/compare-cross-runner-embedding-fingerprints.mjs"
+      - "scripts/measure-embedding-output-fingerprint-lib.mjs"
+      - "scripts/compare-embedding-output-fingerprints-lib.mjs"
+      - "scripts/print-local-embedding-cache-key.mjs"
+      - "scripts/local-embedding-pinned-revision.json"
+      - "examples/chat/src/embedding-fingerprint.ts"
+      - "examples/chat/src/providers.ts"
+      - "examples/chat/src/local-embedding-warmup.ts"
+      - "packages/local-embedding/src/**"
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: "脚 runner=${{ matrix.runner }} numThreads=${{ matrix.numThreads }} rep=${{ matrix.rep }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-latest, ubuntu-24.04-arm, ubuntu-22.04, ubuntu-22.04-arm]
+        numThreads: [1, 2, 4]
+        rep: [1, 2]
+    env:
+      MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: "固定した revision（Issue #597 案(a)）から cache 鍵を決める（ci.yml と同じスクリプト）"
+        # 🔑 **ci.yml の `example-chat` 等と同じキー空間を意図的に共有する**——同じモデル・
+        # 同じ revision であり、重みファイル自体は arch に依存しないデータファイル
+        # （tokenizer.json / config.json / onnx の重み）なので、x64 runner が作った
+        # キャッシュを arm runner が読んでもよい。分ける理由が無い。
+        id: local-embedding-cache-key
+        run: node scripts/print-local-embedding-cache-key.mjs >> "$GITHUB_OUTPUT"
+
+      - name: モデル重みをキャッシュする（actions/cache。ci.yml と同じ key）
+        uses: actions/cache@v6
+        with:
+          path: ${{ github.workspace }}/.cache/local-embedding
+          key: local-embedding-${{ steps.local-embedding-cache-key.outputs.key }}
+
+      - name: "固定入力に対する embedding 出力を測る（numThreads=${{ matrix.numThreads }}、Issue #565 ランナー間比較）"
+        id: embedding-fingerprint
+        env:
+          MNEMORA_EMBEDDING_FINGERPRINT_RAW_JSON: ${{ github.workspace }}/embedding-fingerprint-raw.json
+          MNEMORA_EMBEDDING_FINGERPRINT_NUM_THREADS: ${{ matrix.numThreads }}
+        run: pnpm --filter @mnemora/example-chat run embedding-fingerprint
+
+      - name: "この脚の測定 JSON を組み立てる（runner label・arch・lscpu・numThreads・rep・sha256Float32）"
+        if: always()
+        run: |
+          node scripts/measure-cross-runner-embedding-fingerprint.mjs \
+            --raw "${{ github.workspace }}/embedding-fingerprint-raw.json" \
+            --out "${{ github.workspace }}/embedding-fingerprint.json" \
+            --runner-label "${{ matrix.runner }}" \
+            --runner-name "${{ runner.name }}" \
+            --rep "${{ matrix.rep }}"
+
+      - name: "この脚の指紋を成果物として残す(Issue #565)"
+        # ⚠ **artifact 名は `crossRunnerArtifactName()`（cross-runner-embedding-fingerprint-lib.mjs）
+        # と同じ形を、文字列展開でそのまま書いている。** ずれたら比較段が「artifact が無い」
+        # として扱う——`embedding-cross-runner-reproducibility-workflow-wiring.test.mjs` が
+        # この行と `crossRunnerArtifactName` の出力が一致することを確かめる。
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: "cross-runner-embedding-fingerprint--runner-${{ matrix.runner }}--nt-${{ matrix.numThreads }}--rep-${{ matrix.rep }}"
+          path: ${{ github.workspace }}/embedding-fingerprint.json
+          if-no-files-found: warn
+
+  compare:
+    name: "全脚を基準脚と突き合わせ、群ごとに要約する(測るだけ。門にはしない。常に成功する。Issue #565)"
+    needs: [measure]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: "全脚が残した cross-runner-embedding-fingerprint--* artifact を集める(無ければ無いまま——このジョブは落とさない)"
+        uses: actions/download-artifact@v6
+        with:
+          pattern: "cross-runner-embedding-fingerprint--*"
+          path: ${{ github.workspace }}/cross-runner-embedding-fingerprint-artifacts
+
+      - name: "基準脚との比較・群ごとの要約を Job Summary と JSON artifact に残す(⛔ 門ではない。常に exit 0)"
+        run: |
+          node scripts/compare-cross-runner-embedding-fingerprints.mjs \
+            --artifacts-dir "${{ github.workspace }}/cross-runner-embedding-fingerprint-artifacts" \
+            --json-out "${{ github.workspace }}/embedding-cross-runner-reproducibility-summary.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: "比較結果の JSON を成果物として残す"
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: embedding-cross-runner-reproducibility-summary
+          path: ${{ github.workspace }}/embedding-cross-runner-reproducibility-summary.json
+          if-no-files-found: warn
