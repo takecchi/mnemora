@@ -41,6 +41,7 @@ export * from "./clock.js";
 export * from "./inline-scheduler.js";
 
 export * from "./extraction.js";
+export * from "./claim-key.js";
 export * from "./runtime.js";
 export * from "./recall-runtime.js";
 export * from "./recall-output-validation.js";

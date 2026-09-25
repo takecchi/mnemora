@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { ClaimKey } from "./claim-key.js";
 import type { Ctx } from "./ctx.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./strategies/decay.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
@@ -461,6 +462,12 @@ export interface BuildNewMemoryParams {
    * 何も増えない」）。
    */
   halfLifeRecalls?: number;
+  /**
+   * Issue #371（claim-key.ts の `ClaimKey` 参照）: opt-in で取れた claim key。
+   * `undefined`/`null` はどちらも「鍵なし」——呼び出し側（`runtime.ts`）が claim key
+   * opt-in を使っていない、またはこの候補について鍵が取れなかった場合。
+   */
+  claimKey?: ClaimKey | null;
 }
 
 function buildProvenance(params: BuildNewMemoryParams): Provenance {
@@ -534,6 +541,9 @@ export function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMe
     // 「限定の出所から出た記憶は限定のまま」——落とす方向に倒す（`Memory.attributes` の
     // doc コメント参照）。
     attributes: params.observation.attributes ?? {},
+    // Issue #371: opt-in で取れた claim key をそのまま通す。`undefined`/`null` は
+    // どちらも「鍵なし」——`params.claimKey` の doc コメント（`BuildNewMemoryParams`）参照。
+    claimKey: params.claimKey ?? null,
     strength: 1,
     halfLifeHours: params.halfLifeHours,
     decayFloorAt,
