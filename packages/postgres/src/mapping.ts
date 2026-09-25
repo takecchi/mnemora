@@ -144,7 +144,9 @@ export function parsePgBigint(value: string | number | null): number | null {
  * 欠けているなら鍵なしとして扱う」という寛容な側へ倒す（`docs/autonomy.md` の「壊れている
  * ものを直す」規律に反しない範囲で、読み出しを止めない）。
  */
-function rowToClaimKey(row: Pick<MemoryRow, "claim_key_subject" | "claim_key_predicate">): ClaimKey | null {
+function rowToClaimKey(
+  row: Pick<MemoryRow, "claim_key_subject" | "claim_key_predicate">,
+): ClaimKey | null {
   if (row.claim_key_subject === null || row.claim_key_predicate === null) {
     return null;
   }

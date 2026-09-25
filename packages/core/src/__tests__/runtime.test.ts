@@ -2493,9 +2493,7 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
 
   it("claim key の呼び出しが失敗しても、Memory の作成は止まらない——claimKey は null のまま、失敗は ObserveResult に残る", async () => {
     // 2回目（claim key）の応答を設定しない ⟹ sequencedLlm が例外を投げる。
-    const llm = sequencedLlm([
-      { memories: [{ content: "発話", provenanceKind: "stated" }] },
-    ]);
+    const llm = sequencedLlm([{ memories: [{ content: "発話", provenanceKind: "stated" }] }]);
     const { runtime, stores } = buildRuntime(llm);
     const result = await runtime.observe(ctx, {
       kind: "utterance",

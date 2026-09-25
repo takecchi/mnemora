@@ -515,9 +515,7 @@ type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attribute
 // Issue #371（(B) 第1段、ADR 0185/0315）: `claim-key.ts` に `ClaimKeyOptionsSchema`
 // （`satisfies z.ZodType<...>`）を新設した。このファイル冒頭のコメントの規律どおり、
 // 対応するペアをここに登録する。
-type _p62_ClaimKeyOptions = Expect<
-  Equals<z.infer<typeof ClaimKeyOptionsSchema>, ClaimKeyOptions>
->;
+type _p62_ClaimKeyOptions = Expect<Equals<z.infer<typeof ClaimKeyOptionsSchema>, ClaimKeyOptions>>;
 
 // =============================================================================
 // 実行時の存在証明
