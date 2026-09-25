@@ -122,7 +122,7 @@ arm も走らせる（Issue #109 後半）。**識別子・日本語固有名詞
 `identifiersDense`/`japaneseNamesSparse`/`japaneseNamesDense`）と数詞・記号索引 probe
 （`numeralSparse`/`numeralDense`）の計6群。**⛔ 門ではない**——Job Summary に基準値との
 差分と「並走の判定」を出すだけで、相違しても・並走の判定が red でも `exit 0` のまま
-（[ADR 0315](./docs/decisions/0315-openai-embedding-false-positive-ceiling.md)。
+（[ADR 0316](./docs/decisions/0316-openai-embedding-false-positive-ceiling.md)。
 Issue #109 の閉じる条件と、実測した偽陽性率の上限は
 下の「OpenAI 実埋め込みでの偽陽性率の上限（Issue #109 後半）」を見ること）。
 
@@ -185,7 +185,7 @@ Issue #109 の閉じる条件と、実測した偽陽性率の上限は
 偽陽性率に上限を置けると実測できたとき——を、識別子・日本語固有名詞・数詞・記号索引の
 6群（`text-embedding-3-small`/256次元、実 API）で実測した。**測ったこと・実測した上限の
 値と射程（何の揺れに対する上限か）は
-[ADR 0315](./docs/decisions/0315-openai-embedding-false-positive-ceiling.md) に記録してある
+[ADR 0316](./docs/decisions/0316-openai-embedding-false-positive-ceiling.md) に記録してある
 ——⛔ **ここには実測値を写さない**（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
 測った記録そのものは `examples/chat/openai-embedding-fp-ceiling-measurement.json`
 （コミット済み）にある。
@@ -214,7 +214,7 @@ OPENAI_API_KEY=... DATABASE_URL=postgresql://<user>@127.0.0.1:<port>/<db> \
 
 **⚠ この測定は「同じモデル・同じコードでの独立な録り直し」に対する上限である。**
 モデルの交代や、カセットが日〜週単位で経年するずれ（録画からの日数が空くと埋め込みが
-どれだけ乖離するか）には及ばない——射程の詳細は ADR 0315 を読むこと。
+どれだけ乖離するか）には及ばない——射程の詳細は ADR 0316 を読むこと。
 
 外から評価する立場からの現状の評価は、[Issue #109](https://github.com/takecchi/mnemora/issues/109)
 に測定付きで書いてある。
