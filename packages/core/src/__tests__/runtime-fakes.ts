@@ -297,6 +297,9 @@ export class FakeMemoryStore implements MemoryStore {
         lastReinforcedAt: input.lastReinforcedAt ?? null,
         validFrom: input.validFrom ?? null,
         validUntil: input.validUntil ?? null,
+        // Issue #371（ADR 0185/ADR 0312）: `InMemoryMemoryStore`（packages/testkit）と
+        // 同じ理由・同じ形——`?? null` で転記しないと `undefined` のまま消える。
+        claimKey: input.claimKey ?? null,
         strength: input.strength,
         halfLifeHours: input.halfLifeHours,
         decayFloorAt: input.decayFloorAt,

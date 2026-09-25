@@ -79,6 +79,9 @@ import type {
   ObserveMemoryUsageInput,
 } from "../observation.js";
 
+import type { ClaimKeyOptionsSchema } from "../claim-key.js";
+import type { ClaimKeyOptions } from "../claim-key.js";
+
 import type { ProvenanceKindSchema, ProvenanceSchema } from "../provenance.js";
 import type {
   ProvenanceKind,
@@ -503,6 +506,13 @@ type _p60_AnnUnreachedSeverity = Expect<
   Equals<z.infer<typeof AnnUnreachedSeveritySchema>, AnnUnreachedSeverity>
 >;
 
+// Issue #371（(B) 第1段、ADR 0185/0312）: `claim-key.ts` に `ClaimKeyOptionsSchema`
+// （`satisfies z.ZodType<...>`）を新設した。このファイル冒頭のコメントの規律どおり、
+// 対応するペアをここに登録する。
+type _p61_ClaimKeyOptions = Expect<
+  Equals<z.infer<typeof ClaimKeyOptionsSchema>, ClaimKeyOptions>
+>;
+
 // =============================================================================
 // packages/core/src/attributes.ts — 1ペア（Issue #152/#153、ADR 0312）
 // =============================================================================
@@ -551,7 +561,8 @@ describe("schema ↔ 型 の Equals parity（Issue #272）", () => {
       "3本（_p03 Omission_whole / _p34 ObserveInput_whole / _p40 Provenance_whole）が" +
       "discriminated union 自体の全体一致、1本（_p59 ScopeRelation）が `main` から" +
       "取り込んだ分、1本（_p60 AnnUnreachedSeverity、ADR 0288 / Issue #361）が" +
-      "`AnnUnreachedOmission.severity` 追加分（Issue #272 / ADR 0181 参照）。";
+      "`AnnUnreachedOmission.severity` 追加分、1本（_p61 ClaimKeyOptions、Issue #371 / " +
+      "ADR 0185・0312）が `claim-key.ts` の新設分（Issue #272 / ADR 0181 参照）。";
 
     expect(numbers.length, howToFix).toBe(EXPECTED_PAIR_COUNT);
 

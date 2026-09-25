@@ -39,6 +39,8 @@ function baseRow(overrides: Partial<MemoryRow> = {}): MemoryRow {
     last_reinforced_at: null,
     valid_from: null,
     valid_until: null,
+    claim_key_subject: null,
+    claim_key_predicate: null,
     strength: 1,
     half_life_hours: 720,
     decay_floor_at: "2026-06-01 00:00:00+00",

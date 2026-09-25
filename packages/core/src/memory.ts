@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { StoredAttributesSchema } from "./attributes.js";
 import type { Attributes } from "./attributes.js";
+import { ClaimKeySchema, type ClaimKey } from "./claim-key.js";
 import type { MemoryId, ObservationId } from "./ids.js";
 import { ProvenanceSchema, type Provenance } from "./provenance.js";
 
@@ -130,6 +131,31 @@ export interface Memory {
   /** `validFrom` の doc コメント参照。対になる終点。 */
   validUntil?: Date | null;
 
+  /**
+   * Issue #371（(B) 第1段、ADR 0185 決定2・ADR 0312、`claim-key.ts` の doc コメント参照）:
+   * 「この記憶は何についての主張か」を表す構造化された鍵。
+   *
+   * 🔴 **この鍵は LLM が作る ⟹ 推論である**（`docs/north-star.md` 問い4）。
+   * `provenance`（ユーザーが言った事実か・AI の推論かを区別する既存の欄）とは**別の軸**
+   * であり、この欄が非 `null` であること自体は `provenance.kind` に一切影響しない。
+   * ⟹ **「事実」と「主張の分類」を混ぜないための、意図的に別の名前・別の欄である。**
+   *
+   * `subject`/`predicate` は `normalizeClaimKeyPart`（claim-key.ts）で正規化済みの値を
+   * 想定する——読み出し側は「既に正規化されている」ことを前提にしてよい（書き込み側
+   * ——`runtime.ts` の opt-in 経路——が正規化してから渡す契約）。
+   *
+   * ⛔ **この欄が埋まっていることは、検出（#372）が実行されたことを意味しない。**
+   * この issue（#371）は鍵を持たせるだけで、同じ鍵を持つ2件を見つけて `contested` を
+   * 立てる処理は一切実装しない（ADR 0185 決定4）。
+   *
+   * **省略可能な新規フィールドとして足した**（`decayBaseSeq` 等と同じ理由——`Memory` は
+   * `@mnemora/core` の公開型。必須にすると、この型を自分でリテラルとして組み立てている
+   * 既存の呼び出し元・adapter・テストのフィクスチャすべてに新しい必須プロパティを
+   * 強制する破壊的変更になる）。`undefined`（未指定）と `null`（明示的に鍵なし）は
+   * 同じ意味で扱ってよい——読み出し側はどちらも「鍵が無い」として扱うこと。
+   */
+  claimKey?: ClaimKey | null;
+
   strength: number;
   halfLifeHours: number;
   decayFloorAt: Date;
@@ -245,6 +271,9 @@ export const MemorySchema = z.object({
   // Issue #202（ADR 0145）: `Memory.validFrom`/`validUntil` の doc コメント参照。
   validFrom: z.date().nullable().optional(),
   validUntil: z.date().nullable().optional(),
+
+  // Issue #371（ADR 0185/ADR 0312）: `Memory.claimKey` の doc コメント参照。
+  claimKey: ClaimKeySchema.nullable().optional(),
 
   // ADR 0078: 値域は `(0, MAX_STRENGTH]`。
   // ⚠ **この schema は書き込み経路では走らない**——`MemorySchema` / `NewMemorySchema` を

@@ -9,6 +9,8 @@ import type {
 import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor, NewMemoryEvent } from "./event.js";
+import { deriveClaimKeys } from "./claim-key.js";
+import type { ClaimKey, ClaimKeyOptions } from "./claim-key.js";
 import {
   buildNewMemoryFromCandidate,
   describeExtractionFailure,
@@ -57,6 +59,7 @@ import type {
   ObserveInputKind,
 } from "./observation.js";
 import {
+  CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX,
   ObserveInputSchema,
   observeInputKindToObservationKind,
   SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX,
@@ -275,6 +278,18 @@ export interface ObserveResult {
    * - **渡した場合は常に配列**（弾いた候補が無ければ `[]`）。
    */
   rejectedSubjectIds?: string[];
+  /**
+   * Issue #371: この呼び出しで `claimKey: { enabled: true }` を渡したとき、
+   * `deriveClaimKeys`（claim-key.ts）の呼び出しが失敗した理由。**失敗しても
+   * Memory の作成自体は止まらない**——各候補の `claimKey` が `null` のまま作られる
+   * （`rejectedSubjectIds` と同じ「黙って戻さない」ための監査用の記録）。
+   *
+   * ⛔ **省略可能にする**（`rejectedSubjectIds` と同じ理由・同じ規約）。
+   * - **`claimKey.enabled` を渡さなかった（省略、または `enabled: false`）呼び出しでは、
+   *   この欄は無い**（`undefined`）。
+   * - **`claimKey.enabled: true` を渡した場合は常に値を持つ**（成功なら `null`）。
+   */
+  claimKeyFailure?: ExtractionFailure | null;
 }
 
 /**
@@ -2387,13 +2402,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     ctx: Ctx,
     observation: Observation,
     candidates: ExtractedMemoryCandidate[],
+    // Issue #371: `deriveClaimKeys` の結果（`candidates` と同じ長さ・同じ順序）。
+    // 省略、または opt-in を使わなかった呼び出しでは `undefined` のまま——各候補は
+    // `claimKey: null` として作られる（`buildNewMemoryFromCandidate` の既定）。
+    claimKeys?: readonly (ClaimKey | null)[],
   ): Promise<NewMemory[]> {
     const halfLifeHours = await deps.tenantSettingsStore.getDefaultHalfLifeHours(ctx);
     const now = clock.now();
     // ADR 0165 決めたこと3・5・12: 活動時計の3つ組を、書き込み側3箇所のうちの1つとして
     // ここで織り込む。
     const activityClockInputs = await resolveActivityClockInputs(ctx);
-    return candidates.map((candidate) =>
+    return candidates.map((candidate, index) =>
       buildNewMemoryFromCandidate({
         ctx,
         observation,
@@ -2405,6 +2424,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         halfLifeHours,
         now,
         digestFallbackLength,
+        claimKey: claimKeys?.[index] ?? null,
         ...activityClockInputs,
       }),
     );
@@ -2456,8 +2476,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     candidates: ExtractedMemoryCandidate[],
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
+    claimKeys?: readonly (ClaimKey | null)[],
   ): Promise<{ memoryIds: MemoryId[]; contentHashes: Set<string> }> {
-    const newMemories = await buildNewMemoriesForCandidates(ctx, observation, candidates);
+    const newMemories = await buildNewMemoriesForCandidates(
+      ctx,
+      observation,
+      candidates,
+      claimKeys,
+    );
     const memoryIds: MemoryId[] = [];
     const contentHashes = new Set<string>();
     // Issue #204 / ADR 0157: 既定 `["embed"]` のみ。opt-in（config.autoQueueConsolidateReflectOnExtract）
@@ -2491,16 +2517,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 経路からだけ渡る——`processExtractJob`（deferred 側）は渡さない。渡す先が無いのは
    * 「保存していないから」であって「対応していないから」ではない（`SubjectCandidatesInput`
    * の doc コメント、observation.ts 参照）。`reextract` も同じ理由でこの引数を使わない。
+   *
+   * `claimKeyOptions`（Issue #371）も同じ理由で sync 経路からだけ渡る。**既定は無効**
+   * ——`claimKeyOptions` が `undefined`、または `{ enabled: false }` なら
+   * `deriveClaimKeys`（claim-key.ts）は一度も呼ばれない。抽出プロンプト（`extraction.ts`）
+   * は一切変更しない——`extractCandidates` の呼び出しはこの関数の変更前と1バイトも
+   * 変わっていない（ADR 0312 決定1・決定2）。
    */
   async function runExtraction(
     ctx: Ctx,
     observation: Observation,
     subjectCandidates?: readonly string[],
+    claimKeyOptions?: ClaimKeyOptions,
   ): Promise<{
     memoryIds: MemoryId[];
     outcome: ExtractionOutcome;
     failure: ExtractionFailure | null;
     rejectedSubjectIds: string[];
+    claimKeyFailure: ExtractionFailure | null;
   }> {
     const {
       candidates,
@@ -2517,7 +2551,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ? "llm_failed_whole_observation"
       : "ok";
     if (candidates.length === 0) {
-      return { memoryIds: [], outcome, failure, rejectedSubjectIds };
+      // ADR 0312 決定2「候補が0件なら+0回にできる」: ここで早期 return するため、
+      // `deriveClaimKeys` の呼び出しにすら到達しない。
+      return { memoryIds: [], outcome, failure, rejectedSubjectIds, claimKeyFailure: null };
+    }
+    // Issue #371: opt-in のときだけ、候補群の content をまとめて claim key を取る
+    // 別の構造化呼び出しを1回行う（ADR 0312 決定2 の (ii) separate）。
+    let claimKeys: (ClaimKey | null)[] | undefined;
+    let claimKeyFailure: ExtractionFailure | null = null;
+    if (claimKeyOptions?.enabled === true) {
+      const derived = await deriveClaimKeys(
+        deps.llmProvider,
+        ctx,
+        candidates.map((candidate) => candidate.content),
+        claimKeyOptions.knownPredicates,
+      );
+      claimKeys = derived.claimKeys;
+      claimKeyFailure = derived.failure;
     }
     const { memoryIds } = await createMemoriesFromCandidates(
       ctx,
@@ -2525,8 +2575,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       candidates,
       outcome,
       failure,
+      claimKeys,
     );
-    return { memoryIds, outcome, failure, rejectedSubjectIds };
+    return { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure };
   }
 
   /**
@@ -2837,11 +2888,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // （上の早期 return・`processExtractJob`）には渡らない。`observe()` が deferred と
     // 同時に渡された組み合わせを先に弾いているため、ここに来る時点で
     // `extractMode === 'sync'` であることは保証済み。
-    const { memoryIds, outcome, failure, rejectedSubjectIds } = await runExtraction(
-      ctx,
-      observation,
-      input.subjectCandidates,
-    );
+    const { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure } =
+      await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
       // CAS（ADR 0142）: この場では claimBatch を経由していないため attempts は
@@ -2860,6 +2908,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ...(input.subjectCandidates !== undefined && input.subjectCandidates.length > 0
         ? { rejectedSubjectIds }
         : {}),
+      // Issue #371: `claimKey.enabled` を渡した呼び出しだけこの欄を持たせる
+      // （ObserveResult.claimKeyFailure の doc コメント参照。同じ「渡していない」規約）。
+      ...(input.claimKey?.enabled === true ? { claimKeyFailure } : {}),
     };
   }
 
@@ -2882,6 +2933,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new Error(
         SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX +
           "pass extract: 'sync' (or omit extract), or drop subjectCandidates",
+      );
+    }
+    // Issue #371: `claimKey` と `extract: 'deferred'` の組み合わせも同じ理由で落とす
+    // （`CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX` の doc コメント、observation.ts 参照）。
+    if (extractMode === "deferred" && parsed.claimKey !== undefined) {
+      throw new Error(
+        CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX +
+          "pass extract: 'sync' (or omit extract), or drop claimKey",
       );
     }
     return handleExtractableObservation(ctx, parsed);
