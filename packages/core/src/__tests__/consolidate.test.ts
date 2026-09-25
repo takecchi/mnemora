@@ -907,6 +907,55 @@ describe("buildConsolidatedMemory（純関数）", () => {
     expect(memory.digestSource).toBe("fallback");
     expect(memory.digest.length).toBeLessThanOrEqual(11); // 10文字 + "…"
   });
+
+  // Issue #153（ADR 0312 決定4）: `attributes` は積集合。
+  describe("attributes は eligible 全件に同じキー・同じ値で入っているものだけを残す（積集合）", () => {
+    it("全件一致するキーだけが残る。値が割れているキー・一部にしか無いキーは落ちる", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [
+          fixtureMemory({ id: "m1", attributes: { visibility: "internal", region: "jp" } }),
+          fixtureMemory({ id: "m2", attributes: { visibility: "internal", region: "us" } }),
+        ],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      // visibility は両方 "internal" で一致 ⟹ 残る。region は値が割れている ⟹ 落ちる。
+      expect(memory.attributes).toEqual({ visibility: "internal" });
+    });
+
+    it("いずれかの eligible が attributes を持たない（undefined）ならそのキーは残らない", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [
+          fixtureMemory({ id: "m1", attributes: { visibility: "internal" } }),
+          fixtureMemory({ id: "m2", attributes: undefined }),
+        ],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.attributes).toEqual({});
+    });
+
+    it("eligible がどちらも attributes を持たなければ {}", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [fixtureMemory({ id: "m1" }), fixtureMemory({ id: "m2" })],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.attributes).toEqual({});
+    });
+  });
 });
 
 describe("runtime.consolidate — 口が在る adapter（ADR 0100）", () => {

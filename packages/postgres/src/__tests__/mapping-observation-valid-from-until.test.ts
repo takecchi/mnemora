@@ -28,6 +28,8 @@ function baseRow(overrides: Partial<ObservationRow> = {}): ObservationRow {
     recorded_at: "2026-01-01 00:00:00+00",
     valid_from: null,
     valid_until: null,
+    // Issue #152（ADR 0312）: `jsonb NOT NULL DEFAULT '{}'`。DB は常に値を返す。
+    attributes: {},
     ...overrides,
   };
 }

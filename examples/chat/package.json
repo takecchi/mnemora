@@ -20,6 +20,8 @@
     "validity": "tsx src/cli.ts validity",
     "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
     "lexical-tie-density-bench": "tsx src/bench/lexical-tie-density-bench.ts",
+    "subject-crossing-cost": "tsx src/subject-crossing-measure.ts",
+    "subject-crossing-summary": "tsx src/subject-crossing-summary.ts",
     "identifier-probes": "tsx src/cli.ts identifier-probes",
     "association-probes": "tsx src/cli.ts association-probes",
     "consolidation-cost": "tsx src/cli.ts consolidation-cost",

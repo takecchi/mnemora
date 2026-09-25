@@ -465,6 +465,11 @@ export interface ForgetResult {
  * - `seedMemoryId` が指す Memory が無い場合、`recall()` は呼ばない——
  *   対象は `[seedMemoryId]` の1件のみとなり、後続の `getMany` が `not_found` に分類する
  *   （新しい `nothingReason` を発明しない。下記 {@link ConsolidateNothingReason} 参照）。
+ * - **近傍は `ctx` の scope で集める。**`ctx.subjectId` を付けなければテナント全体から集まる。
+ *   近傍が別の subject にまたがると、統合後の `subjectId` は `null` に畳まれる。
+ *   **帰属を保ちたいなら、`ctx.subjectId` に種の `subjectId` を渡すこと**——混在は構造的に
+ *   起きなくなる（Issue #579、ADR 0310 の実測。付けなかった場合の混在率は、使い方しだいで
+ *   0〜100%）。
  */
 export type ConsolidateTarget =
   | { memoryIds: MemoryId[] }
@@ -2780,6 +2785,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // doc コメント参照。deferred 抽出でも値が残るよう Observation に持たせる）。
       validFrom: input.validFrom ?? null,
       validUntil: input.validUntil ?? null,
+      // Issue #152（ADR 0312）: 同じ経路。runtime は常に `{}` 以上の値を書く
+      // （`Observation.attributes` の doc コメント参照）。
+      attributes: input.attributes ?? {},
     };
 
     const { observation, created, jobs } = await deps.memoryStore.createObservationWithOutbox(

@@ -3,6 +3,7 @@
 
 export * from "./ctx.js";
 export * from "./ids.js";
+export * from "./attributes.js";
 export * from "./provenance.js";
 export * from "./observation.js";
 export * from "./memory.js";
