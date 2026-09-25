@@ -254,7 +254,7 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 [docs/recall.md](./docs/recall.md) §9.2）。**`limit` を上げずに天井だけ外したいなら
 `anchorPool: "passed"` を渡すこと**（既定は `"withinLimit"` のまま。
 [Issue #377](https://github.com/takecchi/mnemora/issues/377)、
-[ADR 0303](./docs/decisions/0303-association-anchor-pool.md)）。
+[ADR 0308](./docs/decisions/0308-association-anchor-pool.md)）。
 
 ### `Runtime` の中核5動詞以外 — 中核を守る3つの層
 

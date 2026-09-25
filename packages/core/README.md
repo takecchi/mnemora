@@ -128,7 +128,7 @@ const recalled = await runtime.recall(ctx, {
   ⭐ **`limit` を上げずに天井だけ外したいなら、下の `anchorPool: "passed"` を使うこと。**
 - `anchorPool?` — アンカーの母集合。既定 `DEFAULT_ASSOCIATION_ANCHOR_POOL` = `"withinLimit"`
   （この欄を足す前と同じ挙動。[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
-  [ADR 0303](../../docs/decisions/0303-association-anchor-pool.md)）。
+  [ADR 0308](../../docs/decisions/0308-association-anchor-pool.md)）。
   `"passed"` を渡すと、母集合が `limit` で切り詰める前の `passed`（段2の閾値を通った全候補）
   になり、**`limit` を上げずに `anchorCount` の天井を外せる**——テナントの規模が伸びても、
   `anchorCount` と `anchorPool: "passed"` の組で連想の起点をそれに追随させられる。
