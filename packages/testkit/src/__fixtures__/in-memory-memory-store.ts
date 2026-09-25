@@ -131,7 +131,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   readonly activitySeq = new Map<string, number>();
 
   /**
-   * Issue #201 / ADR 0315: `labels` 相当のインメモリ表。key は `${tenantId}::${name}`。
+   * Issue #201 / ADR 0316: `labels` 相当のインメモリ表。key は `${tenantId}::${name}`。
    * `PostgresMemoryStore.upsertProposedLabels`/`listLabels`/`registerLabel` と同じ意味論
    * （`docs/memory-model.md` §8）を、`Map` の上でそのまま再現する。
    */
@@ -142,7 +142,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 / ADR 0315: `PostgresMemoryStore.upsertProposedLabels` と同じ契約——
+   * Issue #201 / ADR 0316: `PostgresMemoryStore.upsertProposedLabels` と同じ契約——
    * 新しく作った Memory の `tags`（重複は `Set` で潰す）から `proposed` ラベルを作り・
    * `proposedCount` を数える。`status === 'registered'` のラベルは件数を進めない。
    * `createMemoryIdempotent` の「新しい行を実際に作った」分岐からだけ呼ぶ
@@ -353,7 +353,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (input.sourceObservationId) {
         this.extractionIndex.set(idemKey, memory.id);
       }
-      // Issue #201 / ADR 0315: `createMemory`/`createMemoryWithOutbox`/
+      // Issue #201 / ADR 0316: `createMemory`/`createMemoryWithOutbox`/
       // `supersedeWithNewMemories` はすべてこの `createMemoryIdempotent` を通る
       // （このファイル冒頭の doc コメント参照）——「新しい行を実際に作った」この分岐
       // だけで1回呼べば3経路すべてを覆える。
@@ -1381,7 +1381,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 / [ADR 0315](../../../../docs/decisions/0315-taxonomy-labels.md):
+   * Issue #201 / [ADR 0316](../../../../docs/decisions/0316-taxonomy-labels.md):
    * `listLabels?`（`PostgresMemoryStore.listLabels` と同じ契約）。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
@@ -1397,7 +1397,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 / [ADR 0315](../../../../docs/decisions/0315-taxonomy-labels.md):
+   * Issue #201 / [ADR 0316](../../../../docs/decisions/0316-taxonomy-labels.md):
    * `registerLabel?`（`PostgresMemoryStore.registerLabel` と同じ契約）。
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {

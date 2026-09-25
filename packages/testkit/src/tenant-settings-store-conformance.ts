@@ -23,7 +23,7 @@ const INVALID_DAYS_ERROR = new RegExp(EVENT_RETENTION_DAYS_INVALID_MESSAGE);
 const INVALID_DECAY_CLOCK_ERROR = new RegExp(DECAY_CLOCK_INVALID_MESSAGE);
 /**
  * `setTaxonomyMode` に不正な値を渡したときのメッセージが `TAXONOMY_MODE_INVALID_MESSAGE` を
- * 含むことを見る。`INVALID_DECAY_CLOCK_ERROR` と同じ理由・同じ形（Issue #201、ADR 0315）。
+ * 含むことを見る。`INVALID_DECAY_CLOCK_ERROR` と同じ理由・同じ形（Issue #201、ADR 0316）。
  */
 const INVALID_TAXONOMY_MODE_ERROR = new RegExp(TAXONOMY_MODE_INVALID_MESSAGE);
 
@@ -81,7 +81,7 @@ export interface TenantSettingsStoreConformanceOptions {
   advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
 
   /**
-   * Issue #201 / [ADR 0315](../../../docs/decisions/0315-taxonomy-labels.md):
+   * Issue #201 / [ADR 0316](../../../docs/decisions/0316-taxonomy-labels.md):
    * `getTaxonomyMode`/`setTaxonomyMode` を検査するかどうか。
    *
    * ⭐ **省略可にしない**——`supportsDecayClock` と同じ判断（このファイルの doc コメント
@@ -363,7 +363,7 @@ export function describeTenantSettingsStoreConformance(
     }
 
     // -----------------------------------------------------------------
-    // getTaxonomyMode / setTaxonomyMode (Issue #201, ADR 0315)
+    // getTaxonomyMode / setTaxonomyMode (Issue #201, ADR 0316)
     //
     // `supportsTaxonomyMode` の理由は `TenantSettingsStoreConformanceOptions` の doc
     // コメント参照——`supportsDecayClock` と同じ判断。

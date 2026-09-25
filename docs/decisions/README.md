@@ -340,5 +340,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0313](./0313-numeral-token-probes-ci-wiring-and-baseline-verification.md) | ADR 0135 §8 の残件1〜3を実装する — CI ジョブ・summary script・基準値ファイルを配線し、「sparse/dense が完全一致し margin の min が正」という基準値の見た目の不自然さを実測で検証する | 採用 (2026-09) |
 | [0314](./0314-recall-footprint-calibration-samples-need-ci-sourcing.md) | recall-footprint 較正の補助標本は作れる(実 API 不要)が、compare-baseline.json への昇格には CI artifact が要る — 別ファイルに留めた | 採用 (2026-09) |
 | [0315](./0315-claim-key-does-not-touch-extraction-cassettes.md) | 主張キー（(B) 第1段）は既定の抽出プロンプトを変えない — 候補群への別呼び出しで取り、カセットは書き換えず新規追加、⭐門は動かさない（Issue #370） | 採用 (2026-09) |
+| [0316](./0316-taxonomy-labels.md) | taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
