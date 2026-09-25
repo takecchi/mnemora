@@ -86,6 +86,27 @@ export const OPENAI_ARM_GROUPS: readonly OpenAiArmGroupDescriptor[] = [
   },
 ];
 
+/**
+ * `armLabel` の**唯一の出所**。`examples/chat/src/cli.ts`(実測 JSON を作る側)と
+ * `examples/chat/src/scripts/openai-embedding-fp-ceiling.ts`(基準値 JSON を作る側)の
+ * どちらも、この関数で label を組む——**別々の文字列テンプレートを持たない**。
+ *
+ * ⚠ **この関数を2箇所で別々に持っていた初期実装は、実際に相違を起こした**
+ * （`openai-arm-summary-lib.mjs` の diff が毎回 `label` だけ相違を出し続けていた——
+ * ADR 0094 §8.1「label が条件を落としていた」と同じ形の再発）。
+ */
+export function buildArmLabel(
+  group: OpenAiArmGroupDescriptor,
+  params: { llmMode: string; embeddingMode: string; model: string; dimensions: number },
+): string {
+  const prefix = group.family === "identifier" ? "identifier-probes" : "numeral-token-probes";
+  return (
+    `${prefix}/${group.labelSlug}(llm=${params.llmMode}, ` +
+    `embedding=${params.embeddingMode}/${params.model}/${params.dimensions}次元, ` +
+    `haystack=${group.haystackKind})`
+  );
+}
+
 export function identifierArmGroups(): readonly OpenAiArmGroupDescriptor[] {
   return OPENAI_ARM_GROUPS.filter((g) => g.family === "identifier");
 }
