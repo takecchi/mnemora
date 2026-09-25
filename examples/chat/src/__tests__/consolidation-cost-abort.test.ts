@@ -69,8 +69,22 @@ function buildFakeRuntime(): Runtime {
   let nextObserveId = 0;
   let nextConsolidatedId = 0;
 
+  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
+  // 後: 実物の `Runtime` は「`observe()`/`consolidate()` が積んだ embed ジョブを
+  // `tick()` が処理する」という契約を持つ（`packages/core/src/runtime.ts` — outbox
+  // 経由。`consolidate()` が `outcome: "consolidated"` を返すときは
+  // `createMemoryWithOutbox(ctx, newMemory, ['embed'])` で新しい embed ジョブを1件
+  // 積む）。この偽 `Runtime` はその契約を無視して `tick` が常に `processed: 0` を
+  // 返していたため、`runConsolidationCost` が ingest 段(`allIds.length`)・round 段
+  // (`newMemoryIdsThisRound.length`)それぞれで渡す `expectedProcessed` と噛み合わず、
+  // 実際には何も壊れていないのに `drainEmbedTicks` が例外を投げていた。⟹
+  // `observe()`/`consolidate()` が積んだ件数を `tick()` が消化して返す、最小限の
+  // 契約通りの偽物に直す。
+  let pendingEmbedJobs = 0;
+
   const observe: Runtime["observe"] = async () => {
     nextObserveId += 1;
+    pendingEmbedJobs += 1;
     return {
       observationId: `obs-${nextObserveId}`,
       memoryIds: [`mem-observe-${nextObserveId}`],
@@ -79,10 +93,13 @@ function buildFakeRuntime(): Runtime {
     } as unknown as Awaited<ReturnType<Runtime["observe"]>>;
   };
 
-  const tick: Runtime["tick"] = async () =>
-    ({ processed: 0, failed: 0, unsupported: [] }) as unknown as Awaited<
+  const tick: Runtime["tick"] = async () => {
+    const processed = pendingEmbedJobs;
+    pendingEmbedJobs = 0;
+    return { processed, failed: 0, unsupported: [] } as unknown as Awaited<
       ReturnType<Runtime["tick"]>
     >;
+  };
 
   const recall: Runtime["recall"] = async () =>
     ({
@@ -108,6 +125,7 @@ function buildFakeRuntime(): Runtime {
       throw buildInjectedError();
     }
     nextConsolidatedId += 1;
+    pendingEmbedJobs += 1;
     return {
       outcome: "consolidated",
       atomicity: "store_supported",

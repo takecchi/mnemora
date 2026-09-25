@@ -109,9 +109,18 @@ function buildFakeRuntime(
   calls: FakeRuntimeCalls,
   discoveryCandidates: CorrectionCandidate[] = defaultDiscoveryCandidates(),
 ): Runtime {
+  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
+  // 後: 実物の `Runtime` は「`observe()` が積んだ embed ジョブを `tick()` が処理する」
+  // という契約を持つ（`packages/core/src/runtime.ts` — outbox 経由）。この偽 `Runtime`
+  // はその契約を無視して `tick` が常に `processed: 0` を返していたため、
+  // `runCorrectionDemo` が渡す `expectedProcessed`(= original/correction の2件)と
+  // 噛み合わず、実際には何も壊れていないのに `drainEmbedTicks` が例外を投げていた。
+  // ⟹ `observe()` が積んだ件数を `tick()` が消化して返す、最小限の契約通りの偽物に直す。
+  let pendingEmbedJobs = 0;
   const observe: Runtime["observe"] = async (_ctx, input) => {
     const externalId = (input as { externalId: string }).externalId;
     calls.observedExternalIds.push(externalId);
+    pendingEmbedJobs += 1;
     return {
       observationId: `obs-${externalId}`,
       memoryIds: [memoryIdFor(externalId)],
@@ -120,10 +129,13 @@ function buildFakeRuntime(
     } as unknown as Awaited<ReturnType<Runtime["observe"]>>;
   };
 
-  const tick: Runtime["tick"] = async () =>
-    ({ processed: 0, failed: 0, unsupported: [] }) as unknown as Awaited<
+  const tick: Runtime["tick"] = async () => {
+    const processed = pendingEmbedJobs;
+    pendingEmbedJobs = 0;
+    return { processed, failed: 0, unsupported: [] } as unknown as Awaited<
       ReturnType<Runtime["tick"]>
     >;
+  };
 
   const findCorrectionCandidates: Runtime["findCorrectionCandidates"] = async (_ctx, input) => {
     calls.findCorrectionCandidatesCallCount += 1;
