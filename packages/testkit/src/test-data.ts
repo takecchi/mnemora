@@ -21,8 +21,9 @@ import type {
  * ⚠ **既定の `recordedAt`（`2026-01-01T00:00:00.000Z` 固定）は、既定の `halfLifeHours`
  * （720h）・`strength`（1）と組むと、`decayFloorAt` が `defaultDecayStrategy.floorAt`
  * （`halfLifeHours × log2(strength / DEFAULT_DECAY_THRESHOLD)` = `720 × log2(1/0.05)`
- * 時間後）で **`2026-05-10T15:47Z`** になる。この既定値そのものは変えない——
- * ここに書かれている以上、変えるのはこの doc コメントの主張が崩れたときだけである。**
+ * 時間後）で **`2026-05-10T15:47Z`** になる。**この既定値そのものは変えていない**——
+ * 固定日付であることに頼るテストがあり（[ADR 0104](../../../docs/decisions/0104-recall-gate-index-tooth-measures-applicability.md)
+ * 決定5）、testkit は publish 対象なので、既定を変えるのは公開面の変更になる（Issue #731）。
  *
  * ⟹ **その日以降に、実時計（あるいは今日の日付の偽時計）で `recall()` を通すと、
  * 段1の忘却ゲート（[ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）で
