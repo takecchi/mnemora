@@ -229,7 +229,8 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   もある——**明確な改善ではなくトレードオフ**であることを実測した。呼び出し側が明示的に
   渡す `knownPredicates` だけの経路・opt-in でない経路のプロンプトは1バイトも変えていない
   （[Issue #835](https://github.com/takecchi/mnemora/issues/835) /
-  [ADR 0338](./docs/decisions/0338-claim-key-known-predicates-from-store-wording.md)）。
+  [ADR 0338](./docs/decisions/0338-claim-key-known-predicates-from-store-wording.md)、
+  PR #841）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
