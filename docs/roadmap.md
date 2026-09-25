@@ -188,6 +188,18 @@ recall 側でラベルによる絞り込みを行う経路（表の見立てが�
 
 **⟹ この行も「部分的に前倒し」である**（削除ジョブ自体は実装済み・定期実行の配線は未着手）。
 
+**⚠ 2026-09-25 追記（Issue #205 の2本目、[ADR 0324](./decisions/0324-bullmq-tick-driver.md)〔仮番号〕）:
+上の表の「`packages/bullmq`（Scheduler の実装）」の行は、実装された形が本文の見立てと違う。**
+本文は「Phase 3 は『outbox を運ぶ役』を `InlineScheduler` から BullMQ に差し替えるだけで済む」
+と書いていたが、これは `Scheduler` interface を BullMQ が実装する（案A）ことを前提にした
+見立てだった。**実際に前倒しで実装されたのは別の形（案B）である**——`@mnemora/bullmq` は
+`Scheduler` を実装せず、BullMQ を「`runtime.tick()` を定期的に呼ぶ役」としてだけ使う。
+outbox は今日どおり Postgres が正本のままで、`InlineScheduler` から BullMQ への
+「差し替え」は起きていない——両者は共存する（`InlineScheduler` は手動 `tick()` 呼び出しの
+既定のまま残る）。⟹ **「差し替えるだけで済む」という見立ては、案Aの形では検証されておらず、
+実際には別の設計（案B）が採られた。** 理由・採らなかった案は ADR 0324 参照。
+**`@mnemora/bullmq` は `private: true` であり、npm には出ていない**（同 ADR 決定2）。
+
 ### Phase 4
 
 | 項目 | Phase 1 の何が効いているか |
