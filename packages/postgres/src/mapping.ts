@@ -104,7 +104,7 @@ export interface MemoryRow {
   purged_at: string | null;
   created_at: string;
   updated_at: string;
-  // Issue #152/#153（ADR 0304）: `jsonb NOT NULL DEFAULT '{}'`。`pg` は jsonb を
+  // Issue #152/#153（ADR 0306）: `jsonb NOT NULL DEFAULT '{}'`。`pg` は jsonb を
   // パース済みオブジェクトとして返す（`provenance` 列と同じ扱い——`row.provenance` も
   // 追加の変換なしに使っている）。
   attributes: Record<string, string>;
@@ -172,7 +172,7 @@ export interface ObservationRow {
   recorded_at: string;
   valid_from: string | null;
   valid_until: string | null;
-  // Issue #152（ADR 0304）: `MemoryRow.attributes` の doc コメント参照。
+  // Issue #152（ADR 0306）: `MemoryRow.attributes` の doc コメント参照。
   attributes: Record<string, string>;
 }
 

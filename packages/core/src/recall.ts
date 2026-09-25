@@ -764,10 +764,10 @@ export const DIGEST_BAND_MAX_ENTRY_CHARS = 120;
  * この集約では常に発生しない（型としての `FilteredOmission.condition: 'taxonomy'` は
  * Phase 2 向けに残す）。
  *
- * **⚠ 2026-09 追記（Issue #152/#153、ADR 0304）: `attributes`（`RecallQuery.attributes`）は
+ * **⚠ 2026-09 追記（Issue #152/#153、ADR 0306）: `attributes`（`RecallQuery.attributes`）は
  * `tenant`/`subject` と同じ側——スコープの外側の境界である。** `attributes` で絞り込んだ
  * 結果は `filtered` として報告しない（`FilteredOmission.condition` に専用の値を足さない
- * ——ADR 0304「採らなかった案」参照）。`totalInScope` はこの絞り込みの内側だけを数える。
+ * ——ADR 0306「採らなかった案」参照）。`totalInScope` はこの絞り込みの内側だけを数える。
  * `RecallScope.attributes` の doc コメント参照。
  *
  * **件数はすべてこの集約1本から取る**（ADR 0011 が段1から締め出した
@@ -1218,13 +1218,13 @@ export interface RecalledMemory {
   occurredAt?: Date | null;
   /**
    * この記憶の {@link Memory.attributes}（呼び手が申告した属性）（Issue #152/#153、
-   * ADR 0304）。
+   * ADR 0306）。
    *
    * **なぜ「詳細は `get()` の問い」という設計原理の例外にするか**（`provenanceKind` の
    * doc コメント参照）: `RecallQuery.attributes` で母集合を絞ったのに、絞りに使った軸の
    * 値が返らないと、呼び出し側は「なぜこれが返ったか」を自分で検証できない——北極星の
    * 問い3（「この記憶が選ばれた理由を、後から説明できるか」）に直接触れる。**線を引く
-   * なら「絞り込みに使える軸は載せる。使えない詳細は `get()` に残す」**（ADR 0304）。
+   * なら「絞り込みに使える軸は載せる。使えない詳細は `get()` に残す」**（ADR 0306）。
    *
    * **型の上では省略可能だが、`recall-runtime.ts` は常に `{}` 以上の値を書く**
    * （`speaker`/`subjectId` と同じ runtime 保証。`Memory.attributes` が `undefined` の
@@ -1302,14 +1302,14 @@ export interface RecallQuery {
   vector?: number[];
   tags?: string[];
   /**
-   * **母集合を段1（候補生成）で減らす、AND 等値の絞り込み**（Issue #152/#153、ADR 0304）。
+   * **母集合を段1（候補生成）で減らす、AND 等値の絞り込み**（Issue #152/#153、ADR 0306）。
    *
    * `tags`（上）とは別の軸——`tags` は加点（段2の再スコア、`computeTagMatch`）にしか
    * ならず母集合を減らさないが、この欄は減らす。`Memory.attributes` の doc コメントが
    * 説明する通り、`tags` は LLM の推論、`attributes` は呼び手の申告であり、由来の違う
    * 2つを同じ絞り込み意味論に混ぜない。
    *
-   * **意味論は AND 等値だけ**（ADR 0304 決定5）。渡したキーすべてが、その Memory の
+   * **意味論は AND 等値だけ**（ADR 0306 決定5）。渡したキーすべてが、その Memory の
    * `attributes` に同じ値で存在する場合だけ候補に残る（`jsonb` の `@>` 包含と同じ形）。
    * **OR・キーの不在（`key が無いこと`）を表す形は、この版では提供しない**——
    * 「いまは決めない」と明示する（ADR 0223 決定8 の反例節、ADR 0046 の形）。母集合を
@@ -1324,7 +1324,7 @@ export interface RecallQuery {
    * `subjectId`/`tenant` と同じ「呼び出し側が明示した境界の外は『失われた』のではなく
    * 『そもそも問うていない』」という扱い（`ScopeAggregate` の doc コメント参照）。**v2 で
    * `FilteredOmission.condition` に専用の値を足す案は、この版では採らない**——公開 union
-   * への値追加が破壊的変更に当たるかどうかは #541 が未決であり（ADR 0304「採らなかった
+   * への値追加が破壊的変更に当たるかどうかは #541 が未決であり（ADR 0306「採らなかった
    * 案」参照）、この PR は純粋な追加のみで完結させる。
    *
    * **段1（ANN・語彙の両チャンネル）と段3.5（連想枠）の両方へ押し下げる**——`period`/
@@ -1746,7 +1746,7 @@ export interface RecallScope {
    */
   includeSubjectless?: boolean;
   /**
-   * Issue #152/#153（ADR 0304）: `RecallQuery.attributes` がそのまま入る（空オブジェクト
+   * Issue #152/#153（ADR 0306）: `RecallQuery.attributes` がそのまま入る（空オブジェクト
    * なら `recall-runtime.ts` が `undefined` に正規化する——「絞り込み無し」を1つの形に
    * 揃える。`RecallQuery.attributes` の doc コメント参照）。**⭐ 軸の唯一の出所**——段1
    * （ANN・語彙）と段3.5（連想枠）の `VectorFilter.attributes`/`LexicalFilter.attributes`、

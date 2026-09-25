@@ -39,7 +39,7 @@ export interface Observation {
   /** `validFrom` の doc コメント参照。対になる終点。 */
   validUntil?: Date | null;
   /**
-   * Issue #152（ADR 0304）: 呼び手が申告した任意属性を `occurredAt`/`validFrom` と同じ経路
+   * Issue #152（ADR 0306）: 呼び手が申告した任意属性を `occurredAt`/`validFrom` と同じ経路
    * （`ObserveXxxInput.attributes` → `Observation.attributes` → `buildNewMemoryFromCandidate`）
    * で運ぶための永続列。**理由は `validFrom` の doc コメントと同じ**——`extract: 'deferred'`
    * を選んだ場合、抽出は `outbox` 経由で後から `processExtractJob` が拾い、そこでは
@@ -71,7 +71,7 @@ export const ObservationSchema = z.object({
   // Issue #280: `Observation.validFrom`/`validUntil` の doc コメント参照。
   validFrom: z.date().nullable().optional(),
   validUntil: z.date().nullable().optional(),
-  // Issue #152（ADR 0304）: `Observation.attributes` の doc コメント参照。格納側は
+  // Issue #152（ADR 0306）: `Observation.attributes` の doc コメント参照。格納側は
   // 検査をしない schema を使う（`AttributesSchema` は入力側専用。下記
   // `ObserveXxxInputSchema` 参照）。
   attributes: StoredAttributesSchema.optional(),
@@ -194,7 +194,7 @@ export interface ObserveUtteranceInput {
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
-  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0304）。 */
+  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0306）。 */
   attributes?: Attributes;
   speaker?: string;
   text: string;
@@ -211,7 +211,7 @@ export interface ObserveEventInput {
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
-  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0304）。 */
+  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0306）。 */
   attributes?: Attributes;
   name: string;
   data?: Record<string, unknown>;
@@ -228,7 +228,7 @@ export interface ObserveDocumentInput {
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
-  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0304）。 */
+  /** {@link Observation.attributes} の doc コメント参照（Issue #152、ADR 0306）。 */
   attributes?: Attributes;
   title?: string;
   content: string;

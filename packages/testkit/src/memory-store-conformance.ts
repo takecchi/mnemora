@@ -823,7 +823,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // attributes（Issue #152/#153、ADR 0304）
+    // attributes（Issue #152/#153、ADR 0306）
     // -------------------------------------------------------------------
 
     it("createMemory は attributes を書き込み、読み戻す", async () => {
@@ -871,7 +871,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reread?.attributes).toEqual({ visibility: "internal" });
     });
 
-    it("aggregateScope は scope.attributes で絞り込める。落ちた分は totalInScope から静かに除かれる（omitted 相当の報告は無い、ADR 0304 決定6）", async () => {
+    it("aggregateScope は scope.attributes で絞り込める。落ちた分は totalInScope から静かに除かれる（omitted 相当の報告は無い、ADR 0306 決定6）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       await store.createMemory(
@@ -918,7 +918,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.totalInScope).toBe(1);
     });
 
-    it("aggregateScope の digests（目次帯の候補）も scope.attributes で絞られる（レビュー指摘、ADR 0304 追記）", async () => {
+    it("aggregateScope の digests（目次帯の候補）も scope.attributes で絞られる（レビュー指摘、ADR 0306 追記）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       const matching = await store.createMemory(

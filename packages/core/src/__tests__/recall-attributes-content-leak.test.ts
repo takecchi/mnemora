@@ -9,7 +9,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
  * レビュー指摘（マネージャー経由、2026-09-25）: `attributes` による絞り込み（Issue #152/#153、
- * ADR 0304）は、段1（ANN・語彙の候補生成）と段3.5（連想枠）の後置フィルタ
+ * ADR 0306）は、段1（ANN・語彙の候補生成）と段3.5（連想枠）の後置フィルタ
  * （`survivesAttributesFilter`）でしか検査していなかった。**Memory の中身（`digest`）が
  * `RecallResult` に乗る経路は他に2つあり、どちらも検査を素通りしていた**:
  *
@@ -90,7 +90,7 @@ function buildRuntime(memoryStoreOverride?: (fms: MemoryStore) => MemoryStore) {
 //    既存原則と同じ落ち方——unit_assembly_dropped、ADR 0043）。
 // ---------------------------------------------------------------------------
 
-describe("recall() — 必須の同伴取得（段3）にも attributes が掛かる（レビュー指摘、ADR 0304 追記）", () => {
+describe("recall() — 必須の同伴取得（段3）にも attributes が掛かる（レビュー指摘、ADR 0306 追記）", () => {
   it("対向（companion）の attributes が絞り込みに一致しなければ、争っている側ごと結果から落ちる", async () => {
     const { runtime, stores } = buildRuntime();
     const strong = await stores.memoryStore.createMemory(
@@ -208,7 +208,7 @@ function withAttributesIgnoringAggregateScope(inner: MemoryStore): MemoryStore {
   }) as MemoryStore;
 }
 
-describe("recall() — 目次帯（段5）にも attributes が掛かる（レビュー指摘、ADR 0304 追記）", () => {
+describe("recall() — 目次帯（段5）にも attributes が掛かる（レビュー指摘、ADR 0306 追記）", () => {
   it("scope.attributes を無視する MemoryStore.aggregateScope でも、digestBand に絞り込みの外の digest は乗らない", async () => {
     const { runtime, stores } = buildRuntime((fms) => withAttributesIgnoringAggregateScope(fms));
     // 目次帯にしか現れないよう、どちらもベクトルを登録しない（段1の候補にはならない）。

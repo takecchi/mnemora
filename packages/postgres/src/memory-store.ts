@@ -1103,7 +1103,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ? sql`AND (subject_id = ${scope.subjectId} OR subject_id IS NULL)`
           : sql`AND subject_id = ${scope.subjectId}`
         : sql``;
-    // Issue #152/#153（ADR 0304）: `attributes` も `subjectId` と同じくスコープの外側の
+    // Issue #152/#153（ADR 0306）: `attributes` も `subjectId` と同じくスコープの外側の
     // 境界——`scoped` CTE の WHERE に足すことで、この絞り込みの外は `totalInScope` は
     // もちろん `filtered*` のどの列にも数えない（`recall.ts` の `ScopeAggregate` doc
     // 「2026-09 追記」参照）。`@>`（containment）は `idx_memories_attributes` の GIN 索引

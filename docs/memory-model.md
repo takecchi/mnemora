@@ -536,7 +536,7 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
   引き続き Phase 2 である。** `tags` が Phase 1 のスコアリングに参加することと、
   `labels` テーブルによる語彙管理が Phase 2 であることは別の軸であり、混同しない。
 
-**⚠ 2026-09 追記（Issue #152/#153、[ADR 0304](./decisions/0304-observe-recall-caller-attributes.md)）:
+**⚠ 2026-09 追記（Issue #152/#153、[ADR 0306](./decisions/0306-observe-recall-caller-attributes.md)）:
 `memories.attributes`（呼び手が申告する任意属性）を足した。`tags`/`labels` と役割が
 重なって見えるが、3本は「誰が値を決めるか」で分かれている——統合するとむしろ
 北極星の問い4（AI の推論とユーザーが言った事実を区別する）に反する。**
