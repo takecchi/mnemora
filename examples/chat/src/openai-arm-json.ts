@@ -27,6 +27,20 @@ export interface EmbeddingSpaceJson {
   dimensions: number;
 }
 
+/**
+ * probe 1件ぶんの `margin`（ADR 0135 §5.5、`identifier-arm.ts` の
+ * `IdentifierProbeOutcome.margin`）。ADR 0333 §2.1 が指摘した欠落
+ * （群レベルの集約値=`marginStats` だけで probe ごとの値を保存していなかった）を埋める。
+ *
+ * ⛔ **`IdentifierProbeOutcome` のうち `probeId`/`margin` だけを持つ**——
+ * `scoreDetails`/`termSpreads` 等、他の欄はこの JSON の役割（Job Summary 用の
+ * margin基準「並走の判定」候補、ADR 0333 §4.3）に要らないので複製しない。
+ */
+export interface OpenAiArmProbeMarginJson {
+  probeId: string;
+  margin: number | null;
+}
+
 export interface OpenAiArmGroupJson {
   group: string;
   label: string;
@@ -39,6 +53,17 @@ export interface OpenAiArmGroupJson {
   hit10Count: number;
   probeCount: number;
   marginStats?: MarginStats;
+  /**
+   * probe ごとの margin（ADR 0333 §2.1・§4.3「A」）。`decideMarginDropVerdict`
+   * （`verdict-candidate-margin.ts`）が要る唯一の入力——群レベルの `marginStats` だけでは
+   * 「どの probe が縮んだか」を突き合わせられない。**probe の並び順ではなく `probeId` で
+   * 突き合わせること**（呼び出し側の順序が baseline と一致する保証はない）。
+   *
+   * ⚠ **省略可能(optional)にしてある**——`marginStats` と同じ理由（後方互換。既存の
+   * `identifier-probe-baseline.openai.json`/`numeral-token-probe-baseline.openai.json`
+   * はこの欄を追記するまで持っていなかった）。
+   */
+  probeMargins?: OpenAiArmProbeMarginJson[];
 }
 
 export interface OpenAiArmRunJson {
@@ -80,6 +105,7 @@ export function buildOpenAiArmRunJson(
       hit10Count: report.hit10Count,
       probeCount: report.probeCount,
       ...(report.marginStats !== undefined ? { marginStats: report.marginStats } : {}),
+      probeMargins: report.probes.map((p) => ({ probeId: p.probeId, margin: p.margin })),
     })),
   };
 }

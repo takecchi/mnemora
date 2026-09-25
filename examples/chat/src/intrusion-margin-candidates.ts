@@ -3,6 +3,8 @@ import type { CorrectionAbstainCase } from "./correction-case.js";
 import { correctionProtectedExternalId } from "./correction-case.js";
 import {
   computeIntrusionMargin,
+  computeProtectionMargin,
+  maxNonProtectedScore,
   minProtectedFactScore,
   runCorrectionCandidateArm,
 } from "./correction-candidate-arm.js";
@@ -11,13 +13,27 @@ import { resolveExternalId } from "./provenance-trace.js";
 import type { ProviderMode } from "./providers.js";
 
 /**
+ * ⚠ **この輸出は re-export である**——`maxNonProtectedScore`/`computeProtectionMargin`
+ * の実装本体は ADR 0333 §4.2 の推奨を実装する際に `correction-candidate-arm.ts`
+ * （本番の `runCorrectionCandidateArm` も同じ式を必要とするため）へ移した。二重管理を
+ * 避けるため、この器は元の輸出名をそのまま再輸出するだけにしてある——このファイルの
+ * 既存テスト（`__tests__/intrusion-margin-candidates.test.ts`）の import 先を
+ * 変えずに済む。式そのものは1文字も変えていない。
+ */
+export { computeProtectionMargin, maxNonProtectedScore };
+
+/**
  * Issue #109 残件C（マネージャー依頼）——ADR 0291 §5.5/ADR 0321 が決めた
  * `intrusionMargin`（B群、深い誤爆のときだけ定義）の**定義の候補**を、同じ53件
  * （A群21・B群32）の実測で比べるための純関数と手動測定。
  *
- * ⛔ **`correction-candidate-arm.ts`・基準値 JSON・summary スクリプト・`ci.yml` は
- * 1文字も変えない。**このファイルは、それらが計算し終えた出力（`CorrectionCandidateReport`）
- * を受けて、追加の候補値を計算する新しいファイルである。
+ * ⚠ **当初「`correction-candidate-arm.ts` は1文字も変えない」という制約の下で
+ * 書かれたファイルである**（ADR 0333 の測定・比較フェーズ）。ADR 0333 §4.2 の
+ * 推奨（案2）を実際に出荷する本作業では、`correction-candidate-arm.ts` 側に
+ * 同じ式（`protectionMargin`）を本番の一部として追加した——**この上の制約は
+ * その時点（比較のためだけの測定）にだけ適用されていたものであり、今は
+ * 上書きされている**。このファイル自身（`measureIntrusionMarginCandidates` 以下）は
+ * 変更していない（2回 `recall()` する独自の測定経路も、既存テストもそのまま）。
  *
  * **現状（案0・現行）**: `intrusionMargin = topScore − protectedFactScore`。
  * `protectedAtTop === true`（深い誤爆）のときだけ定義し、それ以外（誤爆(浅)・棄権）は
@@ -67,48 +83,6 @@ export function scoresMatchWithinJitter(a: number | null, b: number | null): boo
     return a === b;
   }
   return Math.abs(a - b) <= SCORE_JITTER_EPSILON;
-}
-
-/**
- * `protectedIds` に**含まれない**外部IDを持つ候補のうち、`ScoreBreakdown.total` が
- * 最も高いもの（＝訂正に使われうる候補の中で最有力）を返す純関数。
- * `minProtectedFactScore`（`correction-candidate-arm.ts`）と対になる——あちらは
- * 保護対象の中の**最小**（最も危うい）、こちらは非保護対象の中の**最大**（最も強い
- * 「訂正の相手」候補）を取る。1件も見つからなければ `null`。
- *
- * `memories`/`externalIds` は同じ添字で対応している前提（呼び出し側が揃える。
- * `minProtectedFactScore` と同じ契約）。
- */
-export function maxNonProtectedScore(
-  memories: readonly { score: { total: number } }[],
-  externalIds: readonly (string | null)[],
-  protectedIds: readonly string[],
-): number | null {
-  const scores: number[] = [];
-  externalIds.forEach((id, i) => {
-    if (id === null || !protectedIds.includes(id)) {
-      const memory = memories[i];
-      if (memory !== undefined) {
-        scores.push(memory.score.total);
-      }
-    }
-  });
-  return scores.length === 0 ? null : Math.max(...scores);
-}
-
-/**
- * 案1/2 の数値そのもの: `protectedFactScore − topNonProtectedScore`。
- * どちらかが `null` なら `null`（「差が0だった」と「測れなかった」を同じ顔にしない、
- * ADR 0033 の適用——`computeCorrectionMargin`/`computeIntrusionMargin` と同じ規律）。
- */
-export function computeProtectionMargin(
-  protectedFactScore: number | null,
-  topNonProtectedScore: number | null,
-): number | null {
-  if (protectedFactScore === null || topNonProtectedScore === null) {
-    return null;
-  }
-  return protectedFactScore - topNonProtectedScore;
 }
 
 /** B群1件ぶんの、候補比較用の測定結果。 */

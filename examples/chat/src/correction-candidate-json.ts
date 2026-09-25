@@ -45,7 +45,14 @@ export interface CorrectionCandidateAbstainJson {
   abstained: boolean;
   topScore: number | null;
   protectedFactScore: number | null;
+  /** 🧊 凍結（ADR 0291 §5.5・ADR 0321）。並べて出す後継は `protectionMargin`。 */
   intrusionMargin: number | null;
+  /**
+   * ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」——
+   * `protectedFactScore − topNonProtectedScore`。`intrusionMargin` と違い、深い誤爆・
+   * 誤爆(浅)の両方で定義される。既存フィールドの意味は変えない・追加のみ。
+   */
+  protectionMargin: number | null;
 }
 
 export interface CorrectionCandidateSummaryJson {
@@ -63,7 +70,15 @@ export interface CorrectionCandidateSummaryJson {
   abstainTopScoreMin: number | null;
   abstainTopScoreMax: number | null;
   marginStats: MarginStats;
+  /** 🧊 凍結（ADR 0291 §5.5・ADR 0321）。 */
   intrusionMarginStats: MarginStats;
+  /**
+   * ADR 0333 §3.2 案2、`intrusionMarginStats` と並べて出す後継。**同じ形**
+   * （`count`/`mean`/`stdDev`/`min`）。`report.protectionMarginStats` が無い
+   * （型上は起こりうる。実際には `runCorrectionCandidateArm` は常に埋める）
+   * ときは、このフィールド自体を省く——「測ったが0件だった」と型で区別する。
+   */
+  protectionMarginStats?: MarginStats;
 }
 
 export type CorrectionCandidateProbeRunJson =
@@ -113,6 +128,9 @@ function summaryJson(
     abstainTopScoreMax: summary.abstainTopScoreMax,
     marginStats: report.marginStats,
     intrusionMarginStats: report.intrusionMarginStats,
+    ...(report.protectionMarginStats !== undefined
+      ? { protectionMarginStats: report.protectionMarginStats }
+      : {}),
   };
 }
 
@@ -155,6 +173,7 @@ export function buildMeasuredCorrectionCandidateProbeJson(options: {
       topScore: a.topScore,
       protectedFactScore: a.protectedFactScore,
       intrusionMargin: a.intrusionMargin,
+      protectionMargin: a.protectionMargin ?? null,
     })),
   };
 }

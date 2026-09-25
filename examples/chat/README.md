@@ -372,6 +372,17 @@ hit@k・distractor 逆転率・誤爆率（深/浅）・棄権率・**margin**�
 **intrusionMargin**（深い誤爆のときの topScore−protectedFactScore）を出す。鍵・カセット不要
 （deterministic LLM + `@mnemora/local-embedding` の実推論）。
 
+**`protectionMargin`（ADR 0333 §3.2 案2、`intrusionMargin` と並べて出す）**:
+`protectedFactScore − topNonProtectedScore`（`topNonProtectedScore` は保護対象でない
+候補＝訂正に使われうる候補の中の最有力スコア）。`intrusionMargin` と違い、**深い誤爆・
+誤爆(浅)の両方で定義される**（`protectedFacts` が1件以上返っている限り）——符号:
+正=深い誤爆側、負=誤爆(浅)側。🧊 **`intrusionMargin` はこの追加によって1つも変わっていない
+（凍結）**——`protectionMargin` は別名として並べて出す後継であり、既存フィールドを
+書き換えたものではない（ADR 0333 §3.2「案2」）。⚠ `protectedFacts` が複数件のケースでは
+（今日の母集合には無い）、`protectedFactScore` が使う「最小（最も危うい）」という既存の
+設計判断のせいで、`protectionMargin` の符号が `protectedAtTop` とねじれうる
+（ADR 0333 §3.5、未検証）。
+
 **この数字の出発点は [ADR 0232](../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
 が測定・記録したものである**（`main` の変更でこのコマンドの出力が動くことはあっても、
 ADR 0232 本文の数字自体はその時点の記録として書き換えない——`AGENTS.md`「⚠ 数を、
@@ -402,7 +413,14 @@ ADR 0232「引き受けた負債」3番が名指しした「CI ジョブを足�
 - **intrusionMargin は、今日の母集合（`protectedFacts` が0〜1件）では深い誤爆のとき
   常に0になる。**これは実装の欠陥ではなく定義どおりの挙動である（1位そのものが保護対象
   である以上、自明な結果）——`protectedFacts` が複数件のケースが増えたときに初めて
-  非自明な値になる（ADR 0321 §5.5 相当の実装ノート）。
+  非自明な値になる（ADR 0321 §5.5 相当の実装ノート）。🧊 **この値・この挙動は凍結
+  しており、以降の変更でも書き換えない**（ADR 0333）。
+- **protectionMargin（ADR 0333 §3.2 案2、上の intrusionMargin の「常に0」を実際に
+  解消した後継）は0に潰れない**——B群24件（`protectedFacts` が1件以上返った、vague
+  8件を除く）で実測すると、深い誤爆20件は**全件正**（mean≈+0.037452）、誤爆(浅)4件は
+  **全件負**（mean≈-0.006089）、全体24件で mean≈+0.030195 となり、符号が深い誤爆/
+  誤爆(浅)の二値と完全に分離した（重なりゼロ）。ただし誤爆(浅)側の絶対値は深い誤爆側
+  よりずっと小さく、n=4なので統計的には主張しない。
 - **索引型によって深い誤爆の起きやすさに違いが見える**（ASCII識別子の`other_person`は
   深い誤爆だったが、日本語固有名詞・数詞インデックスの`other_person`は浅い誤爆だった）。
   ⚠ 標本が小さく、この傾向を統計的には主張しない。

@@ -27,7 +27,135 @@
       "mrrOverall": 0.84,
       "hit1Count": 21,
       "hit10Count": 30,
-      "probeCount": 30
+      "probeCount": 30,
+      "marginStats": {
+        "count": 30,
+        "mean": 0.045145756678804494,
+        "stdDev": 0.07930124529980073,
+        "min": -0.11793100320731442
+      },
+      "probeMargins": [
+        {
+          "probeId": "project-code-a",
+          "margin": 0.20959781014893664
+        },
+        {
+          "probeId": "project-code-b",
+          "margin": 0.046534273081364264
+        },
+        {
+          "probeId": "project-code-c",
+          "margin": -0.024731066499266707
+        },
+        {
+          "probeId": "project-code-d",
+          "margin": 0.0230066454177279
+        },
+        {
+          "probeId": "project-code-e",
+          "margin": -0.00828738134105178
+        },
+        {
+          "probeId": "project-code-f",
+          "margin": -0.11793100320731442
+        },
+        {
+          "probeId": "ticket-a",
+          "margin": -0.04166399452159464
+        },
+        {
+          "probeId": "ticket-b",
+          "margin": 0.0504588350782994
+        },
+        {
+          "probeId": "ticket-c",
+          "margin": 0.00005256235640471729
+        },
+        {
+          "probeId": "ticket-d",
+          "margin": 0.024578531213733656
+        },
+        {
+          "probeId": "ticket-e",
+          "margin": -0.008322017800604264
+        },
+        {
+          "probeId": "ticket-f",
+          "margin": -0.03183710068064005
+        },
+        {
+          "probeId": "system-a",
+          "margin": 0.0812381099421493
+        },
+        {
+          "probeId": "system-b",
+          "margin": 0.05635725742097186
+        },
+        {
+          "probeId": "system-c",
+          "margin": 0.023321481316453396
+        },
+        {
+          "probeId": "system-d",
+          "margin": -0.0009619339894465506
+        },
+        {
+          "probeId": "system-e",
+          "margin": 0.046981865531233624
+        },
+        {
+          "probeId": "system-f",
+          "margin": 0.08965523807055942
+        },
+        {
+          "probeId": "channel-a",
+          "margin": 0.14331534244450184
+        },
+        {
+          "probeId": "channel-b",
+          "margin": 0.1619394703689876
+        },
+        {
+          "probeId": "channel-c",
+          "margin": 0.0064716597271355925
+        },
+        {
+          "probeId": "channel-d",
+          "margin": 0.23553931289772723
+        },
+        {
+          "probeId": "channel-e",
+          "margin": 0.17715385016453844
+        },
+        {
+          "probeId": "channel-f",
+          "margin": 0.030872570813376576
+        },
+        {
+          "probeId": "person-a",
+          "margin": -0.06983570183203291
+        },
+        {
+          "probeId": "person-b",
+          "margin": 0.011674828292294825
+        },
+        {
+          "probeId": "person-c",
+          "margin": 0.08850883420287747
+        },
+        {
+          "probeId": "person-d",
+          "margin": 0.029274654137505518
+        },
+        {
+          "probeId": "person-e",
+          "margin": 0.05470619673667532
+        },
+        {
+          "probeId": "person-f",
+          "margin": 0.06670357087263123
+        }
+      ]
     },
     {
       "group": "identifiersDense",
@@ -43,7 +171,135 @@
       "mrrOverall": 0.815,
       "hit1Count": 20,
       "hit10Count": 30,
-      "probeCount": 30
+      "probeCount": 30,
+      "marginStats": {
+        "count": 30,
+        "mean": 0.045145756678804494,
+        "stdDev": 0.07930124529980073,
+        "min": -0.11793100320731442
+      },
+      "probeMargins": [
+        {
+          "probeId": "project-code-a",
+          "margin": 0.20959781014893664
+        },
+        {
+          "probeId": "project-code-b",
+          "margin": 0.046534273081364264
+        },
+        {
+          "probeId": "project-code-c",
+          "margin": -0.024731066499266707
+        },
+        {
+          "probeId": "project-code-d",
+          "margin": 0.0230066454177279
+        },
+        {
+          "probeId": "project-code-e",
+          "margin": -0.00828738134105178
+        },
+        {
+          "probeId": "project-code-f",
+          "margin": -0.11793100320731442
+        },
+        {
+          "probeId": "ticket-a",
+          "margin": -0.04166399452159464
+        },
+        {
+          "probeId": "ticket-b",
+          "margin": 0.0504588350782994
+        },
+        {
+          "probeId": "ticket-c",
+          "margin": 0.00005256235640471729
+        },
+        {
+          "probeId": "ticket-d",
+          "margin": 0.024578531213733656
+        },
+        {
+          "probeId": "ticket-e",
+          "margin": -0.008322017800604264
+        },
+        {
+          "probeId": "ticket-f",
+          "margin": -0.03183710068064005
+        },
+        {
+          "probeId": "system-a",
+          "margin": 0.0812381099421493
+        },
+        {
+          "probeId": "system-b",
+          "margin": 0.05635725742097186
+        },
+        {
+          "probeId": "system-c",
+          "margin": 0.023321481316453396
+        },
+        {
+          "probeId": "system-d",
+          "margin": -0.0009619339894465506
+        },
+        {
+          "probeId": "system-e",
+          "margin": 0.046981865531233624
+        },
+        {
+          "probeId": "system-f",
+          "margin": 0.08965523807055942
+        },
+        {
+          "probeId": "channel-a",
+          "margin": 0.14331534244450184
+        },
+        {
+          "probeId": "channel-b",
+          "margin": 0.1619394703689876
+        },
+        {
+          "probeId": "channel-c",
+          "margin": 0.0064716597271355925
+        },
+        {
+          "probeId": "channel-d",
+          "margin": 0.23553931289772723
+        },
+        {
+          "probeId": "channel-e",
+          "margin": 0.17715385016453844
+        },
+        {
+          "probeId": "channel-f",
+          "margin": 0.030872570813376576
+        },
+        {
+          "probeId": "person-a",
+          "margin": -0.06983570183203291
+        },
+        {
+          "probeId": "person-b",
+          "margin": 0.011674828292294825
+        },
+        {
+          "probeId": "person-c",
+          "margin": 0.08850883420287747
+        },
+        {
+          "probeId": "person-d",
+          "margin": 0.029274654137505518
+        },
+        {
+          "probeId": "person-e",
+          "margin": 0.05470619673667532
+        },
+        {
+          "probeId": "person-f",
+          "margin": 0.06670357087263123
+        }
+      ]
     },
     {
       "group": "japaneseNamesSparse",
@@ -59,7 +315,63 @@
       "mrrOverall": 0.9583333333333334,
       "hit1Count": 11,
       "hit10Count": 12,
-      "probeCount": 12
+      "probeCount": 12,
+      "marginStats": {
+        "count": 12,
+        "mean": 0.10709724620632204,
+        "stdDev": 0.08135299384909217,
+        "min": -0.09333139893254028
+      },
+      "probeMargins": [
+        {
+          "probeId": "person-a",
+          "margin": 0.20448592890823392
+        },
+        {
+          "probeId": "person-b",
+          "margin": 0.1595825532065881
+        },
+        {
+          "probeId": "person-c",
+          "margin": 0.06596145237503181
+        },
+        {
+          "probeId": "person-d",
+          "margin": 0.11333742564341209
+        },
+        {
+          "probeId": "org-a",
+          "margin": 0.1236480519447607
+        },
+        {
+          "probeId": "org-b",
+          "margin": -0.09333139893254028
+        },
+        {
+          "probeId": "org-c",
+          "margin": 0.04803051842855144
+        },
+        {
+          "probeId": "product-a",
+          "margin": 0.07745748612314207
+        },
+        {
+          "probeId": "product-b",
+          "margin": 0.1262451971871098
+        },
+        {
+          "probeId": "product-c",
+          "margin": 0.11439569073281963
+        },
+        {
+          "probeId": "place-a",
+          "margin": 0.22266081547036798
+        },
+        {
+          "probeId": "place-b",
+          "margin": 0.12269323338838711
+        }
+      ]
     },
     {
       "group": "japaneseNamesDense",
@@ -75,7 +387,68 @@
       "mrrOverall": 0.9583333333333334,
       "hit1Count": 11,
       "hit10Count": 12,
-      "probeCount": 12
+      "probeCount": 12,
+      "marginStats": {
+        "count": 12,
+        "mean": 0.10709724620632204,
+        "stdDev": 0.08135299384909217,
+        "min": -0.09333139893254028
+      },
+      "probeMargins": [
+        {
+          "probeId": "person-a",
+          "margin": 0.20448592890823392
+        },
+        {
+          "probeId": "person-b",
+          "margin": 0.1595825532065881
+        },
+        {
+          "probeId": "person-c",
+          "margin": 0.06596145237503181
+        },
+        {
+          "probeId": "person-d",
+          "margin": 0.11333742564341209
+        },
+        {
+          "probeId": "org-a",
+          "margin": 0.1236480519447607
+        },
+        {
+          "probeId": "org-b",
+          "margin": -0.09333139893254028
+        },
+        {
+          "probeId": "org-c",
+          "margin": 0.04803051842855144
+        },
+        {
+          "probeId": "product-a",
+          "margin": 0.07745748612314207
+        },
+        {
+          "probeId": "product-b",
+          "margin": 0.1262451971871098
+        },
+        {
+          "probeId": "product-c",
+          "margin": 0.11439569073281963
+        },
+        {
+          "probeId": "place-a",
+          "margin": 0.22266081547036798
+        },
+        {
+          "probeId": "place-b",
+          "margin": 0.12269323338838711
+        }
+      ]
     }
-  ]
+  ],
+  "marginFieldsProvenance": {
+    "addedBy": "ADR 0333 §2.1/§4.3 A の後続作業（クローン miku の判断、branch feat/109-margin-verdict-shadow）。既存の mrrOverall/hit1Count/hit10Count/probeCount/provenance は1バイトも変更していない。",
+    "how": "env -u OPENAI_API_KEY MNEMORA_LLM=deterministic MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON=... MNEMORA_LOCAL_EMBEDDING_CACHE_DIR=... pnpm --filter @mnemora/example-chat run identifier-probes",
+    "note": "実 API は使っていない——コミット済みカセット（examples/chat/cassettes/*.openai.json、round0＝このファイルの provenance.measuredAt と同じ録画）を recorded provider で再生しただけ。再生で得た mrrOverall/hit1Count/hit10Count/probeCount が、上の provenance で記録済みの値と一致することを確認済み（一致しなければ、この marginStats/probeMargins は別の録画からのものになってしまう）。"
+  }
 }
