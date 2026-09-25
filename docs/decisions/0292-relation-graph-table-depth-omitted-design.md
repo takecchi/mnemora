@@ -590,4 +590,11 @@ kind を新設する判断に切り替わる。
 
 ---
 
+⭐ **追記 (2026-09-25)**: §2 決定1-d が持ち越した「`markContested`/`resolveContested` が
+`memory_relations` にも書くのか、多者間専用の別口を新設するのか」に、段1として
+[ADR 0327](./0327-relation-graph-contested-write-path-design.md) が設計を続けている
+（状態: 提案）。本 ADR の決定（テーブル形・深さ・`omitted` の出し方）は変更していない。
+
+---
+
 Refs #207

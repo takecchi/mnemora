@@ -351,5 +351,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0324](./0324-claim-key-contested-detection.md) | 主張キー（(B) 第2段）の検出実装 — 列と索引だけで衝突を見つけ、`contested` までで止める（Issue #372） | 採用 (2026-09) |
 | [0325](./0325-bullmq-tick-driver.md) | `@mnemora/bullmq` は `Scheduler` を実装せず、BullMQ で `runtime.tick()` を駆動する（Issue #205 の2本目） | 採用 (2026-09) |
 | [0326](./0326-answer-path-claim-key-contested-opt-in-measurement.md) | examples/chat の answer 経路に claimKey/detectContested を評価用 opt-in する — `[矛盾候補:]` が0件だった理由を実測する（Issue #691 続き） | 採用 (2026-09) |
+| [0327](./0327-relation-graph-contested-write-path-design.md) | 関係グラフ本体（Issue #207）の段1 — `memory_relations` へ何を移すか・既存列からの移行の形・多者間 `contested` の解き方（設計のみ） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
