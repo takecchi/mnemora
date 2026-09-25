@@ -23,13 +23,13 @@ import {
  * ⛔ **ADR 0305（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
  * 変わったため、再生元を `ANSWER_CASSETTE_PATH`（旧形式、`answer.json`）から
  * `ANSWER_ORDER_LEGEND_CASSETTE_PATH`（新形式、`answer.order-legend.json`）へ向け直した。
- * **このファイルはまだ実 API で記録していない**（`cassette-coverage.test.ts` が
- * 「カセットが無い」で先に落ちる）。記録は `record:answer`（`recordAnswer`、`cli.ts`）
- * 1回で足りる——`recordRetentionMutationPositiveControl` が同じ実行の中で変異分
- * （下記「実 API の記録」節）も一緒に記録するため、旧形式のときのような専用の追記
- * スクリプト（`record-answer-retention-mutation.ts`）はもう要らない。
- * ⚠ **記録し直したら、下の【実測】コメント（`mutatedVerdict`/`mutatedJudgement.outcome`
- * が両方 `"fail"` になる、という具体的な outcome）を新しい記録の実測値で書き直すこと**
+ * このファイルは、旧 `answer.json` を種にして `record:answer` 1回で記録した（ADR 0305 §4.5.2）
+ * ——`recordRetentionMutationPositiveControl` が同じ実行の中で変異分（下記「実 API の記録」節）
+ * も一緒に記録するため、旧形式のときのような専用の追記スクリプト
+ * （`record-answer-retention-mutation.ts`）はもう要らない。
+ * 新しい記録でも、下の【実測】コメントの outcome（`mutatedVerdict`/`mutatedJudgement.outcome`
+ * が両方 `"fail"`）は旧の値のまま一致した。⚠ **次に録り直したら、この outcome を
+ * 新しい記録の実測値で確かめ直すこと**
  * ——プロンプトの文言が変わるため、同じ outcome になる保証は無い。
  *
  * ## この歯が示すもの

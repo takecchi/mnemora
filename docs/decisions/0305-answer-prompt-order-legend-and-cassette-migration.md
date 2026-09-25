@@ -75,13 +75,13 @@
 
 ### 2.2 結果
 
-| 描画 | `schedule-change-meeting-day` | 他の dev 5件 |
-|---|---|---|
-| `recorded`（PR #698 書式。由来・話者・主題・矛盾候補・生の記録順タグ） | 3/15 | 各15/15 |
-| `digest-only`（Issue #691 以前。タグを一切付けない） | 9/15 | 各15/15 |
-| `order-sorted`（`recordedAt` 昇順への並べ替えだけ。凡例なし） | 5/15 | 各15/15 |
-| `order-sorted-legend`（並べ替え＋凡例1行。**採用、以後 `order-legend`**） | 13/15 | 各15/15 |
-| `digest-order-legend`（由来等のタグを落とし、並べ替え＋凡例だけ残す） | 13/15 | 各15/15 |
+| 描画                                                                      | `schedule-change-meeting-day` | 他の dev 5件 |
+| ------------------------------------------------------------------------- | ----------------------------- | ------------ |
+| `recorded`（PR #698 書式。由来・話者・主題・矛盾候補・生の記録順タグ）    | 3/15                          | 各15/15      |
+| `digest-only`（Issue #691 以前。タグを一切付けない）                      | 9/15                          | 各15/15      |
+| `order-sorted`（`recordedAt` 昇順への並べ替えだけ。凡例なし）             | 5/15                          | 各15/15      |
+| `order-sorted-legend`（並べ替え＋凡例1行。**採用、以後 `order-legend`**） | 13/15                         | 各15/15      |
+| `digest-order-legend`（由来等のタグを落とし、並べ替え＋凡例だけ残す）     | 13/15                         | 各15/15      |
 
 **他の dev 5件はどの描画でも 15/15 のまま揺れない**——ADR 0295 追記2 §11 の記録と整合する
 （このケース1件だけが `digest のみ` でも揺れる、訂正関係を含む特異なケースである）。
@@ -131,15 +131,15 @@
 `buildMnemoraPrompt` の呼び出し元（`grep -rn buildMnemoraPrompt examples/chat/src`
 【実測】、`__tests__` を除く）:
 
-| 呼び出し元 | 用途 | `recorded` provider を経由するか |
-|---|---|---|
-| `answer-bench.ts`（`runAnswerCase`） | `answer`/`answer-trials` 系の回答生成プロンプト組み立て | する（呼び出し側次第。`answer-bench.postgres.test.ts` は `deterministic` 強制なので経由しない） |
-| `cli.ts`（`runChat`） | `chat` サブコマンドの画面表示（`console.log`。LLM へは送らない） | しない |
-| `time-weighting-bench.ts`（`runTimeWeightingTrial`） | `answer-time-weighting` の回答生成プロンプト組み立て | する |
-| `budget-demo.ts` | docstring のみの言及。実装は `cli.ts` 側の既存経路を再利用 | （変更なし） |
-| `answer-retention-mutation.ts` | docstring のみの言及（`applyRetentionMutation` は `PromptSpec` を受け取るだけ） | （変更なし） |
-| `answer-case-set.eval.ts` | docstring のみの言及（描画の変更を踏まえてケースを書いた、という注記） | （対象外） |
-| `answer-trials-material.ts`/`answer-trials-render.ts` | カセットの記録済み文字列を**静的にパース**・**構造から再構成**するだけ（ADR 0301 決定1・2） | しない（DB・recall を一度も経由しない設計） |
+| 呼び出し元                                            | 用途                                                                                        | `recorded` provider を経由するか                                                                |
+| ----------------------------------------------------- | ------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
+| `answer-bench.ts`（`runAnswerCase`）                  | `answer`/`answer-trials` 系の回答生成プロンプト組み立て                                     | する（呼び出し側次第。`answer-bench.postgres.test.ts` は `deterministic` 強制なので経由しない） |
+| `cli.ts`（`runChat`）                                 | `chat` サブコマンドの画面表示（`console.log`。LLM へは送らない）                            | しない                                                                                          |
+| `time-weighting-bench.ts`（`runTimeWeightingTrial`）  | `answer-time-weighting` の回答生成プロンプト組み立て                                        | する                                                                                            |
+| `budget-demo.ts`                                      | docstring のみの言及。実装は `cli.ts` 側の既存経路を再利用                                  | （変更なし）                                                                                    |
+| `answer-retention-mutation.ts`                        | docstring のみの言及（`applyRetentionMutation` は `PromptSpec` を受け取るだけ）             | （変更なし）                                                                                    |
+| `answer-case-set.eval.ts`                             | docstring のみの言及（描画の変更を踏まえてケースを書いた、という注記）                      | （対象外）                                                                                      |
+| `answer-trials-material.ts`/`answer-trials-render.ts` | カセットの記録済み文字列を**静的にパース**・**構造から再構成**するだけ（ADR 0301 決定1・2） | しない（DB・recall を一度も経由しない設計）                                                     |
 
 **実際にプロンプトの形が変わり、`RecordedLLMProvider`（ADR 0051、`llmCassetteKey` は
 `PromptSpec` 全体の SHA-256）の鍵が変わるのは、`answer-bench.ts` 経由（`answer` 系）と
@@ -147,14 +147,14 @@
 
 ### 3.1 落ちる再生の一覧（CI ジョブ・テスト単位）【現物、§4 の変更前の状態として特定】
 
-| CI ジョブ | ステップ / テストファイル | 症状 |
-|---|---|---|
-| `example-chat` | `test:db`（`pnpm --filter @mnemora/example-chat run test:db`）内の `answer-cli.postgres.test.ts` | `answer` を `recorded` で再生する3本の `it` が `RecordedLLMProvider`「記録に無い」例外で失敗 |
-| `example-chat` | 同上、`answer-retention-positive-control.postgres.test.ts` | `runAnswerCase` が新描画のプロンプトを組むため、変異前段階から「記録に無い」例外 |
-| `example-chat` | 同上、`time-weighting-recorded-replay.postgres.test.ts` | 2本の `it`（全16ケース×2方針の再生、既知の取り引きの固定）が同じ例外 |
-| `example-chat` | 同上、`cassette-coverage.test.ts` | `answer`/`answer-time-weighting` の対応検査が対象カセットの中身と整合しなくなる（このテスト自体は DB 不要・API 不要だが、対象が「使われなくなった形」のカセットのままだと検査の意味が失われる） |
-| `example-chat` | 専用ステップ「`RecallQuery.timeWeighting`…を `answer-time-weighting` で再生し…」 | `pnpm --filter @mnemora/example-chat run answer-time-weighting` が `resolveRecordedRun` の中で例外 |
-| `root-gate-db-stage` | `test:db` を `run-db-tests.mjs` 経由で examples/chat に対しても実行するステップ | 上と同じ理由で失敗（`example-chat` ジョブと同一原因の重複） |
+| CI ジョブ            | ステップ / テストファイル                                                                        | 症状                                                                                                                                                                                            |
+| -------------------- | ------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `example-chat`       | `test:db`（`pnpm --filter @mnemora/example-chat run test:db`）内の `answer-cli.postgres.test.ts` | `answer` を `recorded` で再生する3本の `it` が `RecordedLLMProvider`「記録に無い」例外で失敗                                                                                                    |
+| `example-chat`       | 同上、`answer-retention-positive-control.postgres.test.ts`                                       | `runAnswerCase` が新描画のプロンプトを組むため、変異前段階から「記録に無い」例外                                                                                                                |
+| `example-chat`       | 同上、`time-weighting-recorded-replay.postgres.test.ts`                                          | 2本の `it`（全16ケース×2方針の再生、既知の取り引きの固定）が同じ例外                                                                                                                            |
+| `example-chat`       | 同上、`cassette-coverage.test.ts`                                                                | `answer`/`answer-time-weighting` の対応検査が対象カセットの中身と整合しなくなる（このテスト自体は DB 不要・API 不要だが、対象が「使われなくなった形」のカセットのままだと検査の意味が失われる） |
+| `example-chat`       | 専用ステップ「`RecallQuery.timeWeighting`…を `answer-time-weighting` で再生し…」                 | `pnpm --filter @mnemora/example-chat run answer-time-weighting` が `resolveRecordedRun` の中で例外                                                                                              |
+| `root-gate-db-stage` | `test:db` を `run-db-tests.mjs` 経由で examples/chat に対しても実行するステップ                  | 上と同じ理由で失敗（`example-chat` ジョブと同一原因の重複）                                                                                                                                     |
 
 **変わらず緑のまま**: `answer-bench.postgres.test.ts`（`deterministic` 強制、`recorded` を
 経由しない）・`mnemora-path.postgres.test.ts`（カセットを使わない）・`compare` 関連一式
@@ -163,6 +163,7 @@
 ## 4. 配線: 既存カセットは書き換えず、新しいカセットファイルを足す
 
 ### 4.1 決定: `answer`/`answer-time-weighting` の再生対象を新形式カセットへ向け、旧形式は
+
 `answer-trials-material.ts` 専用の基準として固定する
 
 `examples/chat/src/cassette-io.ts` に以下を追加した:
@@ -245,20 +246,20 @@ Issue #498 完了条件4の陽性対照（`recordRetentionMutationPositiveContro
 **`record:answer`**（`ANSWER_CASE_SET_DEV` 6件 + `ANSWER_CASE_SET_EVAL` 8件、計14件
 【現物、`grep -c question: answer-case-set.*.ts`】）:
 
-| 呼び出し種別 | 見込み回数 | 内訳 |
-|---|---|---|
-| chat（`complete`/`completeStructured`、すべて `gpt-4o-mini`） | **108 + 2 = 110** | 抽出 52（14ケースの user 発話合計、1発話=1抽出呼び出し）+ 回答生成 28（14ケース×naive/mnemora） + judge 28（14ケース×naive/mnemora） + 陽性対照の変異分2（mnemora 回答生成1 + judge 1） |
-| embedding | **14 以上**（上限は未確定） | 質問文の埋め込み14（1ケース1回）+ 抽出が生んだ Memory の埋め込み（0件以上、抽出結果に依存するため実行前には確定できない） |
+| 呼び出し種別                                                  | 見込み回数                  | 内訳                                                                                                                                                                                    |
+| ------------------------------------------------------------- | --------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| chat（`complete`/`completeStructured`、すべて `gpt-4o-mini`） | **108 + 2 = 110**           | 抽出 52（14ケースの user 発話合計、1発話=1抽出呼び出し）+ 回答生成 28（14ケース×naive/mnemora） + judge 28（14ケース×naive/mnemora） + 陽性対照の変異分2（mnemora 回答生成1 + judge 1） |
+| embedding                                                     | **14 以上**（上限は未確定） | 質問文の埋め込み14（1ケース1回）+ 抽出が生んだ Memory の埋め込み（0件以上、抽出結果に依存するため実行前には確定できない）                                                               |
 
 **`record:answer-time-weighting`**（`TIME_WEIGHTING_CASE_SET_DEV` 6件 +
 `_EVAL` 6件 + `_EVAL_UNDATED` 4件、計16件【現物】。既存の
 `time-weighting-recorded-replay.postgres.test.ts` の docstring「全16ケース×2方針」と
 一致）:
 
-| 呼び出し種別 | 見込み回数 | 内訳 |
-|---|---|---|
-| chat（`complete`、`gpt-4o-mini`） | **32** | 16ケース×`legacy`/`eventAwareFreshness` の2方針（judge は呼ばない。`gradeAnswer` のみ） |
-| embedding | **32 以上**（下限） | 質問文の埋め込み（`recall()` を方針ごとに呼ぶため最大32＝16×2、キャッシュされれば16まで減りうる）+ 各ケースが直接書く記憶の埋め込み（ケースごとに件数が違う。`cassette-coverage.test.ts` の「すべてのケースが直接書く記憶の content」検査が数える対象と同じ） |
+| 呼び出し種別                      | 見込み回数          | 内訳                                                                                                                                                                                                                                                          |
+| --------------------------------- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| chat（`complete`、`gpt-4o-mini`） | **32**              | 16ケース×`legacy`/`eventAwareFreshness` の2方針（judge は呼ばない。`gradeAnswer` のみ）                                                                                                                                                                       |
+| embedding                         | **32 以上**（下限） | 質問文の埋め込み（`recall()` を方針ごとに呼ぶため最大32＝16×2、キャッシュされれば16まで減りうる）+ 各ケースが直接書く記憶の埋め込み（ケースごとに件数が違う。`cassette-coverage.test.ts` の「すべてのケースが直接書く記憶の content」検査が数える対象と同じ） |
 
 合計の見込みは **chat 142回・embedding 少なくとも46回**（embedding の上限は抽出結果に
 依存するため、実行前には確定できない）。`verify:answer`/`verify:answer-time-weighting`
@@ -365,6 +366,22 @@ MNEMORA_RECORD_SEED_CASSETTE=examples/chat/cassettes/answer-time-weighting.json 
 LLM・埋め込み別）と、記憶集合が§2の対照（`answer.json`）と一致したかどうかを、
 ここに追記すること。
 
+### 4.5.2 【実測】種つきで記録した結果（マネージャー）
+
+> ⚠ 本節は、マネージャーのセッション（自動化された担い手）が書いた。⛔ オーナー本人の判定ではない。
+
+マネージャーが、自分専用の Postgres の上で、種カセットを渡して2本を実 API で記録した（gpt-4o-mini・text-embedding-3-small）。
+
+| 記録                                                                       | 種                           | LLM：種から再生／実 API | 埋め込み：種から再生／実 API | 費用（usage-meter の概算） |
+| -------------------------------------------------------------------------- | ---------------------------- | ----------------------- | ---------------------------- | -------------------------- |
+| `record:answer` → `answer.order-legend.json`                               | `answer.json`                | 60 ／ 18                | 46 ／ 0                      | $0.000919                  |
+| `record:answer-time-weighting` → `answer-time-weighting.order-legend.json` | `answer-time-weighting.json` | 0 ／ 22                 | 48 ／ 0                      | $0.000712                  |
+
+- **記憶集合は旧カセットと一致した。** 記憶経路のプロンプトを持つ12問すべてで、記憶の行（`- [由来:…] … digest`）の集合が `answer.json` と `answer.order-legend.json` とで一致した（並びと凡例だけが違う）。抽出と埋め込みはすべて種から返っており、実 API を呼んでいない。⟹ §4.5 の交絡は、この2本については起きていない。§2 の n=15 の対照と、新形式カセットは同じ記憶集合の上にある。
+- 新形式カセットの1回の記録では、dev 6件はすべて ✅ だった（`schedule-change-meeting-day` を含む。n=15 で 13/15 の描画の1回の試行にすぎない）。eval では `schedule-change-deadline` の mnemora 側が ❌ だった。旧カセットでも答えは「今月の20日です」で、`gradeAnswer` は同じく fail である。1回の試行どうしでは退行ではない。ただし eval を n 回で測ってはいない（ADR 0301 の器は eval を受け付けない）。
+- 記録の後、`answer-cli.postgres.test.ts`・`answer-retention-positive-control.postgres.test.ts`・`time-weighting-recorded-replay.postgres.test.ts`・`cassette-coverage.test.ts` は、固定値を1つも書き直さずに緑だった（33件）。陽性対照の変異後の outcome も、`time-weighting` の `EXPECTED_VERDICT` も、旧の値のままで新しい記録と一致した。
+- 記録の前に、種を渡さずに `record:answer` を1回走らせて失敗している（§4.5.1）。その回に使ったのは chat 108回と埋め込み 58回で、ファイルは何も書かれていない。
+
 ## 5. 記録した時点の gradeAnswer/検証値は、録り直すたびに書き直す
 
 `time-weighting-recorded-replay.postgres.test.ts` の `EXPECTED_VERDICT`（16ケース×2方針の
@@ -386,25 +403,12 @@ LLM・埋め込み別）と、記憶集合が§2の対照（`answer.json`）と�
 3. **`digest-order-legend`（タグを落とす案）が eval の誤帰属検知ケースを壊すかどうかは
    測っていない**（§2.4）——本対照は dev 6件だけで行っており（ADR 0301 と同じ絶対の線）、
    eval を材料にした対照はこの ADR の範囲外のまま。
-4. **新形式カセットをまだ記録していない**（§4.3/§4.4）——`answer`/`answer-time-weighting`
-   の CI 再生（`example-chat`/`root-gate-db-stage` の該当ステップ）は、記録するまで赤の
-   ままである。記録・マージのタイミングはオーナーの判断領域（ADR 0295 §4 と同じ先例）。
-5. **新形式カセットでの記憶集合が旧形式と一致する保証が無い**（§4.5)——一致するかどうかの
-   実測も、記録後にしかできない。**§4.5.1 で、記憶集合を揃えやすくする下ごしらえ（種
-   カセット、`MNEMORA_RECORD_SEED_CASSETTE`）を実装したが、これも実 API で記録して
-   初めて「実際に揃ったか」が分かる**——下ごしらえ自体はこの書き手が歯・変異試験で
-   確かめたが、記憶集合が揃うことそのものはまだ実測していない。
+4. ~~新形式カセットをまだ記録していない~~ → **記録した**（§4.5.2）。
+5. ~~新形式カセットでの記憶集合が旧形式と一致する保証が無い~~ → **種つきの記録で一致を確かめた**（§4.5.2）。種を渡さずに録り直すと、一致しないことがある（§4.5.1 の失敗がその実例）。
 6. **embedding の呼び出し回数は上限が確定できない**（§4.4）——抽出が生成する Memory の
    件数に依存し、記録を実行するまで正確な数は分からない。
-7. **`answer-retention-positive-control.postgres.test.ts` の「変異後」の期待 outcome
-   （現状 `"fail"`/`"fail"` に固定）も、新形式での記録後に書き直しが要る可能性がある**
-   ——docstring には注記したが、値そのものはまだ直していない（旧形式の値のまま）。
-8. **種カセット（§4.5.1）は、まだ実 API に対して一度も走らせていない。** 歯（DB 不要）と
-   変異試験は通ったが、それは「種にある入力では real を呼ばない／種に無い入力では呼ぶ／
-   どちらも記録される」という**構造**の検査であり、実際の `answer.json`/
-   `answer-time-weighting.json` を種にして `record:answer`/`record:answer-time-weighting`
-   を実 API で走らせたときに、§4.5.1 の「見込み」（抽出・埋め込みは当たる／回答生成・judge・
-   陽性対照は当たらない）が実測とどれだけ一致するかは確かめていない。
+7. ~~陽性対照の変異後の期待 outcome を書き直す要がありうる~~ → 新しい記録でも旧の値のまま一致した（§4.5.2）。
+8. ~~種カセットをまだ実 API に対して走らせていない~~ → **走らせた**（§4.5.2）。実際に種に当たらなかったのは、answer では LLM 18件（回答生成・judge・陽性対照のうち、プロンプトが変わったもの）、time-weighting では回答生成の LLM 22件だった。埋め込みはどちらも全件が種に当たった。
 
 ## 関連
 
