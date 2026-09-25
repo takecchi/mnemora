@@ -574,3 +574,225 @@ ADR 0324 の real-fixture 実測・本 ADR 決定2 の ON-ceiling 実測は、�
   判定できない（ADR 0329「負債1」がpredicate側で28〜45回という近い回数でも
   同じ限界を報告している）。
 - ⛔ **この opt-in を既定にするかどうか**——本追記は判断しない（冒頭の注記）。
+
+---
+
+## 追記 2026-09-26（2）: 別ターンのケースでの `knownSubjects` 実測（本文・既存の追記は書き換えていない）
+
+> **クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)
+> ——投稿者名は担い手とオーナーを区別しない）。**この追記に出てくる判断はすべて
+> 「委譲された担い手（クローン miku）の判断（オーナーではない）」である。**この
+> opt-in を既定にするかどうかの判断はここでも行わない——その判断はオーナー領分
+> として残す。
+
+### 前提のずれ（依頼文の誤り・限定を先に訂正する）
+
+この追記に着手する依頼（クローン miku からの委譲）には、以下4点のずれがあった。
+**(1)〜(3) は依頼側（クローン miku）の誤り・簡略化であり、この追記で訂正した
+うえで進めた。(4) は事実の確認。**
+
+1. **型A を定義しているのは本 ADR（0334）決定1であって、[ADR 0324](./0324-claim-key-contested-detection.md)
+   ではない。** 依頼文は「ADR 0324 の型A」という言い方をしていたが、0324 は型の
+   分類そのものを持たない——分類（型A/B/C）は本 ADR 決定1が新たに導入したもので
+   ある。また、依頼文にあった「三人称が `'user'` に振られる向きは型A」という説明も
+   不正確——決定1を読むと、**その向き（三人称→`'user'`）は型B**（実測でしか
+   分からない、方向性）である。**型Aは「1回の `deriveClaimKeys` 呼び出しが
+   比較材料を構造的に持たない」という構造上の性質**であり、向きの話ではない。
+2. **[ADR 0324](./0324-claim-key-contested-detection.md) §4 の「9/30」は
+   `contested` の誤検出の件数であり、`predicate` が一致しないと数に入らない。**
+   （ADR 0324 §4「誤検出（無関係な話題間…）」の定義そのまま。）`answer` 経路では、
+   ターンをまたぐと `predicate` が揃いにくい（[ADR 0326](./0326-answer-path-claim-key-contested-opt-in-measurement.md)/
+   [ADR 0329](./0329-claim-key-known-predicates-from-store.md) が指摘した揺れの
+   構造 (c)）——下記「実測」節で、この追記自身の実測でも同じ傾向（predicate 一致
+   9/40、**全9件が同一トピック "pet"**、他3トピックは10回とも0件）を確認した。
+   **⟹ `contested` の
+   誤検出だけを見ていると、predicate が揃わないせいで `subject` の誤帰属自体が
+   見えなくなる**——だからこの追記は、`contested` フラグではなく
+   `claim_key_subject` の値そのものを診断ログ・`memories` テーブルから直接数えた。
+3. **[ADR 0324](./0324-claim-key-contested-detection.md) §4 と本 ADR 決定2は、
+   抽出後の単文 `content` を直接渡していた。**§4 は `examples/chat/cassettes/
+   retrieval.json` に記録済みの抽出結果をそのままコピーし、決定2も同様——どちらも
+   `packages/core/dist` を直接 import した使い捨てスクリプトで `deriveClaimKeys` を
+   直接呼んでいる。**`answer` 経路は生の発話（`AnswerCaseTurn.text`）を
+   `ingestConversation` → `extractCandidates`（抽出）へ通してから
+   `deriveClaimKeys` に渡す**——抽出という追加の LLM 呼び出し段を経由する。
+   下記「実測」節で、この抽出段が実際に content を書き換えていないか（例:
+   「ユーザーの妻は…」のように三人称の発話へ本人由来の語を混ぜていないか）を
+   直接確認した——**結果、そのような書き換えは見つからなかった**（詳細は
+   「型Aが再現しなかった理由」節）。
+4. **Issue #372 は CLOSED だが、コメントは付けられる。** 依頼文にあったとおり、
+   状態が CLOSED であることはコメント投稿の妨げにならないことを確認した
+   （`gh issue view 372` で状態を確認した上でコメントした）。
+
+### 足したもの
+
+負債2・前回の追記（2026-09-26）が残した「本人と第三者を別ターンに分けた新ケースでの
+測定」を埋めた。**既存の集合・既定は1バイトも変えない**:
+
+- `examples/chat/src/answer-case-set.separate-turn.ts`（新規ファイル）: 4件。
+  [ADR 0324](./0324-claim-key-contested-detection.md) §4 の `family`/`diet`/
+  `language`（誤帰属率が高かった3類、家族4/5・言語3/5・食事2/5）と `pet`（0/5
+  だった対照）の4類を参考にしたが、**関係名詞・文言はこの ADR/0324 が使った
+  ものをそのまま流用せず、この集合独自の自然な文にした**（作り込んで型Aを無理に
+  再現させないため）。**本人の事実と第三者の事実を意図的に別ターン（別の
+  `AnswerCaseTurn`、したがって別の `observe()` 呼び出し）に分けている**——
+  既存14件の4件（`other-person-birthday` 等）が同じターンに両方の事実を同居させて
+  いたのとは対照的である。
+
+  | ケース | 第三者 | 本人の事実（ターン） | 第三者の事実（ターン） | 質問 |
+  |---|---|---|---|---|
+  | `separate-turn-family-workplace` | 姉 | 「最近、大阪で新しい仕事を始めました。」(turn 0) | 「姉は先月、福岡に転勤になったそうです。」(turn 4) | 姉はどこで働いていますか? |
+  | `separate-turn-spouse-diet` | 妻 | 「わたしは乳製品を控えています。」(turn 0) | 「妻は小麦を控えています。」(turn 4) | 妻は何を控えていますか? |
+  | `separate-turn-colleague-language` | 同僚 | 「わたしは英語を話せます。」(turn 0) | 「同僚はフランス語を話せます。」(turn 4) | 同僚は何語を話せますか? |
+  | `separate-turn-father-pet` | 父 | 「わたしは犬を飼っています。」(turn 0) | 「父は猫を飼っています。」(turn 4) | 父は何を飼っていますか? |
+
+  全件 `knownSubjects: ["user", <第三者>]`（上限＝オラクル測定用、既存4件と同じ
+  限定）・`tuningUse: "held-out"`（実装の挙動を見る前に会話・期待値を決めた）。
+  `__tests__/answer-case-set.separate-turn.test.ts` が構造上の規約（3〜6件・全件
+  `knownSubjects` を持つ・`expected.accept`/`expected.reject` の語が同じターンに
+  同居しない＝別ターンであることの機械的な歯、他）を検査する——変異試験で
+  「同じターンに同居させる」変異を入れると、この歯が実際に赤くなることを確認した
+  （`cp` での退避・復元、`docs/autonomy.md` §2 の手順どおり）。
+- `examples/chat/src/scripts/record-answer-claim-key.ts`: `MNEMORA_ANSWER_CASE_SET`
+  （`"default"` 省略時の既定 | `"separate-turn"`）を追加。**既定は dev+eval
+  14件（この env を足す前と1バイトも変わらない）。** `"separate-turn"` を指定すると
+  `ANSWER_CASE_SET_SEPARATE_TURN` だけを走らせる——既存14件のケースセットは
+  一切参照しない。
+
+**既存14件（dev6+eval8）・既存カセット30本＋前回追記の6本（合わせて36本）は1バイトも
+変えていない**（`git status --porcelain` で、新規ファイルのみであることを確認）。
+
+**決定論のユニットテスト**（`MNEMORA_LLM=deterministic` 明示、ファイル名指定で実行）:
+
+```
+MNEMORA_LLM=deterministic pnpm --filter example-chat exec vitest run \
+  src/__tests__/answer-case.test.ts src/__tests__/answer-claim-key-options.test.ts \
+  src/__tests__/answer-case-set.separate-turn.test.ts
+```
+
+47件全通過（既存37件 + 新規10件）。typecheck（`pnpm --filter example-chat run
+typecheck`）・eslint（変更した3ファイルのみ）・prettier（`--check`）もすべて
+クリーン。
+
+### 実測: `MNEMORA_RECORD_CONDITION=baseline`（off、"detect"）と `known-subjects`（on）を5回ずつ、1回ごとに対で実行
+
+【実測】2026-09-26、`gpt-4o-mini`。`ANSWER_CASE_SET_SEPARATE_TURN` 4ケース全件、
+`initdb`（PostgreSQL 17、pgvector・btree_gin・pgcrypto、専用ポート・作業ツリー外
+`/tmp/mgr-a2c4ac80/pg`）で立てた専用インスタンス。種カセットは常に
+`answer.order-legend.json`（前回追記と同じ）。新カセット10本
+（`examples/chat/cassettes/answer.claim-key.separate-turn-{off,on}-{1,2,3,4,5}.json`）
+へ記録し、既存カセット・既存ケースセットは1バイトも触っていない。
+
+**基準は "detect"**（前回追記と同じ）。off/on は同じ順で対にして実行した
+（off-1, on-1, …, off-5, on-5——依頼の「3回以上」を満たした上で、費用が
+極めて低かった（1回あたり概算$0.002前後）ため、統計的な手がかりを増やす目的で
+5回に増やした）。
+
+**主指標: `memories` テーブルの `claim_key_subject`（診断ログ・直接 SELECT の両方から
+確認、[ADR 0329](./0329-claim-key-known-predicates-from-store.md) までと同じやり方
+——決定1の訂正2で書いたとおり、`contested` フラグには頼らない）:**
+
+| run | 条件 | 第三者→"user" 誤帰属 /4 | 本人→"user"以外 誤帰属 /4 | predicate一致 /4 | contested誤検出 /4 | 費用 |
+|---|---|---|---|---|---|---|
+| off-1 | baseline | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002063 |
+| on-1 | known-subjects | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002265 |
+| off-2 | baseline | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002079 |
+| on-2 | known-subjects | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002350 |
+| off-3 | baseline | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.001918 |
+| on-3 | known-subjects | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002201 |
+| off-4 | baseline | 0/4 | 0/4 | 0/4（pet も不一致） | 0/4 | $0.002133 |
+| on-4 | known-subjects | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002345 |
+| off-5 | baseline | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002128 |
+| on-5 | known-subjects | 0/4 | 0/4 | 1/4（pet） | 0/4 | $0.002281 |
+| **合計/平均** | — | **0/20（off）・0/20（on）** | **0/20（off）・0/20（on）** | **4/20（off）・5/20（on）** | **0/20（off）・0/20（on）** | **$0.021763** |
+
+**中心となる観測: 第三者 subject の誤帰属は、off・on どちらの5回でも一度も
+起きなかった（4件×5回=20機会中0件、両条件とも。合わせて40機会中0件）。**
+`separate-turn-family-workplace` の「姉」→ off/on とも `sister`/`姉`、
+`separate-turn-spouse-diet` の「妻」→ `wife`/`妻`、`separate-turn-colleague-language`
+の「同僚」→ `colleague`/`同僚`、`separate-turn-father-pet` の「父」→ `father`/`父`
+——40回すべてで、baseline（語彙ヒント無し）の時点ですでに正しく本人以外へ
+分離されていた。逆方向（本人の事実が `"user"` 以外になる）も40機会中0件だった。
+
+**⟹ この4ケース・この5回という範囲では、`knownSubjects` が「直す」べき誤帰属が
+そもそも観測されなかった**——前回の追記（同じ状況、既存4件）と同じ結果だが、
+今回は本人の事実と第三者の事実が意図的に別ターン（別の `observe()`）にあり、
+決定1「型A」の前提（比較材料を構造的に持たない）が成り立っている点が前回と違う。
+**⟹ 型Aの前提を満たしてもなお、`answer` 経路のこの4ケースでは off の時点で
+誤帰属が再現しなかった。**
+
+**副指標**: predicate 一致は "pet"（user: `has_pet` 系、第三者: `has_pet` 系）に
+**完全に限定して**発生した——一致した9件はすべて "pet" トピックであり（"pet" は
+10回中9回一致、off-4 だけ `has_pet` 対 `has_pet_cat` で不一致になった）、
+"family"/"diet"/"language" の3類は**10回とも一度も predicate が一致しなかった**（0/30）——
+`avoiding_dairy_products` 対 `gluten_intolerance`、`new_job_location` 対
+`moved_to` のように、別ターンでは同じ話題でも predicate の語彙が揃わない
+（[ADR 0326](./0326-answer-path-claim-key-contested-opt-in-measurement.md)/
+[ADR 0329](./0329-claim-key-known-predicates-from-store.md) の揺れ (c) の再確認）。
+`contested` 誤検出は40機会中0件——`findActiveByClaimKey` の診断ログは全40turnとも
+`{"matchCount":0,"result":{"kind":"no_conflict"}}` だった。predicate がほぼ揃わない
+以上、`subject` が仮に誤帰属していたとしても `contested` は構造的に発火しにくい
+——これが「`contested` の誤検出だけを見ていると `subject` の誤帰属が見えなくなる」
+（訂正2）の実例である。
+
+### 型Aが再現しなかった理由（確かめた範囲）
+
+依頼は「off で型A が再現しなければ、それ自体が結果である」「抽出後の content と
+claim key を実際に見て原因を書く」と求めていた。実際に確認した:
+
+**確かめたこと（【現物】診断ログ・`memories` テーブルの直接 SELECT）**:
+抽出段が三人称の発話へ本人由来の語を混ぜていないか——**混ぜていなかった。**
+10回すべてで、第三者ターンの抽出後 `content` は元の発話の関係名詞をそのまま保った
+（例: `"姉は先月、福岡に転勤になった。"`／`"妻は小麦を控えている。"`／
+`"同僚はフランス語を話せる。"`／`"父は猫を飼っています。"`——`"ユーザーの妻は…"`
+のような書き換えは一度も観測しなかった）。**⟹ 依頼文が最有力候補として挙げていた
+「抽出段の書き換え」という説明は、この4ケースでは当てはまらない。**
+
+**確認した構造上の違い（[ADR 0324](./0324-claim-key-contested-detection.md) §4・
+本 ADR 決定2 が使った `examples/chat/src/probe-set.ts` の `PROBES` との比較、
+【現物】）**: 誤帰属率が高かった3類（family/language/diet）の `fact`（本人の事実、
+`PROBES` 定義）は、いずれも**明示的な一人称代名詞を持たない**——`family` の
+`fact: "弟は札幌に住んでいます。"` に至っては**本人の事実ですらなく、別の第三者
+（弟）についての発話**である。`diet`（`"牛乳を飲むとお腹を壊します。"`）・
+`language`（`"TypeScriptよりRustのほうが好みです。"`）も主語が省略された文で
+ある。一方この追記の4ケースは、本人の事実の発話を常に明示的な一人称
+（「わたしは…」）で始めている。**この構造上の違いは実在する**——ただし、
+`deriveClaimKeys` は「1発話=1バッチ」（決定2・本追記とも）で呼ばれ、各呼び出しは
+独立した1件の `content` だけを受け取る（前ターンの内容やバッチ内の他候補は
+見えない、`buildClaimKeyPrompt` の実装どおり）ため、**「本人の事実の言い方」が
+「第三者の事実」の呼び出しへ直接漏れる経路は無い**——この構造上の違いが今回の
+0/40 の**直接の原因だと断定することはできない**（0/5 だった `color`/`pet` の
+`fact` は明示的な一人称 `"私は"`/`"私の"` を持つが、同じく 0/5 だった `exercise`/
+`travel` の `fact` は一人称を持たない——一人称の有無だけでは、誤帰属率が高い3類と
+低い4類の分かれ方を完全には説明できない）。
+
+**⟹ 確かめられたのは「抽出段の書き換えは原因ではない」ことと「入力文の一人称
+明示という構造上の違いが実在する」ことまでであり、その違いが誤帰属率の差を
+どれだけ説明するかは確認できていない。** 残る候補（ADR 0324 §4/本 ADR 決定2の
+実測が使った独立スクリプト——「使い捨てスクリプト」でリポジトリに残っていない
+——との、他の未特定の相違点／モデル出力のばらつき／`gpt-4o-mini` のモデル
+バージョンが2026-09-25/26の間で変わった可能性）は、いずれも確認も反証もして
+いない。
+
+### 確かめていないこと（この追記が新たに残す分）
+
+- ⛔ **型A が再現しなかった根本原因**——上記「型Aが再現しなかった理由」節のとおり、
+  抽出段の書き換えは原因ではないと確認したが、代わりの確定的な説明は得られて
+  いない。
+- ⛔ **`knownSubjects` が実際に誤帰属を減らす効果**——別ターンにしてもなお
+  off で誤帰属が観測されなかった（0/20）ため、on との比較（0/20 のまま）は
+  「直す対象が無かった」以上のことを示さない。決定2の ON-ceiling 実測（1発話=1
+  バッチを独立スクリプトで強制）でのみ効果を確認済みのまま——`answer` harness を
+  経由した効果の確認は、この追記でもまだ得られていない。
+- ⛔ **`gpt-4o-mini` のモデル出力が [ADR 0324](./0324-claim-key-contested-detection.md)
+  §4（2026-09-25）・本 ADR 決定2（2026-09-26）の実測時点から変わったか**
+  ——モデルのバージョン・重みが固定されているかどうかを OpenAI 側の情報で確認して
+  いない。
+- ⛔ **一人称明示という構造上の違いが誤帰属率にどれだけ効くか**——`color`/`pet`
+  （一人称あり・0/5）と `exercise`/`travel`（一人称なし・0/5）が同じ0/5になって
+  いる以上、この追記の比較だけでは因果を主張できない。
+- ⛔ **本人・第三者の語順を入れ替えた別ターン版**（`eval-misattribution-order-swapped`
+  相当の語順ストレスを、別ターン構成と組み合わせた場合）——今回は本人が常に先に
+  発話する語順だけを扱った。
+- ⛔ **この opt-in を既定にするかどうか**——本追記は判断しない（冒頭の注記）。
