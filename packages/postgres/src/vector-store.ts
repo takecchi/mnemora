@@ -139,6 +139,12 @@ export class PostgresVectorStore implements VectorStore {
     if (opts.filter.attributes !== undefined) {
       conditions.push(sql`m.attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
     }
+    // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み。配列の重なり演算子（`&&`）——
+    // 渡した名前のうち1つでも `tags` に含まれれば通る。`idx_memories_tags`（GIN）が効く。
+    // 未指定なら no-op。
+    if (opts.filter.labels !== undefined) {
+      conditions.push(sql`m.tags && ${sql.param(opts.filter.labels)}::text[]`);
+    }
     // ADR 0059: period の押し下げ。比較対象は COALESCE(occurred_at, recorded_at)
     // （ADR 0039 が定義した「実効時刻」——4箇所あった判定規則の5箇所目)。両端とも包含
     // （`>=`/`<=`）——`VectorFilter.occurredAfter`/`occurredBefore` の doc、および

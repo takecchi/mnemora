@@ -293,6 +293,33 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 （ユーザーが言った事実を消す側）へ進めてはならない。機構2が「判定できないときは
 `contested` に落とす」と既に定めている先の、まさにその一例として扱う。
 
+### ⚠ 2026-09 追記（Issue #372、(B) 第2段。[ADR 0324](./decisions/0324-claim-key-contested-detection.md)）: 検出を実装した——**列と索引だけで発火する。既定 off**
+
+上の追記が「今日まだ無い」と書いていた検出処理を実装した。`runtime.observe()` に
+`claimKey: { enabled: true, detectContested: true }` を渡したときだけ、新しく `active` に
+なった Memory ごとに、同じ `tenant_id`・同じ `subject_id`（`null` 同士も一致として扱う）・
+同じ claim key・有効期間（`validFrom`/`validUntil`）が重なる・`content_hash` が違う、
+他の `active` な Memory を `MemoryStore.findActiveByClaimKey?`（新設の任意メソッド、
+`idx_memories_claim_key` を使う）で探す。**LLM を一度も呼ばない。**
+
+- **相手がちょうど1件** ⟹ `Runtime.markContested` を呼ぶ（機構2そのもの）。根拠
+  （鍵・重なった有効期間・両側の `content_hash`）を `meta.note` に構造として載せる。
+- **相手が0件** ⟹ 何もしない。
+- **相手が2件以上** ⟹ **`markContested` を呼ばない。**[#207](https://github.com/takecchi/mnemora/issues/207)
+  （`memory_relations`、多対多）が無いと1対1の `contested_with_id` では表現できないため
+  ——`memory_events` へ根拠（鍵・関係する各 `id`/`content_hash`/有効期間・件数）を
+  `kind: 'updated'`・`meta.reason: 'claim_key_conflict_unresolved'`（`'contested'` とは
+  別のタグ）で1件だけ残し、件数を数えられるようにする。
+
+**`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
+（行6）までであり、`contested → active | superseded`（行7）は今日どおり
+`resolveContested` の明示呼び出しのみ。
+
+**既定は off のまま**（`detectContested` を渡さない・`enabled: false` の呼び出しは、
+`findActiveByClaimKey` を一度も呼ばない）。**既定を on にするかどうかは、この PR でも
+決めていない**（ADR 0185 決定7 が「#372 が着地して初めて意味を持つ」とした判断が、
+まさにこの PR の着地である——決定そのものはオーナー専権のまま）。
+
 ---
 
 ## 6. 強化 (Reinforcement)
@@ -603,9 +630,8 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 （`migrations/0020_taxonomy_labels.sql`、既存 `memories.tags` からの backfill を含む）。
 `MemoryStore.listLabels?`/`registerLabel?`（任意メソッド）で語彙の一覧・`registered`
 への昇格ができ、`TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?`（任意メソッド）
-で `taxonomy_mode` を読み書きできる。**ただし前倒ししたのは保存・語彙の口だけであり、
-`labels` を使った recall の絞り込み（上の表が言う「段1への参加」に相当するもの）は
-まだ実装していない**（PR-B、未着地）——この点で `attributes` とはまだ非対称である。
+で `taxonomy_mode` を読み書きできる。**前倒ししたのは保存・語彙の口だけであり、
+`labels` を使った recall の絞り込みは PR-B（下記追記）で実装した。**
 
 **さらに、本節の冒頭が書いている「`strict` モードが変えるのは『`proposed` なラベルが
 検索の*フィルタ・加点*に参加できるか』だけである」のうち、*加点*の側は実装しない
@@ -613,8 +639,17 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 `tagMatch`（`tags` の生の一致数による加点、`recall.md` §7）は、`taxonomy_mode` の値に
 関わらず今日と同じ計算をし続ける。** 変えると、`strict` なテナントの既存スコアが
 この PR によって動いてしまう（呼び出し側の挙動を1バイトも変えないという制約に反する）。
-`strict` が実際に効くのは、`labels` を使った**新しい**絞り込み（PR-B、まだ実装していない）
-に対してだけになる予定である。
+`strict` が実際に効くのは、`labels` を使った**新しい**絞り込みに対してだけである
+（下記追記のとおり実装済み）。
+
+**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](./decisions/0323-taxonomy-recall-filter.md)）:
+上の「PR-B、まだ実装していない」は、本追記の時点で古い。** `RecallQuery.labels?`/
+`taxonomyGroups?` を実装した——recall の段1（ANN・語彙）・段3.5（連想枠）・
+`aggregateScope` への絞り込みの伝播、`taxonomy_mode` の参加資格（open: registered/proposed
+両方、strict: registered のみ）、`FilteredOmission.condition: 'taxonomy'` の報告、
+`GroupCount.axis: 'taxonomy'`（呼び手が明示したときだけ）のいずれも着地している。
+**`tagMatch`（上）は引き続き変えていない**——`docs/recall.md`「taxonomy によるラベルの
+絞り込みと群カウント」節、ADR 0323 を参照。
 
 ---
 

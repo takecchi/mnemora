@@ -100,6 +100,8 @@ describeMemoryStoreConformance({
   // Issue #201 / ADR 0318: PostgresMemoryStore は listLabels/registerLabel を
   // 実装している。
   supportsLabels: true,
+  // Issue #372: PostgresMemoryStore は findActiveByClaimKey を実装している。
+  supportsFindActiveByClaimKey: true,
 });
 
 describeEventStoreConformance({
@@ -143,6 +145,7 @@ describeVectorStoreConformance({
         ...(attrs?.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
         ...(attrs?.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
         ...(attrs?.attributes !== undefined ? { attributes: attrs.attributes } : {}),
+        ...(attrs?.tags !== undefined ? { tags: attrs.tags } : {}),
       }),
     );
     return memory.id;
@@ -192,6 +195,7 @@ describeLexicalStoreConformance({
         ...(attrs.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
         ...(attrs.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
         ...(attrs.attributes !== undefined ? { attributes: attrs.attributes } : {}),
+        ...(attrs.tags !== undefined ? { tags: attrs.tags } : {}),
       }),
     );
     return memory.id;

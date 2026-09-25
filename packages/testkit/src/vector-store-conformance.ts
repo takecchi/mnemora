@@ -48,6 +48,8 @@ export interface PrepareMemoryIdAttrs {
   validUntil?: Date | null;
   /** Issue #152/#153（ADR 0312）: `filter.attributes` の歯が使う。 */
   attributes?: Record<string, string>;
+  /** Issue #201 PR-B（ADR 0323）: `filter.labels` の歯が使う。 */
+  tags?: string[];
 }
 
 export interface VectorStoreConformanceOptions {
@@ -923,6 +925,54 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
 
       expect(ids).toContain(bothId);
       expect(ids).not.toContain(onlyOneId);
+    });
+
+    // -------------------------------------------------------------------
+    // filter.labels（Issue #201 PR-B、ADR 0323）: OR の集合絞り込み。
+    // -------------------------------------------------------------------
+
+    it("filter.labels: 渡した名前のいずれかを tags に持つ Memory だけが返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const matchingId = await prepareMemoryId(ctx, { tags: ["alpha"] });
+      const otherId = await prepareMemoryId(ctx, { tags: ["beta"] });
+      const untaggedId = await prepareMemoryId(ctx, {});
+
+      await store.upsert(ctx, space, matchingId, [1, 0, 0]);
+      await store.upsert(ctx, space, otherId, [1, 0, 0]);
+      await store.upsert(ctx, space, untaggedId, [1, 0, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1", labels: ["alpha"] },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(matchingId);
+      expect(ids).not.toContain(otherId);
+      expect(ids).not.toContain(untaggedId);
+    });
+
+    it("filter.labels: 複数名は OR——いずれか1つでも一致すれば返る", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const alphaId = await prepareMemoryId(ctx, { tags: ["alpha"] });
+      const betaId = await prepareMemoryId(ctx, { tags: ["beta"] });
+      const gammaId = await prepareMemoryId(ctx, { tags: ["gamma"] });
+
+      await store.upsert(ctx, space, alphaId, [1, 0, 0]);
+      await store.upsert(ctx, space, betaId, [1, 0, 0]);
+      await store.upsert(ctx, space, gammaId, [1, 0, 0]);
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1", labels: ["alpha", "beta"] },
+      });
+      const ids = hits.map((hit) => hit.memoryId);
+
+      expect(ids).toContain(alphaId);
+      expect(ids).toContain(betaId);
+      expect(ids).not.toContain(gammaId);
     });
 
     it("filter は複数同時に渡すと AND になる（どれか1つが不一致なら返らない）", async () => {

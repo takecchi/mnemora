@@ -100,10 +100,12 @@ export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, cont
 export interface ClaimKeyOptions {
     enabled: boolean;
     knownPredicates?: string[];
+    detectContested?: boolean;
 }
 export declare const ClaimKeyOptionsSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
     knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    detectContested: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 
 // ===== dist/clock.d.ts =====
@@ -505,6 +507,7 @@ export interface LexicalFilter {
     occurredBefore?: Date;
     validAt?: Date;
     attributes?: Attributes;
+    labels?: string[];
 }
 export interface LexicalHit {
     memoryId: MemoryId;
@@ -542,6 +545,7 @@ export interface LLMProvider {
 }
 
 // ===== dist/interfaces/memory-store.d.ts =====
+import type { ClaimKey } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
@@ -680,6 +684,14 @@ export interface MemoryStore {
             MemoryEvent
         ];
     }>;
+    findActiveByClaimKey?(ctx: Ctx, query: {
+        subjectId: string | null;
+        claimKey: ClaimKey;
+        excludeMemoryId: MemoryId;
+        contentHash: string;
+        validFrom: Date | null;
+        validUntil: Date | null;
+    }): Promise<Memory[]>;
     restoreSupersededBy?(ctx: Ctx, supersededById: MemoryId, event: {
         reason?: string;
         actor?: EventActor;
@@ -859,6 +871,7 @@ export interface VectorFilter {
     decayFloorAnyAxis?: boolean;
     validAt?: Date;
     attributes?: Attributes;
+    labels?: string[];
 }
 export interface VectorEntry {
     memoryId: MemoryId;
@@ -1234,6 +1247,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         claimKey: z.ZodOptional<z.ZodObject<{
             enabled: z.ZodBoolean;
             knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            detectContested: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
@@ -1261,6 +1275,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         claimKey: z.ZodOptional<z.ZodObject<{
             enabled: z.ZodBoolean;
             knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            detectContested: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -1288,6 +1303,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
         claimKey: z.ZodOptional<z.ZodObject<{
             enabled: z.ZodBoolean;
             knownPredicates: z.ZodOptional<z.ZodArray<z.ZodString>>;
+            detectContested: z.ZodOptional<z.ZodBoolean>;
         }, z.core.$strip>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;
@@ -1934,6 +1950,10 @@ export interface ScopeAggregate {
         count: number;
         countKind: CountKind;
     };
+    filteredTaxonomy?: {
+        count: number;
+        countKind: CountKind;
+    };
     filteredDecayed: {
         count: number;
         countKind: CountKind;
@@ -2077,6 +2097,8 @@ export interface RecallQuery {
     vector?: number[];
     tags?: string[];
     attributes?: Attributes;
+    labels?: string[];
+    taxonomyGroups?: boolean;
     occurredAfter?: Date;
     occurredBefore?: Date;
     limit?: number;
@@ -2156,6 +2178,8 @@ export declare const RecallQuerySchema: z.ZodObject<{
         legacy: "legacy";
         eventAwareFreshness: "eventAwareFreshness";
     }>>;
+    labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    taxonomyGroups: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export interface RecallScope {
     subjectId?: string;
@@ -2167,6 +2191,8 @@ export interface RecallScope {
     decayFloorAnyAxis?: boolean;
     includeSubjectless?: boolean;
     attributes?: Attributes;
+    labels?: string[];
+    taxonomyGroupCandidates?: string[];
 }
 export declare const RecallScopeSchema: z.ZodObject<{
     subjectId: z.ZodOptional<z.ZodString>;
@@ -2178,6 +2204,8 @@ export declare const RecallScopeSchema: z.ZodObject<{
     decayFloorAnyAxis: z.ZodOptional<z.ZodBoolean>;
     includeSubjectless: z.ZodOptional<z.ZodBoolean>;
     attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    labels: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    taxonomyGroupCandidates: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 export interface RecallOutputValidationIssue {
     path: string;
@@ -2513,6 +2541,7 @@ import type { FindCorrectionCandidatesInput, FindCorrectionCandidatesResult } fr
 import type { ApplyCorrectionInput, ApplyCorrectionResult } from "./apply-correction.js";
 import type { Ctx } from "./ctx.js";
 import type { EventActor } from "./event.js";
+import type { ClaimKey } from "./claim-key.js";
 import type { ExtractionFailure, ExtractionOutcome } from "./extraction.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
@@ -2568,6 +2597,22 @@ export interface ObserveResult {
     extractionFailure: ExtractionFailure | null;
     rejectedSubjectIds?: string[];
     claimKeyFailure?: ExtractionFailure | null;
+    contestedDetection?: ContestedDetectionOutcome[];
+}
+export interface ContestedDetectionOutcome {
+    memoryId: MemoryId;
+    claimKey: ClaimKey;
+    matchCount: number;
+    result: {
+        kind: "no_conflict";
+    } | {
+        kind: "contested";
+        withMemoryId: MemoryId;
+        markContested: MarkContestedResult;
+    } | {
+        kind: "unresolved_conflict";
+        matchMemoryIds: MemoryId[];
+    };
 }
 export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_attempted";
 export interface ReextractResult {
