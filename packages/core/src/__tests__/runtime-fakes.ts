@@ -184,7 +184,7 @@ export class FakeMemoryStore implements MemoryStore {
         // Issue #280: `occurredAt` と同じ経路。
         validFrom: input.validFrom ?? null,
         validUntil: input.validUntil ?? null,
-        // Issue #152（ADR 0302）: 同じ経路。runtime は常に `{}` 以上の値を書く。
+        // Issue #152（ADR 0304）: 同じ経路。runtime は常に `{}` 以上の値を書く。
         attributes: input.attributes ?? {},
       };
       this.backing.observations.set(observation.id, observation);
@@ -310,7 +310,7 @@ export class FakeMemoryStore implements MemoryStore {
         halfLifeRecalls: input.halfLifeRecalls ?? null,
         embeddingStatus: input.embeddingStatus,
         purgedAt: input.purgedAt ?? null,
-        // Issue #152/#153（ADR 0302）: runtime は常に `{}` 以上の値を書く。
+        // Issue #152/#153（ADR 0304）: runtime は常に `{}` 以上の値を書く。
         attributes: input.attributes ?? {},
         createdAt: now,
         updatedAt: now,
@@ -690,7 +690,7 @@ export class FakeMemoryStore implements MemoryStore {
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
       if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) continue;
-      // Issue #152/#153（ADR 0302）: `attributes` も `subjectId` と同じくスコープの外側の
+      // Issue #152/#153（ADR 0304）: `attributes` も `subjectId` と同じくスコープの外側の
       // 境界——落ちた分は `filtered*` のどの列にも数えず、`totalInScope` にも入れない
       // （`recall.ts` の `ScopeAggregate` doc「2026-09 追記」参照）。
       if (scope.attributes !== undefined) {
@@ -1345,7 +1345,7 @@ export class FakeVectorStore implements VectorStore {
       if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
         continue;
       }
-      // Issue #152/#153（ADR 0302）: AND 等値。`FakeLexicalStore.search` と同じ意味論。
+      // Issue #152/#153（ADR 0304）: AND 等値。`FakeLexicalStore.search` と同じ意味論。
       if (opts.filter.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};
         const matches = Object.entries(opts.filter.attributes).every(
@@ -1533,7 +1533,7 @@ export class FakeLexicalStore implements LexicalStore {
       if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
         continue;
       }
-      // Issue #152/#153（ADR 0302）: AND 等値。`FakeVectorStore.search` と同じ意味論。
+      // Issue #152/#153（ADR 0304）: AND 等値。`FakeVectorStore.search` と同じ意味論。
       if (opts.filter.attributes !== undefined) {
         const memoryAttributes = memory.attributes ?? {};
         const matches = Object.entries(opts.filter.attributes).every(

@@ -134,7 +134,7 @@ export class PostgresVectorStore implements VectorStore {
           : sql`m.subject_id = ${opts.filter.subjectId}`,
       );
     }
-    // Issue #152/#153（ADR 0302）: AND 等値の絞り込み。`jsonb` の containment（`@>`）——
+    // Issue #152/#153（ADR 0304）: AND 等値の絞り込み。`jsonb` の containment（`@>`）——
     // `idx_memories_attributes`（`jsonb_path_ops`）が効く述語。未指定なら no-op。
     if (opts.filter.attributes !== undefined) {
       conditions.push(sql`m.attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);

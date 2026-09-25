@@ -815,7 +815,7 @@ describe("3つの LLM スキーマ（extraction / consolidation / reflection）�
   });
 });
 
-describe("buildReflectedMemory（純関数） — attributes は積集合（Issue #153、ADR 0302）", () => {
+describe("buildReflectedMemory（純関数） — attributes は積集合（Issue #153、ADR 0304）", () => {
   function fixtureMemory(overrides: Partial<Memory> = {}): Memory {
     const recordedAt = overrides.recordedAt ?? NOW;
     const strength = overrides.strength ?? 1;

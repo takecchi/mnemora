@@ -362,7 +362,7 @@ export async function runRecall(
         ? nowSeq
         : undefined,
     decayFloorAnyAxis: decayGateActive && decayClock === "either",
-    // Issue #152/#153（ADR 0302）: 空オブジェクトは「絞り込み無し」（`RecallQuery.attributes`
+    // Issue #152/#153（ADR 0304）: 空オブジェクトは「絞り込み無し」（`RecallQuery.attributes`
     // の doc コメント参照）——`undefined` に正規化して、以降すべての箇所（段1・段3.5・
     // `aggregateScope`・後置フィルタ）が同じ1つの「絞り込み無し」の形を見るようにする。
     attributes:
@@ -471,7 +471,7 @@ export async function runRecall(
   };
 
   /**
-   * ⭐ `attributes` の後置フィルタ述語（Issue #152/#153、ADR 0302）。段1の後置フィルタと
+   * ⭐ `attributes` の後置フィルタ述語（Issue #152/#153、ADR 0304）。段1の後置フィルタと
    * 段3.5（連想枠）の後置フィルタが、同じこの関数を呼ぶ——`survivesSubjectFilter` と同じ
    * 「1箇所に述語を置く」規律。
    *
@@ -625,7 +625,7 @@ export async function runRecall(
         subjectId: scope.subjectId,
         // Issue #608 項目③(b) / ADR 0286: `subjectId` が渡っているときだけ効く opt-in。
         includeSubjectless: scope.includeSubjectless,
-        // Issue #152/#153（ADR 0302）: AND 等値の絞り込み。`scope.attributes` が
+        // Issue #152/#153（ADR 0304）: AND 等値の絞り込み。`scope.attributes` が
         // `undefined`（絞り込み無し）なら no-op（`VectorFilter.attributes` の doc 参照）。
         attributes: scope.attributes,
         excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
@@ -704,7 +704,7 @@ export async function runRecall(
           subjectId: scope.subjectId,
           // Issue #608 項目③(b) / ADR 0286: ANN チャンネルと同じ opt-in（上のコメント参照）。
           includeSubjectless: scope.includeSubjectless,
-          // Issue #152/#153（ADR 0302）: ANN チャンネルと同じ絞り込み（上のコメント参照）。
+          // Issue #152/#153（ADR 0304）: ANN チャンネルと同じ絞り込み（上のコメント参照）。
           attributes: scope.attributes,
           excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
           occurredAfter: scope.occurredAfter,
@@ -811,7 +811,7 @@ export async function runRecall(
     // Issue #608 項目③(b) / ADR 0286: 述語は `survivesSubjectFilter` に1箇所へまとめてある
     // （段3.5 の後置フィルタと共有——ここで書き直さない）。
     if (!survivesSubjectFilter(memory)) continue;
-    // Issue #152/#153（ADR 0302）: 同じ規律。`survivesAttributesFilter` に1箇所へまとめてある。
+    // Issue #152/#153（ADR 0304）: 同じ規律。`survivesAttributesFilter` に1箇所へまとめてある。
     if (!survivesAttributesFilter(memory)) continue;
     const effectiveTime = memory.occurredAt ?? memory.recordedAt;
     if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
@@ -1217,7 +1217,7 @@ export async function runRecall(
                 // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
                 // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
                 includeSubjectless: scope.includeSubjectless,
-                // Issue #152/#153（ADR 0302）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+                // Issue #152/#153（ADR 0304）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
                 // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
                 // ——を繰り返さないための規律をそのまま適用する）。
                 attributes: scope.attributes,
@@ -1314,7 +1314,7 @@ export async function runRecall(
           // 何件増えるかは**測っていない。**
           // Issue #608 項目③(b) / ADR 0286: 段1と同じ述語を共有する（`survivesSubjectFilter`）。
           if (!survivesSubjectFilter(memory)) continue;
-          // Issue #152/#153（ADR 0302）: 段1と同じ述語を共有する（`survivesAttributesFilter`）。
+          // Issue #152/#153（ADR 0304）: 段1と同じ述語を共有する（`survivesAttributesFilter`）。
           if (!survivesAttributesFilter(memory)) continue;
           const effectiveTime = memory.occurredAt ?? memory.recordedAt;
           if (scope.occurredAfter && effectiveTime < scope.occurredAfter) continue;
@@ -1522,7 +1522,7 @@ export async function runRecall(
         // occurredAt は Memory 自身の欄をそのまま引き継ぐ。undefined も null に揃える
         // （「述べられていない」を推測で埋めない——ADR 0298「決めなかったこと」参照）。
         occurredAt: member.memory.occurredAt ?? null,
-        // Issue #152/#153（ADR 0302）: 常に `{}` 以上の値を書く（`undefined` にしない）
+        // Issue #152/#153（ADR 0304）: 常に `{}` 以上の値を書く（`undefined` にしない）
         // ——`Memory.attributes` が `undefined` の古い行・adapter でもここで `{}` に揃える
         // （`RecalledMemory.attributes` の doc コメント参照）。
         attributes: member.memory.attributes ?? {},
