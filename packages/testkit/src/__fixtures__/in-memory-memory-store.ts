@@ -397,8 +397,20 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
+    // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引く
+    // （実測）。同じ id が `ids` に複数回含まれていても、一致する行は主キーの性質上
+    // 1回しか無いため、返る件数は**一意な id の数**にしかならない。ここで検査せず
+    // 単純にループで push すると、同じ id の Memory オブジェクトを重複して返して
+    // しまう（実測: Postgres は `getMany([x,x,y])` に対し2件、素朴なループ実装は
+    // 3件を返す）。呼び出し済みの id は2回目以降スキップし、Postgres の集合演算と
+    // 同じ「一意な id の集合」に揃える。
+    const seen = new Set<MemoryId>();
     const results: Memory[] = [];
     for (const id of ids) {
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
       const memory = this.memories.get(id);
       if (memory && memory.tenantId === ctx.tenantId) {
         results.push(memory);
@@ -652,7 +664,33 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    // `PostgresMemoryStore.purgeExpiredEvents`（`buildPurgeExpiredEventsTargetSelect`）は
+    // SQL の `LIMIT ${opts.limit + 1}` を使うため、`opts.limit` が負数だと
+    // 生 SQL の `LIMIT` へ負数（またはそれ以下）が渡る。`opts.limit === -1` のときだけ
+    // `LIMIT 0` になり例外を投げずに `purged: 0` で返るが（実測済み）、`opts.limit <= -2`
+    // では Postgres が `LIMIT must not be negative` で例外を投げる（実測済み）。
+    // ここで検査せず `candidates.slice(0, opts.limit)` へ渡すと、
+    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
+    // 対象テナントの期限切れイベントの**ほぼ全件を静かに削除**してしまう
+    // （このメソッドは delete の副作用を持つ——`search`/`list` 系より実害が大きい）。
+    // `opts.limit === -1` の1点だけは Postgres と完全には一致しない（Postgres は
+    // 例外を投げず `purged: 0`）が、**どちらの入力でも「誤って削除しない」ことは
+    // 保証される**——`LIMIT + 1` の窓を模してまで `-1` だけを特別扱いする値打ちが
+    // 無いと判断し、負数はすべて一様に拒む。
+    // ⚠ 負数だけでは足りない——`opts.limit + 1` も bigint 型の SQL パラメータへ渡るため、
+    // `NaN`/`Infinity`/非整数を渡すと Postgres は
+    // `invalid input syntax for type bigint: "NaN"` の形で例外を投げる（実測済み。
+    // `opts.limit + 1` の形のままでも同じ例外になることを確認済み——
+    // in-memory-vector-store.ts の同種の注記参照）。
+    // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
+    // 「負数は例外」の回帰テストの文言を変えずに済ませる。
     const dryRun = opts.dryRun ?? false;
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`purgeExpiredEvents: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`purgeExpiredEvents: limit must not be negative (got ${opts.limit})`);
+    }
     const candidates = this.events
       .filter(
         (event) =>
@@ -987,6 +1025,27 @@ export class InMemoryMemoryStore implements MemoryStore {
     let digests: ScopeAggregate["digests"] = [];
     let digestEligible: ScopeAggregate["digestEligible"] = { count: 0, countKind: "exact" };
     if (opts?.digestBand) {
+      // `PostgresMemoryStore.aggregateScope` は `digestBand.limit` を生 SQL の `LIMIT`
+      // にそのまま渡すため、負数を渡すと Postgres 自身が `LIMIT must not be negative`
+      // で例外を投げる（in-memory-vector-store.ts の同種の注記・実測参照）。ここで
+      // 検査せず `eligibleMemories.slice(0, opts.digestBand.limit)` へ渡すと、
+      // `Array.prototype.slice` の負数引数により、スコープ内のほぼ全件の digest を
+      // 静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
+      // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
+      // `Infinity`/非整数を渡すと Postgres は `invalid input syntax for type bigint: "NaN"`
+      // の形で例外を投げる（実測済み。in-memory-vector-store.ts の同種の注記参照）。
+      // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
+      // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+      if (!Number.isInteger(opts.digestBand.limit)) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must be an integer (got ${opts.digestBand.limit})`,
+        );
+      }
+      if (opts.digestBand.limit < 0) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must not be negative (got ${opts.digestBand.limit})`,
+        );
+      }
       const exclude = new Set(opts.digestBand.excludeMemoryIds);
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順

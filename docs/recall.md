@@ -18,9 +18,7 @@
 
 ```ts
 type RecallResult = {
-  | { kind: 'not_indexed'
-      reason: 'pending' | 'failed' | 'skipped'
-      count: number; countKind: CountKind }recallId: string              // 記録された recall の識別子。observe() の usage 報告で使う
+  recallId: string              // 記録された recall の識別子。observe() の usage 報告で使う
   memories: RecalledMemory[]    // 返ったもの。score 内訳 + 取得理由つき
   omitted: Omission[]           // 返らなかったものの分類（§4）
   index: IndexBand              // 目次帯。被覆不変条件を担う（§5）
@@ -208,7 +206,9 @@ SELECT
   m.id,
   m.digest,
   e.embedding <=> $1              AS distance
-FROM memory_embeddings_default e
+FROM memory_embeddings_<space> e  -- <space> は埋め込み空間ごとに導出されるスラグ。
+                                   -- 固定のテーブル名ではない（packages/postgres/README.md
+                                   -- 「実行時に増える系列」参照）
 JOIN memories m ON m.id = e.memory_id
 WHERE m.tenant_id = $2
   AND m.status IN ('active', 'contested')  -- 誤り1の修正。後述
@@ -440,7 +440,7 @@ alteroid の「全文か目次1行かのどちらかに必ず現れる」とい�
   "recallId": "rcl_01HXYZ...",
   "memories": [],
   "omitted": [
-    { "kind": "filtered", "condition": "period", "count": 3, "countKind": "exact" }
+    { "kind": "filtered", "condition": "period", "scopeRelation": "outside_scope", "count": 3, "countKind": "exact" }
   ],
   "index": {
     "groups": [
@@ -887,7 +887,7 @@ DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + min(digest長, DIGEST_BAND_MAX_ENTRY_CH
 
 ```ts
 const recalled = await runtime.recall(ctx, {
-  content: "...",
+  text: "...",
   digestBandLimit: 10, // 既定 50 から下げる。0 は渡せない（1 が下限）
 });
 
@@ -1021,8 +1021,9 @@ core はモデル固有のトークナイザに依存しない。`TokenCounter` 
 type RecalledMemory = {
   memoryId: string
   digest: string
-  retrievedVia: 'ann' | 'lexical' | 'mandatory_companion'
+  retrievedVia: 'ann' | 'lexical' | 'mandatory_companion' | 'association'
   companionOf?: string          // 矛盾の相手として同伴取得された場合、その相手の memoryId
+  associationOf?: string        // retrievedVia: 'association' のときだけ在る。起点にしたアンカーの memoryId（§9）
   provenanceKind: ProvenanceKind // 本人が述べた事実か、AI の推論か（オーナーの原則7）
   score: ScoreBreakdown
 }
@@ -1243,7 +1244,7 @@ Issue #200 は**2つの読み方**を挙げていた。
   🔴 **⛔ 担い手が技術的に検証して得た結論ではない。**
   ⛔ **§7.4 の ⚠3 の本文は書き換えられていない**——roadmap は §7.0 の規律で**前の節を書き換えず、後から決まったことを新しい節として積む**。
   ⟹ ⚠ **⚠3 だけを読むと、まだ留保が付いているように見える。§7.18 まで読むこと。**
-  ⚠ **解かれたのは ⚠3 だけである**——**同§の ⚠4（`memories` と `omitted` の排他性。下の §9.8 が扱っているもの）は、そのまま残っている。**
+  ⚠ **このオーナー決定が解いたのは ⚠3 だけである**——**同§の ⚠4（`memories` と `omitted` の排他性）は、決定とは別に、下の §9.8（[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)、採用 2026-09-17）のコードの修理で塞がれている。**⚠ **2026-09-26 訂正**: 当初ここは「⚠4 はそのまま残っている」と書いていたが、この追記を書いた 2026-09-21 の時点で既に誤りだった（[docs/roadmap.md](./roadmap.md) §7.18 の「解いていないこと」1番）。
   ⟹ ⭐ **以下は、その留保が置かれた 2026-09-17 時点の測定の記録である。**⛔ **既定を on にするなら、いまでもここから読むこと**——**留保が解かれたことは、ここに書いてある窓が測られなかったことを意味しない。**
 
   段3.5 は**意図的にスコア閾値の外**に在る——`partitionByThreshold` の呼び出しは `recall-runtime.ts` の1箇所だけで対象は段1の候補のみであり、**段3.5 はその後に走る**（[ADR 0172](./decisions/0172-association-passes-decay-and-validity-gates.md)「段3.5 の候補は段2の閾値分割を通らない」がこの非対称を逐語で自認している）。

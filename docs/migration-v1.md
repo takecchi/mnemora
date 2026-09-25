@@ -8,23 +8,38 @@
 | **v0.2.0 → v0.3.0**（🔴 **出荷済み**） | **4件** | **8**・**9**・**10**・**11** |
 | **v0.3.0 → v0.4.0**（🔴 **出荷済み**） | **6件** | **12**〜**17** |
 | **v0.4.0 → v0.5.0**（🔴 **出荷済み**） | **1件** | **18** |
-| **v0.5.0 → v1.0.0**（未リリース） | ⛔ **件数を書かない**（下記） | **19** 以降（`v0.5.0` より後に着地したもの） |
+| **v0.5.0 → v1.0.0**（🔴 **出荷済み**） | **0件** | 無し（この世代には最後まで何も着地しなかった） |
 
-⭐ **上4世代の件数を書いてよいのは、両端が tag で閉じているからである。**`v0.1.9`→`v0.2.0` も
-`v0.2.0`→`v0.3.0` も `v0.3.0`→`v0.4.0` も `v0.4.0`→`v0.5.0` も、**`main` が動いても変わらない。**
+⭐ **全5世代の件数を書いてよいのは、両端が tag で閉じているからである。**`v0.1.9`→`v0.2.0` も
+`v0.2.0`→`v0.3.0` も `v0.3.0`→`v0.4.0` も `v0.4.0`→`v0.5.0` も `v0.5.0`→`v1.0.0` も、
+**`main` が動いても変わらない——この文書が表題に掲げた範囲は、これで閉じた。**
 
-⭐ **【実測 2026-09-21】`v0.5.0` → `v1.0.0` の世代には、まだ1件も無い。**
-🔴 **ただし理由が今までと違う**——**この世代を起こした時点では `v0.5.0` の tag と `origin/main` が
-同じ commit（`509f4e7`）を指しており、数える範囲そのものが空だったからである。**
-⛔ **その後 `main` は docs だけの commit で進んでいる。**⟹ ⭐ **「いまも空か」を見るなら
-commit の本数ではなく出荷される面を当てること**: `git diff --stat v0.5.0..origin/main -- packages/`。
-⛔ **これを「`v1.0.0` では何も壊れない」と読まないこと**——**測った時点までの話である。**
+⭐ **【実測 2026-09-26】`v0.5.0` → `v1.0.0` の世代には、最後まで1件も着地しなかった。**
+`v1.0.0` は **2026-09-22T23:54:08Z に published**（draft でも pre-release でもない。
+`gh release view v1.0.0 --json isDraft,isPrerelease,publishedAt,targetCommitish` で確認）。
+`git diff --stat v0.5.0..v1.0.0 -- packages/` も
+`git diff --stat v0.5.0..v1.0.0 -- scripts/__snapshots__/public-api/` も**どちらも
+差分を返さない。**⟹ **「いまのところ空」ではなく「空のまま出荷された」に確定した。**
 
-⛔ **`v0.5.0` → `v1.0.0` の件数は、ここに写さない。**`v1.0.0` の tag はまだ切られていないので、
-**`main` に破壊的変更が1件着地するたびに、ここへ写した数は腐る**（`AGENTS.md`「⚠ 数を、道具と
-生成物に焼き込まない」/ [ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
-⚠ **これは [Issue #532](https://github.com/takecchi/mnemora/issues/532) が指した腐り方そのものである**
-——数を正しく直しても、次の破壊的変更が着地した時点でまた同じ場所が腐る。
+🔴 **`v1.0.0` の tag はもう切られている。**⛔ **この文書は、それに追随していなかった**
+——`CHANGELOG.md` は `## [1.0.0] - 2026-09-23` を既に持っている（追随済み）のに対し、
+この文書は本節を含め随所で `v1.0.0` を「未リリース」のまま書き続けていた。
+**2026-09-18・2026-09-19・2026-09-21（2回目まで）の「訂正の履歴」と同じ形が、
+今回は文書の表題そのものが指す版で起きた**（経緯は下の「訂正の履歴」に畳む）。
+
+⚠ **`v1.0.0` より後に着地した変更を、この文書はまだ数えていない。**そのうち3件
+（`TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`・
+`MemoryStoreConformanceOptions.supportsLabels`/`supportsFindActiveByClaimKey`）は、
+一時的に必須フィールドとして着地し v1.0.0 時点の呼び出しを壊していたが、
+[Issue #818](https://github.com/takecchi/mnemora/issues/818) の結果、3つとも
+`?: boolean`（省略時は該当する適合項目を実行しない）へ戻したため、**もう破壊的変更
+ではない**——次の世代の節に計上する対象からは外れた（詳しくは **6** の末尾、
+[ADR 0318](./decisions/0318-taxonomy-labels.md) / [ADR 0324](./decisions/0324-claim-key-contested-detection.md)
+の追記）。**この3件以外に、`v1.0.0` より後に着地してまだ数えていない変更が残っている
+かどうかは、別途棚卸しが要る**——次の世代の節はまだ起こさない。
+
+⚠ **これは [Issue #532](https://github.com/takecchi/mnemora/issues/532) が指した腐り方と同じ形である**
+——数を正しく直しても、次の破壊的変更が着地した時点でまた同じ場所が腐りうる。
 ⟹ ⭐ **数えるなら、下の番号付きの一覧を数えること。**冒頭のこの表は一覧の**写し**であって、
 **正本は一覧のほうである**（`AGENTS.md`「**複製した瞬間から、正本と写しはずれ始める**」——
 🔴 **実際にずれたのは、この写しのほうだった**）。
@@ -174,6 +189,35 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 ⟹ ⭐ **代わりに、上の2箇所へ「⛔ この判定には使えない」を現物として焼いた。**
 ⛔ **これは機械の歯ではない**——**次に同じ根拠を書こうとした人が、その場で気づく形にしただけである。**
 
+#### 🔴 2026-09-26 の訂正 —— **`v1.0.0` が出たのに、この文書が追随していなかった（5回目、今回は表題の版そのもの）**
+
+🔴 **同じ形の5回目である。**⛔ **1〜4回目までの節は当時の記録なので書き換えない。**
+
+| 2026-09-26 以前はこう書いてあった | いまの記述 |
+|---|---|
+| 世代が**5つ**で、5つ目は `v0.5.0` → `v1.0.0`（**未リリース**） | **同じ5世代のまま。`v0.5.0` → `v1.0.0` は0件のまま出荷済み** |
+| `v0.5.0` → `v1.0.0` の世代には「**まだ1件も無い**」 | ⚠ **最後まで1件も無いまま出荷された**（両端が tag で閉じたので、いま「0件」と書ける） |
+
+**【実測 2026-09-26】** `v1.0.0` は **2026-09-22T23:54:08Z に published**
+（`gh release view v1.0.0` で `isDraft: false`・`isPrerelease: false`・`targetCommitish: main` を確認）、
+`git diff --stat v0.5.0..v1.0.0 -- packages/` と
+`-- scripts/__snapshots__/public-api/` はどちらも差分なし。`CHANGELOG.md` は
+`## [1.0.0] - 2026-09-23` を既に持ち、追随済みだった。**この文書だけが追随していなかった。**
+
+⚠ **`v1.0.0` より後に着地した変更を、この文書が数え直す作業はまだ終わっていない。**
+この移行ガイド自身の §6 の例を `@mnemora/testkit`（当時の `main`）に対して型検査したところ、
+`TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`（`?` の付かない必須フィールド、
+PR #717・commit `ba6e5dd`）が足りずコンパイルできなくなっていることが分かった——さらに
+棚卸しで `MemoryStoreConformanceOptions.supportsLabels`（同じ commit）・
+`supportsFindActiveByClaimKey`（PR #745・commit `7987de4`）も同じ壊れ方をしていたことが
+見つかった。[Issue #818](https://github.com/takecchi/mnemora/issues/818) の結果、
+3つとも `?: boolean` へ戻し、省略時は該当する適合項目を実行しないようにした
+（[ADR 0318](./decisions/0318-taxonomy-labels.md) /
+[ADR 0324](./decisions/0324-claim-key-contested-detection.md) の追記）——**破壊的変更として
+次の世代の節に計上する対象からは外れた。**§6 の例は再びそのままコンパイル・実行できる
+——詳細は **6** の末尾。**この3件以外に、`v1.0.0` より後に着地してまだ数えていない
+変更が残っているかどうかは、別途棚卸しが要る。**
+
 ---
 
 ⚠ **番号は通しである**（**1** から。⛔ **総数をここに写さない**——`main` が動けば増える）。
@@ -193,7 +237,8 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 `npm view @mnemora/<pkg> dist-tags` が6パッケージとも `latest: 0.2.0`）。
 ⟹ **表題と本文の版を `v0.2.0` に直した。手順の中身は1件も変えていない。**
 
-⛔ **`v1.0.0` はまだ切られていない。**経緯は [docs/roadmap.md](./roadmap.md) §7.12 に在る。
+⛔ **（この段落を書いた 2026-09-17 の時点では）`v1.0.0` はまだ切られていなかった。**経緯は [docs/roadmap.md](./roadmap.md) §7.12 に在る。
+⚠ **2026-09-26 訂正**: その後 `v1.0.0` は **2026-09-22T23:54:08Z に published** された（冒頭の「2026-09-26 の訂正」）。当初ここは日付を付けずに「まだ切られていない」と書いており、出荷後も現在形のまま残っていた。
 
 ⭐ **この文書はかつて「`v0.2.0` → `v1.0.0` の移行手順は、この文書には無い」と宣言していた。
 2026-09-17、その宣言を撤回した**（[Issue #432](https://github.com/takecchi/mnemora/issues/432)）。
@@ -224,11 +269,12 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 使っているなら、v0.2.0 でも v1.0.0 でもコードの変更は要らない。
 
 下の🔴の項目はすべて「**独自の adapter・独自の `Runtime` 実装・独自のテスト基盤コードを
-書いている場合**」にだけ影響する（⛔ **ここに項目の総数を写さない**——`main` が動けば増える。
-理由は上の「⛔ **`v0.5.0` → `v1.0.0` の件数は、ここに写さない**」と同じ。数えるなら一覧を数えること）。
-あなたが該当するかどうかは、次の表で判定できる
+書いている場合**」にだけ影響する。あなたが該当するかどうかは、次の表で判定できる
 （⚠ **`8`〜`11` が `v0.2.0` → `v0.3.0`、`12`〜`17` が `v0.3.0` → `v0.4.0`、`18` が `v0.4.0` → `v0.5.0` の分で、**
-**🔴 どれも出荷済みである。`v0.5.0` → `v1.0.0` の分は、いまのところ無い**）:
+**🔴 どれも出荷済みである。`v0.5.0` → `v1.0.0` の分は0件のまま出荷された**。`v1.0.0` より後に
+一時的に必須化されていた3件（`supportsTaxonomyMode`/`supportsLabels`/
+`supportsFindActiveByClaimKey`）は [Issue #818](https://github.com/takecchi/mnemora/issues/818)
+の結果すべて任意へ戻したため、破壊的変更としては数えない——**6** の末尾を見ること）:
 
 | していること | 影響 |
 |---|---|
@@ -405,11 +451,26 @@ interface NewRecallRecord {
 }
 ```
 
-**`memoryId` の配列だけが必要な場合の最小の読み替え**:
+**`memoryId` の配列だけが必要な場合の最小の読み替え**——⚠ **どちらの型を読んでいるかで形が違う**
+（後述「1」の `RecallRecord`（`getRecall()` の戻り値）は、この時点よりさらに後（ADR 0155本体、
+`0013` と同じ変更）で `returnedMemories` 自体が判別可能ユニオンになっている。**`NewRecallRecord`
+（`createRecall` への入力）側は素朴な配列のままである**）:
 
 ```ts
+// (a) NewRecallRecord（createRecall への入力）を組み立てている場合:
 // 旧: const ids = record.returnedMemoryIds;
 const ids = record.returnedMemories.map((m) => m.memoryId);
+
+// (b) RecallRecord（getRecall() の戻り値）を読んでいる場合:
+// `returnedMemories` は `RecallRecordReturnedMemories`
+// （`{ breakdownCaptured: true; memories: RecallRecordMemory[] }
+//   | { breakdownCaptured: false; memories: { memoryId: MemoryId }[] }`）
+// ——配列ではないので、(a) と同じ書き方は tsc エラーになる
+// （`Property 'map' does not exist on type 'RecallRecordReturnedMemories'`）。
+const ids = record.returnedMemories.memories.map((m) => m.memoryId);
+// `breakdownCaptured: false` は「この行は返り値のスコア内訳を持ったことが無い」印であり
+// （`0013` が移行元行にこの値を立てる）、そちら側の要素は `memoryId` しか持たない——
+// `memoryId` だけを取り出すこの読み替えでは breakdownCaptured の値を分岐する必要はない。
 ```
 
 `MemoryStore.createRecall`/`getRecall` を自分で実装している場合は、単なるリネームでは
@@ -517,6 +578,15 @@ describeTenantSettingsStoreConformance({
 - 実装している場合は `supportsDecayClock: true` にし、追加のフック
   （`setDefaultHalfLifeRecalls`/`advanceActivitySeq`、いずれも任意）も検討する
   （`packages/testkit/src/tenant-settings-store-conformance.ts` の doc コメント参照）。
+
+⚠ **2026-09-25〜26 の一時期、`main` 上で `supportsTaxonomyMode`・
+`@mnemora/testkit` の `MemoryStoreConformanceOptions.supportsLabels`（どちらも PR #717）と
+`supportsFindActiveByClaimKey`（PR #745）も必須になっており、この例やそれに類する
+呼び出しがコンパイルできなくなっていた。**[Issue #818](https://github.com/takecchi/mnemora/issues/818)
+の結果、3つとも `?: boolean` へ戻し、省略時は該当する適合項目を実行しないようにしたため
+（`false` 相当）、**この例は再びそのままコンパイル・実行できる**
+（[ADR 0318](./decisions/0318-taxonomy-labels.md) /
+[ADR 0324](./decisions/0324-claim-key-contested-detection.md) の追記）。
 
 ### 7. `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドになった
 
@@ -883,50 +953,29 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ---
 
-## 🔴 破壊的変更（v0.5.0 → v1.0.0）—— ⛔ **未リリース。いまのところ1件も無い**
+## 🔴 破壊的変更（v0.5.0 → v1.0.0）—— ⚠ **出荷済み。0件のまま出荷された**
 
-⛔ **件数をここに書かない**——`v1.0.0` の tag はまだ切られておらず、`main` が動けば増えるためである
-（冒頭の「⛔ **`v0.5.0` → `v1.0.0` の件数は、ここに写さない**」と同じ理由）。
-⟹ ⭐ **数えるなら、この節の項目そのものを数えること。**次に足す番号は **19** である。
+⭐ **両端が tag で閉じたので、この節はもう更新されない。**`v1.0.0` は
+**2026-09-22T23:54:08Z に published**（`gh release view v1.0.0` で `isDraft: false`・
+`isPrerelease: false` を確認）、`git diff --stat v0.5.0..v1.0.0 -- packages/` も
+`-- scripts/__snapshots__/public-api/` も**差分を返さない**——
+**この世代に着地した破壊的変更は、最後まで0件だった。**
 
-**【実測 2026-09-21、`origin/main` = `89f8dd5`】この世代は、いまも空である。**
-⭐ **判定は「出荷される面の差分」で行う**（⛔ **commit の本数ではない。**下記）:
+🔴 **空である理由は「まだ着地していなかった」ではない。**`v0.5.0` タグを切った時点で
+`v0.5.0` と当時の `origin/main` が同じ commit（`509f4e7`）を指しており、
+**この世代を起こした時点で数える範囲そのものが空だった**——その後 `v1.0.0` が切られるまでに
+着地した29本の commit（`git log --oneline v0.5.0..v1.0.0`）のうち、`scripts/publish-targets.mjs` の `PUBLISH_TARGETS`（6パッケージ）
+を触ったものは1本も無かった。
 
-```bash
-git diff --stat v0.5.0..origin/main -- packages/                          # → （差分なし）
-git diff --stat v0.5.0..origin/main -- scripts/__snapshots__/public-api/  # → （差分なし）
-```
+⚠ **判定に使った手順・使ってはいけない手順（`git rev-list --count` 等とその理由）の詳細は、
+上の「訂正の履歴」の「2026-09-21（2回目）の訂正」に残してある**（ここでは複製しない）。
 
-⭐ `packages/` は `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` の各 `dir` を
-**1本ずつ当てても全部 0 件**である【実測 2026-09-21、`origin/main` = `89f8dd5`】。
-
-🔴 **⛔ この判定に、次の2本を使わないこと。**
-
-```bash
-git rev-parse origin/main v0.5.0^{commit}   # ⛔ この判定には使えない
-git rev-list --count v0.5.0..origin/main    # ⛔ この判定には使えない
-```
-
-**どちらも docs だけの commit で動く**——**実際、この節を書いた commit 自身が `main` を1本進めた。**
-⟹ **この判定には最初から使えない。**
-⚠ **【実測 2026-09-21】その後ほんとうに動いた**——この節を起こした時点では `git rev-parse` が
-2行とも `509f4e7`、`git rev-list --count` は **0** だったが、`origin/main` = `89f8dd5` の時点で
-**同じ count は 17 になっている**（17本の PR が着地した）。
-⛔ **それでも `packages/` の差分は 0 のままである** ⟹ **この世代は空のままである。**
-
-🔴 **空である理由が、いままでの世代と違う。**`v0.3.0` → `v0.4.0` や `v0.4.0` → `v0.5.0` が
-一時的に空だったのは「**まだ着地していなかった**」からだが、`v0.5.0` → `v1.0.0` は
-**この世代を起こした時点で `v0.5.0` の tag と `origin/main` が同じ commit を指しており、
-数える範囲そのものが空だった**からである。⚠ **その後 `main` は 17 本進んだが、
-進んだ分は1本も `PUBLISH_TARGETS` の中に入っていない。**
-
-⛔ **これを「`v1.0.0` では何も壊れない」と読まないこと**——**測った時点までの話である。**
-⟹ ⭐ **`v1.0.0` を切る側は、切る直前に上の2本をその場で引き直すこと。**
-⚠ **差分が出たら、`git log --oneline v0.5.0..origin/main -- packages/` で
-「どの PR が運んだか」を見て、この節へ 19 から番号を振ること。**
-
-⚠ **⟹ いまこの瞬間に `v1.0.0` を切ると、`v0.5.0` からの移行手順は1つも無い。**
-**`v0.4.0` 以前から上げる人は、上の各世代の節をそのまま読むこと。**
+⚠ **`v1.0.0` より後に着地した破壊的変更の節は、まだここに無い。**理由は冒頭と **6** の末尾に
+書いたとおり——一時的に必須化されていた3件（`supportsTaxonomyMode`/`supportsLabels`/
+`supportsFindActiveByClaimKey`）は [Issue #818](https://github.com/takecchi/mnemora/issues/818)
+の結果すべて任意へ戻したため、この3件を理由に次の節を起こす必要は無くなった。**この3件
+以外に `v1.0.0` より後に着地してまだ数えていない変更が残っているかどうかは、別途棚卸しが
+要る。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

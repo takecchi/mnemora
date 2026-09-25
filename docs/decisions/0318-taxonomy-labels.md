@@ -515,3 +515,67 @@ tenant-y（tags=[]）: labels/memory_labels とも0行
   による公開 API スナップショットの更新は、本 ADR 執筆と同じ作業の中で別途実行する
   （PR 本文に記録）。
 - `examples/chat` からの動作確認はしていない（「引き受けた負債」4）。
+
+## 追記（2026-09-26）—— `supportsTaxonomyMode`/`supportsLabels` を任意へ戻す（Issue #818）
+
+> **⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。**
+> **⛔ オーナー本人の判定ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⚠ GitHub の actor は層を判別しないので、この追記を含む PR も `takecchi` の名前で載る。
+> **名前で読まないこと。**
+
+**この ADR が足した `TenantSettingsStoreConformanceOptions.supportsTaxonomyMode`
+（本文「決定」節、[ADR 0165](./0165-decay-activity-clock.md) の `supportsDecayClock`
+に倣った「省略可にしない」判断）と、`MemoryStoreConformanceOptions.supportsLabels`
+（同じ判断）は、どちらも必須の `boolean` フィールドとして着地した——実装した commit
+は `ba6e5dd`（PR #717）。**
+
+**壊れたこと**: この2フィールドは v1.0.0（2026-09-22T23:54:08Z published）の時点では
+存在しなかった。v1.0.0 の利用者が書いた
+`describeTenantSettingsStoreConformance({ name, createStore, supportsDecayClock })` /
+`describeMemoryStoreConformance({ ...既存の8つの supports*フラグ... })` は、
+`ba6e5dd` 以降の `@mnemora/testkit` に対してコンパイルできなくなっていた
+（`docs/migration-v1.md` §6 に載せていた `supportsDecayClock` の例そのものが、
+`supportsTaxonomyMode` を足りない状態で型エラーになる）。[Issue #818](https://github.com/takecchi/mnemora/issues/818)
+がこれを指摘し、`docs/migration-v1.md` は一時的にこの2フィールド（および後述の
+`supportsFindActiveByClaimKey`）を「破壊的変更として計上するか検討中」として保留していた。
+
+**判断（クローン miku の判断——オーナーの判断ではない）**: 3フィールド
+（この ADR の2つと [ADR 0324](./0324-claim-key-contested-detection.md) の
+`supportsFindActiveByClaimKey`、詳細は同 ADR の追記）を **すべて `?: boolean` へ戻し、
+省略時は該当する適合項目を実行しない（`false` 相当）にする。** 破壊的変更として
+`docs/migration-v1.md` へ計上する案は採らなかった。
+
+**なぜ `supportsDecayClock` の先例（[ADR 0165](./0165-decay-activity-clock.md)
+「🔴 訂正」節）と違う結論にしたか**: `supportsDecayClock` のときは、破壊が
+「まだ誰も v1.0.0 を使い始めていない」段階で見つかり、`docs/migration-v1.md` に
+書けば足りた。**今回は違う**——実際に v1.0.0 が published され、その呼び出し形を
+書いた利用者が既に居りうる段階で見つかった。「移行ガイドに書く」対応は、
+「次に上げる人への案内」にはなっても、**「今のコードが動かない」を直さない。**
+`@mnemora/testkit` 側は「省略可にしない」という設計意図（配線漏れを歯で検出する）を
+持っていたが、その意図のために**v1.0.0 で契約した公開 API の後方互換**を犠牲にする
+のは非対称だと判断した。
+
+**代わりに何を手放したか（引き受けた負債）**: 「実装したのに配線を忘れて検査されていない」
+を歯で検出する効果は、外部 adapter に対しては働かなくなる——省略した adapter は
+`⚠ 未検査` の named it（`supportsLabels`/`supportsFindActiveByClaimKey`。
+`supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` と同じ形）
+または該当項目が単に実行されないだけ（`supportsTaxonomyMode`）になり、CI は
+緑のまま素通りする。**この repo に同梱の2実装
+（`PostgresTenantSettingsStore`/`InMemoryTenantSettingsStore`・
+`PostgresMemoryStore`/`InMemoryMemoryStore`）を配線する呼び出し
+（`packages/postgres/src/__tests__/conformance.postgres.test.ts`・
+`packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts`）は
+引き続き明示で `true` を渡しており、そちらに対する検出は変わらず働く。**
+
+**これが覆るとしたら**: 「配線漏れの検出」を外部 adapter に対しても再び必須にしたいなら、
+次の破壊的変更として `docs/migration-v1.md` に計上し、次のメジャー版で必須へ戻すのが
+筋——今回のような「気づかれないまま出荷してしまった必須化」を繰り返さないため、
+次に必須化するときは根拠 ADR にその破壊性を明記し（ADR 0156 の要求）、
+[Issue #342](https://github.com/takecchi/mnemora/issues/342) / [ADR 0178](./0178-public-api-surface-gate.md)
+の公開 API 表面の門で差分を確認してから出すこと。
+
+詳細な歯・変異試験・スナップショット差分は、この追記を運んだ PR
+（[Issue #818](https://github.com/takecchi/mnemora/issues/818) を close する PR）の本文を
+見ること——ここには複製しない。

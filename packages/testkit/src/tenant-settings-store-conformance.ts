@@ -82,15 +82,29 @@ export interface TenantSettingsStoreConformanceOptions {
 
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
-   * `getTaxonomyMode`/`setTaxonomyMode` を検査するかどうか。
+   * `getTaxonomyMode`/`setTaxonomyMode` を検査するかどうか。**省略時は `false` 相当**
+   * ——taxonomy 系の適合項目は登録・実行されない。
    *
-   * ⭐ **省略可にしない**——`supportsDecayClock` と同じ判断（このファイルの doc コメント
-   * 参照）。interface 上は任意（`?`、外部 adapter が壊れないための配慮）だが、この repo
-   * に同梱される2実装（`PostgresTenantSettingsStore`/`InMemoryTenantSettingsStore`）は
-   * どちらも実装している——呼び出し側に `true`/`false` を明示させることで、「実装したのに
-   * 配線を忘れて検査されていない」を歯で検出する。
+   * ⚠ **[Issue #818](https://github.com/takecchi/mnemora/issues/818)**: このフィールドは
+   * v1.0.0 の時点では存在しなかった。PR #717 (`ba6e5dd`) が `supportsDecayClock`
+   * （このファイルの直上の doc コメント参照——「省略可にしない」という判断だった）に
+   * 倣って**必須**として足したため、v1.0.0 の利用者の呼び出し
+   * （`describeTenantSettingsStoreConformance({ name, createStore, supportsDecayClock })`。
+   * `docs/migration-v1.md` §6 に載っている `supportsDecayClock` の例そのもの——当時は
+   * `supportsTaxonomyMode` が存在しないので、この例は v1.0.0 に対してそのまま有効だった）
+   * がコンパイルできなくなっていた。
+   *
+   * ⭐ **`supportsDecayClock` の「省略可にしない」判断そのものは撤回していない**
+   * ——この repo に同梱の2実装（`PostgresTenantSettingsStore`/`InMemoryTenantSettingsStore`）
+   * を配線する呼び出し（`packages/postgres/src/__tests__/conformance.postgres.test.ts`・
+   * `packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts`）は、
+   * 引き続き明示で `supportsTaxonomyMode: true` を渡す——「実装したのに配線を忘れて
+   * 検査されていない」を歯で検出する効果は、この2箇所に対してはいまも働く。
+   * **`?` を戻すのは、外部の呼び出し側（v1.0.0 で公開したこの関数の利用者）まで
+   * 巻き込んで壊す理由にはならない、という判断**（クローン miku の判断——オーナーの
+   * 判断ではない）。
    */
-  supportsTaxonomyMode: boolean;
+  supportsTaxonomyMode?: boolean;
 }
 
 /**
@@ -365,8 +379,8 @@ export function describeTenantSettingsStoreConformance(
     // -----------------------------------------------------------------
     // getTaxonomyMode / setTaxonomyMode (Issue #201, ADR 0318)
     //
-    // `supportsTaxonomyMode` の理由は `TenantSettingsStoreConformanceOptions` の doc
-    // コメント参照——`supportsDecayClock` と同じ判断。
+    // `supportsTaxonomyMode` の理由・省略時の意味（`false` 相当、Issue #818）は
+    // `TenantSettingsStoreConformanceOptions` の doc コメント参照。
     // -----------------------------------------------------------------
     if (supportsTaxonomyMode) {
       it("getTaxonomyMode: 行が無いテナントには DEFAULT_TAXONOMY_MODE（'open'）を返す", async () => {

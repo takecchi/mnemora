@@ -120,6 +120,26 @@ export class InMemoryVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
+    // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
+    // （実測済み）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
+    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
+    // ほぼ全件を静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
+    //
+    // ⚠ 負数だけでは足りない——`LIMIT` の SQL パラメータは bigint 型であり、`NaN`/
+    // `Infinity`/非整数（例: `1.5`）を渡すと Postgres は
+    // `invalid input syntax for type bigint: "NaN"` の形で例外を投げる（実測済み）。
+    // `Array.prototype.slice` はこれらを黙って別の値へ丸める
+    // （`ToIntegerOrInfinity`: `NaN`→`0`＝空配列、`Infinity`→全件、`1.5`→切り捨てて`1`）ため、
+    // 検査しないと「limit が全く効いていない/黙って縮む」という誤った結果を返してしまう。
+    // 既存の「負数」ガード（上の段落）とは別の例外メッセージにして、PR #811 が固定した
+    // 「負数は例外」の回帰テストの文言を変えずに済ませる。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`search: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`search: limit must not be negative (got ${opts.limit})`);
+    }
     // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。
     // テナント分離は `opts.filter.tenantId` の一致だけで行う——これが
     // `VectorStore.search` の実際の契約（docs/architecture.md §5.2: filter は
@@ -127,7 +147,7 @@ export class InMemoryVectorStore implements VectorStore {
     // 「filter.tenantId を無視しても壊れない」という誤ったプレースホルダになる。
     const prefix = `${space.provider}:${space.model}:${space.dimensions}:`;
     const memoryCtx: Ctx = { tenantId: opts.filter.tenantId };
-    const hits: VectorHit[] = [];
+    const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
       if (!key.startsWith(prefix)) {
         continue;
@@ -247,10 +267,26 @@ export class InMemoryVectorStore implements VectorStore {
           continue;
         }
       }
-      hits.push({ memoryId: entry.memoryId, distance: cosineDistance(query, entry.vector) });
+      hits.push({
+        memoryId: entry.memoryId,
+        distance: cosineDistance(query, entry.vector),
+        recordedAt: memory.recordedAt,
+      });
     }
-    hits.sort((a, b) => a.distance - b.distance);
-    return hits.slice(0, opts.limit);
+    // `PostgresVectorStore.search`（ADR 0170、Issue #339）と同じ3段 tie-break:
+    // 距離 → `recordedAt` DESC → `memoryId` 昇順。以前はここが距離だけのソートで、
+    // 同点の中身は `Array.prototype.sort` の安定性により**挿入順**（＝通常の呼び出し順では
+    // `recordedAt` が古いほうが先）に落ちていた——Postgres 側の「新しい方が先」とは
+    // 逆向きになり、`VectorStore.search` の doc が明記する「同点の順序も adapter の責務」
+    // （距離だけでなく完全なタイブレークまで含めて決定的な順序を返すこと）を満たしていなかった
+    // （`packages/testkit/src/__tests__/in-memory-vector-store-tiebreak.test.ts` が歯）。
+    hits.sort((a, b) => {
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      const recordedAtDiff = b.recordedAt.getTime() - a.recordedAt.getTime();
+      if (recordedAtDiff !== 0) return recordedAtDiff;
+      return a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0;
+    });
+    return hits.slice(0, opts.limit).map(({ memoryId, distance }) => ({ memoryId, distance }));
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
@@ -265,8 +301,20 @@ export class InMemoryVectorStore implements VectorStore {
     // `key` は space + tenantId + memoryId から機械的に決まる（クラス冒頭の `key` 参照）
     // ので、tenant 境界は search と同じくキーの一致だけで自然に掛かる——他テナントの
     // memoryId が渡っても、そのテナントの key には一致しない。
+    //
+    // `PostgresVectorStore.getVectors` は `memory_id = ANY(...)` という集合演算で引く
+    // （実測。`packages/postgres/src/vector-store.ts`）ため、同じ id を複数回渡しても
+    // 一致する行は主キーの性質上1回しか無い（`InMemoryMemoryStore.getMany` の重複 id
+    // 対応、PR #812 と同じ形の不一致）。ここで検査せず `memoryIds` をそのまま for-of
+    // すると、同じ id の `VectorEntry` を重複して返してしまう——`seen` で2回目以降を
+    // スキップし、Postgres の集合演算と同じ「一意な id の集合」に揃える。
+    const seen = new Set<MemoryId>();
     const results: VectorEntry[] = [];
     for (const memoryId of memoryIds) {
+      if (seen.has(memoryId)) {
+        continue;
+      }
+      seen.add(memoryId);
       const entry = this.entries.get(this.key(space, ctx.tenantId, memoryId));
       if (entry !== undefined) {
         results.push({ memoryId, vector: entry.vector });
