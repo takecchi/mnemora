@@ -11,7 +11,10 @@ import {
   RecordedLLMProvider,
   RecordingEmbeddingProvider,
   RecordingLLMProvider,
+  SeededEmbeddingProvider,
+  SeededLLMProvider,
 } from "@mnemora/testkit";
+import type { SeedUsageCounts } from "@mnemora/testkit";
 import type { UsageMeter } from "./usage-meter.js";
 import { createUsageMeter } from "./usage-meter.js";
 
@@ -117,6 +120,24 @@ export interface Providers {
    * これを画面の警告行として開示する。
    */
   cassetteIgnored: boolean;
+  /**
+   * 「種カセット」（`CreateProvidersOptions.seedCassette`、Issue #691 続き）を実際に
+   * 使ったときだけ存在する。呼ぶと、その時点までに LLM・埋め込みそれぞれで
+   * 種から返した回数／実 API（delegate）を呼んだ回数を返す——**呼ぶたびに実測を
+   * 読み直す関数**であり、構築時点のスナップショットではない（記録の実行が進むほど
+   * 数が増える）。`usage-meter`（`UsageMeter.formatReport`）とは別の実測であり、
+   * 混ぜて出さない（マネージャー指示）。
+   *
+   * `seedCassette` を渡さなければ `undefined`——**種を与えなければ、この関数自体が
+   * 存在しない**ことで、既存の呼び出し側の挙動を1バイトも変えない。
+   */
+  readSeedUsage?: () => SeedUsageSummary;
+}
+
+/** `Providers.readSeedUsage` が返す形。LLM・埋め込みを別々に数える。 */
+export interface SeedUsageSummary {
+  llm: SeedUsageCounts;
+  embedding: SeedUsageCounts;
 }
 
 /** 本物の OpenAI を使う場合のモデル選定。サンプルアプリの裁量値であり、強い根拠は無い。 */
@@ -470,6 +491,25 @@ export interface CreateProvidersOptions {
    * したいときだけ明示的に渡す。
    */
   llmTemperature?: number;
+  /**
+   * 「種カセット」（Issue #691 続き）。`llmMode`/`embeddingMode` が `"openai"` の側だけに
+   * 効く——種にある入力（`llmCassetteKey`/`embeddingCassetteKey` が一致する入力）には
+   * 実 API を呼ばずその値を返し、無ければ実 API を呼ぶ（`SeededLLMProvider`/
+   * `SeededEmbeddingProvider`、`@mnemora/testkit`）。**`recorder` と組み合わせると**、
+   * 種から返した値も実 API から返した値も同じように新しいカセットへ記録される
+   * ——新しいカセットは自己完結し、種への参照は残さない。
+   *
+   * **なぜ要るか**: `record` は毎回、抽出（`observe()`）を実 API でやり直す。抽出は
+   * 非決定的なため、録り直すたびに記憶集合が変わりうる（マネージャーが実 API で
+   * `record:answer` を走らせた際に実測——陽性対照 `applyRetentionMutation` が
+   * 「変異対象の部分文字列が見つからない」で落ちた）。旧カセットを種として渡すことで、
+   * 同じ入力には記録済みの値を返し、記憶集合を旧カセットへ揃えやすくする。
+   *
+   * **省略すれば（既定）、この欄が無かったときと1バイトも挙動が変わらない**——
+   * `buildLLM`/`buildEmbedding` の `"openai"` 分岐は、`seedCassette` が `undefined` の
+   * ときは real をそのまま使う（`SeededLLMProvider`/`SeededEmbeddingProvider` で包まない）。
+   */
+  seedCassette?: Cassette;
 }
 
 export function createProviders(
@@ -479,7 +519,13 @@ export function createProviders(
   const mode = selectProviderMode(env);
   const llmMode = selectLLMMode(env);
   const embeddingMode = selectEmbeddingMode(env);
-  const { cassette, recorder, llmTemperature } = options;
+  const { cassette, recorder, llmTemperature, seedCassette } = options;
+
+  // `buildLLM`/`buildEmbedding` が `"openai"` 分岐で `SeededLLMProvider`/
+  // `SeededEmbeddingProvider` を作ったときだけ、ここへ実体を控える
+  // （`Providers.readSeedUsage` が呼ばれた時点の実測を読むための参照）。
+  let seededLLM: SeededLLMProvider | undefined;
+  let seededEmbedding: SeededEmbeddingProvider | undefined;
 
   const requireCassette = (which: string): Cassette => {
     if (cassette === undefined) {
@@ -519,7 +565,18 @@ export function createProviders(
       client: usageMeter?.client,
       ...(llmTemperature !== undefined ? { temperature: llmTemperature } : {}),
     });
-    return recorder ? new RecordingLLMProvider(real, recorder, OPENAI_LLM_MODEL) : real;
+    // 組み立て順: real → `SeededLLMProvider`（種にあれば実 API を呼ばない）→
+    // `RecordingLLMProvider`（種由来・実 API 由来のどちらも新しいカセットへ記録する）。
+    // この順を逆にする（Recording が real を直接包み、Seeded がその外側に来る）と、
+    // 種から返した値が一度も recorder を通らず、新しいカセットに記録されない
+    // （変異試験で確認済み）。
+    const withSeed: LLMProvider = seedCassette
+      ? (seededLLM = new SeededLLMProvider(real, {
+          seed: seedCassette.llm,
+          expectedModel: OPENAI_LLM_MODEL,
+        }))
+      : real;
+    return recorder ? new RecordingLLMProvider(withSeed, recorder, OPENAI_LLM_MODEL) : withSeed;
   };
 
   const buildEmbedding = (): EmbeddingProvider => {
@@ -565,7 +622,18 @@ export function createProviders(
       dimensions: OPENAI_EMBEDDING_DIMENSIONS,
       client: usageMeter?.client,
     });
-    return recorder ? new RecordingEmbeddingProvider(real, recorder) : real;
+    // `buildLLM` と同じ組み立て順（real → Seeded → Recording）。理由も同じ。
+    const withSeed: EmbeddingProvider = seedCassette
+      ? (seededEmbedding = new SeededEmbeddingProvider(real, {
+          seed: seedCassette.embedding,
+          expectedSpace: {
+            provider: "openai",
+            model: OPENAI_EMBEDDING_MODEL,
+            dimensions: OPENAI_EMBEDDING_DIMENSIONS,
+          },
+        }))
+      : real;
+    return recorder ? new RecordingEmbeddingProvider(withSeed, recorder) : withSeed;
   };
 
   const llmProvider = buildLLM();
@@ -576,6 +644,15 @@ export function createProviders(
   const cassetteIgnored =
     cassette !== undefined && llmMode !== "recorded" && embeddingMode !== "recorded";
 
+  const zeroCounts: SeedUsageCounts = { seeded: 0, real: 0 };
+  const readSeedUsage: (() => SeedUsageSummary) | undefined =
+    seedCassette !== undefined
+      ? () => ({
+          llm: seededLLM ? seededLLM.usage : zeroCounts,
+          embedding: seededEmbedding ? seededEmbedding.usage : zeroCounts,
+        })
+      : undefined;
+
   return {
     mode,
     llmMode,
@@ -584,5 +661,6 @@ export function createProviders(
     embeddingProvider,
     cassetteIgnored,
     ...(usageMeter !== undefined ? { usageMeter } : {}),
+    ...(readSeedUsage !== undefined ? { readSeedUsage } : {}),
   };
 }

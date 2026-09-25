@@ -6,11 +6,15 @@
 //
 // ここでは、その食い違いを**検査の時点で**捕まえる。DB も API キーも要らない。
 
+import { createHash } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { embeddingCassetteKey, llmCassetteKey } from "@mnemora/testkit";
 import { describe, expect, it } from "vitest";
 import {
   ANSWER_CASSETTE_PATH,
+  ANSWER_ORDER_LEGEND_CASSETTE_PATH,
   ANSWER_TIME_WEIGHTING_CASSETTE_PATH,
+  ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH,
   COMPARE_CASSETTE_PATH,
   cassetteExists,
   loadCassette,
@@ -25,6 +29,17 @@ import { buildConversation } from "../scenario.js";
 import { TIME_WEIGHTING_CASE_SET_DEV } from "../time-weighting-case-set.dev.js";
 import { TIME_WEIGHTING_CASE_SET_EVAL } from "../time-weighting-case-set.eval.js";
 import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "../time-weighting-case-set.eval-undated.js";
+
+/**
+ * `buildMnemoraPrompt` の描画が変わっても、旧形式カセットは1バイトも変えない
+ * （ADR 0309、Issue #691 続き）。**ここで固定する sha256 は「正本の写し」ではなく、
+ * それ自体が実測した記録**である——`answer-trials-material.ts` が ADR 0301 の
+ * 対照の基準として読み続ける2ファイルが、意図せず書き換わっていないことを
+ * このファイル（カセットの対応を検査する場所）自身で捕まえる。
+ */
+function sha256OfFile(path: string): string {
+  return createHash("sha256").update(readFileSync(path, "utf8"), "utf8").digest("hex");
+}
 
 describe("記録した応答のカセットと probe set の対応（ADR 0051）", () => {
   it("カセットがリポジトリに存在する", () => {
@@ -104,19 +119,40 @@ describe("compare のカセットと会話生成の対応（ADR 0052）", () => 
   });
 });
 
-describe("`answer` のカセットと評価ケース集合の対応（Issue #498 / #506、ADR 0051）", () => {
-  const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+// ---------------------------------------------------------------------------
+// `answer` の旧形式カセット（`examples/chat/cassettes/answer.json`）は、
+// `record`/`verify`/CLI の再生対象からは外れた（ADR 0309）が、
+// `answer-trials-material.ts` が ADR 0301 の対照の基準として読み続ける。
+// ⟹ **1バイトも変わっていないことだけ**をここで固定する——
+// 中身の対応検査（質問文・naive プロンプト等）は、もう実行時に使わないので増やさない。
+// ---------------------------------------------------------------------------
 
-  it("カセットがリポジトリに存在する", () => {
+describe("`answer` の旧形式カセット（ADR 0301 対照の基準。1バイトも変えない、ADR 0309）", () => {
+  it("カセットがリポジトリに存在し、形式検査に通る", () => {
     expect(cassetteExists(ANSWER_CASSETTE_PATH)).toBe(true);
-  });
-
-  it("形式検査に通る", () => {
     expect(() => loadCassette(ANSWER_CASSETTE_PATH)).not.toThrow();
   });
 
+  it("sha256 が実測した記録のままである（書き換わっていたら落ちる）", () => {
+    expect(sha256OfFile(ANSWER_CASSETTE_PATH)).toBe(
+      "303d59031935cbcabad9c55aa9e4b605e697944359d3a71196f4b11ce58acd7b",
+    );
+  });
+});
+
+describe("`answer` の新形式カセットと評価ケース集合の対応（Issue #498 / #506 / #691、ADR 0309）", () => {
+  const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+
+  it("カセットがリポジトリに存在する", () => {
+    expect(cassetteExists(ANSWER_ORDER_LEGEND_CASSETTE_PATH)).toBe(true);
+  });
+
+  it("形式検査に通る", () => {
+    expect(() => loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH)).not.toThrow();
+  });
+
   it("記録元は、いま使っている埋め込み空間と同じである", () => {
-    expect(loadCassette(ANSWER_CASSETTE_PATH).embedding.space).toEqual({
+    expect(loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH).embedding.space).toEqual({
       provider: "openai",
       model: "text-embedding-3-small",
       dimensions: 256,
@@ -124,12 +160,12 @@ describe("`answer` のカセットと評価ケース集合の対応（Issue #498
   });
 
   it("記録元の LLM は、いま使っているモデルと同じである", () => {
-    expect(loadCassette(ANSWER_CASSETTE_PATH).llm.model).toBe(OPENAI_LLM_MODEL);
+    expect(loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH).llm.model).toBe(OPENAI_LLM_MODEL);
   });
 
   it("すべてのケースの質問文が埋め込みとして記録されている（ケースを足したら録り直す）", () => {
     // `queryRecall` は `conversation.query`（＝ ケースの `question`）を埋め込む。
-    const { entries } = loadCassette(ANSWER_CASSETTE_PATH).embedding;
+    const { entries } = loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH).embedding;
     const missing = cases
       .filter((c) => entries[embeddingCassetteKey(c.question)] === undefined)
       .map((c) => c.id);
@@ -141,7 +177,10 @@ describe("`answer` のカセットと評価ケース集合の対応（Issue #498
     // ここで完全に組み立て直して鍵を引ける——ケースの会話・質問を1文字でも変えて
     // 録り直しを忘れたら、実行の数分後ではなく**この検査の時点で**赤くなる。
     // ⛔ mnemora 側は `recall()` の結果に依るため、ここからは組み立てられない。
-    const { entries } = loadCassette(ANSWER_CASSETTE_PATH).llm;
+    // ⚠ naive プロンプトの形は `buildMnemoraPrompt` の描画（ADR 0309）に依らないので、
+    // 旧形式カセットと新形式カセットで同じ鍵が引けるはずである——だが検査は新形式側
+    // （実際に使う側）だけに置く。二重化すると、どちらかを直し忘れて静かにずれる。
+    const { entries } = loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH).llm;
     const missing = cases
       .filter((c) => entries[llmCassetteKey(buildNaiveAnswerPromptSpec(c))] === undefined)
       .map((c) => c.id);
@@ -149,12 +188,12 @@ describe("`answer` のカセットと評価ケース集合の対応（Issue #498
   });
 
   it("🔴 記録は入力の種類ぶんしか無い——実行時の呼び出し回数とは一致しない（ADR 0052 の代償）", () => {
-    // ⚠ `answer` の評価ケース12件は同じフィラー発話を共有しており、同じ抽出プロンプトが
+    // ⚠ `answer` の評価ケースは同じフィラー発話を共有しており、同じ抽出プロンプトが
     // 1回の記録の中で複数回現れる。**記録器はそれを memo として1回しか叩かない**
     // （`RecordingLLMProvider`）——さもないと後勝ちで先の値が消え、記録が、記録を
-    // 作った実行そのものを再生できなくなる（本 PR の実測）。
-    const entries = Object.keys(loadCassette(ANSWER_CASSETTE_PATH).llm.entries);
-    // 回答生成24回 + judge 24回 + 抽出（会話ターンぶん）。
+    // 作った実行そのものを再生できなくなる。
+    const entries = Object.keys(loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH).llm.entries);
+    // 回答生成2回(naive+mnemora) + judge2回(naive+mnemora) をケース数ぶん + 抽出（会話ターンぶん）。
     const answerAndJudgeCalls = cases.length * 4;
     expect(entries.length).toBeGreaterThan(answerAndJudgeCalls);
   });
@@ -167,7 +206,20 @@ describe("`answer` のカセットと評価ケース集合の対応（Issue #498
 // (1) 各ケースの質問文と (2) 各ケースが直接書く記憶の content の2種類だけである。
 // ---------------------------------------------------------------------------
 
-describe("`answer-time-weighting` のカセットとケース集合の対応（Issue #690、ADR 0300）", () => {
+describe("`answer-time-weighting` の旧形式カセット（実行時にはもう使わない。1バイトも変えない、ADR 0309）", () => {
+  it("カセットがリポジトリに存在し、形式検査に通る", () => {
+    expect(cassetteExists(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).toBe(true);
+    expect(() => loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).not.toThrow();
+  });
+
+  it("sha256 が実測した記録のままである（書き換わっていたら落ちる）", () => {
+    expect(sha256OfFile(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).toBe(
+      "43b4b593afedc590a44bb9c5770d0c193eb48f610a5978b43b9d518beb86e79c",
+    );
+  });
+});
+
+describe("`answer-time-weighting` の新形式カセットとケース集合の対応（Issue #690 / #691、ADR 0300 / 0309）", () => {
   const cases = [
     ...TIME_WEIGHTING_CASE_SET_DEV,
     ...TIME_WEIGHTING_CASE_SET_EVAL,
@@ -175,12 +227,12 @@ describe("`answer-time-weighting` のカセットとケース集合の対応（I
   ];
 
   it("カセットがリポジトリに存在し、形式検査に通る", () => {
-    expect(cassetteExists(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).toBe(true);
-    expect(() => loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).not.toThrow();
+    expect(cassetteExists(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH)).toBe(true);
+    expect(() => loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH)).not.toThrow();
   });
 
   it("記録元は、いま使っている埋め込み空間と同じである", () => {
-    expect(loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).embedding.space).toEqual({
+    expect(loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH).embedding.space).toEqual({
       provider: "openai",
       model: "text-embedding-3-small",
       dimensions: 256,
@@ -188,11 +240,13 @@ describe("`answer-time-weighting` のカセットとケース集合の対応（I
   });
 
   it("記録元の LLM は、いま使っているモデルと同じである", () => {
-    expect(loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).llm.model).toBe(OPENAI_LLM_MODEL);
+    expect(loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH).llm.model).toBe(
+      OPENAI_LLM_MODEL,
+    );
   });
 
   it("すべてのケースの質問文が埋め込みとして記録されている（ケースを足したら録り直す）", () => {
-    const { entries } = loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).embedding;
+    const { entries } = loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH).embedding;
     const missing = cases
       .filter((c) => entries[embeddingCassetteKey(c.question)] === undefined)
       .map((c) => c.id);
@@ -202,7 +256,7 @@ describe("`answer-time-weighting` のカセットとケース集合の対応（I
   it("すべてのケースが直接書く記憶の content が埋め込みとして記録されている（記憶を足したら録り直す）", () => {
     // seedTimeWeightingMemories は seed.content をそのまま embed する
     // （time-weighting-bench.ts の buildTimeWeightingNewMemory / drainEmbedTicks）。
-    const { entries } = loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).embedding;
+    const { entries } = loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH).embedding;
     const missing = cases.flatMap((c) =>
       c.memories
         .filter((m) => entries[embeddingCassetteKey(m.content)] === undefined)
@@ -212,7 +266,9 @@ describe("`answer-time-weighting` のカセットとケース集合の対応（I
   });
 
   it("LLM の記録が1件以上ある（record:answer-time-weighting を一度も実行していない空カセットではない）", () => {
-    const entries = Object.keys(loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH).llm.entries);
+    const entries = Object.keys(
+      loadCassette(ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH).llm.entries,
+    );
     expect(entries.length).toBeGreaterThan(0);
   });
 });
