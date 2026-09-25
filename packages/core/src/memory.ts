@@ -52,6 +52,16 @@ export function isStrengthInRange(value: number): boolean {
   return value > 0 && value <= MAX_STRENGTH;
 }
 
+/**
+ * `"skipped"` は本番コードのどこからも書かれない（`extraction.ts` が書くのは
+ * `"pending"` だけで、`runtime.ts` がそこから遷移させるのは `"ready"`/`"failed"` の
+ * 2値だけ）。**ただしこれは Issue #206 / ADR 0117・0144 が扱った「構造的に到達不能な
+ * union 値」とは別の性質である**——`MemoryStore.setEmbeddingStatus(ctx, id, status)` の
+ * `status` は呼び出し側が直接値を渡せる公開パラメータであり、型の外側に「これは通らない」
+ * という構造的な壁は無い。「今日それを呼ぶ本番コードが無いだけ」であり、値を落とす理由には
+ * ならない（ADR 0053「採らなかった案」の「遷移表を全面的に固定する」が、この値も含め
+ * 全遷移の意味を今日決める根拠が無いと明記している。Issue #168 の棚卸し項目13-3）。
+ */
 export type EmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
 
 export const EmbeddingStatusSchema = z.enum([

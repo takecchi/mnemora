@@ -58,6 +58,16 @@ export const MemoryEventKindSchema = z.enum([
   "unsuperseded",
 ]) satisfies z.ZodType<MemoryEventKind>;
 
+/**
+ * `type: "human" | "clone"` は本番コード（`examples/chat` 含む）のどこからも生成されない
+ * ——実際に書かれる actor は `{ type: "system" }` だけである。**ただしこれは
+ * Issue #206 / ADR 0117・0144 が扱った「構造的に到達不能な union 値」とは別の性質である
+ * **——`actor` は `Runtime`（`applyCorrection`・`markContested` 等）の各口が受け取る
+ * 公開パラメータで、呼び出し側が「これは人間が行った訂正である」「これはクローンが行った
+ * 書き込みである」と申告するために存在する。今日それを渡す呼び出し元（人間参加型・
+ * クローン参加型のワークフロー）が repo 内に無いだけであり、型の外側に構造的な壁は無い
+ * （Issue #168 の棚卸し項目13-3）。
+ */
 export interface EventActor {
   type: "human" | "system" | "clone";
   id?: string;
