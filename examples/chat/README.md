@@ -1376,7 +1376,7 @@ node scripts/identifier-probe-summary.mjs \
 ⭐ **その手間は目的である**——更新しないと差分が Job Summary に出続け、
 更新すれば新しい値が PR の diff に必ず現れる。
 
-### OpenAI 実埋め込みの追加 arm（Issue #109 後半、[ADR 0313](../../docs/decisions/0313-openai-embedding-false-positive-ceiling.md)）
+### OpenAI 実埋め込みの追加 arm（Issue #109 後半、[ADR 0314](../../docs/decisions/0314-openai-embedding-false-positive-ceiling.md)）
 
 `identifier-probes` は上の5群（`@mnemora/local-embedding`）に加えて、
 **4群**（`identifiersSparse`/`identifiersDense`/`japaneseNamesSparse`/
@@ -1397,7 +1397,7 @@ MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON=... DATABASE_URL=... \
 相違しても・判定が red でも CI は落ちない——この4群のうち少なくとも2群
 （`identifiersSparse`/`identifiersDense`）は、**実測で偽陽性率に低い上限を置けなかった**
 （実 API の埋め込みは呼び出しをまたいで完全には決定的でない）。実測した値と射程は
-[ADR 0313](../../docs/decisions/0313-openai-embedding-false-positive-ceiling.md) に記録して
+[ADR 0314](../../docs/decisions/0314-openai-embedding-false-positive-ceiling.md) に記録して
 ある。⛔ **ここには実測値を写さない**（数を焼き込まない規律）。
 
 **カセット・基準値ファイルの録り直し・K回の再計測**は、ルートの
@@ -1490,7 +1490,7 @@ node scripts/numeral-token-probe-summary.mjs \
 （`exit 0`）——非0になるのは入力そのものが壊れているときだけである。
 **値が意図して動いたときは、基準値ファイルを手で更新すること**（CI は自動更新しない）。
 
-### OpenAI 実埋め込みの追加 arm（Issue #109 後半、[ADR 0313](../../docs/decisions/0313-openai-embedding-false-positive-ceiling.md)）
+### OpenAI 実埋め込みの追加 arm（Issue #109 後半、[ADR 0314](../../docs/decisions/0314-openai-embedding-false-positive-ceiling.md)）
 
 `identifier-probes` の同名節と同じ規律。`sparse`/`dense` の2群を OpenAI 実埋め込み
 （`text-embedding-3-small`/256次元、`recorded` provider で
@@ -1498,7 +1498,7 @@ node scripts/numeral-token-probe-summary.mjs \
 を再生）でも走らせる。基準値は
 [numeral-token-probe-baseline.openai.json](./numeral-token-probe-baseline.openai.json)。
 ⛔ 門ではない。再計測の手順・実測した偽陽性率の上限はルートの README.md と
-ADR 0313 を見ること(⛔ ここには実測値を写さない)。
+ADR 0314 を見ること(⛔ ここには実測値を写さない)。
 
 ---
 
