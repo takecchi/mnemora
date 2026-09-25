@@ -1,4 +1,4 @@
-# ADR 0305: `calibrateRecallFootprint` は、較正の前に構造項を差し引く（Issue #340 フォローアップ）
+# ADR 0306: `calibrateRecallFootprint` は、較正の前に構造項を差し引く（Issue #340 フォローアップ）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
@@ -158,6 +158,17 @@ turnCount totalInScope
 実装前の赤はこの変異と同じ形で確認した——実装と歯を同じ作業 セッション内で組んだため、
 「実装前に書いた」という時間的順序そのものではなく、**「差し引きを外した状態で赤くなる」
 という歯の実効性**を変異試験で直接確認したことを、ここに正直に書く）。
+
+**【実測】修正前の実装に当てた赤（マネージャーが追加で確認した）**: 新しい歯をそのまま残し、
+`packages/core/src/recall-footprint.ts` だけを `origin/main` の版（本修正の前）に戻して
+`recall-footprint.test.ts` を走らせると、**4 failed / 40 passed** になった。
+落ちた4本は次のとおり。
+
+- 真の係数へ戻る歯
+- `footprintSampleFromRecall` の写しの歯2本
+- in-memory の往復の歯
+
+修正後の版へ戻すと、**44 passed** になった。
 
 ### 【実測】in-memory runtime の実 `recall()` を使った較正 → 推定の往復
 

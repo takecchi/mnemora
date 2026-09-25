@@ -227,7 +227,7 @@ export const DEFAULT_FOOTPRINT_TOLERANCE = 0.05;
  *
  * **新しい計測を足していない**——4つとも `recall()` が既に返しているものである。
  *
- * ### `totalInScope`（任意、Issue #340 フォローアップ / ADR 0305）
+ * ### `totalInScope`（任意、Issue #340 フォローアップ / ADR 0306）
  *
  * ⚠ **これは非破壊の純追加である。**省略した標本は、以前と1バイトも変わらない扱いを受ける
  * ——`calibrateRecallFootprint` は構造項を0として差し引く（＝何も差し引かない）。
@@ -270,7 +270,7 @@ export function footprintSampleFromRecall(result: RecallResult): RecallFootprint
 }
 
 /**
- * 較正の標本1件が実際に含んでいたはずの構造項の合計（Issue #340 フォローアップ / ADR 0305）。
+ * 較正の標本1件が実際に含んでいたはずの構造項の合計（Issue #340 フォローアップ / ADR 0306）。
  *
  * `sample.totalInScope` が無ければ `0`（＝差し引かない。`calibrateRecallFootprint`
  * が呼ぶのは常に `bandEntryCount === 0` の標本だけなので、渡す `bandEntries` は `0`
@@ -304,7 +304,7 @@ function structuralCarryForSample(sample: RecallFootprintSample): number {
  * **標本が足りないときに黙って既定値へ倒れない。**どの係数を借りたかは
  * `origin.borrowedFromDefault` に名前で出る（`FootprintProfileOrigin` の doc）。
  *
- * ### 構造項を差し引いてから最小二乗する（Issue #340 フォローアップ / ADR 0305）
+ * ### 構造項を差し引いてから最小二乗する（Issue #340 フォローアップ / ADR 0306）
  *
  * 「帯が空の標本では `totalChars = fixedIndexChars + memoryCount * charsPerDigest` が
  * 厳密な線形式になる」という上の主張は、**`totalInScope` が1桁のときだけ**厳密に成り立つ。
@@ -516,10 +516,10 @@ const LIMITED_BY_LABEL_ADDED_CHARS = 26;
 
 /**
  * 構造項(a)〜(d)の内訳。`estimateRecallFootprint`（足す側）と `calibrateRecallFootprint`
- * （差し引く側、Issue #340 フォローアップ / ADR 0305）の**両方から呼ばれる、唯一の実装**。
+ * （差し引く側、Issue #340 フォローアップ / ADR 0306）の**両方から呼ばれる、唯一の実装**。
  *
  * ⚠ **なぜ共有するか**: 2箇所に同じ計算を書くと、どちらかを直したときにもう片方が
- * 古いまま残り、静かにずれる（この関数が塞ぐ ADR 0305 の不具合自体が、まさに
+ * 古いまま残り、静かにずれる（この関数が塞ぐ ADR 0306 の不具合自体が、まさに
  * 「片方だけが構造項を知っている」ことで起きた二重計上だった）。
  *
  * @param inScope `memoryCountInScope`（推定側）/ `totalInScope`（較正側）。
@@ -660,7 +660,7 @@ export function estimateRecallFootprint(
   const bandEntries = Math.min(bandLimit, bandEligible);
 
   // 構造項(a)〜(d)。`calibrateRecallFootprint` と共有する唯一の実装
-  // （`indexBandStructuralTerms` の doc、ADR 0305）。
+  // （`indexBandStructuralTerms` の doc、ADR 0306）。
   const {
     bandChars,
     totalInScopeDigitCarry,

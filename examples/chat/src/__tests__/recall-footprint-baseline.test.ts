@@ -346,7 +346,7 @@ describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん�
 });
 
 /**
- * `calibrateRecallFootprint` に `totalInScope`（Issue #340 フォローアップ / ADR 0305）を
+ * `calibrateRecallFootprint` に `totalInScope`（Issue #340 フォローアップ / ADR 0306）を
  * 渡しても、この repo の hold-in 7行（`totalInScope` はいずれも1桁——上の「前提」節参照）
  * では較正係数が**バイト単位で**変わらないことを示す。
  *
@@ -361,7 +361,7 @@ describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん�
  * の分け方のいずれも変更しない。**既存の `holdInRows`/`ACCURACY_TOLERANCE` をそのまま
  * 読むだけである。
  */
-describe("calibrateRecallFootprint — totalInScope を渡しても、hold-in 7行(すべて1桁)では係数がバイト単位で変わらない（Issue #340 フォローアップ / ADR 0305）", () => {
+describe("calibrateRecallFootprint — totalInScope を渡しても、hold-in 7行(すべて1桁)では係数がバイト単位で変わらない（Issue #340 フォローアップ / ADR 0306）", () => {
   const samplesWithout: RecallFootprintSample[] = holdInRows.map((row) => ({
     totalChars: row.mnemoraChars,
     memoryCount: row.returnedCount,

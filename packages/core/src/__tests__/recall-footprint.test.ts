@@ -388,7 +388,7 @@ describe("calibrateRecallFootprint — 3階建て", () => {
 });
 
 // ---------------------------------------------------------------------------
-// calibrateRecallFootprint — 構造項を差し引く（Issue #340 フォローアップ / ADR 0305）
+// calibrateRecallFootprint — 構造項を差し引く（Issue #340 フォローアップ / ADR 0306）
 //
 // `estimateRecallFootprint` は `indexBand` の JSON 構造から決まる4つの構造項
 // （ADR 0302）を足す。ADR 0302 の hold-in 標本（`compare-baseline.json` の7行）は
@@ -404,7 +404,7 @@ describe("calibrateRecallFootprint — 3階建て", () => {
 // 「`totalInScope` を渡さなければ偏る／渡せば真の係数に戻る」ことを直接示す。
 // ---------------------------------------------------------------------------
 
-describe("calibrateRecallFootprint — 構造項を差し引く（Issue #340 フォローアップ / ADR 0305）", () => {
+describe("calibrateRecallFootprint — 構造項を差し引く（Issue #340 フォローアップ / ADR 0306）", () => {
   /**
    * 既知の真の係数。**standard な値ではなく、丸め誤差と区別しやすいよう小数を選んだ。**
    */
@@ -962,7 +962,7 @@ describe("estimateRecallFootprint — 構造項をin-memory runtimeの実recall(
   });
 
   /**
-   * ⭐ 較正側の歯（Issue #340 フォローアップ / ADR 0305）: `footprintSampleFromRecall` で
+   * ⭐ 較正側の歯（Issue #340 フォローアップ / ADR 0306）: `footprintSampleFromRecall` で
    * **実際の `recall()`（1桁・2桁・3桁の `totalInScope`、すべて帯が空）**から標本を取り、
    * `calibrateRecallFootprint` で較正し、その較正済みプロファイルが
    * **held-out シナリオ**（帯が非空のものを含む）の実測 `usage.chars` と一致することを示す。
