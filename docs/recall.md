@@ -930,7 +930,7 @@ Issue #200 は**2つの読み方**を挙げていた。
    ——直後の「⚠ `anchorCount` の天井は `RecallQuery.limit` である」を見ること。
    `anchorPool: "passed"` を渡すと母集合が `passed`（`limit` で切り詰める前、段2の閾値を
    通った全候補）になり、`limit` を上げずにその天井を外せる——[Issue #377](https://github.com/takecchi/mnemora/issues/377) /
-   [ADR 0306](./decisions/0306-association-anchor-pool.md)。
+   [ADR 0308](./decisions/0308-association-anchor-pool.md)。
 4. アンカーのベクトルを `getVectors` で引き、**そのベクトルで** `VectorStore.search` を
    **段1の ANN 検索と同じ filter で**呼ぶ——scope（tenant/subject/status/period/
    `excludeProvenanceKinds`）**だけでなく、忘却ゲート（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md) /
@@ -993,7 +993,7 @@ Issue #200 は**2つの読み方**を挙げていた。
 ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`（= `limit × overFetchFactor`、§3）も一緒に広がる
 ——費用は連想枠だけの話では済まない。
 
-#### 9.2.1 `anchorPool` — `limit` を上げずに天井を外す（2026-09-25 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0306](./decisions/0306-association-anchor-pool.md)）
+#### 9.2.1 `anchorPool` — `limit` を上げずに天井を外す（2026-09-25 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0308](./decisions/0308-association-anchor-pool.md)）
 
 **上の「`limit` と `anchorCount` の両方を上げる」は、`limit` を上げた分だけ返す件数と
 段1の取り込み幅 `kPrime` も一緒に膨らむ**——アンカーの母集合だけを広げたい場合には、
@@ -1016,16 +1016,26 @@ Issue #200 は**2つの読み方**を挙げていた。
 （`companions` を起点にしない）」という制約は、`"passed"` でも保たれる——`passed` は
 `withinLimit` の**上位集合**であり、どちらも「段2の閾値を通った」候補の部分集合である。
 
-**規模に追随させる 1万件規模の実測**（合成 haystack、`@mnemora/local-embedding`
-`ruri-v3-30m/sym`・256次元、HNSW 既定パラメータ、`examples/chat` の `association-probes`
-12 probe。テストスイート外の使い捨て測定、CI には載せていない）:
+**規模に追随させる実測**（62〜1万件、`@mnemora/local-embedding` `ruri-v3-30m/sym`・
+256次元、HNSW 既定パラメータ、`examples/chat` の `ASSOCIATION_PROBES` 12 probe。
+`pnpm --filter @mnemora/example-chat run association-anchor-pool-scale-bench` として
+コミットしたベンチ、CI には載せていない）:
 
-<!-- MEASUREMENT_10K_PLACEHOLDER -->
+🔴 **測った7規模（62/1000/1500/2000/2500/3000/10000）・2つの `ef_search`（40/120）・
+2つの `anchorCount`（10/40）の全ての組み合わせで、`anchorPool: "passed"` が gold 到達を
+既定より1件でも増やした組は無かった。** 小〜中規模では既定より悪化し（母集合を広げた分、
+無関係な候補が連想枠 `maxCount` を奪い合う）、大規模では既定と同着（どちらも届かない）
+だった——**唯一 gold 到達が伸びたのは `limit` 自体を上げた場合（この節が最初に指摘した
+費用の重い回避策）だけである。** 数値・器・読み方の全体は
+[ADR 0308](./decisions/0308-association-anchor-pool.md) §7 に**唯一の記録**として置く
+（ここに写さない——AGENTS.md「数を、道具と生成物に焼き込まない」）。
 
 **⚠ 「anchor がそもそも生の ANN `kPrime`（既定40）件にすら入らない probe は、`anchorPool` を
 変えても届かない」**——`anchorPool: "passed"` が広げるのは「`withinLimit` の外・`passed` の中」
 という帯であり、`passed` 自体の外（`below_threshold` に落ちた分）までは広げない。
-その帯の外に居る probe は、この修正の範囲外である（下の実測を見ること）。
+ADR 0308 §7.2 の実測では、この帯（`withinLimit` の外・`passed` の中）自体が
+測った全ての規模で空だった——`anchorPool` が理論上救えるはずの候補が、この
+probe 集合では1件も観測されなかった（ADR 0308 §7.4 の考察参照）。
 
 **⚠ 「走らせて0件だった」と「走らせなかった」を同じ顔にしない。**
 走らせて0件のときは `stage_skipped` を積まない——本文書全体を貫く原則3

@@ -1,6 +1,7 @@
-# ADR 0306: `RecallAssociationQuery.anchorPool` を任意欄として足す — アンカーの母集合を、既定を変えずに `limit` の外へ広げる（Issue #377）
+# ADR 0308: `RecallAssociationQuery.anchorPool` を任意欄として足す — アンカーの母集合を、既定を変えずに `limit` の外へ広げる（Issue #377）
 
-- **状態**: 提案 (2026-09)
+- **状態**: 提案 (2026-09) ——🔴 **実測の結果、測った範囲（7規模・2 ef_search・2 anchorCount）
+  では gold 到達を1件も増やせなかった（§7）。「採用」へは進めていない。オーナー判断待ち。**
 - **日付**: 2026-09-25
 
 **出自**: オーナーの依頼を受けたマネージャーのセッションから切り出され、それを受けたエージェントの
@@ -185,7 +186,171 @@ const anchors = anchorSource.slice(0, anchorCount);
 
 ## 7. 測ったこと
 
-<!-- MEASUREMENT_SECTION_PLACEHOLDER -->
+🔴 **結論を先に書く: この節の実測は、`anchorPool: "passed"` が gold 到達を
+1件でも増やした規模・`ef_search` の組を1つも見つけていない。** 測った7規模
+（62/1000/1500/2000/2500/3000/10000）・2つの `ef_search`（40/120）・2つの
+`anchorCount`（10/40）の**全ての組み合わせで**、`anchorPool: "passed"` の
+gold 到達数は既定（`anchorPool` 省略）と**同数か、それより少なかった**——
+1件でも上回った組は無い。小〜中規模（62・1000・1500・2500）では既定より
+明確に**悪化**しており（アンカー母集合が広がった分だけ、無関係な候補が
+連想の枠（`maxCount`）を奪い合う——下の「なぜ悪化するか」参照）、
+中〜大規模（2000・3000・10000）では既定と**同着**（どちらも取り戻せない）
+だった。**⟹ 実装を出す意味があるかは、本 ADR だけでは判断できない
+——オーナー判断を仰ぐ（下の「この ADR の状態について」参照）。**
+
+### 7.0 器（すべての実測に共通）
+
+| 項目 | 値 |
+|---|---|
+| PostgreSQL | 17.11、pgvector 0.8.0（`\dx` で確認） |
+| embedding | `local` / `ruri-v3-30m/sym` / 256次元（`@mnemora/local-embedding`、ADR 0085） |
+| LLM | `deterministic` |
+| probe | `examples/chat/src/association-probe-set.ts` の `ASSOCIATION_PROBES`（12件、ADR 0151/Issue #291 が設計した「query ≈ anchor / anchor ≈ gold / query ≉ gold」の三角形） |
+| 62件点の haystack | `ASSOCIATION_HAYSTACK`（手書き60文 + Issue #317 で足した2文）——CI の `association-probes` ジョブと**同じ**関数（`buildAssociationProbeSetConversation()`）で組む。**陽性対照そのもの** |
+| 62件超の filler | `examples/chat/src/bench/association-anchor-pool-scale-bench.ts` の `buildDistinctFiller`（構成上ゼロ重複、プローブ語彙と非交差のログ風合成テキスト） |
+| `RecallQuery.limit` の既定 | 10（`kPrime = 10 × 4 = 40`） |
+| 計測道具 | `pnpm --filter @mnemora/example-chat run association-anchor-pool-scale-bench`（本 PR が追加。§7.5「この道具について」参照） |
+
+**測定道具は `packages/core`/`packages/postgres` を1行も変更せずに段ごとの内訳を取る**
+——`VectorStore.search`/`VectorStore.getVectors` を薄い spy で包み、`anchorPool`/
+`anchorCount`/`limit` の組み合わせを変えて `recall()` を複数回呼ぶことで、
+(a) 生ANN・(b) `passed`・(c) `withinLimit`・(d) 実際のアンカー、を外側から観測する
+（`ADR 0188` が前提にしている「`getVectors` の呼び出し箇所は1つ」という事実を使う）。
+詳細はベンチファイル冒頭の docstring。
+
+### 7.1 陽性対照 — 測定器は生きている
+
+62件点（`ASSOCIATION_HAYSTACK`、ADR 0168 と同じ規模）で:
+
+| arm | goldReturned |
+|---|---|
+| off（連想枠なし） | **0/12**（設計どおり——query だけでは gold に届かない） |
+| on-default（`maxCount=10`、`anchorCount`/`anchorPool` は既定） | **12/12** |
+
+**`off` が 0/12 になること自体が、三角形の設計（query ≉ gold）が壊れていないことの
+確認であり、`on-default` が 12/12 に届くことが Issue #377 本文の「62文の haystack
+では12/12だった」と一致する陽性対照である。** ⟹ 以下の「規模が伸びると崩れる」
+という否定的な結果は、測定器が反応していないからではない。
+
+### 7.2 規模ごとの内訳（4 arm、ef_search 40/120）
+
+`(a)=(b)=(c)` は「probe自身のanchorが、生のANN kPrime件・`passed`・`withinLimit`の
+それぞれに入っていたprobe数/12」。**この3つの値は測った7規模・全ての ef_search で
+一度も食い違わなかった**——つまり、この corpus では「`withinLimit` の外・`passed`
+の中」という `anchorPool: "passed"` が本来救うはずの帯（順位11〜40位）に、
+probe自身のanchorが入ったことが**1件も無い**。以下は代表4規模(off/on-default/
+on-旧回避策/on-新修正の4 arm、`d` はそのarmで実際にアンカーとして選ばれたprobe数):
+
+| scale | ef | (a)=(b)=(c) | off gold | on-default gold(d) | on-旧回避策(limit=40,anchorCount=40) gold(d) | on-新修正(pool=passed,anchorCount=40) gold(d) |
+|---|---|---|---|---|---|---|
+| 62 | 40 | 12/12 | 0/12 | **12/12** (12/12) | 9/12 (12/12) | 5/12 (12/12) |
+| 62 | 120 | 12/12 | 0/12 | **12/12** (12/12) | 9/12 (12/12) | 5/12 (12/12) |
+| 1000 | 40 | 12/12 | 0/12 | **12/12** (12/12) | 10/12 (12/12) | 4/12 (12/12) |
+| 1000 | 120 | 12/12 | 0/12 | **12/12** (12/12) | 10/12 (12/12) | 4/12 (12/12) |
+| 3000 | 40 | 1/12 | 0/12 | 0/12 (1/12) | 1/12 (3/12) | 0/12 (1/12) |
+| 3000 | 120 | 1/12 | 0/12 | 0/12 (1/12) | **10/12** (12/12) | 0/12 (1/12) |
+| 10000 | 40 | 0/12 | 0/12 | 0/12 (0/12) | 0/12 (0/12) | 0/12 (0/12) |
+| 10000 | 120 | 0/12 | 0/12 | 0/12 (0/12) | 0/12 (0/12) | 0/12 (0/12) |
+
+平均レイテンシ（scale=10000、ef=40、`recall()` 1回あたり）: off 64.3ms /
+on-default 39.1ms / on-旧回避策 191.0ms / on-新修正 130.2ms。**アンカー数が
+増えるほど `getVectors`/アンカーごとの `search()` 呼び出しが増え、素直に遅くなる**
+（ADR 0308「引き受けた負債」3番が予期していたとおり）。
+
+**読み方**:
+
+1. **62・1000（小〜中規模）**: `(a)=(b)=(c)=12/12`——アンカーは常に`withinLimit`
+   （上位10件）の中に居る。この状態で `anchorPool: "passed"` を使うと、母集合が
+   `withinLimit`（最大10件）から `passed`（最大40件）へ無条件に広がり、
+   **本来救う必要のない代わりに、無関係な30件が新たにアンカー候補へ混じる**。
+   その結果、連想枠の再結合（`maxCount=10`枠の奪い合い）で本来の gold が
+   押し出され、**goldReturnedが12/12から4〜5/12へ悪化する**（`on-旧回避策`も
+   同じ理由で9〜10/12へ悪化するが、`anchorPool:"passed"`ほどではない——
+   `limit`を上げる方は返す`memories`自体が40件に増えるため、gold自身が
+   `withinLimit`に残りやすい面がある一方、`anchorPool:"passed"`は`limit`を
+   変えないため`memories`は10件のままで競合が起きやすい）。
+2. **3000・10000（大規模）**: `(a)=(b)=(c)`が1/12・0/12へ急落する——**probe自身の
+   anchorが、段2の閾値どころか段1の生ANN kPrime(既定40)件にすら入らなくなる**。
+   これは `anchorPool` が触る段（`passed`→`withinLimit`の絞り込み）より**手前**の
+   崩れであり、`anchorPool: "passed"`は原理的に届かない（ADR「引き受けた負債」1番
+   がまさにこれを予期していた）。**この帯を広げるには`limit`（≒`kPrime`）自体を
+   上げるしかない**——実際、`on-旧回避策`（`limit=40`→`kPrime=160`）だけが
+   scale=3000/ef=120で10/12まで回復している。**ただし`ef_search`を上げるだけ
+   （`limit`はそのまま、既定`kPrime=40`）では一度も回復しなかった**——
+   scale=3000のon-default/on-新修正はef=40でもef=120でも0/12のまま
+   （`hnsw.ef_search`はHNSWグラフ探索の**精度**を上げるだけで、`kPrime`という
+   **窓の大きさ**そのものは広げないため。窓の外にあるものは、探索精度をいくら
+   上げても見えない）。
+
+### 7.3 `anchorCount` を控えめ（10）にしても結論は変わらない
+
+7.2 の `anchorCount=40`（`kPrime`の上限いっぱい）は極端な設定であり、
+「悪化」が単にその極端さのせいではないかを確かめるため、`anchorCount=10`
+（`maxCount`と同数、より現実的な値）でも同じ4点+3点（scale=1500/2000/2500、
+ef=40のみ）を測り直した:
+
+| scale | ef | (a)=(b)=(c) | on-default gold | on-新修正(anchorCount=40) gold | on-新修正-控えめ(anchorCount=10) gold |
+|---|---|---|---|---|---|
+| 1000 | 40 | 12/12 | 12/12 | 4/12 | 9/12 |
+| 1000 | 120 | 12/12 | 12/12 | 4/12 | 9/12 |
+| 1500 | 40 | 8/12 | 7/12 | 2/12 | 6/12 |
+| 2000 | 40 | 1/12 | 1/12 | 0/12 | 1/12 |
+| 2500 | 40 | 9/12 | 6/12 | 2/12 | 5/12 |
+| 3000 | 40 | 1/12 | 1/12 | 0/12 | 1/12 |
+| 3000 | 120 | 1/12 | 1/12 | 0/12 | 1/12 |
+
+**`anchorCount`を10へ下げると悪化の幅は縮む（控えめのほうが40より常に良い）が、
+それでも既定を上回った点は1つも無い**——最良でも同着（scale=2000/3000）、
+それ以外は全て既定より少ない。⟹ 「アンカー数が極端すぎた」だけでは説明が
+付かない、`anchorPool: "passed"`自体の性質である。
+
+### 7.4 なぜ「passedの中・withinLimitの外」という帯が空だったのか（推測、確かめていない）
+
+`ASSOCIATION_PROBES`の三角形設計（query ≈ anchorを強く作る）そのものが、
+「anchorの順位が10位と40位の間」という中間状態を作りにくくしている可能性がある
+——**anchorはqueryに強く似せて設計されているため、生き残るときは大抵上位に
+生き残り、死ぬときはfillerに押し出されて一気にkPrimeの外まで落ちる**、という
+二値的な振る舞いを、この12 probe × 7規模の観測範囲では一貫して示した
+（`(a)=(b)=(c)`が食い違った組が1つも無い、という上の事実そのもの）。
+
+**⟹ 確かめていないこと**: 本物のテナントの記憶集合（多様な話題・多様な強さの
+類似度分布を持つ）で、この中間帯（11〜40位）が実際に埋まる状況があるかは
+測っていない——`ASSOCIATION_PROBES`はこの中間帯を意図的に作る設計にはなって
+いない（三角形は「query≈anchor」を強くするよう作られており、「anchorの順位が
+ちょうど`limit`と`kPrime`の間になる」ことは設計目標に入っていなかった）。
+**もし本番データでこの中間帯が実際に埋まるなら、`anchorPool: "passed"`は
+そこでは効くはずである**——本 ADR の実測はそれを否定していない。**否定して
+いるのは「この12 probeのこの合成 filler では、その中間帯が一度も観測されな
+かった」という1点である。**
+
+### 7.5 この道具について
+
+`examples/chat/src/bench/association-anchor-pool-scale-bench.ts`として
+コミットした（`pnpm --filter @mnemora/example-chat run association-anchor-pool-scale-bench`）。
+`lexical-tie-density-bench.ts`（Issue #394）・`packages/postgres/src/bench/scale-bench.ts`
+と同じ規律——CIには載せない・exit codeは常に0・スケール/ef_searchは環境変数で
+振れる。旧`tmp-scale-bench-377.ts`（前任者の使い捨てスクリプト、`digest`文字列
+比較でgoldを判定していた）は本コミットで削除した——本ベンチは`ObserveResult.
+memoryIds`から直接memoryIdを取るため、この脆さを持たない。
+
+### 7.6 この ADR の状態について
+
+**上の実測により、3節が提案する`anchorPool: "passed"`は、測った範囲では
+Issue #377が報告した問題を解決していない**——大規模（3000・10000）では
+届かず（そもそも段1のANN窓の外）、小〜中規模（62・1000・1500・2500）では
+既定より悪化する。**唯一プラスに働いたのは`ef_search=120`と`limit=40`
+（`旧回避策`、ADR 0303/PR #430が既に指摘していた案）を**併用**したときだけ**
+——しかしそれは本 ADR が「費用が目的外にまで及ぶ」として退けた案そのものである。
+
+**⟹ 本 ADR は「提案」のまま、状態を「採用」へ進めない。** 実装（`anchorPool`
+欄の追加）そのものは既定の挙動を1バイトも変えない**安全な**任意欄の追加であり、
+歯（`recall-association.test.ts`）は変異試験で赤/緑を確認済みである
+（PR本文参照）——**壊れているわけではない**。だが、Issue #377の目的
+（規模が伸びても連想の起点を保つ）を、実測した範囲では達成していない。
+**この実装を出す意味があるか（① 中間帯が実在するテナントのために先回りで
+用意する任意機能として出す／② Issue #377を「未解決」のまま閉じずに再検討する
+／③ この PR自体を見送る）は、書き手には決められない——オーナー判断を仰ぐ**
+（`docs/autonomy.md`が定める「オーナー判断を待つ点」の実例）。
 
 ## 参照
 

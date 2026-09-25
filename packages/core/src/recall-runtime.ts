@@ -1123,7 +1123,7 @@ export async function runRecall(
       // 使うと「クエリに当たっていない候補から、さらにクエリに当たっていない候補を
       // 連想する」という不透明な連鎖になる。
       //
-      // ⭐ Issue #377 / ADR 0306: 母集合は `anchorPool` で選べる。既定 `"withinLimit"`
+      // ⭐ Issue #377 / ADR 0308: 母集合は `anchorPool` で選べる。既定 `"withinLimit"`
       // は本欄を足す前と1バイトも変わらない（`withinLimit = passed.slice(0, limit)`。
       // 上のコメント）——`RecallQuery.limit` が実効的な天井になる。`"passed"` を選ぶと、
       // `limit` で切り詰める前の `passed`（段2の閾値を通った全候補）が母集合になり、

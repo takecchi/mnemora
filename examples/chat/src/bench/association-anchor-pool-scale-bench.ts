@@ -5,7 +5,7 @@
  *
  * ## これは何を測るか
  *
- * [Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0306](../../../docs/decisions/0306-association-anchor-pool.md)
+ * [Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0308](../../../docs/decisions/0308-association-anchor-pool.md)
  * が足した `RecallAssociationQuery.anchorPool` が、テナントの規模（filler 件数）が
  * 伸びるにつれて実際に何を取り戻すか・取り戻さないかを、本物の Postgres + pgvector +
  * `@mnemora/local-embedding` に対して測る。
@@ -17,7 +17,7 @@
  *
  * gold 到達（`goldReturned`）は、連想枠のパイプライン全体（アンカー選定 → アンカー近傍探索
  * → 再結合）が繋がって初めて 1 になる合成指標であり、「どの段で取りこぼしたか」を
- * 区別しない。ADR 0306「引き受けた負債」1番が明記する通り、`anchorPool: 'passed'` は
+ * 区別しない。ADR 0308「引き受けた負債」1番が明記する通り、`anchorPool: 'passed'` は
  * 「そもそも `passed` に入っていない probe」を救わない——⟹ **probe 自身の anchor** が
  * パイプラインのどの段まで生き残ったかを、段ごとに数える:
  *

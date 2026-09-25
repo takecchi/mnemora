@@ -1554,7 +1554,7 @@ export interface RecallAssociationQuery {
    * （**`anchorPool` の既定値 `"withinLimit"` のとき。** 下の `anchorPool` を参照）。
    *
    * ⭐ **2026-09-25 追記（[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
-   * [ADR 0306](../../../docs/decisions/0306-association-anchor-pool.md)）**:
+   * [ADR 0308](../../../docs/decisions/0308-association-anchor-pool.md)）**:
    * 上の「`limit` を一緒に上げる」以外に、`anchorPool: "passed"` を渡すと
    * `limit` を上げずに `anchorCount` の天井だけを外せる——`limit` を上げると
    * 段1の取り込み幅 `kPrime` も一緒に広がり返す件数自体も増えるが、`anchorPool` は
@@ -1601,7 +1601,7 @@ export interface RecallAssociationQuery {
    * 出所: [Issue #377](https://github.com/takecchi/mnemora/issues/377)（既定
    * `anchorCount = 3` が `withinLimit`（既定10件）からしか取れず、テナントの規模が
    * 伸びても連想の起点になれる候補の割合が下がる、という実測）。決定は
-   * [ADR 0306](../../../docs/decisions/0306-association-anchor-pool.md)。
+   * [ADR 0308](../../../docs/decisions/0308-association-anchor-pool.md)。
    */
   anchorPool?: AssociationAnchorPool;
 }
@@ -1610,7 +1610,7 @@ export interface RecallAssociationQuery {
  * {@link RecallAssociationQuery.anchorPool} が選べる母集合。
  *
  * - `"withinLimit"` — 段2で `RecallQuery.limit` の内側に入った分だけ（既定。ADR 0151 以来の挙動）。
- * - `"passed"` — 段2の閾値分割を通った全候補（`limit` で切る前。ADR 0306）。
+ * - `"passed"` — 段2の閾値分割を通った全候補（`limit` で切る前。ADR 0308）。
  */
 export const ASSOCIATION_ANCHOR_POOLS = ["withinLimit", "passed"] as const;
 
@@ -1631,7 +1631,7 @@ export const DEFAULT_ASSOCIATION_ANCHOR_COUNT = 3;
  * `RecallAssociationQuery.anchorPool` の既定値。**`"withinLimit"`**——
  * この欄を足す前の唯一の挙動であり、省略した呼び出しは1バイトも変わらない
  * （[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
- * [ADR 0306](../../../docs/decisions/0306-association-anchor-pool.md)）。
+ * [ADR 0308](../../../docs/decisions/0308-association-anchor-pool.md)）。
  */
 export const DEFAULT_ASSOCIATION_ANCHOR_POOL: AssociationAnchorPool = "withinLimit";
 
