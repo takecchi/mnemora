@@ -1,0 +1,63 @@
+{
+  "_readme": "numeral-token-probes ベンチ(examples/chat の `numeral-token-probes` サブコマンド、@mnemora/local-embedding によるプロセス内推論。鍵もカセットも要らない)の基準値。ADR 0135(Issue #109 第1弾)——「単独トークンの数詞・記号インデックス」(文字種×共有前置長の行列)を弁別軸とする第4の probe 集合。`identifier-probe-baseline.json`/`retrieval-baseline.json` とは別ファイルであり、そちらの内容・作法には一切触れていない。この基準値は手作業で置いたもので、CIジョブが自動更新することは無い(既存2ファイルと同じ方針)。生成し直す手段は下の provenance の手順を再実行することである。",
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "d4c43633d2bd8eb2595b6ed0a27ede67be4ea60a",
+    "measuredAt": "2026-09-25T01:52:15.139Z",
+    "how": "env -u OPENAI_API_KEY DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test MNEMORA_NUMERAL_TOKEN_JSON=<path> pnpm --filter @mnemora/example-chat run numeral-token-probes",
+    "database": "PostgreSQL 17.11 + pgvector 0.8.0(ローカル、非本番。docs/autonomy.md の initdb 手順で立てた自分専用インスタンス)",
+    "modelWeights": "sirasagi62/ruri-v3-30m-ONNX(dtype=q8)。ローカルキャッシュから読んだ——ネットワーク取得そのものは別途 warmup() の歯(local-embedding-warmup.test.ts)で検査している",
+    "repeatRuns": 2,
+    "note": "🔴 上の commit を土台に、この PR の変更(numeral-token-probe-set.ts/identifier-arm.tsのmargin追加/numeral-token-json.ts/cli.tsのnumeral-token-probesサブコマンド)を載せた作業ツリー(測定時点では未コミット)で2回実行し、measuredAt を除いて JSON が完全一致した(決定的)。⭐ hit@1=15/18(sparse/dense とも同じ3件が外れる: kanji-medium-a/kanji-short-a/kanji-short-b)。⚠ **この3件の『外れ』は、登録した distractor に負けたのではない**——`distractorBeatsGold` はこの3件を含め18件すべてで false であり、margin(gold−登録distractorのsimilarity差)も18件全部が正(最小 +1.048e-2)。実際に1位を取ったのは、同じ会話に同居する**別セルの兄弟probe**(例: kanji-medium-aの1位は、ほぼ同一の語幹を持つarabic-medium-aのgold文『総務部の3番窓口は…』——kanji-medium-aのquery『総務部の三番窓口は…』とほぼ同じベクトルになった)。⟹ hit@1はこの『名指ししていない近傍』に敏感だが、margin(登録したgold/distractor対の差)は健全という、ADR 0135 §5.5が二値と分布を併記する理由そのものの実例が、初回実測で早速出た。⚠ この重なりは、文字種を独立変数にするために『long/medium/short兼カテゴリで同じ語幹を使う』という設計(§5.1)自体が招いている——距離を測る対象を1本の共有会話に同居させる既存3集合と同じ配線(全probeのgold/distractorを1つのテナントへingestする)を踏襲した結果であり、bugではない。次にこの現象を追うなら、cousin probeを除外した『同一セル内だけのスコープ』での再測定が考えられる(この PR では行っていない——残件)。 ⚠ 標本18件であり、ADR 0033 §3 によりここから成功率・失敗率を統計的に主張しない。言えるのは『この埋め込み・この18件・この haystack で、15件が1位、3件が(登録distractorではない近傍に)敗れた』までである。 ⛔ この2群は門ではない(相違しても exit 0)。失敗している3件を赤い歯にしていない——値として記録するだけである。",
+    "denseHaystackDesign": "9セル(文字種3×共有前置長3)それぞれに、probe が使っていない値域(漢数字は20番台、算用数字は100番台、アルファベットはG〜P)で10件ずつ、計90件(18件×5、ADR 0135 §5.4 の密度)を1度だけ設計し、1度だけ測った。値を見てからhaystackやprobeを作り直すことはしていない(numeral-token-probe-set.tsのDENSE_NUMERAL_TOKEN_FAMILIESのコメント参照)。",
+    "probeSetDesign": "18件(9セル×2インスタンス)。文字種(漢数字/算用数字/アルファベット)×共有前置長(長い≒11字/中間≒4字/短い≒0字)の行列(ADR 0135 §5.1・§5.4)。セルあたり2インスタンスに留めた判断理由は numeral-token-probe-set.ts 冒頭の doc コメントに記録している——3インスタンス化は実装時の残件として明示的に次へ渡した。⚠ 設計(行列・件数・語彙)は測定前に固定し、値を見てから probe を書き直していない(ADR 0094 §6 と同じ規律)。"
+  },
+  "groups": [
+    {
+      "group": "sparse",
+      "label": "numeral-token-probes/sparse(llm=deterministic, embedding=local/ruri-v3-30m/sym/256次元, haystack=sparse)",
+      "description": "数詞・記号索引 probe 18件(examples/chat/src/numeral-token-probe-set.ts、文字種3×共有前置長3の9セル×2インスタンス)。haystackは索引を1件も含まない既定の60件(probe-set.tsのbuildHaystackUtterance)。",
+      "llmMode": "deterministic",
+      "embeddingMode": "local",
+      "embeddingSpace": {
+        "provider": "local",
+        "model": "ruri-v3-30m/sym",
+        "dimensions": 256
+      },
+      "haystackKind": "sparse",
+      "mrrOverall": 0.9166666666666666,
+      "hit1Count": 15,
+      "hit10Count": 18,
+      "probeCount": 18,
+      "marginStats": {
+        "count": 18,
+        "mean": 0.03746779259837277,
+        "stdDev": 0.019020042046373538,
+        "min": 0.010481718896094394
+      }
+    },
+    {
+      "group": "dense",
+      "label": "numeral-token-probes/dense(llm=deterministic, embedding=local/ruri-v3-30m/sym/256次元, haystack=dense)",
+      "description": "同じ18 probeを、probeとは重ならない値域(漢数字20番台/算用数字100番台/アルファベットG〜P)の索引が密なhaystack(9セル×10件=計90件)で走らせた結果。sparseと完全に同じ3件(kanji-medium-a/kanji-short-a/kanji-short-b)がhit@1で外れ、値もsparseとビット一致——haystackの密度は、この3件の勝敗を動かしていない。",
+      "llmMode": "deterministic",
+      "embeddingMode": "local",
+      "embeddingSpace": {
+        "provider": "local",
+        "model": "ruri-v3-30m/sym",
+        "dimensions": 256
+      },
+      "haystackKind": "dense",
+      "mrrOverall": 0.9166666666666666,
+      "hit1Count": 15,
+      "hit10Count": 18,
+      "probeCount": 18,
+      "marginStats": {
+        "count": 18,
+        "mean": 0.03746779259837277,
+        "stdDev": 0.019020042046373538,
+        "min": 0.010481718896094394
+      }
+    }
+  ]
+}

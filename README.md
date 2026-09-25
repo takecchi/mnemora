@@ -112,9 +112,10 @@ API キーは要らない——**実 API が返した埋め込みの記録を再
 |---|---|---|
 | 想起の質（[ADR 0088](./docs/decisions/0088-retrieval-quality-measured-in-ci.md)）`retrieval-quality` | 意味的関連性 probe **7件**の `hit@1` / `hit@10` / MRR | 記録の再生 |
 | 識別子・固有名詞 probe（[ADR 0094](./docs/decisions/0094-identifier-probes-local-embedding.md)）`identifier-probes` | 識別子・固有名詞 probe **30件**（`examples/chat/src/identifier-probe-set.ts` の `IDENTIFIER_PROBES`） | `@mnemora/local-embedding`（プロセス内推論） |
+| 単独トークンの数詞・記号索引 probe（[ADR 0135](./docs/decisions/0135-numeral-token-discriminator-probe-domain-design.md)）`numeral-token-probes` | 文字種（漢数字/算用数字/アルファベット）×共有前置長（長/中/短）の9セル×2 probe **18件**（`examples/chat/src/numeral-token-probe-set.ts` の `NUMERAL_TOKEN_PROBES`）の `hit@1` / `hit@10` / MRR / margin（gold−distractor の similarity 差、分布で読む） | 同上 |
 | 統合の費用（[ADR 0101](./docs/decisions/0101-how-to-measure-whether-consolidate-moved-the-north-star.md)）`consolidation-cost` | `consolidate()` が「載る量」に効いたか | 同上 |
 
-**⚠ この表は、`ci.yml` の測定系ジョブの全部ではない。**上の3つのほかに
+**⚠ この表は、`ci.yml` の測定系ジョブの全部ではない。**上の4つのほかに
 `association-probes`（連想枠が想起の質を動かすか）・`archive-sweep-cost`（掃引が「載る量」/ hit@k に
 効くか）・`time-term`（時間項が順位を動かすか）・`validity`（`validAt` ゲートが候補の有無を動かすか）が
 **同じく毎 PR 走っている。**⟹ **ここに挙げていないジョブが無いとは読まないこと**——
