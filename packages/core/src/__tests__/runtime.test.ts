@@ -2662,9 +2662,7 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
     expect(firstMemory?.contestedWithId ?? null).toBeNull();
     expect(secondMemory?.contestedWithId ?? null).toBeNull();
     const events = await stores.eventStore.list(ctx, {});
-    expect(events.some((e) => (e.meta as { reason?: string }).reason === "contested")).toBe(
-      false,
-    );
+    expect(events.some((e) => (e.meta as { reason?: string }).reason === "contested")).toBe(false);
     expect(
       events.some(
         (e) => (e.meta as { reason?: string }).reason === "claim_key_conflict_unresolved",
