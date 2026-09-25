@@ -91,6 +91,24 @@ export const ANSWER_TIME_WEIGHTING_ORDER_LEGEND_CASSETTE_PATH = join(
   "answer-time-weighting.order-legend.json",
 );
 
+/**
+ * `answer`（`MNEMORA_ANSWER_CLAIM_KEY=detect` opt-in、Issue #691 続き）専用カセット。
+ *
+ * ⛔ **`CassetteTarget`/`CASSETTE_PATH_BY_TARGET`（下）には加えない。** `record`/`verify`
+ * サブコマンドの対象一覧に混ぜると、`answer.order-legend.json`（現役の対照の基準、
+ * ADR 0301/0309）が向く先と紛れる——claimKey opt-in の記録は
+ * `src/scripts/record-answer-claim-key.ts`（`record-answer-retention-mutation.ts` と
+ * 同じ「専用スクリプト」の形、Issue #691 続き）という別経路から、このパスへ直接書く。
+ * **既存4カセット（`retrieval.json`/`compare.json`/`answer.order-legend.json`/
+ * `answer-time-weighting.order-legend.json`）は1バイトも触らない**（ADR 0315 決定4）。
+ */
+export const ANSWER_CLAIM_KEY_CASSETTE_PATH = join(
+  here,
+  "..",
+  "cassettes",
+  "answer.claim-key.json",
+);
+
 /** `record` / `verify` / 再生が対象にできるカセット。 */
 export type CassetteTarget = "retrieval" | "compare" | "answer" | "answer-time-weighting";
 

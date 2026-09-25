@@ -40,7 +40,8 @@
     "verify:answer": "tsx src/cli.ts verify answer",
     "record:answer-time-weighting": "tsx src/cli.ts record answer-time-weighting",
     "verify:answer-time-weighting": "tsx src/cli.ts verify answer-time-weighting",
-    "record:answer-retention-mutation": "tsx src/scripts/record-answer-retention-mutation.ts"
+    "record:answer-retention-mutation": "tsx src/scripts/record-answer-retention-mutation.ts",
+    "record:answer-claim-key": "tsx src/scripts/record-answer-claim-key.ts"
   },
   "dependencies": {
     "@mnemora/core": "workspace:*",

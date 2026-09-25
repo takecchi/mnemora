@@ -93,7 +93,12 @@ describe("parseMemoryLine", () => {
 describe("parseMnemoraPromptBody", () => {
   it("記憶が0件の本体(索引行のみ)を解析する", () => {
     const body = "(索引: スコープ内 2 件のうち 0 件を提示)";
-    expect(parseMnemoraPromptBody(body)).toEqual({ totalInScope: 2, presented: 0, lines: [] });
+    expect(parseMnemoraPromptBody(body)).toEqual({
+      totalInScope: 2,
+      presented: 0,
+      lines: [],
+      hasOrderLegend: false,
+    });
   });
 
   it("記憶が2件ある本体を解析する", () => {
@@ -116,6 +121,26 @@ describe("parseMnemoraPromptBody", () => {
   it("索引行の提示件数と実際の行数が食い違えば例外", () => {
     const body = "- [由来:stated] [主題:なし] 本文1\n(索引: スコープ内 5 件のうち 2 件を提示)";
     expect(() => parseMnemoraPromptBody(body)).toThrow();
+  });
+
+  /**
+   * Issue #691 続き: `order-legend` 描画の凡例行を先頭で剥がしてから記憶行を
+   * 解析する（同じ穴を `isMnemoraShapedContent` 側でも塞いだ、この PR の本題）。
+   */
+  it("先頭が ORDER_LEGEND_LINE の本体は、その行を記憶行として解析せず hasOrderLegend=true を返す", () => {
+    const body =
+      "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)\n" +
+      "- [由来:stated] [主題:なし] [記録順:1] 本文1\n" +
+      "(索引: スコープ内 1 件のうち 1 件を提示)";
+    const parsed = parseMnemoraPromptBody(body);
+    expect(parsed.hasOrderLegend).toBe(true);
+    expect(parsed.lines).toHaveLength(1);
+    expect(parsed.lines[0]?.digest).toBe("本文1");
+  });
+
+  it("凡例行が無い本体は hasOrderLegend=false", () => {
+    const body = "- [由来:stated] [主題:なし] 本文1\n(索引: スコープ内 1 件のうち 1 件を提示)";
+    expect(parseMnemoraPromptBody(body).hasOrderLegend).toBe(false);
   });
 });
 
@@ -286,5 +311,42 @@ describe("loadAnswerTrialsMaterial(異常系。一時ファイルで作った合
 
   it("カセットが読めなければ例外", () => {
     expect(() => loadAnswerTrialsMaterial("/no/such/path/cassette.json")).toThrow();
+  });
+
+  /**
+   * Issue #691 続き: `order-legend` 描画（ADR 0309）の凡例行
+   * （`(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)`）で
+   * 始まる content を、`findMnemoraEntryContent` が「記憶経路のプロンプトではない」
+   * として黙って弾いていた穴（`isMnemoraShapedContent` の3条件目を足すまで、この
+   * PR の作業中に実際に踏んだ）。この歯は、その3条件目が無いと赤くなる。
+   */
+  it("凡例行（ORDER_LEGEND_LINE）で始まる content も記憶経路のプロンプトとして見つかる", () => {
+    // ⭐ loadAnswerTrialsMaterial は ANSWER_CASE_SET_DEV の全件を引き当てようとする
+    // （`buildCaseMaterial` が dev 6件それぞれに対して呼ばれる）——1件だけ用意すると
+    // 他の5件が「見つからない」で例外になる（このテストが検査したいのはそこではない
+    // ので、6件すべてに凡例行つきの content を用意する）。
+    const entries: Record<string, unknown> = {};
+    for (const [i, c] of ANSWER_CASE_SET_DEV.entries()) {
+      const content =
+        "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)\n" +
+        `- [由来:stated] [主題:なし] [記録順:1] 本文${i}\n` +
+        "(索引: スコープ内 1 件のうち 1 件を提示)" +
+        `\n\n質問: ${c.question}`;
+      entries[`e${i}`] = {
+        prompt: { system: ANSWER_SYSTEM_PROMPT, messages: [{ role: "user", content }] },
+        value: { content: "回答" },
+      };
+    }
+    const path = writeTempCassette(entries);
+    try {
+      const material = loadAnswerTrialsMaterial(path);
+      expect(material.cases).toHaveLength(ANSWER_CASE_SET_DEV.length);
+      for (const c of material.cases) {
+        expect(c.hasOrderLegend).toBe(true);
+        expect(c.rawContent.startsWith("(記録順:")).toBe(true);
+      }
+    } finally {
+      rmSync(path, { recursive: true, force: true });
+    }
   });
 });

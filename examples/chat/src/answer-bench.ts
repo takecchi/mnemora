@@ -30,6 +30,7 @@ import type { ContentPreservationResult } from "./answer-content-preservation.js
 import { checkContentPreserved } from "./answer-content-preservation.js";
 import type { AnswerJudgement } from "./answer-judge.js";
 import { judgeAnswer, reconcileVerdicts } from "./answer-judge.js";
+import type { IngestConversationOptions } from "./mnemora-path.js";
 import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
 import { naivePrompt } from "./naive-path.js";
 import type {
@@ -425,6 +426,12 @@ export async function runAnswerCase(
   judgeLLMProvider: CountingLLMProvider,
   answerCase: AnswerCase,
   tenantPrefix: string,
+  // Issue #691 続き（claimKey 評価用の opt-in）。**省略すれば、これまでと1バイトも
+  // 挙動が変わらない**——`ingestConversation` へそのまま転送するだけであり、
+  // このパラメータを渡さない既存の呼び出し（`cli.ts` の `recordAnswer`/`runAnswer`、
+  // `record-answer-retention-mutation.ts`、`answer-retention-mutation.ts`）は
+  // 1つも変更していない（`IngestConversationOptions` docstring参照）。
+  ingestOptions: IngestConversationOptions = {},
 ): Promise<AnswerCaseRunResult> {
   const embeddingSpace = embeddingSpaceSlug(embeddingProvider.space);
   const ctx: Ctx = { tenantId: `${tenantPrefix}-${embeddingSpace}-${answerCase.id}` };
@@ -433,7 +440,7 @@ export async function runAnswerCase(
 
   const beforeIngestLLM = llmProvider.snapshot();
   const beforeIngestEmb = embeddingProvider.snapshot();
-  await ingestConversation(runtime, ctx, conversation);
+  await ingestConversation(runtime, ctx, conversation, ingestOptions);
   const afterIngestLLM = llmProvider.snapshot();
 
   // 連想枠（`DEFAULT_MNEMORA_PATH_ASSOCIATION`）は既定のまま渡す——`queryRecall` の
@@ -547,6 +554,8 @@ export async function runAnswerBench(
   judgeLLMProvider: CountingLLMProvider,
   cases: readonly AnswerCase[],
   tenantPrefix: string,
+  // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない。
+  ingestOptions: IngestConversationOptions = {},
 ): Promise<AnswerCaseRunResult[]> {
   const results: AnswerCaseRunResult[] = [];
   for (const answerCase of cases) {
@@ -558,6 +567,7 @@ export async function runAnswerBench(
         judgeLLMProvider,
         answerCase,
         tenantPrefix,
+        ingestOptions,
       ),
     );
   }

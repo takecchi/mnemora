@@ -1,5 +1,7 @@
 import type {
+  ClaimKeyOptions,
   Ctx,
+  ObserveResult,
   RecallAssociationQuery,
   RecallBudget,
   RecalledMemory,
@@ -7,7 +9,7 @@ import type {
   Runtime,
 } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
-import type { Conversation } from "./scenario.js";
+import type { Conversation, ConversationTurn } from "./scenario.js";
 
 /**
  * `queryRecall` が既定で渡す `RecallQuery.association`（Issue #291 / ADR 0168）。
@@ -56,6 +58,27 @@ export function factStatementExternalId(): string {
 }
 
 /**
+ * {@link ingestConversation} の任意オプション（Issue #691 続き、claimKey 評価用の opt-in）。
+ *
+ * **既定（省略）では、これまでと1バイトも挙動が変わらない**——`claimKey` を省略すると
+ * `runtime.observe()` へ `claimKey` キー自体を渡さない（`undefined` を明示的に渡すのでは
+ * なく、キーを持たない）ので、`packages/core` 側は「claimKey opt-in を渡さなかった
+ * 呼び出し」として扱う（ADR 0320/0324 の既定 off の規約と同じ）。`onObserved` も
+ * 省略すれば呼ばれない。
+ */
+export interface IngestConversationOptions {
+  /** 渡すと `runtime.observe()` の各呼び出しへそのまま転送する（ADR 0320/0324）。 */
+  claimKey?: ClaimKeyOptions;
+  /**
+   * 診断用のフック。各ターンを observe() した直後、そのターンと `ObserveResult`
+   * （`claimKeyFailure`/`contestedDetection` を含む）を受け取る。**`answer-bench.ts` の
+   * 呼び出し経路を変えない**——`runAnswerCase`/`runAnswerBench` 経由で渡さなければ、
+   * このフックは一度も呼ばれない。
+   */
+  onObserved?: (turn: ConversationTurn, result: ObserveResult) => void;
+}
+
+/**
  * 会話全体を observe() し、tick() で embed を処理する（経路Bの取り込み段）。
  *
  * `externalId` に turn の連番を使う——同じ `conversation` に対してこの関数を
@@ -82,6 +105,7 @@ export async function ingestConversation(
   runtime: Runtime,
   ctx: Ctx,
   conversation: Conversation,
+  opts: IngestConversationOptions = {},
 ): Promise<void> {
   // Issue #719: `observed.memoryIds`(冪等な再送では空配列——`ObserveResult` の
   // docstring)を積算し、`drainEmbedTicks` に渡す——`compare`/`retrieval` が使う
@@ -94,8 +118,13 @@ export async function ingestConversation(
       text: turn.text,
       speaker: turn.role,
       externalId: externalIdForTurn(turn.index),
+      // ⭐ `opts.claimKey` を省略した呼び出しでは、このキー自体を渡さない
+      // （`claimKey: undefined` を明示するのとは違う——`IngestConversationOptions`
+      // docstring参照）。既存の呼び出し側の挙動を1バイトも変えないための規律。
+      ...(opts.claimKey !== undefined ? { claimKey: opts.claimKey } : {}),
     });
     expectedEmbedJobs += observed.memoryIds.length;
+    opts.onObserved?.(turn, observed);
   }
   await drainEmbedTicks(runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 }
