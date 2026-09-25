@@ -356,5 +356,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0329](./0329-claim-key-known-predicates-from-store.md) | `knownPredicates` を store の既存 predicate 一覧から動的に渡す — ADR 0326「採らなかった案B」を実装し、実測する（Issue #691 続き） | 採用 (2026-09) |
 | [0330](./0330-openai-embedding-live-conformance-and-determinism-measured.md) | 実 API の `OpenAIEmbeddingProvider` に適合テストを当て、決定性を測った——無条件7本は緑、単独入力は一致、3件バッチは一致しない（Issue #142 ①、測っただけ。宣言は変えない） | **提案 (2026-09)** |
 | [0331](./0331-extension-creation-shared-advisory-lock.md) | 拡張を作る段だけを、schema に依らない共有 advisory lock で直列化する | 採用 (2026-09) |
+| [0332](./0332-association-default-100k-measurement.md) | 連想枠の既定 on を10万行級で測る — 62件/1万行/10万行の実測記録（Issue #337、判定はしない） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
