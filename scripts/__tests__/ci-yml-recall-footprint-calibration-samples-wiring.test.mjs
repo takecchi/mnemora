@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
  * **`.github/workflows/ci.yml` の `example-chat` ジョブが、実際に
  * `recall-footprint-calibration-samples` サブコマンドを実行し、その出力を
  * `scripts/recall-footprint-calibration-samples-summary.mjs` へ渡し、artifact として
- * アップロードしていること（Issue #340 フォローアップ、ADR 0307）。**
+ * アップロードしていること（Issue #340 フォローアップ、ADR 0310）。**
  *
  * ⚠ **これは `recall-footprint-calibration-samples-summary.test.mjs`/`-lib.test.mjs`
  * の重複ではない**（`ci-yml-compare-wiring.test.mjs` の docstring と同じ理由）。
@@ -23,7 +23,7 @@ import { describe, expect, it } from "vitest";
  * オーナー専権）。壊れたときは「配線が変わった」か「書き方が変わった」かを見て、
  * 配線が変わっていないなら取り出し方のほうを直すこと（歯を消さないこと）。
  *
- * ⚠ **いまのところ `--baseline` は渡していない**（ADR 0307 §2 — この bench の
+ * ⚠ **いまのところ `--baseline` は渡していない**（ADR 0310 §2 — この bench の
  * 基準値ファイルはまだ CI artifact での2回以上一致を経ていない）。この歯は
  * 「まだ渡していない」ことを固定する——`--baseline` を足す PR が出たら、この歯を
  * `ci-yml-time-term-wiring.test.mjs` が ADR 0121 決定5 で辿った道と同じように、
@@ -189,7 +189,7 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
     expect(summaryStepMeasuredPath()).toBe(benchStepJsonPath());
   });
 
-  it("いまのところ --baseline は渡していない(ADR 0307 §2、基準値ファイルがまだ無い)", () => {
+  it("いまのところ --baseline は渡していない(ADR 0310 §2、基準値ファイルがまだ無い)", () => {
     expect(summaryStep?.run.includes("--baseline")).toBe(false);
   });
 

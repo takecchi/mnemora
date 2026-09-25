@@ -2,7 +2,7 @@ import type { CalibrationSampleRow } from "./recall-footprint-calibration-sample
 import type { ProviderMode } from "./providers.js";
 
 /**
- * `recall-footprint-calibration-samples`（Issue #340 フォローアップ、ADR 0307）の
+ * `recall-footprint-calibration-samples`（Issue #340 フォローアップ、ADR 0310）の
  * 機械可読な出力口。
  *
  * `./compare-json.ts`（ADR 0133）・`./time-term-json.ts`（ADR 0058/#217）と同じ分担:
@@ -18,7 +18,7 @@ import type { ProviderMode } from "./providers.js";
  *
  * ⚠ **これは `compare-baseline.json`（⭐門、ADR 0133）とは別物である。**
  * `examples/chat/README.md`「`recall-footprint-calibration-samples.dev.json`」節・
- * ADR 0307 §2 の決定どおり、この出力を `compare-baseline.json` の `rows` へ混ぜない
+ * ADR 0310 §2 の決定どおり、この出力を `compare-baseline.json` の `rows` へ混ぜない
  * ——別ファイルとして CI artifact 化し、`compare-baseline.json` と同じ手順
  * （CI artifact・2回以上一致）で別途基準値へ昇格させる。
  *

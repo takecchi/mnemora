@@ -7,14 +7,14 @@ import { afterEach, describe, expect, it } from "vitest";
 
 /**
  * `scripts/recall-footprint-calibration-samples-summary.mjs` の歯(Issue #340
- * フォローアップ、ADR 0307)。**本物のスクリプトを子プロセスとして実際に起動する**
+ * フォローアップ、ADR 0310)。**本物のスクリプトを子プロセスとして実際に起動する**
  * (`scripts/__tests__/consolidation-cost-summary.test.mjs` と同じ判断)——
  * `recall-footprint-calibration-samples-summary-lib.test.mjs` は純関数だけを見ており、
  * 「CLI としての配線」(引数の読み方・ファイル I/O・exit code)はここでしか測れない。
  *
  * DB は要求しない——このスクリプトは JSON ファイル1〜2個を読むだけである。
  *
- * ⛔ この bench の基準値ファイルはまだ存在しない(ADR 0307 §2)。ここで使う
+ * ⛔ この bench の基準値ファイルはまだ存在しない(ADR 0310 §2)。ここで使う
  * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
  */
 
@@ -87,7 +87,7 @@ describe("recall-footprint-calibration-samples-summary.mjs(子プロセスで起
     expect(result.stdout).toContain("✅ 基準値と一致");
   });
 
-  it("🔴 基準値と相違するときも exit 0(門ではないことをここで固定する。ADR 0307 §2)", () => {
+  it("🔴 基準値と相違するときも exit 0(門ではないことをここで固定する。ADR 0310 §2)", () => {
     const measuredPath = writeJson(
       "measured.json",
       makeMeasured({ rows: [makeRow({ mnemoraChars: 999 })] }),

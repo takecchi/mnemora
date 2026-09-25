@@ -1,4 +1,4 @@
-# ADR 0307: recall-footprint 較正の補助標本は作れる(実 API 不要)が、compare-baseline.json への昇格には CI artifact が要る — 別ファイルに留めた
+# ADR 0310: recall-footprint 較正の補助標本は作れる(実 API 不要)が、compare-baseline.json への昇格には CI artifact が要る — 別ファイルに留めた
 
 - **状態**: 未決 (2026-09-25)
 - **日付**: 2026-09-25

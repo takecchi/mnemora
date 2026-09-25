@@ -444,7 +444,7 @@ ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化
 ADR 0119/0121/0133）を経ていない**——ファイル自身の `_readme`/`provenance` がそれを名乗る。
 検査は `src/__tests__/recall-footprint-calibration-samples.test.ts`。詳細と、
 `compare-baseline.json` へ昇格させる条件は
-[ADR 0307](../../docs/decisions/0307-recall-footprint-calibration-samples-need-ci-sourcing.md)。
+[ADR 0310](../../docs/decisions/0310-recall-footprint-calibration-samples-need-ci-sourcing.md)。
 
 #### CI artifact `recall-footprint-calibration-samples`（Issue #340 フォローアップ）
 
@@ -454,7 +454,7 @@ ADR 0119/0121/0133）を経ていない**——ファイル自身の `_readme`/`
 アップロードする**（`.github/workflows/ci.yml`、`MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON`）。
 この artifact は `.dev.json` と同じ `CALIBRATION_SAMPLE_DESIGN`（8点）から生成され、
 `rawIndex`（生の `IndexBand`）まで含む。**`compare-baseline.json` の `rows` には混ぜない**
-——ADR 0307 §2 が決めた「別ファイル」の方針を、CI-sourcing できる形にしただけである
+——ADR 0310 §2 が決めた「別ファイル」の方針を、CI-sourcing できる形にしただけである
 （`rowCount`/12行を前提にした既存の歯・この README の表が壊れないようにするため）。
 
 ⚠ **この artifact 自身はまだ⭐門でも基準値でもない。**Job Summary への要約

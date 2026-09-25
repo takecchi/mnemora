@@ -24,11 +24,11 @@ import {
  * 該当コメント）。この歯は、**その主張を実際に自分で計算し直して検算する**
  * ——同梱の既定プロファイルを信用せず、`calibrateRecallFootprint` を実際に呼ぶ。
  *
- * ## ⭐ hold-in/hold-out の分け方: `bandEntryCount === 0`（Issue #340 フォローアップ、ADR 0307）
+ * ## ⭐ hold-in/hold-out の分け方: `bandEntryCount === 0`（Issue #340 フォローアップ、ADR 0310）
  *
  * 旧い分け方 `totalInScope <= DEFAULT_RECALL_LIMIT` は、「目次帯が空である」ことの
  * **代理指標**だった——`queryRecall`（`mnemora-path.ts`）が `limit` を明示的に渡さず、
- * 既定 `DEFAULT_RECALL_LIMIT` のまま呼ぶ限り両者は常に一致する。ADR 0307 §2 が指摘した
+ * 既定 `DEFAULT_RECALL_LIMIT` のまま呼ぶ限り両者は常に一致する。ADR 0310 §2 が指摘した
  * とおり、`limit` を明示的に上げる呼び出し（`recall-footprint-calibration-samples.ts`）が
  * 増えると、この一致は構造的に崩れる（`totalInScope=14` でも `limit=20` なら帯は空）。
  * ⟹ 代理指標ではなく、帯が実際に空かどうか（`RecallResult.index.digestBand?.length ?? 0
@@ -50,7 +50,7 @@ interface BaselineRow {
   mnemoraShareOfNaiveChars: number;
   returnedCount: number;
   /**
-   * `ComparisonRow.bandEntryCount` — Issue #340 フォローアップ、ADR 0307。
+   * `ComparisonRow.bandEntryCount` — Issue #340 フォローアップ、ADR 0310。
    * **`compare-baseline.json` はまだこの欄を持たない**（次の段でCI artifact経由で
    * 更新される）。ここで型に持たせているのは、更新された基準値を読めるようにするため
    * であり、いまの基準値では常に `undefined` になる。
@@ -152,7 +152,7 @@ function bandEntryCountOrThrow(row: BaselineRow): number {
       `compare-baseline.json の turnCount=${row.turnCount} 行に bandEntryCount が無い。` +
         "hold-in/hold-out の分け方を bandEntryCount === 0 へ切り替えるには、先に基準値を" +
         "CI artifact 経由で更新すること(ADR 0121/0133 の手順、Issue #340 フォローアップ・" +
-        "ADR 0307)。旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)に一時的に戻すには、" +
+        "ADR 0310)。旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)に一時的に戻すには、" +
         "この分け方の切り替えコミットを revert すること。",
     );
   }
@@ -175,7 +175,7 @@ describe("compare-baseline.json — 前提（行数が変わっていないこ�
 });
 
 /**
- * ⭐ Issue #340 フォローアップ(ADR 0307)が明示的に要求した歯:
+ * ⭐ Issue #340 フォローアップ(ADR 0310)が明示的に要求した歯:
  * 「既存の12行について、旧い条件（`totalInScope <= DEFAULT_RECALL_LIMIT`）と
  * 新しい条件（`bandEntryCount === 0`）の分け方が1行も違わない」ことを検算する。
  *
@@ -183,7 +183,7 @@ describe("compare-baseline.json — 前提（行数が変わっていないこ�
  * が無ければこのファイル自体が module 読み込み時点で例外を投げるため、この
  * describe に実際に到達するのは、基準値が更新された後だけである。
  */
-describe("hold-in/hold-out の分け方の移行 — bandEntryCount === 0 と旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)が1行も違わない（Issue #340 フォローアップ、ADR 0307）", () => {
+describe("hold-in/hold-out の分け方の移行 — bandEntryCount === 0 と旧条件(totalInScope <= DEFAULT_RECALL_LIMIT)が1行も違わない（Issue #340 フォローアップ、ADR 0310）", () => {
   it.each(rows)(
     "turnCount=$turnCount: bandEntryCount===0 と totalInScope<=DEFAULT_RECALL_LIMIT の判定が一致する",
     (row) => {
