@@ -23,7 +23,9 @@ import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
  * `eligible` が空なら `{}`（呼び出し側は必ず1件以上を渡す契約だが、空配列に対しても
  * 安全に `{}` を返す）。
  */
-export function intersectAttributes(eligible: ReadonlyArray<Pick<Memory, "attributes">>): Attributes {
+export function intersectAttributes(
+  eligible: ReadonlyArray<Pick<Memory, "attributes">>,
+): Attributes {
   if (eligible.length === 0) {
     return {};
   }

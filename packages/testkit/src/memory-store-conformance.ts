@@ -860,7 +860,10 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
 
       const created = await store.createObservation(
         ctx,
-        buildNewObservationFixture({ tenantId: "tenant-1", attributes: { visibility: "internal" } }),
+        buildNewObservationFixture({
+          tenantId: "tenant-1",
+          attributes: { visibility: "internal" },
+        }),
       );
       expect(created.attributes).toEqual({ visibility: "internal" });
 

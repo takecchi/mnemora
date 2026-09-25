@@ -487,7 +487,9 @@ export async function runRecall(
   const survivesAttributesFilter = (memory: Memory): boolean => {
     if (scope.attributes === undefined) return true;
     const memoryAttributes = memory.attributes ?? {};
-    return Object.entries(scope.attributes).every(([key, value]) => memoryAttributes[key] === value);
+    return Object.entries(scope.attributes).every(
+      ([key, value]) => memoryAttributes[key] === value,
+    );
   };
 
   /**
