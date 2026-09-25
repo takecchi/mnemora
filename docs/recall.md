@@ -807,6 +807,104 @@ interface TokenCounter {
 名前で誤解を潰しておかないと、次に誰かが「予算なのに効かないのは変だ」と言って
 目次帯を予算に含めにいく。**そのとき止めるのは、名前ではなく上に書いた理由である。**
 
+### 目次帯の量を把握し、調整する（2026-09 追記。[Issue #413](https://github.com/takecchi/mnemora/issues/413)）
+
+**帯は、件数上限（`RecallQuery.digestBandLimit`。既定 `DEFAULT_DIGEST_BAND_LIMIT`）と
+帯全体の文字数上限（`DIGEST_BAND_MAX_CHARS`。呼び出し側からは変えられない）の
+どちらか先に当たったほうで切れる**（`packDigestBand`、`packages/core/src/digest-band.ts`）。
+
+帯1件の内部コストは
+
+```
+DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + min(digest長, DIGEST_BAND_MAX_ENTRY_CHARS)
+  + DIGEST_BAND_ENTRY_SEPARATOR_CHARS
+```
+
+（各定数の値そのものの正本は `packages/core/src/digest-band.ts` / `packages/core/src/recall.ts`
+であり、ここには写さない——「数を道具と生成物に焼き込まない」規律、`AGENTS.md`）。
+
+⟹ **digest が短ければ件数上限が先に効き、digest が長ければ文字数上限が先に効く。** どちらが
+実際に効いたかは `IndexBand.digestBandCoverage.limitedBy`（`"entry_limit"` / `"char_budget"` /
+`"both"`）で読める。**`digestBandLimit` を下げても、帯が既に文字数上限で飽和している場合は
+何も変わらない**——`digestBandLimit` を「文字数上限 ÷ 帯1件のコスト」未満にして、初めて
+件数上限のほうが先に効くようになる。
+
+**自分の recall で帯がどれだけ占有しているかは `RecallUsage.indexChars / RecallUsage.chars`
+で読める。**`budget`（`RecallBudget`）ではこの分は削れない——上の「目次帯は予算の対象外である」
+のとおりである。
+
+#### 【実測 2026-09-21・合成コーパス】digest 長ごとの占有率と飽和件数
+
+[Issue #413](https://github.com/takecchi/mnemora/issues/413) の 2026-09-21 のコメントが、
+合成コーパス（PostgreSQL 17.11 + pgvector 0.8.0、`@mnemora/local-embedding` 既定、
+`SUBJECT_COUNT=5`、mulberry32 による決定的生成、各点 n=3）で digest 長を3水準
+（short ≈15字 / medium ≈60字 / long ≈150字→120字に切詰め）に振って測っている。
+
+**occupancy（`byTier.index / chars`、テナント全体・`limit` 既定10・`digestBandLimit` 未指定。
+元の14点から抜粋）:**
+
+| N（subject あたりの記憶件数） | short(≈15字) | medium(≈60字) | long(≈150字) |
+|---:|---:|---:|---:|
+| 5 | 92.1% | 81.8% | 71.5% |
+| 10 | 96.1% | 89.9% | 77.4% |
+| 20 | 96.7% | 90.3% | 78.1% |
+| 50 | 97.2% | 90.9% | 78.3% |
+| 100 | 97.4% | 90.7% | 78.8% |
+
+⟹ 本 issue が報告した **90.7%** は、テナント全体・**medium(≈60字)** 相当の条件でのみ
+再現する。short なら約97%、long なら約78%——**90.7% は「digest≈60字・テナント全体」という
+条件付きの値であり、一般則ではない。**
+
+**`DEFAULT_DIGEST_BAND_LIMIT` が実際に発火するかどうか（帯1件のコストと飽和件数の実測）:**
+
+| digest 水準 | 帯1件のコスト（実測） | 実測の飽和件数 | 先に効く上限 |
+|---|---:|---:|---|
+| short (≈15字) | 約79字 | 50件 | **`entry_limit`**（＝既定の `digestBandLimit`） |
+| medium (≈60字) | 約124字 | 31〜32件 | **`char_budget`**（＝`DIGEST_BAND_MAX_CHARS`） |
+| long (≈150字→120字) | 約184字 | 21件 | **`char_budget`** |
+
+⟹ **既定の `digestBandLimit`（`DEFAULT_DIGEST_BAND_LIMIT`）が実際に効くのは、digest が
+短い（実測では約15字程度）ときだけである。** digest がそれより長いテナントでは、
+`digestBandLimit` を既定から動かしても帯は縮まない——先に `DIGEST_BAND_MAX_CHARS` に
+当たっているためである。
+
+**既定 50 から下げたとき、どの水準に効くか（同じ測定からの帰結）:**
+
+| 50 → | short | medium | long |
+|---|---|---|---|
+| 40 | 50→40件に縮む | 変化なし（31件で頭打ち） | 変化なし（21件） |
+| 25 | 50→25件に縮む | 31→25件に縮む | 変化なし（21件） |
+| 20 | 50→20件に縮む | 31→20件に縮む | 21→20件に縮む |
+
+⚠ **実運用の subject あたり記憶件数 N も digest 長も不明である**（オーナー回答
+2026-09-24。実運用のサーバーが無く、測りようがない——同じ回答は
+[ADR 0310](./decisions/0310-subject-crossing-consolidate-frequency-measured.md) /
+[ADR 0311](./decisions/0311-activity-clock-boundary-measured-soft-and-hard.md) にも別件で
+記録されている）。⟹ **上の表は合成コーパスでの曲線であり、この曲線に実運用の値を
+代入することはまだできない。**
+
+#### `recall()` の呼び出し例
+
+```ts
+const recalled = await runtime.recall(ctx, {
+  content: "...",
+  digestBandLimit: 10, // 既定 50 から下げる。0 は渡せない（1 が下限）
+});
+
+// 帯が実際にどれだけ占有しているか
+const occupancy = recalled.usage.indexChars / recalled.usage.chars;
+// どちらの上限で切れたか（"entry_limit" / "char_budget" / "both" / 未定義）
+const limitedBy = recalled.index.digestBandCoverage?.limitedBy;
+```
+
+#### 確かめていないこと
+
+- **実運用の N・digest 長**（上記オーナー回答のとおり）。
+- 上の表は合成コーパス（[Issue #413](https://github.com/takecchi/mnemora/issues/413) の
+  2026-09-21 コメント）の測定であり、`subjectId` で絞った recall・多テナント同居・
+  実運用のクエリと digest の意味的近さは別の曲線になりうる（同コメントの
+  「確かめていないこと」参照）。
+
 ### ⚠ `share` は「予算の何割を使ったか」であり、「全体でいくらか」ではない（2026-09 訂正）
 
 当初の実装は `share` の分子に**目次帯を含めていた**。目次帯は予算の対象外なので、

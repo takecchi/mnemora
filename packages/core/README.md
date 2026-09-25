@@ -172,6 +172,14 @@ const scoped = { tenantId: "tenant-1", subjectId: "user-1" }; // ⟹ この subj
 [docs/recall.md](../../docs/recall.md) §5 の古い表（100,000行で 45.8ms）との差は、
 同 §5「**`subjectId` を省略すると何が起きるか**」を見ること。
 
+## ⚠ 目次帯（`digestBandLimit`）は既定で返却量の大半を占めうる
+
+**帯は `digestBandLimit`（既定 `DEFAULT_DIGEST_BAND_LIMIT`）と帯全体の文字数上限
+（呼び出し側からは変えられない）の、どちらか先に当たったほうで切れる。** どちらが先に
+当たるかは digest の長さ次第で、`digestBandLimit` を下げても縮まないことがある。
+実測・調整のしかたは [docs/recall.md](../../docs/recall.md) §6「目次帯の量を把握し、
+調整する」（[Issue #413](https://github.com/takecchi/mnemora/issues/413)）を見ること。
+
 ## 単体で呼べる純関数（動く最小の例）
 
 一方で、以下は `@mnemora/core` だけで完結して**そのまま実行できる**——
