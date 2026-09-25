@@ -718,6 +718,292 @@ async function buildMeasurementReport(
 }
 
 // ---------------------------------------------------------------------------
+// repeat-ef モード(マネージャー追加依頼、2026-09-26) —— 以下の3点を追加で測る。
+//
+// 1. M0だけの追加反復(I4〜I8、filler順はforward固定)。ADR 0332の1万行(A)では
+//    独立ingestのaRawが0,9,1,0と揺れた——本ファイルのmainモード(I1〜I3)では
+//    3回とも0/12でほぼ揺れなかったため、反復数を増やして分布を見る。
+// 2. I4の索引をそのまま(REINDEXしない)使い、hnsw.ef_search=40/120/400/1000を
+//    本番経路(PostgresVectorStore.search、ADR 0284のrelaxed_order込み)で掃引。
+//    aRaw・到達(on-3/on-10)・aRawに入ったときの順位を見る——「取りこぼしが
+//    探索幅の問題か(efで戻るか)、ef=1000でも戻らないか(グラフ到達性の問題を
+//    示唆)」を分けるため。EXPLAINでHNSW使用を確認する。
+// 3. (余力があれば)I4・ef=40の上で、hnsw.iterative_scan=off と relaxed_order
+//    でaRawが変わるか。**production経路(PostgresVectorStore.search)は
+//    ADR 0284によりrelaxed_orderを無条件にSET LOCALするため、iterative_scan=off
+//    はproduction経路からは再現できない**——ここだけは生SQL(EXACT測定と同じ
+//    `pool.connect()`→`BEGIN`→`SET LOCAL`→`SELECT`→`COMMIT`の形)で、
+//    LIMIT=kPrime・索引は使わせたまま(enable_indexscanは弄らない)、
+//    `hnsw.iterative_scan`の値だけを変えて生ANN候補の集合を直接比べる。
+// ---------------------------------------------------------------------------
+
+/** `association-scale-bench.ts` の `setEfSearchAndReconnect` と同じ形の複製。 */
+async function setEfSearchAndReconnect(
+  databaseUrl: string,
+  databaseName: string,
+  ef: number,
+  cache: FileEmbeddingCache,
+): Promise<InstrumentedHandle> {
+  assertSafeIdentifier(databaseName);
+  const alterHandle = await createInstrumentedRuntime(databaseUrl, cache);
+  await alterHandle.pool.query(`ALTER DATABASE ${databaseName} SET hnsw.ef_search = ${ef}`);
+  await alterHandle.close();
+  return createInstrumentedRuntime(databaseUrl, cache);
+}
+
+interface EfProbeResult {
+  probeId: string;
+  aRaw: boolean;
+  aRawRank: number | null;
+  reachedOn3: boolean;
+  reachedOn10: boolean;
+}
+
+/** ef_search掃引の1点ぶん —— 本番経路(runtime.recall、spy)でaRaw/rank/到達(on-3/on-10)を測る。 */
+async function measureEfPoint(
+  handle: InstrumentedHandle,
+  tenantId: string,
+  anchorIds: ReadonlyMap<string, MemoryId>,
+  goldIds: ReadonlyMap<string, MemoryId>,
+): Promise<EfProbeResult[]> {
+  const ctx: Ctx = { tenantId };
+  const out: EfProbeResult[] = [];
+  for (const probe of ASSOCIATION_PROBES) {
+    const anchorId = anchorIds.get(probe.id)!;
+    const goldId = goldIds.get(probe.id)!;
+
+    handle.spy.reset();
+    await handle.runtime.recall(ctx, { text: probe.query });
+    const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
+    const rawHits = searchCalls[0]?.hits ?? [];
+    const idx = rawHits.findIndex((h) => h.memoryId === anchorId);
+    const aRaw = idx !== -1;
+
+    handle.spy.reset();
+    const on3 = await handle.runtime.recall(ctx, {
+      text: probe.query,
+      association: { maxCount: 3 },
+    });
+    const reachedOn3 = on3.memories.some(
+      (m) => m.memoryId === goldId && m.retrievedVia === "association",
+    );
+
+    handle.spy.reset();
+    const on10 = await handle.runtime.recall(ctx, {
+      text: probe.query,
+      association: { maxCount: 10 },
+    });
+    const reachedOn10 = on10.memories.some(
+      (m) => m.memoryId === goldId && m.retrievedVia === "association",
+    );
+
+    out.push({
+      probeId: probe.id,
+      aRaw,
+      aRawRank: aRaw ? idx + 1 : null,
+      reachedOn3,
+      reachedOn10,
+    });
+  }
+  return out;
+}
+
+interface EfSweepPoint {
+  ef: number;
+  efSearchShown: string;
+  probes: EfProbeResult[];
+  explainQuery: ExplainCapture;
+}
+
+/** 生ANN候補(memory_id, distance)をLIMIT件、指定したsetupSqlの下で1本の接続内で撮る。 */
+async function rawAnnHits(
+  pool: PostgresClient["pool"],
+  table: string,
+  tenantId: string,
+  vector: number[],
+  limit: number,
+  setupSql: string[],
+): Promise<{ memoryId: string; distance: number }[]> {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    for (const s of setupSql) {
+      await client.query(s);
+    }
+    const { rows } = await client.query(
+      `SELECT e.memory_id AS memory_id, (e.embedding <=> $1::vector)::float8 AS distance
+       FROM ${table} e
+       JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+       WHERE e.tenant_id = $2
+       ORDER BY e.embedding <=> $1::vector, m.recorded_at DESC, e.memory_id
+       LIMIT $3`,
+      [toVectorLiteral(vector), tenantId, limit],
+    );
+    await client.query("COMMIT");
+    return rows.map((r: { memory_id: string; distance: number }) => ({
+      memoryId: r.memory_id,
+      distance: Number(r.distance),
+    }));
+  } finally {
+    client.release();
+  }
+}
+
+interface IterativeScanComparisonRow {
+  probeId: string;
+  aRawRelaxedOrder: boolean;
+  aRawOff: boolean;
+}
+
+/**
+ * I4・ef=40の上で、`hnsw.iterative_scan`を`relaxed_order`(production既定)と`off`の
+ * 2通りに変えたときの生ANN(kPrime=40)候補にanchorが入るかを比べる。**索引は
+ * 使わせたまま**(enable_indexscanには触れない)——変えるのは`iterative_scan`だけ。
+ */
+async function runIterativeScanComparison(
+  pool: PostgresClient["pool"],
+  space: EmbeddingSpaceId,
+  tenantId: string,
+  anchorIds: ReadonlyMap<string, MemoryId>,
+  cachingEmbeddingProvider: CachingEmbeddingProvider,
+): Promise<IterativeScanComparisonRow[]> {
+  const table = embeddingSpaceTableName(space);
+  assertSafeIdentifier(table);
+  const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
+  const out: IterativeScanComparisonRow[] = [];
+  for (const probe of ASSOCIATION_PROBES) {
+    const anchorId = anchorIds.get(probe.id)!;
+    const vector = await cachedVectorOrThrow(cachingEmbeddingProvider, probe.query);
+    const relaxed = await rawAnnHits(pool, table, tenantId, vector, kPrime, [
+      "SET LOCAL hnsw.iterative_scan = relaxed_order",
+    ]);
+    const off = await rawAnnHits(pool, table, tenantId, vector, kPrime, [
+      "SET LOCAL hnsw.iterative_scan = off",
+    ]);
+    out.push({
+      probeId: probe.id,
+      aRawRelaxedOrder: relaxed.some((r) => r.memoryId === anchorId),
+      aRawOff: off.some((r) => r.memoryId === anchorId),
+    });
+  }
+  return out;
+}
+
+interface RepeatReport {
+  label: string;
+  ingestSeconds: number;
+  drainSeconds: number;
+  m0: MeasurementReport;
+}
+
+interface RepeatEfReport {
+  repeats: RepeatReport[];
+  efSweep: EfSweepPoint[];
+  iterativeScanComparison: IterativeScanComparisonRow[];
+}
+
+const EF_SWEEP_VALUES = [40, 120, 400, 1000];
+
+async function runRepeatEfMode(
+  databaseUrl: string,
+  databaseName: string,
+  scale: number,
+  cache: FileEmbeddingCache,
+): Promise<RepeatEfReport> {
+  const tenantId = "nondet-repeat";
+  const labels = ["I4", "I5", "I6", "I7", "I8"];
+  const repeats: RepeatReport[] = [];
+  let efSweep: EfSweepPoint[] = [];
+  let iterativeScanComparison: IterativeScanComparisonRow[] = [];
+
+  for (const label of labels) {
+    console.log(`\n########## ${label} (fillerOrder=forward, repeat-efモード) ##########`);
+    const corpus = buildCorpus(scale, "forward");
+    const handle = await createInstrumentedRuntime(databaseUrl, cache);
+    await truncateAll(handle.pool);
+    const ingest = await ingestCorpus(handle, tenantId, corpus);
+    console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+    const space = handle.cachingEmbeddingProvider.space;
+
+    const m0 = await buildMeasurementReport(
+      handle,
+      tenantId,
+      space,
+      ingest.anchorIds,
+      ingest.goldIds,
+      "M0",
+      ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+    );
+    console.log(summarizeMeasurement("M0", m0.probes));
+    repeats.push({ label, ingestSeconds: ingest.ingestSeconds, drainSeconds: ingest.drainSeconds, m0 });
+
+    if (label === "I4") {
+      // --- I4の索引そのまま(REINDEXしない)でef_search掃引 ---
+      const table = embeddingSpaceTableName(space);
+      assertSafeIdentifier(table);
+      for (const ef of EF_SWEEP_VALUES) {
+        const efHandle = await setEfSearchAndReconnect(databaseUrl, databaseName, ef, cache);
+        const check = await efHandle.pool.query("show hnsw.ef_search");
+        const efSearchShown = JSON.stringify(check.rows);
+        const probes = await measureEfPoint(efHandle, tenantId, ingest.anchorIds, ingest.goldIds);
+        const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
+        const repProbe = ASSOCIATION_PROBES[0]!;
+        const queryVector = await cachedVectorOrThrow(efHandle.cachingEmbeddingProvider, repProbe.query);
+        const explainQuery = await captureExplainAt(
+          efHandle.pool,
+          table,
+          tenantId,
+          `ef=${ef}`,
+          queryVector,
+          kPrime,
+          ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
+        );
+        const aRawCount = probes.filter((p) => p.aRaw).length;
+        const on3Count = probes.filter((p) => p.reachedOn3).length;
+        const on10Count = probes.filter((p) => p.reachedOn10).length;
+        console.log(
+          `  [efSweep ef=${ef}] ef_search実測=${efSearchShown} aRaw=${aRawCount}/12 ` +
+            `到達on-3=${on3Count}/12 到達on-10=${on10Count}/12 ` +
+            `hnsw=${explainQuery.hnswUsedHeuristic} seq=${explainQuery.seqScanHeuristic}`,
+        );
+        for (const p of probes) {
+          console.log(`    [ef=${ef}] ${p.probeId}: aRaw=${p.aRaw} rank=${p.aRawRank} on3=${p.reachedOn3} on10=${p.reachedOn10}`);
+        }
+        efSweep.push({ ef, efSearchShown, probes, explainQuery });
+        await efHandle.close();
+      }
+
+      // --- 余力: I4・ef=40の上でiterative_scan=off vs relaxed_orderの比較(生SQL) ---
+      const ef40Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 40, cache);
+      iterativeScanComparison = await runIterativeScanComparison(
+        ef40Handle.pool,
+        space,
+        tenantId,
+        ingest.anchorIds,
+        ef40Handle.cachingEmbeddingProvider,
+      );
+      const diffCount = iterativeScanComparison.filter(
+        (r) => r.aRawRelaxedOrder !== r.aRawOff,
+      ).length;
+      console.log(`  [iterativeScan比較] relaxed_order vs off で差が出たprobe: ${diffCount}/12`);
+      for (const r of iterativeScanComparison) {
+        console.log(`    ${r.probeId}: relaxed_order=${r.aRawRelaxedOrder} off=${r.aRawOff}`);
+      }
+      await ef40Handle.close();
+
+      // ef_searchをDB既定へ戻す(後続I5〜I8の測定に漏れないように)。
+      const resetHandle = await createInstrumentedRuntime(databaseUrl, cache);
+      await resetHandle.pool.query(`ALTER DATABASE ${databaseName} RESET hnsw.ef_search`);
+      await resetHandle.close();
+    }
+
+    await handle.close();
+  }
+
+  return { repeats, efSweep, iterativeScanComparison };
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -726,13 +1012,15 @@ async function main(): Promise<void> {
   requireGatesOrThrow();
 
   const databaseUrl = requireDatabaseUrl();
+  const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
   const scale = parseIntEnv("MNEMORA_ASSOC_NONDET_SCALE", 10000);
   const cacheDir =
     process.env.MNEMORA_ASSOC_NONDET_EMBED_CACHE_DIR ?? "/tmp/mnemora-assoc-nondet-embcache";
   const jsonPath = process.env.MNEMORA_ASSOC_NONDET_JSON;
   const tenantId = "nondet";
+  const mode = process.env.MNEMORA_ASSOC_NONDET_MODE === "repeat-ef" ? "repeat-ef" : "main";
 
-  console.log(`scale=${scale} cacheDir=${cacheDir}`);
+  console.log(`scale=${scale} cacheDir=${cacheDir} mode=${mode}`);
 
   const { embeddingProvider: realEmbedding } = createProviders(process.env, {});
   if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
@@ -751,8 +1039,8 @@ async function main(): Promise<void> {
 
   const cache = new FileEmbeddingCache(cacheDir, realEmbedding.space);
 
-  // precompute: I1/I2/I3 は filler の「挿入順」だけが違い、テキスト集合自体は同じ
-  // ——一度の precompute で全 ingest ぶんのキャッシュが埋まる。
+  // precompute: I1/I2/I3(/I4〜I8) は filler の「挿入順」だけが違い、テキスト集合自体は
+  // 同じ——一度の precompute で全 ingest ぶんのキャッシュが埋まる。
   const forwardCorpus = buildCorpus(scale, "forward");
   const allTexts = [
     ...forwardCorpus.base.map((u) => u.text),
@@ -767,6 +1055,17 @@ async function main(): Promise<void> {
     `  precompute: unique=${precompute.uniqueTextCount} hit=${precompute.hitCount} ` +
       `miss=${precompute.missCount} ms=${precompute.ms.toFixed(0)}`,
   );
+
+  if (mode === "repeat-ef") {
+    const report = await runRepeatEfMode(databaseUrl, databaseName, scale, cache);
+    cache.close();
+    if (jsonPath) {
+      mkdirSync(dirname(jsonPath), { recursive: true });
+      writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
+      console.log(`\n[association-scale-nondeterminism] repeat-efモードの結果を書き出した: ${jsonPath}`);
+    }
+    return;
+  }
 
   const plans: { label: string; fillerOrder: FillerOrder }[] = [
     { label: "I1", fillerOrder: "forward" },
