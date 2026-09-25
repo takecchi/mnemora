@@ -1462,6 +1462,28 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
 }
 
 /**
+ * 段3.5（連想）が実際に何件・どの memoryId をアンカーとして `getVectors` へ渡したかを記録する
+ * spy（Issue #377 / ADR 0303 の歯用）。
+ *
+ * `packages/core` が `getVectors` を呼ぶのは段3.5のこの1箇所だけである
+ * （[ADR 0188](../../../../docs/decisions/0188-association-over-limit-omission.md) 等が
+ * 前提にしている実測と同じ事実）。⟹ この spy が記録した呼び出しの引数が、
+ * そのまま「実際に起点になったアンカー」の実測になる——[PR #430](https://github.com/takecchi/mnemora/pull/430) が
+ * 本物の Postgres に対して手動で数えたのと同じ量を、擬似実装の上で歯として固定する。
+ */
+export function withGetVectorsSpy(store: FakeVectorStore, calls: MemoryId[][]): VectorStore {
+  return {
+    upsert: (ctx, space, memoryId, vector) => store.upsert(ctx, space, memoryId, vector),
+    search: (ctx, space, query, opts) => store.search(ctx, space, query, opts),
+    delete: (ctx, space, memoryId) => store.delete(ctx, space, memoryId),
+    getVectors: async (ctx, space, memoryIds) => {
+      calls.push([...memoryIds]);
+      return store.getVectors(ctx, space, memoryIds);
+    },
+  };
+}
+
+/**
  * `FakeLexicalStore` は `packages/core` 自身のテスト用であり `@mnemora/testkit` に依存しない
  * （このファイル冒頭のコメント参照）。`packages/testkit` の `InMemoryLexicalStore` とは
  * **意図的に独立している**——本 PR の時点で `InMemoryLexicalStore` はまだ書かれている最中

@@ -207,8 +207,21 @@ export interface RunAssociationArmOptions {
   memoryStore: MemoryStore;
   tenantId: string;
   armLabel: string;
-  /** 渡さなければ連想枠は一切走らない（`RecallQuery.association` の既定 off）。 */
-  association?: { maxCount: number };
+  /**
+   * 渡さなければ連想枠は一切走らない（`RecallQuery.association` の既定 off）。
+   *
+   * `anchorCount`/`anchorPool` は任意——省略すれば `packages/core` の既定
+   * （`DEFAULT_ASSOCIATION_ANCHOR_COUNT` / `DEFAULT_ASSOCIATION_ANCHOR_POOL`）のまま。
+   * ⭐ **CI の4 arm（off/on3/on5/on10）はどちらも渡していない**——この2欄を足しても
+   * 既存の呼び出しの挙動は1バイトも変わらない（[Issue #377](https://github.com/takecchi/mnemora/issues/377) /
+   * [ADR 0303](../../../docs/decisions/0303-association-anchor-pool.md) の規模追随の実測用に、
+   * 手動実行でだけ使う）。
+   */
+  association?: {
+    maxCount: number;
+    anchorCount?: number;
+    anchorPool?: RecallAssociationQuery["anchorPool"];
+  };
   /** 既定は `./association-probe-set.js` の `DEFAULT_HAYSTACK_SIZE`。 */
   haystackSize?: number;
 }
@@ -237,7 +250,15 @@ export async function runAssociationArm(
   await drainEmbedTicks(options.runtime, ctx);
 
   const association: RecallAssociationQuery | undefined = options.association
-    ? { maxCount: options.association.maxCount }
+    ? {
+        maxCount: options.association.maxCount,
+        ...(options.association.anchorCount !== undefined
+          ? { anchorCount: options.association.anchorCount }
+          : {}),
+        ...(options.association.anchorPool !== undefined
+          ? { anchorPool: options.association.anchorPool }
+          : {}),
+      }
     : undefined;
 
   // ⭐ 枠の中身を判定するための「共有 haystack の externalId 一覧」。この会話に

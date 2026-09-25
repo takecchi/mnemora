@@ -119,11 +119,20 @@ const recalled = await runtime.recall(ctx, {
 - `maxCount` — **必須。既定値は無い**（「量の上限を呼び出し側に必ず明示させる」ため）
 - `anchorCount?` — 段3までに残った上位何件を連想の起点（アンカー）にするか。
   既定 `DEFAULT_ASSOCIATION_ANCHOR_COUNT` = 3。
-  **⚠ `limit`（既定 10）が天井になる**——アンカーは段2で `limit` の内側に入った候補から取るので、
+  **⚠ `limit`（既定 10）が天井になる**（`anchorPool` の既定 `"withinLimit"` のとき）——
+  アンカーは段2で `limit` の内側に入った候補から取るので、
   **`anchorCount` だけを上げても効かない。**裾野を広げたいなら `limit` と両方上げること
   （【実測 2026-09-17】`limit:10 / anchorCount:40` で実際に起点になったアンカーは **10件**、
   `limit:40 / anchorCount:40` では 40件。
-  [docs/recall.md](../../docs/recall.md) §9.2「⚠ `anchorCount` の天井」）
+  [docs/recall.md](../../docs/recall.md) §9.2「⚠ `anchorCount` の天井」）。
+  ⭐ **`limit` を上げずに天井だけ外したいなら、下の `anchorPool: "passed"` を使うこと。**
+- `anchorPool?` — アンカーの母集合。既定 `DEFAULT_ASSOCIATION_ANCHOR_POOL` = `"withinLimit"`
+  （この欄を足す前と同じ挙動。[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
+  [ADR 0303](../../docs/decisions/0303-association-anchor-pool.md)）。
+  `"passed"` を渡すと、母集合が `limit` で切り詰める前の `passed`（段2の閾値を通った全候補）
+  になり、**`limit` を上げずに `anchorCount` の天井を外せる**——テナントの規模が伸びても、
+  `anchorCount` と `anchorPool: "passed"` の組で連想の起点をそれに追随させられる。
+  実アンカー数は常に `min(anchorCount, 選んだ母集合の件数)`。
 - `minSimilarity?` — アンカーとの**生のコサイン類似度**の下限。
   既定 `DEFAULT_ASSOCIATION_MIN_SIMILARITY` = 0.5（`scoreThreshold` とは尺度が違う別の値）
 

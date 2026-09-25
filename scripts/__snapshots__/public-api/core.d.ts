@@ -1991,13 +1991,24 @@ export interface RecallAssociationQuery {
     maxCount: number;
     anchorCount?: number;
     minSimilarity?: number;
+    anchorPool?: AssociationAnchorPool;
 }
+export declare const ASSOCIATION_ANCHOR_POOLS: readonly [
+    "withinLimit",
+    "passed"
+];
+export type AssociationAnchorPool = (typeof ASSOCIATION_ANCHOR_POOLS)[number];
 export declare const RecallAssociationQuerySchema: z.ZodObject<{
     maxCount: z.ZodNumber;
     anchorCount: z.ZodOptional<z.ZodNumber>;
     minSimilarity: z.ZodOptional<z.ZodNumber>;
+    anchorPool: z.ZodOptional<z.ZodEnum<{
+        withinLimit: "withinLimit";
+        passed: "passed";
+    }>>;
 }, z.core.$strip>;
 export declare const DEFAULT_ASSOCIATION_ANCHOR_COUNT = 3;
+export declare const DEFAULT_ASSOCIATION_ANCHOR_POOL: AssociationAnchorPool;
 export declare const DEFAULT_ASSOCIATION_MIN_SIMILARITY = 0.5;
 export declare const DEFAULT_RECALL_LIMIT = 10;
 export declare const DEFAULT_OVER_FETCH_FACTOR = 4;
@@ -2034,6 +2045,10 @@ export declare const RecallQuerySchema: z.ZodObject<{
         maxCount: z.ZodNumber;
         anchorCount: z.ZodOptional<z.ZodNumber>;
         minSimilarity: z.ZodOptional<z.ZodNumber>;
+        anchorPool: z.ZodOptional<z.ZodEnum<{
+            withinLimit: "withinLimit";
+            passed: "passed";
+        }>>;
     }, z.core.$strip>>;
     includeSubjectless: z.ZodOptional<z.ZodBoolean>;
     timeWeighting: z.ZodOptional<z.ZodEnum<{

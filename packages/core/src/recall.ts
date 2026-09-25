@@ -1550,7 +1550,15 @@ export interface RecallAssociationQuery {
    * `limit:10 / anchorCount:3` → 3、**`limit:10 / anchorCount:40` → 10**、
    * `limit:40 / anchorCount:40` → 40、**`limit:5 / anchorCount:40` → 5**、
    * `limit:40 / anchorCount:3` → 3。
-   * すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
+   * すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である
+   * （**`anchorPool` の既定値 `"withinLimit"` のとき。** 下の `anchorPool` を参照）。
+   *
+   * ⭐ **2026-09-25 追記（[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
+   * [ADR 0303](../../../docs/decisions/0303-association-anchor-pool.md)）**:
+   * 上の「`limit` を一緒に上げる」以外に、`anchorPool: "passed"` を渡すと
+   * `limit` を上げずに `anchorCount` の天井だけを外せる——`limit` を上げると
+   * 段1の取り込み幅 `kPrime` も一緒に広がり返す件数自体も増えるが、`anchorPool` は
+   * 返す件数を変えずにアンカーの母集合だけを広げる。詳細は `anchorPool` の doc。
    */
   anchorCount?: number;
   /**
@@ -1567,16 +1575,65 @@ export interface RecallAssociationQuery {
    * 巻き込む——だから独立の定数を置く。
    */
   minSimilarity?: number;
+  /**
+   * アンカーの母集合。既定 {@link DEFAULT_ASSOCIATION_ANCHOR_POOL}（`"withinLimit"`）。
+   *
+   * **既定 `"withinLimit"` は、この欄を足す前の挙動と1バイトも変わらない**——
+   * `recall-runtime.ts` は `anchors = anchorSource.slice(0, anchorCount)` を計算し、
+   * `anchorSource` は `anchorPool` を省略する限り常に `withinLimit`
+   * （`= passed.slice(0, limit)`）である。⟹ 上の `anchorCount` の doc のとおり、
+   * `"withinLimit"` を選ぶ限り（省略時も含む）`RecallQuery.limit` が実効的な天井であり続ける。
+   *
+   * `"passed"` を選ぶと、母集合が `withinLimit` ではなく `passed`
+   * （段2の閾値分割を通った全候補。`limit` で切り詰める**前**の集合。最大でも段1の
+   * over-fetch 窓 `kPrime`（= `limit` × {@link DEFAULT_OVER_FETCH_FACTOR}）規模）になる。
+   * ⟹ **`limit` を上げずに、アンカーの母集合をテナントの規模に追随させられる**——
+   * `passed` は「クエリに実際に当たった（閾値を通った）候補」であり、`companions`
+   * （スコアに関係なく足された必須同伴取得の相方）は含まない。ADR 0151 の
+   * 「アンカーはクエリに実際に当たった候補から取る」という制約は、`"withinLimit"` と
+   * 同じくここでも保たれる——`passed` は `withinLimit` の**上位集合**であり、
+   * 両方とも「段2の閾値を通った」候補の部分集合である。
+   *
+   * ⚠ **`"passed"` は `anchorCount` の天井を外すだけで、下限を保証しない。**
+   * `passed.length` はテナントの規模・クエリの具体性・`scoreThreshold` に依存する。
+   * 実際のアンカー数は常に `min(anchorCount, 選んだ母集合の件数)` である。
+   *
+   * 出所: [Issue #377](https://github.com/takecchi/mnemora/issues/377)（既定
+   * `anchorCount = 3` が `withinLimit`（既定10件）からしか取れず、テナントの規模が
+   * 伸びても連想の起点になれる候補の割合が下がる、という実測）。決定は
+   * [ADR 0303](../../../docs/decisions/0303-association-anchor-pool.md)。
+   */
+  anchorPool?: AssociationAnchorPool;
 }
+
+/**
+ * {@link RecallAssociationQuery.anchorPool} が選べる母集合。
+ *
+ * - `"withinLimit"` — 段2で `RecallQuery.limit` の内側に入った分だけ（既定。ADR 0151 以来の挙動）。
+ * - `"passed"` — 段2の閾値分割を通った全候補（`limit` で切る前。ADR 0303）。
+ */
+export const ASSOCIATION_ANCHOR_POOLS = ["withinLimit", "passed"] as const;
+
+/** {@link ASSOCIATION_ANCHOR_POOLS} の要素型。 */
+export type AssociationAnchorPool = (typeof ASSOCIATION_ANCHOR_POOLS)[number];
 
 export const RecallAssociationQuerySchema = z.object({
   maxCount: z.number().int().positive(),
   anchorCount: z.number().int().positive().optional(),
   minSimilarity: z.number().optional(),
+  anchorPool: z.enum(ASSOCIATION_ANCHOR_POOLS).optional(),
 }) satisfies z.ZodType<RecallAssociationQuery>;
 
 /** `RecallAssociationQuery.anchorCount` の既定値（マネージャー決定）。 */
 export const DEFAULT_ASSOCIATION_ANCHOR_COUNT = 3;
+
+/**
+ * `RecallAssociationQuery.anchorPool` の既定値。**`"withinLimit"`**——
+ * この欄を足す前の唯一の挙動であり、省略した呼び出しは1バイトも変わらない
+ * （[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
+ * [ADR 0303](../../../docs/decisions/0303-association-anchor-pool.md)）。
+ */
+export const DEFAULT_ASSOCIATION_ANCHOR_POOL: AssociationAnchorPool = "withinLimit";
 
 /**
  * `RecallAssociationQuery.minSimilarity` の既定値（マネージャー決定）。

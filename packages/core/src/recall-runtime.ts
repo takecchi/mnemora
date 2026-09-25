@@ -17,6 +17,7 @@ import type { Memory } from "./memory.js";
 import {
   ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE,
   DEFAULT_ASSOCIATION_ANCHOR_COUNT,
+  DEFAULT_ASSOCIATION_ANCHOR_POOL,
   DEFAULT_ASSOCIATION_MIN_SIMILARITY,
   DEFAULT_DIGEST_BAND_LIMIT,
   DEFAULT_OVER_FETCH_FACTOR,
@@ -1117,11 +1118,21 @@ export async function runRecall(
       const getVectors = deps.vectorStore.getVectors.bind(deps.vectorStore);
       const anchorCount = associationQuery.anchorCount ?? DEFAULT_ASSOCIATION_ANCHOR_COUNT;
       const minSimilarity = associationQuery.minSimilarity ?? DEFAULT_ASSOCIATION_MIN_SIMILARITY;
-      // アンカーは「クエリに実際に当たった」候補（withinLimit）から取る——companions
+      // アンカーは「クエリに実際に当たった」候補から取る——companions
       // （段3の必須同伴取得）はスコアに関係なく足された候補であり、連想の起点として
       // 使うと「クエリに当たっていない候補から、さらにクエリに当たっていない候補を
       // 連想する」という不透明な連鎖になる。
-      const anchors = withinLimit.slice(0, anchorCount);
+      //
+      // ⭐ Issue #377 / ADR 0303: 母集合は `anchorPool` で選べる。既定 `"withinLimit"`
+      // は本欄を足す前と1バイトも変わらない（`withinLimit = passed.slice(0, limit)`。
+      // 上のコメント）——`RecallQuery.limit` が実効的な天井になる。`"passed"` を選ぶと、
+      // `limit` で切り詰める前の `passed`（段2の閾値を通った全候補）が母集合になり、
+      // `limit` を上げずに `anchorCount` の天井を外せる。どちらの値でも「段2の閾値を
+      // 通った」候補の部分集合である点は変わらない——ADR 0151 の制約
+      // （クエリに実際に当たった候補から取る）はここでも保たれる。
+      const anchorPool = associationQuery.anchorPool ?? DEFAULT_ASSOCIATION_ANCHOR_POOL;
+      const anchorSource = anchorPool === "passed" ? passed : withinLimit;
+      const anchors = anchorSource.slice(0, anchorCount);
       if (anchors.length === 0) {
         omitted.push({ kind: "stage_skipped", stage: "association", reason: "no_anchor" });
       } else {

@@ -249,9 +249,12 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 ⟹ **npm から入れたままの既定の振る舞いは「聞かれたことにしか答えない」。**
 渡し方・各フィールドの既定値・渡したときの実測値は
 [packages/core/README.md](./packages/core/README.md) を見ること。
-⚠ **渡すとき、`anchorCount` だけを上げても連想の裾野は広がらない**——連想の起点は
+⚠ **渡すとき、`anchorCount` だけを上げても連想の裾野は広がらない**——既定では連想の起点は
 `RecallQuery.limit`（既定 10）の内側から取るので、`limit` が天井になる（同 README /
-[docs/recall.md](./docs/recall.md) §9.2）。
+[docs/recall.md](./docs/recall.md) §9.2）。**`limit` を上げずに天井だけ外したいなら
+`anchorPool: "passed"` を渡すこと**（既定は `"withinLimit"` のまま。
+[Issue #377](https://github.com/takecchi/mnemora/issues/377)、
+[ADR 0303](./docs/decisions/0303-association-anchor-pool.md)）。
 
 ### `Runtime` の中核5動詞以外 — 中核を守る3つの層
 

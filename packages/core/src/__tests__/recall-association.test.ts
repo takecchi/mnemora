@@ -4,8 +4,10 @@ import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
+import type { MemoryId } from "../ids.js";
 import {
   createFakeRuntimeStores,
+  withGetVectorsSpy,
   withoutGetVectors,
   withReversedGetVectorsOrder,
 } from "./runtime-fakes.js";
@@ -444,5 +446,144 @@ describe("recall() — 連想枠: 複数アンカーが同じ候補を連想し�
     const reversed = await run((s) => withReversedGetVectorsOrder(s.vectorStore));
     expect(reversed.cEntry?.retrievedVia).toBe("association");
     expect(reversed.cEntry?.associationOf).toBe(reversed.a.id);
+  });
+});
+
+describe("recall() — 連想枠: anchorPool（規模への追随、Issue #377 / ADR 0303）", () => {
+  const deg = (d: number): number => (d * Math.PI) / 180;
+
+  /**
+   * `limit` より多くの候補が段2の閾値を通っている状況（`over_limit(stage:'rescore')` が
+   * 積まれる状況）を作り、`getVectors` に実際に渡された memoryId を spy で数える——
+   * [PR #430](https://github.com/takecchi/mnemora/pull/430) が本物の Postgres に対して
+   * 手動で数えた表（`limit:10/anchorCount:40 → 実アンカー10件`）と同じ量を、ここでは
+   * 擬似実装の上で歯として固定する。
+   */
+  async function setupFiveCandidates(
+    overrideVectorStore?: (stores: ReturnType<typeof createFakeRuntimeStores>) => VectorStore,
+  ) {
+    const { runtime, stores } = buildRuntime(overrideVectorStore);
+    // クエリ [1,0] に対する類似度が単調に下がる5件。すべて既定の scoreThreshold(0.1) を
+    // 楽に上回る（最小でも cos(25°) ≈ 0.906）——5件とも段2の閾値分割を通り、`passed` に入る。
+    const angles = [5, 10, 15, 20, 25];
+    const created: Memory[] = [];
+    for (const a of angles) {
+      created.push(
+        await createEmbeddedMemory(stores, [Math.cos(deg(a)), Math.sin(deg(a))], {
+          digest: `m${a}`,
+        }),
+      );
+    }
+    return { runtime, stores, created };
+  }
+
+  it("anchorPool を省略すると、実アンカー数は従来どおり limit で頭打ちになる（回帰）", async () => {
+    const calls: MemoryId[][] = [];
+    const { runtime, created } = await setupFiveCandidates((s) =>
+      withGetVectorsSpy(s.vectorStore, calls),
+    );
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 2,
+      association: { maxCount: 1, anchorCount: 5 },
+    });
+
+    // over_limit(stage:'rescore') が3件——5件通って上位2件だけが limit の内側。
+    expect(result.omitted).toContainEqual(
+      expect.objectContaining({ kind: "over_limit", stage: "rescore", count: 3 }),
+    );
+    // anchorCount:5 を渡しても、getVectors に渡ったのは withinLimit の2件だけ
+    // （min(anchorCount, limit, 通過数) = min(5, 2, 5) = 2）。
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(created.slice(0, 2).map((m) => m.id));
+  });
+
+  it("anchorPool: 'passed' を渡すと、limit を超えて段2の通過集合全体からアンカーを取れる", async () => {
+    const calls: MemoryId[][] = [];
+    const { runtime, created } = await setupFiveCandidates((s) =>
+      withGetVectorsSpy(s.vectorStore, calls),
+    );
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 2,
+      association: { maxCount: 1, anchorCount: 5, anchorPool: "passed" },
+    });
+
+    expect(result.omitted).toContainEqual(
+      expect.objectContaining({ kind: "over_limit", stage: "rescore", count: 3 }),
+    );
+    // 同じ anchorCount:5 でも、母集合を passed にすると5件全部が実アンカーになる
+    // （min(anchorCount, passed の件数) = min(5, 5) = 5）——limit(2) は天井にならない。
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toEqual(created.map((m) => m.id));
+  });
+
+  it("anchorPool: 'withinLimit' を明示しても、省略時と同じ挙動になる", async () => {
+    const calls: MemoryId[][] = [];
+    const { runtime, created } = await setupFiveCandidates((s) =>
+      withGetVectorsSpy(s.vectorStore, calls),
+    );
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 2,
+      association: { maxCount: 1, anchorCount: 5, anchorPool: "withinLimit" },
+    });
+
+    expect(result.omitted).toContainEqual(
+      expect.objectContaining({ kind: "over_limit", stage: "rescore", count: 3 }),
+    );
+    expect(calls[0]).toEqual(created.slice(0, 2).map((m) => m.id));
+  });
+
+  /**
+   * 内部の呼び出し回数だけでなく、`RecallResult` に実際に現れる効果でも確かめる——
+   * `anchorPool: 'passed'` にしないと届かない候補が、`recall()` の返り値レベルで
+   * `retrievedVia: 'association'` として現れることを検査する。
+   *
+   * 幾何: query=[1,0,0]。anchor1〜3 は xy 平面上（角度5°/15°/25°、query に近い順で
+   * withinLimit（limit=3）に入る）。anchor4 は xz 平面上（角度35°、query との類似度
+   * 0.819 で4位——`withinLimit` には入らないが `passed` には入る）。D も xz 平面上
+   * （角度70°）に置き、D–anchor4 間の類似度 (cos35°≈0.819) は minSimilarity(0.5) を
+   * 超えるが、D–anchor1..3 間の類似度（cos(角度)×cos70°、最大でも cos5°×cos70°≈0.34）は
+   * 0.5 を下回るよう角度を選んだ——D は anchor4 経由でしか連想枠に現れない。
+   */
+  it("anchorPool: 'passed' でのみ、withinLimit の外に居るアンカー経由の候補が現れる", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor1 = await createEmbeddedMemory(stores, [Math.cos(deg(5)), Math.sin(deg(5)), 0], {
+      digest: "anchor1",
+    });
+    await createEmbeddedMemory(stores, [Math.cos(deg(15)), Math.sin(deg(15)), 0], {
+      digest: "anchor2",
+    });
+    await createEmbeddedMemory(stores, [Math.cos(deg(25)), Math.sin(deg(25)), 0], {
+      digest: "anchor3",
+    });
+    const anchor4 = await createEmbeddedMemory(stores, [Math.cos(deg(35)), 0, Math.sin(deg(35))], {
+      digest: "anchor4",
+    });
+    const d = await createEmbeddedMemory(stores, [Math.cos(deg(70)), 0, Math.sin(deg(70))], {
+      digest: "D",
+    });
+
+    const query = { vector: [1, 0, 0], limit: 3 };
+
+    const withDefaultPool = await runtime.recall(ctx, {
+      ...query,
+      association: { maxCount: 5, anchorCount: 4 },
+    });
+    expect(withDefaultPool.memories.some((m) => m.memoryId === d.id)).toBe(false);
+
+    const withPassedPool = await runtime.recall(ctx, {
+      ...query,
+      association: { maxCount: 5, anchorCount: 4, anchorPool: "passed" },
+    });
+    const dEntry = withPassedPool.memories.find((m) => m.memoryId === d.id);
+    expect(dEntry?.retrievedVia).toBe("association");
+    expect(dEntry?.associationOf).toBe(anchor4.id);
+    // 参照用に anchor1 を使っていることを明示する（未使用変数として消さない）。
+    expect(withPassedPool.memories.some((m) => m.memoryId === anchor1.id)).toBe(true);
   });
 });

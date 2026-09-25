@@ -922,11 +922,15 @@ Issue #200 は**2つの読み方**を挙げていた。
 1. `query.association` が無ければ**何もしない**（`omitted` にも積まない）。
 2. `VectorStore.getVectors`（**任意メソッド**）が無ければ
    `stage_skipped { stage: 'association', reason: 'vector_store_lacks_get_vectors' }` を積んで終わる。
-3. 段3までに残った集合のうち**段2で `limit` の内側に入った分**（`withinLimit`）の、
-   さらに上位 `anchorCount` 件をアンカーにする。0件なら
+3. **アンカーの母集合**（`anchorPool`、既定 `"withinLimit"`）の上位 `anchorCount` 件を
+   アンカーにする。既定 `"withinLimit"` は段3までに残った集合のうち**段2で `limit` の
+   内側に入った分**（`withinLimit`）——0件なら
    `stage_skipped { stage: 'association', reason: 'no_anchor' }`。
-   ⚠ **`limit` が `anchorCount` の天井になる**——直後の「⚠ `anchorCount` の天井は
-   `RecallQuery.limit` である」を見ること。
+   ⚠ **`anchorPool: "withinLimit"`（既定）のとき、`limit` が `anchorCount` の天井になる**
+   ——直後の「⚠ `anchorCount` の天井は `RecallQuery.limit` である」を見ること。
+   `anchorPool: "passed"` を渡すと母集合が `passed`（`limit` で切り詰める前、段2の閾値を
+   通った全候補）になり、`limit` を上げずにその天井を外せる——[Issue #377](https://github.com/takecchi/mnemora/issues/377) /
+   [ADR 0303](./decisions/0303-association-anchor-pool.md)。
 4. アンカーのベクトルを `getVectors` で引き、**そのベクトルで** `VectorStore.search` を
    **段1の ANN 検索と同じ filter で**呼ぶ——scope（tenant/subject/status/period/
    `excludeProvenanceKinds`）**だけでなく、忘却ゲート（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md) /
@@ -983,10 +987,45 @@ Issue #200 は**2つの読み方**を挙げていた。
 | 5 | 40 | **5** |
 | 40 | 3（既定） | 3 |
 
-すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である。
+すなわち実際のアンカー数は `min(anchorCount, limit, 段2を通った候補数)` である
+（**`anchorPool` の既定値 `"withinLimit"` のとき**）。
 連想の裾野を広げたいなら **`limit` と `anchorCount` の両方**を上げること。
 ⚠ ただし `limit` を上げると段1の取り込み幅 `kPrime`（= `limit × overFetchFactor`、§3）も一緒に広がる
 ——費用は連想枠だけの話では済まない。
+
+#### 9.2.1 `anchorPool` — `limit` を上げずに天井を外す（2026-09-25 追記、[Issue #377](https://github.com/takecchi/mnemora/issues/377) / [ADR 0303](./decisions/0303-association-anchor-pool.md)）
+
+**上の「`limit` と `anchorCount` の両方を上げる」は、`limit` を上げた分だけ返す件数と
+段1の取り込み幅 `kPrime` も一緒に膨らむ**——アンカーの母集合だけを広げたい場合には、
+費用が本来の目的（アンカーを増やす）と関係ない箇所（段1の ANN 全体・返す `memories` の件数）
+にまで及ぶ。
+
+`RecallAssociationQuery.anchorPool?: "withinLimit" | "passed"` は、これを分離する
+**任意欄の純追加**である（既定値・既定の挙動は1バイトも変えない。ADR 0289 と同じ型）。
+
+- **既定 `"withinLimit"`** — 上の表と同じ、`anchors = withinLimit.slice(0, anchorCount)`。
+- **`"passed"`** — `anchors = passed.slice(0, anchorCount)`。`passed` は段2の閾値分割を
+  通った**全**候補（`limit` で切り詰める前。最大でも段1の over-fetch 窓 `kPrime` 規模）。
+  `limit`・返す `memories` の件数・段1の費用は1つも変わらない——変わるのは
+  アンカーの母集合だけである。
+
+⚠ **`anchorPool` はアンカーの**母集合**を変えるだけで、連想枠が実際に返す集合の除外条件
+（`withinLimit` + `companions` + アンカー自身）は変えない**——`anchorPool: "passed"` で
+`withinLimit` の外から選ばれたアンカーも、そのアンカー自身が `memories` に混入することはない
+（既に除外集合に入っている）。ADR 0151 の「アンカーはクエリに実際に当たった候補から取る
+（`companions` を起点にしない）」という制約は、`"passed"` でも保たれる——`passed` は
+`withinLimit` の**上位集合**であり、どちらも「段2の閾値を通った」候補の部分集合である。
+
+**規模に追随させる 1万件規模の実測**（合成 haystack、`@mnemora/local-embedding`
+`ruri-v3-30m/sym`・256次元、HNSW 既定パラメータ、`examples/chat` の `association-probes`
+12 probe。テストスイート外の使い捨て測定、CI には載せていない）:
+
+<!-- MEASUREMENT_10K_PLACEHOLDER -->
+
+**⚠ 「anchor がそもそも生の ANN `kPrime`（既定40）件にすら入らない probe は、`anchorPool` を
+変えても届かない」**——`anchorPool: "passed"` が広げるのは「`withinLimit` の外・`passed` の中」
+という帯であり、`passed` 自体の外（`below_threshold` に落ちた分）までは広げない。
+その帯の外に居る probe は、この修正の範囲外である（下の実測を見ること）。
 
 **⚠ 「走らせて0件だった」と「走らせなかった」を同じ顔にしない。**
 走らせて0件のときは `stage_skipped` を積まない——本文書全体を貫く原則3
