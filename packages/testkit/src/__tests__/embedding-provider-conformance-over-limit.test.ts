@@ -1,4 +1,4 @@
-// Issue #449 / ADR 0304: `EmbeddingProviderConformanceOptions.overLimitText` の陽性対照。
+// Issue #449 / ADR 0305: `EmbeddingProviderConformanceOptions.overLimitText` の陽性対照。
 //
 // `describeEmbeddingProviderConformance` に足した「上限超過は reject する」歯そのものが
 // 実際に何かを捕まえることを、ここで先に示す（AGENTS.md「⚠ 『出なかった』を、事象が

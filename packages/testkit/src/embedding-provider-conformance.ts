@@ -42,7 +42,7 @@ export interface EmbeddingProviderConformanceOptions {
   /**
    * 🔴 **任意。渡すと、`EmbeddingProvider` の契約——「入力が実装の上限を超えたら
    * `embed` は例外を投げる。黙って切り詰めてベクトルを返さない」（`embedding-provider.ts`
-   * の interface doc、ADR 0304・Issue #449）——を測る歯が1本増える: `embed(ctx,
+   * の interface doc、ADR 0305・Issue #449）——を測る歯が1本増える: `embed(ctx,
    * [overLimitText])` が reject することだけを見る。**
    *
    * ⚠ **この文字列がその実装の上限を実際に超えていることは、呼び出し側の責任である。**
@@ -267,7 +267,7 @@ export function describeEmbeddingProviderConformance(
     const maybeOverLimitIt = overLimitText !== undefined ? it : it.skip;
 
     maybeOverLimitIt(
-      "上限を超える入力を渡すと embed() が reject する（黙って切り詰めない。ADR 0304・Issue #449）",
+      "上限を超える入力を渡すと embed() が reject する（黙って切り詰めない。ADR 0305・Issue #449）",
       async () => {
         const provider = await createProvider();
 

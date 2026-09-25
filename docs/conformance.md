@@ -14,7 +14,7 @@ suite ごと・呼び出し元ごとに違う。**この文書が無いと、採
 **根拠の種別**: **【現物】** = `main` = `18a8a09`（2026-09-17）のコードを読んで数えた。
 **【実測】** = 書き手がこの器で実際に走らせた、または取得した。
 
-**⚠ 2026-09-25 追記（Issue #449 / ADR 0304）**: `EmbeddingProvider` suite に
+**⚠ 2026-09-25 追記（Issue #449 / ADR 0305）**: `EmbeddingProvider` suite に
 `overLimitText`（任意。省略時 `it.skip`）に依存する歯を1本足した。**この節の数のうち
 `EmbeddingProvider` に関わるものだけを、その分だけ更新してある**（下の該当箇所に
 逐語で印を付けた）。**他の6 suite の数はこの追記の対象外**——数えていない。
@@ -75,7 +75,7 @@ suite ごと・呼び出し元ごとに違う。**この文書が無いと、採
 | 4   | `packages/local-embedding/src/__tests__/live.local-embedding.test.ts:379`                                                         | **本物の `LocalEmbeddingProvider`**（実際に ONNX の重みを落としてプロセス内推論）                                                                        | 🔴 **走らない** |
 | 5   | `packages/openai/src/__tests__/embedding-provider.conformance.test.ts:143`                                                        | `OpenAIEmbeddingProvider` ＋ 注入 client（`fixtures/recorded-openai-embeddings.json` の再生）                                                            | **走る**        |
 | 6   | `packages/openai/src/__tests__/live.openai.test.ts:106`                                                                           | **実 API**                                                                                                                                               | 🔴 **走らない** |
-| 7   | `packages/testkit/src/__tests__/embedding-provider-conformance-over-limit.test.ts`（2026-09-25 追記、Issue #449 / ADR 0304）      | この歯専用の最小 provider（`RejectsOverLimitEmbeddingProvider`。**本物のモデルではない**——`overLimitText` の歯が実際に何かを検出することを示す陽性対照） | **走る**        |
+| 7   | `packages/testkit/src/__tests__/embedding-provider-conformance-over-limit.test.ts`（2026-09-25 追記、Issue #449 / ADR 0305）      | この歯専用の最小 provider（`RejectsOverLimitEmbeddingProvider`。**本物のモデルではない**——`overLimitText` の歯が実際に何かを検出することを示す陽性対照） | **走る**        |
 
 ⚠ **#1・#2・#7 はどれも `overLimitText` を渡していない/渡している、が食い違う——** #1・#2 は
 省略（上限の概念を持たない実装のため `it.skip`）、**#7 だけが渡している**（この歯専用の
@@ -340,7 +340,7 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 - **§4 の表**は [Issue #142](https://github.com/takecchi/mnemora/issues/142) 本文からの引用である。
 - **判断（何を採り、何を採らなかったか）**は
   [ADR 0184](./decisions/0184-conformance-scope-documented-not-closed.md) に在る。
-- **2026-09-25 追記**（Issue #449 / ADR 0304）: `EmbeddingProvider` suite に
+- **2026-09-25 追記**（Issue #449 / ADR 0305）: `EmbeddingProvider` suite に
   `overLimitText` の歯を1本足したことに伴い、**その1本が数え方に効く箇所だけ**を
   この作業者が読んで更新した（§1・§2.2・§3・§6）。**他の6 suite・他の節の数は
   この追記の対象外**——2026-09-17 時点の値のままである。

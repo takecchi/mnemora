@@ -584,7 +584,7 @@ describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () =
   });
 
   /**
-   * Issue #449 / ADR 0304: 3段つながっての歯。
+   * Issue #449 / ADR 0305: 3段つながっての歯。
    *
    * 1. `observe({ kind: 'document' })` の `content` に上限は無い（`observation.ts` の
    *    `.min(1)` のみ、`.max()` 無し）。
