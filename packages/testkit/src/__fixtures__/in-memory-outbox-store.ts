@@ -25,6 +25,17 @@ export class InMemoryOutboxStore implements OutboxStore {
   constructor(private readonly jobs: OutboxJobRecord[]) {}
 
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
+    // `PostgresOutboxStore` は `limit` を生 SQL の `LIMIT` にそのまま渡すため、負数を
+    // 渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる（クエリを
+    // 一切実行しない——claim の副作用も起きない）。ここで同じ入力を検査せずに
+    // `eligible.slice(0, opts.limit)` へ渡すと、`Array.prototype.slice` の負数引数は
+    // 「末尾から数えた除外」という別の意味になり、ジョブを黙って claim してしまう
+    // （このクラスの doc が明言する「`PostgresOutboxStore` と一致させてある」という
+    // 意図に反する）。クエリを投げる前に弾く Postgres 側に揃え、副作用が起きる前に
+    // 例外を投げる。
+    if (opts.limit < 0) {
+      throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
+    }
     // リースが切れたとみなす境界時刻。`PostgresOutboxStore` と同じ `<=`（両端含む）。
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.jobs.filter((job) => {
