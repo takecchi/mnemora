@@ -115,6 +115,15 @@ describe.skipIf(!live)(
       // ⚠ 互いに違う短い文字列にする。順序の歯は `deterministic: false` で skip されるが、
       // 「3件渡して3件返る」を測る以上、同じ文字列を並べる意味は無い。
       texts: { a: "mnemora conformance a", b: "mnemora conformance b", c: "mnemora conformance c" },
+      // ⚠ `overLimitText`（Issue #449 / ADR 0305）は、ここでも渡さない——足すこと自体は
+      // 難しくない候補が既に在る:【実測 2026-09-25、実 API 1回】マネージャーが
+      // `text-embedding-3-small` に `" hello".repeat(10000)` を送り、
+      // `HTTP 400 "maximum input length is 8192 tokens"` を確認している（ADR 0305 参照）。
+      // ⛔ ここで足さなかったのは、`docs/conformance.md`§3「無条件7本」（Issue #142）の
+      // 「決定性2本＋overLimitText未指定1本＝3本を除いた7本」という数え方を、この呼び出しが
+      // `overLimitText` を渡す・渡さないで動かしたくなかったため（渡すと8本になる）。
+      // **この歯を足す価値は在る。足すなら、上の数え方も一緒に直すこと。**
+
       // ネットワーク往復は vitest の既定（5秒）に収まらないことがある。
       timeout: 60_000,
     });
