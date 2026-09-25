@@ -7,6 +7,8 @@ import {
 import type { CorrectionAbstainCase, CorrectionHitCase } from "./correction-case.js";
 import { drainEmbedTicks } from "./embed-drain.js";
 import type { DrainResult } from "./embed-drain.js";
+import { computeMarginStats, formatMarginStats } from "./identifier-arm.js";
+import type { MarginStats } from "./identifier-arm.js";
 import { DEFAULT_HAYSTACK_SIZE, buildHaystackUtterance } from "./probe-set.js";
 import type { ProviderMode } from "./providers.js";
 import { resolveExternalId } from "./provenance-trace.js";
@@ -26,6 +28,25 @@ import { resolveExternalId } from "./provenance-trace.js";
  * ⭐ **訂正の発話そのものは `observe()` しない。**自分自身が自明に1位を取るのを避ける
  * ため。⟹ ⚠ **「訂正を observe してから自己を除外して探す」形は、この器では測って
  * いない**（`Runtime.findCorrectionCandidates` の `excludeMemoryIds` がその形を取る）。
+ *
+ * **`margin`/`intrusionMargin`（[ADR 0291](../../../docs/decisions/0291-primary-probe-coverage-map-correction-candidate-domain.md) §5.5、
+ * [ADR 0321](../../../docs/decisions/0321-correction-candidate-domain-implementation.md)）**:
+ *
+ * - A群: `margin = goldScore − distractorScore`（`ScoreBreakdown.total` の差）。
+ *   どちらかが `null`（返らなかった）なら `null`。`identifier-arm.ts` の `margin`
+ *   （`similarity` の差）とは**使う値が違う**——この arm はもともと `goldScore` を
+ *   `.total` で記録しており、その系譜をそのまま延長した。
+ * - B群: `intrusionMargin = topScore − protectedFactScore`。**深い誤爆
+ *   （`protectedAtTop === true`）のときだけ**定義し、誤爆(浅)・棄権のときは `null`
+ *   （ADR 0291 §5.5 の逐語どおり）。`protectedFactScore` は `protectedFacts`（複数件
+ *   ありうる）のうち、返った候補の中で最も順位が低い（＝最も危うい）ものの
+ *   `ScoreBreakdown.total`。⚠ **今日のケース集合はどれも `protectedFacts` が0〜1件
+ *   なので、深い誤爆のとき `topScore === protectedFactScore` となり
+ *   `intrusionMargin` は常に `0`——これは実装の欠陥ではなく定義どおりの挙動である
+ *   （ADR 0321 に実測として記録）。**複数件になって初めて非自明な値になる。
+ * - `computeMarginStats`（`identifier-arm.ts`、ADR 0135 §5.5）をそのまま再利用し、
+ *   arm 全体では平均・標準偏差・最小値の分布で読む。**二値（hit@k・誤爆の深/浅）と
+ *   併記する。置き換えない**——ADR 0135/0291 と同じ理由。
  */
 
 /** A 群1件ぶんの結果。 */
@@ -38,6 +59,12 @@ export interface CorrectionHitOutcome {
   distractorBeatsGold: boolean;
   /** gold の `ScoreBreakdown.total`。返らなかったなら null（0 へ倒さない）。 */
   goldScore: number | null;
+  /**
+   * `goldScore − distractorScore`（ADR 0291 §5.5、ADR 0321）。
+   * どちらかが `null`（返らなかった）なら `null`——「差が0だった」と「測れなかった」を
+   * 同じ顔にしない（ADR 0033「無いには種類がある」の適用）。
+   */
+  margin: number | null;
   returned: number;
   totalInScope: number;
   omittedKinds: string[];
@@ -57,6 +84,17 @@ export interface CorrectionAbstainOutcome {
   /** 1位の `ScoreBreakdown.total`。棄権したなら null。 */
   topScore: number | null;
   topDigest: string | null;
+  /**
+   * `protectedFacts`（複数件ありうる）のうち、`recall()` が返した候補の中で
+   * 最も順位が低い（＝最も危うい）ものの `ScoreBreakdown.total`。1件も返って
+   * いなければ `null`（ADR 0291 §5.5、ADR 0321）。
+   */
+  protectedFactScore: number | null;
+  /**
+   * `topScore − protectedFactScore`。**深い誤爆（`protectedAtTop === true`）の
+   * ときだけ**定義する。誤爆(浅)・棄権のときは `null`（ADR 0291 §5.5 の逐語）。
+   */
+  intrusionMargin: number | null;
   returned: number;
   omittedKinds: string[];
 }
@@ -70,6 +108,66 @@ export interface CorrectionCandidateReport {
   ingestDrain: DrainResult;
   hits: CorrectionHitOutcome[];
   abstains: CorrectionAbstainOutcome[];
+  /** A群の `margin` の分布（ADR 0135 §5.5 と同じ形の集約）。 */
+  marginStats: MarginStats;
+  /** B群の `intrusionMargin` の分布。 */
+  intrusionMarginStats: MarginStats;
+}
+
+/**
+ * gold/distractor の `ScoreBreakdown.total` から margin を計算する純関数
+ * （ADR 0291 §5.5、ADR 0321）。どちらかが `null` なら `null`。
+ */
+export function computeCorrectionMargin(
+  goldScore: number | null,
+  distractorScore: number | null,
+): number | null {
+  if (goldScore === null || distractorScore === null) {
+    return null;
+  }
+  return goldScore - distractorScore;
+}
+
+/**
+ * `protectedIds` に含まれる外部IDを持つ候補のうち、`ScoreBreakdown.total` が
+ * 最も低いもの（＝最も危うい）を返す純関数。1件も見つからなければ `null`。
+ * `memories`/`externalIds` は同じ添字で対応している前提（呼び出し側が揃える）。
+ */
+export function minProtectedFactScore(
+  memories: readonly { score: { total: number } }[],
+  externalIds: readonly (string | null)[],
+  protectedIds: readonly string[],
+): number | null {
+  const scores: number[] = [];
+  externalIds.forEach((id, i) => {
+    if (id !== null && protectedIds.includes(id)) {
+      const memory = memories[i];
+      if (memory !== undefined) {
+        scores.push(memory.score.total);
+      }
+    }
+  });
+  return scores.length === 0 ? null : Math.min(...scores);
+}
+
+/**
+ * B群の `intrusionMargin`（ADR 0291 §5.5、ADR 0321）。深い誤爆のときだけ
+ * `topScore − protectedFactScore` を返す。誤爆(浅)・棄権のときは `null`。
+ *
+ * ⚠ `protectedFacts` が1件以下のケースでは、深い誤爆のとき
+ * `topScore === protectedFactScore` になり、結果は常に `0`——これは実装の欠陥では
+ * なく定義どおりの挙動である（1位そのものが保護対象である以上、自明な結果）。
+ * この値が非自明になるのは `protectedFacts` が複数件のケースに限る。
+ */
+export function computeIntrusionMargin(
+  topScore: number | null,
+  protectedAtTop: boolean,
+  protectedFactScore: number | null,
+): number | null {
+  if (!protectedAtTop || topScore === null || protectedFactScore === null) {
+    return null;
+  }
+  return topScore - protectedFactScore;
 }
 
 export interface RunCorrectionCandidateArmOptions {
@@ -134,13 +232,17 @@ export async function runCorrectionCandidateArm(
     const distractorIndex = externalIds.indexOf(correctionDistractorExternalId(c.id));
     const goldRank = goldIndex === -1 ? null : goldIndex + 1;
     const distractorRank = distractorIndex === -1 ? null : distractorIndex + 1;
+    const goldScore = goldIndex === -1 ? null : (result.memories[goldIndex]?.score.total ?? null);
+    const distractorScore =
+      distractorIndex === -1 ? null : (result.memories[distractorIndex]?.score.total ?? null);
     hits.push({
       caseId: c.id,
       goldRank,
       distractorRank,
       distractorBeatsGold:
         distractorRank !== null && (goldRank === null || distractorRank < goldRank),
-      goldScore: goldIndex === -1 ? null : (result.memories[goldIndex]?.score.total ?? null),
+      goldScore,
+      margin: computeCorrectionMargin(goldScore, distractorScore),
       returned: result.memories.length,
       totalInScope: result.index.totalInScope,
       omittedKinds: result.omitted.map((o) => o.kind),
@@ -151,18 +253,30 @@ export async function runCorrectionCandidateArm(
   for (const c of options.abstainCases) {
     const result = await options.runtime.recall(ctx, { text: c.utterance });
     const topMemory = result.memories[0];
-    const topExternalId =
-      topMemory === undefined
-        ? null
-        : await resolveExternalId(options.memoryStore, ctx, topMemory.memoryId);
+    // ⚠ **全候補の externalId を解決する**（top1 だけではない）——`protectedFacts` が
+    // 複数件のとき、1位以外に居る保護対象のスコアも `protectedFactScore` に使うため
+    // （ADR 0291 §5.5、ADR 0321）。
+    const resolvedExternalIds = await Promise.all(
+      result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
+    );
+    const topExternalId = resolvedExternalIds[0] ?? null;
     const protectedIds = c.protectedFacts.map((_, i) => correctionProtectedExternalId(c.id, i));
+    const protectedAtTop = topExternalId !== null && protectedIds.includes(topExternalId);
+    const protectedFactScore = minProtectedFactScore(
+      result.memories,
+      resolvedExternalIds,
+      protectedIds,
+    );
+    const topScore = topMemory?.score.total ?? null;
     abstains.push({
       caseId: c.id,
       kind: c.kind,
-      protectedAtTop: topExternalId !== null && protectedIds.includes(topExternalId),
+      protectedAtTop,
       abstained: topMemory === undefined,
-      topScore: topMemory?.score.total ?? null,
+      topScore,
       topDigest: topMemory?.digest ?? null,
+      protectedFactScore,
+      intrusionMargin: computeIntrusionMargin(topScore, protectedAtTop, protectedFactScore),
       returned: result.memories.length,
       omittedKinds: result.omitted.map((o) => o.kind),
     });
@@ -177,6 +291,8 @@ export async function runCorrectionCandidateArm(
     ingestDrain,
     hits,
     abstains,
+    marginStats: computeMarginStats(hits.map((h) => h.margin)),
+    intrusionMarginStats: computeMarginStats(abstains.map((a) => a.intrusionMargin)),
   };
 }
 
@@ -262,6 +378,7 @@ export function formatCorrectionCandidateReport(
   lines.push(
     `  gold スコア範囲 = ${summary.goldScoreMin?.toFixed(5) ?? "—"} 〜 ${summary.goldScoreMax?.toFixed(5) ?? "—"}`,
   );
+  lines.push(`  margin(goldScore−distractorScore): ${formatMarginStats(report.marginStats)}`);
   lines.push("");
   lines.push(`B 群（⛔ 訂正してはいけない。n=${String(summary.abstainCount)}）`);
   lines.push(
@@ -278,6 +395,10 @@ export function formatCorrectionCandidateReport(
   );
   lines.push(
     `  1位スコア範囲 = ${summary.abstainTopScoreMin?.toFixed(5) ?? "—"} 〜 ${summary.abstainTopScoreMax?.toFixed(5) ?? "—"}`,
+  );
+  lines.push(
+    `  intrusionMargin(topScore−protectedFactScore、深い誤爆のみ): ` +
+      formatMarginStats(report.intrusionMarginStats),
   );
   lines.push("");
   lines.push(

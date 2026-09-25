@@ -299,7 +299,13 @@ function formatMargin(margin: number | null): string {
   return margin === null ? "(測れず)" : margin.toExponential(6);
 }
 
-function formatMarginStats(stats: MarginStats): string {
+/**
+ * Issue #109 続き（ADR 0291/0321）: `correction-candidate-arm.ts` の
+ * margin/intrusionMargin の表示にもそのまま再利用する — 表示の書式を複製しない。
+ * `identifier-probes`/`numeral-token-probes` の表示から意味は変えていない
+ * （エクスポートを足しただけで、この関数自体の入出力は変更していない）。
+ */
+export function formatMarginStats(stats: MarginStats): string {
   if (stats.count === 0) {
     return "(測れた probe が0件)";
   }
