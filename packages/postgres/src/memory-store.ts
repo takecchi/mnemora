@@ -12,6 +12,7 @@ import type {
   AggregateScopeOptions,
   ArchiveDecayedOptions,
   ArchiveDecayedResult,
+  ClaimKey,
   Ctx,
   EmbeddingStatus,
   EventActor,
@@ -1908,6 +1909,67 @@ export class PostgresMemoryStore implements MemoryStore {
         events: [firstEvent, secondEvent] as [MemoryEvent, MemoryEvent],
       };
     });
+  }
+
+  /**
+   * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装（interface 側の
+   * doc コメントに契約全体がある。ここはクエリの組み立てだけ）。
+   * `idx_memories_claim_key`（`(tenant_id, subject_id, claim_key_subject,
+   * claim_key_predicate)`、`migrations/0021_memories_claim_key.sql`）に載る4列の等値比較で
+   * 絞り込み、`status`/`content_hash`/有効期間の重なりを追加の `WHERE` で絞る。
+   * **LLM を一度も呼ばない**——列の等値比較・範囲比較・索引アクセスだけで完結する
+   * （北極星 問い5）。
+   *
+   * `subject_id` は `IS NOT DISTINCT FROM` で比較する（NULL 同士も一致として扱う）——
+   * Postgres の `=` は `NULL = NULL` を（真ではなく）`NULL` に評価するため、素の `=` では
+   * `subjectId: null` の Memory 同士が一致しない（`docs/memory-model.md` の
+   * 「`NULLS NOT DISTINCT` が要る理由」と同じ配慮を、索引ではなく述語の側でやっている）。
+   *
+   * `excludeMemoryId` はここでは SQL の条件にしない——`id` は `uuid` 型の列であり、
+   * 呼び出し側から壊れた形式の文字列が渡ると `<>` の暗黙キャストでクエリ全体が
+   * 例外を投げる（`get`/`reinforce` が `isUuidLike` で入口で弾いているのと同じ問題）。
+   * この口は「渡された id を除いた行を返す」という契約であって「壊れた id を拒否する」
+   * 契約ではないため、**返ってきた行を JS 側で除く**——`getMany` が壊れた id を
+   * クエリの前に取り除くのと対称の位置（クエリの後）で同じ頑健性を買う。
+   *
+   * 有効期間の重なりは半開区間 `[valid_from, valid_until)` の標準的な判定
+   * （`a1 < b2 AND a2 < b1`）を、`NULL` を `-∞`/`+∞` として読み替えて書く
+   * （`aggregateScope` の `validAt` ゲートは「1点」を判定するのに対し、こちらは
+   * 「区間の重なり」を判定する——同じ NULL の読み方を区間判定に拡張しただけである）。
+   */
+  async findActiveByClaimKey(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]> {
+    const validFrom = query.validFrom ?? null;
+    const validUntil = query.validUntil ?? null;
+    const result = await this.db.execute(sql`
+      SELECT * FROM memories
+      WHERE tenant_id = ${ctx.tenantId}
+        AND subject_id IS NOT DISTINCT FROM ${query.subjectId}
+        AND claim_key_subject = ${query.claimKey.subject}
+        AND claim_key_predicate = ${query.claimKey.predicate}
+        AND status = 'active'
+        AND content_hash <> ${query.contentHash}
+        AND (
+          ${validFrom}::timestamptz IS NULL OR valid_until IS NULL
+          OR ${validFrom}::timestamptz < valid_until
+        )
+        AND (
+          valid_from IS NULL OR ${validUntil}::timestamptz IS NULL
+          OR valid_from < ${validUntil}::timestamptz
+        )
+    `);
+    return result.rows
+      .map((row) => rowToMemory(row as unknown as MemoryRow))
+      .filter((memory) => memory.id !== query.excludeMemoryId);
   }
 
   /**

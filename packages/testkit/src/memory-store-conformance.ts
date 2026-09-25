@@ -284,6 +284,20 @@ export interface MemoryStoreConformanceOptions {
    * にはしない。
    */
   supportsLabels: boolean;
+  /**
+   * Issue #372（(B) 第2段）: 対象の `MemoryStore` 実装が `findActiveByClaimKey`
+   * （任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsMarkContestedPair`/`supportsLabels` 等と同じ
+   * 判断——省略可にしない。`true` なら契約の歯（同じ tenant・同じ subjectId・同じ
+   * claimKey・`status='active'`・`contentHash` が違う・有効期間が重なる行だけを返す、
+   * `subjectId` は `null` 同士も一致として扱う、`excludeMemoryId` に一致する行は
+   * 返さない、`contentHash` が同じ行は返さない、`status` が `active` でない行は
+   * 返さない、有効期間が重ならない行は返さない、テナント分離）を実行する。`false` なら
+   * `expect(store.findActiveByClaimKey).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。
+   */
+  supportsFindActiveByClaimKey: boolean;
 }
 
 /**
@@ -323,6 +337,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsPreviewRestoreSupersededBy,
     supportsOnlyMemoryIdsFilter,
     supportsLabels,
+    supportsFindActiveByClaimKey,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -1057,6 +1072,399 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(first.claimKey?.predicate).toBe("favorite_food");
       expect(second.claimKey?.predicate).toBe("favorite_color");
     });
+
+    // -------------------------------------------------------------------
+    // findActiveByClaimKey（Issue #372、(B) 第2段。任意メソッド）
+    //
+    // 判定規則（Issue #372 本文、逐語）: 同じ tenant_id・同じ subject_id・同じ主張キー・
+    // 有効期間が重なる・content_hash が違う・両方 status='active' ⟹ 矛盾。
+    // ここでは「規則の各項をそれぞれ落とすと結果から消える」ことを1項ずつ検査する。
+    // -------------------------------------------------------------------
+
+    if (supportsFindActiveByClaimKey) {
+      it("同じ tenant・同じ subjectId・同じ claimKey・有効期間が重なる・content_hash が違う active な Memory を返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "find-claim-key-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "find-claim-key-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches.map((m) => m.id)).toEqual([other.id]);
+      });
+
+      it("excludeMemoryId に一致する行は返さない（自分自身を相手として見つけない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "exclude-self-a",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: "some-other-hash-not-used-by-target",
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("subjectId が null 同士でも一致として扱う", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: null,
+            contentHash: "null-subject-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: null,
+            contentHash: "null-subject-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: null,
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches.map((m) => m.id)).toEqual([other.id]);
+      });
+
+      it("subjectId が違えば返さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "alice",
+            contentHash: "diff-subject-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "bob",
+            contentHash: "diff-subject-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "alice",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("claimKey の predicate が違えば返さない（同じ subjectId でも別の主張として扱う）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "diff-predicate-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "diff-predicate-other",
+            claimKey: { subject: "user", predicate: "favorite_color" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("content_hash が同じ行は返さない（内容が同じなら矛盾ではない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "same-content-hash",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "same-content-hash",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: "same-content-hash",
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("status が active でない行は返さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "status-gate-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "status-gate-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.updateStatus(ctx, other.id, "archived");
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("有効期間が重ならなければ返さない（去年の住所と今の住所）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "no-overlap-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2022-01-01T00:00:00.000Z"),
+            validUntil: new Date("2023-01-01T00:00:00.000Z"),
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "no-overlap-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      /**
+       * ⚠ 上のテスト（target が「今」・other が「去年」）だけでは、有効期間の重なり判定を
+       * 構成する2つの AND 節のうち片方だけが働いても green のままになる——
+       * `target.validFrom < other.validUntil` が単独で false になる配置だからである
+       * （【実測】この歯を書く過程で、`packages/postgres` の実装から2つ目の AND 節
+       * （`other.validFrom < target.validUntil`）を丸ごと削る変異を通したところ、
+       * 上のテストは検出できなかった）。この歯は逆向きの時系列（target が「去年」・
+       * other が「今」）を置き、**もう片方の AND 節だけが false になる配置**で
+       * 同じ規則を検査する——両方の節がそれぞれ実際に効いていることを、2本で初めて言える。
+       */
+      it("有効期間が重ならなければ返さない（逆向き: target が過去、other が現在）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "no-overlap-reversed-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "no-overlap-reversed-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2022-01-01T00:00:00.000Z"),
+            validUntil: new Date("2023-01-01T00:00:00.000Z"),
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches).toEqual([]);
+      });
+
+      it("有効期間が重なれば返す（片方が無期限＝null でも重なる）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const target = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "overlap-target",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2024-01-01T00:00:00.000Z"),
+            validUntil: null,
+          }),
+        );
+        const other = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "overlap-other",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2025-01-01T00:00:00.000Z"),
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctx, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "address" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: target.validFrom ?? null,
+          validUntil: target.validUntil ?? null,
+        });
+        expect(matches.map((m) => m.id)).toEqual([other.id]);
+      });
+
+      it("クロステナントの Memory は返さない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const target = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({
+            tenantId: "tenant-a",
+            subjectId: "user-1",
+            contentHash: "cross-tenant-target",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            subjectId: "user-1",
+            contentHash: "cross-tenant-other",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const matches = await store.findActiveByClaimKey!(ctxA, {
+          subjectId: "user-1",
+          claimKey: { subject: "user", predicate: "favorite_food" },
+          excludeMemoryId: target.id,
+          contentHash: target.contentHash,
+          validFrom: null,
+          validUntil: null,
+        });
+        expect(matches).toEqual([]);
+      });
+    } else {
+      it("findActiveByClaimKey は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.findActiveByClaimKey).toBeUndefined();
+      });
+    }
 
     // -------------------------------------------------------------------
     // decayBaseSeq/decayFloorSeq/halfLifeRecalls（活動時計の3つ組、

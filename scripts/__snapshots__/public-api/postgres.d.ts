@@ -86,7 +86,7 @@ export declare class PostgresLexicalStore implements LexicalStore {
 
 // ===== dist/memory-store.d.ts =====
 import type { SQL } from "drizzle-orm";
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 import type { Db } from "./client.js";
 export declare class PostgresMemoryStore implements MemoryStore {
     private readonly db;
@@ -171,6 +171,14 @@ export declare class PostgresMemoryStore implements MemoryStore {
             MemoryEvent
         ];
     }>;
+    findActiveByClaimKey(ctx: Ctx, query: {
+        subjectId: string | null;
+        claimKey: ClaimKey;
+        excludeMemoryId: MemoryId;
+        contentHash: string;
+        validFrom: Date | null;
+        validUntil: Date | null;
+    }): Promise<Memory[]>;
     resolveContestedPair(ctx: Ctx, first: {
         id: MemoryId;
         status: "active" | "superseded";
