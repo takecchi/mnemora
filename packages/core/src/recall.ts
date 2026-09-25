@@ -732,12 +732,35 @@ export const IndexBandSchema = z.object({
 // 目次帯の定数（docs/recall.md §5、本 PR）
 // ---------------------------------------------------------------------------
 
-/** `RecallQuery.digestBandLimit` の既定値（帯に載せる件数の上限）。 */
+/**
+ * `RecallQuery.digestBandLimit` の既定値（帯に載せる件数の上限）。
+ *
+ * **⚠ この値が実際に帯を止めるとは限らない。** 帯は、この件数上限と
+ * {@link DIGEST_BAND_MAX_CHARS}（帯全体の文字数上限。呼び出し側からは変えられない）の
+ * どちらか**先に当たったほう**で切れる（`packDigestBand`、`digest-band.ts`）。1件の
+ * 内部コストは `DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + min(digest長,
+ * DIGEST_BAND_MAX_ENTRY_CHARS) + DIGEST_BAND_ENTRY_SEPARATOR_CHARS`（値の正本は
+ * `digest-band.ts` の各定数。ここには写さない）なので、**digest が長いテナントほど、
+ * この値に届く前に {@link DIGEST_BAND_MAX_CHARS} が先に効く。** 【実測
+ * 2026-09-21・合成コーパス】digest が短い（≈15字）水準ではこの値が実際に発火したが、
+ * digest が60字を超える水準では全設定で `DIGEST_BAND_MAX_CHARS` が先に効き、この値は
+ * 一度も発火しなかった（[Issue #413](https://github.com/takecchi/mnemora/issues/413)、
+ * `docs/recall.md` §6「目次帯の量を把握し、調整する」節に詳細）。
+ * どちらの上限が実際に効いたかは `IndexBand.digestBandCoverage.limitedBy`
+ * （`"entry_limit"` / `"char_budget"` / `"both"`）で読める。
+ */
 export const DEFAULT_DIGEST_BAND_LIMIT = 50;
 
 /**
  * 帯全体の文字数予算。呼び出し側からは変えられない（`RecallQuery` に欄を持たない）。
  * `digestBandLimit` にどれだけ大きい値を渡されても、帯全体はこれを超えない。
+ *
+ * **⚠ digest が短くない限り、実際に帯を止めているのはこちらであって
+ * {@link DEFAULT_DIGEST_BAND_LIMIT} ではないことが多い**——理由・実測は
+ * {@link DEFAULT_DIGEST_BAND_LIMIT} の doc、`docs/recall.md` §6「目次帯の量を把握し、
+ * 調整する」節を参照（[Issue #413](https://github.com/takecchi/mnemora/issues/413)）。
+ * 帯を縮めたい呼び出し側は、`digestBandLimit` を「この値 ÷ 帯1件のコスト」未満に
+ * しないかぎり、`digestBandLimit` を下げても帯は縮まない。
  */
 export const DIGEST_BAND_MAX_CHARS = 4000;
 
@@ -749,6 +772,10 @@ export const DIGEST_BAND_MAX_CHARS = 4000;
  * 実運用の digest 長が測れたら見直すこと——見直す根拠になるのは「多くの digest が
  * この値の前後で切られている（＝短すぎて情報が削れすぎ、または長すぎて予算を圧迫する）」
  * という実測であり、勘で変えない。
+ *
+ * **帯1件の内部コストの一部**（{@link DEFAULT_DIGEST_BAND_LIMIT} の doc、
+ * `digest-band.ts` の `packDigestBand` 参照）。この値で切り詰められた digest は
+ * `truncated: true` を持つ。
  */
 export const DIGEST_BAND_MAX_ENTRY_CHARS = 120;
 
@@ -1507,6 +1534,19 @@ export interface RecallQuery {
   scoreThreshold?: number;
   /**
    * 帯に載せる件数の上限。既定 `DEFAULT_DIGEST_BAND_LIMIT`。
+   *
+   * **⚠ この値を下げても、帯が縮むとは限らない。** 帯は、この件数上限と
+   * `DIGEST_BAND_MAX_CHARS`（帯全体の文字数上限。呼び出し側からは変えられない）の
+   * どちらか**先に当たったほう**で切れる（`packDigestBand`、`digest-band.ts`）。digest が
+   * 短ければこの値が先に効くが、digest が長い（【実測 2026-09-21・合成コーパス】では
+   * 約60字を超える水準）と `DIGEST_BAND_MAX_CHARS` が先に効き、この値をいくら下げても
+   * 「`DIGEST_BAND_MAX_CHARS` ÷ 帯1件のコスト」未満にするまでは帯は縮まない
+   * （[Issue #413](https://github.com/takecchi/mnemora/issues/413)、`docs/recall.md` §6
+   * 「目次帯の量を把握し、調整する」節に実測の詳細がある）。**どちらの上限が実際に
+   * 効いたかは `IndexBand.digestBandCoverage.limitedBy`（`"entry_limit"` /
+   * `"char_budget"` / `"both"`）で分かる。**自分の recall で帯がどれだけ占有しているかは
+   * `RecallUsage.indexChars / RecallUsage.chars` で読める——`budget`（`RecallBudget`）
+   * ではこの分は削れない（`RecallBudget` の doc参照）。
    *
    * **⚠ `0` は渡せない（`positive()`）。** 目次帯の存在理由は「recall が0件でも
    * 何が在るかは言える」ことであり（`RecallBudget` の doc・docs/recall.md §6 参照）、
