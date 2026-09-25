@@ -44,6 +44,28 @@ import { resolveExternalId } from "./provenance-trace.js";
  *   なので、深い誤爆のとき `topScore === protectedFactScore` となり
  *   `intrusionMargin` は常に `0`——これは実装の欠陥ではなく定義どおりの挙動である
  *   （ADR 0321 に実測として記録）。**複数件になって初めて非自明な値になる。
+ *   🧊 **`intrusionMargin` はこの意味のまま凍結する**（ADR 0291 §5.5 の逐語・
+ *   ADR 0321 の回帰テストを1つも変えない）。**並べて出す後継は `protectionMargin`
+ *   （ADR 0333、下記）——`intrusionMargin` を書き換えるのではなく、別名を追加する形。
+ * - B群: `protectionMargin = protectedFactScore − topNonProtectedScore`
+ *   （ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」）。
+ *   `topNonProtectedScore` は保護対象でない候補（＝訂正に使われうる候補）の中の
+ *   最有力スコア（`maxNonProtectedScore`）。`intrusionMargin` と違い、**深い誤爆・
+ *   誤爆(浅)の両方で定義される**（`protectedFacts` が1件以上返っている限り）。
+ *   符号: 正=深い誤爆側（保護対象が最有力の非保護候補より高い）、
+ *   負=誤爆(浅)側（非保護候補が保護対象より高い）。`null` になるのは
+ *   `protectedFactScore`/`topNonProtectedScore` のどちらかが `null` のとき
+ *   （`protectedFacts` が0件、または一方の側が1件も候補として返らなかった場合）。
+ *   ⚠ **`protectedFacts` が複数件のケースでの限界（ADR 0333 §3.5、未検証）**:
+ *   `protectedFactScore` は保護対象のうち**最小**（最も危ういもの、既存の設計判断）を
+ *   使う——`protectedAtTop` は「**最大**スコアの保護対象が1位か」と同値であるため、
+ *   保護対象が2件以上あるケースでは `protectionMargin`（min協定）の符号が
+ *   `protectedAtTop` とねじれうる（例: 保護対象0.95(1位)と0.3の2件、非保護最有力0.5
+ *   → `protectedAtTop=true` だが `protectionMargin=0.3−0.5=−0.2` で見かけ上
+ *   誤爆(浅)側の符号になる）。**今日のケース集合は `protectedFacts` が0〜1件なので
+ *   顕在化しない**——実装のバグではなく、「最も危うい保護対象」と「1位に来た保護対象」が
+ *   異なる問いになるために起きる（min版とmax版は別の問いに答える。max版
+ *   `protectionMarginBest` は未実装）。
  * - `computeMarginStats`（`identifier-arm.ts`、ADR 0135 §5.5）をそのまま再利用し、
  *   arm 全体では平均・標準偏差・最小値の分布で読む。**二値（hit@k・誤爆の深/浅）と
  *   併記する。置き換えない**——ADR 0135/0291 と同じ理由。
@@ -93,8 +115,25 @@ export interface CorrectionAbstainOutcome {
   /**
    * `topScore − protectedFactScore`。**深い誤爆（`protectedAtTop === true`）の
    * ときだけ**定義する。誤爆(浅)・棄権のときは `null`（ADR 0291 §5.5 の逐語）。
+   * 🧊 **凍結**（ADR 0291 §5.5・ADR 0321 の回帰テストの対象）。並べて出す後継は
+   * `protectionMargin`（ADR 0333）——この値の定義・計算は一切変えない。
    */
   intrusionMargin: number | null;
+  /**
+   * ADR 0333 §3.2 案2の追加フィールド: 保護対象でない候補（＝訂正に使われうる候補）の
+   * 中の最有力スコア（`maxNonProtectedScore`）。1件も無ければ `null`。
+   * `protectionMargin` の計算に使う。既存フィールドの意味は変えない・追加のみ。
+   */
+  topNonProtectedScore?: number | null;
+  /**
+   * ADR 0333 §3.2 案2「別名 `protectionMargin` を新設し `intrusionMargin` は凍結」——
+   * `protectedFactScore − topNonProtectedScore`。`intrusionMargin` と違い、
+   * `protectedFacts` が1件以上返っていれば深い誤爆・誤爆(浅)の両方で定義される。
+   * 符号: 正=深い誤爆側、負=誤爆(浅)側。`null` はどちらかのスコアが取れなかったとき。
+   * ⚠ `protectedFacts` が複数件のケースでの限界は `computeProtectionMargin` の
+   * doc コメントと、このファイル冒頭の doc コメント（ADR 0333 §3.5）を参照。
+   */
+  protectionMargin?: number | null;
   returned: number;
   omittedKinds: string[];
 }
@@ -110,8 +149,13 @@ export interface CorrectionCandidateReport {
   abstains: CorrectionAbstainOutcome[];
   /** A群の `margin` の分布（ADR 0135 §5.5 と同じ形の集約）。 */
   marginStats: MarginStats;
-  /** B群の `intrusionMargin` の分布。 */
+  /** B群の `intrusionMargin` の分布。🧊 凍結（ADR 0291 §5.5・ADR 0321）。 */
   intrusionMarginStats: MarginStats;
+  /**
+   * B群の `protectionMargin` の分布（ADR 0333 §3.2 案2、`intrusionMarginStats` と
+   * 並べて出す後継）。`intrusionMarginStats` と同じ形（`computeMarginStats`）。
+   */
+  protectionMarginStats?: MarginStats;
 }
 
 /**
@@ -168,6 +212,60 @@ export function computeIntrusionMargin(
     return null;
   }
   return topScore - protectedFactScore;
+}
+
+/**
+ * `protectedIds` に**含まれない**外部IDを持つ候補のうち、`ScoreBreakdown.total` が
+ * 最も高いもの（＝訂正に使われうる候補の中で最有力）を返す純関数（ADR 0333 §3.2 案2）。
+ * `minProtectedFactScore` と対になる——あちらは保護対象の中の**最小**（最も危うい）、
+ * こちらは非保護対象の中の**最大**（最も強い「訂正の相手」候補）を取る。
+ * 1件も見つからなければ `null`。
+ *
+ * `memories`/`externalIds` は同じ添字で対応している前提（呼び出し側が揃える。
+ * `minProtectedFactScore` と同じ契約）。
+ */
+export function maxNonProtectedScore(
+  memories: readonly { score: { total: number } }[],
+  externalIds: readonly (string | null)[],
+  protectedIds: readonly string[],
+): number | null {
+  const scores: number[] = [];
+  externalIds.forEach((id, i) => {
+    if (id === null || !protectedIds.includes(id)) {
+      const memory = memories[i];
+      if (memory !== undefined) {
+        scores.push(memory.score.total);
+      }
+    }
+  });
+  return scores.length === 0 ? null : Math.max(...scores);
+}
+
+/**
+ * B群の `protectionMargin`（ADR 0333 §3.2 案2、`intrusionMargin` を凍結したまま
+ * 並べて出す後継）。`protectedFactScore − topNonProtectedScore`。どちらかが `null`
+ * なら `null`（「差が0だった」と「測れなかった」を同じ顔にしない、ADR 0033 の適用——
+ * `computeCorrectionMargin`/`computeIntrusionMargin` と同じ規律）。
+ *
+ * `intrusionMargin` と違い、`protectedAtTop` を問わない——`protectedFacts` が1件以上
+ * 返っていれば、深い誤爆・誤爆(浅)の両方で定義される。符号: 正=深い誤爆側
+ * （保護対象のスコアが最有力の非保護候補より高い）、負=誤爆(浅)側。
+ *
+ * ⚠ **`protectedFacts` が複数件のときの未検証点（ADR 0333 §3.5）**: `protectedFactScore`
+ * は保護対象のうち最小（`minProtectedFactScore`、既存の設計判断）を使う。`protectedAtTop`
+ * は「最大スコアの保護対象が1位か」と同値であるため、保護対象が2件以上あるケースでは
+ * この関数の符号が `protectedAtTop` とねじれうる（実装のバグではなく、「最も危うい
+ * 保護対象」と「1位に来た保護対象」が異なる問いになるために起きる）。今日のケース集合は
+ * `protectedFacts` が0〜1件なのでこの不整合は表面化しない——実データでは検証していない。
+ */
+export function computeProtectionMargin(
+  protectedFactScore: number | null,
+  topNonProtectedScore: number | null,
+): number | null {
+  if (protectedFactScore === null || topNonProtectedScore === null) {
+    return null;
+  }
+  return protectedFactScore - topNonProtectedScore;
 }
 
 export interface RunCorrectionCandidateArmOptions {
@@ -267,6 +365,11 @@ export async function runCorrectionCandidateArm(
       resolvedExternalIds,
       protectedIds,
     );
+    const topNonProtectedScore = maxNonProtectedScore(
+      result.memories,
+      resolvedExternalIds,
+      protectedIds,
+    );
     const topScore = topMemory?.score.total ?? null;
     abstains.push({
       caseId: c.id,
@@ -277,6 +380,8 @@ export async function runCorrectionCandidateArm(
       topDigest: topMemory?.digest ?? null,
       protectedFactScore,
       intrusionMargin: computeIntrusionMargin(topScore, protectedAtTop, protectedFactScore),
+      topNonProtectedScore,
+      protectionMargin: computeProtectionMargin(protectedFactScore, topNonProtectedScore),
       returned: result.memories.length,
       omittedKinds: result.omitted.map((o) => o.kind),
     });
@@ -293,6 +398,7 @@ export async function runCorrectionCandidateArm(
     abstains,
     marginStats: computeMarginStats(hits.map((h) => h.margin)),
     intrusionMarginStats: computeMarginStats(abstains.map((a) => a.intrusionMargin)),
+    protectionMarginStats: computeMarginStats(abstains.map((a) => a.protectionMargin ?? null)),
   };
 }
 
@@ -397,9 +503,15 @@ export function formatCorrectionCandidateReport(
     `  1位スコア範囲 = ${summary.abstainTopScoreMin?.toFixed(5) ?? "—"} 〜 ${summary.abstainTopScoreMax?.toFixed(5) ?? "—"}`,
   );
   lines.push(
-    `  intrusionMargin(topScore−protectedFactScore、深い誤爆のみ): ` +
+    `  intrusionMargin(topScore−protectedFactScore、深い誤爆のみ、🧊凍結): ` +
       formatMarginStats(report.intrusionMarginStats),
   );
+  if (report.protectionMarginStats !== undefined) {
+    lines.push(
+      `  protectionMargin(protectedFactScore−topNonProtectedScore、深い誤爆+誤爆(浅)、ADR 0333): ` +
+        formatMarginStats(report.protectionMarginStats),
+    );
+  }
   lines.push("");
   lines.push(
     "⚠ この数字は、この母集合・この provider・この規模についてのものである。代表性は主張しない。",

@@ -20,11 +20,13 @@ import type { SignedMarginStats } from "../intrusion-margin-candidates.js";
  * **手で回す測定スクリプト**（CI からは呼ばない。`local-embedding-synthetic-noise-fp.ts`
  * と同じ位置づけ）。
  *
- * ⛔ **`correction-candidate-arm.ts`・基準値 JSON
- * （`correction-candidate-probe-baseline.json`）・summary スクリプト・`ci.yml` は
- * 1文字も変えない。**このスクリプトは `../intrusion-margin-candidates.ts`（新規、
- * 純関数）を呼ぶだけであり、既存の測定は `runCorrectionCandidateArm`
- * （未変更）をそのまま内部で使う。
+ * ⚠ **当初「`correction-candidate-arm.ts`・基準値 JSON・summary スクリプト・`ci.yml` は
+ * 1文字も変えない」という制約の下で書かれたスクリプトである**（ADR 0333 の測定・比較
+ * フェーズ）。ADR 0333 §4.2 の推奨（案2）を実際に出荷した本作業では、上の4つとも
+ * `protectionMargin`（並べて出す後継、`intrusionMargin` は凍結）を追加で持つ——
+ * **この上の制約はその時点（比較のためだけの測定）にだけ適用されていたものであり、
+ * 今は上書きされている。**このスクリプト自身は変更していない
+ * （`../intrusion-margin-candidates.ts` を呼ぶだけの手動測定という位置づけのまま）。
  *
  * ## 候補
  *

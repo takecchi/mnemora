@@ -31,6 +31,14 @@
  * `caseSet` に加え、**`marginStats`/`intrusionMarginStats`（count/mean/stdDev/min）も
  * 比べる**——ADR 0291 §5.5 の核心である margin/intrusionMargin の分布が、
  * 基準値と実測でずれていないかを見る。
+ *
+ * ## 🧊 `protectionMargin`（ADR 0333 §3.2 案2）は影で並べるだけ——`DIFF_FIELDS` には入れない
+ *
+ * `intrusionMargin` を凍結したまま並べて出す後継 `protectionMargin`
+ * （`summary.protectionMarginStats`）を、**`DIFF_FIELDS`（基準値との一致/相違判定）には
+ * 加えていない**——既存の判定を1つも変えないため。measured 側の値は本文の表に
+ * intrusionMargin と並べて出す。基準値側に `protectionMarginStats` があれば、
+ * 「参考（差分判定には使っていない）」と明記した別節で並べて出す（`exit code` は変えない）。
  */
 
 const REQUIRED_SUMMARY_NUMBER_FIELDS = [
@@ -99,6 +107,14 @@ function findSummaryFieldProblems(summary) {
   }
   problems.push(...findMarginStatsProblems(s.marginStats, "summary.marginStats"));
   problems.push(...findMarginStatsProblems(s.intrusionMarginStats, "summary.intrusionMarginStats"));
+  // ADR 0333 §3.2 案2: `protectionMarginStats` は追加フィールドであり、旧い実測 JSON・
+  // 旧い基準値には存在しない。⟹ **在るときだけ**形を検査する（無いこと自体は問題にしない
+  // ——`REQUIRED_SUMMARY_NUMBER_FIELDS` と違い必須項目に昇格させない）。
+  if (s.protectionMarginStats !== undefined) {
+    problems.push(
+      ...findMarginStatsProblems(s.protectionMarginStats, "summary.protectionMarginStats"),
+    );
+  }
   return problems;
 }
 
@@ -297,6 +313,35 @@ function buildDiffSection(measured, baseline) {
 }
 
 /**
+ * `protectionMargin`（ADR 0333 §3.2 案2）の基準値との突き合わせを、**参考としてだけ**
+ * 出す節。🔴 **`DIFF_FIELDS`/`diffSnapshot` には一切関わらない**——ここで測定と基準値の
+ * 値が違っても `matches`/exit code は動かない。基準値に無い（旧い基準値、または
+ * 何らかの理由で欠けている）ときは、その旨を書いて終える。
+ *
+ * @param {Record<string, any>} measured
+ * @param {Record<string, any>} baseline
+ */
+function buildProtectionMarginReferenceSection(measured, baseline) {
+  const lines = ["## 参考: protectionMargin(ADR 0333 案2、差分判定には使っていない)", ""];
+  const measuredStats = measured.summary?.protectionMarginStats;
+  const baselineStats = baseline.snapshot.summary?.protectionMarginStats;
+  lines.push(`実測: ${formatMargin(measuredStats)}`);
+  if (baselineStats === undefined) {
+    lines.push(
+      "基準値に `protectionMarginStats` が無い(旧い基準値、または未計測)。" +
+        "🔴 この節は参考であり、`DIFF_FIELDS` による一致/相違判定には元から含まれていない。",
+    );
+    return lines.join("\n");
+  }
+  lines.push(`基準値: ${formatMargin(baselineStats)}`);
+  lines.push(
+    "⚠ 上の実測/基準値が一致しなくても、このスクリプトの exit code・" +
+      "「基準値との差分」節の判定には影響しない(この節は参考専用)。",
+  );
+  return lines.join("\n");
+}
+
+/**
  * `validateMeasured`/`validateBaseline` を通した値から Markdown を組み立てる。
  * **呼び出し側は必ず validate 済みの値を渡すこと。**
  *
@@ -340,16 +385,19 @@ export function buildSummaryMarkdown({ measured, baseline }) {
     "",
     "## B群（⛔ 訂正してはいけない。n=" + String(s.abstainCount) + "）",
     "",
-    "| 棄権 | 🔴 誤爆・深 | 誤爆・浅 | intrusionMargin(n/mean/stdDev/min、深い誤爆のみ) |",
-    "|---|---|---|---|",
+    "| 棄権 | 🔴 誤爆・深 | 誤爆・浅 | intrusionMargin(n/mean/stdDev/min、深い誤爆のみ、🧊凍結) | " +
+      "protectionMargin(n/mean/stdDev/min、深い誤爆+誤爆(浅)、ADR 0333) |",
+    "|---|---|---|---|---|",
     `| ${formatFraction(s.abstainedCount, s.abstainCount)} | ` +
       `${formatFraction(s.protectedAtTopCount, s.abstainCount)} | ` +
       `${formatFraction(s.shallowMisfireCount, s.abstainCount)} | ` +
-      `${formatMargin(s.intrusionMarginStats)} |`,
+      `${formatMargin(s.intrusionMarginStats)} | ` +
+      `${formatMargin(s.protectionMarginStats)} |`,
     "",
   );
   if (baseline) {
     lines.push(buildDiffSection(measured, baseline), "");
+    lines.push(buildProtectionMarginReferenceSection(measured, baseline), "");
   }
   lines.push(
     `⚠ ADR 0033 §3・ADR 0232「引き受けた負債」2: 標本(A群${s.hitCount}件・B群${s.abstainCount}件)` +
