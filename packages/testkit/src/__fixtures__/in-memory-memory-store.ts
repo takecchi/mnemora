@@ -397,8 +397,20 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
+    // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引く
+    // （実測）。同じ id が `ids` に複数回含まれていても、一致する行は主キーの性質上
+    // 1回しか無いため、返る件数は**一意な id の数**にしかならない。ここで検査せず
+    // 単純にループで push すると、同じ id の Memory オブジェクトを重複して返して
+    // しまう（実測: Postgres は `getMany([x,x,y])` に対し2件、素朴なループ実装は
+    // 3件を返す）。呼び出し済みの id は2回目以降スキップし、Postgres の集合演算と
+    // 同じ「一意な id の集合」に揃える。
+    const seen = new Set<MemoryId>();
     const results: Memory[] = [];
     for (const id of ids) {
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
       const memory = this.memories.get(id);
       if (memory && memory.tenantId === ctx.tenantId) {
         results.push(memory);
