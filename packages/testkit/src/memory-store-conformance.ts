@@ -3079,6 +3079,60 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(created).toBe(true);
       });
 
+      // Issue #759 組B: `supersede[].id` に**他テナントの** Memory を渡した場合、対象が
+      // そもそも無いのと同じ扱い（「memory not found」）になるべきである——`updateStatus`/
+      // `updateStatusWithEvent` と同じ契約（このファイル冒頭の「クロステナントの
+      // updateStatus/reinforce は…」参照）。この歯は今回追加するまで無かった。手作業の
+      // 変異試験で、supersede ループの UPDATE 文から `tenant_id = ...` を落としても、
+      // 既存の supersedeWithNewMemories 系テストは全て緑のままだった（実測）——
+      // 他テナントの行を書き換えてしまう変異が構造的に見逃されていた。
+      it("supersedeWithNewMemories は supersede 対象が他テナントの Memory だと throw し、news の作成も含めてロールバックし、対象は無傷のまま", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        const oldA = await store.createMemory(
+          ctxA,
+          buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "cross-tenant-old-a" }),
+        );
+        const observation = await store.createObservation(
+          ctxB,
+          buildNewObservationFixture({ tenantId: "tenant-b" }),
+        );
+        const newsInput = buildNewMemoryFixture({
+          tenantId: "tenant-b",
+          sourceObservationId: observation.id,
+          extractorVersion: "conformance-supersede-with-new-memories-v1",
+          contentHash: "cross-tenant-rollback-check",
+        });
+
+        // ctxB から ctxA の Memory を supersede しようとする——対象が無いのと同じ扱いに
+        // なるべきで、expectedStatus は付けない（「対象が無い」と「CAS 競合」を混同しない
+        // ため。上の「対象がそもそも存在しなければ throw」テストと同じ形）。
+        await expect(
+          store.supersedeWithNewMemories!(
+            ctxB,
+            [{ input: newsInput, jobKinds: [] }],
+            [
+              {
+                id: oldA.id,
+                supersededByIndex: 0,
+                event: buildSupersedeEvent(ctxB, oldA.id, "digest"),
+              },
+            ],
+          ),
+        ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
+
+        // tenant-a 側の対象は無傷のまま。
+        const unchanged = await store.get(ctxA, oldA.id);
+        expect(unchanged?.status).toBe("active");
+        expect(unchanged?.supersededById ?? null).toBeNull();
+        expect(await listEventsForMemory(ctxA, oldA.id)).toEqual([]);
+
+        // news もロールバックされている（上のテストと同じ確認方法）。
+        const { created } = await store.createMemoryWithOutbox(ctxB, newsInput, []);
+        expect(created).toBe(true);
+      });
+
       it("supersedeWithNewMemories は範囲外の supersededByIndex を RangeError で落とし、news の作成もロールバックする", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
