@@ -9,19 +9,7 @@
       "model": "ruri-v3-30m/sym",
       "dimensions": 256
     },
-    "sigmaGrid": [
-      0.0025,
-      0.005,
-      0.01,
-      0.02,
-      0.04,
-      0.08,
-      0.12,
-      0.16,
-      0.24,
-      0.32,
-      0.48
-    ],
+    "sigmaGrid": [0.0025, 0.005, 0.01, 0.02, 0.04, 0.08, 0.12, 0.16, 0.24, 0.32, 0.48],
     "seedCount": 15,
     "marginDropOptions": {
       "stdDevMultiplier": 3,
