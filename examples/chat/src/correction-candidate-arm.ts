@@ -107,14 +107,21 @@ export async function runCorrectionCandidateArm(
     });
   }
 
+  // Issue #719: `observed.memoryIds`（冪等な再送では空配列）を積算し、
+  // `drainEmbedTicks` に渡す——「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  let expectedEmbedJobs = 0;
   for (const u of utterances) {
-    await options.runtime.observe(ctx, {
+    const observed = await options.runtime.observe(ctx, {
       kind: "utterance",
       text: u.text,
       externalId: u.externalId,
     });
+    expectedEmbedJobs += observed.memoryIds.length;
   }
-  const ingestDrain = await drainEmbedTicks(options.runtime, ctx);
+  const ingestDrain = await drainEmbedTicks(options.runtime, ctx, {
+    expectedProcessed: expectedEmbedJobs,
+  });
 
   const hits: CorrectionHitOutcome[] = [];
   for (const c of options.hitCases) {

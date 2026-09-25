@@ -97,13 +97,13 @@ export async function runScopeDemo(
   const tenantCtx: Ctx = { tenantId };
   const otherTenantCtx: Ctx = { tenantId: otherTenantId };
 
-  await runtime.observe(aliceCtx, {
+  const aliceObserved = await runtime.observe(aliceCtx, {
     kind: "utterance",
     text: ALICE_FACT,
     speaker: "user",
     externalId: ALICE_EXTERNAL_ID,
   });
-  await runtime.observe(bobCtx, {
+  const bobObserved = await runtime.observe(bobCtx, {
     kind: "utterance",
     text: BOB_FACT,
     speaker: "user",
@@ -112,7 +112,12 @@ export async function runScopeDemo(
   // outbox の claimBatch はテナント単位（packages/postgres/src/outbox-store.ts、
   // subjectId では絞らない）なので、tenantId だけの ctx で1回干上がらせれば
   // alice・bob 両方の embed ジョブが処理される。
-  await drainEmbedTicks(runtime, tenantCtx);
+  // Issue #719: `observed.memoryIds`（冪等な再送では空配列）の合計を
+  // `drainEmbedTicks` に渡し、「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  await drainEmbedTicks(runtime, tenantCtx, {
+    expectedProcessed: aliceObserved.memoryIds.length + bobObserved.memoryIds.length,
+  });
 
   const aliceOnly = await runtime.recall(aliceCtx, { text: SCOPE_DEMO_QUERY });
   const tenantWide = await runtime.recall(tenantCtx, { text: SCOPE_DEMO_QUERY });

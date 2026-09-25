@@ -110,36 +110,43 @@ export async function runBackfillDemo(
   const cutoff = new Date(now.getTime() - BACKFILL_CUTOFF_DAYS * DAY);
 
   // 1. 出来事の時刻を渡して取り込む（backfill の正しい呼び方）。
-  await runtime.observe(withCtx, {
+  const withOld = await runtime.observe(withCtx, {
     kind: "utterance",
     text: BACKFILL_OLD_FACT,
     speaker: "user",
     externalId: OLD_EXTERNAL_ID,
     occurredAt: oldOccurredAt,
   });
-  await runtime.observe(withCtx, {
+  const withRecent = await runtime.observe(withCtx, {
     kind: "utterance",
     text: BACKFILL_RECENT_FACT,
     speaker: "user",
     externalId: RECENT_EXTERNAL_ID,
     occurredAt: recentOccurredAt,
   });
-  await drainEmbedTicks(runtime, withCtx);
+  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)の合計を
+  // `drainEmbedTicks` に渡し、「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  await drainEmbedTicks(runtime, withCtx, {
+    expectedProcessed: withOld.memoryIds.length + withRecent.memoryIds.length,
+  });
 
   // 2. 渡さずに取り込む（これまでの呼び方。recordedAt は今日になる）。
-  await runtime.observe(withoutCtx, {
+  const withoutOld = await runtime.observe(withoutCtx, {
     kind: "utterance",
     text: BACKFILL_OLD_FACT,
     speaker: "user",
     externalId: OLD_EXTERNAL_ID,
   });
-  await runtime.observe(withoutCtx, {
+  const withoutRecent = await runtime.observe(withoutCtx, {
     kind: "utterance",
     text: BACKFILL_RECENT_FACT,
     speaker: "user",
     externalId: RECENT_EXTERNAL_ID,
   });
-  await drainEmbedTicks(runtime, withoutCtx);
+  await drainEmbedTicks(runtime, withoutCtx, {
+    expectedProcessed: withoutOld.memoryIds.length + withoutRecent.memoryIds.length,
+  });
 
   const withOccurredAt = await runtime.recall(withCtx, {
     text: BACKFILL_QUERY,

@@ -253,7 +253,10 @@ export async function runConsolidationCost(
       fillerIds.push(...observed.memoryIds);
     }
   }
-  await drainEmbedTicks(options.runtime, ctx);
+  // Issue #719: `allIds`(いま作った Memory の総数、冪等な再送は含まない——`observed.
+  // memoryIds` の docstring)を `drainEmbedTicks` に渡し、「available_at との ms 競合で
+  // claim 0件のまま」黙って抜けないことを検査させる。
+  await drainEmbedTicks(options.runtime, ctx, { expectedProcessed: allIds.length });
 
   const embeddingSpace: ConsolidationEmbeddingSpaceJson = { ...options.embeddingProvider.space };
 
@@ -315,7 +318,14 @@ export async function runConsolidationCost(
       }
       candidatePool = [...nextPool, ...leftover];
 
-      await drainEmbedTicks(options.runtime, ctx);
+      // Issue #719: `newMemoryIdsThisRound`(この round で `consolidate()` が新しく
+      // 作った Memory——`createMemoryWithOutbox(ctx, newMemory, ['embed'])` を1件につき
+      // 1回だけ呼ぶ、`packages/core/src/runtime.ts` 参照)の件数を `drainEmbedTicks` に
+      // 渡し、「available_at との ms 競合で claim 0件のまま」黙って抜けないことを
+      // 検査させる。
+      await drainEmbedTicks(options.runtime, ctx, {
+        expectedProcessed: newMemoryIdsThisRound.length,
+      });
 
       const embedding = await measureNewMemoriesEmbedding(
         options.memoryStore,

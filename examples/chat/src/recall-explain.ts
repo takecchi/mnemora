@@ -97,20 +97,25 @@ export async function runRecallExplainDemo(
 ): Promise<RecallExplainDemoResult> {
   const ctx: Ctx = { tenantId };
 
-  await runtime.observe(ctx, {
+  const foodObserved = await runtime.observe(ctx, {
     kind: "utterance",
     text: EXPLAIN_FACT_FOOD,
     speaker: "user",
     externalId: EXPLAIN_EXTERNAL_ID_FOOD,
   });
-  await runtime.observe(ctx, {
+  const hobbyObserved = await runtime.observe(ctx, {
     kind: "utterance",
     text: EXPLAIN_FACT_HOBBY,
     speaker: "user",
     externalId: EXPLAIN_EXTERNAL_ID_HOBBY,
   });
   // この時点で干上がらせる — food/hobby だけが embeddingStatus: 'ready' になる。
-  await drainEmbedTicks(runtime, ctx);
+  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)の合計を
+  // `drainEmbedTicks` に渡し、「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  await drainEmbedTicks(runtime, ctx, {
+    expectedProcessed: foodObserved.memoryIds.length + hobbyObserved.memoryIds.length,
+  });
 
   // 3件目はこの後で観測し、embed ジョブを積んだままにする(呼ばないのが意図的)。
   await runtime.observe(ctx, {

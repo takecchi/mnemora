@@ -1,5 +1,5 @@
 import type { Ctx, MemoryStore, RecalledMemory, Runtime, ScoreBreakdown } from "@mnemora/core";
-import { drainEmbedTicks } from "./embed-drain.js";
+import { clockPastRecentDbWrites, drainEmbedTicks } from "./embed-drain.js";
 import type { MutableClock } from "./mutable-clock.js";
 import type { ProviderMode } from "./providers.js";
 import { resolveExternalId } from "./provenance-trace.js";
@@ -217,6 +217,10 @@ async function runOneProbe(
   // 残り、`decay` に測るつもりの無い幅が入る。
   const realNow = new Date();
 
+  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)を積算し、
+  // `drainEmbedTicks` に渡す——「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
     // ⭐ member を observe する直前に、**必ず** Clock を置く。
     // `recordedAt` を明示する member(`decay-*` probe)はその時刻へ、明示しない member は
@@ -224,12 +228,13 @@ async function runOneProbe(
     // `recordedAt` を持つ probe を足したときに、もう片方が前の member の過去時刻を
     // そのまま引き継いでしまう(いまの `TIME_PROBES` には無いが、罠は残さない)。
     options.clock?.set(utterance.recordedAt ?? realNow);
-    await options.runtime.observe(ctx, {
+    const observed = await options.runtime.observe(ctx, {
       kind: "utterance",
       text: utterance.text,
       externalId: utterance.externalId,
       ...(utterance.occurredAt !== null ? { occurredAt: utterance.occurredAt } : {}),
     });
+    expectedEmbedJobs += observed.memoryIds.length;
   }
 
   // ⭐ recall の直前に必ず実時刻へ戻す——`recall()` の `now`(freshness/decay の基準時刻)も
@@ -245,10 +250,24 @@ async function runOneProbe(
   // より前の時刻(= `realNow`)に戻すと、`available_at`(取り込み中の DB 時刻)のほうが
   // 後になり、**embed ジョブが1件も claim されずに ANN 候補が空になる。**
   // **実測でこれを踏んだ**——8 probe すべてが「この項を持つ候補が無い」になった。
-  const afterIngest = new Date();
-  options.clock?.set(afterIngest);
+  //
+  // 🔴 Issue #719: 素の `new Date()` を渡すだけでは足りない——`available_at`
+  // (Postgres の `now()`、us精度)と同じ ms 内でこの時刻を読むと claim が1件も
+  // 進まない(`clockPastRecentDbWrites` の docstring 参照)。`options.clock` が
+  // 在る(`decay-*` probe、止まった `MutableClock`)場合は、`.set()` するまで
+  // 動かないので `drainEmbedTicks` の `waitForClockToAdvance`(実時計が進むのを
+  // 待つ既定の再試行)は無意味——ここで先に +1ms して確実に追い越しておき、
+  // `waitForClockToAdvance: false` で無駄な待ちを避ける。`options.clock` が
+  // 無い(既定の `systemClock`)場合は `.set()` する対象が無いので何もせず、
+  // `waitForClockToAdvance` の既定 `true`(実時計が進むのを待つ)に任せる。
+  if (options.clock !== undefined) {
+    options.clock.set(clockPastRecentDbWrites());
+  }
 
-  await drainEmbedTicks(options.runtime, ctx);
+  await drainEmbedTicks(options.runtime, ctx, {
+    expectedProcessed: expectedEmbedJobs,
+    waitForClockToAdvance: options.clock === undefined,
+  });
 
   // ⛔ `text` 以外を渡さない——既定の limit/閾値/overFetchFactor のまま測る
   // (既存 `runRetrievalQualityArm` と同じ規律)。

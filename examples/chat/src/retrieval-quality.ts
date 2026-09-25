@@ -502,6 +502,10 @@ export async function runRetrievalQualityArm(
     skipped: 0,
     llmFailedWholeObservation: 0,
   };
+  // Issue #719: `observed.memoryIds`(冪等な再送では空配列——`ObserveResult` の
+  // docstring)も積算し、`drainEmbedTicks` に渡す——「available_at との ms 競合で
+  // claim 0件のまま」黙って抜けないことを検査させる。
+  let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
     const observed = await options.runtime.observe(ctx, {
       kind: "utterance",
@@ -519,10 +523,13 @@ export async function runRetrievalQualityArm(
         extractionCounts.llmFailedWholeObservation += 1;
         break;
     }
+    expectedEmbedJobs += observed.memoryIds.length;
   }
   const measurement = classifyIngestMeasurement(extractionCounts);
 
-  const drain = await drainEmbedTicks(options.runtime, ctx);
+  const drain = await drainEmbedTicks(options.runtime, ctx, {
+    expectedProcessed: expectedEmbedJobs,
+  });
 
   const probes: ProbeOutcome[] = [];
   for (const probe of PROBES) {
