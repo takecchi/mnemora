@@ -982,7 +982,7 @@ type TaxonomyMode = 'open' | 'strict';
 > （`@mnemora/core` は npm 公開済みであり、必須化すると外部 adapter が壊れる）等の詳細は
 > ソースの doc コメントを参照すること。
 
-> **2026-09-25 追記（Issue #201、[ADR 0306](./decisions/0306-taxonomy-labels.md)）**: 直下の
+> **2026-09-25 追記（Issue #201、[ADR 0307](./decisions/0307-taxonomy-labels.md)）**: 直下の
 > 「`tenant_settings` の他の列（`taxonomy_mode`）の読み書きはこの interface の範囲外」は
 > 古くなった。`getTaxonomyMode?`/`setTaxonomyMode?`（`getDecayClock?`/`setDecayClock?` と
 > 同じ形の任意メソッド）を足し、`taxonomy_mode` の読み書きをこの interface の範囲に含めた。
