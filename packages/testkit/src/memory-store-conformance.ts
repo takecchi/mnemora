@@ -2119,6 +2119,32 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reread?.embeddingStatus).toBe("ready");
     });
 
+    // ⚠ `reinforce`/`updateStatus` には「クロステナントの…は対象が無いものとして失敗する」
+    // という歯が既に在る（上の「クロステナントの updateStatus/reinforce」参照）が、
+    // `setEmbeddingStatus` には同じ形の歯が無かった——実際に変異で確かめた: Postgres 実装の
+    // `setEmbeddingStatus` は本体の `UPDATE` の手前に `reinforce` のような事前 `SELECT` を
+    // 持たない（`isUuidLike` の形式検査だけ）ため、`UPDATE` の `WHERE` から
+    // `tenant_id = ...` を落とす変異を撃つと、既存の6本はどれも赤くならなかった
+    // （Issue #759 組D、PR 本文の変異記録参照）。⟹ 他テナントの Memory の embeddingStatus を
+    // 書き換えられてしまう穴が、歯に守られていなかった。
+    it("クロステナントの setEmbeddingStatus は対象が無いものとして失敗する", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const memoryA = await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({ tenantId: "tenant-a", embeddingStatus: "pending" }),
+      );
+
+      await expect(store.setEmbeddingStatus(ctxB, memoryA.id, "ready")).rejects.toThrow(
+        NOT_FOUND_ERROR_MESSAGE,
+      );
+
+      // 触られていないこと（tenant-b から書けてしまっていないこと）を tenant-a 側で確かめる。
+      const stillPending = await store.get(ctxA, memoryA.id);
+      expect(stillPending?.embeddingStatus).toBe("pending");
+    });
+
     // -------------------------------------------------------------------
     // recordUsage（D9・docs/architecture.md §3.5「挿入の成否で数える」）
     // -------------------------------------------------------------------
