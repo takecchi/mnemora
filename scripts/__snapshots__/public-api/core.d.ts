@@ -84,7 +84,7 @@ export declare const ClaimKeySchema: z.ZodObject<{
 export type ClaimKey = z.infer<typeof ClaimKeySchema>;
 export declare function normalizeClaimKeyPart(value: string): string;
 export declare function normalizeClaimKey(key: ClaimKey): ClaimKey;
-export declare function buildClaimKeyPrompt(contents: readonly string[], knownPredicates?: readonly string[]): PromptSpec;
+export declare function buildClaimKeyPrompt(contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[]): PromptSpec;
 export declare const ClaimKeyBatchResultSchema: z.ZodObject<{
     claims: z.ZodArray<z.ZodObject<{
         subject: z.ZodString;
@@ -96,7 +96,7 @@ export interface DeriveClaimKeysResult {
     claimKeys: (ClaimKey | null)[];
     failure: ExtractionFailure | null;
 }
-export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[]): Promise<DeriveClaimKeysResult>;
+export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[]): Promise<DeriveClaimKeysResult>;
 export declare const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
 export interface ClaimKeyOptions {
     enabled: boolean;
@@ -105,6 +105,7 @@ export interface ClaimKeyOptions {
     knownPredicatesFromStore?: boolean | {
         limit?: number;
     };
+    knownSubjects?: string[];
 }
 export declare const ClaimKeyOptionsSchema: z.ZodObject<{
     enabled: z.ZodBoolean;
@@ -116,6 +117,7 @@ export declare const ClaimKeyOptionsSchema: z.ZodObject<{
             limit: z.ZodOptional<z.ZodNumber>;
         }, z.core.$strip>
     ]>>;
+    knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
 }, z.core.$strip>;
 
 // ===== dist/clock.d.ts =====
@@ -1268,6 +1270,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
                     limit: z.ZodOptional<z.ZodNumber>;
                 }, z.core.$strip>
             ]>>;
+            knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
         speaker: z.ZodOptional<z.ZodString>;
         text: z.ZodString;
@@ -1302,6 +1305,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
                     limit: z.ZodOptional<z.ZodNumber>;
                 }, z.core.$strip>
             ]>>;
+            knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
         name: z.ZodString;
         data: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodUnknown>>;
@@ -1336,6 +1340,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
                     limit: z.ZodOptional<z.ZodNumber>;
                 }, z.core.$strip>
             ]>>;
+            knownSubjects: z.ZodOptional<z.ZodArray<z.ZodString>>;
         }, z.core.$strip>>;
         title: z.ZodOptional<z.ZodString>;
         content: z.ZodString;

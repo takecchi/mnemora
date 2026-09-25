@@ -358,5 +358,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0331](./0331-extension-creation-shared-advisory-lock.md) | 拡張を作る段だけを、schema に依らない共有 advisory lock で直列化する | 採用 (2026-09) |
 | [0332](./0332-association-default-100k-measurement.md) | 連想枠の既定 on を10万行級で測る — 62件/1万行/10万行の実測記録（Issue #337、判定はしない） | **提案 (2026-09)** |
 | [0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md) | Issue #109 残件 A・C — 識別子2群の判定候補と `intrusionMargin` の定義候補を実測で比較する（B は範囲外） | **提案 (2026-09)** |
+| [0334](./0334-claim-key-known-subjects-hint.md) | claim key の `subject` 誤帰属を、明示的な `knownSubjects` 語彙ヒントで減らす — store 自己蓄積版・`subjectCandidates` への暗黙の転用は、いずれも実測・設計検討の末に採らない（Issue #372負債6） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

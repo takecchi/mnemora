@@ -2828,6 +2828,119 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
   });
 });
 
+describe("observe: claimKey knownSubjects は subjectCandidates へ暗黙に転用しない（Issue #372負債6、ADR 0334）", () => {
+  /**
+   * ⚠ ADR 0334「採らなかった案」: `knownPredicatesFromStore` と対になる
+   * `knownSubjectsFromStore`（store が自己蓄積した claim key subject を語彙ヒントに
+   * 動的に足す版）は実装していない——store 分は LLM が自由記述で作った曖昧な値
+   * （例: `'sibling'`）になりがちで、それを汎用語彙として横流しすると無関係な話題の
+   * 主張にまで誤って使い回される汚染を実測で確認したため（`claim-key.ts` の
+   * `ClaimKeyOptions.knownSubjects` doc コメント、ADR 0334 決定3参照）。
+   *
+   * ⚠ **当初案は `knownSubjects` 省略時に `subjectCandidates`（Issue #608 項目②(b)）を
+   * 既定値として転用していたが、取り下げた**（ADR 0334 追記〔2026-09-26〕）——
+   * `claimKey.enabled: true` と `subjectCandidates` を既に併用している呼び出し側が、
+   * `knownSubjects` という新しい opt-in を一切選んでいないのに claim key プロンプト・
+   * カセット鍵が動いてしまい、「off のときのプロンプトは1バイトも変えない」に反する
+   * ため。この describe が検査するのは、`knownSubjects` を明示しない限り
+   * `subjectCandidates` の有無・中身がプロンプトに一切影響しないことである。
+   */
+
+  it("knownSubjects も subjectCandidates も渡さなければ、system に既知の subject 候補一覧の文言が無い", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      claimKey: { enabled: true },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).not.toContain("既知の subject 候補一覧");
+  });
+
+  it("claimKeyOptions.knownSubjects を渡すと、その語彙が system へ足される", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      claimKey: { enabled: true, knownSubjects: ["user", "姉"] },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    expect(claimKeyCall.prompt.system).toContain("既知の subject 候補一覧: user, 姉。");
+  });
+
+  it("regression: enabled: true + subjectCandidates あり + knownSubjects 省略のとき、claim key プロンプトは subjectCandidates を渡さない場合（＝main の既存挙動）と完全に同一——暗黙の転用が復活していないことを固定する", async () => {
+    const withCandidatesLlm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime: withCandidatesRuntime } = buildRuntime(withCandidatesLlm);
+    await withCandidatesRuntime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      // 既存で claimKey.enabled と subjectCandidates を併用している呼び出し側を模す
+      // ——knownSubjects は一切渡していない（この opt-in を選んでいない）。
+      subjectCandidates: ["user", "姉", "同僚"],
+      claimKey: { enabled: true },
+    });
+
+    const withoutCandidatesLlm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime: withoutCandidatesRuntime } = buildRuntime(withoutCandidatesLlm);
+    await withoutCandidatesRuntime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      claimKey: { enabled: true },
+    });
+
+    const withCandidatesPrompt = withCandidatesLlm.calls[1]!.prompt;
+    const withoutCandidatesPrompt = withoutCandidatesLlm.calls[1]!.prompt;
+    // `PromptSpec`（system + messages）が完全一致 ⟹ カセット鍵（`llmCassetteKey`）も動かない。
+    expect(withCandidatesPrompt).toEqual(withoutCandidatesPrompt);
+    expect(withCandidatesPrompt.system).not.toContain("既知の subject 候補一覧");
+  });
+
+  it("claimKeyOptions.knownSubjects と subjectCandidates の両方を渡しても、subjectCandidates 側は system に一切現れない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "姉は福岡で働いています。", provenanceKind: "stated" }] },
+      { claims: [{ subject: "姉", predicate: "sibling_residence" }] },
+    ]);
+    const { runtime } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "姉は福岡で働いています。",
+      subjectCandidates: ["user", "ignored_candidate"],
+      claimKey: { enabled: true, knownSubjects: ["user", "姉"] },
+    });
+    const claimKeyCall = llm.calls[1]!;
+    const system = claimKeyCall.prompt.system as string;
+    expect(system).toContain("既知の subject 候補一覧: user, 姉。");
+    expect(system).not.toContain("ignored_candidate");
+  });
+
+  it("候補が0件なら、subjectCandidates を渡していても claim key 派生自体が呼ばれない（+0回、既存の「候補0件」規約のまま）", async () => {
+    const llm = sequencedLlm([{ memories: [] }]);
+    const { runtime } = buildRuntime(llm);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "何も記憶に値しない発話",
+      subjectCandidates: ["user", "姉"],
+      claimKey: { enabled: true },
+    });
+    expect(result.memoryIds).toEqual([]);
+    expect(llm.calls.length).toBe(1);
+  });
+});
+
 describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2・決定4）", () => {
   /**
    * `stores.memoryStore.findActiveByClaimKey` の呼び出し回数を数える薄いラッパーを
