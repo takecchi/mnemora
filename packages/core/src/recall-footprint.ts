@@ -187,9 +187,17 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
     kind: "builtin_default",
     measuredFrom:
       "examples/chat/compare-baseline.json（CI の example-chat ジョブが実測し repo に commit した値。" +
-      "llmMode=recorded / embeddingMode=recorded、provenance commit d6a0092）の12点のうち、" +
-      "目次帯が空の7点（totalInScope <= DEFAULT_RECALL_LIMIT）だけを使った最小二乗。" +
-      "帯のある5点は較正に使っていない（hold-out）。",
+      "12点のうち目次帯が空の hold-in 7点、totalInScope <= DEFAULT_RECALL_LIMIT）と、" +
+      "examples/chat/recall-footprint-calibration-samples-baseline.json（同じく CI 実測、" +
+      "RecallQuery.limit=20 を明示して帯を空に保った8点、totalInScope は10〜19の範囲）を" +
+      "合わせた15点の最小二乗（Issue #340 フォローアップ、ADR 0306/0310）。両ファイルとも" +
+      "llmMode=recorded / embeddingMode=recorded。標本には totalInScope を渡し、" +
+      "calibrateRecallFootprint が構造項（indexBandStructuralTerms、桁上がり分）を" +
+      "差し引いてから較正している（ADR 0306）——15点のうち7点は totalInScope が2桁であり、" +
+      "この差し引きを行わないと係数がずれる。compare-baseline.json の帯のある5点は較正に" +
+      "使っていない（hold-out）。旧い値（7点だけの較正、charsPerDigest≒15.458 / " +
+      "fixedIndexChars≒170.881）は examples/chat/src/__tests__/recall-footprint-baseline." +
+      "test.ts の回帰の歯にいまも残っている。",
     measuredUnder: {
       defaultRecallLimit: 10,
       defaultDigestBandLimit: 50,
@@ -199,20 +207,25 @@ export const BUILTIN_RECALL_FOOTPRINT_PROFILE: RecallFootprintProfile = {
       digestBandEntrySeparatorChars: 1,
     },
   },
-  charsPerDigest: 15.458,
-  fixedIndexChars: 170.881,
+  charsPerDigest: 16.175,
+  fixedIndexChars: 168.503,
 };
 
 /**
  * 見積もりの許容誤差の既定値（`compareWithFullLog` が `'too_close_to_call'` を返す幅）。
  *
- * **出所**: 上の既定プロファイル（帯が空の7点だけで較正）で
- * `compare-baseline.json` の12点すべてを予測したときの**最大残差 1.56%**
- * （帯のある5点＝ hold-out 側の最大は 1.28%）。
- * **その実測に余裕を見て 5% に置いている。**
+ * **出所（当初、7点だけで較正した時点）**: 帯が空の7点だけで較正した既定プロファイルで
+ * `compare-baseline.json` の12点すべてを予測したときの最大残差 1.56%
+ * （帯のある5点＝ hold-out 側の最大は 1.28%）。**その実測に余裕を見て 5% に置いた。**
+ *
+ * ⚠ **2026-09-25 訂正（Issue #340 フォローアップ、ADR 0306/0310）**: 上の既定プロファイルは
+ * 較正標本を15点（hold-in 7点 + `recall-footprint-calibration-samples-baseline.json` の
+ * 8点）へ拡張した。同じ12点を予測したときの最大残差は **2.023%**（hold-out 5行側の
+ * 最大は1.122%）に動いた——それでも 5% の内側であり、この既定値自体は変えていない。
+ * 古い記述を消すのではなく、当時の値といまの値を書き分けている（ADR 0166 の作法）。
  *
  * ⚠ **この値は「この関数の精度が常に5%以内である」ことを意味しない。**
- * 意味するのは「**このリポジトリのベンチの12点では 1.56% だった**」ことだけである。
+ * 意味するのは「**このリポジトリのベンチの12点ではこの程度だった**」ことだけである。
  * 較正していない環境・外挿の領域ではもっと外れうる——そのことは
  * `origin` と `RecallFootprintEstimate.extrapolated` が名乗る。
  */
