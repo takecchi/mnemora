@@ -16,6 +16,7 @@ import type {
   AggregateScopeOptions,
   ArchiveDecayedOptions,
   ArchiveDecayedResult,
+  ClaimKey,
   Ctx,
   EmbeddingStatus,
   EventActor,
@@ -1285,6 +1286,50 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
+
+  /**
+   * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装（契約は interface
+   * 側の doc コメントにある）。`packages/postgres` の実装と同じ4つの絞り込み——
+   * `subjectId` は `null` 同士も一致・`claimKey` は正規化済み文字列のまま等値比較・
+   * `status === "active"`・`contentHash` が違う——に加え、有効期間の重なりを判定する。
+   * **LLM を一度も呼ばない。**
+   */
+  async findActiveByClaimKey(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]> {
+    const targetFrom = query.validFrom ?? null;
+    const targetUntil = query.validUntil ?? null;
+    return [...this.memories.values()].filter((m) => {
+      if (m.tenantId !== ctx.tenantId) return false;
+      if (m.id === query.excludeMemoryId) return false;
+      if ((m.subjectId ?? null) !== query.subjectId) return false;
+      if (!m.claimKey) return false;
+      if (
+        m.claimKey.subject !== query.claimKey.subject ||
+        m.claimKey.predicate !== query.claimKey.predicate
+      ) {
+        return false;
+      }
+      if (m.status !== "active") return false;
+      if (m.contentHash === query.contentHash) return false;
+      // 半開区間 [validFrom, validUntil) の重なり判定。`null` は -∞/+∞ として扱う
+      // （`packages/postgres` の実装と同じ規約）。
+      const otherFrom = m.validFrom ?? null;
+      const otherUntil = m.validUntil ?? null;
+      const overlaps =
+        (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
+        (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
+      return overlaps;
+    });
   }
 
   /**

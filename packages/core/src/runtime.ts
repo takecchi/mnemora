@@ -290,6 +290,48 @@ export interface ObserveResult {
    * - **`claimKey.enabled: true` を渡した場合は常に値を持つ**（成功なら `null`）。
    */
   claimKeyFailure?: ExtractionFailure | null;
+  /**
+   * Issue #372（(B) 第2段）: この呼び出しで `claimKey: { enabled: true,
+   * detectContested: true }` を渡したとき、鍵が付いた Memory ごとの検出結果
+   * （`detectClaimKeyContested` 参照）。**LLM を一度も呼ばない**——列と索引だけで
+   * 判定する（`docs/decisions/`「主張キーの衝突検出」ADR、北極星 問い5）。
+   *
+   * ⛔ **省略可能にする**（`rejectedSubjectIds`/`claimKeyFailure` と同じ理由・同じ規約）。
+   * - **`claimKey.detectContested` を渡さなかった（省略、または `false`）呼び出しでは、
+   *   この欄は無い**（`undefined`）——「検出していない」ことと「検出したが対象の候補が
+   *   無かった」ことを、キーの有無で区別する。
+   * - **`detectContested: true` を渡した場合は常に配列**（`claimKey` が付かなかった
+   *   候補——鍵の導出自体が失敗した／実行しなかった——は含まれない。付いた鍵の数だけ
+   *   要素がある。0件なら `[]`）。
+   */
+  contestedDetection?: ContestedDetectionOutcome[];
+}
+
+/**
+ * Issue #372（(B) 第2段）: `detectClaimKeyContested` が Memory 1件について返す結果。
+ * `matchCount` は「同じ tenant・同じ subjectId・同じ claim key・有効期間が重なる・
+ * `contentHash` が違う、他の `active` Memory」の件数（この Memory 自身を除く）。
+ *
+ * - `matchCount === 0` ⟹ `result.kind === "no_conflict"`。
+ * - `matchCount === 1` ⟹ `result.kind === "contested"`。`Runtime.markContested` を
+ *   実際に呼んだ結果を `markContested` に運ぶ（`ineligible`/`conflict` になることもある
+ *   ——TOCTOU で相手の status が読んだ後に変わった場合等。この関数はその結果をそのまま
+ *   運ぶだけで、再試行はしない）。
+ * - `matchCount >= 2` ⟹ `result.kind === "unresolved_conflict"`。**`markContested` を
+ *   呼ばない**——[#207](https://github.com/takecchi/mnemora/issues/207)（`memory_relations`、
+ *   多対多）が無いと、1対1の `contestedWithId` では3件以上を表現できない
+ *   （ADR 0185 決定5）。代わりに `memory_events` へ根拠を構造として残すだけに留める
+ *   （`detectClaimKeyContested` の実装コメント参照）。**`superseded` へは
+ *   一切進めない。**
+ */
+export interface ContestedDetectionOutcome {
+  memoryId: MemoryId;
+  claimKey: ClaimKey;
+  matchCount: number;
+  result:
+    | { kind: "no_conflict" }
+    | { kind: "contested"; withMemoryId: MemoryId; markContested: MarkContestedResult }
+    | { kind: "unresolved_conflict"; matchMemoryIds: MemoryId[] };
 }
 
 /**
@@ -2470,6 +2512,118 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     });
   }
 
+  /**
+   * Issue #372（(B) 第2段。ADR 0185 決定2・決定4、ADR 0320 の続き）: 新しく `active` に
+   * なった Memory 1件について、同じ鍵の衝突を**列と索引だけで**（LLM を一度も呼ばずに）
+   * 見つけ、ちょうど1件なら `markContested` を呼ぶ。
+   *
+   * 手順:
+   * 1. `memory.claimKey` が無ければ何もしない（`null` を返す——鍵が無ければ引くものが無い）。
+   * 2. `deps.memoryStore.findActiveByClaimKey` が無ければ何もしない（任意メソッド。
+   *    フォールバック経路は無い——`markContested` と同じ判断）。
+   * 3. 一致件数で分岐する:
+   *    - **0件**: 何もしない（`{ kind: "no_conflict" }`）。
+   *    - **ちょうど1件**: `markContested(ctx, memory.id, other.id, { reason: <構造化JSON> })`
+   *      を呼ぶ。判定の根拠（鍵・重なった有効期間・両側の `contentHash`・id）を
+   *      `memory_events.meta.note` に構造として載せる（問い3）。`markContested` 自身が
+   *      `ineligible`/`conflict` を返すことがある（TOCTOU、または相手が既に別件で
+   *      `contested`/`active` 以外になっていた場合）——**この関数はその結果をそのまま
+   *      運ぶだけで、追加の再試行やフォールバックはしない**（ADR 0134 が確立した
+   *      「開く前に落とす」「上限の無い再試行ループを作らない」規律をそのまま継承する）。
+   *    - **2件以上**: [#207](https://github.com/takecchi/mnemora/issues/207)
+   *      （`memory_relations`、多対多）が無いと1対1の `contestedWithId` では表現できない
+   *      （ADR 0185 決定5）。**`markContested` を一切呼ばない**——状態は一切動かさず、
+   *      根拠（鍵・関係する各 `id`/`contentHash`/有効期間・件数）を `memory_events` へ
+   *      1件、構造として残すだけに留める（`kind: "updated"`、
+   *      `meta.reason: "claim_key_conflict_unresolved"`——`"contested"` と紛れないよう
+   *      別のタグを使う。`MemoryEventKind` という公開 union には値を足さない——`meta` は
+   *      もともと自由形式である）。これにより「同じ鍵に3件以上が並んだ」件数を
+   *      `memory_events` から数えられる。
+   *
+   * ⛔ **この関数のどこにも `superseded` への言及が無い。**`contested` までで止める
+   * （ADR 0185 決定4・北極星 問い4「AI の推論と、ユーザーが言った事実を区別する」——
+   * `claimKey` は LLM が作る鍵＝推論であり、推論から導いた「矛盾」でユーザーが言った
+   * 事実を消してはならない）。
+   */
+  async function detectClaimKeyContested(
+    ctx: Ctx,
+    memory: Memory,
+  ): Promise<ContestedDetectionOutcome | null> {
+    const claimKey = memory.claimKey ?? null;
+    if (claimKey === null) {
+      return null;
+    }
+    const findActiveByClaimKey = deps.memoryStore.findActiveByClaimKey;
+    if (findActiveByClaimKey === undefined) {
+      return null;
+    }
+    const matches = await findActiveByClaimKey.call(deps.memoryStore, ctx, {
+      subjectId: memory.subjectId ?? null,
+      claimKey,
+      excludeMemoryId: memory.id,
+      contentHash: memory.contentHash,
+      validFrom: memory.validFrom ?? null,
+      validUntil: memory.validUntil ?? null,
+    });
+
+    if (matches.length === 0) {
+      return { memoryId: memory.id, claimKey, matchCount: 0, result: { kind: "no_conflict" } };
+    }
+
+    const describeSide = (m: Memory) => ({
+      id: m.id,
+      contentHash: m.contentHash,
+      validFrom: m.validFrom ?? null,
+      validUntil: m.validUntil ?? null,
+    });
+
+    if (matches.length === 1) {
+      const other = matches[0]!;
+      // 問い3: 根拠を構造として `meta.note`（`MarkContestedOptions.reason`）へ載せる。
+      const note = JSON.stringify({
+        kind: "claim_key_conflict",
+        claimKey,
+        subjectId: memory.subjectId ?? null,
+        first: describeSide(memory),
+        second: describeSide(other),
+      });
+      const markResult = await markContested(ctx, memory.id, other.id, { reason: note });
+      return {
+        memoryId: memory.id,
+        claimKey,
+        matchCount: 1,
+        result: { kind: "contested", withMemoryId: other.id, markContested: markResult },
+      };
+    }
+
+    // matches.length >= 2: #207 が無いと1対1で表せない（ADR 0185 決定5）。
+    // markContested を呼ばず、根拠だけを memory_events に残す。
+    await deps.eventStore.append(ctx, {
+      tenantId: ctx.tenantId,
+      memoryId: memory.id,
+      kind: "updated",
+      actor: { type: "system" },
+      digestSnapshot: memory.digest,
+      meta: {
+        reason: "claim_key_conflict_unresolved",
+        note: JSON.stringify({
+          kind: "claim_key_conflict_unresolved",
+          claimKey,
+          subjectId: memory.subjectId ?? null,
+          triggering: describeSide(memory),
+          matches: matches.map(describeSide),
+          matchCount: matches.length,
+        }),
+      },
+    });
+    return {
+      memoryId: memory.id,
+      claimKey,
+      matchCount: matches.length,
+      result: { kind: "unresolved_conflict", matchMemoryIds: matches.map((m) => m.id) },
+    };
+  }
+
   async function createMemoriesFromCandidates(
     ctx: Ctx,
     observation: Observation,
@@ -2477,7 +2631,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
     claimKeys?: readonly (ClaimKey | null)[],
-  ): Promise<{ memoryIds: MemoryId[]; contentHashes: Set<string> }> {
+    detectContested?: boolean,
+  ): Promise<{
+    memoryIds: MemoryId[];
+    contentHashes: Set<string>;
+    contestedDetection: ContestedDetectionOutcome[];
+  }> {
     const newMemories = await buildNewMemoriesForCandidates(
       ctx,
       observation,
@@ -2486,6 +2645,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     );
     const memoryIds: MemoryId[] = [];
     const contentHashes = new Set<string>();
+    const contestedDetection: ContestedDetectionOutcome[] = [];
     // Issue #204 / ADR 0157: 既定 `["embed"]` のみ。opt-in（config.autoQueueConsolidateReflectOnExtract）
     // が true のときだけ、同じ memoryId を種にした consolidate/reflect ジョブも積む——
     // `createMemoryWithOutbox` は jobKinds の各要素に同じ payload `{ memoryId }` を使うので、
@@ -2503,11 +2663,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       memoryIds.push(memory.id);
       if (created) {
         await appendCreatedEvent(ctx, memory, observation, outcome, failure);
+        // Issue #372: 書き込み時（新しい Memory が active になる時点）の延長として、
+        // opt-in のときだけ検出を走らせる。**冪等な再送（`created === false`）では
+        // 走らせない**——「新しく active になった」わけではないため。
+        if (detectContested === true) {
+          const outcomeForMemory = await detectClaimKeyContested(ctx, memory);
+          if (outcomeForMemory !== null) {
+            contestedDetection.push(outcomeForMemory);
+          }
+        }
       }
       // embed/consolidate/reflect ジョブは常に outbox 経由（非同期、docs/memory-model.md §11 行3）。
       // ここでは何もしない — tick() の各 processXxxJob が処理する。
     }
-    return { memoryIds, contentHashes };
+    return { memoryIds, contentHashes, contestedDetection };
   }
 
   /**
@@ -2535,6 +2704,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     failure: ExtractionFailure | null;
     rejectedSubjectIds: string[];
     claimKeyFailure: ExtractionFailure | null;
+    contestedDetection: ContestedDetectionOutcome[];
   }> {
     const {
       candidates,
@@ -2552,8 +2722,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       : "ok";
     if (candidates.length === 0) {
       // ADR 0315 決定2「候補が0件なら+0回にできる」: ここで早期 return するため、
-      // `deriveClaimKeys` の呼び出しにすら到達しない。
-      return { memoryIds: [], outcome, failure, rejectedSubjectIds, claimKeyFailure: null };
+      // `deriveClaimKeys` の呼び出しにすら到達しない。Issue #372 の検出も同じ理由で
+      // 候補が無ければ何も走らない（鍵が付いた Memory が1件も作られないため）。
+      return {
+        memoryIds: [],
+        outcome,
+        failure,
+        rejectedSubjectIds,
+        claimKeyFailure: null,
+        contestedDetection: [],
+      };
     }
     // Issue #371: opt-in のときだけ、候補群の content をまとめて claim key を取る
     // 別の構造化呼び出しを1回行う（ADR 0315 決定2 の (ii) separate）。
@@ -2569,15 +2747,21 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       claimKeys = derived.claimKeys;
       claimKeyFailure = derived.failure;
     }
-    const { memoryIds } = await createMemoriesFromCandidates(
+    // Issue #372: `enabled: true` と組み合わせたときだけ意味を持つ（`ClaimKeyOptions.
+    // detectContested` の doc コメント参照）。`enabled` が false/省略なら `claimKeys` が
+    // 無いため、`createMemoriesFromCandidates` 内で各 Memory の `claimKey` は常に `null`
+    // になり、検出は呼ばれても何も見つけようがない（`detectClaimKeyContested` の
+    // 早期 return）。
+    const { memoryIds, contestedDetection } = await createMemoriesFromCandidates(
       ctx,
       observation,
       candidates,
       outcome,
       failure,
       claimKeys,
+      claimKeyOptions?.detectContested === true,
     );
-    return { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure };
+    return { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection };
   }
 
   /**
@@ -2888,7 +3072,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // （上の早期 return・`processExtractJob`）には渡らない。`observe()` が deferred と
     // 同時に渡された組み合わせを先に弾いているため、ここに来る時点で
     // `extractMode === 'sync'` であることは保証済み。
-    const { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure } =
+    const { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection } =
       await runExtraction(ctx, observation, input.subjectCandidates, input.claimKey);
     const extractJob = jobs.find((job) => job.kind === "extract");
     if (extractJob) {
@@ -2911,6 +3095,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // Issue #371: `claimKey.enabled` を渡した呼び出しだけこの欄を持たせる
       // （ObserveResult.claimKeyFailure の doc コメント参照。同じ「渡していない」規約）。
       ...(input.claimKey?.enabled === true ? { claimKeyFailure } : {}),
+      // Issue #372: `claimKey.detectContested: true` を渡した呼び出しだけこの欄を持たせる
+      // （ObserveResult.contestedDetection の doc コメント参照。同じ「渡していない」規約）。
+      ...(input.claimKey?.detectContested === true ? { contestedDetection } : {}),
     };
   }
 

@@ -2615,3 +2615,325 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
     expect("claimKeyFailure" in reextractResult).toBe(false);
   });
 });
+
+describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2・決定4）", () => {
+  /**
+   * `stores.memoryStore.findActiveByClaimKey` の呼び出し回数を数える薄いラッパーを
+   * インスタンスへ被せる（プロトタイプは変更しない——他のテストに影響しない）。
+   */
+  function spyOnFindActiveByClaimKey(memoryStore: FakeMemoryStore): { calls: number } {
+    const counter = { calls: 0 };
+    const original = memoryStore.findActiveByClaimKey.bind(memoryStore);
+    memoryStore.findActiveByClaimKey = (async (...args: Parameters<typeof original>) => {
+      counter.calls += 1;
+      return original(...args);
+    }) as typeof memoryStore.findActiveByClaimKey;
+    return counter;
+  }
+
+  it("既定（detectContested を渡さない）では、findActiveByClaimKey は一度も呼ばれず、1件も contested にならない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物は寿司", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnFindActiveByClaimKey(stores.memoryStore);
+
+    const first = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true },
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物は寿司",
+      claimKey: { enabled: true },
+    });
+
+    expect(spy.calls).toBe(0);
+    expect("contestedDetection" in first).toBe(false);
+    expect("contestedDetection" in second).toBe(false);
+    const firstMemory = await stores.memoryStore.get(ctx, first.memoryIds[0]!);
+    const secondMemory = await stores.memoryStore.get(ctx, second.memoryIds[0]!);
+    expect(firstMemory?.status).toBe("active");
+    expect(secondMemory?.status).toBe("active");
+    expect(firstMemory?.contestedWithId ?? null).toBeNull();
+    expect(secondMemory?.contestedWithId ?? null).toBeNull();
+    const events = await stores.eventStore.list(ctx, {});
+    expect(events.some((e) => (e.meta as { reason?: string }).reason === "contested")).toBe(
+      false,
+    );
+    expect(
+      events.some(
+        (e) => (e.meta as { reason?: string }).reason === "claim_key_conflict_unresolved",
+      ),
+    ).toBe(false);
+  });
+
+  it("detectContested: false は既定と同じ——検出は走らない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const spy = spyOnFindActiveByClaimKey(stores.memoryStore);
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: false },
+    });
+    expect(spy.calls).toBe(0);
+    expect("contestedDetection" in result).toBe(false);
+  });
+
+  it("同じ鍵・重なる有効期間・違う内容の active がちょうど1件あると、検出が発火して両側とも contested になる", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物は寿司", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const first = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    // 1件目の時点では相手がいない ⟹ no_conflict。
+    expect(first.contestedDetection).toEqual([
+      {
+        memoryId: first.memoryIds[0],
+        claimKey: { subject: "user", predicate: "favorite_food" },
+        matchCount: 0,
+        result: { kind: "no_conflict" },
+      },
+    ]);
+
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物は寿司",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    expect(second.contestedDetection).toHaveLength(1);
+    const outcome = second.contestedDetection![0]!;
+    expect(outcome.matchCount).toBe(1);
+    expect(outcome.result.kind).toBe("contested");
+    if (outcome.result.kind !== "contested") throw new Error("unreachable");
+    expect(outcome.result.withMemoryId).toBe(first.memoryIds[0]);
+    expect(outcome.result.markContested.outcome.kind).toBe("contested");
+
+    const firstMemory = await stores.memoryStore.get(ctx, first.memoryIds[0]!);
+    const secondMemory = await stores.memoryStore.get(ctx, second.memoryIds[0]!);
+    expect(firstMemory?.status).toBe("contested");
+    expect(secondMemory?.status).toBe("contested");
+    expect(firstMemory?.contestedWithId).toBe(second.memoryIds[0]);
+    expect(secondMemory?.contestedWithId).toBe(first.memoryIds[0]);
+    // ⛔ superseded へは一切進めない。
+    expect(firstMemory?.status).not.toBe("superseded");
+    expect(secondMemory?.status).not.toBe("superseded");
+  });
+
+  it("markContested の根拠（鍵・重なった有効期間・両側の content_hash）が meta.note に構造として載る", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物は寿司", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const first = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物は寿司",
+      claimKey: { enabled: true, detectContested: true },
+    });
+
+    const events = await stores.eventStore.list(ctx, { memoryId: second.memoryIds[0]! });
+    const contestedEvent = events.find(
+      (e) => (e.meta as { reason?: string }).reason === "contested",
+    );
+    expect(contestedEvent).toBeDefined();
+    const note = JSON.parse((contestedEvent!.meta as { note: string }).note) as {
+      kind: string;
+      claimKey: { subject: string; predicate: string };
+      subjectId: string | null;
+      first: { id: string; contentHash: string };
+      second: { id: string; contentHash: string };
+    };
+    expect(note.kind).toBe("claim_key_conflict");
+    expect(note.claimKey).toEqual({ subject: "user", predicate: "favorite_food" });
+    expect([note.first.id, note.second.id].sort()).toEqual(
+      [first.memoryIds[0], second.memoryIds[0]].sort(),
+    );
+  });
+
+  it("content_hash が同じなら矛盾にならない（同じ内容を2回言っても衝突しない）", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    expect(second.contestedDetection).toEqual([
+      expect.objectContaining({ matchCount: 0, result: { kind: "no_conflict" } }),
+    ]);
+    void stores;
+  });
+
+  it("有効期間が重ならなければ矛盾にならない（去年の住所と今の住所）", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "住所は東京", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "address" }] },
+      { memories: [{ content: "住所は大阪", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "address" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "住所は東京",
+      claimKey: { enabled: true, detectContested: true },
+      validFrom: new Date("2020-01-01T00:00:00Z"),
+      validUntil: new Date("2021-01-01T00:00:00Z"),
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "住所は大阪",
+      claimKey: { enabled: true, detectContested: true },
+      validFrom: new Date("2022-01-01T00:00:00Z"),
+      validUntil: new Date("2023-01-01T00:00:00Z"),
+    });
+    expect(second.contestedDetection).toEqual([
+      expect.objectContaining({ matchCount: 0, result: { kind: "no_conflict" } }),
+    ]);
+    const secondMemory = await stores.memoryStore.get(ctx, second.memoryIds[0]!);
+    expect(secondMemory?.status).toBe("active");
+  });
+
+  it("subject_id が違えば矛盾にならない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物は寿司", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      subjectId: "alice",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物は寿司",
+      subjectId: "bob",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    expect(second.contestedDetection).toEqual([
+      expect.objectContaining({ matchCount: 0, result: { kind: "no_conflict" } }),
+    ]);
+    void stores;
+  });
+
+  it("相手の active が2件以上（3件目以降）のときは markContested を呼ばず、根拠が memory_events に構造として残る", async () => {
+    // 1件目・2件目は detectContested を使わずに作る——2件ともペアにならないまま
+    // `active` で残り続ける（実運用では「後から opt-in を有効にした」「バッチ内の
+    // 複数候補が同じ鍵になった」等でも同じ状況になりうる）。3件目で初めて検出を
+    // 有効にすると、相手の active が2件（=3件目）ある状態に出会う。
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物は寿司", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+      { memories: [{ content: "好きな食べ物はカレー", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const first = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true },
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物は寿司",
+      claimKey: { enabled: true },
+    });
+    // 検出を使っていないので、1件目・2件目はどちらも active のまま。
+    expect((await stores.memoryStore.get(ctx, first.memoryIds[0]!))?.status).toBe("active");
+    expect((await stores.memoryStore.get(ctx, second.memoryIds[0]!))?.status).toBe("active");
+
+    const third = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はカレー",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    expect(third.contestedDetection).toHaveLength(1);
+    const outcome = third.contestedDetection![0]!;
+    expect(outcome.matchCount).toBe(2);
+    expect(outcome.result.kind).toBe("unresolved_conflict");
+    if (outcome.result.kind !== "unresolved_conflict") throw new Error("unreachable");
+    expect([...outcome.result.matchMemoryIds].sort()).toEqual(
+      [first.memoryIds[0], second.memoryIds[0]].sort(),
+    );
+
+    // markContested を呼んでいない ⟹ 3件目は active のまま、既存2件の状態も変わらない。
+    const thirdMemory = await stores.memoryStore.get(ctx, third.memoryIds[0]!);
+    expect(thirdMemory?.status).toBe("active");
+    expect(thirdMemory?.contestedWithId ?? null).toBeNull();
+
+    const events = await stores.eventStore.list(ctx, { memoryId: third.memoryIds[0]! });
+    const unresolvedEvent = events.find(
+      (e) => (e.meta as { reason?: string }).reason === "claim_key_conflict_unresolved",
+    );
+    expect(unresolvedEvent).toBeDefined();
+    const note = JSON.parse((unresolvedEvent!.meta as { note: string }).note) as {
+      kind: string;
+      matchCount: number;
+      matches: { id: string }[];
+    };
+    expect(note.kind).toBe("claim_key_conflict_unresolved");
+    expect(note.matchCount).toBe(2);
+    expect(note.matches.map((m) => m.id).sort()).toEqual(
+      [first.memoryIds[0], second.memoryIds[0]].sort(),
+    );
+  });
+
+  it("findActiveByClaimKey を実装しない adapter では、detectContested: true でも例外を投げず静かに何もしない", async () => {
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: "user", predicate: "favorite_food" }] },
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    // `findActiveByClaimKey` を持たない adapter を模す（インスタンスへ `undefined` を
+    // 直接代入してプロトタイプの実装を覆う。`delete` はプロトタイプのメソッドには
+    // 効かないため使わない）。
+    // @ts-expect-error テスト用に任意メソッドを取り除く。
+    stores.memoryStore.findActiveByClaimKey = undefined;
+    const result = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    expect(result.contestedDetection).toEqual([]);
+    const memory = await stores.memoryStore.get(ctx, result.memoryIds[0]!);
+    expect(memory?.status).toBe("active");
+  });
+});

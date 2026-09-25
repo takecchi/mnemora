@@ -1,3 +1,4 @@
+import type { ClaimKey } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
@@ -1072,6 +1073,46 @@ export class FakeMemoryStore implements MemoryStore {
     this.backing.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
+
+  /**
+   * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装
+   * （`packages/testkit` の `InMemoryMemoryStore.findActiveByClaimKey` と同じロジック
+   * ——このファイルは意図的に独立している、冒頭のコメント参照）。
+   */
+  async findActiveByClaimKey(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]> {
+    const targetFrom = query.validFrom ?? null;
+    const targetUntil = query.validUntil ?? null;
+    return [...this.backing.memories.values()].filter((m) => {
+      if (m.tenantId !== ctx.tenantId) return false;
+      if (m.id === query.excludeMemoryId) return false;
+      if ((m.subjectId ?? null) !== query.subjectId) return false;
+      if (!m.claimKey) return false;
+      if (
+        m.claimKey.subject !== query.claimKey.subject ||
+        m.claimKey.predicate !== query.claimKey.predicate
+      ) {
+        return false;
+      }
+      if (m.status !== "active") return false;
+      if (m.contentHash === query.contentHash) return false;
+      const otherFrom = m.validFrom ?? null;
+      const otherUntil = m.validUntil ?? null;
+      const overlaps =
+        (targetFrom === null || otherUntil === null || targetFrom < otherUntil) &&
+        (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
+      return overlaps;
+    });
   }
 
   /**
