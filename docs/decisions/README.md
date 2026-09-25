@@ -360,5 +360,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md) | Issue #109 残件 A・C — 識別子2群の判定候補と `intrusionMargin` の定義候補を実測で比較する（B は範囲外） | **提案 (2026-09)** |
 | [0334](./0334-claim-key-known-subjects-hint.md) | claim key の `subject` 誤帰属を、明示的な `knownSubjects` 語彙ヒントで減らす — store 自己蓄積版・`subjectCandidates` への暗黙の転用は、いずれも実測・設計検討の末に採らない（Issue #372負債6） | 採用 (2026-09) |
 | [0335](./0335-recalled-memory-contested-with.md) | `RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足す —— 矛盾する対が同伴取得を経由せず両方とも自然に候補に入った場合にも、対向の memoryId を返す（Issue #691 続き） | 採用 (2026-09) |
+| [0337](./0337-recall-association-default-on.md) | 連想枠（`RecallQuery.association`）の既定を on にする（Issue #337） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
