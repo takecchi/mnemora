@@ -285,8 +285,20 @@ export class InMemoryVectorStore implements VectorStore {
     // `key` は space + tenantId + memoryId から機械的に決まる（クラス冒頭の `key` 参照）
     // ので、tenant 境界は search と同じくキーの一致だけで自然に掛かる——他テナントの
     // memoryId が渡っても、そのテナントの key には一致しない。
+    //
+    // `PostgresVectorStore.getVectors` は `memory_id = ANY(...)` という集合演算で引く
+    // （実測。`packages/postgres/src/vector-store.ts`）ため、同じ id を複数回渡しても
+    // 一致する行は主キーの性質上1回しか無い（`InMemoryMemoryStore.getMany` の重複 id
+    // 対応、PR #812 と同じ形の不一致）。ここで検査せず `memoryIds` をそのまま for-of
+    // すると、同じ id の `VectorEntry` を重複して返してしまう——`seen` で2回目以降を
+    // スキップし、Postgres の集合演算と同じ「一意な id の集合」に揃える。
+    const seen = new Set<MemoryId>();
     const results: VectorEntry[] = [];
     for (const memoryId of memoryIds) {
+      if (seen.has(memoryId)) {
+        continue;
+      }
+      seen.add(memoryId);
       const entry = this.entries.get(this.key(space, ctx.tenantId, memoryId));
       if (entry !== undefined) {
         results.push({ memoryId, vector: entry.vector });
