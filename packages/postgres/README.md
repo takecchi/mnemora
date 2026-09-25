@@ -388,6 +388,26 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
   - `runMigrations`: シード `mnemora:runMigrations:advisory-lock:<schema>`
   - `registerEmbeddingSpace`: シード `mnemora:registerEmbeddingSpace:advisory-lock:<schema>`
 
+> **⚠ `--schema` を省略するときは、接続ロール名と同じ名前のスキーマを DB に作らないこと**
+> （[Issue #779](https://github.com/takecchi/mnemora/issues/779)）:
+>
+> `--schema` を省略すると（上の「専用スキーマを指定する」の通り）接続の `search_path` には
+> 一切触らない。PostgreSQL の既定の `search_path` は `"$user", public` なので、
+> **接続に使ったロール名と同じ名前のスキーマが DB 内に存在すると、`"$user"` がそちらへ
+> 解決され、`--schema` を指定していないのに例外も出さずそのスキーマへ読み書きする**
+> （`runMigrations` はロール名のスキーマの台帳を適用済みと誤判定し、`applied: []` を
+> 返して `public` には一切触れずに成功する）。さらに、この場合のロックキーは
+> 上の「未指定、または `--schema public`」の固定キーに倒れるため、**同じ物理スキーマを
+> `--schema <ロール名>` で明示指定した別の呼び出し（導出キー側）とはキーが食い違い、
+> 互いを待たない。**
+>
+> **回避策**: `--schema` を明示するか、接続に使うロールと同じ名前のスキーマを
+> DB 内に作らない。挙動・既定値はどちらも変えていない——詳細は
+> [Issue #779](https://github.com/takecchi/mnemora/issues/779)・
+> [ADR 0057](../../docs/decisions/0057-dedicated-schema-namespace.md) 決定6・
+> [ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)
+> 「引き受ける負債」参照。
+
 ## もっと詳しく
 
 - [docs/memory-model.md](../../docs/memory-model.md) §10 — DB schema・規約
