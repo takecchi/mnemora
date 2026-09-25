@@ -1,4 +1,4 @@
-# ADR 0320: taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き）
+# ADR 0321: taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25

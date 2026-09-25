@@ -238,7 +238,7 @@ export interface AggregateScopeOptions {
  * - `aggregateScope` の返り値は近似を許すが、`countKind` を必ず伴う（Phase 1 は常に厳密。
  *   PR 本文の「設計上の疑義」参照）。**`axis: 'subject'` の `groups` の総和は必ず
  *   `totalInScope` と一致する。**`axis: 'taxonomy'`（Issue #201 PR-B、
- *   [ADR 0320](../../../../docs/decisions/0320-taxonomy-recall-filter.md)）は
+ *   [ADR 0321](../../../../docs/decisions/0321-taxonomy-recall-filter.md)）は
  *   ラベルの多対多により総和が一致しない——別の被覆保証（`GroupCount` の doc コメント）
  *   を持つ。
  * - テナント分離: すべてのメソッドは `ctx.tenantId` に一致しない行を返してはならない。
@@ -533,7 +533,7 @@ export interface MemoryStore {
    * 契約: 返り値の `axis: 'subject'` の `groups` の総和は必ず `totalInScope` と一致する
    * （同一クエリから導出するため、並行する書き込みがあっても構造的に崩れない）。
    * **`axis: 'taxonomy'`（`scope.taxonomyGroupCandidates` が在るときだけ生成、Issue #201
-   * PR-B、[ADR 0320](../../../../docs/decisions/0320-taxonomy-recall-filter.md)）は
+   * PR-B、[ADR 0321](../../../../docs/decisions/0321-taxonomy-recall-filter.md)）は
    * この契約の対象外**——`GroupCount` の doc コメント参照。
    *
    * `opts.digestBand` を渡すと、`ScopeAggregate.digests`/`digestEligible` も

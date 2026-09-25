@@ -167,7 +167,7 @@ export class InMemoryVectorStore implements VectorStore {
           continue;
         }
       }
-      // Issue #201 PR-B（ADR 0320）: OR の集合絞り込み——`PostgresVectorStore.search`
+      // Issue #201 PR-B（ADR 0321）: OR の集合絞り込み——`PostgresVectorStore.search`
       // （`m.tags && ...::text[]`）と同じ意味論。
       if (opts.filter.labels !== undefined) {
         const labels = opts.filter.labels;

@@ -6153,13 +6153,13 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // scope.labels（Issue #201 PR-B、[ADR 0320](../../../docs/decisions/0320-taxonomy-recall-filter.md)）:
+    // scope.labels（Issue #201 PR-B、[ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
     // taxonomy によるラベルの絞り込み。`attributes` とは違い、`totalInScope` から除かれ
-    // かつ `filteredTaxonomy` として報告される（`period`/`validity` と同じ側——ADR 0320
+    // かつ `filteredTaxonomy` として報告される（`period`/`validity` と同じ側——ADR 0321
     // 「前提として確認したこと」参照）。ここでの `scope.labels` は core が既に
     // `taxonomy_mode` の参加資格で解決した名前の配列であり、`MemoryStore` 自身は
     // `labels`/`memory_labels` テーブルの状態を一切見ない（`tags` の配列演算のみ、
-    // ADR 0320「決定1」）。
+    // ADR 0321「決定1」）。
     // -------------------------------------------------------------------
 
     it("aggregateScope は scope.labels で絞り込める。落ちた分は totalInScope から除かれ filteredTaxonomy に計上される", async () => {
@@ -6262,12 +6262,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // scope.taxonomyGroupCandidates（Issue #201 PR-B、ADR 0320「決定5」）:
+    // scope.taxonomyGroupCandidates（Issue #201 PR-B、ADR 0321「決定5」）:
     // `axis: 'taxonomy'` の群カウント。呼び手が明示したとき（このフィールドを渡した
     // とき）だけ生成される——既定（`undefined`）では `groups` に `axis: 'taxonomy'` の
     // エントリが1件も現れない。
     //
-    // 🔴 被覆不変条件（`docs/recall.md` §5、ADR 0320「決定6」）: `axis: 'subject'` とは
+    // 🔴 被覆不変条件（`docs/recall.md` §5、ADR 0321「決定6」）: `axis: 'subject'` とは
     // 違い、ラベルは多対多なので `axis: 'taxonomy'` の `count` の単純合計は
     // `totalInScope` と一致しない（超えうる）。保証されるのは「取りこぼしが無いこと」
     // （distinct-coverage）——スコープ内の全 Memory は、少なくとも1つのラベル群、
@@ -6291,7 +6291,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.groups.some((g) => g.axis === "taxonomy")).toBe(false);
     });
 
-    it("aggregateScope の scope.taxonomyGroupCandidates: ラベルごとの群と残差（key: null）を、重複所属・無所属を混在させて厳密に数える（被覆不変条件、ADR 0320 決定6）", async () => {
+    it("aggregateScope の scope.taxonomyGroupCandidates: ラベルごとの群と残差（key: null）を、重複所属・無所属を混在させて厳密に数える（被覆不変条件、ADR 0321 決定6）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       // (1) alpha のみ、(2) alpha+beta の両方、(3) 参加資格の候補に無いラベルのみ、

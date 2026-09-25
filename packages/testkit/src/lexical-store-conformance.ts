@@ -34,7 +34,7 @@ export interface PrepareLexicalMemoryAttrs {
   validUntil?: Date | null;
   /** Issue #152/#153（ADR 0312）: `filter.attributes` の歯が使う。 */
   attributes?: Record<string, string>;
-  /** Issue #201 PR-B（ADR 0320）: `filter.labels` の歯が使う。 */
+  /** Issue #201 PR-B（ADR 0321）: `filter.labels` の歯が使う。 */
   tags?: string[];
 }
 
@@ -637,7 +637,7 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
     });
 
     // -------------------------------------------------------------------
-    // filter.labels（Issue #201 PR-B、ADR 0320）: `vector-store-conformance.ts` と
+    // filter.labels（Issue #201 PR-B、ADR 0321）: `vector-store-conformance.ts` と
     // 同じ意味論（OR の集合絞り込み）。
     // -------------------------------------------------------------------
 

@@ -139,7 +139,7 @@ export class PostgresVectorStore implements VectorStore {
     if (opts.filter.attributes !== undefined) {
       conditions.push(sql`m.attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
     }
-    // Issue #201 PR-B（ADR 0320）: OR の集合絞り込み。配列の重なり演算子（`&&`）——
+    // Issue #201 PR-B（ADR 0321）: OR の集合絞り込み。配列の重なり演算子（`&&`）——
     // 渡した名前のうち1つでも `tags` に含まれれば通る。`idx_memories_tags`（GIN）が効く。
     // 未指定なら no-op。
     if (opts.filter.labels !== undefined) {

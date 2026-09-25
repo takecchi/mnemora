@@ -76,11 +76,11 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 > **⚠ 2026-09 追記（Issue #152/#153、[ADR 0312](./decisions/0312-observe-recall-caller-attributes.md)）: `attributes`（呼び手が申告した任意属性）をスコープの外側の境界に足した。**
 > `RecallQuery.attributes` による絞り込みは、**`tenant`/`subject` と同じ側**——スコープを定義する境界であり、`filtered` としては報告しない（`FilteredOmission.condition` に専用の値を足していない。ADR 0312「採らなかった案」参照）。`totalInScope` はこの絞り込みの内側だけを数える。理由: `attributes` は記憶の内容ではなく取り扱い（公開範囲・区分など）を表す軸であり、呼び手が明示した境界の外は「失われた」のではなく「そもそも問うていない」——この段落の冒頭がスコープ外全般について述べているのと同じ扱いを、`attributes` にも適用した。
 
-> **⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0320](./decisions/0320-taxonomy-recall-filter.md)）: `taxonomy` が実体を持ち、`period`/`status`/`validAt` と同じ側（`filtered` として報告される）に加わった。**
+> **⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）: `taxonomy` が実体を持ち、`period`/`status`/`validAt` と同じ側（`filtered` として報告される）に加わった。**
 > `RecallQuery.labels` による絞り込みは `attributes`（上）とは逆側——`tenant`/`subject` のような識別子の境界ではなく、`period`/`validAt` と同じ「スコープを定義するが、落ちた分は `filtered` として報告される」次元である。下の箇条書き（**taxonomy は Phase 1 に実体が無い**）は、`labels`/`memory_labels` テーブルが存在しなかった時点（PR-A 以前）の記述であり、今は成り立たない。
 
 - **tenant と subject はスコープの外側の境界である。** 呼び出し側が明示した境界の外は「失われた」のではなく「そもそも問うていない」——ちょうどこの段落が「スコープ外は『無い』ではなく『そもそも問うていない』」と述べているのと同じ扱いであり、`Omission`（§4）としては報告しない（`FilteredOmission.condition` に `'tenant'`/`'subject'` の値が無いことと対応する。`'tenant'` という値自体は型として残っているが、Phase 1 の recall はテナント境界の外を問うことが構造的に無いため、実際には発生しない）。
-- **period・status（archived / superseded / forgotten）・validAt（expired / not_yet_valid）・taxonomy（`RecallQuery.labels` による絞り込み、Issue #201 PR-B、ADR 0320）が実際に `filtered` として報告される次元である。** status ゲートで落ちる Memory はさらに三分する——`status = 'archived'`（`condition: 'archived'`）、`status = 'superseded'`（`condition: 'superseded'`）、`status = 'forgotten'`（`condition: 'forgotten'`）。分ける理由: `archived` は「使われなくなって静かに遠ざかった」ものであり、強化すれば戻ってくる可能性がある（次の一手が違う）。`superseded` はより新しい Memory が既に別の形で返るはずのもの（**機構の都合**であり、`superseded_by_id` で置き換え先を辿れる）、`forgotten` は利用者が明示的に忘れさせたもの（**製品の振る舞い**であり、置き換え先を持たない）で、互いに次の一手が異なる（[ADR 0027](./decisions/0027-split-superseded-forgotten-omission.md)）。以前はこの2つを単純に `'status'` という1つの condition へ丸めていたが、それでは「利用者が忘れてほしいと言ったのか、こちらが作り直しただけなのか」を呼び出し側が判定できなくなる。validAt ゲートも同様に二分する——`expired`（`validUntil` が `validAt` 以前。その事実はもう真ではない）と `not_yet_valid`（`validFrom` が `validAt` より後。その事実はまだ真になっていない）——束ねると「まだ来ていない」のか「もう過ぎた」のかを呼び出し側が判定できなくなる（ADR 0164、`FilteredOmission.condition` の doc）。
+- **period・status（archived / superseded / forgotten）・validAt（expired / not_yet_valid）・taxonomy（`RecallQuery.labels` による絞り込み、Issue #201 PR-B、ADR 0321）が実際に `filtered` として報告される次元である。** status ゲートで落ちる Memory はさらに三分する——`status = 'archived'`（`condition: 'archived'`）、`status = 'superseded'`（`condition: 'superseded'`）、`status = 'forgotten'`（`condition: 'forgotten'`）。分ける理由: `archived` は「使われなくなって静かに遠ざかった」ものであり、強化すれば戻ってくる可能性がある（次の一手が違う）。`superseded` はより新しい Memory が既に別の形で返るはずのもの（**機構の都合**であり、`superseded_by_id` で置き換え先を辿れる）、`forgotten` は利用者が明示的に忘れさせたもの（**製品の振る舞い**であり、置き換え先を持たない）で、互いに次の一手が異なる（[ADR 0027](./decisions/0027-split-superseded-forgotten-omission.md)）。以前はこの2つを単純に `'status'` という1つの condition へ丸めていたが、それでは「利用者が忘れてほしいと言ったのか、こちらが作り直しただけなのか」を呼び出し側が判定できなくなる。validAt ゲートも同様に二分する——`expired`（`validUntil` が `validAt` 以前。その事実はもう真ではない）と `not_yet_valid`（`validFrom` が `validAt` より後。その事実はまだ真になっていない）——束ねると「まだ来ていない」のか「もう過ぎた」のかを呼び出し側が判定できなくなる（ADR 0164、`FilteredOmission.condition` の doc）。
 - **taxonomy は Phase 1 に実体が無い**（labels/memory_labels は Phase 2、[./memory-model.md](./memory-model.md) §8）。したがって Phase 1 のスコープの taxonomy 次元は常に無条件であり、`Omission { kind: 'filtered', condition: 'taxonomy' }` は Phase 1 では発生しない（型としては残す）。
 
 **件数はすべて単一の集約から取る。** `IndexBand.totalInScope` と `groups`、および `filtered` 系 Omission の件数・`not_indexed` の件数は、すべて同じ1回の集約クエリ（`MemoryStore.aggregateScope`）から得る。ADR 0011 が段1の `count(*) OVER ()` を締め出したのと同じ理由——**別々のクエリから出すと、その間の書き込みで総和が一致しなくなる**——がここでも成り立つ。
@@ -429,7 +429,7 @@ alteroid の「全文か目次1行かのどちらかに必ず現れる」とい�
 
 **「スコープ」の外延は §2 段0「スコープの外延」で確定した(tenant + subject + 時間窓 + 有効性(validAt) + taxonomy + status ゲート)。この不変条件が指す「スコープ内の総数」はその定義そのものであり、status ゲートで落ちた Memory(`archived`/`superseded`/`forgotten`)・validAt ゲートで落ちた Memory(`expired`/`not_yet_valid`)・taxonomy ゲートで落ちた Memory(`RecallQuery.labels` で絞り込んだ結果、`filteredTaxonomy`)は「スコープ内」に含まれない——したがって群カウントにも乗らない。乗るのは、スコープには入ったが段1〜4のどこかで(索引未整備・閾値・件数超過・予算・忘却ゲートのいずれかで)落ちたものだけである(`decayed` を含む——§2 段0「`filtered` の2群」参照)。**この区別を曖昧にすると、この不変条件は「在るなら出せるはず」という誤読を生む——忘れられた Memory まで「在る」と数えて見せることは、原則3(結果は、そこから漏れたものと必ず同時に提示する)の逆効果になる。**
 
-**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0320](./decisions/0320-taxonomy-recall-filter.md)）: 上の「総和が一致する」という文は `axis: 'subject'` の群カウントについてのものである。** `RecallQuery.taxonomyGroups: true` で opt-in する `axis: 'taxonomy'` の群カウントは、ラベルが1 Memory に複数付きうる(多対多)ため単純合計が `totalInScope` と一致しない——**別の被覆保証(distinct-coverage)を持つ。** 詳細は本節末尾の専用の項、および `GroupCount`/`ScopeAggregate`(`packages/core/src/recall.ts`)の doc コメントを参照。
+**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）: 上の「総和が一致する」という文は `axis: 'subject'` の群カウントについてのものである。** `RecallQuery.taxonomyGroups: true` で opt-in する `axis: 'taxonomy'` の群カウントは、ラベルが1 Memory に複数付きうる(多対多)ため単純合計が `totalInScope` と一致しない——**別の被覆保証(distinct-coverage)を持つ。** 詳細は本節末尾の専用の項、および `GroupCount`/`ScopeAggregate`(`packages/core/src/recall.ts`)の doc コメントを参照。
 
 二階建てが mnemora で成り立たない理由は単純である。1テナントが100万件の Memory を持ちうる設計で、digest 1行ずつでもプロンプトに載せれば数十万文字になる。alteroid の二階建てが成立していたのは、想定するのが単一所有者・文書数が少ないという前提の上だからである(§1 参照)。mnemora はこの前提を持たない。
 
@@ -707,7 +707,7 @@ ADR 0307。
 `subject_id` の `NULL` は「主題を持たない記憶」という、それ自体で完結した値である。
 詳細は ADR 0286 を参照。
 
-### taxonomy によるラベルの絞り込みと群カウント（Issue #201 PR-B / [ADR 0320](./decisions/0320-taxonomy-recall-filter.md)）
+### taxonomy によるラベルの絞り込みと群カウント（Issue #201 PR-B / [ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）
 
 `RecallQuery.labels?: string[]` は、[ADR 0318](./decisions/0318-taxonomy-labels.md) が実装した
 統制語彙（`labels`/`memory_labels`、`registered`/`proposed`）で母集合を絞り込む。**意味論は
@@ -738,7 +738,7 @@ strict: registered のみ）で参加資格のあるものを1つでも `tags` �
 軸の群カウントは taxonomy による絞り込みが適用された後の `totalInScope` を数えるので、
 2つの軸は独立に自分の被覆保証を満たす。
 
-設計の詳細・採らなかった案・適合テストの形は ADR 0320 を参照。**`packages/testkit` の
+設計の詳細・採らなかった案・適合テストの形は ADR 0321 を参照。**`packages/testkit` の
 適合テストが postgres・In-Memory の両方で、ラベル所属が0個・1個・複数個・strict で
 参加資格の無いものだけ、を混在させたフィクスチャに対しこの2つの被覆保証（`subject` 軸の
 合計一致・`taxonomy` 軸の distinct-coverage）を歯で検算する。**
@@ -748,7 +748,7 @@ strict: registered のみ）で参加資格のあるものを1つでも `tags` �
 **Phase 1 では第3階(群カウント)のみを実装する。digest 帯(第2階)は Phase 2 に送る。** 理由は、digest 帯が taxonomy(分類語彙)を要するのに対し、群カウントは `subject` 単位だけでも成立するからである。Phase 1 の `IndexBand.groups` の既定 `axis` は `'subject'` とする。**`time_window` 軸は当時型として持っていたが、生成するコードが一度も無く、[ADR 0144](./decisions/0144-drop-unreachable-classification-3-union-values.md)（2026-09-16）で型からも落とした。**
 
 **⚠ 2026-09-25 追記（Issue #201 PR-A/PR-B、[ADR 0318](./decisions/0318-taxonomy-labels.md)/
-[ADR 0320](./decisions/0320-taxonomy-recall-filter.md)）: 上の「`taxonomy` 軸によるグルーピングは
+[ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）: 上の「`taxonomy` 軸によるグルーピングは
 Phase 2 に含める」は前倒しで実装され、もう成り立たない。** `labels`/`memory_labels`
 テーブル・recall 側の絞り込みを任意の追加として実装した——詳細は上の「taxonomy による
 ラベルの絞り込みと群カウント」節。**既定（`RecallQuery.taxonomyGroups` を渡さない）では

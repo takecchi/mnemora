@@ -615,14 +615,14 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 `strict` が実際に効くのは、`labels` を使った**新しい**絞り込みに対してだけである
 （下記追記のとおり実装済み）。
 
-**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0320](./decisions/0320-taxonomy-recall-filter.md)）:
+**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）:
 上の「PR-B、まだ実装していない」は、本追記の時点で古い。** `RecallQuery.labels?`/
 `taxonomyGroups?` を実装した——recall の段1（ANN・語彙）・段3.5（連想枠）・
 `aggregateScope` への絞り込みの伝播、`taxonomy_mode` の参加資格（open: registered/proposed
 両方、strict: registered のみ）、`FilteredOmission.condition: 'taxonomy'` の報告、
 `GroupCount.axis: 'taxonomy'`（呼び手が明示したときだけ）のいずれも着地している。
 **`tagMatch`（上）は引き続き変えていない**——`docs/recall.md`「taxonomy によるラベルの
-絞り込みと群カウント」節、ADR 0320 を参照。
+絞り込みと群カウント」節、ADR 0321 を参照。
 
 ---
 

@@ -48,7 +48,7 @@ export interface PrepareMemoryIdAttrs {
   validUntil?: Date | null;
   /** Issue #152/#153（ADR 0312）: `filter.attributes` の歯が使う。 */
   attributes?: Record<string, string>;
-  /** Issue #201 PR-B（ADR 0320）: `filter.labels` の歯が使う。 */
+  /** Issue #201 PR-B（ADR 0321）: `filter.labels` の歯が使う。 */
   tags?: string[];
 }
 
@@ -928,7 +928,7 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // filter.labels（Issue #201 PR-B、ADR 0320）: OR の集合絞り込み。
+    // filter.labels（Issue #201 PR-B、ADR 0321）: OR の集合絞り込み。
     // -------------------------------------------------------------------
 
     it("filter.labels: 渡した名前のいずれかを tags に持つ Memory だけが返る", async () => {

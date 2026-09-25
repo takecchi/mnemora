@@ -116,7 +116,7 @@ export function buildLexicalSearchSelect(
   if (opts.filter.attributes !== undefined) {
     conditions.push(sql`attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
   }
-  // Issue #201 PR-B（ADR 0320）: `PostgresVectorStore.search`（vector-store.ts）と
+  // Issue #201 PR-B（ADR 0321）: `PostgresVectorStore.search`（vector-store.ts）と
   // 同じ述語・同じ意味（配列の重なり演算子）。
   if (opts.filter.labels !== undefined) {
     conditions.push(sql`tags && ${sql.param(opts.filter.labels)}::text[]`);

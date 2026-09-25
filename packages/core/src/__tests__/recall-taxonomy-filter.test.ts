@@ -10,7 +10,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
  * `RecallQuery.labels`/`RecallQuery.taxonomyGroups`（Issue #201 PR-B、
- * [ADR 0320](../../../docs/decisions/0320-taxonomy-recall-filter.md)）の歯。
+ * [ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）の歯。
  *
  * `recall-attributes-filter.test.ts`（ADR 0312）と同型の構え:
  * 1. 配線の歯——段1（ANN・語彙）と段3.5（連想枠）の filter に `labels` が渡ること。
@@ -236,7 +236,7 @@ describe("recall() — labels が実際に候補を落とす（OR、Issue #201 P
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, labels: ["alpha"] });
 
-    // ADR 0320「決定2」: 参加資格の無い名前しか渡していないので、絞り込みそのものが
+    // ADR 0321「決定2」: 参加資格の無い名前しか渡していないので、絞り込みそのものが
     // 無効化される——「その名前を条件にしていない」のと同じ扱いになり、両方返る。
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toContain(proposedOnly.id);
@@ -400,7 +400,7 @@ describe("recall() — 連想枠（段3.5）にも labels が掛かる（Issue #
 // 5. GroupCount.axis: 'taxonomy' — 呼び手が明示したときだけ。
 // ---------------------------------------------------------------------------
 
-describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0320「決定5」）", () => {
+describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0321「決定5」）", () => {
   it("既定（省略）では axis: 'taxonomy' の群は1件も載らない", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { tags: ["alpha"] });
