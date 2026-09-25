@@ -55,3 +55,35 @@ export function resolveAnswerClaimKeyOptions(env: EnvLike): ClaimKeyOptions | un
   // 分岐で確定している。
   return { enabled: true, detectContested: true };
 }
+
+/**
+ * ADR 0334 負債2（Issue #372負債6の続き）: `condition === "known-subjects"` のとき
+ * だけ、ケースが持つ `AnswerCase.knownSubjects`（任意）を `claimKeyOptions.
+ * knownSubjects` として合流させる。**それ以外の条件、またはケースが `knownSubjects`
+ * を持たない場合は、渡された `claimKeyOptions` をそのまま返す**（新しいオブジェクトを
+ * 作らない・1バイトも変えない）——`record-answer-claim-key.ts` の
+ * `MNEMORA_RECORD_CONDITION` を省略・`"baseline"`/`"known-predicates-from-store"` に
+ * したときの挙動は、このフィールドを足す前と完全に同じままである。
+ *
+ * ⚠ **これは上限（オラクル）測定の経路である。** `caseKnownSubjects` は作業者が
+ * ケース定義（`answer-case-set.*.ts`）に手で埋めた正解の第三者名であり、この関数は
+ * それをそのまま `ClaimKeyOptions.knownSubjects`（ADR 0334 決定4）へ渡す。「正解を
+ * 知っている」という理想条件での効き目の上限を測るためのものであり、実運用で
+ * mnemora がこの正解を知っている保証は無い（`AnswerCase.knownSubjects` docstring、
+ * ADR 0334 負債1・負債2 と同じ懸念——このファイル冒頭の docstring が
+ * `knownPredicates` について述べている懸念そのものが、この経路にも当てはまる）。
+ *
+ * `condition` の型を `string` に緩めているのは、`RecordCondition`（呼び出し側
+ * `record-answer-claim-key.ts` にだけ在る型）とこのモジュールを結合しないため
+ * ——この関数は「`"known-subjects"` という文字列と一致するか」しか見ない。
+ */
+export function applyCaseKnownSubjects(
+  claimKeyOptions: ClaimKeyOptions,
+  condition: string,
+  caseKnownSubjects: string[] | undefined,
+): ClaimKeyOptions {
+  if (condition !== "known-subjects" || caseKnownSubjects === undefined) {
+    return claimKeyOptions;
+  }
+  return { ...claimKeyOptions, knownSubjects: caseKnownSubjects };
+}

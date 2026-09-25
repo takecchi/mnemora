@@ -141,6 +141,9 @@ export const ANSWER_CASE_SET_EVAL: AnswerCase[] = [
         "第0ターンで『わたしはラーメン、息子はカレー』と2人分の事実が並んでいる。問いは息子の側だけを指しており、本人のラーメンは別人（reject）の値である。",
     },
     tuningUse: "held-out",
+    // ADR 0334 負債2: 本人以外の第三者（息子）が出てくるケース。正解の claim key
+    // subject 候補（上限＝オラクル測定用、`AnswerCase.knownSubjects` docstring参照）。
+    knownSubjects: ["user", "息子"],
   },
   {
     id: "other-period-city-last-year",
@@ -214,6 +217,10 @@ export const ANSWER_CASE_SET_EVAL: AnswerCase[] = [
         "値である。語順に引きずられて誤帰属しないかを検査する。",
     },
     tuningUse: "held-out",
+    // ADR 0334 負債2: 本人以外の第三者（同僚の佐藤さん）が出てくるケース。正解の
+    // claim key subject 候補（上限＝オラクル測定用、`AnswerCase.knownSubjects`
+    // docstring参照）。会話中の呼び方に揃えて「佐藤さん」を使う。
+    knownSubjects: ["user", "佐藤さん"],
   },
   {
     id: "eval-inferred-habit-not-attributed-to-user",
@@ -238,5 +245,9 @@ export const ANSWER_CASE_SET_EVAL: AnswerCase[] = [
         "鈴木さんの麦茶を『わたし』の答えとして混同しないか（誤帰属の検知）を検査する。",
     },
     tuningUse: "held-out",
+    // ADR 0334 負債2: 本人以外の第三者（友人の鈴木さん）が出てくるケース。正解の
+    // claim key subject 候補（上限＝オラクル測定用、`AnswerCase.knownSubjects`
+    // docstring参照）。会話中の呼び方に揃えて「鈴木さん」を使う。
+    knownSubjects: ["user", "鈴木さん"],
   },
 ];

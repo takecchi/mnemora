@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { resolveAnswerClaimKeyOptions } from "../answer-claim-key-options.js";
+import type { ClaimKeyOptions } from "@mnemora/core";
+import {
+  applyCaseKnownSubjects,
+  resolveAnswerClaimKeyOptions,
+} from "../answer-claim-key-options.js";
 
 /**
  * `resolveAnswerClaimKeyOptions`（Issue #691 続き）の単体テスト。
@@ -38,5 +42,60 @@ describe("resolveAnswerClaimKeyOptions", () => {
     expect(() => resolveAnswerClaimKeyOptions({ MNEMORA_ANSWER_CLAIM_KEY: "on" })).toThrow(
       /MNEMORA_ANSWER_CLAIM_KEY/,
     );
+  });
+});
+
+/**
+ * `applyCaseKnownSubjects`（ADR 0334 負債2、Issue #372負債6の続き）の単体テスト。
+ *
+ * **省けば従来どおり**——`condition !== "known-subjects"`、またはケースが
+ * `knownSubjects` を持たない場合は、渡された `claimKeyOptions` をそのまま
+ * （同じ参照で）返すことを固定する。**指定すれば渡る**——`condition ===
+ * "known-subjects"` かつケースが `knownSubjects` を持つときだけ合流することを固定する。
+ */
+describe("applyCaseKnownSubjects", () => {
+  const baseline: ClaimKeyOptions = { enabled: true, detectContested: true };
+
+  it('condition が "known-subjects" 以外なら、caseKnownSubjects が在っても素通し（同じ参照）', () => {
+    const result = applyCaseKnownSubjects(baseline, "baseline", ["user", "妻"]);
+    expect(result).toBe(baseline);
+  });
+
+  it('condition が "known-predicates-from-store" でも、caseKnownSubjects が在っても素通し（同じ参照）', () => {
+    const withStore: ClaimKeyOptions = {
+      enabled: true,
+      detectContested: true,
+      knownPredicatesFromStore: true,
+    };
+    const result = applyCaseKnownSubjects(withStore, "known-predicates-from-store", ["user", "妻"]);
+    expect(result).toBe(withStore);
+  });
+
+  it('condition が "known-subjects" でも、ケースが knownSubjects を持たなければ素通し（同じ参照）', () => {
+    const result = applyCaseKnownSubjects(baseline, "known-subjects", undefined);
+    expect(result).toBe(baseline);
+  });
+
+  it('condition が "known-subjects" かつケースが knownSubjects を持てば合流する', () => {
+    const result = applyCaseKnownSubjects(baseline, "known-subjects", ["user", "妻"]);
+    expect(result).toEqual({ enabled: true, detectContested: true, knownSubjects: ["user", "妻"] });
+    // 元のオブジェクトは変更しない。
+    expect(baseline).toEqual({ enabled: true, detectContested: true });
+    expect("knownSubjects" in baseline).toBe(false);
+  });
+
+  it("knownPredicatesFromStore と knownSubjects は共存できる（合流は knownSubjects だけを足す）", () => {
+    const withStore: ClaimKeyOptions = {
+      enabled: true,
+      detectContested: true,
+      knownPredicatesFromStore: true,
+    };
+    const result = applyCaseKnownSubjects(withStore, "known-subjects", ["user", "息子"]);
+    expect(result).toEqual({
+      enabled: true,
+      detectContested: true,
+      knownPredicatesFromStore: true,
+      knownSubjects: ["user", "息子"],
+    });
   });
 });

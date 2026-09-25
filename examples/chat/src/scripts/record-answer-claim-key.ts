@@ -1,6 +1,9 @@
 import { CassetteRecorder } from "@mnemora/testkit";
 import { createPostgresClient, closePostgresClient } from "@mnemora/postgres";
-import { resolveAnswerClaimKeyOptions } from "../answer-claim-key-options.js";
+import {
+  applyCaseKnownSubjects,
+  resolveAnswerClaimKeyOptions,
+} from "../answer-claim-key-options.js";
 import { createAnswerBenchRuntime, embeddingSpaceSlug, runAnswerCase } from "../answer-bench.js";
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
@@ -29,11 +32,22 @@ import {
  * **ADR 0329 が足した2つの環境変数**（両方省略すれば、この PR より前と1バイトも
  * 変わらない挙動になる）:
  *
- * - `MNEMORA_RECORD_CONDITION`（`"baseline"` 省略時の既定 | `"known-predicates-from-store"`）:
+ * - `MNEMORA_RECORD_CONDITION`（`"baseline"` 省略時の既定 |
+ *   `"known-predicates-from-store"` | `"known-subjects"`）:
  *   `"known-predicates-from-store"` を指定すると、`MNEMORA_ANSWER_CLAIM_KEY` を
  *   `"detect-known-predicates-from-store"` に切り替える（`ClaimKeyOptions.
  *   knownPredicatesFromStore: true` を足した新案）。省略・`"baseline"` は従来どおり
  *   `"detect"`（`knownPredicatesFromStore` を渡さない基準）。
+ *   **`"known-subjects"`（ADR 0334 負債2、Issue #372負債6の続き）**は、
+ *   `MNEMORA_ANSWER_CLAIM_KEY` は `"detect"` のまま、ケースごとに
+ *   `AnswerCase.knownSubjects`（作業者が手で埋めた、正解の第三者名。任意項目）を
+ *   `applyCaseKnownSubjects`（`answer-claim-key-options.ts`）で
+ *   `claimKeyOptions.knownSubjects` へ合流させる——**`knownSubjects` を持たない
+ *   ケース（14件中10件）はこの条件でも `claimKeyOptions` が1バイトも変わらない**。
+ *   ⚠ **これは上限（オラクル）測定である**（`AnswerCase.knownSubjects` docstring・
+ *   `applyCaseKnownSubjects` docstring 参照）——正解を作業者が手で渡した場合の
+ *   効き目の上限を見るためのものであり、mnemora が実運用でこの正解を知っている
+ *   保証は無い。
  * - `MNEMORA_RECORD_CASSETTE_PATH`（省略時の既定 = {@link ANSWER_CLAIM_KEY_CASSETTE_PATH}）:
  *   書き出し先を上書きする。ADR 0329 の測定は、条件×反復ごとに別ファイル
  *   （`examples/chat/cassettes/` の新しいファイル名）へ書く——このスクリプト自体は
@@ -65,7 +79,7 @@ import {
  * ための実データ。
  */
 
-const RECORD_CONDITIONS = ["baseline", "known-predicates-from-store"] as const;
+const RECORD_CONDITIONS = ["baseline", "known-predicates-from-store", "known-subjects"] as const;
 type RecordCondition = (typeof RECORD_CONDITIONS)[number];
 
 function resolveRecordCondition(raw: string | undefined): RecordCondition {
@@ -93,7 +107,7 @@ interface ObservedTurnDiagnostic {
 const usage = () => {
   console.error(
     "使い方: DATABASE_URL=... OPENAI_API_KEY=... " +
-      "[MNEMORA_RECORD_CONDITION=baseline|known-predicates-from-store] " +
+      "[MNEMORA_RECORD_CONDITION=baseline|known-predicates-from-store|known-subjects] " +
       "[MNEMORA_RECORD_CASSETTE_PATH=...] " +
       "tsx examples/chat/src/scripts/record-answer-claim-key.ts",
   );
@@ -153,6 +167,19 @@ async function main(): Promise<void> {
   try {
     const results: { caseId: string; contradictionTagCount: number }[] = [];
     for (const answerCase of allCases) {
+      // ADR 0334 負債2: condition === "known-subjects" のときだけ、このケースの
+      // knownSubjects（在れば）を合流させる。他の条件・knownSubjects を持たない
+      // ケースでは claimKeyOptions をそのまま返す（1バイトも変わらない）。
+      const caseClaimKeyOptions = applyCaseKnownSubjects(
+        claimKeyOptions,
+        condition,
+        answerCase.knownSubjects,
+      );
+      if (caseClaimKeyOptions !== claimKeyOptions) {
+        console.log(
+          `[record-answer-claim-key] ${answerCase.id}: knownSubjects=${JSON.stringify(answerCase.knownSubjects)} を合流（condition=${condition}）`,
+        );
+      }
       const result = await runAnswerCase(
         handle.runtime,
         handle.llmProvider,
@@ -161,7 +188,7 @@ async function main(): Promise<void> {
         answerCase,
         tenantPrefix,
         {
-          claimKey: claimKeyOptions,
+          claimKey: caseClaimKeyOptions,
           onObserved: (turn, observed) => {
             diagnostics.push({
               caseId: answerCase.id,
