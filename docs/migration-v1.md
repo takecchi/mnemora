@@ -948,7 +948,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 🔴 **空である理由は「まだ着地していなかった」ではない。**`v0.5.0` タグを切った時点で
 `v0.5.0` と当時の `origin/main` が同じ commit（`509f4e7`）を指しており、
 **この世代を起こした時点で数える範囲そのものが空だった**——その後 `v1.0.0` が切られるまでに
-着地した17本超の PR のうち、`scripts/publish-targets.mjs` の `PUBLISH_TARGETS`（6パッケージ）
+着地した29本の commit（`git log --oneline v0.5.0..v1.0.0`）のうち、`scripts/publish-targets.mjs` の `PUBLISH_TARGETS`（6パッケージ）
 を触ったものは1本も無かった。
 
 ⚠ **判定に使った手順・使ってはいけない手順（`git rev-list --count` 等とその理由）の詳細は、
