@@ -1,6 +1,9 @@
 # ADR 0310: recall-footprint 較正の補助標本は作れる(実 API 不要)が、compare-baseline.json への昇格には CI artifact が要る — 別ファイルに留めた
 
-- **状態**: 未決 (2026-09-25)
+- **状態**: 採用 (2026-09-25)。⚠ 当初「未決」としていたのは PR を作れず CI artifact を
+  取得できなかったためだが、本 ADR §4（本追記）が CI-sourcing を完了させた——決定2「昇格
+  させない」は覆り、標本は `examples/chat/recall-footprint-calibration-samples-baseline.json`
+  として正式に基準値へ昇格した。
 - **日付**: 2026-09-25
 
 ---
@@ -144,6 +147,83 @@ dev.json`（8点、CI未経由）を使った参考計算の再計算である�
 Postgres + `recorded` カセットの実行に基づく（下の「測ったこと」に相当する手順を
 このコミットでは ADR 本文へ書き足していない。詳細はマネージャーへの報告に譲る）。
 
+### 4. 2026-09-25 追記: CI-sourcing を完了し、`compare-baseline.json` と並ぶ基準値へ正式に昇格した
+
+> **⚠ この追記は、自動化された担い手（マネージャーのセッションから切り出された worker
+> セッション）が書いた。⛔ オーナー本人の判定ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+上の「確かめていないこと」（CI 上での実測）を埋めた。PR #728 の CI run 36090652846
+（`example-chat` ジョブ）で `compare` / `recall-footprint-calibration-samples` の両
+artifact を attempt 1・2 の2回取得し、`measuredAt` を除いてバイト単位で一致すること
+（node で `JSON.stringify` した各フィールドを row 単位で比較）を確認した。
+
+| | attempt 1 | attempt 2 |
+|---|---|---|
+| compare artifact ID | 10845303067 | 10845791720 |
+| recall-footprint-calibration-samples artifact ID | 10845602321 | 10846036078 |
+| measuredAt (compare) | 2026-09-25T03:34:09.435Z | 2026-09-25T03:40:56.745Z |
+| measuredAt (calibration-samples) | 2026-09-25T03:34:13.049Z | 2026-09-25T03:41:00.853Z |
+
+いずれも `gh api repos/takecchi/mnemora/actions/artifacts/<id>` で `workflow_run.id`
+（36090652846）・`created_at`・`workflow_run.head_sha`（1b94f8a、PR head）を個別に確認済み。
+CI が実際に checkout したのは pull_request のマージプレビュー commit
+`deecbd5f20ffeeb2454522a66b20e34c690795c7`（`refs/pull/728/merge`）であり、PR head
+（`1b94f8a642bea9b87dc3730b4d7481fb56667d2d`）そのものではない——`gh api
+repos/takecchi/mnemora/actions/runs/36090652846` の `pull_requests[0].head.sha` は
+PR head を返す一方、ジョブ内で実際にチェックアウトされた sha は前者だった（CI ログでの
+実測、`compare-baseline.json`/`recall-footprint-calibration-samples-baseline.json`
+双方の `provenance.commit` に記録）。
+
+`recall-footprint-calibration-samples` artifact の8点は、`recall-footprint-
+calibration-samples.dev.json`（ローカル2回一致のみ、CI未経由）と rows が1バイトも
+違わなかった——ローカル実行とCI実行が同じ設計・同じカセットで同じ結果を返すことも、
+この一致で確認できた。`.dev.json` は削除し、CI-sourced な
+`examples/chat/recall-footprint-calibration-samples-baseline.json` へ役割を一本化した。
+
+`compare-baseline.json` にも `bandEntryCount`/`rawIndexJsonLength` の2欄を実測反映した
+（⭐門が見る2欄は12行すべて不変）。これにより、決定2が保留していた
+「hold-in/hold-out の分け方を `bandEntryCount === 0` へ切り替える」も実行できた——
+12行の分け方（7行/5行、同じ行）は旧条件（`totalInScope <= DEFAULT_RECALL_LIMIT`）と
+1行も変わらなかった（`recall-footprint-baseline.test.ts` の「分け方の移行」歯）。
+
+`recall-footprint-baseline.test.ts` の hold-in を、上の8点を加えた15点（7+8）へ拡張し、
+`totalInScope` を渡して較正した。以下は main（本追記時点の `compare-baseline.json`
+更新後）と、拡張前（hold-in 7点のみ）を並べた表——上の§3訂正の表と数値は同じだが、
+実際に CI artifact から作った `compare-baseline.json`/新設 baseline ファイルに対して
+再計算し直し、95%予測区間の半幅（決定4「これが覆るとしたら」・ADR 0201「固定の半 digest
+は外挿の距離を見ていない」節と同じ式）を追加した。
+
+| | hold-in 7点(main、拡張前) | hold-in 15点(7+8、本追記) |
+|---|---|---|
+| `charsPerDigest` | 15.458 | 16.175 |
+| `fixedIndexChars` | 170.881 | 168.503 |
+| hold-in 残差 RSE(自由度 n−2) / 最大絶対値 | 1.810 / 3.202字 | 2.180 / 4.922字 |
+| hold-out 5行の最大相対誤差 | 1.430% | 1.122% |
+| 12行全体の最大相対誤差 | 1.562% | 2.023%(2.5%許容=`ACCURACY_TOLERANCE`の内側) |
+| ADR 0201 の余白(半digest, 最も狭い行) | 12.177字(42ターン行, 上側) | **9.387字(42ターン行, 下側)** |
+| FLOOR(`charsPerDigest / 2`) | 7.729字 | 8.088字 |
+| この歯 | 緑(+4.448字) | **緑(+1.299字)** |
+| 95%予測区間の半幅(外挿なし, x0=x̄) | 4.975字 | 4.865字 |
+| 95%予測区間の半幅(hold-outの返る件数の平均=16まで外挿) | 12.437字 | **5.123字** |
+| 95%予測区間の半幅(hold-outの返る件数の最大=20まで外挿) | 15.992字 | **5.477字** |
+
+⟹ **15点への拡張は、ADR 0201「固定の半 digest は外挿の距離を見ていない」節が指摘した
+問題を実際に縮めた。**hold-in の標本点が `memoryCount`(=`returnedCount`)の5点
+（main、2〜8の範囲）から13点（拡張後、2〜19の範囲）へ増え、hold-out の外挿距離
+（`x̄` からの乖離）が相対的に縮んだため、予測区間の半幅は外挿先（returnedCount=16や20）
+でもほとんど膨らまない（main は 4.98字→16.0字まで3.2倍に膨らむのに対し、拡張後は
+4.87字→5.48字と1.13倍にしか膨らまない）。FLOOR(半digest)は8.088字に上がったが、
+実際の最小余白（9.387字）はそれを上回っており、歯は緑のままである。
+
+⚠ **予測区間の半幅（5.12字/5.48字）は、いまの最小余白（9.387字）より小さい——
+95%予測区間そのものは依然として FLOOR を上回っているが、両者の差は main ほど大きくは
+ない。**外挿の不確かさが実際に縮んだことは確認できたが、消えたわけではない
+（引き受けた負債は下の節で更新する）。
+
+**確かめていないこと**: 予測区間は残差が独立で同一分布に従うと仮定している。
+`compare-baseline.json` の5点しかない hold-out 側で、この仮定自体を検証してはいない
+（ADR 0201 と同じ留保）。
+
 ## 検討して採らなかった案
 
 1. **`compare-baseline.json` の `rows` に直接追記する。** ⛔ 却下——CI-sourcing の規律
@@ -151,6 +231,10 @@ Postgres + `recorded` カセットの実行に基づく（下の「測ったこ�
 2. **hold-in/hold-out の分け方(`totalInScope <= DEFAULT_RECALL_LIMIT`)を
    `bandEntryCount === 0` に直す。** ⛔ 保留——委譲元の規律で「分け方の条件を変える必要が
    出たら、変えずに止まって報告する」と定められている。本 ADR はその報告を兼ねる。
+   ⚠ **2026-09-25 追記（§4）: この保留は解けた。**`compare-baseline.json` が
+   `bandEntryCount` を実測で持つようになったため、分け方を `bandEntryCount === 0`
+   へ切り替えた——切り替えても12行の分け方（7行/5行、同じ行）は1行も変わらないことを
+   検算済み（`recall-footprint-baseline.test.ts`「分け方の移行」歯）。
 3. **deterministic provider で標本を作る。** ⛔ 却下——`recorded` と `deterministic` は
    digest 長の分布が別物であり、較正の意味が変わる(委譲元の規律で明示的に止められている)。
 4. **ADR 0201 の余白の歯を緩めて拡張標本を通す。** ⛔ 検討していない——歯を通すために
@@ -160,26 +244,42 @@ Postgres + `recorded` カセットの実行に基づく（下の「測ったこ�
 
 ## 引き受けた負債
 
-1. **本 ADR は `compare-baseline.json` を実際には1バイトも変えていない。** Issue #340
-   案3の目的（推定器の較正精度を上げる）そのものは、まだ達成していない——達成には
-   CI artifact の取得（＝ PR を作れる担い手による続きの作業）が要る。
-2. **`.dev.json` の8標本は、ローカルの2回一致でしか裏取りされていない。** CI環境間の
-   非決定性を検出する力を持たない。この8標本をそのまま `compare-baseline.json` へ
-   昇格させる場合、`examples/chat/README.md` の更新手順（同一commitのCI2回以上一致）を
-   別途踏むこと。
-3. **hold-in/hold-out の分け方の見直し（決定2の「代わりに」の直後）は本 ADR で決めていない。**
-   `bandEntryCount` を明示フィールドにする案を含め、`compare-baseline.json` のスキーマ変更は
-   別途オーナー/委譲元の判断を仰ぐ。
+1. ~~**本 ADR は `compare-baseline.json` を実際には1バイトも変えていない。**~~
+   ⚠ **2026-09-25 追記（§4）: 解消した。**`compare-baseline.json` は CI artifact から
+   `bandEntryCount`/`rawIndexJsonLength` を実測反映し、`recall-footprint-calibration-
+   samples-baseline.json` を新設して較正標本を15点へ拡張した。Issue #340 案3の目的
+   （推定器の較正精度を上げる）は達成した——`BUILTIN_RECALL_FOOTPRINT_PROFILE` を更新済み。
+2. ~~**`.dev.json` の8標本は、ローカルの2回一致でしか裏取りされていない。**~~
+   ⚠ **2026-09-25 追記（§4）: 解消した。**同一 commit（マージプレビュー deecbd5f）で
+   `example-chat` ジョブを2回実行し、artifact がバイト単位で一致することを確認した
+   うえで基準値へ採った。`.dev.json` は削除した。
+3. ~~**hold-in/hold-out の分け方の見直しは本 ADR で決めていない。**~~
+   ⚠ **2026-09-25 追記（§4）: 決めた。**`bandEntryCount` を `compare-baseline.json` の
+   フィールドとして持たせ（スキーマの非破壊追加）、分け方を `bandEntryCount === 0` へ
+   切り替えた（上の「検討して採らなかった案」2番の追記参照）。
 4. **10〜20件の範囲のうち14/16/18/20は掃引で到達しなかった(9,10,11,12,13,15,17,19の8点)。**
    無理に丸い数へ到達させると、その選択自体が「範囲を埋めたい」という結果からの逆算になり、
    決定1の「hold-outを見ずに決めた」設計の精神に反するため、到達した値だけを採った。
+   ⚠ **この負債は解消していない**——§4もこの8点のまま採用しており、14/16/18/20は
+   依然として較正標本に無い。
+5. **（新規、§4）予測区間の半幅は縮んだが、まだ最小余白より小さくない水準にある。**
+   拡張後も95%予測区間の半幅（5.12字〜5.48字、外挿先による）は現行の最小余白
+   （9.387字）を下回っており歯は緑だが、外挿の不確かさそのものが消えたわけではない
+   （§4「確かめていないこと」参照）。標本をさらに増やす、または予測区間そのものを
+   歯にする案は、まだ検討していない。
 
 ## これが覆るとしたら
 
-- CI artifact を取得できる担い手が、`.dev.json` と同じ `CALIBRATION_SAMPLE_DESIGN` を
+- ~~CI artifact を取得できる担い手が、`.dev.json` と同じ `CALIBRATION_SAMPLE_DESIGN` を
   PR の `example-chat` job 上で実行し（または同等の CI 経路を新設し）、2回以上の一致を
-  確認できたとき——`compare-baseline.json` へ正式に昇格させる根拠になる。
-- オーナーが hold-in/hold-out の分け方（`totalInScope <= DEFAULT_RECALL_LIMIT`）を
-  `bandEntryCount` ベースへ変える判断をしたとき——その変更自体は本 ADR の範囲外である。
+  確認できたとき——`compare-baseline.json` へ正式に昇格させる根拠になる。~~
+  ⚠ **2026-09-25 追記（§4）: 起きた。**`example-chat` job に独立ステップとして配線され、
+  PR #728 の CI run 36090652846 で2回一致を確認し、
+  `recall-footprint-calibration-samples-baseline.json` へ昇格させた。
+- ~~オーナーが hold-in/hold-out の分け方（`totalInScope <= DEFAULT_RECALL_LIMIT`）を
+  `bandEntryCount` ベースへ変える判断をしたとき——その変更自体は本 ADR の範囲外である。~~
+  ⚠ **2026-09-25 追記（§4）: 起きた。**マネージャー委譲のもとで切り替えた
+  （検討して採らなかった案2の追記参照）。
 - ADR 0201 の余白の歯が赤くなる件について、オーナーが FLOOR の設計そのものを見直す
-  判断をしたとき（Issue #340 の残りの論点1本目）。
+  判断をしたとき（Issue #340 の残りの論点1本目）。**§4時点ではまだ赤くなっていない**
+  （最小余白9.387字 > FLOOR 8.088字）——この論点自体はまだ現れていない。
