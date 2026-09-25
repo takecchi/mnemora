@@ -53,17 +53,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 🔴 **この節は以前、`v1.0.0` … `8cf82b1` を数えたと名乗っていたが、それは偽だった。** `8cf82b1`
 （PR #728）へ pin を進めたのは PR #733 だったが、#733 は自分が足す Fixed 1項目のために sha を
-書き換えただけで、`v1.0.0..8cf82b1` の間の101本を実際には数え直していなかった——`#684`/`#694`/
-`#703`/`#711`/`#721`/`#724`/`#728` など、publish 対象パッケージに触れる複数の PR が未計上の
-まま残っていた。この節は今回、`v1.0.0` から `origin/main`（`7987de4`）まで118本を1本ずつ見て、
-数え直したものである（一覧は本節の変更をもたらした PR の本文・付随する調査記録を参照）。
+書き換えただけで、`v1.0.0..8cf82b1` の間を実際には数え直していなかった——`#684`/`#694`/
+`#703`/`#711`/`#724`/`#728` など、publish 対象パッケージに触れる PR が未計上のまま残っていた。
+この節は、`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものである
+（載せる／載せないの全数表と理由は [PR #747](https://github.com/takecchi/mnemora/pull/747) の本文）。
 
-**この節が数えた範囲に破壊的変更は無い。**【実測】`git diff v1.0.0..origin/main --
-scripts/__snapshots__/public-api/` は5ファイルで641行の追加・13行の削除だが、削除された行は
-すべて（a）zod スキーマの欄の並べ替え、（b）`import type` 一覧への新しい型名の追加、
-（c）任意の末尾引数を足したことによる関数シグネチャの再フォーマット、のいずれかであり、
-削除・必須化・型の狭小化は0件だった（`buildExtractionPrompt`/`extractCandidates`/
-`previewRestoreSupersededBy` はいずれも任意引数の追加のみ）。⟹ `### Breaking` の節は無い。
+**この節が数えた範囲に破壊的変更は無い。**【実測】`git diff v1.0.0..7987de4 --
+scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキーマの欄の並べ替え、
+（b）`import type` 一覧への新しい型名の追加、（c）任意の末尾引数を足したことによる関数
+シグネチャの再フォーマット、のいずれかであり、削除・必須化・型の狭小化は無かった
+（`buildExtractionPrompt`/`extractCandidates`/`previewRestoreSupersededBy` はいずれも任意引数の
+追加のみ）。⟹ **公開 API への影響は、任意の欄・任意の引数・任意のメソッド・新しい export の
+追加のみである。** `### Breaking` の節は無い。
 
 対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
 `@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
@@ -199,6 +200,20 @@ scripts/__snapshots__/public-api/` は5ファイルで641行の追加・13行の
   限定的、とADRに明記）。
   （[Issue #394](https://github.com/takecchi/mnemora/issues/394) /
   [ADR 0308](./docs/decisions/0308-lexical-rank-length-normalization.md)、PR #711）。
+- **`estimateRecallFootprint`/`calibrateRecallFootprint`（想起の想定文字数の見積もり）の精度を
+  直し、既定の係数が変わった。**`indexBand` の実 JSON 構造から決まる帯のカンマ・桁上がり・`limitedBy` などの
+  構造項が推定式から欠落しており、`calibrateRecallFootprint` はその構造項を較正の前に
+  差し引けず二重計上していた。較正標本も CI artifact から7点→15点に増やし、hold-in/hold-out の
+  分け方を「帯が空であること」そのものに揃えた。**この結果、既定プロファイル
+  `BUILTIN_RECALL_FOOTPRINT_PROFILE` の値が変わった**——`charsPerDigest` は
+  `15.458` → **`16.175`**、`fixedIndexChars` は `170.881` → **`168.503`**（【実測】
+  `git diff v1.0.0..7987de4 -- packages/core/src/recall-footprint.ts`）。既定プロファイルで
+  見積もりを使っている呼び手が受け取る数値は変わるが、公開の型・関数シグネチャは無変更
+  （[Issue #340](https://github.com/takecchi/mnemora/issues/340) /
+  [ADR 0302](./docs/decisions/0302-recall-footprint-structural-terms.md) /
+  [ADR 0306](./docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md) /
+  [ADR 0314](./docs/decisions/0314-recall-footprint-calibration-samples-need-ci-sourcing.md)、
+  PR #710 / #722 / #728）。
 
 ### Fixed
 
@@ -216,20 +231,6 @@ scripts/__snapshots__/public-api/` は5ファイルで641行の追加・13行の
   PR #673 / #672 / #676）。
   ⭕ **公開型は変えていない**——診断欄は `explain.stages[...].detail` の型無し欄に条件成立時
   だけ足す形で、既定の出力は変わらない。SQL の `WHERE`/`ORDER BY` も変えていない。
-- **`estimateRecallFootprint`/`calibrateRecallFootprint`（想起の想定文字数の見積もり）の精度を
-  直した。**`indexBand` の実 JSON 構造から決まる帯のカンマ・桁上がり・`limitedBy` などの
-  構造項が推定式から欠落しており、`calibrateRecallFootprint` はその構造項を較正の前に
-  差し引けず二重計上していた。較正標本も CI artifact から7点→15点に増やし、hold-in/hold-out の
-  分け方を「帯が空であること」そのものに揃えた。**この結果、既定プロファイル
-  `BUILTIN_RECALL_FOOTPRINT_PROFILE` の値が変わった**——`charsPerDigest` は
-  `15.458` → **`16.175`**、`fixedIndexChars` は `170.881` → **`168.503`**（【実測】
-  `git diff v1.0.0..origin/main -- packages/core/src/recall-footprint.ts`）。既定プロファイルで
-  見積もりを使っている呼び手が受け取る数値は変わるが、公開の型・関数シグネチャは無変更
-  （[Issue #340](https://github.com/takecchi/mnemora/issues/340) /
-  [ADR 0302](./docs/decisions/0302-recall-footprint-structural-terms.md) /
-  [ADR 0306](./docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md) /
-  [ADR 0314](./docs/decisions/0314-recall-footprint-calibration-samples-need-ci-sourcing.md)、
-  PR #710 / #722 / #728）。
 - **`sanitizeCandidateSubjectId` が、LLM が「主題なし」のつもりで返す文字列 `"null"`（JSON の
   `null` リテラルではない）を、候補一覧に無い値として弾いていた。**弾かれた値は
   `undefined`（未指定）へ戻り、意図せず observation の主題へフォールバックしていた
