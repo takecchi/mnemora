@@ -1489,7 +1489,10 @@ export class FakeOutboxStore implements OutboxStore {
   }
 
   // CAS 意味論（ADR 0142, Issue #233）も `packages/testkit` の `InMemoryOutboxStore`/
-  // `PostgresOutboxStore` と一致させてある。
+  // `PostgresOutboxStore` と一致させてある。complete/fail は互いに排他でもある
+  // （Issue #826）——相手側の終端列（`completedAt`/`failedAt`）が既に付いていれば、
+  // 後から来た呼び出しは行を一切変えず例外も投げない（先に付いた終端が勝つ）。
+  // 同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は変えていない。
   async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
     const job = this.backing.outboxJobs.find((j) => j.id === jobId && j.tenantId === ctx.tenantId);
     if (!job) {
@@ -1497,6 +1500,11 @@ export class FakeOutboxStore implements OutboxStore {
     }
     if (job.attempts !== expectedAttempts) {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
+    }
+    // Issue #826: 相手側の終端（fail）が既に付いていれば、先に付いた終端を勝たせる
+    // ——行を変えず、例外も投げない。
+    if ((job.failedAt ?? null) !== null) {
+      return;
     }
     job.completedAt = new Date();
   }
@@ -1508,6 +1516,11 @@ export class FakeOutboxStore implements OutboxStore {
     }
     if (job.attempts !== expectedAttempts) {
       throw new OutboxLeaseConflictError(jobId, expectedAttempts, job.attempts);
+    }
+    // Issue #826: 相手側の終端（complete）が既に付いていれば、先に付いた終端を勝たせる
+    // ——行を変えず、例外も投げない。
+    if ((job.completedAt ?? null) !== null) {
+      return;
     }
     job.failedAt = new Date();
     job.lastError = error;
