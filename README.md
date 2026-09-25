@@ -292,11 +292,14 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 
 **内部が複雑でも、記憶そのものを動かす中核操作はこの5つに保つ。ここは増やさない。**
 
-**⚠ 冒頭の構成図にある `Association`（連想枠）は、`@mnemora/core` の `recall()` では
-既定で走らない。**`recall()` に `association: { maxCount: 10 }` のように**明示的に渡した
-ときだけ**走る（省略時は連想を一切走らせない——`packages/core/src/recall.ts:1132`、
-[ADR 0151](./docs/decisions/0151-recall-association-unprompted.md)）。
-⟹ **npm から入れたままの既定の振る舞いは「聞かれたことにしか答えない」。**
+**⚠ 冒頭の構成図にある `Association`（連想枠）は、`@mnemora/core` の `recall()` で
+既定で走る。**`recall()` の `association` を省略すると `DEFAULT_RECALL_ASSOCIATION`
+（`{ maxCount: 10 }`）が適用される。一切走らせたくない呼び出しは `association: null` を
+**明示的に渡す**（`packages/core/src/recall.ts` の `RecallQuery.association` doc、
+[ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) / 既定は
+[ADR 0337](./docs/decisions/0337-recall-association-default-on.md) が on にした）。
+⟹ **npm から入れたままの既定の振る舞いは「聞かれたことに加えて、関連する記憶も添える」**
+——ADR 0151 時点の「聞かれたことにしか答えない」既定からは変わっている。
 渡し方・各フィールドの既定値・渡したときの実測値は
 [packages/core/README.md](./packages/core/README.md) を見ること。
 ⚠ **渡すとき、`anchorCount` だけを上げても連想の裾野は広がらない**——連想の起点は

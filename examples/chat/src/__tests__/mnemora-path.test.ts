@@ -59,13 +59,13 @@ describe("queryRecall（Issue #291 / ADR 0168: 既定で association を渡す�
     expect(captured.query?.association).toEqual(DEFAULT_MNEMORA_PATH_ASSOCIATION);
   });
 
-  it("opts.association: null を渡すと association: null をそのまま packages/core へ転送する（明示的な off の脱出口。ADR 0336）", async () => {
+  it("opts.association: null を渡すと association: null をそのまま packages/core へ転送する（明示的な off の脱出口。ADR 0337）", async () => {
     const captured: { query?: RecallQuery } = {};
     const runtime = fakeRuntimeCapturingQuery(captured);
 
     await queryRecall(runtime, { tenantId: "t" }, FAKE_CONVERSATION, { association: null });
 
-    // ⚠ ADR 0336 前はここで「association キー自体を渡さない（省略）」を検査していた
+    // ⚠ ADR 0337 前はここで「association キー自体を渡さない（省略）」を検査していた
     // ——`packages/core` の既定が off だったので、省略が off と同じ効果だったからである。
     // `packages/core` の既定が on に変わった後は、省略すると連想が走ってしまう
     // （黙って off の脱出口が壊れる）。⟹ ここでは null をそのまま転送することを検査する

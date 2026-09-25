@@ -407,7 +407,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     // 「窓の外が top-k へ入りえたか」まで判定してから鳴る。この歯の主題は
     // **「2つの omission が同時に出うる」ことであって `ann_truncated` の鳴り方ではない**ので、
     // 鳴る側になる形（どの候補も持たないタグをクエリへ足し、上界を 1.1 倍にする）で作る。
-    // association: null — 連想枠は既定 on（ADR 0336）。この歯は over_limit と
+    // association: null — 連想枠は既定 on（ADR 0337）。この歯は over_limit と
     // ann_truncated が同時に発生しうることだけを検査する。limit の外に押し出された
     // 3件はアンカーとの類似度が高いままなので連想の対象になりうる——この歯の対象外の
     // 効果を持ち込まないよう明示的に止める。

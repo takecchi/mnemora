@@ -533,7 +533,7 @@ export async function runRetrievalQualityArm(
 
   const probes: ProbeOutcome[] = [];
   for (const probe of PROBES) {
-    // association: null — 連想枠が既定 on になった（ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
     // でも、北極星の物差し（retrieval-quality）の基準線を動かさない。
     const result = await options.runtime.recall(ctx, {
       text: probe.query,

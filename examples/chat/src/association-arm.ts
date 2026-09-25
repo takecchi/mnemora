@@ -209,7 +209,7 @@ export interface RunAssociationArmOptions {
   armLabel: string;
   /**
    * 渡さなければ連想枠は一切走らない——[ADR
-   * 0336](../../../docs/decisions/0336-recall-association-default-on.md)（`RecallQuery.association`
+   * 0337](../../../docs/decisions/0337-recall-association-default-on.md)（`RecallQuery.association`
    * の既定を on にする決定。オーナーが選択肢 (あ) を選んだ。ask_human ac5953d1、
    * 2026-09-25T21:11Z）後は、この arm 自身が `association: null` を
    * `packages/core` へ明示することでこの「渡さなければ off」を担保する
@@ -251,7 +251,7 @@ export async function runAssociationArm(
 
   // ⚠ `options.association` が無い（"off" arm）ときは `null` を明示する——`undefined`
   // にして `recall()` へキー自体を渡さないと、`packages/core` の既定が on になった
-  // （ADR 0336）後はこの "off" arm が黙って on（既定値）になってしまう。実際に
+  // （ADR 0337）後はこの "off" arm が黙って on（既定値）になってしまう。実際に
   // この関数はかつて `undefined` を使っており、cli.ts の `runAssociationArm({..})`
   // （association を渡さない呼び出し）がこのバグの実例だった。
   const association: RecallAssociationQuery | null = options.association

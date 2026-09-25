@@ -306,7 +306,7 @@ async function collectContextDiagnostics(
   policy: TimeWeightingPolicy,
   localIdByMemoryId: ReadonlyMap<string, string>,
 ): Promise<TimeWeightingContextDiagnosticEntry[]> {
-  // association: null — 連想枠が既定 on になった（ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+  // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
   // でも、この bench（時間重み付け方針の比較）の基準線（recorded cassette への
   // プロンプト・判定）を動かさない。
   const diagnosticRecall = await runtime.recall(ctx, {

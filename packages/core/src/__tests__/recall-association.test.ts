@@ -88,7 +88,7 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-describe("recall() — 連想枠（association、既定 on。ADR 0336）", () => {
+describe("recall() — 連想枠（association、既定 on。ADR 0337）", () => {
   it("association を省略すると DEFAULT_RECALL_ASSOCIATION が適用され、byTier.association が現れる（既定 on）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { digest: "アンカー" });
@@ -99,7 +99,7 @@ describe("recall() — 連想枠（association、既定 on。ADR 0336）", () =>
     expect(
       result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
     ).toBe(false);
-    // byTier.association が在る（既定 on の形の証明。ADR 0336 以前は無かった欄）。
+    // byTier.association が在る（既定 on の形の証明。ADR 0337 以前は無かった欄）。
     expect(Object.keys(result.usage.byTier).sort()).toEqual([
       "association",
       "digest",

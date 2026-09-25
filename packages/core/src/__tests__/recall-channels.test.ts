@@ -196,7 +196,7 @@ describe("recall() — 歯①: 固有名詞・識別子は ann では引けず l
       channels: ["ann", "lexical"],
       limit: 1,
       overFetchFactor: 1, // kPrime = 1
-      // association: null — 連想枠は既定 on（ADR 0336）だが、この歯は語彙チャンネルの
+      // association: null — 連想枠は既定 on（ADR 0337）だが、この歯は語彙チャンネルの
       // 効果だけを検査する。limit の外に押し出された distractor はアンカー（gold）との
       // 類似度が高いままなので、連想の対象になりうる。この歯の対象外の効果を
       // 持ち込まないよう明示的に止める。
@@ -404,7 +404,7 @@ describe("recall() — 歯②: 既定(channels 未指定)は ADR 0084 以前と1
         chars: digestChars + indexChars,
         estimatedTokens: tokenCount.tokens,
         counter: "heuristic",
-        // association: 0 — 連想枠は既定 on（ADR 0336）。このテストにはアンカー以外の
+        // association: 0 — 連想枠は既定 on（ADR 0337）。このテストにはアンカー以外の
         // 候補が無いため収穫0件だが、走った以上 byTier.association 欄は在る。この歯の
         // 対象（channels 既定は ADR 0084 以前と1バイトも変わらない）とは無関係な欄の
         // 増加であり、期待値を黙って緩めるのではなくリテラルで固定し直す

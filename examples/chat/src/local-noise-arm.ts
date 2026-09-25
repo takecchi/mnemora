@@ -131,7 +131,7 @@ export async function captureGroupCandidates(
 
   const probes: CapturedProbeCandidates[] = [];
   for (const probe of group.probeSet.probes) {
-    // association: null — 連想枠が既定 on になった（ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
     // でも、この arm（局所ノイズが候補の並びに与える効果）の基準線を動かさない。
     const result = await runtime.recall(ctx, { text: probe.query, association: null });
     const resolvedExternalIds = await Promise.all(

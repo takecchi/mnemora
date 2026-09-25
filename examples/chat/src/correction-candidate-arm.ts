@@ -322,7 +322,7 @@ export async function runCorrectionCandidateArm(
   const hits: CorrectionHitOutcome[] = [];
   for (const c of options.hitCases) {
     // ⛔ `text` 以外を渡さない。
-    // association: null — 連想枠が既定 on になった（ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
     // でも、この arm（訂正が gold/distractor 順位に与える効果）の基準線を動かさない。
     const result = await options.runtime.recall(ctx, { text: c.correction, association: null });
     const externalIds = await Promise.all(

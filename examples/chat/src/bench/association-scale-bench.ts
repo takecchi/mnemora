@@ -606,7 +606,7 @@ interface ArmConfig {
   /**
    * `null` は明示的な off。**`undefined`（省略）ではない**——`packages/core` の
    * 連想枠が既定 on になった（[ADR
-   * 0336](../../../../docs/decisions/0336-recall-association-default-on.md)。
+   * 0337](../../../../docs/decisions/0337-recall-association-default-on.md)。
    * オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
    * `association` キーを省略すると連想が既定で走ってしまうため、"off" arm を
    * 「キーを渡さない」で作ると `packages/core` の既定に静かに乗っ取られる

@@ -270,6 +270,25 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   PR #828）。
   ⚠ 擬似物の同点順序に依存する呼び出し側（自前のテスト・スナップショット等）があれば、
   結果が変わりうる。
+- 🔴 **既定の挙動の変更: 連想枠（`RecallQuery.association`、段3.5）の既定が off から on に
+  変わった。** `association` を省略した呼び出しは、`DEFAULT_RECALL_ASSOCIATION`
+  （`{ maxCount: 10 }`、新設 export）を使って連想が走るようになる——**クエリに直接は
+  当たらなかったが、クエリで引けた記憶（アンカー）の近傍として引いた候補
+  （`retrievedVia: "association"`）が、`association` を渡さない呼び出しでも
+  `RecallResult.memories` に混ざりうる。**`RecallUsage.byTier.association` も、
+  `association` を渡したかどうかに関わらず、連想が実際に走った呼び出しには現れる
+  ようになる（[0.5.0] の逐語「**既定 off なので、`association` を渡していない呼び手は
+  1バイトも影響を受けない。**」との対比——この節ではもう成り立たない）。
+  **従来どおり連想を一切走らせたい呼び出しは `association: null` を明示的に渡す**
+  （`undefined` ＝省略＝既定値適用、`null` ＝明示 off、という新しい区別。型は
+  `RecallQuery.association?: RecallAssociationQuery | null` に広がった）。
+  **破壊的変更ではない**——公開 API の実 diff は、この入力型が `| null` に広がったことと
+  `DEFAULT_RECALL_ASSOCIATION` が1つ増えたことだけで、既存の呼び出しは型検査上そのまま
+  通る（[docs/migration-v1.md](./docs/migration-v1.md) の破壊的変更の定義「公開契約について、
+  既存の利用者のコードが型検査または実行時に壊れる変更」に照らした判定。前例として
+  `RecallQuery.validAt` ゲートを既定で有効にした際も同様に非破壊と判定している）。
+  （Issue #337 のオーナー決定（ask_human ac5953d1、2026-09-25T21:11Z、選択肢「あ」）／
+  [ADR 0337](./docs/decisions/0337-recall-association-default-on.md)）。
 
 ### Fixed
 

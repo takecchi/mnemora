@@ -447,7 +447,7 @@ async function measureAllProbes(
     // off（同時に aRaw を測る — 段1のANN検索はarmに依らず同じkPrimeを使う）。
     handle.spy.reset();
     // association: null — 明示的な off。上の measureEfPoint と同じ理由
-    // （ADR 0336 で association 省略＝既定 on になり得るため、off の測定点を守る）。
+    // （ADR 0337 で association 省略＝既定 on になり得るため、off の測定点を守る）。
     const offResult = await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
@@ -818,7 +818,7 @@ async function measureEfPoint(
 
     handle.spy.reset();
     // association: null — 明示的な off。`packages/core` の連想枠が既定 on になった
-    // （ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
+    // （ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後は、
     // association キーを省略すると既定 on を意味するようになる——ここは "off" の
     // 測定点なので、それに乗っ取られないよう明示する（association-scale-bench.ts の
     // ArmConfig と同じ修正）。
@@ -1474,7 +1474,7 @@ async function measureOrderScaleProbes(
 
     handle.spy.reset();
     // association: null — 明示的な off。上の measureEfPoint と同じ理由
-    // （ADR 0336 で association 省略＝既定 on になり得るため、off の測定点を守る）。
+    // （ADR 0337 で association 省略＝既定 on になり得るため、off の測定点を守る）。
     const offResult = await handle.runtime.recall(ctx, { text: probe.query, association: null });
     const searchCalls = handle.spy.calls.filter((c) => c.kind === "search");
     const rawHits = searchCalls[0]?.hits ?? [];
