@@ -1697,6 +1697,57 @@ ADR 0305）**。ADR 0295 追記2 が見つけた `schedule-change-meeting-day`�
 である。`answer-trials`（下記セクション）が読む `cassettes/answer.json` は
 **旧形式のまま**変わらない——ADR 0301 の対照の基準として使い続けるため。
 
+#### 種カセットを渡して記録する（`MNEMORA_RECORD_SEED_CASSETTE`、Issue #691 続き、ADR 0305 §4.5.1）
+
+`record:answer`/`record:answer-time-weighting` は毎回、抽出（`observe()`）を実 API で
+やり直す。抽出は非決定的なため、素のまま録り直すと記憶集合が旧カセット
+（`cassettes/answer.json` の n=15 対照、ADR 0305 §2）と変わりうる——マネージャーが
+実 API で `record:answer` を一度走らせたところ、実際に digest が変わり、Issue #498
+完了条件4の陽性対照（`applyRetentionMutation`、`answer-retention-mutation.ts`）が
+「変異対象の部分文字列…が見つからない」で落ち、カセットを1件も書き出せなかった。
+
+`MNEMORA_RECORD_SEED_CASSETTE=<path>` に旧カセットを渡すと、LLM・埋め込みの
+どちらも、種カセットに同じ鍵（`llmCassetteKey`/`embeddingCassetteKey`、
+`@mnemora/testkit`——**既存の鍵の作り方をそのまま再利用しており、新しい鍵の作り方は
+増やしていない**）のエントリがあればそれを返し（実 API を呼ばない）、無ければ実 API
+を呼ぶ。**どちらの場合も新しいカセットへ記録する**——新しいカセットは自己完結し、
+種への参照は一切残らない（`SeededLLMProvider`/`SeededEmbeddingProvider` を real と
+`RecordingLLMProvider`/`RecordingEmbeddingProvider` の間に挟む組み立て順、
+`providers.ts`）。**種の LLM モデル名・埋め込み空間が今の設定と食い違えば、構築時に
+例外になる**——黙って混ぜない。
+
+```bash
+MNEMORA_RECORD_SEED_CASSETTE=cassettes/answer.json \
+  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer
+
+MNEMORA_RECORD_SEED_CASSETTE=cassettes/answer-time-weighting.json \
+  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer-time-weighting
+```
+
+記録の終わりに、usage-meter の実測（実際に叩いた回数・トークン・概算費用）とは別枠で、
+「種から再生した件数／実 API を呼んだ件数」を LLM・埋め込みそれぞれ画面に出す
+（`src/seed-usage.ts` の `formatSeedUsageReport`）。
+
+**種にヒットする見込み・しない見込み**（コードを読んで数えた見込みであり、実測では
+ない）: 抽出（`observe()` 側の `completeStructured`）は `buildMnemoraPrompt` を経由
+しないため、同じ会話入力なら種にヒットする見込みが高い——抽出が種から返れば、その
+digest 文字列は記録済みの値そのものになるため、そこから生まれる Memory の埋め込み・
+質問文の埋め込み（ケース定義から決まる固定文字列）も連鎖して種にヒットする見込みが
+高い。一方、**回答生成・judge・陽性対照の回答生成**は `buildMnemoraPrompt` が
+`order-legend` 描画に変わったことでプロンプトのハッシュ鍵が変わっており、
+**種にヒットしない見込み**（実 API を呼ぶ）。`answer-time-weighting` は `observe()`
+（抽出）を一度も通らない設計（記憶を直接書く、`time-weighting-bench.ts`）——ヒット
+しうるのは質問文・記憶本文の埋め込みだけで、回答生成（`legacy`/
+`eventAwareFreshness` の2方針、プロンプトに `order-legend` の描画を含む）は種に
+ヒットしない見込み。実際にどれだけヒットしたかは、記録を実行した本人が画面の実測
+（`formatSeedUsageReport` の出力）で確かめること。詳しい理由・変異試験・引き受けた
+負債は [ADR 0305](../../docs/decisions/0305-answer-prompt-order-legend-and-cassette-migration.md)
+§4.5.1 を参照。
+
+**種を渡さなければ、この機能自体が無かったときと1バイトも挙動が変わらない**——
+`MNEMORA_RECORD_SEED_CASSETTE` を設定しない限り、`record:answer`/
+`record:answer-time-weighting` は従来どおり全ケースを実 API で記録する。
+
 ---
 
 ## `answer-trials` / `answer-trials-compare`: 同じ記憶集合で n 回試行し、正答数で見る（Issue #705、ADR 0301）

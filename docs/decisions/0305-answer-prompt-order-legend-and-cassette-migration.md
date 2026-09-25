@@ -287,6 +287,84 @@ recall をやり直さない、ADR 0301 決定1）。ただし、**「新形式�
 新形式ファイルにも向けられるよう拡張する）ことは本 ADR の範囲外とし、Issue #691 の
 残作業として残す**（§6）。
 
+### 4.5.1 種カセットで記憶集合を揃える下ごしらえ【現物・実測、本節の書き手】
+
+> ⚠ 本節も、上と同じく自動化された担い手が書いた。⛔ オーナー本人の判定ではない。
+
+**マネージャーが実 API で `record:answer` を実際に1度走らせ、上（§4.5）の懸念が
+現実に起きたことを実測した**——録り直しで digest が変わり、Issue #498 完了条件4の
+陽性対照（`applyRetentionMutation`、`answer-retention-mutation.ts`）が「変異対象の
+部分文字列…が見つからない」で落ち、新形式カセットが1件も書き出されなかった
+（マネージャーからの逐語の引き継ぎ。**本節の書き手は実 API を一切叩いていない**
+——上（§4.4冒頭）と同じ絶対の禁則。抽出は非決定的なため、録り直すたびに記憶集合が
+変わりうる、という§4.5の分析どおりの結果が実際に出た形になる）。
+
+**この書き手は、記憶集合を旧カセット（`answer.json`/`answer-time-weighting.json`）へ
+揃えやすくするための「種カセット」を `record:answer`/`record:answer-time-weighting`
+に実装した**（環境変数 `MNEMORA_RECORD_SEED_CASSETTE=<path>`、`examples/chat/src/
+providers.ts`・`cli.ts`）。LLM・埋め込みのどちらも、種カセットに同じ鍵
+（`llmCassetteKey`/`embeddingCassetteKey`、`@mnemora/testkit`——**既存の鍵の作り方を
+再利用しており、新しい鍵の作り方は増やしていない**）のエントリがあれば実 API を呼ばずに
+その値を返し、無ければ実 API を呼ぶ。**どちらの場合も新しいカセットへ記録し、新しい
+カセットは自己完結する**（種への参照は残らない、値そのものをコピーして持つだけ）——
+`SeededLLMProvider`/`SeededEmbeddingProvider`（`@mnemora/testkit`、新規）を real と
+`RecordingLLMProvider`/`RecordingEmbeddingProvider`（ADR 0051、既存）の間に挟む
+組み立て順（real → Seeded → Recording）を取る。順を誤る（例: Recording が real を
+直接包み、Seeded がその外側に来る）と、種から返した値が一度も recorder を通らず、
+新しいカセットに記録されない——この壊れ方は変異試験で実際に再現して確かめた
+【実測】。種のモデル名・埋め込み空間が今の設定（`OPENAI_LLM_MODEL`/
+`OPENAI_EMBEDDING_MODEL`/`OPENAI_EMBEDDING_DIMENSIONS`）と食い違えば構築時に例外に
+する——黙って混ぜない。
+
+**歯（DB 不要）**: `packages/testkit/src/__tests__/seeded-provider.test.ts`
+（`SeededLLMProvider`/`SeededEmbeddingProvider` 自体——種にある入力では delegate
+を呼ばない・無ければ呼ぶ・モデル/空間の不一致は例外・種由来実 API 由来どちらも
+recorder に記録される、の4点）・`examples/chat/src/__tests__/providers.test.ts`
+（`createProviders` の配線——`seedCassette` 省略時は挙動を変えない・
+`readSeedUsage` の有無・モデル/空間不一致の例外・`openai` 以外のモードでは
+種の不一致を検査しない）。**変異試験**（`cp` で退避・復元、コミットしていない）:
+「種を見ずに常に real を呼ぶ」実装・「種から返した分を recorder に入れない
+（組み立て順を誤る）」実装のそれぞれで、狙った歯が赤くなることを確認した
+【実測】。
+
+**録音のコマンド（旧カセットを種として渡す）**:
+
+```
+MNEMORA_RECORD_SEED_CASSETTE=examples/chat/cassettes/answer.json \
+  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer
+
+MNEMORA_RECORD_SEED_CASSETTE=examples/chat/cassettes/answer-time-weighting.json \
+  DATABASE_URL=... OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run record:answer-time-weighting
+```
+
+**理由は2つ**: (1) 記憶集合を§2の n=15 対照（`answer.json` を材料にした）と揃えること
+——抽出（`observe()` → `completeStructured`）の入力プロンプトは `buildMnemoraPrompt` の
+変更と無関係（§4.5冒頭）なので、種にヒットする見込みが高い。抽出が種から返れば、
+その戻り値（digest 文字列）は記録済みの値そのものであり、そこから生まれる Memory の
+埋め込み入力も旧カセットの記録と一致する——**種が抽出に当たれば、その下流の埋め込みも
+連鎖して種に当たる見込みが高い。** (2) 陽性対照（`applyRetentionMutation`）が変異対象に
+する部分文字列（回答生成が返す digest の一部）を安定させること——ただしこれは
+間接的な効果である（抽出＝記憶集合が同じになることを経由する）。
+
+**種にヒットしない見込みのもの**（コードを読んで数えた見込みであり、実測ではない
+——§4.4 と同じ区別）: `record:answer` の回答生成・judge・陽性対照の回答生成
+（§4.4 の内訳で言う 110 回のうち抽出 52 回を除いた 58 回）は、`buildMnemoraPrompt`
+が `order-legend` 描画に変わったことで、プロンプトのハッシュ鍵（recall した memory の
+並び・凡例行を含む）が旧カセットと一致しない——**実 API を呼ぶ見込み。**
+`record:answer-time-weighting` は `observe()`（抽出）を一度も通らない設計
+（記憶を直接書く、`time-weighting-bench.ts`）——回答生成（`legacy`/
+`eventAwareFreshness` の2方針、§4.4 の 32 回）は同じ理由（`order-legend` 描画）で
+**実 API を呼ぶ見込み**である一方、**質問文・記憶本文の埋め込みはケース定義
+（`time-weighting-case-set.*.ts`）から決まる固定文字列で `buildMnemoraPrompt` と
+無関係なため、種にヒットする見込みが高い**（§4.4 の 32 回以上）。
+
+⟹ **記憶集合が実際に旧カセットと揃ったかどうか・上の「見込み」が実測とどれだけ
+一致したかは、この書き手はまだ確かめていない（実 API を一切叩いていないため）。**
+マネージャーが `MNEMORA_RECORD_SEED_CASSETTE` を渡して実際に記録を実行した後、
+`formatSeedUsageReport` の画面出力（種から再生した件数／実 API を呼んだ件数、
+LLM・埋め込み別）と、記憶集合が§2の対照（`answer.json`）と一致したかどうかを、
+ここに追記すること。
+
 ## 5. 記録した時点の gradeAnswer/検証値は、録り直すたびに書き直す
 
 `time-weighting-recorded-replay.postgres.test.ts` の `EXPECTED_VERDICT`（16ケース×2方針の
@@ -312,12 +390,21 @@ recall をやり直さない、ADR 0301 決定1）。ただし、**「新形式�
    の CI 再生（`example-chat`/`root-gate-db-stage` の該当ステップ）は、記録するまで赤の
    ままである。記録・マージのタイミングはオーナーの判断領域（ADR 0295 §4 と同じ先例）。
 5. **新形式カセットでの記憶集合が旧形式と一致する保証が無い**（§4.5)——一致するかどうかの
-   実測も、記録後にしかできない。
+   実測も、記録後にしかできない。**§4.5.1 で、記憶集合を揃えやすくする下ごしらえ（種
+   カセット、`MNEMORA_RECORD_SEED_CASSETTE`）を実装したが、これも実 API で記録して
+   初めて「実際に揃ったか」が分かる**——下ごしらえ自体はこの書き手が歯・変異試験で
+   確かめたが、記憶集合が揃うことそのものはまだ実測していない。
 6. **embedding の呼び出し回数は上限が確定できない**（§4.4）——抽出が生成する Memory の
    件数に依存し、記録を実行するまで正確な数は分からない。
 7. **`answer-retention-positive-control.postgres.test.ts` の「変異後」の期待 outcome
    （現状 `"fail"`/`"fail"` に固定）も、新形式での記録後に書き直しが要る可能性がある**
    ——docstring には注記したが、値そのものはまだ直していない（旧形式の値のまま）。
+8. **種カセット（§4.5.1）は、まだ実 API に対して一度も走らせていない。** 歯（DB 不要）と
+   変異試験は通ったが、それは「種にある入力では real を呼ばない／種に無い入力では呼ぶ／
+   どちらも記録される」という**構造**の検査であり、実際の `answer.json`/
+   `answer-time-weighting.json` を種にして `record:answer`/`record:answer-time-weighting`
+   を実 API で走らせたときに、§4.5.1 の「見込み」（抽出・埋め込みは当たる／回答生成・judge・
+   陽性対照は当たらない）が実測とどれだけ一致するかは確かめていない。
 
 ## 関連
 
