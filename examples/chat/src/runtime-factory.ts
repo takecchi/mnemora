@@ -1,4 +1,4 @@
-import type { Clock, EmbeddingProvider, Runtime } from "@mnemora/core";
+import type { Clock, EmbeddingProvider, LexicalStore, Runtime } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import type { PostgresClient } from "@mnemora/postgres";
 import {
@@ -7,6 +7,7 @@ import {
   PostgresMemoryStore,
   PostgresOutboxStore,
   PostgresTenantSettingsStore,
+  PostgresTrigramLexicalStore,
   PostgresVectorStore,
   closePostgresClient,
   createPostgresClient,
@@ -18,12 +19,41 @@ import type { CreateProvidersOptions, EnvLike, ProviderMode } from "./providers.
 import { createProviders } from "./providers.js";
 import type { UsageMeter } from "./usage-meter.js";
 
+/** `MNEMORA_LEXICAL_STORE` が受け付ける値。`"default"` が今日どおり（`PostgresLexicalStore`）。 */
+const LEXICAL_STORE_MODES = ["default", "trigram"] as const;
+export type LexicalStoreMode = (typeof LEXICAL_STORE_MODES)[number];
+
+/**
+ * `MNEMORA_LEXICAL_STORE` を読む（Issue #278, ADR 0319）。**空文字・未指定は `"default"`**
+ * （`selectLLMMode`/`selectEmbeddingMode`「空文字は未指定」と同じ作法、`providers.ts`）。
+ *
+ * ⛔ **既定を変えない**: この環境変数を一切設定しない既存の呼び出しは
+ * `"default"` になり、`createExampleRuntime` は今日どおり `PostgresLexicalStore` を
+ * 配線する——1バイトも挙動が変わらない。`"trigram"` を明示したときだけ
+ * `PostgresTrigramLexicalStore`（opt-in、pg_trgm）に差し替わる。
+ */
+export function selectLexicalStoreMode(env: EnvLike): LexicalStoreMode {
+  const value = env.MNEMORA_LEXICAL_STORE;
+  if (value === undefined || value === "") {
+    return "default";
+  }
+  if ((LEXICAL_STORE_MODES as readonly string[]).includes(value)) {
+    return value as LexicalStoreMode;
+  }
+  throw new Error(
+    `MNEMORA_LEXICAL_STORE には ${LEXICAL_STORE_MODES.map((m) => `"${m}"`).join(" / ")} の` +
+      `いずれかを指定すること（実際: "${value}"）。`,
+  );
+}
+
 export interface ExampleRuntimeHandle {
   runtime: Runtime;
   /** 後方互換のために残す単一ラベル（`providers.ts` の `Providers.mode` と同じ注記）。 */
   mode: ProviderMode;
   llmMode: ProviderMode;
   embeddingMode: ProviderMode;
+  /** `selectLexicalStoreMode(env)` の結果（Issue #278, ADR 0319）。既定は `"default"`。 */
+  lexicalStoreMode: LexicalStoreMode;
   /** `llmMode`/`embeddingMode` のどちらかが `"openai"` のときだけ存在する。 */
   usageMeter?: UsageMeter;
   /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
@@ -102,6 +132,14 @@ export interface ExampleRuntimeHandle {
  *   1バイトも変えない**（`RecallQuery.channels` の既定は `DEFAULT_RECALL_CHANNELS`
  *   = `["ann"]` のまま、`packages/core` 側も変更していない）。**`channels` を明示して
  *   `"lexical"` を含めた呼び出し側だけが、この配線の効果を受け取る。**
+ * - **`MNEMORA_LEXICAL_STORE=trigram`（Issue #278、ADR 0319）で opt-in の
+ *   `PostgresTrigramLexicalStore` に差し替えられる**（{@link selectLexicalStoreMode}）。
+ *   **未設定・空文字は今日どおり `PostgresLexicalStore`**——既定は1バイトも変わらない。
+ *   `"trigram"` を指定すると `PostgresTrigramLexicalStore.create()` を呼ぶ——拡張・ロケール
+ *   の前提を満たせない環境（`server_encoding` が `UTF8` でない等）では、ここで
+ *   `TrigramLexicalStoreUnavailableError` が投げられ `createExampleRuntime` 自体が失敗する
+ *   （黙って `PostgresLexicalStore` にフォールバックしない——「trigram を選んだのに
+ *   実は既定のままだった」という静かな取り違えを避けるため）。
  */
 export async function createExampleRuntime(
   databaseUrl: string,
@@ -123,6 +161,12 @@ export async function createExampleRuntime(
   } = createProviders(env, providerOptions);
   await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
+  const lexicalStoreMode = selectLexicalStoreMode(env);
+  const lexicalStore: LexicalStore =
+    lexicalStoreMode === "trigram"
+      ? await PostgresTrigramLexicalStore.create(client.db)
+      : new PostgresLexicalStore(client.db);
+
   const memoryStore = new PostgresMemoryStore(client.db);
   const tenantSettingsStore = new PostgresTenantSettingsStore(client.db);
   const eventStore = new PostgresEventStore(client.db);
@@ -130,7 +174,7 @@ export async function createExampleRuntime(
     memoryStore,
     outboxStore: new PostgresOutboxStore(client.db),
     vectorStore: new PostgresVectorStore(client.db),
-    lexicalStore: new PostgresLexicalStore(client.db),
+    lexicalStore,
     eventStore,
     tenantSettingsStore,
     llmProvider,
@@ -144,6 +188,7 @@ export async function createExampleRuntime(
     mode,
     llmMode,
     embeddingMode,
+    lexicalStoreMode,
     cassetteIgnored,
     ...(usageMeter !== undefined ? { usageMeter } : {}),
     memoryStore,
