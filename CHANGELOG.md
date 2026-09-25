@@ -261,6 +261,19 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ統合が
   構造的に起きなくなる（実測は ADR 0310/0317）。
   明示的な `runtime.consolidate(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
+- **`@mnemora/postgres` の `registerEmbeddingSpace()` に `dimensions > 2000` を渡すと、
+  `CREATE TABLE IF NOT EXISTS` は成功するが続く HNSW 索引の作成が pgvector の `54000`
+  （"column cannot have more than 2000 dimensions for hnsw index"）で失敗し、**テーブルだけが
+  DB に残っていた**（ADR 0018 が「C-2」として実測・記録していたが、当時は直さない方針だった）。
+  テーブルを作る前（advisory lock を取る前の既存バリデーションと同じ場所）で
+  `dimensions > 2000` を拒否するようにした。上限値 2000 は pgvector の README（`vector` 型に
+  対する HNSW 索引: "up to 2,000 dimensions"）と、手元の pgvector 0.8.0 に対する実測の
+  両方で裏取りしている
+  （[Issue #776](https://github.com/takecchi/mnemora/issues/776) /
+  ADR 0018 追記、PR #<PR_NUMBER>）。
+  ⭕ **公開型は変えていない**——新しいエラークラスは足さず、既存の dimensions バリデーション
+  （`Number.isInteger(dimensions) && dimensions > 0`）と同じ流儀（`Error`）で拒否する。
+  `dimensions <= 2000` の既存呼び出しの挙動は無変更。
 
 ---
 
