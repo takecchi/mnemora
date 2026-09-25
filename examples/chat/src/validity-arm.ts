@@ -96,17 +96,22 @@ async function runOneProbe(
   const utterances = buildValidityConversation(probe, now);
 
   // ⭐ 書く経路は Runtime.observe() の validFrom/validUntil（マネージャー決定4）。
+  // Issue #719: `observed.memoryIds`（冪等な再送では空配列——`ObserveResult` の
+  // docstring）を積算し、`drainEmbedTicks` に渡す——drain が「available_at との ms
+  // 競合で claim 0件のまま」黙って抜けないことを検査させる。
+  let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
-    await options.runtime.observe(ctx, {
+    const observed = await options.runtime.observe(ctx, {
       kind: "utterance",
       text: utterance.text,
       externalId: utterance.externalId,
       ...(utterance.validFrom !== undefined ? { validFrom: utterance.validFrom } : {}),
       ...(utterance.validUntil !== undefined ? { validUntil: utterance.validUntil } : {}),
     });
+    expectedEmbedJobs += observed.memoryIds.length;
   }
 
-  await drainEmbedTicks(options.runtime, ctx);
+  await drainEmbedTicks(options.runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 
   const currentId = currentExternalId(probe.id);
   const otherId = otherExternalId(probe.id);

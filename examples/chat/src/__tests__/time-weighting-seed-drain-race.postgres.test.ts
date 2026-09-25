@@ -129,7 +129,7 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
             recordedAt: new Date(frozenMs),
           },
         ]),
-      ).rejects.toThrow(/embed ジョブが 1 件のはずが/);
+      ).rejects.toThrow(/embed ジョブが 1 件処理されるはずが/);
     } finally {
       await handle.close();
     }

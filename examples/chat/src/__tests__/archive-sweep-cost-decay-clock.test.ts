@@ -54,8 +54,18 @@ function fakeMemory(id: string): Memory {
 
 function buildFakeRuntime(): Runtime {
   let nextObserveId = 0;
+  // Issue #719 の歯（`drainEmbedTicks` の `expectedProcessed`）が実際に噛むようになった
+  // 後: 実物の `Runtime` は「`observe()` が積んだ embed ジョブを `tick()` が処理する」
+  // という契約を持つ（`packages/core/src/runtime.ts` — outbox 経由、`createMemoryWithOutbox`
+  // が積み `tick()` の `processEmbedJob` が消化する）。この偽 `Runtime` はその契約を無視して
+  // `tick` が常に `processed: 0` を返していたため、`runArchiveSweepCost` が渡す
+  // `expectedProcessed`(= 積んだ件数)と噛み合わず、実際には何も壊れていないのに
+  // `drainEmbedTicks` が例外を投げていた。⟹ `observe()` が積んだ件数を `tick()` が
+  // 消化して返す、最小限の契約通りの偽物に直す。
+  let pendingEmbedJobs = 0;
   const observe: Runtime["observe"] = async () => {
     nextObserveId += 1;
+    pendingEmbedJobs += 1;
     return {
       observationId: `obs-${nextObserveId}`,
       memoryIds: [`mem-observe-${nextObserveId}`],
@@ -63,10 +73,13 @@ function buildFakeRuntime(): Runtime {
       extractionFailure: null,
     } as unknown as Awaited<ReturnType<Runtime["observe"]>>;
   };
-  const tick: Runtime["tick"] = async () =>
-    ({ processed: 0, failed: 0, unsupported: [] }) as unknown as Awaited<
+  const tick: Runtime["tick"] = async () => {
+    const processed = pendingEmbedJobs;
+    pendingEmbedJobs = 0;
+    return { processed, failed: 0, unsupported: [] } as unknown as Awaited<
       ReturnType<Runtime["tick"]>
     >;
+  };
   const recall: Runtime["recall"] = async () =>
     ({
       recallId: "recall-1",

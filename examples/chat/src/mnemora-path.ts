@@ -83,15 +83,21 @@ export async function ingestConversation(
   ctx: Ctx,
   conversation: Conversation,
 ): Promise<void> {
+  // Issue #719: `observed.memoryIds`(冪等な再送では空配列——`ObserveResult` の
+  // docstring)を積算し、`drainEmbedTicks` に渡す——`compare`/`retrieval` が使う
+  // 主測定の取り込み段であるため、「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことをここでも検査させる。
+  let expectedEmbedJobs = 0;
   for (const turn of conversation.userUtterances) {
-    await runtime.observe(ctx, {
+    const observed = await runtime.observe(ctx, {
       kind: "utterance",
       text: turn.text,
       speaker: turn.role,
       externalId: externalIdForTurn(turn.index),
     });
+    expectedEmbedJobs += observed.memoryIds.length;
   }
-  await drainEmbedTicks(runtime, ctx);
+  await drainEmbedTicks(runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 }
 
 /**

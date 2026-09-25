@@ -226,15 +226,20 @@ export async function runAssociationArm(
   const ctx: Ctx = { tenantId: options.tenantId };
   const utterances = buildAssociationProbeSetConversation(options.haystackSize);
 
+  // Issue #719: `observed.memoryIds`（冪等な再送では空配列）を積算し、
+  // `drainEmbedTicks` に渡す——「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  let expectedEmbedJobs = 0;
   for (const utterance of utterances) {
-    await options.runtime.observe(ctx, {
+    const observed = await options.runtime.observe(ctx, {
       kind: "utterance",
       text: utterance.text,
       externalId: utterance.externalId,
     });
+    expectedEmbedJobs += observed.memoryIds.length;
   }
 
-  await drainEmbedTicks(options.runtime, ctx);
+  await drainEmbedTicks(options.runtime, ctx, { expectedProcessed: expectedEmbedJobs });
 
   const association: RecallAssociationQuery | undefined = options.association
     ? { maxCount: options.association.maxCount }

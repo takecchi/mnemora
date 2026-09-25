@@ -252,7 +252,12 @@ export async function runCorrectionDemo(
     speaker: "user",
     externalId: scenario.correction.externalId,
   });
-  await drainEmbedTicks(runtime, ctx);
+  // Issue #719: `observed.memoryIds`(冪等な再送では空配列)の合計を
+  // `drainEmbedTicks` に渡し、「available_at との ms 競合で claim 0件のまま」
+  // 黙って抜けないことを検査させる。
+  await drainEmbedTicks(runtime, ctx, {
+    expectedProcessed: originalObserved.memoryIds.length + correctionObserved.memoryIds.length,
+  });
 
   const originalId = originalObserved.memoryIds[0];
   const correctionId = correctionObserved.memoryIds[0];
