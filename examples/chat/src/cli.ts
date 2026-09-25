@@ -65,6 +65,10 @@ import {
   runCorrectionCandidateArm,
   summarizeCorrectionCandidateReport,
 } from "./correction-candidate-arm.js";
+import {
+  buildMeasuredCorrectionCandidateProbeJson,
+  buildWeightsUnavailableCorrectionCandidateProbeJson,
+} from "./correction-candidate-json.js";
 import { CORRECTION_CASE_SET_DEV } from "./correction-case-set.dev.js";
 import {
   CORRECTION_ABSTAIN_CASE_SET_EVAL,
@@ -2518,12 +2522,15 @@ async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
 async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
   const databaseUrl = requireDatabaseUrl();
   const runToken = newRunToken();
+  const measuredAt = new Date();
+  const commit = tryGitRevParseHead(process.cwd());
   const handle = await createExampleRuntime(databaseUrl, {
     ...process.env,
     MNEMORA_LLM: "deterministic",
     MNEMORA_EMBEDDING: "local",
   });
   printProviderMode(handle, null);
+  const jsonPath = process.env.MNEMORA_CORRECTION_CANDIDATE_JSON;
   try {
     console.log(
       "\n[correction-candidates] warmup() でモデルの読み込みを先に済ませる" +
@@ -2537,8 +2544,22 @@ async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
           "ネットワーク・Hugging Face repo の状態を確認し、再実行すること。",
       );
       process.exitCode = 1;
+      if (jsonPath) {
+        const json = buildWeightsUnavailableCorrectionCandidateProbeJson({
+          measuredAt,
+          commit,
+          detail: warmup.detail,
+        });
+        writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+        console.log(`\n[correction-candidates] 機械可読な結果(取得失敗)を書き出した: ${jsonPath}`);
+      }
       return;
     }
+    const embeddingSpace = handle.embeddingProvider.space;
+    console.log(
+      `[correction-candidates] embedding space: provider=${embeddingSpace.provider} ` +
+        `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}`,
+    );
     const label = useDevSet ? "dev" : "eval";
     console.log(
       `\n[correction-candidates] ケース集合 = ${label}` +
@@ -2562,10 +2583,22 @@ async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
       process.exitCode = 1;
       return;
     }
+    const summary = summarizeCorrectionCandidateReport(report);
     console.log("");
-    console.log(
-      formatCorrectionCandidateReport(report, summarizeCorrectionCandidateReport(report)),
-    );
+    console.log(formatCorrectionCandidateReport(report, summary));
+
+    if (jsonPath) {
+      const json = buildMeasuredCorrectionCandidateProbeJson({
+        report,
+        summary,
+        caseSet: useDevSet ? "dev" : "eval",
+        embeddingSpace,
+        measuredAt,
+        commit,
+      });
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(`\n[correction-candidates] 機械可読な結果を書き出した: ${jsonPath}`);
+    }
   } finally {
     await handle.close();
   }
@@ -2612,8 +2645,8 @@ function printHelp(): void {
       "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。MNEMORA_ARCHIVE_SWEEP_JSON で機械可読出力",
       "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction-candidates",
-      "                                                                      # 訂正の相手探しの精度(Issue #369 (C))を測る。hit@k/distractor逆転率/誤爆率/棄権率",
-      "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。-- --dev で開発用ケース集合",
+      "                                                                      # 訂正の相手探しの精度(Issue #369 (C)、ADR 0291/0321)を測る。hit@k/distractor逆転率/誤爆率/棄権率/margin/intrusionMargin",
+      "                                                                      #   鍵・カセット不要(deterministic LLM + local embedding)。-- --dev で開発用ケース集合。MNEMORA_CORRECTION_CANDIDATE_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer      # naive/mnemora の最終回答・入力量を対で出す(Issue #506)",
       "                                                                      #   🔴 配線の検査であり、回答品質は測っていない(llmMode=deterministic のとき集計を出さない)",
       "                                                                      #   MNEMORA_ANSWER_JSON で機械可読出力",
