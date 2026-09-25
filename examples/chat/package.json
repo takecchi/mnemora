@@ -10,6 +10,7 @@
     "test:db": "vitest run",
     "chat": "tsx src/cli.ts chat",
     "compare": "tsx src/cli.ts compare",
+    "recall-footprint-calibration-samples": "tsx src/cli.ts recall-footprint-calibration-samples",
     "scope": "tsx src/cli.ts scope",
     "explain": "tsx src/cli.ts explain",
     "backfill": "tsx src/cli.ts backfill",

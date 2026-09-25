@@ -24,6 +24,8 @@ import {
   runComparison,
 } from "./compare.js";
 import { buildCompareJson } from "./compare-json.js";
+import { generateCalibrationSamples } from "./recall-footprint-calibration-samples.js";
+import { buildRecallFootprintCalibrationSamplesJson } from "./recall-footprint-calibration-samples-json.js";
 import { parseConsolidationCostOptions } from "./consolidation-cost-options.js";
 import { runConsolidationCost } from "./consolidation-cost.js";
 import { formatConsolidationCostReport } from "./consolidation-cost-format.js";
@@ -654,6 +656,67 @@ async function runCompare(decayClock: DecayClock | undefined): Promise<void> {
       });
       writeFileSync(compareJsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
       console.log(`\n[compare] 機械可読な結果を書き出した: ${compareJsonPath}`);
+    }
+  } finally {
+    await handle.close();
+  }
+}
+
+/**
+ * Issue #340 フォローアップ（ADR 0307）: `recall-footprint` 較正の補助標本
+ * （`CALIBRATION_SAMPLE_DESIGN`、8点）を、`compare` と同じ recorded カセット
+ * （`examples/chat/cassettes/compare.json`）に対して生成する。
+ *
+ * ⚠ **`compare` の代わりではない。** `compare-baseline.json`（⭐門）の `rows`
+ * には混ぜない——`examples/chat/README.md`
+ * 「recall-footprint-calibration-samples.dev.json」節・ADR 0307 §2 参照。
+ * この関数は CI の `example-chat` ジョブに、`compare` ステップと並ぶ独立のステップとして
+ * 配線される（`.github/workflows/ci.yml`）。
+ *
+ * `resolveRecordedRun("compare")` を使う——`recall-footprint-calibration-samples.ts`
+ * 冒頭の doc が実測済みのとおり、抽出プロンプトの鍵は発話内容だけで決まるため、
+ * `compare` のカセットがそのまま再生に使える（新しいカセットを録る必要が無い）。
+ */
+async function runRecallFootprintCalibrationSamples(): Promise<void> {
+  const databaseUrl = requireDatabaseUrl();
+  const plan = resolveRecordedRun("compare");
+  const handle = await createExampleRuntime(databaseUrl, plan.env, plan.providerOptions);
+  printProviderMode(handle, plan.plannedSource);
+  try {
+    console.log(
+      "\nrecall-footprint の較正標本（目次帯が空のまま件数10〜20件、limit=20固定の8点）を生成する。\n",
+    );
+    const rows = await generateCalibrationSamples(handle.runtime);
+    for (const row of rows) {
+      console.log(
+        `  fillerPairs=${row.fillerPairs} limit=${row.recallLimit} turnCount=${row.turnCount} ` +
+          `totalInScope=${row.totalInScope} bandEntryCount=${row.bandEntryCount} ` +
+          `mnemoraChars=${row.mnemoraChars}`,
+      );
+    }
+    console.log(
+      handle.usageMeter
+        ? handle.usageMeter.formatReport()
+        : formatNoApiCallsNotice({
+            llmMode: handle.llmMode,
+            embeddingMode: handle.embeddingMode,
+          }),
+    );
+
+    // `MNEMORA_COMPARE_JSON` と同じ規約——設定されているときだけ書く。
+    const jsonPath = process.env.MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON;
+    if (jsonPath) {
+      const json = buildRecallFootprintCalibrationSamplesJson({
+        rows,
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        measuredAt: new Date(),
+        commit: tryGitRevParseHead(process.cwd()),
+      });
+      writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+      console.log(
+        `\n[recall-footprint-calibration-samples] 機械可読な結果を書き出した: ${jsonPath}`,
+      );
     }
   } finally {
     await handle.close();
@@ -2192,6 +2255,9 @@ function printHelp(): void {
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run compare    # 会話の長さを変えて経路A/経路Bの量を実測",
       "                                                                      #   OPENAI_API_KEY があれば実 API、無ければ記録の再生(ADR 0052)",
       "                                                                      #   -- --decay-clock <wall|activity|either> で対象テナントの decay_clock を設定する(ADR 0165、既定は未指定=何も書かない)",
+      "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples",
+      "                                                                      # recall-footprint 較正の補助標本(limit=20の8点、Issue #340・ADR 0307)を生成する",
+      "                                                                      #   compare と同じ recorded カセットを再生。MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON で機械可読出力",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run scope      # tenantId/subjectId のスコープを実演",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run explain    # recallId から Runtime.getRecall() で内訳を後から読み戻す(Issue #312)",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run backfill   # observe() の occurredAt が period の絞りに効くことを実演",
@@ -2265,6 +2331,8 @@ async function main(): Promise<void> {
     await runChat();
   } else if (command === "compare") {
     await runCompare(parseDecayClockFlag(process.argv.slice(3)));
+  } else if (command === "recall-footprint-calibration-samples") {
+    await runRecallFootprintCalibrationSamples();
   } else if (command === "scope") {
     await runScope();
   } else if (command === "explain") {

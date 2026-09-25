@@ -1,4 +1,4 @@
-import { heuristicTokenCounter, writeDecayClock } from "@mnemora/core";
+import { footprintSampleFromRecall, heuristicTokenCounter, writeDecayClock } from "@mnemora/core";
 import type {
   Ctx,
   DecayClock,
@@ -87,6 +87,28 @@ export interface ComparisonRow {
    * `omitted` 列にそのまま残るので、不確かさの有無はそちらで確認できる。
    */
   annCandidateCount: number;
+  /**
+   * `recall().index.digestBand?.length ?? 0`（Issue #340 フォローアップ、ADR 0307）。
+   *
+   * `@mnemora/core` の `footprintSampleFromRecall` をそのまま呼んで導く
+   * （二重実装しない——ADR 0306 決定1が推定器/較正側で共有した設計を、この計測器側でも
+   * そのまま使う）。`recall-footprint` の hold-in/hold-out の分け方
+   * （`totalInScope <= DEFAULT_RECALL_LIMIT` の代理指標 vs 帯が空そのもの）を、
+   * 代理指標を介さずこの生の値で判定できるようにするための追加——ADR 0307
+   * 「引き受けた負債3」の続きに当たる。
+   */
+  bandEntryCount: number;
+  /**
+   * `JSON.stringify(recall().index).length`（Issue #340 フォローアップ、ADR 0307）。
+   *
+   * `recall().index`（`IndexBand`）そのものを毎行 commit すると
+   * `compare-baseline.json` が肥大化する（診断用の生データであり、⭐門の判定には
+   * 使わない——ADR 0121 決定2「診断用の配列で比較に使われないものは落とす」と同じ
+   * 規律）。⟹ この行は、生の `index` を残す代わりに、その JSON 化された長さだけを
+   * 残す——`recall-footprint` の切片（`fixedIndexChars`）の検算に使える最小限の値
+   * （`usage.chars` のうち index tier の寄与の下限）。
+   */
+  rawIndexJsonLength: number;
   /**
    * 冒頭の事実表明（`FACT_STATEMENT`）の出典（`sourceObservationId` → `externalId`）に、
    * `recall().memories` が到達しているか。判定方法は `factStatementSourceReached`
@@ -179,6 +201,7 @@ export async function runComparison(
     // ので、ここで呼んでもこの行の測定値(naiveChars/mnemoraChars/omitted/…)は
     // 一切変わらない——「報告は測定済みの recall の後」という配線方針そのもの。
     const usageReport = await reportMemoryUsage(runtime, ctx, recall);
+    const footprintSample = footprintSampleFromRecall(recall);
 
     rows.push({
       fillerPairs,
@@ -192,6 +215,8 @@ export async function runComparison(
       omitted: recall.omitted,
       returnedCount: recall.memories.length,
       annCandidateCount: recall.index.totalInScope - notIndexedCount(recall.omitted),
+      bandEntryCount: footprintSample.bandEntryCount,
+      rawIndexJsonLength: JSON.stringify(recall.index).length,
       factStatementSurvived: survived,
       memoryUsageReported: usageReport.reported,
     });

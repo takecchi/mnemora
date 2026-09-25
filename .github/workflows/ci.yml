@@ -562,6 +562,35 @@ jobs:
           path: ${{ github.workspace }}/compare.json
           if-no-files-found: ignore
 
+      - name: recall-footprint 較正の補助標本（limit=20の8点、Issue #340 フォローアップ・ADR 0307）を生成する
+        # 🔴 `compare` ステップと同じ理由で `OPENAI_API_KEY` を設定していないが、
+        # 同じ recorded カセット（`examples/chat/cassettes/compare.json`）を再生する
+        # （`recall-footprint-calibration-samples.ts` 冒頭の doc が実測済みのとおり、
+        # 抽出プロンプトの鍵は発話内容だけで決まるため、新しいカセットは要らない）。
+        #
+        # `compare-baseline.json`（⭐門）とは別物である——`rows` には混ぜない
+        # （ADR 0307 §2）。この標本を `compare-baseline.json` のような CI-sourcing の
+        # 基準値へ昇格させる（同一 commit で本ジョブを2回以上実行し一致を確かめる）のは、
+        # この配線を経た artifact が揃ってから行う、別の判断・別の PR である。
+        env:
+          MNEMORA_RECALL_FOOTPRINT_CALIBRATION_SAMPLES_JSON: ${{ github.workspace }}/recall-footprint-calibration-samples.json
+        run: pnpm --filter @mnemora/example-chat run recall-footprint-calibration-samples
+
+      - name: 較正標本の8点を Job Summary に残す（⛔ 門ではない。基準値ファイルがまだ無いため）
+        if: always()
+        run: |
+          node scripts/recall-footprint-calibration-samples-summary.mjs \
+            --measured "${{ github.workspace }}/recall-footprint-calibration-samples.json" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: recall-footprint 較正の補助標本の実測値そのもの（機械可読、生の index を含む）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: recall-footprint-calibration-samples
+          path: ${{ github.workspace }}/recall-footprint-calibration-samples.json
+          if-no-files-found: ignore
+
       - name: "RecallQuery.timeWeighting（legacy/eventAwareFreshness、Issue #690・ADR 0300）を answer-time-weighting で再生し、正誤の表をログへ残す"
         # 🔴 このステップも `OPENAI_API_KEY` を設定していないが、`compare` と同じ理由で
         # 擬似(deterministic) provider では走らない——`examples/chat/cassettes/
