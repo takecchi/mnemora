@@ -1,3 +1,4 @@
+# ⚠ 2026-09-26: 追加した push（5963108）で GitHub がこの workflow を登録し損ねたため、このファイルに触れて登録させる（中身の変更なし）。
 # 🔴🔴 ⛔ **この workflow は required status check ではない。** `.github/workflows/ci.yml`・
 # `.github/required-status-checks.json`・branch protection のどれにも触れていない
 # （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」節・ADR 0279 の対象外——required
