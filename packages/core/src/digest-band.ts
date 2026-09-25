@@ -87,7 +87,13 @@ export function packDigestBand(
 
   for (const candidate of candidates) {
     const digestTooLong = candidate.digest.length > opts.maxEntryChars;
-    const digest = digestTooLong ? candidate.digest.slice(0, opts.maxEntryChars) : candidate.digest;
+    // `String.prototype.slice(0, n)` は `n` が負数だと「末尾から `n` 文字を除く」という
+    // 別の意味になり、先頭からの切り詰めにならない（負数の `maxEntryChars` を渡すと、
+    // 上限より長い文字列がそのまま残っていた）。`maxEntryChars` は「1件の digest の
+    // 文字数上限」であり、負数は上限0（何も残さない）の下限として扱う。
+    const digest = digestTooLong
+      ? candidate.digest.slice(0, Math.max(0, opts.maxEntryChars))
+      : candidate.digest;
     const cost =
       DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + digest.length + DIGEST_BAND_ENTRY_SEPARATOR_CHARS;
 
