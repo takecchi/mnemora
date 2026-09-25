@@ -138,6 +138,13 @@ export class InMemoryLexicalStore implements LexicalStore {
           continue;
         }
       }
+      // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み（`InMemoryVectorStore` と同じ意味論）。
+      if (opts.filter.labels !== undefined) {
+        const labels = opts.filter.labels;
+        if (!memory.tags.some((tag) => labels.includes(tag))) {
+          continue;
+        }
+      }
       // ADR 0056: 除外の列挙（status とは向きが逆）。`undefined`/空配列は no-op。
       if (
         opts.filter.excludeProvenanceKinds !== undefined &&

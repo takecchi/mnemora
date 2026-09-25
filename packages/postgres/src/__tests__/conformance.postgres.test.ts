@@ -145,6 +145,7 @@ describeVectorStoreConformance({
         ...(attrs?.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
         ...(attrs?.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
         ...(attrs?.attributes !== undefined ? { attributes: attrs.attributes } : {}),
+        ...(attrs?.tags !== undefined ? { tags: attrs.tags } : {}),
       }),
     );
     return memory.id;
@@ -194,6 +195,7 @@ describeLexicalStoreConformance({
         ...(attrs.validFrom !== undefined ? { validFrom: attrs.validFrom } : {}),
         ...(attrs.validUntil !== undefined ? { validUntil: attrs.validUntil } : {}),
         ...(attrs.attributes !== undefined ? { attributes: attrs.attributes } : {}),
+        ...(attrs.tags !== undefined ? { tags: attrs.tags } : {}),
       }),
     );
     return memory.id;

@@ -168,6 +168,16 @@ export interface VectorFilter {
    * 場合だけ通す。**未指定・空オブジェクトは no-op**（絞り込み無し）。
    */
   attributes?: Attributes;
+  /**
+   * **OR の集合絞り込み**（Issue #201 PR-B、
+   * [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
+   * `RecallScope.labels`/`RecallQuery.labels` の doc コメント参照。渡した名前のうち
+   * 1つでも `tags` に含まれれば通す（配列の重なり、postgres 実装は `&&` 演算子）。
+   * **未指定は no-op**（絞り込み無し）。渡される名前は既に「現在の `taxonomy_mode` で
+   * 参加資格がある」ことが呼び出し側（core）で解決済みであり、この interface の
+   * 実装は `status`（`registered`/`proposed`）を意識しなくてよい。
+   */
+  labels?: string[];
 }
 
 /** `VectorStore.getVectors` が返す1件。 */

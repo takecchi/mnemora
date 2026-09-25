@@ -8,13 +8,16 @@ import type { OutboxJobKind } from "../interfaces/scheduler.js";
 import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
+  assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
   DEFAULT_HALF_LIFE_RECALLS,
+  DEFAULT_TAXONOMY_MODE,
 } from "../interfaces/tenant-settings-store.js";
 import type {
   DecayClock,
   EventRetention,
   EventRetentionSetting,
+  TaxonomyMode,
   TenantSettingsStore,
 } from "../interfaces/tenant-settings-store.js";
 import type { VectorStore, VectorFilter, VectorHit } from "../interfaces/vector-store.js";
@@ -34,6 +37,7 @@ import type {
   AggregateScopeOptions,
   ArchiveDecayedOptions,
   ArchiveDecayedResult,
+  LabelSummary,
   MemoryStore,
   PurgeExpiredEventsOptions,
   PurgeExpiredEventsResult,
@@ -108,6 +112,13 @@ class FakeBackingStore {
    * 観測可能な形で再現する。
    */
   activitySeq = new Map<string, number>();
+  /**
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+   * `labels` 相当。`packages/testkit` の `InMemoryMemoryStore` と同じ key 形式
+   * （`${tenantId}::${name}`）——`recall-taxonomy-filter.test.ts` が `listLabels`/
+   * `registerLabel` 経由でここを操作する。
+   */
+  labels = new Map<string, LabelSummary>();
 
   extractionKey(
     tenantId: string,
@@ -323,8 +334,71 @@ export class FakeMemoryStore implements MemoryStore {
       if (input.sourceObservationId) {
         this.backing.extractionIndex.set(idemKey, memory.id);
       }
+      // Issue #201 PR-B（ADR 0323）: `packages/testkit` の `InMemoryMemoryStore` と同じ
+      // 契機——新しい行を実際に作ったときだけ `tags` から `proposed` ラベルを作る。
+      this.upsertProposedLabels(ctx, memory.tags);
       return memory;
     });
+  }
+
+  private labelKey(tenantId: string, name: string): string {
+    return `${tenantId}::${name}`;
+  }
+
+  /**
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+   * `packages/testkit` の `InMemoryMemoryStore.upsertProposedLabels` と同じ意味論。
+   */
+  private upsertProposedLabels(ctx: Ctx, tags: readonly string[]): void {
+    const uniqueNames = Array.from(new Set(tags));
+    for (const name of uniqueNames) {
+      const key = this.labelKey(ctx.tenantId, name);
+      const existing = this.backing.labels.get(key);
+      if (existing === undefined) {
+        this.backing.labels.set(key, {
+          name,
+          status: "proposed",
+          proposedCount: 1,
+          registeredAt: null,
+        });
+        continue;
+      }
+      if (existing.status === "proposed") {
+        this.backing.labels.set(key, { ...existing, proposedCount: existing.proposedCount + 1 });
+      }
+    }
+  }
+
+  /**
+   * Issue #201 PR-B（ADR 0323）: `listLabels?`（`InMemoryMemoryStore.listLabels` と同じ契約）。
+   */
+  async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
+    const results: LabelSummary[] = [];
+    const prefix = `${ctx.tenantId}::`;
+    for (const [key, label] of this.backing.labels) {
+      if (key.startsWith(prefix)) {
+        results.push(label);
+      }
+    }
+    results.sort((a, b) => a.name.localeCompare(b.name));
+    return results;
+  }
+
+  /**
+   * Issue #201 PR-B（ADR 0323）: `registerLabel?`（`InMemoryMemoryStore.registerLabel` と
+   * 同じ契約）。
+   */
+  async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    const key = this.labelKey(ctx.tenantId, name);
+    const existing = this.backing.labels.get(key);
+    const registered: LabelSummary = {
+      name,
+      status: "registered",
+      proposedCount: existing?.proposedCount ?? 0,
+      registeredAt: existing?.registeredAt ?? new Date(),
+    };
+    this.backing.labels.set(key, registered);
+    return registered;
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
@@ -686,6 +760,7 @@ export class FakeMemoryStore implements MemoryStore {
     let filteredPeriod = 0;
     let filteredExpired = 0;
     let filteredNotYetValid = 0;
+    let filteredTaxonomy = 0;
     let filteredDecayed = 0;
     // 目次帯の候補（本 PR）: totalInScope に数える条件と**同じ条件**で in-scope の
     // Memory を集める。`digestBand` が要求されなかった場合はこの配列を使わない。
@@ -741,6 +816,15 @@ export class FakeMemoryStore implements MemoryStore {
           continue;
         }
       }
+      // Issue #201 PR-B（ADR 0323）: taxonomy ゲート。`attributes`（上）とは違い
+      // `period`/`validity` と同じ側——`totalInScope` から除かれ、`filtered*` に数えられる。
+      if (scope.labels !== undefined) {
+        const labels = scope.labels;
+        if (!memory.tags.some((tag) => labels.includes(tag))) {
+          filteredTaxonomy += 1;
+          continue;
+        }
+      }
 
       totalInScope += 1;
       // ⭐ Issue #329 / ADR 0173: 忘却ゲートで落ちた件数。**`continue` しない**
@@ -767,6 +851,35 @@ export class FakeMemoryStore implements MemoryStore {
         countKind: "exact" as const,
       }),
     );
+
+    // Issue #201 PR-B（ADR 0323「決定5」）: `packages/testkit` の `InMemoryMemoryStore` と
+    // 同じ意味論。
+    if (scope.taxonomyGroupCandidates !== undefined) {
+      const candidates = scope.taxonomyGroupCandidates;
+      const perLabelCount = new Map<string, number>();
+      let residual = 0;
+      for (const memory of inScopeMemories) {
+        const matchingLabels = new Set(memory.tags.filter((tag) => candidates.includes(tag)));
+        if (matchingLabels.size === 0) {
+          residual += 1;
+          continue;
+        }
+        for (const label of matchingLabels) {
+          perLabelCount.set(label, (perLabelCount.get(label) ?? 0) + 1);
+        }
+      }
+      for (const [key, count] of perLabelCount) {
+        groups.push({ axis: "taxonomy" as const, key, count, countKind: "exact" as const });
+      }
+      if (residual > 0) {
+        groups.push({
+          axis: "taxonomy" as const,
+          key: null,
+          count: residual,
+          countKind: "exact" as const,
+        });
+      }
+    }
 
     let digests: ScopeAggregate["digests"] = [];
     let digestEligible: ScopeAggregate["digestEligible"] = { count: 0, countKind: "exact" };
@@ -802,6 +915,7 @@ export class FakeMemoryStore implements MemoryStore {
       filteredPeriod: { count: filteredPeriod, countKind: "exact" },
       filteredExpired: { count: filteredExpired, countKind: "exact" },
       filteredNotYetValid: { count: filteredNotYetValid, countKind: "exact" },
+      filteredTaxonomy: { count: filteredTaxonomy, countKind: "exact" },
       filteredDecayed: { count: filteredDecayed, countKind: "exact" },
       digests,
       digestEligible,
@@ -1698,6 +1812,13 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   private eventRetention: EventRetention = { kind: "unset" };
   private decayClockByTenant = new Map<string, DecayClock>();
   private halfLifeRecallsByTenant = new Map<string, number>();
+  /**
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+   * `tenant_settings.taxonomy_mode` 相当。`decayClockByTenant` と同じ形——
+   * `FakeMemoryStore` の `labels`（`FakeBackingStore` 側）とは違い、これを読むのは
+   * `TenantSettingsStore` だけなので backing の共有は要らない。
+   */
+  private taxonomyModeByTenant = new Map<string, TaxonomyMode>();
 
   constructor(
     private readonly halfLifeHours = 720,
@@ -1757,6 +1878,23 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async getActivitySeq(ctx: Ctx): Promise<number> {
     if (this.backing === undefined) return 0;
     return this.backing.activitySeq.get(ctx.tenantId) ?? 0;
+  }
+
+  /**
+   * Issue #201 PR-B（ADR 0323）: `getTaxonomyMode?`（`InMemoryTenantSettingsStore` と
+   * 同じ契約）。未設定のテナントは `DEFAULT_TAXONOMY_MODE`（`'open'`）。
+   */
+  async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
+    return this.taxonomyModeByTenant.get(ctx.tenantId) ?? DEFAULT_TAXONOMY_MODE;
+  }
+
+  /**
+   * Issue #201 PR-B（ADR 0323）: `setTaxonomyMode?`（`InMemoryTenantSettingsStore` と
+   * 同じ契約）。
+   */
+  async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
+    assertValidTaxonomyMode(mode);
+    this.taxonomyModeByTenant.set(ctx.tenantId, mode);
   }
 }
 

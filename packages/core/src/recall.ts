@@ -100,15 +100,19 @@ export interface FilteredOmission {
    * `"status"` に束ねると、「利用者が忘れてほしいと言ったのか、こちらが作り直したのか」を
    * 呼び出し側が判定できなくなる。`"archived"` が既に別条件として独立している先例に倣う。
    *
-   * **⚠ `"tenant"` と `"taxonomy"` は、この union に在るが生成するコードが無い**
-   * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) で棚卸し済み）。**理由は別々である。**
-   * - `"tenant"`: **意図的に、恒久的に来ない。これは欠陥ではなく正しい状態である。**
-   *   tenant はスコープの外側の境界であり、`filtered` としては報告しない
-   *   （別テナントのデータを omission として報告しないのと同じ理由。`ScopeAggregate` の doc 参照）。
-   *   **実装を待っている値ではない**——生成するコードを足す予定は無い。
-   * - `"taxonomy"`: **Phase 1 に実体が無いため、今は来ない。**labels テーブルは Phase 2
-   *   （docs/memory-model.md §8、Issue #201）。あちらが入れば発火するようになる、
-   *   という意味で `"tenant"` とは性質が違う。
+   * **⚠ `"tenant"` は、この union に在るが生成するコードが無い**
+   * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) で棚卸し済み）。
+   * **意図的に、恒久的に来ない。これは欠陥ではなく正しい状態である。**
+   * tenant はスコープの外側の境界であり、`filtered` としては報告しない
+   * （別テナントのデータを omission として報告しないのと同じ理由。`ScopeAggregate` の doc 参照）。
+   * **実装を待っている値ではない**——生成するコードを足す予定は無い。
+   *
+   * **⚠ `"taxonomy"` は ADR 0117 の棚卸し時点（Issue #206）では `"tenant"` と同じ未実装の
+   * union 値だったが、2026-09-25（Issue #201 PR-A/PR-B、[ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)/
+   * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）に実体を持った。**
+   * `RecallQuery.labels` による絞り込みが落とした Memory を数える（`recall-runtime.ts`
+   * が `aggregate.filteredTaxonomy.count > 0` のときだけ push する。`period`/`expired`と
+   * 同じ扱い）。**`"tenant"` とは違い、今は現に生成される。**
    *
    * **`"decayed"`（マネージャー決定、Issue #196 /
    * [ADR 0153](../../../docs/decisions/0153-recall-decay-floor-gate.md)）**:
@@ -605,16 +609,30 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
 // ---------------------------------------------------------------------------
 
 /**
- * D12: `key` は `string | null` にする。`subject_id IS NULL` の群を表すため。
- * `'(none)'` のような番兵文字列は実在する subject 名と衝突しうるので採らない。
+ * D12: `key` は `string | null` にする。`subject_id IS NULL` の群（`axis: 'subject'`）や、
+ * 参加資格のあるラベルを1つも持たない群（`axis: 'taxonomy'` の残差群）を表すため。
+ * `'(none)'` のような番兵文字列は実在する subject 名・ラベル名と衝突しうるので採らない。
  *
- * **⚠ `axis` は現在 `"subject"` でしか生成されない**（Issue #206 /
- * [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) で棚卸し済み）。
- * - `"taxonomy"`: labels テーブルが Phase 2（Issue #201）で入るまで来ない。
+ * **⚠ `axis` は Issue #206（[ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)）
+ * の棚卸し時点では `"subject"` でしか生成されなかった。**
+ * - `"taxonomy"`: 2026-09-25（Issue #201 PR-B、
+ *   [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）に実体を持った。
+ *   `RecallQuery.taxonomyGroups: true` を渡したときだけ生成される（既定は今日どおり
+ *   `"subject"` のみ）。
  * - `"time_window"`: 2026-09-16 に落とした（ADR 0117 の分類3、
  *   [ADR 0144](../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)
  *   で実施。`@mnemora/core` の公開 API の破壊的変更）。実装が消えたのに union に値だけ
  *   残っていたもので、生成するコードは一度も無かった。
+ *
+ * **🔴 `axis: 'taxonomy'` の被覆不変条件は `axis: 'subject'` と違う。** `subject` は
+ * 1 Memory が厳密に1つの値（または `null`）しか持たないため、`axis: 'subject'` の
+ * `count` の総和は必ず `ScopeAggregate.totalInScope`/`IndexBand.totalInScope` と一致する。
+ * **`taxonomy` は多対多（1 Memory が複数のラベルを持ちうる）ため、`axis: 'taxonomy'` の
+ * `count` の単純合計は `totalInScope` と一致しない（超えうる）。** 保証されるのは
+ * 「合計の一致」ではなく「取りこぼしが無いこと」——スコープ内の Memory は必ず
+ * (a) 少なくとも1つのラベル群、または (b) 残差群（`key: null`）のどちらかに数えられる
+ * （両方に載ることは無い——(a)(b) は排他的だが、ラベル群どうしは排他的ではない）。
+ * 詳細・適合テストの形は ADR 0323「決定6」、`docs/recall.md` §5 を参照。
  */
 export interface GroupCount {
   axis: "subject" | "taxonomy";
@@ -760,26 +778,40 @@ export const DIGEST_BAND_MAX_ENTRY_CHARS = 120;
  * （詳細は `FilteredOmission.condition` の doc、[ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)）。
  * **period・status（archived / superseded / forgotten）・validity（expired /
  * not_yet_valid、Issue #280）が実際に `filtered` として報告される次元である。**
- * taxonomy は Phase 1 に実体が無い（labels テーブルは Phase 2、docs/memory-model.md §8）ため、
- * この集約では常に発生しない（型としての `FilteredOmission.condition: 'taxonomy'` は
- * Phase 2 向けに残す）。
+ *
+ * **⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+ * 上の「taxonomy は Phase 1 に実体が無い」は、`labels`/`memory_labels` テーブルが
+ * 存在しなかった時点（PR-A 以前）の記述であり、今は成り立たない。** `taxonomy` は
+ * `period`/`validity` と同じ側（`filtered` として報告され、`totalInScope` から
+ * 除かれる）に実装された——`RecallQuery.labels` による絞り込みが `filteredTaxonomy`
+ * （下）として数えられる。
  *
  * **⚠ 2026-09 追記（Issue #152/#153、ADR 0312）: `attributes`（`RecallQuery.attributes`）は
  * `tenant`/`subject` と同じ側——スコープの外側の境界である。** `attributes` で絞り込んだ
  * 結果は `filtered` として報告しない（`FilteredOmission.condition` に専用の値を足さない
  * ——ADR 0312「採らなかった案」参照）。`totalInScope` はこの絞り込みの内側だけを数える。
- * `RecallScope.attributes` の doc コメント参照。
+ * `RecallScope.attributes` の doc コメント参照。**`taxonomy`（上）はこちら側ではなく
+ * `period`/`validity` 側であることに注意**——読み違えないこと（ADR 0323「前提として
+ * 確認したこと」）。
  *
  * **件数はすべてこの集約1本から取る**（ADR 0011 が段1から締め出した
  * `count(*) OVER ()` の代わりに指定した経路と同じ発想）。`groups` の総和・`totalInScope`・
  * `filteredArchived`/`filteredSuperseded`/`filteredForgotten`/`filteredPeriod`/
- * `filteredExpired`/`filteredNotYetValid`/`filteredDecayed`/`notIndexed`
+ * `filteredExpired`/`filteredNotYetValid`/`filteredTaxonomy`/`filteredDecayed`/`notIndexed`
  * の各件数を、
  * 別々のクエリではなく同一の集約クエリから得ることで、書き込みが並行して起きていても
  * 「群カウントと totalInScope の総和が一致する」という被覆不変条件が構造的に崩れない。
+ * **⚠ この「総和が一致する」は `axis: 'subject'` の群カウントについてである
+ * ——`axis: 'taxonomy'`（`RecallQuery.taxonomyGroups`、ADR 0323）は別の被覆保証を持つ。
+ * `GroupCount` の doc コメント参照。**
  */
 export interface ScopeAggregate {
-  /** 群カウント（第3階、axis は Phase 1 では常に 'subject'）。totalInScope に一致するよう合算できる。 */
+  /**
+   * 群カウント（第3階）。**既定では `axis: 'subject'` のみ**——`RecallQuery.taxonomyGroups:
+   * true` を渡したときだけ `axis: 'taxonomy'` の群も追加される（Issue #201 PR-B、
+   * ADR 0323）。`axis: 'subject'` の `count` の総和は必ず `totalInScope` に一致するが、
+   * `axis: 'taxonomy'` はそうではない（`GroupCount` の doc コメント参照）。
+   */
   groups: GroupCount[];
   /** スコープ内（tenant + subject? + period? + status ゲート + validity? ゲート）の総数。 */
   totalInScope: number;
@@ -827,6 +859,37 @@ export interface ScopeAggregate {
    */
   filteredNotYetValid: { count: number; countKind: CountKind };
   /**
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+   * `RecallQuery.labels` による絞り込みで落ちた件数（`FilteredOmission.condition:
+   * 'taxonomy'` の doc 参照）。`scope.labels` が `undefined`（絞り込み無し）なら常に0。
+   * `countKind` は常に `'exact'`——`filteredExpired`/`filteredNotYetValid` と同じく、
+   * 段1へ押し下げているのと**同じ述語**（`tags` と参加資格のあるラベル名の重なり）を
+   * この集約が `count(*) FILTER` として持つため厳密に数えられる。
+   *
+   * **`filteredArchived`/`filteredPeriod`/`filteredExpired`/`filteredNotYetValid` と
+   * 同じ側**——`totalInScope` から**除かれた**件数である（`filteredDecayed`（下）とは
+   * 違う）。`docs/recall.md` §2 段0「スコープの外延」が列挙する次元
+   * （tenant + subject + period + taxonomy + status）に taxonomy が含まれる、という
+   * 元々の型設計（`FILTERED_CONDITION_SCOPE_RELATION.taxonomy === 'outside_scope'`）を
+   * そのまま実装したもの。
+   *
+   * **`filteredDecayed`（下）より先に評価される**——`decayed` はスコープ内に在る
+   * Memory の到達しにくさのゲートであり、taxonomy で既に除外された Memory は
+   * `filteredDecayed` の対象集合にも入らない（`aggregateScope` の実装コメント参照）。
+   *
+   * 🔴 **任意フィールドである。** `ScopeAggregate` の他の `filtered*` 欄
+   * （`filteredArchived` 等）は必須だが、それらは Phase 1 から存在する契約であり、
+   * `aggregateScope` を実装するすべての adapter が最初から満たしている。**この欄を
+   * 必須にすると、`aggregateScope` を自作する第三者 adapter（`@mnemora/core` は npm
+   * 公開済み）が本 PR の取り込みだけでコンパイルできなくなる**——`VectorFilter.labels?`/
+   * `RecallScope.labels?` 等、本 PR の他のすべての欄が任意である（新しい機能は追加のみ、
+   * 既存の実装を壊さない）のと不整合になる。`postgres`/`testkit` は常にこの欄を返すが、
+   * 実装しない adapter では `recall-runtime.ts` がこの欄の不在を「0件」として扱う
+   * （`labels`/`taxonomyGroups` を渡さない呼び出しと同じ「機能が無いだけ」の扱い、
+   * ADR 0318 が確立した規律）。
+   */
+  filteredTaxonomy?: { count: number; countKind: CountKind };
+  /**
    * Issue #329 / [ADR 0173](../../../docs/decisions/0173-decayed-omission-counted-by-aggregate-scope.md):
    * 忘却ゲート（`decay_floor_at` / `decay_floor_seq`）が落とした件数
    * （`FilteredOmission.condition: 'decayed'` の doc 参照）。
@@ -836,12 +899,12 @@ export interface ScopeAggregate {
    * `count(*) FILTER` として持つため厳密に数えられる。
    *
    * **⚠ 他の `filtered*` 欄と、`totalInScope` との関係が違う。**
-   * `filteredArchived`/`filteredPeriod`/`filteredExpired`/`filteredNotYetValid` は
-   * `totalInScope` から**除かれた**件数だが、**`filteredDecayed` は `totalInScope` の
-   * 内訳（部分集合）である。** 忘却ゲートは `docs/recall.md` §2 段0「スコープの外延」が
-   * 列挙する次元（tenant + subject + period + taxonomy + status）に**入っていない**
-   * ——減衰しきった Memory はスコープ内に在り、群カウントにも目次帯にも現れる
-   * （だから `below_threshold` と同じ「スコープ内で落ちたもの」の側に属する）。
+   * `filteredArchived`/`filteredPeriod`/`filteredExpired`/`filteredNotYetValid`/
+   * `filteredTaxonomy` は `totalInScope` から**除かれた**件数だが、**`filteredDecayed`
+   * は `totalInScope` の内訳（部分集合）である。** 忘却ゲートは `docs/recall.md` §2 段0
+   * 「スコープの外延」が列挙する次元（tenant + subject + period + taxonomy + status）に
+   * **入っていない**——減衰しきった Memory はスコープ内に在り、群カウントにも目次帯にも
+   * 現れる（だから `below_threshold` と同じ「スコープ内で落ちたもの」の側に属する）。
    * ⟹ **群カウントの総和 = `totalInScope` という被覆不変条件は、この欄を足しても崩れない。**
    * 詳細は ADR 0173。
    */
@@ -1337,6 +1400,70 @@ export interface RecallQuery {
    * 上限超過は `parse()` の時点で例外になる——`ObserveXxxInput.attributes` と同じ検査。
    */
   attributes?: Attributes;
+  /**
+   * **taxonomy によるラベルの絞り込み**（Issue #201 PR-B、
+   * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
+   *
+   * `MemoryStore.listLabels?`/`registerLabel?`（[ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)）
+   * が管理する統制語彙（`tags` に語彙の状態 `registered`/`proposed` を持たせたもの）で
+   * 絞り込む。**意味論は OR**——渡した名前のうち、現在の `TenantSettingsStore.getTaxonomyMode?`
+   * （既定 `'open'`）で参加資格のあるものを1つでも `tags` に持つ Memory だけを残す。
+   *
+   * **参加資格の規則**（`docs/memory-model.md` §8）:
+   * - `taxonomy_mode: 'open'`（既定）—— `registered`・`proposed` の両方が参加資格を持つ。
+   * - `taxonomy_mode: 'strict'` —— `registered` のみ。渡した名前の中に `proposed`
+   *   （または未登録）のものが混ざっていても、**それらは参加資格のある名前の集合から
+   *   外れる**（ADR 0323「決定2」）。
+   *
+   * 🔴 **参加資格のある名前が1つも残らなかった場合、絞り込みは「何にも一致しない」
+   * 述語になる（結果は0件、落ちた Memory は `FilteredOmission.condition: 'taxonomy'`
+   * に計上される）——この欄を渡さなかった場合（絞り込み無し・全件通過）とは逆の結果に
+   * なる。** `docs/memory-model.md` §8【逐語】「strict モードで `proposed` ラベルが
+   * フィルタから外れて記憶が返らなかった場合、それは recall の `Omission.kind =
+   * 'filtered'`…にそのまま乗る」が定める契約そのものであり、「絞り込み自体を
+   * 諦める」側には倒さない（2026-09-25 訂正——以前この段落は逆に書いていた）。
+   *
+   * **`tags`（上）とは別の軸**——`tags` は LLM の推論で加点（段2）にしか使われないが、
+   * この欄は呼び出し側が明示した統制語彙による絞り込みであり、母集合を段1で減らす
+   * （`attributes` と同じ「AND 等値の絞り込み」の隣に立つ、こちらは「OR の集合絞り込み」）。
+   *
+   * **`MemoryStore.listLabels?` を実装していない adapter**（`registered`/`proposed` の
+   * 状態を一切知りようが無い）**では、`taxonomy_mode` に応じて次のどちらかに倒す**
+   * （ADR 0323「決定2」参照。黙って絞り込みを諦めて全件へ広げることはしない）:
+   * - `'open'`（既定・フォールバック含む）: 渡した名前をそのまま参加資格ありとして使う
+   *   （open は状態を見ないので、状態が引けなくても結論は変わらない）。
+   * - `'strict'`: 検証できないため参加資格ゼロと見なす（絞り込みは0件になる）——
+   *   `open` 側へ広げてテナントの明示した方針を破らない。
+   *
+   * **段1（ANN・語彙の両チャンネル）と段3.5（連想枠）へ押し下げ、`MemoryStore.aggregateScope`
+   * にも同じ述語で渡る**（`RecallScope.labels` の doc コメント参照）。**必須の同伴取得
+   * （段3）では検査しない**（`tags` と同じ扱い、ADR 0323「決定3」）。
+   *
+   * **落ちた分は `FilteredOmission.condition: 'taxonomy'` として報告される**
+   * （`attributes` とは違う——`attributes` はスコープの内側の境界として報告しないが、
+   * taxonomy は `period`/`validity` と同じくスコープを定義するゲートとして報告される。
+   * ADR 0323「前提として確認したこと」参照）。`totalInScope` はこの絞り込みの内側を数える。
+   */
+  labels?: string[];
+  /**
+   * **`IndexBand.groups` に `axis: 'taxonomy'` の群を作るかどうかの明示的な opt-in**
+   * （Issue #201 PR-B、ADR 0323「決定5」）。
+   *
+   * **既定 `false`（省略）——この欄を渡さない呼び出しの出力は1バイトも変わらない。**
+   * `true` にすると、テナントの語彙全体（現在の `taxonomy_mode` で参加資格のある
+   * ラベル名すべて）を候補にした群カウントが `groups` に追加される。
+   *
+   * **`labels`（上）とは独立**——この欄だけを `true` にしても、`labels` を指定して
+   * いなければ絞り込みには何の影響もない（グルーピングだけが増える）。
+   *
+   * ⚠ **この軸の被覆不変条件は `subject` 軸と違う**——ラベルは多対多なので、
+   * `axis: 'taxonomy'` の `count` の総和は `totalInScope` と一致しない（超えうる）。
+   * `GroupCount` の doc コメント、`docs/recall.md` §5、ADR 0323「決定6」を参照。
+   *
+   * **`MemoryStore.listLabels?` を実装していない adapter では、この欄は静かに無視される**
+   * （`taxonomy` 軸のエントリが1つも生成されない。`labels` と同じ規律）。
+   */
+  taxonomyGroups?: boolean;
   occurredAfter?: Date;
   occurredBefore?: Date;
   limit?: number;
@@ -1682,6 +1809,9 @@ export const RecallQuerySchema = z.object({
   includeSubjectless: z.boolean().optional(),
   // 一覧を書き写さない——TIME_WEIGHTING_POLICIES から導く（Issue #690、ADR 0300）。
   timeWeighting: z.enum(TIME_WEIGHTING_POLICIES).optional(),
+  // Issue #201 PR-B（ADR 0323）。
+  labels: z.array(z.string()).optional(),
+  taxonomyGroups: z.boolean().optional(),
 }) satisfies z.ZodType<RecallQuery>;
 
 /**
@@ -1690,10 +1820,11 @@ export const RecallQuerySchema = z.object({
  * 素直に導いた最小限の型を置く。
  *
  * `subjectId` を省略すると「テナント全体」を意味する（`ctx.subjectId` が無い呼び出し）。
- * `taxonomy` フィールドが無いのは意図的——Phase 1 に taxonomy の実体（labels テーブル）が
- * 無い（docs/memory-model.md §8、labels/memory_labels は Phase 2）ため、スコープの
- * taxonomy 次元は Phase 1 では常に無条件（フィルタが存在しない）である
- * （PR 本文の「決めたこと」参照）。
+ *
+ * **⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+ * 上の「`taxonomy` フィールドが無いのは意図的」という記述は、`labels`/`memory_labels`
+ * テーブルが存在しなかった時点（PR-A 以前）のものであり、今は成り立たない。** `labels`
+ * フィールド（下）が taxonomy 次元をスコープの一部として持つ。
  */
 export interface RecallScope {
   subjectId?: string;
@@ -1754,6 +1885,60 @@ export interface RecallScope {
    * （`decayFloorAtAfter` 等と同じ「2箇所に式を書くと食い違う」規律、ADR 0038）。
    */
   attributes?: Attributes;
+  /**
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
+   * `RecallQuery.labels` を、現在の `taxonomy_mode` での参加資格（`registered` は常に、
+   * `proposed` は `taxonomy_mode: 'open'` のときだけ）で絞り込んだ結果。
+   *
+   * **`attributes` と同じ「スコープの外側の境界」である**——ただし `attributes` とは
+   * 違い、`filtered` として**報告される**（`FilteredOmission.condition: 'taxonomy'`、
+   * `FILTERED_CONDITION_SCOPE_RELATION.taxonomy === 'outside_scope'` は ADR 0318 より前
+   * から固定されている分類）。`totalInScope` はこの絞り込みの内側だけを数える。
+   *
+   * **意味論は OR**（渡した名前のうち参加資格のあるものを1つでも `tags` に持てば通る）。
+   *
+   * **3つの状態を区別する**（`undefined`/空配列/非空配列を混同しない）:
+   * - `undefined`: 絞り込み無し（全件通過）——`RecallQuery.labels` が未指定、または
+   *   空配列で渡された場合（「絞り込み無し」を1つの形に揃える、`attributes` の空
+   *   オブジェクトと同じ規約）。
+   * - **空配列 `[]`**: 絞り込みは要求されたが、参加資格のある名前が1つも残らなかった
+   *   （ADR 0323「決定2」訂正）。**この場合「何にも一致しない」述語として働く**
+   *   （OR の対象が0個 ⟹ 恒偽）——`undefined` とは逆の結果になる。`docs/memory-model.md`
+   *   §8 の契約（参加資格の無いラベルは記憶を返さず `filtered` に計上する）をそのまま
+   *   実装したものであり、2026-09-25 より前はここを `undefined` へ丸めて「絞り込み
+   *   無し」に倒す誤りがあった（レビューで訂正）。
+   * - 非空配列: その名前のいずれかを `tags` に持つ Memory だけを通す。
+   *
+   * **段1（ANN・語彙の両チャンネル）と段3.5（連想枠）へ `VectorFilter.labels`/
+   * `LexicalFilter.labels` として押し下げる。`MemoryStore.aggregateScope` にも同じ
+   * `scope` が渡る**——`attributes` と同じ3点セットの規律（ADR 0038 が測った
+   * 「2箇所に式を書くと食い違う」を避けるための唯一の出所）。
+   *
+   * **必須の同伴取得（段3）では検査しない**——`tags` 自体が同伴取得を素通しするのと
+   * 同じ理由（ADR 0323「決定3」）。
+   */
+  labels?: string[];
+  /**
+   * Issue #201 PR-B（ADR 0323）: `RecallQuery.taxonomyGroups: true` のときだけ、
+   * `IndexBand.groups` に `axis: 'taxonomy'` の群を作るための候補ラベル名（現在の
+   * `taxonomy_mode` で参加資格のある、テナントの語彙**全体**）。
+   *
+   * **`labels`（上）とは独立**——`RecallQuery.labels` を指定していなくても、または
+   * 指定した名前と違う名前でも、テナントの語彙全体を対象にグルーピングする。
+   * `undefined` は「グルーピングしない」（`IndexBand.groups` に `taxonomy` 軸の
+   * エントリを1つも作らない）。空配列は「グルーピングは要求されたが、現在参加資格の
+   * あるラベルが0件」を表す有効な値であり、`undefined` とは区別される
+   * （このときは残差群 `{ axis: 'taxonomy', key: null, ... }` だけが載りうる）。
+   *
+   * **`labels` フィルタが指定されているときは、その絞り込みの内側を数える**——
+   * `subject` 軸の群カウントが `attributes`/`subjectId` の絞り込みの内側を数えるのと
+   * 同じ設計。
+   *
+   * ⚠ **被覆不変条件が `subject` 軸とは違う形になる**——`GroupCount` の doc コメント、
+   * `docs/recall.md` §5、ADR 0323「決定6」を参照。ラベルは多対多なので、この軸の
+   * `count` の総和は `totalInScope` と一致しない（超えうる）。
+   */
+  taxonomyGroupCandidates?: string[];
 }
 
 export const RecallScopeSchema = z.object({
@@ -1766,6 +1951,8 @@ export const RecallScopeSchema = z.object({
   decayFloorAnyAxis: z.boolean().optional(),
   includeSubjectless: z.boolean().optional(),
   attributes: StoredAttributesSchema.optional(),
+  labels: z.array(z.string()).optional(),
+  taxonomyGroupCandidates: z.array(z.string()).optional(),
 }) satisfies z.ZodType<RecallScope>;
 
 /**

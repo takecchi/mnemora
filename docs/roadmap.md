@@ -172,6 +172,14 @@ Phase 1 で入れた土台が、後続フェーズをどう安くしているか
 recall 側でラベルによる絞り込みを行う経路（表の見立てが指す「Phase 2 は『フィルタへの
 参加可否』の切り替えを足すだけで済む」の後半）は依然未実装**（PR-B、ADR 0318 参照）。
 
+**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](./decisions/0323-taxonomy-recall-filter.md)）:
+上の「recall 側でラベルによる絞り込みを行う経路は依然未実装」は、本追記の時点で古い。**
+`RecallQuery.labels?`/`taxonomyGroups?` を実装し、`taxonomy_mode`（open/strict）が
+実際に絞り込みの参加資格を変えるようになった。**digest 帯そのもの（第2階）は引き続き
+Phase 2 のまま**——PR-B が実装したのは「絞り込み」と「第3階の `axis: 'taxonomy'` 群
+カウント」であり、digest 帯（1件1行の要旨、`IndexBand.digestBand`）自体は ADR 0073 が
+前倒しした形（taxonomy を要さない）のまま変わっていない。
+
 ### Phase 3
 
 | 項目 | Phase 1 の何が効いているか |
@@ -577,6 +585,15 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 **⚠3 項目4 の判定「在る」は、`association`（段3.5 連想枠）が既定 off であることに依存している** 【実測 2026-09-17、[Issue #402](https://github.com/takecchi/mnemora/issues/402)】。⭐ **上の根拠の鎖に段3.5 が一行も出てこないのは書き漏らしではない——既定 off なら鎖に要らないからである。**⛔ **既定が動けば要る。**⚠2 が塞いだのはゲートの側であり、**こちらは順位の側で、まだ開いている。****なぜ開くか**: 段3.5 は**意図的にスコア閾値の外**に置かれている（`recall-runtime.ts:1042` 以降の冒頭コメントが逐語で「連想の候補は定義上クエリに当たらないのだから、段1に置くと必ず段2の `below_threshold` で落ちる。『スコアに関係なく候補へ足す』経路は既に段3（必須の同伴取得）が持っており、連想はその一般化である」と書いている）。`partitionByThreshold` の呼び出しは `recall-runtime.ts:805` の**1箇所だけ**で対象は段1の候補 `scored` のみ、**段3.5 は `:1042` 以降で閾値分割より後に走る。**[ADR 0172](./decisions/0172-association-passes-decay-and-validity-gates.md)「段3.5 の候補は段2の閾値分割を通らない」がこの非対称を逐語で自認している——「段3.5 の候補は段2の閾値分割を通らない（`associationUnits` は閾値の後に連結される）」。🔴 **⟹ 窓が開く** 【実測】: **段2が `below_threshold` で棄却したその記憶が、連想枠 on では `retrievedVia: "association"` で返る。**窓は「**その記憶が段2から落ちた日 → 129.658日**」。上端は永続化された `decay_floor_at` からの直読（`720 × log2(1/0.05)` 時間）。下端は `total = affinity × decay × tagMatch × freshness × strength`（`strategies/scoring.ts:272`）で決まり、⚠ **`occurredAt` 未指定・未 reinforce という既定では `freshness` が `decay` と同じ値になるため実質 `similarity × decay²`** ⟹ similarity 1.0 で約49.8日 / 0.7 で約42.1日（⛔ **`decay` 単独が閾値を割る約99.7日ではない**——この逆算は実測前に崩れた）。**独立した2つの場（`packages/core` の fake ストア / 本物の Postgres + pgvector）で全点再現した。****発生率** 【実測、合成コーパス217件・クエリ35本、[#402 の追記](https://github.com/takecchi/mnemora/issues/402#issuecomment-5701589039)】: **連想枠 on の返却の 47.5%（294/619）が窓の中の記憶**で、`maxCount=10` の席の **84%**（294/350）がそれで埋まった。off 325件 → on 619件と返却量が約90%増え、**その増分は全件が窓の中だった。**⛔ **合成コーパスの数字であり「実運用でこうなる」ではない**（射程の断り書きは #402 の追記に分けて書いてある）。⭐ **そして、次に読む人にいちばん効く切り分けはこれである——破れているのは順位（スコア閾値）の側だけで、忘却ゲートの側は破れていない。**⚠2 が集約した `gateVectorFilterFields` は段1と段3.5 に同一のものが撒かれ、後置 `survivesDecayGate` も両段に在る ⟹ **実測でも 140日では off / on どちらでも返らず `omitted` が完全一致し、復活した294件のうち129日超は0件だった。[#348](https://github.com/takecchi/mnemora/pull/348) は完全である。**⟹ ⭐ **既定を on にする提案を見たら、まずここを読むこと。**「費用がかかる」ではなく「**出荷既定を on にすると正典項目4 が出荷物の中で破れる**」という形の話である（2026-09-17、この実測を受けて [#386](https://github.com/takecchi/mnemora/pull/386) をマージしない判断が下され、draft へ戻された）。
 
 **⚠4 項目6 にも、段3.5 を勘定に入れていない箇所が1つある（⚠3 と同じ形）** 【実測 2026-09-17】。上の根拠は「`Omission.kind` 11種すべてに本番の生成箇所が在る」という **kind 単位の網羅性**であり、**これは段3.5 が無くても真である**（`stage_skipped` / `over_limit` は段2側にも独立した生成箇所を持つ——`recall-runtime.ts:535` / `:549` / `:833`）。⛔ **だが `omitted` の契約は kind の網羅性だけではない。**[docs/recall.md](./recall.md) の `RecallResult` の定義は `omitted` を逐語で「**返らなかったものの分類**」と書いている。🔴 **実測**: `association` を on にすると、**同一の `recall()` の中で、同じ `memoryId` が `result.memories`（`retrievedVia: "association"`）と `result.omitted`（`below_threshold` の `nearMisses`）の両方に載る**——窓の中の全点（実測では45〜129日）で再現した。**なぜそうなるか**: 段2は `recall-runtime.ts:805` の閾値分割の直後に `below_threshold` を確定させ、`docs/recall.md` の規約どおり**以降の段は「これを積み上げるだけ」で取り直さない**。連想枠（`:1042` 以降）が候補へ足し直すのはその**後**であり、`:1096` の除外集合は「既に返る集合（`withinLimit` + `companions`）」を除くだけで、⛔ **`omitted` に既に載った記憶は除かない。**⟹ **返した記憶について「閾値未満で落ちた」と名乗り続ける。**⭐ **これは正典項目6「『見つからなかった』と『探していない』を、同じ顔で返さない」の、もう一つの読みに当たる**——**落ちていないものを落ちたと名乗るのは、分類が嘘をつくことである。**⚠ **段2の三分割そのものは破れていない**（`scored = passed + below_threshold + score_not_comparable`、[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）——破れているのは `memories` と `omitted` の排他性である。⛔ **そしてその排他性は、どの ADR も明示的に決めていない**（`recall.ts` の `BelowThresholdOmission` の doc にも `Omission` の総論にも、排他性の言明が無いことを現物で確認した）。⟹ **既定 off である限りこれは起きない**——連想枠だけがこの経路を作る。**既定を on にするなら、①`omitted` から取り下げる ②連想の除外集合に `omitted` を足す ③排他性を契約として持たないと明示する——のどれかを決める必要がある。**⛔ **どれを選ぶかはここでは決めない**（測っただけである）。
+
+**⚠5 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](./decisions/0323-taxonomy-recall-filter.md)）:
+項目6 の表本文が書く「`condition` の9値のうち `tenant` と `taxonomy` は本番の生成箇所が
+0件」は、`taxonomy` については本追記の時点で古い。** `RecallQuery.labels` による絞り込みが
+落ちた分は `condition: 'taxonomy'` として実際に push されるようになった
+（`recall-runtime.ts` の該当 `if (aggregate.filteredTaxonomy.count > 0)` ブロック）。
+`GroupCount.axis: 'taxonomy'` も `RecallQuery.taxonomyGroups: true` を渡したときだけ
+生成されるようになった。**表本文・行番号ポインタは書き換えない**（§7.0 の規律）——
+`tenant` のほうは引き続き0件のまま（意図的、恒久的）であり、こちらは変わっていない。
 
 #### ⛔ 項目2 を「在る」と数えなかった理由
 

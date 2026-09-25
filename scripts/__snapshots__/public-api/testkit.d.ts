@@ -429,6 +429,7 @@ export interface PrepareLexicalMemoryAttrs {
     validFrom?: Date | null;
     validUntil?: Date | null;
     attributes?: Record<string, string>;
+    tags?: string[];
 }
 export interface LexicalStoreConformanceOptions {
     name: string;
@@ -530,6 +531,7 @@ export interface PrepareMemoryIdAttrs {
     validFrom?: Date | null;
     validUntil?: Date | null;
     attributes?: Record<string, string>;
+    tags?: string[];
 }
 export interface VectorStoreConformanceOptions {
     name: string;
