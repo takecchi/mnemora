@@ -1602,7 +1602,7 @@ export class FakeVectorStore implements VectorStore {
     // 混同して返していた——`key()` が space を含む prefix を作っているのに、`search` だけが
     // それを見ていなかった。
     const prefix = `${space.provider}:${space.model}:${space.dimensions}:`;
-    const hits: VectorHit[] = [];
+    const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
       if (!key.startsWith(prefix)) continue;
       if (entry.tenantId !== opts.filter.tenantId || entry.tenantId !== ctx.tenantId) continue;
@@ -1695,10 +1695,24 @@ export class FakeVectorStore implements VectorStore {
           continue;
         }
       }
-      hits.push({ memoryId: entry.memoryId, distance: cosineDistance(query, entry.vector) });
+      hits.push({
+        memoryId: entry.memoryId,
+        distance: cosineDistance(query, entry.vector),
+        recordedAt: memory.recordedAt,
+      });
     }
-    hits.sort((a, b) => a.distance - b.distance);
-    return hits.slice(0, opts.limit);
+    // `PostgresVectorStore.search`（ADR 0170、Issue #339）と同じ3段 tie-break:
+    // 距離 → `recordedAt` DESC → `memoryId` 昇順。`InMemoryVectorStore`（`packages/testkit`）
+    // と同じ理由・同じ修正——以前は距離だけのソートで、同点の中身が挿入順（通常の呼び出し順では
+    // `recordedAt` が古いほうが先）に落ちており、Postgres の「新しい方が先」と逆向きだった
+    // （`packages/core/src/__tests__/fake-vector-store-tiebreak.test.ts` が歯）。
+    hits.sort((a, b) => {
+      if (a.distance !== b.distance) return a.distance - b.distance;
+      const recordedAtDiff = b.recordedAt.getTime() - a.recordedAt.getTime();
+      if (recordedAtDiff !== 0) return recordedAtDiff;
+      return a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0;
+    });
+    return hits.slice(0, opts.limit).map(({ memoryId, distance }) => ({ memoryId, distance }));
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {
