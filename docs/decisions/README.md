@@ -335,5 +335,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0308](./0308-lexical-rank-length-normalization.md) | `ts_rank_cd` の normalization に文書長のビットを足す — 語彙チャンネルの `rank` に内容由来の分解能を持たせる（Issue #394 案2） | 採用 (2026-09) |
 | [0309](./0309-answer-prompt-order-legend-and-cassette-migration.md) | `buildMnemoraPrompt` を `order-legend` 描画に確定し、`answer`/`answer-time-weighting` の再生カセットを新形式へ移行する（Issue #691 続き） | 採用 (2026-09) |
 | [0311](./0311-activity-clock-boundary-measured-soft-and-hard.md) | Issue #338 の境界を実測で確かめ直す。素の `recall()` では 3112回より先の 2392回で沈む。残るオーナー判断2点に、数値と推奨を添える | 採用 (2026-09) |
+| [0312](./0312-claim-key-does-not-touch-extraction-cassettes.md) | 主張キー（(B) 第1段）は既定の抽出プロンプトを変えない — 候補群への別呼び出しで取り、カセットは書き換えず新規追加、⭐門は動かさない（Issue #370） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
