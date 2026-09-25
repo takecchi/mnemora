@@ -102,6 +102,48 @@ branches: [main]` / `pull_request` という発火条件のもとでは、PR を
 `FLOOR_CHARS` の式・12行の値）は本 ADR で一切変更していない——上の表は、
 `recall-footprint-calibration-samples.test.ts` 側の参考計算としてのみ存在する。
 
+### ⚠ 訂正（2026-09-25、CI 配線を進めた段の担い手）: 上の表は #722（ADR 0306）を反映していない。実際は緑になる
+
+**上の表（決定3の直後、2026-09-25 当初版）は誤りではないが、古い。**この ADR は
+`52113a8`（main、`RecallFootprintSample.totalInScope` が存在しない時点）の上で書かれた
+——**#722（[ADR 0306](./0306-recall-footprint-calibration-subtracts-structural-terms.md)、
+`calibrateRecallFootprint` が構造項を差し引くようになった変更）はまだ main に無かった。**
+本ブランチを `cd2c728`（#722 マージ後の main）へ載せ替えた後、ローカル Postgres 17 +
+pgvector で `compare`/`recall-footprint-calibration-samples` を実際に実行し直し
+（`MNEMORA_PROVIDER_SOURCE=recorded` を明示、実 API は叩いていない）、8点が
+`recall-footprint-calibration-samples.dev.json` と完全一致することを確認したうえで、
+**#722 の較正**（`totalInScope` を渡し、構造項を差し引いてから最小二乗する）で
+拡張標本を較正し直した。上の表の計算は `totalInScope` を渡していなかった
+（`recall-footprint-calibration-samples.test.ts` の参考計算節も同様——本 ADR が書かれた
+時点で `RecallFootprintSample.totalInScope` 自体が存在しなかったため、渡しようがなかった）。
+**加えて、`estimateRecallFootprint` の `shape.limit` を省略していた**——8点の標本は
+`limit=20` で測ったが、`limit` を省略すると既定の `DEFAULT_RECALL_LIMIT`(10)が使われ、
+`totalInScope`(11〜19)が limit(10)を超えたと誤解して、実際には空のはずの目次帯を
+「非空」と見積もってしまう(桁上がりとは別の、もう1つの取り違い)。**この2点を両方
+直すと、拡張標本の残差は正常な小ささ(最大絶対値5字未満)に戻り、ADR 0201 の余白の歯は
+拡張後も緑のままである。**
+
+| | 現行(hold-in 7点、main) | 拡張(7+8=15点、**#722較正・limit修正後**) |
+|---|---|---|
+| `charsPerDigest` | 15.458 | 16.175 |
+| `fixedIndexChars` | 170.881 | 168.503 |
+| hold-in 残差 SD(自由度 n−2) / 最大絶対値 | 1.810 / 3.202字 | 2.180 / 4.922字 |
+| hold-out 5行の最大相対誤差 | 1.430% | 1.122% |
+| 12行全体の最大相対誤差 | 1.562% | 2.023%(2.5%許容の内側) |
+| ADR 0201 の余白(半digest, 最も狭い行) | 12.18字(42ターン行, 上側, 緑) | **9.39字(42ターン行, 下側, FLOOR=8.088字を上回り緑)** |
+
+⟹ **上の「2026-09-25 当初版」表の「7.68字・赤」という結論は、この訂正で覆る。**
+#722 の較正（構造項の差し引き）と、`estimateRecallFootprint` へ正しい `limit` を渡すことの
+両方が揃って初めて、拡張標本は「正しく」評価される——片方だけでは（このブランチで
+実際に踏んだとおり）巨大な見かけ上の残差が出る。**この訂正は、基準値
+（`compare-baseline.json`）を1バイトも変えていない**——`recall-footprint-calibration-samples.
+dev.json`（8点、CI未経由）を使った参考計算の再計算である。基準値への正式な反映は、
+この ADR §2 が定める CI-sourcing の手順を経てから行う。
+
+**確かめていないこと**: CI（`example-chat` job）上での実測——この訂正もローカル
+Postgres + `recorded` カセットの実行に基づく（下の「測ったこと」に相当する手順を
+このコミットでは ADR 本文へ書き足していない。詳細はマネージャーへの報告に譲る）。
+
 ## 検討して採らなかった案
 
 1. **`compare-baseline.json` の `rows` に直接追記する。** ⛔ 却下——CI-sourcing の規律
