@@ -35,6 +35,15 @@ import { describeTenantSettingsStoreConformance } from "../tenant-settings-store
 
 interface CountingTaxonomyStore {
   store: TenantSettingsStore;
+  /**
+   * `scripts/__tests__/tenant-settings-conformance-hook-wiring.test.mjs`（Issue #184 の
+   * 追測）が、`describeTenantSettingsStoreConformance(…)` を呼ぶ側は必ず
+   * `setDefaultHalfLifeHours` を渡していることを repo 全体で縛っている——省くと
+   * `tenant-settings-store-conformance.ts` の `if (setDefaultHalfLifeHours) { it(…) }` の
+   * 2本が登録すらされなくなるため。このフックはこのファイルの本題（taxonomy の歯）とは
+   * 無関係だが、その門を通すために両方の呼び出しへ渡す。
+   */
+  setDefaultHalfLifeHours: (ctx: Ctx, hours: number) => void;
   counts: () => { get: number; set: number };
 }
 
@@ -55,7 +64,12 @@ function countingTaxonomyStore(): CountingTaxonomyStore {
       return inner.setTaxonomyMode(ctx, mode);
     },
   };
-  return { store, counts: () => ({ get, set }) };
+  return {
+    store,
+    setDefaultHalfLifeHours: (ctx: Ctx, hours: number) =>
+      inner.setDefaultHalfLifeHours(ctx.tenantId, hours),
+    counts: () => ({ get, set }),
+  };
 }
 
 // --- 陽性対照: supportsTaxonomyMode: true では getTaxonomyMode/setTaxonomyMode が呼ばれる ---
@@ -63,6 +77,7 @@ const control = countingTaxonomyStore();
 describeTenantSettingsStoreConformance({
   name: "taxonomy-mode probe (control, supportsTaxonomyMode: true)",
   createStore: () => control.store,
+  setDefaultHalfLifeHours: control.setDefaultHalfLifeHours,
   supportsDecayClock: false,
   supportsTaxonomyMode: true,
 });
@@ -72,6 +87,7 @@ const omitted = countingTaxonomyStore();
 describeTenantSettingsStoreConformance({
   name: "taxonomy-mode probe (v1.0.0 call shape, supportsTaxonomyMode omitted)",
   createStore: () => omitted.store,
+  setDefaultHalfLifeHours: omitted.setDefaultHalfLifeHours,
   supportsDecayClock: false,
 });
 
