@@ -234,6 +234,83 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
     expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
   });
 
+  it("(庚) 'either' のテナントでは OR: 活動時計が沈んでいても壁時計が生きていれば連想枠から返る（ADR 0172 引き受けた負債4 — 実 Postgres では未測定だった）", async () => {
+    const ctx: Ctx = { tenantId: `tenant-assoc-either-activity-decayed-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
+    await tenantSettingsStore.setDecayClock(ctx, "either");
+    expect(await tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
+
+    const { anchor, associated } = await seedAnchorAndAssociated(
+      memoryStore,
+      vectorStore,
+      ctx,
+      {
+        decayFloorAt: FAR_FUTURE, // 壁時計は生きている
+        decayBaseSeq: 0,
+        decayFloorSeq: 0, // 活動時計は沈んでいる（nowSeq(=0) ちょうど、狭義の `>` が効かない）
+      },
+      { decayBaseSeq: null, decayFloorSeq: null },
+    );
+
+    const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
+
+    // OR（最も緩い）なので、片方の軸（壁時計）が生きていれば連想枠から返る。
+    const entry = result.memories.find((m) => m.memoryId === associated.id);
+    expect(entry?.retrievedVia).toBe("association");
+    expect(entry?.associationOf).toBe(anchor.id);
+  });
+
+  it("(辛) 'either' のテナントでは OR（逆向き）: 壁時計が沈んでいても活動時計が生きていれば連想枠から返る（ユニットの歯（core）が測っていなかった向き）", async () => {
+    const ctx: Ctx = { tenantId: `tenant-assoc-either-wall-decayed-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
+    await tenantSettingsStore.setDecayClock(ctx, "either");
+    expect(await tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
+
+    const { anchor, associated } = await seedAnchorAndAssociated(
+      memoryStore,
+      vectorStore,
+      ctx,
+      {
+        // 壁時計は「いま」の1秒前に沈んでいる（狭義の `>` が効かず沈んでいる）。
+        decayFloorAt: new Date(NOW.getTime() - 1_000),
+        decayBaseSeq: 0,
+        decayFloorSeq: 1, // 活動時計は生きている（decayFloorSeq(=1) > nowSeq(=0)）
+      },
+      { decayBaseSeq: null, decayFloorSeq: null },
+    );
+
+    const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
+
+    // OR（最も緩い）なので、片方の軸（活動時計）が生きていれば連想枠から返る。
+    const entry = result.memories.find((m) => m.memoryId === associated.id);
+    expect(entry?.retrievedVia).toBe("association");
+    expect(entry?.associationOf).toBe(anchor.id);
+  });
+
+  it("(対照-壬) 'either' でも両軸とも沈んでいれば連想枠から返らない（OR が「常に通す」わけではないことの検算）", async () => {
+    const ctx: Ctx = { tenantId: `tenant-assoc-either-both-decayed-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
+    await tenantSettingsStore.setDecayClock(ctx, "either");
+
+    const { anchor, associated } = await seedAnchorAndAssociated(
+      memoryStore,
+      vectorStore,
+      ctx,
+      {
+        decayFloorAt: new Date(NOW.getTime() - 1_000), // 壁時計も沈んでいる
+        decayBaseSeq: 0,
+        decayFloorSeq: 0, // 活動時計も沈んでいる
+      },
+      { decayBaseSeq: null, decayFloorSeq: null },
+    );
+
+    const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
+
+    expect(result.memories.map((m) => m.memoryId)).toContain(anchor.id);
+    expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
+    expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);
+  });
+
   it("(戊) 期限切れ（valid_until が過去）の記憶は、連想枠からも返らない（validAt ゲート、Issue #280 / ADR 0164）", async () => {
     const ctx: Ctx = { tenantId: `tenant-assoc-expired-${randomUUID()}` };
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
