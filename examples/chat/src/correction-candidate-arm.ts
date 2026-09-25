@@ -322,7 +322,9 @@ export async function runCorrectionCandidateArm(
   const hits: CorrectionHitOutcome[] = [];
   for (const c of options.hitCases) {
     // ⛔ `text` 以外を渡さない。
-    const result = await options.runtime.recall(ctx, { text: c.correction });
+    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+    // でも、この arm（訂正が gold/distractor 順位に与える効果）の基準線を動かさない。
+    const result = await options.runtime.recall(ctx, { text: c.correction, association: null });
     const externalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
     );
@@ -349,7 +351,8 @@ export async function runCorrectionCandidateArm(
 
   const abstains: CorrectionAbstainOutcome[] = [];
   for (const c of options.abstainCases) {
-    const result = await options.runtime.recall(ctx, { text: c.utterance });
+    // association: null — 上の hitCases ループと同じ理由。基準線を動かさない。
+    const result = await options.runtime.recall(ctx, { text: c.utterance, association: null });
     const topMemory = result.memories[0];
     // ⚠ **全候補の externalId を解決する**（top1 だけではない）——`protectedFacts` が
     // 複数件のとき、1位以外に居る保護対象のスコアも `protectedFactScore` に使うため

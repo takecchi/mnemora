@@ -88,20 +88,55 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-describe("recall() — 連想枠（association、既定 off）", () => {
-  it("association を渡さなければ、返り値の形は1バイトも変わらない", async () => {
+describe("recall() — 連想枠（association、既定 on。ADR 0337）", () => {
+  it("association を省略すると DEFAULT_RECALL_ASSOCIATION が適用され、byTier.association が現れる（既定 on）", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { digest: "アンカー" });
 
     const result = await runtime.recall(ctx, { vector: [1, 0] });
 
+    // 連想は走る（対象がアンカー自身しか無いので収穫0件）——stage_skipped は積まれない。
+    expect(
+      result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
+    ).toBe(false);
+    // byTier.association が在る（既定 on の形の証明。ADR 0337 以前は無かった欄）。
+    expect(Object.keys(result.usage.byTier).sort()).toEqual([
+      "association",
+      "digest",
+      "full",
+      "index",
+    ]);
+    expect(result.usage.byTier.association).toBe(0);
+    expect(result.memories.every((m) => m.retrievedVia !== "association")).toBe(true);
+  });
+
+  it("association: null を渡すと、連想は一切走らない（ADR 0151 以前の振る舞い、明示的な opt-out）", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: "アンカー" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], association: null });
+
     // stage_skipped(association) が積まれない——問われていないことは「無い」ではない。
     expect(
       result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
     ).toBe(false);
-    // byTier に association キー自体が無い（既定 off の形の証明）。
+    // byTier に association キー自体が無い（明示的な off の形の証明）。
     expect(Object.keys(result.usage.byTier).sort()).toEqual(["digest", "full", "index"]);
     expect(result.memories.every((m) => m.retrievedVia !== "association")).toBe(true);
+  });
+
+  it("association: null は、連想を有効にする候補が居ても一切拾わない（既定 on を確実に打ち消す）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
+      digest: "アンカー本文",
+    });
+    const associated = await createEmbeddedMemory(stores, [0, 1], { digest: "連想本文" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0], association: null });
+
+    expect(result.memories.some((m) => m.memoryId === associated.id)).toBe(false);
+    expect(result.memories.find((m) => m.memoryId === anchor.id)?.retrievedVia).toBe("ann");
+    expect("association" in result.usage.byTier).toBe(false);
   });
 
   it("VectorStore.getVectors が無ければ stage_skipped(vector_store_lacks_get_vectors) が立つ", async () => {
@@ -136,8 +171,8 @@ describe("recall() — 連想枠（association、既定 off）", () => {
       stage: "association",
       reason: "no_anchor",
     });
-    // association を申告した以上、byTier.association 欄は在る（走ったが収穫0）。
-    // 欄自体が無い（＝申告していない）既定offの形とは区別する。
+    // 連想は走った（アンカーが無く no_anchor で終わった）ので、byTier.association 欄は在る。
+    // 欄自体が無い（＝ null で明示的に off にした）形とは区別する。
     expect(result.usage.byTier.association).toBe(0);
   });
 
@@ -171,8 +206,8 @@ describe("recall() — 連想枠（association、既定 off）", () => {
     // affinityMeasured: true の記憶と比較可能ではない（Issue #548 方向1、ADR 0282）。
     expect(assocEntry?.score.affinityMeasured).toBe(false);
 
-    // 既定 off のときには出ない stage_skipped が、ここでも出ていないこと
-    // （実行して収穫が有った run では stage_skipped を積まない）。
+    // 収穫が有った run では stage_skipped を積まない（収穫が無い run／null で
+    // 明示的に off にした run とは区別する）。
     expect(
       result.omitted.some((o) => o.kind === "stage_skipped" && o.stage === "association"),
     ).toBe(false);
