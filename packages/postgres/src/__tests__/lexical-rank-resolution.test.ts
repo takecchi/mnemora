@@ -6,7 +6,7 @@ import { PostgresLexicalStore } from "../lexical-store.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 
 /**
- * Issue #394（`ADR 0305`）: `coverage`/`rank` に、内容由来の分解能が無かった。
+ * Issue #394（`ADR 0306`）: `coverage`/`rank` に、内容由来の分解能が無かった。
  *
  * [Issue #394](https://github.com/takecchi/mnemora/issues/394) 本文が
  * `lexical-store-index.test.ts` の `seedManyMemories`（20,000行、末尾の整数だけが違う
@@ -48,7 +48,7 @@ async function createMemory(
   );
 }
 
-describe("PostgresLexicalStore.search — rank に内容由来の分解能を持たせる（Issue #394, ADR 0305）", () => {
+describe("PostgresLexicalStore.search — rank に内容由来の分解能を持たせる（Issue #394, ADR 0306）", () => {
   beforeEach(async () => {
     await resetTestDatabase();
   });
