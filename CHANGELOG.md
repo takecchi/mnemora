@@ -201,7 +201,7 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   （`companionOf` の意味は無変更）。相手が budget 切り詰め後の最終的な結果集合に
   含まれるときだけ付く（オーナーの決定、ask_human 327fd89b /
   [Issue #691](https://github.com/takecchi/mnemora/issues/691) /
-  [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #TBD）。
+  [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #832）。
   ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
   （ADR 0335「引き受けた負債」参照）。
 
