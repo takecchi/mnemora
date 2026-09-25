@@ -1146,7 +1146,7 @@ jobs:
           path: ${{ github.workspace }}/.cache/local-embedding
           key: local-embedding-${{steps.local-embedding-cache-key.outputs.key}}
 
-      - name: 数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測する
+      - name: "数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測する"
         # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` ジョブと同じ規律。
         env:
           MNEMORA_NUMERAL_TOKEN_JSON: ${{ github.workspace }}/numeral-token-probe.json
