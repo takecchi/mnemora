@@ -22,6 +22,7 @@
     "subject-crossing-cost": "tsx src/subject-crossing-measure.ts",
     "subject-crossing-summary": "tsx src/subject-crossing-summary.ts",
     "identifier-probes": "tsx src/cli.ts identifier-probes",
+    "numeral-token-probes": "tsx src/cli.ts numeral-token-probes",
     "association-probes": "tsx src/cli.ts association-probes",
     "consolidation-cost": "tsx src/cli.ts consolidation-cost",
     "archive-sweep-cost": "tsx src/cli.ts archive-sweep-cost",
