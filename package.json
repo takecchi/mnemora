@@ -21,7 +21,8 @@
     "check:cjs-parse": "node scripts/check-cjs-transpile-parse.mjs",
     "check:required-status-checks": "node scripts/check-required-status-checks.mjs",
     "ci:green-check": "node scripts/ci-green-check.mjs",
-    "north-star:default-probe": "node scripts/north-star-default-probe.mjs"
+    "north-star:default-probe": "node scripts/north-star-default-probe.mjs",
+    "north-star:tarball-probe": "node scripts/north-star-tarball-probe.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
