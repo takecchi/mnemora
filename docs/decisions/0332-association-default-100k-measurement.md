@@ -507,3 +507,135 @@ pnpm --filter @mnemora/example-chat run association-scale-investigate
 - [ADR 0284](./0284-hnsw-iterative-scan-relaxed-order-adopted.md) — `relaxed_order` の採用（本 ADR §6.3 が実測で裏取りした）
 - `main` の [ADR 0308](./0308-lexical-rank-length-normalization.md) — **本 ADR とは無関係**（§10 参照。同番号の別件）
 - `docs/decisions/0327-relation-graph-contested-write-path-design.md` — 本 ADR が体裁を踏襲した「提案」状態の先例
+
+---
+
+## 追記 2026-09-26: 独立 ingest 間の揺れの切り分け（§5.4 への回答。本文は書き換えていない）
+
+> **クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> 既定値・公開 API・既存ベンチは変えていない。直し方は提案に留め、実装していない。
+
+**道具**: `examples/chat/src/bench/association-scale-nondeterminism.ts`（新規の手動ベンチ、CI 外）。
+器は §1 と同じ系統（PostgreSQL 17 + pgvector 0.8.0 を `initdb` で自前構築、`local`/ruri-v3-30m/256次元、
+LLM は `deterministic`）。**規模は1万行、`hnsw.ef_search` は既定 40**（掃引以外）。以下はすべて【実測】。
+
+### A.1 何を動かして何を固定したか（実験の設計）
+
+| 実験 | 動かすもの | 固定するもの | 切り分ける候補 |
+|---|---|---|---|
+| EXACT（`enable_indexscan=off`、EXPLAIN で Seq Scan を確認）を独立 ingest 3回で | memory_id・recorded_at・filler の挿入順 | ベクトル、HNSW を使わない | (a) 同点 tie-break・(c) 挿入順/並列 |
+| 境界の同点を数える（35〜45位と anchor の距離を float8 で比較） | — | — | (a) の大きさそのもの |
+| 同じ ingest の上で HNSW だけ REINDEX ×3 | HNSW 構築の乱数 | 行・memory_id・recorded_at | (b) |
+| `ef_search` 掃引（40〜1000）・`iterative_scan` off/relaxed_order | 探索幅 | 索引 | (b) が探索幅の問題か |
+| **base（anchor/gold を含む62文）の挿入位置**: 先頭（既存ベンチと同じ）／末尾／filler の間に均等に散らす | 挿入の型 | ベクトル集合・HNSW パラメータ | (b) の中身（グラフの到達性） |
+
+### A.2 結果
+
+**(1) 厳密探索は ingest をやり直しても完全に同一だった ⟹ (a)(c) は主因ではない。**
+I1/I2/I3（I3 は filler を逆順に挿入）で、12 probe すべての anchor の厳密順位・距離・40位/41位の距離が
+ビット単位で一致した。**境界での同点は 36回（12 probe × 3回）とも0件。** `max_parallel_workers_per_gather=0`
+の有無でも順位は変わらない（I1 のみ）。**anchor の真の順位は全 probe で 1〜3位**（10000件中）であり、
+kPrime=40 の遥か内側にある。EXACT での到達は off/on-3/on-10 = 0/9/11（3回とも同じ）。
+
+**(2) HNSW を使うと、その 1〜3位の anchor をほぼ毎回取りこぼす。**
+
+| 測定 | 回数 | aRaw（anchor が生 ANN 40件に入った probe 数） |
+|---|---|---|
+| 逐次 INSERT で育った索引（M0、base を先頭に挿入） | 独立 ingest 9回（I1〜I9） | 0,0,0,1,0,0,0,0,0 /12 |
+| 同じ ingest の上で REINDEX のみ | 9回（3 ingest × 3） | 0 が8回、1/12 が1回 |
+| `ef_search` 40 / 120 / 400 / 500（EXPLAIN で HNSW 使用を確認） | I9 | すべて 0/12 |
+| `ef_search` ≥ 550 | I9 | 12/12 — ⚠ **プランナが索引を捨てて Seq Scan（厳密）に切り替わった結果**（本番と同形の JOIN 込みクエリの EXPLAIN で確認）。HNSW の回復ではない |
+| `iterative_scan` off と relaxed_order（ef=40） | I9 | どちらも 0/12 |
+
+⟹ REINDEX だけで値が動く（0→1）ので、**HNSW 構築の乱数が揺れを生むこと自体は実証した**。
+ただ揺れより大きいのは、**索引が効く範囲では探索幅を広げても戻らない、一貫した取りこぼし**である。
+
+**(3) base の挿入位置を変えるだけで、取りこぼしが消えた（同じベクトル集合・同じ HNSW パラメータ）。**
+
+| 挿入の型 | aRaw | 到達 off/on-3/on-10 | ef=400 で HNSW 使用 |
+|---|---|---|---|
+| base を先頭（既存ベンチと同じ。同じ run の対照） | **0/12** | 0/0/0 | ✓ |
+| base を末尾（1回目） | **12/12** | 0/8/10 | ✓ |
+| base を末尾（2回目、独立 ingest） | **12/12** | 0/8/10 | ✓ |
+| base を filler の間に均等に散らす（161件おき、1回） | **10/12** | 0/9/10 | ✓ |
+
+厳密順位・距離は base を末尾にしても (1) と完全に同一だった（距離は挿入順に依存しない、の確認）。
+
+### A.3 読み取れること・特定の度合い
+
+- **§5 の揺れの主因は (b) の側にある**（(a) 同点 tie-break と (c) 挿入順・並列は、厳密探索で差が0だったので除外できる）。
+- **(b) の中身は「乱数による小さな揺れ」より、「似通った filler が大量に後から入ると、先に入れた少数の base
+  へ HNSW の探索が辿り着けなくなる」ことだと強く示唆される。** 探索幅を 500 まで広げても戻らず、
+  挿入位置を変えると戻る——探索の精度ではなく**グラフの到達性**の問題と整合する。
+  ⚠ **pgvector のグラフ（近傍の辺・入口点）を直接覗いてはいない。** 「後から入る filler の近傍選択と
+  刈り込みで base の島へ入る辺が消える」という機構は推測であり、確かめたのは
+  「挿入の型を変えると結果が変わる」という現象までである。
+- **既存の実測との噛み合い（後から当てはめたもの。予測してから確かめたものではない）**:
+  §2 の配置(B) では、最初に ingest したテナント（off）は空の表に base を先頭から入れて 0/12、
+  2〜4番目のテナント（on-3/5/10）は、他テナントの行がすでに10万行以上ある**共有の** HNSW に base を入れて
+  7/12（ef40）・9/12（ef120）だった【現物: `runModeB` はテナントを arm 順に続けて ingest する】。
+  base を途中に入れた形であり、(3) と同じ向きである。
+- ⛔ **説明できていないもの**: base を先頭に入れた回でも大きく戻る回があること——§2 の1万行(A) on-3 の
+  aRaw 9/12、10万行(R) の 11/12。今回の base 先頭の 10回（I1〜I9＋対照）では最大 1/12 で、その大きさの
+  回復は一度も出なかった。構築の乱数で稀にそういうグラフができる（入口点・上位の層の引き次第）という
+  推測はできるが、**確かめていない。**
+
+### A.4 #337・#377 の判断材料として
+
+- **§2 の 1万行・10万行の「到達」と「anchor位置」は、連想枠の性質より先に、このベンチの挿入の型
+  （base 62文 → 似通った合成 filler を大量に）で HNSW が base を取りこぼす現象を大きく含んでいる。**
+  base を末尾に入れれば、同じ1万行で aRaw 12/12、到達 on-3 8/12・on-10 10/12 まで出る。
+  ⟹ §2 の大規模の数字を「連想枠は規模に弱い」とそのまま読むことはできない。
+- **#377 の「段1の窓（kPrime）から anchor が落ちる」の中身も、少なくともこの corpus では
+  「anchor が 40位より下にある」のではなく「真の 1〜3位を HNSW が返さない」だった。**
+  kPrime を広げるより前に、索引の到達性の問題として扱うのが筋である。
+- ⛔ **実運用のテナントで同じことが起きるかは測っていない。** 「古い少数の話題の記憶のあとに、似通った
+  記憶が大量に積もる」という型は実運用にもありうるが、今回の filler は合成のテンプレート文である。
+
+### A.5 直し方の案（実装していない。既定の挙動を変えるので判断はオーナー）
+
+1. **測定側**: 大規模ベンチの挿入の型を、base 先頭／末尾／散らす、で必ず振る（または base 末尾を主に）。
+   現状の §2 の大規模の数字は base 先頭の型だけを見ている。
+2. **索引側（採用するなら ADR が要る）**: HNSW の構築パラメータ（`m`・`ef_construction`）を上げる、
+   あるいは ingest の後に REINDEX で建て直す。⚠ ただし今回の REINDEX 9回はほぼ回復しなかった
+   ——pgvector の一括構築も行の物理順（＝挿入順）に沿って入れるためと推測するが、確かめていない。
+   `m`・`ef_construction` を変えたときの効き方は測っていない。
+3. **検索側**: 小さなテナントや、索引の取りこぼしが疑われる規模では厳密探索に倒す（例: 件数に閾値を置く）。
+   1万行の厳密探索の費用は測っていない。
+4. **同点の決定的な tie-break は、この揺れの対策にならない**——厳密探索で同点は0件で、厳密順位は
+   ingest をまたいで一致していた。
+
+### A.6 確かめていないこと
+
+- pgvector のグラフ構造そのもの（辺・入口点・層）。機構は推測。
+- base 先頭で大きく戻る回（§2 の 9/12・11/12）が出る条件。
+- 1万行以外の規模（62件・10万行）での、挿入の型による差。
+- `m`・`ef_construction` を変えたときの効き方、厳密探索に倒すときの費用。
+- base を散らす形は1回・間隔1通りだけ。末尾は2回だけ——統計的な広がりは見ていない。
+- base を末尾にしたときの到達（8/12・10/12）が EXACT（9/12・11/12）より少し低い理由
+  （recorded_at が最新になり、段2の並べ替えが変わる可能性がある。切り分けていない）。
+- 実運用に近い分布の文での再現。
+
+### A.7 実行コマンド
+
+```bash
+# 共通: DATABASE_URL=postgresql://worker@127.0.0.1:<port>/mnemora_test
+#       MNEMORA_LLM=deterministic MNEMORA_EMBEDDING=local（どちらも未指定なら起動直後に例外で止まる）
+#       MNEMORA_ASSOC_NONDET_SCALE=10000 MNEMORA_ASSOC_NONDET_EMBED_CACHE_DIR=<dir>
+# (1)(2) EXACT・REINDEX（I1〜I3）: MNEMORA_ASSOC_NONDET_MODE 未指定
+# (2) M0 の反復（I4〜I8）: MNEMORA_ASSOC_NONDET_MODE=repeat-ef
+# (2) ef_search 掃引（I9）: MNEMORA_ASSOC_NONDET_MODE=ef-sweep
+# (3) 挿入の型: MNEMORA_ASSOC_NONDET_MODE=order
+pnpm --filter @mnemora/example-chat run association-scale-nondeterminism
+```
+
+所要: モードごとに 6〜16分（1万行の ingest＋drain が1回あたり約2.5分）。
+
+### A.8 既存ベンチの穴（直していない）
+
+`association-scale-bench.ts` は `MNEMORA_LLM` を検査するが、`MNEMORA_EMBEDDING` を未指定にすると、
+`LocalEmbeddingProvider` の検査（`createInstrumentedRuntime` の中）より前に埋め込みの前計算が走り、
+**`OPENAI_API_KEY` が在れば実 OpenAI の埋め込み API を呼ぶ**。
+【実測】偽の鍵（`sk-dummy-invalid`）を入れて起動すると、`precomputeEmbeddingCache` の中で
+api.openai.com から 401 が返った。`association-scale-investigate.ts` と新しいベンチは、
+通信の前に例外で止まる（同じく偽の鍵で確認）。

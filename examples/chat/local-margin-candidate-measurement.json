@@ -1,0 +1,654 @@
+{
+  "_readme": "Issue #109 残件「A」——マネージャーからの実測依頼。ADR 0322 と同じ local 埋め込み・合成ノイズの反実仮想データに、候補案1(margin基準)を当て、案0(ADR 0316の判定、変更していない)と比べる。🔴🔴 これは実際の偽陽性率ではない(local の揺れは観測されていない)——反実仮想の比較専用。",
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "81f774aa8b152ee81575a2c23a6ad2173ec4a4ae",
+    "measuredAt": "2026-09-25T14:38:41.896Z",
+    "embeddingSpace": {
+      "provider": "local",
+      "model": "ruri-v3-30m/sym",
+      "dimensions": 256
+    },
+    "sigmaGrid": [0.0025, 0.005, 0.01, 0.02, 0.04, 0.08, 0.12, 0.16, 0.24, 0.32, 0.48],
+    "seedCount": 15,
+    "marginDropOptions": {
+      "stdDevMultiplier": 3,
+      "minShrunkProbes": 2
+    },
+    "positiveControlSigma": 5
+  },
+  "groups": [
+    {
+      "group": "japanese",
+      "probeCount": 7,
+      "baseline": {
+        "group": "japanese",
+        "mrrOverall": 0.8095238095238095,
+        "hit1Count": 5,
+        "hit10Count": 7,
+        "probeCount": 7
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 0,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 0,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 5,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 10,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 13,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 4,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 11,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 12,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 118,
+      "candidate1FullGridRedCount": 57,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.7727073564286815,
+      "candidate1FullGridUpperBound95": 0.41112657764440275
+    },
+    {
+      "group": "identifiersSparse",
+      "probeCount": 30,
+      "baseline": {
+        "group": "identifiersSparse",
+        "mrrOverall": 1,
+        "hit1Count": 30,
+        "hit10Count": 30,
+        "probeCount": 30
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 1,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 8,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 11,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 8,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 140,
+      "candidate1FullGridRedCount": 98,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.8924186273639214,
+      "candidate1FullGridUpperBound95": 0.6581905353700033
+    },
+    {
+      "group": "identifiersDense",
+      "probeCount": 30,
+      "baseline": {
+        "group": "identifiersDense",
+        "mrrOverall": 1,
+        "hit1Count": 30,
+        "hit10Count": 30,
+        "probeCount": 30
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 1,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 8,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 11,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 8,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 140,
+      "candidate1FullGridRedCount": 98,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.8924186273639214,
+      "candidate1FullGridUpperBound95": 0.6581905353700033
+    },
+    {
+      "group": "japaneseNamesSparse",
+      "probeCount": 12,
+      "baseline": {
+        "group": "japaneseNamesSparse",
+        "mrrOverall": 0.9583333333333334,
+        "hit1Count": 11,
+        "hit10Count": 12,
+        "probeCount": 12
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 0,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 0,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 1,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 5,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 11,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 107,
+      "candidate1FullGridRedCount": 90,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.7102618702589547,
+      "candidate1FullGridUpperBound95": 0.6112318590234171
+    },
+    {
+      "group": "japaneseNamesDense",
+      "probeCount": 12,
+      "baseline": {
+        "group": "japaneseNamesDense",
+        "mrrOverall": 0.9583333333333334,
+        "hit1Count": 11,
+        "hit10Count": 12,
+        "probeCount": 12
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 0,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 0,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 1,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 5,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 11,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 107,
+      "candidate1FullGridRedCount": 90,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.7102618702589547,
+      "candidate1FullGridUpperBound95": 0.6112318590234171
+    },
+    {
+      "group": "numeralSparse",
+      "probeCount": 18,
+      "baseline": {
+        "group": "numeralSparse",
+        "mrrOverall": 0.9166666666666666,
+        "hit1Count": 15,
+        "hit10Count": 18,
+        "probeCount": 18
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 12,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 10,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 11,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 2,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 153,
+      "candidate1FullGridRedCount": 92,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.9575018896848275,
+      "candidate1FullGridUpperBound95": 0.6230289419628838
+    },
+    {
+      "group": "numeralDense",
+      "probeCount": 18,
+      "baseline": {
+        "group": "numeralDense",
+        "mrrOverall": 0.9166666666666666,
+        "hit1Count": 15,
+        "hit10Count": 18,
+        "probeCount": 18
+      },
+      "sigmaLevels": [
+        {
+          "sigma": 0.0025,
+          "candidate0RedCount": 12,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.005,
+          "candidate0RedCount": 10,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.01,
+          "candidate0RedCount": 11,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.02,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 0,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.04,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 2,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.08,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.12,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.16,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.24,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.32,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        },
+        {
+          "sigma": 0.48,
+          "candidate0RedCount": 15,
+          "candidate1RedCount": 15,
+          "seedCount": 15
+        }
+      ],
+      "candidate0FullGridRedCount": 153,
+      "candidate1FullGridRedCount": 92,
+      "fullGridTrials": 165,
+      "candidate0FullGridUpperBound95": 0.9575018896848275,
+      "candidate1FullGridUpperBound95": 0.6230289419628838
+    }
+  ],
+  "positiveControl": [
+    {
+      "group": "japanese",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    },
+    {
+      "group": "identifiersSparse",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    },
+    {
+      "group": "identifiersDense",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    },
+    {
+      "group": "japaneseNamesSparse",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    },
+    {
+      "group": "japaneseNamesDense",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    },
+    {
+      "group": "numeralSparse",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    },
+    {
+      "group": "numeralDense",
+      "candidate0RedCount": 15,
+      "candidate1RedCount": 15,
+      "seedCount": 15
+    }
+  ]
+}

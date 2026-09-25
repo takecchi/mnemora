@@ -378,3 +378,8 @@ ADR 0232 の核心的な指摘は、母数を増やしても再現している�
 ---
 
 Refs #109, #369, ADR 0232, ADR 0291
+
+> **追記（2026-09-25、Issue #109）**: §4の「`intrusionMargin`は常に0」について、
+`protectionMargin`（別名新設）案を実測で比較した——
+[ADR 0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md)（状態:提案。
+`intrusionMargin`/`correction-candidate-arm.ts`はこの追記でも書き換えていない）。
