@@ -298,6 +298,19 @@ export interface MemoryStoreConformanceOptions {
    * ——`it.skip` にはしない。
    */
   supportsFindActiveByClaimKey: boolean;
+  /**
+   * Issue #691続き（ADR 0328）: 対象の `MemoryStore` 実装が `listActiveClaimPredicates`
+   * （任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * `supportsFindActiveByClaimKey` 等と同じ判断——省略可にしない。`true` なら契約の歯
+   * （同じ tenant・同じ subjectId・`status='active'`・claim key を持つ行から predicate を
+   * 重複無く新しい順に返す、`subjectId` は `null` 同士も一致として扱う、`limit` を
+   * 超えない、`status` が `active` でない行は対象外、claim key を持たない行は対象外、
+   * テナント分離）を実行する。`false` なら
+   * `expect(store.listActiveClaimPredicates).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。
+   */
+  supportsListActiveClaimPredicates: boolean;
 }
 
 /**
@@ -338,6 +351,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsOnlyMemoryIdsFilter,
     supportsLabels,
     supportsFindActiveByClaimKey,
+    supportsListActiveClaimPredicates,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -1463,6 +1477,188 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       it("findActiveByClaimKey は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.findActiveByClaimKey).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // listActiveClaimPredicates（Issue #691続き、ADR 0328。任意メソッド）
+    //
+    // 契約: 同じ tenant・同じ subjectId・status='active'・claim key を持つ Memory から、
+    // predicate を重複無く新しい順に、limit 件まで返す。
+    // -------------------------------------------------------------------
+
+    if (supportsListActiveClaimPredicates) {
+      it("同じ tenant・同じ subjectId・active な Memory の predicate を、重複無く新しい順に返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-a",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-b",
+            claimKey: { subject: "user", predicate: "favorite_color" },
+          }),
+        );
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        // 同じ predicate をもう1件——重複は1つに畳まれ、この行の created_at が
+        // favorite_food の代表値を更新する（下の期待順で確認する）。
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-c",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        // favorite_food の最新行（c）が favorite_color（b）より新しい ⟹ favorite_food が先。
+        expect(predicates).toEqual(["favorite_food", "favorite_color"]);
+      });
+
+      it("limit を超えない件数を返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        for (const predicate of ["p1", "p2", "p3"]) {
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              subjectId: "user-1",
+              contentHash: `list-predicates-limit-${predicate}`,
+              claimKey: { subject: "user", predicate },
+            }),
+          );
+          await new Promise((resolve) => setTimeout(resolve, 5));
+        }
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 2,
+        });
+        expect(predicates).toHaveLength(2);
+        expect(predicates).toEqual(["p3", "p2"]);
+      });
+
+      it("subjectId が null 同士でも一致として扱う", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: null,
+            contentHash: "list-predicates-null-subject",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: null,
+          limit: 10,
+        });
+        expect(predicates).toEqual(["favorite_food"]);
+      });
+
+      it("subjectId が違えば対象にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "alice",
+            contentHash: "list-predicates-diff-subject",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "bob",
+          limit: 10,
+        });
+        expect(predicates).toEqual([]);
+      });
+
+      it("status が active でない行は対象にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-status-gate",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+        await store.updateStatus(ctx, memory.id, "archived");
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual([]);
+      });
+
+      it("claim key を持たない行は対象にしない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            subjectId: "user-1",
+            contentHash: "list-predicates-no-claim-key",
+          }),
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctx, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual([]);
+      });
+
+      it("クロステナントの Memory は対象にしない", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "tenant-a" };
+        const ctxB: Ctx = { tenantId: "tenant-b" };
+        await store.createMemory(
+          ctxB,
+          buildNewMemoryFixture({
+            tenantId: "tenant-b",
+            subjectId: "user-1",
+            contentHash: "list-predicates-cross-tenant",
+            claimKey: { subject: "user", predicate: "favorite_food" },
+          }),
+        );
+
+        const predicates = await store.listActiveClaimPredicates!(ctxA, {
+          subjectId: "user-1",
+          limit: 10,
+        });
+        expect(predicates).toEqual([]);
+      });
+    } else {
+      it("listActiveClaimPredicates は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.listActiveClaimPredicates).toBeUndefined();
       });
     }
 

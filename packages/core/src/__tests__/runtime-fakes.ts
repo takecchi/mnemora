@@ -1230,6 +1230,34 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #691続き（ADR 0328）: `MemoryStore.listActiveClaimPredicates?` の実装
+   * （`packages/testkit` の `InMemoryMemoryStore.listActiveClaimPredicates` と同じ
+   * ロジック——このファイルは意図的に独立している、冒頭のコメント参照）。
+   */
+  async listActiveClaimPredicates(
+    ctx: Ctx,
+    query: { subjectId: string | null; limit: number },
+  ): Promise<string[]> {
+    const latestByPredicate = new Map<string, number>();
+    for (const m of this.backing.memories.values()) {
+      if (m.tenantId !== ctx.tenantId) continue;
+      if ((m.subjectId ?? null) !== query.subjectId) continue;
+      if (m.status !== "active") continue;
+      if (!m.claimKey) continue;
+      const predicate = m.claimKey.predicate;
+      const createdAtMs = m.createdAt.getTime();
+      const existing = latestByPredicate.get(predicate);
+      if (existing === undefined || createdAtMs > existing) {
+        latestByPredicate.set(predicate, createdAtMs);
+      }
+    }
+    return [...latestByPredicate.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, query.limit)
+      .map(([predicate]) => predicate);
+  }
+
+  /**
    * `docs/memory-model.md` §11 行15「`superseded → active`」。`archiveDecayed` と同じ
    * 「範囲走査 + 一括更新」の形——`await` を挟まない同期区間で選定・更新・イベント
    * 追記を行うことで、postgres 実装の単一トランザクションを模す

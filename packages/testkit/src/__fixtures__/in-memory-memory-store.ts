@@ -1380,6 +1380,36 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #691続き（ADR 0328）: `MemoryStore.listActiveClaimPredicates?` の実装（契約は
+   * interface 側の doc コメントにある）。`packages/postgres` の実装と同じ絞り込み
+   * （`subjectId` は `null` 同士も一致・`status === "active"`・`claimKey` を持つ行のみ）
+   * のうえで、predicate ごとに最も新しい `createdAt` を代表値にして降順ソートし、
+   * `limit` 件までを返す。
+   */
+  async listActiveClaimPredicates(
+    ctx: Ctx,
+    query: { subjectId: string | null; limit: number },
+  ): Promise<string[]> {
+    const latestByPredicate = new Map<string, number>();
+    for (const m of this.memories.values()) {
+      if (m.tenantId !== ctx.tenantId) continue;
+      if ((m.subjectId ?? null) !== query.subjectId) continue;
+      if (m.status !== "active") continue;
+      if (!m.claimKey) continue;
+      const predicate = m.claimKey.predicate;
+      const createdAtMs = m.createdAt.getTime();
+      const existing = latestByPredicate.get(predicate);
+      if (existing === undefined || createdAtMs > existing) {
+        latestByPredicate.set(predicate, createdAtMs);
+      }
+    }
+    return [...latestByPredicate.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, query.limit)
+      .map(([predicate]) => predicate);
+  }
+
+  /**
    * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
    * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここは選定・更新の
    * 実装のみ。`archiveDecayed`（直上ではなく本クラス冒頭寄りのメソッド）と同じ

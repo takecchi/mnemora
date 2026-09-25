@@ -1076,6 +1076,49 @@ export interface MemoryStore {
     },
   ): Promise<Memory[]>;
   /**
+   * Issue #691 続き（`docs/decisions/0327-*.md`、ADR 0326 が「採らなかった案B」として
+   * 保留した「`knownPredicates` を store の既存 predicate 一覧から動的に渡す」の実装）:
+   * 同じ tenant・同じ `subjectId` で claim key を持つ `active` な Memory から、
+   * `claim_key_predicate` を**新しい順・重複なく**列挙する読み取り専用の口。
+   * `deriveClaimKeys`（`claim-key.ts`）の `knownPredicates` 語彙ヒントを、呼び出し側が
+   * 手で作らずに store から集めるために使う（`ClaimKeyOptions.knownPredicatesFromStore`）。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`findActiveByClaimKey?`/`markContestedPair?` と同じ理由）。
+   * **フォールバック経路は無い**——この口が無い adapter に対しては、
+   * `knownPredicatesFromStore` は黙って効かない（渡した `knownPredicates` だけが使われる。
+   * ADR 0324 決定1の「渡されたが効かない」規約と同じ）。
+   *
+   * 契約:
+   * - **`subjectId` は NULL 同士も一致として扱う**（`IS NOT DISTINCT FROM`）——
+   *   `findActiveByClaimKey?` と同じ規約。
+   * - **`status = 'active'` の行だけを対象にする。** `contested`/`superseded`/`archived`/
+   *   `forgotten` は対象外——`findActiveByClaimKey?` と同じ「今読むべき主張」の定義。
+   * - **`claim_key_predicate` が非 `null` の行だけを対象にする**
+   *   （`idx_memories_claim_key`、`migrations/0021_memories_claim_key.sql` の部分索引の
+   *   条件と同じ）。
+   * - 返す `string[]` は `claim_key_predicate` の**重複を除いた**一覧。同じ predicate を
+   *   持つ行が複数あれば、そのうち最も新しい行（`created_at` が最大のもの）で代表させる。
+   * - **新しい順**（代表行の `created_at` 降順）に並べる。呼び出し側
+   *   （`ClaimKeyOptions.knownPredicates` との合成、`runtime.ts`）は「利用者の一覧を先に、
+   *   この一覧を後に、重複除去」という順序に依存するため、この口自身の返り値の順序は
+   *   「新しい順」であることを契約にする（`findActiveByClaimKey?` の「順序は規定しない」
+   *   とは異なる——あちらは呼び出し側が件数でしか分岐しないが、こちらは語彙ヒントの
+   *   優先順位に順序がそのまま使われる）。
+   * - **`query.limit` を超えない件数を返す。**`limit` は呼び出し側
+   *   （`ClaimKeyOptions.knownPredicatesFromStore`）が決める——この口自身は既定値を
+   *   持たない。
+   * - **`claim_key_subject` の値は返り値に出ない。** この口が集めるのは predicate の
+   *   語彙だけである（`buildKnownPredicateInstruction` が predicate だけを渡す形と
+   *   対応する）。
+   * - **LLM を一度も呼ばない。**列の等値比較・`GROUP BY`・索引アクセスだけで完結する
+   *   （北極星 問い5）。
+   */
+  listActiveClaimPredicates?(
+    ctx: Ctx,
+    query: { subjectId: string | null; limit: number },
+  ): Promise<string[]>;
+  /**
    * `docs/memory-model.md` §11 行15「`superseded → active`」を書き込む口
    * （`Runtime.restoreSuperseded` の doc コメントに設計全体の理由がある。ここは
    * この店側メソッド固有の契約と、**なぜ新しい任意メソッドが要るか**だけを述べる）。
