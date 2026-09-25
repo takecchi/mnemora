@@ -49,7 +49,9 @@ describe("InMemoryOutboxStore.complete/fail — 相手側の終端が既に付�
     const store = new InMemoryOutboxStore([job]);
 
     await store.complete(ctx, job.id, job.attempts);
-    await expect(store.fail(ctx, job.id, "should-not-be-recorded", job.attempts)).resolves.not.toThrow();
+    await expect(
+      store.fail(ctx, job.id, "should-not-be-recorded", job.attempts),
+    ).resolves.not.toThrow();
 
     expect(job.completedAt).not.toBeNull();
     expect(job.failedAt).toBeNull();
@@ -101,7 +103,9 @@ describe("InMemoryOutboxStore.complete/fail — 相手側の終端が既に付�
     await expect(store.complete(ctx, job.id, 1)).rejects.toBeInstanceOf(OutboxLeaseConflictError);
     expect(job.completedAt).toBeNull();
 
-    await expect(store.fail(ctx, job.id, "boom", 1)).rejects.toBeInstanceOf(OutboxLeaseConflictError);
+    await expect(store.fail(ctx, job.id, "boom", 1)).rejects.toBeInstanceOf(
+      OutboxLeaseConflictError,
+    );
     expect(job.failedAt).toBeNull();
   });
 
