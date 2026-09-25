@@ -325,6 +325,7 @@ export interface EmbeddingProviderConformanceOptions {
     deterministic: boolean;
     texts: EmbeddingProviderConformanceTexts;
     ctx?: Ctx;
+    overLimitText?: string;
     timeout?: number;
 }
 export declare function describeEmbeddingProviderConformance(options: EmbeddingProviderConformanceOptions): void;
