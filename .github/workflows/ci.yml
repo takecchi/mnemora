@@ -562,7 +562,7 @@ jobs:
           path: ${{ github.workspace }}/compare.json
           if-no-files-found: ignore
 
-      - name: recall-footprint 較正の補助標本（limit=20の8点、Issue #340 フォローアップ・ADR 0310）を生成する
+      - name: recall-footprint 較正の補助標本（limit=20の8点、#340 フォローアップ・ADR 0310）を生成する
         # 🔴 `compare` ステップと同じ理由で `OPENAI_API_KEY` を設定していないが、
         # 同じ recorded カセット（`examples/chat/cassettes/compare.json`）を再生する
         # （`recall-footprint-calibration-samples.ts` 冒頭の doc が実測済みのとおり、
