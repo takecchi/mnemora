@@ -83,13 +83,22 @@
  * pnpm --filter @mnemora/example-chat run association-scale-bench
  * ```
  *
- * ⚠ **`MNEMORA_LLM=deterministic` は省略できない**(main() が起動直後に検査して
- * 落とす)。この器では `OPENAI_API_KEY` が既に環境に在り(他用途)、明示しないと
+ * ⚠ **`MNEMORA_LLM=deterministic` と `MNEMORA_EMBEDDING=local` は両方省略できない**
+ * ——`main()` の最初の行（`requireGatesOrThrow()`）が、**どんな provider も構築する前に**
+ * `selectLLMMode`/`selectEmbeddingMode`（文字列レベルの判定、`../providers.js`。
+ * provider のインスタンスを1つも作らない）で両方を検査し、どちらかが違えば例外で落ちる。
+ *
+ * この器では `OPENAI_API_KEY` が既に環境に在り(他用途)、`MNEMORA_LLM` を明示しないと
  * `selectProviderMode`(`providers.ts`)が「キー在り ⟹ openai」に倒れ、`observe()`
  * の抽出が黙って実 OpenAI API を叩く——【実測】1呼び出し ~1.5〜2s(cache 済みの
  * `local` embedding 単体なら観測は ~10ms/呼び出し)、かつ実課金。
- * `MNEMORA_EMBEDDING=local` は embedding 側だけの指定であり、LLM 側の分岐
- * （`selectLLMMode`）には効かない——2つは独立の環境変数である。
+ *
+ * `MNEMORA_EMBEDDING=local` を省いた場合は、**さらに手前**で穴があった
+ * ——【実測 2026-09-25、ADR 0332 追記 A.8】`main()` 内で LLM だけを検査していた旧版は、
+ * その検査より前に `precomputeEmbeddingCache` が `realEmbedding`（`OPENAI_API_KEY` が
+ * 在れば `OpenAIEmbeddingProvider`）へ直接 `embed()` を呼び、実 OpenAI API を叩いていた。
+ * `requireGatesOrThrow()` は provider を作る前の文字列検査なので、この穴を塞ぐ
+ * （`association-scale-nondeterminism.ts` と同じ形）。
  *
  * `MNEMORA_ASSOC_SCALE_JSON` を指定すると機械可読な結果も書き出す。
  * ⛔ **これは測定であり判定ではない。** exit code は結果で変えない
@@ -133,12 +142,48 @@ import {
 } from "../association-probe-set.js";
 import { drainEmbedTicks } from "../embed-drain.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
-import { createProviders } from "../providers.js";
+import { createProviders, selectEmbeddingMode, selectLLMMode } from "../providers.js";
 import {
   CachingEmbeddingProvider,
   FileEmbeddingCache,
   precomputeEmbeddingCache,
 } from "./embedding-cache.js";
+
+// ---------------------------------------------------------------------------
+// 歯 —— 何よりも先に置く（実 API を絶対に叩かないため）。
+//
+// ⚠ 【実測 2026-09-25、ADR 0332 追記 A.8】旧版はここが無く、LLM だけを
+// `main()` の途中（`createProviders` の後）で検査していた。`MNEMORA_EMBEDDING`
+// を省略した場合、その検査より前に `precomputeEmbeddingCache` が
+// `realEmbedding`（`OPENAI_API_KEY` が環境に在れば `OpenAIEmbeddingProvider`
+// になっている）へ直接 `embed()` を呼び、実 OpenAI API を叩いていた——
+// `association-scale-nondeterminism.ts` の `requireGatesOrThrow()` と同じ形で塞ぐ。
+// ---------------------------------------------------------------------------
+
+/**
+ * provider を1つも構築する前に、環境変数の**文字列**だけで判定する
+ * （`selectLLMMode`/`selectEmbeddingMode` は provider のインスタンスを作らない
+ * 純関数——`../providers.ts` 参照）。ここを通らない限り、後続のどのコードも
+ * 実行しない。
+ */
+function requireGatesOrThrow(): void {
+  const llmMode = selectLLMMode(process.env);
+  if (llmMode !== "deterministic") {
+    throw new Error(
+      `association-scale-bench: MNEMORA_LLM=deterministic を明示すること` +
+        `(実測: "${llmMode}")。この器は OPENAI_API_KEY が既に設定されており、` +
+        "明示しないと黙って実 OpenAI API へ倒れる。",
+    );
+  }
+  const embeddingMode = selectEmbeddingMode(process.env);
+  if (embeddingMode !== "local") {
+    throw new Error(
+      `association-scale-bench: MNEMORA_EMBEDDING=local を明示すること` +
+        `(実測: "${embeddingMode}")。` +
+        "省くと precomputeEmbeddingCache が実 OpenAI API を叩く（ADR 0332 追記 A.8）。",
+    );
+  }
+}
 
 function requireDatabaseUrl(): string {
   const url = process.env.DATABASE_URL;
@@ -1034,6 +1079,9 @@ function summarizeScale(report: ScaleReport): string {
 }
 
 async function main(): Promise<void> {
+  // ⛔ 何よりも先に。provider を1つも作らない歯（ADR 0332 追記 A.8）。
+  requireGatesOrThrow();
+
   const databaseUrl = requireDatabaseUrl();
   const databaseName = new URL(databaseUrl).pathname.replace(/^\//, "");
   const scales = parseIntListEnv("MNEMORA_ASSOC_SCALE_SCALES", [62, 10000]);
@@ -1049,21 +1097,13 @@ async function main(): Promise<void> {
   );
   console.log(`cacheDir=${cacheDir}`);
 
-  // ⚠ 【実測 2026-09-25】この器では `OPENAI_API_KEY` が環境に既に在り(他用途)、
-  // `MNEMORA_LLM` を明示しないと `selectProviderMode` が「キー在り ⟹ openai」に
-  // 倒れ、`observe()` の抽出が**黙って実 OpenAI API を叩く**(1呼び出し ~1.5〜2s、
-  // かつ実課金)。`MNEMORA_EMBEDDING=local` を指定しても LLM 側には効かない
-  // ——独立の分岐(`selectLLMMode`/`selectEmbeddingMode`、`providers.ts`)。
-  // ⟹ **このベンチは LLM を明示的に `deterministic` に固定する**(ADR 0308 §7.0 の
-  // 器と同じ「LLM: deterministic」)。黙って実 API へ倒れる経路を作らない
-  // ——`providers.ts` 自身の「黙って擬似物へフォールバックしない」原則の逆向き版。
-  const { embeddingProvider: realEmbedding, llmMode } = createProviders(process.env, {});
-  if (llmMode !== "deterministic") {
-    throw new Error(
-      `association-scale-bench: LLM は "deterministic" 固定である(実測: "${llmMode}")。` +
-        "MNEMORA_LLM=deterministic を明示すること" +
-        "(この環境は OPENAI_API_KEY が既に設定されており、明示しないと黙って実 OpenAI API へ倒れる)。",
-    );
+  // `requireGatesOrThrow()` が文字列レベルで既に検査しているので、ここに来るのは
+  // 「文字列は local と名乗ったのに実際は違うインスタンスだった」という、それ自体が
+  // 壊れの証拠になるケースだけである。多層防御として残す
+  // （`association-scale-nondeterminism.ts` の `main()` と同じ形）。
+  const { embeddingProvider: realEmbedding } = createProviders(process.env, {});
+  if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
+    throw new Error("association-scale-bench: realEmbedding が LocalEmbeddingProvider ではない。");
   }
   const warmup = await warmupLocalEmbedding(realEmbedding);
   if (!warmup.ok) {
