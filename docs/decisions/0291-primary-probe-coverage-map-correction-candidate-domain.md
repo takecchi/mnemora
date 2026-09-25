@@ -444,3 +444,8 @@ intrusionMargin: number | null;
 ---
 
 Refs #109, #106
+
+> **追記（2026-09-25、Issue #109）**: §5.5 の `intrusionMargin` の式そのものを差し替える
+案（案1）と、別名 `protectionMargin` を新設する案（案2）を実測で比較した——
+[ADR 0333](./0333-identifier-verdict-and-intrusion-margin-candidates.md)（状態:提案。
+この ADR の§5.5・状態欄はこの追記でも書き換えていない）。
