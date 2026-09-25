@@ -236,6 +236,20 @@ describe("embeddingInput opt-in フック（Issue #753、本物の Postgres）",
     // 運用側が opt-in フックを足した runtime を、同じ DB に対して新たに立てる
     // （`ingest-roundtrip.postgres.test.ts` の他の it と同じく、runtime 自体は状態を
     // 持たない——状態は DB 側にある）。
+    //
+    // 🔴 `clock` に 1 秒だけ未来を返す `Clock` を渡す——`PostgresMemoryStore.requeueEmbedJobs`
+    // が積む outbox 行の `available_at` は DB 側の `now()`（マイクロ秒精度）で書かれるのに
+    // 対し、`runtime.tick` の既定 `Clock`（`systemClock`）は JavaScript の `Date`
+    // （ミリ秒までしか持たない）を使う。この直後の `reembed()` → `tick()` のように
+    // 同じミリ秒の中で両方が起きると、`available_at = 12:00:00.123456` に対して
+    // `new Date()` が `12:00:00.123`（切り捨て）になり、**積んだばかりの行が
+    // `available_at <= now` を満たさず claim できない**——`packages/testkit` の
+    // `memory-store-conformance.ts`（`CLAIM_NOW_SKEW_MS` の doc コメント）が
+    // ADR 0079「測ったこと」4 として既に実測・記録している、同じ穴である
+    // （実際にこの it が CI の `server_encoding=UTF8` 脚だけで `processed: 0` になって
+    // 落ちた——ミリ秒の端数次第で結果が変わる、割れ方まで一致する）。
+    // 1秒は `leaseMs`（60秒）よりずっと小さいので、既に claim 済みの行がリース切れとして
+    // 再取得されることはない。
     const healingRuntime = createRuntime({
       memoryStore: new PostgresMemoryStore(db),
       outboxStore: new PostgresOutboxStore(db),
@@ -246,6 +260,7 @@ describe("embeddingInput opt-in フック（Issue #753、本物の Postgres）",
       embeddingProvider: provider,
       hashContent: sha256Hex,
       embeddingInput: (memory) => memory.content.slice(0, 50),
+      clock: { now: () => new Date(Date.now() + 1_000) },
     });
 
     const reembedResult = await healingRuntime.reembed(ctx, { statuses: ["failed"], limit: 10 });
