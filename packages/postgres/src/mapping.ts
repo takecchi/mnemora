@@ -93,7 +93,7 @@ export interface MemoryRow {
   last_reinforced_at: string | null;
   valid_from: string | null;
   valid_until: string | null;
-  // Issue #371（ADR 0185/ADR 0314）: `Memory.claimKey` の doc コメント参照。
+  // Issue #371（ADR 0185/ADR 0315）: `Memory.claimKey` の doc コメント参照。
   // 2列とも NULL＝鍵なし。`rowToMemory` がこの2列を1つの `ClaimKey` オブジェクトへ
   // 組み立てる（`packages/postgres/migrations/0021_memories_claim_key.sql` の
   // 「NULL の意味」参照）。

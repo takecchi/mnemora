@@ -2522,7 +2522,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * ——`claimKeyOptions` が `undefined`、または `{ enabled: false }` なら
    * `deriveClaimKeys`（claim-key.ts）は一度も呼ばれない。抽出プロンプト（`extraction.ts`）
    * は一切変更しない——`extractCandidates` の呼び出しはこの関数の変更前と1バイトも
-   * 変わっていない（ADR 0314 決定1・決定2）。
+   * 変わっていない（ADR 0315 決定1・決定2）。
    */
   async function runExtraction(
     ctx: Ctx,
@@ -2551,12 +2551,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       ? "llm_failed_whole_observation"
       : "ok";
     if (candidates.length === 0) {
-      // ADR 0314 決定2「候補が0件なら+0回にできる」: ここで早期 return するため、
+      // ADR 0315 決定2「候補が0件なら+0回にできる」: ここで早期 return するため、
       // `deriveClaimKeys` の呼び出しにすら到達しない。
       return { memoryIds: [], outcome, failure, rejectedSubjectIds, claimKeyFailure: null };
     }
     // Issue #371: opt-in のときだけ、候補群の content をまとめて claim key を取る
-    // 別の構造化呼び出しを1回行う（ADR 0314 決定2 の (ii) separate）。
+    // 別の構造化呼び出しを1回行う（ADR 0315 決定2 の (ii) separate）。
     let claimKeys: (ClaimKey | null)[] | undefined;
     let claimKeyFailure: ExtractionFailure | null = null;
     if (claimKeyOptions?.enabled === true) {

@@ -965,7 +965,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // claimKey（Issue #371、(B) 第1段。ADR 0185 決定2・決定3・決定4、ADR 0314）
+    // claimKey（Issue #371、(B) 第1段。ADR 0185 決定2・決定3・決定4、ADR 0315）
     //
     // ⛔ この歯は検出を検査しない——「主張キーが書き込み・読み戻しできること」と
     // 「鍵が無い行が壊れないこと」だけを見る（#372 の範囲外）。

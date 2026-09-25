@@ -512,7 +512,7 @@ type _p60_AnnUnreachedSeverity = Expect<
 
 type _p61_Attributes = Expect<Equals<z.infer<typeof AttributesSchema>, Attributes>>;
 
-// Issue #371（(B) 第1段、ADR 0185/0314）: `claim-key.ts` に `ClaimKeyOptionsSchema`
+// Issue #371（(B) 第1段、ADR 0185/0315）: `claim-key.ts` に `ClaimKeyOptionsSchema`
 // （`satisfies z.ZodType<...>`）を新設した。このファイル冒頭のコメントの規律どおり、
 // 対応するペアをここに登録する。
 type _p62_ClaimKeyOptions = Expect<

@@ -11,7 +11,7 @@ import type { ExtractionFailure } from "./extraction.js";
 import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
 
 /**
- * Issue #371（(B) 第1段、ADR 0185 決定2・ADR 0314）: 「この記憶は何についての主張か」を
+ * Issue #371（(B) 第1段、ADR 0185 決定2・ADR 0315）: 「この記憶は何についての主張か」を
  * 表す構造化された鍵。
  *
  * 🔴 **この鍵は LLM が作る ⟹ 推論である**（`docs/north-star.md` 問い4）。
@@ -27,15 +27,15 @@ import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
  * どこにも `contested`/`status` への言及が無いことがその実装上の証拠）。
  */
 export const ClaimKeySchema = z.object({
-  /** 主張の主語（例: `"user"`）。ADR 0314 §2 の実験に倣い、正規化済み文字列を想定する。 */
+  /** 主張の主語（例: `"user"`）。ADR 0315 §2 の実験に倣い、正規化済み文字列を想定する。 */
   subject: z.string().min(1),
-  /** 主張の述語（属性名）。正規化済みの英語 snake_case を想定する（ADR 0314 決定3）。 */
+  /** 主張の述語（属性名）。正規化済みの英語 snake_case を想定する（ADR 0315 決定3）。 */
   predicate: z.string().min(1),
 });
 export type ClaimKey = z.infer<typeof ClaimKeySchema>;
 
 /**
- * ADR 0314 決定3 の正規化規則: **NFKC 正規化 → 前後の空白除去 → 小文字化 →
+ * ADR 0315 決定3 の正規化規則: **NFKC 正規化 → 前後の空白除去 → 小文字化 →
  * 内部の連続空白を単一の `_` に畳む。**
  *
  * べき等（2回適用しても結果が変わらない）——`normalizeClaimKeyPart(normalizeClaimKeyPart(x))
@@ -44,7 +44,7 @@ export type ClaimKey = z.infer<typeof ClaimKeySchema>;
  * 意図的に選んだ性質であり、`__tests__/claim-key.test.ts` の歯で固定してある。
  *
  * ⚠ **これは統計的な言い換え統合（「好きな食べ物」/「好きな食物」を同じ鍵にする）を
- * 行わない。** その統合は LLM 自身が行う（ADR 0314 §3.2 の実測: バッチ内で常に100%
+ * 行わない。** その統合は LLM 自身が行う（ADR 0315 §3.2 の実測: バッチ内で常に100%
  * 統合された）。この関数が吸収するのは、同じ意味の文字列の**表記ゆれ**（全角/半角、
  * 大文字/小文字、空白の数や位置）だけである。
  */
@@ -62,7 +62,7 @@ export function normalizeClaimKey(key: ClaimKey): ClaimKey {
 
 /**
  * 抽出プロンプト本文（`extraction.ts` の `EXTRACTION_PROMPT_SYSTEM_BASE`）とは
- * **完全に独立した別の system 文面**（ADR 0314 決定1・決定2）。この文字列を変えても
+ * **完全に独立した別の system 文面**（ADR 0315 決定1・決定2）。この文字列を変えても
  * `extraction.ts` 側のカセット鍵（`llmCassetteKey`）は1バイトも動かない——両者は
  * 別の `PromptSpec` であり、抽出候補群を得た*後*にだけ呼ばれる別の構造化呼び出しに使う。
  */
@@ -79,7 +79,7 @@ const CLAIM_KEY_PROMPT_SYSTEM =
 /**
  * ADR 0271 の `buildSubjectCandidateInstruction`（`extraction.ts`）と同型の語彙ヒント。
  * 独立した呼び出しであるため、抽出プロンプト本体の指示と混線しない
- * （ADR 0314 決定2 の表「語彙ヒントの使い回し」参照）。
+ * （ADR 0315 決定2 の表「語彙ヒントの使い回し」参照）。
  */
 function buildKnownPredicateInstruction(knownPredicates: readonly string[]): string {
   return (
@@ -150,14 +150,14 @@ function describeClaimKeyFailure(error: unknown): ExtractionFailure {
 }
 
 /**
- * ADR 0314 決定2 の (ii) separate: 既存の抽出（`extraction.ts` の `extractCandidates`）が
+ * ADR 0315 決定2 の (ii) separate: 既存の抽出（`extraction.ts` の `extractCandidates`）が
  * 終わった**後**に、候補群の `content` をまとめて1回（バッチ）で問う別の構造化呼び出し。
  *
  * ⛔ **既定では呼ばれない。** この関数は `runtime.ts` の opt-in 経路（`ClaimKeyOptions.
  * enabled: true`）からしか呼ばれず、`extraction.ts`/`buildExtractionPrompt` を一切変更・
  * 経由しない——既存の抽出呼び出しのプロンプト・カセット鍵は無関係のまま残る。
  *
- * `contents.length === 0`（候補が0件）なら**呼び出しを一切行わない**（ADR 0314 決定2
+ * `contents.length === 0`（候補が0件）なら**呼び出しを一切行わない**（ADR 0315 決定2
  * 「候補が0件なら+0回にできる」）。
  */
 export async function deriveClaimKeys(

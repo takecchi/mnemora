@@ -132,7 +132,7 @@ export interface Memory {
   validUntil?: Date | null;
 
   /**
-   * Issue #371（(B) 第1段、ADR 0185 決定2・ADR 0314、`claim-key.ts` の doc コメント参照）:
+   * Issue #371（(B) 第1段、ADR 0185 決定2・ADR 0315、`claim-key.ts` の doc コメント参照）:
    * 「この記憶は何についての主張か」を表す構造化された鍵。
    *
    * 🔴 **この鍵は LLM が作る ⟹ 推論である**（`docs/north-star.md` 問い4）。
@@ -272,7 +272,7 @@ export const MemorySchema = z.object({
   validFrom: z.date().nullable().optional(),
   validUntil: z.date().nullable().optional(),
 
-  // Issue #371（ADR 0185/ADR 0314）: `Memory.claimKey` の doc コメント参照。
+  // Issue #371（ADR 0185/ADR 0315）: `Memory.claimKey` の doc コメント参照。
   claimKey: ClaimKeySchema.nullable().optional(),
 
   // ADR 0078: 値域は `(0, MAX_STRENGTH]`。
