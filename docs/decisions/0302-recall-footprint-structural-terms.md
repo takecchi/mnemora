@@ -1,4 +1,4 @@
-# ADR 0300: `recall-footprint` の見積もりに、`indexBand` の実 JSON 構造から決まる4つの構造項を足す（Issue #340）
+# ADR 0302: `recall-footprint` の見積もりに、`indexBand` の実 JSON 構造から決まる4つの構造項を足す（Issue #340）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
