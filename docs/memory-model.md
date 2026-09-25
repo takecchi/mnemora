@@ -458,6 +458,13 @@ n1 = await tenantSettingsStore.getActivitySeq(ctx)   // t1 の時点
 既定 `720`（Issue #338 案3）や `subject` 単位カウンタへの変種は、依然としてオーナー判断の
 範囲であり、この追記も踏み込まない。
 
+**境界の実測（2026-09-25 追記、[ADR 0311](./decisions/0311-activity-clock-boundary-measured-soft-and-hard.md)）**:
+上の「3112回」は、硬いゲートの境界として実測で確かめてある（`scoreThreshold: 0` のとき、
+3112回目まで返り、3113回目で消える）。**`scoreThreshold` を省略した既定の呼び方では、
+段2の足切り（`0.1`）が先に効く。既定 `720` で最大 2392回、問いの近さが 1 未満ならさらに手前で
+返らなくなる。** また、`recall()` だけでは強化されない（強化は使用報告でだけ起きる）。
+回数はテナント合計で数える（別 subject に絞った recall でも進む）。
+
 ---
 
 ## 8. taxonomy の strict / open
