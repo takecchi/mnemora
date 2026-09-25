@@ -2828,17 +2828,17 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
   });
 });
 
-describe("observe: claimKey knownSubjects は subjectCandidates へ暗黙に転用しない（Issue #372負債6、ADR 0333）", () => {
+describe("observe: claimKey knownSubjects は subjectCandidates へ暗黙に転用しない（Issue #372負債6、ADR 0334）", () => {
   /**
-   * ⚠ ADR 0333「採らなかった案」: `knownPredicatesFromStore` と対になる
+   * ⚠ ADR 0334「採らなかった案」: `knownPredicatesFromStore` と対になる
    * `knownSubjectsFromStore`（store が自己蓄積した claim key subject を語彙ヒントに
    * 動的に足す版）は実装していない——store 分は LLM が自由記述で作った曖昧な値
    * （例: `'sibling'`）になりがちで、それを汎用語彙として横流しすると無関係な話題の
    * 主張にまで誤って使い回される汚染を実測で確認したため（`claim-key.ts` の
-   * `ClaimKeyOptions.knownSubjects` doc コメント、ADR 0333 決定3参照）。
+   * `ClaimKeyOptions.knownSubjects` doc コメント、ADR 0334 決定3参照）。
    *
    * ⚠ **当初案は `knownSubjects` 省略時に `subjectCandidates`（Issue #608 項目②(b)）を
-   * 既定値として転用していたが、取り下げた**（ADR 0333 追記〔2026-09-26〕）——
+   * 既定値として転用していたが、取り下げた**（ADR 0334 追記〔2026-09-26〕）——
    * `claimKey.enabled: true` と `subjectCandidates` を既に併用している呼び出し側が、
    * `knownSubjects` という新しい opt-in を一切選んでいないのに claim key プロンプト・
    * カセット鍵が動いてしまい、「off のときのプロンプトは1バイトも変えない」に反する

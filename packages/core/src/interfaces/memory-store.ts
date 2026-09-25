@@ -1115,13 +1115,13 @@ export interface MemoryStore {
    *   （北極星 問い5）。
    *
    * ⚠ **`subject` 側の対（`listActiveClaimSubjects?` のような口）は意図的に作っていない**
-   * （Issue #372負債6、ADR 0333「採らなかった案」）。store が自己蓄積した `claim_key_subject`
+   * （Issue #372負債6、ADR 0334「採らなかった案」）。store が自己蓄積した `claim_key_subject`
    * の値（LLM が自由記述で作った曖昧な値になりがち、例: `'sibling'`）を汎用語彙ヒントとして
    * 横流しすると、無関係な話題の主張にまでその値が誤って使い回される汚染を実測で確認した
    * ——predicate 側で起きる語彙の使い回し（ADR 0329「負債1」）より一段深刻（別人の
    * claim key `subject` を取り違えて同一視しうる）。`ClaimKeyOptions.knownSubjects` は
    * 呼び出し側が明示的に渡す静的な語彙だけをサポートする（`subjectCandidates` への
-   * 暗黙の転用はしない——ADR 0333 追記〔2026-09-26〕）——詳細は ADR 0333。
+   * 暗黙の転用はしない——ADR 0334 追記〔2026-09-26〕）——詳細は ADR 0334。
    */
   listActiveClaimPredicates?(
     ctx: Ctx,

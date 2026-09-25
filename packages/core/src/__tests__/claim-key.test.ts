@@ -73,7 +73,7 @@ describe("buildClaimKeyPrompt（Issue #371）", () => {
     expect(prompt.system).not.toContain("provenanceKind");
   });
 
-  // Issue #372負債6（ADR 0333）: knownSubjects を一切渡さない呼び出しの system は
+  // Issue #372負債6（ADR 0334）: knownSubjects を一切渡さない呼び出しの system は
   // 1バイトも変わっていないことを固定する——既存カセット（`llmCassetteKey` は
   // `PromptSpec` から決まる）が動かないことの直接の証拠。この逐語は
   // `claim-key.ts` の `CLAIM_KEY_PROMPT_SYSTEM` の定義と完全一致させてある。
@@ -188,7 +188,7 @@ describe("deriveClaimKeys（Issue #371、ADR 0185/0315 決定2 の (ii) separate
     expect(capturedSystem).toContain("favorite_food");
   });
 
-  it("既知 subject 一覧を渡す（Issue #372負債6、ADR 0333）", async () => {
+  it("既知 subject 一覧を渡す（Issue #372負債6、ADR 0334）", async () => {
     let capturedSystem: string | undefined;
     const provider: LLMProvider = {
       complete: async () => {

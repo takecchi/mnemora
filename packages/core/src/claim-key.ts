@@ -93,7 +93,7 @@ function buildKnownPredicateInstruction(knownPredicates: readonly string[]): str
  * ほぼ全量が claim key の `subject` 誤帰属（三人称の発話の主語を `"user"` に誤って
  * 割り当てる）だと分かったことへの対処。`buildKnownPredicateInstruction` と同型の
  * 語彙ヒント——**候補から選ばせるだけ**であり、正規化強化・埋め込み類似度のような
- * 別の仕組みは持ち込まない（採らなかった案は ADR 0333 決定1参照）。
+ * 別の仕組みは持ち込まない（採らなかった案は ADR 0334 決定1参照）。
  */
 function buildKnownSubjectInstruction(knownSubjects: readonly string[]): string {
   return (
@@ -109,7 +109,7 @@ function buildKnownSubjectInstruction(knownSubjects: readonly string[]): string 
  *
  * `knownPredicates`/`knownSubjects` を省略・空配列にすると、対応する語彙ヒントの文言は
  * 足されない（`buildExtractionPrompt` の `subjectCandidates` と同じ「空配列＝渡していない」
- * 規約）。**両方省略すれば `CLAIM_KEY_PROMPT_SYSTEM` と1バイトも違わない**——ADR 0333の
+ * 規約）。**両方省略すれば `CLAIM_KEY_PROMPT_SYSTEM` と1バイトも違わない**——ADR 0334の
  * 「off のプロンプトは変えない」制約はこの関数のこの性質で保たれる。
  */
 export function buildClaimKeyPrompt(
@@ -268,18 +268,18 @@ export const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
  *   が効かない」規約（`findActiveByClaimKey?` 系のフォールバック無し方針）。
  *   `{ limit: number }` で件数の上限を指定できる。省略すると
  *   {@link DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT} を使う。
- * - **`knownSubjects`**（Issue #372負債6、ADR 0333）: `knownPredicates` と同型の語彙
+ * - **`knownSubjects`**（Issue #372負債6、ADR 0334）: `knownPredicates` と同型の語彙
  *   ヒントを `subject` 側にも用意する。**呼び出し側が明示的に `claimKeyOptions.
  *   knownSubjects` を渡したときだけ効く**——`subjectCandidates`（Issue #608 項目②(b)、
  *   `runtime.observe` の同名引数）を渡していても、`knownSubjects` を省略すれば
  *   `deriveClaimKeys` の system プロンプトは1バイトも変わらない（`subjectCandidates`
- *   だけを渡す既存の呼び出し側の挙動・カセット鍵を動かさないため——ADR 0333 追記
+ *   だけを渡す既存の呼び出し側の挙動・カセット鍵を動かさないため——ADR 0334 追記
  *   〔2026-09-26〕。`subjectCandidates` と同じ語彙をヒントに使いたい呼び出し側は、
  *   同じ配列を明示的に `knownSubjects` へも渡すこと）。**store から動的に集める版
  *   （predicate 側の `knownPredicatesFromStore` に対応するもの）は意図的に実装して
- *   いない**——ADR 0333 決定3が実測で示した「store が自己蓄積した曖昧な値
+ *   いない**——ADR 0334 決定3が実測で示した「store が自己蓄積した曖昧な値
  *   （例: 'sibling'）を汎用語彙としてヒントに使うと、無関係な話題の主張にまでその値が
- *   誤って使い回される」という汚染を理由に見送った（採らなかった案、ADR 0333
+ *   誤って使い回される」という汚染を理由に見送った（採らなかった案、ADR 0334
  *   「採らなかった案」参照）。
  */
 export interface ClaimKeyOptions {
@@ -311,11 +311,11 @@ export interface ClaimKeyOptions {
   knownPredicatesFromStore?: boolean | { limit?: number };
   /**
    * Issue #372負債6（ADR 0324「real-fixture 実測で、誤検出（30%）のほぼ全量が claim key
-   * の `subject` 誤帰属だと分かった」、ADR 0333）: `knownPredicates` と同型の語彙ヒントを
+   * の `subject` 誤帰属だと分かった」、ADR 0334）: `knownPredicates` と同型の語彙ヒントを
    * `subject` 側にも用意する。呼び出し側が明示的に渡す一覧——**`knownPredicates` と同じ
    * `readonly` を付けない規約**（`ClaimKeyOptionsSchema` の `z.infer` と型を完全一致させる
    * ため）。**省略・空配列＝渡していないと同じで、`subjectCandidates` への暗黙の転用は
-   * 行わない**（ADR 0333 追記〔2026-09-26〕——`subjectCandidates` と同じ語彙をヒントに
+   * 行わない**（ADR 0334 追記〔2026-09-26〕——`subjectCandidates` と同じ語彙をヒントに
    * 使いたい呼び出し側は、同じ配列をここへも明示的に渡すこと）。
    */
   knownSubjects?: string[];
