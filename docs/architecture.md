@@ -491,6 +491,10 @@ interface MemoryStore {
       validUntil: Date | null;
     }
   ): Promise<Memory[]>;
+  listActiveClaimPredicates?(
+    ctx: Ctx,
+    query: { subjectId: string | null; limit: number }
+  ): Promise<string[]>;
   restoreSupersededBy?(
     ctx: Ctx,
     supersededById: MemoryId,
