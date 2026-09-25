@@ -2457,13 +2457,10 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
 
   it("既定の抽出プロンプトは opt-in の有無で変わらない——2回目の呼び出しだけが増える", async () => {
     // 1回目（抽出）の req.prompt を捕まえ、opt-in の有無で完全に同一であることを確認する。
-    let firstPromptWithoutOptIn: unknown;
-    let firstPromptWithOptIn: unknown;
-
     const withoutOptIn = sequencedLlm([{ memories: [] }]);
     const { runtime: runtimeA } = buildRuntime(withoutOptIn);
     await runtimeA.observe(ctx, { kind: "utterance", text: "発話" });
-    firstPromptWithoutOptIn = withoutOptIn.calls[0]!.prompt;
+    const firstPromptWithoutOptIn: unknown = withoutOptIn.calls[0]!.prompt;
 
     const withOptIn = sequencedLlm([{ memories: [] }]);
     const { runtime: runtimeB } = buildRuntime(withOptIn);
@@ -2472,7 +2469,7 @@ describe("observe: claimKey（Issue #371、(B) 第1段。ADR 0185/0315 決定2�
       text: "発話",
       claimKey: { enabled: true },
     });
-    firstPromptWithOptIn = withOptIn.calls[0]!.prompt;
+    const firstPromptWithOptIn: unknown = withOptIn.calls[0]!.prompt;
 
     expect(firstPromptWithOptIn).toEqual(firstPromptWithoutOptIn);
     // 候補0件なので claim key の呼び出しにも到達しない——どちらも呼び出しは1回だけ。
