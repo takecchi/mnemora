@@ -263,9 +263,7 @@ async function createInstrumentedRuntime(
 
   const { embeddingProvider: realEmbedding, llmProvider } = createProviders(process.env, {});
   if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
-    throw new Error(
-      "association-scale-nondeterminism: MNEMORA_EMBEDDING=local を指定すること。",
-    );
+    throw new Error("association-scale-nondeterminism: MNEMORA_EMBEDDING=local を指定すること。");
   }
   const cachingEmbeddingProvider = new CachingEmbeddingProvider(realEmbedding, cache);
   await registerEmbeddingSpace(client.pool, cachingEmbeddingProvider.space);
@@ -566,14 +564,9 @@ async function measureExactRanks(
       await client.query("COMMIT");
       const idx = rows.findIndex((r: { memory_id: string }) => r.memory_id === anchorId);
       const rank = idx === -1 ? null : idx + 1;
-      const distance =
-        idx === -1 ? null : Number((rows[idx] as { distance: number }).distance);
-      const rank40Distance = rows[39]
-        ? Number((rows[39] as { distance: number }).distance)
-        : null;
-      const rank41Distance = rows[40]
-        ? Number((rows[40] as { distance: number }).distance)
-        : null;
+      const distance = idx === -1 ? null : Number((rows[idx] as { distance: number }).distance);
+      const rank40Distance = rows[39] ? Number((rows[39] as { distance: number }).distance) : null;
+      const rank41Distance = rows[40] ? Number((rows[40] as { distance: number }).distance) : null;
       const boundaryWindow = rows
         .slice(34, 45)
         .map((r: { memory_id: string; distance: number }, i: number) => ({
@@ -984,7 +977,10 @@ async function runEfSweepAndIterativeScan(
     const probes = await measureEfPoint(efHandle, tenantId, anchorIds, goldIds);
     const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
     const repProbe = ASSOCIATION_PROBES[0]!;
-    const queryVector = await cachedVectorOrThrow(efHandle.cachingEmbeddingProvider, repProbe.query);
+    const queryVector = await cachedVectorOrThrow(
+      efHandle.cachingEmbeddingProvider,
+      repProbe.query,
+    );
     // ⚠ 本番と同形(JOIN + 3段tie-break込み)のEXPLAINを撮る——`captureExplainAt`
     // (JOIN無し)はef_searchが上がったときのプランナのコスト推定がずれ、
     // 索引を諦める閾値を読み違える(2026-09-26の実機検証、上のコメント参照)。
@@ -1056,7 +1052,9 @@ async function runEfSweepOnlyMode(
   const handle = await createInstrumentedRuntime(databaseUrl, cache);
   await truncateAll(handle.pool);
   const ingest = await ingestCorpus(handle, tenantId, corpus);
-  console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+  console.log(
+    `  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`,
+  );
   const space = handle.cachingEmbeddingProvider.space;
 
   const m0 = await buildMeasurementReport(
@@ -1111,7 +1109,9 @@ async function runRepeatEfMode(
     const handle = await createInstrumentedRuntime(databaseUrl, cache);
     await truncateAll(handle.pool);
     const ingest = await ingestCorpus(handle, tenantId, corpus);
-    console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+    console.log(
+      `  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`,
+    );
     const space = handle.cachingEmbeddingProvider.space;
 
     const m0 = await buildMeasurementReport(
@@ -1124,7 +1124,12 @@ async function runRepeatEfMode(
       ["SET LOCAL hnsw.iterative_scan = relaxed_order"],
     );
     console.log(summarizeMeasurement("M0", m0.probes));
-    repeats.push({ label, ingestSeconds: ingest.ingestSeconds, drainSeconds: ingest.drainSeconds, m0 });
+    repeats.push({
+      label,
+      ingestSeconds: ingest.ingestSeconds,
+      drainSeconds: ingest.drainSeconds,
+      m0,
+    });
 
     if (label === "I4") {
       // --- I4の索引そのまま(REINDEXしない)でef_search掃引 + iterative_scan比較 ---
@@ -1180,9 +1185,10 @@ interface OrderedUtterance {
  */
 function buildOrderedCorpus(scale: number, order: IngestOrder): OrderedUtterance[] {
   const base = buildAssociationProbeSetConversation();
-  const filler: OrderedUtterance[] = buildDistinctFiller(scale - ASSOCIATION_HAYSTACK_SIZE, "forward").map(
-    (f) => ({ ...f, kind: "filler" }),
-  );
+  const filler: OrderedUtterance[] = buildDistinctFiller(
+    scale - ASSOCIATION_HAYSTACK_SIZE,
+    "forward",
+  ).map((f) => ({ ...f, kind: "filler" }));
   if (order === "base-first") {
     return [...base, ...filler];
   }
@@ -1316,7 +1322,9 @@ async function runOrderExperimentMode(
     const handle = await createInstrumentedRuntime(databaseUrl, cache);
     await truncateAll(handle.pool);
     const ingest = await ingestOrderedCorpus(handle, tenantId, utterances);
-    console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+    console.log(
+      `  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`,
+    );
     const space = handle.cachingEmbeddingProvider.space;
 
     const m0 = await buildMeasurementReport(
@@ -1375,7 +1383,10 @@ async function runOrderExperimentMode(
     assertSafeIdentifier(table);
     const ef400Handle = await setEfSearchAndReconnect(databaseUrl, databaseName, 400, cache);
     const repProbe = ASSOCIATION_PROBES[0]!;
-    const queryVector = await cachedVectorOrThrow(ef400Handle.cachingEmbeddingProvider, repProbe.query);
+    const queryVector = await cachedVectorOrThrow(
+      ef400Handle.cachingEmbeddingProvider,
+      repProbe.query,
+    );
     const kPrime = Math.max(1, Math.round(DEFAULT_RECALL_LIMIT * DEFAULT_OVER_FETCH_FACTOR));
     const explain400 = await captureExplainAtProduction(
       ef400Handle.pool,
@@ -1440,7 +1451,9 @@ async function main(): Promise<void> {
     // requireGatesOrThrow() が文字列レベルで既に検査しているので、ここに来るのは
     // 「文字列は local と名乗ったのに実際は違うインスタンスだった」という、それ自体が
     // 壊れの証拠になるケースだけである。多層防御として残す。
-    throw new Error("association-scale-nondeterminism: realEmbedding が LocalEmbeddingProvider ではない。");
+    throw new Error(
+      "association-scale-nondeterminism: realEmbedding が LocalEmbeddingProvider ではない。",
+    );
   }
   const warmup = await warmupLocalEmbedding(realEmbedding);
   if (!warmup.ok) {
@@ -1475,7 +1488,9 @@ async function main(): Promise<void> {
     if (jsonPath) {
       mkdirSync(dirname(jsonPath), { recursive: true });
       writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-      console.log(`\n[association-scale-nondeterminism] repeat-efモードの結果を書き出した: ${jsonPath}`);
+      console.log(
+        `\n[association-scale-nondeterminism] repeat-efモードの結果を書き出した: ${jsonPath}`,
+      );
     }
     return;
   }
@@ -1486,7 +1501,9 @@ async function main(): Promise<void> {
     if (jsonPath) {
       mkdirSync(dirname(jsonPath), { recursive: true });
       writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-      console.log(`\n[association-scale-nondeterminism] ef-sweepモードの結果を書き出した: ${jsonPath}`);
+      console.log(
+        `\n[association-scale-nondeterminism] ef-sweepモードの結果を書き出した: ${jsonPath}`,
+      );
     }
     return;
   }
@@ -1497,7 +1514,9 @@ async function main(): Promise<void> {
     if (jsonPath) {
       mkdirSync(dirname(jsonPath), { recursive: true });
       writeFileSync(jsonPath, `${JSON.stringify(report, null, 2)}\n`, "utf-8");
-      console.log(`\n[association-scale-nondeterminism] orderモードの結果を書き出した: ${jsonPath}`);
+      console.log(
+        `\n[association-scale-nondeterminism] orderモードの結果を書き出した: ${jsonPath}`,
+      );
     }
     return;
   }
@@ -1518,7 +1537,9 @@ async function main(): Promise<void> {
     const handle = await createInstrumentedRuntime(databaseUrl, cache);
     await truncateAll(handle.pool);
     const ingest = await ingestCorpus(handle, tenantId, corpus);
-    console.log(`  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`);
+    console.log(
+      `  ingest=${ingest.ingestSeconds.toFixed(1)}s drain=${ingest.drainSeconds.toFixed(1)}s`,
+    );
     const space = handle.cachingEmbeddingProvider.space;
 
     // --- M0: そのまま ---
@@ -1589,7 +1610,9 @@ async function main(): Promise<void> {
         const other = exactNoParallelRanks![i]!;
         return r.rank !== other.rank || r.distance !== other.distance;
       }).length;
-      console.log(`  [I1限定] max_parallel_workers_per_gather=0 有無での差分: ${diffCount}/12 probe`);
+      console.log(
+        `  [I1限定] max_parallel_workers_per_gather=0 有無での差分: ${diffCount}/12 probe`,
+      );
     }
     await exactHandle.close();
 
