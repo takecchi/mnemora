@@ -89,6 +89,47 @@ function buildKnownPredicateInstruction(knownPredicates: readonly string[]): str
 }
 
 /**
+ * Issue #835（ADR 0329 決定3・負債1の続き）: `ClaimKeyOptions.knownPredicatesFromStore`
+ * が集めた predicate は、呼び出し側が明示的に選んだ `knownPredicates`
+ * （{@link buildKnownPredicateInstruction}）と違い、**store が過去に蓄積した語彙を
+ * 機械的に集めただけ**であり、今回の発話と無関係でも「当てはまる候補」として
+ * 引き寄せられやすい（real-fixture 実測: 無関係な filler 発話どうしが同じ predicate に
+ * 落ちて誤って `contested` になる——`unknown-favorite-number`/
+ * `other-period-city-this-year` の2ケース）。
+ *
+ * ⚠ **`buildKnownPredicateInstruction` と文言を分けているのはこの理由のみ**——
+ * 「必ずそのまま使い」という強い指示を、呼び出し側が明示的に選んだ語彙にはそのまま
+ * 残しつつ、store 由来の語彙にだけ「同じ主題・同じ属性のときに限る」という再利用条件を
+ * 明示し、話題が違う・迷う場合は新しい predicate を作るよう促す（マネージャー指示の
+ * 第一候補）。**正規化の強化・類義の統合（ADR 0329 案B）・埋め込み類似度による統合
+ * （ADR 0329 案C）は持ち込まない**——文言だけを変える、候補から選ばせる仕組みのまま。
+ *
+ * 見出しも `buildKnownPredicateInstruction` と別にする（「既知の predicate 候補一覧」
+ * ではなく「過去の記憶から集めた predicate 候補一覧」）——同じ見出しで文言だけ変えると、
+ * 呼び出し側が両方渡した場合に2つの一覧が同じ見出しで並び、どちらの条件がどちらの一覧に
+ * 掛かるかが読み取りにくくなるため。
+ *
+ * ⚠ **ADR 0329 の追記（2026-09-25、負債1）は、この関数と同じ「store 経由の呼び出しだけ
+ * 新しい文言を使う」設計の変種を4つ（v1〜v4）実測し、いずれも run 間の揺れの幅を超えて
+ * 誤検出を下げつつ predicate 一致を保つことはできなかったと記録している（否定的結果）。**
+ * その4変種は `knownPredicates` を渡す呼び出し側が無い前提（呼び出し側の一覧が常に空）で
+ * 単一の一覧の文言を書き換えていた——本関数の文言は ADR 0329 の v1 と意味的にほぼ同じ
+ * （「同じ主体の同じ属性と確信できる場合に限り再利用」）である。**この文言変更が
+ * `other-period-city-this-year`/`unknown-favorite-number` を実際に減らせるかは、
+ * ADR 0329 の否定的結果を踏まえると懐疑的に見るべきである**——本 Issue の ADR
+ * （`docs/decisions/` の Issue #835 対応）に実測結果を記録する。
+ */
+function buildKnownPredicateFromStoreInstruction(
+  knownPredicatesFromStore: readonly string[],
+): string {
+  return (
+    ` 過去の記憶から集めた predicate 候補一覧: ${knownPredicatesFromStore.join(", ")}。` +
+    "この一覧の項目は、今回の記憶が同じ主題・同じ属性について述べている場合にだけそのまま使ってください。" +
+    "話題が違う場合や、当てはまるか迷う場合は、新しい predicate を作ってください。"
+  );
+}
+
+/**
  * Issue #372 負債6（ADR 0324、Issue #691続き）: real-fixture 実測で、誤検出（30%）の
  * ほぼ全量が claim key の `subject` 誤帰属（三人称の発話の主語を `"user"` に誤って
  * 割り当てる）だと分かったことへの対処。`buildKnownPredicateInstruction` と同型の
@@ -107,21 +148,34 @@ function buildKnownSubjectInstruction(knownSubjects: readonly string[]): string 
 /**
  * `deriveClaimKeys` が投げる別の構造化呼び出しのプロンプトを組み立てる。
  *
- * `knownPredicates`/`knownSubjects` を省略・空配列にすると、対応する語彙ヒントの文言は
- * 足されない（`buildExtractionPrompt` の `subjectCandidates` と同じ「空配列＝渡していない」
- * 規約）。**両方省略すれば `CLAIM_KEY_PROMPT_SYSTEM` と1バイトも違わない**——ADR 0334の
- * 「off のプロンプトは変えない」制約はこの関数のこの性質で保たれる。
+ * `knownPredicates`/`knownSubjects`/`knownPredicatesFromStore` を省略・空配列にすると、
+ * 対応する語彙ヒントの文言は足されない（`buildExtractionPrompt` の `subjectCandidates` と
+ * 同じ「空配列＝渡していない」規約）。**全部省略すれば `CLAIM_KEY_PROMPT_SYSTEM` と
+ * 1バイトも違わない**——ADR 0334の「off のプロンプトは変えない」制約はこの関数のこの性質で
+ * 保たれる。
+ *
+ * `knownPredicatesFromStore`（Issue #835、4番目・末尾の引数——既存呼び出しへの追加のみ）は
+ * `knownPredicates` とは**別の**文言・別の見出しで足す
+ * （{@link buildKnownPredicateFromStoreInstruction} の doc コメント参照）。**呼び出し側が
+ * 明示的に渡した `knownPredicates` の文言は、`knownPredicatesFromStore` の有無に関わらず
+ * 1バイトも変わらない**——ADR 0329「利用者の分を先に」の並び順もそのまま保つ。
  */
 export function buildClaimKeyPrompt(
   contents: readonly string[],
   knownPredicates?: readonly string[],
   knownSubjects?: readonly string[],
+  knownPredicatesFromStore?: readonly string[],
 ): PromptSpec {
   const hasKnownPredicates = knownPredicates !== undefined && knownPredicates.length > 0;
   const hasKnownSubjects = knownSubjects !== undefined && knownSubjects.length > 0;
+  const hasKnownPredicatesFromStore =
+    knownPredicatesFromStore !== undefined && knownPredicatesFromStore.length > 0;
   let system = CLAIM_KEY_PROMPT_SYSTEM;
   if (hasKnownPredicates) {
     system += buildKnownPredicateInstruction(knownPredicates);
+  }
+  if (hasKnownPredicatesFromStore) {
+    system += buildKnownPredicateFromStoreInstruction(knownPredicatesFromStore);
   }
   if (hasKnownSubjects) {
     system += buildKnownSubjectInstruction(knownSubjects);
@@ -183,6 +237,10 @@ function describeClaimKeyFailure(error: unknown): ExtractionFailure {
  *
  * `contents.length === 0`（候補が0件）なら**呼び出しを一切行わない**（ADR 0315 決定2
  * 「候補が0件なら+0回にできる」）。
+ *
+ * `knownPredicatesFromStore`（Issue #835、4番目・末尾の引数）は
+ * {@link buildClaimKeyPrompt} へそのまま転送するだけ——省略すれば挙動・カセット鍵は
+ * 1バイトも変わらない。
  */
 export async function deriveClaimKeys(
   llmProvider: LLMProvider,
@@ -190,13 +248,19 @@ export async function deriveClaimKeys(
   contents: readonly string[],
   knownPredicates?: readonly string[],
   knownSubjects?: readonly string[],
+  knownPredicatesFromStore?: readonly string[],
 ): Promise<DeriveClaimKeysResult> {
   if (contents.length === 0) {
     return EMPTY_RESULT;
   }
   try {
     const result = await llmProvider.completeStructured(ctx, {
-      prompt: buildClaimKeyPrompt(contents, knownPredicates, knownSubjects),
+      prompt: buildClaimKeyPrompt(
+        contents,
+        knownPredicates,
+        knownSubjects,
+        knownPredicatesFromStore,
+      ),
       schema: ClaimKeyBatchResultSchema,
     });
     if (result.claims.length !== contents.length) {

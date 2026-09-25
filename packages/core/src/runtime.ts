@@ -2734,17 +2734,33 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * - 合成の結果、一覧が空（利用者も渡さず、store にも1件も無い）なら `undefined` を返す
    *   ——`deriveClaimKeys`/`buildClaimKeyPrompt` の「空配列＝渡していない」規約
    *   （`buildKnownPredicateInstruction` の呼び出し条件）に合わせる。
+   *
+   * ⚠ Issue #835（ADR 0329 負債1）: **利用者が渡した `knownPredicates` と、store から
+   * 集めた分を、もう1本の配列へ合成しない。** 以前はここで1本の配列へ連結していたが、
+   * `deriveClaimKeys`/`buildClaimKeyPrompt` 側で「利用者が明示的に選んだ語彙」と
+   * 「store が過去に蓄積した語彙」を**別の文言・別の見出し**で扱うようにした
+   * （`claim-key.ts` の `buildKnownPredicateFromStoreInstruction` doc コメント参照）ため、
+   * この関数は2本の配列（`knownPredicates`/`knownPredicatesFromStore`）を別々に返す。
+   * **利用者分・store分それぞれの重複除去と「利用者分を先に」の優先順位は変えていない**
+   * ——store 分から利用者分と重複する predicate を除くのは従来と同じ、店由来の配列自体の
+   * 内部重複除去も従来と同じ。
    */
   async function resolveKnownPredicates(
     ctx: Ctx,
     observation: Observation,
     claimKeyOptions: ClaimKeyOptions,
-  ): Promise<string[] | undefined> {
+  ): Promise<{
+    knownPredicates: string[] | undefined;
+    knownPredicatesFromStore: string[] | undefined;
+  }> {
     const callerKnown = claimKeyOptions.knownPredicates ?? [];
     const fromStoreOption = claimKeyOptions.knownPredicatesFromStore;
     const listActiveClaimPredicates = deps.memoryStore.listActiveClaimPredicates;
     if (!fromStoreOption || listActiveClaimPredicates === undefined) {
-      return callerKnown.length > 0 ? callerKnown : undefined;
+      return {
+        knownPredicates: callerKnown.length > 0 ? callerKnown : undefined,
+        knownPredicatesFromStore: undefined,
+      };
     }
     const limit =
       typeof fromStoreOption === "object" && fromStoreOption.limit !== undefined
@@ -2754,13 +2770,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       subjectId: observation.subjectId ?? null,
       limit,
     });
-    const merged = [...callerKnown];
+    const dedupedFromStore: string[] = [];
     for (const predicate of fromStore) {
-      if (!merged.includes(predicate)) {
-        merged.push(predicate);
+      if (!callerKnown.includes(predicate) && !dedupedFromStore.includes(predicate)) {
+        dedupedFromStore.push(predicate);
       }
     }
-    return merged.length > 0 ? merged : undefined;
+    return {
+      knownPredicates: callerKnown.length > 0 ? callerKnown : undefined,
+      knownPredicatesFromStore: dedupedFromStore.length > 0 ? dedupedFromStore : undefined,
+    };
   }
 
   /**
@@ -2852,7 +2871,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     let claimKeys: (ClaimKey | null)[] | undefined;
     let claimKeyFailure: ExtractionFailure | null = null;
     if (claimKeyOptions?.enabled === true) {
-      const knownPredicates = await resolveKnownPredicates(ctx, observation, claimKeyOptions);
+      const { knownPredicates, knownPredicatesFromStore } = await resolveKnownPredicates(
+        ctx,
+        observation,
+        claimKeyOptions,
+      );
       const knownSubjects = resolveKnownSubjects(claimKeyOptions);
       const derived = await deriveClaimKeys(
         deps.llmProvider,
@@ -2860,6 +2883,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         candidates.map((candidate) => candidate.content),
         knownPredicates,
         knownSubjects,
+        knownPredicatesFromStore,
       );
       claimKeys = derived.claimKeys;
       claimKeyFailure = derived.failure;

@@ -118,6 +118,74 @@ describe("buildClaimKeyPrompt（Issue #371）", () => {
     expect(predicateIndex).toBeGreaterThanOrEqual(0);
     expect(subjectIndex).toBeGreaterThan(predicateIndex);
   });
+
+  // Issue #835（ADR 0329 負債1の続き）: knownPredicatesFromStore（4番目・末尾の引数）は
+  // 追加のみ——省略時の挙動を固定して、(a)「opt-in でない・knownPredicates だけのとき、
+  // プロンプトが従来と完全に同じ」を歯にする。
+  describe("knownPredicatesFromStore（Issue #835、ADR 0329 負債1の続き）", () => {
+    it("渡さなければ、その文言を含まない——knownPredicates だけの呼び出しは1バイトも変わらない", () => {
+      const withoutStore = buildClaimKeyPrompt(["ラーメンが好き"], ["favorite_food"]);
+      expect(withoutStore.system).not.toContain("過去の記憶から集めた predicate 候補一覧");
+      // (a) 3引数までの呼び出しは、4引数目を新設する前と1バイトも変わらない
+      // ——CLAIM_KEY_PROMPT_SYSTEM_LITERAL + buildKnownPredicateInstruction の組み立てのみ。
+      expect(withoutStore.system).toBe(
+        CLAIM_KEY_PROMPT_SYSTEM_LITERAL +
+          " 既知の predicate 候補一覧: favorite_food。この一覧に当てはまる場合は必ずそのまま使い、" +
+          "どれにも当てはまらない場合だけ新しい predicate を作ってください。",
+      );
+    });
+
+    it("opt-in でない（何も渡さない）呼び出しは CLAIM_KEY_PROMPT_SYSTEM と1バイトも違わない", () => {
+      const prompt = buildClaimKeyPrompt(["ラーメンが好き"]);
+      expect(prompt.system).toBe(CLAIM_KEY_PROMPT_SYSTEM_LITERAL);
+    });
+
+    it("空配列は『渡していない』と同じ", () => {
+      const withEmpty = buildClaimKeyPrompt(["発話"], undefined, undefined, []);
+      const withoutAny = buildClaimKeyPrompt(["発話"]);
+      expect(withEmpty).toEqual(withoutAny);
+    });
+
+    // (b) store 由来の語彙があるときだけ、新しい文言になることを固定する。
+    it("渡すと、既存の『既知の predicate 候補一覧』とは別の見出し・別の（弱めた）文言で足される", () => {
+      const prompt = buildClaimKeyPrompt(["発話"], undefined, undefined, ["hobby_interest"]);
+      const system = prompt.system as string;
+      expect(system).toContain("過去の記憶から集めた predicate 候補一覧: hobby_interest。");
+      expect(system).not.toContain("既知の predicate 候補一覧");
+      // 「必ずそのまま使い」という強い文言は使わない——弱めた再利用条件になっている。
+      expect(system).not.toContain("必ずそのまま使い");
+      expect(system).toContain(
+        "同じ主題・同じ属性について述べている場合にだけそのまま使ってください",
+      );
+    });
+
+    it("knownPredicates（利用者指定）と両方渡すと、利用者指定分は旧文言のまま・store分は新しい見出しで別に足される", () => {
+      const prompt = buildClaimKeyPrompt(["発話"], ["user_chosen_hint"], undefined, [
+        "hobby_interest",
+      ]);
+      const system = prompt.system as string;
+      expect(system).toContain(
+        "既知の predicate 候補一覧: user_chosen_hint。この一覧に当てはまる場合は必ずそのまま使い",
+      );
+      expect(system).toContain("過去の記憶から集めた predicate 候補一覧: hobby_interest。");
+    });
+
+    it("knownPredicates・knownPredicatesFromStore・knownSubjects の3つを渡すと、predicate → store分 → subject の順で並ぶ", () => {
+      const prompt = buildClaimKeyPrompt(
+        ["発話"],
+        ["favorite_food"],
+        ["user", "姉"],
+        ["hobby_interest"],
+      );
+      const system = prompt.system as string;
+      const predicateIndex = system.indexOf("既知の predicate 候補一覧");
+      const fromStoreIndex = system.indexOf("過去の記憶から集めた predicate 候補一覧");
+      const subjectIndex = system.indexOf("既知の subject 候補一覧");
+      expect(predicateIndex).toBeGreaterThanOrEqual(0);
+      expect(fromStoreIndex).toBeGreaterThan(predicateIndex);
+      expect(subjectIndex).toBeGreaterThan(fromStoreIndex);
+    });
+  });
 });
 
 function llmReturning(response: unknown): LLMProvider {
@@ -186,6 +254,23 @@ describe("deriveClaimKeys（Issue #371、ADR 0185/0315 決定2 の (ii) separate
     };
     await deriveClaimKeys(provider, ctx, ["発話"], ["favorite_food"]);
     expect(capturedSystem).toContain("favorite_food");
+  });
+
+  it("knownPredicatesFromStore（Issue #835、末尾の引数）を buildClaimKeyPrompt へそのまま転送する", async () => {
+    let capturedSystem: string | undefined;
+    const provider: LLMProvider = {
+      complete: async () => {
+        throw new Error("not used");
+      },
+      completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
+        capturedSystem = req.prompt.system;
+        return req.schema.parse({
+          claims: [{ subject: "user", predicate: "hobby_interest" }],
+        }) as T;
+      },
+    };
+    await deriveClaimKeys(provider, ctx, ["発話"], undefined, undefined, ["hobby_interest"]);
+    expect(capturedSystem).toContain("過去の記憶から集めた predicate 候補一覧: hobby_interest。");
   });
 
   it("既知 subject 一覧を渡す（Issue #372負債6、ADR 0334）", async () => {

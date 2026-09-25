@@ -2930,7 +2930,10 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
     expect(spy.calls).toEqual([{ subjectId: null, limit: 3 }]);
   });
 
-  it("利用者の knownPredicates を先に、store から集めた一覧を後ろに、重複を除いて連結する", async () => {
+  // Issue #835（ADR 0329 負債1の続き）: 利用者の knownPredicates と store から集めた分は、
+  // もはや1本の配列へ連結しない——別の文言・別の見出しで扱う
+  // （`claim-key.ts` の `buildKnownPredicateFromStoreInstruction` 参照）。
+  it("利用者の knownPredicates と、store から集めた分は、別の見出し・別の文言で system へ足される（重複は store 側から除く）", async () => {
     const seedLlm = sequencedLlm([
       { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
       { claims: [{ subject: "user", predicate: "favorite_food" }] },
@@ -2979,11 +2982,15 @@ describe("observe: claimKey knownPredicatesFromStore（Issue #691続き、ADR 03
     });
     const claimKeyCall = followUpLlm.calls[1]!;
     const system = claimKeyCall.prompt.system as string;
-    // 利用者指定分（"user_chosen_hint", "favorite_food"）の後ろに、store 分から
-    // 重複を除いた "favorite_color" だけが連結されている——"favorite_food" が
-    // 重複して並んでいれば、この厳密な部分文字列は一致しない。
-    expect(system).toContain(
-      "既知の predicate 候補一覧: user_chosen_hint, favorite_food, favorite_color。",
+    // 利用者指定分（"user_chosen_hint", "favorite_food"）はそのまま従来の文言・見出しで
+    // 変わらない。
+    expect(system).toContain("既知の predicate 候補一覧: user_chosen_hint, favorite_food。");
+    // store 分は重複除去後の "favorite_color" だけが、別の見出し・別の（弱めた）文言で
+    // 足される——"favorite_food" が重複して store 側にも並んでいれば、この厳密な
+    // 部分文字列は一致しない。
+    expect(system).toContain("過去の記憶から集めた predicate 候補一覧: favorite_color。");
+    expect(system.indexOf("既知の predicate 候補一覧")).toBeLessThan(
+      system.indexOf("過去の記憶から集めた predicate 候補一覧"),
     );
   });
 });

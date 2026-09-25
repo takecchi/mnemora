@@ -84,7 +84,7 @@ export declare const ClaimKeySchema: z.ZodObject<{
 export type ClaimKey = z.infer<typeof ClaimKeySchema>;
 export declare function normalizeClaimKeyPart(value: string): string;
 export declare function normalizeClaimKey(key: ClaimKey): ClaimKey;
-export declare function buildClaimKeyPrompt(contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[]): PromptSpec;
+export declare function buildClaimKeyPrompt(contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[], knownPredicatesFromStore?: readonly string[]): PromptSpec;
 export declare const ClaimKeyBatchResultSchema: z.ZodObject<{
     claims: z.ZodArray<z.ZodObject<{
         subject: z.ZodString;
@@ -96,7 +96,7 @@ export interface DeriveClaimKeysResult {
     claimKeys: (ClaimKey | null)[];
     failure: ExtractionFailure | null;
 }
-export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[]): Promise<DeriveClaimKeysResult>;
+export declare function deriveClaimKeys(llmProvider: LLMProvider, ctx: Ctx, contents: readonly string[], knownPredicates?: readonly string[], knownSubjects?: readonly string[], knownPredicatesFromStore?: readonly string[]): Promise<DeriveClaimKeysResult>;
 export declare const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
 export interface ClaimKeyOptions {
     enabled: boolean;
