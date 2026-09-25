@@ -117,7 +117,7 @@ async function runOneProbe(
   const otherId = otherExternalId(probe.id);
 
   // 既定（validAt 省略 = いま）。
-  // association: null — 連想枠が既定 on になった（ADR 0335。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+  // association: null — 連想枠が既定 on になった（ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
   // でも、この arm（validity ゲート）の基準線を動かさない（下2箇所も同じ理由）。
   const atNow = await options.runtime.recall(ctx, { text: probe.query, association: null });
   const atNowExternalIds = await memoryIdsByExternalId(

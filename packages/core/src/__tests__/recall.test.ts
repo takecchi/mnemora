@@ -508,7 +508,7 @@ describe("RecallQuerySchema — digestBandLimit（目次帯の件数上限。本
   });
 });
 
-describe("RecallQuerySchema — association: null と undefined の区別（ADR 0335、既定 on の提案）", () => {
+describe("RecallQuerySchema — association: null と undefined の区別（ADR 0336、既定 on の提案）", () => {
   it("association を省略すると、パース後も undefined のまま（キー自体が無い）", () => {
     const result = RecallQuerySchema.parse({});
     expect(result.association).toBeUndefined();

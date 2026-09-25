@@ -1277,7 +1277,7 @@ export async function runRecall(
   }
 
   // -------------------------------------------------------------------
-  // 段3.5: 連想（既定 on。docs/recall.md §9、ADR 0151、既定は ADR 0335 が反転した
+  // 段3.5: 連想（既定 on。docs/recall.md §9、ADR 0151、既定は ADR 0336 が反転した
   // ——採用。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
   //
   // 「聞かれていないことを、自分から思い出す」の実装。クエリで引けた記憶（アンカー）の
@@ -1289,7 +1289,7 @@ export async function runRecall(
   // 段1に置くと必ず段2の below_threshold で落ちる。「スコアに関係なく候補へ足す」経路は
   // 既に段3（必須の同伴取得）が持っており、連想はその一般化である。
   //
-  // **既定 on／`null` で明示的に off（ADR 0335）**: `validatedQuery.association` が
+  // **既定 on／`null` で明示的に off（ADR 0336）**: `validatedQuery.association` が
   // `undefined`（省略）なら DEFAULT_RECALL_ASSOCIATION を使い、`null`（明示）なら
   // この段全体を丸ごとスキップする——北極星の問い2（無効にしても成立するか）の
   // 担保先が、ADR 0151 の「既定 off」から「`null` という明示の opt-out」へ移る。
@@ -1752,7 +1752,7 @@ export async function runRecall(
   }
 
   // 連想枠（Issue #200、ADR 0151）が返した digest の合計文字数の内訳。既定 on
-  // （ADR 0335）になったので、`associationQuery`（省略時は DEFAULT_RECALL_ASSOCIATION、
+  // （ADR 0336）になったので、`associationQuery`（省略時は DEFAULT_RECALL_ASSOCIATION、
   // `null` を渡したときだけ undefined）が undefined でない限り usage.byTier に載せる
   // ——「連想を走らせなかった」のは `null` で明示した呼び出しだけである。
   // 「呼び手が連想で何文字増えたか」を見られるようにする欄。

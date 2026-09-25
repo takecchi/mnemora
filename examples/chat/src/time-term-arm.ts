@@ -271,7 +271,7 @@ async function runOneProbe(
 
   // ⛔ `text` 以外を渡さない——既定の limit/閾値/overFetchFactor のまま測る
   // (既存 `runRetrievalQualityArm` と同じ規律)。
-  // association: null — `packages/core` の連想枠が既定 on になった（ADR 0335。
+  // association: null — `packages/core` の連想枠が既定 on になった（ADR 0336。
   // オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後も、この arm の
   // 基準線（時制の新旧判定）を動かさないための唯一の例外。連想は on/off の判断
   // そのものとは無関係な効果（近傍からの追加昇格）を持ち込むため、"text 以外を渡さない"

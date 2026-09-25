@@ -302,7 +302,7 @@ describe("recall() — omitted.kind = 'over_limit'（docs/recall.md §2 段2）"
     await createEmbeddedMemory(stores, [1, 0]);
     await createEmbeddedMemory(stores, [1, 0.001]);
 
-    // association: null — 連想枠は既定 on（ADR 0335）だが、この歯は over_limit だけを
+    // association: null — 連想枠は既定 on（ADR 0336）だが、この歯は over_limit だけを
     // 検査する。limit の外に落ちた候補は連想の対象にもなりうる（アンカーとの類似度が
     // 高いため）ので、この歯の対象外の効果を持ち込まないよう明示的に止める。
     const result = await runtime.recall(ctx, {
@@ -909,11 +909,11 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
     await createEmbeddedMemory(stores, [1, 0], { digest: "正常1" });
     await createEmbeddedMemory(stores, [0.9, 0.1], { digest: "正常2" });
 
-    // association: null — 連想枠は既定 on（ADR 0335）だが、この歯は段2の
+    // association: null — 連想枠は既定 on（ADR 0336）だが、この歯は段2の
     // score_not_comparable（NaN 三分割）だけを検査する。「壊れた」記憶は段2で除外
     // されても、アンカー（正常1/正常2）との生のコサイン類似度は高いままなので、
     // 連想枠の対象になりうる（連想の候補選定は score_not_comparable を経由しない
-    // ——引き受けた負債として ADR 0335 に記録した既知のギャップ）。この歯の対象外の
+    // ——引き受けた負債として ADR 0336 に記録した既知のギャップ）。この歯の対象外の
     // 効果を持ち込まないよう明示的に止める。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],

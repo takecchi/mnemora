@@ -34,7 +34,7 @@ export interface MnemoraPathOptions {
    * 明示すること——この関数は `null` を `packages/core` へそのまま転送する
    * （`queryRecall` の doc 参照）。**この関数の既定（on、`DEFAULT_MNEMORA_PATH_ASSOCIATION`）
    * は `packages/core` 側の既定が off だった ADR 0151 のときから独立に持っている値であり、
-   * `packages/core` 側の既定が [ADR 0335](../../../docs/decisions/0335-recall-association-default-on.md)
+   * `packages/core` 側の既定が [ADR 0336](../../../docs/decisions/0336-recall-association-default-on.md)
    * で on に変わっても変えない**（`examples/chat` という一呼び手が、明示的に
    * オプトインしている形であることに変わりはない）。
    */
@@ -148,9 +148,9 @@ export async function ingestConversation(
  *
  * ⚠ **`opts.association: null`（明示的に off にしたい呼び出し側の脱出口）は、
  * `packages/core` へ `association: null` をそのまま転送する**（[ADR
- * 0335](../../../docs/decisions/0335-recall-association-default-on.md) 前は、この関数は
+ * 0336](../../../docs/decisions/0336-recall-association-default-on.md) 前は、この関数は
  * `association` キー自体を省略して転送していた——`packages/core` の既定が off だったので
- * 「省略」が「off」と同じ効果だったからである。**ADR 0335（採用。オーナーが選択肢(あ)を
+ * 「省略」が「off」と同じ効果だったからである。**ADR 0336（採用。オーナーが選択肢(あ)を
  * 選んだ、ask_human ac5953d1、2026-09-25）で `packages/core` の既定が on に変わると、この「省略」は意味が反転し、
  * `opts.association: null` の呼び出しが黙って連想 on になってしまう**——実際に
  * `memory-usage-reinforce.postgres.test.ts` が「`packages/core` 既定の off のまま呼ぶ

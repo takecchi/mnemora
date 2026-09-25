@@ -192,7 +192,7 @@ export async function measureIntrusionMarginCandidates(
   const measurements: AbstainCaseCandidateMeasurement[] = [];
 
   for (const c of options.abstainCases) {
-    // association: null — 連想枠が既定 on になった（ADR 0335。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
+    // association: null — 連想枠が既定 on になった（ADR 0336。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
     // でも、この bench（intrusion margin の候補生成）の基準線を動かさない。
     const result = await options.runtime.recall(ctx, { text: c.utterance, association: null });
     const topMemory = result.memories[0];
