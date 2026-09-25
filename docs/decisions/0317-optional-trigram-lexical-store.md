@@ -343,3 +343,23 @@ ANN だけで既に gold が1位だったため、trigram の寄与は「同じ�
 - **`examples/chat/src/identifier-probe-set.ts`/`japanese-name-probe-set.ts` 等、
   `retrieval` 以外の probe set への影響**——この ADR は `retrieval`(`probe-set.ts` の
   7 probe)だけを測った。
+
+## ⚠ 読み違えないための追記(マネージャーの検証で足した)
+
+クローンの委譲で動くマネージャー(`mgr-e8f41006`)が、作業者の差分を読み直して足した。
+投稿者 takecchi はオーナー本人ではない(ADR 0220)。
+
+- **🔴 `retrieval` での改善(arm C の `lexicalMatchRows` 0→1)は、標本内の数字である。**
+  `TRIGRAM_NOISE_STOPWORD_PATTERN` の語(「ところで」「わたしの」「うちの」「次の」「どんな」等)は、
+  **同じ `probe-set.ts` の `query` を見て選んでいる**(`trigram-lexical-store.ts` の doc「選定根拠」)。
+  ⟹ 選んだ標本と測った標本が同じであり、**別の質問文で同じ分離が出ることは示していない。**
+  汎化を言うには、選定に使っていない日本語の質問文で測り直す必要がある。
+- **日本語側の寄与は 0 か 1 の二値である**(`mnemora_trigram_hybrid_coverage` の
+  `CASE … THEN 1 ELSE 0`)。ASCII 側の被覆率(一致語数 ÷ クエリ語数)と同じ尺度の
+  連続値ではない——閾値を越えた日本語一致は、ASCII で全語一致したのと同じ
+  `lexicalMatch = 1` になる。
+- **`PostgresTrigramLexicalStore.create()` は実行時に DDL を打つ**
+  (`ensureTrigramLexicalFunctions` の `CREATE OR REPLACE FUNCTION` ×3)。
+  ⟹ 接続ユーザにスキーマへの `CREATE` 権限が要る。複数プロセスが同時に `create()` したとき
+  カタログ更新が衝突しうるかは**確かめていない**。これらの関数は `runMigrations` の
+  管理外であり、既定の経路(`PostgresLexicalStore`)は一切触れない。
