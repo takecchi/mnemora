@@ -167,6 +167,41 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       expect(claimed.length).toBeLessThanOrEqual(2);
     });
 
+    // `PostgresOutboxStore` は `LIMIT ${opts.limit}` を生 SQL にそのまま渡すため、
+    // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
+    // （SQL の制約から来る、実装が意図して選んだわけではない挙動）。`InMemoryOutboxStore`
+    // は元々 `eligible.slice(0, opts.limit)` を使っており、負数は「末尾から数えた
+    // 除外」という Array.prototype.slice の意味論を素通りさせていた——例外を投げる
+    // どころか、ジョブを黙って claim（状態を変更）してしまっていた。
+    // このファイルの doc が明言する「`claimBatch` のリース意味論は `PostgresOutboxStore`
+    // と一致させてある」という設計意図に対し、負数 limit だけがこの意図から外れていた。
+    it("claimBatch は limit が負数のとき、ジョブを claim せずに例外を投げる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await seedJob(ctx, { kind: "extract" });
+      await seedJob(ctx, { kind: "extract" });
+
+      await expect(
+        store.claimBatch(ctx, {
+          limit: -1,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        }),
+      ).rejects.toThrow();
+
+      // 例外を投げた場合、どのジョブも claim 済み（＝この後 claim 可能）のままである
+      // こと——失敗の副作用として一部のジョブが claim される、という状態変更が
+      // 起きていないことを確かめる。
+      const claimed = await store.claimBatch(ctx, {
+        limit: 10,
+        now: new Date(),
+        claimedBy: "worker-2",
+        leaseMs: DEFAULT_LEASE_MS,
+      });
+      expect(claimed.length).toBe(2);
+    });
+
     it("complete したジョブは再び claimBatch に現れない", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

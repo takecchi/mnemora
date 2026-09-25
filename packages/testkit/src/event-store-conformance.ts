@@ -240,6 +240,19 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect(limited.map((event) => event.id)).not.toEqual([e3.id]);
     });
 
+    // `PostgresEventStore.list` は `filter.limit` を生 SQL の `LIMIT` にそのまま渡す
+    // ため、負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
+    // （実測）。素朴な `Array.prototype.slice(0, limit)` 実装は、負数を「末尾から数えた
+    // 除外」という別の意味で受け取ってしまい、ほぼ全件を静かに返しうる。
+    it("limit が負数のとき例外を投げる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      await store.append(ctx, buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId }));
+
+      await expect(store.list(ctx, { memoryId, limit: -1 })).rejects.toThrow();
+    });
+
     it("since は境界を含む（at >= since）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

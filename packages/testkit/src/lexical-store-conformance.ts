@@ -303,6 +303,24 @@ export function describeLexicalStoreConformance(options: LexicalStoreConformance
       expect(limited).toEqual(full.slice(0, 2));
     });
 
+    // `PostgresLexicalStore.search`（`buildLexicalSearchSelect`）は `opts.limit` を
+    // 生 SQL の `LIMIT` にそのまま渡すため、負数を渡すと Postgres 自身が
+    // `LIMIT must not be negative` で例外を投げる（実測）。素朴な
+    // `Array.prototype.slice(0, limit)` 実装は、負数を「末尾から数えた除外」という
+    // 別の意味で受け取ってしまい、ほぼ全件を静かに返しうる。
+    it("search は limit が負数のとき例外を投げる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await prepareMemory(ctx, { content: "obsidian cave" });
+
+      await expect(
+        store.search(ctx, "obsidian cave", {
+          limit: -1,
+          filter: { tenantId: "tenant-1" },
+        }),
+      ).rejects.toThrow();
+    });
+
     // -------------------------------------------------------------------
     // filter.status。
     // -------------------------------------------------------------------

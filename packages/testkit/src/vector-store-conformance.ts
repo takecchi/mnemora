@@ -394,6 +394,26 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       expect(hits.length).toBeLessThanOrEqual(2);
     });
 
+    // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡す
+    // ため、負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
+    // （実測）。素朴な `Array.prototype.slice(0, limit)` 実装は、負数を「末尾から数えた
+    // 除外」という別の意味で受け取ってしまい、ほぼ全件を静かに返しうる。
+    it("search は limit が負数のとき例外を投げる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId1 = await prepareMemoryId(ctx);
+      const memoryId2 = await prepareMemoryId(ctx);
+      await store.upsert(ctx, space, memoryId1, [1, 0, 0]);
+      await store.upsert(ctx, space, memoryId2, [0, 1, 0]);
+
+      await expect(
+        store.search(ctx, space, [1, 0, 0], {
+          limit: -1,
+          filter: { tenantId: "tenant-1" },
+        }),
+      ).rejects.toThrow();
+    });
+
     it("filter.status: 配列に無い status の Memory は返らず、配列に在る status の Memory は返る", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

@@ -3402,6 +3402,34 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(await listEventsForMemory(ctx, memory.id)).toEqual([]);
       });
 
+      // `PostgresMemoryStore.purgeExpiredEvents`（`buildPurgeExpiredEventsTargetSelect`）は
+      // `LIMIT opts.limit + 1` を使うため、`opts.limit === -1` のときだけ `LIMIT 0` に
+      // なり例外を投げない（`purged: 0` で返る）が、`opts.limit <= -2` では Postgres が
+      // `LIMIT must not be negative` で例外を投げる（実測）。この歯は両 adapter が
+      // 一致して例外を投げる `-2` を使う——`-1` は境界そのものが adapter 間で割れており
+      // （Postgres は無害に0件、素朴な `Array.prototype.slice(0, -1)` 実装だと対象の
+      // ほぼ全件を削除しうる）、この歯では検査しない。
+      it("purgeExpiredEvents は limit が負数（-2）のとき例外を投げ、1行も消さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "purge-negative-limit" }),
+        );
+        const base = new Date("2024-01-01T00:00:00.000Z").getTime();
+        for (let i = 0; i < 3; i++) {
+          await seedEvent(store, ctx, memory.id, { at: new Date(base + i * 1000) });
+        }
+        const cutoff = new Date(base + 10_000);
+
+        await expect(
+          store.purgeExpiredEvents!(ctx, { olderThan: cutoff, limit: -2 }),
+        ).rejects.toThrow();
+
+        const remaining = await listEventsForMemory(ctx, memory.id);
+        expect(remaining.length).toBe(3);
+      });
+
       it("purgeExpiredEvents は dryRun のとき1行も消さず、events_purged も1行も積まない", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -6578,6 +6606,24 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       );
       // limit を小さくしても digestEligible.count は減らない——limit を掛ける前の件数だから。
       expect(withLowLimit.digestEligible.count).toBe(TOTAL);
+    });
+
+    // `PostgresMemoryStore.aggregateScope` は `digestBand.limit` を生 SQL の `LIMIT`
+    // にそのまま渡すため、負数を渡すと Postgres 自身が `LIMIT must not be negative`
+    // で例外を投げる（実測）。素朴な `Array.prototype.slice(0, limit)` 実装は、負数を
+    // 「末尾から数えた除外」という別の意味で受け取ってしまい、スコープ内のほぼ全件の
+    // digest を静かに返しうる。
+    it("aggregateScope の digestBand: limit が負数のとき例外を投げる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "digest-band-negative-limit" }),
+      );
+
+      await expect(
+        store.aggregateScope(ctx, {}, { digestBand: { limit: -1, excludeMemoryIds: [] } }),
+      ).rejects.toThrow();
     });
 
     it("aggregateScope の digestBand: digests.length は limit を超えない", async () => {

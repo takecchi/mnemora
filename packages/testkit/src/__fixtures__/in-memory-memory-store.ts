@@ -652,7 +652,23 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    // `PostgresMemoryStore.purgeExpiredEvents`（`buildPurgeExpiredEventsTargetSelect`）は
+    // SQL の `LIMIT ${opts.limit + 1}` を使うため、`opts.limit` が負数だと
+    // 生 SQL の `LIMIT` へ負数（またはそれ以下）が渡る。`opts.limit === -1` のときだけ
+    // `LIMIT 0` になり例外を投げずに `purged: 0` で返るが（実測済み）、`opts.limit <= -2`
+    // では Postgres が `LIMIT must not be negative` で例外を投げる（実測済み）。
+    // ここで検査せず `candidates.slice(0, opts.limit)` へ渡すと、
+    // `Array.prototype.slice` の負数引数は「末尾から数えた除外」という別の意味になり、
+    // 対象テナントの期限切れイベントの**ほぼ全件を静かに削除**してしまう
+    // （このメソッドは delete の副作用を持つ——`search`/`list` 系より実害が大きい）。
+    // `opts.limit === -1` の1点だけは Postgres と完全には一致しない（Postgres は
+    // 例外を投げず `purged: 0`）が、**どちらの入力でも「誤って削除しない」ことは
+    // 保証される**——`LIMIT + 1` の窓を模してまで `-1` だけを特別扱いする値打ちが
+    // 無いと判断し、負数はすべて一様に拒む。
     const dryRun = opts.dryRun ?? false;
+    if (opts.limit < 0) {
+      throw new Error(`purgeExpiredEvents: limit must not be negative (got ${opts.limit})`);
+    }
     const candidates = this.events
       .filter(
         (event) =>
@@ -987,6 +1003,17 @@ export class InMemoryMemoryStore implements MemoryStore {
     let digests: ScopeAggregate["digests"] = [];
     let digestEligible: ScopeAggregate["digestEligible"] = { count: 0, countKind: "exact" };
     if (opts?.digestBand) {
+      // `PostgresMemoryStore.aggregateScope` は `digestBand.limit` を生 SQL の `LIMIT`
+      // にそのまま渡すため、負数を渡すと Postgres 自身が `LIMIT must not be negative`
+      // で例外を投げる（in-memory-vector-store.ts の同種の注記・実測参照）。ここで
+      // 検査せず `eligibleMemories.slice(0, opts.digestBand.limit)` へ渡すと、
+      // `Array.prototype.slice` の負数引数により、スコープ内のほぼ全件の digest を
+      // 静かに返してしまう——クエリを投げる前に弾く Postgres 側に揃える。
+      if (opts.digestBand.limit < 0) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must not be negative (got ${opts.digestBand.limit})`,
+        );
+      }
       const exclude = new Set(opts.digestBand.excludeMemoryIds);
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順

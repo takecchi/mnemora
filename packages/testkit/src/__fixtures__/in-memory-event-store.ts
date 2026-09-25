@@ -77,6 +77,15 @@ export class InMemoryEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    // `PostgresEventStore.list` は `filter.limit` を生 SQL の `LIMIT` にそのまま渡すため、
+    // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
+    // （実測済み。in-memory-vector-store.ts の同種の注記参照）。ここで検査せず
+    // `sorted.slice(0, filter.limit)` へ渡すと、`Array.prototype.slice` の負数引数は
+    // 「末尾から数えた除外」という別の意味になり、ほぼ全件を静かに返してしまう
+    // ——クエリを投げる前に弾く Postgres 側に揃える。
+    if (filter.limit !== undefined && filter.limit < 0) {
+      throw new Error(`list: limit must not be negative (got ${filter.limit})`);
+    }
     const matched = this.events.filter((event) => {
       if (event.tenantId !== ctx.tenantId) {
         return false;
