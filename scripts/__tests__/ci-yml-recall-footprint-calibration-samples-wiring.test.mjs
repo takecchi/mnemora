@@ -23,11 +23,11 @@ import { describe, expect, it } from "vitest";
  * オーナー専権）。壊れたときは「配線が変わった」か「書き方が変わった」かを見て、
  * 配線が変わっていないなら取り出し方のほうを直すこと（歯を消さないこと）。
  *
- * ⚠ **いまのところ `--baseline` は渡していない**（ADR 0313 §2 — この bench の
- * 基準値ファイルはまだ CI artifact での2回以上一致を経ていない）。この歯は
- * 「まだ渡していない」ことを固定する——`--baseline` を足す PR が出たら、この歯を
+ * 🔴 **`--baseline` は `examples/chat/recall-footprint-calibration-samples-baseline.json` へ渡っている**
+ * （基準値ファイルは PR #728 の CI artifact で2回一致を経て作った。ADR 0313）。
+ * 以前この歯は「まだ渡していない」ことを固定していた。基準値ファイルができたので、
  * `ci-yml-time-term-wiring.test.mjs` が ADR 0121 決定5 で辿った道と同じように、
- * 「実在する基準値ファイルへ配線されている」ことを固定する歯へ置き換えること。
+ * 「実在する基準値ファイルへ配線されている」ことを固定する歯へ置き換えた。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -189,8 +189,12 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
     expect(summaryStepMeasuredPath()).toBe(benchStepJsonPath());
   });
 
-  it("いまのところ --baseline は渡していない(ADR 0313 §2、基準値ファイルがまだ無い)", () => {
-    expect(summaryStep?.run.includes("--baseline")).toBe(false);
+  it("--baseline が、実在する較正標本の基準値ファイルへ配線されている(ADR 0313)", () => {
+    const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
+    const baselinePath = matched?.[1] ?? matched?.[2];
+    expect(baselinePath).toBe("examples/chat/recall-footprint-calibration-samples-baseline.json");
+    const baselineJson = JSON.parse(readFileSync(join(repoRoot, baselinePath), "utf8"));
+    expect(baselineJson.rowCount).toBe(baselineJson.rows.length);
   });
 
   it("artifact アップロード段が、bench の書き先と同じ path を指している", () => {
