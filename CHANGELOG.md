@@ -212,6 +212,12 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #832）。
   ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
   （ADR 0335「引き受けた負債」参照）。
+- **`RuntimeDeps` に任意欄 `embeddingInput?: (memory: Memory) => string` を足した**——
+  埋め込み入力の上限超過で `embeddingStatus: 'failed'` になった Memory を、`reembed()`
+  （ADR 0079）だけでは回復できなかった問題に、opt-in の回復手段を用意する。省略時は
+  `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
+  無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
+  [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
