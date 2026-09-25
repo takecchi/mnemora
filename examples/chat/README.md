@@ -355,30 +355,57 @@ outcome=candidates / 候補1件
 
 ---
 
-## `correction-candidates`: 訂正の相手探しの精度を測る（Issue #369 (C)）
+## `correction-candidates`: 訂正の相手探しの精度を測る（Issue #369 (C)、ADR 0291/0321）
 
 ```bash
 DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction-candidates
 # -- --dev で開発用ケース集合（held-out ではなく調整用）を使う
+# MNEMORA_CORRECTION_CANDIDATE_JSON=<path> で機械可読出力
 ```
 
 **`findCorrectionCandidates` の関連度ランキングが、A群（訂正すべき相手が実在する）と
 B群（⛔ 訂正してはいけない——否定・曖昧・別人・別期間の4分類）をどれだけ分離できているかを
 測る。** 件数は [`src/correction-case-set.eval.ts`](./src/correction-case-set.eval.ts)
 （held-out）/[`src/correction-case-set.dev.ts`](./src/correction-case-set.dev.ts)（開発用）を
-見ること——ここには焼き込まない（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」。
-ADR 0291 §4 の項3 がこの件数を将来増やす拡張を設計済みであり、動く数だからである）。
-hit@k・distractor 逆転率・誤爆率・棄権率を出す。鍵・カセット不要
+見ること——ここには焼き込まない（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+hit@k・distractor 逆転率・誤爆率（深/浅）・棄権率・**margin**（goldScore−distractorScore）・
+**intrusionMargin**（深い誤爆のときの topScore−protectedFactScore）を出す。鍵・カセット不要
 （deterministic LLM + `@mnemora/local-embedding` の実推論）。
 
-**この数字自体は [ADR 0232](../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
-が測定・記録したものであり、このコマンドはその再現・継続監視のための道具である**
-（`main` の変更でこのコマンドの出力が動くことはあっても、ADR 0232 本文の数字自体は
-その時点の記録として書き換えない——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
-**CI には配線していない**——`examples/chat/README.md` のこの節時点では手で走らせる
-道具のままである（継続計測への拡張は
-[ADR 0291](../../docs/decisions/0291-primary-probe-coverage-map-correction-candidate-domain.md)
-が設計のみ済ませている。実装は別issue）。
+**この数字の出発点は [ADR 0232](../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)
+が測定・記録したものである**（`main` の変更でこのコマンドの出力が動くことはあっても、
+ADR 0232 本文の数字自体はその時点の記録として書き換えない——`AGENTS.md`「⚠ 数を、
+道具と生成物に焼き込まない」）。**[ADR 0291](../../docs/decisions/0291-primary-probe-coverage-map-correction-candidate-domain.md)
+が設計し、[ADR 0321](../../docs/decisions/0321-correction-candidate-domain-implementation.md)
+が実装した拡張**——既存23件（A群15+B群8）に「短い索引の型」（ASCII識別子／日本語固有名詞／
+数詞インデックス）を弁別軸とする新セル（A群6件・B群24件、計30件）を足し、母数を53件にした。
+**既存15件・8件は1文字も書き換えていない**——追加後も、この23件だけを抽出した分類（hit@k
+所属・distractor逆転・誤爆の深/浅・棄権）は追加前と完全一致することを確認している
+（ADR 0321 §3）。
+
+**CI に配線した**（`correction-candidate-probes` ジョブ、`.github/workflows/ci.yml`。
+ADR 0232「引き受けた負債」3番が名指しした「CI ジョブを足していない」という残債を返す）。
+`identifier-probes`/`numeral-token-probes` ジョブと同じ形——毎 PR・鍵不要・**⛔ 門ではない**
+（相違しても exit 0。標本53件は ADR 0033 §3 の規律に照らして閾値の門に足る母数ではない）。
+基準値は [`correction-candidate-probe-baseline.json`](./correction-candidate-probe-baseline.json)
+（手で更新する。CI は自動更新しない）。
+
+### 実測結果（[correction-candidate-probe-baseline.json](./correction-candidate-probe-baseline.json)、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
+
+数値は上のファイルを見ること——ここには焼き込まない（`AGENTS.md`「⚠ 数を、道具と
+生成物に焼き込まない」）。ADR 0232 と比べた読み方の要点だけをここに書く:
+
+- A群の hit@1・distractor逆転率は ADR 0232 の水準（hit@1 100%・逆転0%）を、新セルを
+  加えた母数でも概ね維持している（新セルのうち1件だけ hit@1 を外すが hit@3 では拾う）。
+- B群の深い誤爆率は ADR 0232 の実測（75%）と近い水準のまま——**新しい索引型を足しても、
+  ADR 0232 が指摘した危険（守るべき事実を1位に置く）は消えていない。**
+- **intrusionMargin は、今日の母集合（`protectedFacts` が0〜1件）では深い誤爆のとき
+  常に0になる。**これは実装の欠陥ではなく定義どおりの挙動である（1位そのものが保護対象
+  である以上、自明な結果）——`protectedFacts` が複数件のケースが増えたときに初めて
+  非自明な値になる（ADR 0321 §5.5 相当の実装ノート）。
+- **索引型によって深い誤爆の起きやすさに違いが見える**（ASCII識別子の`other_person`は
+  深い誤爆だったが、日本語固有名詞・数詞インデックスの`other_person`は浅い誤爆だった）。
+  ⚠ 標本が小さく、この傾向を統計的には主張しない。
 
 ---
 

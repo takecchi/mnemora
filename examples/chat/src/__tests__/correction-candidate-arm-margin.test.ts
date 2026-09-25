@@ -117,7 +117,9 @@ function hitOutcome(overrides: Partial<CorrectionHitOutcome> = {}): CorrectionHi
   };
 }
 
-function abstainOutcome(overrides: Partial<CorrectionAbstainOutcome> = {}): CorrectionAbstainOutcome {
+function abstainOutcome(
+  overrides: Partial<CorrectionAbstainOutcome> = {},
+): CorrectionAbstainOutcome {
   return {
     caseId: "y",
     kind: "negation",
@@ -168,7 +170,12 @@ describe("summarizeCorrectionCandidateReport（A群/B群の取り違え検出）
       abstains: [
         abstainOutcome({ caseId: "deep", protectedAtTop: true }),
         abstainOutcome({ caseId: "shallow", protectedAtTop: false, abstained: false }),
-        abstainOutcome({ caseId: "abstained", protectedAtTop: false, abstained: true, topScore: null }),
+        abstainOutcome({
+          caseId: "abstained",
+          protectedAtTop: false,
+          abstained: true,
+          topScore: null,
+        }),
       ],
       marginStats: { count: 0, mean: null, stdDev: null, min: null },
       intrusionMarginStats: { count: 0, mean: null, stdDev: null, min: null },

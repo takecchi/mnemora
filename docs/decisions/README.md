@@ -344,5 +344,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0317](./0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md) | 自動経路の `consolidate` ジョブは、近傍探索を種の subject に絞る — 案 S を採る | 採用 (2026-09) |
 | [0318](./0318-taxonomy-labels.md) | taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201） | 採用 (2026-09) |
 | [0319](./0319-optional-trigram-lexical-store.md) | 日本語の語彙照合を、opt-in の `PostgresTrigramLexicalStore`（pg_trgm）として足す — Issue #278 への回答 | 採用 (2026-09) |
+| [0321](./0321-correction-candidate-domain-implementation.md) | ADR 0291 §7 残件1〜4 を実装する — 訂正候補探索に30件のセルを追加し、margin/intrusionMargin を足し、CI ジョブを配線する | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

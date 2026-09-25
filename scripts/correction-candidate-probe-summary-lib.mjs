@@ -92,7 +92,7 @@ function findSummaryFieldProblems(summary) {
     problems.push("summary.hitAtK がオブジェクトでない");
   } else {
     for (const k of ["1", "3", "5", "10"]) {
-      if (typeof /** @type {any} */ (hitAtK)[k] !== "number") {
+      if (typeof (/** @type {any} */ (hitAtK)[k]) !== "number") {
         problems.push(`summary.hitAtK.${k} が数値でない`);
       }
     }

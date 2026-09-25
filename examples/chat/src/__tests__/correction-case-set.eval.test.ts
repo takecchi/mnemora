@@ -26,7 +26,9 @@ describe("correction-case-set.eval: ADR 0291/0321 が追加した30件の行列"
       expect(CORRECTION_HIT_CASE_SET_EVAL.some((c) => c.id === id)).toBe(true);
     }
     for (const prefix of ["ascii", "jpname", "numeral"]) {
-      const count = CORRECTION_HIT_CASE_SET_EVAL.filter((c) => c.id.startsWith(`${prefix}-`)).length;
+      const count = CORRECTION_HIT_CASE_SET_EVAL.filter((c) =>
+        c.id.startsWith(`${prefix}-`),
+      ).length;
       expect(count).toBe(2);
     }
   });

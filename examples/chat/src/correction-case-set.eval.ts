@@ -339,7 +339,8 @@ export const CORRECTION_ABSTAIN_CASE_SET_EVAL: CorrectionAbstainCase[] = [
     kind: "vague",
     protectedFacts: [],
     utterance: "チケットの件、うーん、番号があいまいで自信がありません。",
-    grounds: "対象のチケット番号を含まない。⟹ どの記憶を相手として選んでも、選んだ根拠が発話に無い。",
+    grounds:
+      "対象のチケット番号を含まない。⟹ どの記憶を相手として選んでも、選んだ根拠が発話に無い。",
     tuningUse: "held-out",
   },
   // --- ASCII識別子 × other_person ---
