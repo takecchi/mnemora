@@ -220,9 +220,7 @@ export class TrigramLexicalStoreUnavailableError extends Error {
   readonly detail: string | undefined;
 
   constructor(reason: TrigramLexicalUnavailableReason, detail?: string) {
-    super(
-      TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX + reason + (detail ? ` (${detail})` : ""),
-    );
+    super(TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX + reason + (detail ? ` (${detail})` : ""));
     this.name = "TrigramLexicalStoreUnavailableError";
     this.reason = reason;
     this.detail = detail;
@@ -544,10 +542,7 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
    * 別途、自分のタイミングで呼ぶ（このファイル冒頭の doc「なぜフィルタ条件の組み立てを
    * 複製するか」の下、`ensureTrigramLexicalFunctions` の doc参照）。
    */
-  static async create(
-    db: Db,
-    opts?: { threshold?: number },
-  ): Promise<PostgresTrigramLexicalStore> {
+  static async create(db: Db, opts?: { threshold?: number }): Promise<PostgresTrigramLexicalStore> {
     const probe = await probeTrigramLexicalSupport(db);
     if (!probe.ok) {
       throw new TrigramLexicalStoreUnavailableError(probe.reason, probe.detail);

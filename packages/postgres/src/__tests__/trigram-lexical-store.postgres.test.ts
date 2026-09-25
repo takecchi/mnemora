@@ -166,7 +166,10 @@ describe("PostgresTrigramLexicalStore — opt-in pg_trgm 語彙照合(Issue #278
 
       // Issue #106 の報告者が書いた形そのもの（ADR 0092 の OR + 被覆率の主対象）。
       const query = "PROJ-1234について前に何か言ってたはず";
-      const baseHits = await baseStore.search(ctx, query, { limit: 10, filter: { tenantId: TENANT } });
+      const baseHits = await baseStore.search(ctx, query, {
+        limit: 10,
+        filter: { tenantId: TENANT },
+      });
       const trigramHits = await trigramStore.search(ctx, query, {
         limit: 10,
         filter: { tenantId: TENANT },
