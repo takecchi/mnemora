@@ -2249,6 +2249,11 @@ export interface Runtime {
    *    `llmFailure`・`llmCalls: 1`・書き込みゼロ（失敗を根拠に既存の記憶を置き換えない。
    *    `ReextractResult.supersededMemoryIds` の doc と同じ規律）。
    * 6. 統合先を1件作る（`createMemoryWithOutbox`。`buildConsolidatedMemory` 参照）。
+   *    ⚠ **統合先は `embeddingStatus: 'pending'` で作られ、`embed` ジョブを積むだけ——
+   *    `tick()` が回るまで ANN の候補に入らない。**統合元は同じ呼び出しの中で
+   *    `superseded` へ動くため、**元はもう引けないが統合先もまだ引けない窓が開く**
+   *    （[ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md)
+   *    「引き受けた負債」4。塞いでいない——今は決めない、と書いてある）。
    * 7. eligible を1件ずつ `updateStatusWithEvent` で `superseded` へ CAS する（`reextract` の
    *    ループと同じ形）。`MemoryStatusConflictError` はその1件だけ `status_changed_concurrently`
    *    として飛ばして続行、それ以外の例外は `failed` を積んでその場で打ち切り、残りを
