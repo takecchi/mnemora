@@ -358,3 +358,189 @@ Tests  1 failed | 24 passed (25)
 - ⛔ **`decideNoiseRoundRed` への配線が1か所に絞られていることを機械的に検査していない。**
 
 Refs #109, ADR 0094, ADR 0254, ADR 0276, ADR 0316, Issue #572
+
+---
+
+## 追記（2026-09-25）— sparse/dense 群の一致理由を突き合わせで確かめた（Issue #109）
+
+> **⚠ この追記もマネージャー（クローンのセッション）から切り出された作業者が書いた。
+> オーナー本人の決定ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> **この ADR は「採用」のまま変えない——本文は書き換えず、ここに追記するだけである。**
+
+Issue #109（06:58Z のコメント、4番「残っているもの」）が「仮説のみで未確認」として
+残していた1件を、実際の突き合わせで確かめた:
+
+> ノイズは (seed, probe 番号, 候補の並び位置) だけで決まるので、dense で足した
+> distractor が `recall()` の返す候補に入らなければ、結果は完全に一致する。
+> 群どうしで候補を突き合わせてはいない。
+
+### 【実測】環境
+
+本文と同じ手元の `initdb` 自製インスタンス（PostgreSQL 17、pgvector 0.8.0、別ポート）、
+`@mnemora/local-embedding`（`ruri-v3-30m/sym`、256次元、本物の ONNX 推論）、LLM は
+`DeterministicLLMProvider`。実 API は一切叩いていない。対象は「sparse/dense の結果が
+σ・seed の全組で完全に一致した」3組——`identifiersSparse`/`identifiersDense`（30 probe）、
+`japaneseNamesSparse`/`japaneseNamesDense`（12 probe）、`numeralSparse`/`numeralDense`
+（18 probe）。`japanese`（sparse/dense の区別が無い群）は対象外。
+
+### 追加した歯・スクリプト
+
+- `examples/chat/src/local-noise-candidate-diff.ts`（純関数）——sparse/dense それぞれの
+  `captureGroupCandidates`（`local-noise-arm.ts`、**変更していない**）が捕まえた候補配列
+  （`externalId`・`score.total`）を probe ごとに突き合わせ、件数・順序・値が丸ごと
+  一致するか（`identical`）、dense にしか無い候補（`denseOnlyIds`）が gold/distractor
+  より上位に来ているか（`denseOnlyRankedAboveGoldOrDistractor`）を出す。
+  歯: `examples/chat/src/__tests__/local-noise-candidate-diff.test.ts`（11件、DB 非依存）。
+- `examples/chat/src/local-noise-grid-comparison.ts`（純関数）——`synthetic-score-noise.ts`
+  の既存関数（`computeNoisyGroupMetrics`/`decideNoiseRoundRed`、**1文字も変更していない**）
+  をそのまま呼び、σ 格子 × seed 全通り（11×15=165 round）で sparse/dense の
+  MRR 実値・red/green 判定を突き合わせる。
+  歯: `examples/chat/src/__tests__/local-noise-grid-comparison.test.ts`（4件、DB 非依存）。
+- `examples/chat/src/scripts/local-noise-arm-candidate-diff.ts`——上の2つを実際の
+  `recall()` に対して走らせる、手で回すスクリプト（本文の
+  `local-embedding-synthetic-noise-fp.ts` と同じ構え。**CI ジョブは足していない**——
+  本文「決めたこと」5番と同じ判断）。出力は
+  `examples/chat/local-noise-arm-candidate-diff.json`（コミット済み、機械可読）。
+- ⛔ **新しい DB 配線の歯は足していない。** `diffGroupCandidates`/
+  `compareGroupNoiseOutcomes` は純関数で、入力を作る `captureGroupCandidates` は
+  既存の `local-noise-arm.postgres.test.ts`（本文、変更していない）が既に検査している。
+
+### 【実測】① 候補配列そのもの（入力）の突き合わせ — 仮説は字義通りには誤りだった
+
+| 組 | probe数 | `identical`(丸ごと一致) | `denseOnlyRankedAboveGoldOrDistractor`=true の probe数 |
+|---|---|---|---|
+| identifiers | 30 | **0/30** | **0/30** |
+| japaneseNames | 12 | **0/12** | **0/12** |
+| numeral | 18 | **0/18** | **0/18** |
+
+**「dense で足した distractor が `recall()` の返す候補に入らなければ」という仮説の前段は
+成り立っていない。** dense 固有の候補（`denseOnlyIds`）は、ほぼ全ての probe で実際に
+`recall()` の返す10件（`DEFAULT_RECALL_LIMIT=10`、`packages/core`）の中に入っている
+（`identifiers` の30 probe中、`denseOnlyIds` が空だったのは2 probe だけ）。⟹ 仮説の
+前段（「入らない」）は**誤り**——dense の filler は実際に候補集合へ入り込んでいる。
+
+**ただし、60 probe すべてで、dense 固有の候補は gold・distractor のどちらよりも
+上位に来たことが1件も無かった**（`denseOnlyRankedAboveGoldOrDistractor` が全 probe で
+`false`）。これが、σ=0 の基準値（本文の表、identifiers 1.0/30・japaneseNames
+0.958/11・numeral 0.917/15）が sparse/dense で一致した**構造的な理由**である——
+dense が足した候補は、この embedding 空間・この probe 設計では、常に gold/distractor
+より低い順位にしか来ない。
+
+**`identical` が60 probe中1件も無かった理由の内訳は2つある**（`local-noise-arm-candidate-diff.json`
+で1件ずつ確認した）:
+
+1. **候補集合そのものが違う**（`denseOnlyIds`/`sparseOnlyIds` が非空）——上で述べた通り、
+   dense/sparse の filler が別の文言のため、`recall()` の下位（3位以降）に入る filler の
+   顔ぶれが sparse/dense で違う。
+2. **候補集合が完全に同じ probe でも、score.total が10⁻⁷ 相対のごく僅かな差で食い違う**
+   （例: `project-code-d`——`denseOnlyIds`/`sparseOnlyIds` ともに空、10件の externalId・
+   順序が sparse/dense で完全一致するのに、`score.total` が
+   `0.9674024463343104`(sparse) vs `0.9674025663714538`(dense) のように末尾で違う）。
+   **この差は2回の独立実行（実時刻が違う）で `identical` の判定結果（後述の
+   MRR完全一致数を含む）が1バイトも変わらなかった**——もし `packages/core` の
+   decay（経過時間依存、既定 `systemClock`、`examples/chat/src/runtime-factory.ts`）が
+   原因なら、実時刻に依存して結果が run ごとに揺れるはずだが、実際には揺れなかった。
+   ⟹ **decay ではなく、sparse/dense で haystack の構成（バッチに含まれる文の集合）が
+   違うことによる ONNX 推論のバッチ依存の浮動小数点非結合性が原因である可能性が高いが、
+   埋め込みベクトル自体までは追っていない**——これは【確かめていないこと】に残す。
+   **いずれにせよこの差は10⁻⁷相対であり、格子最小の σ=0.0025（2500倍大きい）より
+   4桁小さい**——ノイズによる並べ替えには実質影響しない大きさである。
+
+### 【実測】② σ×seed 全165通り（出力）の突き合わせ — 「完全に一致」は red/green 判定に限って正しい
+
+`local-noise-grid-comparison.ts` の `compareGroupNoiseOutcomes` で、実際に捕まえた
+候補集合に SIGMA_GRID×SEEDS（165通り、本文と同じ格子）のノイズを掛け、sparse/dense を
+round ごとに突き合わせた（2回の独立実行で下の数値は1件も変わらなかった）:
+
+| 組 | red/green 判定が一致した round | MRR 実値が厳密一致した round | 最初に MRR が食い違い始める σ |
+|---|---|---|---|
+| identifiers | **165/165** | 55/165 | 0.02 |
+| japaneseNames | **165/165** | 97/165 | 0.08 |
+| numeral | **165/165** | 91/165 | 0.04 |
+
+**red/green の判定（`decideNoiseRoundRed`、ADR 0316 の判定そのもの）は3組とも
+165/165 で完全一致した**——本文の表（帯・上限95%が sparse/dense で同じ値になっていた
+こと）を、集約統計ではなく round 単位で裏付ける。
+
+**一方、MRR の実値は165通り中55〜97通りでしか厳密一致していない。** 食い違いは
+σ が小さいうち（identifiers は σ≤0.01、japaneseNames は σ≤0.04、numeral は σ≤0.02）は
+**1件も起きず**、それより大きい σ から起き始め、σ が大きくなるほど増える。
+
+**⟹ Issue #109 の「完全に一致した」という記述は、「ADR 0316 の判定（red/green）」に
+ついては165/165で正確だが、「MRR の実値」については正確ではない。** ADR 0322 本文が
+報告した σ ごとの表（`japanese` 群の例）でも、`redCount` は sparse/dense で終始一致する
+一方、`mrrMedian` は red が飽和した高い σ で僅かに食い違っていた
+（本追記のための再検査で確認——例: `identifiersSparse` σ=0.04 の `mrrMedian`
+0.8388888888888888 に対し `identifiersDense` は 0.8027777777777777）。本文の
+「帯」（medianPreservesBaseline）の定義や「全11段合算」の red 数はこの食い違いの
+影響を受けない——**帯に入る低い σ では実際に厳密一致しており、高い σ では
+`decideEmbeddingDriftVerdict` が閾値を大きく超えて両方とも red と判定するため、
+実値が僅かに違っても判定は割れない。**
+
+### 機構の説明（仮説の差し替え）
+
+元の仮説（「dense固有候補が候補に入らない」）は誤りだったが、観測結果は以下で
+無矛盾に説明できる:
+
+1. **σ=0（基準線）で、dense 固有候補は常に gold/distractor より下位にしか来ない**
+   （①で確認、60 probe 全数）。⟹ 基準線の goldRank・hit@1・MRR は sparse/dense で
+   一致する（本文の表が示す通り）。
+2. **ノイズは (seed, streamId=probe番号, index=候補配列内の位置) だけで決まり、
+   候補の識別子には依存しない**（`synthetic-score-noise.ts` の `noiseEpsilon` の
+   doc コメント、本文で確認済み）。σ が小さいうちは、この位置基準のノイズが
+   gold・distractor と、その下に居る sparse/dense 固有の候補との間のスコア差
+   （embedding のマージン）を越えられない——⟹ 順位の並べ替えが「gold/distractor の
+   2件の中でだけ」起きる限り、その2件は sparse/dense で共通のため、結果は一致する。
+3. **σ が大きくなると、この位置基準のノイズが、sparse/dense で別の候補が座っている
+   下位の位置まで動かせるようになる。** その候補は sparse/dense で別物なので、
+   一方の腕でだけ gold の上に来ることがあり、そこで MRR の実値が分岐する。
+4. **それでも red/green の判定が割れないのは、その頃には両腕とも
+   `decideEmbeddingDriftVerdict` の閾値（MRR drop ≥ 0.01）を大きく超えて red に
+   飽和しているから**——実値が違っても、どちらも「同じ結論（red）」に落ちる。
+
+### これは「dense群が独立な情報を足していない」ことを意味するか
+
+**しない、が言い過ぎでもない——両方が効いている、というのがここでの答えである。**
+
+- **「dense が sparse と全く同じ情報しか持っていない」わけではない。** dense の filler は
+  実際に sparse とは違う候補として `recall()` の結果に混入している（①）。σ を上げると
+  MRR の実値が分岐する（②）のは、dense が sparse には無い「もう少しで gold に迫る
+  近傍」を実際に持ち込んでいることの現れである。**dense はゼロ情報ではない——sparse
+  より競合の多い、より厳しい条件を作れている**（`identifier-probe-set.ts` の設計意図
+  通り）。
+- **一方で、σ が低い側（判定に使う「帯」がある側）で sparse/dense が一致するのは、
+  この embedding・この probe 設計のもとで dense の追加競合が「僅差で紛れ込む」ほどには
+  強くない（gold/distractor とのマージンを崩すほどではない）ことの表れであり、これは
+  実質的な発見である**——ただし、それが**判定（`decideEmbeddingDriftVerdict`）の
+  「一致」として表面化するかどうかは、σ 格子の刻み方・閾値という**ノイズ注入設計の側**
+  にも依存する。σ 格子がもっと細かければ、①で見た「dense固有候補が意外と近い」
+  という違いが、もっと低い σ から MRR 実値の分岐として見えていたかもしれない
+  （本 ADR・この追記のどちらもその探索はしていない）。
+
+**⟹ 一言でまとめると**: 基準線（σ=0）が一致するのは probe/embedding 側の構造的事実
+（dense固有候補が常に gold/distractor より下位）であり、**「完全に一致した」という
+高いσまで含めた強い主張はノイズ注入設計（位置基準のノイズ・粗い閾値判定）の産物**
+である。前者は「dense は独立情報を持たない」の根拠にならない——後者と合わせて
+初めて「なぜ ADR 0316 の判定テーブルが sparse/dense で完全に一致したか」の説明になる。
+
+### 確かめていないこと（この追記の範囲でも残るもの）
+
+- ⛔ **`identical=false` の主因とした「ONNX バッチ依存の浮動小数点非結合性」は、
+  埋め込みベクトル自体を比較して確認していない。** 2回の独立実行で結果が1バイトも
+  揺れなかったことから decay（実時刻依存）を消去法で除外しただけであり、埋め込み側の
+  挙動を直接見た確認ではない。
+- ⛔ **σ 格子の間の値**（例: 0.005〜0.02 の間で `identifiers` の MRR 実値がどこから
+  分岐し始めるか、格子の11点だけでは分からない）は探索していない。
+- ⛔ **`japanese` 群**（sparse/dense の区別が無い）はこの追記の対象外。
+- ⛔ **CI ランナー上では走らせていない。** 手元の `initdb` インスタンスのみ（本文と同じ限定）。
+- ⛔ **`ruri-v3-30m/sym` 以外のモデル・次元は測っていない**（本文と同じ限定）。
+
+### 成果物
+
+- `examples/chat/src/local-noise-candidate-diff.ts` / `local-noise-grid-comparison.ts`
+- `examples/chat/src/scripts/local-noise-arm-candidate-diff.ts`
+- `examples/chat/src/__tests__/local-noise-candidate-diff.test.ts` /
+  `local-noise-grid-comparison.test.ts`
+- `examples/chat/local-noise-arm-candidate-diff.json`（実測結果、コミット済み）
+
+Refs #109
