@@ -1,9 +1,11 @@
 /**
- * `scripts/north-star-default-probe.mjs`（Issue #387 / ADR 0216 決定7「段1: 一覧を印字
- * するだけ」）の純関数の側。ファイル I/O・`Runtime` の構築・`process.exit` を一切持たない
- * ——`identifier-probe-summary-lib.mjs`/`association-summary-lib.mjs` と同じ分担。
+ * `scripts/north-star-default-probe.mjs`（段1）と `scripts/north-star-tarball-probe.mjs`
+ * （段2、Issue #387 / ADR 0216 決定7）が**共有する**純関数の側。ファイル I/O・`Runtime` の
+ * 構築・`process.exit` を一切持たない——`identifier-probe-summary-lib.mjs`/
+ * `association-summary-lib.mjs` と同じ分担。実際に `Runtime` を組んで観測するロジックは
+ * こちらではなく `./north-star-probe-runtime.mjs`（これも段1・段2で共有）に在る。
  *
- * ## このファイルが持つ3つの役目
+ * ## このファイルが持つ4つの役目
  *
  * 1. **登録簿**（`NORTH_STAR_ITEM_REGISTRY`）—— 北極星「目指す姿」7項目それぞれの
  *    「類（甲/乙/丙）」と「出典」。**類の割り当ては [ADR 0216](../docs/decisions/0216-north-star-shipped-only-measurement.md)
@@ -18,12 +20,14 @@
  *    見つからなければ「文面が変わった可能性」として、どちらも推測で埋めずに一覧へ出す。
  * 3. **ADOPTER-SUPPLIED の集計**（`countAdopterSuppliedMarks`）—— ADR 0216 決定4-2
  *    「probe が『出荷物の外から持ち込んだもの』を、コード上の印で明示する規律」の実装。
- *    probe 本体（`north-star-default-probe.mjs`）のソースを渡すと、
+ *    probe 本体（`north-star-probe-runtime.mjs`）のソースを渡すと、
  *    `// ADOPTER-SUPPLIED(itemN): 配線|データ|判定` の形式のコメントを数える。
- *    **判定はしない**——件数と種別を数えるだけ。
- *
+ *    **判定はしない**——件数と種別を数えるだけ。段1・段2は同じ観測ロジックを使うので、
+ *    どちらの CLI もこの1ファイルを数えれば足りる。
  * 4. **Markdown の組み立て**（`buildSummaryMarkdown`）—— 上3つと、実際に走らせた観測の
  *    結果（CLI 側が組み立てた `itemResults`）を受け取り、Job Summary 用の Markdown を返す。
+ *    `stage`（見出しラベルと、その段固有の断り）を引数に取ることで、段1・段2が同じ
+ *    組み立てロジックを共有しつつ、名乗る内容だけを変える。
  *
  * ⛔ **このファイルは1つも `判定` をしない。** 差が出た/出なかった/観測に失敗した、という
  * 事実だけを文字列として運ぶ。「満たす/満たさない/半分」という語はここにもCLI側にも出さない
@@ -366,31 +370,39 @@ function buildAdopterSuppliedSection(tally) {
 }
 
 /**
- * `north-star-default-probe.mjs` の出力全体（Job Summary 向け Markdown）を組み立てる。
+ * `north-star-default-probe.mjs`（段1）と `north-star-tarball-probe.mjs`（段2）の出力全体
+ * （Job Summary 向け Markdown）を組み立てる。**両段が同じ関数を呼ぶ**——判定しない・門に
+ * しない・常に exit 0・`packages/postgres` を測らない、という共通の断りを複製しない。
+ *
+ * 段ごとに違うのは `stage`（見出しに出す段ラベルと、その段固有の測り方・限界を説明する
+ * 断り）と、任意の `extraSections` / `extraCaveats`（段2が tarball install の経路や、
+ * その段特有の「確かめていないこと」を足すために使う）だけである。
  *
  * @param {{
+ *   stage: { label: string, scopeNote: string },
  *   registryReport: RegistryReport,
  *   canonError: string | null,
  *   itemResults: ItemResult[],
  *   adopterSuppliedTally: Map<string, AdopterSuppliedCounts>,
  *   generatedAt: string,
+ *   extraSections?: string[],
+ *   extraCaveats?: string[],
  * }} input
  */
 export function buildSummaryMarkdown({
+  stage,
   registryReport,
   canonError,
   itemResults,
   adopterSuppliedTally,
   generatedAt,
+  extraSections = [],
+  extraCaveats = [],
 }) {
   const lines = [
-    "# 北極星7項目・既定差分の一覧（段1、Issue #387 / ADR 0216）",
+    `# 北極星7項目・既定差分の一覧（${stage.label}、Issue #387 / ADR 0216）`,
     "",
-    "⚠ **段1: ワークスペース解決で測っている。出荷物（tarball）で測ったとは名乗らない**" +
-      "（ADR 0216 決定7）。ワークスペース内から `@mnemora/core` / `@mnemora/testkit` の" +
-      "公開入口だけを import して組んだ `Runtime` に対する観測であり、`pnpm pack` で作った" +
-      "tarball を install した状態（段2、まだ実装していない）ではない。段1が通っても段2が" +
-      "落ちることはありうる。",
+    stage.scopeNote,
     "",
     "⛔ **これは判定ではない。** 7項目の充足判定は `docs/roadmap.md` が正であり続ける" +
       "（ADR 0216 決定8）。以下は「差が出た/出なかった/観測に失敗した」という事実だけを書く" +
@@ -411,6 +423,7 @@ export function buildSummaryMarkdown({
     buildObservationsSection(itemResults, registryReport),
     "",
     buildAdopterSuppliedSection(adopterSuppliedTally),
+    ...(extraSections.length > 0 ? ["", ...extraSections] : []),
     "",
     "## このスクリプトが確かめていないこと",
     "",
@@ -428,6 +441,7 @@ export function buildSummaryMarkdown({
     "- `@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding` は使っていない" +
       "——`DeterministicLLMProvider` / `DeterministicEmbeddingProvider` による配線・契約の" +
       "検査であり、想起の質については何も言わない（AGENTS.md「provider は4層ある」）。",
+    ...extraCaveats.map((caveat) => `- ${caveat}`),
   ];
   return lines.join("\n");
 }

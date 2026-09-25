@@ -1,0 +1,67 @@
+# 🔴🔴 ⛔ **この workflow は required status check ではない。** `.github/workflows/ci.yml`・
+# `.github/required-status-checks.json`・branch protection のどれにも触れていない
+# （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」節・ADR 0279 の対象外——required
+# check の一覧はこの workflow を持たない）。
+#
+# ## 何をするか（Issue #387 / ADR 0216 決定7「段2」）
+#
+# `scripts/north-star-tarball-probe.mjs` を走らせる。段1（ci.yml の build ジョブに相乗り、
+# ワークスペース内から @mnemora/* を import する）とは違い、この段は
+#
+#   PUBLISH_TARGETS を pnpm pack → tarball を os.tmpdir() 配下（repo の外）へ npm install
+#   → その中から段1と同じ probe ロジックを走らせる
+#
+# ところまでやる。ADR 0216 決定7「(イ) 毎 PR で tarball を作って install する」案は
+# 「費用が合わない」として却下され、代わりにこの手動起動専用ワークフローに置かれた。
+#
+# ⛔ **これは門ではない。常に exit 0。** 7項目の充足判定は `docs/roadmap.md` が正であり
+# 続ける（ADR 0216 決定8）——このワークフローは「差が出た/出なかった/観測に失敗した」と
+# いう事実の一覧を Job Summary に印字するだけである。
+#
+# ⛔ **`publish.yml` にもその引き金（release / workflow_dispatch の実 publish 経路）にも
+# 触れていない。** ここで作る tarball は観測のためだけに install するものであり、
+# どこにも upload しない（ADR 0216 決定7「publish.yml と publish の経路には触らない」）。
+#
+# ⚠ **on: は workflow_dispatch のみ。** push / pull_request では走らない——毎 PR には
+# 重すぎる（`pnpm pack` × PUBLISH_TARGETS 件、`npm install` の registry 依存）ため、
+# リリース前などに人が明示的に起こす運用を想定している。
+name: "北極星7項目・tarball install の一覧を印字する（段2。測るだけ。門にはしない。Issue #387 / ADR 0216 決定7）"
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: "pnpm pack → npm install → 段1と同じ probe ロジックを再実行する（段2）"
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      # ⛔ 実 API は使わない。probe 自体は DeterministicLLMProvider /
+      # DeterministicEmbeddingProvider を直接 new するため、この2つの環境変数を probe が
+      # 読むわけではないが、この workflow で何かのコード経路が provider 選択に
+      # フォールバックしたとしても実 API へ向かわないよう、明示しておく（AGENTS.md）。
+      MNEMORA_LLM: deterministic
+      MNEMORA_EMBEDDING: local
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: "workspace を build する（各パッケージの prepack が自分でも作り直すが、事前に揃えておく）"
+        run: pnpm run build
+
+      - name: "北極星7項目・tarball install の一覧を印字する（⛔ 門ではない。常に exit 0。Issue #387 / ADR 0216 決定7 段2）"
+        run: node scripts/north-star-tarball-probe.mjs >> "$GITHUB_STEP_SUMMARY"

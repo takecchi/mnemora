@@ -184,8 +184,16 @@ describe("buildSummaryMarkdown", () => {
     { item: 7, mode: "measured", fact: "観測7の事実。" },
   ];
 
+  /** 段1相当のダミー `stage`（このテストでは文面の逐語一致は見ない）。 */
+  const stage1 = {
+    label: "段1",
+    scopeNote:
+      "⚠ **段1: ワークスペース解決で測っている。出荷物（tarball）で測ったとは名乗らない**（テスト用の断り）。",
+  };
+
   it("冒頭の断りをすべて含む", () => {
     const markdown = buildSummaryMarkdown({
+      stage: stage1,
       registryReport: baseRegistryReport,
       canonError: null,
       itemResults: baseItemResults,
@@ -198,8 +206,56 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("`packages/postgres` は1バイトも測らない");
   });
 
+  it("stage.label が見出しに出る（段1と段2の出力を見分けられる）", () => {
+    const markdown = buildSummaryMarkdown({
+      stage: { label: "段2（tarball を install して測った）", scopeNote: "断り。" },
+      registryReport: baseRegistryReport,
+      canonError: null,
+      itemResults: baseItemResults,
+      adopterSuppliedTally: new Map(),
+      generatedAt: "2026-09-25T00:00:00.000Z",
+    });
+    expect(
+      markdown.startsWith(
+        "# 北極星7項目・既定差分の一覧（段2（tarball を install して測った）、Issue #387 / ADR 0216）",
+      ),
+    ).toBe(true);
+  });
+
+  it("extraSections を ADOPTER-SUPPLIED節の後・「確かめていないこと」の前に足す", () => {
+    const markdown = buildSummaryMarkdown({
+      stage: stage1,
+      registryReport: baseRegistryReport,
+      canonError: null,
+      itemResults: baseItemResults,
+      adopterSuppliedTally: new Map(),
+      generatedAt: "2026-09-25T00:00:00.000Z",
+      extraSections: ["## tarball install の経路\n\n観測した事実。"],
+    });
+    const adopterIndex = markdown.indexOf("## ADOPTER-SUPPLIED");
+    const extraIndex = markdown.indexOf("## tarball install の経路");
+    const caveatsIndex = markdown.indexOf("## このスクリプトが確かめていないこと");
+    expect(adopterIndex).toBeGreaterThan(-1);
+    expect(extraIndex).toBeGreaterThan(adopterIndex);
+    expect(caveatsIndex).toBeGreaterThan(extraIndex);
+  });
+
+  it("extraCaveats を「確かめていないこと」の箇条書きに足す", () => {
+    const markdown = buildSummaryMarkdown({
+      stage: stage1,
+      registryReport: baseRegistryReport,
+      canonError: null,
+      itemResults: baseItemResults,
+      adopterSuppliedTally: new Map(),
+      generatedAt: "2026-09-25T00:00:00.000Z",
+      extraCaveats: ["段2固有の確かめていないこと。"],
+    });
+    expect(markdown).toContain("- 段2固有の確かめていないこと。");
+  });
+
   it("観測セクション（項目ごとの事実）は判定語（満たす/満たさない/半分）を名乗らない", () => {
     const markdown = buildSummaryMarkdown({
+      stage: stage1,
       registryReport: baseRegistryReport,
       canonError: null,
       itemResults: baseItemResults,
@@ -223,6 +279,7 @@ describe("buildSummaryMarkdown", () => {
 
   it("項目ごとの観測結果（事実）をすべて含む", () => {
     const markdown = buildSummaryMarkdown({
+      stage: stage1,
       registryReport: baseRegistryReport,
       canonError: null,
       itemResults: baseItemResults,
@@ -236,6 +293,7 @@ describe("buildSummaryMarkdown", () => {
 
   it("正典を読めなかった場合（canonError）は、その旨を出し、未割り当て/文面相違の節は出さない", () => {
     const markdown = buildSummaryMarkdown({
+      stage: stage1,
       registryReport: baseRegistryReport,
       canonError: "docs/north-star.md が読めなかった: ENOENT",
       itemResults: baseItemResults,
@@ -253,6 +311,7 @@ describe("buildSummaryMarkdown", () => {
         : result,
     );
     const markdown = buildSummaryMarkdown({
+      stage: stage1,
       registryReport: baseRegistryReport,
       canonError: null,
       itemResults: itemResultsWithFailure,
@@ -272,6 +331,7 @@ describe("buildSummaryMarkdown", () => {
       ["item7", { 配線: 1, データ: 1, 判定: 0 }],
     ]);
     const markdown = buildSummaryMarkdown({
+      stage: stage1,
       registryReport: baseRegistryReport,
       canonError: null,
       itemResults: baseItemResults,
