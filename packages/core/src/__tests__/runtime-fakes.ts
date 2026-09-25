@@ -24,6 +24,7 @@ import type { VectorStore, VectorFilter, VectorHit } from "../interfaces/vector-
 import type { LexicalStore, LexicalFilter, LexicalHit } from "../interfaces/lexical-store.js";
 import type { NotIndexedReason } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
+import { isStrengthInRange, MAX_STRENGTH } from "../memory.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
@@ -41,13 +42,14 @@ import type {
   MemoryStore,
   PurgeExpiredEventsOptions,
   PurgeExpiredEventsResult,
+  ReinforceOptions,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
 } from "../interfaces/memory-store.js";
 import type { NewRecallRecord, RecallRecord, RecallScope, ScopeAggregate } from "../recall.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { OutboxJobRecord } from "../outbox.js";
-import { defaultDecayStrategy } from "../strategies/decay.js";
+import { defaultActivityDecayStrategy, defaultDecayStrategy } from "../strategies/decay.js";
 import { resolveIdempotentCreate } from "../idempotent-create.js";
 import type { IdempotentCreateResult } from "../idempotent-create.js";
 
@@ -257,6 +259,32 @@ export class FakeMemoryStore implements MemoryStore {
   /**
    * ADR 0054: 冪等キーの判定と挿入を1つの同期区間に閉じる
    * （`InMemoryMemoryStore.createMemoryIdempotent` と同じ形・同じ理由）。
+   *
+   * Issue #768（調査時、`packages/testkit` の `describeMemoryStoreConformance` へ
+   * この Fake を一時的に通して実測——その通し方自体は採らず、PR には載せていない。
+   * 見つけた食い違いのうち Fake 側のバグだった7件を、下の doc と同じ形で
+   * `fake-*.test.ts` の専用テストとして固定している）: ADR 0078 の値域検査
+   * （{@link isStrengthInRange}）を、`InMemoryMemoryStore` と同じ位置（冪等衝突の判定
+   * より前／何も書く前）に持つ。既存の `packages/core` テストで無効な `strength` を
+   * 使うものは無い（実測: 全テストファイルを通して実行して確認）。
+   *
+   * ⚠ **ADR 0140 の `ContestedWithoutCompanionError` 相当のガードと、ADR 0125 の
+   * `halfLifeHours` 値域検査は、意図して持たない。**
+   *
+   * - ADR 0140 決定2が明記するとおり、`FakeMemoryStore` はこのガードの対象外
+   *   ——`packages/core` 自身の単体テスト（`recall-pipeline.test.ts` 等）が ADR 0136
+   *   の読み取り側の防御（対向未解決の `contested` は単位を組まない）を検査するには、
+   *   まさにこのガードが塞ごうとする壊れた状態（`contestedWithId` 無しの `contested`）
+   *   を `FakeMemoryStore` 経由で構成できる必要がある。ガードを足すとそれらの
+   *   回帰テストが構造的に書けなくなる（Issue #768 の調査で実測: 19件の既存テストが
+   *   赤くなった。`recall-pipeline.test.ts` ×12 など。下の `halfLifeHours` 側の2件とは
+   *   別枠——合わせて21件が Issue #768 のコメントに載っている）。詳細は ADR 0140
+   *   「決定2」「開いている穴1」「これが覆るとしたら」。
+   * - ADR 0125「引き受ける負債」節が同じ形で明記するとおり、`FakeMemoryStore` には
+   *   `halfLifeHours` の値域検査も元から無い。`recall-pipeline.test.ts`
+   *   （score_not_comparable の三分割、ADR 0153）が `halfLifeHours: 0` の「壊れた」
+   *   Memory を意図的に作り、scoring 側の NaN 処理の防御を検査している——検査を足すと
+   *   この2件の回帰テストが書けなくなる（Issue #768 の調査で実測）。
    */
   private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
     const idemKey = this.backing.extractionKey(
@@ -286,6 +314,15 @@ export class FakeMemoryStore implements MemoryStore {
       if (input.contestedWithId && !this.backing.memories.has(input.contestedWithId)) {
         throw new Error(
           `FakeMemoryStore: contested-with memory not found: ${input.contestedWithId}`,
+        );
+      }
+      // 値域（ADR 0078）: `InMemoryMemoryStore.createMemoryIdempotent` と同じ位置・
+      // 同じ理由——ここで放置すると「本番（Postgres の CHECK 制約）では落ちる書き込みが
+      // 手元では黙って成功する」。`halfLifeHours`（ADR 0125）を検査しない理由は、この
+      // メソッドの doc コメント参照。
+      if (!isStrengthInRange(input.strength)) {
+        throw new Error(
+          `FakeMemoryStore: strength out of range (0, ${MAX_STRENGTH}]: ${input.strength}`,
         );
       }
       const now = new Date();
@@ -473,6 +510,8 @@ export class FakeMemoryStore implements MemoryStore {
     status: MemoryStatus,
     opts?: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
   ): Promise<Memory> {
+    // ⚠ Issue #768: ADR 0140 の `status: 'contested'` ガードは、この Fake には意図して
+    // 持たない（`createMemoryIdempotent` の doc コメント参照——ADR 0140 決定2）。
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -508,6 +547,7 @@ export class FakeMemoryStore implements MemoryStore {
     opts: { supersededById?: MemoryId; expectedStatus?: MemoryStatus },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    // ⚠ Issue #768: updateStatus と同じ理由——ADR 0140 のガードは意図して持たない。
     this.beforeUpdateStatus?.(id);
     const memory = await this.get(ctx, id);
     if (!memory) {
@@ -574,6 +614,9 @@ export class FakeMemoryStore implements MemoryStore {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${target.id}`);
       }
     }
+    // ⚠ Issue #768: `InMemoryMemoryStore.supersedeWithNewMemories` は news 側にも
+    // ADR 0140 の制約を課すが、この Fake は意図して課さない（`createMemoryIdempotent`
+    // の doc コメント参照）。
 
     // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
     const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
@@ -690,7 +733,7 @@ export class FakeMemoryStore implements MemoryStore {
    * ——狭義の `<`（同じ `at` は no-op）で `lastReinforcedAt`/`decayFloorAt` を
    * 同じ条件でまとめて動かす。古い `at` は例外にせず、no-op のまま現在の行を返す。
    */
-  async reinforce(ctx: Ctx, id: MemoryId, at: Date): Promise<Memory> {
+  async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
     const memory = await this.get(ctx, id);
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
@@ -709,6 +752,21 @@ export class FakeMemoryStore implements MemoryStore {
       strength: memory.strength,
       halfLifeHours: memory.halfLifeHours,
     });
+    // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16
+    // （Issue #768 で実測して足した）: `opts.nowSeq` が渡され、かつこの Memory が
+    // `halfLifeRecalls` を持つときに限り、活動時計側の起点・床も同じ強化イベントとして
+    // 進める。`InMemoryMemoryStore.reinforce`/`PostgresMemoryStore.reinforce` と同じ分岐
+    // ——壁時計側の「等しい/古い at は no-op」の分岐（上）を通り抜けたあとでだけ動かす
+    // ことで、Issue #730 の「同じ at の2回目は活動時計側も動かさない」を1バイトも
+    // 変えずに保つ。
+    if (opts?.nowSeq !== undefined && memory.halfLifeRecalls != null) {
+      memory.decayBaseSeq = opts.nowSeq;
+      memory.decayFloorSeq = defaultActivityDecayStrategy.floorAt({
+        baseSeq: opts.nowSeq,
+        strength: memory.strength,
+        halfLifeRecalls: memory.halfLifeRecalls,
+      });
+    }
     memory.updatedAt = new Date();
     return memory;
   }
@@ -768,7 +826,15 @@ export class FakeMemoryStore implements MemoryStore {
 
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== ctx.tenantId) continue;
-      if (scope.subjectId !== undefined && memory.subjectId !== scope.subjectId) continue;
+      // Issue #608 項目③(b) / ADR 0286（Issue #768 で実測して足した）:
+      // `InMemoryMemoryStore.aggregateScope`/`PostgresMemoryStore.aggregateScope` と
+      // 同じ意味論——`includeSubjectless: true` のときだけ `subjectId === null`
+      // （主題なし）も scope 内に含める。
+      const subjectMatches =
+        scope.subjectId === undefined ||
+        memory.subjectId === scope.subjectId ||
+        (scope.includeSubjectless === true && memory.subjectId === null);
+      if (!subjectMatches) continue;
       // Issue #152/#153（ADR 0312）: `attributes` も `subjectId` と同じくスコープの外側の
       // 境界——落ちた分は `filtered*` のどの列にも数えず、`totalInScope` にも入れない
       // （`recall.ts` の `ScopeAggregate` doc「2026-09 追記」参照）。
@@ -1002,16 +1068,39 @@ export class FakeMemoryStore implements MemoryStore {
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
     const nowMs = opts.now.getTime();
+    const clock = opts.clock ?? "wall";
+    // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
+    // （Issue #768 で実測して足した）: `opts.clock` の分岐を
+    // `InMemoryMemoryStore.archiveDecayed`/`PostgresMemoryStore.archiveDecayed` と
+    // 同じ形に揃える——境界の非対称（ゲートは狭義 `>`、掃引は境界を含む `<=`）を
+    // 1バイトも変えずに写す。`'either'` は AND（両方の軸で沈んでいるものだけ掃く）。
+    const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
+    const passesActivity = (m: Memory): boolean => {
+      if (opts.nowSeq === undefined) {
+        throw new Error(
+          `FakeMemoryStore.archiveDecayed: opts.nowSeq is required when clock is "${clock}"`,
+        );
+      }
+      const decayFloorSeq = m.decayFloorSeq ?? null;
+      return decayFloorSeq !== null && decayFloorSeq <= opts.nowSeq;
+    };
+    const passesClock = (m: Memory): boolean => {
+      if (clock === "wall") return passesWall(m);
+      if (clock === "activity") return passesActivity(m);
+      return passesWall(m) && passesActivity(m);
+    };
+    // ⭐ ADR 0165 決めたこと8: 並べる軸は掃く軸に合わせる（`clock: 'activity'` では
+    // `decayFloorSeq` 昇順）。`InMemoryMemoryStore` と同じ形——返り値 `archived` の
+    // 並び順の契約は変えない（下で `decayFloorAt` 昇順に並べ直す）。
+    const byId = (a: Memory, b: Memory): number => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+    const selectionOrder = (a: Memory, b: Memory): number =>
+      clock === "activity"
+        ? (a.decayFloorSeq ?? 0) - (b.decayFloorSeq ?? 0) || byId(a, b)
+        : a.decayFloorAt.getTime() - b.decayFloorAt.getTime() || byId(a, b);
+
     const targets = [...this.backing.memories.values()]
-      .filter(
-        (m) =>
-          m.tenantId === ctx.tenantId && m.status === "active" && m.decayFloorAt.getTime() <= nowMs,
-      )
-      .sort(
-        (a, b) =>
-          a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
-          (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
-      )
+      .filter((m) => m.tenantId === ctx.tenantId && m.status === "active" && passesClock(m))
+      .sort(selectionOrder)
       .slice(0, Math.max(0, opts.limit));
 
     const archived: Array<{ memoryId: MemoryId; decayFloorAt: Date }> = [];
@@ -1031,6 +1120,11 @@ export class FakeMemoryStore implements MemoryStore {
       this.backing.events.push(storedEvent);
       archived.push({ memoryId: memory.id, decayFloorAt: memory.decayFloorAt });
     }
+    archived.sort(
+      (a, b) =>
+        a.decayFloorAt.getTime() - b.decayFloorAt.getTime() ||
+        (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
+    );
     return { archived, reachedLimit: archived.length === opts.limit };
   }
 
