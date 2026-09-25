@@ -420,3 +420,157 @@ claim key 派生の system プロンプト・カセット鍵が動く**——「
   （語彙ヒントの流用という同型の副作用を predicate 側で先に発見した記録）
 - [ADR 0287](./0287-extraction-subject-candidates-caller-supplied.md)（`subjectCandidates`
   の導入、Issue #608 項目②(b)）
+
+---
+
+## 追記 2026-09-26: 負債2（`answer` 経路での /14・/4 実測）への回答（本文は書き換えていない）
+
+> **クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)
+> ——投稿者名は担い手とオーナーを区別しない）。**この追記に出てくる判断はすべて
+> 「委譲された担い手（クローン miku）の判断（オーナーではない）」である。**
+> `packages/core` の既定・`examples/chat` の既定はどちらも1バイトも変えていない
+> （下記「足したもの」参照）。**この opt-in を既定にするかどうかの判断はここでは
+> 行わない**——その判断はオーナー領分として残す。
+
+### 足したもの
+
+負債2が指摘した「`answer` harness がケースへ `subjectCandidates`（相当）を渡す口を
+持たない」を埋めた。**既定を1バイトも変えない形**で:
+
+- `examples/chat/src/answer-case.ts`: `AnswerCase.knownSubjects?: string[]`
+  （任意項目）。省略すれば従来どおり。
+- `examples/chat/src/answer-claim-key-options.ts`: `applyCaseKnownSubjects(claimKeyOptions,
+  condition, caseKnownSubjects)`——`condition === "known-subjects"` かつケースが
+  `knownSubjects` を持つときだけ合流する純関数。
+- `examples/chat/src/scripts/record-answer-claim-key.ts`: `MNEMORA_RECORD_CONDITION`
+  に第3の値 `"known-subjects"` を追加（ADR 0329 が足した
+  `"known-predicates-from-store"` と同型）。省略・`"baseline"` は従来どおり。
+- `answer-case-set.dev.ts`/`.eval.ts`: 会話に本人以外の第三者が出てくる4件
+  （14件中）にだけ `knownSubjects` を埋めた。
+
+| ケース | 集合 | 第三者 | `knownSubjects` | 選定理由 |
+|---|---|---|---|---|
+| `other-person-birthday` | dev | 妻 | `["user", "妻"]` | 会話本文の呼び方そのまま |
+| `other-person-favorite-food` | eval | 息子 | `["user", "息子"]` | 同上 |
+| `eval-misattribution-order-swapped` | eval | 同僚の佐藤さん | `["user", "佐藤さん"]` | 会話中の呼び方（「佐藤さん」）に揃えた。関係名詞「同僚」ではなく固有の呼称を選んだ——他5件の候補と違い、この会話には名前が明示されているため |
+| `eval-inferred-habit-not-attributed-to-user` | eval | 友人の鈴木さん | `["user", "鈴木さん"]` | 同上（「鈴木さん」） |
+
+残り10件（`pref-*`/`schedule-change-*`/`negation-*`/`other-period-*`/`unknown-*`）は
+本人以外の第三者が会話に登場しないため、`knownSubjects` を持たない
+（`answer-case.test.ts` の歯で固定——14件中4件だけが持つことを検査する）。
+
+⚠ **これは上限（オラクル）測定である**——正解の第三者名を作業者が手で選んで渡した。
+`answer-claim-key-options.ts` 冒頭の docstring が `knownPredicates` について述べている
+懸念（「作業者が手で語彙を選ぶと、その語彙選択自体が正解を暗に漏らしうる」）が、
+この4件の選定にもそのまま当てはまる。実運用で mnemora がこの正解を知っている保証は
+無い（負債1・負債2がすでに明記している限定）。
+
+**決定論のユニットテスト**（`MNEMORA_LLM=deterministic` 明示、ファイル名指定で実行）:
+
+```
+MNEMORA_LLM=deterministic pnpm --filter example-chat exec vitest run \
+  src/__tests__/answer-claim-key-options.test.ts src/__tests__/answer-case.test.ts
+```
+
+37件全通過（既存30件 + `applyCaseKnownSubjects` 新規5件 + `knownSubjects` の
+ケース一覧固定3件）。typecheck（`pnpm --filter example-chat run typecheck`）・
+eslint（変更したファイルのみ）・prettier（`--check`）もすべてクリーン。
+
+### 実測: `MNEMORA_RECORD_CONDITION=baseline`（off、"detect"、語彙ヒント無し）と `known-subjects`（on）を3回ずつ、1回ごとに対で実行
+
+【実測】2026-09-26、`gpt-4o-mini`。dev6+eval8=14ケース全件、`initdb`（PostgreSQL 17、
+pgvector・btree_gin・pgcrypto、専用ポート・作業ツリー外）で立てた専用インスタンス。
+種カセットは常に `answer.order-legend.json`（ADR 0326/0329 と同じ）。
+新カセット6本（`examples/chat/cassettes/answer.claim-key.known-subjects-{off,on}-{1,2,3}.json`）
+へ記録し、既存カセット（`retrieval.json`/`compare.json`/`answer.order-legend.json`/
+`answer-time-weighting.order-legend.json`・#748/ADR 0326/0329 の
+`answer.claim-key*.json`）は1バイトも触っていない（`git status --porcelain` で
+新規ファイルのみであることを確認）。
+
+**基準は "detect"**（`knownPredicates`/`knownPredicatesFromStore`/`knownSubjects` の
+いずれも渡さない、ADR 0326 決定1の "detect"）。off/on は同じ順で対にして実行した
+（off-1, on-1, off-2, on-2, off-3, on-3）。
+
+| run | 条件 | predicate一致/4 | contested/4 | 誤検出/14 | 誤検出したケース | 第三者subject誤帰属/4 |
+|---|---|---|---|---|---|---|
+| off-1 | baseline | 0/4 | 0/4 | 1/14 | other-period-city-this-year | 0/4 |
+| on-1 | known-subjects | 1/4（negation-moved-job） | 1/4（同左） | 0/14 | （無し） | 0/4 |
+| off-2 | baseline | 1/4（schedule-change-meeting-day） | 1/4（同左） | 1/14 | other-period-city-this-year | 0/4 |
+| on-2 | known-subjects | 0/4 | 0/4 | 1/14 | other-period-city-this-year | 0/4 |
+| off-3 | baseline | 0/4 | 0/4 | 1/14 | other-period-city-this-year | 0/4 |
+| on-3 | known-subjects | 0/4 | 0/4 | 0/14 | （無し） | 0/4 |
+
+**中心となる観測: 第三者 subject の誤帰属は、off・on どちらの3回でも一度も
+起きなかった（4件×3回=12機会中0件、両条件とも）。** `other-person-birthday` の
+「妻」→`user's_wife`/`妻`（off/on とも正しい第三者の subject）、
+`other-person-favorite-food` の「息子」→`son`/`息子`、
+`eval-misattribution-order-swapped` の「佐藤さん」→`sato`/`佐藤さん`、
+`eval-inferred-habit-not-attributed-to-user` の「鈴木さん」→`friend_suzuki`/`鈴木さん`
+——6回すべてで、baseline（語彙ヒント無し）の時点ですでに `"user"` へ落ちなかった。
+⟹ **この14ケース・この3回という範囲では、`knownSubjects` が「直す」べき誤帰属が
+そもそも観測されなかった**（decision4 が効くかどうかを判定できる対照が無い）。
+
+**なぜ ADR 0324/決定2 の実測と食い違うか（差の構造、確かめた範囲での説明）**:
+ADR 0324 の real-fixture 実測・本 ADR 決定2 の ON-ceiling 実測は、いずれも
+「本人の事実」と「第三者の distractor」を**別々の `observe()` 呼び出し**（別バッチ）
+として与えていた——`deriveClaimKeys` が比較材料を持たない、という決定1「型A」が
+成り立つ設定だった。**この4ケースの会話は、本人の事実と第三者の事実が同じ1ターン
+（例: 「わたしの誕生日は4月3日です。妻の誕生日は9月10日です。」）に同居しており、
+`ingestConversation` は1ターン=1回の `observe()` として送る**（`mnemora-path.ts`）
+——`extractCandidates` が同じ観測から両方の候補を抽出し、`deriveClaimKeys` は
+**同じバッチ**でこの2候補を受け取る（`onObserved` の診断ログで実際に
+`contestedDetection` 配列が同じ turn で2要素になっていることを確認した）。
+⟹ **型Aの前提（1回の `deriveClaimKeys` 呼び出しは比較材料を持たない）が、この4ケースでは
+成り立っていない**——本人と第三者の発話が同じバッチに同居するため、語彙ヒント無しでも
+モデルは両者を対比できた。**これは推測ではなく、決定1の型Aの記述とこの実測結果が
+構造的に整合することの確認である**が、①他のケース構成（本人と第三者が別ターン）でも
+同じ結果になるか、②サンプル数を増やしても0/12のままか、は確かめていない
+（下記「確かめていないこと」参照）。
+
+**predicate一致/4・contested/4・誤検出/14 は、off/on の間で明確な差が見えなかった**
+（off: 0,1,0 / on: 1,0,0。誤検出 off: 1,1,1 / on: 0,1,0）——ADR 0326/0329 が
+記録した揺れの構造（(c) predicate がターンをまたぐと不安定、(d)
+`other-period-city-this-year` が `validFrom`/`validUntil` 無しで構造的に誤検出になる）
+がそのまま観測され、`knownSubjects` はこのどちらにも作用しない（`knownSubjects` は
+`subject` だけを対象にする語彙ヒントであり、(c)(d) は `predicate`/有効期間の問題で
+`subject` とは無関係——決定1の分類どおり）。**n=3という小さい回数のため、この
+「差が見えない」を「差が無い」の証明として読まないこと**（下記参照）。
+
+**呼び出し回数・費用**（`gpt-4o-mini`、`examples/chat/src/usage-meter.ts` と同じ単価）:
+
+| run | chat 呼び出し | 費用（概算） |
+|---|---|---|
+| off-1 | 26 | $0.001522 |
+| on-1 | 35 | $0.002249 |
+| off-2 | 26 | $0.001518 |
+| on-2 | 35 | $0.002245 |
+| off-3 | 26 | $0.001519 |
+| on-3 | 35 | $0.002242 |
+| **合計** | **chat 183 / embedding 0** | **$0.011295**（費用上限 $0.30 の約3.8%） |
+
+見積もり（実行前）: ADR 0329 の実測単価（baseline $0.0015/run、新案 $0.0028/run）を
+基準に、6回で $0.02 未満と見積もり、上限 $0.30 を大きく下回ると判断してから実行した
+——実測はほぼ一致した（$0.0113）。1回実行するたびに費用を確認し、上限に近づく兆候は
+無かった。
+
+### 確かめていないこと（この追記が新たに残す分）
+
+- ⛔ **`knownSubjects` が実際に誤帰属を減らす効果**——本人と第三者が**別ターン**
+  （型Aが成り立つ構成）の `answer` ケースが現在の14ケースに存在しないため、
+  この追記の実測範囲では確認も反証もできていない。決定2の ON-ceiling 実測
+  （`packages/core` を直接 import した使い捨てスクリプト、1発話=1バッチを
+  意図的に強制した設定）でのみ効果を確認済み——`answer` harness を経由した確認は
+  まだ無い。
+- ⛔ **n=3という回数で「差が無い」と言えるか**——off/on とも12機会中0件の誤帰属
+  だったのは、効果が無いからか、この14ケースの構成（本人と第三者が同バッチ）では
+  そもそも誤帰属が起きにくいからかを、この実測だけでは切り分けられない。
+- ⛔ **本人と第三者を別ターンに分けたケースを新設した場合の効果**——上記の差の
+  構造説明が正しければ、型Aが成り立つケース（別ターン）を `answer-case-set.*.ts`
+  に足せば、決定2と同じ効果が観測できるはずである。**その新設は本追記では行って
+  いない**（既存14ケースを変えない、というこの追記の範囲を超える）。
+- ⛔ **predicate一致/4・誤検出/14 の off/on 差**——両条件とも3回中の揺れの範囲に
+  収まっており、6回という回数でこの揺れが `knownSubjects` の副作用か偶然かを
+  判定できない（ADR 0329「負債1」がpredicate側で28〜45回という近い回数でも
+  同じ限界を報告している）。
+- ⛔ **この opt-in を既定にするかどうか**——本追記は判断しない（冒頭の注記）。

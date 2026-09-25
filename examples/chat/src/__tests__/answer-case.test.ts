@@ -179,3 +179,48 @@ describe.each([
     }
   });
 });
+
+/**
+ * ADR 0334 負債2（Issue #372負債6の続き）: `AnswerCase.knownSubjects`（任意項目）を
+ * 持つケースを固定する。**会話に本人以外の第三者が出てくる4件だけ**が持ち、残り10件は
+ * このフィールド自体を持たない（`knownSubjects` を省略すれば従来どおり）ことを歯にする。
+ *
+ * 値は会話本文中の呼び方（relation noun か、会話中で使われている名前）に揃えてある
+ * ——`"user"`（本人）と、その第三者を指す1語を候補として渡す（ADR 0334 決定2の
+ * ON-ceiling 実測が使った形と同型）。これは上限（オラクル）測定用の正解ラベルであり、
+ * 実運用で mnemora がこの正解を知っている保証は無い（`AnswerCase.knownSubjects`
+ * docstring参照）。
+ */
+describe("AnswerCase.knownSubjects（ADR 0334 負債2、任意項目）", () => {
+  const EXPECTED_KNOWN_SUBJECTS: Record<string, string[]> = {
+    "other-person-birthday": ["user", "妻"],
+    "other-person-favorite-food": ["user", "息子"],
+    "eval-misattribution-order-swapped": ["user", "佐藤さん"],
+    "eval-inferred-habit-not-attributed-to-user": ["user", "鈴木さん"],
+  };
+
+  const allCases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
+
+  it("14件中4件だけが knownSubjects を持つ", () => {
+    const withKnownSubjects = allCases.filter((c) => c.knownSubjects !== undefined);
+    expect(withKnownSubjects.map((c) => c.id).sort()).toEqual(
+      Object.keys(EXPECTED_KNOWN_SUBJECTS).sort(),
+    );
+  });
+
+  it("knownSubjects を持つケースは、期待した候補一覧と完全に一致する", () => {
+    for (const [id, expected] of Object.entries(EXPECTED_KNOWN_SUBJECTS)) {
+      const found = allCases.find((c) => c.id === id);
+      expect(found).toBeDefined();
+      expect(found?.knownSubjects).toEqual(expected);
+    }
+  });
+
+  it("残り10件（本人以外の第三者が出てこないケース）は knownSubjects キー自体を持たない", () => {
+    const withoutKnownSubjects = allCases.filter((c) => !(c.id in EXPECTED_KNOWN_SUBJECTS));
+    expect(withoutKnownSubjects.length).toBe(allCases.length - 4);
+    for (const c of withoutKnownSubjects) {
+      expect("knownSubjects" in c).toBe(false);
+    }
+  });
+});

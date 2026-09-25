@@ -101,6 +101,9 @@ export const ANSWER_CASE_SET_DEV: AnswerCase[] = [
         "第0ターンで『わたしの誕生日は4月3日、妻の誕生日は9月10日』と2人分の事実が並んでいる。問いは妻の側だけを指しており、本人の4月3日は別人（reject）の値である。",
     },
     tuningUse: "development",
+    // ADR 0334 負債2: 本人以外の第三者（妻）が出てくるケース。正解の claim key
+    // subject 候補（上限＝オラクル測定用、`AnswerCase.knownSubjects` docstring参照）。
+    knownSubjects: ["user", "妻"],
   },
   {
     id: "other-period-city-this-year",

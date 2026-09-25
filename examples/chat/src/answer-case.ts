@@ -65,6 +65,22 @@ export interface AnswerCase {
    * `deterministic: false` と「測っていない」を区別した）。
    */
   tuningUse: "development" | "held-out";
+  /**
+   * ADR 0334 負債2（Issue #372負債6の続き）: この会話に本人以外の第三者が出てくる
+   * ケースにだけ、その正解の claim key `subject` 候補（例: `["user", "妻"]`）を
+   * 任意で持たせる。**省略すれば、これまでと1バイトも挙動が変わらない**——この
+   * フィールドを読むのは `record-answer-claim-key.ts` が
+   * `MNEMORA_RECORD_CONDITION=known-subjects` を明示したときだけであり
+   * （`answer-claim-key-options.ts` の `applyCaseKnownSubjects`）、それ以外の経路
+   * （`cli.ts`/`answer-bench.ts` の既存呼び出し）はこのフィールドを一切読まない。
+   *
+   * ⚠ **これは上限（オラクル）測定用である。** 正解の第三者名を作業者が手で選んで
+   * 埋めている——`answer-claim-key-options.ts` の `resolveAnswerClaimKeyOptions`
+   * docstring が `knownPredicates` について述べている懸念（作業者が手で語彙を選ぶと
+   * 正解が漏れる）が、このフィールドにもそのまま当てはまる。実運用で mnemora が
+   * 呼び出し時にこの正解を知っている保証は無い（ADR 0334 負債1・負債2）。
+   */
+  knownSubjects?: string[];
 }
 
 /**
