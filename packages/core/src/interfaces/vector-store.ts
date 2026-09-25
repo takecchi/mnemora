@@ -170,7 +170,7 @@ export interface VectorFilter {
   attributes?: Attributes;
   /**
    * **OR の集合絞り込み**（Issue #201 PR-B、
-   * [ADR 0321](../../../../docs/decisions/0321-taxonomy-recall-filter.md)）。
+   * [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
    * `RecallScope.labels`/`RecallQuery.labels` の doc コメント参照。渡した名前のうち
    * 1つでも `tags` に含まれれば通す（配列の重なり、postgres 実装は `&&` 演算子）。
    * **未指定は no-op**（絞り込み無し）。渡される名前は既に「現在の `taxonomy_mode` で

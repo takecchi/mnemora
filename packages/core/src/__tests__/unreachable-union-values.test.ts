@@ -42,7 +42,7 @@ import { describe, expect, it } from "vitest";
  * 主張していたこと（「生成されない」）は、値そのものが型に無くなったことでより強く
  * 成立している**（型検査そのものが、これらの値を持つオブジェクトリテラルを拒む）。
  *
- * **2026-09-25 追記（Issue #201 PR-B、[ADR 0321](../../../../docs/decisions/0321-taxonomy-recall-filter.md)）**:
+ * **2026-09-25 追記（Issue #201 PR-B、[ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）**:
  * `condition: "taxonomy"`（`FilteredOmission`）と `axis: "taxonomy"`（`GroupCount`）を
  * 棚卸しの対象から外した——`RecallQuery.labels`/`taxonomyGroups` の実装により、
  * どちらも実際に生成されるようになったため（`kind: "purged"` を外したときと同じ、

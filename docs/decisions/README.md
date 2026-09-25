@@ -347,5 +347,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0320](./0320-claim-key-field-implementation.md) | 主張キー（(B) 第1段）の実装 — `{subject, predicate}` を2列+部分索引で持ち、opt-inの別呼び出しで埋める（Issue #371） | 採用 (2026-09) |
 | [0321](./0321-correction-candidate-domain-implementation.md) | ADR 0291 §7 残件1〜4 を実装する — 訂正候補探索に30件のセルを追加し、margin/intrusionMargin を足し、CI ジョブを配線する | 採用 (2026-09) |
 | [0322](./0322-local-embedding-synthetic-noise-false-positive-counterfactual.md) | `local` 埋め込み5+2群に合成ノイズを注入し、ADR 0316 判定の偽陽性率を反実仮想として測る — Issue #109（ADR 0316「引き受けた負債」1番） | 採用 (2026-09) |
+| [0323](./0323-taxonomy-recall-filter.md) | taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

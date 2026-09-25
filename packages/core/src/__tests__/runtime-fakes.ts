@@ -112,7 +112,7 @@ class FakeBackingStore {
    */
   activitySeq = new Map<string, number>();
   /**
-   * Issue #201 PR-B（[ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `labels` 相当。`packages/testkit` の `InMemoryMemoryStore` と同じ key 形式
    * （`${tenantId}::${name}`）——`recall-taxonomy-filter.test.ts` が `listLabels`/
    * `registerLabel` 経由でここを操作する。
@@ -333,7 +333,7 @@ export class FakeMemoryStore implements MemoryStore {
       if (input.sourceObservationId) {
         this.backing.extractionIndex.set(idemKey, memory.id);
       }
-      // Issue #201 PR-B（ADR 0321）: `packages/testkit` の `InMemoryMemoryStore` と同じ
+      // Issue #201 PR-B（ADR 0323）: `packages/testkit` の `InMemoryMemoryStore` と同じ
       // 契機——新しい行を実際に作ったときだけ `tags` から `proposed` ラベルを作る。
       this.upsertProposedLabels(ctx, memory.tags);
       return memory;
@@ -345,7 +345,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 PR-B（[ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `packages/testkit` の `InMemoryMemoryStore.upsertProposedLabels` と同じ意味論。
    */
   private upsertProposedLabels(ctx: Ctx, tags: readonly string[]): void {
@@ -369,7 +369,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 PR-B（ADR 0321）: `listLabels?`（`InMemoryMemoryStore.listLabels` と同じ契約）。
+   * Issue #201 PR-B（ADR 0323）: `listLabels?`（`InMemoryMemoryStore.listLabels` と同じ契約）。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
@@ -384,7 +384,7 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 PR-B（ADR 0321）: `registerLabel?`（`InMemoryMemoryStore.registerLabel` と
+   * Issue #201 PR-B（ADR 0323）: `registerLabel?`（`InMemoryMemoryStore.registerLabel` と
    * 同じ契約）。
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
@@ -815,7 +815,7 @@ export class FakeMemoryStore implements MemoryStore {
           continue;
         }
       }
-      // Issue #201 PR-B（ADR 0321）: taxonomy ゲート。`attributes`（上）とは違い
+      // Issue #201 PR-B（ADR 0323）: taxonomy ゲート。`attributes`（上）とは違い
       // `period`/`validity` と同じ側——`totalInScope` から除かれ、`filtered*` に数えられる。
       if (scope.labels !== undefined) {
         const labels = scope.labels;
@@ -851,7 +851,7 @@ export class FakeMemoryStore implements MemoryStore {
       }),
     );
 
-    // Issue #201 PR-B（ADR 0321「決定5」）: `packages/testkit` の `InMemoryMemoryStore` と
+    // Issue #201 PR-B（ADR 0323「決定5」）: `packages/testkit` の `InMemoryMemoryStore` と
     // 同じ意味論。
     if (scope.taxonomyGroupCandidates !== undefined) {
       const candidates = scope.taxonomyGroupCandidates;
@@ -1772,7 +1772,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   private decayClockByTenant = new Map<string, DecayClock>();
   private halfLifeRecallsByTenant = new Map<string, number>();
   /**
-   * Issue #201 PR-B（[ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
+   * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `tenant_settings.taxonomy_mode` 相当。`decayClockByTenant` と同じ形——
    * `FakeMemoryStore` の `labels`（`FakeBackingStore` 側）とは違い、これを読むのは
    * `TenantSettingsStore` だけなので backing の共有は要らない。
@@ -1840,7 +1840,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * Issue #201 PR-B（ADR 0321）: `getTaxonomyMode?`（`InMemoryTenantSettingsStore` と
+   * Issue #201 PR-B（ADR 0323）: `getTaxonomyMode?`（`InMemoryTenantSettingsStore` と
    * 同じ契約）。未設定のテナントは `DEFAULT_TAXONOMY_MODE`（`'open'`）。
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {
@@ -1848,7 +1848,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * Issue #201 PR-B（ADR 0321）: `setTaxonomyMode?`（`InMemoryTenantSettingsStore` と
+   * Issue #201 PR-B（ADR 0323）: `setTaxonomyMode?`（`InMemoryTenantSettingsStore` と
    * 同じ契約）。
    */
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {

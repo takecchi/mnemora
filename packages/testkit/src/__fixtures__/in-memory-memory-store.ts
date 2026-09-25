@@ -911,7 +911,7 @@ export class InMemoryMemoryStore implements MemoryStore {
           continue;
         }
       }
-      // Issue #201 PR-B（[ADR 0321](../../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
+      // Issue #201 PR-B（[ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
       // taxonomy ゲート。`attributes`（上）とは違い `period`/`validity` と同じ側
       // ——`totalInScope` から除かれ、かつ `filtered*` に数えられる
       // （`PostgresMemoryStore.aggregateScope` の `has_qualifying_label` と同じ意味論）。
@@ -950,7 +950,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       }),
     );
 
-    // Issue #201 PR-B（ADR 0321「決定5」）: `scope.taxonomyGroupCandidates` が渡された
+    // Issue #201 PR-B（ADR 0323「決定5」）: `scope.taxonomyGroupCandidates` が渡された
     // ときだけ `axis: 'taxonomy'` の群を足す——`PostgresMemoryStore.aggregateScope` の
     // `taxonomy_label_groups`/`taxonomy_residual_count` と同じ意味論（`inScopeMemories` は
     // 既に `has_qualifying_label` を含む最終スコープなので、`hasQualifyingLabel`

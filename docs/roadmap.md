@@ -172,7 +172,7 @@ Phase 1 で入れた土台が、後続フェーズをどう安くしているか
 recall 側でラベルによる絞り込みを行う経路（表の見立てが指す「Phase 2 は『フィルタへの
 参加可否』の切り替えを足すだけで済む」の後半）は依然未実装**（PR-B、ADR 0318 参照）。
 
-**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）:
+**⚠ 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](./decisions/0323-taxonomy-recall-filter.md)）:
 上の「recall 側でラベルによる絞り込みを行う経路は依然未実装」は、本追記の時点で古い。**
 `RecallQuery.labels?`/`taxonomyGroups?` を実装し、`taxonomy_mode`（open/strict）が
 実際に絞り込みの参加資格を変えるようになった。**digest 帯そのもの（第2階）は引き続き
@@ -586,7 +586,7 @@ Issue #200（北極星「聞かれていないことを、自分から思い出�
 
 **⚠4 項目6 にも、段3.5 を勘定に入れていない箇所が1つある（⚠3 と同じ形）** 【実測 2026-09-17】。上の根拠は「`Omission.kind` 11種すべてに本番の生成箇所が在る」という **kind 単位の網羅性**であり、**これは段3.5 が無くても真である**（`stage_skipped` / `over_limit` は段2側にも独立した生成箇所を持つ——`recall-runtime.ts:535` / `:549` / `:833`）。⛔ **だが `omitted` の契約は kind の網羅性だけではない。**[docs/recall.md](./recall.md) の `RecallResult` の定義は `omitted` を逐語で「**返らなかったものの分類**」と書いている。🔴 **実測**: `association` を on にすると、**同一の `recall()` の中で、同じ `memoryId` が `result.memories`（`retrievedVia: "association"`）と `result.omitted`（`below_threshold` の `nearMisses`）の両方に載る**——窓の中の全点（実測では45〜129日）で再現した。**なぜそうなるか**: 段2は `recall-runtime.ts:805` の閾値分割の直後に `below_threshold` を確定させ、`docs/recall.md` の規約どおり**以降の段は「これを積み上げるだけ」で取り直さない**。連想枠（`:1042` 以降）が候補へ足し直すのはその**後**であり、`:1096` の除外集合は「既に返る集合（`withinLimit` + `companions`）」を除くだけで、⛔ **`omitted` に既に載った記憶は除かない。**⟹ **返した記憶について「閾値未満で落ちた」と名乗り続ける。**⭐ **これは正典項目6「『見つからなかった』と『探していない』を、同じ顔で返さない」の、もう一つの読みに当たる**——**落ちていないものを落ちたと名乗るのは、分類が嘘をつくことである。**⚠ **段2の三分割そのものは破れていない**（`scored = passed + below_threshold + score_not_comparable`、[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）——破れているのは `memories` と `omitted` の排他性である。⛔ **そしてその排他性は、どの ADR も明示的に決めていない**（`recall.ts` の `BelowThresholdOmission` の doc にも `Omission` の総論にも、排他性の言明が無いことを現物で確認した）。⟹ **既定 off である限りこれは起きない**——連想枠だけがこの経路を作る。**既定を on にするなら、①`omitted` から取り下げる ②連想の除外集合に `omitted` を足す ③排他性を契約として持たないと明示する——のどれかを決める必要がある。**⛔ **どれを選ぶかはここでは決めない**（測っただけである）。
 
-**⚠5 2026-09-25 追記（Issue #201 PR-B、[ADR 0321](./decisions/0321-taxonomy-recall-filter.md)）:
+**⚠5 2026-09-25 追記（Issue #201 PR-B、[ADR 0323](./decisions/0323-taxonomy-recall-filter.md)）:
 項目6 の表本文が書く「`condition` の9値のうち `tenant` と `taxonomy` は本番の生成箇所が
 0件」は、`taxonomy` については本追記の時点で古い。** `RecallQuery.labels` による絞り込みが
 落ちた分は `condition: 'taxonomy'` として実際に push されるようになった

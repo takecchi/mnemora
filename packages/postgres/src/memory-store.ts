@@ -1207,7 +1207,7 @@ export class PostgresMemoryStore implements MemoryStore {
       scope.attributes !== undefined
         ? sql`AND attributes @> ${JSON.stringify(scope.attributes)}::jsonb`
         : sql``;
-    // Issue #201 PR-B（[ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
+    // Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
     // taxonomy は `attributes`/`subjectId` とは違う側——「スコープを定義する識別子の境界」
     // ではなく「period/validity と同じ、filtered として報告されるゲート」である
     // （`FILTERED_CONDITION_SCOPE_RELATION.taxonomy === 'outside_scope'` は ADR 0318 より
@@ -1215,7 +1215,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // して持つ（`isDecayed` と同じパターン）——`period_filtered`/`expired_filtered` と
     // 同じ「直前までのゲートを通過し、このゲートだけで落ちた」件数を数えるため。
     // `labels.name` は書き込み経路が `tags` からしか作らないため1対1で一致する
-    // （ADR 0321「決定1」）——`memory_labels`/`labels` を JOIN せず `tags` の配列の重なり
+    // （ADR 0323「決定1」）——`memory_labels`/`labels` を JOIN せず `tags` の配列の重なり
     // だけで判定できる。
     const hasQualifyingLabel =
       scope.labels !== undefined ? sql`(tags && ${sql.param(scope.labels)}::text[])` : sql`true`;
@@ -1337,7 +1337,7 @@ export class PostgresMemoryStore implements MemoryStore {
         )::int AS digest_eligible_count`
       : sql``;
 
-    // Issue #201 PR-B（ADR 0321「決定5」）: `RecallQuery.taxonomyGroups: true` のときだけ
+    // Issue #201 PR-B（ADR 0323「決定5」）: `RecallQuery.taxonomyGroups: true` のときだけ
     // 追加する——`scope.taxonomyGroupCandidates` が `undefined` なら SQL テキストにも
     // 実行計画にも一切現れない（`digestBandColumns` と同じパターン）。`scoped`/`flags`/`agg`
     // を経由せず、`memories` を直接（同じ WHERE で）再スキャンする——`unnest(tags)` を伴う
@@ -1435,7 +1435,7 @@ export class PostgresMemoryStore implements MemoryStore {
           count(*) FILTER (
             WHERE live AND in_period AND is_not_yet_valid
           )::int AS not_yet_valid_filtered,
-          -- Issue #201 PR-B（ADR 0321）: taxonomy ゲートで落ちた件数。period_filtered/
+          -- Issue #201 PR-B（ADR 0323）: taxonomy ゲートで落ちた件数。period_filtered/
           -- expired_filtered と同じ「直前までのゲートを通過し、このゲートだけで落ちた」
           -- 集計——in_scope から除かれる（decayed_filtered とは違う。下のコメント参照）。
           count(*) FILTER (
@@ -1503,7 +1503,7 @@ export class PostgresMemoryStore implements MemoryStore {
       countKind: "exact" as const,
     }));
 
-    // Issue #201 PR-B（ADR 0321「決定5」）: `taxonomyGroupCandidates` が渡されたときだけ
+    // Issue #201 PR-B（ADR 0323「決定5」）: `taxonomyGroupCandidates` が渡されたときだけ
     // `axis: 'taxonomy'` の群を足す。カウント0のラベルは載らない（`GROUP BY` が自然に
     // そうなる、`axis: 'subject'` の `in_scope > 0` フィルタと同じ規約）。残差
     // （`key: null`）もカウントが0なら載せない（同じ規約をここにも揃える）。

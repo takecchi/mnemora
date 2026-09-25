@@ -10,7 +10,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
  * `RecallQuery.labels`/`RecallQuery.taxonomyGroups`（Issue #201 PR-B、
- * [ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）の歯。
+ * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）の歯。
  *
  * `recall-attributes-filter.test.ts`（ADR 0312）と同型の構え:
  * 1. 配線の歯——段1（ANN・語彙）と段3.5（連想枠）の filter に `labels` が渡ること。
@@ -222,7 +222,7 @@ describe("recall() — labels が実際に候補を落とす（OR、Issue #201 P
     expect(result.memories.map((m) => m.memoryId)).toContain(matching.id);
   });
 
-  it("strict では registered だけが参加する——proposed だけを渡すと絞り込みが丸ごと無効化される", async () => {
+  it("strict では registered だけが参加する——proposed だけを渡すと絞り込みは『何にも一致しない』になる（2026-09-25 訂正）", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.tenantSettingsStore.setTaxonomyMode(ctx, "strict");
     const proposedOnly = await createEmbeddedMemory(stores, [1, 0], {
@@ -236,11 +236,21 @@ describe("recall() — labels が実際に候補を落とす（OR、Issue #201 P
 
     const result = await runtime.recall(ctx, { vector: [1, 0], limit: 10, labels: ["alpha"] });
 
-    // ADR 0321「決定2」: 参加資格の無い名前しか渡していないので、絞り込みそのものが
-    // 無効化される——「その名前を条件にしていない」のと同じ扱いになり、両方返る。
+    // ADR 0323「決定2」訂正・docs/memory-model.md §8: 参加資格の無い名前しか渡して
+    // いないので、絞り込みは「何にも一致しない」述語になる——`proposedOnly` 自身も
+    // 通らない（`alpha` が strict で参加資格を持たないため）。`other`（`beta`）は
+    // そもそも `alpha` を持たないので当然通らない。
+    expect(result.memories).toHaveLength(0);
+    expect(result.omitted).toContainEqual({
+      kind: "filtered",
+      condition: "taxonomy",
+      scopeRelation: "outside_scope",
+      count: 2,
+      countKind: "exact",
+    });
     const ids = result.memories.map((m) => m.memoryId);
-    expect(ids).toContain(proposedOnly.id);
-    expect(ids).toContain(other.id);
+    expect(ids).not.toContain(proposedOnly.id);
+    expect(ids).not.toContain(other.id);
   });
 
   it("strict で registered に昇格したラベルは参加する", async () => {
@@ -400,7 +410,7 @@ describe("recall() — 連想枠（段3.5）にも labels が掛かる（Issue #
 // 5. GroupCount.axis: 'taxonomy' — 呼び手が明示したときだけ。
 // ---------------------------------------------------------------------------
 
-describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0321「決定5」）", () => {
+describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0323「決定5」）", () => {
   it("既定（省略）では axis: 'taxonomy' の群は1件も載らない", async () => {
     const { runtime, stores } = buildRuntime();
     await createEmbeddedMemory(stores, [1, 0], { tags: ["alpha"] });
@@ -485,21 +495,25 @@ describe("recall() — RecallQuery.taxonomyGroups（Issue #201 PR-B、ADR 0321�
 // 6. `listLabels?` を実装しない adapter では静かに無効化される（ADR 0318 の規律）。
 // ---------------------------------------------------------------------------
 
-describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issue #201 PR-B）", () => {
-  it("labels/taxonomyGroups の両方が静かに無効化される（エラーにしない）", async () => {
-    const { stores } = buildRuntime();
-    await createEmbeddedMemory(stores, [1, 0], { tags: ["alpha"] });
-    // `listLabels` を持たない MemoryStore を装う——透過的な Proxy で1つのプロパティだけ
-    // `undefined` に見せる（class インスタンスをそのまま spread すると prototype 上の
-    // メソッドが1つも複製されない）。
-    const memoryStoreWithoutListLabels = new Proxy(stores.memoryStore, {
+describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issue #201 PR-B、ADR 0323「決定2」訂正）", () => {
+  // `listLabels` を持たない MemoryStore を装う——透過的な Proxy で1つのプロパティだけ
+  // `undefined` に見せる（class インスタンスをそのまま spread すると prototype 上の
+  // メソッドが1つも複製されない）。
+  function withoutListLabels(stores: ReturnType<typeof createFakeRuntimeStores>) {
+    return new Proxy(stores.memoryStore, {
       get(target, prop, receiver) {
         if (prop === "listLabels") return undefined;
         return Reflect.get(target, prop, receiver);
       },
     });
-    const runtimeWithoutListLabels = createRuntime({
-      memoryStore: memoryStoreWithoutListLabels,
+  }
+
+  function buildRuntimeWithout(
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+    memoryStore: unknown,
+  ) {
+    return createRuntime({
+      memoryStore: memoryStore as typeof stores.memoryStore,
       outboxStore: stores.outboxStore,
       vectorStore: stores.vectorStore,
       lexicalStore: stores.lexicalStore,
@@ -517,15 +531,64 @@ describe("recall() — MemoryStore.listLabels? を実装しない adapter（Issu
       hashContent: (content: string) => `sha256(${content})`,
       clock: { now: () => NOW },
     });
+  }
+
+  it("taxonomyGroups は静かに無効化される（エラーにしない、出力が0件増えないだけ）", async () => {
+    const { stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { tags: ["alpha"] });
+    const runtimeWithoutListLabels = buildRuntimeWithout(stores, withoutListLabels(stores));
+
+    const result = await runtimeWithoutListLabels.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      taxonomyGroups: true,
+    });
+
+    expect(result.index.groups.some((g) => g.axis === "taxonomy")).toBe(false);
+  });
+
+  it("open（既定）では、渡した名前をそのまま参加資格ありとして tags と直接照合する", async () => {
+    const { stores } = buildRuntime();
+    const matching = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "matching",
+      tags: ["alpha"],
+    });
+    const other = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "other",
+      tags: ["beta"],
+    });
+    const runtimeWithoutListLabels = buildRuntimeWithout(stores, withoutListLabels(stores));
 
     const result = await runtimeWithoutListLabels.recall(ctx, {
       vector: [1, 0],
       limit: 10,
       labels: ["alpha"],
-      taxonomyGroups: true,
     });
 
-    expect(result.memories.length).toBe(1); // 絞り込みは無効化されている。
-    expect(result.index.groups.some((g) => g.axis === "taxonomy")).toBe(false);
+    // 「絞り込みが丸ごと無効化される」のではない——`alpha` を持たない `other` は
+    // 通らない。状態（registered/proposed）が引けなくても open は状態を見ないため、
+    // 渡した名前をそのまま使ってよい。
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(matching.id);
+    expect(ids).not.toContain(other.id);
+  });
+
+  it("strict では、状態を検証できないため参加資格ゼロと見なし、絞り込みは『何にも一致しない』になる（open へ広げない）", async () => {
+    const { stores } = buildRuntime();
+    await stores.tenantSettingsStore.setTaxonomyMode(ctx, "strict");
+    const memory = await createEmbeddedMemory(stores, [1, 0], { tags: ["alpha"] });
+    const runtimeWithoutListLabels = buildRuntimeWithout(stores, withoutListLabels(stores));
+
+    const result = await runtimeWithoutListLabels.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      labels: ["alpha"],
+    });
+
+    // `alpha` が実際に registered かどうかを検証する手段が無い——安全側（参加資格ゼロ）
+    // に倒し、`open` へ広げてテナントの明示した strict の方針を破らない。
+    expect(result.memories).toHaveLength(0);
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).not.toContain(memory.id);
   });
 });

@@ -1,4 +1,4 @@
-# ADR 0321: taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き）
+# ADR 0323: taxonomy によるラベル絞り込みを recall に足す — PR-B（Issue #201、ADR 0318 の続き）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
@@ -98,7 +98,31 @@ Memory が持つラベルの詳細を1件ずつ返す」ような読み出し）
 
 ### 2. 参加資格の解決 — CORE が `listLabels?`/`getTaxonomyMode?` を1回だけ呼ぶ
 
-`recall-runtime.ts` の段0（スコープ確定）で、`RecallQuery.labels` か
+**⚠ 2026-09-25 レビュー訂正。本節は初稿から書き換えた**（採用前の訂正であり、
+ADR 0223 決定1「まだ採用されていない初稿はこの限りではない」に従い書き換えている
+——採用済み ADR の本文を書き換えない規律とは別枠）。**初稿は「参加資格のある名前が
+1つも残らなければ絞り込み全体を無効化する（`RecallScope.labels = undefined`、
+＝全件通過）」としていたが、これは正典と食い違っていた。**
+
+`docs/memory-model.md` §8【逐語】:
+
+> このモデルには専用の「不在の章」を recall.md に立てる必要が無い。strict モードで
+> `proposed` ラベルがフィルタから外れて**記憶が返らなかった場合**、それは recall の
+> `Omission.kind = 'filtered'`（どの条件で落ちたか、を持つ既存の分類）にそのまま乗る
+
+——参加資格の無いラベルは「その記憶を**返さない**」側の結果を生む契約であり、
+「絞り込み自体をやめる」側ではない。AGENTS.md「正典と実装が食い違ったらバグなのは
+実装のほう」に当たる誤りだった。
+
+**ADR 0318「PR-B に向けた申し送り」の読み直し**（0318 は採用済みなので本文は
+書き換えない。ここで「こう解する」と明記する）: 申し送りの文言「そのラベルによる
+絞り込みがフィルタから外れる＝そのラベルを条件にしていないのと同じ扱いになる」は、
+**OR で結ぶ候補集合（`qualifying`）から個々のラベルが落ちること**を言っているの
+であって、**候補集合全体が空になったときに絞り込みという操作自体を取りやめてよい**
+とは言っていない。「個々のラベルが条件から外れる」ことと「絞り込みという行為自体を
+やめる」ことは別の主張であり、初稿は前者の記述を後者の意味に読み違えた。
+
+**訂正した設計**: `recall-runtime.ts` の段0（スコープ確定）で、`RecallQuery.labels` か
 `RecallQuery.taxonomyGroups`（後述）のどちらかが指定されているときだけ:
 
 1. `taxonomyMode = deps.tenantSettingsStore が無ければ 'open'、在れば readTaxonomyMode(...)`
@@ -107,24 +131,44 @@ Memory が持つラベルの詳細を1件ずつ返す」ような読み出し）
    `undefined`）。
 3. `allLabels` が取れたら、`qualifying = allLabels のうち status === 'registered'、
    または（taxonomyMode === 'open' かつ status === 'proposed'）` の名前集合を作る。
+4. `RecallQuery.labels` を `qualifying` で絞り、**その結果（空配列でありうる）を
+   そのまま `RecallScope.labels` に渡す**——空配列を `undefined` へ丸めない。
 
-`RecallQuery.labels` は `qualifying` と積を取り、**空になったら「絞り込み無し」
-（`RecallScope.labels = undefined`）に倒す**——ADR 0318「PR-B に向けた申し送り」が
-明示した意味論（「そのラベルによる絞り込みがフィルタから外れる＝そのラベルを
-条件にしていないのと同じ扱いになる」）をそのまま実装したもの。**1個でも参加資格の
-あるラベルが残れば、絞り込みはその残った集合だけで行う**（strict モードで
-proposed のラベルだけを渡すと、絞り込みが丸ごと無効化される——これは「絞り込みが
-効かない」のではなく「その軸を条件にしなかった」という扱いであり、ADR 0318 が
-決めた `tagMatch` 非破壊の原則と同じ「既存の呼び出しを壊さない」側に倒す判断である）。
+`RecallScope.labels` は3つの状態を区別する（`RecallScope.labels` の doc コメント参照）:
+`undefined`（絞り込み要求そのものが無い、全件通過）、**空配列**（絞り込みは要求されたが
+参加資格のある名前が0個——「何にも一致しない」述語、0件）、非空配列（OR 一致）。
+`survivesLabelsFilter`（後置フィルタ）も postgres の SQL（`tags && ARRAY[]::text[]`
+は常に偽）も in-memory 実装（空配列に対する `.includes` は常に偽）も、**実装を
+1行も変える必要が無かった**——「OR の対象が0個なら恒偽」という自然な意味論を
+最初から持っていたため、直したのは資格解決（本節）が結果を `undefined` へ丸めて
+いた1箇所だけである。
 
-**`listLabels?` が無い adapter（`allLabels === undefined`）では、`RecallQuery.labels`・
-`RecallQuery.taxonomyGroups` の両方が静かに無効化される**（`RecallScope.labels`/
-`taxonomyGroupCandidates` とも `undefined` のまま）。エラーにしない——ADR 0318が
-確立した「任意メソッドを実装しない adapter は、この機能が無い今日と同じ状態に
-とどまるだけ」という規律をそのまま踏襲する。`RecallQuery.channels: ['lexical']` が
-`lexicalStore` 不在で投げるのとは性質が違う——あちらは「配線の誤り」だが、こちらは
-「taxonomy の語彙管理自体を実装していない adapter」であり、mnemora 自体が
-`listLabels?`/`registerLabel?` を任意にした時点で許容した差である。
+**`listLabels?` が無い adapter（`allLabels === undefined`）での縮退——ここも
+「黙って広げない」側に倒す:**
+
+- `RecallQuery.taxonomyGroups`: 群カウントを生成しない（`taxonomyGroupCandidates`
+  は `undefined` のまま）。これは「出力が0件増えない」だけであり、`labels` の
+  フィルタと違って「返すべきでない Memory を返してしまう」種類の誤りを起こさない
+  ——静かな無効化のままでよい（ここは初稿から変えていない）。
+- `RecallQuery.labels`: `taxonomyMode` に応じて分岐する。
+  - `taxonomyMode === 'open'`（既定、または `getTaxonomyMode?` 自体が無いことに
+    よるフォールバック）: 渡された名前をそのまま参加資格ありとして使う
+    （`resolvedLabelsFilter = validatedQuery.labels`）。open は状態を見ないので、
+    状態が引けなくても結論は変わらない——安全に「そのまま使う」を選べる。
+  - `taxonomyMode === 'strict'`: `registered` かどうかを検証する手段が無い。
+    **`open` 側へ広げてテナントが明示した strict の方針を黙って破ることはしない**
+    ——参加資格ゼロと見なす（`resolvedLabelsFilter = []`、絞り込みは0件になる）。
+    「投げる」（例外にする）案も検討したが、`listLabels?` は任意メソッドであり、
+    これを実装しないこと自体は ADR 0318 が許容した差であって「配線の誤り」
+    （`channels: ['lexical']` に `lexicalStore` が無い場合と同種の、何度呼んでも
+    成功しない壊れ方）ではない——`RecallQuery.channels` の doc が引く境界線と
+    同じ理由で、こちらは投げずに縮退させる側を採った。
+
+**`listLabels?` を実装しない adapter は「taxonomy の語彙管理自体を実装していない」
+という今日と同じ状態にとどまるだけ**——ADR 0318 が確立した規律を維持している。
+変わったのは「その状態でテナントが `strict` を宣言していた場合にどちらへ倒すか」
+という縮退の**向き**だけであり、「機能が無いことは許容する」という前提は動いて
+いない。
 
 ### 3. 3点セットへの伝播 — `attributes`（ADR 0312）と同じ配線
 
@@ -338,7 +382,8 @@ Issue #201・`docs/memory-model.md` §8 の文言どおり:
 | **`taxonomy` 軸の群カウントも `subject` 軸と同じ「合計一致」にする（残差を作らず、多重計上を許容しない）** | ラベルの多対多という現実を反映できない。多重計上を禁じるには「Memory ごとに1つの代表ラベルだけを選ぶ」ような追加の規則が要り、`labels`/`memory_labels` の設計（複数ラベルを許す）と矛盾する。 |
 | **strict で参加資格の無い Memory を残差群からも省く（黙って消す）** | Issue の指示「strict で数えられなかった proposed は黙って消さず、どう見えるかを決めること」に反する。北極星の「見つからなかった／数えられなかった」の区別を潰す（`docs/north-star.md`）。 |
 | **`labels` フィルタを必須の同伴取得（段3）にも適用する** | 「決定3」参照。`labels` は `tags` 由来の内容分類軸であり、`attributes`（取り扱いの境界）とは性質が違う。`tags` 自体が同伴取得を素通しする既存の設計と揃える。 |
-| **`listLabels?` が無い adapter でエラーにする** | ADR 0318 が確立した「任意メソッドを実装しない adapter はこの機能が無いだけ」という規律に反する。エラーにすると、taxonomy 語彙管理を実装していないだけの既存 adapter の `recall()` 呼び出しが（`labels`/`taxonomyGroups` を指定した途端に）壊れる。 |
+| **`listLabels?` が無い adapter でエラーにする** | ADR 0318 が確立した「任意メソッドを実装しない adapter はこの機能が無いだけ」という規律に反する。エラーにすると、taxonomy 語彙管理を実装していないだけの既存 adapter の `recall()` 呼び出しが（`labels`/`taxonomyGroups` を指定した途端に）壊れる。**`labels` フィルタ + `taxonomy_mode: 'strict'` の組み合わせについても改めて検討したが（「決定2」参照）、同じ理由で見送った**——参加資格ゼロと見なして絞り込みを0件にする側（縮退）を採り、例外にはしない。 |
+| **（レビューで却下・訂正済み）参加資格のある名前が1つも残らなければ絞り込み全体を無効化する（`RecallScope.labels = undefined`、全件通過）** | 「決定2」参照。`docs/memory-model.md` §8【逐語】が「strict で proposed ラベルがフィルタから外れて記憶が返らなかった場合...`filtered` にそのまま乗る」と定めており、**参加資格の無いラベルは記憶を返さない側の契約**。「絞り込み自体を諦める」側は正典と食い違う（AGENTS.md「正典と実装が食い違ったらバグなのは実装」）。ADR 0318 の申し送り文言は個々のラベルが候補集合から落ちることを言っているのであって、候補集合が空になったときに絞り込みという操作自体をやめてよいとは言っていない——読み違いだった。 |
 
 ## 引き受けた負債
 
@@ -377,30 +422,41 @@ Issue #201・`docs/memory-model.md` §8 の文言どおり:
 `127.0.0.1:55432`）、PostgreSQL 17 + pgvector 0.8.0 + `btree_gin`/`pgcrypto` に対して
 2026-09-25 に行った。
 
-### 【実測】適合テスト・単体テスト（すべて green）
+### 【実測】適合テスト・単体テスト（main 取り込み後の最終数）
 
 ```
 $ pnpm --filter @mnemora/core exec vitest run
- Test Files  78 passed (78)
-      Tests  1183 passed | 4 expected fail (1187)
+ Test Files  82 passed (82)
+      Tests  1373 passed | 85 expected fail (1458)
 
 $ pnpm --filter @mnemora/testkit exec vitest run
  Test Files  7 passed (7)
-      Tests  420 passed | 11 skipped (431)
+      Tests  426 passed | 11 skipped (437)
 
 $ DATABASE_URL=postgresql://worker@127.0.0.1:55432/mnemora_test \
   pnpm --filter @mnemora/postgres exec vitest run
- Test Files  58 passed (58)
-      Tests  662 passed (662)
+ Test Files  1 failed | 58 passed (59)
+      Tests  4 failed | 668 passed (672)
 ```
 
-`packages/core` の新規テスト（`recall-taxonomy-filter.test.ts`、17件）は配線・OR 絞り込み・
+**⚠ postgres の4件の失敗は本 PR と無関係**——`trigram-lexical-store.postgres.test.ts`
+（`main` の別 PR #738、ADR 0319、pg_trgm 語彙照合）が、CI の2脚
+（`server_encoding=UTF8`/`SQL_ASCII`）のどちらでもない第3の regime
+（`initdb --encoding=UTF8 --locale=C`——`AGENTS.md` の例示コマンドそのもの）で
+`locale_no_japanese_trigrams` を返し、そのテストが期待する `server_encoding_not_utf8`
+と食い違う。そのテストファイル自身の doc コメントが「CI の2脚には無い regime」として
+既に明記している既知の限界であり、本 PR のどのファイルも触れていない。CI（GitHub
+Actions、両 regime 専用のコンテナ）では green（PR #743 の CI 実行結果を参照）。
+
+`packages/core` の新規テスト（`recall-taxonomy-filter.test.ts`、21件）は配線・OR 絞り込み・
 open/strict の参加資格・`filteredTaxonomy`・後置フィルタ・連想枠への伝播・
-`taxonomyGroups`・`listLabels?` 未実装 adapter での静かな無効化を検査する。
-`packages/testkit`（in-memory: +12件、postgres: +12件、同じフィクスチャ・同じ期待値）は
-`VectorFilter.labels`/`LexicalFilter.labels` の絞り込みと、`aggregateScope` の
-`filteredTaxonomy`・`axis: 'taxonomy'` の群カウント・**distinct-coverage の直接検算**
-（フィクスチャから独立に計算した期待値との突き合わせ）を検査する。
+`taxonomyGroups`・`listLabels?` 未実装 adapter での縮退（open は直接照合、strict は
+参加資格ゼロ）を検査する。`packages/testkit`（in-memory・postgres、同じフィクスチャ・
+同じ期待値）は `VectorFilter.labels`/`LexicalFilter.labels` の絞り込みと、
+`aggregateScope` の `filteredTaxonomy`・`axis: 'taxonomy'` の群カウント・
+**distinct-coverage の直接検算**（フィクスチャから独立に計算した期待値との突き合わせ）、
+および**「レビュー訂正」節で足した `scope.labels: []`（何にも一致しない）が
+`undefined`（絞り込み無し）と逆の結果になることの直接検算**を検査する。
 
 ### 【実測】赤→緑（変異試験、`docs/autonomy.md` §2 の要求）
 
@@ -462,7 +518,54 @@ $ pnpm --filter @mnemora/testkit exec vitest run src/__tests__/in-memory-fixture
 
 赤くなった4件は M1 と同じ性質の歯（in-memory 側）。復元後、緑に戻る（348 passed | 1 skipped）。
 
-**5本とも、`cp` で退避したファイルに `cp` で復元後、同じ it が緑に戻ることまで実測した**
+**M6: core `recall-runtime.ts` の「積が空なら `undefined` へ丸める」を復活させる**
+（レビュー訂正の回帰止め）
+
+```
+$ (`resolvedLabelsFilter = (validatedQuery.labels ?? []).filter(...)` を
+   `const effective = ...; resolvedLabelsFilter = effective.length > 0 ? effective : undefined;`
+   へ戻す)
+$ pnpm --filter @mnemora/core exec vitest run src/__tests__/recall-taxonomy-filter.test.ts
+ Tests  1 failed | 18 passed (19)
+```
+
+赤くなったのは「strict では registered だけが参加する…『何にも一致しない』になる」
+1件だけ（訂正した歯そのものが噛むことの確認）。復元後、19件すべて緑に戻る。
+
+**M7: core `recall-runtime.ts` の `listLabels?` 未実装時の strict 縮退を外す**
+（`open` へ広げる誤りの回帰止め）
+
+```
+$ (`resolvedLabelsFilter = taxonomyMode === "open" ? (validatedQuery.labels ?? []) : [];`
+   を `resolvedLabelsFilter = validatedQuery.labels ?? [];` へ置換)
+$ pnpm --filter @mnemora/core exec vitest run src/__tests__/recall-taxonomy-filter.test.ts
+ Tests  1 failed | 18 passed (19)
+```
+
+赤くなったのは「strict では、状態を検証できないため参加資格ゼロと見なし…」1件だけ。
+復元後、19件すべて緑に戻る。
+
+**M8: postgres SQL / in-memory 実装で、空配列を `undefined` と同じ扱いにする**
+（`hasQualifyingLabel`/`InMemoryMemoryStore` の側で意味論が壊れていないかの回帰止め）
+
+```
+$ (postgres: `scope.labels !== undefined` を `scope.labels !== undefined && scope.labels.length > 0` に変更)
+$ DATABASE_URL=... pnpm --filter @mnemora/postgres exec vitest run src/__tests__/conformance.postgres.test.ts
+ Tests  2 failed | 353 passed (355)
+
+$ (in-memory: 同じ条件を同じ形で変更)
+$ pnpm --filter @mnemora/testkit exec vitest run src/__tests__/in-memory-fixtures.conformance.test.ts
+ Tests  2 failed | 352 passed | 1 skipped (355)
+```
+
+両実装とも、赤くなったのは「レビュー訂正」節で足した2件（空配列の直接検算・
+taxonomyGroupCandidates との組み合わせ）だけ。**これは `MemoryStore` 層の実装自体は
+最初から正しかった**（`tags && '{}'`・空配列への `.includes` はどちらも元々
+「恒偽」の自然な意味論を持っていた）ことの検算でもある——壊れていたのは
+`recall-runtime.ts` の資格解決（M6・M7）だけであり、M8 はその境界を独立に確認した。
+復元後、両方とも全件緑に戻る。
+
+**8本とも、`cp` で退避したファイルに `cp` で復元後、同じ it が緑に戻ることまで実測した**
 （`git status --porcelain` が空になることも確認済み）。
 
 ### 【実測】型・lint・フォーマット・公開 API

@@ -138,7 +138,7 @@ export class InMemoryLexicalStore implements LexicalStore {
           continue;
         }
       }
-      // Issue #201 PR-B（ADR 0321）: OR の集合絞り込み（`InMemoryVectorStore` と同じ意味論）。
+      // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み（`InMemoryVectorStore` と同じ意味論）。
       if (opts.filter.labels !== undefined) {
         const labels = opts.filter.labels;
         if (!memory.tags.some((tag) => labels.includes(tag))) {

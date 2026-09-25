@@ -33,7 +33,7 @@ import {
  * 新実装（`memory-store.ts`）の変更から独立に保つ。
  *
  * **⚠ 唯一の例外（2026-09-25、Issue #201 PR-B、
- * [ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）**:
+ * [ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）**:
  * `ScopeAggregate.filteredTaxonomy` が新設の**必須**フィールドになったため、
  * この関数の返り値もこの型を満たすには何かを書かなければ型検査が通らない。
  * **SQL・計算ロジックは1行も変えていない**——`filteredTaxonomy: { count: 0,
@@ -233,7 +233,7 @@ async function oracleAggregateScope(
     filteredExpired: { count: row.expired_filtered, countKind: "exact" },
     filteredNotYetValid: { count: row.not_yet_valid_filtered, countKind: "exact" },
     filteredDecayed: { count: row.decayed_filtered, countKind: "exact" },
-    // Issue #201 PR-B（ADR 0321）: クラス doc の「唯一の例外」参照。
+    // Issue #201 PR-B（ADR 0323）: クラス doc の「唯一の例外」参照。
     filteredTaxonomy: { count: 0, countKind: "exact" },
     digests,
     digestEligible,

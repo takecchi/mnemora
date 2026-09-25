@@ -50,7 +50,7 @@ export interface LexicalFilter {
   attributes?: Attributes;
   /**
    * `VectorFilter.labels` と同じ欄・同じ意味（Issue #201 PR-B、
-   * [ADR 0321](../../../../docs/decisions/0321-taxonomy-recall-filter.md)）。
+   * [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）。
    */
   labels?: string[];
 }

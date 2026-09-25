@@ -6153,13 +6153,13 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // scope.labels（Issue #201 PR-B、[ADR 0321](../../../docs/decisions/0321-taxonomy-recall-filter.md)）:
+    // scope.labels（Issue #201 PR-B、[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
     // taxonomy によるラベルの絞り込み。`attributes` とは違い、`totalInScope` から除かれ
-    // かつ `filteredTaxonomy` として報告される（`period`/`validity` と同じ側——ADR 0321
+    // かつ `filteredTaxonomy` として報告される（`period`/`validity` と同じ側——ADR 0323
     // 「前提として確認したこと」参照）。ここでの `scope.labels` は core が既に
     // `taxonomy_mode` の参加資格で解決した名前の配列であり、`MemoryStore` 自身は
     // `labels`/`memory_labels` テーブルの状態を一切見ない（`tags` の配列演算のみ、
-    // ADR 0321「決定1」）。
+    // ADR 0323「決定1」）。
     // -------------------------------------------------------------------
 
     it("aggregateScope は scope.labels で絞り込める。落ちた分は totalInScope から除かれ filteredTaxonomy に計上される", async () => {
@@ -6212,6 +6212,69 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.filteredTaxonomy).toEqual({ count: 1, countKind: "exact" });
     });
 
+    it("aggregateScope の scope.labels: 空配列は『何にも一致しない』——undefined（絞り込み無し）とは逆の結果になる（レビュー訂正、docs/memory-model.md §8）", async () => {
+      // `RecallScope.labels: []` は、core（`recall-runtime.ts`）が「strict モードで
+      // 参加資格のある名前が1つも無かった」ときに解決する形そのもの——`MemoryStore` は
+      // taxonomy_mode を一切知らないので、ここでは resolved 済みの空配列を直接渡して
+      // その契約だけを検査する（ADR 0323「決定2」訂正）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          tags: ["alpha"],
+          contentHash: "labels-empty-1",
+        }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", tags: [], contentHash: "labels-empty-2" }),
+      );
+
+      const emptyFilter = await store.aggregateScope(ctx, { labels: [] });
+      expect(emptyFilter.totalInScope).toBe(0);
+      expect(emptyFilter.filteredTaxonomy).toEqual({ count: 2, countKind: "exact" });
+
+      // 対照: `undefined`（絞り込み無し）では両方とも in scope のまま——`[]` と
+      // `undefined` が逆の結果になることを同じフィクスチャで直接確かめる。
+      const noFilter = await store.aggregateScope(ctx, {});
+      expect(noFilter.totalInScope).toBe(2);
+      expect(noFilter.filteredTaxonomy).toEqual({ count: 0, countKind: "exact" });
+    });
+
+    it("aggregateScope の scope.taxonomyGroupCandidates: scope.labels が空配列（strict で全滅）でも、被覆不変条件（distinct-coverage）は崩れない", async () => {
+      // 「strict で proposed のラベルしか要求されなかった」場面を模す——絞り込み結果は
+      // 0件だが、グルーピング自体は（別の呼び出しで）成立することを確認する。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          tags: ["alpha"],
+          contentHash: "labels-empty-groups-1",
+        }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          tags: [],
+          contentHash: "labels-empty-groups-2",
+        }),
+      );
+
+      // 絞り込みが空配列で「何にも一致しない」場合、taxonomyGroupCandidates を足しても
+      // 群カウントは0件のまま（totalInScope 自体が0なので、被覆すべき対象が無い）。
+      const aggregate = await store.aggregateScope(ctx, {
+        labels: [],
+        taxonomyGroupCandidates: ["alpha"],
+      });
+      expect(aggregate.totalInScope).toBe(0);
+      expect(aggregate.groups.filter((g) => g.axis === "taxonomy")).toEqual([]);
+    });
+
     it("scope.labels を渡さなければ filteredTaxonomy は常に0（既定動作を壊さない）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
@@ -6262,12 +6325,12 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // scope.taxonomyGroupCandidates（Issue #201 PR-B、ADR 0321「決定5」）:
+    // scope.taxonomyGroupCandidates（Issue #201 PR-B、ADR 0323「決定5」）:
     // `axis: 'taxonomy'` の群カウント。呼び手が明示したとき（このフィールドを渡した
     // とき）だけ生成される——既定（`undefined`）では `groups` に `axis: 'taxonomy'` の
     // エントリが1件も現れない。
     //
-    // 🔴 被覆不変条件（`docs/recall.md` §5、ADR 0321「決定6」）: `axis: 'subject'` とは
+    // 🔴 被覆不変条件（`docs/recall.md` §5、ADR 0323「決定6」）: `axis: 'subject'` とは
     // 違い、ラベルは多対多なので `axis: 'taxonomy'` の `count` の単純合計は
     // `totalInScope` と一致しない（超えうる）。保証されるのは「取りこぼしが無いこと」
     // （distinct-coverage）——スコープ内の全 Memory は、少なくとも1つのラベル群、
@@ -6291,7 +6354,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(aggregate.groups.some((g) => g.axis === "taxonomy")).toBe(false);
     });
 
-    it("aggregateScope の scope.taxonomyGroupCandidates: ラベルごとの群と残差（key: null）を、重複所属・無所属を混在させて厳密に数える（被覆不変条件、ADR 0321 決定6）", async () => {
+    it("aggregateScope の scope.taxonomyGroupCandidates: ラベルごとの群と残差（key: null）を、重複所属・無所属を混在させて厳密に数える（被覆不変条件、ADR 0323 決定6）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
       // (1) alpha のみ、(2) alpha+beta の両方、(3) 参加資格の候補に無いラベルのみ、
