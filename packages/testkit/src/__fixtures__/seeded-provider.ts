@@ -92,11 +92,7 @@ export class SeededLLMProvider implements LLMProvider {
   async complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
     const entry = this.lookup(req);
     if (entry !== undefined) {
-      if (
-        typeof entry.value !== "object" ||
-        entry.value === null ||
-        !("content" in entry.value)
-      ) {
+      if (typeof entry.value !== "object" || entry.value === null || !("content" in entry.value)) {
         throw new Error(
           "SeededLLMProvider: complete() の種の記録が LLMResponse の形をしていない。" +
             "種カセットが壊れている。",

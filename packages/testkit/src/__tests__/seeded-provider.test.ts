@@ -22,12 +22,20 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { EmbeddingCassetteSection, LLMCassetteSection } from "../__fixtures__/cassette.js";
 import { embeddingCassetteKey, llmCassetteKey } from "../__fixtures__/cassette.js";
-import { CassetteRecorder, RecordingEmbeddingProvider, RecordingLLMProvider } from "../__fixtures__/cassette-recorder.js";
+import {
+  CassetteRecorder,
+  RecordingEmbeddingProvider,
+  RecordingLLMProvider,
+} from "../__fixtures__/cassette-recorder.js";
 import { SeededEmbeddingProvider, SeededLLMProvider } from "../__fixtures__/seeded-provider.js";
 
 const ctx: Ctx = { tenantId: "seeded-provider-test" };
 
-const SPACE: EmbeddingSpaceId = { provider: "openai", model: "text-embedding-3-small", dimensions: 3 };
+const SPACE: EmbeddingSpaceId = {
+  provider: "openai",
+  model: "text-embedding-3-small",
+  dimensions: 3,
+};
 const MODEL = "gpt-4o-mini";
 
 const SCHEMA = z.object({ digest: z.string() });
@@ -80,7 +88,9 @@ function promptFor(text: string): PromptSpec {
   return { system: "抽出せよ", messages: [{ role: "user", content: text }] };
 }
 
-function seedLLMSection(entries: Array<{ prompt: PromptSpec; value: unknown }>): LLMCassetteSection {
+function seedLLMSection(
+  entries: Array<{ prompt: PromptSpec; value: unknown }>,
+): LLMCassetteSection {
   const out: LLMCassetteSection["entries"] = {};
   for (const e of entries) {
     out[llmCassetteKey(e.prompt)] = e;
@@ -88,7 +98,9 @@ function seedLLMSection(entries: Array<{ prompt: PromptSpec; value: unknown }>):
   return { model: MODEL, entries: out };
 }
 
-function seedEmbeddingSection(entries: Array<{ text: string; vector: number[] }>): EmbeddingCassetteSection {
+function seedEmbeddingSection(
+  entries: Array<{ text: string; vector: number[] }>,
+): EmbeddingCassetteSection {
   const out: EmbeddingCassetteSection["entries"] = {};
   for (const e of entries) {
     out[embeddingCassetteKey(e.text)] = e;
@@ -129,7 +141,10 @@ describe("SeededLLMProvider", () => {
     const provider = new SeededLLMProvider(delegate, { seed, expectedModel: MODEL });
 
     const missingPrompt = promptFor("種に無い発話");
-    const result = await provider.completeStructured(ctx, { prompt: missingPrompt, schema: SCHEMA });
+    const result = await provider.completeStructured(ctx, {
+      prompt: missingPrompt,
+      schema: SCHEMA,
+    });
 
     expect(result).toEqual({ digest: "実APIのdigest" });
     expect(delegate.calls).toHaveLength(1);
@@ -200,7 +215,10 @@ describe("SeededEmbeddingProvider", () => {
 
     const result = await provider.embed(ctx, ["種にある文", "種に無い文2"]);
 
-    expect(result).toEqual([[9, 9, 9], ["種に無い文2".length, 0, 0]]);
+    expect(result).toEqual([
+      [9, 9, 9],
+      ["種に無い文2".length, 0, 0],
+    ]);
     expect(delegate.calls).toEqual([["種に無い文2"]]);
     expect(provider.usage).toEqual({ seeded: 1, real: 1 });
   });
@@ -209,9 +227,9 @@ describe("SeededEmbeddingProvider", () => {
     const seed = seedEmbeddingSection([]);
     const delegate = new ThrowingEmbeddingProvider();
     const mismatched: EmbeddingSpaceId = { ...SPACE, model: "text-embedding-3-large" };
-    expect(() => new SeededEmbeddingProvider(delegate, { seed, expectedSpace: mismatched })).toThrow(
-      /埋め込み空間/,
-    );
+    expect(
+      () => new SeededEmbeddingProvider(delegate, { seed, expectedSpace: mismatched }),
+    ).toThrow(/埋め込み空間/);
   });
 
   it("種から返した分・実 API から返した分の両方が、新しいカセットに記録される（自己完結）", async () => {
