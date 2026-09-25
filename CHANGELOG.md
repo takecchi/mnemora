@@ -39,6 +39,38 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ---
 
+## [1.1.0] - 未リリース
+
+⛔ **`v1.1.0` の tag はまだ切られていない。**
+
+**この節は `v1.0.0` からの差分を対象とする。**
+
+⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`8cf82b1`** の範囲を数えたものである。
+⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
+⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
+増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
+⛔ **ここに件数を書かないこと**（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+### Fixed
+
+- **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
+  処理する `consolidate` ジョブ、`processConsolidateJob`）が、subject をまたいで統合し、
+  統合後の `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `consolidate`
+  ジョブを subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の
+  `subjectId` が食い違うと、近傍探索が種と別の subject から候補を拾っていた。
+  `processConsolidateJob` は、種の Memory の `subjectId` を `ctx.subjectId` に置いてから
+  `consolidate()` を呼ぶように直した——種が見つからない、または種の `subjectId` が `null` の
+  場合は今日どおり（[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
+  [ADR 0310](./docs/decisions/0310-subject-crossing-consolidate-frequency-measured.md) /
+  [ADR 0315](./docs/decisions/0315-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
+  ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
+  利用者には何も起きない。migration も不要。
+  ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ統合が
+  構造的に起きなくなる（実測は ADR 0310/0315）。
+  明示的な `runtime.consolidate(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
+
+---
+
 ## [1.0.0] - 2026-09-23
 
 **Release**: [v1.0.0](https://github.com/takecchi/mnemora/releases/tag/v1.0.0)（pre-release ではない）。

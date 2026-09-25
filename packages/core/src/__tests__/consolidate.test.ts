@@ -669,6 +669,246 @@ describe("runtime.consolidate — target の { seedMemoryId } の形（Issue #13
   });
 });
 
+/**
+ * Issue #579 / ADR 0315: `tick()` の `consolidate` ジョブハンドラ（`processConsolidateJob`）は、
+ * 種の `subjectId` を `ctx.subjectId` に置いてから `consolidate(ctx', { target: { seedMemoryId } })`
+ * を呼ぶ——ADR 0310 が実測したとおり、`tick()` はジョブを subject で絞って claim できないため、
+ * `ctx.subjectId`（呼び手が `tick()` に渡した値）と種の `subjectId` の食い違いが、subject を
+ * またぐ統合（統合後の `Memory.subjectId` が `null` に畳まれる）の主な経路だった。
+ *
+ * ⚠ これは `runtime.consolidate(ctx, { target: { seedMemoryId } })` を**直接**呼ぶ経路の
+ * 歯ではない——上の describe（`{ seedMemoryId } の形`）がその経路をすでに固定しており、
+ * この変更はそちらに一切触れていない（明示呼び出しは呼び手の `ctx.subjectId` で完全に
+ * 制御できる、ADR 0310 決定2）。ここで測るのは、必ず `runtime.tick()` を経由する
+ * `processConsolidateJob` の分岐だけである。
+ */
+describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探索を絞る（Issue #579 / ADR 0315）", () => {
+  /**
+   * 上のファイル共通の `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を
+   * 注入している——`runtime.consolidate()` を直接呼ぶ既存の歯はこれで問題ない（`tick`
+   * 自体を経由しないため）。この describe は `tick()` の `claimBatch` を経由する
+   * ため、outbox 行の `availableAt`（`FakeOutboxStore.enqueueJob` が `new Date()`＝
+   * 実時刻で刻む）より前の固定 clock を使うと、`availableAt <= now` が成り立たず
+   * 1件も claim されない。⟹ ここだけ実時計（既定の `systemClock`）を使う。
+   */
+  function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    return { runtime, stores };
+  }
+
+  /**
+   * `FakeEmbeddingProvider` は使わない——`vectorStore.upsert` で直接ベクトルを置く
+   * （上の `{ seedMemoryId }` の形の歯と同じ作法）。ここでは「同一の話題（同一 digest 相当）
+   * を複数 subject が持つ」を、**同じベクトル**を複数 subject の Memory に置くことで模す
+   * ——ADR 0310 の shared 極（話題が重なる使い方）に対応する、affinity が十分高いケース。
+   */
+  async function enqueueConsolidateJob(
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+    overrides: Partial<NewMemory>,
+  ): Promise<Memory> {
+    const { memory, jobs } = await stores.memoryStore.createMemoryWithOutbox(
+      ctx,
+      newMemory(overrides),
+      ["consolidate"],
+    );
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toEqual({ memoryId: memory.id });
+    return memory;
+  }
+
+  it("ctx.subjectId 無しで tick を呼んでも、種の subject 以外の高affinity近傍は混ざらない（混在 0%）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(
+      llmConsolidatingTo({ content: "統合後" }),
+    );
+
+    const seed = await enqueueConsolidateJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: "subject-a",
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    // 種と同じ subject の近傍——similarity 1.0（[4,0] と同じ向き）。
+    const neighborSameSubject = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "same-subject neighbor",
+        digest: "n-same",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborSameSubject.id,
+      [8, 0],
+    );
+
+    // 別 subject の近傍——**同じベクトル**（話題が重なる使い方、ADR 0310 shared 極）。
+    // 種の subject に絞らなければ、これも既定の minAffinity（0.8）を満たして候補に入る。
+    const neighborOtherSubject = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "other-subject neighbor",
+        digest: "n-other",
+        subjectId: "subject-b",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborOtherSubject.id,
+      [8, 0],
+    );
+
+    // `ctx` に subjectId を付けずに tick を呼ぶ——ADR 0310 の「絞らない」列に相当する
+    // 呼び方。修正前はここで別 subject の近傍が混ざり、統合後の subjectId が null に
+    // 畳まれた（本 PR 本文に、実装を一時的に戻して赤くなることを確認した記録がある）。
+    const tickResult = await runtime.tick(ctx, { kinds: ["consolidate"], leaseMs: 60_000 });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const seedAfter = await stores.memoryStore.get(ctx, seed.id);
+    expect(seedAfter?.status).toBe("superseded");
+    const consolidated = await stores.memoryStore.get(ctx, seedAfter!.supersededById!);
+    expect(consolidated).not.toBeNull();
+    // 混在 0%: 統合後の subjectId は null に畳まれず、種の subject のままである。
+    expect(consolidated!.subjectId).toBe("subject-a");
+    expect(consolidated!.provenance).toMatchObject({
+      kind: "consolidated",
+      sources: expect.arrayContaining([seed.id, neighborSameSubject.id]),
+    });
+    expect((consolidated!.provenance as { sources: MemoryId[] }).sources).not.toContain(
+      neighborOtherSubject.id,
+    );
+    // 別 subject の近傍は候補にすら入らないので、統合されず active のまま残る。
+    const otherAfter = await stores.memoryStore.get(ctx, neighborOtherSubject.id);
+    expect(otherAfter?.status).toBe("active");
+  });
+
+  it("tick に渡した ctx.subjectId が種と別でも、種の subject を優先する（種と同じ subject に絞る）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(
+      llmConsolidatingTo({ content: "統合後" }),
+    );
+
+    const seed = await enqueueConsolidateJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: "subject-a",
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    const neighborSameAsSeed = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "same-as-seed neighbor",
+        digest: "n-seed",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborSameAsSeed.id,
+      [8, 0],
+    );
+
+    // ctx.subjectId と同じ subject の近傍——ADR 0310 §3 が実測したとおり、`tick()` は
+    // ジョブを subject で絞って claim できないため、種と別の subject が来ることがある。
+    // ここでは「ctx.subjectId に付けた subject」を優先すると、かえってこれが混ざる
+    // ことになる（ADR 0310 の「種と別」の列）——それを防ぐのがこの歯である。
+    const neighborSameAsCtx = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "same-as-ctx neighbor",
+        digest: "n-ctx",
+        subjectId: "subject-c",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborSameAsCtx.id,
+      [8, 0],
+    );
+
+    const ctxWithDifferentSubject: Ctx = { tenantId: "tenant-1", subjectId: "subject-c" };
+    const tickResult = await runtime.tick(ctxWithDifferentSubject, {
+      kinds: ["consolidate"],
+      leaseMs: 60_000,
+    });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const seedAfter = await stores.memoryStore.get(ctx, seed.id);
+    expect(seedAfter?.status).toBe("superseded");
+    const consolidated = await stores.memoryStore.get(ctx, seedAfter!.supersededById!);
+    expect(consolidated).not.toBeNull();
+    // 種の subject（subject-a）を優先する——ctx に付けた subject-c ではない。
+    expect(consolidated!.subjectId).toBe("subject-a");
+    expect((consolidated!.provenance as { sources: MemoryId[] }).sources).toEqual(
+      expect.arrayContaining([seed.id, neighborSameAsSeed.id]),
+    );
+    expect((consolidated!.provenance as { sources: MemoryId[] }).sources).not.toContain(
+      neighborSameAsCtx.id,
+    );
+    const ctxNeighborAfter = await stores.memoryStore.get(ctx, neighborSameAsCtx.id);
+    expect(ctxNeighborAfter?.status).toBe("active");
+  });
+
+  it("種の subjectId が null なら、今日どおり ctx のまま呼ぶ（挙動を変えない）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(
+      llmConsolidatingTo({ content: "統合後" }),
+    );
+
+    const seed = await enqueueConsolidateJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: null,
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    const neighbor = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "neighbor",
+        digest: "n",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, neighbor.id, [8, 0]);
+
+    // ctx に subjectId を付けない——種が null のとき、ctx をそのまま使うので recall は
+    // テナント全体を見る。今日どおりの挙動（変えていない）を固定する。
+    const tickResult = await runtime.tick(ctx, { kinds: ["consolidate"], leaseMs: 60_000 });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const seedAfter = await stores.memoryStore.get(ctx, seed.id);
+    expect(seedAfter?.status).toBe("superseded");
+    const consolidated = await stores.memoryStore.get(ctx, seedAfter!.supersededById!);
+    expect(consolidated).not.toBeNull();
+    expect((consolidated!.provenance as { sources: MemoryId[] }).sources).toEqual(
+      expect.arrayContaining([seed.id, neighbor.id]),
+    );
+  });
+});
+
 describe("computeAffinity（純関数、strategies/consolidate.ts）", () => {
   it("similarity と lexicalMatch の大きい方を返す", () => {
     expect(
