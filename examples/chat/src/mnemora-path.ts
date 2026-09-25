@@ -255,7 +255,7 @@ function recordedOrderSegment(
 }
 
 /**
- * 行の並び順を「記録順」に揃える凡例（ADR 0304、Issue #691 の続き）。
+ * 行の並び順を「記録順」に揃える凡例（ADR 0305、Issue #691 の続き）。
  *
  * `sortMemoriesForDisplay` で行そのものを並べ替えたときにだけ、この1行を本文の
  * 先頭へ足す——**`order-legend` という描画名で `examples/chat/src/answer-trials-render.ts`
@@ -266,7 +266,7 @@ export const ORDER_LEGEND_LINE =
   "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)";
 
 /**
- * `recall.memories` を表示用に並べ替える（ADR 0304 が採用した `order-legend` 描画）。
+ * `recall.memories` を表示用に並べ替える（ADR 0305 が採用した `order-legend` 描画）。
  *
  * **`recordedAt` を持つ行（`order` に順位がある行）だけを昇順に並べ替える。**
  * `recordedAt` が無い行（`order` に順位が無い行）は、並べ替えの対象にせず、
@@ -340,14 +340,14 @@ function renderRecalledMemoryLine(
  * さらに乖離する——詳細と実測は `docs/recall.md` §6・`examples/chat/README.md`
  * 「`answer`」節・本変更の PR 本文を参照。
  *
- * **2026-09（ADR 0304、`order-legend` 描画）**: 行の並びを `recordedAt` の昇順
+ * **2026-09（ADR 0305、`order-legend` 描画）**: 行の並びを `recordedAt` の昇順
  * （`sortMemoriesForDisplay`）へ差し替え、少なくとも1行が `[記録順:N]` を持つとき
  * （＝ `order.size > 0`）だけ、本文の先頭に {@link ORDER_LEGEND_LINE} を1行足す。
  * 記録順が1つも無い（`recordedAt` を誰も渡していない）呼び出しでは、並べ替えも
  * 凡例も出さない——「並べてある」という文言を、並べ替えていないのに出さないため
  * （n=15 の実測でこの描画（`schedule-change-meeting-day` 13/15）が、由来等の
  * タグを保ったまま記録順だけ生ISOから並べ替え+凡例に変えた3候補中で最も高かった
- * ことが根拠。ADR 0304 を参照。他候補・数値はそちらに集約し、ここには複製しない）。
+ * ことが根拠。ADR 0305 を参照。他候補・数値はそちらに集約し、ここには複製しない）。
  *
  * ⚠ **`recall.memories` の元のスコア順は、この並べ替えで失われる**
  * （`sortMemoriesForDisplay` の doc を参照）。この関数の**出力文字列**からは

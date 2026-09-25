@@ -20,7 +20,7 @@ import {
  */
 
 describe("レジストリ", () => {
-  it("RENDER_NAMES は recorded・digest-only・order-legend の3つ（ADR 0304、採らなかった order-sorted/digest-order-legend は外す）", () => {
+  it("RENDER_NAMES は recorded・digest-only・order-legend の3つ（ADR 0305、採らなかった order-sorted/digest-order-legend は外す）", () => {
     expect(RENDER_NAMES).toEqual(["recorded", "digest-only", "order-legend"]);
   });
 
@@ -112,7 +112,7 @@ describe("変異試験(c): recordedRenderer の一致検査を外すと通って
 
 // ---------------------------------------------------------------------------
 // orderLegendRenderer と、本番の buildMnemoraPrompt（mnemora-path.ts）の一致検査
-// （ADR 0304、マネージャー依頼「同じ材料から組んだ RecallResult を渡した
+// （ADR 0305、マネージャー依頼「同じ材料から組んだ RecallResult を渡した
 // buildMnemoraPrompt の出力と一致することを検査するテストを足す」への回答）。
 // ---------------------------------------------------------------------------
 
@@ -144,7 +144,7 @@ function materialLineToRecalledMemory(line: MaterialMemoryLine, index: number): 
     throw new Error(
       "materialLineToRecalledMemory: 矛盾候補（contradiction）を持つ行は、相手の " +
         "memoryId をテキストから復元できないため、RecallResult へ再構成できない " +
-        "（ADR 0304「組めない部分」）。",
+        "（ADR 0305「組めない部分」）。",
     );
   }
   const recordedAt =
@@ -189,7 +189,7 @@ function materialToRecallResult(material: CaseMaterial): RecallResult {
 }
 
 describe(
-  "orderLegendRenderer と buildMnemoraPrompt の一致（同じ材料から組んだ RecallResult。ADR 0304、" +
+  "orderLegendRenderer と buildMnemoraPrompt の一致（同じ材料から組んだ RecallResult。ADR 0305、" +
     "マネージャー依頼「描画の出力が、同じ材料から組んだ RecallResult を渡した buildMnemoraPrompt の" +
     "出力と一致することを検査する」への回答）",
   () => {

@@ -41,7 +41,7 @@ describe("buildMnemoraPrompt: 由来・話者・主題・矛盾関係の描画�
     it(`${c.id}: ${c.description}`, () => {
       const prompt = buildMnemoraPrompt(recallWith(c.memories));
       const lines = prompt.split("\n");
-      // 先頭は「凡例行が在れば凡例行」（ADR 0304。expectedLegend で判定）。
+      // 先頭は「凡例行が在れば凡例行」（ADR 0305。expectedLegend で判定）。
       // 末尾は必ず索引行。digest 行はその間に、期待した表示順で並ぶ。
       const hasLegend = lines[0] === ORDER_LEGEND_LINE;
       expect(hasLegend).toBe(c.expectedLegend ?? false);
