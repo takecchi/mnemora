@@ -132,7 +132,7 @@ describe("deriveMigrationObjects", () => {
       .sort();
     const texts = fileNames.map((name) => readFileSync(`${migrationsDir}/${name}`, "utf8"));
     const result = deriveMigrationObjects(texts);
-    // Issue #201 / ADR 0313: migrations/0020_taxonomy_labels.sql が `labels`/
+    // Issue #201 / ADR 0314: migrations/0020_taxonomy_labels.sql が `labels`/
     // `memory_labels`（テーブル+2）と `idx_labels_by_status`/`idx_memory_labels_by_label`
     // （索引+2）を足した。Issue #152/#153 / ADR 0312: migrations/0019_observations_memories_attributes.sql
     // が `idx_memories_attributes`（索引+1）を足した。8→10・20→23 はその反映であり、

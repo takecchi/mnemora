@@ -179,7 +179,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * Issue #201 / ADR 0313: 行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）——
+   * Issue #201 / ADR 0314: 行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）——
    * `getDecayClock` と同じ規律。
    */
   async getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode> {

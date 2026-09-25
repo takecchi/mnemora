@@ -84,7 +84,7 @@ export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly db: Db) {}
 
   /**
-   * Issue #201 / [ADR 0313](../../../docs/decisions/0313-taxonomy-labels.md):
+   * Issue #201 / [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md):
    * 新規作成された Memory の `tags` から `proposed` ラベルを作り・件数を数え、
    * `memory_labels` で結び付ける。
    *
@@ -257,7 +257,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
 
-    // Issue #201 / ADR 0313: 新しく作った Memory の `tags` から `proposed` ラベルを
+    // Issue #201 / ADR 0314: 新しく作った Memory の `tags` から `proposed` ラベルを
     // 同一トランザクションで作るため、このメソッド自身がトランザクションを開く
     // ようになった（本 PR 以前は単発の INSERT 文、衝突時は単発の SELECT 文だった——
     // 返す値は変わらない。`inserted`/`existing`/`rowToMemory` の呼び方は1行も
@@ -400,7 +400,7 @@ export class PostgresMemoryStore implements MemoryStore {
       }
 
       const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
-      // Issue #201 / ADR 0313: 同一トランザクションで proposed ラベルを作る
+      // Issue #201 / ADR 0314: 同一トランザクションで proposed ラベルを作る
       // （冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない——`createMemory`
       // の doc コメントと同じ判断）。
       await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
@@ -748,7 +748,7 @@ export class PostgresMemoryStore implements MemoryStore {
         }
 
         const memory = rowToMemory(inserted.rows[0] as unknown as MemoryRow);
-        // Issue #201 / ADR 0313: `news` の各要素について、同一トランザクションで
+        // Issue #201 / ADR 0314: `news` の各要素について、同一トランザクションで
         // proposed ラベルを作る（`createMemory`/`createMemoryWithOutbox` と同じ判断
         // ——冪等衝突〔上の `inserted.rows.length === 0`〕では呼ばない）。
         await this.upsertProposedLabels(tx, ctx, memory.id, memory.tags);
@@ -2094,7 +2094,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 / [ADR 0313](../../../docs/decisions/0313-taxonomy-labels.md):
+   * Issue #201 / [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md):
    * `listLabels?`（`@mnemora/core` の interface doc 参照）。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
@@ -2105,7 +2105,7 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #201 / [ADR 0313](../../../docs/decisions/0313-taxonomy-labels.md):
+   * Issue #201 / [ADR 0314](../../../docs/decisions/0314-taxonomy-labels.md):
    * `registerLabel?`（`@mnemora/core` の interface doc 参照）。行が無ければ
    * `proposed_count: 0` の `registered` 行を作る。既に `proposed` なら `registered` へ
    * 更新し `registered_at` を今にする。既に `registered` なら `registered_at` を
