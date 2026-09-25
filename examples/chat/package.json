@@ -19,6 +19,7 @@
     "validity": "tsx src/cli.ts validity",
     "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
     "lexical-tie-density-bench": "tsx src/bench/lexical-tie-density-bench.ts",
+    "association-anchor-pool-scale-bench": "tsx src/bench/association-anchor-pool-scale-bench.ts",
     "identifier-probes": "tsx src/cli.ts identifier-probes",
     "association-probes": "tsx src/cli.ts association-probes",
     "consolidation-cost": "tsx src/cli.ts consolidation-cost",
