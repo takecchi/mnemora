@@ -99,6 +99,11 @@ describe("live: OpenAI (OPENAI_API_KEY と MNEMORA_LIVE_OPENAI の両方が無�
  * CI にも鍵は無い（`.github/workflows/ci.yml` に `OPENAI_API_KEY` は出てこない）。
  * ⟹ **「実 API が9本を満たすか」は、いまだ誰も測っていない。**この節は、鍵を持つ人が
  * それを1コマンドで測れるようにするために置いてある。
+ *
+ * **追記（2026-09-25、Issue #142 ①）: 上の段落はもう古い。**鍵の在る器で1回走らせ、
+ * 無条件7本は緑だった。決定性も測り、**3件バッチでは同じ入力に別のベクトルが返った**
+ * （単独入力はずれなかった）。⟹ 下の `false` は、いまは「測って非決定的だった」である。
+ * 詳細は [ADR 0330](../../../../docs/decisions/0330-openai-embedding-live-conformance-and-determinism-measured.md)。
  */
 describe.skipIf(!live)(
   "live: 実 API に対する EmbeddingProvider 適合テスト（ADR 0095 / Issue #116）",

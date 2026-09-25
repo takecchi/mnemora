@@ -354,5 +354,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0327](./0327-relation-graph-contested-write-path-design.md) | 関係グラフ本体（Issue #207）の段1 — `memory_relations` へ何を移すか・既存列からの移行の形・多者間 `contested` の解き方（設計のみ） | **提案 (2026-09)** |
 | [0328](./0328-local-embedding-output-cross-runner-reproducibility-measured.md) | `local` 埋め込みの出力は、ランナーをまたいで同じになるか——x64 どうしはビット一致、x64 と arm64 は系統的に不一致（Issue #565、測っただけ。門にはしない） | **提案 (2026-09)** |
 | [0329](./0329-claim-key-known-predicates-from-store.md) | `knownPredicates` を store の既存 predicate 一覧から動的に渡す — ADR 0326「採らなかった案B」を実装し、実測する（Issue #691 続き） | 採用 (2026-09) |
+| [0330](./0330-openai-embedding-live-conformance-and-determinism-measured.md) | 実 API の `OpenAIEmbeddingProvider` に適合テストを当て、決定性を測った——無条件7本は緑、単独入力は一致、3件バッチは一致しない（Issue #142 ①、測っただけ。宣言は変えない） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->
