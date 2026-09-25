@@ -94,12 +94,22 @@ function throwingLlm(message = "simulated LLM outage"): LLMProvider {
   };
 }
 
-function buildRuntime(llmProvider: LLMProvider = notUsedLlm) {
+/**
+ * `wireLexicalStore` は既定 `false`（この関数の既存の全呼び出しと1バイトも変わらない）。
+ * `true` にすると `stores.lexicalStore`（`FakeLexicalStore`）を配線する——
+ * `recall-channels.test.ts`/`buildRuntime` と同じ opt-in パターン。窓（ADR 0089
+ * 「引き受けた負債」4）の ANN/lexical 非対称を測る歯だけがこれを使う。
+ */
+function buildRuntime(
+  llmProvider: LLMProvider = notUsedLlm,
+  opts: { wireLexicalStore?: boolean } = {},
+) {
   const stores = createFakeRuntimeStores();
   const runtime = createRuntime({
     memoryStore: stores.memoryStore,
     outboxStore: stores.outboxStore,
     vectorStore: stores.vectorStore,
+    lexicalStore: opts.wireLexicalStore === true ? stores.lexicalStore : undefined,
     eventStore: stores.eventStore,
     tenantSettingsStore: stores.tenantSettingsStore,
     llmProvider,
@@ -492,6 +502,107 @@ describe("runtime.consolidate — recall() との裏取り（recall 側は変更
       count: 2,
       countKind: "exact",
     });
+  });
+});
+
+/**
+ * ADR 0089「引き受けた負債」4（Issue #765 項目4）: `consolidate` は統合先の作成時に
+ * `createMemoryWithOutbox(..., ["embed"])` で `embed` ジョブを積むだけであり、`tick` が
+ * 回るまで `embeddingStatus: 'pending'` のまま ANN の候補に入らない。統合元は同じ呼び出しの
+ * 中で `superseded` へ動くため、「元は引けなくなったが統合先もまだ引けない」窓が開く。
+ *
+ * 🔴 **この describe は挙動を変えない。**今の実装がこの窓をどう見せるかを、そのまま
+ * 歯として固定するだけである——塞ぐ変更ではない（Issue #765 が「今は決めない」と書いた
+ * 候補のどちらも実装しない）。
+ */
+describe("runtime.consolidate — 統合直後の埋め込み非同期窓（ADR 0089 引き受けた負債4、Issue #765）", () => {
+  /**
+   * この describe だけ `tick()` を経由して `embed` ジョブを claim する。ファイル共通の
+   * `buildRuntime` は `clock: { now: () => NOW }`（`2026-06-01` 固定）を注入しているが、
+   * `FakeOutboxStore.enqueueJob` は `availableAt` を `new Date()`（実時刻）で刻むため、
+   * 固定 clock だと `availableAt <= now` が成り立たず1件も claim されない——下の
+   * 「`runtime.tick — consolidate ジョブは種の subjectId...」describe が同じ理由で
+   * 既に `buildRuntimeWithRealClock` を使っている（そちらのコメント参照）。ここでも
+   * 同じ回避を踏む。
+   */
+  function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    return { runtime, stores };
+  }
+
+  it("統合先は作られた直後 embeddingStatus: 'pending' で ANN では引けず、tick(embed) の後に初めて引ける", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(
+      llmConsolidatingTo({ content: "統合後の本文" }),
+    );
+    const a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "A", embeddingStatus: "ready" }),
+    );
+    const b = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ content: "B", embeddingStatus: "ready" }),
+    );
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, a.id, [1, 0]);
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, b.id, [1, 0]);
+
+    const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } });
+    const consolidatedId = result.consolidatedMemoryId!;
+
+    // (a) 統合先は作られた直後、embeddingStatus は 'pending' のまま
+    // （`buildConsolidatedMemory`、strategies/consolidate.ts、常にこの値を積む）。
+    const justCreated = await stores.memoryStore.get(ctx, consolidatedId);
+    expect(justCreated?.embeddingStatus).toBe("pending");
+
+    // (b) 窓の中: 統合元は superseded で filtered、統合先はまだ vectorStore に
+    // upsert されていないので ANN（既定チャンネル）には一切出てこない——recall は
+    // 0件になる。「見つからなかった」ではなく「まだ引ける状態になっていない」。
+    const duringWindow = await runtime.recall(ctx, { text: "統合後の本文" });
+    expect(duringWindow.memories.map((m) => m.memoryId)).not.toContain(consolidatedId);
+    expect(duringWindow.memories.map((m) => m.memoryId)).not.toContain(a.id);
+    expect(duringWindow.memories.map((m) => m.memoryId)).not.toContain(b.id);
+
+    // (d) tick が embed ジョブを処理すると窓は閉じる。
+    const tickResult = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000 });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const afterTick = await stores.memoryStore.get(ctx, consolidatedId);
+    expect(afterTick?.embeddingStatus).toBe("ready");
+
+    const afterEmbed = await runtime.recall(ctx, { text: "統合後の本文" });
+    expect(afterEmbed.memories.map((m) => m.memoryId)).toContain(consolidatedId);
+  });
+
+  it("(c) lexical チャンネルを配線していれば、embeddingStatus: 'pending' のままでも統合先を引ける——ANN とは非対称", async () => {
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後トークンXYZ" }), {
+      wireLexicalStore: true,
+    });
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+
+    const result = await runtime.consolidate(ctx, { target: { memoryIds: [a.id, b.id] } });
+    const consolidatedId = result.consolidatedMemoryId!;
+    expect((await stores.memoryStore.get(ctx, consolidatedId))?.embeddingStatus).toBe("pending");
+
+    // ANN チャンネルだけでは、この describe の1つ目の歯と同じ理由でまだ引けない。
+    const annOnly = await runtime.recall(ctx, { text: "XYZ", channels: ["ann"] });
+    expect(annOnly.memories.map((m) => m.memoryId)).not.toContain(consolidatedId);
+
+    // 語彙チャンネルは `memories.content` を直接引く経路であり、embeddingStatus には
+    // 依存しない（`packages/postgres/src/lexical-store.ts` の SELECT に
+    // embedding_status の絞りが無い。`FakeLexicalStore` も同じ契約）——
+    // ⟹ tick 前でも統合先が引ける。
+    const withLexical = await runtime.recall(ctx, { text: "XYZ", channels: ["lexical"] });
+    expect(withLexical.memories.map((m) => m.memoryId)).toContain(consolidatedId);
   });
 });
 
