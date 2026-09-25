@@ -1216,6 +1216,29 @@ export interface RecalledMemory {
   /** 矛盾の相手として同伴取得された場合、その相手の memoryId。 */
   companionOf?: MemoryId;
   /**
+   * この記憶が `contested`（矛盾の相手が居る）で、かつその相手（`Memory.contestedWithId`）が
+   * **同じ recall 結果に含まれるとき**、その相手の memoryId（Issue #691 続き、
+   * [ADR 0335](../../../docs/decisions/0335-recalled-memory-contested-with.md)）。
+   *
+   * **`companionOf` とは別の欄である。**`companionOf` は「同伴取得（段3の必須の同伴取得、
+   * `retrievedVia: 'mandatory_companion'`）で候補に引き込まれた側だけが持つ」という
+   * 既存の意味（`docs/recall.md` §8、`examples/chat` の `correction-demo.ts` が
+   * 「ちょうど片方が mandatory_companion」を前提にしている）をそのまま残すために、
+   * 意味を変えずに新設した——`companionOf` は**この記憶が対の中でどちらの役割だったか**
+   * （起点か同伴か）を表すのに対し、この欄は**取得経路を問わず**「対が両方とも
+   * 返っているかどうか」だけを表す。
+   *
+   * **`retrievedVia` の値に関わらず在りうる**——矛盾する2件が同伴取得ではなく
+   * `"ann"`/`"lexical"` で自然に両方とも候補に入ったとき（相手の順位がたまたま
+   * 予算・limit の内側だったとき）にも付く。これが本欄を足した理由そのもの:
+   * 同伴取得（`companionOf`）だけでは、この場合に矛盾を示す手段が無かった。
+   *
+   * **相手が最終的な結果集合（budget による切り詰め後）に含まれないときは付かない**
+   * ——連想枠（`retrievedVia: 'association'`）経由で単独候補になった `contested` な
+   * 記憶や、相手が forget 済み・予算で落ちた場合がこれに当たる（ADR 0335「決定」参照）。
+   */
+  contestedWith?: MemoryId;
+  /**
    * **`retrievedVia: "association"` のときだけ在る。**どのアンカー（`memoryId`）を
    * 起点に連想したか（Issue #200）。`companionOf` と同じ形・同じ理由——
    * 北極星の問い3（この記憶が選ばれた理由を、後から説明できるか）に答えるための欄であり、
@@ -1329,6 +1352,7 @@ export const RecalledMemorySchema = z.object({
   digest: z.string(),
   retrievedVia: z.enum(["ann", "lexical", "mandatory_companion", "association"]),
   companionOf: z.string().min(1).optional(),
+  contestedWith: z.string().min(1).optional(),
   associationOf: z.string().min(1).optional(),
   provenanceKind: ProvenanceKindSchema,
   score: ScoreBreakdownSchema,
