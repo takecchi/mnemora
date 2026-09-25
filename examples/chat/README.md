@@ -1379,16 +1379,11 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run numeral-token-probes
   `identifier-probes`/日本語固有名詞集合の既存の歯・基準値には影響しない
   （report 上は optional なフィールドとして足している）。
 
-### 実測結果（[numeral-token-probe-baseline.json](./numeral-token-probe-baseline.json)、`ruri-v3-30m/sym`・256次元、`DeterministicLLMProvider`）
+### 実測結果
 
-| 群 | `(provider, model, dimensions)` | haystack | MRR | hit@1 | hit@10 | margin(n/mean/stdDev/min) |
-|---|---|---|---|---|---|---|
-| `sparse`(18件) | `local`/`ruri-v3-30m/sym`/256次元 | sparse | **0.917** | 15/18 | 18/18 | n=18 mean=+3.75e-2 stdDev=1.90e-2 min=+1.05e-2 |
-| `dense`(18件) | `local`/`ruri-v3-30m/sym`/256次元 | dense | **0.917** | 15/18 | 18/18 | n=18 mean=+3.75e-2 stdDev=1.90e-2 min=+1.05e-2 |
-
-生の実測値は
-[numeral-token-probe-baseline.json](./numeral-token-probe-baseline.json)に置いてある
-（2回実行し、`measuredAt` を除いて完全一致した）。
+⛔ **値はここに写さない**（`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」）。
+生の実測値は [numeral-token-probe-baseline.json](./numeral-token-probe-baseline.json)
+にあり、CI の Job Summary が毎回それと突き合わせる。
 
 #### 🔴 読み方: sparse と dense が完全一致するのは haystack が効いていないからではない
 
@@ -1411,9 +1406,9 @@ gold 文）である。この兄弟 probe は sparse でも dense でも常に�
   （ADR 0135 §3.3 の実測。「長い前置+漢数字」の別語彙インスタンスは健全だった）。
   この行列は「壊れる条件を狙い撃つ」ためではなく、margin がどう分布するかを
   観測するための実験計画である。
-- **本番（Postgres + pgvector / HNSW）での実測はまだ無い**——ここまでの実測は
-  すべて `@mnemora/local-embedding` のプロセス内推論に対するものである
-  （ANN のインデックス構造は本ベンチの対象外）。
+- **本番規模（1テナント数万件）での HNSW の順位は測っていない**——基準値は
+  ローカル単一ノードの Postgres 17 + pgvector と CI の `pgvector/pgvector:pg17`
+  イメージで、この小さな会話に対して取ったものである。
 - CI ジョブ（`numeral-token-probes`）はこのベンチを門にしていない。基準値と違っても
   落ちない——落ちるのは「重みを取得できなかった」ときだけであり、
   `identifier-probes` と同じ規律・同じ扱いである。

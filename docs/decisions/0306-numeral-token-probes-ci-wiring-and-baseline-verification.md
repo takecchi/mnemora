@@ -158,11 +158,10 @@ ADR 0135 §8-2 は「実装 PR では、既存2集合の出力が壊れないこ
   **この差は§5「引き受けた負債」に明記する(次の人への引き継ぎ)。**
 - ⛔ **`examples/chat/README.md` の `numeral-token-probes` 節と基準値ファイルの
   食い違いを検出する freshness 歯(`scripts/identifier-probes-readme-freshness-lib.mjs`
-  相当、240行)を新設する。** 同じ理由(時間予算)で採らなかった。**⟹ README の
-  `numeral-token-probes` 節にある実測値(MRR 0.917・hit@1=15/18等)は、
-  `numeral-token-probe-baseline.json` が将来更新されても自動的には追随しない**——
-  `identifier-probes` 節が(Issue #425 で実際に一度)踏んだ drift を、この節は
-  歯を持たずに繰り返す可能性がある。**§5に残す。**
+  相当)を新設する。** 要らなくした——**README の節には実測値を1つも写さず、
+  基準値ファイルを指すだけにした**(`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」)。
+  写さなければ食い違いは起きない。`identifier-probes` 節が(Issue #425 で)踏んだ drift は、
+  歯ではなく数を置かないことで避けた。
 - ⛔ **日本語固有名詞集合相当の第3の比較対象をこの集合に追加する。** ADR 0135 §5.3が
   既に却下している(lexicalControl 相当の対照群は置かない)——この ADR はその決定を
   変えない。
@@ -180,8 +179,8 @@ ADR 0135 §8-2 は「実装 PR では、既存2集合の出力が壊れないこ
    検出する歯は無い。次にこの領域へ手を入れる人が、`identifier-probes` と同水準の
    厳密さを求めるなら、`ci-yml-identifier-probes-wiring.test.mjs` を写経して作る
    ことになる。
-2. **README の `numeral-token-probes` 節は freshness 歯で守られていない**(§4)——
-   基準値ファイルが将来更新されても、README の数字は手で直すまで古いままになる。
+2. **README の `numeral-token-probes` 節には freshness 歯が無い**(§4)——数を写して
+   いないので今は要らないが、後から誰かが数を書き足しても検出する歯は無い。
 3. **日本語固有名詞集合(`japanese-name-probe-set.ts`)専用の postgres 歯は新設して
    いない**——`identifier-arm.postgres.test.ts` は `IDENTIFIER_PROBES` だけを対象に
    している。§3 の変異試験は識別子集合の歯でのみ確認しており、日本語固有名詞集合
