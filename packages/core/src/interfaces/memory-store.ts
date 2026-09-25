@@ -1,3 +1,4 @@
+import type { ClaimKey } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent } from "../event.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
@@ -1013,6 +1014,60 @@ export interface MemoryStore {
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  /**
+   * Issue #372（(B) 第2段。`docs/decisions/`「主張キーの衝突を検出する」ADR、ADR 0185
+   * 決定4・ADR 0320 決定7・決定8 の続き）: 「同じ tenant・同じ `subjectId`・同じ claim key
+   * （`claimKeySubject`/`claimKeyPredicate`）・有効期間が重なる・`contentHash` が違う、
+   * 他の `active` Memory」を**列と索引だけで**（LLM を一度も呼ばずに）見つける読み取り
+   * 専用の口。`idx_memories_claim_key`
+   * （`packages/postgres/migrations/0021_memories_claim_key.sql`、ADR 0320 決定7）が
+   * このためにある——`(tenant_id, subject_id, claim_key_subject, claim_key_predicate)` の
+   * 部分索引で絞り込み、`status`/`contentHash`/有効期間の重なりはこの口が追加で絞る
+   * （ADR 0320 決定8「`status` の絞り込みは呼び出し側〔＝この口〕に委ねる」）。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`markContestedPair?`/`resolveContestedPair?` などと同じ理由、
+   * `docs/autonomy.md`「してはいけないこと」表）。**フォールバック経路は無い**——この口が
+   * 無い adapter に対しては、`Runtime` 側の検出（`claimKey.detectContested: true`）は
+   * 何もしない。判定を近似で代替する擬似フォールバックは意図的に作らない
+   * （`markContestedPair?` と同じ判断——近似は北極星 問い3「説明できるか」を壊しうる）。
+   *
+   * 契約:
+   * - **`subjectId` は NULL 同士も一致として扱う**（SQL でいう `IS NOT DISTINCT FROM`）。
+   *   `docs/memory-model.md` の「`NULLS NOT DISTINCT` が要る理由」と同じ配慮——
+   *   `subjectId` を持たない Memory 同士（両方 `null`）も「同じ主題」として扱う。
+   *   ⚠ **recall 側の `RecallScope.subjectId`（既定は厳密一致、`includeSubjectless` で
+   *   明示的に緩める）とは異なる規約である**——検出は「同じかどうか」を問うだけで、
+   *   緩める/締めるという選択肢を持たない。
+   * - **`query.claimKey.subject`/`.predicate` は正規化済みの文字列として、そのまま
+   *   等値比較する**（呼び出し側が既に `normalizeClaimKey` を通した値を渡す前提。
+   *   この口自体は正規化しない）。
+   * - **`status = 'active'` の行だけを返す。**`contested`/`superseded`/`archived`/
+   *   `forgotten` は対象外。
+   * - **`query.excludeMemoryId` に一致する行は返さない**（呼び出し側は通常、いま作った
+   *   ばかりの Memory 自身の id を渡す）。
+   * - **`query.contentHash` と一致する行は返さない**——内容が同じなら矛盾ではない
+   *   （Issue #372 の判定規則そのもの）。
+   * - **有効期間が重ならない行は返さない。**半開区間 `[validFrom, validUntil)` として
+   *   扱い、`validFrom` が `null` なら `-∞`、`validUntil` が `null` なら `+∞` として扱う
+   *   （`aggregateScope` の `validAt` ゲートと同じ NULL の読み方——ただしこちらは「1点」
+   *   ではなく「区間の重なり」を判定する）。
+   * - **返す順序は規定しない。**呼び出し側（`Runtime`）は件数（0/1/2件以上）で分岐する
+   *   だけで、順序に依存する判断をしない。
+   * - **LLM を一度も呼ばない。**列の等値比較・範囲比較・索引アクセスだけで完結する
+   *   （北極星 問い5）。
+   */
+  findActiveByClaimKey?(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]>;
   /**
    * `docs/memory-model.md` §11 行15「`superseded → active`」を書き込む口
    * （`Runtime.restoreSuperseded` の doc コメントに設計全体の理由がある。ここは

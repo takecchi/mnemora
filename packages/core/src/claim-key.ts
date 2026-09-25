@@ -198,18 +198,22 @@ export async function deriveClaimKeys(
 }
 
 /**
- * `runtime.observe`（Observe*Input）の opt-in 口（Issue #371）。
+ * `runtime.observe`（Observe*Input）の opt-in 口（Issue #371、Issue #372）。
  *
  * - **渡さない（省略）**: 既定の挙動。`deriveClaimKeys` は一度も呼ばれず、抽出プロンプト・
- *   カセット鍵・呼び出し回数は1バイトも変わらない。
+ *   カセット鍵・呼び出し回数は1バイトも変わらない。**検出（`detectContested`）も
+ *   もちろん動かない**——鍵が無ければ引くものが無い。
  * - **`{ enabled: true }`**: 抽出後、候補群に対して `deriveClaimKeys` を1回（バッチ）
  *   呼ぶ。`knownPredicates` を省略・空配列にすると語彙ヒント無しで呼ぶ。
  * - **`{ enabled: false }`**: 明示的に無効。省略と同じ挙動だが、呼び出し側が
  *   「このテナント/フローでは意図的に無効にしている」ことをコードで表せる。
- *
- * ⚠ **`extract: 'deferred'` とは併用できない**（`subjectCandidates` と同じ理由——
- * `Observation` に永続化しないため、`processExtractJob` はこの口を構造的に見られない。
- * `runtime.ts` の `observe()` が `subjectCandidates` と同じ位置で検証・拒否する）。
+ * - **`{ enabled: true, detectContested: true }`**（Issue #372、(B) 第2段）:
+ *   鍵が付いた Memory を作った直後、**列と索引だけで**（LLM を一度も呼ばずに）
+ *   同じ tenant・同じ subjectId・同じ claim key・有効期間が重なる・`contentHash` が違う
+ *   他の `active` Memory を探し、ちょうど1件なら `Runtime.markContested` を呼ぶ
+ *   （`superseded` へは進めない）。**`enabled: false`（または省略）と組み合わせても
+ *   何も起きない**——鍵が無いので検出のしようがない（`runtime.ts` の
+ *   `detectClaimKeyContested` 参照）。
  */
 export interface ClaimKeyOptions {
   enabled: boolean;
@@ -220,9 +224,19 @@ export interface ClaimKeyOptions {
    * （`__tests__/schema-type-equals-parity.test.ts` の歯）。
    */
   knownPredicates?: string[];
+  /**
+   * Issue #372（(B) 第2段）: 鍵の衝突検出を opt-in で有効にする。**既定 `false`（省略と
+   * 同じ）。** `enabled: true` と組み合わせたときだけ意味を持つ——`enabled` が
+   * `false`/省略のままこれだけ `true` にしても、鍵が一度も埋まらないので検出は
+   * 常に空振りする（`runtime.ts` の doc コメント参照。これはエラーにしない——
+   * `knownPredicates` を `enabled: false` と組み合わせても無視されるのと同じ「渡された
+   * が効かない」規約）。
+   */
+  detectContested?: boolean;
 }
 
 export const ClaimKeyOptionsSchema = z.object({
   enabled: z.boolean(),
   knownPredicates: z.array(z.string().min(1)).optional(),
+  detectContested: z.boolean().optional(),
 }) satisfies z.ZodType<ClaimKeyOptions>;
