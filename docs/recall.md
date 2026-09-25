@@ -633,6 +633,40 @@ PostgreSQL 17 + pgvector、`packages/postgres/src/bench/scale-bench.ts`、擬似
 [ADR 0011](./decisions/0011-no-window-count-in-ann-stage.md) が同一スナップショットのために
 選んだ設計である。**分ければ別スナップショットになる。**
 
+### `aggregateScope` の単一パス書き換え（2026-09 追記、Issue #355、[ADR 0307](./decisions/0307-aggregate-scope-single-pass.md)）
+
+**上の節（「`subjectId` を省略すると何が起きるか」）は実装を変えず数字を置くだけだったが、
+本節は実装を変えた側の追記である。** `PostgresMemoryStore.aggregateScope` の SQL を
+「`scoped` CTE を3回参照する（本体・`groups`・`digestBand` の各サブクエリ）」形から
+「各行の述語を1回だけ boolean として計算し、`GROUP BY subject_id` で1パスに畳む」形へ
+書き換えた。**公開 API・返り値の型・SQL 文が1本であること（ADR 0011 の同一スナップショット
+契約）は変えていない**——変えたのは SQL の書き方だけである。等価性は
+`packages/postgres/src/__tests__/aggregate-scope-single-pass.postgres.test.ts` が、
+書き換え前の SQL をテスト内に固定した参照オラクルとの完全一致で検査する。詳細・
+採らなかった案（索引・`MATERIALIZED`・近似カウント・`digestBand` と群カウントの分離）は
+ADR 0307。
+
+**実測**（PostgreSQL 17.11 + pgvector 0.8.0、native、10万行、`digestBand` あり
+（limit 50・除外10件）、`new PostgresMemoryStore(db).aggregateScope()` を実際に呼んで
+交互実行・各25回、warm-up 別）:
+
+| | `subjectId` 無し（median） | `subjectId` あり・中規模2,000行（median） |
+|---|---:|---:|
+| 書き換え前 | 281.2ms | 8.53ms |
+| 書き換え後 | 156.0ms | 6.69ms |
+
+⟹ **テナント全体の集計で約1.8倍（-44.5%）。** `EXPLAIN (ANALYZE, BUFFERS)` で、
+書き換え前に3箇所現れていた `CTE Scan on scoped`（実体化・`work_mem` を超えた
+ディスク溢れを伴う）が、書き換え後は1つも現れなくなったことを確認した
+（`scoped`/`agg` とも参照が1回なので Postgres がインライン化する）。
+
+**⚠ 支配項は消えていない。** 10万行を `GROUP BY subject_id` で束ねる1パスの集計
+（`HashAggregate`）そのものは、書き換え後も実測165ms中の約133msを占める。本 ADR が
+削ったのは「3回読む」「digest 本文を持ち回る」「述語を重複評価する」の3つであって、
+テナント全体を集計するコストの本体ではない。**1M行では測っていない**——上の表
+（100k→45.8ms、1M→408ms、いずれも旧い測定条件）と同じ規模で書き換え後を測ったら
+どうなるかは、本 ADR の射程外（ADR 0307「確かめていないこと」）。
+
 ### `includeSubjectless` — subject X または主題なしを1回の recall で引く（Issue #608 項目③(b) / [ADR 0286](./decisions/0286-recall-include-subjectless.md)）
 
 上の節は「`subjectId` を省略すると『テナント全体』になる」という**2値**（絞る/絞らない）
