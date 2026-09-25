@@ -1,10 +1,10 @@
 -- 0019_taxonomy_labels.sql
 --
--- Issue #201 / ADR 0308（案(1)）: taxonomy の語彙管理（labels / memory_labels）を
+-- Issue #201 / ADR 0310（案(1)）: taxonomy の語彙管理（labels / memory_labels）を
 -- Phase 2 の予定から、任意の追加として前倒しで実装する PR-A。
 -- docs/memory-model.md §8 の SQL 案をそのまま採用する。
 --
--- 決定の詳細は ADR 0308 を見ること。ここでは移行そのものに関係する要点だけ書く。
+-- 決定の詳細は ADR 0310 を見ること。ここでは移行そのものに関係する要点だけ書く。
 --
 --   - **書き込みは常に自由（open）のまま。** この移行はテーブルを作り、
 --     `PostgresMemoryStore` の書き込み経路（`createMemory` / `createMemoryWithOutbox` /
@@ -59,7 +59,7 @@ CREATE TABLE memory_labels (
 -- 引くための索引。主キー (tenant_id, memory_id, label_id) の列順は「この Memory のラベル
 -- 一覧」には効くが、逆方向（label_id → memory_id の集合）には効かない。
 -- ⚠ PR-A 自身はこの索引を使う読み出し経路を実装していない——先取りで足しておくだけである
--- （ADR 0308「決めたこと」参照）。
+-- （ADR 0310「決めたこと」参照）。
 CREATE INDEX idx_memory_labels_by_label
   ON memory_labels (tenant_id, label_id);
 
@@ -70,13 +70,13 @@ CREATE INDEX idx_memory_labels_by_label
 -- 各 (tenant_id, tag) の組について、その tag を持つ memories の行数を
 -- proposed_count の初期値とする。この移行より後に作られる Memory は
 -- `PostgresMemoryStore` の書き込み経路が同じ数え方で proposed_count を
--- インクリメントする（ADR 0308）——ここで起動時点の値を揃えておく。
+-- インクリメントする（ADR 0310）——ここで起動時点の値を揃えておく。
 --
 -- ⚠ 同一 Memory の `tags` 配列内に重複した文字列が入っていた場合、その重複ぶんも
 -- 数えてしまう（`unnest` は配列の要素をそのまま展開するため）。`proposed_count` は
 -- 「昇格の判断材料になる目安」であり厳密な一意カウントを契約していない
 -- （docs/memory-model.md §8 参照）ため、ここでは DISTINCT を取らない——書き込み経路
--- （1 Memory ＝ 1回のインクリメント、`tags` 内の重複は `Set` で潰す。ADR 0308 参照）
+-- （1 Memory ＝ 1回のインクリメント、`tags` 内の重複は `Set` で潰す。ADR 0310 参照）
 -- とこの backfill の数え方が完全には一致しない可能性がある、という限界を残す。
 
 INSERT INTO labels (tenant_id, name, status, proposed_count)
