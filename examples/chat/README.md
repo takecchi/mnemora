@@ -1376,6 +1376,35 @@ node scripts/identifier-probe-summary.mjs \
 ⭐ **その手間は目的である**——更新しないと差分が Job Summary に出続け、
 更新すれば新しい値が PR の diff に必ず現れる。
 
+### OpenAI 実埋め込みの追加 arm（Issue #109 後半、[ADR 0316](../../docs/decisions/0316-openai-embedding-false-positive-ceiling.md)）
+
+`identifier-probes` は上の5群（`@mnemora/local-embedding`）に加えて、
+**4群**（`identifiersSparse`/`identifiersDense`/`japaneseNamesSparse`/
+`japaneseNamesDense`）を **OpenAI 実埋め込み**（`text-embedding-3-small`/256次元）でも
+走らせる。CI では鍵もネットワークも要らない——実 API の応答を録った専用カセット
+（[cassettes/identifier-probes.openai.json](./cassettes/identifier-probes.openai.json)）を
+`recorded` provider で再生するだけである。⛔ **`japanese` 群は対象外**——その群は
+既に `retrieval` の arm B/C が同じ空間で測っている（重複して録らない）。
+
+```bash
+MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON=... DATABASE_URL=... \
+  pnpm --filter @mnemora/example-chat run identifier-probes
+```
+
+**⛔ 門ではない。**基準値
+（[identifier-probe-baseline.openai.json](./identifier-probe-baseline.openai.json)）との
+差分と、測定前に決めた「並走の判定」（hit@1 低下・MRR 低下）を Job Summary に出すだけで、
+相違しても・判定が red でも CI は落ちない——この4群のうち少なくとも2群
+（`identifiersSparse`/`identifiersDense`）は、**実測で偽陽性率に低い上限を置けなかった**
+（実 API の埋め込みは呼び出しをまたいで完全には決定的でない）。実測した値と射程は
+[ADR 0316](../../docs/decisions/0316-openai-embedding-false-positive-ceiling.md) に記録して
+ある。⛔ **ここには実測値を写さない**（数を焼き込まない規律）。
+
+**カセット・基準値ファイルの録り直し・K回の再計測**は、ルートの
+[README.md「OpenAI 実埋め込みでの偽陽性率の上限（Issue #109 後半）」](../../README.md#openai-実埋め込みでの偽陽性率の上限issue-109-後半)
+の手順（`tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts`）を使うこと——
+`identifier-probes`/`numeral-token-probes` 両サブコマンドの基準値・カセットを同時に作る。
+
 ---
 
 ## `numeral-token-probes`: 単独トークンの数詞・記号索引の弁別（ADR 0135、Issue #109）
@@ -1460,6 +1489,16 @@ node scripts/numeral-token-probe-summary.mjs \
 一致していれば1行で黙り、違うときだけ内訳を展開する。⛔ 相違では落ちない
 （`exit 0`）——非0になるのは入力そのものが壊れているときだけである。
 **値が意図して動いたときは、基準値ファイルを手で更新すること**（CI は自動更新しない）。
+
+### OpenAI 実埋め込みの追加 arm（Issue #109 後半、[ADR 0316](../../docs/decisions/0316-openai-embedding-false-positive-ceiling.md)）
+
+`identifier-probes` の同名節と同じ規律。`sparse`/`dense` の2群を OpenAI 実埋め込み
+（`text-embedding-3-small`/256次元、`recorded` provider で
+[cassettes/numeral-token-probes.openai.json](./cassettes/numeral-token-probes.openai.json)
+を再生）でも走らせる。基準値は
+[numeral-token-probe-baseline.openai.json](./numeral-token-probe-baseline.openai.json)。
+⛔ 門ではない。再計測の手順・実測した偽陽性率の上限はルートの README.md と
+ADR 0316 を見ること(⛔ ここには実測値を写さない)。
 
 ---
 

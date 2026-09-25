@@ -1,0 +1,81 @@
+{
+  "_readme": "identifier-probes ベンチの4群(identifiersSparse/identifiersDense/japaneseNamesSparse/japaneseNamesDense)を、実 OpenAI embedding(recorded provider で再生)で測った基準値(Issue #109 後半)。examples/chat/identifier-probe-baseline.json(local embedding版)とは別ファイルであり、そちらには1文字も触れていない。生成し直す手段は examples/chat/src/scripts/openai-embedding-fp-ceiling.ts の再実行。",
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "ff325c6f8c1a7bad4a9b55329b8e2121959fef30",
+    "measuredAt": "2026-09-25T03:01:03.997Z",
+    "how": "OPENAI_API_KEY=... DATABASE_URL=... tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts",
+    "embeddingSpace": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 256
+    },
+    "note": "round 0(このファイルの出所)。round 1..59 は同じ設定で独立に録り直し、round 0 からの偽陽性率を測った(openai-embedding-fp-ceiling-measurement.json)。"
+  },
+  "groups": [
+    {
+      "group": "identifiersSparse",
+      "label": "identifier-probes/identifiers-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+      "llmMode": "deterministic",
+      "embeddingMode": "recorded",
+      "embeddingSpace": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "dimensions": 256
+      },
+      "haystackKind": "sparse",
+      "mrrOverall": 0.84,
+      "hit1Count": 21,
+      "hit10Count": 30,
+      "probeCount": 30
+    },
+    {
+      "group": "identifiersDense",
+      "label": "identifier-probes/identifiers-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+      "llmMode": "deterministic",
+      "embeddingMode": "recorded",
+      "embeddingSpace": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "dimensions": 256
+      },
+      "haystackKind": "dense",
+      "mrrOverall": 0.815,
+      "hit1Count": 20,
+      "hit10Count": 30,
+      "probeCount": 30
+    },
+    {
+      "group": "japaneseNamesSparse",
+      "label": "identifier-probes/japanese-names-sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+      "llmMode": "deterministic",
+      "embeddingMode": "recorded",
+      "embeddingSpace": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "dimensions": 256
+      },
+      "haystackKind": "sparse",
+      "mrrOverall": 0.9583333333333334,
+      "hit1Count": 11,
+      "hit10Count": 12,
+      "probeCount": 12
+    },
+    {
+      "group": "japaneseNamesDense",
+      "label": "identifier-probes/japanese-names-dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+      "llmMode": "deterministic",
+      "embeddingMode": "recorded",
+      "embeddingSpace": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "dimensions": 256
+      },
+      "haystackKind": "dense",
+      "mrrOverall": 0.9583333333333334,
+      "hit1Count": 11,
+      "hit10Count": 12,
+      "probeCount": 12
+    }
+  ]
+}
