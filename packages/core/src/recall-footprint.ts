@@ -225,7 +225,25 @@ export const DEFAULT_FOOTPRINT_TOLERANCE = 0.05;
 /**
  * 較正の標本1件。`RecallResult` から `footprintSampleFromRecall` で作れる。
  *
- * **新しい計測を足していない**——3つとも `recall()` が既に返しているものである。
+ * **新しい計測を足していない**——4つとも `recall()` が既に返しているものである。
+ *
+ * ### `totalInScope`（任意、Issue #340 フォローアップ / ADR 0306）
+ *
+ * ⚠ **これは非破壊の純追加である。**省略した標本は、以前と1バイトも変わらない扱いを受ける
+ * ——`calibrateRecallFootprint` は構造項を0として差し引く（＝何も差し引かない）。
+ *
+ * **なぜ足したか**: [ADR 0302](../../../../docs/decisions/0302-recall-footprint-structural-terms.md)
+ * は `estimateRecallFootprint` に、`indexBand` の JSON 構造（帯のカンマ・桁上がり・
+ * `limitedBy`）から決まる4つの構造項を足した。だが `calibrateRecallFootprint` は
+ * この欄が無ければ標本の `totalInScope` を知りようがなく、`totalChars` から同じ構造項を
+ * **差し引けない**——ADR 0302 は「hold-in（`compare-baseline.json` の7行）はすべて
+ * `totalInScope` が1桁」という前提の下でこれを許していた（1桁なら構造項は常に0なので、
+ * 差し引かなくても較正はずれない）。**この前提が崩れる**（2桁以上の標本を較正に混ぜる）
+ * と、桁上がり分が較正係数（`charsPerDigest`/`fixedIndexChars`）へ吸い込まれたうえで、
+ * `estimateRecallFootprint` がその係数の上にもう一度構造項を足す——**二重計上**になる。
+ * ⟹ この欄を足し、`calibrateRecallFootprint` が構造項を推定器と同じ関数
+ * （`indexBandStructuralTerms`、`structuralCarryForSample` から呼ぶ）で計算して
+ * 差し引けるようにした。
  */
 export interface RecallFootprintSample {
   /** `usage.chars`（digest tier + index tier の合計）。 */
@@ -234,6 +252,11 @@ export interface RecallFootprintSample {
   memoryCount: number;
   /** `index.digestBand?.length ?? 0`。 */
   bandEntryCount: number;
+  /**
+   * `index.totalInScope`。**任意——省略すれば構造項を0として扱い、これまでと
+   * 1バイトも変わらない。**上のクラス doc「`totalInScope`（任意）」参照。
+   */
+  totalInScope?: number;
 }
 
 /** `RecallResult` から較正の標本を取り出す。**新しい I/O は要らない。** */
@@ -242,7 +265,27 @@ export function footprintSampleFromRecall(result: RecallResult): RecallFootprint
     totalChars: result.usage.chars,
     memoryCount: result.memories.length,
     bandEntryCount: result.index.digestBand?.length ?? 0,
+    totalInScope: result.index.totalInScope,
   };
+}
+
+/**
+ * 較正の標本1件が実際に含んでいたはずの構造項の合計（Issue #340 フォローアップ / ADR 0306）。
+ *
+ * `sample.totalInScope` が無ければ `0`（＝差し引かない。`calibrateRecallFootprint`
+ * が呼ぶのは常に `bandEntryCount === 0` の標本だけなので、渡す `bandEntries` は `0`
+ * 固定でよく、`charsPerDigest` はその経路では結果に効かないダミー値でよい
+ * （`indexBandStructuralTerms` の doc）。
+ */
+function structuralCarryForSample(sample: RecallFootprintSample): number {
+  if (sample.totalInScope === undefined) return 0;
+  const terms = indexBandStructuralTerms(sample.totalInScope, sample.memoryCount, 0, 0);
+  return (
+    terms.bandChars +
+    terms.totalInScopeDigitCarry +
+    terms.bandCoverageDigitCarry +
+    terms.limitedByChars
+  );
 }
 
 /**
@@ -261,6 +304,19 @@ export function footprintSampleFromRecall(result: RecallResult): RecallFootprint
  * **標本が足りないときに黙って既定値へ倒れない。**どの係数を借りたかは
  * `origin.borrowedFromDefault` に名前で出る（`FootprintProfileOrigin` の doc）。
  *
+ * ### 構造項を差し引いてから最小二乗する（Issue #340 フォローアップ / ADR 0306）
+ *
+ * 「帯が空の標本では `totalChars = fixedIndexChars + memoryCount * charsPerDigest` が
+ * 厳密な線形式になる」という上の主張は、**`totalInScope` が1桁のときだけ**厳密に成り立つ。
+ * `estimateRecallFootprint` は `indexBand` の JSON 構造から決まる4つの構造項
+ * （`indexBandStructuralTerms`、ADR 0302）を足しているので、逆に較正はその項を
+ * **差し引いてから**線形式を当てないと、桁上がり分が `fixedIndexChars`/`charsPerDigest`
+ * に吸い込まれ、`estimateRecallFootprint` 側でもう一度足されて二重計上になる。
+ *
+ * `sample.totalInScope` が在る標本だけ、推定器と同じ `indexBandStructuralTerms`
+ * （唯一の共有実装）で構造項を計算して差し引く。**省略した標本は構造項0として扱う**
+ * ——挙動は以前と1バイトも変わらない（`RecallFootprintSample.totalInScope` の doc）。
+ *
  * @param samples 較正の標本。`bandEntryCount === 0` のものだけが使われる。
  * @param fallback 決められなかった係数の借り元。既定は同梱プロファイル。
  */
@@ -268,7 +324,9 @@ export function calibrateRecallFootprint(
   samples: readonly RecallFootprintSample[],
   fallback: RecallFootprintProfile = BUILTIN_RECALL_FOOTPRINT_PROFILE,
 ): RecallFootprintProfile {
-  const usable = samples.filter((s) => s.bandEntryCount === 0 && s.memoryCount > 0);
+  const usable = samples
+    .filter((s) => s.bandEntryCount === 0 && s.memoryCount > 0)
+    .map((s) => ({ ...s, totalChars: s.totalChars - structuralCarryForSample(s) }));
   const counts = usable.map((s) => s.memoryCount);
   const observedMemoryCount = {
     min: counts.length > 0 ? Math.min(...counts) : 0,
@@ -457,6 +515,67 @@ function extraDigitsBeyondOne(n: number): number {
 const LIMITED_BY_LABEL_ADDED_CHARS = 26;
 
 /**
+ * 構造項(a)〜(d)の内訳。`estimateRecallFootprint`（足す側）と `calibrateRecallFootprint`
+ * （差し引く側、Issue #340 フォローアップ / ADR 0306）の**両方から呼ばれる、唯一の実装**。
+ *
+ * ⚠ **なぜ共有するか**: 2箇所に同じ計算を書くと、どちらかを直したときにもう片方が
+ * 古いまま残り、静かにずれる（この関数が塞ぐ ADR 0306 の不具合自体が、まさに
+ * 「片方だけが構造項を知っている」ことで起きた二重計上だった）。
+ *
+ * @param inScope `memoryCountInScope`（推定側）/ `totalInScope`（較正側）。
+ * @param returnedMemories 実際に(または見積もり上)本体へ返った件数。
+ * @param bandEntries 目次帯に実際に(または見積もり上)載る件数。
+ *   ⚠ **`bandLimit` からではなくこの値自体を渡す**——較正側は実測の
+ *   `bandEntryCount` をそのまま渡せる（`bandLimit` を知らなくてよい）。
+ * @param charsPerDigest 帯1件あたりの費用の計算に使う。`bandEntries === 0` のときは
+ *   結果に影響しない（掛け算の相手が0のため）——較正側は較正中でまだ確定していない
+ *   値でもよい（`bandEntryCount === 0` の標本しか較正に使わないため、常にこの経路）。
+ */
+function indexBandStructuralTerms(
+  inScope: number,
+  returnedMemories: number,
+  bandEntries: number,
+  charsPerDigest: number,
+): {
+  bandChars: number;
+  totalInScopeDigitCarry: number;
+  bandCoverageDigitCarry: number;
+  limitedByChars: number;
+  bandSaturated: boolean;
+} {
+  const bandEligible = Math.max(0, inScope - returnedMemories);
+
+  const perEntry = bandEntryChars(charsPerDigest);
+  const uncappedBandChars = bandEntries * perEntry;
+  const bandSaturated = uncappedBandChars >= DIGEST_BAND_MAX_CHARS;
+  // 構造項(a): 配列の要素区切りは n 件で n-1 個。`bandEntryChars` は1件ごとに
+  // 区切り1字を計上しており(n個分)、帯が非空なら常に1字だけ数えすぎる。
+  // 飽和している領域では `帯の件数` 自体が実際の打ち切り位置と乖離する既存の
+  // 近似が先に効くため、ここでは手を出さない(下の「(d) limitedBy」と同じ理由)。
+  const commaOvercount = !bandSaturated && bandEntries >= 1 ? DIGEST_BAND_ENTRY_SEPARATOR_CHARS : 0;
+  const bandChars = Math.min(uncappedBandChars, DIGEST_BAND_MAX_CHARS) - commaOvercount;
+
+  // 構造項(b)/(c): totalInScope・(単一groupを仮定した)groups[0].count・
+  // digestBandCoverage.shown/eligible の桁上がり。
+  const totalInScopeDigitCarry = 2 * extraDigitsBeyondOne(inScope);
+  const bandCoverageDigitCarry =
+    extraDigitsBeyondOne(bandEntries) + extraDigitsBeyondOne(bandEligible);
+
+  // 構造項(d): entry_limit/char_budget による打ち切りが起きたとき(かつ飽和していない
+  // とき)だけ digestBandCoverage.limitedBy が足される。
+  const limitedByChars =
+    !bandSaturated && bandEligible > bandEntries ? LIMITED_BY_LABEL_ADDED_CHARS : 0;
+
+  return {
+    bandChars,
+    totalInScopeDigitCarry,
+    bandCoverageDigitCarry,
+    limitedByChars,
+    bandSaturated,
+  };
+}
+
+/**
  * `recall()` が積むであろう文字数を見積もる。**LLM を呼ばない。DB も引かない。**
  *
  * 式（すべて `recall-runtime.ts` の構造をそのまま写したもの。ADR 0166 で
@@ -540,26 +659,15 @@ export function estimateRecallFootprint(
   const bandEligible = Math.max(0, inScope - returnedMemories);
   const bandEntries = Math.min(bandLimit, bandEligible);
 
-  const perEntry = bandEntryChars(profile.charsPerDigest);
-  const uncappedBandChars = bandEntries * perEntry;
-  const bandSaturated = uncappedBandChars >= DIGEST_BAND_MAX_CHARS;
-  // 構造項(a): 配列の要素区切りは n 件で n-1 個。`bandEntryChars` は1件ごとに
-  // 区切り1字を計上しており(n個分)、帯が非空なら常に1字だけ数えすぎる。
-  // 飽和している領域では `帯の件数` 自体が実際の打ち切り位置と乖離する既存の
-  // 近似が先に効くため、ここでは手を出さない(上のdocの「(d) limitedBy」と同じ理由)。
-  const commaOvercount = !bandSaturated && bandEntries >= 1 ? DIGEST_BAND_ENTRY_SEPARATOR_CHARS : 0;
-  const bandChars = Math.min(uncappedBandChars, DIGEST_BAND_MAX_CHARS) - commaOvercount;
-
-  // 構造項(b)/(c): totalInScope・(単一groupを仮定した)groups[0].count・
-  // digestBandCoverage.shown/eligible の桁上がり。
-  const totalInScopeDigitCarry = 2 * extraDigitsBeyondOne(inScope);
-  const bandCoverageDigitCarry =
-    extraDigitsBeyondOne(bandEntries) + extraDigitsBeyondOne(bandEligible);
-
-  // 構造項(d): entry_limit/char_budget による打ち切りが起きたとき(かつ飽和していない
-  // とき)だけ digestBandCoverage.limitedBy が足される。
-  const limitedByChars =
-    !bandSaturated && bandEligible > bandEntries ? LIMITED_BY_LABEL_ADDED_CHARS : 0;
+  // 構造項(a)〜(d)。`calibrateRecallFootprint` と共有する唯一の実装
+  // （`indexBandStructuralTerms` の doc、ADR 0306）。
+  const {
+    bandChars,
+    totalInScopeDigitCarry,
+    bandCoverageDigitCarry,
+    limitedByChars,
+    bandSaturated,
+  } = indexBandStructuralTerms(inScope, returnedMemories, bandEntries, profile.charsPerDigest);
 
   const digestChars = returnedMemories * profile.charsPerDigest;
   const indexChars =

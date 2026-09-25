@@ -344,3 +344,56 @@ describe("字数で見た誤差の余白 — hold-out 5行のうちいちばん�
     },
   );
 });
+
+/**
+ * `calibrateRecallFootprint` に `totalInScope`（Issue #340 フォローアップ / ADR 0306）を
+ * 渡しても、この repo の hold-in 7行（`totalInScope` はいずれも1桁——上の「前提」節参照）
+ * では較正係数が**バイト単位で**変わらないことを示す。
+ *
+ * hold-in 7行はすべて `totalInScope <= DEFAULT_RECALL_LIMIT`(10) であり、実際の値は
+ * 2/3/3/3/4/5/8（`compare-baseline.json` 実測、上の `describe` 群が既に検算済み）と
+ * すべて1桁——構造項（`indexBandStructuralTerms`、`totalInScope` の桁上がり）は
+ * このデータでは常に0になる。⟹ `totalInScope` を渡しても渡さなくても
+ * `calibrateRecallFootprint` の出力は**完全に同じ値**のはずである
+ * （`Object.is` で比較——`toBeCloseTo` ではなく、丸めの余地を一切与えない）。
+ *
+ * ⚠ **この歯は ACCURACY_TOLERANCE・FLOOR_CHARS・compare-baseline.json・hold-in/hold-out
+ * の分け方のいずれも変更しない。**既存の `holdInRows`/`ACCURACY_TOLERANCE` をそのまま
+ * 読むだけである。
+ */
+describe("calibrateRecallFootprint — totalInScope を渡しても、hold-in 7行(すべて1桁)では係数がバイト単位で変わらない（Issue #340 フォローアップ / ADR 0306）", () => {
+  const samplesWithout: RecallFootprintSample[] = holdInRows.map((row) => ({
+    totalChars: row.mnemoraChars,
+    memoryCount: row.returnedCount,
+    bandEntryCount: 0,
+  }));
+  const samplesWith: RecallFootprintSample[] = holdInRows.map((row) => ({
+    totalChars: row.mnemoraChars,
+    memoryCount: row.returnedCount,
+    bandEntryCount: 0,
+    totalInScope: row.totalInScope,
+  }));
+
+  it("hold-in 7行がすべて1桁であること（この歯の前提。桁上がりが起きない形であることを検算する）", () => {
+    for (const row of holdInRows) {
+      expect(row.totalInScope, `turnCount=${row.turnCount}`).toBeLessThanOrEqual(9);
+    }
+  });
+
+  it("charsPerDigest / fixedIndexChars とも Object.is で完全一致する（totalInScope の有無で1バイトも変わらない）", () => {
+    const withoutProfile = calibrateRecallFootprint(samplesWithout);
+    const withProfile = calibrateRecallFootprint(samplesWith);
+    expect(Object.is(withProfile.charsPerDigest, withoutProfile.charsPerDigest)).toBe(true);
+    expect(Object.is(withProfile.fixedIndexChars, withoutProfile.fixedIndexChars)).toBe(true);
+    // BUILTIN_RECALL_FOOTPRINT_PROFILE 自身の実測値とも一致すること(3桁目まで)——
+    // ADR 0302 の「較正係数は1つも動かしていない」という主張の、本 PR 版の確認。
+    expect(withProfile.charsPerDigest).toBeCloseTo(
+      BUILTIN_RECALL_FOOTPRINT_PROFILE.charsPerDigest,
+      2,
+    );
+    expect(withProfile.fixedIndexChars).toBeCloseTo(
+      BUILTIN_RECALL_FOOTPRINT_PROFILE.fixedIndexChars,
+      2,
+    );
+  });
+});
