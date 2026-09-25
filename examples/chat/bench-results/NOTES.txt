@@ -1,0 +1,37 @@
+answer-time-weighting 段2b: 実API（live、gpt-4o-mini + text-embedding-3-small）による評価実測。
+マネージャー指示（Issue #690）に基づき、dev+eval+eval-undated の全16ケース × legacy/
+eventAwareFreshness の2方針 × trials=5 を2回連続で実行した。
+
+温度（temperature）: 明示指定していない（packages/openai/src/llm-provider.ts の
+complete()/completeStructured() はどちらも chat.completions.create() へ temperature を
+渡していない）——OpenAI API の既定値（1.0）がそのまま使われている。
+
+- answer-time-weighting-live-eval-run1.log: 1回目の実行の標準出力そのまま（表形式の
+  正答数/5、類型ごとの正答率、usage-meter の呼び出し回数・費用）。
+  ⚠ この回は eval-undated-c1-seat-floor-reinforced で
+  eventAwareFreshness=1/5 < legacy=5/5 という退行を観測した——マネージャーが定めた
+  「eventAwareFreshness の正答数が legacy より少ないケースが1件でも出たら止まれ」に
+  該当し、この回の後で作業を止めた。
+
+- answer-time-weighting-live-eval-run2.json: MNEMORA_TIME_WEIGHTING_JSON で書き出した
+  機械可読な2回目の実行結果（`buildTimeWeightingJson` の形。trials/verdict/
+  recallMemoryCount 等の生データ + aggregate 集計）。この回は同じケースで
+  eventAwareFreshness=5/5 = legacy=5/5 となり、退行は再現しなかった。
+
+⟹ eval-undated-c1-seat-floor-reinforced は境界例である。設計上の理由
+（time-weighting-case-set.eval-undated.ts の rationale 参照——古い側が occurredAt/
+validFrom/validUntil のいずれも持たず reinforce もされているため、eventAwareFreshness
+下での freshness=1 と高い decay の組み合わせがちょうど閾値付近になる）に加え、
+実API側の非決定性（同じ入力でも embeddings.create は完全には再現しない
+ことが cli.ts の verify コメントで既に実測されている。chat.completions.create は
+temperature 未指定＝既定1.0でさらに揺れる）が重なって、5trial中の合否がぶれたと考えられる。
+
+呼び出し回数・費用（2回の合計）:
+  chat.completions.create: 160回 + 160回 = 320回
+  embeddings.create      : 320回 + 320回 = 640回
+  概算費用（run1 + run2）: $0.003639 + $0.004032 = $0.007671（公開価格表による概算、
+  OpenAI の請求APIから取得した実額ではない）
+
+この後の作業（record:answer-time-weighting によるカセット記録・CI再生ステップ・
+cassette-coverage への追加・verify）は、上記の退行報告のためマネージャーの指示待ちで
+保留している。

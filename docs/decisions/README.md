@@ -324,5 +324,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0297](./0297-answer-retention-judge-positive-control-recorded.md) | 完了条件4「回答評価」側の陽性対照を実 API で記録し、カセット再生の歯として固定する（Issue #498） | **提案 (2026-09)** |
 | [0298](./0298-recalled-memory-recorded-occurred-at.md) | `RecalledMemory` に `recordedAt`/`occurredAt` を任意欄として足す —— Issue #691 の子（Issue #702）、「後で訂正された」を読むための時点（非破壊） | 採用 (2026-09) |
 | [0299](./0299-extraction-context.md) | 抽出文脈を観測と保存し、相対日付の暦計算をモデルから分ける | **提案 (2026-09)** |
+| [0300](./0300-time-weighting-policy-opt-in.md) | 既定スコアの時間二重減衰を分ける — `occurredAt` が無い記憶には `freshness` を掛けない明示的 opt-in を `RecallQuery` に足す（Issue #690） | **提案 (2026-09)** |
 
 <!-- ADR-INDEX:GENERATED:END -->

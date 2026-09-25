@@ -26,16 +26,40 @@ const here = dirname(fileURLToPath(import.meta.url));
 export const RETRIEVAL_CASSETTE_PATH = join(here, "..", "cassettes", "retrieval.json");
 export const COMPARE_CASSETTE_PATH = join(here, "..", "cassettes", "compare.json");
 export const ANSWER_CASSETTE_PATH = join(here, "..", "cassettes", "answer.json");
+/**
+ * `answer-time-weighting` ベンチ（Issue #690 / PR #697、`timeWeighting` を回答の正誤で
+ * 比較する器）専用のカセット。**`answer.json` とは別ファイルにする**——ADR 0052 と同じ
+ * 理由（入力の集合が別物・費用が別勘定）に加え、こちらはケースごとに `recall()` を
+ * `legacy`/`eventAwareFreshness` の2方針で呼ぶため、同じ質問でも記録の鍵（プロンプトの
+ * ハッシュ）が `answer` ベンチとは異なる——1つのファイルにまとめる技術的な理由も無い。
+ *
+ * ⚠ 段1（本 commit）ではこのパスを**宣言するだけ**で、ファイル自体はまだ存在しない。
+ * `record:answer-time-weighting`（実 API 必須）を実行して初めて作られる——
+ * `answer.json` 等の既存カセットと同じく、手編集は禁止（`describeCassette` 等が
+ * 前提にする形式検査 `assertCassette` を満たす保証が無くなる）。
+ */
+export const ANSWER_TIME_WEIGHTING_CASSETTE_PATH = join(
+  here,
+  "..",
+  "cassettes",
+  "answer-time-weighting.json",
+);
 
 /** `record` / `verify` / 再生が対象にできるカセット。 */
-export type CassetteTarget = "retrieval" | "compare" | "answer";
+export type CassetteTarget = "retrieval" | "compare" | "answer" | "answer-time-weighting";
 
-export const CASSETTE_TARGETS: readonly CassetteTarget[] = ["retrieval", "compare", "answer"];
+export const CASSETTE_TARGETS: readonly CassetteTarget[] = [
+  "retrieval",
+  "compare",
+  "answer",
+  "answer-time-weighting",
+];
 
 const CASSETTE_PATH_BY_TARGET: Record<CassetteTarget, string> = {
   retrieval: RETRIEVAL_CASSETTE_PATH,
   compare: COMPARE_CASSETTE_PATH,
   answer: ANSWER_CASSETTE_PATH,
+  "answer-time-weighting": ANSWER_TIME_WEIGHTING_CASSETTE_PATH,
 };
 
 export function cassettePathFor(target: CassetteTarget): string {
@@ -48,7 +72,12 @@ export function cassettePathFor(target: CassetteTarget): string {
  * 取り違えは実害になる）。
  */
 export function parseCassetteTarget(value: string | undefined): CassetteTarget {
-  if (value === "retrieval" || value === "compare" || value === "answer") {
+  if (
+    value === "retrieval" ||
+    value === "compare" ||
+    value === "answer" ||
+    value === "answer-time-weighting"
+  ) {
     return value;
   }
   throw new Error(

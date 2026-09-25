@@ -17,6 +17,16 @@ export interface OpenAILLMProviderOptions {
   apiKey?: string;
   model: string;
   client?: Pick<OpenAI, "chat">;
+  /**
+   * `chat.completions.create` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
+   *
+   * **省略時（既定）は渡さない**——OpenAI API 自身の既定値がそのまま使われ、
+   * この欄を渡さない既存の呼び出しの挙動は1バイトも変わらない。`examples/chat` の
+   * `answer-time-weighting` ベンチが、temperature を固定して非決定性を切り分けるために
+   * `CreateProvidersOptions.llmTemperature`（`providers.ts`）経由でのみ使う——
+   * 他のベンチ・呼び出し元はこの欄を渡さない。
+   */
+  temperature?: number;
 }
 
 /**
@@ -119,16 +129,19 @@ function toOpenAIMessages(
 export class OpenAILLMProvider implements LLMProvider {
   private readonly client: Pick<OpenAI, "chat">;
   private readonly model: string;
+  private readonly temperature?: number;
 
   constructor(options: OpenAILLMProviderOptions) {
     this.client = options.client ?? new OpenAI({ apiKey: options.apiKey });
     this.model = options.model;
+    this.temperature = options.temperature;
   }
 
   async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
     const response = await this.client.chat.completions.create({
       model: this.model,
       messages: toOpenAIMessages(req),
+      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
     });
     assertNotRefusedOrTruncated(response.choices[0]);
     // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
@@ -146,6 +159,7 @@ export class OpenAILLMProvider implements LLMProvider {
       model: this.model,
       messages: toOpenAIMessages(req.prompt),
       response_format: { type: "json_schema", json_schema: format },
+      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
     });
     // ⭐ **`content` を読む前に拒否・切り詰めを見る。**順序が本質である
     // ——後ろに置くと、拒否が `no_content` に化けて種類が潰れる（拒否時は `content` が `null`）。

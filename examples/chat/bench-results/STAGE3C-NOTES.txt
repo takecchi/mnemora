@@ -1,0 +1,85 @@
+answer-time-weighting 段3c: 食い違いの調査（実 API なし、Issue #690）。
+
+## 経緯
+段3b-1（本評価の取り直し、temperature=0・trials=5）で
+eval-undated-c1-seat-floor-reinforced の eventAwareFreshness が 5/5（全問正解）に
+なったのに対し、段3a（切り分け、temperature=0・20回）では同じケース・同じ
+temperature=0 で 0/20 だった。マネージャー指示により、実 API を一切叩かず、
+残っている生データ・カセットだけでこの食い違いを調査した。
+
+## 手順
+1. 両方の生データ（`answer-time-weighting-stage3a-isolation.json`・
+   `answer-time-weighting-live-eval-temp0.json`）から、同一ケース・同一方針
+   （eventAwareFreshness）の `inputChars` を比較した。
+   - 段3a: `inputChars=81`（全20 trial で同一）
+   - 段3b-1: `inputChars=185`（全5 trial で同一）
+   ⟹ **プロンプトの長さ自体が違う。** recall のスコア（`contextDiagnostics`）は
+   両方とも `old-seat-undated: rank=1, total=0.8031002918516041`
+   （ビット単位で同一）であり、文脈に入った記憶の集合・順序は変わっていない
+   ——変わっているのは、その記憶を prompt へ描画する書式のほうである。
+
+2. 原因を特定するため、`examples/chat/cassettes/answer-time-weighting.json`
+   （段3b-2で記録済み、温度0）を `MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded`
+   で再生し（実 API 不要）、`runTimeWeightingCase` を直接呼んで
+   eval-undated-c1-seat-floor-reinforced の実際のプロンプト・回答を確認した。
+   結果（再生、鍵不要）:
+
+   ```
+   === eventAwareFreshness ===
+   verdict: pass inputChars: 185
+   --- prompt ---
+   - [由来:imported] [主題:なし] [記録順:1] [出来事時刻:不明] オフィスの座席は3階です。
+   - [由来:imported] [主題:なし] [記録順:2] [出来事時刻:2026-07-26T09:00:00.000Z] 先週、座席が5階に移動した。
+   (索引: スコープ内 2 件のうち 2 件を提示)
+
+   質問: いまのオフィスの座席は何階ですか?
+   --- answer ---
+   5階です。
+   ```
+
+   これは段3b-1・段3b-2（記録時）が実際に使った書式そのもの（記録済みカセットの
+   再生なので、記録時の実際の回答と一致する）。
+
+3. 段3a のスクリプト（`time-weighting-stage3a-isolation.ts`）が呼んでいる
+   `runTimeWeightingCase`/`runTimeWeightingPolicy` は本ベンチと**同じ関数**であり、
+   経路の違いは無い。違いは呼び出し時点の `mnemora-path.ts` の実装そのものにあった:
+   - 段3a を実行した時点（`abe29b2` 系のコミット時点）: `buildMnemoraPrompt` は
+     `recall.memories[].digest` を `- ${digest}` として並べるだけだった。
+   - 段3b-1/3b-2 を実行した時点: このブランチが `origin/main`（Issue #691 / PR #698
+     「回答プロンプトで記憶の由来・話者・主題・矛盾関係を保持する」、ADR
+     0295-answer-prompt-provenance-rendering、段3bの「1. main の取り込み」で
+     マージ済み）を取り込んでおり、`buildMnemoraPrompt` は
+     `provenanceKind`/`subjectId`/記録順/`occurredAt` をタグとして各行に付けるように
+     変わっていた。
+   ⟹ **段3a と段3b-1 は、同じケース定義・同じ recall() 結果に対して、
+   違うバージョンの `buildMnemoraPrompt` を通していた。** これが `inputChars`
+   の違い（81 対 185）の直接の原因であり、`gradeAnswer` の結果が割れた
+   直接の原因でもある。
+
+## 結論
+- **特定できた**: プロンプトの差は `[出来事時刻:...]` タグの有無である。旧書式
+  （タグ無し）では回答生成モデルに「この記憶に occurredAt があるかどうか」が
+  一切伝わらず、モデルは「分かりません。」と答えた（`3階`/`5階` のどちらの語も
+  含まないため `gradeAnswer` は `fail`——古い方を選んだのではなく、答えを保留した）。
+  新書式（`[出来事時刻:不明]` 対 `[出来事時刻:2026-07-26T09:00:00.000Z]`）では、
+  モデルは「5階です。」と正しく答えた（`pass`）。
+- **「OpenAI の temperature=0 は非決定的」という当初の説明は撤回する。**
+  プロンプトの同一性を確かめずに立てた仮説であり、実際にはプロンプト自体が
+  違っていた。ADR 0300 §6.4・docs/recall.md §7.1・
+  `bench-results/STAGE3B-1-NOTES.txt` を訂正した。
+- **取り引きの結論（検索側の事実）は変わらない**: `eventAwareFreshness` は
+  `occurredAt`/validity 列を持たない、reinforce 済みの古い予定を、
+  `recall()` のスコアリング上つねに rank1・文脈入りさせる——これは段3a・段3b-1の
+  両方で100%・ビット単位で再現しており、プロンプトの書式には依存しない。
+  **依存するのは、その検索結果が最終的な誤答に繋がるかどうかのほうであり、
+  それは回答プロンプトが `occurredAt` の有無を回答生成モデルにどう見せるかに
+  左右される。**
+
+## 副産物: CI が起動しなかった原因（マネージャーが特定）
+このブランチの PR #697 は `origin/main` と衝突していた（`mergeable=CONFLICTING`）
+——`pull_request` トリガーの CI は、衝突があると走らない。段3cの「1. main の
+取り込み」で `origin/main` をマージ（衝突は `docs/decisions/README.md` のみ、
+`node scripts/generate-adr-index.mjs` で再生成して解消）し、ADR を0299→0300へ
+再度振り直した（`origin/main` に #694 が ADR 0299 を先に採っていたため）。
+push 後、`gh pr view 697 --json mergeable` が `MERGEABLE` になり、CI（run id は
+報告参照）が起動した。

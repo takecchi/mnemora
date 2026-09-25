@@ -461,6 +461,15 @@ export interface CreateProvidersOptions {
    * ——叩いていない API は記録しようがない。
    */
   recorder?: CassetteRecorder;
+  /**
+   * `OpenAILLMProvider` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
+   *
+   * **省略時（既定）は渡さない**——`llmMode === "openai"` の既存の呼び出し（`compare`/
+   * `retrieval`/`answer` 等）はこの欄を渡していないため、挙動は1バイトも変わらない。
+   * `answer-time-weighting` ベンチが、非決定性を切り分けるために temperature を固定
+   * したいときだけ明示的に渡す。
+   */
+  llmTemperature?: number;
 }
 
 export function createProviders(
@@ -470,7 +479,7 @@ export function createProviders(
   const mode = selectProviderMode(env);
   const llmMode = selectLLMMode(env);
   const embeddingMode = selectEmbeddingMode(env);
-  const { cassette, recorder } = options;
+  const { cassette, recorder, llmTemperature } = options;
 
   const requireCassette = (which: string): Cassette => {
     if (cassette === undefined) {
@@ -508,6 +517,7 @@ export function createProviders(
       apiKey: env.OPENAI_API_KEY,
       model: OPENAI_LLM_MODEL,
       client: usageMeter?.client,
+      ...(llmTemperature !== undefined ? { temperature: llmTemperature } : {}),
     });
     return recorder ? new RecordingLLMProvider(real, recorder, OPENAI_LLM_MODEL) : real;
   };

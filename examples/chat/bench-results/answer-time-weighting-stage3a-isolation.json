@@ -1,0 +1,3859 @@
+{
+  "measuredAt": "2026-09-24T21:22:48.979Z",
+  "targetCaseId": "eval-undated-c1-seat-floor-reinforced",
+  "oldLocalId": "old-seat-undated",
+  "runsPerPolicy": 20,
+  "settings": [
+    {
+      "label": "unspecified",
+      "trials": [
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 1,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "eccf7275-00e0-4a99-b567-9c197dbe81cf",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "cad96739-1402-4b6b-b798-3c48d5b9146e",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "cad96739-1402-4b6b-b798-3c48d5b9146e",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "eccf7275-00e0-4a99-b567-9c197dbe81cf",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 2,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "d0c55202-e757-4ebd-a885-6f727e652459",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "1bb8048a-6c16-4bfb-8ced-80bb9dfddfc3",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "1bb8048a-6c16-4bfb-8ced-80bb9dfddfc3",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "d0c55202-e757-4ebd-a885-6f727e652459",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 3,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "6a24b99d-eaf9-4410-90a4-e5b56f64b0b8",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "823a877e-b3ec-4a3e-870a-09a705e22ddf",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "823a877e-b3ec-4a3e-870a-09a705e22ddf",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "6a24b99d-eaf9-4410-90a4-e5b56f64b0b8",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 4,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "4aaa87d9-6c61-424f-9505-cf1e3ef2a87f",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "447c0d5a-a984-409c-83ab-fb16e9f9594f",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "447c0d5a-a984-409c-83ab-fb16e9f9594f",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "4aaa87d9-6c61-424f-9505-cf1e3ef2a87f",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 5,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c2cdc36f-abfe-4a73-88c5-b1bbdb51913e",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "fe881527-aa8c-43d4-8b2a-7af8c68868aa",
+                  "rank": 2,
+                  "total": 0.0007842336729475681,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "fe881527-aa8c-43d4-8b2a-7af8c68868aa",
+                  "rank": 1,
+                  "total": 0.8030552810983097,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c2cdc36f-abfe-4a73-88c5-b1bbdb51913e",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 6,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "今のオフィスの座席は5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c1114728-bddb-4563-9c40-efd26a05216f",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "af679703-8540-4586-9b09-f60604661ac9",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "af679703-8540-4586-9b09-f60604661ac9",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c1114728-bddb-4563-9c40-efd26a05216f",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 7,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "ec923f0c-eb48-4fa8-868c-9881487c0717",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "69d448d1-6930-46c2-89be-ea9466469f8c",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "69d448d1-6930-46c2-89be-ea9466469f8c",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "ec923f0c-eb48-4fa8-868c-9881487c0717",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 8,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "d447d836-d051-45b2-9be9-6135fef512fb",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "8b65740a-9b37-47eb-8080-21d10f06b8ef",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "8b65740a-9b37-47eb-8080-21d10f06b8ef",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "d447d836-d051-45b2-9be9-6135fef512fb",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 9,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "e76c6824-7316-44cb-a136-f73fa88b85e9",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "cbb96368-2000-4168-86eb-0e55aff2087f",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "cbb96368-2000-4168-86eb-0e55aff2087f",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "e76c6824-7316-44cb-a136-f73fa88b85e9",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 10,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "3d9905d5-cced-4868-b335-ac8ba948cbce",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "59be9ffd-ed6d-45fb-a68a-f0625ed50c3f",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "59be9ffd-ed6d-45fb-a68a-f0625ed50c3f",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "3d9905d5-cced-4868-b335-ac8ba948cbce",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 11,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "463c6325-4c7d-417e-9001-7665d54fb0d1",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "cde5515f-9c70-4ee5-b033-7c58d05f4278",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "cde5515f-9c70-4ee5-b033-7c58d05f4278",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "463c6325-4c7d-417e-9001-7665d54fb0d1",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 12,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "08ee890e-2dae-45f3-9320-3e7dca8054e8",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "31c4a4cb-4ead-4e92-90b7-3955cdd2242b",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "31c4a4cb-4ead-4e92-90b7-3955cdd2242b",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "08ee890e-2dae-45f3-9320-3e7dca8054e8",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 13,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c2116de8-5e72-42b0-907c-6c42c5347780",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "1e243c4a-b566-4171-8e6c-7c71c2148e0e",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "1e243c4a-b566-4171-8e6c-7c71c2148e0e",
+                  "rank": 1,
+                  "total": 0.8030711848577204,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c2116de8-5e72-42b0-907c-6c42c5347780",
+                  "rank": 2,
+                  "total": 0.443180607664435,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 14,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "3f37dd55-87a7-4447-ac63-2bbcefb89fb3",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "7c9144bd-e2f5-4457-be3e-a2bc5faf6b4a",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "7c9144bd-e2f5-4457-be3e-a2bc5faf6b4a",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "3f37dd55-87a7-4447-ac63-2bbcefb89fb3",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 15,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c4b79218-b66c-447e-88d2-428d7631ef78",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "59b93a4c-2340-45dc-b2e6-461d9f5afb60",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "59b93a4c-2340-45dc-b2e6-461d9f5afb60",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c4b79218-b66c-447e-88d2-428d7631ef78",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 16,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "66a0eaa1-9883-45ab-bc4d-3e69a78da31a",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "0649107a-73c1-4de1-8be7-db84db6213f9",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "0649107a-73c1-4de1-8be7-db84db6213f9",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "66a0eaa1-9883-45ab-bc4d-3e69a78da31a",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 17,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "8e4eb61c-592b-4754-9884-73e624ae67e4",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "fb72be2a-cb76-43a4-a0f7-761a9a85d087",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "fb72be2a-cb76-43a4-a0f7-761a9a85d087",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "8e4eb61c-592b-4754-9884-73e624ae67e4",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 18,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "0c6ed878-fa67-4978-a4e6-8376c8256ab3",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "86720672-30ef-49de-a443-5b8f389d1887",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "86720672-30ef-49de-a443-5b8f389d1887",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "0c6ed878-fa67-4978-a4e6-8376c8256ab3",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 19,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "f66bc3b9-51de-42bb-9c61-4d119fa05a5d",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "711e8ed4-b298-4918-a8f8-a1c35c839223",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "711e8ed4-b298-4918-a8f8-a1c35c839223",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "f66bc3b9-51de-42bb-9c61-4d119fa05a5d",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 20,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "938ef566-f3b5-441a-a6e4-9cf636975980",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "d7da995c-7d92-4141-af35-2988e8585ced",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "d7da995c-7d92-4141-af35-2988e8585ced",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "938ef566-f3b5-441a-a6e4-9cf636975980",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "label": "zero",
+      "llmTemperature": 0,
+      "trials": [
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 1,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "3f133d57-e19b-439d-af37-4437e684482b",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "c2a26af3-5ad3-4e41-8661-7be73225096b",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "c2a26af3-5ad3-4e41-8661-7be73225096b",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "3f133d57-e19b-439d-af37-4437e684482b",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 2,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c70d0227-9cf5-4673-b508-bc57345657e3",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "75639734-9298-40c5-ad28-8d11f7c66357",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "75639734-9298-40c5-ad28-8d11f7c66357",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c70d0227-9cf5-4673-b508-bc57345657e3",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 3,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "e97c60d6-3f6d-4a9d-a5c6-c58034194245",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "f8e3829c-04eb-4969-851e-182dbbb8558c",
+                  "rank": 2,
+                  "total": 0.0007842336729475681,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "f8e3829c-04eb-4969-851e-182dbbb8558c",
+                  "rank": 1,
+                  "total": 0.8030552810983097,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "e97c60d6-3f6d-4a9d-a5c6-c58034194245",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 4,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "23c8b8c1-7715-41ed-b69b-ad0fdb673851",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "3f76890c-3dc2-4e19-bdaf-1d2e476feab5",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "3f76890c-3dc2-4e19-bdaf-1d2e476feab5",
+                  "rank": 1,
+                  "total": 0.8030711848577204,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "23c8b8c1-7715-41ed-b69b-ad0fdb673851",
+                  "rank": 2,
+                  "total": 0.443180607664435,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 5,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "52361914-c262-4fb2-9d4c-3f22464d29c9",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "da48b831-a620-494a-8d7d-3c7e7dc74f43",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "da48b831-a620-494a-8d7d-3c7e7dc74f43",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "52361914-c262-4fb2-9d4c-3f22464d29c9",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 6,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "ea797501-d258-42d5-8f27-01a9c2e3ae9b",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "ee4fcf35-bc26-42c5-ac00-6c6270eecea1",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "ee4fcf35-bc26-42c5-ac00-6c6270eecea1",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "ea797501-d258-42d5-8f27-01a9c2e3ae9b",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 7,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "2719e4ba-aaf4-468b-ab9e-b1a56dc03520",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "626ebf6f-4810-4a34-86f6-398dfb9c7283",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "626ebf6f-4810-4a34-86f6-398dfb9c7283",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "2719e4ba-aaf4-468b-ab9e-b1a56dc03520",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 8,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "d5604d0e-c6ab-4d76-9aab-5f5febf16622",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "961a6683-444b-47a3-aadf-242071677731",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "961a6683-444b-47a3-aadf-242071677731",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "d5604d0e-c6ab-4d76-9aab-5f5febf16622",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 9,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "e2fa711f-2da4-4685-8387-23cf9ee7f03f",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "14423ab8-ca0c-4e08-a0b5-7e07eb793822",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "14423ab8-ca0c-4e08-a0b5-7e07eb793822",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "e2fa711f-2da4-4685-8387-23cf9ee7f03f",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 10,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "5dfc3292-62c8-40cb-b07c-ed3ccd3e50e2",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "05ca06af-9425-4add-8d8b-eb27ffd21cf1",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "05ca06af-9425-4add-8d8b-eb27ffd21cf1",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "5dfc3292-62c8-40cb-b07c-ed3ccd3e50e2",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 11,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "ee96ea82-34c9-4268-8fd2-73d85cf67fbd",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "0fb6ede0-0d57-490c-a6b9-48db46314224",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "0fb6ede0-0d57-490c-a6b9-48db46314224",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "ee96ea82-34c9-4268-8fd2-73d85cf67fbd",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 12,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "1827c02b-910e-4a44-b07f-514c66f02d91",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "5c357e7d-f0bf-45d9-8622-afd6c6ece28a",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "5c357e7d-f0bf-45d9-8622-afd6c6ece28a",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "1827c02b-910e-4a44-b07f-514c66f02d91",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 13,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "5e7bdd00-a7e2-42a5-b18c-8ef29fd5e4d2",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "c09a8879-d260-4a0e-9103-3f23f9e85b9f",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "c09a8879-d260-4a0e-9103-3f23f9e85b9f",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "5e7bdd00-a7e2-42a5-b18c-8ef29fd5e4d2",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 14,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "a17e7647-8a9c-4fa2-92aa-215fc05380ce",
+                  "rank": 1,
+                  "total": 0.443180607664435,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "7a6504c8-a083-481b-bcaf-7866752bab3a",
+                  "rank": 2,
+                  "total": 0.0007842492039626176,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "7a6504c8-a083-481b-bcaf-7866752bab3a",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "a17e7647-8a9c-4fa2-92aa-215fc05380ce",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 15,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "63c187a1-df90-4df9-8e14-f1fa0ef23302",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "ba31f425-ff7d-4fd7-9238-69479d5d8fdc",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "ba31f425-ff7d-4fd7-9238-69479d5d8fdc",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "63c187a1-df90-4df9-8e14-f1fa0ef23302",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 16,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "5a4e5f70-7c79-49d8-a591-05a09442e36c",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "bbe6bb61-220c-4c4c-bc9b-70a3a03d2e17",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "bbe6bb61-220c-4c4c-bc9b-70a3a03d2e17",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "5a4e5f70-7c79-49d8-a591-05a09442e36c",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 17,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "7680d92a-b8c2-4c40-9b38-c3a99c5e67ea",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "8b0fd0b4-7a96-4875-854b-88d66621329d",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "8b0fd0b4-7a96-4875-854b-88d66621329d",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "7680d92a-b8c2-4c40-9b38-c3a99c5e67ea",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 18,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c0b8f838-afa1-4057-aae6-49633c238716",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "34e3500c-ed63-4a53-a476-1e580600f7fa",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "34e3500c-ed63-4a53-a476-1e580600f7fa",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "c0b8f838-afa1-4057-aae6-49633c238716",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 19,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "470e27e2-ef3c-4535-990b-08e113ced4ea",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "e7136e54-1142-4a09-b7bd-c4e674e0e4ae",
+                  "rank": 2,
+                  "total": 0.0007842776287613322,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "e7136e54-1142-4a09-b7bd-c4e674e0e4ae",
+                  "rank": 1,
+                  "total": 0.8031002918516041,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "470e27e2-ef3c-4535-990b-08e113ced4ea",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        },
+        {
+          "case": {
+            "id": "eval-undated-c1-seat-floor-reinforced",
+            "kind": "expired-schedule-undated-vs-current",
+            "recallAt": "2026-08-01T09:00:00.000Z",
+            "memories": [
+              {
+                "localId": "old-seat-undated",
+                "content": "オフィスの座席は3階です。",
+                "recordedAt": "2025-10-05T09:00:00.000Z",
+                "reinforceAt": ["2026-07-30T09:00:00.000Z"]
+              },
+              {
+                "localId": "current-seat",
+                "content": "先週、座席が5階に移動した。",
+                "occurredAt": "2026-07-26T09:00:00.000Z",
+                "recordedAt": "2026-07-26T09:00:00.000Z",
+                "validFrom": "2026-07-26T09:00:00.000Z",
+                "reinforceAt": ["2026-07-26T09:00:00.000Z"]
+              }
+            ],
+            "question": "いまのオフィスの座席は何階ですか?",
+            "expected": {
+              "kind": "closed-value",
+              "accept": ["5階"],
+              "reject": ["3階"]
+            },
+            "rationale": "old-seat-undated は occurredAt も validFrom/validUntil も持たない——抽出がこの事実を『期限のある予定』として構造化できなかった想定。validFrom/validUntil が両方 null の記憶は『いつでも真』として扱われる（`validAt` ゲートでは除かれない）ため、除外の頼みの綱は freshness/decay だけになる。300日前の記録・直近2日前のreinforce という組み合わせは eval-undated-b1 と同型の危険を、予定（schedule）の文脈で踏む。",
+            "tuningUse": "held-out"
+          },
+          "trial": 20,
+          "byPolicy": {
+            "legacy": {
+              "policy": "legacy",
+              "answer": "5階です。",
+              "verdict": "pass",
+              "recallMemoryCount": 1,
+              "prompt": "- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 1 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 65,
+              "inputEstimatedTokens": 47,
+              "contextDiagnostics": [
+                {
+                  "localId": "current-seat",
+                  "memoryId": "63e4a89f-656c-4fec-91ca-3a4c3bdaf24b",
+                  "rank": 1,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "34c20111-c704-4b2e-9ed0-322ba953f2c3",
+                  "rank": 2,
+                  "total": 0.0007842587104092637,
+                  "freshness": 0.0009765625,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": true,
+                  "enteredContext": false
+                }
+              ]
+            },
+            "eventAwareFreshness": {
+              "policy": "eventAwareFreshness",
+              "answer": "分かりません。",
+              "verdict": "fail",
+              "recallMemoryCount": 2,
+              "prompt": "- オフィスの座席は3階です。\n- 先週、座席が5階に移動した。\n(索引: スコープ内 2 件のうち 2 件を提示)\n\n質問: いまのオフィスの座席は何階ですか?",
+              "inputChars": 81,
+              "inputEstimatedTokens": 58,
+              "contextDiagnostics": [
+                {
+                  "localId": "old-seat-undated",
+                  "memoryId": "34c20111-c704-4b2e-9ed0-322ba953f2c3",
+                  "rank": 1,
+                  "total": 0.803080919459086,
+                  "freshness": 1,
+                  "decay": 0.9548416039104165,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                },
+                {
+                  "localId": "current-seat",
+                  "memoryId": "63e4a89f-656c-4fec-91ca-3a4c3bdaf24b",
+                  "rank": 2,
+                  "total": 0.44326108349484006,
+                  "freshness": 0.8705505632961241,
+                  "decay": 0.8705505632961241,
+                  "belowThreshold": false,
+                  "enteredContext": true
+                }
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}

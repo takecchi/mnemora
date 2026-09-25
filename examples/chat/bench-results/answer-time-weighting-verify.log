@@ -1,0 +1,19 @@
+$ tsx src/cli.ts verify answer-time-weighting
+照合するカセット（answer-time-weighting）: 記録日時=2026-09-24T21:41:06.107Z LLM=gpt-4o-mini(22件) 埋め込み=text-embedding-3-small/256次元(48件)
+
+埋め込み 48 件を実 API と照合した。
+  完全一致: 1 件（一致しない分は実 API 側の揺らぎ。異常ではない）
+  最小コサイン類似度: 0.997681456
+  最も離れた入力: "ジムの会員プランはベーシックプラン。"
+  閾値 0.99 を割った件数: 0
+  ✅ 揺らぎの範囲内。記録は実 API と整合している。
+
+LLM（gpt-4o-mini）の記録 22 件は照合していない——同じ入力でも応答が揺れるため、差が出ても「モデルが変わった」とは言えない。
+--- OpenAI API 実測（usage-meter） ---
+chat.completions.create: 呼び出し 0 回 / prompt_tokens=0 / completion_tokens=0
+embeddings.create      : 呼び出し 1 回 / prompt_tokens=1041
+費用（2026-09 時点の公開価格表による概算。OpenAI の請求 API から取得した実額ではない）:
+  LLM input  : $0.000000
+  LLM output : $0.000000
+  Embedding  : $0.000021
+  合計       : $0.000021

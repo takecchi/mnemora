@@ -1,0 +1,4755 @@
+{
+  "measuredAt": "2026-09-24T21:32:54.375Z",
+  "commit": "3f6b578c26377ffdcfcf7746932a587ee350c437",
+  "llmMode": "openai",
+  "embeddingMode": "openai",
+  "qualityClaimable": true,
+  "trials": [
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 141,
+      "inputEstimatedTokens": 99,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "e9e32db7-68c4-4736-9d25-25a098e4443a",
+          "rank": 1,
+          "total": 0.4809393904521282,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "a463f762-725d-4e63-930b-c7e5698f3ef0",
+          "rank": 2,
+          "total": 0.00005328839381503332,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 219,
+      "inputEstimatedTokens": 151,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "a463f762-725d-4e63-930b-c7e5698f3ef0",
+          "rank": 1,
+          "total": 0.5500040731250546,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "e9e32db7-68c4-4736-9d25-25a098e4443a",
+          "rank": 2,
+          "total": 0.481866287445031,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 141,
+      "inputEstimatedTokens": 99,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "77679ec4-2941-427f-a030-3f26c20c4c4b",
+          "rank": 1,
+          "total": 0.4809393904521282,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "3c4a41e8-2cb6-4794-a149-08e513326818",
+          "rank": 2,
+          "total": 0.00005328839381503332,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 219,
+      "inputEstimatedTokens": 151,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "3c4a41e8-2cb6-4794-a149-08e513326818",
+          "rank": 1,
+          "total": 0.5500040731250546,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "77679ec4-2941-427f-a030-3f26c20c4c4b",
+          "rank": 2,
+          "total": 0.481866287445031,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 141,
+      "inputEstimatedTokens": 99,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "1721b892-8bea-4162-9ffb-cd7c42c77eb1",
+          "rank": 1,
+          "total": 0.4809393904521282,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "a737d107-8ca4-4f62-bb7d-33e12a4d2c55",
+          "rank": 2,
+          "total": 0.00005328839381503332,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 219,
+      "inputEstimatedTokens": 151,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "a737d107-8ca4-4f62-bb7d-33e12a4d2c55",
+          "rank": 1,
+          "total": 0.5500040731250546,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "1721b892-8bea-4162-9ffb-cd7c42c77eb1",
+          "rank": 2,
+          "total": 0.481866287445031,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 141,
+      "inputEstimatedTokens": 99,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "06ccf149-1963-4bf6-a427-b1a0e343dd5c",
+          "rank": 1,
+          "total": 0.4809393904521282,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "d0429606-0ffe-4c5b-884c-d5acc6a57a06",
+          "rank": 2,
+          "total": 0.00005328839381503332,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 219,
+      "inputEstimatedTokens": 151,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "d0429606-0ffe-4c5b-884c-d5acc6a57a06",
+          "rank": 1,
+          "total": 0.5500040731250546,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "06ccf149-1963-4bf6-a427-b1a0e343dd5c",
+          "rank": 2,
+          "total": 0.481866287445031,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 141,
+      "inputEstimatedTokens": 99,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "3599f0ad-a53a-4260-9b0f-eb5eedd639d4",
+          "rank": 1,
+          "total": 0.4809393904521282,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "c6199a77-e612-470d-a462-bc3fcea5a3d4",
+          "rank": 2,
+          "total": 0.00005328839381503332,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 219,
+      "inputEstimatedTokens": 151,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "c6199a77-e612-470d-a462-bc3fcea5a3d4",
+          "rank": 1,
+          "total": 0.5500040731250546,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "3599f0ad-a53a-4260-9b0f-eb5eedd639d4",
+          "rank": 2,
+          "total": 0.481866287445031,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "d92560fb-1fd8-423e-b8e7-45ccf880bc4d",
+          "rank": 1,
+          "total": 0.5587576189744646,
+          "freshness": 0.9971160533345892,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-rule",
+          "memoryId": "5ec69f41-203b-43ca-8d1d-95034a6f70d1",
+          "rank": 2,
+          "total": 0.000007644720455856904,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 190,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-rule",
+          "memoryId": "5ec69f41-203b-43ca-8d1d-95034a6f70d1",
+          "rank": 1,
+          "total": 0.7952949112753406,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "d92560fb-1fd8-423e-b8e7-45ccf880bc4d",
+          "rank": 2,
+          "total": 0.5603737068577409,
+          "freshness": 1,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "057644ea-1acc-402f-b015-6f08bf0734f8",
+          "rank": 1,
+          "total": 0.5587576189744646,
+          "freshness": 0.9971160533345892,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-rule",
+          "memoryId": "0ff90711-b877-4c55-af24-bac3a6348cf7",
+          "rank": 2,
+          "total": 0.000007644720455856904,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 190,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-rule",
+          "memoryId": "0ff90711-b877-4c55-af24-bac3a6348cf7",
+          "rank": 1,
+          "total": 0.7952949112753406,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "057644ea-1acc-402f-b015-6f08bf0734f8",
+          "rank": 2,
+          "total": 0.5603737068577409,
+          "freshness": 1,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "e63c9219-e6fe-44df-b3bc-5c98022e1edf",
+          "rank": 1,
+          "total": 0.5587576189744646,
+          "freshness": 0.9971160533345892,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-rule",
+          "memoryId": "67835188-7a94-4839-86e6-5bfd3d00370f",
+          "rank": 2,
+          "total": 0.000007644720455856904,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 190,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-rule",
+          "memoryId": "67835188-7a94-4839-86e6-5bfd3d00370f",
+          "rank": 1,
+          "total": 0.7952949112753406,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "e63c9219-e6fe-44df-b3bc-5c98022e1edf",
+          "rank": 2,
+          "total": 0.5603737068577409,
+          "freshness": 1,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "c7cc12bb-a720-43a5-99ab-5d8e5c0f759b",
+          "rank": 1,
+          "total": 0.5587576189744646,
+          "freshness": 0.9971160533345892,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-rule",
+          "memoryId": "1cde6ca7-575c-4f17-b3e2-3dce575499c4",
+          "rank": 2,
+          "total": 0.000007644720455856904,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 190,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-rule",
+          "memoryId": "1cde6ca7-575c-4f17-b3e2-3dce575499c4",
+          "rank": 1,
+          "total": 0.7952949112753406,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "c7cc12bb-a720-43a5-99ab-5d8e5c0f759b",
+          "rank": 2,
+          "total": 0.5603737068577409,
+          "freshness": 1,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "b545b940-7c1e-4edf-878a-18f418f2eacb",
+          "rank": 1,
+          "total": 0.5587576189744646,
+          "freshness": 0.9971160533345892,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-rule",
+          "memoryId": "b7a43f7c-f40b-443d-ada0-5a5bf6c9fbcc",
+          "rank": 2,
+          "total": 0.000007644720455856904,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 190,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-rule",
+          "memoryId": "b7a43f7c-f40b-443d-ada0-5a5bf6c9fbcc",
+          "rank": 1,
+          "total": 0.7952949112753406,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "b545b940-7c1e-4edf-878a-18f418f2eacb",
+          "rank": 2,
+          "total": 0.5603737068577409,
+          "freshness": 1,
+          "decay": 0.9971160533345892,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "621a44b9-990d-402b-9351-d4e8c7f15758",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "f9dfb3ae-e66f-4574-a2fa-4a37f6dc936f",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "621a44b9-990d-402b-9351-d4e8c7f15758",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "f9dfb3ae-e66f-4574-a2fa-4a37f6dc936f",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "328abd88-949c-43f6-871f-7ffa28afc351",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "3b3db412-2a14-43a6-b6aa-75228b321192",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "328abd88-949c-43f6-871f-7ffa28afc351",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "3b3db412-2a14-43a6-b6aa-75228b321192",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "55710f28-b6ef-4b4c-bc88-229eaac6bd38",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "e1ba0fe2-f8e3-440c-8608-7d882552c055",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "55710f28-b6ef-4b4c-bc88-229eaac6bd38",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "e1ba0fe2-f8e3-440c-8608-7d882552c055",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "cf5edf8a-19c7-449f-a327-e963c726282c",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "07546cc7-bbed-445d-9274-8b35bbf50551",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "cf5edf8a-19c7-449f-a327-e963c726282c",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "07546cc7-bbed-445d-9274-8b35bbf50551",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "730c6425-12f8-4569-97b6-91569684d08b",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "8433d67c-b5ee-4dc8-b6ce-8e5c1fa101dc",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "730c6425-12f8-4569-97b6-91569684d08b",
+          "rank": 1,
+          "total": 0.4331957070054249,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "8433d67c-b5ee-4dc8-b6ce-8e5c1fa101dc",
+          "rank": 2,
+          "total": 0.00003573288526919749,
+          "freshness": 0.00009688727123829339,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "da5a03c7-1c99-4b2c-851f-a8383e952757",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "530f9be9-c722-4323-afe6-c27b536b1cff",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "da5a03c7-1c99-4b2c-851f-a8383e952757",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "530f9be9-c722-4323-afe6-c27b536b1cff",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "fead072b-c7ec-42d0-986d-737a3f33a17d",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "3ebb40cf-819a-410e-88dc-fc7835fe689d",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "fead072b-c7ec-42d0-986d-737a3f33a17d",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "3ebb40cf-819a-410e-88dc-fc7835fe689d",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "855b03b7-6c55-4b51-8d87-637f1a35f276",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "90ebef90-9530-4d6c-a8dd-ed398901c5ae",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "855b03b7-6c55-4b51-8d87-637f1a35f276",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "90ebef90-9530-4d6c-a8dd-ed398901c5ae",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "18d86bb8-46c9-4143-a9ec-ea579074be3e",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "2285674a-8da2-404d-8d93-551b4b313479",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "18d86bb8-46c9-4143-a9ec-ea579074be3e",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "2285674a-8da2-404d-8d93-551b4b313479",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "a9905047-547b-472c-8bae-2505b2ccd9b8",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "7d06ada1-03c6-4d6d-86f2-293c87006890",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 138,
+      "inputEstimatedTokens": 81,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "a9905047-547b-472c-8bae-2505b2ccd9b8",
+          "rank": 1,
+          "total": 0.2534967857128573,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "7d06ada1-03c6-4d6d-86f2-293c87006890",
+          "rank": 2,
+          "total": 3.1294413909043844e-8,
+          "freshness": 4.7308237909323e-8,
+          "decay": 0.9980764435756287,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "5a472a8c-a73b-4104-b8f0-798385d817e2",
+          "rank": 1,
+          "total": 0.6906921831226542,
+          "freshness": 0.9771599684342459,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "5a472a8c-a73b-4104-b8f0-798385d817e2",
+          "rank": 1,
+          "total": 0.7068363476139798,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "4a4c8476-ec8e-4d78-874c-53b6b6f2fc42",
+          "rank": 1,
+          "total": 0.6906921831226542,
+          "freshness": 0.9771599684342459,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "4a4c8476-ec8e-4d78-874c-53b6b6f2fc42",
+          "rank": 1,
+          "total": 0.7068363476139798,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "82dda0bf-31c7-420a-b316-3dea13d2d21d",
+          "rank": 1,
+          "total": 0.6906921831226542,
+          "freshness": 0.9771599684342459,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "82dda0bf-31c7-420a-b316-3dea13d2d21d",
+          "rank": 1,
+          "total": 0.7068363476139798,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "c03d235e-6f87-4a23-acdd-c88028925b91",
+          "rank": 1,
+          "total": 0.6906921831226542,
+          "freshness": 0.9771599684342459,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "c03d235e-6f87-4a23-acdd-c88028925b91",
+          "rank": 1,
+          "total": 0.7068363476139798,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "9607e716-625d-4714-82bb-636b1dfb0f9f",
+          "rank": 1,
+          "total": 0.6906921831226542,
+          "freshness": 0.9771599684342459,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 76,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "9607e716-625d-4714-82bb-636b1dfb0f9f",
+          "rank": 1,
+          "total": 0.7068363476139798,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "2f907d92-9421-490a-afcb-aecfa1d36e7e",
+          "rank": 1,
+          "total": 0.5421002548570131,
+          "freshness": 0.8506671609508557,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "2f907d92-9421-490a-afcb-aecfa1d36e7e",
+          "rank": 1,
+          "total": 0.6372648195929724,
+          "freshness": 1,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "129b5d89-c359-41b1-a1ad-296b617d7b06",
+          "rank": 1,
+          "total": 0.5421002548570131,
+          "freshness": 0.8506671609508557,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "129b5d89-c359-41b1-a1ad-296b617d7b06",
+          "rank": 1,
+          "total": 0.6372648195929724,
+          "freshness": 1,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "45f6a985-6a5d-4eb7-98f1-cb64afe170d7",
+          "rank": 1,
+          "total": 0.5421002548570131,
+          "freshness": 0.8506671609508557,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "45f6a985-6a5d-4eb7-98f1-cb64afe170d7",
+          "rank": 1,
+          "total": 0.6372648195929724,
+          "freshness": 1,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "92f7795d-c77d-40b2-8d56-0b28099e566d",
+          "rank": 1,
+          "total": 0.5421002548570131,
+          "freshness": 0.8506671609508557,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "92f7795d-c77d-40b2-8d56-0b28099e566d",
+          "rank": 1,
+          "total": 0.6372648195929724,
+          "freshness": 1,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "89b98a7f-a9e7-49a1-877a-baeace2d0a17",
+          "rank": 1,
+          "total": 0.5421002548570131,
+          "freshness": 0.8506671609508557,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 118,
+      "inputEstimatedTokens": 79,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "89b98a7f-a9e7-49a1-877a-baeace2d0a17",
+          "rank": 1,
+          "total": 0.6372648195929724,
+          "freshness": 1,
+          "decay": 0.8506671609508557,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 84,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "8806c071-3b92-4123-8223-405c0d126294",
+          "rank": 1,
+          "total": 0.5775314438694256,
+          "freshness": 0.9990377588337834,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "f27ef853-6d79-4a58-926c-69d51b8ecbe7",
+          "rank": 2,
+          "total": 0.00002037354803972567,
+          "freshness": 0.000030517578125,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 193,
+      "inputEstimatedTokens": 128,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "f27ef853-6d79-4a58-926c-69d51b8ecbe7",
+          "rank": 1,
+          "total": 0.6676004221657308,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "8806c071-3b92-4123-8223-405c0d126294",
+          "rank": 2,
+          "total": 0.5780877036555666,
+          "freshness": 1,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 84,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "4b94d35d-0e02-4ab4-893a-b029059b6da0",
+          "rank": 1,
+          "total": 0.5775314438694256,
+          "freshness": 0.9990377588337834,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "f85264a9-07a0-4568-b3e9-0222c3e72d2a",
+          "rank": 2,
+          "total": 0.00002037354803972567,
+          "freshness": 0.000030517578125,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 193,
+      "inputEstimatedTokens": 128,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "f85264a9-07a0-4568-b3e9-0222c3e72d2a",
+          "rank": 1,
+          "total": 0.6676004221657308,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "4b94d35d-0e02-4ab4-893a-b029059b6da0",
+          "rank": 2,
+          "total": 0.5780877036555666,
+          "freshness": 1,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 84,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "c51e3ede-b76f-42f9-9b36-9e23a2915f2b",
+          "rank": 1,
+          "total": 0.5775314438694256,
+          "freshness": 0.9990377588337834,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "dbf31a7f-1f8d-417b-a580-58d761ae057c",
+          "rank": 2,
+          "total": 0.00002037354803972567,
+          "freshness": 0.000030517578125,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 193,
+      "inputEstimatedTokens": 128,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "dbf31a7f-1f8d-417b-a580-58d761ae057c",
+          "rank": 1,
+          "total": 0.6676004221657308,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "c51e3ede-b76f-42f9-9b36-9e23a2915f2b",
+          "rank": 2,
+          "total": 0.5780877036555666,
+          "freshness": 1,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 84,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "60ffcf44-c422-4add-8e5b-8e6ce1b3498e",
+          "rank": 1,
+          "total": 0.5775314438694256,
+          "freshness": 0.9990377588337834,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "08c64372-4623-422d-900e-c6a971b1c699",
+          "rank": 2,
+          "total": 0.00002037354803972567,
+          "freshness": 0.000030517578125,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 193,
+      "inputEstimatedTokens": 128,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "08c64372-4623-422d-900e-c6a971b1c699",
+          "rank": 1,
+          "total": 0.6676004221657308,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "60ffcf44-c422-4add-8e5b-8e6ce1b3498e",
+          "rank": 2,
+          "total": 0.5780877036555666,
+          "freshness": 1,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 84,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "6c8f2bf3-d15a-4cdc-9ad1-cf3be30ab4dd",
+          "rank": 1,
+          "total": 0.5775314438694256,
+          "freshness": 0.9990377588337834,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "75de11be-fbd2-498b-8148-6605e375b67a",
+          "rank": 2,
+          "total": 0.00002037354803972567,
+          "freshness": 0.000030517578125,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 193,
+      "inputEstimatedTokens": 128,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "75de11be-fbd2-498b-8148-6605e375b67a",
+          "rank": 1,
+          "total": 0.6676004221657308,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "6c8f2bf3-d15a-4cdc-9ad1-cf3be30ab4dd",
+          "rank": 2,
+          "total": 0.5780877036555666,
+          "freshness": 1,
+          "decay": 0.9990377588337834,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "9b405c39-823f-4852-b755-1dde422becde",
+          "rank": 1,
+          "total": 0.44532755019554,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "a74d1a26-4aed-448c-86aa-198a2cda7bbb",
+          "rank": 2,
+          "total": 5.970000606308732e-7,
+          "freshness": 9.5367431640625e-7,
+          "decay": 0.9330329915368074,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 198,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "a74d1a26-4aed-448c-86aa-198a2cda7bbb",
+          "rank": 1,
+          "total": 0.6259999355760785,
+          "freshness": 1,
+          "decay": 0.9330329915368074,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "9b405c39-823f-4852-b755-1dde422becde",
+          "rank": 2,
+          "total": 0.4461858137841077,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "0dfa944a-beb3-4248-be87-033e02aeba42",
+          "rank": 1,
+          "total": 0.44532755019554,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "60664fe5-0f0e-4e07-8310-ecc2fc4eb2ad",
+          "rank": 2,
+          "total": 5.970000606308732e-7,
+          "freshness": 9.5367431640625e-7,
+          "decay": 0.9330329915368074,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 198,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "60664fe5-0f0e-4e07-8310-ecc2fc4eb2ad",
+          "rank": 1,
+          "total": 0.6259999355760785,
+          "freshness": 1,
+          "decay": 0.9330329915368074,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "0dfa944a-beb3-4248-be87-033e02aeba42",
+          "rank": 2,
+          "total": 0.4461858137841077,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "891b2824-1931-4b87-a1ad-8c91ddc38c0c",
+          "rank": 1,
+          "total": 0.44532755019554,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "482750d5-2733-46fa-905b-f5b38b8d39e1",
+          "rank": 2,
+          "total": 5.970000606308732e-7,
+          "freshness": 9.5367431640625e-7,
+          "decay": 0.9330329915368074,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 198,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "482750d5-2733-46fa-905b-f5b38b8d39e1",
+          "rank": 1,
+          "total": 0.6259999355760785,
+          "freshness": 1,
+          "decay": 0.9330329915368074,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "891b2824-1931-4b87-a1ad-8c91ddc38c0c",
+          "rank": 2,
+          "total": 0.4461858137841077,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "44aec80d-03e4-480b-8eec-e8c2398cd961",
+          "rank": 1,
+          "total": 0.44532755019554,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "c9a61271-34a1-4520-b445-44a374caef68",
+          "rank": 2,
+          "total": 5.970000606308732e-7,
+          "freshness": 9.5367431640625e-7,
+          "decay": 0.9330329915368074,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 198,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "c9a61271-34a1-4520-b445-44a374caef68",
+          "rank": 1,
+          "total": 0.6259999355760785,
+          "freshness": 1,
+          "decay": 0.9330329915368074,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "44aec80d-03e4-480b-8eec-e8c2398cd961",
+          "rank": 2,
+          "total": 0.4461858137841077,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "fail",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "offhand-remark",
+          "memoryId": "85fb8c01-27cc-4580-8fd2-239b48367d57",
+          "rank": 1,
+          "total": 0.44532755019554,
+          "freshness": 0.9980764435756287,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "established-preference",
+          "memoryId": "0c9a1cef-1597-448b-90b9-0f2462de0a53",
+          "rank": 2,
+          "total": 5.970000606308732e-7,
+          "freshness": 9.5367431640625e-7,
+          "decay": 0.9330329915368074,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 198,
+      "inputEstimatedTokens": 125,
+      "contextDiagnostics": [
+        {
+          "localId": "established-preference",
+          "memoryId": "0c9a1cef-1597-448b-90b9-0f2462de0a53",
+          "rank": 1,
+          "total": 0.6259999355760785,
+          "freshness": 1,
+          "decay": 0.9330329915368074,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "offhand-remark",
+          "memoryId": "85fb8c01-27cc-4580-8fd2-239b48367d57",
+          "rank": 2,
+          "total": 0.4461858137841077,
+          "freshness": 1,
+          "decay": 0.9980764435756287,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "6a39c616-27f8-40dd-b4b3-6b494956cb27",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "a63b5be3-3315-4a7e-ac00-b1f9b50f32aa",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "6a39c616-27f8-40dd-b4b3-6b494956cb27",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "a63b5be3-3315-4a7e-ac00-b1f9b50f32aa",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "04709897-3bc9-46ec-afb3-b82dc1eca8bc",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "580c022a-2aad-4dbf-bf92-6d96fe29f45c",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "04709897-3bc9-46ec-afb3-b82dc1eca8bc",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "580c022a-2aad-4dbf-bf92-6d96fe29f45c",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "3ddb9add-9ce3-4dc2-8506-8f321c3a4f45",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "bd42100d-f716-43ee-a99f-0e4fd6995dc9",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "3ddb9add-9ce3-4dc2-8506-8f321c3a4f45",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "bd42100d-f716-43ee-a99f-0e4fd6995dc9",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "c7c64ea9-1272-4eda-ab86-2b38bfb811c8",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "bae578c0-09c4-42e3-848c-beb7ed8a3dab",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "c7c64ea9-1272-4eda-ab86-2b38bfb811c8",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "bae578c0-09c4-42e3-848c-beb7ed8a3dab",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "f6dcfd41-04fa-4b53-8ce5-99bdaa70e400",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "fdb06481-b00b-4c41-825b-0191db7f4a2a",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 72,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "f6dcfd41-04fa-4b53-8ce5-99bdaa70e400",
+          "rank": 1,
+          "total": 0.31285511935360893,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "fdb06481-b00b-4c41-825b-0191db7f4a2a",
+          "rank": 2,
+          "total": 1.0777044806740037e-37,
+          "freshness": 2.3696481226136063e-37,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "6afd8613-3577-4130-bc24-7d8a15d54d9f",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "8e14a2f4-a893-428d-a97d-8161a0b22b7c",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "6afd8613-3577-4130-bc24-7d8a15d54d9f",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "8e14a2f4-a893-428d-a97d-8161a0b22b7c",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "d2847733-f8ce-49c0-9565-3205d2dfbfff",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "c5387f0d-fdda-46cf-aa00-acbed17a38f3",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "d2847733-f8ce-49c0-9565-3205d2dfbfff",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "c5387f0d-fdda-46cf-aa00-acbed17a38f3",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "0a8b5a4f-1846-43f6-bfe8-0158745c713e",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "1b4ad04f-2c7b-424e-b7c4-6ca2b0c0b6fe",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "0a8b5a4f-1846-43f6-bfe8-0158745c713e",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "1b4ad04f-2c7b-424e-b7c4-6ca2b0c0b6fe",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "cdc3ae3b-7c67-4d32-8253-b8f4c6d81caa",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "86d0cbc4-d4d4-4bb5-b71a-57776672a162",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "cdc3ae3b-7c67-4d32-8253-b8f4c6d81caa",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "86d0cbc4-d4d4-4bb5-b71a-57776672a162",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "ad64ed12-bad5-4b4b-b823-69c70af60a65",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "43923db3-16e4-4281-bc38-6cb60e8d0350",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 70,
+      "contextDiagnostics": [
+        {
+          "localId": "new-event",
+          "memoryId": "ad64ed12-bad5-4b4b-b823-69c70af60a65",
+          "rank": 1,
+          "total": 0.23767190983645778,
+          "freshness": 0.8908987181403393,
+          "decay": 0.8908987181403393,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-event",
+          "memoryId": "43923db3-16e4-4281-bc38-6cb60e8d0350",
+          "rank": 2,
+          "total": 3.5544234308116886e-19,
+          "freshness": 8.673617379884035e-19,
+          "decay": 0.9990377588337834,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "2bb0ac8f-dfc4-4b7b-afaf-ab9a227c0e94",
+          "rank": 1,
+          "total": 0.34425897232248065,
+          "freshness": 0.723634618720189,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "2bb0ac8f-dfc4-4b7b-afaf-ab9a227c0e94",
+          "rank": 1,
+          "total": 0.47573590789690623,
+          "freshness": 1,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "4d52d015-2e52-4df8-8287-7c0adc7fdc51",
+          "rank": 1,
+          "total": 0.34425897232248065,
+          "freshness": 0.723634618720189,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "4d52d015-2e52-4df8-8287-7c0adc7fdc51",
+          "rank": 1,
+          "total": 0.47573590789690623,
+          "freshness": 1,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "2469d70e-087c-416a-9869-6c4d9463c5dc",
+          "rank": 1,
+          "total": 0.34425897232248065,
+          "freshness": 0.723634618720189,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "2469d70e-087c-416a-9869-6c4d9463c5dc",
+          "rank": 1,
+          "total": 0.47573590789690623,
+          "freshness": 1,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "20731bc4-97b9-4f4e-a4b7-9454af402169",
+          "rank": 1,
+          "total": 0.34425897232248065,
+          "freshness": 0.723634618720189,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "20731bc4-97b9-4f4e-a4b7-9454af402169",
+          "rank": 1,
+          "total": 0.47573590789690623,
+          "freshness": 1,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "77b23be6-4a66-40b8-b56c-5033d09f0ba1",
+          "rank": 1,
+          "total": 0.34425897232248065,
+          "freshness": 0.723634618720189,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 126,
+      "inputEstimatedTokens": 86,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "77b23be6-4a66-40b8-b56c-5033d09f0ba1",
+          "rank": 1,
+          "total": 0.47573590789690623,
+          "freshness": 1,
+          "decay": 0.723634618720189,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "6254b5d7-6228-4a77-b838-da3cd506629c",
+          "rank": 1,
+          "total": 0.4854619309155235,
+          "freshness": 0.9117224885582168,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "6254b5d7-6228-4a77-b838-da3cd506629c",
+          "rank": 1,
+          "total": 0.5324667725189329,
+          "freshness": 1,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "54959acc-bfe0-4f33-a1dc-43807f553d5d",
+          "rank": 1,
+          "total": 0.4854619309155235,
+          "freshness": 0.9117224885582168,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "54959acc-bfe0-4f33-a1dc-43807f553d5d",
+          "rank": 1,
+          "total": 0.5324667725189329,
+          "freshness": 1,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "641e3f99-e7f8-4cbb-a49b-2d8edde44b41",
+          "rank": 1,
+          "total": 0.4854619309155235,
+          "freshness": 0.9117224885582168,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "641e3f99-e7f8-4cbb-a49b-2d8edde44b41",
+          "rank": 1,
+          "total": 0.5324667725189329,
+          "freshness": 1,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "b87cea46-668d-4bd3-972d-2edf96645873",
+          "rank": 1,
+          "total": 0.4854619309155235,
+          "freshness": 0.9117224885582168,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "b87cea46-668d-4bd3-972d-2edf96645873",
+          "rank": 1,
+          "total": 0.5324667725189329,
+          "freshness": 1,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "539918a9-bfec-4194-93ca-b9158e638b35",
+          "rank": 1,
+          "total": 0.4854619309155235,
+          "freshness": 0.9117224885582168,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 116,
+      "inputEstimatedTokens": 74,
+      "contextDiagnostics": [
+        {
+          "localId": "current-schedule",
+          "memoryId": "539918a9-bfec-4194-93ca-b9158e638b35",
+          "rank": 1,
+          "total": 0.5324667725189329,
+          "freshness": 1,
+          "decay": 0.9117224885582168,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 69,
+      "contextDiagnostics": [
+        {
+          "localId": "new-department",
+          "memoryId": "f00da2e6-009a-4972-9ca1-3bd24cb08679",
+          "rank": 1,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-department-undated",
+          "memoryId": "e7062758-9a28-44c2-8605-7fcdaf58d26b",
+          "rank": 2,
+          "total": 0.000004626509064751501,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 181,
+      "inputEstimatedTokens": 102,
+      "contextDiagnostics": [
+        {
+          "localId": "old-department-undated",
+          "memoryId": "e7062758-9a28-44c2-8605-7fcdaf58d26b",
+          "rank": 1,
+          "total": 0.48130459935224296,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "new-department",
+          "memoryId": "f00da2e6-009a-4972-9ca1-3bd24cb08679",
+          "rank": 2,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 69,
+      "contextDiagnostics": [
+        {
+          "localId": "new-department",
+          "memoryId": "8f909f8b-8cca-4a6f-abc8-e1c38c27be06",
+          "rank": 1,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-department-undated",
+          "memoryId": "b744d039-e747-4106-9c79-a2e6ac806782",
+          "rank": 2,
+          "total": 0.000004626509064751501,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 181,
+      "inputEstimatedTokens": 102,
+      "contextDiagnostics": [
+        {
+          "localId": "old-department-undated",
+          "memoryId": "b744d039-e747-4106-9c79-a2e6ac806782",
+          "rank": 1,
+          "total": 0.48130459935224296,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "new-department",
+          "memoryId": "8f909f8b-8cca-4a6f-abc8-e1c38c27be06",
+          "rank": 2,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 69,
+      "contextDiagnostics": [
+        {
+          "localId": "new-department",
+          "memoryId": "8f999f83-ac83-441a-ad73-e9dc4c087df9",
+          "rank": 1,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-department-undated",
+          "memoryId": "2480b2d5-dc8d-430f-ac17-324e52300a7d",
+          "rank": 2,
+          "total": 0.000004626509064751501,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 181,
+      "inputEstimatedTokens": 102,
+      "contextDiagnostics": [
+        {
+          "localId": "old-department-undated",
+          "memoryId": "2480b2d5-dc8d-430f-ac17-324e52300a7d",
+          "rank": 1,
+          "total": 0.48130459935224296,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "new-department",
+          "memoryId": "8f999f83-ac83-441a-ad73-e9dc4c087df9",
+          "rank": 2,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 69,
+      "contextDiagnostics": [
+        {
+          "localId": "new-department",
+          "memoryId": "cccfb184-353a-4400-ae48-470d26516149",
+          "rank": 1,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-department-undated",
+          "memoryId": "b05d5a98-f804-4ee0-978e-bbcb6c16089d",
+          "rank": 2,
+          "total": 0.000004626509064751501,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 181,
+      "inputEstimatedTokens": 102,
+      "contextDiagnostics": [
+        {
+          "localId": "old-department-undated",
+          "memoryId": "b05d5a98-f804-4ee0-978e-bbcb6c16089d",
+          "rank": 1,
+          "total": 0.48130459935224296,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "new-department",
+          "memoryId": "cccfb184-353a-4400-ae48-470d26516149",
+          "rank": 2,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 124,
+      "inputEstimatedTokens": 69,
+      "contextDiagnostics": [
+        {
+          "localId": "new-department",
+          "memoryId": "8a5f6406-1179-416e-8e50-3385f0883c66",
+          "rank": 1,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-department-undated",
+          "memoryId": "69574118-bf30-43ee-8e03-99c419b6ed30",
+          "rank": 2,
+          "total": 0.000004626509064751501,
+          "freshness": 0.000009612434767874695,
+          "decay": 0.9771599684342459,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 181,
+      "inputEstimatedTokens": 102,
+      "contextDiagnostics": [
+        {
+          "localId": "old-department-undated",
+          "memoryId": "69574118-bf30-43ee-8e03-99c419b6ed30",
+          "rank": 1,
+          "total": 0.48130459935224296,
+          "freshness": 1,
+          "decay": 0.9771599684342459,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "new-department",
+          "memoryId": "8a5f6406-1179-416e-8e50-3385f0883c66",
+          "rank": 2,
+          "total": 0.17254147381578475,
+          "freshness": 0.6299605249474366,
+          "decay": 0.6299605249474366,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "c38593e6-1bb1-4bd6-aefc-3ba5fafd3fd9",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "c38593e6-1bb1-4bd6-aefc-3ba5fafd3fd9",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "a1a18c24-42fa-499c-af7a-ec49397fd55f",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "a1a18c24-42fa-499c-af7a-ec49397fd55f",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "e9b31f6e-0cf0-47d6-949c-471fe685b543",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "e9b31f6e-0cf0-47d6-949c-471fe685b543",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "fa6dfef4-3a79-4229-b1c4-422346a92df2",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "fa6dfef4-3a79-4229-b1c4-422346a92df2",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "d53a65a6-beaf-4f16-ac8b-92850ba389b1",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 133,
+      "inputEstimatedTokens": 77,
+      "contextDiagnostics": [
+        {
+          "localId": "new-hobby",
+          "memoryId": "d53a65a6-beaf-4f16-ac8b-92850ba389b1",
+          "rank": 1,
+          "total": 0.2698442773144378,
+          "freshness": 0.7937005259840998,
+          "decay": 0.7937005259840998,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 71,
+      "contextDiagnostics": [
+        {
+          "localId": "current-seat",
+          "memoryId": "6698bcff-c12d-4e8a-9e53-02655f0adace",
+          "rank": 1,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "f876869e-2a23-4a79-8b4e-094e4c2fc160",
+          "rank": 2,
+          "total": 0.0007842776287613322,
+          "freshness": 0.0009765625,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 185,
+      "inputEstimatedTokens": 104,
+      "contextDiagnostics": [
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "f876869e-2a23-4a79-8b4e-094e4c2fc160",
+          "rank": 1,
+          "total": 0.8031002918516041,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "current-seat",
+          "memoryId": "6698bcff-c12d-4e8a-9e53-02655f0adace",
+          "rank": 2,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 71,
+      "contextDiagnostics": [
+        {
+          "localId": "current-seat",
+          "memoryId": "4625831a-8336-4c5b-9a42-b8b1de26c7c4",
+          "rank": 1,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "182b2146-df3b-4c3b-90f1-c02bc2e1a0ad",
+          "rank": 2,
+          "total": 0.0007842776287613322,
+          "freshness": 0.0009765625,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 185,
+      "inputEstimatedTokens": 104,
+      "contextDiagnostics": [
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "182b2146-df3b-4c3b-90f1-c02bc2e1a0ad",
+          "rank": 1,
+          "total": 0.8031002918516041,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "current-seat",
+          "memoryId": "4625831a-8336-4c5b-9a42-b8b1de26c7c4",
+          "rank": 2,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 71,
+      "contextDiagnostics": [
+        {
+          "localId": "current-seat",
+          "memoryId": "5c98fb82-cc76-4cb2-b5bc-49ddcedb15e3",
+          "rank": 1,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "9df7ec6f-10d9-4c0b-abdb-de84363cc8b4",
+          "rank": 2,
+          "total": 0.0007842776287613322,
+          "freshness": 0.0009765625,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 185,
+      "inputEstimatedTokens": 104,
+      "contextDiagnostics": [
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "9df7ec6f-10d9-4c0b-abdb-de84363cc8b4",
+          "rank": 1,
+          "total": 0.8031002918516041,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "current-seat",
+          "memoryId": "5c98fb82-cc76-4cb2-b5bc-49ddcedb15e3",
+          "rank": 2,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 71,
+      "contextDiagnostics": [
+        {
+          "localId": "current-seat",
+          "memoryId": "c8141cbc-d05f-4c35-8b45-e74d302e1822",
+          "rank": 1,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "973bb556-6130-4783-bd3d-dedfb19b0690",
+          "rank": 2,
+          "total": 0.0007842776287613322,
+          "freshness": 0.0009765625,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 185,
+      "inputEstimatedTokens": 104,
+      "contextDiagnostics": [
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "973bb556-6130-4783-bd3d-dedfb19b0690",
+          "rank": 1,
+          "total": 0.8031002918516041,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "current-seat",
+          "memoryId": "c8141cbc-d05f-4c35-8b45-e74d302e1822",
+          "rank": 2,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 128,
+      "inputEstimatedTokens": 71,
+      "contextDiagnostics": [
+        {
+          "localId": "current-seat",
+          "memoryId": "6120ede4-0705-4cbb-8b77-8475f198f444",
+          "rank": 1,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "82fcae0b-7882-4960-88ad-45f94ad687b6",
+          "rank": 2,
+          "total": 0.0007842776287613322,
+          "freshness": 0.0009765625,
+          "decay": 0.9548416039104165,
+          "belowThreshold": true,
+          "enteredContext": false
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 2,
+      "inputChars": 185,
+      "inputEstimatedTokens": 104,
+      "contextDiagnostics": [
+        {
+          "localId": "old-seat-undated",
+          "memoryId": "82fcae0b-7882-4960-88ad-45f94ad687b6",
+          "rank": 1,
+          "total": 0.8031002918516041,
+          "freshness": 1,
+          "decay": 0.9548416039104165,
+          "belowThreshold": false,
+          "enteredContext": true
+        },
+        {
+          "localId": "current-seat",
+          "memoryId": "6120ede4-0705-4cbb-8b77-8475f198f444",
+          "rank": 2,
+          "total": 0.44326108349484006,
+          "freshness": 0.8705505632961241,
+          "decay": 0.8705505632961241,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "3bf9dc7c-c1d0-4afc-ae53-01b320739fbe",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 1,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "3bf9dc7c-c1d0-4afc-ae53-01b320739fbe",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "e4e020e5-9131-41ca-b4e1-382cb3dc54dd",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 2,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "e4e020e5-9131-41ca-b4e1-382cb3dc54dd",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "482a8fa8-485f-4c4a-90a4-30e0086719e5",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 3,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "482a8fa8-485f-4c4a-90a4-30e0086719e5",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "361dec06-b275-41af-ba98-84dc168f52a0",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 4,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "361dec06-b275-41af-ba98-84dc168f52a0",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "legacy",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "25013f16-622e-40d1-88a5-0408957d5344",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "trial": 5,
+      "policy": "eventAwareFreshness",
+      "verdict": "pass",
+      "recallMemoryCount": 1,
+      "inputChars": 137,
+      "inputEstimatedTokens": 80,
+      "contextDiagnostics": [
+        {
+          "localId": "current-standup",
+          "memoryId": "25013f16-622e-40d1-88a5-0408957d5344",
+          "rank": 1,
+          "total": 0.419985411085946,
+          "freshness": 0.7071067811865476,
+          "decay": 0.7071067811865476,
+          "belowThreshold": false,
+          "enteredContext": true
+        }
+      ]
+    }
+  ],
+  "aggregate": [
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "dev-a1-tea-over-coffee",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "dev-a2-remote-work-day",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b1-phone-model",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-b2-current-project",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c1-meeting-schedule",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "dev-c2-gym-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "eval-a1-window-seat",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 0
+    },
+    {
+      "caseId": "eval-a2-doc-tool",
+      "kind": "reinforced-fact-vs-fresh-weak",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b1-pet",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-b2-relocation",
+      "kind": "old-event-not-outrank-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c1-internet-plan",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-c2-work-shift",
+      "kind": "expired-schedule-not-outrank-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b1-department-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-b2-hobby-not-reinforced",
+      "kind": "old-event-undated-vs-new",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c1-seat-floor-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "legacy",
+      "trials": 5,
+      "passCount": 5
+    },
+    {
+      "caseId": "eval-undated-c2-standup-day-not-reinforced",
+      "kind": "expired-schedule-undated-vs-current",
+      "policy": "eventAwareFreshness",
+      "trials": 5,
+      "passCount": 5
+    }
+  ]
+}
