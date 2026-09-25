@@ -1145,8 +1145,8 @@ export async function runRecall(
           // 正しさ」ではなく「取り扱い（公開範囲など）の境界」を表すからである——
           // ADR 0312 決定6・「北極星との整合」参照。
           .filter((companionMemory) => survivesAttributesFilter(companionMemory))
-          // マネージャー調査（`fix/forget-contested-pair` 枝）: forget/直接の status
-          // 書き換えで対向が `contested` でなくなっていれば、companion として使わない
+          // forget（ADR 0087 引き受けた負債1）や直接の status 書き換えで
+          // 対向が `contested` でなくなっていれば、companion として使わない
           // ——「forget した記憶は recall に出ない」(ADR 0087 決定6) を段3も守る。
           // 弾かれれば「対向が見つからなかった」と同じ扱いに倒れ（上のコメントと同じ経路、
           // 新しい Omission は無い）、ADR 0312 9-a の `survivesAttributesFilter` と
