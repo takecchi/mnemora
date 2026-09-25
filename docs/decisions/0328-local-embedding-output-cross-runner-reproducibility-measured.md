@@ -41,14 +41,15 @@ PR #668 以降の **244 run** から、`embedding-output-fingerprint-{example-ch
 
 - 脚: runner ∈ {`ubuntu-latest`, `ubuntu-22.04`, `ubuntu-24.04-arm`, `ubuntu-22.04-arm`} × `numThreads` ∈ {1, 2, 4}
   × rep ∈ {1, 2}（rep は別ジョブ、つまり別 VM での反復）。**24脚**になる。
-- 同じ構成を2回走らせた: run [`36117549993`](https://github.com/takecchi/mnemora/actions/runs/36117549993)
-  （pull_request）と [`36117926755`](https://github.com/takecchi/mnemora/actions/runs/36117926755)
-  （workflow_dispatch）。**合わせて 48 脚。**
+- 同じ構成を3回走らせた: run [`36117549993`](https://github.com/takecchi/mnemora/actions/runs/36117549993)（pull_request）、
+  [`36117926755`](https://github.com/takecchi/mnemora/actions/runs/36117926755)（workflow_dispatch）、
+  [`36118651240`](https://github.com/takecchi/mnemora/actions/runs/36118651240)（pull_request）。**合わせて 72 脚。**
+  ⚠ 下の「群」の表と差の数値は、最初の2 run で数えたものである。3本目は、sha256 がアーキテクチャごとに1種類ずつになることだけを確かめた。
 - 各脚は、固定3文（`FIXED_EMBEDDING_FINGERPRINT_INPUTS`）の出力ベクトル（3×256 = 768 成分）を、
   float32 のビット列のまま丸ごと残す。一緒に `lscpu`、runtime の版、重みファイルの sha256 も残す。
 - 比較ジョブは、どの結果でも exit 0 で終わる。
 
-**条件をそろえたこと**【実測】: 全 48 脚で次がそろっていた。
+**条件をそろえたこと**【実測】: 最初の2 run の 48 脚で次がそろっていた。
 node v22.23.2、onnxruntime-node 1.24.3、`@huggingface/transformers` 4.2.0、重みは
 `sirasagi62/ruri-v3-30m-ONNX@cdf9391f…` で `model_quantized.onnx` の sha256 は `3d374a62…`。
 
@@ -69,7 +70,7 @@ AMD EPYC 9V45（AVX-512+VNNI+BF16+AVX-VNNI）、Intel Xeon Platinum 8370C（AVX-
 Intel Xeon Platinum 8573C（AVX-512+VNNI / それに BF16+AMX を加えたものの2通り）、
 Intel Xeon 6973P-C（AVX-512+VNNI+BF16+AMX）。**同じ型番でも、ゲストに見える命令セットは VM ごとに違う。**
 
-### B. 24 脚 × 2 run【実測】
+### B. 24 脚 × 3 run【実測】
 
 | 群 | 組数（1 run あたり） | 一致 |
 |---|---|---|
@@ -79,12 +80,12 @@ Intel Xeon 6973P-C（AVX-512+VNNI+BF16+AMX）。**同じ型番でも、ゲスト
 | 同じランナー・同じ `numThreads` で rep だけ違う（別 VM） | 12 | **全組ビット一致** |
 | **x64 と arm64** | 144 | **0 組（全組が不一致）** |
 
-- x64 の脚に出た CPU は AMD EPYC 7763 / 9V74 / 9V45、Intel Xeon 8370C / 6973P-C だった。
+- x64 の脚に出た CPU は AMD EPYC 7763 / 9V74 / 9V45、Intel Xeon 8370C / 8573C / 6973P-C だった。
   既存方式（float64 LE）で sha256 を取り直すと、**A の `ac84b5d4…` と一致した**。
   ⟹ A の 484 観測と B の x64 脚は、同じ出力として比べられる。
 - arm64 の脚は、`ubuntu-24.04-arm` で `lscpu` が Neoverse-N2 を返した。`ubuntu-22.04-arm` は
   `Model name` を返さなかったが、Flags（asimd/sve2/i8mm/bf16 など）は N2 と同じ一式だった。
-  arm64 の 24 脚はすべて同じ出力になった（既存方式の sha256 は `a72fac9c…`）。
+  arm64 の 36 脚はすべて同じ出力になった（既存方式の sha256 は `a72fac9c…`）。
 
 ### x64 と arm64 の差は、どの桁で出るか【実測。この担い手が artifact のビット列から再計算した】
 
@@ -96,7 +97,7 @@ Intel Xeon 6973P-C（AVX-512+VNNI+BF16+AMX）。**同じ型番でも、ゲスト
 | 典型的な成分 | 絶対値の中央値は 0.021。そこで差が 2^-24 なら、ずれは十進で7桁目前後になる |
 | 最大の ULP 差 | 1115（小さい成分ほど ULP が細かいので、ULP で見ると大きく出る） |
 | cosine 類似度（3ベクトルそれぞれ） | 0.9999999999999978 / 0.9999999999999993 / 0.9999999999999989 |
-| 差の出方 | 24 脚 × 2 run のすべてで**まったく同じ差**になった。乱れではなく、系統的な差である |
+| 差の出方 | arm64 の脚すべてで**まったく同じ差**になった（3 run とも、arm64 の sha256 は1種類だった）。乱れではなく、系統的な差である |
 
 **なぜ差が出るのかは確かめていない。**onnxruntime の x86 と ARM で量子化カーネルの実装が違う、というのは推測にすぎない。
 
@@ -129,7 +130,7 @@ Intel Xeon 6973P-C（AVX-512+VNNI+BF16+AMX）。**同じ型番でも、ゲスト
 ## 確かめていないこと
 
 - **日をまたいだとき、ランナーイメージが更新されたとき、node や onnxruntime-node の版が上がったときの再現性。**
-  B は同じ日の数分違いの2 run だけであり、A も #668 以降の約2日分しかない。
+  B は同じ日の、1時間足らずのうちに走った3 run だけであり、A も #668 以降の約2日分しかない。
 - arm64 は Neoverse-N2 の一種類しか観測していない（`ubuntu-22.04-arm` の型番は flags から推測したもの）。
   Graviton など、別の ARM コアは見ていない。
 - macOS と Windows のランナーは測っていない。
