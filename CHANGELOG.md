@@ -163,13 +163,21 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   （[Issue #152](https://github.com/takecchi/mnemora/issues/152)/
   [Issue #153](https://github.com/takecchi/mnemora/issues/153) /
   [ADR 0312](./docs/decisions/0312-observe-recall-caller-attributes.md)、PR #724）。
-  ⭕ 渡さない呼び出しの挙動・既定値は無変更。
+  ⭕ 絞り込みの挙動・既定値は無変更。⚠ **訂正**（初出時の記述は不正確だった）:
+  `recall()` の返り値には常に `RecalledMemory.attributes` が載るようになる——`attributes`
+  を渡さない呼び出しでも、対象の Memory が `attributes` を持たなくても欄自体は省略されない
+  （詳細は下の `### Changed`）。
 - **抽出に主張キー `claimKey: { subject, predicate }` を持たせた（(B) 第1段。既定 off・検出は
   まだしない）**——「この記憶は何についての主張か」を LLM に分類させて構造化された鍵として
   持たせるだけで、同じ鍵を持つ記憶どうしの衝突検出はこの段では行わない。新しい migration
   `0021_memories_claim_key.sql` を含む
   （[Issue #371](https://github.com/takecchi/mnemora/issues/371) /
   [ADR 0320](./docs/decisions/0320-claim-key-field-implementation.md)、PR #736）。
+  ⚠ **訂正**（初出時の「既定 off」は値の導出だけを指しており、欄そのものの挙動を書いて
+  いなかった）: 「既定 off」は LLM を呼んで値を導出する opt-in（`observe` の
+  `claimKey?: ClaimKeyOptions`）についてであり、抽出で作られる `Memory` 自体には
+  opt-in の有無に関わらず常に `claimKey` 欄（値が無ければ `null`）が入る（詳細は下の
+  `### Changed`）。
 - **`@mnemora/postgres` に opt-in の語彙ストア `PostgresTrigramLexicalStore` を足した**——
   `pg_trgm` で日本語（非 ASCII）部分を照合する。`PostgresTrigramLexicalStore.create()` が拡張と
   ロケール（`server_encoding`・日本語トライグラムの自己一致）を検査し、満たせなければ投げる
@@ -230,6 +238,38 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   [ADR 0306](./docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md) /
   [ADR 0314](./docs/decisions/0314-recall-footprint-calibration-samples-need-ci-sourcing.md)、
   PR #710 / #722 / #728）。
+- **`recall()` の既定の呼び出し（`attributes` によるフィルタを渡さない呼び出しを含む）でも、
+  返ってくる `RecalledMemory` には `attributes` 欄が常に載るようになった**——対象の Memory が
+  `attributes` を持たない場合は `{}`（`packages/core/src/recall-runtime.ts` の
+  `attributes: member.memory.attributes ?? {}`）。絞り込みの挙動そのものは無変更だが、
+  `RecalledMemory` の形（返り値の欄の有無）は変わる——欄の有無を見る比較・スナップショットは
+  影響を受けうる
+  （[Issue #152](https://github.com/takecchi/mnemora/issues/152) /
+  [Issue #153](https://github.com/takecchi/mnemora/issues/153) /
+  [ADR 0312](./docs/decisions/0312-observe-recall-caller-attributes.md)、PR #724）。
+- **抽出（`observe` → 抽出）で作られる `Memory` には、claim key opt-in を使っていない
+  呼び出しでも `claimKey: null` が常に入るようになった（欄が省略されることは無い）**——
+  `buildNewMemoryFromCandidate`（`packages/core/src/extraction.ts`）が
+  `claimKey: params.claimKey ?? null` を常に書く。`@mnemora/postgres` から読み出した
+  `Memory`（`rowToMemory`、`packages/postgres/src/mapping.ts`）も同様に、値が無ければ
+  `claimKey: null` を返す——読み出し側でも欄自体は省略されない。**LLM を呼んで値を導出する
+  opt-in（`observe` の `claimKey?: ClaimKeyOptions`）は引き続き既定 off**——変わるのは
+  欄の有無であって、値が付く条件ではない
+  （[Issue #371](https://github.com/takecchi/mnemora/issues/371) /
+  [ADR 0320](./docs/decisions/0320-claim-key-field-implementation.md)、PR #736）。
+- **`@mnemora/testkit` の `InMemoryVectorStore.search`（擬似 `VectorStore`）で、距離が完全
+  一致したヒットの順序を、挿入順から Postgres と同じ3段 tie-break（距離 → `recordedAt`
+  DESC → `memoryId` 昇順）に揃えた。** `VectorStore.search` の interface（ADR 0170）は
+  同点でも決定的な順序を返すことを約束しているが、擬似物はこれまで
+  `Array.prototype.sort` の安定性により挿入順（通常の呼び出し順では `recordedAt` の
+  古い方が先）に落ちており、Postgres の「新しい方が先」とは逆向きだった。返す形
+  （`{ memoryId, distance }`）は変えていない
+  （[Issue #339](https://github.com/takecchi/mnemora/issues/339) /
+  [ADR 0049](./docs/decisions/0049-reinforce-monotonicity-in-pseudo-implementations.md) /
+  [ADR 0170](./docs/decisions/0170-association-search-tiebreak-nondeterminism.md)、
+  PR #828）。
+  ⚠ 擬似物の同点順序に依存する呼び出し側（自前のテスト・スナップショット等）があれば、
+  結果が変わりうる。
 
 ### Fixed
 
@@ -307,6 +347,37 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md) 追記）。
   ⭕ **この repo に同梱の実装（`packages/postgres`/`packages/testkit`）の呼び出しは
   引き続き明示で `true` を渡しており、挙動は無変更。**
+- **`packDigestBand`（`packages/core/src/digest-band.ts`）に負数の `maxEntryChars` を渡すと、
+  `String.prototype.slice` の「末尾から除く」意味に化けて切り詰めが効かず、ほぼ全文が
+  残っていた。** `Math.max(0, maxEntryChars)` で下限0にクランプした。正の値の既存呼び出しの
+  挙動は無変更（PR #801）。
+- **`truncateForFallbackDigest`（`packages/core/src/extraction.ts`、digest 生成の安全弁）にも
+  同じ形の不具合があった**——負数の `maxLength` で同じく切り詰めが効かなかった。同様に
+  `Math.max(0, maxLength)` でクランプした。正の値の既存呼び出しの挙動は無変更（PR #802）。
+- **`@mnemora/openai` の strict モード向け JSON Schema 変換（`makeNullable`）で、省略可能な
+  `z.enum`/`z.literal` が `null` を選べず実質必須になっていた。** `const` を持つ形は
+  `anyOf` で包み、`enum` を持つ形は `enum` にも `null` を足すよう直した。core が現に渡す
+  3スキーマ（`ExtractionResultSchema`/`ClaimKeyBatchResultSchema`/`ConsolidationLLMResultSchema`）
+  の翻訳結果はバイト単位で不変——既存カセットに影響しない（PR #808）。
+  ⚠ 独自のスキーマで `completeStructured()` を呼ぶ呼び出し側には、出力が変わりうる。
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` に `retry: { attempts: NaN }` を
+  渡すと、`Math.max(1, NaN)` が `NaN` になり、モデルを一度も読み込もうとせず（読み込みの
+  `for` ループが一度も回らず）原因不明のエラーになっていた。** `NaN` は0以下と同じ扱いに
+  倒し、1回は試みるよう直した。既定値・正の値の挙動は無変更（PR #810）。
+- **`@mnemora/testkit` の `InMemoryMemoryStore.getMany`・`InMemoryVectorStore.getVectors`
+  （擬似実装）が、重複した id を渡されると重複したまま返していた。** Postgres 実装と同じく
+  1件に畳むよう直した。適合テストには触れていない（Issue #809）
+  （PR #812 / #814）。
+- **`recall()` の段3（必須の同伴取得）が、forget 済み（または `contested` でなくなった）
+  対向を companion として返すことがあった。** `contested` の組の片方を `forget()`（または
+  直接の status 書き換え）した後も、生き残った側が recall に当たると forget 済みの相手が
+  `retrievedVia: "mandatory_companion"` として結果に混ざり、「forget した記憶は recall に
+  出ない」（[ADR 0087](./docs/decisions/0087-runtime-forget-shape.md) 決定6）に違反していた。
+  段3の companion フィルタに `status === "contested"` を足した——弾かれた対向は「対向が
+  見つからない contested」と同じ扱いに倒れ、既存の `unit_assembly_dropped`（ADR 0043）に
+  合流する。新しい Omission 種別も公開 API の変更も無い（PR #824）。
+  ⚠ **既定の recall 結果が変わりうる**——`contested` の組の片方を forget した状態で、
+  もう片方が recall に当たる呼び出し。
 
 ---
 
