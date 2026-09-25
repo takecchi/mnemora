@@ -165,6 +165,24 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    */
   async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
     assertValidHalfLifeRecalls(recalls);
+    // `assertValidHalfLifeRecalls`（core 共有）の値域は `(0, ∞)`——JS の float64 では
+    // 有限だが、`tenant_settings.default_half_life_recalls` は Postgres の `real`
+    // （IEEE 754 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い
+    // （`migrations/0015_decay_activity_clock.sql` の
+    // `CHECK (default_half_life_recalls > 0 AND default_half_life_recalls < 'Infinity'::real)`）。
+    // `PostgresTenantSettingsStore.setDefaultHalfLifeRecalls` へ float4 の範囲を超える値
+    // （例: `1e300`）を渡すと、値が `real` へ変換される際に `Infinity` へ丸まり、
+    // 上の CHECK 制約に引っかかって例外を投げる（実測: 本物の Postgres 17 で確認）。
+    // `Math.fround` は JS の number を IEEE 754 単精度（float4 と同じビット幅）へ丸める
+    // 標準関数であり、その丸めで `Infinity` になるかどうかは Postgres の `real` への
+    // 変換が overflow するかどうかと**ビット単位で一致する**（実測: 境界値
+    // `3.4028235677973362e+38`（有限）と `3.4028235677973366e+38`（overflow）の両方を
+    // `psql` で確認し、`Math.fround` の有限/無限の境界と完全に一致することを確認した）。
+    if (!Number.isFinite(Math.fround(recalls))) {
+      throw new Error(
+        `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
+      );
+    }
     this.ensureRow(ctx.tenantId).defaultHalfLifeRecalls = recalls;
   }
 
