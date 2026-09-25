@@ -1,15 +1,20 @@
+import { ORDER_LEGEND_LINE } from "./mnemora-path.js";
 import type { CaseMaterial, MaterialMemoryLine } from "./answer-trials-material.js";
 
 /**
  * Issue #705 / ADR 0301 の描画器。`answer-trials-material.ts` が組んだ
- * {@link CaseMaterial}（1つの記憶集合）を、A/B 2通りのプロンプト文字列へ描画する。
+ * {@link CaseMaterial}（1つの記憶集合）を、A/B/C 3通りのプロンプト文字列へ描画する。
  *
- * ⭐ **A/B は同じ `CaseMaterial` を読むだけである。** 別の記憶集合を取り直すことは
+ * ⭐ **A/B/C は同じ `CaseMaterial` を読むだけである。** 別の記憶集合を取り直すことは
  * 構造的にできない——`CaseMaterial` 以外の入力（DB・recall 等）を取らない。
+ *
+ * **2026-09（ADR 0304）**: n=15 の候補比較で使った `order-sorted`/`digest-order-legend`
+ * は、比較のための一時的なレジストリ項目だった——採用したのは `order-legend`
+ * （旧名 `order-sorted-legend`）だけであり、他の2つはレジストリから外した
+ * （数値は ADR 0304 に残る）。
  */
 
-export type RenderName =
-  "recorded" | "digest-only" | "order-sorted" | "order-sorted-legend" | "digest-order-legend";
+export type RenderName = "recorded" | "digest-only" | "order-legend";
 
 export interface Renderer {
   readonly name: RenderName;
@@ -90,13 +95,23 @@ export const digestOnlyRenderer: Renderer = {
 };
 
 // ---------------------------------------------------------------------------
-// Issue #691 の候補（記録順の見せ方だけを変える）。欠落値は埋めない——記録順を持たない行は
-// 並べ替えの末尾に元の順で残し、欄も足さない。
+// 描画 C: order-legend — Issue #691 の子（ADR 0304）が採用した描画。
+//
+// n=15 の dev 対照（ADR 0304）で、`schedule-change-meeting-day` が
+// recorded（現行 #698 書式）3/15・digest-only 9/15・order-sorted（並べ替えのみ）5/15・
+// order-sorted-legend（この描画）13/15・digest-order-legend（由来等の欄を落として
+// 並べ替え+凡例）13/15 だった。**由来・話者・主題等の欄を保つ**（ADR 0295 決定3〜6が
+// 足した欄を落とすと eval の誤帰属対照を壊しうる、ADR 0304）ため、この描画を
+// `order-legend` として採用し、`order-sorted`（並べ替えのみ・凡例なし）と
+// `digest-order-legend`（欄を落とす）は採らなかった——数値・却下理由は ADR 0304
+// に集約し、ここには複製しない。
+//
+// **`mnemora-path.ts` の `buildMnemoraPrompt`（本番の実装）と同じ規則を、構造化した
+// 材料の上で再現する**——凡例文字列は `ORDER_LEGEND_LINE` をあちらから import して
+// 1箇所にする（2箇所に手で複製すると、どちらかを直し忘れて静かにずれる）。
 // ---------------------------------------------------------------------------
 
-const ORDER_LEGEND = "(記録順: 数が大きいほど後に記録された。行は記録の古い順に並べてある)";
-const SEQUENCE_LEGEND = "(行は記録の古い順に並べてある。下の行ほど後に記録された)";
-
+/** `recordedOrder` を持つ行だけを昇順に並べ替え、持たない行は元順のまま末尾に残す。 */
 function sortByRecordedOrder(lines: readonly MaterialMemoryLine[]): MaterialMemoryLine[] {
   const withOrder = lines.filter((l) => l.recordedOrder !== undefined);
   const without = lines.filter((l) => l.recordedOrder === undefined);
@@ -106,35 +121,25 @@ function sortByRecordedOrder(lines: readonly MaterialMemoryLine[]): MaterialMemo
   ];
 }
 
-function sortedRenderer(name: RenderName, legend: boolean, digestOnly: boolean): Renderer {
-  return {
-    name,
-    renderUserContent(material: CaseMaterial): string {
-      const lines = sortByRecordedOrder(material.lines)
-        .map((l) => (digestOnly ? `- ${l.digest}` : renderLineAsRecorded(l)))
-        .join("\n");
-      const legendText = digestOnly ? SEQUENCE_LEGEND : ORDER_LEGEND;
-      const head = legend && material.lines.length > 0 ? `${legendText}\n` : "";
-      return `${head}${joinBody(lines, indexLine(material))}${questionSuffix(material.question)}`;
-    },
-  };
-}
+export const orderLegendRenderer: Renderer = {
+  name: "order-legend",
+  renderUserContent(material: CaseMaterial): string {
+    const hasAnyRecordedOrder = material.lines.some((l) => l.recordedOrder !== undefined);
+    const lines = sortByRecordedOrder(material.lines)
+      .map((l) => renderLineAsRecorded(l))
+      .join("\n");
+    const head = hasAnyRecordedOrder ? `${ORDER_LEGEND_LINE}\n` : "";
+    return `${head}${joinBody(lines, indexLine(material))}${questionSuffix(material.question)}`;
+  },
+};
 
 export const RENDERERS: Readonly<Record<RenderName, Renderer>> = {
   recorded: recordedRenderer,
   "digest-only": digestOnlyRenderer,
-  "order-sorted": sortedRenderer("order-sorted", false, false),
-  "order-sorted-legend": sortedRenderer("order-sorted-legend", true, false),
-  "digest-order-legend": sortedRenderer("digest-order-legend", true, true),
+  "order-legend": orderLegendRenderer,
 };
 
-export const RENDER_NAMES: readonly RenderName[] = [
-  "recorded",
-  "digest-only",
-  "order-sorted",
-  "order-sorted-legend",
-  "digest-order-legend",
-];
+export const RENDER_NAMES: readonly RenderName[] = ["recorded", "digest-only", "order-legend"];
 
 export function isRenderName(value: string): value is RenderName {
   return (RENDER_NAMES as readonly string[]).includes(value);

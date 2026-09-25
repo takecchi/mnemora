@@ -69,6 +69,28 @@ import type { RecalledMemory } from "@mnemora/core";
  *    1つに畳まない（読み手が「たまたま同じ」と「同じ欄」を区別できなくなるのを
  *    避ける）。
  *
+ * ## 行の並べ替え・凡例（ADR 0304、`order-legend` 描画。旧: `[記録順:N]` タグだけを
+ * 添えて配列順のまま出す描画）
+ *
+ * 10. 🔴 **`recall.memories` を `recordedAt` の昇順に並べ替えて出す。** 生の ISO
+ *     タイムスタンプ（案A）でも、配列順のまま `[記録順:N]` タグだけ添える描画
+ *     （旧実装）でもなく、**行そのものの表示順を記録順に差し替える**——
+ *     `schedule-change-meeting-day`（「金曜→水曜」の訂正）を材料にした n=15 の
+ *     dev 対照で、この描画（`order-sorted-legend`）が 13/15 と、旧描画の揺れ幅
+ *     （8/15）に対して安定して高かった（他の dev 5件はどの描画でも 15/15）。
+ *     数値・採らなかった候補は ADR 0304 に集約する。**`recordedAt` を持たない行は
+ *     並べ替えの対象から外し、元の配列順のまま末尾に残す**（欠落値を推測しない、
+ *     Issue #691 完了条件1と同じ規律の適用——「記録順が無い」ことを「先頭」でも
+ *     「末尾以外のどこか」でもなく、末尾かつ元順のままとして扱う）。
+ * 11. **少なくとも1行が `[記録順:N]` を持つとき（＝並べ替えが実際に起きたとき）だけ**、
+ *     本文の先頭に凡例1行 `(記録順: 数が大きいほど後に記録された。行は記録の古い順に
+ *     並べてある)` を出す。1件も記録順を持たない（`recordedAt` を誰も渡していない）
+ *     呼び出しでは、並べ替えが起きていないので「並べてある」と書かない。
+ * 12. ⚠ **`recall.memories` が元々持っていたスコア順（`docs/recall.md` §2）は、
+ *     この並べ替えで失われる。**`buildMnemoraPrompt` の出力文字列だけを見る
+ *     呼び出し側は、もうスコア順を復元できない——スコア順が要るなら
+ *     `recall.memories` 自体（並べ替えていない）を見ること。
+ *
  * ## この定義が実装前であることの確認
  *
  * `provenance-prompt-contract.test.ts` は、このケース集合を読んで
@@ -80,6 +102,14 @@ import type { RecalledMemory } from "@mnemora/core";
  * 追加した時点でも同じ規律を守る——このコミットの時点では
  * `buildMnemoraPrompt`/`renderRecalledMemoryLine` はまだ `recordedAt`/`occurredAt` を
  * 描画しないので、この5件だけが赤になることが期待される（既存9件は無関係のまま緑）。
+ *
+ * **2026-09（ADR 0304、`order-legend` 描画への切り替え）**: 上の10〜12を実装へ
+ * 反映した時点で、`temporal-*` の5件だけが再び赤になった
+ * （`pnpm exec vitest run src/__tests__/provenance-prompt-contract.test.ts` の実測、
+ * 5 failed | 11 passed——凡例行が追加された分と、`temporal-order-multi-out-of-array-order`
+ * の行順が入れ替わった分）。この5件の `expectedLines`/`expectedLegend` を新しい
+ * 出力に合わせて更新した——**由来・話者・主題・矛盾関係だけを見る既存9件
+ * （recordedAt を渡していない）は無関係のまま緑だった。**
  */
 
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
@@ -87,10 +117,20 @@ const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
 export interface ProvenancePromptCase {
   id: string;
   description: string;
-  /** この会話ターンで recall が返した memories（順序どおり）。 */
+  /** この会話ターンで recall が返した memories（`recall()` が返す元の順序どおり）。 */
   memories: RecalledMemory[];
-  /** `buildMnemoraPrompt` が返す本文のうち、digest 箇条書き部分の期待行（memories と同じ順）。 */
+  /**
+   * `buildMnemoraPrompt` が返す本文のうち、digest 箇条書き部分の期待行——
+   * **表示順**（ADR 0304 の並べ替え後。`recordedAt` を持たない行は `memories` の
+   * 元順のまま末尾に残る）。
+   */
   expectedLines: string[];
+  /**
+   * 凡例行 `ORDER_LEGEND_LINE`（`../mnemora-path.js`）が本文の先頭に出るはずなら
+   * `true`。省略時 `false`——1件も `recordedAt` を持たないケースでは出ない
+   * （ADR 0304 決定「少なくとも1行が記録順を持つときだけ」）。
+   */
+  expectedLegend?: boolean;
 }
 
 export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
@@ -337,6 +377,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       "- [由来:stated] [話者:太郎] [主題:user-1] " +
         "[記録順:1] [出来事時刻:2026-01-01T00:00:00.000Z] 会議は10時から",
     ],
+    expectedLegend: true,
   },
   {
     id: "temporal-occurred-null",
@@ -359,6 +400,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
     expectedLines: [
       "- [由来:stated] [話者:次郎] [主題:user-1] [記録順:1] [出来事時刻:不明] 予定は未定",
     ],
+    expectedLegend: true,
   },
   {
     id: "temporal-order-tie",
@@ -395,6 +437,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       "- [由来:stated] [話者:花子] [主題:user-1] [記録順:2] " +
         "[出来事時刻:2026-01-05T09:00:00.123Z] 後に並んでいる方",
     ],
+    expectedLegend: true,
   },
   {
     id: "temporal-occurred-undefined",
@@ -414,13 +457,15 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       },
     ],
     expectedLines: ["- [由来:inferred] [主題:なし] [記録順:1] 本文のみ"],
+    expectedLegend: true,
   },
   {
     id: "temporal-order-multi-out-of-array-order",
     description:
       "2件の recordedAt が異なり、かつ recall.memories の並び（配列の位置）と時系列の" +
-      "前後が逆: 記録順は配列位置ではなく recordedAt の昇順で決まることを示す" +
-      "（先に並んでいる方が実は後で記録された）",
+      "前後が逆: 記録順は配列位置ではなく recordedAt の昇順で決まる。ADR 0304 以降は" +
+      "タグの番号だけでなく、行そのものの表示順が記録順に入れ替わる" +
+      "（配列では先に置いた方が、出力では後ろに回る）",
     memories: [
       {
         memoryId: "m-later",
@@ -446,8 +491,43 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       },
     ],
     expectedLines: [
-      "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:2] [出来事時刻:不明] 配列では先だが、記録は後",
       "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:1] [出来事時刻:不明] 配列では後だが、記録は先",
+      "- [由来:stated] [話者:太郎] [主題:user-1] [記録順:2] [出来事時刻:不明] 配列では先だが、記録は後",
     ],
+    expectedLegend: true,
+  },
+  {
+    id: "temporal-mixed-with-and-without-recorded-at",
+    description:
+      "同じ recall.memories の中に recordedAt を持つ行と持たない行が混在: 記録順を持たない行は" +
+      "並べ替えの対象から外れ、元の配列位置に関わらず末尾に残る（先頭に回さない・他の順位で埋めない）" +
+      "——recordedAt が無い行を先頭へ回す変異試験(b)がここでだけ赤くなる",
+    memories: [
+      {
+        memoryId: "m-no-recorded-at",
+        digest: "記録順を持たない行（配列では先頭）",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "太郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+      {
+        memoryId: "m-has-recorded-at",
+        digest: "記録順を持つ行（配列では2番目）",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "次郎",
+        subjectId: "user-1",
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.000Z"),
+        occurredAt: null,
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:次郎] [主題:user-1] [記録順:1] [出来事時刻:不明] 記録順を持つ行（配列では2番目）",
+      "- [由来:stated] [話者:太郎] [主題:user-1] 記録順を持たない行（配列では先頭）",
+    ],
+    expectedLegend: true,
   },
 ];
