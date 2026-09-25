@@ -25,7 +25,7 @@ import type {
   ArchiveSweepResultJson,
   RawArchiveSweepProbeMeasurement,
 } from "./archive-sweep-json.js";
-import { drainEmbedTicks } from "./embed-drain.js";
+import { clockPastRecentDbWrites, drainEmbedTicks } from "./embed-drain.js";
 import type { MutableClock } from "./mutable-clock.js";
 import {
   DEFAULT_HAYSTACK_SIZE,
@@ -290,9 +290,18 @@ export async function runArchiveSweepCost(
   // ⭐ recall/tick の直前に必ず実時刻へ戻す——`outbox.available_at` は Postgres の
   // 実時刻で入るため、Clock を過去に置いたままだと embed ジョブが1件も claim
   // されない(`mutable-clock.ts` の docstring、`time-term-arm.ts` で実測済みの罠)。
-  const afterIngest = new Date();
-  options.clock.set(afterIngest);
-  await drainEmbedTicks(options.runtime, ctx);
+  //
+  // 🔴 Issue #719: 素の `new Date()` だけでは足りない——`available_at`(Postgres の
+  // `now()`、us精度)と同じ ms 内でこの時刻を読むと、claim が1件も進まない
+  // (`clockPastRecentDbWrites` の docstring 参照)。`clock` は `.set()` するまで
+  // 動かない止まった時計なので、`drainEmbedTicks` の `waitForClockToAdvance`
+  // (実時計が進むのを待つ既定の再試行)は無意味——ここで先に +1ms して確実に
+  // 追い越しておき、`waitForClockToAdvance: false` で無駄な待ちを避ける。
+  options.clock.set(clockPastRecentDbWrites());
+  await drainEmbedTicks(options.runtime, ctx, {
+    expectedProcessed: allIds.length,
+    waitForClockToAdvance: false,
+  });
 
   const embeddingSpace: ArchiveSweepEmbeddingSpaceJson = { ...options.embeddingProvider.space };
 

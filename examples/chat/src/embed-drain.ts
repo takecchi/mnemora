@@ -40,6 +40,54 @@ export interface DrainResult {
   firstTickProcessed: number;
 }
 
+/** `drainEmbedTicks` の既定の待ち上限(ms)。`waitForClockToAdvance` 参照。 */
+const DEFAULT_MAX_WAIT_MS = 2000;
+
+/** 実時計が進むのを待つためだけの sleep(`waitForClockToAdvance` が使う)。 */
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+export interface DrainEmbedTicksOptions {
+  /**
+   * 呼び出し元が把握している、今回処理されるはずの embed ジョブ件数(Issue #719)。
+   *
+   * **出所**: `runtime.observe()`/`runtime.consolidate()` などが返す `memoryIds`
+   * (`ObserveResult.memoryIds` の docstring — 冪等な再送では空配列になる、
+   * `packages/core/src/runtime.ts` 参照)を積算して渡す。`createMemoryWithOutbox` は
+   * 新しい Memory 1件につき embed ジョブを1件だけ積む(既定 `jobKinds: ["embed"]`、
+   * `packages/core/src/runtime.ts` の `createMemoriesFromCandidates`)ため、
+   * 「新しく作られた Memory の件数」= 「積まれた embed ジョブの件数」になる。
+   *
+   * 渡すと、drain 終了時に `totalProcessed + totalFailed`(claim されて終端まで
+   * 進んだ件数 — embed 自体の成功・失敗は問わない)と比較し、一致しなければ
+   * 例外を投げる。**embed 自体の失敗(例: 入力長超過、ADR 0090)は `totalFailed` に
+   * 正しく数えるので、ここでは「揃わなかった」として扱わない**——この検査が
+   * 捕まえたいのは「claim 自体が0件になる」Issue #719 の競合であって、
+   * embed 自体が成功したかどうかではない。
+   */
+  expectedProcessed?: number;
+  /**
+   * 既定 `true`。`expectedProcessed` を満たさなかったとき、実時計が1ms以上進むのを
+   * 待って drain し直す——`packages/core` の既定 `systemClock`(`new Date()`、
+   * `packages/core/src/clock.ts`)を使う呼び出し元向け。`available_at`(Postgres の
+   * `now()`、マイクロ秒精度)と同じ ms 内で claim を試みてしまった取りこぼしを、
+   * 実時刻が先へ進んだ次の drain で拾い直す(`clockPastRecentDbWrites` と同じ理屈を、
+   * 「先に +1ms する」のではなく「進むまで待つ」形で満たす)。
+   *
+   * ⚠ **MutableClock(`./mutable-clock.js`、止まった時計)を注入している呼び出し元では
+   * `false` を渡すこと。** `clock.now()` は `.set()` するまで動かないため、実時計を
+   * 待っても無意味——`maxWaitMs` を無駄に消費するだけで、最後は必ず例外になる。
+   * 代わりに、drain を呼ぶ直前に自分で `clock.set(clockPastRecentDbWrites())` を呼び、
+   * 1回目の drain で確実に揃えること(`archive-sweep-cost.ts`/`time-term-arm.ts` 参照)。
+   */
+  waitForClockToAdvance?: boolean;
+  /** `waitForClockToAdvance` が待つ上限(ms)。既定 {@link DEFAULT_MAX_WAIT_MS}。 */
+  maxWaitMs?: number;
+}
+
 /**
  * 直近に書いた outbox ジョブの `available_at`（Postgres の `now()`、マイクロ秒精度）を
  * **確実に追い越す**、ミリ秒精度の `Date` を返す（Issue #719）。
@@ -95,23 +143,72 @@ export function clockPastRecentDbWrites(nowMs: number = Date.now()): Date {
  * ingest してから測る」バッチ的な呼び出し側であり、干上がるまで回す責任は
  * `packages/core`(単発の安全弁である `DEFAULT_TICK_LIMIT` を持つ側)ではなく、
  * こちら側にある(ADR 0021「採らなかった案」参照)。
+ *
+ * **Issue #719 の歯**: `processed === 0` は「claim できるジョブがもう無い」ことの
+ * 証拠にならない——`available_at`(Postgres `now()`、us精度)と `opts.now`(呼び出し側の
+ * `Clock`、ms精度で切り捨て)が同じ ms に収まると、実際にはジョブが残っているのに
+ * `processed === 0` になる(`clockPastRecentDbWrites` の docstring 参照)。
+ * `options.expectedProcessed` を渡すと、この関数自身がそれを検査する
+ * ——渡さない呼び出し元は従来どおり `processed === 0` だけで「干上がった」と判定する
+ * (呼び出し元ごとの判断は PR 本文の表を参照)。
  */
-export async function drainEmbedTicks(runtime: Runtime, ctx: Ctx): Promise<DrainResult> {
+export async function drainEmbedTicks(
+  runtime: Runtime,
+  ctx: Ctx,
+  options: DrainEmbedTicksOptions = {},
+): Promise<DrainResult> {
+  const waitForClockToAdvance = options.waitForClockToAdvance ?? true;
+  const maxWaitMs = options.maxWaitMs ?? DEFAULT_MAX_WAIT_MS;
+
   let ticks = 0;
   let totalProcessed = 0;
   let totalFailed = 0;
   let firstTickProcessed = 0;
-  for (;;) {
-    const result = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: EMBED_DRAIN_LEASE_MS });
-    ticks += 1;
-    totalProcessed += result.processed;
-    totalFailed += result.failed;
-    if (ticks === 1) {
-      firstTickProcessed = result.processed;
-    }
-    if (result.processed === 0) {
-      break;
+
+  async function drainOnce(): Promise<void> {
+    for (;;) {
+      const result = await runtime.tick(ctx, { kinds: ["embed"], leaseMs: EMBED_DRAIN_LEASE_MS });
+      ticks += 1;
+      totalProcessed += result.processed;
+      totalFailed += result.failed;
+      if (ticks === 1) {
+        firstTickProcessed = result.processed;
+      }
+      if (result.processed === 0) {
+        break;
+      }
     }
   }
+
+  // `expectedProcessed` が満たされたか。`processed + failed` で見る理由は
+  // `DrainEmbedTicksOptions.expectedProcessed` の docstring 参照
+  // (embed 自体の失敗は「揃った」うちに数える——claim 自体の欠落だけを検査する)。
+  const isSatisfied = (): boolean =>
+    options.expectedProcessed === undefined ||
+    totalProcessed + totalFailed === options.expectedProcessed;
+
+  await drainOnce();
+
+  if (!isSatisfied() && waitForClockToAdvance) {
+    const deadline = Date.now() + maxWaitMs;
+    while (!isSatisfied() && Date.now() < deadline) {
+      // 実時計が1ms以上進むのを待ってから drain し直す。`systemClock`
+      // (`packages/core/src/clock.ts`、`new Date()`)は呼ぶたびに実時刻を読むため、
+      // これだけで `available_at` との ms 競合を抜けられる。
+      await sleep(2);
+      await drainOnce();
+    }
+  }
+
+  if (!isSatisfied()) {
+    throw new Error(
+      `drainEmbedTicks: embed ジョブが ${String(options.expectedProcessed)} 件処理される` +
+        `はずが、claim されて終端まで進んだのは ${String(totalProcessed + totalFailed)} 件` +
+        `(processed=${String(totalProcessed)}, failed=${String(totalFailed)})しかなかった` +
+        `(ticks=${String(ticks)})。outbox の available_at と clock の競合、` +
+        `または呼び出し側が渡した expectedProcessed 自体の見積もり違いを疑うこと。`,
+    );
+  }
+
   return { ticks, totalProcessed, totalFailed, firstTickProcessed };
 }

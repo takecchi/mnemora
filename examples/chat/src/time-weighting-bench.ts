@@ -203,21 +203,19 @@ export async function seedTimeWeightingMemories(
   clock.set(clockPastRecentDbWrites());
   // 埋め込みは全件書き終えた後にまとめて処理する——`ingestConversation` と同じ順序
   // （`mnemora-path.ts` の `drainEmbedTicks` 呼び出し）。
-  const drainResult = await drainEmbedTicks(runtime, ctx);
-  // 🔴 **Issue #719: 黙って0件のまま進まない歯。** 上の +1ms 対策が効かなかった
-  // （または将来また同じ形の競合を踏んだ）場合、`drainEmbedTicks` は
-  // `processed === 0` を「もう無い」と解釈してループを抜けるだけで、例外は投げない
-  // （`embed-drain.ts` の `drainEmbedTicks` 参照）。それを afterward の `recall()` が
-  // 「0件提示」として静かに飲み込むと、原因が分からないまま再生検査だけが赤くなる
-  // （実際に CI で踏んだ形）。⟹ **ここで、書いた seed 件数ぶん埋め込みが処理された
-  // ことを検査し、欠けたら明示的に例外にする。**
-  if (drainResult.totalProcessed !== seeds.length) {
-    throw new Error(
-      `seedTimeWeightingMemories: embed ジョブが ${seeds.length} 件のはずが ` +
-        `${drainResult.totalProcessed} 件しか処理されなかった（failed=${drainResult.totalFailed}, ` +
-        `ticks=${drainResult.ticks}）。outbox の available_at と clock の競合、または埋め込み自体の失敗を疑うこと。`,
-    );
-  }
+  //
+  // 🔴 **Issue #719: 黙って0件のまま進まない歯は `drainEmbedTicks` 自身が持つ**
+  // （`embed-drain.ts` の `DrainEmbedTicksOptions.expectedProcessed` 参照）。ここでは
+  // 書いた seed 件数を渡すだけでよい——上の +1ms 対策が効かなかった（または将来また
+  // 同じ形の競合を踏んだ）場合、`drainEmbedTicks` 自身が例外を投げる。`clock` は
+  // `.set()` するまで動かない止まった `MutableClock` なので、`waitForClockToAdvance`
+  // （実時計が進むのを待つ既定の再試行）は無意味——`false` で無駄な待ちを避ける
+  // （この関数がこの直前で `clockPastRecentDbWrites()` により1回目から追い越して
+  // いるので、待たずとも揃うはず）。
+  await drainEmbedTicks(runtime, ctx, {
+    expectedProcessed: seeds.length,
+    waitForClockToAdvance: false,
+  });
 
   for (const seed of seeds) {
     const memoryId = memoryIdByLocalId.get(seed.localId);
