@@ -69,7 +69,7 @@ import type { RecalledMemory } from "@mnemora/core";
  *    1つに畳まない（読み手が「たまたま同じ」と「同じ欄」を区別できなくなるのを
  *    避ける）。
  *
- * ## 行の並べ替え・凡例（ADR 0305、`order-legend` 描画。旧: `[記録順:N]` タグだけを
+ * ## 行の並べ替え・凡例（ADR 0309、`order-legend` 描画。旧: `[記録順:N]` タグだけを
  * 添えて配列順のまま出す描画）
  *
  * 10. 🔴 **`recall.memories` を `recordedAt` の昇順に並べ替えて出す。** 生の ISO
@@ -78,7 +78,7 @@ import type { RecalledMemory } from "@mnemora/core";
  *     `schedule-change-meeting-day`（「金曜→水曜」の訂正）を材料にした n=15 の
  *     dev 対照で、この描画（`order-sorted-legend`）が 13/15 と、旧描画の揺れ幅
  *     （8/15）に対して安定して高かった（他の dev 5件はどの描画でも 15/15）。
- *     数値・採らなかった候補は ADR 0305 に集約する。**`recordedAt` を持たない行は
+ *     数値・採らなかった候補は ADR 0309 に集約する。**`recordedAt` を持たない行は
  *     並べ替えの対象から外し、元の配列順のまま末尾に残す**（欠落値を推測しない、
  *     Issue #691 完了条件1と同じ規律の適用——「記録順が無い」ことを「先頭」でも
  *     「末尾以外のどこか」でもなく、末尾かつ元順のままとして扱う）。
@@ -103,7 +103,7 @@ import type { RecalledMemory } from "@mnemora/core";
  * `buildMnemoraPrompt`/`renderRecalledMemoryLine` はまだ `recordedAt`/`occurredAt` を
  * 描画しないので、この5件だけが赤になることが期待される（既存9件は無関係のまま緑）。
  *
- * **2026-09（ADR 0305、`order-legend` 描画への切り替え）**: 上の10〜12を実装へ
+ * **2026-09（ADR 0309、`order-legend` 描画への切り替え）**: 上の10〜12を実装へ
  * 反映した時点で、`temporal-*` の5件だけが再び赤になった
  * （`pnpm exec vitest run src/__tests__/provenance-prompt-contract.test.ts` の実測、
  * 5 failed | 11 passed——凡例行が追加された分と、`temporal-order-multi-out-of-array-order`
@@ -121,14 +121,14 @@ export interface ProvenancePromptCase {
   memories: RecalledMemory[];
   /**
    * `buildMnemoraPrompt` が返す本文のうち、digest 箇条書き部分の期待行——
-   * **表示順**（ADR 0305 の並べ替え後。`recordedAt` を持たない行は `memories` の
+   * **表示順**（ADR 0309 の並べ替え後。`recordedAt` を持たない行は `memories` の
    * 元順のまま末尾に残る）。
    */
   expectedLines: string[];
   /**
    * 凡例行 `ORDER_LEGEND_LINE`（`../mnemora-path.js`）が本文の先頭に出るはずなら
    * `true`。省略時 `false`——1件も `recordedAt` を持たないケースでは出ない
-   * （ADR 0305 決定「少なくとも1行が記録順を持つときだけ」）。
+   * （ADR 0309 決定「少なくとも1行が記録順を持つときだけ」）。
    */
   expectedLegend?: boolean;
 }
@@ -463,7 +463,7 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
     id: "temporal-order-multi-out-of-array-order",
     description:
       "2件の recordedAt が異なり、かつ recall.memories の並び（配列の位置）と時系列の" +
-      "前後が逆: 記録順は配列位置ではなく recordedAt の昇順で決まる。ADR 0305 以降は" +
+      "前後が逆: 記録順は配列位置ではなく recordedAt の昇順で決まる。ADR 0309 以降は" +
       "タグの番号だけでなく、行そのものの表示順が記録順に入れ替わる" +
       "（配列では先に置いた方が、出力では後ろに回る）",
     memories: [

@@ -20,10 +20,10 @@ import {
  * ADR 0236 / PR #523 が未達のまま残した半分）。**記録（カセット）の再生で回る**
  * ——鍵は要らない。
  *
- * ⛔ **ADR 0305（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
+ * ⛔ **ADR 0309（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
  * 変わったため、再生元を `ANSWER_CASSETTE_PATH`（旧形式、`answer.json`）から
  * `ANSWER_ORDER_LEGEND_CASSETTE_PATH`（新形式、`answer.order-legend.json`）へ向け直した。
- * このファイルは、旧 `answer.json` を種にして `record:answer` 1回で記録した（ADR 0305 §4.5.2）
+ * このファイルは、旧 `answer.json` を種にして `record:answer` 1回で記録した（ADR 0309 §4.5.2）
  * ——`recordRetentionMutationPositiveControl` が同じ実行の中で変異分（下記「実 API の記録」節）
  * も一緒に記録するため、旧形式のときのような専用の追記スクリプト
  * （`record-answer-retention-mutation.ts`）はもう要らない。
@@ -60,7 +60,7 @@ import {
  * 追加記録した——既存67件は1バイトも録り直していない（`recorder-answer-retention-mutation.ts`
  * の docstring、PR 本文参照）。
  *
- * **ADR 0305 以降、この節は歴史的な記録である。**新形式カセット
+ * **ADR 0309 以降、この節は歴史的な記録である。**新形式カセット
  * （`answer.order-legend.json`）は、上の docstring が書いたとおり `record:answer` 1回で
  * 変異分も含めて記録する——追記専用スクリプトを介さない全置換になる。
  *

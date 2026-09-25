@@ -32,7 +32,7 @@ import { TIME_WEIGHTING_CASE_SET_EVAL_UNDATED } from "../time-weighting-case-set
 
 /**
  * `buildMnemoraPrompt` の描画が変わっても、旧形式カセットは1バイトも変えない
- * （ADR 0305、Issue #691 続き）。**ここで固定する sha256 は「正本の写し」ではなく、
+ * （ADR 0309、Issue #691 続き）。**ここで固定する sha256 は「正本の写し」ではなく、
  * それ自体が実測した記録**である——`answer-trials-material.ts` が ADR 0301 の
  * 対照の基準として読み続ける2ファイルが、意図せず書き換わっていないことを
  * このファイル（カセットの対応を検査する場所）自身で捕まえる。
@@ -121,13 +121,13 @@ describe("compare のカセットと会話生成の対応（ADR 0052）", () => 
 
 // ---------------------------------------------------------------------------
 // `answer` の旧形式カセット（`examples/chat/cassettes/answer.json`）は、
-// `record`/`verify`/CLI の再生対象からは外れた（ADR 0305）が、
+// `record`/`verify`/CLI の再生対象からは外れた（ADR 0309）が、
 // `answer-trials-material.ts` が ADR 0301 の対照の基準として読み続ける。
 // ⟹ **1バイトも変わっていないことだけ**をここで固定する——
 // 中身の対応検査（質問文・naive プロンプト等）は、もう実行時に使わないので増やさない。
 // ---------------------------------------------------------------------------
 
-describe("`answer` の旧形式カセット（ADR 0301 対照の基準。1バイトも変えない、ADR 0305）", () => {
+describe("`answer` の旧形式カセット（ADR 0301 対照の基準。1バイトも変えない、ADR 0309）", () => {
   it("カセットがリポジトリに存在し、形式検査に通る", () => {
     expect(cassetteExists(ANSWER_CASSETTE_PATH)).toBe(true);
     expect(() => loadCassette(ANSWER_CASSETTE_PATH)).not.toThrow();
@@ -140,7 +140,7 @@ describe("`answer` の旧形式カセット（ADR 0301 対照の基準。1バイ
   });
 });
 
-describe("`answer` の新形式カセットと評価ケース集合の対応（Issue #498 / #506 / #691、ADR 0305）", () => {
+describe("`answer` の新形式カセットと評価ケース集合の対応（Issue #498 / #506 / #691、ADR 0309）", () => {
   const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
 
   it("カセットがリポジトリに存在する", () => {
@@ -177,7 +177,7 @@ describe("`answer` の新形式カセットと評価ケース集合の対応（I
     // ここで完全に組み立て直して鍵を引ける——ケースの会話・質問を1文字でも変えて
     // 録り直しを忘れたら、実行の数分後ではなく**この検査の時点で**赤くなる。
     // ⛔ mnemora 側は `recall()` の結果に依るため、ここからは組み立てられない。
-    // ⚠ naive プロンプトの形は `buildMnemoraPrompt` の描画（ADR 0305）に依らないので、
+    // ⚠ naive プロンプトの形は `buildMnemoraPrompt` の描画（ADR 0309）に依らないので、
     // 旧形式カセットと新形式カセットで同じ鍵が引けるはずである——だが検査は新形式側
     // （実際に使う側）だけに置く。二重化すると、どちらかを直し忘れて静かにずれる。
     const { entries } = loadCassette(ANSWER_ORDER_LEGEND_CASSETTE_PATH).llm;
@@ -206,7 +206,7 @@ describe("`answer` の新形式カセットと評価ケース集合の対応（I
 // (1) 各ケースの質問文と (2) 各ケースが直接書く記憶の content の2種類だけである。
 // ---------------------------------------------------------------------------
 
-describe("`answer-time-weighting` の旧形式カセット（実行時にはもう使わない。1バイトも変えない、ADR 0305）", () => {
+describe("`answer-time-weighting` の旧形式カセット（実行時にはもう使わない。1バイトも変えない、ADR 0309）", () => {
   it("カセットがリポジトリに存在し、形式検査に通る", () => {
     expect(cassetteExists(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).toBe(true);
     expect(() => loadCassette(ANSWER_TIME_WEIGHTING_CASSETTE_PATH)).not.toThrow();
@@ -219,7 +219,7 @@ describe("`answer-time-weighting` の旧形式カセット（実行時にはも�
   });
 });
 
-describe("`answer-time-weighting` の新形式カセットとケース集合の対応（Issue #690 / #691、ADR 0300 / 0305）", () => {
+describe("`answer-time-weighting` の新形式カセットとケース集合の対応（Issue #690 / #691、ADR 0300 / 0309）", () => {
   const cases = [
     ...TIME_WEIGHTING_CASE_SET_DEV,
     ...TIME_WEIGHTING_CASE_SET_EVAL,

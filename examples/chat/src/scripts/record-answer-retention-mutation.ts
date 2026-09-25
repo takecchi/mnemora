@@ -11,12 +11,12 @@ import { ANSWER_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io
  * Issue #498 完了条件4・「回答評価」側の陽性対照を、実 API で**変異分だけ**追加記録する
  * ——**既存の `examples/chat/cassettes/answer.json`（67件）を1バイトも録り直さずに**。
  *
- * ⛔ **ADR 0305（Issue #691 続き）以降、このスクリプトは事実上使われなくなった。**
+ * ⛔ **ADR 0309（Issue #691 続き）以降、このスクリプトは事実上使われなくなった。**
  * 下の段落が予告していた「`answer.json` を近く全体で録り直す」は、実際には
  * **採らなかった**——`buildMnemoraPrompt` の描画が変わった（`order-legend`）ときの
  * 方針は「既存カセットは1バイトも書き換えず、新しいファイル
  * （`answer.order-legend.json`、`cassette-io.ts` の `ANSWER_ORDER_LEGEND_CASSETTE_PATH`）
- * を足す」に決まった（ADR 0305）。`answer.json` は今後も `answer-trials-material.ts`
+ * を足す」に決まった（ADR 0309）。`answer.json` は今後も `answer-trials-material.ts`
  * （ADR 0301 の対照の基準）が読み続けるので、**このスクリプトが対象にしていた67件も
  * 変異2件も、このまま歴史的な記録として残る。** 新形式カセットへ変異分を記録するときは、
  * 下の段落と同じ理由でこのスクリプトを使い回さない——`recordAnswer`（`record:answer`）が

@@ -29,7 +29,7 @@ import { requireDatabaseUrl } from "./test-db.js";
  * ⚠ **実 API は絶対に叩かない**——`MNEMORA_PROVIDER_SOURCE=recorded` を明示し、
  * かつ `OPENAI_API_KEY` を env から確実に消してから子プロセスへ渡す（二重に塞ぐ。
  * `retrieval-json-cli-wiring.postgres.test.ts` と同じ規律）。再生元は
- * `examples/chat/cassettes/answer.order-legend.json`（ADR 0051 / PR #514、ADR 0305）。
+ * `examples/chat/cassettes/answer.order-legend.json`（ADR 0051 / PR #514、ADR 0309）。
  *
  * ⛔ **ただし「既定の道」を測る歯（Issue #577）だけは、塞ぎが1枚しかない。**
  * あちらが測るのは `MNEMORA_*` を**一切指定しない**ときの挙動であり、
@@ -194,7 +194,7 @@ describe("examples/chat answer: 記録の再生で最後まで通る(本物の C
       // mnemora 経路の digest に `expected.accept` が実際に残っていること（層2）を
       // 固定する。カセットは gpt-4o-mini/text-embedding-3-small で記録されたものであり
       // （`examples/chat/cassettes/answer.order-legend.json` の `recordedAt`/`llm.model`。
-      // ⛔ ADR 0305（Issue #691 続き）でこのファイルへ向け直した——旧形式 `answer.json`
+      // ⛔ ADR 0309（Issue #691 続き）でこのファイルへ向け直した——旧形式 `answer.json`
       // は 2026-09-17 記録だったが、新形式の記録日は録り直した時点で変わる）、
       // この歯自体は録り直しを要求しない——既存の記録済み digest 文字列を決定的に
       // 読むだけである。

@@ -1,4 +1,4 @@
-# ADR 0305: `buildMnemoraPrompt` を `order-legend` 描画に確定し、`answer`/`answer-time-weighting` の再生カセットを新形式へ移行する（Issue #691 続き）
+# ADR 0309: `buildMnemoraPrompt` を `order-legend` 描画に確定し、`answer`/`answer-time-weighting` の再生カセットを新形式へ移行する（Issue #691 続き）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
@@ -54,10 +54,7 @@
    （`cassettePathFor` 経由）と、影響する `*.postgres.test.ts`・`cassette-coverage.test.ts`
    をそちらへ向けた（§4）。**実 API を叩いていないため、新形式カセットはまだ存在せず、
    該当する歯は意図して赤いまま止めてある**（§4.3）。
-3. **前の担い手が仮置きしていた ADR 番号（0304）を、実際に採番できる番号（0305、本 ADR）へ
-   修正した**——`node scripts/adr-renumber.mjs --next` を引き継ぎ時点で実行したところ、
-   `main` は 0302 までで、open な PR #711/#713 が 0303 を、#712/#715 が 0304 を既に
-   主張しており、`--next` は 0305 を返した【実測】。
+3. **ADR 番号は、何度か付け替えた。** 前の担い手は 0304 を仮置きした。この書き手は、引き継いだ時点の `node scripts/adr-renumber.mjs --next` の返り値（0305）へ直した。その後、main に別の ADR 0305・0306 が入った。マネージャーが rebase し、`adr-renumber.mjs` の既定動作で 0307 へ移した。0307 と 0308 は open な PR（#720・#723）が主張していたので、`--next` の返り値の 0309 へ移した【実測、2026-09-25】。
 4. 本 ADR の執筆、[ADR 0295](./0295-answer-prompt-provenance-rendering.md) への追記3、
    `examples/chat/README.md` の更新、ADR 索引の再生成。
 

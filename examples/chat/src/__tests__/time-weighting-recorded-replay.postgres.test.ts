@@ -29,14 +29,14 @@ import {
  * temperature=0で記録）を `MNEMORA_LLM=recorded MNEMORA_EMBEDDING=recorded` で再生する。
  * CI の `example-chat` ジョブがこのファイルを（`test:db` 経由で自動的に）実行する。
  *
- * ⛔ **ADR 0305（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
+ * ⛔ **ADR 0309（Issue #691 続き）**: `buildMnemoraPrompt` が `order-legend` 描画に
  * 変わったため、旧形式（`answer-time-weighting.json`、`ANSWER_TIME_WEIGHTING_CASSETTE_PATH`）
  * はもう再生できない——このファイルはまだ実 API で記録していない
  * （`cassette-coverage.test.ts` が「カセットが無い」で先に落ちる）。**記録し直したら、
  * 下の `EXPECTED_VERDICT` を新しい記録のログからそのまま書き写すこと——旧記録の値を
  * 使い回さない。** プロンプトの文言が変わるとモデルの実際の回答文字列も変わりうるため、
  * `gradeAnswer` の正誤が今と同じである保証は無い（**特に legacy 4件——`schedule-change-
- * meeting-day` 系と同様の「訂正の後続」を含むケースは、ADR 0305 の実測でも並べ替え・
+ * meeting-day` 系と同様の「訂正の後続」を含むケースは、ADR 0309 の実測でも並べ替え・
  * 凡例の有無で正答率が動いている——結果が変わる可能性が高い**）。
  *
  * 🔴 **正誤を「期待どおり」に固定する。取り引きを隠さない**（マネージャー決定）:

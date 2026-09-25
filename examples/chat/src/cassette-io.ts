@@ -29,7 +29,7 @@ export const COMPARE_CASSETTE_PATH = join(here, "..", "cassettes", "compare.json
  * `answer` の**旧形式**カセット（記録済み・67件、`buildMnemoraPrompt` の #698 書式で
  * 記録した実 API の応答）。
  *
- * ⛔ **ADR 0305（Issue #691 続き）以降、`record`/`verify`/CLI の `answer` 再生には
+ * ⛔ **ADR 0309（Issue #691 続き）以降、`record`/`verify`/CLI の `answer` 再生には
  * もう使わない**——`buildMnemoraPrompt` が `order-legend` 描画に変わり、この記録に
  * 入っているプロンプトの形（記録順タグ無し・凡例無し）とはもう一致しないため
  * （`RecordedLLMProvider` は形が合わない入力を「記録に無い」として例外にする）。
@@ -43,7 +43,7 @@ export const COMPARE_CASSETTE_PATH = join(here, "..", "cassettes", "compare.json
  */
 export const ANSWER_CASSETTE_PATH = join(here, "..", "cassettes", "answer.json");
 /**
- * `answer` の**新形式**カセット（ADR 0305、`order-legend` 描画）。`record`/`verify`/CLI
+ * `answer` の**新形式**カセット（ADR 0309、`order-legend` 描画）。`record`/`verify`/CLI
  * の `answer` 再生は、ここからこのファイルを読む——`CASSETTE_PATH_BY_TARGET` 参照。
  *
  * ⚠ **段1（本 commit）ではこのパスを宣言するだけで、ファイル自体はまだ存在しない。**
@@ -67,7 +67,7 @@ export const ANSWER_ORDER_LEGEND_CASSETTE_PATH = join(
  * の2方針で呼ぶため、同じ質問でも記録の鍵（プロンプトのハッシュ）が `answer` ベンチとは
  * 異なる——1つのファイルにまとめる技術的な理由も無い。
  *
- * ⛔ **ADR 0305 以降、`record`/`verify`/CLI の `answer-time-weighting` 再生にはもう
+ * ⛔ **ADR 0309 以降、`record`/`verify`/CLI の `answer-time-weighting` 再生にはもう
  * 使わない**——理由は {@link ANSWER_CASSETTE_PATH} と同じ（`buildMnemoraPrompt` の形が
  * 変わったため）。1バイトも書き換えない。
  */
@@ -78,7 +78,7 @@ export const ANSWER_TIME_WEIGHTING_CASSETTE_PATH = join(
   "answer-time-weighting.json",
 );
 /**
- * `answer-time-weighting` の**新形式**カセット（ADR 0305、`order-legend` 描画）。
+ * `answer-time-weighting` の**新形式**カセット（ADR 0309、`order-legend` 描画）。
  * `record`/`verify`/CLI の `answer-time-weighting` 再生は、ここからこのファイルを読む。
  *
  * ⚠ **段1（本 commit）ではこのパスを宣言するだけで、ファイル自体はまだ存在しない。**
@@ -102,7 +102,7 @@ export const CASSETTE_TARGETS: readonly CassetteTarget[] = [
 ];
 
 /**
- * **ADR 0305（Issue #691 続き）**: `answer`/`answer-time-weighting` は、`buildMnemoraPrompt`
+ * **ADR 0309（Issue #691 続き）**: `answer`/`answer-time-weighting` は、`buildMnemoraPrompt`
  * が `order-legend` 描画に変わったことを受けて、新形式カセット（`*.order-legend.json`）へ
  * 向け直した。旧形式（`ANSWER_CASSETTE_PATH`/`ANSWER_TIME_WEIGHTING_CASSETTE_PATH`）は
  * 1バイトも書き換えず、`answer-trials-material.ts`（ADR 0301 の対照の基準）だけが

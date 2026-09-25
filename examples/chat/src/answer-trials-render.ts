@@ -8,10 +8,10 @@ import type { CaseMaterial, MaterialMemoryLine } from "./answer-trials-material.
  * ⭐ **A/B/C は同じ `CaseMaterial` を読むだけである。** 別の記憶集合を取り直すことは
  * 構造的にできない——`CaseMaterial` 以外の入力（DB・recall 等）を取らない。
  *
- * **2026-09（ADR 0305）**: n=15 の候補比較で使った `order-sorted`/`digest-order-legend`
+ * **2026-09（ADR 0309）**: n=15 の候補比較で使った `order-sorted`/`digest-order-legend`
  * は、比較のための一時的なレジストリ項目だった——採用したのは `order-legend`
  * （旧名 `order-sorted-legend`）だけであり、他の2つはレジストリから外した
- * （数値は ADR 0305 に残る）。
+ * （数値は ADR 0309 に残る）。
  */
 
 export type RenderName = "recorded" | "digest-only" | "order-legend";
@@ -95,15 +95,15 @@ export const digestOnlyRenderer: Renderer = {
 };
 
 // ---------------------------------------------------------------------------
-// 描画 C: order-legend — Issue #691 の子（ADR 0305）が採用した描画。
+// 描画 C: order-legend — Issue #691 の子（ADR 0309）が採用した描画。
 //
-// n=15 の dev 対照（ADR 0305）で、`schedule-change-meeting-day` が
+// n=15 の dev 対照（ADR 0309）で、`schedule-change-meeting-day` が
 // recorded（現行 #698 書式）3/15・digest-only 9/15・order-sorted（並べ替えのみ）5/15・
 // order-sorted-legend（この描画）13/15・digest-order-legend（由来等の欄を落として
 // 並べ替え+凡例）13/15 だった。**由来・話者・主題等の欄を保つ**（ADR 0295 決定3〜6が
-// 足した欄を落とすと eval の誤帰属対照を壊しうる、ADR 0305）ため、この描画を
+// 足した欄を落とすと eval の誤帰属対照を壊しうる、ADR 0309）ため、この描画を
 // `order-legend` として採用し、`order-sorted`（並べ替えのみ・凡例なし）と
-// `digest-order-legend`（欄を落とす）は採らなかった——数値・却下理由は ADR 0305
+// `digest-order-legend`（欄を落とす）は採らなかった——数値・却下理由は ADR 0309
 // に集約し、ここには複製しない。
 //
 // **`mnemora-path.ts` の `buildMnemoraPrompt`（本番の実装）と同じ規則を、構造化した
