@@ -280,6 +280,208 @@ function buildDiffSection(measuredGroups, baselineGroups) {
   return lines.join("\n");
 }
 
+/**
+ * ## 参考節 — margin基準の判定候補(ADR 0333 §2・§4.1・§4.3「A」)
+ *
+ * **クローン miku の判断であり、オーナーの決定ではない**(ADR 0333 冒頭の注記と同じ立場)。
+ * ADR 0333 が候補案1(margin基準、`stdDevMultiplier=3`・`minShrunkProbes=2`、
+ * 識別子2群の実測を見る前に固定した閾値)を「次の候補として推す」とした——
+ * その候補を、**参考としてこの Job Summary に並べて出す。**
+ *
+ * ⛔ **これは判定に使っていない。**上の `decideShadowVerdict`/`buildShadowVerdictSection`
+ * (ADR 0316 のまま、既存の・唯一の「並走の判定」)には1文字も触れていない。
+ * `buildSummaryMarkdown` の exit code・既存の判定結果は、この節の red/green が
+ * 何であっても変わらない(`openai-arm-summary.mjs` は元々 parse/validate 失敗時にしか
+ * 非0にしない——この節の追加でその経路は増えていない)。
+ *
+ * ⭐ **正本は `examples/chat/src/verdict-candidate-margin.ts`
+ * (`DEFAULT_MARGIN_DROP_OPTIONS`・`decideMarginDropVerdict`)である。**
+ * この `.mjs` は TS を import できないため、ここは**手複製**——上の `MRR_DROP_THRESHOLD`
+ * と同じ事情(二重管理。値を変えるときは両方直すこと)。
+ * 歯 `scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs` が、同じ入力を
+ * TS 側 `decideMarginDropVerdict` とこの `.mjs` 側の両方に通し、同じ出力になることを
+ * 検査する——ADR 0316 側の手複製(`decideShadowVerdict`)には無い歯である。
+ *
+ * ⚠ **`probeId` で突き合わせる。**TS側 `decideMarginDropVerdict` は呼び出し側が
+ * 既に揃えた同順の配列(`(number|null)[]`)を受け取る前提だが、ここは JSON から読んだ
+ * `probeMargins`(`OpenAiArmProbeMarginJson[]`、`examples/chat/src/openai-arm-json.ts`)を
+ * 扱うため、**`probeId` をキーにして対応する値だけを比べる**——順序が保証されない
+ * 入力に対しても正しく突き合わせるための、この `.mjs` 側だけの追加のロバスト性である
+ * (突き合わせテストは、TS側へ渡す配列をこの `.mjs` と同じ `probeId` 交差で組み立ててから
+ * 比較する——「同じ入力」を確保するため)。
+ *
+ * ⛔ **`per-probe margin が無い`・`probeId が1件も突き合わない`・
+ * `baseline margin の標本標準偏差が定義できない`(count<2 または stdDev===0)ときは
+ * red にしない。**「比較できない」を「悪化した」と同じ顔にしない
+ * (`decideMarginDropVerdict` 本体と同じ規律。ADR 0008)。
+ */
+export const MARGIN_VERDICT_OPTIONS = { stdDevMultiplier: 3, minShrunkProbes: 2 };
+
+/**
+ * `examples/chat/src/identifier-arm.ts` の `computeMarginStats` の手複製
+ * (上の docstring 参照。正本は TS 側)。**export しているのは突き合わせテスト用**
+ * (`scripts/__tests__/openai-arm-margin-verdict-crosscheck.test.mjs` が TS側の
+ * `computeMarginStats` と同じ入力で同じ出力になることを検査する)。
+ *
+ * @param {readonly (number | null | undefined)[]} margins
+ */
+export function computeMarginStatsShadow(margins) {
+  const present = margins.filter((m) => typeof m === "number" && !Number.isNaN(m));
+  if (present.length === 0) {
+    return { count: 0, mean: null, stdDev: null, min: null };
+  }
+  const mean = present.reduce((sum, v) => sum + v, 0) / present.length;
+  const min = Math.min(...present);
+  let stdDev = null;
+  if (present.length >= 2) {
+    const variance = present.reduce((sum, v) => sum + (v - mean) ** 2, 0) / (present.length - 1);
+    stdDev = Math.sqrt(variance);
+  }
+  return { count: present.length, mean, stdDev, min };
+}
+
+/**
+ * 1群ぶんの margin基準の参考判定(上の docstring 参照。⛔ 判定には使っていない)。
+ *
+ * @param {Record<string, any>} measuredGroup
+ * @param {Record<string, any> | undefined} baselineGroup
+ * @param {{ stdDevMultiplier: number, minShrunkProbes: number }} options
+ */
+export function decideMarginShadowVerdict(
+  measuredGroup,
+  baselineGroup,
+  options = MARGIN_VERDICT_OPTIONS,
+) {
+  if (!baselineGroup) {
+    return { comparable: false, red: false, reasons: ["基準値にこの群が無い(比較していない)"] };
+  }
+  const baselineMargins = baselineGroup.probeMargins;
+  if (!Array.isArray(baselineMargins) || baselineMargins.length === 0) {
+    return {
+      comparable: false,
+      red: false,
+      reasons: ["基準値にこの群の probeMargins が無い(比較できない)"],
+    };
+  }
+  const measuredMargins = measuredGroup.probeMargins;
+  if (!Array.isArray(measuredMargins) || measuredMargins.length === 0) {
+    return {
+      comparable: false,
+      red: false,
+      reasons: ["実測 JSON にこの群の probeMargins が無い(比較できない)"],
+    };
+  }
+
+  const baselineStats = computeMarginStatsShadow(baselineMargins.map((p) => p.margin));
+  const unit = baselineStats.stdDev;
+  if (unit === null || unit === 0) {
+    return {
+      comparable: false,
+      red: false,
+      reasons: [
+        `baseline margin の標本標準偏差が定義できない(count=${baselineStats.count}, ` +
+          `stdDev=${baselineStats.stdDev})——判定不能につき red にしない`,
+      ],
+    };
+  }
+
+  const baselineByProbe = new Map(baselineMargins.map((p) => [p.probeId, p.margin]));
+  let shrunkProbeCount = 0;
+  let comparableProbeCount = 0;
+  for (const m of measuredMargins) {
+    if (!baselineByProbe.has(m.probeId)) {
+      continue;
+    }
+    const b = baselineByProbe.get(m.probeId);
+    if (typeof b !== "number" || typeof m.margin !== "number") {
+      continue;
+    }
+    comparableProbeCount += 1;
+    const drop = b - m.margin;
+    if (drop >= options.stdDevMultiplier * unit) {
+      shrunkProbeCount += 1;
+    }
+  }
+
+  if (comparableProbeCount === 0) {
+    return {
+      comparable: false,
+      red: false,
+      reasons: ["probeId が1件も突き合わなかった(比較できない)"],
+    };
+  }
+
+  const red = shrunkProbeCount >= options.minShrunkProbes;
+  const reasons = [];
+  if (red) {
+    reasons.push(
+      `margin が baseline 標準偏差×${options.stdDevMultiplier}` +
+        `(=${(unit * options.stdDevMultiplier).toFixed(6)})以上縮んだ probe が` +
+        `${shrunkProbeCount}件(閾値${options.minShrunkProbes}件、比較できたprobe${comparableProbeCount}件)`,
+    );
+  }
+  return {
+    comparable: true,
+    red,
+    shrunkProbeCount,
+    comparableProbeCount,
+    baselineMarginStats: baselineStats,
+    reasons,
+  };
+}
+
+/**
+ * margin基準の参考節そのもの(⛔ 判定には使っていない。上の docstring 参照)。
+ *
+ * @param {Record<string, any>[]} measuredGroups
+ * @param {Record<string, any>[]} baselineGroups
+ * @param {{ stdDevMultiplier: number, minShrunkProbes: number }} options
+ */
+export function buildMarginShadowVerdictSection(
+  measuredGroups,
+  baselineGroups,
+  options = MARGIN_VERDICT_OPTIONS,
+) {
+  const baselineByGroup = new Map(baselineGroups.map((g) => [g.group, g]));
+  const verdicts = measuredGroups.map((g) => ({
+    group: g.group,
+    ...decideMarginShadowVerdict(g, baselineByGroup.get(g.group), options),
+  }));
+  const anyRed = verdicts.some((v) => v.red);
+  const comparableVerdicts = verdicts.filter((v) => v.comparable);
+  const lines = [
+    "## 参考: margin基準の判定候補(ADR 0333 §2・§4.1・§4.3「A」)",
+    "",
+    "⚠ **これは参考であり、判定には使っていない。**上の「並走の判定」" +
+      "(ADR 0316 のまま、既存の・唯一の判定)がこのジョブの唯一の判定であり、" +
+      "exit code にも実際の判定にも、ここの red/green は一切反映しない。" +
+      "**クローン miku の判断であり、オーナーの決定ではない**(ADR 0333)。",
+    "",
+    `測定前に固定した閾値(ADR 0333 §2.2): stdDevMultiplier=${options.stdDevMultiplier}、` +
+      `minShrunkProbes=${options.minShrunkProbes}。baseline margin の標本標準偏差の` +
+      `${options.stdDevMultiplier}倍以上縮んだ probe が${options.minShrunkProbes}件以上あれば参考red。`,
+    "",
+  ];
+  if (comparableVerdicts.length === 0) {
+    lines.push(
+      "⚪ 比較できない(全群で per-probe margin が無い、または probeId が突き合わない、" +
+        "または baseline margin の標本標準偏差が定義できない)。",
+    );
+  } else {
+    lines.push(
+      `${anyRed ? "🔴" : "✅"}(参考) ${verdicts.filter((v) => v.red).length}/` +
+        `${comparableVerdicts.length} 群が参考red(比較できた群のうち)。`,
+    );
+  }
+  for (const v of verdicts) {
+    const mark = !v.comparable ? "⚪" : v.red ? "🔴" : "✅";
+    lines.push(
+      `- ${mark} \`${v.group}\`${v.reasons.length > 0 ? `: ${v.reasons.join("; ")}` : ""}`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function buildShadowVerdictSection(measuredGroups, baselineGroups) {
   const baselineByGroup = new Map(baselineGroups.map((g) => [g.group, g]));
   const verdicts = measuredGroups.map((g) => ({
@@ -324,6 +526,7 @@ export function buildSummaryMarkdown({ title, measured, baseline }) {
   if (baseline) {
     lines.push(buildDiffSection(measuredGroups, baseline.groups), "");
     lines.push(buildShadowVerdictSection(measuredGroups, baseline.groups), "");
+    lines.push(buildMarginShadowVerdictSection(measuredGroups, baseline.groups), "");
   }
   lines.push(
     "⚠ ADR 0033 §3: この群の母数からは失敗率も成功率も統計的に主張しない。" +

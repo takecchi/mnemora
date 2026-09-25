@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   MRR_DROP_THRESHOLD,
   buildSummaryMarkdown,
+  buildMarginShadowVerdictSection,
+  decideMarginShadowVerdict,
   decideShadowVerdict,
   diffGroup,
   validateBaseline,
@@ -188,5 +190,185 @@ describe("buildSummaryMarkdown", () => {
     });
     expect(markdown).not.toContain("基準値との差分");
     expect(markdown).not.toContain("並走の判定");
+  });
+
+  it("baseline を渡すと参考節(margin基準)も出る——「判定には使っていない」の文言を含む", () => {
+    const group = makeGroup();
+    const markdown = buildSummaryMarkdown({
+      title: "テスト",
+      measured: makeMeasured([group]),
+      baseline: { groups: [group] },
+    });
+    expect(markdown).toContain("参考: margin基準の判定候補");
+    expect(markdown).toContain("判定には使っていない");
+    expect(markdown).toContain("ADR 0333");
+  });
+
+  it("baseline を渡さなければ参考節(margin基準)も出さない", () => {
+    const markdown = buildSummaryMarkdown({
+      title: "テスト",
+      measured: makeMeasured([makeGroup()]),
+    });
+    expect(markdown).not.toContain("参考: margin基準の判定候補");
+  });
+});
+
+/**
+ * `decideMarginShadowVerdict`/`buildMarginShadowVerdictSection` の歯(ADR 0333 §2・§4.1・
+ * §4.3「A」。⛔ 参考であり判定には使っていない)。
+ *
+ * baseline の5probeの margin([0.10, 0.12, 0.08, 0.11, 0.09])は
+ * mean=0.10・標本標準偏差(n-1)=0.01581138830...(電卓で検算済み)——
+ * `3×stdDev`≈0.04743 なので、0.05 縮めれば確実に閾値を超える。
+ */
+function makeProbeMargins(overrides = {}) {
+  const base = {
+    p1: 0.1,
+    p2: 0.12,
+    p3: 0.08,
+    p4: 0.11,
+    p5: 0.09,
+  };
+  const merged = { ...base, ...overrides };
+  return Object.entries(merged).map(([probeId, margin]) => ({ probeId, margin }));
+}
+
+function makeGroupWithMargins(probeMarginOverrides = {}, groupOverrides = {}) {
+  return makeGroup({ probeMargins: makeProbeMargins(probeMarginOverrides), ...groupOverrides });
+}
+
+describe("decideMarginShadowVerdict(⛔ 参考。判定には使っていない)", () => {
+  it("2件が3σ以上縮むと参考red", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const verdict = decideMarginShadowVerdict(measured, baseline);
+    expect(verdict.comparable).toBe(true);
+    expect(verdict.red).toBe(true);
+    expect(verdict.shrunkProbeCount).toBe(2);
+  });
+
+  it("1件だけ3σ以上縮んでも参考green(minShrunkProbes=2)", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05 });
+    const verdict = decideMarginShadowVerdict(measured, baseline);
+    expect(verdict.comparable).toBe(true);
+    expect(verdict.red).toBe(false);
+    expect(verdict.shrunkProbeCount).toBe(1);
+  });
+
+  it("基準値にこの群の probeMargins が無ければ比較できない(red にしない)", () => {
+    const baseline = makeGroup(); // probeMargins 無し
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const verdict = decideMarginShadowVerdict(measured, baseline);
+    expect(verdict.comparable).toBe(false);
+    expect(verdict.red).toBe(false);
+  });
+
+  it("実測 JSON にこの群の probeMargins が無ければ比較できない(red にしない)", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroup(); // probeMargins 無し
+    const verdict = decideMarginShadowVerdict(measured, baseline);
+    expect(verdict.comparable).toBe(false);
+    expect(verdict.red).toBe(false);
+  });
+
+  it("probeId が1件も突き合わなければ比較できない(red にしない)", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroup({
+      probeMargins: [
+        { probeId: "unrelated-a", margin: -1 },
+        { probeId: "unrelated-b", margin: -1 },
+      ],
+    });
+    const verdict = decideMarginShadowVerdict(measured, baseline);
+    expect(verdict.comparable).toBe(false);
+    expect(verdict.red).toBe(false);
+  });
+
+  it("baseline margin の標本標準偏差が定義できない(全部同じ値)なら比較できない", () => {
+    const baseline = makeGroupWithMargins({ p1: 0.1, p2: 0.1, p3: 0.1, p4: 0.1, p5: 0.1 });
+    const measured = makeGroupWithMargins({ p1: -0.5, p2: -0.5 });
+    const verdict = decideMarginShadowVerdict(measured, baseline);
+    expect(verdict.comparable).toBe(false);
+    expect(verdict.red).toBe(false);
+  });
+
+  it("基準値にこの群が無ければ比較できない(red にしない)", () => {
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const verdict = decideMarginShadowVerdict(measured, undefined);
+    expect(verdict.comparable).toBe(false);
+    expect(verdict.red).toBe(false);
+  });
+
+  it("変異: stdDevMultiplier を大きくすると同じ縮み幅では red にならない", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const verdict = decideMarginShadowVerdict(measured, baseline, {
+      stdDevMultiplier: 30,
+      minShrunkProbes: 2,
+    });
+    expect(verdict.red).toBe(false);
+  });
+
+  it("変異: minShrunkProbes を1にすると1件の縮みだけで red になる", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05 });
+    const verdict = decideMarginShadowVerdict(measured, baseline, {
+      stdDevMultiplier: 3,
+      minShrunkProbes: 1,
+    });
+    expect(verdict.red).toBe(true);
+  });
+
+  it("変異: 比較の向きを反転させる(measured−baseline)と、縮んでいるのに red が消える", () => {
+    // ここでの「向きの反転」変異は、実装の `drop = b - m`(baseline−measured)を
+    // `m - b`(measured−baseline)に入れ替えたときと同じ効果を、呼び出し側の入力を
+    // 入れ替えることで再現する——baseline と measured を丸ごと入れ替えて渡すと、
+    // 「縮んだ」はずの2 probe が符号反転して「伸びた」side になり、red が消える。
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const forwardVerdict = decideMarginShadowVerdict(measured, baseline);
+    expect(forwardVerdict.red).toBe(true);
+    const reversedVerdict = decideMarginShadowVerdict(baseline, measured);
+    expect(reversedVerdict.red).toBe(false);
+  });
+});
+
+describe("buildMarginShadowVerdictSection(⛔ 参考。判定には使っていない)", () => {
+  it("参考redでも、見出し・本文に「判定には使っていない」が明記される", () => {
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const section = buildMarginShadowVerdictSection([measured], [baseline]);
+    expect(section).toContain("🔴");
+    expect(section).toContain("判定には使っていない");
+    expect(section).toContain("ADR 0333");
+  });
+
+  it("per-probe margin が無い baseline では「比較できない」を出す(赤にしない)", () => {
+    const baseline = makeGroup();
+    const measured = makeGroupWithMargins();
+    const section = buildMarginShadowVerdictSection([measured], [baseline]);
+    expect(section).toContain("比較できない");
+    expect(section).not.toContain("🔴");
+  });
+
+  it("参考節が red でも、既存の並走の判定(decideShadowVerdict)の結果は変わらない", () => {
+    // 並走の判定(ADR 0316)は hit1Count/mrrOverall だけを見る——margin(参考節)を
+    // どれだけ動かしても、既存の判定は影響を受けない(⛔ 判定を混ぜていないことの直接確認)。
+    const baseline = makeGroupWithMargins();
+    const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
+    const marginVerdict = decideMarginShadowVerdict(measured, baseline);
+    expect(marginVerdict.red).toBe(true);
+
+    const shadowVerdict = decideShadowVerdict(measured, baseline);
+    expect(shadowVerdict.red).toBe(false); // hit1Count/mrrOverall は makeGroup の既定値のまま
+
+    const markdown = buildSummaryMarkdown({
+      title: "テスト",
+      measured: makeMeasured([measured]),
+      baseline: { groups: [baseline] },
+    });
+    expect(markdown).toContain("✅ 0/1 群が red"); // 既存の並走の判定は green のまま
+    expect(markdown).toContain("🔴(参考)"); // 参考節だけが red
   });
 });

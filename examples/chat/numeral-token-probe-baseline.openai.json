@@ -27,7 +27,87 @@
       "mrrOverall": 1,
       "hit1Count": 18,
       "hit10Count": 18,
-      "probeCount": 18
+      "probeCount": 18,
+      "marginStats": {
+        "count": 18,
+        "mean": 0.06563903608969664,
+        "stdDev": 0.05151422036389044,
+        "min": 0.004027075886142706
+      },
+      "probeMargins": [
+        {
+          "probeId": "kanji-long-a",
+          "margin": 0.03465327474625268
+        },
+        {
+          "probeId": "kanji-long-b",
+          "margin": 0.004027075886142706
+        },
+        {
+          "probeId": "arabic-long-a",
+          "margin": 0.038722699526462234
+        },
+        {
+          "probeId": "arabic-long-b",
+          "margin": 0.027352208968554392
+        },
+        {
+          "probeId": "alpha-long-a",
+          "margin": 0.016373593231960637
+        },
+        {
+          "probeId": "alpha-long-b",
+          "margin": 0.033013701982621324
+        },
+        {
+          "probeId": "kanji-medium-a",
+          "margin": 0.0438777907642276
+        },
+        {
+          "probeId": "kanji-medium-b",
+          "margin": 0.04350503434997566
+        },
+        {
+          "probeId": "arabic-medium-a",
+          "margin": 0.05684525219834535
+        },
+        {
+          "probeId": "arabic-medium-b",
+          "margin": 0.040256172156373005
+        },
+        {
+          "probeId": "alpha-medium-a",
+          "margin": 0.09807551156441252
+        },
+        {
+          "probeId": "alpha-medium-b",
+          "margin": 0.12566414357210176
+        },
+        {
+          "probeId": "kanji-short-a",
+          "margin": 0.19407934751976663
+        },
+        {
+          "probeId": "kanji-short-b",
+          "margin": 0.1056008852688125
+        },
+        {
+          "probeId": "arabic-short-a",
+          "margin": 0.15068539528465053
+        },
+        {
+          "probeId": "arabic-short-b",
+          "margin": 0.09503538376482312
+        },
+        {
+          "probeId": "alpha-short-a",
+          "margin": 0.05249492435015268
+        },
+        {
+          "probeId": "alpha-short-b",
+          "margin": 0.02124025447890432
+        }
+      ]
     },
     {
       "group": "numeralDense",
@@ -43,7 +123,92 @@
       "mrrOverall": 1,
       "hit1Count": 18,
       "hit10Count": 18,
-      "probeCount": 18
+      "probeCount": 18,
+      "marginStats": {
+        "count": 18,
+        "mean": 0.06563903608969664,
+        "stdDev": 0.05151422036389044,
+        "min": 0.004027075886142706
+      },
+      "probeMargins": [
+        {
+          "probeId": "kanji-long-a",
+          "margin": 0.03465327474625268
+        },
+        {
+          "probeId": "kanji-long-b",
+          "margin": 0.004027075886142706
+        },
+        {
+          "probeId": "arabic-long-a",
+          "margin": 0.038722699526462234
+        },
+        {
+          "probeId": "arabic-long-b",
+          "margin": 0.027352208968554392
+        },
+        {
+          "probeId": "alpha-long-a",
+          "margin": 0.016373593231960637
+        },
+        {
+          "probeId": "alpha-long-b",
+          "margin": 0.033013701982621324
+        },
+        {
+          "probeId": "kanji-medium-a",
+          "margin": 0.0438777907642276
+        },
+        {
+          "probeId": "kanji-medium-b",
+          "margin": 0.04350503434997566
+        },
+        {
+          "probeId": "arabic-medium-a",
+          "margin": 0.05684525219834535
+        },
+        {
+          "probeId": "arabic-medium-b",
+          "margin": 0.040256172156373005
+        },
+        {
+          "probeId": "alpha-medium-a",
+          "margin": 0.09807551156441252
+        },
+        {
+          "probeId": "alpha-medium-b",
+          "margin": 0.12566414357210176
+        },
+        {
+          "probeId": "kanji-short-a",
+          "margin": 0.19407934751976663
+        },
+        {
+          "probeId": "kanji-short-b",
+          "margin": 0.1056008852688125
+        },
+        {
+          "probeId": "arabic-short-a",
+          "margin": 0.15068539528465053
+        },
+        {
+          "probeId": "arabic-short-b",
+          "margin": 0.09503538376482312
+        },
+        {
+          "probeId": "alpha-short-a",
+          "margin": 0.05249492435015268
+        },
+        {
+          "probeId": "alpha-short-b",
+          "margin": 0.02124025447890432
+        }
+      ]
     }
-  ]
+  ],
+  "marginFieldsProvenance": {
+    "addedBy": "ADR 0333 §2.1/§4.3 A の後続作業（クローン miku の判断、branch feat/109-margin-verdict-shadow）。既存の mrrOverall/hit1Count/hit10Count/probeCount/provenance は1バイトも変更していない。",
+    "how": "env -u OPENAI_API_KEY MNEMORA_LLM=deterministic MNEMORA_NUMERAL_TOKEN_OPENAI_JSON=... MNEMORA_LOCAL_EMBEDDING_CACHE_DIR=... pnpm --filter @mnemora/example-chat run numeral-token-probes",
+    "note": "実 API は使っていない——コミット済みカセット（examples/chat/cassettes/*.openai.json、round0＝このファイルの provenance.measuredAt と同じ録画）を recorded provider で再生しただけ。再生で得た mrrOverall/hit1Count/hit10Count/probeCount が、上の provenance で記録済みの値と一致することを確認済み（一致しなければ、この marginStats/probeMargins は別の録画からのものになってしまう）。"
+  }
 }
