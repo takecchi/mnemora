@@ -1844,6 +1844,48 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reinforced.decayFloorAt.getTime()).toBe(expectedDecayFloorAt.getTime());
     });
 
+    it("⚠ reinforce は同じ at をもう一度渡すと、opts.nowSeq が進んでいても活動時計側を動かさない（2軸を同じ WHERE で守る、ADR 0048/0165。Issue #730）", async () => {
+      // ⚠ これは修正ではなく、今の契約を固定する歯である。活動時計側の3列は壁時計の
+      // `at` と同じ条件（狭義の `<`）で守られる——「seq が進んだから活動時計側だけ書く」
+      // 実装は2軸の起点をずらすので、この契約の下では誤り（`MemoryStore.reinforce` の doc）。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          decayBaseSeq: 0,
+          decayFloorSeq: 10,
+          halfLifeRecalls: 360,
+        }),
+      );
+      const at = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60);
+      const firstSeq = 1000;
+      const secondSeq = 2000;
+
+      const first = await store.reinforce(ctx, memory.id, at, { nowSeq: firstSeq });
+      // 前提: 1回目は活動時計側も実際に進めている。
+      expect(first.decayBaseSeq).toBe(firstSeq);
+      // ⚠ プリミティブへ即座に写し取る（上の「同じ at は no-op」の歯と同じ理由——in-memory
+      // 実装は行オブジェクトへの参照を返すので、保持すると同じオブジェクトを2回見るだけになる）。
+      const firstDecayFloorSeq = first.decayFloorSeq;
+      const firstUpdatedAt = first.updatedAt.getTime();
+      // 書けば必ず updatedAt が変わる状況を作る（上の歯と同じ理由）。
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      const again = await store.reinforce(ctx, memory.id, at, { nowSeq: secondSeq });
+      expect(again.decayBaseSeq).toBe(firstSeq);
+      expect(again.decayFloorSeq).toBe(firstDecayFloorSeq);
+      expect(again.halfLifeRecalls).toBe(360);
+      expect(again.updatedAt.getTime()).toBe(firstUpdatedAt);
+
+      // 読み直しても同じ（返り値だけを繕う実装を弾く）。
+      const reread = await store.get(ctx, memory.id);
+      expect(reread?.decayBaseSeq).toBe(firstSeq);
+      expect(reread?.decayFloorSeq).toBe(firstDecayFloorSeq);
+      expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
+    });
+
     // -------------------------------------------------------------------
     // updateStatus（docs/memory-model.md §5）
     // -------------------------------------------------------------------
