@@ -47,7 +47,7 @@ function baseRow(overrides: Partial<MemoryRow> = {}): MemoryRow {
     half_life_recalls: null,
     embedding_status: "pending",
     purged_at: null,
-    // Issue #152/#153（ADR 0310）: `jsonb NOT NULL DEFAULT '{}'`。DB は常に値を返す。
+    // Issue #152/#153（ADR 0312）: `jsonb NOT NULL DEFAULT '{}'`。DB は常に値を返す。
     attributes: {},
     created_at: "2026-01-01 00:00:00+00",
     updated_at: "2026-01-01 00:00:00+00",

@@ -111,7 +111,7 @@ export function buildLexicalSearchSelect(
         : sql`subject_id = ${opts.filter.subjectId}`,
     );
   }
-  // Issue #152/#153（ADR 0310）: `PostgresVectorStore.search`（vector-store.ts）と
+  // Issue #152/#153（ADR 0312）: `PostgresVectorStore.search`（vector-store.ts）と
   // 同じ述語・同じ意味。
   if (opts.filter.attributes !== undefined) {
     conditions.push(sql`attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
