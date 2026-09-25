@@ -1,0 +1,49 @@
+{
+  "_readme": "numeral-token-probes ベンチの2群(sparse/dense)を、実 OpenAI embedding(recorded provider で再生)で測った基準値(Issue #109 後半)。examples/chat/numeral-token-probe-baseline.json(local embedding版)とは別ファイルであり、そちらには1文字も触れていない。",
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "ff325c6f8c1a7bad4a9b55329b8e2121959fef30",
+    "measuredAt": "2026-09-25T03:01:03.997Z",
+    "how": "OPENAI_API_KEY=... DATABASE_URL=... tsx examples/chat/src/scripts/openai-embedding-fp-ceiling.ts",
+    "embeddingSpace": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "dimensions": 256
+    },
+    "note": "round 0(このファイルの出所)。round 1..59 は openai-embedding-fp-ceiling-measurement.json。"
+  },
+  "groups": [
+    {
+      "group": "numeralSparse",
+      "label": "numeral-token-probes/sparse(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=sparse)",
+      "llmMode": "deterministic",
+      "embeddingMode": "recorded",
+      "embeddingSpace": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "dimensions": 256
+      },
+      "haystackKind": "sparse",
+      "mrrOverall": 1,
+      "hit1Count": 18,
+      "hit10Count": 18,
+      "probeCount": 18
+    },
+    {
+      "group": "numeralDense",
+      "label": "numeral-token-probes/dense(llm=deterministic, embedding=recorded/text-embedding-3-small/256次元, haystack=dense)",
+      "llmMode": "deterministic",
+      "embeddingMode": "recorded",
+      "embeddingSpace": {
+        "provider": "openai",
+        "model": "text-embedding-3-small",
+        "dimensions": 256
+      },
+      "haystackKind": "dense",
+      "mrrOverall": 1,
+      "hit1Count": 18,
+      "hit10Count": 18,
+      "probeCount": 18
+    }
+  ]
+}

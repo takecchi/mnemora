@@ -1068,6 +1068,13 @@ jobs:
         env:
           MNEMORA_IDENTIFIER_PROBE_JSON: ${{ github.workspace }}/identifier-probe.json
           MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+          # Issue #109 後半。`recorded` provider でカセット
+          # （examples/chat/cassettes/identifier-probes.openai.json）を再生するだけであり、
+          # 鍵もネットワークも要らない——この env を足しても、上の local embedding 測定・
+          # このステップの失敗モード（重み取得失敗）は1つも変わらない。このブロックが
+          # 例外を投げても `identifier-probes` サブコマンド自体は握って続行する
+          # （`cli.ts` の openai arm ブロックの doc コメント参照）。
+          MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON: ${{ github.workspace }}/identifier-probe-openai.json
         run: pnpm --filter @mnemora/example-chat run identifier-probes
 
       - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
@@ -1100,6 +1107,26 @@ jobs:
         with:
           name: identifier-probe
           path: ${{ github.workspace }}/identifier-probe.json
+          if-no-files-found: ignore
+
+      - name: "OpenAI 実埋め込み arm（recorded 再生、Issue #109 後半）の差分と並走の判定を Job Summary に残す（⛔ 門ではない）"
+        # `identifier-probe-openai.json` が無いことがある（openai arm ブロックが握った
+        # 例外・カセット未整備）——`openai-arm-summary.mjs` はその場合を非0にしない
+        # （doc コメント参照）。相違でも「並走の判定」が red でも exit 0 のまま。
+        if: always()
+        run: |
+          node scripts/openai-arm-summary.mjs \
+            --title "識別子・日本語固有名詞 probe（OpenAI 実埋め込み・4群）" \
+            --measured "${{ github.workspace }}/identifier-probe-openai.json" \
+            --baseline examples/chat/identifier-probe-baseline.openai.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（OpenAI arm、機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: identifier-probe-openai
+          path: ${{ github.workspace }}/identifier-probe-openai.json
           if-no-files-found: ignore
 
   numeral-token-probes:
@@ -1185,6 +1212,9 @@ jobs:
         env:
           MNEMORA_NUMERAL_TOKEN_JSON: ${{ github.workspace }}/numeral-token-probe.json
           MNEMORA_LOCAL_EMBEDDING_CACHE_DIR: ${{ github.workspace }}/.cache/local-embedding
+          # Issue #109 後半。`identifier-probes` ジョブの同名 env と同じ規律
+          # （recorded provider の再生。鍵もネットワークも要らない）。
+          MNEMORA_NUMERAL_TOKEN_OPENAI_JSON: ${{ github.workspace }}/numeral-token-probe-openai.json
         run: pnpm --filter @mnemora/example-chat run numeral-token-probes
 
       - name: 実測値と基準値の差分、または「重みが取得できなかった」ことを Job Summary に残す（⛔ 門ではない）
@@ -1204,6 +1234,24 @@ jobs:
         with:
           name: numeral-token-probe
           path: ${{ github.workspace }}/numeral-token-probe.json
+          if-no-files-found: ignore
+
+      - name: "OpenAI 実埋め込み arm（recorded 再生、Issue #109 後半）の差分と並走の判定を Job Summary に残す（⛔ 門ではない）"
+        # `identifier-probes` ジョブの同名ステップと同じ規律。
+        if: always()
+        run: |
+          node scripts/openai-arm-summary.mjs \
+            --title "数詞・記号索引 probe（OpenAI 実埋め込み・2群）" \
+            --measured "${{ github.workspace }}/numeral-token-probe-openai.json" \
+            --baseline examples/chat/numeral-token-probe-baseline.openai.json \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 実測値そのもの（OpenAI arm、機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: numeral-token-probe-openai
+          path: ${{ github.workspace }}/numeral-token-probe-openai.json
           if-no-files-found: ignore
 
   association-probes:

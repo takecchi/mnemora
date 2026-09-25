@@ -54,6 +54,13 @@ import {
   buildWeightsUnavailableNumeralTokenProbeJson,
 } from "./numeral-token-json.js";
 import {
+  IDENTIFIER_OPENAI_CASSETTE_PATH,
+  NUMERAL_TOKEN_OPENAI_CASSETTE_PATH,
+  loadOpenAiArmCassette,
+} from "./openai-arm-cassette.js";
+import { buildArmLabel, identifierArmGroups, numeralArmGroups } from "./openai-arm-probe-groups.js";
+import { buildOpenAiArmRunJson } from "./openai-arm-json.js";
+import {
   formatCorrectionCandidateReport,
   runCorrectionCandidateArm,
   summarizeCorrectionCandidateReport,
@@ -1605,6 +1612,84 @@ async function runIdentifierProbes(): Promise<void> {
   } finally {
     await handle.close();
   }
+
+  // Issue #109 後半——OpenAI 実埋め込み(recorded provider でカセットを再生。鍵もネットワーク
+  // も要らない)の4群(identifiersSparse/identifiersDense/japaneseNamesSparse/
+  // japaneseNamesDense)を追加で走らせる。⛔ 門ではない——このブロックが例外を投げても、
+  // 上の local embedding の5群の測定・書き出しは既に終わっている(この行より前)。
+  // `MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON` が指定されていないときは何もしない
+  // (既存の呼び出し——CI 含む——を1つも変えない)。
+  const openaiJsonPath = process.env.MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON;
+  if (openaiJsonPath) {
+    try {
+      await runIdentifierProbesOpenAiArm(databaseUrl, openaiJsonPath, measuredAt, commit);
+    } catch (error) {
+      console.error(
+        "\n🔴 [identifier-probes/openai] OpenAI arm(recorded)の測定に失敗した" +
+          "(⛔ 上の local embedding 測定・このジョブ自体は落とさない):",
+        error,
+      );
+    }
+  }
+}
+
+/**
+ * Issue #109 後半——識別子・日本語固有名詞 probe の4群を、OpenAI 実埋め込み
+ * (`examples/chat/cassettes/identifier-probes.openai.json` の再生)で測る。
+ *
+ * ⛔ **門ではない。**呼び出し側(`runIdentifierProbes`)がこの関数の例外を握って
+ * ログに出すだけで、既存の local embedding 測定・ジョブ自体には影響させない。
+ */
+async function runIdentifierProbesOpenAiArm(
+  databaseUrl: string,
+  jsonPath: string,
+  measuredAt: Date,
+  commit: string | null,
+): Promise<void> {
+  const cassette = loadOpenAiArmCassette(IDENTIFIER_OPENAI_CASSETTE_PATH);
+  const runToken = newRunToken();
+  const handle = await createExampleRuntime(
+    databaseUrl,
+    { ...process.env, MNEMORA_LLM: "deterministic", MNEMORA_EMBEDDING: "recorded" },
+    { cassette },
+  );
+  try {
+    const embeddingSpace = handle.embeddingProvider.space;
+    console.log(
+      `\n[identifier-probes/openai] embedding space: provider=${embeddingSpace.provider} ` +
+        `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}(recorded 再生)`,
+    );
+    const groupResults: {
+      key: string;
+      report: Awaited<ReturnType<typeof runIdentifierProbeArm>>;
+      embeddingSpace: typeof embeddingSpace;
+    }[] = [];
+    for (const group of identifierArmGroups()) {
+      const armLabel = buildArmLabel(group, {
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        model: embeddingSpace.model,
+        dimensions: embeddingSpace.dimensions,
+      });
+      const report = await runIdentifierProbeArm({
+        armLabel,
+        tenantId: buildArmTenantId(`identifier-probes-openai-${group.key}`, runToken),
+        runtime: handle.runtime,
+        memoryStore: handle.memoryStore,
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        haystackKind: group.haystackKind,
+        probeSet: group.probeSet,
+      });
+      console.log(formatIdentifierArmReport(report));
+      groupResults.push({ key: group.key, report, embeddingSpace });
+    }
+    const json = buildOpenAiArmRunJson(groupResults, measuredAt, commit);
+    writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+    console.log(`\n[identifier-probes/openai] 機械可読な結果を書き出した: ${jsonPath}`);
+  } finally {
+    await handle.close();
+  }
 }
 
 /**
@@ -1733,6 +1818,77 @@ async function runNumeralTokenProbes(): Promise<void> {
       writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
       console.log(`\n[numeral-token-probes] 機械可読な結果を書き出した: ${jsonPath}`);
     }
+  } finally {
+    await handle.close();
+  }
+
+  // Issue #109 後半——`identifier-probes` の同名ブロックと同じ規律。⛔ 門ではない。
+  const openaiJsonPath = process.env.MNEMORA_NUMERAL_TOKEN_OPENAI_JSON;
+  if (openaiJsonPath) {
+    try {
+      await runNumeralTokenProbesOpenAiArm(databaseUrl, openaiJsonPath, measuredAt, commit);
+    } catch (error) {
+      console.error(
+        "\n🔴 [numeral-token-probes/openai] OpenAI arm(recorded)の測定に失敗した" +
+          "(⛔ 上の local embedding 測定・このジョブ自体は落とさない):",
+        error,
+      );
+    }
+  }
+}
+
+/**
+ * Issue #109 後半——数詞・記号索引 probe の2群を、OpenAI 実埋め込み
+ * (`examples/chat/cassettes/numeral-token-probes.openai.json` の再生)で測る。
+ * ⛔ 門ではない(`runIdentifierProbesOpenAiArm` と同じ規律)。
+ */
+async function runNumeralTokenProbesOpenAiArm(
+  databaseUrl: string,
+  jsonPath: string,
+  measuredAt: Date,
+  commit: string | null,
+): Promise<void> {
+  const cassette = loadOpenAiArmCassette(NUMERAL_TOKEN_OPENAI_CASSETTE_PATH);
+  const runToken = newRunToken();
+  const handle = await createExampleRuntime(
+    databaseUrl,
+    { ...process.env, MNEMORA_LLM: "deterministic", MNEMORA_EMBEDDING: "recorded" },
+    { cassette },
+  );
+  try {
+    const embeddingSpace = handle.embeddingProvider.space;
+    console.log(
+      `\n[numeral-token-probes/openai] embedding space: provider=${embeddingSpace.provider} ` +
+        `model=${embeddingSpace.model} dimensions=${embeddingSpace.dimensions}(recorded 再生)`,
+    );
+    const groupResults: {
+      key: string;
+      report: Awaited<ReturnType<typeof runIdentifierProbeArm>>;
+      embeddingSpace: typeof embeddingSpace;
+    }[] = [];
+    for (const group of numeralArmGroups()) {
+      const armLabel = buildArmLabel(group, {
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        model: embeddingSpace.model,
+        dimensions: embeddingSpace.dimensions,
+      });
+      const report = await runIdentifierProbeArm({
+        armLabel,
+        tenantId: buildArmTenantId(`numeral-token-probes-openai-${group.key}`, runToken),
+        runtime: handle.runtime,
+        memoryStore: handle.memoryStore,
+        llmMode: handle.llmMode,
+        embeddingMode: handle.embeddingMode,
+        haystackKind: group.haystackKind,
+        probeSet: group.probeSet,
+      });
+      console.log(formatIdentifierArmReport(report));
+      groupResults.push({ key: group.key, report, embeddingSpace });
+    }
+    const json = buildOpenAiArmRunJson(groupResults, measuredAt, commit);
+    writeFileSync(jsonPath, `${JSON.stringify(json, null, 2)}\n`, "utf-8");
+    console.log(`\n[numeral-token-probes/openai] 機械可読な結果を書き出した: ${jsonPath}`);
   } finally {
     await handle.close();
   }
