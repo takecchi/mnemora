@@ -18,9 +18,7 @@
 
 ```ts
 type RecallResult = {
-  | { kind: 'not_indexed'
-      reason: 'pending' | 'failed' | 'skipped'
-      count: number; countKind: CountKind }recallId: string              // 記録された recall の識別子。observe() の usage 報告で使う
+  recallId: string              // 記録された recall の識別子。observe() の usage 報告で使う
   memories: RecalledMemory[]    // 返ったもの。score 内訳 + 取得理由つき
   omitted: Omission[]           // 返らなかったものの分類（§4）
   index: IndexBand              // 目次帯。被覆不変条件を担う（§5）
@@ -208,7 +206,9 @@ SELECT
   m.id,
   m.digest,
   e.embedding <=> $1              AS distance
-FROM memory_embeddings_default e
+FROM memory_embeddings_<space> e  -- <space> は埋め込み空間ごとに導出されるスラグ。
+                                   -- 固定のテーブル名ではない（packages/postgres/README.md
+                                   -- 「実行時に増える系列」参照）
 JOIN memories m ON m.id = e.memory_id
 WHERE m.tenant_id = $2
   AND m.status IN ('active', 'contested')  -- 誤り1の修正。後述
@@ -440,7 +440,7 @@ alteroid の「全文か目次1行かのどちらかに必ず現れる」とい�
   "recallId": "rcl_01HXYZ...",
   "memories": [],
   "omitted": [
-    { "kind": "filtered", "condition": "period", "count": 3, "countKind": "exact" }
+    { "kind": "filtered", "condition": "period", "scopeRelation": "outside_scope", "count": 3, "countKind": "exact" }
   ],
   "index": {
     "groups": [
@@ -887,7 +887,7 @@ DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + min(digest長, DIGEST_BAND_MAX_ENTRY_CH
 
 ```ts
 const recalled = await runtime.recall(ctx, {
-  content: "...",
+  text: "...",
   digestBandLimit: 10, // 既定 50 から下げる。0 は渡せない（1 が下限）
 });
 
@@ -1021,8 +1021,9 @@ core はモデル固有のトークナイザに依存しない。`TokenCounter` 
 type RecalledMemory = {
   memoryId: string
   digest: string
-  retrievedVia: 'ann' | 'lexical' | 'mandatory_companion'
+  retrievedVia: 'ann' | 'lexical' | 'mandatory_companion' | 'association'
   companionOf?: string          // 矛盾の相手として同伴取得された場合、その相手の memoryId
+  associationOf?: string        // retrievedVia: 'association' のときだけ在る。起点にしたアンカーの memoryId（§9）
   provenanceKind: ProvenanceKind // 本人が述べた事実か、AI の推論か（オーナーの原則7）
   score: ScoreBreakdown
 }
