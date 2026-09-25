@@ -363,3 +363,7 @@ ANN だけで既に gold が1位だったため、trigram の寄与は「同じ�
   ⟹ 接続ユーザにスキーマへの `CREATE` 権限が要る。複数プロセスが同時に `create()` したとき
   カタログ更新が衝突しうるかは**確かめていない**。これらの関数は `runMigrations` の
   管理外であり、既定の経路(`PostgresLexicalStore`)は一切触れない。
+- **公開 API 表面(ADR 0178)**: `scripts/__snapshots__/public-api/postgres.d.ts` の差分は
+  **追加44行・削除0行**(`pnpm run api:write` 後の `git diff` で確かめた)。
+  `@mnemora/postgres` に export を足しただけで、既存の型シグネチャは1つも変わっていない。
+  ⟹ **破壊的変更ではない**(他の publish 対象パッケージの snapshot は変わっていない)。
