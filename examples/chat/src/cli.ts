@@ -2088,7 +2088,10 @@ async function runAnswerTrialsCommand(): Promise<void> {
  * ケースごとの材料指紋が一致しなければ、どこがずれたかを表示して exit 1。一致すれば
  * 並べて表示して exit 0（Issue #705 完了条件2、ADR 0295 追記2 の見落としの再発防止）。
  */
-async function runAnswerTrialsCompareCommand(paths: string[]): Promise<void> {
+async function runAnswerTrialsCompareCommand(argv: string[]): Promise<void> {
+  // `pnpm run answer-trials-compare -- a.json b.json` では pnpm が `--` をそのまま渡してくる
+  // （実測: `--` をファイルとして開こうとして ENOENT）。パスではないので落とす。
+  const paths = argv.filter((a) => a !== "--");
   if (paths.length < 2) {
     console.error(
       "answer-trials-compare には比較対象の JSON パスを2件以上指定すること" +
