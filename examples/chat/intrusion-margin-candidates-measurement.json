@@ -1,0 +1,412 @@
+{
+  "_readme": "Issue #109 残件C（マネージャー依頼）——ADR 0291 §5.5/ADR 0321 の intrusionMargin 定義の候補比較。correction-candidate-probe-baseline.json とは別ファイルであり、そちらの内容・作法には一切触れていない。CI からは呼ばれない手動測定である (examples/chat/src/scripts/local-embedding-synthetic-noise-fp.ts と同じ位置づけ)。 案0=現行のintrusionMargin(深い誤爆のみ定義、今日の母集合では常に0)。案1/2=protectionMargin(protectedFactScore-topNonProtectedScore、深い誤爆/誤爆(浅)の両方で定義、符号が意味を持つ)。案1と案2は数値としては同一の式であり、分かれるのは出荷方法(intrusionMarginの定義域を書き換えるか、別名で新設するか)。",
+  "schemaVersion": 1,
+  "provenance": {
+    "commit": "81f774aa8b152ee81575a2c23a6ad2173ec4a4ae",
+    "measuredAt": "2026-09-25T14:32:40.803Z",
+    "how": "env -u OPENAI_API_KEY DATABASE_URL=<port> tsx examples/chat/src/scripts/measure-intrusion-margin-candidates.ts",
+    "database": "PostgreSQL 17 + pgvector(ローカル、非本番。docs/autonomy.md の initdb 手順)",
+    "embeddingSpace": {
+      "provider": "local",
+      "model": "ruri-v3-30m/sym",
+      "dimensions": 256
+    },
+    "llmMode": "deterministic",
+    "embeddingMode": "local",
+    "caseSet": "eval",
+    "hitCount": 21,
+    "abstainCount": 32
+  },
+  "candidates": {
+    "0_current_intrusionMargin": {
+      "definition": "topScore - protectedFactScore（深い誤爆(protectedAtTop=true)のときだけ。それ以外はnull）",
+      "stats": {
+        "count": 20,
+        "mean": 0,
+        "stdDev": 0,
+        "min": 0,
+        "max": 0
+      }
+    },
+    "1_2_protectionMargin": {
+      "definition": "protectedFactScore - topNonProtectedScore（protectedFactsが1件以上返っていれば、深い誤爆・誤爆(浅)の両方で定義。符号: 正=深い誤爆側、負=誤爆(浅)側）",
+      "statsOverall": {
+        "count": 24,
+        "mean": 0.030194978276586206,
+        "stdDev": 0.022251567123064524,
+        "min": -0.0087758171942941,
+        "max": 0.06113316679459946
+      },
+      "statsDeepMisfireOnly": {
+        "count": 20,
+        "mean": 0.03745181392732828,
+        "stdDev": 0.016273783988063627,
+        "min": 0.0035278785399126544,
+        "max": 0.06113316679459946
+      },
+      "statsShallowMisfireOnly": {
+        "count": 4,
+        "mean": -0.006089199977124149,
+        "stdDev": 0.0035003336509041617,
+        "min": -0.0087758171942941,
+        "max": -0.001122539920897725
+      },
+      "nullCount": 8
+    }
+  },
+  "measurements": [
+    {
+      "caseId": "neg-jog",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.8908560145257439,
+      "protectedFactScore": 0.8908560145257439,
+      "topNonProtectedScore": 0.8363868039934115,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.054469210532332446
+    },
+    {
+      "caseId": "neg-milk",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.8928137655673091,
+      "protectedFactScore": 0.8928137655673091,
+      "topNonProtectedScore": 0.8481120796733438,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.04470168589396528
+    },
+    {
+      "caseId": "vague-maybe",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8099753079983197,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8099753079983197,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "vague-dunno",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8177029670396196,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8177029670396196,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "person-origin",
+      "kind": "other_person",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9081520794342672,
+      "protectedFactScore": 0.9081520794342672,
+      "topNonProtectedScore": 0.8545703109452528,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.053581768489014414
+    },
+    {
+      "caseId": "person-pet",
+      "kind": "other_person",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.8800676935939122,
+      "protectedFactScore": 0.8800676935939122,
+      "topNonProtectedScore": 0.8402790342948095,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.03978865929910269
+    },
+    {
+      "caseId": "period-team",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9048678022012403,
+      "protectedFactScore": 0.9048678022012403,
+      "topNonProtectedScore": 0.863189049239449,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.041678752961791354
+    },
+    {
+      "caseId": "period-live",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.8834443639355913,
+      "protectedFactScore": 0.8834443639355913,
+      "topNonProtectedScore": 0.8375916091510484,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.04585275478454298
+    },
+    {
+      "caseId": "neg-ticket-1",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.8678404793797089,
+      "protectedFactScore": 0.8678404793797089,
+      "topNonProtectedScore": 0.8427365815133684,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.025103897866340485
+    },
+    {
+      "caseId": "neg-proj-1",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9031313441632384,
+      "protectedFactScore": 0.9031313441632384,
+      "topNonProtectedScore": 0.8595966815603362,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.043534662602902174
+    },
+    {
+      "caseId": "vague-ascii-1",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8258193940544069,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8258193940544069,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "vague-ascii-2",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8646205305347211,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8646205305347211,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "person-ticket-1",
+      "kind": "other_person",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9154097442020491,
+      "protectedFactScore": 0.9154097442020491,
+      "topNonProtectedScore": 0.8542765774074497,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.06113316679459946
+    },
+    {
+      "caseId": "person-proj-1",
+      "kind": "other_person",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9117166954875083,
+      "protectedFactScore": 0.9117166954875083,
+      "topNonProtectedScore": 0.8617756756759197,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.049941019811588605
+    },
+    {
+      "caseId": "period-ticket-1",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9255870217689273,
+      "protectedFactScore": 0.9255870217689273,
+      "topNonProtectedScore": 0.8947764222314974,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.030810599537429817
+    },
+    {
+      "caseId": "period-proj-1",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9185195931035571,
+      "protectedFactScore": 0.9185195931035571,
+      "topNonProtectedScore": 0.8772047178700373,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.04131487523351984
+    },
+    {
+      "caseId": "neg-jpname-1",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.8952829378624619,
+      "protectedFactScore": 0.8952829378624619,
+      "topNonProtectedScore": 0.8369090613156662,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.05837387654679571
+    },
+    {
+      "caseId": "neg-jpname-2",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9032282026253946,
+      "protectedFactScore": 0.9032282026253946,
+      "topNonProtectedScore": 0.8672358457913082,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.035992356834086414
+    },
+    {
+      "caseId": "vague-jpname-1",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8114038376950773,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8114038376950773,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "vague-jpname-2",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8494294010991769,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8494294010991769,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "person-jpname-1",
+      "kind": "other_person",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.9123337654209025,
+      "protectedFactScore": 0.9061703970026859,
+      "topNonProtectedScore": 0.9123337654209025,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": -0.00616336841821663
+    },
+    {
+      "caseId": "person-jpname-2",
+      "kind": "other_person",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8970690767863185,
+      "protectedFactScore": 0.8887740024112304,
+      "topNonProtectedScore": 0.8970690767863185,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": -0.00829507437508814
+    },
+    {
+      "caseId": "period-jpname-1",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9263786991457779,
+      "protectedFactScore": 0.9263786991457779,
+      "topNonProtectedScore": 0.9038298184856968,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.022548880660081094
+    },
+    {
+      "caseId": "period-jpname-2",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9109900260579922,
+      "protectedFactScore": 0.9109900260579922,
+      "topNonProtectedScore": 0.8990118590921873,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.011978166965804893
+    },
+    {
+      "caseId": "neg-numeral-1",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9077326655773168,
+      "protectedFactScore": 0.9077326655773168,
+      "topNonProtectedScore": 0.8783439986191092,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.029388666958207632
+    },
+    {
+      "caseId": "neg-numeral-2",
+      "kind": "negation",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9317882368613074,
+      "protectedFactScore": 0.9317882368613074,
+      "topNonProtectedScore": 0.88607781480388,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.04571042205742737
+    },
+    {
+      "caseId": "vague-numeral-1",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8478321906260652,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8478321906260652,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "vague-numeral-2",
+      "kind": "vague",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8817831309259548,
+      "protectedFactScore": null,
+      "topNonProtectedScore": 0.8817831309259548,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": null
+    },
+    {
+      "caseId": "person-numeral-1",
+      "kind": "other_person",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.8939416428985539,
+      "protectedFactScore": 0.8851658257042598,
+      "topNonProtectedScore": 0.8939416428985539,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": -0.0087758171942941
+    },
+    {
+      "caseId": "person-numeral-2",
+      "kind": "other_person",
+      "protectedAtTop": false,
+      "abstained": false,
+      "topScore": 0.9270092598760823,
+      "protectedFactScore": 0.9258867199551846,
+      "topNonProtectedScore": 0.9270092598760823,
+      "intrusionMarginCurrent": null,
+      "protectionMargin": -0.001122539920897725
+    },
+    {
+      "caseId": "period-numeral-1",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9122021543063595,
+      "protectedFactScore": 0.9122021543063595,
+      "topNonProtectedScore": 0.9025971781292393,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.009604976177120195
+    },
+    {
+      "caseId": "period-numeral-2",
+      "kind": "other_period",
+      "protectedAtTop": true,
+      "abstained": false,
+      "topScore": 0.9350973432444254,
+      "protectedFactScore": 0.9350973432444254,
+      "topNonProtectedScore": 0.9315694647045127,
+      "intrusionMarginCurrent": 0,
+      "protectionMargin": 0.0035278785399126544
+    }
+  ],
+  "consistencyMismatches": []
+}
