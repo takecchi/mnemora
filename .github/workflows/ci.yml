@@ -75,6 +75,22 @@ jobs:
         # ジョブへステップを足す形に留めた。
         run: pnpm run pack:check
 
+      - name: "北極星7項目・既定差分の一覧を印字する（⛔ 門ではない。常に exit 0。Issue #387 / ADR 0216 決定7 段1）"
+        # ADR 0216 決定7「段1: 一覧を印字するだけ」の実装。#387 自身が置いた制約
+        # （「⛔ CIを重くしない。新しいジョブは要らない」「最初に作るなら、門ではなく
+        # 『一覧を吐くだけ』にすること」）をそのまま継ぎ、この既存の build ジョブへ
+        # 相乗りする——上の pack:check ステップのコメントと同じ論拠で、このジョブ名
+        # （`typecheck / lint / test / build`）は branch protection の
+        # required_status_checks に登録された文字列そのものであり、ジョブを分けると
+        # オーナー権限での branch protection 更新が要る。**required status checks の
+        # 名前・必須かどうかはこのステップで変えていない。**
+        # `continue-on-error: true` にする理由: scripts/north-star-default-probe.mjs
+        # 自体は個々の観測を try/catch で包み常に exit 0 を返す設計だが、想定外の失敗
+        # （例: import 解決そのものが壊れる）でこのジョブ全体を巻き込んで赤くしない
+        # ための二重の安全弁。
+        continue-on-error: true
+        run: node scripts/north-star-default-probe.mjs >> "$GITHUB_STEP_SUMMARY"
+
   postgres:
     name: packages/postgres (本物の Postgres + pgvector, server_encoding=${{ matrix.serverEncoding }})
     runs-on: ubuntu-latest
