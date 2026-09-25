@@ -95,6 +95,24 @@ describe("translateForOpenAIStructuredOutput", () => {
     expect(kindSchema.enum).toEqual(["stated", "inferred"]);
   });
 
+  // `.optional()` の enum / literal は、null を値として受け付ける形にならなければならない。
+  // `type` に "null" を足しただけでは、`enum` / `const` が null を弾くので、strict モードの
+  // モデルは「省略」を表せず、列挙のどれかを埋めるしかなくなる（任意の欄が実質必須に化ける）。
+  it("省略可能な z.enum は enum に null を含む（type だけでなく）", () => {
+    const schema = z.object({ kind: z.enum(["a", "b"]).optional() });
+    const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
+    const kindSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>).kind!;
+    expect(kindSchema.type).toEqual(["string", "null"]);
+    expect(kindSchema.enum).toEqual(["a", "b", null]);
+  });
+
+  it("省略可能な z.literal は null も選べる形に包まれる", () => {
+    const schema = z.object({ kind: z.literal("x").optional() });
+    const { schema: jsonSchema } = translateForOpenAIStructuredOutput("f", schema);
+    const kindSchema = (jsonSchema.properties as Record<string, Record<string, unknown>>).kind!;
+    expect(kindSchema).toEqual({ anyOf: [{ type: "string", const: "x" }, { type: "null" }] });
+  });
+
   it("実際に extraction.ts と同じ形（ExtractionResultSchema 相当）を翻訳できる", () => {
     const extractedMemoryCandidateSchema = z.object({
       content: z.string().min(1),
