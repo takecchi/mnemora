@@ -32,7 +32,7 @@ import type { AnswerJudgement } from "./answer-judge.js";
 import { judgeAnswer, reconcileVerdicts } from "./answer-judge.js";
 import { buildMnemoraPrompt, ingestConversation, queryRecall } from "./mnemora-path.js";
 import { naivePrompt } from "./naive-path.js";
-import type { CreateProvidersOptions, EnvLike, ProviderMode } from "./providers.js";
+import type { CreateProvidersOptions, EnvLike, ProviderMode, SeedUsageSummary } from "./providers.js";
 import { createProviders } from "./providers.js";
 import type { Conversation, ConversationTurn } from "./scenario.js";
 import type { UsageMeter } from "./usage-meter.js";
@@ -197,6 +197,8 @@ export interface AnswerBenchRuntimeHandle {
   usageMeter?: UsageMeter;
   /** `createProviders` が計算した値をそのまま通す（`providers.ts` の `Providers.cassetteIgnored` docstring参照）。 */
   cassetteIgnored: boolean;
+  /** `Providers.readSeedUsage` をそのまま通す（`providerOptions.seedCassette` を渡したときだけ存在する）。 */
+  readSeedUsage?: () => SeedUsageSummary;
   close(): Promise<void>;
 }
 
@@ -236,6 +238,7 @@ export async function createAnswerBenchRuntime(
     judgeLLMProvider,
     cassetteIgnored: created.cassetteIgnored,
     ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
+    ...(created.readSeedUsage !== undefined ? { readSeedUsage: created.readSeedUsage } : {}),
     close: () => closePostgresClient(client),
   };
 }
