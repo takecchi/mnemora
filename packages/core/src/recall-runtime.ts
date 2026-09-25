@@ -1661,6 +1661,15 @@ export async function runRecall(
     detail: { budgetApplied: budget !== undefined, unitsKept: keptUnits.length },
   });
 
+  // Issue #691 続き（ADR 0335）: `contestedWith` を付けるかどうかの判定に使う、
+  // **budget 切り詰め後**の最終的な返却集合。`companionOf`（段3の必須の同伴取得でだけ
+  // 付く）とは別に、「矛盾の相手が同じ recall 結果に実際に含まれているか」を
+  // retrievedVia を問わず判定するために要る——契約は上の `keptUnits` 確定後の
+  // この時点でなければ、まだ落ちるかもしれない相手を「居る」と数えてしまう。
+  const keptMemoryIds = new Set(
+    keptUnits.flatMap((unit) => unit.members.map((member) => member.memory.id)),
+  );
+
   const finalMemories: RecalledMemory[] = keptUnits.flatMap((unit) =>
     unit.members.map((member) => {
       const recalled: RecalledMemory = {
@@ -1698,6 +1707,21 @@ export async function runRecall(
       }
       if (member.associationOf !== undefined) {
         recalled.associationOf = member.associationOf;
+      }
+      // Issue #691 続き（ADR 0335）: 同伴取得（companionOf）を経由したかどうかを
+      // 問わない——矛盾する2件が `"ann"`/`"lexical"` で自然に両方とも候補に入った
+      // ときにも、両側へ対称に付ける。`member.memory.contestedWithId` は
+      // `Memory` 本体の欄（truthy チェックは段3の同伴取得フィルタ、上の
+      // `contestedNeedingCompanion` と同じ形——`null`/`undefined`/空文字はどれも
+      // 「対向なし」として扱う）。相手が budget 切り詰め後の `keptMemoryIds` に
+      // 実在するときだけ付ける——切り詰めで相手が落ちた・連想枠経由で単独候補に
+      // なった・相手が forget 済みで一度も候補に上がらなかった場合は付かない。
+      if (
+        member.memory.status === "contested" &&
+        member.memory.contestedWithId &&
+        keptMemoryIds.has(member.memory.contestedWithId)
+      ) {
+        recalled.contestedWith = member.memory.contestedWithId;
       }
       return recalled;
     }),

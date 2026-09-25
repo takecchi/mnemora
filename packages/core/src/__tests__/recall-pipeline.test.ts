@@ -1528,6 +1528,122 @@ describe("recall() — 段3: 矛盾の解決と必須の同伴取得（docs/reca
   });
 });
 
+describe("recall() — 段3: contestedWith（互いに contested な記憶が、同伴取得ではなく両方とも自然に候補に入った場合の印、Issue #691 続き）", () => {
+  /**
+   * `runtime.markContested` で相互に `contestedWithId` を持つ対を作り、**両方**を
+   * クエリベクトルに近い位置へ置く——段3のユニット組み立て（`recall-runtime.ts` の
+   * 「両側とも独立に withinLimit に含まれていたケース」、`else if (companion)` 分岐）を
+   * 通し、mandatory companion 経路（`retrievedVia: "mandatory_companion"`）を通さない。
+   * `setupContestedPair`（上）との違いは、対向側 `b` も embedding を持ち、スコアだけで
+   * 候補に入る点——`companionOf` が付く前提そのものを崩す fixture である。
+   */
+  async function setupNaturallyPairedContestedPair(
+    runtimeAndStores: ReturnType<typeof buildRuntime>,
+  ) {
+    const { runtime, stores } = runtimeAndStores;
+    const a = await createEmbeddedMemory(stores, [1, 0], { digest: "休みは月曜" });
+    const b = await createEmbeddedMemory(stores, [0.99, 0.01], { digest: "休みは火曜" });
+    const markResult = await runtime.markContested(ctx, a.id, b.id);
+    if (markResult.outcome.kind !== "contested") {
+      throw new Error(
+        `setupNaturallyPairedContestedPair: markContested が failed: ${markResult.outcome.kind}`,
+      );
+    }
+    return { a, b };
+  }
+
+  it("🔴 両方とも ann で自然に候補に入ると、両方に contestedWith が付き、相手の memoryId を指す", async () => {
+    const built = buildRuntime();
+    const { runtime } = built;
+    const { a, b } = await setupNaturallyPairedContestedPair(built);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(a.id);
+    expect(ids).toContain(b.id);
+
+    const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
+    const returnedB = result.memories.find((m) => m.memoryId === b.id)!;
+
+    // 前提の確認: 段3の mandatory companion 経路を通していない
+    // （通っていたら、この歯は既存の companionOf の歯と区別が付かない）。
+    expect(returnedA.retrievedVia).not.toBe("mandatory_companion");
+    expect(returnedB.retrievedVia).not.toBe("mandatory_companion");
+    expect(returnedA.companionOf).toBeUndefined();
+    expect(returnedB.companionOf).toBeUndefined();
+
+    // 本体: companionOf が付かない代わりに、両側に contestedWith が付く。
+    expect(returnedA.contestedWith).toBe(b.id);
+    expect(returnedB.contestedWith).toBe(a.id);
+  });
+
+  it("active な（contested でない）記憶には contestedWith が付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const active = await createEmbeddedMemory(stores, [1, 0], { digest: "ただの記憶" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const returned = result.memories.find((m) => m.memoryId === active.id)!;
+    expect(returned.contestedWith).toBeUndefined();
+  });
+
+  it("🔴 status が active のまま contestedWithId だけが（不整合に）設定されている記憶には contestedWith が付かない（status 検査そのものの歯）", async () => {
+    // `Runtime` の公開口（markContested/resolveContested）はこの組み合わせを作らない
+    // ——CAS が status と contestedWithId を一緒に動かすため。ここでは
+    // `MemoryStore` を直接叩き、「status='active' なのに contestedWithId が生き残る」
+    // という不整合な状態（ADR 0046/0087 が扱う一対一の破れの隣接ケース）を意図的に作る。
+    // 段3のユニット組み立てはこのケースでも `companionOf` 抜きで2件をペアにするが
+    // （unit 組み立て自体は候補の status を見ない）、`contestedWith` は
+    // `member.memory.status === "contested"` を見るので、a には付かないはずである。
+    const { runtime, stores } = buildRuntime();
+    const b = await createEmbeddedMemory(stores, [0.99, 0.01], { digest: "後から見ると無関係" });
+    const a = await createEmbeddedMemory(stores, [1, 0], {
+      digest: "active なのに contestedWithId が残っている",
+      status: "active",
+      contestedWithId: b.id,
+    });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const returnedA = result.memories.find((m) => m.memoryId === a.id)!;
+    expect(returnedA.contestedWith).toBeUndefined();
+  });
+
+  it("contested だが相手が最終的な結果集合に居ない（連想枠経由で単独候補になり、対向は recall にそもそも掛からない）場合は contestedWith が付かない", async () => {
+    const { runtime, stores } = buildRuntime();
+    // 対向側: 実在はするが forgotten（status が active/contested のどちらでもないため、
+    // 段1の候補生成にも段3の同伴取得にも一切掛からない——`FakeMemoryStore` の外部キー
+    // 相当の検査（ADR 0047）を満たすため、実在する id を使う）。
+    const phantomPartner = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ status: "forgotten", digest: "存在はするが二度と返らない" }),
+    );
+    // Q = [1,0]。アンカーはクエリに強く当たる。
+    const anchor = await createEmbeddedMemory(stores, [0.70710678, 0.70710678], {
+      digest: "アンカー本文",
+    });
+    // 連想で拾われる側はクエリには当たらない（below_threshold）が、アンカーとは近い。
+    // contested だが、contestedWithId が指す相手（phantomPartner）は forgotten なので
+    // 段3の対の組み立て（`retrievedVia: "mandatory_companion"` 側の companion フィルタ、
+    // `docs/recall.md` §8）を一切通らず、最終的な結果集合に一度も現れない。
+    const contestedAlone = await createEmbeddedMemory(stores, [0, 1], {
+      digest: "対向が居ない矛盾",
+      status: "contested",
+      contestedWithId: phantomPartner.id,
+    });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      association: { maxCount: 5, anchorCount: 1 },
+    });
+
+    expect(result.memories.some((m) => m.memoryId === phantomPartner.id)).toBe(false);
+    const returned = result.memories.find((m) => m.memoryId === contestedAlone.id);
+    expect(returned).toBeDefined();
+    expect(returned?.retrievedVia).toBe("association");
+    expect(returned?.contestedWith).toBeUndefined();
+    void anchor;
+  });
+});
+
 describe("recall() — 片側だけの contested は単独で出さない（Issue #243 / ADR 0136）", () => {
   it("🔴 contestedWithId が null の contested Memory は recall() に単独で出ない。unit_assembly_dropped に計上される", async () => {
     // `Runtime.markContested`（Issue #197 / ADR 0134）はこの状態を作らない（両側

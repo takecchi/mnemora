@@ -194,6 +194,9 @@ export async function runMnemoraPath(
 // - 欠落値を推測で埋めない（"user" 等を書かない）。
 // - 矛盾関係は recall.memories 全体を見て、companionOf の向き先・向かれ元の
 //   両方に対称な印を出す。中身は相手の memoryId ではなく相手の digest 本文。
+// - contestedWith（Issue #691 続き、ADR 0335）も同じ矛盾候補欄に合流する——
+//   同伴取得（companionOf）を経由せず、両方とも ann/lexical で自然に候補に
+//   入った contested な対にも印が出るようにする。
 // ---------------------------------------------------------------------------
 
 /**
@@ -226,14 +229,30 @@ function subjectSegment(m: RecalledMemory): string {
  * `m` と矛盾関係にある相手の `memoryId` の集合。`RecalledMemory` 単体では非対称
  * （`companionOf` を持つのは同伴取得された側だけ、`docs/recall.md` §8）なので、
  * `all` 全体を見て逆向き（`m` が誰かの `companionOf` に指されている側）も拾う。
+ *
+ * `contestedWith`（Issue #691 続き、[ADR 0335](../../../docs/decisions/0335-recalled-memory-contested-with.md)）も
+ * 同じ理由で両向きを見る——`companionOf` は「同伴取得（段3）でだけ付く」ため、
+ * 矛盾する2件が `"ann"`/`"lexical"` で自然に両方とも候補に入った場合には
+ * 印を出す手段が無かった。`contestedWith` は取得経路を問わず、相手が同じ
+ * recall 結果に含まれるときだけ付くので、`companionOf` と違い**双方が自分自身の
+ * 欄として持ちうる**（一方向にしか設定されていないこともある——`core` 側は
+ * 相互参照を要求しない、`RecalledMemory.contestedWith` の doc 参照）。
+ * `Set` で重複を除くため、同伴取得の既存の出力（`companionOf` 側の印）とは
+ * 重複しても表示は1つにまとまる。
  */
 function contradictionCounterpartIds(m: RecalledMemory, all: readonly RecalledMemory[]): string[] {
   const ids = new Set<string>();
   if (m.retrievedVia === "mandatory_companion" && m.companionOf !== undefined) {
     ids.add(m.companionOf);
   }
+  if (m.contestedWith !== undefined) {
+    ids.add(m.contestedWith);
+  }
   for (const other of all) {
     if (other.companionOf === m.memoryId) {
+      ids.add(other.memoryId);
+    }
+    if (other.contestedWith === m.memoryId) {
       ids.add(other.memoryId);
     }
   }

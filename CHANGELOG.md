@@ -203,6 +203,15 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   0/4→4/4 に改善したが、誤検出も1/14→3〜4/14 に増える副作用が実測された
   （[Issue #691](https://github.com/takecchi/mnemora/issues/691) /
   [ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md)、PR #750）。
+- **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
+  同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
+  `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
+  （`companionOf` の意味は無変更）。相手が budget 切り詰め後の最終的な結果集合に
+  含まれるときだけ付く（オーナーの決定、ask_human 327fd89b /
+  [Issue #691](https://github.com/takecchi/mnemora/issues/691) /
+  [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #832）。
+  ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
+  （ADR 0335「引き受けた負債」参照）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -369,6 +378,15 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   合流する。新しい Omission 種別も公開 API の変更も無い（PR #824）。
   ⚠ **既定の recall 結果が変わりうる**——`contested` の組の片方を forget した状態で、
   もう片方が recall に当たる呼び出し。
+- **`OutboxStore.complete`/`fail` の CAS（ADR 0142）が `attempts` の一致しか見ておらず、
+  相手側の終端列（`completed_at`/`failed_at`）を見ていなかった。** 同じ `attempts` のまま
+  complete → fail を呼ぶと（逐次でも、本物の Postgres の2接続からの並行でも）、両方の
+  終端が付く矛盾した状態を作れた。先に付いた終端を勝たせるようにした——相手側の終端が
+  既に付いていれば、後から来た `complete`/`fail` は行を変えず例外も投げない
+  （[Issue #826](https://github.com/takecchi/mnemora/issues/826)、PR #830）。
+  ⭕ **公開型は変えていない**——`attempts` 不一致の `OutboxLeaseConflictError` と行が
+  無い場合の no-op、同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は
+  すべて既存どおり。
 
 ---
 
