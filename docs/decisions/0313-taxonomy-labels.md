@@ -1,4 +1,4 @@
-# ADR 0310: taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201）
+# ADR 0313: taxonomy の語彙管理（labels / memory_labels）を任意の追加として実装する — PR-A: migration・書き込み経路・語彙 API（Issue #201）
 
 - **状態**: 採用 (2026-09-25)
 - **日付**: 2026-09-25
@@ -69,21 +69,24 @@
 ### Issue #152/#153（呼び手の属性）とは別設計 ⟹ 混ぜない
 
 **⚠ 2026-09-25 訂正・拡充**: 本節は当初【受】として「`attributes` はフィルタにも加点にも
-使わない」と書いていたが、これは PR #724（Issue #152/#153、`packages/core/src/attributes.ts`、
-本稿執筆時点ではまだ `main` に未着地）の確定した設計と食い違っていた——PR #724 の
-[ADR（`docs/decisions/0310-observe-recall-caller-attributes.md`、PR #724 のブランチ上）]
-(https://github.com/takecchi/mnemora/pull/724) 決定5は、**`attributes` を段1（ANN・語彙・
-連想の3チャンネル）へ AND 等値の絞り込みとして押し下げる**——「フィルタに使わない」は
-誤りだった。本節はその訂正を反映する（本 ADR 自身がまだ採用前の初稿であるため、
-書き換えて良い——ADR 0223 決定1「まだ採用されていない初稿はこの限りではない」）。
+使わない」と書いていたが、これは着手時点でまだ `main` に無かった PR #724（Issue #152/#153）
+の確定した設計と食い違っていた。PR #724 は本稿の作業中に `main` へ着地し
+（commit `87fe0990`、[ADR 0312](./0312-observe-recall-caller-attributes.md)）、
+`packages/core/src/attributes.ts` と `memories.attributes`/`observations.attributes`
+（`migrations/0019_observations_memories_attributes.sql`）を実装した。ADR 0312 決定5は
+**`attributes` を段1（ANN・語彙・連想の3チャンネル）へ AND 等値の絞り込みとして押し下げる**
+——「フィルタに使わない」は誤りだった。本節はその訂正を反映する（本 ADR 自身がまだ採用前の
+初稿であるため、書き換えて良い——ADR 0223 決定1「まだ採用されていない初稿はこの限りでは
+ない」）。
 
-PR #724 の決定8が確定した3本の役割分担の表（逐語ではなく本 ADR の言葉で写す。
-`tags`/`labels` の記述は本 ADR の決定と一致することを確認済み）:
+[ADR 0312](./0312-observe-recall-caller-attributes.md) 決定8が確定した3本の役割分担の表
+（逐語ではなく本 ADR の言葉で写す。`tags`/`labels` の記述は本 ADR の決定と一致することを
+確認済み）:
 
 | 軸 | 何を入れるか | 誰が値を決めるか | 段1（候補生成）に参加するか |
 |---|---|---|---|
 | `tags`（Phase 1、既存） | 話題・内容の要約 | **100% LLM の推論**（抽出プロンプトは語彙・粒度を指示しない） | ⛔ しない（段2の加点のみ、`tagMatch`） |
-| `attributes`（PR #724、Issue #152/#153） | 公開範囲・区分などの**宣言された属性** | **100% 呼び手の申告**。mnemora は値の意味を解釈しない | ⭕ する（AND 等値の絞り込み。`RecallQuery.attributes?`） |
+| `attributes`（[ADR 0312](./0312-observe-recall-caller-attributes.md)、Issue #152/#153） | 公開範囲・区分などの**宣言された属性** | **100% 呼び手の申告**。mnemora は値の意味を解釈しない | ⭕ する（AND 等値の絞り込み。`RecallQuery.attributes?`） |
 | `labels`/`memory_labels`（本 ADR、Issue #201） | **統制語彙**（テナントが登録した語彙に `tags` が当たるかどうか） | **repo（スキーマ）が定める状態（`registered`/`proposed`）に、既存の `tags` の値が当たる** | PR-A（本 PR）は不参加。PR-B で「ラベルでの絞り込み」を足す予定（strict/open の分岐はここにだけ効く。「決定5」参照） |
 
 ⟹ **3本とも「誰が値を決めるか」が違う——LLM の推論（`tags`）／呼び手の申告
@@ -94,14 +97,24 @@ LLM の推論ではないため、taxonomy の語彙登録が想定する「テ�
 `registered`/`proposed` を決める」という枠に馴染まない）。**`attributes` は語彙登録の
 対象にしない**（`registerLabel?` は `labels` テーブルのみを操作し、`attributes` を
 読み書きしない）。2つの機構は保存先・migration・検索への関与のしかたが全部独立している
-——同じ PR・同じテーブルに混ぜない。
+——同じ PR・同じテーブルに混ぜない。**【実測】**両者が同一テーブル（`memories`）に
+別々の列（`tags`/`attributes`）と別々の索引（`idx_memories_tags`/`idx_memories_attributes`）
+を持つことを、実際に `\d memories` で確認した（下記「測ったこと」）。
 
-**PR 間の整合について（マネージャー指示、2026-09-25）**: PR #724 が `main` へ着地した後、
-本 PR は `main` を取り込んで migration 番号（`0019` は PR #724 が
-`observations_memories_attributes` として使用済みのため、本 PR の migration は
-`0020_taxonomy_labels.sql` へ付け替えた）と ADR 番号を再度確認する。`docs/memory-model.md`
-§8 に PR #724 が同じ3本の役割分担の表を追記する見込みであり、本 PR がそこへ重複した
-表を追記しないよう、取り込み時に突き合わせて調整する（下記「決定7」参照）。
+**PR 間の整合（マネージャー指示、2026-09-25。実施済み）**: PR #724 が `main` へ着地
+（`87fe0990`）した後、本 PR は `main` を取り込んだ。migration 番号は `0019` が PR #724
+（`observations_memories_attributes`）に確定していたため、本 PR の migration を
+`0020_taxonomy_labels.sql` へ付け替えた（`schema.ts`/`mapping.ts`/`migrate-concurrency.test.ts`/
+docs の参照も追従）。`packages/postgres/src/memory-store.ts` の
+`createMemory`/`createMemoryWithOutbox`/`supersedeWithNewMemories` は両 PR がそれぞれ
+書き換えた領域が近接しており実際にコンフリクトした——本 PR のトランザクション化＋
+`upsertProposedLabels` 呼び出しと、PR #724 の `attributes` 列・値を手作業で統合した
+（`git diff` で3メソッドとも両方の変更が共存することを確認済み）。`docs/memory-model.md`
+§8・`packages/postgres/README.md`「この package が作るオブジェクト」・
+`scripts/__tests__/readme-postgres-objects-lib.test.mjs`（テーブル10・索引23の回帰止め）
+も、両 PR の変更を合算する形で統合した。ADR 番号は `node scripts/adr-renumber.mjs`
+（引数無し）で本稿を `0313` へ付け替えた（`origin/main` の ADR 0312 = PR #724 との
+衝突を検出・解消）。
 
 ### ADR 0289 が確立した「任意の追加は非破壊」という数え方を踏む
 

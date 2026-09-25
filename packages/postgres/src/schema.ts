@@ -184,7 +184,7 @@ export const tenantActivity = pgTable("tenant_activity", {
 });
 
 /**
- * Issue #201 / ADR 0310: taxonomy の語彙（docs/memory-model.md §8、
+ * Issue #201 / ADR 0313: taxonomy の語彙（docs/memory-model.md §8、
  * `migrations/0020_taxonomy_labels.sql`）。テナントごとの語彙名と、その状態
  * （`registered` | `proposed`）を持つ。`UNIQUE (tenant_id, name)` は移行側で宣言する
  * （drizzle-kit push には渡さないため、ここでは型のためだけの宣言。`./schema.ts` 冒頭の
@@ -201,7 +201,7 @@ export const labels = pgTable("labels", {
 });
 
 /**
- * Issue #201 / ADR 0310: Memory と label の多対多の結び付け
+ * Issue #201 / ADR 0313: Memory と label の多対多の結び付け
  * （`migrations/0020_taxonomy_labels.sql`）。
  */
 export const memoryLabels = pgTable(
