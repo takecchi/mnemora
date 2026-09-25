@@ -172,7 +172,7 @@ const scoped = { tenantId: "tenant-1", subjectId: "user-1" }; // ⟹ この subj
 [docs/recall.md](../../docs/recall.md) §5 の古い表（100,000行で 45.8ms）との差は、
 同 §5「**`subjectId` を省略すると何が起きるか**」を見ること。
 
-## ⚠ 目次帯（`digestBandLimit`）は既定で帯の大半を占めうる
+## ⚠ 目次帯（`digestBandLimit`）は既定で返却量の大半を占めうる
 
 **帯は `digestBandLimit`（既定 `DEFAULT_DIGEST_BAND_LIMIT`）と帯全体の文字数上限
 （呼び出し側からは変えられない）の、どちらか先に当たったほうで切れる。** どちらが先に
