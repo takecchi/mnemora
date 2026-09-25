@@ -1,0 +1,40 @@
+{
+  "name": "@mnemora/bullmq",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "BullMQ で runtime.tick() を駆動する役（Issue #205 の2本目、ADR 0325 案B）。outbox は Postgres のまま正本——BullMQ はジョブの中身を持たず、「いま tick して」の合図だけを運ぶ。",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "test": "vitest run",
+    "test:redis": "vitest run -c vitest.redis.config.mts"
+  },
+  "dependencies": {
+    "@mnemora/core": "workspace:^",
+    "bullmq": "6.3.8",
+    "ioredis": "6.0.0"
+  },
+  "devDependencies": {
+    "@mnemora/postgres": "workspace:*",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vitest": "5.0.0"
+  }
+}

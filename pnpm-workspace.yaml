@@ -3,7 +3,8 @@ packages:
   - "examples/*"
 allowBuilds:
   esbuild: true
-  # ⭐ @mnemora/local-embedding が持ち込む3つ。**どれも明示的に false で拒否する。**
+  # ⭐ @mnemora/local-embedding が持ち込む3つ、および @mnemora/bullmq が持ち込む1つ。
+  # **どれも明示的に false で拒否する。**
   #
   # pnpm は allowBuilds に載っていないビルドスクリプトを ERR_PNPM_IGNORED_BUILDS で
   # 落とす。⟹ 黙って無視されるのではなく、**「拒否した」と書いてあることが記録になる。**
@@ -20,5 +21,10 @@ allowBuilds:
   onnxruntime-node: false
   protobufjs: false
   sharp: false
+  # msgpackr-extract: bullmq（@mnemora/bullmq、Issue #205 の2本目）が推移的に持ち込む
+  #   msgpackr の optional native アドオン（文字列抽出の高速化）。無くても msgpackr は
+  #   純 JS 実装にフォールバックする——bullmq 自身がこれをビルド必須にはしていない。
+  #   上と同じ理由（プロセス内で完結する用途に不要なネイティブビルドを増やさない）で拒否する。
+  msgpackr-extract: false
 minimumReleaseAgeExclude:
   - eslint@10.10.0

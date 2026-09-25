@@ -256,6 +256,92 @@ jobs:
             --artifacts-dir "${{ github.workspace }}/lexical-regime-artifacts" \
             >> "$GITHUB_STEP_SUMMARY"
 
+  bullmq:
+    # Issue #205 の2本目（`packages/bullmq`、ADR 0325）。
+    #
+    # 🔴 **required status check には入れていない。** `.github/required-status-checks.json`
+    # の宣言（branch protection の写し）に本ジョブは無い——required にするかどうかは
+    # branch protection 側の設定変更を伴いオーナー領分（`docs/autonomy.md` §3）であり、
+    # 本 PR の範囲外。⟹ このジョブが赤くても GitHub の Merge ボタンは単独では止まらない
+    # （Issue #426 が名指しした「required でない check」と同じ形。
+    # `scripts/__tests__/ci-yml-measurement-jobs-wiring.test.mjs` の対象にもしていない
+    # ——あちらは「測定ジョブ」7本を対象にした歯であり、本ジョブは測定ではなく
+    # 正しさの検査〔pass/fail が明確な歯〕なので対象が違う）。
+    #
+    # `@mnemora/bullmq` は `private: true`（`scripts/publish-targets.mjs` の
+    # `PUBLISH_TARGETS` にも入れていない）ため、`build`（typecheck/lint/test/build/
+    # api:check/check:cjs-parse/pack:check）ジョブの各門はほぼそのまま素通りする——
+    # `typecheck`/`build`/`test`（Redis 不要な単体テストのみ）だけは
+    # `pnpm -r --if-present run <script>` 経由で走る。**Redis を要る歯
+    # （`src/**/*.redis.test.ts`、`test:redis`）だけがこのジョブの持ち場である。**
+    name: "packages/bullmq（本物の Postgres + 本物の Redis）"
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          # Issue #148 ②/Issue #224: matrix 化していない pgvector ジョブ（このジョブを
+          # 含む）は、`postgres` ジョブの matrix の UTF8 脚と同じ値を宣言する
+          # （scripts/__tests__/ci-yml-postgres-regime-wiring.test.mjs (b) が固定する）。
+          # このジョブ自体は server_encoding の regime を測らない——単に揃えるだけ。
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+      redis:
+        image: redis:7
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: "複数プロセス同時 tick が outbox ジョブを二重処理しないことを、本物の Postgres + 本物の Redis に対して検査する（ADR 0325）"
+        # `packages/bullmq` の `test:redis` はマイグレーションも自前で行う
+        # （`concurrent-tick.redis.test.ts` の `beforeAll` が `runMigrations`/
+        # `registerEmbeddingSpace` を直接呼ぶ）——`@mnemora/postgres` の
+        # `migrate` スクリプトを別途ここで叩く必要は無い。
+        # ⚠ `@mnemora/core`/`@mnemora/postgres` を事前に `build` する必要も無い——
+        # この歯（親プロセス・子プロセスとも）は両パッケージの `src` を相対 import /
+        # vitest alias で直接読む（`concurrent-tick-child.ts` 冒頭のコメント参照。
+        # 変異試験でビルドを挟まずに済ませるための意図的な設計）。
+        run: pnpm --filter @mnemora/bullmq run test:redis
+
   example-chat:
     # 🔴🔴 ⛔ 直上の `name:` は変えない —— この文字列は branch protection の
     # required status check の*文脈名*そのものである【実測、2026-09-23】:

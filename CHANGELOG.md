@@ -45,14 +45,131 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.0` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`8cf82b1`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`7987de4`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
+🔴 **この節は以前、`v1.0.0` … `8cf82b1` を数えたと名乗っていたが、それは偽だった。** `8cf82b1`
+（PR #728）へ pin を進めたのは PR #733 だったが、#733 は自分が足す Fixed 1項目のために sha を
+書き換えただけで、`v1.0.0..8cf82b1` の間を実際には数え直していなかった——`#684`/`#694`/
+`#703`/`#711`/`#724`/`#728` など、publish 対象パッケージに触れる PR が未計上のまま残っていた。
+この節は、`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものである
+（載せる／載せないの全数表と理由は [PR #747](https://github.com/takecchi/mnemora/pull/747) の本文）。
+
+**この節が数えた範囲に破壊的変更は無い。**【実測】`git diff v1.0.0..7987de4 --
+scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキーマの欄の並べ替え、
+（b）`import type` 一覧への新しい型名の追加、（c）任意の末尾引数を足したことによる関数
+シグネチャの再フォーマット、のいずれかであり、削除・必須化・型の狭小化は無かった
+（`buildExtractionPrompt`/`extractCandidates`/`previewRestoreSupersededBy` はいずれも任意引数の
+追加のみ）。⟹ **公開 API への影響は、任意の欄・任意の引数・任意のメソッド・新しい export の
+追加のみである。** `### Breaking` の節は無い。
+
+対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
+`@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
+
+**postgres 利用者へ**: 新しいマイグレーションが3本増えている
+（`0019_observations_memories_attributes.sql` / `0020_taxonomy_labels.sql` /
+`0021_memories_claim_key.sql`）。⟹ `v1.0.0` から上げるなら
+`pnpm --filter @mnemora/postgres run migrate` が要る。
+
 ### Added
 
+- **`restoreSuperseded`/`previewRestoreSupersededBy` に任意の `filter?: { onlyMemoryIds?:
+  MemoryId[] }` を足し、1回の統合・訂正操作の単位まで戻す範囲を絞れるようにした**
+  （`MemoryStoreConformanceOptions.supportsOnlyMemoryIdsFilter?` は既存必須8本と違い**任意**）。
+  ⭕ 省略時は従来どおり群全体を戻す（[Issue #515](https://github.com/takecchi/mnemora/issues/515) /
+  [ADR 0258](./docs/decisions/0258-restore-superseded-operation-scope.md)、PR #573）。
+- **`@mnemora/testkit` に `describeLLMProviderConformance`（`LLMProvider` の適合テスト一式）を
+  新設し、`@mnemora/openai`・`@mnemora/anthropic` の両方に当てた**——`@mnemora/anthropic` は
+  publish 対象でありながらこれまで適合テストに1本も当たっていなかった
+  （[Issue #389](https://github.com/takecchi/mnemora/issues/389) /
+  [ADR 0266](./docs/decisions/0266-llm-provider-conformance.md)、PR #603）。
+- **抽出候補（`ExtractedMemoryCandidateSchema`）に任意欄 `subjectId?: string | null` を足した**——
+  1回の `observe()` から出る複数の Memory に、それぞれ違う主題を持たせられる。`undefined`
+  （省略）＝未指定（従来どおり observation の主題へ）、明示的な `null`＝主題なしの明示
+  （[Issue #608](https://github.com/takecchi/mnemora/issues/608) 項目① /
+  [ADR 0271](./docs/decisions/0271-extraction-candidate-subject-id-overrides-observation.md)、
+  PR #612）。
+- **`ScoreBreakdown` に任意欄 `affinityMeasured?: boolean` を足した**——連想枠（段3.5）が
+  affinity を測っていない状態で返した記憶かどうかを、`score.total` を比較する前に呼び手が
+  見分けられるようにする（[Issue #548](https://github.com/takecchi/mnemora/issues/548) 方向1 /
+  [ADR 0282](./docs/decisions/0282-score-breakdown-affinity-measured.md)、PR #642）。
+  ⭕ 既存欄は型・名前・必須性とも無変更。
+- **`@mnemora/local-embedding` の `LocalEmbeddingProviderOptions`/`LocalEmbeddingModelSpec` に
+  任意欄 `revision?: string` を足し、`pipeline()` へ素通しするようにした**——モデルの repo・
+  ミラーの汚染を固定の revision で予防できる
+  （[Issue #597](https://github.com/takecchi/mnemora/issues/597)、PR #664）。
+  ⭕ 省略時は既定（transformers.js の `"main"`）のまま。
+- **`RecallQuery`/`RecallScope`/`VectorFilter`/`LexicalFilter` に任意欄
+  `includeSubjectless?: boolean` を足した**——「subject X、または主題なし」を1回の `recall()`
+  で引けるようにする（[Issue #608](https://github.com/takecchi/mnemora/issues/608) ③(b) /
+  [ADR 0286](./docs/decisions/0286-recall-include-subjectless.md)、PR #679）。
+  ⭕ 既定（省略・`false`）の挙動は無変更。
+- **`observe` の入力に任意欄 `subjectCandidates?: string[]` を足し、抽出器に主題を候補一覧から
+  選ばせられるようにした**——一覧に無い値は runtime が弾き、弾いた値を
+  `ObserveResult.rejectedSubjectIds?` に返す
+  （[Issue #608](https://github.com/takecchi/mnemora/issues/608) 項目②(b) /
+  [ADR 0287](./docs/decisions/0287-extraction-subject-candidates-caller-supplied.md)、PR #680）。
+  ⭕ 候補を渡さない呼び出しはプロンプト（カセット鍵）も挙動も無変更。
+- **`AnnUnreachedOmission` に任意欄 `severity?: "info" | "warning"` を足した**——同じ `recall()`
+  で ANN 窓が実際に到達可能な下限に届かなかったときだけ `"warning"`、構造的に鳴っているだけなら
+  `"info"`。呼び手が構造的発火と実損の兆候を濾せるようにする
+  （[Issue #361](https://github.com/takecchi/mnemora/issues/361) /
+  [ADR 0288](./docs/decisions/0288-ann-unreached-severity.md)、PR #682）。
+- **`RecalledMemory` に任意欄 `speaker?: string | null`・`subjectId?: string | null` を足した**——
+  recall の場で誰が言ったか・誰との会話かが見えるようにする
+  （Issue #579 案D /
+  [ADR 0289](./docs/decisions/0289-recalled-memory-speaker-subject.md)、PR #684）。
+- **観測（`observe`）に呼び手が渡す任意の `extractionContext`（保存した文脈と日時）を抽出へ
+  渡せるようにした**——単独発話では失われる同意の対象・話者・相対日付を、同期・非同期・
+  再抽出の経路すべてで同じ入力として使う。省略時は既存プロンプトのまま
+  （Refs #689 /
+  [ADR 0299](./docs/decisions/0299-extraction-context.md)、PR #694）。
+  ⚠ 曖昧な参照・複雑な日時表現は未評価。既定経路の置換ではない。
+- **`RecallQuery`/`ScoringInput` に任意欄 `timeWeighting?: "legacy" | "eventAwareFreshness"` を
+  足した**——`"eventAwareFreshness"` を明示すると、`occurredAt` を持たない記憶（恒常的な事実・
+  好み）の `freshness` を、記録時刻の古さで二重に減衰させなくなる。**省略時は `"legacy"` で
+  既定の挙動は無変更**（[Issue #690](https://github.com/takecchi/mnemora/issues/690) /
+  [ADR 0300](./docs/decisions/0300-time-weighting-policy-opt-in.md)、PR #697）。
+  併せて `@mnemora/openai` の `OpenAILLMProviderOptions` に任意欄 `temperature?: number` を
+  足した（純追加、既定は渡さない——既存呼び出しの挙動は無変更、PR #697）。
+- **`RecalledMemory` に任意欄 `recordedAt?: Date`・`occurredAt?: Date | null` を足した**——
+  回答生成側で「後で訂正された」を時点から読めるようにする下地
+  （[Issue #702](https://github.com/takecchi/mnemora/issues/702) /
+  [ADR 0298](./docs/decisions/0298-recalled-memory-recorded-occurred-at.md)、PR #703）。
+- **`EmbeddingProvider` の契約に「上限超過は例外。黙って切り詰めたベクトルを返さない」を
+  明記し、testkit 適合 suite に任意欄 `overLimitText?: string` を足した**——省略時は
+  「測っていない」と `it.skip` で名乗る
+  （[Issue #449](https://github.com/takecchi/mnemora/issues/449) /
+  [ADR 0305](./docs/decisions/0305-embedding-provider-input-limit-contract.md)、PR #715）。
+- **`@mnemora/testkit` に `SeededLLMProvider`/`SeededEmbeddingProvider` を足した**——「種
+  カセット」から実 API を呼ばずに再生し、種に無い入力だけ実 API（delegate）へ渡す provider
+  （記録そのものは別層が担う）
+  （Issue #691 /
+  [ADR 0309](./docs/decisions/0309-answer-prompt-order-legend-and-cassette-migration.md)、
+  PR #716）。
+- **`@mnemora/postgres` に taxonomy（`labels`/`memory_labels`）の保存・語彙側を足した（PR-A）**
+  ——`tags` の書き込みから `proposed` ラベルを同一トランザクションで自動生成し、
+  `MemoryStore.listLabels?`/`registerLabel?`（いずれも**任意**メソッド）・
+  `TenantSettingsStore.getTaxonomyMode?`/`setTaxonomyMode?` で語彙を管理する。新しい migration
+  `0020_taxonomy_labels.sql` を含む（[Issue #201](https://github.com/takecchi/mnemora/issues/201) /
+  [ADR 0318](./docs/decisions/0318-taxonomy-labels.md)、PR #717）。
+  ⭕ 既存の `tagMatch` 加点・`taxonomy_mode` に関わらないスコアリングは無変更。
+- **`observe`/`recall` に呼び手専用の `attributes?: Record<string,string>` を足した**——
+  公開範囲・区分などの、mnemora が解釈しない申告された属性を、段1（ANN・語彙）・段3.5から
+  絞り込める。新しい migration `0019_observations_memories_attributes.sql` を含む
+  （[Issue #152](https://github.com/takecchi/mnemora/issues/152)/
+  [Issue #153](https://github.com/takecchi/mnemora/issues/153) /
+  [ADR 0312](./docs/decisions/0312-observe-recall-caller-attributes.md)、PR #724）。
+  ⭕ 渡さない呼び出しの挙動・既定値は無変更。
+- **抽出に主張キー `claimKey: { subject, predicate }` を持たせた（(B) 第1段。既定 off・検出は
+  まだしない）**——「この記憶は何についての主張か」を LLM に分類させて構造化された鍵として
+  持たせるだけで、同じ鍵を持つ記憶どうしの衝突検出はこの段では行わない。新しい migration
+  `0021_memories_claim_key.sql` を含む
+  （[Issue #371](https://github.com/takecchi/mnemora/issues/371) /
+  [ADR 0320](./docs/decisions/0320-claim-key-field-implementation.md)、PR #736）。
 - **`@mnemora/postgres` に opt-in の語彙ストア `PostgresTrigramLexicalStore` を足した**——
   `pg_trgm` で日本語（非 ASCII）部分を照合する。`PostgresTrigramLexicalStore.create()` が拡張と
   ロケール（`server_encoding`・日本語トライグラムの自己一致）を検査し、満たせなければ投げる
@@ -61,11 +178,66 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⭕ **既定は変えていない**——`PostgresLexicalStore`・`REQUIRED_EXTENSIONS`・migration は無変更で、
   導入側が差し替えたときだけ効く。
   ⚠ 選定に使っていない質問文での精度・閾値は測っていない（ADR 0319）。
-  ⚠ この項は上の数えた範囲（`8cf82b1`）の外の PR を個別に足したものであり、範囲の sha は
-  動かしていない——間の PR を数え直していないため。
+- **taxonomy の recall 側絞り込みを実装した（PR-B。Closes #201）**——`RecallQuery.labels?:
+  string[]`（OR の集合絞り込み）・`taxonomyGroups?: boolean`（既定 `false`）を新設し、
+  `taxonomy_mode`（open/strict）に応じた参加資格で段1・段3.5・`aggregateScope` を絞る。
+  `GroupCount.axis: 'taxonomy'`・`FilteredOmission.condition: 'taxonomy'` も新設
+  （[Issue #201](https://github.com/takecchi/mnemora/issues/201) /
+  [ADR 0323](./docs/decisions/0323-taxonomy-recall-filter.md)、PR #743）。
+- **主張キーの衝突を列と索引で検出し `contested` にする（(B) 第2段、既定 off）**——同じ
+  `claimKey`（正規化済み）を持つ複数の Memory を検出する。既定では発火しない
+  （[Issue #372](https://github.com/takecchi/mnemora/issues/372) /
+  [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)、PR #745）。
+
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`@mnemora/postgres` の語彙チャンネルで `ts_rank_cd` の normalization ビットに文書長
+  （`1 + ln(length)`）の項を足した（`TS_RANK_CD_NORMALIZATION` を `32` から `32 | 1` = `33`
+  へ）**——被覆率が同じでも内容量が違う候補の `rank` が完全同点になる問題を減らす。`rank` は
+  段2のスコア（`LexicalHit.coverage`/`ScoreBreakdown.lexicalMatch`）には入らないが、段1の
+  `PostgresLexicalStore.search()` の `ORDER BY`/`LIMIT` による切り詰めには効く——**そのため
+  段1の窓境界に近い候補の並びが変わりうる**（日本語本文に埋もれた単一 ASCII 識別子では効果は
+  限定的、とADRに明記）。
+  （[Issue #394](https://github.com/takecchi/mnemora/issues/394) /
+  [ADR 0308](./docs/decisions/0308-lexical-rank-length-normalization.md)、PR #711）。
+- **`estimateRecallFootprint`/`calibrateRecallFootprint`（想起の想定文字数の見積もり）の精度を
+  直し、既定の係数が変わった。**`indexBand` の実 JSON 構造から決まる帯のカンマ・桁上がり・`limitedBy` などの
+  構造項が推定式から欠落しており、`calibrateRecallFootprint` はその構造項を較正の前に
+  差し引けず二重計上していた。較正標本も CI artifact から7点→15点に増やし、hold-in/hold-out の
+  分け方を「帯が空であること」そのものに揃えた。**この結果、既定プロファイル
+  `BUILTIN_RECALL_FOOTPRINT_PROFILE` の値が変わった**——`charsPerDigest` は
+  `15.458` → **`16.175`**、`fixedIndexChars` は `170.881` → **`168.503`**（【実測】
+  `git diff v1.0.0..7987de4 -- packages/core/src/recall-footprint.ts`）。既定プロファイルで
+  見積もりを使っている呼び手が受け取る数値は変わるが、公開の型・関数シグネチャは無変更
+  （[Issue #340](https://github.com/takecchi/mnemora/issues/340) /
+  [ADR 0302](./docs/decisions/0302-recall-footprint-structural-terms.md) /
+  [ADR 0306](./docs/decisions/0306-recall-footprint-calibration-subtracts-structural-terms.md) /
+  [ADR 0314](./docs/decisions/0314-recall-footprint-calibration-samples-need-ci-sourcing.md)、
+  PR #710 / #722 / #728）。
 
 ### Fixed
 
+- **`@mnemora/postgres` の段1 `search()` で、他テナントの near-duplicate が HNSW の候補窓
+  （既定 `hnsw.ef_search`=40）を埋め尽くすと、自テナントの候補を1件も見ないまま `recall()` が
+  0件を返すことがあった。** `PostgresVectorStore.search()` に
+  `SET LOCAL hnsw.iterative_scan = relaxed_order` を採用して塞いだ（ADR 0063 決定1 を、
+  当時測っていなかった条件の新しい実測で覆す）。併せて、ANN 窓が実際に到達可能な下限に
+  届かなかったことを `RecallResult.explain.stages` の型無し診断欄
+  （`annReturnedFewerThanReachable`）に名乗らせるようにした——「探して見つからなかった」と
+  「探していない」を同じ顔で返さないため
+  （[Issue #671](https://github.com/takecchi/mnemora/issues/671) /
+  [ADR 0284](./docs/decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md) /
+  [ADR 0285](./docs/decisions/0285-ann-window-empty-of-in-scope-candidates-stage-detail.md)、
+  PR #673 / #672 / #676）。
+  ⭕ **公開型は変えていない**——診断欄は `explain.stages[...].detail` の型無し欄に条件成立時
+  だけ足す形で、既定の出力は変わらない。SQL の `WHERE`/`ORDER BY` も変えていない。
+- **`sanitizeCandidateSubjectId` が、LLM が「主題なし」のつもりで返す文字列 `"null"`（JSON の
+  `null` リテラルではない）を、候補一覧に無い値として弾いていた。**弾かれた値は
+  `undefined`（未指定）へ戻り、意図せず observation の主題へフォールバックしていた
+  （実 API で `gpt-4o-mini` に対し5/5回再現）。候補一覧に文字列 `"null"` 自体が含まれていない
+  場合に限り、明示的な主題なしとして扱う特例を追加した
+  （[Issue #608](https://github.com/takecchi/mnemora/issues/608) /
+  [ADR 0304](./docs/decisions/0304-subject-candidates-string-null-literal.md)、PR #712）。
 - **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
   処理する `consolidate` ジョブ、`processConsolidateJob`）が、subject をまたいで統合し、
   統合後の `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `consolidate`
