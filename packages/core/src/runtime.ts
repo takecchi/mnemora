@@ -3463,10 +3463,32 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
     // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
     const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
-    // ⚠ `insertedMemoryIds` の status は確かめない——`MemoryStore.reinforce` の doc
-    // コメント（Issue #840）が、status を絞らないことの帰結を status ごとに明記している。
-    for (const memoryId of insertedMemoryIds) {
-      await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);
+    // ⚠ `insertedMemoryIds` の status は確かめない——`MemoryStore.reinforce`/
+    // `MemoryStore.reinforceMany` の doc コメント（Issue #840）が、status を絞らない
+    // ことの帰結を status ごとに明記している。
+    //
+    // [Issue #874](https://github.com/takecchi/mnemora/issues/874): `reinforce` を
+    // `insertedMemoryIds` の件数だけ直列に呼ぶと、使用報告1件ごとに往復数が線形に
+    // 増える（N+1）。`MemoryStore.reinforceMany`（任意メソッド、`archiveDecayed` と
+    // 同じ「口が在るかどうかで分岐する」作法）が在ればそれを1回呼んで束ね、無ければ
+    // 従来どおり1件ずつのループへ戻る——`reinforceMany` を実装しない adapter の挙動は
+    // 1バイトも変えない。`insertedMemoryIds` が空なら（従来のループも0回だったのと
+    // 同じく）どちらの経路も呼ばない。
+    if (insertedMemoryIds.length > 0) {
+      const reinforceMany = deps.memoryStore.reinforceMany;
+      if (reinforceMany !== undefined) {
+        await reinforceMany.call(
+          deps.memoryStore,
+          ctx,
+          insertedMemoryIds,
+          reinforcedAt,
+          reinforceOpts,
+        );
+      } else {
+        for (const memoryId of insertedMemoryIds) {
+          await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);
+        }
+      }
     }
 
     return {
