@@ -612,7 +612,17 @@ tenant-y（tags=[]）: labels/memory_labels とも0行
 「`name` 昇順」を、**`name` のコードポイント順**（Postgres の `COLLATE "C"` と同じ、
 バイト順）の昇順と定めた。`PostgresMemoryStore.listLabels` は `ORDER BY name COLLATE
 "C" ASC` に変え、`FakeMemoryStore`/`InMemoryMemoryStore` は `localeCompare` をやめて
-コードポイント同士の `<`/`>` 比較に変えた。
+コードポイントを比較する専用の比較関数に変えた。
+
+**追記2（同日）**: 当初は `FakeMemoryStore`/`InMemoryMemoryStore` 側を素の `<`/`>`
+文字列比較（`a.name < b.name`）で実装していたが、これは JS の仕様上 UTF-16 コード単位の
+比較であり、U+10000 以上の文字（サロゲートペア）を含む名前では実際のコードポイント順と
+食い違うことに気づいた（`"！"` U+FF01 と `"😀"` U+1F600 のペアで実際に確認: 素の `<` は
+`"😀"` を先にするが、コードポイント順は `"！"` が先）。契約に「コードポイント順」と書いた
+以上これはその契約を自ら満たさない実装だったため、`String.prototype.codePointAt` で
+1文字（サロゲートペアなら2コード単位）ずつ読んでコードポイントの値そのものを比較する
+実装に直した。Postgres の `COLLATE "C"` は UTF-8 のバイト列を比較しており、UTF-8 の
+バイト順はコードポイント順と単調に対応するため、この実装は Postgres と一致する。
 
 **採らなかった案**:
 

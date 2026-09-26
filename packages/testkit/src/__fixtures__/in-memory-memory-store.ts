@@ -106,19 +106,34 @@ function isDecayedForScope(
  * （2026-09-26、クローン miku の判断）: `listLabels?` の `name` 昇順を**コードポイント順**
  * （Postgres の `COLLATE "C"` と同じ、バイト順）と定めた。この比較関数はそれを実装する。
  *
- * ⚠ **限界**: JS の `<`/`>` は UTF-16 コード単位を比較する。BMP（U+0000〜U+FFFF）の
- * 範囲内では UTF-16 コード単位の値とコードポイントの値が一致するため問題にならないが、
- * サロゲートペア（U+10000 以上、絵文字など）を含む名前では、コード単位の比較が
- * コードポイントの比較と食い違いうる（サロゲート自体の値 U+D800〜U+DFFF が
- * U+E000〜U+FFFF の BMP 文字より小さいコード単位として並んでしまうため）。
- * `COLLATE "C"` は UTF-8 のバイト列を比較しており、UTF-8 のバイト順はコードポイント順と
- * 単調に対応する（サロゲートという中間表現を経由しない）ため、この限界は Postgres 側には
- * 無い。label 名にサロゲートペアが混在するケースでの Postgres との厳密な一致は
- * 確かめていない——実運用の label 名（tags）が主に ASCII/BMP を想定している現状では
- * 影響が小さいと見て、この限界を許容する判断にした。
+ * **文字列同士を素の `<`/`>` で比較しない。**JS の `<`/`>` は UTF-16 コード単位を比較する
+ * ため、サロゲートペア（U+10000 以上、絵文字など）を含む名前では、サロゲート自体の値
+ * （U+D800〜U+DFFF）が U+E000〜U+FFFF の BMP 文字より小さいコード単位として並んでしまい、
+ * 実際のコードポイント順と食い違う（追記2、2026-09-26。`"！"` U+FF01 と `"😀"` U+1F600 の
+ * ペアで実際に踏んだ——素の `<` だと `"😀"` が先に来るが、コードポイント順は `"！"` が先）。
+ *
+ * ⟹ 先頭から `String.prototype.codePointAt` で1文字（サロゲートペアなら2コード単位）ずつ
+ * 読み、コードポイントの値そのものを比較する。UTF-8 のバイト順（Postgres の
+ * `COLLATE "C"`）はコードポイント順と単調に対応するため、この実装は Postgres と一致する。
  */
 function compareLabelName(a: string, b: string): number {
-  return a < b ? -1 : a > b ? 1 : 0;
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    // i/j はループ条件で length 未満と保証済みなので、その位置に有効なコード単位が必ずある。
+    const aCodePoint = a.codePointAt(i)!;
+    const bCodePoint = b.codePointAt(j)!;
+    if (aCodePoint !== bCodePoint) {
+      return aCodePoint < bCodePoint ? -1 : 1;
+    }
+    // サロゲートペア（コードポイントが BMP 外）なら2コード単位、それ以外は1コード単位進む。
+    i += aCodePoint > 0xffff ? 2 : 1;
+    j += bCodePoint > 0xffff ? 2 : 1;
+  }
+  // ここまで全コードポイントが一致——残りがある方（長い方）が後ろ。
+  if (i < a.length) return 1;
+  if (j < b.length) return -1;
+  return 0;
 }
 
 export class InMemoryMemoryStore implements MemoryStore {
