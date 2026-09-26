@@ -87,47 +87,59 @@ export async function createTimeWeightingBenchRuntime(
   providerOptions: CreateProvidersOptions = {},
 ): Promise<TimeWeightingBenchRuntimeHandle> {
   const client: PostgresClient = createPostgresClient(databaseUrl);
-  await runMigrations(client.pool);
+  // `runtime-factory.ts` の `createExampleRuntime` と同じ穴・同じ理由:
+  // `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に失敗しうる
+  // `await` が何段もある（`runMigrations`/`registerEmbeddingSpace`）。呼び出し側は
+  // `const handle = await createTimeWeightingBenchRuntime(...); try { ... } finally {
+  // await handle.close(); }` という形で、ここで reject すると `handle` に一度も
+  // 代入されないため `close()` を呼びようがない。
+  try {
+    await runMigrations(client.pool);
 
-  const created = createProviders(env, providerOptions);
-  const llmProvider = new CountingLLMProvider(created.llmProvider);
-  const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
-  await registerEmbeddingSpace(client.pool, embeddingProvider.space);
+    const created = createProviders(env, providerOptions);
+    const llmProvider = new CountingLLMProvider(created.llmProvider);
+    const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
+    await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
-  const memoryStore = new PostgresMemoryStore(client.db);
-  // ⭐ 初期値はどうでもよい——`runTimeWeightingCase` が各ケースの `recallAt` へ
-  // `recall()` の直前に必ず `set()` する。記憶の作成・reinforce は `Clock` を読まない
-  // （`NewMemory.recordedAt`/`reinforce(ctx, id, at)` はどちらも呼び出し側が渡す
-  // 明示の `Date` であり、`RuntimeDeps.clock` に依らない——`mutable-clock.ts` の
-  // docstring と同じ理解）。
-  const clock = createMutableClock();
+    const memoryStore = new PostgresMemoryStore(client.db);
+    // ⭐ 初期値はどうでもよい——`runTimeWeightingCase` が各ケースの `recallAt` へ
+    // `recall()` の直前に必ず `set()` する。記憶の作成・reinforce は `Clock` を読まない
+    // （`NewMemory.recordedAt`/`reinforce(ctx, id, at)` はどちらも呼び出し側が渡す
+    // 明示の `Date` であり、`RuntimeDeps.clock` に依らない——`mutable-clock.ts` の
+    // docstring と同じ理解）。
+    const clock = createMutableClock();
 
-  const runtime = createRuntime({
-    memoryStore,
-    outboxStore: new PostgresOutboxStore(client.db),
-    vectorStore: new PostgresVectorStore(client.db),
-    lexicalStore: new PostgresLexicalStore(client.db),
-    eventStore: new PostgresEventStore(client.db),
-    tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
-    llmProvider,
-    embeddingProvider,
-    hashContent: sha256Hex,
-    clock,
-  });
+    const runtime = createRuntime({
+      memoryStore,
+      outboxStore: new PostgresOutboxStore(client.db),
+      vectorStore: new PostgresVectorStore(client.db),
+      lexicalStore: new PostgresLexicalStore(client.db),
+      eventStore: new PostgresEventStore(client.db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
+      llmProvider,
+      embeddingProvider,
+      hashContent: sha256Hex,
+      clock,
+    });
 
-  return {
-    runtime,
-    memoryStore,
-    clock,
-    llmMode: created.llmMode,
-    embeddingMode: created.embeddingMode,
-    llmProvider,
-    embeddingProvider,
-    cassetteIgnored: created.cassetteIgnored,
-    ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
-    ...(created.readSeedUsage !== undefined ? { readSeedUsage: created.readSeedUsage } : {}),
-    close: () => closePostgresClient(client),
-  };
+    return {
+      runtime,
+      memoryStore,
+      clock,
+      llmMode: created.llmMode,
+      embeddingMode: created.embeddingMode,
+      llmProvider,
+      embeddingProvider,
+      cassetteIgnored: created.cassetteIgnored,
+      ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
+      ...(created.readSeedUsage !== undefined ? { readSeedUsage: created.readSeedUsage } : {}),
+      close: () => closePostgresClient(client),
+    };
+  } catch (err) {
+    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
+    await closePostgresClient(client).catch(() => {});
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
