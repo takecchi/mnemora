@@ -394,9 +394,15 @@ function renderRecalledMemoryLine(
 }
 
 /**
- * mnemora path が実際にプロンプトへ積む文字列を、`recall()` の返り値だけから組み立てる。
- * `usage.chars` が数えているのと同じ材料（各 memory の digest + index band の JSON）を
- * 呼び出し側の視点で再現する——「mnemora はプロンプトを組み立てない」ことを実演する関数。
+ * mnemora path が実際にプロンプトへ積む文字列を、`recall()` の返り値だけから組み立てる
+ * ——「mnemora はプロンプトを組み立てない」ことを実演する関数。
+ *
+ * **積むのは `recall.memories` の各行と、`recall.index.totalInScope` から作る
+ * `(索引: …)` の1行だけである。目次帯（`recall.index`）の中身——digest 帯・群カウント
+ * （`docs/recall.md` §5 の被覆不変条件の第2階・第3階）——は積まない。**
+ * `usage.chars` は目次帯の JSON（`usage.indexChars`）を含めて数えるので、この関数の出力とは
+ * 材料そのものが違う。目次帯を回答プロンプトへ描画する案は、プロンプトと再生カセットの
+ * 形を変える別の方針として残っている（Issue #971）。
  *
  * **2026-09（Issue #691）**: digest だけでなく、由来（`provenanceKind`）・話者
  * （`speaker`）・主題（`subjectId`）・矛盾関係（`companionOf`/`retrievedVia`）も

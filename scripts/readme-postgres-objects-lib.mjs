@@ -34,6 +34,27 @@
  * `CREATE OR REPLACE FUNCTION` で同名を別シグネチャに置き換えても、この歯は
  * 気づかない（ADR 0204「引き受けた負債」）。
  *
+ * ## 動的 DDL（`DO` ブロック内の `EXECUTE format(...)`）に対する誤検出を防ぐ
+ * （Issue #956 / ADR 0343）
+ *
+ * `0022_embedding_zero_norm_index.sql` は、対象の索引名を実行時に計算するため
+ * `EXECUTE format('CREATE INDEX IF NOT EXISTS %I ON %I (...) WHERE ...', index_name,
+ * target_table)` という形の**文字列リテラルの中に** `CREATE INDEX IF NOT EXISTS` を
+ * 持つ。この歯は SQL を構文解析せず正規表現で走査するだけなので、**この文字列を
+ * そのまま「静的な `CREATE INDEX <名前>`」と誤認しかけた**——`%I` は
+ * `[a-zA-Z_][a-zA-Z0-9_]*` に一致しないため、`(?:IF\s+NOT\s+EXISTS\s+)?` を
+ * 呑み込んだ状態では捕捉グループが失敗し、正規表現エンジンが「`IF NOT EXISTS` を
+ * 呑み込まない」側へバックトラックした結果、**`IF` という語そのものを索引名として
+ * 誤って捕捉していた**（【実測】この修正を入れる前は `README に無い索引: ["IF"]` で
+ * 赤くなった）。⟹ 各捕捉グループの直前に、SQL 予約語
+ * （`IF`/`NOT`/`EXISTS`/`CONCURRENTLY`/`OR`/`REPLACE`）を除外する否定先読み
+ * （`RESERVED_WORD_LOOKAHEAD`）を挟んだ——バックトラックしてもこれらの語だけは
+ * 名前として捕捉されず、この動的 DDL の出現全体が「一致無し」になる（＝最終集合に
+ * 何も足さない）。**この除外は動的 DDL 専用の特別扱いではない**——実在するオブジェクト
+ * が `IF`/`NOT`/`EXISTS` 等という名前になることは実務上あり得ない（`assertSafeIdentifier`
+ * の対象にもならないほど非現実的）ため、既存の静的な migration の走査結果には
+ * 影響しない。
+ *
  * ## コメントの剥がし方
  *
  * `--` 行コメントに加えて、スラッシュ・アスタリスク形式のブロックコメントも
@@ -64,8 +85,19 @@ export function stripSqlBlockComments(sqlText) {
   return sqlText.replace(/\/\*[\s\S]*?\*\//g, "");
 }
 
-const STATEMENT_RE =
-  /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(?<createTable>[a-zA-Z_][a-zA-Z0-9_]*)|DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?<dropTable>[a-zA-Z_][a-zA-Z0-9_]*)|CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+NOT\s+EXISTS\s+)?(?<createIndex>[a-zA-Z_][a-zA-Z0-9_]*)|DROP\s+INDEX\s+(?:CONCURRENTLY\s+)?(?:IF\s+EXISTS\s+)?(?<dropIndex>[a-zA-Z_][a-zA-Z0-9_]*)|CREATE\s+(?:OR\s+REPLACE\s+)?FUNCTION\s+(?<createFunction>[a-zA-Z_][a-zA-Z0-9_]*)\s*\(|DROP\s+FUNCTION\s+(?:IF\s+EXISTS\s+)?(?<dropFunction>[a-zA-Z_][a-zA-Z0-9_]*)/gi;
+// SQL 予約語をバックトラックで名前として誤って捕まえないための否定先読み
+// （上の「動的 DDL に対する誤検出を防ぐ」節参照）。
+const RESERVED_WORD_LOOKAHEAD = "(?!(?:IF|NOT|EXISTS|CONCURRENTLY|OR|REPLACE)\\b)";
+
+const STATEMENT_RE = new RegExp(
+  `CREATE\\s+TABLE\\s+(?:IF\\s+NOT\\s+EXISTS\\s+)?${RESERVED_WORD_LOOKAHEAD}(?<createTable>[a-zA-Z_][a-zA-Z0-9_]*)` +
+    `|DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?${RESERVED_WORD_LOOKAHEAD}(?<dropTable>[a-zA-Z_][a-zA-Z0-9_]*)` +
+    `|CREATE\\s+(?:UNIQUE\\s+)?INDEX\\s+(?:CONCURRENTLY\\s+)?(?:IF\\s+NOT\\s+EXISTS\\s+)?${RESERVED_WORD_LOOKAHEAD}(?<createIndex>[a-zA-Z_][a-zA-Z0-9_]*)` +
+    `|DROP\\s+INDEX\\s+(?:CONCURRENTLY\\s+)?(?:IF\\s+EXISTS\\s+)?${RESERVED_WORD_LOOKAHEAD}(?<dropIndex>[a-zA-Z_][a-zA-Z0-9_]*)` +
+    `|CREATE\\s+(?:OR\\s+REPLACE\\s+)?FUNCTION\\s+${RESERVED_WORD_LOOKAHEAD}(?<createFunction>[a-zA-Z_][a-zA-Z0-9_]*)\\s*\\(` +
+    `|DROP\\s+FUNCTION\\s+(?:IF\\s+EXISTS\\s+)?${RESERVED_WORD_LOOKAHEAD}(?<dropFunction>[a-zA-Z_][a-zA-Z0-9_]*)`,
+  "gi",
+);
 
 /**
  * 複数の移行ファイルのテキスト（コメント剥がし前でよい。この関数が剥がす）を、
@@ -114,21 +146,30 @@ export function deriveMigrationObjects(migrationTextsInFileOrder) {
 
 /**
  * `packages/postgres/src/embedding-space-table.ts` の現物から、埋め込み空間ごとに
- * 増えるテーブル名・HNSW索引名の接頭辞を読む。
+ * 増えるテーブル名・HNSW索引名・ゼロベクトル用部分索引名（Issue #956 / ADR 0343）の
+ * 接頭辞を読む。
  *
  * @param {string} embeddingSpaceTableSourceText
- * @returns {{ tablePrefix: string, indexPrefix: string }}
+ * @returns {{ tablePrefix: string, indexPrefix: string, zeroNormIndexPrefix: string }}
  */
 export function deriveEmbeddingSpaceNaming(embeddingSpaceTableSourceText) {
   const tableMatch = /const TABLE_PREFIX = "([^"]+)";/.exec(embeddingSpaceTableSourceText);
   const indexMatch = /const HNSW_INDEX_PREFIX = "([^"]+)";/.exec(embeddingSpaceTableSourceText);
-  if (!tableMatch || !indexMatch) {
+  const zeroNormIndexMatch = /const ZERO_NORM_INDEX_PREFIX = "([^"]+)";/.exec(
+    embeddingSpaceTableSourceText,
+  );
+  if (!tableMatch || !indexMatch || !zeroNormIndexMatch) {
     throw new Error(
-      "embedding-space-table.ts から TABLE_PREFIX / HNSW_INDEX_PREFIX を読み取れなかった。" +
+      "embedding-space-table.ts から TABLE_PREFIX / HNSW_INDEX_PREFIX / " +
+        "ZERO_NORM_INDEX_PREFIX を読み取れなかった。" +
         "定数名か書き方が変わった——この歯の正規表現を直すこと（歯を消さないこと）。",
     );
   }
-  return { tablePrefix: tableMatch[1], indexPrefix: indexMatch[1] };
+  return {
+    tablePrefix: tableMatch[1],
+    indexPrefix: indexMatch[1],
+    zeroNormIndexPrefix: zeroNormIndexMatch[1],
+  };
 }
 
 /**
@@ -250,6 +291,7 @@ export function extractBulletedIdentifiers(sectionText) {
  *   functionHeadingCount: number | undefined,
  *   embeddingTablePattern: string | undefined,
  *   embeddingIndexPattern: string | undefined,
+ *   embeddingZeroNormIndexPattern: string | undefined,
  *   advisoryLockKeys: string[],
  *   advisoryLockSeedPrefixes: string[],
  * }}
@@ -264,6 +306,9 @@ export function parseReadmeObjectsSection(readmeText) {
   const tableMatch = embeddingSection ? /`(memory_embeddings_[^`]*)`/.exec(embeddingSection) : null;
   const indexMatch = embeddingSection
     ? /`(idx_memory_embeddings_hnsw_[^`]*)`/.exec(embeddingSection)
+    : null;
+  const zeroNormIndexMatch = embeddingSection
+    ? /`(idx_memory_embeddings_zero_norm_[^`]*)`/.exec(embeddingSection)
     : null;
 
   const advisoryLockKeys = advisorySection
@@ -282,6 +327,7 @@ export function parseReadmeObjectsSection(readmeText) {
     functionHeadingCount: extractHeadingCount(readmeText, "関数"),
     embeddingTablePattern: tableMatch ? tableMatch[1] : undefined,
     embeddingIndexPattern: indexMatch ? indexMatch[1] : undefined,
+    embeddingZeroNormIndexPattern: zeroNormIndexMatch ? zeroNormIndexMatch[1] : undefined,
     advisoryLockKeys,
     advisoryLockSeedPrefixes,
   };

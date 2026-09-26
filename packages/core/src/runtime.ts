@@ -3480,11 +3480,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // ADR 0009・docs/memory-model.md §6: 使用報告は抽出器を通らず recall_usages へ直接反映される。
     // 上の doc コメント1: 保存済みの Observation の payload を読み直して使う。
     const storedPayload = UsageObservationPayloadSchema.parse(observation.payload);
-    const { insertedMemoryIds } = await deps.memoryStore.recordUsage(
-      ctx,
-      storedPayload.recallId,
-      storedPayload.usedMemoryIds,
-    );
     const reinforcedAt = clock.now();
     // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
     // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
@@ -3493,6 +3488,34 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // `MemoryStore.reinforceMany` の doc コメント（Issue #840）が、status を絞らない
     // ことの帰結を status ごとに明記している。
     //
+    // [Issue #961](https://github.com/takecchi/mnemora/issues/961): 使用の記録と強化を
+    // 別々にコミットすると、その間で落ちたとき記録だけが残り、同じ `externalId` の再送では
+    // `recordUsage` が `insertedMemoryIds: []` を返すため強化が二度と呼ばれない。
+    // `MemoryStore.recordUsageAndReinforce`（任意メソッド）が在れば、両方を1トランザクション
+    // で撃つ——強化が失敗すれば記録も巻き戻るので、再送がそのまま両方をやり直す。
+    // 無い adapter では下の従来の2段のまま（その窓は残る。ADR 0009 の 2026-09-27 追記）。
+    const recordUsageAndReinforce = deps.memoryStore.recordUsageAndReinforce;
+    if (recordUsageAndReinforce !== undefined) {
+      const { insertedMemoryIds } = await recordUsageAndReinforce.call(
+        deps.memoryStore,
+        ctx,
+        storedPayload.recallId,
+        storedPayload.usedMemoryIds,
+        reinforcedAt,
+        reinforceOpts,
+      );
+      return {
+        observationId: observation.id,
+        memoryIds: insertedMemoryIds,
+        extraction: "skipped",
+        extractionFailure: null,
+      };
+    }
+    const { insertedMemoryIds } = await deps.memoryStore.recordUsage(
+      ctx,
+      storedPayload.recallId,
+      storedPayload.usedMemoryIds,
+    );
     // [Issue #874](https://github.com/takecchi/mnemora/issues/874): `reinforce` を
     // `insertedMemoryIds` の件数だけ直列に呼ぶと、使用報告1件ごとに往復数が線形に
     // 増える（N+1）。`MemoryStore.reinforceMany`（任意メソッド、`archiveDecayed` と

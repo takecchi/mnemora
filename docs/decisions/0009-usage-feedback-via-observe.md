@@ -163,3 +163,42 @@ Issue #870 がこの食い違いを実測し、2つの選択肢（`ObserveMemory
 **残るもの**: Issue #870 が指摘した2つの実害——「再送の成否を `observationId` で確かめられ
 ない」「再送のたびに `observations` が増え続ける」——はこの変更で解消した。副作用
 （`recall_usages`/`reinforce`）は元から冪等だった（上の本文・結果参照）。
+
+## 追記（2026-09-27、[Issue #961](https://github.com/takecchi/mnemora/issues/961)）: 使用の記録と強化を1トランザクションで撃つ任意の口を足した——口を持たない adapter には窓が残る
+
+クローン miku の委譲先が書いた（オーナーではない）。判断はクローン miku。
+
+**何が食い違っていたか**: 上の「再送時の設計」は「最初の呼び出しが途中で落ちていた場合でも、
+保存済みの payload を読み直すことで `recordUsage`/`reinforce` を完了させられる」と書いていた。
+この主張が成り立つのは、`createObservation` の後・`recordUsage` の前で落ちた場合だけだった。
+`recordUsage` がコミットした後・強化の前で落ちると、同じ `externalId` の再送では `recordUsage` が
+`insertedMemoryIds: []` を返すため強化が二度と呼ばれず、**強化は恒久に失われる**。
+`docs/memory-model.md` §11 行4 の「同期（`observe()` と同一トランザクション）」とも食い違っていた。
+
+【実測】PostgreSQL 17 で、強化の UPDATE をトリガーで拒否させて再現した。1回目は reject し、
+`recall_usages` に1行残る。トリガーを外した後の再送は、同じ observation のまま `memoryIds: []` で
+成功扱いになり、`last_reinforced_at` は `NULL` のままだった。
+
+**決めたこと**: `MemoryStore` に任意メソッド `recordUsageAndReinforce?(ctx, recallId, memoryIds, at, opts?)`
+を足した。`recordUsage` と、それが返した `insertedMemoryIds` への強化（`reinforceMany` と同じ結果）を
+1トランザクションで撃つ。強化が失敗すれば使用の記録も巻き戻るので、再送がそのまま両方をやり直す。
+`runtime.ts` の `handleMemoryUsage` は、この口が在ればそれを使う。
+
+- `PostgresMemoryStore`: `recordUsage`/`reinforceMany` の本体を実行者（db か tx）を受け取る形に
+  切り出し、`db.transaction` の中で順に呼ぶ。SQL は1バイトも変えていない。
+- `InMemoryMemoryStore`（testkit）と core のテスト用 Fake: in-memory にトランザクションは無いので、
+  強化が投げたらこの呼び出しで挿入した使用の行を取り消す。
+- 歯は各実装の個別テストに置いた（`*-conformance.ts` には要件を足していない）。
+
+**採らなかった案**: 再送のときに「使用の行はあるのに強化が未適用」を検知して強化し直す案。
+§6 の「実際に挿入が起きたときだけ強化する」という契約の意味を変えるので採らなかった。
+
+**引き受けた負債**: **この口を持たない adapter では、従来の2段（`recordUsage` → 強化）のまま動く。**
+その adapter には「強化の前で落ちると、再送でも強化されない」窓が残る。§11 行4 の
+「同一トランザクション」は、この口を持つ adapter でだけ成り立つ。
+`createObservation` と `recordUsage` の間の窓は、上の「再送時の設計」のとおり再送で閉じる
+（こちらは変えていない）。
+
+**これが覆るとしたら**: 第三者の adapter がこの口を実装しないまま運用され、強化の取りこぼしが
+実害として観測されたとき。そのときは、口を必須にする（破壊的変更）か、再送時の検知（上で
+採らなかった案）を改めて比べることになる。

@@ -60,9 +60,11 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 `cf11cd6` までに載せていた項目・その計上の経緯（`8cf82b1` が偽だった話・PR #747/#844 の
 全数表・PR #811/#813/#815 の保留注記）は、対象の項目とともに下の `## [1.0.1]` 節へ移した。**
 
-**postgres 利用者へ**: `v1.0.1` からマイグレーションは増えていない——最後尾は引き続き
-`0021_memories_claim_key.sql`。**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の
-`## [1.0.1]` 節の migrate 案内も合わせて読むこと**（`0019`〜`0021` の3本が要る）。
+**postgres 利用者へ**: `v1.0.1` から新しいマイグレーションが1本増えている
+（`0022_embedding_zero_norm_index.sql`、Issue #956 / ADR 0343）。⟹ `v1.0.1` から
+この節までの範囲へ上げる場合は `pnpm --filter @mnemora/postgres run migrate` が要る。
+**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の `## [1.0.1]` 節の migrate 案内も
+合わせて読むこと**（`0019`〜`0022` の4本が要る）。
 
 **この節が数えた範囲（`v1.0.1`…`dce0f71`）に破壊的変更は無い。**【実測 2026-09-26】
 `git diff v1.0.1..dce0f71 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
@@ -182,6 +184,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 ### Fixed
 
 - **`tick()` の embed ジョブで、埋め込みの失敗を受けて `embeddingStatus: "failed"` を書く処理そのものが失敗すると、元の例外（なぜ埋め込めなかったか）が失われ、outbox 行の `lastError` には二次的な失敗しか残らなかった**（Issue #962 の前半）——元の例外を `cause` に残し、`lastError` にも両方を載せる。
+- **`createBullmqTickDriver().start()` が `upsertJobScheduler` の失敗で reject した後、もう一度 `start()` を呼ぶと何もせず resolve していた**（Issue #963）——Worker は動くのにスケジュールが無く、tick が発火しないまま「起動できた」ように見えた。登録を先に済ませ、成功した後でだけ Worker を走らせるようにし、失敗した後の `start()` は登録と起動をやり直す。
+- **`observe({kind:'memory_usage'})` が使用の記録（`recall_usages`）の後・強化の前で落ちると、同じ `externalId` で再送しても強化されなかった**（Issue #961）——`MemoryStore` に任意メソッド `recordUsageAndReinforce?` を足し（`PostgresMemoryStore` と testkit の `InMemoryMemoryStore` が実装）、在れば記録と強化を1トランザクションで撃つ。口を持たない adapter は従来の2段のまま（ADR 0009 の追記）。
 - **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、ループ前の読み（`MemoryStore.getMany`、`restoreArchived` では活動時計の読みも）が失敗すると例外をそのまま外へ投げていた**（Issue #964）——doc コメントの「例外はこのメソッドの外へは投げない」どおり、1件目を `failed`、残りを `not_attempted` にして返すようにした（まだ1件も書いていない）。
 - **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、compare-and-swap が破れた後の1回だけの再読（`MemoryStore.get`）が失敗すると、その例外をそのまま外へ投げていた**——doc コメントの「例外はこのメソッドの外へは投げない」に反し、同じ呼び出しで先に確定した要素（`forgotten`/`restored`/`purged`）の outcome まで呼び出し側から見えなくなっていた。再読の失敗も他の「競合以外の例外」と同じく、その要素を `failed`、残りを `not_attempted` にして返すようにした。
 - **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
@@ -444,7 +448,13 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （[Issue #938](https://github.com/takecchi/mnemora/issues/938)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
 - **`@mnemora/testkit` の `InMemoryLexicalStore` の語の一致判定を `PostgresLexicalStore` に揃えた**——非 ASCII だけのクエリは0件になり、本文は ASCII の境界で分割してから小文字化する（[Issue #951](https://github.com/takecchi/mnemora/issues/951)、[ADR 0084](./docs/decisions/0084-lexical-recall-channel.md)）。
+- **`@mnemora/testkit` の `InMemoryVectorStore.search` が、距離が `NaN` の候補（ゼロベクトル、ADR 0040）を `PostgresVectorStore` と同じく常に最後尾へ置くようにした**——以前は並べ替えの比較関数が `NaN` で一貫せず、その候補の位置が挿入順しだいで揺れ、limit 内の集合が Postgres と食い違うことがあった（[Issue #983](https://github.com/takecchi/mnemora/issues/983)）。
 - **`runtime.recall()` の段3.5（連想枠）が拾った `status: "contested"` の記憶が、対向（`contestedWithId`）を伴わない単独のまま `memories` に返り、`omitted` にも何も出ないことがあった**——段3（必須の同伴取得）と同じ規則を段3.5にも適用し、対向が取得できれば1つの Unit として一緒に返し、できなければ Unit ごと落として `unit_assembly_dropped` を積むようにした（`memories`/`omitted` の公開型は無変更）（[Issue #959](https://github.com/takecchi/mnemora/issues/959)、[ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記 2026-09-27）。
+- **`PostgresVectorStore.search()`/`searchMany()` が、pgvector の HNSW（cosine）索引に
+  そもそも入らないゼロベクトルの候補（ADR 0040）を取りこぼしていた。** 埋め込み
+  テーブルに専用の部分索引を足し、別枝として `UNION ALL` で拾うようにした（往復数・
+  通常の検索結果は無変更）（[Issue #956](https://github.com/takecchi/mnemora/issues/956)、
+  [ADR 0343](./docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。
 
 ---
 
