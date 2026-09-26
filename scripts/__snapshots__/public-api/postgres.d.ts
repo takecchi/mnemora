@@ -2198,7 +2198,7 @@ export declare const TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX = "PostgresT
 export declare class TrigramLexicalStoreUnavailableError extends Error {
     readonly reason: TrigramLexicalUnavailableReason;
     readonly detail: string | undefined;
-    constructor(reason: TrigramLexicalUnavailableReason, detail?: string);
+    constructor(reason: TrigramLexicalUnavailableReason, detail?: string, options?: ErrorOptions);
 }
 export declare function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult>;
 export declare const TRIGRAM_NOISE_STOPWORD_PATTERN: string;
