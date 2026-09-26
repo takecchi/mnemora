@@ -961,3 +961,68 @@ test.ts` の同型の(c)（bystander の歯）は「新しい判定が無い状�
   経路は検討していない。
 
 Refs #949
+
+---
+
+## 2026-09-27 追記5（クローン miku の委譲先、Issue #950）
+
+**追記3「範囲外と分かったこと」2番目——`below_threshold` の候補が段3/段3.5 で候補集合に
+戻り、段4の予算で改めて落ちると、`below_threshold` と `budget_dropped` の両方に数えられる
+経路——を、この日付で解消した。**
+
+### 決めたこと
+
+追記3・追記4 が `over_limit(stage:"rescore")` について決めた「1件の Memory は `omitted` の
+中で、最後にそれを落とした段で1回だけ数える」を、`below_threshold` にも当てた。段3/段3.5 で
+戻った候補の「最後の段」は段4なので、`budget_dropped` 側に1回だけ残し、`below_threshold` の
+`count` と `nearMisses` からは取り下げる。取り下げの作法（`count` を減らす・`nearMisses` から
+外す・0件なら Omission ごと外す、`nearMisses` を6件目以降で埋め直さない）は、決定5 と同じで
+ある。
+
+**塞いだこと**: `recall-runtime.ts` の排他性契約ブロックで、`promotedFromBelowThreshold` の
+判定を「`finalMemories` に返ったか」から「`finalMemories` に返ったか、または (a) `companions`
+（段3）に居るか (b) `associationUnits`（段3.5 が席を埋めた候補。#959 以降は段3.5 が取った
+必須の同伴を含む）に居るか」へ広げた。(a)(b) は追記3 が `over_limit(stage:"rescore")` の
+判定に使っている集合と同じものであり、判定の式を共有するために集合の組み立てを
+below_threshold のブロックの前へ移した（`over_limit` 側の判定は変えていない）。
+
+### `nearMisses` の意味について
+
+Issue #950 は、`nearMisses`（memoryId を持つ公開の欄）から「予算で落ちた」記憶が消えることを、
+#940 と別の判断にする理由に挙げていた。決定5 が決めていたのは「昇格して返ったもの」の
+取り下げだけで、「戻ったが返らなかったもの」は決めていなかったからである。この追記は次の
+理由で取り下げる側を採った。
+
+- `BelowThresholdOmission` の doc が約束しているのは「`memories` に返った memoryId を
+  含まない」ことと、「`nearMisses` は段2の閾値未満の候補の上位5件で、`count` の全件の
+  サンプルではない」ことだけである。予算で落ちた記憶を `nearMisses` に残すことは、
+  どこも約束していない。
+- 取り下げなければ、同じ memoryId が `below_threshold.nearMisses` と `budget_dropped` の
+  両方に数えられ、追記3・追記4 の原則に反したままになる。
+- ⟹ 取り下げ後の `nearMisses` は「最後に閾値で落ちた」記憶の上位だけになる。予算で落ちた
+  記憶は、個体としてはどの Omission にも現れず、`budget_dropped` の件数にだけ残る
+  （`budget_dropped` はもともと memoryId を持たない）。
+
+### 範囲外と分かったこと（実測、直していない）
+
+- **below_threshold の候補が段3.5 の候補プールに入ったが席に着けず、
+  `over_limit(stage:"association")` にも数えられる**。追記4 が `over_limit(stage:"rescore")`
+  について塞いだ経路と同じ形が、below_threshold 側に残っている。fake ストアの一時テスト
+  （commit していない）で、`maxCount: 1` の連想枠で席を競り負けた below_threshold の候補が
+  `below_threshold`（`nearMisses` にも載る）と `over_limit(stage:"association")` の両方に
+  数えられることを確かめた。この追記では直していない（Issue #984 に切り出した）。
+
+### 測ったこと
+
+- 【実測】歯 `packages/core/src/__tests__/recall-below-threshold-budget-promotion.test.ts`
+  （fake ストア、3本）: 修正前に (a)（段3の同伴）と (b)（段3.5 の連想）が赤。(c)（どの経路でも
+  戻っていない候補は残る）も修正前は赤——(b) と同じ二重計上で `count` が 2 になるため。
+  修正後は3本とも緑。
+- 【実測】変異試験: 判定を「すべて取り下げる」にすると (c) だけが赤、段3の同伴（(a) の条件）を
+  判定から外すと (a) だけが赤。どちらも戻すと緑。
+- 【実測】`packages/core` の recall・omission まわりの既存の歯 31 ファイル（484本）を
+  ファイル名指定で実行し、すべて緑。`pnpm api:check` の差分は0。
+- **確かめていないこと**: 本物の Postgres での再現（この判定は `packages/core` の中だけで
+  完結しており、adapter に依存しない）。`budget` を渡すベンチの基準値への影響は CI で見る。
+
+Refs #950
