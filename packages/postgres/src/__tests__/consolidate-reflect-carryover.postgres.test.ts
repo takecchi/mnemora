@@ -9,7 +9,10 @@ import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { embeddingSpaceTableName } from "../embedding-space-table.js";
-import { PostgresTrigramLexicalStore } from "../trigram-lexical-store.js";
+import {
+  PostgresTrigramLexicalStore,
+  probeTrigramLexicalSupport,
+} from "../trigram-lexical-store.js";
 import {
   closeTestClient,
   getTestClient,
@@ -347,6 +350,12 @@ describe("runtime.consolidate/reflect — 付随データの引き継ぎ（本�
   it("consolidate: 新しい行の content は lexical（trigram）チャンネルで直接引ける。元（superseded）は引けない", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
+    const probe = await probeTrigramLexicalSupport(db);
+    if (!probe.ok) {
+      // ADR 0103: この環境では前提（UTF8 等）が満たせない——`trigram-lexical-store.postgres.test.ts`
+      // が別途この否定を検査済みであり、ここでは重ねて検査しない。
+      return;
+    }
     const memoryStore = new PostgresMemoryStore(db);
     const ctx: Ctx = { tenantId: TENANT };
     const { a, b } = await seedTwoActiveMemories(memoryStore, ctx);
