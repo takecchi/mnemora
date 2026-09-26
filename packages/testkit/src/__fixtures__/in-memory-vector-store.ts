@@ -129,7 +129,7 @@ export class InMemoryVectorStore implements VectorStore {
   }
 
   async search(
-    _ctx: Ctx,
+    ctx: Ctx,
     space: EmbeddingSpaceId,
     query: number[],
     opts: { limit: number; filter: VectorFilter },
@@ -155,10 +155,15 @@ export class InMemoryVectorStore implements VectorStore {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
     // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。
-    // テナント分離は `opts.filter.tenantId` の一致だけで行う——これが
-    // `VectorStore.search` の実際の契約（docs/architecture.md §5.2: filter は
-    // 索引で表現できる形に限る）であり、ctx.tenantId で二重に絞ってしまうと
-    // 「filter.tenantId を無視しても壊れない」という誤ったプレースホルダになる。
+    // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の**両方**の一致で行う（AND）。
+    // ⚠ 以前は「`filter.tenantId` の一致だけで行う。`ctx.tenantId` で二重に絞ると
+    // 『filter.tenantId を無視しても壊れない』誤ったプレースホルダになる」と書いて、
+    // 意図して `ctx` を見ていなかった。Issue #1050 で、隔離の境界は `ctx.tenantId` だと
+    // 決め直した（ADR 0007。`VectorStore.getVectors` の doc も同じ境界）——`filter.tenantId`
+    // だけだと、2つが食い違ったとき `filter` 側のテナントの行が返る。`filter.tenantId` も
+    // 引き続き見るので、`filter` を無視する誤りはこのプレースホルダでも隠れない。
+    // 食い違えば0件（例外は投げない。`PostgresVectorStore` と core の `FakeVectorStore` も同じ）。
+    // 歯は `in-memory-search-ctx-tenant-boundary.test.ts`。
     const prefix = `${space.provider}:${space.model}:${space.dimensions}:`;
     const memoryCtx: Ctx = { tenantId: opts.filter.tenantId };
     const hits: (VectorHit & { recordedAt: Date })[] = [];
@@ -166,7 +171,7 @@ export class InMemoryVectorStore implements VectorStore {
       if (!key.startsWith(prefix)) {
         continue;
       }
-      if (entry.tenantId !== opts.filter.tenantId) {
+      if (entry.tenantId !== opts.filter.tenantId || entry.tenantId !== ctx.tenantId) {
         continue;
       }
       // `status` / `subjectId` / `decayFloorAt` は Memory の属性であり、`memories`

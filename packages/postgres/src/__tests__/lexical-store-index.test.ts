@@ -117,6 +117,8 @@ async function explainSearch(): Promise<string> {
   const select = buildLexicalSearchSelect("obsidian shards", {
     limit: 50,
     filter: { tenantId: ctx.tenantId, status: ["active", "contested"] },
+    // `PostgresLexicalStore.search` は `ctx.tenantId` も渡す（Issue #1050）——同じ形で見る。
+    ctxTenantId: ctx.tenantId,
   });
   const result = await db.execute(sql`EXPLAIN (FORMAT TEXT) ${select}`);
   return planText(result.rows as unknown as { "QUERY PLAN": string }[]);

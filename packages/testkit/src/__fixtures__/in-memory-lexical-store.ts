@@ -250,10 +250,13 @@ export class InMemoryLexicalStore implements LexicalStore {
       return [];
     }
 
-    // テナント分離は `opts.filter.tenantId` の一致だけで行う——`InMemoryVectorStore.search`
-    // と同じ理由（docs/architecture.md §5.2: filter は索引で表現できる形に限る。
-    // `ctx.tenantId` で二重に絞ると「filter.tenantId を無視しても壊れない」誤ったプレースホルダになる）。
-    const memories = this.memoryStore.listByTenant({ tenantId: opts.filter.tenantId });
+    // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の**両方**の一致で行う（AND）。
+    // 以前は `filter.tenantId` だけで絞っていた——理由と、Issue #1050 で決め直した経緯は
+    // `InMemoryVectorStore.search` の同じ箇所のコメントを見ること。食い違えば0件（例外は投げない）。
+    const memories =
+      ctx.tenantId === opts.filter.tenantId
+        ? this.memoryStore.listByTenant({ tenantId: opts.filter.tenantId })
+        : [];
 
     const hits: (LexicalHit & { recordedAt: Date })[] = [];
     for (const memory of memories) {
