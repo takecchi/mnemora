@@ -67,6 +67,30 @@ export function createPostgresClient(
   return { pool, db };
 }
 
+/**
+ * `client` ごとに、進行中/完了済みの `closePostgresClient` の `Promise` を覚える
+ * （Issue #935）。`PostgresClient` という公開の型そのものには手を触れず、
+ * `WeakMap` の外側から冪等性を持たせる。
+ */
+const closingPromises = new WeakMap<PostgresClient, Promise<void>>();
+
+/**
+ * `client.pool.end()` を呼ぶ。**2回目以降の呼び出しは冪等**——`node-postgres`
+ * （`pg`）の `Pool.end()` は、既に `end()` 済みの `Pool` にもう一度呼ぶと
+ * `Called end on pool more than once` で reject するが、この関数は同じ `client`
+ * に対して呼ばれるたびに、その `client` の最初の呼び出しが作った `Promise` を
+ * 使い回す——**2回目以降は `pool.end()` を呼び直さず、何もせずに resolve する**
+ * （並行に2回呼ばれた場合も、どちらも同じ `Promise` を待つだけで reject しない）。
+ *
+ * `close()` 後にクエリを投げたときの振る舞い（`pg` 側がどう reject するか）は
+ * 変えていない——冪等にしたのは「閉じる」という操作そのものだけである。
+ */
 export async function closePostgresClient(client: PostgresClient): Promise<void> {
-  await client.pool.end();
+  const existing = closingPromises.get(client);
+  if (existing !== undefined) {
+    return existing;
+  }
+  const closing = client.pool.end();
+  closingPromises.set(client, closing);
+  return closing;
 }

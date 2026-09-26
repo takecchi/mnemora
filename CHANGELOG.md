@@ -164,6 +164,13 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
+- **語彙検索（`PostgresLexicalStore`/`PostgresTrigramLexicalStore`、`InMemoryLexicalStore`、
+  `FakeLexicalStore`）で使うクエリの、異なる語の数（`LEXICAL_QUERY_MAX_DISTINCT_WORDS` = 32）・
+  1語あたりの文字数（`LEXICAL_QUERY_MAX_WORD_CHARS` = 64、trigram の日本語側は
+  `TRIGRAM_JAPANESE_QUERY_MAX_CHARS` = 100）・クエリ全体の文字数
+  （`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600）に上限を設けた**
+  （[Issue #878](https://github.com/takecchi/mnemora/issues/878)、
+  [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) 追記節）。
 - **`VectorStore` に任意メソッド `searchMany?` を足した**——連想枠（段3.5）がアンカーごとに
   `search()` を1回ずつ呼んでいた往復（`anchorCount` に比例して増えていた）を、実装した
   adapter では1回の往復に束ねられるようにする。`PostgresVectorStore` に実装済み。
@@ -409,6 +416,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
   `MemoryStore.createMemory` の doc コメントに記録した
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
+- **`@mnemora/postgres` の `closePostgresClient` を冪等にした**——2回目以降の呼び出しは `Called end on pool more than once` で reject せず、何もせずに resolve する（[Issue #935](https://github.com/takecchi/mnemora/issues/935)）。
+- **`runtime.recall()` の段2（`compareScoredCandidates`）と段3.5（連想）の2つの並べ替え
+  （`associationHits.sort`・`rankedCandidates.sort`）が、候補の `total`/`similarity`/
+  `rankKey` のいずれかが `NaN`（ADR 0040——ゼロベクトルの cosine 距離に由来）になると、
+  その `NaN` な候補とは無関係な、他の有限な候補どうしの相対順序まで崩していた。**
+  `b.field - a.field` を比較値にする素朴な降順比較は、`NaN` が混ざると比較関数の一貫性
+  （推移律）を満たさなくなるため。`NaN` を必ず最後尾へ送る比較 helper に揃え、有限値
+  どうしの大小関係・同点時の安定ソートの性質は変えていない（公開 API 無変更）
+  （[Issue #938](https://github.com/takecchi/mnemora/issues/938)、
+  [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
 
 ---
 
