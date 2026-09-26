@@ -22,6 +22,32 @@ import {
 } from "./schema-namespace.js";
 
 /**
+ * `SET LOCAL search_path TO ...` として発行する直前だけ、`searchPathFor` の返り値
+ * （コンマ区切りのスキーマ名の並び、引用符なし）を二重引用符で囲み直す。
+ *
+ * **`searchPathFor` 自身は変えない。** `schema-namespace.ts` の doc が明記するとおり、
+ * `searchPathFor` は `client.ts` の libpq 起動パラメータ（`-c search_path=...`）でも
+ * 使われており、あちらは SQL の構文解析を経ないため引用符を持ち込まない設計が正しい
+ * （`assertSafeSchemaName` を通した名前——`^[a-z_][a-z0-9_]*$`——である前提の上で、
+ * 素の値のまま渡してよい）。
+ *
+ * **ここ（`runMigrations` が発行する `SET LOCAL search_path TO ...`）は事情が違う**——
+ * この文字列は通常の SQL 文としてパースされるため、PostgreSQL の完全予約語
+ * （`user`/`select`/`table` 等、文字種の検査だけでは弾けないすべて小文字の識別子）が
+ * 引用符無しで渡ると構文エラーになる（`assertSafeSchemaName` は文字種と長さしか見ず、
+ * 予約語かどうかは判定しない設計のまま——`dedicated-schema.postgres.test.ts` 測定8が
+ * 実測）。分割・引用符化・再結合だけで安全なのは、`schema`/`extensionSchema` が
+ * 呼び出し側で既に `assertSafeSchemaName` を通っており、二重引用符・コンマ・空白の
+ * いずれも含み得ないためである。
+ */
+function quotedSearchPathFor(schema: string, extensionSchema: string): string {
+  return searchPathFor(schema, extensionSchema)
+    .split(",")
+    .map((part) => `"${part}"`)
+    .join(",");
+}
+
+/**
  * `packages/postgres` の唯一のマイグレーション実行口（ADR 0001・docs/memory-model.md §10「規約」）。
  *
  * ベクトル索引を含むスキーマ全体の DDL は `migrations/*.sql` に手書きで置き、
@@ -702,7 +728,7 @@ export async function runMigrations(
           await client.query("BEGIN");
           if (schema !== undefined) {
             await client.query(
-              `SET LOCAL search_path TO ${searchPathFor(schema, extensionSchema!)}`,
+              `SET LOCAL search_path TO ${quotedSearchPathFor(schema, extensionSchema!)}`,
             );
           }
           await client.query(sql);

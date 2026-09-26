@@ -363,5 +363,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0336](./0336-embedding-input-opt-in-hook.md) | `RuntimeDeps.embeddingInput` — 上限超過で `failed` になった Memory を、既定を変えずに回復できる opt-in フック（Issue #753、#449 の残り） | **提案 (2026-09)** |
 | [0337](./0337-recall-association-default-on.md) | 連想枠（`RecallQuery.association`）の既定を on にする（Issue #337） | 採用 (2026-09) |
 | [0339](./0339-checked-out-client-error-listener.md) | `runMigrations`/`registerEmbeddingSpace` が `pool.connect()` で借り切るクライアントに、空の `error` リスナーを付ける | 採用 (2026-09) |
+| [0341](./0341-quote-search-path-in-set-local.md) | `runMigrations` の `SET LOCAL search_path TO ...` で、スキーマ名を二重引用符で囲む | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

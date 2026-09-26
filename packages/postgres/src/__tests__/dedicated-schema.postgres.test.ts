@@ -62,6 +62,7 @@ const DB_CLIENT = "mnemora_ds_client";
 const DB_DEFAULT = "mnemora_ds_default";
 const DB_VECTOR_STORE = "mnemora_ds_vector_store";
 const DB_KIND_CONSTRAINT_SCOPE = "mnemora_ds_kind_constraint_scope";
+const DB_RESERVED_WORD_SCHEMA = "mnemora_ds_reserved_word_schema";
 
 const VECTOR_SPACE: EmbeddingSpaceId = {
   provider: "test",
@@ -424,6 +425,47 @@ describe("専用スキーマ（feat/dedicated-schema）", () => {
       }
     },
   );
+
+  // 🔴 安全監査（miku 委譲・オーナー本人の判断ではない）: `assertSafeSchemaName`
+  // （`schema-namespace.ts`）は文字種（`^[a-z_][a-z0-9_]*$`）と長さしか見ないため、
+  // PostgreSQL の完全予約語（`user`/`select`/`table` 等、すべて小文字の英字だけで
+  // 構成される）もそのまま通す。`client.ts` の起動パラメータ（`-c search_path=...`）は
+  // SQL の構文解析を経ないため予約語でも問題なく動くが、`migrate.ts` の
+  // `SET LOCAL search_path TO ...` は通常の SQL 文として解析されるため、
+  // 予約語を引用符無しで埋め込むと構文エラーになる。`user` は実在しうるスキーマ名
+  // （テナントのアカウント種別を反映した命名等）であり、悪意の無い入力である。
+  it("測定8: 予約語スキーマ名（`user`）でも runMigrations / createPostgresClient / 検索が壊れない", async () => {
+    const pool = await createBlankDatabase(DB_RESERVED_WORD_SCHEMA);
+
+    const result = await runMigrations(pool, DEFAULT_MIGRATIONS_DIR, { schema: "user" });
+    expect(result.applied).toEqual(listMigrationFiles(DEFAULT_MIGRATIONS_DIR));
+
+    const memoriesOid = await regclassOid(pool, qualifiedName("user", "memories"));
+    expect(memoriesOid, '"user".memories が存在すること').not.toBeNull();
+
+    const client = createPostgresClient(connectionStringFor(DB_RESERVED_WORD_SCHEMA), {
+      schema: "user",
+    });
+    try {
+      const store = new PostgresMemoryStore(client.db);
+      const ctx: Ctx = { tenantId: "tenant-reserved-word-schema" };
+
+      const observation = await store.createObservation(ctx, buildNewObservationFixture());
+      const memory = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ sourceObservationId: observation.id }),
+      );
+      expect(memory.id).toBeTruthy();
+
+      const inSchema = await pool.query<{ n: string }>(
+        `SELECT count(*)::text AS n FROM "user".memories WHERE tenant_id = $1`,
+        [ctx.tenantId],
+      );
+      expect(inSchema.rows[0]!.n, '"user".memories に行が入っていること').toBe("1");
+    } finally {
+      await closePostgresClient(client);
+    }
+  });
 
   // 🔴 探針からの移植ではない（測定1〜7と違い、この歯は元の
   // schema-namespace-probe.postgres.test.ts に対応物を持たない）。

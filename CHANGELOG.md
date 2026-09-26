@@ -205,6 +205,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   全0ベクトルに置き換え、Postgres を Fake の実際の挙動に揃えた（新しい例外は投げない。
   次元数が0以外だが空間の次元数と食い違う `vector` は今回の修正範囲外・未検証）
   （[Issue #857](https://github.com/takecchi/mnemora/issues/857)）。
+- **`runMigrations`（専用スキーマ、feat/dedicated-schema・ADR 0057）が、PostgreSQL の
+  完全予約語と一致するスキーマ名（`user` 等——`assertSafeSchemaName` は文字種と長さしか
+  見ないため、これも通ってしまう）で構文エラーになっていた。** `SET LOCAL search_path
+  TO ...` にスキーマ名を引用符無しで埋め込んでいたのが原因——`CREATE SCHEMA
+  IF NOT EXISTS "<schema>"` 側は既に引用符を付けており無事だった。該当箇所だけ
+  スキーマ名を二重引用符で囲むようにした（新しい例外は投げない。予約語ではない
+  スキーマ名の挙動は無変更、`searchPathFor` 自体の公開契約も無変更）
+  （[ADR 0341](./docs/decisions/0341-quote-search-path-in-set-local.md)）。
 - **`@mnemora/testkit` の `InMemoryLexicalStore.search`（擬似 `LexicalStore`）で、
   `coverage`/`rank` が完全一致したヒットの順序を、挿入順から Postgres と同じ4段
   tie-break（`coverage` → `rank` → `recordedAt` DESC → `memoryId` 昇順）に揃えた。**
