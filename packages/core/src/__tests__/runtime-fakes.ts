@@ -2470,12 +2470,12 @@ export class FakeEventStore implements EventStore {
 }
 
 // `getEventRetention`/`setEventRetention` は `TenantSettingsStore` interface が必須にした
-// ため（ADR 0050）、型を満たすためだけに足した最小実装。このファイル以外の既存テストは
-// `getDefaultHalfLifeHours` しか使わず、これら2メソッドを呼ぶ既存テストは無い——
-// `packages/testkit` の `InMemoryTenantSettingsStore`（適合スイートの対象）とは異なり、
-// `FakeTenantSettingsStore` は適合スイートの対象外（ADR 0047 が明記した「core 専用の
-// Fake は testkit の適合テストが届かない」構造と同じ）ため、ここに置いた実装を
-// 独立に検査する歯は無い。
+// ため（ADR 0050）、型を満たすためだけに足した最小実装。⚠ 当初は「これら2メソッドを呼ぶ
+// 既存テストは無い」と書いていたが、その後 `event-retention-purge.test.ts`（ADR 0115）が
+// 呼ぶようになった。`packages/testkit` の `InMemoryTenantSettingsStore`（適合スイートの対象）
+// とは異なり、`FakeTenantSettingsStore` は適合スイートの対象外（ADR 0047 が明記した
+// 「core 専用の Fake は testkit の適合テストが届かない」構造と同じ）。テナントごとに
+// 持つことだけは `fake-tenant-settings-event-retention-per-tenant.test.ts` が検査する。
 //
 // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13:
 // `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/`getActivitySeq` を実装する。
@@ -2483,7 +2483,9 @@ export class FakeEventStore implements EventStore {
 // 実装が要る**——省略した adapter がどう振る舞うかは `readDecayClock` 等の
 // フォールバック自身の歯（`tenant-settings-store.test.ts` 等）が別に持つ。
 export class FakeTenantSettingsStore implements TenantSettingsStore {
-  private eventRetention: EventRetention = { kind: "unset" };
+  // ADR 0007 / ADR 0050: テナントごとに持つ（以前は1つだけ持ち、`ctx` を読まずに共有していた。
+  // 歯は `fake-tenant-settings-event-retention-per-tenant.test.ts`）。
+  private eventRetentionByTenant = new Map<string, EventRetention>();
   private decayClockByTenant = new Map<string, DecayClock>();
   private halfLifeRecallsByTenant = new Map<string, number>();
   /**
@@ -2510,15 +2512,15 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
     return this.halfLifeHours;
   }
 
-  async getEventRetention(_ctx: Ctx): Promise<EventRetention> {
-    return this.eventRetention;
+  async getEventRetention(ctx: Ctx): Promise<EventRetention> {
+    return this.eventRetentionByTenant.get(ctx.tenantId) ?? { kind: "unset" };
   }
 
-  async setEventRetention(_ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+  async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
     if (retention.kind === "days") {
       assertValidEventRetentionDays(retention.days);
     }
-    this.eventRetention = retention;
+    this.eventRetentionByTenant.set(ctx.tenantId, retention);
   }
 
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
