@@ -26,5 +26,10 @@ export function redactDatabaseUrl(url: string): string {
   if (parsed.password !== "") {
     parsed.password = "***";
   }
+  // libpq の接続 URI はクエリの `password` パラメータでもパスワードを受け付ける
+  // （`postgresql://user@host/db?password=...`）。`set` は同名の重複もまとめて置き換える。
+  if (parsed.searchParams.has("password")) {
+    parsed.searchParams.set("password", "***");
+  }
   return parsed.toString();
 }
