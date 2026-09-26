@@ -366,5 +366,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0341](./0341-quote-search-path-in-set-local.md) | `runMigrations` の `SET LOCAL search_path TO ...` で、スキーマ名を二重引用符で囲む | 採用 (2026-09) |
 | [0342](./0342-recalled-memory-basis-lost.md) | `RecalledMemory` に任意欄 `basisLost?: true` を足す —— `inferred` の根拠が失われたことを、削除せずに印として返す（Issue #883） | **提案 (2026-09)** |
 | [0343](./0343-vector-store-search-returns-zero-norm-candidates.md) | `PostgresVectorStore.search()`/`searchMany()` が、HNSW 索引に入らないゼロベクトルの候補を部分索引 + `UNION ALL` で拾う（Issue #956） | 採用 (2026-09) |
+| [0344](./0344-upgrade-from-released-version-fixture.md) | 公開済みの版で作った DB の fixture を置き、今の migration で上げる経路を必須ジョブで検査する（Issue #1038） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
