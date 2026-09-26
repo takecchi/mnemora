@@ -398,3 +398,18 @@ memory とベクトルの対応が1つずれる、という実害はこの2経�
 反映先: `packages/core/src/interfaces/embedding-provider.ts`、
 `packages/openai/src/embedding-provider.ts`、`docs/architecture.md` §5.5、
 `packages/openai/README.md`、`packages/testkit/src/embedding-provider-conformance.ts`。
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: 返ったベクトルが足りないときの embed ジョブの扱いを明記した
+
+`runtime.ts` の recall 以外の経路に変異試験を当てたところ（PR #1045）、`processEmbedJob` の「provider がベクトルを返さなければ失敗にする」検査（`if (!vector)`）を外す変異が、既存の歯をすべてすり抜けた。一時テストで実測すると、次の違いがあった。
+
+- 検査が在るとき（いまの実装）: provider が空の配列を返すと、embed のジョブは失敗し、`embeddingStatus` は `'failed'` になる。
+- 検査を外したとき: core の Fake ではジョブが成功し、ベクトルが無いまま `'ready'` になった（Postgres では `upsert` が落ちる）。
+
+この振る舞いを約束として書いた文書は無かった。挙動は変えず、いまの振る舞いを契約として明記した。
+
+- **契約**（`packages/core/src/interfaces/embedding-provider.ts` の doc に追記）: `Runtime.tick` の embed ジョブは、`embed` が1件もベクトルを返さなければ、そのジョブを失敗にし、`embeddingStatus` を `'failed'` にする。ベクトルを書かないまま `'ready'` にしない。embed ジョブは `embed` に常に1件だけ渡すので、「渡した件数より少ない」はこのジョブでは「空」と同じである。
+- **歯**: `packages/core/src/__tests__/embed-job-missing-vector.test.ts`（Fake）。検査を外す変異で赤、戻して緑を確かめた。
+- **適合テスト一式（`*-conformance.ts`）には足していない**（Issue #809 の方針）。これは provider ではなく runtime の側の約束である。

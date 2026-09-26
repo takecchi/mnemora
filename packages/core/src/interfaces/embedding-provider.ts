@@ -32,6 +32,13 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * ある。応答の件数が `texts` と食い違った場合の `OpenAIEmbeddingProvider` の結果は
  * 未定義である。`packages/core` の本番経路（`runtime.ts`/`recall-runtime.ts`）は
  * どちらも `embed` に常に1件ずつ渡すため、この食い違いは踏まれていない。
+ *
+ * ⚠ **2026-09-27 追記（ADR 0305 の追記）: 返ったベクトルが渡した件数より少ない（空を含む）
+ * ときの `packages/core` 側の扱い。**`Runtime.tick` の embed ジョブは、`embed` が1件も
+ * ベクトルを返さなければ、そのジョブを失敗にし、Memory の `embeddingStatus` を `'failed'`
+ * にする——**ベクトルを書かないまま `'ready'` にしない。**embed ジョブは `embed` に常に
+ * 1件だけ渡すので、「渡した件数より少ない」はこのジョブでは「空」と同じである
+ * （`runtime.ts` の `processEmbedJob`。歯は `packages/core/src/__tests__/embed-job-missing-vector.test.ts`）。
  */
 export interface EmbeddingProvider {
   readonly space: EmbeddingSpaceId;

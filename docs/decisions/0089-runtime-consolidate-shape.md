@@ -540,3 +540,18 @@ CAS の破れや部分的な失敗という稀なケースで読み違えうる�
 反映先: [ADR 0152](./0152-consolidate-seed-neighborhood.md) の追記（同じ日付、負債5の実測）、
 `docs/memory-model.md`、`packages/core/src/runtime.ts` の `consolidate`/`ConsolidateTarget`
 の doc コメント。
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: 統合の材料は重複を除いて数える
+
+`runtime.ts` の recall 以外の経路に変異試験を当てたところ（PR #1045）、`consolidate` の eligible を作るときの重複除去（`seenEligible`）を外す変異が、既存の歯をすべてすり抜けた。一時テストで実測すると、次の違いがあった。
+
+- 重複除去が在るとき（いまの実装）: `{ memoryIds: [a, a] }` は `nothing_to_consolidate`/`single_eligible_source` で終わり、LLM を呼ばない。
+- 重複除去を外したとき: LLM を呼び、同じ Memory を自分自身と統合した。
+
+`reflect` の doc の手順3は「eligible（重複除去）」と書いているが、`consolidate` の doc には対応する記述が無かった。挙動は変えず、いまの振る舞いを契約として明記した。
+
+- **契約**（`runtime.ts` の `Runtime.consolidate` の doc の手順3に追記）: eligible は重複を除いて数える。`{ memoryIds: [a, a] }` は eligible 1件として `single_eligible_source` になり、同じ Memory を自分自身と統合しない。`sources` は入力と同じ長さ（重複も保つ）のまま。
+- **歯**: `packages/core/src/__tests__/consolidate-duplicate-ids.test.ts`（Fake）。重複除去を外す変異で赤、戻して緑を確かめた。
+- **適合テスト一式（`*-conformance.ts`）には足していない**（Issue #809 の方針）。
