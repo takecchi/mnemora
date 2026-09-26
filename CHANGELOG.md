@@ -99,7 +99,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （フォールバック無し）として3実装（`@mnemora/postgres`/`@mnemora/testkit`/
   `@mnemora/core` の Fake）に揃えた（[Issue #825](https://github.com/takecchi/mnemora/issues/825) /
   [ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 /
-  [ADR 0087](./docs/decisions/0087-runtime-forget-shape.md) 追記、PR #TBD）。
+  [ADR 0087](./docs/decisions/0087-runtime-forget-shape.md) 追記、PR #914）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
