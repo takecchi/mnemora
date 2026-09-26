@@ -22,10 +22,11 @@ import { describe, expect, it } from "vitest";
  *
  * `packages/core/src/runtime.ts` を読み、`export interface Runtime {` の行から
  * 列0の `}` までを切り出し、その範囲から行頭2スペースのメソッド宣言
- * （`/^ {2}([A-Za-z][A-Za-z0-9_]*)\s*[(<]/`）を正規表現で拾う。これは TypeScript の
- * 構文を機械的に数え直しているだけであり、`docs/vision.md`「中核を守る3つの層」のような
- * 散文をパースしているわけではない——ADR 0199 が「表現が変わると歯自体が壊れる」として
- * 落とした形（節を切り出してプローズをパースする）とは違う。
+ * （`/^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/`——`?` は TypeScript の任意メソッド構文
+ * `name?(`/`name?<` も拾うための追加、2026-09-26、Issue #926）を正規表現で拾う。これは
+ * TypeScript の構文を機械的に数え直しているだけであり、`docs/vision.md`「中核を守る
+ * 3つの層」のような散文をパースしているわけではない——ADR 0199 が「表現が変わると歯自体が
+ * 壊れる」として落とした形（節を切り出してプローズをパースする）とは違う。
  *
  * ## literal で持ってよい唯一のもの: 中核5動詞
  *
@@ -114,20 +115,36 @@ function extractRuntimeInterfaceBlock() {
 }
 
 /**
- * `export interface Runtime` のブロックから、行頭2スペースのメソッド宣言の名前を
+ * 行頭2スペースのメソッド宣言（必須・任意どちらも）の名前を、渡されたブロック文字列から
  * 機械的に抽出する。⭐ これはコードのパースであってプローズのパースではない。
  *
+ * ⚠ **2026-09-26 追記（Issue #926、ADR 0244「⛔ この歯が捕まえないもの」の4つ目）**:
+ * 正規表現は名前の直後に任意の `?`（TypeScript の任意メソッド構文 `name?(` / `name?<`）を
+ * 許す。`?` を許さない版では `resolveOrphanedContested?(...)`（Issue #825、`7ab8948`）が
+ * 抽出結果から丸ごと落ち、下の「本体」の `it` がこの名前を3文書に対して一度も検査しない
+ * まま歯全体が緑になっていた——変異試験で実際に確認した（このファイルの
+ * 「陽性対照（Issue #926）」の `it` が、その回帰を固定する）。
+ *
+ * @param {string} block
  * @returns {string[]}
  */
-function extractRuntimeMethodNames() {
-  const block = extractRuntimeInterfaceBlock();
-  const methodRe = /^ {2}([A-Za-z][A-Za-z0-9_]*)\s*[(<]/gm;
+function extractMethodNamesFromBlock(block) {
+  const methodRe = /^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/gm;
   const names = [];
   let match;
   while ((match = methodRe.exec(block)) !== null) {
     names.push(match[1]);
   }
   return names;
+}
+
+/**
+ * `export interface Runtime` のブロックから、メソッド名の集合を抽出する。
+ *
+ * @returns {string[]}
+ */
+function extractRuntimeMethodNames() {
+  return extractMethodNamesFromBlock(extractRuntimeInterfaceBlock());
 }
 
 describe("Runtime のメソッドが3文書（README/vision/architecture）で名指しされている（Issue #518、ADR 0244）", () => {
@@ -156,6 +173,23 @@ describe("Runtime のメソッドが3文書（README/vision/architecture）で�
     // ⛔ 総数をハードコードしない——main が動けば変わる側である
     // （AGENTS.md「⚠ 数を、道具と生成物に焼き込まない」）。下限だけを空回り防止として固定する。
     expect(names.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it("陽性対照（Issue #926、ADR 0244「⛔ この歯が捕まえないもの」の4つ目）: 任意メソッド（`name?(`/`name?<`）も抽出する", () => {
+    // fixture: 実在の Runtime を経由せず、抽出そのものが `?` を通すことを固定で示す。
+    // ⚠ この it が赤くなった場合、`resolveOrphanedContested?(...)`（Issue #825）のような
+    // 任意メソッドが、下の「本体」の it の検査対象（target）から丸ごと落ちる——
+    // 3文書での名指しが一度も検査されないまま歯全体が緑になる、という取りこぼしが
+    // 再発している。
+    const block = [
+      "export interface Sample {",
+      "  required(ctx: Ctx): Promise<void>;",
+      "  optional?(ctx: Ctx): Promise<void>;",
+      "  optionalGeneric?<T>(ctx: Ctx, input: T): Promise<T>;",
+      "}",
+    ].join("\n");
+
+    expect(extractMethodNamesFromBlock(block)).toEqual(["required", "optional", "optionalGeneric"]);
   });
 
   it("Runtime のメソッド（中核5動詞を除く）は、README / vision / architecture の3文書すべてで名指しされている", () => {
