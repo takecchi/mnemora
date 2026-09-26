@@ -1432,6 +1432,24 @@ export const StageTraceSchema = z.object({
  */
 export interface RecallQuery {
   text?: string;
+  /**
+   * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と
+   * 一致することは、この型では検証しない——**一致させるのは呼び出し側の責任**である。
+   *
+   * **長さが違うときの結果は未定義**（Issue #867）。【実測 2026-09、`main` f68dd8a】
+   * `packages/postgres` の `VectorStore.search` は pgvector の DB エラー
+   * （`DrizzleQueryError`、"different vector dimensions"）で未捕捉のまま落ちる。
+   * `packages/testkit`/`packages/core` の Fake（`InMemoryVectorStore` 等）は足りない側を
+   * `0` で埋めて `cosineDistance` の計算を続け、意味の無い点数を普通のヒットとして返す
+   * （`omitted` にも何も残らない）。**この2つの実装は互いに揃っていない**——どちらを
+   * 正とするかは未決である。
+   *
+   * 境界で拒む案（型付き例外）・比較不能として扱う案（`score_not_comparable` へ倒す）は
+   * どちらも Fake の挙動を変えることになり、それが外部 adapter 実装者にとって
+   * 破壊的変更になりうるかという未解決の論点
+   * （[Issue #809](https://github.com/takecchi/mnemora/issues/809)）に属する。⟹
+   * **この「未定義」という記述は、#809 の回答が出るまでの暫定であり、変わりうる。**
+   */
   vector?: number[];
   tags?: string[];
   /**

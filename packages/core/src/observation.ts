@@ -19,6 +19,16 @@ export interface Observation {
   externalId?: string | null;
   kind: string;
   payload: unknown;
+  /**
+   * その出来事・事実がいつのものか（`docs/memory-model.md` §3「三つ（四つ）の時計」）。
+   *
+   * **呼び出し側の申告をそのまま受け入れる。未来の値も拒まない**（ADR 0037 決定3、
+   * ADR 0036）——`occurredAt` の定義上「来月、京都へ出張する」のような予定はふつうに
+   * 未来になるため。**未来の `occurredAt` が「まだ起きていない予定」なのか「呼び出し側の
+   * 時計がずれている」なのかは区別しない**（Issue #767）。極端に未来の値（数年〜数十年先）
+   * を警告・拒否する検証は無く、信頼度・出所を示す別欄も無い——2026-09-26 にクローン miku が、
+   * この区別をしないことを仕様として記録すると決めた（ADR 0037 追記）。
+   */
   occurredAt?: Date | null;
   recordedAt: Date;
   /**
@@ -200,6 +210,8 @@ export interface ObserveUtteranceInput {
   kind: "utterance";
   subjectId?: string;
   externalId?: string;
+  /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
+   * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
   occurredAt?: Date;
   validFrom?: Date;
   validUntil?: Date;
@@ -220,6 +232,8 @@ export interface ObserveEventInput {
   kind: "event";
   subjectId?: string;
   externalId?: string;
+  /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
+   * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
   occurredAt?: Date;
   validFrom?: Date;
   validUntil?: Date;
@@ -240,6 +254,8 @@ export interface ObserveDocumentInput {
   kind: "document";
   subjectId?: string;
   externalId?: string;
+  /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
+   * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
   occurredAt?: Date;
   validFrom?: Date;
   validUntil?: Date;
