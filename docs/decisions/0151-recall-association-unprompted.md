@@ -531,3 +531,142 @@ Issue #377 本題は、依然として未解決のまま残る**——`anchorCou
 - **`anchorCount` の既定を上げる提案が別途出たとき**——往復数の費用はこの追記で
   定数化されているため、その提案の判断材料からは外れる（費用ではなく「規模に見合う値か」
   だけが残った論点になる）。
+
+---
+
+## その後（2026-09-27）——段3.5が拾った contested が対向なしの単独で返っていた穴を塞いだ（Issue #959）
+
+### 何が起きていたか
+
+段3.5（連想枠）の検索フィルタは `status: ["active", "contested"]` を渡しており、
+`contested` の Memory も連想の候補になり得た。しかし段3（必須の同伴取得、ADR 0043/0136）の
+対向取得は `withinLimit`（段2で `limit` の内側に入った候補）にしか掛かっておらず、
+段3.5が独自に拾った `contested` にはその規則が及んでいなかった。結果として、
+`limit` の外に落ちた `contested` が連想枠の候補として浮上すると、対向を伴わない単独の
+まま `memories` に返り、`omitted` にも何も出ない状態が起きていた（Issue #959 本文の
+最小再現）。これは `docs/architecture.md` §0 原則1（争われている主張は、それを争う
+相手と必ず同時に提示する）・`packages/core/src/interfaces/memory-store.ts` の
+`MemoryStore` の契約（`contested` を単独で返してはならない）と食い違っていた。
+
+一方で ADR 0335（`RecalledMemory.contestedWith`）は、この状態を「相手が budget
+切り詰め後の最終的な結果集合に含まれないとき（連想枠経由で単独候補になった場合など）は
+`contestedWith` が付かない」として観測し、文書にも残していた——起きうるものとして
+観測されてはいたが、原則1・`MemoryStore` の契約とは照らされていなかった。
+
+### 採った案 (B)
+
+Issue #959 が挙げていた2案のうち、(B)（段3.5で選んだ contested にも段3と同じ同伴取得を
+かけ、対になれば1 Unit、なれなければ Unit ごと落とす）を採った。(A)（段3.5で
+`status === "contested"` を落とす）は不採用——対で拾えたはずの組まで連想枠から
+消えてしまい、(B) より狭い結果しか返せなくなるためである。
+
+具体的には、段3の必須同伴取得（`getMany` + `survivesAttributesFilter` + 対向の
+`status === "contested"` チェック。段3自身の振る舞いは1バイトも変えていない）を
+`fetchMandatoryCompanions`（`packages/core/src/recall-runtime.ts` 冒頭）として括り出し、
+段3・段3.5の両方から呼ぶ形にした。段3.5側は、`selectedCandidates`（連想枠が席
+（`maxCount`）を埋め終えた後の候補集合）のうち `status === "contested"` なものについて:
+
+1. 対向が既に段3の結果（`units`）に含まれていれば、追加の取得はしない（多層防御。
+   下の「確かめていないこと」参照）。
+2. 対向が連想枠自身の `selectedCandidates` の中に別のアンカー経由で独立に見つかっていれば、
+   2件を1つの Unit にまとめる（`retrievedVia` はどちらも書き換えない——段3の
+   「両側とも独立に withinLimit に含まれていた」分岐と同じ形）。
+3. どちらでもなければ `fetchMandatoryCompanions` で対向を取得する。取得できれば
+   `retrievedVia: "mandatory_companion"` + `companionOf` を段3と同じ形で付け、
+   1つの Unit にする。
+4. 取得できなければ（forget 済み・存在しない・片側だけの `contested`（`contestedWithId`
+   が無い）・`attributes` の絞り込みで外れた、等）、その候補ごと Unit を組まず落とす。
+
+落とした件数は、段3と同じ `unit_assembly_dropped`（`countKind: "lower_bound"`）で名乗る。
+段3が同じ recall で既にこの札を積んでいれば、段3.5 の件数はその `count` に足し、
+同じ kind のエントリを2件に割らない（`UnitAssemblyDroppedOmission` は段を持たない型であり、
+2件に割ると `find` で1件を読む呼び手が段3.5 の分を取りこぼすため）。
+
+### 席（`maxCount`）の数え方 — 段3の `limit` の扱いに揃えた
+
+**連想枠の席は「Unit の数」で数え、必須の同伴は席を食わない。** 段3の現物
+（`packages/core/src/recall-runtime.ts`）を読むと、`withinLimit = passed.slice(0, limit)`
+（段2の直後、修理前後で行番号は動くが式は変えていない）が確定した*後*に、
+`allCandidates = [...withinLimit, ...companions]` という形で必須の同伴（`companions`）を
+別枠で連結している——`limit` は同伴を1件も数えない。段3.5もこれに揃え、
+`selectedCandidates = rankedCandidates.slice(0, associationQuery.maxCount)` で
+`maxCount` 件の席を確定させた*後*に、`fetchMandatoryCompanions` で取得した同伴を
+追加する（席の確定に一切関与させない）。⟹ **必須の同伴取得によって連想枠が返す
+`RecalledMemory` の総数が `maxCount` を超えることがある**が、これは段3が `limit` を
+超えて `companionsAdded` 分を返すのと同じ、意図した非対称である。
+
+### 印の付け方 — 段3の既存の印付けをそのまま流用した
+
+現物（`retrievedVia`/`companionOf`/`associationOf`/`contestedWith` の4つ）を確認し、
+新しい印は1つも作らなかった:
+
+- 段3.5が本来見つけていた側（連想で見つかった候補そのもの）は `retrievedVia:
+  "association"` + `associationOf` のまま——同伴取得を経由したことにはならない。
+- `fetchMandatoryCompanions` が取得した同伴側は、段3の同伴と同じ
+  `retrievedVia: "mandatory_companion"` + `companionOf: <相手の memoryId>`。
+- 両側とも連想枠自身の検索で独立に見つかった場合は、どちらの `retrievedVia` も
+  書き換えない（段3の「両側とも独立に withinLimit に含まれていた」分岐、
+  `companion.retrievedVia !== "mandatory_companion"` の場合の扱いと同じ）。
+- `contestedWith` は ADR 0335 の既存の機構（budget 切り詰め後の `keptMemoryIds` を見て
+  対称に付ける）がそのまま働く——この修理のために `contestedWith` の判定ロジック自体は
+  1行も変えていない。対向が同じ Unit に入るようになったことで、「対向が
+  `keptMemoryIds` に居ない」状態自体が構造的に起きなくなり、結果として ADR 0335が
+  観測していた「連想枠経由で単独候補になり `contestedWith` が付かない」状態が
+  解消された（ADR 0335 の 2026-09-27 追記を参照）。
+
+### 重複防止（#823/#925 の排他性を壊さないこと）
+
+連想枠自身の検索は `excludeIds`（`withinLimit` + 段3の `companions` + アンカー自身）で
+既に段3の結果と重複しないようにしている——このため「対向が段3の結果に既に居る」
+（上の1番）の経路は、通常の一対一の `contested` 不変条件のもとでは**到達しないはずだと
+判断している**（`markContested` が両側 `status='active'` の CAS で相互参照を書くため、
+一対一が壊れるのは `MemoryStore` を `Runtime` を経由せず直接操作した場合に限る——
+ADR 0136 と同じ限界）。多層防御として残したが、この経路を直接踏む fixture は
+作れなかった（下の「確かめていないこと」参照）。
+
+「対向が連想枠自身の中に居る」（上の2番）は、`selectedCandidates` 内の重複を
+`associationConsumed`（`recall-runtime.ts`）という消費済み集合で追跡し、後から
+処理された側が同じ対向を二重に取得・二重に Unit へ入れないようにしている。
+
+### 歯
+
+`packages/core/src/__tests__/recall-association-contested-companion.test.ts`
+（Fake）・`packages/postgres/src/__tests__/recall-association-contested-companion.
+postgres.test.ts`（本物の Postgres + pgvector）に、不変条件（`result.memories` に
+`status: "contested"` の記憶が、その `contestedWithId` の記憶を伴わずに含まれていたら
+赤）と、Issue #959 の最小再現・対向が取れず Unit ごと落ちる経路・連想枠自身が両側を
+選んだときに重複しないこと、3組以上・`channels: ["ann","lexical"]` 併用の各歯を置いた。
+修理前のコードに対してこれらの歯が実際に赤くなること、修理後に緑へ戻ることを実測した
+（PR 本文参照）。
+
+既存の `recall-pipeline.test.ts` の「contested だが相手が最終的な結果集合に居ない
+（連想枠経由で単独候補になり、対向は recall にそもそも掛からない）場合は
+contestedWith が付かない」歯は、この修理により前提が成立しなくなった（対向が
+forgotten で取得できない場合、いまは `contestedAlone` 自体が単独で返らず Unit ごと
+落ちる）ため、新しい挙動を検算する形に書き換えた——歯が検査していた「forget 済みの
+対向は同伴として使わない」という規則自体（ADR 0087 決定6）は変えていない。
+
+### 確かめていないこと
+
+- **「対向が段3の結果に既に居る」経路（上の重複防止1番）を直接踏む fixture は
+  作れなかった。** 一対一の `contested` 不変条件が保たれている限り構造的に到達しない
+  はずだと判断しているが、`MemoryStore` を直接操作して壊れた一対一を作った場合に
+  この分岐が正しく振る舞うことは、コードを読んで確認した以上には検査していない。
+- **4組以上・`subjectId`/`labels` 併用など、歯で当てた組み合わせ以外の絞り込みの
+  組み合わせ**（例: `labels` 絞り込みで対向だけが外れる場合）は、`attributes` 絞り込みの
+  歯と同じ経路（`fetchMandatoryCompanions` が `survivesAttributesFilter` だけを見る）を
+  通るはずだが、`labels`/`subjectId` それぞれについて専用の歯は置いていない。
+- **`over_limit(stage:"association")` / `associationUnitAssemblyShortfall` が同時に
+  多数発生する規模での性能**は測っていない——`fetchMandatoryCompanions` は
+  `getMany` を1回にまとめるが、その1回の呼び出しが返す件数が多いときの費用は未計測。
+- **ベンチのベースライン（`compare-baseline.json` 等）への影響**は、手元では
+  contested を含む合成コーパスを使っていないため差分が出るかどうかを実測していない
+  （PR 本文参照）。
+
+### これが覆るとしたら
+
+- **一対一の `contested` 不変条件が破れる新しい経路が見つかったとき**——上の
+  「対向が段3の結果に既に居る」多層防御が実際に到達するようになり、その振る舞いを
+  fixture で固定する必要が生じる。
+- **連想枠の席の数え方（Unit の数、必須の同伴は席を食わない）を見直す提案が出たとき**
+  ——本追記が揃えた「段3の `limit` と同じ扱い」という前提が変わる。

@@ -608,3 +608,46 @@ describe("runtime.restoreArchived — CAS が破れた後の再読そのもの�
     expect(m3After?.status).toBe("archived"); // 3件目には一切触れていない
   });
 });
+
+describe("runtime.restoreArchived — ループ前の読みが失敗する（Issue #964）", () => {
+  /**
+   * `forget.test.ts` の同名の describe と同じ理由。`restoreArchived` はループ前に
+   * `getMany` に加えて活動時計（`getDecayClock`）も読む——どちらの失敗も同じ打ち切りに落とす。
+   */
+  it("getMany が投げても [failed, not_attempted, not_attempted]・例外は伝播せず・書き込み0件", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    stores.memoryStore.getMany = async () => {
+      throw new Error("simulated connection reset on getMany");
+    };
+
+    const result = await runtime.restoreArchived(ctx, { memoryIds: [m1.id, m2.id, m3.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "failed", error: "simulated connection reset on getMany" },
+      { memoryId: m2.id, kind: "not_attempted" },
+      { memoryId: m3.id, kind: "not_attempted" },
+    ]);
+    expect(stores.eventStore.events.filter((e) => e.kind === "restored")).toHaveLength(0);
+  });
+
+  it("活動時計の読み（getDecayClock）が投げても [failed, not_attempted]・例外は伝播せず・書き込み0件", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    stores.tenantSettingsStore.getDecayClock = async () => {
+      throw new Error("simulated connection reset on getDecayClock");
+    };
+
+    const result = await runtime.restoreArchived(ctx, { memoryIds: [m1.id, m2.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "failed", error: "simulated connection reset on getDecayClock" },
+      { memoryId: m2.id, kind: "not_attempted" },
+    ]);
+    expect(stores.eventStore.events.filter((e) => e.kind === "restored")).toHaveLength(0);
+    expect((await stores.memoryStore.get(ctx, m1.id))?.status).toBe("archived");
+  });
+});
