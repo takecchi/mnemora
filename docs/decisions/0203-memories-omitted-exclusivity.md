@@ -414,3 +414,122 @@ companion が最初から `withinLimit` に居た場合や、companion が `over
   実運用での発生頻度も未計測——Issue #823 と同じく、この追記も頻度の実測はしていない。
 
 Refs #823
+
+---
+
+## 2026-09-26 追記2（クローン miku の委譲先、Issue #925）
+
+**「引き受けた負債」2番が名指ししていた経路——段3.5（連想、既定 on、ADR 0337）が
+`over_limit(stage:"rescore")` の候補を独立に拾い直して `finalMemories` へ昇格させる
+経路——を、直前の追記と同じ日付で塞いだ。**
+
+**塞いだこと**: `recall-runtime.ts` の排他性契約ブロックが、差し引く対象を
+「`overLimit`（段2、まだこの時点で生きている `ScoredCandidate[]`）に居て、かつ
+(a) `companions`（段3の必須同伴取得）に居るか、(b) `finalMemories` に
+`retrievedVia: "association"` で実際に返った」id に広げた。(a) は直前の追記の判定を
+そのまま残し、(b) を OR で足した形である。
+
+**差し引く数の取り方**: 「連想で返った総数」ではなく、**`overLimit` に居て、かつ
+(a)(b) いずれかの経路で実際に `finalMemories` に返った id の数**に絞った。(b) を
+`retrievedVia: "association"` で絞ったのは、`finalMemories` 全体との突き合わせだけで
+判定すると、`overLimit` に一度も居なかった連想候補（below_threshold から連想で
+拾われた場合など）まで数えてしまい、無関係な `over_limit(stage:"rescore")` の count
+を誤って減らすため——これは below_threshold 側の取り下げが既に正しく処理している経路
+であり、二重に差し引くと過剰実装になる。
+`packages/core/src/__tests__/recall-over-limit-association-promotion.test.ts` の(c)が、
+`overLimit` に一度も居ない連想候補（below_threshold 経由）を実際に組み、count が
+無関係に減らないことを変異試験で確認した。
+
+**既存 probe に `association: null` を明示した理由**: `omission-kind-generation.test.ts`
+の `over_limit` probe のフィクスチャ（候補2件・`limit:1`）は、連想が既定 on のままだと
+まさにこの経路を踏む——2件目が段2で `over_limit(stage:"rescore")` に落ちると同時に、
+段3.5 のアンカーから拾い直されて `retrievedVia: "association"` として昇格し、今回の
+取り下げで Omission 自体が消える。同 probe が確かめたいのは「`over_limit` という kind
+の生成経路が本番コードに実在すること」（ADR 0159 のレジストリが縛る範囲）であり、
+連想を含む既定構成での挙動まではこのレジストリの契約に含まれない——だから同 probe には
+`association: null` を明示して連想を切り、射程を「kind の生成経路が在る」ことだけに絞った。
+
+**訂正**: 直前の追記（Issue #823）は「壊した回帰」を、「`omission-kind-generation.test.ts`
+の既存の歯が実際に赤くなった…無関係なはずの `over_limit(stage:"rescore")` の Omission
+が誤って消えた」と書いていた。**この記述は不正確だった。** 実測し直すと、当時
+「誤って消えた」と読んでいたその Omission は、実際には**連想で実際に返った記憶
+（B）の分**であり、消えたこと自体は本追記の判定（overLimit ∩ 実際に association で
+返った id）に照らして正しい——「無関係な」候補が巻き込まれて消えたのではない。
+壊れていたのは Omission の消え方ではなく、**probe 側が「連想を明示的に切っていない」
+という前提の甘さ**だった。同 probe が検査したいのは「over_limit という kind が
+生成されること」であり、その検証に連想の挙動を混ぜていたのが赤の原因である。
+
+**「引き受けた負債」2番**（below_threshold 以外の kind で段3.5 が同種の昇格を起こす
+経路）は、`over_limit(stage:"rescore")` については本追記で解消した。**残るのは
+`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等、段2の
+内部状態自体が memoryId を持ち回っていない他の kind についての前提**（「これが覆る
+としたら」3番の「型の拡張が先」）であり、これは直前の追記から変わっていない。
+`over_limit(stage:"association")` 自身の内部状態（連想候補の追跡）が id 付きで
+保持されているかは、引き続き調べていない（Issue #925「確かめていないこと」）。
+
+### 測ったこと
+
+- 【実測】陽性対照（修正前、fake ストア）:
+  `recall-over-limit-association-promotion.test.ts` の(a)(b)が赤になることを確認した
+  ——(a) は Issue #925 本文の再現構成そのまま（`omission-kind-generation.test.ts` の
+  `over_limit` probe と同一のフィクスチャ）で、`over_limit(stage:"rescore")` の
+  Omission が消えるはずが `{ count: 1, ... }` のまま残る。(b) は `count` が `2` の
+  まま `1` に減らない。(c)（過剰実装を捕まえる歯）は、この時点ではまだ緑だった
+  （対象の count がそもそも動かないため）。
+- 【実測】修正後、(a)(b)(c) の3本がすべて緑になることを確認した。
+- 【実測】既存の `omission-kind-generation.test.ts` の `over_limit` probe に
+  `association: null` を明示する前は、修正の適用によってこの probe 自体が赤くなる
+  ことを確認した（2件目が連想で昇格し、Omission 自体が消えるため）。`association: null`
+  を明示した後は緑に戻ることを確認した。
+- 【実測】変異試験:
+  (i) 追加した `associationReturnedIds` の判定を丸ごと除去（直前の追記の
+      `companions` 限定の判定に戻す）→ (a)(b) が実際に赤になることを確認した。
+  (ii) 差し引く数を「`overLimit` に居たか問わず、連想で返った総数をそのまま加算する」
+      過剰実装に変える → (b)(c) が実際に赤になることを確認した（(c) は「無関係な
+      候補が返っても count は減らない」という主張そのものが破れる）。
+  両方とも `cp` で退避したファイルから `cp` で復元し、`git status --porcelain` が
+  意図どおりの差分に戻ることを確認したうえで、3本とも緑に戻ることを確認した。
+- 【実測】`pnpm --filter @mnemora/core exec vitest run
+  src/__tests__/recall-over-limit-association-promotion.test.ts
+  src/__tests__/recall-over-limit-promotion.test.ts
+  src/__tests__/omission-kind-generation.test.ts
+  src/__tests__/recall-association-gates.test.ts
+  src/__tests__/recall-association-usage-ranking.test.ts
+  src/__tests__/recall-association.test.ts
+  src/__tests__/recall.test.ts
+  src/__tests__/recall-pipeline.test.ts`:
+  8ファイル・256件すべて緑（既存の omitted/over_limit/連想関連の歯を含め、回帰は無い）。
+- 【実測】`pnpm --filter @mnemora/core run typecheck` / `pnpm run lint` /
+  `pnpm run format:check`: すべて緑、警告0。
+- 【実測】`pnpm run api:check`（6パッケージ、`pnpm run build` 実行後）: 全パッケージ
+  「差分なし」——本追記は公開 API 表面を1バイトも変えていない。
+- 【実測】本物の Postgres + pgvector（`packages/postgres`、initdb で自前に構築した
+  ローカルインスタンス、UTF8+C locale）に対し、`recall.postgres.test.ts` に同型の歯を
+  1本追加し、修正前に赤（`over_limit` が `{ count: 1, ... }` のまま残る）、修正後に
+  緑になることを確認した。同ファイルの既存18本（新設分含め）もすべて緑、
+  `recall-association-gates.postgres.test.ts` の既存7本も緑（回帰なし）。
+- 【実測】`examples/chat` の `compare` ベンチ（`MNEMORA_PROVIDER_SOURCE=recorded`、
+  実 API は叩いていない、`examples/chat/cassettes/compare.json` の再生）を本追記の
+  修正の前後で実行し、`MNEMORA_COMPARE_JSON` で機械可読な出力を比較した。
+  12行中5行（`turnCount` 42/82/162/322/642）で `omitted` の
+  `over_limit(stage:"rescore")` の `count` が減った（42: 4→3、82: 15→12、
+  162: 30→25、322: 30→26、642: 30→20）——いずれも本追記が狙った、連想で実際に
+  拾い直された分の取り下げである。⭐門（`scripts/compare-summary.mjs` が見る
+  `mnemoraShareOfNaiveChars`/`factStatementSurvived` の2欄）はこの5行を含む
+  12行すべてで不変であり、退行ではない。**この差分は `examples/chat/compare-baseline.json`
+  にはコミットしていない**——同ファイルの `_readme` と `examples/chat/README.md`
+  「基準値を更新する手順」が「手元で測った値を書かない・本体は CI の artifact から作る」
+  （ADR 0121 決定1・ADR 0119 決定6）と明記しており、更新は PR 自身の CI run の
+  artifact を2回以上一致させてから行う手順（ADR 0231 決定5）を要求するため、
+  本追記の作業（ローカルの initdb インスタンス上の実行）はその手順の対象外である。
+  ⟹ **`compare-baseline.json` の `omitted` 欄は、この PR がマージされた後、
+  その PR 自身の CI artifact を使って別途更新する必要がある**（`over_limit` 欄だけで、
+  ⭐門の2欄には影響しない）。
+- **確かめていないこと**: `test:db` 全体（他ファイル含む約4分のスイート）・
+  `examples/chat` の `retrieval`/`identifier-probes`/`numeral-token-probes` 等の
+  他のベンチ・`pack:check` は走らせていない。`compare-baseline.json` の更新自体
+  （CI artifact を使った正式な更新）も行っていない——上記のとおり対象外の手順である。
+  実運用での発生頻度も未計測。`over_limit(stage:"association")` 側の内部状態が
+  id 付きで保持されているかどうかも、引き続き未調査。
+
+Refs #925
