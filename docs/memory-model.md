@@ -916,6 +916,23 @@ CREATE INDEX idx_observations_by_subject ON observations (tenant_id, subject_id,
 通らない。payload の `{ recallId, usedMemoryIds }` を直接読み、`recall_usages` への挿入に
 使われる（§6）。他の `kind` は抽出パイプラインを経て `memories` 行を生む。
 
+**⚠ 2026-09-26 追記（クローン miku の判断、[Issue #897](https://github.com/takecchi/mnemora/issues/897)）:
+`uq_observations_external_id` による冪等性は、その Observation から生まれた Memory がその後
+どうなったかを一切問わない。** `forget()`（status を `forgotten` にする、§9）や `purge()`
+（content/digest をトゥームストーンで上書きする、§9）を経たあとでも、同じ `externalId` で
+`observe()` を呼び直せば `createObservationWithOutbox` は既存の Observation を
+`created: false` で返し、抽出はやり直さない——`{ memoryIds: [], extraction: 'skipped' }` が
+返るだけで、Memory は forgotten/purged のまま変わらない。この振る舞いは `forgotten`
+（`purge` 前）の段階でも同じである——`createObservationWithOutbox` は Observation どうしの
+一致だけを見ており、対応する Memory の `status` を一度も読まない。
+
+理由: 抽出をやり直すと、`purge()` で消した内容が `externalId` の再送だけで蘇りうる。
+それは「忘れさせる」という約束と正面から食い違う。
+
+⚠ 呼び出し側は、この返り値だけでは「正常な冪等の再送」と「forgotten/purged が原因で無視
+された」を区別できない（`Runtime.observe` の doc コメント、`packages/core/src/runtime.ts`
+参照）。
+
 ### `memories`（Phase 1。一部列は Phase 2）
 
 ```sql

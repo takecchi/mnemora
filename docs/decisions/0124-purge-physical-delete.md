@@ -280,3 +280,22 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
 - **真の並行呼び出し**（複数プロセス・複数コネクションからの同時 `purge`）は fake store 上でのみ検証しており、実 DB の行ロックの振る舞いは検証していない（[ADR 0087](./0087-runtime-forget-shape.md) と同じ限界）。
 - **`vectorStore.delete` が実際に失敗するケース**（ネットワーク断等）は、本物の環境で発生させて確認していない——決定5の設計は推論に基づく。
 - **北極星の物差し**（「使う側が会話ログを全部積むのをやめられたか」）への効果は測っていない。`purge` は recall の既定挙動を変えないため測定対象外と判断した（[ADR 0122](./0122-restore-archived-memory.md) と同じ扱い）。
+
+---
+
+## 追記（2026-09-26）: `forget`/`purge` 済みの Memory へ、同じ `externalId` で再 observe したときの扱い
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜7・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+
+[Issue #897](https://github.com/takecchi/mnemora/issues/897) が扱った問い: `forget()` → `purge()` の後、その `purge()` 対象の元になった Observation と同じ `externalId` で `observe()` を呼び直すと、`docs/architecture.md` §3.5 の Observation 冪等性（`createObservationWithOutbox` が既存の Observation を `created: false` で返す）により、抽出は一切やり直されず `{ memoryIds: [], extraction: 'skipped' }` が返るだけで Memory は purge されたトゥームストーンのまま変わらない。呼び出し側はこの返り値だけでは「正常な冪等の再送」と「forgotten/purged が原因で無視された」を区別できない。
+
+**クローン miku の判断（2026-09-26）**: この「何もしない」を仕様とする。
+
+- 理由: 抽出をやり直すと、`purge()` で消した情報が `externalId` の再送だけで蘇りうる。それは決定1・決定3が守っている「忘れさせる」という約束に反する。
+- 採らなかった案1: 抽出をやり直す（forgotten/purged な Memory が見つかったときだけ、`created: false` でも抽出を走らせる）。理由は上と同じ——消した情報が再送だけで蘇る経路を開くことになる。
+- 採らなかった案2: `ObserveResult` に「なぜ skipped なのか」の内訳を持たせる。公開の型が増えるため今回は採らない。将来の選択肢としては残す。
+- 依拠した方針: 「文書と実装がずれたら記述を実態へ合わせる」（2026-09-16）と「クローンが決められるものは決めてよい」（2026-09-24）。
+
+反映先: `packages/core/src/runtime.ts` の `Runtime.observe` の doc コメント、`docs/memory-model.md` §10 `observations` の節。新しい ADR は作らず、この追記に留めた。
