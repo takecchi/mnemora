@@ -1990,6 +1990,8 @@ export interface Runtime {
    * 4. それ以外の例外は `"failed"` を積んだ上で**その場で処理を打ち切り**、残りの
    *    対象は一切試みずに `"not_attempted"` として返す。例外はこのメソッドの外へは
    *    投げない。
+   *    ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
+   *    いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
    *
    * `memory_events` へ積むイベントの `kind` は `"restored"`
    * （[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md) が
@@ -2194,6 +2196,8 @@ export interface Runtime {
    *   **その場で処理を打ち切り**、残りの対象は一切試みずに
    *   `{ kind: 'not_attempted' }` として返す。例外はこのメソッドの外へは
    *   投げない。
+   *   ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
+   *   いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
    *
    * `kind` の意味と呼び出し側の次の一手は {@link ForgetOutcome} の doc コメントに
    * 詳しい。`target` が空配列（`{ memoryIds: [] }`）なら、store に一切触れずに
@@ -2247,6 +2251,8 @@ export interface Runtime {
    * 6. それ以外の例外（DB 接続断等）は `"failed"` を積んだ上で**その場で処理を打ち切り**、
    *    残りの対象は一切試みずに `"not_attempted"` として返す。例外はこのメソッドの外へは
    *    投げない。
+   *    ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
+   *    いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
    *
    * `memory_events` へ積むイベントの `kind` は `"purged"`（`MemoryEventKind` に
    * 既に在る値——追加していない）。`digestSnapshot` には上書き**前**の digest を入れ、
@@ -4053,6 +4059,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const actor = opts?.actor ?? { type: "system" };
     const outcomes: RestoreArchivedOutcome[] = [];
+    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
+    const abortAt = (i: number, failure: unknown) => {
+      outcomes.push({
+        memoryId: ids[i]!,
+        kind: "failed",
+        error: failure instanceof Error ? failure.message : String(failure),
+      });
+      for (let j = i + 1; j < ids.length; j += 1) {
+        outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
+      }
+      return { outcomes };
+    };
     // ADR 0165 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
     // が `resolveActivityClockInputs` を候補バッチ1つにつき1回だけ読むのと同じ理由——
     // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
@@ -4137,7 +4155,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         if (error instanceof MemoryStatusConflictError) {
           // 安全弁（`forget` と同じ形。1回だけ再読して打ち切る——上限の無い
           // 再試行ループを作らない）。
-          const refetched = await deps.memoryStore.get(ctx, id);
+          let refetched: Memory | null;
+          try {
+            refetched = await deps.memoryStore.get(ctx, id);
+          } catch (refetchError) {
+            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」である——下と同じく
+            // 打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から
+            // 見えなくなる（interface の doc コメント「例外はこのメソッドの外へは投げない」）。
+            return abortAt(i, refetchError);
+          }
           if (refetched === null) {
             outcomes.push({ memoryId: id, kind: "not_found" });
           } else if (refetched.status === "active") {
@@ -4160,15 +4186,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
         // 競合以外の例外——打ち切って、残りは「見ていない」として返す（interface の
         // doc コメント参照）。例外をここより外へは投げない。
-        outcomes.push({
-          memoryId: id,
-          kind: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        for (let j = i + 1; j < ids.length; j += 1) {
-          outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
-        }
-        return { outcomes };
+        return abortAt(i, error);
       }
     }
 
@@ -4311,6 +4329,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const actor = opts?.actor ?? { type: "system" };
     const outcomes: ForgetOutcome[] = [];
+    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
+    const abortAt = (i: number, failure: unknown) => {
+      outcomes.push({
+        memoryId: ids[i]!,
+        kind: "failed",
+        error: failure instanceof Error ? failure.message : String(failure),
+      });
+      for (let j = i + 1; j < ids.length; j += 1) {
+        outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
+      }
+      return { outcomes };
+    };
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
@@ -4346,7 +4376,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         if (error instanceof MemoryStatusConflictError) {
           // 安全弁（ADR 0030 と同じ形。ただし `reextract` と違い、ここは1回だけ
           // 再読して打ち切る——上限の無い再試行ループを作らない、という明示の決定）。
-          const refetched = await deps.memoryStore.get(ctx, id);
+          let refetched: Memory | null;
+          try {
+            refetched = await deps.memoryStore.get(ctx, id);
+          } catch (refetchError) {
+            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」である——下と同じく
+            // 打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から
+            // 見えなくなる（interface の doc コメント「例外はこのメソッドの外へは投げない」）。
+            return abortAt(i, refetchError);
+          }
           if (refetched === null) {
             outcomes.push({ memoryId: id, kind: "not_found" });
           } else if (refetched.status === "forgotten") {
@@ -4364,15 +4402,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
         // 競合以外の例外——打ち切って、残りは「見ていない」として返す（interface の
         // doc コメント参照）。例外をここより外へは投げない。
-        outcomes.push({
-          memoryId: id,
-          kind: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        for (let j = i + 1; j < ids.length; j += 1) {
-          outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
-        }
-        return { outcomes };
+        return abortAt(i, error);
       }
     }
 
@@ -4413,6 +4443,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const actor = opts?.actor ?? { type: "system" };
     const dryRun = opts?.dryRun ?? false;
     const outcomes: PurgeOutcome[] = [];
+    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
+    const abortAt = (i: number, failure: unknown) => {
+      outcomes.push({
+        memoryId: ids[i]!,
+        kind: "failed",
+        error: failure instanceof Error ? failure.message : String(failure),
+      });
+      for (let j = i + 1; j < ids.length; j += 1) {
+        outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
+      }
+      return { supported: true, outcomes };
+    };
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
@@ -4469,7 +4511,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         if (error instanceof MemoryPurgeConflictError) {
           // 安全弁（`forget`/`restoreArchived` と同じ形。1回だけ再読して打ち切る
           // ——上限の無い再試行ループを作らない）。
-          const refetched = await deps.memoryStore.get(ctx, id);
+          let refetched: Memory | null;
+          try {
+            refetched = await deps.memoryStore.get(ctx, id);
+          } catch (refetchError) {
+            // 再読そのものの失敗（DB 接続断等）も「競合以外の例外」である——下と同じく
+            // 打ち切る。ここで投げると、先に確定した要素の outcome まで呼び出し側から
+            // 見えなくなる（interface の doc コメント「例外はこのメソッドの外へは投げない」）。
+            return abortAt(i, refetchError);
+          }
           if (refetched === null) {
             outcomes.push({ memoryId: id, kind: "not_found" });
           } else if ((refetched.purgedAt ?? null) !== null) {
@@ -4496,15 +4546,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
         // 競合以外の例外——打ち切って、残りは「見ていない」として返す（interface の
         // doc コメント参照）。例外をここより外へは投げない。
-        outcomes.push({
-          memoryId: id,
-          kind: "failed",
-          error: error instanceof Error ? error.message : String(error),
-        });
-        for (let j = i + 1; j < ids.length; j += 1) {
-          outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
-        }
-        return { supported: true, outcomes };
+        return abortAt(i, error);
       }
     }
 
