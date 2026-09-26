@@ -465,3 +465,74 @@ describe("runtime.forget — recall() との裏取り（recall 側は変更し�
     });
   });
 });
+
+describe("runtime.forget — CAS が破れた後の再読そのものが失敗する", () => {
+  /**
+   * `forget` の doc コメントは「例外はこのメソッドの外へは投げない」と約束している。
+   * CAS が破れたときの1回だけの再読（`memoryStore.get`）が DB 接続断等で失敗しても、
+   * それは「競合以外の例外」であり、`failed` を積んで打ち切り、残りを `not_attempted`
+   * として返す——先に書き込みが確定した要素（ここでは1件目の `forgotten`）を
+   * 例外で呼び出し側から見えなくしない。
+   */
+  it("2件目の再読で get が投げても [forgotten, failed, not_attempted]・例外は伝播しない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === m2.id) {
+        m2.status = "archived";
+      }
+    };
+    // m2 への get の1回目は updateStatusWithEvent 内部（CAS 判定用）、2回目が forget の再読。
+    let m2GetCalls = 0;
+    const originalGet = stores.memoryStore.get.bind(stores.memoryStore);
+    stores.memoryStore.get = async (c, id) => {
+      if (id === m2.id) {
+        m2GetCalls += 1;
+        if (m2GetCalls === 2) {
+          throw new Error("simulated connection reset on refetch");
+        }
+      }
+      return originalGet(c, id);
+    };
+
+    const result = await runtime.forget(ctx, { memoryIds: [m1.id, m2.id, m3.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "forgotten", previousStatus: "active" },
+      { memoryId: m2.id, kind: "failed", error: "simulated connection reset on refetch" },
+      { memoryId: m3.id, kind: "not_attempted" },
+    ]);
+    expect(forgottenEvents(stores, m1.id)).toHaveLength(1);
+    expect(forgottenEvents(stores, m2.id)).toHaveLength(0);
+    const m3After = await originalGet(ctx, m3.id);
+    expect(m3After?.status).toBe("active"); // 3件目には一切触れていない
+  });
+});
+
+describe("runtime.forget — ループ前の一括読み（getMany）が失敗する（Issue #964）", () => {
+  /**
+   * 「例外はこのメソッドの外へは投げない」はループ前の読みにも掛かる。まだ1件も書いて
+   * いないので、1件目を `failed`、残りを `not_attempted` として返す（CAS 破れの後の再読の
+   * 失敗と同じ打ち切り、PR #960）。
+   */
+  it("getMany が投げても [failed, not_attempted, not_attempted]・例外は伝播せず・書き込み0件", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    stores.memoryStore.getMany = async () => {
+      throw new Error("simulated connection reset on getMany");
+    };
+
+    const result = await runtime.forget(ctx, { memoryIds: [m1.id, m2.id, m3.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "failed", error: "simulated connection reset on getMany" },
+      { memoryId: m2.id, kind: "not_attempted" },
+      { memoryId: m3.id, kind: "not_attempted" },
+    ]);
+    expect(stores.eventStore.events.filter((e) => e.kind === "forgotten")).toHaveLength(0);
+  });
+});

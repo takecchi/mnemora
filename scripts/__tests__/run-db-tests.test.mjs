@@ -37,6 +37,10 @@ function runGate(env) {
     cwd: repoRoot,
     encoding: "utf8",
     env,
+    // DB に繋がらない構成では DB テストがほぼ全件落ち、その出力が spawnSync の既定の
+    // maxBuffer（1 MiB）を超えると子が途中で殺され、末尾の「DB テストが落ちました」が
+    // 捕まらない（PR #965 の CI で観測。DB テストが増えるほど出力も増える）。
+    maxBuffer: 64 * 1024 * 1024,
   });
 }
 

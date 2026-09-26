@@ -567,3 +567,87 @@ describe("runtime.restoreArchived — 往復（sweepArchive → archived → res
     expect(after.memories.map((m) => m.memoryId)).toContain(memory.id);
   });
 });
+
+describe("runtime.restoreArchived — CAS が破れた後の再読そのものが失敗する", () => {
+  /**
+   * `forget.test.ts` の同名の describe と同じ理由（「例外はこのメソッドの外へは投げない」）。
+   */
+  it("2件目の再読で get が投げても [restored, failed, not_attempted]・例外は伝播しない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === m2.id) {
+        m2.status = "forgotten";
+      }
+    };
+    // m2 への get の1回目は updateStatusWithEvent 内部（CAS 判定用）、2回目が再読。
+    let m2GetCalls = 0;
+    const originalGet = stores.memoryStore.get.bind(stores.memoryStore);
+    stores.memoryStore.get = async (c, id) => {
+      if (id === m2.id) {
+        m2GetCalls += 1;
+        if (m2GetCalls === 2) {
+          throw new Error("simulated connection reset on refetch");
+        }
+      }
+      return originalGet(c, id);
+    };
+
+    const result = await runtime.restoreArchived(ctx, { memoryIds: [m1.id, m2.id, m3.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "restored", previousStatus: "archived" },
+      { memoryId: m2.id, kind: "failed", error: "simulated connection reset on refetch" },
+      { memoryId: m3.id, kind: "not_attempted" },
+    ]);
+    expect(restoredEvents(stores, m1.id)).toHaveLength(1);
+    expect(restoredEvents(stores, m2.id)).toHaveLength(0);
+    const m3After = await originalGet(ctx, m3.id);
+    expect(m3After?.status).toBe("archived"); // 3件目には一切触れていない
+  });
+});
+
+describe("runtime.restoreArchived — ループ前の読みが失敗する（Issue #964）", () => {
+  /**
+   * `forget.test.ts` の同名の describe と同じ理由。`restoreArchived` はループ前に
+   * `getMany` に加えて活動時計（`getDecayClock`）も読む——どちらの失敗も同じ打ち切りに落とす。
+   */
+  it("getMany が投げても [failed, not_attempted, not_attempted]・例外は伝播せず・書き込み0件", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    stores.memoryStore.getMany = async () => {
+      throw new Error("simulated connection reset on getMany");
+    };
+
+    const result = await runtime.restoreArchived(ctx, { memoryIds: [m1.id, m2.id, m3.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "failed", error: "simulated connection reset on getMany" },
+      { memoryId: m2.id, kind: "not_attempted" },
+      { memoryId: m3.id, kind: "not_attempted" },
+    ]);
+    expect(stores.eventStore.events.filter((e) => e.kind === "restored")).toHaveLength(0);
+  });
+
+  it("活動時計の読み（getDecayClock）が投げても [failed, not_attempted]・例外は伝播せず・書き込み0件", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "archived" }));
+    stores.tenantSettingsStore.getDecayClock = async () => {
+      throw new Error("simulated connection reset on getDecayClock");
+    };
+
+    const result = await runtime.restoreArchived(ctx, { memoryIds: [m1.id, m2.id] });
+
+    expect(result.outcomes).toEqual([
+      { memoryId: m1.id, kind: "failed", error: "simulated connection reset on getDecayClock" },
+      { memoryId: m2.id, kind: "not_attempted" },
+    ]);
+    expect(stores.eventStore.events.filter((e) => e.kind === "restored")).toHaveLength(0);
+    expect((await stores.memoryStore.get(ctx, m1.id))?.status).toBe("archived");
+  });
+});
