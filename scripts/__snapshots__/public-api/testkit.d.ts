@@ -306,7 +306,7 @@ export declare class InMemoryVectorStore implements VectorStore {
     constructor(memoryStore: InMemoryMemoryStore);
     private key;
     upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
-    search(_ctx: Ctx, space: EmbeddingSpaceId, query: number[], opts: {
+    search(ctx: Ctx, space: EmbeddingSpaceId, query: number[], opts: {
         limit: number;
         filter: VectorFilter;
     }): Promise<VectorHit[]>;

@@ -82,3 +82,29 @@
   - testkit の2テナント適合テストが実際にどこまでの分離漏れパターン（誤った ctx の伝播、
     JOIN 時の tenant_id 条件漏れ等）を検出できるかは、testkit 自体の実装（Phase 1 着手時）を
     待たないと分からない。
+
+## 追記（2026-09-27、[Issue #1050](https://github.com/takecchi/mnemora/issues/1050)）: **`search` の3口は `filter.tenantId` だけで絞っていた。`ctx.tenantId` との AND に揃えた**
+
+⚠ **本文（上）は当時の記録なので書き換えていない。**この追記は、上の「確かめていないこと」の2つ目
+（2テナントの適合テストがどこまでの漏れを検出できるか）への実測の1件である。
+
+- **何が起きていたか**: `VectorStore.search`/`searchMany` と `LexicalStore.search` は、`ctx` とは別に
+  `opts.filter.tenantId` を受け取る。`@mnemora/postgres` の3実装（vector・語彙・trigram）と
+  `@mnemora/testkit` の `InMemoryVectorStore`/`InMemoryLexicalStore` は、`filter.tenantId` だけで絞り、
+  **`ctx.tenantId` を見ていなかった。**`ctx` と `filter.tenantId` に違うテナントを渡すと、`filter` 側の
+  テナントの memoryId とスコアが返った（本文は返らない。runtime は常に同じ値を渡すので、runtime 経由では
+  起きない）。core の `FakeVectorStore`/`FakeLexicalStore` だけが両方の一致を求めていた。
+- **なぜ適合テストが捕まえなかったか**: 適合テストの2テナントの歯は、`ctx` と `filter.tenantId` に
+  **同じ**テナントを渡していた。上の決定の「引き受ける負債」が言う「誤ったテナント ID を渡すこと自体は
+  型では検出できない」の、口の内側での形にあたる。
+- **決めたこと**（クローン miku の判断。オーナーの判断ではない）: 隔離の境界は、上の決定どおり
+  `ctx.tenantId` である。`filter.tenantId` は残し、`ctx.tenantId` との **AND** で絞る。食い違えば0件を
+  返し、例外は投げない（入力を狭めない）。`VectorFilter.tenantId`/`LexicalFilter.tenantId` の doc に書いた。
+- **採らなかった案**: 食い違ったら例外にする（入力を狭める変更になる）。`filter.tenantId` を正とすると
+  明記する（`ctx` が境界だという上の決定と食い違う）。
+- **歯**: `packages/postgres/src/__tests__/search-ctx-tenant-boundary.postgres.test.ts` と
+  `packages/testkit/src/__tests__/in-memory-search-ctx-tenant-boundary.test.ts`。
+  **`*-conformance.ts` には足していない**（[Issue #809](https://github.com/takecchi/mnemora/issues/809)）
+  ——第三者の adapter にこの要件は、まだ課していない。
+- **同じ調査で、決めずに残したもの**: 書き込みの口が他テナントの id を参照として受け付ける件は
+  [Issue #1051](https://github.com/takecchi/mnemora/issues/1051) に置いた（拒むのは入力を狭める新しい方針になる）。

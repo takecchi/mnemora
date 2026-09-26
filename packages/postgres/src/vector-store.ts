@@ -56,9 +56,14 @@ async function withRelaxedOrderScan<T>(
  * 集合・順序ともに完全に一致する」契約の土台）。クエリベクトル自体はここでは扱わない
  * ——この関数が返す条件は `query`/`qvec` を一度も参照しない（`WHERE` はどれも
  * `filter` 由来で、距離での絞り込みは `ORDER BY`/`LIMIT` 側の仕事）。
+ *
+ * Issue #1050: テナントは `filter.tenantId` と `ctx.tenantId` の**両方**で絞る（AND）。
+ * 隔離の境界は `ctx.tenantId` である（ADR 0007）——`filter.tenantId` だけで絞ると、
+ * 2つが食い違ったとき `filter` 側のテナントの行が返る。食い違えば0件になり、例外は
+ * 投げない。歯は `__tests__/search-ctx-tenant-boundary.postgres.test.ts`。
  */
-function buildFilterConditions(filter: VectorFilter) {
-  const conditions = [sql`e.tenant_id = ${filter.tenantId}`];
+function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
+  const conditions = [sql`e.tenant_id = ${filter.tenantId}`, sql`e.tenant_id = ${ctx.tenantId}`];
   if (filter.status !== undefined) {
     conditions.push(sql`m.status = ANY(${sql.param(filter.status)}::text[])`);
   }
@@ -235,7 +240,7 @@ export class PostgresVectorStore implements VectorStore {
 
     // `filter` の翻訳は `searchMany()` と共有する（クラス doc コメント、
     // `buildFilterConditions` 参照）——2箇所で食い違う経路を作らない。
-    const whereClause = buildFilterConditions(opts.filter);
+    const whereClause = buildFilterConditions(ctx, opts.filter);
 
     // ORDER BY には距離演算子の結果をそのまま昇順で置く（式にしない。docs/recall.md §3）。
     // tie-break はクラス doc コメント（このファイル冒頭）のとおり3段
@@ -366,7 +371,7 @@ export class PostgresVectorStore implements VectorStore {
 
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    const whereClause = buildFilterConditions(opts.filter);
+    const whereClause = buildFilterConditions(ctx, opts.filter);
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
     const valuesRows = queries.map((q) => {
