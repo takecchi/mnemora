@@ -180,6 +180,20 @@ describe("truncateForFallbackDigest", () => {
     const long = "0123456789";
     expect(truncateForFallbackDigest(long, -5)).toBe("…");
   });
+
+  it("切り詰め位置が UTF-16 サロゲートペアの内側に落ちたら、1文字手前で止める（孤立サロゲートを作らない）", () => {
+    // "😀" は UTF-16 では2コードユニット（サロゲートペア）——`slice(0, 5)` は素朴には
+    // "AAAA" + 高サロゲートだけを残してしまい、対になる低サロゲートを失った孤立サロゲート
+    // ができる。孤立サロゲートは UTF-8 へエンコードする経路（Postgres の `content`/`digest`
+    // 列に書き込むとき、node-postgres が使う `Buffer.from(str, "utf8")`）で静かに
+    // U+FFFD（置換文字）へ壊れる（Issue #816 が「入力に孤立サロゲートが最初から含まれる」
+    // ケースを報告済みだが、これは「正しい入力を機械的に切り詰めた結果、こちら側が
+    // 孤立サロゲートを作ってしまう」別のケースである）。
+    const content = "AAAA😀BBBB";
+    expect(truncateForFallbackDigest(content, 5)).toBe("AAAA…");
+    // ペアがちょうど境界に収まる場合は割らない——1文字も余計に削らない。
+    expect(truncateForFallbackDigest(content, 6)).toBe("AAAA😀…");
+  });
 });
 
 describe("buildNewMemoryFromCandidate", () => {

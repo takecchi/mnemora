@@ -174,6 +174,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `NaN` だけを負数と同じ安全側（既に上限に達している扱い）に倒した。`+Infinity` は
   「上限なし」として意味が通るため今の挙動のまま（新しい例外は投げない）
   （[Issue #803](https://github.com/takecchi/mnemora/issues/803)、PR #853）。
+- **`truncateForFallbackDigest`（`observe()` の digest フォールバック、`extraction.ts`）と
+  `packDigestBand`（`recall()` の目次帯、`digest-band.ts`）が、切り詰め位置が UTF-16
+  サロゲートペア（絵文字等、2コードユニットの文字）の内側に落ちたとき、対になる片方を
+  失った孤立サロゲートを残していた。** 孤立サロゲートは JS の文字列としては保持できるが、
+  UTF-8 へエンコードする経路（`packages/postgres` が `content`/`digest` 列へ書き込む際の
+  node-postgres のエンコード）で静かに U+FFFD（置換文字）へ壊れる——切り詰めという安全弁
+  自身が、切り詰めていない部分よりも先にデータを壊していた。共通の
+  `sliceWithoutSplittingSurrogatePair`（`text-truncation.ts`。`@mnemora/core` の公開 API には出さない内部関数）へ切り出し、
+  切り詰め位置がペアの内側なら1文字手前に丸めるようにした（新しい例外は投げない。
+  ペアの外側で切れる場合は1バイトも挙動が変わらない）。
 
 ---
 
