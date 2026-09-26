@@ -38,6 +38,7 @@ import type {
   CountKind,
   IndexBand,
   Omission,
+  OverLimitOmission,
   RecallBudget,
   RecallQuery,
   RecallResult,
@@ -1803,12 +1804,15 @@ export async function runRecall(
   // （`docs/recall.md` §3）という規約を破らず、**確定を書き換えるのではなく、
   // 実際に返した集合と改めて突き合わせて矛盾を解消する後処理**として置く。
   //
-  // ⚠ 対象は `below_threshold` だけである。`Omission` の他の10種のうち、memoryId を
-  // 明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり（`recall.ts` の
-  // 各 interface を見ること）、他の kind（`over_limit`/`budget_dropped`/
-  // `score_not_comparable` 等）はどの記憶を指しているかを個体で言わない——同じ昇格が
-  // 起きても「同じ memoryId が両方に載る」という**検証可能な**矛盾を作らないため、
-  // 本 PR の射程外とする（ADR 0203「引き受けた負債」参照）。
+  // ⚠ ここで一緒に扱えるのは、段2の内部状態から memoryId 単位で「昇格したかどうか」を
+  // 突き合わせられる kind だけである。`BelowThresholdOmission.nearMisses` は公開型が
+  // memoryId を持つのでそのまま使えるが、`OverLimitOmission`（下の段2の `overLimit`
+  // 変数）は公開型に memoryId を持たない——それでも `overLimit` 自体は関数内部の
+  // `ScoredCandidate[]` としてこの時点でまだ生きており、`finalMemories` との突き合わせは
+  // 公開型を経由せずに行える（Issue #823、ADR 0203「これが覆るとしたら」3番）。
+  // `budget_dropped`/`score_not_comparable` 等、段2の内部状態自体が memoryId を持ち回って
+  // いない他の kind にはこの前提が当たらず、本 PR の射程外のままである
+  // （ADR 0203「引き受けた負債」2番）。
   const returnedMemoryIds = new Set(finalMemories.map((m) => m.memoryId));
   const promotedFromBelowThreshold = belowThreshold.filter((c) =>
     returnedMemoryIds.has(c.memory.id),
@@ -1832,6 +1836,58 @@ export async function runRecall(
         // 全件昇格した。0件の omission を残さない——他の kind が count === 0 では
         // 積まない作法（`filtered`/`over_limit` 等の各 push 直前の `if` 参照）に揃える。
         omitted.splice(belowThresholdIndex, 1);
+      }
+    }
+  }
+
+  // Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）、
+  // Issue #925（同じ ADR「引き受けた負債」2番が名指ししていた、段3.5 経由の同型の経路の是正）:
+  // 段2で `passed.slice(limit)` により `over_limit(stage:"rescore")` へ回された候補
+  // （上の `overLimit`、まだこの時点で生きている `ScoredCandidate[]`）が、段3の必須の
+  // 同伴取得（上の `companions`）または段3.5（連想、既定 on、ADR 0337）のどちらかを
+  // 経由して `finalMemories` に昇格することがある——below_threshold と同型の矛盾
+  // （「返したのに落ちたと名乗る」）。
+  //
+  // ⚠ 対象は**「`overLimit` に居て、かつ (a) 段3の必須同伴取得（`companions`）に居るか
+  // (b) `finalMemories` に `retrievedVia: "association"` で実際に返った」id**に絞る。
+  // (a) は `companions`（`retrievedVia: "mandatory_companion"` を付けて構築した配列、
+  // 上）に居るかどうかで判定し、(b) は `finalMemories` を `retrievedVia` で絞って判定
+  // する——`retrievedVia` を見ずに `finalMemories` 全体との突き合わせだけで判定すると、
+  // 何も昇格していない候補まで拾ってしまう（下のコメント参照）。
+  //
+  // **`over_limit(stage:"association")` 等、他の kind にはこの取り下げを広げない**——
+  // 段3.5 自身が独自に積む `over_limit(stage:"association")` は、まだ id 付きで内部状態を
+  // 追跡できるかを調べていない（Issue #925「確かめていないこと」）。
+  //
+  // ⚠ 差し引く数は「段3で返した同伴の総数」でも「連想で返った総数」でもない。
+  // **`overLimit` に居て、かつ実際に (a)(b) いずれかの経路で `finalMemories` に返った
+  // id の数**だけを数える——companion/連想候補が最初から withinLimit に居た場合や、
+  // below_threshold から昇格した場合、あるいは `overLimit` に一度も居なかった連想候補
+  // （below_threshold から連想で拾われた場合など）まで数えると、無関係な over_limit の
+  // count を誤って減らすことになる（上の below_threshold の取り下げは、その経路を
+  // 既に別ブロックで正しく扱っている。過剰実装を捕まえる歯は
+  // `recall-over-limit-association-promotion.test.ts` の(c)）。
+  const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
+  const associationReturnedIds = new Set(
+    finalMemories.filter((m) => m.retrievedVia === "association").map((m) => m.memoryId),
+  );
+  const promotedFromOverLimit = overLimit.filter(
+    (c) =>
+      returnedMemoryIds.has(c.memory.id) &&
+      (mandatoryCompanionIds.has(c.memory.id) || associationReturnedIds.has(c.memory.id)),
+  );
+  if (promotedFromOverLimit.length > 0) {
+    const overLimitRescoreIndex = omitted.findIndex(
+      (o): o is OverLimitOmission => o.kind === "over_limit" && o.stage === "rescore",
+    );
+    if (overLimitRescoreIndex !== -1) {
+      const existing = omitted[overLimitRescoreIndex] as OverLimitOmission;
+      const remainingCount = existing.count - promotedFromOverLimit.length;
+      if (remainingCount > 0) {
+        omitted[overLimitRescoreIndex] = { ...existing, count: remainingCount };
+      } else {
+        // 全件昇格した。below_threshold と同じ作法で 0件の omission を残さない。
+        omitted.splice(overLimitRescoreIndex, 1);
       }
     }
   }

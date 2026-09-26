@@ -166,6 +166,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
+  へ落とした記憶を、段3.5（連想、既定 on、ADR 0337）が `RecallResult.memories` へ
+  `retrievedVia: "association"` として昇格させた場合でも、同じ記憶を `over_limit` の
+  `count` にそのまま数え続けていた**（PR #922 が段3の必須同伴取得経由について塞いだのと
+  同型の矛盾。段3.5 経由はそのとき意図的に対象外にしていた）。差し引く対象を「`overLimit`
+  に居て、かつ段3の必須同伴取得または段3.5の連想のどちらかで実際に `finalMemories` に
+  返った id」へ広げ、0件になった Omission は既存の作法どおり配列から取り除くようにした
+  （`memories` の中身・公開型はどちらも無変更）
+  （[Issue #925](https://github.com/takecchi/mnemora/issues/925)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記2 2026-09-26）。
 - **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
   検索結果（順位・スコア）は変えていない（[Issue #878](https://github.com/takecchi/mnemora/issues/878)）。
 - **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を
@@ -313,6 +323,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （新しい例外は投げない。`VectorStore.upsert` に長さの違うベクトルを渡したときの
   扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
+- **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
+  へ落とした記憶を、段3（必須の同伴取得）が `RecallResult.memories` へ昇格させた場合でも、
+  同じ記憶を `over_limit` の `count` にそのまま数え続けていた**（below_threshold で
+  ADR 0203 が塞いだのと同型の矛盾、「返したのに落ちたと名乗る」）。段3で実際に昇格した分
+  だけ `count` から差し引き、0件になった Omission は below_threshold と同じ作法で配列
+  から取り除くようにした（`memories` の中身・公開型はどちらも無変更）
+  （[Issue #823](https://github.com/takecchi/mnemora/issues/823)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記 2026-09-26）。
 - **`runMigrations`/`registerEmbeddingSpace` の `schema` オプション省略時、接続ロール名と
   同じ名前のスキーマが DB に在ると（PostgreSQL の既定 `search_path` `"$user", public` により
   `"$user"` がそちらへ解決される）、advisory lock のキーが `schema: "<ロール名>"` を明示
@@ -363,6 +381,18 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`\uD800` 等）も対象外——Postgres 側（node-postgres が U+FFFD へ静かに置換する）の
   挙動に Fake をどちらへ寄せるかは別途の製品判断が要る
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ、PR #923）。
+- **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit`）/`FakeMemoryStore.createMemory`
+  （`@mnemora/core`）が、上の PR #923 で塞ぎ残した `subjectId`・`tags`（各要素）・
+  `digest` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
+  いた。** 実測すると `PostgresMemoryStore.createMemory` はこの3欄も `content` と同じ
+  理由（Postgres の `text` 型が NUL バイトを構造的に拒む）・同じメッセージで例外を
+  投げる対称な入力面だったため、`content` と揃えた。`tenantId` は引き続き対象外
+  ——`ctx.tenantId` は `createMemory` 以外のほぼ全メソッドが個別に直接読む横断的な値で
+  あり、両 Fake とも `ctx` を受ける共通の入口を持たないため、検査を足すには全メソッドへ
+  の横展開が要る。孤立サロゲート（`\uD800` 等）も引き続き対象外——今の挙動（Postgres は
+  node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
+  `MemoryStore.createMemory` の doc コメントに記録した
+  （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
 
 ---
 

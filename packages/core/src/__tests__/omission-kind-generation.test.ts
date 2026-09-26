@@ -277,12 +277,24 @@ const OMISSION_PROBES: Record<Omission["kind"], OmissionProbe> = {
   over_limit: {
     drivenThrough: "recall()",
     producedAt: "recall-runtime.ts（段2 `passed.slice(limit)`）",
-    situation: "閾値を超えた候補が limit より多い（候補2件・limit 1）",
+    situation:
+      "閾値を超えた候補が limit より多い（候補2件・limit 1）。連想（既定 on、ADR 0337）は" +
+      " `association: null` で明示的に切る——このフィクスチャ（2件目が limit を超えつつ" +
+      " 1件目に酷似）は、連想が既定 on のままだと段3.5 のアンカーから2件目を拾い直し、" +
+      " over_limit(stage:'rescore') を正しく取り下げてしまう（Issue #925、" +
+      " `recall-over-limit-association-promotion.test.ts` の(a)がこの経路自体を固定する）。" +
+      " この probe が確かめたいのは「over_limit という kind の生成経路が在る」ことであり、" +
+      " 連想を含む既定構成での挙動まではこの probe の射程ではない。",
     run: async () => {
       const { runtime, stores } = buildRuntime();
       await createEmbeddedMemory(stores, [1, 0]);
       await createEmbeddedMemory(stores, [1, 0.001]);
-      const result = await runtime.recall(ctx, { vector: [1, 0], limit: 1, overFetchFactor: 10 });
+      const result = await runtime.recall(ctx, {
+        vector: [1, 0],
+        limit: 1,
+        overFetchFactor: 10,
+        association: null,
+      });
       return result.omitted;
     },
   },
