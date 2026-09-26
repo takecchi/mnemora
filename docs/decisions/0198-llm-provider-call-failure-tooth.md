@@ -236,7 +236,7 @@ README・`docs/architecture.md` §5.4 に明記するに留めた。
 反映先: `packages/core/src/interfaces/llm-provider.ts`、`packages/openai/src/llm-provider.ts`・
 `packages/openai/src/embedding-provider.ts`、`packages/anthropic/src/llm-provider.ts` の
 `client` オプション doc コメント、`docs/architecture.md` §5.4、`packages/openai/README.md`・
-`packages/anthropic/README.md`。ADR 0266 負債6 への短い相互参照も付けた（同日付追記2）。
+`packages/anthropic/README.md`。ADR 0266 負債6 への短い相互参照も付けた（同日付の追記4）。
 
 **確かめていないこと**: Issue #884 本文の実測はローカルサーバへの偽装であり、実 API
 （本物の OpenAI/Anthropic）には当てていない。401/403（認証エラー）・408/409・

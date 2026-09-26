@@ -562,7 +562,7 @@ try {
 
 ---
 
-## 追記（2026-09-26、[Issue #850](https://github.com/takecchi/mnemora/issues/850)）: core は completeStructured の返り値を再検証しない——歯2 が測るのは provider 側の parse
+## 追記3（2026-09-26、[Issue #850](https://github.com/takecchi/mnemora/issues/850)）: core は completeStructured の返り値を再検証しない——歯2 が測るのは provider 側の parse
 
 クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
 **上の本文（決定・引き受けた負債・確かめていないこと。追記1・追記2を含む）は書き換えていない。**当時の記録として残す。
@@ -579,9 +579,9 @@ fake `LLMProvider`（`{ content: 12345, provenanceKind: "stated" }` を返す）
 宣言した欄の集合に収まっている」）は、**provider（`AnthropicLLMProvider`/
 `OpenAILLMProvider`）が自前で `req.schema.parse` を呼んでいることを測るものであり、
 core 側に同等の検査を要求するものではない。**Issue #850 が指摘した穴と本 ADR の歯2 は
-別の層にある——歯2 が緑であることは、provider が契約（決定4「provider は schema に
-適合する値を返す責務を負う」の実質）を守っていることの検査であって、core がその値を
-信用しないことの保証ではない。
+別の層にある——歯2 が緑であることは、provider が契約（ADR 0072 決定3「completeStructured の戻り値は
+常に `req.schema.parse` を通した検証済みの T」）を守っていることの検査であって、core が
+その値を検証し直していることの保証ではない。
 
 **クローン miku の判断（2026-09-26）**: 実装は変えず、「provider は schema に適合する
 値を返す責務を負い、core はその値を再検証しない」を今の契約として
@@ -606,10 +606,10 @@ core 側に同等の検査を要求するものではない。**Issue #850 が�
 
 ---
 
-## 追記2（2026-09-26、[Issue #884](https://github.com/takecchi/mnemora/issues/884)）: 負債6「SDK 既定リトライ回数は測っていない」を埋めた——記録は ADR 0198 側に置く
+## 追記4（2026-09-26、[Issue #884](https://github.com/takecchi/mnemora/issues/884)）: 負債6「SDK 既定リトライ回数は測っていない」を埋めた——記録は ADR 0198 側に置く
 
 クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
-**上の本文（決定・引き受けた負債。追記1を含む）は書き換えていない。**当時の記録として残す。
+**上の本文（決定・引き受けた負債。追記1〜3を含む）は書き換えていない。**当時の記録として残す。
 コードの挙動は変えていない——この追記は記録だけである。
 
 負債6「`new Anthropic()`/`new OpenAI()` の既定リトライ回数は測っていない」は、
