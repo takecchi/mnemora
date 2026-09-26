@@ -56,6 +56,14 @@ jobs:
       - name: "配布物（packages/*/dist）が CommonJS として構文解析できること（Issue #110）"
         run: pnpm run check:cjs-parse
 
+      - name: "文書の印付きコード片（```ts check）が今の公開 API で型検査に通ること（ADR 0345）"
+        # 直前の Build ステップが作った packages/*/dist の .d.ts に当てる（自分では
+        # ビルドし直さない）。印の無い片は見ない（opt-in）ので、偽陽性が出うる母集団は
+        # 印を付けた片に閉じる——門にしてよい理由は ADR 0345 決定2。
+        # 別ジョブにしない理由は上の api:check の段と同じ（ジョブ名が required status
+        # check の文脈名そのものであり、分けると branch protection の更新が要る）。
+        run: pnpm run check:doc-snippets
+
       - name: "publish 梱包の門（pack:check）を毎PRのCIでも走らせる（Issue #241）"
         # 六つの門（docs/autonomy.md §2）のうち pack:check だけが、これまで
         # publish.yml（release / workflow_dispatch 経由）でしか走っていなかった
