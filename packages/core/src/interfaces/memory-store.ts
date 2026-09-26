@@ -1571,6 +1571,24 @@ export interface PurgeExpiredEventsOptions {
   /**
    * 1回の呼び出しで削除する上限。**必須・既定値なし**
    * （`ClaimOutboxJobsOptions.leaseMs` と同じ理由。上の interface doc 参照）。
+   *
+   * **0以上の整数を渡す前提である。負数を渡したときの結果は未定義——実装ごとに違う**
+   * （[Issue #876](https://github.com/takecchi/mnemora/issues/876)、クローン miku:
+   * 挙動を変えず、負数を「受け付けない値」として明記し、結果を実装依存のまま残す判断）。
+   *
+   * **今の実装の挙動**（2026-09-26 実測、PostgreSQL 17.11 + pgvector 0.8.0、
+   * `main` cb6d1db）:
+   *
+   * | 実装 | `limit: -1` | `limit <= -2` |
+   * |---|---|---|
+   * | `PostgresMemoryStore`（`packages/postgres`） | 例外にならず `{ purged: 0, reachedLimit: true }` を返す——`buildPurgeExpiredEventsTargetSelect` の `LIMIT ${opts.limit + 1}` が `LIMIT 0` になる**算術上の偶然**であり、狙って設計した契約ではない | 例外（`LIMIT` に負数は渡せない） |
+   * | `InMemoryMemoryStore`（`@mnemora/testkit`）／`FakeMemoryStore`（`@mnemora/core`） | 例外（`purgeExpiredEvents: limit must not be negative`） | 例外（同上） |
+   *
+   * **どちらの実装でも「誤って削除する」ことは起きない**——Postgres は0件、Fake 側は
+   * 例外。ただし `-1` の結果そのもの（例外か `purged: 0` か）は実装間で分かれたままであり、
+   * **この分岐を揃える予定は無い**——揃える2案（Fake を Postgres の `-1` に合わせる／
+   * Postgres の全負数を0件に倒す）を採らなかった理由は
+   * [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md) の2026-09-26追記を参照。
    */
   limit: number;
   /**

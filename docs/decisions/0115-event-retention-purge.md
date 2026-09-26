@@ -376,3 +376,57 @@ M1・M4 とも死亡することを確認した:**
 由来が「分からない」に劣化する——[ADR 0258](./0258-restore-superseded-operation-scope.md)
 の同日付追記に詳細（実測・採らなかった案）を記録した。**この ADR の決定1自体は変えない**
 ——「保持期間を超えたイベントは種類を問わず消える」という契約はそのまま維持する。
+
+---
+
+## 追記（2026-09-26、[Issue #876](https://github.com/takecchi/mnemora/issues/876)）: 負の `limit` は「受け付けない値」とし、結果を実装依存のまま明記する
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コードの挙動は変えていない——この追記は記録だけである。
+
+`MemoryStore.purgeExpiredEvents(ctx, { limit, ... })` の `limit` に負数を渡したときの
+挙動が、`PostgresMemoryStore` と2つの Fake（`InMemoryMemoryStore`・`FakeMemoryStore`）で
+分かれている（PR #875 の時点で発覚。詳細は Issue #876 本文）:
+
+| 実装 | `limit: -1` | `limit <= -2` |
+|---|---|---|
+| `PostgresMemoryStore` | 例外にならず `{ purged: 0, reachedLimit: true }` | 例外 |
+| `InMemoryMemoryStore`／`FakeMemoryStore` | 例外 | 例外 |
+
+**決定**: この不一致を解消しない。`PurgeExpiredEventsOptions.limit` の契約を
+「0以上の整数を渡す前提であり、負数を渡したときの結果は未定義——実装ごとに違う」と
+明記するに留める。既存の実装のコードは変えない。
+
+**理由**: `limit: -1` に対する Postgres の `{ purged: 0, reachedLimit: true }` は、
+`buildPurgeExpiredEventsTargetSelect` の `LIMIT ${opts.limit + 1}` が `LIMIT 0` に
+なる**算術上の偶然**であり、`purgeExpiredEvents` の契約として狙って設計したものでは
+ない。Fake 側が `-1` を含む全ての負数を一律に拒む判断（PR #811・PR #875）は、
+「誤って削除しない」ことを優先した安全側の選択であり、それ自体は正しい。**どちらの
+実装でも実害（意図しない削除）は起きない**——Postgres は0件、Fake は例外。実害が
+無い分岐を、どちらかに合わせるために本番のコードを触る理由が無い。
+
+**採らなかった案**:
+
+(a) **Fake を Postgres の `-1` の振る舞い（`purged: 0`、`reachedLimit: true`）に
+合わせる。** 却下——上記の通り、Postgres の `-1` は `limit + 1` の算術が生んだ偶然の
+副作用であり、契約として真似る理由が無い。Fake がこれを模すには「`limit === -1` の
+1点だけ特別扱いする」条件分岐を新たに書く必要があり、その分岐自体が「なぜ `-1` だけ
+特別か」を説明できない（説明できるのは実装の都合だけである）。
+
+(b) **負数をすべて `purged: 0` にする（Postgres 側にガードを足して揃える）。**
+却下——`PostgresMemoryStore.purgeExpiredEvents` に新しい早期 return を足すことは、
+`limit: -1` を渡している既存の呼び出し側（本番）から見える挙動を変える、利用者に
+見える挙動の変更になる。得るものに対してコストが見合わない。
+
+**確かめたこと（2026-09-26 実測、PostgreSQL 17.11 + pgvector 0.8.0、`main` cb6d1db）**:
+`PostgresMemoryStore.purgeExpiredEvents(ctx, { olderThan, limit: -1 })` は
+`dryRun` の有無に関わらず `{ purged: 0, reachedLimit: true, oldestPurgedAt: null,
+newestPurgedAt: null, dryRun }` を返した。`reachedLimit: true` になるのは、
+`buildPurgeExpiredEventsTargetSelect` が返す0行に対し、呼び出し側が
+`rows.length > opts.limit`（`0 > -1`）で判定するため——コード上の算術から導ける値と
+一致した。
+
+**確かめていないこと**: `limit <= -2`（`-2`・`NaN`・`Infinity`・非整数）を、この
+追記のために手元の Postgres へ改めて当ててはいない——PR #804・PR #875 の実測（Issue
+#876 本文に引用）を踏襲した。

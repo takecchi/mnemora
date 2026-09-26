@@ -718,11 +718,15 @@ export class FakeMemoryStore implements MemoryStore {
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
     // `PostgresMemoryStore.purgeExpiredEvents` は `opts.limit`（+1件）を生 SQL の
-    // `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は
-    // 例外になる（実測）。ここで検査せず `candidates.slice(0, opts.limit)` へ渡すと
-    // `Array.prototype.slice` の意味論を踏んで誤った件数を削除してしまう——
-    // `InMemoryMemoryStore.purgeExpiredEvents`（`packages/testkit`、PR #804/#811）と
-    // 同じ形の不一致（`fake-store-postgres-parity.test.ts` が歯）。
+    // `LIMIT`（bigint パラメータ）にそのまま渡すため、`NaN`・`Infinity`・非整数と
+    // `opts.limit <= -2` は例外になる（実測）。ただし `opts.limit === -1` の1点だけは
+    // `LIMIT opts.limit + 1` が `LIMIT 0` になり例外を投げず `{ purged: 0,
+    // reachedLimit: true }` を返す——`InMemoryMemoryStore.purgeExpiredEvents`
+    // （`packages/testkit`、PR #804/#811）と同じ不一致であり、今の契約として残す
+    // （Issue #876、`PurgeExpiredEventsOptions.limit` の doc 参照）。ここで検査せず
+    // `candidates.slice(0, opts.limit)` へ渡すと `Array.prototype.slice` の意味論を踏んで
+    // 誤った件数を削除してしまうため、負数はすべて一様に拒む
+    // （`fake-store-postgres-parity.test.ts` が歯。`-1` ではなく `-2` で確認している）。
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeExpiredEvents: limit must be an integer (got ${opts.limit})`);
     }
