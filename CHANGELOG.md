@@ -127,6 +127,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ——既存の `MemoryStore` 実装（第三者 adapter を含む）の挙動は1バイトも変えない。
   `PostgresMemoryStore.reinforceMany` は件数によらず定数2往復（[Issue #874](https://github.com/takecchi/mnemora/issues/874) /
   [ADR 0303](./docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節、PR #917）。
+- **`RecalledMemory` に任意欄 `basisLost?: true` を足した**——`provenanceKind === 'inferred'`
+  で、かつその根拠（`basis.memoryIds`）の少なくとも1件が失われている（存在しない・
+  `status === 'forgotten'`・`purgedAt` が非 `null`）ときだけ `true` を返す
+  （docs/memory-model.md §2 が約束していた「根拠を失った推論に印を付けて返す」の実装）。
+  `basis` の中身（`memoryIds`/`observationIds`）は返さない——それ以外はキー自体を出さない。
+  `MemoryStore` の interface は変えていない（既存の `getMany` だけを使う。recall 1回あたり
+  最大+1往復）（[Issue #883](https://github.com/takecchi/mnemora/issues/883) /
+  [ADR 0342](./docs/decisions/0342-recalled-memory-basis-lost.md)）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

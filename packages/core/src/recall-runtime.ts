@@ -1732,6 +1732,49 @@ export async function runRecall(
     keptUnits.flatMap((unit) => unit.members.map((member) => member.memory.id)),
   );
 
+  // -------------------------------------------------------------------
+  // Issue #883（ADR 0342）: `basisLost` の解決。budget 切り詰め後（`keptUnits`）に
+  // 実際に返る記憶のうち `provenanceKind === "inferred"` なものだけを見て、
+  // `basis.memoryIds` を重複除去して集め、`MemoryStore.getMany` を**1回だけ**呼ぶ
+  // （集めた id が0件なら呼ばない——決定4）。書き込み時の事前計算はしない。
+  //
+  // 「失われている」の定義（3つのうち1つでも当たれば失われている。`RecalledMemory.basisLost`
+  // の doc コメントと同じ規律）: getMany の結果に無い（存在しない/他テナント/形式不正、
+  // getMany の doc コメントの契約そのまま）／`status === "forgotten"`／`purgedAt` が
+  // 非 `null`。`archived`/`superseded`/`contested` は本文が残り復帰経路があるので
+  // 失われていない扱い（docs/memory-model.md §11 行7・14・15）。
+  //
+  // `basis.observationIds` は確かめない——Observation は追記専用で forget/purge の経路が
+  // 無く、一括取得口も無い（ADR 0342「引き受けた負債」）。
+  // -------------------------------------------------------------------
+  const inferredBasisMemoryIds = new Set<MemoryId>();
+  for (const unit of keptUnits) {
+    for (const member of unit.members) {
+      if (member.memory.provenance.kind === "inferred") {
+        for (const basisMemoryId of member.memory.provenance.basis.memoryIds) {
+          inferredBasisMemoryIds.add(basisMemoryId);
+        }
+      }
+    }
+  }
+  const lostBasisMemoryIds = new Set<MemoryId>();
+  if (inferredBasisMemoryIds.size > 0) {
+    const basisMemories = await deps.memoryStore.getMany(ctx, [...inferredBasisMemoryIds]);
+    const basisMemoriesById = new Map(basisMemories.map((m) => [m.id, m]));
+    for (const basisMemoryId of inferredBasisMemoryIds) {
+      const basisMemory = basisMemoriesById.get(basisMemoryId);
+      // getMany は存在しない/クロステナントの id を静かに落とす契約（`getMany` の doc
+      // コメント参照）——見つからないこと自体が「失われている」の1つ目の当たり方。
+      if (
+        !basisMemory ||
+        basisMemory.status === "forgotten" ||
+        (basisMemory.purgedAt ?? null) !== null
+      ) {
+        lostBasisMemoryIds.add(basisMemoryId);
+      }
+    }
+  }
+
   const finalMemories: RecalledMemory[] = keptUnits.flatMap((unit) =>
     unit.members.map((member) => {
       const recalled: RecalledMemory = {
@@ -1784,6 +1827,15 @@ export async function runRecall(
         keptMemoryIds.has(member.memory.contestedWithId)
       ) {
         recalled.contestedWith = member.memory.contestedWithId;
+      }
+      // Issue #883（ADR 0342）: inferred で、かつ basis.memoryIds の少なくとも1件が
+      // 上で確定した lostBasisMemoryIds に当たるときだけ付ける。それ以外はキー自体を
+      // 出さない（`companionOf`/`associationOf`/`contestedWith` と同じ `?: true` の作法）。
+      if (
+        member.memory.provenance.kind === "inferred" &&
+        member.memory.provenance.basis.memoryIds.some((id) => lostBasisMemoryIds.has(id))
+      ) {
+        recalled.basisLost = true;
       }
       return recalled;
     }),

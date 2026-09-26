@@ -36,7 +36,7 @@ import {
  *   `anchorCount`（既定3）自体は増えないことを利用して、逆に
  *   「アンカー数由来の往復は一定である」ことの土台として使う。
  *
- * **⭐ 歯4（新設）は上の「固定しないもの」を覆す。** `VectorStore.searchMany?`
+ * **⭐ 歯5（新設）は上の「固定しないもの」を覆す。** `VectorStore.searchMany?`
  * （任意メソッド、Issue #377／ADR 0151 追記）を `PostgresVectorStore` に実装し、
  * `recall-runtime.ts` の段3.5がそれを使えるときは全アンカーを1回の往復に束ねる
  * ようにした後は、`anchorCount` を増やしても往復数は増えない——アンカーごとの
@@ -368,7 +368,88 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     expect(roundtripsN20).toBe(roundtripsN1);
   });
 
-  it("歯4: 連想枠 on — anchorCount=1/3/10 で往復数が等しい（Issue #377、VectorStore.searchMany? を束ねた後）", async () => {
+  it("歯4（Issue #883・ADR 0342）: RecalledMemory.basisLost の解決は、inferred が無ければ+0往復、在れば basis の件数に関わらず+1往復のまま増えない", async () => {
+    const ctx: Ctx = { tenantId: `tenant-rtc-basislost-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+
+    // `memories_check`（0001_init.sql 68行）: inferred は source_observation_id が
+    // 必須（observations への FK）。まず本物の Observation を1件作る。
+    async function createInferredMemory(
+      vector: number[],
+      digest: string,
+      basisMemoryIds: string[],
+    ) {
+      const observation = await memoryStore.createObservation(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: null,
+        kind: "utterance",
+        payload: { text: "fixture" },
+        occurredAt: null,
+      });
+      return createEmbeddedMemory(memoryStore, vectorStore, ctx, vector, {
+        digest,
+        sourceObservationId: observation.id,
+        provenance: {
+          kind: "inferred",
+          model: "test-model",
+          promptVersion: "v1",
+          basis: { memoryIds: basisMemoryIds, observationIds: [] },
+          confidence: 0.9,
+        },
+      });
+    }
+
+    // 基準: inferred を含まない recall（連想枠 off——`association: null`——で、
+    // 段3の同伴取得も `scope.attributes` も踏まないようにする。歯1・歯2 と同じ
+    // 「候補フェッチ以外の getMany 経路を混ぜない」配置）。
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], { digest: "plain-1" });
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.01, 0], {
+      digest: "plain-2",
+    });
+    const baselineRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 1件の inferred、basis 1件。
+    const basis = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: "basis" }),
+    );
+    await createInferredMemory([0.98, 0.02, 0], "inferred-with-1-basis", [basis.id]);
+    const oneBasisRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(oneBasisRoundtrips).toBe(baselineRoundtrips + 1);
+
+    // さらに4件の inferred（合計5件）、それぞれ basis 5件（新規24件 + 既存1件 = のべ29件、
+    // ユニークな basis memoryId は25件超）を追加する——basis の件数を増やしても
+    // 往復数が変わらないことを見るのが目的なので、絶対数そのものは固定しない。
+    for (let i = 0; i < 4; i += 1) {
+      const basisIds: string[] = [basis.id];
+      for (let j = 0; j < 5; j += 1) {
+        const b = await memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: `basis-${i}-${j}` }),
+        );
+        basisIds.push(b.id);
+      }
+      await createInferredMemory(
+        [0.97 - i * 0.001, 0.03 + i * 0.001, 0],
+        `inferred-${i}`,
+        basisIds,
+      );
+    }
+    const manyBasisRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 固定するのはこれだけ: inferred の件数・basis の件数が増えても、
+    // basisLost の解決に要る往復は常に+1のまま増えない。
+    expect(manyBasisRoundtrips).toBe(oneBasisRoundtrips);
+  });
+
+  it("歯5: 連想枠 on — anchorCount=1/3/10 で往復数が等しい（Issue #377、VectorStore.searchMany? を束ねた後）", async () => {
     // `seedRoundtripCorpus` は ANCHOR + SECOND + THIRD + FILLER(47件) を持つ
     // （ファイル冒頭の doc コメント参照）。全50件が段2の閾値(0.1)を超えるので、
     // `limit=20` の `withinLimit` は常に20件——`anchorCount` を 1/3/10 のどれに

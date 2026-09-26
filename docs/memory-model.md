@@ -74,15 +74,23 @@ kind ごとに形が違う部分）は `provenance` jsonb 列にまとめる。�
 「推論は、その根拠と必ず同時に提示する」という規律を、根拠が失われた場合にも一貫させるなら、
 「根拠が失われたという事実」を提示するのが唯一の整合的な振る舞いになる。
 
-**⚠ 未実装（[Issue #883](https://github.com/takecchi/mnemora/issues/883)）。**
-この約束は消さない——元の設計思想はそのまま保つ。ただし今日この印を付ける経路は無い。
-`Memory`（`packages/core/src/memory.ts`）にも、`MemoryStore.get()` の戻り値にも、
-`recall()` が返す記憶にも、「`basis` が解決できるか」を運ぶ欄が無い（`packages/core`
-全体を `根拠を失った|basisLost|orphanedBasis|lostBasis` で grep して0件だったことを含め、
-Issue #883 が確認済み）。`recall()` は `provenanceKind` だけを返し `basis` そのものは
-返さない設計であり（`packages/core/src/recall.ts` の doc コメント）、この印をどの型に・
-どの時点で持たせるかは決まっていない——`basis` の参照先が `forgotten`/`purge()` されても、
-呼び出し側にはどこにも出ない。実装の仕事として Issue #883 は開けたままにしてある。
+**実装済み（[Issue #883](https://github.com/takecchi/mnemora/issues/883)、
+[ADR 0342](./decisions/0342-recalled-memory-basis-lost.md)）。**
+`RecalledMemory`（`packages/core/src/recall.ts`）に任意欄 `basisLost?: true` を足した。
+`provenanceKind === 'inferred'` で、かつ `basis.memoryIds` の少なくとも1件が失われている
+（`MemoryStore.getMany` の結果に無い・`status === 'forgotten'`・`purgedAt` が非 `null`の
+いずれか）ときだけ `true` を書き、それ以外はキー自体を出さない——`basis` そのもの
+（`memoryIds`/`observationIds`）は今回も返さない（`provenanceKind` の doc コメントが
+説明する設計原理をそのまま保つ）。`archived`/`superseded`/`contested` は本文が残り
+復帰経路があるため、失われていない扱い（§11）。
+
+🔴 **`basis.observationIds` は確かめない。**Observation は追記専用で forget/purge/削除の
+経路がコードに無く（§11 行1）、一括取得口も存在しないため——「探したが無かった」ではなく
+「そもそも探していない」（[ADR 0257](./decisions/0257-searched-and-found-nothing-versus-did-not-search.md)
+の区別）。また、本番で `inferred` を作る唯一の経路（`extraction.ts`）は
+`basis.memoryIds` を常に空配列で書くため、今日の抽出パイプラインが作った記憶にはこの印は
+今のところ立たない——`basis.memoryIds` を持つ `inferred` を書く経路（`createMemory` を
+直接叩く等）が在ってはじめて効く。詳細は ADR 0342「引き受けた負債」。
 
 ---
 
