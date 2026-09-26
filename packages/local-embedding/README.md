@@ -465,6 +465,8 @@ const provider = new LocalEmbeddingProvider({ repo: "my-ruri", createPipeline })
   **`createPipeline` を注入して、本物のモデルを落とさずに走る。**CI で必ず走る。
   遅延ロードを1回に畳むこと・失敗後に再試行できること・次元と件数の検査・
   prefix の適用・`warmup()` を測る。
+
+  ⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）: `embed()` は件数と次元に加えて、成分が有限か（`NaN`・`Infinity` を含まないか）も検査し、含んでいれば次元の検査と同じ素の `Error` を投げる（Issue #992）。この検査も同じテストファイルで測っている。
 - `src/__tests__/input-token-limit.test.ts` — **擬似の extractor を注入して、
   上限の受け取りと超過の名乗り方を測る。**CI で必ず走る（ADR 0090）。
   ⚠ **ここでは `8192` という数字は測っていない**——それはモデルが持つ事実であり、
