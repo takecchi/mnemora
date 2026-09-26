@@ -577,6 +577,11 @@ Issue #959 が挙げていた2案のうち、(B)（段3.5で選んだ contested 
 4. 取得できなければ（forget 済み・存在しない・片側だけの `contested`（`contestedWithId`
    が無い）・`attributes` の絞り込みで外れた、等）、その候補ごと Unit を組まず落とす。
 
+落とした件数は、段3と同じ `unit_assembly_dropped`（`countKind: "lower_bound"`）で名乗る。
+段3が同じ recall で既にこの札を積んでいれば、段3.5 の件数はその `count` に足し、
+同じ kind のエントリを2件に割らない（`UnitAssemblyDroppedOmission` は段を持たない型であり、
+2件に割ると `find` で1件を読む呼び手が段3.5 の分を取りこぼすため）。
+
 ### 席（`maxCount`）の数え方 — 段3の `limit` の扱いに揃えた
 
 **連想枠の席は「Unit の数」で数え、必須の同伴は席を食わない。** 段3の現物

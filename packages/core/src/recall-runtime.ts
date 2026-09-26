@@ -46,6 +46,7 @@ import type {
   RecalledMemory,
   ScoreBreakdown,
   StageTrace,
+  UnitAssemblyDroppedOmission,
 } from "./recall.js";
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
@@ -1804,14 +1805,23 @@ export async function runRecall(
         }
         if (associationUnitAssemblyShortfall > 0) {
           // 段3と同じ札・同じ countKind（ADR 0043）。`UnitAssemblyDroppedOmission` は
-          // stage を持たない公開型なので、既存の段3のエントリを書き換えるのではなく、
-          // 段3.5 分をもう1件積む——`omission-kind-generation.test.ts` は
-          // `.filter()`/`.some()` で見ており、同じ kind の複数エントリを許容する。
-          omitted.push({
-            kind: "unit_assembly_dropped",
-            count: associationUnitAssemblyShortfall,
-            countKind: "lower_bound",
-          });
+          // stage を持たない公開型なので、段3が既に積んでいればその件数に足し、
+          // 同じ kind のエントリを2件に割らない（`find` で1件を読む呼び手が段3.5 分を
+          // 取りこぼさないように）。
+          const existingIndex = omitted.findIndex((o) => o.kind === "unit_assembly_dropped");
+          if (existingIndex !== -1) {
+            const existing = omitted[existingIndex] as UnitAssemblyDroppedOmission;
+            omitted[existingIndex] = {
+              ...existing,
+              count: existing.count + associationUnitAssemblyShortfall,
+            };
+          } else {
+            omitted.push({
+              kind: "unit_assembly_dropped",
+              count: associationUnitAssemblyShortfall,
+              countKind: "lower_bound",
+            });
+          }
         }
       }
     }

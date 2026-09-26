@@ -221,6 +221,32 @@ describe("recall() — 段3.5(連想枠)の contested 候補にも必須の同�
     );
   });
 
+  it("段3と段3.5の両方で Unit が落ちても、unit_assembly_dropped は1件にまとまり件数が足される", async () => {
+    const { runtime, stores } = buildRuntime();
+    const a = await createEmbeddedMemory(stores, [1, 0, 0, 0], { digest: "A" });
+    // 段3で落ちる組: B は limit 内に入るが、対向 B2 は forget 済み。
+    const b = await createEmbeddedMemory(stores, [0.99, 0.01, 0, 0], { digest: "B" });
+    const b2 = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B2" }));
+    expect((await runtime.markContested(ctx, b.id, b2.id)).outcome.kind).toBe("contested");
+    await runtime.forget(ctx, { memoryId: b2.id });
+    // 段3.5で落ちる組: C1 は limit の外で連想枠に拾われ、対向 C2 は forget 済み。
+    const c1 = await createEmbeddedMemory(stores, [0.9, 0.1, 0, 0], { digest: "C1" });
+    const c2 = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "C2" }));
+    expect((await runtime.markContested(ctx, c1.id, c2.id)).outcome.kind).toBe("contested");
+    await runtime.forget(ctx, { memoryId: c2.id });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0, 0], limit: 2 });
+
+    await assertNoLoneContested(stores, result);
+    const ids = result.memories.map((m) => m.memoryId);
+    expect(ids).toContain(a.id);
+    expect(ids).not.toContain(b.id);
+    expect(ids).not.toContain(c1.id);
+    const dropped = result.omitted.filter((o) => o.kind === "unit_assembly_dropped");
+    expect(dropped).toHaveLength(1);
+    expect(dropped[0]).toMatchObject({ count: 2, countKind: "lower_bound" });
+  });
+
   it("連想枠自身が contested の両側を別々のアンカーから選んでも、1つの Unit にまとまり重複しない（#823/#925 の排他性を壊さない）", async () => {
     const { runtime, stores } = buildRuntime();
     const q = await createEmbeddedMemory(stores, [1, 0, 0, 0], { digest: "Q" });
