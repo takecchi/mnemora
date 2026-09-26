@@ -144,13 +144,21 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  * `mnemora_lexical_query_or`/`mnemora_lexical_query_tsqueries` に渡る——新しい例外には
  * しない（呼び出し側を壊さない）。理由・採らなかった案は `capLexicalQueryWords` の doc と
  * ADR 0092 追記節を見ること。
+ *
+ * **Issue #1050: `opts.ctxTenantId` を渡すと、`filter.tenantId` に加えてそのテナントでも
+ * 絞る（AND）。**`PostgresLexicalStore.search` は常に `ctx.tenantId` を渡す——隔離の境界は
+ * `ctx.tenantId` である（ADR 0007）。2つが食い違えば0件になり、例外は投げない。
+ * 公開 API に足す欄なので省略可能にしてあり、省略すれば従来どおり `filter.tenantId` だけで絞る。
  */
 export function buildLexicalSearchSelect(
   query: string,
-  opts: { limit: number; filter: LexicalFilter },
+  opts: { limit: number; filter: LexicalFilter; ctxTenantId?: string },
 ): SQL {
   const cappedQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
+  if (opts.ctxTenantId !== undefined) {
+    conditions.push(sql`tenant_id = ${opts.ctxTenantId}`);
+  }
   if (opts.filter.status !== undefined) {
     conditions.push(sql`status = ANY(${sql.param(opts.filter.status)}::text[])`);
   }
@@ -297,7 +305,7 @@ export class PostgresLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
-    const select = buildLexicalSearchSelect(query, opts);
+    const select = buildLexicalSearchSelect(query, { ...opts, ctxTenantId: ctx.tenantId });
     const result = await this.db.execute(select);
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; coverage: number; rank: number };

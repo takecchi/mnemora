@@ -38,7 +38,7 @@ append-only・並び順・外部キー相当の契約などを検査できる。
 `describeLexicalStoreConformance` / `describeOutboxStoreConformance` /
 `describeTenantSettingsStoreConformance` / `describeEmbeddingProviderConformance` がある)。
 
-```ts
+```ts check
 // my-event-store.test.ts
 import { randomUUID } from "node:crypto";
 import type { Ctx, EventFilter, EventId, EventStore, MemoryEvent, NewMemoryEvent } from "@mnemora/core";
@@ -97,7 +97,7 @@ npx vitest run my-event-store.test.ts
 `LLMProvider` / `EmbeddingProvider` の本物（[`@mnemora/openai`](../openai/README.md)）を
 CI で叩けない（API キーが無い）場合に備えて、決定的な擬似実装を export している。
 
-```ts
+```ts check
 import { DeterministicLLMProvider, DeterministicEmbeddingProvider } from "@mnemora/testkit";
 
 const llmProvider = new DeterministicLLMProvider();

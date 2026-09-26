@@ -541,16 +541,23 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  * 足したことは、この形自体には影響しない（`LEFT` も `query` の束縛パラメータだけに
  * 依存する IMMUTABLE な式であり、他リレーションの列参照にはしていない）。
  * `trigram-lexical-store.postgres.test.ts` の索引の歯がそのまま通ることを確認している。
+ *
+ * **Issue #1050: `opts.ctxTenantId` は `buildLexicalSearchSelect` と同じ欄・同じ意味**
+ * （`filter.tenantId` との AND。`PostgresTrigramLexicalStore.search` は常に `ctx.tenantId`
+ * を渡す。省略すれば従来どおり）。
  */
 export function buildTrigramLexicalSearchSelect(
   query: string,
-  opts: { limit: number; filter: LexicalFilter; threshold: number },
+  opts: { limit: number; filter: LexicalFilter; threshold: number; ctxTenantId?: string },
 ): SQL {
   // Issue #878: 全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc）は
   // ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
   const totalCappedQuery = capLexicalQueryTotalChars(query);
   const asciiQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
+  if (opts.ctxTenantId !== undefined) {
+    conditions.push(sql`tenant_id = ${opts.ctxTenantId}`);
+  }
   if (opts.filter.status !== undefined) {
     conditions.push(sql`status = ANY(${sql.param(opts.filter.status)}::text[])`);
   }
@@ -724,7 +731,7 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
   }
 
   async search(
-    _ctx: Ctx,
+    ctx: Ctx,
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
@@ -740,7 +747,11 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
     // 各 `db.transaction` 呼び出しと同じ前提）。
     return this.db.transaction(async (tx) => {
       await tx.execute(sql.raw(`SET LOCAL pg_trgm.word_similarity_threshold = ${threshold}`));
-      const select = buildTrigramLexicalSearchSelect(query, { ...opts, threshold });
+      const select = buildTrigramLexicalSearchSelect(query, {
+        ...opts,
+        threshold,
+        ctxTenantId: ctx.tenantId,
+      });
       const result = await tx.execute(select);
       return result.rows.map((row) => {
         const r = row as unknown as { memory_id: string; coverage: number; rank: number };

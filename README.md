@@ -48,7 +48,7 @@ Application → Agent / LLM → Cognitive Runtime → Storage / LLM / Queue
 `createRuntime()`（`@mnemora/core`）が返す `runtime` のメソッドであり、
 **すべて第一引数に `ctx`（`tenantId` 必須）を取る。**
 
-```ts
+```ts check
 import type { Runtime } from "@mnemora/core";
 
 // runtime は createRuntime() で組み立てる（実装は @mnemora/postgres・@mnemora/openai から。
@@ -352,7 +352,7 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 会話の長さによって変わる**——短い会話では mnemora のほうが大きい。
 その判定は `@mnemora/core` の**純関数**として提供する（[ADR 0147](./docs/decisions/0147-recall-footprint-estimator.md)）。
 
-```ts
+```ts check
 import { compareWithFullLog } from "@mnemora/core";
 
 const verdict = compareWithFullLog({
@@ -385,7 +385,7 @@ mnemora を使うという判断はありうる。**
 
 **上の5つは、すべて第一引数に `ctx` を取る。**その `ctx` が、記憶を誰に紐づけるかを決める。
 
-```ts
+```ts check
 // tenantId は必須。subjectId は省略できる。
 const ctx = { tenantId: "guild-123", subjectId: "user-456" }
 
@@ -466,7 +466,7 @@ claim key 衝突検出を除く。下記）。
 
 ### (a) `observe()` だけの場合
 
-```ts
+```ts check
 await runtime.observe(ctx, { kind: "utterance", text: "私の好きな色は青です。", speaker: "user" });
 await runtime.observe(ctx, {
   kind: "utterance",
@@ -504,7 +504,7 @@ deterministic provider、`pnpm --filter @mnemora/example-chat run correction`）
 
 呼び出し側が「これは訂正だ」と判断したら、次の3段を明示的に踏む:
 
-```ts
+```ts check
 // 1. 発見: 既存の recall() を1回呼ぶだけ。書き込み・LLM 呼び出しは無い（ADR 0232）。
 const discovery = await runtime.findCorrectionCandidates(ctx, {
   text: "訂正します。よく考えたら、好きな色は青ではなく赤でした。",
@@ -514,7 +514,8 @@ const discovery = await runtime.findCorrectionCandidates(ctx, {
 
 // 2. 選択: どの候補が「訂正される相手」かを、呼び出し側が決める。
 //    discovery.candidates[0] を機械的に採らない——下の「関連度だけで確定しない」を参照。
-const correctedId = /* 呼び出し側が選んだ memoryId（人が選ぶ・UI で選ばせる 等） */;
+// 呼び出し側が選んだ memoryId（人が選ぶ・UI で選ばせる 等）。ここでは型だけを示す。
+declare const correctedId: string;
 
 // 3. 確定・書き込み: 選んだ相手が候補一覧に実在するかを照合してから markContested する。
 const marked = await runtime.applyCorrection(ctx, {

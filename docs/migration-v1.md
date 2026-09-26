@@ -508,7 +508,7 @@ filteredNotYetValid: { count: number; countKind: CountKind };  // validFrom > va
 
 **何をすればよいか**: 分岐に2ケースを足す。
 
-```ts
+```ts check
 switch (omission.condition) {
   case "tenant": /* ... */ break;
   case "superseded": /* ... */ break;
@@ -564,7 +564,9 @@ async getRecall(ctx: Ctx, recallId: RecallId): Promise<RecallRecord | null> {
 
 **何をすればよいか**: 呼び出しに `supportsDecayClock: boolean` を追加する。
 
-```ts
+```ts check
+import { describeTenantSettingsStoreConformance } from "@mnemora/testkit";
+
 describeTenantSettingsStoreConformance({
   name: "my-tenant-settings-store",
   createStore: () => new MyTenantSettingsStore(),
