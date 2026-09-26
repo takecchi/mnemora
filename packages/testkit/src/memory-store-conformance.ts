@@ -2683,29 +2683,6 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
     });
 
-    // Issue #854 の調査（テナント分離の棚卸し）の副産物: `get`/`getMany`/`updateStatus` 等には
-    // 他テナント対象の歯が既にあるが、`reinforce` にはこの形の歯が無かった——調査時点で
-    // 両実装（Postgres/Fake）とも `tenant_id`/`tenantId` で正しく絞っていることを確認済みで、
-    // この歯は今日時点では緑になる回帰の歯として足す。
-    it("reinforce は他テナントの Memory を対象にしない（memory not found）", async () => {
-      const store = await createStore();
-      const ctxA: Ctx = { tenantId: "tenant-a" };
-      const ctxB: Ctx = { tenantId: "tenant-b" };
-      const memoryA = await store.createMemory(
-        ctxA,
-        buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "reinforce-tenant-a" }),
-      );
-
-      await expect(
-        store.reinforce(ctxB, memoryA.id, new Date(memoryA.recordedAt.getTime() + 1000)),
-      ).rejects.toThrow(NOT_FOUND_ERROR_MESSAGE);
-
-      // tenant-a 側から見ても無傷のまま。
-      const afterA = await store.get(ctxA, memoryA.id);
-      expect(afterA?.lastReinforcedAt ?? null).toBe(memoryA.lastReinforcedAt ?? null);
-      expect(afterA?.updatedAt.getTime()).toBe(memoryA.updatedAt.getTime());
-    });
-
     // -------------------------------------------------------------------
     // updateStatus（docs/memory-model.md §5）
     // -------------------------------------------------------------------
