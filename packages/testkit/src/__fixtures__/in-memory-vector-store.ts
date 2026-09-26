@@ -295,7 +295,13 @@ export class InMemoryVectorStore implements VectorStore {
     // （距離だけでなく完全なタイブレークまで含めて決定的な順序を返すこと）を満たしていなかった
     // （`packages/testkit/src/__tests__/in-memory-vector-store-tiebreak.test.ts` が歯）。
     hits.sort((a, b) => {
-      if (a.distance !== b.distance) return a.distance - b.distance;
+      // 距離 `NaN`（ゼロベクトル、ADR 0040）は Postgres の `float8` と同じく、どの有限値よりも
+      // 大きく、`NaN` どうしは同点として扱う（Issue #983）。`a.distance - b.distance` だけだと
+      // `NaN` で比較関数が一貫せず、ゼロベクトルの候補の位置が挿入順しだいで揺れる。
+      const aNaN = Number.isNaN(a.distance);
+      const bNaN = Number.isNaN(b.distance);
+      if (aNaN !== bNaN) return aNaN ? 1 : -1;
+      if (!aNaN && a.distance !== b.distance) return a.distance - b.distance;
       const recordedAtDiff = b.recordedAt.getTime() - a.recordedAt.getTime();
       if (recordedAtDiff !== 0) return recordedAtDiff;
       return a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0;
