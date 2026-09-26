@@ -205,7 +205,7 @@ digest 安全弁と対になる）。
 |---|---|---|
 | Observation | `externalId`（テナント内一意, 任意） | 再送は同じ Observation を返す |
 | 抽出 → Memory | `(observationId, extractorVersion)` | `(tenant_id, source_observation_id, extractor_version, content_hash)` に一意制約 |
-| 使用報告 | `(recall_id, memory_id)` | 主キー。再送は挿入が弾かれるだけ。`last_reinforced_at` / `strength` は挿入が実際に起きたときだけ更新する |
+| 使用報告 | `(recall_id, memory_id)` | 主キー。再送は挿入が弾かれるだけ。`last_reinforced_at` / `decay_floor_at` は挿入が実際に起きたときだけ更新する（`strength` は動かさない。[ADR 0041](./decisions/0041-reinforce-does-not-change-strength.md)） |
 
 この対応表が示す通り、**「使われたかどうか」は行の存在で表現する**。カラムを+1するのではない。
 
@@ -608,8 +608,10 @@ type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgot
 - `getMany` は `get` の複数件版。**存在しない・クロステナントの id は結果から静かに除く**
   （エラーにしない）。呼び出し側が「要求した件数」と「返ってきた件数」の差分から
   欠落を検知できるようにする（recall 側で `omitted` に変換する）。
-- `reinforce` は挿入が実際に起きたときだけ `last_reinforced_at` / `strength` を更新し、
+- `reinforce` は挿入が実際に起きたときだけ `last_reinforced_at` を更新し、
   `decay_floor_at` を再計算する（§3.5・[docs/memory-model.md](./memory-model.md)）。
+  **`strength` は動かさない**（[ADR 0041](./decisions/0041-reinforce-does-not-change-strength.md)。
+  `strength` は初期値として設定できる欄のままであり、強化では変化しない）。
 - `recordUsage` は `(recall_id, memory_id)` の一意制約により冪等（§3.5 の使用報告と同じ表）。
   再送で新規に挿入されなかった id は `insertedMemoryIds` に含めない。
 - `status = 'contested'` の Memory を単独で返す呼び出し側（recall の内部実装）は、対向する
