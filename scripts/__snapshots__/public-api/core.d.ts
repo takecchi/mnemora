@@ -1235,6 +1235,7 @@ export interface ObserveDocumentInput {
 }
 export interface ObserveMemoryUsageInput {
     kind: "memory_usage";
+    externalId?: string;
     recallId: string;
     usedMemoryIds: string[];
 }
@@ -1347,6 +1348,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"memory_usage">;
+        externalId: z.ZodOptional<z.ZodString>;
         recallId: z.ZodString;
         usedMemoryIds: z.ZodArray<z.ZodString>;
     }, z.core.$strip>

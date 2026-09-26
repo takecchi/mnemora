@@ -90,6 +90,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
   無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
   [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
+- **`ObserveMemoryUsageInput`（`observe({ kind: 'memory_usage', ... })`）に他3種
+  （utterance/event/document）と同じ任意欄 `externalId?: string` を足した**——
+  `observations` 行の冪等化（テナント内一意、再送は同じ Observation を返す）が
+  `memory_usage` にも構造的に効くようになった（以前は `handleMemoryUsage` が
+  `externalId: null` を固定で渡しており、同じ使用報告を再送するたびに `observations`
+  行が増え続けていた。`recall_usages`/`reinforce` 自体は元から冪等）。省略時の挙動は
+  無変更。マイグレーションは無し——`0001_init.sql` の `uq_observations_external_id` は
+  元から kind を問わない一意制約だった（[Issue #870](https://github.com/takecchi/mnemora/issues/870) /
+  [ADR 0009](./docs/decisions/0009-usage-feedback-via-observe.md) 追記、PR #913）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

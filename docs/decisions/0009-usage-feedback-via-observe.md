@@ -113,3 +113,53 @@
 **残るもの**: 「なぜ強化されたか」を `memory_events` から後で引く経路は無い。使用の事実は
 `recall_usages`（`recall_id`・`memory_id`・`used_at`）から引く。
 Issue #871 が触れている別の穴（#840、強化が `status` を見ない）は、この追記では扱っていない。
+
+## 追記（2026-09-26、[Issue #870](https://github.com/takecchi/mnemora/issues/870)）: `memory_usage` にも `externalId` を持たせ、`observations` 行を冪等化した
+
+⚠ この追記はクローン miku の判断による（オーナー本人の決定ではない。
+[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+上の本文（決定・理由・結果）は書き換えていない。
+
+**なぜこの ADR に書くか**: 上の理由2は「`observe()` は既に `externalId` による冪等性の仕組みを
+持っており、`memory_usage` もその枠組み（`(recall_id, memory_id)` 主キー、
+`docs/decisions/0006-memory-schema.md` 参照）にそのまま乗せられる」と書いていたが、実際に
+挙げたキーは `externalId` ではなく `recall_usages` テーブル自身の主キーであり、`observations`
+行そのものを `externalId` で冪等化するかどうかは、本文の時点では決め切れていなかった。
+Issue #870 がこの食い違いを実測し、2つの選択肢（`ObserveMemoryUsageInput` に `externalId` を
+足すか、`observations` 行は監査ログとして増え続けてよいと明示するか）を起票した。
+
+**決めたこと**: `ObserveMemoryUsageInput`（`packages/core/src/observation.ts`）に、他3種
+（utterance/event/document）と同じ `externalId?: string` を足した。`handleMemoryUsage`
+（`packages/core/src/runtime.ts`）は `externalId: input.externalId ?? null` を
+`createObservation` に渡すようになり、`observations` 行の冪等化（`(tenant_id, external_id)`
+の一意制約、docs/architecture.md §3.5）が `memory_usage` にも構造的に効くようになった。
+**`externalId` を渡さない呼び出しの挙動は変えていない**——省略時は従来どおり、呼ぶたびに
+新しい `observations` 行が作られる。
+
+**migration は足していない。**`packages/postgres` の `createObservation` は元から
+`INSERT ... ON CONFLICT (tenant_id, external_id) WHERE external_id IS NOT NULL DO NOTHING`
+（`0001_init.sql` の `uq_observations_external_id`）で書かれており、この一意制約は `kind` を
+問わない——`memory_usage` の Observation にも、既存の DB のスキーマのまま、コード変更だけで
+効く。
+
+**再送時の設計**:
+- `recordUsage`/`reinforce` は、返ってきた（保存済みの）Observation の payload で呼ぶ
+  ——`observe()` に渡された入力そのものではない。初回はこの2つは同じ値。再送では、最初の
+  呼び出しが `createObservation` の後・`recordUsage` の前で落ちていた場合でも、保存済みの
+  payload を読み直すことで `recordUsage`/`reinforce` を完了させられる。同じ `externalId` で
+  異なる payload（`recallId`/`usedMemoryIds`）が来た場合、後着の payload は無視される
+  ——他 kind の冪等な再送と同じ規約。
+- 返ってきた Observation の `kind` が `usage` 以外（別 kind の Observation と `externalId` が
+  衝突した場合）なら、`recordUsage`/`reinforce` を呼ばず、他 kind の冪等な再送と同じ形
+  （その `observationId`、`memoryIds: []`、`extraction: 'skipped'`）で返す。
+
+**採らなかった案**: Issue #870 の選択肢2——「`memory_usage` の `observations` 行は監査ログ
+として増え続けてよい（副作用側の冪等性だけで十分）」を明示の設計として書き足すこと。採らなかった
+理由は、`memory_usage` の `observe()` を retry したい呼び出し側（ネットワーク断など）が、
+`observationId` が呼ぶたびに変わるため「本当に1回だけ届いたか」を Observation 側から確認
+できない、という実害が残ったままになること。他3種は既に `externalId` でこれを確認できるのに、
+`memory_usage` だけ確認できないという非対称を残す理由は無いと判断した。
+
+**残るもの**: Issue #870 が指摘した2つの実害——「再送の成否を `observationId` で確かめられ
+ない」「再送のたびに `observations` が増え続ける」——はこの変更で解消した。副作用
+（`recall_usages`/`reinforce`）は元から冪等だった（上の本文・結果参照）。
