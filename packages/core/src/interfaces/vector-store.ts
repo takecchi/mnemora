@@ -224,6 +224,16 @@ export interface VectorStore {
   /**
    * 距離昇順で最大 `opts.limit` 件を返す。
    *
+   * **⚠ `query`（および `upsert` の `vector`）の長さが `space.dimensions` と違うときの
+   * 結果は未定義**（`RecallQuery.vector` の doc コメント参照、Issue #867）。この interface
+   * は長さの一致を検証しない——一致させるのは呼び出し側の責任である。【実測 2026-09、
+   * `main` f68dd8a】`packages/postgres` の実装は pgvector の DB エラーで未捕捉のまま落ち、
+   * `packages/testkit`/`packages/core` の Fake は足りない側を `0` で埋めて計算を続け、
+   * 意味の無い点数を返す——adapter 間で挙動が揃っていない。境界で拒む・比較不能扱いに
+   * するといった案は、公開 Fake の挙動を変えることになるため
+   * [Issue #809](https://github.com/takecchi/mnemora/issues/809) 待ちであり、この記述は
+   * その回答が出るまでの暫定である。
+   *
    * **⚠ 距離が完全に一致する行が複数あるときの順序も、adapter の責務である**
    * （Issue #339 / [ADR 0170](../../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)）。
    * `recall-runtime.ts` の段2（再スコア）・段3.5（連想枠、ADR 0151）は、どちらも
