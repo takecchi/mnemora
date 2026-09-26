@@ -1115,3 +1115,26 @@ Refs #1019
 - **確かめていないこと**: 本物の Postgres での再現（判定は `packages/core` の中で完結する）。
 
 Refs #1020
+
+---
+
+## 2026-09-27 追記8 の補足（クローン miku の委譲先、Issue #1026）
+
+追記8（Issue #1020）と同じく、Issue #959 の段3.5 の必須の同伴取得（PR #970）まわりの取りこぼしである。番号は、同じ日に予定している追記9（集約の層と候補ごとの札の区別、Issue #1021・#1025）のために空けておき、追記8 の補足として記録する。
+
+**段2で `over_limit(stage:"rescore")`（または `below_threshold`・`score_not_comparable`）に数えた contested の候補を段3.5 が席に着け、その後の必須の同伴取得で対向が取れずに Unit ごと落ちると、同じ記憶が段2の札と `unit_assembly_dropped` の両方に数えられていた。これを解消した。**
+
+見つけた経緯: recall の不変条件を固定シードで検査する検査器（repo に入れる準備中、Fake）が、シード24・38 で拾った。排他性の後処理は、段3.5 の候補を「Unit に入った（`associationUnits`）」か「席に着けなかった（`overLimitAssociationSeatlessIds`）」かで差し引いていた。「席に着いたが組み立てで落ちた」候補はどちらにも入らず、段2の札に残っていた。
+
+### 決めたこと
+
+段3.5 の組み立てで落ちた候補の id を `associationAssemblyDroppedIds` に集め、`over_limit(stage:"rescore")`・`below_threshold`・`score_not_comparable` の差し引きの判定に OR で足した。最後にその候補を落とした段は段3.5 の組み立て（`unit_assembly_dropped`）なので、段2の札からは外れる（追記3〜8 の原則）。`unit_assembly_dropped` 自身の件数は変えていない。
+
+### 測ったこと
+
+- 【実測】歯 `packages/core/src/__tests__/recall-association-assembly-dropped.test.ts`（fake ストア、3本）: 修正前は (a)（`over_limit(rescore)` の候補が組み立てで落ちた）・(b)（`below_threshold` の候補が組み立てで落ちた）・(c)（連想枠に拾われなかった `over_limit(rescore)` の候補は残る）の3本とも赤（(c) は二重計上で件数が 2 になる）。修正後は3本とも緑。
+- 【実測】変異試験: 落ちた id を集めないようにすると3本とも赤。
+- 【実測】recall・omission まわりの既存の歯 36 ファイル（501本）をファイル名指定で実行し、すべて緑。
+- **確かめていないこと**: 本物の Postgres での再現（判定は `packages/core` の中で完結する）。
+
+Refs #1026

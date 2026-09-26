@@ -1352,6 +1352,10 @@ export async function runRecall(
   // 実際に数えている集合そのものであり、別の基準を新たに作らない——下のブロックで
   // その2つの内訳をそのまま id で積む。
   const overLimitAssociationSeatlessIds = new Set<MemoryId>();
+  // Issue #1026: 段3.5 で席に着いたが、対向が取れずに Unit ごと落ちた（`unit_assembly_dropped` に
+  // 数えた）候補の id。下の排他性の後処理が、段2の札（`over_limit(stage:"rescore")`・
+  // `below_threshold`・`score_not_comparable`）から差し引くのに使う。
+  const associationAssemblyDroppedIds = new Set<MemoryId>();
   if (associationQuery !== undefined) {
     if (deps.vectorStore.getVectors === undefined) {
       // 北極星の問い2（無効にしても成立するか）を型で担保する任意メソッドが無い。
@@ -1803,6 +1807,7 @@ export async function runRecall(
           // 対向が取れなかった（forget 済み・存在しない・片側だけの contested・
           // attributes の絞り込みで外れた、等）。段3と同じ判断——Unit ごと落とす。
           associationUnitAssemblyShortfall += 1;
+          associationAssemblyDroppedIds.add(candidate.memory.id);
         }
         if (associationUnitAssemblyShortfall > 0) {
           // 段3と同じ札・同じ countKind（ADR 0043）。`UnitAssemblyDroppedOmission` は
@@ -2091,7 +2096,8 @@ export async function runRecall(
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      overLimitAssociationSeatlessIds.has(c.memory.id),
+      overLimitAssociationSeatlessIds.has(c.memory.id) ||
+      associationAssemblyDroppedIds.has(c.memory.id),
   );
   if (promotedFromBelowThreshold.length > 0) {
     const promotedIds = new Set(promotedFromBelowThreshold.map((c) => c.memory.id));
@@ -2127,7 +2133,8 @@ export async function runRecall(
     (c) =>
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
-      associationUnitIds.has(c.memory.id),
+      associationUnitIds.has(c.memory.id) ||
+      associationAssemblyDroppedIds.has(c.memory.id),
   );
   if (promotedFromNotComparable.length > 0) {
     const notComparableIndex = omitted.findIndex((o) => o.kind === "score_not_comparable");
@@ -2205,7 +2212,8 @@ export async function runRecall(
     (c) =>
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      overLimitAssociationSeatlessIds.has(c.memory.id),
+      overLimitAssociationSeatlessIds.has(c.memory.id) ||
+      associationAssemblyDroppedIds.has(c.memory.id),
   );
   if (promotedFromOverLimit.length > 0) {
     const overLimitRescoreIndex = omitted.findIndex(
