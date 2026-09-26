@@ -37,6 +37,8 @@ type RecallResult = {
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の排他性の段落は、段3.5 による昇格と `below_threshold` の取り下げだけを書いている。いまはこれが一般則になっている——**1件の Memory は `omitted` の中で1回だけ、最後にそれを落とした段で数える**（ADR 0203 追記3〜6）。`below_threshold` と `over_limit(stage:"rescore")` は、段3の同伴・段3.5 の席・段3.5 で席に着けなかった分のどの経路で扱われても、`omitted` の中で1回だけ数えられる。詳細は §9.8。
 
+**⚠ 2026-09-27 追記（ADR 0203 追記9、Issue #1021・#1025）**: 上の排他性の段落と直前の追記がいう「返らなかったものの分類」「1回だけ数える」は、**候補ごとの層**の札（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・`unit_assembly_dropped`）について成り立つ。**集約の層**の札（`not_indexed`、`filtered` のすべての `condition`）は、スコープ全体の集約から出す件数で、返った記憶を含みうる。札の一覧と理由は §9.8 の追記9 と ADR 0203 追記9。
+
 以降の節はこの型の各フィールドを埋めていく作業である。
 
 ---
@@ -1484,3 +1486,5 @@ Issue #200 は**2つの読み方**を挙げていた。
 **2026-09-27 追記8（Issue #1020、ADR 0203 追記8）**: 段3.5 で席を競り負けて `over_limit(stage:"association")` に数えた候補が、同じ段3.5 の必須の同伴取得（§9.2 手順7）で対向として取られた場合は、`over_limit(stage:"association")` の件数から外し、戻った先（`memories` または `budget_dropped`）で1回だけ数えるようにした。
 
 **2026-09-27 追記8 の補足（Issue #1026、ADR 0203 追記8 の補足）**: 段2で `over_limit(stage:"rescore")`・`below_threshold`・`score_not_comparable` に数えた contested の候補を段3.5 が席に着け、その後の必須の同伴取得で対向が取れずに Unit ごと落ちた場合は、段2の札から外し、`unit_assembly_dropped` で1回だけ数えるようにした。
+
+**2026-09-27 追記9（Issue #1021・#1025、ADR 0203 追記9）**: `omitted` の札は2つの層に分かれる。**集約の層**（`not_indexed`、`filtered` のすべての `condition`）は、`aggregateScope` の1回の集約（§2 段0）から出す「スコープ内でその条件に当たる記憶の件数」であり、その記憶が返ったか・ほかの札に数えられたかを問わない。**候補ごとの層**（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・`unit_assembly_dropped`）には、上の追記3〜8 の「最後に落とした段で1回だけ数える」が掛かり、`memories` に返った記憶はこれらに数えない。件数を持たない札（`stage_skipped`・`ann_truncated`・`ann_unreached`・`lexical_truncated`）は数え方の問いが立たない。⟹ 埋め込みの無い記憶が語彙や同伴で返ったとき、減衰しきった記憶が contested の対向として返ったときも、`not_indexed`・`filtered(decayed)` の件数には残る。これは二重計上ではなく、層の違う数である。
