@@ -1143,6 +1143,17 @@ export class PostgresMemoryStore implements MemoryStore {
     at: Date,
     opts?: ReinforceOptions,
   ): Promise<Memory[]> {
+    return this.reinforceManyOn(this.db, ctx, ids, at, opts);
+  }
+
+  /** `reinforceMany` の本体。`recordUsageAndReinforce` がトランザクションの中から呼ぶため、実行者を受け取る。 */
+  private async reinforceManyOn(
+    exec: SqlExecutor,
+    ctx: Ctx,
+    ids: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<Memory[]> {
     if (ids.length === 0) {
       return [];
     }
@@ -1150,7 +1161,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const uniqueIds = [...new Set(ids)];
     const wellFormedIds = uniqueIds.filter((id) => isUuidLike(id));
 
-    const current = await this.db.execute(sql`
+    const current = await exec.execute(sql`
       SELECT * FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
     `);
     const currentById = new Map<string, Memory>();
@@ -1204,7 +1215,7 @@ export class PostgresMemoryStore implements MemoryStore {
       sql`, `,
     );
 
-    const result = await this.db.execute(sql`
+    const result = await exec.execute(sql`
       WITH input(id, decay_floor_at, has_activity, activity_base_seq, activity_floor_seq) AS (
         VALUES ${inputRows}
       ),
@@ -1246,10 +1257,45 @@ export class PostgresMemoryStore implements MemoryStore {
     recallId: RecallId,
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    return this.recordUsageOn(this.db, ctx, recallId, memoryIds);
+  }
+
+  /**
+   * Issue #961: `recordUsage` と、それが返した `insertedMemoryIds` への強化
+   * （`reinforceMany` と同じ SQL）を1トランザクションで撃つ。強化の UPDATE が失敗すれば
+   * `recall_usages` の INSERT も巻き戻るので、同じ使用報告の再送がそのまま両方をやり直す
+   * （interface の doc コメント参照）。
+   */
+  async recordUsageAndReinforce(
+    ctx: Ctx,
+    recallId: RecallId,
+    memoryIds: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<{ insertedMemoryIds: MemoryId[] }> {
     if (memoryIds.length === 0) {
       return { insertedMemoryIds: [] };
     }
-    const result = await this.db.execute(sql`
+    return this.db.transaction(async (tx) => {
+      const result = await this.recordUsageOn(tx, ctx, recallId, memoryIds);
+      if (result.insertedMemoryIds.length > 0) {
+        await this.reinforceManyOn(tx, ctx, result.insertedMemoryIds, at, opts);
+      }
+      return result;
+    });
+  }
+
+  /** `recordUsage` の本体。`recordUsageAndReinforce` がトランザクションの中から呼ぶため、実行者を受け取る。 */
+  private async recordUsageOn(
+    exec: SqlExecutor,
+    ctx: Ctx,
+    recallId: RecallId,
+    memoryIds: MemoryId[],
+  ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    if (memoryIds.length === 0) {
+      return { insertedMemoryIds: [] };
+    }
+    const result = await exec.execute(sql`
       INSERT INTO recall_usages (tenant_id, recall_id, memory_id, used_at)
       SELECT ${ctx.tenantId}, ${recallId}, m, now()
       FROM unnest(${sql.param(memoryIds)}::uuid[]) AS m

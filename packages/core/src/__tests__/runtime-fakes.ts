@@ -955,6 +955,35 @@ export class FakeMemoryStore implements MemoryStore {
     return results;
   }
 
+  /**
+   * Issue #961: `recordUsage` と `reinforceMany` を1つの口で撃つ（`PostgresMemoryStore`
+   * は1トランザクション）。in-memory にトランザクションは無いので、強化が投げたら
+   * この呼び出しで挿入した使用の行を取り消して、何も起きなかったのと同じに見せる。
+   * この Fake で強化が投げうるのは Invalid Date の `at` だけで（Issue #807）、`at` は
+   * 全件に共通なので、1件目の強化で何も書かずに投げる——強化の部分的な書き込みは残らない。
+   */
+  async recordUsageAndReinforce(
+    ctx: Ctx,
+    recallId: RecallId,
+    memoryIds: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    const result = await this.recordUsage(ctx, recallId, memoryIds);
+    if (result.insertedMemoryIds.length === 0) {
+      return result;
+    }
+    try {
+      await this.reinforceMany(ctx, result.insertedMemoryIds, at, opts);
+    } catch (err) {
+      for (const memoryId of result.insertedMemoryIds) {
+        this.backing.usages.delete(`${ctx.tenantId}:${recallId}:${memoryId}`);
+      }
+      throw err;
+    }
+    return result;
+  }
+
   async recordUsage(
     ctx: Ctx,
     recallId: string,
