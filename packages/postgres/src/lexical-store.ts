@@ -93,6 +93,46 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  * `mnemora_lexical_query_tsqueries` が各語を `"..."` で囲んで
  * `websearch_to_tsquery` へ渡すのは、この隣接要求を語ごとに保つためでもある
  * （`migrations/0009_*.sql` の doc 参照）。
+ *
+ * **🔴 `coverage` の計算は、行ごとにではなく1回だけ分解した語配列を使い回す
+ * （Issue #878）。**以前は `mnemora_lexical_coverage(content, query)` を `SELECT` の
+ * 行ごとに呼んでおり、この関数は内部で `mnemora_lexical_query_tsqueries(query)`
+ * （`query` を語に割り、語ごとに `websearch_to_tsquery` を呼ぶ処理）を**候補行の数だけ
+ * 繰り返し**やり直していた——`query` 自体は行に依存しない値（`content` のような
+ * 行ごとの列ではない）なのに、候補行の数ぶん重複して計算していた（相関サブクエリの
+ * `FROM` に置いた集合を返す式は、行に依存しない部分でも PostgreSQL によって行ごとに
+ * 再実行される——`content` を参照する集約と同じサブプランに包まれているため）。
+ *
+ * ⟹ **`WITH qc AS MATERIALIZED (SELECT mnemora_lexical_query_tsqueries(query) AS terms)`
+ * で1回だけ計算し、`FROM memories, qc` で全行に配る。**候補行ごとに残る仕事は
+ * 「配列 `qc.terms` を舐めて一致数を数える」（`unnest` + `count(*) FILTER`）という
+ * 軽い比較だけになる——`mnemora_lexical_coverage` が候補行ごとにやり直していた
+ * 「`query` を割り直す」重い処理（正規表現・`websearch_to_tsquery` の呼び出し・
+ * `DISTINCT` の並べ替え）を、もうやらない。
+ *
+ * **`WHERE`/`ORDER BY` 側の `mnemora_lexical_query_or(query)`（`tsQueryOr`、下記）は
+ * 書き換えていない。**あえて `qc` に寄せなかった——`query` は定数ではなく束縛パラメータ
+ * だが、PostgreSQL は名前を付けない一回限りの実行では実際の値を使って計画を立てる
+ * （custom plan）ため、`mnemora_lexical_query_or(query)` は IMMUTABLE な定数式として
+ * 折り畳まれ、`idx_memories_lexical`（GIN）の選択・行数見積りにその**具体的な語彙の
+ * 頻度統計**が使える。試しにこの式も `qc` の列参照に置き換えたところ、
+ * `lexical-store-index.test.ts` が（環境依存ではなく確実に）赤くなった——右辺が
+ * 「他リレーションの列」になった時点で、プランナは具体的な tsquery を見られなくなり、
+ * 既定の（不正確な）選択率しか使えず、`idx_memories_lexical` を避けて
+ * `Seq Scan on memories` を選ぶことがある。**⟹ 索引選択に効く式は触らず、
+ * 効かない式（`coverage` の中身）だけを触る、という線引きにした。**
+ *
+ * **この書き換えは `mnemora_lexical_coverage`/`mnemora_lexical_query_or`
+ * （`migrations/0009_*.sql`）を1バイトも変えていない**——呼ぶ回数と呼び方だけを変えた。
+ * 下の `coverage` の式は `migrations/0009_memories_lexical_or_coverage.sql` の
+ * `mnemora_lexical_coverage` の本体を、行ごとに使い回せる形（`query` の分解結果を
+ * 引数ではなく `qc.terms` から受け取る形）に書き直したものであり、**同じ式**である
+ * （変えたのは「`query` をどこで割るか」だけで、「割った後どう数えるか」の式自体は
+ * 一致させてある）。**⟹ 出力（`coverage`/`rank`/候補集合/順序）は書き換え前と
+ * 完全に同じでなければならない**——`lexical-store-index.test.ts` の
+ * `EXPLAIN` の歯に加え、既存の全 `lexical-store-*.test.ts` / `lexical-search-tiebreak.test.ts` /
+ * `lexical-rank-resolution.test.ts` がこの一致を検査する（新しい歯ではなく、
+ * 既存の歯がそのまま通ることが根拠——値を変える意図は無い）。
  */
 export function buildLexicalSearchSelect(
   query: string,
@@ -158,20 +198,38 @@ export function buildLexicalSearchSelect(
   // 🔴 ADR 0092: クエリ全体を1つの tsquery にするのではなく、語ごとに OR で結ぶ
   // （mnemora_lexical_query_or）。`WHERE` の左辺（索引式）は 0008 と同じ式のまま——
   // 変えているのは `@@` の右辺（tsquery そのものの組み立て方）だけである。
+  //
+  // Issue #878: ここ（WHERE・rank）は書き換えていない——`query` の具体的な値が
+  // プランナから見える形を保つため（このファイル冒頭の buildLexicalSearchSelect doc
+  // 「WHERE/ORDER BY 側の mnemora_lexical_query_or(query) は書き換えていない」参照）。
   const tsQueryOr = sql`mnemora_lexical_query_or(${query})`;
   conditions.push(sql`to_tsvector('simple', mnemora_lexical_normalize(content)) @@ ${tsQueryOr}`);
   const whereClause = sql.join(conditions, sql` AND `);
 
   return sql`
+    WITH qc AS MATERIALIZED (
+      -- Issue #878: mnemora_lexical_query_tsqueries(query) を1回だけ計算し、
+      -- coverage の計算（下、候補行ごとに評価される）で使い回す。
+      SELECT mnemora_lexical_query_tsqueries(${query}) AS terms
+    )
     SELECT
       id AS memory_id,
-      mnemora_lexical_coverage(content, ${query}) AS coverage,
+      -- migrations/0009_memories_lexical_or_coverage.sql の mnemora_lexical_coverage
+      -- と同じ式（一致した語彙数 / クエリ語彙の総数）。query を渡して呼ぶ代わりに、
+      -- 上の qc で1回だけ計算した terms を受け取る形にしてある。式そのものは
+      -- 1バイトも変えていない（このファイル冒頭の buildLexicalSearchSelect doc 参照）。
+      (
+        SELECT count(*) FILTER (
+                 WHERE to_tsvector('simple', mnemora_lexical_normalize(content)) @@ tq
+               )::float8 / NULLIF(count(*), 0)
+        FROM unnest(qc.terms) AS tq
+      ) AS coverage,
       ts_rank_cd(
         to_tsvector('simple', mnemora_lexical_normalize(content)),
         ${tsQueryOr},
         ${TS_RANK_CD_NORMALIZATION}
       ) AS rank
-    FROM memories
+    FROM memories, qc
     WHERE ${whereClause}
     ORDER BY coverage DESC, rank DESC, recorded_at DESC, id
     LIMIT ${opts.limit}
