@@ -141,7 +141,10 @@ uncaught exception を報告する」——であり、実運用のプロセス�
    `query`/`connect` を包みの own property として `.bind(pool)` した関数に
    明示的に置き換える設計にした。
 3. **query**: `db.execute(sql\`SELECT 1\`)` が包み経由で正しく動く
-   （`facade.query = pool.query.bind(pool)` が実 `pool` の `query()` を呼ぶ）。
+   （このときの実装は `facade.query = pool.query.bind(pool)` だった——**後に
+   これが既存の歯を1本壊すことが分かり、生成時の束縛ではなく呼び出しのたびに
+   `pool.query(...)` を読み直す形へ直した。下記「【実測】広いテストで実際に
+   赤を引いた」を見ること**）。
 4. **`db.transaction()` の commit**: `CREATE TEMP TABLE` → `INSERT` を
    トランザクション内で実行し、commit 後に行が残ることを確認した。
 5. **`db.transaction()` の rollback**: トランザクション内で例外を投げ、
@@ -166,6 +169,42 @@ uncaught exception を報告する」——であり、実運用のプロセス�
 公開しているクラスのプロトタイプであり、アンダースコア始まりの非公開 API には
 依存していない。
 
+## 【実測】広いテストで実際に赤を引いた——`facade.query` の生成時束縛が壊した歯
+
+上記1〜7の実測は独立した使い捨てスクリプトで確かめたものであり、実際の
+テストスイートに対する影響は別途 `packages/postgres` の関連する歯（`migrate*`
+系9本・`extension-mode`・`vector-space-concurrency`・`dedicated-schema`・
+`conformance.postgres.test.ts` 376 本）を再実行して確かめた。**その過程で、
+本 ADR 初版が採っていた `facade.query = pool.query.bind(pool)`（生成時に1回だけ
+束縛する形）が、既存の歯を1本壊していることを実際に見つけた**:
+
+```
+FAIL src/__tests__/recall.postgres.test.ts > ... > 被覆不変条件: aggregateScope は単一の SQL 往復で完結する（構造的な検査）
+AssertionError: expected +0 to be 1
+```
+
+この歯（`recall.postgres.test.ts`）は `getTestClient()` が作った共有 client の
+`pool.query` を一時的に差し替えて（`pool.query = (...) => { queryCount += 1; ... }`）
+呼び出し回数を数える——`aggregateScope` が単一の SQL 往復で完結するという ADR 0011
+と同型の不変条件を検査している。`facade.query` を生成時に `pool.query.bind(pool)`
+で束縛していたため、`facade` 経由の呼び出しはこの差し替え**より前**の
+`pool.query` を握ったままで、差し替え後のカウンタを一切通らなかった
+（`queryCount` が `0` のまま）。
+
+⟹ **`query`/`connect` の実装本体を、生成時の束縛（`.bind(pool)`）から、
+呼び出しのたびに `pool.query(...)`/`pool.connect(...)`（メソッド呼び出し構文）で
+`pool` の*現在の*プロパティを読み直す形に直した。** 直した後、この歯を含む
+全ての再実行が green になることを確認した。
+
+**この発見は、本 ADR「⚠ 名乗れないものを道具に名乗らせない」の裏返しの実例でもある**
+——独立した使い捨てスクリプトでの実測（instanceof・query・transaction・rollback・
+savepoint）は「drizzle-orm と噛み合うこと」までしか確かめておらず、「この repo の
+既存のテストが（drizzle 経由ではなく）`pool.query` を直接差し替える形で client を
+使っている」という、独立スクリプトの射程の外にある使い方までは見えていなかった。
+**広い既存テストの再実行を実際に行って初めて見つかった**——見つからなかった場合、
+「使い捨てスクリプトで確認した」だけを根拠に「drizzle と噛み合う」と報告していた
+可能性がある。
+
 ## 決めたこと
 
 1. **`createPostgresClient` が公開する `Pool`（`PostgresClient.pool`）は
@@ -174,16 +213,20 @@ uncaught exception を報告する」——であり、実運用のプロセス�
    `createDrizzleClientFacade(pool)`（`client.ts`）が作る**専用の薄い包み**を
    渡す。
 2. **包みは `query`/`connect` の2つだけを own property として持つ。**
-   どちらも元の `pool` インスタンスへ `.bind(pool)` した関数——`this` を
+   どちらも元の `pool` インスタンスの上で、呼び出しのたびに `pool.query(...)`/
+   `pool.connect(...)`（メソッド呼び出し構文——都度 `pool` の*現在の*
+   プロパティを読み、`this = pool` で呼ぶ）を実行する関数——`this` を
    経由した暗黙の委譲（`Object.create(pool)` のように実インスタンスを
    プロトタイプに積む案）は採らない（上記「測ったこと」2番で実際に壊れる
-   ことを確認したため）。`instanceof Pool` を満たすためだけに
-   `Object.create(Pool.prototype)`（クラスのプロトタイプ）を使う。
+   ことを確認したため）。**生成時に `.bind(pool)` で1回だけ束縛する形も
+   採らない**——`pool.query` を後から差し替えるテストを実際に壊すことを
+   確認したため（上記「【実測】広いテストで実際に赤を引いた」）。
+   `instanceof Pool` を満たすためだけに `Object.create(Pool.prototype)`
+   （クラスのプロトタイプ）を使う。
 3. **`connect` だけ、返す checked-out client に ADR 0339 と同じ no-op
-   `error` リスナーを自動で付け外しする。** `query` はそのまま
-   `pool.query.bind(pool)` を素通しする——`pg-pool` の `query()` は内部で
-   自前の `error` 保護（`client.once('error', onError)`）を持つため、
-   対策が要らない。
+   `error` リスナーを自動で付け外しする。** `query` はそのまま現在の
+   `pool.query` を素通しする——`pg-pool` の `query()` は内部で自前の
+   `error` 保護（`client.once('error', onError)`）を持つため、対策が要らない。
 4. **`pool.connect()` の promise 形だけを対象にする。** callback 形
    （`pool.connect((err, client, done) => ...)`）はこのコードベースのどこからも
    （`migrate.ts`/`advisory-lock.ts`/drizzle-orm のいずれからも）呼ばれていない

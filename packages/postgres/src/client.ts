@@ -86,16 +86,23 @@ const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
  * `query()` を包みの `this` で呼ぶと `this.log` が `undefined` になり壊れることを
  * 実測で確認した（ADR 0340「測ったこと」）。
  * ⟹ **`query`/`connect` は、包みの own property として、必ず元の `pool`
- * インスタンスへ `.bind(pool)` した関数を明示的に置く。** `this` を経由した
- * 暗黙の委譲はしない。
+ * インスタンスの上で呼ぶ関数を明示的に置く。** `this` を経由した暗黙の委譲は
+ * しない。⚠ **さらに、生成時に `pool.query.bind(pool)` のように1回だけ束縛
+ * しない**——テストが `getTestClient()` で作った共有 client の `pool.query`
+ * を後から一時的に差し替えて呼び出し回数を数える歯
+ * （`recall.postgres.test.ts`「aggregateScope は単一の SQL 往復で完結する」）が
+ * 実在し、生成時の束縛だとその差し替えを素通りしてしまうことを実測で確認した
+ * （ADR 0340「測ったこと」）。⟹ **`query`/`connect` の呼び出し本体は、毎回
+ * `pool.query(...)`/`pool.connect(...)`（メソッド呼び出し構文——都度 `pool` の
+ * *現在の*プロパティを読み、`this = pool` で呼ぶ）を書く。**
  *
  * ## `connect` だけ、借りた client に `error` リスナーを付け外しする
  *
- * `query`（`facade.query = pool.query.bind(pool)`）はそのまま元の `pool.query` を
- * 呼ぶ——`pg-pool` の `query()` は内部で `client.once('error', onError)` を
- * 自前で付けて自衛する経路を持つため、素通しで安全（ADR 0339 の「見つけた別の穴」参照）。
- * **`connect` だけ**、返す checked-out client へこの no-op `error` リスナーを
- * 自動で付け外しするものに包む。
+ * `query`（呼び出しのたびに現在の `pool.query` を読んで呼ぶ）はそのまま元の
+ * `pool.query` を呼ぶ——`pg-pool` の `query()` は内部で `client.once('error',
+ * onError)` を自前で付けて自衛する経路を持つため、素通しで安全（ADR 0339 の
+ * 「見つけた別の穴」参照）。**`connect` だけ**、返す checked-out client へこの
+ * no-op `error` リスナーを自動で付け外しするものに包む。
  *
  * ⚠ **このコードベースは `pool.connect()` の promise 形しか使わない**
  * （`migrate.ts`/`advisory-lock.ts`/drizzle-orm、いずれも）。callback 形
@@ -110,9 +117,15 @@ const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
 function createDrizzleClientFacade(pool: Pool): Pool {
   const facade = Object.create(Pool.prototype) as Pool;
 
-  facade.query = pool.query.bind(pool) as Pool["query"];
+  // ⚠ `pool.query.bind(pool)` のように生成時に1回だけ束縛しない——`pool.query`
+  // そのものを呼ぶたびに読み直す（メソッド呼び出し構文 `pool.query(...)` は毎回
+  // `this = pool` で束縛される）。既存の歯（`recall.postgres.test.ts` の
+  // 「aggregateScope は単一の SQL 往復で完結する」）が、生成後に `pool.query` を
+  // 一時的に差し替えて呼び出し回数を数えており、生成時の束縛だとその差し替えを
+  // 素通りしてしまう（実測——下記「測ったこと」参照）。
+  facade.query = ((...args: unknown[]) =>
+    (pool.query as (...a: unknown[]) => unknown)(...args)) as Pool["query"];
 
-  const originalConnect = pool.connect.bind(pool);
   facade.connect = ((
     callback?: (
       err: Error | undefined,
@@ -121,10 +134,10 @@ function createDrizzleClientFacade(pool: Pool): Pool {
     ) => void,
   ) => {
     if (callback) {
-      return originalConnect(callback);
+      return pool.connect(callback);
     }
     return (async (): Promise<PoolClient> => {
-      const client = await originalConnect();
+      const client = await pool.connect();
       client.on("error", NOOP_CLIENT_ERROR_HANDLER);
       const originalRelease = client.release.bind(client);
       client.release = ((err?: Error | boolean) => {
