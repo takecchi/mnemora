@@ -1817,10 +1817,11 @@ export async function runRecall(
   // `finalMemories` へ昇格させる経路は、この PR では塞いでいない**——これは ADR 0203
   // 「引き受けた負債」2番がまさに名指ししていた経路（below_threshold 以外の kind で
   // 段3.5 が同種の昇格を起こす）であり、そちらは未解消のまま残っている
-  // （`over_limit(stage:"association")` を含め）。ここで `companions` 限定にしている
-  // のはそのため——`retrievedVia` を見ずに `finalMemories` 全体との突き合わせだけで
-  // 判定すると、連想経由の昇格まで `stage:"rescore"` の count から誤って差し引いてしまう
-  // （実際に `omission-kind-generation.test.ts` の既存の歯を壊す回帰として実測した）。
+  // （`over_limit(stage:"association")` を含め、Issue #925 として別途起票）。ここで
+  // `companions` 限定にしているのはそのため——`retrievedVia` を見ずに `finalMemories`
+  // 全体との突き合わせだけで判定すると、連想経由の昇格まで `stage:"rescore"` の count
+  // から誤って差し引いてしまう（実際に `omission-kind-generation.test.ts` の既存の歯を
+  // 壊す回帰として実測した）。
   //
   // ⚠ 差し引く数は「段3で返した同伴の総数」でもない。**`overLimit` に居て、かつ
   // 段3の同伴取得で実際に `finalMemories` に返った id の数**だけを数える——companion が
