@@ -8,9 +8,10 @@ import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
  * `to_tsvector('simple', regexp_replace(text, '([[:ascii:]]+)', ' \1 ', 'g'))` の上に
  * `websearch_to_tsquery` を重ねる。**ここではそれを自前で再発明しない**——
  * `'simple'` dictionary は語幹処理（stemming）をしない、というその1点だけを借りて、
- * 「小文字化してから Unicode の英数字境界で分割し、トークンの完全一致を見る」という
- * 最小の実装にしてある（`'simple'` が語幹処理をしないからこそ、完全一致がその近似になる。
- * `'english'` 等の語幹処理をする config だったら、この近似は成り立たない）。
+ * 「ASCII の連なりの前後に空白を入れてから小文字化し、Unicode の英数字境界で分割し、
+ * トークンの完全一致を見る」という最小の実装にしてある（`'simple'` が語幹処理を
+ * しないからこそ、完全一致がその近似になる。`'english'` 等の語幹処理をする config
+ * だったら、この近似は成り立たない）。
  *
  * **⚠ 正直に書く: 何が同じで何が違うか。**
  *
@@ -20,21 +21,41 @@ import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
  * - クエリの語のいずれか1つでも含むか（OR）で絞り、一致した語の割合（`coverage`）を返す
  *   （[ADR 0092](../../../../docs/decisions/0092-lexical-or-coverage.md)。
  *   postgres 実装の `mnemora_lexical_query_or` / `mnemora_lexical_coverage` と同じ向き）。
+ * - **本文側は、ASCII の連なりの前後に空白を入れてから小文字化する**
+ *   （`mnemora_lexical_normalize` と同じ順序。**順序が大事**——先に小文字化すると、
+ *   小文字化で ASCII 化する非 ASCII 文字（例: ケルビン記号 U+212A → `k`）が隣の
+ *   ASCII 文字と癒着してしまう。Issue #951 の実測: 本文 `"100" + U+212A` は、この順序
+ *   なら `["100", "k"]` に割れ、クエリ `"100k"` とは一致しない——`PostgresLexicalStore`
+ *   を本物の Postgres（UTF8/`en_US.UTF-8` 系・SQL_ASCII/`C` 系の両 regime）に対して
+ *   実測し、同じく0件であることを確認した上で揃えた）。
+ * - **クエリ側は、非 ASCII の連なりを空白に落としてから分割する**
+ *   （`mnemora_lexical_query_terms` と同じ向き。Issue #951 の実測: 非 ASCII だけの
+ *   クエリ（ギリシャ文字・日本語等）は、本物の Postgres でも語彙が1つも残らず0件になる
+ *   ——`websearch_to_tsquery` が空の tsquery を返し `@@` が常に false になるため。
+ *   ここでも同じ形で語彙を0個にし、0件を返す）。
  *
  * **違う・確認していないこと**:
  * - `websearch_to_tsquery` の `"..."`（フレーズ）/ `OR` / `-`（NOT）はここでは一切解釈しない。
- *   空白区切りの語の集合としてしか読まない（各語を独立に OR で見る）。
- *   **⚠ ADR 0092 で postgres 側も各語を `"..."` で囲むようになり、生クエリ中の
- *   websearch 演算子を解釈しなくなった**——この差はむしろ縮む方向である
- *   （ADR 0092「採った副作用」）。
- * - CJK（分かち書きの無い日本語・中国語等）の扱いは確認していない。
- *   postgres 側の `regexp_replace(text, '([[:ascii:]]+)', ' \1 ', 'g')` は ascii の連続の前後に
- *   空白を挟むことで、CJK に埋め込まれた ascii の語（例: 日本語文中の英単語）を
- *   `to_tsvector` が別トークンとして切れるようにする一手だが、**CJK 自体を分かち書きする
- *   ものではない**（`'simple'` dictionary・既定の text search parser に形態素解析は無い）。
- *   ここでの実装（Unicode の「文字」境界で分割）が同じ挙動になるかは**確認していない**。
+ *   空白区切りではなく Unicode の英数字境界で割った語の集合としてしか読まない
+ *   （各語を独立に OR で見る）。**この違いは、ハイフンで結んだ識別子（`PROJ-1234` 等）を
+ *   `proj`/`1234` の2語に割ってしまうことを意味する**——postgres 側は
+ *   `websearch_to_tsquery` のフレーズ演算子（`<->`、隣接必須）で識別子を1単位として
+ *   扱うが、ここでは2語の OR 一致になるため、同じ接頭辞を持つ別の識別子
+ *   （`PROJ-5678` 等）にも部分一致（`coverage` 0.5）してしまいうる。**⚠ ADR 0092 で
+ *   postgres 側も各語を `"..."` で囲むようになり、生クエリ中の websearch 演算子を
+ *   解釈しなくなった**——演算子解釈が無くなった点自体は差が縮む方向だが、
+ *   フレーズによる隣接必須という性質までは再現していない。
+ * - CJK（分かち書きの無い日本語・中国語等）自体の分かち書きはしない
+ *   （`'simple'` dictionary・既定の text search parser に形態素解析が無いのと同じ
+ *   立場）。ASCII/非ASCII の境界で割ることで CJK に埋め込まれた ASCII の語
+ *   （例: 日本語文中の英数字識別子）が別トークンとして切れることは確認したが、
+ *   CJK 自体を語単位に割ることは意図していない——Unicode の「文字」境界（`\p{L}\p{N}`
+ *   の連なり）で1トークンになる、より粗い規則のままである。
  * - `String.prototype.toLowerCase()` と postgres の `lower()` が全ロケール・全文字で
- *   一致する保証は無い（確認していない）。
+ *   一致する保証は無い（確認していない）。ギリシャ語の語末シグマ（`Σ` の位置依存の
+ *   小文字化）はその一例——ただし Issue #951 で実際に測った3つの食い違いのうち、
+ *   これが単独で表面化するケースは見つかっていない（本文・クエリの両方が全て非 ASCII
+ *   の語では、上の「クエリ側は非 ASCII を落とす」が先に効き、常に0件になるため）。
  * - 数字・ハイフン・アポストロフィ等の細かいトークン化規則（postgres の text search parser の
  *   `word`/`numword`/`hword` 等の分類）は再現していない——ここでは
  *   Unicode の letter/number をひとまとめのトークンとして扱う、より粗い規則を使う。
@@ -44,9 +65,31 @@ import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
  */
 function tokenize(text: string): string[] {
   return text
+    .replace(ASCII_RUN_PATTERN, " $1 ")
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
     .filter((token) => token.length > 0);
+}
+
+/**
+ * `mnemora_lexical_normalize`（`regexp_replace($1, '([[:ascii:]]+)', ' \1 ', 'g')`、
+ * `packages/postgres/migrations/0008_memories_lexical_index.sql`）が使う POSIX の
+ * `[[:ascii:]]` クラス（0x00–0x7F）を、JS の正規表現でそのまま再現したもの。
+ * 制御文字も含む——`[[:ascii:]]` は「印字可能」ではなく「7bit 全域」を指す。
+ */
+// eslint-disable-next-line no-control-regex
+const ASCII_RUN_PATTERN = /([\x00-\x7f]+)/g;
+
+/**
+ * `mnemora_lexical_query_terms`（`regexp_replace($1, '[^[:ascii:]]+', ' ', 'g')`、
+ * `packages/postgres/migrations/0008_memories_lexical_index.sql`）と同じ向き:
+ * クエリ側の非 ASCII の連なりを空白1つに落とす。`tokenize()`（本文側）へ渡す**前**に
+ * 呼ぶこと——本文側は ASCII の連なりの前後に空白を入れるだけ（非 ASCII は残す）で
+ * 意味が違う（このファイル冒頭の doc 参照、Issue #951）。
+ */
+function dropNonAsciiRuns(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[^\x00-\x7f]+/g, " ");
 }
 
 /**
@@ -199,7 +242,9 @@ export class InMemoryLexicalStore implements LexicalStore {
     }
     // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
     // （capQueryTotalChars/capQueryTerms の doc 参照）。全体の文字数を最初に適用する。
-    const queryTerms = capQueryTerms(tokenize(capQueryTotalChars(query)));
+    // Issue #951: `mnemora_lexical_query_terms` と同じ向きで、非 ASCII の連なりを
+    // 空白に落としてから分割する（このファイル冒頭の `tokenize()` doc 参照）。
+    const queryTerms = capQueryTerms(tokenize(dropNonAsciiRuns(capQueryTotalChars(query))));
     if (queryTerms.size === 0) {
       // 契約: 語彙が1つも取れないクエリは0件（`lexical-store-conformance.ts` の歯）。
       return [];
