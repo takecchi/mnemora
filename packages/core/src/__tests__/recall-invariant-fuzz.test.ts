@@ -28,16 +28,19 @@ import { defaultDecayStrategy } from "../strategies/decay.js";
  * - I8 `contestedWith` の相手は同じ結果に居る（ADR 0335）
  * - I9 同じ操作列は同じ結果を返す（Fake の決定性。id の採番は実行ごとにモジュールを読み直して
  *   揃える）
- * - I10 件数の勘定。スコープ内の記憶を、返したもの（status が active/contested）と、スコープ内の
- *   Omission（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・
- *   `unit_assembly_dropped`・`filtered` のうち `scopeRelation: 'within_scope'`）の件数で数える。
- *   `not_indexed` はスコープ全体の集約から出す件数で、排他性の対象の外に置く（ADR 0203 追記9、
- *   Issue #1021）ので、この勘定には入れない。
+ * - I10 件数の勘定。スコープ内の記憶を、返したもの（status が active/contested）と、**候補ごとの層**の
+ *   札（`below_threshold`・`over_limit`・`budget_dropped`・`score_not_comparable`・
+ *   `unit_assembly_dropped`）の件数で数える。**集約の層**の札（`not_indexed`、`filtered` のすべての
+ *   `condition`）は、スコープ全体の集約から出す件数で、排他性の対象の外に置く（ADR 0203 追記9、
+ *   Issue #1021・#1025）ので、この和には入れない。
  *   - 上限: 和 ≦ `totalInScope`。ADR 0203 の「1件の Memory は `omitted` の中で1回だけ数える」
- *     （追記3〜8）から導ける。
- *   - 下限: 件数がすべて `'exact'` で、件数を持たない札（`ann_truncated`・`ann_unreached`・
- *     `lexical_truncated`・段1の `stage_skipped`）が無いとき、和 ≧ `totalInScope` − `not_indexed`。
- *     `docs/recall.md` 冒頭の原則3（結果は、そこから漏れたものと必ず同時に提示する）から導ける。
+ *     （決めたこと1、追記3〜8）から導ける。
+ *   - 下限: 候補ごとの層の件数がすべて `'exact'` で、件数を持たない札（`ann_truncated`・
+ *     `ann_unreached`・`lexical_truncated`・段1の `stage_skipped`）が無いとき、
+ *     和 ≧ `totalInScope` − `not_indexed` − スコープ内の `filtered`（`within_scope`）。
+ *     候補にならなかったスコープ内の記憶は、埋め込みが無いか減衰しきっているかのどちらかであり、
+ *     それは集約の層の札が数えている。`docs/recall.md` 冒頭の原則3（結果は、そこから漏れたものと
+ *     必ず同時に提示する）から導ける。
  *
  * 落ちたときは、操作を1つずつ抜いて違反が残るかを見る形で操作列を最小化し、シードと最小の
  * 操作列を出力に出す。`RECALL_FUZZ_SEEDS`・`RECALL_FUZZ_LEN` で本数と長さを変えられる。
@@ -246,16 +249,16 @@ async function run(ops: readonly Op[]): Promise<RunOutcome> {
       if (returned.has(d.memoryId)) v("I7-band-returned", d.memoryId);
 
     let counted = returnedInScope;
-    let notIndexed = 0;
+    // 集約の層の札（ADR 0203 追記9）。和には入れず、下限の余白にだけ使う。
+    let aggregateSlack = 0;
     let allExact = true;
     for (const o of r.omitted) {
       switch (o.kind) {
         case "not_indexed":
-          notIndexed += o.count;
+          aggregateSlack += o.count;
           break;
         case "filtered":
-          if (o.scopeRelation === "within_scope") counted += o.count;
-          if (o.countKind !== "exact") allExact = false;
+          if (o.scopeRelation === "within_scope") aggregateSlack += o.count;
           break;
         case "below_threshold":
         case "over_limit":
@@ -276,9 +279,9 @@ async function run(ops: readonly Op[]): Promise<RunOutcome> {
       }
     }
     const summary = () =>
-      `returned ${returnedInScope}, counted ${counted}, not_indexed ${notIndexed}, total ${r.index.totalInScope} :: ${JSON.stringify(r.omitted)}`;
+      `returned ${returnedInScope}, counted ${counted}, aggregate-layer ${aggregateSlack}, total ${r.index.totalInScope} :: ${JSON.stringify(r.omitted)}`;
     if (counted > r.index.totalInScope) v("I10-upper", summary());
-    if (allExact && counted < r.index.totalInScope - notIndexed) v("I10-lower", summary());
+    if (allExact && counted < r.index.totalInScope - aggregateSlack) v("I10-lower", summary());
   };
 
   for (let oi = 0; oi < ops.length; oi++) {
