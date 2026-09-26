@@ -350,6 +350,7 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 
 - テーブル: `memory_embeddings_<space>`
 - 索引（HNSW）: `idx_memory_embeddings_hnsw_<space>`
+- 索引（ゼロベクトル用の部分索引、Issue #956 / ADR 0343）: `idx_memory_embeddings_zero_norm_<space>`
 
 `<space>` は `provider` / `model` / `dimensions` を小文字化・非英数字を `_` に置換して
 連結したスラグ（例: `openai_text_embedding_3_small_1536`）。**PostgreSQL の識別子は
@@ -390,6 +391,16 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 「切り詰め・ハッシュ付与が実際に起きたときの具体名がテーブルと索引で食い違いうる」
 ことをここに明記するのが今回の変更である**（ADR 0202「引き受けた負債」2番を、
 実測に基づいて埋めた）。
+
+🔴 **ゼロベクトル用の部分索引の接頭辞（`idx_memory_embeddings_zero_norm_` = 33バイト）は
+HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——同じ `<space>` でも、HNSW 索引が
+まだ切り詰められない大きさでも、この部分索引は先に切り詰められうる（実測は
+[`src/__tests__/embedding-space-table.test.ts`](./src/__tests__/embedding-space-table.test.ts)
+の `embeddingSpaceZeroNormIndexName` の節を参照）。この索引は `registerEmbeddingSpace`
+が呼ばれるたびに `CREATE INDEX IF NOT EXISTS` で作られる——HNSW 索引と同じ経路であり、
+既存の空間（この索引を持たないまま運用されてきたもの）にも、次回 `registerEmbeddingSpace`
+が呼ばれたとき（通常はプロセスの再起動時）に同様に作られる。詳細・build 時間の実測は
+[ADR 0343](../../docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)。
 
 ### advisory lock のキー
 
