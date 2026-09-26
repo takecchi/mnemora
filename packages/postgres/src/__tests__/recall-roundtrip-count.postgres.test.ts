@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { sql } from "drizzle-orm";
 import { Client } from "pg";
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx, LLMProvider } from "@mnemora/core";
@@ -292,53 +291,72 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     expect(roundtripsByLimit.get(50)).toBe(roundtripsByLimit.get(5));
   });
 
-  it("歯3（現状の記録。#874 が直ったら書き換える前提）: recordUsage → reinforce ループは使用報告1件ごとに2往復し、件数に比例する", async () => {
-    // ⚠ この歯は「今のあるべき姿」ではなく「今の実装がどう振る舞うか」を記録している。
-    // [Issue #874](https://github.com/takecchi/mnemora/issues/874) が指摘した
-    // N+1（`runtime.ts` の `handleMemoryUsage`、`recordUsage` 1回 + `reinforce` を
-    // `insertedMemoryIds` の件数だけ直列に呼ぶ）を、書き込み経路のまま——束ねる修正は
-    // 別Issueの領分——実測値として固定する。**#874 が直ったら、この歯（特に
-    // `1 + 2 * n` の式）を実装に合わせて書き換えること。**
-    const ctx: Ctx = { tenantId: `tenant-rtc-reinforce-${randomUUID()}` };
-    const { memoryStore, vectorStore } = await buildTestRuntime();
-    const { db } = await getTestClient();
+  it("歯3: observe({kind:'memory_usage'}) の往復数は usedMemoryIds の件数に比例しない — N=1/5/20 で等しい（Issue #874、PR「perf/874-reinforce-many」）", async () => {
+    // この歯は元々「recordUsage → reinforce ループは使用報告1件ごとに2往復し、
+    // 件数に比例する」ことを `1 + 2 * n` という式で固定していた（現状の記録であり、
+    // あるべき姿ではないと明記していた）。[Issue #874](https://github.com/takecchi/mnemora/issues/874)
+    // を直した本 PR で、その式のとおり書き換える——ただし固定するのは絶対値の式
+    // ではなく、歯1・歯2 と同じ「比較先も同じ実行・同じ環境」の相対比較である
+    // （ファイル冒頭の doc コメント参照）。理由: この歯が数えるのは
+    // `runtime.observe()` 全体（`createObservation` を含む）の往復数であり、
+    // `createObservation` 側の往復数はこの PR の対象外（Issue #870 が並行で
+    // `externalId` を足している）——絶対値を固定すると、無関係な変更で赤くなる歯に
+    // なってしまう（`docs/north-star.md` 問い3）。
+    //
+    // 実測値（直す前・直した後とも）は PR 本文に控えてあり、ここには焼き込まない
+    // （`AGENTS.md`「数を、道具と生成物に焼き込まない」）——固定するのは、この歯自身が
+    // 検査する「N を変えても往復数が変わらない」という関係だけである。
+    const ctx: Ctx = { tenantId: `tenant-rtc-usage-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
 
-    // 使用報告の対象になる Memory を5件、事前に作る（埋め込みは使わないが、
+    // 使用報告の対象になる Memory を20件、事前に作る（埋め込みは使わないが、
     // 既存の helper をそのまま使う）。
     const memoryIds: string[] = [];
-    for (let i = 0; i < 5; i += 1) {
+    for (let i = 0; i < 20; i += 1) {
       const memory = await createEmbeddedMemory(memoryStore, vectorStore, ctx, ANCHOR_VECTOR, {
-        digest: `reinforce-target-${i}`,
+        digest: `usage-target-${i}`,
       });
       memoryIds.push(memory.id);
     }
 
-    async function recordUsageThenReinforce(ids: string[]): Promise<number> {
+    async function observeMemoryUsage(ids: string[]): Promise<number> {
       // `recall_usages_recall_id_fkey` を満たすため、呼ぶたびに新しい `recalls` 行を
       // 1本作る（recall_id が毎回違うので、`memoryIds` を呼び出しの間で再利用しても
       // `recall_usages` の複合PK（tenant_id, recall_id, memory_id）に衝突しない
       // ——ON CONFLICT DO NOTHING が効く経路をこの歯では踏まない）。
-      const recallId = randomUUID();
-      await db.execute(sql`
-        INSERT INTO recalls (id, tenant_id, subject_id, query, budget, omitted, usage, index_band, explain, returned_memories)
-        VALUES (${recallId}, ${ctx.tenantId}, NULL, '{}'::jsonb, NULL, '[]'::jsonb, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb, '[]'::jsonb)
-      `);
+      const recallId = await memoryStore.createRecall(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        query: { text: "fixture" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic",
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
       return countClientQueries(async () => {
-        const { insertedMemoryIds } = await memoryStore.recordUsage(ctx, recallId, ids);
-        expect(insertedMemoryIds.length).toBe(ids.length); // 検算: 全件が新規挿入。
-        for (const memoryId of insertedMemoryIds) {
-          await memoryStore.reinforce(ctx, memoryId, NOW);
-        }
+        const result = await runtime.observe(ctx, {
+          kind: "memory_usage",
+          recallId,
+          usedMemoryIds: ids,
+        });
+        expect(result.memoryIds.length).toBe(ids.length); // 検算: 全件が新規挿入として強化された。
       });
     }
 
-    const roundtripsN1 = await recordUsageThenReinforce([memoryIds[0]!]);
-    expect(roundtripsN1).toBe(1 + 2 * 1);
+    const roundtripsN1 = await observeMemoryUsage(memoryIds.slice(0, 1));
+    const roundtripsN5 = await observeMemoryUsage(memoryIds.slice(0, 5));
+    const roundtripsN20 = await observeMemoryUsage(memoryIds.slice(0, 20));
 
-    const roundtripsN3 = await recordUsageThenReinforce(memoryIds.slice(1, 4));
-    expect(roundtripsN3).toBe(1 + 2 * 3);
-
-    const roundtripsN5 = await recordUsageThenReinforce(memoryIds);
-    expect(roundtripsN5).toBe(1 + 2 * 5);
+    // 固定するのはこれだけ: usedMemoryIds の件数（1→5→20）が変わっても往復数は増えない。
+    expect(roundtripsN5).toBe(roundtripsN1);
+    expect(roundtripsN20).toBe(roundtripsN1);
   });
 });

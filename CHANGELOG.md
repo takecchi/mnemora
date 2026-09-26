@@ -119,6 +119,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   無変更。マイグレーションは無し——`0001_init.sql` の `uq_observations_external_id` は
   元から kind を問わない一意制約だった（[Issue #870](https://github.com/takecchi/mnemora/issues/870) /
   [ADR 0009](./docs/decisions/0009-usage-feedback-via-observe.md) 追記、PR #913）。
+- **`MemoryStore` に任意メソッド `reinforceMany?` を足した**——`observe({kind:
+  'memory_usage'})` の `recordUsage → reinforce` ループが使用報告1件ごとに直列に往復し
+  （N+1）、報告件数に比例して往復数が増えていた問題（1回の呼び出しで `1 + 2N` 往復）を、
+  この口があるときだけ1回の呼び出しに束ねる。`runtime.ts` の `handleMemoryUsage` は
+  `reinforceMany` が在ればそれを使い、無ければ従来どおり `reinforce` を1件ずつ呼ぶ
+  ——既存の `MemoryStore` 実装（第三者 adapter を含む）の挙動は1バイトも変えない。
+  `PostgresMemoryStore.reinforceMany` は件数によらず定数2往復（[Issue #874](https://github.com/takecchi/mnemora/issues/874) /
+  [ADR 0303](./docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節、PR #917）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
