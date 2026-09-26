@@ -1094,3 +1094,24 @@ Refs #984
 - **確かめていないこと**: 本物の Postgres での再現（判定は `packages/core` の中で完結する）。
 
 Refs #1019
+
+---
+
+## 2026-09-27 追記8（クローン miku の委譲先、Issue #1020）
+
+**段3.5（連想枠）で席（`maxCount`）を競り負けて `over_limit(stage:"association")` に数えた候補が、同じ段3.5 の必須の同伴取得（Issue #959、ADR 0151 の 2026-09-27 追記）で対向として取られると、`memories`（または段4の `budget_dropped`）と `over_limit(stage:"association")` の両方に数えられていた。これを解消した。**
+
+見つけた経緯: シードつきのランダムな操作列で不変条件を検査する使い捨ての検査器（Fake）が拾った。`over_limit(stage:"association")` の件数は、席が決まった時点（`recall-runtime.ts` の `overLimitAssociationCount`）で積まれる。Issue #959 の同伴の取得はその後に走るので、席を競り負けた候補が同伴として Unit に入っても、件数が直らなかった。**Issue #959 の修正（PR #970）が持ち込んだ二重計上である。**
+
+### 決めたこと
+
+追記4 が作った `overLimitAssociationSeatlessIds`（席に着けなかった候補の id）のうち、段3.5 の Unit（`associationUnits`）に入ったものを、`over_limit(stage:"association")` の `count` から差し引く。0件になれば Omission ごと外す。戻った先で返るか、予算で落ちて `budget_dropped` に数えられるかは問わない（追記3〜6 の「最後に落とした段で1回だけ数える」）。`over_limit(stage:"rescore")` と `below_threshold` の側は、追記4・追記6 の判定（`associationUnits` か `overLimitAssociationSeatlessIds` のどちらかに居れば差し引く）で既に1回だけ差し引かれているので、変えていない。
+
+### 測ったこと
+
+- 【実測】歯 `packages/core/src/__tests__/recall-association-seatless-companion.test.ts`（fake ストア、3本）: 修正前は (a)（席を競り負けた候補が同伴として返った）・(b)（同伴として取られた後に予算で落ちた）・(c)（同伴として取られていない候補は残る）の3本とも赤（(c) は二重計上で件数が 2 になる）。修正後は3本とも緑。
+- 【実測】変異試験: 判定を「席に着けなかった分をすべて差し引く」にすると (c) だけが赤。
+- 【実測】recall・omission まわりの既存の歯 33 ファイル（489本）をファイル名指定で実行し、すべて緑。
+- **確かめていないこと**: 本物の Postgres での再現（判定は `packages/core` の中で完結する）。
+
+Refs #1020

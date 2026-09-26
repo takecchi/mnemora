@@ -2062,6 +2062,30 @@ export async function runRecall(
   const associationUnitIds = new Set(
     associationUnits.flatMap((u) => u.members.map((m) => m.memory.id)),
   );
+  // Issue #1020: 段3.5 で席を競り負けて `over_limit(stage:"association")` に数えた候補
+  // （`overLimitAssociationSeatlessIds`）が、同じ段3.5 の必須の同伴取得（Issue #959）で
+  // 対向として `associationUnits` に入ることがある。その件数は席が決まった時点で既に
+  // 積まれているので、ここで差し引く——ADR 0203「決めたこと」1 と追記3〜6 の
+  // 「最後に落とした段で1回だけ数える」（戻った先で返るか、予算で落ちて `budget_dropped` に
+  // 数えられる）。
+  const seatlessPulledIntoUnits = [...overLimitAssociationSeatlessIds].filter((id) =>
+    associationUnitIds.has(id),
+  );
+  if (seatlessPulledIntoUnits.length > 0) {
+    const assocIndex = omitted.findIndex(
+      (o) => o.kind === "over_limit" && o.stage === "association",
+    );
+    if (assocIndex !== -1) {
+      const existing = omitted[assocIndex] as OverLimitOmission;
+      const remainingCount = existing.count - seatlessPulledIntoUnits.length;
+      if (remainingCount > 0) {
+        omitted[assocIndex] = { ...existing, count: remainingCount };
+      } else {
+        omitted.splice(assocIndex, 1);
+      }
+    }
+  }
+
   const promotedFromBelowThreshold = belowThreshold.filter(
     (c) =>
       returnedMemoryIds.has(c.memory.id) ||
