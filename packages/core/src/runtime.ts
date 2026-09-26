@@ -404,6 +404,29 @@ export interface ContestedDetectionOutcome {
  */
 export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_attempted";
 
+/**
+ * ⚠ **2026-09-26 追記（[Issue #856](https://github.com/takecchi/mnemora/issues/856)）:
+ * この型は「observationId が存在しない（または他テナントの id だった）」場合を
+ * 表す値を持たない。** `Runtime.reextract(ctx, observationId)` は
+ * `deps.memoryStore.getObservation(ctx, observationId)` が `null` を返すと、
+ * `ReextractResult` を一切構築せずに素の `Error`
+ * （`runtime.reextract: observation not found: <id>`。型付き例外ではない、
+ * `RangeError` でもない）で reject する——書き込みは一切行わない。
+ *
+ * `Runtime` の他の書き込み系メソッド（`forget`/`purge`/`restoreArchived`/
+ * `restoreSuperseded`/`markContested`/`resolveContested`）は、対象 id が存在しない
+ * 場合を構造化された outcome（`kind: "not_found"` 等）として返し、例外にしない、
+ * という規律をそれぞれの doc コメントで明示している。`reextract` は単一の id を
+ * 直接受け取る口という点で `getRecall(ctx, recallId)`（存在しない id には例外では
+ * なく `null` を返す）とも似た形をしているが、`getRecall` とは逆に、存在しない id
+ * では例外を投げる——この型・このメソッドは、その不揃いを解消していない。
+ * 呼び出し側は `try`/`catch`（または Promise の `.catch`）でこれを扱うことになる。
+ *
+ * 2026-09-26、クローン miku がこの振る舞いを現状の契約として記録すると決めた
+ * （[Issue #856](https://github.com/takecchi/mnemora/issues/856)）。採らなかった案は、
+ * `ReextractResult` に `not_found` 相当の outcome を足す案（公開の型の変更になる）と、
+ * 型付き例外に変える案（投げる例外の種類が変わる）である。
+ */
 export interface ReextractResult {
   observationId: ObservationId;
   /** {@link WriteAtomicity}。⛔ 省略可能にしない。 */
@@ -902,6 +925,26 @@ export interface OutboxLeaseConflict {
 
 export interface TickResult {
   processed: number;
+  /**
+   * この tick で `outboxStore.fail()` を呼び、それが `OutboxLeaseConflictError` で
+   * 弾かれなかった件数。
+   *
+   * ⚠ **2026-09-26 追記（[Issue #836](https://github.com/takecchi/mnemora/issues/836)）:
+   * 「`fail()` を呼んで弾かれなかった」は「その行が終端 `failed` になった」と同じでは
+   * ない。** `outboxStore.complete()` がハンドラの成功を DB へコミットした**後**に
+   * `OutboxLeaseConflictError` 以外の例外（コミット後の接続断・タイムアウト等）を
+   * 返すと、`tick()` はそれを「処理が失敗した」と区別できずに `fail()` を呼ぶ。
+   * `OutboxStore.complete`/`fail` の契約（Issue #826）により、既に `completed_at` が
+   * 付いた行に対する `fail()` は無言の no-op になる——行は `completed` のまま
+   * （`failed_at`/`last_error` は `NULL`）で変わらないが、`tick()` はそれでも
+   * `failed` を1増やす。この場合、行の実際の終端状態（`completed`）と `failed`
+   * の集計は食い違う。`unsupported` にも `leaseConflicts` にも載らないため、
+   * `TickResult` からはどの1件がこのずれに当たるかを特定できない。
+   * `OutboxStore.complete`/`fail` はどちらも `Promise<void>` で、`OutboxStore` に
+   * id で1件を読み直す口も無いため、`tick()` 自身にこれを区別する手段は無い
+   * （[ADR 0142](../../../docs/decisions/0142-outbox-complete-fail-compare-and-swap.md)
+   * の同日付追記を参照）。
+   */
   failed: number;
   /**
    * `failed` の**内訳**のうち、「処理を試みて失敗した」のではなく
@@ -912,7 +955,12 @@ export interface TickResult {
    * `tick` は consolidate を処理できない」が、どちらも `failed: 1` という**同じ顔**になる。
    * それは ADR 0029 が `ReextractResult.skipped` で塞いだのと同じ族の欠落
    * （「無い」の種類を潰す）である。**`unsupported` に入ったジョブは `failed` にも数える**
-   * ——`failed` の意味（この tick で終端の失敗になった件数）は変えていない。
+   * ——`failed` の意味（`fail()` を呼んで弾かれなかった件数）は変えていない。⚠ **この
+   * 「`fail()` を呼んで弾かれなかった件数」という意味そのものが、「終端が `failed` に
+   * なった件数」と常に一致するとは限らない**（`failed` フィールド自身の doc コメント、
+   * [Issue #836](https://github.com/takecchi/mnemora/issues/836) 参照）——ただし
+   * `unsupported` に入るジョブ（対応する handler が無い）はこの分岐（`complete()` が
+   * コミット後に例外を返す）を通らないため、このずれの対象にはならない。
    *
    * ⚠ **ここに出たジョブは `fail()` で終端に落ちている**（Phase 1 に自動リトライは無い。
    * ADR 0032）。黙って lease 切れを待つ形にはしない——claim したまま何もしないと、
@@ -1115,6 +1163,21 @@ export type RestoreSupersededTarget = {
    * {@link groupSupersededCandidatesByOperation} が、この判断を機械的に
    * 補助する任意の純関数として在る——ただし判定はしない・"unknown" を
    * 隠さない（同関数の doc コメント参照）。
+   *
+   * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+   * 上の判断材料（`supersededReason`）は、`MemoryStore.purgeExpiredEvents?`
+   * （[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）が保持期間で
+   * 掃除した後は取れなくなる。** `previewRestoreSupersededBy?` は `kind: 'superseded'`
+   * の `memory_events` 行から `supersededReason` を読むが、`purgeExpiredEvents?` は
+   * `kind = 'events_purged'` 以外の行をすべて対象にする——`superseded` 行も除外しない。
+   * ⟹ 保持期間を過ぎた後は、`consolidated`/`contested_resolved` のように本来は
+   * `"structural"`/`"per_item"` へ分類できたはずの候補も `supersededReason: null` に
+   * 劣化し、`groupSupersededCandidatesByOperation` の `"unknown"` グループへ合流する。
+   * **「最初から由来が無かった」候補と「由来はあったが掃除で消えた」候補は、この型・
+   * この関数のどちらからも区別できない**——別々の操作の敗者が、たまたま同じ `null` に
+   * なって1グループへ誤って統合されうる。詳細・採らなかった案は
+   * [ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)
+   * の同日付追記を参照。
    */
   onlyMemoryIds?: MemoryId[];
 };
@@ -1172,6 +1235,19 @@ export type SupersededOperationGroup = {
  *
  * 入力の順序は保持しない（`supersededReason` の初出順にグループを並べる）。
  * 空配列を渡すと空配列を返す。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+ * この関数自身は渡された `supersededReason` をそのまま group key として使うだけであり、
+ * `null` になった理由（最初から由来が記録されていなかったのか、
+ * `MemoryStore.purgeExpiredEvents?` の保持期間の掃除で消えたのかのどちらか）は問わない。**
+ * `purgeExpiredEvents?`（[ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）
+ * が走った後は、本来なら別々の `"consolidated"`/`"contested_resolved"` だった候補も
+ * `null` に劣化してここへ渡され、同じ `"unknown"` グループへ合流しうる——
+ * `boundaryConfidence: "unknown"` の宣言どおり「分からない」という顔のままだが、
+ * この場合の「分からない」は**掃除によって後天的に作られたもの**であり、判定材料が
+ * 最初から無かった場合と地続きに扱われる。詳細は
+ * [ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)
+ * の同日付追記を参照。
  */
 export function groupSupersededCandidatesByOperation(
   candidates: ReadonlyArray<{ memoryId: MemoryId; supersededReason: string | null }>,
@@ -3581,6 +3657,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "complete" });
           continue;
         }
+        // ⚠ 2026-09-26 追記（Issue #836）: ここに来る `err` は「`complete()` が
+        // `OutboxLeaseConflictError` 以外の例外を返した」ことしか意味しない——
+        // `handler` は既に成功しており、`complete()` が DB 上ではコミット済みなのに
+        // （コミット後の接続断・タイムアウト等で）例外だけをクライアントへ返した
+        // ケースを、この catch は「処理が失敗した」ケースと区別できない。前者の場合、
+        // 下の `fail()` は既に `completed_at` が付いた行に対する無言の no-op になり
+        // （Issue #826）、行は `completed` のまま変わらないが、それでも `failed` は
+        // 1増える（`TickResult.failed` の doc コメント参照）。
         try {
           await deps.outboxStore.fail(
             ctx,

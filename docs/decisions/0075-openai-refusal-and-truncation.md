@@ -158,3 +158,21 @@
 - **拒否が実運用でどの頻度で起きるかを測っていない。**
 - **`finish_reason === "content_filter"` のときに `message.refusal` も同時に入るのかを、
   実 API では確かめていない。**型の上は両方入りうるので、実装は `refusal` を先に見る。
+
+---
+
+## 追記（2026-09-26、[Issue #885](https://github.com/takecchi/mnemora/issues/885)）: `kind` の外——応答オブジェクトの形そのものが壊れている場合
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・採らなかった案・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コードの挙動は変えていない——この追記は記録だけである。
+
+この ADR が定めた `kind`（`refusal`/`truncated`/`no_content`）は、応答オブジェクトの
+トップレベルの欄（`choices`/`data`）がキーごと丸ごと無い場合までは分類しない。
+`response.choices[0]`（LLM）・`[...response.data]`（埋め込み）は、そのキー自体が無いと
+`kind` の外の生の `TypeError` を投げる——`OpenAILLMProviderError` にはならない。
+主たる記録（実測・採らなかった案）は
+[ADR 0072](./0072-anthropic-llm-provider.md) の同日付追記に置いた（anthropic 側と
+openai 側の両方をまとめて記録している）。反映先は
+`packages/openai/src/errors.ts`・`llm-provider.ts`・`embedding-provider.ts` の
+doc コメントと `packages/openai/README.md`。

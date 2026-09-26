@@ -828,6 +828,16 @@ CREATE TABLE tenant_settings (
 );
 ```
 
+**⚠ 2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+この削除は `kind: 'superseded'` の行を特別扱いしない。** `restoreSuperseded` の
+下見（`MemoryStore.previewRestoreSupersededBy?`、下記「矛盾の扱い」・
+[ADR 0237](./decisions/0237-restore-superseded-dry-run-preview.md)/
+[ADR 0258](./decisions/0258-restore-superseded-operation-scope.md)）は、この
+`superseded` 行の `meta.reason` を読んで「別々の敗者を1回の操作としてまとめて戻して
+よいか」を判定する唯一の情報源であり、保持期間の掃除が走った後は由来が
+「分からない」に劣化する——最初から由来が無かった候補と区別が付かない。
+詳細は [ADR 0115](./decisions/0115-event-retention-purge.md) の同日付追記を参照。
+
 **`tenant_settings` は [ADR 0007](./decisions/0007-tenant-scoping.md) が禁じる「テナントの台帳」ではない。** mnemora はテナントの識別・
 認証・存在確認を行わない——`tenant_id` は呼び出し側が渡す不透明な文字列のままである。
 `tenant_settings` に行が無いテナントは、コード中の定数による既定値で動作する。この表は

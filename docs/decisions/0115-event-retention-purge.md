@@ -360,3 +360,19 @@ M1・M4 とも死亡することを確認した:**
   **未検証——マネージャーの報告として引用する。** 本 PR を出す直前に
   `git fetch origin main && git ls-tree --name-only origin/main docs/decisions/`
   で自分でも空きを再確認する）。
+
+---
+
+## 追記（2026-09-26、[Issue #821](https://github.com/takecchi/mnemora/issues/821)）: `purgeExpiredEvents` は `kind = 'superseded'` の行も対象にする——`restoreSuperseded` の下見が経年劣化する
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コードの挙動は変えていない——この追記は記録だけである。
+
+決定1の `WHERE`（`kind <> 'events_purged'`）は無限後退を避けるためのものであり、
+`kind = 'superseded'` を除外する意図はどこにも無かった。だが `superseded` 行は
+`MemoryStore.previewRestoreSupersededBy?`（[ADR 0237](./0237-restore-superseded-dry-run-preview.md)）
+が `supersededReason` を読む唯一の情報源でもあり、保持期間の運用ジョブが走った後は
+由来が「分からない」に劣化する——[ADR 0258](./0258-restore-superseded-operation-scope.md)
+の同日付追記に詳細（実測・採らなかった案）を記録した。**この ADR の決定1自体は変えない**
+——「保持期間を超えたイベントは種類を問わず消える」という契約はそのまま維持する。

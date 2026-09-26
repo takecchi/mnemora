@@ -25,6 +25,21 @@
  * `Error` を継承しているので、`@mnemora/anthropic` と揃えた既存の契約
  * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
  * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
+ * `kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである。**
+ * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——`choices`/`data` の
+ * トップレベルの欄がキーごと丸ごと無い場合（`{}` が返る等）——は、この分類の**外**にある
+ * 生の例外（`TypeError` 等。壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と
+ * 同じ扱い）がそのまま伝播する。`OpenAILLMProviderError` にはならず、`instanceof` でも
+ * `kind` でも捕まえられない（埋め込み側の `OpenAIEmbeddingProvider.embed` はそもそも
+ * この `errors.ts` を使わず、専用のエラー型を持たない——壊れた応答は最初から生の
+ * 例外がそのまま伝播する形である）。**実 API がこの形
+ * （200 応答なのにトップレベルのキーが丸ごと欠ける）を実際に返すかは確認していない。**
+ * 詳細・検討した案は
+ * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記
+ * （主たる記録）を参照。`llm-provider.ts` の `assertNotRefusedOrTruncated` 呼び出し箇所、
+ * `embedding-provider.ts` の `embed` にも個別の doc コメントがある。
  */
 
 /**

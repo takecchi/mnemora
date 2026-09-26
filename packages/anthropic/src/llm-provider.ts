@@ -81,7 +81,15 @@ export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
 
 /** 応答の `content` は content block の配列。テキストは `{ type: "text", text: string }`
  * ブロック。`@mnemora/openai` の「最初の choice の content」に対応する規律として、
- * **最初に見つかったテキストブロック**を採用する（thinking 等の他ブロック型は無視する）。 */
+ * **最初に見つかったテキストブロック**を採用する（thinking 等の他ブロック型は無視する）。
+ *
+ * ⚠ 2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
+ * 呼び出し元（`complete`/`completeStructured`）はこの関数へ `response.content` を
+ * そのまま渡す。`content` キー自体が応答オブジェクトに丸ごと無い場合（`{}` が返る等）、
+ * `content` 引数は `undefined` になり、下の `content.find(...)` が
+ * `TypeError: Cannot read properties of undefined (reading 'find')` を投げる——
+ * `AnthropicLLMProviderError` の `kind` 分類には一切載らない。詳細は `errors.ts`
+ * 冒頭コメントの同日付追記を参照。 */
 function firstTextBlock(content: Anthropic.Messages.ContentBlock[]): string | undefined {
   return content.find((block) => block.type === "text")?.text;
 }
