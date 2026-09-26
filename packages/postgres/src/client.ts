@@ -17,7 +17,7 @@ export interface PostgresClient {
 
 /**
  * `pool.connect()` で借り切った checked-out client に付ける、何もしない `error`
- * リスナー（ADR 0339・{@link protectCheckedOutClientsFromUnhandledErrors} 参照）。
+ * リスナー（ADR 0340・{@link createDrizzleClientFacade} 参照）。
  *
  * 🔴 モジュールで1つだけの、同じ関数参照を使い回すこと（`migrate.ts`/`advisory-lock.ts`
  * の同名の定数と同じ理由——`on`/`removeListener` に別々の関数を使うと外せず、
@@ -26,8 +26,10 @@ export interface PostgresClient {
 const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
 
 /**
- * `pool.connect()` それ自体を、返す checked-out client に空の `error` リスナーを
- * 自動で付け外しするものへその場で置き換える（ADR 0340）。
+ * `drizzle()` に渡す**専用の薄い包み**を作る（ADR 0340）。`createPostgresClient` が
+ * 公開する `Pool`（`PostgresClient.pool`）そのものは、この関数の外で `new Pool(...)`
+ * したまま**一切書き換えない**——利用者が自分で `client.pool.connect()` を呼んで
+ * 借りるクライアントは、今日と同じ、無防備なままの素の `PoolClient` である。
  *
  * ## なぜ要るか
  *
@@ -45,26 +47,73 @@ const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
  * フェイルオーバー・運用者による切断・OOM kill）でプロセスが丸ごと落ちる——
  * `db-transaction-connection-loss.test.ts` が `pg_terminate_backend` で実測。
  *
- * `drizzle-orm` は node_modules 内の依存であり直接編集できない。`createPostgresClient`
- * は `db.transaction()` が使う `Pool` インスタンスを作る唯一の入口（doc コメント参照）
- * なので、ここで作った直後にその `Pool` インスタンス自身の `connect` を、生成時にだけ
- * 差し替える——`drizzle()` にも呼び出し側にも、以後は今日と同じ `Pool` に見える。
+ * ## なぜ「別の包み」であって「公開する pool の書き換え」ではないか
+ *
+ * 最初の実装（PR #863 の初稿）は、公開する `Pool` インスタンス自身の `connect` を
+ * その場で差し替えていた。だがそれだと、**利用者が自分で `client.pool.connect()` を
+ * 呼んで借りたクライアントにも、黙って mnemora の `error` リスナーが付く**——
+ * `PostgresClient.pool` は公開している面であり、その `connect()` が何をするかは
+ * mnemora が独自に決めてよい契約ではない。ADR 0339 が「`runMigrations`/
+ * `acquireAdvisoryLock` **自身**が借りたものだけに付ける」という線を引いたのと
+ * 同じ理由で、ここでも「mnemora 自身が内部で使うために借りたもの（drizzle の
+ * `db.transaction()` が借りるもの）だけに付け、利用者が自分で借りたものには
+ * 触らない」という線を保つ。⟹ **`drizzle()` に渡す先だけを、公開する `pool` とは
+ * 別のオブジェクト（薄い包み）にする。**
+ *
+ * ## 包みの作り方——drizzle-orm が実際に触る3点だけを満たす
+ *
+ * `drizzle-orm` の node-postgres 経路が `this.client`（＝ここで渡す包み）に対して
+ * 実際に呼ぶのは次の3つだけ（`node_modules/drizzle-orm/node-postgres/session.js` を
+ * 読んで確認した）:
+ *
+ * 1. `client.query(...)`（`NodePgPreparedQuery.execute`/`all` — 通常のクエリ・
+ *    トランザクション内のクエリのどちらも、最終的にこの形で呼ぶ）
+ * 2. `client.connect()`（`NodePgSession.transaction` — `db.transaction()` の入口）
+ * 3. `this.client instanceof Pool`（`Object.getPrototypeOf(this.client).constructor.name`
+ *    による緩い代替判定もある）——`db.transaction()` が「専用コネクションを
+ *    新しく借りるべきか」を見分ける判定
+ *
+ * 包みは `Object.create(Pool.prototype)` で作る——**`Pool.prototype` を
+ * プロトタイプ鎖に直接持つ**ため、`instanceof Pool` は素直に真になる
+ * （3番目の要求を満たす。`facade instanceof Pool → true` を実測で確認した——
+ * ADR 0340「測ったこと」）。
+ *
+ * ⚠ **包みに `Pool.prototype` のメソッドを「継承させたまま」呼ばせてはいけない。**
+ * `pg-pool` の `query()`/`connect()` の実装は `this.log`/`this.Promise`/
+ * `this._clients` 等、**コンストラクタで実インスタンスにだけ設定される
+ * プロパティ**を読む。包みの `[[Prototype]]` は `Pool.prototype`（クラスの
+ * プロトタイプ）であって実インスタンスではないため、これらは無い——継承したままの
+ * `query()` を包みの `this` で呼ぶと `this.log` が `undefined` になり壊れることを
+ * 実測で確認した（ADR 0340「測ったこと」）。
+ * ⟹ **`query`/`connect` は、包みの own property として、必ず元の `pool`
+ * インスタンスへ `.bind(pool)` した関数を明示的に置く。** `this` を経由した
+ * 暗黙の委譲はしない。
+ *
+ * ## `connect` だけ、借りた client に `error` リスナーを付け外しする
+ *
+ * `query`（`facade.query = pool.query.bind(pool)`）はそのまま元の `pool.query` を
+ * 呼ぶ——`pg-pool` の `query()` は内部で `client.once('error', onError)` を
+ * 自前で付けて自衛する経路を持つため、素通しで安全（ADR 0339 の「見つけた別の穴」参照）。
+ * **`connect` だけ**、返す checked-out client へこの no-op `error` リスナーを
+ * 自動で付け外しするものに包む。
  *
  * ⚠ **このコードベースは `pool.connect()` の promise 形しか使わない**
  * （`migrate.ts`/`advisory-lock.ts`/drizzle-orm、いずれも）。callback 形
  * （`pool.connect((err, client, done) => ...)`）は使われていないため、渡ってきたら
  * 対策せずそのまま元の実装へ委譲する（呼ばれない経路のために作り込まない）。
  *
- * ⚠ **`migrate.ts`/`advisory-lock.ts` 自身が付ける `error` リスナーと二重になる**——
- * `runMigrations`/`acquireAdvisoryLock` がこの `Pool` を受け取って呼ばれた場合
- * （`test-db.ts` の `getTestClient()` が実際にそうしている）、同じ checked-out
- * client に2つの no-op リスナー（別の関数参照）が付く。害は無い——`EventEmitter` は
- * 同じイベントに複数のリスナーを同時に持て、どちらも自分の `release()`/`removeListener`
- * の対で正しく外れる（積み上がらない）。
+ * ⚠ **`migrate.ts`/`advisory-lock.ts` 自身が付ける `error` リスナーとは無関係。**
+ * `runMigrations`/`acquireAdvisoryLock` は公開する `pool`（この包みではない）を
+ * 受け取って呼ばれる（`test-db.ts` の `getTestClient()` が実際にそうしている）ため、
+ * ADR 0339 の対策とは別の経路であり、互いに干渉しない。
  */
-function protectCheckedOutClientsFromUnhandledErrors(pool: Pool): void {
+function createDrizzleClientFacade(pool: Pool): Pool {
+  const facade = Object.create(Pool.prototype) as Pool;
+
+  facade.query = pool.query.bind(pool) as Pool["query"];
+
   const originalConnect = pool.connect.bind(pool);
-  pool.connect = ((
+  facade.connect = ((
     callback?: (
       err: Error | undefined,
       client: PoolClient | undefined,
@@ -85,6 +134,8 @@ function protectCheckedOutClientsFromUnhandledErrors(pool: Pool): void {
       return client;
     })();
   }) as Pool["connect"];
+
+  return facade;
 }
 
 /**
@@ -117,6 +168,10 @@ function protectCheckedOutClientsFromUnhandledErrors(pool: Pool): void {
  *
  * 呼び出し側が既に `config.options` を渡していた場合は、**その値の後ろに空白区切りで
  * 追記する**（上書きして黙って捨てない）。
+ *
+ * **`drizzle()` に渡すのは、公開する `pool` そのものではなく
+ * {@link createDrizzleClientFacade} が作る薄い包みである**（ADR 0340）——
+ * 公開する `pool` の `connect()` は素の `Pool` のまま変えない。
  */
 export function createPostgresClient(
   connectionString: string,
@@ -135,8 +190,7 @@ export function createPostgresClient(
   }
 
   const pool = new Pool({ connectionString, ...poolConfig });
-  protectCheckedOutClientsFromUnhandledErrors(pool);
-  const db = drizzle(pool, { schema });
+  const db = drizzle(createDrizzleClientFacade(pool), { schema });
   return { pool, db };
 }
 
