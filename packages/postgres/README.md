@@ -22,6 +22,18 @@ npm i @mnemora/postgres @mnemora/core
   `import.meta` を含めていないため（[ADR 0086](../../docs/decisions/0086-no-import-meta-in-published-artifacts.md)）。
   `import.meta` は CommonJS として解析されると**構文解析の時点で**落ちるので、
   1箇所在るだけで「import しただけで落ちる」状態になる
+- **`tsc` を `skipLibCheck: false`（unset のままでも同じ——TypeScript 自体のコンパイラ
+  既定値が `false`）で走らせる consumer が `@mnemora/postgres` を import すると、
+  自分のコードとは無関係な型エラーが出ることがある。**【実測、drizzle-orm 0.45.2 /
+  TypeScript 5.9.3、2026-09-26】公開 `@mnemora/postgres@1.0.1` と main を
+  `pnpm pack` したもの、どちらを `moduleResolution: NodeNext` の素の consumer から
+  import しても70件——全件 `node_modules/drizzle-orm/**/*.d.ts` 由来（`gel` /
+  `mysql2/promise` 等、未インストールの任意 peer 向け型の欠落や drizzle-orm 内部の
+  構造的な型の不整合）で、`@mnemora/*` 自身の `.d.ts` からは0件。`drizzle-orm` を
+  mnemora を介さず単独 import するだけでも同条件で再現する（84件）ため、
+  **mnemora 固有の型の欠陥ではない**（[Issue #893](https://github.com/takecchi/mnemora/issues/893)）。
+  `tsc --init` が書き出す既定テンプレートは `skipLibCheck: true` なので、多くの consumer は
+  踏まない。回避策は `skipLibCheck: true` を明示すること。
 - **本物の Postgres + pgvector が要る。**擬似物・インメモリでの代替は無い
   （このリポジトリの CI は [`pgvector/pgvector:pg17`](https://hub.docker.com/r/pgvector/pgvector) の
   Docker イメージに対して実行している。実物は
