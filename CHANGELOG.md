@@ -136,7 +136,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `Pool` インスタンスを作る唯一の入口）が `Pool` を作った直後に、そのインスタンス自身の
   `connect` を、返す checked-out client へ同じ空の `error` リスナーを自動で付け外しする
   ものへ差し替えるようにした。公開の型・export は変えていない
-  （[ADR 0340](./docs/decisions/0340-drizzle-transaction-checked-out-client-error-listener.md)）。
+  （[ADR 0340](./docs/decisions/0340-drizzle-transaction-checked-out-client-error-listener.md)、
+  PR #863）。
 - **`runtime.tick()` が、`consolidate`/`reflect` の自動ジョブで LLM 呼び出しが失敗しても、
   そのジョブを「処理成功」として数えていた。** `processConsolidateJob`/`processReflectJob`
   は `consolidate()`/`reflect()` の戻り値（LLM 失敗時は `outcome: "llm_failed"` を返す——
