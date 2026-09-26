@@ -292,6 +292,48 @@ describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres 
 });
 
 /**
+ * `packages/testkit` の `InMemoryOutboxStore.claimBatch`
+ * （`in-memory-fixtures-claim-batch-lease-ms.test.ts`）と同じ形の不一致が `FakeOutboxStore.claimBatch`
+ * にもあった。`PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を
+ * `timestamptz` のパラメータとして送るため、どちらかが Invalid Date になる入力では例外になる
+ * （実測は testkit 側のテストのコメント参照）。修正前の Fake は `leaseMs` が `NaN` /
+ * `±Infinity` / `1e20` でも、未 claim のジョブを claim していた。
+ */
+describe("FakeOutboxStore.claimBatch: リースの境界時刻が Date にならない入力は、Postgres と同じく例外を投げ、1件も claim しない", () => {
+  const cases: [label: string, now: Date, leaseMs: number][] = [
+    ["leaseMs=NaN", new Date("2100-01-01T00:00:00.000Z"), Number.NaN],
+    ["leaseMs=Infinity", new Date("2100-01-01T00:00:00.000Z"), Number.POSITIVE_INFINITY],
+    ["leaseMs=-Infinity", new Date("2100-01-01T00:00:00.000Z"), Number.NEGATIVE_INFINITY],
+    ["leaseMs=1e20", new Date("2100-01-01T00:00:00.000Z"), 1e20],
+    ["now=Invalid Date", new Date(Number.NaN), 60_000],
+  ];
+  for (const [label, now, leaseMs] of cases) {
+    it(`${label} は例外を投げ、ジョブを claim しない`, async () => {
+      const { memoryStore, outboxStore } = createFakeRuntimeStores();
+      await memoryStore.createMemory(ctx, fixture({ embeddingStatus: "failed" }));
+      await memoryStore.requeueEmbedJobs(ctx, { statuses: ["failed"], limit: 1 });
+      await expect(
+        outboxStore.claimBatch(ctx, {
+          kinds: ["embed"],
+          limit: 5,
+          now,
+          claimedBy: "test",
+          leaseMs,
+        }),
+      ).rejects.toThrow(/claimBatch: now - leaseMs must be a valid Date/);
+      const jobs = await outboxStore.claimBatch(ctx, {
+        kinds: ["embed"],
+        limit: 5,
+        now: new Date("2100-01-01T00:00:00.000Z"),
+        claimedBy: "test",
+        leaseMs: 60_000,
+      });
+      expect(jobs.map((j) => j.attempts)).toEqual([1]);
+    });
+  }
+});
+
+/**
  * `packages/testkit` の `InMemoryMemoryStore.requeueEmbedJobs`
  * （`in-memory-fixtures-requeue-embed-jobs-limit.test.ts`）と同じ形の不一致が
  * `FakeMemoryStore.requeueEmbedJobs` にもあった——`.slice(0, Math.max(0, opts.limit))` を
