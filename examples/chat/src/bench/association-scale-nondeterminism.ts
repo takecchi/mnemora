@@ -84,14 +84,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import type {
-  Ctx,
-  EmbeddingSpaceId,
-  MemoryId,
-  Runtime,
-  VectorHit,
-  VectorStore,
-} from "@mnemora/core";
+import type { Ctx, EmbeddingSpaceId, MemoryId, Runtime } from "@mnemora/core";
 import { DEFAULT_OVER_FETCH_FACTOR, DEFAULT_RECALL_LIMIT, createRuntime } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "@mnemora/local-embedding";
 import type { PostgresClient } from "@mnemora/postgres";
@@ -117,6 +110,7 @@ import {
   buildAssociationProbeSetConversation,
 } from "../association-probe-set.js";
 import { drainEmbedTicks } from "../embed-drain.js";
+import { type VectorStoreSpy, wrapVectorStoreWithSpy } from "./vector-store-spy.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 import { createProviders, selectEmbeddingMode, selectLLMMode } from "../providers.js";
 import {
@@ -204,37 +198,7 @@ function buildCorpus(scale: number, fillerOrder: FillerOrder): CorpusTexts {
   return { base, filler };
 }
 
-// ---------------------------------------------------------------------------
-// VectorStore spy —— `association-scale-bench.ts` の複製。
-// ---------------------------------------------------------------------------
-
-interface SpyCall {
-  kind: "search" | "getVectors";
-  hits?: VectorHit[];
-  memoryIds?: MemoryId[];
-}
-
-interface VectorStoreSpy {
-  calls: SpyCall[];
-  reset(): void;
-}
-
-function wrapVectorStoreWithSpy(inner: VectorStore, spy: VectorStoreSpy): VectorStore {
-  return {
-    upsert: (ctx, space, memoryId, vector) => inner.upsert(ctx, space, memoryId, vector),
-    delete: (ctx, space, memoryId) => inner.delete(ctx, space, memoryId),
-    search: async (ctx, space, query, opts) => {
-      const hits = await inner.search(ctx, space, query, opts);
-      spy.calls.push({ kind: "search", hits });
-      return hits;
-    },
-    getVectors: async (ctx, space, memoryIds) => {
-      const result = await inner.getVectors!(ctx, space, memoryIds);
-      spy.calls.push({ kind: "getVectors", memoryIds: [...memoryIds] });
-      return result;
-    },
-  };
-}
+// VectorStore spy は ./vector-store-spy.ts（association-scale-bench.ts と共有。Issue #1012）。
 
 // ---------------------------------------------------------------------------
 // runtime handle —— `association-scale-bench.ts` の `createInstrumentedRuntime` の

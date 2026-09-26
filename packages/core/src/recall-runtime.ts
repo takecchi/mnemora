@@ -44,6 +44,7 @@ import type {
   RecallResult,
   RecallScope,
   RecalledMemory,
+  ScoreNotComparableOmission,
   ScoreBreakdown,
   StageTrace,
   UnitAssemblyDroppedOmission,
@@ -1351,6 +1352,10 @@ export async function runRecall(
   // 実際に数えている集合そのものであり、別の基準を新たに作らない——下のブロックで
   // その2つの内訳をそのまま id で積む。
   const overLimitAssociationSeatlessIds = new Set<MemoryId>();
+  // Issue #1026: 段3.5 で席に着いたが、対向が取れずに Unit ごと落ちた（`unit_assembly_dropped` に
+  // 数えた）候補の id。下の排他性の後処理が、段2の札（`over_limit(stage:"rescore")`・
+  // `below_threshold`・`score_not_comparable`）から差し引くのに使う。
+  const associationAssemblyDroppedIds = new Set<MemoryId>();
   if (associationQuery !== undefined) {
     if (deps.vectorStore.getVectors === undefined) {
       // 北極星の問い2（無効にしても成立するか）を型で担保する任意メソッドが無い。
@@ -1802,6 +1807,7 @@ export async function runRecall(
           // 対向が取れなかった（forget 済み・存在しない・片側だけの contested・
           // attributes の絞り込みで外れた、等）。段3と同じ判断——Unit ごと落とす。
           associationUnitAssemblyShortfall += 1;
+          associationAssemblyDroppedIds.add(candidate.memory.id);
         }
         if (associationUnitAssemblyShortfall > 0) {
           // 段3と同じ札・同じ countKind（ADR 0043）。`UnitAssemblyDroppedOmission` は
@@ -2061,12 +2067,37 @@ export async function runRecall(
   const associationUnitIds = new Set(
     associationUnits.flatMap((u) => u.members.map((m) => m.memory.id)),
   );
+  // Issue #1020: 段3.5 で席を競り負けて `over_limit(stage:"association")` に数えた候補
+  // （`overLimitAssociationSeatlessIds`）が、同じ段3.5 の必須の同伴取得（Issue #959）で
+  // 対向として `associationUnits` に入ることがある。その件数は席が決まった時点で既に
+  // 積まれているので、ここで差し引く——ADR 0203「決めたこと」1 と追記3〜6 の
+  // 「最後に落とした段で1回だけ数える」（戻った先で返るか、予算で落ちて `budget_dropped` に
+  // 数えられる）。
+  const seatlessPulledIntoUnits = [...overLimitAssociationSeatlessIds].filter((id) =>
+    associationUnitIds.has(id),
+  );
+  if (seatlessPulledIntoUnits.length > 0) {
+    const assocIndex = omitted.findIndex(
+      (o) => o.kind === "over_limit" && o.stage === "association",
+    );
+    if (assocIndex !== -1) {
+      const existing = omitted[assocIndex] as OverLimitOmission;
+      const remainingCount = existing.count - seatlessPulledIntoUnits.length;
+      if (remainingCount > 0) {
+        omitted[assocIndex] = { ...existing, count: remainingCount };
+      } else {
+        omitted.splice(assocIndex, 1);
+      }
+    }
+  }
+
   const promotedFromBelowThreshold = belowThreshold.filter(
     (c) =>
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      overLimitAssociationSeatlessIds.has(c.memory.id),
+      overLimitAssociationSeatlessIds.has(c.memory.id) ||
+      associationAssemblyDroppedIds.has(c.memory.id),
   );
   if (promotedFromBelowThreshold.length > 0) {
     const promotedIds = new Set(promotedFromBelowThreshold.map((c) => c.memory.id));
@@ -2087,6 +2118,33 @@ export async function runRecall(
         // 全件昇格した。0件の omission を残さない——他の kind が count === 0 では
         // 積まない作法（`filtered`/`over_limit` 等の各 push 直前の `if` 参照）に揃える。
         omitted.splice(belowThresholdIndex, 1);
+      }
+    }
+  }
+
+  // 段2で `score_not_comparable` に数えた候補（`notComparable`、total が NaN——ゼロベクトルの
+  // 埋め込みなど、ADR 0040/0044）も、段3の必須同伴取得・段3.5 の連想で候補集合に戻りうる。
+  // below_threshold と同じ判定（返ったか、`companions`/`associationUnits` に居るか）で
+  // 取り下げ、ADR 0203「決めたこと」1（`omitted` は返さなかった記憶の集合）と追記3〜6 の
+  // 「最後にその候補を落とした段で1回だけ数える」を守る——戻った先で予算に落ちれば
+  // `budget_dropped` 側に1回だけ残る。`notComparable` は段2の内部状態として memoryId を
+  // 持つので、公開型を広げずに突き合わせられる。
+  const promotedFromNotComparable = notComparable.filter(
+    (c) =>
+      returnedMemoryIds.has(c.memory.id) ||
+      mandatoryCompanionIds.has(c.memory.id) ||
+      associationUnitIds.has(c.memory.id) ||
+      associationAssemblyDroppedIds.has(c.memory.id),
+  );
+  if (promotedFromNotComparable.length > 0) {
+    const notComparableIndex = omitted.findIndex((o) => o.kind === "score_not_comparable");
+    if (notComparableIndex !== -1) {
+      const existing = omitted[notComparableIndex] as ScoreNotComparableOmission;
+      const remainingCount = existing.count - promotedFromNotComparable.length;
+      if (remainingCount > 0) {
+        omitted[notComparableIndex] = { ...existing, count: remainingCount };
+      } else {
+        omitted.splice(notComparableIndex, 1);
       }
     }
   }
@@ -2154,7 +2212,8 @@ export async function runRecall(
     (c) =>
       mandatoryCompanionIds.has(c.memory.id) ||
       associationUnitIds.has(c.memory.id) ||
-      overLimitAssociationSeatlessIds.has(c.memory.id),
+      overLimitAssociationSeatlessIds.has(c.memory.id) ||
+      associationAssemblyDroppedIds.has(c.memory.id),
   );
   if (promotedFromOverLimit.length > 0) {
     const overLimitRescoreIndex = omitted.findIndex(
