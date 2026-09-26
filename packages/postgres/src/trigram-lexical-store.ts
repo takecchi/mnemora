@@ -563,6 +563,11 @@ export function buildTrigramLexicalSearchSelect(
   if (opts.filter.attributes !== undefined) {
     conditions.push(sql`attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
   }
+  // Issue #201 PR-B（ADR 0323）: `PostgresLexicalStore.search`（lexical-store.ts）・
+  // `PostgresVectorStore.search`（vector-store.ts）と同じ述語・同じ意味（配列の重なり演算子）。
+  if (opts.filter.labels !== undefined) {
+    conditions.push(sql`tags && ${sql.param(opts.filter.labels)}::text[]`);
+  }
   if (opts.filter.occurredAfter !== undefined) {
     conditions.push(sql`COALESCE(occurred_at, recorded_at) >= ${opts.filter.occurredAfter}`);
   }
