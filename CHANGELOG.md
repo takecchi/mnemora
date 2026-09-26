@@ -215,7 +215,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   安定性により挿入順（通常の呼び出し順では `recordedAt` の古い方が先）に落ちており、
   Postgres の「新しい方が先」とは逆向きだった——`InMemoryVectorStore.search` に
   Issue #339 / ADR 0170 で入れた tie-break（上記）と同じ形の食い違いが、語彙チャンネル側
-  にだけ残っていた。返す形（`{ memoryId, coverage, rank }`）は変えていない。
+  にだけ残っていた。返す形（`{ memoryId, coverage, rank }`）は変えていない
+  （PR #875）。
 
 ---
 
