@@ -316,7 +316,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `MemoryStore.purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`、下の
   `[1.0.1]` 節の PR #811/#813 相当）より実害が大きかった。`PostgresMemoryStore.archiveDecayed`
   と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くように
-  した（新しい正常系の挙動は変えていない）（[Issue #880](https://github.com/takecchi/mnemora/issues/880)）。
+  した（新しい正常系の挙動は変えていない）（[Issue #880](https://github.com/takecchi/mnemora/issues/880)、PR #923）。
 - **`InMemoryMemoryStore.reinforce`（`@mnemora/testkit` の擬似 `MemoryStore`）に Invalid
   Date（`new Date(NaN)`）を渡すと、例外を投げず `lastReinforcedAt`/`decayFloorAt` に
   Invalid Date をそのまま書き込んで成功していた——以後その Memory の減衰計算が `NaN`
@@ -325,7 +325,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `createMemory` の `recordedAt`/`occurredAt`/`validFrom`/`validUntil` と、
   `EventStore.append`/`updateStatusWithEvent` 等イベントを積む口が共有する
   `at`（Postgres の `timestamptz` 列）もまとめて塞いだ（新しい正常系の挙動は変えて
-  いない）（[Issue #807](https://github.com/takecchi/mnemora/issues/807)）。
+  いない）（[Issue #807](https://github.com/takecchi/mnemora/issues/807)、PR #923）。
 - **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit` の擬似 `MemoryStore`）が、
   `halfLifeHours` に float64 では有限だが Postgres の `real`（IEEE 754 単精度・float4、
   値域は約 `±3.4028235e38`）の範囲を超える値（例: `1e300`）を渡されても例外を投げず
@@ -334,7 +334,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `setDefaultHalfLifeRecalls`（PR #815）と同根）と同じ `Math.fround` ベースの判定を
   足した（新しい正常系の挙動は変えていない。`strength` は値域 `(0, MAX_STRENGTH]` が
   float4 の範囲へ届かないため、既存の値域検査で既に拒まれており対象外）
-  （[Issue #817](https://github.com/takecchi/mnemora/issues/817)）。
+  （[Issue #817](https://github.com/takecchi/mnemora/issues/817)、PR #923）。
 - **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit` の擬似 `MemoryStore`）が、
   `content` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
   いた。** Postgres の `text` 型は NUL バイトを構造的に拒む（C 文字列表現に由来する
@@ -344,7 +344,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   実測したが、どこまで範囲を広げるかは製品判断が要ると判断し対象外にした。孤立サロゲート
   （`\uD800` 等）も対象外——Postgres 側（node-postgres が U+FFFD へ静かに置換する）の
   挙動に Fake をどちらへ寄せるかは別途の製品判断が要る
-  （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ）。
+  （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ、PR #923）。
 
 ---
 
