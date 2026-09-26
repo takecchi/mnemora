@@ -224,6 +224,29 @@ describe("deriveClaimKeys（Issue #371、ADR 0185/0315 決定2 の (ii) separate
     expect(result.failure?.kind).toBe("claim_key_length_mismatch");
   });
 
+  it("subject/predicate が空白だけ（正規化後に空文字列になる）なら、その要素は null にする（無関係な Memory 同士が空の鍵で衝突するのを防ぐ）", async () => {
+    // スキーマの `min(1)` は素通りする（" " は長さ1）が、`normalizeClaimKeyPart` の
+    // trim で空文字列に潰れる——このケースを `{ subject: "", predicate: "" }` のまま
+    // 返すと、無関係な2件の Memory が同じ「空の鍵」で誤って一致してしまう
+    // （`runtime.ts` の `detectClaimKeyContested`）。
+    const provider = llmReturning({
+      claims: [
+        { subject: " ", predicate: "favorite_food" },
+        { subject: "user", predicate: "　" }, // 全角スペース
+        { subject: "  ", predicate: "  " },
+        { subject: "user", predicate: "favorite_food" },
+      ],
+    });
+    const result = await deriveClaimKeys(provider, ctx, ["発話1", "発話2", "発話3", "発話4"]);
+    expect(result.claimKeys).toEqual([
+      null,
+      null,
+      null,
+      { subject: "user", predicate: "favorite_food" },
+    ]);
+    expect(result.failure).toBeNull();
+  });
+
   it("provider が投げたエラーの kind を duck typing で読む（extraction.ts の describeExtractionFailure と同じ規律）", async () => {
     const provider: LLMProvider = {
       complete: async () => {

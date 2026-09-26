@@ -211,7 +211,18 @@ export async function deriveClaimKeys(
       };
     }
     return {
-      claimKeys: result.claims.map((claim) => normalizeClaimKey(claim)),
+      // ⚠ `ClaimKeySchema` の `min(1)` は空白だけの値（例: `" "`、全角スペース）を
+      // 素通りする——`normalizeClaimKeyPart` の trim でそれらは空文字列に潰れる。
+      // 正規化後に `subject`/`predicate` のどちらかが空文字列になった要素は、鍵が
+      // 取れなかったものとして `null` にする（`DeriveClaimKeysResult.claimKeys` の
+      // doc コメント「部分的な対応付けを推測ででっち上げない」と同じ規律の延長）。
+      // `{ subject: "", predicate: "" }` のまま返すと、無関係な複数の Memory が
+      // 同じ「空の鍵」で誤って一致し、`detectClaimKeyContested` が的外れに
+      // `contested` を立ててしまう（実測、`__tests__/claim-key.test.ts`）。
+      claimKeys: result.claims.map((claim) => {
+        const normalized = normalizeClaimKey(claim);
+        return normalized.subject === "" || normalized.predicate === "" ? null : normalized;
+      }),
       failure: null,
     };
   } catch (error) {
