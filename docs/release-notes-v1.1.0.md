@@ -48,6 +48,7 @@
 
 1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `747acaf` か。**
    `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`747acaf` から動いていたら、この草稿の「新しく足した機能」「主な修正」の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節を読み、この草稿へ追記すること。
+   ⚠ **【実測 2026-09-26】この草稿を書く途中の `git merge origin/main` で、PR #845（`decay.ts` の `floorAt` 修正）が sha を動かさずに `[1.1.0]` の `### Fixed` へ1項目追記されているのを見つけた**（`747acaf` という表示は変わっていない）。⟹ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**——`git diff` で `CHANGELOG.md` 自体の差分も当日見ること。この1件はこの草稿に反映済み。
 2. **[Issue #809](https://github.com/takecchi/mnemora/issues/809) が決着しているか。**`gh issue view 809 --json state,title` で当日確認する。
    - **まだ `OPEN` なら**: この草稿の🔶マーク（`<!-- ⚠ #809 待ち -->` の直後）2箇所はそのままでよい。
    - **`CLOSED` になっており、「破壊的変更として扱う」と決まった場合**: 「🔴 まず」節末尾の「破壊的変更はありません」を「一部破壊的変更があります」に直し、PR #811/#813/#815（負数・`NaN`・`Infinity`・非整数の `limit`、float4 範囲外の値を testkit の Fake が例外にする変更）を新しい「### 破壊的変更」節へ移すこと。移行手順は、その時点で `docs/migration-v1.md` に新しい番号付き項目が足されているはずなので、それを指す（この草稿は先回りして番号を書かない——`migration-v1.md` は担い手の作業範囲外）。
@@ -90,6 +91,7 @@
 >
 > ### 主な修正
 >
+> - **有限だが巨大な半減期（`halfLifeHours`/`halfLifeRecalls`）を設定すると、「ほぼ永久に減衰しない」つもりの記憶が「作成直後から忘却済み」と逆転して判定される不具合を直しました。** `Date` で表現できる上限・`Number.MAX_SAFE_INTEGER` を超える値を、それぞれ表現可能な上限へ丸めるようにしました。新しく例外を投げる箇所はありません（PR #845）。
 > - **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる不具合を直しました**——`restoreSuperseded` と `forget` の並行実行、`markContested`/`resolveContested` を逆順で並行に呼んだときのデッドロックです（PR #839）。
 > - **`OutboxStore.complete`/`fail` を互いに排他にしました。** 同じ `attempts` のまま `complete` → `fail` を呼ぶと、逐次でも本物の Postgres の2接続からの並行でも、両方の終端列が付く矛盾した状態を作れていました。先に付いた終端を勝たせるようにしました（[Issue #826](https://github.com/takecchi/mnemora/issues/826)、PR #830）。
 > - ほかにも、段1 ANN 窓が他テナントの候補で埋め尽くされて0件を返す不具合、LLM が返す文字列 `"null"` を主題として誤って扱う不具合、自動統合が subject をまたいで記憶を混ぜる不具合、`runMigrations()` の拡張作成が同時実行で衝突する不具合、`dimensions > 2000` で HNSW 索引の作成だけが失敗してテーブルが残る不具合、負数の切り詰め処理2件、strict モードの JSON Schema 変換で省略可能な値が `null` を選べない不具合、`retry.attempts: NaN` でモデル読み込みが一度も試みられない不具合、擬似実装が重複 id をそのまま返す不具合、forget 済みの対向が recall の同伴取得に混ざる不具合を直しています。一覧と根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Fixed` を見てください。
