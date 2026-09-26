@@ -18,10 +18,12 @@ import type { FakeVectorStore } from "./runtime-fakes.js";
  * 同型の3段構え:
  * 1. 配線の歯——`RecallQuery.includeSubjectless` が段1の `VectorFilter`/`LexicalFilter` に
  *    そのまま渡ること。
- * 2. **adapter がこの欄を無視しても安全であること**——`FakeVectorStore`/`FakeLexicalStore`
- *    は本 PR で1文字も変えていない（`includeSubjectless` を知らない「他社 adapter」を
- *    自然に再現する）。この状態で `includeSubjectless: true` を渡しても、主題なしの
- *    Memory を取りこぼすだけで、別の subject の Memory が混ざることは無い。
+ * 2. **adapter がこの欄を無視しても安全であること**——`includeSubjectless` を知らない
+ *    「他社 adapter」を `IncludeSubjectlessIgnoringVectorStore` で再現する。この状態で
+ *    `includeSubjectless: true` を渡しても、主題なしの Memory を取りこぼすだけで、
+ *    別の subject の Memory が混ざることは無い。
+ *    （当初は素の `FakeVectorStore` がこの欄を参照していなかったので、それをそのまま
+ *    使っていた。Issue #948 で Fake がこの欄を適用するようになったため、ラッパに置き換えた。）
  * 3. **後置フィルタ本体の歯**——`PeriodStrippingVectorStore`（ADR 0059）と同型の
  *    `SubjectFilterStrippingVectorStore` で段1の絞りを剥がし、`recall-runtime.ts` の
  *    `survivesSubjectFilter` だけで正しく絞れることを確かめる。
@@ -176,13 +178,48 @@ async function createEmbeddedMemory(
 
 // ---------------------------------------------------------------------------
 // 2. adapter がこの欄を無視しても安全である（取りこぼしはあるが、混入は無い）。
-// `FakeVectorStore` は本 PR で1文字も変えていない——`subjectId` の厳密一致だけを見る
-// 「includeSubjectless を知らない adapter」をそのまま再現する。
+// `IncludeSubjectlessIgnoringVectorStore` は `includeSubjectless` だけを剥がし、
+// `subjectId` の厳密一致だけを見る「includeSubjectless を知らない adapter」を再現する
+// （Issue #948 までは素の `FakeVectorStore` がこの形だった）。
 // ---------------------------------------------------------------------------
 
+class IncludeSubjectlessIgnoringVectorStore implements VectorStore {
+  constructor(private readonly inner: VectorStore) {}
+
+  upsert(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    memoryId: Parameters<VectorStore["upsert"]>[2],
+    vector: number[],
+  ): ReturnType<VectorStore["upsert"]> {
+    return this.inner.upsert(ctx, space, memoryId, vector);
+  }
+
+  delete(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    memoryId: Parameters<VectorStore["delete"]>[2],
+  ): ReturnType<VectorStore["delete"]> {
+    return this.inner.delete(ctx, space, memoryId);
+  }
+
+  search(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    query: number[],
+    opts: { limit: number; filter: VectorFilter },
+  ): Promise<VectorHit[]> {
+    // 🔑 includeSubjectless「だけ」を剥がす。subjectId を含め他は素通し。
+    const { includeSubjectless: _includeSubjectless, ...stripped } = opts.filter;
+    return this.inner.search(ctx, space, query, { ...opts, filter: stripped });
+  }
+}
+
 describe("recall() — includeSubjectless を無視する adapter でも、別 subject が混ざることは無い", () => {
-  it("FakeVectorStore（未対応）では、includeSubjectless: true でも主題なしの Memory は返らない（取りこぼし。混入ではない）", async () => {
-    const { runtime, stores } = buildRuntime();
+  it("includeSubjectless を知らない adapter では、includeSubjectless: true でも主題なしの Memory は返らない（取りこぼし。混入ではない）", async () => {
+    const { runtime, stores } = buildRuntime(
+      (fvs) => new IncludeSubjectlessIgnoringVectorStore(fvs),
+    );
     const query = [1, 0];
 
     const subjectAMemory = await createEmbeddedMemory(stores, query, { subjectId: "user-a" });

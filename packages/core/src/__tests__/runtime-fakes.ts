@@ -1914,7 +1914,17 @@ export class FakeVectorStore implements VectorStore {
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
       }
-      if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
+      // Issue #608 項目③(b) / ADR 0286（Issue #948 で追加）: `includeSubjectless: true` の
+      // ときだけ、`subjectId` 一致に加えて主体なし（`subjectId === null`）の行も通す
+      // ——`InMemoryVectorStore.search`（`packages/testkit`）・`PostgresVectorStore.search`
+      // （`m.subject_id = ... OR m.subject_id IS NULL`）と同じ意味論。以前は厳密一致
+      // （`memory.subjectId !== opts.filter.subjectId`）だけを見ており、
+      // `includeSubjectless` を一度も参照していなかった。
+      const subjectMatches =
+        opts.filter.subjectId === undefined ||
+        memory.subjectId === opts.filter.subjectId ||
+        (opts.filter.includeSubjectless === true && memory.subjectId === null);
+      if (!subjectMatches) {
         continue;
       }
       // Issue #152/#153（ADR 0312）: AND 等値。`FakeLexicalStore.search` と同じ意味論。
@@ -1924,6 +1934,16 @@ export class FakeVectorStore implements VectorStore {
           ([key, value]) => memoryAttributes[key] === value,
         );
         if (!matches) continue;
+      }
+      // Issue #201 PR-B（ADR 0323、Issue #948 で追加）: OR の集合絞り込み——渡した名前の
+      // うち1つでも `tags` に含まれれば通す。`InMemoryVectorStore.search`
+      // （`packages/testkit`）・`PostgresVectorStore.search`（`m.tags && ...::text[]`）と
+      // 同じ意味論。以前は一度も参照しておらず、`labels` を渡しても絞り込まれなかった。
+      if (opts.filter.labels !== undefined) {
+        const labels = opts.filter.labels;
+        if (!memory.tags.some((tag) => labels.includes(tag))) {
+          continue;
+        }
       }
       // ADR 0165 決めたこと1・12・14: 忘却ゲートの2軸。`decayFloorAnyAxis: true` かつ
       // 両方（`decayFloorAtAfter`・`decayFloorSeqAfter`）が与えられているときに限り OR で
@@ -2263,7 +2283,14 @@ export class FakeLexicalStore implements LexicalStore {
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
       }
-      if (opts.filter.subjectId !== undefined && memory.subjectId !== opts.filter.subjectId) {
+      // Issue #608 項目③(b) / ADR 0286（Issue #948 で追加）: `includeSubjectless: true` の
+      // ときだけ、`subjectId` 一致に加えて主体なし（`subjectId === null`）の行も通す
+      // ——`FakeVectorStore.search` と同じ意味論（doc はそちらを参照）。
+      const subjectMatches =
+        opts.filter.subjectId === undefined ||
+        memory.subjectId === opts.filter.subjectId ||
+        (opts.filter.includeSubjectless === true && memory.subjectId === null);
+      if (!subjectMatches) {
         continue;
       }
       // Issue #152/#153（ADR 0312）: AND 等値。`FakeVectorStore.search` と同じ意味論。
@@ -2273,6 +2300,14 @@ export class FakeLexicalStore implements LexicalStore {
           ([key, value]) => memoryAttributes[key] === value,
         );
         if (!matches) continue;
+      }
+      // Issue #201 PR-B（ADR 0323、Issue #948 で追加）: OR の集合絞り込み。
+      // `FakeVectorStore.search` と同じ意味論（doc はそちらを参照）。
+      if (opts.filter.labels !== undefined) {
+        const labels = opts.filter.labels;
+        if (!memory.tags.some((tag) => labels.includes(tag))) {
+          continue;
+        }
       }
       if (
         opts.filter.excludeProvenanceKinds !== undefined &&

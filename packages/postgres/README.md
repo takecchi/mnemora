@@ -41,7 +41,9 @@ npm i @mnemora/postgres @mnemora/core
 - 接続先には次の3拡張が要る: **`vector`**（pgvector）・**`btree_gin`**・**`pgcrypto`**。
   `mnemora-postgres-migrate`（後述）の `migrations/0001_init.sql` が
   `CREATE EXTENSION IF NOT EXISTS` で作成を試みるが、接続ロールに拡張を作る権限が無い
-  環境ではあらかじめ DBA 側で作っておくこと。
+  環境ではあらかじめ DBA 側で作っておくこと。そのうえで `--extension-mode verify`（後述）を
+  付けて流すと、`CREATE EXTENSION` を1文も発行せず、3拡張が在ることだけを確かめる
+  （[ADR 0093](../../docs/decisions/0093-extension-verify-mode.md)）。
   **この3つで足りる——`pg_trgm` 等の追加の拡張は要求しない**
   （[ADR 0084](../../docs/decisions/0084-lexical-recall-channel.md) §3・
   [ADR 0149](../../docs/decisions/0149-japanese-lexical-no-required-extension.md)）。
@@ -163,6 +165,12 @@ npx mnemora-postgres-migrate --help
   `schema` 無しで `--extension-schema` だけを指定するとエラー（終了コード 1）になる
   ——黙って無視すると「拡張の置き場所を変えたつもりで実は変わっていない」という
   気付きにくい事故になるため。
+- `--extension-mode <create|verify>`（`MNEMORA_EXTENSION_MODE`）は3拡張の用意のしかたを選ぶ
+  （[ADR 0093](../../docs/decisions/0093-extension-verify-mode.md)）。`create`（既定）は
+  `CREATE EXTENSION IF NOT EXISTS` を発行する。`verify` は何も発行せず `pg_extension` を読み、
+  足りない拡張があれば拡張名と実行すべき SQL を示して失敗する（`CREATE EXTENSION` 権限を
+  持たないロール向け）。`--schema` の有無に関わらず指定できる。`create` / `verify` 以外の値は
+  エラー（終了コード 1）になる。
 - 不正なスキーマ名（PostgreSQL の識別子として使えない・63バイト超）や未知の引数、
   値の無い `--schema` もエラー（終了コード 1）で止まる。
 

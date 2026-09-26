@@ -2604,8 +2604,12 @@ async function runCorrectionCandidates(useDevSet: boolean): Promise<void> {
   }
 }
 
-function printHelp(): void {
-  console.log(
+/**
+ * 使い方を出す。既定は stdout。未知のサブコマンドのときは `console.error` を渡して
+ * stderr に出す（Issue #944）。
+ */
+function printHelp(write: (text: string) => void = console.log): void {
+  write(
     [
       "使い方:",
       "  DATABASE_URL=... pnpm --filter @mnemora/example-chat run chat       # observe/recall の往復・omitted/usage/budget を実演",
@@ -2685,6 +2689,8 @@ function printHelp(): void {
   );
 }
 
+const HELP_COMMANDS: ReadonlySet<string> = new Set(["--help", "-h", "help"]);
+
 async function main(): Promise<void> {
   const command = process.argv[2];
   if (command === "chat") {
@@ -2733,11 +2739,13 @@ async function main(): Promise<void> {
     await runRecord(parseCassetteTarget(process.argv[3]));
   } else if (command === "verify") {
     await runVerify(parseCassetteTarget(process.argv[3]));
-  } else {
+  } else if (command === undefined || HELP_COMMANDS.has(command)) {
     printHelp();
-    if (command !== undefined) {
-      process.exitCode = 1;
-    }
+  } else {
+    // 未知のサブコマンド: 理由と使い方を stderr に出して exit 1（Issue #944）。
+    console.error(`未知のサブコマンド: ${command}`);
+    printHelp(console.error);
+    process.exitCode = 1;
   }
 }
 
