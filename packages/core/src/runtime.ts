@@ -3188,6 +3188,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
     // decayBaseSeq/decayFloorSeq を同じ強化イベントとして進める。
     const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+    // ⚠ `insertedMemoryIds` の status は確かめない——`MemoryStore.reinforce` の doc
+    // コメント（Issue #840）が、status を絞らないことの帰結を status ごとに明記している。
     for (const memoryId of insertedMemoryIds) {
       await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);
     }
