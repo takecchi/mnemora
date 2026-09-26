@@ -50,10 +50,11 @@ describe("runMigrations: 接続が外部要因で失われたとき", () => {
   // データベースなので実害は無いが、手元の再実行に対して独立にしておく。
   beforeEach(async () => {
     const { pool } = await getTestClient();
-    await pool.query(
-      "DELETE FROM _mnemora_migrations WHERE name IN ($1, $2, $3)",
-      ["9401_connloss_file.sql", "9402_connloss_lock.sql", "9403_connloss_followup.sql"],
-    );
+    await pool.query("DELETE FROM _mnemora_migrations WHERE name IN ($1, $2, $3)", [
+      "9401_connloss_file.sql",
+      "9402_connloss_lock.sql",
+      "9403_connloss_followup.sql",
+    ]);
   });
 
   /**
@@ -80,70 +81,62 @@ describe("runMigrations: 接続が外部要因で失われたとき", () => {
     throw new Error(`waitForBackendRunning: ${likePattern} に一致するバックエンドが現れなかった`);
   }
 
-  it(
-    "マイグレーション本体を実行中の接続が失われても、runMigrations は例外で reject する（プロセスを落とさない）",
-    async () => {
-      const { pool } = await getTestClient();
-      const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-file-"));
-      writeFileSync(join(dir, "9401_connloss_file.sql"), "SELECT pg_sleep(5);");
+  it("マイグレーション本体を実行中の接続が失われても、runMigrations は例外で reject する（プロセスを落とさない）", async () => {
+    const { pool } = await getTestClient();
+    const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-file-"));
+    writeFileSync(join(dir, "9401_connloss_file.sql"), "SELECT pg_sleep(5);");
 
-      const migrating = runMigrations(pool, dir);
+    const migrating = runMigrations(pool, dir);
 
-      const pid = await waitForBackendRunning(pool, "%pg_sleep(5)%");
-      await pool.query("SELECT pg_terminate_backend($1)", [pid]);
+    const pid = await waitForBackendRunning(pool, "%pg_sleep(5)%");
+    await pool.query("SELECT pg_terminate_backend($1)", [pid]);
 
-      await expect(migrating).rejects.toThrow(/9401_connloss_file\.sql/);
+    await expect(migrating).rejects.toThrow(/9401_connloss_file\.sql/);
 
-      const recorded = await pool.query("SELECT name FROM _mnemora_migrations WHERE name = $1", [
-        "9401_connloss_file.sql",
-      ]);
-      expect(recorded.rows).toEqual([]);
-    },
-    20_000,
-  );
+    const recorded = await pool.query("SELECT name FROM _mnemora_migrations WHERE name = $1", [
+      "9401_connloss_file.sql",
+    ]);
+    expect(recorded.rows).toEqual([]);
+  }, 20_000);
 
-  it(
-    "advisory lock を保持しているクライアントの接続が失われても、runMigrations は例外で reject する（プロセスを落とさない）",
-    async () => {
-      const { pool } = await getTestClient();
-      const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-lock-"));
-      writeFileSync(join(dir, "9402_connloss_lock.sql"), "SELECT pg_sleep(5);");
+  it("advisory lock を保持しているクライアントの接続が失われても、runMigrations は例外で reject する（プロセスを落とさない）", async () => {
+    const { pool } = await getTestClient();
+    const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-lock-"));
+    writeFileSync(join(dir, "9402_connloss_lock.sql"), "SELECT pg_sleep(5);");
 
-      const migrating = runMigrations(pool, dir);
+    const migrating = runMigrations(pool, dir);
 
-      // ロック保持用クライアントは `pg_advisory_lock(...)` を実行した直後、以後は
-      // マイグレーション本体の間ずっと「アイドル状態で接続だけ保持する」——`query` 列に
-      // 残る文字列は最後に実行したものなので、アイドルのままでもこの目印で見つかる。
-      const pid = await waitForBackendRunning(pool, "%pg_advisory_lock%");
-      await pool.query("SELECT pg_terminate_backend($1)", [pid]);
+    // ロック保持用クライアントは `pg_advisory_lock(...)` を実行した直後、以後は
+    // マイグレーション本体の間ずっと「アイドル状態で接続だけ保持する」——`query` 列に
+    // 残る文字列は最後に実行したものなので、アイドルのままでもこの目印で見つかる。
+    const pid = await waitForBackendRunning(pool, "%pg_advisory_lock%");
+    await pool.query("SELECT pg_terminate_backend($1)", [pid]);
 
-      // ⚠ マイグレーション本体（`9402_connloss_lock.sql`）自体は、ロック保持用クライアントとは
-      // **別のコネクション**（ファイルごとのトランザクション用に `pool.connect()` で
-      // 別途借りる）で実行されるため、ロック保持用クライアントを殺しても本体の適用・
-      // COMMIT は妨げられない。⟹ `runMigrations` が reject するのは「マイグレーションが
-      // 失敗したから」ではなく、**最後の `releaseMigrationLock`（`pg_advisory_unlock`）が
-      // 死んだ接続に対して失敗するから**である——プロセスを落とさない、というこの歯の
-      // 主張にとってはどちらの理由で reject しても同じだが、「本体は成功したのに
-      // 呼び出し全体は失敗として報告される」という非対称は実際の挙動として観測しておく。
-      await expect(migrating).rejects.toThrow();
+    // ⚠ マイグレーション本体（`9402_connloss_lock.sql`）自体は、ロック保持用クライアントとは
+    // **別のコネクション**（ファイルごとのトランザクション用に `pool.connect()` で
+    // 別途借りる）で実行されるため、ロック保持用クライアントを殺しても本体の適用・
+    // COMMIT は妨げられない。⟹ `runMigrations` が reject するのは「マイグレーションが
+    // 失敗したから」ではなく、**最後の `releaseMigrationLock`（`pg_advisory_unlock`）が
+    // 死んだ接続に対して失敗するから**である——プロセスを落とさない、というこの歯の
+    // 主張にとってはどちらの理由で reject しても同じだが、「本体は成功したのに
+    // 呼び出し全体は失敗として報告される」という非対称は実際の挙動として観測しておく。
+    await expect(migrating).rejects.toThrow();
 
-      const recorded = await pool.query("SELECT name FROM _mnemora_migrations WHERE name = $1", [
-        "9402_connloss_lock.sql",
-      ]);
-      expect(recorded.rows).toEqual([{ name: "9402_connloss_lock.sql" }]);
+    const recorded = await pool.query("SELECT name FROM _mnemora_migrations WHERE name = $1", [
+      "9402_connloss_lock.sql",
+    ]);
+    expect(recorded.rows).toEqual([{ name: "9402_connloss_lock.sql" }]);
 
-      // advisory lock は PostgreSQL 側でセッション（コネクション）に紐づく——
-      // `pg_terminate_backend` でセッションごと終わらせれば、明示的な
-      // `pg_advisory_unlock` が失敗していても、サーバー側は自動的にロックを手放す。
-      // ⟹ 次の `runMigrations` 呼び出しが、解放されないロックを待ち続けて
-      // ハングしないことまで確かめる（`lockTimeoutMs` を短くし、待たされる場合は
-      // `MigrationLockTimeoutError` で早く赤くなるようにしておく——ハングを
-      // タイムアウト無しで待つ歯にしない）。
-      const dir2 = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-followup-"));
-      writeFileSync(join(dir2, "9403_connloss_followup.sql"), "SELECT 1;");
-      const followUp = await runMigrations(pool, dir2, { lockTimeoutMs: 5_000 });
-      expect(followUp.applied).toEqual(["9403_connloss_followup.sql"]);
-    },
-    20_000,
-  );
+    // advisory lock は PostgreSQL 側でセッション（コネクション）に紐づく——
+    // `pg_terminate_backend` でセッションごと終わらせれば、明示的な
+    // `pg_advisory_unlock` が失敗していても、サーバー側は自動的にロックを手放す。
+    // ⟹ 次の `runMigrations` 呼び出しが、解放されないロックを待ち続けて
+    // ハングしないことまで確かめる（`lockTimeoutMs` を短くし、待たされる場合は
+    // `MigrationLockTimeoutError` で早く赤くなるようにしておく——ハングを
+    // タイムアウト無しで待つ歯にしない）。
+    const dir2 = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-followup-"));
+    writeFileSync(join(dir2, "9403_connloss_followup.sql"), "SELECT 1;");
+    const followUp = await runMigrations(pool, dir2, { lockTimeoutMs: 5_000 });
+    expect(followUp.applied).toEqual(["9403_connloss_followup.sql"]);
+  }, 20_000);
 });
