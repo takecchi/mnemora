@@ -181,7 +181,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   UTF-8 へエンコードする経路（`packages/postgres` が `content`/`digest` 列へ書き込む際の
   node-postgres のエンコード）で静かに U+FFFD（置換文字）へ壊れる——切り詰めという安全弁
   自身が、切り詰めていない部分よりも先にデータを壊していた。共通の
-  `sliceWithoutSplittingSurrogatePair`（新設 export、`text-truncation.ts`）へ切り出し、
+  `sliceWithoutSplittingSurrogatePair`（`text-truncation.ts`。`@mnemora/core` の公開 API には出さない内部関数）へ切り出し、
   切り詰め位置がペアの内側なら1文字手前に丸めるようにした（新しい例外は投げない。
   ペアの外側で切れる場合は1バイトも挙動が変わらない）。
 
