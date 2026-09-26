@@ -1192,6 +1192,13 @@ export interface RecalledMemory {
   /**
    * どの経路でこの記憶が候補に入ったか。
    *
+   * **⚠ ANN と語彙（`"lexical"`）の両方が同じ記憶を引き当てたときは `"ann"` になる**
+   * （この記憶を候補集合へ入れた**最初の**チャンネル。ANN が先に候補プールへ入れるため。
+   * ADR 0084 §6）。「このチャンネルだけが見つけた」ことを表す欄ではない——**単一の値で
+   * チャンネルの集合を表そうとしない**、という設計判断である。語彙チャンネルも当てたかどうかは
+   * `score.lexicalMatch` の有無が名乗る（`ScoreBreakdown.lexicalMatch` の doc 参照）。
+   * 2つを併せて読むと、どのチャンネルの集合に入っていたかが一意に決まる。
+   *
    * **`"tag_match"` と `"recency"` は、この union に存在していたが、2026-09-16 に落とした**
    * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md)
    * の分類3、[ADR 0144](../../../docs/decisions/0144-drop-unreachable-classification-3-union-values.md)

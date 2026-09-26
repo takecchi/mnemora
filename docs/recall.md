@@ -1042,7 +1042,7 @@ core はモデル固有のトークナイザに依存しない。`TokenCounter` 
 type RecalledMemory = {
   memoryId: string
   digest: string
-  retrievedVia: 'ann' | 'lexical' | 'mandatory_companion' | 'association'
+  retrievedVia: 'ann' | 'lexical' | 'mandatory_companion' | 'association' // ANN と語彙の両方が同じ記憶を引き当てたときは 'ann'（候補集合へ入れた最初のチャンネル）。語彙も当てたかどうかは score.lexicalMatch の有無で分かる（ADR 0084 §6）
   companionOf?: string          // 矛盾の相手として同伴取得された場合、その相手の memoryId
   contestedWith?: string        // contested で、かつ相手が同じ recall 結果に含まれる場合、その相手の memoryId。retrievedVia を問わない（Issue #691 続き、ADR 0335）
   associationOf?: string        // retrievedVia: 'association' のときだけ在る。起点にしたアンカーの memoryId（§9）
@@ -1057,6 +1057,7 @@ type RecalledMemory = {
 
 type ScoreBreakdown = {
   similarity?: number   // ANN 経由でのみ存在。距離から変換した類似度
+  lexicalMatch?: number // 語彙チャンネルが引き当てた候補にのみ存在（ADR 0084）。一致したクエリ語彙数 ÷ クエリ語彙の総数（ADR 0092）
   decay: number          // decay(now, lastReinforcedAt, strength, halfLife) の値
   tagMatch: number
   freshness: number      // 1 で頭打ち（ADR 0036）。まだ起きていない出来事は古びようがない
@@ -1065,6 +1066,8 @@ type ScoreBreakdown = {
   affinityMeasured?: boolean // 連想枠（段3.5）が affinity を測っていない状態で返した記憶かどうか（Issue #548 方向1、ADR 0282）。§9.7 参照
 }
 ```
+
+**⚠ 2026-09-26 追記: 上のスニペットは `lexicalMatch` を欠いたまま放置されていた——ここで併せて直した。** 実フィールドは `packages/core/src/recall.ts` の `ScoreBreakdown`・`ScoreBreakdownSchema` に最初から在り（ADR 0084・ADR 0092）、型・schema 側は1バイトも変えていない。ズレていたのはこの文書のスニペットだけである。
 
 **⚠ 2026-09-26 追記（`v1.0.1`）**: 上のスニペットは `speaker`/`subjectId`/`recordedAt`/
 `occurredAt`/`attributes`（`RecalledMemory`）と `affinityMeasured`（`ScoreBreakdown`）を
