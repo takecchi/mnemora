@@ -4,6 +4,7 @@ import type {
   EmbeddingProvider,
   Memory,
   MemoryStore,
+  RecallAssociationQuery,
   Runtime,
   TenantSettingsStore,
 } from "@mnemora/core";
@@ -93,6 +94,12 @@ export interface RunArchiveSweepCostOptions {
    * 呼ばない。**
    */
   decayClock?: { store: TenantSettingsStore; clock: DecayClock };
+  /**
+   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
+   * **省略時は `null`**——この bench(archive sweep コスト・gold 順位)の基準線は
+   * 変えない。`examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 /**
@@ -172,14 +179,15 @@ async function measureProbe(
   query: string,
   budget: { maxMemoryTokens: number } | undefined,
   limit: number | undefined,
+  association: RecallAssociationQuery | null = null,
 ): Promise<RawArchiveSweepProbeMeasurement> {
-  // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-  // でも、この bench（archive sweep コスト・gold 順位）の基準線を動かさない。
+  // association: 省略時は null — この欄を省略した既存の呼び出しではこの bench
+  // （archive sweep コスト・gold 順位）の基準線を動かさない（ADR 0337 追記2026-09-26）。
   const result = await runtime.recall(
     ctx,
     budget !== undefined
-      ? { text: query, limit, budget, association: null }
-      : { text: query, association: null },
+      ? { text: query, limit, budget, association }
+      : { text: query, association },
   );
   const resolvedExternalIds = await Promise.all(
     result.memories.map((m) => resolveExternalId(memoryStore, ctx, m.memoryId)),
@@ -214,10 +222,20 @@ export async function measureRecallForPhase(
   activeCount: number,
   budgetLadder: readonly number[],
   recallLimit: number,
+  association: RecallAssociationQuery | null = null,
 ): Promise<ArchiveSweepRecallJson> {
   const unbudgetedRaw = await Promise.all(
     PROBES.map((probe) =>
-      measureProbe(runtime, memoryStore, ctx, probe.id, probe.query, undefined, undefined),
+      measureProbe(
+        runtime,
+        memoryStore,
+        ctx,
+        probe.id,
+        probe.query,
+        undefined,
+        undefined,
+        association,
+      ),
     ),
   );
   const unbudgetedProbes = unbudgetedRaw.map((raw) => buildArchiveSweepProbeJson(raw, activeCount));
@@ -234,6 +252,7 @@ export async function measureRecallForPhase(
           probe.query,
           { maxMemoryTokens: budgetTokens },
           recallLimit,
+          association,
         ),
       ),
     );
@@ -317,6 +336,7 @@ export async function runArchiveSweepCost(
     beforeStore.json.activeCount,
     options.budgetLadder,
     options.recallLimit,
+    options.association,
   );
   const before: ArchiveSweepPhaseJson = { store: beforeStore.json, recall: beforeRecall };
 
@@ -340,6 +360,7 @@ export async function runArchiveSweepCost(
     afterStore.json.activeCount,
     options.budgetLadder,
     options.recallLimit,
+    options.association,
   );
   const after: ArchiveSweepPhaseJson = { store: afterStore.json, recall: afterRecall };
 

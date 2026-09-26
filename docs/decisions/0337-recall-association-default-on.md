@@ -208,3 +208,174 @@ export const DEFAULT_RECALL_ASSOCIATION: RecallAssociationQuery = {
 - [ADR 0166](./0166-recall-footprint-association-term.md) — `estimateRecallFootprint` の `associationCount` の既定 `0`（この ADR の決定5が、`recall()` 自身の既定が on になった後も据え置いた値）
 - [ADR 0168](./0168-examples-chat-uses-association.md) — `examples/chat` が独自に連想枠を既定で使う（この ADR では変更していない）
 - [ADR 0332](./0332-association-default-100k-measurement.md) — Issue #337 の依頼に沿った10万行級の測定記録（状態: 提案。判定を持たない。オーナーはこの実測が確定する前に決定した）
+
+---
+
+## 追記（2026-09-26）
+
+> 本文はクローン miku の委譲先が書いた。オーナー本人の執筆ではない。依頼元は
+> クローン miku（オーナーではない）——リリース 1.1.0 の前に、既存の記録済みベンチの
+> 上で連想枠の既定 on が何を動かすかを測って残してほしい、という委譲である。
+>
+> **⛔ これは既定を戻すかどうかを決めるための測定ではない。記録である。** 上の
+> 「決定」節・「これが覆るとしたら」節の判断そのものは変えていない。
+
+### 目的
+
+決定2・「確かめていないこと」が明記するとおり、`DEFAULT_RECALL_ASSOCIATION.maxCount=10`
+の根拠は合成12問（ADR 0332/0168）だけであり、`examples/chat` の既存の記録済みベンチ
+（`retrieval`/`compare`/`time-term`/`validity`/`answer-time-weighting`/`answer`、
+および `identifier-probes`/`numeral-token-probes`/`consolidation-cost`）に対する
+既定 on の影響はこの ADR 自身が測っていなかった。この追記は、その影響の**大きさ**
+（品質指標・載る量・`omitted` の内訳・連想枠経由の件数）を実測して残す。
+
+### 条件
+
+- **sha**: `origin/main` = `d500ad4`（この ADR 自身のマージ commit、PR #838）の木。
+- **枝**: `measure/association-default-on-2026-09-26`。
+- **道具**: `examples/chat/src/bench/association-default-on-measure.ts`
+  （新設。`association-default-on-measure-lib.ts` に純関数を分離）。各ベンチの
+  arm/オプションへ **省略可能な `association` オプションを足しただけ**——既存の
+  呼び出し（この欄を渡さない呼び出し）は1バイトも挙動が変わらない
+  （`RunRetrievalQualityArmOptions.association` 等、各ファイルの docstring参照）。
+- **層**（⚠ ベンチごとに違う。一括ではない——詳細・理由は
+  [examples/chat/bench-results/association-default-on-2026-09-26/README.md](../../examples/chat/bench-results/association-default-on-2026-09-26/README.md)）:
+  - `retrieval-quality`/`compare`: `recorded` カセット（`retrieval.json`/`compare.json`）。
+    連想枠は `VectorStore.getVectors`/`search` しか呼ばない（`embeddingProvider`/
+    `llmProvider` に触れない）ため、on にしてもカセットに無い入力は出なかった
+    （実測。例外0件）。
+  - `time-term`/`validity`/`identifier-probes`/`numeral-token-probes`/
+    `consolidation-cost`/`answer-time-weighting`/`answer`: `MNEMORA_EMBEDDING=local`
+    （プロセス内 ONNX 推論。CLI の既定が `deterministic`+`deterministic` のベンチ
+    （`time-term`/`validity`）も、この測定だけ embedding を `local` へ上書きした
+    ——`deterministic` 埋め込みでは連想枠が拾う近傍が意味を持たないため）。
+    `answer-time-weighting`/`answer` は **recall 側の量だけ**を読み、回答の正誤
+    （verdict）は読んでいない（`llmMode=deterministic` の出力に正誤の意味を
+    持たせられないため）。
+- **コマンド**:
+  ```
+  MNEMORA_ASSOCIATION_DEFAULT_ON_MEASURE_JSON=examples/chat/bench-results/association-default-on-2026-09-26/measure-run.json \
+    pnpm --filter @mnemora/example-chat run association-default-on-measure
+  ```
+- **決定性**: 同じ条件で2回走らせ、`headline`（下の表の数字の出所）が全ベンチ・
+  全4段で一致することを確認した
+  （`examples/chat/bench-results/association-default-on-2026-09-26/determinism-check.json`、
+  `allMatched: true`）。生の `score.decay`/`score.freshness`（壁時計依存、
+  ADR 0033/0109 が既に記録している 1e-7 桁の揺れ）は2回の実行で一致しない
+  ——これはこの追記が測る対象（連想枠の on/off）とは無関係な、この repo が
+  既に記録済みの性質である。
+- **実 API**: 呼び出し回数 **0**。理由は上の「層」節と
+  [README](../../examples/chat/bench-results/association-default-on-2026-09-26/README.md)
+  「実 API」節に書く——この測定が読む差は `recorded`/`local` 層で構造的に決まり、
+  「回答の正誤が on/off で変わるか」のような実 API が要る問いをそもそも対象にしていない。
+
+### off と on10（既定）の差
+
+| ベンチ | 指標 | off | on10 | 差 |
+|---|---|---|---|---|
+| retrieval-quality(7probe, arm B相当) | mrrOverall / hit@1 / hit@10 | 0.714 / 4/7 / 6/7 | 0.714 / 4/7 / 6/7 | **変化なし** |
+| retrieval-quality | recalledRows(候補行の総数) | 70 | 105 | +35(+50.0%) |
+| retrieval-quality | associationRows(連想枠経由の件数) | 0 | 35 | +35 |
+| retrieval-quality | omitted `over_limit` | 7 | 10 | +3(+42.9%) |
+| compare(全12会話長) | totalMnemoraChars(全12行の合計) | 15885 | 15655 | -230(-1.4%、**減少**) |
+| compare | totalReturnedCount | 78 | 108 | +30(+38.5%) |
+| compare | associationRows | 0 | 30 | +30 |
+| compare | factStatementSurvivedCount(出典到達、12件中) | 12 | 12 | **変化なし** |
+| time-term(8probe) | outcome tally | newer-ranked-higher=4, older-not-returned=1, tied=3 | newer-ranked-higher=5, older-not-returned=0, tied=3 | older-not-returned の1件が newer-ranked-higher へ移った |
+| validity(2probe) | current@now / other@now / historical.otherReturned / optOut.otherReturned | 2/2, 0/2, 1/1, 2/2 | 同じ | **変化なし**(ゲートは連想枠と無関係に機能している) |
+| identifier-probes(30probe, sparse) | hit@1 / hit@10 | 30/30 | 30/30 | **変化なし** |
+| identifier-probes | associationRows | 0 | 300 | +300 |
+| numeral-token-probes(18probe, sparse) | hit@1 / hit@10 | 15/18 / 18/18 | 15/18 / 18/18 | **変化なし** |
+| numeral-token-probes | associationRows | 0 | 180 | +180 |
+| consolidation-cost(budgetLadder=[32,128]、この測定専用に縮小) | round0.unbudgeted.mean.usageChars | 4418.6 | 4649.6 | +231(+5.2%) |
+| consolidation-cost | round0.gold到達(7probe中) | 7 | 7 | **変化なし** |
+| answer-time-weighting(recall側、dev6件) | meanRecallMemoryCount / meanInputChars | 1.17 / 177.7 | 1.67 / 220.5 | +0.5(+42.9%) / +42.8(+24.1%) |
+| answer(recall側、dev+eval14件) | meanInputChars / meanReturnedCount | 418.1 / 3.71 | 418.1 / 3.71 | **変化なし** |
+
+### maxCount 5/10/20 の比較
+
+| ベンチ | 指標 | on5 | on10 | on20 |
+|---|---|---|---|---|
+| retrieval-quality | associationRows | 20 | 35(+75.0%) | 60(+200.0%) |
+| retrieval-quality | recalledRows | 90 | 105(+16.7%) | 130(+44.4%) |
+| compare | totalMnemoraChars | 15473 | 15655(+1.2%) | 16024(+3.6%) |
+| compare | totalAssociationRows | 19 | 30(+57.9%) | 47(+147.4%) |
+| time-term | outcome tally | on10 と同じ | (基準) | on10 と同じ |
+| validity | 全指標 | on10と同じ | (基準) | on10と同じ |
+| identifier-probes | associationRows | 150 | 300(+100.0%) | 600(+300.0%) |
+| numeral-token-probes | associationRows | 90 | 180(+100.0%) | 360(+300.0%) |
+| consolidation-cost | round0.unbudgeted.mean.usageChars | 4534.4 | 4649.6(+2.5%) | 4873.1(+7.5%) |
+| answer-time-weighting | meanRecallMemoryCount / meanInputChars | 1.67 / 220.5 | on5と同じ | on5と同じ |
+| answer | 全指標 | on10と同じ | (基準) | on10と同じ |
+
+生の数字・ベンチごとの `raw` report は
+[measure-run.json](../../examples/chat/bench-results/association-default-on-2026-09-26/measure-run.json)
+にある。
+
+### 読み取れること
+
+- **品質指標（hit@1/hit@10/mrr/gold到達）は、測った全ベンチで off/on10/on5/on20 の
+  間で変化しなかった。** 連想枠が既存の gold/distractor の順位を動かした実例は
+  今回の測定には無い——連想枠経由の候補（`associationRows`）は既存の ANN 候補と
+  別枠で末尾に追加されており、既存の上位候補を押し下げていないと読める（実測の
+  範囲内。理論的な保証ではない）。
+- **一方、「載る量」は on にすると明確に増える。** `associationRows`/
+  `recalledRows`/`totalReturnedCount` は on10 で off の数倍〜数十件増え、
+  `maxCount` を5→10→20と上げるとほぼ線形に増える(retrieval-quality: 20→35→60、
+  identifier-probes: 150→300→600、numeral-token-probes: 90→180→360)。
+  `compare` の `totalMnemoraChars`（全12会話長の合計）は on10 でわずかに**減った**
+  （-1.4%）——`totalReturnedCount`（+38.5%）と方向が逆になっている。これは
+  `mnemoraChars` が `recall().usage.chars`（budget無しの生の量）であり、連想枠の
+  候補は既存の候補より digest が短い場合がある・件数が増えても短い会話長側の
+  絶対値が支配的、といった構成上の理由が考えられるが、**この測定はその原因を
+  切り分けていない**（下の「確かめていないこと」）。
+- **`answer`（recall側、dev+eval14件）だけは off/on5/on10/on20 で完全に無変化
+  だった。** `meanTotalInScope=3.71`（各ケースのスコープ内 Memory 数の平均）が
+  既定の `limit`（10件）を下回っており、ANN 段だけで全件が既に返っている
+  ——連想枠が追加できる残りの候補がそもそも存在しない構成だったと読める。
+  `answer-time-weighting`（同じ recall 側の量を測る枠組みだが、記憶を直接書く
+  ぶん `answer` より1ケースあたりの記憶数が多い）では実際に量が動いている
+  （+42.9%/+24.1%）ことと整合する。
+- **`time-term` は1probeで `older-not-returned` → `newer-ranked-higher` へ
+  outcome が移った。** ペア（newer/older）の一方が off では返らず、on では
+  連想枠経由で拾われた結果、ペア判定自体が変わった実例である。この arm は
+  「時制の新旧判定」を測る目的で `association: null` を基準線に固定している
+  （決定4）ため、この1件の移動は基準線には現れない——この追記でだけ見える。
+- **`consolidation-cost`/`answer-time-weighting`/compare の `over_limit` の
+  微増**（+2〜+3件）は、連想枠が追加した候補の一部が `limit` の外へ落ちている
+  ことを示す——連想枠は予算内側に候補を積むが、`limit` そのものは連想枠のために
+  拡げられていない（`recall-runtime.ts` の既存の設計、この追記が新しく確かめた
+  ものではない）。
+- **`recorded`/`local` 層のどちらでも、連想枠を on にして「カセットに無い入力」の
+  例外は0件だった。** ADR 0337 決定4・本文が述べる「連想枠は `VectorStore.
+  getVectors`/`search` しか呼ばない」という設計上の理由と一致する——on にしても
+  `embeddingProvider`/`llmProvider` への新しい呼び出しは増えない。
+
+### 確かめていないこと
+
+- **実運用の記憶量・分布での効果**（この ADR 自身の「確かめていないこと」と同じ
+  範囲）。今回測ったのは既存ベンチの合成データ（数件〜数十件規模）であり、
+  ADR 0332 が扱った10万行級の規模はここでは測っていない。
+- **`compare` の `totalMnemoraChars` が on で減った理由**。方向が直感と逆
+  （件数は増えたのに合計文字数はわずかに減った）だが、この追記はその原因
+  （digest の長さの分布・会話長ごとの内訳）を切り分けていない。
+  `measure-run.json` の `compare[].raw`（会話長ごとの行）を読めば追跡できるが、
+  この追記では行っていない。
+- **`identifier-probes`/`numeral-token-probes` は sparse haystack の群だけを
+  測った。** dense haystack・日本語固有名詞群（既存 CI ジョブが測る他の3群）は
+  時間の都合で対象外にした。
+- **`archive-sweep-cost` は実行していない。** `association` オプション自体は
+  `archive-sweep-cost.ts` に足した（加算）が、`decayClock`/`MutableClock` による
+  backdate・`sweepArchive()` の呼び出しを正しく組むコストが他のベンチより高く、
+  この回の時間予算では見送った。
+- **回答の正誤（verdict）が on/off で変わるか。** `answer`/`answer-time-weighting`
+  は recall 側の量だけを読んだ——`llmMode=deterministic` の出力に正誤の意味を
+  持たせられないため、この問いには実 API（`recorded`/`openai`）での再測定が要る
+  （この ADR 自身の「確かめていないこと」と同じ、まだ埋まっていない項目）。
+  今回はこの問いのために実 API を使う判断はしなかった——測った9ベンチのいずれも
+  `recorded`/`local` 層で決定的に差を観測できたため、実 API を要する問いに
+  当たらなかった。
+- **`DEFAULT_RECALL_ASSOCIATION.maxCount=10` を他の値に変えるべきかという
+  判断そのもの。** 上の実測は「on にするとどれだけ動くか」の記録であり、
+  「10 が適切な値か」「既定を戻すべきか」への判定材料として使うことをこの追記は
+  意図していない（冒頭の「⛔」の通り）。
