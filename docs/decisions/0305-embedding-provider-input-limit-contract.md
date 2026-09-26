@@ -353,3 +353,48 @@ run build` の後、`node scripts/check-public-api-surface.mjs` を実行した�
   「反復で content が縮む保証はコードに無い」と記録している経路）は、この ADR でも
   再検証していない。
 - **この経路が実運用でどれくらいの頻度で踏まれるか**は、Issue #449 と同じく測っていない。
+
+---
+
+## 追記（2026-09-26、[Issue #860](https://github.com/takecchi/mnemora/issues/860)）: `OpenAIEmbeddingProvider.embed()` は応答の件数・次元を突き合わせない
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・検討した選択肢・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——この追記は記録だけである。
+
+Issue #860 は、`OpenAIEmbeddingProvider.embed()`（`packages/openai/src/embedding-provider.ts`）
+が `response.data` を `index` で並べ替えて返すだけで、**件数が `texts.length` と一致するかを
+確かめていない**ことを指摘した。`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()`
+は件数の一致（および次元の一致）を確かめて、食い違えば例外を投げる——同じ
+`EmbeddingProvider` の2実装で、この契約の守り方が食い違っている。
+
+本 ADR の決定1（「上限超過は例外」の契約明記）と同じ形の負債である——**「上限超過を
+サーバの拒否に依存する」（負債2）と「件数の一致をサーバの応答に依存する」は同じ性質の
+未検査であり、どちらも `@mnemora/openai` が専用の検査を持たないことに由来する。**
+`packages/core` の本番経路（`runtime.ts:3289`・`recall-runtime.ts:709`）はどちらも
+常に1件ずつ渡しており、戻り値が空のときの防御（`!vector`）もあるため、件数がずれて
+memory とベクトルの対応が1つずれる、という実害はこの2経路では再現できない。問題が
+表に出るのは、利用者が provider を直接呼んで複数件を渡した場合と、将来コアがバッチで
+渡すようになった場合である。
+
+**クローン miku の判断（2026-09-26）**: 実装は変えず、「`embed` は入力と同じ件数・同じ
+順序でベクトルを返すことが `EmbeddingProvider` の契約だが、守り方は実装ごとに違う。
+`@mnemora/openai` はこれを検査せず OpenAI のサーバに依存しており、応答が食い違ったとき
+の結果は未定義」を今の契約として `packages/core/src/interfaces/embedding-provider.ts`・
+`packages/openai/src/embedding-provider.ts`・`docs/architecture.md` §5.5・
+`packages/openai/README.md`・`packages/testkit/src/embedding-provider-conformance.ts`
+（この suite が測る範囲の注記）に明記するに留めた（Issue #860 が挙げた方向2）。
+
+**採らなかった案**:
+1. **`@mnemora/local-embedding` と同じく、件数（および次元）の不一致で例外を投げる。**
+   却下——`OpenAIEmbeddingProvider.embed()` が**新しく throw する**ようになる、公開
+   パッケージの振る舞いの変更であり、委譲された範囲（新しい throw を足さない）を超える。
+2. **件数の一致を `EmbeddingProvider` の契約として明文化し、`packages/testkit` の
+   適合テストに、下層が食い違った件数を返す偽 client を注入する歯を足す。** 却下
+   ——conformance の要件の変更になる。既存の「embed(ctx, [a,b,c]) はちょうど3件返す」
+   等の歯は「正常に機能する provider」の検査であり、これを「壊れた下層からも防御する」
+   要求へ広げるのは、この追記の範囲（記述のみ）を超える。
+
+反映先: `packages/core/src/interfaces/embedding-provider.ts`、
+`packages/openai/src/embedding-provider.ts`、`docs/architecture.md` §5.5、
+`packages/openai/README.md`、`packages/testkit/src/embedding-provider-conformance.ts`。

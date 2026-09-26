@@ -92,6 +92,15 @@ const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };
  * 成立するとは限らず、まだ measure していない——ADR で「確かめていないこと」として
  * 扱う（PR 本文参照）。ここで測るのはあくまで「1回の `embed` 呼び出しの中で、
  * 返る順序が入力順に対応するか」までである。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）:
+ * この suite が「件数・順序」の名目で測っているのは、`createProvider` が返す
+ * provider が正常に応答した場合の件数・順序であって、下層（本物の HTTP 応答など）が
+ * 入力と食い違う件数を返したときにその provider が防御するかどうかは測っていない。**
+ * その防御は実装ごとに違う——`@mnemora/local-embedding` は件数・次元の不一致を実行時に
+ * 検査して例外を投げるが、`@mnemora/openai` は検査を持たず、サーバが正しい件数を返す
+ * ことに依存している（`packages/core/src/interfaces/embedding-provider.ts` の同日付
+ * 追記、ADR 0305）。この suite にその食い違いを注入する歯は無い。
  */
 export function describeEmbeddingProviderConformance(
   options: EmbeddingProviderConformanceOptions,

@@ -19,6 +19,19 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  *   専用の検査を持たず、OpenAI のサーバが上限超過を拒否することに依存している——
  *   その依存自体は本 interface の契約ではなく、`@mnemora/openai` 側の負債として
  *   ADR 0305 に記録してある。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）:
+ * `embed` は `texts` と同じ件数・同じ順序でベクトルを返す。この一致自体は本
+ * interface の契約だが、守り方は実装ごとに違う。**`@mnemora/local-embedding` は
+ * 返ってきたベクトルの件数・次元を実行時に `texts`/`space.dimensions` と突き合わせ、
+ * 食い違えば例外を投げる（`packages/local-embedding/src/local-embedding-provider.ts`）。
+ * `@mnemora/openai` の `OpenAIEmbeddingProvider.embed` はこの突き合わせを持たず、
+ * `response.data` を `index` で並べ替えて返すだけで、件数・次元が `texts`/`space` と
+ * 一致することは OpenAI の応答に依存している——上の入力上限の項と同じ形で、
+ * 「サーバが正しい件数・次元を返すこと」に依存する側の負債として ADR 0305 に記録して
+ * ある。応答の件数が `texts` と食い違った場合の `OpenAIEmbeddingProvider` の結果は
+ * 未定義である。`packages/core` の本番経路（`runtime.ts`/`recall-runtime.ts`）は
+ * どちらも `embed` に常に1件ずつ渡すため、この食い違いは踏まれていない。
  */
 export interface EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
