@@ -132,11 +132,17 @@ export class PostgresOutboxStore implements OutboxStore {
     if (!isUuidLike(jobId)) {
       return;
     }
+    // Postgres の `text` は NUL（U+0000）を保存できない（22021）。`error` には失敗した
+    // クエリの params（利用者の本文）が入りうるので、LLM の出力に NUL が混ざると
+    // この UPDATE そのものが落ち、ジョブが終端に落ちないまま `tick()` が投げていた。
+    // 黙って消さず、目に見える6文字の `\u0000` に置き換えて書く。
+    // 歯は `__tests__/outbox-fail-nul-last-error.postgres.test.ts`。
+    const storableError = error.replaceAll("\u0000", "\\u0000");
     // Issue #826: 相手側の終端（complete）が既に付いていたら、この UPDATE は0行のまま
     // 何も書かない（`completed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     const result = await this.db.execute(sql`
       UPDATE outbox
-      SET failed_at = now(), last_error = ${error}
+      SET failed_at = now(), last_error = ${storableError}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
         AND completed_at IS NULL
       RETURNING id
