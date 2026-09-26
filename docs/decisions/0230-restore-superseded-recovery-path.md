@@ -539,3 +539,16 @@ OPEN な ISSUE のコメント投稿者名ではオーナーと担い手（エ�
 - ⛔ **この ADR の書き手（マネージャー）自身は、`packages/` のテストを1本も走らせていない。**
   上の「測ったこと」は、このセッションが立てた作業者が走らせた結果である。
   ⟹ **最終的な判定は CI に置く**（`docs/autonomy.md` §2.1 の5番——手元の緑は CI の緑の代わりにならない）。
+
+## 追記（2026-09-26）: 「設計で選んだこと」5 の「行14 が `decay_floor_at` を動かさない」は、ADR 0153 以降の実装と食い違う
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（「設計で選んだこと」5 の末尾、「⟹ 行14 が `decay_floor_at` を動かさないのに対し、行15 は動かす。」）は書き換えていない。**
+当時の記録として残す。
+
+- 本文のこの文は、`docs/memory-model.md` §11 行14（`restoreArchived`）が「`decay_floor_at` は動かさない」と書いていたことを前提にしていた。
+- [ADR 0153](./0153-recall-decay-floor-gate.md) 以降、`Runtime.restoreArchived` は `archived → active` の直後に `reinforce` を呼び、`decay_floor_at` を先へ動かしている（`packages/core/src/runtime.ts` の `restoreArchived` の doc コメントにある 2026-09 訂正）。⟹ **この文の前半は、今日の実装と食い違う。**行14・行15はどちらも `decay_floor_at` を動かす。
+- **【実測】2026-09-26。**`decayFloorAt` が過去の `archived` な Memory に `restoreArchived` を呼ぶと、戻った Memory の `decayFloorAt` が呼び出し時刻より先へ動いたことを、Fake と Postgres（Postgres 17 + pgvector）の両方で確かめた。走らせたのは、このセッションが立てた作業者である。
+- 同じ前提に立っていた `docs/memory-model.md` §11 行14・行15の記述は、同じ 2026-09-26 に PR #872 で訂正した。
+- 本文の直前の段落が挙げる違い（`archived` は掃引の選定条件上、床が必ず過去である。`superseded` の床は過去とは限らない）は、この訂正の後も成り立つ。
