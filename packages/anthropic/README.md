@@ -135,7 +135,7 @@ try {
 
 **採用する前に読むこと。**
 
-**⚠ 2026-09-26 追記（`v1.1.0`、Issue #389 /
+**⚠ 2026-09-26 追記（`v1.0.1`、Issue #389 /
 [ADR 0266](../../docs/decisions/0266-llm-provider-conformance.md)）**: この見出しは以前
 「適合テスト（conformance suite）が、そもそも存在しない」だった。**それはもう成り立たない。**
 `@mnemora/testkit` に `describeLLMProviderConformance` が新設され、このパッケージ

@@ -299,7 +299,7 @@ recall の候補から外れたことを表す。`'archived'` には相乗りし
 ADR 0011 と同じ理由で原理的に数えられず、ここに載る `count` は core の後置フィルタが
 実際に落とした件数だけである。⟹ `countKind` は常に `'lower_bound'`。詳細は ADR 0153。
 
-**⚠ 2026-09-26 追記（[ADR 0288](./decisions/0288-ann-unreached-severity.md)、Issue #361、`v1.1.0`）**:
+**⚠ 2026-09-26 追記（[ADR 0288](./decisions/0288-ann-unreached-severity.md)、Issue #361、`v1.0.1`）**:
 `ann_unreached` は上のコード例には無い任意欄 `severity?: 'info' | 'warning'` も持つ
 （本節の型例は書き換えない——追記としてここに足す）。`'warning'` は、同じ `recall()` で
 ANN 窓が実際に到達可能な下限に届かなかった場合（§「`ann_unreached` の違い」の
@@ -1058,7 +1058,7 @@ type ScoreBreakdown = {
 }
 ```
 
-**⚠ 2026-09-26 追記（`v1.1.0`）**: 上のスニペットは `speaker`/`subjectId`/`recordedAt`/
+**⚠ 2026-09-26 追記（`v1.0.1`）**: 上のスニペットは `speaker`/`subjectId`/`recordedAt`/
 `occurredAt`/`attributes`（`RecalledMemory`）と `affinityMeasured`（`ScoreBreakdown`）を
 この追記で足した。**いずれも既存欄の型・名前・必須性は無変更**——追加のみである。
 
