@@ -199,6 +199,20 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `omitted` の中で最後に落とした段でだけ数えられる（`memories`・公開型はどちらも無変更）
   （[Issue #940](https://github.com/takecchi/mnemora/issues/940)、
   [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記3 2026-09-26）。
+- **`over_limit(stage:"rescore")` の候補が段3.5（連想）の候補プールに入ったが席に
+  着けなかった（過取得の窓の外、または `rankedCandidates` には居たが `maxCount` の
+  席を他候補に取られた）場合、その候補は `over_limit(stage:"rescore")` からも
+  差し引かれず、段3.5 自身が積む `over_limit(stage:"association")` にも数えられ、
+  同じ1件が両方に計上されていた**（上の Issue #940 の取り下げは、候補集合に
+  実際に戻った——`companions`/`associationUnits` に入った——場合だけを対象にしており、
+  席に着けなかった場合は対象外だった）。差し引く対象に (c)
+  「`over_limit(stage:"association")` に実際に数えられたか」を OR で足した——
+  `over_limit(stage:"association")` は段2より後の段なので、この経路は
+  `over_limit(stage:"rescore")` から差し引かれ `over_limit(stage:"association")` に
+  1回だけ残る。`over_limit(stage:"association")` 自身の count・`memories`・公開型は
+  どれも無変更
+  （[Issue #949](https://github.com/takecchi/mnemora/issues/949)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記4 2026-09-26）。
 - **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
   検索結果（順位・スコア）は変えていない（[Issue #878](https://github.com/takecchi/mnemora/issues/878)）。
 - **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を

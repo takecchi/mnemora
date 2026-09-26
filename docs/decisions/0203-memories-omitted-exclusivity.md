@@ -730,3 +730,234 @@ memoryId を持ち回っていない他の kind は、引き続き対象外で�
   いなければ Issue としても起票していない。
 
 Refs #940
+
+---
+
+## 2026-09-26 追記4（クローン miku の委譲先、Issue #949）
+
+**直前の追記3「範囲外と分かったこと」1番目——`over_limit(stage:"rescore")` の候補が
+段3.5（連想）の候補プールに入ったが席に着けず、`over_limit(stage:"association")` にも
+数えられる経路——を、この日付で解消した。**
+
+### 決めたこと
+
+1件の Memory は `omitted` の中で、最後にそれを落とした段で1回だけ数える。段3.5（連想）は
+段2より後の段なので、この経路の"最後の段"は段3.5になる——`over_limit(stage:"rescore")`
+からは差し引き、`over_limit(stage:"association")` 側に1回だけ残す。全件差し引いた場合は
+below_threshold/`over_limit(stage:"rescore")` と同じ作法で Omission 自体を配列から外す。
+
+**塞いだこと**: `recall-runtime.ts` の排他性契約ブロックが、差し引く対象を「`overLimit`
+（段2、まだこの時点で生きている `ScoredCandidate[]`）に居て、かつ (a) `companions`
+（段3）に居るか (b) `associationUnits`（段3.5が席を埋めた候補）に居るか (c) 段3.5 の
+候補プールに入ったが席に着けなかったか」に広げた。(a)(b) は追記3の判定をそのまま残し、
+(c) を OR で足した形である。
+
+### 判定条件
+
+(c) の判定は、`over_limit(stage:"association")` の count（`overLimitAssociationCount`）を
+構成する式と**同じ2つの式**を、件数ではなく id の集合として組み立て直したものである
+（`overLimitAssociationSeatlessIds`）。
+
+- 過取得の窓の外に居た分: `associationHits.slice(rankFetchCount)` の id。
+- 土俵（`rankedCandidates`）に上がって `maxCount` の席を競り負けた分:
+  `rankedCandidates` のうち `selectedCandidates` に入らなかった要素の id。
+
+`promotedFromOverLimit` は、`overLimit` の各要素についてこの3条件（(a)(b)(c)）を OR で
+判定する——同じ候補が複数の条件に同時に当たることは構造的に起きない
+（`companions`/`associationUnits`/`overLimitAssociationSeatlessIds` は互いに素な集合
+——companion は同伴取得、`associationUnits` は席を得た連想候補、
+`overLimitAssociationSeatlessIds` は席を得なかった連想候補であり、同じ候補が
+同時に2つの身分を持つことは無い）ため、`Set` を経由しなくても二重に差し引く心配は無い
+——`Array.prototype.filter` は各要素を1回だけ評価する。
+
+**`over_limit(stage:"association")` 自身の count はここでは変えない**——差し引くのは
+常に `over_limit(stage:"rescore")` 側だけである（追記3までと同じ非対称）。
+
+### 多層防御の分を除いた理由
+
+`overLimitAssociationSeatlessIds` は、多層防御（`survivesSubjectFilter`/
+`survivesAttributesFilter`/`survivesLabelsFilter`/`survivesValidityGate`/
+`survivesDecayGate` ほか、`rankFetchHits` を `rankedCandidates` へ絞り込む for ループの
+中）で落ちた候補を**含まない**。これは新しい除外ロジックを足したのではなく、
+`overLimitAssociationCount` が最初から数えている2つの式（過取得の窓の外／席を競り負けた分）
+を、そのまま id で複製しただけだからである——多層防御で落ちた候補は、そもそも
+`rankedCandidates` に一度も入らない（for ループの `continue` で弾かれる）ため、
+「土俵に上がって競り負けた分」（`rankedCandidates` に居るが `selectedCandidates` に
+居ない）にも「過取得の窓の外」（`associationHits.slice(rankFetchCount)`、
+`rankFetchHits` の外）にも当たらない。多層防御で落ちた分は段5の `aggregateScope` が
+`filtered(...)` として別途数えており（Issue #329 / ADR 0173）、ここで差し引くと
+二重計上になる——この区別は`overLimitAssociationCount` の既存のコメント
+（「🔴 落ちた件数はここでは数えない」）がそもそも守っていた線であり、今回はそれを
+複製しただけで新しく作った線ではない。
+
+**この区別を歯で直接押さえてはいない**——多層防御で落ちた候補を意図的に混入させ、
+それが `over_limit(rescore)` から差し引かれないことを確認する歯は書いていない。
+上の段落の論拠はコードを読んで確かめたものであり、`recall-over-limit-association-
+seat-promotion.test.ts` の3本はどれも多層防御が1件も落とさない構成になっている
+（`overLimitAssociationCount` 自身の既存の歯もこの区別を直接検査したものは無い
+——追跡した範囲では、この区別は「二重計上を作らない」という不変条件の帰結として
+コードレビューでしか確認していない）。
+
+### 採らなかった案
+
+1. **`over_limit(stage:"association")` の内部状態（連想候補の追跡）が id 付きで
+   保持されているかを、あらためて型を拡張してから調べる**（ADR 0203「これが覆るとしたら」
+   3番が前提に置いていた順序）。**不要だった**——`over_limit(stage:"rescore")` の
+   ときの ADR 0203 追記（Issue #823）と同じ理由で、`Omission` という公開型を1バイトも
+   広げずに `runRecall` 内部の未公開の状態（`associationHits`/`rankedCandidates`/
+   `selectedCandidates`）だけから `overLimitAssociationSeatlessIds` を組み立てられた。
+2. **`overLimitAssociationCount` の式をこの機会に書き直す**（例えば
+   `overLimitAssociationSeatlessIds.size` を直接使う）。**採らなかった**——
+   `overLimitAssociationCount` は「件数」という既存の契約をそのまま維持する値であり、
+   今回変えたいのは`over_limit(stage:"rescore")` 側の判定だけである。同じ集合を
+   2通りの表現（数と id）で独立に持つことは、どちらかが将来ズレたときに片方だけ
+   直して他方を見落とす負債を生むが、`overLimitAssociationSeatlessIds` の構築式は
+   `overLimitAssociationCount` の式のコメントをそのまま複製しており、片方を直すときは
+   もう片方も直すべきことがコード上で並んで見える位置にある（実装した位置を参照）。
+3. **`associationHits ∩ overLimit`（席に着いたかどうかを見ずに、連想候補プールに
+   入った時点で全部差し引く）という、より粗い判定にする**（マネージャーが過剰実装の例
+   として挙げた案の一つ）。**検討したが、正しい判定と区別できないことが分かった**——
+   `overLimit` に居るある候補が `associationHits` に入った時点で、その候補は必ず
+   「席を得て `associationUnits` に入る」か「席を得ずに `overLimitAssociationSeatlessIds`
+   に入る」かのどちらか一方になる（`rankFetchHits` の外に出た分・`rankedCandidates`
+   で競り負けた分・`selectedCandidates` に入った分の3つで `associationHits` の全体を
+   汲み尽くす。多層防御で落ちた分だけが例外だが、これは上の段落の理由でそもそも
+   `associationHits`ではなく`rankFetchHits`から`rankedCandidates`への絞り込みの内側の
+   話であり、「連想候補プールに入った」時点の粗い判定でも `associationHits` 自体には
+   含まれているので、この粗い判定はむしろ多層防御で落ちた分**も**拾ってしまう）。
+   ⟹ この粗い判定は、多層防御で落ちた分を除けば正しい判定と常に同じ結果を返すため、
+   「過剰実装だが今回のフィクスチャでは見分けが付かない」変異になる——(c)（バイスタンダー
+   の歯）は捕まえられなかった（多層防御を1件も落とさない構成のため）。かわりに
+   「`overLimit` 全件を無条件に差し引く」というさらに粗い過剰実装（下の変異試験(ii)）を
+   採用し、それは(c)で確かに捕まえた。**この案と「本当の正しい判定」を区別する歯は
+   書けていない**——多層防御で意図的に候補を落とす歯を別途組まないと区別できない
+   （上の「多層防御の分を除いた理由」の限界と同じ）。
+
+### 訂正
+
+直前の追記3の「測ったこと」は、`recall-over-limit-budget-promotion.test.ts` の(c)
+（過剰実装を捕まえる歯）について「修正前…(c)は、この時点ではまだ緑だった（対象の count
+がそもそも動かないため）」と書いていた。**この記述は不正確だった。** 本追記の作業中に、
+`recall-runtime.ts` を追記3の直前の状態（commit `3b09840`^、Issue #925 の判定
+——`returnedMemoryIds` との AND を課す形）に戻して実際に走らせ直すと、(c) は
+`expected 2 to be 1` で**赤**になった——(a)(b) と同時に赤くなっており、「(c) だけが
+この時点で緑だった」という記述は誤りである。壊れていたのは記述であり、当時の
+コード・修正・変異試験の結論（(a)(b)(c) が修正後に緑になり、変異(i)(ii)で正しく
+赤くなること）自体は正しいままである——(a)(b) が主張していた二重計上そのものは
+実在し、修正前が(a)(b)(c) すべてで赤かったか(a)(b)だけで赤かったかは、修正が正しいことの
+証明には影響しない。**なぜ見落としたか**: 追記3の作業ログを読み返すと、「(c)は対象の
+count がそもそも動かないため緑」という予測を、実測せずにそのまま書いていた可能性が高い
+——`recall-over-limit-promotion.test.ts`・`recall-over-limit-association-promotion.
+test.ts` の同型の(c)（bystander の歯）は「新しい判定が無い状態」でも入力の bystander
+自体が無関係であり続けるため実際に緑になる場合があり、その類推を
+`recall-over-limit-budget-promotion.test.ts` の(c)にも当てはめて書いた可能性がある。
+だが budget-promotion の(c)は bystander に加えて「companion 経由で戻り、over_limit
+からも budget_dropped からも差し引かれるべき候補」も同時に含む構成であり
+（`recall-over-limit-budget-promotion.test.ts` の該当フィクスチャを参照）、修正前の
+コード（追記2の判定、`returnedMemoryIds` の AND 付き）では後者の取り下げが発火せず、
+`over_limit(rescore)` の count がbystanderの1件だけでなくこの候補の分も足された2に
+なっていた——だからこの(c)は独立した過剰実装の検出だけでなく、追記3が直した本題の
+再現も部分的に相乗りしていた（(a)(b)と同じ理由で赤くなっていた）。
+
+### 「引き受けた負債」・「これが覆るとしたら」の残り
+
+- **below_threshold の候補が段3/段3.5で戻り、段4で落ちると、below_threshold と
+  budget_dropped の両方に数えられる経路**（追記3「範囲外と分かったこと」2番目）は、
+  本追記でも塞いでいない。[Issue #950](https://github.com/takecchi/mnemora/issues/950)
+  として別途起票した状態のまま、未解消で残っている——起票にとどめた理由は同 Issue 本文の
+  とおり、`below_threshold.nearMisses` が memoryId 付きの**公開の欄**であり、
+  「戻ったが最終的に返らなかった」ものまで `nearMisses` から取り下げるかどうかを、
+  `over_limit` の件数だけの直しとは別の判断として扱うべきだからである。
+- **`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等、
+  段2の内部状態自体が memoryId を持ち回っていない他の kind についての前提**
+  （「これが覆るとしたら」3番の「型の拡張が先」）は、`over_limit(stage:"rescore")` からの
+  差し引き対象を広げる形では引き続き解消してきているが（今回で(a)(b)(c)の3経路）、
+  `over_limit(stage:"association")` 自身の count を他の kind の昇格に応じて調整する
+  経路（例えば below_threshold から連想で拾われて席を得た場合に
+  `over_limit(stage:"association")` 側を調整するような話）は検討していない——
+  今回の射程は常に「`over_limit(stage:"rescore")` から何を差し引くか」であり、
+  他の kind 同士の突き合わせには広げていない。
+
+### 測ったこと
+
+- 【実測】陽性対照（修正前、fake ストア）:
+  `recall-over-limit-association-seat-promotion.test.ts` の(a)(b)(c)が赤になることを
+  確認した——(a)(b) は `over_limit(stage:"rescore")` の Omission が消えるはずが
+  `{ count: 1, ... }` のまま残る。(c)（過剰実装を捕まえる歯）は
+  `expected 2 to be 1` で赤だった（D（バイスタンダー）は元から無関係なので1のまま
+  残るべきだが、T の分が差し引かれないため2のまま）。
+- 【実測】修正後、(a)(b)(c) の3本がすべて緑になることを確認した。
+- 【実測】本物の Postgres + pgvector（initdb で自前に構築したローカルインスタンス、
+  `mnemora_test`、UTF8/C.UTF-8 ロケール）に対し、`recall.postgres.test.ts` に(a)と
+  同型の歯を1本追加し、`recall-runtime.ts` を本追記の変更前の内容（commit `3b09840`、
+  PR #947 の内容そのもの）に戻して実行すると赤（`over_limit(rescore)` が
+  `{ count: 1, ... }` のまま残る）になり、変更後の内容に戻すと緑になることを確認した。
+  同ファイルの既存21本・
+  新設1本の計22本もすべて緑、`recall-association-gates.postgres.test.ts` の既存7本も
+  緑（回帰なし）。
+- 【実測】変異試験:
+  (i) 追加した `overLimitAssociationSeatlessIds.has(...)` の OR 条件を丸ごと除去
+      （追記3の判定——`companions`/`associationUnits` の2条件だけ——に戻す）→ (a)(b)(c)
+      の3本すべてが実際に赤になることを確認した。
+  (ii) 判定を `promotedFromOverLimit = overLimit`（`overLimit` 全件を無条件に差し引く
+      過剰実装）に変える →
+      `recall-over-limit-promotion.test.ts` の2本、
+      `recall-over-limit-association-promotion.test.ts` の2本、
+      `recall-over-limit-budget-promotion.test.ts` の(c)、
+      `recall-over-limit-association-seat-promotion.test.ts` の(c) の、
+      あわせて6本が実際に赤になることを確認した——いずれも「連想の近傍に現れていない、
+      または無関係な over_limit の候補まで count から差し引かれてしまう」形の赤である。
+  どちらも `cp` で退避したファイルから `cp` で復元し、`git status --porcelain` が
+  意図どおりの差分（本追記の変更点だけ）に戻ることを確認したうえで、全数が緑に
+  戻ることを確認した。
+  **より粗い過剰実装（`associationHits ∩ overLimit` を席に着いたかどうかを見ずに
+  差し引く、上の「採らなかった案」3番）は、上の(a)(b)(c)のどの歯でも赤にならなかった**
+  ——「採らなかった案」3番に書いたとおり、多層防御を1件も落とさない今回のフィクスチャ
+  では正しい判定と数学的に一致するため、区別する歯を用意できていない。
+- 【実測】`pnpm --filter @mnemora/core exec vitest run
+  src/__tests__/recall-over-limit-association-seat-promotion.test.ts
+  src/__tests__/recall-over-limit-budget-promotion.test.ts
+  src/__tests__/recall-over-limit-promotion.test.ts
+  src/__tests__/recall-over-limit-association-promotion.test.ts
+  src/__tests__/omission-kind-generation.test.ts
+  src/__tests__/recall-association.test.ts
+  src/__tests__/recall-association-gates.test.ts
+  src/__tests__/recall-association-usage-ranking.test.ts
+  src/__tests__/recall-budget-channel-registry.test.ts
+  src/__tests__/recall.test.ts
+  src/__tests__/recall-pipeline.test.ts
+  src/__tests__/schema-type-equals-parity.test.ts`:
+  12ファイル・272件すべて緑（既存の omitted/over_limit/連想/budget 関連の歯を含め、
+  回帰は無い）。
+- 【実測】`pnpm --filter @mnemora/core run typecheck` / `pnpm --filter @mnemora/postgres
+  run typecheck` / `pnpm run lint` / `pnpm run format:check` / `pnpm run build`:
+  すべて緑、警告0。
+- 【実測】`pnpm run api:check`（6パッケージ、`build` 実行後）: 全パッケージ
+  「差分なし」——本追記は公開 API 表面を1バイトも変えていない。
+- 【実測】`examples/chat` の `compare` ベンチ（`MNEMORA_PROVIDER_SOURCE=recorded`、
+  実 API は叩いていない、`examples/chat/cassettes/compare.json` の再生）を本追記の
+  修正の前後で実行し、`MNEMORA_COMPARE_JSON` で機械可読な出力を比較した——
+  **本追記は budget を渡さない `compare` でも差分が出た**（追記3が「`compare` は
+  budget を渡さないため対象の外にあり、差分ゼロは効果が無かったことを意味しない」と
+  書いていたのとは対照的に、本追記の判定は budget に依存しない）。12行中1行
+  （`turnCount` 642）で `omitted` の `over_limit(stage:"rescore")` の `count` が
+  20→12 に減った——連想の候補プールで席に着けなかった分が、この修正で正しく
+  `over_limit(stage:"rescore")` から差し引かれたことを示す。他の11行（`over_limit
+  (stage:"association")` の count を含む）はすべて不変。⭐門（`mnemoraShareOfNaiveChars`/
+  `factStatementSurvived`）はこの1行を含む12行すべてで不変であり、退行ではない。
+  手元の実行値は基準値には書いていない（「手元で測った値を書かない」、ADR 0121 決定1・
+  ADR 0119 決定6）。`examples/chat/compare-baseline.json` はこの手元の実測時点では
+  642ターンの行が `over_limit(stage:"rescore")` の count を旧値（20）のまま持っており、
+  本追記の変更を適用した状態のCIが走ったときに、ADR 0231 決定5の手順（CI artifact の
+  attempt 1・2 の一致を確認してから機械的に差し替える）で更新されるべき対象として残って
+  いる——本追記ではプログラムでの差し替えは行っていない（手で書き換えない、という
+  制約に従った）。
+- **確かめていないこと**: `test:db` 全体（他ファイル含む約4分のスイート）・
+  `examples/chat` の `retrieval`/`identifier-probes`/`numeral-token-probes`/`chat`
+  （budget を渡す経路）等の他のベンチ・`pack:check` は手元では走らせていない。
+  実運用での発生頻度も未計測。「採らなかった案」3番・「多層防御の分を除いた理由」で
+  触れた、多層防御で候補を意図的に落とす歯は組んでいない。`over_limit(stage:
+  "association")` 自身の内部状態を他の kind（below_threshold 等）の昇格と突き合わせる
+  経路は検討していない。
+
+Refs #949

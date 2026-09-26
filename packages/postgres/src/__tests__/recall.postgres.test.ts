@@ -691,6 +691,81 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     }
   });
 
+  it("Issue #949（ADR 0203 追記3「範囲外と分かったこと」1番目の是正）: over_limit(stage:'rescore') の候補が段3.5（連想）の候補プールで maxCount の席を競り負けると、over_limit(rescore) からも差し引かれ over_limit(association) に1回だけ残る", async () => {
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    const ctx: Ctx = { tenantId: TENANT };
+
+    // owner を [1, 0, 0]（クエリと完全一致）に置き、他の全候補は owner への類似度を
+    // 単位ベクトルの第1成分 c だけで制御する（cos(vector(c), owner) = c）——owner が
+    // クエリそのものなので、「クエリでの順位」と「アンカー owner への近さ」を同じ1つの
+    // 数で同時に決められる（packages/core の同型テストと同じ設計）。
+    const vec = (c: number): [number, number, number] => [c, Math.sqrt(1 - c * c), 0];
+
+    const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(1.0), {
+      digest: "owner",
+    });
+    // F1〜F4: limit=5 の残り4席を占め、withinLimit を owner+フィラーで満杯にする。
+    const f1 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(0.95), {
+      digest: "F1",
+    });
+    const f2 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(0.9), {
+      digest: "F2",
+    });
+    const f3 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(0.85), {
+      digest: "F3",
+    });
+    const f4 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(0.8), {
+      digest: "F4",
+    });
+    // C1: limit=5 の外——over_limit(stage:"rescore") に回るが、owner への類似度
+    // （0.65）が連想の minSimilarity（既定 0.5）を超えるので段3.5 の候補プールに入る。
+    const c1 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(0.65), {
+      digest: "C1",
+    });
+    // T: C1 と同じ理由で候補プールに入るが、owner への類似度（0.60）が C1（0.65）に
+    // 劣るため、maxCount=1 の唯一の席を C1 に奪われる——「土俵に上がって競り負けた」形
+    // （packages/core の同型テストの(a)）。
+    const t = await createEmbeddedMemory(memoryStore, vectorStore, ctx, vec(0.6), {
+      digest: "T",
+    });
+
+    // overFetchFactor=2.0: rankFetchCount = max(1, round(1*2)) = 2 —— C1・T の
+    // associationHits（2件）が両方とも過取得の窓に入り、maxCount=1 の席を similarity で
+    // 競う。anchorCount=1 で連想のアンカーを owner だけに絞る（F1〜F4 が
+    // withinLimit に居るため既定の anchorCount=3 だとフィラーもアンカーになってしまう）。
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 5,
+      overFetchFactor: 2.0,
+      association: { maxCount: 1, anchorCount: 1 },
+    });
+
+    expect(result.memories.map((m) => m.memoryId).sort()).toEqual(
+      [owner.id, f1.id, f2.id, f3.id, f4.id, c1.id].sort(),
+    );
+    const returnedC1 = result.memories.find((m) => m.memoryId === c1.id);
+    expect(returnedC1?.retrievedVia).toBe("association");
+    expect(result.memories.some((m) => m.memoryId === t.id)).toBe(false);
+
+    // 修正前: over_limit(stage:"rescore") は C1 の分だけ既存処理（Issue #925）で
+    // 差し引かれ、T の分は残ったまま `{ count: 1, ... }` になる——同じ T が
+    // over_limit(stage:"association") にも数えられ、二重計上になっていた
+    // （Issue #949 の再現）。修正後は T の分も差し引かれ、Omission 自体が配列から消える。
+    const overLimitRescore = result.omitted.find(
+      (o) => o.kind === "over_limit" && o.stage === "rescore",
+    );
+    expect(overLimitRescore).toBeUndefined();
+
+    // T は over_limit(stage:"association") 側に1回だけ残る（席を競り負けた分）。
+    const overLimitAssociation = result.omitted.find(
+      (o) => o.kind === "over_limit" && o.stage === "association",
+    );
+    expect(overLimitAssociation).toBeDefined();
+    if (overLimitAssociation?.kind === "over_limit") {
+      expect(overLimitAssociation.count).toBe(1);
+    }
+  });
+
   it("段6: recallId が発行され、observe({kind:'memory_usage'}) から参照できる", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
