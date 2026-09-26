@@ -132,7 +132,7 @@ export class InMemoryLexicalStore implements LexicalStore {
     // `ctx.tenantId` で二重に絞ると「filter.tenantId を無視しても壊れない」誤ったプレースホルダになる）。
     const memories = this.memoryStore.listByTenant({ tenantId: opts.filter.tenantId });
 
-    const hits: LexicalHit[] = [];
+    const hits: (LexicalHit & { recordedAt: Date })[] = [];
     for (const memory of memories) {
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
         continue;
@@ -214,11 +214,25 @@ export class InMemoryLexicalStore implements LexicalStore {
         memoryId: memory.id,
         coverage,
         rank: computeRank(contentTokens, queryTerms),
+        recordedAt: memory.recordedAt,
       });
     }
 
-    // coverage 降順、同値なら rank 降順（ADR 0092: limit の窓は被覆率の高い候補から切る）。
-    hits.sort((a, b) => b.coverage - a.coverage || b.rank - a.rank);
-    return hits.slice(0, opts.limit);
+    // `PostgresLexicalStore.search`（`interfaces/lexical-store.ts` の `LexicalStore.search`
+    // doc、Issue #345 / ADR 0175）と同じ4段 tie-break: coverage → rank → recordedAt DESC →
+    // memoryId 昇順。以前は coverage/rank の2段止まりで、同点の中身が
+    // `Array.prototype.sort` の安定性により挿入順（通常の呼び出し順では recordedAt が
+    // 古いほうが先）に落ちており、Postgres の「新しい方が先」と逆向きだった
+    // （`in-memory-lexical-store-tiebreak.test.ts` が歯）。
+    hits.sort(
+      (a, b) =>
+        b.coverage - a.coverage ||
+        b.rank - a.rank ||
+        b.recordedAt.getTime() - a.recordedAt.getTime() ||
+        (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
+    );
+    return hits
+      .slice(0, opts.limit)
+      .map(({ memoryId, coverage, rank }) => ({ memoryId, coverage, rank }));
   }
 }

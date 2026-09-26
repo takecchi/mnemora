@@ -205,6 +205,17 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   全0ベクトルに置き換え、Postgres を Fake の実際の挙動に揃えた（新しい例外は投げない。
   次元数が0以外だが空間の次元数と食い違う `vector` は今回の修正範囲外・未検証）
   （[Issue #857](https://github.com/takecchi/mnemora/issues/857)）。
+- **`@mnemora/testkit` の `InMemoryLexicalStore.search`（擬似 `LexicalStore`）で、
+  `coverage`/`rank` が完全一致したヒットの順序を、挿入順から Postgres と同じ4段
+  tie-break（`coverage` → `rank` → `recordedAt` DESC → `memoryId` 昇順）に揃えた。**
+  `LexicalStore.search` の interface doc（Issue #345 / ADR 0175）は、同点でも決定的な
+  順序を返すことを adapter の責務として明記し、`PostgresLexicalStore`/
+  `PostgresTrigramLexicalStore` の4段 tie-break を模範として名指ししているが、擬似物は
+  これまで `coverage`/`rank` の2段止まりで、同点の中身は `Array.prototype.sort` の
+  安定性により挿入順（通常の呼び出し順では `recordedAt` の古い方が先）に落ちており、
+  Postgres の「新しい方が先」とは逆向きだった——`InMemoryVectorStore.search` に
+  Issue #339 / ADR 0170 で入れた tie-break（上記）と同じ形の食い違いが、語彙チャンネル側
+  にだけ残っていた。返す形（`{ memoryId, coverage, rank }`）は変えていない。
 
 ---
 

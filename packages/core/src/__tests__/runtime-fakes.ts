@@ -8,6 +8,7 @@ import type { OutboxJobKind } from "../interfaces/scheduler.js";
 import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
+  assertValidHalfLifeRecalls,
   assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
   DEFAULT_HALF_LIFE_RECALLS,
@@ -464,8 +465,19 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
+    // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引くため
+    // （実測）、同じ id が `ids` に複数回含まれていても一致する行は主キーの性質上1回しか
+    // 無い。ここで検査せず単純にループで push すると同じ Memory を重複して返してしまう
+    // ——`InMemoryMemoryStore.getMany`（`packages/testkit`、PR #806/#812）と同じ形の
+    // 不一致（`fake-store-postgres-parity.test.ts` が歯）。`seen` で2回目以降を
+    // スキップし、Postgres の集合演算と同じ「一意な id の集合」に揃える。
+    const seen = new Set<MemoryId>();
     const results: Memory[] = [];
     for (const id of ids) {
+      if (seen.has(id)) {
+        continue;
+      }
+      seen.add(id);
       const memory = this.backing.memories.get(id);
       if (memory && memory.tenantId === ctx.tenantId) {
         results.push(memory);
@@ -665,6 +677,18 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    // `PostgresMemoryStore.purgeExpiredEvents` は `opts.limit`（+1件）を生 SQL の
+    // `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は
+    // 例外になる（実測）。ここで検査せず `candidates.slice(0, opts.limit)` へ渡すと
+    // `Array.prototype.slice` の意味論を踏んで誤った件数を削除してしまう——
+    // `InMemoryMemoryStore.purgeExpiredEvents`（`packages/testkit`、PR #804/#811）と
+    // 同じ形の不一致（`fake-store-postgres-parity.test.ts` が歯）。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`purgeExpiredEvents: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`purgeExpiredEvents: limit must not be negative (got ${opts.limit})`);
+    }
     const dryRun = opts.dryRun ?? false;
     const candidates = this.backing.events
       .filter(
@@ -950,6 +974,22 @@ export class FakeMemoryStore implements MemoryStore {
     let digests: ScopeAggregate["digests"] = [];
     let digestEligible: ScopeAggregate["digestEligible"] = { count: 0, countKind: "exact" };
     if (opts?.digestBand) {
+      // `PostgresMemoryStore.aggregateScope` は `digestBand.limit` を生 SQL の `LIMIT`
+      // （bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外に
+      // なる（実測）。ここで検査せず `eligibleMemories.slice(0, opts.digestBand.limit)`
+      // へ渡すと `Array.prototype.slice` の意味論を踏む——
+      // `InMemoryMemoryStore.aggregateScope`（`packages/testkit`、PR #804/#811）と
+      // 同じ形の不一致（`fake-store-postgres-parity.test.ts` が歯）。
+      if (!Number.isInteger(opts.digestBand.limit)) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must be an integer (got ${opts.digestBand.limit})`,
+        );
+      }
+      if (opts.digestBand.limit < 0) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must not be negative (got ${opts.digestBand.limit})`,
+        );
+      }
       const exclude = new Set(opts.digestBand.excludeMemoryIds);
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順（本 PR）。
@@ -1466,6 +1506,18 @@ export class FakeOutboxStore implements OutboxStore {
   // `runtime.test.ts` が「今日の姿」を検査しているつもりで、実は直った後の姿を
   // 検査してしまう食い違いが起きる。
   async claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]> {
+    // `PostgresOutboxStore.claimBatch` は `opts.limit` を生 SQL の `LIMIT`（bigint
+    // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる
+    // （実測）。ここで検査せず `eligible.slice(0, opts.limit)` へ渡すと
+    // `Array.prototype.slice` の意味論を踏んでジョブを黙って claim してしまう——
+    // `InMemoryOutboxStore.claimBatch`（`packages/testkit`、PR #804/#811）と同じ形の
+    // 不一致（`fake-store-postgres-parity.test.ts` が歯）。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`claimBatch: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
+    }
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.backing.outboxJobs.filter((job) => {
       const claimedAt = job.claimedAt ?? null;
@@ -1609,6 +1661,18 @@ export class FakeVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT`（bigint
+    // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる
+    // （実測）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと
+    // `Array.prototype.slice` の意味論を踏んでほぼ全件を静かに返してしまう——
+    // `InMemoryVectorStore.search`（`packages/testkit`、PR #804/#811）と同じ形の不一致
+    // （`fake-store-postgres-parity.test.ts` が歯）。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`search: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`search: limit must not be negative (got ${opts.limit})`);
+    }
     // `InMemoryVectorStore`（packages/testkit）と同じ意味論に揃える（ADR 0065）:
     // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。以前はここで
     // `space` を一度も参照しておらず（引数名も `_space` だった）、異なる space の vector を
@@ -1742,8 +1806,18 @@ export class FakeVectorStore implements VectorStore {
     space: EmbeddingSpaceId,
     memoryIds: MemoryId[],
   ): Promise<{ memoryId: MemoryId; vector: number[] }[]> {
+    // `PostgresVectorStore.getVectors` は `memory_id = ANY(...)` という集合演算で引くため
+    // （実測）、同じ id を複数回渡しても一致する行は主キーの性質上1回しか無い。ここで
+    // 検査せず `memoryIds` をそのまま for-of すると重複して返してしまう——
+    // `InMemoryVectorStore.getVectors`（`packages/testkit`、PR #812）と同じ形の不一致
+    // （`fake-store-postgres-parity.test.ts` が歯）。`seen` で2回目以降をスキップする。
+    const seen = new Set<MemoryId>();
     const results: { memoryId: MemoryId; vector: number[] }[] = [];
     for (const memoryId of memoryIds) {
+      if (seen.has(memoryId)) {
+        continue;
+      }
+      seen.add(memoryId);
       const entry = this.entries.get(this.key(space, ctx.tenantId, memoryId));
       if (entry !== undefined) {
         results.push({ memoryId, vector: entry.vector });
@@ -1830,8 +1904,20 @@ export class FakeLexicalStore implements LexicalStore {
     if (this.shouldThrow) {
       throw new Error("FakeLexicalStore: simulated search failure");
     }
+    // `PostgresLexicalStore.search`/`PostgresTrigramLexicalStore.search` は `opts.limit` を
+    // 生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・
+    // 非整数は例外になる（実測、両実装とも同じ）。ここで検査せず
+    // `hits.slice(0, opts.limit)` へ渡すと `Array.prototype.slice` の意味論を踏んで
+    // ほぼ全件を静かに返してしまう——`InMemoryLexicalStore.search`（`packages/testkit`、
+    // PR #804/#811）と同じ形の不一致（`fake-store-postgres-parity.test.ts` が歯）。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`search: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`search: limit must not be negative (got ${opts.limit})`);
+    }
     const termSet = new Set(query.split(/\s+/).filter((t) => t.length > 0));
-    const hits: LexicalHit[] = [];
+    const hits: (LexicalHit & { recordedAt: Date })[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== opts.filter.tenantId || memory.tenantId !== ctx.tenantId) continue;
       if (opts.filter.status !== undefined && !opts.filter.status.includes(memory.status)) {
@@ -1884,14 +1970,24 @@ export class FakeLexicalStore implements LexicalStore {
 
       const coverage = matchedTerms.length / termSet.size;
       const rank = matchedTerms.reduce((sum, t) => sum + (memory.content.split(t).length - 1), 0);
-      hits.push({ memoryId: memory.id, coverage, rank });
+      hits.push({ memoryId: memory.id, coverage, rank, recordedAt: memory.recordedAt });
     }
-    // coverage 降順、同値なら rank 降順。さらに同率なら memoryId 昇順で決定的にする
-    // （`FakeVectorStore` の distance 昇順ソートと同じ「adapter は決定的な順序で返す」作法）。
+    // `PostgresLexicalStore.search`（`interfaces/lexical-store.ts` の `LexicalStore.search`
+    // doc、Issue #345 / ADR 0175）と同じ4段 tie-break: coverage → rank → recordedAt DESC →
+    // memoryId 昇順。以前は coverage/rank/memoryId の3段止まりで recordedAt を見ておらず、
+    // Postgres の「新しい方が先」と食い違っていた
+    // （`fake-store-postgres-parity.test.ts` が歯。`InMemoryLexicalStore`
+    // （`packages/testkit`）と同じ形の不一致・同じ修正）。
     hits.sort(
-      (a, b) => b.coverage - a.coverage || b.rank - a.rank || (a.memoryId < b.memoryId ? -1 : 1),
+      (a, b) =>
+        b.coverage - a.coverage ||
+        b.rank - a.rank ||
+        b.recordedAt.getTime() - a.recordedAt.getTime() ||
+        (a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0),
     );
-    return hits.slice(0, opts.limit);
+    return hits
+      .slice(0, opts.limit)
+      .map(({ memoryId, coverage, rank }) => ({ memoryId, coverage, rank }));
   }
 }
 
@@ -1926,6 +2022,18 @@ export class FakeEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    // `PostgresEventStore.list` は `filter.limit` を生 SQL の `LIMIT`（bigint パラメータ）
+    // にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は例外になる（実測）。ここで
+    // 検査せず `sorted.slice(0, filter.limit)` へ渡すと `Array.prototype.slice` の
+    // 意味論を踏んでほぼ全件を静かに返してしまう——`InMemoryEventStore.list`
+    // （`packages/testkit`、PR #804/#811）と同じ形の不一致
+    // （`fake-store-postgres-parity.test.ts` が歯）。
+    if (filter.limit !== undefined && !Number.isInteger(filter.limit)) {
+      throw new Error(`list: limit must be an integer (got ${filter.limit})`);
+    }
+    if (filter.limit !== undefined && filter.limit < 0) {
+      throw new Error(`list: limit must not be negative (got ${filter.limit})`);
+    }
     const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;
       if (filter.memoryId !== undefined && e.memoryId !== filter.memoryId) return false;
@@ -2022,6 +2130,31 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    */
   setDefaultHalfLifeRecallsForTest(tenantId: string, value: number): void {
     this.halfLifeRecallsByTenant.set(tenantId, value);
+  }
+
+  /**
+   * miku 了承済み（マネージャー経由）: `TenantSettingsStore.setDefaultHalfLifeRecalls`
+   * （[ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md) の本番の
+   * 書き込み口、interface 上は `?` 付きの任意メソッド）を `packages/postgres`・
+   * `packages/testkit` の `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls` と
+   * 同じ意味論で実装する。値域は `assertValidHalfLifeRecalls`（core 共有）で検査する。
+   *
+   * `tenant_settings.default_half_life_recalls` は Postgres の `real`（IEEE 754
+   * 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い
+   * （`migrations/0015_decay_activity_clock.sql` の CHECK 制約）。`assertValidHalfLifeRecalls`
+   * の値域 `(0, ∞)` は JS の float64 では有限でも、float4 の範囲を超える値
+   * （例: `1e300`）は Postgres 側で `real` への変換時に `Infinity` へ丸まり、CHECK
+   * 制約違反の例外になる（実測。`in-memory-fixtures-half-life-recalls-float4-overflow.test.ts`
+   * と同じ形・同じ `Math.fround` の境界判定）。
+   */
+  async setDefaultHalfLifeRecalls(ctx: Ctx, recalls: number): Promise<void> {
+    assertValidHalfLifeRecalls(recalls);
+    if (!Number.isFinite(Math.fround(recalls))) {
+      throw new Error(
+        `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
+      );
+    }
+    this.halfLifeRecallsByTenant.set(ctx.tenantId, recalls);
   }
 
   async getActivitySeq(ctx: Ctx): Promise<number> {
