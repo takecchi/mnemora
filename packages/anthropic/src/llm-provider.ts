@@ -16,6 +16,15 @@ import { translateForAnthropicStructuredOutput } from "./json-schema.js";
  * `client` を注入できるようにしてある（`@mnemora/openai` と同じ理由・同じ形。
  * `Pick<Anthropic, "messages">` は `OpenAILLMProviderOptions.client` の
  * `Pick<OpenAI, "chat">` に対応する）。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）:
+ * `client` を省略すると `new Anthropic({ apiKey })` が作る SDK 既定のクライアントが
+ * 使われる——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する
+ * （実測: `@anthropic-ai/sdk@0.124.0` は既定 `maxRetries: 2`＝最大3回・
+ * `timeout: 600000`ms。この数値は mnemora の契約ではなく SDK の既定値であり、
+ * SDK の版が上がれば変わりうる）。再試行の有無・回数・timeout を変えたい呼び出し側は、
+ * `maxRetries`/`timeout` を設定した `Anthropic` インスタンスを自分で作り、`client` へ
+ * 渡すこと。**
  */
 
 /** Anthropic の `messages.create` は `max_tokens` が必須（OpenAI の chat completions と違う）。

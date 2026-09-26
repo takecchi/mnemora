@@ -559,3 +559,64 @@ try {
 - **足した歯は、この repo の実装だけを見る。**利用者の自作 `LLMProvider` 実装や、
   実カセット JSON ファイル（`examples/chat/cassettes/*.json`）に対しては検査していない
   ——ここで使ったカセットはこのテストファイルのためだけに手で組み立てたインメモリ値である。
+
+---
+
+## 追記3（2026-09-26、[Issue #850](https://github.com/takecchi/mnemora/issues/850)）: core は completeStructured の返り値を再検証しない——歯2 が測るのは provider 側の parse
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・引き受けた負債・確かめていないこと。追記1・追記2を含む）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——この追記は記録だけである。
+
+Issue #850 は、`packages/core` の呼び出し側（`extraction.ts`/`claim-key.ts`/
+`strategies/consolidate.ts`/`strategies/reflect.ts`）が `completeStructured` の戻り値を
+一度も `schema.parse()` で検証し直していないことを指摘した。`schema.parse` を通さない
+fake `LLMProvider`（`{ content: 12345, provenanceKind: "stated" }` を返す）を注入すると、
+`observe()` が `TypeError: content.trim is not a function`（`extraction.ts` の
+`truncateForFallbackDigest`）で未処理のまま終わる実測を含む。
+
+**本 ADR の歯2**（「completeStructured が返すオブジェクトの欄は、structured.schema が
+宣言した欄の集合に収まっている」）は、**provider（`AnthropicLLMProvider`/
+`OpenAILLMProvider`）が自前で `req.schema.parse` を呼んでいることを測るものであり、
+core 側に同等の検査を要求するものではない。**Issue #850 が指摘した穴と本 ADR の歯2 は
+別の層にある——歯2 が緑であることは、provider が契約（ADR 0072 決定3「completeStructured の戻り値は
+常に `req.schema.parse` を通した検証済みの T」）を守っていることの検査であって、core が
+その値を検証し直していることの保証ではない。
+
+**クローン miku の判断（2026-09-26）**: 実装は変えず、「provider は schema に適合する
+値を返す責務を負い、core はその値を再検証しない」を今の契約として
+`packages/core/src/interfaces/llm-provider.ts`・`docs/architecture.md` §5.4 に明記するに
+留めた（Issue #850 が挙げた方向4）。
+
+**採らなかった案**:
+1. **各呼び出し箇所（`claim-key.ts`/`extraction.ts`/`strategies/consolidate.ts`/
+   `strategies/reflect.ts`）で `req.schema.parse(result)` を呼び直す。** 却下——新しい
+   失敗経路を追加する変更になる。今まで「型が違っても、たまたまクラッシュしない限り
+   通っていた」ものが、明示的に「provider 呼び出し失敗」（`describeExtractionFailure`
+   等の `failure` の意味の拡張）として扱われるようになり、委譲された範囲（実装は
+   変えない・新しい throw を足さない）を超える。
+2. **`completeStructured` を呼ぶ共通ラッパーを core に1つ用意し、そこで `schema.parse`
+   を強制する。** 却下——理由は1と同じ（新しい失敗経路の追加）。加えて、これは
+   「provider を信用しない」方向へ core 側の設計を変える判断であり、この追記の範囲
+   （記述のみ）を超える。
+3. **本 ADR の歯2 を「必要な欄が落ちていない」まで強め、`*-conformance.ts` に
+   core 側の再検証相当の要件を足す。** 却下——conformance の要件の変更になる。
+
+反映先: `packages/core/src/interfaces/llm-provider.ts`、`docs/architecture.md` §5.4。
+
+---
+
+## 追記4（2026-09-26、[Issue #884](https://github.com/takecchi/mnemora/issues/884)）: 負債6「SDK 既定リトライ回数は測っていない」を埋めた——記録は ADR 0198 側に置く
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・引き受けた負債。追記1〜3を含む）は書き換えていない。**当時の記録として残す。
+コードの挙動は変えていない——この追記は記録だけである。
+
+負債6「`new Anthropic()`/`new OpenAI()` の既定リトライ回数は測っていない」は、
+[ADR 0198](./0198-llm-provider-call-failure-tooth.md) の負債(a) と同一の未測定であり、
+ADR 0198 の同日付追記で実測して埋めた（`openai@7.10.0`/`@anthropic-ai/sdk@0.124.0` は
+どちらも既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms）。主たる記録（実測・採らなかった案）
+は重複を避けるため ADR 0198 側にのみ置いた。
+
+反映先: `packages/core/src/interfaces/llm-provider.ts`、両 provider の `client` オプション
+doc コメント、両パッケージの README（詳細は ADR 0198 の同日付追記を参照）。
