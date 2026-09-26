@@ -802,6 +802,14 @@ export async function runRecall(
     if (embeddableText) {
       try {
         const [vector] = await deps.embeddingProvider.embed(ctx, [embeddableText]);
+        // provider がベクトルを返さなかった（`[]`、または配列でない要素）ときも、
+        // 例外と同じく「provider が使えない」として名乗る（docs/recall.md「0 件ではなく
+        // embedding_provider_unavailable として記録する」）。以前は `queryVector` が
+        // `undefined` のまま ANN の段を黙って飛ばしていた。歯は
+        // `__tests__/recall-query-embedding-missing-vector.test.ts`。
+        if (!Array.isArray(vector)) {
+          throw new Error("embedding provider returned no vector for the query");
+        }
         queryVector = vector;
       } catch {
         omitted.push({
