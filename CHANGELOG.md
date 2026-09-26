@@ -167,6 +167,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
+  へ落とした記憶を、段3.5（連想、既定 on、ADR 0337）が `RecallResult.memories` へ
+  `retrievedVia: "association"` として昇格させた場合でも、同じ記憶を `over_limit` の
+  `count` にそのまま数え続けていた**（PR #922 が段3の必須同伴取得経由について塞いだのと
+  同型の矛盾。段3.5 経由はそのとき意図的に対象外にしていた）。差し引く対象を「`overLimit`
+  に居て、かつ段3の必須同伴取得または段3.5の連想のどちらかで実際に `finalMemories` に
+  返った id」へ広げ、0件になった Omission は既存の作法どおり配列から取り除くようにした
+  （`memories` の中身・公開型はどちらも無変更）
+  （[Issue #925](https://github.com/takecchi/mnemora/issues/925)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記2 2026-09-26）。
 - **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
   検索結果（順位・スコア）は変えていない（[Issue #878](https://github.com/takecchi/mnemora/issues/878)）。
 - **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を

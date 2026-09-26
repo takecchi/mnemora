@@ -1857,32 +1857,41 @@ export async function runRecall(
     }
   }
 
-  // Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）:
+  // Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）、
+  // Issue #925（同じ ADR「引き受けた負債」2番が名指ししていた、段3.5 経由の同型の経路の是正）:
   // 段2で `passed.slice(limit)` により `over_limit(stage:"rescore")` へ回された候補
   // （上の `overLimit`、まだこの時点で生きている `ScoredCandidate[]`）が、段3の必須の
-  // 同伴取得（上の `companions`）を経由して `finalMemories` に昇格することがある——
-  // below_threshold と同型の矛盾（「返したのに落ちたと名乗る」）。
+  // 同伴取得（上の `companions`）または段3.5（連想、既定 on、ADR 0337）のどちらかを
+  // 経由して `finalMemories` に昇格することがある——below_threshold と同型の矛盾
+  // （「返したのに落ちたと名乗る」）。
   //
-  // ⚠ 対象は**段3の必須同伴取得で拾われた id**に絞る——`companions`（`retrievedVia:
-  // "mandatory_companion"` を付けて構築した配列、上）に居るかどうかで判定する。
-  // **段3.5（連想、既定 on、ADR 0337）が同じ `overLimit` の候補を独立に拾い直して
-  // `finalMemories` へ昇格させる経路は、この PR では塞いでいない**——これは ADR 0203
-  // 「引き受けた負債」2番がまさに名指ししていた経路（below_threshold 以外の kind で
-  // 段3.5 が同種の昇格を起こす）であり、そちらは未解消のまま残っている
-  // （`over_limit(stage:"association")` を含め、Issue #925 として別途起票）。ここで
-  // `companions` 限定にしているのはそのため——`retrievedVia` を見ずに `finalMemories`
-  // 全体との突き合わせだけで判定すると、連想経由の昇格まで `stage:"rescore"` の count
-  // から誤って差し引いてしまう（実際に `omission-kind-generation.test.ts` の既存の歯を
-  // 壊す回帰として実測した）。
+  // ⚠ 対象は**「`overLimit` に居て、かつ (a) 段3の必須同伴取得（`companions`）に居るか
+  // (b) `finalMemories` に `retrievedVia: "association"` で実際に返った」id**に絞る。
+  // (a) は `companions`（`retrievedVia: "mandatory_companion"` を付けて構築した配列、
+  // 上）に居るかどうかで判定し、(b) は `finalMemories` を `retrievedVia` で絞って判定
+  // する——`retrievedVia` を見ずに `finalMemories` 全体との突き合わせだけで判定すると、
+  // 何も昇格していない候補まで拾ってしまう（下のコメント参照）。
   //
-  // ⚠ 差し引く数は「段3で返した同伴の総数」でもない。**`overLimit` に居て、かつ
-  // 段3の同伴取得で実際に `finalMemories` に返った id の数**だけを数える——companion が
-  // 最初から withinLimit に居た場合や、below_threshold から昇格した場合まで数えると、
-  // 無関係な over_limit の count を誤って減らすことになる（上の below_threshold の
-  // 取り下げは、この2つ目の経路を既に別ブロックで正しく扱っている）。
+  // **`over_limit(stage:"association")` 等、他の kind にはこの取り下げを広げない**——
+  // 段3.5 自身が独自に積む `over_limit(stage:"association")` は、まだ id 付きで内部状態を
+  // 追跡できるかを調べていない（Issue #925「確かめていないこと」）。
+  //
+  // ⚠ 差し引く数は「段3で返した同伴の総数」でも「連想で返った総数」でもない。
+  // **`overLimit` に居て、かつ実際に (a)(b) いずれかの経路で `finalMemories` に返った
+  // id の数**だけを数える——companion/連想候補が最初から withinLimit に居た場合や、
+  // below_threshold から昇格した場合、あるいは `overLimit` に一度も居なかった連想候補
+  // （below_threshold から連想で拾われた場合など）まで数えると、無関係な over_limit の
+  // count を誤って減らすことになる（上の below_threshold の取り下げは、その経路を
+  // 既に別ブロックで正しく扱っている。過剰実装を捕まえる歯は
+  // `recall-over-limit-association-promotion.test.ts` の(c)）。
   const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
+  const associationReturnedIds = new Set(
+    finalMemories.filter((m) => m.retrievedVia === "association").map((m) => m.memoryId),
+  );
   const promotedFromOverLimit = overLimit.filter(
-    (c) => mandatoryCompanionIds.has(c.memory.id) && returnedMemoryIds.has(c.memory.id),
+    (c) =>
+      returnedMemoryIds.has(c.memory.id) &&
+      (mandatoryCompanionIds.has(c.memory.id) || associationReturnedIds.has(c.memory.id)),
   );
   if (promotedFromOverLimit.length > 0) {
     const overLimitRescoreIndex = omitted.findIndex(

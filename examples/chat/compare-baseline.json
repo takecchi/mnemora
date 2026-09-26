@@ -2,17 +2,18 @@
   "_readme": "compare ベンチ(examples/chat の `compare` サブコマンド、北極星の物差し=mnemora/naive比)の基準値。scripts/compare-summary.mjs --baseline がこれを読む。retrieval-baseline.json / time-term-baseline.json と同じ考え方(『基準値をrepoにコミットし出所を添える』)を踏襲している。⚠ このベンチは他5本と違い、実測で2回のCI run(同一commit)が measuredAt を除いて完全一致したため(ADR 0133「測ったこと」)、⭐ 門にしている——mnemoraShareOfNaiveCharsの悪化とfactStatementSurvivedの退行(true→false)を検知すると赤くなる。⚠ 判定の規則と終了コードはここに写さない(ADR 0223 決定9『焼き込んだ数字は腐る。唯一の出所を指すだけにする』)——唯一の出所は scripts/compare-summary-lib.mjs の evaluateCompare であり、この行が以前名指ししていた computeRegressions は ADR 0222 が廃した。⭐ 1つだけ写す: 判定は3値であり、exit 2 は「判定していない」(実測と基準値の turnCount 集合が一致せず、比較していない会話長が在る)であって「失敗」ではない(ADR 0222 決定5・Issue #477)。⚠ CIのジョブがこのファイルを更新することはない(意図的な手作業のみ)。⚠ この行は以前『ADR 0133参照』と指していたが、ADR 0133 本文に「手作業」の語は1度も無い——主張自体は ADR 0121 決定1『手で数値を書いた欄は無い』と ADR 0119 決定6『実測せずに数値を書けば、それは捏造である』が支えているので、指し先だけをそちらへ差し替えた(ADR 0231 決定6)。更新手順は examples/chat/README.md の compare 節。🔴 2026-09-16 追記(ADR 0168・Issue #291): examples/chat が recall() の連想枠を既定で使うようになったため、この基準値を更新した。値が退行に見えても、それはこの意図した変更の反映であり、bugではない——詳細は provenance.note と ADR 0168 を見ること。🔴🔴 2026-09-16 追記2(ADR 0170・Issue #339): turnCount=322 の行が、この直前の更新の時点では非決定だった(同一commitのCI再実行で mnemoraChars が 4481/4555/4558 と揺れる。ADR 0168 が固定した 4558 はその揺れの中の1点に過ぎなかった)。原因を直し(ADR 0170)、322行を再実測した値に差し替えた。他の11行は不変。🔴🔴🔴 2026-09-17 追記3(ADR 0231・Issue #403): omitted 欄が main 上で陳腐化していた(12行中5行が相違)のを、この PR 自身の CI の artifact で実測更新した。⭐門が見る2欄は12行すべて不変であり、⟹ 退行ではない。理由は ADR 0188(over_limit に stage)と ADR 0193(ann_unreached が窓満杯でも鳴る)の2本である——詳細は provenance.thirdUpdate と ADR 0231。⚠ 併せて、⭐門が見ない欄の食い違いを Job Summary が毎 run 名乗るようにした(ADR 0231 決定3)。⛔ それは門ではない——ジョブは落ちない。🔴🔴🔴🔴 2026-09-25 追記4(ADR 0306/0307/0310・Issue #340 フォローアップ): compare の各行に `bandEntryCount`/`rawIndexJsonLength` の2欄を新設し、CI artifact で実測更新した(先行して main 上で付いた `ann_unreached` の `severity:\"info\"` も同時に反映)。⭐門が見る2欄(mnemoraShareOfNaiveChars/factStatementSurvived)は12行すべて不変であり、退行ではない——詳細は provenance.fourthUpdate。`bandEntryCount` は `recall-footprint-baseline.test.ts` の hold-in/hold-out の分け方を、目次帯が空であることの代理指標(`totalInScope <= DEFAULT_RECALL_LIMIT`)から一次指標(`bandEntryCount === 0`)へ切り替えるために使う——切り替えても12行の分け方(7行/5行、同じ行)は1行も変わらない(検算はテストファイル自身の歯)。",
   "schemaVersion": 1,
   "provenance": {
-    "commit": "deecbd5f20ffeeb2454522a66b20e34c690795c7",
-    "measuredAt": "2026-09-25T03:40:56.745Z",
-    "how": "gh run download / gh api で、この PR(#728, Issue #340 フォローアップ)自身の CI(example-chat ジョブ、run 36090652846)が生成した artifact compare を取得し、node で読み込んで llmMode/embeddingMode/rowCount/rows をそのまま複製した(ADR 0133 決定1 / ADR 0168 決定5 と同じ手順)。⛔ 手で数値を書いた欄は無い。⚠ この作業環境には DATABASE_URL が無く、compare ベンチ自体は一度も実行していない——使ったのは CI の artifact だけである(ADR 0121『手元では書かない』/ ADR 0119 決定6)。⚠ 上の commit は pull_request の CI が checkout するマージプレビュー(refs/pull/728/merge)の sha であり、PR ブランチの head(1b94f8a642bea9b87dc3730b4d7481fb56667d2d)そのものではない——gh api repos/takecchi/mnemora/actions/runs/36090652846 の pull_requests[0].head.sha で確認済み。",
-    "ciJob": "example-chat(pgvector/pgvector:pg17 の service container 上、PR #728 の CI run 36090652846。attempt 1 = Artifact ID 10845303067 / attempt 2 = Artifact ID 10845791720。作成時刻・head_sha は gh api repos/takecchi/mnemora/actions/artifacts/<id> で個別に確認済み)",
+    "commit": "1a12e65556c2026eacb4d536988c3d52bb946e3e",
+    "measuredAt": "2026-09-26T11:57:42.224Z",
+    "how": "gh run download で、この PR(#930, Issue #925)自身の CI(example-chat ジョブ、run 36240303816)が生成した artifact compare を attempt 1・2 の2本取得し、measuredAt/commit を除いて rows がバイト単位で一致することを node で確かめてから、attempt 1 の llmMode/embeddingMode/rowCount/rows をプログラムで複製した(ADR 0133 決定1 / ADR 0168 決定5 / ADR 0231 決定5)。⛔ 手で数値を書いた欄は無い。⚠ 上の commit は pull_request の CI が checkout するマージプレビュー(refs/pull/930/merge)の sha であり、PR ブランチの head(a268c74ec99f69f1b61b354812348df8a75ebd5e)そのものではない——gh api repos/takecchi/mnemora/actions/runs/36240303816 の pull_requests[0].head.sha で確認済み。",
+    "ciJob": "example-chat(PR #930 の CI run 36240303816。attempt 1 = Artifact ID 10904574149 / attempt 2 = Artifact ID 10904589772)",
     "providers": "llmMode=recorded / embeddingMode=recorded（ADR 0133 で確定した通り、examples/chat/cassettes/compare.json の再生。deterministic ではない）。",
     "repeatRuns": 2,
     "note": "ADR 0168(Issue #291)により、queryRecall(mnemora-path.ts、compare/chat が使う想起経路)が既定で RecallQuery.association(maxCount=10)を渡すようになった。この基準値はその変更後の値である。旧値との対比: turnCount<=22の6行は不変(over_limitが起きないため連想枠は何も拾わない)。42/82/162ターンはmnemoraSharOfNaiveCharsが改善(61.7%→55.6%/74.5%→65.2%/84.7%→75.3%、目次帯の1件63字の固定費より本体への昇格コストが安いため)。322/642ターンは悪化(53.0%→56.0%/26.5%→27.6%、除外候補が目次帯の上限50件を超え連想枠が純追加になるため)——これがこの PR で唯一 ⭐ 門を赤くした理由であり、ADR 0168 が意図した変更である。再現性はこのPRのCI run 1回と、書き手が別環境(ローカルPostgres)で独立に走らせた測定の一致で確認した(ADR 0133 が行ったような同一commitのCI2回reRunは行っていない——1回のCI run + 独立環境での一致確認、という異なる形の裏取りである)。",
     "reconfirmedAfterMainMerge": "2026-09-16: このブランチへ origin/main を2回取り込んだ(8e11663=PR #334 validAtゲート/Issue #280/ADR 0164、1021a93=PR #335 decay活動時計/Issue #305/ADR 0165、いずれも migration を含む)後、この PR 自身の CI run 35045819349(head 3b854e3、example-chat ジョブ)が生成した compare.json artifact を取得し、rows 12件を measuredAt を除いて突き合わせたところ、上記の値と1バイトも違わなかった(node で JSON.stringify した各フィールドをrow単位で比較)。⟹ #334/#335 は compare の実測値を動かしていない(validAt ゲートは valid_from/valid_until を使わないシナリオでは効かず、decay 活動時計は既定 'wall' で非破壊のため)。この事実確認のためだけであり、rows 自体はどちらの CI run(35040893466 / 35045819349)から取っても同じなので更新していない——ADR 0133 決定1が言う『CI artifact をそのまま基準値の本体にする』の対象は変わらず ADR 0168 が最初に固定した35040893466のままで正しい。",
     "secondUpdate": "2026-09-16(ADR 0170・Issue #339): 上記の 322 行(4558)は、実は同一commitのCI再実行で 4481/4555/4558 と揺れる非決定値だった——ADR 0168 はこの揺れを検知しないまま最初に観測した値をそのまま基準値にしていた。原因(PostgresVectorStore.searchのORDER BYがADR 0167で足したmemory_id tie-breakに依存しており、memory_idがingestのたびに振り直されるランダムなUUIDであるため、重複コンテンツの多いこのベンチでfresh ingestごとに勝者が変わっていた)をADR 0170で直した。この PR 自身の CI run 35050847242 に対し、同一 job(examples/chat)を gh run rerun --job で2回追加実行し(計3回、attempt 1/2/3)、artifact ID直指定(10428986922 / 10429345663 / 10429615448)でそれぞれ取得した——measuredAt(2026-09-16T03:13:12.136Z / T03:20:28.517Z / T03:23:51.317Z、3つとも別物であることを確認済み)を除いて rows 12件すべてが3回ともバイト単位で一致した(node でJSON.stringifyしたrows配列をdiff)。⟹ 322行を新しい値(mnemoraChars=4547、mnemoraShareOfNaiveChars=0.5590115564298008)に差し替えた。他11行(642行を含む)はこのCI run群でも1バイトも変わっていない——642行はmnemoraCharsの値としては修正前後で不変だが、連想枠の中身(externalIdの集合)は修正前は非決定だったことをローカル実測で別途確認している(ADR 0170参照。この基準値ファイルはmnemoraCharsしか持たないため、その事実はここには現れない)。",
     "thirdUpdate": "2026-09-17(ADR 0231・Issue #403): omitted 欄が main 上で陳腐化していたのを、CI の artifact で実測更新した。⭐ 動いたのは omitted だけである——⭐門が見る2欄(mnemoraShareOfNaiveChars / factStatementSurvived)は12行すべてで不変であり、この更新で門の検知力は下がらない。値が動いた理由は2本の ADR である: (1) ADR 0188 が over_limit に stage を足した(turnCount=42/82 はこれだけで説明が付く。count は不変)。(2) ADR 0193 が ann_unreached を『窓が満杯でも鳴る』形に直した——旧条件 annHits.length < kPrime が ann_truncated の判定が動く場合を構造的に除外していたため一度も鳴りようがなく、0193 が条件を広げて初めて鳴り始めた(turnCount=162/322/642 に新しく現れた ann_unreached はこれである)。⭐ 採る前に一致を確かめた(ADR 0231 決定5、ADR 0133「これが覆るとしたら」が将来形で書いたまま明文化されていなかった規律): (a) 同一 commit(f6059c7f、refs/pull/513/merge)で example-chat ジョブを2回実行し、artifact ID 直指定(10498937273 / 10498309325)で取得したところ、measuredAt(2026-09-17T13:02:11.883Z / T13:09:10.138Z)を除いて全欄がバイト単位で一致した。(b) さらに main の成功 run 8本(35208811254 / 35210285638 / 35212209546 / 35213802314 / 35214441665 / 35215295404 / 35215408232 / 35216005498。head は8つの別 commit)の artifact とも rows が1バイトも違わなかった。⟹ 計10 run で一致している。⚠ この10本は 2026-09-17 の約2時間の窓のものであり、それ以前の run は見ていない。",
-    "fourthUpdate": "2026-09-25(Issue #340 フォローアップ、ADR 0306/0307/0310): CI(example-chat ジョブ)に recall-footprint 較正標本の配線を足した際、compare の各行へ `bandEntryCount`(`index.digestBand?.length ?? 0`)と `rawIndexJsonLength`(`JSON.stringify(index).length`)の2欄を新設した(先行コミット86488cf、compare.ts の ComparisonRow)。⭐ 動いたのはこの2欄の新設と、main 上で別件(PR #682, ADR 0288)により `omitted` の `ann_unreached` 札に `severity: \"info\"` が付いたことだけである——⭐門が見る2欄(mnemoraShareOfNaiveChars / factStatementSurvived)は12行すべてで1バイトも変わっていない。値そのもの(naiveChars/mnemoraChars 等)もすべて不変であり、退行ではない。⭐ 採る前に2回一致を確かめた: 同一 commit(deecbd5f、refs/pull/728/merge)で example-chat ジョブを2回実行(attempt 1 = run 36090652846 の compare artifact 10845303067 / recall-footprint-calibration-samples artifact 10845602321、attempt 2 = compare artifact 10845791720 / recall-footprint-calibration-samples artifact 10846036078)し、measuredAt(2026-09-25T03:34:09.435Z / T03:40:56.745Z)を除いて全欄がバイト単位で一致した(node で JSON.stringify した各フィールドをrow単位で比較。8点の recall-footprint-calibration-samples artifact も同様に2回一致——詳細は examples/chat/recall-footprint-calibration-samples-baseline.json の provenance)。gh api repos/takecchi/mnemora/actions/artifacts/<id> で4本のartifact ID・作成時刻(03:34:10Z/03:34:13Z/03:40:57Z/03:41:01Z)・workflow_run.id(いずれも36090652846)を個別に確認済み。⚠ CI が checkout したのは pull_request のマージプレビュー(refs/pull/728/merge)の commit(deecbd5f20ffeeb2454522a66b20e34c690795c7)であり、PR #728 の head(1b94f8a642bea9b87dc3730b4d7481fb56667d2d)そのものではない——上の provenance.commit は前者。gh api repos/takecchi/mnemora/actions/runs/36090652846 の pull_requests[0].head.sha は 1b94f8a(head)を返す一方、実ジョブ内でチェックアウトされる sha は マネージャーの実測(CI run のログ)による deecbd5f である。この不一致自体は本ファイルの以前の更新(ADR 0133 決定1 の頃から)と同じ形であり、新しい事象ではない。"
+    "fourthUpdate": "2026-09-25(Issue #340 フォローアップ、ADR 0306/0307/0310): CI(example-chat ジョブ)に recall-footprint 較正標本の配線を足した際、compare の各行へ `bandEntryCount`(`index.digestBand?.length ?? 0`)と `rawIndexJsonLength`(`JSON.stringify(index).length`)の2欄を新設した(先行コミット86488cf、compare.ts の ComparisonRow)。⭐ 動いたのはこの2欄の新設と、main 上で別件(PR #682, ADR 0288)により `omitted` の `ann_unreached` 札に `severity: \"info\"` が付いたことだけである——⭐門が見る2欄(mnemoraShareOfNaiveChars / factStatementSurvived)は12行すべてで1バイトも変わっていない。値そのもの(naiveChars/mnemoraChars 等)もすべて不変であり、退行ではない。⭐ 採る前に2回一致を確かめた: 同一 commit(deecbd5f、refs/pull/728/merge)で example-chat ジョブを2回実行(attempt 1 = run 36090652846 の compare artifact 10845303067 / recall-footprint-calibration-samples artifact 10845602321、attempt 2 = compare artifact 10845791720 / recall-footprint-calibration-samples artifact 10846036078)し、measuredAt(2026-09-25T03:34:09.435Z / T03:40:56.745Z)を除いて全欄がバイト単位で一致した(node で JSON.stringify した各フィールドをrow単位で比較。8点の recall-footprint-calibration-samples artifact も同様に2回一致——詳細は examples/chat/recall-footprint-calibration-samples-baseline.json の provenance)。gh api repos/takecchi/mnemora/actions/artifacts/<id> で4本のartifact ID・作成時刻(03:34:10Z/03:34:13Z/03:40:57Z/03:41:01Z)・workflow_run.id(いずれも36090652846)を個別に確認済み。⚠ CI が checkout したのは pull_request のマージプレビュー(refs/pull/728/merge)の commit(deecbd5f20ffeeb2454522a66b20e34c690795c7)であり、PR #728 の head(1b94f8a642bea9b87dc3730b4d7481fb56667d2d)そのものではない——上の provenance.commit は前者。gh api repos/takecchi/mnemora/actions/runs/36090652846 の pull_requests[0].head.sha は 1b94f8a(head)を返す一方、実ジョブ内でチェックアウトされる sha は マネージャーの実測(CI run のログ)による deecbd5f である。この不一致自体は本ファイルの以前の更新(ADR 0133 決定1 の頃から)と同じ形であり、新しい事象ではない。",
+    "fifthUpdate": "2026-09-26(Issue #925、ADR 0203 追記2): Issue #925 / ADR 0203 追記2 により、段3.5(連想)が over_limit(stage:\"rescore\") の候補を拾い直して memories に返した分を、その count から差し引くようになった。旧値との差は omitted の over_limit(stage:\"rescore\").count だけで、turnCount 42: 4→3、82: 15→12、162: 30→25、322: 30→26、642: 30→20。他の欄(⭐門が見る mnemoraShareOfNaiveChars/factStatementSurvived を含む)は12行すべて不変。 ⭐ 採る前に2回一致を確かめた: 同一 commit(1a12e655、refs/pull/930/merge)で example-chat ジョブを2回実行(attempt 1 = artifact 10904574149 / attempt 2 = artifact 10904589772、measuredAt 2026-09-26T11:57:42.224Z / T12:04:50.164Z)し、measuredAt/commit を除いて rows がバイト単位で一致した。"
   },
   "llmMode": "recorded",
   "embeddingMode": "recorded",
@@ -143,7 +144,7 @@
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 4,
+          "count": 3,
           "countKind": "exact"
         }
       ],
@@ -166,7 +167,7 @@
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 15,
+          "count": 12,
           "countKind": "exact"
         }
       ],
@@ -189,7 +190,7 @@
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 30,
+          "count": 25,
           "countKind": "exact"
         },
         {
@@ -217,7 +218,7 @@
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 30,
+          "count": 26,
           "countKind": "exact"
         },
         {
@@ -251,7 +252,7 @@
         {
           "kind": "over_limit",
           "stage": "rescore",
-          "count": 30,
+          "count": 20,
           "countKind": "exact"
         },
         {
