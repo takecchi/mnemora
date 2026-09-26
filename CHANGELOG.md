@@ -58,7 +58,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 この節は、`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものである
 （載せる／載せないの全数表と理由は [PR #747](https://github.com/takecchi/mnemora/pull/747) の本文）。
 2026-09-26 に `v1.0.0` … `079169d` を改めて1本ずつ数え直し、計上漏れ（PR #792）を足した
-（全数表は PR __THIS_PR__ の本文）。
+（全数表は [PR #844](https://github.com/takecchi/mnemora/pull/844) の本文）。
 
 🔴 **`079169d` までの範囲で、計上を保留しているものが在る。**PR #811 / #813 / #815
 （`@mnemora/testkit/fixtures` の Fake が、これまで黙って受け入れていた不正な入力——負数・NaN・
