@@ -154,6 +154,11 @@ export class InMemoryVectorStore implements VectorStore {
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。
     // テナント分離は `opts.filter.tenantId` と `ctx.tenantId` の**両方**の一致で行う（AND）。
     // ⚠ 以前は「`filter.tenantId` の一致だけで行う。`ctx.tenantId` で二重に絞ると

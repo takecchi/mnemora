@@ -422,6 +422,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `MemoryStore.purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`、下の
   `[1.0.1]` 節の PR #811/#813 相当）より実害が大きかった。`PostgresMemoryStore.archiveDecayed`
   と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くように
+- **`@mnemora/testkit` の擬似 store が、bigint に収まらない `limit`（2^63 以上）を受け入れていた**——`claimBatch`・`VectorStore.search`・`LexicalStore.search`・`EventStore.list`・`purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`・`archiveDecayed`。Postgres は同じ値を `LIMIT` の bigint パラメータとして拒む（`2 ** 63` は `out of range for type bigint`、`1e21` 以上は指数表記になり `invalid input syntax for type bigint`）。`Number.isInteger` を通るため、負数・`NaN`・`Infinity`・非整数のガード（PR #811/#813/#923）をすり抜けていた。書き込みを持つ `claimBatch`・`archiveDecayed` では対象を全件書き換えていた。同じ値をクエリの前に弾くようにした（2^63 未満の値の挙動は変えていない）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
   した（新しい正常系の挙動は変えていない）（[Issue #880](https://github.com/takecchi/mnemora/issues/880)、PR #923）。
   ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.reinforce`（`@mnemora/testkit` の擬似 `MemoryStore`）に Invalid

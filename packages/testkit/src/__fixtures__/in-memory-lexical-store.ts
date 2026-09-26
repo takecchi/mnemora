@@ -240,6 +240,11 @@ export class InMemoryLexicalStore implements LexicalStore {
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
     // （capQueryTotalChars/capQueryTerms の doc 参照）。全体の文字数を最初に適用する。
     // Issue #951: `mnemora_lexical_query_terms` と同じ向きで、非 ASCII の連なりを

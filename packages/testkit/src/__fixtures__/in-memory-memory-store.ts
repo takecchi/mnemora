@@ -798,6 +798,13 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (opts.limit < 0) {
       throw new Error(`purgeExpiredEvents: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(
+        `purgeExpiredEvents: limit must fit in a Postgres bigint (got ${opts.limit})`,
+      );
+    }
     const candidates = this.events
       .filter(
         (event) =>
@@ -1214,6 +1221,13 @@ export class InMemoryMemoryStore implements MemoryStore {
           `aggregateScope: digestBand.limit must not be negative (got ${opts.digestBand.limit})`,
         );
       }
+      // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+      // "9223372036854776000" is out of range for type bigint`）。
+      if (opts.digestBand.limit >= 2 ** 63) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must fit in a Postgres bigint (got ${opts.digestBand.limit})`,
+        );
+      }
       const exclude = new Set(opts.digestBand.excludeMemoryIds);
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順
@@ -1376,6 +1390,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     if (opts.limit < 0) {
       throw new Error(`archiveDecayed: limit must not be negative (got ${opts.limit})`);
+    }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`archiveDecayed: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     const nowMs = opts.now.getTime();
     const clock = opts.clock ?? "wall";

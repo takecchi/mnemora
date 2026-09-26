@@ -50,6 +50,11 @@ export class InMemoryOutboxStore implements OutboxStore {
     if (opts.limit < 0) {
       throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`claimBatch: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     // リースが切れたとみなす境界時刻。`PostgresOutboxStore` と同じ `<=`（両端含む）。
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.jobs.filter((job) => {
