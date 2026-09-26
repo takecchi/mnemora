@@ -1993,6 +1993,58 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  * 「一度も呼ばれていないこと」（既定チャンネルが語彙 store に触れない）と
  * 「配線されているが落ちる adapter」の両方を、歯から直接組み立てられるようにするため。
  */
+
+/**
+ * クエリの異なる語数・語ごとの文字数の上限（Issue #878、2026-09-26、
+ * クローン miku の判断）。
+ *
+ * `packages/postgres` の `LEXICAL_QUERY_MAX_DISTINCT_WORDS`/`LEXICAL_QUERY_MAX_WORD_CHARS`
+ * （`packages/postgres/src/lexical-query-cap.ts`）、`packages/testkit` の
+ * `InMemoryLexicalStore` が持つ同名の定数
+ * （`packages/testkit/src/__fixtures__/in-memory-lexical-store.ts`）と**同じ値**
+ * （3箇所とも手で揃える——`FakeLexicalStore` は `@mnemora/postgres`/`@mnemora/testkit`
+ * の外に居るため、import で共有できない。値がずれていないことは `packages/postgres`
+ * 側の歯 `lexical-query-cap-values-match.test.ts` が、3ファイルのソースを読んで
+ * 突き合わせる）。
+ *
+ * `search` が使う `query.split(/\s+/)`（空白区切り、記号は分割しない）は postgres 側の
+ * 「クエリ側は空白でしか割らない」形と同じであり、`InMemoryLexicalStore`（非文字・
+ * 非数字の連なりで割る）とは違う——`InMemoryLexicalStore` の同名定数の doc が書いている
+ * 「記号つなぎの長い1語」は、ここでは実際に1語のまま残る。
+ *
+ * このファイルは `tsconfig.build.json` の `exclude`（`src/**\/__tests__/**`）に含まれ、
+ * `@mnemora/core` の公開ビルド（`dist/`）には一切含まれない——ここでの export は
+ * 同じパッケージ内の他のテストファイルが値を書き写さずに参照するためだけのものであり、
+ * `pnpm api:check` には影響しない。
+ */
+export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
+export const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
+
+/**
+ * `rawTerms`（空白区切りの生の語の配列）から、1語が
+ * {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える場合は先頭からその文字数に切り詰め、
+ * そのうえで異なる語を先頭からの出現順に {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個
+ * まで残した `Set` を返す。どちらの上限にも触れない限り、全ての語を含む `Set` を
+ * そのまま返す（1件も切り捨てない）。
+ */
+function capFakeLexicalQueryTerms(rawTerms: string[]): Set<string> {
+  const truncated = rawTerms.map((term) =>
+    term.length > LEXICAL_QUERY_MAX_WORD_CHARS ? term.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS) : term,
+  );
+  const distinctInFirstSeenOrder: string[] = [];
+  const seen = new Set<string>();
+  for (const term of truncated) {
+    if (!seen.has(term)) {
+      seen.add(term);
+      distinctInFirstSeenOrder.push(term);
+    }
+  }
+  if (distinctInFirstSeenOrder.length <= LEXICAL_QUERY_MAX_DISTINCT_WORDS) {
+    return seen;
+  }
+  return new Set(distinctInFirstSeenOrder.slice(0, LEXICAL_QUERY_MAX_DISTINCT_WORDS));
+}
+
 export class FakeLexicalStore implements LexicalStore {
   /** `search` が呼ばれるたびに積む診断ログ。「一度も呼ばれていないこと」を歯が直接検査できる。 */
   calls: { ctx: Ctx; query: string; opts: { limit: number; filter: LexicalFilter } }[] = [];
@@ -2022,7 +2074,8 @@ export class FakeLexicalStore implements LexicalStore {
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
-    const termSet = new Set(query.split(/\s+/).filter((t) => t.length > 0));
+    // Issue #878: 異なる語数・語ごとの文字数に上限を置く（capFakeLexicalQueryTerms の doc 参照）。
+    const termSet = capFakeLexicalQueryTerms(query.split(/\s+/).filter((t) => t.length > 0));
     const hits: (LexicalHit & { recordedAt: Date })[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== opts.filter.tenantId || memory.tenantId !== ctx.tenantId) continue;

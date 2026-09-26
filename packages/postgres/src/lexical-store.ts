@@ -135,12 +135,13 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  * `lexical-rank-resolution.test.ts` がこの一致を検査する（新しい歯ではなく、
  * 既存の歯がそのまま通ることが根拠——値を変える意図は無い）。
  *
- * **🔴 Issue #878（2026-09-26、クローン miku の判断）: `query` の異なる語数に上限を置く。**
- * `capLexicalQueryWords`（`./lexical-query-cap.ts`）を通してから使う——上限
- * （{@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}）に触れない大多数のクエリでは1バイトも
- * 変わらない。触れた場合は先頭からその数の語だけが `mnemora_lexical_query_or`/
- * `mnemora_lexical_query_tsqueries` に渡る——新しい例外にはしない（呼び出し側を壊さない）。
- * 理由・採らなかった案は `capLexicalQueryWords` の doc と ADR 0092 追記節を見ること。
+ * **🔴 Issue #878（2026-09-26、クローン miku の判断）: `query` の異なる語数・語ごとの
+ * 文字数に上限を置く。**`capLexicalQueryWords`（`./lexical-query-cap.ts`）を通してから
+ * 使う——上限（{@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}/{@link LEXICAL_QUERY_MAX_WORD_CHARS}）
+ * に触れない大多数のクエリでは1バイトも変わらない。触れた場合は先頭からその範囲だけが
+ * `mnemora_lexical_query_or`/`mnemora_lexical_query_tsqueries` に渡る——新しい例外には
+ * しない（呼び出し側を壊さない）。理由・採らなかった案は `capLexicalQueryWords` の doc と
+ * ADR 0092 追記節を見ること。
  */
 export function buildLexicalSearchSelect(
   query: string,

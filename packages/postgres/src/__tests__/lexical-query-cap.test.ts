@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { LEXICAL_QUERY_MAX_DISTINCT_WORDS, capLexicalQueryWords } from "../lexical-query-cap.js";
+import {
+  LEXICAL_QUERY_MAX_DISTINCT_WORDS,
+  LEXICAL_QUERY_MAX_WORD_CHARS,
+  capLexicalQueryWords,
+} from "../lexical-query-cap.js";
 
 /**
  * `capLexicalQueryWords`（Issue #878、2026-09-26、クローン miku の判断）の純粋な単体テスト。
@@ -57,5 +61,35 @@ describe("capLexicalQueryWords", () => {
   it("空文字列・空白だけの文字列はそのまま返す", () => {
     expect(capLexicalQueryWords("")).toBe("");
     expect(capLexicalQueryWords("   ")).toBe("   ");
+  });
+
+  it("1語の文字数がちょうど上限のときは変えない", () => {
+    const query = "a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS);
+    expect(capLexicalQueryWords(query)).toBe(query);
+  });
+
+  it("1語の文字数が上限を1つ超えると、その語を先頭から上限の文字数だけに切り詰める", () => {
+    const query = "a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS + 1);
+    expect(capLexicalQueryWords(query)).toBe("a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS));
+  });
+
+  it("記号だけでつないだ、空白を含まない1語も文字数の上限で切り詰められる（語数の上限では防げない形）", () => {
+    const longSymbolJoinedWord = Array.from(
+      { length: LEXICAL_QUERY_MAX_WORD_CHARS },
+      () => "a",
+    ).join("-");
+    expect(longSymbolJoinedWord.length).toBeGreaterThan(LEXICAL_QUERY_MAX_WORD_CHARS);
+    const capped = capLexicalQueryWords(longSymbolJoinedWord);
+    expect(capped).toBe(longSymbolJoinedWord.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS));
+  });
+
+  it("長すぎる語が複数あっても、それぞれ独立に先頭から切り詰められる", () => {
+    const wordA = "a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS + 10);
+    const wordB = "b".repeat(LEXICAL_QUERY_MAX_WORD_CHARS + 20);
+    const query = `${wordA} ${wordB}`;
+    const capped = capLexicalQueryWords(query);
+    expect(capped).toBe(
+      `${"a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS)} ${"b".repeat(LEXICAL_QUERY_MAX_WORD_CHARS)}`,
+    );
   });
 });
