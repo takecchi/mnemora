@@ -122,6 +122,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
+  検索結果（順位・スコア）は変えていない（[Issue #878](https://github.com/takecchi/mnemora/issues/878)）。
 - **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を
   失う（DB の再起動・フェイルオーバー・運用者による手動切断・OOM kill 等）と、Node
   プロセス全体が uncaught exception で落ちていた。** `pool.connect()` で借り切った
