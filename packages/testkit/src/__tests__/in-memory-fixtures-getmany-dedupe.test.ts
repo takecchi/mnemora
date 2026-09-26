@@ -39,3 +39,32 @@ describe("InMemoryMemoryStore.getMany: ids に重複があっても一意な id 
     expect(new Set(results.map((m) => m.id))).toEqual(new Set([x.id, y.id]));
   });
 });
+
+// テナント分離の棚卸し（Issue #854）で気づいた歯の欠落: `get`/`getMany`/`updateStatus`/
+// `setEmbeddingStatus`/`purgeMemory`/`markContestedPair` 等には他テナント対象外の歯が
+// `memory-store-conformance.ts` に既にあるが、`reinforce` には無かった。この歯は
+// `InMemoryMemoryStore` 自身（このファイルが既に import している）を対象にする——
+// `memory-store-conformance.ts` へは足さない（このファイル冒頭の #806/Issue #809 と
+// 同じ理由: 適合テストへの要件追加は外部の store 実装者の CI を落としうる）。
+// この describe は上の getMany の話とは無関係の別トピックだが、
+// 「Fake を直接テストしている既存ファイルに足す・新しいファイルは作らない」という
+// 同じ方針をそのまま踏襲している。
+describe("InMemoryMemoryStore.reinforce: 他テナントの Memory を対象にしない", () => {
+  it("他テナントの id を渡すと memory not found を投げ、対象の行は無傷のまま", async () => {
+    const store = new InMemoryMemoryStore();
+    const ctxA: Ctx = { tenantId: "tenant-a" };
+    const ctxB: Ctx = { tenantId: "tenant-b" };
+    const memoryA = await store.createMemory(
+      ctxA,
+      buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "reinforce-tenant-a" }),
+    );
+
+    await expect(
+      store.reinforce(ctxB, memoryA.id, new Date(memoryA.recordedAt.getTime() + 1000)),
+    ).rejects.toThrow(/memory not found for tenant/);
+
+    const afterA = await store.get(ctxA, memoryA.id);
+    expect(afterA?.lastReinforcedAt ?? null).toBe(memoryA.lastReinforcedAt ?? null);
+    expect(afterA?.updatedAt.getTime()).toBe(memoryA.updatedAt.getTime());
+  });
+});

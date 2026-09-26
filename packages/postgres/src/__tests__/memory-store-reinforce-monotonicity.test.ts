@@ -108,4 +108,31 @@ describe("PostgresMemoryStore.reinforce は減衰の起点を巻き戻さない�
     const reread = await new PostgresMemoryStore(db).get(ctx, memory.id);
     expect(reread?.lastReinforcedAt?.getTime()).toBe(newest.getTime());
   });
+
+  // テナント分離の棚卸し（Issue #854）で気づいた歯の欠落: `get`/`getMany`/`updateStatus`/
+  // `setEmbeddingStatus`/`purgeMemory`/`markContestedPair` 等には他テナント対象外の歯が
+  // conformance suite に既にあるが、`reinforce` には無かった。この歯は
+  // `PostgresMemoryStore` 自身の実装（`WHERE tenant_id = ${ctx.tenantId} AND id = ${id}`）を
+  // 対象にする——`packages/testkit` の conformance へは足さない（外部 adapter への要件追加は
+  // このPRの範囲外、Issue #809 の論点）。
+  it("🔴 reinforce は他テナントの Memory を対象にしない（memory not found）", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const store = new PostgresMemoryStore(db);
+    const ctxA: Ctx = { tenantId: "tenant-a" };
+    const ctxB: Ctx = { tenantId: "tenant-b" };
+    const memoryA = await store.createMemory(
+      ctxA,
+      buildNewMemoryFixture({ tenantId: "tenant-a", contentHash: "reinforce-tenant-a" }),
+    );
+
+    await expect(
+      store.reinforce(ctxB, memoryA.id, new Date(memoryA.recordedAt.getTime() + 1000)),
+    ).rejects.toThrow(/memory not found for tenant/);
+
+    // tenant-a 側から見ても無傷のまま。
+    const afterA = await store.get(ctxA, memoryA.id);
+    expect(afterA?.lastReinforcedAt ?? null).toBe(memoryA.lastReinforcedAt ?? null);
+    expect(afterA?.updatedAt.getTime()).toBe(memoryA.updatedAt.getTime());
+  });
 });
