@@ -127,6 +127,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   catchable な `Error` として観測できるようになる（[ADR 0339](./docs/decisions/0339-checked-out-client-error-listener.md)、
   [ADR 0020](./docs/decisions/0020-temp-database-drain-before-drop.md) とは別の話——
   自傷ではなく外部要因による接続断であり、握り潰す対象は無い。PR #859）。
+- **同じ穴（上の PR #859 の項目）が `MemoryStore`/`VectorStore`/`TrigramLexicalStore` の
+  `db.transaction()` 呼び出し全般にも残っていた。** drizzle-orm の
+  `NodePgSession.transaction`（`db.transaction()` の内部実装）も `pool.connect()` で
+  checked-out client を借りるが、`error` リスナーは一切付けない——トランザクション実行中に
+  DB 側の接続を失うと、同じ形で Node プロセス全体が uncaught exception で落ちる。
+  drizzle-orm 自体は編集できないため、`createPostgresClient`（`db.transaction()` が使う
+  `Pool` インスタンスを作る唯一の入口）が `Pool` を作った直後に、そのインスタンス自身の
+  `connect` を、返す checked-out client へ同じ空の `error` リスナーを自動で付け外しする
+  ものへ差し替えるようにした。公開の型・export は変えていない
+  （[ADR 0340](./docs/decisions/0340-drizzle-transaction-checked-out-client-error-listener.md)）。
 - **`runtime.tick()` が、`consolidate`/`reflect` の自動ジョブで LLM 呼び出しが失敗しても、
   そのジョブを「処理成功」として数えていた。** `processConsolidateJob`/`processReflectJob`
   は `consolidate()`/`reflect()` の戻り値（LLM 失敗時は `outcome: "llm_failed"` を返す——

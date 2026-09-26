@@ -1,4 +1,4 @@
-import { Pool, type PoolConfig } from "pg";
+import { Pool, type PoolClient, type PoolConfig } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema.js";
 import {
@@ -13,6 +13,78 @@ export type Db = NodePgDatabase<typeof schema>;
 export interface PostgresClient {
   pool: Pool;
   db: Db;
+}
+
+/**
+ * `pool.connect()` で借り切った checked-out client に付ける、何もしない `error`
+ * リスナー（ADR 0339・{@link protectCheckedOutClientsFromUnhandledErrors} 参照）。
+ *
+ * 🔴 モジュールで1つだけの、同じ関数参照を使い回すこと（`migrate.ts`/`advisory-lock.ts`
+ * の同名の定数と同じ理由——`on`/`removeListener` に別々の関数を使うと外せず、
+ * `pg-pool` が使い回す物理コネクションにリスナーが積み上がる）。
+ */
+const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
+
+/**
+ * `pool.connect()` それ自体を、返す checked-out client に空の `error` リスナーを
+ * 自動で付け外しするものへその場で置き換える（ADR 0339 決定4）。
+ *
+ * ## なぜ要るか
+ *
+ * ADR 0339 は `migrate.ts`/`advisory-lock.ts` **自身**が呼ぶ `pool.connect()` に、
+ * 借りたクライアントへの `error` リスナー欠如（`pg` は「checked-out client の
+ * 接続断は呼び出し側が自分で拾うこと」を要求しており、拾わないと Node の
+ * `EventEmitter` の既定動作でプロセス全体が uncaught exception で落ちる）を対策した。
+ *
+ * だが `db.transaction()`（drizzle-orm、`drizzle-orm/node-postgres/session.js` の
+ * `NodePgSession.transaction`）も**同じ形で** `pool.connect()` を呼ぶ——
+ * `await this.client.connect()` で checked-out client を借り、`finally` で
+ * `release()` するが、`error` リスナーは一切付けない。`memory-store.ts`/
+ * `vector-store.ts`/`trigram-lexical-store.ts` の全ての `db.transaction()` 呼び出しが
+ * この経路を通るため、対策が無いとトランザクション実行中の接続断（DB の再起動・
+ * フェイルオーバー・運用者による切断・OOM kill）でプロセスが丸ごと落ちる——
+ * `db-transaction-connection-loss.test.ts` が `pg_terminate_backend` で実測。
+ *
+ * `drizzle-orm` は node_modules 内の依存であり直接編集できない。`createPostgresClient`
+ * は `db.transaction()` が使う `Pool` インスタンスを作る唯一の入口（doc コメント参照）
+ * なので、ここで作った直後にその `Pool` インスタンス自身の `connect` を、生成時にだけ
+ * 差し替える——`drizzle()` にも呼び出し側にも、以後は今日と同じ `Pool` に見える。
+ *
+ * ⚠ **このコードベースは `pool.connect()` の promise 形しか使わない**
+ * （`migrate.ts`/`advisory-lock.ts`/drizzle-orm、いずれも）。callback 形
+ * （`pool.connect((err, client, done) => ...)`）は使われていないため、渡ってきたら
+ * 対策せずそのまま元の実装へ委譲する（呼ばれない経路のために作り込まない）。
+ *
+ * ⚠ **`migrate.ts`/`advisory-lock.ts` 自身が付ける `error` リスナーと二重になる**——
+ * `runMigrations`/`acquireAdvisoryLock` がこの `Pool` を受け取って呼ばれた場合
+ * （`test-db.ts` の `getTestClient()` が実際にそうしている）、同じ checked-out
+ * client に2つの no-op リスナー（別の関数参照）が付く。害は無い——`EventEmitter` は
+ * 同じイベントに複数のリスナーを同時に持て、どちらも自分の `release()`/`removeListener`
+ * の対で正しく外れる（積み上がらない）。
+ */
+function protectCheckedOutClientsFromUnhandledErrors(pool: Pool): void {
+  const originalConnect = pool.connect.bind(pool);
+  pool.connect = ((
+    callback?: (
+      err: Error | undefined,
+      client: PoolClient | undefined,
+      done: (release?: unknown) => void,
+    ) => void,
+  ) => {
+    if (callback) {
+      return originalConnect(callback);
+    }
+    return (async (): Promise<PoolClient> => {
+      const client = await originalConnect();
+      client.on("error", NOOP_CLIENT_ERROR_HANDLER);
+      const originalRelease = client.release.bind(client);
+      client.release = ((err?: Error | boolean) => {
+        client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
+        return originalRelease(err);
+      }) as PoolClient["release"];
+      return client;
+    })();
+  }) as Pool["connect"];
 }
 
 /**
@@ -63,6 +135,7 @@ export function createPostgresClient(
   }
 
   const pool = new Pool({ connectionString, ...poolConfig });
+  protectCheckedOutClientsFromUnhandledErrors(pool);
   const db = drizzle(pool, { schema });
   return { pool, db };
 }
