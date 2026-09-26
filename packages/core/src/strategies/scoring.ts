@@ -162,7 +162,7 @@ export const MAX_FRESHNESS = 1;
  *
  * **⚠ 下限側には clamp が無い（意図的な契約。Issue #939）**: `elapsed / halfLifeHours` が
  * 十分大きいと（既定の半減期720時間で約88年前の `occurredAt` 相当）、`0.5 ** x` は
- * IEEE 754 倍精度の下限を割り込み、丸めではなく**厳密に0**になる——`total`
+ * IEEE 754 倍精度の下限を割り込み、`0` へ丸められて**厳密に0**になる——`total`
  * （`affinity × decay × tagMatch × freshness × strength`）も0になり、その時点で
  * `similarity` の差が順位から消える。**これは直さない挙動として決めたもの**——
  * 「そこまで古い記憶は区別しない」という契約であり、バグではない。境界の実測値・

@@ -57,7 +57,7 @@ function decayBase(params: DecayParams): Date {
  * 部分だけを切り出したもの。
  *
  * **⚠ 下限に clamp は無い。** `elapsed / halfLife` が十分大きいと（`Math.pow(0.5, x)` が
- * IEEE 754 倍精度の下限を割り込む領域）、戻り値は丸めではなく厳密に `0` になる。
+ * IEEE 754 倍精度の下限を割り込む領域）、戻り値は `0` へ丸められ、厳密に `0` になる。
  * `scoring.ts` の `computeFreshness`（この関数を `occurredAt ?? recordedAt` 起点で呼ぶ側）が
  * この境界を実測し、契約として `docs/recall.md` §7.2 に書いている——ここでは値域の事実
  * だけを記す。

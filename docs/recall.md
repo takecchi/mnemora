@@ -1143,7 +1143,7 @@ Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.m
 
 ### 7.2 `freshness` の下限側 — 経過が半減期の約1075倍を超えると厳密に0になる（Issue #939）
 
-**ADR 0036 が塞いだのは上限側（未来の `occurredAt`）だけである。下限側（古すぎる `occurredAt`）には、そもそも下限が無い。** `freshness` は `Math.min(MAX_FRESHNESS, 0.5 ** (elapsed / halfLifeHours))` （`packages/core/src/strategies/scoring.ts` の `computeFreshness`、`elapsed = now - (occurredAt ?? recordedAt)`）であり、`elapsed / halfLifeHours` が十分大きいと、IEEE 754 倍精度の指数部の下限（最小の非正規化数 `Number.MIN_VALUE` = 2^-1074）を割り込み、**丸めではなく厳密に `0`** になる。
+**ADR 0036 が塞いだのは上限側（未来の `occurredAt`）だけである。下限側（古すぎる `occurredAt`）には、そもそも下限が無い。** `freshness` は `Math.min(MAX_FRESHNESS, 0.5 ** (elapsed / halfLifeHours))` （`packages/core/src/strategies/scoring.ts` の `computeFreshness`、`elapsed = now - (occurredAt ?? recordedAt)`）であり、`elapsed / halfLifeHours` が十分大きいと、IEEE 754 倍精度の指数部の下限（最小の非正規化数 `Number.MIN_VALUE` = 2^-1074）を割り込み、**`0` へ丸められて厳密に `0`** になる（`2^-1075` はちょうど最小の非正規化数の半分で、最近接偶数丸めにより `0` になる）。
 
 **境界の実測**（この文書を書いた器、Node.js **v22.23.3**。`Math.pow` の丸めは V8 依存であり、他のエンジン・他のバージョンでは1でもずれうる——この数値は「この環境で測った」ものであり、規格が保証する値ではない）:
 
@@ -1154,7 +1154,7 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 
 **⟹ `elapsed / halfLifeHours ≥ 1075` は、`freshness === 0` を保証する十分条件である**（この環境で測った境界に基づく。理論上の下限は `2^-1074` なので、境界はこの近辺——「約1074〜1075」——にしか一般には言えない。1075 という整数値そのものが V8 の丸めに依存する)。既定の半減期 `DEFAULT_HALF_LIFE_HOURS`（`packages/core/src/interfaces/tenant-settings-store.ts`、720時間 = 30日）では、これは**約88.3年前**の `occurredAt`（`720h × 1075 ÷ 24 ÷ 365.25`）に相当する。半減期24時間のテナントでは約2.9年前になる（`defaultScoringStrategy` を直接呼んで実測。`similarity: 0.95`・`lastReinforcedAt: now`・`strength: 1` でも同じ境界で `freshness`/`total` とも厳密に `0` になることを確認した）。
 
-**freshness がまだ0でなくても、他の項が1未満なら `total` はそれより手前で0になりうる。** `total = affinity × decay × tagMatch × freshness × strength` は積なので、`freshness` が非正規化数域（例: `5e-324`）まで縮んだ状態で `strength`（または `decay`）が1未満だと、掛け算の結果がさらに小さくなって丸めで0になる——実測では、上の境界（88.3年）より少し手前の**88.28年**で `freshness` はまだ `5e-324`（非0）だが、`strength: 0.1` を掛けた `total` は既に `0` になった。**⟹ 上の境界は「そこに達すれば必ず0になる」という十分条件であり、「そこまでは0にならない」という必要条件ではない。** `decay`/`strength` に上限1の保証が無いこと自体は ADR 0069 §6 の前提（`DEFAULT_STRATEGY_BOUND_ASSUMPTIONS`）が既に名乗っている。
+**freshness がまだ0でなくても、他の項が1未満なら `total` はそれより手前で0になりうる。** `total = affinity × decay × tagMatch × freshness × strength` は積なので、`freshness` が非正規化数域（例: `5e-324`）まで縮んだ状態で `strength`（または `decay`）が1未満だと、掛け算の結果がさらに小さくなって丸めで0になる——実測では、上の境界（88.3年）より少し手前の**88.28年**で `freshness` はまだ `5e-324`（非0）だが、`strength: 0.1` を掛けた `total` は既に `0` になった。**⟹ 上の境界は「そこに達すれば必ず0になる」という十分条件であり、「そこまでは0にならない」という必要条件ではない。**
 
 **適用範囲**: `timeWeighting: "eventAwareFreshness"`（§7.1）で `occurredAt` が無い記憶は、`freshness` が `MAX_FRESHNESS`（1）に固定されるため、この下限アンダーフローには当たらない——当たるのは「`occurredAt` が在る記憶」と「`timeWeighting` が既定の `"legacy"`（`occurredAt` の有無に関わらず `recordedAt` へフォールバックする）」の組み合わせだけである。
 
@@ -1171,7 +1171,7 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 
 - **段2の既定 `scoreThreshold`（`DEFAULT_SCORE_THRESHOLD` = `0.1`、`packages/core/src/recall.ts`）では、`total: 0` の候補は `below_threshold` に落ち、`RecalledMemory` としては返らない。** これが表に出るのは **`scoreThreshold <= 0` を渡した呼び出し**（`0 >= 0` は真）。
 - **連想枠（段3.5）には `scoreThreshold` に相当するゲートが無い。** `rankKey` 降順で `maxCount` 件を席に着けるだけなので、`total: 0`（`rankKey: 0`）の候補でも、連想枠の候補数が `maxCount` 以下なら普通に返る。
-- **`mandatory_companion`（段3、矛盾の同伴取得）も `scoreThreshold` を経由しない。** `docs/recall.md` §8 のとおり「対向する Memory をスコアに関係なく候補集合へ追加する」ため、対向の記憶の `occurredAt` が極端に古ければ `total: 0` のまま `RecalledMemory` として返る（スコアは説明用の内訳としてのみ付き、選抜には使われない）。
+- **`mandatory_companion`（段3、矛盾の同伴取得）も `scoreThreshold` を経由しない。** §8 のとおり「対向する Memory をスコアに関係なく候補集合へ追加する」ため、対向の記憶の `occurredAt` が極端に古ければ `total: 0` のまま `RecalledMemory` として返る（スコアは説明用の内訳としてのみ付き、選抜には使われない）。
 - **`omitted[kind: 'below_threshold'].nearMisses`** は `belowThreshold`（`total` 降順）の先頭5件のスコアを、`RecalledMemory` としてではなく `Omission` の一部として返す（`recall-runtime.ts`）。`belowThreshold` は `total` の降順を保つ配列なので、`total: 0` の候補が `nearMisses` に入るのは、その recall 呼び出しの `belowThreshold` が5件以下（＝閾値未満の候補がそもそも少ない）ときに限られる——通常は、より高い `total` を持つ他の閾値未満の候補が先に5枠を占める。
 
 ---
