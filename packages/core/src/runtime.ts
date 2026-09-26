@@ -1909,6 +1909,12 @@ export interface Runtime {
    * 埋め込みの provider が落ちていた間に入った Memory は、provider が直っても
    * 自力では索引へ戻らない（`fail` は終端であり、Phase 1 に自動リトライは無い。ADR 0032）。
    *
+   * ⚠ **埋め込みの入力上限を超えて `failed` になった Memory は、この口だけでは戻らない**
+   * （Issue #753）——次の `tick()` がまた同じ `memory.content` を送り、同じ理由で
+   * `failed` に戻る。戻すには {@link RuntimeDeps.embeddingInput}（任意フック、ADR 0336）を
+   * 渡した runtime でこの口を呼び、続けて `tick({ kinds: ['embed'] })` を呼ぶ
+   * （`Memory.content` は変わらない）。既定では何も切らない。
+   *
    * ⚠ **`reextract` とは別の操作である。**`reextract` は**抽出**をやり直す
    * （Observation から Memory を作り直す）。こちらは既にある Memory の**埋め込み**を
    * やり直す。
@@ -3724,6 +3730,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         );
       }
       throw err;
+    }
+
+    // Issue #1035 / ADR 0124 決定5: 上で読んでから upsert するまでの間に `purge()` が
+    // 完了していると、purge の埋め込み削除より後に、purge 前の内容から作ったベクトルを
+    // 書いてしまう。書いた後に読み直し、purge 済みなら書いた埋め込みを消す。
+    // purge は「内容の上書きをコミット → 埋め込みを消す」の順なので、この読み直しが
+    // 上書きより前なら purge 側の削除が upsert より後に来て、後なら、ここで消す。
+    // `embeddingStatus` は `purge()` と同じく触らない（purge は `ready` の記憶を
+    // `ready` のまま残す）。ここでの失敗は try の外で投げ、`failed` は書かない
+    // ——埋め込み自体は成功しているため。`tick()` がジョブの失敗として記録する。
+    const afterWrite = await deps.memoryStore.get(ctx, memory.id);
+    if ((afterWrite?.purgedAt ?? null) !== null) {
+      await deps.vectorStore.delete(ctx, deps.embeddingProvider.space, memory.id);
     }
   }
 

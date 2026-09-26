@@ -224,8 +224,17 @@ export async function captureClientQuery(
  *
  * `ROLLBACK` で終える（`COMMIT` しない）——`EXPLAIN`（`ANALYZE` オプション無し）は
  * 何も書き込まないため、コミットする理由が無い。
+ *
+ * `explainOptions` は `EXPLAIN (...)` の括弧の中身。既定は `FORMAT TEXT`。
+ * `scale-bench.ts` は `ANALYZE, BUFFERS, FORMAT TEXT` を渡す（Issue #1016）。
+ * `ANALYZE` を付けると本体が実際に走るが、捕まえるのは `SELECT` だけであり、
+ * どのみち `ROLLBACK` で終えるので何も残らない。
  */
-export async function explainCaptured(pool: Pool, captured: CapturedQuery): Promise<string> {
+export async function explainCaptured(
+  pool: Pool,
+  captured: CapturedQuery,
+  explainOptions = "FORMAT TEXT",
+): Promise<string> {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -233,7 +242,7 @@ export async function explainCaptured(pool: Pool, captured: CapturedQuery): Prom
       await client.query(statement);
     }
     const explainResult = await client.query(
-      `EXPLAIN (FORMAT TEXT) ${captured.text}`,
+      `EXPLAIN (${explainOptions}) ${captured.text}`,
       captured.params,
     );
     return explainResult.rows.map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"]).join("\n");
