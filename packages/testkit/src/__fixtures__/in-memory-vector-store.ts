@@ -43,9 +43,23 @@ interface Entry {
  * **契約（ADR 0040）: ゼロベクトルが絡む候補は `recall()` の結果に出ない。**
  * `NaN` はどんな数との比較も false になるので、**どんな `scoreThreshold` でも通らない。**
  * `Infinity` は `scoreThreshold = -Infinity` で通ってしまうため使わない。
+ *
+ * **Issue #867 / 案B: 長さが違う2本を比較不能として扱う。** 以前はここが
+ * `Math.max(a.length, b.length)` まで回し、足りない側を `?? 0` で zero-pad してから
+ * 計算を続けていた——ノルムが0にならないため ADR 0040 の `NaN` 経路に乗らず、
+ * 意味の無い実数の類似度を普通のヒットとして返していた（`omitted` にも何も残らない）。
+ * `Postgres`（pgvector）は同じ入力で「different vector dimensions」の DB エラーになり、
+ * adapter 間で挙動が割れていた。**長さが違う時点で比較不能**——`Math.max`/zero-pad より先に
+ * `a.length !== b.length` を見て `NaN` を返す。`PostgresVectorStore.search` も
+ * （`packages/postgres/src/vector-store.ts`）同じ場面でゼロベクトルに差し替えて
+ * 同じ `NaN` 経路に乗せている。
  */
 function cosineDistance(a: number[], b: number[]): number {
-  const length = Math.max(a.length, b.length);
+  if (a.length !== b.length) {
+    // 上の doc コメント（Issue #867 / 案B）参照——長さが違う時点で比較不能。
+    return Number.NaN;
+  }
+  const length = a.length;
   let dot = 0;
   let normA = 0;
   let normB = 0;

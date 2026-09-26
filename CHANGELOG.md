@@ -101,6 +101,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `@mnemora/core` の Fake）に揃えた（[Issue #825](https://github.com/takecchi/mnemora/issues/825) /
   [ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 /
   [ADR 0087](./docs/decisions/0087-runtime-forget-shape.md) 追記、PR #914）。
+- **`RecallResult.explain.stages` の `budget_truncation` の任意 `detail` に
+  `droppedFitsWhenConcatenated?: boolean` を足した**——`omitted.kind: 'budget_dropped'`
+  が発生したときだけ現れ、落ちた分も含めた全候補の digest を連結して1回だけ数えた量
+  （`usage.share` の分子と同じ数え方）が実は予算に収まっていたかどうかを表す。段4の
+  切り詰め判定は digest ごとに `Math.ceil` するため、件数が多い digest ほど丸めの
+  積み重ねで「予算に余りがあるのに落とす」ことがある——**切り詰めの判定・落とす件数・
+  `omitted` は変えていない**（ふるまいは無変更、`detail` は `Record<string, unknown>` の
+  任意欄なので公開の型も変えていない）（[Issue #829](https://github.com/takecchi/mnemora/issues/829)、
+  [ADR 0097](./docs/decisions/0097-recall-usage-share-may-exceed-1.md) 追記 2026-09-26、PR #915）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -267,6 +276,19 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`server_encoding_not_utf8`/`extension_unavailable`/`locale_no_japanese_trigrams`）は
   そもそも Postgres のエラーオブジェクトを持たない値ベースの判定であり対象外
   （[Issue #892](https://github.com/takecchi/mnemora/issues/892)、PR #908）。
+- **`RecallQuery.vector` の長さが対象の空間の `dimensions` と違う（かつ空配列でもない）
+  とき、`@mnemora/postgres` は未捕捉の `DrizzleQueryError`（`different vector dimensions`）
+  で `runtime.recall()` ごと reject し、`@mnemora/testkit`/`@mnemora/core` の Fake は
+  足りない側を0で埋めて計算を続け、意味の無い実数の距離を普通のヒットとして返していた
+  （`omitted` にも何も残らない）。** 長さの不一致を「比較不能」として扱うようにした——
+  Postgres は次元不一致のクエリを embedding space の次元数ぶんの全0ベクトルへ置き換え
+  （[Issue #857](https://github.com/takecchi/mnemora/issues/857) / PR #862 が空配列に
+  対して足した経路の拡張）、Fake の `cosineDistance` は比較する2本の長さが違う時点で
+  `NaN` を返すようにした。どちらも ADR 0040 の既存の経路（`NaN` は候補を落とさず、
+  `recall()` の段2が `omitted.score_not_comparable` に数える）にそのまま乗る
+  （新しい例外は投げない。`VectorStore.upsert` に長さの違うベクトルを渡したときの
+  扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
+  [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
 
 ---
 

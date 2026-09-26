@@ -64,6 +64,12 @@ forget(ctx, target)      // -> ForgetResult
 - `consolidate` — 複数の記憶を統合して、より上位の記憶を作る。
 - `forget` — 記憶を落とす、あるいは失効させる。
 
+ここでの `Observation` は概念の名前であり、`observe` の実際の戻り値の型は `ObserveResult`
+（`packages/core/src/runtime.ts`）である（Issue #864）。型の詳細は `docs/memory-model.md` に在る
+——`docs/architecture.md`・`docs/recall.md` は `ObserveResult` を説明していない。ほかの4つ
+（`recall` → `RecallResult`・`reflect` → `ReflectionResult`・`consolidate` → `ConsolidationResult`・
+`forget` → `ForgetResult`）は実装の戻り値の型名とそのまま一致している。
+
 ### 中核を守る3つの層
 
 `Runtime`（`@mnemora/core` の実装）には、上の5つ以外にもメソッドがある。⭐ **何が在るかの
