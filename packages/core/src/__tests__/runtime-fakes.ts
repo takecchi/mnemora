@@ -1263,6 +1263,25 @@ export class FakeMemoryStore implements MemoryStore {
    * 外から観測させない（ADR 0054 と同じ形）。
    */
   async requeueEmbedJobs(ctx: Ctx, opts: RequeueEmbedJobsOptions): Promise<RequeueEmbedJobsResult> {
+    // `PostgresMemoryStore.requeueEmbedJobs` は `opts.limit` を生 SQL の `LIMIT`（bigint
+    // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
+    // 自身が例外を投げる（実測: `LIMIT must not be negative` / `invalid input syntax for
+    // type bigint: "NaN"` 等）。ここで検査せず `.slice(0, Math.max(0, opts.limit))` へ
+    // 渡すと、`Infinity` は対象を全件、`1.5` は1件、積み直す書き込みをしてしまう
+    // （`archiveDecayed` の Issue #880 と同じ形）。クエリを投げる前に弾く Postgres 側に
+    // 揃える（同じ2段の順序: 非整数を先に、次に負数を見る）。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`requeueEmbedJobs: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`requeueEmbedJobs: limit must not be negative (got ${opts.limit})`);
+    }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`。`1e21` 以上は指数表記になり
+    // `invalid input syntax for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`requeueEmbedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
     const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds);
     const targets = [...this.backing.memories.values()]
@@ -1277,7 +1296,7 @@ export class FakeMemoryStore implements MemoryStore {
         (a, b) =>
           a.updatedAt.getTime() - b.updatedAt.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
       )
-      .slice(0, Math.max(0, opts.limit));
+      .slice(0, opts.limit);
 
     const memoryIds: MemoryId[] = [];
     for (const memory of targets) {
