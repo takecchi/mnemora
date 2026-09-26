@@ -147,6 +147,33 @@ describe("packDigestBand — maxEntryChars が負数（境界値）", () => {
   });
 });
 
+describe("packDigestBand — 切り詰め位置が UTF-16 サロゲートペアの内側（境界値）", () => {
+  it("サロゲートペアの内側で切ると孤立サロゲートを作ってしまうため、1文字手前で止める", () => {
+    // "😀" は UTF-16 では2コードユニット（サロゲートペア）。`digest.slice(0, 5)` を
+    // 素朴にやると "AAAA" + 高サロゲートだけが残り、対になる低サロゲートを失った
+    // 孤立サロゲートができる——UTF-8 へエンコードする経路（Postgres の digest 列へ
+    // 書き込むとき）で静かに U+FFFD（置換文字）へ壊れる（`extraction.test.ts` の
+    // `truncateForFallbackDigest` の同じ歯、Issue #816 とは別のケース）。
+    const candidates = [entry("m1", "AAAA😀BBBB")];
+    const { band } = packDigestBand(candidates, 1, {
+      limit: 10,
+      maxChars: 10_000,
+      maxEntryChars: 5,
+    });
+    expect(band).toEqual([{ memoryId: "m1", digest: "AAAA", truncated: true }]);
+  });
+
+  it("ペアがちょうど境界に収まる場合は割らない——1文字も余計に削らない", () => {
+    const candidates = [entry("m1", "AAAA😀BBBB")];
+    const { band } = packDigestBand(candidates, 1, {
+      limit: 10,
+      maxChars: 10_000,
+      maxEntryChars: 6,
+    });
+    expect(band).toEqual([{ memoryId: "m1", digest: "AAAA😀", truncated: true }]);
+  });
+});
+
 describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）", () => {
   // `band.length >= opts.limit` / `runningChars + cost > opts.maxChars` は、比較の片方が
   // NaN だと常に false になる——打ち切り条件が一度も成立せず、上限が実質「無制限」に
