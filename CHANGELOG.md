@@ -45,7 +45,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`ec39629`** の範囲を
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`4cd1354`**（PR #906）の範囲を
 数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
@@ -64,8 +64,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 `0021_memories_claim_key.sql`。**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の
 `## [1.0.1]` 節の migrate 案内も合わせて読むこと**（`0019`〜`0021` の3本が要る）。
 
-**この節が数えた範囲（`v1.0.1`…`ec39629`）に破壊的変更は無い。**【実測 2026-09-26】
-`git diff v1.0.1..ec39629 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
+**この節が数えた範囲（`v1.0.1`…`4cd1354`）に破壊的変更は無い。**【実測 2026-09-26】
+`git diff v1.0.1..4cd1354 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
 の型を `| null` へ広げたこと（PR #838）に伴う再フォーマットのみであり、削除・必須化・型の
 狭小化は無い。`### Breaking` の節は無い。
 
@@ -145,7 +145,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   数が増えて見える。** 終端後の自動リトライは足していない（Phase 1 の `OutboxStore` 契約
   どおり）。`consolidate()`/`reflect()` を直接呼ぶ同期 API の契約は無変更
   （[Issue #849](https://github.com/takecchi/mnemora/issues/849) /
-  [ADR 0157](./docs/decisions/0157-tick-drives-consolidate-and-reflect.md) 決定2 追記）。
+  [ADR 0157](./docs/decisions/0157-tick-drives-consolidate-and-reflect.md) 決定2 追記、PR #852）。
 - **`@mnemora/core` の `decay.ts`（`defaultDecayStrategy.floorAt`/`defaultActivityDecayStrategy.floorAt`）が、
   ADR 0125/`isHalfLifeRecallsInRange` の値域 `(0, ∞)`（`Infinity` のみ拒む）の内側にある、
   有限だが巨大な `halfLifeHours`/`halfLifeRecalls` で壊れていた。** 壁時計側は `new Date` の
@@ -153,15 +153,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `false` になるため「ほぼ永久に減衰しない」つもりの設定が「作成直後から忘却済み」に
   逆転していた。活動時計側は `decay_floor_seq`（Postgres `bigint`）へ `Number.MAX_SAFE_INTEGER`
   を超える精度の無い値を静かに書いていた。どちらも表現可能な上限へ丸めるようにした
-  （新しい例外は投げない）。
+  （新しい例外は投げない）（PR #845）。
 - **`@mnemora/core` の `deriveClaimKeys`（`claim-key.ts`）が、LLM の壊れた出力
   （`subject`/`predicate` が空白だけ）を空文字列の claim key としてそのまま返していた。**
   `ClaimKeySchema` の `min(1)` は空白だけの値を素通りするため、正規化（NFKC→trim→小文字化）
   後に空文字列へ潰れることがあり、無関係な複数の Memory が同じ「空の鍵」で誤って一致し、
   `detectClaimKeyContested` が的外れに `contested` を立てていた。正規化後に `subject`/
   `predicate` のどちらかが空文字列になった要素は、鍵が取れなかったもの（`null`）として
-  扱うようにした（新しい例外は投げない）。
-- **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
+  扱うようにした（新しい例外は投げない）（PR #846）。
+- **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSupersededBy` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContestedPair`／`resolveContestedPair` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
 - **`OutboxStore.complete`/`fail` の CAS（ADR 0142）が `attempts` の一致しか見ておらず、
   相手側の終端列（`completed_at`/`failed_at`）を見ていなかった。** 同じ `attempts` のまま
   complete → fail を呼ぶと（逐次でも、本物の Postgres の2接続からの並行でも）、両方の
@@ -173,7 +173,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   すべて既存どおり。
 - **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
   処理する `reflect` ジョブ、`processReflectJob`）が、`consolidate` 側の同種の修正
-  （上の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
+  （下の `[1.0.1]` 節の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
   `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `reflect` ジョブを
   subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の `subjectId`
   が食い違うと、近傍探索が種と別の subject から候補を拾っていた。`processReflectJob` は、
@@ -202,7 +202,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   自身が、切り詰めていない部分よりも先にデータを壊していた。共通の
   `sliceWithoutSplittingSurrogatePair`（`text-truncation.ts`。`@mnemora/core` の公開 API には出さない内部関数）へ切り出し、
   切り詰め位置がペアの内側なら1文字手前に丸めるようにした（新しい例外は投げない。
-  ペアの外側で切れる場合は1バイトも挙動が変わらない）。
+  ペアの外側で切れる場合は1バイトも挙動が変わらない）（PR #858）。
 - **`@mnemora/postgres` の `PostgresVectorStore.search` が、`RecallQuery.vector: []`
   （空配列）を渡すと未捕捉の `DrizzleQueryError`（`vector must have at least 1
   dimension`）で `runtime.recall()` ごと reject していた。** Fake（`@mnemora/testkit`
@@ -211,7 +211,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   adapter ごとに別の答えが出ていた。空配列のときだけ embedding space の次元数ぶんの
   全0ベクトルに置き換え、Postgres を Fake の実際の挙動に揃えた（新しい例外は投げない。
   次元数が0以外だが空間の次元数と食い違う `vector` は今回の修正範囲外・未検証）
-  （[Issue #857](https://github.com/takecchi/mnemora/issues/857)）。
+  （[Issue #857](https://github.com/takecchi/mnemora/issues/857)、PR #862）。
 - **`runMigrations`（専用スキーマ、feat/dedicated-schema・ADR 0057）が、PostgreSQL の
   完全予約語と一致するスキーマ名（`user` 等——`assertSafeSchemaName` は文字種と長さしか
   見ないため、これも通ってしまう）で構文エラーになっていた。** `SET LOCAL search_path
@@ -219,7 +219,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   IF NOT EXISTS "<schema>"` 側は既に引用符を付けており無事だった。該当箇所だけ
   スキーマ名を二重引用符で囲むようにした（新しい例外は投げない。予約語ではない
   スキーマ名の挙動は無変更、`searchPathFor` 自体の公開契約も無変更）
-  （[ADR 0341](./docs/decisions/0341-quote-search-path-in-set-local.md)）。
+  （[ADR 0341](./docs/decisions/0341-quote-search-path-in-set-local.md)、PR #877）。
 - **`@mnemora/testkit` の `InMemoryLexicalStore.search`（擬似 `LexicalStore`）で、
   `coverage`/`rank` が完全一致したヒットの順序を、挿入順から Postgres と同じ4段
   tie-break（`coverage` → `rank` → `recordedAt` DESC → `memoryId` 昇順）に揃えた。**
@@ -229,7 +229,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   これまで `coverage`/`rank` の2段止まりで、同点の中身は `Array.prototype.sort` の
   安定性により挿入順（通常の呼び出し順では `recordedAt` の古い方が先）に落ちており、
   Postgres の「新しい方が先」とは逆向きだった——`InMemoryVectorStore.search` に
-  Issue #339 / ADR 0170 で入れた tie-break（上記）と同じ形の食い違いが、語彙チャンネル側
+  Issue #339 / ADR 0170 で入れた tie-break（下の `[1.0.1]` 節の項目）と同じ形の食い違いが、語彙チャンネル側
   にだけ残っていた。返す形（`{ memoryId, coverage, rank }`）は変えていない
   （PR #875）。
 - **`mnemora-postgres-migrate` の `--help`/`-h` が、同じ argv に壊れた引数（値の無い
@@ -242,6 +242,17 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `--help`/`-h` が1つでもあれば即座に `{ help: true }` を返すようにした（新しい例外は
   投げない。`--help`/`-h` を含まない argv の既存の解決順序・エラーメッセージは無変更）
   （PR #887）。
+- **`PostgresTrigramLexicalStore.create()` が投げる `TrigramLexicalStoreUnavailableError`
+  が、`CREATE EXTENSION IF NOT EXISTS pg_trgm` の失敗（`reason: "extension_create_denied"`/
+  `"extension_create_failed"`）で元の Postgres エラーオブジェクトを一切保持しておらず、
+  `.cause` を辿って元の `.stack`・`.code`（SQLSTATE）を調べる手段が無かった。**
+  `probeTrigramLexicalSupport` の内部実体が元のエラーを持ち回り、`create()` がそれを
+  `TrigramLexicalStoreUnavailableError` の新しい第3引数 `options?: ErrorOptions` へ渡す
+  ようにした（既存の2引数の呼び出しは無変更で動く）。公開の `probeTrigramLexicalSupport`
+  の戻り値の形は変えていない（`cause` は漏れない）。他の3つの reason
+  （`server_encoding_not_utf8`/`extension_unavailable`/`locale_no_japanese_trigrams`）は
+  そもそも Postgres のエラーオブジェクトを持たない値ベースの判定であり対象外
+  （[Issue #892](https://github.com/takecchi/mnemora/issues/892)）。
 
 ---
 

@@ -220,3 +220,42 @@ ADR 0114「これが覆るとしたら」の2条件（`contested` の解決規�
   実運用でどれだけ起きうるかは測っていない**（そもそも `recall()` が `superseded` を
   返さないため、正規の経路からは `usedMemoryIds` に混入しにくいが、呼び出し側が
   古い id を握っていれば起こりうる、という以上の実測はしていない）。
+
+## 追記（2026-09-26、[Issue #840](https://github.com/takecchi/mnemora/issues/840)）: `reinforce` の status 未検査は `superseded` だけでなく `archived`/`forgotten` にも及ぶ——doc に明記し、挙動は変えない
+
+クローン miku が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・検討して採らなかった案・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——`MemoryStore.reinforce` の doc コメントに明記しただけである。
+
+**この ADR が「確かめていないこと」に残していた負債4番、および PR #713 本文の
+「本 PR では扱わない発見」3番は、`reinforce` が status を見ずに書くという同じ穴を
+`superseded` についてだけ記録していた。** Issue #840 は、同じ穴が `archived` と
+`forgotten` にも同様に及ぶことを新たに確かめた（`contested` は上の決定2どおりの正規経路
+であり、この追記の対象ではない）。
+
+- **`archived`**: `restoreArchived` が復帰の直後に `reinforce` を呼ぶ（決定1が
+  `superseded`/`restoreSuperseded` について書いた形と同じ）ため、時計が前にしか進まない
+  通常の順序では単調性ガードにより上書きされる。**ただし、これは時計が前にしか進まない
+  ことに頼った結果であり、`reinforce` 自身が status を見て守っているわけではない**——
+  注入した時計を逆行させた場合、不正な値が復帰後の行に残りうることを Issue #840 が
+  確かめている。
+- **`forgotten`**: 戻る経路が無いため、書かれた値は消えずに残る。忘却ゲート・段1の索引・
+  段5の集計はいずれも `forgotten` の `decayFloorAt`/`decayBaseSeq` を読まないため、
+  `recall()` の結果には影響しない——値が見えるのは `get()` で直接読んだときだけ
+  （監査・エクスポート時のノイズ）。
+
+**判断（2026-09-26、クローン miku）: 挙動は変えず、`MemoryStore.reinforce` の doc
+コメント（`packages/core/src/interfaces/memory-store.ts`）に status ごとの帰結を明記した
+うえで、Issue #840 を閉じる。**
+
+**`reinforce` の対象を `active`/`contested` に絞る案は、今回は採らなかった。**
+Issue #840 自身が挙げていた判断点（対象を絞るか、絞る場合に適合テストへ歯を足すか）を、
+この追記の場で決めることはできる。しかし**どの status を `reinforce` の対象から外すかを
+決めることは、「使用報告が届いたという事実をどこまで記録するか」の意味を変える判断**
+であり、単なるバグ修正の範囲を超える——対象を絞れば、`archived`/`forgotten` な Memory に
+対する使用報告は黙って無視されることになり、それが望ましいかどうかは製品判断である。
+**今回は記録に留め、決定は持ち越す。**
+
+**実測について**: 上の `archived`/`forgotten` の観測（時計逆行での不正な値の残存、
+forgotten の値が消えずに残ること）は、**Issue #840 が Fake・Postgres の両方で実測した
+結果を引いたものであり、この追記・この PR では手元で再現していない。**
