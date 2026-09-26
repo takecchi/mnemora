@@ -325,7 +325,6 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （[Issue #779](https://github.com/takecchi/mnemora/issues/779)、
   [ADR 0331](./docs/decisions/0331-extension-creation-shared-advisory-lock.md) 追記
   2026-09-26）。
->>>>>>> origin/main
 - **`InMemoryMemoryStore.archiveDecayed`（`@mnemora/testkit` の擬似 `MemoryStore`）が
   `opts.limit` に負数・`NaN`・`Infinity`・非整数を渡されても例外を投げず、`.slice(0,
   Math.max(0, opts.limit))` の丸めに従って実際に書き込みまで行っていた。** `limit:
