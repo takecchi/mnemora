@@ -2289,9 +2289,19 @@ export interface Runtime {
    *    （[ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md)
    *    「引き受けた負債」4。塞いでいない——今は決めない、と書いてある）。
    * 7. eligible を1件ずつ `updateStatusWithEvent` で `superseded` へ CAS する（`reextract` の
-   *    ループと同じ形）。`MemoryStatusConflictError` はその1件だけ `status_changed_concurrently`
-   *    として飛ばして続行、それ以外の例外は `failed` を積んでその場で打ち切り、残りを
-   *    `not_attempted` として返す（投げない。`forget`/ADR 0087 決定5 と同じ）。
+   *    ループと同じ形。**`atomicity: 'store_unsupported'`——`MemoryStore.supersedeWithNewMemories`
+   *    が無い adapter のときだけこの手順を通る**）。`MemoryStatusConflictError` はその1件だけ
+   *    `status_changed_concurrently` として飛ばして続行、それ以外の例外は `failed` を積んで
+   *    その場で打ち切り、残りを `not_attempted` として返す（投げない。`forget`/ADR 0087 決定5
+   *    と同じ）。
+   *    🔴 **`atomicity: 'store_supported'`（口が在る adapter）はこの手順そのものを使わない**
+   *    ——統合先の作成と統合元の supersede を1トランザクションで撃ち、CAS の競合は例外では
+   *    なく戻り値の `conflicted`（`status_changed_concurrently` に写す）として届く。**それ以外の
+   *    予期しない例外はここでは投げる**——ADR 0089 決定5（「予期しない例外は打ち切って
+   *    `not_attempted` として返す。投げない」）を**この経路だけ**部分的に覆す。決定5が
+   *    「投げない」とした理由（部分的に起きたことを呼び出し側から見えなくしないため）は、
+   *    1トランザクションでは部分的に起きたこと自体が無い（統合先の作成も supersede も全部
+   *    巻き戻る）ため、この経路では別の手段で既に満たされている（ADR 0100 決定8）。
    * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
    *
    * `memory_events.meta.reason` は `superseded` イベントに `'consolidated'` を積む

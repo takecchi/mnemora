@@ -247,6 +247,13 @@ export interface BelowThresholdOmission {
   kind: "below_threshold";
   count: number;
   countKind: CountKind;
+  /**
+   * **`count` 全件のサンプルではない。** 実装（`recall-runtime.ts`）は
+   * `belowThreshold`（段2の閾値未満で落ちた全候補）のうち**上位5件だけ**を積む
+   * （ADR 0203「決めたこと」5 の「`nearMisses` の上位5件サンプル」）——`count` が5を超えても
+   * `nearMisses.length` は5を超えない。6件目以降は `count` にだけ数として残り、
+   * 個体としては現れない。
+   */
   nearMisses?: { memoryId: MemoryId; score: number }[];
 }
 
