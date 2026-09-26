@@ -1569,6 +1569,27 @@ export interface ResolveContestedResult {
 }
 
 export interface Runtime {
+  /**
+   * `docs/architecture.md` §3.5 の Observation 冪等キー（`externalId`）は、その Observation
+   * から生まれた Memory がその後どうなったかを問わない（2026-09-26 追記、クローン miku の
+   * 判断、[Issue #897](https://github.com/takecchi/mnemora/issues/897)）。`forget()` で
+   * `forgotten` になった、あるいはさらに `purge()` でトゥームストーン化された Memory の
+   * 元になった Observation と同じ `externalId` で `observe()` を呼び直しても、
+   * `createObservationWithOutbox`（`handleExtractableObservation` 参照）は既存の
+   * Observation を `created: false` で返し、抽出はやり直さない——
+   * `{ memoryIds: [], extraction: 'skipped', extractionFailure: null }` がそのまま返る。
+   * `extract: 'sync'`/`'deferred'` のどちらでも同じ形になる（`created: false` の分岐は
+   * `extractMode` を見るより前にあるため）。この振る舞いは `forgotten`（`purge` 前）の
+   * 段階でも同じである——`createObservationWithOutbox` は Observation どうしの一致だけを
+   * 見ており、対応する Memory の `status` を一度も読まない。
+   *
+   * 理由: 抽出をやり直すと、`purge()` で消した内容が同じ `externalId` の再送だけで
+   * 蘇りうる。それは「忘れさせる」という約束と正面から食い違う。
+   *
+   * ⚠ 呼び出し側は、この返り値だけでは「正常な冪等の再送」と「forgotten/purged が原因で
+   * 無視された」を区別できない。`ObserveResult` に内訳を持たせる案は見送った（公開の型が
+   * 増えるため）——将来の選択肢としては残っている。
+   */
   observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult>;
   /**
    * outbox に溜まったジョブを消化する（docs/architecture.md §3.3）。
