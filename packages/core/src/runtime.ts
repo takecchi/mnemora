@@ -3707,7 +3707,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {
       // 索引の遅れ・失敗を黙って無かったことにしない（docs/architecture.md 原則の姿3）。
-      await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "failed");
+      // Issue #962: `failed` の書き込み自体が失敗しても、元の例外（なぜ埋め込めなかったか）を
+      // 失わない——`cause` に残し、`tick()` が `lastError` に載せるメッセージにも両方を書く。
+      let markFailure: { error: unknown } | null = null;
+      try {
+        await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "failed");
+      } catch (markErr) {
+        markFailure = { error: markErr };
+      }
+      if (markFailure !== null) {
+        const markErr = markFailure.error;
+        throw new Error(
+          `runtime.tick: embed job failed (${err instanceof Error ? err.message : String(err)}), and marking ` +
+            `embeddingStatus "failed" also failed: ${markErr instanceof Error ? markErr.message : String(markErr)}`,
+          { cause: err },
+        );
+      }
       throw err;
     }
   }
@@ -3843,6 +3858,37 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * Issue #969: `tick()` が `outboxStore.fail()` に渡す `lastError` の文字列を作る。
+   *
+   * `err.message` だけでは足りない——drizzle の `db.execute()` は pg のエラーを
+   * `Failed query: <SQL> params: …` で包むので、DB 由来の失敗では理由（pg のエラー文・
+   * SQLSTATE）が `cause` にしか無い（`packages/postgres/src/advisory-lock.ts` の doc と同じ形）。
+   * そこで `cause` の連鎖を辿り、各段の `message` と、文字列の `code`（pg なら SQLSTATE、
+   * Node なら `ECONNRESET` 等）だけを連結する。
+   *
+   * 🔴 **各段の `message` と `code` 以外は載せない。**pg エラーの `detail`（制約違反のキー値
+   * など）には利用者のデータが入りうる。先頭の `message` は今までどおりそのまま使う
+   * （drizzle が既に含めている params は、増やしも減らしもしない）。
+   * 循環した `cause` は、一度見た段で打ち切る。
+   */
+  function describeJobFailure(err: unknown): string {
+    const parts: string[] = [];
+    const seen = new Set<unknown>();
+    let current: unknown = err;
+    while (current !== undefined && current !== null && !seen.has(current)) {
+      seen.add(current);
+      if (!(current instanceof Error)) {
+        parts.push(String(current));
+        break;
+      }
+      const code = (current as { code?: unknown }).code;
+      parts.push(typeof code === "string" ? `${current.message} (code: ${code})` : current.message);
+      current = current.cause;
+    }
+    return parts.join(" <- caused by: ");
+  }
+
+  /**
    * `tick` がジョブを配る先。**キーの集合は {@link TICK_SUPPORTED_JOB_KINDS} と型で結ばれている**
    * ——`Record<TickSupportedJobKind, JobHandler>` なので、片方だけ足す/消すと型検査が落ちる。
    * issue #105（型に `consolidate` が在るのに分岐が無い）と同じずれを、次からは
@@ -3938,12 +3984,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // （Issue #826）、行は `completed` のまま変わらないが、それでも `failed` は
         // 1増える（`TickResult.failed` の doc コメント参照）。
         try {
-          await deps.outboxStore.fail(
-            ctx,
-            job.id,
-            err instanceof Error ? err.message : String(err),
-            job.attempts,
-          );
+          await deps.outboxStore.fail(ctx, job.id, describeJobFailure(err), job.attempts);
         } catch (failErr) {
           if (failErr instanceof OutboxLeaseConflictError) {
             leaseConflicts.push({ jobId: job.id, kind: job.kind, attemptedOutcome: "fail" });

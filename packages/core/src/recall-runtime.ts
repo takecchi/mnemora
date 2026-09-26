@@ -2043,9 +2043,24 @@ export async function runRecall(
   // `budget_dropped`/`score_not_comparable` 等、段2の内部状態自体が memoryId を持ち回って
   // いない他の kind にはこの前提が当たらず、本 PR の射程外のままである
   // （ADR 0203「引き受けた負債」2番）。
+  //
+  // Issue #950（ADR 0203 追記3「範囲外と分かったこと」2番目の是正）: 取り下げの条件は
+  // 「`finalMemories` へ実際に返ったか」ではなく「段3の必須同伴取得（`companions`）か
+  // 段3.5 の連想（`associationUnits`）で候補集合に戻ったか」である。戻った候補が段4の予算で
+  // 改めて落ちると `budget_dropped` 側に数えられるので、ここで取り下げないと同じ1件が
+  // `below_threshold` と `budget_dropped` の両方に載る。追記3（Issue #940）が
+  // `over_limit(stage:"rescore")` について決めた「最後にその候補を落とした段で1回だけ
+  // 数える」を、below_threshold にも当てる。`nearMisses` から外す作法は ADR 0203「決めたこと」5 と同じ。
   const returnedMemoryIds = new Set(finalMemories.map((m) => m.memoryId));
-  const promotedFromBelowThreshold = belowThreshold.filter((c) =>
-    returnedMemoryIds.has(c.memory.id),
+  const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
+  const associationUnitIds = new Set(
+    associationUnits.flatMap((u) => u.members.map((m) => m.memory.id)),
+  );
+  const promotedFromBelowThreshold = belowThreshold.filter(
+    (c) =>
+      returnedMemoryIds.has(c.memory.id) ||
+      mandatoryCompanionIds.has(c.memory.id) ||
+      associationUnitIds.has(c.memory.id),
   );
   if (promotedFromBelowThreshold.length > 0) {
     const promotedIds = new Set(promotedFromBelowThreshold.map((c) => c.memory.id));
@@ -2129,10 +2144,6 @@ export async function runRecall(
   // 過剰実装を捕まえる歯は `recall-over-limit-association-promotion.test.ts` の(c)、
   // `recall-over-limit-budget-promotion.test.ts` の(c)、
   // `recall-over-limit-association-seat-promotion.test.ts` の(c)）。
-  const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
-  const associationUnitIds = new Set(
-    associationUnits.flatMap((u) => u.members.map((m) => m.memory.id)),
-  );
   const promotedFromOverLimit = overLimit.filter(
     (c) =>
       mandatoryCompanionIds.has(c.memory.id) ||
