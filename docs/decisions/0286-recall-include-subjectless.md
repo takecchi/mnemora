@@ -94,6 +94,15 @@ if (opts.filter.subjectId !== undefined) {
 
 ### 3. adapter がこの欄を無視しても安全——取りこぼしはあっても混入は無い
 
+> **⚠ 2026-09-26 追記（本文は書き換えていない）。** 下の「既存の `FakeVectorStore`/
+> `FakeLexicalStore`」は、この ADR を書いた時点の現物である。
+> [Issue #948](https://github.com/takecchi/mnemora/issues/948) で、両 Fake は
+> `includeSubjectless`（と `labels`）を適用するようになり、もうこの欄を知らない adapter の
+> 例ではない。下の【実測】の describe は、素の `FakeVectorStore` の代わりに、
+> `includeSubjectless` だけを剥がすラッパ（`IncludeSubjectlessIgnoringVectorStore`、
+> `recall-subjectless-filter.test.ts` の中に閉じている）で同じ adapter の形を再現し、
+> 同じ結論（取りこぼしはあるが、別 subject の混入は無い）を確かめ続けている。
+
 `includeSubjectless` を実装していない adapter（既存の `FakeVectorStore`/
 `FakeLexicalStore`・将来の第三社 adapter を含む）は、`subjectId` の厳密一致だけを見る。
 ⟹ **`subjectId: null` の Memory を取りこぼす**（本来なら返るはずのものが返らない）が、
