@@ -1,0 +1,95 @@
+########## 段1: off/on10 の回答プロンプト差を数える(実 API ゼロ) ##########
+カセット: /tmp/mgr-67132c19/examples/chat/cassettes/answer-time-weighting.order-legend.json
+  sha256: 3338c1926243d353e1ff160b5661c0900131e5d5217a43d1522c17e458c2f7d5
+  recordedAt: 2026-09-25T02:41:15.635Z
+
+[recorded embedding] 32組中 6組で変化:
+  same    dev-a1-tea-over-coffee/legacy: chars 178->178 memLines 1->1
+  same    dev-a1-tea-over-coffee/eventAwareFreshness: chars 256->256 memLines 2->2
+  CHANGED dev-a2-remote-work-day/legacy: chars 155->227 memLines 1->2
+  same    dev-a2-remote-work-day/eventAwareFreshness: chars 227->227 memLines 2->2
+  same    dev-b1-phone-model/legacy: chars 175->175 memLines 1->1
+  same    dev-b1-phone-model/eventAwareFreshness: chars 175->175 memLines 1->1
+  CHANGED dev-b2-current-project/legacy: chars 175->263 memLines 1->2
+  CHANGED dev-b2-current-project/eventAwareFreshness: chars 175->263 memLines 1->2
+  same    dev-c1-meeting-schedule/legacy: chars 153->153 memLines 1->1
+  same    dev-c1-meeting-schedule/eventAwareFreshness: chars 153->153 memLines 1->1
+  same    dev-c2-gym-plan/legacy: chars 155->155 memLines 1->1
+  same    dev-c2-gym-plan/eventAwareFreshness: chars 155->155 memLines 1->1
+  same    eval-a1-window-seat/legacy: chars 161->161 memLines 1->1
+  same    eval-a1-window-seat/eventAwareFreshness: chars 230->230 memLines 2->2
+  same    eval-a2-doc-tool/legacy: chars 161->161 memLines 1->1
+  same    eval-a2-doc-tool/eventAwareFreshness: chars 235->235 memLines 2->2
+  same    eval-b1-pet/legacy: chars 165->165 memLines 1->1
+  same    eval-b1-pet/eventAwareFreshness: chars 165->165 memLines 1->1
+  CHANGED eval-b2-relocation/legacy: chars 163->251 memLines 1->2
+  CHANGED eval-b2-relocation/eventAwareFreshness: chars 163->251 memLines 1->2
+  same    eval-c1-internet-plan/legacy: chars 163->163 memLines 1->1
+  same    eval-c1-internet-plan/eventAwareFreshness: chars 163->163 memLines 1->1
+  same    eval-c2-work-shift/legacy: chars 153->153 memLines 1->1
+  same    eval-c2-work-shift/eventAwareFreshness: chars 153->153 memLines 1->1
+  same    eval-undated-b1-department-reinforced/legacy: chars 161->161 memLines 1->1
+  same    eval-undated-b1-department-reinforced/eventAwareFreshness: chars 218->218 memLines 2->2
+  same    eval-undated-b2-hobby-not-reinforced/legacy: chars 170->170 memLines 1->1
+  same    eval-undated-b2-hobby-not-reinforced/eventAwareFreshness: chars 170->170 memLines 1->1
+  CHANGED eval-undated-c1-seat-floor-reinforced/legacy: chars 165->222 memLines 1->2
+  same    eval-undated-c1-seat-floor-reinforced/eventAwareFreshness: chars 222->222 memLines 2->2
+  same    eval-undated-c2-standup-day-not-reinforced/legacy: chars 174->174 memLines 1->1
+  same    eval-undated-c2-standup-day-not-reinforced/eventAwareFreshness: chars 174->174 memLines 1->1
+
+[local embedding(参考)] 32組中 14組で変化
+
+段1確定: recorded embedding で変わった組 = 6 件。n(試行回数) = 5（予算190回 ÷ (2×6組) を 5 で cap）
+
+########## 段2: 実 API(gpt-4o-mini)で対にして回す ##########
+LLM: openai(gpt-4o-mini, temperature=未指定=provider既定) / Embedding: recorded(既存カセットを流用、embed()の実API呼び出しは0回見込み)
+
+[smoke] 最初の1組×1回で混在指定(openai LLM + recorded embedding)を確認する: dev-a2-remote-work-day/legacy trial=1
+[smoke] off 成功: verdict=fail answer="分かりません。"
+[smoke] on  成功: verdict=pass answer="在宅勤務は毎週火曜日と決まっています。"
+[smoke] 混在指定は動く。本番へ続行する（呼び出し済み: 2回）。
+
+  dev-a2-remote-work-day/legacy trial=1: off=fail on=pass  ⚠ 食い違い
+  dev-a2-remote-work-day/legacy trial=2: off=fail on=pass  ⚠ 食い違い
+  dev-a2-remote-work-day/legacy trial=3: off=fail on=pass  ⚠ 食い違い
+  dev-a2-remote-work-day/legacy trial=4: off=fail on=pass  ⚠ 食い違い
+  dev-a2-remote-work-day/legacy trial=5: off=fail on=pass  ⚠ 食い違い
+  dev-b2-current-project/legacy trial=1: off=pass on=pass
+  dev-b2-current-project/legacy trial=2: off=pass on=pass
+  dev-b2-current-project/legacy trial=3: off=pass on=pass
+  dev-b2-current-project/legacy trial=4: off=pass on=pass
+  dev-b2-current-project/legacy trial=5: off=pass on=pass
+  dev-b2-current-project/eventAwareFreshness trial=1: off=pass on=pass
+  dev-b2-current-project/eventAwareFreshness trial=2: off=pass on=pass
+  dev-b2-current-project/eventAwareFreshness trial=3: off=pass on=pass
+  dev-b2-current-project/eventAwareFreshness trial=4: off=pass on=pass
+  dev-b2-current-project/eventAwareFreshness trial=5: off=pass on=pass
+  eval-b2-relocation/legacy trial=1: off=pass on=pass
+  eval-b2-relocation/legacy trial=2: off=pass on=pass
+  eval-b2-relocation/legacy trial=3: off=pass on=pass
+  eval-b2-relocation/legacy trial=4: off=pass on=pass
+  eval-b2-relocation/legacy trial=5: off=pass on=pass
+  eval-b2-relocation/eventAwareFreshness trial=1: off=pass on=pass
+  eval-b2-relocation/eventAwareFreshness trial=2: off=pass on=pass
+  eval-b2-relocation/eventAwareFreshness trial=3: off=pass on=pass
+  eval-b2-relocation/eventAwareFreshness trial=4: off=pass on=pass
+  eval-b2-relocation/eventAwareFreshness trial=5: off=pass on=pass
+  eval-undated-c1-seat-floor-reinforced/legacy trial=1: off=pass on=pass
+  eval-undated-c1-seat-floor-reinforced/legacy trial=2: off=pass on=pass
+  eval-undated-c1-seat-floor-reinforced/legacy trial=3: off=pass on=pass
+  eval-undated-c1-seat-floor-reinforced/legacy trial=4: off=pass on=pass
+  eval-undated-c1-seat-floor-reinforced/legacy trial=5: off=pass on=pass
+
+########## 集計 ##########
+実 API 呼び出し回数（回答生成のみ。judge は無い）: 60 / 上限 200
+off 全体正答率: 25/30 (83.3%)
+on  全体正答率: 30/30 (100.0%)
+対にした差: on正・off誤=5 / off正・on誤=0 / 一致=25 / 符号検定(exact) p=0.0625
+  dev-a2-remote-work-day/legacy: off 0/5 / on 5/5
+  dev-b2-current-project/legacy: off 5/5 / on 5/5
+  dev-b2-current-project/eventAwareFreshness: off 5/5 / on 5/5
+  eval-b2-relocation/legacy: off 5/5 / on 5/5
+  eval-b2-relocation/eventAwareFreshness: off 5/5 / on 5/5
+  eval-undated-c1-seat-floor-reinforced/legacy: off 5/5 / on 5/5
+
+書き出した: /tmp/mgr-67132c19/examples/chat/bench-results/association-answer-correctness-2026-09-26/measure-run.json
