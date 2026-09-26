@@ -421,7 +421,7 @@ const FIXED_SUBJECT_EXPR = "$2::text";
  * `aggregateScope` の `FILTER (WHERE ...)` の各枝を実際に踏ませるための最小限の作り込みで、
  * 「これが現実の分布だ」という主張はしていない。
  */
-async function seedMemories(
+export async function seedMemories(
   pool: Pool,
   tenant: string,
   rowCount: number,
@@ -504,7 +504,7 @@ async function countSubjectRows(pool: Pool, tenant: string, subjectId: string): 
  * この INSERT はテーブルが空でない索引へ逐次追記する形になる——本番でベクトルが
  * 継続的に流し込まれるのと同じ順序であり、まさに計測したい経路そのものである。
  */
-async function seedVectors(
+export async function seedVectors(
   pool: Pool,
   tenant: string,
   table: string,
@@ -518,13 +518,17 @@ async function seedVectors(
       `
       INSERT INTO ${table} (tenant_id, memory_id, embedding, model, created_at)
       SELECT
-        tenant_id,
-        id,
-        (ARRAY(SELECT (random() * 2 - 1)::real FROM generate_series(1, $2)))::vector,
+        m.tenant_id,
+        m.id,
+        -- Issue #1005: 副問い合わせが外側の行を参照しないと、PostgreSQL はこれを
+        -- InitPlan として1回だけ評価し、全行に同じベクトルを入れる（random() が
+        -- volatile でも変わらない）。WHERE m.id IS NOT NULL で外側の行に相関させ、
+        -- 行ごとに評価させる。
+        (ARRAY(SELECT (random() * 2 - 1)::real FROM generate_series(1, $2) WHERE m.id IS NOT NULL))::vector,
         'bench-model',
         now()
-      FROM memories
-      WHERE tenant_id = $1
+      FROM memories m
+      WHERE m.tenant_id = $1
       `,
       [tenant, dimensions],
     );
