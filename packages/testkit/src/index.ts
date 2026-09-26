@@ -1,6 +1,13 @@
 // packages/testkit — adapter が満たすべき適合テスト一式（conformance suite）。
 // プレースホルダ実装（__fixtures__）は意図的にここから export しない。
 // adapter 作者は自分の実装を `createStore` に渡して conformance suite を走らせる。
+//
+// Issue #809（2026-09-26、クローン miku）: 適合テスト（`*-conformance.ts`）には入力検証の
+// 要件を足さないと決めた。理由は、要件を足すと外部 adapter の CI を新しく赤にしうるため。
+// __fixtures__ の Fake と Postgres 実装の食い違いは Fake 側を直し、その回帰の歯は
+// `src/__tests__/`（このパッケージの内部だけで完結するテスト）に置く——`*-conformance.ts`
+// 自体は変更しない。採らなかった案は、適合テストに要件を足して minor で出す
+// （CHANGELOG の告知だけで外部実装を赤にする）。
 
 export * from "./memory-store-conformance.js";
 export * from "./vector-store-conformance.js";
