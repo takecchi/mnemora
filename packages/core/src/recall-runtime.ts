@@ -128,6 +128,24 @@ type ScoredCandidate = {
 };
 
 /**
+ * 数値の降順比較で、`NaN`（比較できない値。ADR 0040——ゼロベクトルの cosine 距離）を
+ * 必ず最後尾に送る（Issue #938。ADR 0040「引き受ける負債」が「壊さなかった」と書いた
+ * 観測への反例）。有限値どうしの大小関係・`NaN` どうしの扱い（0 を返し、呼び出し側の
+ * 次段のタイブレークに委ねる）以外は変えない——`b - a` の生の引き算だと、どちらかが
+ * `NaN` のとき比較関数の一貫性が崩れ、`NaN` と無関係な有限値どうしの順序まで
+ * `Array.prototype.sort` が壊しうる（未定義動作）。
+ */
+function compareDescendingNaNLast(a: number, b: number): number {
+  const aComparable = !Number.isNaN(a);
+  const bComparable = !Number.isNaN(b);
+  if (!aComparable || !bComparable) {
+    return aComparable === bComparable ? 0 : aComparable ? -1 : 1;
+  }
+  if (a === b) return 0;
+  return a > b ? -1 : 1;
+}
+
+/**
  * 段2（再スコア）の並び順。`score.total` 降順が主キーで、**同点のときのタイブレークを
  * 明示する**（Issue #339 / ADR 0170）。
  *
@@ -154,8 +172,8 @@ type ScoredCandidate = {
  * `partitionByThreshold` を直接 import しているのと同じ作法）。
  */
 export function compareScoredCandidates(a: ScoredCandidate, b: ScoredCandidate): number {
-  const scoreDiff = b.score.total - a.score.total;
-  if (scoreDiff !== 0) return scoreDiff;
+  const scoreCompare = compareDescendingNaNLast(a.score.total, b.score.total);
+  if (scoreCompare !== 0) return scoreCompare;
   const aTime = (a.memory.occurredAt ?? a.memory.recordedAt).getTime();
   const bTime = (b.memory.occurredAt ?? b.memory.recordedAt).getTime();
   if (aTime !== bTime) return bTime - aTime;
@@ -1431,7 +1449,9 @@ export async function runRecall(
         // ——(a) 下の過取得の前置きを決める順序であり、(b) 上のコメントの通り同点時に
         // adapter の順序へ委ねる ADR 0170 の規律の土台でもあるからである。**席をどう
         // 埋めるかは、この sort の"後"で決める**（下）。
-        associationHits.sort((a, b) => b.similarity - a.similarity);
+        // `NaN`（ゼロベクトルの cosine 距離。ADR 0040）だけを最後尾へ送る
+        // （Issue #938）——有限値どうしの大小・同点時の安定性は変えない。
+        associationHits.sort((a, b) => compareDescendingNaNLast(a.similarity, b.similarity));
         // 席を埋める前に、まず過取得する——段1の kPrime と同じ理由・同じ係数
         // （`overFetchFactor`、既に上のスコープに在る）で、新しい係数は定義しない。
         // `Math.max` で下限を `maxCount` に留めるのは、`overFetchFactor < 1` を
@@ -1550,7 +1570,9 @@ export async function runRecall(
         // 降順、同点はさらに adapter の順序、上のコメントの通り）を保つ。decay が高い・
         // 最近強化された記憶が先に座り、使われていない記憶は decay が効いて後ろへ
         // 回る——これが正典項目4をこの枠にも適用したところである。
-        rankedCandidates.sort((a, b) => b.rankKey - a.rankKey);
+        // `NaN`（`hit.similarity`/`score.total` のどちらかがゼロベクトル由来。ADR 0040）
+        // だけを最後尾へ送る（Issue #938）——有限値どうしの大小・同点時の安定性は変えない。
+        rankedCandidates.sort((a, b) => compareDescendingNaNLast(a.rankKey, b.rankKey));
         const selectedCandidates = rankedCandidates.slice(0, associationQuery.maxCount);
         // 席に着けなかった分を over_limit として名乗る（Issue #375 / ADR 0188）。
         // 段2の `passed.slice(limit)`（上、`stage: "rescore"`）と同じ形——`associationHits`

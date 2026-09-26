@@ -394,6 +394,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
   `MemoryStore.createMemory` の doc コメントに記録した
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
+- **`runtime.recall()` の段2（`compareScoredCandidates`）と段3.5（連想）の2つの並べ替え
+  （`associationHits.sort`・`rankedCandidates.sort`）が、候補の `total`/`similarity`/
+  `rankKey` のいずれかが `NaN`（ADR 0040——ゼロベクトルの cosine 距離に由来）になると、
+  その `NaN` な候補とは無関係な、他の有限な候補どうしの相対順序まで崩していた。**
+  `b.field - a.field` を比較値にする素朴な降順比較は、`NaN` が混ざると比較関数の一貫性
+  （推移律）を満たさなくなるため。`NaN` を必ず最後尾へ送る比較 helper に揃え、有限値
+  どうしの大小関係・同点時の安定ソートの性質は変えていない（公開 API 無変更）
+  （[Issue #938](https://github.com/takecchi/mnemora/issues/938)、
+  [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
 
 ---
 
