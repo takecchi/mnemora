@@ -3,6 +3,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx, EmbeddingProvider, LLMProvider, MemoryStatus } from "@mnemora/core";
 import { createRuntime } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
+import { InMemoryMemoryStore, InMemoryVectorStore } from "@mnemora/testkit/fixtures";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { embeddingSpaceTableName } from "../embedding-space-table.js";
@@ -594,4 +595,90 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       await writer;
     }
   }, 60_000);
+
+  it("Issue #857: vector: [] は Postgres でも Fake と同じ形の RecallResult になる（reject しない）", async () => {
+    // 実測（Issue #857）: 同じ入力 `{ vector: [] }` に対して、
+    // 修正前の Postgres は `toVectorLiteral([])` が `"[]"` を作り、`::vector` キャストが
+    // 「vector must have at least 1 dimension」で未捕捉の `DrizzleQueryError` になっていた
+    // （`runtime.recall()` の呼び出しそのものが reject される）。
+    // Fake（`@mnemora/testkit/fixtures` の `InMemoryVectorStore`、実体は
+    // `packages/testkit/src/__fixtures__/in-memory-vector-store.ts` の `cosineDistance`）は
+    // 短い方の配列を 0 で zero-pad してから長さを揃えるため、空配列は暗黙にゼロベクトルとして
+    // 扱われ、ADR 0040（ゼロベクトルは NaN 類似度になり候補に出ない）の経路にそのまま乗って
+    // 正常完走していた。この it は、その Fake の実際の挙動（reject しない・memories: []・
+    // omitted に score_not_comparable が候補の件数ぶん出る）を Postgres 側でも実測で確かめる。
+    const ctx: Ctx = { tenantId: `tenant-857-${randomUUID()}` };
+    const digest = "Issue #857 の再現データ";
+    const contentHash = `issue-857-${randomUUID()}`;
+
+    const {
+      runtime: pgRuntime,
+      memoryStore: pgMemoryStore,
+      vectorStore: pgVectorStore,
+    } = await buildTestRuntime();
+    await createEmbeddedMemory(pgMemoryStore, pgVectorStore, ctx, [1, 0, 0], {
+      digest,
+      contentHash,
+    });
+
+    // Fake 側に、同じ ctx・同じ内容のデータを組む（`@mnemora/testkit/fixtures` は
+    // 適合スイートの入力ではなく、`Runtime` を組み立てるための別入口——fixtures.ts 冒頭参照）。
+    const fakeMemoryStore = new InMemoryMemoryStore();
+    const fakeVectorStore = new InMemoryVectorStore(fakeMemoryStore);
+    const fakeMemory = await fakeMemoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: ctx.tenantId,
+        embeddingStatus: "ready",
+        digest,
+        contentHash,
+      }),
+    );
+    await fakeVectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, fakeMemory.id, [1, 0, 0]);
+    const fakeRuntime = createRuntime({
+      memoryStore: fakeMemoryStore,
+      outboxStore: {
+        claimBatch: async () => [],
+        complete: async () => {},
+        fail: async () => {},
+      },
+      vectorStore: fakeVectorStore,
+      eventStore: {
+        append: async (_ctx, e) => ({ id: "evt", ...e, at: e.at ?? new Date() }),
+        get: async () => null,
+        list: async () => [],
+      },
+      tenantSettingsStore: {
+        getDefaultHalfLifeHours: async () => 720,
+        getEventRetention: async () => {
+          throw new Error("この it の Fake ダミーは getEventRetention を呼ばないはず");
+        },
+        setEventRetention: async () => {
+          throw new Error("この it の Fake ダミーは setEventRetention を呼ばないはず");
+        },
+      },
+      llmProvider: throwingLlm,
+      embeddingProvider: makeEmbeddingProvider(),
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+    });
+
+    // 前提: Fake は reject せず、Issue #857 本文どおりの形で完走する
+    // （memories: [] ・ omitted に score_not_comparable が候補1件ぶん出る）。
+    const fakeResult = await fakeRuntime.recall(ctx, { vector: [] });
+    expect(fakeResult.memories).toEqual([]);
+    const fakeNotComparable = fakeResult.omitted.find((o) => o.kind === "score_not_comparable");
+    expect(fakeNotComparable).toEqual({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+
+    // 本題: Postgres も reject せず、Fake と同じ件数の score_not_comparable になる。
+    // ⚠ 修正前はここで `runtime.recall()` 自体が DrizzleQueryError で reject していた。
+    const pgResult = await pgRuntime.recall(ctx, { vector: [] });
+    expect(pgResult.memories).toEqual([]);
+    const pgNotComparable = pgResult.omitted.find((o) => o.kind === "score_not_comparable");
+    expect(pgNotComparable).toEqual(fakeNotComparable);
+  });
 });
