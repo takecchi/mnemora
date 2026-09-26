@@ -1,4 +1,11 @@
-import type { Ctx, EmbeddingProvider, Memory, MemoryStore, Runtime } from "@mnemora/core";
+import type {
+  Ctx,
+  EmbeddingProvider,
+  Memory,
+  MemoryStore,
+  RecallAssociationQuery,
+  Runtime,
+} from "@mnemora/core";
 import type { PostgresClient } from "@mnemora/postgres";
 import {
   buildConsolidationCostRunJson,
@@ -67,6 +74,12 @@ export interface RunConsolidationCostOptions {
   commit: string | null;
   /** 既定は `DEFAULT_HAYSTACK_SIZE`(`probe-set.ts`、既存 `retrieval` と同じ既定)。 */
   haystackSize?: number;
+  /**
+   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
+   * **省略時は `null`**——この bench(統合コスト・gold 順位)の基準線は変えない。
+   * `examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 interface StoreSnapshot {
@@ -116,14 +129,15 @@ async function measureProbe(
   query: string,
   budget: { maxMemoryTokens: number } | undefined,
   limit: number | undefined,
+  association: RecallAssociationQuery | null = null,
 ): Promise<RawProbeMeasurement> {
-  // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-  // でも、この bench（統合コスト・gold 順位）の基準線を動かさない。
+  // association: 省略時は null — この欄を省略した既存の呼び出しではこの bench
+  // （統合コスト・gold 順位）の基準線を動かさない（ADR 0337 追記2026-09-26）。
   const result = await runtime.recall(
     ctx,
     budget !== undefined
-      ? { text: query, limit, budget, association: null }
-      : { text: query, association: null },
+      ? { text: query, limit, budget, association }
+      : { text: query, association },
   );
   const resolvedExternalIds = await Promise.all(
     result.memories.map((m) => resolveExternalId(memoryStore, ctx, m.memoryId)),
@@ -150,10 +164,20 @@ export async function measureRecallForRound(
   activeCount: number,
   budgetLadder: readonly number[],
   recallLimit: number,
+  association: RecallAssociationQuery | null = null,
 ): Promise<RecallMeasurement> {
   const unbudgetedRaw = await Promise.all(
     PROBES.map((probe) =>
-      measureProbe(runtime, memoryStore, ctx, probe.id, probe.query, undefined, undefined),
+      measureProbe(
+        runtime,
+        memoryStore,
+        ctx,
+        probe.id,
+        probe.query,
+        undefined,
+        undefined,
+        association,
+      ),
     ),
   );
   const unbudgetedProbes: ConsolidationRecallProbeJson[] = unbudgetedRaw.map((raw) =>
@@ -172,6 +196,7 @@ export async function measureRecallForRound(
           probe.query,
           { maxMemoryTokens: budgetTokens },
           recallLimit,
+          association,
         ),
       ),
     );
@@ -274,6 +299,7 @@ export async function runConsolidationCost(
     round0Store.json.activeCount,
     options.budgetLadder,
     options.recallLimit,
+    options.association,
   );
   rounds.push({ round: 0, consolidation: null, store: round0Store.json, recall: round0Recall });
 
@@ -346,6 +372,7 @@ export async function runConsolidationCost(
         store.json.activeCount,
         options.budgetLadder,
         options.recallLimit,
+        options.association,
       );
 
       const consolidation: ConsolidationRoundConsolidationJson = {

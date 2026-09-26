@@ -1,4 +1,11 @@
-import type { Ctx, MemoryStore, RecalledMemory, Runtime, ScoreBreakdown } from "@mnemora/core";
+import type {
+  Ctx,
+  MemoryStore,
+  RecallAssociationQuery,
+  RecalledMemory,
+  Runtime,
+  ScoreBreakdown,
+} from "@mnemora/core";
 import { clockPastRecentDbWrites, drainEmbedTicks } from "./embed-drain.js";
 import type { MutableClock } from "./mutable-clock.js";
 import type { ProviderMode } from "./providers.js";
@@ -199,6 +206,12 @@ export interface RunTimeTermArmOptions {
    * (常に実時刻のまま)、`decay-*` probe は「分離できていない」結果になる。
    */
   clock?: MutableClock;
+  /**
+   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
+   * **省略時は `null`**——この arm(時制の新旧判定)の基準線は変えない。
+   * `examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 function toPairMember(memory: RecalledMemory, index: number): PairMember {
@@ -271,12 +284,16 @@ async function runOneProbe(
 
   // ⛔ `text` 以外を渡さない——既定の limit/閾値/overFetchFactor のまま測る
   // (既存 `runRetrievalQualityArm` と同じ規律)。
-  // association: null — `packages/core` の連想枠が既定 on になった（ADR 0337。
-  // オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）後も、この arm の
-  // 基準線（時制の新旧判定）を動かさないための唯一の例外。連想は on/off の判断
-  // そのものとは無関係な効果（近傍からの追加昇格）を持ち込むため、"text 以外を渡さない"
-  // の規律よりここを優先する。
-  const result = await options.runtime.recall(ctx, { text: probe.query, association: null });
+  // association: options.association ?? null — `packages/core` の連想枠が既定 on に
+  // なった（ADR 0337）後も、この欄を省略した既存の呼び出しではこの arm の基準線
+  // （時制の新旧判定）を動かさない。連想は on/off の判断そのものとは無関係な効果
+  // （近傍からの追加昇格）を持ち込むため、"text 以外を渡さない" の規律よりここを
+  // 優先する。`options.association` を明示するのは ADR 0337 追記2026-09-26 の
+  // 測定スクリプトだけである。
+  const result = await options.runtime.recall(ctx, {
+    text: probe.query,
+    association: options.association ?? null,
+  });
 
   const resolvedExternalIds = await Promise.all(
     result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),

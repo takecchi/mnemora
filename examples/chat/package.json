@@ -23,6 +23,7 @@
     "association-scale-bench": "tsx src/bench/association-scale-bench.ts",
     "association-scale-investigate": "tsx src/bench/association-scale-investigate.ts",
     "association-scale-nondeterminism": "tsx src/bench/association-scale-nondeterminism.ts",
+    "association-default-on-measure": "tsx src/bench/association-default-on-measure.ts",
     "subject-crossing-cost": "tsx src/subject-crossing-measure.ts",
     "subject-crossing-summary": "tsx src/subject-crossing-summary.ts",
     "identifier-probes": "tsx src/cli.ts identifier-probes",

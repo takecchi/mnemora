@@ -1,0 +1,949 @@
+{
+  "schemaVersion": 1,
+  "purpose": "同じ条件で association-default-on-measure.ts を2回走らせ、各ベンチ・各association段の headline(表示・ADR追記の表に使う数値)が一致するかを確かめた記録(決定性の確認)。",
+  "comparedFiles": [
+    "measure-run.json(1回目)",
+    "/tmp からの一時ファイル(2回目、この JSON には残さない)"
+  ],
+  "allMatched": true,
+  "perBench": {
+    "retrievalQuality": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 70,
+          "associationRows": 0,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 7,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        },
+        "run2": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 70,
+          "associationRows": 0,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 7,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 90,
+          "associationRows": 20,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 10,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        },
+        "run2": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 90,
+          "associationRows": 20,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 10,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 105,
+          "associationRows": 35,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 10,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        },
+        "run2": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 105,
+          "associationRows": 35,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 10,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 130,
+          "associationRows": 60,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 9,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        },
+        "run2": {
+          "mrrOverall": 0.7142857142857143,
+          "hit1Count": 4,
+          "hit10Count": 6,
+          "probeCount": 7,
+          "recalledRows": 130,
+          "associationRows": 60,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 1,
+          "over_limit": 9,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 7,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0
+        }
+      }
+    ],
+    "compare": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "totalMnemoraChars": 15885,
+          "totalReturnedCount": 78,
+          "totalAssociationRows": 0,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 5,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        },
+        "run2": {
+          "totalMnemoraChars": 15885,
+          "totalReturnedCount": 78,
+          "totalAssociationRows": 0,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 5,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "totalMnemoraChars": 15473,
+          "totalReturnedCount": 97,
+          "totalAssociationRows": 19,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 8,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        },
+        "run2": {
+          "totalMnemoraChars": 15473,
+          "totalReturnedCount": 97,
+          "totalAssociationRows": 19,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 8,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "totalMnemoraChars": 15655,
+          "totalReturnedCount": 108,
+          "totalAssociationRows": 30,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 7,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        },
+        "run2": {
+          "totalMnemoraChars": 15655,
+          "totalReturnedCount": 108,
+          "totalAssociationRows": 30,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 7,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "totalMnemoraChars": 16024,
+          "totalReturnedCount": 125,
+          "totalAssociationRows": 47,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 6,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        },
+        "run2": {
+          "totalMnemoraChars": 16024,
+          "totalReturnedCount": 125,
+          "totalAssociationRows": 47,
+          "factStatementSurvivedCount": 12,
+          "rowCount": 12,
+          "not_indexed": 0,
+          "filtered": 0,
+          "below_threshold": 0,
+          "over_limit": 6,
+          "budget_dropped": 0,
+          "stage_skipped": 0,
+          "ann_truncated": 0,
+          "ann_unreached": 3,
+          "lexical_truncated": 0,
+          "unit_assembly_dropped": 0,
+          "score_not_comparable": 0,
+          "not_indexed:pending": 0,
+          "not_indexed:embed_failed": 0,
+          "filtered:tenant": 0,
+          "filtered:status": 0,
+          "filtered:archived": 0,
+          "filtered:decayed": 0,
+          "filtered:expired": 0,
+          "filtered:not_yet_valid": 0,
+          "filtered:labels": 0,
+          "filtered:taxonomy": 0
+        }
+      }
+    ],
+    "timeTerm": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "probeCount": 8,
+          "newer-ranked-higher": 4,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 1,
+          "neither-returned": 0,
+          "collapsed": 0
+        },
+        "run2": {
+          "probeCount": 8,
+          "newer-ranked-higher": 4,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 1,
+          "neither-returned": 0,
+          "collapsed": 0
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "probeCount": 8,
+          "newer-ranked-higher": 5,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 0,
+          "neither-returned": 0,
+          "collapsed": 0
+        },
+        "run2": {
+          "probeCount": 8,
+          "newer-ranked-higher": 5,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 0,
+          "neither-returned": 0,
+          "collapsed": 0
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "probeCount": 8,
+          "newer-ranked-higher": 5,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 0,
+          "neither-returned": 0,
+          "collapsed": 0
+        },
+        "run2": {
+          "probeCount": 8,
+          "newer-ranked-higher": 5,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 0,
+          "neither-returned": 0,
+          "collapsed": 0
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "probeCount": 8,
+          "newer-ranked-higher": 5,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 0,
+          "neither-returned": 0,
+          "collapsed": 0
+        },
+        "run2": {
+          "probeCount": 8,
+          "newer-ranked-higher": 5,
+          "older-ranked-higher": 0,
+          "tied": 3,
+          "newer-not-returned": 0,
+          "older-not-returned": 0,
+          "neither-returned": 0,
+          "collapsed": 0
+        }
+      }
+    ],
+    "validity": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        },
+        "run2": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        },
+        "run2": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        },
+        "run2": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        },
+        "run2": {
+          "probeCount": 2,
+          "currentReturnedAtNow": 2,
+          "otherReturnedAtNow": 0,
+          "historicalProbeCount": 1,
+          "historicalOtherReturned": 1,
+          "optOutOtherReturned": 2
+        }
+      }
+    ],
+    "identifierProbes": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 0
+        },
+        "run2": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 0
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 150
+        },
+        "run2": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 150
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 300
+        },
+        "run2": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 300
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 600
+        },
+        "run2": {
+          "mrrOverall": 1,
+          "hit1Count": 30,
+          "hit10Count": 30,
+          "probeCount": 30,
+          "associationRows": 600
+        }
+      }
+    ],
+    "numeralTokenProbes": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 0
+        },
+        "run2": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 0
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 90
+        },
+        "run2": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 90
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 180
+        },
+        "run2": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 180
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 360
+        },
+        "run2": {
+          "mrrOverall": 0.9166666666666666,
+          "hit1Count": 15,
+          "hit10Count": 18,
+          "probeCount": 18,
+          "associationRows": 360
+        }
+      }
+    ],
+    "consolidationCost": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4418.571428571428,
+          "round0GoldReturnedCount": 7
+        },
+        "run2": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4418.571428571428,
+          "round0GoldReturnedCount": 7
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4534.428571428572,
+          "round0GoldReturnedCount": 7
+        },
+        "run2": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4534.428571428572,
+          "round0GoldReturnedCount": 7
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4649.571428571428,
+          "round0GoldReturnedCount": 7
+        },
+        "run2": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4649.571428571428,
+          "round0GoldReturnedCount": 7
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4873.142857142857,
+          "round0GoldReturnedCount": 7
+        },
+        "run2": {
+          "roundCount": 4,
+          "round0UnbudgetedMeanUsageChars": 4873.142857142857,
+          "round0GoldReturnedCount": 7
+        }
+      }
+    ],
+    "timeWeighting": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.1666666666666667,
+          "meanInputChars": 177.66666666666666,
+          "meanInputEstimatedTokens": 120
+        },
+        "run2": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.1666666666666667,
+          "meanInputChars": 177.66666666666666,
+          "meanInputEstimatedTokens": 120
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.6666666666666667,
+          "meanInputChars": 220.5,
+          "meanInputEstimatedTokens": 142.83333333333334
+        },
+        "run2": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.6666666666666667,
+          "meanInputChars": 220.5,
+          "meanInputEstimatedTokens": 142.83333333333334
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.6666666666666667,
+          "meanInputChars": 220.5,
+          "meanInputEstimatedTokens": 142.83333333333334
+        },
+        "run2": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.6666666666666667,
+          "meanInputChars": 220.5,
+          "meanInputEstimatedTokens": 142.83333333333334
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.6666666666666667,
+          "meanInputChars": 220.5,
+          "meanInputEstimatedTokens": 142.83333333333334
+        },
+        "run2": {
+          "caseCount": 6,
+          "meanRecallMemoryCount": 1.6666666666666667,
+          "meanInputChars": 220.5,
+          "meanInputEstimatedTokens": 142.83333333333334
+        }
+      }
+    ],
+    "answer": [
+      {
+        "level": "off",
+        "matched": true,
+        "run1": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        },
+        "run2": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        }
+      },
+      {
+        "level": "on5",
+        "matched": true,
+        "run1": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        },
+        "run2": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        }
+      },
+      {
+        "level": "on10",
+        "matched": true,
+        "run1": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        },
+        "run2": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        }
+      },
+      {
+        "level": "on20",
+        "matched": true,
+        "run1": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        },
+        "run2": {
+          "caseCount": 14,
+          "meanInputChars": 418.14285714285717,
+          "meanInputEstimatedTokens": 271.2857142857143,
+          "meanReturnedCount": 3.7142857142857144,
+          "meanTotalInScope": 3.7142857142857144
+        }
+      }
+    ]
+  }
+}

@@ -6,6 +6,7 @@ import type {
   LLMResponse,
   PromptMessage,
   PromptSpec,
+  RecallAssociationQuery,
   Runtime,
   StructuredRequest,
 } from "@mnemora/core";
@@ -432,6 +433,12 @@ export async function runAnswerCase(
   // `record-answer-retention-mutation.ts`、`answer-retention-mutation.ts`）は
   // 1つも変更していない（`IngestConversationOptions` docstring参照）。
   ingestOptions: IngestConversationOptions = {},
+  // `queryRecall` へそのまま転送する `association`(ADR 0337 追記2026-09-26。新設の
+  // 測定専用オプション)。**省略時は `undefined`**——`queryRecall` 自身の既定
+  // ({@link DEFAULT_MNEMORA_PATH_ASSOCIATION}、`{maxCount:10}`)のまま、これまでと
+  // 1バイトも挙動が変わらない。明示するのは
+  // `examples/chat/src/bench/association-default-on-measure.ts` だけである。
+  association?: RecallAssociationQuery | null,
 ): Promise<AnswerCaseRunResult> {
   const embeddingSpace = embeddingSpaceSlug(embeddingProvider.space);
   const ctx: Ctx = { tenantId: `${tenantPrefix}-${embeddingSpace}-${answerCase.id}` };
@@ -444,8 +451,9 @@ export async function runAnswerCase(
   const afterIngestLLM = llmProvider.snapshot();
 
   // 連想枠（`DEFAULT_MNEMORA_PATH_ASSOCIATION`）は既定のまま渡す——`queryRecall` の
-  // 既定と同じ規律をこの bench でも保つ（明示的に外していない）。
-  const recall = await queryRecall(runtime, ctx, conversation);
+  // 既定と同じ規律をこの bench でも保つ（明示的に外していない）。`association` を
+  // 呼び出し側が明示したときだけ上書きする。
+  const recall = await queryRecall(runtime, ctx, conversation, { association });
 
   // ⚠ 「記憶は在るが、この空間のベクトルが0件」を名乗る（Issue #583）。
   // 🔴 例外にしない・落ちるのを防がない——「なぜ落ちたか」が画面に出ることだけが目的。
@@ -556,6 +564,8 @@ export async function runAnswerBench(
   tenantPrefix: string,
   // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない。
   ingestOptions: IngestConversationOptions = {},
+  // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない（ADR 0337 追記2026-09-26）。
+  association?: RecallAssociationQuery | null,
 ): Promise<AnswerCaseRunResult[]> {
   const results: AnswerCaseRunResult[] = [];
   for (const answerCase of cases) {
@@ -568,6 +578,7 @@ export async function runAnswerBench(
         answerCase,
         tenantPrefix,
         ingestOptions,
+        association,
       ),
     );
   }

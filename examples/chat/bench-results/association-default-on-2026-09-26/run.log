@@ -1,0 +1,249 @@
+
+=== retrieval-quality(llm=deterministic, embedding=recorded) ===
+  off(association: null): mrr=0.714 hit@1=4/7 hit@10=6/7 associationRows=0
+  on(maxCount:5): mrr=0.714 hit@1=4/7 hit@10=6/7 associationRows=20
+  on(maxCount:10, 既定と同じ値): mrr=0.714 hit@1=4/7 hit@10=6/7 associationRows=35
+  on(maxCount:20): mrr=0.714 hit@1=4/7 hit@10=6/7 associationRows=60
+
+=== compare(llm=recorded, embedding=recorded) ===
+  off(association: null): totalMnemoraChars=15885 totalReturnedCount=78 associationRows=0
+  on(maxCount:5): totalMnemoraChars=15473 totalReturnedCount=97 associationRows=19
+  on(maxCount:10, 既定と同じ値): totalMnemoraChars=15655 totalReturnedCount=108 associationRows=30
+  on(maxCount:20): totalMnemoraChars=16024 totalReturnedCount=125 associationRows=47
+
+=== time-term(llm=deterministic, embedding=local) ===
+  off(association: null): {"newer-ranked-higher":4,"older-ranked-higher":0,"tied":3,"newer-not-returned":0,"older-not-returned":1,"neither-returned":0,"collapsed":0}
+  on(maxCount:5): {"newer-ranked-higher":5,"older-ranked-higher":0,"tied":3,"newer-not-returned":0,"older-not-returned":0,"neither-returned":0,"collapsed":0}
+  on(maxCount:10, 既定と同じ値): {"newer-ranked-higher":5,"older-ranked-higher":0,"tied":3,"newer-not-returned":0,"older-not-returned":0,"neither-returned":0,"collapsed":0}
+  on(maxCount:20): {"newer-ranked-higher":5,"older-ranked-higher":0,"tied":3,"newer-not-returned":0,"older-not-returned":0,"neither-returned":0,"collapsed":0}
+
+=== validity(llm=deterministic, embedding=local) ===
+  off(association: null): current@now=2/2 other@now=0/2(既定はゲートで隠れているはずが0)
+  on(maxCount:5): current@now=2/2 other@now=0/2(既定はゲートで隠れているはずが0)
+  on(maxCount:10, 既定と同じ値): current@now=2/2 other@now=0/2(既定はゲートで隠れているはずが0)
+  on(maxCount:20): current@now=2/2 other@now=0/2(既定はゲートで隠れているはずが0)
+
+=== identifier-probes(sparse, llm=deterministic, embedding=local) ===
+  off(association: null): hit@1=30/30 hit@10=30/30 associationRows=0
+  on(maxCount:5): hit@1=30/30 hit@10=30/30 associationRows=150
+  on(maxCount:10, 既定と同じ値): hit@1=30/30 hit@10=30/30 associationRows=300
+  on(maxCount:20): hit@1=30/30 hit@10=30/30 associationRows=600
+
+=== numeral-token-probes(sparse, llm=deterministic, embedding=local) ===
+  off(association: null): hit@1=15/18 hit@10=18/18 associationRows=0
+  on(maxCount:5): hit@1=15/18 hit@10=18/18 associationRows=90
+  on(maxCount:10, 既定と同じ値): hit@1=15/18 hit@10=18/18 associationRows=180
+  on(maxCount:20): hit@1=15/18 hit@10=18/18 associationRows=360
+
+=== consolidation-cost(llm=deterministic, embedding=local, budgetLadder=[32,128]) ===
+  off(association: null): rounds=4 round0.unbudgeted.mean.usageChars=4418.571428571428
+  on(maxCount:5): rounds=4 round0.unbudgeted.mean.usageChars=4534.428571428572
+  on(maxCount:10, 既定と同じ値): rounds=4 round0.unbudgeted.mean.usageChars=4649.571428571428
+  on(maxCount:20): rounds=4 round0.unbudgeted.mean.usageChars=4873.142857142857
+
+=== answer-time-weighting(recall 側のみ、dev集合、llm=deterministic, embedding=local) ===
+  off(association: null): meanRecallMemoryCount=1.17 meanInputChars=177.7
+  on(maxCount:5): meanRecallMemoryCount=1.67 meanInputChars=220.5
+  on(maxCount:10, 既定と同じ値): meanRecallMemoryCount=1.67 meanInputChars=220.5
+  on(maxCount:20): meanRecallMemoryCount=1.67 meanInputChars=220.5
+
+=== answer(recall 側のみ、dev+eval、llm=deterministic, embedding=local) ===
+  off(association: null): meanInputChars=418.1 meanReturnedCount=3.71
+  on(maxCount:5): meanInputChars=418.1 meanReturnedCount=3.71
+  on(maxCount:10, 既定と同じ値): meanInputChars=418.1 meanReturnedCount=3.71
+  on(maxCount:20): meanInputChars=418.1 meanReturnedCount=3.71
+
+
+########## off → on10(既定)の差・maxCount 5/10/20 の比較 ##########
+
+  --- retrieval-quality: off → on10(既定) の差 ---
+    mrrOverall: 0.7142857142857143 → 0.7142857142857143 (0, 0.0%)
+    hit1Count: 4 → 4 (0, 0.0%)
+    hit10Count: 6 → 6 (0, 0.0%)
+    probeCount: 7 → 7 (0, 0.0%)
+    recalledRows: 70 → 105 (+35, +50.0%)
+    associationRows: 0 → 35 (+35, (基準0))
+    not_indexed: 0 → 0 (0, (基準0))
+    filtered: 0 → 0 (0, (基準0))
+    below_threshold: 1 → 1 (0, 0.0%)
+    over_limit: 7 → 10 (+3, +42.9%)
+    budget_dropped: 0 → 0 (0, (基準0))
+    stage_skipped: 0 → 0 (0, (基準0))
+    ann_truncated: 0 → 0 (0, (基準0))
+    ann_unreached: 7 → 7 (0, 0.0%)
+    lexical_truncated: 0 → 0 (0, (基準0))
+    unit_assembly_dropped: 0 → 0 (0, (基準0))
+    score_not_comparable: 0 → 0 (0, (基準0))
+  --- retrieval-quality: maxCount 5/10/20 の比較(基準=on5) ---
+    mrrOverall: on5=0.7142857142857143 on10=0.7142857142857143 → 0.7142857142857143 (0, 0.0%) on20=0.7142857142857143 → 0.7142857142857143 (0, 0.0%)
+    hit1Count: on5=4 on10=4 → 4 (0, 0.0%) on20=4 → 4 (0, 0.0%)
+    hit10Count: on5=6 on10=6 → 6 (0, 0.0%) on20=6 → 6 (0, 0.0%)
+    probeCount: on5=7 on10=7 → 7 (0, 0.0%) on20=7 → 7 (0, 0.0%)
+    recalledRows: on5=90 on10=90 → 105 (+15, +16.7%) on20=90 → 130 (+40, +44.4%)
+    associationRows: on5=20 on10=20 → 35 (+15, +75.0%) on20=20 → 60 (+40, +200.0%)
+    not_indexed: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    below_threshold: on5=1 on10=1 → 1 (0, 0.0%) on20=1 → 1 (0, 0.0%)
+    over_limit: on5=10 on10=10 → 10 (0, 0.0%) on20=10 → 9 (-1, -10.0%)
+    budget_dropped: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    stage_skipped: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    ann_truncated: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    ann_unreached: on5=7 on10=7 → 7 (0, 0.0%) on20=7 → 7 (0, 0.0%)
+    lexical_truncated: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    unit_assembly_dropped: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    score_not_comparable: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+
+  --- compare: off → on10(既定) の差 ---
+    totalMnemoraChars: 15885 → 15655 (-230, -1.4%)
+    totalReturnedCount: 78 → 108 (+30, +38.5%)
+    totalAssociationRows: 0 → 30 (+30, (基準0))
+    factStatementSurvivedCount: 12 → 12 (0, 0.0%)
+    rowCount: 12 → 12 (0, 0.0%)
+    not_indexed: 0 → 0 (0, (基準0))
+    filtered: 0 → 0 (0, (基準0))
+    below_threshold: 0 → 0 (0, (基準0))
+    over_limit: 5 → 7 (+2, +40.0%)
+    budget_dropped: 0 → 0 (0, (基準0))
+    stage_skipped: 0 → 0 (0, (基準0))
+    ann_truncated: 0 → 0 (0, (基準0))
+    ann_unreached: 3 → 3 (0, 0.0%)
+    lexical_truncated: 0 → 0 (0, (基準0))
+    unit_assembly_dropped: 0 → 0 (0, (基準0))
+    score_not_comparable: 0 → 0 (0, (基準0))
+    not_indexed:pending: 0 → 0 (0, (基準0))
+    not_indexed:embed_failed: 0 → 0 (0, (基準0))
+    filtered:tenant: 0 → 0 (0, (基準0))
+    filtered:status: 0 → 0 (0, (基準0))
+    filtered:archived: 0 → 0 (0, (基準0))
+    filtered:decayed: 0 → 0 (0, (基準0))
+    filtered:expired: 0 → 0 (0, (基準0))
+    filtered:not_yet_valid: 0 → 0 (0, (基準0))
+    filtered:labels: 0 → 0 (0, (基準0))
+    filtered:taxonomy: 0 → 0 (0, (基準0))
+  --- compare: maxCount 5/10/20 の比較(基準=on5) ---
+    totalMnemoraChars: on5=15473 on10=15473 → 15655 (+182, +1.2%) on20=15473 → 16024 (+551, +3.6%)
+    totalReturnedCount: on5=97 on10=97 → 108 (+11, +11.3%) on20=97 → 125 (+28, +28.9%)
+    totalAssociationRows: on5=19 on10=19 → 30 (+11, +57.9%) on20=19 → 47 (+28, +147.4%)
+    factStatementSurvivedCount: on5=12 on10=12 → 12 (0, 0.0%) on20=12 → 12 (0, 0.0%)
+    rowCount: on5=12 on10=12 → 12 (0, 0.0%) on20=12 → 12 (0, 0.0%)
+    not_indexed: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    below_threshold: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    over_limit: on5=8 on10=8 → 7 (-1, -12.5%) on20=8 → 6 (-2, -25.0%)
+    budget_dropped: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    stage_skipped: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    ann_truncated: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    ann_unreached: on5=3 on10=3 → 3 (0, 0.0%) on20=3 → 3 (0, 0.0%)
+    lexical_truncated: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    unit_assembly_dropped: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    score_not_comparable: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    not_indexed:pending: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    not_indexed:embed_failed: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:tenant: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:status: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:archived: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:decayed: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:expired: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:not_yet_valid: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:labels: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    filtered:taxonomy: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+
+  --- time-term: off → on10(既定) の差 ---
+    probeCount: 8 → 8 (0, 0.0%)
+    newer-ranked-higher: 4 → 5 (+1, +25.0%)
+    older-ranked-higher: 0 → 0 (0, (基準0))
+    tied: 3 → 3 (0, 0.0%)
+    newer-not-returned: 0 → 0 (0, (基準0))
+    older-not-returned: 1 → 0 (-1, -100.0%)
+    neither-returned: 0 → 0 (0, (基準0))
+    collapsed: 0 → 0 (0, (基準0))
+  --- time-term: maxCount 5/10/20 の比較(基準=on5) ---
+    probeCount: on5=8 on10=8 → 8 (0, 0.0%) on20=8 → 8 (0, 0.0%)
+    newer-ranked-higher: on5=5 on10=5 → 5 (0, 0.0%) on20=5 → 5 (0, 0.0%)
+    older-ranked-higher: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    tied: on5=3 on10=3 → 3 (0, 0.0%) on20=3 → 3 (0, 0.0%)
+    newer-not-returned: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    older-not-returned: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    neither-returned: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    collapsed: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+
+  --- validity: off → on10(既定) の差 ---
+    probeCount: 2 → 2 (0, 0.0%)
+    currentReturnedAtNow: 2 → 2 (0, 0.0%)
+    otherReturnedAtNow: 0 → 0 (0, (基準0))
+    historicalProbeCount: 1 → 1 (0, 0.0%)
+    historicalOtherReturned: 1 → 1 (0, 0.0%)
+    optOutOtherReturned: 2 → 2 (0, 0.0%)
+  --- validity: maxCount 5/10/20 の比較(基準=on5) ---
+    probeCount: on5=2 on10=2 → 2 (0, 0.0%) on20=2 → 2 (0, 0.0%)
+    currentReturnedAtNow: on5=2 on10=2 → 2 (0, 0.0%) on20=2 → 2 (0, 0.0%)
+    otherReturnedAtNow: on5=0 on10=0 → 0 (0, (基準0)) on20=0 → 0 (0, (基準0))
+    historicalProbeCount: on5=1 on10=1 → 1 (0, 0.0%) on20=1 → 1 (0, 0.0%)
+    historicalOtherReturned: on5=1 on10=1 → 1 (0, 0.0%) on20=1 → 1 (0, 0.0%)
+    optOutOtherReturned: on5=2 on10=2 → 2 (0, 0.0%) on20=2 → 2 (0, 0.0%)
+
+  --- identifier-probes: off → on10(既定) の差 ---
+    mrrOverall: 1 → 1 (0, 0.0%)
+    hit1Count: 30 → 30 (0, 0.0%)
+    hit10Count: 30 → 30 (0, 0.0%)
+    probeCount: 30 → 30 (0, 0.0%)
+    associationRows: 0 → 300 (+300, (基準0))
+  --- identifier-probes: maxCount 5/10/20 の比較(基準=on5) ---
+    mrrOverall: on5=1 on10=1 → 1 (0, 0.0%) on20=1 → 1 (0, 0.0%)
+    hit1Count: on5=30 on10=30 → 30 (0, 0.0%) on20=30 → 30 (0, 0.0%)
+    hit10Count: on5=30 on10=30 → 30 (0, 0.0%) on20=30 → 30 (0, 0.0%)
+    probeCount: on5=30 on10=30 → 30 (0, 0.0%) on20=30 → 30 (0, 0.0%)
+    associationRows: on5=150 on10=150 → 300 (+150, +100.0%) on20=150 → 600 (+450, +300.0%)
+
+  --- numeral-token-probes: off → on10(既定) の差 ---
+    mrrOverall: 0.9166666666666666 → 0.9166666666666666 (0, 0.0%)
+    hit1Count: 15 → 15 (0, 0.0%)
+    hit10Count: 18 → 18 (0, 0.0%)
+    probeCount: 18 → 18 (0, 0.0%)
+    associationRows: 0 → 180 (+180, (基準0))
+  --- numeral-token-probes: maxCount 5/10/20 の比較(基準=on5) ---
+    mrrOverall: on5=0.9166666666666666 on10=0.9166666666666666 → 0.9166666666666666 (0, 0.0%) on20=0.9166666666666666 → 0.9166666666666666 (0, 0.0%)
+    hit1Count: on5=15 on10=15 → 15 (0, 0.0%) on20=15 → 15 (0, 0.0%)
+    hit10Count: on5=18 on10=18 → 18 (0, 0.0%) on20=18 → 18 (0, 0.0%)
+    probeCount: on5=18 on10=18 → 18 (0, 0.0%) on20=18 → 18 (0, 0.0%)
+    associationRows: on5=90 on10=90 → 180 (+90, +100.0%) on20=90 → 360 (+270, +300.0%)
+
+  --- consolidation-cost: off → on10(既定) の差 ---
+    roundCount: 4 → 4 (0, 0.0%)
+    round0UnbudgetedMeanUsageChars: 4418.571428571428 → 4649.571428571428 (+231, +5.2%)
+    round0GoldReturnedCount: 7 → 7 (0, 0.0%)
+  --- consolidation-cost: maxCount 5/10/20 の比較(基準=on5) ---
+    roundCount: on5=4 on10=4 → 4 (0, 0.0%) on20=4 → 4 (0, 0.0%)
+    round0UnbudgetedMeanUsageChars: on5=4534.428571428572 on10=4534.428571428572 → 4649.571428571428 (+115.14285714285688, +2.5%) on20=4534.428571428572 → 4873.142857142857 (+338.7142857142853, +7.5%)
+    round0GoldReturnedCount: on5=7 on10=7 → 7 (0, 0.0%) on20=7 → 7 (0, 0.0%)
+
+  --- answer-time-weighting: off → on10(既定) の差 ---
+    caseCount: 6 → 6 (0, 0.0%)
+    meanRecallMemoryCount: 1.1666666666666667 → 1.6666666666666667 (+0.5, +42.9%)
+    meanInputChars: 177.66666666666666 → 220.5 (+42.83333333333334, +24.1%)
+    meanInputEstimatedTokens: 120 → 142.83333333333334 (+22.833333333333343, +19.0%)
+  --- answer-time-weighting: maxCount 5/10/20 の比較(基準=on5) ---
+    caseCount: on5=6 on10=6 → 6 (0, 0.0%) on20=6 → 6 (0, 0.0%)
+    meanRecallMemoryCount: on5=1.6666666666666667 on10=1.6666666666666667 → 1.6666666666666667 (0, 0.0%) on20=1.6666666666666667 → 1.6666666666666667 (0, 0.0%)
+    meanInputChars: on5=220.5 on10=220.5 → 220.5 (0, 0.0%) on20=220.5 → 220.5 (0, 0.0%)
+    meanInputEstimatedTokens: on5=142.83333333333334 on10=142.83333333333334 → 142.83333333333334 (0, 0.0%) on20=142.83333333333334 → 142.83333333333334 (0, 0.0%)
+
+  --- answer: off → on10(既定) の差 ---
+    caseCount: 14 → 14 (0, 0.0%)
+    meanInputChars: 418.14285714285717 → 418.14285714285717 (0, 0.0%)
+    meanInputEstimatedTokens: 271.2857142857143 → 271.2857142857143 (0, 0.0%)
+    meanReturnedCount: 3.7142857142857144 → 3.7142857142857144 (0, 0.0%)
+    meanTotalInScope: 3.7142857142857144 → 3.7142857142857144 (0, 0.0%)
+  --- answer: maxCount 5/10/20 の比較(基準=on5) ---
+    caseCount: on5=14 on10=14 → 14 (0, 0.0%) on20=14 → 14 (0, 0.0%)
+    meanInputChars: on5=418.14285714285717 on10=418.14285714285717 → 418.14285714285717 (0, 0.0%) on20=418.14285714285717 → 418.14285714285717 (0, 0.0%)
+    meanInputEstimatedTokens: on5=271.2857142857143 on10=271.2857142857143 → 271.2857142857143 (0, 0.0%) on20=271.2857142857143 → 271.2857142857143 (0, 0.0%)
+    meanReturnedCount: on5=3.7142857142857144 on10=3.7142857142857144 → 3.7142857142857144 (0, 0.0%) on20=3.7142857142857144 → 3.7142857142857144 (0, 0.0%)
+    meanTotalInScope: on5=3.7142857142857144 on10=3.7142857142857144 → 3.7142857142857144 (0, 0.0%) on20=3.7142857142857144 → 3.7142857142857144 (0, 0.0%)
+
+
+実 API 呼び出し回数: 0(このスクリプトは recorded/local 層だけで測る——本体の docstring 参照)
+
+所見: 例外・スキップは無かった。
+
+[association-default-on-measure] 生データを書き出した: bench-results/association-default-on-2026-09-26/run1.json
