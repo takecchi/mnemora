@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { capLexicalQueryWords } from "./lexical-query-cap.js";
 
 /**
  * `ts_rank_cd` の normalization 引数。PostgreSQL のドキュメント（textsearch-controls）の
@@ -133,11 +134,19 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  * `EXPLAIN` の歯に加え、既存の全 `lexical-store-*.test.ts` / `lexical-search-tiebreak.test.ts` /
  * `lexical-rank-resolution.test.ts` がこの一致を検査する（新しい歯ではなく、
  * 既存の歯がそのまま通ることが根拠——値を変える意図は無い）。
+ *
+ * **🔴 Issue #878（2026-09-26、クローン miku の判断）: `query` の異なる語数に上限を置く。**
+ * `capLexicalQueryWords`（`./lexical-query-cap.ts`）を通してから使う——上限
+ * （{@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}）に触れない大多数のクエリでは1バイトも
+ * 変わらない。触れた場合は先頭からその数の語だけが `mnemora_lexical_query_or`/
+ * `mnemora_lexical_query_tsqueries` に渡る——新しい例外にはしない（呼び出し側を壊さない）。
+ * 理由・採らなかった案は `capLexicalQueryWords` の doc と ADR 0092 追記節を見ること。
  */
 export function buildLexicalSearchSelect(
   query: string,
   opts: { limit: number; filter: LexicalFilter },
 ): SQL {
+  const cappedQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
   if (opts.filter.status !== undefined) {
     conditions.push(sql`status = ANY(${sql.param(opts.filter.status)}::text[])`);
@@ -202,7 +211,7 @@ export function buildLexicalSearchSelect(
   // Issue #878: ここ（WHERE・rank）は書き換えていない——`query` の具体的な値が
   // プランナから見える形を保つため（このファイル冒頭の buildLexicalSearchSelect doc
   // 「WHERE/ORDER BY 側の mnemora_lexical_query_or(query) は書き換えていない」参照）。
-  const tsQueryOr = sql`mnemora_lexical_query_or(${query})`;
+  const tsQueryOr = sql`mnemora_lexical_query_or(${cappedQuery})`;
   conditions.push(sql`to_tsvector('simple', mnemora_lexical_normalize(content)) @@ ${tsQueryOr}`);
   const whereClause = sql.join(conditions, sql` AND `);
 
@@ -210,7 +219,7 @@ export function buildLexicalSearchSelect(
     WITH qc AS MATERIALIZED (
       -- Issue #878: mnemora_lexical_query_tsqueries(query) を1回だけ計算し、
       -- coverage の計算（下、候補行ごとに評価される）で使い回す。
-      SELECT mnemora_lexical_query_tsqueries(${query}) AS terms
+      SELECT mnemora_lexical_query_tsqueries(${cappedQuery}) AS terms
     )
     SELECT
       id AS memory_id,

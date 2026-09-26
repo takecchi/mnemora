@@ -2,6 +2,7 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
+import { capLexicalQueryWords } from "./lexical-query-cap.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -403,6 +404,15 @@ const TRIGRAM_STRIP_NOISE_FUNCTION_SQL = sql.raw(`
  *
  * `threshold` を引数に取る（GUC に頼らない）——このファイルの外から呼ばれる場合にも
  * 閾値の受け渡しが明示的になる。
+ *
+ * **⚠ Issue #878（2026-09-26）: この関数は `ensureTrigramLexicalFunctions` により
+ * 引き続きインストールされるが、`buildTrigramLexicalSearchSelect` はもう直接呼ばない。**
+ * `mnemora_lexical_coverage(content, query)` を候補行ごとに呼んでおり、`packages/postgres`
+ * の `lexical-store.ts`（`buildLexicalSearchSelect`）が Issue #878 で直したのと同じ形の
+ * 再計算（`query` の分解を行ごとにやり直す）をここでも抱えていた。`buildTrigramLexicalSearchSelect`
+ * は同じ式を、事前に1回だけ計算した配列を受け取る形にインライン展開して呼ぶ
+ * （下記参照）——この関数自体は書き換えていない（**互換のためインストールは続ける**が、
+ * 内部の呼び出し経路からは外れている）。
  */
 const TRIGRAM_HYBRID_COVERAGE_FUNCTION_SQL = sql`
   CREATE OR REPLACE FUNCTION mnemora_trigram_hybrid_coverage(content text, query text, threshold float8)
@@ -492,11 +502,33 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  * （明示引数）の両方に使う——`search()` がトランザクション内で
  * `SET LOCAL pg_trgm.word_similarity_threshold` を先に発行することが前提
  * （`PostgresTrigramLexicalStore.search` 参照）。
+ *
+ * **🔴 Issue #878（2026-09-26、クローン miku の判断）: ASCII 側の語数に上限を置く。**
+ * `capLexicalQueryWords`（`./lexical-query-cap.ts`、`lexical-store.ts` と共有）を通した
+ * `asciiQuery` を、ASCII 側の呼び出し（`mnemora_lexical_query_or`/
+ * `mnemora_lexical_query_tsqueries`）にだけ使う。**日本語側（`jaTerm`）には元の `query`
+ * をそのまま使う**——`capLexicalQueryWords` は非 ASCII を落とす前提の関数であり
+ * （ASCII 側と同じ「クエリ側は非 ASCII を落とす」非対称、`mnemora_lexical_query_terms`
+ * と同じ理由）、日本語側に通すと日本語の語彙が消えてしまう。
+ *
+ * **🔴 Issue #878: ASCII 側の `coverage` も、行ごとの再計算をやめた。**
+ * `mnemora_trigram_hybrid_coverage(content, query, threshold)` を直接呼ぶ代わりに、
+ * `mnemora_lexical_query_tsqueries(asciiQuery)` を `WITH qc AS MATERIALIZED (...)` で
+ * 1回だけ計算し、その式を `mnemora_trigram_hybrid_coverage` の本体と同じ形
+ * （`GREATEST(ASCII側, 日本語側)`）にインライン展開して使う——`lexical-store.ts` の
+ * `buildLexicalSearchSelect` と同じ理由・同じ形（そちらの doc 参照）。
+ *
+ * **`WHERE`/`rank` 側（`asciiTsQuery`/`jaTerm`）は書き換えていない**——`lexical-store.ts`
+ * で実測したのと同じ理由（`query` の具体的な値がプランナから見える形を保ち、
+ * `idx_memories_lexical`/`idx_memories_trigram` の選択を壊さないため）。この関数でも
+ * 同じ形（`qc` を `WHERE`/`rank` には使わず、`coverage` の中身だけに使う）で書き、
+ * `trigram-lexical-store.postgres.test.ts` の索引の歯がそのまま通ることを確認している。
  */
 export function buildTrigramLexicalSearchSelect(
   query: string,
   opts: { limit: number; filter: LexicalFilter; threshold: number },
 ): SQL {
+  const asciiQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
   if (opts.filter.status !== undefined) {
     conditions.push(sql`status = ANY(${sql.param(opts.filter.status)}::text[])`);
@@ -531,7 +563,7 @@ export function buildTrigramLexicalSearchSelect(
     );
   }
 
-  const asciiTsQuery = sql`mnemora_lexical_query_or(${query})`;
+  const asciiTsQuery = sql`mnemora_lexical_query_or(${asciiQuery})`;
   const jaTerm = sql`mnemora_trigram_strip_noise(mnemora_trigram_query_nonascii(${query}))`;
 
   // ASCII 側は既存経路と同じ述語（式索引 idx_memories_lexical がそのまま選ばれる）。
@@ -545,9 +577,31 @@ export function buildTrigramLexicalSearchSelect(
   const whereClause = sql.join(conditions, sql` AND `);
 
   return sql`
+    WITH qc AS MATERIALIZED (
+      -- Issue #878: ASCII 側の語の分解（mnemora_lexical_query_tsqueries）を1回だけ
+      -- 計算し、coverage の計算（下、候補行ごとに評価される）で使い回す。
+      SELECT mnemora_lexical_query_tsqueries(${asciiQuery}) AS terms
+    )
     SELECT
       id AS memory_id,
-      mnemora_trigram_hybrid_coverage(content, ${query}, ${opts.threshold}) AS coverage,
+      -- mnemora_trigram_hybrid_coverage（このファイル冒頭付近）と同じ式
+      -- （GREATEST(ASCII 側, 日本語側)）。ASCII 側は mnemora_lexical_coverage の式を、
+      -- 上の qc で1回だけ計算した terms を受け取る形に書き直したもの
+      -- （lexical-store.ts の buildLexicalSearchSelect と同じ形）。
+      GREATEST(
+        coalesce(
+          (
+            SELECT count(*) FILTER (
+                     WHERE to_tsvector('simple', mnemora_lexical_normalize(content)) @@ tq
+                   )::float8 / NULLIF(count(*), 0)
+            FROM unnest(qc.terms) AS tq
+          ),
+          0
+        ),
+        (CASE
+          WHEN ${jaTerm} IS NOT NULL AND word_similarity(${jaTerm}, content) >= ${opts.threshold}
+          THEN 1 ELSE 0 END)
+      ) AS coverage,
       (
         ts_rank_cd(
           to_tsvector('simple', mnemora_lexical_normalize(content)),
@@ -559,7 +613,7 @@ export function buildTrigramLexicalSearchSelect(
             0
           )
       ) AS rank
-    FROM memories
+    FROM memories, qc
     WHERE ${whereClause}
     ORDER BY coverage DESC, rank DESC, recorded_at DESC, id
     LIMIT ${opts.limit}

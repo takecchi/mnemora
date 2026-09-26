@@ -373,3 +373,39 @@ Postgres + pgvector）`、PostgreSQL 17 + pgvector）で実測。**
   を含む）はすべて CI でしか実行できていない。**期待値は読解と既存の実測
   （`migrations/0008_*.sql` のコメントの実測）から導いたが、CI が赤くなる可能性を
   否定できない。
+
+---
+
+## 追記（2026-09-26、クローン miku の判断）: クエリの異なる語の数に上限を設けた
+
+Issue #878 が指摘した経路（`mnemora_lexical_query_or`/`mnemora_lexical_query_tsqueries`、
+`migrations/0009_memories_lexical_or_coverage.sql`）の計算量は、行数と語数の積に近い形で
+悪化する。呼ぶ側（`packages/postgres/src/lexical-store.ts`/`trigram-lexical-store.ts`）で
+計算の重複を減らす直しは別途行った（`buildLexicalSearchSelect`/
+`buildTrigramLexicalSearchSelect` の doc コメント参照）が、それでも消えない形が2つ残る:
+行数 × 語数という形そのものと、PostgreSQL 自身が持つ tsquery 表現の大きさの上限である。
+どちらも、既存の関数の形を保ったままでは挙動を変えずに消せない。
+
+**⟹ クエリの異なる語の数に上限（64）を設け、超えた分は先頭から64語だけを使うことにした。**
+重複する語は先にまとめる（`mnemora_lexical_query_tsqueries` 自身が `DISTINCT` で重複を
+畳んでいるのと同じ向きであり、まとめても結果は変わらない）。上限に触れない大多数の
+クエリは1バイトも変わらない。実装は `packages/postgres/src/lexical-query-cap.ts`
+（`capLexicalQueryWords`）。
+
+**守っているもの**: 悪意のある、または壊れた入力によって DB の接続が長く専有される
+ことを防ぐ。正常な用途のクエリの語数は小さい——上限に触れることを想定していない。
+
+**採らなかった案**:
+- **上限を超えたら例外にする。** 採らない——新しい `throw` を足すことになり、
+  `LexicalStore.search` を呼ぶ既存のコードを壊す。上限を超えても「0件になりうる」
+  だけにして、呼び出し側の契約を変えないほうを選んだ。
+- **上限を設けず、`migrations/0009_*.sql` の関数の形自体を改善する
+  （tsquery の組み立て方を変える等）。** 採らない、または今は後回し——関数の形を
+  良くしても、行数 × 語数という形そのものと、tsquery の表現サイズの上限は残る。
+  上限の無い解決策ではない。
+
+確かめていないこと: `packages/testkit` の `InMemoryLexicalStore` と `packages/core` の
+`FakeLexicalStore` には、この上限を入れていない——同じ計算量の問題を持たないため
+（`query` の分解を1回だけ行い、候補行ごとの仕事は集合の所属チェックのみ）。挙動の一致
+（適合テスト）という観点では、上限を超える語数のクエリで postgres 実装と in-memory/fake
+実装が異なる候補集合を返しうるという差を残した——今回はこの差を許容している。

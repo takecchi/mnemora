@@ -119,6 +119,9 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
+- **語彙検索（`PostgresLexicalStore`/`PostgresTrigramLexicalStore`）で使うクエリの、
+  異なる語の数に上限（64）を設けた**（[Issue #878](https://github.com/takecchi/mnemora/issues/878)、
+  [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) 追記節）。
 
 ### Fixed
 
