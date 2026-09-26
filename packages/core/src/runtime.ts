@@ -1909,6 +1909,12 @@ export interface Runtime {
    * 埋め込みの provider が落ちていた間に入った Memory は、provider が直っても
    * 自力では索引へ戻らない（`fail` は終端であり、Phase 1 に自動リトライは無い。ADR 0032）。
    *
+   * ⚠ **埋め込みの入力上限を超えて `failed` になった Memory は、この口だけでは戻らない**
+   * （Issue #753）——次の `tick()` がまた同じ `memory.content` を送り、同じ理由で
+   * `failed` に戻る。戻すには {@link RuntimeDeps.embeddingInput}（任意フック、ADR 0336）を
+   * 渡した runtime でこの口を呼び、続けて `tick({ kinds: ['embed'] })` を呼ぶ
+   * （`Memory.content` は変わらない）。既定では何も切らない。
+   *
    * ⚠ **`reextract` とは別の操作である。**`reextract` は**抽出**をやり直す
    * （Observation から Memory を作り直す）。こちらは既にある Memory の**埋め込み**を
    * やり直す。
