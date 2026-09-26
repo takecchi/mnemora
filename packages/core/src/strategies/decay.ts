@@ -24,6 +24,24 @@ export const DEFAULT_DECAY_THRESHOLD = 0.05;
 
 const MS_PER_HOUR = 1000 * 60 * 60;
 
+/**
+ * `Date` が有限の時刻として表現できる最大値（ECMA-262 `Date` 仕様。西暦 +275760 年ごろ）。
+ * `new Date(x)` は `|x| > MAX_DATE_MS` で Invalid Date になる。
+ *
+ * ⭐ **`floorAt` がここで丸める理由**（バグ調査で見つけた、ADR 0125 未収録の穴）:
+ * `halfLifeHours` は ADR 0125 決定4 が `(0, ∞)` の有限の正の実数を認めており、
+ * `Infinity` だけを弾いている——「ほぼ永久に減衰しない」を意図した、有限だが巨大な
+ * 値（例: 6億時間 ≈ 68,000年）は値域の中に入る。だが `base + halfLifeHours *
+ * log2(strength/threshold)` はそのような値で容易に `±8.64e15ms` を超え、
+ * `new Date(...)` が Invalid Date を返す——`decayFloorAt` が Invalid Date になると
+ * `decayFloorAt > now` は常に `false`（NaN の比較は常に false）になり、
+ * `recall-runtime.ts` の `wallAxisAlive` が「作成直後から既に忘却済み」と誤判定する
+ * （意図とちょうど逆——巨大な halfLifeHours は「ほぼ永久に生きる」の表現のはずが、
+ * 「即座に死ぬ」に壊れる）。**`decayFloorOffset` は非負**（`strength > threshold` の
+ * ときだけ正、それ以外は0）なので、下側では起こらない——上側だけを丸めれば足りる。
+ */
+const MAX_DATE_MS = 8_640_000_000_000_000;
+
 function decayBase(params: DecayParams): Date {
   return params.lastReinforcedAt ?? params.recordedAt;
 }
@@ -80,7 +98,13 @@ function strengthAt(now: Date, params: DecayParams): number {
 function floorAt(params: DecayParams, threshold: number = DEFAULT_DECAY_THRESHOLD): Date {
   const base = decayBase(params);
   const hours = decayFloorOffset(params.strength, params.halfLifeHours, threshold);
-  return new Date(base.getTime() + hours * MS_PER_HOUR);
+  // `MAX_DATE_MS` の doc コメント参照——`halfLifeHours` が有限でも巨大だと
+  // `new Date` の表現可能域を超えて Invalid Date になりうる。`Math.min` で
+  // 表現可能な最大値に丸める（Invalid Date にしない。ADR 0125 が finite を許す
+  // 値域の意味論——「ほぼ永久に減衰しない」——を、実際に永久に近い遠い未来の
+  // 有効な Date として表現する）。
+  const ms = Math.min(base.getTime() + hours * MS_PER_HOUR, MAX_DATE_MS);
+  return new Date(ms);
 }
 
 export const defaultDecayStrategy: DecayStrategy = {
@@ -134,13 +158,26 @@ function activityStrengthAt(nowSeq: number, params: ActivityDecayParams): number
  * `base + 3` を床にすれば、この境界では `decay_floor_seq > nowSeq` が保たれる。**
  * `strength <= threshold`（`decayFloorOffset` が `0` を返す）ときは `baseSeq` をそのまま返す
  * ——壁時計の `floorAt` が `base` を返すのと同じ分岐。
+ *
+ * ⭐ **`Number.MAX_SAFE_INTEGER` で丸める理由**（バグ調査で見つけた穴。`floorAt` が
+ * `MAX_DATE_MS` で丸める理由と同根）: `halfLifeRecalls` も `isHalfLifeRecallsInRange`
+ * （`(0, ∞)`、Infinity のみ拒む）の値域を持ち、有限だが巨大な値を許す。戻り値は
+ * `decay_floor_seq`（Postgres `bigint`、`mode: "number"` で読み書きする列、
+ * `packages/postgres/src/mapping.ts` の `parsePgBigint`）に書かれるが、**JS の
+ * number は `2**53`（`Number.MAX_SAFE_INTEGER`）を超えると整数を正確に表現できない**
+ * ——`ADR 0290`（`PostgresTenantSettingsStore.getActivitySeq` の doc コメント）が
+ * 同じ境界を「`Number.MAX_SAFE_INTEGER` を超える運用は想定していない」と既に
+ * 明記しており、この関数もその前提に揃える。丸めなければ、精度を落とした値を
+ * 静かに書く（安全整数域と bigint の上限の間）か、Postgres の bigint 範囲
+ * （約 `9.22e18`）を超えて INSERT が例外になる一方 Fake は無検査で受け入れる
+ * （`packages/testkit` 側、Issue #817 と同型の食い違い）——どちらの壊れ方も避ける。
  */
 function activityFloorAt(
   params: ActivityDecayParams,
   threshold: number = DEFAULT_DECAY_THRESHOLD,
 ): number {
   const offset = decayFloorOffset(params.strength, params.halfLifeRecalls, threshold);
-  return params.baseSeq + Math.ceil(offset);
+  return Math.min(params.baseSeq + Math.ceil(offset), Number.MAX_SAFE_INTEGER);
 }
 
 export const defaultActivityDecayStrategy: ActivityDecayStrategy = {

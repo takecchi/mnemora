@@ -116,6 +116,45 @@ describe("defaultDecayStrategy.floorAt", () => {
     );
     expect(floor.getTime()).toBe(lastReinforcedAt.getTime() + 10 * HOUR);
   });
+
+  /**
+   * バグ調査で見つけた穴（ADR 0125 未収録）: `halfLifeHours` は ADR 0125 決定4 が
+   * `(0, ∞)` の有限の正の実数を認めている——`Infinity` だけを弾く。だが
+   * `base + halfLifeHours * log2(strength/threshold)` は、有限でも十分大きい
+   * `halfLifeHours`（例: 6億時間 ≈ 68,000年、`Infinity` ではない）で
+   * `new Date` の表現可能域（`±8.64e15ms`、西暦 ±275760年）を超え、修正前は
+   * Invalid Date を返していた（`node` で実測: `halfLifeHours: 6e8` で
+   * `Invalid Date`）。**Invalid Date になると壊れ方が特に悪い**——
+   * `decayFloorAt > now` は NaN の比較で常に `false` になり、
+   * `recall-runtime.ts` の `wallAxisAlive` が「作成直後から既に忘却済み」と
+   * 誤判定する。意図（「ほぼ永久に減衰しない」）とちょうど逆に壊れる。
+   */
+  it("halfLifeHours が有限でも巨大だと Invalid Date にせず、表現可能な最大の Date に丸める", () => {
+    const recordedAt = new Date("2026-01-01T00:00:00.000Z");
+    const floor = defaultDecayStrategy.floorAt({
+      recordedAt,
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 6e8, // 6億時間。ADR 0125 の値域 (0, ∞) の内側（Infinity ではない）
+    });
+    expect(Number.isNaN(floor.getTime())).toBe(false);
+    // Date が表現できる最大値（ECMA-262、西暦 +275760 年ごろ）に丸まる。
+    expect(floor.getTime()).toBe(8_640_000_000_000_000);
+    // 丸めた後も「recordedAt より先の未来」であることは保たれる——
+    // wallAxisAlive（`decayFloorAt > now`）が「まだ生きている」側に倒れるために必要。
+    expect(floor.getTime()).toBeGreaterThan(recordedAt.getTime());
+  });
+
+  it("halfLifeHours が表現可能域に収まる大きさなら、丸めずにそのまま計算する（回帰）", () => {
+    const recordedAt = new Date("2026-01-01T00:00:00.000Z");
+    const floor = defaultDecayStrategy.floorAt(
+      { recordedAt, lastReinforcedAt: null, strength: 1, halfLifeHours: 24 },
+      0.5,
+    );
+    // 通常域では丸めの影響を受けない（既存の1本目のケースと同じ検算）。
+    expect(floor.getTime()).toBe(recordedAt.getTime() + 24 * HOUR);
+    expect(floor.getTime()).toBeLessThan(8_640_000_000_000_000);
+  });
 });
 
 /**
@@ -288,5 +327,35 @@ describe("defaultActivityDecayStrategy.floorAt", () => {
     });
     // floor 自身では、実際の強度が既に閾値以下になっている（ceil が正しい側に倒れている）。
     expect(strengthAtFloor).toBeLessThanOrEqual(threshold);
+  });
+
+  /**
+   * バグ調査で見つけた穴: `halfLifeRecalls` は `isHalfLifeRecallsInRange`（`(0, ∞)`、
+   * `Infinity` のみ拒む）の値域を持ち、有限だが巨大な値を許す。修正前は
+   * `baseSeq + Math.ceil(offset)` をそのまま返しており、`Number.MAX_SAFE_INTEGER`
+   * （`2**53-1`）を超える値を静かに返していた——戻り値は Postgres の `bigint` 列
+   * （`decay_floor_seq`）に `mode: "number"` で書き込まれるため、安全整数域を
+   * 超えると精度を落とした値を書く（node で実測: `halfLifeRecalls: 1e16` で
+   * `Number.isSafeInteger` が `false` の値を返していた）。
+   */
+  it("halfLifeRecalls が有限でも巨大だと、Number.MAX_SAFE_INTEGER を超えず丸める", () => {
+    const floor = defaultActivityDecayStrategy.floorAt({
+      baseSeq: 1000,
+      strength: 1,
+      halfLifeRecalls: 1e16, // ADR 0165 の値域 (0, ∞) の内側（Infinity ではない）
+    });
+    expect(Number.isSafeInteger(floor)).toBe(true);
+    expect(floor).toBe(Number.MAX_SAFE_INTEGER);
+    // 丸めた後も baseSeq より先（＝まだ生きている側）であることは保たれる。
+    expect(floor).toBeGreaterThan(1000);
+  });
+
+  it("halfLifeRecalls が安全整数域に収まる大きさなら、丸めずにそのまま計算する（回帰）", () => {
+    const floor = defaultActivityDecayStrategy.floorAt(
+      { baseSeq: 100, strength: 1, halfLifeRecalls: 10 },
+      0.5,
+    );
+    expect(floor).toBe(110); // 既存の「1 half-life 経過で半分になる」ケースと同じ入力
+    expect(floor).toBeLessThan(Number.MAX_SAFE_INTEGER);
   });
 });

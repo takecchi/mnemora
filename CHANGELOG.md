@@ -299,6 +299,14 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
 ### Fixed
 
 
+- **`@mnemora/core` の `decay.ts`（`defaultDecayStrategy.floorAt`/`defaultActivityDecayStrategy.floorAt`）が、
+  ADR 0125/`isHalfLifeRecallsInRange` の値域 `(0, ∞)`（`Infinity` のみ拒む）の内側にある、
+  有限だが巨大な `halfLifeHours`/`halfLifeRecalls` で壊れていた。** 壁時計側は `new Date` の
+  表現可能域（`±8.64e15ms`）を超えて Invalid Date を返し、`decayFloorAt > now` が常に
+  `false` になるため「ほぼ永久に減衰しない」つもりの設定が「作成直後から忘却済み」に
+  逆転していた。活動時計側は `decay_floor_seq`（Postgres `bigint`）へ `Number.MAX_SAFE_INTEGER`
+  を超える精度の無い値を静かに書いていた。どちらも表現可能な上限へ丸めるようにした
+  （新しい例外は投げない）。
 - **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
 - **`@mnemora/postgres` の段1 `search()` で、他テナントの near-duplicate が HNSW の候補窓
   （既定 `hnsw.ef_search`=40）を埋め尽くすと、自テナントの候補を1件も見ないまま `recall()` が
