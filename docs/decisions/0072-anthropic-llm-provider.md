@@ -401,3 +401,70 @@ publish 対象は固定リストであり「新しい publish 対象が増えた
 - **root スキーマの `description` へ `$schema` が漏れることの害を測っていない。**
 - **`packages/anthropic` を含めた状態での `pack:check` / publish の梱包が正しいか**は、
   門としては通したが、**実際に npm へ出して確かめてはいない**（出せない。⛔）。
+
+---
+
+## 追記（2026-09-26、[Issue #885](https://github.com/takecchi/mnemora/issues/885)）: 応答オブジェクトの形そのものが壊れていると、`kind` の外の生の例外が伝播する
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——この追記は記録だけである。
+
+**実測（Issue #885 本文、`@mnemora/anthropic`・`@mnemora/openai` の両方、一時テストで確認後コミットせず削除）**:
+既存のテスト（`refusal.test.ts`・`provider-parity.test.ts`・`embedding-provider.test.ts` 等）は
+`choices: []`/`content: []`（配列はあるが空）、`message.content: null`、壊れた JSON 文字列
+（`SyntaxError`）、スキーマ不適合（`ZodError`）を作っていたが、**キーそのものが丸ごと無い**
+応答オブジェクト（`{}` が返る）は1本もテストしていなかった。この形を手書きの偽 client
+（既存の `call-failure.test.ts` と同じパターン）で作ると:
+
+- `@mnemora/anthropic` の `AnthropicLLMProvider.complete`/`completeStructured`:
+  `firstTextBlock(response.content)` の `content.find(...)` が
+  `TypeError: Cannot read properties of undefined (reading 'find')`。
+  `assertNotRefusedOrTruncated` 自体は `stop_reason` が無くても早期 return するため
+  素通りし、その後の `firstTextBlock` で落ちる。
+- `@mnemora/openai` の `OpenAILLMProvider.complete`/`completeStructured`:
+  `response.choices[0]` が `TypeError: Cannot read properties of undefined
+  (reading '0')`。`assertNotRefusedOrTruncated` に届く前に落ちる。
+- `@mnemora/openai` の `OpenAIEmbeddingProvider.embed`: `[...response.data]` が
+  `TypeError: response.data is not iterable`。
+
+⟹ **3経路とも、`errors.ts` が定義する `kind`（`refusal`/`truncated`/`no_content`）の
+どれにも分類されない生の `TypeError` が投げられる。** `packages/core` 側の呼び出し
+箇所（`extraction.ts`/`claim-key.ts`/`runtime.ts` の複数箇所/`recall-runtime.ts`）は
+全て `try`/`catch` の内側にあり、この `TypeError` は既存の「LLM/embedding 呼び出しが
+失敗した」という経路にそのまま合流する——今日この形が `observe()`/`recall()` を
+未処理のままクラッシュさせることは無い（[#850](https://github.com/takecchi/mnemora/issues/850)
+とは別層。あちらは `completeStructured` が成功したように見えて返り値の型が契約と違う
+という core 側の穴だが、こちらは provider 内部で応答を読んでいる最中に落ちる）。
+ただし `kind` で分岐している呼び出し側コード（この repo の外の利用者を含む）は、
+この形の失敗だけ `kind` を読めず、`instanceof` でも捕まえられない。
+
+**クローン miku の判断（2026-09-26）**: 実装は変えず、この形についての約束を
+doc コメント（`packages/openai/src/errors.ts`・`packages/anthropic/src/errors.ts` の
+冒頭コメント、`llm-provider.ts` の `assertNotRefusedOrTruncated`/`firstTextBlock`、
+`embedding-provider.ts` の `embed`）と両パッケージの README に明記するに留めた
+（Issue #885 が挙げた方向3）。
+
+**採らなかった案**:
+1. **`response.choices?.[0]`/`response.content`/`response.data` を `?.`・null 合体で
+   防御的に読み、`no_content` へ倒す。** 却下——「キーが無い」場合の症状が
+   `TypeError` から `no_content` へ変わる。これは**投げる例外の種類が変わる変更**であり、
+   委譲された範囲（新しく throw しない）を超える。加えて「テキストが1つも見つからない」
+   （本来の `no_content` の意味）と「応答の形そのものが壊れている」（より深刻な異常）を
+   同じ `kind` に混ぜることになり、`docs/recall.md`/`errors.ts` が掲げる「無いの種類を
+   潰さない」という固定点に反する。
+2. **新しい `kind: "malformed_response"` を足す。** 却下——`OpenAILLMFailureKind`/
+   `AnthropicLLMFailureKind` という公開の union 型への値の追加になる。破壊的ではないが、
+   union に値を足すかどうかの判断はオーナーへ問うている性質の問いであり、この追記の
+   範囲（委譲された記述のみ）を超える。
+
+**実 API がこの形（200 応答なのにトップレベルのキーが丸ごと欠ける）を実際に返すかは
+確認していない。** 各社のドキュメント上は `choices`/`content`/`data` は常に返る前提だが、
+プロキシ・ミドルボックス・SDK バージョン間の非互換等で欠ける可能性はゼロとは言い切れない、
+という以上のことは確かめていない——Issue #885 のこの節をそのまま引く。
+
+反映先: `packages/openai/src/errors.ts`・`packages/anthropic/src/errors.ts` の冒頭コメント、
+`packages/openai/src/llm-provider.ts`・`packages/openai/src/embedding-provider.ts`・
+`packages/anthropic/src/llm-provider.ts` の該当 doc コメント、
+`packages/anthropic/README.md`・`packages/openai/README.md`。openai 側の対応する短い
+追記は [ADR 0075](./0075-openai-refusal-and-truncation.md) にもある。

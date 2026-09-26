@@ -61,6 +61,25 @@ console.log(structured.summary);
 `createRuntime()` にそのまま渡して使う例は [`@mnemora/postgres`](../postgres/README.md) の
 README にある。
 
+## ⚠ 失敗は種類として返る（拒否を「空の成功」にしない）——ただし応答の形そのものが壊れている場合は別
+
+**OpenAI の拒否は HTTP 200 で返る。**`message.refusal` に拒否理由の文字列が入り、
+このとき `message.content` は `null` になる。SDK は例外を投げない。
+`LLMProvider.complete`/`completeStructured` は `content` を読む前にこれを見て、
+`OpenAILLMProviderError` を `kind: "refusal" | "truncated" | "no_content"` として
+投げる（`src/errors.ts` 参照。`@mnemora/anthropic` の `kind` タクソノミーと対になる形）。
+
+**⚠ 2026-09-26 追記（Issue #885）: `kind` が表すのはこの3種のどれかである。** HTTP 200
+の応答オブジェクトそのものの形が壊れている場合——`chat.completions.create` の
+`choices` や `embeddings.create` の `data` がトップレベルからキーごと丸ごと無い場合
+（`{}` が返る等）——は、`kind` の**外**にある生の例外（`TypeError` 等。壊れた JSON の
+`SyntaxError`・スキーマ不適合の `ZodError` と同じ扱い）がそのまま伝播する。
+`OpenAILLMProviderError` にはならず、`instanceof` でも `kind` でも捕まえられない
+（埋め込み側の `OpenAIEmbeddingProvider.embed` はそもそも専用のエラー型を持たず、
+壊れた応答は最初から生の例外がそのまま伝播する）。実 API がこの形を実際に返すかは
+確認していない（詳細は
+[ADR 0072](../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記）。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§5.4・§5.5 — `LLMProvider` / `EmbeddingProvider` の契約

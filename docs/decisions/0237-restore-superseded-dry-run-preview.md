@@ -213,3 +213,20 @@ issue の判定は「dryRun の実装費用を測っていない……読むだ�
 - **`reextract` が絡む混在ケース。** [ADR 0230](./0230-restore-superseded-recovery-path.md) が引き継いだ「確かめていないこと」——`dryRun` はこれが同型でもそうでなくても、対象選定の `WHERE` を素通しするだけなので効くはずだが、実測はしていない。
 - **本番トラフィックでの利用実績。** `restoreSuperseded`/`previewRestoreSupersededBy` を呼ぶ本番コードは `packages/` に0件のまま（ADR 0230 と同じ状況）——出荷される既定では踏まれない。
 - **`supersededReason` を実際の運用でどう使うか（UI・アラート等）。** この PR は API を足すところまでで、利用側の設計は範囲外。
+
+---
+
+## 追記（2026-09-26、[Issue #821](https://github.com/takecchi/mnemora/issues/821)）: `supersededReason` は保持期間の掃除で経年劣化する
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（実装・測ったこと・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コードの挙動は変えていない——この追記は記録だけである。
+
+`previewRestoreSupersededBy?` が運ぶ `supersededReason` は `kind: 'superseded'` の
+`memory_events` 行の `meta.reason` を読むだけであり、この行が
+[ADR 0115](./0115-event-retention-purge.md) の `purgeExpiredEvents?` によって保持期間で
+削除されうることを、本 ADR は検討していなかった。削除された後は `supersededReason: null`
+になり、[ADR 0258](./0258-restore-superseded-operation-scope.md) の
+`groupSupersededCandidatesByOperation` が「最初から由来が無い」場合と同じ
+`"unknown"` グループへまとめてしまう。実測・採らなかった案は ADR 0258 の同日付追記に
+記録した。

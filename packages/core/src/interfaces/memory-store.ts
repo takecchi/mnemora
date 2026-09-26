@@ -768,6 +768,18 @@ export interface MemoryStore {
    *   newestPurgedAt, olderThan }` の4欄のみ——`docs/memory-model.md` §9 が言う
    *   「件数と期間のみ。削除された個々のイベントの詳細は残らない」を、`memory_id`
    *   個別の記録を一切持たないことで守る。
+   *
+   * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+   * 上記の `WHERE`（`kind <> 'events_purged'`）は `kind = 'superseded'` の行を除外しない
+   * ——保持期間を過ぎればそれらも他の行と同じく削除の対象になる。** これは決定1どおりの
+   * 挙動であり、この口自身は約束を破っていない。ただし `superseded` 行は
+   * `MemoryStore.previewRestoreSupersededBy?` が `supersededReason` を読む唯一の
+   * 情報源でもある——この口を運用ジョブとして定期的に呼んでいるテナントでは、
+   * 保持期間を過ぎた時点で `previewRestoreSupersededBy?`/
+   * `groupSupersededCandidatesByOperation`（`packages/core/src/runtime.ts`）が
+   * 由来を「分からない」としてまとめてしまうようになる。詳細・採らなかった案は
+   * [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md) の
+   * 同日付追記を参照。
    */
   purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
   /**
@@ -1255,6 +1267,18 @@ export interface MemoryStore {
    * 一致する `memory_events` 行が無い場合（この adapter が対象について1件も
    * `kind: 'superseded'` を積んでいない、または将来別の書き手が `reason` を
    * 省略した場合）は `null`。
+   *
+   * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+   * 「一致する行が無い」は、上記2つの理由に加えて第三の理由でも起きる——
+   * `MemoryStore.purgeExpiredEvents?`（[ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）
+   * が保持期間の設定に従ってその `kind: 'superseded'` 行を既に削除した場合である。**
+   * `purgeExpiredEvents?` の対象選定は `kind = 'events_purged'` 以外の行すべてであり、
+   * `superseded` を特別扱いして除外しない。この3つの理由はどれも `supersededReason: null`
+   * という同じ値になり、呼び出し側からは区別できない——「由来が最初から無かった」のか
+   * 「由来はあったが保持期間の掃除で消えた」のかを、この戻り値だけでは判定できない。
+   * 詳細・採らなかった案は
+   * [ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)
+   * の同日付追記を参照。
    *
    * - 対象が0件なら `{ candidates: [] }`（`restoreSupersededBy?` の「対象0件なら
    *   例外にしない」規律と同じ）。
