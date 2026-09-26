@@ -148,9 +148,9 @@ describe("schema 未指定 + ロール名と同名のスキーマ: advisory lock
 
     const holder = await grabLockFromAnotherSession(DB_MIGRATE_ROLE_SCHEMA, expectedKey);
     try {
-      await expect(
-        runMigrations(pool, undefined, { lockTimeoutMs: 300 }),
-      ).rejects.toBeInstanceOf(MigrationLockTimeoutError);
+      await expect(runMigrations(pool, undefined, { lockTimeoutMs: 300 })).rejects.toBeInstanceOf(
+        MigrationLockTimeoutError,
+      );
     } finally {
       await holder.release();
     }
@@ -160,9 +160,9 @@ describe("schema 未指定 + ロール名と同名のスキーマ: advisory lock
     const pool = await createBlankDatabase(DB_MIGRATE_PUBLIC);
     const holder = await grabLockFromAnotherSession(DB_MIGRATE_PUBLIC, MIGRATION_LOCK_KEY);
     try {
-      await expect(
-        runMigrations(pool, undefined, { lockTimeoutMs: 300 }),
-      ).rejects.toBeInstanceOf(MigrationLockTimeoutError);
+      await expect(runMigrations(pool, undefined, { lockTimeoutMs: 300 })).rejects.toBeInstanceOf(
+        MigrationLockTimeoutError,
+      );
     } finally {
       await holder.release();
     }

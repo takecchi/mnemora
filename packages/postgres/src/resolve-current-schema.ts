@@ -35,9 +35,7 @@ import type { Pool } from "pg";
  * とは別のファイルに置き、`index.ts` からは export しない。
  */
 export async function resolveCurrentSchema(pool: Pool): Promise<string | undefined> {
-  const { rows } = await pool.query<{ current_schema: string | null }>(
-    "SELECT current_schema()",
-  );
+  const { rows } = await pool.query<{ current_schema: string | null }>("SELECT current_schema()");
   const value = rows[0]?.current_schema;
   return value === null || value === undefined ? undefined : value;
 }
