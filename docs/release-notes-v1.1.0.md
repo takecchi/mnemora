@@ -21,7 +21,7 @@
 | **書いた日** | **2026-09-26**（`origin/main` = `190f365` の木で書いた） |
 | **書いた人** | **担い手（クローン miku の委譲先）。オーナーではない。**（冒頭のバナー） |
 | **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠 ADR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.0` … `747acaf`** を数えたもの）が正、既定 on の決定は [ADR 0337](./decisions/0337-recall-association-default-on.md)、`contestedWith` は [ADR 0335](./decisions/0335-recalled-memory-contested-with.md)、`embeddingInput` は [ADR 0336](./decisions/0336-embedding-input-opt-in-hook.md)、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md)、testkit の Fake の例外化を破壊的変更として扱うかは [Issue #809](https://github.com/takecchi/mnemora/issues/809) が正 |
-| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `747acaf` から動いた（＝新しい変更が積まれた）。② [Issue #809](https://github.com/takecchi/mnemora/issues/809) が決着した（この草稿は🔶マークの箇所を未決のまま書いている）。③ `packages/postgres/migrations/` の本数が3本（`0019`〜`0021`）から増減した。④ 下の「⚠ 未解決のまま残した重大な食い違い（v1.0.1）」が解消・説明された。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
+| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `747acaf` から動いた（＝新しい変更が積まれた）。② [Issue #809](https://github.com/takecchi/mnemora/issues/809) が決着した（この草稿は🔶マークの箇所を未決のまま書いている）。③ `packages/postgres/migrations/` の本数が3本（`0019`〜`0021`）から増減した。④ 下の「🔴 未解決のまま残した重大な食い違い（v1.0.1）」が解消・説明された。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
 
 ⚠ **この文書は、正典の内容を意図的に複製している。**理由は `docs/release-notes-v1.0.0.md` と同じ——**Release 本文を読むのは repo の外に居る採用者**であり、リンクだけでは伝わらない。⟹ **複製を許す代わりに、上の「正はどれか」を必ず添える。**
 
@@ -71,7 +71,7 @@
 >
 > - **連想枠（`RecallQuery.association`、段3.5）の既定が off → on になりました。** `recall()` を呼ぶときに `association` を省略すると、これまでは連想が一切走りませんでしたが、`v1.1.0` からは新設の `DEFAULT_RECALL_ASSOCIATION`（`{ maxCount: 10 }`）で連想が走ります——クエリに直接は当たらなかったが、当たった記憶（アンカー）の近傍として引いた候補（`retrievedVia: "association"`）が、`association` を渡さない呼び出しでも結果に混ざりうるようになります。
 >   **従来どおり連想を一切走らせたくない場合は、`association: null` を明示的に渡してください**（`undefined`＝省略＝既定を適用、`null`＝明示的に off、という新しい区別です）。
->   **型としては破壊的変更ではありません**——`RecallQuery.association` の型が `| null` を受け付けるように広がっただけで、既存の呼び出しはそのまま型検査を通ります。オーナーの決定（Issue #337、[ADR 0337](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0337-recall-association-default-on.md)）によるものです。
+>   **型としては破壊的変更ではありません**——`RecallQuery.association` の型が `| null` を受け付けるように広がっただけで、既存の呼び出しはそのまま型検査を通ります。（Issue #337 / [ADR 0337](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0337-recall-association-default-on.md)、PR #838）
 > - **`recall()` の返り値 `RecalledMemory` に、`attributes` 欄が常に付くようになりました。** `attributes` によるフィルタを渡さない呼び出しでも、対象の Memory が `attributes` を持たなくても、欄自体は省略されなくなりました（無ければ `{}`）。絞り込みの挙動そのものは変わりません（[Issue #152](https://github.com/takecchi/mnemora/issues/152) / [Issue #153](https://github.com/takecchi/mnemora/issues/153)、PR #724）。欄の有無を見るスナップショット比較は影響を受けることがあります。
 > - **抽出で作られる `Memory` に、`claimKey: null` 欄が常に付くようになりました。** claim key を導出する opt-in（`observe` の `claimKey?`）を使っていない呼び出しでも、欄自体は省略されません。値を導出する opt-in は引き続き既定 off のままです（[Issue #371](https://github.com/takecchi/mnemora/issues/371)、PR #736）。
 > - **postgres を使っている方へ**: 新しいマイグレーションが3本増えています（`0019_observations_memories_attributes.sql` / `0020_taxonomy_labels.sql` / `0021_memories_claim_key.sql`）。`v1.0.0` から上げるなら、次を実行してください:
