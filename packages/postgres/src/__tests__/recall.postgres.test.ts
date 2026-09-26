@@ -755,9 +755,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
       // 前提: Fake は reject せず、score_not_comparable が候補1件ぶん出る。
       const fakeResult = await fakeRuntime.recall(ctx, { vector: [...query] });
       expect(fakeResult.memories).toEqual([]);
-      const fakeNotComparable = fakeResult.omitted.find(
-        (o) => o.kind === "score_not_comparable",
-      );
+      const fakeNotComparable = fakeResult.omitted.find((o) => o.kind === "score_not_comparable");
       expect(fakeNotComparable).toEqual({
         kind: "score_not_comparable",
         count: 1,
