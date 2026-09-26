@@ -191,6 +191,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`@mnemora/postgres` の `PostgresOutboxStore.fail` は、`error` に NUL（U+0000）が含まれていると `last_error` を書けずに例外を投げていた**——LLM の抽出結果の本文に NUL が入ると、失敗したクエリの params を含むエラー文が `lastError` に渡るため、`tick()` がその場で打ち切られ、そのジョブは終端に落ちないまま、リースが切れるたびに再び claim されて同じ所で落ちていた。NUL を目に見える `\u0000` に置き換えて書くようにした（PR_LINK）。
+  ⚠ doc が約束していた振る舞い（`tick()` は失敗を `failed` に数え、ジョブを終端に落とす）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`VectorStore.search` / `searchMany` と `LexicalStore.search`（`@mnemora/postgres` の vector・語彙・trigram の3実装と、`@mnemora/testkit/fixtures` の `InMemoryVectorStore` / `InMemoryLexicalStore`）は、テナントを `filter.tenantId` だけで絞り、`ctx.tenantId` を見ていなかった**——`ctx` と `filter.tenantId` に違うテナントを渡すと、`filter` 側のテナントの memoryId とスコアが返った（本文は返らない。runtime は常に同じ値を渡すので、runtime 経由では起きない）。隔離の境界は `ctx.tenantId` なので（ADR 0007）、両方で絞るようにした。食い違えば空を返し、例外は投げない（[Issue #1050](https://github.com/takecchi/mnemora/issues/1050)）。
   ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` は、返すベクトルの成分が有限かを確かめず、NaN / Infinity をそのまま返していた**（Issue #992）——pgvector への書き込みで初めて失敗していた。次元の検査と同じ位置で、有限でない成分があれば何番目かを名指しして例外にする。
