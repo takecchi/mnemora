@@ -327,3 +327,75 @@ EXPLAIN すれば十分だと前提していた。この前提は誤りだった
 
 変更したファイルは `packages/postgres/src/__tests__/test-db.ts`
 （`captureClientQuery` の拡張・`explainCaptured` の新設）と、上に挙げた4ファイル。
+
+---
+
+## 追記（2026-09-26）: `searchMany`（Issue #377）が同じ `relaxed_order` を同じ形で使う
+
+**この節から上は当時の決定・実測の記録のまま書き換えていない。** 以下は、連想枠
+（段3.5）のアンカーごとの ANN 検索を1回の往復に束ねる `VectorStore.searchMany?`
+（Issue #377）を `PostgresVectorStore` に足したときに、この ADR の射程内かどうかを
+確かめた記録である。
+
+### 何が起きたか
+
+`searchMany()` は `search()` と同じ `SET LOCAL hnsw.iterative_scan = relaxed_order` を
+発行してから、複数のクエリベクトルを `VALUES` + `LATERAL` で束ねた1本の `SELECT` を
+実行する。実装した直後、`hnsw-ef-search-window-ceiling.test.ts` 検査2（この ADR が
+「本番経路で `SET LOCAL hnsw.iterative_scan` を発行している箇所は `vector-store.ts` に
+1箇所だけ」とソース走査で固定している歯）が赤くなった——`search()`/`searchMany()` が
+それぞれ独立に `db.transaction()` を開いて `SET LOCAL` を発行しており、同じ文字列が
+2箇所に複製されていたため。
+
+### 採った案（案A）: `SET LOCAL` の発行を共通ヘルパーへ抽出する
+
+`search()`/`searchMany()` の両方が呼ぶ `withRelaxedOrderScan(db, run)` を新設した
+（`packages/postgres/src/vector-store.ts`）——`db.transaction()` で `BEGIN` し、
+`SET LOCAL hnsw.iterative_scan = relaxed_order` を発行してから `run(tx)` を実行する。
+`SET LOCAL` を書く箇所はこの関数の中の1行だけになり、`search()`/`searchMany()` は
+どちらもこの関数を経由するだけで、`SET LOCAL` そのものを直接書かない。
+
+**採らなかった案（案B）**: `hnsw-ef-search-window-ceiling.test.ts` の期待値に
+`searchMany` を足す（「1箇所」を「2箇所（`search()`/`searchMany()`）」に広げる）。
+**採らなかった理由**——この歯が縛っているのは「本番経路で `relaxed_order` を有効にする
+コードパスが、増えるたびに際限なく複製されないこと」であり、`searchMany` の追加を機に
+2箇所目を正式に認めると、次に3つ目の口（例: 将来のバッチ検索）が増えたときにも
+「歯の期待値を書き換えるだけ」で通ってしまい、歯の抑止力が薄れる。共通ヘルパーへ
+抽出するコストは小さく、歯の「1箇所」という意図（この ADR の決定1が指す唯一の
+有効化ポイント）をそのまま保てるため、案Aを採った。
+
+### この ADR の測定は `searchMany` にも及ぶか——見立て
+
+**及ぶ、と見ている。** この ADR の一次実測（陽性対照・退行の確認・レイテンシ）は、
+いずれも「`search()` が発行する1本の ANN `SELECT` に対して、`hnsw.iterative_scan` を
+`off` から `relaxed_order` に変えたときの結果・レイテンシがどう変わるか」を測っている
+——測定対象は SQL の実行そのものであり、その SQL を呼び出す TypeScript 側の口が
+`search()` か `searchMany()` かには依存しない。`searchMany()` の `LATERAL` の中身
+（`WHERE`/`ORDER BY`/`LIMIT`、`buildFilterConditions` を含む）は `search()` の
+`SELECT` と一字一句同じであり、変わるのはクエリベクトルの出どころが1個の
+プレースホルダから `VALUES` の列になっただけである（`vector-store.ts` の doc
+コメント参照）。加えて、`vector-store-search-many.postgres.test.ts` の一致の歯
+（歯1・歯2）が、`searchMany()` の結果が同じクエリを1本ずつ `search()` した場合と
+集合・順序ともに完全一致することを実測している——`search()` の正しさに対する
+`relaxed_order` の効果（この ADR の「一次実測」節）は、この一致を経由して
+`searchMany()` の各クエリの結果にもそのまま伝わる、という見立てである。
+
+**測り直していないもの**: レイテンシ（この ADR の「一次実測」3番、p50/p95）は
+`search()` を単発で呼んだときの往復コストを測ったものであり、`searchMany()` が
+複数クエリを1回の往復に束ねたときのレイテンシは測っていない——ただし Issue #377の
+主題は往復**数**の削減であり、複数クエリを1トランザクションにまとめることで
+「引き受けた負債」2番（`BEGIN`/`SET LOCAL`/`SELECT`/`COMMIT` の往復コスト）は
+クエリ数ぶん複製されるのではなく1回に共有されるため、悪化ではなく改善の方向だと
+考えられる（実測はしていない）。`hnsw.max_scan_tuples` の天井（「引き受けた負債」
+1番）は `searchMany()` でも変えておらず、複数の `LATERAL` 分岐それぞれが独立に
+この天井の対象になる——1回のクエリで束ねるアンカー数が増えるほど、天井に当たる
+分岐が増える可能性はあるが、これも測っていない。
+
+### 確かめていないこと
+
+- `searchMany()` を複数クエリで呼んだときの `recall@40` 相当の正しさは、`search()`
+  との一致の歯を経由した見立てであり、`searchMany()` 自身に対して ADR 0284 の
+  「一次実測」と同じ形（陽性対照・退行の確認）を独立に測り直してはいない。
+- `searchMany()` のレイテンシ（束ねるクエリ数を振ったときの p50/p95）は測っていない。
+- 複数の `LATERAL` 分岐が同時に `hnsw.max_scan_tuples` の天井に当たったときの挙動は
+  測っていない。
