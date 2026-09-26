@@ -1661,7 +1661,20 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     expect(returnedA.contestedWith).toBeUndefined();
   });
 
-  it("contested だが相手が最終的な結果集合に居ない（連想枠経由で単独候補になり、対向は recall にそもそも掛からない）場合は contestedWith が付かない", async () => {
+  it("🔴→✅ 2026-09-27 更新（Issue #959）: 連想枠経由の contested は、対向が取れなければ単独では返らず Unit ごと落ちる", async () => {
+    // このテストはもともと「連想枠経由で単独候補になり、対向は recall にそもそも
+    // 掛からない場合は contestedWith が付かない」という、ADR 0335 が観測した
+    // “穴” をそのまま固定していた——`contestedAlone` が対向なしの単独で
+    // `result.memories` に返ることを「正しい」前提として assert していた。
+    //
+    // Issue #959 はこの穴を、原則1（`docs/architecture.md` §0）・`MemoryStore` の契約
+    // （`status: 'contested'` を単独で返してはならない）と食い違うものとして扱い、
+    // 案 (B) で塞いだ——段3.5（連想枠）が選んだ contested にも、段3と同じ必須の
+    // 同伴取得規則をかける。対向（`phantomPartner`）は forgotten で取得できないため、
+    // 段3の「forget した対向は companion として使わない」（ADR 0087 決定6）と同じ
+    // 判断で、`contestedAlone` は Unit ごと落ちるようになった——単独では二度と返らない。
+    // 歯の本体は `recall-association-contested-companion.test.ts` に集約してあり、
+    // ここでは「このファイルの既存の歯が新しい挙動と食い違わない」ことだけを保つ。
     const { runtime, stores } = buildRuntime();
     // 対向側: 実在はするが forgotten（status が active/contested のどちらでもないため、
     // 段1の候補生成にも段3の同伴取得にも一切掛からない——`FakeMemoryStore` の外部キー
@@ -1676,8 +1689,8 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     });
     // 連想で拾われる側はクエリには当たらない（below_threshold）が、アンカーとは近い。
     // contested だが、contestedWithId が指す相手（phantomPartner）は forgotten なので
-    // 段3の対の組み立て（`retrievedVia: "mandatory_companion"` 側の companion フィルタ、
-    // `docs/recall.md` §8）を一切通らず、最終的な結果集合に一度も現れない。
+    // 段3.5 の必須同伴取得（Issue #959、段3と同じ `fetchMandatoryCompanions`）を
+    // 一切通らず、最終的な結果集合に一度も現れない。
     const contestedAlone = await createEmbeddedMemory(stores, [0, 1], {
       digest: "対向が居ない矛盾",
       status: "contested",
@@ -1690,10 +1703,13 @@ describe("recall() — 段3: contestedWith（互いに contested な記憶が、
     });
 
     expect(result.memories.some((m) => m.memoryId === phantomPartner.id)).toBe(false);
+    // Issue #959 以前はここが `toBeDefined()`（単独で返る）だった——いまは Unit ごと
+    // 落ちるので `undefined`。
     const returned = result.memories.find((m) => m.memoryId === contestedAlone.id);
-    expect(returned).toBeDefined();
-    expect(returned?.retrievedVia).toBe("association");
-    expect(returned?.contestedWith).toBeUndefined();
+    expect(returned).toBeUndefined();
+    expect(result.omitted.some((o) => o.kind === "unit_assembly_dropped" && o.count >= 1)).toBe(
+      true,
+    );
     void anchor;
   });
 });
