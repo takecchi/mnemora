@@ -294,3 +294,73 @@ ANN がテナント全体から 40 件を取り、後段のフィルタで subje
 - **subject が全体に占める割合の境目を特定していない。** 10%（10,000/100,000）で HNSW へ
   戻ったことは分かったが、**何%で切り替わるかは測っていない。**
 - 次元は 256 固定、同時実行下では測っていない（上の追記と同じ）。
+
+---
+
+## 追記（2026-09-27）: Issue #1005（scale-bench の seedVectors が全行に同じベクトルを入れていた不具合）を踏まえた当て直し
+
+上の「追記（2026-09-06）」「追測（2026-09-06）」が使った `packages/postgres/src/bench/scale-bench.ts`
+の `seedVectors` は、`ARRAY(SELECT random() ...)` の副問い合わせが外側の行を参照していなかった
+ため、PostgreSQL がこれを InitPlan として1回だけ評価し、**全行に同じベクトルを入れていた**
+（Issue #1005、PR #1008 で修正、main `76db71c`）。つまり上の2つの実測表は、いずれも
+全行同一ベクトルの表に対する測定である。
+
+直った bench（main `76db71c`）で、同じ規模・同じ Part で測り直した（手元 PostgreSQL 17.11 +
+pgvector 0.8.0。EXPLAIN 捕捉部分のみ、ADR 0284 の `SET LOCAL` に対応させる目的でローカルに
+書き換えている——測定対象のクエリ・ロジックは変えていない）。
+
+### Part2（「追記」の実測表との対応、search: subjectId 有無）
+
+| 規模 | 変種 | 元（同一ベクトル） | 直した後 |
+|---|---|---|---|
+| 10,000 | subjectId 無し | 1.1ms / HNSW=yes / SeqScan=no | 5.6ms / HNSW=yes / SeqScan=no |
+| 10,000 | subjectId 有り | 0.9ms / HNSW=no / SeqScan=no | 2.6ms / HNSW=no / SeqScan=no |
+| 100,000 | subjectId 無し | 1.2ms / HNSW=yes / SeqScan=no | 6.4ms / HNSW=yes / SeqScan=no |
+| 100,000 | subjectId 有り | 0.9ms / HNSW=no / SeqScan=no | 2.5ms / HNSW=no / SeqScan=no |
+
+### Part3（「追測」の実測表との対応、subject size 10/1,000/10,000 @ 全体100,000）
+
+| subject の大きさ | 元 search | 直した後 search |
+|---:|---|---|
+| 10 | 0.8ms / HNSW無 / SeqScan無 | 2.5ms / HNSW無 / SeqScan無 |
+| 1,000 | 2.5ms / HNSW無 / SeqScan無 | 5.7ms / HNSW無 / SeqScan無 |
+| 10,000 | 1.7ms / **HNSW有** / SeqScan無 | 29.0ms / **HNSW有** / SeqScan無 |
+
+**プラン選択（HNSW使用の有無・Seq Scan の有無）という定性的な結論——「3領域」の物語を含め——は
+変わらない。**
+
+### 「HNSW が返した 384 件のうち 6 件だけ」の対応物
+
+上の「大きい subject では別の問題が出る」節が載せた EXPLAIN（HNSW 索引スキャンが384件を返し、
+`memories` との Nested Loop 後に6件しか残らない）を、実測に使われたコミット
+（`gh run view 34010394105` の headSha。2026-09-06 当時のもので `seedVectors` は
+バグ入りのまま）を `git worktree` でチェックアウトし、(a) 無改造、(b) PR #1008 と同じ
+`WHERE m.id IS NOT NULL` の1行修正のみ、の2通りで同じ規模（Part3、subject=10,000 @
+全体100,000）を測り直した。
+
+| 条件 | HNSW 索引スキャンの生候補（`actual rows`） | `memories` との Nested Loop 後の生存（`Limit` の `actual rows`） |
+|---|---:|---:|
+| 無改造（当時のまま） | 391 | **0** |
+| `seedVectors` の修正のみ | 40 | **1** |
+
+桁・現象とも本文の「384件中6件」と一致する（HNSW の近似は索引構築ごとに揺れるため、具体的な
+値そのものは run ごとに変動する——ADR 0025 が記録している通り）。**修正しても「大きい subject
+では HNSW の生存がほぼ0件になる」という現象自体は変わらない。**
+
+### 絶対時間の差の由来
+
+直した bench の値（上表右列）は「今日の main」全体（`packages/postgres` の他の変更を含む）で
+測った値であり、**同一ベクトルの不具合を直しただけの効果ではない。** 上と同じ対照実験
+（無改造 / `seedVectors` の修正のみ）で切り分けると、Part3・subject=10,000 の search の所要
+時間は 3.2ms→2.4ms とほぼ横ばいだった。⟹ 上表の 1.7ms→29.0ms という大きな差は、seedVectors
+の修正ではなく、**2026-09-06〜2026-09-27 の間に入った別の変更に由来する。**
+
+この別の変更を実測で特定した：`e12b49b`「段1の `search()` に `hnsw.iterative_scan =
+relaxed_order` を採用し、他テナントの near-duplicate による全滅を塞ぐ（ADR 0284）」
+（2026-09-24）の親コミットと `e12b49b` 自身に、それぞれ `seedVectors` の修正のみを当てて
+Part4（`runtime.recall()`、subject=10,000）を測ると、`hits`（`kPrime=40` に対する ANN の
+生存件数）が親コミットでは 2、`e12b49b` では 40 だった。**同じベクトル修正の下で
+`e12b49b` を境に切り替わることを実測で確認した**（ADR 0284 の詳細は同 ADR を見ること）。
+
+環境: 手元 PostgreSQL 17.11 / pgvector 0.8.0。元の測定は GitHub Actions CI
+「PostgreSQL 17 + pgvector」（正確な pgvector の patch バージョンは当時の ADR 本文に記載が無い）。
