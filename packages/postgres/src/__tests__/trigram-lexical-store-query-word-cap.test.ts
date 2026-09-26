@@ -99,9 +99,11 @@ describe("PostgresTrigramLexicalStore.search: ASCII 側のクエリ語数の上�
       }),
     );
 
-    // ASCII の異なる語を上限より多く含むが、日本語部分（田中さんについて…）は
-    // そのまま――ASCII 側の切り詰めが日本語側の語彙判定を壊さないことを見る。
-    const asciiBeyondCap = fillerWords(LEXICAL_QUERY_MAX_DISTINCT_WORDS + 50).join(" ");
+    // ASCII の異なる語を上限より多く含む（が、クエリ全体の文字数の上限
+    // （LEXICAL_QUERY_MAX_TOTAL_CHARS）には触れない範囲に収める）。日本語部分
+    // （田中さんについて…）はそのまま――ASCII 側の切り詰めが日本語側の語彙判定を
+    // 壊さないことを見る。
+    const asciiBeyondCap = fillerWords(LEXICAL_QUERY_MAX_DISTINCT_WORDS + 5).join(" ");
     const query = `${asciiBeyondCap} 田中さんについて何か言ってましたか`;
 
     const hits = await trigramStore.search(ctx, query, {

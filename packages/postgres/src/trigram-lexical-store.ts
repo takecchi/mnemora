@@ -2,7 +2,11 @@ import { sql } from "drizzle-orm";
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { TRIGRAM_JAPANESE_QUERY_MAX_CHARS, capLexicalQueryWords } from "./lexical-query-cap.js";
+import {
+  TRIGRAM_JAPANESE_QUERY_MAX_CHARS,
+  capLexicalQueryTotalChars,
+  capLexicalQueryWords,
+} from "./lexical-query-cap.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -512,8 +516,14 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  * `mnemora_lexical_query_terms` と同じ理由）、日本語側に通すと日本語の語彙が消えてしまう。
  * **代わりに、日本語側には別の文字数の上限（{@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）を
  * `LEFT(...)` で直接掛ける**——`mnemora_trigram_query_nonascii` が抽出した非 ASCII の
- * 連なりが長いと `word_similarity` の計算量が文字数に応じて膨らむため
- * （`TRIGRAM_JAPANESE_QUERY_MAX_CHARS` の doc 参照）。
+ * 連なりにも上限を置いた（`TRIGRAM_JAPANESE_QUERY_MAX_CHARS` の doc 参照）。
+ *
+ * **🔴 Issue #878（同日中の見直し）: `query` 全体の文字数にも上限
+ * （{@link LEXICAL_QUERY_MAX_TOTAL_CHARS}）を置いた。**ASCII 側・日本語側の両方に
+ * 同じ1つの上限として効かせる——`asciiQuery`（`capLexicalQueryWords` 経由で内部的に
+ * 適用）と `jaTerm`（`totalCappedQuery` を明示的に経由）のどちらも、この上限を
+ * 通った後の文字列を基にする（`lexical-query-cap.ts` の
+ * `LEXICAL_QUERY_MAX_TOTAL_CHARS` の doc 参照）。
  *
  * **🔴 Issue #878: ASCII 側の `coverage` も、行ごとの再計算をやめた。**
  * `mnemora_trigram_hybrid_coverage(content, query, threshold)` を直接呼ぶ代わりに、
@@ -535,6 +545,9 @@ export function buildTrigramLexicalSearchSelect(
   query: string,
   opts: { limit: number; filter: LexicalFilter; threshold: number },
 ): SQL {
+  // Issue #878: 全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc）は
+  // ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として効かせる。
+  const totalCappedQuery = capLexicalQueryTotalChars(query);
   const asciiQuery = capLexicalQueryWords(query);
   const conditions = [sql`tenant_id = ${opts.filter.tenantId}`];
   if (opts.filter.status !== undefined) {
@@ -571,16 +584,22 @@ export function buildTrigramLexicalSearchSelect(
   }
 
   const asciiTsQuery = sql`mnemora_lexical_query_or(${asciiQuery})`;
-  // Issue #878: mnemora_trigram_query_nonascii が抽出した非 ASCII の連なりに、
-  // word_similarity へ渡す前に LEFT(...) で文字数の上限をかける
-  // （TRIGRAM_JAPANESE_QUERY_MAX_CHARS の doc 参照）。mnemora_trigram_strip_noise は
-  // 切り詰めた**後**の文字列に掛ける——上限に触れない大多数の日本語クエリでは
-  // LEFT(...) が no-op になり、strip_noise の入力は今までと1バイトも変わらない。
-  // 上限に触れる場合は、切り詰め後の短い文字列に strip_noise を掛けるほうが軽い
-  // （**⚠ この順序により、切り詰め境界のすぐ手前にノイズ語尾の一部が残ることがある**
-  // ——strip_noise の正規表現は完全な語形を対象にしており、途中で切れた断片までは
-  // 除去しない。上限に触れるクエリでのみ起きる、副作用として引き受けた挙動である）。
-  const jaTerm = sql`mnemora_trigram_strip_noise(LEFT(mnemora_trigram_query_nonascii(${query}), ${TRIGRAM_JAPANESE_QUERY_MAX_CHARS}))`;
+  // Issue #878: mnemora_trigram_query_nonascii には query そのものではなく
+  // totalCappedQuery（全体の文字数の上限を通した後の文字列）を渡す——ASCII 側と
+  // 同じ1つの上限を日本語側にも効かせるため（LEXICAL_QUERY_MAX_TOTAL_CHARS の doc
+  // 参照）。上限に触れない大多数のクエリでは totalCappedQuery === query であり、
+  // 挙動は変わらない。
+  //
+  // mnemora_trigram_query_nonascii が抽出した非 ASCII の連なりに、word_similarity へ
+  // 渡す前に LEFT(...) で別の文字数の上限をかける（TRIGRAM_JAPANESE_QUERY_MAX_CHARS の
+  // doc 参照）。mnemora_trigram_strip_noise は切り詰めた**後**の文字列に掛ける——
+  // 上限に触れない大多数の日本語クエリでは LEFT(...) が no-op になり、strip_noise の
+  // 入力は今までと1バイトも変わらない。上限に触れる場合は、切り詰め後の短い文字列に
+  // strip_noise を掛けるほうが軽い（**⚠ この順序により、切り詰め境界のすぐ手前に
+  // ノイズ語尾の一部が残ることがある**——strip_noise の正規表現は完全な語形を
+  // 対象にしており、途中で切れた断片までは除去しない。上限に触れるクエリでのみ
+  // 起きる、副作用として引き受けた挙動である）。
+  const jaTerm = sql`mnemora_trigram_strip_noise(LEFT(mnemora_trigram_query_nonascii(${totalCappedQuery}), ${TRIGRAM_JAPANESE_QUERY_MAX_CHARS}))`;
 
   // ASCII 側は既存経路と同じ述語（式索引 idx_memories_lexical がそのまま選ばれる）。
   // 日本語側は pg_trgm の演算子形（`content %> $ja`）——`createOptionalTrigramIndex` の

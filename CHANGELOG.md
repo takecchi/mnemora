@@ -157,7 +157,10 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
 - **語彙検索（`PostgresLexicalStore`/`PostgresTrigramLexicalStore`、`InMemoryLexicalStore`、
-  `FakeLexicalStore`）で使うクエリの、異なる語の数（32）・1語あたりの文字数に上限を設けた**
+  `FakeLexicalStore`）で使うクエリの、異なる語の数（`LEXICAL_QUERY_MAX_DISTINCT_WORDS` = 32）・
+  1語あたりの文字数（`LEXICAL_QUERY_MAX_WORD_CHARS` = 64、trigram の日本語側は
+  `TRIGRAM_JAPANESE_QUERY_MAX_CHARS` = 100）・クエリ全体の文字数
+  （`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600）に上限を設けた**
   （[Issue #878](https://github.com/takecchi/mnemora/issues/878)、
   [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) 追記節）。
 

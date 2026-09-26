@@ -50,10 +50,10 @@ function tokenize(text: string): string[] {
 }
 
 /**
- * クエリの異なる語数・語ごとの文字数の上限（Issue #878、2026-09-26、
+ * クエリ全体の文字数・異なる語数・語ごとの文字数の上限（Issue #878、2026-09-26、
  * クローン miku の判断）。
  *
- * `packages/postgres` の `LEXICAL_QUERY_MAX_DISTINCT_WORDS`
+ * `packages/postgres` の `LEXICAL_QUERY_MAX_TOTAL_CHARS`/`LEXICAL_QUERY_MAX_DISTINCT_WORDS`
  * （`packages/postgres/src/lexical-query-cap.ts`）、`packages/core` の
  * `FakeLexicalStore` が持つ同名の定数（`packages/core/src/__tests__/runtime-fakes.ts`）と
  * **同じ値**（3箇所とも手で揃える——`InMemoryLexicalStore`/`FakeLexicalStore` は
@@ -63,8 +63,8 @@ function tokenize(text: string): string[] {
  *
  * **`tokenize()` は非文字・非数字の連なりをすでに区切り文字として分割する**
  * （`\p{L}\p{N}` の否定クラス）ため、postgres 側と同じ理由がそのまま当てはまる
- * わけではない。**それでも語ごとの文字数の上限を同じ形で入れる**のは、
- * 3実装の挙動をできるだけ揃えるためである。
+ * わけではない。**それでも語ごとの文字数・クエリ全体の文字数の上限を同じ形で
+ * 入れる**のは、3実装の挙動をできるだけ揃えるためである。
  */
 // ⚠ export しない——`packages/testkit` には2つ公開入口があり（`index.ts` と
 // `fixtures.ts`）、`fixtures.ts` は `export { InMemoryLexicalStore } from "..."` という
@@ -79,13 +79,31 @@ function tokenize(text: string): string[] {
 // このファイルのソースを読んで検査する。
 const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
+// `packages/postgres` の LEXICAL_QUERY_MAX_TOTAL_CHARS と同じ値・同じ理由
+// （lexical-query-cap.ts の doc 参照——語数・1語の文字数を両方とも上限まで使った
+// 入力は、この2つの上限だけでは十分に小さくならない場合があるため、クエリ全体の
+// 文字数にも独立した上限を置く）。
+const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
+
+/**
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
+ * 切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。他のどの上限
+ * （語数・1語の文字数）よりも先に適用する（`packages/postgres` の
+ * `capLexicalQueryTotalChars` と同じ位置づけ）。
+ */
+function capQueryTotalChars(query: string): string {
+  return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
+    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    : query;
+}
 
 /**
  * `tokenize(query)` の結果から、1語が {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える
  * 場合は先頭からその文字数に切り詰め、そのうえで異なる語を先頭からの出現順に
  * {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個まで残した `Set` を返す。
  * どちらの上限にも触れない限り、全ての語を含む `Set` をそのまま返す
- * （1件も切り捨てない）。
+ * （1件も切り捨てない）。**呼び出し側が、`tokenize` に渡す前の `query` に
+ * {@link capQueryTotalChars} をあらかじめ通しておくこと**（`search` 参照）。
  */
 function capQueryTerms(tokens: string[]): Set<string> {
   const truncatedTokens = tokens.map((token) =>
@@ -179,8 +197,9 @@ export class InMemoryLexicalStore implements LexicalStore {
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
-    // Issue #878: 異なる語数に上限を置く（capQueryTerms の doc 参照）。
-    const queryTerms = capQueryTerms(tokenize(query));
+    // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
+    // （capQueryTotalChars/capQueryTerms の doc 参照）。全体の文字数を最初に適用する。
+    const queryTerms = capQueryTerms(tokenize(capQueryTotalChars(query)));
     if (queryTerms.size === 0) {
       // 契約: 語彙が1つも取れないクエリは0件（`lexical-store-conformance.ts` の歯）。
       return [];

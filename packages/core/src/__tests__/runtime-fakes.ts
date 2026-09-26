@@ -2104,12 +2104,12 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  */
 
 /**
- * クエリの異なる語数・語ごとの文字数の上限（Issue #878、2026-09-26、
+ * クエリ全体の文字数・異なる語数・語ごとの文字数の上限（Issue #878、2026-09-26、
  * クローン miku の判断）。
  *
- * `packages/postgres` の `LEXICAL_QUERY_MAX_DISTINCT_WORDS`/`LEXICAL_QUERY_MAX_WORD_CHARS`
- * （`packages/postgres/src/lexical-query-cap.ts`）、`packages/testkit` の
- * `InMemoryLexicalStore` が持つ同名の定数
+ * `packages/postgres` の `LEXICAL_QUERY_MAX_TOTAL_CHARS`/`LEXICAL_QUERY_MAX_DISTINCT_WORDS`/
+ * `LEXICAL_QUERY_MAX_WORD_CHARS`（`packages/postgres/src/lexical-query-cap.ts`）、
+ * `packages/testkit` の `InMemoryLexicalStore` が持つ同名の定数
  * （`packages/testkit/src/__fixtures__/in-memory-lexical-store.ts`）と**同じ値**
  * （3箇所とも手で揃える——`FakeLexicalStore` は `@mnemora/postgres`/`@mnemora/testkit`
  * の外に居るため、import で共有できない。値がずれていないことは `packages/postgres`
@@ -2126,13 +2126,27 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  */
 export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 export const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
+export const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
+
+/**
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
+ * 切り詰める。超えなければ `query` をそのまま返す。他のどの上限（語数・1語の文字数）
+ * よりも先に適用する（`packages/postgres` の `capLexicalQueryTotalChars` と同じ
+ * 位置づけ）。
+ */
+function capFakeLexicalQueryTotalChars(query: string): string {
+  return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
+    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    : query;
+}
 
 /**
  * `rawTerms`（空白区切りの生の語の配列）から、1語が
  * {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える場合は先頭からその文字数に切り詰め、
  * そのうえで異なる語を先頭からの出現順に {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} 個
  * まで残した `Set` を返す。どちらの上限にも触れない限り、全ての語を含む `Set` を
- * そのまま返す（1件も切り捨てない）。
+ * そのまま返す（1件も切り捨てない）。**呼び出し側が、分割する前の生の `query` に
+ * {@link capFakeLexicalQueryTotalChars} をあらかじめ通しておくこと**（`search` 参照）。
  */
 function capFakeLexicalQueryTerms(rawTerms: string[]): Set<string> {
   const truncated = rawTerms.map((term) =>
@@ -2181,8 +2195,14 @@ export class FakeLexicalStore implements LexicalStore {
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
-    // Issue #878: 異なる語数・語ごとの文字数に上限を置く（capFakeLexicalQueryTerms の doc 参照）。
-    const termSet = capFakeLexicalQueryTerms(query.split(/\s+/).filter((t) => t.length > 0));
+    // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
+    // （capFakeLexicalQueryTotalChars/capFakeLexicalQueryTerms の doc 参照）。
+    // 全体の文字数を最初に適用する。
+    const termSet = capFakeLexicalQueryTerms(
+      capFakeLexicalQueryTotalChars(query)
+        .split(/\s+/)
+        .filter((t) => t.length > 0),
+    );
     const hits: (LexicalHit & { recordedAt: Date })[] = [];
     for (const memory of this.backing.memories.values()) {
       if (memory.tenantId !== opts.filter.tenantId || memory.tenantId !== ctx.tenantId) continue;

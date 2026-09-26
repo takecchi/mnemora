@@ -44,7 +44,10 @@ describe("capLexicalQueryWords", () => {
   });
 
   it("重複語をいくら増やしても、異なる語が上限以内なら変えない", () => {
-    const query = Array.from({ length: LEXICAL_QUERY_MAX_DISTINCT_WORDS * 5 }, (_, i) =>
+    // クエリ全体の文字数の上限（LEXICAL_QUERY_MAX_TOTAL_CHARS）には触れない範囲で、
+    // 異なる語の数の上限（LEXICAL_QUERY_MAX_DISTINCT_WORDS）よりはるかに多い回数
+    // 重複させる。
+    const query = Array.from({ length: LEXICAL_QUERY_MAX_DISTINCT_WORDS * 2 }, (_, i) =>
       i % 3 === 0 ? "alpha" : i % 3 === 1 ? "beta" : "gamma",
     ).join(" ");
     expect(capLexicalQueryWords(query)).toBe(query);

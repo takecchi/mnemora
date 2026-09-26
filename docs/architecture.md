@@ -736,12 +736,19 @@ interface LexicalStore {
 - **省略可能な依存である**（`RuntimeDeps.lexicalStore?`）。無くても mnemora は成立する。
   **ただし `RecallQuery.channels` に `"lexical"` を明示したのに配線が無ければ `recall()` は投げる**
   ——黙って0件を返すと「探したが無かった」と「探していない」が同じ顔になる（ADR 0084 §4.2）。
-- **⚠ 2026-09-26 追記（Issue #878、ADR 0092 追記節）: `query` の異なる語の数（32）・
-  1語あたりの文字数に上限がある（`packages/postgres` の
+- **⚠ 2026-09-26 追記（Issue #878、ADR 0092 追記節）: `query` の異なる語の数
+  （`LEXICAL_QUERY_MAX_DISTINCT_WORDS` = 32）・1語あたりの文字数
+  （`LEXICAL_QUERY_MAX_WORD_CHARS` = 64）・クエリ全体の文字数
+  （`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600）に上限がある（`packages/postgres` の
   `PostgresLexicalStore`/`PostgresTrigramLexicalStore`、`packages/testkit` の
-  `InMemoryLexicalStore`、`packages/core` の `FakeLexicalStore`）。**
+  `InMemoryLexicalStore`、`packages/core` の `FakeLexicalStore`、いずれも
+  `lexical-query-cap.ts`/同等の定数）。**
   超えた分は先頭から使う——例外にはならない（「一致しなかった」と同じ顔になる）。
   重複する語は先にまとめてから数えるため、上限に触れない大多数のクエリには影響しない。
+  切り詰めの順序はクエリ全体の文字数が最初（`capLexicalQueryTotalChars` の doc 参照）。
+  `PostgresTrigramLexicalStore` の日本語側（trigram）には別途
+  `TRIGRAM_JAPANESE_QUERY_MAX_CHARS` = 100 の上限があり、クエリ全体の文字数の上限は
+  ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として先に効く。
 
 ### 5.3 RelationStore — Phase 2（`status`/`superseded_by_id` 列のみ Phase 1）
 

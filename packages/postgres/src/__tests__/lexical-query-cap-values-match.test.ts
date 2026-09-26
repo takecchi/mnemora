@@ -4,8 +4,9 @@ import { describe, expect, it } from "vitest";
 
 /**
  * Issue #878（2026-09-26、クローン miku の判断）: クエリの異なる語数
- * （`LEXICAL_QUERY_MAX_DISTINCT_WORDS`）・1語あたりの文字数（`LEXICAL_QUERY_MAX_WORD_CHARS`）の
- * 上限は、3つの実装（`packages/postgres`/`packages/testkit`/`packages/core`）が
+ * （`LEXICAL_QUERY_MAX_DISTINCT_WORDS`）・1語あたりの文字数（`LEXICAL_QUERY_MAX_WORD_CHARS`）・
+ * クエリ全体の文字数（`LEXICAL_QUERY_MAX_TOTAL_CHARS`）の上限は、
+ * 3つの実装（`packages/postgres`/`packages/testkit`/`packages/core`）が
  * それぞれ独立に持つ定数であり、import では共有できない
  * （`packages/core` は `packages/postgres`/`packages/testkit` に依存せず、
  * `packages/testkit`/`packages/postgres` は互いに依存しない——`package.json` の
@@ -70,6 +71,27 @@ describe("クエリの語数・文字数の上限: postgres/testkit/core の3実
     const coreValue = extractConstant(
       join(REPO_ROOT, "packages/core/src/__tests__/runtime-fakes.ts"),
       "LEXICAL_QUERY_MAX_WORD_CHARS",
+    );
+
+    expect({ postgresValue, testkitValue, coreValue }).toEqual({
+      postgresValue: testkitValue,
+      testkitValue,
+      coreValue: testkitValue,
+    });
+  });
+
+  it("LEXICAL_QUERY_MAX_TOTAL_CHARS が3ファイルで一致する", () => {
+    const postgresValue = extractConstant(
+      join(REPO_ROOT, "packages/postgres/src/lexical-query-cap.ts"),
+      "LEXICAL_QUERY_MAX_TOTAL_CHARS",
+    );
+    const testkitValue = extractConstant(
+      join(REPO_ROOT, "packages/testkit/src/__fixtures__/in-memory-lexical-store.ts"),
+      "LEXICAL_QUERY_MAX_TOTAL_CHARS",
+    );
+    const coreValue = extractConstant(
+      join(REPO_ROOT, "packages/core/src/__tests__/runtime-fakes.ts"),
+      "LEXICAL_QUERY_MAX_TOTAL_CHARS",
     );
 
     expect({ postgresValue, testkitValue, coreValue }).toEqual({

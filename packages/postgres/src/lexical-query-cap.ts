@@ -11,6 +11,12 @@
  *
  * ## 何をするか
  *
+ * 0. **クエリ全体の文字数が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、
+ *    先頭からその文字数に切り詰める。**これは他のどの段よりも先に行う——以降の
+ *    段（分割・重複まとめ・語数・1語の文字数）は、すべてこの時点で既に短くなった
+ *    入力に対して行われる。語数・1語の文字数の上限（1〜3）を組み合わせても、
+ *    なお大きな入力を許しうる場合があるため、入力そのものを先に縮める1段を
+ *    独立に持つ（{@link LEXICAL_QUERY_MAX_TOTAL_CHARS} の doc 参照）。
  * 1. **重複する語を1つにまとめる。**`mnemora_lexical_query_tsqueries` 自身が
  *    `array_agg(DISTINCT q)` で重複を畳んでいるため（`migrations/0009_*.sql`）、
  *    まとめても最終的な `coverage`/候補集合は変わらない——同じ語を何度呼び出しても
@@ -54,6 +60,47 @@
 export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 
 /**
+ * クエリ全体の文字数の上限（Issue #878、2026-09-26、クローン miku の判断）。
+ *
+ * {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}（語数）と
+ * {@link LEXICAL_QUERY_MAX_WORD_CHARS}（1語の文字数）を両方とも上限まで使った入力は、
+ * この2つの上限だけでは十分に小さくならない場合がある。**⟹ クエリ全体の文字数にも、
+ * 独立した上限を置く。**
+ *
+ * この上限は、他の上限（語数・1語の文字数）より**先に**適用する——クエリ全体を
+ * 先頭からこの文字数に切り詰めてから、残りの段（語への分割・重複まとめ・語数・
+ * 1語の文字数）を行う（`capLexicalQueryWords` 参照）。
+ *
+ * **ASCII 側・日本語側（`PostgresTrigramLexicalStore` の非 ASCII 側）の両方に、
+ * 同じ1つの上限として当てる**（軸を分けない）——`PostgresTrigramLexicalStore` は
+ * ASCII 側の処理（`capLexicalQueryWords`）と日本語側の処理
+ * （`mnemora_trigram_query_nonascii` に渡す SQL 側の抽出）の両方に、この上限で
+ * 切り詰めた**同じ**文字列を渡す（`buildTrigramLexicalSearchSelect` 参照）。
+ * 日本語側は独自の文字数の上限（{@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS}）を
+ * 別に持っているが、それは分かち書きをしない非 ASCII の連なり**だけ**を見た上限であり、
+ * クエリ全体（ASCII と非 ASCII が混在した生の文字列）を見るこの上限とは対象が異なる
+ * ——両方が独立に効く。
+ *
+ * 値を選ぶ基準にしたのは次の2点（両方を同時に満たす値は無かった——マネージャーへの
+ * 報告に数字つきで記録した。この ADR 0092 追記節「確かめていないこと」参照）:
+ * (a) 自然文の長いクエリ（数百文字程度）を切り詰めない、
+ * (b) 上限を組み合わせた最悪の入力でも、1回の検索がごく短い時間に収まる。
+ * **この実装では (a) を優先し、(b) は「無制限よりは大幅に縮めたが、目標には届いていない」
+ * という位置づけである**（採らなかった値・引き受けた残課題は ADR 0092 追記節参照）。
+ */
+export const LEXICAL_QUERY_MAX_TOTAL_CHARS = 600;
+
+/**
+ * `query` が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭からその文字数に
+ * 切り詰める。超えなければ `query` をそのまま返す（1バイトも変えない）。
+ */
+export function capLexicalQueryTotalChars(query: string): string {
+  return query.length > LEXICAL_QUERY_MAX_TOTAL_CHARS
+    ? query.slice(0, LEXICAL_QUERY_MAX_TOTAL_CHARS)
+    : query;
+}
+
+/**
  * 1語（空白を含まない、連続した非空白文字の並び）の文字数の上限
  * （Issue #878、2026-09-26、クローン miku の判断）。
  *
@@ -66,34 +113,48 @@ export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
 export const LEXICAL_QUERY_MAX_WORD_CHARS = 64;
 
 /**
- * `query` の異なる語（`mnemora_lexical_query_terms` と同じ「非 ASCII の連なりを空白に
- * 落とす」処理を経た、空白区切りの語。大文字小文字は無視して重複を見る）が
- * {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} を超えるとき、先頭からその数だけを空白で
- * つないだ文字列を返す。また、1語が {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える場合、
- * その語自体も先頭からその文字数だけに切り詰める（語の途中で切れることがある——
- * `websearch_to_tsquery` に渡す前の生の文字列を切るだけであり、切れた結果が
- * 意味を持つ単位かどうかは問わない）。**どちらの上限にも触れなければ、`query` を
- * そのまま返す**（1バイトも変えない）。
+ * `query` に3段の上限を通す。**0段目（全体の文字数）を最初に適用してから**、
+ * 残りの段（分割・語数・1語の文字数）を行う:
+ *
+ * 0. `query` 全体が {@link LEXICAL_QUERY_MAX_TOTAL_CHARS} を超える場合、先頭から
+ *    その文字数に切り詰める。
+ * 1〜3. （0段目の結果に対して）異なる語（`mnemora_lexical_query_terms` と同じ
+ *    「非 ASCII の連なりを空白に落とす」処理を経た、空白区切りの語。大文字小文字は
+ *    無視して重複を見る）が {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS} を超えるとき、
+ *    先頭からその数だけを空白でつないだ文字列を返す。また、1語が
+ *    {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える場合、その語自体も先頭から
+ *    その文字数だけに切り詰める（語の途中で切れることがある——
+ *    `websearch_to_tsquery` に渡す前の生の文字列を切るだけであり、切れた結果が
+ *    意味を持つ単位かどうかは問わない）。
+ *
+ * **どの上限にも触れなければ、`query` をそのまま返す**（1バイトも変えない）。
  *
  * `mnemora_lexical_query_or`/`mnemora_lexical_query_tsqueries`/`mnemora_lexical_coverage`
  * （`migrations/0009_*.sql`）へ渡す**前**に、呼ぶ側（`lexical-store.ts`/
  * `trigram-lexical-store.ts`）がこれを通す。
  *
- * **非 ASCII（日本語等）の語はここで落ちる**——`mnemora_lexical_query_terms` が
+ * **非 ASCII（日本語等）の語は1〜3段目で落ちる**——`mnemora_lexical_query_terms` が
  * クエリ側の非 ASCII を落とすのと同じ理由（`lexical-store.ts` の
  * `buildLexicalSearchSelect` doc「本文側と query 側で、通す関数が違う」参照。日本語は
  * クエリ側に残しても真陽性を生まない）。**`PostgresTrigramLexicalStore` の日本語側の
- * 語彙判定（`mnemora_trigram_query_nonascii`/`word_similarity`）には、この関数の戻り値
- * ではなく元の `query` をそのまま渡すこと**——この関数は ASCII 語彙チャンネル専用の
- * 上限であり、トライグラム側の日本語処理を切り詰めるものではない
- * （日本語側の文字数の上限は {@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS} が別に持つ。
+ * 語彙判定（`mnemora_trigram_query_nonascii`/`word_similarity`）には、この関数の
+ * 戻り値ではなく {@link capLexicalQueryTotalChars} だけを通した文字列を渡すこと**
+ * ——0段目（全体の文字数）は ASCII・日本語の両方に共通で効かせるが、1〜3段目
+ * （語への分割・語数・1語の文字数）は ASCII 語彙チャンネル専用であり、日本語処理を
+ * 切り詰めるものではない（日本語側の文字数の上限は
+ * {@link TRIGRAM_JAPANESE_QUERY_MAX_CHARS} が別に持つ。
  * `buildTrigramLexicalSearchSelect` 参照）。
  */
 export function capLexicalQueryWords(query: string): string {
+  // 0. クエリ全体の文字数（他のどの段よりも先に適用する。このファイル冒頭の doc・
+  // LEXICAL_QUERY_MAX_TOTAL_CHARS の doc 参照）。
+  const totalCapped = capLexicalQueryTotalChars(query);
+  const wasTotalCapped = totalCapped !== query;
+
   // [:ascii:]（0x00–0x7F）を字句どおり再現するために制御文字の範囲を含める必要がある
   // （migrations/0008_*.sql の同名の POSIX クラスと同じ範囲）。
   // eslint-disable-next-line no-control-regex
-  const asciiOnly = query.replace(/[^\x00-\x7f]+/g, " ");
+  const asciiOnly = totalCapped.replace(/[^\x00-\x7f]+/g, " ");
   const rawTokens = asciiOnly
     .trim()
     .split(/\s+/)
@@ -114,7 +175,11 @@ export function capLexicalQueryWords(query: string): string {
     }
   }
 
-  if (!hasOverlongWord && distinctInFirstSeenOrder.length <= LEXICAL_QUERY_MAX_DISTINCT_WORDS) {
+  if (
+    !wasTotalCapped &&
+    !hasOverlongWord &&
+    distinctInFirstSeenOrder.length <= LEXICAL_QUERY_MAX_DISTINCT_WORDS
+  ) {
     return query;
   }
   return distinctInFirstSeenOrder.slice(0, LEXICAL_QUERY_MAX_DISTINCT_WORDS).join(" ");
