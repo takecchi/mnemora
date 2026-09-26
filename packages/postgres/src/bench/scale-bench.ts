@@ -111,7 +111,7 @@ import { assertSafeIdentifier, embeddingSpaceTableName } from "../embedding-spac
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { dropTempDatabase } from "../__tests__/temp-database.js";
-import { seededRandom } from "../__tests__/test-db.js";
+import { captureClientQuery, explainCaptured, seededRandom } from "../__tests__/test-db.js";
 
 // ---------------------------------------------------------------------------
 // 設定
@@ -296,48 +296,26 @@ async function measureMedian(fn: () => Promise<unknown>): Promise<number> {
 }
 
 /**
- * `pool.query` を一時的に監視し、`matcher` に一致した最初のクエリのテキスト/パラメータを
- * 捕まえる（`vector-search-subject.test.ts` の手法をそのまま踏襲）。drizzle-orm の
- * `db.execute(sql\`...\`)` は内部でこの `pool.query` を通るため、`PostgresMemoryStore` /
- * `PostgresVectorStore` が実際に発行するクエリをそのまま捕まえて、後で
- * `EXPLAIN (ANALYZE, BUFFERS)` にかけられる。
+ * `fn` の中で発行された、`matcher` に一致するクエリを捕まえて `EXPLAIN (ANALYZE, BUFFERS)`
+ * にかけ、プランの全文を返す。`PostgresMemoryStore` / `PostgresVectorStore` が実際に
+ * 発行するクエリをそのまま EXPLAIN するためのもの。
+ *
+ * 捕まえ方と EXPLAIN の打ち方は、テストと同じ `captureClientQuery` / `explainCaptured`
+ * （`__tests__/test-db.ts`、ADR 0284）を使う（Issue #1016）。ADR 0284 以降、`search()` は
+ * `db.transaction()` の中で `SET LOCAL hnsw.iterative_scan` を打ってから SELECT する。
+ * そのトランザクションは `pool.connect()` で借りた client の `client.query()` を使い、
+ * `pool.query` を通らない——以前の `pool.query` を差し替える捕まえ方では search の SQL が
+ * 見えず、Part 2 以降が毎回落ちていた。また、捕まえた SQL を素の `pool.query` で EXPLAIN
+ * すると `SET LOCAL` の効いていないプランを見ることになる。`explainCaptured` は同じ
+ * `SET LOCAL` を同じトランザクションで再生してから EXPLAIN する。
  */
-async function captureQuery(
+export async function captureAndExplain(
   pool: Pool,
   matcher: (text: string) => boolean,
   fn: () => Promise<unknown>,
-): Promise<{ text: string; params: unknown[] }> {
-  let capturedText: string | undefined;
-  let capturedParams: unknown[] | undefined;
-  const originalQuery = pool.query.bind(pool);
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  (pool as any).query = (...args: unknown[]) => {
-    const [config, params] = args as [string | { text: string }, unknown[] | undefined];
-    const text = typeof config === "string" ? config : config.text;
-    if (matcher(text)) {
-      capturedText = text;
-      capturedParams = params;
-    }
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    return (originalQuery as any)(...args);
-  };
-  try {
-    await fn();
-  } finally {
-    pool.query = originalQuery;
-  }
-  if (capturedText === undefined) {
-    throw new Error("captureQuery: matcher に一致するクエリが観測されなかった");
-  }
-  return { text: capturedText, params: capturedParams ?? [] };
-}
-
-async function explainAnalyze(pool: Pool, text: string, params: unknown[]): Promise<string> {
-  const result = await pool.query<{ "QUERY PLAN": string }>(
-    `EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) ${text}`,
-    params,
-  );
-  return result.rows.map((row) => row["QUERY PLAN"]).join("\n");
+): Promise<string> {
+  const captured = await captureClientQuery(matcher, fn);
+  return explainCaptured(pool, captured, "ANALYZE, BUFFERS, FORMAT TEXT");
 }
 
 /** EXPLAIN の全文から、報告に十分な要約を機械的に抜き出す（本文は結果に含める）。 */
@@ -658,12 +636,13 @@ async function benchAggregateScope(
     log(`  aggregateScope（${variant.label}）を計測中...`);
     const medianMs = await measureMedian(() => memoryStore.aggregateScope(ctx, variant.scope));
 
-    const captured = await captureQuery(
-      pool,
-      (text) => text.includes("GROUP BY subject_id"),
-      () => memoryStore.aggregateScope(ctx, variant.scope),
+    const plan = summarizePlan(
+      await captureAndExplain(
+        pool,
+        (text) => text.includes("GROUP BY subject_id"),
+        () => memoryStore.aggregateScope(ctx, variant.scope),
+      ),
     );
-    const plan = summarizePlan(await explainAnalyze(pool, captured.text, captured.params));
 
     log(`    中央値 ${fmtMs(medianMs)} / プラン先頭行: ${plan.topLine}`);
     results.push({ rows: rowCount, subjectCount, variant: variant.label, medianMs, plan });
@@ -737,12 +716,13 @@ async function benchVectorSearch(
       vectorStore.search(ctx, space, queryVector, { limit: 40, filter: variant.filter }),
     );
 
-    const captured = await captureQuery(
-      pool,
-      (text) => text.includes(table) && /order by/i.test(text),
-      () => vectorStore.search(ctx, space, queryVector, { limit: 40, filter: variant.filter }),
+    const plan = summarizePlan(
+      await captureAndExplain(
+        pool,
+        (text) => text.includes(table) && /order by/i.test(text),
+        () => vectorStore.search(ctx, space, queryVector, { limit: 40, filter: variant.filter }),
+      ),
     );
-    const plan = summarizePlan(await explainAnalyze(pool, captured.text, captured.params));
 
     log(
       `    中央値 ${fmtMs(medianMs)} / HNSW使用=${plan.usesHnsw} / Seq Scan=${plan.hasSeqScan} / プラン先頭行: ${plan.topLine}`,
@@ -798,13 +778,12 @@ async function benchSubjectSize(
   const searchMedianMs = await measureMedian(() =>
     vectorStore.search(ctx, space, queryVector, { limit: 40, filter }),
   );
-  const searchCaptured = await captureQuery(
-    pool,
-    (text) => text.includes(table) && /order by/i.test(text),
-    () => vectorStore.search(ctx, space, queryVector, { limit: 40, filter }),
-  );
   const searchPlan = summarizePlan(
-    await explainAnalyze(pool, searchCaptured.text, searchCaptured.params),
+    await captureAndExplain(
+      pool,
+      (text) => text.includes(table) && /order by/i.test(text),
+      () => vectorStore.search(ctx, space, queryVector, { limit: 40, filter }),
+    ),
   );
   log(
     `    中央値 ${fmtMs(searchMedianMs)} / HNSW使用=${searchPlan.usesHnsw} / ` +
@@ -824,13 +803,12 @@ async function benchSubjectSize(
   const memoryStore = new PostgresMemoryStore(db);
   log(`  aggregateScope（subject=${subjectId}）を計測中...`);
   const scopeMedianMs = await measureMedian(() => memoryStore.aggregateScope(ctx, { subjectId }));
-  const scopeCaptured = await captureQuery(
-    pool,
-    (text) => text.includes("GROUP BY subject_id"),
-    () => memoryStore.aggregateScope(ctx, { subjectId }),
-  );
   const scopePlan = summarizePlan(
-    await explainAnalyze(pool, scopeCaptured.text, scopeCaptured.params),
+    await captureAndExplain(
+      pool,
+      (text) => text.includes("GROUP BY subject_id"),
+      () => memoryStore.aggregateScope(ctx, { subjectId }),
+    ),
   );
   log(
     `    中央値 ${fmtMs(scopeMedianMs)} / Seq Scan=${scopePlan.hasSeqScan} / ` +
