@@ -77,6 +77,7 @@ import type { Db } from "./client.js";
 export declare function buildLexicalSearchSelect(query: string, opts: {
     limit: number;
     filter: LexicalFilter;
+    ctxTenantId?: string;
 }): SQL;
 export declare class PostgresLexicalStore implements LexicalStore {
     private readonly db;
@@ -2224,6 +2225,7 @@ export declare function buildTrigramLexicalSearchSelect(query: string, opts: {
     limit: number;
     filter: LexicalFilter;
     threshold: number;
+    ctxTenantId?: string;
 }): SQL;
 export declare class PostgresTrigramLexicalStore implements LexicalStore {
     private readonly db;
@@ -2232,7 +2234,7 @@ export declare class PostgresTrigramLexicalStore implements LexicalStore {
     static create(db: Db, opts?: {
         threshold?: number;
     }): Promise<PostgresTrigramLexicalStore>;
-    search(_ctx: Ctx, query: string, opts: {
+    search(ctx: Ctx, query: string, opts: {
         limit: number;
         filter: LexicalFilter;
     }): Promise<LexicalHit[]>;

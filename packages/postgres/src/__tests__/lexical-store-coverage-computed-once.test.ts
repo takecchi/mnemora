@@ -108,6 +108,8 @@ describe("PostgresLexicalStore.search: query の分解は候補行ごとにや�
     const select = buildLexicalSearchSelect("shared vocabulary token appears row", {
       limit: 50,
       filter: { tenantId: ctx.tenantId, status: ["active", "contested"] },
+      // `PostgresLexicalStore.search` は `ctx.tenantId` も渡す（Issue #1050）——同じ形で見る。
+      ctxTenantId: ctx.tenantId,
     });
     const result = await db.execute(sql`EXPLAIN (ANALYZE, FORMAT JSON) ${select}`);
     const planRoot = (result.rows[0] as unknown as { "QUERY PLAN": [{ Plan: unknown }] })[

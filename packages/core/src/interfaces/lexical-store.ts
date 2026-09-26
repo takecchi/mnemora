@@ -23,6 +23,12 @@ import type { ProvenanceKind } from "../provenance.js";
  * `lexical-store-conformance.ts` が adapter 非依存の歯として検査する。
  */
 export interface LexicalFilter {
+  /**
+   * **`ctx.tenantId` と AND で掛ける**（Issue #1050）。隔離の境界は `ctx.tenantId` である
+   * （ADR 0007）——adapter は、この欄と `ctx.tenantId` の**両方**に一致する行だけを返す。
+   * 2つが食い違えば0件を返し、例外は投げない。runtime は常に同じ値を渡す。
+   * `VectorFilter.tenantId` と同じ。
+   */
   tenantId: string;
   status?: MemoryStatus[];
   subjectId?: string;

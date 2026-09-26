@@ -32,6 +32,12 @@ import type { ProvenanceKind } from "../provenance.js";
  * 在ることは、どの場合も「filter を無視してよい」ことの根拠ではない。
  */
 export interface VectorFilter {
+  /**
+   * **`ctx.tenantId` と AND で掛ける**（Issue #1050）。隔離の境界は `ctx.tenantId` である
+   * （ADR 0007）——adapter は、この欄と `ctx.tenantId` の**両方**に一致する行だけを返す。
+   * 2つが食い違えば0件を返し、例外は投げない。runtime は常に同じ値を渡す。
+   * `LexicalFilter.tenantId` も同じ。
+   */
   tenantId: string;
   status?: MemoryStatus[];
   /**
@@ -319,9 +325,9 @@ export interface VectorStore {
    * 全件が存在しない/形式に合わなければ空配列を返す。
    *
    * **tenant 境界を必ず掛けること。**`ctx.tenantId` に属さない `memoryId` は、
-   * それが実在しても「存在しない」と同じ扱い（返さない）——`search` の
-   * `filter.tenantId` と同じ境界であり、これを緩めると連想の段がテナントを
-   * 跨いで記憶を漏らす経路になる。
+   * それが実在しても「存在しない」と同じ扱い（返さない）——`search` が
+   * `filter.tenantId` と AND で掛ける `ctx.tenantId` と同じ境界であり（Issue #1050）、
+   * これを緩めると連想の段がテナントを跨いで記憶を漏らす経路になる。
    *
    * 返す順序は `memoryIds` の順序と一致している必要はない——呼び出し側
    * （`recall-runtime.ts`）は `memoryId` をキーに引き直す。
