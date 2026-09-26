@@ -955,6 +955,35 @@ export class FakeMemoryStore implements MemoryStore {
     return results;
   }
 
+  /**
+   * Issue #961: `recordUsage` と `reinforceMany` を1つの口で撃つ（`PostgresMemoryStore`
+   * は1トランザクション）。in-memory にトランザクションは無いので、強化が投げたら
+   * この呼び出しで挿入した使用の行を取り消して、何も起きなかったのと同じに見せる。
+   * この Fake で強化が投げうるのは Invalid Date の `at` だけで（Issue #807）、`at` は
+   * 全件に共通なので、1件目の強化で何も書かずに投げる——強化の部分的な書き込みは残らない。
+   */
+  async recordUsageAndReinforce(
+    ctx: Ctx,
+    recallId: RecallId,
+    memoryIds: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<{ insertedMemoryIds: MemoryId[] }> {
+    const result = await this.recordUsage(ctx, recallId, memoryIds);
+    if (result.insertedMemoryIds.length === 0) {
+      return result;
+    }
+    try {
+      await this.reinforceMany(ctx, result.insertedMemoryIds, at, opts);
+    } catch (err) {
+      for (const memoryId of result.insertedMemoryIds) {
+        this.backing.usages.delete(`${ctx.tenantId}:${recallId}:${memoryId}`);
+      }
+      throw err;
+    }
+    return result;
+  }
+
   async recordUsage(
     ctx: Ctx,
     recallId: string,
@@ -2019,7 +2048,13 @@ export class FakeVectorStore implements VectorStore {
     // `recordedAt` が古いほうが先）に落ちており、Postgres の「新しい方が先」と逆向きだった
     // （`packages/core/src/__tests__/fake-vector-store-tiebreak.test.ts` が歯）。
     hits.sort((a, b) => {
-      if (a.distance !== b.distance) return a.distance - b.distance;
+      // 距離 `NaN`（ゼロベクトル、ADR 0040）は Postgres の `float8` と同じく、どの有限値よりも
+      // 大きく、`NaN` どうしは同点として扱う（Issue #983）。`a.distance - b.distance` だけだと
+      // `NaN` で比較関数が一貫せず、ゼロベクトルの候補の位置が挿入順しだいで揺れる。
+      const aNaN = Number.isNaN(a.distance);
+      const bNaN = Number.isNaN(b.distance);
+      if (aNaN !== bNaN) return aNaN ? 1 : -1;
+      if (!aNaN && a.distance !== b.distance) return a.distance - b.distance;
       const recordedAtDiff = b.recordedAt.getTime() - a.recordedAt.getTime();
       if (recordedAtDiff !== 0) return recordedAtDiff;
       return a.memoryId < b.memoryId ? -1 : a.memoryId > b.memoryId ? 1 : 0;

@@ -32,17 +32,25 @@ describe("examples/chat: createExampleRuntime は Pool 構築後の失敗で Poo
   });
 
   it("Pool を使い切った後の同期検証エラー（不正な MNEMORA_LEXICAL_STORE）で reject しても、Pool のコネクションが Postgres 側に残らない", async () => {
-    const databaseUrl = requireDatabaseUrl();
+    // 間欠的な赤（Issue #974）を避けるため、この歯が作らせる
+    // `Pool` の接続にだけ固有の `application_name` を付け、それだけを数える。以前は
+    // 「自分以外の、同じ DB へのすべての接続」を数えていたため、autovacuum のワーカー等、
+    // テスト対象と無関係な接続が before と after の間に現れるだけで赤になっていた。
+    const applicationName = `mnemora-close-on-throw-${process.pid}-${Date.now()}`;
+    const url = new URL(requireDatabaseUrl());
+    url.searchParams.set("application_name", applicationName);
+    const databaseUrl = url.toString();
     const { pool: sharedPool } = await getTestClient();
 
-    const countOtherBackends = async (): Promise<number> => {
+    const countPoolBackends = async (): Promise<number> => {
       const { rows } = await sharedPool.query<{ n: string }>(
-        "SELECT count(*)::text AS n FROM pg_stat_activity WHERE datname = current_database() AND pid <> pg_backend_pid()",
+        "SELECT count(*)::text AS n FROM pg_stat_activity WHERE application_name = $1",
+        [applicationName],
       );
       return Number(rows[0]?.n ?? "0");
     };
 
-    const before = await countOtherBackends();
+    expect(await countPoolBackends()).toBe(0);
 
     await expect(
       createExampleRuntime(databaseUrl, {
@@ -57,10 +65,6 @@ describe("examples/chat: createExampleRuntime は Pool 構築後の失敗で Poo
     // reject の直後（`Pool` 側の既定 `idleTimeoutMillis`＝10秒より十分前）に数える。
     // `close()` が呼べていれば、reject した時点で `pool.end()` 済みのはずで、
     // 新たに増えたバックエンドは残らない。
-    const after = await countOtherBackends();
-
-    // 他のファイルが残した idle な接続が、この間に idleTimeoutMillis で切れて減ることは
-    // ありうる。増えていないことだけを見る。
-    expect(after).toBeLessThanOrEqual(before);
+    expect(await countPoolBackends()).toBe(0);
   });
 });
