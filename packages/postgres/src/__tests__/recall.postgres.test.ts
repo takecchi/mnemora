@@ -510,7 +510,7 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
   });
 
-  it("Issue #823（ADR 0203「引き受けた負債」3番の是正）: over_limit(stage:'rescore') に回った companion が段3の必須同伴取得で昇格すると、over_limit の Omission 自体が消える", async () => {
+  it("Issue #823（ADR 0203「これが覆るとしたら」3番の是正）: over_limit(stage:'rescore') に回った companion が段3の必須同伴取得で昇格すると、over_limit の Omission 自体が消える", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
 

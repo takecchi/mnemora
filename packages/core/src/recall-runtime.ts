@@ -1805,19 +1805,22 @@ export async function runRecall(
     }
   }
 
-  // Issue #823（ADR 0203「引き受けた負債」3番の是正）: 段2で `passed.slice(limit)` に
-  // より `over_limit(stage:"rescore")` へ回された候補（上の `overLimit`、まだこの時点で
-  // 生きている `ScoredCandidate[]`）が、段3の必須の同伴取得（上の `companions`）を経由して
-  // `finalMemories` に昇格することがある——below_threshold と同型の矛盾
-  // （「返したのに落ちたと名乗る」）。
+  // Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）:
+  // 段2で `passed.slice(limit)` により `over_limit(stage:"rescore")` へ回された候補
+  // （上の `overLimit`、まだこの時点で生きている `ScoredCandidate[]`）が、段3の必須の
+  // 同伴取得（上の `companions`）を経由して `finalMemories` に昇格することがある——
+  // below_threshold と同型の矛盾（「返したのに落ちたと名乗る」）。
   //
   // ⚠ 対象は**段3の必須同伴取得で拾われた id**に絞る——`companions`（`retrievedVia:
   // "mandatory_companion"` を付けて構築した配列、上）に居るかどうかで判定する。
-  // 段3.5（連想、既定 on、ADR 0337）が同じ `overLimit` の候補を独立に拾い直して
-  // `finalMemories` へ昇格させることもあるが、それは本 PR の射程外（段3.5 側の
-  // `over_limit(stage:"association")` を含め、ADR 0203「引き受けた負債」に残したまま）
-  // ——`retrievedVia` を見ずに `finalMemories` 全体との突き合わせだけで判定すると、
-  // 連想経由の昇格まで `stage:"rescore"` の count から誤って差し引いてしまう。
+  // **段3.5（連想、既定 on、ADR 0337）が同じ `overLimit` の候補を独立に拾い直して
+  // `finalMemories` へ昇格させる経路は、この PR では塞いでいない**——これは ADR 0203
+  // 「引き受けた負債」2番がまさに名指ししていた経路（below_threshold 以外の kind で
+  // 段3.5 が同種の昇格を起こす）であり、そちらは未解消のまま残っている
+  // （`over_limit(stage:"association")` を含め）。ここで `companions` 限定にしている
+  // のはそのため——`retrievedVia` を見ずに `finalMemories` 全体との突き合わせだけで
+  // 判定すると、連想経由の昇格まで `stage:"rescore"` の count から誤って差し引いてしまう
+  // （実際に `omission-kind-generation.test.ts` の既存の歯を壊す回帰として実測した）。
   //
   // ⚠ 差し引く数は「段3で返した同伴の総数」でもない。**`overLimit` に居て、かつ
   // 段3の同伴取得で実際に `finalMemories` に返った id の数**だけを数える——companion が

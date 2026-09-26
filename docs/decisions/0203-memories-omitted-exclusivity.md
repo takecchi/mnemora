@@ -283,13 +283,31 @@ Refs #421
 
 ## 2026-09-26 追記（クローン miku、Issue #823）
 
-**「引き受けた負債」3番（段3・必須の同伴取得が `over_limit(stage:"rescore")` の候補を
-昇格させる経路）と、「引き受けた負債」2番のうち段2の `over_limit(stage:"rescore")` に
-関する部分は、この日付で解消した。** [Issue #823](https://github.com/takecchi/mnemora/issues/823)
-が、枝 `fix/omitted-over-limit-promotion`（commit `aa4c873`）の陽性対照テストで
-「構造的にあり得るが実測していない」としていた経路を実際に起こし、
-`packages/core/src/recall-runtime.ts` の `runRecall` に below_threshold と同型の
-取り下げ処理を追加して塞いだ。
+**「これが覆るとしたら」3番が観測条件として挙げていた経路——`over_limit(stage:"rescore")`
+の候補が段3（必須の同伴取得）を経由して昇格する——は、この日付で解消した。**
+[Issue #823](https://github.com/takecchi/mnemora/issues/823) が、枝
+`fix/omitted-over-limit-promotion`（commit `aa4c873`）の陽性対照テストでこの経路を
+実際に起こし、`packages/core/src/recall-runtime.ts` の `runRecall` に below_threshold
+と同型の取り下げ処理を追加して塞いだ。
+
+**訂正**: この追記は当初「「引き受けた負債」3番が解消した」と書いていたが、誤りだった。
+「引き受けた負債」3番は `below_threshold` の記憶が段3経由で昇格する経路（争われている
+記憶の同伴が偶然 `belowThreshold` に居た場合）についての記述であり、`over_limit` の話
+ではない——今回の主眼である `over_limit(stage:"rescore")` + 段3 の組み合わせは、
+「引き受けた負債」2番（below_threshold 以外の kind で同種の昇格が起きても本 PR は
+直さない、という一般的な留保。具体例として段3.5 経由の `over_limit(stage:"rescore")`
+昇格を挙げていた）の対象に入る話である。**解消したのは、「引き受けた負債」2番が
+具体例として挙げていた段3.5（連想）経由の昇格ではなく、段3（必須の同伴取得）経由の
+昇格という、同項が具体例として挙げていなかった別の経路である。**「引き受けた負債」2番
+が名指しした段3.5 経由の昇格は今回も未解消のまま残った（下の「残り」節を参照）。
+
+一方、「引き受けた負債」3番（below_threshold + 段3）自体は、この PR のコードでは
+何も変えていない——ADR 0203 採用時点の既存の取り下げ処理がそのまま処理する設計になって
+おり、直すべきコードの欠陥ではなく「実測していない」という**測定の欠落**だった。
+`recall-over-limit-promotion.test.ts` の3本目の歯（below_threshold から段3経由で
+昇格するケースを実際に組んだもの）が、この経路が既存の設計どおりに正しく処理される
+ことを実測で確認した——3番はコードではなく測定として、この Issue #823 の副産物で
+埋まった。
 
 **「これが覆るとしたら」3番が前提に置いていた型の拡張は、置かなかった。** 同項は
 「memoryId を持たない kind は、先に `Omission` の型に memoryId のサンプルを持たせる
@@ -346,9 +364,16 @@ companion が最初から `withinLimit` に居た場合や、companion が `over
   （「これが覆るとしたら」3番の「型の拡張が先」）は、そのまま残っている。
   これらの kind は `runRecall` 内部でも候補を memoryId 付きで保持していないため、
   今回と同じ手は使えない。
-- **段3.5（連想）経由で `over_limit(stage:"rescore")` の候補が昇格する経路は、
-  依然として未実測のまま残した。**「採らなかった案」3番のとおり、今回は
-  `companions`（段3限定）に絞ったため、この経路はまだ塞がれていない。
+- **「引き受けた負債」2番が名指しした経路——段3.5（連想）経由で
+  `over_limit(stage:"rescore")` の候補が昇格する経路——は、今回もあえて塞がなかった。**
+  「採らなかった案」3番のとおり、今回は `companions`（段3限定）に絞ったため、この経路は
+  まだ残っている。**「未実測」ではない**——実装の途中でこの経路を塞ごうとして
+  `finalMemories` 全体との突き合わせに広げたところ、`omission-kind-generation.test.ts`
+  の既存の歯が実際に赤くなった（連想が既定 on のため、`over_limit(stage:"rescore")` の
+  候補が段3.5 経由で `retrievedVia: "association"` として昇格し、無関係なはずの
+  `over_limit(stage:"rescore")` の Omission が誤って消えた）。⟹ **この経路は既定 on の
+  連想の下で実際に起こりうることを、回帰として実測で確認している。**「引き受けた負債」
+  2番は今回も未解消のまま残る。
 
 ### 測ったこと
 

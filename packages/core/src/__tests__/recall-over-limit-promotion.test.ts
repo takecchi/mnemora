@@ -6,7 +6,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * Issue #823（ADR 0203「引き受けた負債」3番・「これが覆るとしたら」3番の是正）。
+ * Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）。
  *
  * below_threshold については ADR 0203 が `finalMemories` との突き合わせで取り下げる
  * 後処理を入れた（`recall-runtime.ts` の排他性契約ブロック）。本テストは、同じ形の
@@ -19,6 +19,13 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * 数」である——companion が over_limit ではなく below_threshold に居た場合や、
  * companion が最初から withinLimit に居た場合まで数えてはいけない（3本目の歯が
  * これを検査する）。
+ *
+ * ⚠ **この PR が解消するのは、over_limit(stage:"rescore") の候補が段3（必須の同伴
+ * 取得）経由で昇格する経路だけである。** 同じ候補が段3.5（連想、既定 on）経由で
+ * 昇格する経路（ADR 0203「引き受けた負債」2番がまさに名指ししていた経路）は、
+ * この PR では塞いでいない——`recall-runtime.ts` の取り下げは `companions`
+ * （段3が構築した配列）に居るかどうかで判定しており、段3.5 経由の昇格はそこに現れない
+ * （広げると `omission-kind-generation.test.ts` の既存の歯を壊す回帰になることを実測した）。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
@@ -91,7 +98,7 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-describe("recall() — over_limit(stage:'rescore') に数えられた候補が段3で finalMemories に昇格したときの排他性（Issue #823、ADR 0203「引き受けた負債」3番）", () => {
+describe("recall() — over_limit(stage:'rescore') に数えられた候補が段3で finalMemories に昇格したときの排他性（Issue #823、ADR 0203「これが覆るとしたら」3番）", () => {
   it("companion が over_limit の唯一の候補で、丸ごと同伴取得に昇格したときは over_limit(stage:'rescore') の Omission 自体が消える", async () => {
     const { runtime, stores } = buildRuntime();
 
@@ -191,7 +198,8 @@ describe("recall() — over_limit(stage:'rescore') に数えられた候補が�
     // companion: owner の対向だが、クエリとはほぼ無関係（similarity ≈ 0）——
     // below_threshold に落ちる。段3の必須同伴取得は閾値を見ずに getMany で
     // 直接取り直すので、below_threshold からでも finalMemories に昇格する
-    // （ADR 0203 決定2・3 が既に検証済みの経路）。
+    // （below_threshold の既存の取り下げ処理——ADR 0203「決めたこと」の設計——が
+    // この経路も同じ形で処理する。段3経由でも実際に効くことは Issue #823 で実測した）。
     const companion = await createEmbeddedMemory(stores, [0, 1], {
       status: "contested",
       digest: "companion",
