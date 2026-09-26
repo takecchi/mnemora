@@ -94,18 +94,23 @@ export class PostgresVectorStore implements VectorStore {
     // Issue #857: `query` が空配列だと `toVectorLiteral([])` が `"[]"` を作り、下の
     // `::vector` キャストが「vector must have at least 1 dimension」で未捕捉の
     // `DrizzleQueryError` になっていた（`runtime.recall()` 自体が reject される）。
+    // Issue #867: 空ではないが `space.dimensions` と長さが違う `query`（例: 3次元空間に
+    // `[1, 2]` や `[1, 2, 3, 4]`）も、pgvector が「different vector dimensions」で
+    // 同じ形の未捕捉 `DrizzleQueryError` を投げていた（実測、Issue #867 本文）。
+    // 案B（Issue #867 のコメントで決定）: 次元の不一致は「比較不能」として扱う——
+    // 新しい throw は足さず、`space.dimensions` 長の全 0 ベクトルに差し替える。
+    // ゼロベクトルは ADR 0040 の経路（`<=>` が `NaN` を返す）にそのまま乗り、
+    // `recall()` の段2で `score_not_comparable` に数えられる（`omitted` に出る）。
+    // 長さが一致する `query` は素通しする——この置き換えは「長さが違う」ときだけ発火する。
+    //
     // Fake（`packages/testkit/src/__fixtures__/in-memory-vector-store.ts` の
     // `cosineDistance`、`packages/core/src/__tests__/runtime-fakes.ts` の
-    // `FakeVectorStore` にも同じ実装が重複している）は、そういう設計として空配列を
-    // 特別扱いしているわけではない——単に短い方の配列を `0` で zero-pad してから
-    // 長さを揃えているため、空配列がその副作用でゼロベクトルとして扱われ、
-    // ADR 0040（ゼロベクトルは NaN 類似度になり候補に出ない）の経路にそのまま乗って
-    // 正常完走していた。ここではその「たまたまの」Fake の挙動に Postgres を揃える
-    // ——空配列だけを `space.dimensions` 長の全 0 ベクトルに置き換える。
-    // 次元数が0以外だが `space.dimensions` と食い違う `query`（例: 3次元空間に
-    // `[1, 2]`）には手を付けない——Postgres/Fake 双方の挙動を確かめていない
-    // （Issue #857「確かめていないこと」）。
-    const effectiveQuery = query.length === 0 ? new Array(space.dimensions).fill(0) : query;
+    // `FakeVectorStore` にも同じ実装が重複している）は、長さが違う2本のベクトルを
+    // 比較しようとしたら `NaN` を返す（足りない側を `0` で zero-pad して計算を続ける
+    // 旧実装は Issue #867 で「意味の無い点数を普通のヒットとして返す」と指摘され、
+    // 案Bの一部として直した）。ここではその直した後の Fake の挙動に Postgres を揃える。
+    const effectiveQuery =
+      query.length === space.dimensions ? query : new Array(space.dimensions).fill(0);
     const queryLiteral = toVectorLiteral(effectiveQuery);
 
     const conditions = [sql`e.tenant_id = ${opts.filter.tenantId}`];

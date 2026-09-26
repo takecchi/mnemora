@@ -1625,6 +1625,16 @@ export async function runRecall(
   const allUnits = [...units, ...associationUnits];
   const budget = validatedQuery.budget;
   let keptUnits = allUnits;
+  // Issue #829 / ADR 0097 追記: 段4の `fits`（すぐ下）と、呼び出し側が実際に受け取る量
+  // （連結して1回だけ数える。下の `memoryTokens` と同じ数え方）は別の式であり、加法的に
+  // 一致しない。件数が多い digest ほど per-unit の `Math.ceil` の積み重ねが実量を
+  // 上回りやすく、予算に余りがあるのに `budget_dropped` で落ちることがある——
+  // どの計測にも「落としすぎた」とは出ない、というのが Issue #829 の再現である。
+  // **ふるまい（切り詰めの判定・件数・omitted）はここでは変えない**——ADR 0097 が
+  // 「段4の強制を連結側へ寄せる」を明示的に却下しているため。ここで足すのは、
+  // 「連結して測り直したら、実は落とさなくても予算に収まっていたか」を
+  // trace（任意欄）に出す観測口だけである。
+  let droppedFitsWhenConcatenated: boolean | undefined;
   if (budget) {
     const maxMemoryChars = budget.maxMemoryChars;
     const maxTokens = effectiveTokenBudget(budget);
@@ -1652,13 +1662,29 @@ export async function runRecall(
       // unitsCountKind（`units`/`allCandidates` から出した精度）をそのまま流用しても
       // 精度の名乗りは変わらない。
       omitted.push({ kind: "budget_dropped", count: droppedCount, countKind: unitsCountKind });
+
+      // Issue #829: `allUnits` 全件（落ちた分も含む）の digest を、`memoryTokens`
+      // （下の usage 計算）と同じやり方——連結して1回だけ数える——で測り直す。
+      // これが予算に収まっていれば、per-unit ceil の積み重ねだけが原因で
+      // 落としたことになる。
+      const allDigests = allUnits.flatMap((u) => u.members.map((m) => m.memory.digest));
+      const concatenated = allDigests.join("\n");
+      const concatenatedCharsOk =
+        maxMemoryChars === undefined || concatenated.length <= maxMemoryChars;
+      const concatenatedTokensOk =
+        maxTokens === undefined || deps.tokenCounter.count(concatenated).tokens <= maxTokens;
+      droppedFitsWhenConcatenated = concatenatedCharsOk && concatenatedTokensOk;
     }
   }
 
   stages.push({
     stage: "budget_truncation",
     executed: true,
-    detail: { budgetApplied: budget !== undefined, unitsKept: keptUnits.length },
+    detail: {
+      budgetApplied: budget !== undefined,
+      unitsKept: keptUnits.length,
+      ...(droppedFitsWhenConcatenated !== undefined ? { droppedFitsWhenConcatenated } : {}),
+    },
   });
 
   // Issue #691 続き（ADR 0335）: `contestedWith` を付けるかどうかの判定に使う、
