@@ -5,7 +5,8 @@
     "baseUrl": ".",
     "paths": {
       "@mnemora/core": ["../core/src/index.ts"],
-      "@mnemora/testkit": ["../testkit/src/index.ts"]
+      "@mnemora/testkit": ["../testkit/src/index.ts"],
+      "@mnemora/testkit/fixtures": ["../testkit/src/fixtures.ts"]
     }
   },
   "include": ["src"]
