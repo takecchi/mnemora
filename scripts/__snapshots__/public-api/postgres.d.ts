@@ -144,6 +144,7 @@ export declare class PostgresMemoryStore implements MemoryStore {
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+    reinforceMany(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
     recordUsage(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[]): Promise<{
         insertedMemoryIds: MemoryId[];
     }>;

@@ -1084,6 +1084,151 @@ export class PostgresMemoryStore implements MemoryStore {
     return rowToMemory(result.rows[0] as unknown as MemoryRow);
   }
 
+  /**
+   * [Issue #874](https://github.com/takecchi/mnemora/issues/874) / ADR 0303 追記節:
+   * `reinforce` を `ids` の各要素について呼んだのと同じ結果になる一括版（契約は
+   * `MemoryStore.reinforceMany` の doc コメント参照）。`reinforce` が呼び出し1回に
+   * つき2往復（現在値の SELECT → CAS 付き UPDATE）だったのに対し、この口は
+   * `ids` の件数によらず**定数2往復**——
+   * 1. **SELECT**: 単調性・活動時計の判定に使う不変の列（`recorded_at`/`strength`/
+   *    `half_life_hours`/`half_life_recalls`——いずれも `reinforce` 自身も書き換えない
+   *    列）を、対象 id 全件ぶん1回でまとめて読む。
+   * 2. **UPDATE**: 行ごとに計算した `decay_floor_at`/活動時計側の値を
+   *    `VALUES (...)` で持ち込み、`WHERE ... AND (last_reinforced_at IS NULL OR
+   *    last_reinforced_at < at)` という**同じ CAS 条件**で1回の文にまとめて書く。
+   *    更新できなかった行（no-op）は、同じ文の中で現在値を読み直して返す
+   *    ——`reinforce` の `UNION ALL` と同じ理由（読みと書きの間に別の強化が
+   *    割り込んでも、その行の返り値は常にその時点の実際の値になる）。
+   *
+   * ⚠ **単調性の比較そのもの（`last_reinforced_at` と `at`）は、1件ずつのときと
+   * 同じく UPDATE の WHERE 句の中で行う**——上のSELECTで読んだ値を比較には使わない
+   * （使うのは `decayFloorAt`/活動時計側の値を計算するための不変の入力だけ）。
+   *
+   * `ids` に重複がある場合は1回だけ処理する（`Set` で去重）——`reinforce` を同じ
+   * `id`・同じ `at` で複数回呼んでも2回目以降が no-op になり最終状態が変わらないのと
+   * 同じ理由。戻り値は元の `ids`（重複・順序とも）に合わせて組み直す。
+   *
+   * `ids` に存在しない・adapter の期待する形式でない id が含まれる場合:
+   * **書ける対象（存在する well-formed な id）へは書き込みを済ませてから**、
+   * `reinforce` と同じ「memory not found」の `Error` を投げる。⚠ **これは1件ずつの
+   * ループと厳密には一致しない**——ループは `ids` の先頭から順に呼び、最初に
+   * 見つからない id で例外を投げて**それ以降の id には一切触れない**のに対し、
+   * この一括版は「見つからない id が1件でもあるかどうか」と「見つかった id への
+   * 書き込み」を切り離しており、見つからない id が配列のどの位置にあっても、
+   * 見つかった id はすべて書き込む。**interface 側の doc コメント（`reinforceMany`）
+   * が明記するとおり、この分岐は runtime の唯一の呼び出し元（`handleMemoryUsage`）
+   * では実際には起こらない**——`recall_usages.memory_id` が `memories(id)` への
+   * 外部キーを持つため、`recordUsage` が返す `insertedMemoryIds` は常に実在する行を
+   * 指す（挿入が成功した時点で参照先が存在した証拠）。1件ずつのループとの
+   * 「どこまで書いてから投げるか」の違いを厳密に揃えるには、見つからない id の
+   * 手前で処理を打ち切る必要があり、それは「定数回の往復で束ねる」という
+   * この口の目的そのものと衝突する——**到達しないと確かめた分岐のために往復を
+   * 増やすのは筋が違うと判断し、揃えなかった。**
+   */
+  async reinforceMany(
+    ctx: Ctx,
+    ids: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<Memory[]> {
+    if (ids.length === 0) {
+      return [];
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const wellFormedIds = uniqueIds.filter((id) => isUuidLike(id));
+
+    const current = await this.db.execute(sql`
+      SELECT * FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(wellFormedIds)}::uuid[])
+    `);
+    const currentById = new Map<string, Memory>();
+    for (const row of current.rows) {
+      const memory = rowToMemory(row as unknown as MemoryRow);
+      currentById.set(memory.id, memory);
+    }
+
+    // `ids` の元の順で最初に見つからない id（`reinforce` 単体を呼んだときに
+    // 「memory not found」になる id）。上のコメントのとおり、書き込みは
+    // これとは独立に「見つかった id 全部」へ行う。
+    const missingId = ids.find((id) => !currentById.has(id));
+    const existingIds = wellFormedIds.filter((id) => currentById.has(id));
+
+    if (existingIds.length === 0) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${missingId}`);
+    }
+
+    const rows = existingIds.map((id) => {
+      const memory = currentById.get(id)!;
+      const decayFloorAt = defaultDecayStrategy.floorAt({
+        recordedAt: memory.recordedAt,
+        lastReinforcedAt: at,
+        strength: memory.strength,
+        halfLifeHours: memory.halfLifeHours,
+      });
+      // ADR 0165 決めたこと16: 行ごとに判定する——`halfLifeRecalls` を持つ行だけ
+      // 活動時計側の列に触れる（`PostgresMemoryStore.reinforce` と同じ分岐）。
+      const hasActivity = opts?.nowSeq !== undefined && memory.halfLifeRecalls != null;
+      const activityFloorSeq = hasActivity
+        ? defaultActivityDecayStrategy.floorAt({
+            baseSeq: opts!.nowSeq!,
+            strength: memory.strength,
+            halfLifeRecalls: memory.halfLifeRecalls!,
+          })
+        : null;
+      return {
+        id,
+        decayFloorAt,
+        hasActivity,
+        activityBaseSeq: hasActivity ? opts!.nowSeq! : null,
+        activityFloorSeq,
+      };
+    });
+
+    const inputRows = sql.join(
+      rows.map(
+        (r) =>
+          sql`(${r.id}::uuid, ${r.decayFloorAt}::timestamptz, ${r.hasActivity}::boolean, ${r.activityBaseSeq}::bigint, ${r.activityFloorSeq}::bigint)`,
+      ),
+      sql`, `,
+    );
+
+    const result = await this.db.execute(sql`
+      WITH input(id, decay_floor_at, has_activity, activity_base_seq, activity_floor_seq) AS (
+        VALUES ${inputRows}
+      ),
+      updated AS (
+        UPDATE memories m
+        SET last_reinforced_at = ${at},
+            decay_floor_at = input.decay_floor_at,
+            updated_at = now(),
+            decay_base_seq = CASE WHEN input.has_activity THEN input.activity_base_seq ELSE m.decay_base_seq END,
+            decay_floor_seq = CASE WHEN input.has_activity THEN input.activity_floor_seq ELSE m.decay_floor_seq END
+        FROM input
+        WHERE m.tenant_id = ${ctx.tenantId} AND m.id = input.id
+          AND (m.last_reinforced_at IS NULL OR m.last_reinforced_at < ${at})
+        RETURNING m.*
+      )
+      SELECT * FROM updated
+      UNION ALL
+      SELECT m.* FROM memories m
+      JOIN input ON input.id = m.id
+      WHERE m.tenant_id = ${ctx.tenantId}
+        AND NOT EXISTS (SELECT 1 FROM updated u WHERE u.id = m.id)
+    `);
+
+    const resultById = new Map<string, Memory>();
+    for (const row of result.rows) {
+      const memory = rowToMemory(row as unknown as MemoryRow);
+      resultById.set(memory.id, memory);
+    }
+
+    if (missingId !== undefined) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${missingId}`);
+    }
+
+    return ids.map((id) => resultById.get(id)!);
+  }
+
   async recordUsage(
     ctx: Ctx,
     recallId: RecallId,

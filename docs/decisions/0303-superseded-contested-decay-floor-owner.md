@@ -259,3 +259,65 @@ Issue #840 自身が挙げていた判断点（対象を絞るか、絞る場合
 **実測について**: 上の `archived`/`forgotten` の観測（時計逆行での不正な値の残存、
 forgotten の値が消えずに残ること）は、**Issue #840 が Fake・Postgres の両方で実測した
 結果を引いたものであり、この追記・この PR では手元で再現していない。**
+
+## 追記（2026-09-26、[Issue #874](https://github.com/takecchi/mnemora/issues/874)）: 使用報告の強化を任意の一括メソッド（`reinforceMany?`）で束ねる——status を見ない・単調性・活動時計の規則は `reinforce` と同一のまま変えていない
+
+クローン miku の判断による（オーナー本人の決定ではない、[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・検討して採らなかった案・引き受けた負債・確かめていないこと）および
+直前の Issue #840 追記は書き換えていない。**当時の記録として残す。
+
+**決めたこと**: `runtime.ts` の `handleMemoryUsage`（`observe({kind:'memory_usage'})`）が
+`recordUsage` の後で `reinforce` を `insertedMemoryIds` の件数だけ直列に呼んでいたことに
+よる N+1（Issue #874 が実測）を、`MemoryStore` に足した任意（省略可能）の一括メソッド
+`reinforceMany?(ctx, ids, at, opts?)` で束ねた。`handleMemoryUsage` はこの口が在れば
+1回だけ呼び、無ければ従来どおり `reinforce` を1件ずつ呼ぶループへ戻る——既存の
+`MemoryStore` 実装（第三者 adapter を含む）の挙動は1バイトも変えていない。
+
+`reinforceMany` の契約は「`reinforce` を `ids` の各要素について呼んだのと同じ結果になる
+こと」であり、**上の本文・直前の追記が `reinforce` について定めた規律をそのまま引き継ぐ**
+——具体的には:
+
+- **`status` を見ない**（この追記の直前の節、Issue #840 の判断をそのまま持ち越す）。
+  一括版も status ごとの no-op・拒否は無く、`archived`/`superseded`/`forgotten` を含む
+  どの status の行にも同じ規則で書き込む。**この追記は Issue #840 の判断を変えていない
+  ——「status を見て絞るかどうか」の判断そのものは、今回も持ち越したままである。**
+- **単調性**（[ADR 0048](./0048-reinforce-does-not-move-decay-origin-backwards.md)）:
+  `last_reinforced_at` が `null` か `at` より狭義に古い行だけを書く。この比較は
+  `reinforce` と同じく WHERE 句（CAS）の中で行う——読みと書きの間に別の強化が割り込んでも
+  上書きしない。等しい/古い `at` は no-op。
+- **活動時計**（[ADR 0165](./0165-decay-activity-clock.md) 決めたこと16）:
+  `opts.nowSeq` を渡したときに活動時計側の列（`decay_base_seq`/`decay_floor_seq`）を
+  同じ強化イベントとして進めるのは、対象の Memory が `halfLifeRecalls` を持つ行だけ
+  ——この判定を1件ずつではなく**行ごと**に行う。
+
+**往復数（実測、2026-09-26時点。`packages/postgres/src/__tests__/recall-roundtrip-count.postgres.test.ts`
+歯3、本 PR で `observe({kind:'memory_usage'})` を直接測るよう書き換えた歯で計測）**:
+直す前は使用報告の件数 N が増えるほど往復数が線形に増えていた（`recordUsage` 1往復 +
+`reinforce` を N 回、1回につき2往復）。直した後はどの N でも往復数が一定になった
+（`PostgresMemoryStore.reinforceMany` が「現在値をまとめて読む1回の SELECT → CAS 付き
+一括 UPDATE 1回」の定数2往復に束ねたため）。実測した具体的な往復数は PR 本文に控えて
+あり、ここには焼き込まない（この文書自身が上で説いている「数を道具と生成物に焼き込まない」
+規律——`main` が動けば `createObservation` 側の往復数が変わりうるため、この節は
+「線形→定数になった」という関係だけを記録する）。
+
+**理由**: Issue #874 が実測した `1 + 2N` という比例往復——recall 1回で使った記憶を
+数十件まとめて報告する利用側では、その分だけ `observe()` のレイテンシが線形に伸びる。
+一括メソッドを**任意**にしたのは、既存の `MemoryStore` を実装している adapter
+（`@mnemora/core` は npm 公開済み、第三者 adapter を含む）を壊さないため——公開されている
+型に新しい必須メソッドを足すのは破壊的変更になる（[ADR 0100](./0100-supersede-with-new-memories.md)
+決定1・`archiveDecayed?`（[ADR 0114](./0114-archive-sweep-for-decayed-memories.md)）と
+同じ理由）。
+
+**採らなかった案**:
+
+- **`reinforce` 自体の署名を配列に変える**（例: `reinforce(ctx, ids: MemoryId[], at, opts?)`）
+  ——既存の呼び出し元・adapter 実装すべての引数の形を変える破壊的変更になるため採らない。
+- **`recordUsage` と `reinforce`（または `reinforceMany`）を1トランザクション・1文に
+  束ねる**——`recordUsage` の INSERT が成功した後に強化側だけが失敗した場合に何が残るか
+  という「部分失敗の形」が今日と変わってしまう。今回は往復を減らすことだけを目的とし、
+  失敗時に残る状態の形は変えない判断をした。
+- **`packages/testkit` の適合テスト（`*-conformance.ts`）に `reinforceMany` の要件を
+  足す**——第三者 adapter に新しい義務を課すことになり、任意メソッドにした理由（既存
+  adapter を壊さない）と矛盾する。契約は `MemoryStore.reinforceMany` の doc コメントに
+  書き、テストは `packages/postgres`/`packages/testkit`/`packages/core` それぞれの
+  fixture・fake に個別に足した。

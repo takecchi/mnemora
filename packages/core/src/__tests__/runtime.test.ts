@@ -612,6 +612,149 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
     });
     expect(second.memoryIds).toEqual([]);
   });
+
+  /**
+   * [Issue #874](https://github.com/takecchi/mnemora/issues/874): `handleMemoryUsage` は
+   * `MemoryStore.reinforceMany`（任意メソッド）が在ればそれを1回だけ呼び、無ければ
+   * 従来どおり `reinforce` を1件ずつ呼ぶループへ戻る——`archiveDecayed`/`sweepArchive`
+   * と同じ「口が在るかどうかで分岐する」作法（上の
+   * `describe("runtime.sweepArchive...")` のブロック参照）。
+   *
+   * `FakeMemoryStore` は `reinforceMany` を実装している（既定では「口が在る」側の
+   * 経路を通る）ので、「口が無い」側は `archiveDecayed` の歯と同じ作法
+   * ——`undefined` を代入して prototype を隠す——で個別に検査する。
+   */
+  it("MemoryStore.reinforceMany が在るときはそれを1回だけ呼び、reinforce を1件ずつは呼ばない", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memories = await Promise.all(
+      [0, 1, 2].map((i) =>
+        stores.memoryStore.createMemory(ctx, {
+          tenantId: "tenant-1",
+          subjectId: null,
+          sourceObservationId: null,
+          extractorVersion: null,
+          content: "本文",
+          contentHash: `hash-${i}`,
+          digest: "要旨",
+          digestSource: "llm",
+          provenance: { kind: "imported", batchId: "batch-1" },
+          tags: [],
+          occurredAt: null,
+          recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+          lastReinforcedAt: null,
+          strength: 1,
+          halfLifeHours: 720,
+          decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+          embeddingStatus: "pending",
+        }),
+      ),
+    );
+
+    const recallId = await createRecallFixture(stores, ctx);
+    // ⚠ `reinforce` 自体は spy しない——`FakeMemoryStore.reinforceMany` の実装は
+    // 「`reinforce` を呼び回す素直な実装」（ADR 0303 追記節、この PR の判断）であり、
+    // `reinforceMany` が実際に呼ばれても内部で `reinforce` が複数回呼ばれる。ここで
+    // 検査したいのは fake の内部実装ではなく、`runtime.ts` が「口が在るときは
+    // `reinforceMany` を1回呼ぶ」という分岐を実際に選んだことだけである。
+    const reinforceManySpy = vi.spyOn(stores.memoryStore, "reinforceMany");
+
+    const result = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      recallId,
+      usedMemoryIds: memories.map((m) => m.id),
+    });
+
+    expect(result.memoryIds).toEqual(memories.map((m) => m.id));
+    expect(reinforceManySpy).toHaveBeenCalledTimes(1);
+    expect(reinforceManySpy.mock.calls[0]?.[1]).toEqual(memories.map((m) => m.id));
+    for (const memory of memories) {
+      const reinforced = await stores.memoryStore.get(ctx, memory.id);
+      expect(reinforced?.lastReinforcedAt).not.toBeNull();
+    }
+  });
+
+  it("MemoryStore.reinforceMany が無いときは従来どおり reinforce を1件ずつ呼ぶ（挙動は変えない）", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memories = await Promise.all(
+      [0, 1, 2].map((i) =>
+        stores.memoryStore.createMemory(ctx, {
+          tenantId: "tenant-1",
+          subjectId: null,
+          sourceObservationId: null,
+          extractorVersion: null,
+          content: "本文",
+          contentHash: `hash-fallback-${i}`,
+          digest: "要旨",
+          digestSource: "llm",
+          provenance: { kind: "imported", batchId: "batch-1" },
+          tags: [],
+          occurredAt: null,
+          recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+          lastReinforcedAt: null,
+          strength: 1,
+          halfLifeHours: 720,
+          decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+          embeddingStatus: "pending",
+        }),
+      ),
+    );
+
+    // 口を持たない adapter を模す（`archiveDecayed` の歯と同じ作法。`delete` では
+    // 消えない——クラスのメソッドは prototype に在る）。
+    (stores.memoryStore as { reinforceMany?: unknown }).reinforceMany = undefined;
+    const reinforceSpy = vi.spyOn(stores.memoryStore, "reinforce");
+
+    const recallId = await createRecallFixture(stores, ctx);
+    const result = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      recallId,
+      usedMemoryIds: memories.map((m) => m.id),
+    });
+
+    expect(result.memoryIds).toEqual(memories.map((m) => m.id));
+    expect(reinforceSpy).toHaveBeenCalledTimes(memories.length);
+    for (const memory of memories) {
+      const reinforced = await stores.memoryStore.get(ctx, memory.id);
+      expect(reinforced?.lastReinforcedAt).not.toBeNull();
+    }
+  });
+
+  it("insertedMemoryIds が空なら reinforceMany を呼ばない（従来のループも0回だったのと同じ）", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memory = await stores.memoryStore.createMemory(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "hash-empty",
+      digest: "要旨",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "batch-1" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+    const recallId = await createRecallFixture(stores, ctx);
+    // 同じ (recallId, memoryId) を先に一度送っておく——2回目は insertedMemoryIds が
+    // 空になる（上の「再送では reinforce が二重に走らない」歯と同じ前提）。
+    await runtime.observe(ctx, { kind: "memory_usage", recallId, usedMemoryIds: [memory.id] });
+
+    const reinforceManySpy = vi.spyOn(stores.memoryStore, "reinforceMany");
+    const result = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+
+    expect(result.memoryIds).toEqual([]);
+    expect(reinforceManySpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () => {
