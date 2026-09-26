@@ -98,7 +98,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   積み重ねで「予算に余りがあるのに落とす」ことがある——**切り詰めの判定・落とす件数・
   `omitted` は変えていない**（ふるまいは無変更、`detail` は `Record<string, unknown>` の
   任意欄なので公開の型も変えていない）（[Issue #829](https://github.com/takecchi/mnemora/issues/829)、
-  [ADR 0097](./docs/decisions/0097-recall-usage-share-may-exceed-1.md) 追記 2026-09-26）。
+  [ADR 0097](./docs/decisions/0097-recall-usage-share-may-exceed-1.md) 追記 2026-09-26、PR #915）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -275,7 +275,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `recall()` の段2が `omitted.score_not_comparable` に数える）にそのまま乗る
   （新しい例外は投げない。`VectorStore.upsert` に長さの違うベクトルを渡したときの
   扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
-  [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
+  [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
 
 ---
 
