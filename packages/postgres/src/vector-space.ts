@@ -297,24 +297,29 @@ export async function registerEmbeddingSpace(
     // テーブル全体の行数に関係なく、この索引が持つ行数（通常0件）だけを読む
     // （`vector-store.ts` の doc コメント参照。`EXPLAIN` で実測済み）。
     //
-    // ⚠ **この索引を作る経路はここ1箇所だけである。** `memory_embeddings_<space>`
-    // テーブルと HNSW 索引自体も migrations/*.sql には無く、`registerEmbeddingSpace`
-    // （このプロセス起動のたびに呼ばれる、べき等な `CREATE ... IF NOT EXISTS`）だけが
-    // 作る——`<space>` はテーブル名に埋め込まれる動的な値であり、migration 作成時点では
-    // 個々の空間名を列挙できない（`docs/decisions/0202-postgres-shared-db-object-names.md`
-    // 「実行時に増える系列」と同じ理由）。⟹ **「新しく作る空間」と「この修正より前から
-    // 存在する空間」は同じコードパスを通る**——違うのは `IF NOT EXISTS` が実行される
-    // タイミング（初回作成時か、この修正を含むバージョンへ上げた後の次回起動時か）だけ。
-    // 既存の HNSW 索引自体も同じ性質（`registerEmbeddingSpace` の再実行に依存する）を
-    // 持っており、この部分索引が新しく背負う運用上の負債ではない。
+    // ⚠ **この索引を作る経路は2つある。** ここ（新しく空間を作る・または
+    // `registerEmbeddingSpace` が再実行されたとき）と、
+    // `migrations/0022_embedding_zero_norm_index.sql`（migration 適用の時点で
+    // 既に存在する空間に、この場で作る）——`memory_embeddings_<space>` テーブルと
+    // HNSW 索引自体は migrations/*.sql に無く（`<space>` が動的な値のため）
+    // `registerEmbeddingSpace` だけが作ってきたが、**この部分索引だけは
+    // 0022 でも作る**——アプリケーションが `mnemora-postgres-migrate` を実行しても、
+    // 実際にプロセスを再起動する（＝ここが呼ばれ直す）までは既存の空間にこの索引が
+    // 無いままになる窓があり、0022 はその窓を無くすために足された（ADR 0343）。
+    // **どちらの経路が先に作っても、索引名は `embeddingSpaceZeroNormIndexName` の
+    // 同じ計算から1バイトも違わずに一致する**（0022 の DO ブロックが SQL で同じ
+    // 計算を再現している——`embedding-zero-norm-migration.postgres.test.ts` が
+    // 実測で固定している）ため、`IF NOT EXISTS` により後から呼ばれたほうは
+    // 何もしない。
     //
     // ⚠ **既存の大きな embedding テーブルに対しては、この `CREATE INDEX`（`CONCURRENTLY`
-    // を使わない素の形）が対象テーブルに `ACCESS EXCLUSIVE` ロックを取り、構築が終わる
-    // まで読み書きを止める**（ADR 0059/0062 が `memories` の索引で同じ形を記録済み。
-    // `CONCURRENTLY` を使えない理由も同じ——`migrate.ts` は1ファイル=1トランザクション
+    // を使わない素の形）が対象テーブルに `ShareLock` を取り、構築が終わるまで
+    // 書き込み（`INSERT`/`UPDATE`/`DELETE`）を止める（読み取りは止めない）**
+    // ——【実測、`pg_locks`・別セッションからの `SELECT`/`INSERT` で確認、ADR 0343】。
+    // `CONCURRENTLY` を使えない理由は別にある——`migrate.ts` は1ファイル=1トランザクション
     // だが、`registerEmbeddingSpace` 自体はトランザクションを開かない代わりに
     // advisory lock で直列化しており、`CONCURRENTLY` は別の理由（索引が2本同時に
-    // 作られる競合を pgvector 側で検査していない）で見送っている——詳細は ADR 0356
+    // 作られる競合を pgvector 側で検査していない）で見送っている——詳細は ADR 0343
     // 「引き受けた負債」）。実測した構築時間は同 ADR を参照。
     await pool.query(`
       CREATE INDEX IF NOT EXISTS ${zeroNormIndex}

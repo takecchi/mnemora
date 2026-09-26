@@ -80,6 +80,24 @@ describe("deriveMigrationObjects", () => {
     expect(result.indexes).toEqual([]);
   });
 
+  it("DO ブロック内の EXECUTE format(...) 文字列リテラル中の CREATE INDEX IF NOT EXISTS %I は、" +
+      "予約語 IF を索引名として誤って拾わない（Issue #956 / ADR 0343、0022_embedding_zero_norm_index.sql と同じ形）", () => {
+    const result = deriveMigrationObjects([
+      [
+        "DO $$",
+        "BEGIN",
+        "  EXECUTE format(",
+        "    'CREATE INDEX IF NOT EXISTS %I ON %I (tenant_id, memory_id) WHERE vector_norm(embedding) = 0',",
+        "    index_name,",
+        "    target_table",
+        "  );",
+        "END $$;",
+      ].join("\n"),
+    ]);
+    expect(result.indexes).toEqual([]);
+    expect(result.tables).toEqual([]);
+  });
+
   it("同名の索引を作り直しても重複しない（Set なので1つに畳まれる）", () => {
     const result = deriveMigrationObjects([
       "CREATE INDEX idx_a ON t (id);",
@@ -151,19 +169,26 @@ describe("deriveMigrationObjects", () => {
 });
 
 describe("deriveEmbeddingSpaceNaming", () => {
-  it("TABLE_PREFIX / HNSW_INDEX_PREFIX を読む", () => {
+  it("TABLE_PREFIX / HNSW_INDEX_PREFIX / ZERO_NORM_INDEX_PREFIX を読む（Issue #956 / ADR 0343）", () => {
     const source = [
       'const TABLE_PREFIX = "memory_embeddings_";',
       'const HNSW_INDEX_PREFIX = "idx_memory_embeddings_hnsw_";',
+      'const ZERO_NORM_INDEX_PREFIX = "idx_memory_embeddings_zero_norm_";',
     ].join("\n");
     expect(deriveEmbeddingSpaceNaming(source)).toEqual({
       tablePrefix: "memory_embeddings_",
       indexPrefix: "idx_memory_embeddings_hnsw_",
+      zeroNormIndexPrefix: "idx_memory_embeddings_zero_norm_",
     });
   });
 
-  it("定数が見つからなければ、読み取れなかったことが分かるエラーで落ちる", () => {
+  it("定数のどれか1つでも見つからなければ、読み取れなかったことが分かるエラーで落ちる", () => {
     expect(() => deriveEmbeddingSpaceNaming("// no consts here")).toThrow(/読み取れなかった/);
+    const missingZeroNorm = [
+      'const TABLE_PREFIX = "memory_embeddings_";',
+      'const HNSW_INDEX_PREFIX = "idx_memory_embeddings_hnsw_";',
+    ].join("\n");
+    expect(() => deriveEmbeddingSpaceNaming(missingZeroNorm)).toThrow(/読み取れなかった/);
   });
 });
 

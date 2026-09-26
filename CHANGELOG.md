@@ -60,9 +60,11 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 `cf11cd6` までに載せていた項目・その計上の経緯（`8cf82b1` が偽だった話・PR #747/#844 の
 全数表・PR #811/#813/#815 の保留注記）は、対象の項目とともに下の `## [1.0.1]` 節へ移した。**
 
-**postgres 利用者へ**: `v1.0.1` からマイグレーションは増えていない——最後尾は引き続き
-`0021_memories_claim_key.sql`。**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の
-`## [1.0.1]` 節の migrate 案内も合わせて読むこと**（`0019`〜`0021` の3本が要る）。
+**postgres 利用者へ**: `v1.0.1` から新しいマイグレーションが1本増えている
+（`0022_embedding_zero_norm_index.sql`、Issue #956 / ADR 0343）。⟹ `v1.0.1` から
+この節までの範囲へ上げる場合は `pnpm --filter @mnemora/postgres run migrate` が要る。
+**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の `## [1.0.1]` 節の migrate 案内も
+合わせて読むこと**（`0019`〜`0022` の4本が要る）。
 
 **この節が数えた範囲（`v1.0.1`…`dce0f71`）に破壊的変更は無い。**【実測 2026-09-26】
 `git diff v1.0.1..dce0f71 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
@@ -442,12 +444,9 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
 - **`@mnemora/testkit` の `InMemoryLexicalStore` の語の一致判定を `PostgresLexicalStore` に揃えた**——非 ASCII だけのクエリは0件になり、本文は ASCII の境界で分割してから小文字化する（[Issue #951](https://github.com/takecchi/mnemora/issues/951)、[ADR 0084](./docs/decisions/0084-lexical-recall-channel.md)）。
 - **`PostgresVectorStore.search()`/`searchMany()` が、pgvector の HNSW（cosine）索引に
-  そもそも入らないゼロベクトルの候補（ADR 0040）を結果から取りこぼしていた。** pgvector
-  は norm が0のベクトルを HNSW 索引に追加しないため、ANN 検索（`ORDER BY <=> LIMIT`）が
-  その索引を経由すると、統計・テーブルの大小に関係なくゼロベクトルの候補が構造的に
-  結果から消えていた。埋め込みテーブルにゼロベクトル専用の部分索引を足し、`search()`/
-  `searchMany()` がそれを別枝として `UNION ALL` で合わせるようにした（往復数は増えない）。
-  通常の検索結果（距離・順序）は無変更（[Issue #956](https://github.com/takecchi/mnemora/issues/956)、
+  そもそも入らないゼロベクトルの候補（ADR 0040）を取りこぼしていた。** 埋め込み
+  テーブルに専用の部分索引を足し、別枝として `UNION ALL` で拾うようにした（往復数・
+  通常の検索結果は無変更）（[Issue #956](https://github.com/takecchi/mnemora/issues/956)、
   [ADR 0343](./docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。
 
 ---

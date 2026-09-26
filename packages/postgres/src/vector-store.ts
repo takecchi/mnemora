@@ -263,8 +263,15 @@ export class PostgresVectorStore implements VectorStore {
     // 上位 `limit` 件を先に確定させてよい）。2枝目（`= 0`）は
     // `registerEmbeddingSpace`（`vector-space.ts`）が作る部分索引
     // （`WHERE vector_norm(embedding) = 0`）を使い、`filter` に一致するゼロベクトルの
-    // 行を全件（テーブル全体の行数に関係なく、通常0件）取る。外側の `SELECT` が
-    // 両枝を再び1本の順序（距離→`recorded_at` DESC→`memory_id`）へ並べ直し、
+    // 行を取る——**この枝にも `ORDER BY`/`LIMIT ${opts.limit}` を掛けてある**——
+    // 2枝目に内側の LIMIT が無いと、ある空間がゼロベクトルの行を大量に持つ場合、
+    // その枝だけがテーブル（の中のゼロベクトル部分）の大きさに比例して増え、
+    // 「余分な参照はテーブルの大きさに比例して増えない」という要求から外れる。
+    // ゼロベクトルの距離はすべて `NaN` で同点のため、`ORDER BY` は `recorded_at`
+    // DESC・`memory_id` の2列（1枝目・外側と同じ tie-break の続き）だけで揃える——
+    // 外側の再ソートで同じ2列がそのまま使われるので、内側でこの `LIMIT` を掛けても
+    // 「外側で見るべき上位 `limit` 件」を取りこぼさない。2枝を合わせた外側の `SELECT`
+    // が両枝を再び1本の順序（距離→`recorded_at` DESC→`memory_id`）へ並べ直し、
     // `LIMIT` をもう一度適用する——ゼロベクトルの行が実在の上位候補を押し出すことは
     // ない（`NaN` は常に最後尾）。往復は増やさない（1本の SQL 文のまま）。
     const result = await withRelaxedOrderScan(this.db, (tx) =>
@@ -287,6 +294,8 @@ export class PostgresVectorStore implements VectorStore {
             FROM ${sql.identifier(table)} e
             JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
             WHERE ${whereClause} AND vector_norm(e.embedding) = 0
+            ORDER BY m.recorded_at DESC, e.memory_id
+            LIMIT ${opts.limit}
           )
         ) AS combined
         ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
@@ -385,6 +394,8 @@ export class PostgresVectorStore implements VectorStore {
               FROM ${sql.identifier(table)} e
               JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
               WHERE ${whereClause} AND vector_norm(e.embedding) = 0
+              ORDER BY m.recorded_at DESC, e.memory_id
+              LIMIT ${opts.limit}
             )
           ) AS combined
           ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id

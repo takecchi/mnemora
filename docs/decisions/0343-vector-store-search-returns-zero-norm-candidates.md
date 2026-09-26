@@ -133,7 +133,7 @@ CREATE INDEX IF NOT EXISTS <name>
 （通常0件の）ゼロベクトル行だけを読む**——「余分な参照はテーブルの大きさに
 比例して増えない」という要求を満たす（下記「実測」節、EXPLAIN で確認）。
 
-### 4. 既存の空間・新規の空間は同じ経路（`registerEmbeddingSpace`）——専用の migration は書かない
+### 4. 新規の空間は `registerEmbeddingSpace`、既存の空間は migration（0022）——両方作る
 
 **`memory_embeddings_<space>` テーブルと HNSW 索引自体、`migrations/*.sql` には
 一度も現れたことが無い**（【実測】`git grep -n memory_embeddings_ packages/postgres/migrations/`
@@ -142,11 +142,34 @@ CREATE INDEX IF NOT EXISTS <name>
 （プロセス起動のたびに呼ばれる、べき等な `CREATE ... IF NOT EXISTS`）だけが作ってきた
 （`examples/chat/src/runtime-factory.ts` 等、本番の呼び出し元はすべてプロセス起動時に
 1回呼ぶ形——【実測】`git grep -n "registerEmbeddingSpace(" --include=*.ts` で確認）。
-**⟹ 新しい部分索引もこれと同じ経路に乗せた。** 「新しく作る空間」と「この修正より
-前から存在する空間」は同じコードパスを通る——違うのは `IF NOT EXISTS` が実行される
-タイミング（初回作成時か、この修正を含むバージョンへ上げた後の次回起動時か）だけ。
-**⟹ 専用の `packages/postgres/migrations/*.sql` は書いていない**（そもそも
-HNSW 索引自体がそのファイル群に無いため、同じ形を保つのが一貫している）。
+
+**この部分索引は`registerEmbeddingSpace`だけに乗せると、「migration を適用した後、
+実際にアプリを再起動する（＝`registerEmbeddingSpace`が呼び直される）まで」の間、
+既存の空間にこの索引が無いままになる**——マネージャーの指摘（miku の指示は
+「migration で足す」）を受け、この窓を無くすために
+`packages/postgres/migrations/0022_embedding_zero_norm_index.sql` を足した。この
+migration は `DO` ブロックで、適用時点の `current_schema()` に存在する埋め込み
+テーブル（`memory_embeddings_%` という名前で `embedding` 列が `vector` 型のテーブル、
+`information_schema.columns` で判定）を列挙し、それぞれに同じ部分索引を
+`CREATE INDEX IF NOT EXISTS` で作る。
+
+**索引名は`embeddingSpaceZeroNormIndexName`（TypeScript）と1バイトも違わないように、
+同じ計算（63バイト以内ならそのまま、超えるなら63−33−8−1=21バイトへ切り詰めて
+SHA-256先頭8桁を付与）を `DO` ブロックの中で SQL として再現している**——PostgreSQL
+は14以降 `sha256(bytea)` を組み込みで持つ（pgcrypto 不要、【実測】
+`encode(sha256('...'::bytea), 'hex')` が Node の
+`crypto.createHash("sha256").update(...).digest("hex")` と同じ16進文字列を返すことを
+確認済み）。名前が1バイトでも違うと `CREATE INDEX IF NOT EXISTS` が「無い」と
+誤判定し、同じ役目の索引が2本作られてしまう——`embedding-zero-norm-migration.postgres.test.ts`
+歯1a・1b が、短い名前・63バイトを超える名前の両方で、migration が実際に作った
+索引名と TypeScript 関数の計算結果が一致することを実測で固定している。
+
+**⟹ 「新しく作る空間」は`registerEmbeddingSpace`が、「migration 適用時点で既に
+存在する空間」は0022が作る——同じ名前に収束するので、`registerEmbeddingSpace`側の
+`CREATE INDEX IF NOT EXISTS`は引き続き残す**（新しい空間にはまだ0022が実行されて
+いないため、こちらが唯一の作成経路のまま）。`embedding-zero-norm-migration.postgres.test.ts`
+歯2が、0022が先に索引を作った後で`registerEmbeddingSpace`を呼んでも2本目が
+作られないこと（`pg_indexes`で数えて1本のまま）を実測で固定している。
 
 schema-namespace（[ADR 0057](./0057-dedicated-schema-namespace.md)）対応の空間も同じ経路
 ——`registerEmbeddingSpace` は `schema`/`extensionSchema` オプションに応じて
@@ -155,13 +178,19 @@ schema-namespace（[ADR 0057](./0057-dedicated-schema-namespace.md)）対応の�
 の `search()`/`searchMany()`）は他の DML と同じく `search_path` に任せ、`vector_norm` を
 裸のまま書いている（`schema-namespace.ts` の doc コメントが定める「DML は
 `search_path` に任せ、DDL は明示修飾する」という既存の使い分けをそのまま踏襲）。
+0022 は `current_schema()` の中だけを対象にする——`--schema` 指定時、`migrate.ts` が
+このファイルを適用する前に `SET LOCAL search_path TO <schema>,<extensionSchema>` を
+発行するため（`migrate.ts` 既存の仕組み、`quotedSearchPathFor`）、`current_schema()`
+はその `<schema>` を指す。`embedding-zero-norm-migration.postgres.test.ts` 歯3が、
+`--schema` 相当の状態で作った索引が指定したスキーマに入り、`public` には誤って
+作られないことを実測で固定している。
 
 ### 5. `CREATE INDEX CONCURRENTLY` は使わない
 
 [Issue #760](https://github.com/takecchi/mnemora/issues/760) が「`CREATE INDEX
 CONCURRENTLY` を流せる経路を作るかどうか」をオーナーへの未決の問いとして残している
 ——本 ADR はその問いを解かない。既存の HNSW 索引と同じ素の `CREATE INDEX`
-（`ACCESS EXCLUSIVE` ロックを取る）のままにした。
+（`ShareLock` を取る——下の「実測」節）のままにした。
 
 ## 実測
 
@@ -199,13 +228,22 @@ Issue #377 の既存の歯）は、この修正後も**往復数が等しいま�
 で通過）——`UNION ALL`/再ソートを `LATERAL` サブクエリの内側に収めた設計が、
 Issue #377 の契約（往復数がアンカー数に依存しない）を壊していないことの確認。
 
-### 部分索引の構築時間（`ACCESS EXCLUSIVE` ロックが対象テーブルへの読み書きを止める間）
+### ロックモードと部分索引の構築時間
 
-素の `CREATE INDEX`（`CONCURRENTLY` 無し）は、構築が終わるまで対象テーブルに
-`ACCESS EXCLUSIVE` ロックを取り、読み書きを止める——[ADR 0059](./0059-period-in-ann-stage.md)/
-[ADR 0062](./0062-contested-with-id-fk-index.md) が `memories` の索引で既に記録した
-PostgreSQL の一般的な性質であり、本 ADR で新しく確かめ直してはいない。**その停止時間**
-（＝索引構築にかかる時間）を実測した:
+素の `CREATE INDEX`（`CONCURRENTLY` 無し）が対象テーブルに取るロックモードを
+**実測した**（`BEGIN; CREATE INDEX ...;` で開いたトランザクションを `pg_sleep()` で
+保持し、`pg_locks` を別セッションから読む・並行して `SELECT`/`INSERT` を試す、という形）:
+
+- `pg_locks.mode` は **`ShareLock`**（`AccessExclusiveLock` ではない）。
+- 別セッションからの `SELECT count(*) FROM <table>` は**即座に完了する**（読み取りは
+  止まらない）。
+- 別セッションからの `INSERT INTO <table> ...`（実在の1行）は、`statement_timeout=3000`
+  で `canceling statement due to statement timeout` になった（**書き込みは止まる**
+  ——`ShareLock` は `RowExclusiveLock`——`INSERT`/`UPDATE`/`DELETE` が取るロック——と
+  競合するという PostgreSQL の一般的なロック互換表どおり）。
+
+⟹ **この索引の構築中、対象テーブルへの読み取りは止まらず、書き込みだけが止まる。**
+**その停止時間**（＝索引構築にかかる時間）を実測した:
 
 | 行数 | テーブルの状態 | 構築時間 |
 |---|---|---|
@@ -240,19 +278,25 @@ PostgreSQL の一般的な性質であり、本 ADR で新しく確かめ直し�
 ## 引き受けた負債
 
 1. **既存の大きな embedding テーブルに対しては、この部分索引の追加が
-   `ACCESS EXCLUSIVE` ロックで読み書きを止める**（上の「実測」節の時間だけ）。
+   `ShareLock` で書き込みを止める**（読み取りは止めない。上の「実測」節の時間だけ）。
    [ADR 0059](./0059-period-in-ann-stage.md)/[ADR 0062](./0062-contested-with-id-fk-index.md)
-   が `memories` の索引について既に引き受けている負債と同じ形であり、
+   が `memories` の索引について「読み書きを止める」と記録している負債と近い形（ロック
+   モードそのものの食い違いは下の追記を見ること）であり、
    [Issue #760](https://github.com/takecchi/mnemora/issues/760) の未決の問い
-   （`CONCURRENTLY` 経路を作るか）がそのまま当たる。
-2. **既存の空間にこの部分索引が実際に作られるのは、次回 `registerEmbeddingSpace`
-   が呼ばれたとき（通常はプロセスの再起動時）である。** アプリケーションが長期間
-   再起動されない場合、その間は決定1〜2の修正があっても、対象の空間では
-   ゼロベクトルの候補が（部分索引が無いため）ゼロ枝から見つからないままになる
-   ——ゼロ枝自体は「索引が無ければ Seq Scan で拾う」というフォールバックを
-   実装していない（`buildFilterConditions` の WHERE に `vector_norm(embedding) = 0`
-   を書いているだけなので、索引が無ければ単に Seq Scan になり、動作はするが遅い
-   ——「拾えない」わけではない。「速く拾えない」だけである）。
+   （`CONCURRENTLY` 経路を作るか）がそのまま当たる。**migration（0022）は
+   `migrate.ts` の1ファイル=1トランザクションという既存の設計のまま**——複数の
+   埋め込み空間が既に存在する場合、その全部の `ShareLock` が、0022 全体がコミット
+   するまで保持される（1空間ずつ個別にコミットするわけではない）。
+2. **0022 が対象にするのは「migration 適用の時点で存在する」空間だけである。**
+   0022 適用より後に（旧いバージョンの `registerEmbeddingSpace`——この部分索引を
+   まだ知らないコード——で）作られた空間は対象にならない。ただし、そのようなコードは
+   このリポジトリの `main` には存在しない（この修正を含むバージョンに上げれば、
+   `registerEmbeddingSpace` 自体が新規作成時にこの部分索引を作る）——⟹ **実際に
+   起こり得るのは「0022 を含む migration を適用したが、アプリはまだ古いバージョンの
+   まま動いている」という、通常のローリングデプロイの過渡的な窓だけであり、
+   その窓では新しい部分索引を知らない旧いコードの `search()`/`searchMany()` も
+   まだ動いているため、この窓の間に新しく実害が増えるわけではない**（旧いコードは
+   そもそもこの部分索引を使わない）。
 3. **pgvector 0.8.6（CI が使う版）で同じ実装（`HnswCheckNorm`/`HnswFormIndexValue`）が
    使われているかは確かめていない。** コンパイラの無い環境から動けなかった
    ——次に pgvector を更新する・CI の実際の版を確かめられる担い手が確認すること
@@ -269,6 +313,55 @@ PostgreSQL の一般的な性質であり、本 ADR で新しく確かめ直し�
   答え、`CREATE INDEX CONCURRENTLY` の経路が実際に作られたとき。** そのとき、
   この部分索引の追加も同じ経路に乗せ直すことを検討する。
 
+## `packages/testkit` の InMemoryVectorStore と、ゼロベクトル候補の並び順が食い違う（確認済み、直していない）
+
+`limit` に対して非ゼロ候補が十分少ないとき、ゼロベクトルの候補が結果のどこに来るかを
+Postgres と `InMemoryVectorStore`（`packages/testkit/src/__fixtures__/in-memory-vector-store.ts`）
+で比較した。
+
+**Postgres**: 距離が `NaN` の行は、PostgreSQL の `float8` の順序規則（`NaN` は他のどんな
+値よりも大きい、`ORDER BY ... ASC` で常に最後）により、**常に最後尾**に来る
+（`vector-search-zero-norm.postgres.test.ts` 歯4 で実測済み）。
+
+**InMemoryVectorStore**: `search()` の並べ替えは
+
+```ts
+hits.sort((a, b) => {
+  if (a.distance !== b.distance) return a.distance - b.distance;
+  ...
+});
+```
+
+という形（`in-memory-vector-store.ts`）。`a.distance`/`b.distance` の一方が `NaN` だと
+`a.distance !== b.distance` は常に真になり、`a.distance - b.distance` も `NaN` を返す
+——`Array.prototype.sort` の比較関数が `NaN` を返したときの挙動は、V8 の実装により
+定まるが「常に最後尾に送る」ことを保証しない。**【実測】** 同じ4件の非ゼロ候補
+（distance 0/0.293/0.757/1）+ ゼロ候補1件を、挿入順を変えて6通り試したところ、
+ゼロ候補の位置は最後尾（5件中4番目、0-indexで4）に来た回もあれば、先頭（0番目）・
+2番目・3番目に来た回もあった——**`NaN` の位置は挿入順に依存し、一定しない。**
+
+⟹ **Postgres と InMemoryVectorStore は、ゼロベクトル候補が `limit` の境界付近に
+いるとき、`search()` が返す集合・順序が食い違いうる**（`limit` が非ゼロ候補の総数
+より小さいとき、Postgres は常に非ゼロ候補を優先して残すが、InMemory は `NaN` の
+位置次第で非ゼロ候補がゼロ候補に押し出されて `limit` から漏れることがある）。
+
+**この ADR の書き手はこれを直していない**——マネージャーの指示どおり、この食い違いを
+見つけたところで止めて報告する。`packages/testkit` 側の修正（`compareDescendingNaNLast`
+のような、`NaN` を必ず最後尾へ送る比較関数への置き換え——[Issue #938](https://github.com/takecchi/mnemora/issues/938)
+が `packages/core/src/recall-runtime.ts` の3箇所に対して既に採った形と同じ）が要るかは、
+オーナー・マネージャーの判断に委ねる。この ADR の決定1〜4（Postgres 側の修正）は、
+この食い違いの有無に関係なく成立する——Postgres 側の契約（ADR 0040）を満たすための
+ものであり、InMemory 側の挙動を変える・前提にするものではない。
+
+### 確かめていないこと（この節固有）
+
+- `packages/core/src/__tests__/runtime-fakes.ts` の `FakeVectorStore`（`in-memory-vector-store.ts`
+  とは別の実装、ADR 0040 本文「引き受ける負債」が触れている）が同じ食い違いを持つかは
+  確認していない。
+- 実際の `recall()` パイプライン（段2の `compareScoredCandidates`、Issue #938 で
+  `NaN` 最後尾に直した箇所）が、この InMemory の並び順の乱れを別の層で吸収しているか
+  どうかは確認していない——`VectorStore.search()` の生の返り値の順序だけを見た。
+
 ## 確かめていないこと
 
 - pgvector 0.8.6（CI の実際の版）での動作再確認（上記「引き受けた負債」3番）。
@@ -282,3 +375,42 @@ PostgreSQL の一般的な性質であり、本 ADR で新しく確かめ直し�
   （`registerEmbeddingSpace` の新しい `CREATE INDEX`）の動作——`qualify()` の
   既存の使い方をそのまま踏襲したという設計上の確認に留め、実機での確認は
   していない。
+
+---
+
+## 追記（2026-09-27）—— ロックモードの実測は `ShareLock` であり、`ACCESS EXCLUSIVE` ではなかった
+
+⛔ 上の本文は1バイトも書き換えていない。同じ形で追記する。
+
+[ADR 0059](./0059-period-in-ann-stage.md)/[ADR 0062](./0062-contested-with-id-fk-index.md)
+は、`memories` テーブルへの素の `CREATE INDEX` が `ACCESS EXCLUSIVE` ロックを取ると
+記録している。本 ADR の本文も、その記録を踏まえて同じ主張（「素の `CREATE INDEX` は
+`ACCESS EXCLUSIVE` ロックを取る」）をしていた——**これは実測に基づくものではなく、
+ADR 0059/0062 からの引用だった。**
+
+本 ADR の対象（埋め込みテーブルへの部分索引 `WHERE vector_norm(embedding) = 0` の
+`CREATE INDEX`）について、この追記の書き手が改めて実測した:
+
+- `BEGIN; CREATE INDEX ...;`（`COMMIT` 前）で開いたトランザクションが対象テーブルに
+  持つロックを、別セッションから `pg_locks.mode` で読むと **`ShareLock`** だった
+  （`AccessExclusiveLock` ではない）。
+- 同じ状態で、別セッションからの `SELECT count(*) FROM <table>` は**即座に完了した**
+  （読み取りは止まらない）。
+- 同じ状態で、別セッションからの `INSERT INTO <table> ...`（実在の1行）は
+  `statement_timeout=3000` で `canceling statement due to statement timeout` に
+  なった（**書き込みは止まる**）。
+
+⟹ **この ADR が対象にしている `CREATE INDEX`（部分索引、埋め込みテーブル）は、
+読み取りを止めず、書き込みだけを止める。** 本文・「実測」節・「引き受けた負債」1番の
+`ACCESS EXCLUSIVE` という記述は、この実測とは食い違う——本文は書き換えず、この追記で
+訂正する。ADR 0059/0062（`memories` テーブルの別の索引についての記録）も書き換えて
+いない——それらが対象にした索引で実際に何が起きたかは、この追記では再確認していない
+（`memories` の該当索引に対して同じ手順で実測し直せば、同じ食い違いが見つかる可能性は
+あるが、確かめていない）。
+
+### この追記が確かめていないこと
+
+- ADR 0059/0062 が実際に対象にした `memories` の索引（`idx_memories_period_ann_stage`
+  等）について、同じ手順（`pg_locks`・並行 `SELECT`/`INSERT`）で測り直してはいない。
+- PostgreSQL のバージョンやテーブルの列構成によってロックモードが変わる余地がある
+  かどうかは確認していない——この実測は本 ADR と同じ PostgreSQL 17.11 環境1点のみ。

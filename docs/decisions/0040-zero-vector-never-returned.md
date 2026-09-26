@@ -358,15 +358,20 @@ EXPLAIN・往復数・索引構築時間の実測は [ADR 0343](./0343-vector-st
 ### 引き受けた負債・migration の扱い
 
 既存の埋め込みテーブルへの部分索引の追加は、素の `CREATE INDEX`（`CONCURRENTLY` 無し）
-のため `ACCESS EXCLUSIVE` ロックで対象テーブルの読み書きを止める——実測した構築時間は
-100,000行で約40ms、1,000,000行で約270ms（[ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md)
-「実測」節）。`memory_embeddings_<space>` テーブルと HNSW 索引自体が最初から
+のため `ShareLock` で対象テーブルへの書き込みを止める（読み取りは止めない——`pg_locks`・
+別セッションからの `SELECT`/`INSERT` で実測、[ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md)
+追記）。実測した構築時間は100,000行で約40ms、1,000,000行で約270ms
+（同 ADR「実測」節）。`memory_embeddings_<space>` テーブルと HNSW 索引自体は最初から
 `packages/postgres/migrations/*.sql` に一度も現れたことが無く（`<space>` は動的な値で
 migration 作成時点では列挙できないため）、`registerEmbeddingSpace`（プロセス起動の
-たびに呼ばれる、べき等な `CREATE ... IF NOT EXISTS`）だけが作ってきた——新しい部分
-索引もこの既存の経路に乗せてあり、専用の `migrations/*.sql` は書いていない。既存の
-空間にこの部分索引が実際に作られるのは、次回 `registerEmbeddingSpace` が呼ばれたとき
-（通常はプロセスの再起動時）である。
+たびに呼ばれる、べき等な `CREATE ... IF NOT EXISTS`）だけが作ってきた。この部分索引は
+それに加えて、**migration（`packages/postgres/migrations/0022_embedding_zero_norm_index.sql`）
+でも作る**——`DO` ブロックで、適用時点に存在する埋め込みテーブルを列挙し、
+`embeddingSpaceZeroNormIndexName`（TypeScript）と同じ計算を SQL で再現した名前で
+`CREATE INDEX IF NOT EXISTS` する。**新しく作る空間は `registerEmbeddingSpace` が、
+migration 適用時点で既に存在する空間は 0022 が作る**——名前が一致するため、
+どちらが先でも `IF NOT EXISTS` により重複しない（詳細・実測は
+[ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md) 決定4）。
 
 ### 確かめていないこと
 
