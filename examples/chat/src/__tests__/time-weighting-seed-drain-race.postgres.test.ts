@@ -46,33 +46,48 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
     const client = await getTestClient();
     const handle = await createTimeWeightingBenchRuntime(requireDatabaseUrl(), {});
     try {
-      const ctx = { tenantId: "seed-drain-race-mechanism" };
+      // 🔴 前提: 書いた行の `available_at` が ms の境界ちょうど（us の端数が 0）ではないこと。
+      // 境界ちょうどだと `floor(ms)` が `available_at` そのものになり、`available_at <= now`
+      // が成り立って claim できてしまう——この機構の証明が前提にしている「同じ ms の中の
+      // us」が存在しない。`now()` の us の端数は制御できないので、自然にはおよそ千回に一度
+      // 起き（手元の実測で 5000 回中 1 回）、CI で実際にこの形の赤が出た（run 36205084679、
+      // `expected [ { …(12) } ] to have a length of +0 but got 1`、Issue #1002）。前提が成り立たなかったら、
+      // 別テナントで行を書き直す（同じテナントに境界ちょうどの行が残ると、下の claim に拾われる）。
+      const MAX_ATTEMPTS = 5;
+      let ctx = { tenantId: "" };
+      let availableAtUs = 0;
+      for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+        ctx = { tenantId: `seed-drain-race-mechanism-${attempt}` };
+        const { memory } = await handle.memoryStore.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            content: "本文",
+            contentHash: sha256Hex(`${ctx.tenantId}:seed`),
+            digest: "本文",
+            tags: [],
+            occurredAt: null,
+            recordedAt: new Date(),
+            validFrom: null,
+            validUntil: null,
+          }),
+          ["embed"],
+        );
+        expect(memory.id).toBeDefined();
 
-      const { memory } = await handle.memoryStore.createMemoryWithOutbox(
-        ctx,
-        buildNewMemoryFixture({
-          tenantId: ctx.tenantId,
-          content: "本文",
-          contentHash: sha256Hex(`${ctx.tenantId}:seed`),
-          digest: "本文",
-          tags: [],
-          occurredAt: null,
-          recordedAt: new Date(),
-          validFrom: null,
-          validUntil: null,
-        }),
-        ["embed"],
-      );
-      expect(memory.id).toBeDefined();
-
-      // available_at を us 精度のまま(浮動小数点変換無し)で読み直す。JS Date に通すと
-      // ms へ丸まってしまい、検査したい「ms の中の us」が消える。
-      const result = await client.pool.query<{ available_at_us: string }>(
-        `SELECT (EXTRACT(EPOCH FROM available_at) * 1000000)::numeric(20,0)::text AS available_at_us
-         FROM outbox WHERE tenant_id = $1 AND kind = 'embed' ORDER BY created_at DESC LIMIT 1`,
-        [ctx.tenantId],
-      );
-      const availableAtUs = Number(result.rows[0]!.available_at_us);
+        // available_at を us 精度のまま(浮動小数点変換無し)で読み直す。JS Date に通すと
+        // ms へ丸まってしまい、検査したい「ms の中の us」が消える。
+        const result = await client.pool.query<{ available_at_us: string }>(
+          `SELECT (EXTRACT(EPOCH FROM available_at) * 1000000)::numeric(20,0)::text AS available_at_us
+           FROM outbox WHERE tenant_id = $1 AND kind = 'embed' ORDER BY created_at DESC LIMIT 1`,
+          [ctx.tenantId],
+        );
+        availableAtUs = Number(result.rows[0]!.available_at_us);
+        if (availableAtUs % 1000 !== 0) {
+          break;
+        }
+      }
+      expect(availableAtUs % 1000).not.toBe(0);
       const flooredMs = Math.floor(availableAtUs / 1000);
 
       const outboxStore = new PostgresOutboxStore(client.db);
