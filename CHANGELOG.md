@@ -394,14 +394,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
   `MemoryStore.createMemory` の doc コメントに記録した
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
-- **`@mnemora/postgres` の `closePostgresClient` を2回呼ぶと、2回目が
-  `Called end on pool more than once` で reject していた**（`node-postgres` の
-  `Pool.end()` の既定の挙動をそのまま継承していたため）。**`closePostgresClient` を
-  冪等にした**——同じ `client` に対する2回目以降の呼び出しは、`pool.end()` を
-  呼び直さずに何もせず resolve する（並行に2回呼ばれた場合も reject しない）。
-  `PostgresClient` という公開の型は変えていない（`WeakMap` で client → Promise を
-  覚える形で実現）。`close()` 後のクエリの振る舞いは無変更
-  （[Issue #935](https://github.com/takecchi/mnemora/issues/935)）。
+- **`@mnemora/postgres` の `closePostgresClient` を冪等にした**——2回目以降の呼び出しは `Called end on pool more than once` で reject せず、何もせずに resolve する（[Issue #935](https://github.com/takecchi/mnemora/issues/935)）。
 
 ---
 
