@@ -1,4 +1,4 @@
-import type { Ctx, LLMProvider, NewMemory, Runtime } from "@mnemora/core";
+import type { Ctx, LLMProvider, NewMemory, RecallAssociationQuery, Runtime } from "@mnemora/core";
 import {
   DEFAULT_SCORE_THRESHOLD,
   TIME_WEIGHTING_POLICIES,
@@ -305,24 +305,26 @@ async function collectContextDiagnostics(
   question: string,
   policy: TimeWeightingPolicy,
   localIdByMemoryId: ReadonlyMap<string, string>,
+  association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingContextDiagnosticEntry[]> {
-  // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-  // でも、この bench（時間重み付け方針の比較）の基準線（recorded cassette への
-  // プロンプト・判定）を動かさない。
+  // association: 省略時は null — この欄を省略した既存の呼び出しではこの bench
+  // （時間重み付け方針の比較）の基準線（recorded cassette へのプロンプト・判定）を
+  // 動かさない（ADR 0337 追記2026-09-26）。
   const diagnosticRecall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
     scoreThreshold: DIAGNOSTIC_SCORE_THRESHOLD,
-    association: null,
+    association,
   });
   const entries: TimeWeightingContextDiagnosticEntry[] = [];
   diagnosticRecall.memories.forEach((m, index) => {
     const localId = localIdByMemoryId.get(m.memoryId);
     if (localId === undefined) {
-      // このケースが直接書いた記憶ではない（連想枠等——この recall() 呼び出しは
-      // association: null で明示的に止めているので実際には起きない経路だが、
-      // 将来ここから null を外す変更が入っても黙って壊れないための防御として残す）。
-      // 診断の対象外として黙って飛ばす——診断は「このケースの記憶」だけを見る。
+      // このケースが直接書いた記憶ではない（連想枠等——`association` を省略した既存の
+      // 呼び出しは null で明示的に止めているので実際には起きない経路だが、`association`
+      // を明示して on にする呼び出し（ADR 0337 追記2026-09-26の測定スクリプト）では
+      // 実際に起きる。いずれの場合も診断の対象外として黙って飛ばす——診断は「この
+      // ケースが直接書いた記憶」だけを見る）。
       return;
     }
     const belowThreshold = m.score.total < DEFAULT_SCORE_THRESHOLD;
@@ -357,14 +359,17 @@ async function runTimeWeightingPolicy(
   expected: TimeWeightingCase["expected"],
   policy: TimeWeightingPolicy,
   localIdByMemoryId: ReadonlyMap<string, string>,
+  association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingPolicyResult> {
-  // association: null — 上の collectContextDiagnostics と同じ理由。この recall() の
-  // 結果がそのまま `buildMnemoraPrompt` を経て LLM プロンプトへ入るため、連想が
-  // 増やす候補は recorded cassette に無い入力を作りうる。
+  // association: 省略時は null（上の collectContextDiagnostics と同じ理由）。この
+  // recall() の結果がそのまま `buildMnemoraPrompt` を経て LLM プロンプトへ入るため、
+  // 連想を on にすると増える候補は recorded cassette に無い入力を作りうる——
+  // ADR 0337 追記2026-09-26 の測定スクリプトは、この欄を明示するときは
+  // llmMode=deterministic（cassette 再生に依らない）でだけ呼ぶ。
   const recall = await runtime.recall(ctx, {
     text: question,
     timeWeighting: policy,
-    association: null,
+    association,
   });
   const prompt = `${buildMnemoraPrompt(recall)}${buildQuestionSuffix(question)}`;
   const response = await llmProvider.complete(ctx, {
@@ -378,6 +383,7 @@ async function runTimeWeightingPolicy(
     question,
     policy,
     localIdByMemoryId,
+    association,
   );
   return {
     policy,
@@ -430,6 +436,9 @@ export async function runTimeWeightingCase(
   timeWeightingCase: TimeWeightingCase,
   tenantPrefix: string,
   trial: number,
+  // `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
+  // **省略時は `null`**——この bench の基準線を変えない。
+  association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingTrialResult> {
   assertTimeWeightingCaseWellFormed(timeWeightingCase);
   const ctx: Ctx = {
@@ -467,6 +476,7 @@ export async function runTimeWeightingCase(
       timeWeightingCase.expected,
       policy,
       localIdByMemoryId,
+      association,
     );
   }
 
@@ -482,6 +492,8 @@ export async function runTimeWeightingBench(
   cases: readonly TimeWeightingCase[],
   tenantPrefix: string,
   trials: number,
+  // `runTimeWeightingCase` と同じ規律——省略すれば挙動は変わらない（ADR 0337 追記2026-09-26）。
+  association: RecallAssociationQuery | null = null,
 ): Promise<TimeWeightingTrialResult[]> {
   if (trials < 1) {
     throw new Error(`runTimeWeightingBench: trials は1以上であること（実際: ${trials}）。`);
@@ -489,7 +501,9 @@ export async function runTimeWeightingBench(
   const results: TimeWeightingTrialResult[] = [];
   for (const timeWeightingCase of cases) {
     for (let trial = 1; trial <= trials; trial += 1) {
-      results.push(await runTimeWeightingCase(handle, timeWeightingCase, tenantPrefix, trial));
+      results.push(
+        await runTimeWeightingCase(handle, timeWeightingCase, tenantPrefix, trial, association),
+      );
     }
   }
   return results;

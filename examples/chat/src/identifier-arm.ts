@@ -1,4 +1,4 @@
-import type { Ctx, MemoryStore, Runtime } from "@mnemora/core";
+import type { Ctx, MemoryStore, RecallAssociationQuery, Runtime } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
 import type { DrainResult } from "./embed-drain.js";
 import {
@@ -69,6 +69,11 @@ export interface IdentifierProbeOutcome {
    * 別の情報を持ち、margin だけでは `omitted`(閾値落ち・窓落ち)を区別できない。
    */
   margin: number | null;
+  /**
+   * `result.memories` のうち `retrievedVia === "association"` だった件数(ADR 0337
+   * 追記2026-09-26)。**`options.association` を省略した既存の呼び出しでは常に 0**。
+   */
+  associationRows?: number;
 }
 
 /**
@@ -201,6 +206,13 @@ export interface RunIdentifierProbeArmOptions {
   haystackSize?: number;
   /** 回す probe 集合。**省略時は `IDENTIFIER_PROBE_SET_SPEC`**（＝ADR 0094 の識別子 probe）。 */
   probeSet?: ArmProbeSetSpec;
+  /**
+   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
+   * **省略時は `null`**——この arm(識別子/数字トークンの gold/distractor 順位)の
+   * 基準線は変えない。`examples/chat/src/bench/association-default-on-measure.ts`
+   * だけが明示する。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 function average(values: number[]): number {
@@ -239,9 +251,12 @@ export async function runIdentifierProbeArm(
   for (const probe of probeSet.probes) {
     // ⛔ `text` 以外を渡さない(既存 arm と同じ規律)——閾値・limit・overFetchFactor は
     // 一切変えない。
-    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-    // でも、この arm（識別子の gold/distractor 順位）の基準線を動かさない。
-    const result = await options.runtime.recall(ctx, { text: probe.query, association: null });
+    // association: options.association ?? null — この欄を省略した既存の呼び出しでは
+    // この arm（識別子/数字トークンの gold/distractor 順位）の基準線を動かさない。
+    const result = await options.runtime.recall(ctx, {
+      text: probe.query,
+      association: options.association ?? null,
+    });
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
     );
@@ -267,6 +282,7 @@ export async function runIdentifierProbeArm(
       scoreDetails,
       termSpreads: computeTermSpreads(result.memories),
       margin: computeMargin(scoreDetails),
+      associationRows: result.memories.filter((m) => m.retrievedVia === "association").length,
     });
   }
 

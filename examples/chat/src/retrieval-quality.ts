@@ -1,6 +1,7 @@
 import type {
   Ctx,
   MemoryStore,
+  RecallAssociationQuery,
   RecallChannel,
   RecalledMemory,
   Runtime,
@@ -288,6 +289,13 @@ export interface ProbeOutcome {
    * あった。ここで恒久化する。
    */
   decayFreshnessRowwise: DecayFreshnessRowwise;
+  /**
+   * `result.memories` のうち `retrievedVia === "association"` だった件数(ADR 0337
+   * 追記2026-09-26)。**`options.association` を省略した既存の呼び出しでは常に 0**
+   * ——連想枠自体を off(`association: null`)にしているため。この欄を明示的に見るのは
+   * `association-default-on-measure.ts` だけである。
+   */
+  associationRows?: number;
 }
 
 function average(values: number[]): number {
@@ -402,6 +410,16 @@ export interface RunRetrievalQualityArmOptions {
    * `["ann", "lexical"]` 等を渡したときだけ、語彙チャンネルを通る構成に切り替わる。
    */
   channels?: readonly RecallChannel[];
+  /**
+   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。連想枠の既定 on が
+   * この arm の基準線を実際にどれだけ動かすかを測る、新設の測定専用オプション)。
+   *
+   * **省略時は `null`**——この arm の基準線(gold/distractor の順位)は連想枠の
+   * 既定 on/off という変更の影響を受けない、という ADR 0337 決定4の前提を1バイトも
+   * 変えない。`examples/chat/src/bench/association-default-on-measure.ts` だけが
+   * この欄を明示的に渡す。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 /**
@@ -533,12 +551,16 @@ export async function runRetrievalQualityArm(
 
   const probes: ProbeOutcome[] = [];
   for (const probe of PROBES) {
-    // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-    // でも、北極星の物差し（retrieval-quality）の基準線を動かさない。
+    // association: options.association ?? null — 連想枠が既定 on になった（ADR 0337。
+    // オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）でも、この欄を
+    // 省略した既存の呼び出しでは北極星の物差し（retrieval-quality）の基準線を
+    // 動かさない。`options.association` を明示的に渡すのは、連想枠の既定 on が
+    // この基準線をどれだけ動かすかを測る新設の測定スクリプト（ADR 0337 追記
+    // 2026-09-26、association-default-on-measure.ts）だけである。
     const result = await options.runtime.recall(ctx, {
       text: probe.query,
       ...(options.channels !== undefined ? { channels: [...options.channels] } : {}),
-      association: null,
+      association: options.association ?? null,
     });
     const resolvedExternalIds = await Promise.all(
       result.memories.map((m) => resolveExternalId(options.memoryStore, ctx, m.memoryId)),
@@ -566,6 +588,7 @@ export async function runRetrievalQualityArm(
       recalledRows: result.memories.length,
       lexicalMatchRows: result.memories.filter((m) => m.score.lexicalMatch !== undefined).length,
       decayFreshnessRowwise: computeDecayFreshnessRowwise(result.memories),
+      associationRows: result.memories.filter((m) => m.retrievedVia === "association").length,
     });
   }
 
