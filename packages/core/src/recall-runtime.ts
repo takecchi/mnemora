@@ -2050,7 +2050,7 @@ export async function runRecall(
   // 改めて落ちると `budget_dropped` 側に数えられるので、ここで取り下げないと同じ1件が
   // `below_threshold` と `budget_dropped` の両方に載る。追記3（Issue #940）が
   // `over_limit(stage:"rescore")` について決めた「最後にその候補を落とした段で1回だけ
-  // 数える」を、below_threshold にも当てる。`nearMisses` から外す作法は決定5 と同じ。
+  // 数える」を、below_threshold にも当てる。`nearMisses` から外す作法は ADR 0203「決めたこと」5 と同じ。
   const returnedMemoryIds = new Set(finalMemories.map((m) => m.memoryId));
   const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
   const associationUnitIds = new Set(

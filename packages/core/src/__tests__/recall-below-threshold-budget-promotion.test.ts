@@ -15,7 +15,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * 最後にそれを落とした段で1回だけ数える」を `below_threshold` にも当てる——戻った候補は
  * `budget_dropped` 側に残し、`below_threshold` の `count` と `nearMisses` からは取り下げる。
  * 取り下げの作法（`count` を減らし、`nearMisses` から外し、0件なら Omission ごと外す）は
- * ADR 0203 決定5 と同じである。
+ * ADR 0203「決めたこと」5 と同じである。
  */
 
 const ctx: Ctx = { tenantId: "tenant-1" };
