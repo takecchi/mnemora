@@ -2098,6 +2098,32 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  *   `ts_rank_cd` を模す必要は無い。`LexicalHit.rank` の doc の通り、この値は
  *   `ScoreBreakdown` には一切入らない。
  *
+ * **一致判定（Issue #951、PostgresLexicalStore に揃えた点・揃えていない点）**:
+ *
+ * `search` の一致判定は（`InMemoryLexicalStore` のようなトークン単位の完全一致ではなく）
+ * 「クエリ語を、ASCII の連なりの前後に空白を入れてから小文字化した `content` に対して
+ * 部分文字列として含むか」という、より粗い判定である
+ * （`fake-lexical-store-query-cap.test.ts` の注記も参照）。**同じだと確認したこと**:
+ * - 大文字・小文字を区別しない（`PostgresLexicalStore`/`to_tsvector('simple', …)` と同じ
+ *   向き。以前はここに大文字小文字の区別があり、`PROJ-1234`/`proj-1234` を別語として
+ *   扱っていた）。
+ * - 本文側は、ASCII の連なりの前後に空白を入れてから小文字化する
+ *   （`mnemora_lexical_normalize` と同じ順序。**順序が大事**——先に小文字化すると、
+ *   小文字化で ASCII 化する非 ASCII 文字（ケルビン記号 U+212A → `k` 等）が隣の ASCII
+ *   文字と癒着する。Issue #951 の実測: 本文 `"100" + U+212A` は `"100"` と `"k"` に
+ *   割れ、クエリ `"100k"` の部分文字列一致にはならない——本物の Postgres でも0件）。
+ * - クエリ側は、非 ASCII の連なりを空白に落としてから語に分割する
+ *   （`mnemora_lexical_query_terms` と同じ向き。非 ASCII だけのクエリは語彙が0個になり
+ *   0件を返す——本物の Postgres でも同じく0件）。
+ *
+ * **揃えていない・確認していないこと**（`InMemoryLexicalStore` と共通の限界。同ファイルの
+ * doc 参照）: クエリは Unicode の英数字境界ではなく**空白区切り**で語に割る
+ * （`InMemoryLexicalStore` とは違う形）ため、`PROJ-1234` のようなハイフン入り識別子は
+ * 1語のまま残り、`websearch_to_tsquery` のフレーズ演算子（隣接必須）と同じ効果を
+ * たまたま部分文字列一致で得ている——これは意図した設計ではなく、たまたま同じ結果に
+ * なっているだけである。語幹処理・`word`/`numword`/`hword` 等の細かいトークン化規則、
+ * ギリシャ語の語末シグマのような locale 依存の小文字化規則は再現していない。
+ *
  * `calls` / `shouldThrow` は `FakeEmbeddingProvider.shouldFail` と同じ形の診断・注入口——
  * 「一度も呼ばれていないこと」（既定チャンネルが語彙 store に触れない）と
  * 「配線されているが落ちる adapter」の両方を、歯から直接組み立てられるようにするため。
@@ -2148,6 +2174,29 @@ function capFakeLexicalQueryTotalChars(query: string): string {
  * そのまま返す（1件も切り捨てない）。**呼び出し側が、分割する前の生の `query` に
  * {@link capFakeLexicalQueryTotalChars} をあらかじめ通しておくこと**（`search` 参照）。
  */
+/**
+ * Issue #951: `mnemora_lexical_normalize`（`regexp_replace($1, '([[:ascii:]]+)', ' \1 ', 'g')`、
+ * `packages/postgres/migrations/0008_memories_lexical_index.sql`）と同じ向き——`content` の
+ * ASCII の連なりの前後に空白を入れる。**呼び出し順が大事——小文字化より前に呼ぶこと。**
+ * 先に小文字化すると、小文字化で ASCII 化する非 ASCII 文字（ケルビン記号 U+212A → `k` 等）
+ * が隣の ASCII 文字と癒着し、本来割れるはずの境界が消える（`FakeLexicalStore` の doc 参照）。
+ */
+function insertAsciiBoundaries(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/([\x00-\x7f]+)/g, " $1 ");
+}
+
+/**
+ * Issue #951: `mnemora_lexical_query_terms`（`regexp_replace($1, '[^[:ascii:]]+', ' ', 'g')`、
+ * `packages/postgres/migrations/0008_memories_lexical_index.sql`）と同じ向き——クエリ側の
+ * 非 ASCII の連なりを空白1つに落とす。本文側（`insertAsciiBoundaries`）とは逆の変換であり、
+ * 混同しないこと（`FakeLexicalStore` の doc 参照）。
+ */
+function dropNonAsciiRuns(text: string): string {
+  // eslint-disable-next-line no-control-regex
+  return text.replace(/[^\x00-\x7f]+/g, " ");
+}
+
 function capFakeLexicalQueryTerms(rawTerms: string[]): Set<string> {
   const truncated = rawTerms.map((term) =>
     term.length > LEXICAL_QUERY_MAX_WORD_CHARS ? term.slice(0, LEXICAL_QUERY_MAX_WORD_CHARS) : term,
@@ -2198,8 +2247,13 @@ export class FakeLexicalStore implements LexicalStore {
     // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
     // （capFakeLexicalQueryTotalChars/capFakeLexicalQueryTerms の doc 参照）。
     // 全体の文字数を最初に適用する。
+    // Issue #951: `mnemora_lexical_query_terms` と同じ向きで、非 ASCII の連なりを
+    // 空白に落としてから分割する。`PostgresLexicalStore`/`to_tsvector('simple', …)` と
+    // 同じく大文字小文字を区別しないため、ここで小文字化する（`FakeLexicalStore` の
+    // doc 参照）。
     const termSet = capFakeLexicalQueryTerms(
-      capFakeLexicalQueryTotalChars(query)
+      dropNonAsciiRuns(capFakeLexicalQueryTotalChars(query))
+        .toLowerCase()
         .split(/\s+/)
         .filter((t) => t.length > 0),
     );
@@ -2251,11 +2305,18 @@ export class FakeLexicalStore implements LexicalStore {
       // 🔴 契約（ADR 0092）: クエリの語彙が0個なら何も返さない。1個以上一致すれば返す
       // （OR 意味論）——AND（すべて含む候補しか返さない）ではない。
       if (termSet.size === 0) continue;
-      const matchedTerms = [...termSet].filter((t) => memory.content.includes(t));
+      // Issue #951: `mnemora_lexical_normalize` と同じ順序（ASCII の連なりの前後に
+      // 空白を入れてから小文字化する）で `content` を正規化してから部分文字列一致を
+      // 見る（`FakeLexicalStore` の doc 参照）。
+      const normalizedContent = insertAsciiBoundaries(memory.content).toLowerCase();
+      const matchedTerms = [...termSet].filter((t) => normalizedContent.includes(t));
       if (matchedTerms.length === 0) continue;
 
       const coverage = matchedTerms.length / termSet.size;
-      const rank = matchedTerms.reduce((sum, t) => sum + (memory.content.split(t).length - 1), 0);
+      const rank = matchedTerms.reduce(
+        (sum, t) => sum + (normalizedContent.split(t).length - 1),
+        0,
+      );
       hits.push({ memoryId: memory.id, coverage, rank, recordedAt: memory.recordedAt });
     }
     // `PostgresLexicalStore.search`（`interfaces/lexical-store.ts` の `LexicalStore.search`

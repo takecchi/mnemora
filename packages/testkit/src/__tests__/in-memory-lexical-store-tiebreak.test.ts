@@ -32,7 +32,15 @@ import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
 import { InMemoryLexicalStore } from "../__fixtures__/in-memory-lexical-store.js";
 
 const TENANT = "lexical-search-tiebreak-tenant";
-const CONTENT = "同じ内容のテスト用本文";
+// Issue #951（2026-09-26）: 以前はここで非 ASCII だけの content/query（日本語）を
+// 使っていたが、`InMemoryLexicalStore.search` を `PostgresLexicalStore` に揃えた結果、
+// 非 ASCII だけのクエリは（本物の Postgres と同じく）常に0件を返すようになった
+// （`mnemora_lexical_query_terms` がクエリ側の非 ASCII を落とすため）。この歯が
+// 見たいのは tie-break（coverage/rank が同値のときの順序）であって非 ASCII の
+// 扱いではないため、ASCII の content に差し替える
+// （`packages/postgres/src/__tests__/lexical-search-tiebreak.test.ts` の
+// `TIED_CONTENT` と同じ文字列——postgres 側の同種の歯と揃えてある）。
+const CONTENT = "widget alpha bravo tie-break test content";
 
 describe("InMemoryLexicalStore.search — coverage/rank が完全一致したときの tie-break（LexicalStore.search doc / ADR 0175）", () => {
   it("recorded_at が新しい方を先に返す（PostgresLexicalStore.search と同じ契約）", async () => {
