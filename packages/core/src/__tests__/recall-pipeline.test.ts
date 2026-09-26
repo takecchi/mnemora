@@ -940,11 +940,17 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
     await createEmbeddedMemory(stores, [1, 0], { digest: "正常" });
 
     // includeFullyDecayed: true の理由は上の describe 冒頭コメント（ADR 0153）を参照。
+    // association: null の理由: 連想枠（既定 on、ADR 0337）は、段2で score_not_comparable に
+    // 数えた「壊れた」記憶を拾い直して返しうる。そのとき ADR 0203「決めたこと」1 により
+    // score_not_comparable からは取り下げられるので、omitted の件数は段2の三分割と一致しなく
+    // なる（recall-score-not-comparable-promotion.test.ts）。この歯が測るのは段2の三分割そのもの
+    // なので、後の段が何も拾い直さない形で測る。
     const result = await runtime.recall(ctx, {
       vector: [1, 0],
       limit: 10,
       scoreThreshold: 0,
       includeFullyDecayed: true,
+      association: null,
     });
     const rescore = result.explain.stages.find((st) => st.stage === "rescore");
     const detail = rescore?.detail as

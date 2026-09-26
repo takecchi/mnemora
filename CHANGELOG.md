@@ -233,6 +233,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   どれも無変更
   （[Issue #949](https://github.com/takecchi/mnemora/issues/949)、
   [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記4 2026-09-26）。
+- **`runtime.recall()` で、段2で `score_not_comparable` に数えた候補（ゼロベクトルの埋め込みなど）が段3（必須の同伴取得）か段3.5（連想）で戻ると、`memories`（または `budget_dropped`）と `score_not_comparable` の両方に数えられていた**——戻った先でだけ数え、`score_not_comparable` の件数からは外すようにした（公開型は無変更）（[Issue #1019](https://github.com/takecchi/mnemora/issues/1019)、[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記7 2026-09-27）。
 - **`runtime.recall()` で、段2の `below_threshold` の候補が段3.5（連想）の候補プールで席に着けなかったとき、`below_threshold` と `over_limit(stage:"association")` の両方に数えられていた**——`over_limit(stage:"association")` 側だけに数え、`below_threshold` の `count`・`nearMisses` からは外すようにした（公開型は無変更）（[Issue #984](https://github.com/takecchi/mnemora/issues/984)、[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記6 2026-09-27）。
 - **`runtime.recall()` で、段2の `below_threshold` の候補が段3（必須の同伴取得）か段3.5（連想）で戻り、段4の予算で落ちると、`below_threshold` と `budget_dropped` の両方に数えられていた**——`budget_dropped` 側だけに数え、`below_threshold` の `count`・`nearMisses` からは外すようにした（公開型は無変更）（[Issue #950](https://github.com/takecchi/mnemora/issues/950)、[ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記5 2026-09-27）。
 - **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
