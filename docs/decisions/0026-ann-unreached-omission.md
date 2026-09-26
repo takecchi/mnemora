@@ -192,3 +192,38 @@
 `eligible > 40` である限り `ann_unreached` も出るようになったはずである
 （ADR 0193 側で別途、単体テストの歯として固定した。本追記の時点で本物の DB による
 再実測は行っていない）。詳細と理由は ADR 0193 を見ること。
+
+---
+
+## 追記（2026-09-27）: Issue #1005（scale-bench の seedVectors が全行に同じベクトルを入れていた不具合）を踏まえた当て直し
+
+本 ADR の「追記（2026-09-06）」が使った `packages/postgres/src/bench/scale-bench.ts` の
+`seedVectors` は、Issue #1005 が特定した不具合（`ARRAY(SELECT random() ...)` が InitPlan
+として1回だけ評価され、全行に同じベクトルが入る）を持ったままだった（PR #1008 で修正、
+main `76db71c`）。
+
+実測に使われたコミット（`gh run view 34012828007 --json headSha` で特定した `0337d4d6`、
+2026-09-06）を `git worktree` でチェックアウトし、(a) 無改造、(b) `WHERE m.id IS NOT NULL`
+の1行修正のみ、の2通りで同じ規模（100,000行、狙い subject 10,000行、次元256）を比較した。
+
+| 条件 | `hits`（subjectId指定・`kPrime=40`） | `omitted` 件数 | `ann_unreached` |
+|---|---:|---:|---|
+| `0337d4d6`（無改造＝当時のまま） | **0** | 6（上表の「本 PR 適用後」列と一致） | 出た |
+| `0337d4d6` + `seedVectors` の修正のみ | **3** | 6 | 出た |
+
+無改造の行が本文の実測値（`omitted` 件数6）と一致し、**再現を確認した。** `ann_unreached` は
+バグの有無にかかわらず正しく発火している（`hits < kPrime` かつ `hits < eligible` の条件どおり）。
+**バグを修正しても `hits` は `kPrime`（40）には届かず**、本 ADR の「破れが実測された当の経路で、
+ちょうど1件だけ増えている」という読みは覆らない。
+
+今日の main（`76db71c`）で同じ条件を測ると `hits: 40` になり `ann_truncated` も同時に立つ。
+この変化は `seedVectors` の修正ではなく、[ADR 0025](./0025-ann-underfill-is-not-reported-in-omitted.md)
+の追記に記録した通り `e12b49b`（ADR 0284、2026-09-24）に由来することを、同じ対照実験
+（`e12b49b` の親コミット・`e12b49b` 自身の双方に `seedVectors` の修正のみを当てて `hits` を
+比較し、親コミットで2・`e12b49b` で40）で確認済みである。#1005 とは無関係である。
+
+⟹ 本 ADR の読みは変わらない（「足した欄が名乗りどおりに働く」という結論は、同一ベクトルの
+不具合の産物ではなく、有効な観測だった）。
+
+環境: 手元 PostgreSQL 17.11 / pgvector 0.8.0。元の測定は GitHub Actions CI
+「PostgreSQL 17 + pgvector」（正確な pgvector の patch バージョンは当時の ADR 本文に記載が無い）。
