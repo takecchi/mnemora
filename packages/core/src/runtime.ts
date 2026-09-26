@@ -585,7 +585,8 @@ export interface ForgetResult {
  * 呼ばれて新しい統合先ができる（Fake・Postgres の両方で実測）。1回目の統合先自身が
  * 2回目の統合に巻き込まれて `superseded` になるケースもありうる（Fake で実測）。
  * `{ query, maxCandidates }` も `recall()` を呼び直す点は同じ形を共有するが、この追記では
- * 実測していない。詳細と扱い（オーナーの判断待ち）は
+ * 実測していない。2026-09-26 にクローン miku（オーナーではない）が、挙動を変えずに
+ * 既知の負債として記録すると判断した。詳細は
  * [ADR 0152](../../../docs/decisions/0152-consolidate-seed-neighborhood.md) 負債5・
  * [ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md) の2026-09-26 追記。
  */
