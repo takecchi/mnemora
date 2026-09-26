@@ -433,6 +433,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.requeueEmbedJobs`（`@mnemora/testkit` の擬似 `MemoryStore`）も、`opts.limit` に負数・`NaN`・`Infinity`・非整数・bigint に収まらない値（2^63 以上）を渡されると例外を投げず、`.slice(0, Math.max(0, opts.limit))` の丸めに従って積み直していた**——`archiveDecayed`（Issue #880）と同じ形が、この口に残っていた。`limit: Infinity` は対象を全件、`limit: 1.5` は1件、`embeddingStatus` を `pending` に戻して embed ジョブを積んでいた。`PostgresMemoryStore.requeueEmbedJobs` と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くようにした（正常系の挙動は変えていない）。
   ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
+- **`InMemoryMemoryStore`（`@mnemora/testkit` の擬似 `MemoryStore`）が、Observation を書く口（`createObservation`・`createObservationWithOutbox`）で NUL（U+0000）を含む値を受け入れていた**——`subjectId`・`externalId`・`kind`（Postgres の `text` 列）、`payload`（入れ子の値・キーも含む）・`attributes`（`jsonb` 列）。`createMemory` の `attributes`・`provenance`（`jsonb` 列）も同じだった。Postgres はどれも例外にする（Issue #816 の NUL 側のうち、PR #923/#928 が扱っていなかった欄）。同じ値を書き込みの前に弾くようにした。孤立サロゲートは扱っていない。
+  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.reinforce`（`@mnemora/testkit` の擬似 `MemoryStore`）に Invalid
   Date（`new Date(NaN)`）を渡すと、例外を投げず `lastReinforcedAt`/`decayFloorAt` に
   Invalid Date をそのまま書き込んで成功していた——以後その Memory の減衰計算が `NaN`
