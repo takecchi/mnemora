@@ -428,6 +428,17 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 > [ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)
 > 「引き受ける負債」・追記参照。
 
+## 運用: 語彙検索と `statement_timeout`
+
+`PostgresLexicalStore`/`PostgresTrigramLexicalStore` は、検索クエリの語数・1語の文字数・
+全体の文字数に上限を持ち、超えた分は先頭から切り詰める（`LEXICAL_QUERY_MAX_DISTINCT_WORDS`
+= 32・`LEXICAL_QUERY_MAX_WORD_CHARS` = 64・`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600。
+[Issue #878](https://github.com/takecchi/mnemora/issues/878)・
+[ADR 0092](../../docs/decisions/0092-lexical-or-coverage.md) 追記節）。
+**この上限は、1回の検索にかかる時間を有界にするためのものであり、時間そのものの上限では
+ない。**利用者の入力を検索クエリとして渡す場合は、DB 側でも `statement_timeout`
+（ロール・データベース・接続のいずれかの単位）を設定して併用することを推奨する。
+
 ## もっと詳しく
 
 - [docs/memory-model.md](../../docs/memory-model.md) §10 — DB schema・規約
