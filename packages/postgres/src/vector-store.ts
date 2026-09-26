@@ -91,7 +91,22 @@ export class PostgresVectorStore implements VectorStore {
   ): Promise<VectorHit[]> {
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    const queryLiteral = toVectorLiteral(query);
+    // Issue #857: `query` が空配列だと `toVectorLiteral([])` が `"[]"` を作り、下の
+    // `::vector` キャストが「vector must have at least 1 dimension」で未捕捉の
+    // `DrizzleQueryError` になっていた（`runtime.recall()` 自体が reject される）。
+    // Fake（`packages/testkit/src/__fixtures__/in-memory-vector-store.ts` の
+    // `cosineDistance`、`packages/core/src/__tests__/runtime-fakes.ts` の
+    // `FakeVectorStore` にも同じ実装が重複している）は、そういう設計として空配列を
+    // 特別扱いしているわけではない——単に短い方の配列を `0` で zero-pad してから
+    // 長さを揃えているため、空配列がその副作用でゼロベクトルとして扱われ、
+    // ADR 0040（ゼロベクトルは NaN 類似度になり候補に出ない）の経路にそのまま乗って
+    // 正常完走していた。ここではその「たまたまの」Fake の挙動に Postgres を揃える
+    // ——空配列だけを `space.dimensions` 長の全 0 ベクトルに置き換える。
+    // 次元数が0以外だが `space.dimensions` と食い違う `query`（例: 3次元空間に
+    // `[1, 2]`）には手を付けない——Postgres/Fake 双方の挙動を確かめていない
+    // （Issue #857「確かめていないこと」）。
+    const effectiveQuery = query.length === 0 ? new Array(space.dimensions).fill(0) : query;
+    const queryLiteral = toVectorLiteral(effectiveQuery);
 
     const conditions = [sql`e.tenant_id = ${opts.filter.tenantId}`];
     if (opts.filter.status !== undefined) {

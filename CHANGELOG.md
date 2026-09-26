@@ -184,6 +184,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `sliceWithoutSplittingSurrogatePair`（`text-truncation.ts`。`@mnemora/core` の公開 API には出さない内部関数）へ切り出し、
   切り詰め位置がペアの内側なら1文字手前に丸めるようにした（新しい例外は投げない。
   ペアの外側で切れる場合は1バイトも挙動が変わらない）。
+- **`@mnemora/postgres` の `PostgresVectorStore.search` が、`RecallQuery.vector: []`
+  （空配列）を渡すと未捕捉の `DrizzleQueryError`（`vector must have at least 1
+  dimension`）で `runtime.recall()` ごと reject していた。** Fake（`@mnemora/testkit`
+  の `InMemoryVectorStore`）は短い方の配列を0で zero-pad する実装の副作用で空配列を
+  ゼロベクトルとして扱い、ADR 0040 の経路で正常完走していたため、同じ入力に対して
+  adapter ごとに別の答えが出ていた。空配列のときだけ embedding space の次元数ぶんの
+  全0ベクトルに置き換え、Postgres を Fake の実際の挙動に揃えた（新しい例外は投げない。
+  次元数が0以外だが空間の次元数と食い違う `vector` は今回の修正範囲外・未検証）
+  （[Issue #857](https://github.com/takecchi/mnemora/issues/857)）。
 
 ---
 

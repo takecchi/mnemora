@@ -13,8 +13,16 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      "@mnemora/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
+      // `@mnemora/testkit/fixtures` は base の `@mnemora/testkit` より前に書く——
+      // vite のエイリアス解決は文字列一致に加えて「pattern + '/'」の前方一致も見るため、
+      // base を先に書くと `@mnemora/testkit/fixtures` が base 側にマッチして
+      // 壊れたパス（`.../testkit/src/index.ts/fixtures`）に化ける
+      // （packages/openai/vitest.config.mts と同じ理由・同じ並び）。
+      "@mnemora/testkit/fixtures": fileURLToPath(
+        new URL("../testkit/src/fixtures.ts", import.meta.url),
+      ),
       "@mnemora/testkit": fileURLToPath(new URL("../testkit/src/index.ts", import.meta.url)),
+      "@mnemora/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
     },
   },
 });
