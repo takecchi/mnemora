@@ -45,7 +45,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.0` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`7987de4`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`747acaf`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -57,14 +57,27 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 `#703`/`#711`/`#724`/`#728` など、publish 対象パッケージに触れる PR が未計上のまま残っていた。
 この節は、`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものである
 （載せる／載せないの全数表と理由は [PR #747](https://github.com/takecchi/mnemora/pull/747) の本文）。
+2026-09-26 に `v1.0.0` … `747acaf` を改めて1本ずつ数え直し、計上漏れ（PR #792）を足した
+（全数表は [PR #844](https://github.com/takecchi/mnemora/pull/844) の本文）。
 
-**この節が数えた範囲に破壊的変更は無い。**【実測】`git diff v1.0.0..7987de4 --
+🔴 **`747acaf` までの範囲で、計上を保留しているものが在る。**PR #811 / #813 / #815
+（`@mnemora/testkit/fixtures` の Fake が、これまで黙って受け入れていた不正な入力——負数・NaN・
+Infinity・非整数の `limit`、float4 の範囲外の値——に対して例外を投げるようになった）。
+型には現れないが、公開の Fake を直接使う外部の実装者には実行時に壊れうる。**破壊的変更として
+扱うかが未決**なので（[Issue #809](https://github.com/takecchi/mnemora/issues/809)）、
+**どの見出しにもまだ載せていない。**⟹ **下の「破壊的変更は無い」は、この3件を除いた主張である。**
+
+**この節が数えた範囲に破壊的変更は無い（上の保留3件を除く）。**【実測】`git diff v1.0.0..7987de4 --
 scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキーマの欄の並べ替え、
 （b）`import type` 一覧への新しい型名の追加、（c）任意の末尾引数を足したことによる関数
 シグネチャの再フォーマット、のいずれかであり、削除・必須化・型の狭小化は無かった
 （`buildExtractionPrompt`/`extractCandidates`/`previewRestoreSupersededBy` はいずれも任意引数の
 追加のみ）。⟹ **公開 API への影響は、任意の欄・任意の引数・任意のメソッド・新しい export の
 追加のみである。** `### Breaking` の節は無い。
+【実測 2026-09-26】`git diff 7987de4..747acaf -- scripts/__snapshots__/public-api/` の削除行も、
+（c）に加えて、型を広げる変更（`RecallQuery.association` に `| null` を足した、PR #838／
+`supportsLabels`・`supportsFindActiveByClaimKey`・`supportsTaxonomyMode` を必須から任意へ戻した、
+PR #827）だけであった。
 
 対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
 `@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
@@ -203,6 +216,17 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   0/4→4/4 に改善したが、誤検出も1/14→3〜4/14 に増える副作用が実測された
   （[Issue #691](https://github.com/takecchi/mnemora/issues/691) /
   [ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md)、PR #750）。
+- **`ClaimKeyOptions` に任意欄 `knownSubjects?: string[]` を足した**——`knownPredicates` と
+  同型の語彙ヒントを `subject` 側にも用意し、claim key の subject 誤帰属（real-fixture 実測で
+  誤検出30%のほぼ全量の原因、ADR 0324 負債6）を減らす。実測（gpt-4o-mini、6話題×3回）:
+  off 1,1,2/6 → 正解の第三者名を渡すと 0,0,0/6。省略・空配列＝渡していないと同じで、
+  `subjectCandidates`（Issue #608）への暗黙の転用は行わない——`knownSubjects` を省いた
+  呼び出しのプロンプトは1バイトも変わらない
+  （[Issue #372](https://github.com/takecchi/mnemora/issues/372) 負債6 /
+  [ADR 0334](./docs/decisions/0334-claim-key-known-subjects-hint.md)、PR #792）。
+  ⭕ `knownPredicatesFromStore` に対応する「store から動的に集める」版は、汎用語彙が
+  無関係な話題へ誤って使い回される汚染が実測されたため意図的に実装していない
+  （ADR 0334「採らなかった案」）。
 - **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
   同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
   `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
@@ -220,6 +244,8 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`@mnemora/postgres` の `aggregateScope` を1回の `GROUP BY` に書き換えた**（PR #721、Issue #355）。公開の型と返り値は変えていない。手元の実測では約1.8倍速い。挙動の変化は無いが、実行計画が変わるので記す。
 
 - **`@mnemora/postgres` の語彙チャンネルで `ts_rank_cd` の normalization ビットに文書長
   （`1 + ln(length)`）の項を足した（`TS_RANK_CD_NORMALIZATION` を `32` から `32 | 1` = `33`

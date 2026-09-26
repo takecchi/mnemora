@@ -299,6 +299,18 @@ recall の候補から外れたことを表す。`'archived'` には相乗りし
 ADR 0011 と同じ理由で原理的に数えられず、ここに載る `count` は core の後置フィルタが
 実際に落とした件数だけである。⟹ `countKind` は常に `'lower_bound'`。詳細は ADR 0153。
 
+**⚠ 2026-09-26 追記（[ADR 0288](./decisions/0288-ann-unreached-severity.md)、Issue #361、`v1.1.0`）**:
+`ann_unreached` は上のコード例には無い任意欄 `severity?: 'info' | 'warning'` も持つ
+（本節の型例は書き換えない——追記としてここに足す）。`'warning'` は、同じ `recall()` で
+ANN 窓が実際に到達可能な下限に届かなかった場合（§「`ann_unreached` の違い」の
+`annReturnedFewerThanReachable` と同じ式）。それ以外（窓は満杯で `eligible > kPrime` という
+構造だけで鳴っている「常時オン」の状態、ADR 0193 §8-1）は `'info'`。呼び手はこれで
+「構造的にいつも鳴る札」と「実損の兆候がある札」を濾せる。⚠ **`'info'` は「損が無い」の
+保証ではない**——ANN の近似探索が窓を満杯にしたまま真の近傍を取りこぼす事象自体は、この
+値の外に居る（ADR 0288「射程」）。**型は任意だが、runtime は必ず値を入れる**
+（`affinityMeasured?`・ADR 0282 と同じ形——破壊的変更を避けるための任意化であって、
+値が付くかどうかの話ではない）。
+
 **⚠ 2026-09-16 訂正（[Issue #329](https://github.com/takecchi/mnemora/issues/329) /
 [ADR 0173](./decisions/0173-decayed-omission-counted-by-aggregate-scope.md)）: 直前の段落は
 もう実態ではない。**`countKind` は **`'exact'`** になり、件数は他の `filtered` と同じく
@@ -1027,6 +1039,11 @@ type RecalledMemory = {
   contestedWith?: string        // contested で、かつ相手が同じ recall 結果に含まれる場合、その相手の memoryId。retrievedVia を問わない（Issue #691 続き、ADR 0335）
   associationOf?: string        // retrievedVia: 'association' のときだけ在る。起点にしたアンカーの memoryId（§9）
   provenanceKind: ProvenanceKind // 本人が述べた事実か、AI の推論か（オーナーの原則7）
+  speaker?: string | null       // Memory.speaker をそのまま引き継ぐ（Issue #579 案D、ADR 0289）。型は任意だが runtime は必ず値を入れる（欄自体が省略されることは無い）
+  subjectId?: string | null     // Memory.subjectId をそのまま引き継ぐ（同上、ADR 0289）
+  recordedAt?: Date              // Memory.recordedAt をそのまま引き継ぐ（同上、ADR 0298）。occurredAt が無い記憶でも必ず在る
+  occurredAt?: Date | null       // Memory.occurredAt をそのまま引き継ぐ（同上、ADR 0298）
+  attributes?: Attributes        // Memory.attributes をそのまま引き継ぐ（Issue #152/#153、ADR 0312）。呼び手が attributes を渡さない・対象が持たない場合も欄自体は省略されず {} になる
   score: ScoreBreakdown
 }
 
@@ -1037,8 +1054,13 @@ type ScoreBreakdown = {
   freshness: number      // 1 で頭打ち（ADR 0036）。まだ起きていない出来事は古びようがない
   strength: number
   total: number           // 段2で使った最終スコア
+  affinityMeasured?: boolean // 連想枠（段3.5）が affinity を測っていない状態で返した記憶かどうか（Issue #548 方向1、ADR 0282）。§9.7 参照
 }
 ```
+
+**⚠ 2026-09-26 追記（`v1.1.0`）**: 上のスニペットは `speaker`/`subjectId`/`recordedAt`/
+`occurredAt`/`attributes`（`RecalledMemory`）と `affinityMeasured`（`ScoreBreakdown`）を
+この追記で足した。**いずれも既存欄の型・名前・必須性は無変更**——追加のみである。
 
 **⚠ 2026-09-16 追記**: `retrievedVia` は以前 `'tag_match'` / `'recency'` も持っていたが、
 生成するコードが一度も無かった（Issue #206 /
