@@ -1026,3 +1026,44 @@ Issue #950 は、`nearMisses`（memoryId を持つ公開の欄）から「予算
   完結しており、adapter に依存しない）。`budget` を渡すベンチの基準値への影響は CI で見る。
 
 Refs #950
+
+---
+
+## 2026-09-27 追記6（クローン miku の委譲先、Issue #984）
+
+**追記5「範囲外と分かったこと」——`below_threshold` の候補が段3.5 の候補プールに入ったが
+席（`maxCount`）に着けず、`below_threshold` と `over_limit(stage:"association")` の両方に
+数えられる経路——を、この日付で解消した。**
+
+### 決めたこと
+
+追記4（Issue #949）が `over_limit(stage:"rescore")` について入れた処置を、`below_threshold` にも
+当てた。この経路で最後にその候補を落とした段は段3.5 なので、`over_limit(stage:"association")`
+側に1回だけ残し、`below_threshold` の `count` と `nearMisses` からは取り下げる。取り下げの作法は
+「決めたこと」5 と同じである。
+
+**塞いだこと**: `recall-runtime.ts` の `promotedFromBelowThreshold` の判定に、
+`overLimitAssociationSeatlessIds`（段3.5 の候補プールで席に着けなかった候補の id。追記4 が
+`over_limit(stage:"association")` の count を構成する2つの式から組み立てた集合）を OR で足した。
+`over_limit(stage:"association")` 自身の count は変えていない。多層防御で落ちた候補がこの集合に
+入らないことも、追記4 に書いたとおりである。
+
+⟹ 追記3〜6 により、`below_threshold` と `over_limit(stage:"rescore")` の2つについては、
+段3（`companions`）・段3.5 の席（`associationUnits`）・段3.5 の席に着けなかった分
+（`overLimitAssociationSeatlessIds`）の3つの経路のどれで扱われても、`omitted` の中で1回だけ
+数えられる。
+
+### 測ったこと
+
+- 【実測】歯 `packages/core/src/__tests__/recall-below-threshold-association-seat-promotion.test.ts`
+  （fake ストア、2本）: 修正前は (a)（席を競り負けた below_threshold の候補が
+  `below_threshold` から外れる）が赤。(b)（連想の土俵に上がっていない候補は `below_threshold` に
+  残る）も、同じ二重計上で `count` が 2 になり赤。修正後は2本とも緑。
+- 【実測】変異試験: 判定を「すべて取り下げる」にすると (b) だけが赤。
+  `overLimitAssociationSeatlessIds` を判定から外すと（修正前と同じ）(a)(b) が赤。
+- 【実測】`packages/core` の recall・omission まわりの既存の歯 32 ファイル（486本）を
+  ファイル名指定で実行し、すべて緑。
+- **確かめていないこと**: 本物の Postgres での再現（判定は `packages/core` の中で完結する）。
+  `maxCount` を渡すベンチの基準値への影響は CI で見る。
+
+Refs #984
