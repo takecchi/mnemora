@@ -90,6 +90,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
   無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
   [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
+- **`Runtime.resolveOrphanedContested(ctx, survivorId, opts?)` を足した**——`markContested`
+  で対にした2件の片側を `forget()` すると、生存側が `contested`・`contestedWithId` が
+  対向を指したまま残り、既存の `resolveContested`（ADR 0150）では解消できなくなっていた
+  （対向がもう `contested` ではないため、決定3の CAS を満たせない）。この口は生存側1件
+  だけを対象にした別の任意メソッドで、`resolveContested`/`MemoryStore.resolveContestedPair`
+  の挙動は変えていない。`MemoryStore.resolveOrphanedContested?` も任意メソッド
+  （フォールバック無し）として3実装（`@mnemora/postgres`/`@mnemora/testkit`/
+  `@mnemora/core` の Fake）に揃えた（[Issue #825](https://github.com/takecchi/mnemora/issues/825) /
+  [ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 /
+  [ADR 0087](./docs/decisions/0087-runtime-forget-shape.md) 追記、PR #TBD）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

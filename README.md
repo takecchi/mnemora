@@ -331,9 +331,9 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない（`sweepArchive` の doc コメント自身が
   「呼び出し側が明示的にこれを呼んだときだけ走る保守操作である」と書いている）。
-- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` /
-  `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・将来の
-  自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
+- **是正・取り消し**（`markContested` / `resolveContested` / `resolveOrphanedContested` /
+  `restoreArchived` / `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・
+  将来の自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
   書き込む口。どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も
   持たない**——下の「⚠ mnemora が保証していないこと」の節を見ること。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口

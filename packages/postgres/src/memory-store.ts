@@ -2175,6 +2175,67 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
+   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記）:
+   * `resolveContestedPair`（上）の解決側 CAS を満たせなくなった生存側1件だけを対象にした
+   * 別の任意メソッド。契約は `MemoryStore.resolveOrphanedContested`（`@mnemora/core`）側に
+   * ある——ここはクエリの組み立てのみ。`resolveContestedPair` と違い、対象は1件だけであり
+   * 対向の行には一切触れないため、`ORDER BY ... FOR UPDATE` の行ロック順序調整は不要
+   * （ロックする行がそもそも1件しかない）。
+   */
+  async resolveOrphanedContested(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    if (!isUuidLike(survivor.id)) {
+      throw new Error(`PostgresMemoryStore: memory not found for tenant: ${survivor.id}`);
+    }
+
+    return this.db.transaction(async (tx) => {
+      const result = await tx.execute(sql`
+        UPDATE memories
+        SET status = 'active',
+            contested_with_id = NULL,
+            updated_at = now()
+        WHERE tenant_id = ${ctx.tenantId} AND id = ${survivor.id}
+          AND status = 'contested' AND contested_with_id = ${survivor.contestedWithId}
+        RETURNING *
+      `);
+      if (result.rows.length === 0) {
+        // 事前検証を通った直後にここへ来るとすれば TOCTOU——読み直して切り分ける
+        // (`resolveContestedPair` と同じ作法)。
+        const current = await tx.execute(sql`
+          SELECT status FROM memories WHERE tenant_id = ${ctx.tenantId} AND id = ${survivor.id} LIMIT 1
+        `);
+        if (current.rows.length === 0) {
+          throw new Error(`PostgresMemoryStore: memory not found for tenant: ${survivor.id}`);
+        }
+        const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
+        throw new MemoryStatusConflictError(survivor.id, "contested", observedStatus);
+      }
+      const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
+
+      const eventResult = await tx.execute(sql`
+        INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
+        VALUES (
+          gen_random_uuid(),
+          ${ctx.tenantId},
+          ${survivor.event.memoryId},
+          ${survivor.event.kind},
+          ${survivor.event.at ?? new Date()},
+          ${JSON.stringify(survivor.event.actor)}::jsonb,
+          ${survivor.event.digestSnapshot ?? null},
+          ${survivor.event.sizeBeforeBytes ?? null},
+          ${JSON.stringify(survivor.event.meta)}::jsonb
+        )
+        RETURNING *
+      `);
+      const storedEvent = rowToMemoryEvent(eventResult.rows[0] as unknown as MemoryEventRow);
+
+      return { memory, event: storedEvent };
+    });
+  }
+
+  /**
    * `docs/memory-model.md` §11 行15「`superseded → active`」。契約は
    * `MemoryStore.restoreSupersededBy`（`@mnemora/core`）側にある——ここはクエリの
    * 実装のみ。

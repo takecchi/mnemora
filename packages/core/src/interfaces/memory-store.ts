@@ -1106,6 +1106,50 @@ export interface MemoryStore {
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
   /**
+   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記、
+   * 2026-09-26）: `resolveContestedPair`（上）の決定3（CAS「両側とも `contested` かつ
+   * 相互参照が成立」）は、対向を `forget()` した後の対では**構造的に満たせない**——forget は
+   * `status` を `'forgotten'` に動かすだけで `contestedWithId` には触れないため
+   * （`Runtime.forget` の doc コメント）、生存側は `status: 'contested'` のまま、対向は
+   * もう `'contested'` ではなくなる。この口は**その対の生存側1件だけ**を対象にした、
+   * `resolveContestedPair` とは別の任意メソッドである——**決定3の CAS 自体は変えない**
+   * （`resolveContestedPair` は1文字も変更していない）。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`markContestedPair?`/`resolveContestedPair?` と同じ理由）。
+   * **フォールバック経路は無い**——`contestedWithId` を `null` に戻せる口は今日
+   * `resolveContestedPair` とこの口以外に無い。この口を実装しない adapter に対しては、
+   * `Runtime.resolveOrphanedContested` は「対応していない」とだけ返し、劣化した代替を
+   * 試みない。
+   *
+   * ⚠ **「対向が forgotten/見つからない」という適格性の判定はこの口自身は行わない。**
+   * それは `Runtime.resolveOrphanedContested` が読み側で行う（interface JSDoc 参照）——
+   * この口は「呼び出し側が既に適格と判定した1件を、CAS を課して書く」だけである
+   * （`markContestedPair`/`resolveContestedPair` と同じ「判定はしない」規律）。
+   *
+   * 契約:
+   * - **`survivor.id` 側は呼び出し時点で `status === 'contested'` かつ
+   *   `contestedWithId === survivor.contestedWithId`（呼び出し側が読んだ時点の値）で
+   *   あること**（CAS）。**対向（`survivor.contestedWithId` が指す行）の現在の状態は
+   *   この口自身は検査しない**——対向はもう `contested` ではない前提の口だからである。
+   * - `survivor.id` が `isUuidLike` でない、またはそのテナントに存在しなければ
+   *   `updateStatusWithEvent` と同じ「memory not found」の `Error` を投げる。
+   * - CAS が破れた場合（存在するが `status !== 'contested'`、または `contestedWithId` が
+   *   渡された値と一致しない）は {@link MemoryStatusConflictError} を投げる。
+   *   `expectedStatus` は常に `'contested'`。
+   * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う: `survivor.id` の
+   *   `status` を `'active'` に、`contestedWithId` を `null` に更新し、`memory_events` へ
+   *   1件追記する（`event.kind` は呼び出し側が渡した値をそのまま使う）。**対向の行には
+   *   一切触れない**——`UPDATE`/`INSERT` の対象はどちらも `survivor.id` 側だけである。
+   * - 🔴 **原子性の証拠ではない。**`markContestedPair`/`resolveContestedPair` の
+   *   doc コメントと同じ注意——この口が在ることは adapter がこの口を実装したことしか
+   *   意味しない。
+   */
+  resolveOrphanedContested?(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
+  /**
    * Issue #372（(B) 第2段。`docs/decisions/`「主張キーの衝突を検出する」ADR、ADR 0185
    * 決定4・ADR 0320 決定7・決定8 の続き）: 「同じ tenant・同じ `subjectId`・同じ claim key
    * （`claimKeySubject`/`claimKeyPredicate`）・有効期間が重なる・`contentHash` が違う、
