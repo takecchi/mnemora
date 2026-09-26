@@ -223,7 +223,7 @@ outbox は今日どおり Postgres が正本のままで、`InlineScheduler` か
 | リスク | 兆候 | 対処 |
 |---|---|---|
 | over-fetch 近似の取りこぼしが、利用者に「記憶が消えた」と見える | `omitted.kind = 'ann_truncated'` の発生率が高い、または「知っているはずなのに出てこない」という報告が増える | over-fetch 係数（k'）を上げる。段1で落ちた境界付近のスコアをログして閾値を調整する。取りこぼしの可能性そのものは常に `omitted` に出し、隠さない。 |
-| 抽出 LLM の品質が全体の質を決めてしまう（garbage in） | digest が空虚・的外れになる、抽出される Memory の件数が異常に多い／少ない、`extractorVersion` を上げた途端に既存 Memory との整合性が崩れる | `extractorVersion` ごとの冪等性を保ったまま並行比較できるようにする。抽出結果のサンプルレビューを運用に組み込む。alteroid の「分類に失敗したら厚い側（安全側）に倒す」という安全弁を抽出にも取り入れる。 |
+| 抽出 LLM の品質が全体の質を決めてしまう（garbage in） | digest が空虚・的外れになる、抽出される Memory の件数が異常に多い／少ない、`extractorVersion` を上げた途端に既存 Memory との整合性が崩れる | `extractorVersion` ごとの冪等性を保ったまま並行比較できるようにする。抽出結果のサンプルレビューを運用に組み込む。alteroid の「分類に失敗したら厚い側（安全側）に倒す」という安全弁を抽出にも取り入れる。⚠ **2026-09-26 追記（Issue #873）: `runtime.reextract()` は今日、`extractorVersion` を跨いだ旧い版の Memory を supersede しない**（同じ版の中でしか比較しない、`docs/decisions/0028-reextract-superseded-cleanup.md` 追記）——新旧の並行比較はこの制約の上で運用側が明示的に退役させる前提で成り立っている。 |
 | 埋め込みモデル移行のコスト（全件再 embed） | 新しい embedding モデルを使いたくなる、または既存モデルが非推奨化される | 埋め込み空間ごとにテーブルを分ける設計（`memory_embeddings_<space>`）を維持する。移行は新しい空間の追加であって、既存空間の置換ではない。 |
 | `decay_floor_at` の設計が、half-life をテナントごとに変えたくなった瞬間に再計算全件を要求する | 「このテナントだけ忘却を早く／遅くしたい」という要望が来る | half-life は Memory 単位の列として持ち、テナント設定はあくまでデフォルト値としてのみ使う。既存行の全件再計算は発生させない。 |
 | 監査ログの量 | `memory_events` テーブルのサイズが MemoryStore 本体を上回るペースで伸びる | テナント単位の保持期間設定と、期限切れ削除を `purged` イベントとして残す仕組みを Phase 3 で実装する。スキーマは Phase 1 から仕込んである。 |
