@@ -347,6 +347,56 @@ export class InMemoryMemoryStore implements MemoryStore {
           `InMemoryMemoryStore: halfLifeHours out of range (0, ∞): ${input.halfLifeHours}`,
         );
       }
+      // Issue #817（PR #815 と同根）: `memories.half_life_hours` は Postgres の `real`
+      // （IEEE 754 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い
+      // （`migrations/0012_half_life_hours_range.sql` の CHECK 制約）。上の
+      // `isHalfLifeHoursInRange` は float64 の `(0, ∞)` しか見ないため、float64 では有限
+      // だが float4 の範囲を超える値（例: `1e300`）を通してしまう——`real` へ変換される際に
+      // `Infinity` へ丸まり CHECK 制約に抵触して Postgres は例外を投げる（実測）。
+      // `Math.fround` は JS の number を float4 と同じビット幅へ丸める標準関数であり、
+      // その丸めで `Infinity` になるかどうかは Postgres の `real` 変換が overflow するか
+      // どうかとビット単位で一致する（`setDefaultHalfLifeRecalls`、PR #815 と同じ判定）。
+      //
+      // ⚠ `strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]`（`MAX_STRENGTH` は
+      // 上の `isStrengthInRange` が使う定数、`packages/core/src/memory.ts`）であり
+      // float4 の範囲へ遠く届かない——`isStrengthInRange` の時点で `1e300` のような値は
+      // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
+      // ため、`strength` にはこの検査を足さない。
+      if (!Number.isFinite(Math.fround(input.halfLifeHours))) {
+        throw new Error(
+          `InMemoryMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
+        );
+      }
+      // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
+      // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date
+      // （`.getTime()` が `NaN`）を渡すと `PostgresMemoryStore.createMemory` はクエリ実行時に
+      // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
+      // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
+      // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
+      if (Number.isNaN(input.recordedAt.getTime())) {
+        throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
+      }
+      for (const [field, value] of [
+        ["occurredAt", input.occurredAt],
+        ["validFrom", input.validFrom],
+        ["validUntil", input.validUntil],
+      ] as const) {
+        if (value != null && Number.isNaN(value.getTime())) {
+          throw new Error(`InMemoryMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
+        }
+      }
+      // Issue #816（NUL 側のみ。孤立サロゲート側は本 PR の対象外）: Postgres の `text` 型は
+      // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
+      // `PostgresMemoryStore.createMemory` は `content` に NUL を含む文字列を渡すと
+      // `invalid byte sequence for encoding "UTF8": 0x00` で例外を投げる（実測）。
+      // ⚠ 同じ制約は `tenantId`/`subjectId`/`tags`/`digest` など他の text 型フィールドにも
+      // 及ぶことを実測した（Issue #816 本文と同じ）が、`tenantId` は `ctx` を通じて
+      // ほぼ全メソッドが共有する横断的な値であり、`subjectId`/`tags`/`digest` を含めるかは
+      // 「どこまでの範囲をガードするか」という Issue 本文が明記する設計判断が要るため、
+      // 本 PR では最も典型的な入力面である `content` だけに絞る。
+      if (input.content.includes("\u0000")) {
+        throw new Error(`InMemoryMemoryStore: content must not contain NUL characters (U+0000)`);
+      }
 
       const now = new Date();
       const memory: Memory = {
@@ -823,6 +873,17 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
+    // `PostgresMemoryStore.reinforce` は `at` を `timestamptz` 列（`last_reinforced_at`/
+    // `decay_floor_at`）へそのまま書き込むため、Invalid Date（`at.getTime()` が `NaN`）を
+    // 渡すとクエリ実行時に `invalid input syntax for type timestamp with time zone` で
+    // 例外を投げる（実測。Issue #807）。ここで検査しないと、下の no-op 判定
+    // （`memory.lastReinforcedAt.getTime() >= at.getTime()`）は `NaN` を含む比較が常に
+    // `false` になるため素通りし、`lastReinforcedAt`/`decayFloorAt` が Invalid Date の
+    // まま静かに書き込まれてしまう——以後この Memory の減衰計算が `NaN` を返し続ける。
+    // クエリを投げる前に弾く Postgres 側に揃える。
+    if (Number.isNaN(at.getTime())) {
+      throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
+    }
     if (
       memory.lastReinforcedAt !== null &&
       memory.lastReinforcedAt !== undefined &&
@@ -1251,6 +1312,23 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `forget` と同じ規約、docs/memory-model.md §9）。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    // `PostgresMemoryStore.archiveDecayed`（`buildArchiveDecayedTargetSelect`）は
+    // `opts.limit` を生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・
+    // `NaN`・`Infinity`・非整数を渡すと Postgres 自身が例外を投げる（実測:
+    // `LIMIT must not be negative` / `invalid input syntax for type bigint: "NaN"` 等。
+    // Issue #880）。ここで検査せず `.slice(0, Math.max(0, opts.limit))` へ渡すと、
+    // `Math.max(0, NaN)` は `NaN`（`slice` はこれを `0` として扱う＝0件）に、
+    // `Math.max(0, Infinity)` は `Infinity`（`slice` は対象を無条件に全件）にしてしまう
+    // ——このメソッドは書き込みの副作用（`status` を `archived` にし、イベントを積む）
+    // を持つため、他の口（PR #811/#875 の limit ガード）より実害が大きい。クエリを
+    // 投げる前に弾く Postgres 側に揃える（`InMemoryMemoryStore.purgeExpiredEvents` と
+    // 同じ2段の順序: 非整数を先に、次に負数を見る）。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`archiveDecayed: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`archiveDecayed: limit must not be negative (got ${opts.limit})`);
+    }
     const nowMs = opts.now.getTime();
     const clock = opts.clock ?? "wall";
     const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;

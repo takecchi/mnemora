@@ -306,6 +306,45 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （新しい例外は投げない。`VectorStore.upsert` に長さの違うベクトルを渡したときの
   扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
+- **`InMemoryMemoryStore.archiveDecayed`（`@mnemora/testkit` の擬似 `MemoryStore`）が
+  `opts.limit` に負数・`NaN`・`Infinity`・非整数を渡されても例外を投げず、`.slice(0,
+  Math.max(0, opts.limit))` の丸めに従って実際に書き込みまで行っていた。** `limit:
+  Infinity` は対象を無条件に全件 `archived` にし、`limit: 1.5` は1件だけ `archived` に
+  していた——このメソッドは書き込みの副作用（`status` を `archived` にし、`archived`
+  イベントを積む）を持つ口であるため、他の口（`OutboxStore.claimBatch`・
+  `VectorStore.search`・`LexicalStore.search`・`EventStore.list`・
+  `MemoryStore.purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`、下の
+  `[1.0.1]` 節の PR #811/#813 相当）より実害が大きかった。`PostgresMemoryStore.archiveDecayed`
+  と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くように
+  した（新しい正常系の挙動は変えていない）（[Issue #880](https://github.com/takecchi/mnemora/issues/880)、PR #923）。
+- **`InMemoryMemoryStore.reinforce`（`@mnemora/testkit` の擬似 `MemoryStore`）に Invalid
+  Date（`new Date(NaN)`）を渡すと、例外を投げず `lastReinforcedAt`/`decayFloorAt` に
+  Invalid Date をそのまま書き込んで成功していた——以後その Memory の減衰計算が `NaN`
+  を返し続ける。** `PostgresMemoryStore.reinforce` は同じ `at` を `timestamptz` 列へ
+  そのまま書き込むため、Invalid Date は例外になる。同じ根本原因が及ぶ範囲を実測し、
+  `createMemory` の `recordedAt`/`occurredAt`/`validFrom`/`validUntil` と、
+  `EventStore.append`/`updateStatusWithEvent` 等イベントを積む口が共有する
+  `at`（Postgres の `timestamptz` 列）もまとめて塞いだ（新しい正常系の挙動は変えて
+  いない）（[Issue #807](https://github.com/takecchi/mnemora/issues/807)、PR #923）。
+- **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit` の擬似 `MemoryStore`）が、
+  `halfLifeHours` に float64 では有限だが Postgres の `real`（IEEE 754 単精度・float4、
+  値域は約 `±3.4028235e38`）の範囲を超える値（例: `1e300`）を渡されても例外を投げず
+  静かに受け入れていた。** `memories.half_life_hours` の `CHECK` 制約（値が `real` へ
+  変換される際に `Infinity` へ丸まる、下の `[1.0.1]` 節の
+  `setDefaultHalfLifeRecalls`（PR #815）と同根）と同じ `Math.fround` ベースの判定を
+  足した（新しい正常系の挙動は変えていない。`strength` は値域 `(0, MAX_STRENGTH]` が
+  float4 の範囲へ届かないため、既存の値域検査で既に拒まれており対象外）
+  （[Issue #817](https://github.com/takecchi/mnemora/issues/817)、PR #923）。
+- **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit` の擬似 `MemoryStore`）が、
+  `content` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
+  いた。** Postgres の `text` 型は NUL バイトを構造的に拒む（C 文字列表現に由来する
+  制約）ため、`PostgresMemoryStore.createMemory` は同じ入力に例外を投げる。この PR で
+  塞ぐのは `content` のみ——`tenantId`（`ctx` を通じてほぼ全メソッドが共有する横断的な
+  値）・`subjectId`・`tags`・`digest` 等の他の text 型フィールドにも同じ制約が及ぶことを
+  実測したが、どこまで範囲を広げるかは製品判断が要ると判断し対象外にした。孤立サロゲート
+  （`\uD800` 等）も対象外——Postgres 側（node-postgres が U+FFFD へ静かに置換する）の
+  挙動に Fake をどちらへ寄せるかは別途の製品判断が要る
+  （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ、PR #923）。
 
 ---
 
