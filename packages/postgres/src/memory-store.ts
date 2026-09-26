@@ -2573,6 +2573,20 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
  * `purged === opts.limit` からの推測に頼らず、専用の信号として立てるため
  * （`packages/core/src/interfaces/memory-store.ts` の契約節参照）。
  *
+ * ⚠ **`opts.limit` は0以上の整数を渡す前提であり、負数を渡したときの結果は未定義**
+ * （`PurgeExpiredEventsOptions.limit` の doc 参照、Issue #876）。**この `+1` の算術ゆえに
+ * `opts.limit === -1` だけは `LIMIT 0` になり例外にならない**——2026-09-26 実測
+ * （PostgreSQL 17.11 + pgvector 0.8.0、`main` cb6d1db）で `purgeExpiredEvents(ctx,
+ * { limit: -1, olderThan })` は `{ purged: 0, reachedLimit: true, oldestPurgedAt: null,
+ * newestPurgedAt: null, dryRun }` を返した（`dryRun: true`/`false` とも同じ形）。
+ * `reachedLimit: true` になるのは、この関数が返す0行に対して呼び出し側が
+ * `rows.length > opts.limit`（`0 > -1`）で判定するため——**「1回で消しきれなかった」を
+ * 意味する信号のはずが、ここでは取り違いを起こす**。`opts.limit <= -2` では
+ * `LIMIT` に負数が渡り Postgres 自身が例外を投げる。**この `-1` の折れ方は狙って設計した
+ * ものではなく、`+1` の算術が生んだ偶然である**——契約として真似る理由は無い
+ * （採らなかった案は [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)
+ * の2026-09-26追記を参照）。
+ *
  * `kind <> 'events_purged'` は `memory_events` に `(tenant_id, at)` の索引
  * （`migrations/0010_memory_events_retention_index.sql`）を張ったうえで Filter として
  * 残す——`kind` を索引に含めない（無限後退を避けるための除外は「対象の絞り込み」で
