@@ -185,6 +185,13 @@ pg_ctl -D "$PGDATA" stop
 **拡張の3本（`vector` / `btree_gin` / `pgcrypto`）は `.github/workflows/ci.yml` の
 `postgres` ジョブと同じである。**片方だけ増やさないこと。
 
+**⚠ 上の `--encoding=UTF8 --locale=C` は、CI の2脚（`UTF8` / `SQL_ASCII`+`--locale=C`）の
+どちらでもない第三の regime（UTF8+C）である。**【実測】2026-09-26、この regime では
+`packages/postgres/src/__tests__/trigram-lexical-store.postgres.test.ts` の4件が手元でだけ赤になり、
+CI では緑だった。既知の挙動で、同ファイルの docstring が「CI の2脚には無い regime」として対象外にしている。
+同じ器で `--encoding=UTF8 --locale=C.UTF-8`（UTF8 脚に相当）と `--encoding=SQL_ASCII --locale=C`
+（SQL_ASCII 脚と同じ）で立て直したところ、4件とも緑だった。
+
 ### 1本に絞って走らせる（変異試験はこちら）
 
 **`test:db` 全体は約4分かかる**【実測】。変異試験では毎回これを待たないこと:
