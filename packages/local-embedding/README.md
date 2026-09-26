@@ -51,7 +51,7 @@ API キーは要らない。ネットワークが要るのは**初回のモデ�
 
 **上限を超えた入力を渡すと `embed()` は例外を投げる**（[ADR 0090](../../docs/decisions/0090-embedding-input-token-limit.md)）。
 
-```ts
+```ts check
 import { isLocalEmbeddingProviderError } from "@mnemora/local-embedding";
 
 try {
@@ -90,7 +90,7 @@ try {
 
 ## `space` の形 — 🔴 `ruri-v3-30m/sym` の `/sym` を消さないこと
 
-```ts
+```ts check
 import type { EmbeddingSpaceId } from "@mnemora/core";
 
 const space: EmbeddingSpaceId = { provider: "local", model: "ruri-v3-30m/sym", dimensions: 256 };
@@ -284,7 +284,7 @@ const runtime = createRuntime({
 呼び出し側（`embed()` / `warmup()`）には、リトライを使い切って本当に失敗したときしか
 例外が届かない。
 
-```ts
+```ts check
 const provider = new LocalEmbeddingProvider({
   retry: {
     attempts: 5, // 既定は3
@@ -304,7 +304,7 @@ const provider = new LocalEmbeddingProvider({
 
 ### 先に読み込ませたいときは `warmup()`
 
-```ts
+```ts check
 await embeddingProvider.warmup(); // 最初のリクエストにロード時間を被せない
 ```
 
@@ -396,7 +396,7 @@ Optimum の文書から書いたものであり、**動くことを確かめて�
 
 **確かめた経路**（このパッケージのコードとして成立している）:
 
-```ts
+```ts check
 // 自分の Hugging Face repo へ push して、その id を指す。
 new LocalEmbeddingProvider({ repo: "your-org/ruri-v3-30m-ONNX" });
 
@@ -423,7 +423,7 @@ new LocalEmbeddingProvider({ cacheDir: "/var/lib/mnemora/models" });
 `{ maxInputTokens, countTokens, embed }` を持つオブジェクトでなければならない。
 `buildLocalEmbeddingPipeline(extractor)` に渡せば、この組み立ては自動でやってくれる）:
 
-```ts
+```ts check
 import {
   LocalEmbeddingProvider,
   buildLocalEmbeddingPipeline,

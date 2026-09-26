@@ -18,7 +18,7 @@ npm i @mnemora/core
 単独では意味が決まらない返答には、`observe` の `extractionContext` を渡せます。
 文脈は観測と一緒に保存され、非同期抽出や `reextract` でも使われます。
 
-```ts
+```ts check
 await runtime.observe(ctx, {
   kind: "utterance",
   text: "それでお願いします。明日使います",
@@ -52,7 +52,7 @@ await runtime.observe(ctx, {
 テスト用の決定的な擬似実装は [`@mnemora/testkit`](../testkit/README.md)）を
 呼び出し側が用意して渡す必要がある。
 
-```ts
+```ts check
 import type {
   EmbeddingProvider,
   EventStore,
@@ -111,7 +111,7 @@ const { observationId } = await runtime.observe(ctx, {
 
 一切走らせたくない呼び出しは `association: null` を明示的に渡す:
 
-```ts
+```ts check
 const recalled = await runtime.recall(ctx, {
   text: "京都の予定は?",
   association: null, // 明示的に off にする（省略すると DEFAULT_RECALL_ASSOCIATION が適用される）
@@ -120,7 +120,7 @@ const recalled = await runtime.recall(ctx, {
 
 既定値ではなく自分で値を渡したいときは、`maxCount` を明示する:
 
-```ts
+```ts check
 const recalled = await runtime.recall(ctx, {
   text: "京都の予定は?",
   association: { maxCount: 10 },
@@ -159,7 +159,7 @@ const recalled = await runtime.recall(ctx, {
 
 **`subjectId` は `recall()` の引数ではない。`Ctx` の任意欄である。**
 
-```ts
+```ts check
 const ctx = { tenantId: "tenant-1" };                        // ⟹ テナント全体が対象
 const scoped = { tenantId: "tenant-1", subjectId: "user-1" }; // ⟹ この subject だけが対象
 ```
@@ -200,7 +200,7 @@ const scoped = { tenantId: "tenant-1", subjectId: "user-1" }; // ⟹ この subj
 記憶の減衰（`DecayStrategy`）・スコアリング（`ScoringStrategy`）・時刻（`Clock`）・
 トークン数の推定（`TokenCounter`）は、DB もネットワークも要らない純関数として公開している。
 
-```ts
+```ts check
 import {
   defaultDecayStrategy,
   defaultScoringStrategy,
