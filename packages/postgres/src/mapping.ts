@@ -40,12 +40,41 @@ import type {
  * `"2026-05-11 00:47:17.621+09"`、`"2026-01-01 00:00:00.123456+05:30"`）を `Date` に変換する。
  * `new Date()` にそのまま渡せる ISO 8601 形式（`T` 区切り・コロン付きタイムゾーン）へ
  * 正規化してから変換する。
+ *
+ * Issue #1039: 既定の出力には、`new Date()` が読めない形もある。
+ * - 秒を含む時差（`"1850-01-01 09:18:59+09:18:59"`）——サーバの `TimeZone` が
+ *   地方平均時（LMT）の時代を持つ地域のとき、その時代の時刻
+ * - 紀元前の接尾辞（`"0001-06-01 00:00:00+00 BC"`。紀元前1年は天文年の0年）
+ * - 5桁以上の年（`"10000-01-01 00:00:00+00"`）
+ *
+ * これらを含め、時差つきの形は各欄から UTC の時刻を組み立てる。年は `Date.UTC` ではなく
+ * `setUTCFullYear` で入れる（`Date.UTC` は0〜99年を1900年代として読む）。小数秒は
+ * `new Date()` と同じく、ミリ秒より下を切り捨てる。
  */
 export function parsePgTimestamp(value: string): Date;
 export function parsePgTimestamp(value: string | null): Date | null;
 export function parsePgTimestamp(value: string | null): Date | null {
   if (value === null) {
     return null;
+  }
+  const parts = value.match(
+    /^(\d{4,})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?([+-])(\d{2})(?::?(\d{2}))?(?::?(\d{2}))?( BC)?$/,
+  );
+  if (parts) {
+    const [, y, mo, d, h, mi, s, frac, sign, oh, om, os, bc] = parts;
+    const year = bc === undefined ? Number(y) : 1 - Number(y);
+    // 時差は各欄から直接引く（ローカル時刻をいったん UTC として組むと、`Date` の表せる
+    // 範囲の端（±275760年）で途中の値だけが範囲を超えて NaN になる）。
+    const k = sign === "-" ? -1 : 1;
+    const utc = new Date(0);
+    utc.setUTCFullYear(year, Number(mo) - 1, Number(d));
+    utc.setUTCHours(
+      Number(h) - k * Number(oh),
+      Number(mi) - k * Number(om ?? "0"),
+      Number(s) - k * Number(os ?? "0"),
+      Number((frac ?? "").padEnd(3, "0").slice(0, 3)),
+    );
+    return utc;
   }
   let normalized = value.replace(" ", "T");
   const tz = normalized.match(/([+-]\d{2})(:?(\d{2}))?$/);
