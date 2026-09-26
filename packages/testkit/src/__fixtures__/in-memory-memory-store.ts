@@ -1430,6 +1430,34 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
+   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記）:
+   * `resolveContestedPair`（上）の解決側 CAS を満たせなくなった生存側1件だけを対象にした
+   * 別の任意メソッド。契約は `MemoryStore.resolveOrphanedContested`（`@mnemora/core`）側に
+   * ある。対向の行には一切触れない。
+   */
+  async resolveOrphanedContested(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const memory = await this.get(ctx, survivor.id);
+    if (!memory) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${survivor.id}`);
+    }
+    if (memory.status !== "contested" || memory.contestedWithId !== survivor.contestedWithId) {
+      throw new MemoryStatusConflictError(survivor.id, "contested", memory.status);
+    }
+
+    memory.status = "active";
+    memory.contestedWithId = null;
+    memory.updatedAt = new Date();
+
+    const storedEvent = buildStoredMemoryEvent(ctx, survivor.event);
+    this.events.push(storedEvent);
+
+    return { memory, event: storedEvent };
+  }
+
+  /**
    * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装（契約は interface
    * 側の doc コメントにある）。`packages/postgres` の実装と同じ4つの絞り込み——
    * `subjectId` は `null` 同士も一致・`claimKey` は正規化済み文字列のまま等値比較・

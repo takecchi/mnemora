@@ -1364,6 +1364,35 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #825（ADR 0150 追記）: `resolveContestedPair` の解決側 CAS を満たせなくなった
+   * 生存側1件だけを対象にした別の任意メソッド。`beforeUpdateStatus` は CAS 判定の直前に
+   * 発火する——`updateStatusWithEvent`/`resolveContestedPair` と同じ位置（TOCTOU 再現の
+   * フックが死なないようにする）。
+   */
+  async resolveOrphanedContested(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const memory = await this.get(ctx, survivor.id);
+    if (!memory) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${survivor.id}`);
+    }
+    this.beforeUpdateStatus?.(survivor.id);
+    if (memory.status !== "contested" || memory.contestedWithId !== survivor.contestedWithId) {
+      throw new MemoryStatusConflictError(survivor.id, "contested", memory.status);
+    }
+
+    memory.status = "active";
+    memory.contestedWithId = null;
+    memory.updatedAt = new Date();
+
+    const storedEvent = buildStoredEvent(ctx, survivor.event);
+    this.backing.events.push(storedEvent);
+
+    return { memory, event: storedEvent };
+  }
+
+  /**
    * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装
    * （`packages/testkit` の `InMemoryMemoryStore.findActiveByClaimKey` と同じロジック
    * ——このファイルは意図的に独立している、冒頭のコメント参照）。

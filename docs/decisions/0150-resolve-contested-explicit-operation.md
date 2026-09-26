@@ -397,3 +397,72 @@ DB 側を見たことになりません」と名指しで出力した（ADR 0015
   変更を伴う。
 - **統合による解決が実装されるとき**（負債3）。`resolution` の union に第3の値が増える
   ——本 PR の型を判別可能 union にしてあるのは、**そのときに壊れずに増やせるようにするため**である。
+
+## 追記（2026-09-26、Issue #825）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。
+> ⛔ オーナー本人の判定ではない
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+[Issue #825](https://github.com/takecchi/mnemora/issues/825) は、決定3（CAS「両側とも
+`contested` かつ相互参照が成立」）が、対の片側を `forget()` した後の対では構造的に満たせなく
+なることを記録した。`forget` は `status` を `forgotten` に動かすだけで `contestedWithId` には
+触れないため、生存側は `contested`・`contestedWithId` が対向を指したまま残るのに、対向はもう
+`contested` ではなくなる。`resolveContested` を生存側に呼んでも対向側が `status_not_contested`
+で ineligible になり、書き込みは一切起きない。この状態になった生存側は、`recall()`（PR #824 の
+後）からも `resolveContested` からも届かなくなる。
+
+本 ADR が「採らなかった案」に置いた案D（相互参照が成立していなくても解決できるよう決定3の
+CAS を緩める案）は、その時点では「壊れたデータをどこまで書き換えてよいかという別の設計判断」
+を理由に見送られ、負債2に持ち越された。今回持ち込まれた設計（クローン miku のセッションが
+下した判断）は、案Dをそのままの形では採らず、範囲を絞って部分的に覆した:
+**決定3の CAS 自体は変更していない。`resolveContestedPair` にも触れていない。**代わりに、
+生存側1件だけを対象にした別の任意メソッド（`Runtime.resolveOrphanedContested?` /
+`MemoryStore.resolveOrphanedContested?`）を足し、対象を「生存側が `contested` で、その対向が
+`forget` という正規操作により `forgotten` になった、または既に見つからない（purge 済み）場合」
+に限った。対向がまだ `active`/`contested` のままの対、あるいは `contestedWithId` がそもそも
+`null` な行（ADR 0140 以前の壊れたデータ、負債2そのもの）は対象外のまま残る——ineligible として
+分類して返し、何も書き込まない。
+
+この範囲を選んだ理由は、負債2が恒久的な却下として置かれていたのでは
+なく、その時点ではまだ入っていなかった主体（`contested` の対を実運用で作る経路）を前提にした
+保留だったことである（ADR 0087 決定1「引き受けた負債」1・「これが覆るとしたら」参照。当時は
+「`contested` を作る主体が Phase 2 で入ったら、負債1は実際に踏まれる。今は決めない」としていた）。
+[ADR 0324](./0324-claim-key-contested-detection.md) で claim-key 検出が `contested` の対を実運用で
+作る経路になったことにより、その保留の前提が満たされた。加えて、本 ADR の決定3・案Dが懸念して
+いた「誰が壊したか分からないデータをどこまで書き換えてよいか」という論点は、`forget` という
+正規の公開操作の結果として生じる状態に限れば当てはまらない——`forget` を呼んだ主体も結果も
+記録に残っており、書き換える範囲も生存側1件の `status` と `contestedWithId` だけに留めてある。
+
+`MemoryStore.resolveOrphanedContested?` も既存の任意メソッド群（`markContestedPair?`/
+`resolveContestedPair?`）と同じくフォールバック経路を持たず、口が無い adapter には
+`{ supported: false, outcome: { kind: "not_attempted" } }` を返す。`memory_events` へ積む
+イベントは既存の `resolveContested` と同じ `meta.reason: 'contested_resolved'` を使い、
+`meta.resolution: 'orphan_reclaimed'` という、`ContestedResolution`（`'supersede'`/
+`'both_active'`）のどちらとも異なる値でこの経路を区別する。
+
+詳細な歯・変異試験・API スナップショット差分は、この追記を運んだ PR（Issue #825 を close する
+PR）の本文に記録した——ここには複製しない。
+
+### 訂正: `Runtime.resolveOrphanedContested` を任意（`?`）へ戻した（同日）
+
+**この追記が最初に着地した時点では、`Runtime.resolveOrphanedContested` は必須メソッドとして
+書かれていた。**`@mnemora/core` は v1.0.0 として npm に公開済みであり、`docs/migration-v1.md`
+§12/§14/§16 は `Runtime` に必須メソッドが増えることを「`Runtime` interface を自前で実装している
+利用者にとって破壊的」として数えている——v1.0.0 の後にこれをやると、次のメジャー版
+（v2）を要求することになる。
+
+**`@mnemora/testkit` の `supportsTaxonomyMode`/`supportsLabels`/`supportsFindActiveByClaimKey`
+（[Issue #818](https://github.com/takecchi/mnemora/issues/818)、PR #827、ADR 0318/ADR 0324の
+同日付追記）で同じ形（v1.0.0 の後に必須の口を足してしまった）が既に踏まれ、任意へ戻す判断が
+下っている。**本 ADR もその前例に倣い、`Runtime.resolveOrphanedContested` を `?` へ戻した
+（クローン miku の判断——オーナーの判断ではない）。`MemoryStore.resolveOrphanedContested?`
+（store 側、当初から任意）は変更していない。
+
+`createRuntime()` が返す `Runtime` にはこのメソッドが必ず実装されている——省略されるのは、
+利用者が独自に `Runtime` を実装する場合の後方互換のためだけである。この repo には
+「`createRuntime` の戻り値の型だけを狭めて、任意メソッドを非 null で見せる」工夫の前例が
+無いことを確認した上で、単純に `?` を付け、呼び出し側は `MemoryStore` の任意メソッドと同じ
+慣習（`runtime.resolveOrphanedContested!(...)`）に倣うことを interface 側の JSDoc に明記する
+形にした。

@@ -358,3 +358,31 @@
     ただしそれは推論であり、実測していない。
   - `ForgetOutcome` の6値が「多すぎる」か「足りない」かは、**実利用のフィードバックが無い。**
     Issue #102 の報告者は `ForgetResult` の中身について具体案を出していない。
+
+## 追記（2026-09-26、Issue #825）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。
+> ⛔ オーナー本人の判定ではない
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+負債1「これが覆るとしたら」が挙げていた条件（「`contested` を作る主体が Phase 2 で入ったら」）
+は、[ADR 0134](./0134-mark-contested-explicit-operation.md)（`runtime.markContested`）と
+[ADR 0324](./0324-claim-key-contested-detection.md)（claim-key 検出）で既に満たされている。
+負債1自身が予告していたとおり、`forget` が対向の `contestedWithId` を始末する経路の欠如が、
+[Issue #825](https://github.com/takecchi/mnemora/issues/825) として実際に踏まれた——対の片側を
+`forget` すると、生存側は `contested`・`contestedWithId` が対向を指したまま残り、対向は
+`contested` ではなくなるため、`resolveContested`（[ADR 0150](./0150-resolve-contested-explicit-operation.md)）
+を呼んでも解消できなくなる。
+
+Issue #825 の対応では、負債1が挙げていた2つの候補（対向も同時に `active` へ戻す／対向の
+`contestedWithId` を NULL にする）とは別の、第3の案（案c: 救済の口を新しい任意メソッドとして
+足す）が採られた（クローン miku のセッションが下した判断）。案a（`forget` の時点で残った側を
+自動で `active` へ戻す）と案b（`contestedWithId` だけを外す）は、どちらも `forget` という
+既存の呼び出しの中で、呼び出し側が指定していない別の行（生存側）を黙って書き換えることになる
+——`forget(ctx, { memoryId: b.id })` を呼んだ側は `b` だけを対象にしたつもりでも、`a` の
+`status`/`contestedWithId` が副作用として動く。この暗黙の連動を避けるため、`forget` 自体には
+一切手を入れず、生存側を明示的に戻す別の操作（`Runtime.resolveOrphanedContested?`、任意メソッド
+——v1.0.0 公開後の必須化を避けるための訂正の経緯は ADR 0150 の同日付の追記を見ること）を足す
+形が採られた。詳細は [ADR 0150](./0150-resolve-contested-explicit-operation.md) の同日付の追記に
+譲る——ここには複製しない。
