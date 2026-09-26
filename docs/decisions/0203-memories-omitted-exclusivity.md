@@ -278,3 +278,139 @@ omitted: [
   PR 本文に、この ADR を書いた後に取得した sha 付きの実測を記載する。
 
 Refs #421
+
+---
+
+## 2026-09-26 追記（クローン miku、Issue #823）
+
+**「これが覆るとしたら」3番が観測条件として挙げていた経路——`over_limit(stage:"rescore")`
+の候補が段3（必須の同伴取得）を経由して昇格する——は、この日付で解消した。**
+[Issue #823](https://github.com/takecchi/mnemora/issues/823) が、枝
+`fix/omitted-over-limit-promotion`（commit `aa4c873`）の陽性対照テストでこの経路を
+実際に起こし、`packages/core/src/recall-runtime.ts` の `runRecall` に below_threshold
+と同型の取り下げ処理を追加して塞いだ。
+
+解消した経路は、「引き受けた負債」2番（below_threshold 以外の kind で同種の昇格が
+起きても本 PR は直さない、という一般的な留保。具体例として段3.5 経由の
+`over_limit(stage:"rescore")` 昇格を挙げていた）の対象に入るが、同項が具体例として
+挙げていた段3.5（連想）経由の昇格ではなく、**段3（必須の同伴取得）経由の昇格**という、
+同項が具体例としては挙げていなかった経路である。「引き受けた負債」2番が名指しした
+段3.5 経由の昇格は未解消のまま残る（[Issue #925](https://github.com/takecchi/mnemora/issues/925)、
+下の「残り」節を参照）。
+
+「引き受けた負債」3番（below_threshold + 段3）自体は、この PR のコードでは何も
+変えていない——ADR 0203 採用時点の既存の取り下げ処理がそのまま処理する設計になって
+おり、コードの欠陥ではなく実測していないという**測定の欠落**だった。
+`recall-over-limit-promotion.test.ts` の3本目の歯（below_threshold から段3経由で
+昇格するケースを実際に組んだもの）が、この経路が既存の設計どおりに正しく処理される
+ことを実測で確認した——3番はコードではなく測定として、この Issue #823 の副産物で
+埋まった。
+
+**「これが覆るとしたら」3番が前提に置いていた型の拡張は、置かなかった。** 同項は
+「memoryId を持たない kind は、先に `Omission` の型に memoryId のサンプルを持たせる
+拡張が前提になる」と書いていたが、これは `over_limit(stage:"rescore")` には
+当てはまらなかった——`runRecall` は段2で `overLimit`（`passed.slice(limit)` の結果、
+`ScoredCandidate[]`）を関数内部のローカル値として構築しており、段3（必須の同伴取得）の
+結果（`finalMemories`）が確定するところまで、この値は生きたまま保持されている。
+⟹ 「どの記憶が昇格したか個体で特定できない」という「これが覆るとしたら」3番の前提は、
+`Omission` という**公開型**についてだけ成り立つ話であり、`runRecall` 内部の
+**未公開の状態**には最初から当たらなかった。公開型を1バイトも広げずに、
+`overLimit` と `finalMemories` を memoryId で突き合わせるだけで、below_threshold と
+同じ形の後処理を書けた。
+
+**差し引く数の取り方**: 「段3で返した同伴の総数」ではなく、「`overLimit` に居て、かつ
+段3の必須同伴取得（`companions`、`retrievedVia: "mandatory_companion"`）で実際に
+`finalMemories` に返った id の数」に絞った。当初の実装案は前者（`finalMemories` 全体
+との突き合わせだけ）で below_threshold 側とコードを共有しようとしたが、これだと
+companion が最初から `withinLimit` に居た場合や、companion が `over_limit` ではなく
+`below_threshold` から昇格した場合まで数えてしまい、無関係な `over_limit(stage:"rescore")`
+の count を誤って減らす（過剰実装）。`recall-over-limit-promotion.test.ts` の3本目の歯
+（below_threshold 経由の昇格と、無関係な over_limit のバイスタンダーを同時に置く構成）が、
+変異試験でこの過剰実装を実際に赤で捕まえた。
+
+同様の理由で、**段3.5（連想、既定 on、ADR 0337）が同じ `overLimit` の候補を独立に
+`finalMemories` へ昇格させる経路は対象に含めなかった**——今回の後処理は
+`companions`（段3が構築した配列）に居るかどうかで判定しており、段3.5 経由の昇格は
+`companions` に現れない。含めると `over_limit(stage:"rescore")` と
+`over_limit(stage:"association")` の両方に跨る昇格の勘定が混ざり、
+`omission-kind-generation.test.ts` の既存の歯（`over_limit(stage:"rescore")` が
+単独で発生することを確認する歯）を壊すことも実測で確認した——一度この形で広げてから
+気づいた回帰であり、`companions` 限定に絞り直して塞いだ。
+
+### 採らなかった案
+
+1. **`OverLimitOmission` に任意の memoryId サンプル欄を足す**（「これが覆るとしたら」3番
+   が前提に置いていた案そのもの）。**却下**——上のとおり、この段には型を広げる前提が
+   そもそも当たらなかった。加えて、公開型への欄追加は一度出すと戻しにくい
+   （`docs/autonomy.md` の一般的な注意）。今回はそれをせずに済んだ。
+2. **段3の必須同伴取得が `over_limit` に回った候補を companion として取らない**
+   （Issue #823 本文が挙げていた候補3）。**却下**——ADR 0043/0136 の「争われている主張を
+   単独で出さない」と衝突する。companion を候補から外すと、owner ごと
+   `unit_assembly_dropped` に落ちるなど、`memories` に**実際に返る集合**が変わる。
+   本 PR の制約（`memories` は変えない、`omitted` の数え方だけを直す）と両立しない。
+3. **段3.5 経由の昇格・`over_limit(stage:"association")` も同じ形で広げる。**
+   **今回は見送った**（上の「壊した回帰」参照）。`companions` に限定した判定は
+   `over_limit(stage:"association")` 側の内部状態（連想候補の追跡）をそのまま
+   使い回せる保証が無く、別途の設計判断が要る——本 PR の射程は Issue #823 が実測した
+   `over_limit(stage:"rescore")` + 段3の経路だけに絞った。
+
+### 「引き受けた負債」・「これが覆るとしたら」の残り
+
+- **`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等、
+  段2の内部状態自体が memoryId を持ち回っていない他の kind についての前提**
+  （「これが覆るとしたら」3番の「型の拡張が先」）は、そのまま残っている。
+  これらの kind は `runRecall` 内部でも候補を memoryId 付きで保持していないため、
+  今回と同じ手は使えない。
+- **「引き受けた負債」2番が名指しした経路——段3.5（連想）経由で
+  `over_limit(stage:"rescore")` の候補が昇格する経路——は、今回もあえて塞がなかった。**
+  「採らなかった案」3番のとおり、今回は `companions`（段3限定）に絞ったため、この経路は
+  まだ残っている。**「未実測」ではない**——実装の途中でこの経路を塞ごうとして
+  `finalMemories` 全体との突き合わせに広げたところ、`omission-kind-generation.test.ts`
+  の既存の歯が実際に赤くなった（連想が既定 on のため、`over_limit(stage:"rescore")` の
+  候補が段3.5 経由で `retrievedVia: "association"` として昇格し、無関係なはずの
+  `over_limit(stage:"rescore")` の Omission が誤って消えた）。⟹ **この経路は既定 on の
+  連想の下で実際に起こりうることを、回帰として実測で確認している。**「引き受けた負債」
+  2番は今回も未解消のまま残る。**この経路は [Issue #925](https://github.com/takecchi/mnemora/issues/925)
+  として別途起票した**（再現の形・実測した出力・直し方の候補を記載。決めていない）。
+
+### 測ったこと
+
+- 【実測】陽性対照（修正前、fake ストア）: `recall-over-limit-promotion.test.ts` の
+  1本目・2本目が赤になることを確認した——1本目は `over_limit(stage:"rescore")` の
+  Omission が消えるはずが `{ count: 1, ... }` のまま残る、2本目は `count` が
+  `2` のまま `1` に減らない。3本目（過剰実装を捕まえる歯）は、この時点ではまだ
+  正しい実装が無いため素通りで緑だった（対象の count がそもそも動かないため）。
+- 【実測】修正後、同じ3本がすべて緑になることを確認した。
+- 【実測】変異試験:
+  (a) 追加した取り下げブロックを丸ごと除去 → 1本目・2本目が実際に赤になることを
+      確認した（1本目: `over_limit` が `undefined` になるはずが定義されたまま、
+      2本目: `count` が `1` になるはずが `2` のまま）。
+  (b) 差し引く数を「`overLimit` に居たか問わず、段3で返した同伴（`companions`）の
+      総数」に変える過剰実装 → 3本目（below_threshold 経由の昇格と無関係な
+      over_limit のバイスタンダーを同時に置く歯）が実際に赤になることを確認した
+      （`over_limit(stage:"rescore")` が消えるはずが `count: 1` のまま残るべきところ、
+      誤って消えた）。1本目・2本目はこの過剰実装でも緑のままだった——この2本だけでは
+      過剰実装を検出できないことも合わせて確認した。
+  両方とも `cp` で退避したファイルから `cp` で復元し、`git status --porcelain` が
+  意図どおりの差分（本 PR の変更点だけ）に戻ることを確認したうえで、3本とも緑に
+  戻ることを確認した。
+- 【実測】`pnpm --filter @mnemora/core exec vitest run
+  src/__tests__/recall-over-limit-promotion.test.ts src/__tests__/omission-kind-generation.test.ts
+  src/__tests__/recall-association.test.ts src/__tests__/recall.test.ts
+  src/__tests__/recall-pipeline.test.ts src/__tests__/recall-association-gates.test.ts
+  src/__tests__/recall-association-usage-ranking.test.ts src/__tests__/schema-type-equals-parity.test.ts`:
+  8ファイル・257件すべて緑（既存の omitted/over_limit 関連の歯を含め、回帰は無い）。
+- 【実測】`pnpm --filter @mnemora/core run typecheck` / `pnpm run lint` / `pnpm run format:check`:
+  すべて緑、警告0。
+- 【実測】`pnpm run api:check`（6パッケージ）: 全パッケージ「差分なし」——本 PR は
+  公開 API 表面を1バイトも変えていない。
+- 【実測】本物の Postgres + pgvector（`packages/postgres`、initdb で自前に構築した
+  ローカルインスタンス）に対し、`recall.postgres.test.ts` に同型の歯を1本追加し、
+  修正前に赤（`over_limit` が `{ count: 1, ... }` のまま残る）、修正後に緑になることを
+  確認した。同ファイルの既存17本（新設分含め）もすべて緑、`recall-association-gates.postgres.test.ts`
+  の既存7本も緑（回帰なし）。
+- **確かめていないこと**: `test:db` 全体（他ファイル含む約4分のスイート）・`build`・
+  `pack:check` は走らせていない（`docs/autonomy.md` の方針どおり、CI の緑で見届ける）。
+  実運用での発生頻度も未計測——Issue #823 と同じく、この追記も頻度の実測はしていない。
+
+Refs #823
