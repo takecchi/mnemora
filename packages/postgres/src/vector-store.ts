@@ -83,6 +83,96 @@ export class PostgresVectorStore implements VectorStore {
     await maybeAnalyzeAfterUpsert(this.db, space);
   }
 
+  /**
+   * `search()`/`searchMany()` の両方が使う `WHERE` 条件の組み立て。**同じヘルパーを
+   * 両方から呼ぶことで、`filter` の翻訳が2箇所で食い違う経路を作らない**（Issue #377、
+   * `VectorStore.searchMany?` の doc コメントが要求する「`search()` を単独で呼んだ場合と
+   * 集合・順序ともに完全に一致する」契約の土台）。クエリベクトル自体はここでは扱わない
+   * ——このメソッドが返す条件は `query`/`qvec` を一度も参照しない（`WHERE` はどれも
+   * `filter` 由来で、距離での絞り込みは `ORDER BY`/`LIMIT` 側の仕事）。
+   */
+  private buildFilterConditions(filter: VectorFilter) {
+    const conditions = [sql`e.tenant_id = ${filter.tenantId}`];
+    if (filter.status !== undefined) {
+      conditions.push(sql`m.status = ANY(${sql.param(filter.status)}::text[])`);
+    }
+    // ADR 0165 決めたこと1・4・12: 忘却ゲートの2軸。`decayFloorAnyAxis` が true かつ
+    // 両方の境界が渡されているときだけ OR で結ぶ（`VectorFilter.decayFloorAnyAxis` の doc
+    // 参照）。それ以外は今日どおり AND のまま個別に効く。
+    const decayFloorAtCondition =
+      filter.decayFloorAtAfter !== undefined
+        ? sql`m.decay_floor_at > ${filter.decayFloorAtAfter}`
+        : undefined;
+    // `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4——NULL は「この軸には
+    // 床が無い＝活動時計では沈まない」）。
+    const decayFloorSeqCondition =
+      filter.decayFloorSeqAfter !== undefined
+        ? sql`(m.decay_floor_seq IS NULL OR m.decay_floor_seq > ${filter.decayFloorSeqAfter})`
+        : undefined;
+    if (
+      filter.decayFloorAnyAxis === true &&
+      decayFloorAtCondition !== undefined &&
+      decayFloorSeqCondition !== undefined
+    ) {
+      conditions.push(sql`(${decayFloorAtCondition} OR ${decayFloorSeqCondition})`);
+    } else {
+      if (decayFloorAtCondition !== undefined) {
+        conditions.push(decayFloorAtCondition);
+      }
+      if (decayFloorSeqCondition !== undefined) {
+        conditions.push(decayFloorSeqCondition);
+      }
+    }
+    // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、等値一致に
+    // `subject_id IS NULL`（主題なし）を OR で足す。`subjectId` が無ければこの欄自体を見ない
+    // ——「テナント全体」は定義上すでに主題なしを含む上位集合であり、広げる余地が無い。
+    if (filter.subjectId !== undefined) {
+      conditions.push(
+        filter.includeSubjectless === true
+          ? sql`(m.subject_id = ${filter.subjectId} OR m.subject_id IS NULL)`
+          : sql`m.subject_id = ${filter.subjectId}`,
+      );
+    }
+    // Issue #152/#153（ADR 0312）: AND 等値の絞り込み。`jsonb` の containment（`@>`）——
+    // `idx_memories_attributes`（`jsonb_path_ops`）が効く述語。未指定なら no-op。
+    if (filter.attributes !== undefined) {
+      conditions.push(sql`m.attributes @> ${JSON.stringify(filter.attributes)}::jsonb`);
+    }
+    // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み。配列の重なり演算子（`&&`）——
+    // 渡した名前のうち1つでも `tags` に含まれれば通る。`idx_memories_tags`（GIN）が効く。
+    // 未指定なら no-op。
+    if (filter.labels !== undefined) {
+      conditions.push(sql`m.tags && ${sql.param(filter.labels)}::text[]`);
+    }
+    // ADR 0059: period の押し下げ。比較対象は COALESCE(occurred_at, recorded_at)
+    // （ADR 0039 が定義した「実効時刻」——4箇所あった判定規則の5箇所目)。両端とも包含
+    // （`>=`/`<=`）——`VectorFilter.occurredAfter`/`occurredBefore` の doc、および
+    // 既存の厳密経路（`memory-store.ts` の `aggregateScope`）と同じ境界の含み方に揃える。
+    if (filter.occurredAfter !== undefined) {
+      conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) >= ${filter.occurredAfter}`);
+    }
+    if (filter.occurredBefore !== undefined) {
+      conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) <= ${filter.occurredBefore}`);
+    }
+    // Issue #280（Issue #202 第2弾）: `validAt` ゲート。両端 NULL は「いつでも真」
+    // （`VectorFilter.validAt` の doc 参照）。`valid_until` は狭義の `>`（非包含）——
+    // `decayFloorAtAfter` と同じ境界の向き。
+    if (filter.validAt !== undefined) {
+      conditions.push(
+        sql`(m.valid_from IS NULL OR m.valid_from <= ${filter.validAt}) AND (m.valid_until IS NULL OR m.valid_until > ${filter.validAt})`,
+      );
+    }
+    // ADR 0056: 空配列は no-op（`VectorFilter.excludeProvenanceKinds` の doc 参照）。
+    // `length > 0` で番わないと `<> ALL('{}')` という無駄な条件が出る——常に真になり実害は
+    // 無いが（`<> ALL` は空配列に対して真）、`EXPLAIN` を読みにくくするので出さない。
+    if (filter.excludeProvenanceKinds !== undefined && filter.excludeProvenanceKinds.length > 0) {
+      conditions.push(
+        sql`m.provenance_kind <> ALL(${sql.param(filter.excludeProvenanceKinds)}::text[])`,
+      );
+    }
+    return sql.join(conditions, sql` AND `);
+  }
+
   async search(
     ctx: Ctx,
     space: EmbeddingSpaceId,
@@ -113,88 +203,9 @@ export class PostgresVectorStore implements VectorStore {
       query.length === space.dimensions ? query : new Array(space.dimensions).fill(0);
     const queryLiteral = toVectorLiteral(effectiveQuery);
 
-    const conditions = [sql`e.tenant_id = ${opts.filter.tenantId}`];
-    if (opts.filter.status !== undefined) {
-      conditions.push(sql`m.status = ANY(${sql.param(opts.filter.status)}::text[])`);
-    }
-    // ADR 0165 決めたこと1・4・12: 忘却ゲートの2軸。`decayFloorAnyAxis` が true かつ
-    // 両方の境界が渡されているときだけ OR で結ぶ（`VectorFilter.decayFloorAnyAxis` の doc
-    // 参照）。それ以外は今日どおり AND のまま個別に効く。
-    const decayFloorAtCondition =
-      opts.filter.decayFloorAtAfter !== undefined
-        ? sql`m.decay_floor_at > ${opts.filter.decayFloorAtAfter}`
-        : undefined;
-    // `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4——NULL は「この軸には
-    // 床が無い＝活動時計では沈まない」）。
-    const decayFloorSeqCondition =
-      opts.filter.decayFloorSeqAfter !== undefined
-        ? sql`(m.decay_floor_seq IS NULL OR m.decay_floor_seq > ${opts.filter.decayFloorSeqAfter})`
-        : undefined;
-    if (
-      opts.filter.decayFloorAnyAxis === true &&
-      decayFloorAtCondition !== undefined &&
-      decayFloorSeqCondition !== undefined
-    ) {
-      conditions.push(sql`(${decayFloorAtCondition} OR ${decayFloorSeqCondition})`);
-    } else {
-      if (decayFloorAtCondition !== undefined) {
-        conditions.push(decayFloorAtCondition);
-      }
-      if (decayFloorSeqCondition !== undefined) {
-        conditions.push(decayFloorSeqCondition);
-      }
-    }
-    // Issue #608 項目③(b) / ADR 0286: `includeSubjectless: true` のときだけ、等値一致に
-    // `subject_id IS NULL`（主題なし）を OR で足す。`subjectId` が無ければこの欄自体を見ない
-    // ——「テナント全体」は定義上すでに主題なしを含む上位集合であり、広げる余地が無い。
-    if (opts.filter.subjectId !== undefined) {
-      conditions.push(
-        opts.filter.includeSubjectless === true
-          ? sql`(m.subject_id = ${opts.filter.subjectId} OR m.subject_id IS NULL)`
-          : sql`m.subject_id = ${opts.filter.subjectId}`,
-      );
-    }
-    // Issue #152/#153（ADR 0312）: AND 等値の絞り込み。`jsonb` の containment（`@>`）——
-    // `idx_memories_attributes`（`jsonb_path_ops`）が効く述語。未指定なら no-op。
-    if (opts.filter.attributes !== undefined) {
-      conditions.push(sql`m.attributes @> ${JSON.stringify(opts.filter.attributes)}::jsonb`);
-    }
-    // Issue #201 PR-B（ADR 0323）: OR の集合絞り込み。配列の重なり演算子（`&&`）——
-    // 渡した名前のうち1つでも `tags` に含まれれば通る。`idx_memories_tags`（GIN）が効く。
-    // 未指定なら no-op。
-    if (opts.filter.labels !== undefined) {
-      conditions.push(sql`m.tags && ${sql.param(opts.filter.labels)}::text[]`);
-    }
-    // ADR 0059: period の押し下げ。比較対象は COALESCE(occurred_at, recorded_at)
-    // （ADR 0039 が定義した「実効時刻」——4箇所あった判定規則の5箇所目)。両端とも包含
-    // （`>=`/`<=`）——`VectorFilter.occurredAfter`/`occurredBefore` の doc、および
-    // 既存の厳密経路（`memory-store.ts` の `aggregateScope`）と同じ境界の含み方に揃える。
-    if (opts.filter.occurredAfter !== undefined) {
-      conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) >= ${opts.filter.occurredAfter}`);
-    }
-    if (opts.filter.occurredBefore !== undefined) {
-      conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) <= ${opts.filter.occurredBefore}`);
-    }
-    // Issue #280（Issue #202 第2弾）: `validAt` ゲート。両端 NULL は「いつでも真」
-    // （`VectorFilter.validAt` の doc 参照）。`valid_until` は狭義の `>`（非包含）——
-    // `decayFloorAtAfter` と同じ境界の向き。
-    if (opts.filter.validAt !== undefined) {
-      conditions.push(
-        sql`(m.valid_from IS NULL OR m.valid_from <= ${opts.filter.validAt}) AND (m.valid_until IS NULL OR m.valid_until > ${opts.filter.validAt})`,
-      );
-    }
-    // ADR 0056: 空配列は no-op（`VectorFilter.excludeProvenanceKinds` の doc 参照）。
-    // `length > 0` で番わないと `<> ALL('{}')` という無駄な条件が出る——常に真になり実害は
-    // 無いが（`<> ALL` は空配列に対して真）、`EXPLAIN` を読みにくくするので出さない。
-    if (
-      opts.filter.excludeProvenanceKinds !== undefined &&
-      opts.filter.excludeProvenanceKinds.length > 0
-    ) {
-      conditions.push(
-        sql`m.provenance_kind <> ALL(${sql.param(opts.filter.excludeProvenanceKinds)}::text[])`,
-      );
-    }
-    const whereClause = sql.join(conditions, sql` AND `);
+    // `filter` の翻訳は `searchMany()` と共有する（クラス doc コメント、
+    // `buildFilterConditions` 参照）——2箇所で食い違う経路を作らない。
+    const whereClause = this.buildFilterConditions(opts.filter);
 
     // ORDER BY には距離演算子の結果をそのまま昇順で置く（式にしない。docs/recall.md §3）。
     // tie-break はクラス doc コメント（このファイル冒頭）のとおり3段
@@ -230,6 +241,80 @@ export class PostgresVectorStore implements VectorStore {
       const r = row as unknown as { memory_id: string; distance: number };
       return { memoryId: r.memory_id, distance: r.distance };
     });
+  }
+
+  /**
+   * `search()` を `queries.length` 回呼ぶのと同じ結果を、1回の往復に束ねる
+   * （連想枠のアンカーごとの ANN 検索、Issue #377）。`packages/core` の
+   * `VectorStore.searchMany?` の doc コメントが定めた契約（`filter`/`limit` は
+   * 全クエリで共通、各クエリの結果は `search()` を単独で呼んだ場合と集合・順序が
+   * 完全一致する）をそのまま実装する。
+   *
+   * **束ね方**: `VALUES` で `(query_key, qvec)` の行を作り、各行に対して
+   * `LATERAL` で「その `qvec` を使った ANN 検索」を実行する。`LATERAL` の中身は
+   * `search()` の `SELECT`（`WHERE`/`ORDER BY`/`LIMIT`）と1文字も変えていない
+   * ——変わるのは、クエリベクトルの出どころがプレースホルダ1個（`queryLiteral`）
+   * から `q.qvec`（`VALUES` の列）になっただけである。`WHERE` 句は
+   * `buildFilterConditions`（`search()` と共有、クラス doc 参照）——クエリベクトルを
+   * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
+   *
+   * **`hnsw.iterative_scan` は `search()` と同じく `SET LOCAL` で1回だけ効かせる**
+   * ——`LATERAL` は同じトランザクション・同じ SELECT 文の中で複数回実行されるが、
+   * `SET LOCAL` はトランザクション単位で効くセッション変数であり、`LATERAL` の
+   * 繰り返し1回ごとに再設定する必要はない（ADR 0284、`search()` と同じ理由）。
+   *
+   * `EXPLAIN` で確認済み（PR 本文に抜粋）: `LATERAL` の内側でも
+   * `Index Scan using ...hnsw...` が選ばれ、アンカーの数だけ `loops=N` で
+   * 繰り返される——`Seq Scan` に落ちない。
+   */
+  async searchMany(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    queries: { key: string; vector: number[] }[],
+    opts: { limit: number; filter: VectorFilter },
+  ): Promise<Map<string, VectorHit[]>> {
+    const resultMap = new Map<string, VectorHit[]>();
+    // 契約（`VectorStore.searchMany?` の doc コメント）: `queries` の `key` の集合は
+    // 返り値の `Map` にそのまま現れる——結果が0件の key も欠落させない。
+    for (const q of queries) {
+      resultMap.set(q.key, []);
+    }
+    if (queries.length === 0) {
+      // 契約: 空配列なら往復を発生させずに空の Map を返す。
+      return resultMap;
+    }
+
+    const table = embeddingSpaceTableName(space);
+    assertSafeIdentifier(table);
+    const whereClause = this.buildFilterConditions(opts.filter);
+
+    // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
+    const valuesRows = queries.map((q) => {
+      const effectiveQuery =
+        q.vector.length === space.dimensions ? q.vector : new Array(space.dimensions).fill(0);
+      return sql`(${q.key}::text, ${toVectorLiteral(effectiveQuery)}::vector)`;
+    });
+
+    const result = await this.db.transaction(async (tx) => {
+      await tx.execute(sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
+      return tx.execute(sql`
+        SELECT q.query_key AS query_key, hit.memory_id AS memory_id, hit.distance AS distance
+        FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_key, qvec)
+        CROSS JOIN LATERAL (
+          SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance
+          FROM ${sql.identifier(table)} e
+          JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+          WHERE ${whereClause}
+          ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
+          LIMIT ${opts.limit}
+        ) AS hit
+      `);
+    });
+    for (const row of result.rows) {
+      const r = row as unknown as { query_key: string; memory_id: string; distance: number };
+      resultMap.get(r.query_key)?.push({ memoryId: r.memory_id, distance: r.distance });
+    }
+    return resultMap;
   }
 
   async delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void> {

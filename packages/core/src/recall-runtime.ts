@@ -1353,45 +1353,80 @@ export async function runRecall(
         const seen = new Set<MemoryId>();
         const associationHits: { memoryId: MemoryId; anchorId: MemoryId; similarity: number }[] =
           [];
+        // **段0と同じ scope の filter で呼ぶ**（docs/recall.md §9.2 手順4）——アンカーの
+        // ベクトルを使うだけで、**tenant/subject/status/period/excludeProvenanceKinds に
+        // 加えて、忘却ゲート（`decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis`）と
+        // `validAt` ゲートまで含めた境界すべてを、段1のANN検索と同一にする**
+        // （Issue #347 / ADR 0172）。ゲートの3種は `gateVectorFilterFields` に1箇所で
+        // まとめてあり、段1と同じ断片をそのまま撒く——**列挙を散文で数え直さない**
+        // （数え直した結果、2つのゲートが抜けたまま「同一にする」と書いてあったのが
+        // Issue #347 である）。limit は over-fetch 済みの kPrime を流用する
+        // ——除外・閾値で落ちる分の余裕を持たせるためであり、新しい係数を定義しない。
+        //
+        // ⭐ Issue #377: この `filter` はどのアンカーに対しても**同一の値**である
+        // （`scope`/`validatedQuery` 由来で、`anchorId`/`anchor.vector` には依存しない）。
+        // ⟹ アンカーごとに変わるのはクエリベクトルだけなので、`VectorStore.searchMany?`
+        // （束ねた1回の往復）に過不足なく渡せる——1箇所にまとめて、下の両方の経路
+        // （束ねる/束ねない）で同じオブジェクトを使う。
+        const associationFilter: VectorFilter = {
+          tenantId: ctx.tenantId,
+          status: ["active", "contested"],
+          subjectId: scope.subjectId,
+          // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
+          // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
+          includeSubjectless: scope.includeSubjectless,
+          // Issue #152/#153（ADR 0312）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+          // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
+          // ——を繰り返さないための規律をそのまま適用する）。
+          attributes: scope.attributes,
+          // Issue #201 PR-B（ADR 0323）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+          // （ADR 0172 の見落としを繰り返さないための同じ規律）。
+          labels: scope.labels,
+          excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
+          occurredAfter: scope.occurredAfter,
+          occurredBefore: scope.occurredBefore,
+          ...gateVectorFilterFields,
+        };
+        // adapter が返さなかった（存在しない/削除された等）アンカーは、束ねる/束ねない
+        // どちらの経路でも同じく検索対象から外す——`anchorVectorById` に無いものは
+        // 元から `vector` を持たない。
+        const anchorsWithVectors: { anchorId: MemoryId; vector: number[] }[] = [];
         for (const anchorId of anchorIds) {
           const anchor = anchorVectorById.get(anchorId);
-          if (!anchor) continue; // adapter が返さなかった（存在しない/削除された等）
-          // **段0と同じ scope の filter で呼ぶ**（docs/recall.md §9.2 手順4）——アンカーの
-          // ベクトルを使うだけで、**tenant/subject/status/period/excludeProvenanceKinds に
-          // 加えて、忘却ゲート（`decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis`）と
-          // `validAt` ゲートまで含めた境界すべてを、段1のANN検索と同一にする**
-          // （Issue #347 / ADR 0172）。ゲートの3種は `gateVectorFilterFields` に1箇所で
-          // まとめてあり、段1と同じ断片をそのまま撒く——**列挙を散文で数え直さない**
-          // （数え直した結果、2つのゲートが抜けたまま「同一にする」と書いてあったのが
-          // Issue #347 である）。limit は over-fetch 済みの kPrime を流用する
-          // ——除外・閾値で落ちる分の余裕を持たせるためであり、新しい係数を定義しない。
-          const hits = await deps.vectorStore.search(
+          if (anchor) anchorsWithVectors.push({ anchorId, vector: anchor.vector });
+        }
+        const hitsByAnchorId = new Map<MemoryId, VectorHit[]>();
+        if (deps.vectorStore.searchMany !== undefined && anchorsWithVectors.length > 0) {
+          // Issue #377: アンカーごとに `search()` を呼ぶ代わりに、全アンカーを
+          // 1回の往復（`searchMany`）に束ねる。`.bind` で `this` を固定してから
+          // 切り出す（`getVectors`/`.bind` の理由と同じ、上のコメント参照）。
+          const searchMany = deps.vectorStore.searchMany.bind(deps.vectorStore);
+          const hitsByKey = await searchMany(
             ctx,
             deps.embeddingProvider.space,
-            anchor.vector,
-            {
-              limit: kPrime,
-              filter: {
-                tenantId: ctx.tenantId,
-                status: ["active", "contested"],
-                subjectId: scope.subjectId,
-                // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
-                // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
-                includeSubjectless: scope.includeSubjectless,
-                // Issue #152/#153（ADR 0312）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
-                // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
-                // ——を繰り返さないための規律をそのまま適用する）。
-                attributes: scope.attributes,
-                // Issue #201 PR-B（ADR 0323）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
-                // （ADR 0172 の見落としを繰り返さないための同じ規律）。
-                labels: scope.labels,
-                excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
-                occurredAfter: scope.occurredAfter,
-                occurredBefore: scope.occurredBefore,
-                ...gateVectorFilterFields,
-              },
-            },
+            anchorsWithVectors.map(({ anchorId, vector }) => ({ key: anchorId, vector })),
+            { limit: kPrime, filter: associationFilter },
           );
+          for (const { anchorId } of anchorsWithVectors) {
+            // 契約（`VectorStore.searchMany?` の doc コメント）: 渡した key は
+            // 必ず Map に現れる（0件でも）——`?? []` はその契約が破られた場合の
+            // 多層防御であり、通常は到達しない。
+            hitsByAnchorId.set(anchorId, hitsByKey.get(anchorId) ?? []);
+          }
+        } else {
+          // adapter が `searchMany` を実装していない——ADR 0151 決定4と同じ「無くても
+          // 成立する」経路（往復数はアンカー数に比例するが、結果は束ねた場合と同じ）。
+          for (const { anchorId, vector } of anchorsWithVectors) {
+            const hits = await deps.vectorStore.search(ctx, deps.embeddingProvider.space, vector, {
+              limit: kPrime,
+              filter: associationFilter,
+            });
+            hitsByAnchorId.set(anchorId, hits);
+          }
+        }
+        for (const anchorId of anchorIds) {
+          const hits = hitsByAnchorId.get(anchorId);
+          if (!hits) continue; // adapter が返さなかった（存在しない/削除された等）
           for (const hit of hits) {
             if (excludeIds.has(hit.memoryId) || seen.has(hit.memoryId)) continue;
             const similarity = 1 - hit.distance;

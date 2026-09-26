@@ -409,3 +409,117 @@ ADR の段階で書けるのは次の2つだけである。
 - **外部の利用者が `retrievedVia` の union 拡張で壊れるかは、確認できていない。**
 - **クローンが「後者を採る」と判断した根拠（問い2による前者の落ち）を、書き手は検算していない。**
   受け取った判断として扱っている 【伝】。
+
+---
+
+## 追記（2026-09-26、Issue #377 — `VectorStore.searchMany?` の追加）
+
+> 本文はクローン miku の委譲先が書いた。オーナー本人の執筆ではない。`VectorStore` に
+> `searchMany?` を任意メソッドとして追加してよいという決定は、2026-09-26 にクローン
+> miku が行った——オーナーではない。
+
+### 背景
+
+[Issue #377](https://github.com/takecchi/mnemora/issues/377) が、連想枠（段3.5）の
+アンカーごとの ANN 検索が、アンカー数（`anchorCount`）に比例して往復数を増やす
+ことを実測している——`recall-runtime.ts` の段3.5は、アンカーごとに
+`vectorStore.search()` を1回ずつ呼ぶループを持ち、`PostgresVectorStore.search()` は
+呼ばれるたびに独立した `db.transaction()`（`begin`/`SET LOCAL hnsw.iterative_scan`/
+`SELECT`/`commit` の4文、ADR 0284）を開く。この作業の依頼は「既定の `anchorCount` は
+変えない。往復数の削減だけを当てる」というものだった。
+
+### 決定: `searchMany?` を任意メソッドとして追加する
+
+`search()` は単一のクエリベクトルを受け取る口であり、この形のままでは複数アンカーを
+1回の往復に束ねられない——新しい口が要る。[ADR 0151 決定4](#決定)（`VectorStore.
+getVectors?` を任意メソッドにした判断）と同じ形で、`packages/core/src/interfaces/
+vector-store.ts` の `VectorStore` に次を追加した:
+
+```ts
+searchMany?(
+  ctx: Ctx, space: EmbeddingSpaceId,
+  queries: { key: string; vector: number[] }[],
+  opts: { limit: number; filter: VectorFilter },
+): Promise<Map<string, VectorHit[]>>;
+```
+
+**理由**:
+
+1. **非破壊。** `pnpm api:check` の差分は「`VectorStore.searchMany?` の追加」と
+   「`PostgresVectorStore` への `searchMany` 実装・`buildFilterConditions`（private、
+   `search()` と共有する `WHERE` 組み立て）の追加」だけであり、既存の型・既存の
+   呼び出しは1つも変わっていない。
+2. **未実装の adapter でも `recall()` は成立する。** `recall-runtime.ts` の段3.5は
+   `deps.vectorStore.searchMany` が無ければ、従来どおりアンカーごとに `search()` を
+   呼ぶ経路へ戻る——結果（集合・順序）は束ねた場合と変わらず、往復数だけが
+   アンカー数に比例したままになる。北極星の問い2（無効にしても成立するか）を
+   型で担保する、決定4と同じ形。
+3. **`search()` のシグネチャそのものを複数ベクトル対応に変える案は採らなかった。**
+   段1（ANN 検索）を含む既存の全呼び出しに影響する変更になり、
+   「往復数の削減だけを当てる」という依頼の範囲を超える。
+4. **`recall-runtime.ts` 側で `Promise.all` によるアンカーごとの並列 `search()` 呼び出しに
+   留める案も採らなかった。** 並列に呼んでも DB への往復（トランザクション・SQL 文の数）
+   自体は減らない——Issue #377 が問題にしているのは並列度ではなく往復数である。
+
+### 実装
+
+`PostgresVectorStore.searchMany`（`packages/postgres/src/vector-store.ts`）は、
+`VALUES (key, vector), ...` と `CROSS JOIN LATERAL` で束ねる。`search()` が組み立てる
+`WHERE` 条件は `buildFilterConditions`（private、`search()`/`searchMany()` が共有）へ
+切り出し、2箇所で食い違う経路を作らないようにした。`ORDER BY` は `search()` と同じ
+3段 tie-break（距離 → `recorded_at` DESC → `memory_id`、Issue #339 / ADR 0170）を
+`LATERAL` の中にそのまま書く。`SET LOCAL hnsw.iterative_scan = relaxed_order`
+（ADR 0284）は1トランザクションに1回だけ発行する——`LATERAL` は同じ SELECT 文の中で
+アンカーの数だけ繰り返し実行されるが、`SET LOCAL` はトランザクション単位のセッション
+変数なので、繰り返しごとに再設定する必要はない。
+
+`recall-runtime.ts` 側は、アンカーごとに同一の `filter`（`scope`/`validatedQuery` 由来で
+`anchorId` に依存しない）を1箇所（`associationFilter`）にまとめ、`searchMany` の
+有無で経路を分岐する。後段（`seen`/`excludeIds` によるアンカー間重複排除、
+`associationOf` が最初に当たったアンカーだけを記録する規約——ADR 0151 負債4）は
+一切変えていない——変わるのは「アンカーごとの ANN 検索を何回の往復で行うか」だけである。
+
+### 実測
+
+- **往復数**: `packages/postgres/src/__tests__/recall-roundtrip-count.postgres.test.ts`
+  歯4に、`anchorCount` を 1/3/10 と振っても往復数が変わらないことを固定する歯を足した。
+  実装前は歯4が実際に赤くなる（アンカー数に比例して増える）ことを確認済み——
+  具体的な実測値は本追記のもとになった PR 本文に控えてある（`main` が動くと変わりうる
+  数なので、ここには焼き込まない）。
+- **EXPLAIN**: `packages/postgres/src/__tests__/vector-store-search-many.postgres.test.ts`
+  歯4が、`searchMany` が実際に発行する SQL を捕捉して `EXPLAIN` し、`LATERAL` の内側
+  でも HNSW 索引（`idx_memory_embeddings_hnsw_*`）が使われ、`Seq Scan` に落ちないことを
+  実測している（1テナント3000行、`vector-search-hnsw.test.ts` と同じ規模・同じ手法）。
+- **一致性**: 同ファイル歯1・歯2が、`searchMany` の結果が同じクエリを1本ずつ `search()`
+  した場合と集合・順序ともに完全一致することを、距離の同点（`recorded_at` DESC・
+  `memory_id` フォールバックの両方を含む）と、`subjectId`/`attributes` フィルタが
+  効いた状態の両方で実測している。
+
+### 既定 `anchorCount` は変えていない
+
+この追記は往復数の削減だけを扱う。**「規模に見合う `anchorCount` がいくつか」という
+Issue #377 本題は、依然として未解決のまま残る**——`anchorCount` を上げる提案が
+出たときの費用（往復数）は、この追記により定数化されたので以前より軽くなったが、
+「いくつが規模に見合うか」自体は依然として測ってから決める話であり、この追記では
+判断しない。
+
+### 確かめていないこと
+
+- **レイテンシ（ms）としての改善効果は測っていない。** 往復の**数**だけを実測した。
+- **100万件級・複数 tenant 混在・`attributes`/`labels` 絞り込みが同時に効いた状態での
+  HNSW 選択は未検証。** 実測は1テナント3000行、フィルタ1種類ずつの検証に留まる。
+- **`packages/testkit`/`packages/core` の in-memory 実装（`FakeVectorStore` 等）には
+  `searchMany` を実装していない。** 任意メソッドなので必須ではなく、これらの adapter を
+  使う既存のテストは引き続き「searchMany 無し」の逐次 `search()` 経路を通る——
+  対称性のために実装するかどうかは、この追記の範囲外の判断として残す。
+
+### これが覆るとしたら
+
+- **`searchMany` の一致性が将来の変更で崩れたとき**——`pnpm api:check` は型のシグネチャ
+  だけを見るため、実装の中身が `search()` の挙動から乖離してもこの歯では検出できない。
+  `vector-store-search-many.postgres.test.ts` が唯一の歯であり、`search()`/`searchMany()`
+  のどちらかだけを直して両者が食い違う変更を入れたときは、この歯が赤くなることを
+  期待している。
+- **`anchorCount` の既定を上げる提案が別途出たとき**——往復数の費用はこの追記で
+  定数化されているため、その提案の判断材料からは外れる（費用ではなく「規模に見合う値か」
+  だけが残った論点になる）。

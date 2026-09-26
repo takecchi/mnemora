@@ -156,6 +156,13 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
+- **`VectorStore` に任意メソッド `searchMany?` を足した**——連想枠（段3.5）がアンカーごとに
+  `search()` を1回ずつ呼んでいた往復（`anchorCount` に比例して増えていた）を、実装した
+  adapter では1回の往復に束ねられるようにする。`PostgresVectorStore` に実装済み。
+  未実装の adapter では従来どおりアンカーごとの `search()` 呼び出しに戻り、結果（集合・
+  順序）は変わらない。**破壊的変更ではない**——公開 API の実 diff は `searchMany?` の
+  追加のみ（Refs [Issue #377](https://github.com/takecchi/mnemora/issues/377) /
+  [ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記）。
 
 ### Fixed
 
