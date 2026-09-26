@@ -62,9 +62,27 @@ describe("examples/chat: createExampleRuntime は Pool 構築後の失敗で Poo
       }),
     ).rejects.toThrow(/MNEMORA_LEXICAL_STORE/);
 
-    // reject の直後（`Pool` 側の既定 `idleTimeoutMillis`＝10秒より十分前）に数える。
     // `close()` が呼べていれば、reject した時点で `pool.end()` 済みのはずで、
     // 新たに増えたバックエンドは残らない。
-    expect(await countPoolBackends()).toBe(0);
+    //
+    // Issue #974（再オープン）: `pool.end()` が返るのはクライアント側がソケットを閉じた
+    // 時点であり、Postgres 側で backend が終了して `pg_stat_activity` から消えるのは
+    // その少し後になりうる。reject の直後に1回だけ数えると、閉じた Pool の接続が
+    // まだ1本見えて赤になることがあった（CI で `expected 1 to be +0`）。そこで短い間隔で
+    // 数え直し、0になるのを期限まで待つ。
+    //
+    // 🔴 **期限（BACKEND_EXIT_DEADLINE_MS）は、Pool の既定 `idleTimeoutMillis`（10秒）より
+    // 十分短く保つこと。**閉じ忘れた Pool の接続は、`idleTimeoutMillis` が過ぎるまで
+    // 自発的には切れない。期限がそれより短ければ、閉じ忘れは期限内に0にならず赤のまま残る
+    // ——期限を延ばしすぎると、この歯は閉じ忘れを見逃す。
+    const BACKEND_EXIT_DEADLINE_MS = 2_000;
+    const BACKEND_EXIT_POLL_MS = 50;
+    const deadline = Date.now() + BACKEND_EXIT_DEADLINE_MS;
+    let remaining = await countPoolBackends();
+    while (remaining > 0 && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, BACKEND_EXIT_POLL_MS));
+      remaining = await countPoolBackends();
+    }
+    expect(remaining).toBe(0);
   });
 });
