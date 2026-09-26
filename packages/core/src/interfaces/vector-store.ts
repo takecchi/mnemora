@@ -240,7 +240,9 @@ export interface VectorStore {
    * `omitted.score_not_comparable` に数える。3実装（`packages/postgres` の pgvector 経由の
    * ゼロベクトル差し替え、`packages/testkit`/`packages/core` の Fake の長さ不一致検査）は
    * 同じ振る舞いをする（実装の詳細である `NaN` という値そのものは揃えない——ADR 0040
-   * 決定1と同じ自由度）。
+   * 決定1と同じ自由度）。**`query` が有限でない成分（`NaN`・`Infinity`）を含むときも
+   * 同じく「比較不能」であり、`search` は例外を投げない**（埋め込み provider がクエリに
+   * そうした値を返した場合。`PostgresVectorStore` は同じゼロベクトルへの差し替えで満たす）。
    *
    * **⚠ 距離が完全に一致する行が複数あるときの順序も、adapter の責務である**
    * （Issue #339 / [ADR 0170](../../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)）。
