@@ -258,3 +258,129 @@ describe("FakeLexicalStore.search — coverage/rank が完全一致したとき�
     expect(hits[1]!.memoryId).toBe(older.id);
   });
 });
+
+/**
+ * `packages/testkit` の `InMemoryMemoryStore.archiveDecayed`（Issue #880、
+ * `in-memory-fixtures-archive-decayed-limit.test.ts`）と同じ形の不一致を
+ * `FakeMemoryStore.archiveDecayed` にも見つけた——どちらも `.slice(0, Math.max(0,
+ * opts.limit))` を検査せず使っており、`PostgresMemoryStore.archiveDecayed` が
+ * `LIMIT`（bigint パラメータ）へそのまま渡して例外にする入力（負数・`NaN`・
+ * `Infinity`・非整数）を、書き込みの副作用（`status` を `archived` にし、イベントを
+ * 積む）付きで静かに通してしまっていた。実測は `in-memory-fixtures-archive-decayed-limit.test.ts`
+ * のコメント参照。
+ */
+describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も archived にしない（Issue #880）", () => {
+  for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+    it(`limit=${limit} は例外を投げ、対象の Memory を archived にしない`, async () => {
+      const { memoryStore } = createFakeRuntimeStores();
+      const memory = await memoryStore.createMemory(ctx, fixture());
+      await expect(
+        memoryStore.archiveDecayed(ctx, { now: new Date("2026-06-01T00:00:00.000Z"), limit }),
+      ).rejects.toThrow(/limit must (be an integer|not be negative)/);
+      const after = await memoryStore.get(ctx, memory.id);
+      expect(after?.status).toBe("active");
+    });
+  }
+});
+
+/**
+ * `packages/testkit` の `InMemoryMemoryStore.reinforce`/`createMemory`/`InMemoryEventStore.append`
+ * （Issue #807、`in-memory-fixtures-invalid-date.test.ts`）と同じ形の不一致を
+ * `FakeMemoryStore`/`FakeEventStore` にも見つけた。実測（Postgres が Invalid Date を
+ * `timestamptz` 列で拒む根拠）は `in-memory-fixtures-invalid-date.test.ts` のコメント参照
+ * ——ここでは同じ判定を `packages/core` 専用の Fake に対して確かめる。
+ */
+describe("FakeMemoryStore.reinforce: Invalid Date を渡すと Postgres と同じく例外を投げ、状態を書き換えない（Issue #807）", () => {
+  it("Invalid Date は例外を投げ、lastReinforcedAt/decayFloorAt を変えない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, fixture());
+    await expect(memoryStore.reinforce(ctx, memory.id, new Date(Number.NaN))).rejects.toThrow(
+      /at must be a valid Date/,
+    );
+    const after = await memoryStore.get(ctx, memory.id);
+    expect(after?.lastReinforcedAt).toBeNull();
+    expect(after?.decayFloorAt).toEqual(memory.decayFloorAt);
+  });
+});
+
+describe("FakeMemoryStore.createMemory: Date フィールドに Invalid Date を渡すと例外を投げ、Memory を作らない（Issue #807）", () => {
+  for (const field of ["occurredAt", "recordedAt", "validFrom", "validUntil"] as const) {
+    it(`${field}=Invalid Date は例外を投げる`, async () => {
+      const { memoryStore } = createFakeRuntimeStores();
+      await expect(
+        memoryStore.createMemory(ctx, fixture({ [field]: new Date(Number.NaN) } as never)),
+      ).rejects.toThrow(/must be a valid Date/);
+    });
+  }
+});
+
+describe("FakeEventStore.append: at に Invalid Date を渡すと例外を投げ、イベントを積まない（Issue #807）", () => {
+  it("Invalid Date は例外を投げ、events に積まれない", async () => {
+    const { memoryStore, eventStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, fixture());
+    await expect(
+      eventStore.append(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "updated",
+        at: new Date(Number.NaN),
+        actor: { type: "system" },
+        meta: {},
+      }),
+    ).rejects.toThrow(/at must be a valid Date/);
+    const list = await eventStore.list(ctx, {});
+    expect(list).toHaveLength(0);
+  });
+});
+
+/**
+ * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #817、PR #815 と同根、
+ * `in-memory-fixtures-half-life-hours-float4-overflow.test.ts`）と同じ形の不一致を
+ * `FakeMemoryStore` にも見つけた。⚠ `strength` には足さない——理由（`isStrengthInRange`
+ * の時点で `1e300` は既に値域外として拒まれ、float4 オーバーフローに到達しない）は
+ * `in-memory-fixtures-half-life-hours-float4-overflow.test.ts` のコメント、および
+ * `runtime-fakes.ts` の `createMemoryIdempotent` doc コメント（ADR 0125「引き受ける負債」
+ * ——`halfLifeHours` の値域全体の検査はこの Fake に意図して無い）参照。
+ */
+describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 列) に収まらない値を拒む（Issue #817）", () => {
+  it("1e300（float4 の範囲を大きく超える）は例外を投げ、Memory を作らない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(memoryStore.createMemory(ctx, fixture({ halfLifeHours: 1e300 }))).rejects.toThrow(
+      /does not fit in a Postgres "real"/,
+    );
+  });
+
+  it("halfLifeHours: 0（既存の recall-pipeline.test.ts が使う『壊れた』Memory）は引き続き成功する（回帰確認）", async () => {
+    // `createMemoryIdempotent` の doc コメント（ADR 0125「引き受ける負債」）が明記する
+    // とおり、この Fake は `halfLifeHours` の値域全体を検査しない——float4 オーバーフロー
+    // だけを見る狭い検査を追加しても、`0` のような既存の「壊れた」入力は通り続ける
+    // ことをここで確かめる（通らなくなると `recall-pipeline.test.ts` の複数の歯が
+    // 構造的に書けなくなる）。
+    const { memoryStore } = createFakeRuntimeStores();
+    const memory = await memoryStore.createMemory(ctx, fixture({ halfLifeHours: 0 }));
+    expect(memory.halfLifeHours).toBe(0);
+  });
+
+  it("strength=1e300 は（別の理由=値域外で）引き続き例外を投げる（回帰確認、float4 検査は不要）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(memoryStore.createMemory(ctx, fixture({ strength: 1e300 }))).rejects.toThrow(
+      /strength out of range/,
+    );
+  });
+});
+
+/**
+ * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #816、NUL 側のみ、
+ * `in-memory-fixtures-nul-content.test.ts`）と同じ形の不一致を `FakeMemoryStore` にも
+ * 見つけた。範囲の切り方（`content` だけに絞る理由）は
+ * `in-memory-fixtures-nul-content.test.ts` のコメント参照——`packages/testkit` と同じ
+ * 範囲に揃える。
+ */
+describe("FakeMemoryStore.createMemory: content に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816、NUL 側のみ）", () => {
+  it("content の途中に NUL を含むと例外を投げ、Memory を作らない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createMemory(ctx, fixture({ content: "abc\u0000def" })),
+    ).rejects.toThrow(/must not contain NUL/);
+  });
+});
