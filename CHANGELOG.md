@@ -310,6 +310,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （新しい例外は投げない。`VectorStore.upsert` に長さの違うベクトルを渡したときの
   扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
+- **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
+  へ落とした記憶を、段3（必須の同伴取得）が `RecallResult.memories` へ昇格させた場合でも、
+  同じ記憶を `over_limit` の `count` にそのまま数え続けていた**（below_threshold で
+  ADR 0203 が塞いだのと同型の矛盾、「返したのに落ちたと名乗る」）。段3で実際に昇格した分
+  だけ `count` から差し引き、0件になった Omission は below_threshold と同じ作法で配列
+  から取り除くようにした（`memories` の中身・公開型はどちらも無変更）
+  （[Issue #823](https://github.com/takecchi/mnemora/issues/823)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記 2026-09-26）。
 - **`runMigrations`/`registerEmbeddingSpace` の `schema` オプション省略時、接続ロール名と
   同じ名前のスキーマが DB に在ると（PostgreSQL の既定 `search_path` `"$user", public` により
   `"$user"` がそちらへ解決される）、advisory lock のキーが `schema: "<ロール名>"` を明示

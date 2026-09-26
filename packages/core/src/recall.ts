@@ -2162,9 +2162,19 @@ export interface RecallResult {
    * その memoryId を名指しで含まない（Issue #421 /
    * [ADR 0203](../../../docs/decisions/0203-memories-omitted-exclusivity.md)）。
    * ただし memoryId を明示的に持つのは `BelowThresholdOmission.nearMisses` だけであり、
-   * この契約が**個体単位で検証できる**のもそこだけである——他の10種の `kind` は
+   * この契約が**個体単位で（外部から）検証できる**のもそこだけである——他の10種の `kind` は
    * 件数（`count`）だけを持ち、どの記憶を指しているかを言わない
    * （ADR 0203「引き受けた負債」参照）。
+   *
+   * **Issue #823（ADR 0203 2026-09-26 追記）**: `over_limit(stage:"rescore")` は
+   * memoryId を公開していないが、`recall-runtime.ts` は段2の内部状態（`overLimit`）を
+   * まだ手元に持ったまま段3（必須の同伴取得）の結果と突き合わせられるため、
+   * **公開型を広げずに**同じ排他性を内部で実装できた——段3の必須同伴取得が
+   * `over_limit(stage:"rescore")` の候補を `finalMemories` へ昇格させたときも、
+   * その分は `count` から差し引かれる（全件昇格すれば Omission 自体が消える）。
+   * ただし外部からの検証は依然としてできない（`nearMisses` に相当する欄が無いため）。
+   * `over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等、
+   * 内部状態自体が memoryId を持ち回っていない他の kind は対象外のままである。
    */
   omitted: Omission[];
   index: IndexBand;

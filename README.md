@@ -334,8 +334,9 @@ forget(ctx, target)      // 記憶を落とす / 失効させる
 - **是正・取り消し**（`markContested` / `resolveContested` / `resolveOrphanedContested` /
   `restoreArchived` / `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・
   将来の自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
-  書き込む口。どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も
-  持たない**——下の「⚠ mnemora が保証していないこと」の節を見ること。
+  書き込む口。どちらが正しいかを mnemora 自身は判定しない。**⚠ 矛盾を*見つける*処理も、
+  既定では持たない**（既定 off の claim key 衝突検出を除く）——下の
+  「⚠ mnemora が保証していないこと」の節を見ること。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口
   （`docs/north-star.md`「目指す姿」の3番目）。
 
@@ -423,14 +424,20 @@ const recalled = await recall(ctx, { text: "..." })
 詳細は [docs/vision.md](./docs/vision.md) の「Tenant と Subject を混同しない」と
 [docs/architecture.md](./docs/architecture.md) §3.7。
 
-**⚠ もう1つある: 矛盾の検出も、mnemora は行わない。**
+**⚠ もう1つある: 矛盾の検出も、既定では mnemora は行わない**（既定 off の
+claim key 衝突検出を除く。下記）。
 `markContested` / `resolveContested` は **「この2件は対向する」と*既に決まっている*ものを
 書き込む口**であり（上の「是正・取り消し」）、**会話の中から矛盾を*見つける*処理は
 `@mnemora/core` に存在しない**（[ADR 0134](./docs/decisions/0134-mark-contested-explicit-operation.md)
 決定1・[Issue #197](https://github.com/takecchi/mnemora/issues/197)）。**これは
 `findCorrectionCandidates`/`applyCorrection`（ADR 0232/ADR 0242、下記）を挟んでも変わらない**
 ——それらは「発見」と「呼び出し側が確定させた対を書き込む」口であり、「どれが訂正か」
-「関連度の高い候補が本当に相手か」の判定は依然として呼び出し側が持つ。
+「関連度の高い候補が本当に相手か」の判定は依然として呼び出し側が持つ。**唯一の例外は
+主張キー（claim key）の衝突検出**——同じ主張キー・重なる有効期間・違う内容を列と索引だけで
+機械的に見つけて `markContested` を呼ぶ経路であり、既定 off
+（`ClaimKeyOptions.detectContested`）かつ会話を一切読まない
+（[ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)、
+[Issue #372](https://github.com/takecchi/mnemora/issues/372)）。
 
 **⟹ npm から入れたままの既定の振る舞いは「訂正しても、古いほうが出続ける」。**
 古いほうを遠ざけるには、**採用側が「どの2件が矛盾しているか」を決めて
