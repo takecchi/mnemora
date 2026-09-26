@@ -126,7 +126,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   v1.0.1 の利用者がまさにこれに当たる）で、途中の接続断がプロセスのクラッシュではなく
   catchable な `Error` として観測できるようになる（[ADR 0339](./docs/decisions/0339-checked-out-client-error-listener.md)、
   [ADR 0020](./docs/decisions/0020-temp-database-drain-before-drop.md) とは別の話——
-  自傷ではなく外部要因による接続断であり、握り潰す対象は無い）。
+  自傷ではなく外部要因による接続断であり、握り潰す対象は無い。PR #859）。
 - **`runtime.tick()` が、`consolidate`/`reflect` の自動ジョブで LLM 呼び出しが失敗しても、
   そのジョブを「処理成功」として数えていた。** `processConsolidateJob`/`processReflectJob`
   は `consolidate()`/`reflect()` の戻り値（LLM 失敗時は `outcome: "llm_failed"` を返す——
