@@ -426,18 +426,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   どうしの大小関係・同点時の安定ソートの性質は変えていない（公開 API 無変更）
   （[Issue #938](https://github.com/takecchi/mnemora/issues/938)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
-- **`@mnemora/testkit` の `InMemoryLexicalStore`（`LexicalStore` の擬似実装）が、
-  `PostgresLexicalStore` とは違う語の一致判定で非 ASCII を含む語を扱っていた。**
-  非 ASCII だけのクエリ（例: 日本語・ギリシャ文字）が `PostgresLexicalStore` では
-  常に0件になる一方、`InMemoryLexicalStore` は一致してしまうことがあり、ASCII と
-  非 ASCII が隣り合う語（例: 数字の直後に非 ASCII 文字が続く語）も、小文字化と分割の
-  順序が逆だったため異なるトークンに割れないことがあった。クエリ側は非 ASCII の連なりを
-  落としてから分割し、本文側は ASCII の連なりの前後に境界を入れてから小文字化するよう
-  `PostgresLexicalStore` と同じ順序に揃えた——語幹処理・ロケール依存の細かい大文字小文字
-  変換規則までは再現していない（`InMemoryLexicalStore` の doc コメント参照）
-  （[Issue #951](https://github.com/takecchi/mnemora/issues/951)、
-  [ADR 0084](./docs/decisions/0084-lexical-recall-channel.md)、
-  [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md)）。
+- **`@mnemora/testkit` の `InMemoryLexicalStore` の語の一致判定を `PostgresLexicalStore` に揃えた**——非 ASCII だけのクエリは0件になり、本文は ASCII の境界で分割してから小文字化する（[Issue #951](https://github.com/takecchi/mnemora/issues/951)、[ADR 0084](./docs/decisions/0084-lexical-recall-channel.md)）。
 
 ---
 
