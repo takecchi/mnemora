@@ -27,7 +27,13 @@ import { dropTempDatabase } from "./temp-database.js";
  * `memories` テーブルを用意するため）。
  */
 
-const DB_NAME = "mnemora_vs_dims_limit";
+// it ごとに別のデータベースを使う（`vector-space-concurrency.test.ts` と同じ構造）。
+// 以前は2本が同じ名前を使い回しており、2本目の冒頭の `dropTempDatabase` が、1本目の
+// Pool が開いたままのデータベースを落とそうとしていた——`temp-database.ts` の前提
+// （呼ぶ前に自分の pool を閉じている）を破り、drain 待ちが pg の Pool のアイドル切断
+// （既定 10 秒）と drain の上限（10 秒）の競争になって間欠的に赤になった（Issue #975）。
+const DB_AT_LIMIT = "mnemora_vs_dims_limit_at_2000";
+const DB_OVER_LIMIT = "mnemora_vs_dims_limit_over_2001";
 
 const SPACE_AT_LIMIT = { provider: "test", model: "vs-dims-limit-at-2000", dimensions: 2000 };
 const SPACE_OVER_LIMIT = { provider: "test", model: "vs-dims-limit-over-2001", dimensions: 2001 };
@@ -80,7 +86,7 @@ describe("registerEmbeddingSpace の dimensions 上限検査（pgvector hnsw、A
   });
 
   it("dimensions=2000 は通り、テーブル・索引の両方が作られる（pgvector hnsw の有効な境界）", async () => {
-    const pool = await createMigratedDatabase(DB_NAME);
+    const pool = await createMigratedDatabase(DB_AT_LIMIT);
 
     const result = await registerEmbeddingSpace(pool, SPACE_AT_LIMIT);
     expect(result.lock.waitedMs).toBeGreaterThanOrEqual(0);
@@ -92,7 +98,7 @@ describe("registerEmbeddingSpace の dimensions 上限検査（pgvector hnsw、A
   }, 20_000);
 
   it("dimensions=2001 は拒否され、テーブルが1つも残らない", async () => {
-    const pool = await createMigratedDatabase(DB_NAME);
+    const pool = await createMigratedDatabase(DB_OVER_LIMIT);
     const table = embeddingSpaceTableName(SPACE_OVER_LIMIT);
     const index = embeddingSpaceIndexName(SPACE_OVER_LIMIT);
 
