@@ -143,8 +143,17 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       try {
         await queue.removeJobScheduler(jobName);
       } finally {
-        await worker.close();
-        await queue.close();
+        // `worker.close()` と `queue.close()` はそれぞれ独立した資源（Worker 自身の
+        // blocking connection と Queue の connection）を閉じる。どちらも await せず
+        // 同じ finally に並べて書くと、`worker.close()` が reject したとき
+        // `queue.close()` の行に到達せず、Queue 側の接続が開いたまま残る
+        // （`tick-driver.stop-cleanup.test.ts` が実測）。内側にもう一段 try/finally を
+        // 挟み、`worker.close()` が失敗しても `queue.close()` は必ず試みる。
+        try {
+          await worker.close();
+        } finally {
+          await queue.close();
+        }
       }
     },
   };
