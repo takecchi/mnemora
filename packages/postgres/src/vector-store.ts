@@ -18,6 +18,27 @@ function toVectorLiteral(vector: number[]): string {
   return `[${vector.join(",")}]`;
 }
 
+/**
+ * `search`/`searchMany` のクエリを、pgvector が受け取れて比較の結果が意味を持つ形にする。
+ * 比較不能なクエリは `space.dimensions` 長の全 0 ベクトルに差し替える——ゼロベクトルは
+ * ADR 0040 の経路（`<=>` が `NaN` を返す）に乗り、`recall()` の段2で
+ * `score_not_comparable` に数えられる。新しい throw は足さない。
+ *
+ * 比較不能とするもの:
+ * - 長さが `space.dimensions` と違う（空配列を含む。Issue #857・#867 の案B）
+ * - 有限でない成分（`NaN`・`Infinity`・`-Infinity`）を含む。pgvector は
+ *   「NaN not allowed in vector」／「infinite value not allowed in vector」で拒み、
+ *   未捕捉の `DrizzleQueryError` になっていた。core の `FakeVectorStore` と testkit の
+ *   `InMemoryVectorStore` は、この場合の距離を以前から `NaN` として返しており、それに揃える
+ *   （歯は `__tests__/vector-search-non-finite-query.postgres.test.ts`）。
+ */
+function toComparableQuery(query: number[], dimensions: number): number[] {
+  if (query.length !== dimensions || !query.every((x) => Number.isFinite(x))) {
+    return new Array(dimensions).fill(0);
+  }
+  return query;
+}
+
 /** `toVectorLiteral` の逆——pgvector のテキスト表現（`[1,2,3]`）を `number[]` に戻す。 */
 function parseVectorLiteral(literal: string): number[] {
   return literal.slice(1, -1).split(",").map(Number);
@@ -234,8 +255,8 @@ export class PostgresVectorStore implements VectorStore {
     // 比較しようとしたら `NaN` を返す（足りない側を `0` で zero-pad して計算を続ける
     // 旧実装は Issue #867 で「意味の無い点数を普通のヒットとして返す」と指摘され、
     // 案Bの一部として直した）。ここではその直した後の Fake の挙動に Postgres を揃える。
-    const effectiveQuery =
-      query.length === space.dimensions ? query : new Array(space.dimensions).fill(0);
+    // 有限でない成分も同じく比較不能として差し替える（`toComparableQuery` の doc）。
+    const effectiveQuery = toComparableQuery(query, space.dimensions);
     const queryLiteral = toVectorLiteral(effectiveQuery);
 
     // `filter` の翻訳は `searchMany()` と共有する（クラス doc コメント、
@@ -375,8 +396,7 @@ export class PostgresVectorStore implements VectorStore {
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
     const valuesRows = queries.map((q) => {
-      const effectiveQuery =
-        q.vector.length === space.dimensions ? q.vector : new Array(space.dimensions).fill(0);
+      const effectiveQuery = toComparableQuery(q.vector, space.dimensions);
       return sql`(${q.key}::text, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
 

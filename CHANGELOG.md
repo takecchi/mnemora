@@ -191,6 +191,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`@mnemora/postgres` の `PostgresVectorStore.search` / `searchMany` は、クエリベクトルに有限でない成分（`NaN`・`Infinity`）があると、pgvector の拒否で未捕捉の `DrizzleQueryError` を投げていた**——埋め込み provider がクエリ埋め込みにそうした値を返すと、`runtime.recall()` 自体が reject された。次元違いのクエリ（Issue #867 の案B）と同じく「比較不能」として扱い、`score_not_comparable` に数えるようにした。core の Fake と testkit の `InMemoryVectorStore` は以前からこの振る舞いである（[PR #1069](https://github.com/takecchi/mnemora/pull/1069)）。
+  ⚠ doc が約束していた振る舞い（`search` は比較不能なクエリで例外を投げない）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`runtime.recall()` のクエリ埋め込みで、`EmbeddingProvider.embed` がベクトルを1件も返さない（`[]`）と、ANN の段を黙って飛ばしていた**——例外のときは `stage_skipped`（`candidate_generation` / `embedding_provider_unavailable`）を積むが、`[]` のときは omission に何も出ず、「ベクトル検索だけが止まった」ことが見えなかった。`docs/recall.md` の約束どおり、`[]` でも `embedding_provider_unavailable` を積むようにした（公開型は無変更）（[PR #1068](https://github.com/takecchi/mnemora/pull/1068)）。
 - **`@mnemora/postgres` の `PostgresOutboxStore.fail` は、`error` に NUL（U+0000）が含まれていると `last_error` を書けずに例外を投げていた**——LLM の抽出結果の本文に NUL が入ると、失敗したクエリの params を含むエラー文が `lastError` に渡るため、`tick()` がその場で打ち切られ、そのジョブは終端に落ちないまま、リースが切れるたびに再び claim されて同じ所で落ちていた。NUL を目に見える `\u0000` に置き換えて書くようにした（[PR #1060](https://github.com/takecchi/mnemora/pull/1060)）。
   ⚠ doc が約束していた振る舞い（`tick()` は失敗を `failed` に数え、ジョブを終端に落とす）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
