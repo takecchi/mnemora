@@ -12,6 +12,14 @@ import { translateForOpenAIStructuredOutput } from "./json-schema.js";
  * 一切現れない**（`OpenAI`/`ChatCompletion` 等の型はこのファイルの外に出ない）。
  *
  * `client` を注入できるようにしてある（`OpenAIEmbeddingProvider` と同じ理由）。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）:
+ * `client` を省略すると `new OpenAI({ apiKey })` が作る SDK 既定のクライアントが使われる
+ * ——このクライアントは SDK 自身が内部で 429・5xx 等に対して再試行する（実測:
+ * `openai@7.10.0` は既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms。この数値は
+ * mnemora の契約ではなく SDK の既定値であり、SDK の版が上がれば変わりうる）。再試行の
+ * 有無・回数・timeout を変えたい呼び出し側は、`maxRetries`/`timeout` を設定した
+ * `OpenAI` インスタンスを自分で作り、`client` へ渡すこと。**
  */
 export interface OpenAILLMProviderOptions {
   apiKey?: string;

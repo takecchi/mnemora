@@ -766,6 +766,26 @@ interface LLMProvider {
 - タイムアウト・レート制限・失敗時は例外を投げる。呼び出し側（runtime）がリトライ方針を持つ。
   `LLMProvider` 自体はリトライを内蔵しない（責務の混在を避ける）。
 
+⚠ **2026-09-26 追記（[Issue #850](https://github.com/takecchi/mnemora/issues/850)）**:
+`completeStructured` が返した後の値を、core は `req.schema` で再検証しない
+（`packages/core/src/interfaces/llm-provider.ts` の同日付追記）。schema への適合を
+保証するのは provider の責務であり、`@mnemora/openai`・`@mnemora/anthropic` は内部で
+`req.schema.parse` を通した値だけを返す（ADR 0072 決定3・ADR 0266 歯2）。この契約を
+破る provider を渡すと、core・呼び出し側は型の違う値をそのまま使い、未処理の例外で
+終わりうる。
+
+⚠ **2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）**:
+上の「呼び出し側（runtime）がリトライ方針を持つ」は、リトライ方針の置き場所を
+`LLMProvider` の外（呼び出し側）に決めた設計上の役割分担であって、`packages/core` の
+`Runtime`（Phase 1）自身が LLM 呼び出しを自動リトライしているという意味ではない
+——`runtime.ts` は他の非同期処理（`tick()` 等）と同じく「Phase 1 に自動リトライは
+無い」を踏襲している。実際に再試行しているのは、`client` を指定しない場合に
+`@mnemora/openai`・`@mnemora/anthropic` が使う SDK 既定のクライアントである
+（`openai@7.10.0`/`@anthropic-ai/sdk@0.124.0` はどちらも既定 `maxRetries: 2`＝最大3回・
+`timeout: 600000`ms で 429・5xx 等を再試行する。実測、Issue #884）。この数値は SDK の
+既定値であり mnemora の契約ではない——変えたい呼び出し側は `client` に自前の SDK
+インスタンスを渡す。
+
 ### 5.5 EmbeddingProvider — Phase 1
 
 ```ts
@@ -790,6 +810,15 @@ interface EmbeddingProvider {
   （[ADR 0072](./decisions/0072-anthropic-llm-provider.md) の負債1。
   [#116](https://github.com/takecchi/mnemora/issues/116)）。
   実装が増えても、契約を機械的に検査する歯は今のところ無い。
+
+⚠ **2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）**:
+`embed` は入力と同じ件数・同じ順序でベクトルを返すことが契約だが、守り方は実装ごとに
+違う。`packages/local-embedding` は件数・次元の食い違いを実行時に検査して例外を投げる
+（ADR 0085 決定5）。`packages/openai` の `OpenAIEmbeddingProvider.embed` はこの検査を
+持たず、OpenAI のサーバが `texts` と同じ件数を返すことに依存している——上限超過を
+「サーバが拒否することに依存する」負債（ADR 0305）と同じ形。応答の件数が食い違った
+ときの結果は未定義である。`packages/core` の本番経路（`runtime.ts`/`recall-runtime.ts`）
+は常に1件ずつ渡す。
 
 ### 5.6 Scheduler — interface は Phase 1（既定 `InlineScheduler`）、BullMQ 実装は後続フェーズ
 

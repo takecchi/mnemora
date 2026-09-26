@@ -80,6 +80,36 @@ README にある。
 確認していない（詳細は
 [ADR 0072](../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記）。
 
+## ⚠ 2026-09-26 追記（[Issue #860](https://github.com/takecchi/mnemora/issues/860)）: `embed()` は応答の件数を確かめない
+
+`EmbeddingProvider.embed` の契約は「入力と同じ件数・同じ順序でベクトルを返す」ことだが、
+`OpenAIEmbeddingProvider.embed` はこれを実行時に確かめない。`response.data` を `index` で
+並べ替えて返すだけで、件数が `texts.length` と食い違っていないかは検査しない
+——`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed` は件数・次元の食い違いを
+検査して例外を投げるが、こちらは OpenAI のサーバが正しい件数を返すことに依存している
+（上限超過を「サーバの拒否に依存する」のと同じ形、[ADR 0305](../../docs/decisions/0305-embedding-provider-input-limit-contract.md)）。
+応答の件数が食い違ったときの戻り値は未定義である。`packages/core` の本番経路は常に
+1件ずつ渡すため、この食い違いは踏まれていない。
+
+## ⚠ 2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）: `client` を省略すると SDK 既定の再試行・timeout が効く
+
+`client` を省略した `OpenAILLMProvider`/`OpenAIEmbeddingProvider` は `new OpenAI({ apiKey })`
+が作る SDK 既定のクライアントを使う——**このクライアント自身が 429・5xx 等を内部で
+再試行する**（実測: `openai@7.10.0` は既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms）。
+`LLMProvider`/`EmbeddingProvider` の「自体はリトライを内蔵しない」は、mnemora の provider
+コードが再試行を書いていない、という意味であり、SDK が裏で再試行しないという意味ではない。
+この数値は SDK の既定値であり mnemora の契約ではないので、SDK の版が上がれば変わりうる。
+再試行の回数・timeout を変えたい場合は、自分で作った `OpenAI` インスタンスを `client` に
+渡す:
+
+```ts
+import OpenAI from "openai";
+import { OpenAILLMProvider } from "@mnemora/openai";
+
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 60_000 });
+const llmProvider = new OpenAILLMProvider({ model: "gpt-4o-mini", client });
+```
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§5.4・§5.5 — `LLMProvider` / `EmbeddingProvider` の契約

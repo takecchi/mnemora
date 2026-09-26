@@ -182,3 +182,63 @@ JSON 構文エラー・`ZodError`・`no_content`・`refusal`・`truncated`。
 - [ADR 0072](./0072-anthropic-llm-provider.md) — `@mnemora/anthropic` を足した判断。**負債1が適合 suite の欠落・負債2が `complete()` の空文字**
 - [ADR 0095](./0095-embedding-provider-conformance.md) — `EmbeddingProvider` 側の suite（suite を作るなら倣う先）
 - [docs/conformance.md](../conformance.md) — 適合テストが何を検証し、何を検証していないか
+
+---
+
+## 追記（2026-09-26、[Issue #884](https://github.com/takecchi/mnemora/issues/884)）: 負債(a)「`new Anthropic()`/`new OpenAI()` の既定リトライ回数」を実測で埋めた
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——この追記は記録だけである。
+
+**実測（2026-09-26、Issue #884 本文。実 API は叩いていない——`OpenAI`/`Anthropic` の
+`baseURL` をローカルの `http.createServer`（127.0.0.1、ランダムポート）へ向け、SDK
+本物のリトライ・バックオフ実装をそのまま走らせた。`openai@7.10.0`/
+`@anthropic-ai/sdk@0.124.0`、Node.js v22.23.3）**:
+
+- 既定値そのもの（ネットワーク無し）: `new OpenAI({ apiKey })` は `maxRetries: 2`・
+  `timeout: 600000`（ms、10分）。`new Anthropic({ apiKey })` も同じく `maxRetries: 2`・
+  `timeout: 600000`。
+- 429（`retry-after` の有無いずれも）・500 とも、OpenAI LLM（`chat.completions.create`）・
+  OpenAI Embedding（`embeddings.create`）・Anthropic LLM（`messages.create`）の3経路
+  すべてで実際に3回 HTTP が発行される（初回＋2リトライ＝`maxRetries: 2` の額面通り）。
+  `retry-after`（秒単位）ヘッダは両 SDK とも尊重する。
+- 接続断（listen していないポートへの接続）では `fetch` 自体は1回しかログに残らないが、
+  SDK 内部では `retriesRemaining` を消費しながら同じ `makeRequest`/相当の経路を最大3回
+  試みている——**「HTTP 呼び出しが1回しかサーバへ届かない」ことは、SDK がリトライして
+  いないことを意味しない。**
+
+⟹ **負債(a)「production の経路が1回しか叩かないとは言っていない」は、これで埋まった。
+むしろ SDK 既定のリトライにより、production では最大3回叩かれている可能性が高い。**
+決定1「`LLMProvider` 自体はリトライを内蔵しない」（wrapper のコードが再試行を書いて
+いないこと）自体は覆らない——覆るのは「だから production も1回しか叩かない」という
+読み方のほうである。
+
+**クローン miku の判断（2026-09-26）**: 挙動は変えず（既定 `client` を `maxRetries: 0` に
+揃える案は採らない）、この実測を `packages/core/src/interfaces/llm-provider.ts`・両
+provider の `client` オプション doc コメント（`packages/openai/src/llm-provider.ts`・
+`embedding-provider.ts`、`packages/anthropic/src/llm-provider.ts`）・両パッケージの
+README・`docs/architecture.md` §5.4 に明記するに留めた。
+
+**採らなかった案**:
+1. **既定 `client` を `maxRetries: 0` に揃える。** 却下——両パッケージ同時の既定の挙動の
+   変更であり、この追記の範囲（委譲された記述のみ）を超える。SDK 既定のリトライは
+   一時的な障害（429・5xx）に対する妥当な既定でもあり、揃える積極的な理由も無い。
+2. **`OpenAILLMProviderOptions`/`AnthropicLLMProviderOptions`/
+   `OpenAIEmbeddingProviderOptions` に `maxRetries`/`timeout` の専用の口を新設する。**
+   却下——公開の型の拡張になる。`client` という既存の注入点で同じ結果に届く
+   （`examples/chat/src/providers.ts` が使用量計測ラッパーのために既に `client` を
+   渡している実績がある）ため、新しい欄を足す積極的な理由が無い。
+3. **`timeout` の既定（600000ms＝10分）を短くする。** 却下——両パッケージ同時の既定値の
+   変更であり、範囲を超える。長い `timeout` 自体は「リトライを内蔵しない」契約と矛盾
+   しない（SDK のリトライは `timeout` とは独立の仕組みである）。
+
+反映先: `packages/core/src/interfaces/llm-provider.ts`、`packages/openai/src/llm-provider.ts`・
+`packages/openai/src/embedding-provider.ts`、`packages/anthropic/src/llm-provider.ts` の
+`client` オプション doc コメント、`docs/architecture.md` §5.4、`packages/openai/README.md`・
+`packages/anthropic/README.md`。ADR 0266 負債6 への短い相互参照も付けた（同日付の追記4）。
+
+**確かめていないこと**: Issue #884 本文の実測はローカルサーバへの偽装であり、実 API
+（本物の OpenAI/Anthropic）には当てていない。401/403（認証エラー）・408/409・
+`retry-after-ms`（ミリ秒単位）ヘッダ・ストリーミング呼び出しは測っていない。SDK の
+版が上がったときにこの数値が変わるかどうかも確かめていない（Issue #884 本文に詳細）。

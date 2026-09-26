@@ -171,6 +171,24 @@ try {
 何が測られていて何が測られていないかの全体像は
 **[docs/conformance.md](../../docs/conformance.md)** に在る。
 
+## ⚠ 2026-09-26 追記（[Issue #884](https://github.com/takecchi/mnemora/issues/884)）: `client` を省略すると SDK 既定の再試行・timeout が効く
+
+`client` を省略した `AnthropicLLMProvider` は `new Anthropic({ apiKey })` が作る SDK 既定の
+クライアントを使う——**このクライアント自身が 429・5xx 等を内部で再試行する**
+（実測: `@anthropic-ai/sdk@0.124.0` は既定 `maxRetries: 2`＝最大3回・`timeout: 600000`ms）。
+`LLMProvider` の「自体はリトライを内蔵しない」は、mnemora の provider コードが再試行を
+書いていない、という意味であり、SDK が裏で再試行しないという意味ではない。この数値は
+SDK の既定値であり mnemora の契約ではないので、SDK の版が上がれば変わりうる。再試行の
+回数・timeout を変えたい場合は、自分で作った `Anthropic` インスタンスを `client` に渡す:
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { AnthropicLLMProvider } from "@mnemora/anthropic";
+
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 60_000 });
+const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client });
+```
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§4・§5.4 — `LLMProvider` の契約と provider 構成
