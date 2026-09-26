@@ -333,6 +333,13 @@ PR #827）だけであった。
   逆転していた。活動時計側は `decay_floor_seq`（Postgres `bigint`）へ `Number.MAX_SAFE_INTEGER`
   を超える精度の無い値を静かに書いていた。どちらも表現可能な上限へ丸めるようにした
   （新しい例外は投げない）。
+- **`@mnemora/core` の `deriveClaimKeys`（`claim-key.ts`）が、LLM の壊れた出力
+  （`subject`/`predicate` が空白だけ）を空文字列の claim key としてそのまま返していた。**
+  `ClaimKeySchema` の `min(1)` は空白だけの値を素通りするため、正規化（NFKC→trim→小文字化）
+  後に空文字列へ潰れることがあり、無関係な複数の Memory が同じ「空の鍵」で誤って一致し、
+  `detectClaimKeyContested` が的外れに `contested` を立てていた。正規化後に `subject`/
+  `predicate` のどちらかが空文字列になった要素は、鍵が取れなかったもの（`null`）として
+  扱うようにした（新しい例外は投げない）。
 - **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
 - **`@mnemora/postgres` の段1 `search()` で、他テナントの near-duplicate が HNSW の候補窓
   （既定 `hnsw.ef_search`=40）を埋め尽くすと、自テナントの候補を1件も見ないまま `recall()` が
