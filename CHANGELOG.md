@@ -45,8 +45,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`b3cc4ee`**（PR #1057）の範囲を
-数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた。下の追記）。
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`ef0ae63`**（PR #1060）の範囲を
+数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた。下の追記2）。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -83,12 +83,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ⟹ **この節の範囲（`v1.0.1`…`951ad44`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
-**⚠ 2026-09-27 追記2（2回目の棚卸し。`b3cc4ee` まで広げた）**: `951ad44`…`b3cc4ee` に `main` へ入った PR を全部当てた。出荷される6パッケージの利用者に見える変更は、どれもこの節に載っている（PR 番号か、その PR が閉じた Issue 番号で受けている）。型の差分は追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。実行時の変化は次のとおり分けた。
+**⚠ 2026-09-27 追記2（2回目の棚卸し。`ef0ae63` まで広げた）**: `951ad44`…`ef0ae63` に `main` へ入った PR を全部当てた。出荷される6パッケージの利用者に見える変更は、どれもこの節に載っている（PR 番号か、その PR が閉じた Issue 番号で受けている）。型の差分は追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。実行時の変化は次のとおり分けた。
 
 - 🔴 **計上を保留しているもの**: この範囲で入ったものには無い（どれも公開の fixture が新しく例外を投げる変更ではない）。
-- ⭕ **非破壊と数えたもの**: 例外を投げず、公開の fixture の結果だけが変わるもの——`search` の3口が `ctx.tenantId` でも絞るようになった件（Issue #1050、PR #1056。`ctx` と `filter.tenantId` が食い違う呼び出しは空を返す）。上の訂正で狭めた基準により、この節のそれより前の範囲にある同じ種類の変更（`InMemoryLexicalStore` の一致判定 Issue #951・同点の並び順 PR #875・クエリの上限 PR #919、`InMemoryMemoryStore.listLabels?` の並び順 PR #906、`InMemoryVectorStore` の次元違いの距離 PR #915・距離 `NaN` の候補の位置 PR #985、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail` PR #830）も非破壊の Fixed として数える（クローン miku の判断）。ほかに、`timestamptz` の読み（Issue #1039）と書き（Issue #1040）のずれの修正、purge 後に埋め込みを残さない修正（Issue #1035）、`recall()` の `omitted` の二重計上の修正（Issue #1019・#1020・#1026）、`0022` がビューで止まらなくなった修正（Issue #1038）。どれも誤った値・誤った件数を返していたものを直したもので、公開の fixture の結果も、新しい例外も伴わない。
+- ⭕ **非破壊と数えたもの**: 例外を投げず、公開の fixture の結果だけが変わるもの——`search` の3口が `ctx.tenantId` でも絞るようになった件（Issue #1050、PR #1056。`ctx` と `filter.tenantId` が食い違う呼び出しは空を返す）。上の訂正で狭めた基準により、この節のそれより前の範囲にある同じ種類の変更（`InMemoryLexicalStore` の一致判定 Issue #951・同点の並び順 PR #875・クエリの上限 PR #919、`InMemoryMemoryStore.listLabels?` の並び順 PR #906、`InMemoryVectorStore` の次元違いの距離 PR #915・距離 `NaN` の候補の位置 PR #985、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail` PR #830）も非破壊の Fixed として数える（クローン miku の判断）。ほかに、`PostgresOutboxStore.fail` が `error` の NUL で例外を投げなくなった修正（PR #1060。例外を投げなくなった側）、`timestamptz` の読み（Issue #1039）と書き（Issue #1040）のずれの修正、purge 後に埋め込みを残さない修正（Issue #1035）、`recall()` の `omitted` の二重計上の修正（Issue #1019・#1020・#1026）、`0022` がビューで止まらなくなった修正（Issue #1038）。どれも誤った値・誤った件数を返していたものを直したもので、公開の fixture の結果も、新しい例外も伴わない。
 
-⟹ **この節の範囲（`v1.0.1`…`b3cc4ee`）で、確定した破壊的変更は無い（上の保留を除く）。**
+⟹ **この節の範囲（`v1.0.1`…`ef0ae63`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
 ### Added
 
@@ -199,6 +199,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`@mnemora/postgres` の `PostgresOutboxStore.fail` は、`error` に NUL（U+0000）が含まれていると `last_error` を書けずに例外を投げていた**——LLM の抽出結果の本文に NUL が入ると、失敗したクエリの params を含むエラー文が `lastError` に渡るため、`tick()` がその場で打ち切られ、そのジョブは終端に落ちないまま、リースが切れるたびに再び claim されて同じ所で落ちていた。NUL を目に見える `\u0000` に置き換えて書くようにした（[PR #1060](https://github.com/takecchi/mnemora/pull/1060)）。
+  ⚠ doc が約束していた振る舞い（`tick()` は失敗を `failed` に数え、ジョブを終端に落とす）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`VectorStore.search` / `searchMany` と `LexicalStore.search`（`@mnemora/postgres` の vector・語彙・trigram の3実装と、`@mnemora/testkit/fixtures` の `InMemoryVectorStore` / `InMemoryLexicalStore`）は、テナントを `filter.tenantId` だけで絞り、`ctx.tenantId` を見ていなかった**——`ctx` と `filter.tenantId` に違うテナントを渡すと、`filter` 側のテナントの memoryId とスコアが返った（本文は返らない。runtime は常に同じ値を渡すので、runtime 経由では起きない）。隔離の境界は `ctx.tenantId` なので（ADR 0007）、両方で絞るようにした。食い違えば空を返し、例外は投げない。公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に、そのための任意の `ctxTenantId?` を足した（[Issue #1050](https://github.com/takecchi/mnemora/issues/1050)、PR #1056）。
 - **`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` は、返すベクトルの成分が有限かを確かめず、NaN / Infinity をそのまま返していた**（Issue #992）——pgvector への書き込みで初めて失敗していた。次元の検査と同じ位置で、有限でない成分があれば何番目かを名指しして例外にする。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture ではないが、不正な入力に新しく例外を投げる同じ形の件。上の前書きの基準の文言には当たらないため、扱いをクローン miku に確認している）。

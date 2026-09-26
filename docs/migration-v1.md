@@ -1001,9 +1001,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ## 🔴 破壊的変更（v1.0.1 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`b3cc4ee`**（PR #1057）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`ef0ae63`**（PR #1060）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
 
-**型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。`git diff 951ad44..b3cc4ee -- scripts/__snapshots__/public-api/` も追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。
+**型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。`git diff 951ad44..ef0ae63 -- scripts/__snapshots__/public-api/` も追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。
 
 **実行時**: 次の2種類に分けた。
 
@@ -1016,6 +1016,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - `runMigrations`/`registerEmbeddingSpace` が、DB 側の接続断でプロセスごと落ちなくなった（Issue #859）。
   - `recall()` が、空ベクトル・次元違いのベクトルで reject しなくなった（Issue #862・#915）。
   - `closePostgresClient` の2回目以降の呼び出しが reject しなくなった（Issue #935）。
+  - `PostgresOutboxStore.fail` が、`error` に NUL を含むときに例外を投げず、終端の失敗を書くようになった（PR #1060）。
 
   理由: どれも doc が約束していた振る舞い（「例外はこのメソッドの外へは投げない」「2回目の close は何もしない」など）へ実装を合わせた修正であり、約束の範囲内の利用者は壊れない。約束に反して例外を catch することに頼っていたコードは、例外が来なくなるぶん挙動が変わる——[CHANGELOG.md](../CHANGELOG.md) の各項目に、その注意を1行ずつ添えた。
 
