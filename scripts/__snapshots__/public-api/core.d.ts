@@ -912,6 +912,13 @@ export interface VectorStore {
         limit: number;
         filter: VectorFilter;
     }): Promise<VectorHit[]>;
+    searchMany?(ctx: Ctx, space: EmbeddingSpaceId, queries: {
+        key: string;
+        vector: number[];
+    }[], opts: {
+        limit: number;
+        filter: VectorFilter;
+    }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }
@@ -2087,6 +2094,7 @@ export interface RecalledMemory {
     recordedAt?: Date;
     occurredAt?: Date | null;
     attributes?: Attributes;
+    basisLost?: true;
 }
 export declare const RecalledMemorySchema: z.ZodObject<{
     memoryId: z.ZodString;
@@ -2122,6 +2130,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
     recordedAt: z.ZodOptional<z.ZodDate>;
     occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    basisLost: z.ZodOptional<z.ZodLiteral<true>>;
 }, z.core.$strip>;
 export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
 export interface StageTrace {
@@ -2327,6 +2336,7 @@ export declare const RecallResultSchema: z.ZodObject<{
         recordedAt: z.ZodOptional<z.ZodDate>;
         occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
         attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        basisLost: z.ZodOptional<z.ZodLiteral<true>>;
     }, z.core.$strip>>;
     omitted: z.ZodArray<z.ZodDiscriminatedUnion<[
         z.ZodObject<{

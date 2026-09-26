@@ -35,6 +35,14 @@ import {
  *   本ファイルの歯2 はこの増加を歯には**しない**——`limit` を増やしても
  *   `anchorCount`（既定3）自体は増えないことを利用して、逆に
  *   「アンカー数由来の往復は一定である」ことの土台として使う。
+ *
+ * **⭐ 歯5（新設）は上の「固定しないもの」を覆す。** `VectorStore.searchMany?`
+ * （任意メソッド、Issue #377／ADR 0151 追記）を `PostgresVectorStore` に実装し、
+ * `recall-runtime.ts` の段3.5がそれを使えるときは全アンカーを1回の往復に束ねる
+ * ようにした後は、`anchorCount` を増やしても往復数は増えない——アンカーごとの
+ * ループが1回の往復に畳まれるため、`anchorCount` に依存しない定数になる
+ * （実測値は PR 本文に控えてある。`main` が動くと変わりうる数なのでここには
+ * 焼き込まない）。**この歯は実装前は赤くなる**——実装前の赤い出力も PR 本文に控えてある。
  * - HNSW の近似性そのもの（[Issue #361](https://github.com/takecchi/mnemora/issues/361)）
  *   ——往復数の歯は文の**数**だけを見るので原理的に影響されないはずだが、
  *   `returned` の件数（「意味のある比較か」の検算に使う）が近似索引の揺れで
@@ -358,5 +366,130 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     // 固定するのはこれだけ: usedMemoryIds の件数（1→5→20）が変わっても往復数は増えない。
     expect(roundtripsN5).toBe(roundtripsN1);
     expect(roundtripsN20).toBe(roundtripsN1);
+  });
+
+  it("歯4（Issue #883・ADR 0342）: RecalledMemory.basisLost の解決は、inferred が無ければ+0往復、在れば basis の件数に関わらず+1往復のまま増えない", async () => {
+    const ctx: Ctx = { tenantId: `tenant-rtc-basislost-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+
+    // `memories_check`（0001_init.sql 68行）: inferred は source_observation_id が
+    // 必須（observations への FK）。まず本物の Observation を1件作る。
+    async function createInferredMemory(
+      vector: number[],
+      digest: string,
+      basisMemoryIds: string[],
+    ) {
+      const observation = await memoryStore.createObservation(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: null,
+        kind: "utterance",
+        payload: { text: "fixture" },
+        occurredAt: null,
+      });
+      return createEmbeddedMemory(memoryStore, vectorStore, ctx, vector, {
+        digest,
+        sourceObservationId: observation.id,
+        provenance: {
+          kind: "inferred",
+          model: "test-model",
+          promptVersion: "v1",
+          basis: { memoryIds: basisMemoryIds, observationIds: [] },
+          confidence: 0.9,
+        },
+      });
+    }
+
+    // 基準: inferred を含まない recall（連想枠 off——`association: null`——で、
+    // 段3の同伴取得も `scope.attributes` も踏まないようにする。歯1・歯2 と同じ
+    // 「候補フェッチ以外の getMany 経路を混ぜない」配置）。
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], { digest: "plain-1" });
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.01, 0], {
+      digest: "plain-2",
+    });
+    const baselineRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 1件の inferred、basis 1件。
+    const basis = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: "basis" }),
+    );
+    await createInferredMemory([0.98, 0.02, 0], "inferred-with-1-basis", [basis.id]);
+    const oneBasisRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(oneBasisRoundtrips).toBe(baselineRoundtrips + 1);
+
+    // さらに4件の inferred（合計5件）、それぞれ basis 5件（新規24件 + 既存1件 = のべ29件、
+    // ユニークな basis memoryId は25件超）を追加する——basis の件数を増やしても
+    // 往復数が変わらないことを見るのが目的なので、絶対数そのものは固定しない。
+    for (let i = 0; i < 4; i += 1) {
+      const basisIds: string[] = [basis.id];
+      for (let j = 0; j < 5; j += 1) {
+        const b = await memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: `basis-${i}-${j}` }),
+        );
+        basisIds.push(b.id);
+      }
+      await createInferredMemory(
+        [0.97 - i * 0.001, 0.03 + i * 0.001, 0],
+        `inferred-${i}`,
+        basisIds,
+      );
+    }
+    const manyBasisRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 固定するのはこれだけ: inferred の件数・basis の件数が増えても、
+    // basisLost の解決に要る往復は常に+1のまま増えない。
+    expect(manyBasisRoundtrips).toBe(oneBasisRoundtrips);
+  });
+
+  it("歯5: 連想枠 on — anchorCount=1/3/10 で往復数が等しい（Issue #377、VectorStore.searchMany? を束ねた後）", async () => {
+    // `seedRoundtripCorpus` は ANCHOR + SECOND + THIRD + FILLER(47件) を持つ
+    // （ファイル冒頭の doc コメント参照）。全50件が段2の閾値(0.1)を超えるので、
+    // `limit=20` の `withinLimit` は常に20件——`anchorCount` を 1/3/10 のどれに
+    // しても、`withinLimit.slice(0, anchorCount)` は毎回「実在する」anchorCount件
+    // を返す（`anchorCount` が `withinLimit` の長さを超えて切り詰められる心配が無い）。
+    const ctx: Ctx = { tenantId: `tenant-rtc-anchorcount-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    await seedRoundtripCorpus(memoryStore, vectorStore, ctx);
+
+    const roundtripsByAnchorCount = new Map<number, number>();
+    const returnedByAnchorCount = new Map<number, number>();
+
+    for (const anchorCount of [1, 3, 10]) {
+      let result: Awaited<ReturnType<typeof runtime.recall>> | undefined;
+      const roundtrips = await countClientQueries(async () => {
+        result = await runtime.recall(ctx, {
+          vector: QUERY_VECTOR,
+          limit: 20,
+          channels: ["ann"],
+          association: { maxCount: 10, anchorCount },
+        });
+      });
+      roundtripsByAnchorCount.set(anchorCount, roundtrips);
+      returnedByAnchorCount.set(anchorCount, result!.memories.length);
+    }
+
+    // 無意味な等号にしない: anchorCount を変えると連想の探索対象は実際に変わって
+    // いる（返る件数そのものはこの corpus では変わらないことがあるので、
+    // ここでは「例外にならず、20件以上は必ず返る」ことだけを検算する——本題は
+    // 下の往復数比較である）。
+    expect(returnedByAnchorCount.get(1)!).toBeGreaterThanOrEqual(20);
+    expect(returnedByAnchorCount.get(3)!).toBeGreaterThanOrEqual(20);
+    expect(returnedByAnchorCount.get(10)!).toBeGreaterThanOrEqual(20);
+
+    // 固定するのはこれだけ: anchorCount（1→3→10）を変えても往復数は増えない
+    // ——`VectorStore.searchMany?` が全アンカーを1回の往復に束ねるため。
+    // 実装前はアンカー数に比例して線形に増え、この2つの expect は両方赤くなる
+    // （実測値・式は PR 本文に控えてある——`main` が動くと変わりうる数なので
+    // ここには焼き込まない、AGENTS.md「数を、道具と生成物に焼き込まない」）。
+    expect(roundtripsByAnchorCount.get(3)).toBe(roundtripsByAnchorCount.get(1));
+    expect(roundtripsByAnchorCount.get(10)).toBe(roundtripsByAnchorCount.get(1));
   });
 });

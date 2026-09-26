@@ -104,6 +104,7 @@ export interface ExampleRuntimeHandle {
    * `meta.note` に選んだ根拠が実際に届いているかを検査するために使う。
    */
   eventStore: PostgresEventStore;
+  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
@@ -148,54 +149,74 @@ export async function createExampleRuntime(
   clock?: Clock,
 ): Promise<ExampleRuntimeHandle> {
   const client = createPostgresClient(databaseUrl);
-  await runMigrations(client.pool);
+  // Issue #934: `client`（`Pool` を含む）を作った
+  // *後*、`ExampleRuntimeHandle`（`close()` を持つ）を返す*前*に、`await` を挟む
+  // 失敗しうる処理が何段もある（`runMigrations` / `registerEmbeddingSpace` /
+  // `PostgresTrigramLexicalStore.create`）だけでなく、`selectLexicalStoreMode` の
+  // ような**同期の検証**も混じる。呼び出し側（`cli.ts` 30箇所超）は
+  // `const handle = await createExampleRuntime(...); try { ... } finally { await
+  // handle.close(); }` という形で、**`await createExampleRuntime(...)` 自体は
+  // `try` の外にある**——ここで reject すると `handle` に一度も代入されないため、
+  // 呼び出し側は `close()` を呼びようがない。⟹ `Pool` を閉じる責務をここで
+  // 引き受け損ねると、その責務は誰にも渡らないまま `Pool` が開いたまま残る
+  // （`runtime-factory-close-on-throw.postgres.test.ts` が `pg_stat_activity` で実測）。
+  try {
+    await runMigrations(client.pool);
 
-  const {
-    llmProvider,
-    embeddingProvider,
-    mode,
-    llmMode,
-    embeddingMode,
-    usageMeter,
-    cassetteIgnored,
-  } = createProviders(env, providerOptions);
-  await registerEmbeddingSpace(client.pool, embeddingProvider.space);
+    const {
+      llmProvider,
+      embeddingProvider,
+      mode,
+      llmMode,
+      embeddingMode,
+      usageMeter,
+      cassetteIgnored,
+    } = createProviders(env, providerOptions);
+    await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
-  const lexicalStoreMode = selectLexicalStoreMode(env);
-  const lexicalStore: LexicalStore =
-    lexicalStoreMode === "trigram"
-      ? await PostgresTrigramLexicalStore.create(client.db)
-      : new PostgresLexicalStore(client.db);
+    const lexicalStoreMode = selectLexicalStoreMode(env);
+    const lexicalStore: LexicalStore =
+      lexicalStoreMode === "trigram"
+        ? await PostgresTrigramLexicalStore.create(client.db)
+        : new PostgresLexicalStore(client.db);
 
-  const memoryStore = new PostgresMemoryStore(client.db);
-  const tenantSettingsStore = new PostgresTenantSettingsStore(client.db);
-  const eventStore = new PostgresEventStore(client.db);
-  const runtime = createRuntime({
-    memoryStore,
-    outboxStore: new PostgresOutboxStore(client.db),
-    vectorStore: new PostgresVectorStore(client.db),
-    lexicalStore,
-    eventStore,
-    tenantSettingsStore,
-    llmProvider,
-    embeddingProvider,
-    hashContent: sha256Hex,
-    ...(clock !== undefined ? { clock } : {}),
-  });
+    const memoryStore = new PostgresMemoryStore(client.db);
+    const tenantSettingsStore = new PostgresTenantSettingsStore(client.db);
+    const eventStore = new PostgresEventStore(client.db);
+    const runtime = createRuntime({
+      memoryStore,
+      outboxStore: new PostgresOutboxStore(client.db),
+      vectorStore: new PostgresVectorStore(client.db),
+      lexicalStore,
+      eventStore,
+      tenantSettingsStore,
+      llmProvider,
+      embeddingProvider,
+      hashContent: sha256Hex,
+      ...(clock !== undefined ? { clock } : {}),
+    });
 
-  return {
-    runtime,
-    mode,
-    llmMode,
-    embeddingMode,
-    lexicalStoreMode,
-    cassetteIgnored,
-    ...(usageMeter !== undefined ? { usageMeter } : {}),
-    memoryStore,
-    tenantSettingsStore,
-    eventStore,
-    embeddingProvider,
-    pool: client.pool,
-    close: () => closePostgresClient(client),
-  };
+    return {
+      runtime,
+      mode,
+      llmMode,
+      embeddingMode,
+      lexicalStoreMode,
+      cassetteIgnored,
+      ...(usageMeter !== undefined ? { usageMeter } : {}),
+      memoryStore,
+      tenantSettingsStore,
+      eventStore,
+      embeddingProvider,
+      pool: client.pool,
+      close: () => closePostgresClient(client),
+    };
+  } catch (err) {
+    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない
+    // （`packages/postgres` の `migrate.ts`/`advisory-lock.ts` が ROLLBACK の
+    // 二次失敗を握り潰すのと同じ形）。`closePostgresClient` は `pool.end()` を
+    // 呼ぶだけで、失敗しても `client` 自体は破棄されるので握り潰してよい。
+    await closePostgresClient(client).catch(() => {});
+    throw err;
+  }
 }

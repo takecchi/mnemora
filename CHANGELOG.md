@@ -127,6 +127,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ——既存の `MemoryStore` 実装（第三者 adapter を含む）の挙動は1バイトも変えない。
   `PostgresMemoryStore.reinforceMany` は件数によらず定数2往復（[Issue #874](https://github.com/takecchi/mnemora/issues/874) /
   [ADR 0303](./docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節、PR #917）。
+- **`RecalledMemory` に任意欄 `basisLost?: true` を足した**——`provenanceKind === 'inferred'`
+  で、かつその根拠（`basis.memoryIds`）の少なくとも1件が失われている（存在しない・
+  `status === 'forgotten'`・`purgedAt` が非 `null`）ときだけ `true` を返す
+  （docs/memory-model.md §2 が約束していた「根拠を失った推論に印を付けて返す」の実装）。
+  `basis` の中身（`memoryIds`/`observationIds`）は返さない——それ以外はキー自体を出さない。
+  `MemoryStore` の interface は変えていない（既存の `getMany` だけを使う。recall 1回あたり
+  最大+1往復）（[Issue #883](https://github.com/takecchi/mnemora/issues/883) /
+  [ADR 0342](./docs/decisions/0342-recalled-memory-basis-lost.md)）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -163,9 +171,26 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600）に上限を設けた**
   （[Issue #878](https://github.com/takecchi/mnemora/issues/878)、
   [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) 追記節）。
+- **`VectorStore` に任意メソッド `searchMany?` を足した**——連想枠（段3.5）がアンカーごとに
+  `search()` を1回ずつ呼んでいた往復（`anchorCount` に比例して増えていた）を、実装した
+  adapter では1回の往復に束ねられるようにする。`PostgresVectorStore` に実装済み。
+  未実装の adapter では従来どおりアンカーごとの `search()` 呼び出しに戻り、結果（集合・
+  順序）は変わらない。**破壊的変更ではない**——公開 API の実 diff は `searchMany?` の
+  追加のみ（Refs [Issue #377](https://github.com/takecchi/mnemora/issues/377) /
+  [ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記）。
 
 ### Fixed
 
+- **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
+  へ落とした記憶を、段3.5（連想、既定 on、ADR 0337）が `RecallResult.memories` へ
+  `retrievedVia: "association"` として昇格させた場合でも、同じ記憶を `over_limit` の
+  `count` にそのまま数え続けていた**（PR #922 が段3の必須同伴取得経由について塞いだのと
+  同型の矛盾。段3.5 経由はそのとき意図的に対象外にしていた）。差し引く対象を「`overLimit`
+  に居て、かつ段3の必須同伴取得または段3.5の連想のどちらかで実際に `finalMemories` に
+  返った id」へ広げ、0件になった Omission は既存の作法どおり配列から取り除くようにした
+  （`memories` の中身・公開型はどちらも無変更）
+  （[Issue #925](https://github.com/takecchi/mnemora/issues/925)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記2 2026-09-26）。
 - **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
   検索結果（順位・スコア）は変えていない（[Issue #878](https://github.com/takecchi/mnemora/issues/878)）。
 - **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を
@@ -383,6 +408,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
   `MemoryStore.createMemory` の doc コメントに記録した
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
+- **`@mnemora/postgres` の `closePostgresClient` を冪等にした**——2回目以降の呼び出しは `Called end on pool more than once` で reject せず、何もせずに resolve する（[Issue #935](https://github.com/takecchi/mnemora/issues/935)）。
 
 ---
 

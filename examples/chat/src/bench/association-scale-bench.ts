@@ -283,6 +283,7 @@ interface InstrumentedHandle {
   spy: VectorStoreSpy;
   pool: PostgresClient["pool"];
   cachingEmbeddingProvider: CachingEmbeddingProvider;
+  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
@@ -297,47 +298,59 @@ async function createInstrumentedRuntime(
   cache: FileEmbeddingCache,
 ): Promise<InstrumentedHandle> {
   const client = createPostgresClient(databaseUrl);
-  await runMigrations(client.pool);
+  // `examples/chat/src/runtime-factory.ts` の `createExampleRuntime` と同じ穴・
+  // 同じ理由: `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に
+  // 失敗しうる処理が何段もある（`runMigrations`/embedding provider の種類検査/
+  // `registerEmbeddingSpace`）。呼び出し側は `close()` を `try`/`finally` で包むが、
+  // `await createInstrumentedRuntime(...)` 自体はその外にあるため、ここで reject
+  // すると handle を一度も受け取れず `close()` を呼びようがない。
+  try {
+    await runMigrations(client.pool);
 
-  const { embeddingProvider: realEmbedding, llmProvider } = createProviders(process.env, {});
-  if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
-    throw new Error(
-      "association-scale-bench: MNEMORA_EMBEDDING=local を指定すること" +
-        "（`local` / ruri-v3-30m の実 ONNX 推論だけを対象にするベンチである）。",
-    );
+    const { embeddingProvider: realEmbedding, llmProvider } = createProviders(process.env, {});
+    if (!(realEmbedding instanceof LocalEmbeddingProvider)) {
+      throw new Error(
+        "association-scale-bench: MNEMORA_EMBEDDING=local を指定すること" +
+          "（`local` / ruri-v3-30m の実 ONNX 推論だけを対象にするベンチである）。",
+      );
+    }
+    const cachingEmbeddingProvider = new CachingEmbeddingProvider(realEmbedding, cache);
+    await registerEmbeddingSpace(client.pool, cachingEmbeddingProvider.space);
+
+    const spy: VectorStoreSpy = {
+      calls: [],
+      reset() {
+        this.calls = [];
+      },
+    };
+    const vectorStore = wrapVectorStoreWithSpy(new PostgresVectorStore(client.db), spy);
+    const memoryStore = new PostgresMemoryStore(client.db);
+
+    const runtime = createRuntime({
+      memoryStore,
+      outboxStore: new PostgresOutboxStore(client.db),
+      vectorStore,
+      lexicalStore: new PostgresLexicalStore(client.db),
+      eventStore: new PostgresEventStore(client.db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
+      llmProvider,
+      embeddingProvider: cachingEmbeddingProvider,
+      hashContent: sha256Hex,
+    });
+
+    return {
+      runtime,
+      memoryStore,
+      spy,
+      pool: client.pool,
+      cachingEmbeddingProvider,
+      close: () => closePostgresClient(client),
+    };
+  } catch (err) {
+    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
+    await closePostgresClient(client).catch(() => {});
+    throw err;
   }
-  const cachingEmbeddingProvider = new CachingEmbeddingProvider(realEmbedding, cache);
-  await registerEmbeddingSpace(client.pool, cachingEmbeddingProvider.space);
-
-  const spy: VectorStoreSpy = {
-    calls: [],
-    reset() {
-      this.calls = [];
-    },
-  };
-  const vectorStore = wrapVectorStoreWithSpy(new PostgresVectorStore(client.db), spy);
-  const memoryStore = new PostgresMemoryStore(client.db);
-
-  const runtime = createRuntime({
-    memoryStore,
-    outboxStore: new PostgresOutboxStore(client.db),
-    vectorStore,
-    lexicalStore: new PostgresLexicalStore(client.db),
-    eventStore: new PostgresEventStore(client.db),
-    tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
-    llmProvider,
-    embeddingProvider: cachingEmbeddingProvider,
-    hashContent: sha256Hex,
-  });
-
-  return {
-    runtime,
-    memoryStore,
-    spy,
-    pool: client.pool,
-    cachingEmbeddingProvider,
-    close: () => closePostgresClient(client),
-  };
 }
 
 async function truncateAll(pool: PostgresClient["pool"]): Promise<void> {

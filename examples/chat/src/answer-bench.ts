@@ -206,6 +206,7 @@ export interface AnswerBenchRuntimeHandle {
   cassetteIgnored: boolean;
   /** `Providers.readSeedUsage` をそのまま通す（`providerOptions.seedCassette` を渡したときだけ存在する）。 */
   readSeedUsage?: () => SeedUsageSummary;
+  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
@@ -215,39 +216,51 @@ export async function createAnswerBenchRuntime(
   providerOptions: CreateProvidersOptions = {},
 ): Promise<AnswerBenchRuntimeHandle> {
   const client: PostgresClient = createPostgresClient(databaseUrl);
-  await runMigrations(client.pool);
+  // `runtime-factory.ts` の `createExampleRuntime` と同じ穴・同じ理由:
+  // `client`（`Pool`）を作った*後*、`close()` を持つ handle を返す*前*に失敗しうる
+  // `await` が何段もある（`runMigrations`/`registerEmbeddingSpace`）。呼び出し側は
+  // `const handle = await createAnswerBenchRuntime(...); try { ... } finally {
+  // await handle.close(); }` という形で、ここで reject すると `handle` に一度も
+  // 代入されないため `close()` を呼びようがない。
+  try {
+    await runMigrations(client.pool);
 
-  const created = createProviders(env, providerOptions);
-  const llmProvider = new CountingLLMProvider(created.llmProvider);
-  // ⭐ 同じ生の provider を、judge 専用の別インスタンスでもう一度包む(上記 docstring)。
-  const judgeLLMProvider = new CountingLLMProvider(created.llmProvider);
-  const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
-  await registerEmbeddingSpace(client.pool, embeddingProvider.space);
+    const created = createProviders(env, providerOptions);
+    const llmProvider = new CountingLLMProvider(created.llmProvider);
+    // ⭐ 同じ生の provider を、judge 専用の別インスタンスでもう一度包む(上記 docstring)。
+    const judgeLLMProvider = new CountingLLMProvider(created.llmProvider);
+    const embeddingProvider = new CountingEmbeddingProvider(created.embeddingProvider);
+    await registerEmbeddingSpace(client.pool, embeddingProvider.space);
 
-  const runtime = createRuntime({
-    memoryStore: new PostgresMemoryStore(client.db),
-    outboxStore: new PostgresOutboxStore(client.db),
-    vectorStore: new PostgresVectorStore(client.db),
-    lexicalStore: new PostgresLexicalStore(client.db),
-    eventStore: new PostgresEventStore(client.db),
-    tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
-    llmProvider,
-    embeddingProvider,
-    hashContent: sha256Hex,
-  });
+    const runtime = createRuntime({
+      memoryStore: new PostgresMemoryStore(client.db),
+      outboxStore: new PostgresOutboxStore(client.db),
+      vectorStore: new PostgresVectorStore(client.db),
+      lexicalStore: new PostgresLexicalStore(client.db),
+      eventStore: new PostgresEventStore(client.db),
+      tenantSettingsStore: new PostgresTenantSettingsStore(client.db),
+      llmProvider,
+      embeddingProvider,
+      hashContent: sha256Hex,
+    });
 
-  return {
-    runtime,
-    llmMode: created.llmMode,
-    embeddingMode: created.embeddingMode,
-    llmProvider,
-    embeddingProvider,
-    judgeLLMProvider,
-    cassetteIgnored: created.cassetteIgnored,
-    ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
-    ...(created.readSeedUsage !== undefined ? { readSeedUsage: created.readSeedUsage } : {}),
-    close: () => closePostgresClient(client),
-  };
+    return {
+      runtime,
+      llmMode: created.llmMode,
+      embeddingMode: created.embeddingMode,
+      llmProvider,
+      embeddingProvider,
+      judgeLLMProvider,
+      cassetteIgnored: created.cassetteIgnored,
+      ...(created.usageMeter !== undefined ? { usageMeter: created.usageMeter } : {}),
+      ...(created.readSeedUsage !== undefined ? { readSeedUsage: created.readSeedUsage } : {}),
+      close: () => closePostgresClient(client),
+    };
+  } catch (err) {
+    // 元の失敗（`err`）を、`close()` 自体の失敗で上書きしない（`runtime-factory.ts` と同じ形）。
+    await closePostgresClient(client).catch(() => {});
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------

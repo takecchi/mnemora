@@ -1354,45 +1354,80 @@ export async function runRecall(
         const seen = new Set<MemoryId>();
         const associationHits: { memoryId: MemoryId; anchorId: MemoryId; similarity: number }[] =
           [];
+        // **段0と同じ scope の filter で呼ぶ**（docs/recall.md §9.2 手順4）——アンカーの
+        // ベクトルを使うだけで、**tenant/subject/status/period/excludeProvenanceKinds に
+        // 加えて、忘却ゲート（`decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis`）と
+        // `validAt` ゲートまで含めた境界すべてを、段1のANN検索と同一にする**
+        // （Issue #347 / ADR 0172）。ゲートの3種は `gateVectorFilterFields` に1箇所で
+        // まとめてあり、段1と同じ断片をそのまま撒く——**列挙を散文で数え直さない**
+        // （数え直した結果、2つのゲートが抜けたまま「同一にする」と書いてあったのが
+        // Issue #347 である）。limit は over-fetch 済みの kPrime を流用する
+        // ——除外・閾値で落ちる分の余裕を持たせるためであり、新しい係数を定義しない。
+        //
+        // ⭐ Issue #377: この `filter` はどのアンカーに対しても**同一の値**である
+        // （`scope`/`validatedQuery` 由来で、`anchorId`/`anchor.vector` には依存しない）。
+        // ⟹ アンカーごとに変わるのはクエリベクトルだけなので、`VectorStore.searchMany?`
+        // （束ねた1回の往復）に過不足なく渡せる——1箇所にまとめて、下の両方の経路
+        // （束ねる/束ねない）で同じオブジェクトを使う。
+        const associationFilter: VectorFilter = {
+          tenantId: ctx.tenantId,
+          status: ["active", "contested"],
+          subjectId: scope.subjectId,
+          // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
+          // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
+          includeSubjectless: scope.includeSubjectless,
+          // Issue #152/#153（ADR 0312）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+          // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
+          // ——を繰り返さないための規律をそのまま適用する）。
+          attributes: scope.attributes,
+          // Issue #201 PR-B（ADR 0323）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
+          // （ADR 0172 の見落としを繰り返さないための同じ規律）。
+          labels: scope.labels,
+          excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
+          occurredAfter: scope.occurredAfter,
+          occurredBefore: scope.occurredBefore,
+          ...gateVectorFilterFields,
+        };
+        // adapter が返さなかった（存在しない/削除された等）アンカーは、束ねる/束ねない
+        // どちらの経路でも同じく検索対象から外す——`anchorVectorById` に無いものは
+        // 元から `vector` を持たない。
+        const anchorsWithVectors: { anchorId: MemoryId; vector: number[] }[] = [];
         for (const anchorId of anchorIds) {
           const anchor = anchorVectorById.get(anchorId);
-          if (!anchor) continue; // adapter が返さなかった（存在しない/削除された等）
-          // **段0と同じ scope の filter で呼ぶ**（docs/recall.md §9.2 手順4）——アンカーの
-          // ベクトルを使うだけで、**tenant/subject/status/period/excludeProvenanceKinds に
-          // 加えて、忘却ゲート（`decayFloorAtAfter`/`decayFloorSeqAfter`/`decayFloorAnyAxis`）と
-          // `validAt` ゲートまで含めた境界すべてを、段1のANN検索と同一にする**
-          // （Issue #347 / ADR 0172）。ゲートの3種は `gateVectorFilterFields` に1箇所で
-          // まとめてあり、段1と同じ断片をそのまま撒く——**列挙を散文で数え直さない**
-          // （数え直した結果、2つのゲートが抜けたまま「同一にする」と書いてあったのが
-          // Issue #347 である）。limit は over-fetch 済みの kPrime を流用する
-          // ——除外・閾値で落ちる分の余裕を持たせるためであり、新しい係数を定義しない。
-          const hits = await deps.vectorStore.search(
+          if (anchor) anchorsWithVectors.push({ anchorId, vector: anchor.vector });
+        }
+        const hitsByAnchorId = new Map<MemoryId, VectorHit[]>();
+        if (deps.vectorStore.searchMany !== undefined && anchorsWithVectors.length > 0) {
+          // Issue #377: アンカーごとに `search()` を呼ぶ代わりに、全アンカーを
+          // 1回の往復（`searchMany`）に束ねる。`.bind` で `this` を固定してから
+          // 切り出す（`getVectors`/`.bind` の理由と同じ、上のコメント参照）。
+          const searchMany = deps.vectorStore.searchMany.bind(deps.vectorStore);
+          const hitsByKey = await searchMany(
             ctx,
             deps.embeddingProvider.space,
-            anchor.vector,
-            {
-              limit: kPrime,
-              filter: {
-                tenantId: ctx.tenantId,
-                status: ["active", "contested"],
-                subjectId: scope.subjectId,
-                // Issue #608 項目③(b) / ADR 0286: 段1（ANN）と同じ opt-in を連想枠にも撒く
-                // （Issue #347 / ADR 0172 と同じ「両段を同じ境界にする」規律）。
-                includeSubjectless: scope.includeSubjectless,
-                // Issue #152/#153（ADR 0312）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
-                // （ADR 0172 の見落とし——段1のゲートを更新しても連想枠が自動追随しない
-                // ——を繰り返さないための規律をそのまま適用する）。
-                attributes: scope.attributes,
-                // Issue #201 PR-B（ADR 0323）: 段1（ANN）と同じ絞り込みを連想枠にも撒く
-                // （ADR 0172 の見落としを繰り返さないための同じ規律）。
-                labels: scope.labels,
-                excludeProvenanceKinds: validatedQuery.excludeProvenanceKinds,
-                occurredAfter: scope.occurredAfter,
-                occurredBefore: scope.occurredBefore,
-                ...gateVectorFilterFields,
-              },
-            },
+            anchorsWithVectors.map(({ anchorId, vector }) => ({ key: anchorId, vector })),
+            { limit: kPrime, filter: associationFilter },
           );
+          for (const { anchorId } of anchorsWithVectors) {
+            // 契約（`VectorStore.searchMany?` の doc コメント）: 渡した key は
+            // 必ず Map に現れる（0件でも）——`?? []` はその契約が破られた場合の
+            // 多層防御であり、通常は到達しない。
+            hitsByAnchorId.set(anchorId, hitsByKey.get(anchorId) ?? []);
+          }
+        } else {
+          // adapter が `searchMany` を実装していない——ADR 0151 決定4と同じ「無くても
+          // 成立する」経路（往復数はアンカー数に比例するが、結果は束ねた場合と同じ）。
+          for (const { anchorId, vector } of anchorsWithVectors) {
+            const hits = await deps.vectorStore.search(ctx, deps.embeddingProvider.space, vector, {
+              limit: kPrime,
+              filter: associationFilter,
+            });
+            hitsByAnchorId.set(anchorId, hits);
+          }
+        }
+        for (const anchorId of anchorIds) {
+          const hits = hitsByAnchorId.get(anchorId);
+          if (!hits) continue; // adapter が返さなかった（存在しない/削除された等）
           for (const hit of hits) {
             if (excludeIds.has(hit.memoryId) || seen.has(hit.memoryId)) continue;
             const similarity = 1 - hit.distance;
@@ -1697,6 +1732,49 @@ export async function runRecall(
     keptUnits.flatMap((unit) => unit.members.map((member) => member.memory.id)),
   );
 
+  // -------------------------------------------------------------------
+  // Issue #883（ADR 0342）: `basisLost` の解決。budget 切り詰め後（`keptUnits`）に
+  // 実際に返る記憶のうち `provenanceKind === "inferred"` なものだけを見て、
+  // `basis.memoryIds` を重複除去して集め、`MemoryStore.getMany` を**1回だけ**呼ぶ
+  // （集めた id が0件なら呼ばない——決定4）。書き込み時の事前計算はしない。
+  //
+  // 「失われている」の定義（3つのうち1つでも当たれば失われている。`RecalledMemory.basisLost`
+  // の doc コメントと同じ規律）: getMany の結果に無い（存在しない/他テナント/形式不正、
+  // getMany の doc コメントの契約そのまま）／`status === "forgotten"`／`purgedAt` が
+  // 非 `null`。`archived`/`superseded`/`contested` は本文が残り復帰経路があるので
+  // 失われていない扱い（docs/memory-model.md §11 行7・14・15）。
+  //
+  // `basis.observationIds` は確かめない——Observation は追記専用で forget/purge の経路が
+  // 無く、一括取得口も無い（ADR 0342「引き受けた負債」）。
+  // -------------------------------------------------------------------
+  const inferredBasisMemoryIds = new Set<MemoryId>();
+  for (const unit of keptUnits) {
+    for (const member of unit.members) {
+      if (member.memory.provenance.kind === "inferred") {
+        for (const basisMemoryId of member.memory.provenance.basis.memoryIds) {
+          inferredBasisMemoryIds.add(basisMemoryId);
+        }
+      }
+    }
+  }
+  const lostBasisMemoryIds = new Set<MemoryId>();
+  if (inferredBasisMemoryIds.size > 0) {
+    const basisMemories = await deps.memoryStore.getMany(ctx, [...inferredBasisMemoryIds]);
+    const basisMemoriesById = new Map(basisMemories.map((m) => [m.id, m]));
+    for (const basisMemoryId of inferredBasisMemoryIds) {
+      const basisMemory = basisMemoriesById.get(basisMemoryId);
+      // getMany は存在しない/クロステナントの id を静かに落とす契約（`getMany` の doc
+      // コメント参照）——見つからないこと自体が「失われている」の1つ目の当たり方。
+      if (
+        !basisMemory ||
+        basisMemory.status === "forgotten" ||
+        (basisMemory.purgedAt ?? null) !== null
+      ) {
+        lostBasisMemoryIds.add(basisMemoryId);
+      }
+    }
+  }
+
   const finalMemories: RecalledMemory[] = keptUnits.flatMap((unit) =>
     unit.members.map((member) => {
       const recalled: RecalledMemory = {
@@ -1749,6 +1827,15 @@ export async function runRecall(
         keptMemoryIds.has(member.memory.contestedWithId)
       ) {
         recalled.contestedWith = member.memory.contestedWithId;
+      }
+      // Issue #883（ADR 0342）: inferred で、かつ basis.memoryIds の少なくとも1件が
+      // 上で確定した lostBasisMemoryIds に当たるときだけ付ける。それ以外はキー自体を
+      // 出さない（`companionOf`/`associationOf`/`contestedWith` と同じ `?: true` の作法）。
+      if (
+        member.memory.provenance.kind === "inferred" &&
+        member.memory.provenance.basis.memoryIds.some((id) => lostBasisMemoryIds.has(id))
+      ) {
+        recalled.basisLost = true;
       }
       return recalled;
     }),
@@ -1805,32 +1892,41 @@ export async function runRecall(
     }
   }
 
-  // Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）:
+  // Issue #823（ADR 0203「これが覆るとしたら」3番が観測条件として挙げていた経路の是正）、
+  // Issue #925（同じ ADR「引き受けた負債」2番が名指ししていた、段3.5 経由の同型の経路の是正）:
   // 段2で `passed.slice(limit)` により `over_limit(stage:"rescore")` へ回された候補
   // （上の `overLimit`、まだこの時点で生きている `ScoredCandidate[]`）が、段3の必須の
-  // 同伴取得（上の `companions`）を経由して `finalMemories` に昇格することがある——
-  // below_threshold と同型の矛盾（「返したのに落ちたと名乗る」）。
+  // 同伴取得（上の `companions`）または段3.5（連想、既定 on、ADR 0337）のどちらかを
+  // 経由して `finalMemories` に昇格することがある——below_threshold と同型の矛盾
+  // （「返したのに落ちたと名乗る」）。
   //
-  // ⚠ 対象は**段3の必須同伴取得で拾われた id**に絞る——`companions`（`retrievedVia:
-  // "mandatory_companion"` を付けて構築した配列、上）に居るかどうかで判定する。
-  // **段3.5（連想、既定 on、ADR 0337）が同じ `overLimit` の候補を独立に拾い直して
-  // `finalMemories` へ昇格させる経路は、この PR では塞いでいない**——これは ADR 0203
-  // 「引き受けた負債」2番がまさに名指ししていた経路（below_threshold 以外の kind で
-  // 段3.5 が同種の昇格を起こす）であり、そちらは未解消のまま残っている
-  // （`over_limit(stage:"association")` を含め、Issue #925 として別途起票）。ここで
-  // `companions` 限定にしているのはそのため——`retrievedVia` を見ずに `finalMemories`
-  // 全体との突き合わせだけで判定すると、連想経由の昇格まで `stage:"rescore"` の count
-  // から誤って差し引いてしまう（実際に `omission-kind-generation.test.ts` の既存の歯を
-  // 壊す回帰として実測した）。
+  // ⚠ 対象は**「`overLimit` に居て、かつ (a) 段3の必須同伴取得（`companions`）に居るか
+  // (b) `finalMemories` に `retrievedVia: "association"` で実際に返った」id**に絞る。
+  // (a) は `companions`（`retrievedVia: "mandatory_companion"` を付けて構築した配列、
+  // 上）に居るかどうかで判定し、(b) は `finalMemories` を `retrievedVia` で絞って判定
+  // する——`retrievedVia` を見ずに `finalMemories` 全体との突き合わせだけで判定すると、
+  // 何も昇格していない候補まで拾ってしまう（下のコメント参照）。
   //
-  // ⚠ 差し引く数は「段3で返した同伴の総数」でもない。**`overLimit` に居て、かつ
-  // 段3の同伴取得で実際に `finalMemories` に返った id の数**だけを数える——companion が
-  // 最初から withinLimit に居た場合や、below_threshold から昇格した場合まで数えると、
-  // 無関係な over_limit の count を誤って減らすことになる（上の below_threshold の
-  // 取り下げは、この2つ目の経路を既に別ブロックで正しく扱っている）。
+  // **`over_limit(stage:"association")` 等、他の kind にはこの取り下げを広げない**——
+  // 段3.5 自身が独自に積む `over_limit(stage:"association")` は、まだ id 付きで内部状態を
+  // 追跡できるかを調べていない（Issue #925「確かめていないこと」）。
+  //
+  // ⚠ 差し引く数は「段3で返した同伴の総数」でも「連想で返った総数」でもない。
+  // **`overLimit` に居て、かつ実際に (a)(b) いずれかの経路で `finalMemories` に返った
+  // id の数**だけを数える——companion/連想候補が最初から withinLimit に居た場合や、
+  // below_threshold から昇格した場合、あるいは `overLimit` に一度も居なかった連想候補
+  // （below_threshold から連想で拾われた場合など）まで数えると、無関係な over_limit の
+  // count を誤って減らすことになる（上の below_threshold の取り下げは、その経路を
+  // 既に別ブロックで正しく扱っている。過剰実装を捕まえる歯は
+  // `recall-over-limit-association-promotion.test.ts` の(c)）。
   const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
+  const associationReturnedIds = new Set(
+    finalMemories.filter((m) => m.retrievedVia === "association").map((m) => m.memoryId),
+  );
   const promotedFromOverLimit = overLimit.filter(
-    (c) => mandatoryCompanionIds.has(c.memory.id) && returnedMemoryIds.has(c.memory.id),
+    (c) =>
+      returnedMemoryIds.has(c.memory.id) &&
+      (mandatoryCompanionIds.has(c.memory.id) || associationReturnedIds.has(c.memory.id)),
   );
   if (promotedFromOverLimit.length > 0) {
     const overLimitRescoreIndex = omitted.findIndex(
