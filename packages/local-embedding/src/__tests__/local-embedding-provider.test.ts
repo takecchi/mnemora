@@ -607,6 +607,60 @@ describe("次元の検査", () => {
   });
 });
 
+describe("成分の検査（Issue #992）", () => {
+  /**
+   * 適合テスト（`describeEmbeddingProviderConformance`）は「ベクトルの各成分は有限の数である」を
+   * provider の要件にしている。次元の検査と同じ位置で、注入された pipeline の出力を信じずに
+   * 確かめる——NaN / Infinity は provider を素通りすると、pgvector への書き込み
+   * （`NaN not allowed in vector` / `infinite value not allowed in vector`）で初めて失敗し、
+   * 原因から離れた SQL の失敗として現れる。
+   */
+  function providerReturning(vector: number[]) {
+    return new LocalEmbeddingProvider({
+      dimensions: vector.length,
+      createPipeline: async () =>
+        fakeLocalEmbeddingPipeline(async (texts) => texts.map(() => [...vector])),
+    });
+  }
+
+  it("NaN を含むベクトルは例外になる", async () => {
+    await expect(providerReturning([Number.NaN, 1]).embed(ctx, ["テキスト"])).rejects.toThrow(
+      /LocalEmbeddingProvider/,
+    );
+  });
+
+  it("Infinity / -Infinity を含むベクトルも例外になる", async () => {
+    await expect(
+      providerReturning([1, Number.POSITIVE_INFINITY]).embed(ctx, ["テキスト"]),
+    ).rejects.toThrow(/LocalEmbeddingProvider/);
+    await expect(
+      providerReturning([Number.NEGATIVE_INFINITY, 1]).embed(ctx, ["テキスト"]),
+    ).rejects.toThrow(/LocalEmbeddingProvider/);
+  });
+
+  it("例外のメッセージは何番目のベクトルの何番目の成分かを名指しする", async () => {
+    const provider = new LocalEmbeddingProvider({
+      dimensions: 2,
+      createPipeline: async () =>
+        fakeLocalEmbeddingPipeline(async () => [
+          [0.5, 0.5],
+          [0.5, Number.NaN],
+        ]),
+    });
+
+    await expect(provider.embed(ctx, ["あ", "い"])).rejects.toThrow(/1 番目.*1 番目の成分.*NaN/s);
+  });
+
+  it("例外の型は次元の検査と同じ素の Error で、kind を持たない", async () => {
+    const error = await providerReturning([Number.NaN, 1])
+      .embed(ctx, ["テキスト"])
+      .catch((err: unknown) => err);
+
+    expect(error).toBeInstanceOf(Error);
+    expect(isLocalEmbeddingProviderError(error)).toBe(false);
+  });
+});
+
 describe("件数の検査", () => {
   it("返ったベクトルの件数が入力件数と違えば例外になる", async () => {
     const recorder = createRecordingPipeline({ countDelta: -1 });
