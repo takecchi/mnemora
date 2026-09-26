@@ -112,3 +112,50 @@
 
   **⟹ 2026-09、オーナーが決定。[ADR 0026](./0026-ann-unreached-omission.md) を見よ**
   （`Omission { kind: 'ann_unreached', countKind: 'unknown' }` として出す。本 ADR のこの節から下は当時の記録のまま書き換えていない）。
+
+---
+
+## 追記（2026-09-27）: Issue #1005（scale-bench の seedVectors が全行に同じベクトルを入れていた不具合）を踏まえた当て直し
+
+本 ADR が実測に使った `packages/postgres/src/bench/scale-bench.ts` の `seedVectors` は、
+`ARRAY(SELECT random() ...)` の副問い合わせが外側の行を参照しておらず、PostgreSQL がこれを
+InitPlan として1回だけ評価して**全行に同じベクトルを入れていた**（Issue #1005、PR #1008 で
+修正、main `76db71c`）。⟹ 本 ADR の実測（`result.memories.length: 0`、`hits: 0`）は、
+全行同一ベクトルの表に対するものだった。
+
+**この不具合が実測結果そのものを作っていたのかを、クリーンな対照実験で切り分けた。** 実測に
+使われたコミット（`gh run view 34011906560 --json headSha` で特定した `f8d4d79`、2026-09-06。
+`seedVectors` はバグ入りのまま）を `git worktree` でチェックアウトし、(a) 無改造のまま実行、
+(b) `WHERE m.id IS NOT NULL` の1行相関を足すだけ（PR #1008 と同じ修正）を当てて実行、の2通り
+を同じ規模（100,000行、狙い subject 10,000行、次元256）で比較した。
+
+| 条件 | `hits`（subjectId指定・`kPrime=40`） | `result.memories.length` | `result.omitted` |
+|---|---:|---:|---|
+| `f8d4d79`（無改造＝当時のまま） | **0** | **0** | 5件（`filtered:archived=1170`・`filtered:status=2542`・`not_indexed:pending=904`・`failed=913`・`skipped=930`——いずれも本文の実測値と完全一致） |
+| `f8d4d79` + `seedVectors` の修正のみ | **1** | 0（`scoreThreshold=0`の変種では1） | 6件（内訳の性質は変わらず） |
+
+無改造の行が本文の実測値と件数まで一致し、**再現を確認した。** その上で、**バグを直しただけでは
+`hits` は 0→1 とわずかに増えるに留まり、`kPrime`（40）には遠く及ばない。** ⟹ **本 ADR の
+核心的な実測結果（「大きい subject で `recall()` を呼ぶと ANN がほぼ何も返さない」）は、
+`seedVectors` のバグが作っていたものではない——バグを直しても再現する。**
+
+今日の main（`76db71c`）で同じ条件を測ると `hits: 40`（満window）になる。この差の出どころを、
+`e12b49b`「段1の `search()` に `hnsw.iterative_scan = relaxed_order` を採用し、他テナントの
+near-duplicate による全滅を塞ぐ（ADR 0284）」（2026-09-24）の親コミットと `e12b49b` 自身の
+双方に `seedVectors` の修正のみを当てて実測し、特定した：
+
+| コミット | ADR 0284 | `hits`（subjectId指定・`kPrime=40`） |
+|---|---|---:|
+| `e12b49b` の親（ADR 0284 適用前） | 適用前 | **2** |
+| `e12b49b`（ADR 0284 適用） | 適用後 | **40** |
+
+**同じ `seedVectors` 修正の下で、`e12b49b` を境に `hits` が切り替わることを実測で確認した。**
+本 ADR が実測した事象（over-filter で ANN が窓を埋められない）は、まさに ADR 0284 が
+主題として直したものであり、**#1005 とは無関係な、正しい改善**として今日の状況を変えている。
+
+⟹ 本 ADR の読みは変わらない（本 ADR の実測は同一ベクトルの不具合の産物ではなく、有効な
+観測だった）。ただし今日の main の挙動は本 ADR 執筆時から大きく変わっている——その理由は
+ADR 0284 であり、#1005 ではない。
+
+環境: 手元 PostgreSQL 17.11 / pgvector 0.8.0。元の測定は GitHub Actions CI
+「PostgreSQL 17 + pgvector」（正確な pgvector の patch バージョンは当時の ADR 本文に記載が無い）。
