@@ -1018,6 +1018,84 @@ describe("runtime.tick — consolidate ジョブは種の subjectId に近傍探
       expect.arrayContaining([seed.id, neighbor.id]),
     );
   });
+
+  /**
+   * Issue #849 / ADR 0157 決定2 追記: `consolidate()` は LLM 呼び出しが失敗しても例外を
+   * 投げず、`outcome: "llm_failed"`（`llmFailure` 付き）を正常な戻り値として返す
+   * （ADR 0089 の公開の約束、`notUsedLlm`/`throwingLlm` の直接呼び出しの歯 —
+   * 「runtime.consolidate — LLM 障害」describe参照）。だが `processConsolidateJob`
+   * （`tick()` 経由）は戻り値を見ずに `await consolidate(...)` するだけだったため、
+   * LLM が本当に落ちても `tick()` はそのジョブを complete() し `processed` を増やしていた
+   * ——ADR 0157 決定2「LLM/store が本当に失敗したときの例外だけが伝播して `tick()` に
+   * `fail()` させる」という前提が実際には成り立っていなかった。
+   *
+   * ⚠ `runtime.tick — consolidate/reflect ジョブを処理する`（`runtime.test.ts` 1296〜1341行）の
+   * 「payload が正しければ processed」の歯とは違う——あちらは `nothing_to_consolidate`
+   * （近傍が無く LLM を呼ばずに決まる正規の結末）を測っており、ここは**LLM を実際に呼んで
+   * 実際に落ちた**ケースを測る。そのため、eligible が2件（種＋同一 subject の高affinity近傍）
+   * になるようにし、LLM 呼び出しの直前まで到達させる。
+   *
+   * `buildRuntimeWithRealClock`/`enqueueConsolidateJob` はこの describe 冒頭で定義した
+   * ものをそのまま使う——`tick()` を経由する必要がある点は上のテスト群と同じ。
+   */
+  describe("LLM が実際に失敗すると、tick は failed に数える（Issue #849 / ADR 0157 決定2 追記）", () => {
+    function throwingLlmWithCallCount(message = "simulated LLM outage") {
+      const state = { calls: 0 };
+      const provider: LLMProvider = {
+        complete: async () => {
+          throw new Error("not used");
+        },
+        completeStructured: async () => {
+          state.calls += 1;
+          throw new Error(message);
+        },
+      };
+      return { provider, state };
+    }
+
+    it("LLM が例外を投げると、tick は processed:0/failed:1 を返し、outbox 行は終端の失敗のまま残り、種は active のまま", async () => {
+      const { provider, state } = throwingLlmWithCallCount("simulated LLM outage");
+      const { runtime, stores } = buildRuntimeWithRealClock(provider);
+
+      const seed = await enqueueConsolidateJob(stores, {
+        content: "seed content",
+        digest: "seed",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      });
+      await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+      // 種と同じ subject の近傍——similarity 1.0（[4,0] と同じ向き）。eligible が2件になり、
+      // LLM を実際に呼ぶ段まで到達する（1件だけだと nothing_to_consolidate で LLM を呼ばず終わる）。
+      const neighbor = await stores.memoryStore.createMemory(
+        ctx,
+        newMemory({
+          content: "same-subject neighbor",
+          digest: "n-same",
+          subjectId: "subject-a",
+          embeddingStatus: "ready",
+        }),
+      );
+      await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, neighbor.id, [8, 0]);
+
+      const tickResult = await runtime.tick(ctx, { kinds: ["consolidate"], leaseMs: 60_000 });
+
+      expect(tickResult).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
+      // LLM が実際に呼ばれたこと自体を固定する——nothing_to_consolidate に化けて LLM を
+      // 呼ばないまま緑になる退行を防ぐ（この歯自身が測りたい経路に実際に乗ったことの証跡）。
+      expect(state.calls).toBe(1);
+
+      // 種は active のまま——ADR 0089「1件も書いていない」どおり、LLM 失敗を根拠に
+      // 既存の記憶へは一切書き込まれていない。
+      const seedAfter = await stores.memoryStore.get(ctx, seed.id);
+      expect(seedAfter?.status).toBe("active");
+
+      const row = stores.outboxStore.listJobs(ctx).find((job) => job.payload.memoryId === seed.id)!;
+      expect(row.failedAt).not.toBeNull();
+      expect(row.completedAt).toBeNull();
+      expect(row.lastError).toContain("simulated LLM outage");
+    });
+  });
 });
 
 describe("computeAffinity（純関数、strategies/consolidate.ts）", () => {
