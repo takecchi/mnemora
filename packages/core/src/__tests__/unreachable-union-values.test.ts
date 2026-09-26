@@ -47,6 +47,17 @@ import { describe, expect, it } from "vitest";
  * 棚卸しの対象から外した——`RecallQuery.labels`/`taxonomyGroups` の実装により、
  * どちらも実際に生成されるようになったため（`kind: "purged"` を外したときと同じ、
  * 「実装漏れではなく実装完了を検知した」ケース）。
+ *
+ * **2026-09-26 追記**: `kind: "events_purged"`（`MemoryEventKind`、分類2）を棚卸しの対象から外した。
+ * この値は `PostgresMemoryStore.purgeExpiredEvents`（Issue #210、
+ * [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）が生の SQL の文字列
+ * `'events_purged'` として積んでおり、既に生成されている。この歯は `kind: "events_purged"` という
+ * オブジェクトリテラルしか探さないので、それを見つけられず、事実と違う「生成されない」を
+ * 緑のまま固定していた。検出の仕組みは変えていない（SQL の中の生成は、上の「静的な文字列一致」の
+ * 限界の外に在る）。判断はクローン miku のもの（オーナー本人の決定ではない）。
+ * 同じ日に、残る `condition: "tenant"` が本当に生成されていないこと（SQL を含め）を確かめた。
+ * ⚠ この歯が赤くなるのは「一覧に載せた値が生成されたとき」だけである。union に到達できない値が
+ * 新しく足されても、一覧に載せない限りこの歯は赤くならない（同日に実測した）。
  */
 
 const PACKAGES_ROOT = join(__dirname, "../../../");
@@ -74,12 +85,6 @@ const UNREACHABLE_VALUES: {
     value: "tenant",
     declaredAt: "packages/core/src/recall.ts (FilteredOmission)",
     classification: "1: 意図的に発火しない",
-  },
-  {
-    field: "kind",
-    value: "events_purged",
-    declaredAt: "packages/core/src/event.ts (MemoryEventKind)",
-    classification: "2: 後続 Phase 待ち",
   },
 ];
 
