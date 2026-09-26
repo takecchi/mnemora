@@ -44,6 +44,7 @@ import type {
   RecallResult,
   RecallScope,
   RecalledMemory,
+  ScoreNotComparableOmission,
   ScoreBreakdown,
   StageTrace,
   UnitAssemblyDroppedOmission,
@@ -2111,6 +2112,32 @@ export async function runRecall(
         // 全件昇格した。0件の omission を残さない——他の kind が count === 0 では
         // 積まない作法（`filtered`/`over_limit` 等の各 push 直前の `if` 参照）に揃える。
         omitted.splice(belowThresholdIndex, 1);
+      }
+    }
+  }
+
+  // 段2で `score_not_comparable` に数えた候補（`notComparable`、total が NaN——ゼロベクトルの
+  // 埋め込みなど、ADR 0040/0044）も、段3の必須同伴取得・段3.5 の連想で候補集合に戻りうる。
+  // below_threshold と同じ判定（返ったか、`companions`/`associationUnits` に居るか）で
+  // 取り下げ、ADR 0203「決めたこと」1（`omitted` は返さなかった記憶の集合）と追記3〜6 の
+  // 「最後にその候補を落とした段で1回だけ数える」を守る——戻った先で予算に落ちれば
+  // `budget_dropped` 側に1回だけ残る。`notComparable` は段2の内部状態として memoryId を
+  // 持つので、公開型を広げずに突き合わせられる。
+  const promotedFromNotComparable = notComparable.filter(
+    (c) =>
+      returnedMemoryIds.has(c.memory.id) ||
+      mandatoryCompanionIds.has(c.memory.id) ||
+      associationUnitIds.has(c.memory.id),
+  );
+  if (promotedFromNotComparable.length > 0) {
+    const notComparableIndex = omitted.findIndex((o) => o.kind === "score_not_comparable");
+    if (notComparableIndex !== -1) {
+      const existing = omitted[notComparableIndex] as ScoreNotComparableOmission;
+      const remainingCount = existing.count - promotedFromNotComparable.length;
+      if (remainingCount > 0) {
+        omitted[notComparableIndex] = { ...existing, count: remainingCount };
+      } else {
+        omitted.splice(notComparableIndex, 1);
       }
     }
   }
