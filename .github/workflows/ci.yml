@@ -91,6 +91,22 @@ jobs:
         continue-on-error: true
         run: node scripts/north-star-default-probe.mjs >> "$GITHUB_STEP_SUMMARY"
 
+      - name: "公開 API の破壊的変更候補を印字する（⛔ 門ではない。常に exit 0。Issue #818 / #811 / #813 / #815）"
+        # scripts/public-api-breaking-diff.mjs 冒頭のコメントの実装。上の北極星ステップと
+        # 同じ理由でこの既存ジョブへ相乗りする——このジョブ名
+        # （`typecheck / lint / test / build`）は branch protection の
+        # required_status_checks に登録された文字列そのものであり、ジョブを分けると
+        # オーナー権限での branch protection 更新が要る。**required status checks の
+        # 名前・必須かどうかはこのステップで変えていない。**
+        # 既定引数のまま（`--base v1.0.0`、`--head` 省略＝このジョブがチェックアウトした
+        # 作業ツリー）で実行する——`git show <ref>:<path>` で snapshot を取るため、
+        # 冒頭の Checkout ステップの `fetch-depth: 0`（タグ `v1.0.0` を含む全履歴）に依存する。
+        # `continue-on-error: true` にする理由は北極星ステップと同じ——この道具自身は
+        # 個々のパッケージの読み取りを try/catch で包み常に exit 0 を返す設計だが、
+        # 想定外の失敗でこのジョブ全体を巻き込んで赤くしないための二重の安全弁。
+        continue-on-error: true
+        run: node scripts/public-api-breaking-diff.mjs >> "$GITHUB_STEP_SUMMARY"
+
   postgres:
     name: packages/postgres (本物の Postgres + pgvector, server_encoding=${{ matrix.serverEncoding }})
     runs-on: ubuntu-latest
