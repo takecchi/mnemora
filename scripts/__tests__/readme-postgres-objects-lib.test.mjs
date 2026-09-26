@@ -80,23 +80,26 @@ describe("deriveMigrationObjects", () => {
     expect(result.indexes).toEqual([]);
   });
 
-  it("DO ブロック内の EXECUTE format(...) 文字列リテラル中の CREATE INDEX IF NOT EXISTS %I は、" +
-      "予約語 IF を索引名として誤って拾わない（Issue #956 / ADR 0343、0022_embedding_zero_norm_index.sql と同じ形）", () => {
-    const result = deriveMigrationObjects([
-      [
-        "DO $$",
-        "BEGIN",
-        "  EXECUTE format(",
-        "    'CREATE INDEX IF NOT EXISTS %I ON %I (tenant_id, memory_id) WHERE vector_norm(embedding) = 0',",
-        "    index_name,",
-        "    target_table",
-        "  );",
-        "END $$;",
-      ].join("\n"),
-    ]);
-    expect(result.indexes).toEqual([]);
-    expect(result.tables).toEqual([]);
-  });
+  it(
+    "DO ブロック内の EXECUTE format(...) 文字列リテラル中の CREATE INDEX IF NOT EXISTS %I は、" +
+      "予約語 IF を索引名として誤って拾わない（Issue #956 / ADR 0343、0022_embedding_zero_norm_index.sql と同じ形）",
+    () => {
+      const result = deriveMigrationObjects([
+        [
+          "DO $$",
+          "BEGIN",
+          "  EXECUTE format(",
+          "    'CREATE INDEX IF NOT EXISTS %I ON %I (tenant_id, memory_id) WHERE vector_norm(embedding) = 0',",
+          "    index_name,",
+          "    target_table",
+          "  );",
+          "END $$;",
+        ].join("\n"),
+      ]);
+      expect(result.indexes).toEqual([]);
+      expect(result.tables).toEqual([]);
+    },
+  );
 
   it("同名の索引を作り直しても重複しない（Set なので1つに畳まれる）", () => {
     const result = deriveMigrationObjects([
