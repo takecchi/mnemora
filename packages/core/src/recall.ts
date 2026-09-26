@@ -1278,6 +1278,10 @@ export interface RecalledMemory {
    *
    * 欄名を `provenanceKind` と平らにしてあるのは、既にある
    * `RecallQuery.excludeProvenanceKinds` と同じ語彙で揃えるためでもある。
+   *
+   * **`basisLost`（下、Issue #883・ADR 0342）もこの原理を保つ**——`kind === "inferred"`
+   * のとき「根拠を失っているか」という**派生した1bitの印**だけを別欄で返し、
+   * `basis` そのもの（`memoryIds`/`observationIds`）は今回も返さない。
    */
   provenanceKind: ProvenanceKind;
   score: ScoreBreakdown;
@@ -1364,6 +1368,40 @@ export interface RecalledMemory {
    * 2つの顔にしない）。
    */
   attributes?: Attributes;
+  /**
+   * この記憶が `provenanceKind === "inferred"` で、かつその `basis.memoryIds`
+   * （どの Memory から導いたか）の少なくとも1件が失われているときだけ `true`
+   * （Issue #883、[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）。
+   *
+   * docs/memory-model.md §2 の規律「推論は根拠なしに提示しない」——`basis` が指す先が
+   * 消えても隠さず、「根拠を失った推論」として印を付けて返す（削除はしない。推論という
+   * 事実自体は消えていないため）を実装する欄。
+   *
+   * **「失われている」の定義**（3つのうちどれか1つでも当たれば、その1件は失われている）:
+   * - `MemoryStore.getMany` の結果に無い（存在しない・他テナント・adapter が期待する
+   *   形式でない——`getMany` の doc コメントが定める「静かに落とす」契約そのまま）。
+   * - `status === "forgotten"`。
+   * - `purgedAt` が非 `null`。
+   *
+   * **`archived`/`superseded`/`contested` は失われていない扱い**——本文が残り、
+   * 復帰する経路がある（docs/memory-model.md §11 行7・14・15）。
+   *
+   * 🔴 **`basis.observationIds` は確かめない。**Observation は追記専用で、forget/purge/
+   * 削除の経路がコードに無く（docs/memory-model.md §11 行1）、一括取得口
+   * （`getMany` の Observation 版）も存在しない——「探したが無かった」ではなく
+   * 「そもそも探していない」（[ADR 0257](../../../docs/decisions/0257-searched-and-found-nothing-versus-did-not-search.md)
+   * の区別）。この限界は ADR 0342「引き受けた負債」に記録してある。
+   *
+   * **`false` にはしない。**基準を満たさないときはキー自体を出さない
+   * （`companionOf`/`associationOf`/`contestedWith` と同じ、`?: true` の作法——
+   * 「無いことを表す値」を持たせず、キーの有無そのものが意味を持つ）。
+   *
+   * **basis の中身（`memoryIds`/`observationIds` そのもの）は返さない。**
+   * `provenanceKind` の doc コメントが説明する設計原理（`provenance` 全体ではなく
+   * 判別だけを平らに返す）をこの欄でも保つ——`basis` の詳細が要るなら
+   * `MemoryStore.get()` を引く。
+   */
+  basisLost?: true;
 }
 
 export const RecalledMemorySchema = z.object({
@@ -1380,6 +1418,7 @@ export const RecalledMemorySchema = z.object({
   recordedAt: z.date().optional(),
   occurredAt: z.date().nullable().optional(),
   attributes: StoredAttributesSchema.optional(),
+  basisLost: z.literal(true).optional(),
 }) satisfies z.ZodType<RecalledMemory>;
 
 // ---------------------------------------------------------------------------

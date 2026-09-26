@@ -2087,6 +2087,7 @@ export interface RecalledMemory {
     recordedAt?: Date;
     occurredAt?: Date | null;
     attributes?: Attributes;
+    basisLost?: true;
 }
 export declare const RecalledMemorySchema: z.ZodObject<{
     memoryId: z.ZodString;
@@ -2122,6 +2123,7 @@ export declare const RecalledMemorySchema: z.ZodObject<{
     recordedAt: z.ZodOptional<z.ZodDate>;
     occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
     attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+    basisLost: z.ZodOptional<z.ZodLiteral<true>>;
 }, z.core.$strip>;
 export type RecallStageName = "scope" | "candidate_generation" | "rescore" | "contradiction_resolution" | "budget_truncation" | "index_band" | "record";
 export interface StageTrace {
@@ -2327,6 +2329,7 @@ export declare const RecallResultSchema: z.ZodObject<{
         recordedAt: z.ZodOptional<z.ZodDate>;
         occurredAt: z.ZodOptional<z.ZodNullable<z.ZodDate>>;
         attributes: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        basisLost: z.ZodOptional<z.ZodLiteral<true>>;
     }, z.core.$strip>>;
     omitted: z.ZodArray<z.ZodDiscriminatedUnion<[
         z.ZodObject<{
