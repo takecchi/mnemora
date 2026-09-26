@@ -3278,7 +3278,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (insertedMemoryIds.length > 0) {
       const reinforceMany = deps.memoryStore.reinforceMany;
       if (reinforceMany !== undefined) {
-        await reinforceMany.call(deps.memoryStore, ctx, insertedMemoryIds, reinforcedAt, reinforceOpts);
+        await reinforceMany.call(
+          deps.memoryStore,
+          ctx,
+          insertedMemoryIds,
+          reinforcedAt,
+          reinforceOpts,
+        );
       } else {
         for (const memoryId of insertedMemoryIds) {
           await deps.memoryStore.reinforce(ctx, memoryId, reinforcedAt, reinforceOpts);

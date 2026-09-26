@@ -192,7 +192,12 @@ describe("PostgresMemoryStore.reinforceMany と reinforce の1件ずつループ
     }
 
     // テナント B: 一括版を1回だけ。
-    await store.reinforceMany({ tenantId: tenantBatch }, beforeBatch.map((m) => m.id), AT, opts);
+    await store.reinforceMany(
+      { tenantId: tenantBatch },
+      beforeBatch.map((m) => m.id),
+      AT,
+      opts,
+    );
 
     const afterLoop = await Promise.all(
       beforeLoop.map((m) => store.get({ tenantId: tenantLoop }, m.id)),
