@@ -156,6 +156,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が
   構造的に起きなくなる。
   明示的な `runtime.reflect(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
+- **`packDigestBand`（`packages/core/src/digest-band.ts`）に `limit`/`maxChars` として `NaN` を
+  渡すと、`NaN` を含む比較が常に false になるため打ち切り条件が一度も成立せず、件数・
+  文字数の上限が黙って無制限に化けていた**（負数を渡すと逆に安全側へ倒れるのと対照的）。
+  `NaN` だけを負数と同じ安全側（既に上限に達している扱い）に倒した。`+Infinity` は
+  「上限なし」として意味が通るため今の挙動のまま（新しい例外は投げない）
+  （[Issue #803](https://github.com/takecchi/mnemora/issues/803)、PR #TBD）。
 
 ---
 
