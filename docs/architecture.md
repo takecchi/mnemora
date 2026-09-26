@@ -481,6 +481,10 @@ interface MemoryStore {
       event: NewMemoryEvent;
     }
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  resolveOrphanedContested?(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent }
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
   findActiveByClaimKey?(
     ctx: Ctx,
     query: {
