@@ -763,6 +763,9 @@ interface LexicalStore {
   `PostgresTrigramLexicalStore` の日本語側（trigram）には別途
   `TRIGRAM_JAPANESE_QUERY_MAX_CHARS` = 100 の上限があり、クエリ全体の文字数の上限は
   ASCII 側・日本語側の両方に、同じ1つの切り詰め結果として先に効く。
+  **これらの上限は、1回の検索にかかる時間を有界にするためのものであり、時間そのものの
+  上限ではない。DB 側でも `statement_timeout` を設定して併用することを推奨する**
+  （`packages/postgres/README.md`「運用: 語彙検索と `statement_timeout`」）。
 
 ### 5.3 RelationStore — Phase 2（`status`/`superseded_by_id` 列のみ Phase 1）
 
