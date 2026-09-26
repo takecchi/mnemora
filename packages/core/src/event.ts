@@ -18,9 +18,9 @@ import type { EventId, MemoryId } from "./ids.js";
  * ⚠ **2026-09-26 訂正**: この段落は以前「どちらも生成するコードが無い」と書いていた
  * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) の
  * 棚卸しの時点の記述）。その後、上の2つの書き手が入ったが、この段落は追いついていなかった。
- * `__tests__/unreachable-union-values.test.ts` は今も `"events_purged"` を棚卸しに残している。
+ * `__tests__/unreachable-union-values.test.ts` も `"events_purged"` を棚卸しに残したまま緑だった。
  * あの歯は `kind: "events_purged"` というオブジェクトリテラルを文字列一致で探すので、
- * Postgres の書き手（SQL の文字列 `'events_purged'`）を見つけられない。
+ * Postgres の書き手（SQL の文字列 `'events_purged'`）を見つけられない。2026-09-26 に棚卸しから外した。
  *
  * **`"restored"`（Issue #195、[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）
  * も、この PR から実際に生成される。**`Runtime.restoreArchived` が
