@@ -325,6 +325,18 @@ PR #827）だけであった。
 ### Fixed
 
 
+- **`runtime.tick()` が、`consolidate`/`reflect` の自動ジョブで LLM 呼び出しが失敗しても、
+  そのジョブを「処理成功」として数えていた。** `processConsolidateJob`/`processReflectJob`
+  は `consolidate()`/`reflect()` の戻り値（LLM 失敗時は `outcome: "llm_failed"` を返す——
+  例外は投げない、ADR 0089 の公開の約束）を見ずに `complete()` を呼んでいたため、LLM が
+  完全に落ちたジョブも `TickResult.processed` に数えられ、outbox 行も完了のまま残っていた。
+  戻り値を見て `llm_failed` を例外に変え、`tick()` の既存の `fail()` 経路に乗せるようにした
+  ——**LLM が失敗したとき、`TickResult` で `processed` ではなく `failed` に数えられるように
+  なり、outbox の行は完了ではなく終端の失敗で残る。監視で `failed` を数えている利用者には
+  数が増えて見える。** 終端後の自動リトライは足していない（Phase 1 の `OutboxStore` 契約
+  どおり）。`consolidate()`/`reflect()` を直接呼ぶ同期 API の契約は無変更
+  （[Issue #849](https://github.com/takecchi/mnemora/issues/849) /
+  [ADR 0157](./docs/decisions/0157-tick-drives-consolidate-and-reflect.md) 決定2 追記）。
 - **`@mnemora/core` の `decay.ts`（`defaultDecayStrategy.floorAt`/`defaultActivityDecayStrategy.floorAt`）が、
   ADR 0125/`isHalfLifeRecallsInRange` の値域 `(0, ∞)`（`Infinity` のみ拒む）の内側にある、
   有限だが巨大な `halfLifeHours`/`halfLifeRecalls` で壊れていた。** 壁時計側は `new Date` の

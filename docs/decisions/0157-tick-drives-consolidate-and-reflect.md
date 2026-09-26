@@ -120,6 +120,35 @@
   ——`consolidate()`/`reflect()` に丸ごと委ね、LLM/store が本当に失敗したときの例外だけが
   伝播して `tick()` に `fail()` させる。
 
+  > **追記（2026-09-26、Issue #849）—— 上の「LLM/store が本当に失敗したときの例外だけが
+  > 伝播して `tick()` に `fail()` させる」という前提は、検証されないまま書かれており、
+  > 実際には成り立っていなかった。**
+  >
+  > `consolidate()` は [ADR 0089](./0089-runtime-consolidate-shape.md) の公開の約束
+  > により、LLM 呼び出しが失敗しても例外を投げない——構造化された `outcome: "llm_failed"`
+  > （`llmFailure` 付き）を正常な戻り値として返す関数として作られている。`reflect()`
+  > （Issue #104）も同じ2階層の「無い」の分類を踏襲し、同じ形で `outcome: "llm_failed"`
+  > を返す（`runtime.ts` の `ConsolidateOutcome`/`ReflectOutcome` の doc コメント参照）。
+  > この ADR の決定2はその契約を検証せずに「例外が伝播する」と書いてしまっており、
+  > `processConsolidateJob`/`processReflectJob` が戻り値を見ずに
+  > `await consolidate(...)`/`await reflect(...)` するだけだったため、**LLM が実際に
+  > 完全に落ちても、`tick()` はそのジョブを `complete()` し `TickResult.processed` に
+  > 数えていた**（[Issue #849](https://github.com/takecchi/mnemora/issues/849)）。
+  >
+  > 直した内容: `processConsolidateJob`/`processReflectJob` が `consolidate()`/`reflect()`
+  > の戻り値を見て、`outcome === "llm_failed"` のときだけ `llmFailure` の内容を載せた
+  > `Error` を投げるようにした。投げた例外は `tick()` の既存の catch → `outboxStore.fail()`
+  > 経路にそのまま乗り、`OutboxStore` の契約（`interfaces/outbox-store.ts`「Phase 1 では
+  > 失敗したジョブの自動リトライを行わない」）どおり終端の失敗（`failedAt` が付き
+  > `completedAt` は付かない）に落ちるだけで、新しいリトライは足していない。
+  >
+  > `consolidate()`/`reflect()` を直接呼ぶ同期 API の契約（ADR 0089: LLM 失敗は例外に
+  > しない）はここでは1行も変えていない——変わるのは `tick()` 経由の自動ジョブの扱いだけ
+  > であり、`TickResult` の型・`OutboxStore` の interface・`jobHandlers` の配線も無変更
+  > である。
+  >
+  > ⛔ 本文（上の段落）は書き換えない（`docs/decisions/README.md`）。
+
   ### `TickResult.unsupported` の性質は変えていない
 
   `unsupported` の型・意味・「`failed` の内訳である」という契約（ADR 0082 決定1）は
