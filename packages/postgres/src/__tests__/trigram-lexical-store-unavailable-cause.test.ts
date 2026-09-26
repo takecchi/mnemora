@@ -58,7 +58,7 @@ function createFakeDb(opts: FakeDbOptions = {}): Db {
 
 describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）", () => {
   it("extension_create_denied: create() が投げる例外の .cause は元の Postgres エラーと同一である", async () => {
-    const original = new Error("permission denied to create extension \"pg_trgm\"");
+    const original = new Error('permission denied to create extension "pg_trgm"');
     const db = createFakeDb({ extensionCreateError: original });
 
     const thrown: unknown = await PostgresTrigramLexicalStore.create(db).catch((e: unknown) => e);
@@ -102,7 +102,7 @@ describe("TrigramLexicalStoreUnavailableError.cause（Issue #892、DB 不要）"
   });
 
   it("公開の probeTrigramLexicalSupport の戻り値には cause 欄が漏れていない", async () => {
-    const original = new Error("permission denied to create extension \"pg_trgm\"");
+    const original = new Error('permission denied to create extension "pg_trgm"');
     const db = createFakeDb({ extensionCreateError: original });
 
     const result = await probeTrigramLexicalSupport(db);

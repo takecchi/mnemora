@@ -206,7 +206,8 @@ interface InternalTrigramLexicalProbeUnavailable extends TrigramLexicalProbeUnav
   readonly cause?: unknown;
 }
 
-type InternalTrigramLexicalProbeResult = TrigramLexicalProbeOk | InternalTrigramLexicalProbeUnavailable;
+type InternalTrigramLexicalProbeResult =
+  TrigramLexicalProbeOk | InternalTrigramLexicalProbeUnavailable;
 
 /**
  * `PostgresTrigramLexicalStore.create()` が投げる例外の、メッセージの接頭辞。
@@ -312,7 +313,9 @@ export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexical
  * **export しない**——公開するのは `cause` を持たない {@link probeTrigramLexicalSupport}
  * だけにする。
  */
-async function probeTrigramLexicalSupportWithCause(db: Db): Promise<InternalTrigramLexicalProbeResult> {
+async function probeTrigramLexicalSupportWithCause(
+  db: Db,
+): Promise<InternalTrigramLexicalProbeResult> {
   const encodingResult = await db.execute(sql`SHOW server_encoding`);
   const encodingRow = encodingResult.rows[0] as { server_encoding: string } | undefined;
   const encoding = encodingRow?.server_encoding ?? "(unknown)";
