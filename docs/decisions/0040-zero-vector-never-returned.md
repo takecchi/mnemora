@@ -253,3 +253,62 @@ Tests  528 passed (528)
   到達性は測っていない）。
 - 候補が複数あるときの順位・`limit`・目次帯への影響（今回も候補1件でしか確かめていない）。
 - 他のバージョンの pgvector でのエラーメッセージ。
+
+---
+
+## その後（2026-09-26）—— 「NaN が他の候補の並びを壊すかは…壊さなかった」という観測に反例が出た（Issue #938）
+
+⛔ 上の本文・前の2つの追記は1バイトも書き換えていない。同じ形で追記する。
+
+### 何が新しく見つかったか
+
+上の「引き受ける負債」節にはこう書いてある（本文、直していない）:
+
+> **NaN が他の候補の並びを壊すかは測った——壊さなかった**（V8 の `sort` で、非 NaN の
+> 相対順は変わらなかった）。ただしこれは1つの標本での観測であり、`sort` の比較器が
+> 不整合なときの順序は実装定義である。
+
+クローンの委譲先が、この「1つの標本」に対する反例を Issue #938 として見つけた。
+`compareScoredCandidates`（`packages/core/src/recall-runtime.ts`、段2の並べ替え）に
+
+```
+[A(total=0.9), C(total=0.7), NAN1(total=NaN), B(total=0.8)]
+```
+
+の順で4件を渡して `sort` すると、`NaN` とは無関係な `B` と `C` の相対順が入れ替わる
+（期待 `["A","B","C"]`、実際 `["A","C","B"]`）。`b.score.total - a.score.total` は
+どちらかが `NaN` だと比較値も `NaN` になり、比較関数の一貫性（推移律）を満たさなく
+なる——`Array.prototype.sort` はその周辺にある、`NaN` を含まない有限値どうしの
+順序まで崩す。
+
+同じ形の生の引き算比較（`b.field - a.field`）は、段3.5（連想）の
+`associationHits.sort`（アンカー類似度降順）・`rankedCandidates.sort`
+（rankKey 降順、いずれも `recall-runtime.ts`）にもあり、`similarity`/`rankKey` は
+どちらも本 ADR が扱うゼロベクトルの cosine 距離に由来して `NaN` になりうる。
+
+### 直したこと（Issue #938）
+
+段2（`compareScoredCandidates` の第1段）と、段3.5の上の2箇所の `sort` に、`NaN`
+（比較できない値）を必ず最後尾へ送る、共有の比較 helper（`compareDescendingNaNLast`）を
+当てた。**有限値どうしの大小関係・同点時の安定ソートの性質は1バイトも変えていない。**
+`NaN` どうしは `0` を返し、`compareScoredCandidates` では次段のタイブレーク
+（実効時刻→id）へそのまま進む。歯: `packages/core/src/__tests__/score-sort-nan.test.ts`。
+
+⚠ この helper は export していない——`pnpm api:check` の差分を0のまま保つため
+（`packages/core/src/index.ts` は `recall-runtime.ts` を `export *` しているので、
+export すれば公開 API 表面に出る）。段3.5の2箇所は private な関数の直接呼び出しでは
+検査できないため、歯はその形（数値2つを受け、降順・`NaN` 最後尾を返す）を複製して
+単体で確かめている——`recall-runtime.ts` 側を変えたら複製側も合わせて直す必要があり、
+歯自身のコメントにその旨を書いてある。
+
+### この追記が確かめていないこと
+
+- 本物の Postgres + pgvector に対する end-to-end の再現はしていない。`packages/core` の
+  純関数レベル（`compareScoredCandidates` への直接入力、および段3.5の2箇所と同じ形の
+  複製）での確認に留めている。
+- 段3.5の `rankKey`（`hit.similarity × score.total`）について、`similarity`/`total` の
+  どちらも有限なのに掛け算そのものがオーバーフロー/アンダーフローして `NaN`/`Infinity`
+  になる経路は見ていない——今回直したのは「どこかで既に `NaN` になった値」を `sort` が
+  受け取ったときの並び順だけである。
+- V8 以外の JS エンジンでの `Array.prototype.sort` の挙動（比較関数が不整合なときの
+  実装定義の振る舞い）は確かめていない。
