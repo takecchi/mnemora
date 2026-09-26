@@ -46,6 +46,7 @@ import type {
   RecalledMemory,
   ScoreBreakdown,
   StageTrace,
+  UnitAssemblyDroppedOmission,
 } from "./recall.js";
 import { defaultScoringStrategy } from "./strategies/scoring.js";
 import { decideAnnTruncation } from "./ann-truncation.js";
@@ -309,6 +310,80 @@ export function countKindForUnits(units: readonly Unit[], candidateCount: number
 export function unitAssemblyShortfall(units: readonly Unit[], candidateCount: number): number {
   const covered = units.reduce((sum, unit) => sum + unit.members.length, 0);
   return Math.max(0, candidateCount - covered);
+}
+
+/**
+ * 必須の同伴取得（mandatory companion retrieval、docs/recall.md §8）を行う。
+ *
+ * **段3（必須の同伴取得）と段3.5（連想、Issue #959）が共有する規則そのもの**——
+ * 対象の候補群（`owners`）が違うだけで、規則は1バイトも変えない:
+ *
+ * - `owners` のうち `memory.contestedWithId` が対向を指すものだけを対象にする
+ *   （呼び出し側が既に「対向が別の経路で結果集合に居る」ものを除外してから渡す——
+ *   段3は `presentIds`（withinLimit）で、段3.5は `unitsMemberIds`/連想枠自身の
+ *   選抜集合で、それぞれ事前に絞り込む）。
+ * - 対向は `getMany` で1回にまとめて取る（`companionIds` を `Set` で重複排除——
+ *   同じ対向を2人以上のオーナーが指す壊れたデータでも二重に取得しない）。
+ * - `survivesAttributesFilter`（ADR 0312 9-a）だけを通す。**`subjectId`/`period`/
+ *   `validAt`/`decayFloorAt` は意図的に検査しない**——同伴取得はそれらの軸を
+ *   最初から見ない設計（docs/recall.md §8「対向する Memory をスコアに関係なく
+ *   候補集合へ追加する」）。
+ * - 対向自身の `status` が `'contested'` でなければ使わない（forget・直接の
+ *   status 書き換えで対向が壊れていた場合。ADR 0087 決定6「forget した記憶は
+ *   recall に出ない」を同伴取得も守る）。
+ * - `contestedWithId` の相互参照は検査しない（ADR 0136 と同じ、owner 側だけを辿る設計）。
+ *
+ * 見つからなかった・filter で落ちた対向は、戻り値に一切現れない——**その owner を
+ * Unit に含めるかどうかの判断は、この関数の外（呼び出し側の unit 組み立て）が持つ。**
+ */
+async function fetchMandatoryCompanions(
+  ctx: Ctx,
+  memoryStore: MemoryStore,
+  owners: readonly ScoredCandidate[],
+  now: Date,
+  queryTags: string[],
+  timeWeighting: RecallQuery["timeWeighting"],
+  decayScoringExtras: (memory: Memory) => {
+    decayClock: DecayClock;
+    nowSeq: number | undefined;
+    decayBaseSeq: number | null | undefined;
+    halfLifeRecalls: number | null | undefined;
+  },
+  survivesAttributesFilter: (memory: Memory) => boolean,
+): Promise<ScoredCandidate[]> {
+  const companionIds = [
+    ...new Set(
+      owners
+        .map((c) => c.memory.contestedWithId)
+        .filter((id): id is MemoryId => id !== null && id !== undefined),
+    ),
+  ];
+  if (companionIds.length === 0) return [];
+  const fetched = await memoryStore.getMany(ctx, companionIds);
+  return fetched
+    .filter((companionMemory) => survivesAttributesFilter(companionMemory))
+    .filter((companionMemory) => companionMemory.status === "contested")
+    .map((companionMemory) => {
+      const owner = owners.find((c) => c.memory.contestedWithId === companionMemory.id);
+      const score = defaultScoringStrategy({
+        now,
+        tags: companionMemory.tags,
+        queryTags,
+        occurredAt: companionMemory.occurredAt,
+        recordedAt: companionMemory.recordedAt,
+        lastReinforcedAt: companionMemory.lastReinforcedAt,
+        strength: companionMemory.strength,
+        halfLifeHours: companionMemory.halfLifeHours,
+        timeWeighting,
+        ...decayScoringExtras(companionMemory),
+      });
+      return {
+        memory: companionMemory,
+        retrievedVia: "mandatory_companion" as const,
+        companionOf: owner?.memory.id,
+        score,
+      };
+    });
 }
 
 export async function runRecall(
@@ -1135,76 +1210,25 @@ export async function runRecall(
       c.memory.contestedWithId &&
       !presentIds.has(c.memory.contestedWithId),
   );
-  const companionIds = [
-    ...new Set(
-      contestedNeedingCompanion
-        .map((c) => c.memory.contestedWithId)
-        .filter((id): id is MemoryId => id !== null && id !== undefined),
-    ),
-  ];
-
-  const companions: ScoredCandidate[] =
-    companionIds.length > 0
-      ? (await deps.memoryStore.getMany(ctx, companionIds))
-          // Issue #152/#153（ADR 0312 追記）: 必須の同伴取得（mandatory companion
-          // retrieval）は `getMany` だけで候補を取っており、他の段（ANN/語彙の後置
-          // フィルタ）が通す `survivesAttributesFilter` を一度も経由しない——`attributes`
-          // で絞り込んだ recall に、絞り込みの外に在る Memory の `digest` が同伴として
-          // 紛れ込む穴だった。ここで落とすと、その companion は `byId` に載らず、
-          // 下の単位組み立てが「対向が見つからない contested」と同じ扱いで**対象の
-          // contested 候補ごと**単位に含めない（既存の `unit_assembly_dropped`、
-          // ADR 0043 の経路にそのまま乗る——争われている主張を、争われていない顔で
-          // 単独で出さない、という既存原則と同じ結果になる）。
-          //
-          // ⚠ `subjectId`/`period`/`validAt`/`decayFloorAt` はここでは意図的に検査
-          // しない——同伴取得はそれらの軸を最初から見ない設計（`docs/recall.md` §8
-          // 「対向する Memory をスコアに関係なく候補集合へ追加する」、
-          // `recall-pipeline.test.ts` の「同伴取得でも speaker/subjectId は対向の
-          // Memory 自身の値を名乗る」歯が、companion が別 subjectId を持ちうることを
-          // 前提にしている）。`attributes` だけを検査するのは、この軸が「内容の
-          // 正しさ」ではなく「取り扱い（公開範囲など）の境界」を表すからである——
-          // ADR 0312 決定6・「北極星との整合」参照。
-          .filter((companionMemory) => survivesAttributesFilter(companionMemory))
-          // forget（ADR 0087 引き受けた負債1）や直接の status 書き換えで
-          // 対向が `contested` でなくなっていれば、companion として使わない
-          // ——「forget した記憶は recall に出ない」(ADR 0087 決定6) を段3も守る。
-          // 弾かれれば「対向が見つからなかった」と同じ扱いに倒れ（上のコメントと同じ経路、
-          // 新しい Omission は無い）、ADR 0312 9-a の `survivesAttributesFilter` と
-          // 同型の後置フィルタとして置く。
-          //
-          // ⚠ **`contestedWithId` が owner を指し返しているか（相互参照）は、ここでは
-          // 検査しない。** 段3のアルゴリズム自体が companion 側の `contestedWithId` を
-          // 一度も読まない（owner 側の `contestedWithId` だけを辿る設計、ADR 0136）ため、
-          // 既存の多数の歯（`recall-pipeline.test.ts` の `setupContestedPair` 等）が
-          // companion 側の `contestedWithId` を意図的に設定しない一方向の fixture を使う
-          // ——ここに相互参照を要求すると、それらは無関係に赤くなる。相互参照そのものの
-          // 不変条件は `contested-pair-invariant.test.ts`（ADR 0046）の管轄。
-          .filter((companionMemory) => companionMemory.status === "contested")
-          .map((companionMemory) => {
-            const owner = contestedNeedingCompanion.find(
-              (c) => c.memory.contestedWithId === companionMemory.id,
-            );
-            const score = defaultScoringStrategy({
-              now,
-              tags: companionMemory.tags,
-              queryTags,
-              occurredAt: companionMemory.occurredAt,
-              recordedAt: companionMemory.recordedAt,
-              lastReinforcedAt: companionMemory.lastReinforcedAt,
-              strength: companionMemory.strength,
-              halfLifeHours: companionMemory.halfLifeHours,
-              // Issue #690 / ADR 0300: 3箇所すべてで同じ値を渡す（唯一の出所は scoring.ts）。
-              timeWeighting: validatedQuery.timeWeighting,
-              ...decayScoringExtras(companionMemory),
-            });
-            return {
-              memory: companionMemory,
-              retrievedVia: "mandatory_companion" as const,
-              companionOf: owner?.memory.id,
-              score,
-            };
-          })
-      : [];
+  // Issue #152/#153（ADR 0312 追記）/ Issue #959: 必須の同伴取得は `getMany` だけで候補を
+  // 取っており、他の段（ANN/語彙の後置フィルタ）が通す `survivesAttributesFilter` を一度も
+  // 経由しない——`attributes` で絞り込んだ recall に、絞り込みの外に在る Memory の `digest`
+  // が同伴として紛れ込む穴だった。ここで落とすと、その companion は下の単位組み立てが
+  // 「対向が見つからない contested」と同じ扱いで**対象の contested 候補ごと**単位に含めない
+  // （既存の `unit_assembly_dropped`、ADR 0043 の経路にそのまま乗る——争われている主張を、
+  // 争われていない顔で単独で出さない、という既存原則と同じ結果になる）。規則そのものは
+  // `fetchMandatoryCompanions`（このファイル冒頭）の doc コメントを見ること——
+  // **段3.5（連想、Issue #959）と共有しており、ここで規則を書き直さない。**
+  const companions: ScoredCandidate[] = await fetchMandatoryCompanions(
+    ctx,
+    deps.memoryStore,
+    contestedNeedingCompanion,
+    now,
+    queryTags,
+    validatedQuery.timeWeighting,
+    decayScoringExtras,
+    survivesAttributesFilter,
+  );
 
   stages.push({
     stage: "contradiction_resolution",
@@ -1671,25 +1695,133 @@ export async function runRecall(
             overLimitAssociationSeatlessIds.add(candidate.memory.id);
           }
         }
+        // Issue #959: 連想枠（段3.5）が選んだ contested な候補にも、段3と同じ必須の
+        // 同伴取得規則をかける（`fetchMandatoryCompanions`、このファイル冒頭）。
+        // 対向が取れなければ、その contested 候補ごと Unit を組まず落とす——
+        // 「争われている主張を、争われていない顔で単独で出さない」という段3と同じ
+        // 判断を段3.5にも適用する（原則1、docs/recall.md §8、ADR 0151 追記）。
+        //
+        // 対向が既に他の経路で結果集合に含まれる場合は、新しく取得しない
+        // （重複防止。#823/#925 が塞いだ `memories`/`omitted` の排他性を、
+        // 同じ Memory を2回返す形で新たに壊さないため）:
+        // (a) 段3の結果（`units`）に既に居る——**理論上、この経路は到達しない**
+        //     （`excludeIds` が withinLimit ＋ companions ＋ アンカー自身を連想の
+        //     候補生成そのものから除外しており、段3の結果に含まれる Memory は
+        //     一対一の contested 不変条件のもとでは連想の候補に上がりようがない。
+        //     多層防御として残す——ADR 0151 追記「確かめていないこと」参照）。
+        // (b) 連想枠自身が両側を選んでいた——2つの別々のアンカーから浮上した場合。
+        //     この場合は新規取得せず、2件を1つの Unit にまとめて budget 切り詰め
+        //     （段4）で分割されないようにする——段3の「両側とも独立に withinLimit に
+        //     含まれていた」分岐と同じ形（retrievedVia は両方とも書き換えない）。
+        const unitsMemberIds = new Set(units.flatMap((u) => u.members.map((m) => m.memory.id)));
+        const selectedById = new Map(selectedCandidates.map((c) => [c.memory.id, c]));
+        const asAssociationMember = (c: (typeof selectedCandidates)[number]): ScoredCandidate => ({
+          memory: c.memory,
+          retrievedVia: "association" as const,
+          associationOf: c.hit.anchorId,
+          score: c.score,
+        });
+
+        const needingCompanionFetch: ScoredCandidate[] = [];
         for (const candidate of selectedCandidates) {
-          associationUnits.push({
-            members: [
-              {
-                memory: candidate.memory,
-                retrievedVia: "association" as const,
-                associationOf: candidate.hit.anchorId,
-                score: candidate.score,
-              },
-            ],
-            // 予算（段4）が「スコアの低いものから落とす」既定に従っても連想が
-            // 最初に落ちるよう、`units`（クエリで引けた本体）の後ろに必ず並ぶ配列
-            // として連結する（下記）。rankScore はこの席順（similarity × score.total、
-            // 降順で既に並んでいる）をそのまま渡す——`units` 側（段2のスコア降順で
-            // `units.sort` が走る、上）と違い、association 側は allUnits 連結後に
-            // 再ソートされないので、この配列への push 順そのものが budget 切り詰め時に
-            // 落ちる順を決める。
-            rankScore: candidate.rankKey,
-          });
+          if (candidate.memory.status !== "contested") continue;
+          const companionId = candidate.memory.contestedWithId;
+          if (!companionId) continue; // 片側だけの contested。取得を試みるまでもなく落とす
+          if (unitsMemberIds.has(companionId)) continue; // (a)
+          if (selectedById.has(companionId)) continue; // (b)
+          needingCompanionFetch.push(asAssociationMember(candidate));
+        }
+        const fetchedAssociationCompanions = await fetchMandatoryCompanions(
+          ctx,
+          deps.memoryStore,
+          needingCompanionFetch,
+          now,
+          queryTags,
+          validatedQuery.timeWeighting,
+          decayScoringExtras,
+          survivesAttributesFilter,
+        );
+        // `companionOf`（owner の memoryId）で引ける——`fetchMandatoryCompanions` の
+        // 契約そのもの（段3の同じ欄の使い方と同じ）。
+        const fetchedAssociationCompanionByOwnerId = new Map(
+          fetchedAssociationCompanions
+            .filter(
+              (c): c is ScoredCandidate & { companionOf: MemoryId } => c.companionOf !== undefined,
+            )
+            .map((c) => [c.companionOf, c]),
+        );
+
+        const associationConsumed = new Set<MemoryId>();
+        let associationUnitAssemblyShortfall = 0;
+        for (const candidate of selectedCandidates) {
+          if (associationConsumed.has(candidate.memory.id)) continue;
+          associationConsumed.add(candidate.memory.id);
+          const member = asAssociationMember(candidate);
+
+          if (candidate.memory.status !== "contested") {
+            associationUnits.push({ members: [member], rankScore: candidate.rankKey });
+            continue;
+          }
+
+          const companionId = candidate.memory.contestedWithId;
+
+          if (companionId && unitsMemberIds.has(companionId)) {
+            // (a) 段3の結果に既に居る（多層防御。上のコメント参照）——`contestedWith` は
+            // 下の「排他性契約」ブロックが budget 切り詰め後の集合を見て自動的に付ける。
+            associationUnits.push({ members: [member], rankScore: candidate.rankKey });
+            continue;
+          }
+
+          const companionInBatch = companionId ? selectedById.get(companionId) : undefined;
+          if (companionInBatch && !associationConsumed.has(companionInBatch.memory.id)) {
+            // (b) 連想枠自身が両側を選んでいた。
+            associationConsumed.add(companionInBatch.memory.id);
+            associationUnits.push({
+              members: [member, asAssociationMember(companionInBatch)],
+              rankScore: Math.max(candidate.rankKey, companionInBatch.rankKey),
+            });
+            continue;
+          }
+
+          const fetchedCompanion = fetchedAssociationCompanionByOwnerId.get(candidate.memory.id);
+          if (fetchedCompanion) {
+            associationUnits.push({
+              members: [member, fetchedCompanion],
+              // 予算（段4）が「スコアの低いものから落とす」既定に従っても連想が最初に
+              // 落ちるよう、`units`（クエリで引けた本体）の後ろに必ず並ぶ配列として
+              // 連結する（下記）。rankScore はこの席順（similarity × score.total、
+              // 降順で既に並んでいる）をそのまま渡す——`units` 側（段2のスコア降順で
+              // `units.sort` が走る、上）と違い、association 側は allUnits 連結後に
+              // 再ソートされないので、この配列への push 順そのものが budget 切り詰め時に
+              // 落ちる順を決める。
+              rankScore: candidate.rankKey,
+            });
+            continue;
+          }
+
+          // 対向が取れなかった（forget 済み・存在しない・片側だけの contested・
+          // attributes の絞り込みで外れた、等）。段3と同じ判断——Unit ごと落とす。
+          associationUnitAssemblyShortfall += 1;
+        }
+        if (associationUnitAssemblyShortfall > 0) {
+          // 段3と同じ札・同じ countKind（ADR 0043）。`UnitAssemblyDroppedOmission` は
+          // stage を持たない公開型なので、段3が既に積んでいればその件数に足し、
+          // 同じ kind のエントリを2件に割らない（`find` で1件を読む呼び手が段3.5 分を
+          // 取りこぼさないように）。
+          const existingIndex = omitted.findIndex((o) => o.kind === "unit_assembly_dropped");
+          if (existingIndex !== -1) {
+            const existing = omitted[existingIndex] as UnitAssemblyDroppedOmission;
+            omitted[existingIndex] = {
+              ...existing,
+              count: existing.count + associationUnitAssemblyShortfall,
+            };
+          } else {
+            omitted.push({
+              kind: "unit_assembly_dropped",
+              count: associationUnitAssemblyShortfall,
+              countKind: "lower_bound",
+            });
+          }
         }
       }
     }

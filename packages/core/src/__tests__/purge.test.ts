@@ -692,3 +692,28 @@ describe("runtime.purge — CAS が破れた後の再読そのものが失敗す
     expect(m3After?.purgedAt ?? null).toBeNull(); // 3件目には一切触れていない
   });
 });
+
+describe("runtime.purge — ループ前の一括読み（getMany）が失敗する（Issue #964）", () => {
+  /** `forget.test.ts` の同名の describe と同じ理由。 */
+  it("getMany が投げても [failed, not_attempted, not_attempted]・例外は伝播せず・書き込み0件", async () => {
+    const { runtime, stores } = buildRuntime();
+    const m1 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    const m2 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    const m3 = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    stores.memoryStore.getMany = async () => {
+      throw new Error("simulated connection reset on getMany");
+    };
+
+    const result = await runtime.purge(ctx, { memoryIds: [m1.id, m2.id, m3.id] });
+
+    expect(result).toEqual({
+      supported: true,
+      outcomes: [
+        { memoryId: m1.id, kind: "failed", error: "simulated connection reset on getMany" },
+        { memoryId: m2.id, kind: "not_attempted" },
+        { memoryId: m3.id, kind: "not_attempted" },
+      ],
+    });
+    expect(stores.eventStore.events.filter((e) => e.kind === "purged")).toHaveLength(0);
+  });
+});

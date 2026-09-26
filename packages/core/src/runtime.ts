@@ -1992,6 +1992,8 @@ export interface Runtime {
    *    投げない。
    *    ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
    *    いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
+   *    ループ前の読み（`getMany`・活動時計の読み）が失敗した場合も同じく、1件目を `"failed"`、残りを
+   *    `"not_attempted"` にして返す（Issue #964。まだ1件も書いていない）。
    *
    * `memory_events` へ積むイベントの `kind` は `"restored"`
    * （[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md) が
@@ -2198,6 +2200,8 @@ export interface Runtime {
    *   投げない。
    *   ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
    *   いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
+   *   ループ前の読み（`getMany`）が失敗した場合も同じく、1件目を `"failed"`、残りを
+   *   `"not_attempted"` にして返す（Issue #964。まだ1件も書いていない）。
    *
    * `kind` の意味と呼び出し側の次の一手は {@link ForgetOutcome} の doc コメントに
    * 詳しい。`target` が空配列（`{ memoryIds: [] }`）なら、store に一切触れずに
@@ -2253,6 +2257,8 @@ export interface Runtime {
    *    投げない。
    *    ⚠ **上の再読そのもの（`get`）が失敗した場合もここに入る**——その要素は書き込まれて
    *    いない（CAS に弾かれた後である）ので `"failed"` の「安全に再試行できる」は保たれる。
+   *    ループ前の読み（`getMany`）が失敗した場合も同じく、1件目を `"failed"`、残りを
+   *    `"not_attempted"` にして返す（Issue #964。まだ1件も書いていない）。
    *
    * `memory_events` へ積むイベントの `kind` は `"purged"`（`MemoryEventKind` に
    * 既に在る値——追加していない）。`digestSnapshot` には上書き**前**の digest を入れ、
@@ -4066,13 +4072,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { outcomes: [] };
     }
 
-    const found = await deps.memoryStore.getMany(ctx, ids);
-    const byId = new Map<MemoryId, Memory>();
-    for (const memory of found) {
-      byId.set(memory.id, memory);
-    }
-
-    const actor = opts?.actor ?? { type: "system" };
     const outcomes: RestoreArchivedOutcome[] = [];
     // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
     const abortAt = (i: number, failure: unknown) => {
@@ -4086,11 +4085,27 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       return { outcomes };
     };
-    // ADR 0165 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
-    // が `resolveActivityClockInputs` を候補バッチ1つにつき1回だけ読むのと同じ理由——
-    // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
-    // `tenant_activity` への往復が増える）。
-    const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+
+    // Issue #964: ループ前の読みの失敗も「競合以外の例外」である——まだ1件も書いていない
+    // ので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
+    let found: Memory[];
+    let reinforceOpts: ReturnType<typeof toReinforceOptions>;
+    try {
+      found = await deps.memoryStore.getMany(ctx, ids);
+      // ADR 0165 決めたこと16: この呼び出し全体で1回だけ読む（`buildNewMemoriesForCandidates`
+      // が `resolveActivityClockInputs` を候補バッチ1つにつき1回だけ読むのと同じ理由——
+      // 対象 id ごとに読み直すと 'activity'/'either' のテナントで id の数だけ
+      // `tenant_activity` への往復が増える）。
+      reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
+    } catch (error) {
+      return abortAt(0, error);
+    }
+    const byId = new Map<MemoryId, Memory>();
+    for (const memory of found) {
+      byId.set(memory.id, memory);
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
@@ -4326,7 +4341,28 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return { outcomes: [] };
     }
 
-    const found = await deps.memoryStore.getMany(ctx, ids);
+    const outcomes: ForgetOutcome[] = [];
+    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
+    const abortAt = (i: number, failure: unknown) => {
+      outcomes.push({
+        memoryId: ids[i]!,
+        kind: "failed",
+        error: failure instanceof Error ? failure.message : String(failure),
+      });
+      for (let j = i + 1; j < ids.length; j += 1) {
+        outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
+      }
+      return { outcomes };
+    };
+
+    // Issue #964: ループ前の一括読みの失敗も「競合以外の例外」である——まだ1件も書いて
+    // いないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
+    let found: Memory[];
+    try {
+      found = await deps.memoryStore.getMany(ctx, ids);
+    } catch (error) {
+      return abortAt(0, error);
+    }
     // 呼び出しの中で同じ id が複数回現れたとき、1回目の書き込み結果を2回目が見るための
     // ローカルの写し。書き込みが成功するたびに更新する。
     //
@@ -4343,19 +4379,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     const actor = opts?.actor ?? { type: "system" };
-    const outcomes: ForgetOutcome[] = [];
-    // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
-    const abortAt = (i: number, failure: unknown) => {
-      outcomes.push({
-        memoryId: ids[i]!,
-        kind: "failed",
-        error: failure instanceof Error ? failure.message : String(failure),
-      });
-      for (let j = i + 1; j < ids.length; j += 1) {
-        outcomes.push({ memoryId: ids[j]!, kind: "not_attempted" });
-      }
-      return { outcomes };
-    };
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
@@ -4448,15 +4471,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    const found = await deps.memoryStore.getMany(ctx, ids);
-    // `forget` と同じ理由（往復の節約。`ADR 0087`）——正しさのためではない。
-    const byId = new Map<MemoryId, Memory>();
-    for (const memory of found) {
-      byId.set(memory.id, memory);
-    }
-
-    const actor = opts?.actor ?? { type: "system" };
-    const dryRun = opts?.dryRun ?? false;
     const outcomes: PurgeOutcome[] = [];
     // 競合以外の例外で打ち切る: `i` 番目を `failed` にし、残りを「見ていない」として返す。
     const abortAt = (i: number, failure: unknown) => {
@@ -4470,6 +4484,23 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       return { supported: true, outcomes };
     };
+
+    // Issue #964: ループ前の一括読みの失敗も「競合以外の例外」である——まだ1件も書いて
+    // いないので、1件目を `failed`、残りを `not_attempted` にして返す（例外を外へ投げない）。
+    let found: Memory[];
+    try {
+      found = await deps.memoryStore.getMany(ctx, ids);
+    } catch (error) {
+      return abortAt(0, error);
+    }
+    // `forget` と同じ理由（往復の節約。`ADR 0087`）——正しさのためではない。
+    const byId = new Map<MemoryId, Memory>();
+    for (const memory of found) {
+      byId.set(memory.id, memory);
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
+    const dryRun = opts?.dryRun ?? false;
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
