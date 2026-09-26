@@ -374,6 +374,18 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`\uD800` 等）も対象外——Postgres 側（node-postgres が U+FFFD へ静かに置換する）の
   挙動に Fake をどちらへ寄せるかは別途の製品判断が要る
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ、PR #923）。
+- **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit`）/`FakeMemoryStore.createMemory`
+  （`@mnemora/core`）が、上の PR #923 で塞ぎ残した `subjectId`・`tags`（各要素）・
+  `digest` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
+  いた。** 実測すると `PostgresMemoryStore.createMemory` はこの3欄も `content` と同じ
+  理由（Postgres の `text` 型が NUL バイトを構造的に拒む）・同じメッセージで例外を
+  投げる対称な入力面だったため、`content` と揃えた。`tenantId` は引き続き対象外
+  ——`ctx.tenantId` は `createMemory` 以外のほぼ全メソッドが個別に直接読む横断的な値で
+  あり、両 Fake とも `ctx` を受ける共通の入口を持たないため、検査を足すには全メソッドへ
+  の横展開が要る。孤立サロゲート（`\uD800` 等）も引き続き対象外——今の挙動（Postgres は
+  node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
+  `MemoryStore.createMemory` の doc コメントに記録した
+  （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
 
 ---
 
