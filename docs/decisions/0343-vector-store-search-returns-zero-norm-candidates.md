@@ -414,3 +414,35 @@ ADR 0059/0062 からの引用だった。**
   等）について、同じ手順（`pg_locks`・並行 `SELECT`/`INSERT`）で測り直してはいない。
 - PostgreSQL のバージョンやテーブルの列構成によってロックモードが変わる余地がある
   かどうかは確認していない——この実測は本 ADR と同じ PostgreSQL 17.11 環境1点のみ。
+
+## 追記（2026-09-27）—— `0022` の対象を実テーブルに絞った（ビューで migration が止まっていた）
+
+**クローン miku の委譲先が書いた（オーナーではない）。**
+
+`0022_embedding_zero_norm_index.sql` は、対象を `information_schema.columns` から
+「名前が `memory_embeddings_` で始まり、`embedding` 列の型が `vector`」で拾っていた。
+`information_schema.columns` は**ビュー・外部テーブルの列も返す**ため、利用者が同じスキーマに
+その形のビュー（例: 全空間をまとめたビュー）を置いていると、`CREATE INDEX` が
+`cannot create index on relation "<view>"` で失敗し、1ファイル=1トランザクションの
+migration 全体が止まる。**v1.0.1 の migrate は同じ DB で通るので、更新だけが塞がる。**
+v1.0.1 で作った DB（Postgres adapter を通してデータを投入したもの）に main の migrate を
+当てて実測した（[Issue #1038](https://github.com/takecchi/mnemora/issues/1038)）。
+
+**決めたこと**: `information_schema.tables` と結び、`table_type = 'BASE TABLE'`
+（パーティション親を含む。PostgreSQL 17 で実測）だけを対象にする。
+歯は `embedding-zero-norm-migration.postgres.test.ts` の歯4（修正前は上のエラーで赤、
+修正後は緑）。
+
+**適用済みの migration の中身を書き換えたことについて**: `0022` は未リリース
+（`[1.1.0]` は tag が切られていない）である。さらに、`0022` の適用に成功した DB には、
+定義上、対象の形のビュー・外部テーブルが無かった（在れば失敗していた）。⟹ 絞った後の
+`0022` を同じ DB に当てた場合の結果は、書き換える前と同じになる。台帳
+（`_mnemora_migrations`）はファイル名しか見ないため、適用済みの DB で再適用されることもない。
+後から `0023` を足す形では、先に `0022` が失敗するので直せない。
+
+**残した負債**: マテリアライズドビューは `information_schema.columns` に出ないので、
+もともと対象外である。`CREATE TABLE memory_embeddings_<x>_bak AS SELECT ...` のような
+利用者の**実テーブル**は、引き続き対象になり、部分索引が1本付く（失敗はしない）。
+mnemora が作った空間のテーブルだけを見分ける台帳は無く、この追記でも足していない。
+外部テーブルは、PostgreSQL の文書上 `table_type = 'FOREIGN'` になるので除かれるはずだが、
+FDW を入れた環境で実測してはいない。

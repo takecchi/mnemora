@@ -93,6 +93,14 @@ const SCHEMA_SPACE: EmbeddingSpaceId = {
 };
 const TEST_SCHEMA = "mnemora_zero_norm_mig_test";
 
+// 歯4専用——利用者が同じスキーマに置いたビュー（`memory_embeddings_` で始まる名前）の形。
+const VIEW_BASE_SPACE: EmbeddingSpaceId = {
+  provider: "test",
+  model: "zero-norm-migration-view-base",
+  dimensions: 3,
+};
+const VIEW_NAME = "memory_embeddings_zero_norm_mig_all_spaces";
+
 describe("packages/postgres/migrations/0022_embedding_zero_norm_index.sql（Issue #956 / ADR 0343）", () => {
   afterAll(async () => {
     const { pool } = await getTestClient();
@@ -100,6 +108,8 @@ describe("packages/postgres/migrations/0022_embedding_zero_norm_index.sql（Issu
     await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(LONG_SPACE)}`);
     await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(REGISTER_SPACE)} CASCADE`);
     await pool.query(`DROP SCHEMA IF EXISTS "${TEST_SCHEMA}" CASCADE`);
+    await pool.query(`DROP VIEW IF EXISTS ${VIEW_NAME}`);
+    await pool.query(`DROP TABLE IF EXISTS ${embeddingSpaceTableName(VIEW_BASE_SPACE)}`);
     await closeTestClient();
   });
 
@@ -197,6 +207,28 @@ describe("packages/postgres/migrations/0022_embedding_zero_norm_index.sql（Issu
       [zeroIndexName],
     );
     expect(publicRows.length).toBe(0);
+  });
+
+  it("歯4: 同じスキーマに `memory_embeddings_` で始まり `embedding vector` 列を持つビューが在っても、migration は失敗せず、実テーブルにだけ索引を作る", async () => {
+    // `information_schema.columns` はビュー（と外部テーブル）の列も返す。0022 がそれを
+    // 対象に含めると `CREATE INDEX` が "cannot create index on relation" で失敗し、
+    // 1ファイル=1トランザクションの migration 全体が止まる——v1.0.1 の migrate は同じ
+    // DB で通るので、更新の経路だけが塞がる（v1.0.1 で作った DB に当てて実測した形）。
+    const { pool } = await getTestClient();
+    const table = embeddingSpaceTableName(VIEW_BASE_SPACE);
+    await pool.query(`DROP VIEW IF EXISTS ${VIEW_NAME}`);
+    await pool.query(`DROP TABLE IF EXISTS ${table}`);
+    await pool.query(
+      `CREATE TABLE ${table} (tenant_id text, memory_id uuid, embedding vector(${VIEW_BASE_SPACE.dimensions}), model text, created_at timestamptz)`,
+    );
+    await pool.query(
+      `CREATE VIEW ${VIEW_NAME} AS SELECT tenant_id, memory_id, embedding FROM ${table}`,
+    );
+
+    await runZeroNormMigrationSql(pool);
+
+    expect(await countZeroNormIndexes(pool, table)).toBe(1);
+    expect(await countZeroNormIndexes(pool, VIEW_NAME)).toBe(0);
   });
 });
 

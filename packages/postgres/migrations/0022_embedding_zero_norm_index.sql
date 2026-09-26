@@ -42,6 +42,13 @@
 -- `current_schema()` はその `<schema>` を指す。⟹ この migration は、指定されたスキーマの
 -- 中に在る埋め込みテーブルだけを対象にする——他のスキーマには触れない。
 --
+-- **実テーブル（`information_schema.tables` の `table_type = 'BASE TABLE'`、パーティション
+-- 親を含む）だけを対象にする。** `information_schema.columns` はビュー・外部テーブルの列も
+-- 返し、それらに `CREATE INDEX` を発行すると "cannot create index on relation" で
+-- この migration 全体が失敗する——利用者が同じスキーマに `memory_embeddings_` で始まる
+-- ビューを置いていると、v1.0.1 の migrate は通るのに更新だけが塞がる（v1.0.1 で作った DB に
+-- 当てて実測。歯は `embedding-zero-norm-migration.postgres.test.ts` の歯4）。
+--
 -- ## ロックとブロックする時間（ADR 0343「実測」節）
 --
 -- 素の `CREATE INDEX`（`CONCURRENTLY` 無し）は対象テーブルに `ShareLock` を取る
@@ -68,7 +75,10 @@ BEGIN
   FOR target_table IN
     SELECT c.table_name
     FROM information_schema.columns c
+    JOIN information_schema.tables t
+      ON t.table_schema = c.table_schema AND t.table_name = c.table_name
     WHERE c.table_schema = current_schema()
+      AND t.table_type = 'BASE TABLE'
       AND starts_with(c.table_name, 'memory_embeddings_')
       AND c.column_name = 'embedding'
       AND c.udt_name = 'vector'

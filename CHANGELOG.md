@@ -484,6 +484,9 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   テーブルに専用の部分索引を足し、別枝として `UNION ALL` で拾うようにした（往復数・
   通常の検索結果は無変更）（[Issue #956](https://github.com/takecchi/mnemora/issues/956)、
   [ADR 0343](./docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。
+  既存の空間にこの索引を作る `0022_embedding_zero_norm_index.sql` は、実テーブルだけを
+  対象にする——同じスキーマに `memory_embeddings_` で始まるビューが在っても migration は
+  止まらない（[Issue #1038](https://github.com/takecchi/mnemora/issues/1038)、ADR 0343 追記 2026-09-27）。
 
 ---
 
