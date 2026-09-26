@@ -3707,7 +3707,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "ready");
     } catch (err) {
       // 索引の遅れ・失敗を黙って無かったことにしない（docs/architecture.md 原則の姿3）。
-      await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "failed");
+      // Issue #962: `failed` の書き込み自体が失敗しても、元の例外（なぜ埋め込めなかったか）を
+      // 失わない——`cause` に残し、`tick()` が `lastError` に載せるメッセージにも両方を書く。
+      let markFailure: { error: unknown } | null = null;
+      try {
+        await deps.memoryStore.setEmbeddingStatus(ctx, memory.id, "failed");
+      } catch (markErr) {
+        markFailure = { error: markErr };
+      }
+      if (markFailure !== null) {
+        const markErr = markFailure.error;
+        throw new Error(
+          `runtime.tick: embed job failed (${err instanceof Error ? err.message : String(err)}), and marking ` +
+            `embeddingStatus "failed" also failed: ${markErr instanceof Error ? markErr.message : String(markErr)}`,
+          { cause: err },
+        );
+      }
       throw err;
     }
   }
