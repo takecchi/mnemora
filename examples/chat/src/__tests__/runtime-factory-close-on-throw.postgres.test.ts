@@ -59,6 +59,8 @@ describe("examples/chat: createExampleRuntime は Pool 構築後の失敗で Poo
     // 新たに増えたバックエンドは残らない。
     const after = await countOtherBackends();
 
-    expect(after).toBe(before);
+    // 他のファイルが残した idle な接続が、この間に idleTimeoutMillis で切れて減ることは
+    // ありうる。増えていないことだけを見る。
+    expect(after).toBeLessThanOrEqual(before);
   });
 });
