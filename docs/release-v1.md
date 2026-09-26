@@ -2060,6 +2060,10 @@ git show origin/main:docs/migration-v1.md | grep -n "未リリース"
 ⟹ **いま (a) に効く機械は、この節の頭に書いた*通知*だけである**——**終了コードは常に 0。**
 🔴 **⟹ 「止まらないから、この §5.5 が要る」は、(a) についても、もう一度そのまま当たる。**
 
+### 5.6 出した版の upgrade fixture を足す（[ADR 0344](./decisions/0344-upgrade-from-released-version-fixture.md)）
+
+版を出したら、その tag の作業木（`git worktree add ../mnemora-<tag> <tag>` のあと、`pnpm install --frozen-lockfile` と `pnpm --filter @mnemora/core --filter @mnemora/testkit --filter @mnemora/postgres run build`）と、拡張3本（`vector` / `btree_gin` / `pgcrypto`）だけを作った空の DB を用意する。そのうえで `node scripts/generate-upgrade-fixture.mjs --from ../mnemora-<tag> --tag <tag> --database-url <その DB> --out packages/postgres/src/__tests__/__fixtures__/upgrade-from-<tag>.sql` を実行し、できたファイルを PR で足す。歯（`upgrade-from-released.postgres.test.ts`）は `__fixtures__/upgrade-from-*.sql` をすべて拾うので、コードの変更は要らない。既存の fixture は消さない（古い版から直接上げる利用者がいるため）。⚠ 足す前に `git diff` で中身を読み、合成データ以外（ホスト名・利用者名・鍵）が入っていないことを確かめること。
+
 ---
 
 ---
