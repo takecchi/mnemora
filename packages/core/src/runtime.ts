@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
 import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "./correction-candidates.js";
@@ -2673,6 +2674,21 @@ export interface Runtime {
   reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
 }
 
+/**
+ * `observations.payload`（`kind = 'usage'`）の形。`ObserveMemoryUsageInputSchema`
+ * （observation.ts、非公開）と同じ2欄——`externalId` は payload ではなく Observation 行の
+ * 列そのもの（他3種と同じ規約）なので、ここには含めない。
+ *
+ * Issue #870: `handleMemoryUsage` が、冪等な再送で保存済み Observation の payload を
+ * 読み直す（＝ `recordUsage`/`reinforce` を保存済みの `recallId`/`usedMemoryIds` で
+ * 呼ぶ）ために使う。**runtime 内部専用**——公開 API 表面（ADR 0178）を増やさないよう
+ * export しない。
+ */
+const UsageObservationPayloadSchema = z.object({
+  recallId: z.string().min(1),
+  usedMemoryIds: z.array(z.string().min(1)),
+});
+
 function extractObservationPayload(
   input: ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput,
 ): unknown {
@@ -3391,25 +3407,57 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
+  /**
+   * Issue #870: `externalId` を渡した場合、`createObservation` の冪等性
+   * （docs/architecture.md §3.5、`(tenant_id, external_id)` の一意制約）が `observations`
+   * 行にもそのまま効く。**その上で、以下2点を守る**:
+   *
+   * 1. **`recordUsage`/`reinforce` は、返ってきた（保存済みの）Observation の payload で
+   *    呼ぶ**——`input` の値ではない。初回はこの2つは同じ値。再送では、最初の呼び出しが
+   *    `createObservation` の後・`recordUsage` の前で落ちていた場合でも、保存済みの
+   *    payload を読み直すことで `recordUsage`/`reinforce` を完了させられる。同じ
+   *    `externalId` で違う payload（`recallId`/`usedMemoryIds`）が来た場合、後着の
+   *    payload は無視される——他 kind の冪等な再送（`handleExtractableObservation` の
+   *    `!created` 分岐）と同じ規約。
+   * 2. **返ってきた Observation の `kind` が `usage` 以外**（別 kind の Observation と
+   *    `externalId` が衝突した場合）**なら、`recordUsage`/`reinforce` を呼ばない**——
+   *    payload の形が `{ recallId, usedMemoryIds }` である保証が無いため。他 kind の
+   *    冪等な再送と同じ形（`memoryIds: []`、`extraction: 'skipped'`）で返す。
+   */
   async function handleMemoryUsage(
     ctx: Ctx,
     input: Extract<ObserveInput, { kind: "memory_usage" }>,
   ): Promise<ObserveResult> {
+    const usageObservationKind = observeInputKindToObservationKind(
+      "memory_usage" satisfies ObserveInputKind,
+    );
     const observation = await deps.memoryStore.createObservation(ctx, {
       tenantId: ctx.tenantId,
       subjectId: ctx.subjectId ?? null,
-      externalId: null,
-      kind: observeInputKindToObservationKind("memory_usage" satisfies ObserveInputKind),
+      externalId: input.externalId ?? null,
+      kind: usageObservationKind,
       payload: { recallId: input.recallId, usedMemoryIds: input.usedMemoryIds },
       occurredAt: null,
       recordedAt: clock.now(),
     });
 
+    if (observation.kind !== usageObservationKind) {
+      // 上の doc コメント2: externalId が別 kind の Observation と衝突した。
+      return {
+        observationId: observation.id,
+        memoryIds: [],
+        extraction: "skipped",
+        extractionFailure: null,
+      };
+    }
+
     // ADR 0009・docs/memory-model.md §6: 使用報告は抽出器を通らず recall_usages へ直接反映される。
+    // 上の doc コメント1: 保存済みの Observation の payload を読み直して使う。
+    const storedPayload = UsageObservationPayloadSchema.parse(observation.payload);
     const { insertedMemoryIds } = await deps.memoryStore.recordUsage(
       ctx,
-      input.recallId,
-      input.usedMemoryIds,
+      storedPayload.recallId,
+      storedPayload.usedMemoryIds,
     );
     const reinforcedAt = clock.now();
     // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
