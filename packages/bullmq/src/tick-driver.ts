@@ -36,6 +36,15 @@ import type { Ctx, Runtime, TickOptions, TickResult } from "@mnemora/core";
  * await driver.stop();
  * ```
  *
+ * **`start()` を呼ぶまでジョブは処理しない**（Issue #890）。`createBullmqTickDriver(...)`
+ * は Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
+ * `start()` が明示的に `worker.run()` を呼んで初めて始まる。
+ *
+ * **`stop()` の後は再開できない**（Issue #891）。`stop()` を呼んだ driver は使い捨てである。
+ * その後にもう一度 `start()` を呼ぶと Error を投げる——BullMQ の `Queue`/`Worker` は
+ * `close()` した後、同じインスタンスを再利用できないため。もう一度動かしたいときは
+ * `createBullmqTickDriver(...)` を新しく呼び直すこと。
+ *
  * ## 複数プロセスで動かすとき
  *
  * **同じ `queueName` に対して複数プロセスが `createBullmqTickDriver(...).start()` を
@@ -80,9 +89,18 @@ export interface CreateBullmqTickDriverOptions {
 }
 
 export interface BullmqTickDriver {
-  /** 繰り返しジョブを登録する（冪等）。 */
+  /**
+   * Worker を起動し、繰り返しジョブを登録する。**`start()` を呼ぶまでジョブは処理しない**
+   * （Issue #890）。`stop()` の前に複数回呼んでも冪等（2回目以降は何もしない）。
+   * ⛔ **`stop()` の後に呼ぶと Error を投げる**（Issue #891）——この driver は使い捨てであり、
+   * 再開したい場合は `createBullmqTickDriver(...)` を呼び直すこと。
+   */
   start(): Promise<void>;
-  /** 繰り返しジョブの登録を外し、Worker と Queue の接続を閉じる。 */
+  /**
+   * 繰り返しジョブの登録を外し、Worker と Queue の接続を閉じる。**`start()` を一度も
+   * 呼んでいなくても安全に呼べる。** 一度呼ぶと、この driver は使い捨てになる
+   * （以後の `start()` は Error を投げる。Issue #891）。
+   */
   stop(): Promise<void>;
 }
 
@@ -118,20 +136,47 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       opts.onTickResult?.(result);
       return result;
     },
-    { connection: opts.connection, concurrency },
+    // 🔴 Issue #890: 既定の `autorun: true`（bullmq 6.3.8、`Worker` コンストラクタ末尾
+    // `if (this.opts.autorun) { this.run().catch(...) }`）のままだと、`start()` を
+    // 一度も呼んでいない時点で Worker が Redis に繋ぎ、既にキューにあるジョブを
+    // 処理し始めてしまう——上の doc コメント「使い方」の読み方と食い違う。
+    // `autorun: false` で構築し、`start()` の中で明示的に `worker.run()` を呼ぶ。
+    { connection: opts.connection, concurrency, autorun: false },
   );
   worker.on("error", (err) => {
     opts.onTickError?.(err);
   });
 
   let started = false;
+  let stopped = false;
 
   return {
     async start() {
+      // 🔴 Issue #891: `stop()` した driver の Queue/Worker は既に `close()` 済みであり、
+      // bullmq はそれらを再利用できない（`node_modules/bullmq` の `queue-base.js`/
+      // `worker.js` は `closing`/`closed` を一方向にしか進めない）。黙って何もせず
+      // resolve すると「再開できた」ように見えてしまうため、理由の分かる Error で
+      // 拒否する——再開したいなら `createBullmqTickDriver(...)` を呼び直すこと。
+      if (stopped) {
+        throw new Error(
+          "createBullmqTickDriver: stop() 済みの driver で start() は呼べない（この driver は使い捨てである）。" +
+            " 再開したい場合は createBullmqTickDriver(...) を呼び直すこと。",
+        );
+      }
       if (started) {
         return;
       }
       started = true;
+      // Worker は上で `autorun: false` で構築したので、ここで明示的に起動する。
+      // ⚠ `worker.run()` が返す promise は、Worker が閉じるまで resolve しない
+      // （bullmq 6.3.8 の `mainLoop` は `while ((!this.closing && !this.paused) || ...)`
+      // というループであり、`this.closing` が立つのは `worker.close()` を呼んだ後）。
+      // ここで `await` すると `start()` 自体が `stop()` されるまで返らなくなるため、
+      // 意図的に await しない。reject は握りつぶさず、bullmq 自身が `autorun: true` の
+      // ときに内部で行っている `this.run().catch(error => this.emit('error', error))`
+      // と同じ形で `worker` の `"error"` listener（上で登録済み、`onTickError` へ流す）
+      // に載せる。
+      worker.run().catch((error) => worker.emit("error", error));
       // BullMQ 6.x の Job Scheduler API（旧 `queue.add(..., { repeat })` /
       // `queue.removeRepeatable(...)` は 6.x の型に無い——`upsertJobScheduler` に
       // 置き換わった。`jobSchedulerId` を固定値にすることで、複数プロセスが同じ
@@ -140,6 +185,11 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
       await queue.upsertJobScheduler(jobName, { every: opts.everyMs }, { name: jobName });
     },
     async stop() {
+      // `start()` を一度も呼んでいなくても安全に呼べる——`worker.close()` は
+      // `run()`/`mainLoop()` が動いていることに依存しない（`whenCurrentJobsFinished`/
+      // `lockManager.close`/`childPool.clean`/`backend.close` の順で、動いていなければ
+      // 素通りする。bullmq 6.3.8 の `worker.js` を読んで確認済み）。
+      stopped = true;
       try {
         await queue.removeJobScheduler(jobName);
       } finally {
