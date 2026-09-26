@@ -181,6 +181,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`createBullmqTickDriver().start()` が `upsertJobScheduler` の失敗で reject した後、もう一度 `start()` を呼ぶと何もせず resolve していた**（Issue #963）——Worker は動くのにスケジュールが無く、tick が発火しないまま「起動できた」ように見えた。登録を先に済ませ、成功した後でだけ Worker を走らせるようにし、失敗した後の `start()` は登録と起動をやり直す。
 - **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、compare-and-swap が破れた後の1回だけの再読（`MemoryStore.get`）が失敗すると、その例外をそのまま外へ投げていた**——doc コメントの「例外はこのメソッドの外へは投げない」に反し、同じ呼び出しで先に確定した要素（`forgotten`/`restored`/`purged`）の outcome まで呼び出し側から見えなくなっていた。再読の失敗も他の「競合以外の例外」と同じく、その要素を `failed`、残りを `not_attempted` にして返すようにした。
 - **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
   へ落とした記憶を、段3.5（連想、既定 on、ADR 0337）が `RecallResult.memories` へ
