@@ -2051,6 +2051,11 @@ export async function runRecall(
   // `below_threshold` と `budget_dropped` の両方に載る。追記3（Issue #940）が
   // `over_limit(stage:"rescore")` について決めた「最後にその候補を落とした段で1回だけ
   // 数える」を、below_threshold にも当てる。`nearMisses` から外す作法は ADR 0203「決めたこと」5 と同じ。
+  //
+  // Issue #984（ADR 0203 追記5「範囲外と分かったこと」の是正）: 段3.5 の候補プールに入ったが
+  // 席に着けなかった候補（`overLimitAssociationSeatlessIds`）も取り下げる。この候補は段3.5 が
+  // `over_limit(stage:"association")` に数えており、最後に落とした段は段3.5 である——追記4
+  // （Issue #949）が `over_limit(stage:"rescore")` について入れた (c) と同じ処置。
   const returnedMemoryIds = new Set(finalMemories.map((m) => m.memoryId));
   const mandatoryCompanionIds = new Set(companions.map((c) => c.memory.id));
   const associationUnitIds = new Set(
@@ -2060,7 +2065,8 @@ export async function runRecall(
     (c) =>
       returnedMemoryIds.has(c.memory.id) ||
       mandatoryCompanionIds.has(c.memory.id) ||
-      associationUnitIds.has(c.memory.id),
+      associationUnitIds.has(c.memory.id) ||
+      overLimitAssociationSeatlessIds.has(c.memory.id),
   );
   if (promotedFromBelowThreshold.length > 0) {
     const promotedIds = new Set(promotedFromBelowThreshold.map((c) => c.memory.id));
