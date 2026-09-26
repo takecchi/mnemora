@@ -130,6 +130,11 @@ function createFakePool(options: { extensionRows?: readonly string[] } = {}): {
       return { rows: [] };
     },
     release: () => {},
+    // `advisory-lock.ts`/`migrate.ts` が checked-out client に付け外しする空の
+    // `error` リスナー用（`migrate-default-path-unchanged.test.ts` の同名フィールドと
+    // 同じ理由）。
+    on: () => client,
+    removeListener: () => client,
   };
 
   const pool = {

@@ -385,6 +385,19 @@ export class MigrationLockUnavailableError extends AdvisoryLockUnavailableError 
   }
 }
 
+/**
+ * `pool.connect()` で借り切った checked-out client に付ける、何もしない `error`
+ * リスナー（下記の per-file トランザクションクライアント参照）。
+ *
+ * 🔴 **モジュールで1つだけの、同じ関数参照を使い回すこと。** `pg-pool` は接続を pool へ
+ * 返却してもソケットは切らずに次の `pool.connect()` で使い回すため、`on`/
+ * `removeListener` に別々の関数（`() => {}` を毎回新しく作る等）を使うと外せず、
+ * ファイルを1本処理するたびに同じ物理コネクションへリスナーが積み上がって
+ * `MaxListenersExceededWarning`（既定上限10）に達する。**`client.release()` する
+ * 直前に、必ずこの定数で `removeListener` すること。**
+ */
+const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
+
 const MIGRATION_LOCK_ERRORS = {
   timeout: (waitedMs: number, cause: unknown) => new MigrationLockTimeoutError(waitedMs, cause),
   unavailable: (cause: unknown) => new MigrationLockUnavailableError(cause),
@@ -672,6 +685,19 @@ export async function runMigrations(
       }
       try {
         const client = await pool.connect();
+        // pg の仕様: `pool.connect()` で借り切ったクライアント（checked-out client）は、
+        // 呼び出し側が自分で `error` リスナーを付けない限り、接続断
+        // （DB の再起動・フェイルオーバー・運用者による切断・OOM kill 等、外部要因による
+        // ものを含む）が Node の `EventEmitter` の既定動作でそのまま投げられ、
+        // プロセス全体が uncaught exception で落ちる——直後の `try` が `await
+        // client.query(...)` の reject として同じ失敗を捕まえ、下の `catch` が
+        // 約束どおり `Error('migration <file> failed: ...')` に包んで投げるので、
+        // ここでは何もせず黙って拾うだけで足りる（`migrate-connection-loss.test.ts` が
+        // 実測。空リスナーが無い状態だと、この歯はプロセスのクラッシュ、または
+        // 後述の ROLLBACK 上書きにより、元の失敗が観測できない形で赤くなる）。
+        // ⚠ `client.release()` する直前に必ず `removeListener` すること
+        // （{@link NOOP_CLIENT_ERROR_HANDLER} のコメント参照——外し忘れるとリスナーが積み上がる）。
+        client.on("error", NOOP_CLIENT_ERROR_HANDLER);
         try {
           await client.query("BEGIN");
           if (schema !== undefined) {
@@ -687,9 +713,14 @@ export async function runMigrations(
           await client.query("COMMIT");
           applied.push(file);
         } catch (err) {
-          await client.query("ROLLBACK");
+          // 接続が既に失われている等で ROLLBACK 自体が失敗しても、元の失敗（`err`）を
+          // 上書きしない——下の throw は常に `err` を基にする（ROLLBACK 失敗時の
+          // 二次エラーは意図的に握り潰す。ROLLBACK が本当に必要な場面
+          // ——コネクションが生きている通常の DDL エラー——では今日どおり実行される）。
+          await client.query("ROLLBACK").catch(() => {});
           throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
         } finally {
+          client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
           client.release();
         }
       } finally {
