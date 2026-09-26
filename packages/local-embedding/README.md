@@ -424,11 +424,15 @@ new LocalEmbeddingProvider({ cacheDir: "/var/lib/mnemora/models" });
 `buildLocalEmbeddingPipeline(extractor)` に渡せば、この組み立ては自動でやってくれる）:
 
 ```ts
-import { LocalEmbeddingProvider, buildLocalEmbeddingPipeline } from "@mnemora/local-embedding";
+import {
+  LocalEmbeddingProvider,
+  buildLocalEmbeddingPipeline,
+  type CreateLocalEmbeddingPipeline,
+} from "@mnemora/local-embedding";
 
 // 再変換した重みを /var/lib/mnemora/models/my-ruri へ置いた、という想定。
 // （config.json / tokenizer.json / tokenizer_config.json / onnx/model_quantized.onnx）
-const createPipeline = async (spec) => {
+const createPipeline: CreateLocalEmbeddingPipeline = async (spec) => {
   const { env, pipeline } = await import("@huggingface/transformers");
   env.localModelPath = "/var/lib/mnemora/models";
   env.allowRemoteModels = false; // ⭐ ネットワークへ出ない

@@ -389,8 +389,8 @@ mnemora を使うという判断はありうる。**
 // tenantId は必須。subjectId は省略できる。
 const ctx = { tenantId: "guild-123", subjectId: "user-456" }
 
-await observe(ctx, input)
-const recalled = await recall(ctx, { text: "..." })
+await runtime.observe(ctx, input)
+const recalled = await runtime.recall(ctx, { text: "..." })
 ```
 
 | | 何の単位か | 跨いだら |
@@ -467,14 +467,14 @@ claim key 衝突検出を除く。下記）。
 ### (a) `observe()` だけの場合
 
 ```ts
-await observe(ctx, { kind: "utterance", text: "私の好きな色は青です。", speaker: "user" });
-await observe(ctx, {
+await runtime.observe(ctx, { kind: "utterance", text: "私の好きな色は青です。", speaker: "user" });
+await runtime.observe(ctx, {
   kind: "utterance",
   text: "訂正します。よく考えたら、好きな色は青ではなく赤でした。",
   speaker: "user",
 });
 
-const recalled = await recall(ctx, { text: "わたしの好きな色を覚えていますか?", limit: 1 });
+const recalled = await runtime.recall(ctx, { text: "わたしの好きな色を覚えていますか?", limit: 1 });
 ```
 
 **何が起きるか**: 2件とも独立した `Memory`（`status: "active"`）として保存される。
