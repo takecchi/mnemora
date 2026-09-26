@@ -432,6 +432,14 @@ interface MemoryStore {
     recallId: RecallId,
     memoryIds: MemoryId[]
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
+  /** Issue #961: recordUsage と、挿入した id への強化を1トランザクションで（任意。無ければ2段） */
+  recordUsageAndReinforce?(
+    ctx: Ctx,
+    recallId: RecallId,
+    memoryIds: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions
+  ): Promise<{ insertedMemoryIds: MemoryId[] }>;
   aggregateScope(
     ctx: Ctx,
     scope: RecallScope,

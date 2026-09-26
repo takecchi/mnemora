@@ -175,6 +175,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
     reinforceMany(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
+    recordUsageAndReinforce(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<{
+        insertedMemoryIds: MemoryId[];
+    }>;
     recordUsage(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[]): Promise<{
         insertedMemoryIds: MemoryId[];
     }>;
