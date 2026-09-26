@@ -12,6 +12,7 @@ import {
   releaseAdvisoryLock,
   releaseAdvisoryLockOnClient,
 } from "./advisory-lock.js";
+import { resolveCurrentSchema } from "./resolve-current-schema.js";
 import {
   DEFAULT_EXTENSION_SCHEMA,
   type SchemaNamespaceOptions,
@@ -330,12 +331,19 @@ export interface RunMigrationsOptions extends SchemaNamespaceOptions {
  *   をそのまま返す。** 理由:
  *   (a) ローリングデプロイ中、旧バージョンのプロセスは常に旧キー（`MIGRATION_LOCK_KEY`）を
  *   使う。既定経路のキーを変えると新旧が別々のロックを取り、**排他が効かなくなる**。
- *   (b) `schema` 未指定は実行時に `current_schema()`（＝接続の `search_path` 先頭）へ
- *   落ちるので、この関数は静的には実際の対象スキーマを特定できない。
+ *   (b) この関数自身は同期関数で DB 接続を持たないため、`schema` 未指定のときに
+ *   実際どのスキーマが使われるか（＝接続の `search_path` が実行時に解決する先）を
+ *   それ自身では特定できない——`runMigrations` が呼び出し側として、ロック取得より前に
+ *   {@link resolveCurrentSchema} で読んだ値をこの引数へ渡す（Issue #779）。読めなかった
+ *   場合（`current_schema()` が `NULL`）は `undefined` のまま渡され、下の分岐に従って
+ *   `MIGRATION_LOCK_KEY` になる。
  *   **ロックを取りすぎる方向の誤り（無関係な処理を待たせる）は無害だが、
  *   取らなすぎる方向（排他が効かない）は壊す。** ⟹ 保守的な側へ倒し、`undefined` と
  *   `"public"` は同じキーへ寄せる。
  * - それ以外 → `deriveAdvisoryLockKey` で `schema` ごとに別のキーを導出する。
+ *
+ * ⚠ **この関数のシグネチャ・戻り値は公開 API であり、変えていない。** `schema` を渡す
+ * *前*に実行時解決を挟む責務は呼び出し側（`runMigrations`）にある。
  */
 export function migrationLockKeyFor(schema?: string): bigint {
   if (schema === undefined || schema === "public") {
@@ -574,11 +582,18 @@ export function listMigrationFiles(migrationsDir: string): string[] {
  *
  * ## `options.schema`（feat/dedicated-schema）
  *
- * **`schema` 未指定なら、このブロックの分岐は一切実行されない**——今日と同じ SQL が
- * 同じ順番で発行される（発行する DDL・DML はこの意味で1文字も変わらない。ただし
- * *初回*適用時だけ、上の共有ロックの `pg_advisory_lock`/`pg_advisory_unlock` が
- * schema ロックを保持している同じ接続（`lockClient`）に対して増える——新しい接続は
- * 増えない。ADR 0331「決定2との関係」）。`schema` を指定すると:
+ * **`schema` 未指定なら、このブロックの分岐は一切実行されない**——今日と同じ DDL・DML が
+ * 同じ順番で発行される。ただし2つの小さな逸脱がある（どちらも DDL・DML の中身には
+ * 触れない）:
+ * - **`options.lockKey` を上書きしない呼び出しは、ロック取得より前に
+ *   `SELECT current_schema()` を1回発行する**（Issue #779、`migrationLockKeyFor` の doc
+ *   参照）。advisory lock のキーを実際のスキーマに揃えるための読み取りで、
+ *   毎回のマイグレーション適用ごとに1回増える（初回に限らない）。
+ * - *初回*適用時だけ、上の共有ロックの `pg_advisory_lock`/`pg_advisory_unlock` が
+ *   schema ロックを保持している同じ接続（`lockClient`）に対して増える——新しい接続は
+ *   増えない（ADR 0331「決定2との関係」）。
+ *
+ * `schema` を指定すると:
  *
  * 1. `assertSafeSchemaName` で `schema`（と、指定されていれば `extensionSchema`）を検証する。
  *    **これはロック取得より前に行う**（`registerEmbeddingSpace` がバリデーションを
@@ -642,7 +657,13 @@ export async function runMigrations(
   }
 
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
-  const lockKey = options.lockKey ?? migrationLockKeyFor(schema);
+  // Issue #779: `schema` 未指定かつ `options.lockKey` の上書きも無いときだけ、ロック取得
+  // より前に同じ `pool` で `SELECT current_schema()` を読み、実際に解決されたスキーマ名で
+  // `migrationLockKeyFor` を呼ぶ。`schema` を指定した呼び出しは静的に分かっているので
+  // 読みに行かない。詳細は {@link migrationLockKeyFor} の doc と ADR 0331 の追記を参照。
+  const lockKey =
+    options.lockKey ??
+    migrationLockKeyFor(schema === undefined ? await resolveCurrentSchema(pool) : schema);
 
   const { client: lockClient, waitedMs } = await acquireMigrationLock(pool, lockKey, lockTimeoutMs);
   try {
