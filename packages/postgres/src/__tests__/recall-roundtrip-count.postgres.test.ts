@@ -359,4 +359,85 @@ describe("recall() の往復数は候補の件数に比例しない — 本物�
     expect(roundtripsN5).toBe(roundtripsN1);
     expect(roundtripsN20).toBe(roundtripsN1);
   });
+
+  it("歯4（Issue #883・ADR 0342）: RecalledMemory.basisLost の解決は、inferred が無ければ+0往復、在れば basis の件数に関わらず+1往復のまま増えない", async () => {
+    const ctx: Ctx = { tenantId: `tenant-rtc-basislost-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+
+    // `memories_check`（0001_init.sql 68行）: inferred は source_observation_id が
+    // 必須（observations への FK）。まず本物の Observation を1件作る。
+    async function createInferredMemory(
+      vector: number[],
+      digest: string,
+      basisMemoryIds: string[],
+    ) {
+      const observation = await memoryStore.createObservation(ctx, {
+        tenantId: ctx.tenantId,
+        subjectId: null,
+        externalId: null,
+        kind: "utterance",
+        payload: { text: "fixture" },
+        occurredAt: null,
+      });
+      return createEmbeddedMemory(memoryStore, vectorStore, ctx, vector, {
+        digest,
+        sourceObservationId: observation.id,
+        provenance: {
+          kind: "inferred",
+          model: "test-model",
+          promptVersion: "v1",
+          basis: { memoryIds: basisMemoryIds, observationIds: [] },
+          confidence: 0.9,
+        },
+      });
+    }
+
+    // 基準: inferred を含まない recall（連想枠 off——`association: null`——で、
+    // 段3の同伴取得も `scope.attributes` も踏まないようにする。歯1・歯2 と同じ
+    // 「候補フェッチ以外の getMany 経路を混ぜない」配置）。
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], { digest: "plain-1" });
+    await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.01, 0], {
+      digest: "plain-2",
+    });
+    const baselineRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 1件の inferred、basis 1件。
+    const basis = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: "basis" }),
+    );
+    await createInferredMemory([0.98, 0.02, 0], "inferred-with-1-basis", [basis.id]);
+    const oneBasisRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+    expect(oneBasisRoundtrips).toBe(baselineRoundtrips + 1);
+
+    // さらに4件の inferred（合計5件）、それぞれ basis 5件（新規24件 + 既存1件 = のべ29件、
+    // ユニークな basis memoryId は25件超）を追加する——basis の件数を増やしても
+    // 往復数が変わらないことを見るのが目的なので、絶対数そのものは固定しない。
+    for (let i = 0; i < 4; i += 1) {
+      const basisIds: string[] = [basis.id];
+      for (let j = 0; j < 5; j += 1) {
+        const b = await memoryStore.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: ctx.tenantId, digest: `basis-${i}-${j}` }),
+        );
+        basisIds.push(b.id);
+      }
+      await createInferredMemory(
+        [0.97 - i * 0.001, 0.03 + i * 0.001, 0],
+        `inferred-${i}`,
+        basisIds,
+      );
+    }
+    const manyBasisRoundtrips = await countClientQueries(async () => {
+      await runtime.recall(ctx, { vector: QUERY_VECTOR, channels: ["ann"], association: null });
+    });
+
+    // 固定するのはこれだけ: inferred の件数・basis の件数が増えても、
+    // basisLost の解決に要る往復は常に+1のまま増えない。
+    expect(manyBasisRoundtrips).toBe(oneBasisRoundtrips);
+  });
 });
