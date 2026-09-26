@@ -628,6 +628,7 @@ export interface MemoryStore {
     }>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+    reinforceMany?(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
     recordUsage(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[]): Promise<{
         insertedMemoryIds: MemoryId[];
     }>;
@@ -1243,6 +1244,7 @@ export interface ObserveDocumentInput {
 }
 export interface ObserveMemoryUsageInput {
     kind: "memory_usage";
+    externalId?: string;
     recallId: string;
     usedMemoryIds: string[];
 }
@@ -1355,6 +1357,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"memory_usage">;
+        externalId: z.ZodOptional<z.ZodString>;
         recallId: z.ZodString;
         usedMemoryIds: z.ZodArray<z.ZodString>;
     }, z.core.$strip>

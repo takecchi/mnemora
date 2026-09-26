@@ -278,6 +278,24 @@ export interface ObserveDocumentInput {
  */
 export interface ObserveMemoryUsageInput {
   kind: "memory_usage";
+  /**
+   * 他3種（utterance/event/document）の `externalId` と同じ規約——テナント内一意・任意、
+   * 再送は同じ Observation を返す（docs/architecture.md §3.5）。
+   *
+   * Issue #870: 以前はこの欄が無く、`handleMemoryUsage`（runtime.ts）は
+   * `externalId: null` を固定で渡していたため、`observations` 行の冪等化が構造的に
+   * 効かなかった（再送のたびに行が増え続けた）。`recall_usages`/`reinforce` 自体は
+   * 元から `(recall_id, memory_id)` 主キーで冪等——この欄はそちらではなく
+   * `observations` 行の冪等キーを補う。
+   *
+   * **再送時の設計**（`handleMemoryUsage` の doc コメント参照）: `recordUsage`/
+   * `reinforce` は保存済みの Observation の payload で呼ぶ（同じ externalId で違う
+   * payload が来た場合、後着は無視される——他 kind の再送と同じ規約）。返ってきた
+   * Observation の `kind` が `usage` 以外（別 kind の externalId と衝突）なら、
+   * `recordUsage`/`reinforce` を呼ばず、他 kind の冪等な再送と同じ形
+   * （`memoryIds: []`、`extraction: 'skipped'`）で返す。
+   */
+  externalId?: string;
   recallId: string;
   usedMemoryIds: string[];
 }
@@ -343,6 +361,7 @@ const ObserveDocumentInputSchema = z.object({
 
 const ObserveMemoryUsageInputSchema = z.object({
   kind: z.literal("memory_usage"),
+  externalId: z.string().min(1).optional(),
   recallId: z.string().min(1),
   usedMemoryIds: z.array(z.string().min(1)).min(1),
 }) satisfies z.ZodType<ObserveMemoryUsageInput>;

@@ -323,6 +323,12 @@ export interface AggregateScopeOptions {
  * `status='archived'` + `archived` イベント」を満たす唯一の書き込み口。`Memory.decayFloorAt`
  * は書き込み時に計算されて列に持たれていた（ADR 0004・ADR 0011）が、それを読んで実際に
  * `archived` へ倒す経路がこれまで無かった——この掃引がその欠落を埋める。
+ *
+ * [Issue #874](https://github.com/takecchi/mnemora/issues/874) / ADR 0303 追記節
+ * （2026-09-26、クローン miku）で `reinforceMany`（任意メソッド）を追加した:
+ * `handleMemoryUsage` の `recordUsage` → `reinforce` ループが使用報告1件ごとに
+ * 直列に往復していた N+1 を、この口があるときだけ束ねるための一括版。契約は
+ * `reinforceMany` 自身の doc コメント参照。
  */
 export interface MemoryStore {
   createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
@@ -580,6 +586,63 @@ export interface MemoryStore {
    * `runtime.observe` に渡す `usedMemoryIds` の出どころを正しく保つ責務を負う。
    */
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
+  /**
+   * [Issue #874](https://github.com/takecchi/mnemora/issues/874) / ADR 0303 追記節
+   * （2026-09-26、クローン miku）: `reinforce` を `ids` の各要素について呼んだのと
+   * 同じ結果になる、任意（省略可能）の一括版。`runtime.ts` の `handleMemoryUsage`
+   * （`observe({kind:'memory_usage'})`）が使用報告1件ごとに `reinforce` を直列に
+   * 呼んでいたことによる N+1（往復数が件数に比例する）を、この口があるときだけ
+   * 束ねるために追加した。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`@mnemora/core` は npm に公開済み、`archiveDecayed?` と
+   * 同じ理由）。この口を実装しない adapter に対しては、`handleMemoryUsage` が
+   * 1件ずつ `reinforce` を呼ぶ従来のループにそのままフォールバックする。
+   *
+   * 契約: **`ids` の各要素 `ids[i]` について、`i = 0, 1, ..., ids.length - 1` の順に
+   * `reinforce(ctx, ids[i], at, opts)` を呼んだのと同じ結果になる。**戻り値は `ids` と
+   * 同じ長さ・同じ順序の配列であり、`results[i]` は `reinforce(ctx, ids[i], at, opts)`
+   * の返り値と同じ `Memory` になる（`ids` に重複がある場合、重複したどの要素も
+   * 同じ最終状態の行を返す——`reinforce` を同じ `id`・同じ `at` で複数回呼んでも
+   * 2回目以降が no-op になるのと同じ理由。`at`/`opts` は呼び出し全体で1つだけ渡す
+   * ——`reinforce` のように呼び出しごとに違う `at` を渡す口ではない）。
+   *
+   * `reinforce` の doc コメントが定める規律は、この一括版の**各要素**にもそのまま
+   * 当たる:
+   * - **減衰の起点を巻き戻さない**（[ADR 0048](../../../../docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)/
+   *   ADR 0049）: 書き込むのは、現在の `lastReinforcedAt` が `null` か `at` より
+   *   狭義に古い行だけ。**この単調性の比較は、1件ずつのときと同じく WHERE 句
+   *   （CAS）の中で行う**——アプリ側で読んだ古い値を条件にしない（読みと書きの間に
+   *   別の強化が割り込んでも上書きしない）。等しい/古い `at` は no-op（例外にしない。
+   *   `updatedAt` も動かさない。更新されなかった現在の行をそのまま返す）。
+   * - [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
+   *   `opts.nowSeq` を渡すと、活動時計側の起点・床（`decayBaseSeq`/`decayFloorSeq`）も
+   *   同じ強化イベントとして進める——**対象の Memory が `halfLifeRecalls` を持つ行に
+   *   限る**。この判定は**行ごと**に行う（`ids` に `halfLifeRecalls` を持つ行と
+   *   持たない行が混ざってもよい。持たない行は活動時計側の3列に一切触れない）。
+   * - [Issue #840](https://github.com/takecchi/mnemora/issues/840) / ADR 0303 追記節:
+   *   **`status` を見ない。**対象 Memory がどの `status`（`active`/`contested`/
+   *   `archived`/`superseded`/`forgotten`）であっても、上の単調性・活動時計の規則
+   *   だけを適用してそのまま書き込む——`status` に応じた no-op・拒否は無い
+   *   （`reinforce` と1バイトも違わない）。
+   * - **`memory_events` は書かない**（`reinforce` 自身が書かないのと同じ）。
+   *
+   * `ids` に存在しない id・adapter の期待する形式でない id が含まれる場合:
+   * `reinforce` 単体を呼べば「memory not found」の `Error` を投げる。この一括版も
+   * 同じ `Error` を投げるが、**「どこまで書いてから投げるか」は 1件ずつのループと
+   * 厳密には一致しない**——実装の doc コメント（`packages/postgres/src/memory-store.ts`
+   * の `PostgresMemoryStore.reinforceMany`）を参照。
+   *
+   * ⚠ **runtime 側の唯一の呼び出し元（`handleMemoryUsage`）が渡す `ids` は
+   * `recordUsage` が返した `insertedMemoryIds` であり、実運用でこの分岐に実際に
+   * 入ることは無い**——`recall_usages.memory_id` は `memories(id)` への外部キーを
+   * 持つため、`recordUsage` の INSERT が成功した時点で参照先の行が存在したことの
+   * 証明になっており、かつ Memory の行は `purgeMemory?`（ADR 0124）でも内容を
+   * 上書きするだけで物理削除されない。**確かめたのは「（この経路では）入らない」
+   * ことであり、「入り得ない」ことの証明ではない**——`purgeMemory?` を実装しない
+   * adapter・`handleMemoryUsage` 以外の将来の呼び出し元まで見渡した保証ではない。
+   */
+  reinforceMany?(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
   /**
    * D9: 使用報告を記録する。`(recall_id, memory_id)` の挿入が実際に起きたものだけを
    * `insertedMemoryIds` として返す（再送は空配列になりうる）。
