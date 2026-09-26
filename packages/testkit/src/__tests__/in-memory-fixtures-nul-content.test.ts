@@ -36,7 +36,11 @@ describe("InMemoryMemoryStore.createMemory: content に NUL 文字を含むと P
     await expect(
       store.createMemory(
         ctx,
-        buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "h1", content: "abc\u0000def" }),
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: "h1",
+          content: "abc\u0000def",
+        }),
       ),
     ).rejects.toThrow(/must not contain NUL/);
     const all = store.listByTenant(ctx);

@@ -294,9 +294,9 @@ describe("FakeMemoryStore.reinforce: Invalid Date を渡すと Postgres と同�
   it("Invalid Date は例外を投げ、lastReinforcedAt/decayFloorAt を変えない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     const memory = await memoryStore.createMemory(ctx, fixture());
-    await expect(
-      memoryStore.reinforce(ctx, memory.id, new Date(Number.NaN)),
-    ).rejects.toThrow(/at must be a valid Date/);
+    await expect(memoryStore.reinforce(ctx, memory.id, new Date(Number.NaN))).rejects.toThrow(
+      /at must be a valid Date/,
+    );
     const after = await memoryStore.get(ctx, memory.id);
     expect(after?.lastReinforcedAt).toBeNull();
     expect(after?.decayFloorAt).toEqual(memory.decayFloorAt);
@@ -345,9 +345,9 @@ describe("FakeEventStore.append: at に Invalid Date を渡すと例外を投げ
 describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 列) に収まらない値を拒む（Issue #817）", () => {
   it("1e300（float4 の範囲を大きく超える）は例外を投げ、Memory を作らない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
-    await expect(
-      memoryStore.createMemory(ctx, fixture({ halfLifeHours: 1e300 })),
-    ).rejects.toThrow(/does not fit in a Postgres "real"/);
+    await expect(memoryStore.createMemory(ctx, fixture({ halfLifeHours: 1e300 }))).rejects.toThrow(
+      /does not fit in a Postgres "real"/,
+    );
   });
 
   it("halfLifeHours: 0（既存の recall-pipeline.test.ts が使う『壊れた』Memory）は引き続き成功する（回帰確認）", async () => {
@@ -363,9 +363,9 @@ describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 
 
   it("strength=1e300 は（別の理由=値域外で）引き続き例外を投げる（回帰確認、float4 検査は不要）", async () => {
     const { memoryStore } = createFakeRuntimeStores();
-    await expect(
-      memoryStore.createMemory(ctx, fixture({ strength: 1e300 })),
-    ).rejects.toThrow(/strength out of range/);
+    await expect(memoryStore.createMemory(ctx, fixture({ strength: 1e300 }))).rejects.toThrow(
+      /strength out of range/,
+    );
   });
 });
 
