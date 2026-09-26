@@ -222,6 +222,14 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             MemoryEvent
         ];
     }>;
+    resolveOrphanedContested(ctx: Ctx, survivor: {
+        id: MemoryId;
+        contestedWithId: MemoryId;
+        event: NewMemoryEvent;
+    }): Promise<{
+        memory: Memory;
+        event: MemoryEvent;
+    }>;
     findActiveByClaimKey(ctx: Ctx, query: {
         subjectId: string | null;
         claimKey: ClaimKey;

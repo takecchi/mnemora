@@ -709,9 +709,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 対象テナントの期限切れイベントの**ほぼ全件を静かに削除**してしまう
     // （このメソッドは delete の副作用を持つ——`search`/`list` 系より実害が大きい）。
     // `opts.limit === -1` の1点だけは Postgres と完全には一致しない（Postgres は
-    // 例外を投げず `purged: 0`）が、**どちらの入力でも「誤って削除しない」ことは
-    // 保証される**——`LIMIT + 1` の窓を模してまで `-1` だけを特別扱いする値打ちが
-    // 無いと判断し、負数はすべて一様に拒む。
+    // 例外を投げず `{ purged: 0, reachedLimit: true }`）が、**どちらの入力でも
+    // 「誤って削除しない」ことは保証される**——`LIMIT + 1` の窓を模してまで `-1` だけを
+    // 特別扱いする値打ちが無いと判断し、負数はすべて一様に拒む。
+    // ⟹ この不一致は解消すべき欠陥ではなく、今の契約である——負数は「受け付けない値」で
+    // あり、結果が実装ごとに違うことを許す（Issue #876、`PurgeExpiredEventsOptions.limit`
+    // の doc 参照）。
     // ⚠ 負数だけでは足りない——`opts.limit + 1` も bigint 型の SQL パラメータへ渡るため、
     // `NaN`/`Infinity`/非整数を渡すと Postgres は
     // `invalid input syntax for type bigint: "NaN"` の形で例外を投げる（実測済み。
@@ -1448,6 +1451,34 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+  }
+
+  /**
+   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記）:
+   * `resolveContestedPair`（上）の解決側 CAS を満たせなくなった生存側1件だけを対象にした
+   * 別の任意メソッド。契約は `MemoryStore.resolveOrphanedContested`（`@mnemora/core`）側に
+   * ある。対向の行には一切触れない。
+   */
+  async resolveOrphanedContested(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const memory = await this.get(ctx, survivor.id);
+    if (!memory) {
+      throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${survivor.id}`);
+    }
+    if (memory.status !== "contested" || memory.contestedWithId !== survivor.contestedWithId) {
+      throw new MemoryStatusConflictError(survivor.id, "contested", memory.status);
+    }
+
+    memory.status = "active";
+    memory.contestedWithId = null;
+    memory.updatedAt = new Date();
+
+    const storedEvent = buildStoredMemoryEvent(ctx, survivor.event);
+    this.events.push(storedEvent);
+
+    return { memory, event: storedEvent };
   }
 
   /**

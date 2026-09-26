@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { systemClock } from "./clock.js";
 import type { Clock } from "./interfaces/clock.js";
 import { DEFAULT_CORRECTION_CANDIDATE_LIMIT } from "./correction-candidates.js";
@@ -1657,6 +1658,80 @@ export interface ResolveContestedResult {
   outcome: ResolveContestedOutcome;
 }
 
+/**
+ * `runtime.resolveOrphanedContested` が生存側1件を分類する適格性
+ * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
+ * `ResolveContestedSideOutcome`（上）と同じ「無いを分類して返す」流儀に倣うが、
+ * この口は対の**もう一方**を分類しない——対向はもう `contested` ではない前提の口だから
+ * である。
+ *
+ * - `"eligible"` — `status === "contested"` かつ `contestedWithId` が非 null で、その id の
+ *   Memory が `"forgotten"` であるか、そもそも見つからない（purge 済み等）。
+ * - `"not_found"` — そのテナントに `survivorId` の Memory がそもそも無い。
+ * - `"status_not_contested"` — 存在はするが `status !== "contested"`。
+ * - `"no_contested_with_id"` — `status === "contested"` だが `contestedWithId` が `null`
+ *   （ADR 0150 負債2「片側だけの `contested`」と同じ形の壊れ方。**この口はそれを直さない**
+ *   ——対象外として ineligible で返す）。
+ * - `"opposite_not_orphaned"` — `contestedWithId` の指す Memory が見つかったが、
+ *   `status` が `"forgotten"` ではない（`active`/`contested`/`superseded` のいずれか）。
+ *   まだ `resolveContestedPair`（決定3の CAS）で正規に解決できる可能性がある対象を、
+ *   この口が代わりに割り込んで処理しないためのガード。
+ */
+export type ResolveOrphanedContestedEligibility =
+  | { kind: "eligible"; contestedWithId: MemoryId }
+  | { kind: "not_found" }
+  | { kind: "status_not_contested"; status: Exclude<MemoryStatus, "contested"> }
+  | { kind: "no_contested_with_id" }
+  | { kind: "opposite_not_orphaned"; contestedWithId: MemoryId; oppositeStatus: MemoryStatus };
+
+/**
+ * `runtime.resolveOrphanedContested` 全体の結末
+ * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
+ * `ResolveContestedOutcome`（上）と対称の語彙を使う。
+ *
+ * - `"resolved"` — 生存側を `status: "active"`・`contestedWithId: null` へ動かした。
+ * - `"ineligible"` — 読んだ時点で `"eligible"` でなかった。**書き込みは一切試みていない。**
+ * - `"conflict"` — 読んだ時点では `"eligible"` だったが、書き込み時点で
+ *   {@link MemoryStatusConflictError} が投げられた（TOCTOU）。`resolveContested` と同じく
+ *   **1回だけ**再読して打ち切る（上限の無い再試行ループにしない）。
+ * - `"not_attempted"` — `MemoryStore.resolveOrphanedContested` が実装されていない
+ *   （`ResolveOrphanedContestedResult.supported: false`）。フォールバック経路は無い。
+ */
+export type ResolveOrphanedContestedOutcome =
+  | { kind: "resolved"; memory: Memory }
+  | { kind: "ineligible"; eligibility: ResolveOrphanedContestedEligibility }
+  | { kind: "conflict"; observedStatus: MemoryStatus | null }
+  | { kind: "not_attempted" };
+
+/**
+ * `runtime.resolveOrphanedContested` の任意オプション
+ * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
+ * `ResolveContestedOptions`（上）と同じ形。
+ */
+export interface ResolveOrphanedContestedOptions {
+  /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
+  actor?: EventActor;
+  /**
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値
+   * `'contested_resolved'` であり、この欄では上書きしない）。省略時は `meta` に `note`
+   * キー自体を持たせない。
+   */
+  reason?: string;
+}
+
+/**
+ * `runtime.resolveOrphanedContested` の結果
+ * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
+ */
+export interface ResolveOrphanedContestedResult {
+  /**
+   * `MemoryStore.resolveOrphanedContested` が実装されていたか。**`false` のとき
+   * `outcome` は必ず `{ kind: "not_attempted" }`。**
+   */
+  supported: boolean;
+  outcome: ResolveOrphanedContestedOutcome;
+}
+
 export interface Runtime {
   /**
    * `docs/architecture.md` §3.5 の Observation 冪等キー（`externalId`）は、その Observation
@@ -2306,6 +2381,83 @@ export interface Runtime {
     opts?: ResolveContestedOptions,
   ): Promise<ResolveContestedResult>;
   /**
+   * [Issue #825](https://github.com/takecchi/mnemora/issues/825)（ADR 0150 追記、
+   * 2026-09-26）: `resolveContested`（上）の決定3（CAS「両側とも `contested` かつ
+   * 相互参照が成立」）は、対の片側を `forget()` すると満たせなくなる——forget は
+   * `status` を `'forgotten'` に動かすだけで `contestedWithId` には触れない
+   * （`forget` の doc コメント参照）ため、生存側は `contested`・`contestedWithId` が
+   * 対向を指したまま残るのに、対向はもう `contested` ではなくなる。この状態になった
+   * 生存側は、`resolveContested` を呼んでも対向側が `status_not_contested` で ineligible
+   * になり、二度と解消できない（Issue #825 の再現）。
+   *
+   * **この口は決定3の CAS には一切触れない。**`resolveContested`/`MemoryStore.
+   * resolveContestedPair` は1文字も変更していない——既存の呼び出しの振る舞いは変わらない。
+   * 代わりに、**生存側1件だけ**を対象にした別の任意メソッドとして足す
+   * （[ADR 0150](../../../docs/decisions/0150-resolve-contested-explicit-operation.md)
+   * 追記「案D を部分的に覆す」参照）。
+   *
+   * **この操作も「どちらが正しいか」を判定しない。**`markContested`/`resolveContested` と
+   * 同じ理由——判定するのは「対向が forget という正規操作で `forgotten` になった（または
+   * 既に purge 済みで見つからない）かどうか」という機械的な事実だけであり、`content` の
+   * 正しさには一切触れない。⟹ `recordedAt`/`occurredAt` を参照しない。LLM を呼ばない。
+   *
+   * 手順:
+   * 1. `deps.memoryStore.resolveOrphanedContested` が無ければ、ここで打ち切り
+   *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す——フォールバック
+   *    経路は無い（`MemoryStore.resolveOrphanedContested` の interface JSDoc 参照）。
+   * 2. `survivorId` を読み、{@link ResolveOrphanedContestedEligibility} に分類する:
+   *    - 見つからない → `"not_found"`。
+   *    - `status !== "contested"` → `"status_not_contested"`。
+   *    - `contestedWithId` が `null` → `"no_contested_with_id"`（ADR 0150 負債2の形。
+   *      この口はそれを対象にしない）。
+   *    - `contestedWithId` の指す Memory を読み、見つからないか `status === "forgotten"`
+   *      なら `"eligible"`。それ以外（`active`/`contested`/`superseded` のいずれか）なら
+   *      `"opposite_not_orphaned"`。
+   * 3. `"eligible"` でなければ、書き込みを一切試みず
+   *    `{ supported: true, outcome: { kind: "ineligible", eligibility } }` を返す。
+   * 4. `"eligible"` なら `deps.memoryStore.resolveOrphanedContested` を呼ぶ。成功すれば
+   *    `{ supported: true, outcome: { kind: "resolved", memory } }`。
+   * 5. {@link MemoryStatusConflictError} が投げられたら（2で読んだ後、4で書く前に別の
+   *    書き込みが割り込んだ TOCTOU）、`resolveContested` と同じく**1回だけ**再読して
+   *    `observedStatus` に積み、`{ supported: true, outcome: { kind: "conflict",
+   *    observedStatus } }` を返す——上限の無い再試行ループにはしない。
+   *
+   * `memory_events` へ生存側1件だけに `kind: 'updated'` を積む（対向〔forgotten〕の行には
+   * 一切触れない）。`meta.reason` は `resolveContested` と同じ固定値 `'contested_resolved'`
+   * を使う——**この経路で解消したことは `meta.resolution: 'orphan_reclaimed'` という、
+   * `ContestedResolution`（`'supersede'`/`'both_active'`）のどちらとも異なる値**で
+   * 区別する（監査ログだけを見て「`resolveContested` の正規経路で決着したのか、
+   * この救済経路で戻したのか」を後から読めるようにするため）。`opts.reason` を渡すと
+   * `meta.note` に追加で入る。
+   *
+   * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` から `'active'` へ
+   * 離れた時点で、既存の段1 status ゲート・段3 mandatory companion retrieval から自然に
+   * 外れる——`resolveContested` と同じ理由。
+   *
+   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く。
+   *
+   * 🔴 **任意メソッドである（2026-09-26 追記、Issue #825 続き）。**当初は必須メソッドとして
+   * 着地したが、`@mnemora/core` は v1.0.0 として npm に公開済みであり、`Runtime` interface
+   * を自前で実装している利用者（`docs/migration-v1.md` §12/§14/§16 が `restoreSuperseded`/
+   * `findCorrectionCandidates`/`applyCorrection` の必須化をそのように破壊的変更として数えた、
+   * まさにその立場）にとって、v1.0.0 の後に必須メソッドが増えることは次のメジャー版を要求する
+   * 破壊的変更になる。`@mnemora/testkit` の `supportsTaxonomyMode`/`supportsLabels`/
+   * `supportsFindActiveByClaimKey`（[Issue #818](https://github.com/takecchi/mnemora/issues/818)、
+   * PR #827）で同じ形（v1.0.0 後の必須化）を任意へ戻した前例に倣い、`?` へ戻した
+   * （クローン miku の判断。[ADR 0150](../../../docs/decisions/0150-resolve-contested-explicit-operation.md)
+   * 追記参照）。⟹ **`createRuntime` が返す `Runtime` には必ずこのメソッドが実装されている**
+   * ——省略されるのは、利用者が独自に `Runtime` を実装する場合の後方互換のためだけである。
+   * `createRuntime()` の戻り値からこの口を呼ぶ側は、`MemoryStore` の任意メソッドを呼ぶ既存の
+   * 慣習（`store.markContestedPair!(...)` 等）と同じく、非 null アサーション
+   * （`runtime.resolveOrphanedContested!(...)`）で呼んでよい——**この repo にはこれ以外の
+   * 前例（`createRuntime` の戻り値の型を狭める工夫）が無いことを確認した上でこの形にした。**
+   */
+  resolveOrphanedContested?(
+    ctx: Ctx,
+    survivorId: MemoryId,
+    opts?: ResolveOrphanedContestedOptions,
+  ): Promise<ResolveOrphanedContestedResult>;
+  /**
    * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
    * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
    * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
@@ -2521,6 +2673,21 @@ export interface Runtime {
    */
   reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
 }
+
+/**
+ * `observations.payload`（`kind = 'usage'`）の形。`ObserveMemoryUsageInputSchema`
+ * （observation.ts、非公開）と同じ2欄——`externalId` は payload ではなく Observation 行の
+ * 列そのもの（他3種と同じ規約）なので、ここには含めない。
+ *
+ * Issue #870: `handleMemoryUsage` が、冪等な再送で保存済み Observation の payload を
+ * 読み直す（＝ `recordUsage`/`reinforce` を保存済みの `recallId`/`usedMemoryIds` で
+ * 呼ぶ）ために使う。**runtime 内部専用**——公開 API 表面（ADR 0178）を増やさないよう
+ * export しない。
+ */
+const UsageObservationPayloadSchema = z.object({
+  recallId: z.string().min(1),
+  usedMemoryIds: z.array(z.string().min(1)),
+});
 
 function extractObservationPayload(
   input: ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput,
@@ -3240,25 +3407,57 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
   }
 
+  /**
+   * Issue #870: `externalId` を渡した場合、`createObservation` の冪等性
+   * （docs/architecture.md §3.5、`(tenant_id, external_id)` の一意制約）が `observations`
+   * 行にもそのまま効く。**その上で、以下2点を守る**:
+   *
+   * 1. **`recordUsage`/`reinforce` は、返ってきた（保存済みの）Observation の payload で
+   *    呼ぶ**——`input` の値ではない。初回はこの2つは同じ値。再送では、最初の呼び出しが
+   *    `createObservation` の後・`recordUsage` の前で落ちていた場合でも、保存済みの
+   *    payload を読み直すことで `recordUsage`/`reinforce` を完了させられる。同じ
+   *    `externalId` で違う payload（`recallId`/`usedMemoryIds`）が来た場合、後着の
+   *    payload は無視される——他 kind の冪等な再送（`handleExtractableObservation` の
+   *    `!created` 分岐）と同じ規約。
+   * 2. **返ってきた Observation の `kind` が `usage` 以外**（別 kind の Observation と
+   *    `externalId` が衝突した場合）**なら、`recordUsage`/`reinforce` を呼ばない**——
+   *    payload の形が `{ recallId, usedMemoryIds }` である保証が無いため。他 kind の
+   *    冪等な再送と同じ形（`memoryIds: []`、`extraction: 'skipped'`）で返す。
+   */
   async function handleMemoryUsage(
     ctx: Ctx,
     input: Extract<ObserveInput, { kind: "memory_usage" }>,
   ): Promise<ObserveResult> {
+    const usageObservationKind = observeInputKindToObservationKind(
+      "memory_usage" satisfies ObserveInputKind,
+    );
     const observation = await deps.memoryStore.createObservation(ctx, {
       tenantId: ctx.tenantId,
       subjectId: ctx.subjectId ?? null,
-      externalId: null,
-      kind: observeInputKindToObservationKind("memory_usage" satisfies ObserveInputKind),
+      externalId: input.externalId ?? null,
+      kind: usageObservationKind,
       payload: { recallId: input.recallId, usedMemoryIds: input.usedMemoryIds },
       occurredAt: null,
       recordedAt: clock.now(),
     });
 
+    if (observation.kind !== usageObservationKind) {
+      // 上の doc コメント2: externalId が別 kind の Observation と衝突した。
+      return {
+        observationId: observation.id,
+        memoryIds: [],
+        extraction: "skipped",
+        extractionFailure: null,
+      };
+    }
+
     // ADR 0009・docs/memory-model.md §6: 使用報告は抽出器を通らず recall_usages へ直接反映される。
+    // 上の doc コメント1: 保存済みの Observation の payload を読み直して使う。
+    const storedPayload = UsageObservationPayloadSchema.parse(observation.payload);
     const { insertedMemoryIds } = await deps.memoryStore.recordUsage(
       ctx,
-      input.recallId,
-      input.usedMemoryIds,
+      storedPayload.recallId,
+      storedPayload.usedMemoryIds,
     );
     const reinforcedAt = clock.now();
     // ADR 0165 決めたこと16: 'wall' 以外のテナントでは活動時計の「いま」も一緒に渡し、
@@ -4536,6 +4735,97 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `Runtime.resolveOrphanedContested` の実装
+   * ([Issue #825](https://github.com/takecchi/mnemora/issues/825)、ADR 0150 追記)。
+   * doc コメントは interface 側（`resolveOrphanedContested` の JSDoc）にある——ここは
+   * アルゴリズムそのものだけ。`resolveContested` の実装と対称に書いてある。
+   */
+  async function resolveOrphanedContested(
+    ctx: Ctx,
+    survivorId: MemoryId,
+    opts?: ResolveOrphanedContestedOptions,
+  ): Promise<ResolveOrphanedContestedResult> {
+    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`resolveContested` と
+    // 同じ作法。分割代入したメソッドは `this` を失う）。
+    const resolveOrphanedContestedPair = deps.memoryStore.resolveOrphanedContested;
+    if (resolveOrphanedContestedPair === undefined) {
+      return { supported: false, outcome: { kind: "not_attempted" } };
+    }
+
+    const survivor = await deps.memoryStore.get(ctx, survivorId);
+    if (survivor === null) {
+      return {
+        supported: true,
+        outcome: { kind: "ineligible", eligibility: { kind: "not_found" } },
+      };
+    }
+    if (survivor.status !== "contested") {
+      return {
+        supported: true,
+        outcome: {
+          kind: "ineligible",
+          eligibility: { kind: "status_not_contested", status: survivor.status },
+        },
+      };
+    }
+    const contestedWithId = survivor.contestedWithId ?? null;
+    if (contestedWithId === null) {
+      return {
+        supported: true,
+        outcome: { kind: "ineligible", eligibility: { kind: "no_contested_with_id" } },
+      };
+    }
+    const opposite = await deps.memoryStore.get(ctx, contestedWithId);
+    if (opposite !== null && opposite.status !== "forgotten") {
+      return {
+        supported: true,
+        outcome: {
+          kind: "ineligible",
+          eligibility: {
+            kind: "opposite_not_orphaned",
+            contestedWithId,
+            oppositeStatus: opposite.status,
+          },
+        },
+      };
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
+    const meta: Record<string, unknown> =
+      opts?.reason === undefined
+        ? { reason: "contested_resolved", resolution: "orphan_reclaimed" }
+        : { reason: "contested_resolved", resolution: "orphan_reclaimed", note: opts.reason };
+    const event: NewMemoryEvent = {
+      tenantId: ctx.tenantId,
+      memoryId: survivorId,
+      kind: "updated",
+      actor,
+      digestSnapshot: survivor.digest,
+      meta,
+    };
+
+    try {
+      const { memory } = await resolveOrphanedContestedPair.call(deps.memoryStore, ctx, {
+        id: survivorId,
+        contestedWithId,
+        event,
+      });
+      return { supported: true, outcome: { kind: "resolved", memory } };
+    } catch (error) {
+      if (error instanceof MemoryStatusConflictError) {
+        // 安全弁（`resolveContested` と同じ形。1回だけ再読して打ち切る——上限の無い
+        // 再試行ループを作らない）。
+        const refetched = await deps.memoryStore.get(ctx, survivorId);
+        return {
+          supported: true,
+          outcome: { kind: "conflict", observedStatus: refetched?.status ?? null },
+        };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * `Runtime.applyCorrection` の実装（Issue #369、[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
    * doc コメントは interface 側（`applyCorrection` の JSDoc）にある——ここは手順そのもの
    * だけ。`markContested`/`resolveContested` を呼ぶだけの薄い orchestration であり、
@@ -5182,6 +5472,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     purge,
     markContested,
     resolveContested,
+    resolveOrphanedContested,
     applyCorrection,
     consolidate,
     reflect,

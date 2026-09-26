@@ -53,8 +53,9 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 
 **記憶そのものを動かす中核操作**は5動詞に固定する（ここは増やさない）。`Runtime` には他にも
 メソッド（保守操作 `tick`/`reembed`/`reextract`/`sweepArchive`、是正・取り消し
-`markContested`/`resolveContested`/`restoreArchived`/`restoreSuperseded`/`purge`、説明
-`getRecall`）があるが、これらは中核を狭く保つために別の層へ出した口である——詳細は
+`markContested`/`resolveContested`/`resolveOrphanedContested`/`restoreArchived`/
+`restoreSuperseded`/`purge`、説明 `getRecall`）があるが、これらは中核を狭く保つために別の層へ
+出した口である——詳細は
 [ADR 0171](./decisions/0171-five-verbs-plus-three-layers.md) と
 [docs/vision.md](./vision.md)「外から見える API」を見ること。
 
@@ -481,6 +482,10 @@ interface MemoryStore {
       event: NewMemoryEvent;
     }
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }>;
+  resolveOrphanedContested?(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent }
+  ): Promise<{ memory: Memory; event: MemoryEvent }>;
   findActiveByClaimKey?(
     ctx: Ctx,
     query: {

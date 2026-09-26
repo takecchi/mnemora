@@ -697,6 +697,14 @@ export interface MemoryStore {
             MemoryEvent
         ];
     }>;
+    resolveOrphanedContested?(ctx: Ctx, survivor: {
+        id: MemoryId;
+        contestedWithId: MemoryId;
+        event: NewMemoryEvent;
+    }): Promise<{
+        memory: Memory;
+        event: MemoryEvent;
+    }>;
     findActiveByClaimKey?(ctx: Ctx, query: {
         subjectId: string | null;
         claimKey: ClaimKey;
@@ -1236,6 +1244,7 @@ export interface ObserveDocumentInput {
 }
 export interface ObserveMemoryUsageInput {
     kind: "memory_usage";
+    externalId?: string;
     recallId: string;
     usedMemoryIds: string[];
 }
@@ -1348,6 +1357,7 @@ export declare const ObserveInputSchema: z.ZodDiscriminatedUnion<[
     }, z.core.$strip>,
     z.ZodObject<{
         kind: z.ZodLiteral<"memory_usage">;
+        externalId: z.ZodOptional<z.ZodString>;
         recallId: z.ZodString;
         usedMemoryIds: z.ZodArray<z.ZodString>;
     }, z.core.$strip>
@@ -3033,6 +3043,41 @@ export interface ResolveContestedResult {
     supported: boolean;
     outcome: ResolveContestedOutcome;
 }
+export type ResolveOrphanedContestedEligibility = {
+    kind: "eligible";
+    contestedWithId: MemoryId;
+} | {
+    kind: "not_found";
+} | {
+    kind: "status_not_contested";
+    status: Exclude<MemoryStatus, "contested">;
+} | {
+    kind: "no_contested_with_id";
+} | {
+    kind: "opposite_not_orphaned";
+    contestedWithId: MemoryId;
+    oppositeStatus: MemoryStatus;
+};
+export type ResolveOrphanedContestedOutcome = {
+    kind: "resolved";
+    memory: Memory;
+} | {
+    kind: "ineligible";
+    eligibility: ResolveOrphanedContestedEligibility;
+} | {
+    kind: "conflict";
+    observedStatus: MemoryStatus | null;
+} | {
+    kind: "not_attempted";
+};
+export interface ResolveOrphanedContestedOptions {
+    actor?: EventActor;
+    reason?: string;
+}
+export interface ResolveOrphanedContestedResult {
+    supported: boolean;
+    outcome: ResolveOrphanedContestedOutcome;
+}
 export interface Runtime {
     observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult>;
     tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
@@ -3048,6 +3093,7 @@ export interface Runtime {
     purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
     markContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, opts?: MarkContestedOptions): Promise<MarkContestedResult>;
     resolveContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, resolution: ContestedResolution, opts?: ResolveContestedOptions): Promise<ResolveContestedResult>;
+    resolveOrphanedContested?(ctx: Ctx, survivorId: MemoryId, opts?: ResolveOrphanedContestedOptions): Promise<ResolveOrphanedContestedResult>;
     applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
     consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
     reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
