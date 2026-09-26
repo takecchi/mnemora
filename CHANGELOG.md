@@ -212,6 +212,12 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #832）。
   ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
   （ADR 0335「引き受けた負債」参照）。
+- **`RuntimeDeps` に任意欄 `embeddingInput?: (memory: Memory) => string` を足した**——
+  埋め込み入力の上限超過で `embeddingStatus: 'failed'` になった Memory を、`reembed()`
+  （ADR 0079）だけでは回復できなかった問題に、opt-in の回復手段を用意する。省略時は
+  `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
+  無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
+  [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -292,6 +298,8 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
 
 ### Fixed
 
+
+- **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
 - **`@mnemora/postgres` の段1 `search()` で、他テナントの near-duplicate が HNSW の候補窓
   （既定 `hnsw.ef_search`=40）を埋め尽くすと、自テナントの候補を1件も見ないまま `recall()` が
   0件を返すことがあった。** `PostgresVectorStore.search()` に
