@@ -1001,9 +1001,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ## 🔴 破壊的変更（v1.0.1 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`951ad44`** の範囲を数えたものである。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`b3cc4ee`**（PR #1057）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
 
-**型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。
+**型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。`git diff 951ad44..b3cc4ee -- scripts/__snapshots__/public-api/` も追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。
 
 **実行時**: 次の2種類に分けた。
 
@@ -1011,6 +1011,8 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。
   - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、Postgres の拒む入力（`archiveDecayed` の不正な `limit`・`reinforce` の Invalid Date・float4 の範囲外の `halfLifeHours`・NUL を含む文字列）で例外を投げるようになった（Issue #880・#807・#817・#816、PR #923・#928）。
   - `@mnemora/testkit/fixtures` の `InMemoryLexicalStore` の一致判定を `PostgresLexicalStore` に揃えた（Issue #951）。例外ではないが、非 ASCII だけのクエリが0件になるなど、公開の fixture の結果が変わる。
+  - `VectorStore.search`/`searchMany` と `LexicalStore.search` が、`filter.tenantId` だけでなく `ctx.tenantId` でも絞るようになった（Issue #1050、PR #1056）。`ctx` と `filter.tenantId` が食い違う呼び出しの結果が空になる（`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方）。
+  - 2026-09-27 の2回目の棚卸しで、上の基準に当たるのに一覧から漏れていた `@mnemora/testkit/fixtures` の変更——どれも例外は投げないが、返す結果が変わる: `InMemoryLexicalStore` の同点の並び順（PR #875）、`InMemoryMemoryStore.listLabels?` の並び順（PR #906）、`InMemoryLexicalStore` のクエリの上限（PR #919）、`InMemoryVectorStore` の次元違いの距離を `NaN` にする件（PR #915）、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail`（PR #830）、`InMemoryVectorStore` の距離 `NaN` の候補の位置（PR #985）。保留に入れたのはクローン miku の委譲先の当て直しであり、オーナーの判断ではない。
 - ⭕ **非破壊と数えたもの**——例外を投げなくなった修正。**この判定はクローン miku の判断であり、オーナーの判断ではない（覆りうる）。**
   - forget/restoreArchived/purge が、ループ前の読みや CAS の後の再読に失敗しても例外を外へ投げず、`failed`/`not_attempted` を返す（Issue #964、PR #960）。
   - `runMigrations`/`registerEmbeddingSpace` が、DB 側の接続断でプロセスごと落ちなくなった（Issue #859）。
