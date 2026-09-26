@@ -1482,3 +1482,5 @@ Issue #200 は**2つの読み方**を挙げていた。
 **2026-09-27 追記7（Issue #1019、ADR 0203 追記7）**: 段2で `score_not_comparable` に数えた候補が、段3の必須同伴取得や段3.5 の連想で候補集合に戻った場合も、`score_not_comparable` の件数から外し、戻った先（`memories` または `budget_dropped`）で1回だけ数えるようにした（`below_threshold` と同じ判定）。
 
 **2026-09-27 追記8（Issue #1020、ADR 0203 追記8）**: 段3.5 で席を競り負けて `over_limit(stage:"association")` に数えた候補が、同じ段3.5 の必須の同伴取得（§9.2 手順7）で対向として取られた場合は、`over_limit(stage:"association")` の件数から外し、戻った先（`memories` または `budget_dropped`）で1回だけ数えるようにした。
+
+**2026-09-27 追記8 の補足（Issue #1026、ADR 0203 追記8 の補足）**: 段2で `over_limit(stage:"rescore")`・`below_threshold`・`score_not_comparable` に数えた contested の候補を段3.5 が席に着け、その後の必須の同伴取得で対向が取れずに Unit ごと落ちた場合は、段2の札から外し、`unit_assembly_dropped` で1回だけ数えるようにした。
