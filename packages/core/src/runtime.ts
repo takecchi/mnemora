@@ -2585,6 +2585,10 @@ export interface Runtime {
    *    `status_not_active`、`active` なら eligible。
    * 3. eligible が0件なら `nothing_to_consolidate`/`no_eligible_sources`、1件だけなら
    *    `nothing_to_consolidate`/`single_eligible_source`——どちらも `llmCalls: 0`・書き込み無し。
+   *    **eligible は重複を除いて数える**（`reflect` の手順3と同じ。2026-09-27 追記、ADR 0089 の
+   *    追記）——`{ memoryIds: [a, a] }` は eligible 1件として `single_eligible_source` になり、
+   *    同じ Memory を自分自身と統合しない。`sources` は入力と同じ長さ（重複も保つ）のまま
+   *    （歯は `packages/core/src/__tests__/consolidate-duplicate-ids.test.ts`）。
    *    **これが冪等性の芯**——同じ id 集合で2回目を呼ぶと eligible が0件になり、LLM も
    *    呼ばず何も書かずに終わる。⚠ **2026-09-26 追記（Issue #869）: 「同じ id 集合」は
    *    `{ memoryIds }` では保証されるが、`{ seedMemoryId }`（手順1）では保証されない**
