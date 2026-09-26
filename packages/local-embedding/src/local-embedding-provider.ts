@@ -346,6 +346,24 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
             `options.dimensions を実物に合わせるか、repo を見直すこと`,
         );
       }
+      // ⭐ Issue #992: 成分が有限の数であることも、同じ位置で確かめる。
+      //
+      // 適合テスト（`describeEmbeddingProviderConformance`）は「ベクトルの各成分は有限の数
+      // である」を provider の要件にしている。`toVectors`（`pipeline.ts`）は
+      // `typeof value === "number"` しか見ないので、NaN / Infinity はそこを素通りする。
+      // 黙って返すと、pgvector への書き込み（`NaN not allowed in vector` /
+      // `infinite value not allowed in vector`）で初めて失敗し、原因（埋め込み）から離れた
+      // SQL の失敗として現れる。注入された pipeline の出力を信じない、という点で
+      // 上の次元の検査と同じ歯である（ADR 0205 の 2026-09-27 追記）。
+      const nonFinite = vector.findIndex((component) => !Number.isFinite(component));
+      if (nonFinite !== -1) {
+        throw new Error(
+          `LocalEmbeddingProvider: モデル（${this.#spec.repo} / dtype=${this.#spec.dtype}）が` +
+            `返したベクトルに有限でない成分がある（${index} 番目のベクトルの ${nonFinite} 番目の` +
+            `成分が ${String(vector[nonFinite])}）。この値は埋め込みとして保存できない` +
+            `（pgvector は NaN / Infinity を拒否する）`,
+        );
+      }
     }
 
     return vectors;
