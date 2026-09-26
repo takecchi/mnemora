@@ -414,18 +414,38 @@ export class FakeMemoryStore implements MemoryStore {
           throw new Error(`FakeMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
         }
       }
-      // Issue #816（NUL 側のみ。孤立サロゲート側は本 PR の対象外）: Postgres の `text` 型は
+      // Issue #816（NUL 側。孤立サロゲート側はここでは扱わない）: Postgres の `text` 型は
       // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
-      // `PostgresMemoryStore.createMemory` は `content` に NUL を含む文字列を渡すと
-      // `invalid byte sequence for encoding "UTF8": 0x00` で例外を投げる（実測）。
-      // ⚠ 同じ制約は `tenantId`/`subjectId`/`tags`/`digest` など他の text 型フィールドにも
-      // 及ぶ（Issue #816 本文）が、`tenantId` は `ctx` を通じてほぼ全メソッドが共有する
-      // 横断的な値であり、`subjectId`/`tags`/`digest` を含めるかは Issue 本文が明記する
-      // 設計判断が要るため、本 PR では最も典型的な入力面である `content` だけに絞る
+      // `PostgresMemoryStore.createMemory` は `content`/`subjectId`/`tags`（各要素）/
+      // `digest` のいずれに NUL を含む文字列を渡しても `invalid byte sequence for
+      // encoding "UTF8": 0x00` で例外を投げる（実測。4欄とも同じメッセージ）。
+      // PR #923 の時点ではこの検査を `content` だけに絞っていた（同 PR のコメント）が、
+      // 実測するとこの4欄は対称な入力面だったため、本 PR（Issue #816 の残り）で揃えた
       // （`packages/testkit` の `InMemoryMemoryStore.createMemory` と同じ範囲）。
+      //
+      // ⚠ `tenantId` はここに含めない——`ctx.tenantId` は `createMemory` 以外の
+      // ほぼ全メソッドが個別に直接読む横断的な値であり、`FakeMemoryStore`/
+      // `InMemoryMemoryStore` のどちらも `ctx` を受ける共通の入口を持たない。ここで検査を
+      // 足しても `get`/`reinforce` 等の他メソッドでは素通りのままで一貫せず、全メソッドへ
+      // 検査を広げる横展開は本 PR の範囲を超えるため扱わない（実測: `tenantId` に NUL を
+      // 含めても Postgres は同じ理由で例外を投げる。Issue #816 本文と同じ）。
       if (input.content.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: content must not contain NUL characters (U+0000)`);
       }
+      if (input.subjectId != null && input.subjectId.includes("\u0000")) {
+        throw new Error(`FakeMemoryStore: subjectId must not contain NUL characters (U+0000)`);
+      }
+      if (input.tags.some((tag) => tag.includes("\u0000"))) {
+        throw new Error(`FakeMemoryStore: tags must not contain NUL characters (U+0000)`);
+      }
+      if (input.digest.includes("\u0000")) {
+        throw new Error(`FakeMemoryStore: digest must not contain NUL characters (U+0000)`);
+      }
+      // 孤立サロゲート（Issue #816、実測）: このメソッドは検査しない。入力をそのまま
+      // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ
+      // 置換するため異なる値になる。この非対称は現状の契約として
+      // `MemoryStore.createMemory` の interface doc コメントに記録してある
+      // （`../interfaces/memory-store.js`）。挙動は変えない。
       const now = new Date();
       const memory: Memory = {
         id: nextId("mem"),
