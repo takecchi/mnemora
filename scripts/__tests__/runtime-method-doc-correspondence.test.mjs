@@ -189,11 +189,7 @@ describe("Runtime のメソッドが3文書（README/vision/architecture）で�
       "}",
     ].join("\n");
 
-    expect(extractMethodNamesFromBlock(block)).toEqual([
-      "required",
-      "optional",
-      "optionalGeneric",
-    ]);
+    expect(extractMethodNamesFromBlock(block)).toEqual(["required", "optional", "optionalGeneric"]);
   });
 
   it("Runtime のメソッド（中核5動詞を除く）は、README / vision / architecture の3文書すべてで名指しされている", () => {
