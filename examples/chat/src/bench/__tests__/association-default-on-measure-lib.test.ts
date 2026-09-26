@@ -75,7 +75,10 @@ describe("fillMissingKeysWithZero", () => {
 
 describe("buildNumberDiffTable", () => {
   it("欄名が完全に一致するとき、絶対差と基準比%を計算する", () => {
-    const table = buildNumberDiffTable({ hit1Count: 5, mrrOverall: 500 }, { hit1Count: 7, mrrOverall: 500 });
+    const table = buildNumberDiffTable(
+      { hit1Count: 5, mrrOverall: 500 },
+      { hit1Count: 7, mrrOverall: 500 },
+    );
     expect(table.hit1Count).toEqual({
       baseline: 5,
       variant: 7,

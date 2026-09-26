@@ -185,7 +185,9 @@ async function measureProbe(
   // （archive sweep コスト・gold 順位）の基準線を動かさない（ADR 0337 追記2026-09-26）。
   const result = await runtime.recall(
     ctx,
-    budget !== undefined ? { text: query, limit, budget, association } : { text: query, association },
+    budget !== undefined
+      ? { text: query, limit, budget, association }
+      : { text: query, association },
   );
   const resolvedExternalIds = await Promise.all(
     result.memories.map((m) => resolveExternalId(memoryStore, ctx, m.memoryId)),

@@ -16,14 +16,16 @@ import type { ComparisonRow } from "../compare.js";
 import { runConsolidationCost } from "../consolidation-cost.js";
 import { createMutableClock } from "../mutable-clock.js";
 import { tryGitRevParseHead } from "../git-info.js";
-import {
-  IDENTIFIER_PROBE_SET_SPEC,
-  runIdentifierProbeArm,
-} from "../identifier-arm.js";
+import { IDENTIFIER_PROBE_SET_SPEC, runIdentifierProbeArm } from "../identifier-arm.js";
 import type { IdentifierArmReport } from "../identifier-arm.js";
 import { NUMERAL_TOKEN_PROBE_SET_SPEC } from "../numeral-token-probe-set.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
-import { armHeadline, buildArmTenantId, newRunToken, runRetrievalQualityArm } from "../retrieval-quality.js";
+import {
+  armHeadline,
+  buildArmTenantId,
+  newRunToken,
+  runRetrievalQualityArm,
+} from "../retrieval-quality.js";
 import type { ArmReport } from "../retrieval-quality.js";
 import { createExampleRuntime } from "../runtime-factory.js";
 import { TIME_WEIGHTING_CASE_SET_DEV } from "../time-weighting-case-set.dev.js";
@@ -180,7 +182,9 @@ interface RetrievalQualityLevelResult {
   raw: ArmReport;
 }
 
-async function measureRetrievalQuality(databaseUrl: string): Promise<RetrievalQualityLevelResult[]> {
+async function measureRetrievalQuality(
+  databaseUrl: string,
+): Promise<RetrievalQualityLevelResult[]> {
   console.log("\n=== retrieval-quality(llm=deterministic, embedding=recorded) ===");
   if (!cassetteExists(RETRIEVAL_CASSETTE_PATH)) {
     recordNote("retrieval-quality", "retrieval.json カセットが無いため測定をスキップした。");
@@ -521,8 +525,12 @@ interface ConsolidationCostLevelResult {
 /** 既定の9段(`DEFAULT_BUDGET_LADDER`)ではなく、この測定専用に縮めた2段。 */
 const MEASURE_BUDGET_LADDER: readonly number[] = [32, 128];
 
-async function measureConsolidationCost(databaseUrl: string): Promise<ConsolidationCostLevelResult[]> {
-  console.log("\n=== consolidation-cost(llm=deterministic, embedding=local, budgetLadder=[32,128]) ===");
+async function measureConsolidationCost(
+  databaseUrl: string,
+): Promise<ConsolidationCostLevelResult[]> {
+  console.log(
+    "\n=== consolidation-cost(llm=deterministic, embedding=local, budgetLadder=[32,128]) ===",
+  );
   const handle = await createExampleRuntime(databaseUrl, {
     ...process.env,
     MNEMORA_LLM: "deterministic",
@@ -591,7 +599,9 @@ function averageOf(values: readonly number[]): number {
 }
 
 async function measureTimeWeighting(databaseUrl: string): Promise<TimeWeightingLevelResult[]> {
-  console.log("\n=== answer-time-weighting(recall 側のみ、dev集合、llm=deterministic, embedding=local) ===");
+  console.log(
+    "\n=== answer-time-weighting(recall 側のみ、dev集合、llm=deterministic, embedding=local) ===",
+  );
   const handle = await createTimeWeightingBenchRuntime(databaseUrl, {
     ...process.env,
     MNEMORA_LLM: "deterministic",
@@ -691,7 +701,9 @@ async function measureAnswer(databaseUrl: string): Promise<AnswerLevelResult[]> 
         headline: {
           caseCount: caseResults.length,
           meanInputChars: averageOf(caseResults.map((r) => r.mnemora.inputChars)),
-          meanInputEstimatedTokens: averageOf(caseResults.map((r) => r.mnemora.inputEstimatedTokens)),
+          meanInputEstimatedTokens: averageOf(
+            caseResults.map((r) => r.mnemora.inputEstimatedTokens),
+          ),
           meanReturnedCount: averageOf(indexCounts.map((c) => c.returned)),
           meanTotalInScope: averageOf(indexCounts.map((c) => c.totalInScope)),
         },
@@ -711,7 +723,10 @@ async function measureAnswer(databaseUrl: string): Promise<AnswerLevelResult[]> 
 // off/on10 の差・on5/10/20 の表(標準出力へ印字するだけ。JSON にも同じ数字を残す)
 // ---------------------------------------------------------------------------
 
-function printDiffTables(benchName: string, levels: readonly { level: string; headline: Record<string, number> }[]): void {
+function printDiffTables(
+  benchName: string,
+  levels: readonly { level: string; headline: Record<string, number> }[],
+): void {
   const off = levels.find((l) => l.level === "off");
   const on5 = levels.find((l) => l.level === "on5");
   const on10 = levels.find((l) => l.level === "on10");
@@ -776,7 +791,9 @@ async function main(): Promise<void> {
   printDiffTables("answer-time-weighting", timeWeighting);
   printDiffTables("answer", answer);
 
-  console.log(`\n\n実 API 呼び出し回数: 0(このスクリプトは recorded/local 層だけで測る——本体の docstring 参照)`);
+  console.log(
+    `\n\n実 API 呼び出し回数: 0(このスクリプトは recorded/local 層だけで測る——本体の docstring 参照)`,
+  );
   if (notes.length > 0) {
     console.log("\n所見(例外・スキップの一覧):");
     for (const note of notes) {
