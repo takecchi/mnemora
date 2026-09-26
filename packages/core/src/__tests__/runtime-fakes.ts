@@ -78,6 +78,17 @@ type OutboxJobMutable = OutboxJobRecord;
  * 同じ形だが、ファイル冒頭のコメントの通り意図的に独立している。
  */
 function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
+  // Issue #807: `memory_events.at` は Postgres の `timestamptz` 列であり、Invalid Date
+  // （`.getTime()` が `NaN`）を渡すと `PostgresEventStore.append` はクエリ実行時に
+  // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
+  // `packages/testkit` の `buildStoredMemoryEvent` と同じ判定・同じ理由）。`event.at` が
+  // 省略されている（`undefined`）場合は「無い」であって Invalid Date ではないので
+  // 検査しない——下の `?? new Date()` で現在時刻になる。この関数は `FakeEventStore.append`
+  // だけでなく `FakeMemoryStore` の `updateStatusWithEvent` 等、イベントを積むすべての口が
+  // 通る単一の合流点であり、ここで検査すればそれらすべてを一度に覆える。
+  if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
+    throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+  }
   return {
     id: nextId("evt"),
     tenantId: ctx.tenantId,
@@ -361,6 +372,59 @@ export class FakeMemoryStore implements MemoryStore {
         throw new Error(
           `FakeMemoryStore: strength out of range (0, ${MAX_STRENGTH}]: ${input.strength}`,
         );
+      }
+      // Issue #817（PR #815 と同根）: `memories.half_life_hours` は Postgres の `real`
+      // （IEEE 754 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い。
+      // float64 では有限だが float4 の範囲を超える値（例: `1e300`）を渡すと、`real` へ
+      // 変換される際に `Infinity` へ丸まり CHECK 制約に抵触して Postgres は例外を投げる
+      // （実測）。⚠ この Fake には `halfLifeHours` の値域全体の検査（ADR 0125、
+      // `(0, ∞)`）は上の `createMemoryIdempotent` の doc コメントが明記するとおり
+      // **意図して無い**——`recall-pipeline.test.ts` が `halfLifeHours: 0` の「壊れた」
+      // Memory を意図的に作ってスコアリング側の NaN 処理を検査するため。ここで足すのは
+      // その値域検査ではなく、Postgres の `real` 列という物理的なストレージ上限だけを見る
+      // 狭い検査（`Math.fround` が `Infinity` に丸めるかどうか）——`0` や負数は
+      // `Math.fround` を通しても有限のままなので、この検査は既存の「壊れた」テストを
+      // 壊さない。
+      //
+      // ⚠ `strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]` であり float4 の
+      // 範囲へ遠く届かない——上の `isStrengthInRange` の時点で `1e300` のような値は
+      // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
+      // ため、`strength` にはこの検査を足さない。
+      if (!Number.isFinite(Math.fround(input.halfLifeHours))) {
+        throw new Error(
+          `FakeMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
+        );
+      }
+      // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
+      // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date
+      // （`.getTime()` が `NaN`）を渡すと `PostgresMemoryStore.createMemory` はクエリ
+      // 実行時に `invalid input syntax for type timestamp with time zone` で例外を投げる
+      // （実測。`reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡された
+      // ときだけ検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date
+      // ではない）。
+      if (Number.isNaN(input.recordedAt.getTime())) {
+        throw new Error(`FakeMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
+      }
+      for (const [field, value] of [
+        ["occurredAt", input.occurredAt],
+        ["validFrom", input.validFrom],
+        ["validUntil", input.validUntil],
+      ] as const) {
+        if (value != null && Number.isNaN(value.getTime())) {
+          throw new Error(`FakeMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
+        }
+      }
+      // Issue #816（NUL 側のみ。孤立サロゲート側は本 PR の対象外）: Postgres の `text` 型は
+      // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
+      // `PostgresMemoryStore.createMemory` は `content` に NUL を含む文字列を渡すと
+      // `invalid byte sequence for encoding "UTF8": 0x00` で例外を投げる（実測）。
+      // ⚠ 同じ制約は `tenantId`/`subjectId`/`tags`/`digest` など他の text 型フィールドにも
+      // 及ぶ（Issue #816 本文）が、`tenantId` は `ctx` を通じてほぼ全メソッドが共有する
+      // 横断的な値であり、`subjectId`/`tags`/`digest` を含めるかは Issue 本文が明記する
+      // 設計判断が要るため、本 PR では最も典型的な入力面である `content` だけに絞る
+      // （`packages/testkit` の `InMemoryMemoryStore.createMemory` と同じ範囲）。
+      if (input.content.includes("\u0000")) {
+        throw new Error(`FakeMemoryStore: content must not contain NUL characters (U+0000)`);
       }
       const now = new Date();
       const memory: Memory = {
@@ -806,6 +870,17 @@ export class FakeMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`FakeMemoryStore: memory not found for tenant: ${id}`);
     }
+    // `PostgresMemoryStore.reinforce` は `at` を `timestamptz` 列へそのまま書き込むため、
+    // Invalid Date（`at.getTime()` が `NaN`）を渡すとクエリ実行時に
+    // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
+    // Issue #807。`packages/testkit` の `InMemoryMemoryStore.reinforce` と同じ判定・
+    // 同じ理由）。ここで検査しないと、下の no-op 判定（`>= at.getTime()`）は `NaN` を
+    // 含む比較が常に `false` になるため素通りし、`lastReinforcedAt`/`decayFloorAt` が
+    // Invalid Date のまま静かに書き込まれてしまう。クエリを投げる前に弾く Postgres 側に
+    // 揃える。
+    if (Number.isNaN(at.getTime())) {
+      throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
+    }
     if (
       memory.lastReinforcedAt !== null &&
       memory.lastReinforcedAt !== undefined &&
@@ -1151,6 +1226,20 @@ export class FakeMemoryStore implements MemoryStore {
    * 挟まない同期区間で行う（postgres 実装の単一トランザクションを模す）。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    // `PostgresMemoryStore.archiveDecayed` は `opts.limit` を生 SQL の `LIMIT`（bigint
+    // パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数を渡すと Postgres
+    // 自身が例外を投げる（実測。Issue #880。`packages/testkit` の
+    // `InMemoryMemoryStore.archiveDecayed` と同じ判定・同じ理由）。ここで検査せず
+    // `.slice(0, Math.max(0, opts.limit))` へ渡すと、`Infinity` は対象を無条件に全件
+    // `archived` にしてしまう——書き込みの副作用を持つ口である分、他の limit ガード
+    // （PR #811/#875 相当、`FakeVectorStore.search` 等）より実害が大きい。クエリを
+    // 投げる前に弾く Postgres 側に揃える。
+    if (!Number.isInteger(opts.limit)) {
+      throw new Error(`archiveDecayed: limit must be an integer (got ${opts.limit})`);
+    }
+    if (opts.limit < 0) {
+      throw new Error(`archiveDecayed: limit must not be negative (got ${opts.limit})`);
+    }
     const nowMs = opts.now.getTime();
     const clock = opts.clock ?? "wall";
     // [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと15
