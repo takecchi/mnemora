@@ -106,6 +106,11 @@ export class InMemoryEventStore implements EventStore {
     if (filter.limit !== undefined && filter.limit < 0) {
       throw new Error(`list: limit must not be negative (got ${filter.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (filter.limit !== undefined && filter.limit >= 2 ** 63) {
+      throw new Error(`list: limit must fit in a Postgres bigint (got ${filter.limit})`);
+    }
     const matched = this.events.filter((event) => {
       if (event.tenantId !== ctx.tenantId) {
         return false;
