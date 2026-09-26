@@ -91,7 +91,9 @@ try {
 ## `space` の形 — 🔴 `ruri-v3-30m/sym` の `/sym` を消さないこと
 
 ```ts
-{ provider: "local", model: "ruri-v3-30m/sym", dimensions: 256 }
+import type { EmbeddingSpaceId } from "@mnemora/core";
+
+const space: EmbeddingSpaceId = { provider: "local", model: "ruri-v3-30m/sym", dimensions: 256 };
 ```
 
 - **`provider: "local"`** — **プロセス内推論であること**を表す。将来 `packages/tei` 等が
