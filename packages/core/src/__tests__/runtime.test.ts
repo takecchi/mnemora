@@ -650,6 +650,11 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
       ),
     );
 
+    // Issue #961: `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の
+    // 2段の経路（`reinforceMany` / 1件ずつの `reinforce`）を通らない。この歯が見るのは2段の
+    // 経路の分岐なので、その口を持たない adapter を模す（下と同じ作法）。
+    (stores.memoryStore as { recordUsageAndReinforce?: unknown }).recordUsageAndReinforce =
+      undefined;
     const recallId = await createRecallFixture(stores, ctx);
     // ⚠ `reinforce` 自体は spy しない——`FakeMemoryStore.reinforceMany` の実装は
     // 「`reinforce` を呼び回す素直な実装」（ADR 0303 追記節、この PR の判断）であり、
@@ -701,6 +706,11 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
 
     // 口を持たない adapter を模す（`archiveDecayed` の歯と同じ作法。`delete` では
     // 消えない——クラスのメソッドは prototype に在る）。
+    // Issue #961: `recordUsageAndReinforce`（任意）が在ると記録と強化を1つの口で撃ち、下の
+    // 2段の経路（`reinforceMany` / 1件ずつの `reinforce`）を通らない。この歯が見るのは2段の
+    // 経路の分岐なので、その口を持たない adapter を模す（下と同じ作法）。
+    (stores.memoryStore as { recordUsageAndReinforce?: unknown }).recordUsageAndReinforce =
+      undefined;
     (stores.memoryStore as { reinforceMany?: unknown }).reinforceMany = undefined;
     const reinforceSpy = vi.spyOn(stores.memoryStore, "reinforce");
 
