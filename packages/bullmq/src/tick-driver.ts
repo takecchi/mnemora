@@ -92,6 +92,8 @@ export interface BullmqTickDriver {
   /**
    * Worker を起動し、繰り返しジョブを登録する。**`start()` を呼ぶまでジョブは処理しない**
    * （Issue #890）。`stop()` の前に複数回呼んでも冪等（2回目以降は何もしない）。
+   * **起動が途中で失敗して reject した後の `start()` は、登録と起動をやり直す**（Issue #963）
+   * ——失敗した時点では Worker を走らせていない。同時に呼んだ `start()` は同じ起動を待つ。
    * ⛔ **`stop()` の後に呼ぶと Error を投げる**（Issue #891）——この driver は使い捨てであり、
    * 再開したい場合は `createBullmqTickDriver(...)` を呼び直すこと。
    */
@@ -147,7 +149,9 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
     opts.onTickError?.(err);
   });
 
-  let started = false;
+  // 起動中または起動済みの `start()` の promise。`null` は「まだ起動していない」（失敗した
+  // 起動の後も含む）。同時に呼ばれた `start()` は同じ promise を待つ。
+  let starting: Promise<void> | null = null;
   let stopped = false;
 
   return {
@@ -163,26 +167,45 @@ export function createBullmqTickDriver(opts: CreateBullmqTickDriverOptions): Bul
             " 再開したい場合は createBullmqTickDriver(...) を呼び直すこと。",
         );
       }
-      if (started) {
-        return;
+      if (starting !== null) {
+        return starting;
       }
-      started = true;
-      // Worker は上で `autorun: false` で構築したので、ここで明示的に起動する。
-      // ⚠ `worker.run()` が返す promise は、Worker が閉じるまで resolve しない
-      // （bullmq 6.3.8 の `mainLoop` は `while ((!this.closing && !this.paused) || ...)`
-      // というループであり、`this.closing` が立つのは `worker.close()` を呼んだ後）。
-      // ここで `await` すると `start()` 自体が `stop()` されるまで返らなくなるため、
-      // 意図的に await しない。reject は握りつぶさず、bullmq 自身が `autorun: true` の
-      // ときに内部で行っている `this.run().catch(error => this.emit('error', error))`
-      // と同じ形で `worker` の `"error"` listener（上で登録済み、`onTickError` へ流す）
-      // に載せる。
-      worker.run().catch((error) => worker.emit("error", error));
-      // BullMQ 6.x の Job Scheduler API（旧 `queue.add(..., { repeat })` /
-      // `queue.removeRepeatable(...)` は 6.x の型に無い——`upsertJobScheduler` に
-      // 置き換わった。`jobSchedulerId` を固定値にすることで、複数プロセスが同じ
-      // `queueName` に対して `start()` を呼んでも冪等に同じスケジュールを指す
-      // （上の doc コメント「複数プロセスで動かすとき」参照）。
-      await queue.upsertJobScheduler(jobName, { every: opts.everyMs }, { name: jobName });
+      // 🔴 Issue #963: 起動が途中で失敗したら「起動済み」の印を残さない——失敗した
+      // `start()` の後の `start()` が何もせず resolve すると、Worker は動くのに
+      // スケジュールが無く、tick が一度も発火しないまま「起動できた」ように見える。
+      // そのために、失敗しうる登録（`upsertJobScheduler`）を**先に**済ませ、Worker は
+      // 登録が成功した後でだけ走らせる。bullmq の Worker は一度 `run()` / `close()` すると
+      // 再利用できない（Issue #891）ので、失敗しうる手順の前に走らせてしまうと片付け
+      // ようがない。登録が失敗した時点では Worker はまだ走っておらず、片付けるものは無い。
+      const attempt = (async () => {
+        // BullMQ 6.x の Job Scheduler API（旧 `queue.add(..., { repeat })` /
+        // `queue.removeRepeatable(...)` は 6.x の型に無い——`upsertJobScheduler` に
+        // 置き換わった。`jobSchedulerId` を固定値にすることで、複数プロセスが同じ
+        // `queueName` に対して `start()` を呼んでも冪等に同じスケジュールを指す
+        // （上の doc コメント「複数プロセスで動かすとき」参照）。
+        await queue.upsertJobScheduler(jobName, { every: opts.everyMs }, { name: jobName });
+        // 登録を待つ間に `stop()` された場合は、閉じた Worker を走らせない。
+        if (stopped) {
+          return;
+        }
+        // Worker は上で `autorun: false` で構築したので、ここで明示的に起動する。
+        // ⚠ `worker.run()` が返す promise は、Worker が閉じるまで resolve しない
+        // （bullmq 6.3.8 の `mainLoop` は `while ((!this.closing && !this.paused) || ...)`
+        // というループであり、`this.closing` が立つのは `worker.close()` を呼んだ後）。
+        // ここで `await` すると `start()` 自体が `stop()` されるまで返らなくなるため、
+        // 意図的に await しない。reject は握りつぶさず、bullmq 自身が `autorun: true` の
+        // ときに内部で行っている `this.run().catch(error => this.emit('error', error))`
+        // と同じ形で `worker` の `"error"` listener（上で登録済み、`onTickError` へ流す）
+        // に載せる。
+        worker.run().catch((error) => worker.emit("error", error));
+      })();
+      starting = attempt;
+      attempt.catch(() => {
+        if (starting === attempt) {
+          starting = null;
+        }
+      });
+      return attempt;
     },
     async stop() {
       // `start()` を一度も呼んでいなくても安全に呼べる——`worker.close()` は

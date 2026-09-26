@@ -668,6 +668,36 @@ export interface MemoryStore {
     memoryIds: MemoryId[],
   ): Promise<{ insertedMemoryIds: MemoryId[] }>;
   /**
+   * [Issue #961](https://github.com/takecchi/mnemora/issues/961): `recordUsage` と、
+   * それが返した `insertedMemoryIds` への強化（`reinforceMany(ctx, insertedMemoryIds, at, opts)`
+   * と同じ結果）を**1トランザクションで**撃つ、任意（省略可能）の口。戻り値は `recordUsage`
+   * と同じ——実際に挿入が起きた id だけを返し、強化もその id にだけ掛ける（再送では
+   * 空配列になり、強化もしない）。
+   *
+   * **なぜ要るか**: `recordUsage` と強化を別々にコミットすると、その間で落ちたとき
+   * `recall_usages` の行だけが残る。同じ `externalId` の再送では `recordUsage` が
+   * `insertedMemoryIds: []` を返すため強化が二度と呼ばれず、強化は恒久に失われる
+   * （docs/memory-model.md §11 行4「`observe()` と同一トランザクション」・ADR 0009
+   * 「再送で完了させられる」と食い違う）。この口では、強化が失敗すれば使用の記録も
+   * 巻き戻るので、再送がそのまま両方をやり直す。
+   *
+   * 契約: 強化の規律（減衰の起点を巻き戻さない・活動時計・`status` を見ない・
+   * `memory_events` を書かない）は `reinforceMany` の doc コメントのとおり。
+   * **例外を投げたときは、使用の記録も強化も1件も残さない。**
+   *
+   * 🔴 **任意メソッドである**（`reinforceMany?` と同じ理由——必須にすると第三者の
+   * adapter を壊す）。この口を持たない adapter では `runtime.ts` の
+   * `handleMemoryUsage` が従来どおり `recordUsage` → 強化の2段で撃つ——**その adapter
+   * には上の「強化が恒久に失われる」窓が残る**（ADR 0009 の 2026-09-27 追記）。
+   */
+  recordUsageAndReinforce?(
+    ctx: Ctx,
+    recallId: RecallId,
+    memoryIds: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<{ insertedMemoryIds: MemoryId[] }>;
+  /**
    * roadmap.md 段階4/5: 群カウント・スコープ内総数・スコープを定義するフィルタ
    * （status/period/taxonomy）で落ちた件数・not_indexed 件数を単一の集約クエリから返す
    * （`ScopeAggregate` の doc コメント、docs/recall.md §5 参照）。

@@ -251,13 +251,54 @@ export class PostgresVectorStore implements VectorStore {
     // パラメータ化を許さない）——固定の識別子リテラルとして埋め込む（`withRelaxedOrderScan`
     // 側の実装）。`hnsw.max_scan_tuples` は既定のまま触らない(Issue #671 が記録した天井は、
     // このADRでは引き受けた負債として残す)。
+    //
+    // Issue #956（ADR 0343）: 下は2枝の `UNION ALL` になっている。pgvector の cosine
+    // HNSW 索引は norm が0のベクトル（ゼロベクトル）をそもそも索引へ入れない
+    // （pgvector README「Troubleshooting」、実装は `src/hnswutils.c` の
+    // `HnswFormIndexValue`/`HnswCheckNorm`）——ORDER BY 押し下げの Index Scan だけに
+    // 頼ると、その候補が ADR 0040 の契約（比較不能でも候補として返す）に反して結果から
+    // 消える。1枝目（`vector_norm(e.embedding) > 0`）は今日と同じ ORDER BY 押し下げの
+    // Index Scan（HNSW）に委ねる——`LIMIT ${opts.limit}` を超えて非ゼロ候補を取る必要は
+    // 無い（ゼロベクトルの距離は常に `NaN` で並び順の最後尾に落ちるため、非ゼロ候補の
+    // 上位 `limit` 件を先に確定させてよい）。2枝目（`= 0`）は
+    // `registerEmbeddingSpace`（`vector-space.ts`）が作る部分索引
+    // （`WHERE vector_norm(embedding) = 0`）を使い、`filter` に一致するゼロベクトルの
+    // 行を取る——**この枝にも `ORDER BY`/`LIMIT ${opts.limit}` を掛けてある**——
+    // 2枝目に内側の LIMIT が無いと、ある空間がゼロベクトルの行を大量に持つ場合、
+    // その枝だけがテーブル（の中のゼロベクトル部分）の大きさに比例して増え、
+    // 「余分な参照はテーブルの大きさに比例して増えない」という要求から外れる。
+    // ゼロベクトルの距離はすべて `NaN` で同点のため、`ORDER BY` は `recorded_at`
+    // DESC・`memory_id` の2列（1枝目・外側と同じ tie-break の続き）だけで揃える——
+    // 外側の再ソートで同じ2列がそのまま使われるので、内側でこの `LIMIT` を掛けても
+    // 「外側で見るべき上位 `limit` 件」を取りこぼさない。2枝を合わせた外側の `SELECT`
+    // が両枝を再び1本の順序（距離→`recorded_at` DESC→`memory_id`）へ並べ直し、
+    // `LIMIT` をもう一度適用する——ゼロベクトルの行が実在の上位候補を押し出すことは
+    // ない（`NaN` は常に最後尾）。往復は増やさない（1本の SQL 文のまま）。
     const result = await withRelaxedOrderScan(this.db, (tx) =>
       tx.execute(sql`
-        SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance
-        FROM ${sql.identifier(table)} e
-        JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-        WHERE ${whereClause}
-        ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id
+        SELECT combined.memory_id AS memory_id, combined.distance AS distance
+        FROM (
+          (
+            SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance,
+                   m.recorded_at AS recorded_at
+            FROM ${sql.identifier(table)} e
+            JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+            WHERE ${whereClause} AND vector_norm(e.embedding) > 0
+            ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id
+            LIMIT ${opts.limit}
+          )
+          UNION ALL
+          (
+            SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance,
+                   m.recorded_at AS recorded_at
+            FROM ${sql.identifier(table)} e
+            JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+            WHERE ${whereClause} AND vector_norm(e.embedding) = 0
+            ORDER BY m.recorded_at DESC, e.memory_id
+            LIMIT ${opts.limit}
+          )
+        ) AS combined
+        ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
         LIMIT ${opts.limit}
       `),
     );
@@ -293,6 +334,14 @@ export class PostgresVectorStore implements VectorStore {
    * `EXPLAIN` で確認済み（PR 本文に抜粋）: `LATERAL` の内側でも
    * `Index Scan using ...hnsw...` が選ばれ、アンカーの数だけ `loops=N` で
    * 繰り返される——`Seq Scan` に落ちない。
+   *
+   * Issue #956（ADR 0343）: `LATERAL` の中身も `search()` と同じ2枝の `UNION ALL`
+   * （`vector_norm(e.embedding) > 0` の ORDER BY 押し下げ枝 + `= 0` の部分索引枝）に
+   * なっている——`search()` の doc コメント参照。**往復数は変えていない**——
+   * `UNION ALL`/再ソートは `LATERAL` サブクエリの中に収めてあり、`queries.length`
+   * が増えても発行する SQL 文は今日と同じ1本のまま
+   * （`vector-store-search-many.postgres.test.ts` の「往復数が anchorCount に依存しない」
+   * 歯を壊さないことを実測で確認済み）。
    */
   async searchMany(
     ctx: Ctx,
@@ -327,11 +376,29 @@ export class PostgresVectorStore implements VectorStore {
         SELECT q.query_key AS query_key, hit.memory_id AS memory_id, hit.distance AS distance
         FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_key, qvec)
         CROSS JOIN LATERAL (
-          SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance
-          FROM ${sql.identifier(table)} e
-          JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-          WHERE ${whereClause}
-          ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
+          SELECT combined.memory_id AS memory_id, combined.distance AS distance
+          FROM (
+            (
+              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
+                     m.recorded_at AS recorded_at
+              FROM ${sql.identifier(table)} e
+              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+              WHERE ${whereClause} AND vector_norm(e.embedding) > 0
+              ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
+              LIMIT ${opts.limit}
+            )
+            UNION ALL
+            (
+              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
+                     m.recorded_at AS recorded_at
+              FROM ${sql.identifier(table)} e
+              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+              WHERE ${whereClause} AND vector_norm(e.embedding) = 0
+              ORDER BY m.recorded_at DESC, e.memory_id
+              LIMIT ${opts.limit}
+            )
+          ) AS combined
+          ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
           LIMIT ${opts.limit}
         ) AS hit
       `),

@@ -632,6 +632,9 @@ export interface MemoryStore {
     recordUsage(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[]): Promise<{
         insertedMemoryIds: MemoryId[];
     }>;
+    recordUsageAndReinforce?(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<{
+        insertedMemoryIds: MemoryId[];
+    }>;
     aggregateScope(ctx: Ctx, scope: RecallScope, opts?: AggregateScopeOptions): Promise<ScopeAggregate>;
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;

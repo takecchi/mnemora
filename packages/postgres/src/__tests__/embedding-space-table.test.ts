@@ -4,6 +4,7 @@ import {
   assertSafeIdentifier,
   embeddingSpaceIndexName,
   embeddingSpaceTableName,
+  embeddingSpaceZeroNormIndexName,
 } from "../embedding-space-table.js";
 
 /**
@@ -133,5 +134,74 @@ describe("embeddingSpaceTableName / embeddingSpaceIndexName", () => {
 
     expect(embeddingSpaceTableName(space)).toBe(embeddingSpaceTableName({ ...space }));
     expect(embeddingSpaceIndexName(space)).toBe(embeddingSpaceIndexName({ ...space }));
+  });
+});
+
+/**
+ * `embeddingSpaceZeroNormIndexName`（Issue #956）の切り詰め。接頭辞
+ * `idx_memory_embeddings_zero_norm_` = 33バイトで、HNSW 索引の接頭辞（27バイト）より
+ * 6バイト長い ⟹ **同じ `<space>` でも、HNSW 索引より先に切り詰めの対象になりうる**
+ * （実測: 「いま使われている中で最長」の `openai/text-embedding-3-small/1536` は、
+ * HNSW 索引はまだ切り詰められない（61バイト）のに、ゼロベクトル索引は既に
+ * 切り詰められる（63バイト、ハッシュ片付き）——上の「索引のほうが9バイト早く上限に
+ * 達する」と同じ構造の一段深い版）。
+ */
+describe("embeddingSpaceZeroNormIndexName", () => {
+  it("HNSW 索引はまだ切り詰められない代表例でも、ゼロベクトル索引は先に切り詰められる: openai/text-embedding-3-small/1536", () => {
+    const space: EmbeddingSpaceId = {
+      provider: "openai",
+      model: "text-embedding-3-small",
+      dimensions: 1536,
+    };
+
+    const index = embeddingSpaceIndexName(space);
+    const zeroNormIndex = embeddingSpaceZeroNormIndexName(space);
+
+    expect(Buffer.byteLength(index, "utf8")).toBe(61); // 切り詰められていない
+    expect(zeroNormIndex).toBe("idx_memory_embeddings_zero_norm_openai_text_embedding__da14a3c6");
+    expect(Buffer.byteLength(zeroNormIndex, "utf8")).toBe(63); // 切り詰め済み
+    expect(zeroNormIndex.endsWith("_da14a3c6")).toBe(true);
+  });
+
+  it("テーブル・HNSW索引・ゼロベクトル索引の3つとも切り詰められる実例: azure-openai/text-embedding-3-large/3072", () => {
+    const space: EmbeddingSpaceId = {
+      provider: "azure-openai",
+      model: "text-embedding-3-large",
+      dimensions: 3072,
+    };
+
+    const zeroNormIndex = embeddingSpaceZeroNormIndexName(space);
+    expect(zeroNormIndex).toBe("idx_memory_embeddings_zero_norm_azure_openai_text_embe_eb32c67b");
+    expect(Buffer.byteLength(zeroNormIndex, "utf8")).toBe(63);
+  });
+
+  it("生成される名前は常に63バイト以内・assertSafeIdentifier を通り、決定的である", () => {
+    const spaces: EmbeddingSpaceId[] = [
+      { provider: "openai", model: "text-embedding-3-small", dimensions: 1536 },
+      { provider: "openai", model: "text-embedding-3-large", dimensions: 3072 },
+      { provider: "azure-openai", model: "text-embedding-3-large", dimensions: 3072 },
+      { provider: "local", model: "ruri-v3-30m/sym", dimensions: 256 },
+      { provider: "a".repeat(1), model: "b".repeat(1), dimensions: 1 },
+      { provider: "a".repeat(200), model: "b".repeat(200), dimensions: 123_456_789 },
+    ];
+
+    for (const space of spaces) {
+      const zeroNormIndex = embeddingSpaceZeroNormIndexName(space);
+      expect(
+        Buffer.byteLength(zeroNormIndex, "utf8"),
+        `zeroNormIndex "${zeroNormIndex}" が63バイトを超えた（space=${JSON.stringify(space)}）`,
+      ).toBeLessThanOrEqual(63);
+      expect(() => assertSafeIdentifier(zeroNormIndex)).not.toThrow();
+      expect(embeddingSpaceZeroNormIndexName({ ...space })).toBe(zeroNormIndex);
+    }
+  });
+
+  it("HNSW 索引名とは異なる名前になる（同じ空間でも接頭辞が違う）", () => {
+    const space: EmbeddingSpaceId = {
+      provider: "openai",
+      model: "text-embedding-3-small",
+      dimensions: 1536,
+    };
+    expect(embeddingSpaceZeroNormIndexName(space)).not.toBe(embeddingSpaceIndexName(space));
   });
 });

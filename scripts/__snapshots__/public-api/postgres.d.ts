@@ -40,6 +40,7 @@ export declare function sha256Hex(content: string): string;
 import type { EmbeddingSpaceId } from "@mnemora/core";
 export declare function embeddingSpaceTableName(space: EmbeddingSpaceId): string;
 export declare function embeddingSpaceIndexName(space: EmbeddingSpaceId): string;
+export declare function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string;
 export declare function assertSafeIdentifier(identifier: string): void;
 
 // ===== dist/event-store.d.ts =====
@@ -145,9 +146,14 @@ export declare class PostgresMemoryStore implements MemoryStore {
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
     reinforceMany(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
+    private reinforceManyOn;
     recordUsage(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[]): Promise<{
         insertedMemoryIds: MemoryId[];
     }>;
+    recordUsageAndReinforce(ctx: Ctx, recallId: RecallId, memoryIds: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<{
+        insertedMemoryIds: MemoryId[];
+    }>;
+    private recordUsageOn;
     aggregateScope(ctx: Ctx, scope: RecallScope, opts?: AggregateScopeOptions): Promise<ScopeAggregate>;
     createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
     getRecall(ctx: Ctx, id: RecallId): Promise<RecallRecord | null>;

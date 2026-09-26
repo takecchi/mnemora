@@ -125,6 +125,16 @@ describe("packages/postgres/README.md の「この package が作るオブジェ
     expect(readmeObjects.embeddingIndexPattern.startsWith(embeddingNaming.indexPrefix)).toBe(true);
   });
 
+  it("埋め込み空間ごとのゼロベクトル用部分索引名の接頭辞が embedding-space-table.ts の ZERO_NORM_INDEX_PREFIX と一致する（Issue #956 / ADR 0343）", () => {
+    expect(
+      readmeObjects.embeddingZeroNormIndexPattern,
+      "README にゼロベクトル用部分索引名パターンの記載が無い",
+    ).toBeDefined();
+    expect(
+      readmeObjects.embeddingZeroNormIndexPattern.startsWith(embeddingNaming.zeroNormIndexPrefix),
+    ).toBe(true);
+  });
+
   it("runMigrations の既定 advisory lock キー（MIGRATION_LOCK_KEY）が README に書いてある", () => {
     expect(readmeObjects.advisoryLockKeys).toContain(advisoryLockKeys.migrationLockKey);
   });
