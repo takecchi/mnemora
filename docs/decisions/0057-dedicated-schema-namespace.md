@@ -166,3 +166,5 @@
     `extensionSchema` を指定し忘れた場合の壊れ方。**`extensionSchema` はそのための口である。**
 
 > **追記（2026-09-25、Issue #757）**: 決定6の「schema ごとに別のロックキー」のもとで、拡張を作る段だけは schema に依らない共有キーで直列化するようにした（決定2への小さな逸脱を含む）——[ADR 0331](./0331-extension-creation-shared-advisory-lock.md)。
+
+> **追記（2026-09-26、Issue #779）**: 「引き受ける負債」の🟠（ロール名＝スキーマ名だと `schema` 未指定の advisory lock キーが明示指定と食い違う）を直した——`schema` 未指定かつ `options.lockKey` 上書き無しのとき、ロック取得前に `SELECT current_schema()` を読んで決定6の2関数へ渡すようにした（決定2への追加の小さな逸脱を含む）——[ADR 0331](./0331-extension-creation-shared-advisory-lock.md) 追記参照。

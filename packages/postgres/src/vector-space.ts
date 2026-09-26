@@ -13,6 +13,7 @@ import {
   deriveAdvisoryLockKey,
   releaseAdvisoryLock,
 } from "./advisory-lock.js";
+import { resolveCurrentSchema } from "./resolve-current-schema.js";
 import {
   DEFAULT_EXTENSION_SCHEMA,
   type SchemaNamespaceOptions,
@@ -84,6 +85,16 @@ export interface RegisterEmbeddingSpaceOptions extends SchemaNamespaceOptions {
  * 保たれる。`schema` ごとに別キーにする理由は `migrationLockKeyFor` と同一で、
  * 「2つの mnemora が同じ DB の別スキーマに同居すると、片方の registerEmbeddingSpace が
  * もう片方を黙ってブロックする」ことを防ぐため。
+ *
+ * **この関数自身は同期関数で DB 接続を持たない**ため、`schema` 未指定のときに実際どの
+ * スキーマが使われるかはそれ自身では特定できない——`registerEmbeddingSpace` が呼び出し側
+ * として、ロック取得より前に {@link resolveCurrentSchema} で読んだ値をこの引数へ渡す
+ * （Issue #779。`migrate.ts` の `migrationLockKeyFor` と同じ形）。読めなかった場合
+ * （`current_schema()` が `NULL`）は `undefined` のまま渡され、既存の
+ * {@link REGISTER_EMBEDDING_SPACE_LOCK_KEY} になる。
+ *
+ * ⚠ **この関数のシグネチャ・戻り値は公開 API であり、変えていない。** `schema` を渡す
+ * *前*に実行時解決を挟む責務は呼び出し側（`registerEmbeddingSpace`）にある。
  */
 export function registerEmbeddingSpaceLockKeyFor(schema?: string): bigint {
   if (schema === undefined || schema === "public") {
@@ -176,7 +187,11 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  * ## `options.schema`（feat/dedicated-schema）
  *
  * **`schema` 未指定なら、発行される DDL は今日と1バイトも変わらない**（`qualify` が
- * 識別子を素通しするため）。`schema` を指定すると、テーブル・外部キー参照先・索引を
+ * 識別子を素通しするため）。ただし **`options.lockKey` を上書きしない呼び出しは、
+ * ロック取得より前に `SELECT current_schema()` を1回発行する**（Issue #779、
+ * {@link registerEmbeddingSpaceLockKeyFor} の doc 参照）——DDL には触れない、
+ * advisory lock のキーを実際のスキーマに揃えるためだけの読み取りである。
+ * `schema` を指定すると、テーブル・外部キー参照先・索引を
  * `qualify(schema, ...)` で完全修飾し、`vector` / `vector_cosine_ops` の型・operator
  * class を `qualify(extensionSchema, ...)` で修飾する（`extensionSchema` 省略時は
  * {@link DEFAULT_EXTENSION_SCHEMA}）。**`search_path` は一切触らない**——`migrate.ts`
@@ -224,7 +239,15 @@ export async function registerEmbeddingSpace(
   assertSafeIdentifier(index);
 
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
-  const lockKey = options.lockKey ?? registerEmbeddingSpaceLockKeyFor(schema);
+  // Issue #779: `migrate.ts` の `runMigrations` と同じ形——`schema` 未指定かつ
+  // `options.lockKey` の上書きも無いときだけ、ロック取得より前に同じ `pool` で
+  // `SELECT current_schema()` を読み、実際に解決されたスキーマ名で
+  // `registerEmbeddingSpaceLockKeyFor` を呼ぶ。
+  const lockKey =
+    options.lockKey ??
+    registerEmbeddingSpaceLockKeyFor(
+      schema === undefined ? await resolveCurrentSchema(pool) : schema,
+    );
 
   const { client: lockClient, waitedMs } = await acquireAdvisoryLock(
     pool,
