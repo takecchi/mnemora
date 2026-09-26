@@ -29,7 +29,10 @@ import { stripSqlComments } from "./sql-comments.js";
  * ## どう測るか
  *
  * `runMigrations` が触る面は `pool.query(...)` と `pool.connect()`（返す client の
- * `query` / `release`）だけ（`../migrate.ts` と `../advisory-lock.ts` を参照）。
+ * `query` / `release` / `on` / `removeListener`）だけ（`../migrate.ts` と
+ * `../advisory-lock.ts` を参照。`on`/`removeListener` は接続断でプロセスが
+ * クラッシュしないための checked-out client 向けの空リスナーの付け外し——
+ * `migrate-connection-loss.test.ts` が実測した壊れ方の修正）。
  * その2つを記録するだけの偽の `Pool` を作り、
  *
  * - A: `runMigrations(fakeA)`（引数1つ）
@@ -75,6 +78,10 @@ function createFakePool(): { pool: Pool; log: string[] } {
     release: () => {
       // 記録することは何も無い（呼ばれたことそのものは検査対象ではない）。
     },
+    // `advisory-lock.ts`/`migrate.ts` が checked-out client に付け外しする空の
+    // `error` リスナー用（実体は検査対象ではないので何もしない no-op でよい）。
+    on: () => client,
+    removeListener: () => client,
   };
 
   const pool = {

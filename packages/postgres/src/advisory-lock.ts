@@ -29,6 +29,20 @@ export const DEFAULT_LOCK_TIMEOUT_MS = 30_000;
 const PG_LOCK_TIMEOUT_SQLSTATE = "55P03";
 
 /**
+ * `pool.connect()` で借り切った checked-out client に付ける、何もしない `error`
+ * リスナー（下記 {@link acquireAdvisoryLock} 参照）。
+ *
+ * 🔴 **モジュールで1つだけの、同じ関数参照を使い回すこと。** 呼び出しのたびに
+ * `() => {}` を新しく作ると、`client.on("error", ...)` で付けたのと**同じ関数参照**を
+ * `client.removeListener("error", ...)` で外せなくなる——`pg-pool` は接続を pool へ
+ * 返却してもソケットは切らずに次の `pool.connect()` で使い回すため、外し忘れると
+ * 同じ物理コネクションに付け外しのたびリスナーが積み上がり、
+ * `MaxListenersExceededWarning`（既定上限10）に達する。**必ずこの定数を `on`/
+ * `removeListener` の両方に使うこと。**
+ */
+const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
+
+/**
  * advisory lock の取得が「待ち時間切れで失敗した」ことを表す汎用の基底クラス。
  *
  * **「待って取れた」「待ったが時間切れ」「ロック機構自体が使えなかった」の3つを
@@ -88,6 +102,19 @@ export async function acquireAdvisoryLock(
   errors: AdvisoryLockErrorFactories,
 ): Promise<{ client: PoolClient; waitedMs: number }> {
   const client = await pool.connect();
+  // pg の仕様: `pool.connect()` で借り切ったクライアント（checked-out client）は、
+  // 呼び出し側が自分で `error` リスナーを付けない限り、接続断（DB の再起動・
+  // フェイルオーバー・運用者による切断・OOM kill 等、外部要因によるものを含む）が
+  // Node の `EventEmitter` の既定動作でそのまま投げられ、プロセス全体が uncaught
+  // exception で落ちる。**このクライアントは呼び出し元（`runMigrations` /
+  // `registerEmbeddingSpace`）に返され、マイグレーション本体の適用中ずっとアイドル状態で
+  // 保持され続ける**——アイドルの間に接続が失われると、待っている進行中のクエリが
+  // 1つも無いため、これを拾わないと確実にプロセスが落ちる
+  // （`migrate-connection-loss.test.ts` が実測）。実際のエラー処理は、この後に
+  // 続く各クエリの `await` が reject することに委ねるので、ここでは黙って拾うだけで足りる。
+  // ⚠ `client.release()` するすべての経路で `removeListener` も対にすること
+  // （{@link NOOP_CLIENT_ERROR_HANDLER} のコメント参照——外し忘れるとリスナーが積み上がる）。
+  client.on("error", NOOP_CLIENT_ERROR_HANDLER);
 
   try {
     // SET だとプレースホルダを使えないため set_config() 経由にする
@@ -96,6 +123,7 @@ export async function acquireAdvisoryLock(
     // 悪影響が残らないよう、後で必ず '0' に戻す）。
     await client.query("SELECT set_config('lock_timeout', $1, false)", [String(lockTimeoutMs)]);
   } catch (err) {
+    client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
     client.release();
     throw errors.unavailable(err);
   }
@@ -105,6 +133,7 @@ export async function acquireAdvisoryLock(
     waitedMs = await acquireAdvisoryLockOnClient(client, lockKey, errors);
   } catch (err) {
     await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
+    client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
     client.release();
     throw err;
   }
@@ -218,6 +247,9 @@ export async function releaseAdvisoryLock(client: PoolClient, lockKey: bigint): 
     await releaseAdvisoryLockOnClient(client, lockKey);
   } finally {
     await client.query("SELECT set_config('lock_timeout', '0', false)").catch(() => {});
+    // `acquireAdvisoryLock` が付けた {@link NOOP_CLIENT_ERROR_HANDLER} を、pool へ返す前に
+    // 外す（外し忘れるとリスナーが積み上がる。同コメント参照）。
+    client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
     client.release();
   }
 }

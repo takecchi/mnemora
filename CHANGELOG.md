@@ -114,7 +114,19 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
-
+- **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を
+  失う（DB の再起動・フェイルオーバー・運用者による手動切断・OOM kill 等）と、Node
+  プロセス全体が uncaught exception で落ちていた。** `pool.connect()` で借り切った
+  checked-out client に `error` リスナーを付けていなかったため——`pg` はこれを要求して
+  いる（付けないと Node の `EventEmitter` の既定動作でそのまま投げる）。捕まった場合も、
+  `catch` 節の `ROLLBACK` 自体が失敗し、`migrate.ts` が約束する
+  `'migration <file> failed: ...'` ではなく素の接続断メッセージへ上書きされていた。
+  空の `error` リスナーを付け、`ROLLBACK` の二次失敗で一次失敗を上書きしないようにした
+  ——利用者が既存 DB を抱えたまま `mnemora-postgres-migrate` を実行する運用（v1.0.0/
+  v1.0.1 の利用者がまさにこれに当たる）で、途中の接続断がプロセスのクラッシュではなく
+  catchable な `Error` として観測できるようになる（[ADR 0339](./docs/decisions/0339-checked-out-client-error-listener.md)、
+  [ADR 0020](./docs/decisions/0020-temp-database-drain-before-drop.md) とは別の話——
+  自傷ではなく外部要因による接続断であり、握り潰す対象は無い）。
 - **`runtime.tick()` が、`consolidate`/`reflect` の自動ジョブで LLM 呼び出しが失敗しても、
   そのジョブを「処理成功」として数えていた。** `processConsolidateJob`/`processReflectJob`
   は `consolidate()`/`reflect()` の戻り値（LLM 失敗時は `outcome: "llm_failed"` を返す——
