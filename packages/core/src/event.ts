@@ -5,17 +5,25 @@ import type { EventId, MemoryId } from "./ids.js";
  * 監査ログのイベント種別（docs/memory-model.md §9）。
  * 「状態が実際に変わった大分類」だけを列挙し、理由の粒度は `meta` に落とす。
  *
- * **⚠ `"purged"` と `"events_purged"` は、この union に在るが生成するコードが無い**
- * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) で棚卸し済み）。
- * `purge()`（物理削除）の書き手そのものが存在しない——Issue #198（オーナー §5.3 が
- * `forget()`（論理削除）と分けると決めた片割れ）が実装されるまで、どちらも本番コードから
- * 一度も書かれない。**`"purged"` は repo 全体でこの宣言以外に一度も出現しない**
- * （テストのフィクスチャにも無い）。`"events_purged"` は `@mnemora/testkit` の適合テストが
- * FK 制約（`memory_events.memory_id` が NULL を拒まないこと）を検査する
- * リテラルとしてのみ現れ、`purge()` を模してはいない。
+ * **`"purged"` と `"events_purged"` は、どちらも本番コードから実際に書かれる。**
+ * - `"purged"`: `Runtime.purge`（`createRuntime` の中の `purge`）が `kind: "purged"` の
+ *   イベントを組み立て、`MemoryStore.purgeMemory`（Postgres は `PostgresMemoryStore.purgeMemory`）が
+ *   本文のトゥームストーン上書きと同じトランザクションで `memory_events` に積む
+ *   （Issue #198 / [ADR 0124](../../../docs/decisions/0124-purge-physical-delete.md)）。
+ * - `"events_purged"`: `MemoryStore.purgeExpiredEvents`（任意メソッド。Postgres は
+ *   `PostgresMemoryStore.purgeExpiredEvents`）が、期限切れの行を消すのと同じトランザクションで
+ *   `memory_id = NULL` の1行を積む（Issue #210 / [ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)）。
+ *   core はイベントを組み立てず、adapter が生の SQL で書く。
+ *
+ * ⚠ **2026-09-26 訂正**: この段落は以前「どちらも生成するコードが無い」と書いていた
+ * （Issue #206 / [ADR 0117](../../../docs/decisions/0117-unreachable-union-values-inventory.md) の
+ * 棚卸しの時点の記述）。その後、上の2つの書き手が入ったが、この段落は追いついていなかった。
+ * `__tests__/unreachable-union-values.test.ts` は今も `"events_purged"` を棚卸しに残している。
+ * あの歯は `kind: "events_purged"` というオブジェクトリテラルを文字列一致で探すので、
+ * Postgres の書き手（SQL の文字列 `'events_purged'`）を見つけられない。
  *
  * **`"restored"`（Issue #195、[ADR 0122](../../../docs/decisions/0122-restore-archived-memory.md)）
- * は上の2つと違い、この PR から実際に生成される。**`Runtime.restoreArchived` が
+ * も、この PR から実際に生成される。**`Runtime.restoreArchived` が
  * `status='archived'` → `status='active'` の遷移（`docs/memory-model.md` §11 行14）で
  * 積む。既存の網羅的な `switch (event.kind)` は出荷対象パッケージ（`packages/core`・
  * `packages/postgres`・`packages/openai`・`packages/local-embedding`・
