@@ -78,6 +78,7 @@ export interface TimeWeightingBenchRuntimeHandle {
   cassetteIgnored: boolean;
   /** `Providers.readSeedUsage` をそのまま通す（`providerOptions.seedCassette` を渡したときだけ存在する）。 */
   readSeedUsage?: () => SeedUsageSummary;
+  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 

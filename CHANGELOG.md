@@ -164,6 +164,13 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
+- **`VectorStore` に任意メソッド `searchMany?` を足した**——連想枠（段3.5）がアンカーごとに
+  `search()` を1回ずつ呼んでいた往復（`anchorCount` に比例して増えていた）を、実装した
+  adapter では1回の往復に束ねられるようにする。`PostgresVectorStore` に実装済み。
+  未実装の adapter では従来どおりアンカーごとの `search()` 呼び出しに戻り、結果（集合・
+  順序）は変わらない。**破壊的変更ではない**——公開 API の実 diff は `searchMany?` の
+  追加のみ（Refs [Issue #377](https://github.com/takecchi/mnemora/issues/377) /
+  [ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記）。
 
 ### Fixed
 
@@ -394,6 +401,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
   `MemoryStore.createMemory` の doc コメントに記録した
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
+- **`@mnemora/postgres` の `closePostgresClient` を冪等にした**——2回目以降の呼び出しは `Called end on pool more than once` で reject せず、何もせずに resolve する（[Issue #935](https://github.com/takecchi/mnemora/issues/935)）。
 - **`runtime.recall()` の段2（`compareScoredCandidates`）と段3.5（連想）の2つの並べ替え
   （`associationHits.sort`・`rankedCandidates.sort`）が、候補の `total`/`similarity`/
   `rankKey` のいずれかが `NaN`（ADR 0040——ゼロベクトルの cosine 距離に由来）になると、

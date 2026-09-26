@@ -912,6 +912,13 @@ export interface VectorStore {
         limit: number;
         filter: VectorFilter;
     }): Promise<VectorHit[]>;
+    searchMany?(ctx: Ctx, space: EmbeddingSpaceId, queries: {
+        key: string;
+        vector: number[];
+    }[], opts: {
+        limit: number;
+        filter: VectorFilter;
+    }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }

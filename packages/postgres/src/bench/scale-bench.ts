@@ -553,25 +553,70 @@ function urlForDatabase(baseUrl: string, database: string): string {
   return url.toString();
 }
 
-interface ScaleDatabase {
+export interface ScaleDatabase {
   admin: Pool;
   pool: Pool;
   db: ReturnType<typeof drizzle<typeof schema>>;
   database: string;
 }
 
-async function createScaleDatabase(baseUrl: string, database: string): Promise<ScaleDatabase> {
+/**
+ * `migrationsDir` は本番の呼び出し（`runSubjectSizeBench`/`main` 内の2箇所）では
+ * 常に省略され、`runMigrations` 自身の既定（`DEFAULT_MIGRATIONS_DIR`）にそのまま
+ * 委譲される——1バイトも挙動が変わらない。存在するのは
+ * `scale-bench-close-on-throw.postgres.test.ts` が「`Pool` を作って一時 DB も作った
+ * *後*に `runMigrations` が失敗する」経路を、`Pool`/接続を模倣せずに実際の
+ * `runMigrations` の失敗（存在しないディレクトリを渡す）で再現するための注入口。
+ *
+ * **Issue #936**: `admin`/`pool` という2本の `Pool` を作った*後*、両方を返す
+ * `ScaleDatabase` を返す*前*に、失敗しうる `await` を複数段（`CREATE DATABASE`・
+ * `runMigrations`）挟んでいた。ここで reject すると、呼び出し元
+ * （`const handle = await createScaleDatabase(...); try { ... } finally { await
+ * teardownScaleDatabase(handle); }`）は `handle` を受け取れず、`teardownScaleDatabase`
+ * を呼びようがない——`Pool` 2本のリークに加え、`CREATE DATABASE` が既に成功していた
+ * 場合は一時データベース自体も `DROP` されずに残る（`examples/chat` の
+ * `createExampleRuntime`／Issue #934 と同じ根、こちらは一時 DB の後始末が絡む分
+ * 一段複雑）。
+ *
+ * ⚠ **`dropTempDatabase`（`__tests__/temp-database.ts`、ADR 0020）は「呼び出し前に
+ * 自分の `pool` を `pool.end()` していること」を前提にしている**——`WITH (FORCE)` を
+ * 使わず `pg_stat_activity` が0本になるまで待つ実装のため、`pool` を先に閉じてから
+ * 呼ぶ（自傷経路——`pool` を閉じる前に叩くと、まだ生きている自分自身の接続を
+ * 検知するだけの待ちになる）。
+ */
+export async function createScaleDatabase(
+  baseUrl: string,
+  database: string,
+  migrationsDir?: string,
+): Promise<ScaleDatabase> {
   const admin = new Pool({ connectionString: baseUrl, max: 1 });
-  // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
-  await dropTempDatabase(admin, database);
-  await admin.query(`CREATE DATABASE ${database}`);
-  const pool = new Pool({ connectionString: urlForDatabase(baseUrl, database), max: 5 });
-  await runMigrations(pool);
-  const db = drizzle(pool, { schema });
-  return { admin, pool, db, database };
+  let pool: Pool | undefined;
+  let databaseCreated = false;
+  try {
+    // FORCE を使わない理由は temp-database.ts 冒頭のコメント（ADR 0020）を参照。
+    await dropTempDatabase(admin, database);
+    await admin.query(`CREATE DATABASE ${database}`);
+    databaseCreated = true;
+    pool = new Pool({ connectionString: urlForDatabase(baseUrl, database), max: 5 });
+    await runMigrations(pool, migrationsDir);
+    const db = drizzle(pool, { schema });
+    return { admin, pool, db, database };
+  } catch (err) {
+    // 元の失敗（`err`）を、後始末自体の失敗で上書きしない
+    // （examples/chat の `runtime-factory.ts`／Issue #934 と同じ形）。
+    if (pool !== undefined) {
+      await pool.end().catch(() => {});
+    }
+    if (databaseCreated) {
+      // `pool` を閉じた*後*に呼ぶ（上の doc コメント参照、ADR 0020 の自傷経路）。
+      await dropTempDatabase(admin, database).catch(() => {});
+    }
+    await admin.end().catch(() => {});
+    throw err;
+  }
 }
 
-async function teardownScaleDatabase(handle: ScaleDatabase): Promise<void> {
+export async function teardownScaleDatabase(handle: ScaleDatabase): Promise<void> {
   await handle.pool.end();
   await dropTempDatabase(handle.admin, handle.database);
   await handle.admin.end();
@@ -1687,7 +1732,14 @@ async function main(): Promise<void> {
   );
 }
 
-main().catch((err: unknown) => {
-  console.error(err);
-  process.exitCode = 1;
-});
+// `scale-bench-close-on-throw.postgres.test.ts` が `createScaleDatabase` を直接
+// import して呼ぶために要るゲート——この行が無いと、import するだけで下の
+// `main()`（Part 1〜4、既定で 10k/100k/1M 行の投入を含む本物のベンチ全体）が
+// 走ってしまう。`tsx src/bench/scale-bench.ts`（`bench:scale` スクリプト経由）
+// で実行する通常の経路ではこの環境変数を設定しないため、今日どおり `main()` が走る。
+if (process.env.MNEMORA_SCALE_BENCH_SKIP_MAIN !== "1") {
+  main().catch((err: unknown) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
+}

@@ -649,6 +649,12 @@ interface VectorStore {
   ): Promise<VectorHit[]>;
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
   getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
+  searchMany?(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    queries: { key: string; vector: number[] }[],
+    opts: { limit: number; filter: VectorFilter }
+  ): Promise<Map<string, VectorHit[]>>;
 }
 
 interface EmbeddingSpaceId {
@@ -677,6 +683,14 @@ interface VectorEntry {
 > この節には反映されていなかった。任意メソッドである理由・契約の詳細（存在しない
 > `memoryId` は黙って結果から落とす・tenant 境界を必ず掛ける等）はソースの doc コメントを
 > 参照すること。
+
+> **Issue #377（2026-09 追記）**: `searchMany?`（任意メソッド）を足した——連想枠（段3.5）が
+> アンカーごとに `search()` を呼ぶと往復数が `anchorCount` に比例して増える問題に対し、
+> 複数のクエリベクトルを同じ `filter`/`limit` で1回の往復に束ねる口。`getVectors?` と
+> 同じ「無くても `VectorStore` として成立する」任意メソッドであり、実装しない adapter では
+> `recall-runtime.ts` の段3.5がアンカーごとの `search()` 呼び出しへ戻る。契約の詳細
+> （各クエリの結果が `search()` を単独で呼んだ場合と集合・順序ともに完全一致すること等）は
+> ソースの doc コメントを参照すること。
 
 契約:
 - **`MemoryStore` が真実の源(source of truth)であり、`VectorStore` は再構築可能な派生索引である。**

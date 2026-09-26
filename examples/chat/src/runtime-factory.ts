@@ -104,6 +104,7 @@ export interface ExampleRuntimeHandle {
    * `meta.note` に選んだ根拠が実際に届いているかを検査するために使う。
    */
   eventStore: PostgresEventStore;
+  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 

@@ -260,6 +260,39 @@ export interface VectorStore {
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]>;
   /**
+   * 複数のクエリベクトルを、**同じ `opts`（`limit`・`filter`）で** `search()` した場合と
+   * 同じ結果を、1回の往復に束ねて返す（連想枠のアンカーごとの ANN 検索、Issue #377）。
+   *
+   * **任意メソッドである。**`getVectors?`（下）と同じ判断——これが無くても `VectorStore`
+   * としては成立する。`recall-runtime.ts` の段3.5（連想、ADR 0151）はこれが無い場合、
+   * アンカーごとに `search()` を1回ずつ呼ぶ既存の経路（往復数がアンカー数に比例する）へ
+   * 戻る——**正しさは変わらない。変わるのは往復数だけ。**
+   *
+   * **契約: 各 `queries[i]` に対する結果は、`search(ctx, space, queries[i].vector, opts)` を
+   * 単独で呼んだ場合と、集合・順序ともに完全に一致しなければならない。** `filter`・`limit`
+   * は全クエリで共通の1つだけを受け取る——`recall-runtime.ts` が段3.5で複数アンカーへ
+   * 発行する `search()` 呼び出しは、`filter`/`limit` が全アンカーで同一で、変わるのは
+   * クエリベクトルだけであるため（段0と同じ scope の filter を毎回同じ形で撒く設計、
+   * ADR 0172/0286/0312/0323 の積み重ね）——クエリごとに違う `filter`/`limit` を渡したい
+   * 呼び出しは、この口の対象外である（`search()` を個別に呼ぶこと）。
+   *
+   * **`queries` の `key` は呼び出し側が選ぶ不透明な識別子である**（`recall-runtime.ts` は
+   * `MemoryId`＝アンカーの `memoryId` をそのまま使う）。返り値の `Map` は `queries` と
+   * 同じ `key` の集合を持つ（`search()` と同じく、対応するクエリの結果が0件でも
+   * `key` 自体はエントリとして存在する——`Map` から欠落するのは `queries` に無い
+   * `key` だけ）。`queries` が空配列なら、空の `Map` を返す（往復を発生させる必要は無い）。
+   *
+   * **タイブレークの契約は `search()` と同じ**——`PostgresVectorStore.searchMany` は
+   * 各クエリを独立した `search()` 呼び出しと同じ3段（距離 → `recorded_at` DESC →
+   * `memory_id`、Issue #339 / ADR 0170）で並べる。
+   */
+  searchMany?(
+    ctx: Ctx,
+    space: EmbeddingSpaceId,
+    queries: { key: string; vector: number[] }[],
+    opts: { limit: number; filter: VectorFilter },
+  ): Promise<Map<string, VectorHit[]>>;
+  /**
    * 対象の vector が存在しなければ何もしない（`void`、べき等）。`memoryId` が adapter
    * の期待する形式でない場合も同じ「何もしない」という結果になる。core の `MemoryId` は
    * 単なる `string` であり形式を強制しないため、adapter が期待する形式に合わない
