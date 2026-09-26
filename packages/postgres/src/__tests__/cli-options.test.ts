@@ -323,6 +323,38 @@ describe("parseMigrateCliOptions: --help", () => {
     expectOk(result);
     expect(result.options.help).toBe(true);
   });
+
+  // 🔴 以下3本は、このファイル冒頭のdocコメント
+  // 「--help はどんな組み合わせでも他の解釈をせず即座に返す（ヘルプ表示に徹する）」を
+  // そのまま検査する歯（実装時点で赤——`--help`/`-h` より後に置かれた壊れた引数が、
+  // ループ内で先に `ok: false` を返してしまい、help に到達しない）。
+  // 上の1本（322行目）は「解決には失敗する*が構文的には壊れていない*値」
+  // （schema="Tenant" は値を消費できる）で help が勝つことしか確認しておらず、
+  // 「構文自体が壊れている（値が無い・未知のオプション）」場合は検査していなかった。
+
+  it("--help の後に値の無い --schema が続いても help を優先する", () => {
+    const result = parseMigrateCliOptions(["--help", "--schema"], {});
+    expectOk(result);
+    expect(result.options.help).toBe(true);
+  });
+
+  it("-h の後に値の無い --schema が続いても help を優先する", () => {
+    const result = parseMigrateCliOptions(["-h", "--schema"], {});
+    expectOk(result);
+    expect(result.options.help).toBe(true);
+  });
+
+  it("--help の後に未知のオプションが続いても help を優先する", () => {
+    const result = parseMigrateCliOptions(["--help", "--foo"], {});
+    expectOk(result);
+    expect(result.options.help).toBe(true);
+  });
+
+  it("未知のオプションの後に --help が続いても help を優先する", () => {
+    const result = parseMigrateCliOptions(["--foo", "--help"], {});
+    expectOk(result);
+    expect(result.options.help).toBe(true);
+  });
 });
 
 describe("formatMigrateCliUsage", () => {
