@@ -577,6 +577,47 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(overLimit).toBeUndefined();
   });
 
+  it("Issue #925（ADR 0203「引き受けた負債」2番の是正）: over_limit(stage:'rescore') に回った候補が段3.5（連想）で拾い直されると、over_limit の Omission 自体が消える", async () => {
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    const ctx: Ctx = { tenantId: TENANT };
+
+    // A: クエリと完全一致。limit=1 なので withinLimit の1件を占め、連想のアンカーになる。
+    const a = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      digest: "A",
+    });
+    // B: A にわずかに劣るだけ。limit=1 なので段2で over_limit(stage:"rescore") へ回る
+    // 一方、A への類似度が連想の minSimilarity（既定 0.5）を軽々超えるため、段3.5 の
+    // アンカー A から拾い直され、retrievedVia:"association" として finalMemories に
+    // 足される——上の Issue #823 の歯と違い、A/B は contested のペアではない
+    // （段3の必須同伴取得ではなく、段3.5 の連想だけを踏む構成）。
+    const b = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.999, 0.001, 0], {
+      digest: "B",
+    });
+
+    // association を渡さない——既定 on（ADR 0337）のまま呼ぶ。
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 1,
+      overFetchFactor: 10,
+    });
+
+    expect(result.memories).toHaveLength(2);
+    const returnedA = result.memories.find((m) => m.memoryId === a.id);
+    expect(returnedA).toBeDefined();
+    expect(returnedA?.retrievedVia).toBe("ann");
+    const returnedB = result.memories.find((m) => m.memoryId === b.id);
+    expect(returnedB).toBeDefined();
+    expect(returnedB?.retrievedVia).toBe("association");
+    expect(returnedB?.associationOf).toBe(a.id);
+
+    // 修正後の期待: over_limit(stage:"rescore") の対象はこの1件（B）だけだったので、
+    // below_threshold と同じ作法で Omission 自体が配列から消える。
+    const overLimitAssociation = result.omitted.find(
+      (o) => o.kind === "over_limit" && o.stage === "rescore",
+    );
+    expect(overLimitAssociation).toBeUndefined();
+  });
+
   it("段6: recallId が発行され、observe({kind:'memory_usage'}) から参照できる", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
