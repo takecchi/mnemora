@@ -45,7 +45,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`4cd1354`**（PR #906）の範囲を
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`dce0f71`**（PR #909）の範囲を
 数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
@@ -64,9 +64,10 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 `0021_memories_claim_key.sql`。**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の
 `## [1.0.1]` 節の migrate 案内も合わせて読むこと**（`0019`〜`0021` の3本が要る）。
 
-**この節が数えた範囲（`v1.0.1`…`4cd1354`）に破壊的変更は無い。**【実測 2026-09-26】
-`git diff v1.0.1..4cd1354 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
-の型を `| null` へ広げたこと（PR #838）に伴う再フォーマットのみであり、削除・必須化・型の
+**この節が数えた範囲（`v1.0.1`…`dce0f71`）に破壊的変更は無い。**【実測 2026-09-26】
+`git diff v1.0.1..dce0f71 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
+の型を `| null` へ広げたこと（PR #838）と、`TrigramLexicalStoreUnavailableError` の constructor に
+任意の第3引数 `options?: ErrorOptions` を足したこと（PR #908）に伴う再フォーマットのみであり、削除・必須化・型の
 狭小化は無い。`### Breaking` の節は無い。
 
 対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
@@ -252,7 +253,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   の戻り値の形は変えていない（`cause` は漏れない）。他の3つの reason
   （`server_encoding_not_utf8`/`extension_unavailable`/`locale_no_japanese_trigrams`）は
   そもそも Postgres のエラーオブジェクトを持たない値ベースの判定であり対象外
-  （[Issue #892](https://github.com/takecchi/mnemora/issues/892)）。
+  （[Issue #892](https://github.com/takecchi/mnemora/issues/892)、PR #908）。
 
 ---
 
