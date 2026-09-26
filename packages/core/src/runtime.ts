@@ -3731,6 +3731,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       throw err;
     }
+
+    // Issue #1035 / ADR 0124 決定5: 上で読んでから upsert するまでの間に `purge()` が
+    // 完了していると、purge の埋め込み削除より後に、purge 前の内容から作ったベクトルを
+    // 書いてしまう。書いた後に読み直し、purge 済みなら書いた埋め込みを消す。
+    // purge は「内容の上書きをコミット → 埋め込みを消す」の順なので、この読み直しが
+    // 上書きより前なら purge 側の削除が upsert より後に来て、後なら、ここで消す。
+    // `embeddingStatus` は `purge()` と同じく触らない（purge は `ready` の記憶を
+    // `ready` のまま残す）。ここでの失敗は try の外で投げ、`failed` は書かない
+    // ——埋め込み自体は成功しているため。`tick()` がジョブの失敗として記録する。
+    const afterWrite = await deps.memoryStore.get(ctx, memory.id);
+    if ((afterWrite?.purgedAt ?? null) !== null) {
+      await deps.vectorStore.delete(ctx, deps.embeddingProvider.space, memory.id);
+    }
   }
 
   /**

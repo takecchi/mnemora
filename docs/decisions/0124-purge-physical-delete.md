@@ -299,3 +299,27 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
 - 依拠した方針: 「文書と実装がずれたら記述を実態へ合わせる」（2026-09-16）と「クローンが決められるものは決めてよい」（2026-09-24）。
 
 反映先: `packages/core/src/runtime.ts` の `Runtime.observe` の doc コメント、`docs/memory-model.md` §10 `observations` の節。新しい ADR は作らず、この追記に留めた。
+
+---
+
+## 追記（2026-09-27）: embed ジョブの最中の `purge()`（Issue #1035）
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜7・引き受けた負債・確かめていないこと）と、上の追記は書き換えていない。**当時の記録として残す。
+
+**見つかった穴**: embed ジョブ（`tick()` の `processEmbedJob`）は Memory を読んでから provider を呼び、その結果を `vectorStore.upsert` する。provider の応答を待っている間に `forget()` → `purge()` が完了すると、ジョブは purge **前**の内容から作ったベクトルを、決定5の埋め込み削除の**後**に書く。⟹ `purge()` が `"purged"` を返したのに、消したはずの内容から作った埋め込みが残る。本文の負債1（`vectorStore.delete` 自体の失敗）とは別の経路で、本文はこの交差に触れていない。
+
+**実測**（main `c6f33d0`、手元の PostgreSQL 17.11 / pgvector 0.8.0）: `packages/postgres/src/__tests__/purge-during-embed-job.postgres.test.ts` が、ジョブを障壁で止めて順序を固定する（sleep は使わない）。止める地点は、provider の中と、`upsert()` の入口の2つ。直す前は2件とも、10回中10回赤だった（埋め込み行が1行残る）。
+
+**直し方**: `processEmbedJob` は、upsert と `ready` の書き込みの後に Memory を読み直し、`purgedAt` が付いていれば、書いた埋め込みを消す。`purge()` は「内容の上書きをコミット → 埋め込みを消す」の順なので、次のどちらかが必ず成り立つ。
+
+- 読み直しが上書きより前なら、purge 側の削除がジョブの upsert より後に来る
+- 読み直しが上書きより後なら、ジョブ自身が消す
+
+- `embeddingStatus` は触らない。`purge()` 自身も `ready` の記憶を `ready` のまま残すので、それと揃える。
+- 読み直しと削除の失敗は、`failed` を書かずにジョブの失敗として投げる（埋め込み自体は成功しているため）。
+- **採らなかった案**: 確かめを upsert の**前**に置く。provider が返った後・upsert の直前に purge が割り込むと残る。【実測】この変異では、`upsert()` の入口で止める歯が10回中10回赤になった。
+- **採らなかった案**: `PostgresVectorStore.upsert` を「purge 済みの Memory には書かない」条件付きにする。`VectorStore.upsert` の契約（保存の意味）を変えることになり、`VectorStore` を実装する第三者の adapter にも同じ義務を課すことになる。
+
+**引き受ける負債**: 埋め込みを書いてから消すまでの間は、purge 済みの記憶の埋め込み行が一瞬在る。ただし recall には現れない（本文の負債1と同じく、`search` は `status` で `memories` と JOIN する）。本文の負債1（`vectorStore.delete` の失敗）は、ジョブ側の削除にもそのまま当てはまる。
