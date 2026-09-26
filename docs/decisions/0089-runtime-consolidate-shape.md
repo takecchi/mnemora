@@ -458,3 +458,45 @@
   - **並行の歯は fake に対して測っており、実 DB の行ロックの振る舞いは測っていない**
     （ADR 0087 と同じ）。特に「ガードで弾かれる `UPDATE` が行ロックを取るかどうか」は
     この ADR の主張の根拠にしていない。
+
+## 追記（2026-09-26、[Issue #882](https://github.com/takecchi/mnemora/issues/882)）: 統合先の `provenance.sources` は eligible の memoryId である——文書を実装に合わせて明記した
+
+⚠ この追記はクローン miku の判断による（オーナー本人の決定ではない。
+[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+上の本文（決定・負債・確かめていないこと）は書き換えていない。
+
+**食い違い（Issue #882 の実測、2026-09-26 に現物のコードで再確認）**:
+- `packages/core/src/strategies/consolidate.ts` の `buildConsolidatedMemory` は
+  `provenance: { kind: 'consolidated', sources: eligible.map((m) => m.id) }` を組み立て、
+  その doc コメントも「`sources`: eligible の memoryId」と書いている。
+- `Runtime.consolidate()` はこれを LLM を呼んだ直後に1回組み立て、統合先の `created` イベントの
+  `meta.sources` にも同じ eligible の id を入れる。その後の supersede の書き込み
+  （`supersedeWithNewMemories` の1トランザクションの経路・口が無いときの2段の経路のどちら）でも、
+  CAS の破れ（`status_changed_concurrently`）や途中の例外（`not_attempted`）が起きたときに
+  `sources` を書き直す処理は無い。
+- ⟹ 決定3 の「CAS が破れたらその1件だけを飛ばして続行」と、決定5 の「途中で落ちたら残りを
+  `not_attempted` にして返す」が起きたとき、実際には `superseded` にならなかった id が
+  統合先の `provenance.sources` に残る。Issue #882 は Fake の2経路と Postgres の1トランザクションの
+  経路で、統合中に forget された元の id が `sources` に残ることを実測している。
+  本文の負債1 は「一部の元が `active` のまま残り、recall に重複が残る」までを書いていたが、
+  統合先の `provenance.sources` の側には触れていなかった。
+
+**決めたこと**: 文書を実装に合わせた。`docs/memory-model.md` §11 行12 に、`sources`（と `created`
+イベントの `meta.sources`）は統合の対象として選ばれた（eligible の）id であり、CAS の破れや途中の失敗で
+実際には `superseded` にならなかった id も含みうる、と明記した。実際に置き換えたかどうかは、
+各 id の `status`/`superseded_by_id`、または `consolidate()` の返り値の `sources[].kind` で分かる。
+コード（`packages/*/src`）の挙動は変えていない。
+根拠はオーナーの2つの方針である。2026-09-16 の「設計文書と実装がずれたら、原則として記述を
+実態へ合わせる。元の設計思想は保つ」と、2026-09-24 の「決められるものは判断して進めてよい」。
+
+**採らなかった案**: 実装を「実際に統合した id」の読みに合わせる（supersede の結果を見てから
+`sources` を書き直す）。統合先は supersede より先に作る（決定5 の書く順序）ので、書き直すには
+作成後の Memory の `provenance` を更新する書き込みの経路と、それを受ける `MemoryStore` の口が要る。
+`supersedeWithNewMemories` の経路でも、統合先の作成と supersede が同じ呼び出しに入っているため、
+結果に応じて `sources` を変えるには口の形そのものを変えることになる。文書の曖昧さを解くために
+書き込みの経路とストアの口に手を入れるのは釣り合わないと判断した。
+
+**残るもの**: `provenance.sources` を「この統合が実際に置き換えた元の一覧」として読む呼び出し側は、
+CAS の破れや部分的な失敗という稀なケースで読み違えうる。その読み違いは文書の明記で防ぐだけで、
+型や値では防いでいない。`reflect()` の `sources` に近い形のずれが理論上ありうること
+（Issue #882「確かめていないこと」）は、この追記でも測っていない。
