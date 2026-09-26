@@ -455,6 +455,22 @@ PR #827）だけであった。
   ⭕ **公開型は変えていない**——`attempts` 不一致の `OutboxLeaseConflictError` と行が
   無い場合の no-op、同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は
   すべて既存どおり。
+- **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
+  処理する `reflect` ジョブ、`processReflectJob`）が、`consolidate` 側の同種の修正
+  （上の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
+  `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `reflect` ジョブを
+  subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の `subjectId`
+  が食い違うと、近傍探索が種と別の subject から候補を拾っていた。`processReflectJob` は、
+  `processConsolidateJob` と同じ形に直した——種の Memory の `subjectId` を `ctx.subjectId` に
+  置いてから `reflect()` を呼ぶ。種が見つからない、または種の `subjectId` が `null` の場合は
+  今日どおり（[Issue #820](https://github.com/takecchi/mnemora/issues/820) /
+  [ADR 0317](./docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
+  追記、PR #851）。
+  ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
+  利用者には何も起きない。migration も不要。
+  ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が
+  構造的に起きなくなる。
+  明示的な `runtime.reflect(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
 
 ---
 

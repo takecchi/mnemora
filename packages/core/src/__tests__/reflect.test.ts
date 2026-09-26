@@ -6,6 +6,7 @@ import type { MemoryStore } from "../interfaces/memory-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { ConsolidationLLMResultSchema } from "../strategies/consolidate.js";
 import { buildReflectedMemory, ReflectionLLMResultSchema } from "../strategies/reflect.js";
+import type { MemoryId } from "../ids.js";
 import type { Memory, MemoryStatus, NewMemory } from "../memory.js";
 import {
   createRuntime,
@@ -701,6 +702,226 @@ describe("runtime.reflect — target の { seedMemoryId } の形（Issue #204、
       { memoryId: high.id, kind: "eligible" },
     ]);
     expect(stores.eventStore.events.length).toBe(eventCountBefore);
+  });
+});
+
+/**
+ * Issue #820 / ADR 0317 決定3「確かめていないこと」: `tick()` の `reflect` ジョブハンドラ
+ * （`processReflectJob`）は、`processConsolidateJob`（Issue #579 / ADR 0317）と対称に、
+ * 種の `subjectId` を `ctx.subjectId` に置いてから `reflect(ctx', { target: { seedMemoryId } })`
+ * を呼ぶ——`consolidate.test.ts` の同名 describe（「runtime.tick — consolidate ジョブは種の
+ * subjectId に近傍探索を絞る」）をそのまま `reflect` に写したもの。
+ *
+ * ⚠ これは `runtime.reflect(ctx, { target: { seedMemoryId } })` を**直接**呼ぶ経路の歯では
+ * ない——上の describe（`{ seedMemoryId } の形`）がその経路をすでに固定しており、この変更は
+ * そちらに一切触れていない。ここで測るのは、必ず `runtime.tick()` を経由する
+ * `processReflectJob` の分岐だけである。
+ *
+ * `reflect` は `consolidate` と違い、既存の行の `status` を1つも動かさない（決定4）。
+ * ⟹ `tick()` の戻り値からは新しく出来た `reflected` Memory の id が分からないため、
+ * `stores.eventStore.events` の `kind: 'created'` を1件だけ拾い、その `meta.sources`
+ * （`created イベント` describe が固定している形）で基底集合を、`event.memoryId` で
+ * 出来た Memory を特定する。
+ */
+describe("runtime.tick — reflect ジョブは種の subjectId に近傍探索を絞る（Issue #820 / ADR 0317）", () => {
+  /**
+   * `consolidate.test.ts` の `buildRuntimeWithRealClock` と同じ理由——この describe は
+   * `tick()` の `claimBatch` を経由するため、outbox 行の `availableAt`
+   * （`FakeOutboxStore.enqueueJob` が `new Date()` ＝実時刻で刻む）より前の固定 clock を
+   * 使うと、`availableAt <= now` が成り立たず1件も claim されない。⟹ ここだけ実時計
+   * （既定の `systemClock`）を使う。
+   */
+  function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    return { runtime, stores };
+  }
+
+  /** `consolidate.test.ts` の `enqueueConsolidateJob` と同じ形、job kind だけ `reflect`。 */
+  async function enqueueReflectJob(
+    stores: ReturnType<typeof createFakeRuntimeStores>,
+    overrides: Partial<NewMemory>,
+  ): Promise<Memory> {
+    const { memory, jobs } = await stores.memoryStore.createMemoryWithOutbox(
+      ctx,
+      newMemory(overrides),
+      ["reflect"],
+    );
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toEqual({ memoryId: memory.id });
+    return memory;
+  }
+
+  /** ちょうど1件の `created` イベントを拾い、`meta.sources` と作られた Memory を返す。 */
+  async function getSoleReflectedResult(stores: ReturnType<typeof createFakeRuntimeStores>) {
+    const createdEvents = stores.eventStore.events.filter((e) => e.kind === "created");
+    expect(createdEvents).toHaveLength(1);
+    const event = createdEvents[0]!;
+    const sources = (event.meta as { sources: MemoryId[] }).sources;
+    const reflected = await stores.memoryStore.get(ctx, event.memoryId!);
+    expect(reflected).not.toBeNull();
+    return { sources, reflected: reflected! };
+  }
+
+  it("ctx.subjectId 無しで tick を呼んでも、種の subject 以外の高affinity近傍は混ざらない（混在 0%）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(llmReflectingTo({ content: "気づき" }));
+
+    const seed = await enqueueReflectJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: "subject-a",
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    // 種と同じ subject の近傍——similarity 1.0（[4,0] と同じ向き）。
+    const neighborSameSubject = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "same-subject neighbor",
+        digest: "n-same",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborSameSubject.id,
+      [8, 0],
+    );
+
+    // 別 subject の近傍——**同じベクトル**（話題が重なる使い方、ADR 0310 shared 極）。
+    // 種の subject に絞らなければ、これも既定の minAffinity（reflect は 0.4）を満たして
+    // 候補に入る。
+    const neighborOtherSubject = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "other-subject neighbor",
+        digest: "n-other",
+        subjectId: "subject-b",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborOtherSubject.id,
+      [8, 0],
+    );
+
+    // `ctx` に subjectId を付けずに tick を呼ぶ——ADR 0310 の「絞らない」列に相当する
+    // 呼び方。修正前はここで別 subject の近傍が混ざり、反映結果の subjectId が null に
+    // 畳まれた（本 PR 本文に、修正前に赤くなることを確認した記録がある）。
+    const tickResult = await runtime.tick(ctx, { kinds: ["reflect"], leaseMs: 60_000 });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const { sources, reflected } = await getSoleReflectedResult(stores);
+    // 混在 0%: 反映結果の subjectId は null に畳まれず、種の subject のままである。
+    expect(reflected.subjectId).toBe("subject-a");
+    expect(sources).toEqual(expect.arrayContaining([seed.id, neighborSameSubject.id]));
+    expect(sources).not.toContain(neighborOtherSubject.id);
+  });
+
+  it("tick に渡した ctx.subjectId が種と別でも、種の subject を優先する（種と同じ subject に絞る）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(llmReflectingTo({ content: "気づき" }));
+
+    const seed = await enqueueReflectJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: "subject-a",
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    const neighborSameAsSeed = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "same-as-seed neighbor",
+        digest: "n-seed",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborSameAsSeed.id,
+      [8, 0],
+    );
+
+    // ctx.subjectId と同じ subject の近傍——ADR 0310 §3 が実測したとおり、`tick()` は
+    // ジョブを subject で絞って claim できないため、種と別の subject が来ることがある。
+    // ここでは「ctx.subjectId に付けた subject」を優先すると、かえってこれが混ざる
+    // ことになる（ADR 0310 の「種と別」の列）——それを防ぐのがこの歯である。
+    const neighborSameAsCtx = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "same-as-ctx neighbor",
+        digest: "n-ctx",
+        subjectId: "subject-c",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(
+      ctx,
+      stores.embeddingProvider.space,
+      neighborSameAsCtx.id,
+      [8, 0],
+    );
+
+    const ctxWithDifferentSubject: Ctx = { tenantId: "tenant-1", subjectId: "subject-c" };
+    const tickResult = await runtime.tick(ctxWithDifferentSubject, {
+      kinds: ["reflect"],
+      leaseMs: 60_000,
+    });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const { sources, reflected } = await getSoleReflectedResult(stores);
+    // 種の subject（subject-a）を優先する——ctx に付けた subject-c ではない。
+    expect(reflected.subjectId).toBe("subject-a");
+    expect(sources).toEqual(expect.arrayContaining([seed.id, neighborSameAsSeed.id]));
+    expect(sources).not.toContain(neighborSameAsCtx.id);
+  });
+
+  it("種の subjectId が null なら、今日どおり ctx のまま呼ぶ（挙動を変えない）", async () => {
+    const { runtime, stores } = buildRuntimeWithRealClock(llmReflectingTo({ content: "気づき" }));
+
+    const seed = await enqueueReflectJob(stores, {
+      content: "seed content",
+      digest: "seed",
+      subjectId: null,
+      embeddingStatus: "ready",
+    });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, seed.id, [4, 0]);
+
+    const neighbor = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        content: "neighbor",
+        digest: "n",
+        subjectId: "subject-a",
+        embeddingStatus: "ready",
+      }),
+    );
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, neighbor.id, [8, 0]);
+
+    // ctx に subjectId を付けない——種が null のとき、ctx をそのまま使うので recall は
+    // テナント全体を見る。今日どおりの挙動（変えていない）を固定する。
+    const tickResult = await runtime.tick(ctx, { kinds: ["reflect"], leaseMs: 60_000 });
+    expect(tickResult).toEqual({ processed: 1, failed: 0, unsupported: [], leaseConflicts: [] });
+
+    const { sources } = await getSoleReflectedResult(stores);
+    expect(sources).toEqual(expect.arrayContaining([seed.id, neighbor.id]));
   });
 });
 
