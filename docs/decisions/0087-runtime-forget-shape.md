@@ -382,6 +382,7 @@ Issue #825 の対応では、負債1が挙げていた2つの候補（対向も�
 既存の呼び出しの中で、呼び出し側が指定していない別の行（生存側）を黙って書き換えることになる
 ——`forget(ctx, { memoryId: b.id })` を呼んだ側は `b` だけを対象にしたつもりでも、`a` の
 `status`/`contestedWithId` が副作用として動く。この暗黙の連動を避けるため、`forget` 自体には
-一切手を入れず、生存側を明示的に戻す別の操作（`Runtime.resolveOrphanedContested`）を足す形が
-採られた。詳細は [ADR 0150](./0150-resolve-contested-explicit-operation.md) の同日付の追記に譲る
-——ここには複製しない。
+一切手を入れず、生存側を明示的に戻す別の操作（`Runtime.resolveOrphanedContested?`、任意メソッド
+——v1.0.0 公開後の必須化を避けるための訂正の経緯は ADR 0150 の同日付の追記を見ること）を足す
+形が採られた。詳細は [ADR 0150](./0150-resolve-contested-explicit-operation.md) の同日付の追記に
+譲る——ここには複製しない。

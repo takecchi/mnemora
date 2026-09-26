@@ -2434,8 +2434,24 @@ export interface Runtime {
    * 外れる——`resolveContested` と同じ理由。
    *
    * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く。
+   *
+   * 🔴 **任意メソッドである（2026-09-26 追記、Issue #825 続き）。**当初は必須メソッドとして
+   * 着地したが、`@mnemora/core` は v1.0.0 として npm に公開済みであり、`Runtime` interface
+   * を自前で実装している利用者（`docs/migration-v1.md` §12/§14/§16 が `restoreSuperseded`/
+   * `findCorrectionCandidates`/`applyCorrection` の必須化をそのように破壊的変更として数えた、
+   * まさにその立場）にとって、v1.0.0 の後に必須メソッドが増えることは次のメジャー版を要求する
+   * 破壊的変更になる。`@mnemora/testkit` の `supportsTaxonomyMode`/`supportsLabels`/
+   * `supportsFindActiveByClaimKey`（[Issue #818](https://github.com/takecchi/mnemora/issues/818)、
+   * PR #827）で同じ形（v1.0.0 後の必須化）を任意へ戻した前例に倣い、`?` へ戻した
+   * （クローン miku の判断。[ADR 0150](../../../docs/decisions/0150-resolve-contested-explicit-operation.md)
+   * 追記参照）。⟹ **`createRuntime` が返す `Runtime` には必ずこのメソッドが実装されている**
+   * ——省略されるのは、利用者が独自に `Runtime` を実装する場合の後方互換のためだけである。
+   * `createRuntime()` の戻り値からこの口を呼ぶ側は、`MemoryStore` の任意メソッドを呼ぶ既存の
+   * 慣習（`store.markContestedPair!(...)` 等）と同じく、非 null アサーション
+   * （`runtime.resolveOrphanedContested!(...)`）で呼んでよい——**この repo にはこれ以外の
+   * 前例（`createRuntime` の戻り値の型を狭める工夫）が無いことを確認した上でこの形にした。**
    */
-  resolveOrphanedContested(
+  resolveOrphanedContested?(
     ctx: Ctx,
     survivorId: MemoryId,
     opts?: ResolveOrphanedContestedOptions,

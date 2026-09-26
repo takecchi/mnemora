@@ -171,7 +171,7 @@ describe("runtime.resolveOrphanedContested — 再現の解消（Issue #825）",
     const { runtime, stores } = buildRuntime();
     const { a, b } = await createOrphanedPair(runtime, stores);
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result.supported).toBe(true);
     expect(result.outcome.kind).toBe("resolved");
@@ -195,7 +195,7 @@ describe("runtime.resolveOrphanedContested — 再現の解消（Issue #825）",
     const aEventsBefore = await stores.eventStore.list(ctx, { memoryId: a.id });
     const bEventsBefore = await stores.eventStore.list(ctx, { memoryId: b.id });
 
-    await runtime.resolveOrphanedContested(ctx, a.id, { reason: "手動で気づいた" });
+    await runtime.resolveOrphanedContested!(ctx, a.id, { reason: "手動で気づいた" });
 
     const aEventsAfter = await stores.eventStore.list(ctx, { memoryId: a.id });
     const newEvents = aEventsAfter.filter(
@@ -221,7 +221,7 @@ describe("runtime.resolveOrphanedContested — 再現の解消（Issue #825）",
     const hiddenStore = hideMemory(stores.memoryStore, b.id);
     const { runtime: runtimeWithHiddenB } = buildRuntime(hiddenStore);
 
-    const result = await runtimeWithHiddenB.resolveOrphanedContested(ctx, a.id);
+    const result = await runtimeWithHiddenB.resolveOrphanedContested!(ctx, a.id);
 
     expect(result.outcome.kind).toBe("resolved");
     const survivor = await stores.memoryStore.get(ctx, a.id);
@@ -234,7 +234,7 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
   it("not_found: 存在しない id を渡すと ineligible.not_found を返す", async () => {
     const { runtime } = buildRuntime();
 
-    const result = await runtime.resolveOrphanedContested(ctx, "does-not-exist");
+    const result = await runtime.resolveOrphanedContested!(ctx, "does-not-exist");
 
     expect(result).toEqual({
       supported: true,
@@ -247,7 +247,7 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
     const { a, b } = await createOrphanedPair(runtime, stores);
     await runtime.forget(ctx, { memoryId: a.id });
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result).toEqual({
       supported: true,
@@ -268,7 +268,7 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
     const stored = await stores.memoryStore.get(ctx, a.id);
     if (stored) stored.contestedWithId = null;
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result).toEqual({
       supported: true,
@@ -280,7 +280,7 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
     const { runtime, stores } = buildRuntime();
     const { a, b } = await createContestedPair(runtime, stores);
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result).toEqual({
       supported: true,
@@ -309,7 +309,7 @@ describe("runtime.resolveOrphanedContested — ineligible（書き込みは一�
       stored.contestedWithId = b.id;
     }
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result).toEqual({
       supported: true,
@@ -335,7 +335,7 @@ describe("runtime.resolveOrphanedContested — 並行（MemoryStatusConflictErro
       }
     };
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result).toEqual({
       supported: true,
@@ -350,7 +350,7 @@ describe("runtime.resolveOrphanedContested — MemoryStore.resolveOrphanedContes
     const { a } = await createOrphanedPair(runtime, stores);
     disableResolveOrphanedContested(stores);
 
-    const result = await runtime.resolveOrphanedContested(ctx, a.id);
+    const result = await runtime.resolveOrphanedContested!(ctx, a.id);
 
     expect(result).toEqual({ supported: false, outcome: { kind: "not_attempted" } });
     const survivor = await stores.memoryStore.get(ctx, a.id);

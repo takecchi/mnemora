@@ -3090,7 +3090,7 @@ export interface Runtime {
     purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult>;
     markContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, opts?: MarkContestedOptions): Promise<MarkContestedResult>;
     resolveContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, resolution: ContestedResolution, opts?: ResolveContestedOptions): Promise<ResolveContestedResult>;
-    resolveOrphanedContested(ctx: Ctx, survivorId: MemoryId, opts?: ResolveOrphanedContestedOptions): Promise<ResolveOrphanedContestedResult>;
+    resolveOrphanedContested?(ctx: Ctx, survivorId: MemoryId, opts?: ResolveOrphanedContestedOptions): Promise<ResolveOrphanedContestedResult>;
     applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
     consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
     reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;
