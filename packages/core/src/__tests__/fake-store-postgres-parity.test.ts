@@ -292,6 +292,36 @@ describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres 
 });
 
 /**
+ * `packages/testkit` の `InMemoryMemoryStore.requeueEmbedJobs`
+ * （`in-memory-fixtures-requeue-embed-jobs-limit.test.ts`）と同じ形の不一致が
+ * `FakeMemoryStore.requeueEmbedJobs` にもあった——`.slice(0, Math.max(0, opts.limit))` を
+ * 検査せず使っており（Issue #880 で `archiveDecayed` から取り除いた形）、
+ * `PostgresMemoryStore.requeueEmbedJobs` が `LIMIT`（bigint パラメータ）へそのまま渡して
+ * 例外にする入力（負数・`NaN`・`Infinity`・非整数）を、書き込みの副作用
+ * （`embeddingStatus` を `pending` に戻し、embed ジョブを積む）付きで通していた。
+ */
+describe("FakeMemoryStore.requeueEmbedJobs: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も積み直さない", () => {
+  for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 2 ** 63, 1e21]) {
+    it(`limit=${limit} は例外を投げ、embeddingStatus も outbox も変えない`, async () => {
+      const { memoryStore, outboxStore } = createFakeRuntimeStores();
+      const memory = await memoryStore.createMemory(ctx, fixture({ embeddingStatus: "failed" }));
+      await expect(
+        memoryStore.requeueEmbedJobs(ctx, { statuses: ["failed"], limit }),
+      ).rejects.toThrow(/limit must (be an integer|not be negative|fit in a Postgres bigint)/);
+      expect((await memoryStore.get(ctx, memory.id))?.embeddingStatus).toBe("failed");
+      const jobs = await outboxStore.claimBatch(ctx, {
+        kinds: ["embed"],
+        limit: 100,
+        now: new Date("2100-01-01T00:00:00.000Z"),
+        claimedBy: "test",
+        leaseMs: 1,
+      });
+      expect(jobs).toEqual([]);
+    });
+  }
+});
+
+/**
  * `packages/testkit` の `InMemoryMemoryStore.reinforce`/`createMemory`/`InMemoryEventStore.append`
  * （Issue #807、`in-memory-fixtures-invalid-date.test.ts`）と同じ形の不一致を
  * `FakeMemoryStore`/`FakeEventStore` にも見つけた。実測（Postgres が Invalid Date を
