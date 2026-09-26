@@ -465,7 +465,7 @@ PR #827）だけであった。
   置いてから `reflect()` を呼ぶ。種が見つからない、または種の `subjectId` が `null` の場合は
   今日どおり（[Issue #820](https://github.com/takecchi/mnemora/issues/820) /
   [ADR 0317](./docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
-  追記）。
+  追記、PR #851）。
   ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
   利用者には何も起きない。migration も不要。
   ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が

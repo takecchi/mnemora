@@ -291,7 +291,7 @@ Issue #579 の用途）、minAffinity=0.8（既定）** を抜いた表がその
 - **本 ADR の変更が、`autoQueueConsolidateReflectOnExtract: true` を実際に有効にしている
   利用者が居るかどうか、居るとして何人か**——ADR 0310 §6と同じく確かめていない。
 
-## 追記（2026-09-26、Issue #820）: 案 S を `processReflectJob` にも適用した
+## 追記（2026-09-26、Issue #820、PR #851）: 案 S を `processReflectJob` にも適用した
 
 > **この追記は、クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない**
 > （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
