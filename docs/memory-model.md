@@ -697,7 +697,8 @@ CREATE TABLE memory_events (
   memory_id         uuid        NULL REFERENCES memories(id),  -- kind='events_purged' の場合のみ NULL
   kind              text        NOT NULL CHECK (kind IN
                        ('created','updated','superseded','archived','forgotten','purged',
-                        'events_purged')),
+                        'events_purged','restored','unsuperseded')),
+                    -- 実物の制約は packages/postgres/migrations/（最新は 0018_memory_events_kind_unsuperseded.sql）
   at                timestamptz NOT NULL DEFAULT now(),
   actor             jsonb       NOT NULL,   -- { type: 'human'|'system'|'clone', id?: string }
   digest_snapshot   text        NULL,       -- 記録時点の digest。本文(content)は写さない
@@ -712,11 +713,22 @@ CREATE INDEX idx_memory_events_by_kind   ON memory_events (tenant_id, kind, at);
 
 記録項目は tenant_id / memory_id / kind / at / actor / digest のスナップショット / 直前の
 サイズに限る。**本文（`content`）は残さない。** 監査ログ自体が情報漏洩の経路にならないための
-制約である。`kind` の6値（`created / updated / superseded / archived / forgotten / purged`）は
-この列挙をそのまま使い、`contested` のような細分は独立した `kind` を
+制約である。`kind` の値（`created / updated / superseded / archived / forgotten / purged /
+events_purged / restored / unsuperseded`）はこの列挙をそのまま使い、`contested` のような細分は独立した `kind` を
 増やさず `kind = 'updated'` の `meta`（例: `{"reason": "contested"}`）で
 表現する。`kind` の値を増やしすぎると監査ログの分岐がアプリケーションコード側に漏れ出すため、
 「状態が実際に変わった大分類」だけを `kind` にし、理由の粒度は `meta` に落とす。
+
+**⚠ 2026-09-26 改訂: `kind` の値の正は、この段落と上の DDL ではなく実装の型である。**
+`packages/core/src/event.ts` の `MemoryEventKind`（union）と `MemoryEventKindSchema`（zod enum）、
+DB 側は `packages/postgres/migrations/` の `memory_events` の `kind` の CHECK 制約
+（`0011_memory_events_kind_restored.sql`・`0018_memory_events_kind_unsuperseded.sql` が値を足した）。
+上の2つの列挙はそこから写したもので、値が増えたときに追いつかないことがある。
+この段落は以前「`kind` の6値」として `created`〜`purged` だけを挙げ、上の DDL も `events_purged` までの
+列挙だったが、実装には `events_purged`（本書の追加、次項）・`restored`（§11 行14、
+[ADR 0122](./decisions/0122-restore-archived-memory.md)）・`unsuperseded`（§11 行15、
+[ADR 0230](./decisions/0230-restore-superseded-recovery-path.md)）も在る。文書を実装に合わせた
+（クローン miku の判断。オーナー本人の決定ではない）。
 
 **⚠ 2026-09-26 改訂（[Issue #871](https://github.com/takecchi/mnemora/issues/871)）: 使用報告による強化（§11 行4）は `memory_events` に書かない。**
 この段落は以前、細分の例に `reinforced` を挙げ、`{"reason": "reinforced", "recallId": "..."}` を

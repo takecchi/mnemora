@@ -465,3 +465,113 @@ ADR 自身のファイル名と見出しの4ファイルだけだった。** `pa
   確認していない**（上の「出所の印」参照）。
 - **npm に出したときの動作**（`private: true` を外した場合の pack 内容・依存解決）は
   検査していない——`scripts/check-publish-pack.mjs` 等の対象に入れていないため。
+
+---
+
+## 2026-09-26 追記: `start()`/`stop()` のライフサイクルを直した（Issue #890/#891）
+
+**この節はクローン miku から委譲された担い手が書いたものであり、オーナー本人の判断ではない。**
+既存の本文（上の「決定」「測ったこと」以下）は書き換えていない——訂正はこの追記の節に積む
+（`docs/decisions/README.md`「⛔ 採用済み ADR の本文は書き換えない」）。
+
+[Issue #890](https://github.com/takecchi/mnemora/issues/890) と
+[Issue #891](https://github.com/takecchi/mnemora/issues/891) が、`createBullmqTickDriver(...)`
+の `start()`/`stop()` について2点を指摘していた:
+
+- **#890**: `Worker` が既定の `autorun: true`（bullmq 6.3.8）で構築されており、
+  `start()` を一度も呼ばなくても、構築した時点で Worker が Redis に繋ぎジョブを
+  処理し始めうる。クラス doc の「使い方」節（`start()` を呼ぶまでは何も起きないと
+  読める書き方）と実際の挙動が食い違っていた。
+- **#891**: `stop()` の後にもう一度 `start()` を呼ぶと、`started` フラグが立ったままなので
+  `if (started) { return; }` で無言で抜け、実際には何も再開しない
+  （`Queue`/`Worker` は `close()` 後は再利用できない——bullmq 6.3.8 の
+  `queue-base.js`/`worker.js` の実装）。エラーも出ないため、呼び出し側は
+  「２回目の `start()` も成功した」と誤認しうる。
+
+**クローン miku は、このパッケージが private で出荷されておらず（`package.json` の
+`"private": true`、[決定2](#決定)）利用者への互換が問題にならないことを理由に、
+両方とも挙動を直す方向で決めた**（doc に現状を明記するだけで済ませない）。
+
+### #890 の決定: `autorun: false` で構築し、`start()` の中で `worker.run()` を呼ぶ
+
+`packages/bullmq/src/tick-driver.ts` の `new Worker(...)` に `autorun: false` を足し、
+`start()` が明示的に `worker.run()` を呼ぶ形にした。【現物】`node_modules/bullmq`
+6.3.8 の `dist/cjs/classes/worker.js` を読むと、`run()` が返す promise は
+`mainLoop()` を `await` しており、`mainLoop()` 自体は
+`while ((!this.closing && !this.paused) || asyncFifoQueue.numTotal() > 0)` という
+ループである——`this.closing` が立つのは `worker.close()` を呼んだ後だけなので、
+**`run()` は Worker を明示的に閉じるまで resolve しない。** ⟹ `start()` の中で
+`await worker.run()` とは書けない（`stop()` されるまで `start()` 自体が返らなくなる）。
+代わりに `await` せず起動し、reject は
+`worker.run().catch((error) => worker.emit("error", error))` という形で、
+bullmq 自身が `autorun: true` のとき内部で行っている
+`this.run().catch(error => this.emit('error', error))`（同ファイル）と同じやり方で、
+既存の `worker.on("error", ...)` リスナー（`onTickError` へ流す）に載せた——
+新しいエラー経路を増やさず、bullmq 自身が想定している経路に合流させている。
+
+`stop()` が `start()` より前に呼ばれても壊れないことも、同じソースを読んで確かめた
+——【現物】`worker.close()` は `whenCurrentJobsFinished` / `lockManager.close` /
+`childPool.clean` / `backend.close` を順に呼ぶだけで、`run()`/`mainLoop()` が
+一度でも動いたかどうかを前提にしていない。
+
+**採らなかった案**: 「現状を仕様として doc に明記するだけにする案」（挙動は変えず、
+「`createBullmqTickDriver(...)` を呼んだ時点で Worker は動きうる」と doc に書くだけで
+済ませる）。⛔ **採らない**——Issue #890 が指摘したとおり、`start()` 前にジョブを
+処理し Redis 接続を握るのは、この ADR 本文の「使い方」節の読み方（`start()` を呼んで
+初めて何かが起きる、という順序）と食い違う。この package はまだ npm に出荷しておらず
+（`private: true`、上の「決定2」「これが覆るとしたら」）、既存の利用者がこの挙動に
+依存している心配が無い——**挙動を正すほうが、doc に「実は違う」と書き足すよりも
+安い**、という判断である。
+
+### #891 の決定: `stop()` の後の `start()` は Error を投げる。作り直しはしない
+
+`stop()` が呼ばれたことを覚える `stopped` フラグを足し、その後の `start()` は
+「`stop()` 済みの driver で `start()` は呼べない（この driver は使い捨てである）。
+再開したい場合は `createBullmqTickDriver(...)` を呼び直すこと。」という Error を
+投げるようにした。`stop()` 前の `start()` の重複呼び出し（`started` フラグによる
+冪等化）は変えていない。
+
+**採らなかった案**: 「`stop()` の後の `start()` で、内部の `Queue`/`Worker` を
+作り直して実際に再起動できるようにする案」（Issue #891 本文が挙げていたもう一方の
+選択肢）。⛔ **採らない**——BullMQ の `Queue`/`Worker` は `close()` した後、
+同じインスタンスを再利用できない（上の #890 の節で確認したのと同じ一方向の
+`closing`/`closed` の性質）ため、作り直すこと自体は技術的に可能ではある。だが、
+それを `start()`/`stop()` の内部に隠すと、**呼び出し側から見て「この driver が
+今どの Redis 接続を握っているか」という資源の寿命が追いにくくなる**——
+`stop()` が「本当に閉じた」のか「次の `start()` で裏から作り直される一時停止」
+なのかが、呼び出し側のコードを読むだけでは区別できなくなる。**この driver を
+再び動かしたい呼び手は、`createBullmqTickDriver(...)` をもう一度呼んで新しい
+インスタンスを作れば足りる**——呼び手側の1行の手間に対して、内部に隠れた
+再構築のロジックと、それが持つ「今の接続は本当に今のものか」という曖昧さを
+天秤にかけ、後者のほうが高くつくと判断した。
+
+### 歯
+
+`packages/bullmq/src/__tests__/tick-driver.lifecycle.test.ts`（新設）が、
+`tick-driver.stop-cleanup.test.ts` と同じ形で `bullmq` の `Queue`/`Worker` を
+モックに差し替えて検査する:
+
+- `Worker` が `autorun: false` で構築されること。
+- `start()` を呼ぶ前は `worker.run()` が呼ばれず、`start()` を呼ぶと呼ばれること。
+- `worker.run()` の reject が `onTickError` へ流れること（握りつぶさない）。
+- `stop()` の後の `start()` が Error で reject し、`queue.upsertJobScheduler` が
+  呼ばれないこと。
+- `start()` を一度も呼ばずに `stop()` を呼んでも `worker.close()`/`queue.close()`
+  が呼ばれ、壊れないこと。
+- `stop()` 前の `start()` の重複呼び出しは今どおり冪等であること（回帰確認）。
+
+修正前のコードに対して実際に赤くなることを確認してからコミットし、修正後に緑へ
+戻したうえで `pnpm --filter @mnemora/bullmq run typecheck` も通した
+（【実測】、この担い手のセッションで）。
+
+### Redis での実測はしていない
+
+⚠ **この追記の決定は、Issue #890/#891 と同じく、`node_modules/bullmq` のソースコードの
+読解と、モックを使ったユニットテストに基づくものであり、実際の Redis に対する実行結果
+ではない。** この担い手の作業環境には Redis（`redis-cli`/`docker`/`podman` のいずれも）
+が無く、【実測】`redis-cli ping` は `command not found`、`docker info` は失敗した
+——この ADR 本文の「測ったこと」節が使った `redis:7-bookworm` の手動展開のような
+迂回も、この担い手は試みていない（時間の兼ね合いで、まず歯とソース読解で決定を
+固める方を優先した）。`packages/bullmq/package.json` の `test:redis` は実行していない。
+**実 Redis に対する `start()`/`stop()` のライフサイクル自体は、依然として確かめていない
+——上の「確かめていないこと」に、この節の分を追加する形になる。**
