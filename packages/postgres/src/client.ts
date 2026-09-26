@@ -27,7 +27,7 @@ const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
 
 /**
  * `pool.connect()` それ自体を、返す checked-out client に空の `error` リスナーを
- * 自動で付け外しするものへその場で置き換える（ADR 0339 決定4）。
+ * 自動で付け外しするものへその場で置き換える（ADR 0340）。
  *
  * ## なぜ要るか
  *
