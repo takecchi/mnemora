@@ -16,9 +16,9 @@ import type { DigestBandLimitedBy, DigestEntry } from "./recall.js";
  * **この関数がやらないこと**: 候補の並べ替え（呼び出し側が決めた順序をそのまま使う）。
  */
 export interface PackDigestBandOptions {
-  /** 帯に載せる件数の上限。 */
+  /** 帯に載せる件数の上限。`NaN` は打ち切り側（負数と同じ）、`+Infinity` は上限なしとして扱う。 */
   limit: number;
-  /** 帯全体の文字数予算。 */
+  /** 帯全体の文字数予算。`NaN` は打ち切り側（負数と同じ）、`+Infinity` は上限なしとして扱う。 */
   maxChars: number;
   /** 1件の digest の文字数上限。超えたら切り詰めて `truncated: true` を立てる。 */
   maxEntryChars: number;
@@ -97,8 +97,13 @@ export function packDigestBand(
     const cost =
       DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + digest.length + DIGEST_BAND_ENTRY_SEPARATOR_CHARS;
 
-    const wouldExceedLimit = band.length >= opts.limit;
-    const wouldExceedChars = runningChars + cost > opts.maxChars;
+    // `NaN` を含む比較は常に false になるため、`limit`/`maxChars` に `NaN` を渡すと
+    // 打ち切り条件が一度も成立せず「上限」が無制限へ化ける（Issue #803）。`NaN` は
+    // 負数と同じ安全側（既に上限に達している扱い）に倒す。`+Infinity`/`-Infinity` は
+    // 通常の数値比較で意図どおりに振る舞う（`+Infinity`＝上限なし、`-Infinity`＝
+    // 常に超過）ため、ここでは変えない。
+    const wouldExceedLimit = Number.isNaN(opts.limit) || band.length >= opts.limit;
+    const wouldExceedChars = Number.isNaN(opts.maxChars) || runningChars + cost > opts.maxChars;
 
     if (wouldExceedLimit && wouldExceedChars) {
       limitedBy = "both";
