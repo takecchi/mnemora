@@ -355,3 +355,52 @@ src/__tests__/set-embedding-status-single-statement.postgres.test.ts`、2 passed
 - **`trigram-lexical-store.postgres.test.ts` の4件の失敗**がこの器のロケール設定
   固有のものか、他の原因かは調べていない。CI（`pgvector/pgvector:pg17`、別のロケール）
   でどうなるかは別に確認すること。
+
+## 追記（2026-09-27、[Issue #962](https://github.com/takecchi/mnemora/issues/962)）: ワーカー1体でも「ベクトル行が在るのに `failed`」になる経路——補償の delete は採らず、文書にとどめる
+
+クローン miku の委譲先が書いた（オーナーではない）。判断はクローン miku。
+
+### 経路（上の「到達経路」とは別。ワーカー1体で起きる）
+
+`runtime.ts` の `processEmbedJob` は、`vectorStore.upsert` が返った**後**に
+`setEmbeddingStatus(..., "ready")` を撃つ。**この `ready` の書き込みが失敗すると**（接続断等）、
+catch が `failed` を書く。現在値は `pending` なので、本 ADR の no-op 規則（現在が `ready` のときだけ
+`failed` を捨てる）にも掛からない。⟹ **ワーカー1体でも、ベクトル行が在るのに
+`embedding_status = 'failed'` になる。**`PostgresVectorStore.upsert` がコミットした後の
+`maybeAnalyzeAfterUpsert` の失敗（[ADR 0194](./0194-embedding-space-analyze-threshold.md)
+「引き受けた負債」5番）でも同じ状態になる。
+
+【実測】PostgreSQL 17 で、`ready` への UPDATE だけをトリガーで拒否させて再現した。ベクトル行は
+1本残り、`embedding_status` は `failed` になった。`recall` は**その記憶を返しつつ、同時に
+`not_indexed{reason:"failed", count:1}` にも数えた。**
+
+### 採らなかった案: 補償として、ベクトル行を消してから `failed` を書く
+
+「`failed` ならベクトル行は無い」に戻せるが、**複数ワーカーの窓で、黙った消失を生む**:
+
+1. 古いワーカー A が `upsert` の後、`ready` の書き込みで失敗する。
+2. その間に、リースを取り直したワーカー B が `upsert` と `ready` まで済ませている。
+3. A の補償の delete が、**B の正しいベクトル行を消す**。
+4. A が続けて書く `failed` は本 ADR の規則で no-op になる。
+5. ⟹ **`ready` なのにベクトル行が無い。**
+
+今の食い違い（`failed` なのに行がある）は `not_indexed` に出るので見える。補償が作る食い違いは、
+`ready` を名乗ったまま検索にかからず、**黙って消える**——こちらのほうが悪い。
+`VectorStore.delete` には条件付きの口が無いので、読み直してから消す等のどの順序にも窓が残る
+（`failed` が実際に書けたときだけ消す案も、窓を狭めるだけで閉じない）。
+`failed` を書かずに `pending` のまま残す案も、見え方が `failed` から `pending` に変わるだけで
+改善が小さいので採らなかった。
+
+### 引き受けた負債
+
+**ワーカー1体でも、`upsert` の後で `ready` の書き込みが失敗すると、ベクトル行が在るのに
+`failed` になる。**`recall` はその記憶を返しながら `notIndexed.failed` にも数え、利用者に
+「埋め込みを疑え」と出す——本 ADR の「到達経路」5 と同じ誤った説明である。
+`reembed({ statuses: ["failed"] })`（ADR 0079）で積み直せば `ready` に戻る。
+
+### 将来の選択肢（これが覆るとしたら）
+
+`VectorStore` に**条件付きの削除**（例: 「その Memory の `embedding_status` が `ready` でないときだけ
+消す」を1トランザクションで撃つ）の任意メソッドを足せば、上の窓を閉じたうえで補償できる。
+今回は採らなかった——公開の口が1つ増える割に、その口を持たない adapter では同じ問題が残るため。
+この食い違いが実運用で観測され、利用者の判断を実際に誤らせたときに、改めて比べること。
