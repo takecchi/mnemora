@@ -379,3 +379,160 @@ export const DEFAULT_RECALL_ASSOCIATION: RecallAssociationQuery = {
   判断そのもの。** 上の実測は「on にするとどれだけ動くか」の記録であり、
   「10 が適切な値か」「既定を戻すべきか」への判定材料として使うことをこの追記は
   意図していない（冒頭の「⛔」の通り）。
+
+---
+
+## 追記（2026-09-26、回答の正誤）
+
+> 本文はクローン miku の委譲先が書いた。オーナー本人の執筆ではない。依頼元は
+> クローン miku（オーナーではない）——上の追記（2026-09-26）が「確かめていないこと」
+> に残した「回答の正誤（verdict）が on/off で変わるか」を、実 API（gpt-4o-mini）で
+> 最小限だけ埋めてほしい、という委譲である。
+>
+> **⛔ これは既定を戻すかどうかを決めるための測定ではない。記録である。** 上の
+> 「決定」節・「これが覆るとしたら」節の判断そのものは変えていない。
+
+### 条件
+
+- **sha**: `origin/main` = `747acaf`（上の追記（2026-09-26）自身のマージ commit、
+  PR #843）の木。
+- **枝**: `measure/association-answer-correctness-2026-09-26`。
+- **道具**: `examples/chat/src/bench/association-answer-correctness-measure.ts`
+  （新設。純関数は `association-answer-correctness-measure-lib.ts` に分離、
+  vitest 1ファイル付き）。
+- **対象**: `answer-time-weighting` ベンチのみ。理由は「対象外にした理由」節。
+- **層**（段によって違う）:
+  - **段1（off/on10 でプロンプトが変わる組を数える。実 API ゼロ）**:
+    `llmMode=deterministic` / `embeddingMode=recorded`（既存カセット
+    `examples/chat/cassettes/answer-time-weighting.order-legend.json` を再生。
+    1バイトも書き換えていない）。参考として `embeddingMode=local`（実推論、
+    カセット非依存）でも同じ32組（dev6+eval6+eval-undated4=16ケース×2方針）を
+    測った。
+  - **段2（対にした正誤測定。実 API）**: `llmMode=openai`（`gpt-4o-mini`、
+    `examples/chat/src/providers.ts` の `OPENAI_LLM_MODEL` を実測確認済み）/
+    `embeddingMode=recorded`（同じ既存カセットを流用。連想枠は
+    `VectorStore.getVectors`/`search` しか呼ばないため、embed() の入力集合は
+    off/on で変わらず、実測でも embed() の実 API 呼び出しは0回だった）。
+    temperature は明示的に渡していない（bench の既存の設定のまま。
+    `OpenAILLMProvider` の provider 既定に委ねる——`answer-trials.ts` の
+    `TEMPERATURE_UNSPECIFIED_LABEL` と同じ立場）。
+- **コマンド**:
+  ```
+  DATABASE_URL=... OPENAI_API_KEY=... \
+    pnpm --filter @mnemora/example-chat exec tsx \
+    src/bench/association-answer-correctness-measure.ts
+  ```
+- **実 API 呼び出し回数**: **60回**（すべて回答生成。このベンチは judge
+  （`answer-judge.ts`）を持たないため採点呼び出しは無い）。呼び出し前に
+  ハードリミット（200）へ達するかを確認してから呼ぶ実装にしており、実測でも
+  上限に達していない（60/200）。生データ・組ごとの回答文・verdict・プロンプト
+  文字数/記憶行数は
+  [examples/chat/bench-results/association-answer-correctness-2026-09-26/](../../examples/chat/bench-results/association-answer-correctness-2026-09-26/)
+  に置いた。
+
+### 段1: off/on10 でプロンプトが変わる組（実測）
+
+32組（16ケース×2方針）のうち:
+
+| 埋め込み層 | 変化した組数 |
+|---|---|
+| `recorded`（本番の層。既存カセットの実 OpenAI 埋め込み） | **6/32** |
+| `local`（参考。ONNX 実推論、カセット非依存） | **14/32** |
+
+`local` のほうが多く変化した——実推論の近傍が、カセット記録時点の実 OpenAI
+埋め込みの近傍と異なるためと考えられるが、**原因の切り分けはしていない**（推測）。
+実 API での正誤測定は、**`recorded`（本番の層）で変化が確認できた6組だけ**を
+対象にした（マネージャー指示。`local` で変化した残り8組は対象外——「確かめて
+いないこと」参照）。
+
+変化した6組: `dev-a2-remote-work-day/legacy`,
+`dev-b2-current-project/legacy`, `dev-b2-current-project/eventAwareFreshness`,
+`eval-b2-relocation/legacy`, `eval-b2-relocation/eventAwareFreshness`,
+`eval-undated-c1-seat-floor-reinforced/legacy`。
+
+### 段2: 実 API（gpt-4o-mini）で対にした結果
+
+n=5（呼び出し予算190回 ÷ (2×6組) ≈ 15.8 を、上限5でcapした値）。最初の1組×1回
+（`dev-a2-remote-work-day/legacy` trial=1）で `MNEMORA_LLM=openai` +
+`MNEMORA_EMBEDDING=recorded` という混在指定が動くことを確認してから残りを
+回した（この1回も捨てずに本番の集計に含めている）。off→on の順で、同じ組の
+同じ trial 番号を続けて呼んだ（時間による偏りを避けるため、全部の off を
+先に済ませてから on をまとめて呼ぶ順序は採らなかった）。
+
+| 組 | off 正答/n | on 正答/n |
+|---|---|---|
+| dev-a2-remote-work-day/legacy | 0/5 | 5/5 |
+| dev-b2-current-project/legacy | 5/5 | 5/5 |
+| dev-b2-current-project/eventAwareFreshness | 5/5 | 5/5 |
+| eval-b2-relocation/legacy | 5/5 | 5/5 |
+| eval-b2-relocation/eventAwareFreshness | 5/5 | 5/5 |
+| eval-undated-c1-seat-floor-reinforced/legacy | 5/5 | 5/5 |
+
+全体正答率: off **25/30（83.3%）** / on **30/30（100.0%）**。
+
+対にした差（`AnswerVerdict` を `pass` のみ正解、`fail`/`indeterminate` を
+不正解側として二値化。この畳み方自体が選択であり、他の畳み方もありうる）:
+**on正・off誤 = 5件 / off正・on誤 = 0件 / 一致 = 25件**。
+
+符号検定（McNemar の exact 二項検定、p=0.5、`min(5,0)=0` を使う両側検定）の
+p 値 = **0.0625**。**慣習的な有意水準 0.05 を下回っていない——「統計的に有意」
+とは言えない。** `n=5` では、片側に完全に振れた最も極端な結果（5勝0敗）でも
+理論上の最小 p 値が 0.0625 に留まる（`2 × (1/2)^5 = 0.0625`）ため、この
+サンプルサイズでは構造的に有意水準0.05に届かない。
+
+### 揺れの範囲の見立て
+
+- 6組中5組は off/on とも 5/5 で完全一致しており、これらについては今回の
+  n=5では「正誤への影響が見えなかった」以上のことは言えない（真に無効果か、
+  効果が小さくn=5では検出できなかったかを、この測定は区別できない）。
+- `dev-a2-remote-work-day/legacy` の1組だけが、5/5 という試行内で完全に
+  一貫した off=fail / on=pass の差を示した——単発の揺れではなく、この組・
+  この温度設定では再現性のある差に見える（推測。真の成功率は測っていない。
+  二項比率の信頼区間はこのサンプルサイズでは広く、例えば真の成功率が
+  70%程度でも5/5が偶然出る確率は無視できない）。
+- 「プロンプトが変わった」ことと「正誤が変わる」ことは別物である——段1で
+  変化が確認された6組のうち、実際に正誤へ影響したのは1組だけだった。
+
+### `answer`（18件）を対象外にした理由
+
+`answer` ベンチ（dev6+eval8+`answer-case-set.separate-turn.ts`の4件=18件）は、
+前段の前提調査（実 API ゼロ、`llmMode=deterministic`/`embeddingMode=local`）で
+**off/on10 のプロンプトが全18件で1バイトも変わらないことを実測済み**——
+各ケースの `totalInScope`（スコープ内の記憶総数）が recall の `limit`（既定10）
+以下であり、ANN 段だけで全件が既に返っているため、連想枠が追加できる残りの
+候補がそもそも存在しない（上の追記（2026-09-26）本文の「読み取れること」の
+`answer` の項と同じ構造）。プロンプトが変わらなければ、同じ入力に対する
+gpt-4o-mini の出力分布も（モデル自体の非決定性を除けば）区別する理由が無い
+——実 API を使って比べても、答えようとしている問い（連想枠の on/off が
+回答の正誤を変えるか）に対する情報が増えないため、対象から外した。
+
+### `answer-trials` を対象外にした理由
+
+`answer-trials`（Issue #705、`examples/chat/src/answer-trials.ts`）は
+**`recall()` を一切呼ばない**——`answer-trials-material.ts` が
+`examples/chat/cassettes/answer.json`（凍結済みカセット）から dev6件の
+mnemora 側プロンプト文字列を直接パースして材料にする設計であり（DB・埋め込み・
+抽出・recall を import すらしない、ADR 0301 の対照の基準を壊さないための
+構造）、association という引数が構造的に存在しない。off 条件を試すには
+`association: null` を明示して新しいカセットを記録し直す別スクリプトが要る
+——今回はその作業を行っていない（下の「確かめていないこと」）。
+
+### 確かめていないこと
+
+- **`local` 埋め込みで変化が見えた14組のうち、`recorded` では変化しなかった
+  残り8組**——実 API では測っていない（`recorded` が本番の層であるとして、
+  そちらだけを対象にした）。
+- **n=5より多い試行による検出力の向上**——200回という呼び出し上限の中で、
+  6組×2(off/on)×5=60回に留めた。`dev-a2-remote-work-day/legacy`の効果の
+  真の大きさ（成功率の差）は、この測定からは点推定（0%→100%）以上のことは
+  言えない。
+- **`answer-trials`/`answer-trials-compare` を association:null 条件で
+  測り直すこと**——新しいカセットの記録が要る、今回は着手していない。
+- **temperature を明示的に固定した場合にどう変わるか**——今回は bench の
+  既存の設定（provider 既定、未指定）をそのまま使った。`answer-time-weighting`
+  ベンチは `--temperature` フラグを持つが、この道具はそれを使っていない。
+- **`answer-time-weighting` 以外のベンチ（`retrieval-quality`/`compare`/
+  `time-term`/`validity`/`identifier-probes`/`numeral-token-probes`/
+  `consolidation-cost`）の回答の正誤**——これらは元より「回答の正誤」という
+  出力を持たない構造（`retrieval-quality`等は候補の順位・到達を測るもので、
+  最終回答という段が無い）ため、この追記の対象にしていない。

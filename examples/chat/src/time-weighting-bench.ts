@@ -439,6 +439,13 @@ export async function runTimeWeightingCase(
   // `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
   // **省略時は `null`**——この bench の基準線を変えない。
   association: RecallAssociationQuery | null = null,
+  // 走らせる方針の集合(ADR 0337 追記2026-09-26「回答の正誤」測定用の新設オプション)。
+  // **省略時は `TIME_WEIGHTING_POLICIES`（両方）**——既存の呼び出し（CLI・
+  // `association-default-on-measure.ts`）は1バイトも挙動が変わらない。実 API で
+  // 「off/on でプロンプトが変わった方針だけ」を課金対象にしたい呼び出し側
+  // （`association-answer-correctness-measure.ts`）が、変わっていない方針の
+  // 回答生成コールを無駄に払わないために使う。
+  policies: readonly TimeWeightingPolicy[] = TIME_WEIGHTING_POLICIES,
 ): Promise<TimeWeightingTrialResult> {
   assertTimeWeightingCaseWellFormed(timeWeightingCase);
   const ctx: Ctx = {
@@ -467,7 +474,7 @@ export async function runTimeWeightingCase(
   handle.clock.set(timeWeightingCase.recallAt);
 
   const byPolicy = {} as Record<TimeWeightingPolicy, TimeWeightingPolicyResult>;
-  for (const policy of TIME_WEIGHTING_POLICIES) {
+  for (const policy of policies) {
     byPolicy[policy] = await runTimeWeightingPolicy(
       handle.runtime,
       handle.llmProvider,
