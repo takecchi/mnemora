@@ -296,3 +296,63 @@ MERGED 2026-09-17T18:44:36Z）、ADR は
   「#505 決定9 が成文化された」という前提の再評価もクローンが行ったものである）。
 - ⛔ **3文書以外（`packages/*/README.md` 等）に同じ形の焼き込みが無いかは調べていない**
   （Issue #518 のスコープがこの3文書だったため、歯の対象もそれに揃えた）。
+
+---
+
+## 追記（2026-09-26、Issue #926）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。
+> ⛔ オーナー本人の判定ではない
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の「⛔ この歯が捕まえないもの」が挙げた3つとは別に、4つ目の盲点が在った。**
+`extractRuntimeMethodNames`（`scripts/__tests__/runtime-method-doc-correspondence.test.mjs`）の
+抽出用正規表現（`/^ {2}([A-Za-z][A-Za-z0-9_]*)\s*[(<]/`）は、TypeScript の任意メソッド構文
+（`name?(`/`name?<`）を抽出できなかった。**名前を抽出できないメソッドは、下の「本体」の
+`it` の検査対象（`target`）にそもそも入らない**——3文書のどれにも名指しされていなくても、
+この歯は一度も検査せず緑のままになる。この歯が本来止めるはずだった壊れ方
+（`Runtime` に口が増えたのに3文書のどれも名指ししないまま `main` へ入ること）を、任意
+メソッドに限って素通りさせる形であり、上の3つ（層の取り違え・未配置集合の食い違い・
+名前の場所）のどれとも異なる。
+
+**発見の経緯**: [Issue #605](https://github.com/takecchi/mnemora/issues/605) の検算
+（`main = 7849377`）で、`resolveOrphanedContested?`（[Issue #825](https://github.com/takecchi/mnemora/issues/825)、
+`7ab8948`）が抽出結果から丸ごと落ちることを見つけ、[Issue #926](https://github.com/takecchi/mnemora/issues/926)
+として切り出した。この ADR・ADR 0270・ADR 0272 のいずれも、当時（`Runtime` に `?` 付き
+メソッドが存在しなかった時点）この形を想定していなかった。
+
+**直したこと**: 正規表現を `/^ {2}([A-Za-z][A-Za-z0-9_]*)\??\s*[(<]/` に変え、名前の
+直後の任意の `?` を許すようにした。抽出関数はブロック文字列を引数に取る形
+（`extractMethodNamesFromBlock`）に分け、`resolveOrphanedContested` を含む18本すべてを
+抽出できることを確認した。
+
+**変異試験【実測】**（`cp` で退避・復元。⛔ `git checkout` は使っていない）:
+
+直す前の正規表現のまま、README.md の是正・取り消し層の列挙から `` `resolveOrphanedContested` ``
+を消す変異を当てると、`pnpm exec vitest run scripts/__tests__/runtime-method-doc-correspondence.test.mjs`
+は **4 tests とも緑のまま**だった——取りこぼしを実際に再現した。直した正規表現で同じ変異を
+当て直すと、本体の `it` が赤くなり、失敗メッセージに逐語で
+`README.md         に無い: resolveOrphanedContested` と出た。`cp` で復元後、5 tests
+（後述の陽性対照を1本足したため4→5）が全緑に戻ることも確認した。
+
+**恒久的な回帰止め**: 上の変異試験は一過性の手作業であり、`runtime.ts`・3文書のどちらも
+書き換えていない。代わりに、実在の `Runtime` を経由しない fixture（`export interface
+Sample { required(...); optional?(...); optionalGeneric?<T>(...); }` 相当の文字列）に
+対して `extractMethodNamesFromBlock` が3つとも抽出することを固定する陽性対照の `it` を
+歯のファイル自体に足した——ADR 0270/0272（`runtime-method-count-not-baked.test.mjs`）が
+サンプル文字列で陽性対照を歯の中に残している形に倣った。
+
+**確かめていないこと**:
+
+- 同種の「行頭2スペースのメソッド宣言を正規表現で抽出する」歯が他に無いかを掃いた範囲では、
+  [ADR 0278](./0278-architecture-section5-port-interface-correspondence-tooth.md) の歯
+  （`scripts/__tests__/architecture-section5-port-interface-correspondence.test.mjs`、
+  正規表現は既に `\??` を含む）はこの盲点を持たない。`runtime-method-count-not-baked.test.mjs`
+  （ADR 0270/0272）はメソッド名を抽出する構造を持たず対象外。`scripts/public-api-surface-lib.mjs`・
+  `scripts/public-api-breaking-diff-lib.mjs`（ADR 0178）は正規表現ではなく TypeScript
+  コンパイラ API（`typescript` パッケージ）で解析しており対象外。**ただしこれは
+  `scripts/__tests__/` 配下と `scripts/` 直下を中心にした確認であり、リポジトリ全体を
+  網羅した grep ではない。**
+- `Runtime` 以外の interface（`MemoryStore` 等）に、同じ形（正規表現ベースの抽出漏れ）が
+  無いかは調べていない。
