@@ -4,6 +4,7 @@ import type {
   DecayClock,
   MemoryStore,
   Omission,
+  RecallAssociationQuery,
   RecallResult,
   Runtime,
   TenantSettingsStore,
@@ -163,6 +164,14 @@ export interface ComparisonRow {
    * この欄はテスト・呼び出し側からの可視化のためだけに在る。
    */
   memoryUsageReported: boolean;
+  /**
+   * `recall.memories` のうち `retrievedVia === "association"` だった件数(ADR 0337
+   * 追記2026-09-26)。**`options.association` を省略した既存の呼び出しでは
+   * `queryRecall` 自身の既定(on、`{maxCount:10}`)のままなので、既存の呼び出しでも
+   * 0 より大きい値を取りうる**——他の欄と違い、この欄は「連想枠の既定 on が
+   * 元々どれだけ効いていたか」の実測であって、既定 off に固定した基準線ではない。
+   */
+  associationRows?: number;
 }
 
 export interface CompareOptions {
@@ -190,6 +199,17 @@ export interface CompareOptions {
    * 1本も増えないことの唯一の保証点。
    */
   decayClock?: { store: TenantSettingsStore; clock: DecayClock };
+  /**
+   * `runMnemoraPath`(`mnemora-path.ts`)へそのまま転送する `association`
+   * (ADR 0337 追記2026-09-26。連想枠の既定 on が `compare` の量にどれだけ効くかを測る、
+   * 新設の測定専用オプション)。
+   *
+   * **省略時は `queryRecall` 自身の既定
+   * ({@link DEFAULT_MNEMORA_PATH_ASSOCIATION}、`{maxCount:10}`)のまま**——`compare` は
+   * ADR 0337 決定3が言うとおり、この既定でしか走ったことが無い。この欄を明示的に渡すのは
+   * `examples/chat/src/bench/association-default-on-measure.ts` だけである。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 /**
@@ -215,7 +235,9 @@ export async function runComparison(
     }
     const conversation = buildConversation(fillerPairs);
     const naive = measureNaive(conversation, heuristicTokenCounter);
-    const { recall } = await runMnemoraPath(runtime, ctx, conversation);
+    const { recall } = await runMnemoraPath(runtime, ctx, conversation, {
+      association: options.association,
+    });
     const survived = await factStatementSourceReached(options.memoryStore, ctx, recall.memories);
 
     // ⭐ Issue #301 / ADR 0163: この行の測定(上の `recall`/`survived`)が終わった
@@ -239,6 +261,7 @@ export async function runComparison(
       ...footprintFieldsFromRecall(recall),
       factStatementSurvived: survived,
       memoryUsageReported: usageReport.reported,
+      associationRows: recall.memories.filter((m) => m.retrievedVia === "association").length,
     });
   }
   return rows;

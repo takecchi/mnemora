@@ -1,4 +1,4 @@
-import type { Ctx, MemoryStore, Runtime } from "@mnemora/core";
+import type { Ctx, MemoryStore, RecallAssociationQuery, Runtime } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
 import type { ProviderMode } from "./providers.js";
 import { resolveExternalId } from "./provenance-trace.js";
@@ -75,6 +75,12 @@ export interface RunValidityArmOptions {
   embeddingMode: ProviderMode;
   /** 既定は `new Date()`。検査から固定できるように受ける。 */
   now?: Date;
+  /**
+   * `recall()` に渡す `association`(ADR 0337 追記2026-09-26。新設の測定専用オプション)。
+   * **省略時は `null`**——この arm(validAt ゲート)の基準線は変えない。
+   * `examples/chat/src/bench/association-default-on-measure.ts` だけが明示する。
+   */
+  association?: RecallAssociationQuery | null;
 }
 
 async function memoryIdsByExternalId(
@@ -117,9 +123,10 @@ async function runOneProbe(
   const otherId = otherExternalId(probe.id);
 
   // 既定（validAt 省略 = いま）。
-  // association: null — 連想枠が既定 on になった（ADR 0337。オーナーが選択肢(あ)を選んだ、ask_human ac5953d1、2026-09-25）
-  // でも、この arm（validity ゲート）の基準線を動かさない（下2箇所も同じ理由）。
-  const atNow = await options.runtime.recall(ctx, { text: probe.query, association: null });
+  // association: options.association ?? null（下2箇所も同じ）——この欄を省略した
+  // 既存の呼び出しではこの arm（validity ゲート）の基準線を動かさない。
+  const association = options.association ?? null;
+  const atNow = await options.runtime.recall(ctx, { text: probe.query, association });
   const atNowExternalIds = await memoryIdsByExternalId(
     options.memoryStore,
     ctx,
@@ -136,7 +143,7 @@ async function runOneProbe(
     const atValidAt = await options.runtime.recall(ctx, {
       text: probe.query,
       validAt,
-      association: null,
+      association,
     });
     const atValidAtExternalIds = await memoryIdsByExternalId(
       options.memoryStore,
@@ -157,7 +164,7 @@ async function runOneProbe(
   const optOutResult = await options.runtime.recall(ctx, {
     text: probe.query,
     includeOutsideValidity: true,
-    association: null,
+    association,
   });
   const optOutExternalIds = await memoryIdsByExternalId(
     options.memoryStore,
