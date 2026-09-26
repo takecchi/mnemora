@@ -370,17 +370,44 @@ describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 
 });
 
 /**
- * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #816、NUL 側のみ、
+ * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #816、
  * `in-memory-fixtures-nul-content.test.ts`）と同じ形の不一致を `FakeMemoryStore` にも
- * 見つけた。範囲の切り方（`content` だけに絞る理由）は
- * `in-memory-fixtures-nul-content.test.ts` のコメント参照——`packages/testkit` と同じ
- * 範囲に揃える。
+ * 見つけた。範囲の切り方（`content`・`subjectId`・`tags`・`digest` を塞ぎ、`tenantId`
+ * は対象外とする理由）は `in-memory-fixtures-nul-content.test.ts` のコメント参照
+ * ——`packages/testkit` と同じ範囲に揃える。
  */
-describe("FakeMemoryStore.createMemory: content に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816、NUL 側のみ）", () => {
+describe("FakeMemoryStore.createMemory: content に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816）", () => {
   it("content の途中に NUL を含むと例外を投げ、Memory を作らない", async () => {
     const { memoryStore } = createFakeRuntimeStores();
     await expect(
       memoryStore.createMemory(ctx, fixture({ content: "abc\u0000def" })),
     ).rejects.toThrow(/must not contain NUL/);
+  });
+});
+
+describe("FakeMemoryStore.createMemory: subjectId に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816 の残り）", () => {
+  it("subjectId の途中に NUL を含むと例外を投げ、Memory を作らない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createMemory(ctx, fixture({ subjectId: "abc\u0000def" })),
+    ).rejects.toThrow(/subjectId must not contain NUL/);
+  });
+});
+
+describe("FakeMemoryStore.createMemory: tags の要素に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816 の残り）", () => {
+  it("tags[0] の途中に NUL を含むと例外を投げ、Memory を作らない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createMemory(ctx, fixture({ tags: ["ok-tag", "abc\u0000def"] })),
+    ).rejects.toThrow(/tags must not contain NUL/);
+  });
+});
+
+describe("FakeMemoryStore.createMemory: digest に NUL 文字を含むと Postgres と同じく例外を投げる（Issue #816 の残り）", () => {
+  it("digest の途中に NUL を含むと例外を投げ、Memory を作らない", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createMemory(ctx, fixture({ digest: "abc\u0000def" })),
+    ).rejects.toThrow(/digest must not contain NUL/);
   });
 });

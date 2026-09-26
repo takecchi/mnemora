@@ -249,6 +249,18 @@ export class PostgresMemoryStore implements MemoryStore {
     });
   }
 
+  /**
+   * 孤立サロゲート（Issue #816、実測）: `content`/`subjectId`/`tags`/`digest` 等に
+   * 対をなさない UTF-16 サロゲートコードユニット（`\uD800` 単体など）を含む文字列を
+   * 渡しても、この実装は例外を投げない——ただし読み返した値は入力と一致しない。
+   * node-postgres（`pg`）ドライバが JS 文字列を UTF-8 バイト列へエンコードする際
+   * （`Buffer.from(str, "utf8")`）、対をなさないサロゲートを静かに U+FFFD（置換文字）へ
+   * 置換するため、クエリが Postgres へ届く前、クライアント側で既に値が変わる
+   * （Postgres 自身の挙動ではない）。`packages/testkit`/`packages/core` の Fake は
+   * 逆に入力をそのまま保持するため、ここで両者の値が食い違う——この非対称は現状の
+   * 契約として `MemoryStore.createMemory` の interface doc コメントに記録してある
+   * （`@mnemora/core`）。挙動は変えない。
+   */
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
