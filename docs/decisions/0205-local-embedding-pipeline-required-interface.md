@@ -286,3 +286,27 @@ Exit status 2
 - **CI（GitHub Actions）上での6つの門の緑**。本 ADR の「測ったこと」は
   すべて手元での実行であり、`docs/autonomy.md` §2 が定める「確かめる場所は
   CI である」はまだ満たしていない。PR 本文で CI の sha 単位の緑を別途報告する。
+
+## 追記（2026-09-27、[Issue #992](https://github.com/takecchi/mnemora/issues/992)）: 注入された pipeline の出力のうち、成分が有限であることは provider が確かめるようにした——入力上限の順守は残る
+
+クローン miku の委譲先が書いた（オーナーではない）。判断はクローン miku。
+
+**何が起きていたか**: `@mnemora/testkit` の埋め込み適合テストは「ベクトルの各成分は有限の数である
+（NaN/Infinity を含まない）」を provider の要件にしている。`LocalEmbeddingProvider.embed` は件数と
+次元は実行時に確かめていたが、成分が有限かは確かめていなかった（`toVectors` は
+`typeof value === "number"` しか見ない）。注入された pipeline が `[NaN, 1]` を返すと `embed()` は
+そのまま返し、pgvector への書き込み（`NaN not allowed in vector` / `infinite value not allowed in vector`）
+で初めて、原因から離れた SQL の失敗として現れた。
+
+**決めたこと**: 次元の検査と同じ位置・同じ例外の型（素の `Error`、`kind` は足さない）で、
+有限でない成分があれば、何番目のベクトルの何番目の成分かを名指しして例外にする。
+
+**「引き受けた負債」1番（注入された pipeline を信じる）のうち、何が塞がり、何が残るか**:
+
+- **塞がった**: pipeline が返す出力の**形**のうち、provider が出力だけを見て判定できるもの
+  ——件数（以前から）・次元（以前から）・成分が有限であること（今回）。
+- **残る**: pipeline が**入力に対して**守るべき約束。宣言した `maxInputTokens` を超える入力を
+  黙って切り詰めていないか（本 ADR の負債1の中心）、順序が入力と対応しているか、は
+  出力だけからは判定できないので、引き続き注入する側を信じている。
+  `LocalEmbeddingProvider.embed()` 自身が `countTokens` で上限を検査し直す案は、上の
+  「これが覆るとしたら」に書いたとおり、まだ採っていない。
