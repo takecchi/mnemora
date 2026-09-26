@@ -1007,13 +1007,11 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **実行時**: 次の2種類に分けた。
 
-- 🔴 **計上を保留しているもの**——公開の場所が、これまで受け入れていた不正な入力に新しく例外を投げる、または公開の fixture の結果が変わるもの。上の世代の PR #811/#813/#815 と同じ論点であり、**同じ問い（ask_human `3f3411c5`、未回答）の答えを待つ。**
-  - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。
+- 🔴 **計上を保留しているもの**——公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるもの（オーナーへの問い `3f3411c5` の射程）。上の世代の PR #811/#813/#815 と同じ論点であり、**同じ問い（ask_human `3f3411c5`、未回答）の答えを待つ。**この基準は当初「…または公開の fixture の結果が変わるもの」と書いていたが、2026-09-27 にクローン miku の判断で狭めた（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の前書きの訂正）。
+  - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。⚠ 公開の fixture ではないので、狭めた基準の文言には当たらない。扱いをクローン miku に確認しているあいだ、ここに置く。
   - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、Postgres の拒む入力（`archiveDecayed` の不正な `limit`・`reinforce` の Invalid Date・float4 の範囲外の `halfLifeHours`・NUL を含む文字列）で例外を投げるようになった（Issue #880・#807・#817・#816、PR #923・#928）。
-  - `@mnemora/testkit/fixtures` の `InMemoryLexicalStore` の一致判定を `PostgresLexicalStore` に揃えた（Issue #951）。例外ではないが、非 ASCII だけのクエリが0件になるなど、公開の fixture の結果が変わる。
-  - `VectorStore.search`/`searchMany` と `LexicalStore.search` が、`filter.tenantId` だけでなく `ctx.tenantId` でも絞るようになった（Issue #1050、PR #1056）。`ctx` と `filter.tenantId` が食い違う呼び出しの結果が空になる（`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方）。
-  - 2026-09-27 の2回目の棚卸しで、上の基準に当たるのに一覧から漏れていた `@mnemora/testkit/fixtures` の変更——どれも例外は投げないが、返す結果が変わる: `InMemoryLexicalStore` の同点の並び順（PR #875）、`InMemoryMemoryStore.listLabels?` の並び順（PR #906）、`InMemoryLexicalStore` のクエリの上限（PR #919）、`InMemoryVectorStore` の次元違いの距離を `NaN` にする件（PR #915）、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail`（PR #830）、`InMemoryVectorStore` の距離 `NaN` の候補の位置（PR #985）。保留に入れたのはクローン miku の委譲先の当て直しであり、オーナーの判断ではない。
-- ⭕ **非破壊と数えたもの**——例外を投げなくなった修正。**この判定はクローン miku の判断であり、オーナーの判断ではない（覆りうる）。**
+- ⭕ **非破壊と数えたもの**——例外を投げなくなった修正と、例外を投げず公開の fixture の結果だけが変わる修正。**この判定はクローン miku の判断であり、オーナーの判断ではない（覆りうる）。**
+  - 公開の fixture の結果だけが変わるもの: `InMemoryLexicalStore` の一致判定を `PostgresLexicalStore` に揃えた件（Issue #951。非 ASCII だけのクエリが0件になるなど）・同点の並び順（PR #875）・クエリの上限（PR #919）、`InMemoryMemoryStore.listLabels?` の並び順（PR #906）、`InMemoryVectorStore` の次元違いの距離を `NaN` にする件（PR #915）・距離 `NaN` の候補の位置（PR #985）、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail`（PR #830）、`search` の3口が `ctx.tenantId` でも絞る件（Issue #1050、PR #1056。`@mnemora/postgres` も同じ）。
   - forget/restoreArchived/purge が、ループ前の読みや CAS の後の再読に失敗しても例外を外へ投げず、`failed`/`not_attempted` を返す（Issue #964、PR #960）。
   - `runMigrations`/`registerEmbeddingSpace` が、DB 側の接続断でプロセスごと落ちなくなった（Issue #859）。
   - `recall()` が、空ベクトル・次元違いのベクトルで reject しなくなった（Issue #862・#915）。

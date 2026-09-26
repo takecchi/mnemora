@@ -77,19 +77,18 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 **⚠ 2026-09-27 追記（破壊的変更の判定を `951ad44` まで広げた）**: 上の「破壊的変更は無い」は `dce0f71` までを、公開 API の型の差分だけで判定したものである。`docs/migration-v1.md` の定義は「型検査**または実行時**に壊れる変更」なので、`951ad44` まで広げて実行時の変化も当てた。型の差分は追加だけで、削除・必須化・型の狭小化は無い。実行時の変化は次の2種類に分かれる。
 
-- 🔴 **計上を保留しているもの**（下の各項目に ⚠ で印を付けた）: 公開の場所が、これまで受け入れていた不正な入力に新しく例外を投げる、または公開の fixture の結果が変わるもの——`LocalEmbeddingProvider.embed()` の有限性の検査（Issue #992）、`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が Postgres の拒む入力を拒むようになった件（Issue #880・#807・#817・#816、PR #923・#928）、`InMemoryLexicalStore` の一致判定を Postgres に揃えた件（Issue #951）。下の `[1.0.1]` 節が保留にしている PR #811/#813/#815 と同じ論点であり（[Issue #809](https://github.com/takecchi/mnemora/issues/809)）、破壊的変更として扱うかはオーナーへの問い（ask_human `3f3411c5`「testkit の擬似ストアが不正な引数で新しくエラーを投げるようになった件を、破壊的変更として扱うか」、未回答）として未決である。**どの見出しからも外さず、保留の注記を付けて置く。**
+- 🔴 **計上を保留しているもの**（下の各項目に ⚠ で印を付けた）: 公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるもの（オーナーへの問い `3f3411c5` の射程）——`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が Postgres の拒む入力を拒むようになった件（Issue #880・#807・#817・#816、PR #923・#928）。下の `[1.0.1]` 節が保留にしている PR #811/#813/#815 と同じ論点であり（[Issue #809](https://github.com/takecchi/mnemora/issues/809)）、破壊的変更として扱うかはオーナーへの問い（ask_human `3f3411c5`「testkit の擬似ストアが不正な引数で新しくエラーを投げるようになった件を、破壊的変更として扱うか」、未回答）として未決である。**どの見出しからも外さず、保留の注記を付けて置く。**
+  ⚠ **2026-09-27 訂正（クローン miku の判断。オーナーの判断ではない）**: この基準は当初「公開の場所が、これまで受け入れていた不正な入力に新しく例外を投げる、または公開の fixture の結果が変わるもの」と書いていた。問い `3f3411c5` が問うているのは PR #811/#813/#815 の「新しくエラーを投げるようになった」件だけであり、「結果が変わる」は判断（新しく投げるものは保留、投げなくなるものは非破壊）を写すときに広がった言い回しだったので、上のとおり狭めた。⟹ 例外を投げず結果だけが変わる fixture の変更（`InMemoryLexicalStore` の一致判定を Postgres に揃えた件、Issue #951 ほか。下の追記2）は、非破壊の Fixed として数える。`LocalEmbeddingProvider.embed()` の有限性の検査（Issue #992）は、新しく例外を投げるが fixture ではないので、狭めた文言には当たらない——扱いをクローン miku に確認しているあいだ、保留の注記を付けたまま置く。
 - ⭕ **非破壊と数えたもの**（下の各項目に ⚠ で注意を添えた）: 例外を投げなくなった修正——forget/restoreArchived/purge（Issue #964、PR #960）、接続断でプロセスが落ちなくなった件（Issue #859）、空ベクトル・次元違いのベクトルで reject しなくなった件（Issue #862・#915）、`closePostgresClient` の2回目を reject しなくなった件（Issue #935）。どれも doc が約束していた振る舞いへ実装を合わせたもので、約束の範囲内の利用者は壊れない。**この判定はクローン miku の判断であり、オーナーの判断ではない**（覆りうる）。
 
 ⟹ **この節の範囲（`v1.0.1`…`951ad44`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
 **⚠ 2026-09-27 追記2（2回目の棚卸し。`b3cc4ee` まで広げた）**: `951ad44`…`b3cc4ee` に `main` へ入った PR を全部当てた。出荷される6パッケージの利用者に見える変更は、どれもこの節に載っている（PR 番号か、その PR が閉じた Issue 番号で受けている）。型の差分は追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。実行時の変化は次のとおり分けた。
 
-- 🔴 **計上を保留しているもの**（上と同じ問い `3f3411c5` の答えを待つ。各項目に ⚠ で印を付けた）:
-  - この範囲で入ったもの——`search` の3口が `ctx.tenantId` でも絞るようになった件（Issue #1050、PR #1056）。`ctx` と `filter.tenantId` が食い違う呼び出しの結果が空になる（`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方）。
-  - 上の追記の一覧から漏れていたもの——上の追記の基準（「公開の fixture の結果が変わるもの」）に当てると、次の `@mnemora/testkit/fixtures` の変更も同じ種類だった。どれも例外は投げないが、公開の fixture の返す結果が変わる: `InMemoryLexicalStore` の同点の並び順（PR #875）、`InMemoryMemoryStore.listLabels?` の並び順（Issue #881、PR #906）、`InMemoryLexicalStore` のクエリの上限（Issue #878、PR #919）、`InMemoryVectorStore` が次元違いのベクトルの距離を `NaN` にする件（Issue #867、PR #915）、`InMemoryOutboxStore` が終端の付いた行への `complete`/`fail` を何もせずに返す件（Issue #826、PR #830）、`InMemoryVectorStore` が距離 `NaN` の候補を最後尾へ置く件（Issue #983、PR #985）。**保留に入れたのはクローン miku の委譲先の当て直しであり、オーナーの判断ではない。**
-- ⭕ **非破壊と数えたもの**: `timestamptz` の読み（Issue #1039）と書き（Issue #1040）のずれの修正、purge 後に埋め込みを残さない修正（Issue #1035）、`recall()` の `omitted` の二重計上の修正（Issue #1019・#1020・#1026）、`0022` がビューで止まらなくなった修正（Issue #1038）。どれも誤った値・誤った件数を返していたものを直したもので、公開の fixture の結果も、新しい例外も伴わない。
+- 🔴 **計上を保留しているもの**: この範囲で入ったものには無い（どれも公開の fixture が新しく例外を投げる変更ではない）。
+- ⭕ **非破壊と数えたもの**: 例外を投げず、公開の fixture の結果だけが変わるもの——`search` の3口が `ctx.tenantId` でも絞るようになった件（Issue #1050、PR #1056。`ctx` と `filter.tenantId` が食い違う呼び出しは空を返す）。上の訂正で狭めた基準により、この節のそれより前の範囲にある同じ種類の変更（`InMemoryLexicalStore` の一致判定 Issue #951・同点の並び順 PR #875・クエリの上限 PR #919、`InMemoryMemoryStore.listLabels?` の並び順 PR #906、`InMemoryVectorStore` の次元違いの距離 PR #915・距離 `NaN` の候補の位置 PR #985、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail` PR #830）も非破壊の Fixed として数える（クローン miku の判断）。ほかに、`timestamptz` の読み（Issue #1039）と書き（Issue #1040）のずれの修正、purge 後に埋め込みを残さない修正（Issue #1035）、`recall()` の `omitted` の二重計上の修正（Issue #1019・#1020・#1026）、`0022` がビューで止まらなくなった修正（Issue #1038）。どれも誤った値・誤った件数を返していたものを直したもので、公開の fixture の結果も、新しい例外も伴わない。
 
-⟹ **この節の範囲（`v1.0.1`…`b3cc4ee`）で、確定した破壊的変更は無い（上の2つの保留を除く）。**
+⟹ **この節の範囲（`v1.0.1`…`b3cc4ee`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
 ### Added
 
@@ -190,7 +189,6 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
-  ⚠ **`InMemoryMemoryStore.listLabels?` の並び順が変わる部分は、破壊的変更として扱うかを保留**（公開の fixture の結果が変わる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **語彙検索（`PostgresLexicalStore`/`PostgresTrigramLexicalStore`、`InMemoryLexicalStore`、
   `FakeLexicalStore`）で使うクエリの、異なる語の数（`LEXICAL_QUERY_MAX_DISTINCT_WORDS` = 32）・
   1語あたりの文字数（`LEXICAL_QUERY_MAX_WORD_CHARS` = 64、trigram の日本語側は
@@ -198,14 +196,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600）に上限を設けた**
   （[Issue #878](https://github.com/takecchi/mnemora/issues/878)、
   [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) 追記節）。
-  ⚠ **`InMemoryLexicalStore` の結果が上限で変わる部分は、破壊的変更として扱うかを保留**（公開の fixture の結果が変わる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 
 ### Fixed
 
 - **`VectorStore.search` / `searchMany` と `LexicalStore.search`（`@mnemora/postgres` の vector・語彙・trigram の3実装と、`@mnemora/testkit/fixtures` の `InMemoryVectorStore` / `InMemoryLexicalStore`）は、テナントを `filter.tenantId` だけで絞り、`ctx.tenantId` を見ていなかった**——`ctx` と `filter.tenantId` に違うテナントを渡すと、`filter` 側のテナントの memoryId とスコアが返った（本文は返らない。runtime は常に同じ値を渡すので、runtime 経由では起きない）。隔離の境界は `ctx.tenantId` なので（ADR 0007）、両方で絞るようにした。食い違えば空を返し、例外は投げない。公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に、そのための任意の `ctxTenantId?` を足した（[Issue #1050](https://github.com/takecchi/mnemora/issues/1050)、PR #1056）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` は、返すベクトルの成分が有限かを確かめず、NaN / Infinity をそのまま返していた**（Issue #992）——pgvector への書き込みで初めて失敗していた。次元の検査と同じ位置で、有限でない成分があれば何番目かを名指しして例外にする。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture ではないが、不正な入力に新しく例外を投げる同じ形の件。上の前書きの基準の文言には当たらないため、扱いをクローン miku に確認している）。
 - **`PostgresTrigramLexicalStore.search`（語彙の trigram 経路、opt-in、ADR 0319）が `filter.labels` を適用していなかった**——`recall({ labels })` の語彙チャンネルで、絞りの外の候補が over-fetch の窓を占め、絞りの内側の候補が窓から押し出されることがあった（最終結果からは後置フィルタで落ちるので、絞りの外の記憶が返ることは無い）。`PostgresLexicalStore`・`PostgresVectorStore` と同じ述語（`tags && labels`）を足した（ADR 0323 の追記、[PR #991](https://github.com/takecchi/mnemora/pull/991)）。
 - **`tick()` がジョブの失敗を記録する outbox 行の `lastError` は `err.message` だけで、drizzle が包んだ DB の失敗では理由（pg のエラー文・SQLSTATE）が残らなかった**（Issue #969）——`cause` の連鎖を辿り、各段の `message` と `code` を連結して載せる。pg エラーの `detail` など利用者のデータが入りうる欄は載せない。
 - **`tick()` の embed ジョブで、埋め込みの失敗を受けて `embeddingStatus: "failed"` を書く処理そのものが失敗すると、元の例外（なぜ埋め込めなかったか）が失われ、outbox 行の `lastError` には二次的な失敗しか残らなかった**（Issue #962 の前半）——元の例外を `cause` に残し、`lastError` にも両方を載せる。
@@ -307,7 +303,6 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⭕ **公開型は変えていない**——`attempts` 不一致の `OutboxLeaseConflictError` と行が
   無い場合の no-op、同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は
   すべて既存どおり。
-  ⚠ **`@mnemora/testkit/fixtures` の `InMemoryOutboxStore` が、終端の付いた行への `complete`/`fail` で行を変えなくなった部分は、破壊的変更として扱うかを保留**（公開の fixture の結果が変わる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
   処理する `reflect` ジョブ、`processReflectJob`）が、`consolidate` 側の同種の修正
   （下の `[1.0.1]` 節の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
@@ -370,7 +365,6 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   Issue #339 / ADR 0170 で入れた tie-break（下の `[1.0.1]` 節の項目）と同じ形の食い違いが、語彙チャンネル側
   にだけ残っていた。返す形（`{ memoryId, coverage, rank }`）は変えていない
   （PR #875）。
-  ⚠ **同点の並び順が変わることは、破壊的変更として扱うかを保留**（公開の fixture の結果が変わる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`mnemora-postgres-migrate` の `--help`/`-h` が、同じ argv に壊れた引数（値の無い
   `--schema`・未知のオプション等）が混じっていると、help を表示せず `ok: false`（終了コード
   1・エラーメッセージ）で止まっていた。** `parseMigrateCliOptions`（`src/bin/cli-options.ts`）
@@ -406,7 +400,6 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
   ⚠ doc が約束していた振る舞いへ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。約束に反して例外（reject）を catch することに頼っていたコードは、例外が来なくなるぶん挙動が変わる。
-  ⚠ **`@mnemora/testkit/fixtures` の `InMemoryVectorStore` の距離が `NaN` に変わる部分は、破壊的変更として扱うかを保留**（公開の fixture の結果が変わる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
   へ落とした記憶を、段3（必須の同伴取得）が `RecallResult.memories` へ昇格させた場合でも、
   同じ記憶を `over_limit` の `count` にそのまま数え続けていた**（below_threshold で
@@ -437,7 +430,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `[1.0.1]` 節の PR #811/#813 相当）より実害が大きかった。`PostgresMemoryStore.archiveDecayed`
   と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くように
   した（新しい正常系の挙動は変えていない）（[Issue #880](https://github.com/takecchi/mnemora/issues/880)、PR #923）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.reinforce`（`@mnemora/testkit` の擬似 `MemoryStore`）に Invalid
   Date（`new Date(NaN)`）を渡すと、例外を投げず `lastReinforcedAt`/`decayFloorAt` に
   Invalid Date をそのまま書き込んで成功していた——以後その Memory の減衰計算が `NaN`
@@ -447,7 +440,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `EventStore.append`/`updateStatusWithEvent` 等イベントを積む口が共有する
   `at`（Postgres の `timestamptz` 列）もまとめて塞いだ（新しい正常系の挙動は変えて
   いない）（[Issue #807](https://github.com/takecchi/mnemora/issues/807)、PR #923）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit` の擬似 `MemoryStore`）が、
   `halfLifeHours` に float64 では有限だが Postgres の `real`（IEEE 754 単精度・float4、
   値域は約 `±3.4028235e38`）の範囲を超える値（例: `1e300`）を渡されても例外を投げず
@@ -457,7 +450,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   足した（新しい正常系の挙動は変えていない。`strength` は値域 `(0, MAX_STRENGTH]` が
   float4 の範囲へ届かないため、既存の値域検査で既に拒まれており対象外）
   （[Issue #817](https://github.com/takecchi/mnemora/issues/817)、PR #923）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit` の擬似 `MemoryStore`）が、
   `content` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
   いた。** Postgres の `text` 型は NUL バイトを構造的に拒む（C 文字列表現に由来する
@@ -468,7 +461,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`\uD800` 等）も対象外——Postgres 側（node-postgres が U+FFFD へ静かに置換する）の
   挙動に Fake をどちらへ寄せるかは別途の製品判断が要る
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ、PR #923）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit`）/`FakeMemoryStore.createMemory`
   （`@mnemora/core`）が、上の PR #923 で塞ぎ残した `subjectId`・`tags`（各要素）・
   `digest` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
@@ -481,7 +474,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
   `MemoryStore.createMemory` の doc コメントに記録した
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`@mnemora/postgres` の `closePostgresClient` を冪等にした**——2回目以降の呼び出しは `Called end on pool more than once` で reject せず、何もせずに resolve する（[Issue #935](https://github.com/takecchi/mnemora/issues/935)）。
   ⚠ doc が約束していた振る舞いへ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。約束に反して例外（reject）を catch することに頼っていたコードは、例外が来なくなるぶん挙動が変わる。
 - **`runtime.recall()` の段2（`compareScoredCandidates`）と段3.5（連想）の2つの並べ替え
@@ -494,9 +487,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （[Issue #938](https://github.com/takecchi/mnemora/issues/938)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
 - **`@mnemora/testkit` の `InMemoryLexicalStore` の語の一致判定を `PostgresLexicalStore` に揃えた**——非 ASCII だけのクエリは0件になり、本文は ASCII の境界で分割してから小文字化する（[Issue #951](https://github.com/takecchi/mnemora/issues/951)、[ADR 0084](./docs/decisions/0084-lexical-recall-channel.md)）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の場所が不正な入力に新しく例外を投げる、または結果を変える件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`@mnemora/testkit` の `InMemoryVectorStore.search` が、距離が `NaN` の候補（ゼロベクトル、ADR 0040）を `PostgresVectorStore` と同じく常に最後尾へ置くようにした**——以前は並べ替えの比較関数が `NaN` で一貫せず、その候補の位置が挿入順しだいで揺れ、limit 内の集合が Postgres と食い違うことがあった（[Issue #983](https://github.com/takecchi/mnemora/issues/983)、PR #985）。
-  ⚠ **並び順（と limit 内の集合）が変わることは、破壊的変更として扱うかを保留**（公開の fixture の結果が変わる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`runtime.recall()` の段3.5（連想枠）が拾った `status: "contested"` の記憶が、対向（`contestedWithId`）を伴わない単独のまま `memories` に返り、`omitted` にも何も出ないことがあった**——段3（必須の同伴取得）と同じ規則を段3.5にも適用し、対向が取得できれば1つの Unit として一緒に返し、できなければ Unit ごと落として `unit_assembly_dropped` を積むようにした（`memories`/`omitted` の公開型は無変更）（[Issue #959](https://github.com/takecchi/mnemora/issues/959)、[ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記 2026-09-27）。
 - **`PostgresVectorStore.search()`/`searchMany()` が、pgvector の HNSW（cosine）索引に
   そもそも入らないゼロベクトルの候補（ADR 0040）を取りこぼしていた。** 埋め込み
