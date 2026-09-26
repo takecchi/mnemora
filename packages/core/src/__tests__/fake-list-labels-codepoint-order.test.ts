@@ -62,4 +62,23 @@ describe("FakeMemoryStore.listLabels は name のコードポイント順で返�
     const labels = await stores.memoryStore.listLabels!(ctx);
     expect(labels.map((l) => l.name)).toEqual([" Foo ", "B", "Foo", "_a", "foo"]);
   });
+
+  it("🔴 サロゲートペア（U+10000 以上）を含む名前でも、コードポイント順で返る", async () => {
+    // クローン miku の判断（2026-09-26、追記2）: 契約に「コードポイント順」と書いた
+    // 以上、BMP 外の文字（サロゲートペア）でもそれを満たす。
+    //
+    // "！"（U+FF01、BMP 内、コード単位1つ）と "😀"（U+1F600、BMP 外、サロゲートペア
+    // "😀"）の2件。コードポイント値は "！"=0xFF01=65281 < "😀"=0x1F600=128512
+    // なので、コードポイント順では "！" が先。
+    //
+    // ところが JS の `<`（UTF-16 コード単位の比較）で見ると、"😀" の先頭コード単位
+    // （上位サロゲート 0xD83D=55357）は "！" の唯一のコード単位（0xFF01=65281）より
+    // 小さいため、単純な `<` 比較では "😀" が先に来てしまう——コードポイント順とは逆。
+    const stores = createFakeRuntimeStores();
+
+    await stores.memoryStore.createMemory(ctx, newMemory({ tags: ["😀", "！"] }));
+
+    const labels = await stores.memoryStore.listLabels!(ctx);
+    expect(labels.map((l) => l.name)).toEqual(["！", "😀"]);
+  });
 });

@@ -83,7 +83,14 @@ describe("PostgresMemoryStore.listLabels は name のコードポイント順で
     return /icu/i.test(message);
   }
 
-  async function seedIcuStore(): Promise<PostgresMemoryStore> {
+  async function seedIcuStore(names: readonly string[]): Promise<PostgresMemoryStore> {
+    // 前のテストが張ったままの pool があれば、DROP DATABASE の前に閉じる
+    // （dropTempDatabase は接続が残っていると drain 待ちでタイムアウトする——
+    // temp-database.ts 冒頭の doc 参照）。
+    if (icuClient) {
+      await icuClient.pool.end();
+      icuClient = undefined;
+    }
     await dropTempDatabase(adminPool(), DB_NAME);
     await adminPool().query(
       `CREATE DATABASE ${DB_NAME} TEMPLATE template0 ENCODING 'UTF8' ` +
@@ -92,28 +99,54 @@ describe("PostgresMemoryStore.listLabels は name のコードポイント順で
     icuClient = createPostgresClient(connectionStringFor(DB_NAME));
     await runMigrations(icuClient.pool);
     const store = new PostgresMemoryStore(icuClient.db);
-    for (const name of NAMES) {
+    for (const name of names) {
       await store.registerLabel(ctx, name);
     }
     return store;
   }
 
-  it("🔴 既定 collation が C ではない DB でも、返る順序はコードポイント順である", async (t) => {
-    let store: PostgresMemoryStore;
+  /**
+   * ICU の一時 DB を作れない環境（この Postgres ビルドが ICU 非対応）では、
+   * その旨を報告して skip する——上のクラス doc コメント参照。呼び出し側の
+   * `it` はこれが `undefined` を返したら即座に return すること。
+   */
+  async function seedIcuStoreOrSkip(
+    names: readonly string[],
+    t: { skip: (note?: string) => void },
+  ): Promise<PostgresMemoryStore | undefined> {
     try {
-      store = await seedIcuStore();
+      return await seedIcuStore(names);
     } catch (err) {
       if (isIcuUnsupportedError(err)) {
         t.skip(
           `この Postgres ビルドは ICU ロケールプロバイダに対応していない: ` +
             `${err instanceof Error ? err.message : String(err)}`,
         );
-        return;
+        return undefined;
       }
       throw err;
     }
+  }
+
+  it("🔴 既定 collation が C ではない DB でも、返る順序はコードポイント順である", async (t) => {
+    const store = await seedIcuStoreOrSkip(NAMES, t);
+    if (!store) return;
 
     const labels = await store.listLabels(ctx);
     expect(labels.map((l) => l.name)).toEqual(CODEPOINT_ORDER);
+  });
+
+  it("既定 collation が C ではない DB でも、サロゲートペア（U+10000 以上）を含む名前はコードポイント順で返る", async (t) => {
+    // クローン miku の判断（2026-09-26、追記2）: `COLLATE "C"` は UTF-8 のバイト列を
+    // 比較しており、UTF-8 のバイト順はコードポイント順と単調に対応する（サロゲート
+    // という UTF-16 の中間表現を経由しない）。そのため Postgres 側はこの歯を足す前
+    // （修正前）から緑のはずである——実際に緑であることをここで確かめる。
+    //
+    // "！"（U+FF01）と "😀"（U+1F600）。コードポイント順では "！"(65281) < "😀"(128512)。
+    const store = await seedIcuStoreOrSkip(["😀", "！"], t);
+    if (!store) return;
+
+    const labels = await store.listLabels(ctx);
+    expect(labels.map((l) => l.name)).toEqual(["！", "😀"]);
   });
 });
