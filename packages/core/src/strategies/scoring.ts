@@ -159,6 +159,16 @@ export const MAX_FRESHNESS = 1;
  * - `"eventAwareFreshness"`: `occurredAt == null` のときだけ `MAX_FRESHNESS` を返す
  *   （減衰式を呼ばない——起点が無いのだから、古びを測る対象そのものが無いという判断。
  *   ADR 0300 §4.2 案(1)）。`occurredAt` が在るときは `"legacy"` と同じ式を通る。
+ *
+ * **⚠ 下限側には clamp が無い（意図的な契約。Issue #939）**: `elapsed / halfLifeHours` が
+ * 十分大きいと（既定の半減期720時間で約88年前の `occurredAt` 相当）、`0.5 ** x` は
+ * IEEE 754 倍精度の下限を割り込み、丸めではなく**厳密に0**になる——`total`
+ * （`affinity × decay × tagMatch × freshness × strength`）も0になり、その時点で
+ * `similarity` の差が順位から消える。**これは直さない挙動として決めたもの**——
+ * 「そこまで古い記憶は区別しない」という契約であり、バグではない。境界の実測値・
+ * 同点時のタイブレーク・どの呼び出しで表に出るかは `docs/recall.md` §7.2 を、
+ * 経緯は [ADR 0036](../../../../docs/decisions/0036-clamp-freshness-at-one.md)
+ * の「その後（2026-09-26）」節を見ること。
  */
 function computeFreshness(input: ScoringInput): number {
   const timeWeighting = input.timeWeighting ?? DEFAULT_TIME_WEIGHTING_POLICY;

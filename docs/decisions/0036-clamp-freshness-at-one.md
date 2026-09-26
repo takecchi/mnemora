@@ -157,3 +157,87 @@ freshness = 0.5 ** ((now - (occurredAt ?? recordedAt)) / halfLifeHours)
   （[ADR 0033](./0033-what-decided-the-rank-in-the-retrieval-bench.md) §4）。
 - **Phase 2 で `valid_from` / `valid_until` が入ったとき。**「いつからいつまで真か」が別の列で
   表せるようになると、`occurredAt` の未来値の意味そのものが変わりうる。
+
+---
+
+## その後（2026-09-26）—— 下限側（古すぎる `occurredAt`）も、厳密に0になる（Issue #939）
+
+⛔ 上の本文は1バイトも書き換えていない。本 ADR の決定1〜5が扱ったのは上限側（未来の
+`occurredAt`）だけであり、下限側については一言も無い——その前提ごと残す。
+
+### 何が見つかったか
+
+[Issue #939](https://github.com/takecchi/mnemora/issues/939) が、`freshness` の式
+（`Math.min(MAX_FRESHNESS, 0.5 ** (elapsed / halfLifeHours))`）の下限側を実測した。
+`elapsed / halfLifeHours` が十分大きいと、`Math.pow(0.5, x)` は IEEE 754 倍精度が表現できる
+最小の非正規化数（`2^-1074`）を割り込み、丸めではなく**厳密に `0`** になる。境界は
+この作業を行った器（Node.js v22.23.3）で `x = 1075`（`Math.pow(0.5, 1074) ===
+Number.MIN_VALUE`、`Math.pow(0.5, 1075) === 0`）と実測した——`Math.pow` の丸めは
+V8 依存であり、他のエンジン・バージョンでは1前後ずれうる。既定の半減期
+（`DEFAULT_HALF_LIFE_HOURS` = 720時間）では、これは約88.3年前の `occurredAt` に相当する。
+
+`freshness` が0まで潰れると `total`（`affinity × decay × tagMatch × freshness × strength`）
+も0になり、`similarity` の差が順位から消える——同点になった候補の順位は、段2
+（`compareScoredCandidates`。`total` 降順→実効時刻降順→`memory.id` 昇順）または連想枠
+（`rankKey = 類似度 × total` の安定ソート、同点は過取得した順序を保つ）のタイブレークだけで決まる。
+
+さらに実測したところ、**`decay`/`strength` が1未満だと、積のアンダーフローで
+`total` が `freshness` 自身より手前で0になりうる**——`strength: 0.1` のとき、
+`freshness` がまだ非正規化数（`5e-324`、非0）の時点で `total` は既に `0` だった。
+⟹ 上の境界（約1075倍・約88.3年）は「そこに達すれば必ず0になる」という
+**十分条件**であり、「そこまでは0にならない」ことの保証ではない。
+
+これは本 ADR の決定1〜5とは独立に、`0.5 ** x` という式そのものが最初から持っていた
+性質である——本 ADR が塞いだのは「経過が負（未来）のときに上限が無い」ことだけであり、
+「経過が非常に大きい（過去）ときに下限がIEEE754の表現域で切れる」ことには触れていない。
+
+### 決めたこと: 案(d)「そこまで古い記憶は区別しない」を契約として書く
+
+式も既定の振る舞いも変えていない——`packages/core/src/strategies/{decay,scoring}.ts` の
+diff はコメントのみである。上で実測した境界・タイブレークの規則・どの呼び出しで
+表に出るか（`scoreThreshold <= 0`・連想枠・`mandatory_companion`）を、
+`docs/recall.md` §7.2 と `computeFreshness`/`decayFactor` の doc コメントに契約として
+明記した。
+
+### 検討して採らなかった案
+
+- **(a) 時間項に下限を置く。** 却下。`freshness`/`decay` の**値そのもの**を変えることになり、
+  既存の呼び出しの `total` が変わる。どこに下限を置くかにも、決定4が上限1について
+  持っていたような根拠（「1 は古びていないという意味を持つ唯一の値」）が無い——
+  下限側には対応する意味の値が無く、選んだ数がただの調整になる。
+- **(b) 段2のタイブレークに `affinity`（`similarity`/`lexicalMatch`）を入れる。** 却下。
+  連想枠（段3.5）では `score.total` に `similarity` が入っていない——アンカーとの
+  類似度は `rankKey`（ローカル変数）にだけ載り、`score.similarity` はクエリとの類似度を
+  渡さないため中立の1に退化する（`affinity` の定義、`scoring.ts` 冒頭の doc）。
+  ⟹ 段2の `compareScoredCandidates` だけを直しても連想枠の `rankKey` 比較には
+  そもそも `affinity` を足す先が無く、2つの並び方針が揃わない。段2だけに限っても、
+  「`total` が同点なら関連度も同じ」という `ScoreBreakdown` の暗黙の前提を崩すことになる。
+- **(c) 比較を対数で行う。** 却下。0への丸め込み自体は避けられるが、`ScoreBreakdown.total`
+  という公開値の意味・計算式（`affinity × decay × tagMatch × freshness × strength` の積）を
+  変えることになる——対数和を返すか、比較専用の別の値を新設するかのどちらでも、
+  現行の `total` の契約（「段2で使った最終スコア」、`docs/recall.md` §7）を壊す。
+
+### 採った理由
+
+表に出る経路が実測で限られていた——既定の `scoreThreshold`（0.1）では
+`below_threshold` に落ちて返らず、観測できるのは `scoreThreshold <= 0` を渡した呼び出し・
+連想枠（段3.5、閾値ゲートが無い）・`mandatory_companion`（段3、スコアに関係なく
+候補集合へ追加される）の3経路だけである。式・公開される `ScoreBreakdown` の値を
+一切変えずに契約として書けるという小ささが、(a)〜(c) のどれかを選ぶより優る。
+
+### この追記が確かめていないこと
+
+- **境界の整数値（`x = 1075`）は、この追記を書いた器の Node.js v22.23.3・V8 の
+  `Math.pow` の丸めに依存する。** 他の JS エンジン・他のバージョンでは確かめていない。
+- [ADR 0040](./0040-zero-vector-never-returned.md) の最後の追記が「`rankKey`
+  （`similarity × total`）について、掛け算そのものがオーバーフロー/アンダーフローして
+  `NaN`/`Infinity` になる経路は見ていない」と書いている——本追記が確かめたのは
+  「`freshness` 自身が式の性質として0になる」経路であり、`hit.similarity × score.total`
+  という掛け算が `score.total` が非正規化数域まで縮んだ状態でさらにどう丸まるか
+  （0になるか、別の非正規化数になるか）の全域は網羅していない。
+- 本物の Postgres + pgvector に対する end-to-end の再現はしていない。`defaultScoringStrategy`
+  / `compareScoredCandidates` を直接呼ぶ形（`packages/core` の純関数レベル）での
+  確認に留めている。
+- `strength`/`decay` が1未満のときに `total` が `freshness` より手前で0になる境界を、
+  `strength`/`decay` の値ごとに一般化した式では出していない——実測した数点（`strength:
+  0.1` のときの1点）からの帰納であり、`decay` 側を1未満にした場合の実測はしていない。
