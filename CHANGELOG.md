@@ -45,7 +45,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.0` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`079169d`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`747acaf`** の範囲を数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -57,10 +57,10 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 `#703`/`#711`/`#724`/`#728` など、publish 対象パッケージに触れる PR が未計上のまま残っていた。
 この節は、`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものである
 （載せる／載せないの全数表と理由は [PR #747](https://github.com/takecchi/mnemora/pull/747) の本文）。
-2026-09-26 に `v1.0.0` … `079169d` を改めて1本ずつ数え直し、計上漏れ（PR #792）を足した
+2026-09-26 に `v1.0.0` … `747acaf` を改めて1本ずつ数え直し、計上漏れ（PR #792）を足した
 （全数表は [PR #844](https://github.com/takecchi/mnemora/pull/844) の本文）。
 
-🔴 **`079169d` までの範囲で、計上を保留しているものが在る。**PR #811 / #813 / #815
+🔴 **`747acaf` までの範囲で、計上を保留しているものが在る。**PR #811 / #813 / #815
 （`@mnemora/testkit/fixtures` の Fake が、これまで黙って受け入れていた不正な入力——負数・NaN・
 Infinity・非整数の `limit`、float4 の範囲外の値——に対して例外を投げるようになった）。
 型には現れないが、公開の Fake を直接使う外部の実装者には実行時に壊れうる。**破壊的変更として
@@ -74,7 +74,7 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
 （`buildExtractionPrompt`/`extractCandidates`/`previewRestoreSupersededBy` はいずれも任意引数の
 追加のみ）。⟹ **公開 API への影響は、任意の欄・任意の引数・任意のメソッド・新しい export の
 追加のみである。** `### Breaking` の節は無い。
-【実測 2026-09-26】`git diff 7987de4..079169d -- scripts/__snapshots__/public-api/` の削除行も、
+【実測 2026-09-26】`git diff 7987de4..747acaf -- scripts/__snapshots__/public-api/` の削除行も、
 （c）に加えて、型を広げる変更（`RecallQuery.association` に `| null` を足した、PR #838／
 `supportsLabels`・`supportsFindActiveByClaimKey`・`supportsTaxonomyMode` を必須から任意へ戻した、
 PR #827）だけであった。
