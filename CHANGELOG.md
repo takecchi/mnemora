@@ -161,7 +161,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   文字数の上限が黙って無制限に化けていた**（負数を渡すと逆に安全側へ倒れるのと対照的）。
   `NaN` だけを負数と同じ安全側（既に上限に達している扱い）に倒した。`+Infinity` は
   「上限なし」として意味が通るため今の挙動のまま（新しい例外は投げない）
-  （[Issue #803](https://github.com/takecchi/mnemora/issues/803)、PR #TBD）。
+  （[Issue #803](https://github.com/takecchi/mnemora/issues/803)、PR #853）。
 
 ---
 
