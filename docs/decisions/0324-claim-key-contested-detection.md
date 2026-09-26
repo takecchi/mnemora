@@ -591,3 +591,38 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 詳細な歯・変異試験・スナップショット差分は、この追記を運んだ PR
 （[Issue #818](https://github.com/takecchi/mnemora/issues/818) を close する PR）の本文を
 見ること——ここには複製しない。
+
+## 追記（2026-09-27）—— 逐次に届く経路では、決定6の「3件以上の件数を数えられる」が成り立たない（Issue #933）
+
+> **この追記は、クローン miku の委譲先の担い手が書いた。オーナー本人の判定ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> 採用済みの本文は書き換えていない。
+
+**【実測】** 同じ claim key の違う主張を、毎回 `detectContested: true` を渡して1件ずつ
+`observe()` した（`packages/core` の Fake と本物の Postgres 17 の両方で同じ結果）。
+
+| 回 | 一致件数 | 結果 | `claim_key_conflict_unresolved` の累計 |
+|---|---|---|---|
+| 1件目 | 0 | `no_conflict`、`active` | 0 |
+| 2件目 | 1 | 1件目と対になり、両方 `contested` | 0 |
+| 3件目 | 0 | `no_conflict`、`active` のまま、痕跡なし | 0 |
+| 4件目 | 1 | 3件目と新しい対になる | 0 |
+
+決定3の `findActiveByClaimKey?` は `status = 'active'` の行だけを返す（契約どおりで、
+3実装とも正しい）。決定5の「ちょうど1件」で対にした2件は `contested` になって
+`active` から外れるため、同じ鍵の主張が1件ずつ届く経路では、一致件数は0か1にしか
+ならず、決定5の「2件以上」の分岐と決定6の evidence イベントには到達しない。
+⟹ 決定6の「同じ鍵に3件以上が並んだ件数を、`memory_events` から
+`meta.reason = 'claim_key_conflict_unresolved'` で数えられる」は、この経路では成り立たない。
+3件目以降は、`active` のまま `contestedWithId` も evidence も持たずに残る。
+本文の「測ったこと」と負債5が扱った「2件以上」の単体テストは、1件目・2件目を
+`detectContested` を使わずに作ることで、この分岐に到達させていた。
+
+**直していない。** 直すには、同じ鍵の `contested` の行を一致として数える口
+（`findActiveByClaimKey?` の意味を広げるか、新しい任意メソッドを足すか）が要る。
+前者は公開済みの契約を型の変更なしに変え、後者は `memory-store-conformance.ts` に
+要件を足す。どちらも「同じ鍵の `contested` の行を同じ矛盾の集合に数える」判断を含み、
+多者の `contested` の持ち方（[Issue #207](https://github.com/takecchi/mnemora/issues/207)、
+[ADR 0327](./0327-relation-graph-contested-write-path-design.md) の未決）に依存する。
+案と帰結、オーナーへの問いの下書きは
+[Issue #933](https://github.com/takecchi/mnemora/issues/933) のコメントにある。
