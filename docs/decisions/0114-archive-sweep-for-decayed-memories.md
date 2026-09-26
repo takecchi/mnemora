@@ -249,3 +249,19 @@ lifecycle 表のどの状態にも無い壊れた行を新しく作る（`update
 「まだ実装していない」から「入れないと決めた」に変わった。** この節の本文自体は
 書き換えない（履歴を書き換えない）——決定の記録として当時の判断はそのまま残す。
 理由・現物調査・検討した代替案の詳細は ADR 0303 を参照。
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: 同時に走る掃引についての約束を明記した
+
+Postgres の adapter の SQL に変異試験を当てたところ、`buildArchiveDecayedTargetSelect` の `FOR UPDATE SKIP LOCKED` を外す変異が、既存の歯をすべてすり抜けた。`MemoryStore.archiveDecayed` の doc にあった約束は「同じ範囲を**繰り返し**掃引しても同じ行が二度 archived にならない」で、逐次の繰り返しについてのものだった。同じ範囲の掃引が**同時に**走る場合の約束は、doc にもこの ADR にも無かった。
+
+振る舞いは変えず、いまの実装が既に満たしている振る舞いを契約として明記した。
+
+- **契約**（`@mnemora/core` の `MemoryStore.archiveDecayed` の doc に1項目足した）: 同じ範囲の掃引が同時に走っても、同じ行が二度 archived にならず、`archived` のイベントも1件だけである。
+- **根拠**: Postgres の実装は、対象の選択に `FOR UPDATE SKIP LOCKED` を掛けている。後から来た掃引は、先の掃引が行ロックを持っている行を飛ばす。行ロックを外すと、後の掃引の `UPDATE` は先の掃引の行ロックが外れるのを待つ。そして外れた後に、同じ行をもう一度 archived にする（`UPDATE ... FROM target WHERE m.id = t.id` は `status` を見直さない）。プロセス内で逐次に動く Fake は、自然にこの契約を満たす。
+- **歯**: `packages/postgres/src/__tests__/archive-decayed-concurrency.postgres.test.ts`。掃引 A をトランザクションの中で走らせて行ロックを持たせたまま、別の接続で掃引 B を起こす。B が「終わった」か「行ロック待ちに入った」（`pg_stat_activity.wait_event_type = 'Lock'`）かを確かめてから A を commit する。順序は sleep ではなく、この障壁で固定している。
+- **実測**（手元の Postgres。initdb で立てたもの、UTF8 / C.UTF-8）:
+  - 行ロックを外す変異では、10回中10回赤になった。後の掃引が同じ行をもう一度 archived にして返し、`archived` のイベントは2件、障壁は行ロック待ちの側に倒れた。
+  - 元に戻すと、10回中10回緑だった。
+- **適合テスト一式（`*-conformance.ts`）には要件を足していない**（Issue #809 の方針）。外部の adapter に並行の性質を要求するかは、別の判断として残る。
