@@ -29,7 +29,7 @@ type RecallResult = {
 
 `memories` と `omitted` は対になる二つのフィールドであって、片方が主でもう片方が付録ではない。型定義上も並び順上も対等に置く。呼び出し側のコードが `omitted` を無視して `memories` だけを使うことは自由だが、mnemora の側が「無視してよい」という前提で設計してはならない——`omitted` を計算しない・空配列で済ませる、という手を抜く経路を作らない。
 
-**⚠ 排他性契約（2026-09 追記。Issue #421 / [ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）**: `omitted` は文字どおり「返らなかったもの」の分類である——ある memoryId が `memories` に載っているなら、`omitted` のどの Omission もその memoryId を名指しで含まない。段3.5（連想、§9）が段2の `below_threshold` 判定を後から `memories` へ昇格させることがあり、そのときは昇格した分を `below_threshold` の `count`/`nearMisses` から取り下げる（§9.8）。**この契約が個体単位で検証できるのは `nearMisses` を持つ `below_threshold` だけである**——他の `Omission.kind` は件数だけを持ち、どの記憶を指すかを言わない。
+**⚠ 排他性契約（2026-09 追記。Issue #421 / [ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）**: `omitted` は文字どおり「返らなかったもの」の分類である——ある memoryId が `memories` に載っているなら、`omitted` のどの Omission もその memoryId を名指しで含まない。段3.5（連想、§9）が段2の `below_threshold` 判定を後から `memories` へ昇格させることがあり、そのときは昇格した分を `below_threshold` の `count`/`nearMisses` から取り下げる（§9.8）。**この契約が個体単位で（外部から）検証できるのは `nearMisses` を持つ `below_threshold` だけである**——他の `Omission.kind` は件数だけを持ち、どの記憶を指すかを言わない。**2026-09-26 追記（Issue #823）**: `over_limit(stage:"rescore")` も、公開型を広げないまま同じ排他性の対象になった——段3（必須の同伴取得）が段2の `over_limit(stage:"rescore")` の候補を昇格させたぶんは `count` から差し引かれる（§9.8 末尾）。検証できるのは内部実装とテストからだけで、`over_limit` 自身は依然として memoryId を公開していない。`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等は対象外のままである。
 
 `index` と `usage` も同じ理由でトップレベルに置く。「何が在るか」（index、§5）と「どれだけの量を返したか」（usage、§6）は、`memories` の中身をどう解釈するかに直接影響する周辺情報であり、後から復元できない。`explain.stages` はパイプラインの実行そのものの記録であり、次節で扱う。
 
@@ -1390,4 +1390,6 @@ Issue #200 は**2つの読み方**を挙げていた。
 
 **直したこと**: 段3.5・段3・段4がすべて終わり `finalMemories`（実際に返す集合）が確定した時点で、`below_threshold` の `count`/`nearMisses` から `finalMemories` に含まれる memoryId を取り下げる（`recall-runtime.ts` の「排他性契約」ブロック）。§3 の規約「段2で確定し、以降は積み上げるだけ。最後に集計し直さない」は破っていない——ここで行っているのは件数の再集計ではなく、**確定した分類と、実際に返した集合との突き合わせ**である。
 
-**この排他性が個体単位で検証できるのは `below_threshold.nearMisses` だけである**——`Omission` の他10種は memoryId を持たない。段3（必須の同伴取得）が同種の昇格を起こす経路（争われている記憶の同伴が偶然 `below_threshold` に居た場合）も構造的には同じ後処理で救われるが、実測で確かめたのは段3.5（連想）の経路だけである（ADR 0203「確かめていないこと」）。
+**この排他性が個体単位で検証できるのは `below_threshold.nearMisses` だけである**——`Omission` の他10種は memoryId を持たない。段3（必須の同伴取得）が同種の昇格を起こす経路（争われている記憶の同伴が偶然 `below_threshold` に居た場合）も構造的には同じ後処理で救われる——**2026-09-26（Issue #823）に実測で確かめた**（`recall-over-limit-promotion.test.ts` の3本目の歯）。
+
+**2026-09-26 追記（Issue #823、ADR 0203「引き受けた負債」3番の是正）**: `over_limit(stage:"rescore")`（段2の `passed.slice(limit)`、§7）についても同種の矛盾が実際に起きていた——段3の必須の同伴取得が、段2で `over_limit(stage:"rescore")` へ回された候補を `finalMemories` へ昇格させることがある。`OverLimitOmission` は公開型として memoryId を持たないため below_threshold と同じ形の後処理は一見できないように見えるが、`recall-runtime.ts` の実装は段2の `overLimit`（`ScoredCandidate[]`、関数内部の値）をこの時点でもまだ保持しており、公開型を経由せずに `finalMemories` と id で突き合わせられる——ADR 0203「これが覆るとしたら」3番が前提に置いていた「型の拡張が先」という制約は、内部に id を持ち回るこの段には当たらなかった。差し引く数は「段3で返した同伴の総数」ではなく「`over_limit(stage:"rescore")` に居て、かつ段3の同伴取得で実際に `finalMemories` に返った id の数」に絞る——companion が最初から `withinLimit` に居た場合や `below_threshold` から昇格した場合まで数えると、無関係な `over_limit` の count を誤って減らす（過剰実装、`recall-over-limit-promotion.test.ts` の変異試験で確認済み）。段3.5（連想）が同じ `overLimit` の候補を独立に昇格させる経路と、`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等の他 kind は今回も対象外のままである——ADR 0203 追記節を参照。

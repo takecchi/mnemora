@@ -510,6 +510,73 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     });
   });
 
+  it("Issue #823（ADR 0203「引き受けた負債」3番の是正）: over_limit(stage:'rescore') に回った companion が段3の必須同伴取得で昇格すると、over_limit の Omission 自体が消える", async () => {
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    const ctx: Ctx = { tenantId: TENANT };
+
+    // companion: クエリにほぼ一致する候補として ANN 経由で見つかる（段2で passed する）が、
+    // owner よりわずかにスコアが低い。limit=1 なので owner だけが withinLimit に入り、
+    // companion は段2の passed.slice(limit) で over_limit(stage:"rescore") に落ちる。
+    const companion = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.999, 0.001, 0], {
+      digest: "companion",
+    });
+    // owner: クエリと完全一致。limit=1 なので withinLimit の1件を占める。
+    const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      digest: "owner",
+    });
+    // `createMemory` は contested を contestedWithId 無しでは作れない
+    // （`ContestedWithoutCompanionError`、ADR 0140）ため、両方を active で作ってから
+    // `markContestedPair` で相互に contested へ倒す（上の「段3/段4」歯と同じ作法）。
+    await memoryStore.markContestedPair!(
+      ctx,
+      {
+        id: owner.id,
+        event: {
+          tenantId: TENANT,
+          memoryId: owner.id,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: owner.digest,
+          meta: { reason: "contested" },
+        },
+      },
+      {
+        id: companion.id,
+        event: {
+          tenantId: TENANT,
+          memoryId: companion.id,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: companion.digest,
+          meta: { reason: "contested" },
+        },
+      },
+    );
+
+    // association: null — 連想枠は既定 on（ADR 0337）。この歯が検査したいのは段2の
+    // over_limit(stage:"rescore") と段3（必須の同伴取得）だけであり、連想が同じ候補を
+    // 独立に拾い直すと検証が段3.5の挙動と混ざる（本 PR の射程外、ADR 0203「引き受けた
+    // 負債」に残したまま）。
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 1,
+      overFetchFactor: 10,
+      association: null,
+    });
+
+    const returnedCompanion = result.memories.find((m) => m.memoryId === companion.id);
+    expect(returnedCompanion).toBeDefined();
+    expect(returnedCompanion?.retrievedVia).toBe("mandatory_companion");
+    const returnedOwner = result.memories.find((m) => m.memoryId === owner.id);
+    expect(returnedOwner).toBeDefined();
+    expect(result.memories).toHaveLength(2);
+
+    // 修正後の期待: over_limit(stage:"rescore") の対象はこの1件（companion）だけ
+    // だったので、below_threshold と同じ作法で Omission 自体が配列から消える。
+    const overLimit = result.omitted.find((o) => o.kind === "over_limit" && o.stage === "rescore");
+    expect(overLimit).toBeUndefined();
+  });
+
   it("段6: recallId が発行され、observe({kind:'memory_usage'}) から参照できる", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
