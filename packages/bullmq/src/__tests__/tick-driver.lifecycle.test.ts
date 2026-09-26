@@ -166,3 +166,61 @@ describe("createBullmqTickDriver() — stop() の後は再開できない（Issu
     expect(queue.upsertJobScheduler).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("createBullmqTickDriver() — start() が途中で失敗したら、次の start() でやり直せる（Issue #963）", () => {
+  it("1回目の upsertJobScheduler が失敗しても、2回目の start() でスケジュールが登録され Worker が1回だけ走る", async () => {
+    const driver = makeDriver();
+    const queue = queueInstances.at(-1)!;
+    const worker = workerInstances.at(-1)!;
+    queue.upsertJobScheduler.mockRejectedValueOnce(new Error("redis down"));
+
+    await expect(driver.start()).rejects.toThrow("redis down");
+    await driver.start();
+
+    // 2回目の start() が実際に登録をやり直した（1回目は失敗したので、成功した登録は2回目の1回だけ）。
+    expect(queue.upsertJobScheduler).toHaveBeenCalledTimes(2);
+    await expect(queue.upsertJobScheduler.mock.results[1]!.value).resolves.toBeUndefined();
+    expect(worker.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("start() が失敗した時点では Worker を走らせたまま残さない", async () => {
+    const driver = makeDriver();
+    const queue = queueInstances.at(-1)!;
+    const worker = workerInstances.at(-1)!;
+    queue.upsertJobScheduler.mockRejectedValueOnce(new Error("redis down"));
+
+    await expect(driver.start()).rejects.toThrow("redis down");
+
+    expect(worker.run).not.toHaveBeenCalled();
+  });
+
+  it("同時に呼んだ start() は同じ起動を待つ（登録も Worker の起動も1回だけ）", async () => {
+    const driver = makeDriver();
+    const queue = queueInstances.at(-1)!;
+    const worker = workerInstances.at(-1)!;
+
+    await Promise.all([driver.start(), driver.start()]);
+
+    expect(queue.upsertJobScheduler).toHaveBeenCalledTimes(1);
+    expect(worker.run).toHaveBeenCalledTimes(1);
+  });
+
+  it("起動の途中で stop() が呼ばれたら、登録が返った後に Worker を走らせない", async () => {
+    const driver = makeDriver();
+    const queue = queueInstances.at(-1)!;
+    const worker = workerInstances.at(-1)!;
+    let resolveUpsert!: () => void;
+    queue.upsertJobScheduler.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        resolveUpsert = resolve;
+      }),
+    );
+
+    const starting = driver.start();
+    await driver.stop();
+    resolveUpsert();
+    await starting.catch(() => {});
+
+    expect(worker.run).not.toHaveBeenCalled();
+  });
+});
