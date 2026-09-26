@@ -19,7 +19,7 @@ suite ごと・呼び出し元ごとに違う。**この文書が無いと、採
 `EmbeddingProvider` に関わるものだけを、その分だけ更新してある**（下の該当箇所に
 逐語で印を付けた）。**他の6 suite の数はこの追記の対象外**——数えていない。
 
-**⚠ 2026-09-26 追記（`v1.1.0`、Issue #389 /
+**⚠ 2026-09-26 追記（`v1.0.1`、Issue #389 /
 [ADR 0266](./decisions/0266-llm-provider-conformance.md)）**: 下の「`LLMProvider` の適合
 suite は、存在しない」はもう成り立たない。`describeLLMProviderConformance` を新設し、
 `@mnemora/openai`・`@mnemora/anthropic` の両方に当てた。**この節の数のうち `LLMProvider` に
@@ -37,7 +37,7 @@ suite は、存在しない」はもう成り立たない。`describeLLMProvider
 | `EmbeddingProvider`   | **10**（2026-09-25 追記: `overLimitText` の歯を1本足した） | `packages/testkit/src/embedding-provider-conformance.ts`    |
 | `EventStore`          | 16                                                         | `packages/testkit/src/event-store-conformance.ts`           |
 | `LexicalStore`        | 21                                                         | `packages/testkit/src/lexical-store-conformance.ts`         |
-| `LLMProvider`         | **8**（2026-09-26 追記: `v1.1.0` で新設）                  | `packages/testkit/src/llm-provider-conformance.ts`           |
+| `LLMProvider`         | **8**（2026-09-26 追記: `v1.0.1` で新設）                  | `packages/testkit/src/llm-provider-conformance.ts`           |
 | `MemoryStore`         | **177**                                                    | `packages/testkit/src/memory-store-conformance.ts`          |
 | `OutboxStore`         | 15                                                         | `packages/testkit/src/outbox-store-conformance.ts`          |
 | `TenantSettingsStore` | 17                                                         | `packages/testkit/src/tenant-settings-store-conformance.ts` |
@@ -47,7 +47,7 @@ suite は、存在しない」はもう成り立たない。`describeLLMProvider
 ### `LLMProvider` の適合 suite —— 2026-09-26 追記: 新設された（旧: 存在しなかった）
 
 **⚠ 以前この節は「`describeLLMProviderConformance` は0件、`llm-provider-conformance.ts` は
-無い」と書いていた。それは `v1.0.0` 時点では正しかったが、`v1.1.0`（Issue #389 /
+無い」と書いていた。それは `v1.0.0` 時点では正しかったが、`v1.0.1`（Issue #389 /
 [ADR 0266](./decisions/0266-llm-provider-conformance.md)、PR #603）でもう成り立たなくなった。**
 
 `packages/testkit/src/llm-provider-conformance.ts` に `describeLLMProviderConformance` が在り、
@@ -320,7 +320,7 @@ MNEMORA_LIVE_LOCAL_EMBEDDING=1 pnpm --filter @mnemora/local-embedding test
 ## 8. 確かめていないこと
 
 - **実 API（OpenAI / Anthropic）には、いまも一度も当てていない。**この文書は手順を
-  書いただけで、**測っていない。**`LLMProvider` の適合 suite（§2.3、`v1.1.0` で新設）も
+  書いただけで、**測っていない。**`LLMProvider` の適合 suite（§2.3、`v1.0.1` で新設）も
   同様——偽 client の固定応答に当てているだけで、実 API には当てていない。
 - **`_name_or_path` 以外の経路で repo id を同定できるかを、網羅的に調べていない。**
   実測したのは `config.json` の中身だけである。
@@ -375,7 +375,7 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
   `overLimitText` の歯を1本足したことに伴い、**その1本が数え方に効く箇所だけ**を
   この作業者が読んで更新した（§1・§2.2・§3・§6）。**他の6 suite・他の節の数は
   この追記の対象外**——2026-09-17 時点の値のままである。
-- **2026-09-26 追記**（`v1.1.0`、Issue #389 / [ADR 0266](./decisions/0266-llm-provider-conformance.md)）:
+- **2026-09-26 追記**（`v1.0.1`、Issue #389 / [ADR 0266](./decisions/0266-llm-provider-conformance.md)）:
   `LLMProvider` の適合 suite が新設されたことに伴い、**それが数え方・記述に効く箇所だけ**を
   この作業者が読んで更新した（§1・§2.3・§8。§1・§2.3 の住所と本数は `packages/testkit/src/llm-provider-conformance.ts`・
   `packages/openai/src/__tests__/llm-provider.conformance.test.ts`・
