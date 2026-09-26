@@ -247,6 +247,7 @@ interface InstrumentedHandle {
   spy: VectorStoreSpy;
   pool: PostgresClient["pool"];
   cachingEmbeddingProvider: CachingEmbeddingProvider;
+  /** `closePostgresClient`（`@mnemora/postgres`）の薄いラッパー。**冪等**——2回目以降呼んでも何もせずに resolve する（Issue #935）。 */
   close(): Promise<void>;
 }
 
