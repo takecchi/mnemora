@@ -19,6 +19,17 @@
  * `Error` を継承しているので、`@mnemora/openai` と揃えた既存の契約
  * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
  * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
+ * `kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである。**
+ * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——トップレベルの `content`
+ * 欄がキーごと丸ごと無い場合（`{}` が返る等）——は、この分類の**外**にある生の例外
+ * （`TypeError` 等。壊れた JSON の `SyntaxError`、スキーマ不適合の `ZodError` と同じ
+ * 扱い）がそのまま伝播する。`AnthropicLLMProviderError` にはならず、`instanceof` でも
+ * `kind` でも捕まえられない。**実 API がこの形（200 応答なのにトップレベルのキーが
+ * 丸ごと欠ける）を実際に返すかは確認していない。** 詳細・検討した案は
+ * [ADR 0072](../../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記を
+ * 参照。`llm-provider.ts` の `firstTextBlock` にも個別の doc コメントがある。
  */
 
 /**

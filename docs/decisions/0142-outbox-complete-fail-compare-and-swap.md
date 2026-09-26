@@ -561,3 +561,42 @@ DB 不要スタブテストを別途新設する必要は無く、**CI の postg
   claim/complete/fail を完結させる)なので、この作業では実運用相当の検証ができて
   いない。決定3のロジック自体は `packages/core` の決定的な差し込みテストで確認済み
   （「測ったこと」参照）。
+
+---
+
+## 追記（2026-09-26、[Issue #836](https://github.com/takecchi/mnemora/issues/836)）: 決定3の「競合で弾かれない限り failed にカウントされる」は実態と一致するが、その帰結に穴がある
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・採らなかった案・開いている穴・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コードの挙動は変えていない——この追記は記録だけである。
+
+決定3の「競合でない例外（ハンドラの処理失敗・DB接続断等）は従来どおり `fail()` を試み、
+それも競合で弾かれない限り `failed` にカウントされる」という一文自体は、字義どおりには
+今も正しい——`tick()` は今もその通りに動く。**ただし、この一文だけを読むと「`failed`
+にカウントされた行は、実際に `failed` として終端している」という誤解を招く。**
+
+**実際には一致しない場合がある（Issue #836 の実測、`InMemoryOutboxStore`・
+`PostgresOutboxStore` の両方）**: `complete()` が DB 上ではコミット済みなのに、
+`OutboxLeaseConflictError` 以外の例外（コミット後の接続断・タイムアウト等）を返すと、
+`tick()` はそれを「処理が失敗した」場合と区別できずに `fail()` を試みる。決定3が
+Issue #826 より前に書かれた時点では、`fail()` はまだ「相手側の終端が既に付いていれば
+無言の no-op になる」という排他の性質を持っていなかった——その性質は本 ADR より後の
+Issue #826（PR #830）で入った。**その結果、この決定3の一文は「`fail()` を試みて
+競合で弾かれなければ `failed` を1増やす」という*カウンタの動き*としては正しいままだが、
+「行が実際に `failed_at`/`last_error` を持つ終端になる」ことは保証しなくなった**——
+Issue #826 以降、既に `completed_at` が付いた行への `fail()` は無言の no-op になり、
+行は `completed` のまま変わらないのに `TickResult.failed` は1増える。
+
+**クローン miku の判断（2026-09-26）**: 挙動は変えず、この帰結を doc コメント
+（`TickResult.failed`・`TickResult.unsupported`、`packages/core/src/runtime.ts` の
+`tick()` 実装内の該当 catch 節）に明記するに留めた。
+
+**採らなかった案**（Issue #836 本文がオーナーへ上げていたものと同じ3択のうち、
+クローン miku の判断で記録に留めることを選んだ）:
+1. `complete`/`fail` の返り値を「書いたか／先に付いた終端に負けたか」を返す型に変える。
+   却下——`OutboxStore`（公開 interface）の変更になり、委譲された範囲を超える。
+2. `complete()` を再試行する。却下——決定1・決定2（完了の記録に失敗したら `fail()` で
+   記録する、という本 ADR の設計）から外れるうえ、再試行がまた失敗すれば同じずれが残る。
+
+反映先: `packages/core/src/runtime.ts` の `TickResult.failed`・`TickResult.unsupported`
+の doc コメント、`tick()` 実装内の該当 catch 節のコメント。

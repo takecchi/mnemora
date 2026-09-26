@@ -579,3 +579,58 @@ tenant-y（tags=[]）: labels/memory_labels とも0行
 詳細な歯・変異試験・スナップショット差分は、この追記を運んだ PR
 （[Issue #818](https://github.com/takecchi/mnemora/issues/818) を close する PR）の本文を
 見ること——ここには複製しない。
+
+## 追記（2026-09-26）—— `listLabels?` の並び順をコードポイント順と定める（Issue #881）
+
+> **⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。**
+> **⛔ オーナー本人の判定ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⚠ GitHub の actor は層を判別しないので、この追記を含む PR も `takecchi` の名前で載る。
+> **名前で読まないこと。**
+
+[Issue #881](https://github.com/takecchi/mnemora/issues/881) が、`MemoryStore.listLabels?`
+の「`name` 昇順で返す。並び順の保証はこの1点のみ」という本文の契約（上、決めたこと）が
+どの照合順序（collation）での昇順かを規定していないことを指摘した。`FakeMemoryStore`
+（`packages/core`）・`InMemoryMemoryStore`（`packages/testkit`）は
+`String.prototype.localeCompare`（Node の既定ロケール）で、`PostgresMemoryStore` は
+`ORDER BY name`（DB の既定の照合順序）で並べており、大文字小文字・前後の空白が混在する
+`name` では3者の返す順序が互いに食い違っていた。
+
+**測った結果**（Issue #881 のコメント。`" Foo "`・`"Foo"`・`"foo"` の3件の label 名を
+並べた場合）:
+
+| 実装・環境 | 返る順序 |
+|---|---|
+| CI の `postgres` ジョブ UTF8 脚（`datcollate=en_US.utf8`） | `foo`, `' Foo '`, `Foo` |
+| CI の `postgres` ジョブ SQL_ASCII 脚（`datcollate=C`） | `' Foo '`, `Foo`, `foo` |
+| Node の `localeCompare`（`FakeMemoryStore`/`InMemoryMemoryStore` が使う既定ロケール） | `' Foo '`, `foo`, `Foo` |
+
+3つとも互いに食い違っていた。
+
+**決めたこと（クローン miku の判断——オーナーの判断ではない）**: `listLabels?` の
+「`name` 昇順」を、**`name` のコードポイント順**（Postgres の `COLLATE "C"` と同じ、
+バイト順）の昇順と定めた。`PostgresMemoryStore.listLabels` は `ORDER BY name COLLATE
+"C" ASC` に変え、`FakeMemoryStore`/`InMemoryMemoryStore` は `localeCompare` をやめて
+コードポイントを比較する専用の比較関数に変えた。
+
+**追記2（同日）**: 当初は `FakeMemoryStore`/`InMemoryMemoryStore` 側を素の `<`/`>`
+文字列比較（`a.name < b.name`）で実装していたが、これは JS の仕様上 UTF-16 コード単位の
+比較であり、U+10000 以上の文字（サロゲートペア）を含む名前では実際のコードポイント順と
+食い違うことに気づいた（`"！"` U+FF01 と `"😀"` U+1F600 のペアで実際に確認: 素の `<` は
+`"😀"` を先にするが、コードポイント順は `"！"` が先）。契約に「コードポイント順」と書いた
+以上これはその契約を自ら満たさない実装だったため、`String.prototype.codePointAt` で
+1文字（サロゲートペアなら2コード単位）ずつ読んでコードポイントの値そのものを比較する
+実装に直した。Postgres の `COLLATE "C"` は UTF-8 のバイト列を比較しており、UTF-8 の
+バイト順はコードポイント順と単調に対応するため、この実装は Postgres と一致する。
+
+**採らなかった案**:
+
+- 契約から並び順の保証そのものを外す案は、`listLabels?` の呼び出し側（taxonomy の
+  語彙一覧表示など）が安定した順序を失うため、採らなかった。
+- 並び順を DB のロケールに委ねる案（`ORDER BY name` のまま、`COLLATE` を明示しない）は、
+  上の実測が示すとおり同じ実装でも実行環境（DB のロケール）によって結果が変わるため、
+  採らなかった。
+
+詳細な歯・実測（ローカルの DB ロケール・赤黒の記録）は、この追記を運んだ PR
+（Issue #881 を close する PR）の本文を見ること——ここには複製しない。

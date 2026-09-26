@@ -170,6 +170,42 @@ function isDecayedForScope(
   return !activityAlive;
 }
 
+/**
+ * Issue #881 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md) 追記
+ * （2026-09-26、クローン miku の判断）: `listLabels?` の `name` 昇順を**コードポイント順**
+ * （Postgres の `COLLATE "C"` と同じ、バイト順）と定めた。`packages/testkit` の
+ * `InMemoryMemoryStore`（`in-memory-memory-store.ts` の同名関数）と同じ実装。
+ *
+ * **文字列同士を素の `<`/`>` で比較しない。**JS の `<`/`>` は UTF-16 コード単位を比較する
+ * ため、サロゲートペア（U+10000 以上、絵文字など）を含む名前では、サロゲート自体の値
+ * （U+D800〜U+DFFF）が U+E000〜U+FFFF の BMP 文字より小さいコード単位として並んでしまい、
+ * 実際のコードポイント順と食い違う（追記2、2026-09-26。詳細は `packages/testkit` の
+ * 同名関数の doc コメントを見ること）。
+ *
+ * ⟹ 先頭から `String.prototype.codePointAt` で1文字（サロゲートペアなら2コード単位）ずつ
+ * 読み、コードポイントの値そのものを比較する。UTF-8 のバイト順（Postgres の
+ * `COLLATE "C"`）はコードポイント順と単調に対応するため、この実装は Postgres と一致する。
+ */
+function compareLabelName(a: string, b: string): number {
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    // i/j はループ条件で length 未満と保証済みなので、その位置に有効なコード単位が必ずある。
+    const aCodePoint = a.codePointAt(i)!;
+    const bCodePoint = b.codePointAt(j)!;
+    if (aCodePoint !== bCodePoint) {
+      return aCodePoint < bCodePoint ? -1 : 1;
+    }
+    // サロゲートペア（コードポイントが BMP 外）なら2コード単位、それ以外は1コード単位進む。
+    i += aCodePoint > 0xffff ? 2 : 1;
+    j += bCodePoint > 0xffff ? 2 : 1;
+  }
+  // ここまで全コードポイントが一致——残りがある方（長い方）が後ろ。
+  if (i < a.length) return 1;
+  if (j < b.length) return -1;
+  return 0;
+}
+
 export class FakeMemoryStore implements MemoryStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
@@ -409,6 +445,10 @@ export class FakeMemoryStore implements MemoryStore {
 
   /**
    * Issue #201 PR-B（ADR 0323）: `listLabels?`（`InMemoryMemoryStore.listLabels` と同じ契約）。
+   *
+   * Issue #881 / ADR 0318 追記（2026-09-26、クローン miku の判断）: 並び順は
+   * `compareLabelName`（このファイル上）——コードポイント順。`localeCompare` はこの
+   * 契約とずれるため使わない。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
@@ -418,7 +458,7 @@ export class FakeMemoryStore implements MemoryStore {
         results.push(label);
       }
     }
-    results.sort((a, b) => a.name.localeCompare(b.name));
+    results.sort((a, b) => compareLabelName(a.name, b.name));
     return results;
   }
 

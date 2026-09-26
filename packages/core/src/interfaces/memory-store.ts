@@ -834,6 +834,18 @@ export interface MemoryStore {
    *   newestPurgedAt, olderThan }` の4欄のみ——`docs/memory-model.md` §9 が言う
    *   「件数と期間のみ。削除された個々のイベントの詳細は残らない」を、`memory_id`
    *   個別の記録を一切持たないことで守る。
+   *
+   * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+   * 上記の `WHERE`（`kind <> 'events_purged'`）は `kind = 'superseded'` の行を除外しない
+   * ——保持期間を過ぎればそれらも他の行と同じく削除の対象になる。** これは決定1どおりの
+   * 挙動であり、この口自身は約束を破っていない。ただし `superseded` 行は
+   * `MemoryStore.previewRestoreSupersededBy?` が `supersededReason` を読む唯一の
+   * 情報源でもある——この口を運用ジョブとして定期的に呼んでいるテナントでは、
+   * 保持期間を過ぎた時点で `previewRestoreSupersededBy?`/
+   * `groupSupersededCandidatesByOperation`（`packages/core/src/runtime.ts`）が
+   * 由来を「分からない」としてまとめてしまうようになる。詳細・採らなかった案は
+   * [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md) の
+   * 同日付追記を参照。
    */
   purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
   /**
@@ -1328,6 +1340,18 @@ export interface MemoryStore {
    * `kind: 'superseded'` を積んでいない、または将来別の書き手が `reason` を
    * 省略した場合）は `null`。
    *
+   * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:
+   * 「一致する行が無い」は、上記2つの理由に加えて第三の理由でも起きる——
+   * `MemoryStore.purgeExpiredEvents?`（[ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)）
+   * が保持期間の設定に従ってその `kind: 'superseded'` 行を既に削除した場合である。**
+   * `purgeExpiredEvents?` の対象選定は `kind = 'events_purged'` 以外の行すべてであり、
+   * `superseded` を特別扱いして除外しない。この3つの理由はどれも `supersededReason: null`
+   * という同じ値になり、呼び出し側からは区別できない——「由来が最初から無かった」のか
+   * 「由来はあったが保持期間の掃除で消えた」のかを、この戻り値だけでは判定できない。
+   * 詳細・採らなかった案は
+   * [ADR 0258](../../../../docs/decisions/0258-restore-superseded-operation-scope.md)
+   * の同日付追記を参照。
+   *
    * - 対象が0件なら `{ candidates: [] }`（`restoreSupersededBy?` の「対象0件なら
    *   例外にしない」規律と同じ）。
    * - 返す順序は adapter に委ねる（`restoreSupersededBy?` の `restored` と同じ規律）。
@@ -1354,7 +1378,11 @@ export interface MemoryStore {
    * はいけないこと」表の「公開 API の破壊的変更」、ADR 0100 決定1と同じ理由）。
    *
    * 契約:
-   * - `name` 昇順で返す。並び順の保証はこの1点のみ。
+   * - `name` の**コードポイント順**（Postgres の `COLLATE "C"` と同じ、バイト順）の
+   *   昇順で返す。並び順の保証はこの1点のみ（Issue #881 / 本 ADR 追記
+   *   （2026-09-26、クローン miku の判断）: ロケール依存の自然順（例:
+   *   `String.prototype.localeCompare` の既定ロケール、DB の既定照合順序）は
+   *   実装や実行環境によって互いにずれるため、契約からは外した）。
    * - `status` は `'registered'` か `'proposed'` のいずれか。
    * - `proposedCount` は「この名前を `tags` に含む Memory が新規作成された回数」の
    *   近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』ではない**

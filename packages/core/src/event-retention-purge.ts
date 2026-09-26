@@ -76,6 +76,12 @@ export interface PurgeExpiredEventsForTenantOptions {
  * `retention.days` 日ぶん遡った時刻として、ここで計算する——
  * {@link MemoryStore.purgeExpiredEvents} 自身は「日数」を知らず、常に確定済みの
  * `Date` だけを受け取る（単体で決定的にテストできるようにするため）。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #821](https://github.com/takecchi/mnemora/issues/821)）:**
+ * この関数を定期的に呼ぶ運用は、`kind: 'superseded'` の `memory_events` 行も
+ * 保持期間どおりに削除する——`MemoryStore.previewRestoreSupersededBy?` が読む唯一の
+ * 情報源であり、これが消えると「群の由来が分からない」扱いに劣化する。詳細は
+ * {@link MemoryStore.purgeExpiredEvents} の doc コメントを参照。
  */
 export async function purgeExpiredEventsForTenant(
   ctx: Ctx,

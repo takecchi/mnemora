@@ -31,6 +31,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.space = { provider: "openai", model: options.model, dimensions: options.dimensions };
   }
 
+  // ⚠ 2026-09-26 追記（Issue #885）: `response.data` キー自体が丸ごと無い応答
+  // （`{}` が返る等）が来ると、下の `[...response.data]` は
+  // `TypeError: response.data is not iterable` を投げる。このクラスは専用の
+  // エラー型を持たず（`OpenAILLMProvider` の `kind` 分類に相当するものが埋め込み側には
+  // 無い）、壊れた応答は最初から生の例外がそのまま呼び出し元へ伝播する形である
+  // （`packages/openai/src/errors.ts` 冒頭コメントの同日付追記を参照）。
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
     if (texts.length === 0) {
       return [];

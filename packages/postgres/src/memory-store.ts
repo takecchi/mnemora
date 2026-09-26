@@ -2338,10 +2338,16 @@ export class PostgresMemoryStore implements MemoryStore {
   /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
    * `listLabels?`（`@mnemora/core` の interface doc 参照）。
+   *
+   * Issue #881 / ADR 0318 追記（2026-09-26、クローン miku の判断）: `name` の並び順は
+   * **コードポイント順**（バイト順）と決めた。`ORDER BY name`（COLLATE 指定なし）は
+   * DB の既定の照合順序に従うため、既定が `C` でない DB（例: `en_US.utf8`）では
+   * ロケール依存の自然順になりコードポイント順とずれる——`COLLATE "C"` を明示して
+   * DB の既定ロケールに関わらず常にコードポイント順（バイト順）で返す。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const result = await this.db.execute(sql`
-      SELECT * FROM labels WHERE tenant_id = ${ctx.tenantId} ORDER BY name ASC
+      SELECT * FROM labels WHERE tenant_id = ${ctx.tenantId} ORDER BY name COLLATE "C" ASC
     `);
     return result.rows.map((row) => rowToLabel(row as unknown as LabelRow));
   }

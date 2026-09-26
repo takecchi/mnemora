@@ -472,3 +472,57 @@ packages/local-embedding/src packages/testkit/src` の結果に、この型・
 - **`reextract` の非アトミック/アトミック両経路が同じ「同じアンカーの共有」を
   起こすかは、両 adapter の実測でしか確認されていない**——この作業者自身は
   再現していない（【受】、ADR 0230 訂正4参照）。
+
+---
+
+## 追記（2026-09-26、[Issue #821](https://github.com/takecchi/mnemora/issues/821)）: 保持期間の掃除が、この ADR の判断材料を経年劣化させる
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・却下した案・これが覆るとしたら・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——この追記は記録だけである。
+
+**この ADR の①（`onlyMemoryIds`/`groupSupersededCandidatesByOperation`）は、
+`MemoryStore.previewRestoreSupersededBy?` が返す `supersededReason` を判断材料にする。**
+その `supersededReason` は `kind: 'superseded'` の `memory_events` 行の `meta.reason` を
+読むだけであり、この ADR も [ADR 0237](./0237-restore-superseded-dry-run-preview.md) も、
+その `memory_events` 行がいつまでも残り続けることを前提にしていた——**どちらの ADR も、
+[ADR 0115](./0115-event-retention-purge.md) の `MemoryStore.purgeExpiredEvents?` が
+`memory_events` を保持期間で削除することを一度も検討していない**
+（`grep -n "previewRestoreSupersededBy\|restoreSuperseded" 0115-event-retention-purge.md`・
+`grep -n "retention\|purgeExpiredEvents" 0258-restore-superseded-operation-scope.md`
+は、Issue #821 が本 PR 以前に確認した時点でどちらも0件だった）。
+
+**実測（Fake、`packages/core`、Issue #821 本文）**: `consolidate` の敗者 A（`meta.reason:
+'consolidated'`）と `resolveContested` の敗者 B（`meta.reason: 'contested_resolved'`）を
+同じ勝者 W の下に作る。掃除前は `previewRestoreSupersededBy(ctx, W)` が2件を別々の
+`supersededReason` で返し、`groupSupersededCandidatesByOperation` は正しく
+`"structural"` グループと `"per_item"` グループに分ける。`purgeExpiredEventsForTenant`
+（保持期間30日、`now` を60日後にずらす）を挟むと、A・B どちらの `superseded` イベントも
+削除され（`purged: 2`）、掃除後は両方とも `supersededReason: null` になり、
+`groupSupersededCandidatesByOperation` は**A と B を1つの `"unknown"` グループへ
+まとめる**。このグループをそのまま `restoreSuperseded` の `onlyMemoryIds` へ渡すと、
+本来は `consolidate` の取り消しのつもりで A だけを戻したかった呼び出しが、無関係な
+`resolveContested` の敗者 B まで一緒に戻してしまう。
+
+**クローン miku の判断（2026-09-26）**: 挙動は変えず、この相互作用を4箇所の doc コメント
+（`RestoreSupersededTarget.onlyMemoryIds`・`groupSupersededCandidatesByOperation`・
+`MemoryStore.previewRestoreSupersededBy?`・`MemoryStore.purgeExpiredEvents?`。いずれも
+`packages/core/src`）と `docs/memory-model.md` §9・本 ADR・ADR 0115・ADR 0237 に明記する
+に留めた（Issue #821 が挙げた方向4）。
+
+**採らなかった案**:
+1. **`purgeExpiredEvents` が `kind = 'superseded'` を対象から除外する。** 却下——
+   ADR 0115 決定1・`docs/memory-model.md` §9 が約束する「保持期間を超えたイベントは
+   種類を問わず本当に消える」という契約の意味を変える、公開の振る舞い変更になる。
+   この追記の範囲（委譲された記述のみ）を超える。
+2. **`RestoreSupersededOutcome`/`SupersededOperationGroup` に「由来が最初から無いのか、
+   掃除で消えたのか」を区別する第三の値を足す。** 却下——公開型の拡張であること自体は
+   小さいが、**「消えた」ことを機械的に見分ける手段が無い**（`memory_events` に一致する
+   行が無いことしか観測できず、それが保持期間の掃除によるものか、そもそも記録されな
+   かったものかを、現在のスキーマは区別しない）。区別を型に持たせても、実装がその型を
+   正しく埋められない。
+
+反映先: `packages/core/src/runtime.ts` の `RestoreSupersededTarget.onlyMemoryIds`・
+`groupSupersededCandidatesByOperation`、`packages/core/src/interfaces/memory-store.ts` の
+`previewRestoreSupersededBy?`・`purgeExpiredEvents?`、`packages/core/src/event-retention-purge.ts`
+の `purgeExpiredEventsForTenant`、`docs/memory-model.md` §9（保持方針）。

@@ -88,6 +88,16 @@ function stripNulls(value: unknown): unknown {
  *
  * **`choices` が空（choice 自体が無い）ときは、この門では投げない。** 既存の
  * `no_content` の経路（`complete` の `?? ""` / `completeStructured` の `if (!raw)`）に任せる。
+ *
+ * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
+ * 上の「`choices` が空」は `choices: []`（キー自体はある）を指す——`response.choices[0]`
+ * が `undefined` になり、この関数はそれを `choice` 引数として受け取って `if (!choice)`
+ * で素通しする。**`choices` キー自体が丸ごと無い応答（`{}` が返る等）は、この関数の
+ * *外*で先に壊れる**——呼び出し元（`complete`/`completeStructured`）の
+ * `response.choices[0]` という式が、`response.choices` が `undefined` であることに
+ * より、この関数を呼ぶ前に `TypeError: Cannot read properties of undefined
+ * (reading '0')` を投げる。この場合 `OpenAILLMProviderError` の `kind` 分類には
+ * 一切載らない。詳細は `errors.ts` 冒頭コメントの同日付追記を参照。
  */
 function assertNotRefusedOrTruncated(choice?: {
   finish_reason?: string | null;

@@ -92,6 +92,14 @@ SDK は例外を投げず、`content` にはテキストブロックが1つも�
 | `"truncated"` | 応答が途中で切れた | `stopReason`（`max_tokens` / `model_context_window_exceeded`）。**`maxTokens` を上げるか、プロンプトを短くする** |
 | `"no_content"` | 上記のどれでもないのに、テキストブロックが無かった | — |
 
+**⚠ 2026-09-26 追記（Issue #885）: `kind` が表すのはこの3種のどれかである。** HTTP 200 の
+応答オブジェクトそのものの形が壊れている場合——トップレベルの `content` 欄がキーごと
+丸ごと無い場合（`{}` が返る等）——は、`kind` の**外**にある生の例外（`TypeError` 等。
+壊れた JSON の `SyntaxError`・スキーマ不適合の `ZodError` と同じ扱い）がそのまま伝播する。
+`AnthropicLLMProviderError` にはならず、`instanceof` でも `kind` でも捕まえられない。
+実 API がこの形を実際に返すかは確認していない（詳細は
+[ADR 0072](../../docs/decisions/0072-anthropic-llm-provider.md) の同日付追記）。
+
 ```ts
 import { AnthropicLLMProviderError } from "@mnemora/anthropic";
 
