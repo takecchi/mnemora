@@ -197,6 +197,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 - **`tick()` がジョブの失敗を記録する outbox 行の `lastError` は `err.message` だけで、drizzle が包んだ DB の失敗では理由（pg のエラー文・SQLSTATE）が残らなかった**（Issue #969）——`cause` の連鎖を辿り、各段の `message` と `code` を連結して載せる。pg エラーの `detail` など利用者のデータが入りうる欄は載せない。
 - **`tick()` の embed ジョブで、埋め込みの失敗を受けて `embeddingStatus: "failed"` を書く処理そのものが失敗すると、元の例外（なぜ埋め込めなかったか）が失われ、outbox 行の `lastError` には二次的な失敗しか残らなかった**（Issue #962 の前半）——元の例外を `cause` に残し、`lastError` にも両方を載せる。
 - **`tick()` の embed ジョブが provider の応答を待っている間に `forget()` → `purge()` が完了すると、ジョブが purge 前の内容から作った埋め込みを purge の削除の後に書き、`"purged"` を返した記憶の埋め込みが残っていた**（Issue #1035）——埋め込みを書いた後に記憶を読み直し、purge 済みなら書いた埋め込みを消す（ADR 0124 の追記）。
+- **`@mnemora/postgres` は、`timestamptz` の値によっては `Date` として読めず、`get()` などが Invalid Date を返していた**（Issue #1039）——対象は、秒を含む時差（サーバの `TimeZone` が Asia/Tokyo なら1888年より前）・紀元前・1万年以降の日時。これらの形も読めるようにした。書き込み側のずれ（Issue #1040）と表現できる範囲の違い（Issue #1041）は、この修正の外である。
 - **`observe({kind:'memory_usage'})` が使用の記録（`recall_usages`）の後・強化の前で落ちると、同じ `externalId` で再送しても強化されなかった**（Issue #961）——`MemoryStore` に任意メソッド `recordUsageAndReinforce?` を足し（`PostgresMemoryStore` と testkit の `InMemoryMemoryStore` が実装）、在れば記録と強化を1トランザクションで撃つ。口を持たない adapter は従来の2段のまま（ADR 0009 の追記）。
 - **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、ループ前の読み（`MemoryStore.getMany`、`restoreArchived` では活動時計の読みも）が失敗すると例外をそのまま外へ投げていた**（Issue #964）——doc コメントの「例外はこのメソッドの外へは投げない」どおり、1件目を `failed`、残りを `not_attempted` にして返すようにした（まだ1件も書いていない）。
   ⚠ doc が約束していた振る舞いへ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。約束に反して例外（reject）を catch することに頼っていたコードは、例外が来なくなるぶん挙動が変わる。
@@ -484,6 +485,9 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   テーブルに専用の部分索引を足し、別枝として `UNION ALL` で拾うようにした（往復数・
   通常の検索結果は無変更）（[Issue #956](https://github.com/takecchi/mnemora/issues/956)、
   [ADR 0343](./docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。
+  既存の空間にこの索引を作る `0022_embedding_zero_norm_index.sql` は、実テーブルだけを
+  対象にする——同じスキーマに `memory_embeddings_` で始まるビューが在っても migration は
+  止まらない（[Issue #1038](https://github.com/takecchi/mnemora/issues/1038)、ADR 0343 追記 2026-09-27）。
 
 ---
 
