@@ -850,6 +850,27 @@ export class InMemoryMemoryStore implements MemoryStore {
     return memory;
   }
 
+  /**
+   * [Issue #874](https://github.com/takecchi/mnemora/issues/874): `reinforce` を
+   * `ids` の各要素について順に呼ぶだけの素直な実装。この fake はテスト用の
+   * プレースホルダであり、往復数を束ねる最適化そのものは対象としない
+   * ——契約（`reinforce` を呼んだのと同じ結果になること）だけを満たす。
+   * `packages/postgres` 側の一括版（`PostgresMemoryStore.reinforceMany`）と違い、
+   * ここでは1件ずつ呼んでも同じ結果になる（往復という概念がそもそも無い）。
+   */
+  async reinforceMany(
+    ctx: Ctx,
+    ids: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<Memory[]> {
+    const results: Memory[] = [];
+    for (const id of ids) {
+      results.push(await this.reinforce(ctx, id, at, opts));
+    }
+    return results;
+  }
+
   async recordUsage(
     ctx: Ctx,
     recallId: RecallId,

@@ -110,6 +110,23 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `omitted` は変えていない**（ふるまいは無変更、`detail` は `Record<string, unknown>` の
   任意欄なので公開の型も変えていない）（[Issue #829](https://github.com/takecchi/mnemora/issues/829)、
   [ADR 0097](./docs/decisions/0097-recall-usage-share-may-exceed-1.md) 追記 2026-09-26、PR #915）。
+- **`ObserveMemoryUsageInput`（`observe({ kind: 'memory_usage', ... })`）に他3種
+  （utterance/event/document）と同じ任意欄 `externalId?: string` を足した**——
+  `observations` 行の冪等化（テナント内一意、再送は同じ Observation を返す）が
+  `memory_usage` にも構造的に効くようになった（以前は `handleMemoryUsage` が
+  `externalId: null` を固定で渡しており、同じ使用報告を再送するたびに `observations`
+  行が増え続けていた。`recall_usages`/`reinforce` 自体は元から冪等）。省略時の挙動は
+  無変更。マイグレーションは無し——`0001_init.sql` の `uq_observations_external_id` は
+  元から kind を問わない一意制約だった（[Issue #870](https://github.com/takecchi/mnemora/issues/870) /
+  [ADR 0009](./docs/decisions/0009-usage-feedback-via-observe.md) 追記、PR #913）。
+- **`MemoryStore` に任意メソッド `reinforceMany?` を足した**——`observe({kind:
+  'memory_usage'})` の `recordUsage → reinforce` ループが使用報告1件ごとに直列に往復し
+  （N+1）、報告件数に比例して往復数が増えていた問題（1回の呼び出しで `1 + 2N` 往復）を、
+  この口があるときだけ1回の呼び出しに束ねる。`runtime.ts` の `handleMemoryUsage` は
+  `reinforceMany` が在ればそれを使い、無ければ従来どおり `reinforce` を1件ずつ呼ぶ
+  ——既存の `MemoryStore` 実装（第三者 adapter を含む）の挙動は1バイトも変えない。
+  `PostgresMemoryStore.reinforceMany` は件数によらず定数2往復（[Issue #874](https://github.com/takecchi/mnemora/issues/874) /
+  [ADR 0303](./docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節、PR #917）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

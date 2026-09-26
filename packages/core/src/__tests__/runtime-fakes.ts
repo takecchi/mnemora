@@ -839,6 +839,27 @@ export class FakeMemoryStore implements MemoryStore {
     return memory;
   }
 
+  /**
+   * [Issue #874](https://github.com/takecchi/mnemora/issues/874): `reinforce` を
+   * `ids` の各要素について順に呼ぶだけの素直な実装。`InMemoryMemoryStore.reinforceMany`
+   * （`packages/testkit`）と同じ理由——この fake はテスト用のプレースホルダであり、
+   * 往復数を束ねる最適化そのものは対象としない。`runtime.ts` の `handleMemoryUsage` が
+   * 「口が在るかどうかで分岐する」ことを検査する歯（`runtime.test.ts`）は、この実装が
+   * 実際に呼ばれたかどうかを `vi.spyOn` で観測する。
+   */
+  async reinforceMany(
+    ctx: Ctx,
+    ids: MemoryId[],
+    at: Date,
+    opts?: ReinforceOptions,
+  ): Promise<Memory[]> {
+    const results: Memory[] = [];
+    for (const id of ids) {
+      results.push(await this.reinforce(ctx, id, at, opts));
+    }
+    return results;
+  }
+
   async recordUsage(
     ctx: Ctx,
     recallId: string,
