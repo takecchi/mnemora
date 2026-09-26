@@ -422,9 +422,10 @@ export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_atte
  * では例外を投げる——この型・このメソッドは、その不揃いを解消していない。
  * 呼び出し側は `try`/`catch`（または Promise の `.catch`）でこれを扱うことになる。
  *
- * これは仕様として確定した振る舞いではなく、**判定を持ち越した記録**である
- * ——`ReextractResult` に `not_found` 相当の outcome を足すか、型付き例外に変えるかの
- * 判断はまだ行っていない（Issue #856「判定を持ち越す理由」参照）。
+ * 2026-09-26、クローン miku がこの振る舞いを現状の契約として記録すると決めた
+ * （[Issue #856](https://github.com/takecchi/mnemora/issues/856)）。採らなかった案は、
+ * `ReextractResult` に `not_found` 相当の outcome を足す案（公開の型の変更になる）と、
+ * 型付き例外に変える案（投げる例外の種類が変わる）である。
  */
 export interface ReextractResult {
   observationId: ObservationId;
