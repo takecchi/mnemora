@@ -121,6 +121,18 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 ### Fixed
 
 
+- **`runtime.tick()` が、`consolidate`/`reflect` の自動ジョブで LLM 呼び出しが失敗しても、
+  そのジョブを「処理成功」として数えていた。** `processConsolidateJob`/`processReflectJob`
+  は `consolidate()`/`reflect()` の戻り値（LLM 失敗時は `outcome: "llm_failed"` を返す——
+  例外は投げない、ADR 0089 の公開の約束）を見ずに `complete()` を呼んでいたため、LLM が
+  完全に落ちたジョブも `TickResult.processed` に数えられ、outbox 行も完了のまま残っていた。
+  戻り値を見て `llm_failed` を例外に変え、`tick()` の既存の `fail()` 経路に乗せるようにした
+  ——**LLM が失敗したとき、`TickResult` で `processed` ではなく `failed` に数えられるように
+  なり、outbox の行は完了ではなく終端の失敗で残る。監視で `failed` を数えている利用者には
+  数が増えて見える。** 終端後の自動リトライは足していない（Phase 1 の `OutboxStore` 契約
+  どおり）。`consolidate()`/`reflect()` を直接呼ぶ同期 API の契約は無変更
+  （[Issue #849](https://github.com/takecchi/mnemora/issues/849) /
+  [ADR 0157](./docs/decisions/0157-tick-drives-consolidate-and-reflect.md) 決定2 追記）。
 - **`@mnemora/core` の `decay.ts`（`defaultDecayStrategy.floorAt`/`defaultActivityDecayStrategy.floorAt`）が、
   ADR 0125/`isHalfLifeRecallsInRange` の値域 `(0, ∞)`（`Infinity` のみ拒む）の内側にある、
   有限だが巨大な `halfLifeHours`/`halfLifeRecalls` で壊れていた。** 壁時計側は `new Date` の
@@ -162,6 +174,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が
   構造的に起きなくなる。
   明示的な `runtime.reflect(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
+- **`packDigestBand`（`packages/core/src/digest-band.ts`）に `limit`/`maxChars` として `NaN` を
+  渡すと、`NaN` を含む比較が常に false になるため打ち切り条件が一度も成立せず、件数・
+  文字数の上限が黙って無制限に化けていた**（負数を渡すと逆に安全側へ倒れるのと対照的）。
+  `NaN` だけを負数と同じ安全側（既に上限に達している扱い）に倒した。`+Infinity` は
+  「上限なし」として意味が通るため今の挙動のまま（新しい例外は投げない）
+  （[Issue #803](https://github.com/takecchi/mnemora/issues/803)、PR #853）。
 
 ---
 

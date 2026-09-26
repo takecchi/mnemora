@@ -147,6 +147,91 @@ describe("packDigestBand — maxEntryChars が負数（境界値）", () => {
   });
 });
 
+describe("packDigestBand — limit/maxChars が NaN（境界値、Issue #803）", () => {
+  // `band.length >= opts.limit` / `runningChars + cost > opts.maxChars` は、比較の片方が
+  // NaN だと常に false になる——打ち切り条件が一度も成立せず、上限が実質「無制限」に
+  // 化けていた（負数を渡すと逆に安全側へ倒れるのと対照的）。NaN だけを負数と同じ
+  // 安全側（既に上限に達している扱い）に倒す。
+  const candidates = [entry("m1", "aaaaa"), entry("m2", "bbbbb"), entry("m3", "ccccc")];
+
+  it("limit が NaN なら band は空で limitedBy === 'entry_limit'", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: NaN,
+      maxChars: 10_000,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toEqual([]);
+    expect(result.limitedBy).toBe("entry_limit");
+  });
+
+  it("maxChars が NaN なら band は空で limitedBy === 'char_budget'", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: 10,
+      maxChars: NaN,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toEqual([]);
+    expect(result.limitedBy).toBe("char_budget");
+  });
+
+  it("limit と maxChars が両方 NaN なら band は空で limitedBy === 'both'", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: NaN,
+      maxChars: NaN,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toEqual([]);
+    expect(result.limitedBy).toBe("both");
+  });
+});
+
+describe("packDigestBand — limit/maxChars が Infinity（境界値、Issue #803では変えない）", () => {
+  // +Infinity は「上限なし」として意味が通るので、NaN とは違って今の挙動のまま
+  // （呼び出し側が明示的に上限を外す手段として使っている可能性があるため、狭めない）。
+  // -Infinity は負数と同じ扱い（安全側、即座に打ち切り）のまま。
+  const candidates = [entry("m1", "aaaaa"), entry("m2", "bbbbb"), entry("m3", "ccccc")];
+
+  it("limit が +Infinity なら件数側では打ち切らず全件載る", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: Infinity,
+      maxChars: 10_000,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toHaveLength(3);
+    expect(result.limitedBy).toBeUndefined();
+  });
+
+  it("maxChars が +Infinity なら文字数側では打ち切らず全件載る", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: 10,
+      maxChars: Infinity,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toHaveLength(3);
+    expect(result.limitedBy).toBeUndefined();
+  });
+
+  it("limit が -Infinity なら band は空で limitedBy === 'entry_limit'", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: -Infinity,
+      maxChars: 10_000,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toEqual([]);
+    expect(result.limitedBy).toBe("entry_limit");
+  });
+
+  it("maxChars が -Infinity なら band は空で limitedBy === 'char_budget'", () => {
+    const result = packDigestBand(candidates, 3, {
+      limit: 10,
+      maxChars: -Infinity,
+      maxEntryChars: 100,
+    });
+    expect(result.band).toEqual([]);
+    expect(result.limitedBy).toBe("char_budget");
+  });
+});
+
 describe("packDigestBand — eligible が 0", () => {
   it("候補が無ければ空の帯を返し、limitedBy は付かない", () => {
     const result = packDigestBand([], 0, { limit: 10, maxChars: 10_000, maxEntryChars: 100 });

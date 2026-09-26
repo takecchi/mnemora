@@ -3319,6 +3319,34 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * Issue #849 / ADR 0157 決定2 追記: `consolidate()`/`reflect()` は ADR 0089 の公開の
+   * 約束により、LLM 呼び出しが失敗しても例外を投げず `outcome: "llm_failed"`（`llmFailure`
+   * 付き）を正常な戻り値として返す。ADR 0157 決定2「種が見つからない場合は、投げない」節は
+   * 「LLM/store が本当に失敗したときの例外だけが伝播して `tick()` に `fail()` させる」と
+   * 書いていたが、この前提は検証されておらず、実際には `consolidate()`/`reflect()` が
+   * 例外を投げないため成り立っていなかった（`processConsolidateJob`/`processReflectJob`
+   * が戻り値を捨てていたため、`tick()` は LLM が落ちても `complete()` して `processed`
+   * に数えていた）。
+   *
+   * `processConsolidateJob`/`processReflectJob` だけがここで結果を見て `llm_failed` を
+   * 例外に変え、`tick()` の既存の catch → `outboxStore.fail()` 経路（`OutboxStore` 契約の
+   * 「Phase 1 では失敗したジョブの自動リトライを行わない」どおり、終端に落ちるだけ）に
+   * 乗せる。`consolidate()`/`reflect()` を直接呼ぶ同期 API の契約（ADR 0089: LLM 失敗は
+   * 例外にしない）はここでは一切変えていない——変えているのは `tick()` 経由の自動ジョブの
+   * 扱いだけである。
+   */
+  function throwIfLlmFailed(
+    kind: "consolidate" | "reflect",
+    result: { outcome: string; llmFailure: ExtractionFailure | null },
+  ): void {
+    if (result.outcome !== "llm_failed") {
+      return;
+    }
+    const detail = result.llmFailure?.message ?? "unknown error";
+    throw new Error(`runtime.tick: ${kind} job failed because the llm call failed: ${detail}`);
+  }
+
+  /**
    * `tick` の `consolidate` ジョブハンドラ（Issue #204 / ADR 0157）。
    *
    * **`seedMemoryId` が指す Memory が見つからない場合は投げない。**
@@ -3326,8 +3354,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （`not_found` → `nothing_to_consolidate`/`no_eligible_sources` 等、ADR 0152 決定6）
    * として扱うため、ここで二重に判定しない——`processEmbedJob` が `memory not found` を
    * 例外にしているのとは事情が違う（embed には「対象が無かった」を表す正規の結末が無い）。
-   * `consolidate()` が投げるのは LLM/store が本当に失敗したときだけであり、その例外は
-   * そのまま伝播させて `tick()` に `fail()` させる。
+   *
+   * 🔴 **LLM 呼び出しが本当に失敗したときは `throwIfLlmFailed` が例外に変える
+   * （Issue #849 / ADR 0157 決定2 追記）。** `consolidate()` は ADR 0089 の公開の約束により
+   * `outcome: "llm_failed"` を正常な戻り値として返す——例外は投げない。ADR 0157 決定2は
+   * 以前「LLM/store が本当に失敗したときの例外だけが伝播して `tick()` に `fail()` させる」
+   * と書いていたが、この前提は検証されておらず実際には成り立っていなかった。ここで結果を
+   * 見て `llm_failed` を例外に変え、`tick()` の既存の catch → `fail()` 経路に乗せる。
    *
    * **種の `subjectId` を `ctx.subjectId` に置いてから `consolidate()` を呼ぶ**
    * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
@@ -3362,7 +3395,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       seed !== null && typeof seed.subjectId === "string"
         ? { ...ctx, subjectId: seed.subjectId }
         : ctx;
-    await consolidate(scopedCtx, { target: { seedMemoryId } });
+    const result = await consolidate(scopedCtx, { target: { seedMemoryId } });
+    throwIfLlmFailed("consolidate", result);
   }
 
   /**
@@ -3379,6 +3413,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * `reflect` にもそのまま当てはまる。種が見つからない、または種の `subjectId` が
    * `null` のときは、今日どおり `tick()` に渡された `ctx` のまま `reflect()` を呼ぶ
    * ——ここで新しい判定は発明しない。
+   *
+   * 🔴 **LLM 呼び出しが本当に失敗したときは `throwIfLlmFailed` が例外に変える**
+   * （Issue #849 / ADR 0157 決定2 追記。`processConsolidateJob` と同じ理由——上の
+   * `throwIfLlmFailed` の doc コメント参照）。
    */
   async function processReflectJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
     const seedMemoryId = readSeedMemoryIdFromPayload(job);
@@ -3387,7 +3425,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       seed !== null && typeof seed.subjectId === "string"
         ? { ...ctx, subjectId: seed.subjectId }
         : ctx;
-    await reflect(scopedCtx, { target: { seedMemoryId } });
+    const result = await reflect(scopedCtx, { target: { seedMemoryId } });
+    throwIfLlmFailed("reflect", result);
   }
 
   /**

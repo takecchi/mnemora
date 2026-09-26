@@ -1103,3 +1103,87 @@ describe("buildReflectedMemory（純関数） — attributes は積集合（Issu
     expect(memory.attributes).toEqual({});
   });
 });
+
+/**
+ * Issue #849 / ADR 0157 決定2 追記: `reflect()` は LLM 呼び出しが失敗しても例外を投げず、
+ * `outcome: "llm_failed"`（`llmFailure` 付き）を正常な戻り値として返す（ADR 0089 の公開の
+ * 約束を `reflect()` にも敷いたもの——上の「runtime.reflect — LLM 障害」describe参照）。
+ * `processReflectJob`（`tick()` 経由）は戻り値を見ずに `await reflect(...)` するだけだった
+ * ため、LLM が本当に落ちても `tick()` はそのジョブを complete() し `processed` を増やして
+ * いた——`consolidate()` 側と対称の食い違いである（`processReflectJob` の doc コメントが
+ * 「`processConsolidateJob` と対称」と明記しているとおり）。
+ *
+ * ⚠ `runtime.tick — consolidate/reflect ジョブを処理する`（`runtime.test.ts` 1296〜1341行）の
+ * 「payload が正しければ processed」の歯とは違う——あちらは `nothing_to_reflect`
+ * （近傍が無く LLM を呼ばずに決まる正規の結末）を測っており、ここは**LLM を実際に呼んで
+ * 実際に落ちた**ケースを測る。`reflect()` は `consolidate()` と違い eligible 1件でも
+ * 打ち切らない（「1件からの一般化も意味を持ちうる」、上の「target の { seedMemoryId } の形」
+ * describe 参照）ため、種1件だけで LLM 呼び出しの直前まで到達する。
+ *
+ * `tick()` を経由するため、`consolidate.test.ts` の `buildRuntimeWithRealClock` と同じ理由
+ * （`FakeOutboxStore.enqueueJob` が `availableAt` を実時刻で刻むため、固定 clock だと
+ * `availableAt <= now` が成り立たず claim されない）で実時計を使う。
+ */
+describe("runtime.tick — reflect ジョブで LLM が実際に失敗すると、tick は failed に数える（Issue #849 / ADR 0157 決定2 追記）", () => {
+  function buildRuntimeWithRealClock(llmProvider: LLMProvider) {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider,
+      embeddingProvider: stores.embeddingProvider,
+      hashContent: (content: string) => `sha256(${content})`,
+    });
+    return { runtime, stores };
+  }
+
+  function throwingLlmWithCallCount(message = "simulated LLM outage") {
+    const state = { calls: 0 };
+    const provider: LLMProvider = {
+      complete: async () => {
+        throw new Error("not used");
+      },
+      completeStructured: async () => {
+        state.calls += 1;
+        throw new Error(message);
+      },
+    };
+    return { provider, state };
+  }
+
+  it("LLM が例外を投げると、tick は processed:0/failed:1 を返し、outbox 行は終端の失敗のまま残り、種は active のまま", async () => {
+    const { provider, state } = throwingLlmWithCallCount("simulated LLM outage");
+    const { runtime, stores } = buildRuntimeWithRealClock(provider);
+
+    // 種1件のみ——`reflect()` は eligible 1件でも打ち切らないため、これだけで LLM
+    // 呼び出しの直前まで到達する（`consolidate()` と違い neighbor は要らない）。
+    const { memory: seed, jobs } = await stores.memoryStore.createMemoryWithOutbox(
+      ctx,
+      newMemory({ content: "seed content", digest: "seed", embeddingStatus: "pending" }),
+      ["reflect"],
+    );
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toEqual({ memoryId: seed.id });
+
+    const tickResult = await runtime.tick(ctx, { kinds: ["reflect"], leaseMs: 60_000 });
+
+    expect(tickResult).toEqual({ processed: 0, failed: 1, unsupported: [], leaseConflicts: [] });
+    // LLM が実際に呼ばれたこと自体を固定する——nothing_to_reflect に化けて LLM を
+    // 呼ばないまま緑になる退行を防ぐ。
+    expect(state.calls).toBe(1);
+
+    // 種は active のまま——`reflect()` は決定4「既存の行の status を1つも動かさない」
+    // ため、これ自体は LLM 失敗の有無と無関係だが、書き込みが1件も起きていないことの
+    // 傍証として確かめる。
+    const seedAfter = await stores.memoryStore.get(ctx, seed.id);
+    expect(seedAfter?.status).toBe("active");
+
+    const row = stores.outboxStore.listJobs(ctx).find((job) => job.payload.memoryId === seed.id)!;
+    expect(row.failedAt).not.toBeNull();
+    expect(row.completedAt).toBeNull();
+    expect(row.lastError).toContain("simulated LLM outage");
+  });
+});

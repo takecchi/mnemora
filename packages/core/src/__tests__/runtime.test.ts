@@ -79,6 +79,39 @@ function throwingLlm(): LLMProvider {
 }
 
 /**
+ * `llmReturning` と同じ抽出結果を返しつつ、`reflect()` の `ReflectionLLMResultSchema` で
+ * 呼ばれたときは「一般化するものは無い」（`outcome: "nothing"`）を返す（Issue #849 追記）。
+ *
+ * ⚠ **この関数が要る理由**: `reflect()` は `consolidate()` と違い、eligible が**1件でも**
+ * LLM を呼ぶ（`no_eligible_basis` で打ち切るのは0件のときだけ——`reflect.test.ts` の
+ * 「eligible が0件なら、LLM を呼ばずに打ち切る」コメント参照）。この節の歯は種を1件だけ
+ * 用意する（近傍を作らない）ため、`reflect` ジョブでは種1件だけで実際に LLM が呼ばれる。
+ * 素の `llmReturning` は `req.schema.parse({ memories })` を無条件で呼ぶため、
+ * `ReflectionLLMResultSchema` に対しては parse が失敗して例外になり、`reflect()` の
+ * catch 節がそれを `outcome: "llm_failed"` に変えてしまう——「payload が正しい job は
+ * 処理される」という、この節の歯が測りたいこととは無関係な理由で `llm_failed`（Issue #849
+ * の修正後は `tick()` の `failed` 側）になってしまう。`req.schema.safeParse` で先に
+ * extraction 形を試し、失敗したら reflect の「辞退」形を返すことで、この歯は
+ * 「job が正しく processed になる」ことだけを測る形に保つ。
+ */
+function llmReturningOrDecliningReflection(
+  memories: Parameters<typeof llmReturning>[0],
+): LLMProvider {
+  return {
+    complete: async () => {
+      throw new Error("not used");
+    },
+    completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
+      const asExtraction = req.schema.safeParse({ memories });
+      if (asExtraction.success) {
+        return asExtraction.data;
+      }
+      return req.schema.parse({ outcome: "nothing" }) as T;
+    },
+  };
+}
+
+/**
  * Issue #371: `completeStructured` 呼び出しの**回数**と**順序**を検査したいテスト用の
  * fake。`responses[0]` が1回目の呼び出し（常に `extractCandidates` 由来）、`responses[1]`
  * が2回目（opt-in が有効なら `deriveClaimKeys` 由来）に対応する——`runExtraction` が
@@ -1296,7 +1329,12 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
   it.each(["consolidate", "reflect"] as const)(
     "⭐ payload `{ memoryId }` が正しければ、'%s' ジョブは unsupported にも failed にもならず処理される",
     async (kind) => {
-      const { runtime, stores } = buildRuntime(llmReturning([]));
+      // `llmReturningOrDecliningReflection`（`llmReturning([])` ではない）を使う理由:
+      // `reflect` は種1件だけでも LLM を呼ぶ（下のコメント参照）——素の `llmReturning` だと
+      // `ReflectionLLMResultSchema` の parse に失敗して `llm_failed`（Issue #849 修正後は
+      // `tick()` の `failed`）になり、この歯が測りたい「payload が正しい job は処理される」
+      // こととは無関係な理由で赤くなる。
+      const { runtime, stores } = buildRuntime(llmReturningOrDecliningReflection([]));
       const { jobs } = await stores.memoryStore.createMemoryWithOutbox(
         ctx,
         {
@@ -1328,8 +1366,10 @@ describe("runtime.tick — consolidate/reflect ジョブを処理する（Issue 
 
       const tickResult = await runtime.tick(ctx, { kinds: [kind], leaseMs: TEST_LEASE_MS });
 
-      // `seedMemoryId` の近傍が無い（テナントにこの1件しかない）ため、`consolidate()`/
-      // `reflect()` は内部的には `nothing_to_consolidate`/`no_eligible_basis` 等で終わるが、
+      // `seedMemoryId` の近傍が無い（テナントにこの1件しかない）ため、`consolidate()` は
+      // eligible が1件（種のみ）で `nothing_to_consolidate`（LLM を呼ばずに打ち切る）に終わる。
+      // `reflect()` は eligible 1件でも LLM を呼ぶが、`llmReturningOrDecliningReflection` が
+      // 「一般化するものは無い」で応じるため `nothing_to_reflect` に終わる——どちらも
       // **`tick()` の視点では「処理を試みて成功した」**——ジョブは完了として扱われる。
       expect(tickResult).toEqual({
         processed: 1,
@@ -1366,8 +1406,14 @@ describe("runtime.observe(extract) が consolidate/reflect の種を積むのは
   });
 
   it("⭐ `autoQueueConsolidateReflectOnExtract: true` にすると、同じ memoryId を種にした consolidate/reflect のジョブも積まれ、tick が処理する", async () => {
+    // `llmReturningOrDecliningReflection` を使う理由は上の it.each の歯と同じ——この
+    // テナントには Memory が1件しかできないため `reflect` ジョブは種1件だけで LLM を呼び、
+    // 素の `llmReturning` だと `ReflectionLLMResultSchema` の parse に失敗して
+    // `llm_failed`（Issue #849 修正後は `tick()` の `failed`）になってしまう。
     const { runtime, stores } = buildRuntime(
-      llmReturning([{ content: "本文", digest: "要旨", provenanceKind: "stated" }]),
+      llmReturningOrDecliningReflection([
+        { content: "本文", digest: "要旨", provenanceKind: "stated" },
+      ]),
       { config: { autoQueueConsolidateReflectOnExtract: true } },
     );
 
