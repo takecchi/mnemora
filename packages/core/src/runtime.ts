@@ -128,20 +128,23 @@ export interface RuntimeConfig {
    * `consolidate(ctx, { target: { seedMemoryId: memoryId } })` /
    * `reflect(ctx, { target: { seedMemoryId: memoryId } })` として処理する。
    *
-   * 🔴 **`consolidate` 側だけ、渡された `ctx` そのままではない**
-   * （[Issue #579](https://github.com/takecchi/mnemora/issues/579) /
-   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)）。
-   * `processConsolidateJob` は種の Memory を読み、その `subjectId` が `null` でなければ
-   * `ctx.subjectId` をそれで置き換えてから `consolidate()` を呼ぶ——`tick()` はジョブを
-   * subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の
-   * `subjectId` が食い違うと、近傍探索（`recall()`）が種と別の subject から候補を
-   * 集めてしまい、統合後の `Memory.subjectId` が `null` に畳まれる（ADR 0310 実測）。
-   * 種の `subjectId` が `null`、または種そのものが見つからない場合は、今日どおり
-   * `tick()` に渡された `ctx` のまま呼ぶ。**`reflect` 側はこの変更の対象外**——
-   * `processReflectJob` は渡された `ctx` のまま `reflect()` を呼ぶ（ADR 0317「確かめて
-   * いないこと」）。**明示的に `runtime.consolidate(ctx, { target: { seedMemoryId } })`
-   * を呼ぶ側の挙動はこの設定と無関係に変わらない**——呼び手は自分の `ctx.subjectId` で
-   * 完全に制御できる（ADR 0310 決定2）。
+   * 🔴 **`consolidate`・`reflect` のどちらも、渡された `ctx` そのままではない**
+   * （`consolidate` は [Issue #579](https://github.com/takecchi/mnemora/issues/579) /
+   * [ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
+   * 決定1、`reflect` は [Issue #820](https://github.com/takecchi/mnemora/issues/820) /
+   * ADR 0317 決定3「確かめていないこと」を埋めた変更）。`processConsolidateJob` /
+   * `processReflectJob` はどちらも種の Memory を読み、その `subjectId` が `null` でなければ
+   * `ctx.subjectId` をそれで置き換えてから `consolidate()` / `reflect()` を呼ぶ——`tick()`
+   * はジョブを subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と
+   * 種の `subjectId` が食い違うと、近傍探索（`recall()`）が種と別の subject から候補を
+   * 集めてしまい、統合後・反映後の `Memory.subjectId` が `null` に畳まれる（`consolidate`
+   * は ADR 0310 実測、`reflect` は Issue #820 実測）。種の `subjectId` が `null`、または
+   * 種そのものが見つからない場合は、今日どおり `tick()` に渡された `ctx` のまま呼ぶ——
+   * どちらも新しい判定は発明していない。**明示的に
+   * `runtime.consolidate(ctx, { target: { seedMemoryId } })` /
+   * `runtime.reflect(ctx, { target: { seedMemoryId } })` を呼ぶ側の挙動はこの設定と
+   * 無関係に変わらない**——呼び手は自分の `ctx.subjectId` で完全に制御できる
+   * （ADR 0310 決定2）。
    */
   autoQueueConsolidateReflectOnExtract?: boolean;
 }
@@ -3399,12 +3402,30 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   /**
    * `tick` の `reflect` ジョブハンドラ（Issue #204 / ADR 0157）。
    * `processConsolidateJob` と対称——理由は同じ（`reflect()` も種が見つからない場合を
-   * `not_found` 経由の正規の結末として扱う、ADR 0154 決定5。LLM 呼び出しが本当に失敗した
-   * ときは `throwIfLlmFailed` が例外に変える、Issue #849 / ADR 0157 決定2 追記）。
+   * `not_found` 経由の正規の結末として扱う、ADR 0154 決定5）。
+   *
+   * **種の `subjectId` を `ctx.subjectId` に置いてから `reflect()` を呼ぶ**
+   * （[Issue #820](https://github.com/takecchi/mnemora/issues/820) / ADR 0317 決定3
+   * 「確かめていないこと」を埋めた変更、[ADR 0317](../../../docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
+   * 案 S を `processConsolidateJob` と同じ形でそのまま写している）。ADR 0310/0317 が
+   * `consolidate` について実測したのと同じ構造的事情——`tick()` はジョブを subject で
+   * 絞って claim できない（`ClaimOutboxJobsOptions` に `subjectId` が無い）——が
+   * `reflect` にもそのまま当てはまる。種が見つからない、または種の `subjectId` が
+   * `null` のときは、今日どおり `tick()` に渡された `ctx` のまま `reflect()` を呼ぶ
+   * ——ここで新しい判定は発明しない。
+   *
+   * 🔴 **LLM 呼び出しが本当に失敗したときは `throwIfLlmFailed` が例外に変える**
+   * （Issue #849 / ADR 0157 決定2 追記。`processConsolidateJob` と同じ理由——上の
+   * `throwIfLlmFailed` の doc コメント参照）。
    */
   async function processReflectJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
     const seedMemoryId = readSeedMemoryIdFromPayload(job);
-    const result = await reflect(ctx, { target: { seedMemoryId } });
+    const seed = await deps.memoryStore.get(ctx, seedMemoryId);
+    const scopedCtx: Ctx =
+      seed !== null && typeof seed.subjectId === "string"
+        ? { ...ctx, subjectId: seed.subjectId }
+        : ctx;
+    const result = await reflect(scopedCtx, { target: { seedMemoryId } });
     throwIfLlmFailed("reflect", result);
   }
 

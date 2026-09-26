@@ -290,3 +290,131 @@ Issue #579 の用途）、minAffinity=0.8（既定）** を抜いた表がその
   引き続き未実測——本 ADR の範囲外）。
 - **本 ADR の変更が、`autoQueueConsolidateReflectOnExtract: true` を実際に有効にしている
   利用者が居るかどうか、居るとして何人か**——ADR 0310 §6と同じく確かめていない。
+
+## 追記（2026-09-26、Issue #820、PR #851）: 案 S を `processReflectJob` にも適用した
+
+> **この追記は、クローン（miku）の委譲で動くセッションが書いた。オーナー本人ではない**
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> 判断の出自: [Issue #820](https://github.com/takecchi/mnemora/issues/820) 自身が
+> 「クローン miku の委譲先が書いた」と明記した上で、直し方の候補として案1（S をそのまま
+> `processReflectJob` に写す）・案2（フラグを `consolidate`/`reflect` で分離）・案3（何もしない）
+> の3択を挙げ、「オーナー判断を経ずに実装だけを対称化してよいかは、委譲先の裁量を超えると
+> 判断した」として、どれを採るかを次の委譲へ渡していた。**本追記が記録するのは、その次の
+> 委譲（本 Issue を割り当てられた作業）が案1を選んで実装した、という事実である**——
+> 本 ADR の元の決定3・「これが覆るとしたら」が挙げていた条件
+> （「`reflect()` 側で同じ形の帰属の畳み込みが問題として実名で報告されたとき」）が
+> Issue #820 によって実際に満たされたことを受けている。
+
+**⚠ 各主張の出所を分ける**（本 ADR 冒頭・ADR 0290/0302/0310 の体裁を踏む）。
+
+- **【実測】** — この追記の作業で、`packages/core` の単体テスト（`FakeMemoryStore`/
+  `FakeVectorStore`）と自分専用の Postgres（`initdb`、ポート 55433、AGENTS.md の手順）に
+  対して実際に確かめた。
+- **【現物】** — この repo のコード・文書（Issue #820 本文を含む）を読んで確かめた。
+- **【算出】** — 実測値や式から導いただけ。走らせていない。
+
+### 決定
+
+**Issue #820 の案1（案 S を `processReflectJob` にそのまま写す）を採る。**
+`packages/core/src/runtime.ts` の `processReflectJob` を、`processConsolidateJob`
+（本 ADR 決定1）と同じ形にした:
+
+```ts
+async function processReflectJob(ctx: Ctx, job: OutboxJobRecord): Promise<void> {
+  const seedMemoryId = readSeedMemoryIdFromPayload(job);
+  const seed = await deps.memoryStore.get(ctx, seedMemoryId);
+  const scopedCtx: Ctx =
+    seed !== null && typeof seed.subjectId === "string"
+      ? { ...ctx, subjectId: seed.subjectId }
+      : ctx;
+  await reflect(scopedCtx, { target: { seedMemoryId } });
+}
+```
+
+- **公開型は1つも変えていない。**`RuntimeConfig`・`ReflectOptions`・`ReflectTarget`・
+  `ReflectionResult` のどれも変更していない。【実測】`node scripts/check-public-api-surface.mjs`
+  が緑（`packages/core` を含む6パッケージすべて「差分なし」）。
+- **新しい throw を足していない。**種が見つからない・`subjectId` が `null` のときは、
+  今日どおり `ctx` のまま `reflect()` を呼ぶ——決定1が `consolidate` について選んだのと
+  同じく、新しい判定は発明していない。
+- **既定値は変えていない。**`autoQueueConsolidateReflectOnExtract` の既定は `false` のまま。
+  このフラグを有効にしていない利用者には何も起きない（フラグが `true` のときにだけ
+  積まれる `reflect` ジョブの経路であり、`runtime.reflect(ctx, { target: { seedMemoryId } })`
+  を直接呼ぶ経路は無変更）。
+- **「なぜ S か」・「ADR 0152 却下案4 との関係」節の分析は、そのまま `reflect` にも当てはまる**
+  ——本追記はこれらの節を書き直さない。S が変えるのは `recall(ctx, { text: seed.digest })`
+  に渡す scope であり、`reflect` 側の「似ている」の定義（`computeAffinity`、
+  `strategies/consolidate.ts` を共用）にも手を入れていない。
+
+### 歯（`packages/core`、修正前に実際に赤くなることを確認した）
+
+`packages/core/src/__tests__/reflect.test.ts` に describe
+「`runtime.tick — reflect ジョブは種の subjectId に近傍探索を絞る（Issue #820 / ADR 0317）」」を、
+`consolidate.test.ts` の同名 describe（本 ADR「歯」節）をそのまま `reflect` に写す形で3本足した
+（`tick(ctx, { kinds: ["reflect"], ... })`、`reflect` は既存行の `status` を動かさないため
+`eventStore` の `created` イベント1件から基底集合と反映結果を拾う）。
+
+**修正前（`processReflectJob` を `await reflect(ctx, { target: { seedMemoryId } })` に一時的に
+戻し、`cp` で退避・復元——`git checkout` は使っていない）に実際に赤くなることを確認した**
+（`pnpm --filter @mnemora/core exec vitest run src/__tests__/reflect.test.ts -t "Issue #820"`）:
+
+```
+ ❯ src/__tests__/reflect.test.ts (36 tests | 2 failed | 33 skipped)
+   ❯ runtime.tick — reflect ジョブは種の subjectId に近傍探索を絞る（Issue #820 / ADR 0317） (3)
+     × ctx.subjectId 無しで tick を呼んでも、種の subject 以外の高affinity近傍は混ざらない（混在 0%）
+     × tick に渡した ctx.subjectId が種と別でも、種の subject を優先する（種と同じ subject に絞る）
+
+AssertionError: expected null to be 'subject-a' // Object.is equality
+```
+
+（3番目「種の `subjectId` が `null` なら、今日どおり `ctx` のまま呼ぶ」は修正前も修正後も
+緑——`consolidate` 側の歯と同じく、変更していない分岐を固定する歯であり、赤くならないことが
+正しい。）
+
+修正を戻すと、3本とも緑に戻ることを確認した
+（`pnpm --filter @mnemora/core exec vitest run src/__tests__/reflect.test.ts` 36件すべて緑、
+`consolidate.test.ts` 41件・`runtime.test.ts` 128件も無関係に緑のまま）。
+
+### 歯（本物の Postgres + pgvector）
+
+本 ADR の元の「歯」節が `consolidate` について置いた
+`examples/chat/src/__tests__/subject-crossing-auto-consolidate.postgres.test.ts` と同じ形で、
+`examples/chat/src/__tests__/subject-crossing-auto-reflect.postgres.test.ts` を1本足した
+（`MNEMORA_EMBEDDING=deterministic`、`initdb` で自分専用インスタンスを起動、ポート 55433・
+既定の 5432 は使っていない）。
+
+**修正を一時的に戻すと、同じ形で赤くなることを確認した**:
+
+```
+ ❯ src/__tests__/subject-crossing-auto-reflect.postgres.test.ts (1 test | 1 failed)
+     × ctx.subjectId 無しで tick を呼んでも、別 subject の高affinity近傍は混ざらない（混在 0%）
+
+AssertionError: expected null to be 'subject-a' // Object.is equality
+```
+
+修正を戻すと緑に戻ることを確認した
+（`pnpm --filter @mnemora/example-chat exec vitest run src/__tests__/subject-crossing-auto-reflect.postgres.test.ts`
+1件緑、既存の `subject-crossing-auto-consolidate.postgres.test.ts` 1件も無関係に緑のまま）。
+使い終わった Postgres インスタンスは `pg_ctl -D <PGDATA> stop` で止めた。
+
+### 確かめていないこと（この追記の範囲で新たに分かったこと・埋まっていないこと）
+
+- **Issue #820 が最初に挙げていた「確かめていないこと」のうち、`dryRun` を使った
+  ADR 0310 と同じ格子（S・N・pole・minAffinity、`reflect` 自身の既定 minAffinity は
+  consolidate と別の 0.4）の再測定はこの追記でも行っていない。**上の歯は最小の
+  1〜数ケースの実測であり、混在率が `consolidate` の修正前と同じ形（shared 極でほぼ100%）
+  になるかどうかは、Issue #820 が実測した1ケースとこの追記が足した歯の範囲でのみ確認できた
+  ——大規模格子での確認ではない。
+- **`reflect()` の `dryRun` を使って大規模格子を実際に走らせた実測はしていない**
+  （本 ADR 元の「引き受けた負債」3が `consolidate` について書いていたのと同じ形の限界。
+  `reflect` については「読み替えの表」すら作っていない——今回は最小の歯のみ）。
+- **`examples/chat` のベンチ・カセット（`compare` 等）への影響は検算していない。**
+  Issue #820 の「確かめていないこと」3番目がそのまま残る——
+  `autoQueueConsolidateReflectOnExtract: true` を使うベンチ・カセットが無いか、
+  `grep` 等で網羅的に洗ってはいない。
+- **本物の Postgres に対する歯は、S=2 相当の3件のみの小規模ケースである**
+  （本 ADR 元の「歯」節が `consolidate` について確認したのと同じ規模——大規模格子の
+  DB 実測ではない）。
+- **`autoQueueConsolidateReflectOnExtract: true` を実際に有効にしている利用者が
+  居るかどうかは、この追記でも確かめていない**（本 ADR 元の「確かめていないこと」
+  最後の項目、`reflect` 側でも同じ）。
