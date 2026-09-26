@@ -117,7 +117,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ように直した（修正前は DB の既定の照合順序に従っていた）。`FakeMemoryStore`/
   `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
   （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
-  [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #TBD）。
+  [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #906）。
 
 ### Fixed
 
