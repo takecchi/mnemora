@@ -203,6 +203,17 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   0/4→4/4 に改善したが、誤検出も1/14→3〜4/14 に増える副作用が実測された
   （[Issue #691](https://github.com/takecchi/mnemora/issues/691) /
   [ADR 0329](./docs/decisions/0329-claim-key-known-predicates-from-store.md)、PR #750）。
+- **`ClaimKeyOptions` に任意欄 `knownSubjects?: string[]` を足した**——`knownPredicates` と
+  同型の語彙ヒントを `subject` 側にも用意し、claim key の subject 誤帰属（real-fixture 実測で
+  誤検出30%のほぼ全量の原因、ADR 0324 負債6）を減らす。実測（gpt-4o-mini、6話題×3回）:
+  off 1,1,2/6 → 正解の第三者名を渡すと 0,0,0/6。省略・空配列＝渡していないと同じで、
+  `subjectCandidates`（Issue #608）への暗黙の転用は行わない——`knownSubjects` を省いた
+  呼び出しのプロンプトは1バイトも変わらない
+  （[Issue #372](https://github.com/takecchi/mnemora/issues/372) 負債6 /
+  [ADR 0334](./docs/decisions/0334-claim-key-known-subjects-hint.md)、PR #792）。
+  ⭕ `knownPredicatesFromStore` に対応する「store から動的に集める」版は、汎用語彙が
+  無関係な話題へ誤って使い回される汚染が実測されたため意図的に実装していない
+  （ADR 0334「採らなかった案」）。
 - **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
   同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
   `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
