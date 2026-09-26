@@ -681,4 +681,93 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     const pgNotComparable = pgResult.omitted.find((o) => o.kind === "score_not_comparable");
     expect(pgNotComparable).toEqual(fakeNotComparable);
   });
+
+  // Issue #867 / 案B: `space.dimensions`（ここでは3）と長さが違うクエリベクトルは、
+  // 空配列（#857、上）と同じ形で「比較不能」として扱う——新しい throw は足さない。
+  //
+  // 【実測 Issue #867、pgvector 0.8.2 / PostgreSQL 17.9】直す前は、保存 `[1,0,0]` に対して
+  // `[1,2]`（短い）・`[1,2,3,4]`（長い）のどちらも pgvector の「different vector
+  // dimensions」で未捕捉の `DrizzleQueryError` になり `runtime.recall()` 自体が reject
+  // されていた。Fake は足りない側を `0` で zero-pad して計算を続け、意味の無い点数を
+  // 普通のヒットとして返していた（`omitted` にも何も残らない）——adapter 間で挙動が
+  // 割れていた。直した後は、どちらの adapter でも `memories: []` ・
+  // `omitted` に `score_not_comparable` が候補の件数ぶん出る。
+  it.each([
+    ["短い", [1, 2]],
+    ["長い", [1, 2, 3, 4]],
+  ] as const)(
+    "Issue #867: 次元がずれたクエリ（%s、%j）は Postgres でも Fake と同じ score_not_comparable になる（reject しない）",
+    async (_label, query) => {
+      const ctx: Ctx = { tenantId: `tenant-867-${randomUUID()}` };
+      const digest = "Issue #867 の再現データ";
+      const contentHash = `issue-867-${randomUUID()}`;
+
+      const {
+        runtime: pgRuntime,
+        memoryStore: pgMemoryStore,
+        vectorStore: pgVectorStore,
+      } = await buildTestRuntime();
+      await createEmbeddedMemory(pgMemoryStore, pgVectorStore, ctx, [1, 0, 0], {
+        digest,
+        contentHash,
+      });
+
+      const fakeMemoryStore = new InMemoryMemoryStore();
+      const fakeVectorStore = new InMemoryVectorStore(fakeMemoryStore);
+      const fakeMemory = await fakeMemoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          embeddingStatus: "ready",
+          digest,
+          contentHash,
+        }),
+      );
+      await fakeVectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, fakeMemory.id, [1, 0, 0]);
+      const fakeRuntime = createRuntime({
+        memoryStore: fakeMemoryStore,
+        outboxStore: {
+          claimBatch: async () => [],
+          complete: async () => {},
+          fail: async () => {},
+        },
+        vectorStore: fakeVectorStore,
+        eventStore: {
+          append: async (_ctx, e) => ({ id: "evt", ...e, at: e.at ?? new Date() }),
+          get: async () => null,
+          list: async () => [],
+        },
+        tenantSettingsStore: {
+          getDefaultHalfLifeHours: async () => 720,
+          getEventRetention: async () => {
+            throw new Error("この it の Fake ダミーは getEventRetention を呼ばないはず");
+          },
+          setEventRetention: async () => {
+            throw new Error("この it の Fake ダミーは setEventRetention を呼ばないはず");
+          },
+        },
+        llmProvider: throwingLlm,
+        embeddingProvider: makeEmbeddingProvider(),
+        hashContent: (content: string) => `sha256(${content})`,
+        clock: { now: () => new Date("2026-01-01T00:00:00.000Z") },
+      });
+
+      // 前提: Fake は reject せず、score_not_comparable が候補1件ぶん出る。
+      const fakeResult = await fakeRuntime.recall(ctx, { vector: [...query] });
+      expect(fakeResult.memories).toEqual([]);
+      const fakeNotComparable = fakeResult.omitted.find((o) => o.kind === "score_not_comparable");
+      expect(fakeNotComparable).toEqual({
+        kind: "score_not_comparable",
+        count: 1,
+        countKind: "exact",
+      });
+
+      // 本題: Postgres も reject せず、Fake と同じ件数の score_not_comparable になる。
+      // ⚠ 修正前はここで `runtime.recall()` 自体が DrizzleQueryError で reject していた。
+      const pgResult = await pgRuntime.recall(ctx, { vector: [...query] });
+      expect(pgResult.memories).toEqual([]);
+      const pgNotComparable = pgResult.omitted.find((o) => o.kind === "score_not_comparable");
+      expect(pgNotComparable).toEqual(fakeNotComparable);
+    },
+  );
 });

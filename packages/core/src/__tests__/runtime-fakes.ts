@@ -1623,8 +1623,20 @@ export class FakeOutboxStore implements OutboxStore {
  * cosine 距離（pgvector の `<=>` 演算子と同じ定義: `1 - cosine_similarity`）。
  * `packages/postgres` の `PostgresVectorStore.search` が実際に使う演算子と同じ式にする
  * ——recall のテストが「本物の pgvector とスコアの意味が違う」という食い違いを生まないため。
+ *
+ * **Issue #867 / 案B: 長さが違う2本は比較不能として `NaN` を返す。**
+ * `packages/testkit/src/__fixtures__/in-memory-vector-store.ts` の `cosineDistance` に
+ * 全く同じ形で足した番人と同じもの（このファイルが `testkit` を import できない理由は
+ * このファイル冒頭のコメント参照）。以前は `a.length` までしか回らず、`a` が `b` より
+ * 短いと `b` の残りを無視し、`a` が `b` より長いと `b[i] ?? 0` で 0 埋めして計算を続けて
+ * いた——ノルムが0にならないため ADR 0040 の `NaN` 経路に乗らず、意味の無い実数の
+ * 類似度を普通のヒットとして返していた。
  */
 function cosineDistance(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    // 上の doc コメント（Issue #867 / 案B）参照——長さが違う時点で比較不能。
+    return NaN;
+  }
   let dot = 0;
   let normA = 0;
   let normB = 0;
