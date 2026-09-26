@@ -2263,7 +2263,6 @@ export declare class PostgresVectorStore implements VectorStore {
     private readonly db;
     constructor(db: Db);
     upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
-    private buildFilterConditions;
     search(ctx: Ctx, space: EmbeddingSpaceId, query: number[], opts: {
         limit: number;
         filter: VectorFilter;
