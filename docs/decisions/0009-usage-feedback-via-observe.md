@@ -69,3 +69,47 @@
     実装・運用を経ないと分からない。
   - zod のユニオン型の型推論パフォーマンス（種別数が多くなったときの TypeScript のコンパイル時間
     への影響）は検証していない。
+
+## 追記（2026-09-26、[Issue #871](https://github.com/takecchi/mnemora/issues/871)）: 使用報告による強化は `memory_events` に書かない——文書を実装に合わせた
+
+⚠ この追記はクローン miku の判断による（オーナー本人の決定ではない。
+[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+上の本文（決定・理由・結果）は書き換えていない。
+
+**なぜこの ADR に書くか**: `docs/memory-model.md` §9 の記録項目の段落と §11 行4 は、
+使用報告による強化が `memory_events` に `kind='updated'`・`meta.reason='reinforced'` を積むと書いていた。
+この約束は設計フェーズの PR #1 で `docs/memory-model.md` に直接書かれたもので、
+`memory_events` の記録項目を決めた ADR は無かった（ADR 0001〜0009 のどれも
+`memory_events` の記録項目に触れていない）。使用報告から強化へ至る経路を決めたのは本 ADR なので、
+ここに記録した。
+
+**食い違い（Issue #871 の実測、2026-09-26 に現物のコードで再確認）**:
+- `packages/core/src/runtime.ts` の `handleMemoryUsage` は、`MemoryStore.recordUsage` で
+  `recall_usages` に行を挿入し、挿入された id それぞれに `MemoryStore.reinforce` を呼ぶだけで、
+  `EventStore.append` も `MemoryStore.updateStatusWithEvent` も呼ばない。
+- `PostgresMemoryStore.reinforce`/`recordUsage` は `memories` の `UPDATE` と `recall_usages` の
+  `INSERT` だけを撃ち、`memory_events` に触れない。testkit の `InMemoryMemoryStore` と
+  `packages/core` のテスト用 Fake も同様である。
+- Issue #871 は Fake と本物の Postgres の両方で、使用報告の前後で `memory_events` が0件のまま
+  変わらないことを実測している。
+
+**決めたこと**: 文書を実装に合わせた。`docs/memory-model.md` §9 の例から `reinforced` を外し、
+§11 行4 の「残るイベント」を「なし（使用の記録は `recall_usages` の行の存在で表す）」とした。
+コード（`packages/*/src`）の挙動は変えていない。
+根拠はオーナーの2つの方針である。2026-09-16 の「設計文書と実装がずれたら、原則として記述を
+実態へ合わせる。元の設計思想は保つ」と、2026-09-24 の「決められるものは判断して進めてよい」。
+元の設計思想——「使われたかどうか」は行の存在で表す（`docs/architecture.md` の使用報告の表）——は、
+`recall_usages` の `(recall_id, memory_id)` 主キーがそのまま担っており、この変更で損なわれない。
+
+**採らなかった案**: 実装を文書に合わせる（使用報告の処理の中で `kind='updated'`・
+`meta.reason='reinforced'` を積む）。採らなかった理由は次の2つである。
+1. 使用報告のたびに、対象 Memory 1件につき1行ずつ監査ログが増える。1回の recall は複数の Memory を
+   返すので、書き込みと保持容量は他のどの操作よりも高い頻度で増える。既存の利用者の DB では、
+   この分の増加が予告なく始まる。
+2. `memory_events` は追記専用（`docs/memory-model.md` §9）なので、一度積んだ行は保持期間が
+   来るまで残る。後で書き込みを止めても、それまでに積んだ分は減らない。文書の変更は、
+   後で方針が変わっても文書を書き換えるだけで戻せる。
+
+**残るもの**: 「なぜ強化されたか」を `memory_events` から後で引く経路は無い。使用の事実は
+`recall_usages`（`recall_id`・`memory_id`・`used_at`）から引く。
+Issue #871 が触れている別の穴（#840、強化が `status` を見ない）は、この追記では扱っていない。
