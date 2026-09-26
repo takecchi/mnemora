@@ -87,7 +87,7 @@ kind ごとに形が違う部分）は `provenance` jsonb 列にまとめる。�
 🔴 **`basis.observationIds` は確かめない。**Observation は追記専用で forget/purge/削除の
 経路がコードに無く（§11 行1）、一括取得口も存在しないため——「探したが無かった」ではなく
 「そもそも探していない」（[ADR 0257](./decisions/0257-searched-and-found-nothing-versus-did-not-search.md)
-の区別）。同じ理由で、本番で `inferred` を作る唯一の経路（`extraction.ts`）は
+の区別）。また、本番で `inferred` を作る唯一の経路（`extraction.ts`）は
 `basis.memoryIds` を常に空配列で書くため、今日の抽出パイプラインが作った記憶にはこの印は
 今のところ立たない——`basis.memoryIds` を持つ `inferred` を書く経路（`createMemory` を
 直接叩く等）が在ってはじめて効く。詳細は ADR 0342「引き受けた負債」。
