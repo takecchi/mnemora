@@ -52,6 +52,7 @@ import {
   rowToObservation,
   rowToOutboxJob,
   rowToRecallRecord,
+  toPgTimestamp,
   type LabelRow,
   type MemoryEventRow,
   type MemoryRow,
@@ -142,10 +143,10 @@ export class PostgresMemoryStore implements MemoryStore {
         ${externalId},
         ${input.kind},
         ${JSON.stringify(input.payload)}::jsonb,
-        ${input.occurredAt ?? null},
-        ${input.recordedAt ?? new Date()},
-        ${input.validFrom ?? null},
-        ${input.validUntil ?? null},
+        ${toPgTimestamp(input.occurredAt)},
+        ${toPgTimestamp(input.recordedAt ?? new Date())},
+        ${toPgTimestamp(input.validFrom)},
+        ${toPgTimestamp(input.validUntil)},
         ${JSON.stringify(input.attributes ?? {})}::jsonb
       )
       ON CONFLICT (tenant_id, external_id) WHERE external_id IS NOT NULL
@@ -203,10 +204,10 @@ export class PostgresMemoryStore implements MemoryStore {
           ${externalId},
           ${input.kind},
           ${JSON.stringify(input.payload)}::jsonb,
-          ${input.occurredAt ?? null},
-          ${input.recordedAt ?? new Date()},
-          ${input.validFrom ?? null},
-          ${input.validUntil ?? null},
+          ${toPgTimestamp(input.occurredAt)},
+          ${toPgTimestamp(input.recordedAt ?? new Date())},
+          ${toPgTimestamp(input.validFrom)},
+          ${toPgTimestamp(input.validUntil)},
           ${JSON.stringify(input.attributes ?? {})}::jsonb
         )
         ON CONFLICT (tenant_id, external_id) WHERE external_id IS NOT NULL
@@ -300,10 +301,10 @@ export class PostgresMemoryStore implements MemoryStore {
           ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
           ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
           ${sql.param(input.tags)},
-          ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
-          ${input.validFrom ?? null}, ${input.validUntil ?? null},
+          ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
+          ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
           ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-          ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
+          ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
           ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
           ${input.embeddingStatus},
           ${JSON.stringify(input.attributes ?? {})}::jsonb,
@@ -386,10 +387,10 @@ export class PostgresMemoryStore implements MemoryStore {
           ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
           ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
           ${sql.param(input.tags)},
-          ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
-          ${input.validFrom ?? null}, ${input.validUntil ?? null},
+          ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
+          ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
           ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-          ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
+          ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
           ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
           ${input.embeddingStatus},
           ${JSON.stringify(input.attributes ?? {})}::jsonb,
@@ -636,7 +637,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${ctx.tenantId},
           ${event.memoryId},
           ${event.kind},
-          ${event.at ?? new Date()},
+          ${toPgTimestamp(event.at ?? new Date())},
           ${JSON.stringify(event.actor)}::jsonb,
           ${event.digestSnapshot ?? null},
           ${event.sizeBeforeBytes ?? null},
@@ -735,10 +736,10 @@ export class PostgresMemoryStore implements MemoryStore {
             ${provenanceKind}, ${JSON.stringify(input.provenance)}::jsonb,
             ${input.status ?? "active"}, ${input.supersededById ?? null}, ${input.contestedWithId ?? null},
             ${sql.param(input.tags)},
-            ${input.occurredAt ?? null}, ${input.recordedAt}, ${input.lastReinforcedAt ?? null},
-            ${input.validFrom ?? null}, ${input.validUntil ?? null},
+            ${toPgTimestamp(input.occurredAt)}, ${toPgTimestamp(input.recordedAt)}, ${toPgTimestamp(input.lastReinforcedAt)},
+            ${toPgTimestamp(input.validFrom)}, ${toPgTimestamp(input.validUntil)},
             ${input.claimKey?.subject ?? null}, ${input.claimKey?.predicate ?? null},
-            ${input.strength}, ${input.halfLifeHours}, ${input.decayFloorAt},
+            ${input.strength}, ${input.halfLifeHours}, ${toPgTimestamp(input.decayFloorAt)},
             ${input.decayBaseSeq ?? null}, ${input.decayFloorSeq ?? null}, ${input.halfLifeRecalls ?? null},
             ${input.embeddingStatus},
             ${JSON.stringify(input.attributes ?? {})}::jsonb,
@@ -835,7 +836,7 @@ export class PostgresMemoryStore implements MemoryStore {
             ${ctx.tenantId},
             ${target.event.memoryId},
             ${target.event.kind},
-            ${target.event.at ?? new Date()},
+            ${toPgTimestamp(target.event.at ?? new Date())},
             ${JSON.stringify(target.event.actor)}::jsonb,
             ${target.event.digestSnapshot ?? null},
             ${target.event.sizeBeforeBytes ?? null},
@@ -1082,9 +1083,9 @@ export class PostgresMemoryStore implements MemoryStore {
     const result = await this.db.execute(sql`
       WITH updated AS (
         UPDATE memories
-        SET last_reinforced_at = ${at}, decay_floor_at = ${decayFloorAt}, updated_at = now()${activitySet}
+        SET last_reinforced_at = ${toPgTimestamp(at)}, decay_floor_at = ${toPgTimestamp(decayFloorAt)}, updated_at = now()${activitySet}
         WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
-          AND (last_reinforced_at IS NULL OR last_reinforced_at < ${at})
+          AND (last_reinforced_at IS NULL OR last_reinforced_at < ${toPgTimestamp(at)})
         RETURNING *
       )
       SELECT * FROM updated
@@ -1210,7 +1211,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const inputRows = sql.join(
       rows.map(
         (r) =>
-          sql`(${r.id}::uuid, ${r.decayFloorAt}::timestamptz, ${r.hasActivity}::boolean, ${r.activityBaseSeq}::bigint, ${r.activityFloorSeq}::bigint)`,
+          sql`(${r.id}::uuid, ${toPgTimestamp(r.decayFloorAt)}::timestamptz, ${r.hasActivity}::boolean, ${r.activityBaseSeq}::bigint, ${r.activityFloorSeq}::bigint)`,
       ),
       sql`, `,
     );
@@ -1221,14 +1222,14 @@ export class PostgresMemoryStore implements MemoryStore {
       ),
       updated AS (
         UPDATE memories m
-        SET last_reinforced_at = ${at},
+        SET last_reinforced_at = ${toPgTimestamp(at)},
             decay_floor_at = input.decay_floor_at,
             updated_at = now(),
             decay_base_seq = CASE WHEN input.has_activity THEN input.activity_base_seq ELSE m.decay_base_seq END,
             decay_floor_seq = CASE WHEN input.has_activity THEN input.activity_floor_seq ELSE m.decay_floor_seq END
         FROM input
         WHERE m.tenant_id = ${ctx.tenantId} AND m.id = input.id
-          AND (m.last_reinforced_at IS NULL OR m.last_reinforced_at < ${at})
+          AND (m.last_reinforced_at IS NULL OR m.last_reinforced_at < ${toPgTimestamp(at)})
         RETURNING m.*
       )
       SELECT * FROM updated
@@ -1431,8 +1432,8 @@ export class PostgresMemoryStore implements MemoryStore {
     // だけで判定できる。
     const hasQualifyingLabel =
       scope.labels !== undefined ? sql`(tags && ${sql.param(scope.labels)}::text[])` : sql`true`;
-    const occurredAfter = scope.occurredAfter ?? null;
-    const occurredBefore = scope.occurredBefore ?? null;
+    const occurredAfter = toPgTimestamp(scope.occurredAfter);
+    const occurredBefore = toPgTimestamp(scope.occurredBefore);
 
     // period 条件: 未指定側は常に真になる（フィルタなしを表す）。
     // occurred_at が NULL の Memory は recorded_at を代替の実効時刻として扱う
@@ -1446,7 +1447,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // Issue #280（Issue #202 第2弾）: validAt ゲート。`scope.validAt` が無ければ常に真
     // （`RecallQuery.includeOutsideValidity: true` のときと同じ「絞りなし」）。
     // 両端とも NULL は「いつでも真」（`RecallQuery.validAt` の doc 参照）。
-    const validAt = scope.validAt ?? null;
+    const validAt = toPgTimestamp(scope.validAt);
     const isValid = sql`(
       ${validAt}::timestamptz IS NULL OR (
         (valid_from IS NULL OR valid_from <= ${validAt}::timestamptz)
@@ -1479,7 +1480,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const decayFloorSeqAfter = scope.decayFloorSeqAfter;
     const wallAxisAlive =
       decayFloorAtAfter !== undefined
-        ? sql`(decay_floor_at > ${decayFloorAtAfter}::timestamptz)`
+        ? sql`(decay_floor_at > ${toPgTimestamp(decayFloorAtAfter)}::timestamptz)`
         : undefined;
     const activityAxisAlive =
       decayFloorSeqAfter !== undefined
@@ -1997,7 +1998,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${ctx.tenantId},
           ${event.memoryId},
           ${event.kind},
-          ${event.at ?? new Date()},
+          ${toPgTimestamp(event.at ?? new Date())},
           ${JSON.stringify(event.actor)}::jsonb,
           ${event.digestSnapshot ?? null},
           ${event.sizeBeforeBytes ?? null},
@@ -2115,7 +2116,7 @@ export class PostgresMemoryStore implements MemoryStore {
             ${ctx.tenantId},
             ${event.memoryId},
             ${event.kind},
-            ${event.at ?? new Date()},
+            ${toPgTimestamp(event.at ?? new Date())},
             ${JSON.stringify(event.actor)}::jsonb,
             ${event.digestSnapshot ?? null},
             ${event.sizeBeforeBytes ?? null},
@@ -2174,8 +2175,8 @@ export class PostgresMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
-    const validFrom = query.validFrom ?? null;
-    const validUntil = query.validUntil ?? null;
+    const validFrom = toPgTimestamp(query.validFrom);
+    const validUntil = toPgTimestamp(query.validUntil);
     const result = await this.db.execute(sql`
       SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId}
@@ -2355,7 +2356,7 @@ export class PostgresMemoryStore implements MemoryStore {
             ${ctx.tenantId},
             ${event.memoryId},
             ${event.kind},
-            ${event.at ?? new Date()},
+            ${toPgTimestamp(event.at ?? new Date())},
             ${JSON.stringify(event.actor)}::jsonb,
             ${event.digestSnapshot ?? null},
             ${event.sizeBeforeBytes ?? null},
@@ -2424,7 +2425,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${ctx.tenantId},
           ${survivor.event.memoryId},
           ${survivor.event.kind},
-          ${survivor.event.at ?? new Date()},
+          ${toPgTimestamp(survivor.event.at ?? new Date())},
           ${JSON.stringify(survivor.event.actor)}::jsonb,
           ${survivor.event.digestSnapshot ?? null},
           ${survivor.event.sizeBeforeBytes ?? null},
@@ -2518,7 +2519,7 @@ export class PostgresMemoryStore implements MemoryStore {
       inserted_events AS (
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         SELECT
-          gen_random_uuid(), ${ctx.tenantId}, r.id, 'unsuperseded', ${event.at},
+          gen_random_uuid(), ${ctx.tenantId}, r.id, 'unsuperseded', ${toPgTimestamp(event.at)},
           ${JSON.stringify(actor)}::jsonb, r.digest, NULL, ${JSON.stringify(meta)}::jsonb
         FROM restored r
         RETURNING memory_id
@@ -2668,7 +2669,7 @@ export class PostgresMemoryStore implements MemoryStore {
  */
 export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOptions): SQL {
   const clock = opts.clock ?? "wall";
-  const wallCondition = sql`decay_floor_at <= ${opts.now}`;
+  const wallCondition = sql`decay_floor_at <= ${toPgTimestamp(opts.now)}`;
   const activityCondition = (): SQL => {
     if (opts.nowSeq === undefined) {
       throw new Error(
@@ -2803,7 +2804,7 @@ export function buildPurgeExpiredEventsTargetSelect(
   return sql`
     SELECT id, at FROM memory_events
     WHERE tenant_id = ${ctx.tenantId}
-      AND at < ${opts.olderThan}
+      AND at < ${toPgTimestamp(opts.olderThan)}
       AND kind <> 'events_purged'
     ORDER BY at ASC
     LIMIT ${opts.limit + 1}`;

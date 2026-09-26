@@ -3,6 +3,7 @@ import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { capLexicalQueryWords } from "./lexical-query-cap.js";
+import { toPgTimestamp } from "./mapping.js";
 
 /**
  * `ts_rank_cd` の normalization 引数。PostgreSQL のドキュメント（textsearch-controls）の
@@ -175,16 +176,20 @@ export function buildLexicalSearchSelect(
   // ADR 0039: 実効時刻は COALESCE(occurred_at, recorded_at)。両端とも包含（>=/<=）
   // ——`PostgresVectorStore.search`（vector-store.ts）の period 絞りと同じ境界。
   if (opts.filter.occurredAfter !== undefined) {
-    conditions.push(sql`COALESCE(occurred_at, recorded_at) >= ${opts.filter.occurredAfter}`);
+    conditions.push(
+      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestamp(opts.filter.occurredAfter)}`,
+    );
   }
   if (opts.filter.occurredBefore !== undefined) {
-    conditions.push(sql`COALESCE(occurred_at, recorded_at) <= ${opts.filter.occurredBefore}`);
+    conditions.push(
+      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestamp(opts.filter.occurredBefore)}`,
+    );
   }
   // Issue #280（Issue #202 第2弾）: `validAt` ゲート。`PostgresVectorStore.search`
   // （vector-store.ts）と同じ述語・同じ境界（`valid_until` は狭義の `>`）。
   if (opts.filter.validAt !== undefined) {
     conditions.push(
-      sql`(valid_from IS NULL OR valid_from <= ${opts.filter.validAt}) AND (valid_until IS NULL OR valid_until > ${opts.filter.validAt})`,
+      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestamp(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestamp(opts.filter.validAt)})`,
     );
   }
   // ADR 0056: 空配列は no-op。`length > 0` で番わないと `<> ALL('{}')` という常に真の
