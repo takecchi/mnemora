@@ -125,14 +125,15 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 
 埋め込み provider が使えない、あるいはクエリに埋め込む内容が無い場合、ベクトル候補生成という**経路そのものが走らない**。これは 0 件ではなく `Omission { kind: 'stage_skipped', stage: 'candidate_generation', reason: 'embedding_provider_unavailable' }` として記録する。タグ一致や直近取得が別途走っていれば `memories` が空にならないこともある——「ベクトル検索だけが止まった」という情報は、それ単体で呼び出し側の次の一手（フォールバックするか、埋め込み待ちの再試行をするか）を変える。
 
-**⚠ `RecallQuery.vector` の長さが対象の空間の `dimensions` と違うときの結果は未定義**
-（Issue #867、`RecallQuery.vector`/`VectorStore.search` の doc コメント参照）。長さを
-`space.dimensions` に合わせるのは呼び出し側の責任である。【実測 2026-09】`packages/postgres`
-は pgvector の DB エラーで未捕捉のまま落ち、`packages/testkit`/`packages/core` の Fake は
-足りない側を `0` で埋めて計算を続け、意味の無い点数を普通のヒットとして返す——adapter 間で
-挙動が揃っていない。境界で拒む・比較不能（`score_not_comparable`）として扱うといった案は
-Fake の挙動を変えることになるため [Issue #809](https://github.com/takecchi/mnemora/issues/809)
-待ちであり、この「未定義」という記述はその回答が出るまでの暫定である。
+**`RecallQuery.vector` の長さが対象の空間の `dimensions` と違うときは「比較不能」として
+扱う**（Issue #867 / 案B、`RecallQuery.vector`/`VectorStore.search` の doc コメント参照）。
+長さを `space.dimensions` に合わせるのは呼び出し側の責任のままだが、合っていなくても
+`recall()` は新しい例外を投げない——候補は落とさず、`score_not_comparable`（下記「段2」・
+`omitted` の表）に数える。`memories` には出ない。`packages/postgres`・`packages/testkit`・
+`packages/core` の3実装は同じ振る舞いをする
+（[ADR 0040 追記 2026-09-26](./decisions/0040-zero-vector-never-returned.md)）。
+**覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを渡したときの扱いは対象外
+（Issue #867「範囲外で見つけたもの」）。
 
 **Phase 1 の範囲(2026-09 追記、本 PR の決定)**: 上記は3チャンネル(ANN・タグ一致・直近取得)が並行して走る一般形を述べているが、roadmap.md 段階4の完了条件は「二段検索(段1: 索引が効く形のフィルタ + ANN、段2: over-fetch した候補への再スコア)」とのみ明記しており、タグ一致・直近取得を独立した候補生成チャンネルとして要求していない。**Phase 1 は ANN の1チャンネルのみを実装する。** タグは段2の再スコア(§7)における加点要素としてのみ参加し、それ自体で候補を拾い上げる経路にはしない。
 
@@ -173,6 +174,7 @@ Fake の挙動を変えることになるため [Issue #809](https://github.com/
 出力: 予算内に収まる部分集合。
 文字数・トークン予算を超える分は `budget_dropped` として記録する。順序は「スコアの低いものから落とす」が既定だが、段3で確定した同伴ペアは分割しない（§8）。
 **段3.5 の連想の候補は、予算で削るときに最初に落とす**（§9。クエリで引けたものを押し出さない）。落ちた分は同じ `budget_dropped` に乗る。
+**この段の切り詰め判定（`fits`）は digest ごとに `Math.ceil` するため、実際に連結して積む量より厳しく出ることがある**——`budget_dropped` が発生したときの `explain.stages` の `budget_truncation.detail.droppedFitsWhenConcatenated` が、この丸めだけが原因の「余裕があったのに落とした」ケースかどうかを表す（2026-09-26 追記、下記「段4の切り詰めが、逆向きにも同じ不一致を持つ」節、Issue #829）。
 
 ### 段5: 目次帯の構築
 
@@ -405,7 +407,7 @@ scope の候補を ANN が拾いきれている」という前提に立ってい
 | `lexical_truncated` | 語彙チャンネルが窓（k'）を埋めたと分かる（[ADR 0084](./decisions/0084-lexical-recall-channel.md) §7.1）。`ann_truncated` とは別の札——語彙チャンネルは損失可能性を判定する機構を持たないため、`countKind` は常に `'unknown'` である。次の一手は「窓を広げる（`overFetchFactor`/`limit`）」であり、閾値やフィルタの調整では直らない。 |
 | `ann_truncated` | 「見えていない領域があるかもしれない」という不確実性そのものが一手になる——例えば厳密検索へのフォールバックを選べる。 |
 | `ann_unreached` | 近似索引が scope の候補を拾いきれなかった可能性がある、と分かる（ADR 0025・0026。2026-09-17 ADR 0193 が発火条件を拡張）。`ann_truncated`（証明）とは別の問い——こちらは scope 内にまだ見られていない候補が残っている疑いであり、厳密検索へのフォールバックや subject を絞り直す一手につながる。**窓が満杯でも鳴りうる**（ADR 0193）——`ann_truncated` と同時に立つことがある。件数は原理的に分からない（`countKind` は常に `'unknown'`）。**⚠ 2026-09-24 追記（Issue #671 / [ADR 0285](./decisions/0285-ann-window-empty-of-in-scope-candidates-stage-detail.md)）**: この札は「窓は満杯だが scope の候補は一部拾えている」正常時と、「窓が他テナント等 scope 外の行だけで埋まり scope 内の候補を1件も拾えなかった」全滅時の両方で同じ形で鳴り、`omitted` だけを見る限り区別できない。この区別は `Omission` union を増やさず、`RecallResult.explain.stages` の ANN チャンネルの trace（`detail.channel === 'ann'`）に補助的な診断キー（型無し欄——zod では検証されない）を足した。**⚠ 2026-09-24 追記その2（Issue #671 続報 / ADR 0285 追記）**: 当初の `detail.annWindowHadNoInScopeCandidates: boolean`（条件 `eligible > 0 && annHits.length === 0`）には偽陽性があった——`eligible` は忘却ゲート（ADR 0173）を知らないため、scope 内で埋め込みのある行が全て decayed で ANN が正しく0件を返した場合にも真になっていた。正しい分母（「scope 内・埋め込みあり・忘却ゲートを通る行」）は `MemoryStore` の契約を変えないと厳密には求まらないため、`reachableLowerBound = max(0, eligible - filteredDecayed.count)` という**下限**（常に真の分母以下になることが構造的に保証される値）で判定するよう倒した——`excludeProvenanceKinds` 指定時はこの下限の保証自体が崩れるため、引き続き判定しない。条件を `annHits.length < min(kPrime, reachableLowerBound)` に一般化し（天井による打ち切りも同じ形で捕まえる）、キーを `detail.annReturnedFewerThanReachable: boolean`・`detail.annReachableLowerBound: number` に改めた（下限による近似のため、未索引かつ decayed な行がある場合は取りこぼしを見逃すことがある。詳細・論証は ADR 0285 参照）。 |
-| `score_not_comparable` | **スコアが閾値と比較できなかった**と分かる（[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）。閾値を緩めても直らない——`below_threshold` とは別の出来事である。実際に起きるのは埋め込みがゼロベクトルのとき（コサインが未定義になり距離が `NaN` になる。[ADR 0040](./decisions/0040-zero-vector-never-returned.md)）で、次の一手は「その記憶の埋め込みを作り直す」であって「閾値を下げる」ではない。**件数は数え上げられる**（段2が触った候補の三分割なので）——ただし `countKind` は三分割が網羅であることを確かめた結果から決まる。**⚠ `RecallQuery.vector` の長さが `space.dimensions` と違う場合はこの分類に入らない**——`omitted` に何も残らないまま普通のヒットとして返ることがある（Fake の場合）。別の未解決の穴であり、束ねていない（Issue #867、上記「段1: 候補生成」の注記参照）。 |
+| `score_not_comparable` | **スコアが閾値と比較できなかった**と分かる（[ADR 0044](./decisions/0044-score-not-comparable-omission.md)）。閾値を緩めても直らない——`below_threshold` とは別の出来事である。実際に起きるのは埋め込みがゼロベクトルのとき（コサインが未定義になり距離が `NaN` になる。[ADR 0040](./decisions/0040-zero-vector-never-returned.md)）で、次の一手は「その記憶の埋め込みを作り直す」であって「閾値を下げる」ではない。**件数は数え上げられる**（段2が触った候補の三分割なので）——ただし `countKind` は三分割が網羅であることを確かめた結果から決まる。**`RecallQuery.vector` の長さが `space.dimensions` と違う場合もここに入る**（Issue #867 / 案B）——3実装（Postgres・testkit・core の Fake）とも距離を `NaN` に差し替え、この分類へ倒す。**覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを渡したときの扱いは対象外のまま（Issue #867「範囲外で見つけたもの」、上記「段1: 候補生成」の注記参照）。 |
 | `unit_assembly_dropped` | **段3で単位を組むときに候補が漏れた**と分かる（[ADR 0043](./decisions/0043-unit-assembly-dropped-omission.md)）。原因は `contested_with_id` の一対一が破れていることであり、次の一手は「その対向関係を直す」——閾値にも予算にも索引にも関係がない。**⚠ 口は在るが、今日は `Runtime` 経由では発火しない**（2026-09-16 訂正）——[Issue #197](https://github.com/takecchi/mnemora/issues/197) / [ADR 0134](./decisions/0134-mark-contested-explicit-operation.md) で `Runtime.markContested` が入り、**`contested` を書く主体そのものは存在するようになった。**ただし `markContested` は両側 `status='active'` の CAS を課したうえで相互参照を1トランザクションで書くため、**`Runtime` 経由で作られた `contested` ペアが一対一を破ることは無い**——⟹ **今日この分岐が通るとすれば、`MemoryStore` を `Runtime` を経由せず直接叩いた場合に限る**（`packages/core/src/recall-runtime.ts` の同じ分岐のコメントが、同じことを書いている）。**さらに、`markContested` を呼ぶ本番コードは今日ひとつも無い**（【実測】2026-09-16、`main` が `5f11291` の時点で `rg "markContested" --glob '!**/__tests__/**' packages examples` が返すのは定義と適合テストだけである）——追跡は [Issue #284](https://github.com/takecchi/mnemora/issues/284)。`countKind` は `'lower_bound'`——二重計上が同時に起きていると消失が隠れるため、下限しか言えない。 |
 
 **`filtered(condition: 'decayed')` の次の一手（2026-09 追記、[ADR 0153](./decisions/0153-recall-decay-floor-gate.md)、Issue #196）**: 忘却ゲートが効いたと分かる。`filtered(condition:'archived')` とは別の一手につながる——`archived` は強化すれば戻る可能性があるが（次の recall で `status` を見直す）、`decayed` は `RecallQuery.includeFullyDecayed: true` を明示的に渡さない限り、強化しても `decayFloorAt` が先へ延びるだけで、次の recall では再びこの条件に当たらなくなる。
@@ -1018,6 +1020,33 @@ type RecallUsage = {
    **この不一致そのものではなく**、「`share` は 1 を超えない」という `RecallUsageSchema` /
    JSDoc の**誤った保証の宣言**のほうである——`.max(1)` を外し、超えうることと理由を明記した。
    **強制側と計測側の数え方をどちらに統一するかは、依然として別の判断として残っている。**
+
+### 段4の切り詰めが、逆向きにも同じ不一致を持つ（2026-09-26 追記、Issue #829）
+
+上の `usage.budgetExceeded` の穴（ADR 0097）は「強制側は予算内と判定するが、連結して
+測り直すと実は超えている」という**予算を超えて詰む**向きだった。[Issue #829](https://github.com/takecchi/mnemora/issues/829)
+は**逆向き**——「強制側は予算オーバーと判定して1件落とすが、連結して測り直すと実は
+全部収まっていた」——を見つけた。原因は同じ場所（段4の `fits`/`unitTokens` が
+digest ごとに `Math.ceil` する）で、丸めの積み重ねが常に実量以上になる方向にしか
+効かないため、件数が多い digest ほど「本当は要らない `budget_dropped`」を作りやすい。
+
+**この Issue に対する決定（ADR 0097 追記）は「挙動（切り詰めの判定・落とす件数）は
+変えない」である。**ADR 0097 は「段4の強制を連結側へ寄せる」案を既に却下している
+（この文書の該当箇所と同じ理由——切り落とす件数が変わるのは値の意味を正す話ではなく
+機能の挙動を変える話であり、別の判断が要る）。代わりに、`explain.stages` の
+`budget_truncation` の `detail`（`Record<string, unknown>`、公開の型は増えない任意欄）に
+`droppedFitsWhenConcatenated: boolean` を足した——`budget_dropped` が発生したときだけ
+現れ、「連結して1回だけ数えた実際の量（`usage.share` の分子と同じ数え方）でも予算に
+収まっていたか」を表す。`true` なら、その `budget_dropped` は per-unit の丸めの
+積み重ねだけが原因で起きた「余裕があったのに落とした」ケースであり、`false` なら
+本当に予算を超えている。呼び出し側はこの欄を見て、`budget_dropped` を一律に
+「予算が足りない」と読まず、丸めが原因かどうかを区別できる。
+
+**覆えていない範囲**: ADR 0097「引き受けた負債」が指摘した一般式（digest が3件以上の
+ときのずれの大きさ）は本追記でも導出していない——Issue #829 本文が挙げた
+近似式（`ceil((N-1)/4)` 等、4文字の倍数か否かで向きが変わる）を参照するに留める。
+`droppedFitsWhenConcatenated` は「収まっていたかどうか」の真偽だけを見せる観測口であり、
+ずれの大きさそのものを説明する欄ではない。
 
 ### 正直に書くべき限界: mnemora はプロンプトを組み立てない
 
