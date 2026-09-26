@@ -196,6 +196,20 @@ export interface TrigramLexicalProbeUnavailable {
 export type TrigramLexicalProbeResult = TrigramLexicalProbeOk | TrigramLexicalProbeUnavailable;
 
 /**
+ * [Issue #892](https://github.com/takecchi/mnemora/issues/892) のための内部専用の拡張。
+ * `extension_create_denied`/`extension_create_failed` のときだけ、元の Postgres エラー
+ * オブジェクト（`.stack`・`.code`・ネストした `.cause` を持ちうる）を運ぶ。**export しない**
+ * ——公開の {@link TrigramLexicalProbeResult} には `cause` を持たせないため
+ * （下記 {@link probeTrigramLexicalSupport} が剥がして返す）。
+ */
+interface InternalTrigramLexicalProbeUnavailable extends TrigramLexicalProbeUnavailable {
+  readonly cause?: unknown;
+}
+
+type InternalTrigramLexicalProbeResult =
+  TrigramLexicalProbeOk | InternalTrigramLexicalProbeUnavailable;
+
+/**
  * `PostgresTrigramLexicalStore.create()` が投げる例外の、メッセージの接頭辞。
  *
  * [ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md) §4.2 の
@@ -214,13 +228,29 @@ export const TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX =
  * `PostgresTrigramLexicalStore.create()` が拡張・ロケールの前提を満たせなかったときに
  * 投げる例外。`reason`/`detail` は {@link TrigramLexicalProbeUnavailable} と同じ形で
  * 保持し、`catch` した側が文字列を読み取らずに分岐できるようにしてある。
+ *
+ * [Issue #892](https://github.com/takecchi/mnemora/issues/892): `options?.cause` を渡すと、
+ * `Error` 標準の `cause` チェーン（`super(message, options)`）に乗る。**新しい第3引数
+ * であり、既存の2引数の呼び出し（`new TrigramLexicalStoreUnavailableError(reason, detail)`）は
+ * 1バイトも変えずに動く**——`packages/local-embedding/src/errors.ts` の
+ * `LocalEmbeddingProviderError` が `options?: ErrorOptions` を末尾に足したのと同じ形。
+ *
+ * ⚠ **`advisory-lock.ts` の `AdvisoryLockTimeoutError`/`AdvisoryLockUnavailableError`
+ * （`constructor(message: string, cause: unknown)` — `cause` が必須の第2位置引数）には
+ * 揃えていない。** 揃えると、このクラスの既存の呼び出し（`create()` の
+ * `new TrigramLexicalStoreUnavailableError(probe.reason, probe.detail)`、`detail` は
+ * `string | undefined` であり `cause` の位置ではない）が全て壊れる破壊的変更になる
+ * ——`options?: ErrorOptions` を任意の第3引数として足す形のほうが非破壊で済む。
  */
 export class TrigramLexicalStoreUnavailableError extends Error {
   readonly reason: TrigramLexicalUnavailableReason;
   readonly detail: string | undefined;
 
-  constructor(reason: TrigramLexicalUnavailableReason, detail?: string) {
-    super(TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX + reason + (detail ? ` (${detail})` : ""));
+  constructor(reason: TrigramLexicalUnavailableReason, detail?: string, options?: ErrorOptions) {
+    super(
+      TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX + reason + (detail ? ` (${detail})` : ""),
+      options,
+    );
     this.name = "TrigramLexicalStoreUnavailableError";
     this.reason = reason;
     this.detail = detail;
@@ -259,8 +289,33 @@ function isPermissionDenied(message: string): boolean {
  * 3. `CREATE EXTENSION IF NOT EXISTS pg_trgm` が成功するか。
  * 4. 日本語リテラルの自己一致（`word_similarity(x, x) >= 0.99`）が成り立つか
  *    （ADR 0084 §3.2 の「`C` ロケールで黙って0件になる」を検出する本体）。
+ *
+ * [Issue #892](https://github.com/takecchi/mnemora/issues/892): この関数自身は、公開の
+ * {@link TrigramLexicalProbeResult}（`cause` を持たない）を返す薄いラッパーであり、
+ * 元の Postgres エラーを運ぶのは export しない {@link probeTrigramLexicalSupportWithCause}
+ * のほうである（{@link PostgresTrigramLexicalStore.create} が使う）。
  */
 export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult> {
+  const result = await probeTrigramLexicalSupportWithCause(db);
+  if (result.ok) {
+    return result;
+  }
+  // `cause` を落として公開の形（cause 無し）に揃える——分割代入で明示的に取り除く
+  // （公開の戻り値のオブジェクトに `cause` キーが漏れないことを、この行自体が保証する）。
+  const { cause: _cause, ...publicResult } = result;
+  return publicResult;
+}
+
+/**
+ * {@link probeTrigramLexicalSupport} の内部専用の実体。判定のロジックは同じだが、
+ * `extension_create_denied`/`extension_create_failed` のときは元の Postgres エラー
+ * オブジェクトを `cause` に載せて返す（[Issue #892](https://github.com/takecchi/mnemora/issues/892)）。
+ * **export しない**——公開するのは `cause` を持たない {@link probeTrigramLexicalSupport}
+ * だけにする。
+ */
+async function probeTrigramLexicalSupportWithCause(
+  db: Db,
+): Promise<InternalTrigramLexicalProbeResult> {
   const encodingResult = await db.execute(sql`SHOW server_encoding`);
   const encodingRow = encodingResult.rows[0] as { server_encoding: string } | undefined;
   const encoding = encodingRow?.server_encoding ?? "(unknown)";
@@ -283,6 +338,10 @@ export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexical
       ok: false,
       reason: isPermissionDenied(message) ? "extension_create_denied" : "extension_create_failed",
       detail: message,
+      // 元の Postgres エラーを保持する——`TrigramLexicalStoreUnavailableError.cause` に
+      // 渡すため（Issue #892）。他の3つの reason は値ベースの判定であり、そもそも
+      // Postgres のエラーオブジェクトを持たない。
+      cause: err,
     };
   }
 
@@ -543,9 +602,17 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
    * 複製するか」の下、`ensureTrigramLexicalFunctions` の doc参照）。
    */
   static async create(db: Db, opts?: { threshold?: number }): Promise<PostgresTrigramLexicalStore> {
-    const probe = await probeTrigramLexicalSupport(db);
+    const probe = await probeTrigramLexicalSupportWithCause(db);
     if (!probe.ok) {
-      throw new TrigramLexicalStoreUnavailableError(probe.reason, probe.detail);
+      // `probe.cause` は `extension_create_denied`/`extension_create_failed` のときだけ
+      // 値を持つ（Issue #892）。無いときは `options` を渡さない——`{ cause: undefined }` を
+      // 常に渡すと、`"cause" in error` が意味もなく true になる（値は `undefined` のまま）
+      // ため、渡すこと自体を条件で分ける。
+      throw new TrigramLexicalStoreUnavailableError(
+        probe.reason,
+        probe.detail,
+        probe.cause !== undefined ? { cause: probe.cause } : undefined,
+      );
     }
     await ensureTrigramLexicalFunctions(db);
     const threshold = opts?.threshold ?? DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD;

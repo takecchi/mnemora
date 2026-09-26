@@ -242,6 +242,17 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `--help`/`-h` が1つでもあれば即座に `{ help: true }` を返すようにした（新しい例外は
   投げない。`--help`/`-h` を含まない argv の既存の解決順序・エラーメッセージは無変更）
   （PR #887）。
+- **`PostgresTrigramLexicalStore.create()` が投げる `TrigramLexicalStoreUnavailableError`
+  が、`CREATE EXTENSION IF NOT EXISTS pg_trgm` の失敗（`reason: "extension_create_denied"`/
+  `"extension_create_failed"`）で元の Postgres エラーオブジェクトを一切保持しておらず、
+  `.cause` を辿って元の `.stack`・`.code`（SQLSTATE）を調べる手段が無かった。**
+  `probeTrigramLexicalSupport` の内部実体が元のエラーを持ち回り、`create()` がそれを
+  `TrigramLexicalStoreUnavailableError` の新しい第3引数 `options?: ErrorOptions` へ渡す
+  ようにした（既存の2引数の呼び出しは無変更で動く）。公開の `probeTrigramLexicalSupport`
+  の戻り値の形は変えていない（`cause` は漏れない）。他の3つの reason
+  （`server_encoding_not_utf8`/`extension_unavailable`/`locale_no_japanese_trigrams`）は
+  そもそも Postgres のエラーオブジェクトを持たない値ベースの判定であり対象外
+  （[Issue #892](https://github.com/takecchi/mnemora/issues/892)）。
 
 ---
 

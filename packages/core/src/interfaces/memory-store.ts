@@ -549,6 +549,35 @@ export interface MemoryStore {
    *   同じミリ秒に2回の使用報告が来たときに当たる（Issue #730。実運用での頻度は
    *   測っていない）。等しい `at` を書く側へ倒す・活動時計側だけ seq で比べる変更は、
    *   適合テストの契約を変える破壊的変更であり、ここでは採っていない。
+   *
+   * ⚠ **[Issue #840](https://github.com/takecchi/mnemora/issues/840): このメソッドは
+   * `status` を見ずに書く。**対象 Memory がどの `status`（`active`/`contested`/
+   * `archived`/`superseded`/`forgotten`）であっても、上の単調性・活動時計の規則だけを
+   * 適用してそのまま書き込む——`status` に応じた no-op・拒否は無い。
+   *
+   * `runtime.observe({ kind: 'memory_usage' })` は、`recordUsage` が返した
+   * `insertedMemoryIds` を `status` を確かめずにこのメソッドへ渡す。正規の
+   * recall→使用報告の往復で届くのは `contested`（recall の段3が companion として返す
+   * 行）だけだが、**呼び出し側が古い Memory の id を持ったまま後から使用報告を送った
+   * 場合、`archived`/`superseded`/`forgotten` の行にも届きうる。**
+   *
+   * 届いたときの帰結（status ごと。[ADR 0303](../../../../docs/decisions/0303-superseded-contested-decay-floor-owner.md)
+   * 追記節、Issue #840 で確かめた）:
+   * - **`contested`**: 正規の経路であり、ADR 0303 決定2（`contested` は忘却ゲートで
+   *   `active` と同格に扱う）どおりの挙動——害ではない。
+   * - **`archived`/`superseded`**: 復帰（`restoreArchived`/`restoreSuperseded`）が
+   *   復帰の直後に `reinforce` を呼ぶため、時計が前にしか進まない通常の順序では
+   *   単調性ガードにより上書きされ、効き目は残らない。**ただしこれは時計が前にしか
+   *   進まないことに頼った結果であり、`reinforce` 自身が status を見て守っているわけ
+   *   ではない**（時計を逆行させた場合、不正な値が復帰後の行に残りうる）。
+   * - **`forgotten`**: 戻る経路が無いため、書かれた値は消えずに残る。忘却ゲート・
+   *   段1の索引・段5の集計はいずれも `forgotten` の `decayFloorAt`/`decayBaseSeq` を
+   *   読まないため、**`recall()` の結果には影響しない**——値が見えるのは `get()` で
+   *   直接読んだときだけ（監査・エクスポート時のノイズ）。
+   *
+   * `reinforce` の対象を `active`/`contested` に絞るかどうかは、Issue #840 と ADR 0303
+   * 追記節で扱った——**この doc の時点では絞っていない**。呼び出し側が
+   * `runtime.observe` に渡す `usedMemoryIds` の出どころを正しく保つ責務を負う。
    */
   reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
   /**
