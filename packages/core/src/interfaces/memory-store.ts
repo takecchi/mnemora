@@ -1008,6 +1008,13 @@ export interface MemoryStore {
    *   同じ範囲を繰り返し掃引しても同じ行が二度 archived になることはない**
    *   （呼び出し自体が特別にべき等性を持つのではなく、対象条件が書き込みの結果として
    *   自然に外れることによる）。
+   * - **同じ範囲の掃引が同時に走っても、同じ行が二度 archived にならず、`archived` の
+   *   イベントも1件だけである**（ADR 0114 の 2026-09-27 追記）。上の項目は逐次の繰り返し
+   *   についての約束であり、並行については条件が自然に外れることだけでは足りない——
+   *   `packages/postgres` の実装は、対象の選択に `FOR UPDATE SKIP LOCKED` を掛けることで
+   *   満たす（後から来た掃引は、先の掃引が行ロックを持っている行を飛ばす）。プロセス内で
+   *   逐次に動く Fake は自然に満たす。歯は
+   *   `packages/postgres/src/__tests__/archive-decayed-concurrency.postgres.test.ts`。
    *
    * ⚠ **既存索引 `idx_memories_recall_gate`（`tenant_id, status, decay_floor_at`、
    * `WHERE status IN ('active','contested')`。`migrations/0001_init.sql`）をそのまま
