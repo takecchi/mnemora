@@ -199,3 +199,70 @@
     競合・CI の service container での再現・2回目以降の適用が並行した場合の実測——
     こちらは推論のまま）は、本 PR でも確かめていない。
   - **確かめていない**: 🟠（ロール名＝スキーマ名）の直し方。別 Issue に切り出した。
+
+## 追記（2026-09-26、[Issue #779](https://github.com/takecchi/mnemora/issues/779)）
+
+**この節は本文を書き換えない**（履歴を書き換えない）。決定・「引き受ける負債」の
+🟠（ロール名＝スキーマ名）は、本 ADR の対象外として当時のまま残っている——ここに書くのは
+その🟠を実際に直した記録である。
+
+2026-09-26 にクローン miku（の委譲先）が、上の🟠の直し方として「`runMigrations`
+（`migrate.ts`）と `registerEmbeddingSpace`（`vector-space.ts`）が、`schema` オプション
+未指定かつ `options.lockKey` の上書きも無いときに限り、advisory lock を取得する**前**に
+同じ `pool` で `SELECT current_schema()` を読み、その結果を既存の `migrationLockKeyFor`/
+`registerEmbeddingSpaceLockKeyFor`（どちらも ADR 0057 決定6で新設した関数）へそのまま
+渡す」形を採った。理由は、この2関数が「`schema` 未指定のとき実際にどのスキーマが
+使われるかを静的には特定できない」という前提の上で固定キーへ倒していた（ADR 0057
+「引き受ける負債」）のに対し、**実行時になら特定できる**——接続の `search_path` が
+実際に解決した先を、その接続自身に問えばよいだけだったため。
+
+**`schema` が `public` を見ているとき、既定キー（`MIGRATION_LOCK_KEY`/
+`REGISTER_EMBEDDING_SPACE_LOCK_KEY`）のままにした。** 新旧の版が同時に `runMigrations`/
+`registerEmbeddingSpace` を呼んでも互いに待ち合う——という ADR 0057 決定6 (a) の性質
+（ローリングデプロイ中の互換性）を保つ線をそのまま引き継いだだけであり、狙って
+分岐を書き足したわけではない。`migrationLockKeyFor("public")`/
+`registerEmbeddingSpaceLockKeyFor("public")` はどちらも元から既定キーを返すので、
+`current_schema()` が `"public"` を返した場合は何もしなくても同じキーに落ちる。
+
+**ADR 0057 決定2（「`schema` を指定しない既定の経路は、発行される SQL が今日と同一
+である」）から、小さな逸脱が増えた。** `options.lockKey` を上書きしない呼び出しは、
+`schema` 未指定のときロック取得より前に `SELECT current_schema()` を1回発行する
+——DDL・DML の内容には一切触れない、advisory lock のキーを選ぶためだけの読み取りである。
+本 ADR の決定7の逸脱（拡張の共有ロックにまつわる `pg_advisory_lock`/`pg_advisory_unlock`
+の増加、初回適用時限定）とは別の、独立した逸脱として積み上がる。
+
+**ADR 0057「引き受ける負債」の「`schema` 未指定と `schema: "public"` を、advisory lock
+については同じ対象として扱う」の根拠（(b) 未指定は静的には特定できない）は、この変更で
+解けた**——静的にではなく実行時に読むことで特定できるようにしたため。ただし
+`migrationLockKeyFor`/`registerEmbeddingSpaceLockKeyFor` 自身は同期関数のまま変えていない
+（次の段落）。
+
+**残る窓**: この変更が入る前後で、ロール名と同名のスキーマを見ている `schema` 未指定の
+呼び出しは、旧版（常に既定キー）と新版（`current_schema()` を読んで導出キー）の間で
+ロックキーが食い違う——移行期に両方のバージョンが同居すると、互いに待たない窓が残る。
+`schema: "<明示指定>"` を経由する呼び出し同士や、新版同士・旧版同士は影響を受けない。
+
+**採らなかった案**:
+
+- **`search_path` に `"$user"` が含まれる場合を検査で弾く。** Issue #779 自身が候補として
+  挙げていたが、これまで意図せず（あるいは意図して）ロール名と同名のスキーマへ書いて
+  きた既存の呼び出しを、新しい例外で落とすことになる——挙動を変えないという線を破る。
+- **`schema` 未指定のとき、既定キーと `current_schema()` から導出したキーの両方を取る
+  （2本の advisory lock を保持する）。** 実装すれば上の「残る窓」も塞げる——旧版は
+  常に既定キーを取るので、新版が両方取れば必ず旧版と鉢合う。今回は採らなかった。
+  理由: 本 Issue が実測して示したのは「ロール名＝スキーマ名という、既に狭い条件」の
+  中の、さらに「新旧混在という移行期」に限られる窓であり、常時2本のロックを取る
+  コスト（`runMigrations`/`registerEmbeddingSpace` が同時に必要とする advisory lock の
+  数が増える）に見合うほどの実測を、この委譲では行っていない。
+- **`migrationLockKeyFor`/`registerEmbeddingSpaceLockKeyFor` を非同期化し、関数自身に
+  `pool` を渡して `current_schema()` を読ませる。** 依頼で明示的に禁じられている
+  ——この2関数は公開 API であり、シグネチャ・戻り値を変えると利用側の呼び出し（同期
+  関数として扱っている既存コード）を破壊的に変えることになる。`resolveCurrentSchema`
+  （`packages/postgres/src/resolve-current-schema.ts`、`index.ts` からは export しない
+  内部 helper）を呼び出し側（`runMigrations`/`registerEmbeddingSpace`）に置くことで、
+  2関数自体は同期のまま変えていない。
+
+実装・テストの詳細は `packages/postgres/src/migrate.ts` の `migrationLockKeyFor` と
+`runMigrations` の doc コメント、`packages/postgres/src/vector-space.ts` の
+`registerEmbeddingSpaceLockKeyFor` と `registerEmbeddingSpace` の doc コメント、
+`packages/postgres/src/__tests__/role-name-schema-lock-key.postgres.test.ts` を参照。
