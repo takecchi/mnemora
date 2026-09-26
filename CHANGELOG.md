@@ -43,29 +43,149 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⛔ **`v1.1.0` の tag はまだ切られていない。**
 
-**この節は `v1.0.0` からの差分を対象とする。**
+**この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.0` … **`747acaf`** の範囲を数えたものである。
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`ec39629`** の範囲を
+数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
 ⛔ **ここに件数を書かないこと**（[ADR 0234](./docs/decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
-🔴 **この節は以前、`v1.0.0` … `8cf82b1` を数えたと名乗っていたが、それは偽だった。** `8cf82b1`
-（PR #728）へ pin を進めたのは PR #733 だったが、#733 は自分が足す Fixed 1項目のために sha を
-書き換えただけで、`v1.0.0..8cf82b1` の間を実際には数え直していなかった——`#684`/`#694`/
-`#703`/`#711`/`#724`/`#728` など、publish 対象パッケージに触れる PR が未計上のまま残っていた。
-この節は、`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものである
-（載せる／載せないの全数表と理由は [PR #747](https://github.com/takecchi/mnemora/pull/747) の本文）。
-2026-09-26 に `v1.0.0` … `747acaf` を改めて1本ずつ数え直し、計上漏れ（PR #792）を足した
-（全数表は [PR #844](https://github.com/takecchi/mnemora/pull/844) の本文）。
+🔴 **オーナーは 2026-09-25T21:16:41Z に Release `v1.0.1`（tag が指す commit は `cf11cd6`、
+PR #827）を作り、npm へも公開した**（6パッケージとも `dist-tags.latest` が `1.0.1`、publish の
+CI run は success）。**この節はこれまで「`v1.0.0` からの未リリースの差分」として、`v1.0.0` から
+`747acaf` までの範囲を数えていたが、そのうち `v1.0.0` から `cf11cd6` までの分は、既に `v1.0.1`
+として出荷済みだったことが分かった。**⟹ **この節は `v1.0.1` から数え直した。`v1.0.0` から
+`cf11cd6` までに載せていた項目・その計上の経緯（`8cf82b1` が偽だった話・PR #747/#844 の
+全数表・PR #811/#813/#815 の保留注記）は、対象の項目とともに下の `## [1.0.1]` 節へ移した。**
 
-🔴 **`747acaf` までの範囲で、計上を保留しているものが在る。**PR #811 / #813 / #815
+**postgres 利用者へ**: `v1.0.1` からマイグレーションは増えていない——最後尾は引き続き
+`0021_memories_claim_key.sql`。**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の
+`## [1.0.1]` 節の migrate 案内も合わせて読むこと**（`0019`〜`0021` の3本が要る）。
+
+**この節が数えた範囲（`v1.0.1`…`ec39629`）に破壊的変更は無い。**【実測 2026-09-26】
+`git diff v1.0.1..ec39629 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
+の型を `| null` へ広げたこと（PR #838）に伴う再フォーマットのみであり、削除・必須化・型の
+狭小化は無い。`### Breaking` の節は無い。
+
+対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
+`@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`（`v1.0.1` と同じ）。
+
+### Added
+
+- **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
+  同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
+  `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
+  （`companionOf` の意味は無変更）。相手が budget 切り詰め後の最終的な結果集合に
+  含まれるときだけ付く（オーナーの決定、ask_human 327fd89b /
+  [Issue #691](https://github.com/takecchi/mnemora/issues/691) /
+  [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #832）。
+  ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
+  （ADR 0335「引き受けた負債」参照）。
+- **`RuntimeDeps` に任意欄 `embeddingInput?: (memory: Memory) => string` を足した**——
+  埋め込み入力の上限超過で `embeddingStatus: 'failed'` になった Memory を、`reembed()`
+  （ADR 0079）だけでは回復できなかった問題に、opt-in の回復手段を用意する。省略時は
+  `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
+  無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
+  [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
+
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- 🔴 **既定の挙動の変更: 連想枠（`RecallQuery.association`、段3.5）の既定が off から on に
+  変わった。** `association` を省略した呼び出しは、`DEFAULT_RECALL_ASSOCIATION`
+  （`{ maxCount: 10 }`、新設 export）を使って連想が走るようになる——**クエリに直接は
+  当たらなかったが、クエリで引けた記憶（アンカー）の近傍として引いた候補
+  （`retrievedVia: "association"`）が、`association` を渡さない呼び出しでも
+  `RecallResult.memories` に混ざりうる。**`RecallUsage.byTier.association` も、
+  `association` を渡したかどうかに関わらず、連想が実際に走った呼び出しには現れる
+  ようになる（[0.5.0] の逐語「**既定 off なので、`association` を渡していない呼び手は
+  1バイトも影響を受けない。**」との対比——この節ではもう成り立たない）。
+  **従来どおり連想を一切走らせたい呼び出しは `association: null` を明示的に渡す**
+  （`undefined` ＝省略＝既定値適用、`null` ＝明示 off、という新しい区別。型は
+  `RecallQuery.association?: RecallAssociationQuery | null` に広がった）。
+  **破壊的変更ではない**——公開 API の実 diff は、この入力型が `| null` に広がったことと
+  `DEFAULT_RECALL_ASSOCIATION` が1つ増えたことだけで、既存の呼び出しは型検査上そのまま
+  通る（[docs/migration-v1.md](./docs/migration-v1.md) の破壊的変更の定義「公開契約について、
+  既存の利用者のコードが型検査または実行時に壊れる変更」に照らした判定。前例として
+  `RecallQuery.validAt` ゲートを既定で有効にした際も同様に非破壊と判定している）。
+  （Issue #337 のオーナー決定（ask_human ac5953d1、2026-09-25T21:11Z、選択肢「あ」）／
+  [ADR 0337](./docs/decisions/0337-recall-association-default-on.md)、PR #838）。
+
+### Fixed
+
+
+- **`@mnemora/core` の `decay.ts`（`defaultDecayStrategy.floorAt`/`defaultActivityDecayStrategy.floorAt`）が、
+  ADR 0125/`isHalfLifeRecallsInRange` の値域 `(0, ∞)`（`Infinity` のみ拒む）の内側にある、
+  有限だが巨大な `halfLifeHours`/`halfLifeRecalls` で壊れていた。** 壁時計側は `new Date` の
+  表現可能域（`±8.64e15ms`）を超えて Invalid Date を返し、`decayFloorAt > now` が常に
+  `false` になるため「ほぼ永久に減衰しない」つもりの設定が「作成直後から忘却済み」に
+  逆転していた。活動時計側は `decay_floor_seq`（Postgres `bigint`）へ `Number.MAX_SAFE_INTEGER`
+  を超える精度の無い値を静かに書いていた。どちらも表現可能な上限へ丸めるようにした
+  （新しい例外は投げない）。
+- **`@mnemora/core` の `deriveClaimKeys`（`claim-key.ts`）が、LLM の壊れた出力
+  （`subject`/`predicate` が空白だけ）を空文字列の claim key としてそのまま返していた。**
+  `ClaimKeySchema` の `min(1)` は空白だけの値を素通りするため、正規化（NFKC→trim→小文字化）
+  後に空文字列へ潰れることがあり、無関係な複数の Memory が同じ「空の鍵」で誤って一致し、
+  `detectClaimKeyContested` が的外れに `contested` を立てていた。正規化後に `subject`/
+  `predicate` のどちらかが空文字列になった要素は、鍵が取れなかったもの（`null`）として
+  扱うようにした（新しい例外は投げない）。
+- **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
+- **`OutboxStore.complete`/`fail` の CAS（ADR 0142）が `attempts` の一致しか見ておらず、
+  相手側の終端列（`completed_at`/`failed_at`）を見ていなかった。** 同じ `attempts` のまま
+  complete → fail を呼ぶと（逐次でも、本物の Postgres の2接続からの並行でも）、両方の
+  終端が付く矛盾した状態を作れた。先に付いた終端を勝たせるようにした——相手側の終端が
+  既に付いていれば、後から来た `complete`/`fail` は行を変えず例外も投げない
+  （[Issue #826](https://github.com/takecchi/mnemora/issues/826)、PR #830）。
+  ⭕ **公開型は変えていない**——`attempts` 不一致の `OutboxLeaseConflictError` と行が
+  無い場合の no-op、同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は
+  すべて既存どおり。
+- **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
+  処理する `reflect` ジョブ、`processReflectJob`）が、`consolidate` 側の同種の修正
+  （上の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
+  `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `reflect` ジョブを
+  subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の `subjectId`
+  が食い違うと、近傍探索が種と別の subject から候補を拾っていた。`processReflectJob` は、
+  `processConsolidateJob` と同じ形に直した——種の Memory の `subjectId` を `ctx.subjectId` に
+  置いてから `reflect()` を呼ぶ。種が見つからない、または種の `subjectId` が `null` の場合は
+  今日どおり（[Issue #820](https://github.com/takecchi/mnemora/issues/820) /
+  [ADR 0317](./docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
+  追記、PR #851）。
+  ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
+  利用者には何も起きない。migration も不要。
+  ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が
+  構造的に起きなくなる。
+  明示的な `runtime.reflect(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
+
+---
+
+## [1.0.1] - 2026-09-25
+
+**`v1.0.1` の tag（`cf11cd6`）は 2026-09-25T21:16:41Z に Release として切られ、npm へ公開されている**
+（6パッケージとも `dist-tags.latest` が `1.0.1`。publish の CI run は success）。**この節は元々
+`## [1.1.0] - 未リリース` に「`v1.0.0` からの未リリースの差分」として書かれていた項目のうち、
+`v1.0.0` から `cf11cd6` までの分——既に `v1.0.1` として出荷済みだった分——を切り出したものである。**
+
+**この節は `v1.0.0`…`v1.0.1`（`cf11cd6`）の差分を対象とする（両端とも tag で閉じている）。**
+
+🔴 **この範囲は以前、`## [1.1.0]` 節が `v1.0.0` … `8cf82b1` を数えたと名乗っていたが、それは
+偽だった。** `8cf82b1`（PR #728）へ pin を進めたのは PR #733 だったが、#733 は自分が足す
+Fixed 1項目のために sha を書き換えただけで、`v1.0.0..8cf82b1` の間を実際には数え直していなかった
+——`#684`/`#694`/`#703`/`#711`/`#724`/`#728` など、publish 対象パッケージに触れる PR が
+未計上のまま残っていた。`v1.0.0` から `7987de4` までの PR を1本ずつ見て数え直したものが最初の
+全数表である（載せる／載せないの理由は [PR #747](https://github.com/takecchi/mnemora/pull/747)
+の本文）。2026-09-26 に `v1.0.0` … `747acaf` を改めて1本ずつ数え直し、計上漏れ（PR #792）を
+足した（全数表は [PR #844](https://github.com/takecchi/mnemora/pull/844) の本文）。**その後、
+`v1.0.1` が既にオーナーによって切られ npm へ公開されていたことが分かり、`v1.0.0` から
+`cf11cd6`（`747acaf` より前）までの分をこの節として独立させた。**
+
+🔴 **`v1.0.1` として出荷済みの範囲に、計上を保留しているものが在る。**PR #811 / #813 / #815
 （`@mnemora/testkit/fixtures` の Fake が、これまで黙って受け入れていた不正な入力——負数・NaN・
 Infinity・非整数の `limit`、float4 の範囲外の値——に対して例外を投げるようになった）。
 型には現れないが、公開の Fake を直接使う外部の実装者には実行時に壊れうる。**破壊的変更として
-扱うかが未決**なので（[Issue #809](https://github.com/takecchi/mnemora/issues/809)）、
-**どの見出しにもまだ載せていない。**⟹ **下の「破壊的変更は無い」は、この3件を除いた主張である。**
+扱うかは、この3件が `v1.0.1` として出荷された後もなお未決**なので
+（[Issue #809](https://github.com/takecchi/mnemora/issues/809)）、**どの見出しにもまだ載せていない。**
+⟹ **下の「破壊的変更は無い」は、この3件を除いた主張である。**
 
 **この節が数えた範囲に破壊的変更は無い（上の保留3件を除く）。**【実測】`git diff v1.0.0..7987de4 --
 scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキーマの欄の並べ替え、
@@ -73,11 +193,10 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
 シグネチャの再フォーマット、のいずれかであり、削除・必須化・型の狭小化は無かった
 （`buildExtractionPrompt`/`extractCandidates`/`previewRestoreSupersededBy` はいずれも任意引数の
 追加のみ）。⟹ **公開 API への影響は、任意の欄・任意の引数・任意のメソッド・新しい export の
-追加のみである。** `### Breaking` の節は無い。
-【実測 2026-09-26】`git diff 7987de4..747acaf -- scripts/__snapshots__/public-api/` の削除行も、
-（c）に加えて、型を広げる変更（`RecallQuery.association` に `| null` を足した、PR #838／
-`supportsLabels`・`supportsFindActiveByClaimKey`・`supportsTaxonomyMode` を必須から任意へ戻した、
-PR #827）だけであった。
+追加のみである。**
+【実測 2026-09-26】`git diff 7987de4..cf11cd6 -- scripts/__snapshots__/public-api/` の削除行も、
+（c）に加えて、型を広げる変更（`supportsLabels`・`supportsFindActiveByClaimKey`・
+`supportsTaxonomyMode` を必須から任意へ戻した、PR #827）だけであった。`### Breaking` の節は無い。
 
 対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
 `@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`。
@@ -227,21 +346,6 @@ PR #827）だけであった。
   ⭕ `knownPredicatesFromStore` に対応する「store から動的に集める」版は、汎用語彙が
   無関係な話題へ誤って使い回される汚染が実測されたため意図的に実装していない
   （ADR 0334「採らなかった案」）。
-- **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
-  同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
-  `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
-  （`companionOf` の意味は無変更）。相手が budget 切り詰め後の最終的な結果集合に
-  含まれるときだけ付く（オーナーの決定、ask_human 327fd89b /
-  [Issue #691](https://github.com/takecchi/mnemora/issues/691) /
-  [ADR 0335](./docs/decisions/0335-recalled-memory-contested-with.md)、PR #832）。
-  ⭕ `RecallRecordMemory`（`recalls.returned_memories` への永続化）は変更していない
-  （ADR 0335「引き受けた負債」参照）。
-- **`RuntimeDeps` に任意欄 `embeddingInput?: (memory: Memory) => string` を足した**——
-  埋め込み入力の上限超過で `embeddingStatus: 'failed'` になった Memory を、`reembed()`
-  （ADR 0079）だけでは回復できなかった問題に、opt-in の回復手段を用意する。省略時は
-  `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
-  無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
-  [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -302,45 +406,9 @@ PR #827）だけであった。
   PR #828）。
   ⚠ 擬似物の同点順序に依存する呼び出し側（自前のテスト・スナップショット等）があれば、
   結果が変わりうる。
-- 🔴 **既定の挙動の変更: 連想枠（`RecallQuery.association`、段3.5）の既定が off から on に
-  変わった。** `association` を省略した呼び出しは、`DEFAULT_RECALL_ASSOCIATION`
-  （`{ maxCount: 10 }`、新設 export）を使って連想が走るようになる——**クエリに直接は
-  当たらなかったが、クエリで引けた記憶（アンカー）の近傍として引いた候補
-  （`retrievedVia: "association"`）が、`association` を渡さない呼び出しでも
-  `RecallResult.memories` に混ざりうる。**`RecallUsage.byTier.association` も、
-  `association` を渡したかどうかに関わらず、連想が実際に走った呼び出しには現れる
-  ようになる（[0.5.0] の逐語「**既定 off なので、`association` を渡していない呼び手は
-  1バイトも影響を受けない。**」との対比——この節ではもう成り立たない）。
-  **従来どおり連想を一切走らせたい呼び出しは `association: null` を明示的に渡す**
-  （`undefined` ＝省略＝既定値適用、`null` ＝明示 off、という新しい区別。型は
-  `RecallQuery.association?: RecallAssociationQuery | null` に広がった）。
-  **破壊的変更ではない**——公開 API の実 diff は、この入力型が `| null` に広がったことと
-  `DEFAULT_RECALL_ASSOCIATION` が1つ増えたことだけで、既存の呼び出しは型検査上そのまま
-  通る（[docs/migration-v1.md](./docs/migration-v1.md) の破壊的変更の定義「公開契約について、
-  既存の利用者のコードが型検査または実行時に壊れる変更」に照らした判定。前例として
-  `RecallQuery.validAt` ゲートを既定で有効にした際も同様に非破壊と判定している）。
-  （Issue #337 のオーナー決定（ask_human ac5953d1、2026-09-25T21:11Z、選択肢「あ」）／
-  [ADR 0337](./docs/decisions/0337-recall-association-default-on.md)）。
 
 ### Fixed
 
-
-- **`@mnemora/core` の `decay.ts`（`defaultDecayStrategy.floorAt`/`defaultActivityDecayStrategy.floorAt`）が、
-  ADR 0125/`isHalfLifeRecallsInRange` の値域 `(0, ∞)`（`Infinity` のみ拒む）の内側にある、
-  有限だが巨大な `halfLifeHours`/`halfLifeRecalls` で壊れていた。** 壁時計側は `new Date` の
-  表現可能域（`±8.64e15ms`）を超えて Invalid Date を返し、`decayFloorAt > now` が常に
-  `false` になるため「ほぼ永久に減衰しない」つもりの設定が「作成直後から忘却済み」に
-  逆転していた。活動時計側は `decay_floor_seq`（Postgres `bigint`）へ `Number.MAX_SAFE_INTEGER`
-  を超える精度の無い値を静かに書いていた。どちらも表現可能な上限へ丸めるようにした
-  （新しい例外は投げない）。
-- **`@mnemora/core` の `deriveClaimKeys`（`claim-key.ts`）が、LLM の壊れた出力
-  （`subject`/`predicate` が空白だけ）を空文字列の claim key としてそのまま返していた。**
-  `ClaimKeySchema` の `min(1)` は空白だけの値を素通りするため、正規化（NFKC→trim→小文字化）
-  後に空文字列へ潰れることがあり、無関係な複数の Memory が同じ「空の鍵」で誤って一致し、
-  `detectClaimKeyContested` が的外れに `contested` を立てていた。正規化後に `subject`/
-  `predicate` のどちらかが空文字列になった要素は、鍵が取れなかったもの（`null`）として
-  扱うようにした（新しい例外は投げない）。
-- **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる3件を直した**（PR #839）。①`restoreSuperseded` と `forget` が同じ記憶に並行して走ると、forget 済みの行が active に戻り、`unsuperseded` イベントも積まれていた。UPDATE の条件に `status='superseded'` を足し、interface の約束どおりにした。②③`markContested`／`resolveContested` を (A,B) と (B,A) で並行して呼ぶとデッドロックになり、生の Postgres 例外（40P01）が出ていた。行を id 順にロックするようにしたので、後から来た側は約束どおり `MemoryStatusConflictError` になる。
 - **`@mnemora/postgres` の段1 `search()` で、他テナントの near-duplicate が HNSW の候補窓
   （既定 `hnsw.ef_search`=40）を埋め尽くすと、自テナントの候補を1件も見ないまま `recall()` が
   0件を返すことがあった。** `PostgresVectorStore.search()` に
@@ -390,7 +458,6 @@ PR #827）だけであった。
   一切参照しない。⚠ `schema` 未指定の経路は、初回適用時だけ advisory lock の制御用
   クエリが2回増える（DDL・DML は1文字も変わらない。ADR 0057 決定2との関係は ADR 0331
   参照）。
-
 - **`@mnemora/postgres` の `registerEmbeddingSpace()` に `dimensions > 2000` を渡すと、
   `CREATE TABLE IF NOT EXISTS` は成功するが続く HNSW 索引の作成が pgvector の `54000`
   （"column cannot have more than 2000 dimensions for hnsw index"）で失敗し、**テーブルだけが
@@ -412,7 +479,7 @@ PR #827）だけであった。
   該当する適合項目を実行しない（`false` 相当）
   （[Issue #818](https://github.com/takecchi/mnemora/issues/818) /
   [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記 /
-  [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md) 追記）。
+  [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md) 追記、PR #827）。
   ⭕ **この repo に同梱の実装（`packages/postgres`/`packages/testkit`）の呼び出しは
   引き続き明示で `true` を渡しており、挙動は無変更。**
 - **`packDigestBand`（`packages/core/src/digest-band.ts`）に負数の `maxEntryChars` を渡すと、
@@ -446,31 +513,6 @@ PR #827）だけであった。
   合流する。新しい Omission 種別も公開 API の変更も無い（PR #824）。
   ⚠ **既定の recall 結果が変わりうる**——`contested` の組の片方を forget した状態で、
   もう片方が recall に当たる呼び出し。
-- **`OutboxStore.complete`/`fail` の CAS（ADR 0142）が `attempts` の一致しか見ておらず、
-  相手側の終端列（`completed_at`/`failed_at`）を見ていなかった。** 同じ `attempts` のまま
-  complete → fail を呼ぶと（逐次でも、本物の Postgres の2接続からの並行でも）、両方の
-  終端が付く矛盾した状態を作れた。先に付いた終端を勝たせるようにした——相手側の終端が
-  既に付いていれば、後から来た `complete`/`fail` は行を変えず例外も投げない
-  （[Issue #826](https://github.com/takecchi/mnemora/issues/826)、PR #830）。
-  ⭕ **公開型は変えていない**——`attempts` 不一致の `OutboxLeaseConflictError` と行が
-  無い場合の no-op、同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は
-  すべて既存どおり。
-- **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
-  処理する `reflect` ジョブ、`processReflectJob`）が、`consolidate` 側の同種の修正
-  （上の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
-  `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `reflect` ジョブを
-  subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の `subjectId`
-  が食い違うと、近傍探索が種と別の subject から候補を拾っていた。`processReflectJob` は、
-  `processConsolidateJob` と同じ形に直した——種の Memory の `subjectId` を `ctx.subjectId` に
-  置いてから `reflect()` を呼ぶ。種が見つからない、または種の `subjectId` が `null` の場合は
-  今日どおり（[Issue #820](https://github.com/takecchi/mnemora/issues/820) /
-  [ADR 0317](./docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
-  追記、PR #851）。
-  ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
-  利用者には何も起きない。migration も不要。
-  ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が
-  構造的に起きなくなる。
-  明示的な `runtime.reflect(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
 
 ---
 
