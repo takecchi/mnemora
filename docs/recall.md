@@ -33,6 +33,10 @@ type RecallResult = {
 
 `index` と `usage` も同じ理由でトップレベルに置く。「何が在るか」（index、§5）と「どれだけの量を返したか」（usage、§6）は、`memories` の中身をどう解釈するかに直接影響する周辺情報であり、後から復元できない。`explain.stages` はパイプラインの実行そのものの記録であり、次節で扱う。
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: `RecallResult` は上の型例には無い任意欄 `outputValidation?` も持つ（[ADR 0098](./decisions/0098-validate-recall-output.md)）。`recall()` の返り値を `RecallResultSchema` で検証した結果であり、`undefined`（検証していない。`RecallRuntimeDeps.outputValidation: "off"`）・`{ ok: true, issues: [] }`（通った）・`{ ok: false, issues }`（落ちた）の3つの状態を取る。既定は `"report"` で、落ちても例外を投げない。型例は書き換えず、ここに追記する。
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の排他性の段落は、段3.5 による昇格と `below_threshold` の取り下げだけを書いている。いまはこれが一般則になっている——**1件の Memory は `omitted` の中で1回だけ、最後にそれを落とした段で数える**（ADR 0203 追記3〜6）。`below_threshold` と `over_limit(stage:"rescore")` は、段3の同伴・段3.5 の席・段3.5 で席に着けなかった分のどの経路で扱われても、`omitted` の中で1回だけ数えられる。詳細は §9.8。
+
 以降の節はこの型の各フィールドを埋めていく作業である。
 
 ---
@@ -52,6 +56,8 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 | 4 | 予算による切り詰め | — | 文字数 / トークン予算で k をさらに絞る |
 | 5 | 目次帯の構築 | 集約クエリ | 群カウントを取る |
 | 6 | 記録 | — | `recalls` へ書き込み、`recallId` を発行する |
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の表の段1の「タグ一致 / 直近」は、実装されていない。段1の候補生成のチャンネルは ANN（既定）と語彙（`RecallQuery.channels` で任意。日本語は opt-in の `PostgresTrigramLexicalStore`）の2つだけである——下の「段1: 候補生成」の追記（Phase 1 の範囲、ADR 0084、ADR 0319）のとおり。タグは段2の `tagMatch` にだけ参加する。
 
 パイプラインの契約として次を明示する。**各段は「なぜ落としたか」を Omission の形にして次の段へ渡す。落とした理由をパイプラインの外で後から復元しようとしない。** 段2で閾値未満として落ちた記憶の識別子とスコアは、段2の中で `Omission { kind: 'below_threshold', ... }` として確定させ、それ以降の段はこれを積み上げるだけにする。パイプラインの最後に「結局何が何件落ちたか」を集計し直す構造にはしない——集計し直す設計は、集計ロジックが実装と乖離した瞬間に `omitted` が嘘をつき始める。
 
@@ -109,6 +115,8 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 | (甲) | `"outside_scope"` | **問うている切り口そのものを定義するゲート**で落ちた——period（いつ）・tenant/subject（誰について）と同じ次元 | **除かれる**（`totalInScope` に入らない） | `archived` / `superseded` / `forgotten` / `period` / `expired` / `not_yet_valid`（`tenant`/`taxonomy` は型に在るが生成されない） |
 | (乙) | `"within_scope"` | **スコープの中に居るまま、到達しにくさのゲート**で落ちた——`below_threshold`/`over_limit`/`budget_dropped`/`ann_truncated`/`not_indexed` と同じ側 | **除かれない**（`totalInScope` の内訳・部分集合） | `decayed` |
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の表の (甲) の「`tenant`/`taxonomy` は型に在るが生成されない」のうち、`taxonomy` はもう成り立たない。[ADR 0323](./decisions/0323-taxonomy-recall-filter.md) 以降、`RecallQuery.labels` の絞り込みで落ちた分は `filtered(condition: 'taxonomy', scopeRelation: 'outside_scope')` として実際に生成される（`recall-runtime.ts` の `aggregate.filteredTaxonomy` の分岐）。生成されないのは `tenant` だけである。
+
 **決め手は `docs/north-star.md`「目指す姿」の逐語である**:
 
 > 使われない記憶が、静かに遠ざかる。——消えるのではなく、遠ざかる。
@@ -154,6 +162,8 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 入力: 段2で残った候補。
 出力: `contested` 状態の Memory について、対向する Memory（`contradicts` の相手）をスコアに関係なく候補に追加した集合。
 既定の recall は `status = 'active'` のみを返し `superseded` を返さない。`contested` は単独で返してはならない——相手を必ず一緒に取得する（mandatory companion retrieval）。詳細な状態遷移とデータモデルは `./memory-model.md` の矛盾の扱いの節に譲る。ここでは recall パイプライン上の位置づけだけを扱う（予算と衝突したときの優先順位は §8 で述べる）。
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の「既定の recall は `status = 'active'` のみを返し」は正確ではない。段1の status ゲートは `status IN ('active', 'contested')` である（§3「段1のクエリ骨格」の訂正1）。`contested` は候補になるが、対向と一緒でなければ返らない——対向が取れなければ Unit ごと落ちて `unit_assembly_dropped` になる（§4 の表）。この規則は段3.5（連想枠）が選んだ `contested` にも同じようにかかる（§9.2 手順7、Issue #959）。
 
 ### 段3.5: 連想（既定 on。`null` で明示的に off。§9 / [ADR 0151](./decisions/0151-recall-association-unprompted.md) / [ADR 0337](./decisions/0337-recall-association-default-on.md)）
 
@@ -239,6 +249,8 @@ LIMIT $3;  -- k' = k × over-fetch 係数
 
 **⚠ 2026-09 追記（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md)、Issue #196）: 上の2番目の訂正（`m.decay_floor_at > now()` を Phase 1 のクエリから外す）は、その後 ADR 0153 が明示的に上書きした。** `recall()` は既定でこの行を段1のクエリに含める（コメントアウトしていたクエリ骨格の1行が、既定で有効になったと読み替えること）。`RecallQuery.includeFullyDecayed: true` を渡すと、この節が書いていた Phase 1 の挙動（この行を含めない）に戻る。理由・引き受けた負債・語彙チャンネル側の扱いは ADR 0153 を参照。**この節の本文・上の3点の記述自体は書き換えない**（履歴を書き換えない）。
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の骨格は、HNSW 索引が取りこぼす候補を含んでいない。pgvector の cosine の HNSW 索引は、ノルムが0のベクトル（ゼロベクトル）を索引に入れない。そのため `PostgresVectorStore.search()`/`searchMany()` は、いまは1本の SQL の中で「ノルムが0でない枝（上の骨格と同じ、HNSW の ORDER BY と LIMIT）」と「ノルムが0の枝（部分索引 `idx_memory_embeddings_zero_norm_<space>` を使い、`recorded_at DESC, memory_id` で LIMIT）」を `UNION ALL` で合わせ、外側で同じタイブレーク（距離 → `recorded_at` DESC → `memory_id`）をかけ直して LIMIT をもう一度かける（[ADR 0343](./decisions/0343-vector-store-search-returns-zero-norm-candidates.md)、Issue #956）。ゼロベクトルの候補は距離が `NaN` になり、段2で `score_not_comparable` に数えられる（ADR 0040・ADR 0044）。ORDER BY に距離演算子の結果をそのまま置くという上の原則は、ノルムが0でない枝でそのまま守られている。
+
 ### over-fetch 係数の決め方
 
 既定案は **k' = k × 4**（k=10 なら k'=40 を取得し、段2で10件に絞る）。この数字に強い根拠はなく、次の裁量として書く。
@@ -248,6 +260,12 @@ LIMIT $3;  -- k' = k × over-fetch 係数
 - テナントのデータ規模が小さいうちは k' が候補総数を超えることがあり、その場合は事実上フルスキャンと同じ精度になる（取りこぼしは発生しない）。
 
 **正直に書くべき限界**: over-fetch は近似である。「段1で k' 位以下に落ちたが、段2の再スコアなら k 位以内に入れたはずの記憶」は、原理的に recall に現れない。これは実装のバグではなく、この構成そのものが持つ性質である。したがって mnemora は取りこぼしを隠さず、`Omission { kind: 'ann_truncated', countKind: 'unknown' }` として結果に出す。`countKind` が `'unknown'` である理由は、ANN が「返さなかった候補」の総数は原理的に数えられないためである(§4)。
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の段落の「`Omission { kind: 'ann_truncated', countKind: 'unknown' }` として結果に出す」は、いまの振る舞いではない。[ADR 0069](./decisions/0069-ann-truncated-says-nothing-about-loss.md) §11 の実装以降、`ann_truncated` は「窓が埋まった」だけでは鳴らず、次の3つの顔を持つ。
+- **鳴らない**: 窓の外の候補が上位 k 件を抜けないと証明できたとき。`omitted` に `ann_truncated` が無いことで表す。
+- **`certainty: 'undecidable'`**（`undecidableReason` つき）: 証明できるかを判定できないとき。たとえば語彙チャンネルを併用しているとき。
+- **`certainty: 'loss_possible'`**（`safetyRatio`（1 未満）と `assumptions` つき）: 損失が起こりえたとき。
+型例（§4）は書き換えず、§4 の型の追記にもこの欄を足した。
 
 ---
 
@@ -376,6 +394,12 @@ taxonomy + status）に**入っていない**——減衰しきった Memory は
 ゲートと `minSimilarity`/除外集合を通過し類似度降順に並び終えた、JS 側で確定済みの
 集合である。DB への未取得候補ではない（`decayed` が ANN の押し下げで原理的に数え
 られない `lower_bound` なのとは対照的）。⟹ `countKind` は常に `'exact'`。
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上のコード例は、ほかにも次の点でいまの型と違う（型例は書き換えず、ここに足す）。
+- `stage_skipped` の `stage` は `'association'` も持ち、`reason` は `'vector_store_lacks_get_vectors'`・`'no_anchor'` も持つ（段3.5、§9.2 手順2・3）。
+- `filtered` の `condition` は `'expired'`・`'not_yet_valid'`（`validAt` ゲート、ADR 0164）も持つ（`'decayed'` と `scopeRelation` は上の追記のとおり）。
+- `ann_truncated` は `certainty: 'loss_possible' | 'undecidable'` と、任意の `safetyRatio`・`assumptions`・`undecidableReason` を持つ（ADR 0069。§3「over-fetch 係数の決め方」の追記）。
+型の出所は `packages/core/src/recall.ts` の `Omission` である。
 
 **`ann_truncated` と `ann_unreached` の違い（2026-09 追記、[ADR 0025](./decisions/0025-ann-underfill-is-not-reported-in-omitted.md)・[ADR 0026](./decisions/0026-ann-unreached-omission.md)。
 2026-09-17 [ADR 0193](./decisions/0193-ann-unreached-covers-full-window.md) が排反の記述を訂正）**:
@@ -796,6 +820,8 @@ Phase 2 に含める」は前倒しで実装され、もう成り立たない。
 
 **⛔ ただし Phase 1 / Phase 2 の線は動いていない。**オーナーの指示により**「1件1行の要旨を出す機能」1つだけを前倒しで実装した**。`taxonomy` 軸によるグルーピング・`labels` / `memory_labels`・その他の Phase 2 の項目は**前倒しされていない**。**1つの機能が前に出ただけであり、Phase 2 が始まったわけではない。**
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の段落の「`labels` / `memory_labels`・その他の Phase 2 の項目は前倒しされていない」は、もう成り立たない。直前の 2026-09-25 追記のとおり、`labels`/`memory_labels` と taxonomy による絞り込み・群カウントは [ADR 0318](./decisions/0318-taxonomy-labels.md)/[ADR 0323](./decisions/0323-taxonomy-recall-filter.md) で実装された。
+
 **⚠ そして帯には上限が要る。**上の「1テナントが100万件の Memory を持ちうる設計で、digest 1行ずつでもプロンプトに載せれば数十万文字になる」という段落が述べているとおり、**上限のない digest 帯はこの文書が明示的に落とした案である**。実装は**件数・帯全体の文字数・1件あたりの長さの3つ**の上限を持ち、どの上限で切れたかを `IndexBand.digestBandCoverage.limitedBy` で名乗る。**切り詰められたものは第3階の群カウントに乗り続けるため、被覆不変条件は壊れない**——三階建てはそのために在る。理由と採らなかった案は [ADR 0073](./decisions/0073-digest-band-bounded-without-taxonomy.md)。
 
 
@@ -1182,9 +1208,11 @@ Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密�
 
 recall は既定で `status = 'active'` の Memory のみを候補にする。ただし `contested`(判定できない矛盾)の Memory は、候補になった時点で**単独では返さない**。対向する Memory(`contradicts` の相手)をスコアに関係なく候補集合へ追加する。これが段3の仕事であり、`RecalledMemory.retrievedVia = 'mandatory_companion'` として、それがスコアで選ばれたのではなく矛盾解決のために強制的に足されたことを型で示す。
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の「recall は既定で `status = 'active'` の Memory のみを候補にする」は正確ではない。候補にするのは `status IN ('active', 'contested')` である（§3「段1のクエリ骨格」の訂正1）。`contested` を候補にしたうえで、単独では返さない——この段落の続きのとおりである。
+
 **対向する2件が、同伴取得を経由せずどちらも自然にスコアで候補に残ることもある**(Issue #691 続き、[ADR 0335](./decisions/0335-recalled-memory-contested-with.md))。この場合 `retrievedVia` はどちらも `'ann'`/`'lexical'` のままで `companionOf` も付かないが、`RecalledMemory.contestedWith` が両側に対称に付く——`retrievedVia` を問わず「矛盾の相手が同じ recall 結果に含まれるか」だけを見る欄である。相手が budget 切り詰め後の最終的な結果集合に含まれないとき(連想枠経由で単独候補になった場合など)は付かない。
 
-**⚠ 2026-09-27 追記（Issue #959 / [ADR 0151](./decisions/0151-recall-association-unprompted.md) 2026-09-27 追記 / [ADR 0335](./decisions/0335-recalled-memory-contested-with.md) 2026-09-27 追記）: 上の「連想枠経由で単独候補になった場合」は解消された。** 段3.5（連想枠、§9）が選んだ `contested` にも、段3と同じ必須の同伴取得規則をかけるようになった——対向が取れれば1つの Unit として一緒に返り（このとき初めて `contestedWith` が対称に付く）、対向が取れなければ Unit ごと落ちて `unit_assembly_dropped`（下記の表）を名乗る。**「対向を伴わない単独の `contested`」という中間状態そのものが、段3.5経由でも構造的に起きなくなった。**この段落の本文は当時の記述として書き換えていない——詳細・境界（一対一が壊れた場合の多層防御など）は上記 ADR を参照。
+**⚠ 2026-09-27 追記（Issue #959 / [ADR 0151](./decisions/0151-recall-association-unprompted.md) 2026-09-27 追記 / [ADR 0335](./decisions/0335-recalled-memory-contested-with.md) 2026-09-27 追記）: 上の「連想枠経由で単独候補になった場合」は解消された。** 段3.5（連想枠、§9）が選んだ `contested` にも、段3と同じ必須の同伴取得規則をかけるようになった——対向が取れれば1つの Unit として一緒に返り（このとき初めて `contestedWith` が対称に付く）、対向が取れなければ Unit ごと落ちて `unit_assembly_dropped`（§4 の表）を名乗る。**「対向を伴わない単独の `contested`」という中間状態そのものが、段3.5経由でも構造的に起きなくなった。**この段落の本文は当時の記述として書き換えていない——詳細・境界（一対一が壊れた場合の多層防御など）は上記 ADR を参照。
 
 **予算(段4)と衝突したときの優先順位: 同伴を落とすくらいなら本体を落とす。** `contested` の Memory とその対向は必ずペアで扱い、ペアを分割して片方だけを予算内に残すことはしない。予算が両方を載せられない場合、そのペア全体を候補から外し、`Omission { kind: 'budget_dropped', ... }` に含める(あるいは、そのペアの片方だけを「争われている」という印を付けて残す設計も選択肢としてあり得るが、Phase 1 の既定は「両方落とす」とし、争われている主張を争われていない顔で出すという事故を避ける側に倒す)。**争われている主張を、争われていない顔で出すくらいなら、両方とも出さない**——これが原則1の recall パイプライン上の実装である。
 
