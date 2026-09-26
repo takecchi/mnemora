@@ -45,6 +45,7 @@ vi.mock("bullmq", () => {
     close = vi.fn().mockResolvedValue(undefined);
     // 実 EventEmitter と同じく、on() で登録したリスナーを実際に呼べるようにしておく
     // （run() の reject を `worker.emit("error", ...)` で流す実装を検査するため）。
+    emit = vi.fn();
     private listeners: Record<string, Array<(...args: unknown[]) => void>> = {};
     constructor(..._args: unknown[]) {
       workerCtorArgs.push(_args);
@@ -53,7 +54,7 @@ vi.mock("bullmq", () => {
         (this.listeners[event] ??= []).push(listener);
         return this;
       });
-      this.emit = vi.fn().mockImplementation((event: string, ...args: unknown[]) => {
+      this.emit.mockImplementation((event: string, ...args: unknown[]) => {
         for (const listener of this.listeners[event] ?? []) {
           listener(...args);
         }
