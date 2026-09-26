@@ -101,6 +101,26 @@ function isDecayedForScope(
   return !activityAlive;
 }
 
+/**
+ * Issue #881 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md) 追記
+ * （2026-09-26、クローン miku の判断）: `listLabels?` の `name` 昇順を**コードポイント順**
+ * （Postgres の `COLLATE "C"` と同じ、バイト順）と定めた。この比較関数はそれを実装する。
+ *
+ * ⚠ **限界**: JS の `<`/`>` は UTF-16 コード単位を比較する。BMP（U+0000〜U+FFFF）の
+ * 範囲内では UTF-16 コード単位の値とコードポイントの値が一致するため問題にならないが、
+ * サロゲートペア（U+10000 以上、絵文字など）を含む名前では、コード単位の比較が
+ * コードポイントの比較と食い違いうる（サロゲート自体の値 U+D800〜U+DFFF が
+ * U+E000〜U+FFFF の BMP 文字より小さいコード単位として並んでしまうため）。
+ * `COLLATE "C"` は UTF-8 のバイト列を比較しており、UTF-8 のバイト順はコードポイント順と
+ * 単調に対応する（サロゲートという中間表現を経由しない）ため、この限界は Postgres 側には
+ * 無い。label 名にサロゲートペアが混在するケースでの Postgres との厳密な一致は
+ * 確かめていない——実運用の label 名（tags）が主に ASCII/BMP を想定している現状では
+ * 影響が小さいと見て、この限界を許容する判断にした。
+ */
+function compareLabelName(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly observations = new Map<string, Observation>();
   private readonly memories = new Map<string, Memory>();
@@ -1568,6 +1588,11 @@ export class InMemoryMemoryStore implements MemoryStore {
   /**
    * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * `listLabels?`（`PostgresMemoryStore.listLabels` と同じ契約）。
+   *
+   * Issue #881 / ADR 0318 追記（2026-09-26、クローン miku の判断）: `name` の並び順は
+   * **コードポイント順**（Postgres の `COLLATE "C"` と同じ、バイト順）と決めた。
+   * `localeCompare`（ロケール依存の自然順）はこの契約とずれる——`compareLabelName`
+   * （このファイル下）に置き換える。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
@@ -1577,7 +1602,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         results.push(label);
       }
     }
-    results.sort((a, b) => a.name.localeCompare(b.name));
+    results.sort((a, b) => compareLabelName(a.name, b.name));
     return results;
   }
 

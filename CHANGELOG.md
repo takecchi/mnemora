@@ -111,6 +111,13 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `RecallQuery.validAt` ゲートを既定で有効にした際も同様に非破壊と判定している）。
   （Issue #337 のオーナー決定（ask_human ac5953d1、2026-09-25T21:11Z、選択肢「あ」）／
   [ADR 0337](./docs/decisions/0337-recall-association-default-on.md)、PR #838）。
+- ロケールが `C` ではない Postgres（既定の照合順序が `C` 以外の DB、例: `en_US.utf8`）を
+  使っている場合、`MemoryStore.listLabels?`（`PostgresMemoryStore`）が返す配列の並び順が
+  変わりうる——`name` の**コードポイント順**（`COLLATE "C"` と同じ、バイト順）を明示する
+  ように直した（修正前は DB の既定の照合順序に従っていた）。`FakeMemoryStore`/
+  `InMemoryMemoryStore` も同じ順序（`localeCompare` ではなくコードポイント比較）に揃えた
+  （Closes [Issue #881](https://github.com/takecchi/mnemora/issues/881) /
+  [ADR 0318](./docs/decisions/0318-taxonomy-labels.md) 追記、PR #TBD）。
 
 ### Fixed
 

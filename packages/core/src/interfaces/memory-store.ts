@@ -1282,7 +1282,11 @@ export interface MemoryStore {
    * はいけないこと」表の「公開 API の破壊的変更」、ADR 0100 決定1と同じ理由）。
    *
    * 契約:
-   * - `name` 昇順で返す。並び順の保証はこの1点のみ。
+   * - `name` の**コードポイント順**（Postgres の `COLLATE "C"` と同じ、バイト順）の
+   *   昇順で返す。並び順の保証はこの1点のみ（Issue #881 / 本 ADR 追記
+   *   （2026-09-26、クローン miku の判断）: ロケール依存の自然順（例:
+   *   `String.prototype.localeCompare` の既定ロケール、DB の既定照合順序）は
+   *   実装や実行環境によって互いにずれるため、契約からは外した）。
    * - `status` は `'registered'` か `'proposed'` のいずれか。
    * - `proposedCount` は「この名前を `tags` に含む Memory が新規作成された回数」の
    *   近似値である——**厳密な『いまこの名前を持つ生きた Memory の数』ではない**

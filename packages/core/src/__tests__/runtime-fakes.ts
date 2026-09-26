@@ -170,6 +170,21 @@ function isDecayedForScope(
   return !activityAlive;
 }
 
+/**
+ * Issue #881 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md) 追記
+ * （2026-09-26、クローン miku の判断）: `listLabels?` の `name` 昇順を**コードポイント順**
+ * （Postgres の `COLLATE "C"` と同じ、バイト順）と定めた。`packages/testkit` の
+ * `InMemoryMemoryStore`（`in-memory-memory-store.ts` の同名関数）と同じ実装・同じ限界。
+ *
+ * ⚠ **限界**: JS の `<`/`>` は UTF-16 コード単位を比較するため、サロゲートペア
+ * （U+10000 以上、絵文字など）を含む名前ではコードポイント順と食い違いうる。詳細は
+ * `packages/testkit` の同名関数の doc コメントを見ること——実運用の label 名（tags）が
+ * 主に ASCII/BMP を想定している現状では影響が小さいと見て、この限界を許容している。
+ */
+function compareLabelName(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
 export class FakeMemoryStore implements MemoryStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
@@ -409,6 +424,10 @@ export class FakeMemoryStore implements MemoryStore {
 
   /**
    * Issue #201 PR-B（ADR 0323）: `listLabels?`（`InMemoryMemoryStore.listLabels` と同じ契約）。
+   *
+   * Issue #881 / ADR 0318 追記（2026-09-26、クローン miku の判断）: 並び順は
+   * `compareLabelName`（このファイル上）——コードポイント順。`localeCompare` はこの
+   * 契約とずれるため使わない。
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
@@ -418,7 +437,7 @@ export class FakeMemoryStore implements MemoryStore {
         results.push(label);
       }
     }
-    results.sort((a, b) => a.name.localeCompare(b.name));
+    results.sort((a, b) => compareLabelName(a.name, b.name));
     return results;
   }
 
