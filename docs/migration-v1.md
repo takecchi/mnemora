@@ -1008,9 +1008,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 **実行時**: 次の2種類に分けた。
 
 - 🔴 **計上を保留しているもの**——公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるもの（オーナーへの問い `3f3411c5` の射程）。上の世代の PR #811/#813/#815 と同じ論点であり、**同じ問い（ask_human `3f3411c5`、未回答）の答えを待つ。**この基準は当初「…または公開の fixture の結果が変わるもの」と書いていたが、2026-09-27 にクローン miku の判断で狭めた（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の前書きの訂正）。
-  - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。⚠ 公開の fixture ではないので、狭めた基準の文言には当たらない。扱いをクローン miku に確認しているあいだ、ここに置く。
   - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、Postgres の拒む入力（`archiveDecayed` の不正な `limit`・`reinforce` の Invalid Date・float4 の範囲外の `halfLifeHours`・NUL を含む文字列）で例外を投げるようになった（Issue #880・#807・#817・#816、PR #923・#928）。
 - ⭕ **非破壊と数えたもの**——例外を投げなくなった修正と、例外を投げず公開の fixture の結果だけが変わる修正。**この判定はクローン miku の判断であり、オーナーの判断ではない（覆りうる）。**
+  - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。⚠ 公開の fixture ではないので、狭めた基準の文言には当たらない。扱いをクローン miku に確認しているあいだ、ここに置く。 有限でないベクトルを返すのはもともと `EmbeddingProvider` の約束に反した出力であり、それを黙って返すのをやめた修正なので非破壊と数える（クローン miku の判断。オーナーの判断ではない）。
   - 公開の fixture の結果だけが変わるもの: `InMemoryLexicalStore` の一致判定を `PostgresLexicalStore` に揃えた件（Issue #951。非 ASCII だけのクエリが0件になるなど）・同点の並び順（PR #875）・クエリの上限（PR #919）、`InMemoryMemoryStore.listLabels?` の並び順（PR #906）、`InMemoryVectorStore` の次元違いの距離を `NaN` にする件（PR #915）・距離 `NaN` の候補の位置（PR #985）、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail`（PR #830）、`search` の3口が `ctx.tenantId` でも絞る件（Issue #1050、PR #1056。`@mnemora/postgres` も同じ）。
   - forget/restoreArchived/purge が、ループ前の読みや CAS の後の再読に失敗しても例外を外へ投げず、`failed`/`not_attempted` を返す（Issue #964、PR #960）。
   - `runMigrations`/`registerEmbeddingSpace` が、DB 側の接続断でプロセスごと落ちなくなった（Issue #859）。
