@@ -295,3 +295,70 @@ git log -S"  tick(" --format='%h %ai %s' -- packages/core/src/runtime.ts | tail 
 - **`compare` ベンチ・DB テストは実行していない**（`DATABASE_URL` が無い環境。
   `docs/autonomy.md` §1.1）——本 ADR はドキュメントのみの変更であり、実行時の挙動に
   触れていないため実害は無いと考えるが、実測はしていない。
+
+---
+
+## 追記（2026-09-26、Issue #605）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。
+> ⛔ オーナー本人の判定ではない
+> （[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**「これが覆るとしたら」の3項目のうち、「将来の自動検出」の条件が成立したことを、クローン
+miku が Issue #605 の検算を受けて認めた。**成立させたのは
+`7987de4`（[#745](https://github.com/takecchi/mnemora/pull/745)、
+[ADR 0324](./0324-claim-key-contested-detection.md)）が入れた
+`detectClaimKeyContested`（`packages/core/src/runtime.ts`）である。既定 off
+（`ClaimKeyOptions.detectContested`）・`observe()` の同期経路でのみ動き、LLM を呼ばず
+列と索引だけで同じ主張キー・重なる有効期間・違う内容の Memory を探し、候補がちょうど1件
+なら `markContested` を呼ぶ。
+
+**この条件成立を受けた扱い: 層の名前・決定1の定義文はどちらも変えない。**理由は次の
+2点である。
+
+1. **是正・取り消し層は「口」の形で定義されている**——`markContested`/`resolveContested`
+   という口が何を書き込むかで層を切っており、その口を*誰が*呼ぶかは定義の外側にある。
+   検出器は `markContested` の新しい呼び出し元の一つが増えただけであり、口そのものの
+   契約（書き込む内容・書き込む形）は変わっていない。
+2. **定義の核**——「どちらが正しいかを mnemora 自身は判定しない」——**は今も真である。**
+   `detectClaimKeyContested` は「同じ主張キー・重なる有効期間・違う内容・両方 active」
+   という機械的事実だけを見て `contested` にするところで止まり、`content` のどちらが
+   正しいかには一切触れない（[ADR 0324](./0324-claim-key-contested-detection.md) 決定1・
+   文脈節）。
+
+⟹ **記録として残すのはこの読みである**: `markContested`/`resolveContested` の呼び出し元は
+「人・上位アプリケーション層」に加えて、**「既定 off の mnemora 内の検出器」**にもなった。
+呼び出し元の集合が増えたことは、層の説明文（「呼び出し側（人・上位アプリケーション層・
+将来の自動検出）が既に下した判断を…書き込む口」）が予め用意していた `将来の自動検出`
+という語で吸収できる範囲であり、説明文そのものを書き換える必要は無いと判断した。
+
+**決定1の member 列挙（本文・書き換えない）の後、是正・取り消し層の実員は2本増えている**
+——**`restoreSuperseded`**（本 ADR より後、
+[ADR 0230](./0230-restore-superseded-recovery-path.md)）と**`resolveOrphanedContested`**
+（[Issue #825](https://github.com/takecchi/mnemora/issues/825)、`7ab8948`、任意メソッド
+`?`）である。**いずれも本 ADR の決定1 の逐語 member 列挙（`markContested`/
+`resolveContested`/`restoreArchived`/`purge`、4本）には無い**——本 ADR がこの2本の存在
+以前に書かれているためであり、一度も検算していない。【実測】`main = 7849377`
+（2026-09-26）時点で、README.md / docs/vision.md / docs/architecture.md の3文書が
+名指しする是正・取り消し層の実員は `markContested` / `resolveContested` /
+`resolveOrphanedContested` / `restoreArchived` / `restoreSuperseded` / `purge` の
+**6本**、`Runtime` interface 全体では**18本**（Issue #605 の検算コメント参照）。
+
+**採らなかった案**:
+
+- **層の定義文（決定1の本文）を書き換える。**⛔ 採らない——定義の核（「どちらが正しいか
+  判定しない」）は崩れていないのに本文を書き換えると、何が変わって何が変わっていないかが
+  追記より読み取りにくくなる。本文は当時の判断の記録として残し、この追記で扱いを示す
+  ほうが、上の「これが覆るとしたら」で予告していた形（覆ったときに何が起きるかを先に
+  書いておく）にも合う。
+- **層の正しさを機械で縛る歯を足す。**⛔ 採らない
+  ——[ADR 0244](./0244-runtime-method-doc-correspondence-tooth.md) が既に見立てている
+  通り、3層への振り分けは意味の判定であり機械には決まらない（同 ADR 決定5）。この追記も
+  その見立てを覆さない。
+
+**副次的に見つかったこと**: Issue #605 の検算コメント群が使ってきた `Runtime` の
+メソッド数え方（`grep -cE '^  [a-zA-Z]+\('`）は、`resolveOrphanedContested?` のような
+TypeScript の任意メソッド構文（`name?(`）を取りこぼす——`?` が正規表現の想定に無いためで
+ある。本 ADR の「14個という数の検算」節・「分類の検算」節が書かれた 2026-09-16 時点では
+`Runtime` に `?` 付きメソッドが存在しなかったため、この取りこぼしは踏まれていなかった。
