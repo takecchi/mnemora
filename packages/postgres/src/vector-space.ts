@@ -4,6 +4,7 @@ import {
   assertSafeIdentifier,
   embeddingSpaceIndexName,
   embeddingSpaceTableName,
+  embeddingSpaceZeroNormIndexName,
 } from "./embedding-space-table.js";
 import {
   AdvisoryLockTimeoutError,
@@ -235,8 +236,10 @@ export async function registerEmbeddingSpace(
 
   const table = embeddingSpaceTableName(space);
   const index = embeddingSpaceIndexName(space);
+  const zeroNormIndex = embeddingSpaceZeroNormIndexName(space);
   assertSafeIdentifier(table);
   assertSafeIdentifier(index);
+  assertSafeIdentifier(zeroNormIndex);
 
   const lockTimeoutMs = options.lockTimeoutMs ?? DEFAULT_LOCK_TIMEOUT_MS;
   // Issue #779: `migrate.ts` の `runMigrations` と同じ形——`schema` 未指定かつ
@@ -278,6 +281,50 @@ export async function registerEmbeddingSpace(
       CREATE INDEX IF NOT EXISTS ${index}
         ON ${qualify(schema, table)}
         USING hnsw (embedding ${qualify(extensionSchema, "vector_cosine_ops")});
+    `);
+
+    // Issue #956: 上の HNSW 索引（cosine 距離）は norm が0のベクトル（ゼロベクトル）を
+    // そもそも索引へ入れない——pgvector の README「Why are there less results for a
+    // query after adding an HNSW index?」の "Also, note that `NULL` vectors are not
+    // indexed (as well as zero vectors for cosine distance)."、実装は pgvector
+    // `src/hnswutils.c` の `HnswFormIndexValue`/`HnswCheckNorm`（norm が0以下なら
+    // `false` を返し、そのタプルは索引に追加されない）。⟹ `search()`/`searchMany()`
+    // が HNSW Index Scan を選ぶと、ゼロベクトルの候補は ADR 0040 の契約
+    // （比較不能でも候補として返す）に反して結果から消える。
+    //
+    // この部分索引は、`search()`/`searchMany()` がゼロベクトルの候補だけを別枝
+    // （`UNION ALL`）で拾うために使う。`WHERE vector_norm(embedding) = 0` に絞るため、
+    // テーブル全体の行数に関係なく、この索引が持つ行数（通常0件）だけを読む
+    // （`vector-store.ts` の doc コメント参照。`EXPLAIN` で実測済み）。
+    //
+    // ⚠ **この索引を作る経路は2つある。** ここ（新しく空間を作る・または
+    // `registerEmbeddingSpace` が再実行されたとき）と、
+    // `migrations/0022_embedding_zero_norm_index.sql`（migration 適用の時点で
+    // 既に存在する空間に、この場で作る）——`memory_embeddings_<space>` テーブルと
+    // HNSW 索引自体は migrations/*.sql に無く（`<space>` が動的な値のため）
+    // `registerEmbeddingSpace` だけが作ってきたが、**この部分索引だけは
+    // 0022 でも作る**——アプリケーションが `mnemora-postgres-migrate` を実行しても、
+    // 実際にプロセスを再起動する（＝ここが呼ばれ直す）までは既存の空間にこの索引が
+    // 無いままになる窓があり、0022 はその窓を無くすために足された（ADR 0343）。
+    // **どちらの経路が先に作っても、索引名は `embeddingSpaceZeroNormIndexName` の
+    // 同じ計算から1バイトも違わずに一致する**（0022 の DO ブロックが SQL で同じ
+    // 計算を再現している——`embedding-zero-norm-migration.postgres.test.ts` が
+    // 実測で固定している）ため、`IF NOT EXISTS` により後から呼ばれたほうは
+    // 何もしない。
+    //
+    // ⚠ **既存の大きな embedding テーブルに対しては、この `CREATE INDEX`（`CONCURRENTLY`
+    // を使わない素の形）が対象テーブルに `ShareLock` を取り、構築が終わるまで
+    // 書き込み（`INSERT`/`UPDATE`/`DELETE`）を止める（読み取りは止めない）**
+    // ——【実測、`pg_locks`・別セッションからの `SELECT`/`INSERT` で確認、ADR 0343】。
+    // `CONCURRENTLY` を使えない理由は別にある——`migrate.ts` は1ファイル=1トランザクション
+    // だが、`registerEmbeddingSpace` 自体はトランザクションを開かない代わりに
+    // advisory lock で直列化しており、`CONCURRENTLY` は別の理由（索引が2本同時に
+    // 作られる競合を pgvector 側で検査していない）で見送っている——詳細は ADR 0343
+    // 「引き受けた負債」）。実測した構築時間は同 ADR を参照。
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS ${zeroNormIndex}
+        ON ${qualify(schema, table)} (tenant_id, memory_id)
+        WHERE ${qualify(extensionSchema, "vector_norm")}(embedding) = 0;
     `);
   } finally {
     await releaseAdvisoryLock(lockClient, lockKey);

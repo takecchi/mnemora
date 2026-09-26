@@ -312,3 +312,71 @@ export すれば公開 API 表面に出る）。段3.5の2箇所は private な�
   受け取ったときの並び順だけである。
 - V8 以外の JS エンジンでの `Array.prototype.sort` の挙動（比較関数が不整合なときの
   実装定義の振る舞い）は確かめていない。
+
+---
+
+## その後（2026-09-27）—— pgvector の HNSW（cosine）索引はゼロベクトルを索引化しない。決定1は `search()`/`searchMany()` 側で部分索引 + `UNION ALL` を足して満たす（Issue #956、ADR 0343）
+
+⛔ 上の本文・前の3つの追記は1バイトも書き換えていない。同じ形で追記する。
+
+### 原因
+
+pgvector の cosine 距離用 HNSW 索引は、norm が0のベクトル（ゼロベクトル）をそもそも
+索引へ追加しない。**【受、pgvector README】**「Troubleshooting」節・「Why are there
+less results for a query after adding an HNSW index?」の直下: *"Also, note that
+`NULL` vectors are not indexed (as well as zero vectors for cosine distance)."*
+（<https://github.com/pgvector/pgvector/blob/master/README.md#hnsw>）。**【現物、
+pgvector 0.8.0 のソース】** `src/hnswutils.c` の `HnswFormIndexValue` が
+`HnswCheckNorm`（norm が0より大きいかを返す）で確認し、`false` ならその行を索引に
+追加しない。⟹ `PostgresVectorStore.search()`/`searchMany()` の `ORDER BY <=> LIMIT`
+が HNSW の Index Scan を経由すると、ゼロベクトルの候補は索引に存在しないため
+構造的に結果へ出てこない——本 ADR 決定1（「比較不能でも候補として返す」）への違反に
+なる。この違反は統計の新旧・テーブルの大小に関係なく、HNSW Index Scan が選ばれれば
+常に起きる（`enable_seqscan`/`enable_bitmapscan` を切って強制した場合・自然に
+HNSW が選ばれた場合のどちらでも、`hnsw.iterative_scan` の3モード
+（`off`/`relaxed_order`/`strict_order`）いずれでも同じ）。
+
+CI が使う `pgvector/pgvector:pg17` イメージは pgvector 0.8.6 を指す（【受、Docker Hub
+のタグ】2026-09-27時点）。上の実測は手元の 0.8.0（Debian パッケージ）に基づく——
+コンパイラ（`gcc`/`make`）を用意できない環境だったため、0.8.6 を手元でビルドしての
+再確認はしていない。
+
+### 直したこと
+
+`packages/postgres/src/vector-store.ts` の `search()`/`searchMany()` を、
+「`vector_norm(embedding) > 0` の候補（今日と同じ HNSW 経由）」と
+「`vector_norm(embedding) = 0` の候補（新設した部分索引経由）」の2枝を
+`UNION ALL` で合わせ、外側で3段 tie-break（距離→`recorded_at` DESC→`memory_id`）を
+掛け直して `LIMIT` を再適用する1本の SQL 文に変えた。ゼロ枝は
+`packages/postgres/src/vector-space.ts` の `registerEmbeddingSpace()` が
+`CREATE INDEX IF NOT EXISTS ... WHERE vector_norm(embedding) = 0` で作る部分索引を
+使う——テーブル全体の行数に関係なく（通常0件の）ゼロベクトル行だけを読む。往復数は
+増えていない（`UNION ALL`・再ソートは1本の SQL 文の中に収めた。`searchMany()` の
+往復数がアンカー数に依存しないという Issue #377 の契約も実測で確認済み）。詳細・
+EXPLAIN・往復数・索引構築時間の実測は [ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md)。
+
+### 引き受けた負債・migration の扱い
+
+既存の埋め込みテーブルへの部分索引の追加は、素の `CREATE INDEX`（`CONCURRENTLY` 無し）
+のため `ShareLock` で対象テーブルへの書き込みを止める（読み取りは止めない——`pg_locks`・
+別セッションからの `SELECT`/`INSERT` で実測、[ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md)
+追記）。実測した構築時間は100,000行で約40ms、1,000,000行で約270ms
+（同 ADR「実測」節）。`memory_embeddings_<space>` テーブルと HNSW 索引自体は最初から
+`packages/postgres/migrations/*.sql` に一度も現れたことが無く（`<space>` は動的な値で
+migration 作成時点では列挙できないため）、`registerEmbeddingSpace`（プロセス起動の
+たびに呼ばれる、べき等な `CREATE ... IF NOT EXISTS`）だけが作ってきた。この部分索引は
+それに加えて、**migration（`packages/postgres/migrations/0022_embedding_zero_norm_index.sql`）
+でも作る**——`DO` ブロックで、適用時点に存在する埋め込みテーブルを列挙し、
+`embeddingSpaceZeroNormIndexName`（TypeScript）と同じ計算を SQL で再現した名前で
+`CREATE INDEX IF NOT EXISTS` する。**新しく作る空間は `registerEmbeddingSpace` が、
+migration 適用時点で既に存在する空間は 0022 が作る**——名前が一致するため、
+どちらが先でも `IF NOT EXISTS` により重複しない（詳細・実測は
+[ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md) 決定4）。
+
+### 確かめていないこと
+
+- pgvector 0.8.6（CI が実際に使う版）での動作再確認。
+- `halfvec`/`sparsevec`、内積・L2距離での同じ構造的欠落の有無。
+- 100万行を大きく超える規模での部分索引の構築時間、同時実行下でのレイテンシ増分。
+- schema-namespace（ADR 0057）を実際に指定した状態での、`registerEmbeddingSpace` の
+  新しい `CREATE INDEX` の実機での動作。
