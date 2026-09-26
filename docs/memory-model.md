@@ -518,8 +518,8 @@ docs/decisions/0011-no-window-count-in-ann-stage.md を参照。）
 
 上の節は壁時計（`decay_floor_at`）だけを扱っている。**[ADR 0165](./decisions/0165-decay-activity-clock.md)
 はもう1本、活動時計（`decay_floor_seq`）を足しており、その「いま」は `tenant_activity`
-（テナントごとに1行、列は `tenant_id` / `activity_seq` / `updated_at` の3つだけ——上の
-DDL は §10 参照）が持つ。** `activity_seq` は `decay_clock` を `'wall'` 以外に設定した
+（テナントごとに1行、列は `tenant_id` / `activity_seq` / `updated_at` の3つだけ——DDL は
+`packages/postgres/migrations/0015_decay_activity_clock.sql` 参照）が持つ。** `activity_seq` は `decay_clock` を `'wall'` 以外に設定した
 テナントで、`recall()` が1回起きるたびに `MemoryStore.createRecall` と同一トランザクションで
 +1 される単調増加のカウンタである（`observe()` は数えない）。
 
@@ -879,6 +879,8 @@ postgres 実装（`packages/postgres/src/memory-store.ts`）とも揃ってい�
 purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームストーン済み（実装済み。Issue #198 / ADR 0124）
 ```
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: `purge()` が書き換えるのは、いまは `memories` の `content`・`digest`・`purged_at` だけであり、あわせて今の `embeddingProvider.space` の埋め込み行をベストエフォートで消す（ADR 0124 決定4・決定5）。それ以外の次のものは元の値のまま残る——`tags`・`attributes`・claimKey の2列・`content_hash`、`labels`/`memory_labels` の行、別の空間の埋め込み行、元の Observation の `payload`、`memory_events.digest_snapshot`、そして purge より前の recall の記録（`recalls.index_band` の digest 帯、および `consolidate`/`reflect` が種の digest を `text` にして撃った recall の `recalls.query`）。ここでは現状を記録するだけで、どこまで消すかは決まっていない（[Issue #994](https://github.com/takecchi/mnemora/issues/994)・[Issue #995](https://github.com/takecchi/mnemora/issues/995)、オーナーの判断待ち）。
+
 ---
 
 ## 10. DB schema 案
@@ -888,6 +890,14 @@ NOT NULL とし、全ての一意制約・索引の先頭列に置く**（[ADR 0
 アプリケーションコードの慎重さではなく、スキーマの形そのものによって保証されることを
 意味する。
 
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: この節の `CREATE TABLE` は、後から migration で足した列・表をすべては写していない。実物（`packages/postgres/migrations/`）にあって、この節の DDL に無いものは次のとおり。
+- `memories`: `decay_base_seq`・`decay_floor_seq`・`half_life_recalls`（0015、ADR 0165）、`attributes`（0019、ADR 0312）、`claim_key_subject`・`claim_key_predicate`（0021、ADR 0320）。
+- `observations`: `valid_from`・`valid_until`（0014）、`attributes`（0019）。
+- `tenant_settings`: `decay_clock`・`default_half_life_recalls`（0015）。
+- 表 `tenant_activity`（0015。列は `tenant_id`・`activity_seq`・`updated_at`）。
+- 埋め込み空間の表のゼロノルムの部分索引（0022。下の「埋め込み空間」の例の後の追記）。
+また `memories` の DDL の `valid_from`/`valid_until` に付いている「Phase 2」は、[ADR 0164](./decisions/0164-valid-from-until-recall.md) の `validAt` ゲートで読まれるようになっている。列の型・既定値・制約の正本は migration である。
 ### 前提: pgvector のバージョン
 
 - **`>= 0.8.0` を必須**とする。iterative index scan（`hnsw.iterative_scan`）が §7 の
@@ -1172,6 +1182,8 @@ CREATE INDEX idx_memory_embeddings_openai_1536_hnsw
   ON memory_embeddings_openai_text_embedding_3_small_1536
   USING hnsw (embedding vector_cosine_ops);
 ```
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 実物の索引名は `idx_memory_embeddings_hnsw_<space>` の形である（上の例の `idx_memory_embeddings_openai_1536_hnsw` は説明用の名前）。さらに、ノルムが0のベクトルを引くための部分索引 `idx_memory_embeddings_zero_norm_<space>`（`(tenant_id, memory_id) WHERE vector_norm(embedding) = 0`）がある。pgvector の cosine の HNSW 索引はゼロベクトルを索引に入れないためで、新しい空間は `registerEmbeddingSpace` が、既存の空間は migration `0022_embedding_zero_norm_index.sql` が作る（[ADR 0343](./decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。名前の作り方は `packages/postgres/README.md` の同じ節を見ること。
 
 Phase 1 は**稼働中の空間を1つに限る**。2つ目の空間（例えばモデル移行後の新しい埋め込み）を
 追加する操作は、既存テーブルの行を書き換えるマイグレーションにはならない——**新しい
