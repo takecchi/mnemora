@@ -88,6 +88,23 @@ export class ContestedWithoutCompanionError extends Error {
  * adapter（`packages/postgres`・`packages/testkit`）それぞれで書き写さず、ここ1箇所に
  * 置く——判定基準が adapter ごとにずれることを防ぐ（ADR 0053 の
  * `isEmbeddingStatusRollback` と同じ形の判断）。
+ *
+ * ⚠ **2026-09-26 追記（Issue #854）: この判定は「対向が無いこと」だけを見る——**
+ * **`contestedWithId` が指す先が呼び出し元と同じテナントの行かは見ない。**
+ * `contestedWithId`/`supersededById` はどちらも、書き手が同じテナントの id を渡す
+ * 前提で設計された欄であり、`MemoryStore` 自身はテナントの一致を検査しない
+ * （Postgres の FK は `memories(id)` への単純参照で `tenant_id` を見ない
+ * ——`packages/postgres/migrations/0001_init.sql` の `superseded_by_id`/
+ * `contested_with_id` 列。`packages/testkit` の Fake は FK すら持たない）。
+ * **読み取りへの実害は無い**——`MemoryStore` の他の全ての口は
+ * `tenant_id = ctx.tenantId` で読み書きを絞るため、他テナントの id を指す
+ * ダングリング参照が行き先テナント自身の行に残るだけで、その参照先の本文が
+ * 別テナントから読めるようになることはない（`get`/`getMany` はテナントが
+ * 違えば `null`/`[]` を返す）。`Runtime` を経由する呼び出し
+ * （`markContested`/`resolveContested`/`consolidate`/`reflect`/`reextract`）は、
+ * いずれも同じ `ctx` で存在を確かめた id からしか `contestedWithId`/
+ * `supersededById` を組み立てない——到達するのは `MemoryStore`（`@mnemora/core`
+ * の公開 interface）を直接呼ぶ経路だけである。
  */
 export function isContestedWithoutCompanion(
   status: MemoryStatus | undefined,
@@ -330,6 +347,9 @@ export interface MemoryStore {
    * 呼び出しは {@link ContestedWithoutCompanionError} を投げる（`isContestedWithoutCompanion`
    * が判定する）。対向を明示した作成（`contestedWithId` に既存 Memory の id を渡す）は
    * 引き続き許される。
+   *
+   * ⚠ **`input.contestedWithId` が `ctx.tenantId` と同じテナントの行を指しているかは
+   * 検査しない**（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
    */
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   /**
@@ -340,7 +360,8 @@ export interface MemoryStore {
    * （同じ内容に対して埋め込みジョブを重複させない）。
    *
    * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
-   * の制約を受ける。
+   * の制約を受ける。⚠ `input.contestedWithId` のテナント一致も `createMemory` と同じく
+   * 検査しない（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
@@ -369,6 +390,11 @@ export interface MemoryStore {
    * ——`extractorVersion: null` を渡すと `extractor_version IS NULL` の行を返す。
    * `observationId` が adapter の期待する形式でない場合も「存在しない」と同じ空配列を
    * 返す（例外を投げない）。
+   *
+   * ⚠ **`extractorVersion` はここでの絞り込み条件であり、指定した版と違う Memory は
+   * この口には一切現れない**（Issue #873）。`Runtime.reextract` はこの口を自分の
+   * `extractorVersion` で呼ぶため、旧い版の Memory を見つけて退役させる手段にはならない
+   * ——それは呼び出し側が別途行う責務である（`Runtime.reextract` の doc コメント参照）。
    */
   listBySourceObservation(
     ctx: Ctx,
@@ -401,6 +427,10 @@ export interface MemoryStore {
    * を投げる——この口には対向（`contestedWithId`）を渡す引数がそもそも無いため、区別の
    * 余地なく単独の `contested` になる。`contested` を正しく書くには `markContestedPair`
    * （ADR 0134）を使うこと。
+   *
+   * ⚠ **`opts.supersededById` が `ctx.tenantId` と同じテナントの行を指しているかは
+   * 検査しない**（`isContestedWithoutCompanion` の doc コメント、Issue #854。同じ注意は
+   * `contestedWithId` にも当たるが、この口には `contestedWithId` を渡す引数が無い）。
    */
   updateStatus(
     ctx: Ctx,
@@ -432,6 +462,9 @@ export interface MemoryStore {
    *   あり形式を強制しないため、adapter が主キーに要求する形式に合わない `id` は
    *   「存在しない」の一種として扱う（`updateStatus` の doc コメント・
    *   `packages/postgres/src/mapping.ts` の `isUuidLike` の doc コメント参照）。
+   *
+   * ⚠ **`opts.supersededById` のテナント一致は `updateStatus` と同じく検査しない**
+   * （`isContestedWithoutCompanion` の doc コメント、Issue #854）。
    *
    * 🔴 **買わない不変条件**（呼び出し側の `reextract` ループが対象1件ごとにこのメソッドを
    * 呼ぶ場合）: 「複数回の呼び出しをまとめて全部成功させるか全部失敗させるか」は買わない。
@@ -706,6 +739,10 @@ export interface MemoryStore {
    * `news[i].input` にも `createMemory` と同じ制約が掛かる——`status === 'contested'` かつ
    * `contestedWithId` が `null`/`undefined` の要素が1件でもあれば、`news`/`supersede`
    * どちらの書き込みも一切行わずに {@link ContestedWithoutCompanionError} を投げる。
+   * ⚠ `news[i].input.contestedWithId` が `ctx.tenantId` と同じテナントの行を指しているかは
+   * `createMemory` と同じく検査しない（`isContestedWithoutCompanion` の doc コメント、
+   * Issue #854）。`supersede[].supersededByIndex` は `news` への索引であり
+   * `MemoryId` を直接受け取らないため、この注意は当たらない（上の doc 参照）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -994,6 +1031,12 @@ export interface MemoryStore {
    *   `expectedStatus` は常に `'contested'`。`markContestedPair` と同じく**この口も
    *   全部成功するか全部失敗するかのどちらかである**——部分成功は無い（対向ペアは本質的
    *   に結合しているため）。
+   * ⚠ **`first.supersededById`/`second.supersededById` が `ctx.tenantId` と同じテナントの
+   * 行を指しているかは検査しない**（`isContestedWithoutCompanion` の doc コメント、
+   * Issue #854）。`Runtime.resolveContested` は勝者の id（`first.id`/`second.id` のどちらか、
+   * 同じ `ctx` で存在を確かめた側）をそのまま渡すため、この口を `Runtime` 経由で使う限り
+   * 実際には他テナントを指す値は渡らない。
+   *
    * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う: 両側とも
    *   `contestedWithId` を `null` にし、`first.status`/`second.status`（呼び出し側が
    *   指定した、それぞれ `'active'` か `'superseded'`）へ更新し（`superseded` を指定した

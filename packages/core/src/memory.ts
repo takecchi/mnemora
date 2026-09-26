@@ -100,7 +100,15 @@ export interface Memory {
   provenance: Provenance;
 
   status: MemoryStatus;
+  /**
+   * 置き換えた側の id。同じテナントの行を指す前提で設計された欄だが、`MemoryStore` は
+   * それを検査しない（Postgres の FK は `memories(id)` への単純参照で `tenant_id` を
+   * 見ない）。実害は無い——`MemoryStore` の全ての読み取り口が `tenant_id = ctx.tenantId`
+   * で絞るため、他テナントを指しても本文は読めない（`isContestedWithoutCompanion`
+   * の doc コメント、`packages/core/src/interfaces/memory-store.ts`、Issue #854）。
+   */
   supersededById?: MemoryId | null;
+  /** `supersededById` と同じ注意が当たる（テナント一致は検査しない、Issue #854）。 */
   contestedWithId?: MemoryId | null;
 
   tags: string[];
