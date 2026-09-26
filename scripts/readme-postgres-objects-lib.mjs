@@ -114,21 +114,30 @@ export function deriveMigrationObjects(migrationTextsInFileOrder) {
 
 /**
  * `packages/postgres/src/embedding-space-table.ts` の現物から、埋め込み空間ごとに
- * 増えるテーブル名・HNSW索引名の接頭辞を読む。
+ * 増えるテーブル名・HNSW索引名・ゼロベクトル用部分索引名（Issue #956 / ADR 0343）の
+ * 接頭辞を読む。
  *
  * @param {string} embeddingSpaceTableSourceText
- * @returns {{ tablePrefix: string, indexPrefix: string }}
+ * @returns {{ tablePrefix: string, indexPrefix: string, zeroNormIndexPrefix: string }}
  */
 export function deriveEmbeddingSpaceNaming(embeddingSpaceTableSourceText) {
   const tableMatch = /const TABLE_PREFIX = "([^"]+)";/.exec(embeddingSpaceTableSourceText);
   const indexMatch = /const HNSW_INDEX_PREFIX = "([^"]+)";/.exec(embeddingSpaceTableSourceText);
-  if (!tableMatch || !indexMatch) {
+  const zeroNormIndexMatch = /const ZERO_NORM_INDEX_PREFIX = "([^"]+)";/.exec(
+    embeddingSpaceTableSourceText,
+  );
+  if (!tableMatch || !indexMatch || !zeroNormIndexMatch) {
     throw new Error(
-      "embedding-space-table.ts から TABLE_PREFIX / HNSW_INDEX_PREFIX を読み取れなかった。" +
+      "embedding-space-table.ts から TABLE_PREFIX / HNSW_INDEX_PREFIX / " +
+        "ZERO_NORM_INDEX_PREFIX を読み取れなかった。" +
         "定数名か書き方が変わった——この歯の正規表現を直すこと（歯を消さないこと）。",
     );
   }
-  return { tablePrefix: tableMatch[1], indexPrefix: indexMatch[1] };
+  return {
+    tablePrefix: tableMatch[1],
+    indexPrefix: indexMatch[1],
+    zeroNormIndexPrefix: zeroNormIndexMatch[1],
+  };
 }
 
 /**
@@ -250,6 +259,7 @@ export function extractBulletedIdentifiers(sectionText) {
  *   functionHeadingCount: number | undefined,
  *   embeddingTablePattern: string | undefined,
  *   embeddingIndexPattern: string | undefined,
+ *   embeddingZeroNormIndexPattern: string | undefined,
  *   advisoryLockKeys: string[],
  *   advisoryLockSeedPrefixes: string[],
  * }}
@@ -264,6 +274,9 @@ export function parseReadmeObjectsSection(readmeText) {
   const tableMatch = embeddingSection ? /`(memory_embeddings_[^`]*)`/.exec(embeddingSection) : null;
   const indexMatch = embeddingSection
     ? /`(idx_memory_embeddings_hnsw_[^`]*)`/.exec(embeddingSection)
+    : null;
+  const zeroNormIndexMatch = embeddingSection
+    ? /`(idx_memory_embeddings_zero_norm_[^`]*)`/.exec(embeddingSection)
     : null;
 
   const advisoryLockKeys = advisorySection
@@ -282,6 +295,7 @@ export function parseReadmeObjectsSection(readmeText) {
     functionHeadingCount: extractHeadingCount(readmeText, "関数"),
     embeddingTablePattern: tableMatch ? tableMatch[1] : undefined,
     embeddingIndexPattern: indexMatch ? indexMatch[1] : undefined,
+    embeddingZeroNormIndexPattern: zeroNormIndexMatch ? zeroNormIndexMatch[1] : undefined,
     advisoryLockKeys,
     advisoryLockSeedPrefixes,
   };

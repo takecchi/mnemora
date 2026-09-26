@@ -40,6 +40,7 @@ export declare function sha256Hex(content: string): string;
 import type { EmbeddingSpaceId } from "@mnemora/core";
 export declare function embeddingSpaceTableName(space: EmbeddingSpaceId): string;
 export declare function embeddingSpaceIndexName(space: EmbeddingSpaceId): string;
+export declare function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string;
 export declare function assertSafeIdentifier(identifier: string): void;
 
 // ===== dist/event-store.d.ts =====

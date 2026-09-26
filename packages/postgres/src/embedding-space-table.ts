@@ -8,6 +8,16 @@ import type { EmbeddingSpaceId } from "@mnemora/core";
 const MAX_IDENTIFIER_BYTES = 63;
 const TABLE_PREFIX = "memory_embeddings_";
 const HNSW_INDEX_PREFIX = "idx_memory_embeddings_hnsw_";
+/**
+ * Issue #956: HNSW（cosine 距離）は norm が0のベクトルをそもそも索引へ入れない
+ * （pgvector の README「Why are there less results for a query after adding an
+ * HNSW index?」——"Also, note that `NULL` vectors are not indexed (as well as
+ * zero vectors for cosine distance)."／実装は `HnswFormIndexValue`・`HnswCheckNorm`、
+ * `src/hnswutils.c`）。この部分索引（`WHERE vector_norm(embedding) = 0`）は、
+ * `search()`/`searchMany()` がその取りこぼしを別枝で拾うために使う
+ * （`vector-store.ts` の `withRelaxedOrderScan` 呼び出し元の doc 参照）。
+ */
+const ZERO_NORM_INDEX_PREFIX = "idx_memory_embeddings_zero_norm_";
 
 function sanitizeSlugPart(value: string): string {
   return value
@@ -50,6 +60,22 @@ export function embeddingSpaceIndexName(space: EmbeddingSpaceId): string {
   const hash = createHash("sha256").update(suffix).digest("hex").slice(0, 8);
   const budget = MAX_IDENTIFIER_BYTES - HNSW_INDEX_PREFIX.length - hash.length - 1;
   return `${HNSW_INDEX_PREFIX}${suffix.slice(0, Math.max(budget, 0))}_${hash}`;
+}
+
+/**
+ * ゼロベクトル（norm=0）専用の部分索引名（Issue #956）。テーブル名・HNSW 索引名と
+ * 同じ導出規則（63バイト超で切り詰め＋ハッシュ）から機械的に決める。
+ */
+export function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string {
+  const table = embeddingSpaceTableName(space);
+  const suffix = table.slice(TABLE_PREFIX.length);
+  const fullName = `${ZERO_NORM_INDEX_PREFIX}${suffix}`;
+  if (Buffer.byteLength(fullName, "utf8") <= MAX_IDENTIFIER_BYTES) {
+    return fullName;
+  }
+  const hash = createHash("sha256").update(suffix).digest("hex").slice(0, 8);
+  const budget = MAX_IDENTIFIER_BYTES - ZERO_NORM_INDEX_PREFIX.length - hash.length - 1;
+  return `${ZERO_NORM_INDEX_PREFIX}${suffix.slice(0, Math.max(budget, 0))}_${hash}`;
 }
 
 /** 識別子として安全であることの防御的なチェック（SQL 注入対策の最後の砦）。 */

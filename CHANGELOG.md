@@ -441,6 +441,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （[Issue #938](https://github.com/takecchi/mnemora/issues/938)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26）。
 - **`@mnemora/testkit` の `InMemoryLexicalStore` の語の一致判定を `PostgresLexicalStore` に揃えた**——非 ASCII だけのクエリは0件になり、本文は ASCII の境界で分割してから小文字化する（[Issue #951](https://github.com/takecchi/mnemora/issues/951)、[ADR 0084](./docs/decisions/0084-lexical-recall-channel.md)）。
+- **`PostgresVectorStore.search()`/`searchMany()` が、pgvector の HNSW（cosine）索引に
+  そもそも入らないゼロベクトルの候補（ADR 0040）を結果から取りこぼしていた。** pgvector
+  は norm が0のベクトルを HNSW 索引に追加しないため、ANN 検索（`ORDER BY <=> LIMIT`）が
+  その索引を経由すると、統計・テーブルの大小に関係なくゼロベクトルの候補が構造的に
+  結果から消えていた。埋め込みテーブルにゼロベクトル専用の部分索引を足し、`search()`/
+  `searchMany()` がそれを別枝として `UNION ALL` で合わせるようにした（往復数は増えない）。
+  通常の検索結果（距離・順序）は無変更（[Issue #956](https://github.com/takecchi/mnemora/issues/956)、
+  [ADR 0343](./docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。
 
 ---
 
