@@ -160,7 +160,17 @@ interface VectorStoreSpy {
 }
 
 function wrapVectorStoreWithSpy(inner: VectorStore, spy: VectorStoreSpy): VectorStore {
+  // Issue #1012: 内側が持つ任意の口（`searchMany?`、PR #932）は包みも持つ——落とすと runtime の
+  // 段3.5 がアンカーごとの `search()` に戻り、本番と違う経路を測る。このスクリプトは
+  // `getVectors` だけを記録するので、`searchMany` は記録せずに素通しする。
+  const innerSearchMany = inner.searchMany;
   return {
+    ...(innerSearchMany !== undefined
+      ? {
+          searchMany: (ctx, space, queries, opts) =>
+            innerSearchMany.call(inner, ctx, space, queries, opts),
+        }
+      : {}),
     upsert: (ctx, space, memoryId, vector) => inner.upsert(ctx, space, memoryId, vector),
     delete: (ctx, space, memoryId) => inner.delete(ctx, space, memoryId),
     search: (ctx, space, query, opts) => inner.search(ctx, space, query, opts),

@@ -114,8 +114,6 @@ import type {
   RecallAssociationQuery,
   RecallResult,
   Runtime,
-  VectorHit,
-  VectorStore,
 } from "@mnemora/core";
 import { DEFAULT_OVER_FETCH_FACTOR, DEFAULT_RECALL_LIMIT, createRuntime } from "@mnemora/core";
 import { LocalEmbeddingProvider } from "@mnemora/local-embedding";
@@ -141,6 +139,7 @@ import {
   buildAssociationProbeSetConversation,
 } from "../association-probe-set.js";
 import { drainEmbedTicks } from "../embed-drain.js";
+import { stage3_5DbMs, type VectorStoreSpy, wrapVectorStoreWithSpy } from "./vector-store-spy.js";
 import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 import { createProviders, selectEmbeddingMode, selectLLMMode } from "../providers.js";
 import {
@@ -231,51 +230,7 @@ function buildDistinctFiller(count: number): { externalId: string; text: string 
   return out;
 }
 
-// ---------------------------------------------------------------------------
-// VectorStore spy(時間つき) — packages/core/postgres は変更しない。このファイルの中だけ。
-// ---------------------------------------------------------------------------
-
-interface SpyCall {
-  kind: "search" | "getVectors";
-  ms: number;
-  /** search のときだけ。 */
-  hits?: VectorHit[];
-  /** getVectors のときだけ。 */
-  memoryIds?: MemoryId[];
-}
-
-interface VectorStoreSpy {
-  calls: SpyCall[];
-  reset(): void;
-}
-
-function wrapVectorStoreWithSpy(inner: VectorStore, spy: VectorStoreSpy): VectorStore {
-  return {
-    upsert: (ctx, space, memoryId, vector) => inner.upsert(ctx, space, memoryId, vector),
-    delete: (ctx, space, memoryId) => inner.delete(ctx, space, memoryId),
-    search: async (ctx, space, query, opts) => {
-      const t0 = performance.now();
-      const hits = await inner.search(ctx, space, query, opts);
-      spy.calls.push({ kind: "search", ms: performance.now() - t0, hits });
-      return hits;
-    },
-    getVectors: async (ctx, space, memoryIds) => {
-      const t0 = performance.now();
-      const result = await inner.getVectors!(ctx, space, memoryIds);
-      spy.calls.push({ kind: "getVectors", ms: performance.now() - t0, memoryIds: [...memoryIds] });
-      return result;
-    },
-  };
-}
-
-/** 段3.5 由来と見なす DB 呼び出しの ms 合計(1回目の search() = 段1、それ以降は段3.5)。 */
-function stage3_5DbMs(spy: VectorStoreSpy): number {
-  const searchCalls = spy.calls.filter((c) => c.kind === "search");
-  const afterFirstSearch = spy.calls.filter(
-    (c) => c.kind === "getVectors" || (c.kind === "search" && c !== searchCalls[0]),
-  );
-  return afterFirstSearch.reduce((sum, c) => sum + c.ms, 0);
-}
+// VectorStore spy は ./vector-store-spy.ts（Issue #1012 で切り出した）。
 
 interface InstrumentedHandle {
   runtime: Runtime;
