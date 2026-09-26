@@ -22,7 +22,9 @@ const TENANT = "scale-bench-capture-tenant";
 
 /**
  * Issue #1016: ADR 0284 以降、`PostgresVectorStore.search()` は `db.transaction()` の中で
- * `SET LOCAL hnsw.iterative_scan = relaxed_order` を打ってから SELECT する。
+ * ADR 0284 の `SET LOCAL`（`hnsw.iterative_scan` を対象にした1文）を打ってから SELECT する
+ * （文そのものをここに書かないのは、`hnsw-ef-search-window-ceiling.test.ts` 検査2が
+ * ソースを走査して SET の箇所を数えるため）。
  * トランザクションは `pool.connect()` で借りた client の `client.query()` を使うので、
  * `pool.query` を差し替える捕まえ方では search の SQL が見えず、`bench:scale` の
  * Part 2 以降が「一致するクエリが観測されなかった」で毎回落ちていた。
