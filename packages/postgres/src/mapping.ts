@@ -86,6 +86,42 @@ export function parsePgTimestamp(value: string | null): Date | null {
   return new Date(normalized);
 }
 
+/**
+ * `Date` を、SQL のパラメータとして送る `timestamptz` の文字列（UTC）にする。
+ * `parsePgTimestamp` の逆向きである。
+ *
+ * Issue #1040: node-postgres（`pg`）は `Date` のパラメータを**プロセスのローカル時刻**の
+ * 文字列にし、時差を**分に切り捨てて**送る（`pg/lib/utils.js` の `dateToString`）。
+ * プロセスの TZ が地方平均時（LMT）の時代に秒を含む時差を持つ地域だと、その時代の日時が
+ * 秒単位でずれて保存される（Asia/Tokyo では1888年より前の日時が59秒後へ、
+ * America/New_York では1883年11月より前が2秒前へ）。⟹ `Date` を `pg` に渡さず、
+ * 書き込みの値も WHERE の条件も、必ずこの関数を通す。
+ *
+ * `pg.defaults.parseInputDatesAsUTC` は使わない——プロセス全体の `pg` の既定を変え、
+ * 利用者のアプリの他の接続にも効くため。`toISOString()` も使わない——5桁以上の年と
+ * 紀元前を `+010000-...` / `-000001-...` の形にし、Postgres が読めないため。
+ *
+ * 年は4桁に0詰めし、5桁以上はそのまま書く。紀元前は ` BC` を付ける（天文年の0年が
+ * 紀元前1年）。Invalid Date は Postgres が拒む文字列になる（これまでと同じく DB の
+ * エラーになる）。
+ */
+export function toPgTimestamp(date: Date): string;
+export function toPgTimestamp(date: Date | null | undefined): string | null;
+export function toPgTimestamp(date: Date | null | undefined): string | null {
+  if (date === null || date === undefined) {
+    return null;
+  }
+  const astronomicalYear = date.getUTCFullYear();
+  const bc = astronomicalYear < 1;
+  const year = bc ? 1 - astronomicalYear : astronomicalYear;
+  const pad = (n: number, width = 2): string => String(n).padStart(width, "0");
+  return (
+    `${pad(year, 4)}-${pad(date.getUTCMonth() + 1)}-${pad(date.getUTCDate())}` +
+    `T${pad(date.getUTCHours())}:${pad(date.getUTCMinutes())}:${pad(date.getUTCSeconds())}` +
+    `.${pad(date.getUTCMilliseconds(), 3)}+00:00${bc ? " BC" : ""}`
+  );
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**

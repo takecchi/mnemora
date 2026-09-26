@@ -10,7 +10,7 @@ import type {
 } from "@mnemora/core";
 import type { Db } from "./client.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
-import { isUuidLike } from "./mapping.js";
+import { isUuidLike, toPgTimestamp } from "./mapping.js";
 import { maybeAnalyzeAfterUpsert } from "./embedding-statistics.js";
 
 /** `number[]` を pgvector のテキスト表現（`[1,2,3]`）に変換する。 */
@@ -67,7 +67,7 @@ function buildFilterConditions(filter: VectorFilter) {
   // 参照）。それ以外は今日どおり AND のまま個別に効く。
   const decayFloorAtCondition =
     filter.decayFloorAtAfter !== undefined
-      ? sql`m.decay_floor_at > ${filter.decayFloorAtAfter}`
+      ? sql`m.decay_floor_at > ${toPgTimestamp(filter.decayFloorAtAfter)}`
       : undefined;
   // `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4——NULL は「この軸には
   // 床が無い＝活動時計では沈まない」）。
@@ -115,17 +115,21 @@ function buildFilterConditions(filter: VectorFilter) {
   // （`>=`/`<=`）——`VectorFilter.occurredAfter`/`occurredBefore` の doc、および
   // 既存の厳密経路（`memory-store.ts` の `aggregateScope`）と同じ境界の含み方に揃える。
   if (filter.occurredAfter !== undefined) {
-    conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) >= ${filter.occurredAfter}`);
+    conditions.push(
+      sql`COALESCE(m.occurred_at, m.recorded_at) >= ${toPgTimestamp(filter.occurredAfter)}`,
+    );
   }
   if (filter.occurredBefore !== undefined) {
-    conditions.push(sql`COALESCE(m.occurred_at, m.recorded_at) <= ${filter.occurredBefore}`);
+    conditions.push(
+      sql`COALESCE(m.occurred_at, m.recorded_at) <= ${toPgTimestamp(filter.occurredBefore)}`,
+    );
   }
   // Issue #280（Issue #202 第2弾）: `validAt` ゲート。両端 NULL は「いつでも真」
   // （`VectorFilter.validAt` の doc 参照）。`valid_until` は狭義の `>`（非包含）——
   // `decayFloorAtAfter` と同じ境界の向き。
   if (filter.validAt !== undefined) {
     conditions.push(
-      sql`(m.valid_from IS NULL OR m.valid_from <= ${filter.validAt}) AND (m.valid_until IS NULL OR m.valid_until > ${filter.validAt})`,
+      sql`(m.valid_from IS NULL OR m.valid_from <= ${toPgTimestamp(filter.validAt)}) AND (m.valid_until IS NULL OR m.valid_until > ${toPgTimestamp(filter.validAt)})`,
     );
   }
   // ADR 0056: 空配列は no-op（`VectorFilter.excludeProvenanceKinds` の doc 参照）。

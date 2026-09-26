@@ -7,6 +7,7 @@ import {
   capLexicalQueryTotalChars,
   capLexicalQueryWords,
 } from "./lexical-query-cap.js";
+import { toPgTimestamp } from "./mapping.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -569,14 +570,18 @@ export function buildTrigramLexicalSearchSelect(
     conditions.push(sql`tags && ${sql.param(opts.filter.labels)}::text[]`);
   }
   if (opts.filter.occurredAfter !== undefined) {
-    conditions.push(sql`COALESCE(occurred_at, recorded_at) >= ${opts.filter.occurredAfter}`);
+    conditions.push(
+      sql`COALESCE(occurred_at, recorded_at) >= ${toPgTimestamp(opts.filter.occurredAfter)}`,
+    );
   }
   if (opts.filter.occurredBefore !== undefined) {
-    conditions.push(sql`COALESCE(occurred_at, recorded_at) <= ${opts.filter.occurredBefore}`);
+    conditions.push(
+      sql`COALESCE(occurred_at, recorded_at) <= ${toPgTimestamp(opts.filter.occurredBefore)}`,
+    );
   }
   if (opts.filter.validAt !== undefined) {
     conditions.push(
-      sql`(valid_from IS NULL OR valid_from <= ${opts.filter.validAt}) AND (valid_until IS NULL OR valid_until > ${opts.filter.validAt})`,
+      sql`(valid_from IS NULL OR valid_from <= ${toPgTimestamp(opts.filter.validAt)}) AND (valid_until IS NULL OR valid_until > ${toPgTimestamp(opts.filter.validAt)})`,
     );
   }
   if (

@@ -10,12 +10,6 @@ import {
   resetTestDatabase,
 } from "./test-db.js";
 
-// 書き込み側（node-postgres は `Date` をプロセスのローカル時刻で文字列にし、時差の秒を
-// 切り捨てる）のずれを、この歯から切り離す。ここで見るのは読み取り側（`parsePgTimestamp`）
-// だけである。書き込み側は Issue #1040 に分けた。
-const ORIGINAL_TZ = process.env.TZ;
-process.env.TZ = "UTC";
-
 /**
  * Issue #1039: `timestamptz` の文字列を `Date` にする `parsePgTimestamp`（`mapping.ts`）は、
  * `+09` / `+09:00` の形の時差しか読めなかった。Postgres の既定の出力には次の形もあり、
@@ -57,11 +51,6 @@ describe("timestamptz の往復: 保存した日時は、サーバの TimeZone �
       await client.pool.end();
     }
     await closeTestClient();
-    if (ORIGINAL_TZ === undefined) {
-      delete process.env.TZ;
-    } else {
-      process.env.TZ = ORIGINAL_TZ;
-    }
   });
 
   for (const tz of SERVER_TIME_ZONES) {

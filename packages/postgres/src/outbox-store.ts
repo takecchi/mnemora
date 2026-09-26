@@ -7,7 +7,7 @@ import {
   type OutboxStore,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { isUuidLike, rowToOutboxJob, type OutboxJobRow } from "./mapping.js";
+import { isUuidLike, rowToOutboxJob, toPgTimestamp, type OutboxJobRow } from "./mapping.js";
 
 /**
  * `OutboxStore` の Postgres 実装（roadmap.md 段階3、ADR 0005 の transactional outbox
@@ -90,15 +90,15 @@ export class PostgresOutboxStore implements OutboxStore {
         WHERE tenant_id = ${ctx.tenantId}
           AND completed_at IS NULL
           AND failed_at IS NULL
-          AND available_at <= ${opts.now}
-          AND (claimed_at IS NULL OR claimed_at <= ${leaseExpiresBefore})
+          AND available_at <= ${toPgTimestamp(opts.now)}
+          AND (claimed_at IS NULL OR claimed_at <= ${toPgTimestamp(leaseExpiresBefore)})
           ${kindsFilter}
         ORDER BY available_at ASC
         LIMIT ${opts.limit}
         FOR UPDATE SKIP LOCKED
       )
       UPDATE outbox o
-      SET claimed_at = ${opts.now}, claimed_by = ${opts.claimedBy}, attempts = attempts + 1
+      SET claimed_at = ${toPgTimestamp(opts.now)}, claimed_by = ${opts.claimedBy}, attempts = attempts + 1
       FROM claimable c
       WHERE o.id = c.id
       RETURNING o.*

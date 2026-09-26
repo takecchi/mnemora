@@ -8,7 +8,7 @@ import type {
   NewMemoryEvent,
 } from "@mnemora/core";
 import type { Db } from "./client.js";
-import { isUuidLike, rowToMemoryEvent, type MemoryEventRow } from "./mapping.js";
+import { isUuidLike, rowToMemoryEvent, toPgTimestamp, type MemoryEventRow } from "./mapping.js";
 
 /**
  * `EventStore` の Postgres 実装（docs/architecture.md §5.8、docs/memory-model.md §9）。
@@ -27,7 +27,7 @@ export class PostgresEventStore implements EventStore {
         ${ctx.tenantId},
         ${event.memoryId},
         ${event.kind},
-        ${event.at ?? new Date()},
+        ${toPgTimestamp(event.at ?? new Date())},
         ${JSON.stringify(event.actor)}::jsonb,
         ${event.digestSnapshot ?? null},
         ${event.sizeBeforeBytes ?? null},
@@ -68,10 +68,10 @@ export class PostgresEventStore implements EventStore {
       conditions.push(sql`kind = ${filter.kind}`);
     }
     if (filter.since !== undefined) {
-      conditions.push(sql`at >= ${filter.since}`);
+      conditions.push(sql`at >= ${toPgTimestamp(filter.since)}`);
     }
     if (filter.until !== undefined) {
-      conditions.push(sql`at <= ${filter.until}`);
+      conditions.push(sql`at <= ${toPgTimestamp(filter.until)}`);
     }
     const whereClause = sql.join(conditions, sql` AND `);
     const limitClause = filter.limit !== undefined ? sql`LIMIT ${filter.limit}` : sql``;
