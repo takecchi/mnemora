@@ -1276,6 +1276,12 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts.limit < 0) {
       throw new Error(`requeueEmbedJobs: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`。`1e21` 以上は指数表記になり
+    // `invalid input syntax for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`requeueEmbedJobs: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     const targetStatuses: readonly EmbeddingStatus[] = opts.statuses;
     const idFilter = opts.memoryIds === undefined ? null : new Set<string>(opts.memoryIds);
     const targets = [...this.backing.memories.values()]

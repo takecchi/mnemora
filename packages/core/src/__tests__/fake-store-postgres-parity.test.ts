@@ -301,13 +301,13 @@ describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres 
  * （`embeddingStatus` を `pending` に戻し、embed ジョブを積む）付きで通していた。
  */
 describe("FakeMemoryStore.requeueEmbedJobs: 壊れた limit を渡すと Postgres と同じく例外を投げ、1件も積み直さない", () => {
-  for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5]) {
+  for (const limit of [-1, Number.NaN, Number.POSITIVE_INFINITY, 1.5, 2 ** 63, 1e21]) {
     it(`limit=${limit} は例外を投げ、embeddingStatus も outbox も変えない`, async () => {
       const { memoryStore, outboxStore } = createFakeRuntimeStores();
       const memory = await memoryStore.createMemory(ctx, fixture({ embeddingStatus: "failed" }));
       await expect(
         memoryStore.requeueEmbedJobs(ctx, { statuses: ["failed"], limit }),
-      ).rejects.toThrow(/limit must (be an integer|not be negative)/);
+      ).rejects.toThrow(/limit must (be an integer|not be negative|fit in a Postgres bigint)/);
       expect((await memoryStore.get(ctx, memory.id))?.embeddingStatus).toBe("failed");
       const jobs = await outboxStore.claimBatch(ctx, {
         kinds: ["embed"],
