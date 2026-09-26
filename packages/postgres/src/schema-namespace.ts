@@ -27,6 +27,15 @@ import { assertSafeIdentifier } from "./embedding-space-table.js";
  * このファイルの関数はすべて `schema === undefined` を特別扱いし、そのときは
  * 何も付け足さずに素通しする。新しい振る舞い（`SET search_path` / `CREATE SCHEMA` /
  * `CREATE EXTENSION` の事前実行）は、`schema` が実際に指定されたときだけ起きる。
+ *
+ * ⚠ **`./resolve-current-schema.ts` の `resolveCurrentSchema` だけはこの線の外に在る**
+ * （Issue #779）。DDL/DML の発行内容には触れないが、`schema` 未指定かつ advisory lock の
+ * `lockKey` 上書きが無いときに限り、`runMigrations` / `registerEmbeddingSpace` から
+ * `SELECT current_schema()` が1回増える——目的が「未指定が実際にどのスキーマを指しているか」
+ * を読むことそのものであるため、`schema === undefined` を素通しでは代替できない。**別ファイル
+ * に切り出してあり、`index.ts` からは export しない**（advisory lock のキー選びのためだけの
+ * 内部 helper であり、公開 API の一部にしない）。詳細は同関数の doc と
+ * ADR 0331 の追記（Issue #779）を参照。
  */
 
 /**

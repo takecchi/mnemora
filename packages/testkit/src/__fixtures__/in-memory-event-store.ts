@@ -16,6 +16,17 @@ import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
  * もう片方を直し忘れる食い違いを作りかねない。
  */
 export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
+  // Issue #807: `memory_events.at` は Postgres の `timestamptz` 列であり、Invalid Date
+  // （`.getTime()` が `NaN`）を渡すと `PostgresEventStore.append` はクエリ実行時に
+  // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測）。
+  // `event.at` が省略されている（`undefined`）場合は「無い」であって Invalid Date では
+  // ないので検査しない——下の `?? new Date()` で現在時刻になる。この関数は
+  // `InMemoryEventStore.append` だけでなく `InMemoryMemoryStore` の
+  // `updateStatusWithEvent`/`purgeMemory`/`supersedeWithNewMemories` 等、イベントを積む
+  // すべての口が通る単一の合流点であり、ここで検査すればそれらすべてを一度に覆える。
+  if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
+    throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+  }
   return {
     id: nextId("evt"),
     tenantId: ctx.tenantId,

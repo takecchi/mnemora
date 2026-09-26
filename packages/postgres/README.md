@@ -22,6 +22,18 @@ npm i @mnemora/postgres @mnemora/core
   `import.meta` を含めていないため（[ADR 0086](../../docs/decisions/0086-no-import-meta-in-published-artifacts.md)）。
   `import.meta` は CommonJS として解析されると**構文解析の時点で**落ちるので、
   1箇所在るだけで「import しただけで落ちる」状態になる
+- **`tsc` を `skipLibCheck: false`（unset のままでも同じ——TypeScript 自体のコンパイラ
+  既定値が `false`）で走らせる consumer が `@mnemora/postgres` を import すると、
+  自分のコードとは無関係な型エラーが出ることがある。**【実測、drizzle-orm 0.45.2 /
+  TypeScript 5.9.3、2026-09-26】公開 `@mnemora/postgres@1.0.1` と main を
+  `pnpm pack` したもの、どちらを `moduleResolution: NodeNext` の素の consumer から
+  import しても70件——全件 `node_modules/drizzle-orm/**/*.d.ts` 由来（`gel` /
+  `mysql2/promise` 等、未インストールの任意 peer 向け型の欠落や drizzle-orm 内部の
+  構造的な型の不整合）で、`@mnemora/*` 自身の `.d.ts` からは0件。`drizzle-orm` を
+  mnemora を介さず単独 import するだけでも同条件で再現する（84件）ため、
+  **mnemora 固有の型の欠陥ではない**（[Issue #893](https://github.com/takecchi/mnemora/issues/893)）。
+  `tsc --init` が書き出す既定テンプレートは `skipLibCheck: true` なので、多くの consumer は
+  踏まない。回避策は `skipLibCheck: true` を明示すること。
 - **本物の Postgres + pgvector が要る。**擬似物・インメモリでの代替は無い
   （このリポジトリの CI は [`pgvector/pgvector:pg17`](https://hub.docker.com/r/pgvector/pgvector) の
   Docker イメージに対して実行している。実物は
@@ -396,17 +408,25 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 > **接続に使ったロール名と同じ名前のスキーマが DB 内に存在すると、`"$user"` がそちらへ
 > 解決され、`--schema` を指定していないのに例外も出さずそのスキーマへ読み書きする**
 > （`runMigrations` はロール名のスキーマの台帳を適用済みと誤判定し、`applied: []` を
-> 返して `public` には一切触れずに成功する）。さらに、この場合のロックキーは
-> 上の「未指定、または `--schema public`」の固定キーに倒れるため、**同じ物理スキーマを
-> `--schema <ロール名>` で明示指定した別の呼び出し（導出キー側）とはキーが食い違い、
-> 互いを待たない。**
+> 返して `public` には一切触れずに成功する）。
+>
+> ロックキーの食い違いは直っている: `--schema` 省略かつテスト用の `lockKey` 上書きも
+> 無い呼び出しは、ロック取得より前に同じ接続で `SELECT current_schema()` を読み、
+> その結果で上の「未指定、または `--schema public`」／「それ以外の `--schema <name>`」の
+> どちらのキーを使うか決める。ロール名と同名のスキーマが在れば導出キー側になり、
+> `--schema <ロール名>` を明示指定した別の呼び出しと同じキーになって互いを待つ
+> （[ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md) 追記）。
+> ただし**新旧バージョンの混在中**（ローリングデプロイの途中で、この修正が入る前の
+> バージョンと後のバージョンが同時に動いている場合）は、旧バージョンが常に固定キーを
+> 使うため、その組み合わせに限り互いを待たない窓が残る。
 >
 > **回避策**: `--schema` を明示するか、接続に使うロールと同じ名前のスキーマを
-> DB 内に作らない。挙動・既定値はどちらも変えていない——詳細は
+> DB 内に作らない（データが意図しないスキーマへ読み書きされること自体は、`--schema` を
+> 省略している限り変わらない）。挙動・既定値はどちらも変えていない——詳細は
 > [Issue #779](https://github.com/takecchi/mnemora/issues/779)・
 > [ADR 0057](../../docs/decisions/0057-dedicated-schema-namespace.md) 決定6・
 > [ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)
-> 「引き受ける負債」参照。
+> 「引き受ける負債」・追記参照。
 
 ## もっと詳しく
 
