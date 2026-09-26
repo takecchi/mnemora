@@ -320,6 +320,12 @@ packages/
   sdk         — client（Phase 4）
 ```
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 上の図は、いまの `packages/` と次の点で違う。
+- `bullmq` は `Scheduler` を実装していない。`runtime.tick()` を BullMQ で駆動する（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)）。`"private": true` で、npm には公開していない。
+- `postgres` が実装しているのは `MemoryStore`・`VectorStore`・`LexicalStore`（任意の `PostgresTrigramLexicalStore` を含む）・`EventStore`・`OutboxStore`・`TenantSettingsStore` であり、`RelationStore` は無い（§5.3、Phase 2）。
+- 図に無い `local-embedding`（外部サービスに繋がない `EmbeddingProvider`、[ADR 0085](./decisions/0085-local-embedding-provider.md)）がある。
+- `server`・`sdk` はまだ無い（Phase 4）。
+
 ### オーナー案から変えた3点
 
 **`testkit` を追加した。**
@@ -879,6 +885,8 @@ interface Scheduler {
 - `InlineScheduler` は `enqueue` を呼び出しコンテキストの中で同期的に実行する実装であり、
   外部プロセスを必要としない。
 
+**⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 見出しの「BullMQ 実装は後続フェーズ」は、そのままの形では来なかった。`@mnemora/bullmq` は `Scheduler` を実装せず、BullMQ のジョブで `runtime.tick()` を駆動する（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)。`start()`/`stop()` の後始末は Issue #890・#891・#963）。`Scheduler` の実装は、いまも `InlineScheduler` だけである。
+
 ### 5.7 ScoringStrategy / DecayStrategy — Phase 1・純関数
 
 ```ts
@@ -938,6 +946,8 @@ interface EventStore {
 - 保持期間はテナント単位で設定可能。期限切れの削除自体も `purged` イベントとして残す（件数と
   期間のみ、対象の詳細は残さない）。alteroid の JournalStore には保持期間の概念が無く、mnemora は
   multi-tenant で量が桁違いになるためこれを追加で持つ（[docs/memory-model.md](./memory-model.md)）。
+
+**⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 上の「期限切れの削除自体も `purged` イベントとして残す」の種別名は正しくない。保持期間の掃除が残すイベントの `kind` は `events_purged` である（`memory_id` は NULL、[ADR 0115](./decisions/0115-event-retention-purge.md)、`docs/memory-model.md` §9）。`purged` は `Runtime.purge()` が記憶1件を物理削除したときの種別で、別のものである。
 
 ### 5.9 TokenCounter — Phase 1
 

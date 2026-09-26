@@ -402,6 +402,8 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 が呼ばれたとき（通常はプロセスの再起動時）に同様に作られる。詳細・build 時間の実測は
 [ADR 0343](../../docs/decisions/0343-vector-store-search-returns-zero-norm-candidates.md)。
 
+⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）: 上の段落は `registerEmbeddingSpace` の経路だけを書いている。既存の空間の表には、migration `0022_embedding_zero_norm_index.sql` も `runMigrations` の時点で同じ名前の索引を作る（今のスキーマの埋め込み表を列挙し、`embeddingSpaceZeroNormIndexName` と同じ規則で名前を作る）。どちらが先に作っても、名前が同じなので2本目はできない。
+
 ### advisory lock のキー
 
 `runMigrations`（マイグレーション適用）と `registerEmbeddingSpace`
