@@ -475,8 +475,9 @@ alteroid の「全文か目次1行かのどちらかに必ず現れる」とい�
 type IndexBand = {
   groups: GroupCount[]
   totalInScope: number
-  countKind: CountKind         // groups の総和が totalInScope と一致するかの信頼度
-  digestBand?: DigestEntry[]   // Phase 2。Phase 1 では常に undefined
+  countKind: CountKind              // groups の総和が totalInScope と一致するかの信頼度
+  digestBand?: DigestEntry[]        // 帯を組んだときだけ在る（下記「目次帯の量を把握し、調整する」節）
+  digestBandCoverage?: DigestBandCoverage // digestBand の被覆度。digestBand を組んだときだけ在る
 }
 
 type GroupCount = {
@@ -492,6 +493,13 @@ type GroupCount = {
 一度も無かった（Issue #206 / [ADR 0117](./decisions/0117-unreachable-union-values-inventory.md)
 の分類3）。オーナー判断を受けて
 [ADR 0144](./decisions/0144-drop-unreachable-classification-3-union-values.md) で落とした。
+
+**⚠ 訂正（この型例自身の記載について）**: `digestBand` は上ではかつて「Phase 2。Phase 1 では
+常に undefined」としていたが、それは成り立たなくなっている——下の「Phase 1 の範囲」節が
+記録しているとおり、digest 帯（第2階）はオーナーの指示で前倒しで実装された
+（[ADR 0073](./decisions/0073-digest-band-bounded-without-taxonomy.md)）。**taxonomy 軸の
+グルーピングなど、Phase 2 の他の項目までが前倒しされたわけではない**——前倒しされたのは
+「1件1行の要旨を出す機能」だけである。
 
 ### 正直に書くべき限界
 
