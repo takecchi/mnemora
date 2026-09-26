@@ -603,3 +603,14 @@ $ pnpm run api:write   # snapshot 更新、api:check が green に戻ること�
 - `examples/chat` からの動作確認はしていない（ADR 0318「引き受けた負債」4 と同じ射程外）。
 - CI（GitHub Actions、`pgvector/pgvector:pg17` イメージ）での実行は、この ADR の執筆時点
   ではまだ確認していない——PR の CI 実行結果を見ること。
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: trigram の語彙経路に `labels` の押し下げが無かった
+
+「opt-in 機能の組み合わせで約束が壊れないか」の軸で、語彙の trigram 経路（`PostgresTrigramLexicalStore`、ADR 0319）と `labels` の絞り込みを組み合わせて当てたところ、`buildTrigramLexicalSearchSelect` の WHERE に `filter.labels` の条件が無かった。本 ADR が `labels` を `PostgresLexicalStore`・`PostgresVectorStore` と共有の適合テストへ足したとき、適合テストを通らない trigram 経路だけが取り残されていた。他の欄（`status`・`subjectId`/`includeSubjectless`・`attributes`・period・`validAt`・`excludeProvenanceKinds`）は tsvector 経路と1欄ずつ突き合わせて一致していた。
+
+- 約束: `LexicalFilter` の doc「各フィールドは adapter が実際に適用しなければならない（ADR 0034）」、`LexicalFilter.labels` の doc「`VectorFilter.labels` と同じ欄・同じ意味」。
+- 影響: recall の後置フィルタ（`survivesLabelsFilter`）が最終結果からは落とすため、絞りの外の記憶が返ることは無い。ただし語彙チャンネルの over-fetch の窓（kPrime）を絞りの外の候補が占め、絞りの内側の候補が窓から押し出されることがあった。
+- 直し方: tsvector 経路と同じ述語 `tags && labels` を足した。公開の型は変えていない。
+- 歯: `packages/postgres/src/__tests__/trigram-lexical-store-labels.postgres.test.ts`（2本。適合テスト一式には足さない——Issue #809 の方針）。修正前は2本とも赤（1本目は絞りの外の4件がすべて返った。2本目は `limit: 2` の窓を絞りの外の候補が占めた）。変異試験: 述語を AND の `tags @> labels` に変えると1本目が赤、述語を外すと2本とも赤になった。
