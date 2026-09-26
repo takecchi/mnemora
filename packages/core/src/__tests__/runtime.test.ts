@@ -3335,6 +3335,43 @@ describe("observe: claimKey 検出（Issue #372、(B) 第2段。ADR 0185 決定2
     void stores;
   });
 
+  it("claim key の subject/predicate が空白だけ（LLM の壊れた出力）だと、無関係な Memory 同士が『空の鍵』で誤って contested にならない", async () => {
+    // `deriveClaimKeys` が返す subject/predicate が空白だけ（スキーマの `min(1)` は
+    // 通るが、`normalizeClaimKeyPart` の trim で空文字列に潰れる）だと、鍵が
+    // 取れなかったものとして扱われる（`claim-key.ts` の `deriveClaimKeys` 参照）。
+    // 内容がまったく無関係な2件のどちらも壊れた鍵を返した場合、直す前は両方が
+    // `{ subject: "", predicate: "" }` という同じ「空の鍵」に潰れて誤って
+    // 一致してしまっていた。
+    const llm = sequencedLlm([
+      { memories: [{ content: "好きな食べ物はラーメン", provenanceKind: "stated" }] },
+      { claims: [{ subject: " ", predicate: "  " }] },
+      { memories: [{ content: "明日は晴れるらしい", provenanceKind: "stated" }] },
+      { claims: [{ subject: "　", predicate: "　" }] }, // 全角スペース——直す前は両方とも
+      // { subject: "", predicate: "" } に潰れ、無関係などうしが誤って一致していた。
+    ]);
+    const { runtime, stores } = buildRuntime(llm);
+    const first = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "好きな食べ物はラーメン",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "明日は晴れるらしい",
+      claimKey: { enabled: true, detectContested: true },
+    });
+    // 鍵が取れなかった（null）ので、detectClaimKeyContested は検出自体を試みない
+    // （`contestedDetection` に対応する要素が現れない）。
+    expect(first.contestedDetection).toEqual([]);
+    expect(second.contestedDetection).toEqual([]);
+    const firstMemory = await stores.memoryStore.get(ctx, first.memoryIds[0]!);
+    const secondMemory = await stores.memoryStore.get(ctx, second.memoryIds[0]!);
+    expect(firstMemory?.status).toBe("active");
+    expect(secondMemory?.status).toBe("active");
+    expect(firstMemory?.claimKey).toBeNull();
+    expect(secondMemory?.claimKey).toBeNull();
+  });
+
   it("相手の active が2件以上（3件目以降）のときは markContested を呼ばず、根拠が memory_events に構造として残る", async () => {
     // 1件目・2件目は detectContested を使わずに作る——2件ともペアにならないまま
     // `active` で残り続ける（実運用では「後から opt-in を有効にした」「バッチ内の
