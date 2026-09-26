@@ -74,6 +74,16 @@ kind ごとに形が違う部分）は `provenance` jsonb 列にまとめる。�
 「推論は、その根拠と必ず同時に提示する」という規律を、根拠が失われた場合にも一貫させるなら、
 「根拠が失われたという事実」を提示するのが唯一の整合的な振る舞いになる。
 
+**⚠ 未実装（[Issue #883](https://github.com/takecchi/mnemora/issues/883)）。**
+この約束は消さない——元の設計思想はそのまま保つ。ただし今日この印を付ける経路は無い。
+`Memory`（`packages/core/src/memory.ts`）にも、`MemoryStore.get()` の戻り値にも、
+`recall()` が返す記憶にも、「`basis` が解決できるか」を運ぶ欄が無い（`packages/core`
+全体を `根拠を失った|basisLost|orphanedBasis|lostBasis` で grep して0件だったことを含め、
+Issue #883 が確認済み）。`recall()` は `provenanceKind` だけを返し `basis` そのものは
+返さない設計であり（`packages/core/src/recall.ts` の doc コメント）、この印をどの型に・
+どの時点で持たせるかは決まっていない——`basis` の参照先が `forgotten`/`purge()` されても、
+呼び出し側にはどこにも出ない。実装の仕事として Issue #883 は開けたままにしてある。
+
 ---
 
 ## 3. 三つ（四つ）の時計
@@ -172,13 +182,27 @@ digest の生成方式がどちらであったかを隠さないのは同じ原�
 ADR 0013 は「検知できるようになっただけで、やり直す操作は無い」という負債を残していた。
 **`runtime.reextract(ctx, observationId)`（ADR 0028、2026-09 追記）**がこれを埋める。
 同じ Observation に対して抽出をもう一度走らせ、成功すれば、2 で残った生テキストの Memory
-（および古い版の抽出結果一般）を `status: 'superseded'` にする——`forgotten`（利用者が
-意図して忘れさせた、という**製品の振る舞い**）ではなく `superseded`（より良い抽出に
-置き換えられた、という**機構の都合**）にするのはオーナー決定である。詳細・却下した案・
-引き受けた負債は [ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) を参照。
+（および**同じ `extractorVersion` を持つ**古い抽出結果）を `status: 'superseded'` にする
+——`forgotten`（利用者が意図して忘れさせた、という**製品の振る舞い**）ではなく
+`superseded`（より良い抽出に置き換えられた、という**機構の都合**）にするのはオーナー決定
+である。詳細・却下した案・引き受けた負債は
+[ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) を参照。
 supersede しなかった理由（`contested`/`forgotten` だったので飛ばした・変わっていなかった・
 そもそも既存を見ていない）は `ReextractResult.skipped` に出る
 （[ADR 0029](./decisions/0029-reextract-skip-visibility.md)）。
+
+⚠ **2026-09-26 追記（Issue #873）: `extractorVersion` を跨いだ旧い版の Memory は見ない。**
+「同じ Observation に対して抽出をもう一度走らせ」の判定対象は
+`MemoryStore.listBySourceObservation(ctx, observationId, extractorVersion)` が返す
+——ここでの `extractorVersion` は**この `reextract()` を呼んだ runtime インスタンスが
+生成時に固定した値**であり、呼び出しの引数ではない。⟹ `extractorVersion` を上げた
+別の runtime インスタンスで同じ Observation を reextract すると、旧い版の Memory は
+`toSupersede`/`skipped` のどちらにも現れず、supersede されずに `active` のまま残る
+——同じ Observation に由来する新旧2件の Memory が同時に `active` になり、`recall()`
+の候補集合に両方出続ける（実測、Fake）。**旧い版の Memory を退役させるのは運用側
+（呼び出し側）の責務であり、`reextract()` はその経路を持たない。**版の並行比較
+（`docs/roadmap.md` §4 技術上のリスク表）はこの性質の上に成り立っている。詳細は
+[ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) の 2026-09-26 追記。
 
 ---
 
@@ -252,6 +276,27 @@ contested_with_id  uuid NULL REFERENCES memories(id),
 関係で表現できないケース（一つの Memory が複数の Memory と同時に争われている等）は Phase 2 の
 `memory_relations` を必要とし、Phase 1 では `contested_with_id` が指す1件を必須の道連れとして
 scoping する設計に留める。
+
+### ⚠ 2026-09-26 追記（Issue #854）: `superseded_by_id`/`contested_with_id` はテナント一致を検査しない
+
+上の `REFERENCES memories(id)` は**単純な FK であり、`tenant_id` を見ない**。
+`superseded_by_id`/`contested_with_id` は、書き手が同じテナントの id を渡す前提で書かれた欄だが、
+Postgres 側の唯一の検査はこの FK（「`memories` のどこかに存在する id か」）であり、
+アプリ側の唯一の検査（`isContestedWithoutCompanion`、
+`packages/core/src/interfaces/memory-store.ts`）も「`status === 'contested'` なのに
+`contestedWithId` が無い」ことしか見ない。`packages/testkit` の Fake（in-memory）は
+FK すら持たないため、存在しない id を渡しても素通る。
+
+**それでも読み取り漏洩・書き込み漏洩には繋がらない**（クローン miku の判断による記録、
+[ADR 0220](./decisions/0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)。
+実測済み——Issue #854）。`MemoryStore` の他の全ての口が `tenant_id = ctx.tenantId` で
+読み書きを絞っているため、他テナントの id を指すダングリング参照が行き先テナント自身の
+行に残るだけで、`get`/`getMany` はテナントが違えば `null`/`[]` を返す。`recall()` の段3
+（必須同伴取得）も同じ口を経由するため、同伴が別テナントなら単に「対向が見つからない」
+扱い（`unit_assembly_dropped`）に落ちる。`Runtime` を経由する呼び出し
+（`markContested`/`resolveContested`/`consolidate`/`reflect`/`reextract`）は、いずれも
+同じ `ctx` で存在を確かめた id からしか `contestedWithId`/`supersededById` を組み立てない
+——到達するのは `MemoryStore`（`@mnemora/core` の公開 interface）を直接呼ぶ経路だけである。
 
 ### ⚠ 2026-09 追記（Issue #371、(B) 第1段。[ADR 0185](./decisions/0185-contradiction-detection-path.md)/[ADR 0315](./decisions/0315-claim-key-does-not-touch-extraction-cassettes.md)）: `claimKey`（主張キー）を足した——**検出はまだ無い**
 

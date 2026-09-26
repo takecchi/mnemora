@@ -500,3 +500,41 @@
 CAS の破れや部分的な失敗という稀なケースで読み違えうる。その読み違いは文書の明記で防ぐだけで、
 型や値では防いでいない。`reflect()` の `sources` に近い形のずれが理論上ありうること
 （Issue #882「確かめていないこと」）は、この追記でも測っていない。
+
+## 追記（2026-09-26、[Issue #869](https://github.com/takecchi/mnemora/issues/869)）: 決定3の「2回目は書き込みゼロ」は `{ seedMemoryId }` の経路では成り立たない
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+振る舞いは変えていない——この追記は記録だけである。**扱い（`{ seedMemoryId }` を冪等にするか、
+この食い違いを記述として残すだけにするかという設計判断は、
+[オーナー自身のコメント](https://github.com/takecchi/mnemora/issues/869#issuecomment-5843096982)が
+明示するとおりオーナーの判断に上げてあり、この追記では決めていない。**
+
+決定3は「2回目の呼び出しでは、1回目で全部 `superseded` になっているので手順3で止まる」
+「これが冪等性の実装そのものである」と書いていた。この主張は、`getMany(ctx, ids)` の `ids` が
+**呼び出しごとに同じ集合であること**に依存している。
+
+- **`{ memoryIds }` はこの前提を満たす。** `target.memoryIds` は呼び手が渡す固定の配列であり、
+  2回目の呼び出しも同じ id 集合を `getMany` で読む——1回目で全部 `superseded` になっていれば、
+  2回目は本当に全件 `status_not_active` になり `nothing_to_consolidate` で終わる。
+- **`{ seedMemoryId }` はこの前提を満たさない**（[ADR 0152](./0152-consolidate-seed-neighborhood.md)
+  決定3、同 ADR の 2026-09-26 追記）。`ids = [seedMemoryId, ...neighborIds]` の
+  `neighborIds` は、呼ぶたびに `recall(ctx, { text: seed.digest })` を新しく実行して
+  **現在の** active な記憶集合から拾い直す。1回目で `recall()` の既定 `limit`（10）や
+  `maxCandidates` の窓から溢れて `active` のまま残った近傍は、2回目には eligible として
+  拾われ、`getMany` が全件 `status_not_active` を返すという決定3の前提が崩れる。
+  Issue #869 は Fake・Postgres の両方でこれを実測し、2回目の呼び出しで LLM が再度呼ばれ
+  （`llmCalls` が0にならない）、新しい統合先 C2 が実際に作られることを確認した——
+  加えて、1回目の統合先 C1 自身が2回目の統合に巻き込まれて `superseded` になるケースも
+  Fake で実測されている。
+- **`{ query, maxCandidates }` も `recall()` を呼び直す点は同じ形を共有するが、
+  Issue #869 はこの経路を実測していない。**
+
+**この決定3の記述は、経路によって成り立つかどうかが分かれている**（`{ memoryIds }` では成り立ち、
+`{ seedMemoryId }` では成り立たない）ことを、この追記で明記した。決定3の本文はどの `ConsolidateTarget`
+にも一様に適用されるかのように書かれていたが、実際には対象の選び方（3つの `ConsolidateTarget` の
+形）に依存する性質だった。
+
+反映先: [ADR 0152](./0152-consolidate-seed-neighborhood.md) の追記（同じ日付、負債5の実測）、
+`docs/memory-model.md`、`packages/core/src/runtime.ts` の `consolidate`/`ConsolidateTarget`
+の doc コメント。

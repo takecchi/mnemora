@@ -188,3 +188,55 @@ extractorVersion)` を追加する。マイグレーション・索引は追加�
     探すロジックを足す等）を決める別の ADR を起こす。
   - `reextract` の呼び出し経路（バッチ化・自動トリガー）を実装する際、`tick()` に統合する
     かどうかを再検討する。
+
+## 追記（2026-09-26、[Issue #873](https://github.com/takecchi/mnemora/issues/873)）: `extractorVersion` を跨いだ旧い版は退役させない——運用側の責務と明記した
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・却下した案・引き受けた負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——新しい経路は足さず、文書に明記しただけである。
+
+**「採らなかった案」の『`extractorVersion` を上げて別物として並べる』は、まさにこの状況
+（`extractorVersion` を上げた reextract）を却下した箇所だが、却下の理由は「LLM 再試行の
+手段として使うと冪等キーの意味が曖昧になる」ことであり、`extractorVersion` を上げること
+自体を禁じてはいない。** `RuntimeConfig.extractorVersion` は runtime インスタンス生成時に
+固定される値であり、実際に版を上げて別の runtime を作ることは今日も可能な使い方である
+（Issue #873「経緯」）。
+
+**食い違い（Issue #873 の実測、2026-09-26、Fake）**:
+`runtime.reextract`（`packages/core/src/runtime.ts`）の supersede 判定は
+`listBySourceObservation(ctx, observationId, extractorVersion)`（決定1）で「今回の
+runtime が持つ `extractorVersion` に一致する既存 Memory」だけを取得する。`extractorVersion`
+を上げた別の runtime インスタンス（同じ store を共有）で同じ Observation を reextract すると:
+
+- 新しい版の Memory は `active` として新規作成される。
+- 旧い版の Memory は `listBySourceObservation` の対象に一切入らないため、
+  `toSupersede`/`skipped` のどちらにも現れない——「supersede しなかった」とすら記録されない。
+- 旧い版の Memory は `active` のまま残り、新旧2件の Memory が同時に `active` になって
+  `recall()` の候補集合に両方出続ける。
+
+**クローン miku の判断（2026-09-26）**: Issue #873 が問うた3択のうち、選択肢2
+（「version 間の共存・退役は運用側の責務であり、`reextract()` の射程外」と明記して終わらせる）
+を採った。`extractorVersion` を上げたとき、旧い版の Memory を退役させるのは呼び出し側の
+責務である。`reextract()` は自分の `extractorVersion` に一致する Memory しか見ないため、
+版を跨いだ退役の経路には**ならない**。旧い版を退役させたい呼び出し側は、`forget`/
+`consolidate` 等の既存の口を個別に呼ぶこと。
+
+**なぜ新しい経路を足さないか（採らなかった案）**:
+1. `reextract()` に「他 version の既存 Memory も一緒に見て、意図的に supersede する」経路を
+   足す案。却下——`listBySourceObservation` の契約（決定1、SELECT のみ・version 一致）を
+   変える公開 interface の意味変更になり、この追記の範囲（判断は委譲できる範囲に留める）を
+   超える。
+2. `extractorVersion` を引数として `reextract()` に渡せるようにし、呼び出し時に版を指定できる
+   形にする案。却下——`RuntimeConfig.extractorVersion` は runtime 全体の設定であり
+   （`docs/architecture.md`）、1メソッドの呼び出しだけ別の版を使わせると、その runtime が
+   以後作る他の Memory の版と食い違う状態を作りうる。
+
+**版の並行比較（`docs/roadmap.md` §4 技術上のリスク表）は、この性質の上に成り立っている**
+——複数の `extractorVersion` を同時に `active` のまま比較できるのは、まさに reextract が
+版を跨いで自動的に退役させないからである。この追記は、その性質を「意図的な設計」として
+文書に明記しただけであり、リスク表の対処案（「`extractorVersion` ごとの冪等性を保ったまま
+並行比較できるようにする」）と矛盾しない。
+
+反映先: `packages/core/src/runtime.ts` の `Runtime.reextract`・
+`MemoryStore.listBySourceObservation` の doc コメント、`docs/memory-model.md`
+（reextract の説明箇所）、`docs/roadmap.md` §4 技術上のリスク表（該当行）。

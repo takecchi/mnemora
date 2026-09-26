@@ -576,6 +576,18 @@ export interface ForgetResult {
  *   **帰属を保ちたいなら、`ctx.subjectId` に種の `subjectId` を渡すこと**——混在は構造的に
  *   起きなくなる（Issue #579、ADR 0310 の実測。付けなかった場合の混在率は、使い方しだいで
  *   0〜100%）。
+ *
+ * ⚠ **2026-09-26 追記（Issue #869）: 「同じ対象で2回呼んだら2回目は書き込みゼロ」
+ * （ADR 0089 決定3）は `{ memoryIds }` の経路でしか成り立たない。** `{ seedMemoryId }` は
+ * 近傍（`neighborIds`）を呼ぶたびに `recall()` で**現在の** active な記憶集合から拾い直す
+ * ——1回目で `recall()` の窓（既定 `limit`/`maxCandidates`）から溢れて `active` のまま
+ * 残った近傍は、同じ `seedMemoryId` で2回目を呼ぶと eligible として拾われ、LLM が再度
+ * 呼ばれて新しい統合先ができる（Fake・Postgres の両方で実測）。1回目の統合先自身が
+ * 2回目の統合に巻き込まれて `superseded` になるケースもありうる（Fake で実測）。
+ * `{ query, maxCandidates }` も `recall()` を呼び直す点は同じ形を共有するが、この追記では
+ * 実測していない。詳細と扱い（オーナーの判断待ち）は
+ * [ADR 0152](../../../docs/decisions/0152-consolidate-seed-neighborhood.md) 負債5・
+ * [ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md) の2026-09-26 追記。
  */
 export type ConsolidateTarget =
   | { memoryIds: MemoryId[] }
@@ -1717,6 +1729,22 @@ export interface Runtime {
    * 今回作られなかったもの（content_hash が今回の集合に無いもの）を `superseded` にする。
    * 安全弁3つ（LLM がまた失敗したら何もしない・候補0件なら何もしない・compare-and-swap で
    * TOCTOU の競合を検知する）は `ReextractResult` の doc コメントを参照。
+   *
+   * ⚠ **2026-09-26 追記（Issue #873）: `extractorVersion` は `this`（この runtime インスタンス）
+   * が生成時に固定した値であり、`reextract()` の引数ではない。** supersede の判定
+   * （`listBySourceObservation(ctx, observationId, extractorVersion)`、ADR 0028 決定1）は
+   * 「今回の runtime が持つ `extractorVersion` に一致する既存 Memory」しか見ない。
+   * ⟹ **`extractorVersion` を上げた別の runtime インスタンスで同じ Observation を
+   * reextract しても、旧い版の Memory は `toSupersede`/`skipped` のどちらにも現れず、
+   * supersede されずに `active` のまま残る**——「supersede しなかった」とすら記録されない
+   * （実測、Fake。`packages/core/src/__tests__/runtime-fakes.ts`）。新しい版の Memory も
+   * `active` として作られるため、同じ Observation に由来する新旧2件の Memory が同時に
+   * `active` になり、`recall()` の候補集合に両方出続ける。**旧い版の Memory を退役させる
+   * のは運用側（呼び出し側）の責務であり、`reextract()` はその経路を持たない**——
+   * `forget`/`consolidate` 等の既存の口を個別に呼ぶこと。版の並行比較
+   * （`docs/roadmap.md` §4 技術上のリスク表）はこの性質の上に成り立っている。
+   * 詳細は [ADR 0028](../../../docs/decisions/0028-reextract-superseded-cleanup.md) の
+   * 2026-09-26 追記。
    */
   reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
   /**
@@ -2297,7 +2325,12 @@ export interface Runtime {
    * 3. eligible が0件なら `nothing_to_consolidate`/`no_eligible_sources`、1件だけなら
    *    `nothing_to_consolidate`/`single_eligible_source`——どちらも `llmCalls: 0`・書き込み無し。
    *    **これが冪等性の芯**——同じ id 集合で2回目を呼ぶと eligible が0件になり、LLM も
-   *    呼ばず何も書かずに終わる。
+   *    呼ばず何も書かずに終わる。⚠ **2026-09-26 追記（Issue #869）: 「同じ id 集合」は
+   *    `{ memoryIds }` では保証されるが、`{ seedMemoryId }`（手順1）では保証されない**
+   *    ——`neighborIds` を毎回 `recall()` で拾い直すため、1回目で `recall()` の窓から
+   *    溢れて `active` のまま残った近傍が2回目には eligible に入り、書き込みゼロにならない
+   *    ことがある（{@link ConsolidateTarget} の doc コメント、ADR 0152 負債5・ADR 0089 の
+   *    2026-09-26 追記）。
    * 4. `dryRun: true` ならここで打ち切る。eligible は `{ kind: 'eligible' }`、他は2の判定の
    *    まま。`outcome: 'dry_run'`、`llmCalls: 0`、書き込みゼロ。
    * 5. LLM を1回呼ぶ（`completeStructured`）。失敗したら `outcome: 'llm_failed'`・

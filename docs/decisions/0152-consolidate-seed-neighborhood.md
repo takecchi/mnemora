@@ -317,3 +317,40 @@
     この形が実際に効くかどうかをこの PR は測っていない。
   - **冪等性の境界（負債5）を歯で固定していない。** 「1回目で落ちた近傍が2回目には
     拾われる」という非決定的な再統合が実際に起きるかどうかは検証していない。
+
+## 追記（2026-09-26、[Issue #869](https://github.com/takecchi/mnemora/issues/869)）: 負債5を実測で確認した——「非決定的」ではなく、`recall()` の窓から溢れるだけで再現する
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定・負債・確かめていないこと）は書き換えていない。**当時の記録として残す。
+振る舞いは変えていない——この追記は記録だけである。扱い（冪等にするか、ADR 0089 の記述を
+経路ごとに書き分けるかという設計判断）は[オーナー自身のコメント](https://github.com/takecchi/mnemora/issues/869#issuecomment-5843096982)が
+明示するとおりオーナーの判断に上げてあり、この追記では決めていない。
+
+**負債5は「1回目で落ちた近傍が2回目には拾われる、といった非決定的な再統合が理論上ありうる」と
+書いていたが、これは「理論上」でも「非決定的」でもない。** `{ seedMemoryId }` の近傍は
+`recall()` の既定 `limit`（10）で切られるため、種+近傍が11件以上あれば**必ず** `maxCandidates`
+（既定は `limit` と同じ枠）から溢れる分が残る。残った近傍は `minAffinity` 未満だったからではなく、
+単に窓に入らなかっただけで `active` のまま残り、**同じ `seedMemoryId` で2回目を呼べば毎回同じ形で
+拾われる**（Fake・Postgres の両方で実測。Issue #869 本文）。
+
+**1回目の統合先（C1）自身も、2回目の統合に巻き込まれうる。** C1 の `embeddingStatus` が
+`recall(text: seed.digest)` のクエリベクトルと十分近ければ、C1 は2回目の近傍探索にそのまま
+拾われ、`status_not_active` で弾かれる種とは違って `active` なので eligible に入り、
+即座に `superseded` へ動く（Fake で実測。Postgres の実測では埋め込みが噛み合わず巻き込まれ
+なかったが、これは環境依存の結果であり、構造的に起きないことの証明ではない）。
+`provenance.sources` の連鎖が1段深くなる（C2 の `sources` に C1 の id が入り、C1 の
+`sources` には元の統合元 id が入ったまま `status: 'superseded'` になる）。
+
+**ADR 0089 決定3 の「2回目は手順3で止まる（`llmCalls: 0`、書き込みゼロ）」は、`ids` の集合が
+呼び出しごとに同じであることに依存している。** `{ memoryIds }` はこの前提を満たす
+（`target.memoryIds` は呼び手が固定して渡す配列であり、呼ぶたびに同じ id 集合を
+`getMany` で読む）。**`{ seedMemoryId }` はこの前提を満たさない**——`ids = [seedMemoryId,
+...neighborIds]` の `neighborIds` は毎回 `recall()` を新しく呼んで**現在の** active な
+記憶集合から拾い直すため、1回目で拾われなかった（または1回目にはまだ存在しなかった）記憶が
+2回目には eligible として入り、`getMany` が全件 `status_not_active` を返して手順3で止まる
+という保証が成り立たない。**`{ query, maxCandidates }` も `recall()` を呼び直す点は同じ形を
+共有するが、この追記では実測していない。**
+
+反映先: [ADR 0089](./0089-runtime-consolidate-shape.md) の追記（同じ日付）、
+`docs/memory-model.md`、`packages/core/src/runtime.ts` の `consolidate`/`ConsolidateTarget`
+の doc コメント。
