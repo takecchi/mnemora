@@ -526,3 +526,10 @@ packages/local-embedding/src packages/testkit/src` の結果に、この型・
 `groupSupersededCandidatesByOperation`、`packages/core/src/interfaces/memory-store.ts` の
 `previewRestoreSupersededBy?`・`purgeExpiredEvents?`、`packages/core/src/event-retention-purge.ts`
 の `purgeExpiredEventsForTenant`、`docs/memory-model.md` §9（保持方針）。
+
+---
+
+**[Issue #515](https://github.com/takecchi/mnemora/issues/515) は、[ADR 0230](./0230-restore-superseded-recovery-path.md)
+末尾の 2026-09-26 追記で、群の範囲（本 ADR が「①②③の比較」節・`boundaryConfidence`
+節で扱ってきた非対称）を今の契約として確定してクローズした。**本 ADR の決定・
+却下した案・確かめていないことは、この追記の前後で変わっていない。

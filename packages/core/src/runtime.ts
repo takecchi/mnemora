@@ -2083,6 +2083,20 @@ export interface Runtime {
    * outcomes: [] }`——`restoreSupersededBy?` を実装済みでも、この2つは独立した
    * 任意メソッドなので免除されない。
    *
+   * ⭐ **2026-09-26 追記 —— これが今の契約である（[Issue #515](https://github.com/takecchi/mnemora/issues/515) クローズ）。**
+   * 群（`target.supersededById` と一致する `superseded_by_id` を持つ、`status =
+   * 'superseded'` の行すべて）は、**1回の操作の単位とは限らない**——
+   * `resolveContested` の勝者は前から在る Memory であり、`reextract` のアンカーも
+   * 冪等な `ON CONFLICT` 経由で前から在る Memory に解決されうるため、別々の操作の
+   * 敗者が同じ群へ積み上がることがある（{@link RestoreSupersededTarget} の doc
+   * コメント、[ADR 0230](../../../docs/decisions/0230-restore-superseded-recovery-path.md)
+   * 冒頭の訂正1・訂正4）。**これはバグではなく確定した契約である。**呼び出し側は
+   * `opts.dryRun: true` で戻す前に群の中身（`supersededReason` を含む）を確かめ、
+   * 必要なら `target.onlyMemoryIds` で絞ってから呼ぶこと——この2つが、群の広さを
+   * 呼び出し側が制御する既定の手段である。群をさらに細かい鍵（`memory_events` への
+   * 操作 id 新設、Issue #515 方向2）で絞る案は v1.0.0 では採らない。理由・
+   * 経緯は ADR 0230 末尾の 2026-09-26 追記を参照。
+   *
    * 手順:
    * 1. `deps.memoryStore.restoreSupersededBy` が無ければ
    *    `{ supported: false, supersedingMemoryId: target.supersededById, outcomes: [] }`。
