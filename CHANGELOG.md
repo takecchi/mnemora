@@ -97,7 +97,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `reinforceMany` が在ればそれを使い、無ければ従来どおり `reinforce` を1件ずつ呼ぶ
   ——既存の `MemoryStore` 実装（第三者 adapter を含む）の挙動は1バイトも変えない。
   `PostgresMemoryStore.reinforceMany` は件数によらず定数2往復（[Issue #874](https://github.com/takecchi/mnemora/issues/874) /
-  [ADR 0303](./docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節）。
+  [ADR 0303](./docs/decisions/0303-superseded-contested-decay-floor-owner.md) 追記節、PR #917）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
