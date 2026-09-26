@@ -13,9 +13,12 @@
  * その頻度も、踏んだときに活動時計（`decay_clock = 'activity'`）側でどれだけ `activity_seq`
  * を取り逃がすかも、実測していなかった。本スクリプトはそれを実測する。
  *
- * **挙動・公開 API・既定値は一切変えない。** `PostgresMemoryStore.reinforce` の1点だけ、
- * 呼ばれた引数と返り値を記録するために `reinforce` メソッドをインスタンス単位で
- * 差し替える（`installReinforceSpy`）——プロトタイプもクラス定義も触らない。
+ * **挙動・公開 API・既定値は一切変えない。** `PostgresMemoryStore` の強化の口
+ * （`reinforce`・`reinforceMany`・`recordUsageAndReinforce`）だけ、呼ばれた引数と返り値を
+ * 記録するためにインスタンス単位で差し替える（`installReinforceSpy`、`./reinforce-spy.ts`）
+ * ——プロトタイプもクラス定義も触らない。⚠ 2026-09-27: 以前は `reinforce` だけを差し替えて
+ * いたため、#917（`reinforceMany`）以降は使用報告の強化を1件も記録していなかった
+ * （下の「実測した結果」は 2026-09-25、#917 より前の実行なので、この不具合の影響を受けていない）。
  *
  * ## セクション
  *
@@ -101,14 +104,7 @@
 
 import { performance } from "node:perf_hooks";
 import { randomUUID } from "node:crypto";
-import type {
-  Ctx,
-  EmbeddingProvider,
-  EmbeddingSpaceId,
-  LLMProvider,
-  Memory,
-  ReinforceOptions,
-} from "@mnemora/core";
+import type { Ctx, EmbeddingProvider, EmbeddingSpaceId, LLMProvider, Memory } from "@mnemora/core";
 import { createRuntime, DEFAULT_HALF_LIFE_RECALLS } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { createPostgresClient, type PostgresClient } from "../client.js";
@@ -117,6 +113,7 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { installReinforceSpy, type ReinforceCallLog } from "./reinforce-spy.js";
 
 // ---------------------------------------------------------------------------
 // 設定
@@ -248,53 +245,6 @@ function buildRig(client: PostgresClient): Rig {
 
 function freshCtx(): Ctx {
   return { tenantId: `bench-730-${randomUUID()}` };
-}
-
-/** `reinforce` に渡った引数と、その呼び出しが返した行の状態を記録する1件。 */
-interface ReinforceCallLog {
-  memoryId: string;
-  at: Date;
-  nowSeq: number | undefined;
-  // その呼び出し「自身」が観測した返り値（並行実行では他の呼び出しに上書きされている
-  // ことがあるため、最終判定には使わない——ここでは診断用にだけ残す）。
-  observedLastReinforcedAt: Date | null;
-  observedDecayBaseSeq: number | null;
-}
-
-/**
- * `store.reinforce` をインスタンス単位で**1回だけ**差し替え、呼ばれた引数と返り値を
- * 「そのとき差し込まれている」ログへ積む。クラス定義・プロトタイプは一切触らない
- * ——このインスタンスへの呼び出しだけを観測する。
- *
- * ⚠ **トライアルのたびに再度差し替えないこと。**`store.reinforce.bind(store)` を
- * 「元の実装」として毎回捕まえると、2回目以降の差し替えは「前回の差し替え後の関数」を
- * 元として包むことになり、呼び出しが前のトライアルのログにも積まれ続ける多重ラップに
- * なる——実際にこの実装で最初に踏んだ（集計がトライアル数と噛み合わなかった）。
- * 差し替えは1回だけ行い、どのログへ積むかを `setLog` で切り替える。
- */
-function installReinforceSpy(store: PostgresMemoryStore): {
-  setLog: (log: ReinforceCallLog[] | null) => void;
-} {
-  const original = store.reinforce.bind(store);
-  let currentLog: ReinforceCallLog[] | null = null;
-  store.reinforce = async (ctx: Ctx, id: string, at: Date, opts?: ReinforceOptions) => {
-    const result = await original(ctx, id, at, opts);
-    if (currentLog !== null) {
-      currentLog.push({
-        memoryId: id,
-        at,
-        nowSeq: opts?.nowSeq,
-        observedLastReinforcedAt: result.lastReinforcedAt ?? null,
-        observedDecayBaseSeq: result.decayBaseSeq ?? null,
-      });
-    }
-    return result;
-  };
-  return {
-    setLog: (log) => {
-      currentLog = log;
-    },
-  };
 }
 
 /** `PostgresMemoryStore.createRecall` を直接呼んで、最小限の recall 行を1件作る。 */
