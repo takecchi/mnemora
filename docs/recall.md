@@ -29,7 +29,7 @@ type RecallResult = {
 
 `memories` と `omitted` は対になる二つのフィールドであって、片方が主でもう片方が付録ではない。型定義上も並び順上も対等に置く。呼び出し側のコードが `omitted` を無視して `memories` だけを使うことは自由だが、mnemora の側が「無視してよい」という前提で設計してはならない——`omitted` を計算しない・空配列で済ませる、という手を抜く経路を作らない。
 
-**⚠ 排他性契約（2026-09 追記。Issue #421 / [ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）**: `omitted` は文字どおり「返らなかったもの」の分類である——ある memoryId が `memories` に載っているなら、`omitted` のどの Omission もその memoryId を名指しで含まない。段3.5（連想、§9）が段2の `below_threshold` 判定を後から `memories` へ昇格させることがあり、そのときは昇格した分を `below_threshold` の `count`/`nearMisses` から取り下げる（§9.8）。**この契約が個体単位で（外部から）検証できるのは `nearMisses` を持つ `below_threshold` だけである**——他の `Omission.kind` は件数だけを持ち、どの記憶を指すかを言わない。**2026-09-26 追記（Issue #823）**: `over_limit(stage:"rescore")` も、公開型を広げないまま同じ排他性の対象になった——段3（必須の同伴取得）が段2の `over_limit(stage:"rescore")` の候補を昇格させたぶんは `count` から差し引かれる（§9.8 末尾）。検証できるのは内部実装とテストからだけで、`over_limit` 自身は依然として memoryId を公開していない。`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等は対象外のままである。**2026-09-26 追記2（Issue #925）**: 段3.5（連想）自身が `over_limit(stage:"rescore")` の候補を拾い直して昇格させる経路も、同じ日付で同じ形（`overLimit` と、`finalMemories` に `retrievedVia: "association"` で実際に返った id との突き合わせ）で対象になった——詳細は ADR 0203 の同日追記2を参照。`over_limit(stage:"association")` 等、他の kind は引き続き対象外である。
+**⚠ 排他性契約（2026-09 追記。Issue #421 / [ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）**: `omitted` は文字どおり「返らなかったもの」の分類である——ある memoryId が `memories` に載っているなら、`omitted` のどの Omission もその memoryId を名指しで含まない。段3.5（連想、§9）が段2の `below_threshold` 判定を後から `memories` へ昇格させることがあり、そのときは昇格した分を `below_threshold` の `count`/`nearMisses` から取り下げる（§9.8）。**この契約が個体単位で（外部から）検証できるのは `nearMisses` を持つ `below_threshold` だけである**——他の `Omission.kind` は件数だけを持ち、どの記憶を指すかを言わない。**2026-09-26 追記（Issue #823）**: `over_limit(stage:"rescore")` も、公開型を広げないまま同じ排他性の対象になった——段3（必須の同伴取得）が段2の `over_limit(stage:"rescore")` の候補を昇格させたぶんは `count` から差し引かれる（§9.8 末尾）。検証できるのは内部実装とテストからだけで、`over_limit` 自身は依然として memoryId を公開していない。`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等は対象外のままである。**2026-09-26 追記2（Issue #925）**: 段3.5（連想）自身が `over_limit(stage:"rescore")` の候補を拾い直して昇格させる経路も、同じ日付で同じ形（`overLimit` と、`finalMemories` に `retrievedVia: "association"` で実際に返った id との突き合わせ）で対象になった——詳細は ADR 0203 の同日追記2を参照。`over_limit(stage:"association")` 等、他の kind は引き続き対象外である。**2026-09-26 追記3（Issue #940）**: 追記・追記2の判定は「戻った先」を `finalMemories`（段4の予算切り詰めの**後**の最終集合）との突き合わせで見ていたため、戻った候補が段4の予算で改めて落ちると取り下げが起きず、`over_limit(stage:"rescore")` と `budget_dropped` の両方に数えられていた。判定を「`companions`/`associationUnits`（どちらも段4より前の内部状態）に居るか」だけに絞り、`finalMemories` との突き合わせをやめた——結果を問わず、候補がひとたび候補集合に戻れば `over_limit(stage:"rescore")` の勘定からは外れ、その先で予算に落ちれば `budget_dropped` 側が数える。詳細は ADR 0203 の同日追記3を参照。
 
 `index` と `usage` も同じ理由でトップレベルに置く。「何が在るか」（index、§5）と「どれだけの量を返したか」（usage、§6）は、`memories` の中身をどう解釈するかに直接影響する周辺情報であり、後から復元できない。`explain.stages` はパイプラインの実行そのものの記録であり、次節で扱う。
 
@@ -1141,6 +1141,39 @@ Memory 本体(内容・provenance の詳細・状態)の型は `./memory-model.m
 
 **⚠ 取り引き（トレードオフ）**: `eventAwareFreshness` は「`occurredAt` が無い恒常的な事実を正しく持ち上げる」ことと表裏で、「`occurredAt`・`validFrom`・`validUntil` のいずれも持たない（＝抽出が出来事時刻・期限を構造化できなかった）記憶」を一律「恒常的な事実」として扱う——それが実際には古びた・期限切れの情報であっても、`freshness` を 1 に固定して持ち上げてしまう。実測（Issue #690 実 API 評価、ADR 0300 §6.4）では、この方針は `occurredAt`/validity 列を一切持たず直近に `reinforce` された古い予定を、`recall()` のスコアリング上つねに最上位・文脈入りさせた——この検索側の性質自体は複数回の実測でビット単位まで再現する。**最終的な回答が誤るかどうかは、回答プロンプトが `occurredAt` の有無をどう描画するかに依存することも実測で確認した**（ADR 0300 §6.4「取り引き」——同じ検索結果でも、`occurredAt` が無いことを回答生成モデルに見える形で示す書式では正答し、示さない書式では「分かりません」と答えて不正解になった。LLM のサンプリングの偶然ではない）。**⟹ `eventAwareFreshness` を選ぶことは「恒常的な事実の埋没」と「未構造化の古い情報の持ち上げ」のどちらの誤りを引き受けるかという取り引きであり、どちらか一方だけを直す方法ではない。**
 
+### 7.2 `freshness` の下限側 — 経過が半減期の約1075倍を超えると厳密に0になる（Issue #939）
+
+**ADR 0036 が塞いだのは上限側（未来の `occurredAt`）だけである。下限側（古すぎる `occurredAt`）には、そもそも下限が無い。** `freshness` は `Math.min(MAX_FRESHNESS, 0.5 ** (elapsed / halfLifeHours))` （`packages/core/src/strategies/scoring.ts` の `computeFreshness`、`elapsed = now - (occurredAt ?? recordedAt)`）であり、`elapsed / halfLifeHours` が十分大きいと、IEEE 754 倍精度の指数部の下限（最小の非正規化数 `Number.MIN_VALUE` = 2^-1074）を割り込み、**`0` へ丸められて厳密に `0`** になる（`2^-1075` はちょうど最小の非正規化数の半分で、最近接偶数丸めにより `0` になる）。
+
+**境界の実測**（この文書を書いた器、Node.js **v22.23.3**。`Math.pow` の丸めは V8 依存であり、他のエンジン・他のバージョンでは1でもずれうる——この数値は「この環境で測った」ものであり、規格が保証する値ではない）:
+
+```
+Math.pow(0.5, 1074) === Number.MIN_VALUE   // 5e-324（最小の非正規化数）
+Math.pow(0.5, 1075) === 0                  // 真——ここから先は厳密に0
+```
+
+**⟹ `elapsed / halfLifeHours ≥ 1075` は、`freshness === 0` を保証する十分条件である**（この環境で測った境界に基づく。理論上の下限は `2^-1074` なので、境界はこの近辺——「約1074〜1075」——にしか一般には言えない。1075 という整数値そのものが V8 の丸めに依存する)。既定の半減期 `DEFAULT_HALF_LIFE_HOURS`（`packages/core/src/interfaces/tenant-settings-store.ts`、720時間 = 30日）では、これは**約88.3年前**の `occurredAt`（`720h × 1075 ÷ 24 ÷ 365.25`）に相当する。半減期24時間のテナントでは約2.9年前になる（`defaultScoringStrategy` を直接呼んで実測。`similarity: 0.95`・`lastReinforcedAt: now`・`strength: 1` でも同じ境界で `freshness`/`total` とも厳密に `0` になることを確認した）。
+
+**freshness がまだ0でなくても、他の項が1未満なら `total` はそれより手前で0になりうる。** `total = affinity × decay × tagMatch × freshness × strength` は積なので、`freshness` が非正規化数域（例: `5e-324`）まで縮んだ状態で `strength`（または `decay`）が1未満だと、掛け算の結果がさらに小さくなって丸めで0になる——実測では、上の境界（88.3年）より少し手前の**88.28年**で `freshness` はまだ `5e-324`（非0）だが、`strength: 0.1` を掛けた `total` は既に `0` になった。**⟹ 上の境界は「そこに達すれば必ず0になる」という十分条件であり、「そこまでは0にならない」という必要条件ではない。**
+
+**適用範囲**: `timeWeighting: "eventAwareFreshness"`（§7.1）で `occurredAt` が無い記憶は、`freshness` が `MAX_FRESHNESS`（1）に固定されるため、この下限アンダーフローには当たらない——当たるのは「`occurredAt` が在る記憶」と「`timeWeighting` が既定の `"legacy"`（`occurredAt` の有無に関わらず `recordedAt` へフォールバックする）」の組み合わせだけである。
+
+#### `total` が同点（0を含む）のときの順位（現物で確認済み）
+
+`freshness`/`total` が0まで潰れると、`similarity` の差が `total` から消える——同じ `total` を持つ候補どうしの順位は、以下のタイブレークだけで決まる。
+
+- **段2（再スコア、`RecalledMemory.retrievedVia: 'ann' | 'lexical'`）**: `compareScoredCandidates`（`packages/core/src/recall-runtime.ts`）が (1) `total` 降順（`NaN` は最後尾、Issue #938） → (2) 実効時刻（`occurredAt ?? recordedAt`）降順 → (3) `memory.id` 昇順（文字列比較）の順で決める。`total` が同点の候補どうしは、`similarity` に関わらず (2)(3) だけで並ぶ。**実測**（`defaultScoringStrategy`/`compareScoredCandidates` を直接呼んだ。同じ実効時刻・`total: 0` の2件に `similarity: 0.95` と `similarity: 0.10` を与えても、並び順は変えず `memory.id` の昇順（辞書順で小さいほうが先）になった）。
+- **連想枠（段3.5、`retrievedVia: 'association'`）**: 順位キーは `rankKey = hit.similarity（アンカーとの類似度） × score.total`（クエリとの `similarity`/`lexicalMatch` は渡さないため `score.similarity` 自体は現れず、`affinity` は中立の1に退化する。§9.2 手順6）。ソートは `compareDescendingNaNLast` を使う `Array.prototype.sort`（安定ソート）なので、`rankKey` が同点（`total: 0` なら `rankKey` も必ず0）の候補どうしは、直前に作った `rankFetchHits` の並び——**アンカー類似度の降順**（さらにその中の同点は adapter が返した順序）——をそのまま保つ。§9.2 の該当コメント（`recall-runtime.ts`）が同じことを述べている。
+
+#### どの呼び出しで表に出るか（現物で確認済み）
+
+既定値では、この現象は基本的に**返らない**——ただし例外が複数ある。
+
+- **段2の既定 `scoreThreshold`（`DEFAULT_SCORE_THRESHOLD` = `0.1`、`packages/core/src/recall.ts`）では、`total: 0` の候補は `below_threshold` に落ち、`RecalledMemory` としては返らない。** これが表に出るのは **`scoreThreshold <= 0` を渡した呼び出し**（`0 >= 0` は真）。
+- **連想枠（段3.5）には `scoreThreshold` に相当するゲートが無い。** `rankKey` 降順で `maxCount` 件を席に着けるだけなので、`total: 0`（`rankKey: 0`）の候補でも、連想枠の候補数が `maxCount` 以下なら普通に返る。
+- **`mandatory_companion`（段3、矛盾の同伴取得）も `scoreThreshold` を経由しない。** §8 のとおり「対向する Memory をスコアに関係なく候補集合へ追加する」ため、対向の記憶の `occurredAt` が極端に古ければ `total: 0` のまま `RecalledMemory` として返る（スコアは説明用の内訳としてのみ付き、選抜には使われない）。
+- **`omitted[kind: 'below_threshold'].nearMisses`** は `belowThreshold`（`total` 降順）の先頭5件のスコアを、`RecalledMemory` としてではなく `Omission` の一部として返す（`recall-runtime.ts`）。`belowThreshold` は `total` の降順を保つ配列なので、`total: 0` の候補が `nearMisses` に入るのは、その recall 呼び出しの `belowThreshold` が5件以下（＝閾値未満の候補がそもそも少ない）ときに限られる——通常は、より高い `total` を持つ他の閾値未満の候補が先に5枠を占める。
+
 ---
 
 ## 8. 矛盾がある場合の提示
@@ -1396,3 +1429,5 @@ Issue #200 は**2つの読み方**を挙げていた。
 **2026-09-26 追記（Issue #823、ADR 0203「これが覆るとしたら」3番の是正）**: `over_limit(stage:"rescore")`（段2の `passed.slice(limit)`、§7）についても同種の矛盾が実際に起きていた——段3の必須の同伴取得が、段2で `over_limit(stage:"rescore")` へ回された候補を `finalMemories` へ昇格させることがある。解消した経路は「引き受けた負債」2番（段3.5経由の昇格を具体例に挙げていた一般的な留保）の対象に入るが、2番が具体例に挙げていた段3.5経由の昇格ではなく、2番が具体例としては挙げていなかった段3経由の昇格である。2番が名指しした段3.5経由の昇格は未解消のまま残っている——`finalMemories` 全体との突き合わせに広げると `omission-kind-generation.test.ts` の既存の歯を壊す回帰を実測したため、あえて対象外にした（[Issue #925](https://github.com/takecchi/mnemora/issues/925) として別途起票）。`OverLimitOmission` は公開型として memoryId を持たないため below_threshold と同じ形の後処理は一見できないように見えるが、`recall-runtime.ts` の実装は段2の `overLimit`（`ScoredCandidate[]`、関数内部の値）をこの時点でもまだ保持しており、公開型を経由せずに `finalMemories` と id で突き合わせられる——ADR 0203「これが覆るとしたら」3番が前提に置いていた「型の拡張が先」という制約は、内部に id を持ち回るこの段には当たらなかった。差し引く数は「段3で返した同伴の総数」ではなく「`over_limit(stage:"rescore")` に居て、かつ段3の同伴取得で実際に `finalMemories` に返った id の数」に絞る——companion が最初から `withinLimit` に居た場合や `below_threshold` から昇格した場合まで数えると、無関係な `over_limit` の count を誤って減らす（過剰実装、`recall-over-limit-promotion.test.ts` の変異試験で確認済み）。`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等の他 kind は今回も対象外のままである——ADR 0203 追記節を参照。
 
 **2026-09-26 追記2（Issue #925、ADR 0203「引き受けた負債」2番の是正）**: 上の追記が「未解消のまま残っている」としていた段3.5（連想）経由の昇格も、同じ日付で塞いだ。判定は「`overLimit` に居て、かつ (a) `companions`（段3）に居るか (b) `finalMemories` に `retrievedVia: "association"` で実際に返った」id に広げた——(b) を `retrievedVia` で絞ることで、`overLimit` に一度も居なかった連想候補（below_threshold から連想で拾われた場合など）まで数える過剰実装を避けている（`recall-over-limit-association-promotion.test.ts` の(c)が変異試験で確認）。**訂正**: 直前の追記が「`finalMemories` 全体との突き合わせに広げると…回帰を実測した」と書いていたその回帰は、実測し直すと「連想で実際に返っていない候補まで巻き込んでいた」ことではなく、`omission-kind-generation.test.ts` の `over_limit` probe のフィクスチャ自身が、まさにこの段3.5経由の昇格を踏む構成だったために、連想で実際に返った記憶の分の Omission が正しく取り下げられていた——それを「壊れた」と読んでいた。同 probe は `association: null` を明示して連想を切るよう直した（ADR 0159 のレジストリが縛るのは「その kind を生成する経路が在ること」であり、連想が既定 on の構成での挙動まではこの probe の射程に含まれない）。`over_limit(stage:"association")`/`budget_dropped`/`score_not_comparable` 等の他 kind は引き続き対象外である。
+
+**2026-09-26 追記3（Issue #940、ADR 0203 追記3の是正）**: 上の追記・追記2の判定は、どちらも「`overLimit` に居て、かつ**実際に `finalMemories` へ返った**」id に絞っていた——`returnedMemoryIds`（段4の予算切り詰めの後の最終集合）との AND 条件である。この条件のせいで、`companions`/段3.5 で候補集合に戻った候補が段4の予算切り詰めで改めて落ちると、取り下げが一度も発火せず、同じ1件が `over_limit(stage:"rescore")` と `budget_dropped` の両方に数えられていた（Issue #940 の再現）。判定を「`overLimit` に居て、かつ (a) `companions` に居るか (b) `associationUnits`（段3.5が席を埋めた候補、段4より前の内部状態）に居るか」だけに絞り、`returnedMemoryIds` との AND をやめた——**候補が戻った先で最終的に `finalMemories` に残るか `budget_dropped` で落ちるかは問わない**。`companions`/`associationUnits` の members は段4の後、必ず `finalMemories` か `budget_dropped` のどちらかに入る（それ以外に消える経路が無い）ことをコードを読んで確かめてある——だからこそ、この入れ替えで二重計上にも取りこぼしにもならない。「1件は `omitted` の中で1回だけ、最後にその候補を落とした段で数える」という形に揃えたことになる。`over_limit(stage:"association")`/`score_not_comparable` 等、対象外の kind は変わっていない。

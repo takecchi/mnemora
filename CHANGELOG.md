@@ -191,6 +191,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`memories` の中身・公開型はどちらも無変更）
   （[Issue #925](https://github.com/takecchi/mnemora/issues/925)、
   [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記2 2026-09-26）。
+- **上と同じ `over_limit(stage:"rescore")` の取り下げ処理が、段3/段3.5 で候補集合に戻った
+  記憶が段4の予算切り詰めで改めて落ちた場合には発火せず、同じ記憶が `over_limit` と
+  `budget_dropped` の両方に数えられていた**（取り下げの条件が「戻った先で実際に
+  `memories` へ返ったか」を課していたため）。判定を「`companions`/段3.5が席を埋めた
+  候補に居るか」だけに絞り、戻った先の最終的な去就は問わないようにした——1件の記憶は
+  `omitted` の中で最後に落とした段でだけ数えられる（`memories`・公開型はどちらも無変更）
+  （[Issue #940](https://github.com/takecchi/mnemora/issues/940)、
+  [ADR 0203](./docs/decisions/0203-memories-omitted-exclusivity.md) 追記3 2026-09-26）。
 - **`PostgresLexicalStore.search`（語彙検索）の、大きな入力での性能を改善した。**
   検索結果（順位・スコア）は変えていない（[Issue #878](https://github.com/takecchi/mnemora/issues/878)）。
 - **`runMigrations`/`registerEmbeddingSpace` が、マイグレーション実行中に DB 側の接続を
