@@ -45,7 +45,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`0d7fc97`** の範囲を
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`ec39629`** の範囲を
 数えたものである。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
@@ -64,8 +64,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 `0021_memories_claim_key.sql`。**`v1.0.0` から直接この節までの範囲へ上げる場合は、下の
 `## [1.0.1]` 節の migrate 案内も合わせて読むこと**（`0019`〜`0021` の3本が要る）。
 
-**この節が数えた範囲（`v1.0.1`…`0d7fc97`）に破壊的変更は無い。**【実測 2026-09-26】
-`git diff v1.0.1..0d7fc97 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
+**この節が数えた範囲（`v1.0.1`…`ec39629`）に破壊的変更は無い。**【実測 2026-09-26】
+`git diff v1.0.1..ec39629 -- scripts/__snapshots__/public-api/` の削除行は、`RecallQuery.association`
 の型を `| null` へ広げたこと（PR #838）に伴う再フォーマットのみであり、削除・必須化・型の
 狭小化は無い。`### Breaking` の節は無い。
 
@@ -140,6 +140,22 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⭕ **公開型は変えていない**——`attempts` 不一致の `OutboxLeaseConflictError` と行が
   無い場合の no-op、同種の再呼び出し（complete+complete、fail+fail）の冪等な挙動は
   すべて既存どおり。
+- **自動経路（`RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときに `tick()` が
+  処理する `reflect` ジョブ、`processReflectJob`）が、`consolidate` 側の同種の修正
+  （上の PR #733 の項目）と違い直っておらず、subject をまたいで反映し、反映結果の
+  `Memory.subjectId` が `null` に畳まれることがあった。** `tick()` は `reflect` ジョブを
+  subject で絞って claim できないため、`tick()` に渡した `ctx.subjectId` と種の `subjectId`
+  が食い違うと、近傍探索が種と別の subject から候補を拾っていた。`processReflectJob` は、
+  `processConsolidateJob` と同じ形に直した——種の Memory の `subjectId` を `ctx.subjectId` に
+  置いてから `reflect()` を呼ぶ。種が見つからない、または種の `subjectId` が `null` の場合は
+  今日どおり（[Issue #820](https://github.com/takecchi/mnemora/issues/820) /
+  [ADR 0317](./docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md)
+  追記、PR #851）。
+  ⭕ **公開型は変えていない**——`autoQueueConsolidateReflectOnExtract` の既定（`false`）の
+  利用者には何も起きない。migration も不要。
+  ⚠ **フラグを有効にしている利用者から見ると挙動が変わる**——subject をまたぐ反映が
+  構造的に起きなくなる。
+  明示的な `runtime.reflect(ctx, { target: { seedMemoryId } })` の呼び出しは変えていない。
 
 ---
 

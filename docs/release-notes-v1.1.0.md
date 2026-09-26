@@ -18,10 +18,10 @@
 
 | | |
 |---|---|
-| **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。**改版 2026-09-26**（`origin/main` = `0d7fc97` の木、下の「解消した」経緯を反映） |
+| **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。**改版 2026-09-26**（`origin/main` = `ec39629` の木、下の「解消した」経緯を反映） |
 | **書いた人** | **担い手（クローン miku の委譲先）。オーナーではない。**（冒頭のバナー） |
-| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠 ADR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.1` … `0d7fc97`** を数えたもの）が正、`v1.0.1` として既に出荷済みの分は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.0.1] - 2026-09-25` 節が正。既定 on の決定は [ADR 0337](./decisions/0337-recall-association-default-on.md)、`contestedWith` は [ADR 0335](./decisions/0335-recalled-memory-contested-with.md)、`embeddingInput` は [ADR 0336](./decisions/0336-embedding-input-opt-in-hook.md)、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md)、testkit の Fake の例外化を破壊的変更として扱うかは [Issue #809](https://github.com/takecchi/mnemora/issues/809) が正 |
-| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `0d7fc97` から動いた（＝新しい変更が積まれた）。② [Issue #809](https://github.com/takecchi/mnemora/issues/809) が決着した（この草稿は🔶マークの箇所を未決のまま書いている）。③ `packages/postgres/migrations/` の本数が3本（`0019`〜`0021`）から増減した。④ `v1.0.1`（tag `cf11cd6`）より新しい `v1.0.x` Release が切られた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
+| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠 ADR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.1` … `ec39629`** を数えたもの）が正、`v1.0.1` として既に出荷済みの分は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.0.1] - 2026-09-25` 節が正。既定 on の決定は [ADR 0337](./decisions/0337-recall-association-default-on.md)、`contestedWith` は [ADR 0335](./decisions/0335-recalled-memory-contested-with.md)、`embeddingInput` は [ADR 0336](./decisions/0336-embedding-input-opt-in-hook.md)、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md)、testkit の Fake の例外化を破壊的変更として扱うかは [Issue #809](https://github.com/takecchi/mnemora/issues/809) が正 |
+| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `ec39629` から動いた（＝新しい変更が積まれた）。② [Issue #809](https://github.com/takecchi/mnemora/issues/809) が決着した（この草稿は🔶マークの箇所を未決のまま書いている）。③ `packages/postgres/migrations/` の本数が3本（`0019`〜`0021`）から増減した。④ `v1.0.1`（tag `cf11cd6`）より新しい `v1.0.x` Release が切られた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
 
 ⚠ **この文書は、正典の内容を意図的に複製している。**理由は `docs/release-notes-v1.0.0.md` と同じ——**Release 本文を読むのは repo の外に居る採用者**であり、リンクだけでは伝わらない。⟹ **複製を許す代わりに、上の「正はどれか」を必ず添える。**
 
@@ -42,9 +42,9 @@
 
 ## 貼る前に確かめること
 
-1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `0d7fc97` か。**
-   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`0d7fc97` から動いていたら、この草稿の「新しく足した機能」「主な修正」の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節を読み、この草稿へ追記すること。
-   ⚠ **【実測】この文書の初版を書く過程・改版する過程で2度、PR が sha を動かさずに `[1.1.0]` の `### Fixed` へ追記される（または追記された後にこの担い手が sha を数え直す）ことが起きた**（PR #845・PR #846）。⟹ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**——`git diff` で `CHANGELOG.md` 自体の差分も当日見ること。
+1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `ec39629` か。**
+   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`ec39629` から動いていたら、この草稿の「新しく足した機能」「主な修正」の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節を読み、この草稿へ追記すること。
+   ⚠ **【実測】この文書の初版を書く過程・改版する過程で、PR が sha を動かさずに `[1.1.0]` の `### Fixed` へ追記される（または追記された後にこの担い手が sha を数え直す）ことが3度起きた**（PR #845・PR #846・PR #851。#851 はこの改版の push 直後に着地し、CHANGELOG の同じ位置へ追記されて競合したため、`ec39629` まで数え直した上で個別に取り込んだ）。⟹ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**——`git diff` で `CHANGELOG.md` 自体の差分も当日見ること。
 2. **[Issue #809](https://github.com/takecchi/mnemora/issues/809) が決着しているか。**`gh issue view 809 --json state,title` で当日確認する。**この issue が対象とする PR #811/#813/#815 は、`v1.0.1` として既に出荷済みである**——決着してもこの草稿（`v1.1.0`）に新しい破壊的変更節は増えない。決着の結果は `CHANGELOG.md` の `## [1.0.1]` 節へ反映すること（この文書の担当範囲外）。
    - **まだ `OPEN` なら**: 下の草稿の🔶マーク（[Issue #809](https://github.com/takecchi/mnemora/issues/809) 待ちである旨の注記）はそのままでよい。
    - **決着したら**: `docs/migration-v1.md`・`CHANGELOG.md` `[1.0.1]` 節が更新されているはずなので、そちらの表現に合わせて下の注記の文言だけ直すこと（この草稿に破壊的変更節を新設する必要はない——対象 PR は `v1.1.0` の範囲に無い）。
@@ -86,6 +86,7 @@
 > - **`deriveClaimKeys` が、LLM が空白だけの `subject`/`predicate` を返したときに空文字列の claim key を作り、無関係な記憶どうしを誤って `contested` にしていた不具合を直しました。** 正規化後に空文字列になった要素は、鍵が取れなかったもの（`null`）として扱うようにしました（PR #846）。
 > - **`@mnemora/postgres` で、2つの接続から同時に呼んだときに壊れる不具合を直しました**——`restoreSuperseded` と `forget` の並行実行、`markContested`/`resolveContested` を逆順で並行に呼んだときのデッドロックです（PR #839）。
 > - **`OutboxStore.complete`/`fail` を互いに排他にしました。** 同じ `attempts` のまま `complete` → `fail` を呼ぶと、逐次でも本物の Postgres の2接続からの並行でも、両方の終端列が付く矛盾した状態を作れていました。先に付いた終端を勝たせるようにしました（[Issue #826](https://github.com/takecchi/mnemora/issues/826)、PR #830）。
+> - **自動経路の `reflect` ジョブ（`processReflectJob`）が、`consolidate` 側と同じ不具合（subject をまたいで反映し、結果の `subjectId` が `null` に畳まれる）を持ったまま直っていませんでした。** `consolidate` 側と同じ形で、種の Memory の `subjectId` を `ctx.subjectId` に置いてから `reflect()` を呼ぶよう直しました（[Issue #820](https://github.com/takecchi/mnemora/issues/820) / [ADR 0317](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0317-auto-consolidate-scopes-neighbor-search-to-seed-subject.md) 追記、PR #851）。
 > - 一覧と根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Fixed` を見てください。**段1 ANN 窓の全滅・`"null"` 文字列の誤扱い・自動統合の subject 跨ぎ・`runMigrations()` の同時実行衝突・`dimensions > 2000` の HNSW 失敗・負数の切り詰め処理2件・strict モード JSON Schema の `null` 不具合・`retry.attempts: NaN`・擬似実装の重複 id・forget 済み対向の混入など、すでに `v1.0.1` として出荷済みの修正は、この節ではなく [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.0.1]` `### Fixed` を見てください。**
 >
 > **移行手順とマイグレーションの詳細一覧は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) が正です。**
