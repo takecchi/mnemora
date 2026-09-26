@@ -100,6 +100,7 @@ import { warmupLocalEmbedding } from "../local-embedding-warmup.js";
 import { createProviders, selectEmbeddingMode, selectLLMMode } from "../providers.js";
 import { resolveExternalId } from "../provenance-trace.js";
 import { CachingEmbeddingProvider, FileEmbeddingCache } from "./embedding-cache.js";
+import { redactDatabaseUrl } from "./redact-database-url.js";
 
 // ---------------------------------------------------------------------------
 // 歯 —— 何よりも先に置く（実 API を絶対に叩かないため）。
@@ -289,7 +290,9 @@ async function main(): Promise<void> {
     base.filter((u) => u.kind === "haystack").map((u) => u.externalId),
   );
 
-  console.log(`\n=== investigate: scale=${scale} DATABASE_URL=${databaseUrl} ===`);
+  console.log(
+    `\n=== investigate: scale=${scale} DATABASE_URL=${redactDatabaseUrl(databaseUrl)} ===`,
+  );
 
   const tenantId = "investigate";
   const handle = await createHandle(databaseUrl, cache);
