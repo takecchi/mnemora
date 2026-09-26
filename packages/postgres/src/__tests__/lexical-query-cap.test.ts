@@ -73,7 +73,7 @@ describe("capLexicalQueryWords", () => {
     expect(capLexicalQueryWords(query)).toBe("a".repeat(LEXICAL_QUERY_MAX_WORD_CHARS));
   });
 
-  it("記号だけでつないだ、空白を含まない1語も文字数の上限で切り詰められる（語数の上限では防げない形）", () => {
+  it("記号を含む、空白を含まない1語も文字数の上限で切り詰められる", () => {
     const longSymbolJoinedWord = Array.from(
       { length: LEXICAL_QUERY_MAX_WORD_CHARS },
       () => "a",

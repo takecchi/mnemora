@@ -11,8 +11,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
  * クエリの、1語（空白を含まない語）あたりの文字数に上限
  * （{@link LEXICAL_QUERY_MAX_WORD_CHARS}）を設けたことの実測。
  *
- * `lexical-store-query-word-cap.test.ts` の語**数**の上限とは別の軸——空白を1つも
- * 含まない代わりに記号だけで長くつないだ「1語」は、語数の上限では防げない
+ * `lexical-store-query-word-cap.test.ts` の語**数**の上限とは別の軸である
  * （`lexical-query-cap.ts` の doc 参照）。
  *
  * **結果（一致する/しない）で見る——時間では見ない**（CI の秒数のブレに揺れないため）。

@@ -26,9 +26,8 @@ describe("InMemoryLexicalStore.search: クエリの1語あたりの文字数の�
     const ctx: Ctx = { tenantId: TENANT };
 
     // 本文の語は上限「ちょうど」の文字数——クエリはそれに続けて追加の文字を足した、
-    // より長い1語（記号を挟まないため tokenize() では1語のまま）。切り詰めが効いて
-    // いれば本文の語と完全一致し、効いていなければ本文より長い別の語のままなので
-    // 一致しない。
+    // より長い1語。切り詰めが効いていれば本文の語と完全一致し、効いていなければ
+    // 本文より長い別の語のままなので一致しない。
     const wordAtCap = "z".repeat(LEXICAL_QUERY_MAX_WORD_CHARS);
     const queryWordBeyondCap = wordAtCap + "extratailbeyondcap";
     expect(queryWordBeyondCap.length).toBeGreaterThan(LEXICAL_QUERY_MAX_WORD_CHARS);

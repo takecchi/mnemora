@@ -20,9 +20,8 @@
  *    ——上限に触れない大多数のクエリで、挙動が変わる余地を無くすため。
  * 3. **語**（空白を含まない、連続した非空白文字の並び）**が
  *    {@link LEXICAL_QUERY_MAX_WORD_CHARS} を超える文字数を持つ場合、その語自体も
- *    先頭からその文字数に切り詰める。**空白による語数の上限（1・2）だけでは、
- *    空白を1つも含まない代わりに記号だけで長くつないだ「1語」を防げないため
- *    （{@link LEXICAL_QUERY_MAX_WORD_CHARS} の doc 参照）。
+ *    先頭からその文字数に切り詰める。**語数の上限（1・2）だけでは大きな入力を
+ *    抑えきれない場合があるため（{@link LEXICAL_QUERY_MAX_WORD_CHARS} の doc 参照）。
  *
  * ## 「語」の数え方と、SQL 側とのずれ
  *
@@ -59,12 +58,7 @@ export const LEXICAL_QUERY_MAX_DISTINCT_WORDS = 32;
  * （Issue #878、2026-09-26、クローン miku の判断）。
  *
  * {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}（語の**数**の上限）だけでは、
- * 空白を1つも含まない代わりに記号（`-`/`.` 等）だけで長くつないだ「1語」を防げない。
- * `websearch_to_tsquery` は語の中の記号も区切りとして解釈するため、空白の無い1語の
- * 中に大量の区切りが入っていると、その1語だけで `mnemora_lexical_coverage`/
- * `mnemora_lexical_query_or` の計算量が語数の上限とは無関係に膨らむ
- * （実測はマネージャーへの報告のみに残す。具体的な文字数・秒数・入力の形は
- * ここには書かない）。
+ * 大きな入力を抑えきれない場合がある。1語の長さにも上限を置いた。
  *
  * ⟹ 語ごとに、この文字数を超える部分は先頭から切り詰める——上限に触れない
  * 大多数の語（識別子・URL の一部・ハッシュ値等）は1バイトも変わらない。
@@ -133,9 +127,8 @@ export function capLexicalQueryWords(query: string): string {
  *
  * {@link LEXICAL_QUERY_MAX_WORD_CHARS} とは別の軸——ASCII 側は「語」単位（空白区切り）
  * で切り詰めるが、日本語側は分かち書きをせず、非 ASCII の連なり全体を1つの文字列として
- * `word_similarity` に渡す（`buildTrigramLexicalSearchSelect` 参照）。この文字列自体が
- * 長いと、`word_similarity`（トライグラムの生成・比較）の計算量が文字数に応じて
- * 膨らむ（実測はマネージャーへの報告のみに残す）。
+ * `word_similarity` に渡す（`buildTrigramLexicalSearchSelect` 参照）。この文字列にも
+ * 上限を置いた。
  *
  * ⟹ 非 ASCII の連なりが長い場合、先頭からこの文字数だけに切り詰めてから
  * `word_similarity` に渡す——上限に触れない大多数の日本語クエリは1バイトも変わらない。

@@ -2096,10 +2096,8 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
  * 側の歯 `lexical-query-cap-values-match.test.ts` が、3ファイルのソースを読んで
  * 突き合わせる）。
  *
- * `search` が使う `query.split(/\s+/)`（空白区切り、記号は分割しない）は postgres 側の
- * 「クエリ側は空白でしか割らない」形と同じであり、`InMemoryLexicalStore`（非文字・
- * 非数字の連なりで割る）とは違う——`InMemoryLexicalStore` の同名定数の doc が書いている
- * 「記号つなぎの長い1語」は、ここでは実際に1語のまま残る。
+ * `search` が使う `query.split(/\s+/)`（空白区切り）の分割は
+ * `InMemoryLexicalStore`（非文字・非数字の連なりで割る）とは違う形である。
  *
  * このファイルは `tsconfig.build.json` の `exclude`（`src/**\/__tests__/**`）に含まれ、
  * `@mnemora/core` の公開ビルド（`dist/`）には一切含まれない——ここでの export は
