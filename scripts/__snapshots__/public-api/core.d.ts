@@ -439,6 +439,7 @@ export * from "./recall.js";
 export * from "./correction-candidates.js";
 export * from "./apply-correction.js";
 export * from "./digest-band.js";
+export * from "./text-truncation.js";
 export * from "./ann-truncation.js";
 export * from "./recall-footprint.js";
 export * from "./event.js";
@@ -3211,3 +3212,7 @@ export interface BoundedScoringStrategy extends ScoringStrategy {
 export declare function isBoundedScoringStrategy(s: ScoringStrategy): s is BoundedScoringStrategy;
 export declare const DEFAULT_STRATEGY_BOUND_ASSUMPTIONS: readonly string[];
 export declare const defaultScoringStrategy: BoundedScoringStrategy;
+
+// ===== dist/text-truncation.d.ts =====
+export declare function truncationBoundary(text: string, index: number): number;
+export declare function sliceWithoutSplittingSurrogatePair(text: string, maxLength: number): string;

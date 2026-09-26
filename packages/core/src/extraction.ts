@@ -7,6 +7,7 @@ import type { DigestSource, NewMemory } from "./memory.js";
 import type { Observation } from "./observation.js";
 import { ExtractionContextSchema } from "./observation.js";
 import type { Provenance } from "./provenance.js";
+import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
 
 /**
  * 基本の Memory Extraction（roadmap.md 段階3、docs/architecture.md §3.8）。
@@ -204,8 +205,10 @@ export function truncateForFallbackDigest(content: string, maxLength: number): s
   // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
   // 別の意味になる（先頭からの切り詰めにならない）。maxLength は「安全弁」
   // （docs/memory-model.md §4）として本文の長さを抑える欄であり、負数は上限0
-  // （本文を残さない）の下限として扱う。
-  return `${trimmed.slice(0, Math.max(0, maxLength))}…`;
+  // （本文を残さない）の下限として扱う。サロゲートペアの内側で切って孤立サロゲートを
+  // 作らないための丸めも `sliceWithoutSplittingSurrogatePair` に集約してある
+  // （`text-truncation.ts` の doc コメント参照）。
+  return `${sliceWithoutSplittingSurrogatePair(trimmed, maxLength)}…`;
 }
 
 export interface ResolvedDigest {

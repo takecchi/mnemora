@@ -11,6 +11,7 @@ export * from "./recall.js";
 export * from "./correction-candidates.js";
 export * from "./apply-correction.js";
 export * from "./digest-band.js";
+export * from "./text-truncation.js";
 export * from "./ann-truncation.js";
 export * from "./recall-footprint.js";
 export * from "./event.js";
