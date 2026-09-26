@@ -367,5 +367,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0342](./0342-recalled-memory-basis-lost.md) | `RecalledMemory` に任意欄 `basisLost?: true` を足す —— `inferred` の根拠が失われたことを、削除せずに印として返す（Issue #883） | **提案 (2026-09)** |
 | [0343](./0343-vector-store-search-returns-zero-norm-candidates.md) | `PostgresVectorStore.search()`/`searchMany()` が、HNSW 索引に入らないゼロベクトルの候補を部分索引 + `UNION ALL` で拾う（Issue #956） | 採用 (2026-09) |
 | [0344](./0344-upgrade-from-released-version-fixture.md) | 公開済みの版で作った DB の fixture を置き、今の migration で上げる経路を必須ジョブで検査する（Issue #1038） | 採用 (2026-09) |
+| [0345](./0345-doc-snippets-typechecked-opt-in-gate.md) | 文書のコード片は、印（` ```ts check `）を付けたものだけを今の公開 API で型検査し、必須の門にする | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

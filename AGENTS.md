@@ -247,6 +247,10 @@ git status --porcelain                                                # 空に�
 - **重大な設計判断は ADR に残す。**「何を決めたか」だけでなく、
   **採らなかった案・引き受けた負債・これが覆るとしたら何が起きたときか**まで書く。
   形式は [docs/decisions/README.md](./docs/decisions/README.md) を見ること。
+- **文書の TypeScript のコード片に `ts check` の印（` ```ts check `）を付けると、
+  CI がその片を今の公開 API で型検査する**（必須の門。印の無い片は見ない）。
+  前提の変数の置き場所と、印を付けてよい片の条件は
+  [ADR 0345](./docs/decisions/0345-doc-snippets-typechecked-opt-in-gate.md) を見ること。
 - **確かめていないことは「確かめていない」と書く。**
   推測を事実の顔で書かない。これは北極星の問い3（説明できるか）の、文書への適用である。
 - **オーナーの判断を待っている点は
