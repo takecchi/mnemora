@@ -138,6 +138,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   最大+1往復）（[Issue #883](https://github.com/takecchi/mnemora/issues/883) /
   [ADR 0342](./docs/decisions/0342-recalled-memory-basis-lost.md)）。
 
+- **`VectorStore` に任意メソッド `searchMany?` を足した**——連想枠（段3.5）がアンカーごとに
+  `search()` を1回ずつ呼んでいた往復（`anchorCount` に比例して増えていた）を、実装した
+  adapter では1回の往復に束ねられるようにする。`PostgresVectorStore` に実装済み。
+  未実装の adapter では従来どおりアンカーごとの `search()` 呼び出しに戻り、結果（集合・
+  順序）は変わらない。**破壊的変更ではない**——公開 API の実 diff は `searchMany?` の
+  追加のみ（Refs [Issue #377](https://github.com/takecchi/mnemora/issues/377) /
+  [ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記）。
+
 ### Changed（後方互換だが挙動が変わりうるもの）
 
 - 🔴 **既定の挙動の変更: 連想枠（`RecallQuery.association`、段3.5）の既定が off から on に
@@ -173,24 +181,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600）に上限を設けた**
   （[Issue #878](https://github.com/takecchi/mnemora/issues/878)、
   [ADR 0092](./docs/decisions/0092-lexical-or-coverage.md) 追記節）。
-- **`VectorStore` に任意メソッド `searchMany?` を足した**——連想枠（段3.5）がアンカーごとに
-  `search()` を1回ずつ呼んでいた往復（`anchorCount` に比例して増えていた）を、実装した
-  adapter では1回の往復に束ねられるようにする。`PostgresVectorStore` に実装済み。
-  未実装の adapter では従来どおりアンカーごとの `search()` 呼び出しに戻り、結果（集合・
-  順序）は変わらない。**破壊的変更ではない**——公開 API の実 diff は `searchMany?` の
-  追加のみ（Refs [Issue #377](https://github.com/takecchi/mnemora/issues/377) /
-  [ADR 0151](./docs/decisions/0151-recall-association-unprompted.md) 追記）。
 
 ### Fixed
 
 - **`@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` は、返すベクトルの成分が有限かを確かめず、NaN / Infinity をそのまま返していた**（Issue #992）——pgvector への書き込みで初めて失敗していた。次元の検査と同じ位置で、有限でない成分があれば何番目かを名指しして例外にする。
-- **`PostgresTrigramLexicalStore.search`（語彙の trigram 経路、opt-in、ADR 0319）が `filter.labels` を適用していなかった**——`recall({ labels })` の語彙チャンネルで、絞りの外の候補が over-fetch の窓を占め、絞りの内側の候補が窓から押し出されることがあった（最終結果からは後置フィルタで落ちるので、絞りの外の記憶が返ることは無い）。`PostgresLexicalStore`・`PostgresVectorStore` と同じ述語（`tags && labels`）を足した（ADR 0323 の追記）。
+- **`PostgresTrigramLexicalStore.search`（語彙の trigram 経路、opt-in、ADR 0319）が `filter.labels` を適用していなかった**——`recall({ labels })` の語彙チャンネルで、絞りの外の候補が over-fetch の窓を占め、絞りの内側の候補が窓から押し出されることがあった（最終結果からは後置フィルタで落ちるので、絞りの外の記憶が返ることは無い）。`PostgresLexicalStore`・`PostgresVectorStore` と同じ述語（`tags && labels`）を足した（ADR 0323 の追記、[PR #991](https://github.com/takecchi/mnemora/pull/991)）。
 - **`tick()` がジョブの失敗を記録する outbox 行の `lastError` は `err.message` だけで、drizzle が包んだ DB の失敗では理由（pg のエラー文・SQLSTATE）が残らなかった**（Issue #969）——`cause` の連鎖を辿り、各段の `message` と `code` を連結して載せる。pg エラーの `detail` など利用者のデータが入りうる欄は載せない。
 - **`tick()` の embed ジョブで、埋め込みの失敗を受けて `embeddingStatus: "failed"` を書く処理そのものが失敗すると、元の例外（なぜ埋め込めなかったか）が失われ、outbox 行の `lastError` には二次的な失敗しか残らなかった**（Issue #962 の前半）——元の例外を `cause` に残し、`lastError` にも両方を載せる。
-- **`createBullmqTickDriver().start()` が `upsertJobScheduler` の失敗で reject した後、もう一度 `start()` を呼ぶと何もせず resolve していた**（Issue #963）——Worker は動くのにスケジュールが無く、tick が発火しないまま「起動できた」ように見えた。登録を先に済ませ、成功した後でだけ Worker を走らせるようにし、失敗した後の `start()` は登録と起動をやり直す。
 - **`observe({kind:'memory_usage'})` が使用の記録（`recall_usages`）の後・強化の前で落ちると、同じ `externalId` で再送しても強化されなかった**（Issue #961）——`MemoryStore` に任意メソッド `recordUsageAndReinforce?` を足し（`PostgresMemoryStore` と testkit の `InMemoryMemoryStore` が実装）、在れば記録と強化を1トランザクションで撃つ。口を持たない adapter は従来の2段のまま（ADR 0009 の追記）。
 - **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、ループ前の読み（`MemoryStore.getMany`、`restoreArchived` では活動時計の読みも）が失敗すると例外をそのまま外へ投げていた**（Issue #964）——doc コメントの「例外はこのメソッドの外へは投げない」どおり、1件目を `failed`、残りを `not_attempted` にして返すようにした（まだ1件も書いていない）。
-- **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、compare-and-swap が破れた後の1回だけの再読（`MemoryStore.get`）が失敗すると、その例外をそのまま外へ投げていた**——doc コメントの「例外はこのメソッドの外へは投げない」に反し、同じ呼び出しで先に確定した要素（`forgotten`/`restored`/`purged`）の outcome まで呼び出し側から見えなくなっていた。再読の失敗も他の「競合以外の例外」と同じく、その要素を `failed`、残りを `not_attempted` にして返すようにした。
+- **`runtime.forget()` / `runtime.restoreArchived()` / `runtime.purge()` は、compare-and-swap が破れた後の1回だけの再読（`MemoryStore.get`）が失敗すると、その例外をそのまま外へ投げていた**——doc コメントの「例外はこのメソッドの外へは投げない」に反し、同じ呼び出しで先に確定した要素（`forgotten`/`restored`/`purged`）の outcome まで呼び出し側から見えなくなっていた。再読の失敗も他の「競合以外の例外」と同じく、その要素を `failed`、残りを `not_attempted` にして返すようにした（[PR #960](https://github.com/takecchi/mnemora/pull/960)）。
 - **`runtime.recall()` が、段2で `limit` を超えて `omitted`（`over_limit(stage:"rescore")`）
   へ落とした記憶を、段3.5（連想、既定 on、ADR 0337）が `RecallResult.memories` へ
   `retrievedVia: "association"` として昇格させた場合でも、同じ記憶を `over_limit` の
