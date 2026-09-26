@@ -131,15 +131,23 @@ try {
 [`@mnemora/core`](../core/README.md) を参照。両実装が同じ契約に従うことは
 `src/__tests__/provider-parity.test.ts` で検査している。
 
-## 🔴 このアダプタは、適合テストに一度も当たっていない
+## 🔴 実 API には、適合テストを一度も当てていない
 
 **採用する前に読むこと。**
 
-- **`LLMProvider` の適合テスト（conformance suite）が、そもそも存在しない**
-  （`@mnemora/testkit` に `describeLLMProviderConformance` は無い）。
-  ⟹ `@mnemora/openai` の `OpenAILLMProvider` も同じ状態である。
+**⚠ 2026-09-26 追記（`v1.1.0`、Issue #389 /
+[ADR 0266](../../docs/decisions/0266-llm-provider-conformance.md)）**: この見出しは以前
+「適合テスト（conformance suite）が、そもそも存在しない」だった。**それはもう成り立たない。**
+`@mnemora/testkit` に `describeLLMProviderConformance` が新設され、このパッケージ
+（`src/__tests__/llm-provider.conformance.test.ts`）と `@mnemora/openai` の両方に当てている
+——**残る限界は下のとおりである。**
+
+- **その適合テストは、注入した偽 client（固定応答）に当てているだけで、実 API には
+  当てていない。**測っているのは「core の契約（ベンダー型を漏らさない・例外を同一性の
+  まま伝播する・リトライを内蔵しない）を、`AnthropicLLMProvider` の変換ロジックが
+  守っているか」であり、HTTP・認証・レート制限・実 API 自身の決定性ではない。
   **`src/__tests__/provider-parity.test.ts` は2実装を突き合わせる歯であって、
-  契約そのものの歯ではない。**
+  契約そのものの歯ではない**（この区別は今も有効）。
 - **実 API（Anthropic）にも、一度も当てていない。**`src/__tests__/live.anthropic.test.ts`
   の2本は `ANTHROPIC_API_KEY` と `MNEMORA_LIVE_ANTHROPIC` の二重 opt-in で、
   **CI にはどちらの環境変数も無い。**
@@ -149,8 +157,8 @@ try {
   ⟹ **いま入れている人が居るかもしれない、という前提で読むこと。**
 
 **⛔ これは「動かない」という意味ではない。**このパッケージには固有の検査が在る
-（`llm-provider.test.ts` / `provider-parity.test.ts` / `json-schema.test.ts` /
-`refusal.test.ts`）。**足りないのは、adapter 非依存の契約を横断で測る層である。**
+（`llm-provider.test.ts` / `llm-provider.conformance.test.ts` / `provider-parity.test.ts` /
+`json-schema.test.ts` / `refusal.test.ts`）。**足りないのは、実 API そのものに当てた検査である。**
 
 何が測られていて何が測られていないかの全体像は
 **[docs/conformance.md](../../docs/conformance.md)** に在る。

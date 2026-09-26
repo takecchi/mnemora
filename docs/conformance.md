@@ -19,9 +19,16 @@ suite ごと・呼び出し元ごとに違う。**この文書が無いと、採
 `EmbeddingProvider` に関わるものだけを、その分だけ更新してある**（下の該当箇所に
 逐語で印を付けた）。**他の6 suite の数はこの追記の対象外**——数えていない。
 
+**⚠ 2026-09-26 追記（`v1.1.0`、Issue #389 /
+[ADR 0266](./decisions/0266-llm-provider-conformance.md)）**: 下の「`LLMProvider` の適合
+suite は、存在しない」はもう成り立たない。`describeLLMProviderConformance` を新設し、
+`@mnemora/openai`・`@mnemora/anthropic` の両方に当てた。**この節の数のうち `LLMProvider` に
+関わるものだけを、その分だけ更新してある**（§1・§2.3・§8）。**他の6 suite・他の節の数は
+この追記の対象外**——2026-09-17（または2026-09-25）時点の値のままである。
+
 ---
 
-## 1. 何が在るか — 7 suite・合計 289 it【現物・2026-09-25 更新】
+## 1. 何が在るか — 8 suite・合計 297 it【2026-09-26 更新】
 
 `packages/testkit/src/*-conformance.ts` の `it` / `maybeIt` を数えた。
 
@@ -30,27 +37,28 @@ suite ごと・呼び出し元ごとに違う。**この文書が無いと、採
 | `EmbeddingProvider`   | **10**（2026-09-25 追記: `overLimitText` の歯を1本足した） | `packages/testkit/src/embedding-provider-conformance.ts`    |
 | `EventStore`          | 16                                                         | `packages/testkit/src/event-store-conformance.ts`           |
 | `LexicalStore`        | 21                                                         | `packages/testkit/src/lexical-store-conformance.ts`         |
+| `LLMProvider`         | **8**（2026-09-26 追記: `v1.1.0` で新設）                  | `packages/testkit/src/llm-provider-conformance.ts`           |
 | `MemoryStore`         | **177**                                                    | `packages/testkit/src/memory-store-conformance.ts`          |
 | `OutboxStore`         | 15                                                         | `packages/testkit/src/outbox-store-conformance.ts`          |
 | `TenantSettingsStore` | 17                                                         | `packages/testkit/src/tenant-settings-store-conformance.ts` |
 | `VectorStore`         | 33                                                         | `packages/testkit/src/vector-store-conformance.ts`          |
-| **合計**              | **289**                                                    |                                                             |
+| **合計**              | **297**                                                    |                                                             |
 
-### 🔴 `LLMProvider` の適合 suite は、存在しない
+### `LLMProvider` の適合 suite —— 2026-09-26 追記: 新設された（旧: 存在しなかった）
 
-`describeLLMProviderConformance` は**0件**である【現物】。
-`packages/testkit/src/` に `llm-provider-conformance.ts` は無い。
+**⚠ 以前この節は「`describeLLMProviderConformance` は0件、`llm-provider-conformance.ts` は
+無い」と書いていた。それは `v1.0.0` 時点では正しかったが、`v1.1.0`（Issue #389 /
+[ADR 0266](./decisions/0266-llm-provider-conformance.md)、PR #603）でもう成り立たなくなった。**
 
-⟹ **`@mnemora/openai` の `OpenAILLMProvider` も `@mnemora/anthropic` の
-`AnthropicLLMProvider` も、適合テストに一度も当たっていない。**
+`packages/testkit/src/llm-provider-conformance.ts` に `describeLLMProviderConformance` が在り、
+8 it（条項1: ベンダー型が漏れない検査2本／決定性2本／失敗伝播とリトライ非内蔵4本）を持つ。
+`@mnemora/openai`（`packages/openai/src/__tests__/llm-provider.conformance.test.ts`）・
+`@mnemora/anthropic`（`packages/anthropic/src/__tests__/llm-provider.conformance.test.ts`）の
+両方が当てている——**詳細と「何を測っていないか」は §2.3**。
+
 両実装が同じ契約に従うことは `packages/anthropic/src/__tests__/provider-parity.test.ts`
-が見ているが、**それは2実装を突き合わせる歯であって、契約そのものの歯ではない。**
-
-**これは [ADR 0099](./decisions/0099-conformance-against-real-embedding-providers.md) が
-「確かめていないこと」に自分で書き残している**（逐語）:
-
-> **`LLMProvider` の適合テストは今も無い**（ADR 0072 負債1の埋め込み側だけを
-> 返済した状態が続く）。
+も見ているが、**それは2実装を突き合わせる歯であって、契約そのものの歯ではない**——
+こちらは今も有効な区別である。
 
 ---
 
@@ -88,6 +96,22 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 
 ⟹ **7箇所のうち「本物に当たる」のは #4 と #6 の2つだけで、その2つが走っていない。**
 （#7 は「本物に当たる」ではなく、この歯専用の擬似 provider に当たる——上の注記参照。）
+
+### 2.3 `LLMProvider` suite — 呼び出し元は2箇所【2026-09-26 追記、新設】
+
+| # | 呼び出し元 | 当たる実装 | CI で走るか |
+| - | --- | --- | --- |
+| 1 | `packages/openai/src/__tests__/llm-provider.conformance.test.ts` | `OpenAILLMProvider` ＋ 注入した偽 client（固定応答。**本物の `openai` SDK ではない**） | **走る**（常時） |
+| 2 | `packages/anthropic/src/__tests__/llm-provider.conformance.test.ts` | `AnthropicLLMProvider` ＋ 注入した偽 client（固定応答。**本物の `@anthropic-ai/sdk` ではない**） | **走る**（常時） |
+
+**両方とも `deterministic: true`・`createFailing` を渡しており、8 it は skip なく全部走る**
+【現物: 両ファイルの `describeLLMProviderConformance({` 呼び出し】。⟹ **本物の実 API に
+当たる `LLMProvider` 適合テストは、この suite にも無い**——測っているのは「core の契約
+（ベンダー型を漏らさない・例外を同一性のまま伝播する・リトライを内蔵しない）を、
+各 provider の変換ロジックが守っているか」であって、HTTP・認証・レート制限・実 API
+自身の決定性ではない（各テストファイル冒頭のコメントが逐語で同じ限界を書いている）。
+`deterministic: true` を支えているのは偽 client の固定応答であって、実 API の決定性を
+実測した結果ではない——§4 の区別と同じ形。
 
 ---
 
@@ -296,8 +320,8 @@ MNEMORA_LIVE_LOCAL_EMBEDDING=1 pnpm --filter @mnemora/local-embedding test
 ## 8. 確かめていないこと
 
 - **実 API（OpenAI / Anthropic）には、いまも一度も当てていない。**この文書は手順を
-  書いただけで、**測っていない。**
-- **`LLMProvider` の適合 suite を新設していない。**§1 の欠落は記録しただけである。
+  書いただけで、**測っていない。**`LLMProvider` の適合 suite（§2.3、`v1.1.0` で新設）も
+  同様——偽 client の固定応答に当てているだけで、実 API には当てていない。
 - **`_name_or_path` 以外の経路で repo id を同定できるかを、網羅的に調べていない。**
   実測したのは `config.json` の中身だけである。
 - **「`repo` を差し替える運用が実在するか」を測っていない。**⟹ §5 の穴が実際に
@@ -351,3 +375,9 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
   `overLimitText` の歯を1本足したことに伴い、**その1本が数え方に効く箇所だけ**を
   この作業者が読んで更新した（§1・§2.2・§3・§6）。**他の6 suite・他の節の数は
   この追記の対象外**——2026-09-17 時点の値のままである。
+- **2026-09-26 追記**（`v1.1.0`、Issue #389 / [ADR 0266](./decisions/0266-llm-provider-conformance.md)）:
+  `LLMProvider` の適合 suite が新設されたことに伴い、**それが数え方・記述に効く箇所だけ**を
+  この作業者が読んで更新した（§1・§2.3・§8。§1・§2.3 の住所と本数は `packages/testkit/src/llm-provider-conformance.ts`・
+  `packages/openai/src/__tests__/llm-provider.conformance.test.ts`・
+  `packages/anthropic/src/__tests__/llm-provider.conformance.test.ts` を読んで数えた【現物】）。
+  **他の7 suite・他の節の数はこの追記の対象外**——それぞれ直前の更新時点の値のままである。
