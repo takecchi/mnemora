@@ -1436,19 +1436,19 @@ export interface RecallQuery {
    * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と
    * 一致することは、この型では検証しない——**一致させるのは呼び出し側の責任**である。
    *
-   * **長さが違うときの結果は未定義**（Issue #867）。【実測 2026-09、`main` f68dd8a】
-   * `packages/postgres` の `VectorStore.search` は pgvector の DB エラー
-   * （`DrizzleQueryError`、"different vector dimensions"）で未捕捉のまま落ちる。
-   * `packages/testkit`/`packages/core` の Fake（`InMemoryVectorStore` 等）は足りない側を
-   * `0` で埋めて `cosineDistance` の計算を続け、意味の無い点数を普通のヒットとして返す
-   * （`omitted` にも何も残らない）。**この2つの実装は互いに揃っていない**——どちらを
-   * 正とするかは未決である。
+   * **長さが違うときは「比較不能」として扱う**（Issue #867 / 案B）。**新しい throw は
+   * 増えない**——候補は `search` の結果から落とさず、距離を比較が通らない値（`NaN`）に
+   * 差し替える。`recall()` の段2（ADR 0044 の網羅的な三分割）がこれを検出し、
+   * `omitted` の `score_not_comparable` に数える。**`memories` には出ない。**
    *
-   * 境界で拒む案（型付き例外）・比較不能として扱う案（`score_not_comparable` へ倒す）は
-   * どちらも Fake の挙動を変えることになり、それが外部 adapter 実装者にとって
-   * 破壊的変更になりうるかという未解決の論点
-   * （[Issue #809](https://github.com/takecchi/mnemora/issues/809)）に属する。⟹
-   * **この「未定義」という記述は、#809 の回答が出るまでの暫定であり、変わりうる。**
+   * これは [ADR 0040](../../../docs/decisions/0040-zero-vector-never-returned.md)
+   * （ゼロベクトルが絡む候補は `recall()` の結果に出ない）と同じ形の契約であり、
+   * `packages/postgres`・`packages/testkit`・`packages/core` の3実装が同じ振る舞いをする
+   * （[ADR 0040 追記 2026-09-26](../../../docs/decisions/0040-zero-vector-never-returned.md)）。
+   *
+   * **覆えていない範囲**: `VectorStore.upsert` に長さの違うベクトルを渡したときの扱いは
+   * この決定の対象外（Issue #867「範囲外で見つけたもの」）——Postgres は例外、Fake は
+   * そのまま保存する食い違いが残ったままである。
    */
   vector?: number[];
   tags?: string[];
