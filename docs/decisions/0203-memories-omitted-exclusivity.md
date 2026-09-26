@@ -531,3 +531,202 @@ Refs #823
   id 付きで保持されているかどうかも、引き続き未調査。
 
 Refs #925
+
+---
+
+## 2026-09-26 追記3（クローン miku の委譲先、Issue #940）
+
+**直前の2つの追記（Issue #823・#925）が塞いだのは、`over_limit(stage:"rescore")` の候補が
+段3（`companions`）または段3.5（連想）を経由して**候補集合に戻り、そのまま
+`finalMemories` へ実際に返った**場合だけだった。**どちらの追記も、取り下げの条件に
+`returnedMemoryIds.has(...)`（段4の予算切り詰めの**後**の最終集合）を AND で課していた
+——「戻った先で最終的に返ったか」まで見ていたことになる。[Issue #940](https://github.com/takecchi/mnemora/issues/940)
+が指摘したのは、この AND 条件のために、**戻った候補が段4の予算切り詰めで改めて落ちる**
+ケースが素通りしていたことである。候補は `companions`/`associationUnits` に入った時点で
+「戻った」にもかかわらず、そのあと budget で落ちると `returnedMemoryIds` に入らず、
+取り下げが一度も発火しない——結果、同じ1件が `over_limit(stage:"rescore")` と
+`budget_dropped` の両方に数えられる（Issue #940 本文の再現がこれをそのまま示している）。
+
+**決めたこと**: 1件の Memory は `omitted` の中で1回だけ、**最後にその候補を落とした段**で
+数える。段3/段3.5 で候補集合に戻り、段4の予算で改めて落ちたときは `budget_dropped` 側に
+残し、`over_limit(stage:"rescore")` の count からは差し引く（0件になれば below_threshold と
+同じ作法で Omission 自体を配列から外す）。
+
+**塞いだこと**: 取り下げの判定から `returnedMemoryIds.has(...)` の AND 条件を外し、
+「`overLimit` に居て、かつ (a) `companions`（段3）に居るか (b) `associationUnits`
+（段3.5が席を埋めた候補、`selectedCandidates` をそのまま Unit にしたもの。段4より前の
+内部状態）に居るか」だけで判定するように変えた。**戻った先で最終的に `finalMemories` に
+残るか `budget_dropped` で落ちるかは、この判定にとって無関係になった**——`companions`/
+`associationUnits` に一度でも入れば、それだけで `over_limit(stage:"rescore")` の勘定からは
+外れる。
+
+**(b) の判定基準も変えた**: 直前の追記（Issue #925）は (b) を「`finalMemories` に
+`retrievedVia: "association"` で実際に返った」で判定していた。これは `returnedMemoryIds`
+と同じ「段4の後」を見る判定だったため、今回は `associationUnits`（段4より前、席を
+埋めた時点の内部状態）に居るかどうかに変えた——`companions` が最初から「段3が構築した
+配列」という段4より前の内部状態で判定されていたのと、形を揃えたことになる。
+
+**この入れ替えが二重計上にも取りこぼしにもならない理由（不変条件）**: `companions` ∪
+`associationUnits` の members は、段4の後、必ず `finalMemories` か `budget_dropped` の
+どちらかに入る——それ以外に消える経路が無い。コードを読んで確かめた根拠は次のとおり。
+
+- `companions`（段3が `getMany` で構築した配列）の各要素は、その owner が
+  `withinLimit` に居る限り、単位組み立ての繰り返し（`for (const candidate of
+  withinLimit) { ... }`）が owner を訪れたときに必ず `byId` 経由で見つかり、
+  owner と companion の2件で1つの `Unit` を組む。`companions` は
+  `contestedNeedingCompanion`（`withinLimit` から作った配列）の `contestedWithId` を
+  `getMany` で引いた結果であり、owner は定義上つねに `withinLimit` に居る——
+  companion 自身が `withinLimit` に含まれることは無い（`presentIds` で除外済み）ので、
+  この訪問を素通りする経路が無い。⟹ `companions` の各要素は必ずどれかの `Unit` の
+  member になり、`allUnits`（`units` と `associationUnits` を連結したもの）に入る。
+- `associationUnits` は `selectedCandidates`（連想の席取り合いで実際に席を得た候補）を
+  1候補=1 `Unit` として `push` しているだけで、これより後に別の条件で間引く処理は無い
+  ——`associationUnits` の要素数と `selectedCandidates` の要素数は常に一致する。
+- 段4（予算による切り詰め）は `allUnits` を先頭から `cut` 件だけ `keptUnits` に残し、
+  残りを丸ごと `droppedUnits` として `budget_dropped` の count に数える——`allUnits` の
+  全要素が `keptUnits` か `droppedUnits` のどちらかに入り、この2つの間に「どちらでもない」
+  経路は無い。`keptUnits` の members はそのまま `finalMemories` になる
+  （`keptUnits.flatMap(...)` 以降、`finalMemories` の構築に至るまでの間にさらに間引く
+  フィルタは無い）。
+
+⟹ 段4の前に `companions`/`associationUnits` に入った候補は、必ず `allUnits` の
+どれかの `Unit` の member であり、段4の後は `finalMemories` か `budget_dropped` の
+どちらかに現れる。**この不変条件が成り立つ前提で、`over_limit(stage:"rescore")` から
+一度差し引いた分は、必ずどちらか一方（`memories` 側か `budget_dropped` 側）でだけ
+数えられる**——差し引いた分が「間で消えて、どこにも数えられない」経路は無い。
+
+### 段3.5 経由でも実際に起きることを先に実測した
+
+Issue #940 は段3（`companions`）経由の再現しか実測しておらず、段3.5（連想）経由でも
+同じ形の二重計上が起きるかどうかは「読んだだけで、再現はしていない」と明記していた。
+本追記の作業では、まず修正前のコードに対して段3.5 経由の陽性対照を組み、実際に
+`over_limit(stage:"rescore")` と `budget_dropped` の両方に数えられることを実測した
+（`recall-over-limit-budget-promotion.test.ts` の(b)）——段3経由と同型の形で実際に起きる
+ことを確認したうえで、(a)(b) を同じ修正・同じ判定で揃えた。
+
+### 採らなかった案・Issue #940 の(1)(2)(3)との関係
+
+Issue #940 は直し方を3つ挙げ、どれも「約束の書かれていない振る舞いを決めることになる」
+として起票にとどめていた。
+
+1. **「取り下げの条件を『後段で一度でも引き直されたか』に広げる」**。本追記が実際に
+   採ったのはこの形に近い——`returnedMemoryIds`（最終的に返ったか）ではなく
+   `companions`/`associationUnits`（一度でも候補集合に戻ったか）で判定するように
+   変えた。Issue 本文は「`over_limit(stage:"rescore")` の意味が変わる」ことを懸念して
+   いたが、**意味が変わるのは `over_limit(stage:"rescore")` という Omission が
+   `omitted` に載るかどうかであって、`memories`/`budget_dropped` 側の集合や件数では
+   ない**——`companions`/`associationUnits` に戻った候補は、以前から
+   `over_limit(stage:"rescore")` の count には含まれない経路（Issue #823/#925 が
+   既に塞いだ「最終的に返った」場合）を持っていた。本追記は「最終的に返った」を
+   「候補集合に戻った」へ広げただけであり、`over_limit(stage:"rescore")` が
+   「段2の順位で漏れ、かつ以降のどの段でも拾い直されなかった」件数を表す、という
+   読み方は変えていない——むしろこの読み方に厳密に一致させたのが本追記である
+   （旧判定は「拾い直されたが、その後さらに落ちた」候補を誤って含めていた）。
+2. **「`budget_dropped` 側から、over_limit に数えた分を除く」**。**採らなかった**。
+   `budget_dropped` の count は変えていない——段4が実際に落とした件数（droppedUnits の
+   members 総数）をそのまま数え続ける。除いていたら「段4が実際に落とした件数」を
+   過小に見せる、という Issue 本文の懸念どおりになる。差し引いたのは常に
+   `over_limit(stage:"rescore")` 側だけである。
+3. **「負債として ADR に追記するだけ」**。**採らなかった**——今回のADR追記は「直した」
+   記録であり、負債を残す記録ではない。
+
+### 段3.5・段3以外の kind への非対称は変えていない
+
+`over_limit(stage:"association")`/`score_not_comparable` 等、段2の内部状態自体が
+memoryId を持ち回っていない他の kind は、引き続き対象外である（ADR 0203「引き受けた
+負債」がそのまま残っている部分）。今回の変更は、既に対象になっていた
+`over_limit(stage:"rescore")` の判定条件を「戻ったか」に絞り直しただけで、対象の
+範囲そのものは広げていない。
+
+### 範囲外と分かったこと（実測、直していない）
+
+作業の過程で、次の2つが実際に二重計上になることを一時テスト（commit していない）で
+確かめた。どちらも今回の修正の対象には含めていない。
+
+- **over_limit(rescore) の候補が連想の候補になったが席に着けず、
+  `over_limit(stage:"association")` にも数えられる**。段2で `over_limit(stage:"rescore")`
+  に落ちた候補が、段3.5 のアンカー近傍として `rankedCandidates` には入ったものの
+  `maxCount` の席を他候補に取られて `selectedCandidates` に入らなかった場合、その候補は
+  `over_limit(stage:"rescore")`（今回の取り下げは `associationUnits` に居る候補にしか
+  効かないので、この候補には効かない）と `over_limit(stage:"association")`（席取りに
+  負けた分としてそのまま数えられる、`recall-runtime.ts` の該当コメント参照）の
+  **両方**に数えられることを実測した。
+- **below_threshold の候補が段3/段3.5で戻り、段4で落ちると、
+  below_threshold と budget_dropped の両方に数えられる**。below_threshold 側の取り下げ
+  （`promotedFromBelowThreshold`）は今回直していない `returnedMemoryIds.has(...)` を
+  そのまま使っており、`companions`/連想で候補集合に戻った below_threshold の候補が
+  段4の予算で改めて落ちると、below_threshold 側の取り下げが発火しないまま
+  `budget_dropped` にも数えられることを実測した——本追記が `over_limit(stage:"rescore")`
+  について解消したのと**同型の**問題が、below_threshold 側にはそのまま残っている。
+
+この2件は、ADR 0203「これが覆るとしたら」3番・「引き受けた負債」2番のどちらにも
+明示的には書かれていなかった経路であり、Issue #940 が挙げた3択のような選択肢の
+検討もしていない。**別途 Issue として起票するかどうかは、この追記の射程外である。**
+
+### 測ったこと
+
+- 【実測】陽性対照（修正前、fake ストア）: `recall-over-limit-budget-promotion.test.ts`
+  の(a)(b)(c)が赤になることを確認した——(a)(b) は `over_limit(stage:"rescore")` の
+  Omission が消えるはずが `{ count: 1, ... }` のまま残る。(c)（過剰実装を捕まえる歯）は、
+  この時点ではまだ緑だった（対象の count がそもそも動かないため）。
+- 【実測】修正後、(a)(b)(c) の3本がすべて緑になることを確認した。
+- 【実測】変異試験:
+  (i) 判定に `returnedMemoryIds.has(...)` の AND を復活させる（直前の追記の判定に
+      戻す）→ (a)(b)(c) の3本すべてが実際に赤になることを確認した（(c) も赤に
+      なったのは、この変異が (a) と同じ fixture を使っているため——companion の
+      取り下げが発火しなくなり、over_limit(stage:"rescore") の count が期待の 1 では
+      なく 2 のままになった）。
+  (ii) 判定を `promotedFromOverLimit = overLimit`（`overLimit` 全件を無条件に差し引く
+      過剰実装）に変える →
+      `recall-over-limit-promotion.test.ts` の2本目・3本目、
+      `recall-over-limit-association-promotion.test.ts` の(b)・(c)、
+      `recall-over-limit-budget-promotion.test.ts` の(c) の、あわせて5本が
+      実際に赤になることを確認した——いずれも「無関係な over_limit の候補まで
+      count から差し引かれてしまう」形の赤である。
+  どちらも `cp` で退避したファイルから `cp` で復元し、`git status --porcelain` が
+  意図どおりの差分（本追記の変更点だけ）に戻ることを確認したうえで、全数が緑に
+  戻ることを確認した。
+- 【実測】`pnpm --filter @mnemora/core exec vitest run
+  src/__tests__/recall-over-limit-budget-promotion.test.ts
+  src/__tests__/recall-over-limit-promotion.test.ts
+  src/__tests__/recall-over-limit-association-promotion.test.ts
+  src/__tests__/omission-kind-generation.test.ts
+  src/__tests__/recall-association.test.ts
+  src/__tests__/recall-association-gates.test.ts
+  src/__tests__/recall-association-usage-ranking.test.ts
+  src/__tests__/recall-budget-channel-registry.test.ts
+  src/__tests__/recall.test.ts
+  src/__tests__/recall-pipeline.test.ts
+  src/__tests__/schema-type-equals-parity.test.ts`:
+  11ファイル・269件すべて緑（既存の omitted/over_limit/連想/budget 関連の歯を含め、
+  回帰は無い）。
+- 【実測】`pnpm --filter @mnemora/core run typecheck` / `pnpm run lint` /
+  `pnpm run format:check` / `pnpm run build`: すべて緑、警告0。
+- 【実測】`pnpm run api:check`（6パッケージ、`build` 実行後）: 全パッケージ
+  「差分なし」——本追記は公開 API 表面を1バイトも変えていない。
+- 【実測】本物の Postgres + pgvector（initdb で自前に構築したローカルインスタンス、
+  `--encoding=UTF8 --locale=C.UTF-8`）に対し、`recall.postgres.test.ts` に段3経由の
+  同型の歯を1本追加し、修正前に赤（`over_limit` が `{ count: 1, ... }` のまま残る）、
+  修正後に緑になることを確認した。同ファイルの既存21本（新設分含め）もすべて緑、
+  `recall-association-gates.postgres.test.ts` の既存7本も緑（回帰なし）。段3.5経由の
+  歯は Postgres には追加していない——`packages/core` で段3・段3.5 とも同じ判定
+  コードを通ることを確認済みであり、AGENTS.md の変異試験の手順（1本に絞って走らせる）
+  にならい、Postgres 側は代表として段3経由の1本に絞った。
+- 【実測】`examples/chat` の `compare` ベンチ（`MNEMORA_PROVIDER_SOURCE=recorded`、
+  実 API は叩いていない、`examples/chat/cassettes/compare.json` の再生）を本追記の
+  修正の前後で実行し、`MNEMORA_COMPARE_JSON` で機械可読な出力を比較した——
+  `measuredAt`/`commit` を除いて `rows` を含む出力全体がバイト単位で一致した
+  （差分ゼロ）。**理由は、`compare` が `recall()` に budget を渡さない設計だから
+  である**（`compare.ts` のコメント「ここでは budget を渡さない——『切り詰めずに、
+  そのままだと何文字になるか』を見る」）。本追記の修正は「段3/段3.5で戻った候補が
+  段4の予算で落ちる」場合にだけ挙動を変えるため、budget が無い `compare` の実行では
+  構造的に差分が出ない——今回の差分ゼロは「効果が無かった」ことではなく
+  「この計測は対象の外にある」ことを示している。`compare-baseline.json` は
+  変更していない（差し替える理由が無い）。
+- **確かめていないこと**: `test:db` 全体（他ファイル含む約4分のスイート）・
+  `examples/chat` の `retrieval`/`identifier-probes`/`numeral-token-probes`/`chat`
+  （budget を渡す経路）等の他のベンチ・`pack:check` は手元では走らせていない。
+  実運用での発生頻度も未計測。上の「範囲外と分かったこと」の2件は、直しても
+  いなければ Issue としても起票していない。
+
+Refs #940

@@ -618,6 +618,79 @@ describe("runtime.recall() — 本物の Postgres + pgvector（roadmap.md 段階
     expect(overLimitAssociation).toBeUndefined();
   });
 
+  it("Issue #940（ADR 0203 追記3の是正）: 段3の必須同伴取得で候補集合に戻った over_limit(stage:'rescore') の候補が、段4の予算で改めて落ちると、over_limit(rescore) は消え budget_dropped だけに数えられる", async () => {
+    const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
+    const ctx: Ctx = { tenantId: TENANT };
+
+    // cand1: クエリと完全一致。limit=2 の1枠を占め、予算にちょうど収まる唯一の候補。
+    const cand1 = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      digest: "C",
+    });
+    // companion: owner の対向。owner にさらに劣り、limit=2 の外——段2で
+    // over_limit(stage:"rescore") に落ちるが、段3の必須同伴取得で owner の対向として
+    // 候補集合に戻る。
+    const companion = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.99, 0.1411, 0], {
+      digest: "COMPANION",
+    });
+    // owner: cand1 にわずかに劣るが、limit=2 のもう1枠を占める。
+    const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [0.999, 0.0447, 0], {
+      digest: "OWNER",
+    });
+    // ADR 0140（Issue #243続き）: `createMemory` は `status: 'contested'` を
+    // `contestedWithId` 無しでは作れない——両方を active で作ってから
+    // `markContestedPair` で相互に contested へ倒す（上の Issue #823 の歯と同じ作法）。
+    await memoryStore.markContestedPair!(
+      ctx,
+      {
+        id: owner.id,
+        event: {
+          tenantId: TENANT,
+          memoryId: owner.id,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: owner.digest,
+          meta: { reason: "contested" },
+        },
+      },
+      {
+        id: companion.id,
+        event: {
+          tenantId: TENANT,
+          memoryId: companion.id,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: companion.digest,
+          meta: { reason: "contested" },
+        },
+      },
+    );
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0, 0],
+      limit: 2,
+      overFetchFactor: 10,
+      // 段3.5（連想、既定 on）を明示的に切る——本テストが検査したいのは段3と段4だけ。
+      association: null,
+      // cand1 の digest（1文字）しか収まらない予算。owner+companion の単位（隣接性の
+      // 不変条件で分割できない、docs/recall.md §8）は丸ごと budget_dropped になる。
+      budget: { maxMemoryChars: cand1.digest.length },
+    });
+
+    expect(result.memories.map((m) => m.memoryId)).toEqual([cand1.id]);
+
+    // 修正前は over_limit(stage:"rescore") の Omission が `{ count: 1, ... }` のまま
+    // 残っていた（Issue #940 の再現）。修正後は budget_dropped 側へ差し引かれ、
+    // Omission 自体が配列から消える。
+    const overLimit = result.omitted.find((o) => o.kind === "over_limit" && o.stage === "rescore");
+    expect(overLimit).toBeUndefined();
+
+    const budgetDropped = result.omitted.find((o) => o.kind === "budget_dropped");
+    expect(budgetDropped).toBeDefined();
+    if (budgetDropped?.kind === "budget_dropped") {
+      expect(budgetDropped.count).toBe(2);
+    }
+  });
+
   it("段6: recallId が発行され、observe({kind:'memory_usage'}) から参照できる", async () => {
     const { runtime, memoryStore, vectorStore } = await buildTestRuntime();
     const ctx: Ctx = { tenantId: TENANT };
