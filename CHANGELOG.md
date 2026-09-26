@@ -245,6 +245,8 @@ PR #827）だけであった。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
+- **`@mnemora/postgres` の `aggregateScope` を1回の `GROUP BY` に書き換えた**（PR #721、Issue #355）。公開の型と返り値は変えていない。手元の実測では約1.8倍速い。挙動の変化は無いが、実行計画が変わるので記す。
+
 - **`@mnemora/postgres` の語彙チャンネルで `ts_rank_cd` の normalization ビットに文書長
   （`1 + ln(length)`）の項を足した（`TS_RANK_CD_NORMALIZATION` を `32` から `32 | 1` = `33`
   へ）**——被覆率が同じでも内容量が違う候補の `rank` が完全同点になる問題を減らす。`rank` は
