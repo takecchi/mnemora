@@ -1007,6 +1007,60 @@ describe("recall() — omitted.kind = 'score_not_comparable'（ADR 0044）", () 
   });
 });
 
+describe("recall() — 次元の違うクエリベクトルは比較不能として扱う（Issue #867 / 案B）", () => {
+  // 【実測 Issue #867、pgvector 0.8.2 / PostgreSQL 17.9、3次元の空間、保存 `[1,0,0]`】
+  // 直す前は、`FakeVectorStore.cosineDistance`（`runtime-fakes.ts`）が足りない側を `0` で
+  // zero-pad して計算を続けていたため、`[1,2]`（短い）・`[1,2,3,4]`（長い）のどちらも
+  // 「普通のヒット」として `memories` に出て `omitted` は空のままだった——Postgres は
+  // 同じ入力で pgvector の「different vector dimensions」の未捕捉 `DrizzleQueryError` に
+  // なっており、adapter 間で挙動が割れていた。
+  //
+  // 直した後は、長さの不一致を「比較不能」として扱う（案B）——`FakeVectorStore` は
+  // 長さが違う2本に `NaN` を返し、段2の三分割（ADR 0044）がそれを
+  // `omitted.score_not_comparable` に数える。`memories` には出ない。
+
+  it("短いクエリ（[1,2]）は score_not_comparable に数えられ、memories は空", async () => {
+    const { runtime, stores } = buildRuntime();
+    // Issue #867 本文の保存データと同じ長さ3のベクトル。空間の宣言（dimensions: 2）とは
+    // 別に、保存側と問い合わせ側の「長さの不一致」そのものを再現する。
+    await createEmbeddedMemory(stores, [1, 0, 0], { digest: "保存データ" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 2], limit: 10, scoreThreshold: 0 });
+    expect(result.memories).toEqual([]);
+    expect(result.omitted).toContainEqual({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+  });
+
+  it("長いクエリ（[1,2,3,4]）も score_not_comparable に数えられ、memories は空", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0, 0], { digest: "保存データ" });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 2, 3, 4],
+      limit: 10,
+      scoreThreshold: 0,
+    });
+    expect(result.memories).toEqual([]);
+    expect(result.omitted).toContainEqual({
+      kind: "score_not_comparable",
+      count: 1,
+      countKind: "exact",
+    });
+  });
+
+  it("⚠ 鳴ってはいけない側: 長さが一致するクエリは普通に score_not_comparable なしでヒットする", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0, 0], { digest: "保存データ" });
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0], limit: 10, scoreThreshold: 0 });
+    expect(result.memories.map((m) => m.digest)).toContain("保存データ");
+    expect(result.omitted.some((o) => o.kind === "score_not_comparable")).toBe(false);
+  });
+});
+
 describe("recall() — provenanceKind（roadmap.md §5.5 のオーナー回答の条件）", () => {
   // オーナーの回答は条件付きだった——「既定の recall に含める。**ただし provenance.kind で
   // 区別して返す**」。前半（既定で含める）は元から満たされていたが、後半は
@@ -1771,6 +1825,95 @@ describe("recall() — 段4: トークン予算による切り詰め（Issue #10
       count: 1,
       countKind: "exact",
     });
+  });
+});
+
+describe("recall() — budget_truncation の detail.droppedFitsWhenConcatenated（Issue #829 / ADR 0097 追記）", () => {
+  /**
+   * Issue #829 の再現: 21文字（非CJK）の digest を4件、`maxMemoryTokens: 23` で渡す。
+   *
+   * - 段4の `fits`（強制側）: digest ごとに `heuristicTokenCounter.count()` を呼び ceil する
+   *   ——`ceil(21*5/20) = ceil(5.25) = 6` トークン/件、4件で `6*4 = 24 > 23`。
+   *   ⟹ 1件落ちて3件残る（`budget_dropped: 1`）。
+   * - 実際に積む量（連結して1回だけ数える。`usage.share` の分子と同じ数え方）:
+   *   4件を `"\n"` で連結すると `21*4 + 3 = 87` 文字、`ceil(87*5/20) = ceil(21.75) = 22`
+   *   トークン——`23` に収まる。
+   *
+   * ⟹ **4件とも予算内に収まるのに1件落ちる**。**ふるまい（落とす件数）はこの PR では
+   * 変えない**（ADR 0097 が「段4の強制を連結側へ寄せる」を明示的に却下しているため）。
+   * ここで検査するのは、その「予算に余りがあるのに落とした」ことが
+   * `explain.stages` の `budget_truncation` の `detail.droppedFitsWhenConcatenated` から
+   * 読めるようになったことだけである。
+   */
+  const DIGEST_21_NON_CJK = "a".repeat(21);
+
+  it("直す前は無かった欄: 4件とも収まるのに1件落ちるとき、detail.droppedFitsWhenConcatenated が true になる", async () => {
+    expect(heuristicTokenCounter.count(DIGEST_21_NON_CJK).tokens).toBe(6);
+    const joined = Array(4).fill(DIGEST_21_NON_CJK).join("\n");
+    expect(joined.length).toBe(87);
+    expect(heuristicTokenCounter.count(joined).tokens).toBe(22);
+
+    const { runtime, stores } = buildRuntime();
+    for (let i = 0; i < 4; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], { digest: DIGEST_21_NON_CJK });
+    }
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      budget: { maxMemoryTokens: 23 },
+    });
+
+    // ふるまいは変えない: 3件だけ残り、1件が budget_dropped になる。
+    expect(result.memories).toHaveLength(3);
+    expect(result.omitted).toContainEqual({
+      kind: "budget_dropped",
+      count: 1,
+      countKind: "exact",
+    });
+
+    const budgetTruncation = result.explain.stages.find((s) => s.stage === "budget_truncation");
+    expect(budgetTruncation?.detail?.droppedFitsWhenConcatenated).toBe(true);
+  });
+
+  it("⚠ 鳴ってはいけない側: 連結しても本当に収まらないときは droppedFitsWhenConcatenated が false", async () => {
+    // 同じ4件・同じ digest だが、maxMemoryTokens を 20 に絞る——連結して測った量（22）も
+    // 予算を超えるので、今度は「本当に収まらない」側になるはずである。
+    const { runtime, stores } = buildRuntime();
+    for (let i = 0; i < 4; i += 1) {
+      await createEmbeddedMemory(stores, [1, 0], { digest: DIGEST_21_NON_CJK });
+    }
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      budget: { maxMemoryTokens: 20 },
+    });
+
+    expect(result.memories).toHaveLength(3);
+    expect(result.omitted).toContainEqual({
+      kind: "budget_dropped",
+      count: 1,
+      countKind: "exact",
+    });
+
+    const budgetTruncation = result.explain.stages.find((s) => s.stage === "budget_truncation");
+    expect(budgetTruncation?.detail?.droppedFitsWhenConcatenated).toBe(false);
+  });
+
+  it("⚠ 鳴ってはいけない側その2: budget_dropped が無いときは欄自体が出ない", async () => {
+    const { runtime, stores } = buildRuntime();
+    await createEmbeddedMemory(stores, [1, 0], { digest: DIGEST_21_NON_CJK });
+
+    const result = await runtime.recall(ctx, {
+      vector: [1, 0],
+      limit: 10,
+      budget: { maxMemoryTokens: 100 },
+    });
+
+    expect(result.omitted.some((o) => o.kind === "budget_dropped")).toBe(false);
+    const budgetTruncation = result.explain.stages.find((s) => s.stage === "budget_truncation");
+    expect(budgetTruncation?.detail?.droppedFitsWhenConcatenated).toBeUndefined();
   });
 });
 

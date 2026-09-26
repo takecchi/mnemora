@@ -64,6 +64,12 @@ forget(ctx, target)      // -> ForgetResult
 - `consolidate` — 複数の記憶を統合して、より上位の記憶を作る。
 - `forget` — 記憶を落とす、あるいは失効させる。
 
+ここでの `Observation` は概念の名前であり、`observe` の実際の戻り値の型は `ObserveResult`
+（`packages/core/src/runtime.ts`）である（Issue #864）。型の詳細は `docs/memory-model.md` に在る
+——`docs/architecture.md`・`docs/recall.md` は `ObserveResult` を説明していない。ほかの4つ
+（`recall` → `RecallResult`・`reflect` → `ReflectionResult`・`consolidate` → `ConsolidationResult`・
+`forget` → `ForgetResult`）は実装の戻り値の型名とそのまま一致している。
+
 ### 中核を守る3つの層
 
 `Runtime`（`@mnemora/core` の実装）には、上の5つ以外にもメソッドがある。⭐ **何が在るかの
@@ -86,9 +92,9 @@ forget(ctx, target)      // -> ForgetResult
 
 - **保守操作**（`tick` / `reembed` / `reextract` / `sweepArchive`）——「いつ動かすか」を
   呼び出し側が決める口。自動では走らない。
-- **是正・取り消し**（`markContested` / `resolveContested` / `restoreArchived` /
-  `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・将来の
-  自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
+- **是正・取り消し**（`markContested` / `resolveContested` / `resolveOrphanedContested` /
+  `restoreArchived` / `restoreSuperseded` / `purge`）——呼び出し側（人・上位のアプリケーション層・
+  将来の自動検出）が既に下した判断（矛盾の指摘・決着・復帰・完全削除）を、決められた形で
   書き込む口。どちらが正しいかを mnemora 自身は判定しない。
 - **説明**（`getRecall`）——なぜそれが想起されたかを、後から読み戻す口。
 

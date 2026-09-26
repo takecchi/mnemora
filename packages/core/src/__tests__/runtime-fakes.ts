@@ -718,11 +718,15 @@ export class FakeMemoryStore implements MemoryStore {
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
     // `PostgresMemoryStore.purgeExpiredEvents` は `opts.limit`（+1件）を生 SQL の
-    // `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・`NaN`・`Infinity`・非整数は
-    // 例外になる（実測）。ここで検査せず `candidates.slice(0, opts.limit)` へ渡すと
-    // `Array.prototype.slice` の意味論を踏んで誤った件数を削除してしまう——
-    // `InMemoryMemoryStore.purgeExpiredEvents`（`packages/testkit`、PR #804/#811）と
-    // 同じ形の不一致（`fake-store-postgres-parity.test.ts` が歯）。
+    // `LIMIT`（bigint パラメータ）にそのまま渡すため、`NaN`・`Infinity`・非整数と
+    // `opts.limit <= -2` は例外になる（実測）。ただし `opts.limit === -1` の1点だけは
+    // `LIMIT opts.limit + 1` が `LIMIT 0` になり例外を投げず `{ purged: 0,
+    // reachedLimit: true }` を返す——`InMemoryMemoryStore.purgeExpiredEvents`
+    // （`packages/testkit`、PR #804/#811）と同じ不一致であり、今の契約として残す
+    // （Issue #876、`PurgeExpiredEventsOptions.limit` の doc 参照）。ここで検査せず
+    // `candidates.slice(0, opts.limit)` へ渡すと `Array.prototype.slice` の意味論を踏んで
+    // 誤った件数を削除してしまうため、負数はすべて一様に拒む
+    // （`fake-store-postgres-parity.test.ts` が歯。`-1` ではなく `-2` で確認している）。
     if (!Number.isInteger(opts.limit)) {
       throw new Error(`purgeExpiredEvents: limit must be an integer (got ${opts.limit})`);
     }
@@ -1364,6 +1368,35 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #825（ADR 0150 追記）: `resolveContestedPair` の解決側 CAS を満たせなくなった
+   * 生存側1件だけを対象にした別の任意メソッド。`beforeUpdateStatus` は CAS 判定の直前に
+   * 発火する——`updateStatusWithEvent`/`resolveContestedPair` と同じ位置（TOCTOU 再現の
+   * フックが死なないようにする）。
+   */
+  async resolveOrphanedContested(
+    ctx: Ctx,
+    survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
+  ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    const memory = await this.get(ctx, survivor.id);
+    if (!memory) {
+      throw new Error(`FakeMemoryStore: memory not found for tenant: ${survivor.id}`);
+    }
+    this.beforeUpdateStatus?.(survivor.id);
+    if (memory.status !== "contested" || memory.contestedWithId !== survivor.contestedWithId) {
+      throw new MemoryStatusConflictError(survivor.id, "contested", memory.status);
+    }
+
+    memory.status = "active";
+    memory.contestedWithId = null;
+    memory.updatedAt = new Date();
+
+    const storedEvent = buildStoredEvent(ctx, survivor.event);
+    this.backing.events.push(storedEvent);
+
+    return { memory, event: storedEvent };
+  }
+
+  /**
    * Issue #372（(B) 第2段）: `MemoryStore.findActiveByClaimKey?` の実装
    * （`packages/testkit` の `InMemoryMemoryStore.findActiveByClaimKey` と同じロジック
    * ——このファイルは意図的に独立している、冒頭のコメント参照）。
@@ -1623,8 +1656,20 @@ export class FakeOutboxStore implements OutboxStore {
  * cosine 距離（pgvector の `<=>` 演算子と同じ定義: `1 - cosine_similarity`）。
  * `packages/postgres` の `PostgresVectorStore.search` が実際に使う演算子と同じ式にする
  * ——recall のテストが「本物の pgvector とスコアの意味が違う」という食い違いを生まないため。
+ *
+ * **Issue #867 / 案B: 長さが違う2本は比較不能として `NaN` を返す。**
+ * `packages/testkit/src/__fixtures__/in-memory-vector-store.ts` の `cosineDistance` に
+ * 全く同じ形で足した番人と同じもの（このファイルが `testkit` を import できない理由は
+ * このファイル冒頭のコメント参照）。以前は `a.length` までしか回らず、`a` が `b` より
+ * 短いと `b` の残りを無視し、`a` が `b` より長いと `b[i] ?? 0` で 0 埋めして計算を続けて
+ * いた——ノルムが0にならないため ADR 0040 の `NaN` 経路に乗らず、意味の無い実数の
+ * 類似度を普通のヒットとして返していた。
  */
 function cosineDistance(a: number[], b: number[]): number {
+  if (a.length !== b.length) {
+    // 上の doc コメント（Issue #867 / 案B）参照——長さが違う時点で比較不能。
+    return NaN;
+  }
   let dot = 0;
   let normA = 0;
   let normB = 0;

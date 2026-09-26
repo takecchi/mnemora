@@ -203,6 +203,14 @@ export declare class PostgresMemoryStore implements MemoryStore {
             MemoryEvent
         ];
     }>;
+    resolveOrphanedContested(ctx: Ctx, survivor: {
+        id: MemoryId;
+        contestedWithId: MemoryId;
+        event: NewMemoryEvent;
+    }): Promise<{
+        memory: Memory;
+        event: MemoryEvent;
+    }>;
     restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
         reason?: string;
         actor?: EventActor;

@@ -224,15 +224,17 @@ export interface VectorStore {
   /**
    * 距離昇順で最大 `opts.limit` 件を返す。
    *
-   * **⚠ `query`（および `upsert` の `vector`）の長さが `space.dimensions` と違うときの
-   * 結果は未定義**（`RecallQuery.vector` の doc コメント参照、Issue #867）。この interface
-   * は長さの一致を検証しない——一致させるのは呼び出し側の責任である。【実測 2026-09、
-   * `main` f68dd8a】`packages/postgres` の実装は pgvector の DB エラーで未捕捉のまま落ち、
-   * `packages/testkit`/`packages/core` の Fake は足りない側を `0` で埋めて計算を続け、
-   * 意味の無い点数を返す——adapter 間で挙動が揃っていない。境界で拒む・比較不能扱いに
-   * するといった案は、公開 Fake の挙動を変えることになるため
-   * [Issue #809](https://github.com/takecchi/mnemora/issues/809) 待ちであり、この記述は
-   * その回答が出るまでの暫定である。
+   * **`query`（および `upsert` の `vector`）の長さが `space.dimensions` と違うときは
+   * 「比較不能」として扱う**（`RecallQuery.vector` の doc コメント参照、Issue #867 / 案B）。
+   * この interface は長さの一致を検証しない——一致させるのは呼び出し側の責任だが、
+   * 一致しなかったときに `search` が新しい例外を投げることはない。**`search` は候補を
+   * 結果から落とさず、距離を比較が通らない値（`NaN`）にして返す**——
+   * [ADR 0040](../../../../docs/decisions/0040-zero-vector-never-returned.md) の
+   * ゼロベクトルと同じ契約の形であり、`recall()` の段2（ADR 0044）がこれを
+   * `omitted.score_not_comparable` に数える。3実装（`packages/postgres` の pgvector 経由の
+   * ゼロベクトル差し替え、`packages/testkit`/`packages/core` の Fake の長さ不一致検査）は
+   * 同じ振る舞いをする（実装の詳細である `NaN` という値そのものは揃えない——ADR 0040
+   * 決定1と同じ自由度）。
    *
    * **⚠ 距離が完全に一致する行が複数あるときの順序も、adapter の責務である**
    * （Issue #339 / [ADR 0170](../../../../docs/decisions/0170-association-search-tiebreak-nondeterminism.md)）。

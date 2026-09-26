@@ -614,6 +614,153 @@ describe("runtime.observe — memory_usage（ADR 0009）", () => {
   });
 });
 
+/**
+ * Issue #870: `ObserveMemoryUsageInput` は他3種（utterance/event/document）と違い
+ * `externalId` を持たず、`handleMemoryUsage` は `externalId: null` を固定で渡していた
+ * ——`observations` 行の冪等化が構造的に効かず、同じ使用報告を再送するたびに
+ * `observations` 行が増え続けていた（`recall_usages`/`reinforce` 自体は元から冪等）。
+ */
+describe("runtime.observe — memory_usage の externalId 冪等性（Issue #870）", () => {
+  function observationsBacking(stores: { memoryStore: FakeMemoryStore }) {
+    // Fake の裏の Map を直接数える（`FakeMemoryStore` に列挙の口が無いため、
+    // `consolidate.test.ts` の「口が投げたら…」歯と同じ手法）。
+    return (
+      stores.memoryStore as unknown as {
+        backing: { observations: Map<string, { kind: string; tenantId: string }> };
+      }
+    ).backing.observations;
+  }
+
+  async function createUsageMemory(stores: { memoryStore: FakeMemoryStore }) {
+    return stores.memoryStore.createMemory(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: `hash-${Math.random()}`,
+      digest: "要旨",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "batch-1" },
+      tags: [],
+      occurredAt: null,
+      recordedAt: new Date("2026-01-01T00:00:00.000Z"),
+      lastReinforcedAt: null,
+      strength: 1,
+      halfLifeHours: 720,
+      decayFloorAt: new Date("2026-06-01T00:00:00.000Z"),
+      embeddingStatus: "pending",
+    });
+  }
+
+  it("同じ externalId で memory_usage を2回送ると observationId が同じで、observations の usage 行は1件のまま", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memory = await createUsageMemory(stores);
+    const recallId = await createRecallFixture(stores, ctx);
+
+    const first = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      externalId: "usage-ext-1",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      externalId: "usage-ext-1",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+
+    expect(second.observationId).toBe(first.observationId);
+    expect(second.memoryIds).toEqual([]);
+    expect(second.extraction).toBe("skipped");
+
+    const usageRows = [...observationsBacking(stores).values()].filter(
+      (o) => o.tenantId === "tenant-1" && o.kind === "usage",
+    );
+    expect(usageRows).toHaveLength(1);
+  });
+
+  it("externalId を渡さない2回は observationId が別のまま（今の振る舞いの固定）", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memory = await createUsageMemory(stores);
+    const recallId = await createRecallFixture(stores, ctx);
+
+    const first = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+
+    expect(second.observationId).not.toBe(first.observationId);
+  });
+
+  it("初回が recordUsage 前に落ちた想定（observation だけ在る）から再送すると、使用が記録・強化される", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memory = await createUsageMemory(stores);
+    const recallId = await createRecallFixture(stores, ctx);
+
+    // 初回呼び出しが createObservation の直後・recordUsage の手前で落ちた状況を模す
+    // ——observation だけを直接作る（handleMemoryUsage を経由しない）。
+    const crashedObservation = await stores.memoryStore.createObservation(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      externalId: "usage-ext-retry",
+      kind: "usage",
+      payload: { recallId, usedMemoryIds: [memory.id] },
+      occurredAt: null,
+      recordedAt: new Date(),
+    });
+
+    const retry = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      externalId: "usage-ext-retry",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+
+    expect(retry.observationId).toBe(crashedObservation.id);
+    expect(retry.memoryIds).toEqual([memory.id]);
+    const reinforced = await stores.memoryStore.get(ctx, memory.id);
+    expect(reinforced?.lastReinforcedAt).not.toBeNull();
+  });
+
+  it("別 kind と externalId が衝突したら recordUsage を呼ばず、他 kind の再送と同じ形で返す", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const memory = await createUsageMemory(stores);
+    const recallId = await createRecallFixture(stores, ctx);
+
+    const utteranceObservation = await stores.memoryStore.createObservation(ctx, {
+      tenantId: "tenant-1",
+      subjectId: null,
+      externalId: "usage-ext-conflict",
+      kind: "utterance",
+      payload: { text: "別 kind の観測" },
+      occurredAt: null,
+      recordedAt: new Date(),
+    });
+
+    const result = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      externalId: "usage-ext-conflict",
+      recallId,
+      usedMemoryIds: [memory.id],
+    });
+
+    expect(result.observationId).toBe(utteranceObservation.id);
+    expect(result.memoryIds).toEqual([]);
+    expect(result.extraction).toBe("skipped");
+    // recordUsage が呼ばれていれば強化されているはず——呼ばれていないことを状態で確かめる。
+    const notReinforced = await stores.memoryStore.get(ctx, memory.id);
+    expect(notReinforced?.lastReinforcedAt).toBeNull();
+  });
+});
+
 describe("runtime.tick — embed ジョブ（embeddingStatus の遷移）", () => {
   it("embed ジョブを処理すると embeddingStatus が 'ready' になり、vector が upsert される", async () => {
     const { runtime, stores } = buildRuntime(

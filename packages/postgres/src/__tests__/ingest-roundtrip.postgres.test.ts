@@ -181,6 +181,60 @@ describe("observe → recall 前段の往復（roadmap.md 段階3、本物の Po
     const after = await memoryStore.get(ctx, memoryId);
     expect(after?.lastReinforcedAt).not.toBeNull();
   });
+
+  /**
+   * Issue #870: `ObserveMemoryUsageInput` は他3種と違い `externalId` を持たず、
+   * `handleMemoryUsage` は `externalId: null` を固定で渡していたため、`observations`
+   * 行の冪等化が構造的に効かなかった——同じ使用報告を再送するたびに `observations` 行が
+   * 増え続ける（`recall_usages`/`reinforce` 自体は元から冪等）。本物の Postgres に対して
+   * 同じ externalId で2回 `observe({kind:'memory_usage', ...})` を送っても、
+   * `observations` の usage 行が1件のまま・`observationId` が同じであることを確かめる。
+   */
+  it("同じ externalId の memory_usage を2回 observe() しても observations の usage 行は1件のまま（本物の Postgres）", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const runtime = await buildRuntime();
+    const ctx: Ctx = { tenantId: "tenant-roundtrip-usage-ext-id" };
+
+    const observeResult = await runtime.observe(ctx, {
+      kind: "utterance",
+      text: "externalId 冪等性チェック用の使用報告の対象",
+    });
+    const memoryId = observeResult.memoryIds[0]!;
+
+    const recallRow = await db.execute(sql`
+      INSERT INTO recalls (id, tenant_id, query, usage, index_band, returned_memories)
+      VALUES (
+        gen_random_uuid(), ${ctx.tenantId}, '{}'::jsonb, '{}'::jsonb, '{}'::jsonb,
+        '{"breakdownCaptured":true,"memories":[]}'::jsonb
+      )
+      RETURNING id
+    `);
+    const recallId = (recallRow.rows[0] as unknown as { id: string }).id;
+
+    const first = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      externalId: "ext-usage-roundtrip-1",
+      recallId,
+      usedMemoryIds: [memoryId],
+    });
+    const second = await runtime.observe(ctx, {
+      kind: "memory_usage",
+      externalId: "ext-usage-roundtrip-1",
+      recallId,
+      usedMemoryIds: [memoryId],
+    });
+
+    expect(second.observationId).toBe(first.observationId);
+    expect(second.memoryIds).toEqual([]);
+    expect(second.extraction).toBe("skipped");
+
+    const usageObservationCount = await db.execute(sql`
+      SELECT count(*)::int AS count FROM observations
+      WHERE tenant_id = ${ctx.tenantId} AND kind = 'usage'
+    `);
+    expect((usageObservationCount.rows[0] as unknown as { count: number }).count).toBe(1);
+  });
 });
 
 /**
