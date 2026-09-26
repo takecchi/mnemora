@@ -516,19 +516,17 @@ Refs #823
   162: 30→25、322: 30→26、642: 30→20）——いずれも本追記が狙った、連想で実際に
   拾い直された分の取り下げである。⭐門（`scripts/compare-summary.mjs` が見る
   `mnemoraShareOfNaiveChars`/`factStatementSurvived` の2欄）はこの5行を含む
-  12行すべてで不変であり、退行ではない。**この差分は `examples/chat/compare-baseline.json`
-  にはコミットしていない**——同ファイルの `_readme` と `examples/chat/README.md`
-  「基準値を更新する手順」が「手元で測った値を書かない・本体は CI の artifact から作る」
-  （ADR 0121 決定1・ADR 0119 決定6）と明記しており、更新は PR 自身の CI run の
-  artifact を2回以上一致させてから行う手順（ADR 0231 決定5）を要求するため、
-  本追記の作業（ローカルの initdb インスタンス上の実行）はその手順の対象外である。
-  ⟹ **`compare-baseline.json` の `omitted` 欄は、この PR がマージされた後、
-  その PR 自身の CI artifact を使って別途更新する必要がある**（`over_limit` 欄だけで、
-  ⭐門の2欄には影響しない）。
+  12行すべてで不変であり、退行ではない。手元の実行値は基準値には書いていない
+  （「手元で測った値を書かない」、ADR 0121 決定1・ADR 0119 決定6）。
+- 【実測】`examples/chat/compare-baseline.json` は、PR #930 自身の CI（example-chat
+  ジョブ、run 36240303816）の artifact `compare` を attempt 1・2 の2本取り、
+  `measuredAt`/`commit` を除いて `rows` がバイト単位で一致することを確かめてから
+  （ADR 0231 決定5）、プログラムで差し替えた。動いたのは上の5行の
+  `over_limit(stage:"rescore")` の `count` だけで、手元の実測と同じ値だった。
+  経緯は同ファイルの `provenance.fifthUpdate` に記録した。
 - **確かめていないこと**: `test:db` 全体（他ファイル含む約4分のスイート）・
   `examples/chat` の `retrieval`/`identifier-probes`/`numeral-token-probes` 等の
-  他のベンチ・`pack:check` は走らせていない。`compare-baseline.json` の更新自体
-  （CI artifact を使った正式な更新）も行っていない——上記のとおり対象外の手順である。
+  他のベンチ・`pack:check` は手元では走らせていない。
   実運用での発生頻度も未計測。`over_limit(stage:"association")` 側の内部状態が
   id 付きで保持されているかどうかも、引き続き未調査。
 
