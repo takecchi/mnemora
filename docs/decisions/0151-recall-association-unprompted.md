@@ -446,9 +446,10 @@ searchMany?(
 **理由**:
 
 1. **非破壊。** `pnpm api:check` の差分は「`VectorStore.searchMany?` の追加」と
-   「`PostgresVectorStore` への `searchMany` 実装・`buildFilterConditions`（private、
-   `search()` と共有する `WHERE` 組み立て）の追加」だけであり、既存の型・既存の
-   呼び出しは1つも変わっていない。
+   「`PostgresVectorStore` への `searchMany` 実装の追加」だけであり、既存の型・既存の
+   呼び出しは1つも変わっていない（`search()` と共有する `WHERE` 組み立ては、クラスの
+   private メンバーではなくモジュール内のトップレベル関数 `buildFilterConditions` として
+   切り出してあり、公開型には現れない——下記「実装」参照）。
 2. **未実装の adapter でも `recall()` は成立する。** `recall-runtime.ts` の段3.5は
    `deps.vectorStore.searchMany` が無ければ、従来どおりアンカーごとに `search()` を
    呼ぶ経路へ戻る——結果（集合・順序）は束ねた場合と変わらず、往復数だけが
@@ -465,11 +466,18 @@ searchMany?(
 
 `PostgresVectorStore.searchMany`（`packages/postgres/src/vector-store.ts`）は、
 `VALUES (key, vector), ...` と `CROSS JOIN LATERAL` で束ねる。`search()` が組み立てる
-`WHERE` 条件は `buildFilterConditions`（private、`search()`/`searchMany()` が共有）へ
-切り出し、2箇所で食い違う経路を作らないようにした。`ORDER BY` は `search()` と同じ
-3段 tie-break（距離 → `recorded_at` DESC → `memory_id`、Issue #339 / ADR 0170）を
-`LATERAL` の中にそのまま書く。`SET LOCAL hnsw.iterative_scan = relaxed_order`
-（ADR 0284）は1トランザクションに1回だけ発行する——`LATERAL` は同じ SELECT 文の中で
+`WHERE` 条件は `buildFilterConditions`（モジュール内のトップレベル関数、`search()`/
+`searchMany()` が共有。公開 API の差分を「`searchMany?`/`searchMany` の追加」だけに
+保つため、クラスの private メンバーではなくモジュール関数にした——マネージャーが
+枝へ直接足した追い作業）へ切り出し、2箇所で食い違う経路を作らないようにした。
+`ORDER BY` は `search()` と同じ3段 tie-break（距離 → `recorded_at` DESC →
+`memory_id`、Issue #339 / ADR 0170）を `LATERAL` の中にそのまま書く。
+`hnsw.iterative_scan = relaxed_order`（ADR 0284）の `SET LOCAL` も同様に共通ヘルパー
+（`withRelaxedOrderScan`）へ切り出した——`search()`/`searchMany()` がそれぞれ独立に
+`SET LOCAL` を発行すると、`hnsw-ef-search-window-ceiling.test.ts` 検査2（ADR 0284が
+「本番経路で SET している箇所は1つだけ」と固定している歯）が赤くなるため。詳細・
+採らなかった案（歯の期待値を変える案）は ADR 0284 の追記（2026-09-26）を参照。
+`SET LOCAL` は1トランザクションに1回だけ発行する——`LATERAL` は同じ SELECT 文の中で
 アンカーの数だけ繰り返し実行されるが、`SET LOCAL` はトランザクション単位のセッション
 変数なので、繰り返しごとに再設定する必要はない。
 

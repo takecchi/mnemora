@@ -22,6 +22,33 @@ function toVectorLiteral(vector: number[]): string {
 function parseVectorLiteral(literal: string): number[] {
   return literal.slice(1, -1).split(",").map(Number);
 }
+
+/**
+ * `search()`/`searchMany()` の両方が使う、ADR 0284 の `SET LOCAL` を発行してから
+ * `run` を実行する共通ヘルパー。**`hnsw.iterative_scan` を `relaxed_order` に変える
+ * その `SET LOCAL` 文は、このファイルの中で下の実装1箇所にしか書かない**——
+ * `search()`/`searchMany()` のどちらも直接 `SET LOCAL` を書かず、必ずこの関数を経由する。
+ *
+ * `packages/postgres/src/__tests__/hnsw-ef-search-window-ceiling.test.ts` 検査2
+ * （ADR 0284）が「`hnsw.iterative_scan` を SET している箇所は `vector-store.ts` に
+ * 1箇所だけ」をソース走査で固定している——`searchMany`（Issue #377）を足したときに
+ * `search()` と同じ `SET LOCAL` 文をもう1箇所に複製すると、この歯が指摘する「1箇所」
+ * という前提を壊す。共通ヘルパーへ抽出することで、複製せずに両メソッドから使い回す
+ * （ADR 0284 追記参照——この抽出のあとも、ADR 0284 が測った「`search()` の正しさ・
+ * レイテンシに対する `relaxed_order` の効果」という測定内容そのものは変わらない）。
+ *
+ * `SET LOCAL` はトランザクション内でしか効かないため、`db.transaction()` で `BEGIN`
+ * してから発行する（ADR 0284 決定1と同じ理由）。
+ */
+async function withRelaxedOrderScan<T>(
+  db: Db,
+  run: (tx: Parameters<Parameters<Db["transaction"]>[0]>[0]) => Promise<T>,
+): Promise<T> {
+  return db.transaction(async (tx) => {
+    await tx.execute(sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
+    return run(tx);
+  });
+}
 /**
  * `search()`/`searchMany()` の両方が使う `WHERE` 条件の組み立て。**同じヘルパーを
  * 両方から呼ぶことで、`filter` の翻訳が2箇所で食い違う経路を作らない**（Issue #377、
@@ -218,24 +245,22 @@ export class PostgresVectorStore implements VectorStore {
     // `recorded_at` まで完全一致したときだけ効く最終フォールバックとして残す。
     // ADR 0284: `hnsw.iterative_scan = relaxed_order` を、この SELECT だけを対象に
     // `SET LOCAL` で有効にする。ADR 0063 決定1（有効にしない）を覆す——理由・実測・
-    // 覆した経緯は ADR 0284 を見ること。`SET LOCAL` はトランザクション内でしか効かず、
-    // かつ pool の同一コネクションを次のクエリが再利用しても漏れない（トランザクション終了で
-    // 自動的に既定へ戻る）ため、`db.transaction()` で BEGIN してから発行する。
+    // 覆した経緯は ADR 0284 を見ること。`SET LOCAL` の発行自体は `withRelaxedOrderScan`
+    // （このファイル冒頭、`search()`/`searchMany()` で共有）に集約してある——
     // ⚠ `SET LOCAL` の値はプレースホルダで束縛できない（Postgres が `SET` の引数に
-    // パラメータ化を許さない）——固定の識別子リテラルとして埋め込む。
-    // `hnsw.max_scan_tuples` は既定のまま触らない(Issue #671 が記録した天井は、
+    // パラメータ化を許さない）——固定の識別子リテラルとして埋め込む（`withRelaxedOrderScan`
+    // 側の実装）。`hnsw.max_scan_tuples` は既定のまま触らない(Issue #671 が記録した天井は、
     // このADRでは引き受けた負債として残す)。
-    const result = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
-      return tx.execute(sql`
+    const result = await withRelaxedOrderScan(this.db, (tx) =>
+      tx.execute(sql`
         SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance
         FROM ${sql.identifier(table)} e
         JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
         WHERE ${whereClause}
         ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id
         LIMIT ${opts.limit}
-      `);
-    });
+      `),
+    );
     return result.rows.map((row) => {
       const r = row as unknown as { memory_id: string; distance: number };
       return { memoryId: r.memory_id, distance: r.distance };
@@ -257,10 +282,13 @@ export class PostgresVectorStore implements VectorStore {
    * `buildFilterConditions`（`search()` と共有、関数の doc 参照）——クエリベクトルを
    * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
    *
-   * **`hnsw.iterative_scan` は `search()` と同じく `SET LOCAL` で1回だけ効かせる**
-   * ——`LATERAL` は同じトランザクション・同じ SELECT 文の中で複数回実行されるが、
-   * `SET LOCAL` はトランザクション単位で効くセッション変数であり、`LATERAL` の
-   * 繰り返し1回ごとに再設定する必要はない（ADR 0284、`search()` と同じ理由）。
+   * **`hnsw.iterative_scan` は `search()` と同じ `withRelaxedOrderScan`（このファイル
+   * 冒頭）を経由して1回だけ効かせる**——`LATERAL` は同じトランザクション・同じ SELECT
+   * 文の中で複数回実行されるが、`SET LOCAL` はトランザクション単位で効くセッション
+   * 変数であり、`LATERAL` の繰り返し1回ごとに再設定する必要はない（ADR 0284、
+   * `search()` と同じ理由）。この `SET LOCAL` 文をこのメソッドが複製しないのは、
+   * `hnsw-ef-search-window-ceiling.test.ts` 検査2（ADR 0284）が「`vector-store.ts`
+   * の中で1箇所だけ」を固定しているため——`withRelaxedOrderScan` の doc コメント参照。
    *
    * `EXPLAIN` で確認済み（PR 本文に抜粋）: `LATERAL` の内側でも
    * `Index Scan using ...hnsw...` が選ばれ、アンカーの数だけ `loops=N` で
@@ -294,9 +322,8 @@ export class PostgresVectorStore implements VectorStore {
       return sql`(${q.key}::text, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
 
-    const result = await this.db.transaction(async (tx) => {
-      await tx.execute(sql`SET LOCAL hnsw.iterative_scan = relaxed_order`);
-      return tx.execute(sql`
+    const result = await withRelaxedOrderScan(this.db, (tx) =>
+      tx.execute(sql`
         SELECT q.query_key AS query_key, hit.memory_id AS memory_id, hit.distance AS distance
         FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_key, qvec)
         CROSS JOIN LATERAL (
@@ -307,8 +334,8 @@ export class PostgresVectorStore implements VectorStore {
           ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
           LIMIT ${opts.limit}
         ) AS hit
-      `);
-    });
+      `),
+    );
     for (const row of result.rows) {
       const r = row as unknown as { query_key: string; memory_id: string; distance: number };
       resultMap.get(r.query_key)?.push({ memoryId: r.memory_id, distance: r.distance });
