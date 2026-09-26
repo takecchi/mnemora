@@ -140,24 +140,36 @@ function isTruthyEnvFlag(value: string | undefined): boolean {
  *
  * ⚠ `--analyze-memories` も `--schema` の有無に関わらず指定できる（`runAnalyzeMemories` に
  * そのまま `schema` を渡すだけで、独立した機能である）。
+ *
+ * ⚠ **`--help`/`-h` は argv のどこにあっても、他の一切（上の「受け付ける形」の解決も
+ * 「弾く形」の判定も）より先に勝つ。** 値の無い `--schema`・未知のオプションが同じ argv に
+ * 混じっていても、`ok: false` にはならず `{ help: true }` を返す
+ * （`../__tests__/cli-options.test.ts` の該当テスト群参照）。
  */
 export function parseMigrateCliOptions(
   argv: readonly string[],
   env: Readonly<Record<string, string | undefined>>,
 ): MigrateCliParseResult {
+  // `--help`/`-h` は「どんな組み合わせでも他の解釈をせず即座に返す（ヘルプ表示に徹する）」
+  // ——このファイル冒頭のdocコメント参照。この約束を守るには、他のどの解釈よりも前に
+  // 判定する必要がある。以前はループの中で見つけてから `continue` する形だったため、
+  // `--help`/`-h` より後ろに置かれた壊れた引数（値の無い `--schema`・未知のオプション・
+  // 値の位置に来た `-h` 自身 等）がループの途中で先に `ok: false` を返してしまい、
+  // help に到達しないことがあった（実測: 起票済みの Issue は無く、実装時点のバグ。
+  // `../__tests__/cli-options.test.ts` 「`--help` の後に値の無い `--schema` が続いても
+  // help を優先する」等がこれを固定する）。
+  // ⟹ argv 全体を先に走査し、完全一致する `--help`/`-h` があれば他の一切を見ずに返す。
+  if (argv.some((arg) => arg === "--help" || arg === "-h")) {
+    return { ok: true, options: { help: true } };
+  }
+
   let schemaArg: string | undefined;
   let extensionSchemaArg: string | undefined;
   let extensionModeArg: string | undefined;
   let analyzeMemoriesArg = false;
-  let help = false;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i]!;
-
-    if (arg === "--help" || arg === "-h") {
-      help = true;
-      continue;
-    }
 
     if (arg === ANALYZE_MEMORIES_FLAG) {
       analyzeMemoriesArg = true;
@@ -190,11 +202,6 @@ export function parseMigrateCliOptions(
     } else {
       extensionModeArg = value;
     }
-  }
-
-  // --help はどんな組み合わせでも他の解釈をせず即座に返す（ヘルプ表示に徹する）。
-  if (help) {
-    return { ok: true, options: { help: true } };
   }
 
   const schema = schemaArg ?? env.MNEMORA_SCHEMA;
