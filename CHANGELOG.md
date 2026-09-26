@@ -120,7 +120,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   元から kind を問わない一意制約だった（[Issue #870](https://github.com/takecchi/mnemora/issues/870) /
   [ADR 0009](./docs/decisions/0009-usage-feedback-via-observe.md) 追記、PR #913）。
 - **`MemoryStore` に任意メソッド `reinforceMany?` を足した**——`observe({kind:
-  'memory_usage'})` の `recordUsage → reinforce` ループが使用報告1件ごとに直列に往復し
+'memory_usage'})` の `recordUsage → reinforce` ループが使用報告1件ごとに直列に往復し
   （N+1）、報告件数に比例して往復数が増えていた問題（1回の呼び出しで `1 + 2N` 往復）を、
   この口があるときだけ1回の呼び出しに束ねる。`runtime.ts` の `handleMemoryUsage` は
   `reinforceMany` が在ればそれを使い、無ければ従来どおり `reinforce` を1件ずつ呼ぶ
@@ -245,7 +245,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ペアの外側で切れる場合は1バイトも挙動が変わらない）（PR #858）。
 - **`@mnemora/postgres` の `PostgresVectorStore.search` が、`RecallQuery.vector: []`
   （空配列）を渡すと未捕捉の `DrizzleQueryError`（`vector must have at least 1
-  dimension`）で `runtime.recall()` ごと reject していた。** Fake（`@mnemora/testkit`
+dimension`）で `runtime.recall()` ごと reject していた。** Fake（`@mnemora/testkit`
   の `InMemoryVectorStore`）は短い方の配列を0で zero-pad する実装の副作用で空配列を
   ゼロベクトルとして扱い、ADR 0040 の経路で正常完走していたため、同じ入力に対して
   adapter ごとに別の答えが出ていた。空配列のときだけ embedding space の次元数ぶんの
@@ -255,8 +255,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 - **`runMigrations`（専用スキーマ、feat/dedicated-schema・ADR 0057）が、PostgreSQL の
   完全予約語と一致するスキーマ名（`user` 等——`assertSafeSchemaName` は文字種と長さしか
   見ないため、これも通ってしまう）で構文エラーになっていた。** `SET LOCAL search_path
-  TO ...` にスキーマ名を引用符無しで埋め込んでいたのが原因——`CREATE SCHEMA
-  IF NOT EXISTS "<schema>"` 側は既に引用符を付けており無事だった。該当箇所だけ
+TO ...` にスキーマ名を引用符無しで埋め込んでいたのが原因——`CREATE SCHEMA
+IF NOT EXISTS "<schema>"` 側は既に引用符を付けており無事だった。該当箇所だけ
   スキーマ名を二重引用符で囲むようにした（新しい例外は投げない。予約語ではない
   スキーマ名の挙動は無変更、`searchPathFor` 自体の公開契約も無変更）
   （[ADR 0341](./docs/decisions/0341-quote-search-path-in-set-local.md)、PR #877）。
@@ -319,8 +319,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   2026-09-26）。
 - **`InMemoryMemoryStore.archiveDecayed`（`@mnemora/testkit` の擬似 `MemoryStore`）が
   `opts.limit` に負数・`NaN`・`Infinity`・非整数を渡されても例外を投げず、`.slice(0,
-  Math.max(0, opts.limit))` の丸めに従って実際に書き込みまで行っていた。** `limit:
-  Infinity` は対象を無条件に全件 `archived` にし、`limit: 1.5` は1件だけ `archived` に
+Math.max(0, opts.limit))` の丸めに従って実際に書き込みまで行っていた。** `limit:
+Infinity` は対象を無条件に全件 `archived` にし、`limit: 1.5` は1件だけ `archived` に
   していた——このメソッドは書き込みの副作用（`status` を `archived` にし、`archived`
   イベントを積む）を持つ口であるため、他の口（`OutboxStore.claimBatch`・
   `VectorStore.search`・`LexicalStore.search`・`EventStore.list`・
@@ -356,6 +356,18 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （`\uD800` 等）も対象外——Postgres 側（node-postgres が U+FFFD へ静かに置換する）の
   挙動に Fake をどちらへ寄せるかは別途の製品判断が要る
   （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816) NUL 側のみ、PR #923）。
+- **`InMemoryMemoryStore.createMemory`（`@mnemora/testkit`）/`FakeMemoryStore.createMemory`
+  （`@mnemora/core`）が、上の PR #923 で塞ぎ残した `subjectId`・`tags`（各要素）・
+  `digest` に NUL 文字（`\u0000`）を含む文字列を渡されても例外を投げず静かに受け入れて
+  いた。** 実測すると `PostgresMemoryStore.createMemory` はこの3欄も `content` と同じ
+  理由（Postgres の `text` 型が NUL バイトを構造的に拒む）・同じメッセージで例外を
+  投げる対称な入力面だったため、`content` と揃えた。`tenantId` は引き続き対象外
+  ——`ctx.tenantId` は `createMemory` 以外のほぼ全メソッドが個別に直接読む横断的な値で
+  あり、両 Fake とも `ctx` を受ける共通の入口を持たないため、検査を足すには全メソッドへ
+  の横展開が要る。孤立サロゲート（`\uD800` 等）も引き続き対象外——今の挙動（Postgres は
+  node-postgres 経由で静かに U+FFFD へ置換、Fake はそのまま保持）を変えず、契約として
+  `MemoryStore.createMemory` の doc コメントに記録した
+  （新しい正常系の挙動は変えていない）（[Issue #816](https://github.com/takecchi/mnemora/issues/816)）。
 
 ---
 
@@ -409,7 +421,7 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
 ### Added
 
 - **`restoreSuperseded`/`previewRestoreSupersededBy` に任意の `filter?: { onlyMemoryIds?:
-  MemoryId[] }` を足し、1回の統合・訂正操作の単位まで戻す範囲を絞れるようにした**
+MemoryId[] }` を足し、1回の統合・訂正操作の単位まで戻す範囲を絞れるようにした**
   （`MemoryStoreConformanceOptions.supportsOnlyMemoryIdsFilter?` は既存必須8本と違い**任意**）。
   ⭕ 省略時は従来どおり群全体を戻す（[Issue #515](https://github.com/takecchi/mnemora/issues/515) /
   [ADR 0258](./docs/decisions/0258-restore-superseded-operation-scope.md)、PR #573）。
@@ -519,7 +531,7 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   導入側が差し替えたときだけ効く。
   ⚠ 選定に使っていない質問文での精度・閾値は測っていない（ADR 0319）。
 - **taxonomy の recall 側絞り込みを実装した（PR-B。Closes #201）**——`RecallQuery.labels?:
-  string[]`（OR の集合絞り込み）・`taxonomyGroups?: boolean`（既定 `false`）を新設し、
+string[]`（OR の集合絞り込み）・`taxonomyGroups?: boolean`（既定 `false`）を新設し、
   `taxonomy_mode`（open/strict）に応じた参加資格で段1・段3.5・`aggregateScope` を絞る。
   `GroupCount.axis: 'taxonomy'`・`FilteredOmission.condition: 'taxonomy'` も新設
   （[Issue #201](https://github.com/takecchi/mnemora/issues/201) /
@@ -529,7 +541,7 @@ scripts/__snapshots__/public-api/` の削除行は、すべて（a）zod スキ�
   （[Issue #372](https://github.com/takecchi/mnemora/issues/372) /
   [ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)、PR #745）。
 - **`MemoryStore` に任意メソッド `listActiveClaimPredicates?` を足し、`ClaimKeyOptions.
-  knownPredicatesFromStore?`（既定 off）で claim key 派生の語彙ヒントを店の既存 predicate
+knownPredicatesFromStore?`（既定 off）で claim key 派生の語彙ヒントを店の既存 predicate
   一覧から動的に集められるようにした**——ADR 0326「採らなかった案B」の実装。real データ
   （`examples/chat` の `answer` 経路、n=3）で訂正の predicate 一致・`contested` 成立を
   0/4→4/4 に改善したが、誤検出も1/14→3〜4/14 に増える副作用が実測された
@@ -726,7 +738,7 @@ commit の日付と同じ `+0900`）。🔴 **この版も UTC と JST で日付
 JST では 9/23（08:54）である。⚠ **tag が指す commit 自体の日付は `2026-09-23 05:31 +0900` で、
 出荷の3時間あまり前である**——**commit の時と出荷の時は別物である**（この版では JST の日付は揃った）。
 
-⭐ **この節は Release を作る *前* に起こしてあった**（[docs/release-v1.md](./docs/release-v1.md) §0.10 /
+⭐ **この節は Release を作る _前_ に起こしてあった**（[docs/release-v1.md](./docs/release-v1.md) §0.10 /
 [ADR 0252](./docs/decisions/0252-release-changelog-section-is-a-publish-gate.md)）。⟹ **上の段落がいま埋まっているのは、
 同 §0.10 が「後からしか分からない事実（`published` の時刻・Release へのリンク）は後から埋めてよい」と
 定めているのに従って、公開後にその時点の現物で埋めたからである。**
@@ -884,11 +896,11 @@ $ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/       → （�
 【実測 2026-09-21】`git diff --stat v0.4.0..v0.5.0 -- scripts/__snapshots__/public-api/` は
 **差分を返さない** ⟹ ⭕ **公開 API の型は1バイトも動いていない。**
 ⚠ それでも破壊的として数えるのは、移行ガイドの定義が逐語で
-「**既存の利用者のコードが型検査 *または実行時* に壊れる変更**」だからである。
+「**既存の利用者のコードが型検査 _または実行時_ に壊れる変更**」だからである。
 
-| # | 変更 | 誰が影響を受けるか | 根拠 |
-|---|---|---|---|
-| 18 | `LocalEmbeddingProvider` のコンストラクタが、**既定と異なる `repo` を `modelId` 無しで渡された宣言**を `throw` で落とすようになった（`@mnemora/local-embedding`） | 🔴 **`repo` を既定以外にし、かつ `modelId` を渡していなかった人だけ。**⭕ `repo` を渡していないなら影響なし。⚠ **該当していた人は元から壊れていた側である**——`repo` は `space.model` に反映されず、別モデルのベクトルが同じ space へ静かに混ざっていた | [ADR 0247](./docs/decisions/0247-local-embedding-repo-model-id-declaration-guard.md) / [#142](https://github.com/takecchi/mnemora/issues/142)（PR #550） |
+| #   | 変更                                                                                                                                                              | 誰が影響を受けるか                                                                                                                                                                                                                                     | 根拠                                                                                                                                                     |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 18  | `LocalEmbeddingProvider` のコンストラクタが、**既定と異なる `repo` を `modelId` 無しで渡された宣言**を `throw` で落とすようになった（`@mnemora/local-embedding`） | 🔴 **`repo` を既定以外にし、かつ `modelId` を渡していなかった人だけ。**⭕ `repo` を渡していないなら影響なし。⚠ **該当していた人は元から壊れていた側である**——`repo` は `space.model` に反映されず、別モデルのベクトルが同じ space へ静かに混ざっていた | [ADR 0247](./docs/decisions/0247-local-embedding-repo-model-id-declaration-guard.md) / [#142](https://github.com/takecchi/mnemora/issues/142)（PR #550） |
 
 ⚠ **移行手順は複製しない**——直し方は [docs/migration-v1.md](./docs/migration-v1.md) の項目 **18** を見ること。
 ⛔ **これを「#142 が解決した」と読まないこと**——#142 は2件を名指ししており、
@@ -963,14 +975,14 @@ commit の日付と同じ `+0900`）。⟹ **UTC で読むと1日ずれる。**
 ⭕ **値を読むだけ・比較するだけなら非破壊**——`never` で網羅性を検査しているコードだけが壊れる。
 ⚠ これも新しい判定基準ではない——`[0.2.0]` の Breaking 表 **4** が同じ形で数えられている。
 
-| # | 変更 | 誰が影響を受けるか | 根拠 |
-|---|---|---|---|
-| 12 | `Runtime` に必須メソッド `restoreSuperseded` が増えた（`@mnemora/core`） | `Runtime` を自分で実装している側だけ。`createRuntime()` が返すものを使っているなら影響なし | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #464）。⚠ **ADR 0230 の本文だけを読むと、これが破壊的であることに気づけない**——2026-09-18 に冒頭への追記で名指しされた |
-| 13 | `MemoryStoreConformanceOptions.supportsRestoreSupersededBy` が必須フィールドになった（`@mnemora/testkit`）。**12 と同じ PR #464 で入っている** | `describeMemoryStoreConformance` を呼んでいる側だけ | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)（PR #464）。🔴 **この項目は 2026-09-18 まで、CHANGELOG にも ADR にも一度も書かれていなかった** |
-| 14 | `Runtime` に必須メソッド `findCorrectionCandidates` が増えた（`@mnemora/core`） | **12 と同じ** | [ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #517） |
-| 15 | `MemoryStoreConformanceOptions.supportsPreviewRestoreSupersededBy` が必須フィールドになった（`@mnemora/testkit`） | **13 と同じ** | [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md) / [#515](https://github.com/takecchi/mnemora/issues/515)（PR #524） |
-| 16 | `Runtime` に必須メソッド `applyCorrection` が増えた（`@mnemora/core`）。`findCorrectionCandidates` が返した候補の中から**人が選んだ1件**を受け取り、`markContested` → `resolveContested` の書き込みまでを1つの口にまとめる | **12 と同じ** | [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #537） |
-| 17 | 🔴 `MemoryEventKind` の union に `"unsuperseded"` が増えた（`@mnemora/core`）。**12・13 と同じ PR #464 で入っている** | ⚠ **届く経路は `EventStore` である**——`MemoryEvent.kind` は必須フィールドで、`EventStore.append`/`.get`/`.list` が返す。⟹ ⭕ **`Runtime` の口からは届かない**ので、**5つの動詞だけを使う利用者には影響しない。**⚠ **同じ形に対する扱いがこの repo に2つ在り、線は引かれていない**——[#541](https://github.com/takecchi/mnemora/issues/541) を見ること | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)（PR #464） |
+| #   | 変更                                                                                                                                                                                                                       | 誰が影響を受けるか                                                                                                                                                                                                                                                                                                                                   | 根拠                                                                                                                                                                                                                                                      |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 12  | `Runtime` に必須メソッド `restoreSuperseded` が増えた（`@mnemora/core`）                                                                                                                                                   | `Runtime` を自分で実装している側だけ。`createRuntime()` が返すものを使っているなら影響なし                                                                                                                                                                                                                                                           | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #464）。⚠ **ADR 0230 の本文だけを読むと、これが破壊的であることに気づけない**——2026-09-18 に冒頭への追記で名指しされた |
+| 13  | `MemoryStoreConformanceOptions.supportsRestoreSupersededBy` が必須フィールドになった（`@mnemora/testkit`）。**12 と同じ PR #464 で入っている**                                                                             | `describeMemoryStoreConformance` を呼んでいる側だけ                                                                                                                                                                                                                                                                                                  | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)（PR #464）。🔴 **この項目は 2026-09-18 まで、CHANGELOG にも ADR にも一度も書かれていなかった**                                                                                      |
+| 14  | `Runtime` に必須メソッド `findCorrectionCandidates` が増えた（`@mnemora/core`）                                                                                                                                            | **12 と同じ**                                                                                                                                                                                                                                                                                                                                        | [ADR 0232](./docs/decisions/0232-correction-candidates-returned-not-chosen.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #517）                                                                                                        |
+| 15  | `MemoryStoreConformanceOptions.supportsPreviewRestoreSupersededBy` が必須フィールドになった（`@mnemora/testkit`）                                                                                                          | **13 と同じ**                                                                                                                                                                                                                                                                                                                                        | [ADR 0237](./docs/decisions/0237-restore-superseded-dry-run-preview.md) / [#515](https://github.com/takecchi/mnemora/issues/515)（PR #524）                                                                                                               |
+| 16  | `Runtime` に必須メソッド `applyCorrection` が増えた（`@mnemora/core`）。`findCorrectionCandidates` が返した候補の中から**人が選んだ1件**を受け取り、`markContested` → `resolveContested` の書き込みまでを1つの口にまとめる | **12 と同じ**                                                                                                                                                                                                                                                                                                                                        | [ADR 0242](./docs/decisions/0242-runtime-apply-correction.md) / [#369](https://github.com/takecchi/mnemora/issues/369)（PR #537）                                                                                                                         |
+| 17  | 🔴 `MemoryEventKind` の union に `"unsuperseded"` が増えた（`@mnemora/core`）。**12・13 と同じ PR #464 で入っている**                                                                                                      | ⚠ **届く経路は `EventStore` である**——`MemoryEvent.kind` は必須フィールドで、`EventStore.append`/`.get`/`.list` が返す。⟹ ⭕ **`Runtime` の口からは届かない**ので、**5つの動詞だけを使う利用者には影響しない。**⚠ **同じ形に対する扱いがこの repo に2つ在り、線は引かれていない**——[#541](https://github.com/takecchi/mnemora/issues/541) を見ること | [ADR 0230](./docs/decisions/0230-restore-superseded-recovery-path.md)（PR #464）                                                                                                                                                                          |
 
 ⚠ **移行手順は複製しない**——直し方は
 [docs/migration-v1.md](./docs/migration-v1.md) の同じ番号の項目を見ること。
@@ -1029,12 +1041,12 @@ commit の日付と同じ `+0900`）。⟹ **UTC で読むと1日ずれる。**
 ⚠ **正本は [docs/migration-v1.md](./docs/migration-v1.md) の番号付き一覧の 8〜11 であり、
 下の表はその写しである**——**`#` 欄はあちらの通し番号で、この表の中での連番ではない。**
 
-| # | 変更 | 誰が影響を受けるか | 根拠 |
-|---|---|---|---|
-| 8 | `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（`@mnemora/testkit`）の署名が `(tenantId: string, recalls: number): void` → `(ctx: Ctx, recalls: number): Promise<void>` へ変わった。ADR 0197 が `TenantSettingsStore` に同名の**本番**メソッドを足して名前が衝突したため、テスト専用フックのほうを消した | 🔴 **旧署名で呼んでいた側。⛔ 引数を直すだけでは足りない**——同期から `Promise` へ変わったので `await` が要る。構築して渡すだけなら影響なし | [ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)（PR #416） |
-| 9 | `FilteredOmission` に必須フィールド `scopeRelation` が増えた（`@mnemora/core`）。`decayed` だけが `totalInScope` の**内側**を数えるという非対称を、契約として明示するもの | **返り値の型なので、読むだけの利用者には非破壊。** `FilteredOmission` を自分で組み立てている側（独自 adapter の `aggregateScope` 実装・テストダブル）だけ | [ADR 0174](./docs/decisions/0174-filtered-omission-scope-relation.md) / [#352](https://github.com/takecchi/mnemora/issues/352)（PR #376） |
-| 10 | `Omission` の `over_limit` に必須フィールド `stage` が増えた（`@mnemora/core`）。連想枠（段3.5）の `maxCount` 切り捨てを段1 の打ち切りと区別して名乗るため | **9 と同じ形**——`omission.count` を読むだけなら非破壊。`OverLimitOmission` を自分で組み立てている側だけ | [ADR 0188](./docs/decisions/0188-association-over-limit-omission.md) / [#375](https://github.com/takecchi/mnemora/issues/375)（PR #391） |
-| 11 | 🔴 `LocalEmbeddingPipeline`（`@mnemora/local-embedding`）が呼び出し可能な関数型から、`countTokens` / `embed` / `maxInputTokens` を要求する必須 `interface` になった | 🔴 **呼んでいる側と、自前で渡していた側の両方**——この4件で唯一「呼ぶだけの側も壊れる」形である。⛔ **渡すものの形そのものが変わっている** | [ADR 0205](./docs/decisions/0205-local-embedding-pipeline-required-interface.md) / [#137](https://github.com/takecchi/mnemora/issues/137)（PR #446） |
+| #   | 変更                                                                                                                                                                                                                                                                                                              | 誰が影響を受けるか                                                                                                                                        | 根拠                                                                                                                                                 |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 8   | `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（`@mnemora/testkit`）の署名が `(tenantId: string, recalls: number): void` → `(ctx: Ctx, recalls: number): Promise<void>` へ変わった。ADR 0197 が `TenantSettingsStore` に同名の**本番**メソッドを足して名前が衝突したため、テスト専用フックのほうを消した | 🔴 **旧署名で呼んでいた側。⛔ 引数を直すだけでは足りない**——同期から `Promise` へ変わったので `await` が要る。構築して渡すだけなら影響なし                | [ADR 0197](./docs/decisions/0197-set-default-half-life-recalls.md)（PR #416）                                                                        |
+| 9   | `FilteredOmission` に必須フィールド `scopeRelation` が増えた（`@mnemora/core`）。`decayed` だけが `totalInScope` の**内側**を数えるという非対称を、契約として明示するもの                                                                                                                                         | **返り値の型なので、読むだけの利用者には非破壊。** `FilteredOmission` を自分で組み立てている側（独自 adapter の `aggregateScope` 実装・テストダブル）だけ | [ADR 0174](./docs/decisions/0174-filtered-omission-scope-relation.md) / [#352](https://github.com/takecchi/mnemora/issues/352)（PR #376）            |
+| 10  | `Omission` の `over_limit` に必須フィールド `stage` が増えた（`@mnemora/core`）。連想枠（段3.5）の `maxCount` 切り捨てを段1 の打ち切りと区別して名乗るため                                                                                                                                                        | **9 と同じ形**——`omission.count` を読むだけなら非破壊。`OverLimitOmission` を自分で組み立てている側だけ                                                   | [ADR 0188](./docs/decisions/0188-association-over-limit-omission.md) / [#375](https://github.com/takecchi/mnemora/issues/375)（PR #391）             |
+| 11  | 🔴 `LocalEmbeddingPipeline`（`@mnemora/local-embedding`）が呼び出し可能な関数型から、`countTokens` / `embed` / `maxInputTokens` を要求する必須 `interface` になった                                                                                                                                               | 🔴 **呼んでいる側と、自前で渡していた側の両方**——この4件で唯一「呼ぶだけの側も壊れる」形である。⛔ **渡すものの形そのものが変わっている**                 | [ADR 0205](./docs/decisions/0205-local-embedding-pipeline-required-interface.md) / [#137](https://github.com/takecchi/mnemora/issues/137)（PR #446） |
 
 ⚠ **`@mnemora/core` だけを見て数えると、8 と 11 が落ちる**——`@mnemora/testkit` と
 `@mnemora/local-embedding` も publish 対象である。
@@ -1106,15 +1118,15 @@ commit の日付と同じ `+0900`）。⟹ **UTC で読むと1日ずれる。**
 
 ### Breaking
 
-| # | 変更 | 誰が影響を受けるか | 根拠 |
-|---|---|---|---|
-| 1 | `MemoryStore.getRecall` が必須メソッドとして追加された。 | `MemoryStore` を自前実装している adapter 作者 | [ADR 0155](./docs/decisions/0155-recall-score-breakdown-persisted.md) |
-| 2 | `NewRecallRecord.returnedMemoryIds: MemoryId[]` を削除し、`returnedMemories: RecallRecordMemory[]` に置き換えた。 | `createRecall` を呼ぶ側・実装する側の両方 | [ADR 0155](./docs/decisions/0155-recall-score-breakdown-persisted.md) |
-| 3 | `ScopeAggregate` に必須フィールド `filteredExpired`/`filteredNotYetValid` が増えた。 | `aggregateScope` を自前実装している adapter 作者 | [ADR 0164](./docs/decisions/0164-valid-from-until-recall.md) |
-| 4 | `FilteredOmission.condition` の union に `"expired"`/`"not_yet_valid"` が増えた。 | 消費するだけなら非破壊。**`never` で網羅性を検査しているコードは壊れる** | [ADR 0164](./docs/decisions/0164-valid-from-until-recall.md) |
-| 5 | `Runtime.getRecall` が必須メソッドとして追加された。 | `Runtime` を自前実装している側。⚠ 根拠 ADR に破壊性の言及が無い——[移行ガイド](./docs/migration-v1.md)を必ず見ること | [ADR 0161](./docs/decisions/0161-runtime-get-recall.md) |
-| 6 | `TenantSettingsStoreConformanceOptions.supportsDecayClock`（`@mnemora/testkit`）が必須フィールドとして追加された。 | `describeTenantSettingsStoreConformance(...)` を呼んでいる adapter 作者。⚠ 根拠 ADR は当初「非破壊」と誤記載していたが訂正済み | [ADR 0165](./docs/decisions/0165-decay-activity-clock.md) |
-| 7 | `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドとして追加された。 | **返り値の型なので、読むだけ・呼ぶだけの利用者には非破壊。** `RecallFootprintEstimate` を自前で構築している側だけが影響を受ける。入力側（`estimateRecallFootprint`）は省略可能フィールドとして追加されており非破壊（省略時は `?? 0`）。（【実測】`packages/core/src/recall-footprint.ts:392` が必須、入力側の `RecallFootprintShape.associationCount` は `:368` で省略可能、既定は `:463` の `?? 0`） | ADR 0166 |
+| #   | 変更                                                                                                               | 誰が影響を受けるか                                                                                                                                                                                                                                                                                                                                                                                    | 根拠                                                                  |
+| --- | ------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------- |
+| 1   | `MemoryStore.getRecall` が必須メソッドとして追加された。                                                           | `MemoryStore` を自前実装している adapter 作者                                                                                                                                                                                                                                                                                                                                                         | [ADR 0155](./docs/decisions/0155-recall-score-breakdown-persisted.md) |
+| 2   | `NewRecallRecord.returnedMemoryIds: MemoryId[]` を削除し、`returnedMemories: RecallRecordMemory[]` に置き換えた。  | `createRecall` を呼ぶ側・実装する側の両方                                                                                                                                                                                                                                                                                                                                                             | [ADR 0155](./docs/decisions/0155-recall-score-breakdown-persisted.md) |
+| 3   | `ScopeAggregate` に必須フィールド `filteredExpired`/`filteredNotYetValid` が増えた。                               | `aggregateScope` を自前実装している adapter 作者                                                                                                                                                                                                                                                                                                                                                      | [ADR 0164](./docs/decisions/0164-valid-from-until-recall.md)          |
+| 4   | `FilteredOmission.condition` の union に `"expired"`/`"not_yet_valid"` が増えた。                                  | 消費するだけなら非破壊。**`never` で網羅性を検査しているコードは壊れる**                                                                                                                                                                                                                                                                                                                              | [ADR 0164](./docs/decisions/0164-valid-from-until-recall.md)          |
+| 5   | `Runtime.getRecall` が必須メソッドとして追加された。                                                               | `Runtime` を自前実装している側。⚠ 根拠 ADR に破壊性の言及が無い——[移行ガイド](./docs/migration-v1.md)を必ず見ること                                                                                                                                                                                                                                                                                   | [ADR 0161](./docs/decisions/0161-runtime-get-recall.md)               |
+| 6   | `TenantSettingsStoreConformanceOptions.supportsDecayClock`（`@mnemora/testkit`）が必須フィールドとして追加された。 | `describeTenantSettingsStoreConformance(...)` を呼んでいる adapter 作者。⚠ 根拠 ADR は当初「非破壊」と誤記載していたが訂正済み                                                                                                                                                                                                                                                                        | [ADR 0165](./docs/decisions/0165-decay-activity-clock.md)             |
+| 7   | `RecallFootprintEstimate.associationCount`（`@mnemora/core`）が必須フィールドとして追加された。                    | **返り値の型なので、読むだけ・呼ぶだけの利用者には非破壊。** `RecallFootprintEstimate` を自前で構築している側だけが影響を受ける。入力側（`estimateRecallFootprint`）は省略可能フィールドとして追加されており非破壊（省略時は `?? 0`）。（【実測】`packages/core/src/recall-footprint.ts:392` が必須、入力側の `RecallFootprintShape.associationCount` は `:368` で省略可能、既定は `:463` の `?? 0`） | ADR 0166                                                              |
 
 ### Changed（後方互換だが挙動が変わりうる）
 
