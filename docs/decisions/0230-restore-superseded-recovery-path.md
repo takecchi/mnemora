@@ -552,3 +552,62 @@ OPEN な ISSUE のコメント投稿者名ではオーナーと担い手（エ�
 - **【実測】2026-09-26。**`decayFloorAt` が過去の `archived` な Memory に `restoreArchived` を呼ぶと、戻った Memory の `decayFloorAt` が呼び出し時刻より先へ動いたことを、Fake と Postgres（Postgres 17 + pgvector）の両方で確かめた。走らせたのは、このセッションが立てた作業者である。
 - 同じ前提に立っていた `docs/memory-model.md` §11 行14・行15の記述は、同じ 2026-09-26 に PR #872 で訂正した。
 - 本文の直前の段落が挙げる違い（`archived` は掃引の選定条件上、床が必ず過去である。`superseded` の床は過去とは限らない）は、この訂正の後も成り立つ。
+
+## 追記（2026-09-26、[Issue #515](https://github.com/takecchi/mnemora/issues/515) クローズ）: 群の範囲を今の契約として確定する
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文・訂正1〜4は書き換えていない。**当時の記録として残す。
+コード（`packages/*/src`）の挙動は変えていない——この追記は記録だけである。
+
+訂正1・訂正4がそれぞれ確かめたとおり、本文「設計で選んだこと 1」の根拠にある
+「`superseded_by_id` が作る群は、1回の `consolidate`/`reextract`/`resolveContested`
+が作った単位と**ちょうど一致する**」は、`resolveContested`（訂正1）と `reextract`
+（訂正4）については偽である。**クローン miku の判断（2026-09-26）**: この非一致を
+直す（実装を変える）のではなく、**「群は同じ `superseded_by_id` を指す
+`superseded` の行すべてであり、1回の操作の単位とは限らない」を今の契約として
+確定する**——訂正1・訂正4が記録した事実を、以後も変えない仕様として扱う。
+
+**理由**:
+
+1. **出荷済みの公開 API の意味を変えることになる。** `Runtime.restoreSuperseded`
+   は `v1.0.0` で出る公開 API であり、群の範囲を狭める（`resolveContested`/
+   `reextract` の由来を機械的に切り分けて別々の群として扱う）ことは、
+   既存の呼び出しが受け取る `outcomes` の集合を変える——[ADR 0237](./0237-restore-superseded-dry-run-preview.md)・
+   [ADR 0258](./0258-restore-superseded-operation-scope.md) が繰り返し採ってきた
+   「契約を狭めない」という基準と同じである。
+2. **呼び出し側は、すでに確かめて絞る手段を持っている。** [ADR 0237](./0237-restore-superseded-dry-run-preview.md)
+   の `dryRun: true`（群の中身と `supersededReason` を書き込み無しで確認できる）
+   と、[ADR 0258](./0258-restore-superseded-operation-scope.md) の
+   `onlyMemoryIds`（確認した上で絞って戻せる）が、既にこの2つを満たしている。
+   群の広さそのものより「広いかどうかを呼び出し側が確かめられないこと」が
+   危険の本体である、という [issue の判定コメント](https://github.com/takecchi/mnemora/issues/515#issuecomment-5716794941)
+   の診断は、`dryRun`/`onlyMemoryIds` が着地した今日も変わらない。
+
+**採らなかった案**:
+
+1. **方向2（`memory_events` に操作 id を新設し、群をもっと細かい鍵で絞る）。**
+   却下——[ADR 0258](./0258-restore-superseded-operation-scope.md) が立てた
+   決定的な理由が今日も成り立つ: 鍵を新設しても、**過去に積み上がった
+   `memory_events` の行は1件もバックフィルできない**（操作の境界は発生時に
+   しか記録されておらず、後から再構成できない）。新しい鍵を持つのは、
+   この変更より後に書かれる行だけである。加えて、鍵を使って群を細かく
+   分割する形は利用者から見える契約が変わる選択であり、`docs/roadmap.md` §5 級に
+   当たる。
+2. **方向4（`resolveContested` 由来だけ別扱いにする）。** 却下——[ADR 0223](./0223-cross-cutting-disciplines-extracted-from-the-adr-corpus.md)
+   決定8「新しい種類・新しいフィールド・新しい `kind` を足す理由は『違うものだから』
+   ではなく『その区別を受け取った側が、実行時に違う手を打てるか』である」に
+   照らすと、`dryRun`/`onlyMemoryIds` があれば呼び出し側は由来を厳密に知らなくても
+   正しく手を打てるため、区別を API の意味に持ち込む必要が無い。持ち込むと
+   3経路の区別が公開契約に漏れ、経路が増えたときに契約が壊れる。
+3. **[ADR 0258](./0258-restore-superseded-operation-scope.md) の R2
+   （`reextract` のアンカー選定を、候補列の先頭ではなく `created === true` の
+   候補優先に変える）。** 却下——[Issue #515 の 2026-09-24 のコメント](https://github.com/takecchi/mnemora/issues/515#issuecomment-5812778138)
+   が `@mnemora/core` の in-memory fixture で実測したとおり、R2 は部分重複の
+   ケースではアンカーを分けられるが、**出荷済みの `reextract` が返す
+   `supersededById` を全呼び出しで変えてしまう**うえ、**「今回作られる候補が
+   0件」の縮退ケースでは分かれない**（どちらの候補優先ルールでも同じ既存の
+   Memory へ位置0として戻る）。バグ修正の副作用ではなく仕組みそのものの変更で
+   あり、しかも縮退ケースは残るため、これだけでは本 issue の挙動を閉じられない。
+
+反映先: `packages/core/src/runtime.ts` の `Runtime.restoreSuperseded`・
+`RestoreSupersededTarget` の doc コメント、`docs/memory-model.md` §11 行15。
