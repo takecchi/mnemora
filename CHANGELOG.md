@@ -306,6 +306,17 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   （新しい例外は投げない。`VectorStore.upsert` に長さの違うベクトルを渡したときの
   扱いは今回の修正範囲外・未検証）（[Issue #867](https://github.com/takecchi/mnemora/issues/867)、
   [ADR 0040](./docs/decisions/0040-zero-vector-never-returned.md) 追記 2026-09-26、PR #915）。
+- **`runMigrations`/`registerEmbeddingSpace` の `schema` オプション省略時、接続ロール名と
+  同じ名前のスキーマが DB に在ると（PostgreSQL の既定 `search_path` `"$user", public` により
+  `"$user"` がそちらへ解決される）、advisory lock のキーが `schema: "<ロール名>"` を明示
+  指定した別の呼び出しと食い違い、互いを待たなかった。** ロック取得より前に同じ接続で
+  `SELECT current_schema()` を読み、その結果を既存の `migrationLockKeyFor`/
+  `registerEmbeddingSpaceLockKeyFor` へ渡すようにした——両関数のシグネチャ・戻り値・
+  `schema` が `public` のときの既定キーは無変更（新しい例外は投げない。データの
+  読み書き先は search_path の意味どおりで変えていない）
+  （[Issue #779](https://github.com/takecchi/mnemora/issues/779)、
+  [ADR 0331](./docs/decisions/0331-extension-creation-shared-advisory-lock.md) 追記
+  2026-09-26）。
 
 ---
 
