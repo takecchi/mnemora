@@ -89,6 +89,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `memory.content` をそのまま送る従来どおりの挙動（`Memory.content` 自体はどちらの場合も
   無変更）（[Issue #753](https://github.com/takecchi/mnemora/issues/753) /
   [ADR 0336](./docs/decisions/0336-embedding-input-opt-in-hook.md)、PR #834）。
+- **`@mnemora/testkit` の `describeMemoryStoreConformance` に、`reinforce` が他テナントの
+  Memory を対象にしないことを検査する歯を足した。** テナント分離の棚卸し（Issue #854）で、
+  `get`/`getMany`/`updateStatus`/`setEmbeddingStatus`/`purgeMemory`/`markContestedPair` 等には
+  既にこの形の歯があるのに `reinforce` には無いことに気づいた。**実装（Postgres/Fake）は
+  この歯を足す前から `tenant_id`/`tenantId` で正しく絞っており、挙動は変えていない**——
+  今回足したのは検査だけである（third-party adapter は、この歯が新たに検査対象へ入る）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
