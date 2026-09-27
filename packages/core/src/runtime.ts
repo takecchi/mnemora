@@ -613,6 +613,14 @@ export interface ForgetResult {
  * 既知の負債として記録すると判断した。詳細は
  * [ADR 0152](../../../docs/decisions/0152-consolidate-seed-neighborhood.md) 負債5・
  * [ADR 0089](../../../docs/decisions/0089-runtime-consolidate-shape.md) の2026-09-26 追記。
+ *
+ * ⚠ **`maxCandidates` の値は検査しない**（[Issue #1067](https://github.com/takecchi/mnemora/issues/1067)）。
+ * **保証するのは、正の整数 `n` を渡したとき「`recall()` が返した順（`{ seedMemoryId }` では種が先頭）の
+ * 先頭 `n` 件」と、省略したとき「その全件（`recall()` の `limit` と、`{ seedMemoryId }` では `minAffinity` で絞ったあと）」だけである。**それ以外（`0`・負の数・整数でない数・`NaN`）を
+ * 渡したときの対象は未定義である——例外は投げず、今の実装はそのまま `Array.prototype.slice` に
+ * 渡すので、`-1` は「末尾の1件を除く全部」、`1.5` は1件、`0` と `NaN` は0件になる。`dryRun` でなければ、
+ * そうして選ばれた対象に統合（統合元は `superseded` になる）を実際に書く。この解釈は将来変わりうるので、頼らないこと。
+ * `Runtime.findCorrectionCandidates` の `limit`（正の整数以外を `RangeError` で拒む）とは揃えていない。
  */
 export type ConsolidateTarget =
   | { memoryIds: MemoryId[] }
@@ -764,6 +772,14 @@ export interface ConsolidationResult {
  *
  * この形も `target` を呼び手が必須で渡す点は変わらない——`reflect` 自身が「何を見るか」を
  * 決めているわけではなく、ADR 0091 決定3（`target` 必須）に反しない（ADR 0154）。
+ *
+ * ⚠ **`maxCandidates` の値は検査しない**（[Issue #1067](https://github.com/takecchi/mnemora/issues/1067)）。
+ * **保証するのは、正の整数 `n` を渡したとき「`recall()` が返した順（`{ seedMemoryId }` では種が先頭）の
+ * 先頭 `n` 件」と、省略したとき「その全件（`recall()` の `limit` と、`{ seedMemoryId }` では `minAffinity` で絞ったあと）」だけである。**それ以外（`0`・負の数・整数でない数・`NaN`）を
+ * 渡したときの対象は未定義である——例外は投げず、今の実装はそのまま `Array.prototype.slice` に
+ * 渡すので、`-1` は「末尾の1件を除く全部」、`1.5` は1件、`0` と `NaN` は0件になる。`dryRun` でなければ、
+ * そうして選ばれた対象に内省の結果（新しい `reflected` の Memory）を実際に書く。この解釈は将来変わりうるので、頼らないこと。
+ * `Runtime.findCorrectionCandidates` の `limit`（正の整数以外を `RangeError` で拒む）とは揃えていない。
  */
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }

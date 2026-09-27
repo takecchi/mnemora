@@ -82,6 +82,16 @@ import {
  */
 type SqlExecutor = Pick<Db, "execute">;
 
+/**
+ * `subject_id` を「NULL 同士も一致」として比較する述語を、**索引で引ける形**で作る
+ * （`findActiveByClaimKey`/`listActiveClaimPredicates` が使う）。
+ * `subject_id IS NOT DISTINCT FROM $n` と同じ意味だが、その形は索引で引けないので、
+ * `subjectId` が `null` なら `subject_id IS NULL`、そうでなければ `subject_id = $n` に分ける。
+ */
+function subjectIdMatches(subjectId: string | null): SQL {
+  return subjectId === null ? sql`subject_id IS NULL` : sql`subject_id = ${subjectId}`;
+}
+
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly db: Db) {}
 
@@ -2147,10 +2157,15 @@ export class PostgresMemoryStore implements MemoryStore {
    * **LLM を一度も呼ばない**——列の等値比較・範囲比較・索引アクセスだけで完結する
    * （北極星 問い5）。
    *
-   * `subject_id` は `IS NOT DISTINCT FROM` で比較する（NULL 同士も一致として扱う）——
+   * `subject_id` は NULL 同士も一致として扱う（`IS NOT DISTINCT FROM` と同じ意味）——
    * Postgres の `=` は `NULL = NULL` を（真ではなく）`NULL` に評価するため、素の `=` では
    * `subjectId: null` の Memory 同士が一致しない（`docs/memory-model.md` の
    * 「`NULLS NOT DISTINCT` が要る理由」と同じ配慮を、索引ではなく述語の側でやっている）。
+   * ⚠ **`IS NOT DISTINCT FROM` そのものは書かない**——索引で引けない形なので、以前は
+   * `subject_id` が Index Cond に入らず Filter に落ちていた（同じ claim key を持つテナント中の
+   * 全 subject の行を読んでから捨てていた）。同じ意味を、索引で引ける `subject_id = $n` /
+   * `subject_id IS NULL` に分けて書く（{@link subjectIdMatches}。歯は
+   * `__tests__/claim-key-index.postgres.test.ts`）。
    *
    * `excludeMemoryId` はここでは SQL の条件にしない——`id` は `uuid` 型の列であり、
    * 呼び出し側から壊れた形式の文字列が渡ると `<>` の暗黙キャストでクエリ全体が
@@ -2180,7 +2195,7 @@ export class PostgresMemoryStore implements MemoryStore {
     const result = await this.db.execute(sql`
       SELECT * FROM memories
       WHERE tenant_id = ${ctx.tenantId}
-        AND subject_id IS NOT DISTINCT FROM ${query.subjectId}
+        AND ${subjectIdMatches(query.subjectId)}
         AND claim_key_subject = ${query.claimKey.subject}
         AND claim_key_predicate = ${query.claimKey.predicate}
         AND status = 'active'
@@ -2209,8 +2224,17 @@ export class PostgresMemoryStore implements MemoryStore {
    * `MAX(created_at)` で新しい順に並べる。**新しい索引は足さない**——ADR 0329 決定4
    * 参照（この口はテナントの1 subjectId に閉じた、既に小さい行数を前提にしている）。
    *
-   * `subject_id` は `findActiveByClaimKey` と同じ `IS NOT DISTINCT FROM`
-   * （NULL 同士も一致として扱う）。
+   * `subject_id` は `findActiveByClaimKey` と同じく NULL 同士も一致として扱う
+   * （{@link subjectIdMatches}）。
+   *
+   * ⚠ **以前はこの SQL が索引を使っていなかった**（上の「先頭2列で絞り込み」は意図であって
+   * 実態ではなかった）。【実測 2026-09-27、1テナント 20,000 行 + 別テナント 5,000 行】
+   * **Seq Scan**（別テナントを含む表全体）だった——`subject_id IS NOT DISTINCT FROM` が
+   * 索引で引けない形であることに加え、`idx_memories_claim_key` は部分索引
+   * （`WHERE claim_key_subject IS NOT NULL`）なのに、WHERE が `claim_key_predicate IS NOT NULL`
+   * だけでは部分索引の述語を導けないため。⟹ `claim_key_subject IS NOT NULL` を足す——
+   * claim key は2列とも NULL か2列とも非 NULL（`0021_memories_claim_key.sql` の「NULL の意味」）
+   * なので、書き込みの口から作られる行について結果は変わらない。
    *
    * `GROUP BY claim_key_predicate ORDER BY MAX(created_at) DESC` は「同じ predicate を
    * 持つ行のうち最も新しい `created_at` で代表させ、その代表値で降順に並べる」という
@@ -2226,8 +2250,9 @@ export class PostgresMemoryStore implements MemoryStore {
       SELECT claim_key_predicate AS predicate
       FROM memories
       WHERE tenant_id = ${ctx.tenantId}
-        AND subject_id IS NOT DISTINCT FROM ${query.subjectId}
+        AND ${subjectIdMatches(query.subjectId)}
         AND status = 'active'
+        AND claim_key_subject IS NOT NULL
         AND claim_key_predicate IS NOT NULL
       GROUP BY claim_key_predicate
       ORDER BY MAX(created_at) DESC

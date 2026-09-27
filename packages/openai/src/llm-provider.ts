@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import { assertApiKeyFitsInHeader } from "./api-key.js";
 import { OpenAILLMProviderError } from "./errors.js";
 import { translateForOpenAIStructuredOutput } from "./json-schema.js";
 
@@ -150,7 +151,20 @@ export class OpenAILLMProvider implements LLMProvider {
   private readonly temperature?: number;
 
   constructor(options: OpenAILLMProviderOptions) {
-    this.client = options.client ?? new OpenAI({ apiKey: options.apiKey });
+    if (options.client !== undefined) {
+      this.client = options.client;
+    } else {
+      const client = new OpenAI({ apiKey: options.apiKey });
+      // Issue #1080: SDK は `Authorization: Bearer <apiKey>` を送る（`apiKey` を省略すると
+      // `OPENAI_API_KEY` を読む）。`api-key.ts` の doc コメント参照。
+      assertApiKeyFitsInHeader(
+        "OpenAILLMProvider",
+        "apiKey",
+        "authorization",
+        `Bearer ${client.apiKey}`,
+      );
+      this.client = client;
+    }
     this.model = options.model;
     this.temperature = options.temperature;
   }

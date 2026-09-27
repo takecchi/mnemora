@@ -226,6 +226,33 @@ export interface VectorHit {
  *   `omitted.kind = 'not_indexed'` としてこれを報告する。
  */
 export interface VectorStore {
+  /**
+   * `memoryId` の埋め込みを書く（同じ `memoryId` なら上書き）。
+   *
+   * ⚠ **`vector` の中身は検証しない。壊れたベクトルの扱いは adapter によって違う**
+   * （[Issue #1070](https://github.com/takecchi/mnemora/issues/1070)）:
+   *
+   * | `vector` | `@mnemora/postgres` | `@mnemora/testkit` の `InMemoryVectorStore` |
+   * |---|---|---|
+   * | 長さが `space.dimensions` と違う・空 | 例外（pgvector の `expected N dimensions` など）。前の埋め込みは残る | そのまま保存する。`search` ではその行の距離が `NaN` になる |
+   * | `NaN`・`Infinity` を含む | 例外（pgvector が拒む） | そのまま保存する |
+   * | 成分がすべて `0` | 保存する（ADR 0040。`search` の距離は比較不能） | 同じ |
+   *
+   * `Runtime.tick` の embed ジョブは provider の出力を確かめずにここへ渡すので、
+   * provider が壊れたベクトルを返すと、`@mnemora/postgres` ではジョブが失敗して
+   * `embeddingStatus: 'failed'`（`recall()` では `not_indexed`）になり、`InMemoryVectorStore` では
+   * `'ready'` のまま保存される（`recall()` では `score_not_comparable`）。同じ Memory の embed
+   * ジョブが2本走り、壊れたベクトルを返す遅い方が後に終わると、`InMemoryVectorStore` では
+   * 先に書かれた正しいベクトルが上書きされる（`@mnemora/postgres` では遅い方が失敗し、正しい
+   * ベクトルが残る）。**保証するのは、長さが `space.dimensions` と一致し、成分がすべて有限の
+   * ベクトルを渡したときの振る舞いだけである。**
+   *
+   * ⚠ **`memoryId` がほかのテナントの Memory を指していても、テナントの一致は約束として
+   * 検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
+   * `@mnemora/postgres` は受け付けて呼んだテナントの行として書くが、`search` は `memories` と
+   * テナントで突き合わせるので、その行は検索に出ない。`InMemoryVectorStore` は「memory not
+   * found」で拒む。`docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   */
   upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
   /**
    * 距離昇順で最大 `opts.limit` 件を返す。

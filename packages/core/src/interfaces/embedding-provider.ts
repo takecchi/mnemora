@@ -39,6 +39,15 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * にする——**ベクトルを書かないまま `'ready'` にしない。**embed ジョブは `embed` に常に
  * 1件だけ渡すので、「渡した件数より少ない」はこのジョブでは「空」と同じである
  * （`runtime.ts` の `processEmbedJob`。歯は `packages/core/src/__tests__/embed-job-missing-vector.test.ts`）。
+ *
+ * ⚠ **2026-09-27 追記（[Issue #1070](https://github.com/takecchi/mnemora/issues/1070)）: 返ったベクトルが
+ * 壊れているとき（長さが `space.dimensions` と違う・空・`NaN`/`Infinity` を含む）、
+ * `packages/core` は embed ジョブで中身を確かめない。**そのまま {@link VectorStore.upsert} に
+ * 渡すので、結果は store の adapter で決まる——`@mnemora/postgres` ではジョブが失敗して
+ * `embeddingStatus: 'failed'`、`@mnemora/testkit` の `InMemoryVectorStore` では `'ready'` のまま
+ * 保存される（書き分けは `VectorStore.upsert` の doc）。有限性を自分で確かめるのは
+ * `@mnemora/local-embedding` だけである（Issue #992）。クエリの埋め込みの側は、
+ * 長さ違い・有限でない値とも `recall()` が比較不能として扱う（`RecallQuery.vector` の doc）。
  */
 export interface EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
