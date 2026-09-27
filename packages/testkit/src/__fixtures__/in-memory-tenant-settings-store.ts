@@ -125,6 +125,13 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
       assertValidEventRetentionDays(retention.days);
+      // Postgres の `event_retention_days` は `integer`（int4）列で、2^31 以上は `22003` で拒む。上の共有の検査は
+      // 「正の整数」だけを見るので、列の範囲はここで写す（#1165 が半減期を `real` の範囲に揃えたのと同じ形）。
+      if (retention.days > 2 ** 31 - 1) {
+        throw new Error(
+          `setEventRetention: days does not fit in a Postgres "integer" (int4) column (got ${retention.days})`,
+        );
+      }
     }
     const eventRetentionDays = retention.kind === "days" ? retention.days : null;
     this.ensureRow(ctx.tenantId).eventRetentionDays = eventRetentionDays;
