@@ -601,6 +601,21 @@ export interface ForgetResult {
  * そのまま保つ**。`{ query, maxCandidates }` は `recall(ctx, query)` を1回呼んで得られた
  * `memories` の id を順に採る（`maxCandidates` があれば先頭からその件数で切る）。
  *
+ * ⚠ 2026-09-27 追記（今の振る舞いを書くだけ。Postgres と testkit で実測）:
+ * - **`{ query }` は、`recall()` の `memories` を `retrievedVia` によらず全部採る。**連想枠は既定 on
+ *   （ADR 0337）なので、`query.association` を省略すると、クエリには当たっていない「連想で返った」
+ *   `active` な記憶（`retrievedVia: 'association'`）も統合元として適格になる。クエリに当たったものだけを
+ *   畳みたいなら `query.association: null` を渡すこと。contested の同伴（`mandatory_companion`）は
+ *   `status_not_active` で弾かれる。`{ seedMemoryId }` は `computeAffinity` の閾値で絞るので、
+ *   連想や同伴で返った記憶（`similarity` も `lexicalMatch` も持たない）は入らない。
+ * - **`{ memoryIds }` は、有効期間（`validFrom`/`validUntil`）も忘却の床（`decayFloorAt`）も見ない。**
+ *   適格性は `status === 'active'` だけである（ADR 0089 決定2。忘却の床はコードを読んで確かめた
+ *   だけで、実測はしていない）。統合先は有効期間を持たない
+ *   （ADR 0164「射程外にしたもの」1）ので、期限切れの記憶を渡すと、その内容は期限の無い `active` な
+ *   記憶として `recall()` に戻る（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)。
+ *   引き継ぎ方は決めていない）。`{ query }`・`{ seedMemoryId }` は `recall()` の期間・忘却のゲートを
+ *   通るので、期限切れ・減衰しきった記憶は最初から入らない。
+ *
  * `{ seedMemoryId }` は「この記憶に似ているものを mnemora 自身が集めて、1つに畳め」という
  * 意味である（ADR 0152）。`{ query, maxCandidates }` と違い、**「似ている」の判定
  * そのものを呼び手ではなく mnemora 側が行う**。ただし ADR 0089 却下案7・
