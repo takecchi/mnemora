@@ -126,7 +126,17 @@ function buildSubjectCandidateInstruction(subjectCandidates: readonly string[]):
   );
 }
 
-/** `completeStructured` へ渡すプロンプト。文面はこの PR の裁量であり、契約はスキーマ側にある。 */
+/**
+ * `completeStructured` へ渡すプロンプト。文面はこの PR の裁量であり、契約はスキーマ側にある。
+ *
+ * ⚠ **観測の本文は切り詰めずに、そのまま入れる**（今の振る舞い。`observe()` の入力にも上限は無い）。
+ * プロンプトの大きさは本文にほぼ比例する（2026-09-27 の実測: 約1MB の本文で、送るリクエストは
+ * 約1.05MB。`@mnemora/anthropic` と `@mnemora/openai` で数バイトの差しかない）。`extractionContext` は
+ * `ExtractionContextSchema` が件数と長さを抑えるので、足される量は約50KB までである。
+ * 入力がモデルの上限を超えると、provider は API の拒否をそのまま投げ（分類の `kind` は付かない。
+ * 各 provider の `errors.ts` 参照）、抽出は LLM の失敗として全文フォールバックへ倒れる
+ * ——本文は1文字も落ちずに1件の Memory として残る。
+ */
 export function buildExtractionPrompt(
   observation: Observation,
   subjectCandidates?: readonly string[],

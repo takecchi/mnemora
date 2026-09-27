@@ -61,6 +61,13 @@ export type ConsolidationLLMResult = z.infer<typeof ConsolidationLLMResultSchema
 /**
  * `completeStructured` へ渡すプロンプト。文面はこの PR の裁量であり、契約は
  * {@link ConsolidationLLMResultSchema} 側にある。
+ *
+ * ⚠ **件数の上限も切り詰めも無い**（今の振る舞い）。統合する記憶の `content` と `digest` を全部、そのまま
+ * 並べる。`{ memoryIds }` の形は件数に上限が無いので、プロンプトは対象の本文の合計にほぼ比例して
+ * 大きくなる（2026-09-27 の実測: 1000件×約1000字で約3.0MB。`@mnemora/anthropic` と
+ * `@mnemora/openai` で同じ）。`{ query }`/`{ seedMemoryId }` の形は `recall()` の `limit` と
+ * `maxCandidates` で件数が抑えられる。入力がモデルの上限を超えると、provider は API の拒否を
+ * そのまま投げ、`outcome: "llm_failed"`（`llmFailure.kind: null`）になる——書き込みは0件である。
  */
 export function buildConsolidationPrompt(eligible: Memory[]): PromptSpec {
   return {
