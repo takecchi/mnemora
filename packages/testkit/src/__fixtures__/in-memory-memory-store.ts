@@ -93,6 +93,38 @@ function jsonContainsNul(value: unknown): boolean {
 }
 
 /**
+ * `createRecall` で、Postgres が `recalls` の行を書けずに拒む入力を先に検査する（何も書かず、
+ * 活動時計も進めない）。`subjectId` は `text` 列（NUL を拒む）。`query`・`omitted`・`usage`・
+ * `indexBand`・`explain`・`returnedMemories` は `NOT NULL` の `jsonb` 列、`budget` は `jsonb` 列で、
+ * `packages/postgres` は `JSON.stringify` した値を送る——NUL を含めば拒み（`unsupported Unicode escape
+ * sequence`）、JSON にならない値（`undefined` など）は `NOT NULL` の列で拒む。
+ */
+function assertRecallRecordStorable(record: NewRecallRecord): void {
+  if (record.subjectId != null && record.subjectId.includes("\u0000")) {
+    throw new Error("createRecall: subjectId must not contain NUL characters (U+0000)");
+  }
+  const jsonColumns: Array<[string, unknown, boolean]> = [
+    ["query", record.query, true],
+    ["budget", record.budget, false],
+    ["omitted", record.omitted, true],
+    ["usage", record.usage, true],
+    ["indexBand", record.indexBand, true],
+    ["explain", record.explain, true],
+    ["returnedMemories", record.returnedMemories, true],
+  ];
+  for (const [field, value, required] of jsonColumns) {
+    if (required && JSON.stringify(value) === undefined) {
+      throw new Error(
+        `createRecall: ${field} must be JSON-serializable (Postgres "jsonb" column is NOT NULL)`,
+      );
+    }
+    if (jsonContainsNul(value)) {
+      throw new Error(`createRecall: ${field} must not contain NUL characters (U+0000)`);
+    }
+  }
+}
+
+/**
  * Observation を書く口（`createObservation` / `createObservationWithOutbox`）で、Postgres が
  * NUL を拒む欄を先に検査する（Issue #816 の NUL 側の残り）。`subjectId`・`externalId`・
  * `kind` は `text` 列（`invalid byte sequence for encoding "UTF8": 0x00`）、`payload`・
@@ -1558,6 +1590,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * ADR の意味論をここでも守る）。
    */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
+    assertRecallRecordStorable(record);
     const id = nextId("rcl");
     this.recalls.set(id, { ...snapshot(record), tenantId: ctx.tenantId, createdAt: new Date() });
     if (record.advanceActivityClock === true) {
