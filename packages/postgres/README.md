@@ -463,6 +463,22 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 > [ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)
 > 「引き受ける負債」・追記参照。
 
+## 例外の見分け方（catch するとき）
+
+この package が投げる例外は、次の4つの顔に分かれる【実測 2026-09-27】。
+
+| 顔 | 例 | 見分け方 |
+|---|---|---|
+| 名前を持つ例外 | 取り合いの衝突（`MemoryStatusConflictError`・`MemoryPurgeConflictError`・`ContestedWithoutCompanionError` は `@mnemora/core`）、lock 待ち（`AdvisoryLockTimeoutError`・`AdvisoryLockUnavailableError` と、その子の `MigrationLock*`・`RegisterEmbeddingSpaceLock*`）、`MissingExtensionsError`、`TrigramLexicalStoreUnavailableError` | `instanceof`（どれも公開の class）。 |
+| `name` だけを持つ `Error` | 埋め込み空間のテーブルの衝突（`registerEmbeddingSpace`。Issue #1151） | `err.name === "EmbeddingSpaceTableConflictError"`（class は公開していない）。 |
+| 名前の無い `Error` | 見つからない id・形の崩れた id・別テナントの id（どれも `memory not found for tenant`）、`TenantSettingsStore` の型の外の値 | 文面でしか分からない。**文面は約束しない。** |
+| DB が拒んだ例外 | 負や整数でない `limit`、型の列挙に無い値（CHECK 制約）、Invalid Date、範囲外の `strength` | drizzle が包んだ `Error`（`err.name === "Error"`）。SQLSTATE は **`err.cause.code`** に在る（`err.code` には無い）。例: `23514`（CHECK 制約）・`2201W`（負の `LIMIT`）・`22P02`（形の崩れた値）・`22007`（日時）。 |
+
+⚠ **`@mnemora/testkit/fixtures` は、DB が拒む入力を同じく拒むが、例外の顔は違う**（名前の無い
+`Error`。`cause.code` を持たない）。揃えてあるのは「拒むかどうか」と「拒んだときに何も書かないこと」
+だけである（`packages/testkit/src/fixtures.ts` の冒頭）。`cause.code` を見る処理のテストを fixture で
+書くと、Postgres とは別の枝を通る。
+
 ## 運用: 語彙検索と `statement_timeout`
 
 `PostgresLexicalStore`/`PostgresTrigramLexicalStore` は、検索クエリの語数・1語の文字数・

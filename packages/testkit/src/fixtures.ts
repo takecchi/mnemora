@@ -51,6 +51,11 @@
 //   `purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）。Postgres の
 //   CHECK 制約 `memory_events_kind_check` を写す。イベントの `at` の検査とともに、状態を書き換える
 //   前に確かめるので、拒んだときは何も書かない（#1096）。
+// - `memories` の列挙の列に無い値（型を外した呼び出し）→ `memories.<列> must be one of <値> (got "<値>")`。
+//   対象: `createMemory` 系の `status`・`digestSource`・`embeddingStatus`・`provenance.kind`、
+//   `InMemoryMemoryStore` の `updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・
+//   `resolveContestedPair`。Postgres の CHECK 制約（`memories_status_check` など）を写す。見つからない
+//   id・CAS の食い違いの検査の後、状態を書き換える前に確かめる。
 // - Postgres の `real`（float4）列に収まらない数 → `… does not fit in a Postgres "real" (float4) column`。
 //   対象: `createMemory` 系の `halfLifeHours` など、
 //   `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（#815・#817）。
