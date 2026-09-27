@@ -128,6 +128,46 @@ describe("FakeMemoryStore.reinforce — 減衰の起点を巻き戻さない（A
     expect(reread?.updatedAt.getTime()).toBe(firstUpdatedAt);
   });
 
+  // Issue #1093: 未強化の記憶では、起点は作成時刻（recordedAt）である。同じ1つの規則——
+  // 「at が起点（lastReinforcedAt ?? recordedAt）より新しいときだけ書く。そうでなければ活動時計の
+  // 欄も含めて何も書かない」——が、未強化の記憶にも当たる。
+  for (const [label, offsetMs] of [
+    ["作成時刻より前の at", -10 * 24 * HOUR],
+    ["作成時刻ちょうどの at（狭義の `<` の境界）", 0],
+  ] as const) {
+    it(`未強化の記憶に${label}を渡すと、活動時計の欄も含めて何も書かない（Issue #1093）`, async () => {
+      const stores = createFakeRuntimeStores();
+      const memory = await stores.memoryStore.createMemory(
+        ctx,
+        newMemory({ halfLifeRecalls: 100, decayBaseSeq: 0, decayFloorSeq: 100 }),
+      );
+      // Fake は行への参照を返すので、比べる値は先にプリミティブへ写し取る（上の歯と同じ理由）。
+      const before = {
+        lastReinforcedAt: memory.lastReinforcedAt ?? null,
+        decayFloorAt: memory.decayFloorAt.getTime(),
+        decayBaseSeq: memory.decayBaseSeq,
+        decayFloorSeq: memory.decayFloorSeq,
+        updatedAt: memory.updatedAt.getTime(),
+      };
+
+      await stores.memoryStore.reinforce(
+        ctx,
+        memory.id,
+        new Date(memory.recordedAt.getTime() + offsetMs),
+        { nowSeq: 50 },
+      );
+
+      const reread = await stores.memoryStore.get(ctx, memory.id);
+      expect({
+        lastReinforcedAt: reread?.lastReinforcedAt ?? null,
+        decayFloorAt: reread?.decayFloorAt.getTime(),
+        decayBaseSeq: reread?.decayBaseSeq,
+        decayFloorSeq: reread?.decayFloorSeq,
+        updatedAt: reread?.updatedAt.getTime(),
+      }).toEqual(before);
+    });
+  }
+
   it("reinforce は存在しない Memory に対して失敗する（既存の挙動を壊していないことの確認）", async () => {
     const stores = createFakeRuntimeStores();
     await expect(stores.memoryStore.reinforce(ctx, "does-not-exist", new Date())).rejects.toThrow(
