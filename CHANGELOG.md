@@ -203,6 +203,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`runtime.consolidate()` / `runtime.reflect()` の `{ seedMemoryId }` 形は、種が forget・purge された記憶でも、その `digest` を検索語にして近傍を集め、近傍どうしを統合・内省していた**（自動 job の `tick()` 経由も同じ。[Issue #1136](https://github.com/takecchi/mnemora/issues/1136)）——利用者が「使わないでほしい」と言った記憶が、束ねる相手を決め続けていた。種が forget・purge された記憶なら近傍を集めず、種1件だけを見て `nothing_to_consolidate`/`no_eligible_sources`（reflect は `nothing_to_reflect`/`no_eligible_basis`）を返す。種が `contested` / `superseded` の場合は今どおり近傍を集める。
+  ⚠ 例外を投げず、結果だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`@mnemora/local-embedding` のモデルの読み込みに失敗したときのメッセージが、キャッシュのファイルの破損に届いていなかった**——キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、次のプロセスでも同じように落ち続けるのに、メッセージはネットワーク断・repo の消滅・dtype 名の誤りしか挙げず、`cacheDir` を省いたときは「既定の場所」としか言わなかった。キャッシュの破損を原因の候補に挙げ、消せば次の読み込みで取り直す場所（`<cacheDir>/<repo>`、省いたときは `node_modules/@huggingface/transformers/.cache/<repo>`）を名指す（[PR #1134](https://github.com/takecchi/mnemora/pull/1134)）。
   ⚠ 例外の種類も投げる条件も変えず、メッセージの文面だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`@mnemora/postgres` の `PostgresMemoryStore.purgeExpiredEvents` は、同時に走った掃除が同じ行を選ぶと、後の側が実際には消していない行まで `purged` と `events_purged` の `meta.purgedCount` に数えていた**（実測: 8本同時・対象400件・`limit` 300 で、名乗りの合計 2400、実際の削除 300、[PR #1129](https://github.com/takecchi/mnemora/pull/1129)）——実際に消した行（`DELETE … RETURNING`）から件数・期間を取るようにした。1行も消さなかった呼び出しは `events_purged` を積まない。また、保持日数が大きく（約247万日から）cutoff が timestamptz の下限より前になると、`purgeExpiredEventsForTenant` が例外で落ちていた——0件の削除として返す（`@mnemora/core` の cutoff の計算も、`Date` の範囲を越える日数で Invalid Date にならないようにした）。どれを消すか（古い順）は変えていない。
@@ -543,6 +545,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   既存の空間にこの索引を作る `0022_embedding_zero_norm_index.sql` は、実テーブルだけを
   対象にする——同じスキーマに `memory_embeddings_` で始まるビューが在っても migration は
   止まらない（[Issue #1038](https://github.com/takecchi/mnemora/issues/1038)、ADR 0343 追記 2026-09-27）。
+- **いくつかの例外の文面が、起きたことと違う・直し方が分からない・本文を丸ごと載せる形だった**——例外の種類・
+  受け付ける入力・公開の定数（`*_MESSAGE`・`*_ERROR_PREFIX`）は変えず、文面だけを直した。
+  `MemoryStatusConflictError` はどの口から投げても `MemoryStore.updateStatus:` と名乗っていた（今は `MemoryStore:`
+  と、読み直して判断し直す旨）。`@mnemora/openai` の切り詰めは設定の無い `max_tokens` を上げるよう勧めていた
+  （`@mnemora/anthropic` は `stop_reason` ごとの直し方を書いた）。`@mnemora/postgres` の埋め込み空間の次元・SQL 識別子の
+  拒否に、受け付ける値を書いた。`@mnemora/testkit` の `RecordedEmbeddingProvider`/`RecordedLLMProvider` は記録に無い
+  入力の本文を丸ごと載せていた（今は先頭 80 文字と全体の長さ）。`InMemoryEventStore`/`InMemoryVectorStore` の
+  「対象なし」は、同じ失敗の他の文面と同じく `memory not found for tenant:` と名乗る。
+  ⭕ 非破壊と数える（エラー文だけの変更。クローン miku の判断であり、オーナーの判断ではない）。
 - **`Runtime.consolidate()` に `actor`・`reason` を渡しても、統合先の `created` イベントだけは `actor` が
   `{ type: "system" }` のままで、`meta.note` も無かった**——`ConsolidateOptions.actor`/`reason` の TSDoc は
   `memory_events` の欄として書いており、統合元の `superseded` イベントと `reflect()` の `created` イベントには

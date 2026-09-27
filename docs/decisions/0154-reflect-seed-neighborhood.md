@@ -306,3 +306,9 @@
     実運用で成り立つかどうかを検証していない。**
   - **事象駆動の反復呼び出しで重複した `reflected` Memory がどれだけ積み上がるか
     （負債6）を測っていない。**
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: forget・purge された種は近傍を集めない（Issue #1136）
+
+[ADR 0152](./0152-consolidate-seed-neighborhood.md) の同日付の追記と同じ規則を、`reflect` の `{ seedMemoryId }` にも当てた。種が forget・purge された記憶なら `recall()` を呼ばず、対象を種1件にする（`status_not_active`（`forgotten`）→ `nothing_to_reflect`/`no_eligible_basis`）。種が `contested` / `superseded` の場合は今どおり近傍を集める。反映先は `ReflectTarget` の doc と `reflect` の手順1。

@@ -79,7 +79,8 @@ function defaultMessage(options: OpenAILLMProviderErrorOptions): string {
       return (
         "OpenAILLMProvider: the response was cut off before it finished" +
         (options.finishReason != null ? ` (finish_reason: ${options.finishReason})` : "") +
-        " — raise max_tokens or shorten the prompt"
+        " — shorten the input: OpenAILLMProvider does not set max_tokens, so the model's own" +
+        " output limit or context window was reached"
       );
     case "no_content":
       return "OpenAILLMProvider: structured completion returned no content";
