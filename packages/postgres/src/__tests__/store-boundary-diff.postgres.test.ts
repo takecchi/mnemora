@@ -38,12 +38,12 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  *   他テナントの記憶とイベント）。
  *   ⚠ 例外の種類と文面は比べない（DB の例外と fixture の `Error` は顔が違う。`packages/testkit/src/fixtures.ts` の冒頭）。
  *
- * 🔴 **許可リスト（`DOCUMENTED_DIFFERENCES`）は、doc に「違う」と書いてある差だけを持つ。**
- * - 許可リストの外で差が出たら落ちる。直すか（fixture は Postgres を写す）、doc に書いてから足すこと。
+ * 🔴 **許可リスト（`DOCUMENTED_DIFFERENCES`）は、doc に「違う」と書いてある差と、揃える先が未決で Issue に在る差だけを持つ。**
+ * - 許可リストの外で差が出たら落ちる。直すか（fixture は Postgres を写す）、doc か Issue に書いてから足すこと。
  * - 許可リストの場面で差が出なくなったら（揃ったら）、それも落ちる（リストが古い）。消すこと。
  */
 
-/** 場面の名前 → どこに「違う」と書いてあるか。 */
+/** 場面の名前 → どこに「違う」と書いてあるか（doc、または揃える先が未決の Issue）。 */
 const DOCUMENTED_DIFFERENCES: Readonly<Record<string, string>> = {
   "vector.upsert(other)":
     "他テナントの memoryId: Postgres は受け付け、fixture は拒む（docs/memory-model.md §5 の Issue #1051 の追記の表・VectorStore.upsert の TSDoc）",
@@ -53,6 +53,10 @@ const DOCUMENTED_DIFFERENCES: Readonly<Record<string, string>> = {
     "壊れたベクトル: Postgres は拒み、fixture は保存する（Issue #1070・VectorStore.upsert の TSDoc の adapter ごとの表）",
   "vector.upsert(self,[1,0])（次元違い）":
     "壊れたベクトル: Postgres は拒み、fixture は保存する（Issue #1070・VectorStore.upsert の TSDoc の adapter ごとの表）",
+  "aggregateScope(digestBand.excludeMemoryIds:[malformed])":
+    "uuid の形でない除外の id: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
+  "aggregateScope(digestBand.excludeMemoryIds:[empty])":
+    "uuid の形でない除外の id（空文字）: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
   "vector.upsert(self,[NaN,0,0])":
     "壊れたベクトル: Postgres は拒み、fixture は保存する（Issue #1070・VectorStore.upsert の TSDoc の adapter ごとの表）",
 };
@@ -109,6 +113,8 @@ async function makeKit(backend: Backend) {
       extractorVersion: "v1",
       content: "東京 に 住んで いる",
       digest: "東京",
+      // 2件の記憶の記録時刻をずらす——同じ時刻だと、並びの同点が id（2実装で形が違う）に落ちる。
+      recordedAt: new Date(Date.now() - 120_000),
     }),
   );
   const m2 = await s.ms.createMemory(
@@ -196,6 +202,8 @@ const TIME_KEYS = new Set([
   "failedAt",
   "purgedAt",
   "registeredAt",
+  "oldestPurgedAt",
+  "newestPurgedAt",
 ]);
 const GENERATED_ID = /^(mem|obs|evt|rec|job|recall|ev)-\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-/;
 
@@ -471,6 +479,308 @@ add("purgeMemory(self)（forgotten でない）", (h) =>
   ),
 );
 
+// ---- 単一の id を取らない口（#1255 の後に足した）----
+const scope = (h: Kit, extra: Record<string, unknown> = {}) =>
+  ({ ...extra }) as Parameters<Stores["ms"]["aggregateScope"]>[1];
+add("requeueEmbedJobs(statuses:[])", (h) =>
+  h.s.ms.requeueEmbedJobs(h.ctx, { statuses: [], limit: 10 }),
+);
+add("requeueEmbedJobs(statuses:[pending,pending])", (h) =>
+  h.s.ms.requeueEmbedJobs(h.ctx, { statuses: ["pending", "pending"], limit: 10 }),
+);
+add("requeueEmbedJobs(memoryIds:[])", (h) =>
+  h.s.ms.requeueEmbedJobs(h.ctx, { statuses: ["pending"], memoryIds: [], limit: 10 }),
+);
+for (const [idKind, pick] of Object.entries(ID_VALUES)) {
+  add(`requeueEmbedJobs(memoryIds:[${idKind}])`, (h) =>
+    h.s.ms.requeueEmbedJobs(h.ctx, { statuses: ["pending"], memoryIds: [pick(h, "m")], limit: 10 }),
+  );
+  add(`aggregateScope(digestBand.excludeMemoryIds:[${idKind}])`, (h) =>
+    h.s.ms.aggregateScope(h.ctx, scope(h), {
+      digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m")] },
+    }),
+  );
+  add(`findActiveByClaimKey(excludeMemoryId:${idKind})`, (h) =>
+    h.s.ms.findActiveByClaimKey(h.ctx, {
+      subjectId: null,
+      claimKey: { subject: "user", predicate: "home_city" },
+      excludeMemoryId: pick(h, "m"),
+      contentHash: "x",
+      validFrom: null,
+      validUntil: null,
+    }),
+  );
+  add(`resolveContestedPair(${idKind},self2)（contested でない）`, (h) =>
+    h.s.ms.resolveContestedPair(
+      h.ctx,
+      { id: pick(h, "m"), status: "active", event: event(h.ctx, pick(h, "m")) },
+      { id: h.m2.id, status: "active", event: event(h.ctx, h.m2.id) },
+    ),
+  );
+  add(`supersedeWithNewMemories(supersede id:${idKind})`, (h) =>
+    h.s.ms.supersedeWithNewMemories(
+      h.ctx,
+      [
+        {
+          input: buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash: `new-${idKind}` }),
+          jobKinds: ["embed"],
+        },
+      ],
+      [
+        {
+          id: pick(h, "m"),
+          supersededByIndex: 0,
+          expectedStatus: "active",
+          event: event(h.ctx, pick(h, "m"), "superseded"),
+        },
+      ],
+    ),
+  );
+}
+add("purgeExpiredEvents(olderThan: Invalid Date)", (h) =>
+  h.s.ms.purgeExpiredEvents(h.ctx, { olderThan: new Date(Number.NaN), limit: 10 }),
+);
+add("purgeExpiredEvents(limit:0)", (h) =>
+  h.s.ms.purgeExpiredEvents(h.ctx, { olderThan: later(), limit: 0 }),
+);
+add("purgeExpiredEvents(dryRun)", (h) =>
+  h.s.ms.purgeExpiredEvents(h.ctx, { olderThan: later(), limit: 10, dryRun: true }),
+);
+add("archiveDecayed(now: Invalid Date)", (h) =>
+  h.s.ms.archiveDecayed(h.ctx, { now: new Date(Number.NaN), limit: 10 }),
+);
+add("archiveDecayed(limit:0)", (h) =>
+  h.s.ms.archiveDecayed(h.ctx, { now: new Date(Date.now() + 1e13), limit: 0 }),
+);
+add("archiveDecayed(nowSeq:-1, clock:activity)", (h) =>
+  h.s.ms.archiveDecayed(h.ctx, { now: new Date(), limit: 10, nowSeq: -1, clock: "activity" }),
+);
+add("archiveDecayed(nowSeq:1.5, clock:activity)", (h) =>
+  h.s.ms.archiveDecayed(h.ctx, { now: new Date(), limit: 10, nowSeq: 1.5, clock: "activity" }),
+);
+add("archiveDecayed(clock:activity, nowSeq 無し)", (h) =>
+  h.s.ms.archiveDecayed(h.ctx, { now: new Date(), limit: 10, clock: "activity" }),
+);
+add("aggregateScope({})", (h) => h.s.ms.aggregateScope(h.ctx, scope(h)));
+add("aggregateScope(subjectId:'')", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { subjectId: "" })),
+);
+add("aggregateScope(labels:[])", (h) => h.s.ms.aggregateScope(h.ctx, scope(h, { labels: [] })));
+add("aggregateScope(labels:[''])", (h) => h.s.ms.aggregateScope(h.ctx, scope(h, { labels: [""] })));
+add("aggregateScope(attributes:{})", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { attributes: {} })),
+);
+add("aggregateScope(occurredAfter: Invalid Date)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { occurredAfter: new Date(Number.NaN) })),
+);
+add("aggregateScope(validAt: Invalid Date)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { validAt: new Date(Number.NaN) })),
+);
+add("aggregateScope(decayFloorAtAfter: Invalid Date)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { decayFloorAtAfter: new Date(Number.NaN) })),
+);
+add("aggregateScope(decayFloorSeqAfter:-1)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { decayFloorSeqAfter: -1 })),
+);
+add("aggregateScope(decayFloorSeqAfter:1.5)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { decayFloorSeqAfter: 1.5 })),
+);
+add("aggregateScope(taxonomyGroupCandidates:[])", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { taxonomyGroupCandidates: [] })),
+);
+add("aggregateScope(digestBand.limit:0)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h), { digestBand: { limit: 0, excludeMemoryIds: [] } }),
+);
+add("findActiveByClaimKey(claimKey 空文字)", (h) =>
+  h.s.ms.findActiveByClaimKey(h.ctx, {
+    subjectId: null,
+    claimKey: { subject: "", predicate: "" },
+    excludeMemoryId: h.m.id,
+    contentHash: "x",
+    validFrom: null,
+    validUntil: null,
+  }),
+);
+add("findActiveByClaimKey(subjectId:'')", (h) =>
+  h.s.ms.findActiveByClaimKey(h.ctx, {
+    subjectId: "",
+    claimKey: { subject: "user", predicate: "home_city" },
+    excludeMemoryId: h.m.id,
+    contentHash: "x",
+    validFrom: null,
+    validUntil: null,
+  }),
+);
+add("findActiveByClaimKey(validFrom: Invalid Date)", (h) =>
+  h.s.ms.findActiveByClaimKey(h.ctx, {
+    subjectId: null,
+    claimKey: { subject: "user", predicate: "home_city" },
+    excludeMemoryId: h.m.id,
+    contentHash: "x",
+    validFrom: new Date(Number.NaN),
+    validUntil: null,
+  }),
+);
+add("listActiveClaimPredicates(subjectId:'')", (h) =>
+  h.s.ms.listActiveClaimPredicates(h.ctx, { subjectId: "", limit: 10 }),
+);
+add("listActiveClaimPredicates(limit:0)", (h) =>
+  h.s.ms.listActiveClaimPredicates(h.ctx, { subjectId: null, limit: 0 }),
+);
+add("supersedeWithNewMemories([],[])", (h) => h.s.ms.supersedeWithNewMemories(h.ctx, [], []));
+for (const index of [1, -1, 1.5]) {
+  add(`supersedeWithNewMemories(supersededByIndex:${index})`, (h) =>
+    h.s.ms.supersedeWithNewMemories(
+      h.ctx,
+      [
+        {
+          input: buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash: `idx-${index}` }),
+          jobKinds: ["embed"],
+        },
+      ],
+      [
+        {
+          id: h.m.id,
+          supersededByIndex: index,
+          expectedStatus: "active",
+          event: event(h.ctx, h.m.id, "superseded"),
+        },
+      ],
+    ),
+  );
+}
+add("supersedeWithNewMemories(同じ id を2回 supersede)", (h) =>
+  h.s.ms.supersedeWithNewMemories(
+    h.ctx,
+    [
+      {
+        input: buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash: "dup-sup" }),
+        jobKinds: ["embed"],
+      },
+    ],
+    [
+      {
+        id: h.m.id,
+        supersededByIndex: 0,
+        expectedStatus: "active",
+        event: event(h.ctx, h.m.id, "superseded"),
+      },
+      {
+        id: h.m.id,
+        supersededByIndex: 0,
+        expectedStatus: "active",
+        event: event(h.ctx, h.m.id, "superseded"),
+      },
+    ],
+  ),
+);
+add("supersedeWithNewMemories(news に同じ冪等の鍵が2つ)", (h) =>
+  h.s.ms.supersedeWithNewMemories(
+    h.ctx,
+    [
+      {
+        input: buildNewMemoryFixture({
+          tenantId: h.ctx.tenantId,
+          contentHash: "dupkey",
+          sourceObservationId: h.obs.id,
+          extractorVersion: "v1",
+        }),
+        jobKinds: ["embed"],
+      },
+      {
+        input: buildNewMemoryFixture({
+          tenantId: h.ctx.tenantId,
+          contentHash: "dupkey",
+          sourceObservationId: h.obs.id,
+          extractorVersion: "v1",
+        }),
+        jobKinds: ["embed"],
+      },
+    ],
+    [
+      {
+        id: h.m2.id,
+        supersededByIndex: 1,
+        expectedStatus: "active",
+        event: event(h.ctx, h.m2.id, "superseded"),
+      },
+    ],
+  ),
+);
+add("resolveContestedPair(self,self)", (h) =>
+  h.s.ms.resolveContestedPair(
+    h.ctx,
+    { id: h.m.id, status: "active", event: event(h.ctx, h.m.id) },
+    { id: h.m.id, status: "active", event: event(h.ctx, h.m.id) },
+  ),
+);
+add("resolveContestedPair(対の両側、supersededById 無しで superseded)", async (h) => {
+  await h.s.ms.markContestedPair(
+    h.ctx,
+    { id: h.m.id, event: event(h.ctx, h.m.id) },
+    { id: h.m2.id, event: event(h.ctx, h.m2.id) },
+  );
+  return h.s.ms.resolveContestedPair(
+    h.ctx,
+    { id: h.m.id, status: "active", event: event(h.ctx, h.m.id) },
+    { id: h.m2.id, status: "superseded", event: event(h.ctx, h.m2.id, "superseded") },
+  );
+});
+add("registerLabel 同じ名前を2回", async (h) => {
+  await h.s.ms.registerLabel(h.ctx, "work");
+  return h.s.ms.registerLabel(h.ctx, "work");
+});
+add("listLabels(何も無いテナント)", (h) => h.s.ms.listLabels(h.other));
+add("event.list({})", (h) => h.s.es.list(h.ctx, {}));
+add("event.list({limit:0})", (h) => h.s.es.list(h.ctx, { limit: 0 }));
+add("event.list({since: Invalid Date})", (h) =>
+  h.s.es.list(h.ctx, { since: new Date(Number.NaN) }),
+);
+add("event.list({until: Invalid Date})", (h) =>
+  h.s.es.list(h.ctx, { until: new Date(Number.NaN) }),
+);
+add("event.list({since > until})", (h) =>
+  h.s.es.list(h.ctx, { since: later(), until: new Date(0) }),
+);
+add("event.list({kind:'events_purged'})", (h) => h.s.es.list(h.ctx, { kind: "events_purged" }));
+
+// ---- 検索の filter の日時・通し番号（#1255 の後に足した）----
+for (const field of ["occurredAfter", "occurredBefore", "validAt", "decayFloorAtAfter"] as const) {
+  add(`vector.search(filter.${field}: Invalid Date)`, (h) =>
+    h.s.vs.search(h.ctx, SPACE, [1, 0, 0], {
+      limit: 5,
+      filter: { tenantId: h.ctx.tenantId, [field]: new Date(Number.NaN) },
+    }),
+  );
+}
+add("vector.search(filter.decayFloorSeqAfter:1.5)", (h) =>
+  h.s.vs.search(h.ctx, SPACE, [1, 0, 0], {
+    limit: 5,
+    filter: { tenantId: h.ctx.tenantId, decayFloorSeqAfter: 1.5 },
+  }),
+);
+for (const field of ["occurredAfter", "occurredBefore", "validAt"] as const) {
+  add(`lexical.search(filter.${field}: Invalid Date)`, (h) =>
+    h.s.ls.search(h.ctx, "東京", {
+      limit: 5,
+      filter: { tenantId: h.ctx.tenantId, [field]: new Date(Number.NaN) },
+    }),
+  );
+}
+add("aggregateScope(occurredBefore: Invalid Date)", (h) =>
+  h.s.ms.aggregateScope(h.ctx, scope(h, { occurredBefore: new Date(Number.NaN) })),
+);
+add("findActiveByClaimKey(validUntil: Invalid Date)", (h) =>
+  h.s.ms.findActiveByClaimKey(h.ctx, {
+    subjectId: null,
+    claimKey: { subject: "user", predicate: "home_city" },
+    excludeMemoryId: h.m.id,
+    contentHash: "x",
+    validFrom: null,
+    validUntil: new Date(Number.NaN),
+  }),
+);
+
 interface Outcome {
   result: string;
   state: string;
@@ -528,7 +838,7 @@ describe("store の公開の口の境界の入力: Postgres と testkit の fixt
     expect(
       unexpected,
       `許可リストの外で、${unexpected.length} 件の場面に差が出た。fixture を Postgres に揃えるか、` +
-        `doc に「違う」と書いてから DOCUMENTED_DIFFERENCES に足すこと:\n${unexpected.join("\n")}`,
+        `doc か Issue に書いてから DOCUMENTED_DIFFERENCES に足すこと:\n${unexpected.join("\n")}`,
     ).toEqual([]);
   });
 

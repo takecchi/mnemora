@@ -46,6 +46,7 @@ import type {
   ScopeAggregate,
 } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
+import { assertQueryDate, assertQueryInteger } from "./query-check.js";
 import { assertCloneableMemoryEvent, assertStorableMemoryEvent } from "./memory-event-check.js";
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
@@ -1034,6 +1035,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
+    // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
+    assertQueryDate("purgeExpiredEvents", "olderThan", opts.olderThan);
     // `PostgresMemoryStore.purgeExpiredEvents`（`buildPurgeExpiredEventsTargetSelect`）は
     // SQL の `LIMIT ${opts.limit + 1}` を使うため、`opts.limit` が負数だと
     // 生 SQL の `LIMIT` へ負数（またはそれ以下）が渡る。`opts.limit === -1` のときだけ
@@ -1315,6 +1318,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     scope: RecallScope,
     opts?: AggregateScopeOptions,
   ): Promise<ScopeAggregate> {
+    // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
+    assertQueryDate("aggregateScope", "occurredAfter", scope.occurredAfter);
+    assertQueryDate("aggregateScope", "occurredBefore", scope.occurredBefore);
+    assertQueryDate("aggregateScope", "validAt", scope.validAt);
+    assertQueryDate("aggregateScope", "decayFloorAtAfter", scope.decayFloorAtAfter);
+    assertQueryInteger("aggregateScope", "decayFloorSeqAfter", scope.decayFloorSeqAfter);
     const inScopeBySubject = new Map<string | null, number>();
     let totalInScope = 0;
     const notIndexed: Record<NotIndexedReason, number> = { pending: 0, failed: 0, skipped: 0 };
@@ -1665,6 +1674,9 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `forget` と同じ規約、docs/memory-model.md §9）。
    */
   async archiveDecayed(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult> {
+    // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
+    assertQueryDate("archiveDecayed", "now", opts.now);
+    assertQueryInteger("archiveDecayed", "nowSeq", opts.nowSeq);
     // `PostgresMemoryStore.archiveDecayed`（`buildArchiveDecayedTargetSelect`）は
     // `opts.limit` を生 SQL の `LIMIT`（bigint パラメータ）にそのまま渡すため、負数・
     // `NaN`・`Infinity`・非整数を渡すと Postgres 自身が例外を投げる（実測:
@@ -1963,6 +1975,9 @@ export class InMemoryMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
+    assertQueryDate("findActiveByClaimKey", "validFrom", query.validFrom);
+    assertQueryDate("findActiveByClaimKey", "validUntil", query.validUntil);
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
     const matches = [...this.memories.values()].filter((m) => {
