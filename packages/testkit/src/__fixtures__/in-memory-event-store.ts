@@ -69,7 +69,7 @@ export class InMemoryEventStore implements EventStore {
     // （0001_init.sql の CHECK 制約が禁じるのは「events_purged なのに非 NULL」の
     // 向きだけであり、その逆は禁じていない）。
     if (event.memoryId !== null) {
-      const memory = await this.memoryStore.get(ctx, event.memoryId);
+      const memory = this.memoryStore.peek(ctx, event.memoryId);
       if (!memory) {
         throw new Error(`InMemoryEventStore: memory not found: ${event.memoryId}`);
       }
