@@ -28,6 +28,15 @@ export interface Observation {
    * 時計がずれている」なのかは区別しない**（Issue #767）。極端に未来の値（数年〜数十年先）
    * を警告・拒否する検証は無く、信頼度・出所を示す別欄も無い——2026-09-26 にクローン miku が、
    * この区別をしないことを仕様として記録すると決めた（ADR 0037 追記）。
+   *
+   * ⚠ **表せる日時の範囲は adapter によって違う**（[Issue #1041](https://github.com/takecchi/mnemora/issues/1041)）。
+   * schema は `Date` であることしか検査しない（JS の `Date` は ±275760年まで）。
+   * `@mnemora/postgres` の `timestamptz` は `new Date("-004713-11-24T00:00:00.000Z")`
+   * （先発グレゴリオ暦の紀元前4714年11月24日、UTC）より前を表せず、この欄・`validFrom`・
+   * `validUntil` にそれより前の日時を渡すと書き込みが例外（`timestamp out of range`）になり、
+   * `observe()` は reject する。上側は Postgres のほうが広い（西暦294276年まで）ので分かれない。
+   * `@mnemora/testkit` の fixture は JS の `Date` をそのまま受け入れ、同じ値で返す。
+   * **保証するのは、上の日時以降の値だけである。**
    */
   occurredAt?: Date | null;
   recordedAt: Date;
@@ -45,6 +54,19 @@ export interface Observation {
    * `validUntil` を `Observation` に持たせず sync 経路だけの一時変数として流すと、
    * deferred 経路では値が消える——`occurredAt` が同じ理由で `Observation` の
    * 永続フィールドになっているのと対称の判断。
+   *
+   * 表せる日時の範囲は `occurredAt` と同じく adapter によって違う（`occurredAt` の doc
+   * コメント、Issue #1041）。
+   *
+   * ⚠ **`validFrom` が `validUntil` より後の区間（逆転した区間）も拒まない**
+   * （[Issue #1042](https://github.com/takecchi/mnemora/issues/1042)）。`observe()` の schema も
+   * `MemoryStore` も、2つの端の順序を検査しない。そうした Memory は `recall()` の `validAt`
+   * ゲート（ADR 0164）を、どの時点でも通らない——`validAt` が2つの端の間
+   * （`validUntil <= validAt < validFrom`）なら `omitted` の `filtered(expired)` と
+   * `filtered(not_yet_valid)` の**両方に1件ずつ**数えられ、それ以外の時点ではどちらか一方に
+   * 数えられる（`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ）。`filtered` の件数は
+   * 「その条件に当たる記憶の件数」であり、条件どうしが排他である約束は無い（ADR 0203 追記9）
+   * ので、二重計上ではない。
    */
   validFrom?: Date | null;
   /** `validFrom` の doc コメント参照。対になる終点。 */
@@ -149,6 +171,11 @@ export type ObserveInputKind = "utterance" | "event" | "memory_usage" | "documen
  * `docs/architecture.md` §3.7）ので、台帳そのものは呼び出し側が持ち、ここには「今回の
  * observe() に関係しそうな候補」だけを渡す。
  *
+ * ⚠ **`@mnemora/openai` では「主題なし」（`subjectId: null`）を選ばせられない**（Issue #1082）。
+ * モデルが `null` を返しても省略として届き、observation の `subjectId` へ落ちる
+ * （`ExtractedMemoryCandidateSchema.subjectId` の doc コメント）。一覧の中から選ばせる部分は
+ * どの provider でも効く。
+ *
  * - **渡す（`subjectCandidates: [...]`、要素は1件以上）**: `buildExtractionPrompt`
  *   （extraction.ts）が候補一覧と「候補の中から選べ。無ければ `subjectId: null` を
  *   明示せよ」という指示をプロンプトへ足す。抽出後、runtime は各候補の `subjectId` が
@@ -214,6 +241,7 @@ export interface ObserveUtteranceInput {
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
   occurredAt?: Date;
+  /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
   validFrom?: Date;
   validUntil?: Date;
   extract?: ExtractMode;
@@ -237,6 +265,7 @@ export interface ObserveEventInput {
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
   occurredAt?: Date;
+  /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
   validFrom?: Date;
   validUntil?: Date;
   extract?: ExtractMode;
@@ -279,6 +308,7 @@ export interface ObserveDocumentInput {
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
   occurredAt?: Date;
+  /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
   validFrom?: Date;
   validUntil?: Date;
   extract?: ExtractMode;
@@ -337,6 +367,15 @@ export interface ObserveMemoryUsageInput {
   usedMemoryIds: string[];
 }
 
+/**
+ * `runtime.observe()` への入力。
+ *
+ * ⚠ **入力の未知のキーは、例外にも警告にもならず黙って捨てられる**
+ * （[Issue #1123](https://github.com/takecchi/mnemora/issues/1123)。`ObserveInputSchema` は `.strict()` ではない）。
+ * 主題は、この入力の `subjectId`（`memory_usage` 以外）か `ctx.subjectId` に置く（両方あれば入力の
+ * `subjectId` が勝つ）。`subject`・`subjectID` のような綴り違いは捨てられ、主題はそれが無いものとして
+ * 決まる。TypeScript の余剰プロパティ検査が止めるのは、オブジェクトリテラルを直接渡したときだけである。
+ */
 export type ObserveInput =
   ObserveUtteranceInput | ObserveEventInput | ObserveDocumentInput | ObserveMemoryUsageInput;
 

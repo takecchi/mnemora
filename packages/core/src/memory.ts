@@ -184,6 +184,18 @@ export interface Memory {
    * 既存の呼び出し元・adapter・テストのフィクスチャすべてに新しい必須プロパティを
    * 強制する破壊的変更になる）。`undefined`（未指定）と `null`（明示的に鍵なし）は
    * 同じ意味で扱ってよい——読み出し側はどちらも「鍵が無い」として扱うこと。
+   *
+   * ⚠ **主語か述語の片方だけのオブジェクト（型を破る入力）を、書き込みの口は拒まない**
+   * （[Issue #1109](https://github.com/takecchi/mnemora/issues/1109)）。TypeScript を通さない
+   * 呼び出しやキャストで `{ subject: "user" }` のような値を `MemoryStore.createMemory`・
+   * `createMemoryWithOutbox` に渡すと、adapter によって持ち方が違う:
+   * - `@mnemora/postgres`: 片方の列だけを入れた行を書き、読み出しでは**鍵なし（`null`）**として返す
+   *   （`mapping.ts` の `rowToClaimKey`）。
+   * - `@mnemora/testkit` の fixture: 片方だけのオブジェクトを**そのまま**持って返す。
+   *
+   * どちらでも、その Memory は `findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` にも
+   * 数えられない（PR #1106 で fixture を Postgres に揃えた）。**片方だけの `claimKey` は鍵なしとして
+   * 扱われうる。**鍵を持たせたいなら、2欄とも埋めて渡すこと。
    */
   claimKey?: ClaimKey | null;
 

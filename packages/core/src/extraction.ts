@@ -38,6 +38,15 @@ export const ExtractedMemoryCandidateSchema = z.object({
    * 1回の `observe()` から複数候補が抽出されると、**候補ごとに違う主題を持てる**——
    * 同じ observation を全候補へ渡す `buildNewMemoriesForCandidates`（runtime.ts）の下でも、
    * この欄だけは候補ごとに独立している。
+   *
+   * ⚠ **`@mnemora/openai` では、明示の `null`（主題なし）が core に届かない**
+   * （[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）。OpenAI の strict モードは
+   * 「省略可能」を「必須かつ `null` 可」に翻訳するので、応答の `null` だけでは「未指定」と
+   * 「主題なし」を区別できず、`OpenAILLMProvider.completeStructured` はすべての `null` を
+   * キーごと消してから（`stripNulls`）このスキーマに渡す。⟹ モデルが指示どおり `null` を返しても
+   * **省略（未指定）として届き、Memory は observation の主題を持つ**。`@mnemora/anthropic` は
+   * `null` を保つので、主題なしの Memory になる。`subjectCandidates` を渡して「主題なし」を
+   * 選ばせる使い方は、今は `@mnemora/anthropic`（か、`null` を保つ自前の provider）でだけ効く。
    */
   subjectId: z.string().min(1).nullable().optional(),
   /**

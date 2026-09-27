@@ -67,6 +67,15 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 
 入力: `ctx`（`tenantId`, `subjectId?`）と `query`（自然文またはベクトル、taxonomy フィルタ、時間窓）。
 出力: 段1に渡す確定済みの `WHERE` 条件一式。
+
+**⚠ 2026-09-27 追記（[Issue #1123](https://github.com/takecchi/mnemora/issues/1123)）: subject は `ctx.subjectId` に置く。クエリの未知のキーは黙って捨てられる。**
+`RecallQuery` に `subjectId` は無い。`recall(ctx, { text, subjectId: "alice" })` と書くと、`subjectId` は
+例外にも警告にもならずに捨てられ（`RecallQuerySchema` は `.strict()` ではない）、**テナント全体から引いた結果が
+何事も無く返る**。キーの綴り違い（`scoreTreshold` など）も同じく無視される。TypeScript の余剰プロパティ検査が
+止めるのは、オブジェクトリテラルを直接渡したときだけである。絞れたかは `explain.stages` の `scope` の
+`detail.subjectId` で確かめられる（絞れていなければ `null`）。`observe()` の入力も同じく未知のキーを捨てる
+（`ObserveInput` の TSDoc）。クローン miku の判断で、入力を `.strict()` にして拒む案（非破壊とは扱えない）は
+採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
 このスコープの外にある Memory は recall の対象になりようがないので、`omitted` にも `index` にも現れない。これは「無い」の分類の対象外であることに注意する——スコープ外は「無い」ではなく「そもそも問うていない」であり、`index` が示す「スコープ内に何が在るか」の母集団を確定する段である。
 
 #### スコープの外延（2026-09 追記。マネージャー決定。欠けていた定義の補完であり、既存記述の訂正ではない）
@@ -418,6 +427,17 @@ taxonomy + status）に**入っていない**——減衰しきった Memory は
 限らない**——近似索引が scope の他の場所へ辿ってしまい、窓の中身自体が真の上位 k' 件から
 ズレている（より近い候補を取りこぼしている）ことがありうる。原因も違えば呼び出し側の
 次の一手も違う（前者は k' を上げる、後者は厳密検索へのフォールバックを検討する）。
+
+**⚠ 2026-09-27 追記（[Issue #1015](https://github.com/takecchi/mnemora/issues/1015)）: 埋め込み空間を切り替えた後の `ann_unreached` は、上の次の一手では直らない。**
+Phase 1 は稼働中の空間を1つに限り、空間の切り替え（モデルの移行）を支えない（`./memory-model.md` §10）。
+`embeddingProvider` を別の空間のものに替えて `recall()` すると、古い空間で `embeddingStatus: 'ready'` の記憶は
+今の空間に行を持たないので `memories` に1件も出ず、`omitted` は `ann_unreached`（`severity: 'warning'`）と
+`stage_skipped(association, no_anchor)` で名乗る——`ann_unreached` の判定に使う件数（`totalInScope - notIndexed`）は
+`embeddingStatus` から数えるので、空間を区別しないためである。記憶は `index` の `totalInScope`・群カウント・目次帯
+（`digestBand`）には残るので、黙って消えるわけではない。ただし本当の原因は「今の空間に行が無い」ことで、
+厳密検索へのフォールバックや subject の絞り直しでは戻らない。`@mnemora/postgres` と `@mnemora/testkit` の fixture で
+同じである。クローン miku の判断で、この場合のために新しい `Omission` の種類・reason を足す案は採らず、
+今の振る舞いを記録した（選び直す余地は Issue に残してある）。
 
 **🔴 2つは同時に立ちうる（2026-09-17 訂正）。** 以前この節は「2つは同時には立たない
 ——`ann_truncated` の条件（hits ≥ k'）と `ann_unreached` の条件（hits < k'）は排反である」

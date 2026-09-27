@@ -62,6 +62,17 @@ export interface OpenAILLMProviderOptions {
  * 見直しが必要になる。Phase 1 で `completeStructured` に渡す実際のスキーマ
  * （`extraction.ts` の `ExtractionResultSchema`）にはそのような区別を要するフィールドが
  * 無いことを確認済み。
+ *
+ * ⚠ **2026-09-27 追記（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）: 上の「確認済み」は、
+ * Issue #608 の後は成り立っていない。**`ExtractedMemoryCandidateSchema.subjectId` は
+ * `.nullable().optional()` で、省略（未指定）と明示の `null`（主題なし）を区別する。この変換が
+ * `null` を消すので、この provider ではモデルが返した「主題なし」が省略として届き、Memory は
+ * observation の主題を持つ（`@mnemora/anthropic` は `null` を保つので結果が分かれる）。
+ * `null` を保つだけでは直らない——strict モードの翻訳では、`subjectCandidates` を渡さないときの
+ * 「未指定」も応答の上では `null` になるので、今度は候補一覧の無い観測のすべてが主題なしになる。
+ * クローン miku の判断で、スキーマ・翻訳を変える案は採らず、今の振る舞いを記録した
+ * （選び直す余地は Issue に残してある）。ほかの3つのスキーマ（統合・内省・claim key）には
+ * `.nullable()` の欄が無い。
  */
 function stripNulls(value: unknown): unknown {
   if (value === null) {

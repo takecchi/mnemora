@@ -302,6 +302,16 @@ memoryIds/observationIds）を伴う。**根拠を欠いた推論をそのまま
    無い。`subjectCandidates` はどこにも永続化しない（新しい列・マイグレーションは無い）ため、
    `extract: 'deferred'` との併用はエラーにし、`reextract` はこの欄を使わない。
 
+**⚠ 2026-09-27 追記（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）: `@mnemora/openai` では「主題なし」が届かない。**
+OpenAI の strict モードは「省略可能」を「必須かつ `null` 可」に翻訳するので、応答の `null` だけでは
+「未指定」と「主題なし」を区別できない。`OpenAILLMProvider.completeStructured` はすべての `null` を
+キーごと消してから core のスキーマに渡すので、モデルが上の2の指示どおり `subjectId: null` を返しても、
+候補は未指定として届き、Memory は observation の主題を持つ。`@mnemora/anthropic` は `null` を保つので、
+同じ応答から主題なしの Memory ができる（`LLMProvider` を差し替えると結果が分かれる）。上の2のうち、
+一覧の中から選ばせる部分はどの provider でも効く。クローン miku の判断で、抽出のスキーマや OpenAI への翻訳を
+変える案（プロンプト・カセットに関わる）は採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
+書き分けは `ExtractedMemoryCandidateSchema.subjectId` の TSDoc。
+
 ---
 
 ## 4. package 構成

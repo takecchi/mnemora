@@ -135,6 +135,25 @@ Memory は目的の異なる複数の時刻を持つ。これを一つの「時�
 スコアリングすること、段1（ANN）への索引の押し下げ、`valid_until` を過ぎた記憶を
 `omitted` で名指しすることは、いずれもまだ Phase 2 のままである**（ADR 0145「射程外」参照）。
 
+**⚠ 2026-09-27 追記（[Issue #1041](https://github.com/takecchi/mnemora/issues/1041)）: 表せる日時の範囲は adapter によって違う。**
+core の schema は `Date` であることしか検査しない（JS の `Date` は ±275760年まで）。`@mnemora/postgres` の
+`timestamptz` は `new Date("-004713-11-24T00:00:00.000Z")`（先発グレゴリオ暦の紀元前4714年11月24日、UTC）より
+前を表せず、`occurred_at`・`valid_from`・`valid_until` にそれより前の日時を渡すと、書き込みが例外
+（`timestamp out of range`）になり `observe()` は reject する。上側は Postgres のほうが広い（西暦294276年まで）
+ので分かれない。`@mnemora/testkit` の fixture は JS の `Date` をそのまま受け入れ、同じ値で返す。保証するのは、
+上の日時以降の値だけである。クローン miku の判断で、範囲を契約にして拒む案・端に丸める案は採らず、
+今の振る舞いを記録した（選び直す余地は Issue に残してある）。書き分けは `Observation.occurredAt` の TSDoc。
+
+**⚠ 2026-09-27 追記（[Issue #1042](https://github.com/takecchi/mnemora/issues/1042)）: 逆転した区間（`valid_from > valid_until`）も拒まない。**
+`observe()` の schema も `MemoryStore` も、2つの端の順序を検査しない。そうした Memory は `recall()` の
+`validAt` ゲート（[ADR 0164](./decisions/0164-valid-from-until-recall.md)）をどの時点でも通らず、`validAt` が2つの端の間
+（`valid_until <= validAt < valid_from`）なら `omitted` の `filtered(expired)` と `filtered(not_yet_valid)` の
+両方に1件ずつ数えられる（それ以外の時点ではどちらか一方）。`@mnemora/postgres` と `@mnemora/testkit` の
+fixture で同じである。`filtered` の件数は「その条件に当たる記憶の件数」であり、条件どうしが排他である約束は
+無い（[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md) 追記9）ので、二重計上ではない。クローン miku の判断で、
+入力の段で拒む案（入力を狭める）は採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
+書き分けは `Observation.validFrom` の TSDoc。
+
 ---
 
 ## 4. Digest（要旨）
@@ -369,6 +388,17 @@ claim_key_predicate  text NULL,
 `#372` の検出クエリ（「同じテナント・同じ subject_id・同じ claim key を持つ他の `active` な
 Memory を探す」）が索引アクセスで済む形にしてある——`superseded_by_id`/`contested_with_id`
 と同じ「グラフ探索ではなく索引で引けるようにする」理由付けを踏襲した。
+
+**⚠ 2026-09-27 追記（[Issue #1109](https://github.com/takecchi/mnemora/issues/1109)）: 片方だけの `claimKey` は書き込みで拒まず、鍵なしとして扱われうる。**
+型（`ClaimKey`）は2欄とも必須だが、TypeScript を通さない呼び出しやキャストで主語か述語の片方だけの
+オブジェクトを `MemoryStore.createMemory`・`createMemoryWithOutbox` に渡しても、どちらの adapter も拒まない。
+`@mnemora/postgres` は片方の列だけを入れた行を書き、読み出しでは鍵なし（`null`）として返す（`mapping.ts` の
+`rowToClaimKey`。上の2列に CHECK 制約は無い）。`@mnemora/testkit` の fixture は片方だけのオブジェクトを
+そのまま持って返す。どちらでも、その Memory は `findActiveByClaimKey` に一致せず `listActiveClaimPredicates`
+にも数えられない（PR #1106 で fixture を Postgres に揃えた）ので、検出（下の #372）からは鍵なしと同じに見える。
+クローン miku の判断で、書き込みで拒む案（入力を狭める。[Issue #809](https://github.com/takecchi/mnemora/issues/809) と同じ論点）・
+書き込み時に `null` へ正規化する案は採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
+書き分けは `Memory.claimKey` の TSDoc。
 
 **#372（検出）が実装されても、進める先は `contested` までである。**[ADR 0185](./decisions/0185-contradiction-detection-path.md)
 決定4: `claimKey` は推論から導かれる ⟹ 推論を根拠に `active → superseded`
@@ -1250,6 +1280,20 @@ Phase 1 は**稼働中の空間を1つに限る**。2つ目の空間（例えば
 `memory_embeddings_<space2>` テーブルを追加するだけ**で済む形にしておく。移行期間中は
 両テーブルが並存し、`memories.embedding_status` がどちらの空間で `ready` かを個別に
 追う設計は Phase 2 の課題として残す（Phase 1 は単一空間なのでこの複雑さは出ない）。
+
+**⚠ 2026-09-27 追記（[Issue #1015](https://github.com/takecchi/mnemora/issues/1015)）: Phase 1 は空間の切り替えを支えない。切り替えたときに起きること。**
+`embeddingProvider` を別の空間のものに替えても、`memories.embedding_status` は空間を区別しないので、古い空間で
+`ready` の記憶は `ready` のままで、今の空間の `memory_embeddings_<space>` には行が無い。その結果:
+- `recall()` の `memories` にそれらの記憶は出ない。`omitted` は `ann_unreached`（`severity: 'warning'`）で名乗り、
+  本当の原因（今の空間に行が無い）とは違う理由に見える（`./recall.md` §4 の `ann_unreached` の節）。`index` の
+  `totalInScope`・群カウント・目次帯には残る。
+- `Runtime.reembed` は `statuses` に `NotIndexedReason`（`pending`/`failed`/`skipped`）しか受け付けないので、`ready` の
+  記憶を新しい空間へ積み直す口は無い（[ADR 0079](./decisions/0079-requeue-embed-jobs.md)）。
+
+`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じである。空間を切り替えるなら、新しい空間で記憶を作り直す
+必要があり、その手順は Phase 1 では用意していない。クローン miku の判断で、新しい `Omission` の種類を足す案・
+`reembed` で `ready` を受け付ける案・空間ごとに `ready` を追う設計の前倒しは採らず、今の振る舞いを記録した
+（選び直す余地は Issue に残してある）。
 
 **確かめていないこと**: 可変次元の埋め込み列を Drizzle でどう型付けるかは一次情報が
 見つからなかった。空間ごとのテーブル分割で回避しているため mnemora の設計には影響しないが、

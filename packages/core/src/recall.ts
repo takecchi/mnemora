@@ -1468,6 +1468,16 @@ export const StageTraceSchema = z.object({
  *
  * D5: 既定で `provenance.kind = 'inferred'` を含める。除外する場合は
  * `excludeProvenanceKinds` に `['inferred']` を渡す。
+ *
+ * ⚠ **subject で絞るなら、`ctx.subjectId` に置く。この型に `subjectId` は無い。**
+ * **クエリの未知のキーは、例外にも警告にもならず黙って捨てられる**
+ * （[Issue #1123](https://github.com/takecchi/mnemora/issues/1123)。`RecallQuerySchema` は `.strict()` ではない）。
+ * ⟹ `recall(ctx, { text, subjectId: "alice" })` と書くと `subjectId` は捨てられ、
+ * **テナント全体から引いた結果が、何事も無く返る**。キーの綴り違い（`scoreTreshold` など）も
+ * 同じく無視される。TypeScript の余剰プロパティ検査が止めるのは、オブジェクトリテラルを直接
+ * 渡したときだけである——変数に入れてから渡す・スプレッドで組む・JavaScript から呼ぶ、の
+ * いずれも素通りする。絞れたかは `explain.stages` の `scope` の `detail.subjectId` で確かめられる
+ * （絞れていなければ `null`）。
  */
 export interface RecallQuery {
   text?: string;
