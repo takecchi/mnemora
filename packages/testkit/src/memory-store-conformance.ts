@@ -2212,7 +2212,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
-    // recordUsage（D9・docs/architecture.md §3.5「挿入の成否で数える」）
+    // recordUsage（D9・docs/architecture.md §3.5「一意制約を持つ行の挿入が『実際に起きたか』で数える」）
     // -------------------------------------------------------------------
 
     it("recordUsage は同じ (recallId, memoryId) の再送に対して冪等である（D9）", async () => {

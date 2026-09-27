@@ -50,7 +50,7 @@ API記録手順は `node --env-file=.env scripts/record-extraction-context.mjs <
 
 出自を一人称で名乗る: 本セッションは Claude Code である。起こしたのは、オーナー
 takecchi の依頼を受けたクローン（takecchi の価値観を写した代理）であり、
-[ADR 0220](./0220-issue-comment-author-identity-owner-vs-agent-not-distinguishable-from-author-name.md)
+[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)
 に倣えば、投稿者欄・commit 上の `takecchi` はここでも人間本人とクローンの両方を
 指しうる——**この ADR とこの PR の投稿者名から、どちらが書いたかは判別できない。**
 
@@ -131,7 +131,7 @@ other-speaker）は見て調整したものであり独立評価ではない、�
 
 出自を一人称で名乗る: 本セッションは Claude Code である。起こしたのは、オーナー
 takecchi の依頼を受けたクローン（takecchi の価値観を写した代理）であり、
-[ADR 0220](./0220-issue-comment-author-identity-owner-vs-agent-not-distinguishable-from-author-name.md)
+[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)
 に倣えば、この ADR・この PR の投稿者欄 `takecchi` は人間本人とクローンの両方を
 指しうる——投稿者名だけからは、どちらが書いたか判別できない。
 

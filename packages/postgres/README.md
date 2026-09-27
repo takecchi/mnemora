@@ -12,6 +12,10 @@ pnpm add @mnemora/postgres @mnemora/core
 npm i @mnemora/postgres @mnemora/core
 ```
 
+下の「動く最小の例」をそのまま動かすなら、`@mnemora/openai` も入れる（例の LLM・埋め込みは OpenAI を使う）。README の install 行だけを pnpm で入れると、例は `Cannot find package '@mnemora/openai'` で止まる（2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れて確かめた）。
+
+⚠ **TypeScript で `skipLibCheck: false` にしていると、`drizzle-orm`（このパッケージの依存）の型定義そのものがエラーを出す**（`Cannot find module 'gel'`・`'mysql2/promise'` など。`drizzle-orm` の `column-builder.d.ts` が使わない方言の型まで読み込むため）。`@mnemora/postgres` 自身の型は `moduleResolution` が `node16`・`bundler` のどちらでもエラー無く解決する。`skipLibCheck: true`（`tsc --init` の既定）にすること。
+
 ## 前提
 
 - Node.js >= 22
@@ -240,6 +244,8 @@ await runtime.observe(ctx, {
 ```
 
 上のコードを動かす前に、`mnemora-postgres-migrate` で該当 DB にスキーマを適用しておくこと。
+
+⚠ 2026-09-27 追記: 見出しの「DB へは未実行」は当時の記録である。`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、`npx mnemora-postgres-migrate` の後に、この例の LLM・埋め込みだけを `@mnemora/testkit` の決定的な provider に差し替えて Postgres 17 + pgvector に対して走らせ、observe → tick → recall が通ることを確かめた。例そのまま（OpenAI）は鍵を要るので走らせていない——鍵が無いと `new OpenAIEmbeddingProvider(...)` の時点で OpenAI の SDK が `Missing credentials` で止まる。
 
 ## adapter として自作する場合
 

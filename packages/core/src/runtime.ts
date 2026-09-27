@@ -2814,7 +2814,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * この2つを同時に満たせない。
    */
   /**
-   * [ADR 0165](../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・3・5・12:
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・3・5・12:
    * Memory 書き込み側3箇所（抽出・consolidate 手順6・reflect 手順7）が共通して要る、
    * 活動時計の入力の組み立て。
    *
@@ -2843,7 +2843,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * [ADR 0165](../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと16:
    * `reinforce` の呼び出し側2箇所（使用報告ループ・`restoreArchived`）が共通して要る、
    * 活動時計の「いま」の解決。
    *
