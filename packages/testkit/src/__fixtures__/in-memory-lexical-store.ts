@@ -1,5 +1,6 @@
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
+import { assertQueryDate } from "./query-check.js";
 
 /**
  * `'simple'` dictionary の代わりに使う、素朴な語彙正規化。
@@ -222,6 +223,10 @@ export class InMemoryLexicalStore implements LexicalStore {
     query: string,
     opts: { limit: number; filter: LexicalFilter },
   ): Promise<LexicalHit[]> {
+    // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
+    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
     // `PostgresLexicalStore.search`（`buildLexicalSearchSelect`）は `opts.limit` を
     // 生 SQL の `LIMIT` にそのまま渡すため、負数を渡すと Postgres 自身が
     // `LIMIT must not be negative` で例外を投げる（実測済み。in-memory-vector-store.ts の
