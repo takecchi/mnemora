@@ -143,9 +143,39 @@ const ARCHIVE_NOW = new Date("2030-01-01T00:00:00.000Z");
 /** 件数 N で、操作の準備をしてから、数える対象の呼び出しを返す。 */
 type Prepare = (k: Kit, n: number) => Promise<() => Promise<unknown>>;
 
+/**
+ * 測る前に、outbox の待ちを掃く（Issue #1101）。
+ *
+ * outbox のジョブの `available_at` は DB の `now()`（トランザクション開始時刻、マイクロ秒）で
+ * 書かれ、`tick` の `claimBatch` はアプリの時計（`Date`、ミリ秒に切り捨て）の `now` と
+ * `available_at <= now` で比べる。準備の最後のジョブを書いてから同じミリ秒のうちに `tick` が
+ * 始まると、そのジョブは「まだ取れない」扱いになり、その回の `tick` から漏れる（ADR 0079 が
+ * 既知として受け入れている窓）。【実測】CI の UTF8 脚で `tick（extract）` の N=5 が1件ぶん
+ * （9往復）少なく数えられ、`9.6 ≠ 6.75` で落ちた。手元で `available_at` と同じミリ秒の
+ * 切り捨てた `now` で取らせると 50/50 で取りこぼした。
+ *
+ * ⟹ **数える範囲を、測る操作だけにする**: 準備の後、数える前に、アプリの時計が outbox の
+ * 最も遅い `available_at` を越えるまで待つ。この問い合わせと待ちは `countClientQueries` の
+ * 外で行うので、数には入らない。**比較（`toBe`）はそのまま**——許容幅は足さない。
+ */
+async function waitUntilOutboxAvailable(): Promise<void> {
+  const { pool } = await getTestClient();
+  const result = await pool.query<{ us: string | null }>(
+    "SELECT (extract(epoch FROM max(available_at)) * 1000000)::text AS us FROM outbox",
+  );
+  const latestUs = result.rows[0]?.us == null ? null : Number(result.rows[0].us);
+  if (latestUs === null) {
+    return;
+  }
+  while (Date.now() * 1000 < latestUs) {
+    await new Promise((resolve) => setTimeout(resolve, 1));
+  }
+}
+
 async function tripsFor(prepare: Prepare, n: number): Promise<number> {
   const k = await kit();
   const call = await prepare(k, n);
+  await waitUntilOutboxAvailable();
   return countClientQueries(call);
 }
 
@@ -195,7 +225,12 @@ const LINEAR: Array<[string, Prepare]> = [
           ["embed"],
         );
       }
-      return () => k.runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000, limit: 100 });
+      return async () => {
+        const result = await k.runtime.tick(ctx, { kinds: ["embed"], leaseMs: 60_000, limit: 100 });
+        // 用意した N 件を全部処理したこと（Issue #1101）。漏れたら往復数ではなく件数で名指しして落ちる。
+        expect(result.processed).toBe(n);
+        return result;
+      };
     },
   ],
   [
@@ -209,7 +244,16 @@ const LINEAR: Array<[string, Prepare]> = [
           extract: "deferred",
         });
       }
-      return () => k.runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000, limit: 100 });
+      return async () => {
+        const result = await k.runtime.tick(ctx, {
+          kinds: ["extract"],
+          leaseMs: 60_000,
+          limit: 100,
+        });
+        // 用意した N 件を全部処理したこと（Issue #1101）。漏れたら往復数ではなく件数で名指しして落ちる。
+        expect(result.processed).toBe(n);
+        return result;
+      };
     },
   ],
   [
