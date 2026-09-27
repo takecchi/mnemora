@@ -137,6 +137,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
         jobs: OutboxJobRecord[];
     }>;
     get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
+    private rawGet;
     getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
     listByTenant(ctx: Ctx): Memory[];
     listBySourceObservation(ctx: Ctx, observationId: ObservationId, extractorVersion: string | null): Promise<Memory[]>;

@@ -48,6 +48,18 @@ import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import { nextId } from "./id.js";
 
 /**
+ * Issue #1108: `MemoryStore` の口が返す値（Memory と、それを含む返り値のオブジェクト）を、
+ * **返す時点の複製**にする。以前は内部に持っている Memory の実体そのものを返していたため、
+ * 呼び手が一度受け取った値が後の別の操作で遡って変わり、呼び手が受け取った値を書き換えると
+ * store の中身まで変わった。Postgres は毎回行を読み直した新しいオブジェクトを返すので、
+ * それに揃える（fixture は Postgres の振る舞いを写すためのもの）。
+ * 歯は `__tests__/in-memory-return-snapshots.test.ts`（返す口の一覧を1本ずつ見る）。
+ */
+function snapshot<T>(value: T): T {
+  return structuredClone(value);
+}
+
+/**
  * `value` を `jsonb` 列へ書くとき、Postgres が NUL（U+0000）で拒むかどうか。
  *
  * `packages/postgres` は `jsonb` 列へ `JSON.stringify(value)` を送る。Postgres は、
@@ -538,21 +550,24 @@ export class InMemoryMemoryStore implements MemoryStore {
         createdAt: now,
         updatedAt: now,
       };
-      this.memories.set(memory.id, memory);
+      // Issue #1108: 呼び手の入力（tags・provenance・claimKey・attributes・日時）と切り離す——
+      // 呼び手が後で入力を書き換えても、保存した値は変わらない（Postgres は行に書き写す）。
+      const stored = structuredClone(memory);
+      this.memories.set(stored.id, stored);
       if (input.sourceObservationId) {
-        this.extractionIndex.set(idemKey, memory.id);
+        this.extractionIndex.set(idemKey, stored.id);
       }
       // Issue #201 / ADR 0318: `createMemory`/`createMemoryWithOutbox`/
       // `supersedeWithNewMemories` はすべてこの `createMemoryIdempotent` を通る
       // （このファイル冒頭の doc コメント参照）——「新しい行を実際に作った」この分岐
       // だけで1回呼べば3経路すべてを覆える。
-      this.upsertProposedLabels(ctx, memory.tags);
-      return memory;
+      this.upsertProposedLabels(ctx, stored.tags);
+      return stored;
     });
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
-    return this.createMemoryIdempotent(ctx, input).value;
+    return snapshot(this.createMemoryIdempotent(ctx, input).value);
   }
 
   async createMemoryWithOutbox(
@@ -566,13 +581,24 @@ export class InMemoryMemoryStore implements MemoryStore {
       "createMemoryWithOutbox",
     );
     if (!created) {
-      return { memory, created: false, jobs: [] };
+      return { memory: snapshot(memory), created: false, jobs: [] };
     }
     const jobs = jobKinds.map((kind) => this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }));
-    return { memory, created: true, jobs };
+    return { memory: snapshot(memory), created: true, jobs: snapshot(jobs) };
   }
 
   async get(ctx: Ctx, id: MemoryId): Promise<Memory | null> {
+    const memory = this.rawGet(ctx, id);
+    return memory === null ? null : snapshot(memory);
+  }
+
+  /**
+   * Issue #1108: 内部に持っている Memory の**実体**を返す（複製しない）。この store の書き込みの
+   * 口が、取った実体をその場で書き換えるために使う。`MemoryStore` の口（`get` など）は
+   * 実体ではなく返す時点の複製を返す（`snapshot`）——Postgres が毎回行を読み直した新しい
+   * オブジェクトを返すのと同じにするため。
+   */
+  private rawGet(ctx: Ctx, id: MemoryId): Memory | null {
     const memory = this.memories.get(id);
     if (!memory || memory.tenantId !== ctx.tenantId) {
       return null;
@@ -597,7 +623,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       seen.add(id);
       const memory = this.memories.get(id);
       if (memory && memory.tenantId === ctx.tenantId) {
-        results.push(memory);
+        results.push(snapshot(memory));
       }
     }
     return results;
@@ -613,8 +639,10 @@ export class InMemoryMemoryStore implements MemoryStore {
    * で属性だけを引くのに対し、`InMemoryLexicalStore` には自前の Map が無い——**この store の
    * `memories` そのものが索引**であり、その非対称をここで反復子として表す。
    *
-   * `get`/`getMany` と同じく、返すのは `Map` の行そのもの（複製しない）。呼び出し側
+   * 返すのは `Map` の行そのもの（複製しない）。呼び出し側
    * （`InMemoryLexicalStore.search`）はここから読むだけで書き換えないことを前提にしている。
+   * ⚠ Issue #1108 以降、`get`/`getMany` は返す時点の複製を返す。この口は `MemoryStore` の口では
+   * なく、同じ fixture 群が読むだけで使う口なので、検索の速さのために複製しないまま残す。
    */
   listByTenant(ctx: Ctx): Memory[] {
     const results: Memory[] = [];
@@ -641,7 +669,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (memory.tenantId !== ctx.tenantId) continue;
       if (memory.sourceObservationId !== observationId) continue;
       if ((memory.extractorVersion ?? null) !== (extractorVersion ?? null)) continue;
-      results.push(memory);
+      results.push(snapshot(memory));
     }
     return results;
   }
@@ -659,7 +687,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatus", id);
     }
-    const memory = await this.get(ctx, id);
+    const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -678,7 +706,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       memory.supersededById = opts.supersededById;
     }
     memory.updatedAt = new Date();
-    return memory;
+    return snapshot(memory);
   }
 
   /**
@@ -697,7 +725,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (status === "contested") {
       throw new ContestedWithoutCompanionError("updateStatusWithEvent", id);
     }
-    const memory = await this.get(ctx, id);
+    const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -717,7 +745,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     memory.updatedAt = new Date();
     const storedEvent = buildStoredMemoryEvent(ctx, event);
     this.events.push(storedEvent);
-    return { memory, event: storedEvent };
+    return snapshot({ memory, event: storedEvent });
   }
 
   /**
@@ -830,7 +858,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       superseded.push(storedEvent);
     }
 
-    return { created, superseded, conflicted };
+    return snapshot({ created, superseded, conflicted });
   }
 
   /**
@@ -945,17 +973,17 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `failed → ready` は妨げない（片側だけの規則）。
    */
   async setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory> {
-    const memory = await this.get(ctx, id);
+    const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
     if (isEmbeddingStatusRollback(memory.embeddingStatus, status)) {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
-      return memory;
+      return snapshot(memory);
     }
     memory.embeddingStatus = status;
     memory.updatedAt = new Date();
-    return memory;
+    return snapshot(memory);
   }
 
   /**
@@ -975,7 +1003,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    * コメント参照）。
    */
   async reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory> {
-    const memory = await this.get(ctx, id);
+    const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -996,7 +1024,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       memory.lastReinforcedAt.getTime() >= at.getTime()
     ) {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
-      return memory;
+      return snapshot(memory);
     }
     memory.lastReinforcedAt = at;
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
@@ -1014,7 +1042,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       });
     }
     memory.updatedAt = new Date();
-    return memory;
+    return snapshot(memory);
   }
 
   /**
@@ -1572,7 +1600,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     tombstone: { content: string; digest: string },
     event: NewMemoryEvent,
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
-    const memory = await this.get(ctx, id);
+    const memory = this.rawGet(ctx, id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
@@ -1585,7 +1613,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     memory.updatedAt = new Date();
     const storedEvent = buildStoredMemoryEvent(ctx, event);
     this.events.push(storedEvent);
-    return { memory, event: storedEvent };
+    return snapshot({ memory, event: storedEvent });
   }
 
   /**
@@ -1605,11 +1633,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
 
-    const firstMemory = await this.get(ctx, first.id);
+    const firstMemory = this.rawGet(ctx, first.id);
     if (!firstMemory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${first.id}`);
     }
-    const secondMemory = await this.get(ctx, second.id);
+    const secondMemory = this.rawGet(ctx, second.id);
     if (!secondMemory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${second.id}`);
     }
@@ -1631,7 +1659,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     const secondEvent = buildStoredMemoryEvent(ctx, second.event);
     this.events.push(firstEvent, secondEvent);
 
-    return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+    return snapshot({
+      first: firstMemory,
+      second: secondMemory,
+      events: [firstEvent, secondEvent],
+    });
   }
 
   /**
@@ -1662,11 +1694,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new RangeError("InMemoryMemoryStore: first.id and second.id must differ");
     }
 
-    const firstMemory = await this.get(ctx, first.id);
+    const firstMemory = this.rawGet(ctx, first.id);
     if (!firstMemory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${first.id}`);
     }
-    const secondMemory = await this.get(ctx, second.id);
+    const secondMemory = this.rawGet(ctx, second.id);
     if (!secondMemory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${second.id}`);
     }
@@ -1694,7 +1726,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     const secondEvent = buildStoredMemoryEvent(ctx, second.event);
     this.events.push(firstEvent, secondEvent);
 
-    return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
+    return snapshot({
+      first: firstMemory,
+      second: secondMemory,
+      events: [firstEvent, secondEvent],
+    });
   }
 
   /**
@@ -1707,7 +1743,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
-    const memory = await this.get(ctx, survivor.id);
+    const memory = this.rawGet(ctx, survivor.id);
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${survivor.id}`);
     }
@@ -1722,7 +1758,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const storedEvent = buildStoredMemoryEvent(ctx, survivor.event);
     this.events.push(storedEvent);
 
-    return { memory, event: storedEvent };
+    return snapshot({ memory, event: storedEvent });
   }
 
   /**
@@ -1745,7 +1781,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<Memory[]> {
     const targetFrom = query.validFrom ?? null;
     const targetUntil = query.validUntil ?? null;
-    return [...this.memories.values()].filter((m) => {
+    const matches = [...this.memories.values()].filter((m) => {
       if (m.tenantId !== ctx.tenantId) return false;
       if (m.id === query.excludeMemoryId) return false;
       if ((m.subjectId ?? null) !== query.subjectId) return false;
@@ -1767,6 +1803,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         (otherFrom === null || targetUntil === null || otherFrom < targetUntil);
       return overlaps;
     });
+    return snapshot(matches);
   }
 
   /**
@@ -1850,7 +1887,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       this.events.push(storedEvent);
       restored.push(memory);
     }
-    return { restored };
+    return snapshot({ restored });
   }
 
   /**
