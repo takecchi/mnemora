@@ -45,6 +45,12 @@
 //   `attributes`（#923・#928・#1073）。
 // - Invalid Date → `<欄> must be a valid Date`。対象: `createMemory` 系の日時の欄、
 //   `reinforce` の `at`、イベントの `at`（#807）。
+// - `MemoryEventKind` に無いイベントの `kind`（型を外した呼び出し）→
+//   `memory_events.kind must be one of <9値> (got "<値>")`。対象: `InMemoryEventStore.append` と、
+//   イベントを受け取る `InMemoryMemoryStore` の口（`updateStatusWithEvent`・`supersedeWithNewMemories`・
+//   `purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）。Postgres の
+//   CHECK 制約 `memory_events_kind_check` を写す。イベントの `at` の検査とともに、状態を書き換える
+//   前に確かめるので、拒んだときは何も書かない（#1096）。
 // - Postgres の `real`（float4）列に収まらない数 → `… does not fit in a Postgres "real" (float4) column`。
 //   対象: `createMemory` 系の `halfLifeHours` など、
 //   `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（#815・#817）。
