@@ -515,7 +515,16 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+
+      - name: "温めたキャッシュだけで local の埋め込みを読み込めるかを確かめる（ネットワークへは出さない。測るだけ。Issue #1004）"
+        # 🔴 失敗させない（スクリプト自身が終了コード 0 で終わり、さらに `|| true`）。出力は1行（requests=HF へ出ようとした回数）。
+        run: pnpm --filter @mnemora/example-chat exec tsx src/scripts/local-embedding-offline-load-check.ts || true
 
       - name: Run examples/chat の observe→recall 往復・量の比較テストを本物の DB に対して実行
         run: pnpm --filter @mnemora/example-chat run test:db
@@ -883,7 +892,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: ルートの門の DB 段を DATABASE_URL 在りで通す（順方向の実測）
         run: |
@@ -1203,7 +1217,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: 識別子・固有名詞 probe（#106）を @mnemora/local-embedding で実測する
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
@@ -1355,7 +1374,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: "数詞・記号索引 probe（ADR 0135 / Issue #109）を @mnemora/local-embedding で実測する"
         # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` ジョブと同じ規律。
@@ -1492,7 +1516,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: "訂正の相手探し（Issue #369 (C)、ADR 0232/0291/0321）を @mnemora/local-embedding で実測する"
         # ⚠ **`continue-on-error: true` にしない。**`identifier-probes` ジョブと同じ規律。
@@ -1622,7 +1651,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: "連想枠(Issue #291)を @mnemora/local-embedding で実測する"
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
@@ -1769,7 +1803,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: Runtime.consolidate() の「載る量」を実測する
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
@@ -1916,7 +1955,12 @@ jobs:
         # 🔴 失敗させない（`|| true`）。warm のはずの cache が tokenizer_config.json を欠いているかを、CI の出力で確かめるためだけにある
         # （欠けていると、毎回 Hugging Face へ取りに行き、届かないと読み込みが失敗する——Issue #1004 の見立て）。
         if: always()
-        run: find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+        run: |
+          find "${{ github.workspace }}/.cache/local-embedding" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
+          # transformers.js の既定のキャッシュ（読み込みの前段の確認は、cacheDir ではなくここだけを見る。Issue #1004）
+          DEFAULT_CACHE_DIR="$(node scripts/print-transformers-default-cache-dir.mjs --plain 2>/dev/null || true)"
+          echo "既定のキャッシュ: ${DEFAULT_CACHE_DIR:-（場所を確かめられなかった）}"
+          [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: 掃引(Runtime.sweepArchive)が「載る量」に効くかを実測する
         # ⚠ **`continue-on-error: true` にしない。**重みを取得できなかった run は
