@@ -1604,6 +1604,11 @@ Job Summary へ内訳を残す。**⛔ 門ではない**——`retrieval-quality
 作らない）。値を捏造しないため——最初の CI 実行で得られる artifact を、後続 PR で基準値に
 する（`scripts/time-term-summary.mjs` は `--baseline` を省略しても動く）。
 
+⚠ **2026-09-27 追記（後の ADR との照合）**: 上の「基準値ファイルはまだ無い」は、もう成り立たない。
+`examples/chat/time-term-baseline.json` は、予告どおり初回 CI の artifact から作ってコミットされた
+（PR #222、[ADR 0121](../../docs/decisions/0121-bench-baselines-from-ci-artifacts.md)、2026-09-15）。CI の time-term の段は、
+いまは `--baseline examples/chat/time-term-baseline.json` を渡している（`.github/workflows/ci.yml`）。
+
 ---
 
 ## `validity`: `validAt` ゲートが候補の有無をどう動かすかを測る（Issue #280、Issue #202 第2弾）
@@ -1811,6 +1816,11 @@ Memory を1件も作らない・ラウンドを反復しない**（1回 sweep �
 ——この作業を行った環境に `DATABASE_URL` が無く、実測せずに数値を書くのは捏造になるため。
 `archive-sweep-cost-summary.mjs` は `--baseline` を省略しても動く。初回 CI の artifact を
 後続の PR で基準値にする想定である。
+
+⚠ **2026-09-27 追記（後の ADR との照合）**: 上の「まだコミットされていない」は、もう成り立たない。
+`examples/chat/archive-sweep-baseline.json` は、想定どおり初回 CI の artifact から作ってコミットされた
+（PR #222、[ADR 0121](../../docs/decisions/0121-bench-baselines-from-ci-artifacts.md)、2026-09-15）。CI の archive-sweep-cost の段は、
+いまは `--baseline examples/chat/archive-sweep-baseline.json` を渡している（`.github/workflows/ci.yml`）。
 
 ---
 
