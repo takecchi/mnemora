@@ -15,9 +15,9 @@ import {
  * ——`retrieval-quality-summary-lib.test.mjs`/`identifier-probe-summary-lib.test.mjs`
  * と同じ分担・同じ理由(ADR 0088 / Issue #136)。
  *
- * ⛔ `examples/chat/consolidation-baseline.json` はまだコミットされていない
- * (マネージャーが実測値で作る)。ここで使う measured/baseline はすべて
- * この歯の中で組み立てたインライン fixture である。
+ * `examples/chat/consolidation-baseline.json` は `22c0731`（ADR 0101、2026-09-11）でコミットされている
+ * （この歯の当初のコメントは「まだコミットされていない」と書いていた）。この歯は実物のファイルに
+ * 依存せず、ここで使う measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
  */
 
 function makeProbe(overrides = {}) {

@@ -33,10 +33,11 @@
  * ⟹ 比べるのは`outcome`(離散・run 間で安定)/`totalInScope`/`omittedKinds` だけにする。
  * 連続値は JSON にはそのまま残す(丸めない)——見比べたい人は artifact を見ればよい。
  *
- * ## 基準値ファイルはまだ無い(2026-09)
+ * ## 基準値ファイル(2026-09)
  *
- * `examples/chat/time-term-baseline.json` は本 PR では作らない——値を捏造しないためである。
- * 最初の CI 実行で得られる artifact を、後続 PR で基準値にする。`--baseline` を渡さなければ
+ * このスクリプトを足した PR では、`examples/chat/time-term-baseline.json` を作らなかった——値を
+ * 捏造しないためである。予告どおり、PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた
+ * （CI の time-term の段は `--baseline` でこれを渡している）。`--baseline` を渡さなければ
  * 差分節そのものを出さない(`buildSummaryMarkdown` 参照。`retrieval-quality-summary.mjs`/
  * `identifier-probe-summary.mjs` と同じく `--baseline` は任意)。
  */
@@ -268,7 +269,7 @@ function buildProbeRow(probe) {
  * (`retrieval-quality-summary-lib.mjs`/`identifier-probe-summary-lib.mjs` と同じ分担)。
  *
  * `baseline` は任意(`--baseline` を渡さなければ差分節そのものを出さない
- * ——基準値ファイルがまだ無いため。冒頭 docstring 参照)。
+ * ——`--baseline` は任意であり、基準値ファイルが無くても動く。冒頭 docstring 参照)。
  *
  * @param {{ measured: Record<string, any>, baseline?: { probes: Record<string, unknown>[] } }} input
  */
