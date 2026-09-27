@@ -1115,6 +1115,11 @@ type TaxonomyMode = 'open' | 'strict';
   （上記追記参照）。行が無ければ `DEFAULT_TAXONOMY_MODE`（`'open'`）を返す。
 - `getEventRetention`/`setEventRetention` は**必須**メソッドである——オーナー決定
   「監査ログの保持期間を短縮できる口は必須」（`docs/roadmap.md` §5.4、ADR 0050）による。
+- `setEventRetention` は、書き込む前に値を検査して拒む（`@mnemora/postgres`・`@mnemora/testkit` の fixture とも、core の
+  共有の検査を呼ぶ）。型の外の `kind`（`'unlimited'`・`'days'` のどちらでもない値。型を外した呼び出し・JavaScript から
+  届く）は `assertValidEventRetentionKind` が `EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` で拒み、`kind: 'days'`
+  の `days` が正の整数でなければ `assertValidEventRetentionDays` が `EVENT_RETENTION_DAYS_INVALID_MESSAGE` を含む `Error`
+  で拒む（Issue #1168・PR #1171。以前は型の外の `kind` を無期限として黙って書いていた）。
 - `getDecayClock?`/`setDecayClock?`/`getDefaultHalfLifeRecalls?`/`setDefaultHalfLifeRecalls?`/
   `getActivitySeq?` は**任意**メソッドである。省略時のフォールバック（`readDecayClock`/
   `readActivitySeq`/`readDefaultHalfLifeRecalls`）は `packages/core` 側の1箇所に閉じ込めてあり、
