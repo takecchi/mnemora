@@ -21,6 +21,10 @@ export interface EventStore {
    *
    * どちらでも、ほかのテナントの行とイベントは変わらない。`Runtime` は同じ `ctx` で確かめた
    * id しか渡さない。`docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   *
+   * ⚠ **`event.meta`・`event.actor` の値の中身は検査しない。**JSON で往復しない値と、NUL・孤立サロゲートを
+   * 含む文字列の扱いは adapter によって違う——{@link MemoryEvent.meta} の doc の表を参照
+   * （[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）。
    */
   append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent>;
   /**
