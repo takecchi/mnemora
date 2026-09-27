@@ -218,6 +218,29 @@ const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client })
 文面は zod・SDK のもので、プロンプトの本文や API キーは含まない。`@mnemora/openai` は同じ形を送る前には落とさず、
 送った後に OpenAI が 400 で拒む（あちらの README に実測）。2つの provider の振る舞いをそろえるかは決めていない（#1148）。
 
+**core が渡す4つのスキーマは、送る前の変換を通る**【2026-09-27、偽の `client` で確かめた。**射程は送る前の変換まで**——
+Anthropic の実 API が、送った JSON Schema を受けるかは確かめていない】（歯: `src/__tests__/core-schemas-send-shape.test.ts`）。
+
+| スキーマ（使う口） | 送る JSON Schema の根 |
+| --- | --- |
+| `ExtractionResultSchema`（`observe`・`reextract`） | `type: "object"` |
+| `ClaimKeyBatchResultSchema`（`observe` の `claimKey`） | `type: "object"` |
+| `ConsolidationLLMResultSchema`（`consolidate`） | `type: "object"` |
+| `ReflectionLLMResultSchema`（`reflect`） | `anyOf`（`type` なし。判別可能ユニオンの2つの枝が、どちらも `type: "object"`） |
+
+runtime の5つの口（`observe`・`claimKey` 付きの `observe`・`reextract`・`reflect`・`consolidate`）は、どれも
+`messages.create` まで届いて `output_config.format.schema` を送る。4つのどれにも、送る前に落ちる形（`z.tuple`・`z.date`・
+`transform`）は含まれていない。
+
+⚠ 送る形の中身で、次の2つは確かめたことの記録として書く（直していない）:
+
+- `reflect` は、根が object でない JSON Schema をそのまま送る。`@mnemora/openai` は OpenAI が根に object を要求するので包んで
+  送る（PR #1147）が、Anthropic 側は包んでいない。Anthropic がこの形を受けるかは確かめていない。
+- 判別の値（`outcome` の `"reflected"`/`"nothing"`）と `z.enum` の値（抽出の `provenanceKind` など）は、`transformJSONSchema` が
+  JSON Schema の制約としては残さず、`description` に JSON の文字列として埋め込む（`json-schema.ts` の冒頭のコメント）。
+  返った JSON は `req.schema.parse` で検査するので、値が外れていれば `ZodError`（抽出なら全文フォールバック、
+  `consolidate`/`reflect` なら `llm_failed`）になる。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§4・§5.4 — `LLMProvider` の契約と provider 構成
