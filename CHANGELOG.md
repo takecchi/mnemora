@@ -203,7 +203,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
-- **`@mnemora/postgres` の `PostgresMemoryStore.purgeExpiredEvents` は、同時に走った掃除が同じ行を選ぶと、後の側が実際には消していない行まで `purged` と `events_purged` の `meta.purgedCount` に数えていた**（実測: 8本同時・対象400件・`limit` 300 で、名乗りの合計 2400、実際の削除 300）——実際に消した行（`DELETE … RETURNING`）から件数・期間を取るようにした。1行も消さなかった呼び出しは `events_purged` を積まない。また、保持日数が大きく（約247万日から）cutoff が timestamptz の下限より前になると、`purgeExpiredEventsForTenant` が例外で落ちていた——0件の削除として返す（`@mnemora/core` の cutoff の計算も、`Date` の範囲を越える日数で Invalid Date にならないようにした）。どれを消すか（古い順）は変えていない。
+- **`@mnemora/postgres` の `PostgresMemoryStore.purgeExpiredEvents` は、同時に走った掃除が同じ行を選ぶと、後の側が実際には消していない行まで `purged` と `events_purged` の `meta.purgedCount` に数えていた**（実測: 8本同時・対象400件・`limit` 300 で、名乗りの合計 2400、実際の削除 300、[PR #1129](https://github.com/takecchi/mnemora/pull/1129)）——実際に消した行（`DELETE … RETURNING`）から件数・期間を取るようにした。1行も消さなかった呼び出しは `events_purged` を積まない。また、保持日数が大きく（約247万日から）cutoff が timestamptz の下限より前になると、`purgeExpiredEventsForTenant` が例外で落ちていた——0件の削除として返す（`@mnemora/core` の cutoff の計算も、`Date` の範囲を越える日数で Invalid Date にならないようにした）。どれを消すか（古い順）は変えていない。
   ⚠ doc が約束していた振る舞い（`purged` は実際に削除された行数）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 
 - **LLM が返した tags の空文字・空白だけの要素（`""`・`" "`・全角空白など）が、そのまま `Memory.tags` に書かれ、その名前の proposed ラベルが `listLabels` に出ていた**——`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方で、extract（inline / deferred）・`consolidate`・`reflect` の全経路で起きていた（`reflect` はスキーマが `""` を拒むが `" "` は通していた）。LLM が返した tags を Memory に書く前に、空白だけの要素を捨てる（`@mnemora/core`、[PR #1122](https://github.com/takecchi/mnemora/pull/1122)）。空白でない要素は、並び・重複も含めてそのまま残す。digest の空白（`resolveDigest`）・claim key の空白（`deriveClaimKeys`）を「与えられなかった」として扱うのと同じ扱いである。LLM の tags が全部空白だけなら、LLM が `tags: []` を返したのと同じ空配列になる。
