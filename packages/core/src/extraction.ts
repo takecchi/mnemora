@@ -136,6 +136,13 @@ function buildSubjectCandidateInstruction(subjectCandidates: readonly string[]):
  * 入力がモデルの上限を超えると、provider は API の拒否をそのまま投げ（分類の `kind` は付かない。
  * 各 provider の `errors.ts` 参照）、抽出は LLM の失敗として全文フォールバックへ倒れる
  * ——本文は1文字も落ちずに1件の Memory として残る。
+ * ⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1222](https://github.com/takecchi/mnemora/issues/1222)）:
+ * **`@mnemora/postgres` では、語の多い本文（tsvector が 1MB を超えるもの）はこの Memory を書けない。**
+ * `memories.content` は語彙の索引に入り、tsvector は 1048575 バイトを超えられない。そのため、`observe()` は
+ * DB の例外（`string is too long for tsvector`）を投げる。Observation と extract ジョブは残り、Memory は1件も
+ * 残らない。`tick()` での再試行も同じ所で失敗し、ジョブは `failed` になる。上限は本文の長さではなく tsvector の
+ * 大きさで決まる（ランダムな16進の語では約0.9MB で落ち、空白の無い日本語の続き書きは 1.8MB でも通った）。
+ * testkit の fixture は1件残す。どう直すかは決まっていない。
  */
 export function buildExtractionPrompt(
   observation: Observation,
@@ -273,6 +280,8 @@ function fallbackWholeObservationCandidate(observation: Observation): ExtractedM
  * - `llm_failed_whole_observation` — LLM 呼び出し自体が失敗し、Observation の全文を
  *   1件の Memory として残す安全弁へ倒れた（docs/memory-model.md §4「曖昧なら厚い側に倒す」）。
  *   **この Memory は「抽出された」ものではない。** 未処理の生テキストである。
+ *   ⚠ `@mnemora/postgres` では、語の多い大きな本文だとこの Memory を書けず、`observe()` が DB の例外を
+ *   投げる（{@link buildExtractionPrompt} の doc、Issue #1222）。
  * - `skipped` — この呼び出しでは抽出を実行していない（`deferred`、`memory_usage`、冪等な再送）。
  */
 export type ExtractionOutcome = "ok" | "llm_failed_whole_observation" | "skipped";
