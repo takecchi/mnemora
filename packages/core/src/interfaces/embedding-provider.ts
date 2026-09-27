@@ -48,6 +48,14 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * 保存される（書き分けは `VectorStore.upsert` の doc）。有限性を自分で確かめるのは
  * `@mnemora/local-embedding` だけである（Issue #992）。クエリの埋め込みの側は、
  * 長さ違い・有限でない値とも `recall()` が比較不能として扱う（`RecallQuery.vector` の doc）。
+ *
+ * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)）:
+ * runtime はこの呼び出しに時間の上限を付けず、中断の口（`AbortSignal` など）も渡さない。**`embed` が
+ * 返るまで、呼んだ Runtime の口（`observe`・`recall`・`tick`・`consolidate`・`reflect`・`reextract`）も返らない。
+ * 上限になるのは provider の側の設定だけである（`@mnemora/openai`・`@mnemora/anthropic` は SDK の既定——
+ * 上の #884 の追記、`@mnemora/local-embedding` は推論のタイムアウトを持たない）。待っている間、
+ * runtime は DB の接続を握らない（【実測 2026-09-27】`@mnemora/postgres` で `max: 1` の pool の横から
+ * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
  */
 export interface EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
