@@ -205,9 +205,9 @@ describe("isDeadlineError: 期限の例外だけを見分ける", () => {
           thrownBy(() => execFileSyncWithDeadline(process.execPath, [script], { stdio: "pipe" })),
         ),
       ).toBe(false);
-      expect(isDeadlineError(thrownBy(() => execSyncWithDeadline(command, { stdio: "pipe" })))).toBe(
-        false,
-      );
+      expect(
+        isDeadlineError(thrownBy(() => execSyncWithDeadline(command, { stdio: "pipe" }))),
+      ).toBe(false);
     });
     expect(isDeadlineError(new Error("子（x）が 1 秒で終わらなかった"))).toBe(false);
     expect(isDeadlineError(undefined)).toBe(false);
