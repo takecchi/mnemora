@@ -70,6 +70,9 @@ export function isHalfLifeHoursInRange(value: number): boolean {
  * 「テナントが一度も触っていない」ことと「テナントが無期限を選んだ」ことは別の事実であり、
  * `getEventRetention` の呼び出し側（将来の運用ジョブ・管理画面）がこの2つを区別できないと、
  * 「まだ何も設定していないテナントの一覧」が作れなくなる。
+ *
+ * ⚠ 2026-09-27 追記: ただし今の実装では、保持期間以外の設定を1つでも書くと行ができるので、
+ * 保持期間を一度も触っていないテナントも `unlimited` になる（`getEventRetention` の doc 参照）。
  */
 export type EventRetention =
   { kind: "unset" } | { kind: "unlimited" } | { kind: "days"; days: number };
@@ -321,11 +324,36 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * 参照）——`TenantSettingsStore` と `MemoryStore` は別 adapter であり、この境界を跨いで
  * 1トランザクションを構成することはできない。`getActivitySeq` は**読み出し専用**であり、
  * 段1のゲート（`'activity'`/`'either'`）と書き込み時の `decayBaseSeq` 採番がこの値を読む。
+ *
+ * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: runtime がテナント設定を読む時点は、口によって違う。**
+ * どの口も1回の呼び出しの中で同じ設定を1回だけ読むが、読むのが呼び出しの始めか途中かで、
+ * 呼び出しの最中に設定を変えたときの効き方が変わる（【実測 2026-09-27】`observe`・`consolidate`・
+ * `recall` は、LLM・埋め込みの応答を止めている間に設定を変えて、`@mnemora/postgres` と testkit の
+ * fixture で同じ結果を確かめた。`reextract`・`reflect`・掃除は、同じ関数・同じ位置で読むことを
+ * コードで確かめた）:
+ * - `recall`: decay_clock・`activity_seq`・taxonomy を**呼び出しの始め**（埋め込みの前）に読む。
+ *   呼び出しの最中に変えた設定は、その呼び出しには効かず、**次の呼び出しから**効く。
+ * - `observe`（抽出）・`reextract`・`consolidate`・`reflect`: 書き込む記憶の既定の半減期
+ *   （`getDefaultHalfLifeHours`）と活動時計の入力（decay_clock・`activity_seq`・
+ *   `getDefaultHalfLifeRecalls`）を、**LLM の応答が返った後**、記憶を組み立てる直前に読む。
+ *   LLM を待っている間に変えた設定は、**その呼び出しで書く記憶に効く**。
+ * - `purgeExpiredEventsForTenant`（保持期間の掃除）: `getEventRetention` を呼び出しの始めに読む。
+ * 「呼び出しの始めの値で揃える」ことは約束していない（揃えるのは新しい方針になる）。
  */
 export interface TenantSettingsStore {
   getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
 
-  /** `tenant_settings.event_retention_days` の現在の状態を、3状態を保ったまま返す。 */
+  /**
+   * `tenant_settings.event_retention_days` の現在の状態を、3状態を保ったまま返す。
+   *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）:** `unset` は「そのテナントの設定の行が1つも
+   * 無い」ことであって、「保持期間を一度も設定していない」ことではない。保持期間を触らずに
+   * 別の設定（`setDecayClock`・`setDefaultHalfLifeRecalls`・`setTaxonomyMode`）を1つでも書くと
+   * 行ができ、以後は `{ kind: "unlimited" }` を返す（`event_retention_days` は NULL のまま）
+   * ——【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture の両方で同じ。したがって
+   * `unlimited` は「明示的に無期限と決めた」とは限らない（{@link EventRetention} の doc 参照）。
+   * どちらも無期限として振る舞う点は変わらない。
+   */
   getEventRetention(ctx: Ctx): Promise<EventRetention>;
 
   /**

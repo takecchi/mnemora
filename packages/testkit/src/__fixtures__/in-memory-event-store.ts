@@ -7,6 +7,7 @@ import type {
   NewMemoryEvent,
 } from "@mnemora/core";
 import { nextId } from "./id.js";
+import { assertStorableMemoryEvent } from "./memory-event-check.js";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 
 /**
@@ -24,9 +25,7 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
   // `InMemoryEventStore.append` だけでなく `InMemoryMemoryStore` の
   // `updateStatusWithEvent`/`purgeMemory`/`supersedeWithNewMemories` 等、イベントを積む
   // すべての口が通る単一の合流点であり、ここで検査すればそれらすべてを一度に覆える。
-  if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
-    throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
-  }
+  assertStorableMemoryEvent(event);
   // Issue #1108: 呼び手の入力（`at`・`actor`・`meta`）と切り離して保存する。
   return structuredClone({
     id: nextId("evt"),

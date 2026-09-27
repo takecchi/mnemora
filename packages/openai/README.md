@@ -18,8 +18,10 @@ npm i @mnemora/openai @mnemora/core zod
 
 - Node.js >= 22
 - **ESM のみ**（`"type": "module"`）。CommonJS からは Node 22.12 以降の
-  `require(esm)` で読み込める（TypeScript は `moduleResolution` が `node10` か
-  `nodenext` なら通る。`node16` は `TS1479` になるので `nodenext` にすること）
+  `require(esm)` で読み込める（TypeScript は `module`/`moduleResolution` を `nodenext` にし、TypeScript 5.8 以降を使うこと。
+  5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる。`node10` は TypeScript 5.x なら
+  パッケージの入口の型を解決できるが、`exports` を読まないので `@mnemora/testkit/fixtures` のような
+  subpath は解決できず、TypeScript 6 で非推奨・7 で廃止された。2026-09-27 に TypeScript 5.0〜7.0 で実測）
 - **`OPENAI_API_KEY` 環境変数**（または `apiKey` オプション）が要る。無いと OpenAI SDK の
   呼び出しが認証エラーになる
 - 1つの `OpenAIEmbeddingProvider` インスタンスは1つの埋め込み空間（`provider`/`model`/`dimensions`の組）に固定される。次元をモデルに応じて動的に変える使い方はできない

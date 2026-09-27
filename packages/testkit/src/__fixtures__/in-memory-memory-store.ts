@@ -45,6 +45,7 @@ import type {
   ScopeAggregate,
 } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
+import { assertStorableMemoryEvent } from "./memory-event-check.js";
 import { nextId } from "./id.js";
 
 /**
@@ -745,6 +746,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
       );
     }
+    assertStorableMemoryEvent(event);
     memory.status = status;
     if (opts.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -801,6 +803,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 1. 事前検証——まだ何も書いていないうちに投げる（news の作成も含め、何も起きな
     //    かったのと同じに見せる）。⛔ 3種類の失敗を1つに潰さない（ADR 0100）。
     for (const target of supersede) {
+      assertStorableMemoryEvent(target.event);
       // 1a. 呼び手が壊れた索引を渡した（RangeError。conflicted にも not found にも混ぜない）。
       if (
         !Number.isInteger(target.supersededByIndex) ||
@@ -1621,6 +1624,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (memory.status !== "forgotten" || (memory.purgedAt ?? null) !== null) {
       throw new MemoryPurgeConflictError(id, memory.status, memory.purgedAt ?? null);
     }
+    assertStorableMemoryEvent(event);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.purgedAt = new Date();
@@ -1662,6 +1666,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(second.id, "active", secondMemory.status);
     }
 
+    assertStorableMemoryEvent(first.event);
+    assertStorableMemoryEvent(second.event);
     firstMemory.status = "contested";
     firstMemory.contestedWithId = second.id;
     firstMemory.updatedAt = new Date();
@@ -1723,6 +1729,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
 
+    assertStorableMemoryEvent(first.event);
+    assertStorableMemoryEvent(second.event);
     firstMemory.status = first.status;
     firstMemory.contestedWithId = null;
     if (first.supersededById !== undefined) {
@@ -1765,6 +1773,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(survivor.id, "contested", memory.status);
     }
 
+    assertStorableMemoryEvent(survivor.event);
     memory.status = "active";
     memory.contestedWithId = null;
     memory.updatedAt = new Date();

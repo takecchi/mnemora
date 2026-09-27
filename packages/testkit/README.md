@@ -24,8 +24,10 @@ npm i -D @mnemora/testkit @mnemora/core vitest
 
 - Node.js >= 22
 - **ESM のみ**（`"type": "module"`）。CommonJS からは Node 22.12 以降の
-  `require(esm)` で読み込める（TypeScript は `moduleResolution` が `node10` か
-  `nodenext` なら通る。`node16` は `TS1479` になるので `nodenext` にすること）
+  `require(esm)` で読み込める（TypeScript は `module`/`moduleResolution` を `nodenext` にし、TypeScript 5.8 以降を使うこと。
+  5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる。`node10` は TypeScript 5.x なら
+  パッケージの入口の型を解決できるが、`exports` を読まないので `@mnemora/testkit/fixtures` のような
+  subpath は解決できず、TypeScript 6 で非推奨・7 で廃止された。2026-09-27 に TypeScript 5.0〜7.0 で実測）
 - 呼び出し側が [vitest](https://vitest.dev/) を使っていること（`describeXxxConformance` は
   内部で `describe`/`it`/`expect` を呼ぶ）
 
