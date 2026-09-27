@@ -458,6 +458,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`@mnemora/openai`・`@mnemora/anthropic` の adapter は、API キーの途中に CR・LF・NUL が入っていると、キー全体を含む例外をそのまま伝播していた**（Issue #1080）——Node の `fetch` がヘッダを組む段階で投げる例外文にキーが入り、`observe` の `extractionFailure.message` と outbox の `lastError`（Postgres では DB に保存される）に残っていた。adapter が SDK のクライアントを自分で作るとき（`client` を注入しないとき）、SDK が送るのと同じヘッダの値を構築時に確かめ、送れない値なら**キーを含まない**例外を投げるようにした。`fetch` が受け付ける値（末尾の空白・改行など）はこれまでどおり受け付ける。core 側で例外文を伏せ字にすることはしていない（#1064 と同じく方針の問い）。
   ⭕ 非破壊と数える（上の前書きの追記2を参照。クローン miku の判断であり、オーナーの判断ではない）。
+- **`mnemora-postgres-migrate`（`@mnemora/postgres` の migrate の CLI）に `--` がそのまま渡ると（`pnpm --filter @mnemora/postgres run migrate -- --analyze-memories` のように書いたとき）、`unknown option: --` だけを出して止まり、正しい書き方が分からなかった**——受け付ける入力は変えず（`--` は未知のオプションのまま）、エラー文の2行目に `--` を付けない書き方の例（渡された残りの引数を使う）を足した（PR #1116）。
+  ⭕ 非破壊と数える（エラー文だけの変更。クローン miku の判断であり、オーナーの判断ではない）。
 - **`Runtime.reextract` に使用報告の Observation（`kind: "usage"`、`observe({ kind: "memory_usage" })` が作る）を渡すと、payload の JSON（`recallId` と memoryId の並び）を LLM に送り、それを本文とする `stated` の記憶を作っていた**（Issue #1099）——使用報告は抽出器を通らない約束（`docs/memory-model.md` §2・§6）に反していた。存在しない Observation と同じ種類の `Error` を、LLM も書き込みも試みる前に投げるようにした。書き込み側の差分ファズで見つけた。
   ⭕ 非破壊と数える（上の前書きの追記2を参照。クローン miku の判断であり、オーナーの判断ではない）。
 - **`InMemoryMemoryStore.reinforce`（`@mnemora/testkit` の擬似 `MemoryStore`）に Invalid

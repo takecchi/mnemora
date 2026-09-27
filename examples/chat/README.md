@@ -69,7 +69,7 @@ pnpm --filter @mnemora/example-chat run compare
 #   何度打っても安全（冪等）。理由は packages/postgres/README.md
 #   「⚠ 新規インストール後、最初のデータ投入が終わったら --analyze-memories を実行すること」
 #   ⚠ `run migrate -- --analyze-memories` と書くと `--` がそのまま渡り、
-#      「unknown option: --」で止まる。`run migrate --analyze-memories` と書くこと
+#      「unknown option: --」で止まる（2行目に正しい書き方が出る）。`run migrate --analyze-memories` と書くこと
 pnpm --filter @mnemora/postgres run migrate --analyze-memories
 
 # tenantId/subjectId のスコープを実演する（後述「scope」節）
