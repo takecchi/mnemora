@@ -160,8 +160,9 @@ PGDATA=/path/to/your/work/pgdata
 PGPORT=<自分専用ポート>          # ⛔ 5432 は使わない
 PGSOCK=/path/to/your/work/pgsock
 
+locale -a | grep -i '^c\.utf'          # C.UTF-8 のロケールが在るか（無ければ下の注を見る）
 mkdir -p "$PGSOCK"
-initdb -D "$PGDATA" -U worker --auth=trust --encoding=UTF8 --locale=C
+initdb -D "$PGDATA" -U worker --auth=trust --encoding=UTF8 --locale=C.UTF-8
 pg_ctl -D "$PGDATA" -l /path/to/your/work/pg.log \
   -o "-p $PGPORT -k $PGSOCK -c listen_addresses=127.0.0.1" start
 
@@ -172,7 +173,8 @@ psql -h 127.0.0.1 -p "$PGPORT" -U worker -d mnemora_test \
   -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
 
 export DATABASE_URL="postgresql://worker@127.0.0.1:${PGPORT}/mnemora_test"
-pnpm install --frozen-lockfile
+pnpm install --frozen-lockfile   # 素の clone では「Failed to create bin … mnemora-postgres-migrate」の
+                                 # WARN が出る。dist がまだ無いためで、次の build の後は影響しない
 pnpm --filter @mnemora/core run build
 pnpm --filter @mnemora/postgres run build
 pnpm --filter @mnemora/postgres run migrate
@@ -185,7 +187,12 @@ pg_ctl -D "$PGDATA" stop
 **拡張の3本（`vector` / `btree_gin` / `pgcrypto`）は `.github/workflows/ci.yml` の
 `postgres` ジョブと同じである。**片方だけ増やさないこと。
 
-**⚠ 上の `--encoding=UTF8 --locale=C` は、CI の2脚（`UTF8` / `SQL_ASCII`+`--locale=C`）の
+**⚠ ロケールは `C.UTF-8` にする**（CI の UTF8 脚に相当）。`C.UTF-8` のロケールが無い器では
+`--encoding=SQL_ASCII --locale=C`（CI の SQL_ASCII 脚と同じ）にする。**`--encoding=UTF8 --locale=C` にしないこと**——
+2026-09-27 まではこの手順がその形を書いており、書いてあるとおりに打つと下の4件が赤になった
+（素の clone で打ち直して実測: `--locale=C` で4件赤、`--locale=C.UTF-8` で4件とも緑）。
+
+**⚠ `--encoding=UTF8 --locale=C` は、CI の2脚（`UTF8` / `SQL_ASCII`+`--locale=C`）の
 どちらでもない第三の regime（UTF8+C）である。**【実測】2026-09-26、この regime では
 `packages/postgres/src/__tests__/trigram-lexical-store.postgres.test.ts` の4件が手元でだけ赤になり、
 CI では緑だった。既知の挙動で、同ファイルの docstring が「CI の2脚には無い regime」として対象外にしている。
@@ -194,7 +201,7 @@ CI では緑だった。既知の挙動で、同ファイルの docstring が「
 
 ### 1本に絞って走らせる（変異試験はこちら）
 
-**`test:db` 全体は約4分かかる**【実測】。変異試験では毎回これを待たないこと:
+**`test:db` 全体は約4分かかる**【実測】（2026-09-27 に素の clone で打ち直したときは約9分30秒。器の負荷で変わる）。変異試験では毎回これを待たないこと:
 
 ```bash
 pnpm --filter @mnemora/postgres exec vitest run \
