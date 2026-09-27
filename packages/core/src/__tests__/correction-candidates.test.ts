@@ -17,7 +17,7 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * `runtime.findCorrectionCandidates`（Issue #369 (C)「訂正の口」、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）の歯。
  *
  * 設計の要点（`runtime.ts` の `Runtime.findCorrectionCandidates` の doc コメント参照）:
- * - 書き込みを1件もしない（`markContested`/`resolveContested` の前に立つ）。
+ * - 記憶と監査ログには書き込まない（`markContested`/`resolveContested` の前に立つ。中の recall() が書く recall の記録は Issue #1244）。
  * - LLM を1回も呼ばない——相手探しは既存の `recall()`（ANN + 既存のスコア）だけ。
  * - 新しい閾値を置かない——`recall()` の既定（`scoreThreshold`）をそのまま通す。
  * - `recallRank` は `excludeMemoryIds` で除外した後も詰め直さない。
@@ -208,7 +208,7 @@ describe("runtime.findCorrectionCandidates — limit を守る", () => {
   });
 });
 
-describe("runtime.findCorrectionCandidates — 書き込みを1件もしない", () => {
+describe("runtime.findCorrectionCandidates — 記憶と監査ログには書き込まない", () => {
   it("呼ぶ前後で全 Memory の status が変わらず、memory_events が1件も増えない", async () => {
     const { runtime, stores } = buildRuntime();
     const target = await createCandidate(stores, [8, 0], { digest: "対象の記憶" });
