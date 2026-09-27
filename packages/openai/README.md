@@ -7,10 +7,12 @@ Structured Output（`response_format: json_schema`）へ翻訳する
 ## インストール
 
 ```bash
-pnpm add @mnemora/openai @mnemora/core
+pnpm add @mnemora/openai @mnemora/core zod
 # または
-npm i @mnemora/openai @mnemora/core
+npm i @mnemora/openai @mnemora/core zod
 ```
+
+下の例は `completeStructured` に渡すスキーマを `zod` で作るので、`zod`（`@mnemora/core` と同じメジャー、^4.5.4）も自分の依存として入れる（2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れて確かめた。npm は依存の `zod` を hoist するので `zod` を足さなくても動くことがあるが、pnpm のような厳格な配置では `Cannot find package 'zod'` で止まる）。
 
 ## 前提
 
