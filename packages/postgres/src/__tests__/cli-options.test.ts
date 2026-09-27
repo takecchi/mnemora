@@ -95,6 +95,32 @@ describe("parseMigrateCliOptions: --analyze-memories（Issue #234 / ADR 0143）"
     );
   });
 
+  it("`--` 単体は受け付けず（入力は変えない）、エラー文に `--` を付けない正しい書き方を1行で示す", () => {
+    // `pnpm --filter @mnemora/postgres run migrate -- --analyze-memories` と書くと、pnpm が
+    // `--` をそのまま渡す（examples/chat/README.md の注意書き）。以前は `unknown option: --` だけで、
+    // 次の一手が分からなかった。
+    const result = parseMigrateCliOptions(["--", "--analyze-memories"], {});
+    expectErr(result);
+    const lines = result.error.message.split("\n");
+    expect(lines[0]).toBe("unknown option: --");
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toMatch(/`--` を付けずに/);
+    expect(lines[1]).toContain("run migrate --analyze-memories");
+    expect(lines[1]).not.toContain("migrate -- --");
+  });
+
+  it("`--` の後ろに何も無いときも、正しい書き方を示す", () => {
+    const result = parseMigrateCliOptions(["--"], {});
+    expectErr(result);
+    expect(result.error.message.split("\n")[1]).toMatch(/`--` を付けずに/);
+  });
+
+  it("ほかの未知のオプションのエラー文は変えない（1行のまま）", () => {
+    const result = parseMigrateCliOptions(["--no-such-flag"], {});
+    expectErr(result);
+    expect(result.error.message).toBe("unknown option: --no-such-flag");
+  });
+
   it("--analyze-memories=true のような = 区切りは受け付けず未知のオプションになる（値を取らない真偽フラグのため）", () => {
     const result = parseMigrateCliOptions(["--analyze-memories=true"], {});
     expectErr(result);
