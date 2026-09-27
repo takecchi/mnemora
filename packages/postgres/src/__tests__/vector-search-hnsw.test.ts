@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -52,157 +52,170 @@ async function seed(
   await pool.query("ANALYZE memories");
 }
 
+afterAll(async () => {
+  await closeTestClient();
+});
+
 describe("PostgresVectorStore.search と HNSW 索引", () => {
-  beforeEach(async () => {
-    await resetTestDatabase();
-  });
+  // 下の3件は、同じ3000行（`seed` の乱数は種で固定）を読むだけで書かない。以前は3件が1本ずつ
+  // `resetTestDatabase()` → `seed()` をやり直し、同じ表を3回作っていた（CI で1本あたり約6〜8秒）。
+  // 積むのはこの describe の最初に1回だけにする——読むものは同じなので、見る範囲は変わらない。
+  describe(`${ROW_COUNT} 行を積んだ表で（積むのは1回だけ。3件とも読むだけ）`, () => {
+    beforeAll(async () => {
+      await resetTestDatabase();
+      const { db, pool } = await getTestClient();
+      await seed(
+        new PostgresMemoryStore(db),
+        new PostgresVectorStore(db),
+        { tenantId: TENANT },
+        pool,
+      );
+    }, 120_000);
 
-  afterAll(async () => {
-    await closeTestClient();
-  });
+    it("ORDER BY <=> ... LIMIT の形で EXPLAIN すると HNSW 索引が使われる（再現用の等価クエリ）", async () => {
+      const { pool } = await getTestClient();
 
-  it("ORDER BY <=> ... LIMIT の形で EXPLAIN すると HNSW 索引が使われる（再現用の等価クエリ）", async () => {
-    const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-    await seed(memoryStore, vectorStore, ctx, pool);
-
-    const explainResult = await pool.query(
-      `EXPLAIN (FORMAT TEXT)
+      const explainResult = await pool.query(
+        `EXPLAIN (FORMAT TEXT)
        SELECT memory_id, embedding <=> '[0.5,0.5,0.5]'::vector AS distance
        FROM ${TABLE}
        WHERE tenant_id = $1
        ORDER BY embedding <=> '[0.5,0.5,0.5]'::vector
        LIMIT 10`,
-      [TENANT],
-    );
-    const plan = explainResult.rows
-      .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
-      .join("\n");
-    // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
-    //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
-    //    CI run 番号も Postgres の版も記載が無い。PR #3 の追記にある PostgreSQL 18.6 +
-    //    pgvector 0.8.6 の変異検査は作業環境での実測であり、CI での実測ではない）。
-    //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
-    //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
-    //    (3) ANALYZE / 統計情報（上の seed のコメント参照）。
-    //    ⟹ まず `origin/main` で対照を取ること（DB 段の出力が接続先の版を名指しで出す）。
-    //  見直す合図: ADR 0001（`ORDER BY` に距離演算子をそのまま書く規約）。この歯が赤いとき、
-    //    HNSW が使われない理由が版ではなくクエリの形なら、そこが崩れている。
-    expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
-    expect(plan).not.toMatch(/Seq Scan/);
-  }, 60_000);
+        [TENANT],
+      );
+      const plan = explainResult.rows
+        .map((row: { "QUERY PLAN": string }) => row["QUERY PLAN"])
+        .join("\n");
+      // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
+      //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
+      //    CI run 番号も Postgres の版も記載が無い。PR #3 の追記にある PostgreSQL 18.6 +
+      //    pgvector 0.8.6 の変異検査は作業環境での実測であり、CI での実測ではない）。
+      //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
+      //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
+      //    (3) ANALYZE / 統計情報（上の seed のコメント参照）。
+      //    ⟹ まず `origin/main` で対照を取ること（DB 段の出力が接続先の版を名指しで出す）。
+      //  見直す合図: ADR 0001（`ORDER BY` に距離演算子をそのまま書く規約）。この歯が赤いとき、
+      //    HNSW が使われない理由が版ではなくクエリの形なら、そこが崩れている。
+      expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
+      expect(plan).not.toMatch(/Seq Scan/);
+    }, 60_000);
 
-  it("PostgresVectorStore.search が実際に発行するクエリ自体が EXPLAIN で HNSW 索引を使う", async () => {
-    // 上のテストは「同じ形のクエリなら索引が使われる」ことしか確認しない。
-    // ここでは vectorStore.search() が実際に組み立てる SQL 文字列とパラメータを捕捉し、
-    // それをそのまま EXPLAIN する——`ORDER BY` を式にする回帰（例: `1 - (embedding <=> ...)`
-    // のような書き換え）が入ったら、このテストだけが検出できる。
-    const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-    await seed(memoryStore, vectorStore, ctx, pool);
+    it("PostgresVectorStore.search が実際に発行するクエリ自体が EXPLAIN で HNSW 索引を使う", async () => {
+      // 上のテストは「同じ形のクエリなら索引が使われる」ことしか確認しない。
+      // ここでは vectorStore.search() が実際に組み立てる SQL 文字列とパラメータを捕捉し、
+      // それをそのまま EXPLAIN する——`ORDER BY` を式にする回帰（例: `1 - (embedding <=> ...)`
+      // のような書き換え）が入ったら、このテストだけが検出できる。
+      const { db, pool } = await getTestClient();
+      const vectorStore = new PostgresVectorStore(db);
+      const ctx: Ctx = { tenantId: TENANT };
 
-    const captured = await captureClientQuery(
-      (text) => text.includes(TABLE) && /order by/i.test(text),
-      () =>
-        vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0.5, 0.5, 0.5], {
-          limit: 10,
-          filter: { tenantId: TENANT },
-        }),
-    );
+      const captured = await captureClientQuery(
+        (text) => text.includes(TABLE) && /order by/i.test(text),
+        () =>
+          vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0.5, 0.5, 0.5], {
+            limit: 10,
+            filter: { tenantId: TENANT },
+          }),
+      );
 
-    // ⚠ `pool.query("EXPLAIN ...")` で素朴に EXPLAIN しない——`search()` は
-    // `db.transaction()` の中で ADR 0284 の `SET LOCAL` を発行してから SELECT する。
-    // `explainCaptured` は捕まえた `SET LOCAL` を同じ transaction の文脈で再生して
-    // から EXPLAIN するので、本番と同じプランナ設定でプランを読む
-    // （詳細は test-db.ts の doc コメント）。
-    const plan = await explainCaptured(pool, captured);
-    // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
-    //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
-    //    CI run 番号も Postgres の版も記載が無い。PR #3 の追記にある PostgreSQL 18.6 +
-    //    pgvector 0.8.6 の変異検査は作業環境での実測であり、CI での実測ではない）。
-    //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
-    //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
-    //    (3) ANALYZE / 統計情報（上の seed のコメント参照）。
-    //    ⟹ まず `origin/main` で対照を取ること（DB 段の出力が接続先の版を名指しで出す）。
-    //  見直す合図: ADR 0001（`ORDER BY` に距離演算子をそのまま書く規約）。この歯が赤いとき、
-    //    HNSW が使われない理由が版ではなくクエリの形なら、そこが崩れている。
-    expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
-    expect(plan).not.toMatch(/Seq Scan/);
-  }, 60_000);
+      // ⚠ `pool.query("EXPLAIN ...")` で素朴に EXPLAIN しない——`search()` は
+      // `db.transaction()` の中で ADR 0284 の `SET LOCAL` を発行してから SELECT する。
+      // `explainCaptured` は捕まえた `SET LOCAL` を同じ transaction の文脈で再生して
+      // から EXPLAIN するので、本番と同じプランナ設定でプランを読む
+      // （詳細は test-db.ts の doc コメント）。
+      const plan = await explainCaptured(pool, captured);
+      // ⚠ この2行はプランナの選択を assert している——版・統計・データ規模に依存する。
+      //  測った版: **分からない**（この歯を足した PR #3 の本文に、この assert を通した
+      //    CI run 番号も Postgres の版も記載が無い。PR #3 の追記にある PostgreSQL 18.6 +
+      //    pgvector 0.8.6 の変異検査は作業環境での実測であり、CI での実測ではない）。
+      //    言えるのは「CI（`pgvector/pgvector:pg17`）では通っている」までである（配線から読める事実）。
+      //  赤くなったら疑うもの: (1) 自分の変更 (2) 実行中の Postgres のメジャー版
+      //    (3) ANALYZE / 統計情報（上の seed のコメント参照）。
+      //    ⟹ まず `origin/main` で対照を取ること（DB 段の出力が接続先の版を名指しで出す）。
+      //  見直す合図: ADR 0001（`ORDER BY` に距離演算子をそのまま書く規約）。この歯が赤いとき、
+      //    HNSW が使われない理由が版ではなくクエリの形なら、そこが崩れている。
+      expect(plan).toMatch(/Index Scan.*using idx_memory_embeddings_hnsw/);
+      expect(plan).not.toMatch(/Seq Scan/);
+    }, 60_000);
 
-  it("search() は実際に limit 件以内のヒットを距離昇順で返す（機能としての往復確認）", async () => {
-    const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-    await seed(memoryStore, vectorStore, ctx, pool);
+    it("search() は実際に limit 件以内のヒットを距離昇順で返す（機能としての往復確認）", async () => {
+      const { db } = await getTestClient();
+      const vectorStore = new PostgresVectorStore(db);
+      const ctx: Ctx = { tenantId: TENANT };
 
-    const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0.5, 0.5, 0.5], {
-      limit: 10,
-      filter: { tenantId: TENANT },
-    });
-    expect(hits.length).toBeLessThanOrEqual(10);
-    for (let i = 1; i < hits.length; i += 1) {
-      expect(hits[i]!.distance).toBeGreaterThanOrEqual(hits[i - 1]!.distance);
-    }
-  }, 60_000);
-
-  it("filter.status で絞り込むと、対象外の status の Memory は search に現れない", async () => {
-    const { db } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-
-    const activeMemory = await memoryStore.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: TENANT, status: "active" }),
-    );
-    const supersededMemory = await memoryStore.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: TENANT, status: "superseded" }),
-    );
-    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, activeMemory.id, [1, 0, 0]);
-    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, supersededMemory.id, [1, 0, 0]);
-
-    const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [1, 0, 0], {
-      limit: 10,
-      filter: { tenantId: TENANT, status: ["active"] },
-    });
-    const hitIds = hits.map((hit) => hit.memoryId);
-    expect(hitIds).toContain(activeMemory.id);
-    expect(hitIds).not.toContain(supersededMemory.id);
+      const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [0.5, 0.5, 0.5], {
+        limit: 10,
+        filter: { tenantId: TENANT },
+      });
+      expect(hits.length).toBeLessThanOrEqual(10);
+      for (let i = 1; i < hits.length; i += 1) {
+        expect(hits[i]!.distance).toBeGreaterThanOrEqual(hits[i - 1]!.distance);
+      }
+      // 積んだ行が実際に読めていること（積むのを1回にしたので、空の表で緑にならないことを見る）。
+      expect(hits.length).toBe(10);
+    }, 60_000);
   });
 
-  it("filter.decayFloorAtAfter で絞り込める", async () => {
-    const { db } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-
-    const farFuture = new Date("2099-01-01T00:00:00.000Z");
-    const past = new Date("2000-01-01T00:00:00.000Z");
-
-    const freshMemory = await memoryStore.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: TENANT, decayFloorAt: farFuture }),
-    );
-    const staleMemory = await memoryStore.createMemory(
-      ctx,
-      buildNewMemoryFixture({ tenantId: TENANT, decayFloorAt: past }),
-    );
-    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, freshMemory.id, [1, 0, 0]);
-    await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, staleMemory.id, [1, 0, 0]);
-
-    const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [1, 0, 0], {
-      limit: 10,
-      filter: { tenantId: TENANT, decayFloorAtAfter: new Date("2050-01-01T00:00:00.000Z") },
+  // 絞り込みの2件は、それぞれ自分で行を書く。1件ずつ空の表から始める（今までどおり）。
+  describe("絞り込み（1件ずつ空の表から）", () => {
+    beforeEach(async () => {
+      await resetTestDatabase();
     });
-    const hitIds = hits.map((hit) => hit.memoryId);
-    expect(hitIds).toContain(freshMemory.id);
-    expect(hitIds).not.toContain(staleMemory.id);
+
+    it("filter.status で絞り込むと、対象外の status の Memory は search に現れない", async () => {
+      const { db } = await getTestClient();
+      const memoryStore = new PostgresMemoryStore(db);
+      const vectorStore = new PostgresVectorStore(db);
+      const ctx: Ctx = { tenantId: TENANT };
+
+      const activeMemory = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: TENANT, status: "active" }),
+      );
+      const supersededMemory = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: TENANT, status: "superseded" }),
+      );
+      await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, activeMemory.id, [1, 0, 0]);
+      await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, supersededMemory.id, [1, 0, 0]);
+
+      const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: TENANT, status: ["active"] },
+      });
+      const hitIds = hits.map((hit) => hit.memoryId);
+      expect(hitIds).toContain(activeMemory.id);
+      expect(hitIds).not.toContain(supersededMemory.id);
+    });
+
+    it("filter.decayFloorAtAfter で絞り込める", async () => {
+      const { db } = await getTestClient();
+      const memoryStore = new PostgresMemoryStore(db);
+      const vectorStore = new PostgresVectorStore(db);
+      const ctx: Ctx = { tenantId: TENANT };
+
+      const farFuture = new Date("2099-01-01T00:00:00.000Z");
+      const past = new Date("2000-01-01T00:00:00.000Z");
+
+      const freshMemory = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: TENANT, decayFloorAt: farFuture }),
+      );
+      const staleMemory = await memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: TENANT, decayFloorAt: past }),
+      );
+      await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, freshMemory.id, [1, 0, 0]);
+      await vectorStore.upsert(ctx, TEST_EMBEDDING_SPACE, staleMemory.id, [1, 0, 0]);
+
+      const hits = await vectorStore.search(ctx, TEST_EMBEDDING_SPACE, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: TENANT, decayFloorAtAfter: new Date("2050-01-01T00:00:00.000Z") },
+      });
+      const hitIds = hits.map((hit) => hit.memoryId);
+      expect(hitIds).toContain(freshMemory.id);
+      expect(hitIds).not.toContain(staleMemory.id);
+    });
   });
 });
