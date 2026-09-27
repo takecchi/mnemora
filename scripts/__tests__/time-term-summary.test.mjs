@@ -14,8 +14,8 @@ import { afterEach, describe, expect, it } from "vitest";
  * 🔴 **このファイルが固定している線**:
  *
  * 1. **基準値と相違しても exit 0**(⛔ 門ではない。ADR 0058 / ADR 0088 §2.1)。
- * 2. **`--baseline` を省略しても exit 0**——基準値ファイルはまだコミットされていない
- *    (本 PR の時点)ので、これが動かないと CI の summary 段そのものが組めない。
+ * 2. **`--baseline` を省略しても exit 0**——この歯を書いた時点では基準値ファイルが未コミットで、
+ *    これが動かないと CI の summary 段そのものが組めなかった（`examples/chat/time-term-baseline.json` は、その後 PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた）。
  * 3. **入力そのものが壊れていれば非0**(JSON が読めない・parse できない・probes が
  *    欠ける・outcome が未知の値・`--baseline` が壊れている)。
  *

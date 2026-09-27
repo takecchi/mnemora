@@ -545,6 +545,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   既存の空間にこの索引を作る `0022_embedding_zero_norm_index.sql` は、実テーブルだけを
   対象にする——同じスキーマに `memory_embeddings_` で始まるビューが在っても migration は
   止まらない（[Issue #1038](https://github.com/takecchi/mnemora/issues/1038)、ADR 0343 追記 2026-09-27）。
+- **いくつかの例外の文面が、起きたことと違う・直し方が分からない・本文を丸ごと載せる形だった**——例外の種類・
+  受け付ける入力・公開の定数（`*_MESSAGE`・`*_ERROR_PREFIX`）は変えず、文面だけを直した。
+  `MemoryStatusConflictError` はどの口から投げても `MemoryStore.updateStatus:` と名乗っていた（今は `MemoryStore:`
+  と、読み直して判断し直す旨）。`@mnemora/openai` の切り詰めは設定の無い `max_tokens` を上げるよう勧めていた
+  （`@mnemora/anthropic` は `stop_reason` ごとの直し方を書いた）。`@mnemora/postgres` の埋め込み空間の次元・SQL 識別子の
+  拒否に、受け付ける値を書いた。`@mnemora/testkit` の `RecordedEmbeddingProvider`/`RecordedLLMProvider` は記録に無い
+  入力の本文を丸ごと載せていた（今は先頭 80 文字と全体の長さ）。`InMemoryEventStore`/`InMemoryVectorStore` の
+  「対象なし」は、同じ失敗の他の文面と同じく `memory not found for tenant:` と名乗る。
+  ⭕ 非破壊と数える（エラー文だけの変更。クローン miku の判断であり、オーナーの判断ではない）。
 
 ---
 

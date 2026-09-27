@@ -58,7 +58,7 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
       if (entry === undefined) {
         throw new Error(
           "RecordedEmbeddingProvider: この入力は記録に無い（黙って擬似ベクトルへ倒れない）。" +
-            `入力: ${JSON.stringify(text)}。` +
+            `入力: ${describeRecordedInput(text)}。` +
             "probe set や会話生成を変えたのなら、実キーを設定して記録し直すこと" +
             "（examples/chat の `record` サブコマンド）。",
         );
@@ -73,4 +73,16 @@ export class RecordedEmbeddingProvider implements EmbeddingProvider {
       return entry.vector;
     });
   }
+}
+
+/**
+ * 記録に無かった入力を、例外の文面に載せる形にする。本文を丸ごと載せない——長い発話や
+ * 文書を入れると例外文（とそれを写すログ・CI の出力）が本文で埋まるため、先頭 80 文字と
+ * 全体の長さだけを出す。どの入力かを見分けるには、これで足りる。
+ */
+function describeRecordedInput(text: string): string {
+  const LIMIT = 80;
+  const chars = Array.from(text);
+  if (chars.length <= LIMIT) return JSON.stringify(text);
+  return `${JSON.stringify(chars.slice(0, LIMIT).join(""))}…（全 ${chars.length} 文字）`;
 }

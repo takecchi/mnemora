@@ -13,7 +13,8 @@ import { afterEach, describe, expect, it } from "vitest";
  *
  * DB は要求しない——このスクリプトは JSON ファイル1〜2個を読むだけである。
  *
- * ⛔ `examples/chat/archive-sweep-baseline.json` はまだコミットされていない。ここで使う
+ * `examples/chat/archive-sweep-baseline.json` は PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた
+ * （この歯が書かれた時点では未コミットだった）。この歯は実物のファイルに依存せず、ここで使う
  * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
  */
 

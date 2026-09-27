@@ -35,8 +35,11 @@ export class MemoryStatusConflictError extends Error {
     readonly observedStatus: MemoryStatus | null,
   ) {
     super(
-      `MemoryStore.updateStatus: expected status "${expectedStatus}" for memory ${memoryId}, ` +
-        `but observed ${observedStatus === null ? "(memory disappeared)" : `"${observedStatus}"`}`,
+      `MemoryStore: expected status "${expectedStatus}" for memory ${memoryId}, ` +
+        `but observed ${observedStatus === null ? "(memory disappeared)" : `"${observedStatus}"`}` +
+        " — the write was rejected because the memory was not in the expected status" +
+        " (for example, another write changed it first). Re-read the memory and decide again" +
+        " instead of retrying blindly.",
     );
     this.name = "MemoryStatusConflictError";
   }
@@ -1584,6 +1587,13 @@ export interface MemoryStore {
    *   詳細は ADR 0318「決めたこと」）。
    * - `registeredAt` は `status: 'registered'` のときだけ非 null。
    * - テナントに1件も無ければ空配列。例外にしない。
+   *
+   * ⚠ 2026-09-27 追記（今の振る舞いを書くだけ）:
+   * - **テナントの全ラベルを1回で返す。**ページング（件数の上限・続きから読む口）は無い。
+   * - **ラベルの行は消えない。**`tags` にその名前を持つ Memory が全部 `forgotten`・`archived`・
+   *   `superseded` になっても、行は残り、`proposedCount` も減らない。⟹ 誰も使わなくなった
+   *   `proposed` のラベルも一覧に出続ける。消す口・却下する口は無い（`registerLabel?` の追記）。
+   *   purge した Memory の語が残る件は Issue #995。
    */
   listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
 
@@ -1603,6 +1613,15 @@ export interface MemoryStore {
    * - 既に `registered` であれば、`registeredAt` を変えずに現在の行をそのまま返す
    *   （何度呼んでも同じ結果になる——冪等）。
    * - 戻り値は更新後の `LabelSummary`。
+   *
+   * ⚠ **状態は `proposed` → `registered` の一方向だけである**（2026-09-27 追記、今の振る舞いを
+   * 書くだけ）。`registered` を `proposed` へ戻す口も、ラベルを却下・削除する口も無い。
+   * `name` の形は検査しない——`""`・空白だけの名前もそのまま `registered` の行になる
+   * （`@mnemora/postgres`・testkit とも。`tags` の要素と同じく完全一致の語彙で、正規化もしない。
+   * `docs/memory-model.md` §8 の 2026-09-27 追記）。`@mnemora/postgres` では、NUL を含む名前は
+   * 例外になり、孤立サロゲートは U+FFFD に置き換わり、索引の1行の上限を超える長い名前は例外に
+   * なる（`Ctx` の doc、Issue #1074）。testkit は置き換えも長さの上限も持たず、そのまま受け入れる
+   * （NUL を Postgres に揃えて拒むのは PR #1135）。
    */
   registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
 }

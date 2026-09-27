@@ -210,7 +210,10 @@ export async function registerEmbeddingSpace(
   options: RegisterEmbeddingSpaceOptions = {},
 ): Promise<RegisterEmbeddingSpaceResult> {
   if (!Number.isInteger(space.dimensions) || space.dimensions <= 0) {
-    throw new Error(`invalid embedding space dimensions: ${space.dimensions}`);
+    throw new Error(
+      `invalid embedding space dimensions: ${space.dimensions} ` +
+        "(正の整数である必要がある。テーブルは作成していない)",
+    );
   }
   // ADR 0018 C-2: pgvector の hnsw 索引は vector 型に対して2000次元までしか受け付けない
   // （HNSW_VECTOR_INDEX_MAX_DIMENSIONS のコメントに出典）。テーブルを作る前に、この上限を
