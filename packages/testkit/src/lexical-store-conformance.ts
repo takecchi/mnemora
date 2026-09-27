@@ -20,9 +20,13 @@ import type { Ctx, LexicalStore, MemoryId, MemoryStatus, ProvenanceKind } from "
  * `vector-store-conformance.ts` の `PrepareMemoryIdAttrs` の doc と同じ（CHECK 制約、ADR 0056）。
  */
 export interface PrepareLexicalMemoryAttrs {
+  /** 用意する Memory の本文（語彙の一致の歯が使う）。 */
   content: string;
+  /** 用意する Memory の `status`（`filter.status` の歯が使う）。 */
   status?: MemoryStatus;
+  /** 用意する Memory の `subjectId`（`filter.subjectId` の歯が使う）。 */
   subjectId?: string;
+  /** 用意する Memory の `provenance.kind`（`filter.excludeProvenanceKinds` の歯が使う。上の doc: `stated`・`inferred` は渡さない）。 */
   provenanceKind?: ProvenanceKind;
   /** ADR 0039: `filter.occurredAfter`/`occurredBefore` の歯が使う。 */
   occurredAt?: Date | null;
@@ -38,8 +42,11 @@ export interface PrepareLexicalMemoryAttrs {
   tags?: string[];
 }
 
+/** {@link describeLexicalStoreConformance} に渡す設定。 */
 export interface LexicalStoreConformanceOptions {
+  /** 見出し（`describe` の名前）に出す adapter の名前。 */
   name: string;
+  /** 新しい store を返す関数。各 `it` の中で1回ずつ呼ぶので、テストケースごとに独立した状態を持つ store を返すこと。 */
   createStore: () => LexicalStore | Promise<LexicalStore>;
   /**
    * 実在する `content` を持つ Memory を用意するフック。`LexicalStore` は upsert/delete を
