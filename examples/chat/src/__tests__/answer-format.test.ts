@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatAnswerQualityBanner } from "../answer-format.js";
+import { formatAnswerInputReduction, formatAnswerQualityBanner } from "../answer-format.js";
 
 /**
  * `formatAnswerQualityBanner` の**陽性対照**（Issue #577 / ADR 0260 の増分）。
@@ -43,5 +43,49 @@ describe("formatAnswerQualityBanner — 陽性対照（バナーは廃止され�
 
   it("openai でもバナーが出ない", () => {
     expect(formatAnswerQualityBanner("openai")).toBe("");
+  });
+});
+
+/**
+ * `formatAnswerInputReduction` の見出しと値の向き。
+ * 【実測 2026-09-27、空の DB で `run answer`】以前は「入力量の削減率 … chars -26.3%
+ * （合計 3924 → 4956）」と出ていた——値は定義（`(naive - mnemora) / naive`）どおりだが、
+ * mnemora のほうが26%多いのに「削減率 -26.3%」と読めるので、「26%削った」と読み違えやすい。
+ * ⟹ 見出しに差の向き（mnemora − 全文。負なら mnemora が少ない）を書き、値にも言葉を添える。
+ * どちらの向きでも正しく読めることを見る。
+ */
+describe("formatAnswerInputReduction — 差の向きを読み違えない", () => {
+  const results = (naiveChars: number, mnemoraChars: number) =>
+    [
+      {
+        naive: { inputChars: naiveChars, inputEstimatedTokens: naiveChars },
+        mnemora: { inputChars: mnemoraChars, inputEstimatedTokens: mnemoraChars },
+      },
+    ] as never;
+
+  it("見出しに差の向き（mnemora − 全文、負なら mnemora が少ない）を書く", () => {
+    const text = formatAnswerInputReduction(results(3924, 4956));
+    expect(text).toContain("mnemora − 全文");
+    expect(text).toContain("負なら mnemora が少ない");
+    expect(text).not.toContain("削減率");
+  });
+
+  it("mnemora が多いときは +差 と「多い」", () => {
+    const text = formatAnswerInputReduction(results(3924, 4956));
+    expect(text).toContain("3924 → 4956");
+    expect(text).toContain("+1032");
+    expect(text).toContain("mnemora が 26.3% 多い");
+  });
+
+  it("mnemora が少ないときは −差 と「少ない」", () => {
+    const text = formatAnswerInputReduction(results(1000, 250));
+    expect(text).toContain("-750");
+    expect(text).toContain("mnemora が 75.0% 少ない");
+  });
+
+  it("同じなら「同じ」", () => {
+    const text = formatAnswerInputReduction(results(500, 500));
+    expect(text).toContain("±0");
+    expect(text).toContain("同じ");
   });
 });

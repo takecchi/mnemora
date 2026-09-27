@@ -142,14 +142,26 @@ export function formatAnswerContentPreservation(results: readonly AnswerCaseRunR
  * ——入力量は品質の主張ではない（`answer-json.ts` の `AnswerInputReductionJson`
  * docstring 参照）。計算は `computeInputReduction`（`answer-json.ts`）に委ね、
  * ここでは表示用の書式だけを持つ。
+ *
+ * **見出しに差の向きを書き、値にも言葉を添える**——以前は「入力量の削減率 … chars -26.3%」
+ * と出ていた。値は定義（`(naive - mnemora) / naive`）どおりだが、mnemora のほうが多いのに
+ * 「削減率 -26.3%」と読めるので、「26%削った」と読み違えやすかった。いまは
+ * 「mnemora − 全文の差（負なら mnemora が少ない）: chars 3924 → 4956（+1032、mnemora が 26.3% 多い）」
+ * の形で出す。JSON（`AnswerInputReductionJson`）の欄と値は変えていない。
  */
 export function formatAnswerInputReduction(results: readonly AnswerCaseRunResult[]): string {
   const r = computeInputReduction(results);
-  const pct = (ratio: number): string => `${(ratio * 100).toFixed(1)}%`;
+  const describe = (naive: number, mnemora: number, reductionRatio: number): string => {
+    const diff = mnemora - naive;
+    const signedDiff = diff > 0 ? `+${diff}` : diff < 0 ? `${diff}` : "±0";
+    const pct = `${(Math.abs(reductionRatio) * 100).toFixed(1)}%`;
+    const words =
+      diff > 0 ? `mnemora が ${pct} 多い` : diff < 0 ? `mnemora が ${pct} 少ない` : "同じ";
+    return `${naive} → ${mnemora}（${signedDiff}、${words}）`;
+  };
   return (
-    "入力量の削減率（naive→mnemora。⛔ judge 等の追加呼び出し費用は差し引いていない）: " +
-    `chars ${pct(r.charReductionRatio)}（合計 ${r.naiveInputChars} → ${r.mnemoraInputChars}） / ` +
-    `tokens(概算) ${pct(r.tokenReductionRatio)}` +
-    `（合計 ${r.naiveInputEstimatedTokens} → ${r.mnemoraInputEstimatedTokens}）`
+    "入力量の mnemora − 全文の差（負なら mnemora が少ない。⛔ judge 等の追加呼び出し費用は含めていない）: " +
+    `chars ${describe(r.naiveInputChars, r.mnemoraInputChars, r.charReductionRatio)} / ` +
+    `tokens(概算) ${describe(r.naiveInputEstimatedTokens, r.mnemoraInputEstimatedTokens, r.tokenReductionRatio)}`
   );
 }

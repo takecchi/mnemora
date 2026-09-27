@@ -1043,7 +1043,7 @@ async function recordAnswer(
 
     // 記録しながら実測もできてしまうので、その場で出す（`recordCompare` と同じ規律）。
     console.log(`\n${formatAnswerTable(results, handle.llmMode)}`);
-    console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
+    console.log("\n--- 追加費用(別ブロック。⛔ 下の入力量の差には含めない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
     console.log(formatAnswerContentPreservation(results));
@@ -2308,7 +2308,7 @@ async function runAnswer(): Promise<void> {
     );
 
     console.log(formatAnswerTable(results, handle.llmMode));
-    console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
+    console.log("\n--- 追加費用(別ブロック。⛔ 下の入力量の差には含めない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
     console.log(formatAnswerContentPreservation(results));

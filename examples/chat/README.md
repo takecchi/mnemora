@@ -1840,9 +1840,12 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer   # 記
   観測でなくなるため（`docs/autonomy.md` §2.2 決定5）。judge の呼び出し回数は
   `answerLLMCalls` とは別勘定（`judgeLLMCalls`）で数える。
 - 追加費用（取り込み時の抽出 LLM 呼び出し・埋め込み呼び出し・回答生成の LLM 呼び出し・
-  judge の LLM 呼び出し）は別ブロックで出す。⛔ 削減率からは差し引かない。
-- **入力量の削減率は `qualityClaimable` に関係なく常に出す**（`inputReduction`、
-  JSON では `AnswerRunJson.inputReduction`）——入力量そのものは品質の主張ではない。
+  judge の LLM 呼び出し）は別ブロックで出す。⛔ 入力量の差には含めない。
+- **入力量は `qualityClaimable` に関係なく常に出す**（JSON では `AnswerRunJson.inputReduction`）
+  ——入力量そのものは品質の主張ではない。画面では「mnemora − 全文の差（負なら mnemora が少ない）」
+  として、合計・差・「mnemora が N% 多い／少ない」を並べる（`削減率` と書くと、mnemora が
+  多いときの負の値を「削った」と読み違えやすいため）。JSON の `charReductionRatio`/
+  `tokenReductionRatio` は従来どおり `(naive - mnemora) / naive`（正なら mnemora が少ない）。
 
 **⭐ 追記（Issue #693 / 親 #498、ADR 0296）: 層2（回答に必要な情報の保持）の決定的な指標。**
 出典への到達（`compare` の `factStatementSurvived`）・最終回答の正しさ（`verdict`/
