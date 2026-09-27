@@ -263,8 +263,8 @@ export interface RuntimeDeps {
    * 常に元のままで、このフックは送る文字列だけを差し替える。
    *
    * 使い方の例: 上限超過で `embeddingStatus: 'failed'` になった Memory を、先頭を
-   * 切って短くする関数を渡し、`reembed({ statuses: ['failed'], limit })` →
-   * `tick({ kinds: ['embed'] })` の順に呼ぶと、対象は `'ready'` に戻る
+   * 切って短くする関数を渡し、`runtime.reembed(ctx, { statuses: ['failed'], limit })` →
+   * `runtime.tick(ctx, { kinds: ['embed'], leaseMs })` の順に呼ぶと、対象は `'ready'` に戻る
    * （`Memory.content` は全文のまま）。
    *
    * 🔴 **core はモデルごとの入力上限・トークン数を持たない**（ADR 0305 決定6 /
@@ -2081,7 +2081,7 @@ export interface Runtime {
    * ⚠ **埋め込みの入力上限を超えて `failed` になった Memory は、この口だけでは戻らない**
    * （Issue #753）——次の `tick()` がまた同じ `memory.content` を送り、同じ理由で
    * `failed` に戻る。戻すには {@link RuntimeDeps.embeddingInput}（任意フック、ADR 0336）を
-   * 渡した runtime でこの口を呼び、続けて `tick({ kinds: ['embed'] })` を呼ぶ
+   * 渡した runtime でこの口を呼び、続けて `tick(ctx, { kinds: ['embed'], leaseMs })` を呼ぶ
    * （`Memory.content` は変わらない）。既定では何も切らない。
    *
    * ⚠ **埋め込み空間を切り替えた後の、古い空間で `ready` の記憶は、この口では積み直せない**
