@@ -213,10 +213,12 @@ check-run は時間とともに増える（Issue #228 観測1）⟹ **一部し�
 「引けなかったから従来どおり」に倒さない（⚠ base branch 自体が決まらない等、`gh` の
 呼び出しそのものが失敗した場合は、従来どおり `3`）。
 
-⚠ **この下限が守るのは required の集合だけである。**【実測】CI の check は13本、うち
-required は6本（Issue #426）⟹ **残りの7本（測定ジョブ）が *登録されたか* について、
-この道具は何も保証しない**——7本がまだ登録されていなくても、required の6件が揃って
-success なら緑になる。⛔ **「残り7本は見なくてよい」ではない。「この道具は、残りが揃うのを
+⚠ **この下限が守るのは required の集合だけである。**CI の check は required より多い（required の集合は
+`.github/required-status-checks.json`、check の全体は `.github/workflows/ci.yml` が正。本数は `main` が動けば変わるので
+ここには写さない——`AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」。【実測】Issue #426 の時点〔2026-09-16〕では
+13本のうち required は6本だった）⟹ **required でない check（測定ジョブ）が *登録されたか* について、
+この道具は何も保証しない**——それらがまだ登録されていなくても、required の集合が揃って
+success なら緑になる。⛔ **「required でない check は見なくてよい」ではない。「この道具は、残りが揃うのを
 待っていない」である。** ⚠ なお「登録された check は全部 success」は required かどうかに
 関わらず要求し続ける（旧来どおり）——required でない check が `failure` なら `red` になる。
 
