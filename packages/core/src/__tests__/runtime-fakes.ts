@@ -442,7 +442,7 @@ export class FakeMemoryStore implements MemoryStore {
       // `Math.fround` を通しても有限のままなので、この検査は既存の「壊れた」テストを
       // 壊さない。
       //
-      // ⚠ `strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]` であり float4 の
+      // ⚠ **上側については**、`strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]` であり float4 の
       // 範囲へ遠く届かない——上の `isStrengthInRange` の時点で `1e300` のような値は
       // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
       // ため、`strength` にはこの検査を足さない。
@@ -450,6 +450,19 @@ export class FakeMemoryStore implements MemoryStore {
         throw new Error(
           `FakeMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
         );
+      }
+      // 下側（アンダーフロー）: `packages/testkit` の `InMemoryMemoryStore` と同じ検査
+      // （そちらのコメント参照）。0 でない値が float4 で 0 に丸まるときだけ拒む——
+      // `halfLifeHours: 0`（上の「壊れた」Memory）はここでは見ない。
+      for (const [field, value] of [
+        ["halfLifeHours", input.halfLifeHours],
+        ["strength", input.strength],
+      ] as const) {
+        if (value !== 0 && Math.fround(value) === 0) {
+          throw new Error(
+            `FakeMemoryStore: ${field} does not fit in a Postgres "real" (float4) column (got ${value}; rounds to 0)`,
+          );
+        }
       }
       // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
       // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date

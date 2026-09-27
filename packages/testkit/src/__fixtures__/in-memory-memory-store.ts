@@ -412,7 +412,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       // その丸めで `Infinity` になるかどうかは Postgres の `real` 変換が overflow するか
       // どうかとビット単位で一致する（`setDefaultHalfLifeRecalls`、PR #815 と同じ判定）。
       //
-      // ⚠ `strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]`（`MAX_STRENGTH` は
+      // ⚠ **上側については**、`strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]`（`MAX_STRENGTH` は
       // 上の `isStrengthInRange` が使う定数、`packages/core/src/memory.ts`）であり
       // float4 の範囲へ遠く届かない——`isStrengthInRange` の時点で `1e300` のような値は
       // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
@@ -421,6 +421,23 @@ export class InMemoryMemoryStore implements MemoryStore {
         throw new Error(
           `InMemoryMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
         );
+      }
+      // 下側（アンダーフロー）: Postgres の `real` は、0 でない値が float4 で 0 に丸まるときも
+      // `"…" is out of range for type real` で拒む（実測: `halfLifeHours: 1e-300`・`strength: 1e-46`
+      // は拒み、`strength: 1e-45`＝float4 の非正規数に収まる値は受け付ける）。境界は
+      // 「`Math.fround(x)` が 0 になるか」とビット単位で一致する（上の上側の検査と同じ形）。
+      // `strength` も同じ `real` 列なので、値域 `(0, MAX_STRENGTH]` の中の値でもここに当たる
+      // ——上側（`1e300`）が値域の検査で先に拒まれるのとは違い、下側は値域の中に在る。
+      // `0` そのものは「0 に丸まった」のではないので、ここでは見ない（値域の検査の担当）。
+      for (const [field, value] of [
+        ["halfLifeHours", input.halfLifeHours],
+        ["strength", input.strength],
+      ] as const) {
+        if (value !== 0 && Math.fround(value) === 0) {
+          throw new Error(
+            `InMemoryMemoryStore: ${field} does not fit in a Postgres "real" (float4) column (got ${value}; rounds to 0)`,
+          );
+        }
       }
       // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
       // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date

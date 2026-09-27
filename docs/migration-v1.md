@@ -1012,6 +1012,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore.requeueEmbedJobs` が、Postgres の拒む `limit`（負数・`NaN`・`Infinity`・非整数・2^63 以上）で例外を投げるようになった（PR #1058）。
   - `@mnemora/testkit/fixtures` の `InMemoryOutboxStore.claimBatch` が、リースの境界時刻が `Date` にならない `leaseMs`（`NaN`・`±Infinity`・範囲外）で例外を投げるようになった（PR #1059）。
   - `@mnemora/testkit/fixtures` の擬似 store が、bigint に収まらない `limit`（2^63 以上）で例外を投げるようになった（PR #1061）。
+  - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、float4 で 0 に丸まる `halfLifeHours`・`strength`（例: `1e-300`）で例外を投げるようになった（PR #__PR__）。
 - ⭕ **非破壊と数えたもの**——例外を投げなくなった修正と、例外を投げず公開の fixture の結果だけが変わる修正。**この判定はクローン miku の判断であり、オーナーの判断ではない（覆りうる）。**
   - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。⚠ 公開の fixture ではないので、狭めた基準の文言には当たらない。扱いをクローン miku に確認しているあいだ、ここに置く。 有限でないベクトルを返すのはもともと `EmbeddingProvider` の約束に反した出力であり、それを黙って返すのをやめた修正なので非破壊と数える（クローン miku の判断。オーナーの判断ではない）。
   - 公開の fixture の結果だけが変わるもの: `InMemoryLexicalStore` の一致判定を `PostgresLexicalStore` に揃えた件（Issue #951。非 ASCII だけのクエリが0件になるなど）・同点の並び順（PR #875）・クエリの上限（PR #919）、`InMemoryMemoryStore.listLabels?` の並び順（PR #906）、`InMemoryVectorStore` の次元違いの距離を `NaN` にする件（PR #915）・距離 `NaN` の候補の位置（PR #985）、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail`（PR #830）、`search` の3口が `ctx.tenantId` でも絞る件（Issue #1050、PR #1056。`@mnemora/postgres` も同じ）。
