@@ -29,6 +29,7 @@
 | 0.8 | `CHANGELOG.md` の `[1.0.0]` 節 | **人間が読んで、`origin/main` の現在地に対して古くないと判断したこと**（⛔ コマンドでは判定できない。⚠ **`packages/*/src` の差分を数えると、マイグレーションの追加のように `src` を触らない変更を取りこぼす**） |
 | 0.9 | `docs/release-notes-v1.0.0.md` | **`origin/main` に在り**、人間が読んで**いま切る tag と合っている**と判断したこと（⛔ 0.8 とは別物。⚠ **GitHub Release の本文に貼る元がこれである**） |
 | 0.10 | 🔴 `CHANGELOG.md` の **出す版**の節 | `origin/main` の `CHANGELOG.md` に `## [X.Y.Z]` の節が**在る**（⚠ **§5.5 から移した項目**。🔴 **2026-09-23 以降、これを外しても機械は止めない**——門は撤回された。[ADR 0267](./decisions/0267-withdraw-the-release-changelog-publish-gate.md)） |
+| 0.11 | `pnpm run check:consumer-install` | **exit 0**・`✔ 外から入れた確認を通った` が出る（**DB 不要・npm registry が要る**。約30〜50秒） |
 
 ### 0.1 `origin/main` の CI が緑であること
 
@@ -614,6 +615,32 @@ git show origin/main:CHANGELOG.md | grep -n "^## \[${TAG#v}\]" || echo "✗ 節�
 ——⛔ **機械が見ていない項目であり、出した後にしか確かめられない形のままだからである。**
 
 ---
+
+### 0.11 `pnpm run check:consumer-install` が通ること（**DB 不要・npm registry が要る**）
+
+```bash
+pnpm run check:consumer-install
+```
+
+**通過条件**: **exit 0** で、最後に `✔ 外から入れた確認を通った` が出ること。段ごとに `✔`/`✖` が出る——
+pack → tarball の `exports` と利用者が頼ってよい入口の一覧の突き合わせ → repo の外への `npm install`
+（`--ignore-scripts`・`--install-strategy=nested`）→ 型検査（`moduleResolution` `node16`・`bundler`、
+`skipLibCheck: true`）→ ESM で全入口を import。`✖` の段の下に、落ちた理由が出る。
+⚠ その後ろの `⚠ この確認が見ていない範囲:` の段は赤ではない（見ていない範囲の断りである）。
+
+**何を見るか**: 利用者が `npm install` した先から、出荷6パッケージの入口（`@mnemora/testkit/fixtures` を含む）が
+型でも実行でも引けること。0.2 の `pack:check` は tarball の中身（入口が指すファイルが在るか）までで、
+**入口の一覧が変わっていないこと・実際の型の解決・hoist に頼らず依存が揃っていること**は見ない。
+
+**⚠ 既定の CI には入れていない。**npm registry から依存を取り（キャッシュが空なら約 550MB）、ロックファイル無しで
+範囲を解決するので、上流の新しい版で PR と無関係に赤になりうる——**だからリリースの前に人が打つ**
+（[ADR 0346](./decisions/0346-consumer-install-check-before-release.md)。
+[ADR 0267](./decisions/0267-withdraw-the-release-changelog-publish-gate.md) の「出す版の確認は人が行う」の線）。
+赤になったら、落ちた段の理由を読み、上流の版のずれ（利用者も同じものを受け取る）か、この repo の変更かを見分けること。
+入口の一覧（`scripts/check-consumer-install-lib.mjs` の `EXPECTED_ENTRY_POINTS`）と作業ツリーの `exports` が
+揃っていることだけは、既定の CI（`scripts/__tests__/check-consumer-install-lib.test.mjs`）でも見ている。
+
+【実測 2026-09-27、この器】合計 26〜51秒（npm のキャッシュが温まっていれば 26〜37秒、空なら 41〜51秒）。
 
 ## 凡例（この文書のすべての記述は、次のいずれかである）
 
