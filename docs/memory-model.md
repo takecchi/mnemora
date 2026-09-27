@@ -815,6 +815,29 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
   （[ADR 0320](./decisions/0320-claim-key-field-implementation.md)、`packages/core/src/claim-key.ts`）。
   tags・labels にはその約束が無い。
 
+**⚠ 2026-09-27 追記（ラベルの一生、今の振る舞いを書くだけ）: ラベルの行は作られるだけで、消えない。
+状態は `proposed` → `registered` の一方向だけである。**`@mnemora/postgres` と testkit の
+`InMemoryMemoryStore` の両方で、次のとおり動く（2026-09-27 に同じ筋書きを両方へ当てて一致した）。
+
+| 出来事 | ラベル |
+|---|---|
+| `tags` を持つ Memory が新しく作られる（抽出・統合・省察・再抽出の新しい行を含む） | その名前の行が無ければ `proposed`・`proposedCount: 1` で作る。`proposed` なら `proposedCount` を1進める。`registered` なら何も変えない |
+| `registerLabel?` | 行が無ければ `registered`・`proposedCount: 0` で作る。`proposed` なら `registered` にする。`registered` なら何もしない（冪等） |
+| Memory が `forgotten`・`archived`・`superseded` になる | **何も変わらない**（行も `proposedCount` も残る） |
+| Memory を purge する | 何も変わらない（[Issue #995](https://github.com/takecchi/mnemora/issues/995) の射程） |
+| `registered` を `proposed` に戻す・ラベルを却下する・消す | **口が無い** |
+
+⟹ 利用者から見ると、次の2つが起こる。
+- **誰も使わなくなった `proposed` のラベルも、`listLabels?` に出続ける。**例: タグ `m` の記憶を1件作って
+  archive すると、`m` は `proposed`・`proposedCount: 1` のまま残る。
+- **`proposedCount` は、いま生きている記憶の数と大きく離れうる。**例: タグ `k` の記憶を2件作って forget と
+  archive にし、さらに2件作ってから `supersedeWithNewMemories` で1件へ統合すると、生きている `k` の記憶は
+  1件なのに、`proposedCount` は 5 になる（作成4件 + 統合先1件）。ADR 0318「引き受けた負債」1 のとおりの
+  近似値である。
+
+`listLabels?` はテナントの全ラベルを1回で返し、ページングは無い。**使われなくなったラベルを消すか、
+却下の状態を足すか、`proposedCount` を生きた記憶の数に直すかは、新しい方針になる。決めていない。**
+
 ---
 
 ## 9. 監査ログ
