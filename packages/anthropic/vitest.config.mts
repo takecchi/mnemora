@@ -11,6 +11,12 @@ export default defineConfig({
     alias: {
       "@mnemora/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
       "@mnemora/openai": fileURLToPath(new URL("../openai/src/index.ts", import.meta.url)),
+      // `@mnemora/testkit/fixtures` は base の `@mnemora/testkit` より前に書く（packages/postgres/vitest.config.mts
+      // と同じ理由: vite のエイリアスは「pattern + '/'」の前方一致も見るので、base を先に書くと
+      // `.../testkit/src/index.ts/fixtures` に化ける）。api-key-header-safety.test.ts（Issue #1080）が使う。
+      "@mnemora/testkit/fixtures": fileURLToPath(
+        new URL("../testkit/src/fixtures.ts", import.meta.url),
+      ),
       "@mnemora/testkit": fileURLToPath(new URL("../testkit/src/index.ts", import.meta.url)),
     },
   },

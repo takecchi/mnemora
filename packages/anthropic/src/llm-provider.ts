@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import { assertApiKeyFitsInHeader } from "./api-key.js";
 import { AnthropicLLMProviderError } from "./errors.js";
 import { translateForAnthropicStructuredOutput } from "./json-schema.js";
 
@@ -145,7 +146,25 @@ export class AnthropicLLMProvider implements LLMProvider {
   private readonly maxTokens: number;
 
   constructor(options: AnthropicLLMProviderOptions) {
-    this.client = options.client ?? new Anthropic({ apiKey: options.apiKey });
+    if (options.client !== undefined) {
+      this.client = options.client;
+    } else {
+      const client = new Anthropic({ apiKey: options.apiKey });
+      // Issue #1080: SDK は `apiKey` を `x-api-key` で、`authToken`（`ANTHROPIC_AUTH_TOKEN` から
+      // 読まれうる）を `Authorization: Bearer <authToken>` で送る。`api-key.ts` の doc コメント参照。
+      if (client.apiKey != null) {
+        assertApiKeyFitsInHeader("AnthropicLLMProvider", "apiKey", "x-api-key", client.apiKey);
+      }
+      if (client.authToken != null) {
+        assertApiKeyFitsInHeader(
+          "AnthropicLLMProvider",
+          "authToken",
+          "authorization",
+          `Bearer ${client.authToken}`,
+        );
+      }
+      this.client = client;
+    }
     this.model = options.model;
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
