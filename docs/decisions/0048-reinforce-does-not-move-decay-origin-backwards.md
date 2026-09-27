@@ -114,3 +114,28 @@ RETURNING *
   古くなることは無い。書き換える経路が入ると、**この ADR が塞いだのとは別の穴が開く。**
 - **「強化」が起点を前へ動かすこともある、と決まる**とき（例: 誤って強化したものを取り消す）。
   ⟹ その操作は `reinforce` ではない別の名前を持つべきである、というのが本 ADR の立場。
+
+## 追記（2026-09-27、[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)）: 未強化の記憶では、作成時刻を起点として比べる
+
+クローン miku の判断で、委譲先が直した（オーナーではない、[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決めたこと・採らなかった案・引き受けた負債）は書き換えていない。**当時の記録として残す。
+
+**何が食い違っていたか**: この ADR の見出しは「減衰の起点を巻き戻さない」だが、決めたことの SQL
+（`last_reinforced_at IS NULL OR last_reinforced_at < at`）は `last_reinforced_at` どうしの順序しか見ていなかった。
+未強化の記憶（`last_reinforced_at` が NULL）の起点は作成時刻（`recorded_at`）なのに、NULL なら `at` によらず書くので、
+作成時刻より前の `at` で `reinforce` すると、起点が作成時刻より前へ戻り、`decay_floor_at` が早まっていた
+——この ADR が測った壊れ方（使われたことを記録しようとして寿命を縮める）が、この境界でそのまま起きていた。
+活動時計の欄（`decay_base_seq`/`decay_floor_seq`、[ADR 0165](./0165-decay-activity-clock.md)）も同時に進んでいた。
+`@mnemora/postgres` と `@mnemora/testkit` の fixture・core の Fake で同じだった（実測）。
+
+**直し方（クローン miku の判断）**: 規則を1つにした——**`at` が起点（`last_reinforced_at ?? recorded_at`）より
+狭義に新しいときだけ書く。そうでなければ、活動時計の欄も含めて何も書かない。**SQL は
+`COALESCE(last_reinforced_at, recorded_at) < at`（`reinforce`・`reinforceMany`・`recordUsageAndReinforce` の共通の条件）。
+作成時刻ちょうどの `at` も、既存の `last_reinforced_at` の比較（狭義の `<`）にそろえて書かない。
+
+**採らなかった案**: 作成時刻に丸めて書く（`last_reinforced_at` を作成時刻にし、活動時計は進める）。未強化の記憶だけを
+例外扱いにすることになり、強化済みの記憶で古い `at` を活動時計の欄も含めて丸ごと no-op にしている既存の規則と
+食い違うため。
+
+**射程**: 活動時計のテナントで、`recorded_at` を書いた時計が runtime の時計より進んでいる使用報告は、この版から
+強化にならない（壁時計・活動時計のどちらでも）。

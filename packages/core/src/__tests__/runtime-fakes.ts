@@ -991,11 +991,9 @@ export class FakeMemoryStore implements MemoryStore {
     if (Number.isNaN(at.getTime())) {
       throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
     }
-    if (
-      memory.lastReinforcedAt !== null &&
-      memory.lastReinforcedAt !== undefined &&
-      memory.lastReinforcedAt.getTime() >= at.getTime()
-    ) {
+    // 起点（lastReinforcedAt ?? recordedAt）より新しい at のときだけ書く（Issue #1093）。未強化の
+    // 記憶では作成時刻が起点なので、それより前・ちょうどの at は、活動時計の欄も含めて何も書かない。
+    if ((memory.lastReinforcedAt ?? memory.recordedAt).getTime() >= at.getTime()) {
       return memory;
     }
     memory.lastReinforcedAt = at;
