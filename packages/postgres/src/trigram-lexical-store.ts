@@ -556,7 +556,10 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  * `coverage` の中身だけに使う形は変えていない——`jaTerm` に `LEFT(...)`（文字数の上限）を
  * 足したことは、この形自体には影響しない（`LEFT` も `query` の束縛パラメータだけに
  * 依存する IMMUTABLE な式であり、他リレーションの列参照にはしていない）。
- * `trigram-lexical-store.postgres.test.ts` の索引の歯がそのまま通ることを確認している。
+ * 索引の歯（`trigram-lexical-store-index.postgres.test.ts`）がそのまま通ることを確認している。
+ * ⚠ 2026-09-28 訂正（[Issue #1260](https://github.com/takecchi/mnemora/issues/1260)）: 以前はこの歯の在りかを
+ * `trigram-lexical-store.postgres.test.ts` と書いていたが、そのファイルにも他のどこにも歯は無かった。
+ * `lexical-store-index.test.ts` と同じ作法で、上の名前のファイルに置いた。
  *
  * **Issue #1050: `opts.ctxTenantId` は `buildLexicalSearchSelect` と同じ欄・同じ意味**
  * （`filter.tenantId` との AND。`PostgresTrigramLexicalStore.search` は常に `ctx.tenantId`
