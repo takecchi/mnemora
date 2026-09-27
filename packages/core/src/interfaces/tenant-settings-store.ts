@@ -108,6 +108,32 @@ export function assertValidEventRetentionDays(days: number): void {
 }
 
 /**
+ * `setEventRetention` に型の外の `kind`（`EventRetentionSetting` の `"unlimited"`・`"days"` の
+ * いずれでもない値）を渡したときに両実装が投げる `Error` のメッセージに必ず含める文字列
+ * （`DECAY_CLOCK_INVALID_MESSAGE` と同じ形、Issue #1168）。
+ */
+export const EVENT_RETENTION_KIND_INVALID_MESSAGE =
+  "event retention kind must be 'unlimited' or 'days'";
+
+/**
+ * `value` が `EventRetentionSetting` の `kind`（`"unlimited"`・`"days"`）のいずれかであることを
+ * 検査する。不正なら `EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` を投げる。
+ * `assertValidDecayClock` と同じ形——`packages/postgres`・`packages/testkit` の両方の
+ * `setEventRetention` 実装がこの関数を呼ぶことで、検査の種類を1箇所に固定する。
+ *
+ * Issue #1168（クローン miku の判断）: 以前は両実装とも `kind === "days"` のときだけ日数を検査し、
+ * それ以外はすべて無期限として書いていた——型の外の `kind`（綴りの誤りなど）が、例外に
+ * ならずに保持期間を無期限にしていた。
+ */
+export function assertValidEventRetentionKind(
+  value: string,
+): asserts value is EventRetentionSetting["kind"] {
+  if (value !== "unlimited" && value !== "days") {
+    throw new Error(EVENT_RETENTION_KIND_INVALID_MESSAGE);
+  }
+}
+
+/**
  * 減衰の時計の種類（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
  * 決めたこと1）。
  *

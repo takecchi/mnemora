@@ -838,6 +838,8 @@ export type EventRetentionSetting = Exclude<EventRetention, {
 }>;
 export declare const EVENT_RETENTION_DAYS_INVALID_MESSAGE = "event retention days must be a positive integer";
 export declare function assertValidEventRetentionDays(days: number): void;
+export declare const EVENT_RETENTION_KIND_INVALID_MESSAGE = "event retention kind must be 'unlimited' or 'days'";
+export declare function assertValidEventRetentionKind(value: string): asserts value is EventRetentionSetting["kind"];
 export type DecayClock = "wall" | "activity" | "either";
 export declare const DEFAULT_DECAY_CLOCK: DecayClock;
 export declare const DEFAULT_HALF_LIFE_RECALLS = 720;

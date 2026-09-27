@@ -101,6 +101,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Added
 
+- **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
 - **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
   同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
   `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
@@ -208,6 +209,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`TenantSettingsStore.setEventRetention` は、型の外の `kind`（`{ kind: "bogus" }` や綴りの誤り `{ kind: "Days", days: 30 }` など）を、例外にせずに保持期間を無期限（`event_retention_days = NULL`）として書いていた**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)）——`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方で同じ。短くしたつもりの呼び出しが、黙って「消さない」に倒れていた。`kind` が `"unlimited"`・`"days"` のどちらでもなければ、`EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` を投げ、何も書かない（`assertValidEventRetentionKind`、上の Added。`setDecayClock`・`setTaxonomyMode` が型の外の文字列を実行時に拒むのと同じ形）。
+  ⚠ 新しく例外を投げるが、型の外の `kind` は一度も意図どおりに動いたことの無い入力であり、それを本物の adapter が早めに拒むものなので、非破壊と数える（#1080・#1099・#1156 と同じ扱い。**クローン miku の判断であり、オーナーの判断ではない**）。testkit の fixture も新しく投げるが、core の共有の検査で Postgres と同時に変わるので、問い `3f3411c5` の保留には入れず、この項目1つで数える。
 - **`@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore` は、半減期の2つの口で、Postgres の `real`（float4）列が拒む値を受け付けていた**——`setDefaultHalfLifeRecalls` は float4 で 0 に丸まる値（例: `1e-46`）を、fixture だけの口 `setDefaultHalfLifeHours` は float4 で溢れる値（`1e39`・`Number.MAX_VALUE`）と 0 に丸まる値を受け付けて、そのまま返していた（Postgres は `"…" is out of range for type real` や CHECK で拒む）。`createMemory` の `halfLifeHours`（PR #1095）と同じく「`Math.fround(x)` が `Infinity` か 0 になるか」で拒む。非正規数に収まる値（`1e-40`）は受け付ける（[PR #1165](https://github.com/takecchi/mnemora/pull/1165)）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`@mnemora/openai` の `OpenAILLMProvider.completeStructured` は、根が object でないスキーマ（core の `ReflectionLLMResultSchema` のような判別可能ユニオン）を、OpenAI の strict な Structured Outputs が受け付けない形で送っていた**——根が `oneOf` のままで、`openai` SDK 自身の strict 変換（`toStrictJsonSchema`）は `Root schema must have type: 'object'` で拒み、実 API も HTTP 400（`'oneOf' is not permitted`）で拒んだ。⟹ `runtime.reflect()` を OpenAI の provider で呼ぶと、毎回 `llm_failed` になっていた。根が object でないスキーマは1つの欄 `result` を持つ object に包んで送り、返った値をその欄から取り出してから検査する。あわせて `oneOf` を `anyOf` にする（SDK が「strict は `oneOf` を受け付けない」とする。[PR #1147](https://github.com/takecchi/mnemora/pull/1147)）。根が object のスキーマは、送る形も読む形も変わらない（`translateForOpenAIStructuredOutput` の返り値も同じ）。
