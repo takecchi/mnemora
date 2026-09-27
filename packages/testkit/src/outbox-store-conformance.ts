@@ -7,14 +7,21 @@ import {
   type OutboxStore,
 } from "@mnemora/core";
 
+/** `OutboxStoreConformanceOptions.seedJob` に渡る、作ってほしい outbox の行。 */
 export interface SeedOutboxJobInput {
+  /** ジョブの種別。 */
   kind: OutboxJobKind;
+  /** ジョブの中身。suite が渡さないこともあるので、省略時の値は adapter が決めてよい。 */
   payload?: Record<string, unknown>;
+  /** claim できるようになる時刻。suite は未来の時刻を渡して「まだ取れない」ことを測る。省略時は、すぐ claim できる時刻にすること。 */
   availableAt?: Date;
 }
 
+/** {@link describeOutboxStoreConformance} に渡す設定。 */
 export interface OutboxStoreConformanceOptions {
+  /** 見出し（`describe` の名前）に出す adapter の名前。 */
   name: string;
+  /** 新しい store を返す関数。各 `it` の中で1回ずつ呼ぶので、テストケースごとに独立した状態を持つ store を返すこと。 */
   createStore: () => OutboxStore | Promise<OutboxStore>;
   /**
    * `OutboxStore` 単体には「積む」操作が無い（`enqueue` は `MemoryStore.createObservationWithOutbox`

@@ -55,6 +55,7 @@ const NONEXISTENT_MEMORY_ID = randomUUID();
  */
 const NOT_FOUND_ERROR_MESSAGE = /memory not found for tenant/;
 
+/** {@link describeMemoryStoreConformance} に渡す設定。必須のフックと、`supports*` の宣言（実装していない任意メソッドの歯を skip にする）を持つ。 */
 export interface MemoryStoreConformanceOptions {
   /** テスト出力に出す adapter 名（例: "postgres", "in-memory"）。 */
   name: string;

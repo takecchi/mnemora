@@ -27,8 +27,11 @@ const INVALID_DECAY_CLOCK_ERROR = new RegExp(DECAY_CLOCK_INVALID_MESSAGE);
  */
 const INVALID_TAXONOMY_MODE_ERROR = new RegExp(TAXONOMY_MODE_INVALID_MESSAGE);
 
+/** {@link describeTenantSettingsStoreConformance} に渡す設定。 */
 export interface TenantSettingsStoreConformanceOptions {
+  /** 見出し（`describe` の名前）に出す adapter の名前。 */
   name: string;
+  /** 新しい store を返す関数。各 `it` の中で1回ずつ呼ぶので、テストケースごとに独立した状態を持つ store を返すこと。 */
   createStore: () => TenantSettingsStore | Promise<TenantSettingsStore>;
   /**
    * テナントの `default_half_life_hours` を明示的に設定するためのフック。
