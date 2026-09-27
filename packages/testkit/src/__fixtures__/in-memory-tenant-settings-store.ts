@@ -1,6 +1,7 @@
 import {
   assertValidDecayClock,
   assertValidEventRetentionDays,
+  assertValidEventRetentionKind,
   assertValidHalfLifeRecalls,
   assertValidTaxonomyMode,
   DEFAULT_DECAY_CLOCK,
@@ -120,6 +121,8 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
+    // Issue #1168: 型の外の kind を、無期限として書かずに拒む（decay_clock・taxonomy と同じ形）。
+    assertValidEventRetentionKind(retention.kind);
     if (retention.kind === "days") {
       assertValidEventRetentionDays(retention.days);
     }
