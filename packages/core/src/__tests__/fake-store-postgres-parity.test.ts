@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { NewMemory } from "../memory.js";
+import type { NewObservation } from "../observation.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
@@ -563,5 +564,74 @@ describe("FakeMemoryStore.createMemory: digest に NUL 文字を含むと Postgr
     await expect(
       memoryStore.createMemory(ctx, fixture({ digest: "abc\u0000def" })),
     ).rejects.toThrow(/digest must not contain NUL/);
+  });
+});
+
+/**
+ * `packages/testkit` の `in-memory-fixtures-observation-nul.test.ts` と同じ判定を、
+ * `packages/core` 専用の Fake に当てる（Issue #816 の NUL 側の残り）。Postgres は
+ * Observation の `text` 列（`subjectId`・`externalId`・`kind`）と `jsonb` 列（`payload`・
+ * `attributes`）、`createMemory` の `jsonb` 列（`attributes`・`provenance`）の NUL を拒む
+ * （実測は testkit 側のテストのコメント参照）。
+ */
+describe("FakeMemoryStore: Observation の口と createMemory の jsonb 列は、NUL を含む値を Postgres と同じく拒む", () => {
+  const observation = (overrides: Partial<NewObservation>): NewObservation => ({
+    tenantId: TENANT,
+    subjectId: null,
+    externalId: null,
+    kind: "utterance",
+    payload: { text: "こんにちは" },
+    occurredAt: null,
+    validFrom: null,
+    validUntil: null,
+    attributes: {},
+    ...overrides,
+  });
+  const cases: [label: string, overrides: Partial<NewObservation>][] = [
+    ["subjectId", { subjectId: "subject\u0000" }],
+    ["externalId", { externalId: "ext\u0000" }],
+    ["kind", { kind: "utterance\u0000" }],
+    ["payload の値", { payload: { text: "a\u0000b" } }],
+    ["payload のキー", { payload: { "te\u0000xt": "a" } }],
+    ["payload の入れ子", { payload: { name: "n", data: { deep: ["ok", { v: "a\u0000" }] } } }],
+    ["attributes の値", { attributes: { k: "a\u0000b" } }],
+  ];
+  for (const [label, overrides] of cases) {
+    it(`createObservationWithOutbox: ${label} に NUL → 例外、extract ジョブを積まない`, async () => {
+      const { memoryStore, outboxStore } = createFakeRuntimeStores();
+      await expect(
+        memoryStore.createObservationWithOutbox(ctx, observation(overrides), ["extract"]),
+      ).rejects.toThrow(/must not contain NUL characters/);
+      const jobs = await outboxStore.claimBatch(ctx, {
+        limit: 10,
+        now: new Date("2100-01-01T00:00:00.000Z"),
+        claimedBy: "test",
+        leaseMs: 1,
+      });
+      expect(jobs).toEqual([]);
+    });
+  }
+
+  it("NUL でない値（結合文字・ZWJ・RTL・異体字セレクタ・文字どおりの \\u0000）は受け入れる", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const text = "é 👨‍👩‍👧 שלום 葛\u{E0100} \\u0000";
+    const created = await memoryStore.createObservation(
+      ctx,
+      observation({ payload: { text }, attributes: { k: text } }),
+    );
+    expect((await memoryStore.getObservation(ctx, created.id))?.payload).toEqual({ text });
+  });
+
+  it("createMemory: attributes / provenance に NUL → 例外", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(
+      memoryStore.createMemory(ctx, fixture({ attributes: { k: "a\u0000" } })),
+    ).rejects.toThrow(/attributes must not contain NUL characters/);
+    await expect(
+      memoryStore.createMemory(
+        ctx,
+        fixture({ contentHash: "h-prov", provenance: { kind: "imported", batchId: "b\u0000" } }),
+      ),
+    ).rejects.toThrow(/provenance must not contain NUL characters/);
   });
 });
