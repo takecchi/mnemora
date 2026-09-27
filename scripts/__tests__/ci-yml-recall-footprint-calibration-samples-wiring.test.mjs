@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
@@ -235,7 +235,7 @@ describe("ci.yml の example-chat ジョブの recall-footprint-calibration-samp
       writeFileSync(measuredPath, JSON.stringify(measured, null, 2), "utf8");
       const summaryPath = join(workspace, "step-summary.md");
       writeFileSync(summaryPath, "", "utf8");
-      const result = spawnSync("bash", ["-c", script], {
+      const result = spawnSyncWithDeadline("bash", ["-c", script], {
         cwd: repoRoot,
         encoding: "utf8",
         env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath },

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { findInconsistentLegs, parseInitdbArgs } from "../initdb-args-lib.mjs";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { normalizeWorkflowExpressions } from "../workflow-expression-lib.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⚠ **2026-09-12 追記(Issue #155)**: `postgres` ジョブを `server_encoding` の
@@ -386,7 +386,7 @@ function runSummaryStepFromWorkflow(fileState, content, leg = DEFAULT_LEG) {
     }
     const summaryPath = join(workspace, "step-summary.md");
     writeFileSync(summaryPath, "", "utf8");
-    const result = spawnSync("bash", ["-c", script], {
+    const result = spawnSyncWithDeadline("bash", ["-c", script], {
       cwd: repoRoot,
       encoding: "utf8",
       env: { ...process.env, GITHUB_STEP_SUMMARY: summaryPath },
