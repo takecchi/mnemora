@@ -307,6 +307,15 @@ function isPermissionDenied(message: string): boolean {
  * {@link TrigramLexicalProbeResult}（`cause` を持たない）を返す薄いラッパーであり、
  * 元の Postgres エラーを運ぶのは export しない {@link probeTrigramLexicalSupportWithCause}
  * のほうである（{@link PostgresTrigramLexicalStore.create} が使う）。
+ *
+ * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの、[Issue #1256](https://github.com/takecchi/mnemora/issues/1256)）:
+ * 手順3の `CREATE EXTENSION` は `SCHEMA` を指定しない。**`pg_trgm` は `search_path` の先頭——専用スキーマの
+ * 構成（`createPostgresClient` に `schema` を渡したとき）では接続の名前空間のスキーマ——に入り、`runMigrations`
+ * が必須の拡張を入れる `extensionSchema`（既定 `public`）には入らない。そのため、同じ DB の2つ目の名前空間では、
+ * 手順3は何もせず（`IF NOT EXISTS`）、手順4の `word_similarity` が見えずに **`{ ok: false, reason }` ではなく
+ * DB の例外（`42883`）を投げる**（`create()` も同じ例外で、`TrigramLexicalStoreUnavailableError` ではない）。
+ * `pg_trgm` が既に `extensionSchema` などの共通のスキーマに在れば起きない。
+ * 【実測 2026-09-28】`trigram-probe-dedicated-schema.postgres.test.ts`。
  */
 export async function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexicalProbeResult> {
   const result = await probeTrigramLexicalSupportWithCause(db);
