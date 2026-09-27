@@ -300,14 +300,14 @@ export interface VectorStore {
    * **adapter を新しく書くときは、距離だけでなく完全なタイブレークまで含めて
    * 決定的な順序を返すこと。**
    *
-   * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの、[Issue #1268](https://github.com/takecchi/mnemora/issues/1268)）:
-   * 何が「距離の同点」になるか自体が、ベクトルを保存する精度で adapter ごとに違う。**`PostgresVectorStore`
-   * （pgvector の `vector` 型）は成分を float4 で持ち、`@mnemora/testkit` の `InMemoryVectorStore` は丸めずに持つ。
-   * そのため、クエリとの距離の差が float4 の桁より小さい2件は、Postgres では同点になって上の tie-break
-   * （`recorded_at` の新しい順）で並び、fixture では距離の近い順に並ぶ。`limit` で切ったときに返る集合も割れる。
-   * 段2は `score.total` と実効時刻で並べ直すので、最終の `memories` まで割れるのは `total` まで同点の組と、
-   * 同点を `search()` の順のまま保つ段3.5（連想枠）である。
-   * 【実測 2026-09-28】`vector-search-float4-tie.postgres.test.ts`。
+   * ⚠ **2026-09-28 追記（[Issue #1268](https://github.com/takecchi/mnemora/issues/1268)）: 距離はベクトルを float4 に
+   * 丸めてから比べる。**`PostgresVectorStore`（pgvector の `vector` 型）は成分を float4 で持ち、クエリも float4 に
+   * 変換する。`@mnemora/testkit` の `InMemoryVectorStore` も、保存するベクトルとクエリを `Math.fround` で丸める
+   * （以前は丸めず、距離の差が float4 の桁より小さい2件の並びと、`limit` で切った集合が Postgres と割れていた）。
+   * ⟹ **何が「距離の同点」になるかは、2実装で同じである。**ただし距離の値そのものの下の桁は揃わない
+   * ——pgvector は積と和を float4 で重ねてから最後だけ倍精度で割り、fixture は丸めた成分を倍精度で計算する。
+   * 【実測 2026-09-28】`vector-search-float4-tie.postgres.test.ts`（並びと同点）、
+   * `in-memory-fixtures-vector-float4.test.ts`（fixture の丸め）。
    */
   search(
     ctx: Ctx,
