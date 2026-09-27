@@ -1799,12 +1799,17 @@ Memory を1件も作らない・ラウンドを反復しない**（1回 sweep �
 二次観測は一次判定を上書きしない——`reconcileVerdicts` が一次と二次を突き合わせ、
 一致すればその値を、食い違えば `"indeterminate"` を返す（ADR 0222 の三分割に倣う）。
 
-🔴 **これは配線の検査であって、回答品質の測定ではない。** `answerQualityClaimable(llmMode)`
-が `false`（`llmMode=deterministic`）のときは、正誤・二次観測・突き合わせのすべての列を
+🔴 **`llmMode=deterministic` のときは配線の検査であって、回答品質の測定ではない。**
+`answerQualityClaimable(llmMode)` が `false`（`llmMode=deterministic`）のときは、正誤・二次観測・突き合わせのすべての列を
 `—` にし、集計（何件中何件 pass、二次観測の集計、突き合わせ後の集計）も出さない。
 `deterministic` の LLM（`@mnemora/testkit` の `DeterministicLLMProvider`）は意味を
 持たない stub——`complete()` は渡した最後のメッセージをそのままエコーするだけで、
-質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけである。
+質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけである
+（ADR 0260。鍵なしの既定の道は、カセットが在れば `recorded` へ倒れる）。
+画面の導入文もこのモードで出し分ける（`answer-format.ts` の `formatAnswerIntro`）——
+`deterministic` では「配線の検査であり、回答品質は測っていない」と言い、`recorded`/`openai` では
+「正誤・二次観測は、回答モデルの実際の回答に対する判定である（このケース集合に対する判定であり、
+一般的な回答品質の保証ではない）」と言う。
 
 ```
 DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer
@@ -1840,9 +1845,12 @@ OPENAI_API_KEY=... pnpm --filter @mnemora/example-chat run verify:answer   # 記
   観測でなくなるため（`docs/autonomy.md` §2.2 決定5）。judge の呼び出し回数は
   `answerLLMCalls` とは別勘定（`judgeLLMCalls`）で数える。
 - 追加費用（取り込み時の抽出 LLM 呼び出し・埋め込み呼び出し・回答生成の LLM 呼び出し・
-  judge の LLM 呼び出し）は別ブロックで出す。⛔ 削減率からは差し引かない。
-- **入力量の削減率は `qualityClaimable` に関係なく常に出す**（`inputReduction`、
-  JSON では `AnswerRunJson.inputReduction`）——入力量そのものは品質の主張ではない。
+  judge の LLM 呼び出し）は別ブロックで出す。⛔ 入力量の差には含めない。
+- **入力量は `qualityClaimable` に関係なく常に出す**（JSON では `AnswerRunJson.inputReduction`）
+  ——入力量そのものは品質の主張ではない。画面では「mnemora − 全文の差（負なら mnemora が少ない）」
+  として、合計・差・「mnemora が N% 多い／少ない」を並べる（`削減率` と書くと、mnemora が
+  多いときの負の値を「削った」と読み違えやすいため）。JSON の `charReductionRatio`/
+  `tokenReductionRatio` は従来どおり `(naive - mnemora) / naive`（正なら mnemora が少ない）。
 
 **⭐ 追記（Issue #693 / 親 #498、ADR 0296）: 層2（回答に必要な情報の保持）の決定的な指標。**
 出典への到達（`compare` の `factStatementSurvived`）・最終回答の正しさ（`verdict`/

@@ -40,7 +40,7 @@ import {
   buildWeightsUnavailableArchiveSweepCostRunJson,
   exitCodeForArchiveSweepCostRun,
 } from "./archive-sweep-json.js";
-import { formatRecall } from "./format.js";
+import { formatChatSummary, formatRecall } from "./format.js";
 import { tryGitRevParseHead } from "./git-info.js";
 import { formatIdentifierArmReport, runIdentifierProbeArm } from "./identifier-arm.js";
 import { JAPANESE_NAME_PROBE_SET_SPEC } from "./japanese-name-probe-set.js";
@@ -130,6 +130,7 @@ import {
   formatAnswerContentPreservation,
   formatAnswerCostTable,
   formatAnswerInputReduction,
+  formatAnswerIntro,
   formatAnswerQualityBanner,
   formatAnswerTable,
 } from "./answer-format.js";
@@ -407,9 +408,7 @@ async function runChat(): Promise<void> {
     console.log(formatRecall(withBudget, `budget maxMemoryChars=${TINY_BUDGET_CHARS}`));
 
     console.log("\n=== まとめ ===");
-    console.log(`naive chars                  : ${naive.chars}`);
-    console.log(`mnemora chars (budget 無し)      : ${withoutBudget.usage.chars}`);
-    console.log(`mnemora chars (budget あり)      : ${withBudget.usage.chars}`);
+    console.log(formatChatSummary(naive.chars, withoutBudget, withBudget));
     console.log(
       "budget_dropped omission (budget あり):",
       withBudget.omitted.find((o) => o.kind === "budget_dropped") ?? "(発生しなかった)",
@@ -1045,7 +1044,7 @@ async function recordAnswer(
 
     // 記録しながら実測もできてしまうので、その場で出す（`recordCompare` と同じ規律）。
     console.log(`\n${formatAnswerTable(results, handle.llmMode)}`);
-    console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
+    console.log("\n--- 追加費用(別ブロック。⛔ 下の入力量の差には含めない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
     console.log(formatAnswerContentPreservation(results));
@@ -2294,11 +2293,7 @@ async function runAnswer(): Promise<void> {
   }
   printProviderMode(handle, plan.plannedSource);
   try {
-    console.log(
-      "\n同じ会話・同じ質問・同じ回答モデル・同じ採点基準で、naive(全文経路)と" +
-        "mnemora(記憶経路)の最終回答・入力量を対で出す(Issue #506)。\n" +
-        "🔴 これは配線の検査であり、回答品質は測っていない。\n",
-    );
+    console.log(formatAnswerIntro(handle.llmMode));
     const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
     const results = await runAnswerBench(
       handle.runtime,
@@ -2310,7 +2305,7 @@ async function runAnswer(): Promise<void> {
     );
 
     console.log(formatAnswerTable(results, handle.llmMode));
-    console.log("\n--- 追加費用(別ブロック。⛔ 削減率からは差し引かない) ---");
+    console.log("\n--- 追加費用(別ブロック。⛔ 下の入力量の差には含めない) ---");
     console.log(formatAnswerCostTable(results));
     console.log(`\n${formatAnswerInputReduction(results)}`);
     console.log(formatAnswerContentPreservation(results));

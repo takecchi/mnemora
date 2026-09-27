@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatAnswerQualityBanner } from "../answer-format.js";
+import {
+  formatAnswerInputReduction,
+  formatAnswerIntro,
+  formatAnswerQualityBanner,
+} from "../answer-format.js";
 
 /**
  * `formatAnswerQualityBanner` の**陽性対照**（Issue #577 / ADR 0260 の増分）。
@@ -44,4 +48,72 @@ describe("formatAnswerQualityBanner — 陽性対照（バナーは廃止され�
   it("openai でもバナーが出ない", () => {
     expect(formatAnswerQualityBanner("openai")).toBe("");
   });
+});
+
+/**
+ * `formatAnswerInputReduction` の見出しと値の向き。
+ * 【実測 2026-09-27、空の DB で `run answer`】以前は「入力量の削減率 … chars -26.3%
+ * （合計 3924 → 4956）」と出ていた——値は定義（`(naive - mnemora) / naive`）どおりだが、
+ * mnemora のほうが26%多いのに「削減率 -26.3%」と読めるので、「26%削った」と読み違えやすい。
+ * ⟹ 見出しに差の向き（mnemora − 全文。負なら mnemora が少ない）を書き、値にも言葉を添える。
+ * どちらの向きでも正しく読めることを見る。
+ */
+describe("formatAnswerInputReduction — 差の向きを読み違えない", () => {
+  const results = (naiveChars: number, mnemoraChars: number) =>
+    [
+      {
+        naive: { inputChars: naiveChars, inputEstimatedTokens: naiveChars },
+        mnemora: { inputChars: mnemoraChars, inputEstimatedTokens: mnemoraChars },
+      },
+    ] as never;
+
+  it("見出しに差の向き（mnemora − 全文、負なら mnemora が少ない）を書く", () => {
+    const text = formatAnswerInputReduction(results(3924, 4956));
+    expect(text).toContain("mnemora − 全文");
+    expect(text).toContain("負なら mnemora が少ない");
+    expect(text).not.toContain("削減率");
+  });
+
+  it("mnemora が多いときは +差 と「多い」", () => {
+    const text = formatAnswerInputReduction(results(3924, 4956));
+    expect(text).toContain("3924 → 4956");
+    expect(text).toContain("+1032");
+    expect(text).toContain("mnemora が 26.3% 多い");
+  });
+
+  it("mnemora が少ないときは −差 と「少ない」", () => {
+    const text = formatAnswerInputReduction(results(1000, 250));
+    expect(text).toContain("-750");
+    expect(text).toContain("mnemora が 75.0% 少ない");
+  });
+
+  it("同じなら「同じ」", () => {
+    const text = formatAnswerInputReduction(results(500, 500));
+    expect(text).toContain("±0");
+    expect(text).toContain("同じ");
+  });
+});
+
+/**
+ * `answer` の導入文。ADR 0260 により、記録の再生（`recorded`）と実 API（`openai`）は
+ * 品質を主張してよいモードで、⛔⛔⛔ バナーも出ない（上の陽性対照）。
+ * 【実測 2026-09-27、鍵なしの既定の道＝`recorded`】以前の導入文は、モードに関係なく
+ * 「これは配線の検査であり、回答品質は測っていない」と言いながら、表には ✅/❌ の判定が
+ * 並んでいた——画面の中で言っていることが食い違っていた。⟹ モードで出し分ける。
+ */
+describe("formatAnswerIntro — 品質を主張できるかで出し分ける", () => {
+  it("deterministic では「配線の検査であり、回答品質は測っていない」と言う", () => {
+    const text = formatAnswerIntro("deterministic");
+    expect(text).toContain("配線の検査であり、回答品質は測っていない");
+  });
+
+  it.each(["recorded", "openai"] as const)(
+    "%s では「測っていない」と言わず、判定がどの LLM の回答によるかを言う",
+    (mode) => {
+      const text = formatAnswerIntro(mode);
+      expect(text).not.toContain("回答品質は測っていない");
+      expect(text).toContain(`llmMode=${mode}`);
+      expect(text).toContain("正誤");
+    },
+  );
 });
