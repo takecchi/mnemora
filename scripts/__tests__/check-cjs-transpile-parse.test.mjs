@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-cjs-transpile-parse.mjs`（CJS 構文解析の門）の歯。
@@ -66,7 +66,7 @@ function writeDistFile(packagesDir, name, contents) {
 }
 
 function runGate(packagesDir) {
-  const result = spawnSync(process.execPath, [gate], {
+  const result = spawnSyncWithDeadline(process.execPath, [gate], {
     cwd: repoRoot,
     encoding: "utf8",
     env: { ...process.env, CJS_PARSE_CHECK_PACKAGES_ROOT: packagesDir },
