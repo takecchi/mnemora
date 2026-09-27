@@ -272,3 +272,17 @@ DEFAULT（720 / 'open'）に任せる」）。
   `DATABASE_URL` が無く、`packages/postgres` の歯・マイグレーションを実行できない。
 - **`packages/core` の歯は実行して確かめた**（下記 PR 本文の「測ったこと」参照）。
   これは確かめていないことの対象外である。
+
+## 追記（2026-09-27、Issue #1094: 値域の内側の値は float4 の精度で保存される）
+
+この追記はクローン miku の委譲先が書いた（オーナーではない）。記録にとどめる判断はクローン miku のもの。
+
+決定7の「⛔ 黙って丸めない」は、**値域の外の値**を丸めて CHECK を通さない、という意味である。**値域の内側の値が
+`real`（float4）の精度に丸めて保存されること**は、この ADR の決定の対象ではなかった。その丸めは
+`decay_floor_at` の計算に効く——作成時の `decay_floor_at` は呼び出し側が float64 の値で計算したものがそのまま
+保存されるが、強化の後は store が保存済みの（丸めた）`half_life_hours`・`strength` で計算し直すので、
+`@mnemora/postgres` と `@mnemora/testkit` の fixture（float64 のまま持つ）とで強化後の床がずれうる。
+【実測】1日後の強化の後の床の差（Postgres − testkit）: 720 時間 0ms、123456.789 時間 +15.6秒、約100万時間 −約6分、
+約1000万時間 −約32分。列の型を変える案・書く前に丸める案は採らず、`Memory.halfLifeHours`・`strength` の TSDoc と
+`docs/memory-model.md` §7 に今の振る舞いを書いた。**決定6（`decay`/`scoring` の計算そのものは変えない）は
+変えていない。**
