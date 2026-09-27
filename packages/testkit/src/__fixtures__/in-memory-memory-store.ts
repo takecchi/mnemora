@@ -233,14 +233,19 @@ export class InMemoryMemoryStore implements MemoryStore {
   readonly activitySeq = new Map<string, number>();
 
   /**
-   * Issue #201 / ADR 0318: `labels` 相当のインメモリ表。key は `${tenantId}::${name}`。
+   * Issue #201 / ADR 0318: `labels` 相当のインメモリ表。key は {@link labelKey}。
    * `PostgresMemoryStore.upsertProposedLabels`/`listLabels`/`registerLabel` と同じ意味論
    * （`docs/memory-model.md` §8）を、`Map` の上でそのまま再現する。
    */
   private readonly labels = new Map<string, LabelSummary>();
 
+  /**
+   * `(tenantId, name)` を区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId` は不透明な
+   * 文字列で `::` を含んでよい（`Ctx` の doc）。以前の `${tenantId}::${name}` は、テナント `a::b` の
+   * `x` とテナント `a` の `b::x` を同じキーに潰していた（`labels-tenant-key.postgres.test.ts`）。
+   */
   private labelKey(tenantId: string, name: string): string {
-    return `${tenantId}::${name}`;
+    return JSON.stringify([tenantId, name]);
   }
 
   /**
@@ -1950,9 +1955,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
-    const prefix = `${ctx.tenantId}::`;
     for (const [key, label] of this.labels) {
-      if (key.startsWith(prefix)) {
+      if ((JSON.parse(key) as [string, string])[0] === ctx.tenantId) {
         results.push(label);
       }
     }
@@ -1963,8 +1967,16 @@ export class InMemoryMemoryStore implements MemoryStore {
   /**
    * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * `registerLabel?`（`PostgresMemoryStore.registerLabel` と同じ契約）。
+   *
+   * `name` に NUL（U+0000）を含むと投げる——`PostgresMemoryStore` は `labels.name`（`text` 列）が
+   * NUL を拒んで例外になる（`invalid byte sequence for encoding "UTF8": 0x00`、実測）。ラベルの名前は
+   * `tags` の要素と同じ語彙で、`tags` の NUL はこの fixture の `createMemory` がすでに拒んでいる
+   * （Issue #816）。
    */
   async registerLabel(ctx: Ctx, name: string): Promise<LabelSummary> {
+    if (name.includes("\u0000")) {
+      throw new Error(`InMemoryMemoryStore: label name must not contain NUL characters (U+0000)`);
+    }
     const key = this.labelKey(ctx.tenantId, name);
     const existing = this.labels.get(key);
     const registered: LabelSummary = {

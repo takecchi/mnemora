@@ -184,7 +184,7 @@ class FakeBackingStore {
   /**
    * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `labels` 相当。`packages/testkit` の `InMemoryMemoryStore` と同じ key 形式
-   * （`${tenantId}::${name}`）——`recall-taxonomy-filter.test.ts` が `listLabels`/
+   * （`JSON.stringify([tenantId, name])`）——`recall-taxonomy-filter.test.ts` が `listLabels`/
    * `registerLabel` 経由でここを操作する。
    */
   labels = new Map<string, LabelSummary>();
@@ -576,8 +576,12 @@ export class FakeMemoryStore implements MemoryStore {
     });
   }
 
+  /**
+   * `packages/testkit` の `InMemoryMemoryStore.labelKey` と同じ形——`tenantId` は `::` を含んで
+   * よいので、区切り文字で繋がず `JSON.stringify` の配列で表す。
+   */
   private labelKey(tenantId: string, name: string): string {
-    return `${tenantId}::${name}`;
+    return JSON.stringify([tenantId, name]);
   }
 
   /**
@@ -613,9 +617,8 @@ export class FakeMemoryStore implements MemoryStore {
    */
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
-    const prefix = `${ctx.tenantId}::`;
     for (const [key, label] of this.backing.labels) {
-      if (key.startsWith(prefix)) {
+      if ((JSON.parse(key) as [string, string])[0] === ctx.tenantId) {
         results.push(label);
       }
     }
