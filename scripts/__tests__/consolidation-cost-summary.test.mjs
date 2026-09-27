@@ -13,8 +13,9 @@ import { afterEach, describe, expect, it } from "vitest";
  *
  * DB は要求しない——このスクリプトは JSON ファイル1〜2個を読むだけである。
  *
- * ⛔ `examples/chat/consolidation-baseline.json` はまだコミットされていない。ここで使う
- * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
+ * `examples/chat/consolidation-baseline.json` は `22c0731`（ADR 0101、2026-09-11）でコミットされている
+ * （この歯の当初のコメントは「まだコミットされていない」と書いていた）。この歯は実物のファイルに
+ * 依存せず、ここで使う measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
  */
 
 const script = fileURLToPath(new URL("../consolidation-cost-summary.mjs", import.meta.url));

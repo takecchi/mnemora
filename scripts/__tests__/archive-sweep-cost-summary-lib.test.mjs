@@ -14,8 +14,8 @@ import {
  * `archive-sweep-cost-summary-lib.mjs`(純関数の側)の歯。DB を要求しない
  * ——`consolidation-cost-summary-lib.test.mjs` と同じ分担・同じ理由(Issue #209)。
  *
- * ⛔ `examples/chat/archive-sweep-baseline.json` はまだコミットされていない
- * (この作業環境に DB が無く、捏造した数値を基準値として残さないため)。ここで使う
+ * `examples/chat/archive-sweep-baseline.json` は PR #222（ADR 0121、2026-09-15）で初回 CI の artifact から作ってコミットされた
+ * （この歯が書かれた時点では未コミットだった）。この歯は実物のファイルに依存せず、ここで使う
  * measured/baseline はすべてこの歯の中で組み立てたインライン fixture である。
  */
 

@@ -19,8 +19,9 @@ import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
  * 打ち間違えても、`MNEMORA_CONSOLIDATION_JSON` の書き先と `--measured` の読み先を
  * ずらしても、**その2本は緑のまま通る。**この歯だけが `ci.yml` を入力に取る。
  *
- * ⛔ **`examples/chat/consolidation-baseline.json` はまだコミットされていない**
- * (マネージャーが実測値で作る予定であり、この歯が作ってはいけない)。そのため
+ * ⚠ **`examples/chat/consolidation-baseline.json` は `22c0731`（ADR 0101、2026-09-11）でコミットされている**。この歯の当初のコメントは
+ * 「まだコミットされていない（マネージャーが実測値で作る予定であり、この歯が作ってはいけない）」と
+ * 書いており、その前提で次の形にした——今もこの形のままである。そのため
  * `identifier-probes` 版の歯(`ci-yml-identifier-probes-wiring.test.mjs`)と違い、
  * **実行系のテストでは summary 段の `--baseline` の値をこの歯の中の一時ファイルへ
  * 差し替えて**走らせる(`substituteBaselinePath`)。**yml に書かれた本来のパス自体**
@@ -281,8 +282,9 @@ function summaryStepBaselinePath() {
  * yml から取り出した要約の段を、実際に走らせる。
  *
  * ⛔ **baseline のパスは、yml に書かれた実物ではなく、この歯が用意した一時ファイルへ
- * 差し替える**(`examples/chat/consolidation-baseline.json` はまだコミットされていない
- * ため)。差し替えは文字列置換のみ——script の他の部分(node の呼び出し・`--measured` の
+ * 差し替える**(この歯を書いた時の前提は「`examples/chat/consolidation-baseline.json` はまだ
+ * コミットされていない」だった。ファイルは今は在るが、実行系のテストが実物の中身に依存しない
+ * よう、差し替えの形のままにしてある)。差し替えは文字列置換のみ——script の他の部分(node の呼び出し・`--measured` の
  * パスなど)はそのまま使う。
  *
  * @param {unknown} measured `--measured` が読むファイルに書き込む中身
@@ -435,8 +437,8 @@ describe("ci.yml の consolidation-cost ジョブの配線", () => {
   it("🔴 要約の段が --baseline を、マネージャーが用意する予定の基準値ファイルへ渡している", () => {
     // ⭐ **これが「輪が閉じている」ことの固定点。**この行が消えると、値が動いても
     // 誰も気づかず、誰も基準値を更新せず、新しい値が PR の diff に現れなくなる。
-    // ⚠ ファイル自体はこの PR の時点でまだコミットされていない(マネージャーが実測値で
-    // 作る)——ここではパスの文字列だけを固定し、存在は要求しない。
+    // ⚠ ファイル自体は今はコミットされている（`22c0731`）が、ここではパスの文字列だけを
+    // 固定し、存在は要求しない（実物の中身を読むのは CI の consolidation の段である）。
     expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
       BASELINE_RELATIVE_PATH,
     );
