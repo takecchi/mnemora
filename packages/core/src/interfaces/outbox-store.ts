@@ -69,6 +69,20 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   止まり続ける job（毎回ワーカーを止めてしまう job など）は、リースが切れるたびに claim され
  *   続ける。`attempts` はフェンシングにだけ使い、再試行の上限には使っていない
  *   （ADR 0032「これが覆るとしたら」が `attempts` の活用を範囲外として残している）。
+ *   ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: そうした job は古い順の先頭に並び続け、後ろを
+ *   止めうる。** `claimBatch` は `available_at` の古い順に `limit` 本を取るので、止まり続ける job が
+ *   `limit` 本以上あると、リースが切れるたびに**同じ job だけが取られ、後ろの job に届かない**
+ *   （先頭詰まり）。後ろに届くのは、別の `tick` がリースの内に続けて取ったとき（止まった job は
+ *   まだ claim 中なので飛ばされる）だけである。【実測 2026-09-27】`@mnemora/postgres` と testkit の
+ *   fixture で同じ（歯は `packages/postgres/src/__tests__/outbox-head-of-line.postgres.test.ts`）。
+ *   止まり続ける job を後回しにする・隔離する・上限で終端にする、はしていない（新しい方針、
+ *   [Issue #1196](https://github.com/takecchi/mnemora/issues/1196)）。
+ * - ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: 取る集合は `available_at` の古い順だが、同じ
+ *   `available_at` の行どうしの並びと、1回の `claimBatch` が返す配列の中の順（`tick` はこの順に
+ *   処理する）は約束しない。** `@mnemora/postgres` は `ORDER BY available_at` だけで取り、
+ *   `UPDATE … RETURNING` の順で返す（SQL はこの順を保証しない）。testkit の fixture は古い順に
+ *   並べて返す（同じ時刻なら積んだ順）。【実測 2026-09-27】20本の範囲では両方とも積んだ順・古い順に
+ *   返ったが、それは約束ではない。
  * - Phase 1 では失敗したジョブの自動リトライを行わない（`fail` は終端状態。本 PR の決定、
  *   PR 本文に記載）。
  */
