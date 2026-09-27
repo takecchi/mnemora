@@ -40,7 +40,7 @@ import {
   buildWeightsUnavailableArchiveSweepCostRunJson,
   exitCodeForArchiveSweepCostRun,
 } from "./archive-sweep-json.js";
-import { formatRecall } from "./format.js";
+import { formatChatSummary, formatRecall } from "./format.js";
 import { tryGitRevParseHead } from "./git-info.js";
 import { formatIdentifierArmReport, runIdentifierProbeArm } from "./identifier-arm.js";
 import { JAPANESE_NAME_PROBE_SET_SPEC } from "./japanese-name-probe-set.js";
@@ -407,9 +407,7 @@ async function runChat(): Promise<void> {
     console.log(formatRecall(withBudget, `budget maxMemoryChars=${TINY_BUDGET_CHARS}`));
 
     console.log("\n=== まとめ ===");
-    console.log(`naive chars                  : ${naive.chars}`);
-    console.log(`mnemora chars (budget 無し)      : ${withoutBudget.usage.chars}`);
-    console.log(`mnemora chars (budget あり)      : ${withBudget.usage.chars}`);
+    console.log(formatChatSummary(naive.chars, withoutBudget, withBudget));
     console.log(
       "budget_dropped omission (budget あり):",
       withBudget.omitted.find((o) => o.kind === "budget_dropped") ?? "(発生しなかった)",

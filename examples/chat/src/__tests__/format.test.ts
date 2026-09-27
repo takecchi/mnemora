@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RecallResult } from "@mnemora/core";
-import { formatRecall } from "../format.js";
+import { formatChatSummary, formatRecall } from "../format.js";
 import type { ComparisonRow } from "../compare.js";
 import { formatRecallQualityTable } from "../compare.js";
 
@@ -129,5 +129,39 @@ describe("formatRecallQualityTable", () => {
     ]);
     const bodyLines = output.split("\n").slice(2); // header + sep を除く
     expect(bodyLines).toHaveLength(2);
+  });
+});
+
+/**
+ * `chat` の「まとめ」の行。目次帯（index）は予算の対象外なので、予算で落とした記憶が
+ * 目次帯へ回ると、予算を渡した run の全量（`usage.chars`）は渡さない run より大きくなりうる
+ * （README「`budget` は `memories` tier だけを切り詰め、`index` tier は切り詰めない」）。
+ * 【実測 2026-09-27、空の DB で `run chat`】budget 無し 346 に対し budget あり 793——
+ * 内訳が出ていなかったので「予算を渡したら増えた」と読めた。⟹ 予算の外の目次帯の
+ * 文字数（`usage.indexChars`）と、予算の対象になった量を並べる。
+ */
+describe("formatChatSummary", () => {
+  const usage = (chars: number, indexChars: number) =>
+    ({
+      usage: {
+        chars,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: chars - indexChars, index: indexChars },
+        indexChars,
+      },
+    }) as never;
+
+  it("budget あり・無しの両方に、予算の外の目次帯の文字数と予算の対象の量を並べる", () => {
+    const text = formatChatSummary(441, usage(346, 40), usage(793, 599));
+    expect(text).toContain("indexChars=40");
+    expect(text).toContain("indexChars=599");
+    expect(text).toContain("予算の対象 306");
+    expect(text).toContain("予算の対象 194");
+  });
+
+  it("目次帯は予算の対象外なので、全量が増えうることを書く", () => {
+    const text = formatChatSummary(441, usage(346, 40), usage(793, 599));
+    expect(text).toContain("予算の対象外");
   });
 });
