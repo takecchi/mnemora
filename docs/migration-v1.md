@@ -10,7 +10,8 @@
 | **v0.4.0 → v0.5.0**（🔴 **出荷済み**） | **1件** | **18** |
 | **v0.5.0 → v1.0.0**（🔴 **出荷済み**） | **0件** | 無し（この世代には最後まで何も着地しなかった） |
 | **v1.0.0 → v1.0.1**（🔴 **出荷済み**） | **0件**（ほかに計上を保留しているものが在る） | 「🔴 破壊的変更（v1.0.0 → v1.0.1）」 |
-| **v1.0.1 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v1.0.1 → 次の版）」 |
+| **v1.0.1 → v1.0.2**（🔴 **出荷済み**） | **0件**（ほかに計上を保留しているものが在る） | 「🔴 破壊的変更（v1.0.1 → v1.0.2）」 |
+| **v1.0.2 → 次の版**（未リリース） | 件数はここに書かない（`main` が動けば変わる） | 「🔴 破壊的変更（v1.0.2 → 次の版）」 |
 
 ⭐ **全5世代の件数を書いてよいのは、両端が tag で閉じているからである。**`v0.1.9`→`v0.2.0` も
 `v0.2.0`→`v0.3.0` も `v0.3.0`→`v0.4.0` も `v0.4.0`→`v0.5.0` も `v0.5.0`→`v1.0.0` も、
@@ -999,9 +1000,13 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0019`〜`0021` の3本が増えている（`0019_observations_memories_attributes.sql`・`0020_taxonomy_labels.sql`・`0021_memories_claim_key.sql`）。
 
-## 🔴 破壊的変更（v1.0.1 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
+## 🔴 破壊的変更（v1.0.1 → v1.0.2）—— ⚠ **出荷済み。確定は0件（ほかに保留が在る）**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`3a8448c`**（PR #1103）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
+`v1.0.2` は **2026-09-27T01:58:27Z に published**（tag が指す commit は `b981ecd`、PR #1098。npm の `@mnemora/core` の `dist-tags.latest` は `1.0.2`、2026-09-27T02:05:56Z 公開）。**両端が tag で閉じたので、この世代の範囲はもう動かない。**
+
+⚠ **2026-09-27 訂正**: この節は `v1.0.2` の出荷の前に「v1.0.1 → 次の版（未リリース）」として書いたものである。数えた範囲（下の `v1.0.1`…`3a8448c`）は `v1.0.2` を含み、`b981ecd` より後の PR #1100・#1102・#1103 は docs・テストだけだった。⟹ 下の一覧は、どれも `v1.0.2` に入って出荷された変更である。計上を保留していたもの（下の 🔴）も出荷されたが、⛔ オーナーがそれを破壊的変更と数えたかどうかは記録から分からない（問い `3f3411c5` は未回答）。以下の本文は、この訂正の前に書いたままである。
+
+⛔ **（当時）次の版の tag はまだ切られていなかった。**この節は `v1.0.1`（`cf11cd6`）… **`3a8448c`**（PR #1103）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
 
 **型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。`git diff 951ad44..3a8448c -- scripts/__snapshots__/public-api/` も追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。
 
@@ -1028,11 +1033,28 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
   理由: どれも doc が約束していた振る舞い（「例外はこのメソッドの外へは投げない」「2回目の close は何もしない」など）へ実装を合わせた修正であり、約束の範囲内の利用者は壊れない。約束に反して例外を catch することに頼っていたコードは、例外が来なくなるぶん挙動が変わる——[CHANGELOG.md](../CHANGELOG.md) の各項目に、その注意を1行ずつ添えた。
 
-**既定の挙動が変わるもの**（連想枠の既定 on など）は、この文書の定義では破壊的変更ではない。[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の「Changed」を見ること。
+**既定の挙動が変わるもの**（連想枠の既定 on など）は、この文書の定義では破壊的変更ではない。[CHANGELOG.md](../CHANGELOG.md) の `[1.0.2]` 節の「Changed」を見ること。
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。
 
-## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
+
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`4514cec`**（PR #1177）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4・追記5 と同じ範囲）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+**型の上**: `git diff v1.0.2..4514cec -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。
+
+**実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
+
+- 🔴 **計上を保留しているもの**——公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるもの（オーナーへの問い `3f3411c5` の射程）:
+  - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore.registerLabel` が NUL を含む名前を拒むようになった（PR #1135）。
+  - `InMemoryMemoryStore.listActiveClaimPredicates` が、Postgres の拒む `limit`（負数・`NaN`・`Infinity`・非整数・2^63 以上）で例外を投げるようになった（PR #1157）。
+  - `InMemoryTenantSettingsStore` の半減期の口が、Postgres の `real`（float4）列が拒む値で例外を投げるようになった（PR #1165）。
+  - `InMemoryEventStore.append` などが、`MemoryEventKind` に無い kind のイベントを拒むようになった（PR #1170）。
+  - ほかにも同じ種類のものがあれば、CHANGELOG の `[1.1.0]` 節の各項目の ⚠ を正とする。
+- ⭕ **非破壊と数えたもの**（⚠ 付き。**この判定はクローン miku の判断であり、オーナーの判断ではない**）——`registerEmbeddingSpace` が同じテーブル名に潰れる別の空間の登録を拒むようになった（PR #1156）、`setEventRetention` が型の外の `kind` を拒むようになった（PR #1171。fixture も core の共有の検査で同時に変わる）、ほか。一覧は CHANGELOG の `[1.1.0]` 節を見ること。
+
+**DB マイグレーション**: `v1.0.2` から増えていない（`git diff v1.0.2 -- packages/postgres/migrations` が空）。
+
 
 ### `RecallQuery.validAt` ゲートが既定で有効になった
 
