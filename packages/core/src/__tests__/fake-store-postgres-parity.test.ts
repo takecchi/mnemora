@@ -525,6 +525,35 @@ describe("FakeMemoryStore.createMemory: halfLifeHours が float4 (Postgres real 
 });
 
 /**
+ * 上の #817 の検査は float4 の**上側**（`Infinity` へ丸まる）だけを見ていた。Postgres の
+ * `real` は、0 でない値が float4 で 0 に丸まる（アンダーフロー）ときも拒む——
+ * `packages/testkit` の `in-memory-fixtures-float4-underflow.test.ts` と同じ形で揃える。
+ * `halfLifeHours: 0` そのもの（下の回帰確認）は「0 に丸まった」のではないので、引き続き通す。
+ */
+describe("FakeMemoryStore.createMemory: float4 で 0 に丸まる値（アンダーフロー）を Postgres と同じく拒む", () => {
+  it("halfLifeHours: 1e-300 は例外を投げる", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(memoryStore.createMemory(ctx, fixture({ halfLifeHours: 1e-300 }))).rejects.toThrow(
+      /does not fit in a Postgres "real"/,
+    );
+  });
+
+  it("strength: 1e-46 は例外を投げる（値域 (0, 1] の中でも float4 では 0 になる）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    await expect(memoryStore.createMemory(ctx, fixture({ strength: 1e-46 }))).rejects.toThrow(
+      /does not fit in a Postgres "real"/,
+    );
+  });
+
+  it("1e-45（float4 の非正規数に収まる）と halfLifeHours: 0 は引き続き成功する（回帰確認）", async () => {
+    const { memoryStore } = createFakeRuntimeStores();
+    const a = await memoryStore.createMemory(ctx, fixture({ strength: 1e-45 }));
+    const b = await memoryStore.createMemory(ctx, fixture({ halfLifeHours: 0 }));
+    expect([a.strength, b.halfLifeHours]).toEqual([1e-45, 0]);
+  });
+});
+
+/**
  * `packages/testkit` の `InMemoryMemoryStore.createMemory`（Issue #816、
  * `in-memory-fixtures-nul-content.test.ts`）と同じ形の不一致を `FakeMemoryStore` にも
  * 見つけた。範囲の切り方（`content`・`subjectId`・`tags`・`digest` を塞ぎ、`tenantId`
