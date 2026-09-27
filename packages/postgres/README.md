@@ -356,6 +356,12 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 運用でその限界を補っている。これが覆るとしたら、mnemora が実際にオーバーロードを
 使い始めたときである（ADR 0204「これが覆るとしたら」）。
 
+⚠ **2026-09-27 追記**: 上の「`CREATE OR REPLACE FUNCTION` はこのリポジトリの履歴に一度も現れていない」は、
+`migrations/0023_lexical_query_inner_quote_as_space.sql` で事実でなくなった——`mnemora_lexical_query_tsqueries`
+を `CREATE OR REPLACE FUNCTION` で置き換えている（語の途中の `"` を空白として扱う修正）。**引数・戻り値の
+シグネチャ（`(text) RETURNS tsquery[]`）は 0009 と同じ**で、同名・別シグネチャの多重定義は作っていない
+（関数は5つのまま）。⟹ 名前だけを見る形を据え置く判断（ADR 0204「引き受けた負債」1番）は変えていない。
+
 ### 実行時に増える系列（埋め込み空間ごと）
 
 `registerEmbeddingSpace` を呼ぶたびに、その `EmbeddingSpaceId`
