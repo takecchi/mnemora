@@ -39,7 +39,7 @@ export interface StatedProvenance {
 export interface InferredProvenance {
   /** 常に `"inferred"`。 */
   kind: "inferred";
-  /** 推論した LLM のモデル名（`RuntimeDeps.llmModelId`）。 */
+  /** 推論した LLM のモデル名（`RuntimeConfig.llmModelId`。省略時は `"unknown"`）。 */
   model: string;
   /** 推論に使ったプロンプトの版。 */
   promptVersion: string;

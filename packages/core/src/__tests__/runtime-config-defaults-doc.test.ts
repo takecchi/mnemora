@@ -1,0 +1,96 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it, vi } from "vitest";
+import type { Ctx } from "../ctx.js";
+import type { LLMProvider } from "../interfaces/llm-provider.js";
+import { truncateForFallbackDigest } from "../extraction.js";
+import { createRuntime } from "../runtime.js";
+import { createFakeRuntimeStores } from "./runtime-fakes.js";
+
+/**
+ * `RuntimeConfig` の欄を省いたときの既定値が、`runtime.ts` の TSDoc に書かれた値と一致することを縛る。
+ * 既定の定数は公開していないので、**doc の値は `runtime.ts` の TSDoc を読んで**、**実装の値は config を省いた
+ * runtime の振る舞いから**、どちらも実行時に取って突き合わせる。どちらか片方だけを直すと赤くなる。
+ */
+
+const RUNTIME_SOURCE = readFileSync(
+  fileURLToPath(new URL("../runtime.ts", import.meta.url)),
+  "utf8",
+);
+
+/** `export interface RuntimeConfig { … }` の中で、`field?:` の直前の TSDoc を返す。 */
+function docOf(field: string): string {
+  const start = RUNTIME_SOURCE.indexOf("export interface RuntimeConfig {");
+  const end = RUNTIME_SOURCE.indexOf("\n}\n", start);
+  const block = RUNTIME_SOURCE.slice(start, end);
+  const at = block.indexOf(`\n  ${field}?:`);
+  if (at < 0) throw new Error(`RuntimeConfig.${field} が見つからない`);
+  const docStart = block.lastIndexOf("/**", at);
+  return block.slice(docStart, at);
+}
+
+/** TSDoc に書かれた既定値（「省略時（…）は `"v1"`」「既定 200」「既定は `false`」の形）を取り出す。 */
+function documentedDefault(field: string): string {
+  const doc = docOf(field);
+  const m =
+    doc.match(/省略時(?:（[^）]*）)?は\s*`"?([^`"]+)"?`/) ??
+    doc.match(/既定は\s*`([^`]+)`/) ??
+    doc.match(/既定\s+([0-9]+)/);
+  if (!m) throw new Error(`RuntimeConfig.${field} の TSDoc に既定値の記述が見つからない`);
+  return m[1]!;
+}
+
+const ctx: Ctx = { tenantId: "runtime-config-defaults-doc" };
+const LONG_CONTENT = "あ".repeat(500);
+
+describe("RuntimeConfig の既定値は TSDoc の値と一致する", () => {
+  it("extractorVersion・llmModelId・promptVersion・digestFallbackLength・autoQueueConsolidateReflectOnExtract", async () => {
+    const stores = createFakeRuntimeStores();
+    const llm: LLMProvider = {
+      complete: async () => ({ content: "unused" }),
+      completeStructured: async (_c, req) =>
+        req.schema.parse({ memories: [{ content: LONG_CONTENT, provenanceKind: "inferred" }] }),
+    };
+    const createWithOutbox = vi.spyOn(stores.memoryStore, "createMemoryWithOutbox");
+    const runtime = createRuntime({
+      ...stores,
+      llmProvider: llm,
+      hashContent: (c: string) => `h:${c}`,
+    });
+
+    const result = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+    const memory = (await stores.memoryStore.get(ctx, result.memoryIds[0]!))!;
+
+    expect(memory.extractorVersion).toBe(documentedDefault("extractorVersion"));
+    expect(memory.provenance).toMatchObject({
+      kind: "inferred",
+      model: documentedDefault("llmModelId"),
+      promptVersion: documentedDefault("promptVersion"),
+    });
+    expect(memory.digestSource).toBe("fallback");
+    expect(memory.digest).toBe(
+      truncateForFallbackDigest(LONG_CONTENT, Number(documentedDefault("digestFallbackLength"))),
+    );
+    expect(documentedDefault("autoQueueConsolidateReflectOnExtract")).toBe("false");
+    expect(createWithOutbox.mock.calls.map((call) => call[2])).toEqual([["embed"]]);
+  });
+
+  it("defaultClaimedBy", async () => {
+    const stores = createFakeRuntimeStores();
+    const claim = vi.spyOn(stores.outboxStore, "claimBatch");
+    const runtime = createRuntime({
+      ...stores,
+      llmProvider: {
+        complete: async () => ({ content: "unused" }),
+        completeStructured: async () => {
+          throw new Error("not used");
+        },
+      },
+      hashContent: (c: string) => `h:${c}`,
+    });
+
+    await runtime.tick(ctx, { leaseMs: 60_000 });
+
+    expect(claim.mock.calls[0]?.[1].claimedBy).toBe(documentedDefault("defaultClaimedBy"));
+  });
+});
