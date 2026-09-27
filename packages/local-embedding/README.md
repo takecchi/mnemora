@@ -145,8 +145,12 @@ npm i @mnemora/local-embedding @mnemora/core
 
 - Node.js >= 22
 - **ESM のみ**（`"type": "module"`）
-- **初回だけネットワークが要る**（Hugging Face から重みを取得する。既定の置き場所は
-  `~/.cache/huggingface`）。2回目以降はキャッシュから読む
+- **初回だけネットワークが要る**（Hugging Face から重みを取得する）。2回目以降はキャッシュから読む。
+  既定の置き場所は、transformers.js の既定——`@huggingface/transformers` パッケージ自身の中の
+  `.cache/`（例: `node_modules/@huggingface/transformers/.cache/`。pnpm なら
+  `node_modules/.pnpm/@huggingface+transformers@<版>/node_modules/@huggingface/transformers/.cache/`）で、
+  ホームの `~/.cache` の下ではない。⚠ `node_modules` を消す・入れ直すと一緒に消え、次の読み込みで取り直す。
+  置き場所を固定したいときは `cacheDir` を渡す
 - ネイティブ依存として `onnxruntime-node` が入る（次節）
 
 ### 🔴 linux/x64 では、install が **CUDA EP を勝手に落とす**（要らないのに）
@@ -195,16 +199,15 @@ postinstall を拒否しており、その状態で動いていることは測�
 | `adm-zip` | `onnxruntime-node` →          | 細工した ZIP で 4GB 確保 / **展開時に destination symlink を辿り任意ファイルを上書き**                            |
 | `sharp`   | `@huggingface/transformers` → | libvips（CVE-2026-33327 / -33328 / -35590 / -35591）と libheif（GHSA-g89c-p67h-r497 / GHSA-2jg2-4ch7-h545）の継承 |
 
-
 > **⭐ 2026-09-17 追記（一次情報を当て直した。上の表も本文も書き換えていない）。**
 > ⭐ **表に並ぶ6つの識別子は、すべて実在する一次情報へ辿れる。** **【実測 2026-09-17】** 当てた先と結果:
 >
-> | 識別子 | 当てた先 | 結果 |
-> | --- | --- | --- |
-> | `CVE-2026-33327` / `-33328` / `-35590` / `-35591` | MITRE CVE Services（`cveawg.mitre.org/api/cve/…`） | **4件とも HTTP 200 / `state: PUBLISHED`**。`vendor: libvips`。影響は `<= 8.18.0`（33327 / 33328）・`<= 8.18.1`（35590 / 35591） |
-> | 同上（sharp 側の名乗り） | GitHub advisory database | [`GHSA-f88m-g3jw-g9cj`](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) *"sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591"*（`sharp < 0.35.0`、2026-07-21） |
-> | `GHSA-g89c-p67h-r497` / `GHSA-2jg2-4ch7-h545` | GitHub advisory database / OSV | ⚠ **単独では引けない**（下記） |
-> | 同上（sharp 側の名乗り） | GitHub advisory database | [`GHSA-rgj7-g3m4-5g8c`](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c) *"sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545"*（`sharp < 0.35.4`、2026-09-08） |
+> | 識別子                                            | 当てた先                                           | 結果                                                                                                                                                                                                                      |
+> | ------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | `CVE-2026-33327` / `-33328` / `-35590` / `-35591` | MITRE CVE Services（`cveawg.mitre.org/api/cve/…`） | **4件とも HTTP 200 / `state: PUBLISHED`**。`vendor: libvips`。影響は `<= 8.18.0`（33327 / 33328）・`<= 8.18.1`（35590 / 35591）                                                                                           |
+> | 同上（sharp 側の名乗り）                          | GitHub advisory database                           | [`GHSA-f88m-g3jw-g9cj`](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) _"sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591"_（`sharp < 0.35.0`、2026-07-21） |
+> | `GHSA-g89c-p67h-r497` / `GHSA-2jg2-4ch7-h545`     | GitHub advisory database / OSV                     | ⚠ **単独では引けない**（下記）                                                                                                                                                                                            |
+> | 同上（sharp 側の名乗り）                          | GitHub advisory database                           | [`GHSA-rgj7-g3m4-5g8c`](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c) _"sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545"_（`sharp < 0.35.4`、2026-09-08）                             |
 >
 > - ⚠ **`GHSA-g89c-p67h-r497` と `GHSA-2jg2-4ch7-h545` は、当てた3箇所すべてで引けなかった**
 >   （`gh api /advisories/<id>` → **404**、`https://github.com/advisories/<id>` → **404**、
@@ -317,18 +320,18 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 
 ### オプション
 
-| オプション       | 既定                             |                                                                                                               |
-| ---------------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `repo`           | `"sirasagi62/ruri-v3-30m-ONNX"`  | Hugging Face の repo id                                                                                       |
-| `dtype`          | `"q8"`                           | 量子化の別                                                                                                    |
-| `dimensions`     | `256`                            | **宣言する**次元数。実物と食い違えば初回 `embed()` で例外になる                                               |
-| `modelId`        | `"ruri-v3-30m/sym"`              | `space.model` に載る文字列                                                                                    |
-| `prefix`         | `""`                             | 全テキストの先頭に付ける文字列                                                                                |
-| `cacheDir`       | 未指定（`~/.cache/huggingface`） | モデルの置き場所                                                                                              |
-| `numThreads`     | `4`                              | onnxruntime の intra-op スレッド数                                                                            |
-| `createPipeline` | transformers.js                  | モデルを読み込む関数（**テスト用の注入点**）                                                                  |
-| `retry`          | `{ attempts: 3 }`                | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141） |
-| `sleep`          | `setTimeout` を使う本物の待ち    | リトライの待ち時間を実際に待つ関数（**テスト用の注入点**）                                                    |
+| オプション       | 既定                                          |                                                                                                               |
+| ---------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| `repo`           | `"sirasagi62/ruri-v3-30m-ONNX"`               | Hugging Face の repo id                                                                                       |
+| `dtype`          | `"q8"`                                        | 量子化の別                                                                                                    |
+| `dimensions`     | `256`                                         | **宣言する**次元数。実物と食い違えば初回 `embed()` で例外になる                                               |
+| `modelId`        | `"ruri-v3-30m/sym"`                           | `space.model` に載る文字列                                                                                    |
+| `prefix`         | `""`                                          | 全テキストの先頭に付ける文字列                                                                                |
+| `cacheDir`       | 未指定（`@huggingface/transformers/.cache/`） | モデルの置き場所                                                                                              |
+| `numThreads`     | `4`                                           | onnxruntime の intra-op スレッド数                                                                            |
+| `createPipeline` | transformers.js                               | モデルを読み込む関数（**テスト用の注入点**）                                                                  |
+| `retry`          | `{ attempts: 3 }`                             | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141） |
+| `sleep`          | `setTimeout` を使う本物の待ち                 | リトライの待ち時間を実際に待つ関数（**テスト用の注入点**）                                                    |
 
 **`numThreads` の既定が 4 なのは実測による**——32コア機で、既定（コア数まかせ）の
 819 文/秒 に対し 4スレッドで **985 文/秒**だった。**増やすほど速くなるわけではない。**
@@ -471,6 +474,7 @@ const provider = new LocalEmbeddingProvider({ repo: "my-ruri", createPipeline })
   prefix の適用・`warmup()` を測る。
 
   ⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）: `embed()` は件数と次元に加えて、成分が有限か（`NaN`・`Infinity` を含まないか）も検査し、含んでいれば次元の検査と同じ素の `Error` を投げる（Issue #992）。この検査も同じテストファイルで測っている。
+
 - `src/__tests__/input-token-limit.test.ts` — **擬似の extractor を注入して、
   上限の受け取りと超過の名乗り方を測る。**CI で必ず走る（ADR 0090）。
   ⚠ **ここでは `8192` という数字は測っていない**——それはモデルが持つ事実であり、

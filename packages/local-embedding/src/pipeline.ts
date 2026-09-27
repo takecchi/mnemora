@@ -26,7 +26,11 @@ export interface LocalEmbeddingModelSpec {
   /** Hugging Face の repo id。 */
   readonly repo: string;
   readonly dtype: LocalEmbeddingDtype;
-  /** モデルファイルの置き場所。未指定なら transformers.js の既定（`~/.cache/huggingface`）。 */
+  /**
+   * モデルファイルの置き場所。未指定なら transformers.js の既定——`@huggingface/transformers`
+   * パッケージ自身の中の `.cache/`（`node_modules/@huggingface/transformers/.cache/` など。
+   * ホームの `~/.cache` の下ではない）。
+   */
   readonly cacheDir: string | undefined;
   /** onnxruntime の intra-op スレッド数。 */
   readonly numThreads: number;
