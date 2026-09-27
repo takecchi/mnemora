@@ -48,6 +48,7 @@
 
 - 関係グラフ本体（`superseded_by_id` / `contradicts` を辿るグラフ探索）
 - reranking
+  - ⚠ 2026-09-27 追記（[Issue #208](https://github.com/takecchi/mnemora/issues/208) を閉じるときに足した）: `packages/` に reranking の実装は無い。段2の再スコア（`packages/core/src/strategies/scoring.ts`）は候補ごとに独立に評価する純関数で、候補どうしを見て並べ替える機構ではない。**LLM reranker は北極星が問い3 で一度落とした案である**（[north-star.md](./north-star.md) の「この問いが、実際に案を落とすことの確認」の表）。再び提案するなら、少なくとも次の条件を満たすこと（Issue #208 の受け入れ条件）: ①問い3（なぜ選ばれたかを後から説明できる）を満たすことを ADR に書く ②問い5（LLM を呼ばずに済ませられないか）に答える ③並べ替えた後も `ScoreBreakdown` に相当する説明が成り立つ ④想起の質を測る器（[Issue #109](https://github.com/takecchi/mnemora/issues/109)）が先に在り、`retrieval-baseline.json` の前後で hit@1 が実際に動いたことを示す ⑤動かなかったときにどうするかを着手前に書く。どの項が実際に順位を決めているかは [ADR 0081](./decisions/0081-similarity-is-the-only-term-that-ranks.md)・[ADR 0109](./decisions/0109-which-score-terms-actually-rank.md) が測っている。
 - `reflect()` の実運用（Background Cognition）
 - `packages/bullmq`（Scheduler の実装）
 - HTTP server（`packages/server`）
