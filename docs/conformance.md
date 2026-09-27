@@ -91,7 +91,7 @@ grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testki
 | `packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts` の6つの `describe*Conformance({` 呼び出し（`describeMemoryStoreConformance` / `describeVectorStoreConformance` / `describeLexicalStoreConformance` / `describeEventStoreConformance` / `describeOutboxStoreConformance` / `describeTenantSettingsStoreConformance`） | in-memory の擬似物（`__fixtures__/in-memory-*.ts`） | **走る**（常時）                                                          |
 | `packages/postgres/src/__tests__/conformance.postgres.test.ts` の6つの `describe*Conformance({` 呼び出し（`describeMemoryStoreConformance` / `describeEventStoreConformance` / `describeVectorStoreConformance` / `describeLexicalStoreConformance` / `describeOutboxStoreConformance` / `describeTenantSettingsStoreConformance`）          | **本物の Postgres + pgvector**                      | **走る**（`DATABASE_URL` 必須。無いと fail する——擬似物へ黙って倒れない） |
 
-### 2.2 `EmbeddingProvider` suite — 呼び出し元は7箇所【2026-09-25 追記で6→7】
+### 2.2 `EmbeddingProvider` suite — 呼び出し元（下の表と、その後の 2026-09-28 追記。表は 2026-09-25 追記で6→7）
 
 | #   | 呼び出し元                                                                                                                        | 当たる実装                                                                                                                                               | CI で走るか     |
 | --- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
@@ -100,7 +100,7 @@ grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testki
 | 3   | `packages/local-embedding/src/__tests__/local-embedding-provider.conformance.test.ts` の `describeEmbeddingProviderConformance({` | `LocalEmbeddingProvider` ＋ 注入した replay pipeline（`fixtures/real-ruri-embeddings.json` = **本物の推論を1回録ったもの**。重みは落とさない）           | **走る**        |
 | 4   | `packages/local-embedding/src/__tests__/live.local-embedding.test.ts:379`                                                         | **本物の `LocalEmbeddingProvider`**（実際に ONNX の重みを落としてプロセス内推論）                                                                        | 🔴 **走らない** |
 | 5   | `packages/openai/src/__tests__/embedding-provider.conformance.test.ts:143`                                                        | `OpenAIEmbeddingProvider` ＋ 注入 client（`fixtures/recorded-openai-embeddings.json` の再生）                                                            | **走る**        |
-| 6   | `packages/openai/src/__tests__/live.openai.test.ts:106`                                                                           | **実 API**                                                                                                                                               | 🔴 **走らない** |
+| 6   | `packages/openai/src/__tests__/live.openai.test.ts:111`                                                                           | **実 API**                                                                                                                                               | 🔴 **走らない** |
 | 7   | `packages/testkit/src/__tests__/embedding-provider-conformance-over-limit.test.ts`（2026-09-25 追記、Issue #449 / ADR 0305）      | この歯専用の最小 provider（`RejectsOverLimitEmbeddingProvider`。**本物のモデルではない**——`overLimitText` の歯が実際に何かを検出することを示す陽性対照） | **走る**        |
 
 ⚠ **#1・#2・#7 はどれも `overLimitText` を渡していない/渡している、が食い違う——** #1・#2 は
@@ -115,7 +115,17 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 ⟹ **7箇所のうち「本物に当たる」のは #4 と #6 の2つだけで、その2つが走っていない。**
 （#7 は「本物に当たる」ではなく、この歯専用の擬似 provider に当たる——上の注記参照。）
 
-### 2.3 `LLMProvider` suite — 呼び出し元は2箇所【2026-09-26 追記、新設】
+**⚠ 2026-09-28 追記（文書と実装の照合）**: 上の表は、その後に足された呼び出し元を写していない。
+次の4つも `describeEmbeddingProviderConformance` を呼んでいる。どれも env の gate を持たず、
+`deterministic: true` を渡し、`overLimitText` は渡していない。包まれる側はどれも
+`DeterministicEmbeddingProvider` である。
+
+- `packages/testkit/src/__tests__/wrapper-providers.conformance.test.ts` の2つ（`SeededEmbeddingProvider`・`RecordingEmbeddingProvider`）
+- `examples/chat/src/__tests__/wrapper-providers.conformance.test.ts` の2つ（`CountingEmbeddingProvider`・`CachingEmbeddingProvider`）
+
+⟹ **どれも本物には当たらない。**「本物に当たるのは #4 と #6 だけで、その2つが走っていない」は変わらない。
+
+### 2.3 `LLMProvider` suite — 呼び出し元（下の表と、その後の 2026-09-28 追記）【2026-09-26 追記、新設】
 
 | # | 呼び出し元 | 当たる実装 | CI で走るか |
 | - | --- | --- | --- |
@@ -131,9 +141,21 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 `deterministic: true` を支えているのは偽 client の固定応答であって、実 API の決定性を
 実測した結果ではない——§4 の区別と同じ形。
 
+**⚠ 2026-09-28 追記（文書と実装の照合）**: 上の表の2つのほかにも、`describeLLMProviderConformance` の
+呼び出し元がある。どれも env の gate を持たず、`deterministic: true` を渡している。
+
+- `packages/testkit/src/__tests__/llm-provider-conformance.test.ts` の2つ（`DeterministicLLMProvider`・`RecordedLLMProvider`）。
+  **`createFailing: null` を渡すので、失敗系の歯は `it.skip` になる**（名前は残る。同ファイル冒頭のコメント）。
+  上の「8 it は skip なく全部走る」は、表の2つについての記述である。
+- `packages/testkit/src/__tests__/wrapper-providers.conformance.test.ts` の2つ（`SeededLLMProvider`・`RecordingLLMProvider`）と、
+  `examples/chat/src/__tests__/wrapper-providers.conformance.test.ts` の1つ（`CountingLLMProvider`）。
+  包まれる側は `DeterministicLLMProvider`、`createFailing` は必ず失敗する包まれる側を渡している。
+
+⟹ **どれも実 API には当たらない。**「本物の実 API に当たる `LLMProvider` 適合テストは、この suite にも無い」は変わらない。
+
 ---
 
-## 3. 🔴 構造的に一度も走らない歯 — 4ファイル・28 it【現物】
+## 3. 🔴 構造的に一度も走らない歯 — ファイルと it の数は下の表【現物】
 
 **数え方**: 「CI のいまの構成では、どんな入力でも通過しない `it`」を **it 単位**で数えた。
 
@@ -159,7 +181,7 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 「**無条件7本**が緑かを見る」と書いている。**これは「env が無くても走る7本」ではない。**
 
 `packages/openai/src/__tests__/live.openai.test.ts` の **12本はすべて `live` gate の下に在る**
-【現物: `:43` / `:53` の `it.skipIf(!live)`、`:103` の `describe.skipIf(!live)`。
+【現物: `:43` / `:53` の `it.skipIf(!live)`、`:108` の `describe.skipIf(!live)`。
 `live` の定義は `:40`】（2026-09-25 追記: 適合テストが9→10になったため11→12）。
 
 **「無条件7本」の正しい意味**: _gate が開いた後_、適合テスト10本のうち
@@ -300,7 +322,7 @@ ADR 0095 §7 が逐語でこう書いている:
 
 **いま採らなかった理由**:
 
-- **CI のジョブが1本増える**（13 → 14）。1周は壁時計 **4〜9分**である
+- **CI のジョブが1本増える**。1周は壁時計 **4〜9分**である
   （[ADR 0183](./decisions/0183-local-postgres-makes-postgres-mutation-testing-possible.md) の実測）。
 - [Issue #267](https://github.com/takecchi/mnemora/issues/267) が、**CI の1周の費用を
   既に問題として挙げている**（ADR を持つ PR は索引再生成でもう1周する）。
@@ -329,13 +351,13 @@ ADR 0095 §7 が逐語でこう書いている:
 ### 打つコマンド
 
 ```bash
-# OpenAI（live 11本。1回あたり embeddings.create が5回増える。ADR 0019 §5c）
+# OpenAI（live の it は §3 の表。1回あたり embeddings.create が5回増える。ADR 0019 §5c）
 OPENAI_API_KEY=sk-... MNEMORA_LIVE_OPENAI=1 pnpm --filter @mnemora/openai test
 
-# Anthropic（live 2本）
+# Anthropic（live の it は §3 の表）
 ANTHROPIC_API_KEY=sk-... MNEMORA_LIVE_ANTHROPIC=1 pnpm --filter @mnemora/anthropic test
 
-# local-embedding（live 14本＋1本。鍵は要らない。4ファイル計42MB（うち重み36MB）を落とす）
+# local-embedding（live の it は §3 の表。鍵は要らない。4ファイル計42MB（うち重み36MB）を落とす）
 MNEMORA_LIVE_LOCAL_EMBEDDING=1 pnpm --filter @mnemora/local-embedding test
 ```
 
