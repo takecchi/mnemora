@@ -1011,6 +1011,8 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: `purge()` が書き換えるのは、いまは `memories` の `content`・`digest`・`purged_at` だけであり、あわせて今の `embeddingProvider.space` の埋め込み行をベストエフォートで消す（ADR 0124 決定4・決定5）。それ以外の次のものは元の値のまま残る——`tags`・`attributes`・claimKey の2列・`content_hash`、`labels`/`memory_labels` の行、別の空間の埋め込み行、元の Observation の `payload`、`memory_events.digest_snapshot`、そして purge より前の recall の記録（`recalls.index_band` の digest 帯、および `consolidate`/`reflect` が種の digest を `text` にして撃った recall の `recalls.query`）。ここでは現状を記録するだけで、どこまで消すかは決まっていない（[Issue #994](https://github.com/takecchi/mnemora/issues/994)・[Issue #995](https://github.com/takecchi/mnemora/issues/995)、オーナーの判断待ち）。
 
+**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）**: `consolidate`/`reflect` が LLM を待っている間に、その元の記憶を `forget`・`purge` しても、統合先・内省の Memory はその本文を入れた LLM の出力から作られ、`active` で書かれる（`purge()` が `"purged"` を返した後でも）。書き込みの前に元の状態を見直す仕組みは無い（`embed` ジョブの同じ形は [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) で直した）。`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ。見直して打ち切るかどうかは決まっていない。
+
 **⚠ 2026-09-27 追記（[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、今の振る舞いを書くだけ）: 1つのテナントを消去した後に、表ごとに何が残るか。**
 テナント単位で消去する口は無い。ここでは「そのテナントの全記憶を `forget` → `purge` し、`setEventRetention({ kind: "days", days: 1 })` の後に
 `purgeExpiredEventsForTenant` で保持期間の掃除をした後」を消去とみなし、`@mnemora/postgres` の全表を当てた（【実測】自分専用の PostgreSQL 17 + pgvector。
