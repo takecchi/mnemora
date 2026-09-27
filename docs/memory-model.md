@@ -411,6 +411,18 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 検索に出やすい」という自己強化ループが生まれ、実際の有用性と無関係にスコアが積み上がる。
 強化のトリガーは「候補になったこと」ではなく「使われたと報告されたこと」でなければならない。
 
+**⚠ 2026-09-27 追記（[Issue #977](https://github.com/takecchi/mnemora/issues/977)）: 報告の中身は突き合わせない。**
+mnemora は `usedMemoryIds` を、その recall（`recallId`）が返した集合とも、呼んだ `ctx.subjectId` とも
+突き合わせない。その recall が返していない記憶や、別の subject の記憶（subject なしの記憶を含む）を
+報告しても、同じテナントに在れば記録されて強化される（`@mnemora/postgres` と `@mnemora/testkit` の
+fixture の両方で確かめた）。ほかのテナントの id は強化の段で「memory not found」になる（Issue #1051）。
+⟹ 上の「実際に使われたものだけを強化する」を守るのは**呼び出し側の報告**であり、
+`usedMemoryIds` を `recall()` の `memories` から選ぶのは呼び出し側の責務である。この約束は、強化の
+きっかけを「報告されたこと」に置いた上の文と食い違わない（報告を検証するとは書いていない）。
+クローン miku の判断で、返した集合や subject で絞る案（受け付けている入力を拒むことになる）は採らず、
+今の振る舞いを記録した。選び直す余地は Issue #977 に残してある。詳細は `ObserveMemoryUsageInput.usedMemoryIds`
+の TSDoc。
+
 **ここも正直に書く。** alteroid には reinforcement の実装が存在しない。使用回数・最終使用時刻・
 スコア更新のいずれも見つからなかった。したがって上記の結論は**運用で検証された結論ではなく、
 設計上の判断**である。「alteroid で効果が確認された」とは書けない。
