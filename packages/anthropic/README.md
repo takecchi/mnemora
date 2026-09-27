@@ -40,6 +40,15 @@ pnpm add @mnemora/anthropic @mnemora/core
 npm i @mnemora/anthropic @mnemora/core
 ```
 
+下の例をそのまま動かすなら、次も自分の依存として入れる（2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れて確かめた。README の install 行どおりに pnpm で入れると、最初の例は `Cannot find package '@mnemora/openai'` で止まった）:
+
+- `@mnemora/openai`——最初の例は埋め込みに `OpenAIEmbeddingProvider` を使う（Anthropic は埋め込み API を持たない）。
+- `zod`（`@mnemora/core` と同じメジャー、^4.5.4）——`completeStructured` に渡すスキーマを作る例で使う。
+
+```bash
+pnpm add @mnemora/openai zod
+```
+
 ## 前提
 
 - Node.js >= 22

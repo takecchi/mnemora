@@ -179,6 +179,20 @@ export function parseMigrateCliOptions(
     const eqIndex = arg.startsWith("--") ? arg.indexOf("=") : -1;
     const flag = eqIndex === -1 ? arg : arg.slice(0, eqIndex);
 
+    if (arg === "--") {
+      // `pnpm --filter @mnemora/postgres run migrate -- --analyze-memories` のように書くと、
+      // pnpm が `--` をそのまま渡してくる。受け付ける入力は変えず（`--` は未知のオプションのまま）、
+      // エラー文に `--` を付けない正しい書き方を1行足す。例には実際に渡された残りの引数を使う。
+      const rest = argv.filter((a) => a !== "--").join(" ");
+      const example = `pnpm --filter @mnemora/postgres run migrate${rest.length > 0 ? ` ${rest}` : ""}`;
+      return {
+        ok: false,
+        error: {
+          message: `unknown option: --\n\`--\` を付けずに、オプションをそのまま渡すこと（例: ${example}）。`,
+        },
+      };
+    }
+
     if (flag !== SCHEMA_FLAG && flag !== EXTENSION_SCHEMA_FLAG && flag !== EXTENSION_MODE_FLAG) {
       return { ok: false, error: { message: `unknown option: ${arg}` } };
     }
