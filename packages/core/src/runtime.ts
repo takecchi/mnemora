@@ -159,6 +159,17 @@ const DEFAULT_CLAIMED_BY = "runtime.tick";
 const DEFAULT_TICK_LIMIT = 50;
 
 /**
+ * Issue #1136: `consolidate` / `reflect` の `{ seedMemoryId }` 形で、種の `digest` を検索語にして
+ * 近傍を集めてよいか。forget と purge は、利用者が「使わないでほしい」と言った記憶である——その
+ * `digest` で近傍を束ねると、消した情報が別の形で効き続ける（#897 / ADR 0124 が observe の再送で
+ * 「消した情報が蘇るので抽出をやり直さない」と決めたのと同じ線。クローン miku の判断）。
+ * `contested` / `superseded` の種は利用者が消したものではないので、今どおり近傍を集める。
+ */
+function isWithdrawnSeed(seed: Memory): boolean {
+  return seed.status === "forgotten" || (seed.purgedAt ?? null) !== null;
+}
+
+/**
  * `tick` が**実際に処理する分岐を持つ** outbox job kind（ADR 0082）。
  *
  * ⚠ **ここに「いまは extract と embed だけ」と書かない。**この配列そのものが答えであり、
@@ -606,6 +617,14 @@ export interface ForgetResult {
  * - `seedMemoryId` が指す Memory が無い場合、`recall()` は呼ばない——
  *   対象は `[seedMemoryId]` の1件のみとなり、後続の `getMany` が `not_found` に分類する
  *   （新しい `nothingReason` を発明しない。下記 {@link ConsolidateNothingReason} 参照）。
+ * - **種が forget・purge された記憶なら、`recall()` は呼ばない**（Issue #1136）——対象は
+ *   `[seedMemoryId]` の1件のみとなり、後続の `getMany` が `status_not_active`（`forgotten`）に
+ *   分類する（結果は `nothing_to_consolidate`/`no_eligible_sources`、`llmCalls: 0`）。利用者が
+ *   「使わないでほしい」と言った記憶の `digest` で近傍を束ねると、消した情報が別の形で効き続ける
+ *   ためである（#897 / ADR 0124 の observe の再送と同じ線）。自動 job（ADR 0157）も同じ経路を通る。
+ *   ⚠ **種が `contested` / `superseded` なら、今どおり種の `digest` で近傍を集める**
+ *   （種そのものは `status_not_active` で弾かれ、近傍が2件以上あれば近傍どうしが統合される）。
+ *   利用者が消した記憶ではないので、集めることを止めていない。
  * - **近傍は `ctx` の scope で集める。**`ctx.subjectId` を付けなければテナント全体から集まる。
  *   近傍が別の subject にまたがると、統合後の `subjectId` は `null` に畳まれる。
  *   **帰属を保ちたいなら、`ctx.subjectId` に種の `subjectId` を渡すこと**——混在は構造的に
@@ -789,6 +808,11 @@ export interface ConsolidationResult {
  * `seedMemoryId` が指す Memory が無い場合、`recall()` は呼ばない——対象は `[seedMemoryId]` の
  * 1件のみとなり、後続の `getMany` が既存の分類（`not_found`）にそのまま落とす（新しい
  * `nothingReason`/`ReflectBasisOutcome` は発明しない）。
+ *
+ * **種が forget・purge された記憶なら、`recall()` は呼ばない**（Issue #1136、
+ * {@link ConsolidateTarget} と同じ規則）——対象は `[seedMemoryId]` の1件のみとなり、
+ * `status_not_active`（`forgotten`）→ `nothing_to_reflect`/`no_eligible_basis`（`llmCalls: 0`）に
+ * 落ちる。種が `contested` / `superseded` なら、今どおり近傍を集める。
  *
  * この形も `target` を呼び手が必須で渡す点は変わらない——`reflect` 自身が「何を見るか」を
  * 決めているわけではなく、ADR 0091 決定3（`target` 必須）に反しない（ADR 0154）。
@@ -2677,7 +2701,8 @@ export interface Runtime {
    *    {@link DEFAULT_CONSOLIDATE_MIN_AFFINITY}）未満のものは落とす。**種そのものは
    *    この判定を受けず、必ず先頭に含める**（種の embedding がまだ無いと ANN に
    *    載らないため）。`maxCandidates` は結果の配列全体（種＋近傍）を先頭から切る。
-   *    種が見つからなければ `recall()` を呼ばず、対象は種の id 1件のみになる。
+   *    種が見つからない、または種が forget・purge された記憶なら（Issue #1136）、`recall()` を
+   *    呼ばず、対象は種の id 1件のみになる。
    * 2. `getMany` で一括読み。無ければ `not_found`、`status !== 'active'` なら
    *    `status_not_active`、`active` なら eligible。
    * 3. eligible が0件なら `nothing_to_consolidate`/`no_eligible_sources`、1件だけなら
@@ -2758,7 +2783,8 @@ export interface Runtime {
    *    `minAffinity`（既定 {@link DEFAULT_REFLECT_MIN_AFFINITY}）未満のものは落とす。
    *    **種そのものはこの判定を受けず、必ず先頭に含める**（種の embedding がまだ無いと
    *    ANN に載らないため）。`maxCandidates` は結果の配列全体（種＋近傍）を先頭から切る。
-   *    種が見つからなければ `recall()` を呼ばず、対象は種の id 1件のみになる。
+   *    種が見つからない、または種が forget・purge された記憶なら（Issue #1136）、`recall()` を
+   *    呼ばず、対象は種の id 1件のみになる。
    * 2. `getMany` で一括読み。**この優先順で**分類する: 無ければ `not_found`、
    *    `status !== 'active'` なら `status_not_active`、`active` かつ
    *    `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を
@@ -5211,9 +5237,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // Issue #135（ADR 0152）: 「この記憶に似ているものを mnemora 自身が集めて、
       // 1つに畳め」。ConsolidateTarget の doc コメント参照。
       const seed = await deps.memoryStore.get(ctx, target.seedMemoryId);
-      if (seed === null) {
+      if (seed === null || isWithdrawnSeed(seed)) {
         // 種が無い——recall を呼ばない。対象は種の id 1件のみとなり、後続の getMany が
         // not_found に分類する（新しい nothingReason は発明しない）。
+        // Issue #1136: 種が forget・purge された記憶のときも同じく recall を呼ばない。
+        // 後続の getMany が status_not_active(forgotten) に分類する。
         ids = [target.seedMemoryId];
       } else {
         // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
@@ -5561,9 +5589,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       // Issue #204（ADR 0154）: `consolidate` の { seedMemoryId }（ADR 0152）と同じ土台選定。
       // ReflectTarget の doc コメント参照。
       const seed = await deps.memoryStore.get(ctx, target.seedMemoryId);
-      if (seed === null) {
+      if (seed === null || isWithdrawnSeed(seed)) {
         // 種が無い——recall を呼ばない。対象は種の id 1件のみとなり、後続の getMany が
         // not_found に分類する（新しい nothingReason は発明しない）。
+        // Issue #1136: 種が forget・purge された記憶のときも同じく recall を呼ばない。
+        // 後続の getMany が status_not_active(forgotten) に分類する。
         ids = [target.seedMemoryId];
       } else {
         // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
