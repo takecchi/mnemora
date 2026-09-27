@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Ctx, MemoryStatus } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -140,9 +140,20 @@ async function gateRowIds(pool: Pool, forcing: Forcing): Promise<string[]> {
 }
 
 describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
-  beforeEach(async () => {
+  // 歯2・歯3は、同じ `insertManyMemories` の表（同じ status の並び）を読むだけで書かない（`withForcing` は
+  // ROLLBACK で閉じる）。以前は1件ずつ `resetTestDatabase()` → `insertManyMemories()` をやり直し、同じ表を
+  // 2回作っていた。積むのはこの describe の最初に1回だけにする。歯1（形）は catalog だけを読むので、表の
+  // 中身に左右されない。
+  beforeAll(async () => {
     await resetTestDatabase();
-  });
+    const { db, pool } = await getTestClient();
+    await insertManyMemories(
+      new PostgresMemoryStore(db),
+      { tenantId: TENANT },
+      ["active", "contested", "superseded", "archived", "forgotten"],
+      pool,
+    );
+  }, 60_000);
 
   afterAll(async () => {
     await closeTestClient();
@@ -194,16 +205,7 @@ describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
    * `idx_memories_recall_gate_seq` が選べること。
    */
   it("適用可能性: btree 経路だけに絞ると、部分述語 (status IN ('active','contested')) でも idx_memories_recall_gate_seq が引ける", async () => {
-    const { db, pool } = await getTestClient();
-    const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-
-    await insertManyMemories(
-      store,
-      ctx,
-      ["active", "contested", "superseded", "archived", "forgotten"],
-      pool,
-    );
+    const { pool } = await getTestClient();
 
     const naturalPlan = await explainGate(pool, "none");
     console.log(`=== EXPLAIN（自然な計画・強制なし。assert しない観測）===\n${naturalPlan}`);
@@ -222,16 +224,7 @@ describe("idx_memories_recall_gate_seq（ADR 0165 / Issue #305）", () => {
    * 3経路が同じ行を返すこと。
    */
   it("同値: 自然な計画・btree を強制した計画・全走査を強制した計画が、同じ行を返す（contested を含み、他の status を含まない）", async () => {
-    const { db, pool } = await getTestClient();
-    const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-
-    await insertManyMemories(
-      store,
-      ctx,
-      ["active", "contested", "superseded", "archived", "forgotten"],
-      pool,
-    );
+    const { pool } = await getTestClient();
 
     const natural = await gateRowIds(pool, "none");
     const viaBtree = await gateRowIds(pool, "btreeIndex");

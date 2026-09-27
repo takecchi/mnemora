@@ -1,5 +1,5 @@
 import type { Pool, PoolClient } from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Ctx, MemoryStatus } from "@mnemora/core";
 import { defaultDecayStrategy } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
@@ -257,9 +257,21 @@ async function gateRowIds(pool: Pool, forcing: Forcing): Promise<string[]> {
 }
 
 describe("idx_memories_recall_gate (誤り1の修正)", () => {
-  beforeEach(async () => {
+  // 適用可能性・同値の2件は、同じ `insertManyMemories` の表（同じ status の並び）を読むだけで書かない
+  // （`withForcing` は ROLLBACK で閉じる）。以前は1件ずつ `resetTestDatabase()` → `insertManyMemories()` を
+  // やり直し、同じ表を2回作っていた。積むのはこの describe の最初に1回だけにする。形の歯は catalog だけを
+  // 読み、最後の歯は自分で書いた1件の値だけを見るので、表の中身に左右されない（最後の歯が書く1件は、
+  // 表を読む2件より後に積まれる）。
+  beforeAll(async () => {
     await resetTestDatabase();
-  });
+    const { db, pool } = await getTestClient();
+    await insertManyMemories(
+      new PostgresMemoryStore(db),
+      { tenantId: TENANT },
+      ["active", "contested", "superseded", "archived", "forgotten"],
+      pool,
+    );
+  }, 60_000);
 
   afterAll(async () => {
     await closeTestClient();
@@ -338,16 +350,7 @@ describe("idx_memories_recall_gate (誤り1の修正)", () => {
    * ——`idx_memories_lexical`（0008）で一度そうなった。
    */
   it("適用可能性: btree 経路だけに絞ると、修正後の述語 (status IN ('active','contested')) でも idx_memories_recall_gate が引ける", async () => {
-    const { db, pool } = await getTestClient();
-    const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-
-    await insertManyMemories(
-      store,
-      ctx,
-      ["active", "contested", "superseded", "archived", "forgotten"],
-      pool,
-    );
+    const { pool } = await getTestClient();
 
     // 自然な計画は assert せず、全文をログへ残す（Issue #150: 落ちたときに計画が読めなかった）。
     const naturalPlan = await explainGate(pool, "none");
@@ -378,16 +381,7 @@ describe("idx_memories_recall_gate (誤り1の修正)", () => {
    * 変わらない」という主張を、誰かが言葉で書くのではなく歯に名乗らせるために。
    */
   it("同値: 自然な計画・btree を強制した計画・全走査を強制した計画が、同じ行を返す（contested を含み、他の status を含まない）", async () => {
-    const { db, pool } = await getTestClient();
-    const store = new PostgresMemoryStore(db);
-    const ctx: Ctx = { tenantId: TENANT };
-
-    await insertManyMemories(
-      store,
-      ctx,
-      ["active", "contested", "superseded", "archived", "forgotten"],
-      pool,
-    );
+    const { pool } = await getTestClient();
 
     const natural = await gateRowIds(pool, "none");
     const viaBtree = await gateRowIds(pool, "btreeIndex");
