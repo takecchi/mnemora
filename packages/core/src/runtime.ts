@@ -2125,8 +2125,11 @@ export interface Runtime {
    * [ADR 0186](../../../docs/decisions/0186-sweep-archive-follows-decay-clock.md)）。
    * `'wall'`（既定）なら `decayFloorAt <= now` のまま、`'activity'`/`'either'` なら
    * `nowSeq`（`tenant_activity.activity_seq`）も併せて読んで store へ渡す。**`opts.clock`
-   * を明示で渡したときはそちらが勝ち、この口は `tenant_settings`/`tenant_activity` を
-   * 一切読まない。** `decay_clock` を設定していないテナントの挙動は本 ADR の前後で
+   * を明示で渡したときはそちらが勝ち、`tenant_settings`（`decay_clock`）は読まない。**
+   * ⚠ 2026-09-27 訂正（[Issue #1217](https://github.com/takecchi/mnemora/issues/1217)）: 以前は「`tenant_activity`
+   * も一切読まない」と書いていたが、実装（ADR 0186 決めたこと1）と合っていなかった。`opts.clock` に
+   * `activity`/`either` を明示して `opts.nowSeq` を省くと、`tenant_activity` は1回読む。
+   * どちらも読まないのは、`clock: wall` を明示したときと、`clock` と `nowSeq` の両方を明示したときだけである。 `decay_clock` を設定していないテナントの挙動は本 ADR の前後で
    * 1バイトも変わらない。
    *
    * store がこの口を実装していなければ `{ supported: false, archived: [], reachedLimit:
