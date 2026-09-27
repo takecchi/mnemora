@@ -248,10 +248,6 @@ export class InMemoryMemoryStore implements MemoryStore {
     return JSON.stringify([tenantId, name]);
   }
 
-  private labelTenantOf(key: string): string {
-    return (JSON.parse(key) as [string, string])[0];
-  }
-
   /**
    * Issue #201 / ADR 0318: `PostgresMemoryStore.upsertProposedLabels` と同じ契約——
    * 新しく作った Memory の `tags`（重複は `Set` で潰す）から `proposed` ラベルを作り・
@@ -1960,7 +1956,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   async listLabels(ctx: Ctx): Promise<LabelSummary[]> {
     const results: LabelSummary[] = [];
     for (const [key, label] of this.labels) {
-      if (this.labelTenantOf(key) === ctx.tenantId) {
+      if ((JSON.parse(key) as [string, string])[0] === ctx.tenantId) {
         results.push(label);
       }
     }
