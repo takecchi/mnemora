@@ -1,4 +1,3 @@
-import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
@@ -7,6 +6,7 @@ import {
   buildPackageModel,
   diffPackageModels,
 } from "../public-api-breaking-diff-lib.mjs";
+import { execFileSyncWithDeadline, isDeadlineError } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/public-api-breaking-diff.mjs`（Issue #818 / #811 / #813 / #815）が使う純関数の歯。
@@ -273,14 +273,19 @@ describe("Markdown 組み立て", () => {
  * スキップする——このテストの目的は「実履歴を読めたときに、実際の3件を捕まえるか」
  * であり、ref が無い環境で赤くして CI を無関係な理由で落とすことではない。
  */
-function refIsAvailable(ref) {
+/**
+ * @param {string} ref
+ * @param {typeof execFileSyncWithDeadline} [run] 期限の例外を投げ直すことを歯から確かめるための注入点。
+ */
+function refIsAvailable(ref, run = execFileSyncWithDeadline) {
   try {
-    execFileSync("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
+    run("git", ["rev-parse", "--verify", "--quiet", `${ref}^{commit}`], {
       cwd: REPO_ROOT,
       stdio: ["ignore", "ignore", "ignore"],
     });
     return true;
-  } catch {
+  } catch (error) {
+    if (isDeadlineError(error)) throw error;
     return false;
   }
 }
@@ -293,10 +298,14 @@ describe.skipIf(!bothRefsAvailable)(
   "陽性対照: v1.0.0 → 55a39bd（#827 の直前）で testkit の3フィールドが実際に必須化されていたことを捕まえる",
   () => {
     function readAtRef(ref) {
-      return execFileSync("git", ["show", `${ref}:scripts/__snapshots__/public-api/testkit.d.ts`], {
-        cwd: REPO_ROOT,
-        encoding: "utf8",
-      });
+      return execFileSyncWithDeadline(
+        "git",
+        ["show", `${ref}:scripts/__snapshots__/public-api/testkit.d.ts`],
+        {
+          cwd: REPO_ROOT,
+          encoding: "utf8",
+        },
+      );
     }
 
     it("supportsTaxonomyMode / supportsLabels / supportsFindActiveByClaimKey を requiredMemberAdded に出す", () => {
@@ -323,3 +332,24 @@ describe.skipIf(!bothRefsAvailable)(
     });
   },
 );
+
+describe("refIsAvailable: 期限の例外だけは、読み替えずに投げ直す", () => {
+  // 止まる子。期限を短くして、`git` の代わりに起こす。
+  const hang = (_command, _args, options) =>
+    execFileSyncWithDeadline(process.execPath, ["-e", "setInterval(() => {}, 1000)"], {
+      ...options,
+      timeoutMs: 500,
+    });
+
+  it("子が期限を超えたら、false（＝skip）に読み替えずに投げる", () => {
+    expect(() => refIsAvailable(HEAD_REF, hang)).toThrow(/秒で終わらなかった/);
+  }, 20_000);
+
+  it("期限でない失敗（非0の終了）は、従来どおり false", () => {
+    expect(
+      refIsAvailable(HEAD_REF, (_command, _args, options) =>
+        execFileSyncWithDeadline(process.execPath, ["-e", "process.exit(1)"], options),
+      ),
+    ).toBe(false);
+  });
+});

@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { execFileSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), "../..");
 const script = join(repoRoot, "scripts/print-transformers-default-cache-dir.mjs");
@@ -28,7 +28,9 @@ const version = JSON.parse(readFileSync(pkgJsonPath, "utf8")).version;
 
 describe("print-transformers-default-cache-dir.mjs（Issue #1004）", () => {
   it("packages/local-embedding が読み込む transformers.js の既定のキャッシュの場所と版を、$GITHUB_OUTPUT の形で出す", () => {
-    const out = execFileSync(process.execPath, [script], { encoding: "utf8" }).trim().split("\n");
+    const out = execFileSyncWithDeadline(process.execPath, [script], { encoding: "utf8" })
+      .trim()
+      .split("\n");
     expect(out).toHaveLength(2);
     expect(out[1]).toBe(`version=${version}`);
     // 既定の場所は、その版の transformers.js のパッケージの中の `.cache/` である（4.2.0 の DEFAULT_CACHE_DIR）。
@@ -36,7 +38,9 @@ describe("print-transformers-default-cache-dir.mjs（Issue #1004）", () => {
   });
 
   it("--plain では場所だけを出す", () => {
-    const out = execFileSync(process.execPath, [script, "--plain"], { encoding: "utf8" }).trim();
+    const out = execFileSyncWithDeadline(process.execPath, [script, "--plain"], {
+      encoding: "utf8",
+    }).trim();
     expect(out).toBe(join(dirname(pkgJsonPath), "/.cache/"));
   });
 });

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   execFileSyncWithDeadline,
+  execSyncWithDeadline,
   killProcessGroup,
   runNodeScript,
   spawnSyncWithDeadline,
@@ -85,6 +86,22 @@ describe("期限を超えて止めたとき、孫も残らない", () => {
       expect(() =>
         execFileSyncWithDeadline("bash", ["-c", bashScript], { timeoutMs: 1_500, stdio: "pipe" }),
       ).toThrow(/秒で終わらなかった/);
+      pid = await grandchildPid(pidFile);
+      expect(await diesWithin(pid, 3_000)).toBe(true);
+    } finally {
+      if (pid && isAlive(pid)) process.kill(pid, "SIGKILL");
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 20_000);
+
+  it("execSyncWithDeadline（シェルが孫を起こす）", async () => {
+    const { dir, pidFile, bashScript } = setup();
+    let pid;
+    try {
+      // `execSync` は `/bin/sh -c` を挟む。同じコマンドの文字列を、そのシェルに渡す。
+      expect(() => execSyncWithDeadline(bashScript, { timeoutMs: 1_500, stdio: "pipe" })).toThrow(
+        /秒で終わらなかった/,
+      );
       pid = await grandchildPid(pidFile);
       expect(await diesWithin(pid, 3_000)).toBe(true);
     } finally {

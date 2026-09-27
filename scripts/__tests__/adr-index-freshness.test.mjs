@@ -1,4 +1,3 @@
-import { execSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -9,6 +8,7 @@ import {
   extractGeneratedIndex,
   extractIndexedNumbers,
 } from "../generate-adr-index-lib.mjs";
+import { execSyncWithDeadline, isDeadlineError } from "./spawn-with-deadline.mjs";
 
 /**
  * 実際の `docs/decisions/` と `docs/decisions/README.md` を読み、索引の
@@ -69,13 +69,15 @@ import {
 
 const decisionsDir = fileURLToPath(new URL("../../docs/decisions", import.meta.url));
 
-function detectGitBranch() {
+/** @param {typeof execSyncWithDeadline} [run] 期限の例外を投げ直すことを歯から確かめるための注入点。 */
+function detectGitBranch(run = execSyncWithDeadline) {
   try {
-    return execSync("git rev-parse --abbrev-ref HEAD", {
+    return run("git rev-parse --abbrev-ref HEAD", {
       cwd: decisionsDir,
       encoding: "utf8",
     }).trim();
-  } catch {
+  } catch (error) {
+    if (isDeadlineError(error)) throw error;
     return undefined;
   }
 }
@@ -153,3 +155,24 @@ describe.skipIf(!enforceFreshnessNow)(
     });
   },
 );
+
+describe("detectGitBranch: 期限の例外だけは、読み替えずに投げ直す", () => {
+  // 止まる子。期限を短くして、`git` の代わりに起こす。
+  const hang = `${JSON.stringify(process.execPath)} -e "setInterval(() => {}, 1000)"`;
+
+  it("子が期限を超えたら、undefined（＝強制しない）に読み替えずに投げる", () => {
+    expect(() =>
+      detectGitBranch((_command, options) =>
+        execSyncWithDeadline(hang, { ...options, timeoutMs: 500 }),
+      ),
+    ).toThrow(/秒で終わらなかった/);
+  }, 20_000);
+
+  it("期限でない失敗（非0の終了）は、従来どおり undefined", () => {
+    expect(
+      detectGitBranch((_command, options) =>
+        execSyncWithDeadline("exit 3", { ...options, stdio: "pipe" }),
+      ),
+    ).toBeUndefined();
+  });
+});

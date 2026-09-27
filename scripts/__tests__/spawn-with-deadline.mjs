@@ -1,5 +1,21 @@
-import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { execFileSync, execSync, spawn, spawnSync } from "node:child_process";
 import { basename } from "node:path";
+
+/** 子が期限までに終わらなかった（close しなかった）ときに、この file の関数たちが投げる例外。 */
+class ChildDeadlineError extends Error {}
+
+/**
+ * この file の関数たち（同期の3つと `runNodeScript`）が、**期限を超えたために**投げた（reject した）例外なら真。
+ * 非0の終了など、それ以外の失敗には偽（文面が似ていても、この file が作った例外でなければ偽）。
+ *
+ * 呼び出しを `try { … } catch { … }` で包み、失敗を「無い」「skip」に読み替えている歯は、**期限の例外だけは
+ * これで見分けて投げ直す。**読み替えると、止まった子が名乗らずに「skip」や「強制しない」に変わり、偽の緑になる。
+ *
+ * @param {unknown} error
+ */
+export function isDeadlineError(error) {
+  return error instanceof ChildDeadlineError;
+}
 
 /** 子の close を待つ既定の期限（ミリ秒）。歯の `testTimeout`（180 秒）より十分に短くする。 */
 export const DEFAULT_CHILD_DEADLINE_MS = 30_000;
@@ -70,7 +86,7 @@ export function runNodeScript(
     let timedOut = false;
     const fail = () =>
       reject(
-        new Error(
+        new ChildDeadlineError(
           `子（${basename(script)} ${args.join(" ")}）が ${timeoutMs / 1000} 秒で close しなかった` +
             `（プロセスグループごと SIGKILL した。pid=${child.pid}）。ここまでの stdout: ${JSON.stringify(stdout.slice(0, 200))}` +
             ` / stderr: ${JSON.stringify(stderr.slice(0, 200))}`,
@@ -97,18 +113,21 @@ export function runNodeScript(
 }
 
 /**
- * 同期の子が期限を超えたときに投げる例外の文面を作る。
- * @param {string} command @param {readonly string[]} args @param {number} timeoutMs
- * @param {unknown} stdout @param {unknown} stderr
+ * 同期の子が期限を超えたときに投げる例外を作る。
+ * @param {string} label 子の名乗り（`コマンド 引数`、`execSync` ならコマンドの文字列そのもの）
+ * @param {number} timeoutMs @param {unknown} stdout @param {unknown} stderr
  */
-function syncDeadlineError(command, args, timeoutMs, stdout, stderr, cause) {
+function syncDeadlineError(label, timeoutMs, stdout, stderr, cause) {
   const text = (v) => JSON.stringify(String(v ?? "").slice(0, 200));
-  return new Error(
-    `子（${basename(String(command))} ${args.join(" ")}）が ${timeoutMs / 1000} 秒で終わらなかった` +
+  return new ChildDeadlineError(
+    `子（${label}）が ${timeoutMs / 1000} 秒で終わらなかった` +
       `（プロセスグループごと SIGKILL した）。ここまでの stdout: ${text(stdout)} / stderr: ${text(stderr)}`,
     { cause },
   );
 }
+
+/** @param {string} command @param {readonly string[]} args */
+const commandLabel = (command, args) => `${basename(String(command))} ${args.join(" ")}`;
 
 /**
  * `spawnSync` と同じ引数で子を起こし、**期限の内なら `spawnSync` と同じ戻り値をそのまま返す。**
@@ -137,7 +156,13 @@ export function spawnSyncWithDeadline(command, args, options = {}) {
   if (result.error && result.error.code === "ETIMEDOUT") {
     // 同期の呼び出しの間は親のコードが走らない。期限で返った直後に、残った孫をグループごと止める。
     killProcessGroup(result.pid);
-    throw syncDeadlineError(command, args, timeoutMs, result.stdout, result.stderr, result.error);
+    throw syncDeadlineError(
+      commandLabel(command, args),
+      timeoutMs,
+      result.stdout,
+      result.stderr,
+      result.error,
+    );
   }
   return result;
 }
@@ -164,7 +189,46 @@ export function execFileSyncWithDeadline(command, args, options = {}) {
     if (error && error.code === "ETIMEDOUT") {
       // 期限で返った直後に、残った孫をグループごと止める（`spawnSyncWithDeadline` と同じ）。
       killProcessGroup(error.pid);
-      throw syncDeadlineError(command, args, timeoutMs, error.stdout, error.stderr, error);
+      throw syncDeadlineError(
+        commandLabel(command, args),
+        timeoutMs,
+        error.stdout,
+        error.stderr,
+        error,
+      );
+    }
+    throw error;
+  }
+}
+
+/**
+ * `execSync` と同じ引数で子を起こし、**期限の内なら `execSync` と同じ戻り値（stdout）を返し、非0の終了では
+ * 同じく投げる。** 期限を超えたら子をプロセスグループごと SIGKILL し、「子（コマンドの文字列）が N 秒で終わらなかった」
+ * と名乗って投げる。`testTimeout` が効かないことは {@link spawnSyncWithDeadline} の doc と同じ。
+ *
+ * ⚠ **`execSync` はシェル（`/bin/sh -c`）を挟むので、コマンドはシェルの孫になる。**【実測 2026-09-28】
+ * `"<node>" -e "setInterval(…)"; echo done` を素の `execSync(…, { timeout: 800, killSignal: "SIGKILL", detached: true })`
+ * で起こすと、804 ms で ETIMEDOUT が返り（文面は `spawnSync /bin/sh ETIMEDOUT` で、コマンドも秒数も出ない）、
+ * 孫の node は生きていた。`/bin/sh` が dash のとき、1つのコマンドでも fork した（孫になる）。
+ * ⟹ 子だけでなく、グループごと止める（`spawn-deadline-grandchild.test.mjs`）。
+ *
+ * @param {string} command
+ * @param {import("node:child_process").ExecSyncOptions & { timeoutMs?: number }} [options]
+ */
+export function execSyncWithDeadline(command, options = {}) {
+  const { timeoutMs = DEFAULT_SYNC_CHILD_DEADLINE_MS, ...rest } = options;
+  try {
+    return execSync(command, {
+      ...rest,
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      detached: true,
+    });
+  } catch (error) {
+    if (error && error.code === "ETIMEDOUT") {
+      // 期限で返った直後に、残ったシェルの孫をグループごと止める（`spawnSyncWithDeadline` と同じ）。
+      killProcessGroup(error.pid);
+      throw syncDeadlineError(command, timeoutMs, error.stdout, error.stderr, error);
     }
     throw error;
   }
