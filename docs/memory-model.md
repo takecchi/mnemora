@@ -207,6 +207,8 @@ digest の生成方式がどちらであったかを隠さないのは同じ原�
    `digest_source = 'fallback'` を記録する（上記）。
 2. **LLM 呼び出し自体が失敗した** → Observation の全文を1件の `stated` Memory として残す。
 
+**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1222](https://github.com/takecchi/mnemora/issues/1222)）**: 2 は、`@mnemora/postgres` では本文の大きさで働かないことがある。`memories.content` は語彙の索引（`to_tsvector` の GIN）に入り、tsvector は 1MB（1048575 バイト）を超えられない。語の多い本文ではフォールバックの Memory の INSERT が失敗し、`observe()` は DB の例外を投げる。Observation と extract ジョブは残り、Memory は1件も残らない（ランダムな16進の語では約0.9MB で落ちた）。`tick()` での再試行も同じ所で失敗する。`@mnemora/testkit` の fixture は1件残す。どう直すか（切り詰める・索引に入れない・入力に上限を置く）は決まっていない。
+
 **2 で残る Memory は「抽出されたもの」ではない。未処理の生テキストである。**
 当初の実装はこれを 1 と同じ顔で記録していた——`ObserveResult` は `extracted: true` を返し、
 `memory_events` の `created` イベントは `meta.reason = 'extracted'` を記録していた。

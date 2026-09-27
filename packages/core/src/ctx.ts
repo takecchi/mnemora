@@ -11,7 +11,7 @@ import { z } from "zod";
  *
  * ⚠ **識別子の長さに上限は約束しない**（[Issue #1074](https://github.com/takecchi/mnemora/issues/1074)）。
  * `tenantId`・`subjectId`（ここと `observe` の入力、Memory）・`observe` の `externalId`・Memory の
- * `tags` の要素は、schema が長さを検査しない。ただし `@mnemora/postgres` はこれらを btree / GIN の
+ * `tags` の要素・`claimKey` の主語と述語（2026-09-27 追記。`idx_memories_claim_key`）は、schema が長さを検査しない。ただし `@mnemora/postgres` はこれらを btree / GIN の
  * 索引に入れるので、索引の1行（複合索引では同じ行のほかの欄との合計）が**圧縮後に**上限
  * （btree 2704 バイト、GIN 2712 バイト）を超えると、書き込みが例外になる
  * （`index row size … exceeds …`）。圧縮後の大きさで決まるので、上限は文字数でもバイト数でも
