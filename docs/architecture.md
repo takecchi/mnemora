@@ -79,9 +79,9 @@ Runtime とその下（Storage / LLM / Queue の interface）だけである。�
 
 ```
 observe
-  → MemoryStore.append(Observation)        ── 同一トランザクションで
+  → MemoryStore.createObservationWithOutbox(Observation)  ── 同一トランザクションで
   → outbox テーブルへ抽出ジョブを書く         ── │ 同一トランザクションで（§3.4）
-  → [extract: 'sync']     その場で LLMProvider 抽出 → MemoryStore.create(Memory)
+  → [extract: 'sync']     その場で LLMProvider 抽出 → MemoryStore.createMemoryWithOutbox(Memory)
   → [extract: 'deferred'] ここで終わる。抽出は後で Scheduler 経由（§3.3）
 ```
 
@@ -107,7 +107,7 @@ recall が「返ったもの」と「返らなかったもの」を対等に返�
 reflect / consolidate
   → Scheduler が起動（または runtime.tick() が明示的に駆動）
   → LLMProvider.completeStructured(...)   ── provenance.kind = 'reflected' | 'consolidated'
-  → MemoryStore.create(Memory)
+  → MemoryStore.createMemoryWithOutbox(Memory)
   → EventStore.append
 ```
 
@@ -377,7 +377,7 @@ core を組み立てる合成ルート（どの adapter を使うかは server �
 ## 5. 主要 interface
 
 各 interface は「型シグネチャ」と「契約（振る舞いの約束）」の両方で構成される。**型だけでなく
-振る舞いが契約である**——例えば `MemoryStore.create` が同じ入力に対して本当に冪等かどうかは
+振る舞いが契約である**——例えば `MemoryStore.createMemoryWithOutbox` が同じ入力に対して本当に冪等かどうかは
 型シグネチャからは分からない。この振る舞いの契約は `packages/testkit` の適合テストで実行可能な
 形で検査される。adapter は型を満たすだけでなく、testkit のスイートを通ることで初めて「準拠」と
 みなす。

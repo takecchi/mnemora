@@ -54,6 +54,61 @@ import { defaultActivityDecayStrategy, defaultDecayStrategy } from "../strategie
 import { resolveIdempotentCreate } from "../idempotent-create.js";
 import type { IdempotentCreateResult } from "../idempotent-create.js";
 
+// `packages/testkit` の `in-memory-memory-store.ts` の同名の関数と同じ判定（Issue #816 の NUL 側の残り）。
+/**
+ * `value` を `jsonb` 列へ書くとき、Postgres が NUL（U+0000）で拒むかどうか。
+ *
+ * `packages/postgres` は `jsonb` 列へ `JSON.stringify(value)` を送る。Postgres は、
+ * 文字列の値にもキーにも `\u0000` が現れると `unsupported Unicode escape sequence` で拒む
+ * （実測）。同じ文字列を JSON として往復させた値を辿るので、`toJSON` などによる変換も
+ * Postgres が受け取る形と同じになる。文字どおりの `\\u0000`（バックスラッシュ + `u0000`）は
+ * NUL ではないので拒まない。
+ */
+function jsonContainsNul(value: unknown): boolean {
+  const text = JSON.stringify(value);
+  if (text === undefined || !text.includes("\\u0000")) {
+    return false;
+  }
+  const visit = (v: unknown): boolean => {
+    if (typeof v === "string") {
+      return v.includes("\u0000");
+    }
+    if (Array.isArray(v)) {
+      return v.some(visit);
+    }
+    if (v !== null && typeof v === "object") {
+      return Object.entries(v).some(([k, inner]) => k.includes("\u0000") || visit(inner));
+    }
+    return false;
+  };
+  return visit(JSON.parse(text));
+}
+
+/**
+ * Observation を書く口（`createObservation` / `createObservationWithOutbox`）で、Postgres が
+ * NUL を拒む欄を先に検査する（Issue #816 の NUL 側の残り）。`subjectId`・`externalId`・
+ * `kind` は `text` 列（`invalid byte sequence for encoding "UTF8": 0x00`）、`payload`・
+ * `attributes` は `jsonb` 列（`unsupported Unicode escape sequence`）。Postgres は
+ * `externalId` の衝突を見る前、クエリの時点で拒むので、冪等の判定より前に見る。
+ */
+function assertObservationHasNoNul(owner: string, input: NewObservation): void {
+  for (const [field, value] of [
+    ["subjectId", input.subjectId],
+    ["externalId", input.externalId],
+    ["kind", input.kind],
+  ] as const) {
+    if (value != null && value.includes("\u0000")) {
+      throw new Error(`${owner}: ${field} must not contain NUL characters (U+0000)`);
+    }
+  }
+  if (jsonContainsNul(input.payload)) {
+    throw new Error(`${owner}: payload must not contain NUL characters (U+0000)`);
+  }
+  if (jsonContainsNul(input.attributes ?? {})) {
+    throw new Error(`${owner}: attributes must not contain NUL characters (U+0000)`);
+  }
+}
+
 /**
  * `packages/core` 自身の runtime テスト用フェイク一式。
  *
@@ -228,6 +283,7 @@ export class FakeMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
   ): IdempotentCreateResult<Observation> {
+    assertObservationHasNoNul("FakeMemoryStore", input);
     const existing = input.externalId
       ? [...this.backing.observations.values()].find(
           (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
@@ -440,6 +496,14 @@ export class FakeMemoryStore implements MemoryStore {
       }
       if (input.digest.includes("\u0000")) {
         throw new Error(`FakeMemoryStore: digest must not contain NUL characters (U+0000)`);
+      }
+      // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
+      // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
+      if (jsonContainsNul(input.attributes ?? {})) {
+        throw new Error(`FakeMemoryStore: attributes must not contain NUL characters (U+0000)`);
+      }
+      if (jsonContainsNul(input.provenance)) {
+        throw new Error(`FakeMemoryStore: provenance must not contain NUL characters (U+0000)`);
       }
       // 孤立サロゲート（Issue #816、実測）: このメソッドは検査しない。入力をそのまま
       // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ

@@ -358,19 +358,24 @@ export interface MemoryStore {
    * 検査しない**（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
    *
    * ⚠ **孤立サロゲート（`\uD800` 単体など、対をなさない UTF-16 サロゲートコード
-   * ユニット）を含む文字列フィールド（`content`/`subjectId`/`tags`/`digest` 等）を
-   * 渡したときの挙動は、adapter によって異なる（Issue #816、実測。契約として現状を
-   * 記録するだけで、この非対称を無くす変更は本 doc コメントの対象外）。**
-   * - `PostgresMemoryStore`: 例外を投げない。node-postgres（`pg`）ドライバが JS 文字列を
-   *   UTF-8 バイト列へエンコードする際、対をなさないサロゲートを静かに U+FFFD
-   *   （置換文字）へ置換する——クエリが Postgres へ届く前、クライアント側で値が
-   *   変わる。読み返した値は入力と一致しない。
+   * ユニット）を含む文字列を渡したときの挙動は、adapter によって異なる。Postgres では、
+   * 欄の列の型によっても異なる（Issue #816・#1075、実測。契約として現状を記録するだけで、
+   * この非対称を無くす変更は本 doc コメントの対象外）。**
+   * - `PostgresMemoryStore`、`text` 列の欄（`content`/`subjectId`/`tags`/`digest`）:
+   *   例外を投げない。node-postgres（`pg`）ドライバが JS 文字列を UTF-8 バイト列へ
+   *   エンコードする際、対をなさないサロゲートを静かに U+FFFD（置換文字）へ置換する
+   *   ——クエリが Postgres へ届く前、クライアント側で値が変わる。読み返した値は入力と
+   *   一致しない。
+   * - `PostgresMemoryStore`、`jsonb` 列の欄（`attributes`/`provenance`）: **例外を投げる**
+   *   （`invalid input syntax for type json`）。`JSON.stringify` が孤立サロゲートを
+   *   `\ud800` のエスケープにし、Postgres の `jsonb` がそれを受け付けないため。
    * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の
-   *   `FakeMemoryStore`: 例外を投げず、入力をそのまま保持する（JS の文字列は
+   *   `FakeMemoryStore`: どの欄でも例外を投げず、入力をそのまま保持する（JS の文字列は
    *   UTF-16 コードユニット列であり、孤立サロゲートを持つことに制約が無いため）。
    *
    * ⟹ 呼び出し側は「成功した」ことだけでは、書き込んだ値と読み返した値が一致するとは
-   * 限らない——Postgres 経由では孤立サロゲートを含む文字列は静かに書き換わる。
+   * 限らない——Postgres 経由では、`text` 列の欄の孤立サロゲートは静かに書き換わり、
+   * `jsonb` 列の欄では書き込みそのものが失敗する。
    */
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   /**
