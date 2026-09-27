@@ -19,12 +19,15 @@ import type { EmbeddingSpaceId, PromptSpec } from "@mnemora/core";
 /** カセットの形式版。読み込み時に照合し、違えば読まずに落とす。 */
 export const CASSETTE_FORMAT_VERSION = 1;
 
+/** 埋め込みのカセットの1件（入力と、記録したベクトル）。 */
 export interface EmbeddingCassetteEntry {
   /** 鍵の元になった入力。**デバッグのために必ず併記する**（上記の理由）。 */
   text: string;
+  /** 記録した時点に実 API が返したベクトル。 */
   vector: number[];
 }
 
+/** LLM のカセットの1件（入力のプロンプトと、記録した応答）。 */
 export interface LLMCassetteEntry {
   /** 鍵の元になった入力。**デバッグのために必ず併記する**。 */
   prompt: PromptSpec;
@@ -35,26 +38,34 @@ export interface LLMCassetteEntry {
   value: unknown;
 }
 
+/** カセットの埋め込みの節。 */
 export interface EmbeddingCassetteSection {
   /**
    * 記録元の埋め込み空間。再生側が要求する空間と食い違ったら落とす
    * （ADR 0051「負債」: モデル版の凍結を、黙って進ませない）。
    */
   space: EmbeddingSpaceId;
+  /** 鍵（{@link embeddingCassetteKey}）ごとの記録。 */
   entries: Record<string, EmbeddingCassetteEntry>;
 }
 
+/** カセットの LLM の節。 */
 export interface LLMCassetteSection {
   /** 記録元のモデル名。空間のような構造を持たないため、名前だけを照合する。 */
   model: string;
+  /** 鍵（{@link llmCassetteKey}）ごとの記録。 */
   entries: Record<string, LLMCassetteEntry>;
 }
 
+/** 1回の記録セッションのカセット全体（埋め込みと LLM の両方を1つに持つ）。 */
 export interface Cassette {
+  /** 形式版。{@link CASSETTE_FORMAT_VERSION} と違えば読まずに落とす。 */
   version: number;
   /** 記録した時刻（ISO 8601）。**いつの API の姿かを、記録自身に持たせる。** */
   recordedAt: string;
+  /** 埋め込みの記録。 */
   embedding: EmbeddingCassetteSection;
+  /** LLM の記録。 */
   llm: LLMCassetteSection;
 }
 

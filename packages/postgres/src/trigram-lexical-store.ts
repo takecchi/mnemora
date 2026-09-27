@@ -182,12 +182,17 @@ export type TrigramLexicalUnavailableReason =
   | "extension_create_failed"
   | "locale_no_japanese_trigrams";
 
+/** `pg_trgm` の前提の確認が通った結果。 */
 export interface TrigramLexicalProbeOk {
+  /** 常に `true`。 */
   readonly ok: true;
 }
 
+/** `pg_trgm` の前提の確認が通らなかった結果。 */
 export interface TrigramLexicalProbeUnavailable {
+  /** 常に `false`。 */
   readonly ok: false;
+  /** 通らなかった理由（{@link TrigramLexicalUnavailableReason}）。機械判定はこの値で行う。 */
   readonly reason: TrigramLexicalUnavailableReason;
   /** 診断用の生の値・エラーメッセージ。人間が読むためのものであり、機械判定には `reason` を使うこと。 */
   readonly detail?: string;
@@ -249,7 +254,9 @@ export const TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX =
  * ——`options?: ErrorOptions` を任意の第3引数として足す形のほうが非破壊で済む。
  */
 export class TrigramLexicalStoreUnavailableError extends Error {
+  /** 通らなかった理由（{@link TrigramLexicalUnavailableReason}）。機械判定はこの値で行う。 */
   readonly reason: TrigramLexicalUnavailableReason;
+  /** 診断用の生の値・エラーメッセージ（人間が読むためのもの）。無ければ `undefined`。 */
   readonly detail: string | undefined;
 
   constructor(reason: TrigramLexicalUnavailableReason, detail?: string, options?: ErrorOptions) {
@@ -520,7 +527,7 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  * 連なりにも上限を置いた（`TRIGRAM_JAPANESE_QUERY_MAX_CHARS` の doc 参照）。
  *
  * **🔴 Issue #878（同日中の見直し）: `query` 全体の文字数にも上限
- * （{@link LEXICAL_QUERY_MAX_TOTAL_CHARS}）を置いた。**ASCII 側・日本語側の両方に
+ * （`LEXICAL_QUERY_MAX_TOTAL_CHARS`）を置いた。**ASCII 側・日本語側の両方に
  * 同じ1つの上限として効かせる——`asciiQuery`（`capLexicalQueryWords` 経由で内部的に
  * 適用）と `jaTerm`（`totalCappedQuery` を明示的に経由）のどちらも、この上限を
  * 通った後の文字列を基にする（`lexical-query-cap.ts` の

@@ -12,6 +12,7 @@ import { llmCassetteKey } from "./cassette.js";
  * **記録に無い入力に対しては例外を投げる**（`RecordedEmbeddingProvider` と同じ理由）。
  */
 export interface RecordedLLMProviderOptions {
+  /** 再生するカセットの LLM の節。 */
   section: LLMCassetteSection;
   /**
    * 呼び出し側が期待するモデル名。指定すると、記録元と食い違ったときに構築時に落ちる
@@ -20,6 +21,12 @@ export interface RecordedLLMProviderOptions {
   expectedModel?: string;
 }
 
+/**
+ * 記録した実 API の応答を再生する `LLMProvider`（ADR 0051）。説明は {@link RecordedLLMProviderOptions} の doc を見ること。
+ *
+ * 投げるもの: 構築時に `expectedModel` が記録元と食い違えば `Error`。呼び出し時に、記録に無いプロンプト・
+ * `LLMResponse` の形をしていない記録は `Error`、`completeStructured` で記録が `schema` に合わなければ `Error`（`ZodError` ではない。zod の詳細はメッセージに載る）。
+ */
 export class RecordedLLMProvider implements LLMProvider {
   private readonly entries: LLMCassetteSection["entries"];
 

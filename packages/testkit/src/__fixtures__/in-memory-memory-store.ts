@@ -348,6 +348,14 @@ function assertStorableNewMemory(input: NewMemory): void {
   // （`packages/core/src/interfaces/memory-store.ts`）。挙動は変えない。
 }
 
+/**
+ * `MemoryStore` のインメモリ実装（`@mnemora/testkit/fixtures`）。適合スイートと単体テストの入力に使う。
+ * 契約は `@mnemora/core` の `MemoryStore` の各メソッドの doc が正で、Postgres が拒む値はこの fixture も拒む
+ * （列挙に無い値・NUL・値域の外の数など）。拒むときは何も書かない。
+ *
+ * status を書く口が投げる名前の付いたエラー（`MemoryStatusConflictError`・`ContestedWithoutCompanionError`）は、
+ * 各メソッドの doc に書いてある。
+ */
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly observations = new Map<string, Observation>();
   private readonly memories = new Map<string, Memory>();
@@ -721,7 +729,12 @@ export class InMemoryMemoryStore implements MemoryStore {
     return results;
   }
 
-  /** ADR 0030: `opts.expectedStatus` があるときだけ compare-and-swap にする（postgres 実装と同じ意味論）。 */
+  /**
+   * ADR 0030: `opts.expectedStatus` があるときだけ compare-and-swap にする（postgres 実装と同じ意味論）。
+   *
+   * 投げるもの: `"contested"` への遷移は常に {@link ContestedWithoutCompanionError}、`expectedStatus` と食い違えば
+   * {@link MemoryStatusConflictError}（どちらも何も書かない）。
+   */
   async updateStatus(
     ctx: Ctx,
     id: MemoryId,
@@ -761,6 +774,9 @@ export class InMemoryMemoryStore implements MemoryStore {
    * ADR 0031: `updateStatus` と同じ CAS 判定のあと、通ったときだけイベントも積む
    * （postgres 実装の `db.transaction()` に対応する意味論——CAS に弾かれたら status も
    * イベントも一切変わらない）。
+   *
+   * 投げるもの: `"contested"` への遷移は常に {@link ContestedWithoutCompanionError}、`expectedStatus` と食い違えば
+   * {@link MemoryStatusConflictError}。
    */
   async updateStatusWithEvent(
     ctx: Ctx,
@@ -830,6 +846,9 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 適合テストで「（CAS に弾かれて）変わっていないこと」を assert するときは、
    * 呼び出しの前にプリミティブ値へ写し取ってから比べること——写し取らずに同じ参照を
    * 2回見ると、変異を入れても歯が赤くならない（死んだ歯になる）。
+   *
+   * 新しい行に `status: "contested"` で `contestedWithId` が無いものがあれば、何も書かずに
+   * {@link ContestedWithoutCompanionError} を投げる。
    */
   async supersedeWithNewMemories(
     ctx: Ctx,
@@ -1721,6 +1740,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    * （`supersedeWithNewMemories`/`updateStatusWithEvent` と同じ「まだ何も書いていないうちに
    * 判定する」作法）。存在確認・CAS 判定の両方を先に済ませ、どちらか一方でも失敗したら
    * この時点で throw する——`first`/`second` のどちらの Map エントリもまだ書き換えていない。
+   *
+   * CAS の失敗（どちらかが `"active"` でない）は {@link MemoryStatusConflictError}。
    */
   async markContestedPair(
     ctx: Ctx,
@@ -1776,6 +1797,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    * いないうちに判定する」作法（存在確認・CAS 判定の両方を先に済ませ、どちらか一方でも
    * 失敗したらこの時点で throw する。`first`/`second` のどちらの Map エントリもまだ
    * 書き換えていない）。
+   *
+   * CAS の失敗（どちらかが `"contested"` でない・相互参照が成り立っていない）は {@link MemoryStatusConflictError}。
    */
   async resolveContestedPair(
     ctx: Ctx,
@@ -1846,6 +1869,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    * `resolveContestedPair`（上）の解決側 CAS を満たせなくなった生存側1件だけを対象にした
    * 別の任意メソッド。契約は `MemoryStore.resolveOrphanedContested`（`@mnemora/core`）側に
    * ある。対向の行には一切触れない。
+   *
+   * CAS の失敗（`"contested"` でない・対向が渡された値と違う）は {@link MemoryStatusConflictError}。
    */
   async resolveOrphanedContested(
     ctx: Ctx,

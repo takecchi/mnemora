@@ -18,9 +18,13 @@ import { needsRootWrap, toBaseJsonSchema, wrapRootSchema } from "./structured-ro
  * ——だからこそ、翻訳結果そのものを検査する歯を専用に用意する（PR 本文参照）。
  */
 
+/** OpenAI の `response_format: { type: "json_schema", json_schema }` に入れる値（上の翻訳の出力）。 */
 export interface OpenAIJsonSchemaFormat {
+  /** スキーマの名前（`json_schema.name`）。 */
   name: string;
+  /** strict モードの制約（上の1・2）を満たすように翻訳した JSON Schema。 */
   schema: Record<string, unknown>;
+  /** 常に `true`（strict モードで送る）。 */
   strict: true;
 }
 

@@ -41,8 +41,11 @@ import type { z } from "zod";
  * そのまま使う。
  */
 
+/** `messages.create` の `output_config.format` に入れる値（上の翻訳の出力）。 */
 export interface AnthropicJsonSchemaFormat {
+  /** 常に `"json_schema"`。 */
   type: "json_schema";
+  /** `zodOutputFormat` が作った JSON Schema。 */
   schema: Record<string, unknown>;
 }
 

@@ -35,6 +35,7 @@ import { translateForAnthropicStructuredOutput } from "./json-schema.js";
  * 前提にしている。 */
 export const DEFAULT_MAX_TOKENS = 16000;
 
+/** {@link AnthropicLLMProvider} のコンストラクタに渡す設定。 */
 export interface AnthropicLLMProviderOptions {
   /**
    * API キー。省略すると SDK が `ANTHROPIC_API_KEY` を読む。
@@ -52,6 +53,11 @@ export interface AnthropicLLMProviderOptions {
   model: string;
   /** 省略時 {@link DEFAULT_MAX_TOKENS}。 */
   maxTokens?: number;
+  /**
+   * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
+   * キーの検査もしない。⚠ `@anthropic-ai/sdk` を自分の依存として入れるときは、`@mnemora/anthropic` が固定している
+   * 版と同じにすること——違う版だと型が食い違う（packages/anthropic/README.md の 2026-09-27 追記）。
+   */
   client?: Pick<Anthropic, "messages">;
 }
 
@@ -64,7 +70,9 @@ interface AnthropicMessageParam {
 
 /** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。 */
 export interface AnthropicRequest {
+  /** `PromptSpec.system`。無ければ鍵ごと無い（Anthropic では top-level の `system` に入る）。 */
   system?: string;
+  /** `PromptSpec.messages` を `role` と `content` だけの形にしたもの。 */
   messages: AnthropicMessageParam[];
 }
 
@@ -150,6 +158,17 @@ function assertNotRefusedOrTruncated(response: {
   }
 }
 
+/**
+ * Anthropic の Messages API を呼ぶ `LLMProvider`。**`EmbeddingProvider` は実装しない**（Anthropic に埋め込み API が無い。
+ * 埋め込みは別の provider を併用する）。設定は {@link AnthropicLLMProviderOptions} を見ること。
+ *
+ * 構築時: キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ * ⚠ キーが見つからなくても構築は通る——`complete()` などを呼んだ時点で、SDK の素の `Error`
+ * （`Could not resolve authentication method`）が伝わる（`kind` を持たない。【実測 2026-09-27】）。
+ *
+ * 拒否・切り詰め・空応答は {@link AnthropicLLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
+ * HTTP の失敗・認証の失敗などは、SDK の例外がそのまま伝わる。
+ */
 export class AnthropicLLMProvider implements LLMProvider {
   private readonly client: Pick<Anthropic, "messages">;
   private readonly model: string;
@@ -179,6 +198,13 @@ export class AnthropicLLMProvider implements LLMProvider {
     this.maxTokens = options.maxTokens ?? DEFAULT_MAX_TOKENS;
   }
 
+  /**
+   * `req` を1回送り、最初のテキストブロックを返す。
+   *
+   * `stop_reason: "refusal"` は `kind: "refusal"`、`"max_tokens"`・`"model_context_window_exceeded"` は `kind: "truncated"` の
+   * {@link AnthropicLLMProviderError} を投げる。⚠ どちらでもなくテキストブロックが無いときは、例外にせず空文字を返す
+   * （ADR 0072「引き受けた負債」2。`@mnemora/openai` も同じ形）。
+   */
   async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
     const { system, messages } = toAnthropicRequest(req);
     const response = await this.client.messages.create({
@@ -203,6 +229,10 @@ export class AnthropicLLMProvider implements LLMProvider {
    * ⚠ **翻訳できない形は、送る前に素の `Error` を投げる**（#1148、今の振る舞い）。`z.tuple`・`z.date`・`transform` は
    * SDK の `zodOutputFormat` が投げ、`messages.create` は呼ばれない。`z.record`・`z.lazy`・`default`・根が union は
    * 翻訳が通って送る（Anthropic が受けるかは実 API で確かめていない）。一覧は README。
+   *
+   * 送った後に投げるもの: 拒否・切り詰めは `complete` と同じ {@link AnthropicLLMProviderError}（`kind: "refusal"`・`"truncated"`）、
+   * テキストブロックが無ければ `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
+   * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
    */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const format = translateForAnthropicStructuredOutput(req.schema);

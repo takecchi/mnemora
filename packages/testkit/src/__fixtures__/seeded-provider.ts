@@ -51,7 +51,9 @@ export interface SeedUsageCounts {
   real: number;
 }
 
+/** {@link SeededLLMProvider} の設定。 */
 export interface SeededLLMProviderOptions {
+  /** 種にするカセットの LLM の節。 */
   seed: LLMCassetteSection;
   /**
    * 呼び出し側が期待するモデル名。種と食い違えば構築時に落ちる。**必須**
@@ -60,6 +62,12 @@ export interface SeededLLMProviderOptions {
   expectedModel: string;
 }
 
+/**
+ * 種カセットに在るプロンプトは記録済みの応答を返し、無いプロンプトだけを `delegate`（実 API）へ流す `LLMProvider`。
+ * 規律はこのファイルの冒頭の doc を見ること。
+ *
+ * 構築時: 種のモデル名が `expectedModel` と食い違えば `Error` を投げる。
+ */
 export class SeededLLMProvider implements LLMProvider {
   private readonly entries: LLMCassetteSection["entries"];
   private seededCalls = 0;
@@ -126,7 +134,9 @@ export class SeededLLMProvider implements LLMProvider {
   }
 }
 
+/** {@link SeededEmbeddingProvider} の設定。 */
 export interface SeededEmbeddingProviderOptions {
+  /** 種にするカセットの埋め込みの節。 */
   seed: EmbeddingCassetteSection;
   /**
    * 呼び出し側が期待する埋め込み空間。種と食い違えば構築時に落ちる。**必須**
@@ -135,6 +145,12 @@ export interface SeededEmbeddingProviderOptions {
   expectedSpace: EmbeddingSpaceId;
 }
 
+/**
+ * 種カセットに在る入力は記録済みのベクトルを返し、無い入力だけを `delegate`（実 API）へ流す `EmbeddingProvider`。
+ * 規律はこのファイルの冒頭の doc を見ること。`space` は `delegate.space` になる。
+ *
+ * 構築時: 種の空間が `expectedSpace` と食い違えば `Error` を投げる。
+ */
 export class SeededEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
   private readonly entries: EmbeddingCassetteSection["entries"];
