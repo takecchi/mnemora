@@ -5,6 +5,7 @@ import {
   isContestedWithoutCompanion,
   isEmbeddingStatusRollback,
   isHalfLifeHoursInRange,
+  isHalfLifeRecallsInRange,
   isStrengthInRange,
   MAX_STRENGTH,
   MemoryPurgeConflictError,
@@ -289,6 +290,50 @@ function assertStorableNewMemory(input: NewMemory): void {
   // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
   // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
   // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
+  // #1183 の外側の CHECK 制約（Postgres の `memories_check`）: 由来が `stated`/`inferred` なら、その元の観測が要る。
+  if (
+    (input.provenance.kind === "stated" || input.provenance.kind === "inferred") &&
+    input.sourceObservationId == null
+  ) {
+    throw new Error(
+      `InMemoryMemoryStore: provenance.kind "${input.provenance.kind}" requires sourceObservationId`,
+    );
+  }
+  // 活動時計の起点と床（ADR 0165）: Postgres は `bigint` 列で、`memories_decay_seq_non_negative` が負を拒む。
+  // 省略（`null`/`undefined`）は「この軸には床が無い」であり、検査しない。
+  for (const [field, value] of [
+    ["decayBaseSeq", input.decayBaseSeq],
+    ["decayFloorSeq", input.decayFloorSeq],
+  ] as const) {
+    if (value == null) continue;
+    if (!Number.isInteger(value)) {
+      throw new Error(`InMemoryMemoryStore: ${field} must be an integer (got ${value})`);
+    }
+    if (value < 0) {
+      throw new Error(`InMemoryMemoryStore: ${field} must not be negative (got ${value})`);
+    }
+    if (value >= 2 ** 63) {
+      throw new Error(`InMemoryMemoryStore: ${field} must fit in a Postgres bigint (got ${value})`);
+    }
+  }
+  // 活動時計の半減期: 値域は `halfLifeHours` と同じ `(0, ∞)`（`memories_half_life_recalls_range`、ADR 0125）で、
+  // `real`（float4）列に収まる必要がある（上の `halfLifeHours` と同じ判定）。省略は検査しない。
+  if (input.halfLifeRecalls != null) {
+    const recalls = input.halfLifeRecalls;
+    if (!isHalfLifeRecallsInRange(recalls)) {
+      throw new Error(`InMemoryMemoryStore: halfLifeRecalls out of range (0, ∞): ${recalls}`);
+    }
+    if (!Number.isFinite(Math.fround(recalls))) {
+      throw new Error(
+        `InMemoryMemoryStore: halfLifeRecalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
+      );
+    }
+    if (Math.fround(recalls) === 0) {
+      throw new Error(
+        `InMemoryMemoryStore: halfLifeRecalls does not fit in a Postgres "real" (float4) column (got ${recalls}; rounds to 0)`,
+      );
+    }
+  }
   if (Number.isNaN(input.recordedAt.getTime())) {
     throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
   }
@@ -436,11 +481,13 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("InMemoryMemoryStore", input);
     assertObservationDatesValid("InMemoryMemoryStore", input);
-    const existing = input.externalId
-      ? [...this.observations.values()].find(
-          (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
-        )
-      : undefined;
+    // Postgres の一意制約は `external_id IS NOT NULL` の行に効く——空文字も鍵である（`null`/`undefined` だけが鍵無し）。
+    const existing =
+      input.externalId != null
+        ? [...this.observations.values()].find(
+            (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
+          )
+        : undefined;
     return resolveIdempotentCreate(existing, () => {
       const observation: Observation = {
         id: nextId("obs"),
@@ -538,7 +585,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       input.extractorVersion ?? null,
       input.contentHash,
     );
-    const existingId = input.sourceObservationId ? this.extractionIndex.get(idemKey) : undefined;
+    const existingId =
+      input.sourceObservationId != null ? this.extractionIndex.get(idemKey) : undefined;
     const existing = existingId !== undefined ? this.memories.get(existingId) : undefined;
 
     return resolveIdempotentCreate(existing, () => {
@@ -548,17 +596,18 @@ export class InMemoryMemoryStore implements MemoryStore {
       // in-memory 実装は `Map` の生成物にすぎず、参照整合性を放置すると「本番では起きない
       // 書き込みが手元では黙って成功する」（ADR 0047）。**「存在」だけを見る——一対一等の
       // 整合までは踏み込まない（`contested_with_id` が双方向かどうかはここでは見ない）。**
-      if (input.sourceObservationId && !this.observations.has(input.sourceObservationId)) {
+      // 空文字も参照として扱う（`null`/`undefined` だけが「参照しない」）——Postgres は空文字を uuid として読めずに拒む。
+      if (input.sourceObservationId != null && !this.observations.has(input.sourceObservationId)) {
         throw new Error(
           `InMemoryMemoryStore: source observation not found: ${input.sourceObservationId}`,
         );
       }
-      if (input.supersededById && !this.memories.has(input.supersededById)) {
+      if (input.supersededById != null && !this.memories.has(input.supersededById)) {
         throw new Error(
           `InMemoryMemoryStore: superseded-by memory not found: ${input.supersededById}`,
         );
       }
-      if (input.contestedWithId && !this.memories.has(input.contestedWithId)) {
+      if (input.contestedWithId != null && !this.memories.has(input.contestedWithId)) {
         throw new Error(
           `InMemoryMemoryStore: contested-with memory not found: ${input.contestedWithId}`,
         );
@@ -609,7 +658,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       // 呼び手が後で入力を書き換えても、保存した値は変わらない（Postgres は行に書き写す）。
       const stored = structuredClone(memory);
       this.memories.set(stored.id, stored);
-      if (input.sourceObservationId) {
+      if (input.sourceObservationId != null) {
         this.extractionIndex.set(idemKey, stored.id);
       }
       // Issue #201 / ADR 0318: `createMemory`/`createMemoryWithOutbox`/
