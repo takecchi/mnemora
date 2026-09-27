@@ -23,6 +23,13 @@ API キーは要らない。ネットワークが要るのは**初回のモデ�
 | **ベクトルが小さい**             | 256次元。`text-embedding-3-small` の 1536 次元に対して 1/6 で、索引も小さい               |
 | **軽い**                         | 重み 36MB（q8）/ peak RSS 362MB / 4スレッドで **985 文/秒**（32コア機での実測）           |
 
+⚠ **peak RSS は、1回の `embed()` に渡す件数に比例して増える。** `LocalEmbeddingProvider` は受け取った配列を
+分割せずに1回で推論する（362MB は [ADR 0085](../../docs/decisions/0085-local-embedding-provider.md) の選定時の実測）。
+【実測 2026-09-27、既定の設定（q8・4スレッド）、1件20〜70文字の短文、プロセスの peak RSS】1件 259MB /
+128件 630MB / 512件 1.7GB / 2048件 6.1GB。同じ2048件を128件ずつ渡すと 822MB で、時間も短かった
+（9.1秒 → 6.8秒）。mnemora の runtime（embed ジョブ・recall のクエリ）は1件ずつ渡す。**大量のテキストを
+自分で `embed()` に渡すときは、呼び手が分割すること。**
+
 ### 🔴 良くならないこと（このモデルでも解けないもの）
 
 **埋め込みは「似ている文字列」を近くに置く道具であって、意味を理解する道具ではない。**
@@ -195,16 +202,15 @@ postinstall を拒否しており、その状態で動いていることは測�
 | `adm-zip` | `onnxruntime-node` →          | 細工した ZIP で 4GB 確保 / **展開時に destination symlink を辿り任意ファイルを上書き**                            |
 | `sharp`   | `@huggingface/transformers` → | libvips（CVE-2026-33327 / -33328 / -35590 / -35591）と libheif（GHSA-g89c-p67h-r497 / GHSA-2jg2-4ch7-h545）の継承 |
 
-
 > **⭐ 2026-09-17 追記（一次情報を当て直した。上の表も本文も書き換えていない）。**
 > ⭐ **表に並ぶ6つの識別子は、すべて実在する一次情報へ辿れる。** **【実測 2026-09-17】** 当てた先と結果:
 >
-> | 識別子 | 当てた先 | 結果 |
-> | --- | --- | --- |
-> | `CVE-2026-33327` / `-33328` / `-35590` / `-35591` | MITRE CVE Services（`cveawg.mitre.org/api/cve/…`） | **4件とも HTTP 200 / `state: PUBLISHED`**。`vendor: libvips`。影響は `<= 8.18.0`（33327 / 33328）・`<= 8.18.1`（35590 / 35591） |
-> | 同上（sharp 側の名乗り） | GitHub advisory database | [`GHSA-f88m-g3jw-g9cj`](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) *"sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591"*（`sharp < 0.35.0`、2026-07-21） |
-> | `GHSA-g89c-p67h-r497` / `GHSA-2jg2-4ch7-h545` | GitHub advisory database / OSV | ⚠ **単独では引けない**（下記） |
-> | 同上（sharp 側の名乗り） | GitHub advisory database | [`GHSA-rgj7-g3m4-5g8c`](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c) *"sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545"*（`sharp < 0.35.4`、2026-09-08） |
+> | 識別子                                            | 当てた先                                           | 結果                                                                                                                                                                                                                      |
+> | ------------------------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+> | `CVE-2026-33327` / `-33328` / `-35590` / `-35591` | MITRE CVE Services（`cveawg.mitre.org/api/cve/…`） | **4件とも HTTP 200 / `state: PUBLISHED`**。`vendor: libvips`。影響は `<= 8.18.0`（33327 / 33328）・`<= 8.18.1`（35590 / 35591）                                                                                           |
+> | 同上（sharp 側の名乗り）                          | GitHub advisory database                           | [`GHSA-f88m-g3jw-g9cj`](https://github.com/advisories/GHSA-f88m-g3jw-g9cj) _"sharp inherited vulnerabilities in libvips: CVE-2026-33327, CVE-2026-33328, CVE-2026-35590, CVE-2026-35591"_（`sharp < 0.35.0`、2026-07-21） |
+> | `GHSA-g89c-p67h-r497` / `GHSA-2jg2-4ch7-h545`     | GitHub advisory database / OSV                     | ⚠ **単独では引けない**（下記）                                                                                                                                                                                            |
+> | 同上（sharp 側の名乗り）                          | GitHub advisory database                           | [`GHSA-rgj7-g3m4-5g8c`](https://github.com/advisories/GHSA-rgj7-g3m4-5g8c) _"sharp: Vulnerabilities in libheif: GHSA-g89c-p67h-r497 and GHSA-2jg2-4ch7-h545"_（`sharp < 0.35.4`、2026-09-08）                             |
 >
 > - ⚠ **`GHSA-g89c-p67h-r497` と `GHSA-2jg2-4ch7-h545` は、当てた3箇所すべてで引けなかった**
 >   （`gh api /advisories/<id>` → **404**、`https://github.com/advisories/<id>` → **404**、
@@ -471,6 +477,7 @@ const provider = new LocalEmbeddingProvider({ repo: "my-ruri", createPipeline })
   prefix の適用・`warmup()` を測る。
 
   ⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）: `embed()` は件数と次元に加えて、成分が有限か（`NaN`・`Infinity` を含まないか）も検査し、含んでいれば次元の検査と同じ素の `Error` を投げる（Issue #992）。この検査も同じテストファイルで測っている。
+
 - `src/__tests__/input-token-limit.test.ts` — **擬似の extractor を注入して、
   上限の受け取りと超過の名乗り方を測る。**CI で必ず走る（ADR 0090）。
   ⚠ **ここでは `8192` という数字は測っていない**——それはモデルが持つ事実であり、
