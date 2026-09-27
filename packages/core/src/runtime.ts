@@ -5393,10 +5393,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         tenantId: ctx.tenantId,
         memoryId: "",
         kind: "created",
-        actor: { type: "system" },
+        // `ConsolidateOptions.actor`/`reason` は、この操作が積むイベントすべてに当たる
+        // （統合元の superseded と同じ。`reflect` の created と同じ形）。
+        actor,
         digestSnapshot: "",
         sizeBeforeBytes: null,
-        meta: { reason: "consolidated", sources: eligibleIds },
+        meta: {
+          reason: "consolidated",
+          sources: eligibleIds,
+          ...(opts.reason !== undefined ? { note: opts.reason } : {}),
+        },
       }) satisfies NewMemoryEvent;
     const buildConsolidateSupersedeEvent = (source: Memory, supersededById?: MemoryId) =>
       ({

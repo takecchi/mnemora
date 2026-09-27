@@ -543,6 +543,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   既存の空間にこの索引を作る `0022_embedding_zero_norm_index.sql` は、実テーブルだけを
   対象にする——同じスキーマに `memory_embeddings_` で始まるビューが在っても migration は
   止まらない（[Issue #1038](https://github.com/takecchi/mnemora/issues/1038)、ADR 0343 追記 2026-09-27）。
+- **`Runtime.consolidate()` に `actor`・`reason` を渡しても、統合先の `created` イベントだけは `actor` が
+  `{ type: "system" }` のままで、`meta.note` も無かった**——`ConsolidateOptions.actor`/`reason` の TSDoc は
+  `memory_events` の欄として書いており、統合元の `superseded` イベントと `reflect()` の `created` イベントには
+  入っていた。今は統合先の `created` にも同じ `actor` と `meta.note` が入る（`tick()` 経由の自動ジョブは `actor` を
+  渡さないので変わらない）。
+  ⭕ 非破壊と数える（例外を投げず、書かれるイベントの欄だけが約束どおりになる。上の前書きの訂正で狭めた基準に当てた）。
 
 ---
 

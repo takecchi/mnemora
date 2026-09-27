@@ -1549,6 +1549,22 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
 駆動しない**——Background Cognition の実運用（スケジューラによる自動起動）は Phase 1 の
 範囲外であり（`docs/roadmap.md` §1.3）、呼び出し側が明示的に呼んだときだけ動く。
 
+**⚠ 2026-09-27 追記（後の ADR・実物との照合）**:
+- 上の段落と表の行12・行13の「`tick()` はこの2つを駆動しない」は、もう成り立たない。
+  [ADR 0157](./decisions/0157-tick-drives-consolidate-and-reflect.md) で、`tick()` は `consolidate`/`reflect` の
+  outbox ジョブが在ればそれを駆動する（ジョブの `payload.memoryId` を種にして `consolidate()`/`reflect()` を呼ぶ）。
+  ジョブを**自動で積む**のは `RuntimeConfig.autoQueueConsolidateReflectOnExtract: true` のときだけで、既定では
+  積まない——既定の構成では、上の段落のとおり呼び出し側が明示的に呼んだときだけ動く。自動ジョブの経路で積まれる
+  `memory_events` は、直接呼んだときと同じ形である（統合元の `superseded`・統合先の `created`、内省の `created`。
+  `@mnemora/postgres` と `@mnemora/testkit` の fixture で、直接の呼び出しと `tick()` 経由を並べて当て直した）。
+  内省は冪等性を買わない（ADR 0091 決定11）ので、同じ種の近くの記憶それぞれにジョブが積まれると、内省の Memory が
+  ジョブの数だけできうる。
+- 行7の `meta.resolution` は `'supersede'`/`'both_active'` のほかに、`Runtime.resolveOrphanedContested`（対向が
+  消えた `contested` を1件だけ戻す口）が書く `'orphan_reclaimed'` を持つ（[ADR 0150](./decisions/0150-resolve-contested-explicit-operation.md) の
+  追記。`meta.reason` は同じく `'contested_resolved'`、`kind` は `updated`）。
+- 行12の `created` イベントは、`consolidate()` の `opts.actor`・`opts.reason`（`meta.note`）を統合元の `superseded` と
+  同じく持つ（2026-09-27 に、`actor` が `{ type: "system" }` に決め打ちで `note` も無かった食い違いを直した）。
+
 
 ### ⚠ `superseded` / `contested` の行は溜まる —— 容量の見積もり（2026-09-24 追記、[Issue #567](https://github.com/takecchi/mnemora/issues/567)）
 
