@@ -66,6 +66,11 @@
 //   （`memories_check`）。`decayBaseSeq`・`decayFloorSeq` が整数でない・負・2^63 以上 → `<欄> must be an integer /
 //   must not be negative / must fit in a Postgres bigint`（`memories_decay_seq_non_negative`）。`halfLifeRecalls` が
 //   `(0, ∞)` の外 → `halfLifeRecalls out of range (0, ∞)`（`memories_half_life_recalls_range`）。省略（`null`）はどれも検査しない。
+// - 読みの口の条件の Invalid Date → `<口>: <欄> must be a valid Date`、整数でない通し番号 → `<口>: <欄> must be an integer`。
+//   対象: `purgeExpiredEvents` の `olderThan`、`archiveDecayed` の `now`・`nowSeq`、`aggregateScope` の日時の条件と
+//   `decayFloorSeqAfter`、`findActiveByClaimKey` の `validFrom`・`validUntil`、`InMemoryEventStore.list` の `since`・`until`、
+//   `InMemoryVectorStore.search`・`InMemoryLexicalStore.search` の filter の日時と `decayFloorSeqAfter`（Postgres はクエリの
+//   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
 // - 空文字の参照・冪等の鍵は「値が在る」として扱う（`null`/`undefined` だけが「無い」）。`createMemory` 系の
 //   `sourceObservationId`・`supersededById`・`contestedWithId` が `""` → `… not found: `（Postgres は uuid として読めずに拒む）。
 //   `createObservation` 系の `externalId` が `""` → 2回目は既存の行を返す（Postgres の一意制約は `external_id IS NOT NULL` の行に効く）。

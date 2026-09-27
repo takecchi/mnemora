@@ -8,6 +8,7 @@ import type {
   VectorStore,
 } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
+import { assertQueryDate, assertQueryInteger } from "./query-check.js";
 
 interface Entry {
   tenantId: string;
@@ -98,6 +99,10 @@ function cosineDistance(a: number[], b: number[]): number {
  * adapter」と「検査できない（＝常に無視しても壊れない）adapter」が同じ緑色の出力に
  * なる。このリポジトリは ADR 0011/0025/0027/0028 で同じ族の失敗
  * （名乗れる以上の精度を主張する）を繰り返しており、ここでも繰り返さない。
+ *
+ * ⚠ **ベクトルは丸めずに（float64 のまま）持つ**（今の振る舞い、Issue #1268）。`@mnemora/postgres`（pgvector）は
+ * float4 で持つので、距離の差が float4 の桁より小さい2件の並びが Postgres と割れる——
+ * `VectorStore.search` の doc の 2026-09-28 追記を参照。
  */
 export class InMemoryVectorStore implements VectorStore {
   private readonly entries = new Map<string, Entry>();
@@ -138,6 +143,12 @@ export class InMemoryVectorStore implements VectorStore {
     query: number[],
     opts: { limit: number; filter: VectorFilter },
   ): Promise<VectorHit[]> {
+    // 条件の日時・通し番号は Postgres の型へ変換できなければならない（query-check.ts）。
+    assertQueryDate("search", "filter.occurredAfter", opts.filter.occurredAfter);
+    assertQueryDate("search", "filter.occurredBefore", opts.filter.occurredBefore);
+    assertQueryDate("search", "filter.validAt", opts.filter.validAt);
+    assertQueryDate("search", "filter.decayFloorAtAfter", opts.filter.decayFloorAtAfter);
+    assertQueryInteger("search", "filter.decayFloorSeqAfter", opts.filter.decayFloorSeqAfter);
     // `PostgresVectorStore.search` は `opts.limit` を生 SQL の `LIMIT` にそのまま渡すため、
     // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
     // （実測済み）。ここで検査せず `hits.slice(0, opts.limit)` へ渡すと、
