@@ -168,7 +168,8 @@ const EMPTY_RESULT: DeriveClaimKeysResult = { claimKeys: [], failure: null };
  * `extraction.ts` の `describeExtractionFailure` と**意図的に同じロジックの複製**
  * （上の import コメント参照——循環 import を避けるため、共有関数にせずここに複製する）。
  * 挙動が食い違ったら片方のバグである。`__tests__/claim-key.test.ts` が
- * `extraction.ts` 側と同じ入力での出力一致を歯にしている。
+ * `extraction.ts` 側と同じ入力での出力一致を歯にしている（2026-09-28、Issue #1264 で置いた。それまでは
+ * 1つの入力の `kind` だけを見ていた）。
  */
 function describeClaimKeyFailure(error: unknown): ExtractionFailure {
   const rawKind = (error as { kind?: unknown } | null | undefined)?.kind;

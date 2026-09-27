@@ -33,6 +33,10 @@ import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js"
  *   `kind: "purged"` を探すため、同じ文字列を使うと「`MemoryEventKind.purged` が
  *   生成された」という偽陽性になる。**文字列が衝突するなら、文字列を変えて衝突を解消する**
  *   ——ADR 0117 側のテキストスキャンを型認識に書き換える負担を、無関係な本 PR に持ち込まない。
+ *   ⚠ 2026-09-28 追記（[Issue #1264](https://github.com/takecchi/mnemora/issues/1264)）: この理由は今は当たらない。
+ *   `unreachable-union-values.test.ts` は、`Runtime.purge` の実装（Issue #198、ADR 0124）で `kind: "purged"` を
+ *   棚卸しの対象から外しており、今はこの文字列を探していない。名前を `"executed"` のまま変えない理由は、
+ *   公開の値を変えないことである。
  */
 export type PurgeExpiredEventsForTenantOutcome =
   | { kind: "unset" }
