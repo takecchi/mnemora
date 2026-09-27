@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
   Ctx,
+  TenantSettingsStore,
   EventStore,
   LexicalStore,
   MemoryEvent,
@@ -16,12 +17,14 @@ import {
   InMemoryLexicalStore,
   InMemoryMemoryStore,
   InMemoryOutboxStore,
+  InMemoryTenantSettingsStore,
   InMemoryVectorStore,
 } from "@mnemora/testkit/fixtures";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresLexicalStore } from "../lexical-store.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
+import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.js";
 
@@ -69,6 +72,7 @@ interface Stores {
   es: EventStore;
   os: OutboxStore;
   ls: LexicalStore;
+  ts: Required<TenantSettingsStore>;
 }
 
 type Backend = "pg" | "testkit";
@@ -89,6 +93,7 @@ async function makeKit(backend: Backend) {
       es: new PostgresEventStore(db),
       os: new PostgresOutboxStore(db),
       ls: new PostgresLexicalStore(db),
+      ts: new PostgresTenantSettingsStore(db) as Required<TenantSettingsStore>,
     };
   } else {
     const ms = new InMemoryMemoryStore();
@@ -98,6 +103,7 @@ async function makeKit(backend: Backend) {
       es: new InMemoryEventStore(ms, ms.events),
       os: new InMemoryOutboxStore(ms.outboxJobs),
       ls: new InMemoryLexicalStore(ms),
+      ts: new InMemoryTenantSettingsStore() as Required<TenantSettingsStore>,
     };
   }
   const obs = await s.ms.createObservation(
@@ -780,6 +786,60 @@ add("findActiveByClaimKey(validUntil: Invalid Date)", (h) =>
     validUntil: new Date(Number.NaN),
   }),
 );
+
+// ---- TenantSettingsStore（#1165・#1171 の外側。書いた後に全部の読みの口を並べて比べる）----
+const readAllSettings = async (h: Kit, ctx: Ctx = h.ctx) => ({
+  halfLifeHours: await h.s.ts.getDefaultHalfLifeHours(ctx),
+  retention: await h.s.ts.getEventRetention(ctx),
+  decayClock: await h.s.ts.getDecayClock(ctx),
+  halfLifeRecalls: await h.s.ts.getDefaultHalfLifeRecalls(ctx),
+  activitySeq: await h.s.ts.getActivitySeq(ctx),
+  taxonomy: await h.s.ts.getTaxonomyMode(ctx),
+});
+add("tenantSettings: 何も書いていないテナントの既定値", (h) => readAllSettings(h));
+add("tenantSettings: 空文字の tenantId の既定値", (h) => readAllSettings(h, { tenantId: "" }));
+for (const days of [1, 365, 2 ** 31 - 1, 2 ** 31, 2 ** 53, 0, -1, 1.5]) {
+  add(`setEventRetention(days:${days})`, async (h) => {
+    await h.s.ts.setEventRetention(h.ctx, { kind: "days", days });
+    return readAllSettings(h);
+  });
+}
+add("setEventRetention(unlimited) の後に days", async (h) => {
+  await h.s.ts.setEventRetention(h.ctx, { kind: "unlimited" });
+  await h.s.ts.setEventRetention(h.ctx, { kind: "days", days: 30 });
+  return readAllSettings(h);
+});
+add("setEventRetention(days) の後に unlimited", async (h) => {
+  await h.s.ts.setEventRetention(h.ctx, { kind: "days", days: 30 });
+  await h.s.ts.setEventRetention(h.ctx, { kind: "unlimited" });
+  return readAllSettings(h);
+});
+for (const clock of ["wall", "activity", "either"] as const) {
+  add(`setDecayClock(${clock}) を2回`, async (h) => {
+    await h.s.ts.setDecayClock(h.ctx, clock);
+    await h.s.ts.setDecayClock(h.ctx, clock);
+    return readAllSettings(h);
+  });
+}
+for (const recalls of [1, 1e-45, 3.4e38, 0.5]) {
+  add(`setDefaultHalfLifeRecalls(${recalls})`, async (h) => {
+    await h.s.ts.setDefaultHalfLifeRecalls(h.ctx, recalls);
+    return readAllSettings(h);
+  });
+}
+for (const mode of ["open", "strict"] as const) {
+  add(`setTaxonomyMode(${mode}) の後の読み`, async (h) => {
+    await h.s.ts.setTaxonomyMode(h.ctx, mode);
+    return readAllSettings(h);
+  });
+}
+add("tenantSettings: 書いたのは別のテナント（読みは変わらない）", async (h) => {
+  await h.s.ts.setEventRetention(h.other, { kind: "days", days: 7 });
+  await h.s.ts.setDecayClock(h.other, "activity");
+  await h.s.ts.setTaxonomyMode(h.other, "strict");
+  await h.s.ts.setDefaultHalfLifeRecalls(h.other, 3);
+  return readAllSettings(h);
+});
 
 interface Outcome {
   result: string;
