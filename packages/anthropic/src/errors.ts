@@ -20,6 +20,11 @@
  * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
  * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
  *
+ * ⚠ **2026-09-27 追記（プロンプトの大きさの軸）:** 入力がモデルのコンテキストを超えたときの顔は2つある（今の振る舞い。実 API では確かめておらず、SDK の例外の形を模した偽のクライアントで確かめた）。成功応答の
+ * `stop_reason: "model_context_window_exceeded"` は `kind: "truncated"` になるが、API が
+ * リクエストを HTTP 400（`prompt is too long` 等）で拒むと、SDK の例外がそのまま伝播し
+ * `kind` は付かない（下の「分類の外」と同じ扱い）。
+ *
  * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
  * `kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである。**
  * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——トップレベルの `content`

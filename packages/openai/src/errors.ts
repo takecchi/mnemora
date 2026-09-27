@@ -26,6 +26,11 @@
  * （`rejects.toThrow(/.../)` でメッセージを見る形）はそのまま通る。
  * **揃えるためにこちらを弱くはしない**——種類は足すだけである。
  *
+ * ⚠ **2026-09-27 追記（プロンプトの大きさの軸）:** 入力がモデルのコンテキストを超えて API がリクエストを HTTP 400
+ * （`context_length_exceeded`）で拒むと、SDK の例外がそのまま伝播し `kind` は付かない
+ * （今の振る舞い。実 API では確かめておらず、SDK の例外の形を模した偽のクライアントで確かめた。`kind: "truncated"` は `finish_reason: "length"`、つまり出力が途中で
+ * 切れた成功応答だけを指す）。
+ *
  * ⚠ **2026-09-26 追記（[Issue #885](https://github.com/takecchi/mnemora/issues/885)）:
  * `kind`（`refusal`/`truncated`/`no_content`）が表すのは、この3種のどれかである。**
  * HTTP 200 の応答オブジェクトそのものの形が壊れている場合——`choices`/`data` の
