@@ -1436,6 +1436,14 @@ export type RecallStageName =
 
 export interface StageTrace {
   stage: RecallStageName;
+  /**
+   * ⚠ 意味は段ごとに違う——**`false` は「段を飛ばした」とは限らない**（2026-09-27 追記、今の振る舞いを
+   * 書くだけ。`docs/recall.md` §2「`explain.stages` の読み方」）。
+   * - `candidate_generation`: その経路（`detail.channel`）が走らなかった。必ず
+   *   `stage_skipped(candidate_generation)` の `Omission` と対になる。
+   * - `rescore`: 採点する候補が0件だった（段は飛ばしていない）。`stage_skipped` は名乗らない。
+   * - それ以外の段: 常に `true`。
+   */
   executed: boolean;
   detail?: Record<string, unknown>;
 }
