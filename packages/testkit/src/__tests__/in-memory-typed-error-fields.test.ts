@@ -270,10 +270,9 @@ describe("OutboxLeaseConflictError: jobId・expectedAttempts・observedAttempts"
     expect(error).toMatchObject({ jobId, expectedAttempts: 2, observedAttempts: 1 });
   });
 
-  // Issue #1292（未決）: 終端済みの行に違う expectedAttempts を渡したとき、`complete` のメソッドの doc の要約と
-  // `outbox-store.ts` 冒頭の契約（attempts が違えば投げる）が食い違って読める。ここは今の振る舞い
-  // （冒頭の契約どおりに投げる）を縛るだけで、どちらを正とするかは #1292 で決める。
-  it("complete（fail で終端済み、attempts 違い）も投げる（#1292 の今の振る舞い）", async () => {
+  // Issue #1292（決まった件）: 終端済みの行に違う expectedAttempts を渡したときは、`outbox-store.ts` 冒頭の契約と
+  // 実装の側（attempts が違えば投げる）を正とし、`complete` のメソッドの doc の要約をそれに合わせた。
+  it("complete（fail で終端済み、attempts 違い）も投げる（#1292）", async () => {
     const { outbox, jobId } = await job(false);
     await outbox.fail(ctx, jobId, "e", 0);
     const error = await caught(() => outbox.complete(ctx, jobId, 1));
@@ -281,7 +280,7 @@ describe("OutboxLeaseConflictError: jobId・expectedAttempts・observedAttempts"
     expect(error).toMatchObject({ jobId, expectedAttempts: 1, observedAttempts: 0 });
   });
 
-  it("fail（complete で終端済み、attempts 違い）も投げる（#1292 の今の振る舞い）", async () => {
+  it("fail（complete で終端済み、attempts 違い）も投げる（#1292）", async () => {
     const { outbox, jobId } = await job(false);
     await outbox.complete(ctx, jobId, 0);
     const error = await caught(() => outbox.fail(ctx, jobId, "e", 1));

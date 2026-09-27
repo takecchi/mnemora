@@ -137,9 +137,9 @@ export interface OutboxStore {
    */
   claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
   /**
-   * ジョブを完了にする。`expectedAttempts` が行の `attempts` と違えば {@link OutboxLeaseConflictError}。行が無い・既に終端が付いているときは例外にしない（冒頭の doc）。
+   * ジョブを完了にする。`expectedAttempts` が行の `attempts` と違えば {@link OutboxLeaseConflictError}。行が無いときと、`attempts` が一致していれば終端済みでも、例外にしない（冒頭の doc）。
    *
-   * ⚠ 既に終端が付いた行に、行の `attempts` と違う `expectedAttempts` を渡したときは、今は2実装（`@mnemora/postgres`・`@mnemora/testkit/fixtures`）とも冒頭の doc のとおり {@link OutboxLeaseConflictError} を投げる（`attempts` が一致すれば、終端が付いていても投げない）。上の要約とどちらを正とするかは未決（Issue #1292）。`fail` も同じ。
+   * ⚠ 既に終端が付いた行でも、行の `attempts` と違う `expectedAttempts` を渡せば {@link OutboxLeaseConflictError} を投げる——終端が付いていることは、`attempts` の検査を外す理由にならない（Issue #1292 で冒頭の doc と実装の側を正と決めた。2実装 `@mnemora/postgres`・`@mnemora/testkit/fixtures` とも、この形で動く）。`fail` も同じ。
    */
   complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
   /** ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ。 */
