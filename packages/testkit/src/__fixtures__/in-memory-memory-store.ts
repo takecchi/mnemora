@@ -45,7 +45,7 @@ import type {
   ScopeAggregate,
 } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
-import { assertStorableMemoryEvent } from "./memory-event-check.js";
+import { assertCloneableMemoryEvent, assertStorableMemoryEvent } from "./memory-event-check.js";
 import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
 
@@ -112,6 +112,25 @@ function assertObservationHasNoNul(owner: string, input: NewObservation): void {
   }
   if (jsonContainsNul(input.attributes ?? {})) {
     throw new Error(`${owner}: attributes must not contain NUL characters (U+0000)`);
+  }
+}
+
+/**
+ * Observation を書く口で、Postgres が `timestamptz` への変換で拒む Invalid Date（`.getTime()` が `NaN`）を先に
+ * 検査する（`invalid input syntax for type timestamp with time zone`、`22007`。Issue #807 の Memory 側と同じ根）。
+ * 省略（`undefined`/`null`）は「無い」であって Invalid Date ではないので検査しない。上の NUL の検査と同じく、
+ * Postgres は `externalId` の衝突を見る前に拒むので、冪等の判定より前に見る。
+ */
+function assertObservationDatesValid(owner: string, input: NewObservation): void {
+  for (const [field, value] of [
+    ["occurredAt", input.occurredAt],
+    ["recordedAt", input.recordedAt],
+    ["validFrom", input.validFrom],
+    ["validUntil", input.validUntil],
+  ] as const) {
+    if (value != null && Number.isNaN(value.getTime())) {
+      throw new Error(`${owner}: ${field} must be a valid Date (got Invalid Date)`);
+    }
   }
 }
 
@@ -408,6 +427,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     input: NewObservation,
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("InMemoryMemoryStore", input);
+    assertObservationDatesValid("InMemoryMemoryStore", input);
     const existing = input.externalId
       ? [...this.observations.values()].find(
           (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
@@ -768,6 +788,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     assertStorableMemoryColumn("status", status);
     assertStorableMemoryEvent(event);
+    assertCloneableMemoryEvent(event);
     memory.status = status;
     if (opts.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -793,6 +814,9 @@ export class InMemoryMemoryStore implements MemoryStore {
    * まだ1バイトも書き込む前に、**すべて先に済ませる**（`await` を挟まない同期区間、
    * `updateStatusWithEvent`/`createObservationIdempotent` と同じ作法）。この検査のどれか1つ
    * でも「無い」なら、この時点で throw する——`news` は1件も Map に入っていない。
+   * `news` の各要素が書ける値か・外部キー相当の検査は `createMemoryIdempotent` の中にあり、2件目
+   * 以降で投げうる。そのときは、この呼び出しで先に作った Memory・冪等キー・outbox・ラベルを
+   * 取り消してから投げる（2026-09-27、それまでは1件目が残っていた）。
    *
    * ⚠ **この事前検査の副作用**: `supersededById` が「同じ呼び出しの `news` で作られる
    * （まだ採番されていない）Memory」を指すケースは、この in-memory 実装ではサポートしない
@@ -847,19 +871,54 @@ export class InMemoryMemoryStore implements MemoryStore {
         throw new ContestedWithoutCompanionError("supersedeWithNewMemories", null);
       }
     }
-
-    // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
-    const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
-    for (const { input, jobKinds } of news) {
-      const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
-      if (!wasCreated) {
-        created.push({ memory, created: false, jobs: [] });
+    // 1d. 下の 3. で CAS を通ってイベントを書く対象だけ、そのイベントが structuredClone で写せるかを
+    //     確かめる（写せないと 3. の `buildStoredMemoryEvent` で、status を書き換えた後に投げる）。
+    //     CAS に弾かれる対象はイベントを書かないので確かめない——投げる入力を増やさない。
+    //     同じ id が2回並ぶと2回目は弾かれる（1回目が superseded にする）ので、それも写す。
+    const willSupersede = new Set<MemoryId>();
+    for (const target of supersede) {
+      const status = willSupersede.has(target.id)
+        ? "superseded"
+        : this.memories.get(target.id)!.status;
+      if (target.expectedStatus !== undefined && status !== target.expectedStatus) {
         continue;
       }
-      const jobs = jobKinds.map((kind) =>
-        this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }),
-      );
-      created.push({ memory, created: true, jobs });
+      assertCloneableMemoryEvent(target.event);
+      willSupersede.add(target.id);
+    }
+
+    // 2. news を作る（`createMemoryWithOutbox` と同じ経路）。
+    //    ⚠ 書ける値か・外部キー相当の検査は `createMemoryIdempotent` の中にあり、2件目以降で投げうる
+    //    ——そのときは、この呼び出しで先に作った Memory・冪等キー・outbox・ラベルを取り消して、
+    //    何も起きなかったのと同じに見せる（Postgres は1トランザクションで巻き戻る）。
+    const created: Array<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> = [];
+    const outboxLengthBefore = this.outboxJobs.length;
+    const labelsBefore = new Map(this.labels);
+    const extractionIndexBefore = new Map(this.extractionIndex);
+    try {
+      for (const { input, jobKinds } of news) {
+        const { value: memory, created: wasCreated } = this.createMemoryIdempotent(ctx, input);
+        if (!wasCreated) {
+          created.push({ memory, created: false, jobs: [] });
+          continue;
+        }
+        const jobs = jobKinds.map((kind) =>
+          this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }),
+        );
+        created.push({ memory, created: true, jobs });
+      }
+    } catch (err) {
+      for (const entry of created) {
+        if (entry.created) {
+          this.memories.delete(entry.memory.id);
+        }
+      }
+      this.outboxJobs.splice(outboxLengthBefore);
+      this.labels.clear();
+      for (const [key, value] of labelsBefore) this.labels.set(key, value);
+      this.extractionIndex.clear();
+      for (const [key, value] of extractionIndexBefore) this.extractionIndex.set(key, value);
+      throw err;
     }
 
     // 3. supersede を1件ずつ CAS で処理する。弾かれても conflicted に積んで続行する
@@ -1645,6 +1704,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new MemoryPurgeConflictError(id, memory.status, memory.purgedAt ?? null);
     }
     assertStorableMemoryEvent(event);
+    assertCloneableMemoryEvent(event);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.purgedAt = new Date();
@@ -1688,6 +1748,8 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     assertStorableMemoryEvent(first.event);
     assertStorableMemoryEvent(second.event);
+    assertCloneableMemoryEvent(first.event);
+    assertCloneableMemoryEvent(second.event);
     firstMemory.status = "contested";
     firstMemory.contestedWithId = second.id;
     firstMemory.updatedAt = new Date();
@@ -1753,6 +1815,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     assertStorableMemoryColumn("status", second.status);
     assertStorableMemoryEvent(first.event);
     assertStorableMemoryEvent(second.event);
+    assertCloneableMemoryEvent(first.event);
+    assertCloneableMemoryEvent(second.event);
     firstMemory.status = first.status;
     firstMemory.contestedWithId = null;
     if (first.supersededById !== undefined) {
@@ -1796,6 +1860,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
 
     assertStorableMemoryEvent(survivor.event);
+    assertCloneableMemoryEvent(survivor.event);
     memory.status = "active";
     memory.contestedWithId = null;
     memory.updatedAt = new Date();
@@ -1928,6 +1993,25 @@ export class InMemoryMemoryStore implements MemoryStore {
 
     const actor = event.actor ?? { type: "system" };
     const meta = { reason: event.reason ?? "unsuperseded", supersededById };
+    // 1件目を書き換える前に、書くイベントが書けるかを確かめる（`at` の Invalid Date・`actor` の
+    // structuredClone できない値）。ループの中の `buildStoredMemoryEvent` で初めて投げると、先の行だけが
+    // 戻ってイベントの無い半端な状態が残る——Postgres は1文で巻き戻る。対象が無いときは今までどおり
+    // 確かめない（投げる入力を増やさない。Postgres は対象が無くても Invalid Date の `at` を拒む——
+    // 投げるかどうかの違いとして残る）。
+    if (targets.length > 0) {
+      const template: NewMemoryEvent = {
+        tenantId: ctx.tenantId,
+        memoryId: supersededById,
+        kind: "unsuperseded",
+        at: event.at,
+        actor,
+        digestSnapshot: null,
+        sizeBeforeBytes: null,
+        meta,
+      };
+      assertStorableMemoryEvent(template);
+      assertCloneableMemoryEvent(template);
+    }
 
     const restored: Memory[] = [];
     for (const memory of targets) {

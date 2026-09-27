@@ -48,7 +48,8 @@
 //   `createObservation`（`WithOutbox` を含む）の `subjectId`・`externalId`・`kind`・`payload`・
 //   `attributes`（#923・#928・#1073）。
 // - Invalid Date → `<欄> must be a valid Date`。対象: `createMemory` 系の日時の欄、
-//   `reinforce` の `at`、イベントの `at`（#807）。
+//   `createObservation` 系の `occurredAt`・`recordedAt`・`validFrom`・`validUntil`（`externalId` が同じ既存の行が
+//   在っても拒む）、`reinforce` の `at`、イベントの `at`（#807）。
 // - `MemoryEventKind` に無いイベントの `kind`（型を外した呼び出し）→
 //   `memory_events.kind must be one of <9値> (got "<値>")`。対象: `InMemoryEventStore.append` と、
 //   イベントを受け取る `InMemoryMemoryStore` の口（`updateStatusWithEvent`・`supersedeWithNewMemories`・

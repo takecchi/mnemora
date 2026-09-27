@@ -240,7 +240,11 @@ export interface RuntimeDeps {
   llmProvider: LLMProvider;
   /** 記憶とクエリの埋め込みに使う provider。ベクトルはこの `space` の空間として `vectorStore` に書かれる（`@mnemora/postgres` では、先に `registerEmbeddingSpace` で登録しておく）。 */
   embeddingProvider: EmbeddingProvider;
-  /** 省略時は `systemClock`。 */
+  /**
+   * 省略時は `systemClock`。
+   * ⚠ 注入した時計は、store が埋める時刻（監査ログの `at`・outbox の `availableAt` など）には届かず、
+   * 壁時計より過去の時計では `tick` がジョブを取らない——{@link Clock} の doc 参照（Issue #1237）。
+   */
   clock?: Clock;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
   hashContent: (content: string) => string;
@@ -309,6 +313,14 @@ export interface ObserveResult {
    * 分の1つずつだけ）。重複を除いた集合が要るときは、呼び手が `new Set(memoryIds)` にする。
    * 【実測 2026-09-27】`@mnemora/postgres` と testkit の InMemory で同じ結果になる
    * （歯は `packages/postgres/src/__tests__/observe-duplicate-candidates.postgres.test.ts`）。
+   *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1234](https://github.com/takecchi/mnemora/issues/1234)）:
+   * 候補は1件ずつ「書く → `created` イベントを積む」の順で、1つのトランザクションではない。**書いた直後、
+   * `created` を積む前にその1件が `forget` → `purge` されると、この配列にも purge した id が入り、その Memory の
+   * 監査ログには `forgotten`・`purged` の**後に** `created` が積まれる（`at` もその順になる。`created` の
+   * `digestSnapshot` は purge 前の digest）。`at` の順に読むと「消した後に作られた」と読めるが、実際は作られてから
+   * 消され、作成の記録だけが遅れて積まれたものである。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture
+   * で同じ（`observe-created-event-after-purge.postgres.test.ts`）。
    */
   memoryIds: MemoryId[];
   /**
