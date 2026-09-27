@@ -216,6 +216,35 @@ describe("runtime.consolidate — 基本の統合", () => {
     expect(Object.keys(event)).not.toContain("content");
     expect(JSON.stringify(event)).not.toContain("A本文");
   });
+
+  it("opts.actor と opts.reason は、統合先の created イベントにも入る（統合元の superseded と同じ。reflect の created と同じ形）", async () => {
+    // `ConsolidateOptions.actor` の TSDoc は「`memory_events.actor`」、`reason` は
+    // 「`memory_events.meta` へ足す補足」と書いており、統合元のイベントだけに限っていない。
+    // 以前は統合先の created だけ actor が `{ type: "system" }` に決め打ちで、note も無かった。
+    const { runtime, stores } = buildRuntime(llmConsolidatingTo({ content: "統合後" }));
+    const a = await stores.memoryStore.createMemory(ctx, newMemory({ content: "A" }));
+    const b = await stores.memoryStore.createMemory(ctx, newMemory({ content: "B" }));
+    const actor = { type: "human" as const, id: "operator-1" };
+
+    const result = await runtime.consolidate(ctx, {
+      target: { memoryIds: [a.id, b.id] },
+      actor,
+      reason: "手動での統合テスト",
+    });
+
+    const created = stores.eventStore.events.filter(
+      (e) => e.memoryId === result.consolidatedMemoryId && e.kind === "created",
+    );
+    expect(created).toHaveLength(1);
+    expect(created[0]!.actor).toEqual(actor);
+    expect(created[0]!.meta).toEqual({
+      reason: "consolidated",
+      sources: [a.id, b.id],
+      note: "手動での統合テスト",
+    });
+    // 統合元の superseded も同じ actor（既存の振る舞い。揃っていることを並べて固定する）。
+    expect(supersededEvents(stores, a.id)[0]!.actor).toEqual(actor);
+  });
 });
 
 describe("runtime.consolidate — 冪等性", () => {
