@@ -187,7 +187,37 @@ export interface Memory {
    */
   claimKey?: ClaimKey | null;
 
+  /**
+   * 強さ。値域は `(0, MAX_STRENGTH]`（ADR 0078）。
+   *
+   * ⚠ **`@mnemora/postgres` はこの値を float4（`real` 列）の精度に丸めて保存する**
+   * （[Issue #1094](https://github.com/takecchi/mnemora/issues/1094)）。`@mnemora/testkit` の fixture は float64 のまま持つ。
+   * `decayFloorAt` は、作成時は呼び出し側が渡した値（float64 で計算したもの）をどちらもそのまま
+   * 保存するが、**強化（`reinforce`）の後は store が保存済みの `strength`・`halfLifeHours` で計算し直す**ので、
+   * 強化後の `decayFloorAt` は実装によってずれうる。ずれは `halfLifeHours × log2(strength / 閾値)` の
+   * 丸め誤差に比例し、半減期が長いほど大きく、向きも一定しない
+   * （【実測】強化後の床の Postgres − testkit: 720 時間 0ms、123456.789 時間 +15.6秒、
+   * 約100万時間 −約6分、約1000万時間 −約32分。`strength: 0.3`・720 時間は 0ms）。
+   * 段2の減衰係数（`scoring.ts`）も、Postgres では丸めた値で計算される。
+   * 列の型を変える案・書く前に丸める案は採らず、今の振る舞いを記録した（クローン miku の判断）。
+   * `docs/memory-model.md` §7 の 2026-09-27 追記を参照。
+   */
   strength: number;
+  /**
+   * 半減期（時間）。値域は `(0, ∞)` の有限の正の実数（ADR 0125）。
+   *
+   * ⚠ **`@mnemora/postgres` はこの値を float4（`real` 列）の精度に丸めて保存する**
+   * （[Issue #1094](https://github.com/takecchi/mnemora/issues/1094)）。`@mnemora/testkit` の fixture は float64 のまま持つ。
+   * `decayFloorAt` は、作成時は呼び出し側が渡した値（float64 で計算したもの）をどちらもそのまま
+   * 保存するが、**強化（`reinforce`）の後は store が保存済みの `halfLifeHours`・`strength` で計算し直す**ので、
+   * 強化後の `decayFloorAt` は実装によってずれうる。ずれは `halfLifeHours × log2(strength / 閾値)` の
+   * 丸め誤差に比例し、半減期が長いほど大きく、向きも一定しない
+   * （【実測】強化後の床の Postgres − testkit: 720 時間 0ms、123456.789 時間 +15.6秒、
+   * 約100万時間 −約6分、約1000万時間 −約32分。`strength: 0.3`・720 時間は 0ms）。
+   * 段2の減衰係数（`scoring.ts`）も、Postgres では丸めた値で計算される。
+   * 列の型を変える案・書く前に丸める案は採らず、今の振る舞いを記録した（クローン miku の判断）。
+   * `docs/memory-model.md` §7 の 2026-09-27 追記を参照。
+   */
   halfLifeHours: number;
   decayFloorAt: Date;
 
