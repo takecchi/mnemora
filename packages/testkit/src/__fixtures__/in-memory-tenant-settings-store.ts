@@ -90,6 +90,17 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     if (!isHalfLifeHoursInRange(hours)) {
       throw new Error(`InMemoryTenantSettingsStore: halfLifeHours out of range (0, ∞): ${hours}`);
     }
+    // `tenant_settings.default_half_life_hours` は Postgres の `real`（float4）列である。
+    // float4 で溢れる値・0 でないのに 0 に丸まる値は、Postgres が
+    // `"…" is out of range for type real` で拒む（【実測 2026-09-27】`1e39`・`Number.MAX_VALUE`・
+    // `1e-46` は拒み、`1e-40`（非正規数に収まる）・`3.4e38` は受け付ける）。境界は
+    // `createMemory` の `halfLifeHours` と同じく「`Math.fround(x)` が `Infinity` か 0 になるか」。
+    const rounded = Math.fround(hours);
+    if (!Number.isFinite(rounded) || rounded === 0) {
+      throw new Error(
+        `InMemoryTenantSettingsStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${hours})`,
+      );
+    }
     this.ensureRow(tenantId).defaultHalfLifeHours = hours;
   }
 
@@ -178,7 +189,12 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
     // 変換が overflow するかどうかと**ビット単位で一致する**（実測: 境界値
     // `3.4028235677973362e+38`（有限）と `3.4028235677973366e+38`（overflow）の両方を
     // `psql` で確認し、`Math.fround` の有限/無限の境界と完全に一致することを確認した）。
-    if (!Number.isFinite(Math.fround(recalls))) {
+    //
+    // 下側も同じ: 0 でない値が float4 で 0 に丸まる（例: `1e-46`）と、Postgres では 0 になって
+    // 上の CHECK（`> 0`）に抵触し例外になる（【実測 2026-09-27】）。`1e-40`（非正規数に収まる）は
+    // 受け付ける。境界は「`Math.fround(x)` が 0 になるか」（`createMemory` の下側と同じ）。
+    const rounded = Math.fround(recalls);
+    if (!Number.isFinite(rounded) || rounded === 0) {
       throw new Error(
         `setDefaultHalfLifeRecalls: recalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
       );
