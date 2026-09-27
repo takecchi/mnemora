@@ -47,6 +47,7 @@ function renderLineAsRecorded(line: MaterialMemoryLine): string {
     line.speaker !== undefined ? `[話者:${line.speaker}]` : undefined,
     `[主題:${line.subject}]`,
     line.contradiction !== undefined ? `[矛盾候補:${line.contradiction}]` : undefined,
+    line.basisLost === true ? "[根拠:失われた]" : undefined,
     line.recordedOrder !== undefined ? `[記録順:${line.recordedOrder}]` : undefined,
     line.occurredAt !== undefined ? `[出来事時刻:${line.occurredAt}]` : undefined,
   ].filter((s): s is string => s !== undefined);

@@ -282,6 +282,22 @@ function contradictionSegment(
 }
 
 /**
+ * 根拠欄（Issue #972）。`RecalledMemory.basisLost`（[ADR 0342](../../../docs/decisions/0342-recalled-memory-basis-lost.md)）が
+ * `true` のとき——`provenanceKind === "inferred"` で、その根拠（`basis.memoryIds`）の少なくとも
+ * 1件が失われている（存在しない・`forgotten`・purge 済み）とき——だけ `[根拠:失われた]` を出す。
+ * 書き方は矛盾候補欄に揃える（`[ラベル:値]`、当てはまらなければ欄そのものを出さない）。
+ * ⟹ 根拠が残っている `inferred` の行は1バイトも変わらず、根拠を失った `inferred` とは
+ * この欄の有無だけで区別できる。
+ *
+ * ⚠ 今日の抽出パイプラインは `basis.memoryIds` を書かないので（ADR 0342 負債1）、実運用の
+ * 経路でこの欄が出る場面はまだ無い。記録済みの `answer` カセットの行にもこの欄は無いので、
+ * 再生カセットのハッシュ鍵は動かない。
+ */
+function basisSegment(m: RecalledMemory): string | undefined {
+  return m.basisLost === true ? "[根拠:失われた]" : undefined;
+}
+
+/**
  * `recall.memories` を `recordedAt` の昇順で並べ替えた順位（1始まり）を返す
  * （Issue #691 の子、Issue #702、ADR 0298）。
  *
@@ -375,7 +391,7 @@ function occurredAtSegment(m: RecalledMemory): string | undefined {
 
 /**
  * 1件の `RecalledMemory` を1行に描画する。
- * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 記録順 → 出来事時刻 → digest。
+ * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 根拠 → 記録順 → 出来事時刻 → digest。
  */
 function renderRecalledMemoryLine(
   m: RecalledMemory,
@@ -387,6 +403,7 @@ function renderRecalledMemoryLine(
     speakerSegment(m),
     subjectSegment(m),
     contradictionSegment(m, all),
+    basisSegment(m),
     recordedOrderSegment(m, order),
     occurredAtSegment(m),
   ].filter((s): s is string => s !== undefined);

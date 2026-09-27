@@ -1986,13 +1986,13 @@ MNEMORA_ANSWER_TRIALS_JSON=/tmp/answer-trials.json OPENAI_API_KEY=... pnpm --fil
 - ⛔ **DB を使わない。** `DATABASE_URL` は不要——`src/answer-trials-material.ts` が
   `examples/chat/cassettes/answer.json`（`record answer` が実 API で記録済みのカセット）
   から、dev 6件（`answer-case-set.dev.ts`。**eval は扱わない**——下記「決めたこと」参照）
-  それぞれの mnemora 経路の回答プロンプトを読み、由来・話者・主題・矛盾候補・記録順・
-  出来事時刻・digest の構造へ戻す。**この module は DB・埋め込み・抽出・recall を
+  それぞれの mnemora 経路の回答プロンプトを読み、由来・話者・主題・矛盾候補・根拠・記録順・
+  出来事時刻・digest の構造へ戻す（根拠の欄は Issue #972、ADR 0295 追記4）。**この module は DB・埋め込み・抽出・recall を
   一切 import しない**——別の抽出・別の recall で「別の記憶集合」を作ってしまう経路が
   構造的に無い。
 - **描画 `recorded`/`digest-only`/`order-legend` は、同じ材料オブジェクトから作る**
   （`src/answer-trials-render.ts`）。`recorded` は**カセットに記録された時点の生の形**
-  （由来・話者・主題・矛盾候補・記録順・出来事時刻のタグは付くが、行の並びは元の配列順の
+  （由来・話者・主題・矛盾候補・根拠・記録順・出来事時刻のタグは付くが、行の並びは元の配列順の
   まま・凡例も無い、PR #698 の書式）を再構成する——**再構成した内容がカセットの原文と
   完全一致することを毎回検査し、ずれれば例外にする。** `digest-only` は由来等のタグを
   一切付けない digest 行だけの描画（ADR 0295 追記2 の「digest のみ」列と同じ形）。
