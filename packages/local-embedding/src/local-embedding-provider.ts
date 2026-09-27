@@ -455,16 +455,33 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
  * 別の問題であり、包んだ文面だけになると区別が付かなくなる。
  * ここで足しているのは「次に何ができるか」だけで、**何が起きたかは cause の側にある。**
  */
+/**
+ * `cacheDir` を省いたときの置き場所（transformers.js の既定。`@huggingface/transformers` パッケージ
+ * 自身の中の `.cache/`）を、メッセージで名指すための表記。transformers.js を import せずに書く
+ * （読み込みに失敗した後で、さらに読み込みを起こさない）。
+ */
+const DEFAULT_TRANSFORMERS_CACHE_PLACE = "node_modules/@huggingface/transformers/.cache/";
+
 function describeLoadFailure(spec: LocalEmbeddingModelSpec, attempts: number): string {
   const where =
-    spec.cacheDir !== undefined ? `cacheDir=${spec.cacheDir}` : "cacheDir=未指定（既定の場所）";
+    spec.cacheDir !== undefined
+      ? `cacheDir=${spec.cacheDir}`
+      : `cacheDir=未指定（transformers.js の既定: ${DEFAULT_TRANSFORMERS_CACHE_PLACE}）`;
+  // 【実測 2026-09-27】キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、
+  // 次のプロセスでも同じように落ち続ける。消せば次の読み込みで取り直すので、消す場所を名指す。
+  const repoCache =
+    spec.cacheDir !== undefined
+      ? `${spec.cacheDir.replace(/\/+$/, "")}/${spec.repo}`
+      : `${DEFAULT_TRANSFORMERS_CACHE_PLACE}${spec.repo}`;
   // attempts <= 1 のときは「1回試した」と言っても情報が増えないので黙る
   // （リトライを無効化した呼び出し側・既存のテストの文面と揃える）。
   const attemptsNote = attempts > 1 ? `${attempts} 回試したが取得できなかった。` : "";
   return (
     `LocalEmbeddingProvider: モデルを読み込めなかった` +
     `（repo=${spec.repo} / dtype=${spec.dtype} / ${where}）。${attemptsNote}` +
-    `原因は cause を見ること——ネットワーク断・repo の消滅・dtype 名の誤りは別の問題である。` +
+    `原因は cause を見ること——ネットワーク断・repo の消滅・dtype 名の誤り・キャッシュのファイルの破損は別の問題である。` +
+    ` キャッシュのファイルが壊れている場合（取得の中断など。cause が Protobuf や JSON の解析の失敗になる）:` +
+    `同じ場所から何度読んでも失敗する。 ${repoCache} を消すと、次の読み込みで取り直す。` +
     ` repo が取得できなくなっている場合: 元モデルは公式の cl-nagoya/ruri-v3-30m（apache-2.0）` +
     `であり、ONNX への変換は自分でやり直せる。変換したものは options.repo に指すことで使える` +
     `（別の変換先でも、自分で変換したものでもよい）。` +
