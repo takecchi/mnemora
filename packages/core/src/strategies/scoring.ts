@@ -38,6 +38,7 @@ import type { DecayClock } from "../interfaces/tenant-settings-store.js";
  * 静かに変わる。**⟹ 既定の挙動を1バイトも変えないために、分岐で書いてある。
  */
 export interface ScoringInput {
+  /** スコアを計算する時点（`decay`・`freshness` の計算に使う）。 */
   now: Date;
   /** ANN 経由の場合のみ渡す。0〜1 の類似度（距離から変換済み）。 */
   similarity?: number;
@@ -48,12 +49,22 @@ export interface ScoringInput {
    * （`recall.ts`）の doc に書いてある。
    */
   lexicalMatch?: number;
+  /** 候補の Memory の `tags`。 */
   tags: string[];
+  /** `RecallQuery.tags`（`tagMatch` に使う）。 */
   queryTags: string[];
+  /**
+   * 候補の Memory の `occurredAt`。`freshness` の起点になる（無ければ `recordedAt`。どちらの `timeWeighting` でも）。
+   * `timeWeighting` が `"eventAwareFreshness"` で、この値が無いときは、`freshness` を最大にする。
+   */
   occurredAt?: Date | null;
+  /** 候補の Memory の `recordedAt`。 */
   recordedAt: Date;
+  /** 候補の Memory の `lastReinforcedAt`（`decay` の起点。無ければ `recordedAt`）。 */
   lastReinforcedAt?: Date | null;
+  /** 候補の Memory の `strength`。 */
   strength: number;
+  /** 候補の Memory の `halfLifeHours`。 */
   halfLifeHours: number;
   /**
    * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと12:
@@ -86,6 +97,7 @@ export interface ScoringInput {
   timeWeighting?: TimeWeightingPolicy;
 }
 
+/** 候補1件のスコアの内訳を計算する純関数（上の doc）。上界を宣言する戦略は {@link BoundedScoringStrategy}。 */
 export type ScoringStrategy = (input: ScoringInput) => ScoreBreakdown;
 
 /**
@@ -202,6 +214,7 @@ function computeTagMatch(tags: string[], queryTags: string[]): number {
  * （`computeTagMatch` そのものの形）。これが「上界をクエリだけから宣言できる」ことの根拠。
  */
 export interface NonSimilarityBoundInput {
+  /** `RecallQuery.tags`。`tagMatch` の上界はこれだけで決まる。 */
   queryTags: readonly string[];
 }
 
@@ -246,6 +259,7 @@ export type NonSimilarityUpperBound =
  * 「宣言を持たない戦略は判定不能に落ちるだけで、黙って誤った上界を使うことにはならない」）。
  */
 export interface BoundedScoringStrategy extends ScoringStrategy {
+  /** 類似度以外の成分がとりうる上界を、クエリ側の情報だけから返す（`decideAnnTruncation` が使う）。 */
   nonSimilarityUpperBound(input: NonSimilarityBoundInput): NonSimilarityUpperBound;
 }
 

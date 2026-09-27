@@ -13,11 +13,19 @@ import type { ObservationId } from "./ids.js";
  * 型としてもそのまま反映し、`kind: string` とする。
  */
 export interface Observation {
+  /** Observation の id。 */
   id: ObservationId;
+  /** Observation が属するテナント。 */
   tenantId: string;
+  /** 主題。主題の無い観測は `null`（または省略）。 */
   subjectId?: string | null;
+  /** 呼び出し側の id（テナント内で一意。任意）。同じ値で再送すると、同じ Observation を返す（docs/architecture.md §3.5）。 */
   externalId?: string | null;
+  /** 観測の種類（`utterance`・`event`・`document`・`usage` など。開いた文字列。上の doc）。 */
   kind: string;
+  /**
+   * 観測の中身。形は `kind` で決まる（`utterance` は `{ text, speaker }`、`event` は `{ name, data }`、`document` は `{ title, content }`、`usage` は `{ recallId, usedMemoryIds }`。`extractionContext` を渡したときはそれも入る）。
+   */
   payload: unknown;
   /**
    * その出来事・事実がいつのものか（`docs/memory-model.md` §3「三つ（四つ）の時計」）。
@@ -39,6 +47,7 @@ export interface Observation {
    * **保証するのは、上の日時以降の値だけである。**
    */
   occurredAt?: Date | null;
+  /** 記録した時刻。 */
   recordedAt: Date;
   /**
    * Issue #280（Issue #202 第2弾）: `ObserveXxxInput.validFrom`/`validUntil`（下記）を
@@ -88,10 +97,12 @@ export interface Observation {
   attributes?: Attributes;
 }
 
+/** `MemoryStore.createObservation` などに渡す新しい Observation。`id` は store が付け、`recordedAt` は省略できる。 */
 export type NewObservation = Omit<Observation, "id" | "recordedAt"> & {
   recordedAt?: Date;
 };
 
+/** `Observation` の zod スキーマ。値を実行時に検査するときに使う（型 `Observation` と揃えてある）。 */
 export const ObservationSchema = z.object({
   id: z.string().min(1),
   tenantId: z.string().min(1),
@@ -110,6 +121,7 @@ export const ObservationSchema = z.object({
   attributes: StoredAttributesSchema.optional(),
 }) satisfies z.ZodType<Observation>;
 
+/** `NewObservation` の zod スキーマ。値を実行時に検査するときに使う（型 `NewObservation` と揃えてある）。 */
 export const NewObservationSchema = ObservationSchema.omit({
   id: true,
   recordedAt: true,
@@ -124,6 +136,7 @@ export const NewObservationSchema = ObservationSchema.omit({
  */
 export type ExtractMode = "sync" | "deferred";
 
+/** `ExtractMode` の zod スキーマ。値を実行時に検査するときに使う（型 `ExtractMode` と揃えてある）。 */
 export const ExtractModeSchema = z.enum(["sync", "deferred"]) satisfies z.ZodType<ExtractMode>;
 
 /**
@@ -230,11 +243,16 @@ export const ExtractionContextSchema = z.object({
     }, "Invalid IANA time zone")
     .optional(),
 });
+/** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
 export type ExtractionContext = z.infer<typeof ExtractionContextSchema>;
 
+/** `observe` に渡す発話。 */
 export interface ObserveUtteranceInput {
+  /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
   extractionContext?: ExtractionContext;
+  /** 常に `"utterance"`。 */
   kind: "utterance";
+  /** この観測の主題。`ctx.subjectId` より優先する（どちらも無ければ主題の無い観測になる）。 */
   subjectId?: string;
   /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   externalId?: string;
@@ -243,7 +261,9 @@ export interface ObserveUtteranceInput {
   occurredAt?: Date;
   /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
   validFrom?: Date;
+  /** 有効期間の終わり（{@link Observation.validFrom} の doc コメント参照）。 */
   validUntil?: Date;
+  /** 抽出の実行のしかた（{@link ExtractMode}）。省略なら `"sync"`（`observe` の中で抽出する）。`"deferred"` は outbox に積み、`tick` で抽出する。 */
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
@@ -252,13 +272,19 @@ export interface ObserveUtteranceInput {
   /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
    * `deriveClaimKeys` は一度も呼ばれない。 */
   claimKey?: ClaimKeyOptions;
+  /** 話者（例: `"user"`）。抽出に渡し、`stated` の Memory の出所にも残る。 */
   speaker?: string;
+  /** 発話の本文。抽出（LLM）に渡し、LLM が失敗したときの全文フォールバックの Memory の本文にもなる。 */
   text: string;
 }
 
+/** `observe` に渡す出来事。⚠ 抽出に渡るのは `name` だけである（`data` の doc）。 */
 export interface ObserveEventInput {
+  /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
   extractionContext?: ExtractionContext;
+  /** 常に `"event"`。 */
   kind: "event";
+  /** この観測の主題。`ctx.subjectId` より優先する（どちらも無ければ主題の無い観測になる）。 */
   subjectId?: string;
   /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   externalId?: string;
@@ -267,7 +293,9 @@ export interface ObserveEventInput {
   occurredAt?: Date;
   /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
   validFrom?: Date;
+  /** 有効期間の終わり（{@link Observation.validFrom} の doc コメント参照）。 */
   validUntil?: Date;
+  /** 抽出の実行のしかた（{@link ExtractMode}）。省略なら `"sync"`（`observe` の中で抽出する）。`"deferred"` は outbox に積み、`tick` で抽出する。 */
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
@@ -308,9 +336,13 @@ export interface ObserveEventInput {
   data?: Record<string, unknown>;
 }
 
+/** `observe` に渡す文書。⚠ 抽出に渡るのは `content` だけである（`title` の doc）。 */
 export interface ObserveDocumentInput {
+  /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
   extractionContext?: ExtractionContext;
+  /** 常に `"document"`。 */
   kind: "document";
+  /** この観測の主題。`ctx.subjectId` より優先する（どちらも無ければ主題の無い観測になる）。 */
   subjectId?: string;
   /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   externalId?: string;
@@ -319,7 +351,9 @@ export interface ObserveDocumentInput {
   occurredAt?: Date;
   /** {@link Observation.validFrom} の doc コメント参照（逆転した区間も拒まない。Issue #1042）。 */
   validFrom?: Date;
+  /** 有効期間の終わり（{@link Observation.validFrom} の doc コメント参照）。 */
   validUntil?: Date;
+  /** 抽出の実行のしかた（{@link ExtractMode}）。省略なら `"sync"`（`observe` の中で抽出する）。`"deferred"` は outbox に積み、`tick` で抽出する。 */
   extract?: ExtractMode;
   /** {@link SubjectCandidatesInput} の doc コメント参照（Issue #608 項目②(b)）。 */
   subjectCandidates?: SubjectCandidatesInput;
@@ -344,6 +378,7 @@ export interface ObserveDocumentInput {
  * という ADR 0009 の呼び出し形そのままの形にする。
  */
 export interface ObserveMemoryUsageInput {
+  /** 常に `"memory_usage"`（保存される Observation の `kind` は `"usage"`）。 */
   kind: "memory_usage";
   /**
    * 他3種（utterance/event/document）の `externalId` と同じ規約——テナント内一意・任意、
@@ -363,6 +398,7 @@ export interface ObserveMemoryUsageInput {
    * （`memoryIds: []`、`extraction: 'skipped'`）で返す。
    */
   externalId?: string;
+  /** 使った記憶を返した `recall()` の `recallId`。 */
   recallId: string;
   /**
    * その recall で実際に使った記憶の id。**この報告が、強化（`reinforce`）のきっかけになる**

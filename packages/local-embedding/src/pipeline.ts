@@ -26,6 +26,7 @@ export type LocalEmbeddingDtype = "fp32" | "fp16" | "q8" | "int8" | "uint8" | "q
 export interface LocalEmbeddingModelSpec {
   /** Hugging Face の repo id。 */
   readonly repo: string;
+  /** 量子化の別（{@link LocalEmbeddingDtype}）。 */
   readonly dtype: LocalEmbeddingDtype;
   /**
    * モデルファイルの置き場所。未指定なら transformers.js の既定——`@huggingface/transformers`
@@ -119,6 +120,7 @@ export interface LocalEmbeddingTokenizer {
 /** transformers.js の feature-extraction pipeline のうち、ここで使うぶんだけを写した形。 */
 export interface LocalEmbeddingExtractor {
   (texts: string[], options: { pooling: "mean"; normalize: boolean }): Promise<unknown>;
+  /** 上限の検査に使うトークナイザ（{@link LocalEmbeddingTokenizer}）。 */
   readonly tokenizer: LocalEmbeddingTokenizer;
 }
 
@@ -139,6 +141,10 @@ export interface LocalEmbeddingExtractor {
  *
  * 🔴 **上限の検査は推論の前に行う。**超過が確定している入力に、
  * 36MB のモデルを回す費用を払わせない。
+ *
+ * 投げるもの: `tokenizer.model_max_length` が正の整数でなければ（`Infinity` は「宣言されていない」）、組み立ての時点で
+ * `kind: "unknown_input_limit"` の {@link LocalEmbeddingProviderError}。組み立てた pipeline は、上限を超える入力に
+ * `kind: "input_too_long"` の {@link LocalEmbeddingProviderError} を投げる。
  */
 export function buildLocalEmbeddingPipeline(
   extractor: LocalEmbeddingExtractor,

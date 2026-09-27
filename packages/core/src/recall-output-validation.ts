@@ -30,7 +30,9 @@ export const DEFAULT_RECALL_OUTPUT_VALIDATION: RecallOutputValidationMode = "rep
  * 相関を取れるようにしてある（ADR 0098「引き受けた負債」）。
  */
 export class RecallOutputValidationError extends Error {
+  /** 検証に落ちた箇所の一覧（`path` と `message`）。 */
   readonly issues: readonly RecallOutputValidationIssue[];
+  /** 既に書き込まれた `recalls` の行の id（上の doc: 例外でも記録は残る）。 */
   readonly recallId: string;
 
   constructor(issues: readonly RecallOutputValidationIssue[], recallId: string) {

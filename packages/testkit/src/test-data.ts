@@ -96,6 +96,10 @@ export function buildProvenanceFixture(kind: ProvenanceKind): Provenance {
   }
 }
 
+/**
+ * テスト用の `NewObservation` を作る。既定は `tenantId: "tenant-1"`・`kind: "utterance"`・`payload: { text: "テスト用の発話" }`、
+ * `subjectId`・`externalId`・`occurredAt` は `null`。`overrides` で渡した欄だけを上書きする（浅いマージ）。
+ */
 export function buildNewObservationFixture(
   overrides: Partial<NewObservation> = {},
 ): NewObservation {

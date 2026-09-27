@@ -6,5 +6,6 @@
  * - 推定値を実測値の顔で返してはならない——`counter` フィールドは必須。
  */
 export interface TokenCounter {
+  /** `text` のトークン数を数える。推定なら `counter: "heuristic"`、実測なら `"exact"` を必ず返す。 */
   count(text: string): { tokens: number; counter: "heuristic" | "exact" };
 }

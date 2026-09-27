@@ -42,7 +42,7 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  *
  * ⚠ **2026-09-27 追記（[Issue #1070](https://github.com/takecchi/mnemora/issues/1070)）: 返ったベクトルが
  * 壊れているとき（長さが `space.dimensions` と違う・空・`NaN`/`Infinity` を含む）、
- * `packages/core` は embed ジョブで中身を確かめない。**そのまま {@link VectorStore.upsert} に
+ * `packages/core` は embed ジョブで中身を確かめない。**そのまま `VectorStore.upsert`（`interfaces/vector-store.ts`） に
  * 渡すので、結果は store の adapter で決まる——`@mnemora/postgres` ではジョブが失敗して
  * `embeddingStatus: 'failed'`、`@mnemora/testkit` の `InMemoryVectorStore` では `'ready'` のまま
  * 保存される（書き分けは `VectorStore.upsert` の doc）。有限性を自分で確かめるのは
@@ -58,6 +58,8 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
  */
 export interface EmbeddingProvider {
+  /** この provider が作るベクトルの埋め込み空間（`provider`・`model`・`dimensions`）。構築時に決まり、変わらない（1インスタンス = 1空間）。 */
   readonly space: EmbeddingSpaceId;
+  /** `texts` を埋め込み、同じ件数・同じ順でベクトルを返す。空配列なら `[]`（上の追記: 件数・次元の守り方は実装ごとに違う）。 */
   embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
 }

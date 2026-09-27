@@ -3,7 +3,9 @@ import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 
 /**
- * `packages/openai` の `EmbeddingProvider` 実装（docs/architecture.md §5.5）。
+ * {@link OpenAIEmbeddingProvider} のコンストラクタに渡す設定。
+ *
+ * 以下はクラスの説明を兼ねる——`packages/openai` の `EmbeddingProvider` 実装（docs/architecture.md §5.5）。
  *
  * 契約: 1インスタンス = 1 `EmbeddingSpaceId` に固定する（D8・§5.5）。`model` /
  * `dimensions` はコンストラクタ引数で固定され、実行時に変わらない。
@@ -33,12 +35,32 @@ export interface OpenAIEmbeddingProviderOptions {
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
   apiKey?: string;
+  /** OpenAI の埋め込みモデル名（例: `text-embedding-3-small`）。`space.model` にそのまま入る。既定値は無い。 */
   model: string;
+  /**
+   * 返すベクトルの次元。API の `dimensions` にそのまま渡し、`space.dimensions` にも入る。
+   * このクラスは返ったベクトルの次元を検査しない（下の `embed` の doc）。
+   */
   dimensions: number;
+  /**
+   * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき。上の Issue #884 の追記）。
+   * 渡すと `apiKey` は使わず、キーの検査もしない。
+   * ⚠ `openai` を自分の依存として入れるときは、`@mnemora/openai` が固定している版と同じにすること——
+   * 違う版だと型が食い違う（packages/openai/README.md の 2026-09-27 追記）。
+   */
   client?: Pick<OpenAI, "embeddings">;
 }
 
+/**
+ * OpenAI の埋め込み API を呼ぶ `EmbeddingProvider`（docs/architecture.md §5.5）。
+ * 1インスタンスは1つの埋め込み空間に固定される。設定と、`client` を省いたときの SDK の既定の
+ * 再試行は {@link OpenAIEmbeddingProviderOptions} の doc を見ること。
+ *
+ * 構築時: `client` を省き、キーが見つからなければ OpenAI の SDK が `OpenAIError`（`Missing credentials`）を投げる。
+ * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ */
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
+  /** `{ provider: "openai", model, dimensions }`。構築時に決まり、変わらない。 */
   readonly space: EmbeddingSpaceId;
   private readonly client: Pick<OpenAI, "embeddings">;
   private readonly model: string;
@@ -62,6 +84,12 @@ export class OpenAIEmbeddingProvider implements EmbeddingProvider {
     this.space = { provider: "openai", model: options.model, dimensions: options.dimensions };
   }
 
+  /**
+   * `texts` を1回の API 呼び出しで埋め込み、入力と同じ順（応答の `index` で並べ直す）で返す。
+   * 空配列なら API を呼ばずに `[]` を返す。
+   *
+   * 失敗は SDK の例外がそのまま伝わる（このクラスに専用のエラー型は無い）。件数・次元は検査しない（下の注）。
+   */
   // ⚠ 2026-09-26 追記（Issue #885）: `response.data` キー自体が丸ごと無い応答
   // （`{}` が返る等）が来ると、下の `[...response.data]` は
   // `TypeError: response.data is not iterable` を投げる。このクラスは専用の

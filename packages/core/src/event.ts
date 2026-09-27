@@ -54,6 +54,7 @@ export type MemoryEventKind =
   | "restored"
   | "unsuperseded";
 
+/** `MemoryEventKind` の zod スキーマ。値を実行時に検査するときに使う（型 `MemoryEventKind` と揃えてある）。 */
 export const MemoryEventKindSchema = z.enum([
   "created",
   "updated",
@@ -77,6 +78,7 @@ export const MemoryEventKindSchema = z.enum([
  * （Issue #168 の棚卸し項目13-3）。
  */
 export interface EventActor {
+  /** 誰が行ったか。`"system"` は runtime 自身（自動の job など）、`"human"`・`"clone"` は呼び出し側が申告する（上の doc）。 */
   type: "human" | "system" | "clone";
   /**
    * 中身は検査しない。NUL（U+0000）か孤立サロゲートを含むと、`@mnemora/postgres` では監査ログの書き込みが
@@ -85,6 +87,7 @@ export interface EventActor {
   id?: string;
 }
 
+/** `EventActor` の zod スキーマ。値を実行時に検査するときに使う（型 `EventActor` と揃えてある）。 */
 export const EventActorSchema = z.object({
   type: z.enum(["human", "system", "clone"]),
   id: z.string().min(1).optional(),
@@ -95,14 +98,21 @@ export const EventActorSchema = z.object({
  * `EventStore` interface が `update`/`delete` を持たないことと対になる型。
  */
 export interface MemoryEvent {
+  /** イベントの id。 */
   id: EventId;
+  /** イベントが属するテナント。 */
   tenantId: string;
   /** `kind = 'events_purged'` の場合のみ null。 */
   memoryId: MemoryId | null;
+  /** 何が起きたか（{@link MemoryEventKind}）。 */
   kind: MemoryEventKind;
+  /** 起きた時刻。 */
   at: Date;
+  /** 誰が行ったか（{@link EventActor}）。 */
   actor: EventActor;
+  /** 記録した時点の Memory の `digest` の写し（本文は写さない）。purge の後も、何が消えたかを digest で読める。 */
   digestSnapshot?: string | null;
+  /** 削除・置換の直前の大きさ（バイト）。⚠ 今は runtime も同梱の store もこの欄に値を書かない（`null`）。 */
   sizeBeforeBytes?: number | null;
   /**
    * `kind` 固有の付帯情報（`docs/memory-model.md` §9）。
@@ -132,6 +142,7 @@ export interface MemoryEvent {
   meta: Record<string, unknown>;
 }
 
+/** `MemoryEvent` の zod スキーマ。値を実行時に検査するときに使う（型 `MemoryEvent` と揃えてある）。 */
 export const MemoryEventSchema = z
   .object({
     id: z.string().min(1),
@@ -149,8 +160,10 @@ export const MemoryEventSchema = z
     path: ["memoryId"],
   }) satisfies z.ZodType<MemoryEvent>;
 
+/** `EventStore.append` に渡す新しいイベント。`id` は store が付け、`at` は省略すると store が今の時刻を入れる。 */
 export type NewMemoryEvent = Omit<MemoryEvent, "id" | "at"> & { at?: Date };
 
+/** `NewMemoryEvent` の zod スキーマ。値を実行時に検査するときに使う（型 `NewMemoryEvent` と揃えてある）。 */
 export const NewMemoryEventSchema = z
   .object({
     tenantId: z.string().min(1),
@@ -167,14 +180,21 @@ export const NewMemoryEventSchema = z
     path: ["memoryId"],
   }) satisfies z.ZodType<NewMemoryEvent>;
 
+/** `EventStore.list` の絞り込み。どの欄も省略でき、渡した条件をすべて満たす行を `at` の古い順に返す。 */
 export interface EventFilter {
+  /** この Memory のイベントだけを返す。 */
   memoryId?: MemoryId;
+  /** この種類のイベントだけを返す。 */
   kind?: MemoryEventKind;
+  /** `at` がこの時刻以後のイベントだけを返す（境界を含む）。 */
   since?: Date;
+  /** `at` がこの時刻以前のイベントだけを返す（境界を含む）。 */
   until?: Date;
+  /** 返す上限の件数（古い順の先頭から）。省略なら全件。負数・非整数は例外になる（`@mnemora/postgres` と testkit の fixture で同じ）。 */
   limit?: number;
 }
 
+/** `EventFilter` の zod スキーマ。値を実行時に検査するときに使う（型 `EventFilter` と揃えてある）。 */
 export const EventFilterSchema = z.object({
   memoryId: z.string().min(1).optional(),
   kind: MemoryEventKindSchema.optional(),

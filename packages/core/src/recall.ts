@@ -13,6 +13,7 @@ import type { TimeWeightingPolicy } from "./strategies/scoring.js";
  */
 export type CountKind = "exact" | "lower_bound" | "unknown";
 
+/** `CountKind` の zod スキーマ。値を実行時に検査するときに使う（型 `CountKind` と揃えてある）。 */
 export const CountKindSchema = z.enum([
   "exact",
   "lower_bound",
@@ -23,8 +24,11 @@ export const CountKindSchema = z.enum([
 // Omission（docs/recall.md §4、ADR 0008）
 // ---------------------------------------------------------------------------
 
+/** 段そのものを実行しなかった（docs/recall.md §4）。「実行して0件だった」ではない。 */
 export interface StageSkippedOmission {
+  /** 常に `"stage_skipped"`（{@link Omission} の判別の鍵）。 */
   kind: "stage_skipped";
+  /** 実行しなかった段（`candidate_generation` は段1、`rescore` は段2、`index_band` は段5、`association` は段3.5）。 */
   stage: "candidate_generation" | "rescore" | "index_band" | "association";
   /**
    * **`"budget_exhausted"` は、この union に存在していたが、2026-09-16 に落とした**
@@ -85,12 +89,15 @@ export interface StageSkippedOmission {
  */
 export type ScopeRelation = "outside_scope" | "within_scope";
 
+/** `ScopeRelation` の zod スキーマ。値を実行時に検査するときに使う（型 `ScopeRelation` と揃えてある）。 */
 export const ScopeRelationSchema = z.enum([
   "outside_scope",
   "within_scope",
 ]) satisfies z.ZodType<ScopeRelation>;
 
+/** 条件（status・期間・主題など）で落ちた候補（docs/recall.md §4）。条件ごとに1件ずつ返す。 */
 export interface FilteredOmission {
+  /** 常に `"filtered"`（{@link Omission} の判別の鍵）。 */
   kind: "filtered";
   /**
    * `"superseded"` と `"forgotten"` を分けて持つ（ADR 0027）。両方とも status ゲートで
@@ -195,7 +202,9 @@ export interface FilteredOmission {
    * （式を2箇所に書くと必ずずれる、ADR 0038 が実測した穴）。
    */
   scopeRelation: ScopeRelation;
+  /** この種類で落ちた候補の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
 }
 
@@ -244,8 +253,11 @@ export const FILTERED_CONDITION_SCOPE_RELATION: Record<
  * 同時に現れることは無い。**
  */
 export interface BelowThresholdOmission {
+  /** 常に `"below_threshold"`（{@link Omission} の判別の鍵）。 */
   kind: "below_threshold";
+  /** 段2の閾値を下回って落ちた候補の件数（`memories` へ昇格した分は取り下げる。上の doc）。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
   /**
    * **`count` 全件のサンプルではない。** 実装（`recall-runtime.ts`）は
@@ -269,15 +281,23 @@ export interface BelowThresholdOmission {
  *   直らない**——連想枠の候補は段2の `limit` とは別の上限（`maxCount`）で切られる。
  */
 export interface OverLimitOmission {
+  /** 常に `"over_limit"`（{@link Omission} の判別の鍵）。 */
   kind: "over_limit";
+  /** どの段の上限で切られたか（上の doc: `rescore` は `limit`、`association` は `maxCount`）。 */
   stage: "rescore" | "association";
+  /** 上限を超えて落ちた候補の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
 }
 
+/** 返却量の予算（`RecallQuery.budget`）に収まらず落ちた候補（docs/recall.md §4）。スコアではなく量の問題である。 */
 export interface BudgetDroppedOmission {
+  /** 常に `"budget_dropped"`（{@link Omission} の判別の鍵）。 */
   kind: "budget_dropped";
+  /** この種類で落ちた候補の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
 }
 
@@ -290,17 +310,22 @@ export interface BudgetDroppedOmission {
  */
 export type NotIndexedReason = "pending" | "failed" | "skipped";
 
+/** `NotIndexedReason` の zod スキーマ。値を実行時に検査するときに使う（型 `NotIndexedReason` と揃えてある）。 */
 export const NotIndexedReasonSchema = z.enum([
   "pending",
   "failed",
   "skipped",
 ]) satisfies z.ZodType<NotIndexedReason>;
 
+/** 記憶は在るが、埋め込みが無いので ANN で引けなかった候補（docs/recall.md §4）。記憶が失われたのではない。 */
 export interface NotIndexedOmission {
+  /** 常に `"not_indexed"`（{@link Omission} の判別の鍵）。 */
   kind: "not_indexed";
   /** なぜ索引に載っていないか。理由ごとに1件ずつ返す（`filtered` の `condition` と同じ形）。 */
   reason: NotIndexedReason;
+  /** この `reason` の Memory の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
 }
 
@@ -314,8 +339,11 @@ export interface NotIndexedOmission {
  */
 export type AnnTruncationCertainty = "loss_possible" | "undecidable";
 
+/** ANN の窓（k'）の外に、本来 top-k に入るべき候補が残っていたかもしれない（docs/recall.md §4、ADR 0069）。証明できたときは積まない。 */
 export interface AnnTruncatedOmission {
+  /** 常に `"ann_truncated"`（{@link Omission} の判別の鍵）。 */
   kind: "ann_truncated";
+  /** 常に `"unknown"`（件数は分からない）。 */
   countKind: "unknown";
   /**
    * **なぜこの札が立っているか**（ADR 0069）。
@@ -385,8 +413,11 @@ export interface AnnTruncatedOmission {
  * ——に揃えた。値の作り方・偽陰性の射程は ADR 0288 参照。
  */
 export interface AnnUnreachedOmission {
+  /** 常に `"ann_unreached"`（{@link Omission} の判別の鍵）。 */
   kind: "ann_unreached";
+  /** 常に `"unknown"`（件数は分からない）。 */
   countKind: "unknown";
+  /** どの程度拾いきれなかったか（{@link AnnUnreachedSeverity}）。 */
   severity?: AnnUnreachedSeverity;
 }
 
@@ -423,8 +454,11 @@ export type AnnUnreachedSeverity = "info" | "warning";
  * 結果から引き継ぐ（`recall-runtime.ts` の `partitionByThreshold` を参照）。
  */
 export interface ScoreNotComparableOmission {
+  /** 常に `"score_not_comparable"`（{@link Omission} の判別の鍵）。 */
   kind: "score_not_comparable";
+  /** スコアが閾値と比較できなかった（`NaN` など）候補の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
 }
 
@@ -446,8 +480,11 @@ export interface ScoreNotComparableOmission {
  * **⟹ 「少なくともこの件数は消えた」までしか言えない。**
  */
 export interface UnitAssemblyDroppedOmission {
+  /** 常に `"unit_assembly_dropped"`（{@link Omission} の判別の鍵）。 */
   kind: "unit_assembly_dropped";
+  /** 段3で単位を組むときに漏れた候補の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}。推定を実測の顔で出さない）。 */
   countKind: CountKind;
 }
 
@@ -470,10 +507,13 @@ export interface UnitAssemblyDroppedOmission {
  * `ann_unreached` に倣う——**「取りこぼしたのは確かだが、何件かは分からない」**とだけ言う。
  */
 export interface LexicalTruncatedOmission {
+  /** 常に `"lexical_truncated"`（{@link Omission} の判別の鍵）。 */
   kind: "lexical_truncated";
+  /** 常に `"unknown"`（件数は分からない）。 */
   countKind: "unknown";
 }
 
+/** recall が返さなかったものの理由（docs/recall.md §4、ADR 0008）。`kind` で判別する。「無い」の種類を潰さないための札である。 */
 export type Omission =
   | StageSkippedOmission
   | FilteredOmission
@@ -557,6 +597,7 @@ const AnnTruncatedOmissionSchema = z.object({
   undecidableReason: z.string().optional(),
 }) satisfies z.ZodType<AnnTruncatedOmission>;
 
+/** `AnnUnreachedSeverity` の zod スキーマ。値を実行時に検査するときに使う（型 `AnnUnreachedSeverity` と揃えてある）。 */
 export const AnnUnreachedSeveritySchema = z.enum([
   "info",
   "warning",
@@ -642,12 +683,17 @@ export const OmissionSchema = z.discriminatedUnion("kind", [
  * 詳細・適合テストの形は ADR 0323「決定6」、`docs/recall.md` §5 を参照。
  */
 export interface GroupCount {
+  /** 何で群に分けたか（`subject` は主題、`taxonomy` はラベル）。 */
   axis: "subject" | "taxonomy";
+  /** 群の鍵（主題の id、またはラベルの名前）。`null` は主題の無い群・どのラベルにも入らない残差群。 */
   key: string | null;
+  /** この群に入るスコープ内の Memory の件数。 */
   count: number;
+  /** `count` がどこまで正確か（{@link CountKind}）。 */
   countKind: CountKind;
 }
 
+/** `GroupCount` の zod スキーマ。値を実行時に検査するときに使う（型 `GroupCount` と揃えてある）。 */
 export const GroupCountSchema = z.object({
   axis: z.enum(["subject", "taxonomy"]),
   key: z.string().nullable(),
@@ -657,12 +703,15 @@ export const GroupCountSchema = z.object({
 
 /** 目次帯の1行（recall.md §5）。 */
 export interface DigestEntry {
+  /** 帯に載せた Memory の id。 */
   memoryId: MemoryId;
+  /** その Memory の `digest`（`truncated` なら切り詰めたもの）。 */
   digest: string;
   /** 帯に載せる際に DIGEST_BAND_MAX_ENTRY_CHARS で切り詰めた場合のみ true。切っていなければ省略する。 */
   truncated?: boolean;
 }
 
+/** `DigestEntry` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestEntry` と揃えてある）。 */
 export const DigestEntrySchema = z.object({
   memoryId: z.string().min(1),
   digest: z.string(),
@@ -675,6 +724,7 @@ export const DigestEntrySchema = z.object({
  */
 export type DigestBandLimitedBy = "entry_limit" | "char_budget" | "both";
 
+/** `DigestBandLimitedBy` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestBandLimitedBy` と揃えてある）。 */
 export const DigestBandLimitedBySchema = z.enum([
   "entry_limit",
   "char_budget",
@@ -705,6 +755,7 @@ export interface DigestBandCoverage {
   limitedBy?: DigestBandLimitedBy;
 }
 
+/** `DigestBandCoverage` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestBandCoverage` と揃えてある）。 */
 export const DigestBandCoverageSchema = z.object({
   shown: z.number().int().nonnegative(),
   eligible: z.number().int().nonnegative(),
@@ -712,9 +763,13 @@ export const DigestBandCoverageSchema = z.object({
   limitedBy: DigestBandLimitedBySchema.optional(),
 }) satisfies z.ZodType<DigestBandCoverage>;
 
+/** 目次帯（段5、docs/recall.md §5）——返さなかった分も含めた、スコープ全体の群ごとの件数と要旨。 */
 export interface IndexBand {
+  /** 群ごとの件数（{@link GroupCount}）。 */
   groups: GroupCount[];
+  /** スコープ内の Memory の総数。 */
   totalInScope: number;
+  /** `totalInScope` がどこまで正確か（{@link CountKind}）。 */
   countKind: CountKind;
   /**
    * `recall()` が返さなかった Memory（スコープ内だが `memories` に載っていないもの）の
@@ -727,6 +782,7 @@ export interface IndexBand {
   digestBandCoverage?: DigestBandCoverage;
 }
 
+/** `IndexBand` の zod スキーマ。値を実行時に検査するときに使う（型 `IndexBand` と揃えてある）。 */
 export const IndexBandSchema = z.object({
   groups: z.array(GroupCountSchema),
   totalInScope: z.number().int().nonnegative(),
@@ -980,8 +1036,11 @@ export interface ScopeAggregate {
 export interface RecallUsage {
   /** 返した全量（`memories` tier + 目次帯）。 */
   chars: number;
+  /** 返した全量のトークン数（`RuntimeDeps.tokenCounter` で数えた値）。 */
   estimatedTokens: number;
+  /** `estimatedTokens` が推定（`"heuristic"`）か実測（`"exact"`）か。 */
   counter: "heuristic" | "exact";
+  /** 返した量の段ごとの内訳（文字数）。 */
   byTier: {
     full: number;
     digest: number;
@@ -1073,6 +1132,7 @@ export interface RecallUsage {
   budgetExceeded?: boolean;
 }
 
+/** `RecallUsage` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallUsage` と揃えてある）。 */
 export const RecallUsageSchema = z.object({
   chars: z.number().int().nonnegative(),
   estimatedTokens: z.number().int().nonnegative(),
@@ -1120,6 +1180,7 @@ export interface RecallBudget {
   promptBudgetTokens?: number;
 }
 
+/** `RecallBudget` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallBudget` と揃えてある）。 */
 export const RecallBudgetSchema = z.object({
   maxMemoryChars: z.number().int().positive().optional(),
   maxMemoryTokens: z.number().int().positive().optional(),
@@ -1130,6 +1191,9 @@ export const RecallBudgetSchema = z.object({
 // スコア内訳（docs/recall.md §7）
 // ---------------------------------------------------------------------------
 
+/**
+ * 候補1件のスコアの内訳（docs/recall.md §7）。既定の戦略では `total = affinity × decay × tagMatch × freshness × strength`（`affinity` は `similarity` と `lexicalMatch` の大きいほう。どちらも無ければ 1）。
+ */
 export interface ScoreBreakdown {
   /** ANN 経由でのみ存在。距離から変換した類似度。 */
   similarity?: number;
@@ -1154,10 +1218,16 @@ export interface ScoreBreakdown {
    * **adapter が返す `LexicalHit.rank` はこの項に入らない**（`interfaces/lexical-store.ts` 参照）。
    */
   lexicalMatch?: number;
+  /** 減衰の係数（既定の戦略の壁時計では `0.5^(経過時間 / halfLifeHours)`。強さそのものは掛けない）。 */
   decay: number;
+  /** タグの一致の係数（既定の戦略では `1 + 0.1 × クエリのタグと一致した数`）。 */
   tagMatch: number;
+  /** 鮮度の係数（既定の戦略では `occurredAt`、無ければ `recordedAt` を起点に減衰させ、上限で丸める。
+   * `timeWeighting` が `"eventAwareFreshness"` で `occurredAt` が無いときは上限の値）。 */
   freshness: number;
+  /** 候補の Memory の `strength`。 */
   strength: number;
+  /** 順位と閾値の比較に使う合計のスコア。 */
   total: number;
   /**
    * 🔴 **`total` の比較可能性を名乗る欄**（Issue #548 方向1、
@@ -1182,6 +1252,7 @@ export interface ScoreBreakdown {
   affinityMeasured?: boolean;
 }
 
+/** `ScoreBreakdown` の zod スキーマ。値を実行時に検査するときに使う（型 `ScoreBreakdown` と揃えてある）。 */
 export const ScoreBreakdownSchema = z.object({
   similarity: z.number().optional(),
   lexicalMatch: z.number().optional(),
@@ -1193,8 +1264,11 @@ export const ScoreBreakdownSchema = z.object({
   affinityMeasured: z.boolean().optional(),
 }) satisfies z.ZodType<ScoreBreakdown>;
 
+/** `recall()` が返した記憶1件。 */
 export interface RecalledMemory {
+  /** 記憶の id。 */
   memoryId: MemoryId;
+  /** 記憶の `digest`（要旨）。 */
   digest: string;
   /**
    * どの経路でこの記憶が候補に入ったか。
@@ -1284,6 +1358,7 @@ export interface RecalledMemory {
    * `basis` そのもの（`memoryIds`/`observationIds`）は今回も返さない。
    */
   provenanceKind: ProvenanceKind;
+  /** スコアの内訳（{@link ScoreBreakdown}）。 */
   score: ScoreBreakdown;
   /**
    * この記憶を実際に述べた人（Issue #579 案D、[ADR 0289](../../../docs/decisions/0289-recalled-memory-speaker-subject.md)）。
@@ -1353,7 +1428,7 @@ export interface RecalledMemory {
    */
   occurredAt?: Date | null;
   /**
-   * この記憶の {@link Memory.attributes}（呼び手が申告した属性）（Issue #152/#153、
+   * この記憶の `Memory.attributes`（`memory.ts`）（呼び手が申告した属性）（Issue #152/#153、
    * ADR 0312）。
    *
    * **なぜ「詳細は `get()` の問い」という設計原理の例外にするか**（`provenanceKind` の
@@ -1404,6 +1479,7 @@ export interface RecalledMemory {
   basisLost?: true;
 }
 
+/** `RecalledMemory` の zod スキーマ。値を実行時に検査するときに使う（型 `RecalledMemory` と揃えてある）。 */
 export const RecalledMemorySchema = z.object({
   memoryId: z.string().min(1),
   digest: z.string(),
@@ -1425,6 +1501,9 @@ export const RecalledMemorySchema = z.object({
 // パイプラインのトレース（docs/recall.md §2）
 // ---------------------------------------------------------------------------
 
+/**
+ * `explain.stages` の段の名前。`scope` は段0、`candidate_generation` は段1、`rescore` は段2、`contradiction_resolution` は段3、`budget_truncation` は段4、`index_band` は段5、`record` は段6（docs/recall.md §2）。
+ */
 export type RecallStageName =
   | "scope"
   | "candidate_generation"
@@ -1434,7 +1513,9 @@ export type RecallStageName =
   | "index_band"
   | "record";
 
+/** `explain.stages` の1段ぶんの記録。 */
 export interface StageTrace {
+  /** 段の名前（{@link RecallStageName}）。 */
   stage: RecallStageName;
   /**
    * ⚠ 意味は段ごとに違う——**`false` は「段を飛ばした」とは限らない**（2026-09-27 追記、今の振る舞いを
@@ -1445,9 +1526,11 @@ export interface StageTrace {
    * - それ以外の段: 常に `true`。
    */
   executed: boolean;
+  /** 段ごとの付帯情報（形は段ごとに違う。docs/recall.md §2「`explain.stages` の読み方」）。 */
   detail?: Record<string, unknown>;
 }
 
+/** `StageTrace` の zod スキーマ。値を実行時に検査するときに使う（型 `StageTrace` と揃えてある）。 */
 export const StageTraceSchema = z.object({
   stage: z.enum([
     "scope",
@@ -1488,6 +1571,7 @@ export const StageTraceSchema = z.object({
  * （絞れていなければ `null`）。
  */
 export interface RecallQuery {
+  /** クエリの本文。埋め込み（`vector` を渡さないとき）と語彙チャンネルに使う。空文字は `ZodError` になる。 */
   text?: string;
   /**
    * クエリの埋め込みベクトル。長さが対象の `space.dimensions`（`EmbeddingSpaceId`）と
@@ -1508,6 +1592,7 @@ export interface RecallQuery {
    * そのまま保存する食い違いが残ったままである。
    */
   vector?: number[];
+  /** クエリのタグ。スコアの `tagMatch` にだけ効く（絞り込みではない）。 */
   tags?: string[];
   /**
    * **母集合を段1（候補生成）で減らす、AND 等値の絞り込み**（Issue #152/#153、ADR 0312）。
@@ -1619,8 +1704,11 @@ export interface RecallQuery {
    * （`taxonomy` 軸のエントリが1つも生成されない。`labels` と同じ規律）。
    */
   taxonomyGroups?: boolean;
+  /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以後の記憶だけを対象にする（境界を含む）。 */
   occurredAfter?: Date;
+  /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以前の記憶だけを対象にする（境界を含む）。 */
   occurredBefore?: Date;
+  /** 段2で残す上限の件数（正の整数）。省略すると {@link DEFAULT_RECALL_LIMIT}。超えた分は `over_limit` になる。 */
   limit?: number;
   /**
    * 段1で取り込む候補数の倍率（`k' = round(limit × overFetchFactor)`、既定は
@@ -1661,6 +1749,7 @@ export interface RecallQuery {
    * 次に値が増えたとき黙って嘘になる。コメントは検査されない。**）
    */
   channels?: RecallChannel[];
+  /** 返却量の予算（{@link RecallBudget}）。収まらない分は `budget_dropped` になる。省略すれば予算で絞らない。 */
   budget?: RecallBudget;
   /**
    * 段2（再スコア）で候補を残すか捨てるかの閾値（docs/recall.md §2 段2）。
@@ -1812,7 +1901,7 @@ export interface RecallQuery {
    * **段2（再スコア）の時間項の方針を明示的に選ぶ**
    * （Issue #690、[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
    *
-   * **省略時は `"legacy"`**（{@link DEFAULT_TIME_WEIGHTING_POLICY}、`ScoringInput.timeWeighting`
+   * **省略時は `"legacy"`**（`DEFAULT_TIME_WEIGHTING_POLICY`（`strategies/scoring.ts`）、`ScoringInput.timeWeighting`
    * と同じ既定）——この欄を渡さない呼び出しの `recall()` 結果は1バイトも変わらない。
    *
    * `"legacy"` の `freshness` は `occurredAt ?? recordedAt` を起点にした減衰係数であり、
@@ -1962,6 +2051,7 @@ export interface RecallAssociationQuery {
   minSimilarity?: number;
 }
 
+/** `RecallAssociationQuery` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallAssociationQuery` と揃えてある）。 */
 export const RecallAssociationQuerySchema = z.object({
   maxCount: z.number().int().positive(),
   anchorCount: z.number().int().positive().optional(),
@@ -2025,6 +2115,7 @@ export const DEFAULT_RECALL_LIMIT = 10;
 /** RecallQuery.overFetchFactor の既定値（docs/recall.md §3: k' = k × 4）。 */
 export const DEFAULT_OVER_FETCH_FACTOR = 4;
 
+/** `RecallQuery` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallQuery` と揃えてある）。 */
 export const RecallQuerySchema = z.object({
   text: z.string().min(1).optional(),
   vector: z.array(z.number()).optional(),
@@ -2068,8 +2159,11 @@ export const RecallQuerySchema = z.object({
  * フィールド（下）が taxonomy 次元をスコープの一部として持つ。
  */
 export interface RecallScope {
+  /** スコープの主題（`ctx.subjectId`）。無ければテナント全体。 */
   subjectId?: string;
+  /** `RecallQuery.occurredAfter` のまま。 */
   occurredAfter?: Date;
+  /** `RecallQuery.occurredBefore` のまま。 */
   occurredBefore?: Date;
   /**
    * Issue #280: `RecallQuery.validAt` ゲートが有効なときの基準時刻。`recall-runtime.ts`
@@ -2182,6 +2276,7 @@ export interface RecallScope {
   taxonomyGroupCandidates?: string[];
 }
 
+/** `RecallScope` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallScope` と揃えてある）。 */
 export const RecallScopeSchema = z.object({
   subjectId: z.string().min(1).optional(),
   occurredAfter: z.date().optional(),
@@ -2203,11 +2298,17 @@ export const RecallScopeSchema = z.object({
  * `code` / `message` は zod の `safeParse` が返す `error.issues` の対応する欄をそのまま写す。
  */
 export interface RecallOutputValidationIssue {
+  /** 不正だった欄のドット連結のパス。 */
   path: string;
+  /** zod の issue の `code`。 */
   code: string;
+  /** zod の issue の `message`。 */
   message: string;
 }
 
+/**
+ * `RecallOutputValidationIssue` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallOutputValidationIssue` と揃えてある）。
+ */
 export const RecallOutputValidationIssueSchema = z.object({
   path: z.string(),
   code: z.string(),
@@ -2233,18 +2334,23 @@ export const RecallOutputValidationIssueSchema = z.object({
  * 一切しない。
  */
 export interface RecallOutputValidation {
+  /** 検証に通ったなら `true`。 */
   ok: boolean;
+  /** 検証に落ちた箇所（`ok` なら空配列）。 */
   issues: RecallOutputValidationIssue[];
 }
 
+/** `RecallOutputValidation` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallOutputValidation` と揃えてある）。 */
 export const RecallOutputValidationSchema = z.object({
   ok: z.boolean(),
   issues: z.array(RecallOutputValidationIssueSchema),
 }) satisfies z.ZodType<RecallOutputValidation>;
 
+/** `recall()` の戻り値。 */
 export interface RecallResult {
   /** 記録された recall の識別子。observe() の usage 報告で使う。 */
   recallId: RecallId;
+  /** 返した記憶（順位の順）。 */
   memories: RecalledMemory[];
   /**
    * **返さなかった記憶の分類（`docs/recall.md` §4）。** `memories` と memoryId で排他——
@@ -2267,8 +2373,11 @@ export interface RecallResult {
    * 内部状態自体が memoryId を持ち回っていない他の kind は対象外のままである。
    */
   omitted: Omission[];
+  /** 目次帯（{@link IndexBand}）。 */
   index: IndexBand;
+  /** 返した量の計測（{@link RecallUsage}。測るだけで抑止しない）。 */
   usage: RecallUsage;
+  /** 段ごとの記録（{@link StageTrace}）。 */
   explain: { stages: StageTrace[] };
   /**
    * `recall()` の戻り値（この欄自身を除く）を zod で検証した結果（Issue #131、ADR 0098）。
@@ -2285,6 +2394,7 @@ export interface RecallResult {
   outputValidation?: RecallOutputValidation;
 }
 
+/** `RecallResult` の zod スキーマ。値を実行時に検査するときに使う（型 `RecallResult` と揃えてある）。 */
 export const RecallResultSchema = z.object({
   recallId: z.string().min(1),
   memories: z.array(RecalledMemorySchema),
@@ -2310,10 +2420,15 @@ export const RecallResultSchema = z.object({
  * 計算し直せないため持つ。
  */
 export interface RecallRecordMemory {
+  /** 返した記憶の id。 */
   memoryId: MemoryId;
+  /** 返した時点のスコアの内訳。 */
   score: ScoreBreakdown;
+  /** どの経路で引いたか（`RecalledMemory.retrievedVia` と同じ）。 */
   retrievedVia: RecalledMemory["retrievedVia"];
+  /** 同伴として引いたとき、その持ち主の id（`RecalledMemory.companionOf` と同じ）。 */
   companionOf?: MemoryId;
+  /** 連想で引いたとき、そのアンカーの id（`RecalledMemory.associationOf` と同じ）。 */
   associationOf?: MemoryId;
 }
 
@@ -2345,7 +2460,9 @@ export type RecallRecordReturnedMemories =
  * マイグレーション以前の行にだけ起きる、{@link RecallRecordReturnedMemories} 側の話である。
  */
 export interface NewRecallRecord {
+  /** recall を呼んだテナント。 */
   tenantId: string;
+  /** recall のスコープの主題。無ければ `null`。 */
   subjectId?: string | null;
   /**
    * 発行された recall クエリ/オプションのスナップショット（JSON にシリアライズ可能な形）。
@@ -2353,11 +2470,17 @@ export interface NewRecallRecord {
    * 値は adapter によって違う——{@link RecallRecord.query} の doc 参照（Issue #1206）。
    */
   query: unknown;
+  /** 渡された予算。無ければ `null`。 */
   budget?: RecallBudget | null;
+  /** 返さなかったものの理由（`RecallResult.omitted`）。 */
   omitted: Omission[];
+  /** 返した量の計測。 */
   usage: RecallUsage;
+  /** 目次帯。 */
   indexBand: IndexBand;
+  /** 段ごとの記録。 */
   explain: { stages: StageTrace[] };
+  /** 返した記憶と、その時点の内訳。 */
   returnedMemories: RecallRecordMemory[];
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5:
@@ -2384,8 +2507,11 @@ export interface NewRecallRecord {
  * 見つからなければ `null`（例外にしない——`MemoryStore.get`/`getObservation` と同じ規律）。
  */
 export interface RecallRecord {
+  /** recall の id。 */
   recallId: RecallId;
+  /** recall を呼んだテナント。 */
   tenantId: string;
+  /** recall のスコープの主題。無ければ `null`。 */
   subjectId: string | null;
   /**
    * 記録したクエリ（`recall()` が検証した後の `RecallQuery`）。
@@ -2405,12 +2531,19 @@ export interface RecallRecord {
    * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`recall-record-query-roundtrip.postgres.test.ts`）。
    */
   query: unknown;
+  /** 渡された予算。無ければ `null`。 */
   budget: RecallBudget | null;
+  /** 返さなかったものの理由。 */
   omitted: Omission[];
+  /** 返した量の計測。 */
   usage: RecallUsage;
+  /** 目次帯。 */
   indexBand: IndexBand;
+  /** 段ごとの記録。 */
   explain: { stages: StageTrace[] };
+  /** 返した記憶（内訳を持たない古い行もある。{@link RecallRecordReturnedMemories}）。 */
   returnedMemories: RecallRecordReturnedMemories;
+  /** 記録した時刻。 */
   createdAt: Date;
 }
 

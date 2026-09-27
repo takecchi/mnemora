@@ -15,6 +15,7 @@ import type { OutboxJob, Scheduler } from "./interfaces/scheduler.js";
 export class InlineScheduler implements Scheduler {
   constructor(private readonly handler: (ctx: Ctx, job: OutboxJob) => Promise<void>) {}
 
+  /** `job` をその場で `handler` に渡して実行し、終わるまで待つ（キューに積まない）。`handler` の例外はそのまま伝わる。 */
   async enqueue(ctx: Ctx, job: OutboxJob): Promise<void> {
     await this.handler(ctx, job);
   }

@@ -16,5 +16,6 @@
  * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（`injected-clock-reach.postgres.test.ts`）。
  */
 export interface Clock {
+  /** 現在時刻を返す。runtime が「今」を得る唯一の口（テストでは固定の時刻を返す実装を注入する）。 */
   now(): Date;
 }

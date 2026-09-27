@@ -56,6 +56,7 @@ export const ConsolidationLLMResultSchema = z.object({
   digest: z.string().optional(),
   tags: z.array(z.string()).optional(),
 });
+/** {@link ConsolidationLLMResultSchema} の型（統合の LLM が返す値）。 */
 export type ConsolidationLLMResult = z.infer<typeof ConsolidationLLMResultSchema>;
 
 /**
@@ -85,17 +86,24 @@ export function buildConsolidationPrompt(eligible: Memory[]): PromptSpec {
   };
 }
 
+/** `buildConsolidatedMemory`（統合先の `NewMemory` を組み立てる純関数）の入力。 */
 export interface BuildConsolidatedMemoryParams {
+  /** `tenantId` を統合先に使う。`subjectId` は `eligible` から決める（全件で同じならその値、違えば `null`）。 */
   ctx: Ctx;
   /**
    * 統合される側（`status: 'active'` の eligible）。**入力の順序をそのまま使う**——
    * `occurredAt` の最新判定・`subjectId` の一致判定・タグの和集合はこの並びに従う。
    */
   eligible: Memory[];
+  /** 統合の LLM が返した値（本文・digest・tags）。 */
   llmResult: ConsolidationLLMResult;
+  /** 本文から `contentHash` を作る関数（`RuntimeDeps.hashContent` と同じもの）。 */
   hashContent: (content: string) => string;
+  /** LLM の digest が無い・空のときに、本文の先頭から切り出す長さ。 */
   digestFallbackLength: number;
+  /** 統合先の半減期（時間）。 */
   halfLifeHours: number;
+  /** 統合先の `recordedAt` にする時刻（減衰の起点にもなる）。 */
   now: Date;
   /**
    * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
@@ -104,6 +112,7 @@ export interface BuildConsolidatedMemoryParams {
    * 呼び出し側がどちらも渡さない。
    */
   activitySeq?: number;
+  /** 活動時計のテナントの半減期（`recall()` の回数）。`activitySeq` と揃って渡したときだけ効く。 */
   halfLifeRecalls?: number;
 }
 

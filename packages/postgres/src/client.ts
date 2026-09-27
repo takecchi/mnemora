@@ -8,10 +8,17 @@ import {
   searchPathFor,
 } from "./schema-namespace.js";
 
+/** このパッケージの store が受け取る drizzle のデータベース（`NodePgDatabase`、このパッケージのスキーマ付き）。 */
 export type Db = NodePgDatabase<typeof schema>;
 
+/** {@link createPostgresClient} の戻り値。 */
 export interface PostgresClient {
+  /**
+   * `pg` の接続プール。`runMigrations`・`registerEmbeddingSpace` に渡す。閉じるのは呼び出し側の責任
+   * （`closePostgresClient`）。⚠ `error` のリスナーは付けていない——付けるのは利用者である（packages/postgres/README.md）。
+   */
   pool: Pool;
+  /** 同じプールの上の drizzle。`PostgresMemoryStore` などの store に渡す。 */
   db: Db;
 }
 

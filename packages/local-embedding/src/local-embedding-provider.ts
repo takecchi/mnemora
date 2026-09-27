@@ -116,6 +116,7 @@ export interface LocalEmbeddingRetryOptions {
   delayMs?: (attempt: number) => number;
 }
 
+/** {@link LocalEmbeddingProvider} のコンストラクタに渡す設定。どれも省略でき、省くと既定のモデルを使う。 */
 export interface LocalEmbeddingProviderOptions {
   /** Hugging Face の repo id。既定 `sirasagi62/ruri-v3-30m-ONNX`。 */
   repo?: string;
@@ -183,6 +184,13 @@ export interface LocalEmbeddingProviderOptions {
   sleep?: (ms: number) => Promise<void>;
 }
 
+/**
+ * `EmbeddingProvider` のプロセス内実装（外部サービスへ繋がない）。既定は `ruri-v3-30m/sym`・256次元・q8。
+ * 契約と実行時の歯（宣言の食い違いの検査・次元の検査）は、このファイルの冒頭の doc を見ること。
+ *
+ * `new` はモデルを読まない。読むのは最初の `embed()`（または `warmup()`）で、初回だけネットワークが要る。
+ * 構築時: `repo` だけを差し替えて `modelId` を省くと例外を投げる（宣言の食い違い。Issue #142 / ADR 0247）。
+ */
 export class LocalEmbeddingProvider implements EmbeddingProvider {
   /**
    * ⭐ **コンストラクタで同期に確定し、凍結する。**
@@ -304,6 +312,15 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     await this.#load();
   }
 
+  /**
+   * `texts` を埋め込み、入力と同じ件数・順で返す。空配列ならモデルを読まずに `[]` を返す。
+   *
+   * 投げるもの（どれも reject として届く）:
+   * - モデルの読み込みの失敗は {@link LocalEmbeddingProvider.warmup} と同じ。
+   * - 入力がモデルの上限トークン数を超えれば、`kind: "input_too_long"` の `LocalEmbeddingProviderError`
+   *   （推論の前に検査する。切り詰めない）。
+   * - 返ったベクトルの件数が `texts` と違う・次元が `space.dimensions` と違う・有限でない成分を含むときは、素の `Error`。
+   */
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
     // `packages/openai` と同じ早期 return。**空でモデルを起こさない。**
     // ⟹ ウォームアップは `warmup()` を使うこと。

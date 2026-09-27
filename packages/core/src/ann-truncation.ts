@@ -52,6 +52,7 @@ export type AnnTruncationVerdict =
   /** 判定そのものができなかった。**「損しなかった」ではない。** */
   | { kind: "undecidable"; reason: string };
 
+/** {@link decideAnnTruncation} の入力。 */
 export interface DecideAnnTruncationInput {
   /**
    * 段2で使ったスコアリング戦略。**上界の宣言を持たない戦略なら `undecidable` に落ちる**——
@@ -79,6 +80,10 @@ function isUsableNumber(v: number): boolean {
   return Number.isFinite(v);
 }
 
+/**
+ * over-fetch の窓の外に、本来 top-k に入るべき候補が残っていたかを判定する純関数（このファイルの冒頭の doc、ADR 0069 案A）。
+ * 判定できないときは `undecidable`（「損しなかった」ではない）を返す。例外は投げない。
+ */
 export function decideAnnTruncation(input: DecideAnnTruncationInput): AnnTruncationVerdict {
   if (!isBoundedScoringStrategy(input.strategy)) {
     return {

@@ -138,8 +138,8 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  *
  * **🔴 Issue #878（2026-09-26、クローン miku の判断）: `query` 全体の文字数・異なる語数・
  * 語ごとの文字数に上限を置く。**`capLexicalQueryWords`（`./lexical-query-cap.ts`）を
- * 通してから使う——上限（{@link LEXICAL_QUERY_MAX_TOTAL_CHARS}/
- * {@link LEXICAL_QUERY_MAX_DISTINCT_WORDS}/{@link LEXICAL_QUERY_MAX_WORD_CHARS}）に
+ * 通してから使う——上限（`LEXICAL_QUERY_MAX_TOTAL_CHARS`/
+ * `LEXICAL_QUERY_MAX_DISTINCT_WORDS`/`LEXICAL_QUERY_MAX_WORD_CHARS`）に
  * 触れない大多数のクエリでは1バイトも変わらない。触れた場合は先頭からその範囲だけが
  * `mnemora_lexical_query_or`/`mnemora_lexical_query_tsqueries` に渡る——新しい例外には
  * しない（呼び出し側を壊さない）。理由・採らなかった案は `capLexicalQueryWords` の doc と
