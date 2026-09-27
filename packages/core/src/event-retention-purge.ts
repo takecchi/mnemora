@@ -40,6 +40,9 @@ export type PurgeExpiredEventsForTenantOutcome =
   | { kind: "store_unsupported" }
   | { kind: "executed"; result: PurgeExpiredEventsResult };
 
+/** `Date` が表せる最も古い時刻（ECMAScript の時刻値の下限）。 */
+const EARLIEST_DATE_MS = -8.64e15;
+
 /**
  * {@link purgeExpiredEventsForTenant} の引数。
  */
@@ -99,7 +102,12 @@ export async function purgeExpiredEventsForTenant(
     return { kind: "store_unsupported" };
   }
   const now = opts.now ?? new Date();
-  const olderThan = new Date(now.getTime() - retention.days * 24 * 60 * 60 * 1000);
+  // 日数が大きいと差が `Date` の範囲（±8.64e15 ms）を越え、Invalid Date になる
+  // （約1億日から。`setEventRetention` は正の整数を上限なく受け付ける）。そのときの cutoff は
+  // 「表せる最も古い時刻より前」なので、表せる最も古い時刻へ寄せる——それより古い行は無い。
+  const olderThan = new Date(
+    Math.max(now.getTime() - retention.days * 24 * 60 * 60 * 1000, EARLIEST_DATE_MS),
+  );
   const result = await deps.memoryStore.purgeExpiredEvents(ctx, {
     olderThan,
     limit: opts.limit,

@@ -897,6 +897,12 @@ export class PostgresMemoryStore implements MemoryStore {
     opts: PurgeExpiredEventsOptions,
   ): Promise<PurgeExpiredEventsResult> {
     const dryRun = opts.dryRun ?? false;
+    // cutoff が timestamptz の下限（4714-11-24 BC）より前なら、それより古い行は存在しえない。
+    // 問い合わせると `timestamp out of range` で落ちるので、0件の削除として返す
+    // （保持日数が約247万日を超えると `purgeExpiredEventsForTenant` がこの cutoff を作る）。
+    if (opts.olderThan.getTime() < PG_TIMESTAMPTZ_MIN_MS) {
+      return { purged: 0, reachedLimit: false, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+    }
     const target = buildPurgeExpiredEventsTargetSelect(ctx, opts);
 
     if (dryRun) {
@@ -925,13 +931,24 @@ export class PostgresMemoryStore implements MemoryStore {
       }
 
       const victimIds = victims.map((row) => row.id);
-      await tx.execute(sql`
+      // 対象の SELECT は行を掴まないので、同時に走った掃除は同じ行を選ぶ。先に消した側が
+      // commit した後、こちらの DELETE はその行を消さない——名乗る件数・期間は、選んだ行では
+      // なく実際に消した行（RETURNING）から取る（`purged` は「実際に削除された行数」）。
+      const deleted = await tx.execute(sql`
         DELETE FROM memory_events
         WHERE tenant_id = ${ctx.tenantId} AND id = ANY(${sql.param(victimIds)}::uuid[])
+        RETURNING at
       `);
+      const deletedAts = (deleted.rows as unknown as { at: string }[])
+        .map((row) => parsePgTimestamp(row.at))
+        .sort((a, b) => a.getTime() - b.getTime());
 
-      const oldestPurgedAt = parsePgTimestamp(victims[0]!.at);
-      const newestPurgedAt = parsePgTimestamp(victims[victims.length - 1]!.at);
+      if (deletedAts.length === 0) {
+        return { purged: 0, reachedLimit, oldestPurgedAt: null, newestPurgedAt: null, dryRun };
+      }
+
+      const oldestPurgedAt = deletedAts[0]!;
+      const newestPurgedAt = deletedAts[deletedAts.length - 1]!;
 
       await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
@@ -945,7 +962,7 @@ export class PostgresMemoryStore implements MemoryStore {
           NULL,
           NULL,
           ${JSON.stringify({
-            purgedCount: victims.length,
+            purgedCount: deletedAts.length,
             oldestPurgedAt,
             newestPurgedAt,
             olderThan: opts.olderThan,
@@ -953,7 +970,7 @@ export class PostgresMemoryStore implements MemoryStore {
         )
       `);
 
-      return { purged: victims.length, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+      return { purged: deletedAts.length, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
     });
   }
 
@@ -2822,6 +2839,9 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
  * あり、行数の大半を削る述語ではないため、部分索引にする動機が薄い。実測は
  * `memory-events-retention-index.test.ts` 参照）。
  */
+/** PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。 */
+const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
+
 export function buildPurgeExpiredEventsTargetSelect(
   ctx: Ctx,
   opts: PurgeExpiredEventsOptions,

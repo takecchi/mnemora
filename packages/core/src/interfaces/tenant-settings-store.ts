@@ -307,6 +307,15 @@ export interface TenantSettingsStore {
    * `retention.kind === "days"` のとき、`retention.days` が正の整数でなければ
    * `EVENT_RETENTION_DAYS_INVALID_MESSAGE` を含む `Error` で失敗する
    * （`assertValidEventRetentionDays` 参照）。
+   *
+   * ⚠ **`days` の上限は約束しない。** 実装によって受け付ける範囲が違う（今の振る舞いを
+   * 書いたもの。上限を新設して入力を狭めることはしていない）:
+   * - `@mnemora/postgres`: 列が `integer` なので、`2^31 − 1` を超えると DB の例外で失敗する
+   *   （`EVENT_RETENTION_DAYS_INVALID_MESSAGE` の失敗ではない）。
+   * - `@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore`: 正の整数なら上限なく受け付ける。
+   *
+   * 受け付けた値なら、どれほど大きくても `purgeExpiredEventsForTenant` は例外にならない
+   * ——cutoff が表せる最も古い時刻より前になる日数では、それより古い行が無いので0件の削除になる。
    */
   setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
 
