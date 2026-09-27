@@ -78,6 +78,10 @@ export const MemoryEventKindSchema = z.enum([
  */
 export interface EventActor {
   type: "human" | "system" | "clone";
+  /**
+   * 中身は検査しない。NUL（U+0000）か孤立サロゲートを含むと、`@mnemora/postgres` では監査ログの書き込みが
+   * 失敗する——{@link MemoryEvent.meta} の doc 参照（Issue #1211）。
+   */
   id?: string;
 }
 
@@ -100,6 +104,31 @@ export interface MemoryEvent {
   actor: EventActor;
   digestSnapshot?: string | null;
   sizeBeforeBytes?: number | null;
+  /**
+   * `kind` 固有の付帯情報（`docs/memory-model.md` §9）。
+   *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）:
+   * `meta` と `actor` は JSON として保存される前提の欄である。**値の中身は検査しない。保証するのは、JSON の値
+   * （有限の数・文字列・真偽値・`null`・配列・プレーンなオブジェクト）が同じ値で読み戻ることだけである。
+   * core が自分で入れる値（`reason`・`note`・id・id の配列）は、どれも JSON で往復する。
+   *
+   * | 値 | `@mnemora/postgres`（`JSON.stringify` して `jsonb` に保存） | `@mnemora/testkit` の fixture |
+   * |---|---|---|
+   * | `Date` | ISO 8601 の文字列に変わる | そのまま保持する |
+   * | `NaN`・`Infinity`・`-Infinity` | `null` に変わる | そのまま保持する |
+   * | `-0` | `0` に変わる | そのまま保持する |
+   * | `undefined` の欄（`actor.id` も） | 欄ごと消える | `undefined` の欄が残る |
+   * | BigInt | 例外（`append` が失敗する） | そのまま保持する |
+   * | 文字列の中の NUL（U+0000）・孤立サロゲート | 例外（書き込みが失敗する） | そのまま保持する |
+   *
+   * 最後の行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
+   * `@mnemora/postgres` では、状態の書き換えとイベントが同じトランザクションにあるので、両方とも取り消され、
+   * 途中まで書かれたものは残らない（`forget` は `{ kind: "failed" }` を返し、`markContested` は DB の例外を投げる）。
+   * testkit の fixture は状態を書き換え、文字列をそのまま監査ログに残す。
+   * Observation・Memory の `jsonb` の欄では fixture も NUL を拒む（PR #1073）が、イベントの側にはその検査が無い。
+   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`event-meta-roundtrip.postgres.test.ts`。
+   * `Runtime` の口は `forget` と `markContested` で当てた）。
+   */
   meta: Record<string, unknown>;
 }
 
