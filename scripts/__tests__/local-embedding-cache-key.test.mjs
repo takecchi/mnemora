@@ -1,10 +1,10 @@
-import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { runNodeScript } from "./spawn-with-deadline.mjs";
 import {
   buildCacheKeySuffix,
   CACHE_LAYOUT_TAG,
@@ -81,15 +81,14 @@ const KEY_BEFORE_THIS_CHANGE = "local-embedding-ruri-v3-30m-q8-v1";
 /** `ci.yml` 側がリテラルで持つ接頭辞（下の「配線」の `describe` が現物と突き合わせる）。 */
 const PREFIX_IN_WORKFLOW = "local-embedding-";
 
-function runCli(args) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [script, ...args], { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (c) => (stdout += c));
-    child.stderr.on("data", (c) => (stderr += c));
-    child.on("close", (code) => resolve({ code, stdout: stdout.trim(), stderr }));
-  });
+/**
+ * CLI を子として起こして待つ。子が期限（`spawn-with-deadline.mjs` の既定 30 秒）までに close しなければ、
+ * 子を kill して「N 秒で close しなかった」と落ちる（2026-09-28、負荷の下で子の node が止まり、この歯が
+ * testTimeout まで待っていた件。原因は断定していない）。
+ */
+async function runCli(args) {
+  const { code, stdout, stderr } = await runNodeScript(script, args);
+  return { code, stdout: stdout.trim(), stderr };
 }
 
 /** `--declaration-path` を、一時ディレクトリに書いた壊れた/正しい宣言へ向けて走らせる。 */
