@@ -46,6 +46,7 @@ import type {
 } from "@mnemora/core";
 import { buildStoredMemoryEvent } from "./in-memory-event-store.js";
 import { assertStorableMemoryEvent } from "./memory-event-check.js";
+import { assertStorableMemoryColumn } from "./memory-enum-check.js";
 import { nextId } from "./id.js";
 
 /**
@@ -511,6 +512,12 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (jsonContainsNul(input.provenance)) {
         throw new Error(`InMemoryMemoryStore: provenance must not contain NUL characters (U+0000)`);
       }
+      // 列挙の列（型の列挙に無い値）: Postgres は CHECK 制約で拒む（`memory-enum-check.ts`）。
+      // `status` は省略すると `active` になるので、省略は検査しない。
+      if (input.status !== undefined) assertStorableMemoryColumn("status", input.status);
+      assertStorableMemoryColumn("digest_source", input.digestSource);
+      assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
+      assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
       // 孤立サロゲート（Issue #816、実測）: このメソッドは検査しない。入力をそのまま
       // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ
       // 置換するため異なる値になる。この非対称は現状の契約として
@@ -709,6 +716,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
       );
     }
+    assertStorableMemoryColumn("status", status);
     memory.status = status;
     if (opts?.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
@@ -746,6 +754,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         `InMemoryMemoryStore: superseded-by memory not found: ${opts.supersededById}`,
       );
     }
+    assertStorableMemoryColumn("status", status);
     assertStorableMemoryEvent(event);
     memory.status = status;
     if (opts.supersededById !== undefined) {
@@ -994,6 +1003,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!memory) {
       throw new Error(`InMemoryMemoryStore: memory not found for tenant: ${id}`);
     }
+    assertStorableMemoryColumn("embedding_status", status);
     if (isEmbeddingStatusRollback(memory.embeddingStatus, status)) {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
       return snapshot(memory);
@@ -1727,6 +1737,8 @@ export class InMemoryMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
 
+    assertStorableMemoryColumn("status", first.status);
+    assertStorableMemoryColumn("status", second.status);
     assertStorableMemoryEvent(first.event);
     assertStorableMemoryEvent(second.event);
     firstMemory.status = first.status;
