@@ -1418,6 +1418,38 @@ describe("runtime.sweepArchive が opts.clock 省略時に decay_clock へ従う
     expect(passedOpts?.clock).toBe("either");
     expect(typeof passedOpts?.nowSeq).toBe("number");
   });
+
+  // Issue #1217: `opts.clock` を明示しても、`'wall'` 以外で `opts.nowSeq` を省けば tenant_activity は読む
+  // （ADR 0186 決めたこと1 のコードどおり）。読まないのは、`decay_clock`（tenant_settings）のほうだけ。
+  it("clock: 'activity' を明示して nowSeq を省くと、decay_clock は読まず、tenant_activity は1回読む", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
+    const getDecayClockSpy = vi.spyOn(stores.tenantSettingsStore, "getDecayClock");
+    const getActivitySeqSpy = vi.spyOn(stores.tenantSettingsStore, "getActivitySeq");
+
+    await runtime.sweepArchive(ctx, { now: NOW, limit: 10, clock: "activity" });
+
+    expect(getDecayClockSpy).not.toHaveBeenCalled();
+    expect(getActivitySeqSpy).toHaveBeenCalledTimes(1);
+    const passedOpts = archiveDecayedSpy.mock.calls[0]?.[1];
+    expect(passedOpts?.clock).toBe("activity");
+    expect(typeof passedOpts?.nowSeq).toBe("number");
+  });
+
+  it("clock と nowSeq の両方を明示すると、tenant_settings も tenant_activity も読まない", async () => {
+    const { runtime, stores } = buildRuntime(llmReturning([]));
+    const archiveDecayedSpy = vi.spyOn(stores.memoryStore, "archiveDecayed");
+    const getDecayClockSpy = vi.spyOn(stores.tenantSettingsStore, "getDecayClock");
+    const getActivitySeqSpy = vi.spyOn(stores.tenantSettingsStore, "getActivitySeq");
+
+    await runtime.sweepArchive(ctx, { now: NOW, limit: 10, clock: "either", nowSeq: 7 });
+
+    expect(getDecayClockSpy).not.toHaveBeenCalled();
+    expect(getActivitySeqSpy).not.toHaveBeenCalled();
+    const passedOpts = archiveDecayedSpy.mock.calls[0]?.[1];
+    expect(passedOpts?.clock).toBe("either");
+    expect(passedOpts?.nowSeq).toBe(7);
+  });
 });
 
 /**
