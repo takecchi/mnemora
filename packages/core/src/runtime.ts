@@ -22,6 +22,7 @@ import type {
   ExtractionFailure,
   ExtractionOutcome,
 } from "./extraction.js";
+import { assertLLMContentNotBlank } from "./llm-content.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
@@ -674,7 +675,8 @@ export interface ConsolidateOptions {
  *   （{@link ConsolidateNothingReason} で細分）。
  * - `"not_examined"` — 対象そのものが空（`memoryIds: []`）、または `query` が0件だった
  *   ——store の Memory を1件も見ていない。
- * - `"llm_failed"` — LLM 呼び出しが失敗した。**1件も書いていない。**
+ * - `"llm_failed"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む。Issue #1065）。
+ *   **1件も書いていない。**
  * - `"dry_run"` — 下見だけを行った。**1件も書いていない。**
  */
 export type ConsolidateOutcome =
@@ -833,7 +835,8 @@ export interface ReflectOptions {
  *   （{@link ReflectNothingReason} で細分）。
  * - `"not_examined"` — 対象そのものが空（`memoryIds: []`）、または `query` が0件だった
  *   ——store の Memory を1件も見ていない。
- * - `"llm_failed"` — LLM 呼び出しが失敗した。**1件も書いていない。**
+ * - `"llm_failed"` — LLM 呼び出しが失敗した（本文が空白だけの応答を含む。Issue #1065）。
+ *   **1件も書いていない。**
  * - `"dry_run"` — 下見だけを行った。**1件も書いていない。**
  */
 export type ReflectOutcome =
@@ -5324,6 +5327,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         prompt: buildConsolidationPrompt(eligibleMemories),
         schema: ConsolidationLLMResultSchema,
       });
+      assertLLMContentNotBlank(llmResult.content, "consolidate");
     } catch (error) {
       return {
         // 書き込みを1件も試みていない（ADR 0100）。
@@ -5664,6 +5668,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         prompt: buildReflectionPrompt(eligibleMemories),
         schema: ReflectionLLMResultSchema,
       });
+      if (llmResult.outcome === "reflected") {
+        assertLLMContentNotBlank(llmResult.content, "reflect");
+      }
     } catch (error) {
       return {
         outcome: "llm_failed",
