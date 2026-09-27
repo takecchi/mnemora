@@ -102,18 +102,6 @@ const DOCUMENTED_DIFFERENCES: Readonly<Record<string, DocumentedDifference>> = {
     fixture: "returns-null",
     vector: { memory: "SELF", postgres: [1, 0, 0], fixture: ["NaN", 0, 0] },
   },
-  "aggregateScope(digestBand.excludeMemoryIds:[malformed])": {
-    where:
-      "uuid の形でない除外の id: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
-    postgres: "throws",
-    fixture: "returns-value",
-  },
-  "aggregateScope(digestBand.excludeMemoryIds:[empty])": {
-    where:
-      "uuid の形でない除外の id（空文字）: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
-    postgres: "throws",
-    fixture: "returns-value",
-  },
 };
 
 const SPACE = TEST_EMBEDDING_SPACE;
@@ -574,6 +562,13 @@ for (const [idKind, pick] of Object.entries(ID_VALUES)) {
   add(`aggregateScope(digestBand.excludeMemoryIds:[${idKind}])`, (h) =>
     h.s.ms.aggregateScope(h.ctx, scope(h), {
       digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m")] },
+    }),
+  );
+  // Issue #1262: uuid の形でない id が混ざっても、ほかの id の除外は今までどおり効く（形の崩れた id だけが
+  // 「無いもの」になる）。`self` の場面では、自分の記憶は目次帯から外れ、件数からも引かれる。
+  add(`aggregateScope(digestBand.excludeMemoryIds:[${idKind},malformed])`, (h) =>
+    h.s.ms.aggregateScope(h.ctx, scope(h), {
+      digestBand: { limit: 10, excludeMemoryIds: [pick(h, "m"), "not-a-uuid"] },
     }),
   );
   add(`findActiveByClaimKey(excludeMemoryId:${idKind})`, (h) =>

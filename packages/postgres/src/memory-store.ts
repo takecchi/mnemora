@@ -1554,6 +1554,10 @@ export class PostgresMemoryStore implements MemoryStore {
     }
 
     const digestBand = opts?.digestBand;
+    // Issue #1262: uuid の形でない除外の id は、どの記憶とも一致しないので「無いもの」として扱い、SQL へは
+    // 渡さない（`get`・`getMany` などほかの読みの口と同じ扱い。mapping.ts の isUuidLike の doc 参照）。
+    // 渡すと `::uuid[]` への変換で DB の例外になっていた。形の正しい id の結果は変わらない。
+    const excludeMemoryIds = digestBand ? digestBand.excludeMemoryIds.filter(isUuidLike) : [];
     // `digestBand` が無ければ余計な仕事をしない（doc コメント・PR 指示のとおり）——
     // このサブクエリ群自体を SQL テキストに載せない。
     //
@@ -1579,7 +1583,7 @@ export class PostgresMemoryStore implements MemoryStore {
             WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
               AND ${hasQualifyingLabel}
-              AND NOT (id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[]))
+              AND NOT (id = ANY(${sql.param(excludeMemoryIds)}::uuid[]))
             ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC
             LIMIT ${digestBand.limit}
           ) band
@@ -1591,7 +1595,7 @@ export class PostgresMemoryStore implements MemoryStore {
             WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
               AND ${hasQualifyingLabel}
-              AND id = ANY(${sql.param([...digestBand.excludeMemoryIds])}::uuid[])
+              AND id = ANY(${sql.param(excludeMemoryIds)}::uuid[])
           ), 0)
         )::int AS digest_eligible_count`
       : sql``;
