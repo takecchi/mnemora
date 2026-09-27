@@ -1030,7 +1030,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **既定の挙動が変わるもの**（連想枠の既定 on など）は、この文書の定義では破壊的変更ではない。[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の「Changed」を見ること。
 
-**DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。
+**DB マイグレーション**: `0022_embedding_zero_norm_index.sql`（Issue #956 / ADR 0343）と `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う）の2本が増えている。`v1.0.0` から上げる場合は `0019`〜`0023` の5本が要る。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
