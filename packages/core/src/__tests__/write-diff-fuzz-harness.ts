@@ -493,9 +493,14 @@ export async function diffWriteBackends(
   a: WriteFuzzBackend,
   b: WriteFuzzBackend,
   ops: readonly WriteOp[],
-  opts: { t0: number; wrapB?: WriteRunOptions["wrapMemoryStore"] },
+  opts: {
+    t0: number;
+    wrapB?: WriteRunOptions["wrapMemoryStore"];
+    /** `a` の実行結果を使い回す（同じ操作列・同じ `t0` なら結果は同じ）。 */
+    runA?: WriteRunOutcome;
+  },
 ): Promise<WriteDiff | null> {
-  const ra = await runWriteOps(a, ops, { t0: opts.t0 });
+  const ra = opts.runA ?? (await runWriteOps(a, ops, { t0: opts.t0 }));
   const rb = await runWriteOps(b, ops, { t0: opts.t0, wrapMemoryStore: opts.wrapB });
   for (let i = 0; i < ops.length; i++) {
     if (ra.results[i] !== rb.results[i]) {
@@ -563,12 +568,24 @@ export async function diffWriteSeeds(
     firstSeed?: number;
     t0: number;
     wrapB?: WriteRunOptions["wrapMemoryStore"];
+    /**
+     * `a` の実行結果を seed ごとに覚えておく入れ物。同じ `a`・同じ `t0`・同じ `len` で
+     * `diffWriteSeeds` を何度も呼ぶとき（Postgres を Fake と testkit の両方と比べる、陽性対照）に
+     * 渡すと、`a` を seed ごとに1回しか流さない。
+     */
+    cacheA?: Map<number, WriteRunOutcome>;
   },
 ): Promise<string> {
   const lines: string[] = [];
   const first = opts.firstSeed ?? 1;
   for (let seed = first; seed < first + opts.seeds; seed++) {
-    const diff = await diffWriteBackends(a, b, genWriteOps(seed, opts.len), opts);
+    const ops = genWriteOps(seed, opts.len);
+    let runA = opts.cacheA?.get(seed);
+    if (runA === undefined) {
+      runA = await runWriteOps(a, ops, { t0: opts.t0 });
+      opts.cacheA?.set(seed, runA);
+    }
+    const diff = await diffWriteBackends(a, b, ops, { t0: opts.t0, wrapB: opts.wrapB, runA });
     if (diff) lines.push(`seed ${seed} op#${diff.op} ${diff.opDescription}: ${diff.detail}`);
   }
   return lines.join("\n");

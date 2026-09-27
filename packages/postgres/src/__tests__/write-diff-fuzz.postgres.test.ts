@@ -1,12 +1,22 @@
 import { sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { createRuntime } from "@mnemora/core";
+import type { Memory, Observation } from "@mnemora/core";
+import {
+  InMemoryEventStore,
+  InMemoryLexicalStore,
+  InMemoryMemoryStore,
+  InMemoryOutboxStore,
+  InMemoryTenantSettingsStore,
+  InMemoryVectorStore,
+} from "@mnemora/testkit/fixtures";
 import {
   breakReinforce,
   diffWriteSeeds,
   fakeWriteFuzzBackend,
   WRITE_FUZZ_CTX,
   type WriteFuzzBackend,
+  type WriteRunOutcome,
 } from "../../../core/src/__tests__/write-diff-fuzz-harness.js";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
@@ -34,15 +44,18 @@ import {
 /**
  * 書き込み側の差分ファズ（`packages/core/src/__tests__/write-diff-fuzz-harness.ts`。何を比べて
  * 何を比べないかは、そこの doc コメントに在る——ここには写さない）を、本物の Postgres +
- * pgvector と core の Fake で回し、1手ごとに戻り値と状態を突き合わせる。
+ * pgvector と core の Fake、Postgres と `@mnemora/testkit/fixtures` の `InMemory*` の2組で回し、
+ * 1手ごとに戻り値と状態を突き合わせる。
  *
  * - 状態は `SELECT *` を `mapping.ts` の `rowTo*` で core の型へ戻して読む（Fake と同じ型で
  *   比べるため）。
- * - **陽性対照**: Fake の側の `reinforce` を「何も書かない」に壊すと、食い違いが報告されること。
+ * - **陽性対照**: Fake / InMemory の側の `reinforce` を「何も書かない」に壊すと、食い違いが
+ *   報告されること（2組それぞれに置く）。
  *   検査器が黙って何も比べなくなる回帰を捕まえる。
  *
  * `WRITE_FUZZ_PG_SEEDS`・`WRITE_FUZZ_LEN`・`WRITE_FUZZ_PG_FIRST_SEED` で本数・長さ・起点を変えられる。
- * 【実測】20シード × 60手で 13〜14 秒（手元の PostgreSQL 17、3回とも食い違い0）。
+ * 【実測】20シード × 60手で、4本合わせて 22〜24 秒（手元の PostgreSQL 17、3回とも食い違い0）。
+ * Postgres の側は seed ごとに1回だけ流し、その結果を Fake・testkit・陽性対照の4本で使い回す。
  */
 
 const SEEDS = Number(process.env.WRITE_FUZZ_PG_SEEDS ?? 20);
@@ -52,6 +65,9 @@ const FIRST_SEED = Number(process.env.WRITE_FUZZ_PG_FIRST_SEED ?? 1);
 // outbox の `available_at` は `now()` で埋まるので、時計はそれより後から始める
 // （そうしないと tick が何も claim しない）。1回の実行の中では両方の backend で同じ値を使う。
 const T0 = Date.now() + 86_400_000;
+// Postgres の側の実行結果は、seed・`T0`・`LEN` が同じなら同じなので、4本の it で使い回す
+// （Postgres を seed ごとに1回しか流さない）。
+const postgresRuns = new Map<number, WriteRunOutcome>();
 
 const postgresBackend: WriteFuzzBackend = {
   name: "postgres",
@@ -90,7 +106,43 @@ const postgresBackend: WriteFuzzBackend = {
 
 const fakeBackend = fakeWriteFuzzBackend("fake", TEST_EMBEDDING_SPACE);
 
-describe("書き込み側の差分ファズ（本物の Postgres + pgvector と Fake）", () => {
+/**
+ * `@mnemora/testkit/fixtures` の `InMemory*`。利用者が Postgres の代わりに使う、出荷される
+ * fixture なので、Postgres との食い違いを core の Fake とは別に見る。状態は
+ * `InMemoryMemoryStore` の内部（`memories`・`observations` の Map）を直接読む——
+ * `MemoryStore` には、テナントの記憶を丸ごと列挙する口が無いため。
+ */
+const testkitBackend: WriteFuzzBackend = {
+  name: "testkit",
+  async setup() {
+    const memoryStore = new InMemoryMemoryStore();
+    const internals = memoryStore as unknown as {
+      memories: Map<string, Memory>;
+      observations: Map<string, Observation>;
+    };
+    const tenant = WRITE_FUZZ_CTX.tenantId;
+    return {
+      stores: {
+        memoryStore,
+        outboxStore: new InMemoryOutboxStore(memoryStore.outboxJobs),
+        vectorStore: new InMemoryVectorStore(memoryStore),
+        lexicalStore: new InMemoryLexicalStore(memoryStore),
+        eventStore: new InMemoryEventStore(memoryStore, memoryStore.events),
+        tenantSettingsStore: new InMemoryTenantSettingsStore(),
+      },
+      space: TEST_EMBEDDING_SPACE,
+      createRuntime,
+      read: async () => ({
+        memories: [...internals.memories.values()].filter((m) => m.tenantId === tenant),
+        observations: [...internals.observations.values()].filter((o) => o.tenantId === tenant),
+        outbox: memoryStore.outboxJobs.filter((j) => j.tenantId === tenant),
+        events: memoryStore.events.filter((e) => e.tenantId === tenant),
+      }),
+    };
+  },
+};
+
+describe("書き込み側の差分ファズ（本物の Postgres + pgvector と、core の Fake・testkit の InMemory）", () => {
   afterAll(async () => {
     await closeTestClient();
   });
@@ -101,6 +153,7 @@ describe("書き込み側の差分ファズ（本物の Postgres + pgvector と 
       len: LEN,
       firstSeed: FIRST_SEED,
       t0: T0,
+      cacheA: postgresRuns,
     });
     expect(report).toBe("");
   }, 600_000);
@@ -112,6 +165,32 @@ describe("書き込み側の差分ファズ（本物の Postgres + pgvector と 
       len: LEN,
       firstSeed: FIRST_SEED,
       t0: T0,
+      cacheA: postgresRuns,
+      wrapB: breakReinforce,
+    });
+    expect(report).not.toBe("");
+    expect(report).toMatch(/lastReinforcedAt|"k":"reinforce"|"k":"usage"/);
+  }, 600_000);
+
+  it(`${SEEDS} シード × ${LEN} 手で、Postgres と testkit の InMemory の戻り値と状態が1手ごとに一致する`, async () => {
+    const report = await diffWriteSeeds(postgresBackend, testkitBackend, {
+      seeds: SEEDS,
+      len: LEN,
+      firstSeed: FIRST_SEED,
+      t0: T0,
+      cacheA: postgresRuns,
+    });
+    expect(report).toBe("");
+  }, 600_000);
+
+  it("陽性対照: testkit の InMemory の reinforce を壊すと、食い違いが報告される", async () => {
+    const report = await diffWriteSeeds(postgresBackend, testkitBackend, {
+      // 食い違いが1つ見えれば足りるので、本数は絞る。
+      seeds: POSITIVE_CONTROL_SEEDS,
+      len: LEN,
+      firstSeed: FIRST_SEED,
+      t0: T0,
+      cacheA: postgresRuns,
       wrapB: breakReinforce,
     });
     expect(report).not.toBe("");
