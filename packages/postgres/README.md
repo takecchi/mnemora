@@ -149,6 +149,17 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
 > 気にしなくてよい（例示は下の `scripts` と、[`examples/chat`](../../examples/chat/README.md)
 > の導入手順）。
 
+> **⚠ 追記（2026-09-27、[Issue #1181](https://github.com/takecchi/mnemora/issues/1181)）— 入れ始めの小さい DB では、連想枠（既定 on）の recall も遅くなる**:
+>
+> 空の DB に記憶を入れ始めたばかり（数百行）で、`memories` にも埋め込み表にもまだ統計が無いと、
+> 連想枠（段3.5、既定 on）がアンカーごとの ANN 検索を束ねる問い合わせ（`PostgresVectorStore.searchMany`）が、
+> memories を主キーで引かないプランになる。【実測】200行・64次元で、recall 全体が
+> 統計なし 63 ms、`ANALYZE` の後 18 ms（その問い合わせ単体では 28 ms → 1.4 ms）。
+> この規模では、書き込み経路の自動の `ANALYZE`（上の追記）はまだ打たれない。
+> ⟹ **上の `--analyze-memories`（`ANALYZE memories;`）を1回打てば戻る**（【実測】`memories` だけの
+> `ANALYZE` で、その問い合わせは 1.8 ms。埋め込み表だけでも 1.4 ms）。数百行を超えると、統計が無くても
+> 上乗せは小さくなった（500〜900行で 5〜8 ms）。詳細と、確かめていないことは Issue #1181。
+
 ### 専用スキーマを指定する（`--schema` / `--extension-schema`）
 
 共有 DB に他システム（例: Prisma が管理する `public`）が同居していて、mnemora の
