@@ -199,6 +199,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`runtime.restoreSuperseded()` は、戻した群の強化を1件ずつ呼んでいたため、群が1件増えるごとに DB の往復が増えていた**（Postgres で群 2 / 6 / 21 件に 6 / 14 / 44 往復）——群の復帰そのものは SQL 1本である。`MemoryStore.reinforceMany?` が在れば1回に束ねる（使用報告を Issue #874 で束ねたのと同じ形）。束ねた強化が失敗したら1件ずつに戻るので、強化の失敗が失敗した要素の `reinforceError` にだけ入る約束は変わらない（[PR #1087](https://github.com/takecchi/mnemora/pull/1087)）。
 - **`@mnemora/postgres` の claimKey の2つの SQL が `idx_memories_claim_key` を `subject_id` まで使えていなかった**——`listActiveClaimPredicates` は Seq Scan（別テナントを含む表全体の走査）で、`knownPredicatesFromStore` を有効にすると observe のたびに呼ばれていた。`findActiveByClaimKey` は `subject_id` を索引の条件に使えず、同じ claim key を持つ全 subject の行を読んでいた。`subject_id IS NOT DISTINCT FROM` を同じ意味の `subject_id = $n` / `subject_id IS NULL` に分け、部分索引の述語 `claim_key_subject IS NOT NULL` を WHERE に足した（結果は変わらない）（[PR #1086](https://github.com/takecchi/mnemora/pull/1086)）。
 - **`@mnemora/postgres` の `PostgresVectorStore.search` / `searchMany` は、クエリベクトルに有限でない成分（`NaN`・`Infinity`）があると、pgvector の拒否で未捕捉の `DrizzleQueryError` を投げていた**——埋め込み provider がクエリ埋め込みにそうした値を返すと、`runtime.recall()` 自体が reject された。次元違いのクエリ（Issue #867 の案B）と同じく「比較不能」として扱い、`score_not_comparable` に数えるようにした。core の Fake と testkit の `InMemoryVectorStore` は以前からこの振る舞いである（[PR #1069](https://github.com/takecchi/mnemora/pull/1069)）。
   ⚠ doc が約束していた振る舞い（`search` は比較不能なクエリで例外を投げない）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
