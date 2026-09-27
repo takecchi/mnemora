@@ -902,9 +902,32 @@ export interface TickOptions {
    * **必須・既定値なし**——リース長は「ワーカーが止まったとみなすまでの時間」という
    * 運用方針であり、`packages/core` が決めてよい値ではなく呼び出し側が決める。
    * これにより `tick(ctx)` を引数無しで呼ぶことはできない（意図した破壊的変更、ADR 0032）。
+   *
+   * ⚠ **0 以下も受け付ける（検査しない）。今の振る舞い:** 0 以下では、claim した行が
+   * その時点で既にリース切れとして扱われる。同時に走る別の `tick` が同じ行を claim して
+   * handler をもう一度走らせ、遅れて `complete`/`fail` した側は {@link TickResult.leaseConflicts}
+   * に載る（Postgres と testkit の fixture の両方で実測）。重複の防ぎは、正の `leaseMs` が
+   * 処理時間より長いときにだけ効く。
+   * `now - leaseMs` が `Date` の範囲を外れる値（`NaN` を含む）は、どちらの実装でも例外になる。
    */
   leaseMs: number;
+  /**
+   * 1回の `tick` で claim する上限。省略時の値は `@mnemora/core` の内部定数（`packages/core/src/runtime.ts` の `DEFAULT_TICK_LIMIT`）。
+   * `0` なら何も claim しない。0 以上の整数を渡す前提であり、負数・非整数は例外になる
+   * （`OutboxStore.claimBatch` がそのまま受け取る。Postgres は DB の例外、testkit の fixture は
+   * 専用のメッセージ）。
+   */
   limit?: number;
+  /**
+   * claim する job の種類。省略時は {@link TICK_SUPPORTED_JOB_KINDS}。
+   *
+   * - **その外の種類の行は、既定の `tick` では claim されず、終端にもならないまま残る**
+   *   （ADR 0082「頼まれていない kind は claim すらしない」）。明示して渡したときだけ claim し、
+   *   {@link TickResult.unsupported} として `fail` に落とす。
+   * - 空配列は何も claim しない。
+   * - claim の順は、種類に関わらず `available_at` の古い順である。種類ごとの枠の配分は無い
+   *   ——古い job が `limit` を埋めていれば、後から積まれた別の種類の job は次の `tick` に回る。
+   */
   kinds?: OutboxJobKind[];
   claimedBy?: string;
 }
