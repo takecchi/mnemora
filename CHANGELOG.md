@@ -66,6 +66,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **PR #1187 の数え方**: `@mnemora/postgres` の語彙チャンネルが語の途中の `"` を空白として扱うようにした件も非破壊の Fixed と数える——例外を投げず、一致だけが変わる（**クローン miku の判断であり、オーナーの判断ではない**）。（⚠ 2026-09-27: PR #1187 はこの一文を、当時 `[1.1.0]` の前書きに在った追記2 の末尾に足していた。追記2 は `v1.0.1` の範囲の記録として `## [1.0.2]` 節へ移したので、`v1.0.2` より後の PR #1187 の一文だけをここへ移した）
 
+**PR #1273 の数え方**: `@mnemora/testkit/fixtures` の `InMemoryVectorStore` がベクトルとクエリを float4 に丸めるようにした件も非破壊の Fixed と数える——例外を投げる入力の集合は変えず、距離の値と、距離が float4 で同点になる組の並びだけが変わる（**クローン miku の判断であり、オーナーの判断ではない**）。
+
 対象パッケージの公開範囲: `@mnemora/core` / `@mnemora/testkit` / `@mnemora/postgres` /
 `@mnemora/openai` / `@mnemora/anthropic` / `@mnemora/local-embedding`（`v1.0.2` と同じ）。
 
@@ -194,6 +196,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
 - **`MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）は、未強化の記憶に作成時刻（`recordedAt`）より前の `at` を渡すと、減衰の起点を作成時刻より前へ戻していた**（[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)、[PR #1173](https://github.com/takecchi/mnemora/pull/1173)）——`lastReinforcedAt` が `null` なら `at` によらず書いていたため、`lastReinforcedAt` が作成時刻より前になり、`decayFloorAt` が早まって忘却ゲートから早く消えた。活動時計の `decayBaseSeq`/`decayFloorSeq` も進んでいた。`@mnemora/postgres`・`@mnemora/testkit/fixtures` とも同じだった。規則を1つにした: **`at` が起点（`lastReinforcedAt ?? recordedAt`）より新しいときだけ書き、そうでなければ活動時計の欄も含めて何も書かない**（強化済みの記憶に古い `at` を渡したときの既存の規則と同じ）。作成時刻ちょうどの `at` も、既存の `lastReinforcedAt` の比較と同じく書かない。
   ⚠ 約束の見出し（`MemoryStore.reinforce` の TSDoc と [ADR 0048](./docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)「減衰の起点を巻き戻さない」）に振る舞いを合わせた修正であり、例外を新しく投げないので、非破壊と数える（**クローン miku の判断であり、オーナーの判断ではない**）。⚠ **射程**: 活動時計のテナントで、`recordedAt` を書いた時計が runtime の時計より進んでいる使用報告は、この版から強化にならない（壁時計・活動時計のどちらでも）。作成と同じミリ秒の中の強化（固定の時計で、作成と使用報告・`restoreArchived` を同じ時刻に打つ形など）も書かれなくなる。既に作成時刻より前の起点を持っている記憶は変えない。
+- **`@mnemora/testkit/fixtures` の `InMemoryVectorStore` は、ベクトルを丸めずに（float64 のまま）比べていた**（[PR #1273](https://github.com/takecchi/mnemora/pull/1273)）——`@mnemora/postgres`（pgvector の `vector` 型）は成分を float4 で持つので、クエリとの距離の差が float4 の桁より小さい2件は、Postgres では同点になって `recorded_at` の新しい順で並び、fixture では距離の近い順に並んでいた（`limit` で切ったときに返る集合も割れた）。いまは fixture も、保存するベクトルとクエリを `Math.fround` で float4 に丸めてから比べ、何が同点になるかが Postgres と同じになる。`VectorHit.distance` と `getVectors` が返す `VectorEntry.vector` の値の下の桁が変わる（距離の値そのものは、pgvector が float4 で積算するぶん、なお Postgres と揃わない）。
+  ⚠ 例外を投げる入力は変えていない（float4 の範囲を超える有限の値は `Infinity` に丸まるが、fixture はもともと `Infinity` を例外にしない）。
 
 ---
 
