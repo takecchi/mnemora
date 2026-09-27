@@ -56,7 +56,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **postgres 利用者へ**: `v1.0.2` から新しいマイグレーションが1本増えている
 （`0023_lexical_query_inner_quote_as_space.sql`、語彙チャンネルのクエリの `"` の扱い、PR #1187）。⟹ `v1.0.2` から
-この節までの範囲へ上げる場合は `pnpm --filter @mnemora/postgres run migrate` が要る。
+この節までの範囲へ上げる場合は `npx mnemora-postgres-migrate`（または `runMigrations`。このリポジトリの workspace 内なら
+`pnpm --filter @mnemora/postgres run migrate`）が要る。（⚠ 2026-09-27 訂正: この行は workspace 内の形だけを書いていた。
+利用者のプロジェクトではその形は打てない。`docs/migration-v1.md` の「v1.0.2 → 次の版」の実測を参照）
 **`v1.0.1` 以前から直接この節までの範囲へ上げる場合は、下の `## [1.0.2]`・`## [1.0.1]` 節の migrate 案内も
 合わせて読むこと**（`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る）。
 
