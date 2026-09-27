@@ -28,6 +28,10 @@
 // Postgres と違う（Postgres は drizzle が包んだ DB の例外、こちらは下の文面の `Error`）。揃えて
 // あるのは「拒むかどうか」と「拒んだときに何も書かないこと」だけである。
 //
+// `createMemory` 系（`WithOutbox`・`supersedeWithNewMemories` の新しい行を含む）は、冪等の鍵が同じ既存の行が
+// 在っても、下の検査で拒む（既存の行を返さない）。Postgres の `INSERT ... ON CONFLICT DO NOTHING` が、衝突を
+// 見る前に値を検査するのを写す。外部キー相当（参照先が在るか）だけは、行を実際に書くときにしか見ない。
+//
 // - `limit` が整数でない（`NaN`・`Infinity` を含む）・負・2^63 以上 →
 //   `<口>: limit must be an integer / must not be negative / must fit in a Postgres bigint`。
 //   対象: `InMemoryOutboxStore.claimBatch`・`InMemoryVectorStore.search`・

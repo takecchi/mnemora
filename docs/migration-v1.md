@@ -1035,13 +1035,13 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **既定の挙動が変わるもの**（連想枠の既定 on など）は、この文書の定義では破壊的変更ではない。[CHANGELOG.md](../CHANGELOG.md) の `[1.0.2]` 節の「Changed」を見ること。
 
-**DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。
+**DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
 ## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`4514cec`**（PR #1177）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4・追記5 と同じ範囲）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`9f58833`**（PR #1191）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記6 と同じ範囲）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
-**型の上**: `git diff v1.0.2..4514cec -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。
+**型の上**: `git diff v1.0.2..9f58833 -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
@@ -1050,10 +1050,12 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - `InMemoryMemoryStore.listActiveClaimPredicates` が、Postgres の拒む `limit`（負数・`NaN`・`Infinity`・非整数・2^63 以上）で例外を投げるようになった（PR #1157）。
   - `InMemoryTenantSettingsStore` の半減期の口が、Postgres の `real`（float4）列が拒む値で例外を投げるようになった（PR #1165）。
   - `InMemoryEventStore.append` などが、`MemoryEventKind` に無い kind のイベントを拒むようになった（PR #1170）。
+  - `InMemoryMemoryStore` が、`memories` の列挙の列（`status` など）に無い値を拒むようになった（PR #1183）。
+  - `InMemoryMemoryStore` の `createMemory` 系が、冪等の鍵が同じ既存の行が在っても、書けない値を拒むようになった（PR #1190）。
   - ほかにも同じ種類のものがあれば、CHANGELOG の `[1.1.0]` 節の各項目の ⚠ を正とする。
-- ⭕ **非破壊と数えたもの**（⚠ 付き。**この判定はクローン miku の判断であり、オーナーの判断ではない**）——`registerEmbeddingSpace` が同じテーブル名に潰れる別の空間の登録を拒むようになった（PR #1156）、`setEventRetention` が型の外の `kind` を拒むようになった（PR #1171。fixture も core の共有の検査で同時に変わる）、ほか。一覧は CHANGELOG の `[1.1.0]` 節を見ること。
+- ⭕ **非破壊と数えたもの**（⚠ 付き。**この判定はクローン miku の判断であり、オーナーの判断ではない**）——`registerEmbeddingSpace` が同じテーブル名に潰れる別の空間の登録を拒むようになった（PR #1156）、`setEventRetention` が型の外の `kind` を拒むようになった（PR #1171。fixture も core の共有の検査で同時に変わる）、`@mnemora/postgres` の語彙チャンネルが語の途中の `"` を空白として扱うようになった（PR #1187。一致だけが変わる）、ほか。一覧は CHANGELOG の `[1.1.0]` 節を見ること。
 
-**DB マイグレーション**: `v1.0.2` から増えていない（`git diff v1.0.2 -- packages/postgres/migrations` が空）。
+**DB マイグレーション**: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）の1本が増えている。`v1.0.2` から上げる場合は `pnpm --filter @mnemora/postgres run migrate` が要る。`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る。
 
 
 ### `RecallQuery.validAt` ゲートが既定で有効になった

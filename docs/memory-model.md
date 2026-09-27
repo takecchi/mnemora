@@ -1611,6 +1611,30 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   `@mnemora/postgres` は meta を JSON で保存するので文字列で読み戻り、`@mnemora/testkit` の fixture も 2026-09-27 から
   同じく文字列で持つ（それまでは `Date` のまま持っていた）。
 
+**⚠ 2026-09-27 追記2（今日入った変更の後に、表の各行を Runtime で起こして当て直した）**: `@mnemora/postgres` と
+`@mnemora/testkit` の fixture の両方で、各行の操作が積むイベントの `kind`・`meta` の欄・状態の遷移を並べた。
+表の遷移と `kind` はどの行も今の実装と一致した（2実装の違いは `meta` の鍵の順と id の形だけ）。表に書いていなかった
+ことを次に足す。
+- 行2・行5の `meta`: 行2の `created` は `{ reason: 'extracted', sourceObservationId, extractorVersion }`。行5
+  （`Runtime.reextract`）の旧い行の `superseded` は `{ reason: 'reextract_superseded', sourceObservationId,
+  extractorVersion, supersededById }`、作り直した行は行2と同じ `created`。`active → superseded` の `meta.reason` は、
+  入口ごとに `'reextract_superseded'`（行5）・`'consolidated'`（行12）・`'contested_resolved'`（行7）の3つで、行15の
+  `dryRun` が運ぶ `supersededReason` はこの値である。
+- 行4・行14・行15の強化は、`at` が起点（`last_reinforced_at ?? recorded_at`）より狭義に新しいときだけ書く。そうで
+  なければ、活動時計の欄も含めて何も書かない（Issue #1093、[ADR 0048](./decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)
+  の追記）。
+- 行6には、`Runtime.markContested` の直接の呼び出しのほかに、`observe()` の claim key の検出（`claimKey: { enabled:
+  true, detectContested: true }`、既定 off。§5 の 2026-09 追記・[ADR 0324](./decisions/0324-claim-key-contested-detection.md)）
+  からも入る。相手がちょうど1件なら `markContested` と同じイベント（`meta.note` に根拠の JSON）。相手が2件以上なら、
+  新しい行に `updated`（`meta.reason: 'claim_key_conflict_unresolved'`）を1件だけ積み、**状態は変えない**（表の
+  どの行の遷移でもない）。
+- 行12・行13の `opts.reason` は `meta.note` に入る（`meta.reason` は固定値 `'consolidated'`・`'reflected'`）。行6・行7と
+  同じ形で、行9・行14（`meta.reason` に入り、省略すると `reason` キー自体が無い）とも、行15（`meta.reason` に入り、
+  省略すると `'unsuperseded'`）とも違う。
+- 行13（`tick()` の `'reflect'` ジョブ）は、同じジョブの再配達でも内省の Memory が2件になる——`reflect()` が書いた後、
+  `complete` の前にワーカーが止まると、リースが切れた後の `tick()` がもう一度処理する（`created` と `embed` ジョブも
+  2つずつ。`Runtime.reflect` の TSDoc の同日付追記。`'consolidate'` のジョブは status で弾くので1回分と同じ状態になる）。
+
 
 ### ⚠ `superseded` / `contested` の行は溜まる —— 容量の見積もり（2026-09-24 追記、[Issue #567](https://github.com/takecchi/mnemora/issues/567)）
 
