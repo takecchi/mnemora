@@ -2538,7 +2538,9 @@ export class PostgresMemoryStore implements MemoryStore {
     const meta = { reason: event.reason ?? "unsuperseded", supersededById };
     const onlyMemoryIdsClause =
       filter?.onlyMemoryIds !== undefined
-        ? sql`AND id = ANY(${sql.param([...filter.onlyMemoryIds])}::uuid[])`
+        ? // uuid の形をしていない id は群に居ないのと同じ——`getMany` と同じく、問い合わせの前に落とし、
+          // `invalid input syntax for type uuid` を漏らさない（mapping.ts の isUuidLike の doc参照）。
+          sql`AND id = ANY(${sql.param(filter.onlyMemoryIds.filter((id) => isUuidLike(id)))}::uuid[])`
         : sql``;
 
     const result = await this.db.execute(sql`
@@ -2609,7 +2611,9 @@ export class PostgresMemoryStore implements MemoryStore {
     }
     const onlyMemoryIdsClause =
       filter?.onlyMemoryIds !== undefined
-        ? sql`AND id = ANY(${sql.param([...filter.onlyMemoryIds])}::uuid[])`
+        ? // uuid の形をしていない id は群に居ないのと同じ——`getMany` と同じく、問い合わせの前に落とし、
+          // `invalid input syntax for type uuid` を漏らさない（mapping.ts の isUuidLike の doc参照）。
+          sql`AND id = ANY(${sql.param(filter.onlyMemoryIds.filter((id) => isUuidLike(id)))}::uuid[])`
         : sql``;
 
     const result = await this.db.execute(sql`
