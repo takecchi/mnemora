@@ -57,7 +57,10 @@ const CASES: Array<[string, Partial<NewMemory>]> = [
   ],
   [
     "inferred で sourceObservationId が無い",
-    { provenance: { kind: "inferred", basis: [] }, sourceObservationId: null },
+    {
+      provenance: { kind: "inferred", basis: { memoryIds: [], observationIds: [] } },
+      sourceObservationId: null,
+    },
   ],
   ["decayBaseSeq が負", { ...ACTIVITY, decayBaseSeq: -1 }],
   ["decayFloorSeq が負", { ...ACTIVITY, decayFloorSeq: -1 }],
