@@ -203,6 +203,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`recall()` の `omitted` の `ann_truncated.assumptions` に出る `strength <= 1` の前提の文言が、「型（number）も DB 列（real）も保証していない」のままだった**——ADR 0078 の後、同梱の実装（Postgres の CHECK 制約、testkit の fixture と core の Fake の書き込み時の検査）は値域 `(0, 1]` を守っている。文言を実態に合わせた（前提であることは変えていない。[ADR 0069](./docs/decisions/0069-ann-truncated-says-nothing-about-loss.md) の追記）。
+  ⚠ 返り値の説明の文字列だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`runtime.consolidate()` / `runtime.reflect()` の `{ seedMemoryId }` 形は、種が forget・purge された記憶でも、その `digest` を検索語にして近傍を集め、近傍どうしを統合・内省していた**（自動 job の `tick()` 経由も同じ。[Issue #1136](https://github.com/takecchi/mnemora/issues/1136)）——利用者が「使わないでほしい」と言った記憶が、束ねる相手を決め続けていた。種が forget・purge された記憶なら近傍を集めず、種1件だけを見て `nothing_to_consolidate`/`no_eligible_sources`（reflect は `nothing_to_reflect`/`no_eligible_basis`）を返す。種が `contested` / `superseded` の場合は今どおり近傍を集める。
   ⚠ 例外を投げず、結果だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`@mnemora/local-embedding` のモデルの読み込みに失敗したときのメッセージが、キャッシュのファイルの破損に届いていなかった**——キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、次のプロセスでも同じように落ち続けるのに、メッセージはネットワーク断・repo の消滅・dtype 名の誤りしか挙げず、`cacheDir` を省いたときは「既定の場所」としか言わなかった。キャッシュの破損を原因の候補に挙げ、消せば次の読み込みで取り直す場所（`<cacheDir>/<repo>`、省いたときは `node_modules/@huggingface/transformers/.cache/<repo>`）を名指す（[PR #1134](https://github.com/takecchi/mnemora/pull/1134)）。

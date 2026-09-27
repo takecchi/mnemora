@@ -521,3 +521,20 @@ it("ANN の返り件数が over-fetch 上限 k' に達したら ann_truncated �
   `decideAnnTruncation` が戦略を**引数で**受ける形にしてあるので、注入口が後から入れば繋がる。
 - **`occurredAt` は入れていない**（§3.3 の順序）。**⟹ §11 の「実装後 0/21」は、
   4項が定数のままの世界での数字である。**
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: `strength <= 1` の前提の文言を、ADR 0078 の後の実態に合わせた
+
+§6 で置いた前提の2つ目（`DEFAULT_STRATEGY_BOUND_ASSUMPTIONS`、`recall()` の `omitted` の `ann_truncated.assumptions` にそのまま出る文字列）は、「書き込み側が無条件に 1 を書いているだけで、型（number）も DB 列（real）も保証していない」と書いていた。
+
+その後の [ADR 0078](./0078-strength-value-range.md)（PR #98）で、値域 `(0, 1]` が決まった。同梱の実装は書き込み時にこれを守る。
+
+- `@mnemora/postgres`: DB の CHECK 制約（`migrations/0006_strength_value_range.sql`）
+- testkit の fixture と core の Fake: `createMemory` の検査
+- 適合テスト（`memory-store-conformance.ts`）が、`createMemory` の拒否を固定している
+
+2026-09-27 に、Postgres と testkit の fixture の両方で `strength` に 0・-1・5・NaN・Infinity を書こうとし、どちらも拒むことを確かめた。⟹ 「DB 列も保証していない」は、同梱の実装については事実でなくなっていた。
+
+- **直したもの**: 前提の文字列と、`packages/core/src/strategies/scoring.ts` の doc を書き直した。前提であることは変えていない。型（`number`）は保証しないので、適合テストを通していない adapter では前提のままだからである。文字列は `strength <= 1:` で始まり、`strength` を名乗る（既存の歯のまま）。
+- **本文（§6）は書き換えていない**（`docs/decisions/README.md` の、採用済み ADR の扱い）。
