@@ -117,7 +117,7 @@ export class InMemoryVectorStore implements VectorStore {
     // 外部キー相当（ADR 0047）: `memory_embeddings_<space>.memory_id → memories(id)`。
     // `search` は既に `this.memoryStore.get(...)` を真実の源として引いている
     // （クラス doc 参照）——書き込み側（upsert）でも同じ非対称を強制する。
-    const memory = this.memoryStore.peek(ctx, memoryId);
+    const memory = await this.memoryStore.get(ctx, memoryId);
     if (!memory) {
       throw new Error(`InMemoryVectorStore: memory not found: ${memoryId}`);
     }
@@ -182,7 +182,7 @@ export class InMemoryVectorStore implements VectorStore {
       // `status` / `subjectId` / `decayFloorAt` は Memory の属性であり、`memories`
       // 相当（`this.memoryStore`）を引かないと見られない（クラス doc 参照）。
       // Postgres 実装の `JOIN memories m ON m.id = e.memory_id` に対応する一段。
-      const memory = this.memoryStore.peek(memoryCtx, entry.memoryId);
+      const memory = await this.memoryStore.get(memoryCtx, entry.memoryId);
       if (!memory) {
         // Postgres の外部キー制約に対応する扱い——真実の源に無い vector は返さない。
         continue;

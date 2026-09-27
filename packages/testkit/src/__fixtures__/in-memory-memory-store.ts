@@ -606,15 +606,6 @@ export class InMemoryMemoryStore implements MemoryStore {
     return memory;
   }
 
-  /**
-   * 同じ fixture 群（`InMemoryVectorStore`・`InMemoryEventStore`）が、存在の確認と絞り込みのために
-   * **読むだけ**で引く口（`MemoryStore` の口ではない）。`get` と違って複製しない——検索の
-   * 候補ごとに複製すると fixture の検索が遅くなるため。呼び出し側は書き換えないこと。
-   */
-  peek(ctx: Ctx, id: MemoryId): Readonly<Memory> | null {
-    return this.rawGet(ctx, id);
-  }
-
   async getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]> {
     // `PostgresMemoryStore.getMany` は `WHERE id = ANY(...)` という集合演算で引く
     // （実測）。同じ id が `ids` に複数回含まれていても、一致する行は主キーの性質上
