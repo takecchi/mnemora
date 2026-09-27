@@ -7,6 +7,7 @@ import type {
   NewMemoryEvent,
 } from "@mnemora/core";
 import { nextId } from "./id.js";
+import { assertQueryDate } from "./query-check.js";
 import { assertStorableMemoryEvent } from "./memory-event-check.js";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 
@@ -105,6 +106,9 @@ export class InMemoryEventStore implements EventStore {
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
+    // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
+    assertQueryDate("list", "since", filter.since);
+    assertQueryDate("list", "until", filter.until);
     // `PostgresEventStore.list` は `filter.limit` を生 SQL の `LIMIT` にそのまま渡すため、
     // 負数を渡すと Postgres 自身が `LIMIT must not be negative` で例外を投げる
     // （実測済み。in-memory-vector-store.ts の同種の注記参照）。ここで検査せず
