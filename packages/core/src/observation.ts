@@ -276,8 +276,17 @@ export interface ObserveEventInput {
   /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
    * `deriveClaimKeys` は一度も呼ばれない。 */
   claimKey?: ClaimKeyOptions;
+  /**
+   * 出来事の名前。**抽出（LLM）に渡すのはこの欄だけである**（今の振る舞い。下の `data` の doc 参照）。
+   * LLM 呼び出しが失敗したときの全文フォールバックの Memory も、この欄の文字列だけを本文にする。
+   */
   name: string;
   /**
+   * ⚠ **この欄は抽出（LLM）に渡らない**（今の振る舞い。[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
+   * testkit の fixture の両方で、抽出のプロンプトと全文フォールバックの Memory の本文が `name` だけで
+   * あることを実測した）。`data` は Observation の `payload` に保存されるだけで、そこから作られる
+   * Memory の本文には入らない。抽出に使わせたい内容は `name` に書くか、`utterance` / `document` で渡すこと。
+   *
    * 出来事に付けるデータ。**JSON として保存される前提の欄である**
    * （[Issue #1076](https://github.com/takecchi/mnemora/issues/1076)）。
    *
@@ -319,7 +328,13 @@ export interface ObserveDocumentInput {
   /** {@link ClaimKeyOptions} の doc コメント参照（Issue #371）。既定は無効——省略すると
    * `deriveClaimKeys` は一度も呼ばれない。 */
   claimKey?: ClaimKeyOptions;
+  /**
+   * ⚠ **この欄は抽出（LLM）に渡らない**（今の振る舞い。[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
+   * testkit の fixture の両方で実測した）。抽出のプロンプトと全文フォールバックの Memory の本文は
+   * `content` だけで作る。`title` は Observation の `payload` に保存されるだけである。
+   */
   title?: string;
+  /** 抽出（LLM）に渡す本文。全文フォールバックの Memory も、この欄だけを本文にする。 */
   content: string;
 }
 
