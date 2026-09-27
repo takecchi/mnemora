@@ -486,6 +486,16 @@ half_life_hours  real        NOT NULL,          -- Memory 単位。テナント�
 decay_floor_at   timestamptz NOT NULL,           -- 書き込み時に一度だけ計算
 ```
 
+**⚠ 2026-09-27 追記（[Issue #1094](https://github.com/takecchi/mnemora/issues/1094)）: `strength`・`half_life_hours` は float4（`real`）で保存される。**
+`@mnemora/postgres` はこの2つを float4 の精度に丸めて保存する（`@mnemora/testkit` の fixture は float64 のまま）。
+`decay_floor_at` は、作成時は呼び出し側が float64 で計算した値をどちらの実装もそのまま保存するが、強化の後は
+store が保存済みの値で計算し直すので、**強化後の `decay_floor_at` は実装によってずれうる。**ずれは半減期が長いほど
+大きく、向きも一定しない。【実測】（自分専用の PostgreSQL 17 + pgvector と testkit の fixture、1日後の強化の後の
+床の差 Postgres − testkit）: 720 時間 0ms、123456.789 時間 +15.6秒、約100万時間 −約6分、約1000万時間 −約32分。
+クローン miku の判断で、列を `double precision` にする案（migration）・書く前に丸める案（結果を変える）は採らず、
+今の振る舞いを記録した。値域の外を丸めて通さないこと（ADR 0125 決定7「黙って丸めない」）とは別の話であり、
+値域の内側の値が float4 の精度になるのは今日の保存の形である（ADR 0125 の追記）。
+
 ### 二段検索とデータモデル側の帰結
 
 具体的な二段検索の SQL の形（over-fetch と段2の再スコアリング）は `docs/recall.md` に譲る。
