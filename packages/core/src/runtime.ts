@@ -1969,6 +1969,12 @@ export interface Runtime {
    * 渡した runtime でこの口を呼び、続けて `tick({ kinds: ['embed'] })` を呼ぶ
    * （`Memory.content` は変わらない）。既定では何も切らない。
    *
+   * ⚠ **埋め込み空間を切り替えた後の、古い空間で `ready` の記憶は、この口では積み直せない**
+   * （[Issue #1015](https://github.com/takecchi/mnemora/issues/1015)）。`statuses` は `NotIndexedReason`
+   * （`pending`/`failed`/`skipped`）だけを受け付け、`embeddingStatus` は空間を区別しないので、
+   * そうした記憶は `ready` のまま今の空間に行を持たない。Phase 1 は空間の切り替えを支えない
+   * （`docs/memory-model.md` §10）。
+   *
    * ⚠ **`reextract` とは別の操作である。**`reextract` は**抽出**をやり直す
    * （Observation から Memory を作り直す）。こちらは既にある Memory の**埋め込み**を
    * やり直す。
