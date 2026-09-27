@@ -357,3 +357,14 @@
 反映先: [ADR 0089](./0089-runtime-consolidate-shape.md) の追記（同じ日付）、
 `docs/memory-model.md`、`packages/core/src/runtime.ts` の `consolidate`/`ConsolidateTarget`
 の doc コメント。
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: forget・purge された種は近傍を集めない（Issue #1136）
+
+本文は「種が見つからなければ `recall()` を呼ばない」とだけ決めていて、種が在るが `active` でない場合を決めていなかった。実装は、種が forget・purge された記憶でも、その `digest` を検索語にして近傍を集め、近傍どうしを統合していた（自動 job も同じ）。
+
+- **決めたこと（クローン miku の判断）**: 種が forget・purge された記憶なら、種が見つからないときと同じく `recall()` を呼ばず、対象を種1件にする。結果は既存の分類のまま `status_not_active`（`forgotten`）→ `nothing_to_consolidate`/`no_eligible_sources` になる。新しい値は足していない。
+- **理由**: forget と purge は、利用者が「使わないでほしい」と言った記憶である。その `digest` で近傍を束ねると、消した情報が別の形で効き続ける。#897 / ADR 0124 が observe の再送で「消した情報が蘇るので抽出をやり直さない」と決めたのと同じ線である。
+- **変えていないもの**: 種が `contested` / `superseded` の場合は、今どおり近傍を集める（利用者が消した記憶ではない）。種を `meta` に記録する案（Issue #1136 の案4）は入れていない。
+- **反映先**: `packages/core/src/runtime.ts` の `ConsolidateTarget` の doc と、`consolidate` の手順1。歯は `packages/postgres/src/__tests__/consolidate-reflect-forgotten-seed.postgres.test.ts`（Postgres と testkit の fixture、直接呼び出しと自動 job）。
