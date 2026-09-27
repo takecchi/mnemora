@@ -335,7 +335,7 @@ DATABASE_URL=... pnpm --filter @mnemora/example-chat run correction
 書き込み0件を実測している**（トップレベルの
 [README.md](../../README.md)「訂正の境界」節も参照）。
 
-### 出力の読み方（実測、2026-09-25、deterministic provider）
+### 出力の読み方（実測、2026-09-27、deterministic provider。連想枠の既定 on〔ADR 0337〕の後に取り直した）
 
 ```
 元の発話: "私の好きな色は青です。" (memoryId=a72fa827-...)
@@ -349,8 +349,9 @@ outcome=candidates / 候補1件
 問い合わせ: recall({ text: "わたしの好きな色を覚えていますか?", limit: 1 })
 
 --- 1. markContested 前（まだ対向として宣言していない） ---
-件数: 1
+件数: 2
   - "私の好きな色は青です。" (retrievedVia=ann)
+  - "訂正します。よく考えたら、好きな色は青ではなく赤でした。" (retrievedVia=association)
 
 --- 2. markContested(指名, 訂正) ⟹ outcome=contested ---
 件数: 2
@@ -366,9 +367,13 @@ outcome=candidates / 候補1件
 
 **段1（`markContested` 前）が、`observe()` を2回呼んだだけの状態と実質的に同じである
 ことに注意**——`findCorrectionCandidates` は読み取り専用で DB を書き換えないため、
-この時点の `recall()` の答え（`"私の好きな色は青です。"`、古い値が単独で返る、印も無い）が
-「`observe()` だけをしたらどうなるか」の実演になっている。段2/3が、そこから明示的な
-`applyCorrection` を経て初めて古い値が消えることを見せる。
+この時点の `recall()` の答えが「`observe()` だけをしたらどうなるか」の実演になっている。
+`limit: 1` なのでクエリで引けるのは古い値（`"私の好きな色は青です。"`）1件だけだが、連想枠（`recall()` の段3.5。
+[ADR 0337](../../docs/decisions/0337-recall-association-default-on.md) で既定 on）がそれを起点に訂正の発話を
+`retrievedVia=association` として連れてくる。⚠ **ただし、これは「対向」の印ではない**——`companionOf` は無く、
+どちらが新しい・正しいかも示さない（似ていたから並んだだけである）。段2で `markContested` を経て初めて
+`mandatory_companion`（必ず一緒に返す対）になり、段3の `resolveContested` を経て初めて古い値が消える。
+（2026-09-25 の実測は連想枠の既定が off だった版で、段1は古い値が単独で返っていた。）
 
 ### 🔴 このコマンドが測っていないこと
 
