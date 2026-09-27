@@ -1007,6 +1007,26 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: `purge()` が書き換えるのは、いまは `memories` の `content`・`digest`・`purged_at` だけであり、あわせて今の `embeddingProvider.space` の埋め込み行をベストエフォートで消す（ADR 0124 決定4・決定5）。それ以外の次のものは元の値のまま残る——`tags`・`attributes`・claimKey の2列・`content_hash`、`labels`/`memory_labels` の行、別の空間の埋め込み行、元の Observation の `payload`、`memory_events.digest_snapshot`、そして purge より前の recall の記録（`recalls.index_band` の digest 帯、および `consolidate`/`reflect` が種の digest を `text` にして撃った recall の `recalls.query`）。ここでは現状を記録するだけで、どこまで消すかは決まっていない（[Issue #994](https://github.com/takecchi/mnemora/issues/994)・[Issue #995](https://github.com/takecchi/mnemora/issues/995)、オーナーの判断待ち）。
 
+**⚠ 2026-09-27 追記（[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、今の振る舞いを書くだけ）: 1つのテナントを消去した後に、表ごとに何が残るか。**
+テナント単位で消去する口は無い。ここでは「そのテナントの全記憶を `forget` → `purge` し、`setEventRetention({ kind: "days", days: 1 })` の後に
+`purgeExpiredEventsForTenant` で保持期間の掃除をした後」を消去とみなし、`@mnemora/postgres` の全表を当てた（【実測】自分専用の PostgreSQL 17 + pgvector。
+別テナントの行は変わらない）。上の追記と重なるものは「上の追記」とだけ書く。
+
+| 表 | 消去の後 | 約束 |
+|---|---|---|
+| `memories` | 行は残る（purged）。`content`・`digest` は消える | 上の追記（`tags`・`attributes`・claimKey・`content_hash` が残る）。**加えて `provenance.speaker`（observe の `speaker`）と `subject_id` も残る**。決まっていない（#995・#1207） |
+| `observations` | 行は残る。`payload`・`attributes`・`subject_id`・`external_id` は元のまま | 上の追記（`payload`）。`subject_id`・`external_id` は決まっていない（#1207） |
+| `memory_embeddings_<space>`（今の空間） | 消える | ADR 0124 決定5（別の空間の表は上の追記） |
+| `labels`・`memory_labels` | 残る | 上の追記 |
+| `recalls` | **行は全部残る**（利用者が撃った recall と、`consolidate`・`reflect` の自動ジョブが中で撃った recall の両方）。`query`（問いの本文・種の digest）・`index_band`・`explain`（scope の `subjectId`）・`returned_memories` は元のまま | digest 帯と種の digest は上の追記（#994）。問いの本文と、行そのものの保持期間は決まっていない（#1207。ADR 0290 が「recalls の保持方針」を先の話としている） |
+| `recall_usages` | 残る（id だけ） | 決まっていない（#1207） |
+| `outbox` | 完了した行は残る（`payload` は id だけ） | 完了した行を消す経路も保持期間も無い（#1207）。`last_error` は #1064 |
+| `memory_events` | 保持期間の掃除で消える。**`events_purged` の行は残る** | ADR 0115 決定4（`events_purged` は掃除の対象外） |
+| `tenant_settings`・`tenant_activity` | 設定の行は残る | 決まっていない（#1207） |
+
+⟹ **この版で「1つのテナントを跡形なく消す」手段は無い。**purge は法的な要求（`purge()` の doc）に応える口だが、残るものは上の表のとおりである。
+今の振る舞いは `packages/postgres/src/__tests__/tenant-erasure-residue.postgres.test.ts` が縛っている（約束を足すものではない）。
+
 ---
 
 ## 10. DB schema 案
