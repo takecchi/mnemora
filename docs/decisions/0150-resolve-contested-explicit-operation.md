@@ -466,3 +466,27 @@ PR）の本文に記録した——ここには複製しない。
 無いことを確認した上で、単純に `?` を付け、呼び出し側は `MemoryStore` の任意メソッドと同じ
 慣習（`runtime.resolveOrphanedContested!(...)`）に倣うことを interface 側の JSDoc に明記する
 形にした。
+
+## 追記（2026-09-27）: 負けた側の `superseded` イベントに `meta.supersededById`（勝った側の id）を足した
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定6を含む）と、既存の追記は書き換えていない。**
+
+**何が変わったか**: `resolveContested(…, { kind: "supersede", winnerId })` で負けた側に積む
+`kind: "superseded"` のイベントの `meta` は、決定6の `{ reason: "contested_resolved", resolution:
+"supersede" }`（`opts.reason` があれば `note`）に加えて、**`supersededById`（勝った側の id）を持つ。**
+勝った側の `updated` と、`both_active` の両側の `updated` には足していない（置き換えられていないため）。
+
+**理由**: 同じ `kind: "superseded"` を積む他の経路——`consolidate`（統合先の id）と `reextract`
+（新しい候補の id）——は、`meta.supersededById` に置き換えた側の id を持つ（ADR 0100 決定5）。
+この経路だけが持たず、監査ログだけでは「負けた側を何が置き換えたか」を追えなかった
+（`memories.superseded_by_id` の列には勝った側の id が入っていたので、行を読めば分かった）。
+`docs/north-star.md` 問い3（この記憶が選ばれた理由を、後から説明できるか）の、監査ログへの適用である。
+
+**非破壊と数える理由（クローン miku の判断）**: `MemoryEvent.meta` は `Record<string, unknown>` で、
+欄を1つ足しても型（公開 API の表面）は変わらない。`MemoryEventKind` の union への値の追加でもなく、
+既存の欄の意味も変えない。
+
+**当て直し**: `@mnemora/postgres` と `@mnemora/testkit` の fixture の両方で、先に歯
+（`packages/postgres/src/__tests__/memory-events-meta-parity.postgres.test.ts`、core の Fake は
+`packages/core/src/__tests__/resolve-contested.test.ts`）を書いて赤を確かめてから直した。

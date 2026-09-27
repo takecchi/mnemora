@@ -955,7 +955,14 @@ export class InMemoryMemoryStore implements MemoryStore {
       memoryId: null,
       kind: "events_purged",
       actor: { type: "system" },
-      meta: { purgedCount: purged, oldestPurgedAt, newestPurgedAt, olderThan: opts.olderThan },
+      // 日時は ISO 8601 の文字列で持つ——`PostgresMemoryStore` は meta を JSON で保存するので、
+      // 読み戻すと文字列になる。fixture はそれを写す（戻り値のほうは `Date` のまま）。
+      meta: {
+        purgedCount: purged,
+        oldestPurgedAt: oldestPurgedAt?.toISOString() ?? null,
+        newestPurgedAt: newestPurgedAt?.toISOString() ?? null,
+        olderThan: opts.olderThan.toISOString(),
+      },
     });
     this.events.push(storedEvent);
 

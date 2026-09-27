@@ -472,7 +472,7 @@ describe("runtime.restoreSuperseded — opts.dryRun（Issue #515、方向3「戻
       kind: "superseded",
       actor: { type: "system" },
       digestSnapshot: source.digest,
-      meta: { reason: "contested_resolved", resolution: "supersede" },
+      meta: { reason: "contested_resolved", resolution: "supersede", supersededById: anchor.id },
     });
 
     const preview = await runtime.restoreSuperseded(
