@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type {
+  ClaimOutboxJobsOptions,
   Ctx,
   TenantSettingsStore,
   EventStore,
@@ -7,6 +8,8 @@ import type {
   MemoryEvent,
   MemoryStore,
   NewMemoryEvent,
+  NewRecallRecord,
+  OutboxJobRecord,
   OutboxStore,
   RecallId,
   VectorEntry,
@@ -129,6 +132,27 @@ type Backend = "pg" | "testkit";
 let scenarioSeq = 0;
 const runTag = Math.random().toString(36).slice(2, 7);
 
+/** recall の記録の既定の形（中身は使わない。境界の場面は一部の欄だけを差し替える）。 */
+function newRecallRecord(ctx: Ctx): NewRecallRecord {
+  return {
+    tenantId: ctx.tenantId,
+    subjectId: null,
+    query: { text: "q" },
+    budget: null,
+    omitted: [],
+    usage: {
+      chars: 0,
+      estimatedTokens: 0,
+      counter: "heuristic",
+      byTier: { full: 0, digest: 0, index: 0 },
+      indexChars: 0,
+    },
+    indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+    explain: { stages: [] },
+    returnedMemories: [],
+  };
+}
+
 async function makeKit(backend: Backend) {
   scenarioSeq += 1;
   const ctx: Ctx = { tenantId: `bd${scenarioSeq}-${backend}-${runTag}` };
@@ -152,7 +176,7 @@ async function makeKit(backend: Backend) {
       es: new InMemoryEventStore(ms, ms.events),
       os: new InMemoryOutboxStore(ms.outboxJobs),
       ls: new InMemoryLexicalStore(ms),
-      ts: new InMemoryTenantSettingsStore() as Required<TenantSettingsStore>,
+      ts: new InMemoryTenantSettingsStore(ms.activitySeq) as Required<TenantSettingsStore>,
     };
   }
   const obs = await s.ms.createObservation(
@@ -192,23 +216,7 @@ async function makeKit(backend: Backend) {
   );
   const ev = await s.es.append(ctx, event(ctx, m.id));
   const oev = await s.es.append(other, event(other, om.id));
-  const recallId: RecallId = await s.ms.createRecall(ctx, {
-    tenantId: ctx.tenantId,
-    subjectId: null,
-    query: { text: "q" },
-    budget: null,
-    omitted: [],
-    usage: {
-      chars: 0,
-      estimatedTokens: 0,
-      counter: "heuristic",
-      byTier: { full: 0, digest: 0, index: 0 },
-      indexChars: 0,
-    },
-    indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
-    explain: { stages: [] },
-    returnedMemories: [],
-  });
+  const recallId: RecallId = await s.ms.createRecall(ctx, newRecallRecord(ctx));
   const alias = new Map<string, string>([
     [m.id, "SELF"],
     [m2.id, "SELF2"],
@@ -260,7 +268,7 @@ const TIME_KEYS = new Set([
   "oldestPurgedAt",
   "newestPurgedAt",
 ]);
-const GENERATED_ID = /^(mem|obs|evt|rec|job|recall|ev)-\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-/;
+const GENERATED_ID = /^(mem|obs|evt|rec|rcl|job|recall|ev)-\d+$|^[0-9a-f]{8}-[0-9a-f]{4}-/;
 
 /** id・テナント・時刻を別名に伏せ、鍵を並べ替えた形にする（2実装で同じになるべき形）。 */
 function normalize(value: unknown, h: Kit): unknown {
@@ -902,6 +910,76 @@ add("tenantSettings: 書いたのは別のテナント（読みは変わらな�
   await h.s.ts.setDefaultHalfLifeRecalls(h.other, 3);
   return readAllSettings(h);
 });
+
+// ---- createRecall（makeKit の用意でだけ呼んでいた口。書いた後に getRecall と活動時計で読み戻す）----
+const recallWith = async (h: Kit, override: Partial<NewRecallRecord>) => {
+  const recallId = await h.s.ms.createRecall(h.ctx, { ...newRecallRecord(h.ctx), ...override });
+  return {
+    recallId,
+    readBack: await h.s.ms.getRecall(h.ctx, recallId),
+    readByOther: await h.s.ms.getRecall(h.other, recallId),
+    activitySeq: await h.s.ts.getActivitySeq(h.ctx),
+  };
+};
+add("createRecall(既定)", (h) => recallWith(h, {}));
+add("createRecall(advanceActivityClock:true)", (h) =>
+  recallWith(h, { advanceActivityClock: true }),
+);
+add("createRecall(record.tenantId:other)", (h) => recallWith(h, { tenantId: h.other.tenantId }));
+add("createRecall(subjectId:'')", (h) => recallWith(h, { subjectId: "" }));
+add("createRecall(subjectId:NUL)", (h) => recallWith(h, { subjectId: "s\u0000" }));
+add("createRecall(query:NUL)", (h) => recallWith(h, { query: { text: "q\u0000" } }));
+add("createRecall(budget:NUL)", (h) =>
+  recallWith(h, { budget: { chars: 1, x: "\u0000" } as never }),
+);
+add("createRecall(query:undefined)", (h) => recallWith(h, { query: undefined }));
+add("createRecall(explain:NUL)", (h) =>
+  recallWith(h, { explain: { stages: [{ stage: "s\u0000" } as never] } }),
+);
+add("createRecall(returnedMemories:[other])", (h) =>
+  recallWith(h, {
+    returnedMemories: [
+      {
+        memoryId: h.om.id,
+        score: {} as never,
+        retrievedVia: "ann",
+      },
+    ],
+  }),
+);
+
+// ---- claimBatch（時刻の境界は #1196・#1237 が持つので外す。now は十分先・leaseMs は固定）----
+const claimWith = async (h: Kit, opts: Partial<ClaimOutboxJobsOptions>) => {
+  await h.s.ms.createMemoryWithOutbox(
+    h.ctx,
+    buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash: "claim-self" }),
+    ["embed", "extract"],
+  );
+  await h.s.ms.createMemoryWithOutbox(
+    h.other,
+    buildNewMemoryFixture({ tenantId: h.other.tenantId, contentHash: "claim-other" }),
+    ["embed"],
+  );
+  const claim = (o: Partial<ClaimOutboxJobsOptions>) =>
+    h.s.os.claimBatch(h.ctx, { limit: 10, now: later(), claimedBy: "w", leaseMs: 60_000, ...o });
+  // 同じ available_at の行どうしの並びは約束していない（outbox-store.ts の冒頭）ので、種別で並べる。
+  const byKind = (jobs: OutboxJobRecord[]) =>
+    jobs.map((j) => [j.kind, j.claimedBy, j.attempts]).sort();
+  const claimed = byKind(await claim(opts));
+  // 残りを取る（同じ呼び手の2回目。リースは切れていないので、1回目に取った行は出ない）。
+  const rest = byKind(await claim({}));
+  return { claimed, rest };
+};
+add("claimBatch(既定)", (h) => claimWith(h, {}));
+add("claimBatch(kinds:[])", (h) => claimWith(h, { kinds: [] }));
+add("claimBatch(kinds:[embed])", (h) => claimWith(h, { kinds: ["embed"] }));
+add("claimBatch(kinds:[embed,embed])", (h) => claimWith(h, { kinds: ["embed", "embed"] }));
+add("claimBatch(kinds:[bogus])", (h) => claimWith(h, { kinds: ["bogus"] }));
+for (const limit of [0, 1, 2 ** 53, -1, 1.5, Number.NaN, 2 ** 63]) {
+  add(`claimBatch(limit:${limit})`, (h) => claimWith(h, { limit }));
+}
+add("claimBatch(claimedBy:'')", (h) => claimWith(h, { claimedBy: "" }));
+add("claimBatch(claimedBy:NUL)", (h) => claimWith(h, { claimedBy: "w\u0000" }));
 
 interface Outcome {
   result: string;

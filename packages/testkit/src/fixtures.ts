@@ -73,6 +73,10 @@
 //   時点で `timestamptz`・`bigint` への変換に失敗する）。省略は検査しない。
 // - `InMemoryTenantSettingsStore.setEventRetention` の `days` が Postgres の `integer`（int4）に収まらない（2^31 以上）→
 //   `setEventRetention: days does not fit in a Postgres "integer" (int4) column`。
+// - `createRecall` の `subjectId` に NUL → `createRecall: subjectId must not contain NUL characters (U+0000)`。`query`・`budget`・
+//   `omitted`・`usage`・`indexBand`・`explain`・`returnedMemories` に NUL → `createRecall: <欄> must not contain NUL characters`、
+//   `budget` 以外が JSON にならない（`undefined` など）→ `createRecall: <欄> must be JSON-serializable`。何も書かず、活動時計も進めない。
+// - `InMemoryOutboxStore.claimBatch` の `claimedBy` に NUL → `claimBatch: claimedBy must not contain NUL characters (U+0000)`。
 // - 空文字の参照・冪等の鍵は「値が在る」として扱う（`null`/`undefined` だけが「無い」）。`createMemory` 系の
 //   `sourceObservationId`・`supersededById`・`contestedWithId` が `""` → `… not found: `（Postgres は uuid として読めずに拒む）。
 //   `createObservation` 系の `externalId` が `""` → 2回目は既存の行を返す（Postgres の一意制約は `external_id IS NOT NULL` の行に効く）。
