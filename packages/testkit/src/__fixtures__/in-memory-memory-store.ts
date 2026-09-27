@@ -1995,6 +1995,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     extractorVersion: string | null,
     contentHash: string,
   ): string {
-    return `${tenantId}:${sourceObservationId ?? ""}:${extractorVersion ?? ""}:${contentHash}`;
+    // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId`・`extractorVersion`・
+    // `contentHash` は呼び手の値で `:` を含んでよく、繋ぐと別の組と同じキーになる
+    // （`joined-string-keys.postgres.test.ts`）。
+    return JSON.stringify([tenantId, sourceObservationId, extractorVersion, contentHash]);
   }
 }

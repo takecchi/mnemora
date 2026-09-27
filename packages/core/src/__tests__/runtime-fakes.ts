@@ -195,7 +195,10 @@ class FakeBackingStore {
     extractorVersion: string | null,
     contentHash: string,
   ): string {
-    return `${tenantId}:${sourceObservationId ?? ""}:${extractorVersion ?? ""}:${contentHash}`;
+    // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`tenantId`・`extractorVersion`・
+    // `contentHash` は呼び手の値で `:` を含んでよく、繋ぐと別の組と同じキーになる
+    // （`joined-string-keys.postgres.test.ts`）。
+    return JSON.stringify([tenantId, sourceObservationId, extractorVersion, contentHash]);
   }
 }
 
@@ -2012,7 +2015,10 @@ export class FakeVectorStore implements VectorStore {
   constructor(private readonly backing: FakeBackingStore) {}
 
   private key(space: EmbeddingSpaceId, tenantId: string, memoryId: MemoryId): string {
-    return `${space.provider}:${space.model}:${space.dimensions}:${tenantId}:${memoryId}`;
+    // 区切り文字で繋がず、`JSON.stringify` の配列で表す。`provider`・`model` は `:` を含みうる
+    // （`nomic-embed-text:latest` など）。繋いだ文字列の前方一致で空間を絞ると、空間 `{p, m, 3}` が
+    // 空間 `{p, m:3, 3}` のベクトルを拾っていた（`joined-string-keys.postgres.test.ts`）。
+    return JSON.stringify([space.provider, space.model, space.dimensions, tenantId, memoryId]);
   }
 
   async upsert(
@@ -2063,10 +2069,12 @@ export class FakeVectorStore implements VectorStore {
     // `space` を一度も参照しておらず（引数名も `_space` だった）、異なる space の vector を
     // 混同して返していた——`key()` が space を含む prefix を作っているのに、`search` だけが
     // それを見ていなかった。
-    const prefix = `${space.provider}:${space.model}:${space.dimensions}:`;
     const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
-      if (!key.startsWith(prefix)) continue;
+      // 空間は `key()` の組の先頭3つを完全一致で比べる（前方一致にしない）。
+      const [provider, model, dimensions] = JSON.parse(key) as [string, string, number];
+      if (provider !== space.provider || model !== space.model || dimensions !== space.dimensions)
+        continue;
       if (entry.tenantId !== opts.filter.tenantId || entry.tenantId !== ctx.tenantId) continue;
       // status / subjectId / decayFloorAtAfter は Memory の属性であり、ベクトルの属性ではない
       // （ADR 0034）。`backing.memories` を真実の源として引く——`InMemoryVectorStore` の
