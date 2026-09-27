@@ -50,6 +50,11 @@ export class InMemoryOutboxStore implements OutboxStore {
     if (opts.limit < 0) {
       throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`claimBatch: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     // `PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を `timestamptz`
     // のパラメータとして送るため、どちらかが Invalid Date になる入力（`now` が Invalid Date、
     // `leaseMs` が `NaN`・`±Infinity`・`Date` の範囲を超える値）では Postgres が例外を投げる

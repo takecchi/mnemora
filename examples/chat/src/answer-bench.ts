@@ -7,6 +7,7 @@ import type {
   PromptMessage,
   PromptSpec,
   RecallAssociationQuery,
+  RecallResult,
   Runtime,
   StructuredRequest,
 } from "@mnemora/core";
@@ -422,6 +423,58 @@ function resolveGroundTurnTexts(answerCase: AnswerCase): string[] {
  * （2回続けて走らせて同じ結果が出ることを測る歯）が意味を失い、かつ tenant が
  * 無限に積み上がる（掃除の口が無い）。
  */
+/**
+ * ⚠ 「記憶は在るが、この空間のベクトルが0件」を名乗る（Issue #583）。
+ * 🔴 例外にしない・落ちるのを防がない——「なぜ落ちたか」が画面に出ることだけが目的。
+ * ⚠ 判定ではなく候補の一覧として出す（ADR 0223 決定5 / ADR 0255）。
+ * スコープ内に記憶が在り、1件も提示されなかったときだけ文を返す（それ以外は `null`）。
+ */
+export function describeZeroPresented(
+  tenantId: string,
+  embeddingSpace: string,
+  recall: Pick<RecallResult, "index" | "memories" | "omitted">,
+): string | null {
+  if (!(recall.index.totalInScope > 0 && recall.memories.length === 0)) {
+    return null;
+  }
+  return [
+    `⚠ [answer-bench] ${tenantId}: スコープ内 ${recall.index.totalInScope} 件の記憶が在るのに、0 件しか提示されていない。`,
+    `  この実行の埋め込み空間: ${embeddingSpace}`,
+    "  ⚠ **これは判定ではない。候補である**:",
+    "   (1) 同じ tenant に別の埋め込み空間で先に記憶が入っており、この空間のベクトルが0件",
+    "       （observations は (tenant_id, external_id) で冪等なので、2回目の抽出は走らない。Issue #583）",
+    "   (2) 予算・減衰・validAt ゲートで候補が落ちた",
+    "   (3) 関連度が閾値に届かなかった（答えを控えるべき問いでは、これが正常な姿である）",
+    `  この recall の omitted: ${describeOmittedBrief(recall.omitted)}`,
+    "  ⛔ どれかは、この行だけでは決まらない（上の omitted が手掛かりになる）。",
+  ].join("\n");
+}
+
+/**
+ * `omitted` を1行に並べる（`describeZeroPresented` 用）。判定はせず、種類と件数を
+ * そのまま出す——例: `below_threshold×2, stage_skipped(association:no_anchor)`。
+ */
+function describeOmittedBrief(omitted: RecallResult["omitted"]): string {
+  if (omitted.length === 0) {
+    return "(無し)";
+  }
+  return omitted
+    .map((o) => {
+      const fields = o as {
+        stage?: unknown;
+        reason?: unknown;
+        condition?: unknown;
+        count?: unknown;
+      };
+      const detail = [fields.stage, fields.reason, fields.condition]
+        .filter((v): v is string => typeof v === "string")
+        .join(":");
+      const count = typeof fields.count === "number" ? `×${fields.count}` : "";
+      return `${o.kind}${detail.length > 0 ? `(${detail})` : ""}${count}`;
+    })
+    .join(", ");
+}
+
 export function embeddingSpaceSlug(space: EmbeddingSpaceId): string {
   const sanitize = (value: string): string =>
     value
@@ -468,22 +521,10 @@ export async function runAnswerCase(
   // 呼び出し側が明示したときだけ上書きする。
   const recall = await queryRecall(runtime, ctx, conversation, { association });
 
-  // ⚠ 「記憶は在るが、この空間のベクトルが0件」を名乗る（Issue #583）。
-  // 🔴 例外にしない・落ちるのを防がない——「なぜ落ちたか」が画面に出ることだけが目的。
-  // ⚠ 判定ではなく候補の一覧として出す（ADR 0223 決定5 / ADR 0255）——
-  // このログ1行だけでは、原因が (1)(2) のどちらかは決まらない。
-  if (recall.index.totalInScope > 0 && recall.memories.length === 0) {
-    console.log(
-      [
-        `⚠ [answer-bench] ${ctx.tenantId}: スコープ内 ${recall.index.totalInScope} 件の記憶が在るのに、0 件しか提示されていない。`,
-        `  この実行の埋め込み空間: ${embeddingSpace}`,
-        "  ⚠ **これは判定ではない。候補である**:",
-        "   (1) 同じ tenant に別の埋め込み空間で先に記憶が入っており、この空間のベクトルが0件",
-        "       （observations は (tenant_id, external_id) で冪等なので、2回目の抽出は走らない。Issue #583）",
-        "   (2) 予算・減衰・validAt ゲートで候補が落ちた",
-        "  ⛔ どちらかは、この行だけでは決まらない。",
-      ].join("\n"),
-    );
+  // 提示0件の警告（Issue #583）。文面と規律は `describeZeroPresented` の doc にある。
+  const zeroPresentedWarning = describeZeroPresented(ctx.tenantId, embeddingSpace, recall);
+  if (zeroPresentedWarning !== null) {
+    console.log(zeroPresentedWarning);
   }
 
   const afterRecallEmb = embeddingProvider.snapshot();
