@@ -67,6 +67,11 @@ npm i @mnemora/postgres @mnemora/core
     `create()` が例外を投げる（黙って `PostgresLexicalStore` 相当に縮退しない）。
     照合の精度・閾値の根拠、`retrieval` ベンチでの実測（悪化していないが、対象の
     probe 集合は語彙的な重なりをほぼ持たない設計であることも含む）は ADR 0319 を見ること。
+    ⚠ **専用スキーマ（`schema` を渡す構成）では、`pg_trgm` は `extensionSchema` ではなく、最初に
+    `create()` した名前空間のスキーマに入る。**同じ DB の2つ目の名前空間では `create()` が名前の付かない
+    DB の例外（`function word_similarity(…) does not exist`）で落ちる。複数の名前空間で使うなら、先に
+    共通のスキーマへ `CREATE EXTENSION pg_trgm WITH SCHEMA public` などで入れておくこと
+    （今の振る舞い。[Issue #1256](https://github.com/takecchi/mnemora/issues/1256)）。
 - 接続文字列は環境変数 `DATABASE_URL` で渡す。
 
 ## マイグレーション（`mnemora-postgres-migrate`）
