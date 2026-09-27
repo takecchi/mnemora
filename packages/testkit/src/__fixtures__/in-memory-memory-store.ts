@@ -204,6 +204,131 @@ function compareLabelName(a: string, b: string): number {
   return 0;
 }
 
+/**
+ * `memories` の1行として書ける値かを確かめる（Postgres が拒む入力を、同じ入力で拒む）。`createMemory` 系の
+ * 共通の入口（`createMemoryIdempotent`）が、冪等の衝突の判定より前に呼ぶ。モジュールの外へは出さない
+ * （`.d.ts` に出ないので、公開の型の面は変わらない）。
+ */
+function assertStorableNewMemory(input: NewMemory): void {
+  // 値域（ADR 0078）: `packages/postgres` は `memories_strength_range` の CHECK 制約で
+  // これを強制する。外部キー相当の検査（`createMemoryIdempotent` の中）と同じ理由（ADR 0047）——ここで放置すると
+  // 「本番では落ちる書き込みが手元では黙って成功する」。
+  if (!isStrengthInRange(input.strength)) {
+    throw new Error(
+      `InMemoryMemoryStore: strength out of range (0, ${MAX_STRENGTH}]: ${input.strength}`,
+    );
+  }
+  // 値域（ADR 0125）: `packages/postgres` は `memories_half_life_range` の CHECK 制約で
+  // これを強制する。`decay`/`freshness` は `elapsedHours / halfLifeHours` として
+  // この値で割るため、`0`・負・`NaN`・`Infinity` は決して通してはならない
+  // （Issue #231。`isHalfLifeHoursInRange` の doc に実測を記録した）。
+  if (!isHalfLifeHoursInRange(input.halfLifeHours)) {
+    throw new Error(
+      `InMemoryMemoryStore: halfLifeHours out of range (0, ∞): ${input.halfLifeHours}`,
+    );
+  }
+  // Issue #817（PR #815 と同根）: `memories.half_life_hours` は Postgres の `real`
+  // （IEEE 754 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い
+  // （`migrations/0012_half_life_hours_range.sql` の CHECK 制約）。上の
+  // `isHalfLifeHoursInRange` は float64 の `(0, ∞)` しか見ないため、float64 では有限
+  // だが float4 の範囲を超える値（例: `1e300`）を通してしまう——`real` へ変換される際に
+  // `Infinity` へ丸まり CHECK 制約に抵触して Postgres は例外を投げる（実測）。
+  // `Math.fround` は JS の number を float4 と同じビット幅へ丸める標準関数であり、
+  // その丸めで `Infinity` になるかどうかは Postgres の `real` 変換が overflow するか
+  // どうかとビット単位で一致する（`setDefaultHalfLifeRecalls`、PR #815 と同じ判定）。
+  //
+  // ⚠ **上側については**、`strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]`（`MAX_STRENGTH` は
+  // 上の `isStrengthInRange` が使う定数、`packages/core/src/memory.ts`）であり
+  // float4 の範囲へ遠く届かない——`isStrengthInRange` の時点で `1e300` のような値は
+  // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
+  // ため、`strength` にはこの検査を足さない。
+  if (!Number.isFinite(Math.fround(input.halfLifeHours))) {
+    throw new Error(
+      `InMemoryMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
+    );
+  }
+  // 下側（アンダーフロー）: Postgres の `real` は、0 でない値が float4 で 0 に丸まるときも
+  // `"…" is out of range for type real` で拒む（実測: `halfLifeHours: 1e-300`・`strength: 1e-46`
+  // は拒み、`strength: 1e-45`＝float4 の非正規数に収まる値は受け付ける）。境界は
+  // 「`Math.fround(x)` が 0 になるか」とビット単位で一致する（上の上側の検査と同じ形）。
+  // `strength` も同じ `real` 列なので、値域 `(0, MAX_STRENGTH]` の中の値でもここに当たる
+  // ——上側（`1e300`）が値域の検査で先に拒まれるのとは違い、下側は値域の中に在る。
+  // `0` そのものは「0 に丸まった」のではないので、ここでは見ない（値域の検査の担当）。
+  for (const [field, value] of [
+    ["halfLifeHours", input.halfLifeHours],
+    ["strength", input.strength],
+  ] as const) {
+    if (value !== 0 && Math.fround(value) === 0) {
+      throw new Error(
+        `InMemoryMemoryStore: ${field} does not fit in a Postgres "real" (float4) column (got ${value}; rounds to 0)`,
+      );
+    }
+  }
+  // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
+  // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date
+  // （`.getTime()` が `NaN`）を渡すと `PostgresMemoryStore.createMemory` はクエリ実行時に
+  // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
+  // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
+  // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
+  if (Number.isNaN(input.recordedAt.getTime())) {
+    throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
+  }
+  for (const [field, value] of [
+    ["occurredAt", input.occurredAt],
+    ["validFrom", input.validFrom],
+    ["validUntil", input.validUntil],
+  ] as const) {
+    if (value != null && Number.isNaN(value.getTime())) {
+      throw new Error(`InMemoryMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
+    }
+  }
+  // Issue #816（NUL 側。孤立サロゲート側はここでは扱わない）: Postgres の `text` 型は
+  // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
+  // `PostgresMemoryStore.createMemory` は `content`/`subjectId`/`tags`（各要素）/
+  // `digest` のいずれに NUL を含む文字列を渡しても `invalid byte sequence for
+  // encoding "UTF8": 0x00` で例外を投げる（実測。4欄とも同じメッセージ）。
+  // PR #923 の時点ではこの検査を `content` だけに絞っていた（同 PR のコメント）が、
+  // 実測するとこの4欄は対称な入力面だったため、本 PR（Issue #816 の残り）で揃えた。
+  //
+  // ⚠ `tenantId` はここに含めない——`ctx.tenantId` は `createMemory` 以外の
+  // ほぼ全メソッドが個別に直接読む横断的な値であり、`InMemoryMemoryStore`/
+  // `FakeMemoryStore` のどちらも `ctx` を受ける共通の入口を持たない。ここで検査を
+  // 足しても `get`/`reinforce` 等の他メソッドでは素通りのままで一貫せず、全メソッドへ
+  // 検査を広げる横展開は本 PR の範囲を超えるため扱わない（実測: `tenantId` に NUL を
+  // 含めても Postgres は同じ理由で例外を投げる。Issue #816 本文と同じ）。
+  if (input.content.includes("\u0000")) {
+    throw new Error(`InMemoryMemoryStore: content must not contain NUL characters (U+0000)`);
+  }
+  if (input.subjectId != null && input.subjectId.includes("\u0000")) {
+    throw new Error(`InMemoryMemoryStore: subjectId must not contain NUL characters (U+0000)`);
+  }
+  if (input.tags.some((tag) => tag.includes("\u0000"))) {
+    throw new Error(`InMemoryMemoryStore: tags must not contain NUL characters (U+0000)`);
+  }
+  if (input.digest.includes("\u0000")) {
+    throw new Error(`InMemoryMemoryStore: digest must not contain NUL characters (U+0000)`);
+  }
+  // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
+  // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
+  if (jsonContainsNul(input.attributes ?? {})) {
+    throw new Error(`InMemoryMemoryStore: attributes must not contain NUL characters (U+0000)`);
+  }
+  if (jsonContainsNul(input.provenance)) {
+    throw new Error(`InMemoryMemoryStore: provenance must not contain NUL characters (U+0000)`);
+  }
+  // 列挙の列（型の列挙に無い値）: Postgres は CHECK 制約で拒む（`memory-enum-check.ts`）。
+  // `status` は省略すると `active` になるので、省略は検査しない。
+  if (input.status !== undefined) assertStorableMemoryColumn("status", input.status);
+  assertStorableMemoryColumn("digest_source", input.digestSource);
+  assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
+  assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
+  // 孤立サロゲート（Issue #816、実測）: この関数は検査しない。入力をそのまま
+  // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ
+  // 置換するため異なる値になる。この非対称は現状の契約として
+  // `MemoryStore.createMemory` の interface doc コメントに記録してある
+  // （`packages/core/src/interfaces/memory-store.ts`）。挙動は変えない。
+}
+
 export class InMemoryMemoryStore implements MemoryStore {
   private readonly observations = new Map<string, Observation>();
   private readonly memories = new Map<string, Memory>();
@@ -375,6 +500,10 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError(method, null);
     }
+    // 書ける値かの検査は、冪等の衝突の判定より前に置く。Postgres の `INSERT ... ON CONFLICT DO NOTHING`
+    // は、衝突を見る前に行の値を型に変換し CHECK 制約を当てるので、同じ鍵の既存の行が在っても拒む（実測）。
+    // 外部キー相当の検査（下の `resolveIdempotentCreate` の中）は、行を実際に書くときにだけ当たるので中に残す。
+    assertStorableNewMemory(input);
     const idemKey = this.extractionKey(
       ctx.tenantId,
       input.sourceObservationId ?? null,
@@ -406,123 +535,6 @@ export class InMemoryMemoryStore implements MemoryStore {
           `InMemoryMemoryStore: contested-with memory not found: ${input.contestedWithId}`,
         );
       }
-      // 値域（ADR 0078）: `packages/postgres` は `memories_strength_range` の CHECK 制約で
-      // これを強制する。外部キー相当を上で置いたのと同じ理由（ADR 0047）——ここで放置すると
-      // 「本番では落ちる書き込みが手元では黙って成功する」。
-      if (!isStrengthInRange(input.strength)) {
-        throw new Error(
-          `InMemoryMemoryStore: strength out of range (0, ${MAX_STRENGTH}]: ${input.strength}`,
-        );
-      }
-      // 値域（ADR 0125）: `packages/postgres` は `memories_half_life_range` の CHECK 制約で
-      // これを強制する。`decay`/`freshness` は `elapsedHours / halfLifeHours` として
-      // この値で割るため、`0`・負・`NaN`・`Infinity` は決して通してはならない
-      // （Issue #231。`isHalfLifeHoursInRange` の doc に実測を記録した）。
-      if (!isHalfLifeHoursInRange(input.halfLifeHours)) {
-        throw new Error(
-          `InMemoryMemoryStore: halfLifeHours out of range (0, ∞): ${input.halfLifeHours}`,
-        );
-      }
-      // Issue #817（PR #815 と同根）: `memories.half_life_hours` は Postgres の `real`
-      // （IEEE 754 単精度・float4）列であり、値域は約 `±3.4028235e38` までしか無い
-      // （`migrations/0012_half_life_hours_range.sql` の CHECK 制約）。上の
-      // `isHalfLifeHoursInRange` は float64 の `(0, ∞)` しか見ないため、float64 では有限
-      // だが float4 の範囲を超える値（例: `1e300`）を通してしまう——`real` へ変換される際に
-      // `Infinity` へ丸まり CHECK 制約に抵触して Postgres は例外を投げる（実測）。
-      // `Math.fround` は JS の number を float4 と同じビット幅へ丸める標準関数であり、
-      // その丸めで `Infinity` になるかどうかは Postgres の `real` 変換が overflow するか
-      // どうかとビット単位で一致する（`setDefaultHalfLifeRecalls`、PR #815 と同じ判定）。
-      //
-      // ⚠ **上側については**、`strength` は同じ `real` 列だが、値域が `(0, MAX_STRENGTH]`（`MAX_STRENGTH` は
-      // 上の `isStrengthInRange` が使う定数、`packages/core/src/memory.ts`）であり
-      // float4 の範囲へ遠く届かない——`isStrengthInRange` の時点で `1e300` のような値は
-      // 既に拒まれている（実測。float4 オーバーフローに到達する前に別の理由で例外になる）
-      // ため、`strength` にはこの検査を足さない。
-      if (!Number.isFinite(Math.fround(input.halfLifeHours))) {
-        throw new Error(
-          `InMemoryMemoryStore: halfLifeHours does not fit in a Postgres "real" (float4) column (got ${input.halfLifeHours})`,
-        );
-      }
-      // 下側（アンダーフロー）: Postgres の `real` は、0 でない値が float4 で 0 に丸まるときも
-      // `"…" is out of range for type real` で拒む（実測: `halfLifeHours: 1e-300`・`strength: 1e-46`
-      // は拒み、`strength: 1e-45`＝float4 の非正規数に収まる値は受け付ける）。境界は
-      // 「`Math.fround(x)` が 0 になるか」とビット単位で一致する（上の上側の検査と同じ形）。
-      // `strength` も同じ `real` 列なので、値域 `(0, MAX_STRENGTH]` の中の値でもここに当たる
-      // ——上側（`1e300`）が値域の検査で先に拒まれるのとは違い、下側は値域の中に在る。
-      // `0` そのものは「0 に丸まった」のではないので、ここでは見ない（値域の検査の担当）。
-      for (const [field, value] of [
-        ["halfLifeHours", input.halfLifeHours],
-        ["strength", input.strength],
-      ] as const) {
-        if (value !== 0 && Math.fround(value) === 0) {
-          throw new Error(
-            `InMemoryMemoryStore: ${field} does not fit in a Postgres "real" (float4) column (got ${value}; rounds to 0)`,
-          );
-        }
-      }
-      // Issue #807: `recordedAt`（必須）/`occurredAt`/`validFrom`/`validUntil`
-      // （省略可能）はすべて Postgres の `timestamptz` 列に書き込まれる。Invalid Date
-      // （`.getTime()` が `NaN`）を渡すと `PostgresMemoryStore.createMemory` はクエリ実行時に
-      // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
-      // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
-      // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
-      if (Number.isNaN(input.recordedAt.getTime())) {
-        throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
-      }
-      for (const [field, value] of [
-        ["occurredAt", input.occurredAt],
-        ["validFrom", input.validFrom],
-        ["validUntil", input.validUntil],
-      ] as const) {
-        if (value != null && Number.isNaN(value.getTime())) {
-          throw new Error(`InMemoryMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
-        }
-      }
-      // Issue #816（NUL 側。孤立サロゲート側はここでは扱わない）: Postgres の `text` 型は
-      // NUL バイト（`\u0000`）を構造的に拒む（C 文字列表現に由来する制約）。
-      // `PostgresMemoryStore.createMemory` は `content`/`subjectId`/`tags`（各要素）/
-      // `digest` のいずれに NUL を含む文字列を渡しても `invalid byte sequence for
-      // encoding "UTF8": 0x00` で例外を投げる（実測。4欄とも同じメッセージ）。
-      // PR #923 の時点ではこの検査を `content` だけに絞っていた（同 PR のコメント）が、
-      // 実測するとこの4欄は対称な入力面だったため、本 PR（Issue #816 の残り）で揃えた。
-      //
-      // ⚠ `tenantId` はここに含めない——`ctx.tenantId` は `createMemory` 以外の
-      // ほぼ全メソッドが個別に直接読む横断的な値であり、`InMemoryMemoryStore`/
-      // `FakeMemoryStore` のどちらも `ctx` を受ける共通の入口を持たない。ここで検査を
-      // 足しても `get`/`reinforce` 等の他メソッドでは素通りのままで一貫せず、全メソッドへ
-      // 検査を広げる横展開は本 PR の範囲を超えるため扱わない（実測: `tenantId` に NUL を
-      // 含めても Postgres は同じ理由で例外を投げる。Issue #816 本文と同じ）。
-      if (input.content.includes("\u0000")) {
-        throw new Error(`InMemoryMemoryStore: content must not contain NUL characters (U+0000)`);
-      }
-      if (input.subjectId != null && input.subjectId.includes("\u0000")) {
-        throw new Error(`InMemoryMemoryStore: subjectId must not contain NUL characters (U+0000)`);
-      }
-      if (input.tags.some((tag) => tag.includes("\u0000"))) {
-        throw new Error(`InMemoryMemoryStore: tags must not contain NUL characters (U+0000)`);
-      }
-      if (input.digest.includes("\u0000")) {
-        throw new Error(`InMemoryMemoryStore: digest must not contain NUL characters (U+0000)`);
-      }
-      // `attributes`・`provenance` は `jsonb` 列。Postgres は NUL を `unsupported Unicode
-      // escape sequence` で拒む（実測。`jsonContainsNul` の doc コメント参照）。
-      if (jsonContainsNul(input.attributes ?? {})) {
-        throw new Error(`InMemoryMemoryStore: attributes must not contain NUL characters (U+0000)`);
-      }
-      if (jsonContainsNul(input.provenance)) {
-        throw new Error(`InMemoryMemoryStore: provenance must not contain NUL characters (U+0000)`);
-      }
-      // 列挙の列（型の列挙に無い値）: Postgres は CHECK 制約で拒む（`memory-enum-check.ts`）。
-      // `status` は省略すると `active` になるので、省略は検査しない。
-      if (input.status !== undefined) assertStorableMemoryColumn("status", input.status);
-      assertStorableMemoryColumn("digest_source", input.digestSource);
-      assertStorableMemoryColumn("embedding_status", input.embeddingStatus);
-      assertStorableMemoryColumn("provenance_kind", input.provenance.kind);
-      // 孤立サロゲート（Issue #816、実測）: このメソッドは検査しない。入力をそのまま
-      // 保持する——`PostgresMemoryStore.createMemory` は node-postgres が静かに U+FFFD へ
-      // 置換するため異なる値になる。この非対称は現状の契約として
-      // `MemoryStore.createMemory` の interface doc コメントに記録してある
-      // （`packages/core/src/interfaces/memory-store.ts`）。挙動は変えない。
 
       const now = new Date();
       const memory: Memory = {
