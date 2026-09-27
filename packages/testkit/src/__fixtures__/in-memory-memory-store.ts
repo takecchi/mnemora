@@ -1007,8 +1007,8 @@ export class InMemoryMemoryStore implements MemoryStore {
    * ADR 0048（Postgres）/ ADR 0049（本実装）: 減衰の起点を巻き戻さない。
    *
    * `PostgresMemoryStore.reinforce`（`packages/postgres/src/memory-store.ts`）の
-   * `WHERE ... AND (last_reinforced_at IS NULL OR last_reinforced_at < ${at})` と
-   * 同じ意味論——**狭義の `<`**（同じ `at` は no-op）で、`lastReinforcedAt` と
+   * `WHERE ... AND COALESCE(last_reinforced_at, recorded_at) < ${at}` と
+   * 同じ意味論（起点 `lastReinforcedAt ?? recordedAt` より新しい `at` だけを書く。Issue #1093）——**狭義の `<`**（同じ `at` は no-op）で、`lastReinforcedAt` と
    * `decayFloorAt` を同じ条件でまとめて動かす。古い `at` を**例外にはしない**——
    * 呼び出し側（`runtime.observe` の使用報告ループ）の次の一手が無いため、
    * no-op のまま現在の（更新されなかった）行を返す。
@@ -1035,11 +1035,9 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (Number.isNaN(at.getTime())) {
       throw new Error(`reinforce: at must be a valid Date (got Invalid Date)`);
     }
-    if (
-      memory.lastReinforcedAt !== null &&
-      memory.lastReinforcedAt !== undefined &&
-      memory.lastReinforcedAt.getTime() >= at.getTime()
-    ) {
+    // 起点（lastReinforcedAt ?? recordedAt）より新しい at のときだけ書く（Issue #1093）。未強化の
+    // 記憶では作成時刻が起点なので、それより前・ちょうどの at は、活動時計の欄も含めて何も書かない。
+    if ((memory.lastReinforcedAt ?? memory.recordedAt).getTime() >= at.getTime()) {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
       return snapshot(memory);
     }

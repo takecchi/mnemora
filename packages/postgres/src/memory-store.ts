@@ -1112,7 +1112,7 @@ export class PostgresMemoryStore implements MemoryStore {
         UPDATE memories
         SET last_reinforced_at = ${toPgTimestamp(at)}, decay_floor_at = ${toPgTimestamp(decayFloorAt)}, updated_at = now()${activitySet}
         WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
-          AND (last_reinforced_at IS NULL OR last_reinforced_at < ${toPgTimestamp(at)})
+          AND COALESCE(last_reinforced_at, recorded_at) < ${toPgTimestamp(at)}
         RETURNING *
       )
       SELECT * FROM updated
@@ -1134,8 +1134,8 @@ export class PostgresMemoryStore implements MemoryStore {
    *    `half_life_hours`/`half_life_recalls`——いずれも `reinforce` 自身も書き換えない
    *    列）を、対象 id 全件ぶん1回でまとめて読む。
    * 2. **UPDATE**: 行ごとに計算した `decay_floor_at`/活動時計側の値を
-   *    `VALUES (...)` で持ち込み、`WHERE ... AND (last_reinforced_at IS NULL OR
-   *    last_reinforced_at < at)` という**同じ CAS 条件**で1回の文にまとめて書く。
+   *    `VALUES (...)` で持ち込み、`WHERE ... AND COALESCE(last_reinforced_at, recorded_at)
+   *    < at` という**同じ CAS 条件**で1回の文にまとめて書く。
    *    更新できなかった行（no-op）は、同じ文の中で現在値を読み直して返す
    *    ——`reinforce` の `UNION ALL` と同じ理由（読みと書きの間に別の強化が
    *    割り込んでも、その行の返り値は常にその時点の実際の値になる）。
@@ -1256,7 +1256,7 @@ export class PostgresMemoryStore implements MemoryStore {
             decay_floor_seq = CASE WHEN input.has_activity THEN input.activity_floor_seq ELSE m.decay_floor_seq END
         FROM input
         WHERE m.tenant_id = ${ctx.tenantId} AND m.id = input.id
-          AND (m.last_reinforced_at IS NULL OR m.last_reinforced_at < ${toPgTimestamp(at)})
+          AND COALESCE(m.last_reinforced_at, m.recorded_at) < ${toPgTimestamp(at)}
         RETURNING m.*
       )
       SELECT * FROM updated

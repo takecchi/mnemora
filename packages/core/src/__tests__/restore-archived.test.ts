@@ -29,9 +29,12 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 const ctx: Ctx = { tenantId: "tenant-1" };
 const NOW = new Date("2026-06-01T00:00:00.000Z");
+// 作成時刻は最初の強化より前に置く——reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
+// 書く（Issue #1093）ので、作成と同じミリ秒の強化は書かれない。
+const RECORDED_AT = new Date(NOW.getTime() - 24 * 60 * 60 * 1000);
 
 function newMemory(overrides: Partial<NewMemory> = {}): NewMemory {
-  const recordedAt = overrides.recordedAt ?? NOW;
+  const recordedAt = overrides.recordedAt ?? RECORDED_AT;
   const strength = overrides.strength ?? 1;
   const halfLifeHours = overrides.halfLifeHours ?? 24 * 365 * 10;
   return {
