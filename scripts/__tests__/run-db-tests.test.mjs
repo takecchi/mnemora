@@ -78,7 +78,9 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
     expect(output).toContain("DB テストが落ちました");
 
     // DB テスト（`vitest run`）が本当に走って落ちたこと——門が自分の文言だけを出す形では通らない。
-    expect(output).toMatch(/Test Files\s+\d+ failed/);
+    // vitest は色の指定（CI の FORCE_COLOR など）で文字の間に ANSI の色の符号を挟むので、外してから見る。
+    // eslint-disable-next-line no-control-regex
+    expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/Test Files\s+\d+ failed/);
 
     // 未実行の告知と取り違えられないこと。
     expect(output).not.toContain("DB テストは実行していません");
