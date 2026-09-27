@@ -127,6 +127,8 @@ export const MIGRATION_LOCK_KEY = 7190158676462701299n;
  * 差し戻した。**この実装なら `runMigrations` が同時に使う接続数は今日と同じ2本のまま
  * （schema ロック用の `lockClient` 1本 + 個々のクエリ・マイグレーションのトランザクション
  * 用にその都度借りる1本）。
+ * （2026-09-27 追記、Issue #1212: いまは個々のクエリ・マイグレーションのトランザクションも
+ * `lockClient` で流すので、同時に使う接続は1本である。{@link runMigrations} の「排他」の節を参照。）
  *
  * `extensionMode: "create"`（既定）のときだけ使う。`"verify"` は `CREATE EXTENSION` を
  * 一切発行しないので、このキーも一切参照しない。
@@ -419,19 +421,6 @@ export class MigrationLockUnavailableError extends AdvisoryLockUnavailableError 
   }
 }
 
-/**
- * `pool.connect()` で借り切った checked-out client に付ける、何もしない `error`
- * リスナー（下記の per-file トランザクションクライアント参照）。
- *
- * 🔴 **モジュールで1つだけの、同じ関数参照を使い回すこと。** `pg-pool` は接続を pool へ
- * 返却してもソケットは切らずに次の `pool.connect()` で使い回すため、`on`/
- * `removeListener` に別々の関数（`() => {}` を毎回新しく作る等）を使うと外せず、
- * ファイルを1本処理するたびに同じ物理コネクションへリスナーが積み上がって
- * `MaxListenersExceededWarning`（既定上限10）に達する。**`client.release()` する
- * 直前に、必ずこの定数で `removeListener` すること。**
- */
-const NOOP_CLIENT_ERROR_HANDLER = (): void => {};
-
 const MIGRATION_LOCK_ERRORS = {
   timeout: (waitedMs: number, cause: unknown) => new MigrationLockTimeoutError(waitedMs, cause),
   unavailable: (cause: unknown) => new MigrationLockUnavailableError(cause),
@@ -460,8 +449,16 @@ async function releaseMigrationLock(client: PoolClient, lockKey: bigint): Promis
  * `lockTimeoutMs` を共用するため、呼び出し側の対処——待って再試行する／権限を見直す——も
  * 変わらない）。
  */
-async function acquireExtensionLock(lockClient: PoolClient): Promise<void> {
-  await acquireAdvisoryLockOnClient(lockClient, EXTENSION_LOCK_KEY, MIGRATION_LOCK_ERRORS);
+async function acquireExtensionLock(lockClient: PoolClient, lockTimeoutMs: number): Promise<void> {
+  // `lockClient` の `lock_timeout` は schema ロックを取った直後に既定へ戻してある（本体の DDL に
+  // 効かせないため、`runMigrations` の「排他」の節）。この共有ロックを待つ間だけ敷き直し、
+  // 待ち時間の上限を今までどおり schema ロックと同じ `lockTimeoutMs` に保つ。
+  await lockClient.query("SELECT set_config('lock_timeout', $1, false)", [String(lockTimeoutMs)]);
+  try {
+    await acquireAdvisoryLockOnClient(lockClient, EXTENSION_LOCK_KEY, MIGRATION_LOCK_ERRORS);
+  } finally {
+    await lockClient.query("RESET lock_timeout");
+  }
 }
 
 /** `acquireExtensionLock` で取得したロックを、`lockClient` を解放せずに手放す。 */
@@ -492,11 +489,11 @@ async function releaseExtensionLock(lockClient: PoolClient): Promise<void> {
  * 常に同じスキーマ内での改名であり、`RENAME TO "<schema>"."_mnemora_migrations"` は
  * 構文エラーになる）。
  */
-async function handOverLegacyMigrationsTable(pool: Pool, schema?: string): Promise<void> {
+async function handOverLegacyMigrationsTable(client: PoolClient, schema?: string): Promise<void> {
   const legacyTable = qualify(schema, "_mnemo_migrations");
   const legacyLiteral = qualifiedLiteral(schema, "_mnemo_migrations");
   const newLiteral = qualifiedLiteral(schema, "_mnemora_migrations");
-  await pool.query(`
+  await client.query(`
     DO $handover$
     BEGIN
       IF to_regclass('${legacyLiteral}') IS NOT NULL
@@ -508,8 +505,8 @@ async function handOverLegacyMigrationsTable(pool: Pool, schema?: string): Promi
   `);
 }
 
-async function ensureMigrationsTable(pool: Pool, schema?: string): Promise<void> {
-  await pool.query(`
+async function ensureMigrationsTable(client: PoolClient, schema?: string): Promise<void> {
+  await client.query(`
     CREATE TABLE IF NOT EXISTS ${qualify(schema, "_mnemora_migrations")} (
       name         text        PRIMARY KEY,
       applied_at   timestamptz NOT NULL DEFAULT now()
@@ -556,6 +553,16 @@ export function listMigrationFiles(migrationsDir: string): string[] {
  * 同ファイルの無印 `CREATE TABLE` の3層に積み重なっていた（詳細は ADR 0017）。
  * 個々の DDL に `IF NOT EXISTS` を積み増す方向は採らない——症状が別の層へ移るだけで、
  * 「並行に呼んでよい」という保証にはならないため、入り口を1つのロックで塞ぐ。
+ *
+ * **ロックの下で流すものは、すべてロックを持つ接続そのもので流す**（Issue #1212）。
+ * advisory lock はセッションに付くので、ロックを持つ接続だけが切れるとサーバーはロックを
+ * 手放す。本体を別の接続で流していたころは、そのとき本体が流れ続け、その間に別の実行が
+ * 同じロックを取って重なりえた（実測で `pg_type_typname_nsp_index` の一意制約違反）。
+ * 同じ接続なら、切れれば本体のトランザクションも一緒に終わり、コミットされない——
+ * 失敗は `migration <file> failed: ...` として報告し、最後のロックの返却の失敗では上書きしない。
+ * ロックを待つために敷く `lock_timeout` は、取った直後に `RESET` して本体の DDL には効かせない
+ * （共有の拡張ロックを待つ間だけ敷き直す、{@link acquireExtensionLock}）。
+ * 使う接続は1本である。
  *
  * **呼び出し側は何も変える必要が無い。**`runMigrations(pool)` は今まで通り安全な既定値
  * （`lockTimeoutMs` 未指定 = {@link DEFAULT_LOCK_TIMEOUT_MS}）で動く。テストなど、
@@ -666,9 +673,15 @@ export async function runMigrations(
     migrationLockKeyFor(schema === undefined ? await resolveCurrentSchema(pool) : schema);
 
   const { client: lockClient, waitedMs } = await acquireMigrationLock(pool, lockKey, lockTimeoutMs);
+  // ロックの下で流すものは、すべてロックを持つ接続（`lockClient`）で流す（Issue #1212、
+  // 上の「排他」の節）。途中で失敗したときは、最後のロックの返却の失敗でその失敗を上書きしない。
+  let failed = false;
   try {
+    // ロックを待つために敷いた `lock_timeout` を、本体の DDL に効かせない（別の接続で流していた
+    // ときと同じく、既定の値で流す）。
+    await lockClient.query("RESET lock_timeout");
     if (schema !== undefined) {
-      await pool.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
+      await lockClient.query(`CREATE SCHEMA IF NOT EXISTS "${schema}"`);
       // `extensionMode: "verify"` では上ですでに存在を確認済みなので、ここで
       // `CREATE EXTENSION` を発行しない（それがこのモードの目的そのもの——
       // `CREATE EXTENSION` 権限を持たないロールでも呼べるようにする、ADR 0093）。
@@ -679,23 +692,28 @@ export async function runMigrations(
         // 互いを待たないため、この CREATE EXTENSION ループだけを
         // {@link EXTENSION_LOCK_KEY} の共有ロックで追加に直列化する。
         // オートコミットの単発クエリの並びなので、ループの前後だけ保持すれば足りる。
-        await acquireExtensionLock(lockClient);
+        await acquireExtensionLock(lockClient, lockTimeoutMs);
+        let extensionsFailed = false;
         try {
           for (const ext of REQUIRED_EXTENSIONS) {
-            await pool.query(
+            await lockClient.query(
               `CREATE EXTENSION IF NOT EXISTS ${ext} WITH SCHEMA "${extensionSchema}"`,
             );
           }
+        } catch (err) {
+          extensionsFailed = true;
+          throw err;
         } finally {
-          await releaseExtensionLock(lockClient);
+          const releasing = releaseExtensionLock(lockClient);
+          await (extensionsFailed ? releasing.catch(() => {}) : releasing);
         }
       }
     }
 
-    await handOverLegacyMigrationsTable(pool, schema);
-    await ensureMigrationsTable(pool, schema);
+    await handOverLegacyMigrationsTable(lockClient, schema);
+    await ensureMigrationsTable(lockClient, schema);
 
-    const { rows } = await pool.query<AppliedMigration>(
+    const { rows } = await lockClient.query<AppliedMigration>(
       `SELECT name FROM ${qualify(schema, "_mnemora_migrations")}`,
     );
     const alreadyApplied = new Set(rows.map((row) => row.name));
@@ -728,23 +746,21 @@ export async function runMigrations(
         extensionMode === "create" &&
         matchCreateExtensionLines(fileSql).length > 0;
       if (needsSharedExtensionLock) {
-        await acquireExtensionLock(lockClient);
+        await acquireExtensionLock(lockClient, lockTimeoutMs);
       }
+      let fileFailed = false;
       try {
-        const client = await pool.connect();
-        // pg の仕様: `pool.connect()` で借り切ったクライアント（checked-out client）は、
-        // 呼び出し側が自分で `error` リスナーを付けない限り、接続断
-        // （DB の再起動・フェイルオーバー・運用者による切断・OOM kill 等、外部要因による
-        // ものを含む）が Node の `EventEmitter` の既定動作でそのまま投げられ、
-        // プロセス全体が uncaught exception で落ちる——直後の `try` が `await
-        // client.query(...)` の reject として同じ失敗を捕まえ、下の `catch` が
-        // 約束どおり `Error('migration <file> failed: ...')` に包んで投げるので、
-        // ここでは何もせず黙って拾うだけで足りる（`migrate-connection-loss.test.ts` が
-        // 実測。空リスナーが無い状態だと、この歯はプロセスのクラッシュ、または
-        // 後述の ROLLBACK 上書きにより、元の失敗が観測できない形で赤くなる）。
-        // ⚠ `client.release()` する直前に必ず `removeListener` すること
-        // （{@link NOOP_CLIENT_ERROR_HANDLER} のコメント参照——外し忘れるとリスナーが積み上がる）。
-        client.on("error", NOOP_CLIENT_ERROR_HANDLER);
+        // Issue #1212: 本体はロックを持つ接続（`lockClient`）そのもので流す。別の接続で流すと、
+        // ロックを持つ接続だけが切れたとき（サーバーはロックを手放す）に本体が流れ続け、
+        // 別の実行と重なりうる。同じ接続なら、切れれば本体のトランザクションも一緒に終わる。
+        // pg の仕様: checked-out client は、呼び出し側が自分で `error` リスナーを付けない限り、
+        // 接続断（DB の再起動・フェイルオーバー・運用者による切断・OOM kill 等、外部要因による
+        // ものを含む）が Node の `EventEmitter` の既定動作でそのまま投げられ、プロセス全体が
+        // uncaught exception で落ちる——`lockClient` には `acquireAdvisoryLock` が空リスナーを
+        // 付けてあり、下の `try` が `await client.query(...)` の reject として同じ失敗を捕まえ、
+        // `catch` が約束どおり `Error('migration <file> failed: ...')` に包んで投げる
+        // （`migrate-connection-loss.test.ts` が実測）。
+        const client = lockClient;
         try {
           await client.query("BEGIN");
           if (schema !== undefined) {
@@ -766,19 +782,24 @@ export async function runMigrations(
           // ——コネクションが生きている通常の DDL エラー——では今日どおり実行される）。
           await client.query("ROLLBACK").catch(() => {});
           throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
-        } finally {
-          client.removeListener("error", NOOP_CLIENT_ERROR_HANDLER);
-          client.release();
         }
+      } catch (err) {
+        fileFailed = true;
+        throw err;
       } finally {
         if (needsSharedExtensionLock) {
-          await releaseExtensionLock(lockClient);
+          const releasing = releaseExtensionLock(lockClient);
+          await (fileFailed ? releasing.catch(() => {}) : releasing);
         }
       }
     }
     return { applied, lock: { waitedMs }, extensionCheck };
+  } catch (err) {
+    failed = true;
+    throw err;
   } finally {
-    await releaseMigrationLock(lockClient, lockKey);
+    const releasing = releaseMigrationLock(lockClient, lockKey);
+    await (failed ? releasing.catch(() => {}) : releasing);
   }
 }
 
