@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Ctx } from "../ctx.js";
 import { intersectAttributes } from "./consolidate.js";
 import { resolveDigest } from "../extraction.js";
+import { dropBlankTags } from "../llm-tags.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
@@ -132,7 +133,7 @@ export function buildReflectedMemory(params: BuildReflectedMemoryParams): NewMem
   );
 
   const tagUnion = Array.from(new Set(eligible.flatMap((m) => m.tags)));
-  const tags = llmResult.tags ?? tagUnion;
+  const tags = llmResult.tags !== undefined ? dropBlankTags(llmResult.tags) : tagUnion;
 
   const occurredAtCandidates = eligible
     .map((m) => m.occurredAt ?? null)
