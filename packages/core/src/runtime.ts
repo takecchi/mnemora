@@ -100,15 +100,25 @@ import type { ReflectionLLMResult } from "./strategies/reflect.js";
  */
 
 export interface RuntimeConfig {
-  /** 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。 */
+  /**
+   * 抽出器のバージョン。冪等キー `(observationId, extractorVersion)` の一部になる。
+   * 省略時（`undefined`・`null`）は `"v1"`。空文字は既定に倒れず、空文字のまま書かれる。
+   */
   extractorVersion?: string;
-  /** `provenance.inferred.model` に書き込むモデル識別子。呼び出し側の LLMProvider の実体に合わせる。 */
+  /**
+   * `provenance.inferred.model` に書き込むモデル識別子。呼び出し側の LLMProvider の実体に合わせる。
+   * 省略時は `"unknown"`。
+   */
   llmModelId?: string;
-  /** `provenance.inferred.promptVersion`。抽出プロンプトを変えたら上げる。 */
+  /** `provenance.inferred.promptVersion`。抽出プロンプトを変えたら上げる。省略時は `"v1"`。 */
   promptVersion?: string;
-  /** digest フォールバック（機械的な先頭文字列切り出し）の最大文字数。既定 200。 */
+  /**
+   * digest フォールバック（機械的な先頭文字列切り出し）の最大文字数。既定 200。
+   * ⚠ 値は検査しない（今の振る舞い）。0・負の数・`NaN` を渡すと、本文が収まらない限り
+   * digest は `"…"` だけになる（本文は `content` にそのまま残る）。
+   */
   digestFallbackLength?: number;
-  /** `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。 */
+  /** `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。省略時は `"runtime.tick"`。 */
   defaultClaimedBy?: string;
   /**
    * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
@@ -2867,6 +2877,25 @@ function extractObservationPayload(
   }
 }
 
+/**
+ * {@link Runtime} を組み立てる。
+ *
+ * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。
+ * 2026-09-27 に Postgres と testkit の fixture の両方で当てた）。省略した欄は各欄の doc にある
+ * 既定値に倒れ、足りない依存や型の外の値は、組み立てでは落ちずに最初の呼び出しで現れる:
+ * - 必須の store・`hashContent` が無い: それを使う最初の呼び出しが `TypeError` を投げる
+ *   （メッセージは欠けた依存の名前ではなく、呼ぼうとしたメソッドの名前を言う）。
+ * - `llmProvider` が無い: 例外にならない。`observe()` の抽出は LLM の失敗と同じ扱いになり、
+ *   `extraction: "llm_failed_whole_observation"` で観測の全文を1件の Memory として残す
+ *   （`extractionFailure.message` に `Cannot read properties of undefined` が出る）。
+ * - `embeddingProvider` が無い: `recall()` は `stage_skipped`（`embedding_provider_unavailable`）を
+ *   名乗って ANN を飛ばし、`tick()` の `embed` ジョブは `failed` になる。
+ * - `clock.now()` が Invalid Date を返す: 最初の書き込み・`recall()`・`tick()` が例外を投げる
+ *   （Postgres は DB の例外、testkit の fixture は `RangeError` などで、文言は揃っていない）。
+ * - `outputValidation` が `"off"`/`"report"`/`"throw"` のどれでもない: `"report"` と同じに振る舞う。
+ * - `config.autoQueueConsolidateReflectOnExtract` が真偽値でない: 真偽として評価される
+ *   （例: 文字列 `"no"` は真として扱われ、consolidate / reflect の job を積む）。
+ */
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const clock = deps.clock ?? systemClock;
   const extractorVersion = deps.config?.extractorVersion ?? DEFAULT_EXTRACTOR_VERSION;
@@ -5025,13 +5054,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       supersededById?: MemoryId;
       event: NewMemoryEvent;
     } => {
-      const buildEvent = (kind: "updated" | "superseded"): NewMemoryEvent => ({
+      const buildEvent = (
+        kind: "updated" | "superseded",
+        supersededById?: MemoryId,
+      ): NewMemoryEvent => ({
         tenantId: ctx.tenantId,
         memoryId: id,
         kind,
         actor,
         digestSnapshot: memory.digest,
-        meta: buildMeta(),
+        // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
+        // superseded と同じ形（ADR 0150 追記）。勝者の updated には足さない。
+        meta: supersededById === undefined ? buildMeta() : { ...buildMeta(), supersededById },
       });
       if (resolution.kind === "both_active") {
         return { id, status: "active", event: buildEvent("updated") };
@@ -5043,7 +5077,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         id,
         status: "superseded",
         supersededById: resolution.winnerId,
-        event: buildEvent("superseded"),
+        event: buildEvent("superseded", resolution.winnerId),
       };
     };
 

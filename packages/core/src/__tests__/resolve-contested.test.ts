@@ -145,7 +145,7 @@ describe("runtime.resolveContested — supersede（基本の成功）", () => {
     expect(storedB?.status).toBe("active");
   });
 
-  it("勝者に kind='updated'、敗者に kind='superseded' のイベントが1件ずつ積まれ、meta.reason='contested_resolved'・meta.resolution='supersede'", async () => {
+  it("勝者に kind='updated'、敗者に kind='superseded' のイベントが1件ずつ積まれ、meta.reason='contested_resolved'・meta.resolution='supersede'・敗者は meta.supersededById=勝者", async () => {
     const { runtime, stores } = buildRuntime();
     const { a, b } = await createContestedPair(runtime, stores);
     const eventsBefore = stores.eventStore.events.length; // markContested が積んだ2件を除く
@@ -158,7 +158,13 @@ describe("runtime.resolveContested — supersede（基本の成功）", () => {
     expect(eventA?.kind).toBe("updated");
     expect(eventA?.meta).toEqual({ reason: "contested_resolved", resolution: "supersede" });
     expect(eventB?.kind).toBe("superseded");
-    expect(eventB?.meta).toEqual({ reason: "contested_resolved", resolution: "supersede" });
+    // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
+    // superseded と同じ形。監査ログだけで「誰に置き換えられたか」を追える（ADR 0150 追記）。
+    expect(eventB?.meta).toEqual({
+      reason: "contested_resolved",
+      resolution: "supersede",
+      supersededById: a.id,
+    });
   });
 });
 

@@ -205,6 +205,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 - **`@mnemora/openai` の `OpenAILLMProvider.completeStructured` は、根が object でないスキーマ（core の `ReflectionLLMResultSchema` のような判別可能ユニオン）を、OpenAI の strict な Structured Outputs が受け付けない形で送っていた**——根が `oneOf` のままで、`openai` SDK 自身の strict 変換（`toStrictJsonSchema`）は `Root schema must have type: 'object'` で拒み、実 API も HTTP 400（`'oneOf' is not permitted`）で拒んだ。⟹ `runtime.reflect()` を OpenAI の provider で呼ぶと、毎回 `llm_failed` になっていた。根が object でないスキーマは1つの欄 `result` を持つ object に包んで送り、返った値をその欄から取り出してから検査する。あわせて `oneOf` を `anyOf` にする（SDK が「strict は `oneOf` を受け付けない」とする。[PR #1147](https://github.com/takecchi/mnemora/pull/1147)）。根が object のスキーマは、送る形も読む形も変わらない（`translateForOpenAIStructuredOutput` の返り値も同じ）。
   ⚠ 例外を新しく投げず、根が object でないスキーマの送る形・読む形だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。偽の `client` で、根が union のスキーマに包まない JSON を返していたテストは、`ZodError` になる。
+- **`InMemoryMemoryStore.listActiveClaimPredicates`（`@mnemora/testkit` の擬似 `MemoryStore`）は、`query.limit` に負数・`NaN`・`Infinity`・非整数・bigint に収まらない値（2^63 以上）を渡されると例外を投げず、`slice(0, limit)` の丸めに従って違う件数を返していた**（実測: 述語3つで `-1` は2件、`1.5` は1件、`NaN` は0件）——`PostgresMemoryStore.listActiveClaimPredicates` は生 SQL の `LIMIT`（bigint パラメータ）でこれらを拒む。`requeueEmbedJobs`（PR #1058）ほかと同じく、クエリの前に弾く Postgres 側に揃えた（正常系の挙動は変えていない）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`recall()` の `omitted` の `ann_truncated.assumptions` に出る `strength <= 1` の前提の文言が、「型（number）も DB 列（real）も保証していない」のままだった**——ADR 0078 の後、同梱の実装（Postgres の CHECK 制約、testkit の fixture と core の Fake の書き込み時の検査）は値域 `(0, 1]` を守っている。文言を実態に合わせた（前提であることは変えていない。[ADR 0069](./docs/decisions/0069-ann-truncated-says-nothing-about-loss.md) の追記）。
   ⚠ 返り値の説明の文字列だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`runtime.consolidate()` / `runtime.reflect()` の `{ seedMemoryId }` 形は、種が forget・purge された記憶でも、その `digest` を検索語にして近傍を集め、近傍どうしを統合・内省していた**（自動 job の `tick()` 経由も同じ。[Issue #1136](https://github.com/takecchi/mnemora/issues/1136)）——利用者が「使わないでほしい」と言った記憶が、束ねる相手を決め続けていた。種が forget・purge された記憶なら近傍を集めず、種1件だけを見て `nothing_to_consolidate`/`no_eligible_sources`（reflect は `nothing_to_reflect`/`no_eligible_basis`）を返す。種が `contested` / `superseded` の場合は今どおり近傍を集める。
@@ -222,6 +224,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   ⚠ 例外を投げず、公開の fixture の結果だけが変わる修正であり、非破壊と数える（クローン miku の判断。オーナーの判断ではない）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.registerLabel` は、NUL（U+0000）を含む名前を受け入れていた**——`PostgresMemoryStore.registerLabel` は `labels.name`（`text` 列）が NUL を拒んで例外になる。ラベルの名前は `tags` の要素と同じ語彙で、`tags` の NUL はこの fixture の `createMemory` がすでに拒んでいる（Issue #816）。`registerLabel` も NUL を含む名前で例外を投げ、ラベルを作らない。
   ⚠ 🔴 公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げる変更なので、計上を保留する（上の前書きの保留と同じ、オーナーへの問い `3f3411c5` の射程）。
+- **`@mnemora/postgres` の `registerEmbeddingSpace` は、同じテーブル名に潰れる別の埋め込み空間の登録を黙って通し、2つの空間のベクトルが混ざっていた**（Issue #1151）——テーブル名（`embeddingSpaceTableName`）は provider・model を小文字にし英数字以外を `_` にしてから繋ぐので、`{a_b, c}` と `{a, b_c}`、`{openai, text-embedding-3-small}` と `{OpenAI, text_embedding_3_small}`、ASCII 以外の文字だけが違う model 名などは、次元が同じなら同じテーブルになる。テーブル名の導出は変えず、`registerEmbeddingSpace` がテーブルのコメントに空間の組（provider・model・dimensions の元の値）を記録し、別の組が記録されたテーブルへの登録を、何も書かずに `name` が `"EmbeddingSpaceTableConflictError"` の `Error` で拒むようにした（新しい export は無い）。同じ組の再登録はこれまでどおり通る。
+  ⚠ 本物のアダプタが「黙ってベクトルが混ざる」入力を早めに拒む変更であり、破壊的とは数えない（Issue #1080 と同じ扱い。クローン miku の判断で、オーナーの判断ではない）。⚠ **射程**: この版より前に作られたテーブルにはコメントが無いので、この版で**最初に登録した組**を記録して通す——既に2つの空間が1つのテーブルを使っていた場合は、先に登録した側が持ち主になり、もう片方の登録が拒まれる。混ざった行は分けない。利用者が自分で付けたテーブルのコメント（mnemora の形ではないもの）は上書きせず、そのテーブルは見張らない。コメントを書くにはテーブルの所有者の権限が要るが、登録は以前から `CREATE INDEX IF NOT EXISTS` で同じ権限を要していたので、登録できるロールの範囲は変わらない。
 - **`@mnemora/testkit/fixtures` の InMemory 一式は、Memory 以外の値でも内部の実体や呼び手の入力をそのまま持ち回っていた**（Issue #1108 の続き、[PR #1120](https://github.com/takecchi/mnemora/pull/1120)。Memory を返す口は下の項目）——`InMemoryMemoryStore.createObservationWithOutbox` が返した outbox ジョブが後の `claimBatch`・`complete` で遡って書き換わり、受け取った Observation・イベント・ラベル・recall 記録・ベクトル・`claimBatch` のジョブ（入れ子の `payload`・Date を含む）や、`createObservation`・`createRecall`・`EventStore.append`・`VectorStore.upsert`・`reinforce` の `at`・`claimBatch` の `now` に渡した入力を呼び手が後から書き換えると、store の中身まで変わった（`claimBatch` の `now` を書き換えるとリースが切れた扱いになった）。Postgres と同じく、返す時点・書き込む時点の複製でやり取りする。
   ⚠ 例外を投げず、公開の fixture の結果だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。返った値を書き換えて store の状態を作っていたテスト（このリポジトリでは OutboxStore の適合スイートの `seedJob` がそうしていた）は、書き換えが store に届かなくなる。
 - **LLM が空白だけの本文（`content`）を返すと、その本文の Memory が書かれていた**（Issue #1065）——`consolidate` は元の2件を `superseded` にして空白の Memory に置き換え、`reextract` は全文フォールバックの Memory を空白の Memory に置き換えていた。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方で起きていた。3スキーマとも `""` の本文はスキーマ不一致（LLM の失敗）として拒んでおり、空白だけの本文もそれと同じ扱いにした（`@mnemora/core`）: 抽出（inline / deferred / `reextract`）は全文フォールバック（`llm_failed_whole_observation`）へ、`consolidate`・`reflect` は `outcome: "llm_failed"`（1件も書かない）へ倒れる。抽出の候補のうち1件でも空白だけなら、`""` が1件あるときと同じく全体が倒れる。前後に空白があっても中身のある本文は、削らずにそのまま書く。
@@ -566,6 +570,16 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   入っていた。今は統合先の `created` にも同じ `actor` と `meta.note` が入る（`tick()` 経由の自動ジョブは `actor` を
   渡さないので変わらない）。
   ⭕ 非破壊と数える（例外を投げず、書かれるイベントの欄だけが約束どおりになる。上の前書きの訂正で狭めた基準に当てた）。
+- **`Runtime.resolveContested()`（`supersede`）で負けた側の `superseded` イベントに、置き換えた側の id が無かった**——
+  `consolidate`・`reextract` の `superseded` は `meta.supersededById` を持つのに、この経路だけ持たず、監査ログだけでは
+  「負けた側を何が置き換えたか」を追えなかった。今は `meta.supersededById` に勝った側の id が入る（勝った側・
+  `both_active` の `updated` には足さない。[ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 2026-09-27）。
+  ⭕ 非破壊と数える（`meta` に欄を1つ足すだけで、型も既存の欄の意味も変えない。クローン miku の判断であり、オーナーの判断ではない）。
+- **`@mnemora/testkit` の `InMemoryMemoryStore.purgeExpiredEvents` が積む `events_purged` の meta の日時
+  （`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）が `Date` のままで、`@mnemora/postgres`（JSON で保存するので ISO 8601 の
+  文字列で読み戻る）と型が違っていた**——今は fixture も ISO 8601 の文字列で持つ。戻り値の `oldestPurgedAt` などは
+  今までどおり `Date` である。
+  ⭕ 非破壊と数える（例外を投げず、公開の fixture の結果だけが変わる。上の前書きの訂正で狭めた基準に当てた。クローン miku の判断であり、オーナーの判断ではない）。
 
 ---
 

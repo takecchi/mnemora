@@ -51,6 +51,23 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
  * `InMemoryEventStore` からも `get`/`list` できるようにするため。省略時は独立した
  * 空配列を持つ。
  *
+ * ⚠ **既定の組み立て（第2引数を省略）では、`InMemoryMemoryStore` が自分の中で書くイベントは
+ * この store の `get`/`list` に出ない。**`@mnemora/postgres` は1つの `memory_events` 表なので、
+ * 2実装で見えるものが割れる。store の中で書くのは、`updateStatusWithEvent`（forget・
+ * restoreArchived など）・`supersedeWithNewMemories`（consolidate・reextract の superseded）・
+ * `markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`・
+ * `restoreSupersededBy`（unsuperseded）・`purgeMemory`（purged）・`archiveDecayed`（archived）・
+ * `purgeExpiredEvents`（events_purged）の各口である（`runtime` が `EventStore.append` で積む
+ * `created` などは、どちらの組み立てでもこの store に入る）。**Postgres と同じく全部を1か所で
+ * 見るには、第2引数に `memoryStore.events` を渡すこと:**
+ *
+ * ```ts
+ * const memoryStore = new InMemoryMemoryStore();
+ * const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+ * ```
+ *
+ * 組み立て方（既定）は変えていない（2026-09-27、クローン miku の判断。今の振る舞いを記録した）。
+ *
  * **`memoryStore` を必須のコンストラクタ引数にしている（省略不可、ADR 0047）。**
  * `memory_events.memory_id → memories(id)` は外部キー（`kind = 'events_purged'` の
  * 場合のみ NULL）。`InMemoryVectorStore` が `InMemoryMemoryStore` を必須にしたのと

@@ -31,8 +31,9 @@ function sanitizeSlugPart(value: string): string {
  * `<space>` は `(provider, model, dimensions)` の組から導出する。
  *
  * ⚠ この導出は単射ではない——正規化（小文字化・英数字以外を `_`）の後に同じ綴りになる組は、
- * 同じテーブル名になる（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)。
- * `registerEmbeddingSpace` の doc の同じ注意を見ること）。
+ * 同じテーブル名になる（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)）。⛔ 導出を変えないこと
+ * ——既存のデプロイのテーブル名が変わる。衝突は `registerEmbeddingSpace` がテーブルのコメントの記録で
+ * 検出して拒む（同関数の doc）。
  */
 export function embeddingSpaceTableName(space: EmbeddingSpaceId): string {
   const rawSlug = [
