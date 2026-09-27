@@ -197,6 +197,13 @@ export class AnthropicLLMProvider implements LLMProvider {
     return { content: firstTextBlock(response.content) ?? "" };
   }
 
+  /**
+   * zod スキーマを Anthropic のネイティブ構造化出力へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
+   *
+   * ⚠ **翻訳できない形は、送る前に素の `Error` を投げる**（#1148、今の振る舞い）。`z.tuple`・`z.date`・`transform` は
+   * SDK の `zodOutputFormat` が投げ、`messages.create` は呼ばれない。`z.record`・`z.lazy`・`default`・根が union は
+   * 翻訳が通って送る（Anthropic が受けるかは実 API で確かめていない）。一覧は README。
+   */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const format = translateForAnthropicStructuredOutput(req.schema);
     const { system, messages } = toAnthropicRequest(req.prompt);

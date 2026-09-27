@@ -206,6 +206,13 @@ export class OpenAILLMProvider implements LLMProvider {
     return { content: response.choices[0]?.message?.content ?? "" };
   }
 
+  /**
+   * zod スキーマを OpenAI の Structured Output へ翻訳して送り、返った JSON を `req.schema` で検査して返す。
+   *
+   * ⚠ **送る前に「OpenAI が受け付ける形か」は検査しない**（#1148、今の振る舞い）。`z.record`・`z.tuple`・
+   * `z.date`・`transform` は、送った後に OpenAI が `BadRequestError`（HTTP 400、`param: response_format`）で拒む
+   * （【実測 2026-09-27】）。`z.lazy`（再帰）・`default`・根が union（包んで送る）は通る。一覧は README。
+   */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const format = translateForOpenAIStructuredOutput("mnemora_structured_output", req.schema);
     const response = await this.client.chat.completions.create({
