@@ -220,6 +220,25 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 出力: `recalls` テーブルへの1行と `recallId` の発行。
 この段が走らないと `recallId` が発行できず、後段の `observe({ kind: 'memory_usage' })` が recall を参照できなくなる。したがって段6は**必須**であり、スキップ可能な段ではない（§4 の5つ目のケースと直結する）。
 
+### `explain.stages` の読み方（2026-09-27 追記、今の振る舞いを書くだけ）
+
+`StageTrace.executed` の意味は、段ごとに違う。**`executed: false` は「段を飛ばした」とは限らない。**
+
+| 段（`stage`） | `executed: false` になるとき | `stage_skipped` を名乗るか |
+|---|---|---|
+| `scope` | ならない（常に `true`） | — |
+| `candidate_generation`（`detail.channel` ごとに1件） | その経路が走らなかったとき（クエリに埋め込む内容が無い、埋め込み provider が失敗した） | **名乗る**——`stage_skipped(candidate_generation, empty_query_content \| embedding_provider_unavailable)`。ANN と語彙の両方が走らなかったときも、`empty_query_content` は1件だけ |
+| `rescore` | **採点する候補が0件だったとき**（段は飛ばしていない） | 名乗らない（候補が無い理由は、前の段の `stage_skipped` か `index` で分かる） |
+| `contradiction_resolution`・`budget_truncation`・`index_band`・`record` | ならない（常に `true`）。`budget_truncation` は予算が無くても `true` で、予算の有無は `detail.budgetApplied` に出る | — |
+
+段3.5（連想枠）は `explain.stages` に出ない（[Issue #865](https://github.com/takecchi/mnemora/issues/865)。`RecallStageName` に値を足す問いの待ち）。飛ばしたときの `stage_skipped(association, …)` は `omitted` に出る。
+
+**`rescore` の `detail` と `omitted` の件数の関係**: `detail.scored`（採点した件数）・`passedThreshold`・`notComparable`・`withinLimit`（`limit` の内側）と、`omitted` の `below_threshold`・`score_not_comparable`・`over_limit(stage: 'rescore')` の件数は、**段3（必須の同伴取得）と段3.5（連想枠）で返った分を足すと合う**。段2で閾値や `limit` の外に出た候補が、後の段で返ったときは `omitted` に数えない（`memories` と `omitted` の排他、[ADR 0203](./decisions/0203-memories-omitted-exclusivity.md)）ためである。例（実測）: `limit: 2`・閾値あり・5件で、`scored 5 / passedThreshold 3 / withinLimit 2`、`below_threshold` 2件、`over_limit` 0件——`limit` の外に出た1件は連想枠で返った。`index_band` の `detail.totalInScope` は `index.totalInScope` と同じ値である。
+
+**記録（`getRecall`）は返り値と一致する**: 段6は、返り値と同じ `omitted`・`explain`・`index`（記録では `indexBand`）・`usage` と、`memories` の内訳（`memoryId`・`score`・`retrievedVia`・`companionOf`・`associationOf`）を書く。`@mnemora/postgres` は jsonb に保存するので、読み戻した値のオブジェクトのキーの順は返り値と違うことがある（値は同じ）。
+
+以上は `packages/postgres/src/__tests__/recall-explain-accounting.postgres.test.ts` が、Postgres と testkit の InMemory の両方で縛っている（約束を足すものではない）。
+
 ---
 
 ## 3. 二段検索と pgvector
