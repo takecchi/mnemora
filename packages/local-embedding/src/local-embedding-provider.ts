@@ -145,7 +145,11 @@ export interface LocalEmbeddingProviderOptions {
    * 変える話であって、このオプションの形を変える話ではない。
    */
   prefix?: string;
-  /** モデルファイルの置き場所。未指定なら transformers.js の既定。 */
+  /**
+   * モデルファイルの置き場所。未指定なら transformers.js の既定——`@huggingface/transformers`
+   * パッケージ自身の中の `.cache/`（`node_modules/@huggingface/transformers/.cache/` など）。
+   * `node_modules` を消す・入れ直すと一緒に消える。
+   */
   cacheDir?: string;
   /** onnxruntime の intra-op スレッド数。既定 `4`。 */
   numThreads?: number;

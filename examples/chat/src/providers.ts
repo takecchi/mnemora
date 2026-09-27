@@ -598,7 +598,8 @@ export function createProviders(
       // （`LocalEmbeddingProvider` のコンストラクタが元から持つオプション——**使うだけで
       // このパッケージ自体は変更していない**）。CI の `identifier-probes` ジョブが
       // `actions/cache` でモデル重みをキャッシュする場所を固定するために使う——
-      // transformers.js の既定（`~/.cache/huggingface`）は環境によって場所が変わりうる
+      // transformers.js の既定（`@huggingface/transformers` パッケージ自身の中の `.cache/`。
+      // `node_modules` の置き方で場所が変わり、入れ直すと消える）は環境によって場所が変わりうる
       // ため、明示したパスのほうが「次の実行でも同じ場所を見る」ことを保証しやすい。
       //
       // `revision` も渡す（Issue #597 案(a)）。CI が使う側（ここと
