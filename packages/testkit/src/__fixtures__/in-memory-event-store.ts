@@ -72,7 +72,7 @@ export class InMemoryEventStore implements EventStore {
     if (event.memoryId !== null) {
       const memory = await this.memoryStore.get(ctx, event.memoryId);
       if (!memory) {
-        throw new Error(`InMemoryEventStore: memory not found: ${event.memoryId}`);
+        throw new Error(`InMemoryEventStore: memory not found for tenant: ${event.memoryId}`);
       }
     }
     const stored = buildStoredMemoryEvent(ctx, event);

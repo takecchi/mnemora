@@ -68,7 +68,8 @@ function defaultMessage(options: AnthropicLLMProviderErrorOptions): string {
       return (
         "AnthropicLLMProvider: the response was cut off before it finished" +
         (options.stopReason != null ? ` (stop_reason: ${options.stopReason})` : "") +
-        " — raise maxTokens or shorten the prompt"
+        " — raise maxTokens if stop_reason is max_tokens; shorten the input if it is" +
+        " model_context_window_exceeded"
       );
     case "no_content":
       return "AnthropicLLMProvider: structured completion returned no content";

@@ -119,7 +119,7 @@ export class InMemoryVectorStore implements VectorStore {
     // （クラス doc 参照）——書き込み側（upsert）でも同じ非対称を強制する。
     const memory = await this.memoryStore.get(ctx, memoryId);
     if (!memory) {
-      throw new Error(`InMemoryVectorStore: memory not found: ${memoryId}`);
+      throw new Error(`InMemoryVectorStore: memory not found for tenant: ${memoryId}`);
     }
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
