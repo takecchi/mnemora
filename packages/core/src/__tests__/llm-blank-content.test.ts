@@ -43,10 +43,22 @@ const observation: Observation = {
   externalId: null,
 } as Observation;
 
+/**
+ * `""` はスキーマ（`min(1)`）が拒む比較の基準。空白だけの本文が、それと同じ結果になることを
+ * 同じ表で比べる。
+ */
+const EMPTY_AND_BLANKS: Array<[string, string]> = [
+  ['`""`（スキーマが拒む基準）', ""],
+  ["半角空白", " "],
+  ["全角空白（U+3000）", "　"],
+  ["改行とタブ", "\n\t"],
+  ["混ぜたもの", BLANK],
+];
+
 describe("extractCandidates — 空白だけの本文", () => {
-  it("空白だけの本文の候補は、全文フォールバックへ倒れる", async () => {
+  it.each(EMPTY_AND_BLANKS)("%s の本文の候補は、全文フォールバックへ倒れる", async (_, content) => {
     const result = await extractCandidates(
-      llmReturning({ memories: [{ content: BLANK, provenanceKind: "stated" }] }),
+      llmReturning({ memories: [{ content, provenanceKind: "stated" }] }),
       ctx,
       observation,
     );
@@ -55,19 +67,23 @@ describe("extractCandidates — 空白だけの本文", () => {
     expect(result.candidates.map((c) => c.content)).toEqual(["来週の月曜に歯医者の予約がある"]);
   });
 
-  it('1件でも空白だけの本文があれば全体が倒れる（`""` が1件あるときのスキーマ不一致と同じ）', async () => {
-    const result = await extractCandidates(
-      llmReturning({
-        memories: [
-          { content: "歯医者の予約は月曜", provenanceKind: "stated" },
-          { content: BLANK, provenanceKind: "stated" },
-        ],
-      }),
-      ctx,
-      observation,
-    );
-    expect(result.usedWholeObservationFallback).toBe(true);
-  });
+  it.each(EMPTY_AND_BLANKS.filter(([, content]) => content === "" || content === "　"))(
+    "%s の本文が1件でも混ざれば、全体が倒れる",
+    async (_, content) => {
+      const result = await extractCandidates(
+        llmReturning({
+          memories: [
+            { content: "歯医者の予約は月曜", provenanceKind: "stated" },
+            { content, provenanceKind: "stated" },
+          ],
+        }),
+        ctx,
+        observation,
+      );
+      expect(result.usedWholeObservationFallback).toBe(true);
+      expect(result.candidates.map((c) => c.content)).toEqual(["来週の月曜に歯医者の予約がある"]);
+    },
+  );
 
   it("前後に空白があっても中身のある本文は、そのまま受ける（trim しない）", async () => {
     const result = await extractCandidates(

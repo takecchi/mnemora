@@ -79,6 +79,9 @@ function shared(llmState: { failNextExtraction: boolean }) {
       embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
     },
     hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
+    // outbox の available_at（DB の now()）より runtime の時計を先に進め、deferred の tick が
+    // ジョブを取れるようにする（operation-roundtrip-shape の CLOCK_AHEAD_MS と同じ理由）。
+    clock: { now: () => new Date(Date.now() + 60_000) },
     config: { extractorVersion: EXTRACTOR_VERSION },
   };
 }
@@ -155,6 +158,23 @@ describe("LLM が返した空白だけの本文は、LLM の失敗として扱�
         expect(result.memoryIds).toHaveLength(1);
         const memory = await memoryStore.get(ctx, result.memoryIds[0]!);
         expect(memory?.content).toBe(OBSERVED_TEXT);
+      });
+
+      it("抽出（deferred、tick の extract ジョブ）: 全文フォールバックへ倒れる", async () => {
+        const { runtime, memoryStore } = await makeKit();
+        const { observationId } = await runtime.observe(ctx, {
+          kind: "utterance",
+          text: OBSERVED_TEXT,
+          extract: "deferred",
+        });
+        await runtime.tick(ctx, { kinds: ["extract"], leaseMs: 60_000, limit: 10 });
+
+        const memories = await memoryStore.listBySourceObservation(
+          ctx,
+          observationId,
+          EXTRACTOR_VERSION,
+        );
+        expect(memories.map((m) => m.content)).toEqual([OBSERVED_TEXT]);
       });
 
       it("reextract: 全文フォールバックの Memory を空白で置き換えない", async () => {
