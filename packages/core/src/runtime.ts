@@ -2811,6 +2811,13 @@ export interface Runtime {
    *    「投げない」とした理由（部分的に起きたことを呼び出し側から見えなくしないため）は、
    *    1トランザクションでは部分的に起きたこと自体が無い（統合先の作成も supersede も全部
    *    巻き戻る）ため、この経路では別の手段で既に満たされている（ADR 0100 決定8）。
+   *    ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）:
+   *    LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、どちらの経路も書き込みの前に
+   *    見直さない。**その1件は `status_changed_concurrently` として飛ばされるだけで、統合先はその本文を入れた
+   *    LLM の出力から作られ、`active` で書かれる（`provenance.sources` にもその id が残る。#882）。
+   *    ⟹ `purge()` が `"purged"` を返した後に、消した本文から作った統合先が残りうる。
+   *    【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（`consolidate-reflect-forget-race.postgres.test.ts`）。
+   *    見直して打ち切るかどうかは決まっていない。
    * 8. `outcome: 'consolidated'`、`consolidatedMemoryId`、`llmCalls: 1`。
    *
    * `memory_events.meta.reason` は `superseded` イベントに `'consolidated'` を積む
@@ -2874,6 +2881,10 @@ export interface Runtime {
    *    `{ kind: 'reflected', sources: <eligible の memoryId> }`——**`sources` は必ず埋める**
    *    （`ReflectedProvenance.sources` は型としては省略可のままだが、この実装が作る値は
    *    常に埋める。公開型の破壊的変更を避けるため型は変えていない）。
+   *    ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）:
+   *    LLM を待つ間に eligible の1件が `forget`（さらに `purge`）されても、書き込みの前に見直さない。**
+   *    内省の Memory はその本文を入れた LLM の出力から作られ、`active` で書かれ、`sources` にもその id が残る
+   *    （`consolidate` の手順7の追記と同じ。Postgres と testkit の fixture で実測）。
    * 8. `created` イベントを1件積む。`meta.reason: 'reflected'`、`meta.sources: <eligible の
    *    id>`、`opts.reason` があれば `meta.note` にも積む（`consolidate` の `superseded`
    *    イベントと同じ形）。
