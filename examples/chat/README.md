@@ -51,7 +51,7 @@ CLI が元のエラーの後ろに `→ …（examples/chat/README.md「DB を�
 ```bash
 # リポジトリルートで
 pnpm install     # 素の clone では「Failed to create bin … mnemora-postgres-migrate … dist/bin/migrate.js」の
-                 # WARN が3行出る。dist がまだ無いためで、下のコマンドには影響しない（無視してよい）
+                 # WARN が3行出る（pnpm 11.25.0 の `pnpm install` では同じ3行が2回、計6行）。dist がまだ無いためで、下のコマンドには影響しない（無視してよい）
 # pnpm run build は、この README のコマンドには要らない。examples/chat の CLI（tsx）は
 # tsconfig.json の paths で @mnemora/* を各パッケージの src から直接読む
 # （素の clone から build せずに migrate・chat・compare・scope・explain・answer が通ることを確かめた）。
