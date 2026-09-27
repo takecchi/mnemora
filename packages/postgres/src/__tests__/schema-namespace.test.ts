@@ -74,7 +74,7 @@ describe("assertSafeSchemaName", () => {
   });
 
   it("落ちる例: 空文字", () => {
-    expect(() => assertSafeSchemaName("")).toThrow(/unsafe SQL identifier: $/);
+    expect(() => assertSafeSchemaName("")).toThrow(/unsafe SQL identifier: {2}\(/);
   });
 
   it("落ちる例: 64バイト（63バイトとの境界。文字種は通る名前で長さだけを見る）", () => {

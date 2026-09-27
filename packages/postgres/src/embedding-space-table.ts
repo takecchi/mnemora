@@ -81,6 +81,9 @@ export function embeddingSpaceZeroNormIndexName(space: EmbeddingSpaceId): string
 /** 識別子として安全であることの防御的なチェック（SQL 注入対策の最後の砦）。 */
 export function assertSafeIdentifier(identifier: string): void {
   if (!/^[a-z_][a-z0-9_]*$/.test(identifier)) {
-    throw new Error(`unsafe SQL identifier: ${identifier}`);
+    throw new Error(
+      `unsafe SQL identifier: ${identifier} ` +
+        "(使えるのは英小文字・数字・_ だけで、先頭は英小文字か _ である必要がある: /^[a-z_][a-z0-9_]*$/)",
+    );
   }
 }

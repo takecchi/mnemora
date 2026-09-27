@@ -41,7 +41,7 @@ export class RecordedLLMProvider implements LLMProvider {
       const lastUser = [...prompt.messages].reverse().find((m) => m.role === "user");
       throw new Error(
         "RecordedLLMProvider: このプロンプトは記録に無い（黙って擬似応答へ倒れない）。" +
-          `最後の user 発話: ${JSON.stringify(lastUser?.content ?? "(無し)")}。` +
+          `最後の user 発話: ${lastUser === undefined ? "(無し)" : describeRecordedInput(lastUser.content)}。` +
           "probe set や抽出プロンプトを変えたのなら、実キーを設定して記録し直すこと" +
           "（examples/chat の `record` サブコマンド）。",
       );
@@ -80,4 +80,16 @@ export class RecordedLLMProvider implements LLMProvider {
     }
     return parsed.data;
   }
+}
+
+/**
+ * 記録に無かった入力を、例外の文面に載せる形にする。本文を丸ごと載せない——長い発話や
+ * 文書を入れると例外文（とそれを写すログ・CI の出力）が本文で埋まるため、先頭 80 文字と
+ * 全体の長さだけを出す。どの入力かを見分けるには、これで足りる。
+ */
+function describeRecordedInput(text: string): string {
+  const LIMIT = 80;
+  const chars = Array.from(text);
+  if (chars.length <= LIMIT) return JSON.stringify(text);
+  return `${JSON.stringify(chars.slice(0, LIMIT).join(""))}…（全 ${chars.length} 文字）`;
 }
