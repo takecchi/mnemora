@@ -1,0 +1,57 @@
+import { describe, expect, it, vi } from "vitest";
+import { LocalEmbeddingProvider } from "../local-embedding-provider.js";
+
+/**
+ * 読み込みに失敗したときのメッセージが名指すキャッシュの場所は、**実際に解決された場所**である。
+ *
+ * 【実測 2026-09-27】以前のメッセージは、`cacheDir` を省いたときの既定を
+ * `node_modules/@huggingface/transformers/.cache/`（npm の配置）と決め打ちで名指していた。
+ * pnpm で入れた利用者の実際の場所は `node_modules/.pnpm/@huggingface+transformers@<版>/node_modules/
+ * @huggingface/transformers/.cache/` であり（transformers.js の `env.cacheDir`）、メッセージは
+ * 無い場所を「消せば取り直す」と指していた。
+ *
+ * 既定の `createPipeline` は transformers.js を import した後で `env.cacheDir` を読めるので、その値を出す。
+ * `@huggingface/transformers` は `vi.mock` で差し替えるので、本物のモデルも onnxruntime も読み込まない。
+ */
+
+const PNPM_CACHE_DIR =
+  "/app/node_modules/.pnpm/@huggingface+transformers@4.2.0/node_modules/@huggingface/transformers/.cache/";
+
+const transformers = vi.hoisted(() => ({
+  env: { cacheDir: "" as string | null },
+  pipeline: vi.fn(async () => {
+    throw new Error("fetch failed");
+  }),
+}));
+
+vi.mock("@huggingface/transformers", () => transformers);
+
+async function loadFailure(): Promise<Error> {
+  const provider = new LocalEmbeddingProvider({ retry: { attempts: 1 } });
+  const error = await provider.warmup().then(
+    () => null,
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(Error);
+  return error as Error;
+}
+
+describe("読み込み失敗のメッセージは、実際に解決されたキャッシュの場所を名指す", () => {
+  it("cacheDir 未指定・既定の pipeline: transformers.js の env.cacheDir（pnpm の配置）を名指す", async () => {
+    transformers.env.cacheDir = PNPM_CACHE_DIR;
+    const error = await loadFailure();
+    expect(error.message).toContain(`既定: ${PNPM_CACHE_DIR}）`);
+    expect(error.message).toContain(` ${PNPM_CACHE_DIR}sirasagi62/ruri-v3-30m-ONNX を消すと`);
+    // npm の配置を決め打ちで名指さない（以前の文面は、この2つの形で名指していた）。
+    expect(error.message).not.toContain("既定: node_modules/");
+    expect(error.message).not.toContain(" node_modules/@huggingface/transformers/.cache/");
+  });
+
+  it("env.cacheDir が無い（ファイルの置き場を持たない環境）なら、特定の場所を断言しない", async () => {
+    transformers.env.cacheDir = null;
+    const error = await loadFailure();
+    expect(error.message).not.toContain("node_modules/@huggingface/transformers/.cache/");
+    expect(error.message).toContain("env.cacheDir");
+    expect(error.message).toContain("sirasagi62/ruri-v3-30m-ONNX");
+  });
+});
