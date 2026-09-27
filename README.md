@@ -277,6 +277,7 @@ adapter を自作してテストするなら `@mnemora/testkit` も devDependenc
 - [packages/openai/README.md](./packages/openai/README.md)
 - [packages/anthropic/README.md](./packages/anthropic/README.md)
 - [packages/testkit/README.md](./packages/testkit/README.md)
+- [packages/local-embedding/README.md](./packages/local-embedding/README.md)（埋め込みを手元の CPU で回す。API キーは要らないが、初回にモデルを取得する）
 
 ---
 

@@ -22,8 +22,9 @@ npm i @mnemora/openai @mnemora/core zod
   5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる。`node10` は TypeScript 5.x なら
   パッケージの入口の型を解決できるが、`exports` を読まないので `@mnemora/testkit/fixtures` のような
   subpath は解決できず、TypeScript 6 で非推奨・7 で廃止された。2026-09-27 に TypeScript 5.0〜7.0 で実測）
-- **`OPENAI_API_KEY` 環境変数**（または `apiKey` オプション）が要る。無いと OpenAI SDK の
-  呼び出しが認証エラーになる
+- **`OPENAI_API_KEY` 環境変数**（または `apiKey` オプション）が要る。無いと、**呼び出す前に、`new OpenAIEmbeddingProvider(...)`・
+  `new OpenAILLMProvider(...)` の時点で** OpenAI SDK が `OpenAIError: Missing credentials. ...` を投げる
+  （`OpenAILLMProviderError` ではなく、`kind` も持たない）【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】
 - 1つの `OpenAIEmbeddingProvider` インスタンスは1つの埋め込み空間（`provider`/`model`/`dimensions`の組）に固定される。次元をモデルに応じて動的に変える使い方はできない
 
 ## 動く最小の例（型検査のみ確認・OPENAI_API_KEY が無いため未実行）
@@ -113,6 +114,8 @@ import { OpenAILLMProvider } from "@mnemora/openai";
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, timeout: 60_000 });
 const llmProvider = new OpenAILLMProvider({ model: "gpt-4o-mini", client });
 ```
+
+⚠ 2026-09-27 追記: この例は `openai` を自分の依存として入れないと動かない（pnpm では `Cannot find package 'openai'`）。**入れる版は、`@mnemora/openai` が依存に固定している版（その `package.json` の `dependencies.openai`。今は `7.10.0`）と同じにすること**——`pnpm add openai`・`npm i openai` で最新（2026-09-27 時点で `7.23.0`）を入れると、`@mnemora/openai` の下に別の `openai` が並び、`client` を渡す行が型検査で `TS2322`（`Type 'OpenAI' is not assignable to type 'Pick<OpenAI, "chat">'`）になる（実行はできる）。`pnpm add -E openai@7.10.0`（npm は `npm i -E openai@7.10.0`）で入れれば通る【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】。
 
 ## ⚠ 2026-09-27 追記: `embed()` に渡せる入力の境界（実 API で当てた、今の振る舞い）
 

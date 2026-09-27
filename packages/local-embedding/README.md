@@ -192,7 +192,8 @@ npm i @mnemora/local-embedding @mnemora/core
 | 使っている物     | 既定                                        | やること                                                                                                 |
 | ---------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | **npm / yarn**   | 🔴 **postinstall が走る**                   | `ONNXRUNTIME_NODE_INSTALL=skip npm i`、または `.npmrc` に `onnxruntime-node-install=skip`                |
-| **pnpm 10 以降** | ✅ 走らない（ビルドスクリプトは既定で拒否） | 何もしなくてよい。**明示したいなら** `pnpm-workspace.yaml` に `allowBuilds: { onnxruntime-node: false }` |
+| **pnpm 10** | ✅ 走らない（ビルドスクリプトは既定で拒否。警告だけ出て install は通る） | 何もしなくてよい。**明示したいなら** 下の pnpm 11 以降と同じ3行を書く |
+| **pnpm 11 以降** | ✅ 走らない。🔴 **ただし install が `ERR_PNPM_IGNORED_BUILDS` で終了コード 1 になる**（パッケージ自体は入る） | `pnpm-workspace.yaml` に `allowBuilds:` の3行 `onnxruntime-node: false`・`protobufjs: false`・`sharp: false` を書く（`onnxruntime-node` だけでは、残りの2つで同じく 1 になる）。pnpm が自分で `set this to true or false` という仮の値を書き足していたら、それを置き換えること【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れた】 |
 
 ⚠ **このリポジトリ自身の `pnpm-workspace.yaml` の `allowBuilds` は、公開物には付いていかない。**
 あれはこの repo を clone した人にしか効かない設定であり、
@@ -203,6 +204,8 @@ npm i @mnemora/local-embedding @mnemora/core
 postinstall を拒否しており、その状態で動いていることは測ってある——
 つまり「CUDA EP 無しで動く」ことは押さえられているが、
 **npm 経路でその env を渡す形そのもの**は測っていない）。
+
+⚠ 2026-09-27 追記: 上の「確かめていないこと」は、その後に測った。`ONNXRUNTIME_NODE_INSTALL=skip npm i @mnemora/local-embedding @mnemora/core` で入れると、`onnxruntime-node` の `bin/napi-v6/linux/x64/` には CPU 版（`libonnxruntime.so.1`・`onnxruntime_binding.node`）だけが在り（CUDA EP は落ちていない）、`warmup()` → `embed()` が 256 次元を返した【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れた】。
 
 ### ⚠ 依存に `npm audit` の high が5件在る（すべて推移的・上流に修正版が無い）
 
@@ -304,6 +307,8 @@ const runtime = createRuntime({
 返したときは、指数バックオフ（+ jitter）を挟んで既定 **3回**まで試してから諦める。**
 呼び出し側（`embed()` / `warmup()`）には、リトライを使い切って本当に失敗したときしか
 例外が届かない。
+
+⚠ 2026-09-27 追記: 【実測】キャッシュを温めた後に、**ネットワークを完全に切った**（別の network namespace で、どこにも届かない）状態で新しいプロセスから読み込むと、失敗せずに `embed()` が 256 次元を返した（`@huggingface/transformers@4.2.0`、`cacheDir` 未指定、pnpm）。⟹ 上の「この1回が一時的なネットワーク断…に当たると、キャッシュが完全に効いていても読み込みが失敗する」は、**少なくとも「どこにも届かない」形の断では起きなかった。**`HTTP 429` などの応答がその1回に返ったときに読み込みが失敗するかは、確かめていない（[ADR 0141](../../docs/decisions/0141-local-embedding-load-retry.md) が CI で見た 429 は、キャッシュの無い取得の回のものだった）。
 
 ```ts check
 const provider = new LocalEmbeddingProvider({
