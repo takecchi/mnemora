@@ -85,6 +85,13 @@ export interface PurgeExpiredEventsForTenantOptions {
  * 保持期間どおりに削除する——`MemoryStore.previewRestoreSupersededBy?` が読む唯一の
  * 情報源であり、これが消えると「群の由来が分からない」扱いに劣化する。詳細は
  * {@link MemoryStore.purgeExpiredEvents} の doc コメントを参照。
+ *
+ * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1232](https://github.com/takecchi/mnemora/issues/1232)）:
+ * 保持期間は呼び出しの始めに1回だけ読む。**読んでから `purgeExpiredEvents` で消すまでの間に
+ * `setEventRetention` が期間を変えても（無期限にしても、延ばしても）、この呼び出しは読んだときの日数で消す
+ * ——設定の呼び出しが返った後に、新しい期間なら残るはずの行が消えうる。消した行は戻らない。
+ * 短くした場合は、この回は長い期間で消し、残りは次の呼び出しで消える。読みと削除を1つにまとめる仕組みは無い。
+ * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（`event-retention-change-during-purge.postgres.test.ts`）。
  */
 export async function purgeExpiredEventsForTenant(
   ctx: Ctx,

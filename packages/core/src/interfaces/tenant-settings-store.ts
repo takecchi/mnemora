@@ -370,6 +370,10 @@ export interface TenantSettingsStore {
    *
    * 受け付けた値なら、どれほど大きくても `purgeExpiredEventsForTenant` は例外にならない
    * ——cutoff が表せる最も古い時刻より前になる日数では、それより古い行が無いので0件の削除になる。
+   *
+   * ⚠ **走っている掃除は止めない**（2026-09-27 追記、今の振る舞い。Issue #1232）。既に保持期間を読み終えた
+   * `purgeExpiredEventsForTenant` は、この呼び出しが返った後でも、読んだときの日数で消す
+   * （`purgeExpiredEventsForTenant` の doc 参照）。
    */
   setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
 
