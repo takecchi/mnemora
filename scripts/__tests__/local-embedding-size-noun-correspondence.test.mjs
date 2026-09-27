@@ -1,8 +1,8 @@
-import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join, relative } from "node:path";
 import { describe, expect, it } from "vitest";
+import { execSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⭐ **この歯が測っているもの(消す前に読むこと)**
@@ -189,7 +189,7 @@ function toHalfWidthDigits(str) {
  * @returns {string[]} repo ルートからの相対パス
  */
 function listScannableFiles() {
-  const raw = execSync("git ls-files", { cwd: repoRoot, encoding: "utf8" });
+  const raw = execSyncWithDeadline("git ls-files", { cwd: repoRoot, encoding: "utf8" });
   return raw
     .split("\n")
     .filter(Boolean)

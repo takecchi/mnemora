@@ -1,9 +1,9 @@
-import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as prettier from "prettier";
 import { describe, expect, it } from "vitest";
+import { execFileSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
@@ -43,7 +43,7 @@ const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 /** `git ls-files` から、`.github/workflows/` 直下の YAML ファイルを導出する。 */
 function listWorkflowFiles() {
-  const raw = execFileSync(
+  const raw = execFileSyncWithDeadline(
     "git",
     ["ls-files", "--", ".github/workflows/*.yml", ".github/workflows/*.yaml"],
     {
