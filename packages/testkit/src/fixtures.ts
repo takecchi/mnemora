@@ -49,6 +49,18 @@
 //   対象: `createMemory` 系の `halfLifeHours` など、
 //   `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（#815・#817）。
 //
+// ## `memory_events` を1か所で見るには、`InMemoryEventStore` に `memoryStore.events` を渡す
+//
+// `InMemoryEventStore` を既定の形（`new InMemoryEventStore(memoryStore)`）で組むと、
+// `InMemoryMemoryStore` が自分の中で書くイベント（forget・archive・purge・contested・
+// supersede・unsuperseded・events_purged など）は `eventStore.list` に出ない——別の配列に
+// 入るためである。`@mnemora/postgres` は1つの表なので、観測の形が割れる。Postgres と同じく
+// 全部を1か所で見るには、次のように組む（詳細は `InMemoryEventStore` の TSDoc）:
+//
+//   const memoryStore = new InMemoryMemoryStore();
+//   const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+//   const outboxStore = new InMemoryOutboxStore(memoryStore.outboxJobs);
+//
 // 揃えていないもの（Postgres だけが拒む、または値を変える。それぞれの doc・Issue を参照）:
 // 孤立サロゲート（`MemoryStore.createMemory` の doc、#1075）、紀元前4713年より前の日時（#1041）、
 // 索引の行の上限を超える識別子（#1074）、1MB を超える本文（tsvector の上限、#1063）、
