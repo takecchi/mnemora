@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import type { Ctx, EventStore, MemoryId } from "@mnemora/core";
 import { buildNewMemoryEventFixture } from "./test-data.js";
 
+/** {@link describeEventStoreConformance} に渡す設定。 */
 export interface EventStoreConformanceOptions {
+  /** 見出し（`describe` の名前）に出す adapter の名前。 */
   name: string;
+  /** 新しい store を返す関数。各 `it` の中で1回ずつ呼ぶので、テストケースごとに独立した状態を持つ store を返すこと。 */
   createStore: () => EventStore | Promise<EventStore>;
   /**
    * `memory_id` に実在の Memory を要求するためのフック。**必須。**

@@ -18,6 +18,7 @@ export interface LLMProviderFailureHarness {
   callCount(): number;
 }
 
+/** {@link describeLLMProviderConformance} に渡す設定。`T` は構造化出力の歯に使うスキーマの型。 */
 export interface LLMProviderConformanceOptions<T> {
   /** 見出しに出す名前（どの実装を測っているかがログで分かる）。 */
   name: string;
