@@ -1435,6 +1435,8 @@ CREATE INDEX idx_recalls_by_subject ON recalls (tenant_id, subject_id, created_a
 （列を足すのではなく置き換えている——理由は ADR 0155 参照）。`MemoryStore.getRecall(ctx,
 recallId)` がこの行を読み戻す口である。
 
+**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1206](https://github.com/takecchi/mnemora/issues/1206)）**: `query` には `recall()` が検証した後のクエリがそのまま入る。そのうち JSON で往復しない値は、`getRecall` で読み戻すと adapter によって違う。`occurredAfter`・`occurredBefore`・`validAt` は、`@mnemora/postgres` では ISO 8601 の文字列で、`@mnemora/testkit` の fixture では `Date` のまま返る。`vector` の要素の `-0` は、Postgres だけで `0` になる。どちらかに揃える約束はしていない（`observations.payload` の [Issue #1076](https://github.com/takecchi/mnemora/issues/1076) と同じ扱い。詳細は `RecallRecord.query` の TSDoc）。`omitted`・`usage`・`index_band`・`explain`・`returned_memories` が `recall()` の返り値と一致することは、`recall-explain-accounting.postgres.test.ts` が2実装で縛っている（`budget` は `recall-record-query-roundtrip.postgres.test.ts`）。
+
 ### `recall_usages`（Phase 1）
 
 §6 に記載。
