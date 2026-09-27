@@ -2347,7 +2347,11 @@ export type RecallRecordReturnedMemories =
 export interface NewRecallRecord {
   tenantId: string;
   subjectId?: string | null;
-  /** 発行された recall クエリ/オプションのスナップショット（JSON にシリアライズ可能な形）。 */
+  /**
+   * 発行された recall クエリ/オプションのスナップショット（JSON にシリアライズ可能な形）。
+   * `recall()` は検証した後のクエリをそのまま渡すので、`Date` の欄を含みうる。読み戻したときの
+   * 値は adapter によって違う——{@link RecallRecord.query} の doc 参照（Issue #1206）。
+   */
   query: unknown;
   budget?: RecallBudget | null;
   omitted: Omission[];
@@ -2383,6 +2387,23 @@ export interface RecallRecord {
   recallId: RecallId;
   tenantId: string;
   subjectId: string | null;
+  /**
+   * 記録したクエリ（`recall()` が検証した後の `RecallQuery`）。
+   *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1206](https://github.com/takecchi/mnemora/issues/1206)）:
+   * JSON で往復しない値は、adapter によって違う値で読み戻る。**型は `unknown` のままで、どちらかに揃える約束はしない
+   * （同じ形の `ObserveEventInput.data`、Issue #1076 と同じ扱い）。
+   *
+   * | 値 | `@mnemora/postgres`（`jsonb` に保存） | `@mnemora/testkit` の fixture |
+   * |---|---|---|
+   * | `occurredAfter`・`occurredBefore`・`validAt`（渡したときは `Date`） | ISO 8601 の文字列 | `Date` |
+   * | `vector` の要素の `-0` | `0` | `-0` |
+   * | キーの順 | `jsonb` の順（渡した順ではない） | 渡した順 |
+   *
+   * `RecallQuery` の検証は `NaN`・`Infinity` を拒むので、JSON で往復しない値はこの表のものだけである。
+   * 読み戻した日付を使う側は、`new Date(value)` を通すと両方で同じ値になる。
+   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`recall-record-query-roundtrip.postgres.test.ts`）。
+   */
   query: unknown;
   budget: RecallBudget | null;
   omitted: Omission[];
