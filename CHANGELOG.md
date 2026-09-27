@@ -600,6 +600,8 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   [ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 2026-09-27、`docs/memory-model.md` §11 の同日付追記）。
   ⭕ 非破壊と数える（上の項目と同じく、`meta` に欄を足すだけで、型も既存の欄の意味も変えない。クローン miku の判断であり、オーナーの判断ではない）。
   ⚠ この版より前に積まれたイベントには `contestedWithId` が無く、後から足すこともできない（監査ログは追記専用）。
+- **`@mnemora/postgres` の `restoreSuperseded()`（`dryRun` を含む）は、`onlyMemoryIds` に uuid の形をしていない id が混ざると、`invalid input syntax for type uuid` の例外を投げていた**——`PostgresMemoryStore.restoreSupersededBy`・`previewRestoreSupersededBy` が `onlyMemoryIds` をそのまま `::uuid[]` に渡していた。`supersededById` の形式不正は例外にしない（`Runtime.restoreSuperseded` の doc）、`getMany` は形式不正な id を無いものとして扱う、と同じ規律に揃え、形式不正な id は群に居ないのと同じに扱う（`@mnemora/testkit/fixtures` の InMemory は、もともとそう返していた）。
+  ⭕ 非破壊と数える（例外を投げなくなる側の修正で、形の正しい id の結果は変わらない。クローン miku の判断であり、オーナーの判断ではない）。
 - **`@mnemora/testkit` の `InMemoryMemoryStore.purgeExpiredEvents` が積む `events_purged` の meta の日時
   （`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）が `Date` のままで、`@mnemora/postgres`（JSON で保存するので ISO 8601 の
   文字列で読み戻る）と型が違っていた**（[PR #1155](https://github.com/takecchi/mnemora/pull/1155)）——今は fixture も ISO 8601 の文字列で持つ。戻り値の `oldestPurgedAt` などは
