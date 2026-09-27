@@ -319,6 +319,21 @@ export interface ObserveMemoryUsageInput {
    */
   externalId?: string;
   recallId: string;
+  /**
+   * その recall で実際に使った記憶の id。**この報告が、強化（`reinforce`）のきっかけになる**
+   * （`docs/memory-model.md` §6「実際に使われたものだけを強化する」——強化のきっかけは
+   * 「使われたと報告されたこと」である）。
+   *
+   * ⚠ **mnemora はこの一覧を、その recall が返した集合とも `ctx.subjectId` とも突き合わせない**
+   * （[Issue #977](https://github.com/takecchi/mnemora/issues/977)）。`recallId` の recall が返して
+   * いない記憶や、別の subject の記憶（subject なしの記憶を含む）を渡しても、同じテナントに
+   * 在れば `recall_usages` に記録されて強化される（`lastReinforcedAt`・`decayFloorAt` が進む）。
+   * `@mnemora/postgres` と `@mnemora/testkit` の fixture で同じである。ほかのテナントの id は、
+   * 強化の段で「memory not found」になる（Issue #1051）。
+   * ⟹ **「その recall が返した記憶のうち、実際に使ったもの」だけを渡すのは呼び出し側の責務である**
+   * ——`recall()` の `memories` から選ぶこと。subject を跨いだ報告も拒まない
+   * （`docs/vision.md`「Subject は整理の単位。跨いでも事故ではない」）。
+   */
   usedMemoryIds: string[];
 }
 
