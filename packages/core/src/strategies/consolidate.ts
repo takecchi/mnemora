@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import { resolveDigest } from "../extraction.js";
+import { dropBlankTags } from "../llm-tags.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import type { ScoreBreakdown } from "../recall.js";
@@ -126,7 +127,7 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
   );
 
   const tagUnion = Array.from(new Set(eligible.flatMap((m) => m.tags)));
-  const tags = llmResult.tags ?? tagUnion;
+  const tags = llmResult.tags !== undefined ? dropBlankTags(llmResult.tags) : tagUnion;
 
   const occurredAtCandidates = eligible
     .map((m) => m.occurredAt ?? null)
