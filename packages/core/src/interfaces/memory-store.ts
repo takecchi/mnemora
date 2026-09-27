@@ -407,6 +407,9 @@ export interface MemoryStore {
    * 抽出の冪等性（`(tenant_id, source_observation_id, extractor_version, content_hash)`）で
    * 既存行に衝突した場合は `created: false` を返し、ジョブは作らない
    * （同じ内容に対して埋め込みジョブを重複させない）。
+   * ⚠ **既存行に衝突する入力でも、書けない値は拒む**（`createMemory` も同じ）——列挙に無い値・NUL・
+   * Invalid Date・値域の外の数は、既存行を返さずに例外になる。Postgres の `INSERT ... ON CONFLICT DO NOTHING`
+   * は、衝突を見る前に値を型に変換し CHECK 制約を当てるためで、testkit の fixture も同じく拒む（実測 2026-09-27）。
    *
    * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
    * の制約を受ける。⚠ `input.contestedWithId` のテナント一致も `createMemory` と同じく

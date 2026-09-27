@@ -690,7 +690,11 @@ export interface ConsolidateOptions {
   dryRun?: boolean;
   /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
   actor?: EventActor;
-  /** `memory_events.meta.reason` へ足す補足。省略時は積まない（`ForgetOptions.reason` と同じ形）。 */
+  /**
+   * `memory_events.meta.note` へ足す補足（統合元の `superseded`・統合先の `created` の両方）。省略時は積まない。
+   * `meta.reason` は常に固定値 `'consolidated'` であり、この欄では上書きしない（`MarkContestedOptions.reason` と
+   * 同じ形。`ForgetOptions.reason` とは違う）。
+   */
   reason?: string;
 }
 
@@ -863,7 +867,10 @@ export interface ReflectOptions {
   dryRun?: boolean;
   /** `memory_events.actor`（`created` イベント）。省略時 `{ type: "system" }`。 */
   actor?: EventActor;
-  /** `memory_events.meta.reason` へ足す補足。省略時は積まない（`ConsolidateOptions.reason` と同じ形）。 */
+  /**
+   * `memory_events.meta.note` へ足す補足（`created` イベント）。省略時は積まない。`meta.reason` は常に固定値
+   * `'reflected'` であり、この欄では上書きしない（`ConsolidateOptions.reason` と同じ形）。
+   */
   reason?: string;
 }
 
