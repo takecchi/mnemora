@@ -86,6 +86,16 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
 - 途中でプロセスが落ちても（kill されても）、当てている途中のファイルは巻き戻り、台帳には載らない
   （ファイルごとに1トランザクション）。ロックはそのプロセスの接続が切れた時点で手放されるので、待っていた
   別のプロセスがそのまま続きから当てる。打ち直しても、適用済みのファイルは二重に当たらない。
+- ⚠ **ロックを持っている接続だけが切れた場合は、直列化されない**（[Issue #1212](https://github.com/takecchi/mnemora/issues/1212)、
+  今の振る舞いを書くだけ）。ロックは専用の接続で持ち、ファイルの本体は別の接続で流すので、DB 側の切断・フェイルオーバーなどで
+  ロックの接続だけが切れると、サーバーはロックを手放すが、適用はロックの無いまま続く。その間に始まった別の実行はロックを取れて、
+  同じ migration を同時に流しうる（【実測】`CREATE TABLE` を含む migration では、後の側が `duplicate key value violates unique
+  constraint "pg_type_typname_nsp_index"` で落ちた。衝突の無い migration では二重に流れうる）。先の実行は、適用を終えた後、
+  最後のロックの返却で失敗として報告される。⟹ 切断が起きたら、両方の実行が終わるのを待ってから打ち直し、台帳
+  （`_mnemora_migrations`）と表を確かめること。今の振る舞いは `src/__tests__/migrate-connection-loss.test.ts` が縛っている。
+- 既定（`--extension-mode create`）で、拡張を作る権限の無いロールで流すと、`migration 0001_init.sql failed: permission denied to
+  create extension "vector"` で終わる（どうすればよいかは文言に出ない。上の「接続先には次の3拡張が要る」の項目のとおり、DBA 側で作ってから
+  `--extension-mode verify` で流す。#1212 に文言の件も書いた）。
 - `--extension-mode verify` の確認は、ロックを取る前（ほかのプロセスの移行を待つ前）に、起動した時点の
   `pg_extension` を読む。同時に既定の `create` のプロセスが拡張を作っている最中だと、`verify` のほうは
   「必要な拡張が見当たりません」で失敗しうる——拡張ができた後に打ち直せば通る。

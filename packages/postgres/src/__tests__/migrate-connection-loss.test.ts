@@ -50,10 +50,11 @@ describe("runMigrations: 接続が外部要因で失われたとき", () => {
   // データベースなので実害は無いが、手元の再実行に対して独立にしておく。
   beforeEach(async () => {
     const { pool } = await getTestClient();
-    await pool.query("DELETE FROM _mnemora_migrations WHERE name IN ($1, $2, $3)", [
+    await pool.query("DELETE FROM _mnemora_migrations WHERE name IN ($1, $2, $3, $4)", [
       "9401_connloss_file.sql",
       "9402_connloss_lock.sql",
       "9403_connloss_followup.sql",
+      "9404_connloss_overlap.sql",
     ]);
   });
 
@@ -138,5 +139,47 @@ describe("runMigrations: 接続が外部要因で失われたとき", () => {
     writeFileSync(join(dir2, "9403_connloss_followup.sql"), "SELECT 1;");
     const followUp = await runMigrations(pool, dir2, { lockTimeoutMs: 5_000 });
     expect(followUp.applied).toEqual(["9403_connloss_followup.sql"]);
+  }, 20_000);
+
+  it("advisory lock を保持しているクライアントの接続だけが失われると、適用が続いている間に、別のセッションが同じロックを取れる（今の振る舞い、Issue #1212）", async () => {
+    // ⚠ 約束を足す歯ではない。ロックを失ったことを検知して止める仕組みは無い（Issue #1212、
+    // 決めていない）——その今の振る舞いを縛る。直すなら、この歯は反転する。
+    const { pool } = await getTestClient();
+    const lockKey = 7_190_158_676_462_701_404n;
+    const dir = mkdtempSync(join(tmpdir(), "mnemora-migrate-connloss-overlap-"));
+    writeFileSync(join(dir, "9404_connloss_overlap.sql"), "SELECT pg_sleep(3);");
+
+    const migrating = runMigrations(pool, dir, { lockKey }).then(
+      () => "resolved",
+      () => "rejected",
+    );
+    const lockHolder = await waitForBackendRunning(pool, "%pg_advisory_lock%");
+    await waitForBackendRunning(pool, "%pg_sleep(3)%");
+    await pool.query("SELECT pg_terminate_backend($1)", [lockHolder]);
+
+    // 本体はまだ流れている（別の接続で pg_sleep の最中）。
+    const stillRunning = await pool.query<{ n: number }>(
+      "SELECT count(*)::int AS n FROM pg_stat_activity WHERE query ILIKE '%pg_sleep(3)%' AND state = 'active' AND pid <> pg_backend_pid()",
+    );
+    expect(stillRunning.rows[0]?.n).toBe(1);
+
+    // それなのに、別のセッションが同じキーのロックを取れる——2つ目の runMigrations も同じく取れて、重なりうる。
+    const other = await pool.connect();
+    try {
+      const taken = await other.query<{ ok: boolean }>("SELECT pg_try_advisory_lock($1) AS ok", [
+        lockKey.toString(),
+      ]);
+      expect(taken.rows[0]?.ok).toBe(true);
+      await other.query("SELECT pg_advisory_unlock($1)", [lockKey.toString()]);
+    } finally {
+      other.release();
+    }
+
+    // 1つ目は、本体を COMMIT した後、最後のロックの返却の失敗で reject する（上の歯と同じ）。
+    expect(await migrating).toBe("rejected");
+    const recorded = await pool.query("SELECT name FROM _mnemora_migrations WHERE name = $1", [
+      "9404_connloss_overlap.sql",
+    ]);
+    expect(recorded.rows).toEqual([{ name: "9404_connloss_overlap.sql" }]);
   }, 20_000);
 });
