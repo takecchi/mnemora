@@ -2773,6 +2773,15 @@ export interface Runtime {
    * 表4「元を消さない」）。**`forgotten` は絶対に統合元にしない**——利用者が意図して
    * 忘れさせたものを、機構の都合（統合）で上書きしない（`runtime.forget` の先例と同じ理由）。
    *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1248](https://github.com/takecchi/mnemora/issues/1248)）:
+   * 下の手順が「書き込み無し」「書き込みゼロ」と書くのは、Memory・`memory_events`・outbox のことである。**
+   * `target` が `{ query }`・`{ seedMemoryId }` のときは、手順1の `recall()` が recall の記録を1件書き、`decay_clock` が
+   * `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165 決めたこと5）。**`dryRun`、eligible が0件・1件、
+   * LLM の失敗など、どの枝で終わっても起きる。**⟹ 活動時計のテナントでは、`dryRun` で確かめるだけでも記憶が1回ぶん
+   * 沈む。`tick()` の `consolidate` ジョブ（`{ seedMemoryId }` で呼ぶ）も同じ。`{ memoryIds }` は `recall()` を呼ばないので、
+   * どちらも起きない。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ
+   * （`consolidate-reflect-recall-side-effects.postgres.test.ts`）。
+   *
    * 手順（ADR 0089 §3。**この順序が冪等性と安全性を買っている**）:
    * 1. `target` を正規化する。`{ memoryIds }` はそのまま（重複・入力順を保つ）。空配列は
    *    store に一切触れず `outcome: 'not_examined'`。`{ query, maxCandidates }` は
@@ -2861,6 +2870,15 @@ export interface Runtime {
    * イベントだけであり、`updateStatus`/`updateStatusWithEvent` は1度も呼ばない
    * ——`reflect` に `superseded`/`forgotten` へ動かす根拠は無い（`consolidate` が
    * `superseded` を使えるのは N→1 の置換だからである）。
+   *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1248](https://github.com/takecchi/mnemora/issues/1248)）:
+   * 下の手順が「書き込み無し」「書き込みゼロ」と書くのは、Memory・`memory_events`・outbox のことである。**
+   * `target` が `{ query }`・`{ seedMemoryId }` のときは、手順1の `recall()` が recall の記録を1件書き、`decay_clock` が
+   * `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165 決めたこと5）。**`dryRun`、eligible が0件・1件、
+   * LLM の失敗など、どの枝で終わっても起きる。**⟹ 活動時計のテナントでは、`dryRun` で確かめるだけでも記憶が1回ぶん
+   * 沈む。`tick()` の `reflect` ジョブ（`{ seedMemoryId }` で呼ぶ）も同じ。`{ memoryIds }` は `recall()` を呼ばないので、
+   * どちらも起きない。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ
+   * （`consolidate-reflect-recall-side-effects.postgres.test.ts`）。
    *
    * 手順（`consolidate` §3 と同じ段取りを踏むが、書き込みの終盤だけ違う）:
    * 1. `target` を正規化する。`{ memoryIds }` はそのまま（重複・入力順を保つ）。空配列は
