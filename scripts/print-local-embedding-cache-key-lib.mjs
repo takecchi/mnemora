@@ -37,6 +37,17 @@ export function slugForCacheKey(value) {
  *
  * @param {{ repo: string, dtype: string, sha: string }} parts
  */
+/**
+ * 保存したキャッシュの**中身の形**の版（Issue #1004）。鍵の末尾に足す。
+ *
+ * 🔴 **revision は鍵に入っている（上の `sha`）のに、これが要る理由。** transformers.js（4.2.0）は、
+ * `revision` を `main` 以外にすると、ファイルキャッシュを `<repo>/<revision>/<file>` の形で引く。
+ * CI のキャッシュは、`revision` を渡す前（2026-09-21）に `<repo>/<file>` の形で保存されたまま、鍵が
+ * 変わらないので保存し直されていなかった（`actions/cache` は鍵が当たると保存しない）。
+ * ⟹ **中身の形が変わったら、この値を変えて保存し直させる。**
+ */
+export const CACHE_LAYOUT_TAG = "revision-layout-1";
+
 export function buildCacheKeySuffix({ repo, dtype, sha }) {
-  return `${slugForCacheKey(repo)}-${slugForCacheKey(dtype)}-${slugForCacheKey(sha)}`;
+  return `${slugForCacheKey(repo)}-${slugForCacheKey(dtype)}-${slugForCacheKey(sha)}-${CACHE_LAYOUT_TAG}`;
 }
