@@ -454,14 +454,14 @@ export interface BuildNewMemoryParams {
   now: Date;
   digestFallbackLength: number;
   /**
-   * [ADR 0165](../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
    * 書き込み時点の `tenant_activity.activity_seq`（テナントの `decay_clock` が
    * `'wall'` 以外のときだけ呼び出し側が渡す）。`halfLifeRecalls` と対で渡すこと——
    * 片方だけ渡しても活動時計の3つ組は作られない（下記 `halfLifeRecalls` 参照）。
    */
   activitySeq?: number;
   /**
-   * [ADR 0165](../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3:
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3:
    * この Memory の活動時計での半減期（単位: recall 回数）。**`activitySeq` と両方
    * 揃っていないと、活動時計の3つ組（`decayBaseSeq`/`decayFloorSeq`/`halfLifeRecalls`）は
    * 作られない**——`'wall'` のテナントでは呼び出し側がどちらも渡さず、3つとも

@@ -1145,3 +1145,10 @@ revision を外す ⟹ 新設した歯が赤になった。戻すと緑に戻る
 要点: x64 どうしは 484 観測すべてでビット一致した（CPU の型番と `numThreads` を問わない）。
 x64 と arm64 は、毎回同じ小さな差（最大の絶対差 2^-24）で不一致になった。
 **案 (c) は、いまも採っていない。**門にするかどうかは決めていない。
+
+## 追記（2026-09-27、クローン miku の委譲先。オーナーではない）: 参照の訂正
+
+本文の次の参照は、**書いた時点から**指す先が無かった（または違う先を指していた）。git の履歴で、指す先がその形で在ったことが一度も無いことを確かめた。本文は書き換えず、正しい先をここに記す（`docs/decisions/README.md` の「採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」）。
+
+- 「偽陽性率に上限を置けない検査を門にするな」の段落のリンク `./0088-retrieval-quality-with-recorded-embeddings.md` と `./0094-identifier-probe-gate-conditions.md` は、存在しないファイル名である。正しくは [ADR 0088](./0088-retrieval-quality-measured-in-ci.md) と [ADR 0094](./0094-identifier-probes-local-embedding.md)。
+- 「「探したが無かった」と「探していない」を分けること」の段落のリンク `./0074-search-scope-enumerated.md` は、存在しないファイル名である。ADR 番号 0074 は正しく（ADR 0223 決定10 も同じ ADR を挙げている）、正しいファイルは [ADR 0074](./0074-impression-topic-growth-what-mnemora-cannot-hold.md)。

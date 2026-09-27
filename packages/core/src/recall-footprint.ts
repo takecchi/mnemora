@@ -262,7 +262,7 @@ export const DEFAULT_FOOTPRINT_TOLERANCE = 0.05;
  * ⚠ **これは非破壊の純追加である。**省略した標本は、以前と1バイトも変わらない扱いを受ける
  * ——`calibrateRecallFootprint` は構造項を0として差し引く（＝何も差し引かない）。
  *
- * **なぜ足したか**: [ADR 0302](../../../../docs/decisions/0302-recall-footprint-structural-terms.md)
+ * **なぜ足したか**: [ADR 0302](../../../docs/decisions/0302-recall-footprint-structural-terms.md)
  * は `estimateRecallFootprint` に、`indexBand` の JSON 構造（帯のカンマ・桁上がり・
  * `limitedBy`）から決まる4つの構造項を足した。だが `calibrateRecallFootprint` は
  * この欄が無ければ標本の `totalInScope` を知りようがなく、`totalChars` から同じ構造項を

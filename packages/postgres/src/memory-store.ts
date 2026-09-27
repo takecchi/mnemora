@@ -2813,7 +2813,7 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
  * 意味する信号のはずが、ここでは取り違いを起こす**。`opts.limit <= -2` では
  * `LIMIT` に負数が渡り Postgres 自身が例外を投げる。**この `-1` の折れ方は狙って設計した
  * ものではなく、`+1` の算術が生んだ偶然である**——契約として真似る理由は無い
- * （採らなかった案は [ADR 0115](../../../../docs/decisions/0115-event-retention-purge.md)
+ * （採らなかった案は [ADR 0115](../../../docs/decisions/0115-event-retention-purge.md)
  * の2026-09-26追記を参照）。
  *
  * `kind <> 'events_purged'` は `memory_events` に `(tenant_id, at)` の索引

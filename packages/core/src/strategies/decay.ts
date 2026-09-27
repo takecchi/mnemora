@@ -47,7 +47,7 @@ function decayBase(params: DecayParams): Date {
 }
 
 /**
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと7:
+ * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと7:
  * 単位を持たない数値核。`elapsed` と `halfLife` が「時間」の単位であろうと「recall 回数」の
  * 単位であろうと、この式自体は変わらない——`floorAt`/`floorSeqAt`（活動時計側は
  * `defaultActivityDecayStrategy.floorAt`）は、この核を「時刻」または「通し番号」で
@@ -120,7 +120,7 @@ export const defaultDecayStrategy: DecayStrategy = {
 
 /**
  * ActivityDecayStrategy — 壁時計（`DecayStrategy`）と同じ式を、「recall() が起きた回数」を
- * 単位にして読む実例（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)
+ * 単位にして読む実例（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
  * 決めたこと1・3・7）。
  *
  * | | 起点（base） | 進み方（1単位） | 保存する床 |

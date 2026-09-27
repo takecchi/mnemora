@@ -81,7 +81,7 @@ export interface BuildReflectedMemoryParams {
   halfLifeHours: number;
   now: Date;
   /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls`・
    * `consolidate.ts` の `BuildConsolidatedMemoryParams` と同じ形。
    */
