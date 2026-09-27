@@ -307,7 +307,8 @@ export interface VectorStore {
    * ⟹ **何が「距離の同点」になるかは、2実装で同じである。**ただし距離の値そのものの下の桁は揃わない
    * ——pgvector は積と和を float4 で重ねてから最後だけ倍精度で割り、fixture は丸めた成分を倍精度で計算する。
    * 【実測 2026-09-28】`vector-search-float4-tie.postgres.test.ts`（並びと同点）、
-   * `in-memory-fixtures-vector-float4.test.ts`（fixture の丸め）。
+   * `in-memory-fixtures-vector-float4.test.ts`（fixture の丸め）、`recall-association-float4-parity.postgres.test.ts`
+   * （同点を `search()` の順のまま保つ段3.5 の、`recall()` の最終の並びまで揃うこと）。
    */
   search(
     ctx: Ctx,
