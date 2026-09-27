@@ -485,6 +485,32 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 > [ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)
 > 「引き受ける負債」・追記参照。
 
+## ⚠ 接続の `error` リスナーは、利用者が付ける（今の振る舞い）
+
+`createPostgresClient` が作る `pool`（node-postgres の `Pool`）には、`error` リスナーを付けていない。
+**pool の中で待機している接続が DB 側から切られると**（Postgres の再起動・フェイルオーバー・運用者による切断など）、
+`Pool` が `error` イベントを出し、リスナーが無いので **Node のプロセスごと落ちる**（`Unhandled 'error' event`）。
+mnemora の呼び出しが1本も進んでいないときでも起きる【実測 2026-09-27、`pg_ctl restart -m fast`】。
+
+避けるには、利用者の側で `client.pool.on("error", …)` を付ける:
+
+```ts
+const client = createPostgresClient(process.env.DATABASE_URL!);
+client.pool.on("error", (error) => {
+  // 記録するだけでよい。死んだ接続は pool が捨てる。
+  console.error("postgres pool error", error.message);
+});
+```
+
+付けた場合、切れた接続は pool から捨てられ、次の呼び出しは新しい接続で通る（`idle in transaction` も残らない。
+`src/__tests__/pool-idle-connection-loss.test.ts` が縛っている）。
+
+- これは**待機中の接続**の話である。`db.transaction()` の途中（借りている最中の接続）で切れた場合もプロセスが落ちるが、
+  それは別の場所であり、利用者のリスナーでは避けられない（[Issue #868](https://github.com/takecchi/mnemora/issues/868)）。
+- mnemora の側でリスナーを付けるか・設定にするかは決まっていない（[Issue #1213](https://github.com/takecchi/mnemora/issues/1213)）。
+  マイグレーションと `registerEmbeddingSpace` が借りる接続には、mnemora が自分でリスナーを付けている
+  （[ADR 0339](../../docs/decisions/0339-checked-out-client-error-listener.md)。こちらは借りている最中の接続の話）。
+
 ## 例外の見分け方（catch するとき）
 
 この package が投げる例外は、次の4つの顔に分かれる【実測 2026-09-27】。
