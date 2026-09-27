@@ -10,6 +10,18 @@ import type { EventFilter, MemoryEvent, NewMemoryEvent } from "../event.js";
  * （docs/memory-model.md §9）。
  */
 export interface EventStore {
+  /**
+   * ⚠ **`event.memoryId` がほかのテナントの Memory を指していても、テナントの一致は
+   * 約束として検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
+   * adapter によって違う:
+   * - `@mnemora/postgres`: 受け付け、呼んだテナントのイベントとして記録する
+   *   （`memories(id)` への外部キーは `tenant_id` を見ない）。
+   * - `@mnemora/testkit` の `InMemoryEventStore`: `ctx` のテナントで Memory を引くので、
+   *   「memory not found」で拒む。
+   *
+   * どちらでも、ほかのテナントの行とイベントは変わらない。`Runtime` は同じ `ctx` で確かめた
+   * id しか渡さない。`docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   */
   append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent>;
   /**
    * `id` が adapter の期待する形式でない場合も「存在しない」と同じ `null` を返す
