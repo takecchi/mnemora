@@ -243,7 +243,9 @@ export interface RuntimeDeps {
   /**
    * 省略時は `systemClock`。
    * ⚠ 注入した時計は、store が埋める時刻（監査ログの `at`・outbox の `availableAt` など）には届かず、
-   * 壁時計より過去の時計では `tick` がジョブを取らない——{@link Clock} の doc 参照（Issue #1237）。
+   * 壁時計より過去の時計では `tick` がジョブを取らない。reinforce は注入した時計に従うが、監査ログの `at` は
+   * `restoreSuperseded` の `unsuperseded` だけが注入した時計で、`restoreArchived` の `restored`・`sweepArchive` の
+   * `archived` は壁時計——{@link Clock} の doc 参照（Issue #1237）。
    */
   clock?: Clock;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */

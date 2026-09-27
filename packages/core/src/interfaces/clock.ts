@@ -14,6 +14,20 @@
  * claim は `available_at <= now` のジョブだけを取るため。`processed: 0` で、何も名乗らない）。過去の時刻での
  * 取り込み直しやテストでは、extract も embed も走らない。
  * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（`injected-clock-reach.postgres.test.ts`）。
+ *
+ * ⚠ **2026-09-28 追記（復帰と掃引の口、同じ Issue #1237）:** reinforce（`lastReinforcedAt`・`decayFloorAt`）は、
+ * どの経路でも注入した時計に従う——`observe` の使用報告・`restoreArchived`・`restoreSuperseded` のどれでも、
+ * runtime が `clock.now()` を渡す。一方、監査ログの `at` は口によって割れている:
+ *
+ * | 口 | 監査ログのイベント | `at` の出どころ |
+ * |---|---|---|
+ * | `sweepArchive` | `archived` | 壁時計（どれを選ぶかの基準は、呼び出し側が渡す `opts.now`。注入した時計ではない） |
+ * | `restoreArchived` | `restored` | 壁時計 |
+ * | `restoreSuperseded` | `unsuperseded` | 注入した時計（runtime が `at` を渡す唯一の口） |
+ *
+ * ⟹ 同じ「戻す」操作でも、`restored` と `unsuperseded` は別の時計で打たれる。時計を注入した runtime で、ある
+ * Memory の監査ログを `at` で並べると、この2つの口のイベントは別の時計の順に並ぶ。
+ * 【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ（同じテストファイル）。
  */
 export interface Clock {
   /** 現在時刻を返す。runtime が「今」を得る唯一の口（テストでは固定の時刻を返す実装を注入する）。 */
