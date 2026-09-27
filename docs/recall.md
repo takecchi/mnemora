@@ -151,6 +151,17 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 
 **⚠ 2026-09-25 追記([ADR 0319](./decisions/0319-optional-trigram-lexical-store.md)、Issue #278)**: 上のとおり `LexicalStore` は日本語の語を引けないが、これは「日本語を引けるようにしない」という決定ではなく「必須依存にはしない」という決定である(ADR 0149 冒頭の区別)。`packages/postgres` は**opt-in** の代替実装 `PostgresTrigramLexicalStore`(pg_trgm を使う)を提供する——導入側が明示的に `PostgresTrigramLexicalStore.create(db)` を呼んだときだけ有効になり、`recall()` の既定・`DEFAULT_RECALL_CHANNELS`・`LexicalStore` interface は1バイトも変わらない。**前提を満たさない環境(`server_encoding` が `UTF8` でない、ロケールが日本語のトライグラムを作れない等)では `create()` が例外を投げる**——「探したが無かった」と「探していない」を同じ顔にしない、という本節冒頭の原則をこの opt-in 機構にも適用したものである(Issue #139 の逐語の指摘、ADR 0149 §6)。精度・閾値の実測、`retrieval` ベンチでの比較(この opt-in の有無で `hit@1`/`hit@10` は変化しなかった——`PROBES` が語彙的な重なりをほぼ持たない設計であるため)は ADR 0319 を見ること。
 
+**⚠ 2026-09-27 追記([Issue #952](https://github.com/takecchi/mnemora/issues/952)、今の振る舞いを書くだけ)**: 語彙チャンネルが約束しているのは「ASCII の大文字小文字を区別しない」「ASCII と非 ASCII の境界で分割する」の2つだけである(ADR 0084)。**Unicode の正規化(NFC/NFD/NFKC)も、全角半角の同一視もしない。**`PostgresLexicalStore` と testkit の `InMemoryLexicalStore` は、どちらも次のように動く(Issue #952 の実測。CI の2脚と同じ regime):
+
+| 書き込んだ content | クエリ | 一致するか |
+|---|---|---|
+| `café`(NFC) | `café`(NFD) | しない |
+| `ＡＢＣ`(全角) | `ABC` | しない |
+| `café`(NFD、`e` + U+0301) | `cafe` | **する** |
+| `café`(NFC) | `cafe` | しない |
+
+最後の2行のとおり、見た目が同じ本文でも、どの正規化形で保存されたかで引ける語が変わる。NFD の結合文字(U+0301)は、Postgres では ASCII 境界の分割(`mnemora_lexical_normalize`)で、testkit では `\p{L}\p{N}` 以外の文字として区切られ、どちらも `cafe` という語だけが残るためである。opt-in の `PostgresTrigramLexicalStore` も `lower()` や正規化を通さない。NFD と NFC の `café` が当たるのは、閾値とトライグラムの重なり方でたまたま当たっているだけで、正規化として設計したものではない(`word_similarity` は 0.6、全角と半角の `ABC` は 0)。**どの正規化形に揃えるか(NFC か NFKC か、本文に掛けるか索引式に掛けるか)は決めていない。**索引式に掛けるなら `idx_memories_lexical` の作り直しが要り、書き込み時に本文へ掛けるなら保存済みの本文の意味が変わる。
+
 ### 段2: 再スコア（索引が要らない。O(k')）
 
 入力: 段1の候補 k' 件。
