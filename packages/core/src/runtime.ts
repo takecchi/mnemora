@@ -1990,12 +1990,17 @@ export interface Runtime {
    * 分離できなかった（実測、[ADR 0232](../../../docs/decisions/0232-correction-candidates-returned-not-chosen.md)）。**⟹ この口は「候補を返すところまで」である。**
    *
    * この口が**やらないこと**（設計の芯。曲げない）:
-   * - ⛔ **書き込みを1件もしない。** `Memory` の `status` を一切動かさない。
+   * - ⛔ **記憶と監査ログには書き込まない。** `Memory` の `status` を一切動かさない。
    *   `memory_events` に一切積まない。**`markContested`/`resolveContested` の
    *   *前*に立つ**——「訂正の相手をこれに決めて、実際に対にする／置き換える」という
    *   確定と書き込みは、常に採用側が `markContested`/`resolveContested`/
    *   `reextract` 等の既存の書き込み口を明示的に呼んで行う。この口はその前段の
    *   「相手を探す」だけを引き受ける。
+   *   ⚠ 2026-09-27 訂正（[Issue #1244](https://github.com/takecchi/mnemora/issues/1244)）: 以前は「書き込みを1件もしない」と
+   *   書いていたが、実装と合っていなかった。中で1回呼ぶ `recall()` が、recall の記録を1件書き（戻り値の `recallId`）、
+   *   `decay_clock` が `'wall'` 以外のテナントでは `activity_seq` を1進める（ADR 0165 決めたこと5）。活動時計の
+   *   テナントでは、訂正の相手を探すたびに記憶が1回ぶん沈む。【実測 2026-09-27】`@mnemora/postgres` と testkit の
+   *   fixture で同じ（`correction-candidates-recall-record.postgres.test.ts`）。
    * - ⛔ **LLM を1回も呼ばない。** 相手探しは既存の `recall()`（ANN + 既存のスコア
    *   `strategies/scoring.ts`）だけで行う——訂正かどうかの判定・相手の良し悪しの
    *   判定のどちらにも LLM を使わない。
