@@ -9,7 +9,8 @@ import { MemoryEventKindSchema } from "@mnemora/core";
  *
  * - `at`: Invalid Date（`.getTime()` が `NaN`）なら拒む（Issue #807）。省略（`undefined`）は
  *   「無い」であって Invalid Date ではないので検査しない。
- * - `kind`: `MemoryEventKind` に無い値なら拒む（Issue #1096）。Postgres は CHECK 制約
+ * - `kind`: `MemoryEventKind` に無い値なら拒む（Issue #1096）。`events_purged` で `memoryId` が null でなければ拒む
+ *   （Postgres の `memory_events_check`）。Postgres は CHECK 制約
  *   `memory_events_kind_check` で拒む。型を外した呼び出し・JavaScript からの呼び出しで届く。
  *
  *
@@ -20,6 +21,13 @@ import { MemoryEventKindSchema } from "@mnemora/core";
 export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+  }
+  // Postgres の `memory_events_check`: `events_purged`（保持期間の掃除の記録）は特定の Memory を指さない
+  // （core の `MemoryEventSchema` の `refine` と同じ約束）。
+  if (event.kind === "events_purged" && event.memoryId !== null) {
+    throw new Error(
+      `memory_events.memoryId must be null for kind "events_purged" (got ${JSON.stringify(event.memoryId)})`,
+    );
   }
   if (!MemoryEventKindSchema.safeParse(event.kind).success) {
     throw new Error(

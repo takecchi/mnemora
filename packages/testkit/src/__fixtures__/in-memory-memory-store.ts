@@ -5,6 +5,7 @@ import {
   isContestedWithoutCompanion,
   isEmbeddingStatusRollback,
   isHalfLifeHoursInRange,
+  isHalfLifeRecallsInRange,
   isStrengthInRange,
   MAX_STRENGTH,
   MemoryPurgeConflictError,
@@ -289,6 +290,50 @@ function assertStorableNewMemory(input: NewMemory): void {
   // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
   // `reinforce`—同じ Issue—と同じ根本原因）。省略可能な3つは値が渡されたときだけ
   // 検査する（既定値 `null`/`undefined` は「無い」であって Invalid Date ではない）。
+  // #1183 の外側の CHECK 制約（Postgres の `memories_check`）: 由来が `stated`/`inferred` なら、その元の観測が要る。
+  if (
+    (input.provenance.kind === "stated" || input.provenance.kind === "inferred") &&
+    input.sourceObservationId == null
+  ) {
+    throw new Error(
+      `InMemoryMemoryStore: provenance.kind "${input.provenance.kind}" requires sourceObservationId`,
+    );
+  }
+  // 活動時計の起点と床（ADR 0165）: Postgres は `bigint` 列で、`memories_decay_seq_non_negative` が負を拒む。
+  // 省略（`null`/`undefined`）は「この軸には床が無い」であり、検査しない。
+  for (const [field, value] of [
+    ["decayBaseSeq", input.decayBaseSeq],
+    ["decayFloorSeq", input.decayFloorSeq],
+  ] as const) {
+    if (value == null) continue;
+    if (!Number.isInteger(value)) {
+      throw new Error(`InMemoryMemoryStore: ${field} must be an integer (got ${value})`);
+    }
+    if (value < 0) {
+      throw new Error(`InMemoryMemoryStore: ${field} must not be negative (got ${value})`);
+    }
+    if (value >= 2 ** 63) {
+      throw new Error(`InMemoryMemoryStore: ${field} must fit in a Postgres bigint (got ${value})`);
+    }
+  }
+  // 活動時計の半減期: 値域は `halfLifeHours` と同じ `(0, ∞)`（`memories_half_life_recalls_range`、ADR 0125）で、
+  // `real`（float4）列に収まる必要がある（上の `halfLifeHours` と同じ判定）。省略は検査しない。
+  if (input.halfLifeRecalls != null) {
+    const recalls = input.halfLifeRecalls;
+    if (!isHalfLifeRecallsInRange(recalls)) {
+      throw new Error(`InMemoryMemoryStore: halfLifeRecalls out of range (0, ∞): ${recalls}`);
+    }
+    if (!Number.isFinite(Math.fround(recalls))) {
+      throw new Error(
+        `InMemoryMemoryStore: halfLifeRecalls does not fit in a Postgres "real" (float4) column (got ${recalls})`,
+      );
+    }
+    if (Math.fround(recalls) === 0) {
+      throw new Error(
+        `InMemoryMemoryStore: halfLifeRecalls does not fit in a Postgres "real" (float4) column (got ${recalls}; rounds to 0)`,
+      );
+    }
+  }
   if (Number.isNaN(input.recordedAt.getTime())) {
     throw new Error(`InMemoryMemoryStore: recordedAt must be a valid Date (got Invalid Date)`);
   }
