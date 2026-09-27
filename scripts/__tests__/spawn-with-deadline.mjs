@@ -8,6 +8,30 @@ export const DEFAULT_CHILD_DEADLINE_MS = 30_000;
 const KILL_GRACE_MS = 5_000;
 
 /**
+ * 子を `detached: true` で起こしたとき（子が自分のプロセスグループの長になる）、そのグループごと SIGKILL する。
+ * **子だけでなく、子が起こした孫も止める。**【実測 2026-09-28】子だけに SIGKILL を送る形では、孫が残った
+ * （`spawn-deadline-grandchild.test.mjs`）。
+ *
+ * グループが既に無い（`ESRCH`）ときは何もしない。それ以外の例外は外へ出す。
+ *
+ * ⚠ **`detached: true` の副作用**: この関数たちが起こす子は、親のプロセスグループから外れる。対話の端末で Ctrl-C を
+ * 押しても、その SIGINT は子（とその孫）には届かない。止めるのは、期限の kill になる。root の vitest は対話の端末を
+ * 前提にしていないので、その影響は受けないと見ている。
+ *
+ * @param {number | undefined} pid
+ * @param {(pid: number, signal: string) => void} [kill] 歯から例外の扱いを確かめるための注入点。既定は `process.kill`。
+ */
+export function killProcessGroup(pid, kill = process.kill.bind(process)) {
+  if (!pid) return;
+  try {
+    kill(-pid, "SIGKILL");
+  } catch (error) {
+    if (error && error.code === "ESRCH") return;
+    throw error;
+  }
+}
+
+/**
  * 同期の子の既定の期限（ミリ秒）。【実測】`pnpm pack` を除くと、1ファイル全体でも CI で最長 7.7 秒
  * （2026-09-27、main の 06a1eac の run）——十分な余裕を持ち、`testTimeout`（180 秒）より短い値にした。
  */
@@ -35,6 +59,8 @@ export function runNodeScript(
     const child = spawn(process.execPath, [script, ...args], {
       stdio: ["ignore", "pipe", "pipe"],
       env: env ?? process.env,
+      // 自分のプロセスグループにして、期限を超えたら孫ごと止める（`killProcessGroup`）。
+      detached: true,
     });
     onSpawn?.(child);
     let stdout = "";
@@ -46,7 +72,7 @@ export function runNodeScript(
       reject(
         new Error(
           `子（${basename(script)} ${args.join(" ")}）が ${timeoutMs / 1000} 秒で close しなかった` +
-            `（SIGKILL した。pid=${child.pid}）。ここまでの stdout: ${JSON.stringify(stdout.slice(0, 200))}` +
+            `（プロセスグループごと SIGKILL した。pid=${child.pid}）。ここまでの stdout: ${JSON.stringify(stdout.slice(0, 200))}` +
             ` / stderr: ${JSON.stringify(stderr.slice(0, 200))}`,
         ),
       );
@@ -55,7 +81,7 @@ export function runNodeScript(
     let afterKill;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGKILL");
+      killProcessGroup(child.pid);
       afterKill = setTimeout(fail, KILL_GRACE_MS);
     }, timeoutMs);
     child.on("close", (code) => {
@@ -79,7 +105,7 @@ function syncDeadlineError(command, args, timeoutMs, stdout, stderr, cause) {
   const text = (v) => JSON.stringify(String(v ?? "").slice(0, 200));
   return new Error(
     `子（${basename(String(command))} ${args.join(" ")}）が ${timeoutMs / 1000} 秒で終わらなかった` +
-      `（SIGKILL した）。ここまでの stdout: ${text(stdout)} / stderr: ${text(stderr)}`,
+      `（プロセスグループごと SIGKILL した）。ここまでの stdout: ${text(stdout)} / stderr: ${text(stderr)}`,
     { cause },
   );
 }
@@ -102,8 +128,15 @@ function syncDeadlineError(command, args, timeoutMs, stdout, stderr, cause) {
  */
 export function spawnSyncWithDeadline(command, args, options = {}) {
   const { timeoutMs = DEFAULT_SYNC_CHILD_DEADLINE_MS, ...rest } = options;
-  const result = spawnSync(command, args, { ...rest, timeout: timeoutMs, killSignal: "SIGKILL" });
+  const result = spawnSync(command, args, {
+    ...rest,
+    timeout: timeoutMs,
+    killSignal: "SIGKILL",
+    detached: true,
+  });
   if (result.error && result.error.code === "ETIMEDOUT") {
+    // 同期の呼び出しの間は親のコードが走らない。期限で返った直後に、残った孫をグループごと止める。
+    killProcessGroup(result.pid);
     throw syncDeadlineError(command, args, timeoutMs, result.stdout, result.stderr, result.error);
   }
   return result;
@@ -121,9 +154,16 @@ export function spawnSyncWithDeadline(command, args, options = {}) {
 export function execFileSyncWithDeadline(command, args, options = {}) {
   const { timeoutMs = DEFAULT_SYNC_CHILD_DEADLINE_MS, ...rest } = options;
   try {
-    return execFileSync(command, args, { ...rest, timeout: timeoutMs, killSignal: "SIGKILL" });
+    return execFileSync(command, args, {
+      ...rest,
+      timeout: timeoutMs,
+      killSignal: "SIGKILL",
+      detached: true,
+    });
   } catch (error) {
     if (error && error.code === "ETIMEDOUT") {
+      // 期限で返った直後に、残った孫をグループごと止める（`spawnSyncWithDeadline` と同じ）。
+      killProcessGroup(error.pid);
       throw syncDeadlineError(command, args, timeoutMs, error.stdout, error.stderr, error);
     }
     throw error;
