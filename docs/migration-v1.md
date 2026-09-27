@@ -1055,8 +1055,27 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - ほかにも同じ種類のものがあれば、CHANGELOG の `[1.1.0]` 節の各項目の ⚠ を正とする。
 - ⭕ **非破壊と数えたもの**（⚠ 付き。**この判定はクローン miku の判断であり、オーナーの判断ではない**）——`registerEmbeddingSpace` が同じテーブル名に潰れる別の空間の登録を拒むようになった（PR #1156）、`setEventRetention` が型の外の `kind` を拒むようになった（PR #1171。fixture も core の共有の検査で同時に変わる）、`@mnemora/postgres` の語彙チャンネルが語の途中の `"` を空白として扱うようになった（PR #1187。一致だけが変わる）、ほか。一覧は CHANGELOG の `[1.1.0]` 節を見ること。
 
-**DB マイグレーション**: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）の1本が増えている。`v1.0.2` から上げる場合は `pnpm --filter @mnemora/postgres run migrate` が要る。`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る。
+**DB マイグレーション**: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）の1本が増えている。`v1.0.2` から上げる場合は、6パッケージを上げた後に `npx mnemora-postgres-migrate`（`DATABASE_URL` を渡す。または `runMigrations`。上の「DB マイグレーション」）が要る——このリポジトリの workspace 内なら `pnpm --filter @mnemora/postgres run migrate` でも同じ。`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る。（⚠ 2026-09-27 訂正: この行は workspace 内の形 `pnpm --filter @mnemora/postgres run migrate` だけを書いていた。利用者のプロジェクトには `--filter` で指せる workspace が無いので、その形では打てない）
 
+【実測 2026-09-27】この節の手順を、利用者の側で通した（`main` = `47b2aa6`）。
+1. npm から `@mnemora/*@1.0.2` の6パッケージを入れた素のプロジェクト（`npm`、`"type": "module"`、TypeScript 5.9 の `nodenext`）で、`npx mnemora-postgres-migrate` を空の DB に打った（`0001`〜`0022`）。
+2. 1.0.2 のコードでデータを入れた。
+3. 6パッケージを `main` の `pnpm pack` の成果物（`scripts/pack-publish-targets.mjs`）へ一度に入れ替えた。
+4. `npx mnemora-postgres-migrate` を打ち直した。1回目は `0023` だけを当て、2回目は何も当てなかった。
+
+結果は次のとおりだった。
+- 型検査は、上げる前も後も通った。見たのは `createRuntime` と6つの Postgres の store、`registerEmbeddingSpace`、各 provider のコンストラクタ、`RecallQuery` と `association: null`、`setEventRetention`、testkit の `buildNewMemoryFixture` と fixture の store。
+- 上の保留の6件は、1.0.2 では受け入れ、上げた後は例外になった。
+  - 見た入力は、`registerLabel` の NUL、`listActiveClaimPredicates` の `limit: -1`、`setDefaultHalfLifeRecalls(1e-46)`・`setDefaultHalfLifeHours(1e39)`、`append` の `kind: "bogus"`、`createMemory` の `digestSource: "bogus"`、冪等の既存行が在るときの `status: "bogus"`。
+  - PR #1190 の件は、1.0.2 では例外にならず、既存の行を返していた。
+- 非破壊と数えた #1156 は、1.0.2 で `{ a_b, c, 3 }` と `{ a, b_c, 3 }` の両方を登録した DB で、上げた後の起動で先に登録した組が通り、2つ目が `EmbeddingSpaceTableConflictError` になった（上の CHANGELOG の項目の「射程」のとおり）。
+- 非破壊と数えた #1171 は、`setEventRetention({ kind: "bogus" })` が、1.0.2 では Postgres も fixture も `{ kind: "unlimited" }` を書き、上げた後は両方とも例外になった。
+- #1187 は、1.0.2 で書いた本文 `alpha"beta` を語彙チャンネルで `alpha"beta` と探すと、1.0.2 では0件、`0023` を当てた後は1件になった（索引は作り直していない）。
+- DB の側の経路は、[ADR 0344](./decisions/0344-upgrade-from-released-version-fixture.md) の `upgrade-from-v1.0.2.sql` を読む歯（`upgrade-from-released.postgres.test.ts`）でも通っている（同じ日に手元の Postgres 17 で緑）。
+
+## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
+
+（⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）
 
 ### `RecallQuery.validAt` ゲートが既定で有効になった
 
