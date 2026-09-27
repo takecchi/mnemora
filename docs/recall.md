@@ -1114,7 +1114,7 @@ type RecalledMemory = {
   associationOf?: string        // retrievedVia: 'association' のときだけ在る。起点にしたアンカーの memoryId（§9）
   provenanceKind: ProvenanceKind // 本人が述べた事実か、AI の推論か（オーナーの原則7）
   basisLost?: true               // provenanceKind === 'inferred' かつ basis.memoryIds の少なくとも1件が失われている（存在しない/forgotten/purge済み）ときだけ true（Issue #883、ADR 0342）。それ以外はキー自体を出さない。basis の中身（memoryIds/observationIds）は返さない
-  speaker?: string | null       // Memory.speaker をそのまま引き継ぐ（Issue #579 案D、ADR 0289）。型は任意だが runtime は必ず値を入れる（欄自体が省略されることは無い）
+  speaker?: string | null       // Memory.provenance.speaker を引き継ぐ（provenance.kind === "stated" のときだけ。それ以外は null。Issue #579 案D、ADR 0289）。型は任意だが runtime は必ず値を入れる（欄自体が省略されることは無い）
   subjectId?: string | null     // Memory.subjectId をそのまま引き継ぐ（同上、ADR 0289）
   recordedAt?: Date              // Memory.recordedAt をそのまま引き継ぐ（同上、ADR 0298）。occurredAt が無い記憶でも必ず在る
   occurredAt?: Date | null       // Memory.occurredAt をそのまま引き継ぐ（同上、ADR 0298）
