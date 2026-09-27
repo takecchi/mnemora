@@ -28,21 +28,39 @@ suite は、存在しない」はもう成り立たない。`describeLLMProvider
 
 ---
 
-## 1. 何が在るか — 8 suite・合計 297 it【2026-09-26 更新】
+## 1. 何が在るか — 8 suite
 
-`packages/testkit/src/*-conformance.ts` の `it` / `maybeIt` を数えた。
+| suite                 | 住所                                                        |
+| --------------------- | ----------------------------------------------------------- |
+| `EmbeddingProvider`   | `packages/testkit/src/embedding-provider-conformance.ts`    |
+| `EventStore`          | `packages/testkit/src/event-store-conformance.ts`           |
+| `LexicalStore`        | `packages/testkit/src/lexical-store-conformance.ts`         |
+| `LLMProvider`         | `packages/testkit/src/llm-provider-conformance.ts`          |
+| `MemoryStore`         | `packages/testkit/src/memory-store-conformance.ts`          |
+| `OutboxStore`         | `packages/testkit/src/outbox-store-conformance.ts`          |
+| `TenantSettingsStore` | `packages/testkit/src/tenant-settings-store-conformance.ts` |
+| `VectorStore`         | `packages/testkit/src/vector-store-conformance.ts`          |
 
-| suite                 | it                                                         | 住所                                                        |
-| --------------------- | ---------------------------------------------------------- | ----------------------------------------------------------- |
-| `EmbeddingProvider`   | **10**（2026-09-25 追記: `overLimitText` の歯を1本足した） | `packages/testkit/src/embedding-provider-conformance.ts`    |
-| `EventStore`          | 16                                                         | `packages/testkit/src/event-store-conformance.ts`           |
-| `LexicalStore`        | 21                                                         | `packages/testkit/src/lexical-store-conformance.ts`         |
-| `LLMProvider`         | **8**（2026-09-26 追記: `v1.0.1` で新設）                  | `packages/testkit/src/llm-provider-conformance.ts`           |
-| `MemoryStore`         | **177**                                                    | `packages/testkit/src/memory-store-conformance.ts`          |
-| `OutboxStore`         | 15                                                         | `packages/testkit/src/outbox-store-conformance.ts`          |
-| `TenantSettingsStore` | 17                                                         | `packages/testkit/src/tenant-settings-store-conformance.ts` |
-| `VectorStore`         | 33                                                         | `packages/testkit/src/vector-store-conformance.ts`          |
-| **合計**              | **297**                                                    |                                                             |
+**各 suite の `it` の数は、ここに書かない**（`main` が動けば変わる数である——
+[AGENTS.md](../AGENTS.md)「⚠ 数を、道具と生成物に焼き込まない」・
+[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。repo の根で次を打って数える:
+
+```sh
+grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testkit/src/*-conformance.ts
+```
+
+- 数えるのは、行の頭で始まる `it(`・`it.skip(`・`it.skipIf(…)(`・`it.each(…)(` と、`it`/`it.skip` を選んで
+  置いた別名（`maybeIt`・`maybeDeterministicIt`・`maybeFailingIt`・`maybeConcurrentIt`・`maybeOverLimitIt`）の呼び出しである。
+- ⚠ **宣言の行の数であって、走る歯の数ではない。**`it.each` の1行は渡した値の数だけ歯を生む。別名は
+  呼び出し元の設定で skip になる。呼び出し元ごとに実際に走った数は、その呼び出し元のテストを走らせて見る（§2）。
+- 別名が増えたら、この式の `maybe[A-Za-z]*It` に当たらない名前でないかを確かめること。
+
+**⚠ 2026-09-27 追記**: この節の表には、以前は suite ごとの `it` の数と合計（297）を手で書いていた。
+上の 2026-09-25・2026-09-26 の追記が更新した `EmbeddingProvider`（10）・`LLMProvider`（8）の2行を除く6行は、
+2026-09-17 の値のまま腐っていた——上の式で main `6df673d` に当てると、`LexicalStore` 21→27・`MemoryStore` 177→262・
+`OutboxStore` 15→16・`TenantSettingsStore` 17→23・`VectorStore` 33→40（`EventStore` は16のまま）、合計は402だった。
+門で生成・照合している数ではなかったので、数を消して数え方の式に置き換えた。上の追記が「印を付けた」と書く
+表の中の箇所は、もう無い（元の値は git の履歴に在る）。
 
 ### `LLMProvider` の適合 suite —— 2026-09-26 追記: 新設された（旧: 存在しなかった）
 
