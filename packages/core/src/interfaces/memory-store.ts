@@ -240,7 +240,13 @@ export interface AggregateScopeOptions {
   digestBand?: {
     /** 取得する上限件数。 */
     limit: number;
-    /** 帯から除外する memoryId（`memories` として返したもの）。 */
+    /**
+     * 帯から除外する memoryId（`memories` として返したもの）。
+     *
+     * adapter の期待する形式でない id（`@mnemora/postgres` なら uuid の形でないもの・空文字）は、どの
+     * Memory とも一致しないので「無いもの」として扱い、例外にしない——`get`・`getMany` と同じ扱い。ほかの
+     * id の除外はそのまま効く（Issue #1262。`@mnemora/postgres` は以前、DB の例外で投げていた）。
+     */
     excludeMemoryIds: readonly MemoryId[];
   };
 }
