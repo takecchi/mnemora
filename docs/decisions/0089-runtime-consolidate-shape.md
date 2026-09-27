@@ -555,3 +555,18 @@ CAS の破れや部分的な失敗という稀なケースで読み違えうる�
 - **契約**（`runtime.ts` の `Runtime.consolidate` の doc の手順3に追記）: eligible は重複を除いて数える。`{ memoryIds: [a, a] }` は eligible 1件として `single_eligible_source` になり、同じ Memory を自分自身と統合しない。`sources` は入力と同じ長さ（重複も保つ）のまま。
 - **歯**: `packages/core/src/__tests__/consolidate-duplicate-ids.test.ts`（Fake）。重複除去を外す変異で赤、戻して緑を確かめた。
 - **適合テスト一式（`*-conformance.ts`）には足していない**（Issue #809 の方針）。
+
+---
+
+## 2026-09-27 追記（クローン miku の委譲先）: `not_attempted` は「先行の `failed` で打ち切られた」場合だけではない
+
+層2（`ConsolidateSourceOutcome`）の表は、`not_attempted` を「**見ていない。**先行の `failed` で打ち切られた」とだけ書いている。実装は、`status === 'active'`（eligible）だったのに書き込みを試みなかった要素に、次の3つの場合で `not_attempted` を付ける（`packages/core/src/__tests__/consolidate.test.ts` がこのうち2つを固定している）。
+
+1. 先行の要素が `failed` になり、打ち切った（表のとおり）。
+2. eligible が1件だけで、`nothing_to_consolidate`/`single_eligible_source` で終わった。その1件が `not_attempted` になる。
+3. LLM 呼び出しが失敗し、`llm_failed` で終わった。eligible だった要素がすべて `not_attempted` になる。
+
+2と3では、その要素は見られている（`active` と分類された）。表の「見ていない」は当たらない。次の一手（「そのまま再送してよい」）は3つとも変わらない。どれも書き込みを試みていないからである。
+
+- **挙動は変えていない。** 既存の値で2と3を言い換えられるものは無い。`eligible` は `dryRun` のときだけ出ると決めてあり、`status_not_active` は事実に反する。別の値を足すことは公開の union への追加になるので、採らなかった。
+- **反映先**: `packages/core/src/runtime.ts` の `ConsolidateSourceOutcome` の doc（3つの場合を列挙した）。上の表の本文は書き換えていない（`docs/decisions/README.md` の、採用済み ADR の扱い）。

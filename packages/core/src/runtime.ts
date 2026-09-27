@@ -702,7 +702,15 @@ export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_
  *   `status_changed_concurrently` と同じ意味）。
  * - `"failed"` — 競合以外の例外で書き込みが失敗した。**この時点で処理を打ち切る**
  *   （下の `"not_attempted"` 参照）。
- * - `"not_attempted"` — それより前の要素が `"failed"` になったため、まだ見ていない。
+ * - `"not_attempted"` — `status === 'active'`（eligible）だったが、この呼び出しでは
+ *   `superseded` への書き込みを試みていない。**次の3つの場合に出る**（どれも書き込みを
+ *   試みていないので、状態を変えずにそのまま再送してよい）:
+ *   - それより前の要素が `"failed"` になり、そこで打ち切った（まだ見ていない）。
+ *   - eligible が1件だけだった（`nothing_to_consolidate`/`single_eligible_source`）。その1件
+ *     （重複して渡されていれば、その全部）がこの値になる。
+ *   - LLM 呼び出しが失敗した（`llm_failed`）。eligible だった要素がすべてこの値になる。
+ *   ⚠ 2026-09-27 に、実装（`consolidate.test.ts` が固定している振る舞い）に合わせて書き直した。
+ *   それまでの doc は1つ目の場合だけを書いていた（ADR 0089 の同日付の追記）。
  * - `"eligible"` — `dryRun: true` のときだけ出る。`status === 'active'` で、実際に統合される
  *   側になったであろう対象。
  */
