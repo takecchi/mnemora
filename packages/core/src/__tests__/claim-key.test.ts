@@ -7,6 +7,7 @@ import {
   normalizeClaimKey,
   normalizeClaimKeyPart,
 } from "../claim-key.js";
+import { describeExtractionFailure } from "../extraction.js";
 import type { StructuredRequest } from "../interfaces/llm-provider.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 
@@ -272,5 +273,38 @@ describe("ClaimKeyBatchResultSchema", () => {
     expect(ClaimKeyBatchResultSchema.safeParse({ claims: [{ subject: "user" }] }).success).toBe(
       false,
     );
+  });
+});
+
+/**
+ * Issue #1264: `describeClaimKeyFailure`（`claim-key.ts`、export しない複製）は、`extraction.ts` の
+ * `describeExtractionFailure` と同じロジックであるべきだ、とその doc は書いている。ずれたら赤くなるよう、
+ * 同じ入力を provider に投げさせ、`deriveClaimKeys` の `failure` と `describeExtractionFailure` の出力を突き合わせる。
+ */
+describe("deriveClaimKeys の失敗の記述は describeExtractionFailure と同じ（Issue #1264）", () => {
+  const withKind = (kind: unknown) => Object.assign(new Error("boom"), { kind });
+  const INPUTS: Array<[string, unknown]> = [
+    ["kind を持つ Error", withKind("rate_limit")],
+    ["kind が空文字の Error", withKind("")],
+    ["kind が文字列でない Error", withKind(5)],
+    ["kind を持たない Error", new Error("plain")],
+    ["文字列", "boom"],
+    ["null", null],
+    ["undefined", undefined],
+    ["kind を持つ Error でないオブジェクト", { kind: "x" }],
+    ["数", 42],
+  ];
+
+  it.each(INPUTS)("%s", async (_label, thrown) => {
+    const provider: LLMProvider = {
+      complete: async () => {
+        throw new Error("not used");
+      },
+      completeStructured: async () => {
+        throw thrown;
+      },
+    };
+    const result = await deriveClaimKeys(provider, ctx, ["発話"]);
+    expect(result.failure).toEqual(describeExtractionFailure(thrown));
   });
 });
