@@ -29,6 +29,10 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  * consolidate、reflect、forget、purge、restoreArchived、restoreSuperseded、reinforce
  * （store の口）、sweepArchive、時計を進める。LLM と埋め込みは、この下の決定的な偽物を使う。
  *
+ * reextract の対象には、usage の Observation（使用報告）も入れる。使用報告は抽出器を通らない
+ * ので、`reextract` は存在しない Observation と同じ種類の `Error` を投げる（Issue #1099）。
+ * 戻り値の比較（`THROW <名前>: <文面>`）で、両方の実装が同じ例外を投げることを見る。
+ *
  * ## 比べるもの
  * 1手ごとの、その手の戻り値（id を伏せた形）と、次の状態。
  * - 記憶: status・本文・digest・tags・subject・由来の Observation・抽出器の版・provenance・
@@ -54,9 +58,6 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
  *   どちらが先に元を吸うかが backend で変わりうる。自動ジョブは積まない
  *   （`autoQueueConsolidateReflectOnExtract` を立てない）。consolidate / reflect の本体は、
  *   直接の操作として当てている。
- * - **usage の Observation への reextract**（Issue #1099）。usage は抽出器を通らない約束だが、
- *   今の `reextract` は抽出してしまう。本文に id が入るので backend で食い違う。直すまでは
- *   reextract の対象から外す。
  * - **境界の時刻。** 時計は1手ごとに1秒進み、`advance` で1時間〜400日進む。
  *   `decay_floor_at` と「いま」がちょうど一致する形はまず作れない。【実測】`archiveDecayed` の
  *   `<=` を `<` に壊す変異は、20シード × 60手で捕まらなかった。境界は、それぞれの口の歯が見る。
@@ -279,7 +280,6 @@ export async function runWriteOps(
   });
 
   const observationOrder: string[] = [];
-  const usageObservations = new Set<string>();
   const memAliases = new Map<string, string>();
   const obsAlias = (id: string) => {
     const n = observationOrder.indexOf(id);
@@ -381,7 +381,6 @@ export async function runWriteOps(
             ...(op.ext !== null ? { externalId: `u${op.ext}` } : {}),
           });
           if (!observationOrder.includes(r.observationId)) observationOrder.push(r.observationId);
-          usageObservations.add(r.observationId);
           result = [r.extraction, r.memoryIds.length];
           break;
         }
@@ -391,8 +390,7 @@ export async function runWriteOps(
           break;
         }
         case "reextract": {
-          // Issue #1099 が直るまで、usage の Observation は対象から外す（doc 参照）。
-          const targets = observationOrder.filter((id) => !usageObservations.has(id));
+          const targets = observationOrder;
           if (targets.length === 0) {
             result = "skip";
             break;
