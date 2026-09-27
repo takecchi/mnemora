@@ -1,9 +1,9 @@
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
@@ -189,7 +189,7 @@ function runFingerprintStepBody(body, fakeNodeExitCode) {
 
   const cacheDir = join(scratch, "cache-does-not-need-to-exist");
 
-  const result = spawnSync("bash", ["--noprofile", "--norc", "-e", scriptPath], {
+  const result = spawnSyncWithDeadline("bash", ["--noprofile", "--norc", "-e", scriptPath], {
     env: {
       ...process.env,
       PATH: `${binDir}:${process.env.PATH ?? ""}`,
