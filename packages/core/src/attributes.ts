@@ -32,6 +32,7 @@ export type Attributes = Record<string, string>;
 export const ATTRIBUTES_MAX_KEYS = 16;
 /** 1キーの最小・最大文字数。 */
 export const ATTRIBUTE_KEY_MIN_LENGTH = 1;
+/** 1キーの最大文字数。これを超えるキーは拒む（`ATTRIBUTE_KEY_MIN_LENGTH` と組）。 */
 export const ATTRIBUTE_KEY_MAX_LENGTH = 64;
 /** 1値の最大文字数（空文字は許す——「キーはあるが値を空にしたい」ケースを塞がない）。 */
 export const ATTRIBUTE_VALUE_MAX_LENGTH = 256;

@@ -341,6 +341,9 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * 「呼び出しの始めの値で揃える」ことは約束していない（揃えるのは新しい方針になる）。
  */
 export interface TenantSettingsStore {
+  /**
+   * テナントの既定の半減期（時間）。書き込む記憶の `halfLifeHours` の既定になる。設定の行が無ければ `DEFAULT_HALF_LIFE_HOURS` を返す（`@mnemora/postgres` と testkit の fixture で同じ）。
+   */
   getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;
 
   /**

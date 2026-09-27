@@ -79,7 +79,9 @@ import type { RecallOutputValidationMode } from "./recall-output-validation.js";
  */
 
 export interface RecallRuntimeDeps {
+  /** 記憶の読み出しと、段6の `recalls` の記録に使う。 */
   memoryStore: MemoryStore;
+  /** ANN チャンネル（段1）と連想枠に使う。 */
   vectorStore: VectorStore;
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md): 忘却ゲート（段1・
@@ -101,8 +103,11 @@ export interface RecallRuntimeDeps {
    * 黙って0件にしない理由は `RecallQuery.channels` の doc に書いてある。
    */
   lexicalStore?: LexicalStore;
+  /** クエリの本文を埋め込むのに使う（`RecallQuery.vector` を渡したときは呼ばない）。 */
   embeddingProvider: EmbeddingProvider;
+  /** 「今」の時刻（減衰・`validAt` の既定・記録の時刻）。 */
   clock: Clock;
+  /** 返却量の予算（`RecallQuery.budget`）の計算に使う。 */
   tokenCounter: TokenCounter;
   /**
    * `recall()` の戻り値を zod で検証するときの倒れ方（Issue #131、ADR 0098）。
@@ -195,12 +200,15 @@ export function compareScoredCandidates(a: ScoredCandidate, b: ScoredCandidate):
  * **構造的に成り立つ。**成り立っていることは呼び出し側が確かめ、`countKind` の名乗りに使う。
  */
 export interface ThresholdPartition {
+  /** `total >= threshold` だった候補。 */
   passed: ScoredCandidate[];
+  /** `total < threshold` だった候補（`below_threshold` として `omitted` に数える）。 */
   belowThreshold: ScoredCandidate[];
   /** `>= threshold` でも `< threshold` でもなかった候補（実際には `total` が `NaN`）。 */
   notComparable: ScoredCandidate[];
 }
 
+/** `scored` を段2の閾値で3つに分ける（分け方と理由は {@link ThresholdPartition} の doc）。入力の順を保ち、どの候補も必ずどれか1つに入る。 */
 export function partitionByThreshold(
   scored: readonly ScoredCandidate[],
   threshold: number,
@@ -247,6 +255,7 @@ export function countKindForPartition(
 
 /** budget truncation の単位。同伴ペアは分割しない（docs/recall.md §8）ため、1つ以上の候補をまとめて持つ。 */
 export type Unit = {
+  /** この単位に入る候補（同伴ペアなら2件、ほかは1件）。切り詰めるときは単位ごと落とす。 */
   members: ScoredCandidate[];
   /** 並び替え・切り詰めの基準スコア。ペアの場合は主(スコアで選ばれた側)のスコアを使う。 */
   rankScore: number;
@@ -387,6 +396,10 @@ async function fetchMandatoryCompanions(
     });
 }
 
+/**
+ * `Runtime.recall` の本体。`query` を {@link RecallQuerySchema} で検査し（合わなければ zod の `ZodError`）、段1〜6を走らせ、記録した結果を返す。
+ * ⚠ `channels` に `"lexical"` を含むのに `deps.lexicalStore` が無ければ例外を投げる（`RecallRuntimeDeps.lexicalStore` の doc）。
+ */
 export async function runRecall(
   ctx: Ctx,
   query: RecallQuery,

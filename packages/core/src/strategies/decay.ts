@@ -9,11 +9,17 @@ export interface DecayParams {
   recordedAt: Date;
   /** Memory.lastReinforcedAt。無ければ recordedAt を起点にする（ADR 0010）。 */
   lastReinforcedAt?: Date | null;
+  /** 減衰させる前の強さ（`Memory.strength`）。 */
   strength: number;
+  /** 半減期（時間）。起点からこの時間が経つと強さが半分になる。 */
   halfLifeHours: number;
 }
 
+/** 壁時計（時間）で読む減衰の戦略（上の doc）。既定は {@link defaultDecayStrategy}。 */
 export interface DecayStrategy {
+  /**
+   * `now` の時点の強さ（`strength × 0.5^(経過時間 / halfLifeHours)`、起点は `lastReinforcedAt ?? recordedAt`）。⚠ `now` が起点より前なら `strength` を超える値を返す（丸めない）。
+   */
   strengthAt(now: Date, params: DecayParams): number;
   /** threshold を省略すると `DEFAULT_DECAY_THRESHOLD`（0.05、ADR 0010）が使われる。 */
   floorAt(params: DecayParams, threshold?: number): Date;
@@ -113,6 +119,7 @@ function floorAt(params: DecayParams, threshold: number = DEFAULT_DECAY_THRESHOL
   return new Date(ms);
 }
 
+/** 既定の {@link DecayStrategy}。`floorAt` は、`Date` で表せる最大の時刻を超えるときは、その最大値に丸める（Invalid Date にしない）。 */
 export const defaultDecayStrategy: DecayStrategy = {
   strengthAt,
   floorAt,
@@ -135,12 +142,17 @@ export const defaultDecayStrategy: DecayStrategy = {
 export interface ActivityDecayParams {
   /** 書き込み時（作成・強化）の tenant_activity.activity_seq。 */
   baseSeq: number;
+  /** 減衰させる前の強さ（`Memory.strength`）。 */
   strength: number;
   /** 単位は「そのテナントで recall() が起きた回数」。 */
   halfLifeRecalls: number;
 }
 
+/** 活動時計（そのテナントで `recall()` が起きた回数）で読む減衰の戦略（上の doc）。既定は {@link defaultActivityDecayStrategy}。 */
 export interface ActivityDecayStrategy {
+  /**
+   * `nowSeq` の時点の強さ（`strength × 0.5^((nowSeq − baseSeq) / halfLifeRecalls)`）。⚠ `nowSeq` が `baseSeq` より小さければ `strength` を超える値を返す（丸めない）。
+   */
   strengthAt(nowSeq: number, params: ActivityDecayParams): number;
   /** threshold を省略すると `DEFAULT_DECAY_THRESHOLD`（0.05、ADR 0010）が使われる。 */
   floorAt(params: ActivityDecayParams, threshold?: number): number;
@@ -186,6 +198,7 @@ function activityFloorAt(
   return Math.min(params.baseSeq + Math.ceil(offset), Number.MAX_SAFE_INTEGER);
 }
 
+/** 既定の {@link ActivityDecayStrategy}。`floorAt` は切り上げた整数を返し、`Number.MAX_SAFE_INTEGER` を超えるときはその値に丸める。 */
 export const defaultActivityDecayStrategy: ActivityDecayStrategy = {
   strengthAt: activityStrengthAt,
   floorAt: activityFloorAt,

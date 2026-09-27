@@ -5,8 +5,17 @@ import { ClaimKeySchema, type ClaimKey } from "./claim-key.js";
 import type { MemoryId, ObservationId } from "./ids.js";
 import { ProvenanceSchema, type Provenance } from "./provenance.js";
 
+/**
+ * Memory の状態。
+ * - `active`: 通常の状態。recall の既定の対象。
+ * - `superseded`: 別の Memory に置き換えられた（`supersededById`）。
+ * - `contested`: 矛盾する相手と組になっている（`contestedWithId`）。
+ * - `archived`: 減衰して退避された（`archiveDecayed`）。戻す口がある。
+ * - `forgotten`: 利用者が `forget` した。本文は残り、`purge` で物理的に消える。
+ */
 export type MemoryStatus = "active" | "superseded" | "contested" | "archived" | "forgotten";
 
+/** `MemoryStatus` の zod スキーマ。値を実行時に検査するときに使う（型 `MemoryStatus` と揃えてある）。 */
 export const MemoryStatusSchema = z.enum([
   "active",
   "superseded",
@@ -64,6 +73,7 @@ export function isStrengthInRange(value: number): boolean {
  */
 export type EmbeddingStatus = "pending" | "ready" | "failed" | "skipped";
 
+/** `EmbeddingStatus` の zod スキーマ。値を実行時に検査するときに使う（型 `EmbeddingStatus` と揃えてある）。 */
 export const EmbeddingStatusSchema = z.enum([
   "pending",
   "ready",
@@ -71,8 +81,10 @@ export const EmbeddingStatusSchema = z.enum([
   "skipped",
 ]) satisfies z.ZodType<EmbeddingStatus>;
 
+/** `digest` をどう作ったか。`"llm"` は LLM が返した要旨、`"fallback"` は LLM の要旨が無い・空だったので本文の先頭を切り出したもの。 */
 export type DigestSource = "llm" | "fallback";
 
+/** `DigestSource` の zod スキーマ。値を実行時に検査するときに使う（型 `DigestSource` と揃えてある）。 */
 export const DigestSourceSchema = z.enum(["llm", "fallback"]) satisfies z.ZodType<DigestSource>;
 
 /**
@@ -85,8 +97,11 @@ export const DigestSourceSchema = z.enum(["llm", "fallback"]) satisfies z.ZodTyp
  * （またはそれと同値の実装）で計算し、`NewMemory.contentHash` に渡すこと。
  */
 export interface Memory {
+  /** Memory の id。 */
   id: MemoryId;
+  /** Memory が属するテナント。 */
   tenantId: string;
+  /** テナントの中の主題。主題の無い Memory は `null`（または省略）。 */
   subjectId?: string | null;
 
   /**
@@ -102,15 +117,22 @@ export interface Memory {
    * `docs/memory-model.md` §5 の 2026-09-27 追記を参照。
    */
   sourceObservationId?: ObservationId | null;
+  /** この Memory を作った抽出器の版。抽出の冪等キー（観測・抽出器の版・`contentHash`）の一部。 */
   extractorVersion?: string | null;
 
+  /** 本文。purge されると tombstone（`PURGE_TOMBSTONE_CONTENT`）で上書きされる。 */
   content: string;
+  /** `content` の SHA-256 の hex 文字列（上の doc: core は計算しない。`RuntimeDeps.hashContent` で作る）。 */
   contentHash: string;
+  /** 要旨（recall が返す・目次帯に載せる短い文）。作り方は `digestSource`。 */
   digest: string;
+  /** `digest` をどう作ったか（{@link DigestSource}）。 */
   digestSource: DigestSource;
 
+  /** どこから来たか（{@link Provenance}）。 */
   provenance: Provenance;
 
+  /** 状態（{@link MemoryStatus}）。 */
   status: MemoryStatus;
   /**
    * 置き換えた側の id。同じテナントの行を指す前提で設計された欄だが、`MemoryStore` は
@@ -132,8 +154,11 @@ export interface Memory {
    */
   tags: string[];
 
+  /** 出来事が起きた時刻（Observation の `occurredAt` など）。分からなければ `null`。期間の絞り込みと `freshness` の起点に使う（無ければ `recordedAt`）。 */
   occurredAt?: Date | null;
+  /** 記録した時刻。減衰の起点（強化されていなければ）。 */
   recordedAt: Date;
+  /** 最後に強化（`reinforce`）された時刻。無ければ `null` で、減衰の起点は `recordedAt` になる。 */
   lastReinforcedAt?: Date | null;
 
   /**
@@ -240,6 +265,7 @@ export interface Memory {
    * `docs/memory-model.md` §7 の 2026-09-27 追記を参照。
    */
   halfLifeHours: number;
+  /** 壁時計で、強さが忘却の閾値を下回る時刻（書き込み時・強化時に計算して保存する）。recall の忘却ゲート（既定で有効。`RecallQuery.includeFullyDecayed` で外せる）は、この時刻が「今」以前の Memory を除く。 */
   decayFloorAt: Date;
 
   /**
@@ -265,6 +291,7 @@ export interface Memory {
   /** `decayBaseSeq` の doc コメント参照。活動時計での Memory 単位の半減期。 */
   halfLifeRecalls?: number | null;
 
+  /** 埋め込みの状態（{@link EmbeddingStatus}）。 */
   embeddingStatus: EmbeddingStatus;
 
   /**
@@ -308,7 +335,9 @@ export interface Memory {
    */
   attributes?: Attributes;
 
+  /** 行を作った時刻。 */
   createdAt: Date;
+  /** 行を最後に書き換えた時刻。 */
   updatedAt: Date;
 }
 
@@ -325,6 +354,7 @@ export type NewMemory = Omit<
 > &
   Partial<Pick<Memory, "status" | "supersededById" | "contestedWithId">>;
 
+/** `Memory` の zod スキーマ。値を実行時に検査するときに使う（型 `Memory` と揃えてある）。 */
 export const MemorySchema = z.object({
   id: z.string().min(1),
   tenantId: z.string().min(1),
@@ -394,6 +424,7 @@ export const MemorySchema = z.object({
   updatedAt: z.date(),
 }) satisfies z.ZodType<Memory>;
 
+/** `NewMemory` の zod スキーマ。値を実行時に検査するときに使う（型 `NewMemory` と揃えてある）。 */
 export const NewMemorySchema = MemorySchema.omit({
   id: true,
   createdAt: true,

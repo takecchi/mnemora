@@ -36,6 +36,7 @@ export const ReflectionLLMResultSchema = z.discriminatedUnion("outcome", [
   }),
   z.object({ outcome: z.literal("nothing") }),
 ]);
+/** {@link ReflectionLLMResultSchema} の型（内省の LLM が返す値。`outcome: "nothing"` を含む）。 */
 export type ReflectionLLMResult = z.infer<typeof ReflectionLLMResultSchema>;
 
 /** {@link ReflectionLLMResultSchema} の `outcome: 'reflected'` 側だけを取り出した形。 */
@@ -75,7 +76,9 @@ export function buildReflectionPrompt(basis: Memory[]): PromptSpec {
   };
 }
 
+/** `buildReflectedMemory`（内省の結果の `NewMemory` を組み立てる純関数）の入力。 */
 export interface BuildReflectedMemoryParams {
+  /** `tenantId` を内省の結果に使う。`subjectId` は `eligible` から決める（全件で同じならその値、違えば `null`）。 */
   ctx: Ctx;
   /**
    * 土台になった側（`status: 'active'` かつ `provenance.kind !== 'reflected'` の eligible）。
@@ -83,10 +86,15 @@ export interface BuildReflectedMemoryParams {
    * 和集合はこの並びに従う（`buildConsolidatedMemory` と同じ規律）。
    */
   eligible: Memory[];
+  /** 内省の LLM が返した値のうち、記憶を作る側（`outcome: "nothing"` ではないもの）。 */
   llmResult: ReflectedLLMResult;
+  /** 本文から `contentHash` を作る関数（`RuntimeDeps.hashContent` と同じもの）。 */
   hashContent: (content: string) => string;
+  /** LLM の digest が無い・空のときに、本文の先頭から切り出す長さ。 */
   digestFallbackLength: number;
+  /** 内省の結果の半減期（時間）。 */
   halfLifeHours: number;
+  /** 内省の結果の `recordedAt` にする時刻（減衰の起点にもなる）。 */
   now: Date;
   /**
    * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
@@ -94,6 +102,7 @@ export interface BuildReflectedMemoryParams {
    * `consolidate.ts` の `BuildConsolidatedMemoryParams` と同じ形。
    */
   activitySeq?: number;
+  /** 活動時計のテナントの半減期（`recall()` の回数）。`activitySeq` と揃って渡したときだけ効く。 */
   halfLifeRecalls?: number;
 }
 
