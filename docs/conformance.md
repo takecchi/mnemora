@@ -245,6 +245,24 @@ ADR 0095 §7 が逐語でこう書いている:
 
 **⟹ この文書は穴を記録するところまでで止める**（Issue #142 の案(う)）。
 
+### ⚠ 2026-09-27 追記: テキストとベクトルの対応も見ていない（[Issue #1000](https://github.com/takecchi/mnemora/issues/1000)）
+
+`describeEmbeddingProviderConformance` の項目は、形（space・件数・次元・有限）、同じ入力なら同じ値、
+1回の呼び出しの中の順序の対応、上限を超える入力を見る。**「別のテキストには別のベクトルが返る」
+「どのテキストにどのベクトルが返るか」を見る項目は無い。**
+⟹ **テキストとベクトルの対応を一貫して壊す実装は、全項目を通る。**Issue #1000 は変異試験で次の2つを実測した。
+
+- `examples/chat` の `CachingEmbeddingProvider` が、取り逃した全テキストに1本目のベクトルを返す変異: 全項目が緑
+- testkit の `RecordingEmbeddingProvider` が、下層の返したベクトルの並びを反転して記録する変異: 全項目が緑
+
+この2つの包み型は、専用テストで対応を見ている（PR #1007。
+`packages/testkit/src/__tests__/recording-embedding-provider-mapping.test.ts`、
+`examples/chat/src/__tests__/caching-embedding-provider-mapping.test.ts`）。**外部の adapter には、この歯は当たらない。**
+
+**suite に要件を足すかは決めていない。**足すと、外部の adapter が通らなければならない要件が増える（#809 の方針と
+関係する）。また「異なるテキストなら異なるベクトル」は本物のモデルでも厳密には保証されない（衝突がありうる）ので、
+どの強さで要求するかも決める必要がある。
+
 ---
 
 ## 6. ⭐ 後から決められるように — `local` の live 15本は、CI で走らせる形が可能である

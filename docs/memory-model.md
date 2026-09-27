@@ -785,6 +785,25 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 **`tagMatch`（上）は引き続き変えていない**——`docs/recall.md`「taxonomy によるラベルの
 絞り込みと群カウント」節、ADR 0323 を参照。
 
+**⚠ 2026-09-27 追記（[Issue #953](https://github.com/takecchi/mnemora/issues/953)、今の振る舞いを書くだけ）:
+`tags` と `labels` の名前は、文字列の完全一致で比べる。正規化はしない。**
+大文字小文字・全角半角（NFKC）・Unicode の正規化形（NFC/NFD）・前後の空白のどれも、同じものとして
+扱わない。⟹ `Foo`・`foo`・` foo `・`ｆｏｏ` を `tags` に書くと、`labels` には4つの別々の語彙として
+残る。`registerLabel('foo')` が `registered` にするのは `foo` だけである。`RecallQuery.labels: ['project']` は
+`tags: ['Project']` の記憶に当たらない。段2の `tagMatch` も完全一致で数える。
+`@mnemora/postgres`・testkit の `InMemoryMemoryStore`・core の Fake の3つは、どれもこのとおりに動く
+（Issue #953 の実測）。
+
+- 例外は1つだけ: LLM が返した tags のうち、空文字・空白だけの要素は Memory に書く前に捨てる（PR #1122）。
+  空白でない要素の前後の空白は削らない。
+- `tags` はほとんどが LLM の出力なので、実運用では表記ゆれが起こりうる。ただし、どのくらい起こるかは
+  測っていない。
+- 同一視する範囲を決めて正規化するのは、新しい方針になる。保存済みの `tags`・`labels` の意味も変わる
+  （既に分かれて残っている行をどう統合するか）。**決めていない。**比較のために書くと、claim key は
+  書き込み側で `normalizeClaimKeyPart`（NFKC → trim → 小文字化 → 空白を `_`）を通す約束がある
+  （[ADR 0320](./decisions/0320-claim-key-field-implementation.md)、`packages/core/src/claim-key.ts`）。
+  tags・labels にはその約束が無い。
+
 ---
 
 ## 9. 監査ログ

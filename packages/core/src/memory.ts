@@ -123,7 +123,13 @@ export interface Memory {
   /** `supersededById` と同じ注意が当たる（テナント一致は検査しない、Issue #854）。 */
   contestedWithId?: MemoryId | null;
 
-  /** 要素の長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
+  /**
+   * 要素の長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。
+   *
+   * 要素は文字列の完全一致で比べる（`labels`・`RecallQuery.labels`・`tagMatch` とも）。大文字小文字・
+   * 全角半角・Unicode の正規化形・前後の空白は同じものとして扱わない（Issue #953、
+   * `docs/memory-model.md` §8 の 2026-09-27 追記）。
+   */
   tags: string[];
 
   occurredAt?: Date | null;
