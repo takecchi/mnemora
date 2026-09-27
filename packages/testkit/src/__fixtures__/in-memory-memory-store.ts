@@ -1785,7 +1785,11 @@ export class InMemoryMemoryStore implements MemoryStore {
       if (m.tenantId !== ctx.tenantId) continue;
       if ((m.subjectId ?? null) !== query.subjectId) continue;
       if (m.status !== "active") continue;
-      if (!m.claimKey) continue;
+      // `PostgresMemoryStore.listActiveClaimPredicates` の SQL
+      // （`claim_key_subject IS NOT NULL AND claim_key_predicate IS NOT NULL`）と同じく、
+      // 主語か述語の片方が欠けた claim key は数えない（以前は述語の欠けた鍵から
+      // `undefined` を一覧に混ぜていた。歯は `in-memory-list-claim-predicates-incomplete-key.test.ts`）。
+      if (!m.claimKey || m.claimKey.subject == null || m.claimKey.predicate == null) continue;
       const predicate = m.claimKey.predicate;
       const createdAtMs = m.createdAt.getTime();
       const existing = latestByPredicate.get(predicate);
