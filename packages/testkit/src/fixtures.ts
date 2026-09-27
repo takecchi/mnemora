@@ -66,6 +66,9 @@
 //   （`memories_check`）。`decayBaseSeq`・`decayFloorSeq` が整数でない・負・2^63 以上 → `<欄> must be an integer /
 //   must not be negative / must fit in a Postgres bigint`（`memories_decay_seq_non_negative`）。`halfLifeRecalls` が
 //   `(0, ∞)` の外 → `halfLifeRecalls out of range (0, ∞)`（`memories_half_life_recalls_range`）。省略（`null`）はどれも検査しない。
+// - 空文字の参照・冪等の鍵は「値が在る」として扱う（`null`/`undefined` だけが「無い」）。`createMemory` 系の
+//   `sourceObservationId`・`supersededById`・`contestedWithId` が `""` → `… not found: `（Postgres は uuid として読めずに拒む）。
+//   `createObservation` 系の `externalId` が `""` → 2回目は既存の行を返す（Postgres の一意制約は `external_id IS NOT NULL` の行に効く）。
 // - `kind: "events_purged"` で `memoryId` が null でないイベント → `memory_events.memoryId must be null for kind "events_purged"`
 //   （`memory_events_check`、core の `MemoryEventSchema` と同じ約束）。対象は `memory_events.kind` の検査と同じ口。
 // - Postgres の `real`（float4）列に収まらない数 → `… does not fit in a Postgres "real" (float4) column`。
