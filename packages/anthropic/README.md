@@ -200,6 +200,24 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries
 const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client });
 ```
 
+## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（今の振る舞い）
+
+`AnthropicLLMProvider.completeStructured` は、送る前に SDK の `zodOutputFormat`（zod の `toJSONSchema` と SDK の
+`transformJSONSchema`）でスキーマを翻訳する。翻訳できない形は、**送る前に**素の `Error` を投げ、`messages.create` は呼ばれない
+（`AnthropicLLMProviderError` の `kind` には入らない）。
+
+【コードとテストで確かめた。Anthropic の実 API には当てていない】（歯: `src/__tests__/structured-output-zod-shapes.test.ts`）
+
+| zod の形 | 結果 |
+| --- | --- |
+| `z.tuple` | 送る前に `Error`「`JSON schema must have a type defined if anyOf/oneOf/allOf are not used`」 |
+| `z.date` | 送る前に `Error`「`Date cannot be represented in JSON Schema`」 |
+| `transform` | 送る前に `Error`「`Transforms cannot be represented in JSON Schema`」 |
+| `z.record`・`z.lazy`（再帰）・`default`・根が union | 翻訳は通り、送る。**送った後に Anthropic が受けるかは確かめていない** |
+
+文面は zod・SDK のもので、プロンプトの本文や API キーは含まない。`@mnemora/openai` は同じ形を送る前には落とさず、
+送った後に OpenAI が 400 で拒む（あちらの README に実測）。2つの provider の振る舞いをそろえるかは決めていない（#1148）。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§4・§5.4 — `LLMProvider` の契約と provider 構成

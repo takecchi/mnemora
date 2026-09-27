@@ -136,6 +136,30 @@ mnemora の runtime は、recall のクエリを trim して空なら埋め込�
 `RuntimeDeps.embeddingInput` の戻り値が空文字だと、その embed ジョブは 400 で失敗する**
 （`@mnemora/local-embedding` は空文字にもベクトルを返す——provider で振る舞いが違う）。
 
+## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（今の振る舞い）
+
+`OpenAILLMProvider.completeStructured` は、渡された zod スキーマを翻訳して**そのまま送る**——送る前に「OpenAI が受け付ける形か」は
+検査しない。受け付けない形は、送った後に OpenAI が拒み、SDK の `BadRequestError`（HTTP 400、`type: invalid_request_error`、
+`param: response_format`）がそのまま伝わる（`OpenAILLMProviderError` の `kind` には入らない）。
+
+【実測 2026-09-27、`gpt-4o-mini`、`openai@7.10.0`、各形1回】
+
+| zod の形                                                                 | 結果                                                       |
+| ------------------------------------------------------------------------ | ---------------------------------------------------------- |
+| `z.object`・`z.array`・`z.enum`・`optional`・`nullable`（core が使う形） | 通る（core の4つのスキーマは実 API で確かめた、#1164）     |
+| 根が union（判別可能ユニオンなど）                                       | 通る（1つの欄 `result` を持つ object に包んで送る、#1147） |
+| `z.lazy`（再帰）                                                         | 通る                                                       |
+| `default`                                                                | 通る                                                       |
+| `z.record`                                                               | 400「`'propertyNames' is not permitted`」                  |
+| `z.tuple`                                                                | 400「`array schema items is not an object`」               |
+| `z.date`                                                                 | 400「`schema must have a 'type' key`」                     |
+| `transform`                                                              | 400「`schema must have a 'type' key`」                     |
+
+拒まれたときの文面はスキーマの位置だけで、プロンプトの本文と API キーは載らなかった（確かめた）。⚠ `z.date`・`transform` は、
+`openai` SDK 自身の strict 検査（`lib/transform.js` の `toStrictJsonSchema`）は通るが、実 API は拒む——SDK の検査を通ることは、
+実 API が受けることの十分条件ではない。`@mnemora/anthropic` は同じ形の一部を**送る前に**素の `Error` で落とす（あちらの README）。
+2つの provider の振る舞いをそろえる（送る前に落とす・失敗に種類を付ける）かは決めていない（#1148）。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§5.4・§5.5 — `LLMProvider` / `EmbeddingProvider` の契約
