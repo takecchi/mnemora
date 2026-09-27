@@ -63,6 +63,5 @@ describe("runNodeScript: 子の close を待つ期限", () => {
         expect(isAlive(pid)).toBe(false);
       },
     );
-  }, // この歯自身の上限（testTimeout は延ばさない。期限の無い形なら、ここで赤くなる）。
-  15_000);
+  }, 15_000); // この歯自身の上限（testTimeout は延ばさない。期限の無い形なら、ここで赤くなる）。
 });
