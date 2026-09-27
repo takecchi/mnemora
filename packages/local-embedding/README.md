@@ -444,6 +444,11 @@ new LocalEmbeddingProvider({ cacheDir: "/var/lib/mnemora/models" });
 `{ maxInputTokens, countTokens, embed }` を持つオブジェクトでなければならない。
 `buildLocalEmbeddingPipeline(extractor)` に渡せば、この組み立ては自動でやってくれる）:
 
+⚠ この形は `@huggingface/transformers` を**自分のコードから直接 import する**。`@mnemora/local-embedding` の
+依存として入るだけでは、pnpm や `npm install --install-strategy=nested` の配置だと自分のコードから解決できない
+（`TS2307: Cannot find module '@huggingface/transformers'`）。自分の依存にも足すこと——版は
+`@mnemora/local-embedding` の `package.json` の `dependencies` と同じものにする（違う版を足すと2つ入る）。
+
 ```ts check
 import {
   LocalEmbeddingProvider,
