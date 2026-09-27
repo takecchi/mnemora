@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +16,7 @@ import {
   findExactPinnedDependencyViolations,
   EXACT_PINNED_DEPENDENCY_EXEMPTIONS,
 } from "../publish-pack-checks.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-publish-pack.mjs`（publish 梱包の門）の歯。
@@ -688,9 +688,11 @@ describe("publish-pack-checks.mjs の判定関数（合成フィクスチャに�
  */
 describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起動する）", () => {
   it("本物どおり起動すると EXIT=0 になる", () => {
-    const result = spawnSync(process.execPath, [gate], {
+    // 本物の `pnpm pack` を起動する（CI で 27.6 秒）。既定の 60 秒ではなく個別に 120 秒を置く。
+    const result = spawnSyncWithDeadline(process.execPath, [gate], {
       cwd: repoRoot,
       encoding: "utf8",
+      timeoutMs: 120_000,
     });
     const output = `${result.stdout}${result.stderr}`;
 
@@ -704,9 +706,11 @@ describe("scripts/check-publish-pack.mjs（動的・本物の pnpm pack を起�
    * ——ADR 0255「決定A」（成功側が本体。「通った＝安全」と読ませないため）。
    */
   it("成功時の実行時出力に「⚠ この門が見ていない範囲」の断りが焼かれている（固定リストの取りこぼしを名乗る）", () => {
-    const result = spawnSync(process.execPath, [gate], {
+    // 本物の `pnpm pack` を起動する（CI で 27.6 秒）。既定の 60 秒ではなく個別に 120 秒を置く。
+    const result = spawnSyncWithDeadline(process.execPath, [gate], {
       cwd: repoRoot,
       encoding: "utf8",
+      timeoutMs: 120_000,
     });
     const output = `${result.stdout}${result.stderr}`;
 
