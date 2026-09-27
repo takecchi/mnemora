@@ -1568,6 +1568,12 @@ export interface RecallQuery {
    * 'filtered'`…にそのまま乗る」が定める契約そのものであり、「絞り込み自体を
    * 諦める」側には倒さない（2026-09-25 訂正——以前この段落は逆に書いていた）。
    *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: 空配列（`labels: []`）は「絞り込み無し」**——この欄を
+   * 渡さなかったときと同じで、全件が通る（`recall-taxonomy-filter.test.ts` が固定している）。上の 🔴 の
+   * 「0件」は、**名前を1つ以上渡し、そのどれも参加資格を持たなかった**場合の話である（空配列には当てはまらない）。
+   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（歯は
+   * `packages/postgres/src/__tests__/recall-filter-combination-parity.postgres.test.ts`）。
+   *
    * **`tags`（上）とは別の軸**——`tags` は LLM の推論で加点（段2）にしか使われないが、
    * この欄は呼び出し側が明示した統制語彙による絞り込みであり、母集合を段1で減らす
    * （`attributes` と同じ「AND 等値の絞り込み」の隣に立つ、こちらは「OR の集合絞り込み」）。
