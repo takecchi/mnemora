@@ -1554,6 +1554,10 @@ export interface RecallQuery {
    * この欄は呼び出し側が明示した統制語彙による絞り込みであり、母集合を段1で減らす
    * （`attributes` と同じ「AND 等値の絞り込み」の隣に立つ、こちらは「OR の集合絞り込み」）。
    *
+   * 名前は文字列の完全一致で比べる——`['project']` は `tags: ['Project']` の記憶に当たらない。
+   * 大文字小文字・全角半角・Unicode の正規化形・前後の空白は同じものとして扱わない
+   * （Issue #953、`docs/memory-model.md` §8 の 2026-09-27 追記）。
+   *
    * **`MemoryStore.listLabels?` を実装していない adapter**（`registered`/`proposed` の
    * 状態を一切知りようが無い）**では、`taxonomy_mode` に応じて次のどちらかに倒す**
    * （ADR 0323「決定2」参照。黙って絞り込みを諦めて全件へ広げることはしない）:
