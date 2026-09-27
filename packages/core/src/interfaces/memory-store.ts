@@ -331,6 +331,26 @@ export interface AggregateScopeOptions {
  * `reinforceMany` 自身の doc コメント参照。
  */
 export interface MemoryStore {
+  /**
+   * ⚠ **孤立サロゲート（`\uD800` 単体など、対をなさない UTF-16 サロゲートコードユニット）を
+   * 含む文字列を渡したときの挙動は、adapter によって、Postgres では欄の列の型によっても
+   * 異なる**（Issue #1075、実測。`createMemory` の同じ節と同じ形。現状を記録するだけで、
+   * どれに揃えるか——正規化・拒否・このまま——は決めていない）。
+   * - `PostgresMemoryStore`、`jsonb` 列の欄（`payload`/`attributes`）: **例外を投げる**
+   *   （`invalid input syntax for type json`）。`JSON.stringify` が孤立サロゲートを `\ud800` の
+   *   エスケープにし、Postgres の `jsonb` がそれを受け付けないため。**`runtime.observe` の
+   *   `text`・`content`・`speaker`・`data` などは全部 `payload` に入る**ので、
+   *   `observe({ kind: "utterance", text: "…\uD83D" })`（サロゲートペアの間で切った文字列）は
+   *   Observation を1件も書かずに例外になる。
+   * - `PostgresMemoryStore`、`text` 列の欄（`subjectId`/`externalId`。実測したのはこの2つ）: 例外を投げず、
+   *   U+FFFD（置換文字）に置き換えて保存する（node-postgres が UTF-8 へエンコードするときに
+   *   置き換える。`createMemory` の `text` 列の欄と同じ）。
+   * - `packages/testkit` の `InMemoryMemoryStore` と `packages/core` の `FakeMemoryStore`:
+   *   どの欄でも例外を投げず、入力をそのまま保持する。
+   *
+   * `createObservationWithOutbox` も同じである。今の振る舞いは
+   * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
+   */
   createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
   /** roadmap.md 段階3: outbox ジョブから observationId を渡された側が本文を取り直すための読み出し。 */
   getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;

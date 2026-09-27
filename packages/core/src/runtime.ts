@@ -1789,6 +1789,9 @@ export interface Runtime {
    * - LLM の呼び出しの失敗は投げない。全文フォールバックへ倒し、`extractionFailure` に載せる
    *   （docs/memory-model.md §4）。
    * - store が投げた例外は、そのまま伝わる（保存できない値の扱いは Issue #1063）。
+   *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
+   *   書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の
+   *   doc、Issue #1075）。
    */
   observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult>;
   /**
