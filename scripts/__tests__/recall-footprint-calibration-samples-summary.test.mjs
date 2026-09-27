@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/recall-footprint-calibration-samples-summary.mjs` の歯(Issue #340
@@ -68,7 +68,7 @@ function writeJson(name, data) {
 }
 
 function run(args) {
-  return spawnSync(process.execPath, [script, ...args], { encoding: "utf8" });
+  return spawnSyncWithDeadline(process.execPath, [script, ...args], { encoding: "utf8" });
 }
 
 describe("recall-footprint-calibration-samples-summary.mjs(子プロセスで起動)", () => {
