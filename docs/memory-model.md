@@ -135,6 +135,17 @@ Memory は目的の異なる複数の時刻を持つ。これを一つの「時�
 スコアリングすること、段1（ANN）への索引の押し下げ、`valid_until` を過ぎた記憶を
 `omitted` で名指しすることは、いずれもまだ Phase 2 のままである**（ADR 0145「射程外」参照）。
 
+**⚠ 2026-09-27 追記（後の ADR との照合）: 上の訂正の「`recall()` がこの区間を使ってフィルタすること、段1への
+押し下げ、`valid_until` を過ぎた記憶を `omitted` で名指しすることは、いずれもまだ Phase 2 のまま」は、もう
+成り立たない。**[ADR 0164](./decisions/0164-valid-from-until-recall.md)（2026-09-16）が3つとも実装した——`recall()` は
+`RecallQuery.validAt`（省略時は `now`）の時点で真でない記憶を段1（ANN・語彙の SQL の `WHERE`）で落とし、
+`omitted` の `filtered(expired)`/`filtered(not_yet_valid)` として名指しする。`includeOutsideValidity: true` で
+ゲートを外せる。区間はスコアの計算には使わない。`observe()` の入力からも `validFrom`/`validUntil` を渡せる
+（ADR 0164 決定4）。`@mnemora/postgres` と `@mnemora/testkit` の fixture で、期限切れの記憶が既定では
+`filtered(expired)` で落ち、`validAt` を区間の中にするか `includeOutsideValidity: true` にすると返ることを
+当て直した。上の表の Phase 欄（`valid_from` / `valid_until` は Phase 2）は、ADR 0164 が「射程外」6 で書き換えない
+と決めたので、そのままにしてある——**表の Phase 欄は設計時の区分であり、実装状況はこの追記のとおりである。**
+
 **⚠ 2026-09-27 追記（[Issue #1041](https://github.com/takecchi/mnemora/issues/1041)）: 表せる日時の範囲は adapter によって違う。**
 core の schema は `Date` であることしか検査しない（JS の `Date` は ±275760年まで）。`@mnemora/postgres` の
 `timestamptz` は `new Date("-004713-11-24T00:00:00.000Z")`（先発グレゴリオ暦の紀元前4714年11月24日、UTC）より
@@ -1405,6 +1416,13 @@ recallId)` がこの行を読み戻す口である。
 ### `labels` / `memory_labels`（Phase 2）
 
 §8 に記載。
+
+**⚠ 2026-09-27 追記（後の ADR との照合）**: 見出しの「Phase 2」は、もう実装状況を表していない。2つの表は
+`migrations/0020_taxonomy_labels.sql` で Phase 1 のスキーマに入り（[ADR 0318](./decisions/0318-taxonomy-labels.md)、既存の
+`memories.tags` からの backfill を含む）、`RecallQuery.labels` による絞り込みも実装された
+（[ADR 0323](./decisions/0323-taxonomy-recall-filter.md)）。migrate の後に2つの表が在ること、`@mnemora/postgres` と
+`@mnemora/testkit` の fixture の両方が `MemoryStore.listLabels?`/`registerLabel?` と
+`TenantSettingsStore.getTaxonomyMode?` を持つことを当て直した。詳細は §8 の 2026-09-25 追記。
 
 ### `outbox`（Phase 1）
 

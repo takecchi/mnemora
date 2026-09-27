@@ -154,6 +154,15 @@ Phase 1 で入れた土台が、後続フェーズをどう安くしているか
 
 **⟹ この行は「部分的に前倒し」である**（アーカイブ掃引は済み・検索時フィルタは未着手）。
 
+**⚠ 2026-09-27 追記（後の ADR との照合）: 上の「検索時フィルタは依然として未実装」と「⟹ 部分的に前倒し」は、
+もう成り立たない。**この訂正が書かれた約40分後に着地した [ADR 0153](./decisions/0153-recall-decay-floor-gate.md)
+（2026-09-16）が、`recall()` の段1に忘却ゲートを**既定で**通した——`recall-runtime.ts` は
+`VectorFilter.decayFloorAtAfter` を渡し、`decay_floor_at` を過ぎた記憶は段1で落ちて `omitted` の
+`filtered(decayed)` として名指しされる。`RecallQuery.includeFullyDecayed: true` でゲートを外せる。`@mnemora/postgres`
+と `@mnemora/testkit` の fixture で、床を1日過ぎた記憶が既定では `filtered(decayed)` で落ち、
+`includeFullyDecayed: true` なら段2まで届く（減衰したスコアで `below_threshold` になる）ことを当て直した。
+⟹ この行の2つの機構（検索時フィルタとアーカイブ掃引）は、どちらも前倒しで実装済みである。
+
 **⚠ 2026-09-16 追記（Issue #282）: 上の「⛔ この表の他の項目も前倒しされていない」の扱いについて。**この PR で Phase 2 / Phase 3 の表の全8行を実装と突き合わせた（内訳は本 PR 本文を見よ）。結果、Phase 2 の5行のうち4行（目次帯の digest 帯側／`purge()`／忘却の実処理のうちアーカイブ掃引側／`valid_from`・`valid_until` の型と保存側）が全部または部分的に前倒しされていた。前倒しされていないままなのは「関係グラフ本体」の1行だけである。**⟹「⛔ この表の他の項目も前倒しされていない」は、もはや一般には成立しない。**
 
 この一文を「前倒しされた行を名指しで列挙する形」に書き換えることも検討した。しかし列挙は、この表に行が増えるたび・既存行の実装が進むたびに追従が要る——**注意力に依存する形であり、`AGENTS.md` が退けている形そのものである。**機械的な歯にできないかも検討したが、各行の説明文（自然言語）と実装コード（識別子・ファイル）の対応付けは、汎用的な静的検査に落とせるものではないと判断した（これは静的な検討から導いた判断であり、実際に検査を書いて試したわけではない）。
@@ -301,6 +310,12 @@ ADR 0124 決定1）。`content`/`digest` を固定のトゥームストーンで
 `status = 'forgotten' AND purged_at IS NULL` の両方（`status` だけでは2回目の呼び出しを
 弾けないため）。`opts.dryRun`（下見）を持ち、`tick()`/`observe()` には配線していない。
 `decay_floor_at` を読み取りに使っていない点は本 PR の範囲外のままであり、変わっていない。
+
+**2026-09-27 追記（後の ADR との照合）**: 上の2つの追記が書いた「`decay_floor_at` を読み取りに使っていない点は
+変わっていない」は、翌日に変わった。[ADR 0153](./decisions/0153-recall-decay-floor-gate.md)（2026-09-16）が `recall()` の
+段1に忘却ゲートを既定で通し、`decay_floor_at` を過ぎた記憶は `filtered(decayed)` として名指しされて落ちる
+（`RecallQuery.includeFullyDecayed: true` で外せる）。落ちた記憶は `omitted` で名指しされ、黙って消えるのではない。
+`status` は `active` のまま変わらない（`archived` へ倒すのは `Runtime.sweepArchive` の明示の呼び出しだけである）。
 
 ### 5.4 監査ログの既定保持期間
 

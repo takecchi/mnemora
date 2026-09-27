@@ -153,10 +153,13 @@ export interface Memory {
    * 一度も読み書きされていなかった。ADR 0145 が `packages/postgres` の読み書きを
    * 初めて配線する。
    *
-   * ⚠ **この PR は `recall()` のどのフィルタ・スコアにもこの値を使わない。**
-   * 「いつ時点で真だった記憶か」を問う口（`RecallQuery`）・段1（ANN）への索引の
-   * 押し下げ・`validUntil` を過ぎた記憶を `omitted` で名指しすることは、いずれも
-   * この PR の射程外であり、別の ADR に委ねる（ADR 0145「これが覆るとしたら」参照）。
+   * **`recall()` はこの区間で絞り込む**（[ADR 0164](../../../docs/decisions/0164-valid-from-until-recall.md)、
+   * `validAt` ゲート）。`RecallQuery.validAt`（省略時は `now`）の時点で真でない記憶——
+   * `validFrom > validAt` または `validUntil <= validAt`——は段1（ANN・語彙の SQL の `WHERE`）で
+   * 落ち、`omitted` の `filtered(not_yet_valid)`/`filtered(expired)` として名指しされる。
+   * `RecallQuery.includeOutsideValidity: true` でゲートを外せる。**スコアの計算には使わない。**
+   * （ADR 0145 の時点では recall はこの値を使っておらず、それを射程外としていた。ADR 0164 が
+   * その射程外を実装した。）
    *
    * **省略可能な既存フィールドとして足した**（`purgedAt` と同じ理由——`Memory` は
    * `@mnemora/core` の公開型。必須にすると、この型を自分でリテラルとして組み立てている
