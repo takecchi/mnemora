@@ -38,10 +38,20 @@ describe("processConsolidateJob は tick() 経由で種の subjectId に近傍�
   it("ctx.subjectId 無しで tick を呼んでも、別 subject の高affinity近傍は混ざらない（混在 0%）", async () => {
     await resetTestDatabase();
     await getTestClient();
-    const handle = await createExampleRuntime(requireDatabaseUrl(), {
-      MNEMORA_LLM: "deterministic",
-      MNEMORA_EMBEDDING: "deterministic",
-    });
+    // 🔴 `clock` は実時刻より 1 秒だけ未来を返す。outbox の `available_at` は DB 側の `now()`（マイクロ秒）で
+    // 書かれるが、既定の `systemClock` は JavaScript の `Date`（ミリ秒で切り捨て）なので、書いた直後の
+    // `tick()` が同じミリ秒に入ると、積んだばかりの行が `available_at <= now` を満たさず claim できない
+    // （Issue #719・#1002・PR #834 と同じ穴。runtime の時計を数 ms 遅らせると、この it は確実に赤になる）。
+    // 1 秒は `leaseMs` よりずっと小さいので、claim 済みの行がリース切れとして取り直されることはない。
+    const handle = await createExampleRuntime(
+      requireDatabaseUrl(),
+      {
+        MNEMORA_LLM: "deterministic",
+        MNEMORA_EMBEDDING: "deterministic",
+      },
+      {},
+      { now: () => new Date(Date.now() + 1_000) },
+    );
     try {
       const ctx = { tenantId: `subject-crossing-auto-${Date.now()}` };
       // 話題が重なる使い方（ADR 0310 shared 極）を、種と近傍にまったく同じ
