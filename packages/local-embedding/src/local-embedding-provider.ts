@@ -288,6 +288,12 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    * （初回推論のグラフ確保ぶんは残る）。ここで適当な文字列を1件通すことも考えたが、
    * **「ウォームアップしただけのつもりが、モデルへ勝手な入力が流れる」**ほうが
    * 説明しづらいと判断した。
+   *
+   * **読み込みに失敗すると reject する**（`embed()` が初回にモデルを読むときと同じ）。
+   * `retry` の回数を使い切ると、元の例外を `cause` に持つ `Error`（repo・dtype・cacheDir と
+   * 再変換の手がかりをメッセージに載せる）になる。種類の付いた失敗
+   * （`LocalEmbeddingProviderError`。例: `kind: "unknown_input_limit"`）は、リトライも包みも
+   * せずにそのまま投げる。
    */
   async warmup(): Promise<void> {
     await this.#load();

@@ -36,6 +36,16 @@ import { translateForAnthropicStructuredOutput } from "./json-schema.js";
 export const DEFAULT_MAX_TOKENS = 16000;
 
 export interface AnthropicLLMProviderOptions {
+  /**
+   * API キー。省略すると SDK が `ANTHROPIC_API_KEY` を読む。
+   *
+   * **構築時に例外を投げることがある**（Issue #1080）: `client` を渡さずに SDK のクライアントを
+   * このクラスが作るとき、SDK が送るヘッダ（`x-api-key`。SDK が `ANTHROPIC_AUTH_TOKEN` を
+   * 読んだときは `Authorization: Bearer <authToken>` も）に載せられない文字（キーの途中の
+   * CR・LF・NUL、U+0100 以上の文字など）を含んでいれば、**キーを含まない**メッセージの
+   * `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
+   * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
+   */
   apiKey?: string;
   /** ⚠ 必須。既定値を持たない（`@mnemora/openai` の `OpenAILLMProviderOptions.model` と
    * 同じ規律——どのモデルを使うかは呼び出し側が決める）。 */

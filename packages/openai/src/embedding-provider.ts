@@ -23,6 +23,15 @@ import { assertApiKeyFitsInHeader } from "./api-key.js";
  * `OpenAI` インスタンスを自分で作り、`client` へ渡すこと。**
  */
 export interface OpenAIEmbeddingProviderOptions {
+  /**
+   * API キー。省略すると SDK が `OPENAI_API_KEY` を読む。
+   *
+   * **構築時に例外を投げることがある**（Issue #1080）: `client` を渡さずに SDK のクライアントを
+   * このクラスが作るとき、SDK が送るヘッダ（`Authorization: Bearer <apiKey>`）に載せられない
+   * 文字（キーの途中の CR・LF・NUL、U+0100 以上の文字など）を含んでいれば、**キーを含まない**
+   * メッセージの `Error` を投げる（元の例外は `cause` にも付けない）。末尾の空白・改行のように
+   * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
+   */
   apiKey?: string;
   model: string;
   dimensions: number;
