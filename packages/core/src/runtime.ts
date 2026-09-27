@@ -4364,8 +4364,45 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // この呼び出し全体で1回だけ読む。
     const reinforceOpts = toReinforceOptions(await resolveReinforceNowSeq(ctx));
 
+    // 群の強化を1回に束ねる（`MemoryStore.reinforceMany?` が在るとき）。群の復帰そのものは
+    // SQL 1本なのに、以前は強化を1件ずつ呼んでいたため、群が1件増えるごとに往復が増えていた
+    // （使用報告を Issue #874 で束ねたのと同じ形。歯は
+    // `packages/postgres/src/__tests__/restore-superseded-roundtrip-count.postgres.test.ts`）。
+    // ⚠ **束ねた強化が失敗したら、下の1件ずつの強化へ戻る**——「強化の失敗は、その要素の
+    // `reinforceError` に入り、outcome は restored のまま」という1件ごとの約束を、束ねた
+    // 経路でも崩さないため。強化は減衰の起点を巻き戻さない（ADR 0048）ので、束ねた強化が
+    // 途中まで書いてから失敗していても、1件ずつやり直して害は無い。
+    const reinforcedById = new Map<MemoryId, Memory>();
+    const reinforceMany = deps.memoryStore.reinforceMany;
+    if (reinforceMany !== undefined) {
+      try {
+        const reinforced = await reinforceMany.call(
+          deps.memoryStore,
+          ctx,
+          restored.map((memory) => memory.id),
+          clock.now(),
+          reinforceOpts,
+        );
+        for (const memory of reinforced) {
+          reinforcedById.set(memory.id, memory);
+        }
+      } catch {
+        reinforcedById.clear();
+      }
+    }
+
     const outcomes: RestoreSupersededOutcome[] = [];
     for (const memory of restored) {
+      const batched = reinforcedById.get(memory.id);
+      if (batched !== undefined) {
+        outcomes.push({
+          memoryId: memory.id,
+          kind: "restored",
+          previousStatus: "superseded",
+          decayFloorAt: batched.decayFloorAt,
+        });
+        continue;
+      }
       // status の復帰は既に `restoreSupersededBy` の1トランザクションで成立している
       // ——ここから先は `restoreArchived` と同じ「reinforce 専用の内側の try/catch」
       // （復帰の成功を reinforce の失敗で握り潰さない）。

@@ -199,6 +199,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ### Fixed
 
+- **`runtime.restoreSuperseded()` は、戻した群の強化を1件ずつ呼んでいたため、群が1件増えるごとに DB の往復が増えていた**（Postgres で群 2 / 6 / 21 件に 6 / 14 / 44 往復）——群の復帰そのものは SQL 1本である。`MemoryStore.reinforceMany?` が在れば1回に束ねる（使用報告を Issue #874 で束ねたのと同じ形）。束ねた強化が失敗したら1件ずつに戻るので、強化の失敗が失敗した要素の `reinforceError` にだけ入る約束は変わらない（PR_LINK）。
 - **`@mnemora/postgres` の `PostgresVectorStore.search` / `searchMany` は、クエリベクトルに有限でない成分（`NaN`・`Infinity`）があると、pgvector の拒否で未捕捉の `DrizzleQueryError` を投げていた**——埋め込み provider がクエリ埋め込みにそうした値を返すと、`runtime.recall()` 自体が reject された。次元違いのクエリ（Issue #867 の案B）と同じく「比較不能」として扱い、`score_not_comparable` に数えるようにした。core の Fake と testkit の `InMemoryVectorStore` は以前からこの振る舞いである（[PR #1069](https://github.com/takecchi/mnemora/pull/1069)）。
   ⚠ doc が約束していた振る舞い（`search` は比較不能なクエリで例外を投げない）へ実装を合わせた修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`runtime.recall()` のクエリ埋め込みで、`EmbeddingProvider.embed` がベクトルを1件も返さない（`[]`）と、ANN の段を黙って飛ばしていた**——例外のときは `stage_skipped`（`candidate_generation` / `embedding_provider_unavailable`）を積むが、`[]` のときは omission に何も出ず、「ベクトル検索だけが止まった」ことが見えなかった。`docs/recall.md` の約束どおり、`[]` でも `embedding_provider_unavailable` を積むようにした（公開型は無変更）（[PR #1068](https://github.com/takecchi/mnemora/pull/1068)）。
