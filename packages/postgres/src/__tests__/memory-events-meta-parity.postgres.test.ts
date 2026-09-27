@@ -141,14 +141,20 @@ describe.each(KITS)("memory_events の meta（%s）", (_name, build) => {
     expect(loser[0]!.meta).toEqual({
       reason: "contested_resolved",
       resolution: "supersede",
+      contestedWithId: b.id,
       supersededById: b.id,
     });
-    // 勝者の updated には足さない（置き換えられていないため）。
+    // 勝者の updated には supersededById を足さない（置き換えられていないため）。相手は
+    // contestedWithId で引ける（Issue #1160）。
     const winner = (await eventStore.list(ctx, { memoryId: b.id, kind: "updated" })).filter(
       (e) => e.meta.reason === "contested_resolved",
     );
     expect(winner).toHaveLength(1);
-    expect(winner[0]!.meta).toEqual({ reason: "contested_resolved", resolution: "supersede" });
+    expect(winner[0]!.meta).toEqual({
+      reason: "contested_resolved",
+      resolution: "supersede",
+      contestedWithId: a.id,
+    });
   });
 
   it("purgeExpiredEvents の events_purged は、meta の日時を ISO 8601 の文字列で持つ", async () => {

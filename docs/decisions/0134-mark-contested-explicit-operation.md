@@ -353,3 +353,16 @@ LLM を呼ばない。「矛盾しているかどうかの判定」は呼び出�
   作れる経路がある」）が変わる。
 - **行7（解決）が実装され、`contested` → `active | superseded` の経路ができたとき**——
   問1の「本 PR 単体では削減しない」という評価は、行7と合わせて評価し直す必要がある。
+
+## 追記（2026-09-27、Issue #1160）: 両側のイベントの `meta` に、対向の id（`contestedWithId`）を足した
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文は書き換えていない。**
+
+`markContested(A, B)` が両側に積む `kind: 'updated'` のイベントの `meta` は、`{ reason: 'contested' }`（`opts.reason` があれば
+`note`）に加えて、**`contestedWithId`（相手の id）を持つ**——A のイベントには B の id、B のイベントには A の id が入る。
+
+**理由**: 解決（[ADR 0150](./0150-resolve-contested-explicit-operation.md) 決定3）は `contested_with_id` をクリアするので、
+監査ログに残さないと、後から「誰と対だったか」を追えない（Issue #1160）。同じ記憶が別々の相手と2回 contested になった
+場合（1回目を解いてから、別の相手と対にした場合）も、どちらの相手だったかをイベントごとに区別できる。解決側の同じ変更は
+ADR 0150 の同日付の追記。**非破壊と数える理由・射程（この版より前のイベントには無く、後から足せない）も同じ追記を見ること。**

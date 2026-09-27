@@ -490,3 +490,32 @@ PR）の本文に記録した——ここには複製しない。
 **当て直し**: `@mnemora/postgres` と `@mnemora/testkit` の fixture の両方で、先に歯
 （`packages/postgres/src/__tests__/memory-events-meta-parity.postgres.test.ts`、core の Fake は
 `packages/core/src/__tests__/resolve-contested.test.ts`）を書いて赤を確かめてから直した。
+
+## 追記（2026-09-27、Issue #1160）: 対にまつわるイベントの `meta` に、対向の id（`contestedWithId`）を足した
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**上の本文（決定6を含む）と、既存の追記は書き換えていない。**
+
+**何が変わったか**: `resolveContested` が積む `updated`（`both_active` の両側・`supersede` の勝者）と `superseded`（`supersede`
+の敗者）、`resolveOrphanedContested` が積む生き残った側の `updated` の `meta` が、**`contestedWithId`（対向の id）を持つ。**
+敗者の `superseded` は、上の追記の `supersededById`（勝者の id。値は同じ）もそのまま持つ。`resolveOrphanedContested` の
+`contestedWithId` は、forget された（または purge 済みで見つからない）対向の id である。`markContested` 側は
+[ADR 0134](./0134-mark-contested-explicit-operation.md) の同日付の追記。
+
+**理由**: 決定3のとおり解決は `contested_with_id` をクリアするので、`both_active` で解いた対は、状態からも監査ログからも
+「誰と対だったか」が消えていた（Issue #1160 の実測。Postgres と testkit で同じ）。`supersede` の対も、勝者の側のイベント
+からは相手が分からなかった。上の追記（敗者に `supersededById` を足した）と同じく、`docs/north-star.md` 問い3（後から説明
+できるか）の監査ログへの適用である。
+
+**なぜ敗者にも `contestedWithId` を足したか**（`supersededById` と値が重なるのに）: 読み手が `meta.reason === "contested_resolved"`
+で絞ったとき、勝者・敗者・決着の種類によらず、同じ1つのキーで相手を引けるようにするため。`supersededById` は
+「置き換え」の経路（consolidate・reextract）とそろえるための欄として、そのまま残した。
+
+**非破壊と数える理由（クローン miku の判断）**: `MemoryEvent.meta` は `Record<string, unknown>` で、欄を足しても公開 API の
+表面は変わらない。`MemoryEventKind` の union への値の追加でもなく、既存の欄の意味も変えない。
+
+**射程**: この版より前に積まれたイベントには `contestedWithId` が無く、後から足すこともできない（`EventStore` は追記専用）。
+
+**当て直し**: `packages/postgres/src/__tests__/contested-event-counterpart.postgres.test.ts`（Postgres と testkit の fixture）を
+先に書き、両方で赤を確かめてから直した。`meta` を全体一致で縛っていた既存の歯（core の `mark-contested`・
+`resolve-contested`、postgres の `memory-events-meta-parity`）は、この形に改めた。

@@ -156,13 +156,19 @@ describe("runtime.resolveContested — supersede（基本の成功）", () => {
     const eventA = newEvents.find((e) => e.memoryId === a.id);
     const eventB = newEvents.find((e) => e.memoryId === b.id);
     expect(eventA?.kind).toBe("updated");
-    expect(eventA?.meta).toEqual({ reason: "contested_resolved", resolution: "supersede" });
+    // Issue #1160: 勝者のイベントにも対向の id が入る。
+    expect(eventA?.meta).toEqual({
+      reason: "contested_resolved",
+      resolution: "supersede",
+      contestedWithId: b.id,
+    });
     expect(eventB?.kind).toBe("superseded");
     // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
     // superseded と同じ形。監査ログだけで「誰に置き換えられたか」を追える（ADR 0150 追記）。
     expect(eventB?.meta).toEqual({
       reason: "contested_resolved",
       resolution: "supersede",
+      contestedWithId: a.id,
       supersededById: a.id,
     });
   });
@@ -195,9 +201,17 @@ describe("runtime.resolveContested — both_active（基本の成功）", () => 
     const eventA = newEvents.find((e) => e.memoryId === a.id);
     const eventB = newEvents.find((e) => e.memoryId === b.id);
     expect(eventA?.kind).toBe("updated");
-    expect(eventA?.meta).toEqual({ reason: "contested_resolved", resolution: "both_active" });
+    expect(eventA?.meta).toEqual({
+      reason: "contested_resolved",
+      resolution: "both_active",
+      contestedWithId: b.id,
+    });
     expect(eventB?.kind).toBe("updated");
-    expect(eventB?.meta).toEqual({ reason: "contested_resolved", resolution: "both_active" });
+    expect(eventB?.meta).toEqual({
+      reason: "contested_resolved",
+      resolution: "both_active",
+      contestedWithId: a.id,
+    });
   });
 });
 
@@ -220,6 +234,7 @@ describe("runtime.resolveContested — opts", () => {
       reason: "contested_resolved",
       resolution: "both_active",
       note: "誤検出だった",
+      contestedWithId: b.id,
     });
   });
 

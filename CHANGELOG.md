@@ -575,6 +575,14 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   「負けた側を何が置き換えたか」を追えなかった。今は `meta.supersededById` に勝った側の id が入る（勝った側・
   `both_active` の `updated` には足さない。[ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 2026-09-27）。
   ⭕ 非破壊と数える（`meta` に欄を1つ足すだけで、型も既存の欄の意味も変えない。クローン miku の判断であり、オーナーの判断ではない）。
+- **`Runtime.markContested()`・`resolveContested()`・`resolveOrphanedContested()` のイベントに、対向の id が無かった**（Issue #1160）——
+  解決は `contested_with_id` をクリアするので、`both_active` で解いた対は、状態からも監査ログからも「誰と対だったか」が消えていた
+  （`supersede` の対も、勝った側のイベントからは相手が分からなかった）。今は対にまつわるイベントがどれも、役割（勝った側・負けた側）
+  にも決着の種類にもよらず `meta.contestedWithId` に相手の id を持つ（負けた側の `superseded` は上の `meta.supersededById` も
+  そのまま持つ。`resolveOrphanedContested` は forget された相手の id。[ADR 0134](./docs/decisions/0134-mark-contested-explicit-operation.md)・
+  [ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 2026-09-27、`docs/memory-model.md` §11 の同日付追記）。
+  ⭕ 非破壊と数える（上の項目と同じく、`meta` に欄を足すだけで、型も既存の欄の意味も変えない。クローン miku の判断であり、オーナーの判断ではない）。
+  ⚠ この版より前に積まれたイベントには `contestedWithId` が無く、後から足すこともできない（監査ログは追記専用）。
 - **`@mnemora/testkit` の `InMemoryMemoryStore.purgeExpiredEvents` が積む `events_purged` の meta の日時
   （`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）が `Date` のままで、`@mnemora/postgres`（JSON で保存するので ISO 8601 の
   文字列で読み戻る）と型が違っていた**——今は fixture も ISO 8601 の文字列で持つ。戻り値の `oldestPurgedAt` などは
