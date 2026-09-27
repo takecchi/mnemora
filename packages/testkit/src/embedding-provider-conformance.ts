@@ -101,6 +101,12 @@ const defaultCtx: Ctx = { tenantId: "embedding-provider-conformance" };
  * 検査して例外を投げるが、`@mnemora/openai` は検査を持たず、サーバが正しい件数を返す
  * ことに依存している（`packages/core/src/interfaces/embedding-provider.ts` の同日付
  * 追記、ADR 0305）。この suite にその食い違いを注入する歯は無い。
+ *
+ * ⚠ **2026-09-27 追記（[Issue #1000](https://github.com/takecchi/mnemora/issues/1000)）:
+ * この suite は「別のテキストには別のベクトルが返る」「どのテキストにどのベクトルが返るか」
+ * を見ていない。** テキストとベクトルの対応を一貫して壊す実装（取り逃した全テキストに
+ * 1本目のベクトルを返す、下層の並びを反転して記憶する、など）も全項目を通る。
+ * 要件として足すかは決めていない（`docs/conformance.md` §5 の同日付追記）。
  */
 export function describeEmbeddingProviderConformance(
   options: EmbeddingProviderConformanceOptions,
