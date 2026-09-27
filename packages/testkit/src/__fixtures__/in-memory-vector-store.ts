@@ -124,7 +124,8 @@ export class InMemoryVectorStore implements VectorStore {
     this.entries.set(this.key(space, ctx.tenantId, memoryId), {
       tenantId: ctx.tenantId,
       memoryId,
-      vector,
+      // Issue #1108: 呼び手の配列と切り離して保存する（Postgres は値を写す）。
+      vector: [...vector],
     });
   }
 
@@ -347,7 +348,7 @@ export class InMemoryVectorStore implements VectorStore {
       seen.add(memoryId);
       const entry = this.entries.get(this.key(space, ctx.tenantId, memoryId));
       if (entry !== undefined) {
-        results.push({ memoryId, vector: entry.vector });
+        results.push({ memoryId, vector: [...entry.vector] });
       }
     }
     return results;

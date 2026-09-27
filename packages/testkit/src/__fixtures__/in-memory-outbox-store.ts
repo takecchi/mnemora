@@ -85,11 +85,12 @@ export class InMemoryOutboxStore implements OutboxStore {
     eligible.sort((a, b) => a.availableAt.getTime() - b.availableAt.getTime());
     const claimed = eligible.slice(0, opts.limit);
     for (const job of claimed) {
-      job.claimedAt = opts.now;
+      // Issue #1108: 呼び手の `now` と同じ Date を保存しない。
+      job.claimedAt = new Date(opts.now);
       job.claimedBy = opts.claimedBy;
       job.attempts += 1;
     }
-    return claimed.map((job) => ({ ...job }));
+    return claimed.map((job) => structuredClone(job));
   }
 
   async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
