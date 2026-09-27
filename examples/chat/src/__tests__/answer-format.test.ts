@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { formatAnswerInputReduction, formatAnswerQualityBanner } from "../answer-format.js";
+import {
+  formatAnswerInputReduction,
+  formatAnswerIntro,
+  formatAnswerQualityBanner,
+} from "../answer-format.js";
 
 /**
  * `formatAnswerQualityBanner` の**陽性対照**（Issue #577 / ADR 0260 の増分）。
@@ -88,4 +92,28 @@ describe("formatAnswerInputReduction — 差の向きを読み違えない", () 
     expect(text).toContain("±0");
     expect(text).toContain("同じ");
   });
+});
+
+/**
+ * `answer` の導入文。ADR 0260 により、記録の再生（`recorded`）と実 API（`openai`）は
+ * 品質を主張してよいモードで、⛔⛔⛔ バナーも出ない（上の陽性対照）。
+ * 【実測 2026-09-27、鍵なしの既定の道＝`recorded`】以前の導入文は、モードに関係なく
+ * 「これは配線の検査であり、回答品質は測っていない」と言いながら、表には ✅/❌ の判定が
+ * 並んでいた——画面の中で言っていることが食い違っていた。⟹ モードで出し分ける。
+ */
+describe("formatAnswerIntro — 品質を主張できるかで出し分ける", () => {
+  it("deterministic では「配線の検査であり、回答品質は測っていない」と言う", () => {
+    const text = formatAnswerIntro("deterministic");
+    expect(text).toContain("配線の検査であり、回答品質は測っていない");
+  });
+
+  it.each(["recorded", "openai"] as const)(
+    "%s では「測っていない」と言わず、判定がどの LLM の回答によるかを言う",
+    (mode) => {
+      const text = formatAnswerIntro(mode);
+      expect(text).not.toContain("回答品質は測っていない");
+      expect(text).toContain(`llmMode=${mode}`);
+      expect(text).toContain("正誤");
+    },
+  );
 });

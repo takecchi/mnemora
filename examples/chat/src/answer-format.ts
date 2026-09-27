@@ -12,6 +12,26 @@ import type { ProviderMode } from "./providers.js";
  * この bench が回っても回答品質は測っていない。
  */
 
+/**
+ * `answer` の導入文。**品質を主張できるか（`answerQualityClaimable`）で出し分ける**——
+ * 以前はモードに関係なく「配線の検査であり、回答品質は測っていない」と言いながら、
+ * `recorded`/`openai` では表に ✅/❌ の判定が並んでいた（ADR 0260 は `recorded` を
+ * 品質を主張してよいモードとし、⛔⛔⛔ バナーも `deterministic` のときだけ出す）。
+ */
+export function formatAnswerIntro(llmMode: ProviderMode): string {
+  const lead =
+    "\n同じ会話・同じ質問・同じ回答モデル・同じ採点基準で、naive(全文経路)と" +
+    "mnemora(記憶経路)の最終回答・入力量を対で出す(Issue #506)。\n";
+  if (!answerQualityClaimable(llmMode)) {
+    return `${lead}🔴 これは配線の検査であり、回答品質は測っていない（llmMode=${llmMode}）。\n`;
+  }
+  const source = llmMode === "recorded" ? "記録した時点の実 API の回答の再生" : "実 API の回答";
+  return (
+    `${lead}正誤・二次観測は、回答モデルの実際の回答（llmMode=${llmMode}: ${source}）に対する判定である。` +
+    "このケース集合に対する判定であり、一般的な回答品質の保証ではない。\n"
+  );
+}
+
 /** stdout の先頭に出す、目立つ注記。`llmMode` が `deterministic` のときだけ非空を返す。 */
 export function formatAnswerQualityBanner(llmMode: ProviderMode): string {
   if (answerQualityClaimable(llmMode)) {

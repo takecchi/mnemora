@@ -130,6 +130,7 @@ import {
   formatAnswerContentPreservation,
   formatAnswerCostTable,
   formatAnswerInputReduction,
+  formatAnswerIntro,
   formatAnswerQualityBanner,
   formatAnswerTable,
 } from "./answer-format.js";
@@ -2292,11 +2293,7 @@ async function runAnswer(): Promise<void> {
   }
   printProviderMode(handle, plan.plannedSource);
   try {
-    console.log(
-      "\n同じ会話・同じ質問・同じ回答モデル・同じ採点基準で、naive(全文経路)と" +
-        "mnemora(記憶経路)の最終回答・入力量を対で出す(Issue #506)。\n" +
-        "🔴 これは配線の検査であり、回答品質は測っていない。\n",
-    );
+    console.log(formatAnswerIntro(handle.llmMode));
     const cases = [...ANSWER_CASE_SET_DEV, ...ANSWER_CASE_SET_EVAL];
     const results = await runAnswerBench(
       handle.runtime,

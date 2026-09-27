@@ -1799,12 +1799,17 @@ Memory を1件も作らない・ラウンドを反復しない**（1回 sweep �
 二次観測は一次判定を上書きしない——`reconcileVerdicts` が一次と二次を突き合わせ、
 一致すればその値を、食い違えば `"indeterminate"` を返す（ADR 0222 の三分割に倣う）。
 
-🔴 **これは配線の検査であって、回答品質の測定ではない。** `answerQualityClaimable(llmMode)`
-が `false`（`llmMode=deterministic`）のときは、正誤・二次観測・突き合わせのすべての列を
+🔴 **`llmMode=deterministic` のときは配線の検査であって、回答品質の測定ではない。**
+`answerQualityClaimable(llmMode)` が `false`（`llmMode=deterministic`）のときは、正誤・二次観測・突き合わせのすべての列を
 `—` にし、集計（何件中何件 pass、二次観測の集計、突き合わせ後の集計）も出さない。
 `deterministic` の LLM（`@mnemora/testkit` の `DeterministicLLMProvider`）は意味を
 持たない stub——`complete()` は渡した最後のメッセージをそのままエコーするだけで、
-質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけである。
+質問に「答えて」いない。実際に品質を主張できるのは `recorded`/`openai` のときだけである
+（ADR 0260。鍵なしの既定の道は、カセットが在れば `recorded` へ倒れる）。
+画面の導入文もこのモードで出し分ける（`answer-format.ts` の `formatAnswerIntro`）——
+`deterministic` では「配線の検査であり、回答品質は測っていない」と言い、`recorded`/`openai` では
+「正誤・二次観測は、回答モデルの実際の回答に対する判定である（このケース集合に対する判定であり、
+一般的な回答品質の保証ではない）」と言う。
 
 ```
 DATABASE_URL=... pnpm --filter @mnemora/example-chat run answer
