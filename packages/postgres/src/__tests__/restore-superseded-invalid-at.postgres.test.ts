@@ -52,15 +52,13 @@ afterAll(async () => {
 
 describe("restoreSupersededBy の at が Invalid Date（今の振る舞い）", () => {
   it("戻す対象が無いとき: Postgres は例外、testkit の fixture は空で返る（2実装で違う）", async () => {
-    const [[, makeFixture], [, makePostgres]] = STORES;
-
-    const fixture = await makeFixture();
+    const fixture = await STORES[0]![1]();
     const { anchor: fixtureAnchor } = await anchorWithGroup(fixture, 0);
     await expect(
       fixture.restoreSupersededBy!(ctx, fixtureAnchor.id, { at: INVALID }),
     ).resolves.toEqual({ restored: [] });
 
-    const postgres = await makePostgres();
+    const postgres = await STORES[1]![1]();
     const { anchor: postgresAnchor } = await anchorWithGroup(postgres, 0);
     const err = await postgres.restoreSupersededBy!(ctx, postgresAnchor.id, { at: INVALID }).then(
       () => undefined,
