@@ -185,6 +185,15 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  * テーブル名・索引名は `EmbeddingSpaceId` から機械的に導出するため、呼び出し側が
  * 直接テーブル名を書く必要はない（`VectorStore` 実装がこの関数と同じ導出規則を使う）。
  *
+ * ⚠ **正規化の後に同じ綴りになる空間どうしは、同じテーブルに潰れる**（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)、
+ * 今の振る舞いを書くだけ）。導出（{@link embeddingSpaceTableName}）は provider・model を小文字にし、
+ * 英数字以外の並びを `_` に置き換えてから繋ぐ。そのため、`{a_b, c}` と `{a, b_c}`、
+ * `{openai, text-embedding-3-small}` と `{OpenAI, text_embedding_3_small}`、ASCII 以外の文字だけが違う
+ * model 名は、次元が同じなら同じテーブルになる。この関数は `CREATE TABLE IF NOT EXISTS` なので、
+ * 2つ目の登録は既存のテーブルを使って黙って成功する。検索は `model` 列で絞らないので、
+ * **2つの空間のベクトルが混ざる。**1つの DB で複数の空間を使うなら、正規化の後にも区別が残る
+ * provider・model を選ぶこと（`docs/memory-model.md` §10 の同日付追記）。
+ *
  * ## `options.schema`（feat/dedicated-schema）
  *
  * **`schema` 未指定なら、発行される DDL は今日と1バイトも変わらない**（`qualify` が

@@ -29,6 +29,10 @@ function sanitizeSlugPart(value: string): string {
 /**
  * `EmbeddingSpaceId` からテーブル名スラグを導出する（docs/memory-model.md §10・ADR 0002 D8）。
  * `<space>` は `(provider, model, dimensions)` の組から導出する。
+ *
+ * ⚠ この導出は単射ではない——正規化（小文字化・英数字以外を `_`）の後に同じ綴りになる組は、
+ * 同じテーブル名になる（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)。
+ * `registerEmbeddingSpace` の doc の同じ注意を見ること）。
  */
 export function embeddingSpaceTableName(space: EmbeddingSpaceId): string {
   const rawSlug = [

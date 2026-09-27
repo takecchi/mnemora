@@ -264,11 +264,14 @@ export function isBoundedScoringStrategy(s: ScoringStrategy): s is BoundedScorin
  * - **`decay ≤ 1`** — `decay` に clamp は**無い**。上の `MAX_FRESHNESS` の doc が
  *   「**上限を掛けるのは `freshness` だけで、`decay` には掛けない**」と明記している通りで、
  *   `0.5 ** (elapsed / halfLife)` は `elapsed < 0`（起点が未来）なら 1 を超える。
- * - **`strength ≤ 1`** — 型は `number`、DB 列は `real` である。
- *   `buildNewMemoryFromCandidate` が無条件に `strength: 1` を書き、
- *   [ADR 0041](../../../../docs/decisions/0041-reinforce-does-not-change-strength.md) が
- *   「`reinforce` は `strength` を動かさない」と決めているだけであって、
- *   **型が 1 以下を保証してはいない。**
+ * - **`strength ≤ 1`** — 型は `number` であり、**型は 1 以下を保証しない。**
+ *   値域 `(0, MAX_STRENGTH]` は [ADR 0078](../../../../docs/decisions/0078-strength-value-range.md)
+ *   が決め、同梱の実装は書き込み時に守る——`@mnemora/postgres` は DB の CHECK 制約
+ *   （`migrations/0006_strength_value_range.sql`）、testkit の fixture と core の Fake は
+ *   `createMemory` の検査。適合テスト（`memory-store-conformance.ts`）が `createMemory` の
+ *   拒否を固定している。**適合テストを通していない adapter では、前提のままである。**
+ *   ⚠ 2026-09-27 に書き直した。それまでは「DB 列（`real`）も保証していない」と書いていたが、
+ *   ADR 0078 の後は同梱の実装については事実でなくなっていた（ADR 0069 の同日付の追記）。
  *
  * **⟹ コメントに書くだけでは検査されない。**だから戻り値に載せる——
  * この配列は歯で中身を検査され、`recall()` の `omitted` にもそのまま出る。
@@ -277,8 +280,9 @@ export function isBoundedScoringStrategy(s: ScoringStrategy): s is BoundedScorin
 export const DEFAULT_STRATEGY_BOUND_ASSUMPTIONS: readonly string[] = [
   "decay <= 1: 減衰の起点（lastReinforcedAt ?? recordedAt）が now より未来でないこと。" +
     "freshness と違い decay に clamp は無い（ADR 0036 は freshness だけを頭打ちにした）。",
-  "strength <= 1: Memory.strength に 1 以外が書かれないこと。" +
-    "書き込み側が無条件に 1 を書いているだけで、型（number）も DB 列（real）も保証していない。",
+  "strength <= 1: Memory.strength が値域 (0, 1] に収まっていること（ADR 0078）。" +
+    "同梱の実装は書き込み時に拒むが（Postgres は DB の CHECK 制約、testkit は createMemory の検査）、" +
+    "型（number）は保証しないので、適合テストを通していない adapter では前提のままである。",
 ];
 
 /**
