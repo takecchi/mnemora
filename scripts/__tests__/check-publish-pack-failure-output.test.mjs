@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-publish-pack.mjs` の**失敗（EXIT=1）側の実行時出力**の歯
@@ -68,10 +68,14 @@ describe("scripts/check-publish-pack.mjs（合成 publish-targets.mjs で失敗�
 
   it("EXIT=1 になり、失敗時の実行時出力にも同じ断りが焼かれている", () => {
     const dir = buildBrokenTargetFixture();
-    const result = spawnSync(process.execPath, [join(dir, "scripts", "check-publish-pack.mjs")], {
-      cwd: dir,
-      encoding: "utf8",
-    });
+    const result = spawnSyncWithDeadline(
+      process.execPath,
+      [join(dir, "scripts", "check-publish-pack.mjs")],
+      {
+        cwd: dir,
+        encoding: "utf8",
+      },
+    );
     const output = `${result.stdout}${result.stderr}`;
 
     expect(result.status, `EXIT=1 を期待した。出力:\n${output}`).toBe(1);

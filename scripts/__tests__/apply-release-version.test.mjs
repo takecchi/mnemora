@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/apply-release-version.mjs` の歯（ADR 0070）。
@@ -50,11 +50,15 @@ function makeSandbox() {
 function run(dir, env) {
   const outputPath = join(dir, "github-output");
   writeFileSync(outputPath, "");
-  const result = spawnSync(process.execPath, [join(dir, "scripts", "apply-release-version.mjs")], {
-    cwd: dir,
-    encoding: "utf8",
-    env: { ...process.env, GITHUB_OUTPUT: outputPath, ...env },
-  });
+  const result = spawnSyncWithDeadline(
+    process.execPath,
+    [join(dir, "scripts", "apply-release-version.mjs")],
+    {
+      cwd: dir,
+      encoding: "utf8",
+      env: { ...process.env, GITHUB_OUTPUT: outputPath, ...env },
+    },
+  );
   return {
     status: result.status,
     stdout: result.stdout ?? "",
@@ -142,7 +146,7 @@ describe("apply-release-version.mjs（ADR 0070）", () => {
     for (const target of PUBLISH_TARGETS) {
       const path = join(sandbox, target.dir, "package.json");
       const written = readFileSync(path, "utf8");
-      const check = spawnSync(
+      const check = spawnSyncWithDeadline(
         process.execPath,
         [
           join(repoRoot, "node_modules", "prettier", "bin", "prettier.cjs"),

@@ -1,8 +1,8 @@
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * 「vitest の unhandled error 1件」が、テストを全部通したまま門を緑にしてしまう
@@ -125,7 +125,7 @@ describe("vitest は『全部通ったが unhandled error が1件』を緑にし
       ].join("\n"),
     );
 
-    const result = spawnSync(
+    const result = spawnSyncWithDeadline(
       "pnpm",
       [
         "exec",
