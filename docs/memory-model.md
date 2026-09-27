@@ -1328,6 +1328,20 @@ CREATE INDEX idx_memory_embeddings_openai_1536_hnsw
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 実物の索引名は `idx_memory_embeddings_hnsw_<space>` の形である（上の例の `idx_memory_embeddings_openai_1536_hnsw` は説明用の名前）。さらに、ノルムが0のベクトルを引くための部分索引 `idx_memory_embeddings_zero_norm_<space>`（`(tenant_id, memory_id) WHERE vector_norm(embedding) = 0`）がある。pgvector の cosine の HNSW 索引はゼロベクトルを索引に入れないためで、新しい空間は `registerEmbeddingSpace` が、既存の空間は migration `0022_embedding_zero_norm_index.sql` が作る（[ADR 0343](./decisions/0343-vector-store-search-returns-zero-norm-candidates.md)）。名前の作り方は `packages/postgres/README.md` の同じ節を見ること。
 
+**⚠ 2026-09-27 追記（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)、今の振る舞いを書くだけ）: 正規化の後に同じ綴りになる空間どうしは、同じテーブルに潰れ、ベクトルが混ざる。**
+スラグ（`embeddingSpaceTableName`）は、provider・model を小文字にし、英数字以外の並びを `_` に置き換え、前後の `_` を落としてから、
+dimensions と `_` で繋いで作る。`registerEmbeddingSpace` は `CREATE TABLE IF NOT EXISTS` なので、同じスラグになる2つ目の空間の登録は、
+既存のテーブルをそのまま使って黙って成功する。検索は `model` 列で絞らないので、片方の空間の `search` がもう片方の空間のベクトルを返す。
+【実測】次の組は、どれも同じテーブルになった。
+- `{a_b, c, 3}` と `{a, b_c, 3}`（区切りの位置が違う）
+- `{openai, text-embedding-3-small, 3}` と `{OpenAI, text_embedding_3_small, 3}`（大文字小文字と記号が違う）
+- `{ollama, nomic-embed-text:latest, 3}` と `{ollama, nomic-embed-text-latest, 3}`
+- `{x, 日本語モデル, 3}` と `{x, 中文模型, 3}`（ASCII 以外の文字は全部落ちるので、model が空になる）
+
+⟹ **1つの DB で複数の空間を使う（切り替えで旧空間のテーブルが残る場合を含む）なら、正規化の後にも区別が残る provider・model を選ぶこと。**
+英数字（ASCII）の部分で違いが出る名前にする。登録時に衝突を検出する仕組みは無い。既存のテーブルには、どの空間のものかの記録も
+無い（provider は残らず、行ごとの `model` 列と列の型 `vector(N)` だけが残る）。直し方は Issue #1151 で決める。
+
 Phase 1 は**稼働中の空間を1つに限る**。2つ目の空間（例えばモデル移行後の新しい埋め込み）を
 追加する操作は、既存テーブルの行を書き換えるマイグレーションにはならない——**新しい
 `memory_embeddings_<space2>` テーブルを追加するだけ**で済む形にしておく。移行期間中は
