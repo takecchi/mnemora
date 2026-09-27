@@ -1,4 +1,12 @@
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -906,6 +914,8 @@ describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生き�
     "build",
     ".turbo",
     "coverage",
+    // `.gitignore` 済みの作業場所。並行に走る歯が一時ファイルを作っては消すので読まない（下の `.tmp/` の歯）。
+    ".tmp",
   ]);
 
   /** 除外ディレクトリを避けつつ、対象拡張子のファイルを repo 全体から再帰的に集める。 */
@@ -1003,6 +1013,32 @@ describe("🔴 本物の歯3: 「ADR X 決定N」の壊れた参照が、生き�
       }
     },
   );
+
+  /**
+   * repo 直下の `.tmp/`（`.gitignore` 済みの作業場所）は歩かない。
+   *
+   * 【実測 2026-09-28】`no-unhandled-errors.test.mjs` は root の vitest の中で `.tmp/no-unhandled-errors-*` に
+   * fixture（`.mjs`・`.mts`）を作っては消す。この歯は収集の段で repo 全体を歩くので、並行に走ると、一覧に出た
+   * ディレクトリ・ファイルが読む前に消え、`ENOENT: … scandir '…/.tmp/…'` でファイルごと落ちていた（手元の門で
+   * たまに出た揺れ。`.tmp/` の下で作っては消しながらこの歯を8回走らせると6回落ちた）。
+   * `.tmp/` は生きたコードでも生きた文書でもないので、門の対象から外す。
+   */
+  it("`.tmp/` の下のファイルは門の対象にしない（並行に走る歯の一時ファイルを読みにいかない）", () => {
+    const deadRef = "ADR 0201 決定" + "99";
+    const dir = mkdtempSync(path.join(tmpdir(), "adr-citation-tmp-"));
+    try {
+      mkdirSync(path.join(dir, ".tmp", "scratch"), { recursive: true });
+      writeFileSync(path.join(dir, ".tmp", "scratch", "fixture.mjs"), `// ${deadRef}\n`);
+      writeFileSync(path.join(dir, "outside.mjs"), `// ${deadRef}\n`);
+      const { gated } = collectDecisionCitationViolations(dir);
+      // `.tmp/` の外の同じ参照は今までどおり拾う（除外が広がりすぎていないことの対照）。
+      expect(gated).toEqual([
+        { file: "outside.mjs", line: 1, raw: deadRef, ruleA: true, ruleB: false },
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
 
   it(`⛔ 門ではない一覧: docs/decisions/ 配下の ADR 本文にも同型の参照が ${ungatedViolations.length} 件見つかっている（この件数では赤くしない）`, () => {
     // ⛔ これは歯ではない。ADR 本文は書き換えない記録なので、ここで赤くすると

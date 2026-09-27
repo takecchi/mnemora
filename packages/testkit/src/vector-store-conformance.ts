@@ -24,8 +24,11 @@ import type {
  * その制約を要らない kind（`"imported"`/`"consolidated"` など）に限る。
  */
 export interface PrepareMemoryIdAttrs {
+  /** 用意する Memory の `status`（`filter.status` の歯が使う）。 */
   status?: MemoryStatus;
+  /** 用意する Memory の `subjectId`（`filter.subjectId` の歯が使う）。 */
   subjectId?: string;
+  /** 用意する Memory の `decayFloorAt`（`filter.decayFloorAtAfter` の歯が使う）。 */
   decayFloorAt?: Date;
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと1・4・12
@@ -33,6 +36,7 @@ export interface PrepareMemoryIdAttrs {
    * `null`/未指定は「この軸には床が無い」（NULL 通過の歯が使う）。
    */
   decayFloorSeq?: number | null;
+  /** 用意する Memory の `provenance.kind`（`filter.excludeProvenanceKinds` の歯が使う。上の doc: `stated`・`inferred` は渡さない）。 */
   provenanceKind?: ProvenanceKind;
   /**
    * ADR 0059: `filter.occurredAfter`/`occurredBefore` の歯が使う。指定しなければ
@@ -52,8 +56,11 @@ export interface PrepareMemoryIdAttrs {
   tags?: string[];
 }
 
+/** {@link describeVectorStoreConformance} に渡す設定。 */
 export interface VectorStoreConformanceOptions {
+  /** 見出し（`describe` の名前）に出す adapter の名前。 */
   name: string;
+  /** 新しい store を返す関数。各 `it` の中で1回ずつ呼ぶので、テストケースごとに独立した状態を持つ store を返すこと。 */
   createStore: () => VectorStore | Promise<VectorStore>;
   /**
    * `packages/postgres` の `memory_embeddings_<space>` テーブルは `memory_id` を

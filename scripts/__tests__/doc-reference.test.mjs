@@ -1,4 +1,5 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -23,7 +24,8 @@ import {
  */
 
 const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
-const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage"]);
+// `.tmp` は `.gitignore` 済みの作業場所。並行に走る歯が一時ファイルを作っては消すので歩かない（末尾の歯）。
+const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "coverage", ".tmp"]);
 
 function toRepoRelative(absolutePath) {
   return path.relative(REPO_ROOT, absolutePath).split(path.sep).join("/");
@@ -153,5 +155,29 @@ describe("陽性対照: 腐った参照を1つ入れた入力は赤になり、�
   it("コードブロックの中のリンクは見ない（markdown）", () => {
     const md = "```\n[x](./no-such.md)\n```\n";
     expect(findBrokenReferences(FILE, maskMarkdownCodeFences(md), REPO_ENV)).toEqual([]);
+  });
+});
+
+/**
+ * repo 直下の `.tmp/`（`.gitignore` 済みの作業場所）は歩かない。
+ *
+ * 【実測 2026-09-28】`no-unhandled-errors.test.mjs` は root の vitest の中で `.tmp/no-unhandled-errors-*` に
+ * fixture を作っては消す。上の `walk(REPO_ROOT)` は収集の段で repo 全体を歩くので、並行に走ると、一覧に出た
+ * ディレクトリが読む前に消え、`ENOENT: … scandir '…/.tmp/…'` でファイルごと落ちうる（`.tmp/` の下で作っては
+ * 消しながらこの歯を8回走らせると5回落ちた）。`adr-citation.test.mjs` と同じ直し方。
+ */
+describe("walk は `.tmp/` を歩かない", () => {
+  it("`.tmp/` の下は集めず、その外は集める", () => {
+    const dir = mkdtempSync(path.join(tmpdir(), "doc-reference-tmp-"));
+    try {
+      mkdirSync(path.join(dir, ".tmp", "scratch"), { recursive: true });
+      writeFileSync(path.join(dir, ".tmp", "scratch", "fixture.md"), "x\n");
+      writeFileSync(path.join(dir, "outside.md"), "x\n");
+      const files = walk(dir);
+      expect(files.some((f) => f.split("/").includes(".tmp"))).toBe(false);
+      expect(files.some((f) => f.endsWith("/outside.md"))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
