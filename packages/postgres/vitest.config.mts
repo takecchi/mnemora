@@ -4,9 +4,12 @@ import { defineConfig } from "vitest/config";
 // packages/testkit/vitest.config.mts と同じ理由: dist ではなく core/src を直接参照する。
 export default defineConfig({
   test: {
-    // DB を使うテストは本質的に直列に走らせたほうが安全（同一 DB を使い回すテストがある場合の
-    // 競合を避ける）。各テストファイルは自分専用のスキーマ/テーブル接頭辞を使うため、
-    // 通常は並列でも安全だが、CI のサービスコンテナの資源制約を考慮してファイル単位は直列にする。
+    // ファイル単位は直列にする。並列にすると壊れる——テストファイルは1つの DB（`DATABASE_URL`）を
+    // 共有し、多くのファイルが `resetTestDatabase()`（`src/__tests__/test-db.ts`）でドメインの表を
+    // `TRUNCATE` する。ファイルごとに専用のスキーマや表の接頭辞は使っていない（互いの行を消す）。
+    // ほかに、索引の `DROP`/`CREATE`・`pg_stat_*`・advisory lock・`pg_stat_activity` など、DB や
+    // クラスタ全体に効くものを使うファイルもある。並列にするなら DB を分ける仕組みが先に要る
+    // （スキーマごと／DB ごとの案と、直列に残すファイルの組: Issue #1277）。
     fileParallelism: false,
     hookTimeout: 30_000,
     testTimeout: 30_000,
