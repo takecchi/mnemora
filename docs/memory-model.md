@@ -1564,6 +1564,11 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   追記。`meta.reason` は同じく `'contested_resolved'`、`kind` は `updated`）。
 - 行12の `created` イベントは、`consolidate()` の `opts.actor`・`opts.reason`（`meta.note`）を統合元の `superseded` と
   同じく持つ（2026-09-27 に、`actor` が `{ type: "system" }` に決め打ちで `note` も無かった食い違いを直した）。
+- 行7の `supersede` で負けた側の `superseded` は、`meta.supersededById` に勝った側の id を持つ（行5・行12・reextract の
+  `superseded` と同じ形。2026-09-27 に足した。[ADR 0150](./decisions/0150-resolve-contested-explicit-operation.md) の追記）。
+- 行11の `events_purged` の meta の日時（`oldestPurgedAt`・`newestPurgedAt`・`olderThan`）は ISO 8601 の文字列である。
+  `@mnemora/postgres` は meta を JSON で保存するので文字列で読み戻り、`@mnemora/testkit` の fixture も 2026-09-27 から
+  同じく文字列で持つ（それまでは `Date` のまま持っていた）。
 
 
 ### ⚠ `superseded` / `contested` の行は溜まる —— 容量の見積もり（2026-09-24 追記、[Issue #567](https://github.com/takecchi/mnemora/issues/567)）
