@@ -8,6 +8,7 @@ import type { Observation } from "./observation.js";
 import { ExtractionContextSchema } from "./observation.js";
 import { assertLLMContentNotBlank } from "./llm-content.js";
 import type { Provenance } from "./provenance.js";
+import { dropBlankTags } from "./llm-tags.js";
 import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
 
 /**
@@ -540,7 +541,7 @@ export function buildNewMemoryFromCandidate(params: BuildNewMemoryParams): NewMe
     digest,
     digestSource,
     provenance: buildProvenance(params),
-    tags: params.candidate.tags ?? [],
+    tags: dropBlankTags(params.candidate.tags ?? []),
     occurredAt: params.observation.occurredAt ?? null,
     recordedAt: params.now,
     lastReinforcedAt: null,

@@ -1,11 +1,23 @@
 import { afterAll, describe, expect, it } from "vitest";
 import { createRuntime } from "@mnemora/core";
 import {
-  diffBackends,
+  InMemoryEventStore,
+  InMemoryLexicalStore,
+  InMemoryMemoryStore,
+  InMemoryOutboxStore,
+  InMemoryTenantSettingsStore,
+  InMemoryVectorStore,
+} from "@mnemora/testkit/fixtures";
+import {
+  breakTotalInScope,
+  diffRuns,
   type FuzzBackend,
   type FuzzProfile,
+  type FuzzStores,
   fuzzSeeds,
   genOps,
+  runForDiff,
+  type RunOutcome,
 } from "../../../core/src/__tests__/recall-invariant-fuzz-harness.js";
 import { createFakeRuntimeStores } from "../../../core/src/__tests__/runtime-fakes.js";
 import { createPostgresClient, type PostgresClient } from "../client.js";
@@ -41,7 +53,10 @@ import {
  * - `wide`: `bulk` で数十〜数百件を作り窓を広げた操作列を、`enable_seqscan = off` の接続で。
  *   【実測】EXPLAIN で段1が `idx_memory_embeddings_hnsw_*` の Index Scan になる——近似索引の
  *   経路（`hnsw.iterative_scan = relaxed_order`、ADR 0284）を通す。
- * - 差分: 同じ操作列を Fake と Postgres に流し、recall ごとの結果を突き合わせる（`diffBackends`）。
+ * - 差分: 同じ操作列を Fake・testkit の `InMemory*` と Postgres に流し、recall ごとの結果を突き合わせる
+ *   （`diffRuns`）。Postgres の側は seed ごとに1回だけ流し、その結果を Fake・testkit・陽性対照で使い回す。
+ *   陽性対照は、testkit の側の `aggregateScope` を壊す（`totalInScope` を1だけ多く返す）と食い違いが
+ *   報告されること——検査器が黙って何も比べなくなる回帰を捕まえる。
  *   Postgres 側は `enable_indexscan = off` の接続で回す——HNSW は索引スキャンしか持たないので
  *   使われず、段1は厳密になる。**HNSW を通す脚には差分を当てない**:【実測】`wide` の20シードを
  *   `enable_seqscan = off` で突き合わせると17シードで食い違い、どれも `lexical_truncated` か
@@ -53,6 +68,7 @@ const LEN = Number(process.env.RECALL_FUZZ_LEN ?? 60);
 const DEFAULT_SEEDS = Number(process.env.RECALL_FUZZ_PG_SEEDS ?? 40);
 const WIDE_SEEDS = Number(process.env.RECALL_FUZZ_PG_WIDE_SEEDS ?? 10);
 const DIFF_SEEDS = Number(process.env.RECALL_FUZZ_PG_DIFF_SEEDS ?? 40);
+const POSITIVE_CONTROL_SEEDS = 5;
 const FIRST_SEED = Number(process.env.RECALL_FUZZ_PG_FIRST_SEED ?? 1);
 
 type ConnectionMode = "planner" | "seqscan_off" | "indexscan_off";
@@ -106,6 +122,75 @@ const fakeBackend: FuzzBackend = {
   vector: (v) => [...v],
 };
 
+/**
+ * `@mnemora/testkit/fixtures` の `InMemory*`。外部の adapter の作り手が比べる相手として出荷される
+ * fixture なので、Postgres との食い違いを core の Fake とは別に見る。`wrap` は陽性対照用。
+ */
+function testkitBackend(
+  wrap: (store: FuzzStores["memoryStore"]) => FuzzStores["memoryStore"] = (store) => store,
+): FuzzBackend {
+  return {
+    async setup() {
+      const memoryStore = new InMemoryMemoryStore();
+      return {
+        stores: {
+          memoryStore: wrap(memoryStore),
+          outboxStore: new InMemoryOutboxStore(memoryStore.outboxJobs),
+          vectorStore: new InMemoryVectorStore(memoryStore),
+          lexicalStore: new InMemoryLexicalStore(memoryStore),
+          eventStore: new InMemoryEventStore(memoryStore, memoryStore.events),
+          tenantSettingsStore: new InMemoryTenantSettingsStore(),
+          embeddingProvider: {
+            space: TEST_EMBEDDING_SPACE,
+            embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
+          },
+        },
+        createRuntime,
+      };
+    },
+    vector: (v) => [...v, 0],
+  };
+}
+
+// Postgres の側の実行結果は seed が同じなら同じなので、差分の it どうしで使い回す
+// （Postgres を seed ごとに1回しか流さない）。
+const postgresRuns = new Map<number, RunOutcome>();
+async function postgresRun(seed: number): Promise<RunOutcome> {
+  let run = postgresRuns.get(seed);
+  if (!run) {
+    run = await runForDiff(postgresBackend("indexscan_off"), genOps(seed, LEN), seed);
+    postgresRuns.set(seed, run);
+  }
+  return run;
+}
+
+/** `other` と Postgres を `seeds` 本突き合わせ、食い違いの報告（無ければ空文字列）と突き合わせた recall の数を返す。 */
+async function diffAgainstPostgres(
+  name: string,
+  other: FuzzBackend,
+  seeds: number,
+): Promise<{ report: string; compared: number }> {
+  const reports: string[] = [];
+  let compared = 0;
+  for (let seed = FIRST_SEED; seed < FIRST_SEED + seeds; seed++) {
+    const outcome = diffRuns(
+      await runForDiff(other, genOps(seed, LEN), seed),
+      await postgresRun(seed),
+    );
+    compared += outcome.compared;
+    if (outcome.diff) {
+      reports.push(
+        [
+          `seed=${seed} recall #${outcome.diff.recall} の ${outcome.diff.path} が食い違った`,
+          `  ${name}: ${outcome.diff.a}`,
+          `  Postgres: ${outcome.diff.b}`,
+        ].join("\n"),
+      );
+    }
+  }
+  return { report: reports.join("\n\n"), compared };
+}
+
 const INVARIANT_LEGS: { profile: FuzzProfile; seeds: number; mode: ConnectionMode }[] = [
   { profile: "default", seeds: DEFAULT_SEEDS, mode: "planner" },
   { profile: "wide", seeds: WIDE_SEEDS, mode: "seqscan_off" },
@@ -132,28 +217,25 @@ describe("recall の不変条件（シードつきのランダムな操作列、
   }
 
   it(`差分（indexscan_off）: ${DIFF_SEEDS} シード × ${LEN} 操作で、Fake と recall の結果が食い違わない`, async () => {
-    const reports: string[] = [];
-    let compared = 0;
-    for (let seed = FIRST_SEED; seed < FIRST_SEED + DIFF_SEEDS; seed++) {
-      const outcome = await diffBackends(
-        fakeBackend,
-        postgresBackend("indexscan_off"),
-        genOps(seed, LEN),
-        seed,
-      );
-      compared += outcome.compared;
-      if (outcome.diff) {
-        reports.push(
-          [
-            `seed=${seed} recall #${outcome.diff.recall} の ${outcome.diff.path} が食い違った`,
-            `  Fake:     ${outcome.diff.a}`,
-            `  Postgres: ${outcome.diff.b}`,
-          ].join("\n"),
-        );
-      }
-    }
-    expect(reports.join("\n\n")).toBe("");
+    const { report, compared } = await diffAgainstPostgres("Fake", fakeBackend, DIFF_SEEDS);
+    expect(report).toBe("");
     // 打ち切り（`lexical_truncated`）だけで空振りしていないこと。
     expect(compared).toBeGreaterThan(0);
+  }, 1_800_000);
+
+  it(`差分（indexscan_off）: ${DIFF_SEEDS} シード × ${LEN} 操作で、testkit の InMemory と recall の結果が食い違わない`, async () => {
+    const { report, compared } = await diffAgainstPostgres("testkit", testkitBackend(), DIFF_SEEDS);
+    expect(report).toBe("");
+    expect(compared).toBeGreaterThan(0);
+  }, 1_800_000);
+
+  it("陽性対照: testkit の InMemory の aggregateScope を壊すと、食い違いが報告される", async () => {
+    // 食い違いが1つ見えれば足りるので、本数は絞る。
+    const { report } = await diffAgainstPostgres(
+      "testkit（壊した）",
+      testkitBackend(breakTotalInScope),
+      POSITIVE_CONTROL_SEEDS,
+    );
+    expect(report).toMatch(/totalInScope/);
   }, 1_800_000);
 });

@@ -198,7 +198,7 @@ export interface RunOutcome {
   /**
    * recall ごとの、backend に依らない形の結果（`RunOptions.snapshot` を立てたときだけ）。
    * Memory の id は作成順の別名（`c0`, `c1`, …。検査器が作ったもの以外は初出順の `x0`, …）へ、
-   * 数値は有効数字6桁へ丸める——Fake と Postgres の差分検査（`diffBackends`）が突き合わせる。
+   * 数値は有効数字6桁へ丸める——Fake・testkit と Postgres の差分検査（`diffRuns`）が突き合わせる。
    */
   snapshots: string[];
 }
@@ -728,7 +728,20 @@ export interface DiffOutcome {
 }
 
 /**
- * 同じ操作列を2つの backend に流し、recall ごとの正規化した結果（`RunOutcome.snapshots`）を
+ * 差分検査のために、1つの backend へ操作列を流す（`diffRuns` に渡す `RunOutcome` を作る）。
+ * 同じ `backend`・`ops`・`jitterSeed` なら同じ結果になるので、呼び出し側は結果を使い回してよい
+ * （Postgres の側を seed ごとに1回だけ流し、Fake・testkit・陽性対照の相手と突き合わせる）。
+ */
+export function runForDiff(
+  backend: FuzzBackend,
+  ops: readonly Op[],
+  jitterSeed: number,
+): Promise<RunOutcome> {
+  return runOps(backend, ops, { jitterSeed, diffVectors: true, snapshot: true });
+}
+
+/**
+ * 2つの `runForDiff` の結果を、recall ごとの正規化した結果（`RunOutcome.snapshots`）で
  * 突き合わせる。最初に食い違った recall を返す。
  *
  * **どちらかに `lexical_truncated` が立った recall で、突き合わせを打ち切る。**語彙の窓は
@@ -740,15 +753,7 @@ export interface DiffOutcome {
  * **近似索引（HNSW）を通す backend には当てない。**窓が満杯でも近似索引は真の上位を
  * 取りこぼしうる（ADR 0193、`ann_unreached`）ので、同じ理由で食い違いが約束の内に入る。
  */
-export async function diffBackends(
-  a: FuzzBackend,
-  b: FuzzBackend,
-  ops: readonly Op[],
-  jitterSeed: number,
-): Promise<DiffOutcome> {
-  const runOpts: RunOptions = { jitterSeed, diffVectors: true, snapshot: true };
-  const ra = await runOps(a, ops, runOpts);
-  const rb = await runOps(b, ops, runOpts);
+export function diffRuns(ra: RunOutcome, rb: RunOutcome): DiffOutcome {
   const n = Math.max(ra.snapshots.length, rb.snapshots.length);
   const lexicalTruncated = (x: unknown) =>
     (x as { omitted?: { kind: string }[] } | null)?.omitted?.some(
@@ -764,4 +769,25 @@ export async function diffBackends(
     if (path !== null) return { diff: { recall: i, path, a: sa, b: sb }, compared: i };
   }
   return { diff: null, compared: n };
+}
+
+/**
+ * 陽性対照用: `aggregateScope` の `totalInScope` を1だけ多く返すように壊した `MemoryStore`。
+ * 差分検査が黙って何も比べなくなる回帰を捕まえるために、相手の側へ被せる。
+ */
+export function breakTotalInScope(store: FuzzStores["memoryStore"]): FuzzStores["memoryStore"] {
+  return new Proxy(store, {
+    get(target, prop, receiver) {
+      if (prop === "aggregateScope") {
+        return async (...args: Parameters<FuzzStores["memoryStore"]["aggregateScope"]>) => {
+          const aggregate = await target.aggregateScope(...args);
+          return { ...aggregate, totalInScope: aggregate.totalInScope + 1 };
+        };
+      }
+      const value = Reflect.get(target, prop, receiver) as unknown;
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
 }
