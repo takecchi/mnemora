@@ -1824,6 +1824,21 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     query: { subjectId: string | null; limit: number },
   ): Promise<string[]> {
+    // `PostgresMemoryStore.listActiveClaimPredicates` は `query.limit` を生 SQL の `LIMIT`（bigint の
+    // パラメータ）へそのまま渡すので、負数・`NaN`・`Infinity`・非整数・2^63 以上では Postgres が
+    // 例外を投げる。検査せず `slice(0, limit)` へ渡すと違う件数を黙って返すので、他の `limit` を
+    // 取る口（`requeueEmbedJobs` ほか）と同じ2段の順序で、クエリの前に弾く Postgres 側に揃える。
+    if (!Number.isInteger(query.limit)) {
+      throw new Error(`listActiveClaimPredicates: limit must be an integer (got ${query.limit})`);
+    }
+    if (query.limit < 0) {
+      throw new Error(`listActiveClaimPredicates: limit must not be negative (got ${query.limit})`);
+    }
+    if (query.limit >= 2 ** 63) {
+      throw new Error(
+        `listActiveClaimPredicates: limit must fit in a Postgres bigint (got ${query.limit})`,
+      );
+    }
     const latestByPredicate = new Map<string, number>();
     for (const m of this.memories.values()) {
       if (m.tenantId !== ctx.tenantId) continue;
