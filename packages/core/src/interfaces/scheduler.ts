@@ -17,11 +17,17 @@ import type { Ctx } from "../ctx.js";
  */
 export type OutboxJobKind = "extract" | "embed" | "consolidate" | "reflect" | (string & {});
 
+/** `Scheduler.enqueue` に渡す、outbox の1ジョブ。 */
 export interface OutboxJob {
+  /** ジョブの id（`outbox` の行の id）。 */
   id: string;
+  /** ジョブが属するテナント。 */
   tenantId: string;
+  /** ジョブの種別（{@link OutboxJobKind}）。 */
   kind: OutboxJobKind;
+  /** ジョブの中身（種別ごとの JSON）。 */
   payload: Record<string, unknown>;
+  /** 処理してよい最早の時刻（`outbox.available_at` に対応する）。省略できる。⚠ `InlineScheduler` はこの値を見ず、その場で実行する。 */
   availableAt?: Date;
 }
 
@@ -37,5 +43,6 @@ export interface OutboxJob {
  *   冪等制約が担う）。
  */
 export interface Scheduler {
+  /** `job` を処理に回す。重複投入に対して冪等でなくてよい（上の契約）。 */
   enqueue(ctx: Ctx, job: OutboxJob): Promise<void>;
 }

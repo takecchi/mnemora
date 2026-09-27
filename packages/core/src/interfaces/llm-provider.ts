@@ -6,20 +6,29 @@ import type { Ctx } from "../ctx.js";
  * （docs/architecture.md §3.8）。provider 非依存の最小限の型のみ持つ。
  */
 export interface PromptMessage {
+  /** 発話者の役割。 */
   role: "system" | "user" | "assistant";
+  /** 本文。 */
   content: string;
 }
 
+/** LLM に送るプロンプト（provider に依らない形）。 */
 export interface PromptSpec {
+  /** system プロンプト。省略できる。 */
   system?: string;
+  /** 会話の本文（古い順）。 */
   messages: PromptMessage[];
 }
 
+/** `LLMProvider.complete` の戻り値。 */
 export interface LLMResponse {
+  /** モデルの応答の本文。⚠ 拒否でも切り詰めでもない空応答は空文字になりうる（`@mnemora/openai`・`@mnemora/anthropic` とも。ADR 0072）。 */
   content: string;
 }
 
+/** `LLMProvider.completeStructured` に渡す要求。 */
 export interface StructuredRequest<T> {
+  /** 送るプロンプト。 */
   prompt: PromptSpec;
   /** core は zod でスキーマを記述するだけ。ベンダー固有の Structured Output 形式への
    * 翻訳は各 provider package の責務（docs/architecture.md §3.8）。 */
@@ -69,6 +78,8 @@ export interface StructuredRequest<T> {
  * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
  */
 export interface LLMProvider {
+  /** `req` を送り、応答の本文を返す。失敗は例外で返す（上の契約。リトライは内蔵しない）。 */
   complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
+  /** `req.schema` に合う値を返させる。`req.schema` への適合を保証するのは provider である（上の #850 の追記）。失敗は例外で返す。 */
   completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
 }

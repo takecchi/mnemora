@@ -89,11 +89,17 @@ import type { RecallResult } from "./recall.js";
  * このリポジトリは何も知らないので、何も検査できない。
  */
 export interface FootprintStructuralConstants {
+  /** `DEFAULT_RECALL_LIMIT` の値。 */
   defaultRecallLimit: number;
+  /** `DEFAULT_DIGEST_BAND_LIMIT` の値。 */
   defaultDigestBandLimit: number;
+  /** `DIGEST_BAND_MAX_CHARS` の値。 */
   digestBandMaxChars: number;
+  /** `DIGEST_BAND_MAX_ENTRY_CHARS` の値。 */
   digestBandMaxEntryChars: number;
+  /** `DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS` の値。 */
   digestBandEntryFixedOverheadChars: number;
+  /** `DIGEST_BAND_ENTRY_SEPARATOR_CHARS` の値。 */
   digestBandEntrySeparatorChars: number;
 }
 
@@ -162,6 +168,7 @@ export type FootprintProfileOrigin =
  * ——持つと、同じ意味の値が2箇所に在って食い違いうる（ADR 0011 と同じ理由）。
  */
 export interface RecallFootprintProfile {
+  /** この係数の出所（既定か、較正したか。{@link FootprintProfileOrigin}）。 */
   origin: FootprintProfileOrigin;
   /**
    * Memory 1件の digest の平均文字数。
@@ -787,19 +794,24 @@ export type FootprintReason =
   /** ⚠ 較正はしたが、決められなかった係数があり既定値のままである。 */
   | { code: "coefficients_borrowed"; borrowed: readonly FootprintCoefficientName[] };
 
+/** {@link compareWithFullLog} の入力。 */
 export interface FullLogComparisonInput {
   /**
    * **会話ログを全部積んだときの文字数。呼び出し側が実測して渡す。**
    * `packages/core` はこれを知りようがない（会話ログを持っていない）。
    */
   fullLogChars: number;
+  /** 見積もる recall の形（スコープ内の件数など。{@link RecallFootprintShape}）。 */
   shape: RecallFootprintShape;
+  /** 見積もりの係数。省略すると同梱の既定プロファイル（このリポジトリのベンチで測った値）を使う。 */
   profile?: RecallFootprintProfile;
   /** `'too_close_to_call'` を返す幅。既定は `DEFAULT_FOOTPRINT_TOLERANCE`。 */
   tolerance?: number;
 }
 
+/** {@link compareWithFullLog} の結果。 */
 export interface FullLogComparison {
+  /** どちらが小さいか（`mnemora_smaller`・`full_log_smaller`・`too_close_to_call`）。 */
   verdict: FullLogVerdict;
   /** 見積もった `mnemora / 会話ログ全部`（`compare` ベンチの `mnemoraShareOfNaiveChars` に対応）。 */
   estimatedShare: number;

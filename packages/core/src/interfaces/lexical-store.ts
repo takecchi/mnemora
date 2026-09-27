@@ -30,7 +30,9 @@ export interface LexicalFilter {
    * `VectorFilter.tenantId` と同じ。
    */
   tenantId: string;
+  /** `VectorFilter.status` と同じ意味（未指定なら絞らない。空配列なら1件も通らない）。 */
   status?: MemoryStatus[];
+  /** 指定すると、この `subjectId` の行だけを返す（`includeSubjectless` で、主題の無い行も含められる）。未指定なら主題で絞らない。 */
   subjectId?: string;
   /**
    * `VectorFilter.includeSubjectless` と同じ欄・同じ意味（Issue #608 項目③(b)、
@@ -40,8 +42,11 @@ export interface LexicalFilter {
    * （`VectorFilter.includeSubjectless` の doc 参照）。
    */
   includeSubjectless?: boolean;
+  /** この中の `provenance.kind` を持つ行を除く。未指定・空配列なら除かない。 */
   excludeProvenanceKinds?: ProvenanceKind[];
+  /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以後の行だけを返す（境界を含む。ADR 0039）。 */
   occurredAfter?: Date;
+  /** 実効時刻（`occurredAt`、無ければ `recordedAt`）がこの時刻以前の行だけを返す（境界を含む。ADR 0039）。 */
   occurredBefore?: Date;
   /**
    * Issue #280（Issue #202 第2弾）: `VectorFilter.validAt` と同じ絞り・同じ意味
@@ -61,7 +66,9 @@ export interface LexicalFilter {
   labels?: string[];
 }
 
+/** `LexicalStore.search` が返す1件。 */
 export interface LexicalHit {
+  /** 当たった Memory の id。 */
   memoryId: MemoryId;
   /**
    * **一致したクエリ語彙の数 ÷ クエリから作れた語彙の総数**

@@ -213,9 +213,13 @@ export const UNSUPPORTED_KIND_ERROR_PREFIX = "runtime.tick: unsupported outbox j
 /** `tick` が1件の outbox ジョブを処理する関数の形。 */
 type JobHandler = (ctx: Ctx, job: OutboxJobRecord) => Promise<void>;
 
+/** {@link createRuntime} に渡す依存。store・provider は利用者が用意する（`@mnemora/postgres`・`@mnemora/openai` など）。 */
 export interface RuntimeDeps {
+  /** 記憶・観測・recall の記録を読み書きする store。 */
   memoryStore: MemoryStore;
+  /** `tick` が outbox のジョブを claim・完了・失敗にする store。 */
   outboxStore: OutboxStore;
+  /** 埋め込みのベクトルを保存し、ANN で引く store。 */
   vectorStore: VectorStore;
   /**
    * 語彙候補生成チャンネル（[ADR 0084](../../../docs/decisions/0084-lexical-recall-channel.md)、Issue #106）。
@@ -228,9 +232,13 @@ export interface RuntimeDeps {
    * 理由は `RecallQuery.channels` の doc に書いてある。
    */
   lexicalStore?: LexicalStore;
+  /** 監査ログ（`memory_events`）を読み書きする store。 */
   eventStore: EventStore;
+  /** テナントの設定（既定の半減期・減衰の時計・保持期間など）を読む store。 */
   tenantSettingsStore: TenantSettingsStore;
+  /** 抽出・統合・内省・claim key に使う LLM。 */
   llmProvider: LLMProvider;
+  /** 記憶とクエリの埋め込みに使う provider。ベクトルはこの `space` の空間として `vectorStore` に書かれる（`@mnemora/postgres` では、先に `registerEmbeddingSpace` で登録しておく）。 */
   embeddingProvider: EmbeddingProvider;
   /**
    * 省略時は `systemClock`。
@@ -240,6 +248,7 @@ export interface RuntimeDeps {
   clock?: Clock;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
   hashContent: (content: string) => string;
+  /** runtime の設定（{@link RuntimeConfig}）。省略すると既定値で動く。 */
   config?: RuntimeConfig;
   /**
    * roadmap.md 段階4: `usage`（docs/recall.md §6）の計測に使う。省略時は
@@ -248,7 +257,7 @@ export interface RuntimeDeps {
   tokenCounter?: TokenCounter;
   /**
    * `recall()` の戻り値を zod で検証するときの倒れ方（Issue #131、ADR 0098）。
-   * 省略時は `"report"`（{@link DEFAULT_RECALL_OUTPUT_VALIDATION}）——既定では投げない。
+   * 省略時は `"report"`（`DEFAULT_RECALL_OUTPUT_VALIDATION`（`recall-output-validation.ts`））——既定では投げない。
    * `recall-runtime.js` の `RecallRuntimeDeps.outputValidation` へそのまま渡る。
    */
   outputValidation?: RecallOutputValidationMode;
@@ -285,7 +294,9 @@ export interface RuntimeDeps {
   embeddingInput?: (memory: Memory) => string;
 }
 
+/** `Runtime.observe` の戻り値。 */
 export interface ObserveResult {
+  /** 記録した Observation の id（`externalId` で冪等に再送したときは既存の Observation の id）。 */
   observationId: ObservationId;
   /**
    * sync 抽出で実際に作られた（または既存の冪等な行として返された）Memory の id。
@@ -404,9 +415,13 @@ export interface ObserveResult {
  *   一切進めない。**
  */
 export interface ContestedDetectionOutcome {
+  /** 検出の対象にした、新しく作った Memory の id。 */
   memoryId: MemoryId;
+  /** その Memory の claim key。 */
   claimKey: ClaimKey;
+  /** 同じ鍵で矛盾しうる他の `active` Memory の件数（この Memory 自身を除く。上の doc）。 */
   matchCount: number;
+  /** 何をしたか（`matchCount` ごとの分岐は上の doc）。 */
   result:
     | { kind: "no_conflict" }
     | { kind: "contested"; withMemoryId: MemoryId; markContested: MarkContestedResult }
@@ -473,6 +488,7 @@ export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_atte
  * 型付き例外に変える案（投げる例外の種類が変わる）である。
  */
 export interface ReextractResult {
+  /** 抽出し直した Observation の id。 */
   observationId: ObservationId;
   /** {@link WriteAtomicity}。⛔ 省略可能にしない。 */
   atomicity: WriteAtomicity;
@@ -511,6 +527,7 @@ export interface ReextractResult {
    * 「既存を見ていない」）。
    */
   skipped: ReextractSkip[];
+  /** 抽出がどう終わったか（{@link ExtractionOutcome}）。 */
   extraction: ExtractionOutcome;
   /**
    * `ObserveResult.extractionFailure` と同じ意味の欄（ADR 0076）。
@@ -709,6 +726,7 @@ export const DEFAULT_CONSOLIDATE_MIN_AFFINITY = 0.8;
  * `runtime.consolidate` の任意オプション（Issue #103、ADR 0089）。
  */
 export interface ConsolidateOptions {
+  /** 統合の対象（{@link ConsolidateTarget}）。 */
   target: ConsolidateTarget;
   /**
    * `true` なら **LLM を呼ばず・1件も書かず**、束ねられる対象だけを見て返す
@@ -790,6 +808,7 @@ export type ConsolidateSourceOutcome =
  * （`sources` を数えれば得られる）。
  */
 export interface ConsolidationResult {
+  /** 統合がどう終わったか（{@link ConsolidateOutcome}）。 */
   outcome: ConsolidateOutcome;
   /**
    * {@link WriteAtomicity}。⛔ 省略可能にしない。
@@ -897,6 +916,7 @@ export const DEFAULT_REFLECT_MIN_AFFINITY = 0.4;
  * `runtime.reflect` の任意オプション（Issue #104）。
  */
 export interface ReflectOptions {
+  /** 内省の対象（{@link ReflectTarget}）。 */
   target: ReflectTarget;
   /**
    * `true` なら **LLM を呼ばず・1件も書かず**、土台になりうる対象だけを見て返す
@@ -970,6 +990,7 @@ export type ReflectBasisOutcome =
  * （`basis` を数えれば得られる）。
  */
 export interface ReflectionResult {
+  /** 内省がどう終わったか（{@link ReflectOutcome}）。 */
   outcome: ReflectOutcome;
   /** `outcome === "nothing_to_reflect"` のときだけ非 `null`。それ以外は必ず `null`。 */
   nothingReason: ReflectNothingReason | null;
@@ -986,6 +1007,7 @@ export interface ReflectionResult {
   llmFailure: ExtractionFailure | null;
 }
 
+/** `Runtime.tick` の設定。 */
 export interface TickOptions {
   /**
    * claim のリース長（ミリ秒）。`ClaimOutboxJobsOptions.leaseMs`（ADR 0032）へそのまま渡す。
@@ -1025,6 +1047,9 @@ export interface TickOptions {
    *   ——古い job が `limit` を埋めていれば、後から積まれた別の種類の job は次の `tick` に回る。
    */
   kinds?: OutboxJobKind[];
+  /**
+   * claim した worker の名前（outbox の行の `claimed_by`）。省略すると `RuntimeConfig.defaultClaimedBy`、それも無ければ `"runtime.tick"`。
+   */
   claimedBy?: string;
 }
 
@@ -1069,7 +1094,9 @@ export interface OutboxLeaseConflict {
   attemptedOutcome: "complete" | "fail";
 }
 
+/** `Runtime.tick` の結果。 */
 export interface TickResult {
+  /** この tick で処理に成功し、`complete()` まで記録できたジョブの本数（完了の記録がリースの競合で弾かれたものは数えない）。 */
   processed: number;
   /**
    * この tick で `outboxStore.fail()` を呼び、それが `OutboxLeaseConflictError` で
@@ -1135,7 +1162,7 @@ export interface TickResult {
  * {@link Runtime.sweepArchive} の返り値（ADR 0114）。
  *
  * `MemoryStore.archiveDecayed` は任意メソッドである。**store 側の
- * {@link ArchiveDecayedResult} をそのまま返り値にしない**——store 側の型には
+ * `ArchiveDecayedResult`（`interfaces/memory-store.ts`） をそのまま返り値にしない**——store 側の型には
  * 「口が無かった」を語る場所が無い（口が無ければそもそも呼べないので、store が
  * 自分について「対応していない」と言う機会が無い）。この違いを埋めるのが `supported`
  * である。
@@ -1266,6 +1293,7 @@ export interface RestoreArchivedResult {
  * 参照）。
  */
 export type RestoreSupersededTarget = {
+  /** 置き換えた側（supersede した側）の Memory の id。これを `supersededById` に持つ Memory の群を戻す。 */
   supersededById: MemoryId;
   /**
    * [Issue #515](https://github.com/takecchi/mnemora/issues/515) 方向①
@@ -1334,7 +1362,9 @@ export type RestoreSupersededTarget = {
  * （[ADR 0258](../../../docs/decisions/0258-restore-superseded-operation-scope.md)）。
  */
 export type SupersededOperationGroup = {
+  /** 群を作った `superseded` イベントの `meta.reason`（自由文をそのまま運ぶ。無ければ `null`）。 */
   supersededReason: string | null;
+  /** この群に入る Memory の id。 */
   memoryIds: MemoryId[];
   /**
    * この `memoryIds` の区切りが、1回の操作と一致することをどこまで
@@ -1706,6 +1736,7 @@ export interface MarkContestedResult {
    * 扱い）。
    */
   supported: boolean;
+  /** どう終わったか（{@link MarkContestedOutcome}）。 */
   outcome: MarkContestedOutcome;
 }
 
@@ -1800,6 +1831,7 @@ export interface ResolveContestedResult {
    * 「無い」の扱い）。
    */
   supported: boolean;
+  /** どう終わったか（{@link ResolveContestedOutcome}）。 */
   outcome: ResolveContestedOutcome;
 }
 
@@ -1874,9 +1906,14 @@ export interface ResolveOrphanedContestedResult {
    * `outcome` は必ず `{ kind: "not_attempted" }`。**
    */
   supported: boolean;
+  /** どう終わったか（{@link ResolveOrphanedContestedOutcome}）。 */
   outcome: ResolveOrphanedContestedOutcome;
 }
 
+/**
+ * `createRuntime()` が返す runtime。中核の5動詞（`observe`・`recall`・`reflect`・`consolidate`・`forget`）と、保守・是正・説明の口を持つ。
+ * どのメソッドも第一引数に `ctx`（`tenantId` 必須）を取る。一覧と分類は README の「外から見える API」を見ること。
+ */
 export interface Runtime {
   /**
    * `docs/architecture.md` §3.5 の Observation 冪等キー（`externalId`）は、その Observation
@@ -2738,7 +2775,7 @@ export interface Runtime {
    * を見て判断すること。
    *
    * ⛔ **この口自身は監査理由を自動生成しない。** `input.reason` は
-   * {@link buildCorrectionReason}（ADR 0238 が定めた形を `packages/core` へ持ち上げたもの）
+   * `buildCorrectionReason`（`apply-correction.ts`）（ADR 0238 が定めた形を `packages/core` へ持ち上げたもの）
    * で呼び出し側が組み立てた文字列、またはその他の自由文をそのまま `markContested`/
    * `resolveContested` の両方へ渡すだけである——`meta.note` に載る `recallId` が
    * `RecallResult.explain`（`getRecall` 経由）への橋になる、という ADR 0238 の形は

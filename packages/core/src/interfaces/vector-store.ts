@@ -39,6 +39,9 @@ export interface VectorFilter {
    * `LexicalFilter.tenantId` も同じ。
    */
   tenantId: string;
+  /**
+   * 指定すると、この中のどれかの status を持つ行だけを返す。未指定なら status で絞らない。⚠ 空配列なら1件も通らない（`@mnemora/postgres` と testkit の fixture で同じ）。
+   */
   status?: MemoryStatus[];
   /**
    * **狭義の `>`。** `decayFloorAt` が境界と*ちょうど同じ* Memory は含まれない
@@ -188,11 +191,15 @@ export interface VectorFilter {
 
 /** `VectorStore.getVectors` が返す1件。 */
 export interface VectorEntry {
+  /** ベクトルの持ち主の Memory の id。 */
   memoryId: MemoryId;
+  /** 保存されているベクトル。 */
   vector: number[];
 }
 
+/** `VectorStore.search` が返す1件。 */
 export interface VectorHit {
+  /** 当たった Memory の id。 */
   memoryId: MemoryId;
   /**
    * **コサイン距離（`1 - cosine similarity`）。** 他の距離関数（ユークリッド距離等）ではない

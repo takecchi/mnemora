@@ -9,6 +9,7 @@
  * 抽出をやり直すか・`created` イベントを積むかを決める。
  */
 export interface IdempotentCreateResult<T> {
+  /** 作った行、または冪等キーに衝突したときの既存の行。 */
   readonly value: T;
   /** この呼び出しが新しい行を挿入したなら `true`。既存の行を返したなら `false`。 */
   readonly created: boolean;

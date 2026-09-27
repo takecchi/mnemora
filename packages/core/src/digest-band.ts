@@ -25,8 +25,11 @@ export interface PackDigestBandOptions {
   maxEntryChars: number;
 }
 
+/** `packDigestBand` の戻り値。 */
 export interface PackedDigestBand {
+  /** 帯に載せた digest（呼び出し側が決めた順のまま）。 */
   band: DigestEntry[];
+  /** どの上限で打ち切ったか。どの上限にも当たらなかったら省く（`packDigestBand` の doc）。 */
   limitedBy?: DigestBandLimitedBy;
 }
 
