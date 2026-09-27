@@ -53,13 +53,18 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
     await closeTestClient();
   });
 
-  async function seedClaimableJob(ctx: Ctx): Promise<string> {
+  /**
+   * `available_at` は、歯が `claimBatch` に渡す `now` と同じ値で書く。
+   * ⚠ DB の `now()` で書かないこと。`now()` はマイクロ秒まで持ち、JS の `Date` はミリ秒で切れる。同じ
+   * ミリ秒の内だと `available_at > now` になり、`claimBatch` が拾わない（【実測】CI で両脚とも1本ずつ赤になった）。
+   */
+  async function seedClaimableJob(ctx: Ctx, availableAt: Date): Promise<string> {
     const { pool } = await getTestClient();
     const seeded = await pool.query<{ id: string }>(
       `INSERT INTO outbox (id, tenant_id, kind, payload, available_at, attempts, created_at)
-       VALUES (gen_random_uuid(), $1, 'embed', '{}'::jsonb, now(), 0, now())
+       VALUES (gen_random_uuid(), $1, 'embed', '{}'::jsonb, $2, 0, $2)
        RETURNING id`,
-      [ctx.tenantId],
+      [ctx.tenantId, availableAt],
     );
     const jobId = seeded.rows[0]?.id;
     if (jobId === undefined) throw new Error("seed に失敗した");
@@ -98,8 +103,8 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
 
   it("lock_timeout で文が打ち切られた後も、ジョブは claim されておらず、次の claimBatch が拾う", async () => {
     const ctx: Ctx = { tenantId: TENANT };
-    const jobId = await seedClaimableJob(ctx);
     const now = new Date();
+    const jobId = await seedClaimableJob(ctx, now);
     const { pool } = await getTestClient();
 
     const holder = await pool.connect();
@@ -135,8 +140,8 @@ describe("PostgresOutboxStore.claimBatch — 文が途中で失敗しても、�
 
   it("文の実行中に backend が切られた後も、ジョブは claim されておらず、次の claimBatch が拾う", async () => {
     const ctx: Ctx = { tenantId: TENANT };
-    const jobId = await seedClaimableJob(ctx);
     const now = new Date();
+    const jobId = await seedClaimableJob(ctx, now);
     const { pool } = await getTestClient();
 
     const holder = await pool.connect();
