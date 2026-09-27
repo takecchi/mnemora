@@ -116,6 +116,25 @@ function assertObservationHasNoNul(owner: string, input: NewObservation): void {
 }
 
 /**
+ * Observation を書く口で、Postgres が `timestamptz` への変換で拒む Invalid Date（`.getTime()` が `NaN`）を先に
+ * 検査する（`invalid input syntax for type timestamp with time zone`、`22007`。Issue #807 の Memory 側と同じ根）。
+ * 省略（`undefined`/`null`）は「無い」であって Invalid Date ではないので検査しない。上の NUL の検査と同じく、
+ * Postgres は `externalId` の衝突を見る前に拒むので、冪等の判定より前に見る。
+ */
+function assertObservationDatesValid(owner: string, input: NewObservation): void {
+  for (const [field, value] of [
+    ["occurredAt", input.occurredAt],
+    ["recordedAt", input.recordedAt],
+    ["validFrom", input.validFrom],
+    ["validUntil", input.validUntil],
+  ] as const) {
+    if (value != null && Number.isNaN(value.getTime())) {
+      throw new Error(`${owner}: ${field} must be a valid Date (got Invalid Date)`);
+    }
+  }
+}
+
+/**
  * `MemoryStore` のインメモリ・プレースホルダ実装。
  *
  * **本番用途ではない。** `packages/testkit` の適合テストが実際に実行できることを示す
@@ -408,6 +427,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     input: NewObservation,
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("InMemoryMemoryStore", input);
+    assertObservationDatesValid("InMemoryMemoryStore", input);
     const existing = input.externalId
       ? [...this.observations.values()].find(
           (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
