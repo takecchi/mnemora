@@ -849,6 +849,17 @@ export interface ConsolidationResult {
  * 渡すので、`-1` は「末尾の1件を除く全部」、`1.5` は1件、`0` と `NaN` は0件になる。`dryRun` でなければ、
  * そうして選ばれた対象に内省の結果（新しい `reflected` の Memory）を実際に書く。この解釈は将来変わりうるので、頼らないこと。
  * `Runtime.findCorrectionCandidates` の `limit`（正の整数以外を `RangeError` で拒む）とは揃えていない。
+ *
+ * ⚠ 2026-09-27 追記（今の振る舞いを書くだけ。Postgres と testkit で実測）——{@link ConsolidateTarget} の
+ * 同日付の追記と同じ形である:
+ * - **`{ query }` は、`recall()` の `memories` を `retrievedVia` によらず全部採る。**連想枠は既定 on
+ *   （ADR 0337）なので、クエリには当たっていない「連想で返った」`active` な記憶も材料として適格になる。
+ *   クエリに当たったものだけを材料にしたいなら `query.association: null` を渡すこと。
+ * - **`{ memoryIds }` は有効期間（`validFrom`/`validUntil`）を見ない。**適格性は `status === 'active'`
+ *   だけである。内省の記憶は有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れの記憶を
+ *   材料に渡すと、それを材料にした内省の記憶が期限の無い `active` な記憶として `recall()` に出る
+ *   （[Issue #1188](https://github.com/takecchi/mnemora/issues/1188) のコメント。引き継ぎ方は決めていない）。
+ *   `{ query }`・`{ seedMemoryId }` は `recall()` の期間のゲートを通るので、期限切れの記憶は材料に入らない。
  */
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }
@@ -2037,6 +2048,17 @@ export interface Runtime {
    * （`docs/roadmap.md` §4 技術上のリスク表）はこの性質の上に成り立っている。
    * 詳細は [ADR 0028](../../../docs/decisions/0028-reextract-superseded-cleanup.md) の
    * 2026-09-26 追記。
+   *
+   * ⚠ 2026-09-27 追記（新しい Memory に何が引き継がれるか。今の振る舞いを書くだけ。Postgres と testkit で実測）:
+   * - **有効期間・`occurredAt` は、Observation から引き継ぐ**（`observe()` と同じ経路。`validUntil` が過去の
+   *   Observation なら、新しい Memory も期限切れになる）。
+   * - **`claimKey` は常に null である。**`reextract` には `observe()` の `claimKey`（opt-in）の口が無く、
+   *   その鍵は保存もされない（ADR 0320 決定4・6、ADR 0324 負債3）。⟹ `claimKey` 付きで observe した
+   *   Memory を置き換えると、置き換えた側（新しい Memory）は鍵を持たず、鍵は `superseded` の旧い Memory
+   *   にだけ残る。同じ鍵の主張による矛盾の検出（ADR 0324）の対象からも外れる。
+   * - **`subjectCandidates` の口も無い**（`sanitizeCandidateSubjectId` の doc。この行はコードを読んで
+   *   確かめただけで、実測はしていない）。LLM が返した候補の
+   *   `subjectId` は一覧で検査されず、省略された候補は Observation の `subjectId` へ落ちる。
    */
   reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
   /**
