@@ -92,8 +92,12 @@ export function assertSafeSchemaName(schema: string): void {
  *
  * `schema === undefined` のときは `name` をそのまま返す——**既定経路が今日と
  * 1バイトも変わらないことは、この分岐そのものが担っている。** それ以外では
- * `"<schema>"."<name>"` と両方を二重引用符で囲む（大文字小文字を区別させ、
- * 予約語・記号を含む名前でも安全にするため）。
+ * `"<schema>"."<name>"` と両方を二重引用符で囲む。
+ *
+ * ⚠ **使い方の約束: この関数は、名前の検査も引用文字のエスケープもしない。`schema` には
+ * `assertSafeSchemaName`、`name` には `assertSafeIdentifier` を通した名前だけを渡すこと。**
+ * 同梱の呼び出し（`runMigrations`・`registerEmbeddingSpace`・`createPostgresClient` など）は、
+ * どれも先に検査を通してから呼んでいる。
  */
 export function qualify(schema: string | undefined, name: string): string {
   if (schema === undefined) {
@@ -111,6 +115,10 @@ export function qualify(schema: string | undefined, name: string): string {
  * `assertSafeIdentifier` を通した名前しか渡さない前提なので、名前自体に
  * シングルクォートが混じる心配は無い）。実体が同じであるため、別関数として
  * 実装を複製せず、意図を示す別名としてだけ用意する。
+ *
+ * ⚠ **使い方の約束: この関数は、名前の検査も引用文字のエスケープもしない（`qualify` と同じ）。
+ * `schema` には `assertSafeSchemaName`、`name` には `assertSafeIdentifier` を通した名前だけを
+ * 渡すこと。**
  */
 export function qualifiedLiteral(schema: string | undefined, name: string): string {
   return qualify(schema, name);
@@ -130,6 +138,9 @@ export function qualifiedLiteral(schema: string | undefined, name: string): stri
  *
  * `schema === extensionSchema` のときは重複を落として1つだけ返す
  * （`search_path=s,s` のような冗長な値にしない）。
+ *
+ * ⚠ **使い方の約束: この関数は、名前の検査も引用文字のエスケープもしない。`schema`・
+ * `extensionSchema` には、`assertSafeSchemaName` を通した名前だけを渡すこと。**
  */
 export function searchPathFor(schema: string, extensionSchema: string): string {
   if (schema === extensionSchema) {
