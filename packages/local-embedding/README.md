@@ -347,9 +347,14 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 | `prefix`         | `""`                                          | 全テキストの先頭に付ける文字列                                                                                |
 | `cacheDir`       | 未指定（`@huggingface/transformers/.cache/`） | モデルの置き場所                                                                                              |
 | `numThreads`     | `4`                                           | onnxruntime の intra-op スレッド数                                                                            |
+| `revision`       | 未指定（transformers.js の既定 `"main"`）     | Hugging Face の revision（枝名・tag・commit sha）。⚠ 渡したときの実挙動は本物のモデルで確かめていない。キャッシュ鍵・重みの指紋の照合との関係も未決（Issue #597） |
 | `createPipeline` | transformers.js                               | モデルを読み込む関数（**テスト用の注入点**）                                                                  |
 | `retry`          | `{ attempts: 3 }`                             | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141） |
 | `sleep`          | `setTimeout` を使う本物の待ち                 | リトライの待ち時間を実際に待つ関数（**テスト用の注入点**）                                                    |
+
+既定値は `DEFAULT_LOCAL_EMBEDDING_REPO`・`DEFAULT_LOCAL_EMBEDDING_DTYPE`・`DEFAULT_LOCAL_EMBEDDING_DIMENSIONS`・
+`DEFAULT_LOCAL_EMBEDDING_MODEL_ID`・`DEFAULT_LOCAL_EMBEDDING_PREFIX`・`DEFAULT_LOCAL_EMBEDDING_NUM_THREADS`・
+`DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS` として export している（`space.provider` の `"local"` は `LOCAL_EMBEDDING_PROVIDER_ID`）。
 
 **`numThreads` の既定が 4 なのは実測による**——32コア機で、既定（コア数まかせ）の
 819 文/秒 に対し 4スレッドで **985 文/秒**だった。**増やすほど速くなるわけではない。**
