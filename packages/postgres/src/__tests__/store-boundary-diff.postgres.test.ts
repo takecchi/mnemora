@@ -1,4 +1,10 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import {
+  ContestedWithoutCompanionError,
+  MemoryPurgeConflictError,
+  MemoryStatusConflictError,
+  OutboxLeaseConflictError,
+} from "@mnemora/core";
 import type {
   ClaimOutboxJobsOptions,
   Ctx,
@@ -43,7 +49,12 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  * - 比べるもの: 戻り値（投げたか・返した値。id・テナント・時刻は別名に伏せ、鍵を並べ替える）と、その後の状態
  *   （自分のテナントの記憶2件の status・参照・本文・強化・埋め込みの状態、イベントの kind と memoryId、
  *   呼んだテナントで記憶2件と他テナントの記憶の id が持つベクトル、他テナントの記憶・イベント・ベクトル）。
- *   ⚠ 例外の種類と文面は比べない（DB の例外と fixture の `Error` は顔が違う。`packages/testkit/src/fixtures.ts` の冒頭）。
+ *   ⚠ 例外の文面は比べない。種類も、interface の TSDoc が約束する4クラス（`ContestedWithoutCompanionError`・
+ *   `MemoryStatusConflictError`・`MemoryPurgeConflictError`・`OutboxLeaseConflictError`）のときだけ比べる——クラス名と
+ *   約束の欄（id は別名に、時刻は `<t>` に伏せる）。それ以外の例外は「投げた」とだけ比べる（DB の例外と fixture の
+ *   `Error` は顔が違う。`packages/testkit/src/fixtures.ts` の冒頭）。
+ * - 約束の4クラスを出す場面は、(口, クラス) の13組すべてを `TYPED_THROWS` に持ち、2実装とも約束のクラスと欄で
+ *   投げることを縛る（差が出ないだけでは、2実装が同じく約束を破っていても緑になるため）。
  *
  * 🔴 **許可リスト（`DOCUMENTED_DIFFERENCES`）は、doc に「違う」と書いてある差と、揃える先が未決で Issue に在る差だけを持つ。**
  * - 許可リストの外で差が出たら落ちる。直すか（fixture は Postgres を写す）、doc か Issue に書いてから足すこと。
@@ -252,6 +263,7 @@ const TIME_KEYS = new Set([
   "completedAt",
   "failedAt",
   "purgedAt",
+  "observedPurgedAt",
   "registeredAt",
   "oldestPurgedAt",
   "newestPurgedAt",
@@ -976,6 +988,207 @@ for (const limit of [0, 1, 2 ** 53, -1, 1.5, Number.NaN, 2 ** 63]) {
 add("claimBatch(claimedBy:'')", (h) => claimWith(h, { claimedBy: "" }));
 add("claimBatch(claimedBy:NUL)", (h) => claimWith(h, { claimedBy: "w\u0000" }));
 
+// ---- 約束の4クラスを出す場面（下の `TYPED_THROWS`。上の場面で足りている組は、そちらを使う）----
+const contestedNew = (h: Kit, contentHash: string) =>
+  buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash, status: "contested" });
+add("updateStatus(self,contested)", (h) => h.s.ms.updateStatus(h.ctx, h.m.id, "contested"));
+add("updateStatusWithEvent(self,contested)", (h) =>
+  h.s.ms.updateStatusWithEvent(h.ctx, h.m.id, "contested", {}, event(h.ctx, h.m.id)),
+);
+add("createMemory(contested、contestedWithId 無し)", (h) =>
+  h.s.ms.createMemory(h.ctx, contestedNew(h, "con-none")),
+);
+add("createMemoryWithOutbox(contested、contestedWithId 無し)", (h) =>
+  h.s.ms.createMemoryWithOutbox(h.ctx, contestedNew(h, "con-none"), ["embed"]),
+);
+add("supersedeWithNewMemories(news が contested、contestedWithId 無し)", (h) =>
+  h.s.ms.supersedeWithNewMemories(
+    h.ctx,
+    [{ input: contestedNew(h, "con-news"), jobKinds: ["embed"] }],
+    [
+      {
+        id: h.m.id,
+        supersededByIndex: 0,
+        expectedStatus: "active",
+        event: event(h.ctx, h.m.id, "superseded"),
+      },
+    ],
+  ),
+);
+add("updateStatus(self,archived,{expectedStatus:superseded})", (h) =>
+  h.s.ms.updateStatus(h.ctx, h.m.id, "archived", { expectedStatus: "superseded" }),
+);
+add("updateStatusWithEvent(self,archived,{expectedStatus:superseded})", (h) =>
+  h.s.ms.updateStatusWithEvent(
+    h.ctx,
+    h.m.id,
+    "archived",
+    { expectedStatus: "superseded" },
+    event(h.ctx, h.m.id, "archived"),
+  ),
+);
+add("resolveOrphanedContested(self,contestedWithId 食い違い)", async (h) => {
+  await h.s.ms.markContestedPair(
+    h.ctx,
+    { id: h.m.id, event: event(h.ctx, h.m.id) },
+    { id: h.m2.id, event: event(h.ctx, h.m2.id) },
+  );
+  await h.s.ms.updateStatusWithEvent(
+    h.ctx,
+    h.m2.id,
+    "forgotten",
+    {},
+    event(h.ctx, h.m2.id, "forgotten"),
+  );
+  return h.s.ms.resolveOrphanedContested(h.ctx, {
+    id: h.m.id,
+    contestedWithId: ID_VALUES.missing!(h, "m"),
+    event: event(h.ctx, h.m.id),
+  });
+});
+add("purgeMemory(self)（purge 済み）", async (h) => {
+  await h.s.ms.updateStatus(h.ctx, h.m.id, "forgotten");
+  const purge = () =>
+    h.s.ms.purgeMemory(
+      h.ctx,
+      h.m.id,
+      { content: "[purged]", digest: "[purged]" },
+      event(h.ctx, h.m.id, "purged"),
+    );
+  await purge();
+  return purge();
+});
+/** 呼んだテナントに embed のジョブを1本作る（`attempts` は 0）。`claim` なら取って `attempts` を 1 にする。 */
+const jobOf = async (h: Kit, claim: boolean) => {
+  const { jobs } = await h.s.ms.createMemoryWithOutbox(
+    h.ctx,
+    buildNewMemoryFixture({ tenantId: h.ctx.tenantId, contentHash: "lease" }),
+    ["embed"],
+  );
+  if (claim) {
+    await h.s.os.claimBatch(h.ctx, { limit: 10, now: later(), claimedBy: "w", leaseMs: 60_000 });
+  }
+  return jobs[0]!.id;
+};
+add("outbox.complete(claim 済み,attempts 違い)", async (h) =>
+  h.s.os.complete(h.ctx, await jobOf(h, true), 2),
+);
+add("outbox.fail(claim 済み,attempts 違い)", async (h) =>
+  h.s.os.fail(h.ctx, await jobOf(h, true), "e", 2),
+);
+// Issue #1292: 終端済みの行に違う expectedAttempts を渡したとき。メソッドの doc の要約と冒頭の契約が食い違って読める。
+// 2実装とも冒頭の契約（attempts が違えば投げる）どおりに動く、という今の振る舞いを縛る。
+add("outbox.complete(終端済み,attempts 違い)", async (h) => {
+  const jobId = await jobOf(h, false);
+  await h.s.os.fail(h.ctx, jobId, "e", 0);
+  return h.s.os.complete(h.ctx, jobId, 1);
+});
+add("outbox.fail(終端済み,attempts 違い)", async (h) => {
+  const jobId = await jobOf(h, false);
+  await h.s.os.complete(h.ctx, jobId, 0);
+  return h.s.os.fail(h.ctx, jobId, "e", 1);
+});
+
+/**
+ * interface の TSDoc が例外の種類まで約束する (口, クラス) の13組と、それを出す場面・約束の欄の値
+ * （`normalize` の後の形。id は別名、ジョブの id と新しく作った id は `<new>`、時刻は `<t>`）。
+ */
+const TYPED_THROWS: ReadonlyArray<{ pair: string; scenario: string; expected: object }> = [
+  ...(
+    [
+      ["updateStatus", "updateStatus(self,contested)", "SELF"],
+      ["updateStatusWithEvent", "updateStatusWithEvent(self,contested)", "SELF"],
+      ["createMemory", "createMemory(contested、contestedWithId 無し)", null],
+      ["createMemoryWithOutbox", "createMemoryWithOutbox(contested、contestedWithId 無し)", null],
+      [
+        "supersedeWithNewMemories",
+        "supersedeWithNewMemories(news が contested、contestedWithId 無し)",
+        null,
+      ],
+    ] as const
+  ).map(([method, scenario, memoryId]) => ({
+    pair: `${method} / ContestedWithoutCompanionError`,
+    scenario,
+    expected: { class: "ContestedWithoutCompanionError", method, memoryId },
+  })),
+  ...(
+    [
+      [
+        "updateStatus",
+        "updateStatus(self,archived,{expectedStatus:superseded})",
+        "superseded",
+        "active",
+      ],
+      [
+        "updateStatusWithEvent",
+        "updateStatusWithEvent(self,archived,{expectedStatus:superseded})",
+        "superseded",
+        "active",
+      ],
+      [
+        "markContestedPair",
+        "markContestedPair(self,self2) 2回目（既に contested）",
+        "active",
+        "contested",
+      ],
+      [
+        "resolveContestedPair",
+        "resolveContestedPair(self,self2)（contested でない）",
+        "contested",
+        "active",
+      ],
+      ["resolveOrphanedContested", "resolveOrphanedContested(self)", "contested", "active"],
+      [
+        "resolveOrphanedContested",
+        "resolveOrphanedContested(self,contestedWithId 食い違い)",
+        "contested",
+        "contested",
+      ],
+    ] as const
+  ).map(([method, scenario, expectedStatus, observedStatus]) => ({
+    pair: `${method} / MemoryStatusConflictError`,
+    scenario,
+    expected: {
+      class: "MemoryStatusConflictError",
+      memoryId: "SELF",
+      expectedStatus,
+      observedStatus,
+    },
+  })),
+  ...(
+    [
+      ["purgeMemory(self)（forgotten でない）", "active", null],
+      ["purgeMemory(self)（purge 済み）", "forgotten", "<t>"],
+    ] as const
+  ).map(([scenario, observedStatus, observedPurgedAt]) => ({
+    pair: "purgeMemory / MemoryPurgeConflictError",
+    scenario,
+    expected: {
+      class: "MemoryPurgeConflictError",
+      memoryId: "SELF",
+      observedStatus,
+      observedPurgedAt,
+    },
+  })),
+  ...(
+    [
+      ["complete", "outbox.complete(claim 済み,attempts 違い)", 2, 1],
+      ["fail", "outbox.fail(claim 済み,attempts 違い)", 2, 1],
+      ["complete", "outbox.complete(終端済み,attempts 違い)", 1, 0],
+      ["fail", "outbox.fail(終端済み,attempts 違い)", 1, 0],
+    ] as const
+  ).map(([method, scenario, expectedAttempts, observedAttempts]) => ({
+    pair: `${method} / OutboxLeaseConflictError`,
+    scenario,
+    expected: {
+      class: "OutboxLeaseConflictError",
+      jobId: "<new>",
+      expectedAttempts,
+      observedAttempts,
+    },
+  })),
+];
+
 interface Outcome {
   result: string;
   state: string;
@@ -986,16 +1199,50 @@ async function runOn(backend: Backend, f: (h: Kit) => Promise<unknown>): Promise
   let result: string;
   try {
     result = `返した ${JSON.stringify(normalize(await f(h), h))}`;
-  } catch {
-    result = "投げた";
+  } catch (error) {
+    const typed = typedError(error);
+    result = typed ? `投げた ${JSON.stringify(normalize(typed, h))}` : "投げた";
   }
   return { result, state: await snapshotState(h) };
 }
 
+/** 約束の4クラスなら、クラス名と TSDoc が約束する欄（それ以外は `null`＝「投げた」とだけ比べる）。 */
+function typedError(error: unknown): Record<string, unknown> | null {
+  if (error instanceof ContestedWithoutCompanionError) {
+    return { class: error.name, method: error.method, memoryId: error.memoryId };
+  }
+  if (error instanceof MemoryStatusConflictError) {
+    return {
+      class: error.name,
+      memoryId: error.memoryId,
+      expectedStatus: error.expectedStatus,
+      observedStatus: error.observedStatus,
+    };
+  }
+  if (error instanceof MemoryPurgeConflictError) {
+    return {
+      class: error.name,
+      memoryId: error.memoryId,
+      observedStatus: error.observedStatus,
+      observedPurgedAt: error.observedPurgedAt,
+    };
+  }
+  if (error instanceof OutboxLeaseConflictError) {
+    return {
+      class: error.name,
+      jobId: error.jobId,
+      expectedAttempts: error.expectedAttempts,
+      observedAttempts: error.observedAttempts,
+    };
+  }
+  return null;
+}
+
 const differing = new Map<string, { pg: Outcome; testkit: Outcome }>();
+const outcomes = new Map<string, { pg: Outcome; testkit: Outcome }>();
 
 function resultKind(result: string): ResultKind {
-  if (result === "投げた") return "throws";
+  if (result.startsWith("投げた")) return "throws";
   return result === "返した null" ? "returns-null" : "returns-value";
 }
 
@@ -1025,6 +1272,7 @@ describe("store の公開の口の境界の入力: Postgres と testkit の fixt
     for (const [name, f] of scenarios) {
       const pg = await runOn("pg", f);
       const testkit = await runOn("testkit", f);
+      outcomes.set(name, { pg, testkit });
       if (pg.result !== testkit.result || pg.state !== testkit.state) {
         differing.set(name, { pg, testkit });
       }
@@ -1037,6 +1285,21 @@ describe("store の公開の口の境界の入力: Postgres と testkit の fixt
 
   it("場面の名前は重複しない（許可リストが名前で引くため）", () => {
     expect(new Set(scenarios.map(([name]) => name)).size).toBe(scenarios.length);
+  });
+
+  it("🔴 約束の4クラスを出す場面では、2実装とも約束のクラスと欄で投げる（13組すべて）", () => {
+    expect(new Set(TYPED_THROWS.map(({ pair }) => pair)).size).toBe(13);
+    const observed = TYPED_THROWS.map(({ scenario }) => {
+      const outcome = outcomes.get(scenario);
+      const parse = (o: Outcome | undefined) =>
+        o?.result.startsWith("投げた {")
+          ? (JSON.parse(o.result.slice("投げた ".length)) as object)
+          : o?.result;
+      return { scenario, pg: parse(outcome?.pg), testkit: parse(outcome?.testkit) };
+    });
+    expect(observed).toEqual(
+      TYPED_THROWS.map(({ scenario, expected }) => ({ scenario, pg: expected, testkit: expected })),
+    );
   });
 
   it("🔴 許可リストの外で、戻り値も状態も差が出ない", () => {
