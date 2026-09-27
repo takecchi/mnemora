@@ -100,9 +100,10 @@ function cosineDistance(a: number[], b: number[]): number {
  * なる。このリポジトリは ADR 0011/0025/0027/0028 で同じ族の失敗
  * （名乗れる以上の精度を主張する）を繰り返しており、ここでも繰り返さない。
  *
- * ⚠ **ベクトルは丸めずに（float64 のまま）持つ**（今の振る舞い、Issue #1268）。`@mnemora/postgres`（pgvector）は
- * float4 で持つので、距離の差が float4 の桁より小さい2件の並びが Postgres と割れる——
- * `VectorStore.search` の doc の 2026-09-28 追記を参照。
+ * **ベクトルは float4 に丸めて持つ**（Issue #1268）。`upsert` は成分を `Math.fround` で丸めて保存し、`search` は
+ * クエリも丸めてから比べる——`@mnemora/postgres`（pgvector）が成分を float4 で持つのに揃え、何が距離の同点になるかを
+ * Postgres と同じにする。`getVectors` が返すのも丸めた値である。距離の値の下の桁は Postgres と揃わない
+ * （`VectorStore.search` の doc の 2026-09-28 追記を参照）。
  */
 export class InMemoryVectorStore implements VectorStore {
   private readonly entries = new Map<string, Entry>();
@@ -133,7 +134,7 @@ export class InMemoryVectorStore implements VectorStore {
       tenantId: ctx.tenantId,
       memoryId,
       // Issue #1108: 呼び手の配列と切り離して保存する（Postgres は値を写す）。
-      vector: [...vector],
+      vector: vector.map(Math.fround),
     });
   }
 
@@ -185,6 +186,8 @@ export class InMemoryVectorStore implements VectorStore {
     // 食い違えば0件（例外は投げない。`PostgresVectorStore` と core の `FakeVectorStore` も同じ）。
     // 歯は `in-memory-search-ctx-tenant-boundary.test.ts`。
     const memoryCtx: Ctx = { tenantId: opts.filter.tenantId };
+    // pgvector はクエリも `::vector`（float4）に変換してから比べる。
+    const float4Query = query.map(Math.fround);
     const hits: (VectorHit & { recordedAt: Date })[] = [];
     for (const [key, entry] of this.entries) {
       // 空間は `key()` の組の先頭3つを完全一致で比べる（前方一致にしない。`key()` の doc）。
@@ -309,7 +312,7 @@ export class InMemoryVectorStore implements VectorStore {
       }
       hits.push({
         memoryId: entry.memoryId,
-        distance: cosineDistance(query, entry.vector),
+        distance: cosineDistance(float4Query, entry.vector),
         recordedAt: memory.recordedAt,
       });
     }
