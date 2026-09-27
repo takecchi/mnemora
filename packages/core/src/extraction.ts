@@ -6,6 +6,7 @@ import type { LLMProvider, PromptSpec } from "./interfaces/llm-provider.js";
 import type { DigestSource, NewMemory } from "./memory.js";
 import type { Observation } from "./observation.js";
 import { ExtractionContextSchema } from "./observation.js";
+import { assertLLMContentNotBlank } from "./llm-content.js";
 import type { Provenance } from "./provenance.js";
 import { sliceWithoutSplittingSurrogatePair } from "./text-truncation.js";
 
@@ -409,6 +410,8 @@ function sanitizeExtractionCandidates(
  * 正常な抽出結果であり、これを「失敗」として無理に1件作ると、北極星の物差し（毎回渡す量を
  * 減らす方向に働くか）に反するゴミ記憶を増やす。フォールバックの対象はあくまで
  * **LLM 呼び出し自体が失敗した場合**（ネットワークエラー・タイムアウト・スキーマ不整合等）。
+ * **候補のどれか1件でも本文が空白だけなら、それも失敗として扱う**（`""` がスキーマ不整合で
+ * 全体を失敗にするのと同じ。Issue #1065、`llm-content.ts` の doc 参照）。
  *
  * `subjectCandidates`（Issue #608 項目②(b)）を渡すと、`buildExtractionPrompt` の文面に
  * 候補一覧と null の指示が足され、LLM の応答は `sanitizeExtractionCandidates` で検証
@@ -425,6 +428,9 @@ export async function extractCandidates(
       prompt: buildExtractionPrompt(observation, subjectCandidates),
       schema: ExtractionResultSchema,
     });
+    for (const memory of result.memories) {
+      assertLLMContentNotBlank(memory.content, "extract");
+    }
     const sanitized = sanitizeExtractionCandidates(result.memories, subjectCandidates);
     return {
       candidates: sanitized.candidates,
