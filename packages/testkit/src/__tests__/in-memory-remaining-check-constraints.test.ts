@@ -25,7 +25,13 @@ const CASES: Array<[string, Partial<NewMemory>, RegExp]> = [
   [
     "inferred で sourceObservationId が無い",
     {
-      provenance: { kind: "inferred", basis: { memoryIds: [], observationIds: [] } },
+      provenance: {
+        kind: "inferred",
+        model: "m",
+        promptVersion: "v1",
+        basis: { memoryIds: [], observationIds: [] },
+        confidence: 0.5,
+      },
       sourceObservationId: null,
     },
     /^InMemoryMemoryStore: provenance\.kind "inferred" requires sourceObservationId$/,
