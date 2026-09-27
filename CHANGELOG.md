@@ -558,6 +558,12 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   入力の本文を丸ごと載せていた（今は先頭 80 文字と全体の長さ）。`InMemoryEventStore`/`InMemoryVectorStore` の
   「対象なし」は、同じ失敗の他の文面と同じく `memory not found for tenant:` と名乗る。
   ⭕ 非破壊と数える（エラー文だけの変更。クローン miku の判断であり、オーナーの判断ではない）。
+- **`Runtime.consolidate()` に `actor`・`reason` を渡しても、統合先の `created` イベントだけは `actor` が
+  `{ type: "system" }` のままで、`meta.note` も無かった**——`ConsolidateOptions.actor`/`reason` の TSDoc は
+  `memory_events` の欄として書いており、統合元の `superseded` イベントと `reflect()` の `created` イベントには
+  入っていた。今は統合先の `created` にも同じ `actor` と `meta.note` が入る（`tick()` 経由の自動ジョブは `actor` を
+  渡さないので変わらない）。
+  ⭕ 非破壊と数える（例外を投げず、書かれるイベントの欄だけが約束どおりになる。上の前書きの訂正で狭めた基準に当てた）。
 
 ---
 
