@@ -266,6 +266,16 @@ export interface ObserveResult {
    * `deferred` の場合、または冪等な再送（`created: false`）の場合は空配列——
    * **この場合に「以前作られた Memory の id」を遡って探すことはしない**（本 PR の決定。
    * PR 本文参照）。
+   *
+   * 要素は抽出の候補ごとに1つ、候補の順に並ぶ。**同じ本文（`content`）の候補が複数あると、
+   * 同じ id が候補の数だけ入る**——Memory の冪等キーは
+   * `(tenant_id, source_observation_id, extractor_version, content_hash)` で
+   * （`MemoryStore.createMemory`）、`content_hash` は本文だけから作るため、2件目以降の候補は
+   * 1件目が作った行に当たる。そのとき2件目以降の候補の `provenanceKind`・`confidence`・
+   * `subjectId`・`tags` は書かれない（Memory・`created` イベント・`embed` ジョブは1件目の
+   * 分の1つずつだけ）。重複を除いた集合が要るときは、呼び手が `new Set(memoryIds)` にする。
+   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の InMemory で同じ結果になる
+   * （歯は `packages/postgres/src/__tests__/observe-duplicate-candidates.postgres.test.ts`）。
    */
   memoryIds: MemoryId[];
   /**
