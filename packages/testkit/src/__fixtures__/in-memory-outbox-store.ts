@@ -68,6 +68,11 @@ export class InMemoryOutboxStore implements OutboxStore {
         `claimBatch: now - leaseMs must be a valid Date (now=${opts.now.getTime()}, leaseMs=${opts.leaseMs})`,
       );
     }
+    // `claimed_by` は `text` 列。Postgres は NUL を含む値をパラメータの時点で拒む（claim する行が
+    // 無くても）。検査せずに進めると、ジョブを claim して NUL を含む名前を書いてしまう。
+    if (opts.claimedBy.includes("\u0000")) {
+      throw new Error("claimBatch: claimedBy must not contain NUL characters (U+0000)");
+    }
     // リースが切れたとみなす境界時刻。`PostgresOutboxStore` と同じ `<=`（両端含む）。
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.jobs.filter((job) => {
