@@ -122,9 +122,10 @@ describe("runtime.markContested — 基本の成功", () => {
     expect(eventsA).toHaveLength(1);
     expect(eventsB).toHaveLength(1);
     expect(eventsA[0]?.kind).toBe("updated");
-    expect(eventsA[0]?.meta).toEqual({ reason: "contested" });
+    // Issue #1160: 両側のイベントに対向の id が入る。
+    expect(eventsA[0]?.meta).toEqual({ reason: "contested", contestedWithId: b.id });
     expect(eventsB[0]?.kind).toBe("updated");
-    expect(eventsB[0]?.meta).toEqual({ reason: "contested" });
+    expect(eventsB[0]?.meta).toEqual({ reason: "contested", contestedWithId: a.id });
   });
 
   it("reason を渡すと meta.note に入り、meta.reason は上書きされない", async () => {
@@ -135,7 +136,11 @@ describe("runtime.markContested — 基本の成功", () => {
     await runtime.markContested(ctx, a.id, b.id, { reason: "ユーザーが前言を訂正した" });
 
     const [eventA] = stores.eventStore.events.filter((e) => e.memoryId === a.id);
-    expect(eventA?.meta).toEqual({ reason: "contested", note: "ユーザーが前言を訂正した" });
+    expect(eventA?.meta).toEqual({
+      reason: "contested",
+      note: "ユーザーが前言を訂正した",
+      contestedWithId: b.id,
+    });
   });
 
   it("actor を渡すとイベントの actor がそれになり、省略時は { type: 'system' }", async () => {

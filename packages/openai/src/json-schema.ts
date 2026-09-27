@@ -1,4 +1,5 @@
-import { z } from "zod";
+import type { z } from "zod";
+import { needsRootWrap, toBaseJsonSchema, wrapRootSchema } from "./structured-root.js";
 
 /**
  * zod スキーマ → OpenAI Structured Output（`response_format: json_schema`, strict モード）への
@@ -100,6 +101,15 @@ function hardenForStrictMode(node: unknown): unknown {
     }
   }
 
+  // OpenAI の strict は `oneOf` を受け付けない（`openai` SDK の `helpers/standard-schema.js`:
+  // 「OpenAI strict schemas do not support `oneOf`; use `anyOf`」）。zod の判別可能ユニオンは
+  // `oneOf` になるが、枝は判別子の値で排他なので、`anyOf` にしても受ける値は変わらない
+  // （受け取った後の `req.schema.parse` が元の判別可能ユニオンで検査する）。
+  if (Array.isArray(result.oneOf) && result.anyOf === undefined) {
+    result.anyOf = result.oneOf;
+    delete result.oneOf;
+  }
+
   if (isPlainObject(result.$defs)) {
     const defs = result.$defs as Record<string, unknown>;
     const nextDefs: Record<string, unknown> = {};
@@ -120,12 +130,15 @@ export function translateForOpenAIStructuredOutput<T>(
   name: string,
   schema: z.ZodType<T>,
 ): OpenAIJsonSchemaFormat {
-  const base = z.toJSONSchema(schema, {
-    target: "draft-2020-12",
-    unrepresentable: "any",
-  }) as JsonSchemaNode;
+  const base = toBaseJsonSchema(schema);
   const hardened = hardenForStrictMode(base) as JsonSchemaNode;
   // `$schema` はメタ情報であり OpenAI 側は要求しない。翻訳結果を最小限にするため落とす。
   delete hardened.$schema;
-  return { name, schema: hardened, strict: true };
+  // 根が object でない（判別可能ユニオンなど）なら、1つの欄を持つ object に包む
+  // （`structured-root.ts`。OpenAI の strict は根が object であることを求める）。
+  return {
+    name,
+    schema: needsRootWrap(base) ? wrapRootSchema(hardened) : hardened,
+    strict: true,
+  };
 }

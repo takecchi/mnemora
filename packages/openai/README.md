@@ -112,6 +112,28 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, t
 const llmProvider = new OpenAILLMProvider({ model: "gpt-4o-mini", client });
 ```
 
+## ⚠ 2026-09-27 追記: `embed()` に渡せる入力の境界（実 API で当てた、今の振る舞い）
+
+`OpenAIEmbeddingProvider.embed` は、入力を検査せずにそのまま `embeddings.create` へ1回で渡し（`dimensions` は常に付く）、
+OpenAI のサーバが拒めば、その例外（SDK の `BadRequestError`、HTTP 400）がそのまま伝わる。どれも mnemora の約束として
+決めた値ではなく、OpenAI のサーバの振る舞いである（サーバが変われば変わりうる）。
+
+【実測 2026-09-27、`text-embedding-3-small`、`openai@7.10.0`、各1回】
+
+| 入力                                                                    | 結果                                                                                                                                                                  |
+| ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 空文字 `""`                                                             | 400「`input cannot be an empty string`」。**1件でも空文字が混ざると、そのバッチ全体が失敗する**（`["a", ""]` も 400）                                                 |
+| 空白だけ（`" "`）                                                       | ベクトルが返る                                                                                                                                                        |
+| 上限（8192 トークン）を超える入力                                       | 400「`maximum input length is 8192 tokens`」（`dimensions` 付きの呼び出しでも同じ、[ADR 0305](../../docs/decisions/0305-embedding-provider-input-limit-contract.md)） |
+| 1回に 2049 件以上                                                       | 400「`array length must be 2048 or less`」（2048 件は通る）。**分割はしない**                                                                                         |
+| `dimensions` がモデルの上限を超える（`text-embedding-3-small` に 1537） | 400「`Must be less than or equal to 1536`」。**構築時には分からず、最初の `embed()` で分かる**                                                                        |
+| 並び順                                                                  | 応答の `index` は入力の順（`[0,1,2]`）で、同じ入力には同じベクトルが返った。`embed` は `index` で並べ直して返す                                                       |
+
+mnemora の runtime は、recall のクエリを trim して空なら埋め込まず、embed ジョブは1件ずつ渡すので、
+空文字の recall と 2049 件以上は runtime からは起きない。**ただし Memory の本文（`content`）や
+`RuntimeDeps.embeddingInput` の戻り値が空文字だと、その embed ジョブは 400 で失敗する**
+（`@mnemora/local-embedding` は空文字にもベクトルを返す——provider で振る舞いが違う）。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§5.4・§5.5 — `LLMProvider` / `EmbeddingProvider` の契約

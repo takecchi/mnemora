@@ -413,3 +413,13 @@ memory とベクトルの対応が1つずれる、という実害はこの2経�
 - **契約**（`packages/core/src/interfaces/embedding-provider.ts` の doc に追記）: `Runtime.tick` の embed ジョブは、`embed` が1件もベクトルを返さなければ、そのジョブを失敗にし、`embeddingStatus` を `'failed'` にする。ベクトルを書かないまま `'ready'` にしない。embed ジョブは `embed` に常に1件だけ渡すので、「渡した件数より少ない」はこのジョブでは「空」と同じである。
 - **歯**: `packages/core/src/__tests__/embed-job-missing-vector.test.ts`（Fake）。検査を外す変異で赤、戻して緑を確かめた。
 - **適合テスト一式（`*-conformance.ts`）には足していない**（Issue #809 の方針）。これは provider ではなく runtime の側の約束である。
+
+---
+
+## ⚠ 2026-09-27 追記（§9「確かめていないこと」の1項目を当てた。本文は書き換えていない）
+
+**`dimensions` パラメータ付きの呼び出しでも、同じ拒否が起きた。**【実測 2026-09-27、実 API 1回、
+`text-embedding-3-small`、`dimensions: 1536`、`openai@7.10.0`、SDK の再試行なし】`" hello"` を1万回並べた入力を
+`OpenAIEmbeddingProvider.embed` で送ると、`BadRequestError`（HTTP 400）「`Invalid 'input[0]': maximum input length is 8192 tokens.`」
+で拒まれ、そのまま伝わった（§2 の素の `input` 超過と同じ文面）。同じ回に当てたほかの入力の境界（空文字・1回の件数の上限・
+`dimensions` の範囲）は `packages/openai/README.md` に書いた。§9 のほかの項目は、引き続き確かめていない。
