@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -8,6 +7,7 @@ import {
   EMBEDDING_FINGERPRINT_JOBS,
   EMBEDDING_FINGERPRINT_FILENAME,
 } from "../compare-embedding-output-fingerprints-lib.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/compare-embedding-output-fingerprints.mjs`（CLI 入口）の歯（Issue #565）。
@@ -41,7 +41,9 @@ function writeArtifact(dir, jobId, record) {
 }
 
 function runCompare(artifactsDir) {
-  return spawnSync("node", [script, "--artifacts-dir", artifactsDir], { encoding: "utf8" });
+  return spawnSyncWithDeadline("node", [script, "--artifacts-dir", artifactsDir], {
+    encoding: "utf8",
+  });
 }
 
 const [jobA, jobB] = EMBEDDING_FINGERPRINT_JOBS;
@@ -94,7 +96,7 @@ describe("compare-embedding-output-fingerprints.mjs の exit code(歯2)", () => 
   });
 
   it("--artifacts-dir を渡し忘れると非0で終わる(CLI の誤用。比較結果ではない)", () => {
-    const result = spawnSync("node", [script], { encoding: "utf8" });
+    const result = spawnSyncWithDeadline("node", [script], { encoding: "utf8" });
     expect(result.status).not.toBe(0);
   });
 });

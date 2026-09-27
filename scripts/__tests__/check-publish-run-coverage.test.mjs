@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { PUBLISH_TARGETS } from "../publish-targets.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-publish-run-coverage.mjs`（CLI 入口）の歯。
@@ -54,7 +54,7 @@ function writeLogFile(content) {
 }
 
 function run(args) {
-  return spawnSync(process.execPath, [script, ...args], {
+  return spawnSyncWithDeadline(process.execPath, [script, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
   });

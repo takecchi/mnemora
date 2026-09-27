@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/openai-arm-summary.mjs` の歯。**本物のスクリプトを子プロセスとして実際に
@@ -64,7 +64,7 @@ function writeJson(name, value) {
 }
 
 function run(args) {
-  return spawnSync("node", [script, ...args], { encoding: "utf-8" });
+  return spawnSyncWithDeadline("node", [script, ...args], { encoding: "utf-8" });
 }
 
 describe("openai-arm-summary.mjs(CLI)", () => {

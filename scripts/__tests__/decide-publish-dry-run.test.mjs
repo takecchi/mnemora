@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/decide-publish-dry-run.mjs`（`.github/workflows/publish.yml` の CLI 入口）の歯。
@@ -43,7 +43,11 @@ function run({ eventName, dryRunInput }) {
     env.DRY_RUN_INPUT = dryRunInput;
   }
 
-  const result = spawnSync(process.execPath, [script], { cwd: repoRoot, encoding: "utf8", env });
+  const result = spawnSyncWithDeadline(process.execPath, [script], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env,
+  });
   const output = readFileSync(githubOutput, "utf8");
   return { result, output };
 }

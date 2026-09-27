@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/run-publish-gates.mjs`（`.github/workflows/publish.yml` の門ステップの CLI 入口）の歯。
@@ -43,7 +43,7 @@ function fakeStage(name, exitCode) {
  * @param {{ name: string; command: string; args: string[] }[]} stages
  */
 function runGate(stages, workflow = "test-of-run-publish-gates") {
-  return spawnSync(process.execPath, [script], {
+  return spawnSyncWithDeadline(process.execPath, [script], {
     cwd: repoRoot,
     encoding: "utf8",
     // **`GITHUB_WORKFLOW` を明示的に上書きする。** `publish.yml` の門そのものが

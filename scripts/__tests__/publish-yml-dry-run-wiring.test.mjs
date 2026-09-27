@@ -1,10 +1,10 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { decideDryRun } from "../publish-dry-run.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
@@ -231,7 +231,7 @@ describe("publish.yml の判定が decideDryRun() と同じ答えを出す（同
       delete env.DRY_RUN_INPUT;
       env[eventKey] = eventName;
       if (dryRunInput !== undefined) env[dryRunKey] = dryRunInput;
-      const result = spawnSync(process.execPath, [join(repoRoot, command)], {
+      const result = spawnSyncWithDeadline(process.execPath, [join(repoRoot, command)], {
         cwd: repoRoot,
         encoding: "utf8",
         env,
@@ -301,7 +301,7 @@ describe("判定の答えが npm publish の段まで届いている（出力名
       ["", ""],
     ]) {
       // 分岐そのものの告知（「予行です」）は捨て、立った flag だけを読む。
-      const result = spawnSync(
+      const result = spawnSyncWithDeadline(
         "bash",
         ["-c", `set -u\n{\n${segment}\n} > /dev/null\nprintf '%s' "\${${flagVar}}"`],
         { encoding: "utf8", env: { ...process.env, [consumedKey]: given } },

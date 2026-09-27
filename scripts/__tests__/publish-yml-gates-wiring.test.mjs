@@ -1,7 +1,7 @@
-import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * ⭐ **この歯が測っているもの（消す前に読むこと）**
@@ -165,7 +165,7 @@ describe(".github/workflows/publish.yml が scripts/run-publish-gates.mjs に配
       { name: "wired-stage-2", command: process.execPath, args: ["-e", "process.exit(9)"] },
       { name: "wired-stage-3", command: process.execPath, args: ["-e", "process.exit(0)"] },
     ];
-    const result = spawnSync(process.execPath, [`${repoRoot}/${invocation[1]}`], {
+    const result = spawnSyncWithDeadline(process.execPath, [`${repoRoot}/${invocation[1]}`], {
       cwd: repoRoot,
       encoding: "utf8",
       // `GITHUB_WORKFLOW` を明示的に上書きする（`run-publish-gates.test.mjs` の `runGate` の

@@ -1,6 +1,6 @@
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/ci-green-check.mjs`（CLI 入口）の歯。
@@ -18,7 +18,7 @@ const script = fileURLToPath(new URL("../ci-green-check.mjs", import.meta.url));
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 
 function run(args) {
-  return spawnSync(process.execPath, [script, ...args], {
+  return spawnSyncWithDeadline(process.execPath, [script, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
   });
