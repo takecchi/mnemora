@@ -9,6 +9,7 @@ import type {
   NewMemoryEvent,
   OutboxStore,
   RecallId,
+  VectorEntry,
   VectorStore,
 } from "@mnemora/core";
 import { buildNewMemoryFixture, buildNewObservationFixture } from "@mnemora/testkit";
@@ -38,30 +39,78 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  *   当てる。あわせて、空配列・重複・壊れたベクトル・空の文字列などの境界を当てる（下の `scenarios`）。
  * - 比べるもの: 戻り値（投げたか・返した値。id・テナント・時刻は別名に伏せ、鍵を並べ替える）と、その後の状態
  *   （自分のテナントの記憶2件の status・参照・本文・強化・埋め込みの状態、イベントの kind と memoryId、
- *   他テナントの記憶とイベント）。
+ *   呼んだテナントで記憶2件と他テナントの記憶の id が持つベクトル、他テナントの記憶・イベント・ベクトル）。
  *   ⚠ 例外の種類と文面は比べない（DB の例外と fixture の `Error` は顔が違う。`packages/testkit/src/fixtures.ts` の冒頭）。
  *
  * 🔴 **許可リスト（`DOCUMENTED_DIFFERENCES`）は、doc に「違う」と書いてある差と、揃える先が未決で Issue に在る差だけを持つ。**
  * - 許可リストの外で差が出たら落ちる。直すか（fixture は Postgres を写す）、doc か Issue に書いてから足すこと。
  * - 許可リストの場面で差が出なくなったら（揃ったら）、それも落ちる（リストが古い）。消すこと。
+ * - 各項目は、doc に書いた**向き**（どちらが投げ、どちらが返すか）と、ベクトルを書く場面では書いた後に
+ *   保存されているベクトルを持つ。差が残っていても、向きや保存の中身が doc と違えば落ちる。
  */
 
-/** 場面の名前 → どこに「違う」と書いてあるか（doc、または揃える先が未決の Issue）。 */
-const DOCUMENTED_DIFFERENCES: Readonly<Record<string, string>> = {
-  "vector.upsert(other)":
-    "他テナントの memoryId: Postgres は受け付け、fixture は拒む（docs/memory-model.md §5 の Issue #1051 の追記の表・VectorStore.upsert の TSDoc）",
-  "event.append(memoryId:other)":
-    "他テナントの memoryId: Postgres は受け付け、fixture は拒む（docs/memory-model.md §5 の Issue #1051 の追記の表・EventStore.append の TSDoc）",
-  "vector.upsert(self,[])":
-    "壊れたベクトル: Postgres は拒み、fixture は保存する（Issue #1070・VectorStore.upsert の TSDoc の adapter ごとの表）",
-  "vector.upsert(self,[1,0])（次元違い）":
-    "壊れたベクトル: Postgres は拒み、fixture は保存する（Issue #1070・VectorStore.upsert の TSDoc の adapter ごとの表）",
-  "aggregateScope(digestBand.excludeMemoryIds:[malformed])":
-    "uuid の形でない除外の id: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
-  "aggregateScope(digestBand.excludeMemoryIds:[empty])":
-    "uuid の形でない除外の id（空文字）: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
-  "vector.upsert(self,[NaN,0,0])":
-    "壊れたベクトル: Postgres は拒み、fixture は保存する（Issue #1070・VectorStore.upsert の TSDoc の adapter ごとの表）",
+/** 戻り値の形（`Outcome.result` から読む）。 */
+type ResultKind = "throws" | "returns-null" | "returns-value";
+
+/** `snapshotState` の `vectors` の1件（成分は有限でなければ文字列にして持つ。JSON で `NaN` が `null` に潰れるため）。 */
+type StoredVector = Array<number | string> | null;
+
+interface DocumentedDifference {
+  /** どこに「違う」と書いてあるか（doc の節、または揃える先が未決の Issue）。 */
+  where: string;
+  postgres: ResultKind;
+  fixture: ResultKind;
+  /** 書いた後に、呼んだテナントで `memory` の別名が持つベクトル（無ければ `null`）。 */
+  vector?: { memory: "SELF" | "OTHER"; postgres: StoredVector; fixture: StoredVector };
+}
+
+const TENANT_REF_DOC = "docs/memory-model.md §5「2026-09-27 追記（Issue #1051）」の表";
+const BROKEN_VECTOR_DOC =
+  "VectorStore.upsert の TSDoc の adapter ごとの表（docs/architecture.md §5.5 の 2026-09-27 追記も同じ）";
+
+/** 場面の名前 → doc に書いた差（向きと、書いた後のベクトル）。 */
+const DOCUMENTED_DIFFERENCES: Readonly<Record<string, DocumentedDifference>> = {
+  "vector.upsert(other)": {
+    where: `他テナントの memoryId: Postgres は受け付けて呼んだテナントの行として書き、fixture は拒む（${TENANT_REF_DOC}・VectorStore.upsert の TSDoc。Issue #1051 はこれを doc に書いて閉じた）`,
+    postgres: "returns-null",
+    fixture: "throws",
+    vector: { memory: "OTHER", postgres: [0, 1, 0], fixture: null },
+  },
+  "event.append(memoryId:other)": {
+    where: `他テナントの memoryId: Postgres は受け付けて記録し、fixture は拒む（${TENANT_REF_DOC}・EventStore.append の TSDoc。Issue #1051 はこれを doc に書いて閉じた）`,
+    postgres: "returns-value",
+    fixture: "throws",
+  },
+  "vector.upsert(self,[])": {
+    where: `空のベクトル: Postgres は拒んで前の埋め込みを残し、fixture は保存する（${BROKEN_VECTOR_DOC}。Issue #1070 はこれを doc に書いて閉じた）`,
+    postgres: "throws",
+    fixture: "returns-null",
+    vector: { memory: "SELF", postgres: [1, 0, 0], fixture: [] },
+  },
+  "vector.upsert(self,[1,0])（次元違い）": {
+    where: `長さが space.dimensions と違うベクトル: Postgres は拒んで前の埋め込みを残し、fixture は保存する（${BROKEN_VECTOR_DOC}。Issue #1070 はこれを doc に書いて閉じた）`,
+    postgres: "throws",
+    fixture: "returns-null",
+    vector: { memory: "SELF", postgres: [1, 0, 0], fixture: [1, 0] },
+  },
+  "vector.upsert(self,[NaN,0,0])": {
+    where: `NaN を含むベクトル: Postgres は拒み、fixture は保存する（${BROKEN_VECTOR_DOC}。Issue #1070 はこれを doc に書いて閉じた）`,
+    postgres: "throws",
+    fixture: "returns-null",
+    vector: { memory: "SELF", postgres: [1, 0, 0], fixture: ["NaN", 0, 0] },
+  },
+  "aggregateScope(digestBand.excludeMemoryIds:[malformed])": {
+    where:
+      "uuid の形でない除外の id: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
+    postgres: "throws",
+    fixture: "returns-value",
+  },
+  "aggregateScope(digestBand.excludeMemoryIds:[empty])": {
+    where:
+      "uuid の形でない除外の id（空文字）: Postgres は DB の例外で投げ、fixture は投げない。揃える先が未決（Issue #1262）",
+    postgres: "throws",
+    fixture: "returns-value",
+  },
 };
 
 const SPACE = TEST_EMBEDDING_SPACE;
@@ -241,6 +290,17 @@ async function snapshotState(h: Kit): Promise<string> {
   const others = await h.s.ms.getMany(h.other, [h.om.id]);
   const events = await h.s.es.list(h.ctx, { limit: 100 });
   const otherEvents = await h.s.es.list(h.other, { limit: 100 });
+  // ベクトルは別名 → 成分で持つ（「保存されたか」を doc の向きと照らすため）。他テナントの記憶の id も、
+  // 呼んだテナントで引く（Postgres は他テナントの memoryId を呼んだテナントの行として書く）。
+  const storedVectors = (entries: VectorEntry[]): Record<string, StoredVector> =>
+    Object.fromEntries(
+      entries.map((e) => [
+        h.alias.get(e.memoryId) ?? "<unknown>",
+        e.vector.map((x) => (Number.isFinite(x) ? x : String(x))),
+      ]),
+    );
+  const vectors = storedVectors(await h.s.vs.getVectors(h.ctx, SPACE, [h.m.id, h.m2.id, h.om.id]));
+  const otherVectors = storedVectors(await h.s.vs.getVectors(h.other, SPACE, [h.om.id]));
   const n = normalize(
     {
       mems: mems.map((x) => [
@@ -254,6 +314,8 @@ async function snapshotState(h: Kit): Promise<string> {
       others: others.map((x) => [x.status, x.content]),
       events: events.map((e: MemoryEvent) => [e.kind, e.memoryId]),
       otherEvents: otherEvents.length,
+      vectors,
+      otherVectors,
     },
     h,
   ) as { mems: unknown[]; events: unknown[] };
@@ -859,6 +921,31 @@ async function runOn(backend: Backend, f: (h: Kit) => Promise<unknown>): Promise
 
 const differing = new Map<string, { pg: Outcome; testkit: Outcome }>();
 
+function resultKind(result: string): ResultKind {
+  if (result === "投げた") return "throws";
+  return result === "返した null" ? "returns-null" : "returns-value";
+}
+
+/** 許可リストの場面で、実測の向きと書いた後のベクトル（`DocumentedDifference` と同じ形）。 */
+function observedDirection(name: string, pg: Outcome, testkit: Outcome) {
+  const expected = DOCUMENTED_DIFFERENCES[name]!;
+  const vectorOf = (o: Outcome, memory: string): StoredVector =>
+    (JSON.parse(o.state) as { vectors: Record<string, StoredVector> }).vectors[memory] ?? null;
+  return {
+    postgres: resultKind(pg.result),
+    fixture: resultKind(testkit.result),
+    ...(expected.vector
+      ? {
+          vector: {
+            memory: expected.vector.memory,
+            postgres: vectorOf(pg, expected.vector.memory),
+            fixture: vectorOf(testkit, expected.vector.memory),
+          },
+        }
+      : {}),
+  };
+}
+
 describe("store の公開の口の境界の入力: Postgres と testkit の fixture の差（PR #1252）", () => {
   beforeAll(async () => {
     await getTestClient();
@@ -912,5 +999,20 @@ describe("store の公開の口の境界の入力: Postgres と testkit の fixt
       `許可リストが古い——差が出なくなった場面（揃ったなら、doc の「違う」と一緒に消すこと）: ${JSON.stringify(stale)}、` +
         `場面に無い名前: ${JSON.stringify(unknown)}`,
     ).toEqual({ stale: [], unknown: [] });
+  });
+
+  it("🔴 許可リストの場面は、doc に書いた向きで違う（どちらが投げるか・書いた後に保存されているベクトル）", () => {
+    const mismatched = [...differing]
+      .filter(([name]) => name in DOCUMENTED_DIFFERENCES)
+      .map(([name, { pg, testkit }]) => {
+        const { where: _where, ...expected } = DOCUMENTED_DIFFERENCES[name]!;
+        return { name, expected, observed: observedDirection(name, pg, testkit) };
+      })
+      .filter(({ expected, observed }) => JSON.stringify(expected) !== JSON.stringify(observed));
+    expect(
+      mismatched,
+      `許可リストの場面で、差の向きか保存の中身が doc と違う（doc と実装のどちらが古いかを確かめること）: ` +
+        JSON.stringify(mismatched, null, 2),
+    ).toEqual([]);
   });
 });
