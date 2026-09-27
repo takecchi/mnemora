@@ -111,6 +111,32 @@ const embeddingProvider = new DeterministicEmbeddingProvider(); // 既定で 8�
 適合テストのための stub**であり、想起の質を測る物差しにはならない
 （`recorded` 層・`openai` 層との違いは [ADR 0051](../../docs/decisions/0051-recorded-provider-cassette.md) を参照）。
 
+## ほかに export しているもの（約束は各 TSDoc）
+
+- **記録を再生する provider**（[ADR 0051](../../docs/decisions/0051-recorded-provider-cassette.md)）:
+  `RecordedLLMProvider`・`RecordedEmbeddingProvider` はカセット（`Cassette`）に記録した実 API の応答を再生する。
+  **記録に無い入力は例外にする。**録る側は `CassetteRecorder` と、実 provider を包む
+  `RecordingLLMProvider`・`RecordingEmbeddingProvider`。カセットの形の検査は `assertCassette`
+  （`CASSETTE_FORMAT_VERSION`）、鍵は `llmCassetteKey`・`embeddingCassetteKey`。
+- **種カセットから返す provider**: `SeededLLMProvider`・`SeededEmbeddingProvider`。種に在る入力は種から返し、
+  **種に無い入力だけ実 provider（`delegate`）へ流す**（`Recorded*` とは逆の規律）。種のモデル名・埋め込み空間が
+  `expectedModel`・`expectedSpace`（必須）と食い違えば構築時に落ちる。
+- **テストデータのひな型**: `buildNewMemoryFixture`・`buildNewObservationFixture`・`buildNewMemoryEventFixture`・
+  `buildProvenanceFixture`。⚠ 実時計で `recall()` を通すなら、`recordedAt`（必要なら `decayFloorAt`）を明示して
+  渡すこと（既定値のままだと減衰の床を越えて0件になる。`buildNewMemoryFixture` の TSDoc）。
+- **適合スイートの各 options の型**（`MemoryStoreConformanceOptions` など）は、対応する `describe*Conformance` の引数。
+
+## `@mnemora/testkit/fixtures`（インメモリの store。適合スイートの入力にしない）
+
+`@mnemora/testkit/fixtures` は、`InMemoryMemoryStore`・`InMemoryVectorStore`・`InMemoryLexicalStore`・
+`InMemoryEventStore`・`InMemoryOutboxStore`・`InMemoryTenantSettingsStore` を export する別の入口である。
+DB 無しで `createRuntime` を組み立てて、本物の provider を通しで動かすためにある。
+
+**⛔ これを `describe*Conformance` の `createStore` に渡してはいけない**——自分の adapter を1文字も測らないまま
+緑になる（そのため `@mnemora/testkit` の入口からは export していない）。Postgres が拒む入力を同じく拒むが、
+例外の顔は違う（`packages/postgres/README.md`「例外の見分け方」）。揃えてあるものと揃えていないものの一覧は
+`src/fixtures.ts` の冒頭にある。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §5 — 各 interface の契約
