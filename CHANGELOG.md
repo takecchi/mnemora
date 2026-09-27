@@ -45,8 +45,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.2` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`ef03a8f`**（PR #1199）の範囲を
-数えたものである（2026-09-27 の4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から、6回目の棚卸しで `4514cec` から、7回目の棚卸しで `9f58833` から広げた。下の追記4〜追記7。それより前の棚卸しの経緯は `## [1.0.2]` 節にある）。
+⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`f8e7fd6`**（PR #1223）の範囲を
+数えたものである（2026-09-27 の4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から、6回目の棚卸しで `4514cec` から、7回目の棚卸しで `9f58833` から、8回目の棚卸しで `ef03a8f` から広げた。下の追記4〜追記8。それより前の棚卸しの経緯は `## [1.0.2]` 節にある）。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -86,13 +86,17 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⟹ **この節の範囲（`v1.0.2`…`ef03a8f`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
+**⚠ 2026-09-27 追記8（8回目の棚卸し。`f8e7fd6` まで広げた）**: `ef03a8f`…`f8e7fd6` に `main` へ入った PR を全部当てた（PR #1201〜#1205・#1208〜#1210・#1214〜#1216・#1218〜#1220・#1223）。出荷される6パッケージの利用者に見える振る舞いの変更は PR #1220（`runMigrations` がロックを持つ接続そのもので本体を流す）と PR #1223（`@mnemora/local-embedding` の読み込み失敗のメッセージが、実際に解決されたキャッシュの場所を名指す）で、どちらも項目があり、PR 番号でも受けている（どちらも非破壊。項目の注のとおり）。ほかはこの節に項目として足していない——この節は docs・README だけの変更を項目にしない（追記5〜7と同じ慣例）。PR #1201・#1202・#1208・#1214・#1215・#1219 は出荷の `src` を触ったが、差分がコメント（TSDoc）だけであることを確かめた。どれも今の振る舞いを書いたもので、実装は変えていない（PR #1214 は `MemoryEvent.meta`・`actor` の値の中身を検査しないこと、JSON の値が同じ値で読み戻ることを TSDoc に書いた）。README だけを変えたのは PR #1216・#1218（PR #1215・#1220 も README を変えた）、CHANGELOG・docs だけは PR #1203・#1210、docs とテストだけは PR #1209、`examples/chat` だけは PR #1205、テストだけは PR #1204 である。公開 API の型の差分は無い（`git diff ef03a8f..f8e7fd6 -- scripts/__snapshots__/public-api/` が空）。マイグレーションは増えていない。棚卸しで直したもの: PR #1220 の項目に PR 番号を足した（Issue #1212 の番号でしか受けていなかった）。
+
+⟹ **この節の範囲（`v1.0.2`…`f8e7fd6`）で、確定した破壊的変更は無い（上の保留を除く）。**
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
 
 ### Fixed
 
-- **`@mnemora/postgres` の `runMigrations()`（と `mnemora-postgres-migrate`）は、advisory lock を持つ接続だけが切れると、ロックの無いまま適用を続け、別の実行と重なりえた**（[Issue #1212](https://github.com/takecchi/mnemora/issues/1212)）——ロックは専用の接続で持ち、ファイルの本体は別の接続で流していたので、ロックの接続が DB 側の切断・フェイルオーバーなどで切れてサーバーがロックを手放しても、本体は流れ続けてコミットされ、その間に始まった別の実行が同じ migration を同時に流しえた（ADR 0017 の「ロックで直列化する」から外れていた）。いまはロックの下で流すものをすべてロックを持つ接続そのもので流すので、ロックの接続が切れると当てている途中のファイルも一緒に止まって巻き戻り、`migration <file> failed: ...` として報告される（最後のロックの返却の失敗では上書きしない）。ロックを待つための `lock_timeout` は本体には効かせない（今までどおり）。`runMigrations` が使う接続は2本から1本になる。
+- **`@mnemora/postgres` の `runMigrations()`（と `mnemora-postgres-migrate`）は、advisory lock を持つ接続だけが切れると、ロックの無いまま適用を続け、別の実行と重なりえた**（[Issue #1212](https://github.com/takecchi/mnemora/issues/1212)、[PR #1220](https://github.com/takecchi/mnemora/pull/1220)）——ロックは専用の接続で持ち、ファイルの本体は別の接続で流していたので、ロックの接続が DB 側の切断・フェイルオーバーなどで切れてサーバーがロックを手放しても、本体は流れ続けてコミットされ、その間に始まった別の実行が同じ migration を同時に流しえた（ADR 0017 の「ロックで直列化する」から外れていた）。いまはロックの下で流すものをすべてロックを持つ接続そのもので流すので、ロックの接続が切れると当てている途中のファイルも一緒に止まって巻き戻り、`migration <file> failed: ...` として報告される（最後のロックの返却の失敗では上書きしない）。ロックを待つための `lock_timeout` は本体には効かせない（今までどおり）。`runMigrations` が使う接続は2本から1本になる。
   ⭕ 非破壊と数える（公開型は変わらない。ロックの接続が切れた場合だけ、コミットされていた途中のファイルが巻き戻り、失敗の文言が `migration <file> failed: ...` になる。クローン miku の判断であり、オーナーの判断ではない）。
 - **`@mnemora/postgres` の `restoreSuperseded()`（`dryRun` を含む）は、`onlyMemoryIds` に uuid の形をしていない id が混ざると、`invalid input syntax for type uuid` の例外を投げていた**（[PR #1195](https://github.com/takecchi/mnemora/pull/1195)）——`PostgresMemoryStore.restoreSupersededBy`・`previewRestoreSupersededBy` が `onlyMemoryIds` をそのまま `::uuid[]` に渡していた。`supersededById` の形式不正は例外にしない（`Runtime.restoreSuperseded` の doc）、`getMany` は形式不正な id を無いものとして扱う、と同じ規律に揃え、形式不正な id は群に居ないのと同じに扱う（`@mnemora/testkit/fixtures` の InMemory は、もともとそう返していた）。
   ⭕ 非破壊と数える（例外を投げなくなる側の修正で、形の正しい id の結果は変わらない。クローン miku の判断であり、オーナーの判断ではない）。

@@ -1039,9 +1039,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`ef03a8f`**（PR #1199）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記7 と同じ範囲）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`f8e7fd6`**（PR #1223）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記8 と同じ範囲）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
-**型の上**: `git diff v1.0.2..ef03a8f -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。
+**型の上**: `git diff v1.0.2..f8e7fd6 -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
