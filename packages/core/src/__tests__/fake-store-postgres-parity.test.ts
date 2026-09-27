@@ -195,6 +195,80 @@ describe("Fake*: NaN/Infinity/非整数の limit を渡すと Postgres と同じ
 });
 
 /**
+ * `packages/testkit` の `in-memory-fixtures-limit-bigint-range.test.ts` と同じ判定を、
+ * `packages/core` 専用の Fake に当てる。bigint に収まらない整数（2^63 以上）は
+ * `Number.isInteger` を通るため、上の2つの describe の検査をすり抜けていた。Postgres は
+ * `2 ** 63` を `out of range for type bigint`、`1e21` を `invalid input syntax for type
+ * bigint` で拒む（実測は testkit 側のテストのコメント参照）。
+ */
+describe("Fake*: bigint に収まらない limit（2^63 以上）を渡すと Postgres と同じく例外を投げる", () => {
+  const calls: [name: string, call: (limit: number) => Promise<unknown>][] = [
+    [
+      "FakeOutboxStore.claimBatch",
+      (limit) =>
+        createFakeRuntimeStores().outboxStore.claimBatch(ctx, {
+          limit,
+          now: new Date("2026-01-01T00:00:00.000Z"),
+          claimedBy: "worker",
+          leaseMs: 60_000,
+        }),
+    ],
+    [
+      "FakeVectorStore.search",
+      (limit) =>
+        createFakeRuntimeStores().vectorStore.search(ctx, SPACE, [0, 0, 0], {
+          limit,
+          filter: { tenantId: TENANT },
+        }),
+    ],
+    [
+      "FakeLexicalStore.search",
+      (limit) =>
+        createFakeRuntimeStores().lexicalStore.search(ctx, "テスト", {
+          limit,
+          filter: { tenantId: TENANT },
+        }),
+    ],
+    ["FakeEventStore.list", (limit) => createFakeRuntimeStores().eventStore.list(ctx, { limit })],
+    [
+      "FakeMemoryStore.purgeExpiredEvents",
+      (limit) =>
+        createFakeRuntimeStores().memoryStore.purgeExpiredEvents!(ctx, {
+          olderThan: new Date("2026-06-01T00:00:00.000Z"),
+          limit,
+        }),
+    ],
+    [
+      "FakeMemoryStore.aggregateScope（digestBand.limit）",
+      (limit) =>
+        createFakeRuntimeStores().memoryStore.aggregateScope(
+          ctx,
+          {},
+          { digestBand: { limit, excludeMemoryIds: [] } },
+        ),
+    ],
+    [
+      "FakeMemoryStore.archiveDecayed",
+      (limit) =>
+        createFakeRuntimeStores().memoryStore.archiveDecayed(ctx, {
+          now: new Date("2026-06-01T00:00:00.000Z"),
+          limit,
+        }),
+    ],
+  ];
+  for (const [name, call] of calls) {
+    for (const limit of [2 ** 63, 1e21]) {
+      it(`${name} は limit=${limit} のとき例外を投げる`, async () => {
+        await expect(call(limit)).rejects.toThrow(/limit must fit in a Postgres bigint/);
+      });
+    }
+    it(`${name} は limit=2^63-1024（2^63 未満で最大の double）では例外を投げない（回帰確認）`, async () => {
+      await expect(call(2 ** 63 - 1024)).resolves.toBeDefined();
+    });
+  }
+});
+
+/**
  * miku 了承済み（マネージャー経由）: `FakeTenantSettingsStore` に interface 本番メソッド
  * `setDefaultHalfLifeRecalls`（`?` 付き、ADR 0197）を足し、`packages/postgres`/
  * `packages/testkit` と揃える。値域検査（`assertValidHalfLifeRecalls`）と float4
@@ -287,6 +361,48 @@ describe("FakeMemoryStore.archiveDecayed: 壊れた limit を渡すと Postgres 
       ).rejects.toThrow(/limit must (be an integer|not be negative)/);
       const after = await memoryStore.get(ctx, memory.id);
       expect(after?.status).toBe("active");
+    });
+  }
+});
+
+/**
+ * `packages/testkit` の `InMemoryOutboxStore.claimBatch`
+ * （`in-memory-fixtures-claim-batch-lease-ms.test.ts`）と同じ形の不一致が `FakeOutboxStore.claimBatch`
+ * にもあった。`PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を
+ * `timestamptz` のパラメータとして送るため、どちらかが Invalid Date になる入力では例外になる
+ * （実測は testkit 側のテストのコメント参照）。修正前の Fake は `leaseMs` が `NaN` /
+ * `±Infinity` / `1e20` でも、未 claim のジョブを claim していた。
+ */
+describe("FakeOutboxStore.claimBatch: リースの境界時刻が Date にならない入力は、Postgres と同じく例外を投げ、1件も claim しない", () => {
+  const cases: [label: string, now: Date, leaseMs: number][] = [
+    ["leaseMs=NaN", new Date("2100-01-01T00:00:00.000Z"), Number.NaN],
+    ["leaseMs=Infinity", new Date("2100-01-01T00:00:00.000Z"), Number.POSITIVE_INFINITY],
+    ["leaseMs=-Infinity", new Date("2100-01-01T00:00:00.000Z"), Number.NEGATIVE_INFINITY],
+    ["leaseMs=1e20", new Date("2100-01-01T00:00:00.000Z"), 1e20],
+    ["now=Invalid Date", new Date(Number.NaN), 60_000],
+  ];
+  for (const [label, now, leaseMs] of cases) {
+    it(`${label} は例外を投げ、ジョブを claim しない`, async () => {
+      const { memoryStore, outboxStore } = createFakeRuntimeStores();
+      await memoryStore.createMemory(ctx, fixture({ embeddingStatus: "failed" }));
+      await memoryStore.requeueEmbedJobs(ctx, { statuses: ["failed"], limit: 1 });
+      await expect(
+        outboxStore.claimBatch(ctx, {
+          kinds: ["embed"],
+          limit: 5,
+          now,
+          claimedBy: "test",
+          leaseMs,
+        }),
+      ).rejects.toThrow(/claimBatch: now - leaseMs must be a valid Date/);
+      const jobs = await outboxStore.claimBatch(ctx, {
+        kinds: ["embed"],
+        limit: 5,
+        now: new Date("2100-01-01T00:00:00.000Z"),
+        claimedBy: "test",
+        leaseMs: 60_000,
+      });
+      expect(jobs.map((j) => j.attempts)).toEqual([1]);
     });
   }
 });

@@ -817,6 +817,13 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts.limit < 0) {
       throw new Error(`purgeExpiredEvents: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(
+        `purgeExpiredEvents: limit must fit in a Postgres bigint (got ${opts.limit})`,
+      );
+    }
     const dryRun = opts.dryRun ?? false;
     const candidates = this.backing.events
       .filter(
@@ -1179,6 +1186,13 @@ export class FakeMemoryStore implements MemoryStore {
           `aggregateScope: digestBand.limit must not be negative (got ${opts.digestBand.limit})`,
         );
       }
+      // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+      // "9223372036854776000" is out of range for type bigint`）。
+      if (opts.digestBand.limit >= 2 ** 63) {
+        throw new Error(
+          `aggregateScope: digestBand.limit must fit in a Postgres bigint (got ${opts.digestBand.limit})`,
+        );
+      }
       const exclude = new Set(opts.digestBand.excludeMemoryIds);
       const eligibleMemories = inScopeMemories.filter((m) => !exclude.has(m.id));
       // 決定的な順序: (occurredAt ?? recordedAt) の降順、同値なら id の降順（本 PR）。
@@ -1328,6 +1342,11 @@ export class FakeMemoryStore implements MemoryStore {
     }
     if (opts.limit < 0) {
       throw new Error(`archiveDecayed: limit must not be negative (got ${opts.limit})`);
+    }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`archiveDecayed: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     const nowMs = opts.now.getTime();
     const clock = opts.clock ?? "wall";
@@ -1769,6 +1788,24 @@ export class FakeOutboxStore implements OutboxStore {
     if (opts.limit < 0) {
       throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`claimBatch: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
+    // `PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を `timestamptz`
+    // のパラメータとして送るため、どちらかが Invalid Date になる入力（`now` が Invalid Date、
+    // `leaseMs` が `NaN`・`±Infinity`・`Date` の範囲を超える値）では Postgres が例外を投げる
+    // （実測: `invalid input syntax for type timestamp with time zone`）。ここで検査せず数の
+    // まま比べると、未 claim のジョブを claim してしまう。クエリを投げる前に弾く Postgres 側に
+    // 揃える。⚠ `Date` としては有効でも Postgres の範囲（紀元前4713年より前）を外れる値は
+    // 揃えていない（Issue #1041 の論点）。`now` が Invalid Date なら `now - leaseMs` も
+    // Invalid Date になるので、1つの検査で両方を見る。
+    if (Number.isNaN(new Date(opts.now.getTime() - opts.leaseMs).getTime())) {
+      throw new Error(
+        `claimBatch: now - leaseMs must be a valid Date (now=${opts.now.getTime()}, leaseMs=${opts.leaseMs})`,
+      );
+    }
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.backing.outboxJobs.filter((job) => {
       const claimedAt = job.claimedAt ?? null;
@@ -1935,6 +1972,11 @@ export class FakeVectorStore implements VectorStore {
     }
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
+    }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
     }
     // `InMemoryVectorStore`（packages/testkit）と同じ意味論に揃える（ADR 0065）:
     // 索引を模す prefix は space（provider/model/dimensions）だけで絞る。以前はここで
@@ -2318,6 +2360,11 @@ export class FakeLexicalStore implements LexicalStore {
     if (opts.limit < 0) {
       throw new Error(`search: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`search: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
     // Issue #878: クエリ全体の文字数・異なる語数・1語の文字数に上限を置く
     // （capFakeLexicalQueryTotalChars/capFakeLexicalQueryTerms の doc 参照）。
     // 全体の文字数を最初に適用する。
@@ -2469,6 +2516,11 @@ export class FakeEventStore implements EventStore {
     }
     if (filter.limit !== undefined && filter.limit < 0) {
       throw new Error(`list: limit must not be negative (got ${filter.limit})`);
+    }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (filter.limit !== undefined && filter.limit >= 2 ** 63) {
+      throw new Error(`list: limit must fit in a Postgres bigint (got ${filter.limit})`);
     }
     const matched = this.backing.events.filter((e) => {
       if (e.tenantId !== ctx.tenantId) return false;

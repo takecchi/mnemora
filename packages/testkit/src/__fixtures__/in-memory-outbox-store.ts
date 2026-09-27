@@ -50,6 +50,24 @@ export class InMemoryOutboxStore implements OutboxStore {
     if (opts.limit < 0) {
       throw new Error(`claimBatch: limit must not be negative (got ${opts.limit})`);
     }
+    // `LIMIT` の bigint に収まらない値（2^63 以上）も Postgres は拒む（実測: `value
+    // "9223372036854776000" is out of range for type bigint`）。
+    if (opts.limit >= 2 ** 63) {
+      throw new Error(`claimBatch: limit must fit in a Postgres bigint (got ${opts.limit})`);
+    }
+    // `PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を `timestamptz`
+    // のパラメータとして送るため、どちらかが Invalid Date になる入力（`now` が Invalid Date、
+    // `leaseMs` が `NaN`・`±Infinity`・`Date` の範囲を超える値）では Postgres が例外を投げる
+    // （実測: `invalid input syntax for type timestamp with time zone`）。ここで検査せず数の
+    // まま比べると、未 claim のジョブを claim してしまう。クエリを投げる前に弾く Postgres 側に
+    // 揃える。⚠ `Date` としては有効でも Postgres の範囲（紀元前4713年より前）を外れる値は
+    // 揃えていない（Issue #1041 の論点）。`now` が Invalid Date なら `now - leaseMs` も
+    // Invalid Date になるので、1つの検査で両方を見る。
+    if (Number.isNaN(new Date(opts.now.getTime() - opts.leaseMs).getTime())) {
+      throw new Error(
+        `claimBatch: now - leaseMs must be a valid Date (now=${opts.now.getTime()}, leaseMs=${opts.leaseMs})`,
+      );
+    }
     // リースが切れたとみなす境界時刻。`PostgresOutboxStore` と同じ `<=`（両端含む）。
     const leaseExpiresBefore = opts.now.getTime() - opts.leaseMs;
     const eligible = this.jobs.filter((job) => {
