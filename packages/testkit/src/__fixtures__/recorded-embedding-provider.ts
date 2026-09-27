@@ -17,6 +17,7 @@ import { embeddingCassetteKey } from "./cassette.js";
  * 黙って何か返すことをしない」）の、この文脈への適用である。
  */
 export interface RecordedEmbeddingProviderOptions {
+  /** 再生するカセットの埋め込みの節。 */
   section: EmbeddingCassetteSection;
   /**
    * 呼び出し側が期待する埋め込み空間。指定すると、記録元の空間と食い違ったときに
@@ -30,6 +31,12 @@ export interface RecordedEmbeddingProviderOptions {
   expectedSpace?: EmbeddingSpaceId;
 }
 
+/**
+ * 記録した実 API のベクトルを再生する `EmbeddingProvider`（ADR 0051）。説明は {@link RecordedEmbeddingProviderOptions} の doc を見ること。
+ * `space` はカセットの記録元の空間になる。
+ *
+ * 投げるもの: 構築時に `expectedSpace` が記録元と食い違えば `Error`。`embed` で記録に無い入力が1つでもあれば `Error`。
+ */
 export class RecordedEmbeddingProvider implements EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
   private readonly entries: EmbeddingCassetteSection["entries"];

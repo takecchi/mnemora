@@ -27,20 +27,24 @@ export class CassetteRecorder {
   private embeddingSpace: EmbeddingSpaceId | undefined;
   private llmModel: string | undefined;
 
+  /** 埋め込みの1件を記録する。同じ `text` を二度記録すると、後の値で上書きする。 */
   recordEmbedding(space: EmbeddingSpaceId, text: string, vector: number[]): void {
     this.embeddingSpace = space;
     this.embeddingEntries.set(embeddingCassetteKey(text), { text, vector });
   }
 
+  /** LLM の応答の1件を記録する。同じ `prompt` を二度記録すると、後の値で上書きする。 */
   recordLLM(model: string, prompt: PromptSpec, value: unknown): void {
     this.llmModel = model;
     this.llmEntries.set(llmCassetteKey(prompt), { prompt, value });
   }
 
+  /** 記録した埋め込みの件数（鍵の数。呼び出す時点の値）。 */
   get embeddingCount(): number {
     return this.embeddingEntries.size;
   }
 
+  /** 記録した LLM の応答の件数（鍵の数。呼び出す時点の値）。 */
   get llmCount(): number {
     return this.llmEntries.size;
   }

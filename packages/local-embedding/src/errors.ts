@@ -36,8 +36,14 @@ export interface LocalEmbeddingInputTooLongDetail {
   readonly characters: number;
 }
 
+/**
+ * このパッケージが投げる、種類の付いたエラー。種類と次の一手は上の {@link LocalEmbeddingProviderErrorKind} の doc の表を見ること。
+ * ⚠ 分岐は `instanceof` ではなく `kind`（または {@link isLocalEmbeddingProviderError}）で行う。
+ */
 export class LocalEmbeddingProviderError extends Error {
+  /** 常に `"LocalEmbeddingProviderError"`。 */
   override readonly name = "LocalEmbeddingProviderError";
+  /** 失敗の種類。分岐はこの値で行う。 */
   readonly kind: LocalEmbeddingProviderErrorKind;
   /** `kind` が `"input_too_long"` のときだけ入る。 */
   readonly detail: LocalEmbeddingInputTooLongDetail | null;

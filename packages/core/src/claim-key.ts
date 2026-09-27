@@ -32,6 +32,7 @@ export const ClaimKeySchema = z.object({
   /** 主張の述語（属性名）。正規化済みの英語 snake_case を想定する（ADR 0315 決定3）。 */
   predicate: z.string().min(1),
 });
+/** 1件の Memory が何についての主張かを表す鍵（主語と述語）。形は {@link ClaimKeySchema}（上の doc）。 */
 export type ClaimKey = z.infer<typeof ClaimKeySchema>;
 
 /**
@@ -137,11 +138,14 @@ export function buildClaimKeyPrompt(
   };
 }
 
+/** `deriveClaimKeys` が LLM に返させる値の zod スキーマ（`claims` は入力の Memory と同じ順の鍵の配列）。 */
 export const ClaimKeyBatchResultSchema = z.object({
   claims: z.array(ClaimKeySchema),
 });
+/** {@link ClaimKeyBatchResultSchema} の型。 */
 export type ClaimKeyBatchResult = z.infer<typeof ClaimKeyBatchResultSchema>;
 
+/** `deriveClaimKeys` の戻り値。 */
 export interface DeriveClaimKeysResult {
   /**
    * `contents` と**同じ長さ・同じ順序**。要素ごとに鍵が取れなかった場合（LLM 呼び出し
@@ -294,6 +298,7 @@ export const DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT = 20;
  *   「採らなかった案」参照）。
  */
 export interface ClaimKeyOptions {
+  /** `true` なら抽出の後に `deriveClaimKeys` を呼んで鍵を付ける。`false` は省略と同じ（上の doc の一覧）。 */
   enabled: boolean;
   /**
    * {@link buildKnownPredicateInstruction} 参照。ADR 0271 の `subjectCandidates`
@@ -332,6 +337,7 @@ export interface ClaimKeyOptions {
   knownSubjects?: string[];
 }
 
+/** `ClaimKeyOptions` の zod スキーマ。値を実行時に検査するときに使う（型 `ClaimKeyOptions` と揃えてある）。 */
 export const ClaimKeyOptionsSchema = z.object({
   enabled: z.boolean(),
   knownPredicates: z.array(z.string().min(1)).optional(),

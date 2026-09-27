@@ -294,6 +294,7 @@ async function verifyRequiredExtensions(
   }
 }
 
+/** {@link runMigrations} の設定。スキーマの指定は {@link SchemaNamespaceOptions} から継ぐ。 */
 export interface RunMigrationsOptions extends SchemaNamespaceOptions {
   /**
    * advisory lock を待つ上限（ミリ秒）。既定は {@link DEFAULT_LOCK_TIMEOUT_MS}。
@@ -354,7 +355,9 @@ export function migrationLockKeyFor(schema?: string): bigint {
   return deriveAdvisoryLockKey(`mnemora:runMigrations:advisory-lock:${schema}`);
 }
 
+/** {@link runMigrations} の戻り値。 */
 export interface RunMigrationsResult {
+  /** この呼び出しで当てた migration のファイル名（当てた順）。適用済みのものは含まない。何も当てなければ空配列。 */
   applied: string[];
   /**
    * 排他の観測値。`waitedMs` は「ロックが空くまで実際に待った時間」（ミリ秒）。
@@ -803,6 +806,7 @@ export async function runMigrations(
   }
 }
 
+/** `analyzeMemories` の設定。 */
 export interface AnalyzeMemoriesOptions {
   /**
    * `memories` テーブルを置くスキーマ。`RunMigrationsOptions.schema` と同じ意味・同じ検証
@@ -812,6 +816,7 @@ export interface AnalyzeMemoriesOptions {
   schema?: string;
 }
 
+/** `analyzeMemories` の戻り値。 */
 export interface AnalyzeMemoriesResult {
   /** 実際に `ANALYZE` を発行した対象（`schema` を指定した場合はスキーマ修飾済み）。 */
   table: string;
@@ -842,20 +847,22 @@ export interface AnalyzeMemoriesResult {
  * （`ANALYZE` は冪等——空テーブルに対しても成功し、行が増えるたびに再実行すれば
  * 統計は最新化される）。
  *
- * ## 副作用について（この環境では測っていない。PostgreSQL の公式文書から引いた）
+ * ## 副作用について（ロックは実測した。残り2点は未計測）
  *
- * **この作業環境には Postgres も docker も無く、実測はできない**（Issue #247 /
- * alteroid #965 / alteroid #1015 の族）。PostgreSQL の公式文書によれば、単体の
- * `ANALYZE`（`VACUUM` を伴わない）は対象テーブルに `SHARE UPDATE EXCLUSIVE` ロックを
- * 取る——このロックは通常の `SELECT`/`INSERT`/`UPDATE`/`DELETE` と競合しない（競合するのは
- * 他の `VACUUM`/`ANALYZE`・一部の DDL のみ）。また `ANALYZE` はテーブル全体を舐めず、
- * `default_statistics_target` に基づく固定サイズのサンプル行だけを読む。
- * ⟹ 素の `CREATE INDEX`（`ACCESS EXCLUSIVE` を取り書き込みを止める——ADR 0062 (c)）とは
- * 性質が異なり、書き込みを止めない設計だと**文書からは読める**。
- * **ただし「文書から読める」は「この環境で測った」ではない**——大きなテーブルで
- * サンプリング自体にどれだけ壁時計時間がかかるか、統計情報以外の副作用
- * （プランキャッシュの無効化等）が実運用でどう効くかは未計測。本 ADR の
- * 「確かめていないこと」に明記する。
+ * PostgreSQL の公式文書によれば、単体の `ANALYZE`（`VACUUM` を伴わない）は対象テーブルに
+ * `SHARE UPDATE EXCLUSIVE` ロックを取る——このロックは通常の `SELECT`/`INSERT`/`UPDATE`/`DELETE` と
+ * 競合しない（競合するのは他の `VACUUM`/`ANALYZE`・一部の DDL のみ）。また `ANALYZE` はテーブル全体を
+ * 舐めず、`default_statistics_target` に基づく固定サイズのサンプル行だけを読む。
+ * ⟹ 素の `CREATE INDEX`（`ACCESS EXCLUSIVE` を取り書き込みを止める——ADR 0062 (c)）とは性質が異なる。
+ *
+ * 【実測 2026-09-28、[Issue #1253](https://github.com/takecchi/mnemora/issues/1253)】PostgreSQL 17 で、
+ * `ANALYZE memories` が `memories` に取るロックは `ShareUpdateExclusiveLock` だった（文書どおり）。
+ * そのロックを持ったまま（`ANALYZE` のトランザクションを開けたまま）でも、別の接続からの
+ * `createMemory` は止まらずに通った（`analyze-memories-lock.postgres.test.ts`）。以前ここに
+ * 「この作業環境には Postgres も docker も無く、実測はできない」と書いていたのは、当時の環境の話である。
+ * **まだ測っていないのは2点**——大きなテーブルでサンプリング自体にどれだけ壁時計時間がかかるか、
+ * 統計情報以外の副作用（プランキャッシュの無効化等）が実運用でどう効くか。ADR 0143 の
+ * 「確かめていないこと」も参照。
  */
 export async function runAnalyzeMemories(
   pool: Pool,

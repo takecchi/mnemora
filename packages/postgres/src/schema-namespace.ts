@@ -45,6 +45,10 @@ import { assertSafeIdentifier } from "./embedding-space-table.js";
  */
 export const DEFAULT_EXTENSION_SCHEMA = "public";
 
+/**
+ * mnemora のテーブルと拡張を置くスキーマの指定。`runMigrations`・`registerEmbeddingSpace`・`createPostgresClient` が受け取る。
+ * どちらも省略すれば、接続の `search_path` 任せ（今日どおり）。
+ */
 export interface SchemaNamespaceOptions {
   /**
    * mnemora のテーブル・索引・マイグレーション台帳を置くスキーマ。

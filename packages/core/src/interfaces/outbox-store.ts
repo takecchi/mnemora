@@ -87,9 +87,13 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   PR 本文に記載）。
  */
 export interface ClaimOutboxJobsOptions {
+  /** この種別のジョブだけを取る。省略なら種別で絞らない。 */
   kinds?: OutboxJobKind[];
+  /** 1回に取る上限の本数。 */
   limit: number;
+  /** 「今」の時刻。`available_at <= now` とリースの切れ目の判定に使う。 */
   now: Date;
+  /** claim した worker の名前（行の `claimed_by` に書く）。 */
   claimedBy: string;
   /**
    * claim のリース長（ミリ秒）。`claimed_at` からこの時間が経過した行は、まだ
@@ -126,8 +130,16 @@ export class OutboxLeaseConflictError extends Error {
   }
 }
 
+/** outbox の未処理のジョブを claim し、完了・失敗を記録する口。契約（重複 claim の禁止・リース・CAS）は、このファイルの冒頭の doc を見ること。 */
 export interface OutboxStore {
+  /**
+   * 未処理（終端が付いていない）で `available_at <= opts.now` のジョブのうち、未 claim かリースが切れたものを、`available_at` の古い順に `opts.limit` 本まで取る。取るたびに `attempts` を1増やす。
+   */
   claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
+  /**
+   * ジョブを完了にする。`expectedAttempts` が行の `attempts` と違えば {@link OutboxLeaseConflictError}。行が無い・既に終端が付いているときは例外にしない（冒頭の doc）。
+   */
   complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
+  /** ジョブを失敗（終端）にし、`error` を記録する。自動の再試行はしない。CAS と冪等の扱いは `complete` と同じ。 */
   fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void>;
 }

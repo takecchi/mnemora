@@ -55,7 +55,9 @@ export interface FindCorrectionCandidatesInput {
  * 返したものをそのまま運ぶ。
  */
 export interface CorrectionCandidate {
+  /** 候補の Memory の id。 */
   memoryId: MemoryId;
+  /** 候補の Memory の `digest`（`recall()` が返した値のまま）。 */
   digest: string;
   /**
    * 1始まり。**`recall()` が返した並びでの順位であり、`excludeMemoryIds` で除外した後に
@@ -68,7 +70,9 @@ export interface CorrectionCandidate {
    * という別の情報（recall の生の結果には無かった情報）を、この口が勝手に作り出さない。
    */
   recallRank: number;
+  /** `recall()` が返したスコアの内訳をそのまま運ぶ。 */
   score: ScoreBreakdown;
+  /** `recall()` がどの経路で引いたか（`RecalledMemory.retrievedVia` のまま）。 */
   retrievedVia: RecalledMemory["retrievedVia"];
 }
 

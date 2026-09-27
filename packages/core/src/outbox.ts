@@ -8,20 +8,33 @@ import type { OutboxJobKind } from "./interfaces/scheduler.js";
  * `OutboxStore` が claim/complete/fail で操作する対象。
  */
 export interface OutboxJobRecord {
+  /** ジョブの id。 */
   id: string;
+  /** ジョブが属するテナント。 */
   tenantId: string;
+  /** ジョブの種別（{@link OutboxJobKind}）。 */
   kind: OutboxJobKind;
+  /** ジョブの中身（種別ごとの JSON）。 */
   payload: Record<string, unknown>;
+  /** この時刻を過ぎたら claim できる。 */
   availableAt: Date;
+  /** 最後に claim された時刻。一度も claim されていなければ `null`（リースの判定に使う）。 */
   claimedAt?: Date | null;
+  /** 最後に claim した worker の名前。 */
   claimedBy?: string | null;
+  /** claim された回数。claim のたびに1増える。`complete`/`fail` の CAS に使う（上限は無い）。 */
   attempts: number;
+  /** 完了にした時刻。未完了なら `null`。 */
   completedAt?: Date | null;
+  /** 失敗（終端）にした時刻。失敗していなければ `null`。 */
   failedAt?: Date | null;
+  /** `fail` に渡したエラーの文字列。 */
   lastError?: string | null;
+  /** 積んだ時刻。 */
   createdAt: Date;
 }
 
+/** `OutboxJobRecord` の zod スキーマ。値を実行時に検査するときに使う（型 `OutboxJobRecord` と揃えてある）。 */
 export const OutboxJobRecordSchema = z.object({
   id: z.string().min(1),
   tenantId: z.string().min(1),

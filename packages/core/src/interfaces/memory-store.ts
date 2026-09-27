@@ -167,6 +167,9 @@ export class MemoryPurgeConflictError extends Error {
  * 判定の根拠にすると、将来この文字列を変えたときに判定ロジックまで壊れる）。
  */
 export const PURGE_TOMBSTONE_CONTENT = "[purged]";
+/**
+ * purge した Memory の `digest` に書く値（`PURGE_TOMBSTONE_CONTENT` と同じ文字列）。⚠ purge されたかの判定には使わない——`Memory.purgedAt !== null` で判定する（上の doc）。
+ */
 export const PURGE_TOMBSTONE_DIGEST = "[purged]";
 
 /**
@@ -233,6 +236,7 @@ export function isEmbeddingStatusRollback(
  * 任意引数ではない（実装側は必須引数でも壊れない）。
  */
 export interface AggregateScopeOptions {
+  /** 目次帯（段5）の digest も集めるときに渡す。省けば digest を集めない。 */
   digestBand?: {
     /** 取得する上限件数。 */
     limit: number;
@@ -1649,7 +1653,9 @@ export interface MemoryStore {
  * 専用の値であり、ラベルの語彙登録の対象にはならない（ADR 0318「決めたこと」参照）。
  */
 export interface LabelSummary {
+  /** ラベルの名前（`tags` の要素と同じ語彙。正規化せず、完全一致で比べる）。 */
   name: string;
+  /** `"registered"` は `registerLabel` で登録した名前、`"proposed"` は記憶の `tags` に現れただけで未登録の名前。 */
   status: "registered" | "proposed";
   /**
    * この名前を `tags` に含む Memory が新規作成された回数の近似値。

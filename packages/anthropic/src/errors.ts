@@ -49,7 +49,9 @@ export type AnthropicLLMFailureKind =
   /** 上記のどれでもないのに、テキストブロックが1つも無かった */
   | "no_content";
 
+/** {@link AnthropicLLMProviderError} のコンストラクタに渡す値。 */
 export interface AnthropicLLMProviderErrorOptions {
+  /** 失敗の種類（{@link AnthropicLLMFailureKind}）。 */
   kind: AnthropicLLMFailureKind;
   /** SDK が返した生の `stop_reason`。分からなければ `null`（偽 client・streaming の途中など） */
   stopReason?: string | null;
@@ -87,8 +89,11 @@ function defaultMessage(options: AnthropicLLMProviderErrorOptions): string {
  * `kind` は値なのでその影響を受けない。
  */
 export class AnthropicLLMProviderError extends Error {
+  /** 失敗の種類。分岐はこの値で行う。 */
   readonly kind: AnthropicLLMFailureKind;
+  /** SDK が返した生の `stop_reason`。分からなければ `null`。 */
   readonly stopReason: string | null;
+  /** `stop_details.category`（開いた集合の文字列）。拒否でなければ・分からなければ `null`。 */
   readonly refusalCategory: string | null;
 
   constructor(options: AnthropicLLMProviderErrorOptions) {

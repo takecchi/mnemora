@@ -124,6 +124,7 @@ export const REGISTER_EMBEDDING_SPACE_LOCK_KEY = -4359922960011245935n;
  */
 const HNSW_VECTOR_INDEX_MAX_DIMENSIONS = 2000;
 
+/** {@link registerEmbeddingSpace} の設定。スキーマの指定は {@link SchemaNamespaceOptions} から継ぐ。 */
 export interface RegisterEmbeddingSpaceOptions extends SchemaNamespaceOptions {
   /** advisory lock を待つ上限（ミリ秒）。既定は {@link DEFAULT_LOCK_TIMEOUT_MS}。 */
   lockTimeoutMs?: number;
@@ -163,6 +164,7 @@ export function registerEmbeddingSpaceLockKeyFor(schema?: string): bigint {
   return deriveAdvisoryLockKey(`mnemora:registerEmbeddingSpace:advisory-lock:${schema}`);
 }
 
+/** {@link registerEmbeddingSpace} の戻り値。 */
 export interface RegisterEmbeddingSpaceResult {
   /**
    * 排他の観測値。`waitedMs` は「ロックが空くまで実際に待った時間」（ミリ秒）。

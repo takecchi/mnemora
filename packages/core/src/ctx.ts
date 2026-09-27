@@ -33,10 +33,13 @@ import { z } from "zod";
  * 例外は `observe` の `externalId` で、入力の schema が空文字を拒む（空白だけは受け付ける）。
  */
 export interface Ctx {
+  /** 隔離の単位（必須）。呼び出し側が渡す不透明な文字列で、store はこの値で行を分ける。跨いだら事故である。 */
   tenantId: string;
+  /** テナントの中の整理の単位（利用者など。省略できる）。**省略すると、テナント全体が対象になる**（packages/core/README.md）。書き込む口では、主題の無い記憶として扱う。 */
   subjectId?: string;
 }
 
+/** `Ctx` の zod スキーマ。値を実行時に検査するときに使う（型 `Ctx` と揃えてある）。 */
 export const CtxSchema = z.object({
   tenantId: z.string().min(1),
   subjectId: z.string().min(1).optional(),

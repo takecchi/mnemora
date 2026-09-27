@@ -59,11 +59,14 @@ export const ExtractedMemoryCandidateSchema = z.object({
   /** `provenanceKind: 'inferred'` のときの確信度。`stated` では無視する。 */
   confidence: z.number().min(0).max(1).optional(),
 });
+/** 抽出の LLM が返す記憶の候補1件（{@link ExtractedMemoryCandidateSchema} の型）。 */
 export type ExtractedMemoryCandidate = z.infer<typeof ExtractedMemoryCandidateSchema>;
 
+/** 抽出の LLM に返させる値の zod スキーマ（`memories` は候補の配列。0件もありうる）。 */
 export const ExtractionResultSchema = z.object({
   memories: z.array(ExtractedMemoryCandidateSchema),
 });
+/** {@link ExtractionResultSchema} の型。 */
 export type ExtractionResult = z.infer<typeof ExtractionResultSchema>;
 
 function observationPayloadText(observation: Observation): string {
@@ -239,8 +242,11 @@ export function truncateForFallbackDigest(content: string, maxLength: number): s
   return `${sliceWithoutSplittingSurrogatePair(trimmed, maxLength)}…`;
 }
 
+/** {@link resolveDigest} の戻り値。 */
 export interface ResolvedDigest {
+  /** 使う digest（LLM の digest か、本文の先頭を切り出したもの）。 */
   digest: string;
+  /** `digest` をどう作ったか（`"llm"` か `"fallback"`）。 */
   digestSource: DigestSource;
 }
 
@@ -324,7 +330,9 @@ export function describeExtractionFailure(error: unknown): ExtractionFailure {
   return { kind, message };
 }
 
+/** `extractCandidates` の戻り値。 */
 export interface ExtractCandidatesResult {
+  /** 記憶の候補。LLM の呼び出しが失敗したときは、観測の全文を本文にした候補1件（全文フォールバック）になる。 */
   candidates: ExtractedMemoryCandidate[];
   /** LLM 呼び出し自体が失敗し、全文フォールバックへ倒れたかどうか。 */
   usedWholeObservationFallback: boolean;
@@ -477,16 +485,27 @@ export async function extractCandidates(
   }
 }
 
+/** {@link buildNewMemoryFromCandidate} の入力。 */
 export interface BuildNewMemoryParams {
+  /** `tenantId` を新しい Memory に使う。 */
   ctx: Ctx;
+  /** 元になった Observation（`sourceObservationId`・主題・時刻・出所の元）。 */
   observation: Observation;
+  /** 組み立てる記憶の候補。 */
   candidate: ExtractedMemoryCandidate;
+  /** 本文から `contentHash` を作る関数（`RuntimeDeps.hashContent` と同じもの）。 */
   hashContent: (content: string) => string;
+  /** 抽出器の版（`Memory.extractorVersion`。冪等キーの一部）。 */
   extractorVersion: string;
+  /** 推論の出所に書くモデル名（`inferred` の `provenance.model`）。 */
   llmModelId: string;
+  /** 推論の出所に書くプロンプトの版（`inferred` の `provenance.promptVersion`）。 */
   promptVersion: string;
+  /** 新しい Memory の半減期（時間）。 */
   halfLifeHours: number;
+  /** 新しい Memory の `recordedAt` にする時刻（減衰の起点にもなる）。 */
   now: Date;
+  /** LLM の digest が無い・空のときに、本文の先頭から切り出す長さ。 */
   digestFallbackLength: number;
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
