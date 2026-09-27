@@ -17,6 +17,7 @@
  */
 
 import { LocalEmbeddingProviderError } from "./errors.js";
+import { recordTransformersCacheDir } from "./transformers-cache-place.js";
 
 /** dtype（量子化の別）。transformers.js が受け付ける値のうち、ここで意味があるものを並べる。 */
 export type LocalEmbeddingDtype = "fp32" | "fp16" | "q8" | "int8" | "uint8" | "q4" | "q4f16";
@@ -242,7 +243,19 @@ function describe(value: unknown): string {
  * ベクトルが混ざる。**
  */
 export const createLocalEmbeddingPipeline: CreateLocalEmbeddingPipeline = async (spec) => {
-  const { pipeline } = await import("@huggingface/transformers");
+  const transformers = await import("@huggingface/transformers");
+  const { pipeline } = transformers;
+  // 読み込みに失敗したときのメッセージが、実際に置かれる場所を名指せるように、`pipeline()` を
+  // 呼ぶ前に記録する（`transformers-cache-place.ts`）。`env` を持たない差し替えもある——vitest の
+  // `vi.mock` は、返していない export を読むだけで例外を投げる。メッセージのための読み出しなので、
+  // 読めなければ「分からない」にして、読み込みそのものは止めない。
+  let cacheDir: unknown;
+  try {
+    cacheDir = (transformers as { env?: { cacheDir?: unknown } }).env?.cacheDir;
+  } catch {
+    cacheDir = undefined;
+  }
+  recordTransformersCacheDir(cacheDir);
   const extractor = await pipeline("feature-extraction", spec.repo, {
     dtype: spec.dtype,
     ...(spec.cacheDir !== undefined ? { cache_dir: spec.cacheDir } : {}),

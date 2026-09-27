@@ -522,10 +522,15 @@ describe("読み込み失敗のメッセージ", () => {
     expect(error.message).toContain("/tmp/mnemora-models/sirasagi62/ruri-v3-30m-ONNX");
   });
 
-  it("cacheDir が未指定なら、既定の場所（@huggingface/transformers の中の .cache/）を名指す", async () => {
+  // ⚠ 2026-09-27: 以前はここで npm の配置（`@huggingface/transformers/.cache/`）を名指すことを
+  // 縛っていたが、pnpm では実際の場所が違う。注入した `createPipeline` の置き場所はこのクラスには
+  // 分からないので、特定の場所を断言しないことを縛る。既定の `createPipeline` のときに実際の場所を
+  // 名指すことは `load-failure-cache-place.test.ts` が縛る。
+  it("cacheDir が未指定で、createPipeline を注入したなら、特定の場所を断言せず env.cacheDir を指す", async () => {
     const error = await loadFailure({ createPipeline: failing });
     expect(error.message).toContain("壊れ");
-    expect(error.message).toContain("@huggingface/transformers/.cache/");
+    expect(error.message).not.toContain("node_modules/@huggingface/transformers/.cache/");
+    expect(error.message).toContain("env.cacheDir");
     expect(error.message).toContain("sirasagi62/ruri-v3-30m-ONNX");
   });
 

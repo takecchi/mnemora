@@ -7,6 +7,7 @@ import type {
 } from "./pipeline.js";
 import { createLocalEmbeddingPipeline } from "./pipeline.js";
 import { isLocalEmbeddingProviderError } from "./errors.js";
+import { lastTransformersCacheDir } from "./transformers-cache-place.js";
 
 /**
  * `EmbeddingProvider` の**プロセス内**実装（外部サービスへ繋がない）。
@@ -437,7 +438,15 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
         }
       }
     }
-    throw new Error(describeLoadFailure(this.#spec, this.#retryAttempts), { cause: lastError });
+    // 実際の置き場所を名指せるのは、既定の `createPipeline` が transformers.js を読み込んだときだけである
+    // （注入された `createPipeline` がどこに置くかは、このクラスには分からない）。
+    const defaultCacheDir =
+      this.#createPipeline === createLocalEmbeddingPipeline
+        ? lastTransformersCacheDir()
+        : undefined;
+    throw new Error(describeLoadFailure(this.#spec, this.#retryAttempts, defaultCacheDir), {
+      cause: lastError,
+    });
   }
 }
 
@@ -460,23 +469,34 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
  * ここで足しているのは「次に何ができるか」だけで、**何が起きたかは cause の側にある。**
  */
 /**
- * `cacheDir` を省いたときの置き場所（transformers.js の既定。`@huggingface/transformers` パッケージ
- * 自身の中の `.cache/`）を、メッセージで名指すための表記。transformers.js を import せずに書く
- * （読み込みに失敗した後で、さらに読み込みを起こさない）。
+ * `cacheDir` を省いたとき、実際の置き場所が分からない場合の表記。**特定の場所を断言しない。**
+ * 置き場所はパッケージマネージャの配置で変わる（npm と pnpm で違う。`transformers-cache-place.ts`）。
+ * 【実測 2026-09-27】以前はここを npm の配置 `node_modules/@huggingface/transformers/.cache/` で
+ * 決め打ちしており、pnpm の利用者には無い場所を指していた。
  */
-const DEFAULT_TRANSFORMERS_CACHE_PLACE = "node_modules/@huggingface/transformers/.cache/";
+const UNKNOWN_TRANSFORMERS_CACHE_PLACE =
+  "transformers.js の env.cacheDir（`@huggingface/transformers` パッケージの中の `.cache/`。実際の場所はパッケージマネージャの配置による）";
 
-function describeLoadFailure(spec: LocalEmbeddingModelSpec, attempts: number): string {
+/**
+ * @param defaultCacheDir `cacheDir` を省いたときに transformers.js が解決した置き場所
+ *   （既定の `createPipeline` が記録した `env.cacheDir`）。分からなければ `undefined`。
+ */
+function describeLoadFailure(
+  spec: LocalEmbeddingModelSpec,
+  attempts: number,
+  defaultCacheDir: string | undefined,
+): string {
   const where =
     spec.cacheDir !== undefined
       ? `cacheDir=${spec.cacheDir}`
-      : `cacheDir=未指定（transformers.js の既定: ${DEFAULT_TRANSFORMERS_CACHE_PLACE}）`;
+      : `cacheDir=未指定（transformers.js の既定: ${defaultCacheDir ?? UNKNOWN_TRANSFORMERS_CACHE_PLACE}）`;
   // 【実測 2026-09-27】キャッシュのファイルが壊れていると（取得の中断など）、再試行を使い切っても、
   // 次のプロセスでも同じように落ち続ける。消せば次の読み込みで取り直すので、消す場所を名指す。
+  const cacheRoot = spec.cacheDir ?? defaultCacheDir;
   const repoCache =
-    spec.cacheDir !== undefined
-      ? `${spec.cacheDir.replace(/\/+$/, "")}/${spec.repo}`
-      : `${DEFAULT_TRANSFORMERS_CACHE_PLACE}${spec.repo}`;
+    cacheRoot !== undefined
+      ? `${cacheRoot.replace(/[\\/]+$/, "")}/${spec.repo}`
+      : `${UNKNOWN_TRANSFORMERS_CACHE_PLACE} の下の ${spec.repo}`;
   // attempts <= 1 のときは「1回試した」と言っても情報が増えないので黙る
   // （リトライを無効化した呼び出し側・既存のテストの文面と揃える）。
   const attemptsNote = attempts > 1 ? `${attempts} 回試したが取得できなかった。` : "";
