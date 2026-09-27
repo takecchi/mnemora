@@ -900,6 +900,8 @@ events_purged / restored / unsuperseded`）はこの列挙をそのまま使い�
 表現する。`kind` の値を増やしすぎると監査ログの分岐がアプリケーションコード側に漏れ出すため、
 「状態が実際に変わった大分類」だけを `kind` にし、理由の粒度は `meta` に落とす。
 
+**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1234](https://github.com/takecchi/mnemora/issues/1234)）**: ある Memory のイベントを `at` の順に読んでも、状態が変わった順とは限らない。`observe()` は候補を1件ずつ「書く → `created` を積む」の順で書き、1つのトランザクションではない。その間にその1件が `forget` → `purge` されると、`created` は `forgotten`・`purged` の後に積まれ、`at` もその順になる（`created` の `digestSnapshot` は purge 前の digest）。「消した後に作られた」と読める並びは、作成の記録が遅れて積まれたものである。`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ。
+
 **⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）**: `actor` と `meta` は JSON として保存される前提の欄で、値の中身は検査しない。`@mnemora/postgres` は `JSON.stringify` して `jsonb` に書くので、`Date` は文字列に、`NaN`・`Infinity` は `null` に、`-0` は `0` になり、`undefined` の欄は消える。BigInt と、NUL（U+0000）か孤立サロゲートを含む文字列は例外になる。`@mnemora/testkit` の fixture はどれもそのまま保持する。core が自分で入れる値はどれも JSON で往復するが、`Runtime` の口に渡す `reason`・`actor.id` は呼び出し側の文字列のまま入る。そこに NUL か孤立サロゲートがあると、Postgres では状態の書き換えごと取り消される（途中まで書かれたものは残らない）。fixture では書き換えが通り、文字列がそのまま残る。どちらかに揃える約束はしていない（詳細は `MemoryEvent.meta` の TSDoc）。
 
 **⚠ 2026-09-26 改訂: `kind` の値の正は、この段落と上の DDL ではなく実装の型である。**
