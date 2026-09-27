@@ -3,6 +3,7 @@ import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } fro
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import { OpenAILLMProviderError } from "./errors.js";
 import { translateForOpenAIStructuredOutput } from "./json-schema.js";
+import { needsRootWrap, toBaseJsonSchema, unwrapRootValue } from "./structured-root.js";
 
 /**
  * `packages/openai` の `LLMProvider` 実装（docs/architecture.md §5.4・§3.8）。
@@ -226,6 +227,12 @@ export class OpenAILLMProvider implements LLMProvider {
     // OpenAI の strict モードは JSON Schema としての形は保証するが、それが core の zod
     // スキーマとして意味的に妥当かは別問題。上の stripNulls で null → 省略へ変換してから
     // もう一度 zod でパースし、core・呼び出し側には常に検証済みの T を返す。
-    return req.schema.parse(stripNulls(parsedJson));
+    //
+    // 根が object でないスキーマは包んで送っている（`translateForOpenAIStructuredOutput`、
+    // `structured-root.ts`）ので、包みの欄から取り出してから検査する。
+    const value = needsRootWrap(toBaseJsonSchema(req.schema))
+      ? unwrapRootValue(parsedJson)
+      : parsedJson;
+    return req.schema.parse(stripNulls(value));
   }
 }

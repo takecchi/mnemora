@@ -37,7 +37,7 @@ export * from "./llm-provider.js";
 export * from "./json-schema.js";
 
 // ===== dist/json-schema.d.ts =====
-import { z } from "zod";
+import type { z } from "zod";
 export interface OpenAIJsonSchemaFormat {
     name: string;
     schema: Record<string, unknown>;
