@@ -369,3 +369,19 @@ claim が既定経路になったとき」が実際に起きた。** [ADR 0325](
 
 ⟹ **本 ADR の負債2は「一部埋まった」であり、「消えた」ではない。** 残る射程は ADR 0325 の
 「確かめていないこと」に引き継がれている。
+
+## その後（2026-09-28）—— ロールバック経路の一部を測った
+
+「その後（2026-09-17）」の「確かめていないこと」に残っていた**ロールバック経路（文の失敗・
+`lock_timeout`・接続断）での取りこぼし**のうち、`lock_timeout` と接続断の2つを、本物の Postgres で
+測る歯を置いた（`packages/postgres/src/__tests__/outbox-claim-statement-failure-recovery.postgres.test.ts`）。
+
+- 別の接続が `outbox` にテーブルの `ACCESS EXCLUSIVE` ロックを持ち、`claimBatch` をそのロック待ちで
+  失敗させる（`lock_timeout=200ms` で打ち切る／`pg_terminate_backend` で切る）。
+- 【実測】どちらの失敗の後も、ジョブは claim されていない（`claimed_at` が無く、`attempts` も進まない）。
+  同じ `now` での次の `claimBatch` が、リースの切れを待たずに拾った。
+
+⚠ **「測った」は「全部埋まった」ではない。** 起こした失敗は、どちらも文がテーブルのロックを待つ段
+（claim を書く前）で起きる。claim を書いた**後**の失敗（たとえば `claimBatch` をトランザクションの無い
+複数の文に分け、後の文が落ちる形）は、この起こし方では作れず、測っていない。今の `claimBatch` は1つの
+SQL 文なので、その形は今の実装には無い。
