@@ -1,4 +1,5 @@
 import type { Pool } from "pg";
+import { escapeLiteral } from "pg";
 import type { EmbeddingSpaceId } from "@mnemora/core";
 import {
   assertSafeIdentifier,
@@ -19,8 +20,66 @@ import {
   DEFAULT_EXTENSION_SCHEMA,
   type SchemaNamespaceOptions,
   assertSafeSchemaName,
+  qualifiedLiteral,
   qualify,
 } from "./schema-namespace.js";
+
+/**
+ * Issue #1151: 空間ごとのテーブルのコメントに記録する、空間の組の接頭辞。この接頭辞で始まらない
+ * コメントは mnemora の記録ではない（利用者が付けたもの）として扱う。
+ */
+const EMBEDDING_SPACE_COMMENT_PREFIX = "mnemora:embedding-space:";
+
+function embeddingSpaceComment(space: EmbeddingSpaceId): string {
+  return `${EMBEDDING_SPACE_COMMENT_PREFIX}${JSON.stringify({
+    provider: space.provider,
+    model: space.model,
+    dimensions: space.dimensions,
+  })}`;
+}
+
+/**
+ * Issue #1151: `embeddingSpaceTableName` は単射ではなく、正規化の後に同じ綴りになる空間どうしは
+ * 同じテーブルになる。導出は変えず、テーブルのコメントに空間の組（元の値）を記録して見張る。
+ *
+ * - コメントが無い（新しく作った・Issue #1151 より前に作られた）: この登録の組を記録する。
+ *   ⚠ 既存のテーブルは、この後で最初に登録した組がそのテーブルの持ち主になる。
+ * - mnemora の記録で、組が同じ: 何もしない。
+ * - mnemora の記録で、組が違う: 何も書かずに、`name` が `"EmbeddingSpaceTableConflictError"` の
+ *   `Error` を投げる。
+ * - mnemora の形ではないコメント: 利用者のものとして上書きせず、見張らない。
+ *
+ * advisory lock の内側で呼ぶこと（読んでから書くまでに、別の登録が割り込まないため）。
+ */
+async function recordOrCheckEmbeddingSpace(
+  pool: Pool,
+  schema: string | undefined,
+  table: string,
+  space: EmbeddingSpaceId,
+): Promise<void> {
+  const result = await pool.query<{ comment: string | null }>(
+    `SELECT obj_description(to_regclass($1), 'pg_class') AS comment`,
+    [qualifiedLiteral(schema, table)],
+  );
+  const recorded = result.rows[0]?.comment ?? null;
+  const expected = embeddingSpaceComment(space);
+  if (recorded === null) {
+    await pool.query(`COMMENT ON TABLE ${qualify(schema, table)} IS ${escapeLiteral(expected)}`);
+    return;
+  }
+  if (!recorded.startsWith(EMBEDDING_SPACE_COMMENT_PREFIX) || recorded === expected) {
+    return;
+  }
+  const error = new Error(
+    `registerEmbeddingSpace: テーブル ${table} は別の埋め込み空間が使っている` +
+      `（記録: ${recorded.slice(EMBEDDING_SPACE_COMMENT_PREFIX.length)}、` +
+      `今回: ${expected.slice(EMBEDDING_SPACE_COMMENT_PREFIX.length)}）。` +
+      `provider・model を小文字にし英数字以外を _ にした綴りが同じになる空間は、同じテーブルに潰れる` +
+      `（Issue #1151）。正規化の後にも区別が残る provider・model を選ぶこと。`,
+  );
+  error.name = "EmbeddingSpaceTableConflictError";
+  throw error;
+}
 
 /**
  * `registerEmbeddingSpace` がプロセス間排他に使う advisory lock のキー（段階2・ADR 0018）。
@@ -185,19 +244,28 @@ const REGISTER_EMBEDDING_SPACE_LOCK_ERRORS = {
  * テーブル名・索引名は `EmbeddingSpaceId` から機械的に導出するため、呼び出し側が
  * 直接テーブル名を書く必要はない（`VectorStore` 実装がこの関数と同じ導出規則を使う）。
  *
- * ⚠ **正規化の後に同じ綴りになる空間どうしは、同じテーブルに潰れる**（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)、
- * 今の振る舞いを書くだけ）。導出（{@link embeddingSpaceTableName}）は provider・model を小文字にし、
- * 英数字以外の並びを `_` に置き換えてから繋ぐ。そのため、`{a_b, c}` と `{a, b_c}`、
- * `{openai, text-embedding-3-small}` と `{OpenAI, text_embedding_3_small}`、ASCII 以外の文字だけが違う
- * model 名は、次元が同じなら同じテーブルになる。この関数は `CREATE TABLE IF NOT EXISTS` なので、
- * 2つ目の登録は既存のテーブルを使って黙って成功する。検索は `model` 列で絞らないので、
- * **2つの空間のベクトルが混ざる。**1つの DB で複数の空間を使うなら、正規化の後にも区別が残る
- * provider・model を選ぶこと（`docs/memory-model.md` §10 の同日付追記）。
+ * ⚠ **正規化の後に同じ綴りになる空間どうしは、同じテーブルに潰れる**（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)）。
+ * 導出（{@link embeddingSpaceTableName}）は provider・model を小文字にし、英数字以外の並びを `_` に
+ * 置き換えてから繋ぐ。そのため、`{a_b, c}` と `{a, b_c}`、`{openai, text-embedding-3-small}` と
+ * `{OpenAI, text_embedding_3_small}`、ASCII 以外の文字だけが違う model 名は、次元が同じなら同じテーブルになる。
+ * 導出は変えず、この関数がテーブルのコメントに空間の組（元の値）を記録して突き合わせる。
+ * **別の組が既に記録されたテーブルへの登録は、何も書かずに `name` が
+ * `"EmbeddingSpaceTableConflictError"` の `Error` で拒む**（新しい export は無いので、`err.name` で見分ける）。
+ * コメントの無いテーブル（新しく作ったもの・Issue #1151 より前に作られたもの）は、この登録の組を記録して
+ * 通す——⚠ 既存のテーブルは、この後で**最初に登録した組**が持ち主になる。mnemora の形ではないコメントは
+ * 上書きせずに通す（そのテーブルは見張れない）。見張るのは登録の口だけで、`upsert`・`search` は
+ * コメントを見ない。1つの DB で複数の空間を使うなら、正規化の後にも区別が残る provider・model を
+ * 選ぶこと（`docs/memory-model.md` §10 の同日付追記）。
+ *
+ * コメントの記録は `COMMENT ON TABLE` なのでテーブルの所有者の権限が要るが、この関数は以前から
+ * `CREATE INDEX IF NOT EXISTS` で同じ所有者の権限を要していた（所有者でないロールは既存の
+ * テーブルでも `must be owner of table` で落ちる。2026-09-27 実測）——登録を通せるロールの範囲は変わらない。
  *
  * ## `options.schema`（feat/dedicated-schema）
  *
- * **`schema` 未指定なら、発行される DDL は今日と1バイトも変わらない**（`qualify` が
- * 識別子を素通しするため）。ただし **`options.lockKey` を上書きしない呼び出しは、
+ * **`schema` 未指定なら、`CREATE TABLE`・`CREATE INDEX` の DDL は schema を指定しない形のまま**
+ * （`qualify` が識別子を素通しするため。Issue #1151 のコメントの読み書き——`obj_description` の
+ * `SELECT` と、必要なときの `COMMENT ON TABLE`——も同じく素通しの名前を使う）。ただし **`options.lockKey` を上書きしない呼び出しは、
  * ロック取得より前に `SELECT current_schema()` を1回発行する**（Issue #779、
  * {@link registerEmbeddingSpaceLockKeyFor} の doc 参照）——DDL には触れない、
  * advisory lock のキーを実際のスキーマに揃えるためだけの読み取りである。
@@ -285,6 +353,10 @@ export async function registerEmbeddingSpace(
         PRIMARY KEY (tenant_id, memory_id)
       );
     `);
+
+    // Issue #1151: このテーブルを別の空間の組が既に使っていないかを、コメントの記録で見張る。
+    // 索引の作成より前に置く——衝突なら、既存のテーブルに何も足さずに拒む。
+    await recordOrCheckEmbeddingSpace(pool, schema, table, space);
 
     // HNSW 索引。operator class を明示する（cosine 距離を採用する。
     // docs/memory-model.md §10 の例と同じ形）。索引名は修飾しない（索引は
