@@ -987,6 +987,12 @@ export interface TickOptions {
    * に載る（Postgres と testkit の fixture の両方で実測）。重複の防ぎは、正の `leaseMs` が
    * 処理時間より長いときにだけ効く。
    * `now - leaseMs` が `Date` の範囲を外れる値（`NaN` を含む）は、どちらの実装でも例外になる。
+   *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、Issue #1200）: ジョブの処理がリースより長く掛かっても、
+   * その間に別の `tick` が同じジョブを取らなければ、完了は通り、`TickResult` には何も出ない**
+   * （`attempts` が変わらないので `complete` の CAS が通る。`processed` に数えられ、`leaseConflicts` は空）。
+   * 別の `tick` が取った場合は、遅れた側が `leaseConflicts` に載る（#1092 の形）。リースを超えたこと自体を
+   * 名乗る口は無い。【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ。
    */
   leaseMs: number;
   /**
