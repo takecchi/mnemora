@@ -45,6 +45,14 @@ export interface PostgresClient {
  *
  * 呼び出し側が既に `config.options` を渡していた場合は、**その値の後ろに空白区切りで
  * 追記する**（上書きして黙って捨てない）。
+ *
+ * ## ⚠ `pool` に `error` リスナーは付けない（今の振る舞い、Issue #1213）
+ *
+ * pool の中で待機している接続が DB 側から切られる（Postgres の再起動など）と、`Pool` が `error` を出し、
+ * リスナーが無ければ Node のプロセスごと落ちる。避けるには、返した `pool` に呼び出し側が
+ * `client.pool.on("error", …)` を付けること——付ければ、切れた接続は捨てられ、次の呼び出しは新しい接続で通る
+ * （`packages/postgres/README.md`「接続の `error` リスナーは、利用者が付ける」）。`db.transaction()` の途中で
+ * 切れる場合は別であり、このリスナーでは避けられない（Issue #868）。
  */
 export function createPostgresClient(
   connectionString: string,
