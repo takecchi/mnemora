@@ -232,7 +232,11 @@ export interface RuntimeDeps {
   tenantSettingsStore: TenantSettingsStore;
   llmProvider: LLMProvider;
   embeddingProvider: EmbeddingProvider;
-  /** 省略時は `systemClock`。 */
+  /**
+   * 省略時は `systemClock`。
+   * ⚠ 注入した時計は、store が埋める時刻（監査ログの `at`・outbox の `availableAt` など）には届かず、
+   * 壁時計より過去の時計では `tick` がジョブを取らない——{@link Clock} の doc 参照（Issue #1237）。
+   */
   clock?: Clock;
   /** D16: SHA-256 hex 等、content からハッシュを計算する関数（core は計算しない）。 */
   hashContent: (content: string) => string;
