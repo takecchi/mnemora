@@ -90,7 +90,7 @@ export interface BuildConsolidatedMemoryParams {
   halfLifeHours: number;
   now: Date;
   /**
-   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
+   * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと3・5:
    * `extraction.ts` の `BuildNewMemoryParams.activitySeq`/`halfLifeRecalls` と同じ形
    * ——両方揃っているときだけ活動時計の3つ組を作る。`'wall'` のテナントでは
    * 呼び出し側がどちらも渡さない。

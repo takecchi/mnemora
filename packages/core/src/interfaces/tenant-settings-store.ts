@@ -108,7 +108,7 @@ export function assertValidEventRetentionDays(days: number): void {
 }
 
 /**
- * 減衰の時計の種類（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)
+ * 減衰の時計の種類（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
  * 決めたこと1）。
  *
  * - `'wall'`: 段1のゲートは `decay_floor_at > now()` のみ（本 ADR 以前と同じ）。
@@ -189,7 +189,7 @@ export function assertValidDecayClock(value: string): asserts value is DecayCloc
 
 /**
  * `tenant_settings.taxonomy_mode` が取りうる値（`migrations/0001_init.sql:223`、
- * Issue #201、[ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)）。
+ * Issue #201、[ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)）。
  *
  * `docs/memory-model.md` §8「二つのモードを二つの経路にしない。『ラベルの状態』一つで
  * 表す」——`strict` が変えるのは「`proposed` なラベルが検索のフィルタ・加点に参加できる
@@ -237,7 +237,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * 監査ログ（`memory_events`）の保持期間の読み書きを提供する。
  *
  * ⚠ **上の段落の「`taxonomy_mode` の読み書きは引き続き本 interface の範囲外である」は
- * [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)（Issue #201）で古くなった。**
+ * [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)（Issue #201）で古くなった。**
  * 本文は書き換えず、ここに追記する——`getTaxonomyMode?`/`setTaxonomyMode?`（下記）が
  * `decay_clock` と同じ「4メソッドは省略可能」の形でこの interface に加わった。
  *
@@ -253,7 +253,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  *   （`EventRetentionSetting` 型がそもそも許さない）。「まだ設定していない」状態への
  *   巻き戻し（行の削除）は、この interface の対象外である。
  *
- * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13で
+ * [ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと13で
  * `getDecayClock`/`setDecayClock`/`getDefaultHalfLifeRecalls`/`getActivitySeq` を足した。
  * `taxonomy_mode`（interface に出していない）と `event_retention_days`（`getEventRetention`/
  * `setEventRetention` を専用メソッドとして足した、ADR 0050）という2つの前例のうち、
@@ -278,7 +278,7 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` を含む `Error` で**明示的に失敗する**
  * （黙って無視しない——`examples/chat --decay-clock` が黙って効かない形を作らない）。
  *
- * [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md) で
+ * [ADR 0197](../../../../docs/decisions/0197-set-default-half-life-recalls.md) で
  * `setDefaultHalfLifeRecalls`（`getDefaultHalfLifeRecalls` の書き込み版）を足した。
  * ADR 0165「引き受けた負債」7 と [Issue #338](https://github.com/takecchi/mnemora/issues/338)
  * がどちらも対処として名指ししていた「`'activity'` を選ぶ採用者は `half_life_recalls` を
@@ -338,7 +338,7 @@ export interface TenantSettingsStore {
    * `HALF_LIFE_RECALLS_INVALID_MESSAGE` を含む `Error` で失敗する
    * （`assertValidHalfLifeRecalls` 参照）。
    *
-   * [ADR 0197](../../../docs/decisions/0197-set-default-half-life-recalls.md): ADR 0165
+   * [ADR 0197](../../../../docs/decisions/0197-set-default-half-life-recalls.md): ADR 0165
    * 「引き受けた負債」7 と Issue #338 が対処として名指ししていた「`'activity'` を選ぶ
    * 採用者は `half_life_recalls` を自分の recall 頻度に合わせて上げる必要がある」を、
    * 本番コードから呼べる口にする。
@@ -367,7 +367,7 @@ export interface TenantSettingsStore {
   getActivitySeq?(ctx: Ctx): Promise<number>;
 
   /**
-   * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
+   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * `tenant_settings.taxonomy_mode` の現在値。行が無ければ `DEFAULT_TAXONOMY_MODE`
    * （`'open'`）を返す（`getDecayClock?` と同じ規律）。
    *
@@ -380,7 +380,7 @@ export interface TenantSettingsStore {
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
 
   /**
-   * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
+   * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):
    * `tenant_settings.taxonomy_mode` を設定する（UPSERT。行が無ければ作る）。`mode` が
    * `TaxonomyMode` の2値のいずれでもない場合は `TAXONOMY_MODE_INVALID_MESSAGE` を含む
    * `Error` で失敗する（`assertValidTaxonomyMode` 参照）。`setDecayClock?` と同じ形。
@@ -390,7 +390,7 @@ export interface TenantSettingsStore {
 
 /**
  * `setDecayClock` を実装していない adapter へ書こうとしたときに投げる `Error` の
- * メッセージに必ず含める文字列（[ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md)
+ * メッセージに必ず含める文字列（[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md)
  * 決めたこと13）。
  *
  * ⭐ **黙って無視しない。**`decay_clock` は「書けたつもりで効いていない」がいちばん
@@ -459,7 +459,7 @@ export async function writeDecayClock(
 /**
  * `setTaxonomyMode` を実装していない adapter へ書こうとしたときに投げる `Error` の
  * メッセージに必ず含める文字列（Issue #201、
- * [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md)。
+ * [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md)。
  * `DECAY_CLOCK_UNSUPPORTED_MESSAGE` と同じ形）。
  */
 export const TAXONOMY_MODE_UNSUPPORTED_MESSAGE =

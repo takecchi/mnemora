@@ -82,7 +82,7 @@ export interface RecallRuntimeDeps {
   memoryStore: MemoryStore;
   vectorStore: VectorStore;
   /**
-   * [ADR 0165](../../docs/decisions/0165-decay-activity-clock.md): 忘却ゲート（段1・
+   * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md): 忘却ゲート（段1・
    * 後置フィルタ）と段2の再スコアが、そのテナントの `decay_clock`・活動時計の「いま」
    * （`activity_seq`）を読むために使う。`Runtime`（`runtime.ts`）は既に
    * `RuntimeDeps.tenantSettingsStore`（`getDefaultHalfLifeHours` 用に必須）を持っており、

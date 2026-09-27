@@ -200,7 +200,7 @@ export interface InferredProvenance {
 2. **🔴 `mentionCount`（何回言及されたか）。**
    mnemora に回数列は無い。`lastReinforcedAt` は**時刻1つ**であり、
    ADR 0041 により `reinforce` は `strength` を動かさない。
-   監査ログも列単位の状態変化は記録しない（`docs/memory-model.md` §21 のログ量リスクへの対処）。
+   監査ログも列単位の状態変化は記録しない（ログ量のリスクへの対処。⚠ 2026-09-27 訂正: 初稿はここを「`docs/memory-model.md` §21」と書いていたが、`docs/memory-model.md` に §21 という節は当時も今も無い。同じリスクは [docs/roadmap.md](../roadmap.md) の §4 の表「監査ログの量」に在る）。
    **⟹ 回数は復元できない。**
 3. **🔴 `confidence` が recall の返り値に出てこない。**
    ADR 0035 の決定であり、`docs/recall.md:505` の逐語は「持ち出すのは `kind` だけである」。
