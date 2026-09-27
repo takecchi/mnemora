@@ -299,6 +299,15 @@ export interface VectorStore {
    * `compare` が使う合成会話）では、DB を作り直すたびに同点候補の並び順が変わる。
    * **adapter を新しく書くときは、距離だけでなく完全なタイブレークまで含めて
    * 決定的な順序を返すこと。**
+   *
+   * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの、[Issue #1268](https://github.com/takecchi/mnemora/issues/1268)）:
+   * 何が「距離の同点」になるか自体が、ベクトルを保存する精度で adapter ごとに違う。**`PostgresVectorStore`
+   * （pgvector の `vector` 型）は成分を float4 で持ち、`@mnemora/testkit` の `InMemoryVectorStore` は丸めずに持つ。
+   * そのため、クエリとの距離の差が float4 の桁より小さい2件は、Postgres では同点になって上の tie-break
+   * （`recorded_at` の新しい順）で並び、fixture では距離の近い順に並ぶ。`limit` で切ったときに返る集合も割れる。
+   * 段2は `score.total` と実効時刻で並べ直すので、最終の `memories` まで割れるのは `total` まで同点の組と、
+   * 同点を `search()` の順のまま保つ段3.5（連想枠）である。
+   * 【実測 2026-09-28】`vector-search-float4-tie.postgres.test.ts`。
    */
   search(
     ctx: Ctx,
