@@ -430,6 +430,10 @@ export interface MemoryStore {
    * 弾かない**——`ids` のうち adapter の期待する形式でないものは、無い id と同じく
    * 静かに結果から落とす（該当する id 以外は通常どおり返す）。全件が形式に合わなければ
    * 空配列を返す。
+   *
+   * ⚠ **返す順序は規定しない**（今の振る舞い。2026-09-27 に実測）——`ids` の順と一致するとは
+   * 限らない（`@mnemora/postgres` は `ids` の順を保たず、testkit の fixture は保つ）。`ids` に
+   * 同じ id が2回以上あっても、結果には1回だけ現れる（両実装とも）。呼び出し側は id で引き当てること。
    */
   getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
   /**
@@ -444,6 +448,9 @@ export interface MemoryStore {
    * この口には一切現れない**（Issue #873）。`Runtime.reextract` はこの口を自分の
    * `extractorVersion` で呼ぶため、旧い版の Memory を見つけて退役させる手段にはならない
    * ——それは呼び出し側が別途行う責務である（`Runtime.reextract` の doc コメント参照）。
+   *
+   * ⚠ **返す順序は規定しない**（今の振る舞い。2026-09-27 に実測。`@mnemora/postgres` と
+   * testkit の fixture で並びが違う）。件数の上限・続きから読む口も無く、該当する行を全部返す。
    */
   listBySourceObservation(
     ctx: Ctx,
