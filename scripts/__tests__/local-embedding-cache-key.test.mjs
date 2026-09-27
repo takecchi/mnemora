@@ -5,7 +5,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { buildCacheKeySuffix, slugForCacheKey } from "../print-local-embedding-cache-key-lib.mjs";
+import {
+  buildCacheKeySuffix,
+  CACHE_LAYOUT_TAG,
+  slugForCacheKey,
+} from "../print-local-embedding-cache-key-lib.mjs";
 
 /**
  * `scripts/print-local-embedding-cache-key.mjs`（CI のモデルキャッシュ鍵を決める CLI）と、
@@ -103,10 +107,15 @@ async function withDeclarationFile(content, fn) {
 }
 
 describe("print-local-embedding-cache-key.mjs: 鍵の接尾辞の組み立て（純関数）", () => {
-  it("repo / dtype / sha が全部入る", () => {
+  it("repo / dtype / sha と、中身の形の版（CACHE_LAYOUT_TAG）が全部入る", () => {
     expect(buildCacheKeySuffix({ repo: "owner/model", dtype: "q8", sha: "abc123" })).toBe(
-      "owner-model-q8-abc123",
+      `owner-model-q8-abc123-${CACHE_LAYOUT_TAG}`,
     );
+  });
+
+  it("⚠ 中身の形の版は、revision を渡した後の形（<repo>/<revision>/<file>）で保存し直した版である（Issue #1004）", () => {
+    // 版を戻すと、revision を渡す前に保存された <repo>/<file> の形のキャッシュが、また当たる。
+    expect(CACHE_LAYOUT_TAG).toBe("revision-layout-1");
   });
 
   it("🔴 接頭辞を持たない（ci.yml 側のリテラルと二重にならない）", () => {
