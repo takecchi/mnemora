@@ -5025,13 +5025,18 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       supersededById?: MemoryId;
       event: NewMemoryEvent;
     } => {
-      const buildEvent = (kind: "updated" | "superseded"): NewMemoryEvent => ({
+      const buildEvent = (
+        kind: "updated" | "superseded",
+        supersededById?: MemoryId,
+      ): NewMemoryEvent => ({
         tenantId: ctx.tenantId,
         memoryId: id,
         kind,
         actor,
         digestSnapshot: memory.digest,
-        meta: buildMeta(),
+        // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
+        // superseded と同じ形（ADR 0150 追記）。勝者の updated には足さない。
+        meta: supersededById === undefined ? buildMeta() : { ...buildMeta(), supersededById },
       });
       if (resolution.kind === "both_active") {
         return { id, status: "active", event: buildEvent("updated") };
@@ -5043,7 +5048,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         id,
         status: "superseded",
         supersededById: resolution.winnerId,
-        event: buildEvent("superseded"),
+        event: buildEvent("superseded", resolution.winnerId),
       };
     };
 
