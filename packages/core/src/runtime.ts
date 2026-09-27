@@ -1769,6 +1769,16 @@ export interface Runtime {
    * ⚠ 呼び出し側は、この返り値だけでは「正常な冪等の再送」と「forgotten/purged が原因で
    * 無視された」を区別できない。`ObserveResult` に内訳を持たせる案は見送った（公開の型が
    * 増えるため）——将来の選択肢としては残っている。
+   *
+   * 投げる例外（現状の振る舞いを約束として書く）:
+   * - `input` を `ObserveInputSchema` で検証し、合わなければ zod の `ZodError` を投げる
+   *   （何も書く前）。
+   * - `extract: "deferred"` と `subjectCandidates`（空でない）、または `claimKey` を同時に
+   *   渡すと、{@link SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} /
+   *   {@link CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} で始まる `Error` を投げる（何も書く前）。
+   * - LLM の呼び出しの失敗は投げない。全文フォールバックへ倒し、`extractionFailure` に載せる
+   *   （docs/memory-model.md §4）。
+   * - store が投げた例外は、そのまま伝わる（保存できない値の扱いは Issue #1063）。
    */
   observe(ctx: Ctx, input: ObserveInput): Promise<ObserveResult>;
   /**
@@ -1794,6 +1804,19 @@ export interface Runtime {
   /**
    * roadmap.md 段階4「想起」・段階5「説明」。docs/recall.md §2 の7段パイプライン
    * （実装は `./recall-runtime.js` の `runRecall`）。
+   *
+   * 投げる例外（現状の振る舞いを約束として書く）:
+   * - `query` を `RecallQuerySchema` で検証し、合わなければ zod の `ZodError` を投げる
+   *   （store を読む前・書く前）。
+   * - `channels` に `"lexical"` が在るのに `RuntimeDeps.lexicalStore` が無ければ、
+   *   `LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`（`recall.ts`）で始まる `Error` を投げる（ADR 0084 §4）。
+   * - `RuntimeDeps.outputValidation` が `"throw"` のときだけ、組み立てた結果が検証に落ちると
+   *   `RecallOutputValidationError` を投げる（ADR 0098。既定の `"report"` では投げない）。
+   *   この検証は recall の記録（`recallId`）を書いた後に走る。
+   * - store が投げた例外は、そのまま伝わる。
+   *
+   * `consolidate` / `reflect` の `{ query }` 形と `findCorrectionCandidates` は内部で
+   * `recall()` を呼ぶので、同じ例外がそのまま届く。
    */
   recall(ctx: Ctx, query: RecallQuery): Promise<RecallResult>;
   /**

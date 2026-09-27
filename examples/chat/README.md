@@ -18,17 +18,43 @@ roadmap.md 段階7「サンプル」。**このサンプルの主目的は「動
 
 ## 動かし方
 
-前提: Node 22 / pnpm（corepack）。ローカルに Postgres + pgvector が必要
-（[AGENTS.md](../../AGENTS.md) 参照、または CI の `example-chat` ジョブと同じ
-`pgvector/pgvector:pg17` イメージ）。
+前提: Node 22 / pnpm（corepack）。Postgres + pgvector が必要（下の「DB を用意する」）。
+
+⚠ **環境に `OPENAI_API_KEY` が設定されていると、`chat` / `compare` / `scope` などは本物の OpenAI を
+叩く（課金される）。**起動直後の `[provider]` 行が「本物の OpenAI」になる。鍵を持ったまま擬似 provider・
+記録の再生で試すなら、`env -u OPENAI_API_KEY pnpm --filter @mnemora/example-chat run chat` のように
+鍵を外して起動すること。
+
+### DB を用意する
+
+`DATABASE_URL` が指すデータベースに、拡張 `vector`（pgvector）・`btree_gin`・`pgcrypto` が要る。
+`migrate` は拡張が無ければ自分で作るが、**それには拡張を作る権限（多くは superuser）が要る。**
+superuser でないロールで繋ぐなら、先に superuser で拡張を入れておく:
+
+```bash
+createdb mnemora_chat                      # データベースを作る（ロールは自分の環境に合わせる）
+psql -d mnemora_chat \
+  -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+  -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+  -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"   # superuser で実行する
+export DATABASE_URL="postgresql://<user>@<host>:<port>/mnemora_chat"
+```
+
+Postgres そのものは、CI の `example-chat` ジョブと同じ `pgvector/pgvector:pg17` イメージか、
+`initdb` で自分専用に立てたもの（手順は [AGENTS.md](../../AGENTS.md)「手元で Postgres を立てる」）を使う。
+
+DB に繋がらない・データベースが無い・ロールが無い・拡張を作る権限が無い、のどれかで止まったときは、
+CLI が元のエラーの後ろに `→ …（examples/chat/README.md「DB を用意する」）` の一行を出す。
+
+### 動かす
 
 ```bash
 # リポジトリルートで
-pnpm install
-pnpm run build   # @mnemora/core 等の workspace パッケージを dist へビルドする
-                 # （tsx で直接実行する examples/chat の CLI は dist を node_modules 経由で
-                 #   解決するため、ビルドが要る。vitest はテスト時だけ src を直接見るため
-                 #   ビルド無しでも動く——後述「テスト」参照）
+pnpm install     # 素の clone では「Failed to create bin … mnemora-postgres-migrate … dist/bin/migrate.js」の
+                 # WARN が3行出る。dist がまだ無いためで、下のコマンドには影響しない（無視してよい）
+# pnpm run build は、この README のコマンドには要らない。examples/chat の CLI（tsx）は
+# tsconfig.json の paths で @mnemora/* を各パッケージの src から直接読む
+# （素の clone から build せずに migrate・chat・compare・scope・explain・answer が通ることを確かめた）。
 
 export DATABASE_URL="postgresql://user@host/dbname?host=/path/to/sockdir&port=5544"
 pnpm --filter @mnemora/postgres run migrate

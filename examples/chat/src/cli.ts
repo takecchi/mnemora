@@ -149,6 +149,7 @@ import {
   formatTimeWeightingTable,
 } from "./time-weighting-format.js";
 import { runAnswerTrialsCompareFromFiles } from "./answer-trials-compare.js";
+import { databaseErrorHint } from "./db-error-hint.js";
 import { formatAnswerTrialsReport, runAnswerTrials } from "./answer-trials.js";
 
 /** `chat` サブコマンドで使う会話の長さ(filler 往復数)。サンプルアプリの裁量値。 */
@@ -159,7 +160,7 @@ function requireDatabaseUrl(): string {
   if (!url) {
     throw new Error(
       "DATABASE_URL が設定されていません。mnemora は Postgres + pgvector を要求する " +
-        "（docs/roadmap.md 段階2）。examples/chat/README.md の手順でローカル DB を用意し、" +
+        "（docs/roadmap.md 段階2）。examples/chat/README.md「DB を用意する」の手順で DB を用意し、" +
         "DATABASE_URL を設定してから実行すること。",
     );
   }
@@ -2746,5 +2747,10 @@ async function main(): Promise<void> {
 
 main().catch((err) => {
   console.error(err);
+  // DB のエラーなら、README の「DB を用意する」節を指す一行を足す（元のエラーは上でそのまま出す）。
+  const hint = databaseErrorHint(err);
+  if (hint !== undefined) {
+    console.error(`\n→ ${hint}`);
+  }
   process.exitCode = 1;
 });
