@@ -12,12 +12,11 @@ import {
 } from "./test-db.js";
 
 /**
- * ベクトルの保存の精度（pgvector は float4、testkit の fixture は丸めない float64）で、何が「距離の同点」になるかが
- * 2実装で違う——今の振る舞いを縛る（Issue #1268。`VectorStore.search` の doc の 2026-09-28 追記）。
- * 振る舞いは変えていない。
+ * ベクトルを float4 で比べる——pgvector は成分を float4 で持ち、testkit の fixture も保存するベクトルとクエリを
+ * `Math.fround` で丸める（Issue #1268）。そのため、何が「距離の同点」になるかが2実装で同じになる。
  *
  * A と B は float64 では A のほうがクエリに近いが、float4 に丸めると同じベクトルになる。B のほうが新しい。
- * Postgres では距離が同点になって tie-break（`recorded_at` の新しい順）で B が先、fixture では距離の近い A が先。
+ * どちらの実装でも距離が同点になり、tie-break（`recorded_at` の新しい順）で B が先に来る。
  */
 
 const NOW = new Date("2026-09-28T00:00:00.000Z");
@@ -41,7 +40,7 @@ const KITS: Array<[string, () => Promise<Kit>, { order: string[]; first: string 
       const memoryStore = new InMemoryMemoryStore();
       return { memoryStore, vectorStore: new InMemoryVectorStore(memoryStore) };
     },
-    { order: ["A", "B", "C"], first: "A" },
+    { order: ["B", "A", "C"], first: "B" },
   ],
   [
     "Postgres",
@@ -58,7 +57,7 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-describe("VectorStore.search: float4 の桁より小さい距離の差（今の振る舞い）", () => {
+describe("VectorStore.search: float4 の桁より小さい距離の差は、2実装とも同点になる", () => {
   for (const [name, makeKit, expected] of KITS) {
     it(`${name}: 並びは ${expected.order.join(" → ")}、limit 1 なら ${expected.first}`, async () => {
       const kit = await makeKit();
@@ -89,11 +88,7 @@ describe("VectorStore.search: float4 の桁より小さい距離の差（今の�
         all.find((h) => labelOf.get(h.memoryId) === "A")!,
         all.find((h) => labelOf.get(h.memoryId) === "B")!,
       ];
-      if (name === "Postgres") {
-        expect(a.distance).toBe(b.distance);
-      } else {
-        expect(a.distance).toBeLessThan(b.distance);
-      }
+      expect(a.distance).toBe(b.distance);
       expect((await search(1)).map((h) => labelOf.get(h.memoryId))).toEqual([expected.first]);
     });
   }

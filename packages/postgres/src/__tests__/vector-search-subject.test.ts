@@ -1,5 +1,5 @@
 import type { Pool } from "pg";
-import { afterAll, beforeEach, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
@@ -172,20 +172,26 @@ async function seedForExplain(
 }
 
 describe("PostgresVectorStore.search — subject_id を足すとプランナが何を選ぶか（歯B、実測で確定）", () => {
-  beforeEach(async () => {
+  // この2件は、同じ `seedForExplain` の表（乱数は種で固定）を EXPLAIN するだけで書かない。以前は1件ずつ
+  // `resetTestDatabase()` → `seedForExplain()` をやり直し、同じ表を2回作っていた（CI で1件あたり約6秒）。
+  // 積むのはこの describe の最初に1回だけにする——読むものは同じなので、見る範囲は変わらない。
+  beforeAll(async () => {
     await resetTestDatabase();
-  });
+    const { db, pool } = await getTestClient();
+    await seedForExplain(
+      new PostgresMemoryStore(db),
+      new PostgresVectorStore(db),
+      { tenantId: EXPLAIN_TENANT },
+      pool,
+    );
+  }, 120_000);
 
   afterAll(async () => {
     await closeTestClient();
   });
 
   it("m.subject_id = $x を足すと、HNSW ではなく idx_memories_by_subject + Sort の厳密な経路が選ばれる（再現用の等価クエリ）", async () => {
-    const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
-    const vectorStore = new PostgresVectorStore(db);
-    const ctx: Ctx = { tenantId: EXPLAIN_TENANT };
-    await seedForExplain(memoryStore, vectorStore, ctx, pool);
+    const { pool } = await getTestClient();
 
     const explainResult = await pool.query(
       `EXPLAIN (FORMAT TEXT)
@@ -210,10 +216,8 @@ describe("PostgresVectorStore.search — subject_id を足すとプランナが�
 
   it("PostgresVectorStore.search が subjectId 込みで実際に発行するクエリも、同じ厳密な経路になる", async () => {
     const { db, pool } = await getTestClient();
-    const memoryStore = new PostgresMemoryStore(db);
     const vectorStore = new PostgresVectorStore(db);
     const ctx: Ctx = { tenantId: EXPLAIN_TENANT };
-    await seedForExplain(memoryStore, vectorStore, ctx, pool);
 
     const captured = await captureClientQuery(
       (text) => text.includes(TABLE) && /order by/i.test(text),
