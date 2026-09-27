@@ -280,7 +280,8 @@ describeOutboxStoreConformance({
       { tenantId: ctx.tenantId, subjectId: null, externalId: null, kind: "utterance", payload: {} },
       [input.kind],
     );
-    const job = jobs[0]!;
+    // Issue #1108: 返るジョブは複製なので、store の中の行（共有している `outboxJobs`）を書き換える。
+    const job = latestMemoryStoreForOutboxSeed.outboxJobs.find((j) => j.id === jobs[0]!.id)!;
     if (input.payload) {
       job.payload = input.payload;
     }

@@ -27,7 +27,8 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
   }
-  return {
+  // Issue #1108: 呼び手の入力（`at`・`actor`・`meta`）と切り離して保存する。
+  return structuredClone({
     id: nextId("evt"),
     tenantId: ctx.tenantId,
     memoryId: event.memoryId,
@@ -37,7 +38,7 @@ export function buildStoredMemoryEvent(ctx: Ctx, event: NewMemoryEvent): MemoryE
     digestSnapshot: event.digestSnapshot ?? null,
     sizeBeforeBytes: event.sizeBeforeBytes ?? null,
     meta: event.meta,
-  };
+  });
 }
 
 /**
@@ -76,7 +77,7 @@ export class InMemoryEventStore implements EventStore {
     }
     const stored = buildStoredMemoryEvent(ctx, event);
     this.events.push(stored);
-    return stored;
+    return structuredClone(stored);
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
@@ -84,7 +85,7 @@ export class InMemoryEventStore implements EventStore {
     if (!event || event.tenantId !== ctx.tenantId) {
       return null;
     }
-    return event;
+    return structuredClone(event);
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {
@@ -134,6 +135,6 @@ export class InMemoryEventStore implements EventStore {
     // その配列を sort() しても `this.events`（InMemoryMemoryStore と共有されうる、
     // ADR 0031）を in-place で破壊しない。
     const sorted = matched.sort((a, b) => a.at.getTime() - b.at.getTime());
-    return filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted;
+    return structuredClone(filter.limit !== undefined ? sorted.slice(0, filter.limit) : sorted);
   }
 }

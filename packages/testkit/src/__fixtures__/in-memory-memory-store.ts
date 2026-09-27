@@ -297,13 +297,15 @@ export class InMemoryMemoryStore implements MemoryStore {
         // Issue #152（ADR 0312）: 同じ経路。runtime は常に `{}` 以上の値を書く。
         attributes: input.attributes ?? {},
       };
-      this.observations.set(observation.id, observation);
-      return observation;
+      // Issue #1108: 呼び手の入力（payload・attributes・Date）と切り離して保存する。
+      const stored = snapshot(observation);
+      this.observations.set(stored.id, stored);
+      return stored;
     });
   }
 
   async createObservation(ctx: Ctx, input: NewObservation): Promise<Observation> {
-    return this.createObservationIdempotent(ctx, input).value;
+    return snapshot(this.createObservationIdempotent(ctx, input).value);
   }
 
   async getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null> {
@@ -311,7 +313,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!observation || observation.tenantId !== ctx.tenantId) {
       return null;
     }
-    return observation;
+    return snapshot(observation);
   }
 
   private enqueueOutboxJob(
@@ -344,12 +346,12 @@ export class InMemoryMemoryStore implements MemoryStore {
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: observation, created } = this.createObservationIdempotent(ctx, input);
     if (!created) {
-      return { observation, created: false, jobs: [] };
+      return { observation: snapshot(observation), created: false, jobs: [] };
     }
     const jobs = jobKinds.map((kind) =>
       this.enqueueOutboxJob(ctx, kind, { observationId: observation.id }),
     );
-    return { observation, created: true, jobs };
+    return snapshot({ observation, created: true, jobs });
   }
 
   /**
@@ -929,7 +931,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     const newestPurgedAt = purged > 0 ? victims[purged - 1]!.at : null;
 
     if (dryRun || purged === 0) {
-      return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+      return snapshot({ purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun });
     }
 
     // 削除。`victims` は `this.events` から探し出した同じ参照なので id で除く。
@@ -952,7 +954,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     });
     this.events.push(storedEvent);
 
-    return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+    return snapshot({ purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun });
   }
 
   /**
@@ -1026,7 +1028,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       // no-op: 何も書かない。返すのは現在の（更新されなかった）行そのもの。
       return snapshot(memory);
     }
-    memory.lastReinforcedAt = at;
+    memory.lastReinforcedAt = new Date(at);
     memory.decayFloorAt = defaultDecayStrategy.floorAt({
       recordedAt: memory.recordedAt,
       lastReinforcedAt: memory.lastReinforcedAt,
@@ -1386,7 +1388,7 @@ export class InMemoryMemoryStore implements MemoryStore {
    */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     const id = nextId("rcl");
-    this.recalls.set(id, { ...record, tenantId: ctx.tenantId, createdAt: new Date() });
+    this.recalls.set(id, { ...snapshot(record), tenantId: ctx.tenantId, createdAt: new Date() });
     if (record.advanceActivityClock === true) {
       const current = this.activitySeq.get(ctx.tenantId) ?? 0;
       this.activitySeq.set(ctx.tenantId, current + 1);
@@ -1404,7 +1406,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!row || row.tenantId !== ctx.tenantId) {
       return null;
     }
-    return {
+    return snapshot({
       recallId: id,
       tenantId: row.tenantId,
       subjectId: row.subjectId ?? null,
@@ -1419,7 +1421,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       // 無い——それは postgres の適合スイート側の検査になる）。
       returnedMemories: { breakdownCaptured: true, memories: row.returnedMemories },
       createdAt: row.createdAt,
-    };
+    });
   }
 
   /**
@@ -1575,7 +1577,7 @@ export class InMemoryMemoryStore implements MemoryStore {
         meta: {},
       });
       this.events.push(storedEvent);
-      archived.push({ memoryId: memory.id, decayFloorAt: memory.decayFloorAt });
+      archived.push({ memoryId: memory.id, decayFloorAt: new Date(memory.decayFloorAt) });
     }
     // `packages/postgres` の外側クエリ（`ORDER BY decay_floor_at ASC, id ASC`）と
     // 同じ契約に揃える——選び方が clock で変わっても、**返る並びは常に `decayFloorAt` 昇順**。
@@ -1955,7 +1957,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       }
     }
     results.sort((a, b) => compareLabelName(a.name, b.name));
-    return results;
+    return snapshot(results);
   }
 
   /**
@@ -1972,7 +1974,7 @@ export class InMemoryMemoryStore implements MemoryStore {
       registeredAt: existing?.registeredAt ?? new Date(),
     };
     this.labels.set(key, registered);
-    return registered;
+    return snapshot(registered);
   }
 
   private extractionKey(
