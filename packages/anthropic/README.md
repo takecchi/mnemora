@@ -58,7 +58,8 @@ pnpm add @mnemora/openai zod
   パッケージの入口の型を解決できるが、`exports` を読まないので `@mnemora/testkit/fixtures` のような
   subpath は解決できず、TypeScript 6 で非推奨・7 で廃止された。2026-09-27 に TypeScript 5.0〜7.0 で実測）
 - **`ANTHROPIC_API_KEY` 環境変数**（または `apiKey` オプション）が要る。無いと Anthropic SDK の
-  呼び出しが認証エラーになる
+  呼び出しが認証エラーになる（`new AnthropicLLMProvider(...)` は通り、`complete()` などを呼んだ時点で、SDK の素の `Error`
+  `Could not resolve authentication method. ...` が伝わる。`AnthropicLLMProviderError` ではなく、`kind` も持たない）【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】
 - **`model` は必須。既定値を持たない**——どのモデルを使うかは常に呼び出し側が決める
   （`@mnemora/openai` の `OpenAILLMProvider` と同じ規律）
 
@@ -199,6 +200,8 @@ import { AnthropicLLMProvider } from "@mnemora/anthropic";
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries: 0, timeout: 60_000 });
 const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client });
 ```
+
+⚠ 2026-09-27 追記: この例は `@anthropic-ai/sdk` を自分の依存として入れないと動かない（pnpm では `Cannot find package '@anthropic-ai/sdk'`）。**入れる版は、`@mnemora/anthropic` が依存に固定している版（その `package.json` の `dependencies["@anthropic-ai/sdk"]`。今は `0.124.0`）と同じにすること**——最新（2026-09-27 時点で `0.128.0`）を入れると、`client` を渡す行が型検査で `TS2322`（`Type 'Anthropic' is not assignable to type 'Pick<Anthropic, "messages">'`）になる（実行はできる）。`pnpm add -E @anthropic-ai/sdk@0.124.0` で入れれば通る【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】。
 
 ## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（今の振る舞い）
 
