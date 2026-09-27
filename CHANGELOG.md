@@ -45,8 +45,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`9b6eca2`**（PR #1158）の範囲を
-数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から、3回目の棚卸しで `e15033a` から、4回目の棚卸しで `3a8448c` から広げた。下の追記2・追記3・追記4）。
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`4514cec`**（PR #1177）の範囲を
+数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から、3回目の棚卸しで `e15033a` から、4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から広げた。下の追記2・追記3・追記4・追記5）。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -100,9 +100,13 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 
 ⟹ **この節の範囲（`v1.0.1`…`9b6eca2`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
+**⚠ 2026-09-27 追記5（5回目の棚卸し。`4514cec` まで広げた）**: `9b6eca2`…`4514cec` に `main` へ入った PR を全部当てた（PR #1147・#1159・#1161〜#1163・#1165〜#1167・#1169〜#1178）。出荷される6パッケージの利用者に見える変更は、どれもこの節に載っている。docs だけ・テストだけ・scripts だけ・ADR だけの PR は載せていない（`docs` を名乗って出荷の `src` を触った PR #1163・#1166・#1167・#1172・#1174・#1178 は、差分がコメントだけであることを確かめた。README だけを変えた PR #1159・#1169 も載せていない）。PR #1176 は出荷の `src` のコードを変えたが、`pg_trgm.word_similarity_threshold` を `SET LOCAL` の文字列へ埋め込む形から `set_config` の引数で渡す形にしただけで、閾値は構築時に `[0, 1]` の有限の数に検査済みなので結果は変わらず、載せていない。公開 API の型の差分は追加だけである——`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind` が増えた（PR #1171。上の Added）ことと、`@mnemora/openai` の宣言の `import { z } from "zod"` が `import type { z } from "zod"` になった（PR #1147。型だけの import に変わっただけで、公開する型は変わらない）こと。実行時の変化の分け方は各項目の ⚠ のとおり——保留は PR #1165（`InMemoryTenantSettingsStore` の半減期の口）と PR #1170（`MemoryEventKind` に無い kind のイベント）で、どちらも公開の fixture が不正な入力に新しく例外を投げる（問い `3f3411c5` の射程）。PR #1171 は fixture も新しく投げるが、core の共有の検査で Postgres と同時に変わるので、その項目1つで非破壊（⚠ 付き）と数えた（項目の注のとおり）。ほかは非破壊である。棚卸しで直したもの: PR #1162・#1170・#1171（Added の項目）・#1173 の項目に PR 番号を足した（Issue 番号でしか受けていなかった）。
+
+⟹ **この節の範囲（`v1.0.1`…`4514cec`）で、確定した破壊的変更は無い（上の保留を除く）。**
+
 ### Added
 
-- **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
+- **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
 - **`RecalledMemory` に任意欄 `contestedWith?: MemoryId` を足した**——矛盾する2件が
   同伴取得（`retrievedVia: 'mandatory_companion'`、`companionOf`）を経由せず、
   `"ann"`/`"lexical"` で両方とも自然に候補に入った場合にも、相手の memoryId を返す
@@ -588,7 +592,7 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   「負けた側を何が置き換えたか」を追えなかった。今は `meta.supersededById` に勝った側の id が入る（勝った側・
   `both_active` の `updated` には足さない。[ADR 0150](./docs/decisions/0150-resolve-contested-explicit-operation.md) 追記 2026-09-27）。
   ⭕ 非破壊と数える（`meta` に欄を1つ足すだけで、型も既存の欄の意味も変えない。クローン miku の判断であり、オーナーの判断ではない）。
-- **`Runtime.markContested()`・`resolveContested()`・`resolveOrphanedContested()` のイベントに、対向の id が無かった**（Issue #1160）——
+- **`Runtime.markContested()`・`resolveContested()`・`resolveOrphanedContested()` のイベントに、対向の id が無かった**（Issue #1160、[PR #1162](https://github.com/takecchi/mnemora/pull/1162)）——
   解決は `contested_with_id` をクリアするので、`both_active` で解いた対は、状態からも監査ログからも「誰と対だったか」が消えていた
   （`supersede` の対も、勝った側のイベントからは相手が分からなかった）。今は対にまつわるイベントがどれも、役割（勝った側・負けた側）
   にも決着の種類にもよらず `meta.contestedWithId` に相手の id を持つ（負けた側の `superseded` は上の `meta.supersededById` も
@@ -601,9 +605,9 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   文字列で読み戻る）と型が違っていた**（[PR #1155](https://github.com/takecchi/mnemora/pull/1155)）——今は fixture も ISO 8601 の文字列で持つ。戻り値の `oldestPurgedAt` などは
   今までどおり `Date` である。
   ⭕ 非破壊と数える（例外を投げず、公開の fixture の結果だけが変わる。上の前書きの訂正で狭めた基準に当てた。クローン miku の判断であり、オーナーの判断ではない）。
-- **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` と、イベントを受け取る `InMemoryMemoryStore` の口は、`MemoryEventKind` に無い kind（型を外した呼び出し）のイベントを受け付けて記録していた**（[Issue #1096](https://github.com/takecchi/mnemora/issues/1096)）——`@mnemora/postgres` は CHECK 制約 `memory_events_kind_check` で拒み、1トランザクションで何も書かない。fixture も `Error`（`memory_events.kind must be one of … (got "…")`。イベントの `at` の検査と同じ形）で拒む。対象は `append` と `updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested` で、状態を書き換える前に確かめるので、拒んだときは何も書かない（イベントの `at` の Invalid Date の検査も、同じ位置で先に確かめるようにした。以前はこれらの口で、状態を書き換えた後に拒んでいた）。
+- **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` と、イベントを受け取る `InMemoryMemoryStore` の口は、`MemoryEventKind` に無い kind（型を外した呼び出し）のイベントを受け付けて記録していた**（[Issue #1096](https://github.com/takecchi/mnemora/issues/1096)、[PR #1170](https://github.com/takecchi/mnemora/pull/1170)）——`@mnemora/postgres` は CHECK 制約 `memory_events_kind_check` で拒み、1トランザクションで何も書かない。fixture も `Error`（`memory_events.kind must be one of … (got "…")`。イベントの `at` の検査と同じ形）で拒む。対象は `append` と `updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested` で、状態を書き換える前に確かめるので、拒んだときは何も書かない（イベントの `at` の Invalid Date の検査も、同じ位置で先に確かめるようにした。以前はこれらの口で、状態を書き換えた後に拒んでいた）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
-- **`MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）は、未強化の記憶に作成時刻（`recordedAt`）より前の `at` を渡すと、減衰の起点を作成時刻より前へ戻していた**（[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)）——`lastReinforcedAt` が `null` なら `at` によらず書いていたため、`lastReinforcedAt` が作成時刻より前になり、`decayFloorAt` が早まって忘却ゲートから早く消えた。活動時計の `decayBaseSeq`/`decayFloorSeq` も進んでいた。`@mnemora/postgres`・`@mnemora/testkit/fixtures` とも同じだった。規則を1つにした: **`at` が起点（`lastReinforcedAt ?? recordedAt`）より新しいときだけ書き、そうでなければ活動時計の欄も含めて何も書かない**（強化済みの記憶に古い `at` を渡したときの既存の規則と同じ）。作成時刻ちょうどの `at` も、既存の `lastReinforcedAt` の比較と同じく書かない。
+- **`MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）は、未強化の記憶に作成時刻（`recordedAt`）より前の `at` を渡すと、減衰の起点を作成時刻より前へ戻していた**（[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)、[PR #1173](https://github.com/takecchi/mnemora/pull/1173)）——`lastReinforcedAt` が `null` なら `at` によらず書いていたため、`lastReinforcedAt` が作成時刻より前になり、`decayFloorAt` が早まって忘却ゲートから早く消えた。活動時計の `decayBaseSeq`/`decayFloorSeq` も進んでいた。`@mnemora/postgres`・`@mnemora/testkit/fixtures` とも同じだった。規則を1つにした: **`at` が起点（`lastReinforcedAt ?? recordedAt`）より新しいときだけ書き、そうでなければ活動時計の欄も含めて何も書かない**（強化済みの記憶に古い `at` を渡したときの既存の規則と同じ）。作成時刻ちょうどの `at` も、既存の `lastReinforcedAt` の比較と同じく書かない。
   ⚠ 約束の見出し（`MemoryStore.reinforce` の TSDoc と [ADR 0048](./docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)「減衰の起点を巻き戻さない」）に振る舞いを合わせた修正であり、例外を新しく投げないので、非破壊と数える（**クローン miku の判断であり、オーナーの判断ではない**）。⚠ **射程**: 活動時計のテナントで、`recordedAt` を書いた時計が runtime の時計より進んでいる使用報告は、この版から強化にならない（壁時計・活動時計のどちらでも）。作成と同じミリ秒の中の強化（固定の時計で、作成と使用報告・`restoreArchived` を同じ時刻に打つ形など）も書かれなくなる。既に作成時刻より前の起点を持っている記憶は変えない。
 
 ---
