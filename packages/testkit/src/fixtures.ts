@@ -61,8 +61,15 @@
 //   `InMemoryMemoryStore` の `updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・
 //   `resolveContestedPair`。Postgres の CHECK 制約（`memories_status_check` など）を写す。見つからない
 //   id・CAS の食い違いの検査の後、状態を書き換える前に確かめる。
+// - `#1183` の外側の CHECK 制約と `bigint` への変換。対象はどれも `createMemory` 系（冪等の既存の行が在っても拒む）:
+//   `provenance.kind` が `stated`/`inferred` で `sourceObservationId` が無い → `provenance.kind "<値>" requires sourceObservationId`
+//   （`memories_check`）。`decayBaseSeq`・`decayFloorSeq` が整数でない・負・2^63 以上 → `<欄> must be an integer /
+//   must not be negative / must fit in a Postgres bigint`（`memories_decay_seq_non_negative`）。`halfLifeRecalls` が
+//   `(0, ∞)` の外 → `halfLifeRecalls out of range (0, ∞)`（`memories_half_life_recalls_range`）。省略（`null`）はどれも検査しない。
+// - `kind: "events_purged"` で `memoryId` が null でないイベント → `memory_events.memoryId must be null for kind "events_purged"`
+//   （`memory_events_check`、core の `MemoryEventSchema` と同じ約束）。対象は `memory_events.kind` の検査と同じ口。
 // - Postgres の `real`（float4）列に収まらない数 → `… does not fit in a Postgres "real" (float4) column`。
-//   対象: `createMemory` 系の `halfLifeHours` など、
+//   対象: `createMemory` 系の `halfLifeHours`・`halfLifeRecalls` など、
 //   `InMemoryTenantSettingsStore.setDefaultHalfLifeRecalls`（#815・#817）。
 //
 // ## `memory_events` を1か所で見るには、`InMemoryEventStore` に `memoryStore.events` を渡す
