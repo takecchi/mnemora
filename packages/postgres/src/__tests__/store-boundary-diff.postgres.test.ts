@@ -1076,8 +1076,8 @@ add("outbox.complete(claim 済み,attempts 違い)", async (h) =>
 add("outbox.fail(claim 済み,attempts 違い)", async (h) =>
   h.s.os.fail(h.ctx, await jobOf(h, true), "e", 2),
 );
-// Issue #1292: 終端済みの行に違う expectedAttempts を渡したとき。メソッドの doc の要約と冒頭の契約が食い違って読める。
-// 2実装とも冒頭の契約（attempts が違えば投げる）どおりに動く、という今の振る舞いを縛る。
+// Issue #1292（決まった件）: 終端済みの行に違う expectedAttempts を渡したときは、冒頭の契約と実装の側
+// （attempts が違えば投げる）を正とした。2実装ともそう動くことを縛る。
 add("outbox.complete(終端済み,attempts 違い)", async (h) => {
   const jobId = await jobOf(h, false);
   await h.s.os.fail(h.ctx, jobId, "e", 0);
