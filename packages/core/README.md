@@ -241,6 +241,20 @@ const { tokens, counter } = heuristicTokenCounter.count("hello world");
 console.log({ decayed, total: score.total, tokens, counter });
 ```
 
+## ほかに export しているもの（約束は各 TSDoc）
+
+`@mnemora/core` は、この README に出てこない名前も多く export している（型・zod スキーマ・既定値・純関数を
+合わせて 390 余り）。`v1.0.0` の後に公開面へ入った名前を、用途ごとに並べる。
+
+| 用途 | 名前 |
+|---|---|
+| 属性（`attributes`） | `Attributes`・`AttributesSchema`（受け付ける側）・`StoredAttributesSchema`（格納・伝播する側）、上限の `ATTRIBUTES_MAX_KEYS`・`ATTRIBUTE_KEY_MIN_LENGTH`・`ATTRIBUTE_KEY_MAX_LENGTH`・`ATTRIBUTE_VALUE_MAX_LENGTH`、統合先へ運ぶ積集合の `intersectAttributes` |
+| 抽出の文脈・主題の候補 | `ExtractionContext`（と上の `ExtractionContextSchema`）、`SubjectCandidatesInput`・`sanitizeCandidateSubjectId`、`extract: 'deferred'` と併せたときのエラーの接頭辞 `SUBJECT_CANDIDATES_WITH_DEFERRED_EXTRACT_ERROR_PREFIX` |
+| claim key（主張キー。`observe()` の `claimKey`） | `ClaimKeyOptions`・`ClaimKeyOptionsSchema`・`ClaimKey`・`ClaimKeySchema`・`ClaimKeyBatchResult`（と `ClaimKeyBatchResultSchema`）、`normalizeClaimKey`・`normalizeClaimKeyPart`・`buildClaimKeyPrompt`・`deriveClaimKeys`・`DeriveClaimKeysResult`、`DEFAULT_KNOWN_PREDICATES_FROM_STORE_LIMIT`、検出の結果の `ContestedDetectionOutcome`、`extract: 'deferred'` と併せたときの `CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX`（[docs/memory-model.md](../../docs/memory-model.md) §5） |
+| taxonomy・テナント設定 | `TaxonomyMode`・`DEFAULT_TAXONOMY_MODE`・`readTaxonomyMode`・`writeTaxonomyMode`・`assertValidTaxonomyMode`・`TAXONOMY_MODE_INVALID_MESSAGE`・`TAXONOMY_MODE_UNSUPPORTED_MESSAGE`・`LabelSummary`、保持期間の `assertValidEventRetentionKind`・`EVENT_RETENTION_KIND_INVALID_MESSAGE` |
+| recall | 段2の時間項の方針 `TimeWeightingPolicy`・`TIME_WEIGHTING_POLICIES`・`DEFAULT_TIME_WEIGHTING_POLICY`、語彙チャンネルの打ち切りの報告 `AnnUnreachedSeverity`・`AnnUnreachedSeveritySchema` |
+| contested・superseded の後始末 | `Runtime.resolveOrphanedContested` の `ResolveOrphanedContestedOptions`・`ResolveOrphanedContestedResult`・`ResolveOrphanedContestedOutcome`・`ResolveOrphanedContestedEligibility`、`restoreSuperseded` の `dryRun` の候補を操作ごとに束ねる `groupSupersededCandidatesByOperation`・`SupersededOperationGroup`（[docs/memory-model.md](../../docs/memory-model.md) §11 行15） |
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) — 全体アーキテクチャ・主要 interface（§5）
