@@ -108,29 +108,47 @@ async function withFailingTrigger<T>(table: string, fn: () => Promise<T>): Promi
 }
 
 /** 口の名前・失敗させる表・「準備して、撃つ関数を返す」・陽性対照で変わる表の数の下限（既定2）。 */
-type Case = [string, string, (store: PostgresMemoryStore) => Promise<() => Promise<unknown>>, number?];
+type Case = [
+  string,
+  string,
+  (store: PostgresMemoryStore) => Promise<() => Promise<unknown>>,
+  number?,
+];
 
 const CASES: Case[] = [
   [
     "createObservationWithOutbox",
     "outbox",
     async (s) => () =>
-      s.createObservationWithOutbox(ctx, { kind: "utterance", payload: { text: "x" }, text: "x" } as never, ["extract"]),
+      s.createObservationWithOutbox(
+        ctx,
+        { kind: "utterance", payload: { text: "x" }, text: "x" } as never,
+        ["extract"],
+      ),
   ],
   [
     "createMemoryWithOutbox",
     "outbox",
     async (s) => () =>
-      s.createMemoryWithOutbox(ctx, buildNewMemoryFixture({ content: "new", contentHash: "new", tags: ["fresh"] } as never), [
-        "embed",
-      ]),
+      s.createMemoryWithOutbox(
+        ctx,
+        buildNewMemoryFixture({ content: "new", contentHash: "new", tags: ["fresh"] } as never),
+        ["embed"],
+      ),
   ],
   [
     "updateStatusWithEvent",
     "memory_events",
     async (s) => {
       const m = await memory(s);
-      return () => s.updateStatusWithEvent(ctx, m.id, "forgotten", { expectedStatus: "active" }, event(m.id, "forgotten"));
+      return () =>
+        s.updateStatusWithEvent(
+          ctx,
+          m.id,
+          "forgotten",
+          { expectedStatus: "active" },
+          event(m.id, "forgotten"),
+        );
     },
   ],
   [
@@ -141,8 +159,24 @@ const CASES: Case[] = [
       return () =>
         s.supersedeWithNewMemories(
           ctx,
-          [{ input: buildNewMemoryFixture({ content: "new", contentHash: "new", tags: ["fresh"] } as never), jobKinds: ["embed"] }],
-          [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event: event(old.id, "superseded") }],
+          [
+            {
+              input: buildNewMemoryFixture({
+                content: "new",
+                contentHash: "new",
+                tags: ["fresh"],
+              } as never),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: event(old.id, "superseded"),
+            },
+          ],
         );
     },
   ],
@@ -152,7 +186,13 @@ const CASES: Case[] = [
     async (s) => {
       const m = await memory(s);
       await s.updateStatus(ctx, m.id, "forgotten");
-      return () => s.purgeMemory(ctx, m.id, { content: "[purged]", digest: "[purged]" }, event(m.id, "purged"));
+      return () =>
+        s.purgeMemory(
+          ctx,
+          m.id,
+          { content: "[purged]", digest: "[purged]" },
+          event(m.id, "purged"),
+        );
     },
   ],
   [
@@ -161,7 +201,12 @@ const CASES: Case[] = [
     async (s) => {
       const a = await memory(s);
       const b = await memory(s);
-      return () => s.markContestedPair(ctx, { id: a.id, event: event(a.id, "updated") }, { id: b.id, event: event(b.id, "updated") });
+      return () =>
+        s.markContestedPair(
+          ctx,
+          { id: a.id, event: event(a.id, "updated") },
+          { id: b.id, event: event(b.id, "updated") },
+        );
     },
   ],
   [
@@ -170,12 +215,21 @@ const CASES: Case[] = [
     async (s) => {
       const a = await memory(s);
       const b = await memory(s);
-      await s.markContestedPair(ctx, { id: a.id, event: event(a.id, "updated") }, { id: b.id, event: event(b.id, "updated") });
+      await s.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id, "updated") },
+        { id: b.id, event: event(b.id, "updated") },
+      );
       return () =>
         s.resolveContestedPair(
           ctx,
           { id: a.id, status: "active", event: event(a.id, "updated") },
-          { id: b.id, status: "superseded", supersededById: a.id, event: event(b.id, "superseded") },
+          {
+            id: b.id,
+            status: "superseded",
+            supersededById: a.id,
+            event: event(b.id, "superseded"),
+          },
         );
     },
   ],
@@ -185,11 +239,23 @@ const CASES: Case[] = [
     async (s) => {
       const a = await memory(s);
       const b = await memory(s);
-      await s.markContestedPair(ctx, { id: a.id, event: event(a.id, "updated") }, { id: b.id, event: event(b.id, "updated") });
+      await s.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id, "updated") },
+        { id: b.id, event: event(b.id, "updated") },
+      );
       // 相手の側だけを contested の外へ出して、a を孤立させる（準備なので SQL で直接書く）。
       const { pool } = await getTestClient();
-      await pool.query("UPDATE memories SET status = 'forgotten', contested_with_id = NULL WHERE id = $1", [b.id]);
-      return () => s.resolveOrphanedContested(ctx, { id: a.id, contestedWithId: b.id, event: event(a.id, "updated") });
+      await pool.query(
+        "UPDATE memories SET status = 'forgotten', contested_with_id = NULL WHERE id = $1",
+        [b.id],
+      );
+      return () =>
+        s.resolveOrphanedContested(ctx, {
+          id: a.id,
+          contestedWithId: b.id,
+          event: event(a.id, "updated"),
+        });
     },
   ],
   [
@@ -210,7 +276,8 @@ const CASES: Case[] = [
     async (s) => {
       await memory(s);
       await memory(s);
-      return () => s.archiveDecayed(ctx, { now: new Date("2999-01-01T00:00:00.000Z"), limit: 100 } as never);
+      return () =>
+        s.archiveDecayed(ctx, { now: new Date("2999-01-01T00:00:00.000Z"), limit: 100 } as never);
     },
   ],
   [
@@ -218,9 +285,19 @@ const CASES: Case[] = [
     "memory_events",
     async (s) => {
       const m = await memory(s);
-      await s.updateStatusWithEvent(ctx, m.id, "forgotten", { expectedStatus: "active" }, event(m.id, "forgotten"));
+      await s.updateStatusWithEvent(
+        ctx,
+        m.id,
+        "forgotten",
+        { expectedStatus: "active" },
+        event(m.id, "forgotten"),
+      );
       // 削除の後に書く `events_purged` の INSERT で失敗させる——先に消した行が戻ること。
-      return () => s.purgeExpiredEvents(ctx, { olderThan: new Date("2999-01-01T00:00:00.000Z"), limit: 1000 } as never);
+      return () =>
+        s.purgeExpiredEvents(ctx, {
+          olderThan: new Date("2999-01-01T00:00:00.000Z"),
+          limit: 1000,
+        } as never);
     },
     // 書くのは memory_events だけ（古い行の DELETE と events_purged の INSERT）。
     1,
@@ -240,7 +317,8 @@ const CASES: Case[] = [
     "outbox",
     async (s) => {
       await memory(s);
-      return () => s.requeueEmbedJobs(ctx, { statuses: ["pending", "failed", "ready"], limit: 100 } as never);
+      return () =>
+        s.requeueEmbedJobs(ctx, { statuses: ["pending", "failed", "ready"], limit: 100 } as never);
     },
   ],
 ];
@@ -258,14 +336,19 @@ describe("PostgresMemoryStore: 複数の表に書く口は、途中で失敗す�
 
       // 陽性対照: トリガー無しなら書く（既定では2つ以上の表に）。
       await call();
-      expect(changedTables(before, await snapshotTables()).length).toBeGreaterThanOrEqual(minTables);
+      expect(changedTables(before, await snapshotTables()).length).toBeGreaterThanOrEqual(
+        minTables,
+      );
     });
   }
 
   describe("supersedeWithNewMemories: news の2件目が書けないとき、1件目も残さない", () => {
     for (const [label, bad] of [
       ["本文に NUL", { content: "bad\u0000" }],
-      ["元の Observation が無い（外部キー）", { sourceObservationId: "00000000-0000-4000-8000-000000000000" as ObservationId }],
+      [
+        "元の Observation が無い（外部キー）",
+        { sourceObservationId: "00000000-0000-4000-8000-000000000000" as ObservationId },
+      ],
     ] as const) {
       it(label, async () => {
         await resetTestDatabase();
@@ -277,10 +360,29 @@ describe("PostgresMemoryStore: 複数の表に書く口は、途中で失敗す�
           store.supersedeWithNewMemories(
             ctx,
             [
-              { input: buildNewMemoryFixture({ content: "new 1", contentHash: "new-1", tags: ["fresh"] } as never), jobKinds: ["embed"] },
-              { input: buildNewMemoryFixture({ content: "new 2", contentHash: "new-2", ...bad } as never), jobKinds: ["embed"] },
+              {
+                input: buildNewMemoryFixture({
+                  content: "new 1",
+                  contentHash: "new-1",
+                  tags: ["fresh"],
+                } as never),
+                jobKinds: ["embed"],
+              },
+              {
+                input: buildNewMemoryFixture(
+                  Object.assign({ content: "new 2", contentHash: "new-2" }, bad) as never,
+                ),
+                jobKinds: ["embed"],
+              },
             ],
-            [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event: event(old.id, "superseded") }],
+            [
+              {
+                id: old.id,
+                supersededByIndex: 0,
+                expectedStatus: "active",
+                event: event(old.id, "superseded"),
+              },
+            ],
           ),
         ).rejects.toThrow();
         expect(changedTables(before, await snapshotTables())).toEqual([]);

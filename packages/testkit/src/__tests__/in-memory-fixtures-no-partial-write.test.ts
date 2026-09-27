@@ -21,7 +21,11 @@ let seq = 0;
 /** structuredClone できない値（Postgres は JSON にするときに欄ごと落とす。#1211 の表の外）。 */
 const uncloneable = { f: () => 1 };
 
-function event(memoryId: MemoryId, kind: NewMemoryEvent["kind"], meta: object = {}): NewMemoryEvent {
+function event(
+  memoryId: MemoryId,
+  kind: NewMemoryEvent["kind"],
+  meta: object = {},
+): NewMemoryEvent {
   return { memoryId, kind, actor: { type: "system" }, meta } as NewMemoryEvent;
 }
 
@@ -69,15 +73,28 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
             ctx,
             [
               {
-                input: buildNewMemoryFixture({ content: "new 1", contentHash: "new-1", tags: ["fresh"] } as never),
+                input: buildNewMemoryFixture({
+                  content: "new 1",
+                  contentHash: "new-1",
+                  tags: ["fresh"],
+                } as never),
                 jobKinds: ["embed"],
               },
               {
-                input: buildNewMemoryFixture({ content: "new 2", contentHash: "new-2", ...bad } as never),
+                input: buildNewMemoryFixture(
+                  Object.assign({ content: "new 2", contentHash: "new-2" }, bad) as never,
+                ),
                 jobKinds: ["embed"],
               },
             ],
-            [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event: event(old.id, "superseded") }],
+            [
+              {
+                id: old.id,
+                supersededByIndex: 0,
+                expectedStatus: "active",
+                event: event(old.id, "superseded"),
+              },
+            ],
           ),
         ).rejects.toThrow();
         expect(await stateOf(store)).toBe(before);
@@ -92,12 +109,26 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
         ctx,
         [
           {
-            input: buildNewMemoryFixture({ content: "new 1", contentHash: "new-1", tags: ["fresh"] } as never),
+            input: buildNewMemoryFixture({
+              content: "new 1",
+              contentHash: "new-1",
+              tags: ["fresh"],
+            } as never),
             jobKinds: ["embed"],
           },
-          { input: buildNewMemoryFixture({ content: "new 2", contentHash: "new-2" } as never), jobKinds: ["embed"] },
+          {
+            input: buildNewMemoryFixture({ content: "new 2", contentHash: "new-2" } as never),
+            jobKinds: ["embed"],
+          },
         ],
-        [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event: event(old.id, "superseded") }],
+        [
+          {
+            id: old.id,
+            supersededByIndex: 0,
+            expectedStatus: "active",
+            event: event(old.id, "superseded"),
+          },
+        ],
       );
       expect(await stateOf(store)).not.toBe(before);
       expect(store.listByTenant(ctx)).toHaveLength(3);
@@ -111,7 +142,13 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       const m = await memory(store);
       const before = await stateOf(store);
       await expect(
-        store.updateStatusWithEvent(ctx, m.id, "forgotten", { expectedStatus: "active" }, event(m.id, "forgotten", uncloneable)),
+        store.updateStatusWithEvent(
+          ctx,
+          m.id,
+          "forgotten",
+          { expectedStatus: "active" },
+          event(m.id, "forgotten", uncloneable),
+        ),
       ).rejects.toThrow();
       expect(await stateOf(store)).toBe(before);
     });
@@ -123,8 +160,20 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       await expect(
         store.supersedeWithNewMemories(
           ctx,
-          [{ input: buildNewMemoryFixture({ content: "new", contentHash: "new" } as never), jobKinds: ["embed"] }],
-          [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event: event(old.id, "superseded", uncloneable) }],
+          [
+            {
+              input: buildNewMemoryFixture({ content: "new", contentHash: "new" } as never),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: event(old.id, "superseded", uncloneable),
+            },
+          ],
         ),
       ).rejects.toThrow();
       expect(await stateOf(store)).toBe(before);
@@ -136,8 +185,20 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       await store.updateStatus(ctx, old.id, "forgotten");
       const result = await store.supersedeWithNewMemories(
         ctx,
-        [{ input: buildNewMemoryFixture({ content: "new", contentHash: "new" } as never), jobKinds: [] }],
-        [{ id: old.id, supersededByIndex: 0, expectedStatus: "active", event: event(old.id, "superseded", uncloneable) }],
+        [
+          {
+            input: buildNewMemoryFixture({ content: "new", contentHash: "new" } as never),
+            jobKinds: [],
+          },
+        ],
+        [
+          {
+            id: old.id,
+            supersededByIndex: 0,
+            expectedStatus: "active",
+            event: event(old.id, "superseded", uncloneable),
+          },
+        ],
       );
       expect(result.conflicted).toEqual([{ id: old.id, observedStatus: "forgotten" }]);
     });
@@ -148,7 +209,11 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       const b = await memory(store);
       const before = await stateOf(store);
       await expect(
-        store.markContestedPair(ctx, { id: a.id, event: event(a.id, "updated") }, { id: b.id, event: event(b.id, "updated", uncloneable) }),
+        store.markContestedPair(
+          ctx,
+          { id: a.id, event: event(a.id, "updated") },
+          { id: b.id, event: event(b.id, "updated", uncloneable) },
+        ),
       ).rejects.toThrow();
       expect(await stateOf(store)).toBe(before);
     });
@@ -157,13 +222,22 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       const store = new InMemoryMemoryStore();
       const a = await memory(store);
       const b = await memory(store);
-      await store.markContestedPair(ctx, { id: a.id, event: event(a.id, "updated") }, { id: b.id, event: event(b.id, "updated") });
+      await store.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id, "updated") },
+        { id: b.id, event: event(b.id, "updated") },
+      );
       const before = await stateOf(store);
       await expect(
         store.resolveContestedPair(
           ctx,
           { id: a.id, status: "active", event: event(a.id, "updated") },
-          { id: b.id, status: "superseded", supersededById: a.id, event: event(b.id, "superseded", uncloneable) },
+          {
+            id: b.id,
+            status: "superseded",
+            supersededById: a.id,
+            event: event(b.id, "superseded", uncloneable),
+          },
         ),
       ).rejects.toThrow();
       expect(await stateOf(store)).toBe(before);
@@ -173,10 +247,18 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       const store = new InMemoryMemoryStore();
       const a = await memory(store);
       const b = await memory(store);
-      await store.markContestedPair(ctx, { id: a.id, event: event(a.id, "updated") }, { id: b.id, event: event(b.id, "updated") });
+      await store.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id, "updated") },
+        { id: b.id, event: event(b.id, "updated") },
+      );
       const before = await stateOf(store);
       await expect(
-        store.resolveOrphanedContested(ctx, { id: a.id, contestedWithId: b.id, event: event(a.id, "updated", uncloneable) }),
+        store.resolveOrphanedContested(ctx, {
+          id: a.id,
+          contestedWithId: b.id,
+          event: event(a.id, "updated", uncloneable),
+        }),
       ).rejects.toThrow();
       expect(await stateOf(store)).toBe(before);
     });
@@ -187,7 +269,12 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       await store.updateStatus(ctx, m.id, "forgotten");
       const before = await stateOf(store);
       await expect(
-        store.purgeMemory(ctx, m.id, { content: "[purged]", digest: "[purged]" }, event(m.id, "purged", uncloneable)),
+        store.purgeMemory(
+          ctx,
+          m.id,
+          { content: "[purged]", digest: "[purged]" },
+          event(m.id, "purged", uncloneable),
+        ),
       ).rejects.toThrow();
       expect(await stateOf(store)).toBe(before);
     });
@@ -196,7 +283,10 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
   describe("restoreSupersededBy: イベントが書けないとき、1件目も戻さない", () => {
     for (const [label, ev] of [
       ["at が Invalid Date", { at: new Date(Number.NaN) }],
-      ["actor が structuredClone できない", { at: new Date(), actor: { type: "system", ...uncloneable } }],
+      [
+        "actor が structuredClone できない",
+        { at: new Date(), actor: { type: "system", ...uncloneable } },
+      ],
     ] as const) {
       it(label, async () => {
         const store = new InMemoryMemoryStore();
@@ -214,7 +304,9 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
     it("投げる入力は増やさない: 戻す対象が無ければ、at が Invalid Date でも今までどおり空で返る（Postgres は拒む）", async () => {
       const store = new InMemoryMemoryStore();
       const anchor = await memory(store);
-      await expect(store.restoreSupersededBy(ctx, anchor.id, { at: new Date(Number.NaN) })).resolves.toEqual({
+      await expect(
+        store.restoreSupersededBy(ctx, anchor.id, { at: new Date(Number.NaN) }),
+      ).resolves.toEqual({
         restored: [],
       });
     });
