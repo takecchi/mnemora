@@ -869,6 +869,16 @@ interface EmbeddingProvider {
 ときの結果は未定義である。`packages/core` の本番経路（`runtime.ts`/`recall-runtime.ts`）
 は常に1件ずつ渡す。
 
+⚠ **2026-09-27 追記（[Issue #1070](https://github.com/takecchi/mnemora/issues/1070)）**:
+返ったベクトルが壊れているとき（長さが `space.dimensions` と違う・空・`NaN`/`Infinity` を含む）、
+`packages/core` の embed ジョブは中身を確かめずに `VectorStore.upsert` へ渡す。結果は store の adapter で
+決まる——`packages/postgres` は `upsert` が拒むのでジョブが失敗し `embeddingStatus: 'failed'`（`recall()` では
+`not_indexed`）、`packages/testkit` の `InMemoryVectorStore` は保存して `'ready'` のまま（`recall()` では
+`score_not_comparable`。壊れたベクトルを返す遅いジョブが、先に書かれた正しいベクトルを上書きしうるのも
+こちらだけ）。保証するのは、長さが一致し成分がすべて有限のベクトルのときの振る舞いだけである。
+クローン miku の判断で、core での検査・adapter を揃える案は採らず、今の振る舞いを記録した（選び直す
+余地は Issue に残してある）。書き分けは `VectorStore.upsert` の TSDoc。
+
 ### 5.6 Scheduler — interface は Phase 1（既定 `InlineScheduler`）、BullMQ 実装は後続フェーズ
 
 ```ts

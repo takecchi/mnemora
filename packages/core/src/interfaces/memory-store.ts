@@ -666,6 +666,15 @@ export interface MemoryStore {
   /**
    * D9: 使用報告を記録する。`(recall_id, memory_id)` の挿入が実際に起きたものだけを
    * `insertedMemoryIds` として返す（再送は空配列になりうる）。
+   *
+   * ⚠ **テナントの一致は検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
+   * `recallId`・`memoryIds` にほかのテナントの id を渡しても、`@mnemora/postgres` と
+   * `@mnemora/testkit` の `InMemoryMemoryStore` のどちらも受け付け、`insertedMemoryIds` に
+   * 入れる。ほかのテナントの行は変わらず、本文も読めない。`Runtime` の
+   * `observe({ kind: "memory_usage" })` は、口が在れば {@link MemoryStore.recordUsageAndReinforce}
+   * を通り、強化の段で「memory not found」になって記録ごと巻き戻る（口が無い adapter では
+   * `recordUsage` → `reinforce` の2段になり、記録だけが残る）。
+   * `docs/memory-model.md` §5 の 2026-09-27 追記を参照。
    */
   recordUsage(
     ctx: Ctx,

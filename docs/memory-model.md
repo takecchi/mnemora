@@ -314,6 +314,27 @@ FK すら持たないため、存在しない id を渡しても素通る。
 同じ `ctx` で存在を確かめた id からしか `contestedWithId`/`supersededById` を組み立てない
 ——到達するのは `MemoryStore`（`@mnemora/core` の公開 interface）を直接呼ぶ経路だけである。
 
+### ⚠ 2026-09-27 追記（Issue #1051）: ほかの書き込みの口も、参照の id のテナント一致を検査しない
+
+上の #854 の節と同じ形が、`superseded_by_id`/`contested_with_id` のほかにも在る。次の口は、ほかの
+テナントの id を参照として渡されても検査しない（クローン miku の判断により、今の振る舞いを記録する。
+入力を狭める・adapter を揃える案は採らなかったが、選び直す余地は [Issue #1051](https://github.com/takecchi/mnemora/issues/1051) に残してある）。
+
+| 口 | ほかのテナントの id を渡す欄 | `@mnemora/postgres` | `@mnemora/testkit` の fixture |
+|---|---|---|---|
+| `MemoryStore.createMemory` | `sourceObservationId` | 受け付ける | 受け付ける |
+| `MemoryStore.recordUsage` | `recallId`・`memoryIds` | 受け付ける（`insertedMemoryIds` に入る） | 受け付ける |
+| `EventStore.append` | `memoryId` | 受け付ける | 拒む（`memory not found`） |
+| `VectorStore.upsert` | `memoryId` | 受け付ける | 拒む（`memory not found`） |
+
+Postgres の外部キー（`observations(id)`/`recalls(id)`/`memories(id)`）は `tenant_id` を含まないので、DB も
+止めない。**それでも読み取り漏洩・書き込み漏洩には繋がらない**——ほかのテナントの行は変わらず、
+読みの口はすべて `ctx.tenantId` で絞る。`VectorStore.upsert` で書いた行も、`search` が `memories` と
+テナントで突き合わせるので検索に出ない。`Runtime` は同じ `ctx` で確かめた id しか渡さず、
+`observe({ kind: "memory_usage" })` は `recordUsageAndReinforce` が在れば強化の段で
+「memory not found」になって記録ごと巻き戻る。⟹ この形になるのは、`MemoryStore`/`EventStore`/
+`VectorStore`（公開の interface）を直接呼ぶ経路だけである。各口の TSDoc にも同じことを書いた。
+
 ### ⚠ 2026-09 追記（Issue #371、(B) 第1段。[ADR 0185](./decisions/0185-contradiction-detection-path.md)/[ADR 0315](./decisions/0315-claim-key-does-not-touch-extraction-cassettes.md)）: `claimKey`（主張キー）を足した——**検出はまだ無い**
 
 `memories.claim_key_subject`/`claim_key_predicate`（`Memory.claimKey: {subject, predicate} | null`）
@@ -1025,6 +1046,23 @@ CREATE INDEX idx_observations_by_subject ON observations (tenant_id, subject_id,
 ⚠ 呼び出し側は、この返り値だけでは「正常な冪等の再送」と「forgotten/purged が原因で無視
 された」を区別できない（`Runtime.observe` の doc コメント、`packages/core/src/runtime.ts`
 参照）。
+
+**⚠ 2026-09-27 追記（[Issue #1074](https://github.com/takecchi/mnemora/issues/1074)）: 識別子の長さに上限は約束しない。**
+`tenant_id`・`subject_id`・`external_id` と `memories.tags` の要素は、上の索引（と `memories` の索引）に
+入る。索引の1行が**圧縮後に** btree 2704 バイト・GIN 2712 バイトを超えると、Postgres は書き込みを
+例外にする。圧縮後の大きさで決まるので、上限は文字数でもバイト数でも一意に言えない（同じ文字の
+繰り返しは1万字でも通り、ランダムな値は約2.7KBで落ちる）。`@mnemora/testkit` の fixture はどの長さも
+受け入れる。クローン miku の判断で、上限の新設（入力を狭める）は採らず、今の振る舞いを記録した
+（選び直す余地は Issue に残してある）。長い外部の ID は、呼び出し側でハッシュなどに縮めてから渡すこと。
+詳細は `Ctx`（`packages/core/src/ctx.ts`）の TSDoc。
+
+**⚠ 2026-09-27 追記（[Issue #1076](https://github.com/takecchi/mnemora/issues/1076)）: `payload` は JSON として保存される。**
+`@mnemora/postgres` は `payload` を `JSON.stringify` して `jsonb` に入れるので、`observe({ kind: "event", data })` の
+`data` に JSON で往復しない値を渡すと、形が変わって読み戻る（`NaN`・`±Infinity` は `null`、`-0` は `0`、
+`Date` は ISO 8601 の文字列、値が `undefined` の欄は消える）。`@mnemora/testkit` の fixture は JS の値を
+そのまま保持する。保証するのは、JSON の値が同じ値で読み戻ることだけである。クローン miku の判断で、
+入力を JSON の値に限る案・fixture を揃える案は採らず、今の振る舞いを記録した（選び直す余地は Issue に
+残してある）。書き分けは `ObserveEventInput.data` の TSDoc。
 
 ### `memories`（Phase 1。一部列は Phase 2）
 

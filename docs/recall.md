@@ -261,6 +261,13 @@ LIMIT $3;  -- k' = k × over-fetch 係数
 - 係数を小さくするほど、段1の ANN 索引の再帰が浅くなり、`hnsw.ef_search` を上げない限り取りこぼしが増える。
 - テナントのデータ規模が小さいうちは k' が候補総数を超えることがあり、その場合は事実上フルスキャンと同じ精度になる（取りこぼしは発生しない）。
 
+**⚠ 2026-09-27 追記（[Issue #1066](https://github.com/takecchi/mnemora/issues/1066)）: `overFetchFactor` に上限は置かず、丸めもしない。**
+`RecallQuery.overFetchFactor` は「有限の正数」だけを検査し、`k' = round(limit × overFetchFactor)` は
+そのまま store の `search` の `limit` になる（段3.5 の `maxCount × overFetchFactor` も同じ）。
+保証するのは `k'` が 2^63 未満のときだけで、それ以上では `@mnemora/postgres` が DB の例外（`bigint` の
+範囲外）を、`@mnemora/testkit` の fixture が `Error` を投げ、`recall()` ごと reject する。クローン miku の
+判断で、上限の新設・内部での丸めは採らず、今の振る舞いを記録した（選び直す余地は Issue に残してある）。
+
 **正直に書くべき限界**: over-fetch は近似である。「段1で k' 位以下に落ちたが、段2の再スコアなら k 位以内に入れたはずの記憶」は、原理的に recall に現れない。これは実装のバグではなく、この構成そのものが持つ性質である。したがって mnemora は取りこぼしを隠さず、`Omission { kind: 'ann_truncated', countKind: 'unknown' }` として結果に出す。`countKind` が `'unknown'` である理由は、ANN が「返さなかった候補」の総数は原理的に数えられないためである(§4)。
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の段落の「`Omission { kind: 'ann_truncated', countKind: 'unknown' }` として結果に出す」は、いまの振る舞いではない。[ADR 0069](./decisions/0069-ann-truncated-says-nothing-about-loss.md) §11 の実装以降、`ann_truncated` は「窓が埋まった」だけでは鳴らず、次の3つの顔を持つ。

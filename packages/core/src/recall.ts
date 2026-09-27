@@ -1594,6 +1594,19 @@ export interface RecallQuery {
   occurredAfter?: Date;
   occurredBefore?: Date;
   limit?: number;
+  /**
+   * 段1で取り込む候補数の倍率（`k' = round(limit × overFetchFactor)`、既定は
+   * {@link DEFAULT_OVER_FETCH_FACTOR}。`docs/recall.md` §3）。段3.5（連想枠）の過取得
+   * （`maxCount × overFetchFactor`）にも同じ値を使う。
+   *
+   * ⚠ **上限は置かず、丸めもしない**（[Issue #1066](https://github.com/takecchi/mnemora/issues/1066)）。
+   * schema が検査するのは「有限の正数」だけで、`k'` はそのまま store の `search` の `limit` に
+   * 渡る。**保証するのは、`k'`（と `maxCount × overFetchFactor`）が 2^63 未満のときだけである。**
+   * これ以上になると、`@mnemora/postgres` は DB の例外（`bigint` の範囲外）を、
+   * `@mnemora/testkit` の fixture は「`limit must fit in a Postgres bigint`」の `Error` を投げ、
+   * `recall()` ごと reject する（例: `limit` 10 なら `overFetchFactor` が約 9.2e17 以上）。
+   * 2^63 未満でも、大きな値はそのまま大きな `LIMIT` になる（費用は呼び出し側の選択である）。
+   */
   overFetchFactor?: number;
   /** D5: recall は既定で inferred を含める。除外したい provenance.kind を明示する。 */
   excludeProvenanceKinds?: ProvenanceKind[];
