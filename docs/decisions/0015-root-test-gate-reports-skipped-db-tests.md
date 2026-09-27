@@ -136,3 +136,32 @@
     逆向き（DB 段が呼ばれなくなる・落ちても赤くならない）と、ルートの `test` が
     この段を呼ぶ配線は、引き続き `scripts/__tests__/run-db-tests.test.mjs` の歯が
     押さえている。
+
+## 追記（2026-09-28）: CI の `root-gate-db-stage` では `@mnemora/postgres` の `test:db` を走らせない
+
+クローン miku の判断で変えた（オーナーではない、[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+**本文と既存の追記は書き換えていない。**
+
+本文の「結果」は、このジョブが既存の `postgres` / `example-chat` ジョブが走らせている `test:db` を、門を経由して
+**もう一度**走らせることを対価として書いていた。その後、`postgres` ジョブは `server_encoding` の2つの行
+（UTF8・SQL_ASCII、Issue #155）になり、DB テストも増え、このジョブが CI の最長（2026-09-27 に約 530 s）になった。
+
+- **何を変えたか**: `scripts/run-db-tests.mjs` に `MNEMORA_DB_TESTS_SKIP`（カンマ区切りのパッケージ名）を足し、
+  CI の `root-gate-db-stage` の門の段だけが `@mnemora/postgres` を挙げる。門は外したものを名前で出し
+  （「この段では実行しないもの」「この段では実行していない」）、ジョブはその行を `grep` で確かめる。
+  知らない名前が混ざっていたら・全部外したら、門は赤になる（黙って外さない・何も走らせずに「通りました」を出さない）。
+  未設定なら今までどおり全部走らせる——手元の `pnpm test` とルートの門の振る舞いは変わらない。
+- **外してよいと判断した根拠**（2つとも確かめた）:
+  1. 同じ集合を走らせていること。コマンドは同じ（`pnpm --filter @mnemora/postgres run test:db`）、DB の作りも同じ
+     （`pgvector/pgvector:pg17`、`--encoding=UTF8`、同じ拡張の作成と migrate）。環境変数の差は2つで、どちらも
+     `@mnemora/postgres` の歯の集合を変えない（`MNEMORA_LOCAL_EMBEDDING_CACHE_DIR` は読まれない、
+     `MNEMORA_LEXICAL_REGIME_JSON` は実測値をファイルへ書くだけ）。main の run 36339162899 の出力で突き合わせると、
+     このジョブの `@mnemora/postgres` の部分と UTF8 のジョブは 167 ファイル・1438 件が1ファイルずつ一致し、
+     SQL_ASCII のジョブは同じ 1438 件のうち `trigram-lexical-store.conformance` の27件だけが UTF8 を前提に skip する
+     （それは UTF8 のジョブが走らせる）。
+  2. `postgres` ジョブの2つが、どちらも branch protection の required status check であること（設定を読んで確かめた）。
+- **このジョブが見るものの変化**: 「ルートの門の DB 段が、`DATABASE_URL` 在りで実際に走って緑になるか」は、
+  `@mnemora/example-chat` の `test:db` を走らせる形で引き続き測る。`@mnemora/postgres` の歯の合否は `postgres`
+  ジョブの2つが測る。門が複数パッケージを依存の順に1本ずつ走らせることは `scripts/__tests__/run-db-tests-exclusivity.test.mjs`
+  が測る。
+- required の門の名前・数・`needs` は変えていない。

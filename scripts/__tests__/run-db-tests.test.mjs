@@ -93,6 +93,54 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
   });
 });
 
+describe("scripts/run-db-tests.mjs の MNEMORA_DB_TESTS_SKIP（CI の root-gate-db-stage だけが使う）", () => {
+  it("挙げたパッケージは走らせず、名前を挙げて出す（残りは走らせる）", () => {
+    // 届かない DB と --bail=1: 走らせたパッケージは最初の1ファイルで落ちる。落ちたのが example-chat
+    // であることが、@mnemora/postgres を走らせなかったことの証拠になる（依存の順で postgres が先に走る）。
+    const result = runGate(
+      {
+        ...process.env,
+        DATABASE_URL: UNREACHABLE_DATABASE_URL,
+        MNEMORA_DB_TESTS_SKIP: "@mnemora/postgres",
+      },
+      ["--bail=1"],
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).not.toBe(0);
+    expect(output).toContain("この段では実行しないもの:");
+    expect(output).toContain("@mnemora/postgres (test:db、MNEMORA_DB_TESTS_SKIP で外した)");
+    expect(output).toContain("DB テストが落ちました（@mnemora/example-chat）");
+    expect(output).not.toContain("DB テストが落ちました（@mnemora/postgres）");
+  });
+
+  it("test:db を持たない名前が混ざっていたら、何も走らせずに赤にする（綴りの誤り・改名の取り残し）", () => {
+    const result = runGate({
+      ...process.env,
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      MNEMORA_DB_TESTS_SKIP: "@mnemora/postgress",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).toBe(2);
+    expect(output).toContain("test:db を持たないパッケージが在ります: @mnemora/postgress");
+    expect(output).not.toContain("DB テストを実行します");
+  });
+
+  it("全部外したら、何も走らせずに「通りました」を出す代わりに赤にする", () => {
+    const result = runGate({
+      ...process.env,
+      DATABASE_URL: UNREACHABLE_DATABASE_URL,
+      MNEMORA_DB_TESTS_SKIP: "@mnemora/postgres,@mnemora/example-chat",
+    });
+    const output = `${result.stdout}${result.stderr}`;
+
+    expect(result.status).toBe(2);
+    expect(output).toContain("全部外しています");
+    expect(output).not.toContain("通りました");
+  });
+});
+
 describe("ルートの test 門の配線", () => {
   /**
    * 上の2つの歯は DB 段そのものを測る。**段が門に繋がっていること**は別の話で、
