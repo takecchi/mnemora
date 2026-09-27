@@ -508,6 +508,27 @@ describe("読み込み失敗のメッセージ", () => {
     expect(error.message).toContain("README");
   });
 
+  /**
+   * 【実測 2026-09-27】キャッシュのファイルが壊れていると（取得の中断など。onnx を途中で
+   * 切る・0 バイト・`tokenizer.json` を途中で切る・`config.json` を空にする、の4形を本物の
+   * transformers.js で当てた）、3回の再試行を使い切っても、次のプロセスでも同じように落ち続ける
+   * （cause は `Protobuf parsing failed`・`Unexpected end of JSON input` など）。
+   * 以前のメッセージはネットワーク断・repo の消滅・dtype 名の誤りしか挙げず、キャッシュの破損と、
+   * 消せば取り直せる場所に届かなかった。
+   */
+  it("キャッシュのファイルの破損を原因の候補に挙げ、消す場所（cacheDir の下の repo）を名指す", async () => {
+    const error = await loadFailure({ cacheDir: "/tmp/mnemora-models", createPipeline: failing });
+    expect(error.message).toContain("壊れ");
+    expect(error.message).toContain("/tmp/mnemora-models/sirasagi62/ruri-v3-30m-ONNX");
+  });
+
+  it("cacheDir が未指定なら、既定の場所（@huggingface/transformers の中の .cache/）を名指す", async () => {
+    const error = await loadFailure({ createPipeline: failing });
+    expect(error.message).toContain("壊れ");
+    expect(error.message).toContain("@huggingface/transformers/.cache/");
+    expect(error.message).toContain("sirasagi62/ruri-v3-30m-ONNX");
+  });
+
   // ⚠ `retry: { attempts: 1 }`——ここで確かめたいのは「包むことと握り続けることは別」
   // （#ready を早期に手放すこと）であって、1回の #load() の中のリトライではない。
   it("包んでも、次の呼び出しで再試行できる（包むことと握り続けることは別）", async () => {
