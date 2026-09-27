@@ -201,8 +201,14 @@ console.log(
 // 一発の `pnpm --recursive --if-present run test:db` には戻さない。1パッケージずつ
 // `pnpm --filter <name> run test:db` を直列に呼び、常に「今どれが走っているか」を
 // この段自身が把握した状態にする（理由は冒頭のコメントを参照）。
+// このスクリプトに渡した引数は、各パッケージの `test:db`（`vitest run`）へそのまま渡す。ルートの門
+// （`run-root-test-gate.mjs`）は何も渡さないので、CI・手元の `pnpm test` の振る舞いは変わらない。
+// 渡すのは `scripts/__tests__/run-db-tests.test.mjs` の「落ちるとき赤くなる」歯だけ（`--bail=1`）——
+// 届かない DB へ全ファイルを走らせて全部落とすと、DB テストが増えるほど時間が伸びるため。
+const forwardedArgs = process.argv.slice(2);
+
 for (const name of packages) {
-  const run = spawnSync("pnpm", ["--filter", name, "run", DB_SCRIPT], {
+  const run = spawnSync("pnpm", ["--filter", name, "run", DB_SCRIPT, ...forwardedArgs], {
     cwd: repoRoot,
     stdio: "inherit",
   });

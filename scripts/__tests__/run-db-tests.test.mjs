@@ -32,8 +32,8 @@ function envWithout(name) {
   return env;
 }
 
-function runGate(env) {
-  return spawnSync(process.execPath, [gate], {
+function runGate(env, args = []) {
+  return spawnSync(process.execPath, [gate, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
     env,
@@ -61,7 +61,13 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
   });
 
   it("DATABASE_URL が在って DB テストが落ちるとき: 門が赤くなる", () => {
-    const result = runGate({ ...process.env, DATABASE_URL: UNREACHABLE_DATABASE_URL });
+    // `--bail=1` を門に渡し、各パッケージの `vitest run` を最初に落ちたファイルで止める。届かない DB へ
+    // 全ファイルを走らせると DB テストが増えるほど長くなり（CI で 2026-09-27 の朝 83s → 夕方 118s、
+    // `testTimeout` は 180s）、歯の主張には要らない——門は最初に落ちたパッケージで止まるので、
+    // 「呼びに行った上で落ちた」「門が赤くなる」を見るには1本落ちれば足りる。
+    const result = runGate({ ...process.env, DATABASE_URL: UNREACHABLE_DATABASE_URL }, [
+      "--bail=1",
+    ]);
     const output = `${result.stdout}${result.stderr}`;
 
     // 芯。以前のルート門はこの状況でも緑のままだった。
@@ -70,6 +76,11 @@ describe("scripts/run-db-tests.mjs（ルートの test 門の DB 段）", () => 
     // 「呼びに行った上で落ちた」ことを確かめる。単に exit 1 する門では、この歯は通らない。
     expect(output).toContain("DB テストを実行します");
     expect(output).toContain("DB テストが落ちました");
+
+    // DB テスト（`vitest run`）が本当に走って落ちたこと——門が自分の文言だけを出す形では通らない。
+    // vitest は色の指定（CI の FORCE_COLOR など）で文字の間に ANSI の色の符号を挟むので、外してから見る。
+    // eslint-disable-next-line no-control-regex
+    expect(output.replace(/\x1b\[[0-9;]*m/g, "")).toMatch(/Test Files\s+\d+ failed/);
 
     // 未実行の告知と取り違えられないこと。
     expect(output).not.toContain("DB テストは実行していません");

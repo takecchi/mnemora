@@ -9,11 +9,17 @@ import type { Ctx, EmbeddingProvider } from "@mnemora/core";
  * 呼び出し側（カセットを持っている側）にしか決められない。
  */
 export interface EmbeddingProviderConformanceTexts {
+  /** 埋め込ませる1本目のテキスト（記録に在る入力を渡す。上の doc）。 */
   readonly a: string;
+  /** 2本目のテキスト。 */
   readonly b: string;
+  /**
+   * 3本目のテキスト。⚠ 3本は互いに違うテキストにすること——同じだと、順序の歯（`[a,b,c]` と `[b,c,a]` の突き合わせ）が並びの取り違えを見分けられない（この suite は違うことを検査しない）。
+   */
   readonly c: string;
 }
 
+/** {@link describeEmbeddingProviderConformance} に渡す設定。 */
 export interface EmbeddingProviderConformanceOptions {
   /** 見出しに出す名前（どの実装を測っているかがログで分かる）。 */
   name: string;
