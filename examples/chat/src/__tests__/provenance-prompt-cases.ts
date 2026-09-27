@@ -128,6 +128,17 @@ import type { RecalledMemory } from "@mnemora/core";
  * `contested-with-partner-missing`）だけが赤くなることが期待される
  * （`contested-with-absent-no-mark` は元々印が出ない期待なので、実装前後どちらでも緑）。
  * 既存14件（`temporal-*` を含む）は無関係のまま緑のはずである。
+ *
+ * **2026-09-27（Issue #972、`basisLost` を足す回）**: `RecalledMemory.basisLost`
+ * （[ADR 0342](../../../../docs/decisions/0342-recalled-memory-basis-lost.md)。根拠を失った
+ * `inferred`）を、**矛盾候補欄と同じ書き方**の欄 `[根拠:失われた]` で出す——ラベルと値を
+ * `[ラベル:値]` の形で書き、当てはまらなければ欄そのものを出さない（5' の「欄が無ければ
+ * 印を出さない」と同じ規律）。位置は矛盾候補欄の直後（どちらも「この行をそのまま信じるな」
+ * という注意の欄なので並べる）。**`basisLost` が無い行は1バイトも変わらない**——根拠が残って
+ * いる `inferred` と根拠を失った `inferred` を、この欄の有無だけで区別する。末尾3件
+ * （`basis-lost-*`）を追加した時点では `buildMnemoraPrompt` はまだ `basisLost` を読まないので、
+ * 印が出ることを期待する2件（`basis-lost-inferred`・`basis-lost-with-contradiction`）だけが
+ * 赤くなることが期待される（`basis-kept-inferred-no-mark` は実装前後どちらでも緑）。
  */
 
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
@@ -621,5 +632,71 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       },
     ],
     expectedLines: ["- [由来:stated] [話者:五郎] [主題:user-1] 矛盾の印が無い記憶"],
+  },
+  {
+    id: "basis-lost-inferred",
+    description:
+      "basisLost: true の inferred（根拠の記憶が失われた推論）は、矛盾候補欄と同じ書き方の " +
+      "[根拠:失われた] を出し、根拠が残っている inferred と区別する（Issue #972、ADR 0342）",
+    memories: [
+      {
+        memoryId: "m-basis-lost",
+        digest: "青系を好むと推測される",
+        retrievedVia: "ann",
+        provenanceKind: "inferred",
+        basisLost: true,
+        speaker: null,
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: ["- [由来:inferred] [主題:user-1] [根拠:失われた] 青系を好むと推測される"],
+  },
+  {
+    id: "basis-kept-inferred-no-mark",
+    description:
+      "basisLost が無い inferred（根拠が残っている）は、欄そのものを出さない（従来と1バイトも変わらない）",
+    memories: [
+      {
+        memoryId: "m-basis-kept",
+        digest: "青系を好むと推測される",
+        retrievedVia: "ann",
+        provenanceKind: "inferred",
+        speaker: null,
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: ["- [由来:inferred] [主題:user-1] 青系を好むと推測される"],
+  },
+  {
+    id: "basis-lost-with-contradiction",
+    description: "矛盾候補欄と根拠欄が両方あるときは、矛盾候補 → 根拠 の順に並ぶ",
+    memories: [
+      {
+        memoryId: "m-basis-lost-contested",
+        digest: "推論された主張",
+        retrievedVia: "ann",
+        contestedWith: "m-basis-lost-other",
+        provenanceKind: "inferred",
+        basisLost: true,
+        speaker: null,
+        subjectId: "user-1",
+        score: SCORE,
+      },
+      {
+        memoryId: "m-basis-lost-other",
+        digest: "対立する主張",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "六郎",
+        subjectId: "user-1",
+        score: SCORE,
+      },
+    ],
+    expectedLines: [
+      "- [由来:inferred] [主題:user-1] [矛盾候補:「対立する主張」] [根拠:失われた] 推論された主張",
+      "- [由来:stated] [話者:六郎] [主題:user-1] [矛盾候補:「推論された主張」] 対立する主張",
+    ],
   },
 ];

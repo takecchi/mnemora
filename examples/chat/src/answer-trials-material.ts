@@ -46,6 +46,8 @@ export interface MaterialMemoryLine {
   speaker?: string;
   subject: string;
   contradiction?: string;
+  /** `[根拠:失われた]` の欄が在った（Issue #972、`RecalledMemory.basisLost`）。 */
+  basisLost?: true;
   recordedOrder?: number;
   occurredAt?: string;
   digest: string;
@@ -202,7 +204,7 @@ function stripLeadingSpace(s: string, context: string): string {
 /**
  * `renderRecalledMemoryLine` が描画した1行（先頭の `"- "` を含む）を
  * {@link MaterialMemoryLine} へパースする。欄の順序は由来 → 話者 → 主題 → 矛盾候補 →
- * 記録順 → 出来事時刻 → digest（`mnemora-path.ts` の同関数 docstring と同じ順序）。
+ * 根拠 → 記録順 → 出来事時刻 → digest（`mnemora-path.ts` の同関数 docstring と同じ順序）。
  *
  * ⛔ **解析できない行は例外を投げる（黙って飛ばさない、Issue #705 の要求）。**
  */
@@ -238,6 +240,20 @@ export function parseMemoryLine(line: string): MaterialMemoryLine {
     rest = stripLeadingSpace(contra.rest, `[矛盾候補:...] の直後、行: ${JSON.stringify(line)}`);
   }
 
+  let basisLost: true | undefined;
+  const basis = takeBracket(rest, "根拠");
+  if (basis) {
+    // 描画側（mnemora-path.ts の basisSegment）が出す値は1つだけ。ほかの値は、描画の形が
+    // 変わったのに追従していないしるしなので、黙って受けずに止める（Issue #705 の規律）。
+    if (basis.value !== "失われた") {
+      throw new Error(
+        `parseMemoryLine: [根拠:...] の値が想定外（「失われた」だけを想定）: ${JSON.stringify(basis.value)}`,
+      );
+    }
+    basisLost = true;
+    rest = stripLeadingSpace(basis.rest, `[根拠:...] の直後、行: ${JSON.stringify(line)}`);
+  }
+
   let recordedOrder: number | undefined;
   const rec = takeBracket(rest, "記録順");
   if (rec) {
@@ -267,6 +283,7 @@ export function parseMemoryLine(line: string): MaterialMemoryLine {
     ...(speaker !== undefined ? { speaker } : {}),
     subject: subj.value,
     ...(contradiction !== undefined ? { contradiction } : {}),
+    ...(basisLost !== undefined ? { basisLost } : {}),
     ...(recordedOrder !== undefined ? { recordedOrder } : {}),
     ...(occurredAt !== undefined ? { occurredAt } : {}),
     digest: rest,
