@@ -2833,6 +2833,15 @@ export interface Runtime {
    * `reflected` Memory が2件できる。**これを塞ぐために `MemoryStore` へメソッドや索引を
    * 足すことはしていない（`reflect.test.ts` がこの挙動を歯で固定している）。
    *
+   * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの）: `tick()` の `'reflect'` ジョブも同じ理由で冪等でない。**
+   * outbox の処理は at-least-once である（`OutboxStore` の doc、ADR 0032）——`reflect()` が内省の
+   * Memory を書いた後、`complete` の前にワーカーが止まると、リースが切れた後の `tick()` が同じ
+   * ジョブをもう一度処理し、**内省の Memory が2件になる**（created イベントと embed ジョブも2つずつ）。
+   * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ。比べて、`'embed'`・
+   * `'consolidate'` のジョブは同じ再配達でも1回だけ処理したときと同じ状態になる（consolidate は
+   * 上の「読んで status で弾く」が効く）。歯は
+   * `packages/postgres/src/__tests__/tick-sequential-redelivery.postgres.test.ts`。
+   *
    * ⭐ **`tick()` は `'reflect'` の outbox ジョブが在ればこれを駆動する**
    * （Issue #204 / ADR 0157。`TICK_SUPPORTED_JOB_KINDS` に足された）。`consolidate` と
    * 対称——ジョブの `payload` は `{ memoryId }` で、`tick` はそれを `seedMemoryId` として
