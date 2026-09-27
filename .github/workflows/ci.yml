@@ -900,10 +900,17 @@ jobs:
           [ -n "${DEFAULT_CACHE_DIR}" ] && find "${DEFAULT_CACHE_DIR}" -type f -printf "%s %P\n" 2>/dev/null | sort -k2 || true
 
       - name: ルートの門の DB 段を DATABASE_URL 在りで通す（順方向の実測）
+        # `@mnemora/postgres` の test:db は、この段では走らせない（ADR 0015 の 2026-09-28 追記）。
+        # 同じ集合（同じコマンド・同じファイル・同じ DB の作り）を `postgres` ジョブの2つ
+        # （server_encoding=UTF8・SQL_ASCII、どちらも required）が走らせている。この段で3回目を
+        # 走らせていたのが、このジョブを最長にしていた。門は外したものを名前で出す（下の grep）。
+        env:
+          MNEMORA_DB_TESTS_SKIP: "@mnemora/postgres"
         run: |
           set -euo pipefail
           node scripts/run-db-tests.mjs 2>&1 | tee gate.log
           grep -F "DB テストを実行します" gate.log
+          grep -F "この段では実行していない: @mnemora/postgres" gate.log
           # 接続先の Postgres が実際に読めていること。純関数の形は
           # scripts/__tests__/db-server-description.test.mjs が測るが、
           # 「本物の DB に繋いで版が取れる」ことを測れるのは、DB を持つこのジョブだけ。

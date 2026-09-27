@@ -145,14 +145,42 @@ function findDbTestPackages() {
   return sorted;
 }
 
-const packages = findDbTestPackages();
+const allPackages = findDbTestPackages();
 
-if (packages.length === 0) {
+// `MNEMORA_DB_TESTS_SKIP`（カンマ区切りのパッケージ名）に挙げたパッケージは、DB 在りでも走らせない。
+// 使うのは CI の `root-gate-db-stage` ジョブだけ——`@mnemora/postgres` の `test:db` は、同じ集合を
+// `postgres` ジョブ（UTF8・SQL_ASCII の2つ、どちらも required）が走らせているので、この段で3回目を
+// 走らせない（ADR 0015 の 2026-09-28 追記）。黙って外さない: 外したものは名前を挙げて出し、知らない
+// 名前（綴りの誤り・改名の取り残し）が混ざっていたら赤にする。未設定なら今までどおり全部走らせる。
+const skipRequested = (process.env.MNEMORA_DB_TESTS_SKIP ?? "")
+  .split(",")
+  .map((name) => name.trim())
+  .filter((name) => name !== "");
+const unknownSkips = skipRequested.filter((name) => !allPackages.includes(name));
+if (unknownSkips.length > 0) {
+  console.error(
+    `MNEMORA_DB_TESTS_SKIP に ${DB_SCRIPT} を持たないパッケージが在ります: ${unknownSkips.join(", ")}`,
+  );
+  process.exit(2);
+}
+const skipped = allPackages.filter((name) => skipRequested.includes(name));
+const packages = allPackages.filter((name) => !skipRequested.includes(name));
+if (allPackages.length > 0 && packages.length === 0) {
+  // 全部外すと何も走らせずに「通りました」を出してしまう——この段が塞いだ取り違えそのもの（ADR 0015）。
+  console.error(`MNEMORA_DB_TESTS_SKIP が ${DB_SCRIPT} を持つパッケージを全部外しています`);
+  process.exit(2);
+}
+
+if (allPackages.length === 0) {
   // `test:db` を持つパッケージが1つも無い。黙って通す（隠すものが無い）。
   process.exit(0);
 }
 
-const listing = packages.map((name) => `    - ${name} (${DB_SCRIPT})`).join("\n");
+const listing = allPackages.map((name) => `    - ${name} (${DB_SCRIPT})`).join("\n");
+const runListing = packages.map((name) => `    - ${name} (${DB_SCRIPT})`).join("\n");
+const skipListing = skipped
+  .map((name) => `    - ${name} (${DB_SCRIPT}、MNEMORA_DB_TESTS_SKIP で外した)`)
+  .join("\n");
 
 if (!process.env.DATABASE_URL) {
   console.log(
@@ -191,7 +219,8 @@ console.log(
     ...serverLines,
     "",
     "  対象:",
-    listing,
+    runListing,
+    ...(skipped.length > 0 ? ["", "  この段では実行しないもの:", skipListing] : []),
     "",
     BANNER,
     "",
@@ -219,4 +248,15 @@ for (const name of packages) {
   }
 }
 
-console.log(["", BANNER, "✔ DB テストも実行し、通りました。", BANNER, ""].join("\n"));
+console.log(
+  [
+    "",
+    BANNER,
+    "✔ DB テストも実行し、通りました。",
+    ...(skipped.length > 0
+      ? [`  ⚠ この段では実行していない: ${skipped.join(", ")}（MNEMORA_DB_TESTS_SKIP）`]
+      : []),
+    BANNER,
+    "",
+  ].join("\n"),
+);
