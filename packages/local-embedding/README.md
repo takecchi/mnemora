@@ -168,7 +168,8 @@ npm i @mnemora/local-embedding @mnemora/core
   `.cache/`（例: `node_modules/@huggingface/transformers/.cache/`。pnpm なら
   `node_modules/.pnpm/@huggingface+transformers@<版>/node_modules/@huggingface/transformers/.cache/`）で、
   ホームの `~/.cache` の下ではない。⚠ `node_modules` を消す・入れ直すと一緒に消え、次の読み込みで取り直す。
-  置き場所を固定したいときは `cacheDir` を渡す
+  置き場所を固定したいときは `cacheDir` を渡す（⚠ `cacheDir` を渡しても、読み込みの前の確認は既定の置き場所を見る。
+  オフラインで使うなら「[`cacheDir` を渡しても…](#-cachedir-を渡しても読み込みの前の確認は既定のキャッシュを見る)」の節）
 - ネイティブ依存として `onnxruntime-node` が入る（次節）
 
 ### 🔴 linux/x64 では、install が **CUDA EP を勝手に落とす**（要らないのに）
@@ -189,10 +190,10 @@ npm i @mnemora/local-embedding @mnemora/core
 
 #### 止め方
 
-| 使っている物     | 既定                                        | やること                                                                                                 |
-| ---------------- | ------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| **npm / yarn**   | 🔴 **postinstall が走る**                   | `ONNXRUNTIME_NODE_INSTALL=skip npm i`、または `.npmrc` に `onnxruntime-node-install=skip`                |
-| **pnpm 10** | ✅ 走らない（ビルドスクリプトは既定で拒否。警告だけ出て install は通る） | 何もしなくてよい。**明示したいなら** 下の pnpm 11 以降と同じ3行を書く |
+| 使っている物     | 既定                                                                                                          | やること                                                                                                                                                                                                                                                                                                                                                           |
+| ---------------- | ------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **npm / yarn**   | 🔴 **postinstall が走る**                                                                                     | `ONNXRUNTIME_NODE_INSTALL=skip npm i`、または `.npmrc` に `onnxruntime-node-install=skip`                                                                                                                                                                                                                                                                          |
+| **pnpm 10**      | ✅ 走らない（ビルドスクリプトは既定で拒否。警告だけ出て install は通る）                                      | 何もしなくてよい。**明示したいなら** 下の pnpm 11 以降と同じ3行を書く                                                                                                                                                                                                                                                                                              |
 | **pnpm 11 以降** | ✅ 走らない。🔴 **ただし install が `ERR_PNPM_IGNORED_BUILDS` で終了コード 1 になる**（パッケージ自体は入る） | `pnpm-workspace.yaml` に `allowBuilds:` の3行 `onnxruntime-node: false`・`protobufjs: false`・`sharp: false` を書く（`onnxruntime-node` だけでは、残りの2つで同じく 1 になる）。pnpm が自分で `set this to true or false` という仮の値を書き足していたら、それを置き換えること【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れた】 |
 
 ⚠ **このリポジトリ自身の `pnpm-workspace.yaml` の `allowBuilds` は、公開物には付いていかない。**
@@ -328,6 +329,38 @@ const provider = new LocalEmbeddingProvider({
 使うどの環境でも起きうる話であり、ライブラリとして自然な既定だと判断した
 （採らなかった案・理由は ADR 0141）。
 
+### 🔴 `cacheDir` を渡しても、読み込みの前の確認は既定のキャッシュを見る
+
+（[Issue #1239](https://github.com/takecchi/mnemora/issues/1239)・[Issue #1004](https://github.com/takecchi/mnemora/issues/1004)。今の振る舞いを書くだけで、コードで直すかは #1239 で決める）
+
+【実測 2026-09-27、`@huggingface/transformers@4.2.0`】`cacheDir` にモデルの4ファイル（`config.json`・`tokenizer.json`・
+`tokenizer_config.json`・`onnx/model_quantized.onnx`）が揃っていても、transformers.js の `pipeline()` は読み込みの前段の
+確認で `config.json`・`tokenizer_config.json` の有無を**既定のキャッシュ**（transformers.js の `env.cacheDir`。上の「前提」の
+置き場所）**だけで**確かめ、無ければ Hugging Face へ取りに行く。
+
+| 既定のキャッシュの `<repo>/` に在るもの  | ネットワークへの要求                                                                                  |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| 何も無い                                 | `config.json` を取りに出る。**ネットワークが無ければ、`cacheDir` が温まっていても読み込みは失敗する** |
+| `config.json` だけ                       | `tokenizer_config.json` を確かめに出る                                                                |
+| `config.json` と `tokenizer_config.json` | 0回                                                                                                   |
+
+⟹ **ネットワークの無いところで `cacheDir` を使うなら、既定のキャッシュも温めておくこと。**置くのは
+`cacheDir` の中の `<repo>/config.json`・`<repo>/tokenizer_config.json` の2つの写しで、置き場所は既定のキャッシュの
+`<repo>/` の下（例: `node_modules/@huggingface/transformers/.cache/sirasagi62/ruri-v3-30m-ONNX/`。pnpm なら上の
+「前提」の形）。
+
+- ⚠ 既定のキャッシュは `node_modules` の中に在るので、`node_modules` を消す・入れ直すと一緒に消える。入れ直した後に
+  もう一度置くこと。
+- `cacheDir` を渡さない（既定のキャッシュそのものを温めた）使い方では、この2つは最初の読み込みで既定のキャッシュに
+  入るので、この節の手当ては要らない（上の 2026-09-27 追記の「ネットワークを切っても読めた」はこの形の測定）。
+- このパッケージは `env` を書き換えない（`env` はプロセス全体で共有される大域である——下の「ネットワークに一切出ずに…」の節）。
+- ⛔ 確かめていないこと: `revision` を `main` 以外にしたとき（`cacheDir` の中の鍵が `<repo>/<revision>/<file>` になる）。
+  transformers.js の 4.2.0 以外の版。
+
+この振る舞いは `src/__tests__/cache-dir-preflight-default-cache.test.ts` が縛っている（ネットワークに出ない形で、
+既定のキャッシュの3つの状態を当てる）。transformers.js の版上げで前段の確認が `cacheDir` を見るようになれば、その歯が
+赤くなる——そのときはこの節と歯を一緒に直すこと。
+
 ### 先に読み込ませたいときは `warmup()`
 
 ```ts check
@@ -343,19 +376,19 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 
 ### オプション
 
-| オプション       | 既定                                          |                                                                                                               |
-| ---------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `repo`           | `"sirasagi62/ruri-v3-30m-ONNX"`               | Hugging Face の repo id                                                                                       |
-| `dtype`          | `"q8"`                                        | 量子化の別                                                                                                    |
-| `dimensions`     | `256`                                         | **宣言する**次元数。実物と食い違えば初回 `embed()` で例外になる                                               |
-| `modelId`        | `"ruri-v3-30m/sym"`                           | `space.model` に載る文字列                                                                                    |
-| `prefix`         | `""`                                          | 全テキストの先頭に付ける文字列                                                                                |
-| `cacheDir`       | 未指定（`@huggingface/transformers/.cache/`） | モデルの置き場所                                                                                              |
-| `numThreads`     | `4`                                           | onnxruntime の intra-op スレッド数                                                                            |
+| オプション       | 既定                                          |                                                                                                                                                                   |
+| ---------------- | --------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `repo`           | `"sirasagi62/ruri-v3-30m-ONNX"`               | Hugging Face の repo id                                                                                                                                           |
+| `dtype`          | `"q8"`                                        | 量子化の別                                                                                                                                                        |
+| `dimensions`     | `256`                                         | **宣言する**次元数。実物と食い違えば初回 `embed()` で例外になる                                                                                                   |
+| `modelId`        | `"ruri-v3-30m/sym"`                           | `space.model` に載る文字列                                                                                                                                        |
+| `prefix`         | `""`                                          | 全テキストの先頭に付ける文字列                                                                                                                                    |
+| `cacheDir`       | 未指定（`@huggingface/transformers/.cache/`） | モデルの置き場所                                                                                                                                                  |
+| `numThreads`     | `4`                                           | onnxruntime の intra-op スレッド数                                                                                                                                |
 | `revision`       | 未指定（transformers.js の既定 `"main"`）     | Hugging Face の revision（枝名・tag・commit sha）。⚠ 渡したときの実挙動は本物のモデルで確かめていない。キャッシュ鍵・重みの指紋の照合との関係も未決（Issue #597） |
-| `createPipeline` | transformers.js                               | モデルを読み込む関数（**テスト用の注入点**）                                                                  |
-| `retry`          | `{ attempts: 3 }`                             | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141） |
-| `sleep`          | `setTimeout` を使う本物の待ち                 | リトライの待ち時間を実際に待つ関数（**テスト用の注入点**）                                                    |
+| `createPipeline` | transformers.js                               | モデルを読み込む関数（**テスト用の注入点**）                                                                                                                      |
+| `retry`          | `{ attempts: 3 }`                             | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141）                                                     |
+| `sleep`          | `setTimeout` を使う本物の待ち                 | リトライの待ち時間を実際に待つ関数（**テスト用の注入点**）                                                                                                        |
 
 既定値は `DEFAULT_LOCAL_EMBEDDING_REPO`・`DEFAULT_LOCAL_EMBEDDING_DTYPE`・`DEFAULT_LOCAL_EMBEDDING_DIMENSIONS`・
 `DEFAULT_LOCAL_EMBEDDING_MODEL_ID`・`DEFAULT_LOCAL_EMBEDDING_PREFIX`・`DEFAULT_LOCAL_EMBEDDING_NUM_THREADS`・
