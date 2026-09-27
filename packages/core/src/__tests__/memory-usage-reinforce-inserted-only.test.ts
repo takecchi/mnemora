@@ -22,6 +22,9 @@ import { createFakeRuntimeStores } from "./runtime-fakes.js";
 const ctx: Ctx = { tenantId: "tenant-1" };
 const T1 = new Date("2026-06-01T00:00:00.000Z");
 const T2 = new Date("2026-06-02T00:00:00.000Z");
+// 作成時刻は最初の強化より前に置く——reinforce は起点（lastReinforcedAt ?? recordedAt）より新しい at だけを
+// 書く（Issue #1093）ので、作成と同じミリ秒の強化は書かれない。
+const RECORDED_AT = new Date(T1.getTime() - 24 * 60 * 60 * 1000);
 
 function newMemory(): NewMemory {
   return {
@@ -36,12 +39,12 @@ function newMemory(): NewMemory {
     provenance: { kind: "imported", batchId: "fixture" },
     tags: [],
     occurredAt: null,
-    recordedAt: T1,
+    recordedAt: RECORDED_AT,
     lastReinforcedAt: null,
     strength: 1,
     halfLifeHours: 24 * 365,
     decayFloorAt: defaultDecayStrategy.floorAt({
-      recordedAt: T1,
+      recordedAt: RECORDED_AT,
       lastReinforcedAt: null,
       strength: 1,
       halfLifeHours: 24 * 365,

@@ -505,7 +505,7 @@ export const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
  * 固定した値を渡す）。同じ値を、日本語側の `WHERE` 述語（`content %> $ja`、
  * `pg_trgm.word_similarity_threshold` セッション変数に依存）と `coverage`/`rank` の計算
  * （明示引数）の両方に使う——`search()` がトランザクション内で
- * `SET LOCAL pg_trgm.word_similarity_threshold` を先に発行することが前提
+ * `pg_trgm.word_similarity_threshold` を先に設定する（`set_config(…, true)`）ことが前提
  * （`PostgresTrigramLexicalStore.search` 参照）。
  *
  * **🔴 Issue #878（2026-09-26、クローン miku の判断）: ASCII 側の語数・語ごとの文字数に
@@ -737,16 +737,15 @@ export class PostgresTrigramLexicalStore implements LexicalStore {
   ): Promise<LexicalHit[]> {
     const threshold = this.threshold;
     // `content %> $ja` は `pg_trgm.word_similarity_threshold`（セッション変数）を読む。
-    // `SET`/`SET LOCAL` は PostgreSQL の文法上バインドパラメータ（$1）を取れない
-    // （プレースホルダを渡すと 42601 構文エラーになる。この PR の作業者が実際に踏んだ）
-    // ため、`create()` で [0, 1] の範囲へ検証済みの `threshold` をリテラルとして埋め込む。
-    // `SET LOCAL` はトランザクション内でしか効かない（トランザクション外では
-    // PostgreSQL が警告を出すだけで無視する）ため、同一トランザクション・同一接続で
-    // `SET LOCAL` と本体の SELECT を発行する必要がある——`db.transaction` はコールバック
-    // の間ずっと同じ接続を使うことを drizzle-orm が保証する（`memory-store.ts` の
-    // 各 `db.transaction` 呼び出しと同じ前提）。
+    // `set_config(name, value, true)` で設定する——値はパラメータで渡し、第3引数の `true`
+    // で、このトランザクションの中だけに効かせる（`SET LOCAL` と同じ。トランザクションの外には
+    // 残らない）。同一トランザクション・同一接続で、設定と本体の SELECT を発行する必要がある
+    // ——`db.transaction` はコールバックの間ずっと同じ接続を使うことを drizzle-orm が保証する
+    // （`memory-store.ts` の各 `db.transaction` 呼び出しと同じ前提）。
     return this.db.transaction(async (tx) => {
-      await tx.execute(sql.raw(`SET LOCAL pg_trgm.word_similarity_threshold = ${threshold}`));
+      await tx.execute(
+        sql`SELECT set_config('pg_trgm.word_similarity_threshold', ${String(threshold)}, true)`,
+      );
       const select = buildTrigramLexicalSearchSelect(query, {
         ...opts,
         threshold,

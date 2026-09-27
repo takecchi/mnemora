@@ -593,9 +593,12 @@ export interface MemoryStore {
    *
    * **減衰の起点を巻き戻さない**（[ADR 0048](../../../../docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)/
    * [ADR 0049](../../../../docs/decisions/0049-reinforce-monotonicity-in-pseudo-implementations.md)。
-   * ADR 0048「引き受けた負債」の、この doc への書き起こし）:
-   * - 書き込むのは、現在の `lastReinforcedAt` が `null` か、**`at` より狭義に古い**ときだけ。
-   * - **等しい `at`・古い `at` は no-op である**——例外にしない。何も書かず（`updatedAt` も
+   * ADR 0048「引き受けた負債」の、この doc への書き起こし）。規則は1つである:
+   * - **`at` が現在の起点（`lastReinforcedAt ?? recordedAt`）より狭義に新しいときだけ書く。**
+   *   未強化の記憶（`lastReinforcedAt` が `null`）では、作成時刻（`recordedAt`）が起点である
+   *   （[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)。以前は `null` なら `at` によらず
+   *   書いていたので、作成時刻より前の `at` で起点が作成時刻より前へ戻っていた）。
+   * - **起点と等しい `at`・古い `at` は no-op である**——例外にしない。何も書かず（`updatedAt` も
    *   動かさず）、更新されなかった現在の行をそのまま返す。呼び出し側からは、書いたか
    *   どうかは戻り値の `lastReinforcedAt` を見ないと分からない。
    * - ⚠ **この比較は壁時計の `at` だけで行い、活動時計側の3列も同じ条件で守る**
@@ -660,8 +663,8 @@ export interface MemoryStore {
    * `reinforce` の doc コメントが定める規律は、この一括版の**各要素**にもそのまま
    * 当たる:
    * - **減衰の起点を巻き戻さない**（[ADR 0048](../../../../docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)/
-   *   ADR 0049）: 書き込むのは、現在の `lastReinforcedAt` が `null` か `at` より
-   *   狭義に古い行だけ。**この単調性の比較は、1件ずつのときと同じく WHERE 句
+   *   ADR 0049）: 書き込むのは、`at` が現在の起点（`lastReinforcedAt ?? recordedAt`）より
+   *   狭義に新しい行だけ（`reinforce` と同じ1つの規則。Issue #1093）。**この単調性の比較は、1件ずつのときと同じく WHERE 句
    *   （CAS）の中で行う**——アプリ側で読んだ古い値を条件にしない（読みと書きの間に
    *   別の強化が割り込んでも上書きしない）。等しい/古い `at` は no-op（例外にしない。
    *   `updatedAt` も動かさない。更新されなかった現在の行をそのまま返す）。
