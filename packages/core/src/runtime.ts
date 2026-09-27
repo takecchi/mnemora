@@ -1898,6 +1898,11 @@ export interface Runtime {
    * 安全弁3つ（LLM がまた失敗したら何もしない・候補0件なら何もしない・compare-and-swap で
    * TOCTOU の競合を検知する）は `ReextractResult` の doc コメントを参照。
    *
+   * 抽出をやり直せない対象には、LLM も書き込みも試みる前に `Error` を投げる。Observation が
+   * 見つからないとき（別テナントの id・形式の合わない id を含む）と、使用報告の Observation
+   * （`kind: "usage"`。`observe({ kind: "memory_usage" })` が作る。抽出器を通らない、
+   * docs/memory-model.md §6）を渡したとき（Issue #1099）である。
+   *
    * ⚠ **2026-09-26 追記（Issue #873）: `extractorVersion` は `this`（この runtime インスタンス）
    * が生成時に固定した値であり、`reextract()` の引数ではない。** supersede の判定
    * （`listBySourceObservation(ctx, observationId, extractorVersion)`、ADR 0028 決定1）は
@@ -3269,6 +3274,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const observation = await deps.memoryStore.getObservation(ctx, observationId);
     if (!observation) {
       throw new Error(`runtime.reextract: observation not found: ${observationId}`);
+    }
+    // Issue #1099: 使用報告（`kind: "usage"`）は抽出器を通らない（docs/memory-model.md §2・§6）。
+    // 抽出をやり直す対象ではないので、存在しない Observation と同じく、LLM も書き込みも
+    // 試みる前に落とす。以前は payload の JSON を LLM に送り、それを本文とする Memory を作っていた。
+    if (observation.kind === observeInputKindToObservationKind("memory_usage")) {
+      throw new Error(
+        `runtime.reextract: observation ${observationId} is a usage report (kind: "usage") and is never extracted`,
+      );
     }
 
     const { candidates, usedWholeObservationFallback, failure } = await extractCandidates(
