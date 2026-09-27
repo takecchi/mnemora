@@ -209,6 +209,7 @@ export interface ObserveUtteranceInput {
   extractionContext?: ExtractionContext;
   kind: "utterance";
   subjectId?: string;
+  /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   externalId?: string;
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
@@ -231,6 +232,7 @@ export interface ObserveEventInput {
   extractionContext?: ExtractionContext;
   kind: "event";
   subjectId?: string;
+  /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   externalId?: string;
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */
@@ -246,6 +248,25 @@ export interface ObserveEventInput {
    * `deriveClaimKeys` は一度も呼ばれない。 */
   claimKey?: ClaimKeyOptions;
   name: string;
+  /**
+   * 出来事に付けるデータ。**JSON として保存される前提の欄である**
+   * （[Issue #1076](https://github.com/takecchi/mnemora/issues/1076)）。
+   *
+   * 値の型は検査しない。**保証するのは、JSON の値（有限の数・文字列・真偽値・`null`・配列・
+   * プレーンなオブジェクト）が同じ値で読み戻ることだけである。**JSON で往復しない値は adapter に
+   * よって違う:
+   *
+   * | 値 | `@mnemora/postgres`（`JSON.stringify` して `jsonb` に保存） | `@mnemora/testkit` の fixture |
+   * |---|---|---|
+   * | `NaN`・`Infinity`・`-Infinity` | `null` に変わる | そのまま保持する |
+   * | `-0` | `0` に変わる | そのまま保持する |
+   * | `Date` | ISO 8601 の文字列に変わる | `Date` のまま保持する |
+   * | 値が `undefined` の欄 | 欄ごと消える | 欄が残る |
+   * | `BigInt` | 例外（`JSON.stringify` が投げる） | 同じ |
+   *
+   * どちらも例外にならない値では、書き込みは成功する。その後の `getObservation`・
+   * `reextract`・監査の読み返しは、adapter によって違う値を見る。
+   */
   data?: Record<string, unknown>;
 }
 
@@ -253,6 +274,7 @@ export interface ObserveDocumentInput {
   extractionContext?: ExtractionContext;
   kind: "document";
   subjectId?: string;
+  /** 長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   externalId?: string;
   /** {@link Observation.occurredAt} の doc コメント参照（未来の値も拒まない。予定か
    * 時計ずれかは区別しない。Issue #767、ADR 0037 追記）。 */

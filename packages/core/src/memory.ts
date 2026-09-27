@@ -89,6 +89,18 @@ export interface Memory {
   tenantId: string;
   subjectId?: string | null;
 
+  /**
+   * 元になった Observation の id。
+   *
+   * ⚠ **テナントの一致は検査しない**（[Issue #1051](https://github.com/takecchi/mnemora/issues/1051)）。
+   * `MemoryStore.createMemory` にほかのテナントの Observation の id を渡しても、
+   * `@mnemora/postgres`（`observations(id)` への外部キーは `tenant_id` を見ない）・
+   * `@mnemora/testkit` の `InMemoryMemoryStore` のどちらも受け付け、呼んだテナントの行に
+   * ほかのテナントを指す参照が残る。**ほかのテナントの行は変わらず、その本文も読めない**
+   * （読みの口はすべて `ctx.tenantId` で絞る）。`Runtime` は同じ `ctx` で作った Observation の
+   * id しか渡さないので、この形になるのは `MemoryStore` を直接呼んだときだけである。
+   * `docs/memory-model.md` §5 の 2026-09-27 追記を参照。
+   */
   sourceObservationId?: ObservationId | null;
   extractorVersion?: string | null;
 
@@ -111,6 +123,7 @@ export interface Memory {
   /** `supersededById` と同じ注意が当たる（テナント一致は検査しない、Issue #854）。 */
   contestedWithId?: MemoryId | null;
 
+  /** 要素の長さの上限は約束しない——`Ctx`（`ctx.ts`）の doc コメント参照（Issue #1074）。 */
   tags: string[];
 
   occurredAt?: Date | null;
