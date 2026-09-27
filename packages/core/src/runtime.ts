@@ -2456,6 +2456,8 @@ export interface Runtime {
    * （`docs/memory-model.md` §11 行6 が定める固定値。`consolidate`/`reflect` の
    * `meta.reason` と同じ「操作の種類を表す固定タグ」の扱いであり、`forget`/`restoreArchived`
    * の「呼び出し側の自由文」とは別物）。`opts.reason` を渡すと `meta.note` に追加で入る。
+   * `meta.contestedWithId` には相手の id が入る（A のイベントには B、B には A。Issue #1160——解決で
+   * `contested_with_id` はクリアされるので、監査ログに残さないと誰と対だったかを後から追えない）。
    * `digestSnapshot` にはその Memory の現在の `digest` を入れる（`content` は運ばない。
    * `forget`/`reextract` と同じ規律）。
    *
@@ -2524,6 +2526,8 @@ export interface Runtime {
    * `'supersede' | 'both_active'`（監査ログから「なぜ contested が消えたか」を追えるように
    * するための欄——`meta.reason` だけでは決着の種類までは分からない）。`opts.reason` を
    * 渡すと `meta.note` に追加で入る（`meta.reason`/`meta.resolution` は上書きしない）。
+   * どのイベント（勝者・敗者・`both_active` の両側）にも `meta.contestedWithId`（相手の id）が入る（Issue #1160）。
+   * 敗者の `superseded` は、加えて `meta.supersededById`（勝者の id。値は同じ）も持つ。
    * `digestSnapshot` にはその Memory の現在の `digest` を入れる（`content` は運ばない。
    * `markContested`/`forget`/`reextract` と同じ規律）。
    *
@@ -2592,6 +2596,7 @@ export interface Runtime {
    * 区別する（監査ログだけを見て「`resolveContested` の正規経路で決着したのか、
    * この救済経路で戻したのか」を後から読めるようにするため）。`opts.reason` を渡すと
    * `meta.note` に追加で入る。
+   * `meta.contestedWithId` には、forget された（または見つからない）対向の id が入る（Issue #1160）。
    *
    * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` から `'active'` へ
    * 離れた時点で、既存の段1 status ゲート・段3 mandatory companion retrieval から自然に
@@ -4912,10 +4917,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     const actor = opts?.actor ?? { type: "system" };
-    const meta: Record<string, unknown> =
+    // Issue #1160: 両側のイベントに対向の id（`contestedWithId`）を載せる——解決のときに
+    // `contested_with_id` はクリアされるので、監査ログに残さないと「誰と対だったか」が後から追えない。
+    const buildMeta = (contestedWithId: MemoryId): Record<string, unknown> =>
       opts?.reason === undefined
-        ? { reason: "contested" }
-        : { reason: "contested", note: opts.reason };
+        ? { reason: "contested", contestedWithId }
+        : { reason: "contested", note: opts.reason, contestedWithId };
 
     try {
       const { first, second } = await markContestedPair.call(
@@ -4929,7 +4936,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             kind: "updated",
             actor,
             digestSnapshot: byId.get(firstId)!.digest,
-            meta,
+            meta: buildMeta(secondId),
           },
         },
         {
@@ -4940,7 +4947,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             kind: "updated",
             actor,
             digestSnapshot: byId.get(secondId)!.digest,
-            meta,
+            meta: buildMeta(firstId),
           },
         },
       );
@@ -5038,16 +5045,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const actor = opts?.actor ?? { type: "system" };
     const resolutionKind = resolution.kind;
-    const buildMeta = (): Record<string, unknown> =>
+    // Issue #1160: 勝者・敗者・決着の種類によらず、どのイベントにも対向の id（`contestedWithId`）を
+    // 載せる——解決のときに `contested_with_id` はクリアされるので、`both_active` の対は監査ログに
+    // 残さないと誰と対だったかが消える。敗者の `superseded` は `supersededById` も持つ（値は同じ）が、
+    // 同じキーで相手を引けるように `contestedWithId` も入れる。
+    const buildMeta = (contestedWithId: MemoryId): Record<string, unknown> =>
       opts?.reason === undefined
-        ? { reason: "contested_resolved", resolution: resolutionKind }
-        : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
+        ? { reason: "contested_resolved", resolution: resolutionKind, contestedWithId }
+        : {
+            reason: "contested_resolved",
+            resolution: resolutionKind,
+            note: opts.reason,
+            contestedWithId,
+          };
 
     // `docs/memory-model.md` §11 行7「`updated` または `superseded`」: `both_active` は
     // 両側とも `updated`、`supersede` は勝者が `updated`・敗者が `superseded`。
     const buildSide = (
       id: MemoryId,
       memory: Memory,
+      contestedWithId: MemoryId,
     ): {
       id: MemoryId;
       status: "active" | "superseded";
@@ -5064,8 +5081,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         actor,
         digestSnapshot: memory.digest,
         // 敗者の superseded には、置き換えた側（勝者）の id を残す——consolidate・reextract の
-        // superseded と同じ形（ADR 0150 追記）。勝者の updated には足さない。
-        meta: supersededById === undefined ? buildMeta() : { ...buildMeta(), supersededById },
+        // superseded と同じ形（ADR 0150 追記）。勝者の updated には足さない（相手は contestedWithId で引ける）。
+        meta:
+          supersededById === undefined
+            ? buildMeta(contestedWithId)
+            : { ...buildMeta(contestedWithId), supersededById },
       });
       if (resolution.kind === "both_active") {
         return { id, status: "active", event: buildEvent("updated") };
@@ -5085,8 +5105,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       const { first, second } = await resolveContestedPair.call(
         deps.memoryStore,
         ctx,
-        buildSide(firstId, firstMemory!),
-        buildSide(secondId, secondMemory!),
+        buildSide(firstId, firstMemory!, secondId),
+        buildSide(secondId, secondMemory!, firstId),
       );
       return { supported: true, outcome: { kind: "resolved", first, second } };
     } catch (error) {
@@ -5169,8 +5189,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const actor = opts?.actor ?? { type: "system" };
     const meta: Record<string, unknown> =
       opts?.reason === undefined
-        ? { reason: "contested_resolved", resolution: "orphan_reclaimed" }
-        : { reason: "contested_resolved", resolution: "orphan_reclaimed", note: opts.reason };
+        ? { reason: "contested_resolved", resolution: "orphan_reclaimed", contestedWithId }
+        : {
+            reason: "contested_resolved",
+            resolution: "orphan_reclaimed",
+            note: opts.reason,
+            contestedWithId,
+          };
     const event: NewMemoryEvent = {
       tenantId: ctx.tenantId,
       memoryId: survivorId,
