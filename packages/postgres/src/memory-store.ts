@@ -92,6 +92,13 @@ function subjectIdMatches(subjectId: string | null): SQL {
   return subjectId === null ? sql`subject_id IS NULL` : sql`subject_id = ${subjectId}`;
 }
 
+/**
+ * `MemoryStore` の PostgreSQL 実装（リファレンス実装）。契約は `@mnemora/core` の `MemoryStore` の各メソッドの doc が正で、
+ * このクラスのメソッドの doc は Postgres での振る舞いと、契約から外れる点を書く。
+ *
+ * status を書く口が投げる名前の付いたエラー（`MemoryStatusConflictError`・`ContestedWithoutCompanionError`）は、
+ * 各メソッドの doc に書いてある。値域の外の値・列挙に無い値は、Postgres の CHECK 制約・型の検査による例外になる。
+ */
 export class PostgresMemoryStore implements MemoryStore {
   constructor(private readonly db: Db) {}
 
@@ -271,6 +278,8 @@ export class PostgresMemoryStore implements MemoryStore {
    * 逆に入力をそのまま保持するため、ここで両者の値が食い違う——この非対称は現状の
    * 契約として `MemoryStore.createMemory` の interface doc コメントに記録してある
    * （`@mnemora/core`）。挙動は変えない。
+   *
+   * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
    */
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
     // ADR 0140: DB へ1バイトも書く前に落とす（`supersededByIndex` の範囲検査と同じ位置）。
@@ -360,6 +369,8 @@ export class PostgresMemoryStore implements MemoryStore {
    * INSERT と outbox への埋め込みジョブ書き込みを同一トランザクションで行う。抽出の
    * 冪等キーに衝突した場合（`created: false`）は埋め込みジョブを作らない——既に埋め込み済み
    * か、既に埋め込みジョブが積まれているはずの Memory に対して重複ジョブを積まない。
+   *
+   * `status: "contested"` で `contestedWithId` が無い入力は、何も書かずに {@link ContestedWithoutCompanionError} を投げる。
    */
   async createMemoryWithOutbox(
     ctx: Ctx,
@@ -528,6 +539,8 @@ export class PostgresMemoryStore implements MemoryStore {
    * {@link MemoryStatusConflictError}。**この読み直しは弾かれた後に行うため、
    * `observedStatus` は弾かれた瞬間の値ではない**（`MemoryStatusConflictError` の
    * doc コメント参照）。
+   *
+   * `"contested"` への遷移は、この口では常に {@link ContestedWithoutCompanionError} を投げる（`markContestedPair` を使う）。
    */
   async updateStatus(
     ctx: Ctx,
@@ -589,6 +602,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * D-ingest-1）。CAS に弾かれた場合・対象が存在しない場合は、UPDATE が0行のまま
    * この関数を抜けて例外を投げるだけなので、`memory_events` への INSERT は実行されない
    * ——ロールバックを待つまでもなく、そもそも書き込みコマンド自体を発行しない。
+   *
+   * 投げるもの: `"contested"` への遷移は {@link ContestedWithoutCompanionError}、CAS に弾かれたら
+   * {@link MemoryStatusConflictError}（どちらも status もイベントも書かない）。
    */
   async updateStatusWithEvent(
     ctx: Ctx,
@@ -679,6 +695,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * FK 違反にはならない（Postgres は同一トランザクション内の自分の書き込みを見る）。
    * CAS に弾かれた場合（0行 UPDATE、かつ対象は存在する）は `conflicted` に積んで
    * トランザクションはそのまま commit する——ここで throw しない。
+   *
+   * ⚠ 新しい行に `status: "contested"` で `contestedWithId` が無いものがあれば、何も書かずに
+   * {@link ContestedWithoutCompanionError} を投げる（これは CAS の弾きとは別で、例外になる）。
    */
   async supersedeWithNewMemories(
     ctx: Ctx,
@@ -2846,6 +2865,10 @@ export function buildRequeueEmbedTargetSelect(ctx: Ctx, opts: RequeueEmbedJobsOp
 /** PostgreSQL の timestamptz の下限（4714-11-24 BC 00:00:00 UTC。天文学的年 -4713）。 */
 const PG_TIMESTAMPTZ_MIN_MS = Date.UTC(-4713, 10, 24);
 
+/**
+ * `purgeExpiredEvents` が消す対象の `memory_events` の行を選ぶ SELECT を組み立てる（`kind <> 'events_purged'`、
+ * `at < opts.olderThan`、古い順に `opts.limit + 1` 件——上限に届いたかを判定するために1件多く取る）。詳しい理由は、すぐ上の `PG_TIMESTAMPTZ_MIN_MS` の直前にある説明を見ること。
+ */
 export function buildPurgeExpiredEventsTargetSelect(
   ctx: Ctx,
   opts: PurgeExpiredEventsOptions,

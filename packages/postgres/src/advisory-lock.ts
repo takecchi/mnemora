@@ -81,7 +81,9 @@ export class AdvisoryLockUnavailableError extends Error {
  * `RegisterEmbeddingSpaceLock*Error`——の役目）。そのためファクトリを渡してもらう。
  */
 export interface AdvisoryLockErrorFactories {
+  /** 待つ上限を超えたときに投げるエラーを作る。`waitedMs` は実際に待った時間（ミリ秒）。 */
   timeout: (waitedMs: number, cause: unknown) => Error;
+  /** 待つ前に、ロックを取れなかった（接続の失敗など）ときに投げるエラーを作る。 */
   unavailable: (cause: unknown) => Error;
 }
 

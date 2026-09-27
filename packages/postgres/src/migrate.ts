@@ -294,6 +294,7 @@ async function verifyRequiredExtensions(
   }
 }
 
+/** {@link runMigrations} の設定。スキーマの指定は {@link SchemaNamespaceOptions} から継ぐ。 */
 export interface RunMigrationsOptions extends SchemaNamespaceOptions {
   /**
    * advisory lock を待つ上限（ミリ秒）。既定は {@link DEFAULT_LOCK_TIMEOUT_MS}。
@@ -354,7 +355,9 @@ export function migrationLockKeyFor(schema?: string): bigint {
   return deriveAdvisoryLockKey(`mnemora:runMigrations:advisory-lock:${schema}`);
 }
 
+/** {@link runMigrations} の戻り値。 */
 export interface RunMigrationsResult {
+  /** この呼び出しで当てた migration のファイル名（当てた順）。適用済みのものは含まない。何も当てなければ空配列。 */
   applied: string[];
   /**
    * 排他の観測値。`waitedMs` は「ロックが空くまで実際に待った時間」（ミリ秒）。
@@ -803,6 +806,7 @@ export async function runMigrations(
   }
 }
 
+/** `analyzeMemories` の設定。 */
 export interface AnalyzeMemoriesOptions {
   /**
    * `memories` テーブルを置くスキーマ。`RunMigrationsOptions.schema` と同じ意味・同じ検証
@@ -812,6 +816,7 @@ export interface AnalyzeMemoriesOptions {
   schema?: string;
 }
 
+/** `analyzeMemories` の戻り値。 */
 export interface AnalyzeMemoriesResult {
   /** 実際に `ANALYZE` を発行した対象（`schema` を指定した場合はスキーマ修飾済み）。 */
   table: string;

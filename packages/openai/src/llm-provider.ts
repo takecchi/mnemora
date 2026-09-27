@@ -34,7 +34,13 @@ export interface OpenAILLMProviderOptions {
    * `fetch` が受け付ける値は拒まない。`client` を渡したときは検査しない。
    */
   apiKey?: string;
+  /** OpenAI のチャットモデル名（例: `gpt-4o-mini`）。必須で、既定値は無い。 */
   model: string;
+  /**
+   * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
+   * キーの検査もしない。⚠ `openai` を自分の依存として入れるときは、`@mnemora/openai` が固定している版と
+   * 同じにすること——違う版だと型が食い違う（packages/openai/README.md の 2026-09-27 追記）。
+   */
   client?: Pick<OpenAI, "chat">;
   /**
    * `chat.completions.create` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
@@ -166,6 +172,15 @@ function toOpenAIMessages(
   return messages;
 }
 
+/**
+ * OpenAI の Chat Completions を呼ぶ `LLMProvider`。設定は {@link OpenAILLMProviderOptions} を見ること。
+ *
+ * 構築時: `client` を省き、キーが見つからなければ OpenAI の SDK が `OpenAIError`（`Missing credentials`）を投げる。
+ * キーがヘッダに載せられない文字を含むときは、キーを含まない `Error` を投げる（`apiKey` の doc）。
+ *
+ * 拒否・切り詰め・空応答は {@link OpenAILLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
+ * HTTP の失敗・認証の失敗・400 などは、SDK の例外がそのまま伝わる。
+ */
 export class OpenAILLMProvider implements LLMProvider {
   private readonly client: Pick<OpenAI, "chat">;
   private readonly model: string;
@@ -190,6 +205,13 @@ export class OpenAILLMProvider implements LLMProvider {
     this.temperature = options.temperature;
   }
 
+  /**
+   * `req` を1回送り、最初の選択肢の本文を返す。
+   *
+   * 拒否（`message.refusal`・`finish_reason === "content_filter"`）は `kind: "refusal"`、`finish_reason === "length"` は
+   * `kind: "truncated"` の {@link OpenAILLMProviderError} を投げる。⚠ どちらでもない空応答は、例外にせず空文字を返す
+   * （ADR 0072「引き受けた負債」2。`@mnemora/anthropic` も同じ形）。
+   */
   async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
     const response = await this.client.chat.completions.create({
       model: this.model,
@@ -212,6 +234,10 @@ export class OpenAILLMProvider implements LLMProvider {
    * ⚠ **送る前に「OpenAI が受け付ける形か」は検査しない**（#1148、今の振る舞い）。`z.record`・`z.tuple`・
    * `z.date`・`transform` は、送った後に OpenAI が `BadRequestError`（HTTP 400、`param: response_format`）で拒む
    * （【実測 2026-09-27】）。`z.lazy`（再帰）・`default`・根が union（包んで送る）は通る。一覧は README。
+   *
+   * 投げるもの: 拒否・切り詰めは `complete` と同じ {@link OpenAILLMProviderError}（`kind: "refusal"`・`"truncated"`）、
+   * 本文が空・欠落なら `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
+   * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
    */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const format = translateForOpenAIStructuredOutput("mnemora_structured_output", req.schema);

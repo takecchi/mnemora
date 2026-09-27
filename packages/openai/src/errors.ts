@@ -61,7 +61,9 @@ export type OpenAILLMFailureKind =
   /** 上記のどちらでもないのに、`content` が空/欠落だった */
   | "no_content";
 
+/** {@link OpenAILLMProviderError} のコンストラクタに渡す値。 */
 export interface OpenAILLMProviderErrorOptions {
+  /** 失敗の種類（{@link OpenAILLMFailureKind}）。 */
   kind: OpenAILLMFailureKind;
   /** SDK が返した生の `finish_reason`。分からなければ `null`（偽 client など） */
   finishReason?: string | null;
@@ -98,8 +100,11 @@ function defaultMessage(options: OpenAILLMProviderErrorOptions): string {
  * `kind` は値なのでその影響を受けない。
  */
 export class OpenAILLMProviderError extends Error {
+  /** 失敗の種類。分岐はこの値で行う。 */
   readonly kind: OpenAILLMFailureKind;
+  /** SDK が返した生の `finish_reason`。分からなければ `null`。 */
   readonly finishReason: string | null;
+  /** `message.refusal` の中身（拒否理由の文面）。無ければ `null`。 */
   readonly refusalMessage: string | null;
 
   constructor(options: OpenAILLMProviderErrorOptions) {
