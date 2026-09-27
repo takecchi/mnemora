@@ -98,6 +98,17 @@ interface Kit {
   memoryStore: PostgresMemoryStore;
 }
 
+/**
+ * runtime の時計を少し先へ進める。outbox のジョブの `available_at` は DB の `now()` で書かれ、
+ * `tick()` は runtime の時計の「いま」と比べて claim する。DB の時計が Node の時計より
+ * わずかに先に進んでいると、作った直後のジョブがまだ claim できず、tick の往復数が
+ * そのぶん減って「1件あたりの増分」が揺れる（【実測 2026-09-27】CI で `tick（embed）` が
+ * N=1→5 で 3.75、N=5→20 で 5.33 になった——N=5 の回だけジョブが1件 claim されなかった形。
+ * 手元で runtime の時計を2秒過去にずらすと、tick の2本だけが同じように赤になった）。
+ * ずれの大きさに依存しないよう、十分先（60秒）にする。
+ */
+const CLOCK_AHEAD_MS = 60_000;
+
 async function kit(): Promise<Kit> {
   await resetTestDatabase();
   const { db } = await getTestClient();
@@ -114,6 +125,7 @@ async function kit(): Promise<Kit> {
       embed: async (_ctx, texts) => texts.map(() => [1, 0, 0]),
     },
     hashContent: (content: string) => `sha256(${content})`,
+    clock: { now: () => new Date(Date.now() + CLOCK_AHEAD_MS) },
   });
   return { runtime, memoryStore };
 }
