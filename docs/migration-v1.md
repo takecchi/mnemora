@@ -1001,9 +1001,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ## 🔴 破壊的変更（v1.0.1 → 次の版）—— **未リリース。確定は0件（ほかに保留が在る）**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`e15033a`**（PR #1071）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.1`（`cf11cd6`）… **`3a8448c`**（PR #1103）の範囲を数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた）。`main` がこれより進めば、数えていない範囲が増える——**件数はこの節にも冒頭の表にも書かない。**
 
-**型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。`git diff 951ad44..e15033a -- scripts/__snapshots__/public-api/` も追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。
+**型の上**: `git diff dce0f71..951ad44 -- scripts/__snapshots__/public-api/` は追加だけで、削除行は0だった（`dce0f71` までの分は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節が判定済み）。足されたのは任意のメソッド（`reinforceMany?`・`recordUsageAndReinforce?`・`resolveOrphanedContested?`・`searchMany?`）、任意の欄（`basisLost?`・`externalId?`）、新しい型と関数である。`git diff 951ad44..3a8448c -- scripts/__snapshots__/public-api/` も追加だけで、`@mnemora/postgres` の公開関数 `buildLexicalSearchSelect`/`buildTrigramLexicalSearchSelect` に任意の `ctxTenantId?` が増えたことと、引数名の変更（`_ctx` → `ctx`）だけである。
 
 **実行時**: 次の2種類に分けた。
 
@@ -1012,6 +1012,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore.requeueEmbedJobs` が、Postgres の拒む `limit`（負数・`NaN`・`Infinity`・非整数・2^63 以上）で例外を投げるようになった（PR #1058）。
   - `@mnemora/testkit/fixtures` の `InMemoryOutboxStore.claimBatch` が、リースの境界時刻が `Date` にならない `leaseMs`（`NaN`・`±Infinity`・範囲外）で例外を投げるようになった（PR #1059）。
   - `@mnemora/testkit/fixtures` の擬似 store が、bigint に収まらない `limit`（2^63 以上）で例外を投げるようになった（PR #1061）。
+  - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、Observation を書く口の欄（`subjectId`・`externalId`・`kind`・`payload`・`attributes`）と `createMemory` の `attributes`・`provenance` の NUL（U+0000）で例外を投げるようになった（PR #1073）。
   - `@mnemora/testkit/fixtures` の `InMemoryMemoryStore` が、float4 で 0 に丸まる `halfLifeHours`・`strength`（例: `1e-300`）で例外を投げるようになった（PR #1095）。
 - ⭕ **非破壊と数えたもの**——例外を投げなくなった修正と、例外を投げず公開の fixture の結果だけが変わる修正。**この判定はクローン miku の判断であり、オーナーの判断ではない（覆りうる）。**
   - `@mnemora/local-embedding` の `LocalEmbeddingProvider.embed()` が、有限でない成分（`NaN`・`Infinity`）を含むベクトルで例外を投げるようになった（Issue #992、PR #993）。本物のモデルはこの値を返さないので、当たるのは、そういう値を返す pipeline を注入していた利用者である。⚠ 公開の fixture ではないので、狭めた基準の文言には当たらない。扱いをクローン miku に確認しているあいだ、ここに置く。 有限でないベクトルを返すのはもともと `EmbeddingProvider` の約束に反した出力であり、それを黙って返すのをやめた修正なので非破壊と数える（クローン miku の判断。オーナーの判断ではない）。
@@ -1022,6 +1023,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - `closePostgresClient` の2回目以降の呼び出しが reject しなくなった（Issue #935）。
   - `PostgresOutboxStore.fail` が、`error` に NUL を含むときに例外を投げず、終端の失敗を書くようになった（PR #1060）。
   - `PostgresVectorStore.search`/`searchMany` が、有限でない成分を含むクエリで例外を投げず、比較不能として扱うようになった（PR #1069）。
+  - `@mnemora/openai`・`@mnemora/anthropic` の adapter が、HTTP ヘッダに載せられない API キー（途中に CR・LF・NUL）を、キーを含まない例外で構築時に拒むようになった（Issue #1080、PR #1083）。一度も正しく送れなかった入力を早く拒むもので、キーが漏れる例外を投げていた経路を塞いだ。
   - `recall()` のクエリ埋め込みが `[]` を返したとき、ANN の段を黙って飛ばさず `embedding_provider_unavailable` を積むようになった（PR #1068。例外は投げない。docs/recall.md の約束へ合わせた修正）。
 
   理由: どれも doc が約束していた振る舞い（「例外はこのメソッドの外へは投げない」「2回目の close は何もしない」など）へ実装を合わせた修正であり、約束の範囲内の利用者は壊れない。約束に反して例外を catch することに頼っていたコードは、例外が来なくなるぶん挙動が変わる——[CHANGELOG.md](../CHANGELOG.md) の各項目に、その注意を1行ずつ添えた。

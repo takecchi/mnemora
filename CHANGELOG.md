@@ -45,8 +45,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.1` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`e15033a`**（PR #1071）の範囲を
-数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から広げた。下の追記2）。
+⭐ **数えた基準を明記する。**この節は `v1.0.1`（tag が指す `cf11cd6`）… **`3a8448c`**（PR #1103）の範囲を
+数えたものである（2026-09-27 の2回目の棚卸しで `951ad44` から、3回目の棚卸しで `e15033a` から広げた。下の追記2・追記3）。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -89,6 +89,10 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
 - ⭕ **非破壊と数えたもの**: 例外を投げず、公開の fixture の結果だけが変わるもの——`search` の3口が `ctx.tenantId` でも絞るようになった件（Issue #1050、PR #1056。`ctx` と `filter.tenantId` が食い違う呼び出しは空を返す）。上の訂正で狭めた基準により、この節のそれより前の範囲にある同じ種類の変更（`InMemoryLexicalStore` の一致判定 Issue #951・同点の並び順 PR #875・クエリの上限 PR #919、`InMemoryMemoryStore.listLabels?` の並び順 PR #906、`InMemoryVectorStore` の次元違いの距離 PR #915・距離 `NaN` の候補の位置 PR #985、`InMemoryOutboxStore` の終端の付いた行への `complete`/`fail` PR #830）も非破壊の Fixed として数える（クローン miku の判断）。ほかに、`PostgresVectorStore.search`/`searchMany` が有限でない成分を含むクエリで例外を投げず比較不能として扱うようになった修正（PR #1069。例外を投げなくなった側）、`recall()` のクエリ埋め込みが `[]` のとき `embedding_provider_unavailable` を積むようになった修正（PR #1068）、`PostgresOutboxStore.fail` が `error` の NUL で例外を投げなくなった修正（PR #1060。例外を投げなくなった側）、`timestamptz` の読み（Issue #1039）と書き（Issue #1040）のずれの修正、purge 後に埋め込みを残さない修正（Issue #1035）、`recall()` の `omitted` の二重計上の修正（Issue #1019・#1020・#1026）、`0022` がビューで止まらなくなった修正（Issue #1038）。どれも誤った値・誤った件数を返していたものを直したもので、公開の fixture の結果も、新しい例外も伴わない。 あわせて、`@mnemora/openai`・`@mnemora/anthropic` の adapter が、HTTP ヘッダに載せられない API キー（途中に CR・LF・NUL など）を構築時にキーを含まない例外で拒むようになった件（Issue #1080。この棚卸しの範囲 `e15033a` より後に入る）も非破壊と数える——新しく例外を投げるが、fixture ではなく本物の adapter で、もともと一度も送れない値を送る前に拒むだけであり、正しく動いていた利用者の振る舞いは変わらない（Issue #992 と同じ扱い。**クローン miku の判断であり、オーナーの判断ではない**）。 あわせて、`Runtime.reextract` が使用報告の Observation（`kind: "usage"`）に、存在しない Observation と同じ種類の `Error` を投げるようになった件（Issue #1099。この棚卸しの範囲 `e15033a` より後に入る）も非破壊と数える——新しく例外を投げるが、以前の振る舞い（使用報告の payload の JSON を本文とする `stated` の記憶を作る）は一度も正しく動いたことが無い（Issue #992・#1080 と同じ扱い。**クローン miku の判断であり、オーナーの判断ではない**）。
 
 ⟹ **この節の範囲（`v1.0.1`…`e15033a`）で、確定した破壊的変更は無い（上の保留を除く）。**
+
+**⚠ 2026-09-27 追記3（3回目の棚卸し。`3a8448c` まで広げた）**: `e15033a`…`3a8448c` に `main` へ入った PR を全部当てた。出荷される6パッケージの利用者に見える変更は、どれもこの節に載っている（PR 番号か、その PR が閉じた Issue 番号で受けている）。公開 API の型の差分は無い。実行時の変化の分け方は上の追記2の一覧に入っている——保留は PR #1073・#1095（公開の fixture が不正な入力に新しく例外を投げる）、非破壊は Issue #1080（PR #1083。一度も正しく送れなかった API キーを、本物の adapter が構築時にキーを含まない例外で早く拒む）。PR #1086・#1087 は結果を変えない往復数の修正である。棚卸しで直したもの: PR #1061 の項目が PR #923 の項目の文の途中に割り込んでいたのを、PR #923 の項目の後ろへ移した。PR #1058・#1059・#1061・#1073 の項目に PR 番号を足した。
+
+⟹ **この節の範囲（`v1.0.1`…`3a8448c`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
 ### Added
 
@@ -438,15 +442,15 @@ CI run は success）。**この節はこれまで「`v1.0.0` からの未リリ
   `MemoryStore.purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`、下の
   `[1.0.1]` 節の PR #811/#813 相当）より実害が大きかった。`PostgresMemoryStore.archiveDecayed`
   と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くように
-- **`@mnemora/testkit` の擬似 store が、bigint に収まらない `limit`（2^63 以上）を受け入れていた**——`claimBatch`・`VectorStore.search`・`LexicalStore.search`・`EventStore.list`・`purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`・`archiveDecayed`。Postgres は同じ値を `LIMIT` の bigint パラメータとして拒む（`2 ** 63` は `out of range for type bigint`、`1e21` 以上は指数表記になり `invalid input syntax for type bigint`）。`Number.isInteger` を通るため、負数・`NaN`・`Infinity`・非整数のガード（PR #811/#813/#923）をすり抜けていた。書き込みを持つ `claimBatch`・`archiveDecayed` では対象を全件書き換えていた。同じ値をクエリの前に弾くようにした（2^63 未満の値の挙動は変えていない）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
   した（新しい正常系の挙動は変えていない）（[Issue #880](https://github.com/takecchi/mnemora/issues/880)、PR #923）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
-- **`InMemoryOutboxStore.claimBatch`（`@mnemora/testkit` の擬似 `OutboxStore`）が、`leaseMs` に `NaN`・`±Infinity`・`Date` の範囲を超える値を渡されても例外を投げず、未 claim のジョブを claim していた**——`PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を `timestamptz` として送るため、どちらかが Invalid Date になると例外になる。同じ入力をクエリの前に弾くようにした（有限の `leaseMs` の挙動は変えていない）。`Date` としては有効でも Postgres の範囲を外れる値は揃えていない（Issue #1041）。
+- **`@mnemora/testkit` の擬似 store が、bigint に収まらない `limit`（2^63 以上）を受け入れていた**——`claimBatch`・`VectorStore.search`・`LexicalStore.search`・`EventStore.list`・`purgeExpiredEvents`・`aggregateScope` の `digestBand.limit`・`archiveDecayed`。Postgres は同じ値を `LIMIT` の bigint パラメータとして拒む（`2 ** 63` は `out of range for type bigint`、`1e21` 以上は指数表記になり `invalid input syntax for type bigint`）。`Number.isInteger` を通るため、負数・`NaN`・`Infinity`・非整数のガード（PR #811/#813/#923）をすり抜けていた。書き込みを持つ `claimBatch`・`archiveDecayed` では対象を全件書き換えていた。同じ値をクエリの前に弾くようにした（2^63 未満の値の挙動は変えていない）（PR #1061）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
-- **`InMemoryMemoryStore.requeueEmbedJobs`（`@mnemora/testkit` の擬似 `MemoryStore`）も、`opts.limit` に負数・`NaN`・`Infinity`・非整数・bigint に収まらない値（2^63 以上）を渡されると例外を投げず、`.slice(0, Math.max(0, opts.limit))` の丸めに従って積み直していた**——`archiveDecayed`（Issue #880）と同じ形が、この口に残っていた。`limit: Infinity` は対象を全件、`limit: 1.5` は1件、`embeddingStatus` を `pending` に戻して embed ジョブを積んでいた。`PostgresMemoryStore.requeueEmbedJobs` と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くようにした（正常系の挙動は変えていない）。
+- **`InMemoryOutboxStore.claimBatch`（`@mnemora/testkit` の擬似 `OutboxStore`）が、`leaseMs` に `NaN`・`±Infinity`・`Date` の範囲を超える値を渡されても例外を投げず、未 claim のジョブを claim していた**——`PostgresOutboxStore.claimBatch` は `now` と `new Date(now - leaseMs)` を `timestamptz` として送るため、どちらかが Invalid Date になると例外になる。同じ入力をクエリの前に弾くようにした（有限の `leaseMs` の挙動は変えていない）。`Date` としては有効でも Postgres の範囲を外れる値は揃えていない（Issue #1041）（PR #1059）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
-- **`InMemoryMemoryStore`（`@mnemora/testkit` の擬似 `MemoryStore`）が、Observation を書く口（`createObservation`・`createObservationWithOutbox`）で NUL（U+0000）を含む値を受け入れていた**——`subjectId`・`externalId`・`kind`（Postgres の `text` 列）、`payload`（入れ子の値・キーも含む）・`attributes`（`jsonb` 列）。`createMemory` の `attributes`・`provenance`（`jsonb` 列）も同じだった。Postgres はどれも例外にする（Issue #816 の NUL 側のうち、PR #923/#928 が扱っていなかった欄）。同じ値を書き込みの前に弾くようにした。孤立サロゲートは扱っていない。
+- **`InMemoryMemoryStore.requeueEmbedJobs`（`@mnemora/testkit` の擬似 `MemoryStore`）も、`opts.limit` に負数・`NaN`・`Infinity`・非整数・bigint に収まらない値（2^63 以上）を渡されると例外を投げず、`.slice(0, Math.max(0, opts.limit))` の丸めに従って積み直していた**——`archiveDecayed`（Issue #880）と同じ形が、この口に残っていた。`limit: Infinity` は対象を全件、`limit: 1.5` は1件、`embeddingStatus` を `pending` に戻して embed ジョブを積んでいた。`PostgresMemoryStore.requeueEmbedJobs` と同じく、生 SQL の `LIMIT`（bigint パラメータ）が拒む入力をクエリの前に弾くようにした（正常系の挙動は変えていない）（PR #1058）。
+  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
+- **`InMemoryMemoryStore`（`@mnemora/testkit` の擬似 `MemoryStore`）が、Observation を書く口（`createObservation`・`createObservationWithOutbox`）で NUL（U+0000）を含む値を受け入れていた**——`subjectId`・`externalId`・`kind`（Postgres の `text` 列）、`payload`（入れ子の値・キーも含む）・`attributes`（`jsonb` 列）。`createMemory` の `attributes`・`provenance`（`jsonb` 列）も同じだった。Postgres はどれも例外にする（Issue #816 の NUL 側のうち、PR #923/#928 が扱っていなかった欄）。同じ値を書き込みの前に弾くようにした。孤立サロゲートは扱っていない（PR #1073）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
 - **`InMemoryMemoryStore`（`@mnemora/testkit` の擬似 `MemoryStore`）が、float4 で 0 に丸まる `halfLifeHours`・`strength`（例: `1e-300`・`strength: 1e-46`）を受け付けていた**——`memories.half_life_hours`・`strength` は Postgres の `real`（float4）列であり、`PostgresMemoryStore` は 0 でない値が 0 に丸まるとき `out of range for type real` で拒む。Issue #817（PR #923）が塞いだのは float4 の上側（`Infinity` へ丸まる）だけで、下側が残っていた。`createMemory`・`createMemoryWithOutbox` で同じく拒むようにした（境界は `Math.fround(x)` が 0 になるか。float4 の非正規数に収まる `1e-45` は受け付ける）（PR #1095）。
   ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
