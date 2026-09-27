@@ -1129,7 +1129,9 @@ NOT NULL とし、全ての一意制約・索引の先頭列に置く**（[ADR 0
   `SELECT * FROM pg_available_extensions WHERE name = 'vector';` で確認すること。
 - 同様に、PostgreSQL 本体側の下限バージョンと pgvector 0.8 系の組み合わせについても
   網羅的な検証はしていない。`gen_random_uuid()` を拡張なしで使う前提を置いているが
-  （PostgreSQL 16 以降で標準搭載）、それより前のバージョンでは `pgcrypto` 拡張が要る。
+  （PostgreSQL 13 以降で標準搭載）、それより前のバージョンでは `pgcrypto` 拡張が要る。
+  （⚠ 2026-09-28 訂正: 以前は「16 以降」と書いていた。`gen_random_uuid()` の追加は
+  PostgreSQL 13.0 のリリースノート（<https://www.postgresql.org/docs/release/13.0/>）に載っている。）
 
 ### `observations`（Phase 1）
 

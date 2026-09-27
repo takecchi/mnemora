@@ -343,17 +343,20 @@ export interface VectorStore {
    * 各クエリを独立した `search()` 呼び出しと同じ3段（距離 → `recorded_at` DESC →
    * `memory_id`、Issue #339 / ADR 0170）で並べる。
    *
+   * **例外の有無も `search()` に揃える**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）:
+   * `search()` が投げない入力では、`searchMany` も投げない。`key` はどんな文字列でもよい（NUL（U+0000）を含んで
+   * いてもよい）——`PostgresVectorStore` は key を SQL に送らず、`queries` の添字で結果を引き直す。
+   * `limit` の負数・非整数・`NaN`、filter の日時の Invalid Date では、`search()` と同じく投げる。
+   * ⚠ 2026-09-28 までは `PostgresVectorStore` が key を `text` として SQL に送っていたので、NUL を含む key で
+   * 投げていた（`search()` には key が無いので投げない）。
+   *
    * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの。契約の外で、どちらに揃えるかは未決）:**
    * - **`queries` に同じ `key` が2回以上あるとき**（[Issue #1284](https://github.com/takecchi/mnemora/issues/1284)）:
    *   `PostgresVectorStore` は `Map` の1つの key に、その key のクエリすべての結果を続けて積む（件数は結果の和で、
    *   `limit` を超えうる。塊の順は約束しない）。`search()` を並べたものとは一致しない。`Runtime` はアンカーの
    *   `memoryId` を key にするので、同じ key を渡さない。
-   * - **例外の有無**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）: 契約が一致を約束するのは結果で
-   *   あり、`search()` が投げない入力で `searchMany` が投げないことは約束していない。`PostgresVectorStore` は key を
-   *   `text` として SQL に送るので、NUL（U+0000）を含む key で投げる（`search()` には key が無い）。
-   *   `limit` の負数・非整数・`NaN`、filter の日時の Invalid Date では、`search()` と同じく投げる。
    * 【実測 2026-09-28】`packages/postgres/src/__tests__/vector-search-many-diff.postgres.test.ts`
-   * （`search()` を並べたものとの差分の歯。上の2つは許可リストに Issue を名指しして載せてある）。
+   * （`search()` を並べたものとの差分の歯。例外の有無も比べる。上の #1284 は許可リストに Issue を名指しして載せてある）。
    */
   searchMany?(
     ctx: Ctx,

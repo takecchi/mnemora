@@ -345,13 +345,19 @@ export class PostgresVectorStore implements VectorStore {
    * 全クエリで共通、各クエリの結果は `search()` を単独で呼んだ場合と集合・順序が
    * 完全一致する）をそのまま実装する。
    *
-   * **束ね方**: `VALUES` で `(query_key, qvec)` の行を作り、各行に対して
+   * **束ね方**: `VALUES` で `(query_idx, qvec)` の行を作り、各行に対して
    * `LATERAL` で「その `qvec` を使った ANN 検索」を実行する。`LATERAL` の中身は
    * `search()` の `SELECT`（`WHERE`/`ORDER BY`/`LIMIT`）と1文字も変えていない
    * ——変わるのは、クエリベクトルの出どころがプレースホルダ1個（`queryLiteral`）
    * から `q.qvec`（`VALUES` の列）になっただけである。`WHERE` 句は
    * `buildFilterConditions`（`search()` と共有、関数の doc 参照）——クエリベクトルを
    * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
+   *
+   * **key は SQL に送らない**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）: `VALUES` には
+   * `queries` の添字（`0..n-1`）を送り、戻った行を `queries[query_idx].key` へ引き直す。以前は key を `text` の
+   * パラメータとして送っていたので、NUL（U+0000）を含む key を Postgres が拒み、`search()` が投げない入力で
+   * `searchMany` だけが投げていた。同じ key が2回以上あるときは、引き直した先が同じ配列なので、今までどおり
+   * その key に結果を続けて積む（Issue #1284、契約の外で未決）。
    *
    * **`hnsw.iterative_scan` は `search()` と同じ `withRelaxedOrderScan`（このファイル
    * 冒頭）を経由して1回だけ効かせる**——`LATERAL` は同じトランザクション・同じ SELECT
@@ -395,15 +401,16 @@ export class PostgresVectorStore implements VectorStore {
     const whereClause = buildFilterConditions(ctx, opts.filter);
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
-    const valuesRows = queries.map((q) => {
+    // key ではなく添字を送る（上の doc コメント、Issue #1285）。
+    const valuesRows = queries.map((q, index) => {
       const effectiveQuery = toComparableQuery(q.vector, space.dimensions);
-      return sql`(${q.key}::text, ${toVectorLiteral(effectiveQuery)}::vector)`;
+      return sql`(${index}::int, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
 
     const result = await withRelaxedOrderScan(this.db, (tx) =>
       tx.execute(sql`
-        SELECT q.query_key AS query_key, hit.memory_id AS memory_id, hit.distance AS distance
-        FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_key, qvec)
+        SELECT q.query_idx AS query_idx, hit.memory_id AS memory_id, hit.distance AS distance
+        FROM (VALUES ${sql.join(valuesRows, sql`, `)}) AS q(query_idx, qvec)
         CROSS JOIN LATERAL (
           SELECT combined.memory_id AS memory_id, combined.distance AS distance
           FROM (
@@ -433,8 +440,10 @@ export class PostgresVectorStore implements VectorStore {
       `),
     );
     for (const row of result.rows) {
-      const r = row as unknown as { query_key: string; memory_id: string; distance: number };
-      resultMap.get(r.query_key)?.push({ memoryId: r.memory_id, distance: r.distance });
+      const r = row as unknown as { query_idx: number; memory_id: string; distance: number };
+      resultMap
+        .get(queries[r.query_idx]!.key)
+        ?.push({ memoryId: r.memory_id, distance: r.distance });
     }
     return resultMap;
   }

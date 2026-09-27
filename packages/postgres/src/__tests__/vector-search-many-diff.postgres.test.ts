@@ -19,7 +19,8 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  *   ベクトルの成分は整数にしてある（float4 の丸めは #1268 の範囲）。
  *
  * 🔴 **許可リスト（`KNOWN_DIFFERENCES`）は、契約の外で、揃える先が未決の Issue に在る差だけを持つ**（key の重複は
- * Issue #1284、例外の有無は Issue #1285。今の振る舞いは `searchMany?` の TSDoc に書いてある）。
+ * Issue #1284。今の振る舞いは `searchMany?` の TSDoc に書いてある。例外の有無の差（Issue #1285、NUL を含む key）は
+ * 直したので載せていない——`search` が投げない入力では `searchMany` も投げない）。
  * 各項目は今の振る舞い（`search` 側と `searchMany` 側の戻り値の形）を持ち、実測と違えば落ちる。
  * 許可リストの外で差が出たら落ちる（契約に反する差は `searchMany` を直す）。差が出なくなったら、それも落ちる。
  */
@@ -40,7 +41,6 @@ interface KnownDifference {
 }
 
 const DUPLICATE_KEY = "https://github.com/takecchi/mnemora/issues/1284";
-const EXCEPTION_PARITY = "https://github.com/takecchi/mnemora/issues/1285";
 
 const KNOWN_DIFFERENCES: Readonly<Record<string, KnownDifference>> = {
   "queries:同じ key・同じベクトルを2回": {
@@ -55,7 +55,6 @@ const KNOWN_DIFFERENCES: Readonly<Record<string, KnownDifference>> = {
     searchMany: "returns",
     keys: { searchMany: 1, queries: 2, hitsAreSumOfSearch: true },
   },
-  "queries:key に NUL": { issue: EXCEPTION_PARITY, search: "returns", searchMany: "throws" },
 };
 
 const SPACE = TEST_EMBEDDING_SPACE;

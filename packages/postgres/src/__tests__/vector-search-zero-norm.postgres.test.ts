@@ -234,13 +234,14 @@ describe("PostgresVectorStore.search/searchMany と HNSW（または Index Scan 
         ),
     );
     const rows = (await runForcedIndexOnly(pool, captured)) as unknown as {
-      query_key: string;
+      query_idx: number;
       memory_id: string;
       distance: number;
     }[];
 
-    for (const key of ["anchor-1", "anchor-2"]) {
-      const zeroRow = rows.find((r) => r.query_key === key && r.memory_id === zeroMemoryId);
+    // 打ち直した SQL の行は、key ではなく `queries` の添字を持つ（Issue #1285）。
+    for (const [index, key] of ["anchor-1", "anchor-2"].entries()) {
+      const zeroRow = rows.find((r) => r.query_idx === index && r.memory_id === zeroMemoryId);
       expect(
         zeroRow,
         `🔴 searchMany() の ${key} で、Index Scan 限定の状態でゼロベクトルの候補が消えている（Issue #956）`,
