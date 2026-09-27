@@ -130,14 +130,16 @@ export interface MemoryEvent {
    * | `undefined` の欄（`actor.id` も） | 欄ごと消える | `undefined` の欄が残る |
    * | BigInt | 例外（`append` が失敗する） | そのまま保持する |
    * | 文字列の中の NUL（U+0000）・孤立サロゲート | 例外（書き込みが失敗する） | そのまま保持する |
+   * | 関数・Symbol（欄の値として。`actor` の欄も） | その欄が消える（配列の要素なら `null`）。残りを書いて成功する | 例外（`DataCloneError`。`structuredClone` が写せない）。状態もイベントも書く前に投げる（PR #1231） |
    *
-   * 最後の行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
+   * NUL・孤立サロゲートの行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
    * `@mnemora/postgres` では、状態の書き換えとイベントが同じトランザクションにあるので、両方とも取り消され、
    * 途中まで書かれたものは残らない（`forget` は `{ kind: "failed" }` を返し、`markContested` は DB の例外を投げる）。
    * testkit の fixture は状態を書き換え、文字列をそのまま監査ログに残す。
    * Observation・Memory の `jsonb` の欄では fixture も NUL を拒む（PR #1073）が、イベントの側にはその検査が無い。
    * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`event-meta-roundtrip.postgres.test.ts`。
-   * `Runtime` の口は `forget` と `markContested` で当てた）。
+   * `Runtime` の口は `forget` と `markContested` で当てた）。関数・Symbol の行は 2026-09-28 に足した
+   * （同じファイル。`EventStore.append` と `MemoryStore.updateStatusWithEvent` で当てた）。
    */
   meta: Record<string, unknown>;
 }

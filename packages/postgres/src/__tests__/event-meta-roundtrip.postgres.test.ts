@@ -171,6 +171,65 @@ describe("EventStore.append: meta と actor の JSON で往復しない値（今
   }
 });
 
+describe("meta・actor の欄に関数・Symbol（今の振る舞い、Issue #1211 の追補）", () => {
+  const fn = () => 1;
+  for (const [name, makeKit] of KITS) {
+    it(`${name}: EventStore.append`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      const appending = kit.eventStore.append(ctx, {
+        tenantId: ctx.tenantId,
+        memoryId: memory.id,
+        kind: "updated",
+        actor: { type: "system", f: fn } as never,
+        meta: { f: fn, s: Symbol("x"), arr: [fn], keep: 1 },
+      });
+      const eventsOf = async () => (await kit.eventStore.list(ctx, { memoryId: memory.id })).length;
+      if (name === "Postgres") {
+        // JSON.stringify が関数・Symbol の欄を落とし、配列の要素なら null にする。残りを書いて通す。
+        const appended = await appending;
+        const back = (await kit.eventStore.get(ctx, appended.id))!;
+        for (const event of [appended, back]) {
+          expect(event.meta).toStrictEqual({ arr: [null], keep: 1 });
+          expect(event.actor).toStrictEqual({ type: "system" });
+        }
+        expect(await eventsOf()).toBe(1);
+      } else {
+        // structuredClone が写せずに投げる。イベントは積まれない。
+        await expect(appending).rejects.toThrow(/could not be cloned/);
+        expect(await eventsOf()).toBe(0);
+      }
+    });
+
+    it(`${name}: updateStatusWithEvent（状態の書き換えとイベントを1回で書く口）`, async () => {
+      const kit = await makeKit();
+      const memory = await createActive(kit);
+      const updating = kit.memoryStore.updateStatusWithEvent(
+        ctx,
+        memory.id,
+        "forgotten",
+        { expectedStatus: "active" },
+        {
+          tenantId: ctx.tenantId,
+          memoryId: memory.id,
+          kind: "forgotten",
+          actor: { type: "system" },
+          meta: { f: fn, keep: 1 },
+        },
+      );
+      if (name === "Postgres") {
+        const { memory: updated, event } = await updating;
+        expect(updated.status).toBe("forgotten");
+        expect(event.meta).toStrictEqual({ keep: 1 });
+      } else {
+        // 書く前に投げる（PR #1231）——状態は呼ぶ前のまま。
+        await expect(updating).rejects.toThrow(/could not be cloned/);
+        expect((await kit.memoryStore.get(ctx, memory.id))!.status).toBe("active");
+      }
+    });
+  }
+});
+
 describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡したとき（今の振る舞い）", () => {
   for (const [name, makeKit] of KITS) {
     for (const [label, bad] of BAD_STRINGS) {
