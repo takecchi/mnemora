@@ -50,6 +50,8 @@
 // - Invalid Date → `<欄> must be a valid Date`。対象: `createMemory` 系の日時の欄、
 //   `createObservation` 系の `occurredAt`・`recordedAt`・`validFrom`・`validUntil`（`externalId` が同じ既存の行が
 //   在っても拒む）、`reinforce` の `at`、イベントの `at`（#807）。
+//   ⚠ `restoreSupersededBy` の `at` は、戻す対象が在るときだけ拒む。対象が無ければ `{ restored: [] }` を返す
+//   （Postgres は対象が無くても拒む。揃えていない——`MemoryStore.restoreSupersededBy?` の doc、#1229）。
 // - `MemoryEventKind` に無いイベントの `kind`（型を外した呼び出し）→
 //   `memory_events.kind must be one of <9値> (got "<値>")`。対象: `InMemoryEventStore.append` と、
 //   イベントを受け取る `InMemoryMemoryStore` の口（`updateStatusWithEvent`・`supersedeWithNewMemories`・
