@@ -84,6 +84,10 @@ export interface TimeWeightingMemorySeed {
   /**
    * この時刻それぞれで `reinforce` する（時系列順、`recallAt` 以前のものだけ有効）。
    * 省略時は一度も reinforce しない。
+   *
+   * ⚠ `MemoryStore.reinforce` は、`at` が起点（前に書いた `reinforceAt`、無ければ `recordedAt`）より
+   * **狭義に新しいときだけ**書く（Issue #1093・PR #1173）。`recordedAt` と同じ時刻の `reinforceAt`（ケース集合の中に在る）は
+   * 何も書かない——減衰の起点はどちらでも `recordedAt` のままなので、スコアは変わらない。
    */
   reinforceAt?: Date[];
 }
