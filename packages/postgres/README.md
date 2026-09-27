@@ -439,7 +439,7 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 
 `runMigrations`（マイグレーション適用）と `registerEmbeddingSpace`
 （埋め込み空間ごとのテーブル作成）は、それぞれ別の `pg_advisory_lock` キーで
-プロセス間排他を行う（[`src/migrate.ts`](./src/migrate.ts)・
+プロセス間排他を行う（`runMigrations` は、拡張を作る段だけ、下の共有キーも追加で取る）（[`src/migrate.ts`](./src/migrate.ts)・
 [`src/vector-space.ts`](./src/vector-space.ts)）。**`pg_advisory_lock` のキー空間は
 データベース全体で共有される**——同じ DB の別アプリが同じ数値をキーに使っていると
 無関係な処理同士が意図せずブロックし合う。
@@ -451,6 +451,11 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
   sha256 でハッシュして導出した値になる（`deriveAdvisoryLockKey`）。
   - `runMigrations`: シード `mnemora:runMigrations:advisory-lock:<schema>`
   - `registerEmbeddingSpace`: シード `mnemora:registerEmbeddingSpace:advisory-lock:<schema>`
+- 拡張を作る段（`extensionMode: "create"`（既定）で、`CREATE EXTENSION` を含むマイグレーションを流す間だけ）:
+  `--schema` によらず固定の `-1670586062650017388`（`EXTENSION_LOCK_KEY`）。上の schema ごとのキーに**追加で**取る
+  2本目のロックである。拡張は DB 全体に1つしか置けないので、schema の違う `runMigrations` 同士もここで待ち合う
+  （[Issue #757](https://github.com/takecchi/mnemora/issues/757)・[ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)）。
+  適用済みの2回目以降の呼び出しと `extensionMode: "verify"` は、このキーを一切取らない。
 
 > **⚠ `--schema` を省略するときは、接続ロール名と同じ名前のスキーマを DB に作らないこと**
 > （[Issue #779](https://github.com/takecchi/mnemora/issues/779)）:
@@ -500,12 +505,28 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 
 `PostgresLexicalStore`/`PostgresTrigramLexicalStore` は、検索クエリの語数・1語の文字数・
 全体の文字数に上限を持ち、超えた分は先頭から切り詰める（`LEXICAL_QUERY_MAX_DISTINCT_WORDS`
-= 32・`LEXICAL_QUERY_MAX_WORD_CHARS` = 64・`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600。
+= 32・`LEXICAL_QUERY_MAX_WORD_CHARS` = 64・`LEXICAL_QUERY_MAX_TOTAL_CHARS` = 600。この3つの名前は
+内部の定数で、この package からは export していない——値は変えられず、import もできない。
 [Issue #878](https://github.com/takecchi/mnemora/issues/878)・
 [ADR 0092](../../docs/decisions/0092-lexical-or-coverage.md) 追記節）。
 **この上限は、1回の検索にかかる時間を有界にするためのものであり、時間そのものの上限では
 ない。**利用者の入力を検索クエリとして渡す場合は、DB 側でも `statement_timeout`
 （ロール・データベース・接続のいずれかの単位）を設定して併用することを推奨する。
+
+## ほかに export しているもの（約束は各 TSDoc）
+
+上の例と節に出てこない公開の名前を、用途ごとに並べる（どれも `@mnemora/postgres` の入口から import できる）。
+
+| 用途 | 名前 |
+|---|---|
+| 接続 | `createPostgresClient`・`closePostgresClient`（2回目以降は冪等）・`PostgresClient`・`Db` |
+| store | `PostgresEventStore`・`PostgresOutboxStore`・`PostgresTenantSettingsStore`（上の例で使う）、`PostgresTrigramLexicalStore` とその下ごしらえ（`probeTrigramLexicalSupport`・`ensureTrigramLexicalFunctions`・任意の索引 `createOptionalTrigramIndex`、`TrigramLexicalStoreUnavailableError`・`TRIGRAM_LEXICAL_STORE_UNAVAILABLE_ERROR_PREFIX`、`DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD`・`TRIGRAM_NOISE_STOPWORD_PATTERN`） |
+| マイグレーション | `runMigrations`（`RunMigrationsOptions`・`RunMigrationsResult`・`ExtensionMode`）、`runAnalyzeMemories`、`listMigrationFiles`・`DEFAULT_MIGRATIONS_DIR`、`matchCreateExtensionLines`・`stripCreateExtensionStatements` |
+| advisory lock | `acquireAdvisoryLock`・`releaseAdvisoryLock`、同じ接続の上で取る `acquireAdvisoryLockOnClient`・`releaseAdvisoryLockOnClient`、`DEFAULT_LOCK_TIMEOUT_MS`、キーの `MIGRATION_LOCK_KEY`・`REGISTER_EMBEDDING_SPACE_LOCK_KEY`・`EXTENSION_LOCK_KEY` と導出の `migrationLockKeyFor`・`registerEmbeddingSpaceLockKeyFor`、待ちの失敗の `*LockTimeoutError`・`*LockUnavailableError` |
+| 埋め込み空間 | `registerEmbeddingSpace`（`RegisterEmbeddingSpaceOptions`・`RegisterEmbeddingSpaceResult`）、名前の導出 `embeddingSpaceTableName`・`embeddingSpaceIndexName`・`embeddingSpaceZeroNormIndexName` |
+| スキーマ・識別子 | `qualify`・`qualifiedLiteral`・`searchPathFor`・`DEFAULT_EXTENSION_SCHEMA`、`assertSafeSchemaName`・`assertSafeIdentifier` |
+| 打つ SQL の組み立て（`EXPLAIN` の歯が本体と同じ文を見るためのもの） | `buildLexicalSearchSelect`・`buildTrigramLexicalSearchSelect`・`buildArchiveDecayedTargetSelect`・`buildRequeueEmbedTargetSelect`・`buildPurgeExpiredEventsTargetSelect` |
+| その他 | `sha256Hex`（`contentHash` の実装） |
 
 ## もっと詳しく
 

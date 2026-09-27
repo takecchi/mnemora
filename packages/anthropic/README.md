@@ -137,7 +137,7 @@ try {
 |---|---|---|
 | `EmbeddingProvider` | 実装する | **実装しない**（上記） |
 | 構造化出力の形 | `response_format: json_schema`（`{ name, strict: true, schema }`） | `output_config.format: json_schema`（`{ type, schema }`。`name`/`strict` 無し） |
-| optional フィールド | strict モードの制約で「全キー required + null 許容」に変換してから、null を省略へ戻す（`hardenForStrictMode` / `stripNulls`） | 変換不要——`.optional()` は optional のまま Anthropic 側の `required` に反映される |
+| optional フィールド | strict モードの制約で「全キー required + null 許容」に変換してから、null を省略へ戻す（`@mnemora/openai` の中の関数 `hardenForStrictMode` / `stripNulls`。どちらも export していない） | 変換不要——`.optional()` は optional のまま Anthropic 側の `required` に反映される |
 | `system` | `role: "system"` のメッセージとして `messages` に積む | top-level `system` パラメータ（`prompt.system` と `role: "system"` のメッセージを連結する） |
 | `max_tokens` | 省略可 | **必須**（`maxTokens` 省略時は `DEFAULT_MAX_TOKENS`） |
 | `enum` / `min` / `max` | JSON Schema の制約としてそのまま送る | **制約としては送らない**——SDK の変換が `description` へ JSON 文字列として降格させる（[ADR 0072](../../docs/decisions/0072-anthropic-llm-provider.md) 決定3b の実測） |
