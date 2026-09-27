@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -6,6 +5,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import { runNodeScript } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-local-embedding-fingerprint.mjs`（CLI 入口）の歯。
@@ -135,18 +135,12 @@ async function withFixture(setup, fn) {
 }
 
 /** CLI を子プロセスで起動して、終了コードと出力を返す。 */
+/**
+ * CLI を子として起こして待つ。子が期限（`spawn-with-deadline.mjs` の既定 30 秒）までに close しなければ、
+ * 子を kill して「N 秒で close しなかった」と落ちる（`local-embedding-cache-key.test.mjs` と同じ直し）。
+ */
 function runCli(args, env) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [script, ...args], {
-      stdio: ["ignore", "pipe", "pipe"],
-      env: env ?? process.env,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (c) => (stdout += c));
-    child.stderr.on("data", (c) => (stderr += c));
-    child.on("close", (code) => resolve({ code, stdout, stderr }));
-  });
+  return runNodeScript(script, args, { env });
 }
 
 /** HTTP 状態コードと固定の body を返す `respond`。 */
