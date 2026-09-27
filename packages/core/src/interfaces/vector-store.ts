@@ -230,8 +230,13 @@ export interface VectorStore {
   /**
    * 距離昇順で最大 `opts.limit` 件を返す。
    *
-   * **`query`（および `upsert` の `vector`）の長さが `space.dimensions` と違うときは
+   * **`query` の長さが `space.dimensions` と違うときは
    * 「比較不能」として扱う**（`RecallQuery.vector` の doc コメント参照、Issue #867 / 案B）。
+   * ⚠ **`upsert` の `vector` の長さが違うときは、この契約の外である**——`PostgresVectorStore`
+   * は `upsert` の時点で例外を投げ（pgvector の `expected N dimensions`）、`packages/testkit`
+   * の `InMemoryVectorStore` はそのまま保存して、`search` でその行の距離を `NaN` にする。
+   * 2実装は揃っていない（`RecallQuery.vector` の doc の「覆えていない範囲」、
+   * [Issue #1070](https://github.com/takecchi/mnemora/issues/1070)）。
    * この interface は長さの一致を検証しない——一致させるのは呼び出し側の責任だが、
    * 一致しなかったときに `search` が新しい例外を投げることはない。**`search` は候補を
    * 結果から落とさず、距離を比較が通らない値（`NaN`）にして返す**——
