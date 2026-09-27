@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import { STAGES } from "../root-test-gate.mjs";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/run-db-tests.mjs`（ルートの `test` 門の DB 段）の歯。
@@ -33,7 +33,7 @@ function envWithout(name) {
 }
 
 function runGate(env, args = []) {
-  return spawnSync(process.execPath, [gate, ...args], {
+  return spawnSyncWithDeadline(process.execPath, [gate, ...args], {
     cwd: repoRoot,
     encoding: "utf8",
     env,

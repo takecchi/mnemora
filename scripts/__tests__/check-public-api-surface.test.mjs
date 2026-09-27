@@ -1,9 +1,9 @@
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-public-api-surface.mjs`（公開 API 表面の門。Issue #342 / ADR 0178）の CLI 全体
@@ -70,7 +70,7 @@ function writeIndexDts(name, contents) {
 }
 
 function runGate(extraArgs = []) {
-  const result = spawnSync(process.execPath, [gate, ...extraArgs], {
+  const result = spawnSyncWithDeadline(process.execPath, [gate, ...extraArgs], {
     cwd: repoRoot,
     encoding: "utf8",
     env: {

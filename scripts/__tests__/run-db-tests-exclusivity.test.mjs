@@ -1,9 +1,9 @@
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, copyFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join } from "node:path";
-import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/run-db-tests.mjs` の芯: **一度に1パッケージしか `test:db` を起動しない**こと
@@ -145,15 +145,19 @@ describe("scripts/run-db-tests.mjs の排他（振る舞いの歯）", () => {
     const timelineLog = join(dir, "timeline.log");
     writeFileSync(timelineLog, "");
 
-    const result = spawnSync(process.execPath, [join(dir, "scripts", "run-db-tests.mjs")], {
-      cwd: dir,
-      encoding: "utf8",
-      env: {
-        ...process.env,
-        DATABASE_URL: "postgresql://dummy:dummy@localhost:1/dummy",
-        TIMELINE_LOG: timelineLog,
+    const result = spawnSyncWithDeadline(
+      process.execPath,
+      [join(dir, "scripts", "run-db-tests.mjs")],
+      {
+        cwd: dir,
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          DATABASE_URL: "postgresql://dummy:dummy@localhost:1/dummy",
+          TIMELINE_LOG: timelineLog,
+        },
       },
-    });
+    );
 
     const output = `${result.stdout}${result.stderr}`;
     expect(output, output).toContain("DB テストを実行します");
