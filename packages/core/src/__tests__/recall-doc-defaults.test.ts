@@ -226,6 +226,15 @@ describe("docs/recall.md の既定値・上限・式は recall() の振る舞い
     expect(nearMisses?.map((n) => n.memoryId)).toEqual(topBelow);
   });
 
+  it("「`Omission.kind` の一覧」の「次の一手」の表の `kind` は、`OmissionSchema` が受け付ける `kind` の名前と一致する", () => {
+    const table = docMatch(
+      /\| kind \| 次の一手がどう変わるか \|\n\|---\|---\|\n((?:\|.*\|\n)+)/,
+    )[1]!;
+    const documented = [...table.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]!).sort();
+    const implemented = core.OmissionSchema.options.map((o) => o.shape.kind.value).sort();
+    expect(documented).toEqual(implemented);
+  });
+
   it("§7.1 `timeWeighting` の省略時の値と、`eventAwareFreshness` で固定される `freshness`", async () => {
     const documentedDefault = docMatch(/\*\*省略時は `"([a-zA-Z]+)"`。\*\*/)[1]!;
     const fixedFreshness = Number(
