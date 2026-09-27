@@ -12,6 +12,7 @@ import { MemoryEventKindSchema } from "@mnemora/core";
  * - `kind`: `MemoryEventKind` に無い値なら拒む（Issue #1096）。Postgres は CHECK 制約
  *   `memory_events_kind_check` で拒む。型を外した呼び出し・JavaScript からの呼び出しで届く。
  *
+ *
  * `buildStoredMemoryEvent` が呼ぶほか、呼び手のイベントを受け取る `InMemoryMemoryStore` の口は、
  * **状態を書き換える前に**これを呼ぶ——Postgres は1トランザクションで巻き戻るので、拒んだときに
  * 何も書かない。それを写す。
@@ -25,4 +26,16 @@ export function assertStorableMemoryEvent(event: NewMemoryEvent): void {
       `memory_events.kind must be one of ${MemoryEventKindSchema.options.join(", ")} (got ${JSON.stringify(event.kind)})`,
     );
   }
+}
+
+/**
+ * `buildStoredMemoryEvent` が `structuredClone` で写せないイベント（`actor`・`meta` に関数・Symbol
+ * など）なら、そこで投げるのと同じ `DataCloneError` を、**状態を書き換える前に**投げる。
+ *
+ * 書き換えた後の `buildStoredMemoryEvent` で初めて投げると、状態だけが書き換わってイベントが残らない
+ * （Postgres は1トランザクションで巻き戻る）。投げる入力は変えない——**必ずそのイベントを書く口でだけ**
+ * 呼ぶこと（CAS に弾かれてイベントを書かない対象に呼ぶと、今まで投げなかった入力で投げる）。
+ */
+export function assertCloneableMemoryEvent(event: NewMemoryEvent): void {
+  structuredClone({ actor: event.actor, meta: event.meta });
 }
