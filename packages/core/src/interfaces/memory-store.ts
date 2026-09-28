@@ -409,6 +409,21 @@ export interface MemoryStore {
    * ⟹ 呼び出し側は「成功した」ことだけでは、書き込んだ値と読み返した値が一致するとは
    * 限らない——Postgres 経由では、`text` 列の欄の孤立サロゲートは静かに書き換わり、
    * `jsonb` 列の欄では書き込みそのものが失敗する。
+   *
+   * ⚠ **`input.provenance` の中身は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と
+   * `@mnemora/testkit` の fixture へ同じ入力を当てて確かめた）。型（`Provenance`、`provenance.ts`）の欄が欠けている・
+   * 値域の外にある（例: `stated` の `sourceObservationId`・`at` が無い、`consolidated` の `sources` が空、
+   * `imported` の `batchId` が無い、`inferred` の `confidence` が `2`、`at` が空文字）ものも、そのまま書いて
+   * 返す。**返った Memory は `MemorySchema` を通らないことがある。**`provenance.sourceObservationId` と
+   * `input.sourceObservationId` が食い違っていても検査しない。
+   * 拒むのは次の3つだけで、どちらの adapter でも例外になる（投げる例外の種類は adapter で違う）:
+   * - `provenance.kind` が列挙（`stated`・`inferred`・`consolidated`・`reflected`・`imported`）に無い
+   *   ——Postgres は DB の CHECK の例外（drizzle が包んだ `Failed query`）、fixture は
+   *   `memories.provenance_kind must be one of …` を投げる。
+   * - `provenance.kind` が `stated`・`inferred` なのに `input.sourceObservationId` が `null`
+   *   ——Postgres は DB の CHECK の例外、fixture は `provenance.kind "…" requires sourceObservationId` を投げる。
+   * - `provenance` が `null`——どちらも `TypeError`（`provenance.kind` を読めない）。
+   * `Runtime` は `provenance` を自分で組み立てて渡すので、ここに届くのは store を直接呼ぶ側である。
    */
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   /**
@@ -424,6 +439,10 @@ export interface MemoryStore {
    * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
    * の制約を受ける。⚠ `input.contestedWithId` のテナント一致も `createMemory` と同じく
    * 検査しない（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
+   *
+   * ⚠ `input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は `MemorySchema` を
+   * 通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い `stated`/`inferred`・
+   * `null` の3つだけ。`createMemory` の doc 参照）。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
@@ -789,6 +808,14 @@ export interface MemoryStore {
    * `RecallId` から `{ recallId, activitySeq? }` のような形へ変えること自体が破壊的変更
    * になる（`docs/autonomy.md`「してはいけないこと」表）。進めた後の値が要る呼び出し側は
    * `TenantSettingsStore.getActivitySeq` を別途読むこと。
+   *
+   * ⚠ **`record` の中身の形は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と `@mnemora/testkit` の
+   * fixture で確かめた）。拒むのは、列の型が受け付けない値——NUL を含む値と、JSON にできない必須の欄——だけである
+   * （Postgres は `text`・`jsonb` 列が拒み、fixture はそれに合わせて先に投げる）。`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories`（その `score` など）が
+   * それぞれの型（`OmissionSchema`・`RecallUsageSchema`・`IndexBandSchema`・`StageTraceSchema`・`ScoreBreakdownSchema`）
+   * に合わなくても、そのまま書く。⟹ **`getRecall` が返す `RecallRecord` は、それらの schema を通らないことがある**
+   * （例: `returnedMemories` の要素の `score` が `{}` のまま読み戻る）。`Runtime` の `recall()` は検証した値だけを
+   * 渡すので、ここに届くのは store を直接呼ぶ側である。
    */
   createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
   /**
@@ -940,6 +967,10 @@ export interface MemoryStore {
    * `createMemory` と同じく検査しない（`isContestedWithoutCompanion` の doc コメント、
    * Issue #854）。`supersede[].supersededByIndex` は `news` への索引であり
    * `MemoryId` を直接受け取らないため、この注意は当たらない（上の doc 参照）。
+   *
+   * ⚠ `news[i].input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は
+   * `MemorySchema` を通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い
+   * `stated`/`inferred`・`null` の3つだけ。`createMemory` の doc 参照）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
@@ -1511,13 +1542,14 @@ export interface MemoryStore {
    *   ——この口はそもそも「範囲に何件あるか分からない」問い合わせであり、0件は
    *   異常ではなく正常な結果の一種であるため。`archiveDecayed?` が対象0件で
    *   `{ archived: [] }` を返すのと同じ規律）。
-   *   ⚠ **2026-09-28 追記（今の振る舞い、[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）:
-   *   `event.at` が Invalid Date のときは、対象が0件でも2実装で違う。**`@mnemora/postgres` は、対象が無くても
-   *   `at` を `timestamptz` に変えるので例外になる（`invalid input syntax for type timestamp with time zone`。
-   *   drizzle の `Failed query` に包まれ、`cause` に入る）。testkit の fixture は、対象が在るときだけ `at` を
-   *   確かめるので、`{ restored: [] }` を返す。対象が在るときは、どちらも例外で、1件も戻さない。
+   *   ⚠ **2026-09-28 追記（[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）:
+   *   `event.at` が Invalid Date のときも、対象が0件なら `{ restored: [] }` を返す（例外にしない）。**2実装で同じ。
+   *   対象が在るときは、どちらも例外で、1件も戻さない（`@mnemora/postgres` は `invalid input syntax for type
+   *   timestamp with time zone` が drizzle の `Failed query` に包まれ、`cause` に入る）。
+   *   以前は `@mnemora/postgres` だけが、対象が無くても `at` を `timestamptz` に変えて例外になっていた。
+   *   例外の少ない側（testkit の fixture）に揃えた（クローン miku の判断であり、オーナーの判断ではない）。
    *   core の `Runtime.restoreSuperseded` は `clock.now()` を渡すので、ここに届くのは store を直接呼ぶ側だけである。
-   *   【実測 2026-09-28】`restore-superseded-invalid-at.postgres.test.ts`。
+   *   【実測 2026-09-28】`restore-superseded-invalid-at.postgres.test.ts`（Postgres と testkit の fixture）。
    * - 返す `restored` の順序は adapter に委ねる（`Runtime.restoreSuperseded` 側は
    *   これをそのまま `outcomes` の順序として運ぶだけで、特定の順序を要求しない）。
    * - 🔴 **原子性の証拠ではない。**`markContestedPair`/`supersedeWithNewMemories` の

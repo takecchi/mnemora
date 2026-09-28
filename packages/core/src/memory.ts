@@ -230,6 +230,10 @@ export interface Memory {
    * どちらでも、その Memory は `findActiveByClaimKey` に一致せず、`listActiveClaimPredicates` にも
    * 数えられない（PR #1106 で fixture を Postgres に揃えた）。**片方だけの `claimKey` は鍵なしとして
    * 扱われうる。**鍵を持たせたいなら、2欄とも埋めて渡すこと。
+   *
+   * ⚠ 2026-09-28 追記: **空文字の `subject`・`predicate`（`{ subject: "", predicate: "p" }` など）も、書き込みの口は
+   * 拒まない。**`@mnemora/postgres` も testkit の fixture も、そのまま書いて、そのまま読み戻す（片方だけのときと違い、
+   * Postgres も鍵なしにはしない）。返った Memory は `MemorySchema`（{@link ClaimKeySchema} は2欄とも `min(1)`）を通らない。
    */
   claimKey?: ClaimKey | null;
 
