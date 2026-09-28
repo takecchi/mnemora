@@ -329,6 +329,30 @@ const provider = new LocalEmbeddingProvider({
 使うどの環境でも起きうる話であり、ライブラリとして自然な既定だと判断した
 （採らなかった案・理由は ADR 0141）。
 
+### 🔴 キャッシュのファイルが壊れていると、再試行でも次のプロセスでも直らない
+
+（[Issue #1140](https://github.com/takecchi/mnemora/issues/1140)。今の振る舞いを書くだけで、自動で消して取り直すか・
+壊れていると分かった失敗を再試行しないかは決めていない。）
+
+モデルのキャッシュのファイルが壊れていると（取得の中断・ディスクの問題などで、onnx や `tokenizer.json` が途中で
+切れている・0 バイトになっている）、読み込みは**同じ失敗を繰り返す**:
+
+- 壊れたファイルの失敗は「種類の分かっていない」失敗なので、上の再試行（既定3回）の対象になる。だが同じファイルを
+  読み直すだけなので、**3回とも同じく失敗する。**
+- **壊れたファイルは消さない。**失敗の後もそのまま残るので、次のプロセス（新しい `LocalEmbeddingProvider`）でも
+  同じく失敗する。
+- 失敗のメッセージは、原因の候補にキャッシュのファイルの破損を挙げ、消す場所（`<cacheDir>/<repo>`、`cacheDir` が
+  未指定なら既定の置き場）を名指す（PR #1134）。原因そのものは `cause` にある（例: `Protobuf parsing failed`、
+  `Unexpected end of JSON input`）。
+
+⟹ 直すには、名指された場所（そのモデルの repo のディレクトリ）を**自分で消して**、取り直させること
+（消すと、次の読み込みで取り直して動いた。Issue #1140）。
+⚠ 同じ `cacheDir` を別のプロセスが使っているなら、消す前に止めること。
+
+【実測 2026-09-27、transformers.js 4.2.0】onnx を途中で切る・onnx を 0 バイトにする・`tokenizer.json` を途中で切る・
+`config.json`・`tokenizer_config.json` を空にする、の4形で同じだった（Issue #1140）。歯は `src/__tests__/corrupt-cache-persists.test.ts`
+（途中で切れた `tokenizer.json` と onnx、ネットワークに出ない形）。
+
 ### 🔴 `cacheDir` を渡しても、読み込みの前の確認は既定のキャッシュを見る
 
 （[Issue #1239](https://github.com/takecchi/mnemora/issues/1239)・[Issue #1004](https://github.com/takecchi/mnemora/issues/1004)。今の振る舞いを書くだけで、コードで直すかは #1239 で決める）
