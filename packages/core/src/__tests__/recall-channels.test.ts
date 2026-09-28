@@ -219,7 +219,7 @@ describe("recall() — 歯①: 固有名詞・識別子は ann では引けず l
     // クエリは単一語("PROJ-1234")なので、一致すれば coverage は 1（= 一致語彙数1 ÷ クエリ語彙数1）。
     // ⚠ 定数 LEXICAL_MATCH_VALUE は ADR 0092 で廃止された——ここでの 1 は
     // 「常にそうなる値」ではなく、このクエリが単一語であることの帰結として書く。
-    // Issue #548 方向2 / ADR 0351: score は判別可能な union になった。ここは lexical 経由
+    // Issue #548 方向2 / ADR 0352: score は判別可能な union になった。ここは lexical 経由
     // （affinityMeasured: true）と分かっているので、型を ScoreBreakdown へ絞り込む
     // （`?.` は narrowing を運ばないので、絞り込んだ後は非 optional で読む）。
     if (returnedGold === undefined) throw new Error("returnedGold not found");
@@ -254,7 +254,7 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
     expect(result.memories).toHaveLength(1);
     // ⛔ 定数 1 を期待しない（旧 LEXICAL_MATCH_VALUE は ADR 0092 で廃止された）。
     // 一致語彙数(1: alpha) ÷ クエリ語彙数(2: alpha, beta) = 0.5。
-    // Issue #548 方向2 / ADR 0351: lexical 経由（affinityMeasured: true）と分かっているので絞り込む。
+    // Issue #548 方向2 / ADR 0352: lexical 経由（affinityMeasured: true）と分かっているので絞り込む。
     assertAffinityMeasured(result.memories[0]!.score);
     expect(result.memories[0]?.score.lexicalMatch).toBeCloseTo(0.5);
   });
@@ -278,7 +278,7 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
 
     const ids = result.memories.map((m) => m.memoryId);
     expect(ids).toEqual([full.id, half.id]);
-    // Issue #548 方向2 / ADR 0351: どちらも lexical 経由（affinityMeasured: true）。
+    // Issue #548 方向2 / ADR 0352: どちらも lexical 経由（affinityMeasured: true）。
     assertAffinityMeasured(result.memories[0]!.score);
     assertAffinityMeasured(result.memories[1]!.score);
     expect(result.memories[0]?.score.lexicalMatch).toBe(1);
@@ -305,7 +305,7 @@ describe("recall() — 歯⑨: score.lexicalMatch は adapter が返した cover
 
     const hit = result.memories.find((m) => m.memoryId === memory.id);
     expect(hit).toBeDefined();
-    // Issue #548 方向2 / ADR 0351: ann 経由（affinityMeasured: true）と分かっているので絞り込む。
+    // Issue #548 方向2 / ADR 0352: ann 経由（affinityMeasured: true）と分かっているので絞り込む。
     assertAffinityMeasured(hit!.score);
     expect(hit?.score.similarity).toBe(1);
     expect(hit?.score.lexicalMatch).toBeCloseTo(0.5);

@@ -1201,7 +1201,7 @@ type ScoreBreakdown = {
 `occurredAt`/`attributes`（`RecalledMemory`）と `affinityMeasured`（`ScoreBreakdown`）を
 この追記で足した。**いずれも既存欄の型・名前・必須性は無変更**——追加のみである。
 
-**⚠ 2026-09-29 追記（`v1.1.0`、Issue #548 方向2、[ADR 0351](./decisions/0351-association-score-without-total.md)）**:
+**⚠ 2026-09-29 追記（`v1.1.0`、Issue #548 方向2、[ADR 0352](./decisions/0352-association-score-without-total.md)）**:
 上のスニペットの `score: ScoreBreakdown`（`RecalledMemory` の中）は、もう正確ではない
 ——実フィールドの型は `score: ScoreBreakdown | AffinityUnmeasuredScore`（公開名
 `RecalledScore`）である。`ScoreBreakdown` 自体（上の型スニペット）は1バイトも変えていない
@@ -1210,7 +1210,7 @@ type ScoreBreakdown = {
 false; decay; tagMatch; freshness; strength }`）になる。`RecallRecordMemory.score`
 （§2 段6、`recalls` への永続化）も同じ型になった。詳細は §9.7 の同日付の追記、
 `docs/migration-v1.md` 項目19 を見ること。**この追記は `v1.0.0` 以降で最初の破壊的変更**
-（`v1.1.0` に minor で入る。根拠は ADR 0351「文脈」節）。
+（`v1.1.0` に minor で入る。根拠は ADR 0352「文脈」節）。
 
 **⚠ 2026-09-16 追記**: `retrievedVia` は以前 `'tag_match'` / `'recency'` も持っていたが、
 生成するコードが一度も無かった（Issue #206 /
@@ -1523,7 +1523,7 @@ Issue #200 は**2つの読み方**を挙げていた。
   欄を1つ足す形で）足すことで埋めた。**`affinityMeasured: false` の記憶の `total` は、
   `true` の記憶の `total` と比較可能ではない**——これが (c) の穴に対する契約である。
   ⛔ **(a)・(b) はそのまま残る**（本節の直前の記述のとおり）。
-  ⭐ **2026-09-29 追記（Issue #548 方向2、[ADR 0351](./decisions/0351-association-score-without-total.md)）:**
+  ⭐ **2026-09-29 追記（Issue #548 方向2、[ADR 0352](./decisions/0352-association-score-without-total.md)）:**
   (c) の穴は**埋まった**（上の追記は「契約で塞いだ」だったが、こちらは「型で塞いだ」）。
   `affinityMeasured: false` の記憶（連想枠 `retrievedVia: "association"`、および必須の
   同伴取得 `retrievedVia: "mandatory_companion"`）の `score` は、もう `total`（と

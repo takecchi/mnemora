@@ -357,10 +357,10 @@ describe("runtime.markContested — recall() の段3が実際に発火する（I
     const companion = result.memories.find((m) => m.memoryId === weak.id);
     expect(companion?.retrievedVia).toBe("mandatory_companion");
     expect(companion?.companionOf).toBe(strong.id);
-    // Issue #548 方向2 / ADR 0351: 段3（連想枠を経由しない）の必須の同伴取得も、
+    // Issue #548 方向2 / ADR 0352: 段3（連想枠を経由しない）の必須の同伴取得も、
     // `fetchMandatoryCompanions` は similarity/lexicalMatch を渡さないので
     // affinityMeasured: false になる——「連想由来ではない、普通の mandatory_companion」
-    // も total/similarity/lexicalMatch という欄を持たない（ADR 0351 決定2）。
+    // も total/similarity/lexicalMatch という欄を持たない（ADR 0352 決定2）。
     expect(companion?.score.affinityMeasured).toBe(false);
     expect(companion?.score).not.toHaveProperty("total");
 

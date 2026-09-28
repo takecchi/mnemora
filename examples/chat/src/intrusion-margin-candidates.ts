@@ -203,7 +203,7 @@ export async function measureIntrusionMarginCandidates(
     const protectedIds = c.protectedFacts.map((_, i) => correctionProtectedExternalId(c.id, i));
     const topExternalId = resolvedExternalIds[0] ?? null;
     const protectedAtTop = topExternalId !== null && protectedIds.includes(topExternalId);
-    // Issue #548 方向2 / ADR 0351: minProtectedFactScore/maxNonProtectedScore は
+    // Issue #548 方向2 / ADR 0352: minProtectedFactScore/maxNonProtectedScore は
     // `{ score: { total: number } }[]` という純関数の形をそのまま保つ（歯を書き換えない）。
     // association: null（上）なので affinityMeasured は必ず true——ここで total を取り出す。
     const scoredMemories = result.memories.map((m) => ({

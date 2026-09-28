@@ -64,7 +64,7 @@ export function buildRankListing(report: ArmReport, fixedClock: string): RankLis
     },
     probes: report.probes.map((p) => {
       const gold = p.scoreDetails.find((d) => d.roles.includes("gold"));
-      // Issue #548 方向2 / ADR 0351: affinityMeasured: false には total が無い。
+      // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total が無い。
       const goldScore = gold ? scoreTotalOrNull(gold.score) : null;
       const lastRecalledScore = p.lastRecalledScore ?? null;
       return {

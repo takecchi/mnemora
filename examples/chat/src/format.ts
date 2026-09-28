@@ -10,7 +10,7 @@ export function formatRecall(result: RecallResult, label: string): string {
   lines.push(`--- recall (${label}) ---`);
   lines.push(`memories: ${result.memories.length} 件返却`);
   for (const m of result.memories) {
-    // Issue #548 方向2 / ADR 0351: affinityMeasured: false（連想枠・必須の同伴取得）は
+    // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠・必須の同伴取得）は
     // total を持たない——表示は「n/a」にする（比較可能な total ではないことをそのまま出す）。
     const total = scoreTotalOrNull(m.score);
     const scoreText = total === null ? "n/a" : total.toFixed(3);

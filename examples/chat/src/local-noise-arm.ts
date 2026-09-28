@@ -144,7 +144,7 @@ export async function captureGroupCandidates(
       distractorExternalId: group.probeSet.distractorExternalId(probe.id),
       candidates: result.memories.map((m, i) => ({
         externalId: resolvedExternalIds[i] ?? null,
-        // association: null（上）なので affinityMeasured は必ず true（ADR 0351）。
+        // association: null（上）なので affinityMeasured は必ず true（ADR 0352）。
         score: requireMeasuredTotal(m.score),
       })),
     });

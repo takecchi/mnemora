@@ -1275,7 +1275,7 @@ export const ScoreBreakdownSchema = z.object({
 /**
  * 連想枠・必須の同伴取得（段3・段3.5とも、`retrievedVia: "mandatory_companion"` /
  * `"association"`）が返す記憶の `score`（Issue #548 方向2、
- * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+ * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
  *
  * **`ScoreBreakdown` との違いは、`total`・`similarity`・`lexicalMatch` を持たないことだけ**
  * ——この3つは「クエリとの関連度（affinity）」を前提にした量であり、affinity を測っていない
@@ -1324,7 +1324,7 @@ export const AffinityUnmeasuredScoreSchema = z.object({
 
 /**
  * `RecalledMemory.score` / `RecallRecordMemory.score` の型
- * （Issue #548 方向2、[ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+ * （Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
  *
  * **判別の鍵は `affinityMeasured`。**`false` なら {@link AffinityUnmeasuredScore}
  * （`total` を持たない）、それ以外（`true`/`undefined`）なら {@link ScoreBreakdown}
@@ -1435,7 +1435,7 @@ export interface RecalledMemory {
    * スコアの内訳。**`affinityMeasured: false` のときは {@link AffinityUnmeasuredScore}**
    * （`total`/`similarity`/`lexicalMatch` を持たない）、**それ以外（`true`/`undefined`）は
    * {@link ScoreBreakdown}**（{@link RecalledScore} の doc、Issue #548 方向2、
-   * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+   * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
    */
   score: RecalledScore;
   /**
@@ -2513,14 +2513,14 @@ export interface RecallRecordMemory {
   memoryId: MemoryId;
   /**
    * 返した時点のスコアの内訳。`RecalledMemory.score` と同じ判別（{@link RecalledScore}
-   * の doc、Issue #548 方向2、ADR 0351）。
+   * の doc、Issue #548 方向2、ADR 0352）。
    *
-   * ⚠ **本 PR（ADR 0351）より前に永続化された行は、`association` 経由の記憶でも
+   * ⚠ **本 PR（ADR 0352）より前に永続化された行は、`association` 経由の記憶でも
    * `total`/`similarity`/`lexicalMatch` を含む `ScoreBreakdown` の形のまま jsonb に
    * 残っている。**`getRecall` はこの欄を zod で検証せず（ADR 0282 決定4、
    * `packages/postgres/src/mapping.ts` の `rowToRecallRecord` は単純な cast）、
    * 書かれた形をそのまま返す——**過去の行を、後から `AffinityUnmeasuredScore` の形に
-   * 作り直すことはしない**（マイグレーション無し。ADR 0351「決定」参照）。
+   * 作り直すことはしない**（マイグレーション無し。ADR 0352「決定」参照）。
    */
   score: RecalledScore;
   /** どの経路で引いたか（`RecalledMemory.retrievedVia` と同じ）。 */

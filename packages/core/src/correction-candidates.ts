@@ -72,7 +72,7 @@ export interface CorrectionCandidate {
   recallRank: number;
   /**
    * `recall()` が返したスコアの内訳をそのまま運ぶ。**2026-09-29（Issue #548 方向2、
-   * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）：
+   * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）：
    * `affinityMeasured === false`（連想枠・必須の同伴取得経由）の候補は `total` を
    * 持たない**——`RecalledMemory.score`（{@link RecalledScore} の doc）と同じ判別。
    */

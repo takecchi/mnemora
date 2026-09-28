@@ -292,7 +292,7 @@ type _p21_RecallBudget = Expect<Equals<z.infer<typeof RecallBudgetSchema>, Recal
 
 type _p22_ScoreBreakdown = Expect<Equals<z.infer<typeof ScoreBreakdownSchema>, ScoreBreakdown>>;
 
-// Issue #548 方向2 / ADR 0351: `RecalledMemory.score`/`RecallRecordMemory.score` の型
+// Issue #548 方向2 / ADR 0352: `RecalledMemory.score`/`RecallRecordMemory.score` の型
 // （`RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore`）。`_OmissionInfer`/
 // `_p03_Omission_whole` と同じ形——個別の型（_p63）と union 全体（_p64）の両方を縛る。
 type _p63_AffinityUnmeasuredScore = Expect<

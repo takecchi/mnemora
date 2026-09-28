@@ -341,7 +341,7 @@ async function collectContextDiagnostics(
       // ケースが直接書いた記憶」だけを見る）。
       return;
     }
-    // Issue #548 方向2 / ADR 0351: association を明示して on にした呼び出しでは、
+    // Issue #548 方向2 / ADR 0352: association を明示して on にした呼び出しでは、
     // このケースが直接書いた記憶（localId が付く）でも affinityMeasured: false
     // （連想枠経由）で見つかることがある——total が無いので、上の localId 未対応と
     // 同じ扱いで診断の対象外として飛ばす。

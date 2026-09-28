@@ -160,7 +160,7 @@ export async function runRecallExplainDemo(
 /**
  * `RecalledScore`（`ScoreBreakdown | AffinityUnmeasuredScore`）の全項を、任意項は在るときだけ
  * 並べる1行に整形する。**2026-09-29（Issue #548 方向2、
- * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）:**
+ * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）:**
  * `affinityMeasured: false`（連想枠・必須の同伴取得）は `similarity`/`lexicalMatch`/`total`
  * を欄として持たない——その3つを省いて表示する（比較可能でない値を作らない）。
  */

@@ -1095,7 +1095,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 ### 19. `RecalledMemory.score`/`RecallRecordMemory.score`/`CorrectionCandidate.score` が `ScoreBreakdown` から `ScoreBreakdown | AffinityUnmeasuredScore` になった（`@mnemora/core`）
 
 [Issue #548](https://github.com/takecchi/mnemora/issues/548) 方向2、
-[ADR 0351](./decisions/0351-association-score-without-total.md)。**この1件は、これまでの
+[ADR 0352](./decisions/0352-association-score-without-total.md)。**この1件は、これまでの
 17件（v0.1.9→v0.2.0）〜18件（v0.4.0→v0.5.0）と違い、`v1.0.0` 以降に確定した最初の
 破壊的変更である**——`v1.0.0`〜`v1.0.2` は0件のまま出荷された（上の各節）。
 
@@ -1103,7 +1103,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 破壊的変更は major を上げるとしているが、この変更はオーナーへの問い（ask_human `6911db12`
 問6、2026-09-28）への回答——逐語「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」
 ——を根拠に `v1.1.0`（minor）へ入れる。詳細は `README.md`「版の付け方」の2026-09-29 追記、
-ADR 0351「文脈」節を見ること。
+ADR 0352「文脈」節を見ること。
 
 **誰が影響を受けるか**: `RecalledMemory.score`（`recall()` の戻り値）・
 `RecallRecordMemory.score`（`getRecall()` で読み戻す内訳）・`CorrectionCandidate.score`
@@ -1127,7 +1127,7 @@ ADR 0351「文脈」節を見ること。
 const total = m.score.affinityMeasured !== false ? m.score.total : null;
 ```
 
-**DB マイグレーション**: 不要（ADR 0351 決定5）。永続化済みの過去の `recalls` 行は、
+**DB マイグレーション**: 不要（ADR 0352 決定5）。永続化済みの過去の `recalls` 行は、
 書かれた当時の形のまま `getRecall()` から読み戻る——本 ADR より前に書かれた
 `association`/`mandatory_companion` の行は `total` を持つ場合がある。
 

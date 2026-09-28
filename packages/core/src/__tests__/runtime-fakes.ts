@@ -2973,7 +2973,7 @@ export function checkRecallResultContract(result: RecallResult): string[] {
 /**
  * `RecalledMemory.score`/`RecallRecordMemory.score` は `ScoreBreakdown |
  * AffinityUnmeasuredScore` の判別可能な union（Issue #548 方向2、
- * [ADR 0351](../../../../docs/decisions/0351-association-score-without-total.md)）。
+ * [ADR 0352](../../../../docs/decisions/0352-association-score-without-total.md)）。
  * `total`/`similarity`/`lexicalMatch` を読む歯は、affinity を測っている（`"ann"`/`"lexical"`
  * 経由で、`affinityMeasured` が `false` でない）ことをテストの入力自体から知っているが、
  * 型はそれを知らない——ここで assert し、`ScoreBreakdown` 側へ絞り込む。

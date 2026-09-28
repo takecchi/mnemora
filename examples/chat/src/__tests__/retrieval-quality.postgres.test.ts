@@ -275,7 +275,7 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
         // 確かめる(ADR 0108 の歯と同じ番人)。
         expect(result.memories.length).toBeGreaterThan(0);
 
-        // Issue #548 方向2 / ADR 0351: affinityMeasured: false（連想枠経由）には
+        // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠経由）には
         // lexicalMatch という欄自体が無い——絞り込んでから読む。
         for (const m of result.memories) {
           assertAffinityMeasured(m.score);

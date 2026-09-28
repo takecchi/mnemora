@@ -200,7 +200,7 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
     expect(assocEntry).toBeDefined();
     expect(assocEntry?.retrievedVia).toBe("association");
     expect(assocEntry?.associationOf).toBe(anchor.id);
-    // Issue #548 方向2 / ADR 0351: affinityMeasured: false の score は AffinityUnmeasuredScore
+    // Issue #548 方向2 / ADR 0352: affinityMeasured: false の score は AffinityUnmeasuredScore
     // の形になり、similarity/total は「undefined」ではなく欄そのものが無い
     // ——⛔ アンカーとの類似度を score.similarity（クエリとの類似度の枠）に入れない、という
     // 元の意図（ADR 0151）を、値ではなく型で保証するようになった。

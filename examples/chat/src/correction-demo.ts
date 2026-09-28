@@ -544,7 +544,7 @@ function formatCandidates(discovery: FindCorrectionCandidatesResult): string {
   }
   return discovery.candidates
     .map((c) => {
-      // Issue #548 方向2 / ADR 0351: findCorrectionCandidates は association の既定（on、
+      // Issue #548 方向2 / ADR 0352: findCorrectionCandidates は association の既定（on、
       // ADR 0337）をそのまま使うので、候補に affinityMeasured: false（連想枠経由）が
       // 混ざりうる——total が無い候補は「n/a」と表示する。
       const total = scoreTotalOrNull(c.score);

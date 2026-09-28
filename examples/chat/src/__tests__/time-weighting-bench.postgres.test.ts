@@ -116,7 +116,7 @@ describe("examples/chat: answer-time-weighting（本物の Postgres、配線検�
 
       expect(legacy.memories).toHaveLength(1);
       expect(eventAware.memories).toHaveLength(1);
-      // Issue #548 方向2 / ADR 0351: この唯一の候補は ann 経由（affinityMeasured: true）の
+      // Issue #548 方向2 / ADR 0352: この唯一の候補は ann 経由（affinityMeasured: true）の
       // はず——絞り込んでから total を読む。
       const legacyScore = legacy.memories[0]!.score;
       const eventAwareScore = eventAware.memories[0]!.score;

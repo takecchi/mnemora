@@ -35,7 +35,7 @@ export interface TimeTermPairMemberJson {
   rank: number;
   /**
    * `affinityMeasured: false`（連想枠経由。Issue #548 方向2、
-   * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）なら
+   * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）なら
    * `null`（`total` という欄自体が無い——比較可能ではないことを表す）。
    */
   total: number | null;
@@ -90,7 +90,7 @@ function memberJson(member: PairMember | null): TimeTermPairMemberJson | null {
   if (member === null) {
     return null;
   }
-  // Issue #548 方向2 / ADR 0351: affinityMeasured: false には total/similarity という
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total/similarity という
   // 欄自体が無い——両方とも null に写す。
   const score = member.score;
   return {

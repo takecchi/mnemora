@@ -174,7 +174,7 @@ describe("collectScoreDetails", () => {
       [1, ["distractor", "top1"], "1位=distractor"],
       [2, ["gold"], "2位=gold"],
     ]);
-    // Issue #548 方向2 / ADR 0351: フィクスチャは常に ScoreBreakdown の形（similarity/total
+    // Issue #548 方向2 / ADR 0352: フィクスチャは常に ScoreBreakdown の形（similarity/total
     // つき）なので絞り込む。
     const detailScore = details[1]!.score;
     assertAffinityMeasured(detailScore);
@@ -306,7 +306,7 @@ function probe(overrides: Partial<ProbeOutcome> = {}): ProbeOutcome {
     scoreDetails: collectScoreDetails(memories, { goldRank: 2, distractorRank: 1 }),
     termSpreads: computeTermSpreads(memories),
     recalledRows: memories.length,
-    // Issue #548 方向2 / ADR 0351: affinityMeasured: false には lexicalMatch という欄が無い。
+    // Issue #548 方向2 / ADR 0352: affinityMeasured: false には lexicalMatch という欄が無い。
     lexicalMatchRows: memories.filter(
       (m) => m.score.affinityMeasured !== false && m.score.lexicalMatch !== undefined,
     ).length,

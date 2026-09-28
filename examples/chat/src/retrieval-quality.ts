@@ -71,7 +71,7 @@ export type ScoreTerm = (typeof SCORE_TERMS)[number];
 /**
  * `memory.score[term]` を、`RecalledScore`（`ScoreBreakdown | AffinityUnmeasuredScore`）から
  * 安全に読む（Issue #548 方向2、
- * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+ * [ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
  * `decay`/`tagMatch`/`freshness`/`strength` はどちらの形にも在る共通の項。`similarity` は
  * `AffinityUnmeasuredScore` には欄そのものが無い——**値は変えていない**（以前も
  * `mandatory_companion`/`association`/lexical-only の候補では `similarity` は
@@ -204,7 +204,7 @@ export interface ProbeScoreDetail {
   rank: number;
   digest: string;
   /**
-   * Issue #548 方向2 / ADR 0351: `association` を on にした測定
+   * Issue #548 方向2 / ADR 0352: `association` を on にした測定
    * （`association-default-on-measure.ts`）では、この score が `AffinityUnmeasuredScore`
    * （`total`/`similarity`/`lexicalMatch` 無し）のことがある。
    */
@@ -625,7 +625,7 @@ export async function runRetrievalQualityArm(
       scoreDetails: collectScoreDetails(result.memories, { goldRank, distractorRank }),
       termSpreads: computeTermSpreads(result.memories),
       recalledRows: result.memories.length,
-      // Issue #548 方向2 / ADR 0351: affinityMeasured: false には lexicalMatch という欄自体が
+      // Issue #548 方向2 / ADR 0352: affinityMeasured: false には lexicalMatch という欄自体が
       // 無い（以前は undefined だった——値は変わらず、判定の形だけ変えている）。
       lexicalMatchRows: result.memories.filter(
         (m) => m.score.affinityMeasured !== false && m.score.lexicalMatch !== undefined,
@@ -746,7 +746,7 @@ export function formatDecayFreshnessRowwise(rowwise: DecayFreshnessRowwise): str
 /**
  * gold/distractor/1位のスコア内訳を、掛け算の形のまま1行ずつ出す。
  *
- * **2026-09-29（Issue #548 方向2、[ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）:**
+ * **2026-09-29（Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）:**
  * `affinityMeasured: false`（連想枠経由）は `total`/`similarity` を欄として持たない
  * ——「掛け算の形」自体を出せないので、比較可能でないことをそのまま名乗る。
  */

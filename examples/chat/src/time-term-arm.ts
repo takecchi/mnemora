@@ -78,7 +78,7 @@ export type PairOutcome =
 export interface PairMember {
   rank: number;
   /**
-   * Issue #548 方向2 / ADR 0351: `options.association` を明示すると
+   * Issue #548 方向2 / ADR 0352: `options.association` を明示すると
    * （`association-default-on-measure.ts` だけが渡す）、`AffinityUnmeasuredScore`
    * （`total`/`similarity` 無し）のことがある。
    */
@@ -117,7 +117,7 @@ export function classifyPairOutcome(
   if (older === null) {
     return "older-not-returned";
   }
-  // Issue #548 方向2 / ADR 0351: affinityMeasured: false（連想枠経由）には total が無い
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false（連想枠経由）には total が無い
   // ——total 差での tie 判定はできない。順位（`rank`）だけで決める（2件の rank が
   // 一致することは構造上無いので、"tied" にはならない——上の doc コメントの
   // 「`newer.rank === older.rank` は届かない分岐」と同じ理由）。
@@ -163,7 +163,7 @@ export interface TimeProbeOutcome {
 /**
  * 片方でも欠けていれば null(0 と区別する)。
  *
- * Issue #548 方向2 / ADR 0351: `pick` は `number | undefined` を返せるようにした
+ * Issue #548 方向2 / ADR 0352: `pick` は `number | undefined` を返せるようにした
  * ——`affinityMeasured: false` の score には `total` が無い（`totalRatio` の呼び出し側、
  * 下）。`undefined` は「欠けている」に合流させる（値は変わらない。以前も
  * `pick(score).total` は候補によって `undefined` になりえたが、そのときは実行時に
@@ -385,7 +385,7 @@ function formatPairMember(label: "newer" | "older", member: PairMember | null): 
     return `  ${label}: (返っていない)`;
   }
   const s = member.score;
-  // Issue #548 方向2 / ADR 0351: affinityMeasured: false には total/similarity という
+  // Issue #548 方向2 / ADR 0352: affinityMeasured: false には total/similarity という
   // 欄自体が無い——「掛け算の形」を出せないので、比較可能でないことをそのまま名乗る。
   if (s.affinityMeasured === false) {
     return (

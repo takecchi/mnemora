@@ -162,7 +162,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **⚠ 2026-09-29 追記20**: 上の18回分の棚卸しとは別に、`f5ad59f`（18回目が数えた末尾）より後に
 `main` へ入った作業として、`@mnemora/core` に破壊的変更がもう1件確定した（[Issue #548](https://github.com/takecchi/mnemora/issues/548)
-方向2、[ADR 0351](./docs/decisions/0351-association-score-without-total.md)）。上の
+方向2、[ADR 0352](./docs/decisions/0352-association-score-without-total.md)）。上の
 `2026-09-29 追記`（PR #1377、`@mnemora/openai`/`@mnemora/anthropic` の件）と同じ扱い
 ——着地に先立って変更を作った本人がこの節に足した項目であり、棚卸しの「PR を全部当てた」
 手順を経て足したものではない。上の `### Breaking` へ2件目の項目として足した（追記19 と番号が
@@ -175,7 +175,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/core` の `RecalledMemory.score`/`RecallRecordMemory.score`/`CorrectionCandidate.score`
   の型が `ScoreBreakdown` から `ScoreBreakdown | AffinityUnmeasuredScore`（新設のUnion型、
   エクスポート名 `RecalledScore`）に変わった**（[Issue #548](https://github.com/takecchi/mnemora/issues/548)
-  方向2、[ADR 0351](./docs/decisions/0351-association-score-without-total.md)）——
+  方向2、[ADR 0352](./docs/decisions/0352-association-score-without-total.md)）——
   **`affinityMeasured` が `false` の記憶（連想枠 `retrievedVia: "association"`、および
   必須の同伴取得 `retrievedVia: "mandatory_companion"`。どちらも段3・段3.5 のどちらの
   経由でも該当する）の `score` は、`total`/`similarity`/`lexicalMatch` という欄を
@@ -203,12 +203,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **永続化済みの過去の `recalls` 行は影響を受けない**——`getRecall` で読み戻すと、
     本 ADR より前に書かれた `association`/`mandatory_companion` の行は、書かれた
     当時の形（`total` を持つ場合はそのまま）で返る。マイグレーションは無い（決定・理由は
-    ADR 0351 決定5）。
+    ADR 0352 決定5）。
   - **版の付け方について**: `README.md`「版の付け方」は `v1.0.0` 以降の破壊的変更は
     major を上げるとしているが、この変更は `v1.1.0`（minor）に破壊的変更として入っている。
     これはオーナーの回答（ask_human 6911db12）（問6、2026-09-28）——逐語
     「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」——を根拠にした運用であり、
-    詳細は ADR 0351「文脈」節と `README.md`「版の付け方」の追記を見ること。
+    詳細は ADR 0352「文脈」節と `README.md`「版の付け方」の追記を見ること。
 
 ### Added
 

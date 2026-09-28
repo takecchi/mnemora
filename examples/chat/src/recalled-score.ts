@@ -2,7 +2,7 @@ import type { RecalledScore, ScoreBreakdown } from "@mnemora/core";
 
 /**
  * `RecalledMemory.score` は `ScoreBreakdown | AffinityUnmeasuredScore` の判別可能な union
- * になった（Issue #548 方向2、[ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+ * になった（Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
  * `examples/chat` の各ベンチ・デモは、これまで `score.total`（と `similarity`/`lexicalMatch`）を
  * 素朴に読んでいた——ここに集めた小さなヘルパーで、その読み方を1箇所に揃える。
  *
@@ -33,7 +33,7 @@ export function requireMeasuredTotal(score: RecalledScore): number {
     throw new Error(
       "requireMeasuredTotal: score.affinityMeasured is false — this call site assumed a " +
         "measured (ann/lexical) score, but got AffinityUnmeasuredScore. " +
-        "association: null のはずが連想枠経由の候補が混ざっていないか確認すること（ADR 0351）。",
+        "association: null のはずが連想枠経由の候補が混ざっていないか確認すること（ADR 0352）。",
     );
   }
   return total;

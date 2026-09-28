@@ -333,7 +333,7 @@ export async function runCorrectionCandidateArm(
     const distractorIndex = externalIds.indexOf(correctionDistractorExternalId(c.id));
     const goldRank = goldIndex === -1 ? null : goldIndex + 1;
     const distractorRank = distractorIndex === -1 ? null : distractorIndex + 1;
-    // association: null（上）なので affinityMeasured は必ず true（ADR 0351）。
+    // association: null（上）なので affinityMeasured は必ず true（ADR 0352）。
     const goldScore =
       goldIndex === -1 ? null : (scoreTotalOrNull(result.memories[goldIndex]!.score) ?? null);
     const distractorScore =
@@ -368,7 +368,7 @@ export async function runCorrectionCandidateArm(
     const topExternalId = resolvedExternalIds[0] ?? null;
     const protectedIds = c.protectedFacts.map((_, i) => correctionProtectedExternalId(c.id, i));
     const protectedAtTop = topExternalId !== null && protectedIds.includes(topExternalId);
-    // Issue #548 方向2 / ADR 0351: minProtectedFactScore/maxNonProtectedScore は
+    // Issue #548 方向2 / ADR 0352: minProtectedFactScore/maxNonProtectedScore は
     // `{ score: { total: number } }[]` という純関数の形をそのまま保つ（歯を書き換えない）。
     // association: null（上）なので affinityMeasured は必ず true——ここで total を取り出す。
     const scoredMemories = result.memories.map((m) => ({

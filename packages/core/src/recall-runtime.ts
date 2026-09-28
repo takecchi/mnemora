@@ -138,7 +138,7 @@ type ScoredCandidate = {
 /**
  * `ScoredCandidate.score`（内部表現。段2・段3.5 のどの候補でも常に `total` を持つ
  * `ScoreBreakdown`）を、呼び出し側へ返す形（`RecalledScore`）へ変換する
- * （Issue #548 方向2、[ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+ * （Issue #548 方向2、[ADR 0352](../../../docs/decisions/0352-association-score-without-total.md)）。
  *
  * **`affinityMeasured === false` のときだけ `total`/`similarity`/`lexicalMatch` を落とす。**
  * `true`/`undefined`（`ScoringStrategy` を自作していて欄を埋めていない場合。ADR 0282
@@ -2040,7 +2040,7 @@ export async function runRecall(
         // 出どころが将来変わったら、名乗りも一緒に変わる——countKind の exact が
         // リテラル固定のまま出どころだけ変わって嘘になった件（ADR 0011）の裏返しである。
         provenanceKind: member.memory.provenance.kind,
-        // Issue #548 方向2 / ADR 0351: affinity を測っていない候補（連想枠・必須の同伴取得。
+        // Issue #548 方向2 / ADR 0352: affinity を測っていない候補（連想枠・必須の同伴取得。
         // `affinityMeasured === false`）は、比較可能でない `total`/`similarity`/`lexicalMatch`
         // を持たない形で返す。`member.score`（内部表現）自体は変えない——`toRecalledScore`
         // の doc コメント参照。
