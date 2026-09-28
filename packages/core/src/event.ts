@@ -87,7 +87,14 @@ export interface EventActor {
   id?: string;
 }
 
-/** `EventActor` の zod スキーマ。値を実行時に検査するときに使う（型 `EventActor` と揃えてある）。 */
+/**
+ * `EventActor` の zod スキーマ。値を実行時に検査するときに使う（型 `EventActor` と揃えてある）。
+ *
+ * ⚠ **この schema は store より厳しい**（今の振る舞い。`ctx.ts` の `CtxSchema` と同じ形の差）。`id` に
+ * `min(1)` を書いているので空文字の `id` を拒むが、`EventStore.append` も `MemoryStore` の書き込みの口も
+ * この schema で `actor` を検査しないので、`{ type: "human", id: "" }` はそのまま保存される。
+ * 【実測 2026-09-28】`@mnemora/postgres`・testkit の fixture・core の Fake の3実装で同じ。
+ */
 export const EventActorSchema = z.object({
   type: z.enum(["human", "system", "clone"]),
   id: z.string().min(1).optional(),
@@ -192,11 +199,21 @@ export interface EventFilter {
   since?: Date;
   /** `at` がこの時刻以前のイベントだけを返す（境界を含む）。 */
   until?: Date;
-  /** 返す上限の件数（古い順の先頭から）。省略なら全件。負数・非整数は例外になる（`@mnemora/postgres` と testkit の fixture で同じ）。 */
+  /**
+   * 返す上限の件数（古い順の先頭から）。省略なら全件。負数・非整数は例外になる（`@mnemora/postgres` と testkit の fixture で同じ）。
+   * `0` は例外にならず、0件を返す（今の振る舞い。{@link EventFilterSchema} は `0` を拒むので、schema と store で違う）。
+   */
   limit?: number;
 }
 
-/** `EventFilter` の zod スキーマ。値を実行時に検査するときに使う（型 `EventFilter` と揃えてある）。 */
+/**
+ * `EventFilter` の zod スキーマ。値を実行時に検査するときに使う（型 `EventFilter` と揃えてある）。
+ *
+ * ⚠ **この schema は store より厳しい**（今の振る舞い。`ctx.ts` の `CtxSchema` と同じ形の差）。`limit` に
+ * `positive()` を書いているので `limit: 0` を拒むが、`EventStore.list` はこの schema でフィルタを検査しないので、
+ * `limit: 0` は例外にならず0件を返す（負数・非整数は store も例外にする）。【実測 2026-09-28】
+ * `@mnemora/postgres`・testkit の fixture・core の Fake の3実装で同じ。
+ */
 export const EventFilterSchema = z.object({
   memoryId: z.string().min(1).optional(),
   kind: MemoryEventKindSchema.optional(),

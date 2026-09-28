@@ -258,6 +258,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/core` の `computeAffinity()` は、`similarity` が `NaN` だと、`lexicalMatch` があっても `NaN` を返していた**（[PR #1350](https://github.com/takecchi/mnemora/pull/1350)）——`NaN` の `similarity` を無いものとして扱い、`lexicalMatch` を使う。⭕ 非破壊（結果だけが変わる）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/core` の `countKindForUnits()`・`unitAssemblyShortfall()` は、件数の和だけで数えていたので、1件が二重に入り別の1件が抜けると `exact`・`0` を返していた**（[PR #1350](https://github.com/takecchi/mnemora/pull/1350)）——候補の `memory.id` の集合で数える（二重計上だけなら今どおり `unknown`・`0`）。⭕ 非破壊（結果だけが変わる。型は変わらない）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/core` の `compareScoredCandidates()` は、実効時刻が Invalid Date だと `NaN` を返し、`memory.id` のタイブレークに届かなかった**（[PR #1350](https://github.com/takecchi/mnemora/pull/1350)）——時刻のどちらかが Invalid Date なら同点として扱い、`memory.id` で決める。⭕ 非破壊（結果だけが変わる）。クローン miku の判断であり、オーナーの判断ではない。
+- **`Runtime.reflect()` は、LLM が `digest: ""`（空文字）を返すと、TSDoc が約束する機械的な切り出しへのフォールバックをせず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #__PR__](https://github.com/takecchi/mnemora/pull/__PR__)）——`ReflectionLLMResultSchema` の `digest` が空文字を拒んでいた。抽出・`consolidate` と同じく空文字を受け付け、`resolveDigest` で `digestSource: "fallback"` の要旨にする。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
+- **`Runtime.reflect()` は、LLM の `tags` に空文字の要素が1つでもあると、その tag だけを落とさず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #__PR__](https://github.com/takecchi/mnemora/pull/__PR__)）——抽出・`consolidate` と同じく空文字の要素を受け付け、`dropBlankTags` で落とす（空白だけの要素はもともと落としていた）。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 
 ---
 

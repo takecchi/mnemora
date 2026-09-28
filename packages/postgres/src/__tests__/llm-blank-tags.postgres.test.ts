@@ -37,8 +37,6 @@ import {
  */
 
 const BLANK_AND_REAL = ["", " ", "\u3000", "旅行"];
-/** reflect のスキーマは `""` を拒む（`tags: z.array(z.string().min(1))`）ので、通る空白だけを渡す。 */
-const BLANK_FOR_REFLECT = [" ", "\u3000", "旅行"];
 
 const EXTRACTOR_VERSION = "blank-tags-v1";
 
@@ -60,7 +58,7 @@ const llm: LLMProvider = {
       return req.schema.parse({
         outcome: "reflected",
         content: "内省した本文",
-        tags: BLANK_FOR_REFLECT,
+        tags: BLANK_AND_REAL,
       });
     }
     throw new Error("unexpected schema");
