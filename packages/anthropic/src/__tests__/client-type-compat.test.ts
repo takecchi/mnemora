@@ -85,7 +85,8 @@ describe("実際に送られる HTTP は、client の型を切り離す前と変
   it("AnthropicLLMProvider.complete は固定した版の client で messages へ想定どおりの body を POST する", async () => {
     const { client, calls } = withCapturingFetch(
       (fetchStub) => new Anthropic({ apiKey: "sk-ant-test", fetch: fetchStub, maxRetries: 0 }),
-      () => jsonResponse({ content: [{ type: "text", text: "こんにちは" }], stop_reason: "end_turn" }),
+      () =>
+        jsonResponse({ content: [{ type: "text", text: "こんにちは" }], stop_reason: "end_turn" }),
     );
     const provider = new AnthropicLLMProvider({ model: "claude-opus-5", client });
 
@@ -106,7 +107,8 @@ describe("実際に送られる HTTP は、client の型を切り離す前と変
     const { client, calls } = withCapturingFetch(
       (fetchStub) =>
         new AnthropicLatest({ apiKey: "sk-ant-test", fetch: fetchStub, maxRetries: 0 }),
-      () => jsonResponse({ content: [{ type: "text", text: "こんにちは" }], stop_reason: "end_turn" }),
+      () =>
+        jsonResponse({ content: [{ type: "text", text: "こんにちは" }], stop_reason: "end_turn" }),
     );
     const provider = new AnthropicLLMProvider({ model: "claude-opus-5", client, maxTokens: 512 });
 

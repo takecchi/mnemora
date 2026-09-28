@@ -61,7 +61,7 @@ describe("client の型は別の版の openai インスタンスも受け付け�
     expect(client).toBeInstanceOf(OpenAILatest);
   });
 
-  it("Pick<OpenAI, \"chat\">/Pick<OpenAI, \"embeddings\"> 型の値も、引き続き代入できる（既存の偽 client の形を壊さない）", () => {
+  it('Pick<OpenAI, "chat">/Pick<OpenAI, "embeddings"> 型の値も、引き続き代入できる（既存の偽 client の形を壊さない）', () => {
     const chatPick: Pick<OpenAI, "chat"> = new OpenAI({ apiKey: "sk-test" });
     const embedPick: Pick<OpenAI, "embeddings"> = new OpenAI({ apiKey: "sk-test" });
     assertAssignable<OpenAIChatClient>(chatPick);
