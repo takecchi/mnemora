@@ -315,6 +315,15 @@ export interface ClaimKeyOptions {
    * 常に空振りする（`runtime.ts` の doc コメント参照。これはエラーにしない——
    * `knownPredicates` を `enabled: false` と組み合わせても無視されるのと同じ「渡された
    * が効かない」規約）。
+   *
+   * ⚠ **同じ発話の中の、時期だけが違う2文も contested になる**（今の振る舞い、Issue #835）。
+   * 例: 1回の `observe()` から「去年は札幌で働いていた。」「今年は福岡で働いている。」の2件が
+   * 抽出されると、`deriveClaimKeys` は2件に同じ鍵（`user/work_location`）を付ける。
+   * 「去年」「今年」は `validFrom`/`validUntil` に入らないので有効期間が重なるとみなされ、
+   * 訂正ではないのに対が contested になる。これは `knownPredicatesFromStore` の語彙ヒントより
+   * 前の、既定の claim key のプロンプトで起きる（ADR 0326 (d)、ADR 0329 の負債1の追記）。
+   * 【実測 2026-09-28】記録の再生（`answer.claim-key.known-predicates-{1,2,3}.json`）でも、
+   * 実 API（gpt-4o-mini、n=3）でも、6回とも成立した。
    */
   detectContested?: boolean;
   /**
@@ -324,6 +333,24 @@ export interface ClaimKeyOptions {
    * 件まで、`{ limit: number }` を渡すとその件数まで集める。`enabled: false`/省略、
    * または store がこの口を実装していない adapter では静かに効かない（上のクラス doc
    * コメント参照）。
+   *
+   * ⚠ **誤検出が増える**（今の振る舞い、ADR 0329 の負債1、Issue #835）。語彙が少なく、その中に
+   * 話題の近い曖昧な predicate があると、無関係な発話にもその predicate がそのまま使われる。
+   * 例: 「新しい趣味を始めようと思っている」の後の「旅行の計画を立てている」「相談したいことが
+   * ある」が、同じ `user/new_hobby_intent` などに寄せられる。`detectContested: true` と組むと、
+   * その対は訂正ではないのに contested になり、Issue #832（ADR 0335）以降は回答プロンプトの
+   * `[矛盾候補:]` まで届く。語彙ヒントの文言を変えて塞ぐ試みは、どれも訂正の取りこぼしか
+   * 別の誤検出を招いた（ADR 0329 の負債1の追記「否定的結果」、Issue #835）。
+   * 【実測 2026-09-28】`{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`、
+   * 訂正4件と誤検出2件（`unknown-favorite-number`・`other-period-city-this-year`）:
+   *
+   * | 回し方 | 訂正の contested | 誤検出の contested |
+   * |---|---|---|
+   * | 記録の再生（`answer.claim-key.known-predicates-{1,2,3}.json`） | 4/4 ×3 | 2/2 ×3 |
+   * | 実 API（gpt-4o-mini、n=3） | 4/4 ×3 | 2/2 ×3 |
+   *
+   * 再生の3回目と実 API の2回は、同じ会話の filler どうしの対も余分に contested になった。
+   * 後者の誤検出（時期だけが違う2文）は語彙ヒントより前で起きる（`detectContested` の doc）。
    */
   knownPredicatesFromStore?: boolean | { limit?: number };
   /**
