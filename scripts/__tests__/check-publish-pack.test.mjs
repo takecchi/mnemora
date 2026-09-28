@@ -15,15 +15,21 @@ import {
   findPrivateViolations,
   findExactPinnedDependencyViolations,
   EXACT_PINNED_DEPENDENCY_EXEMPTIONS,
+  NEVER_PUBLISHED_TARGETS,
 } from "../publish-pack-checks.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
 /**
  * `scripts/check-publish-pack.mjs`（publish 梱包の門）の歯。
  *
- * publish 対象6パッケージは固定である（`docs/roadmap.md` 等で機械的に判別できる
+ * publish 対象パッケージは固定である（`docs/roadmap.md` 等で機械的に判別できる
  * 目印は無く、上位で決定済みのリストを直書きしている——`check-publish-pack.mjs`
- * 冒頭のコメント参照）。この歯もその6つを直書きで持つ。
+ * 冒頭のコメント参照）。この歯もその全件を直書きで持つ（`scripts/__tests__/publish-targets.test.mjs`
+ * が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` と集合として一致することを検査する）。
+ *
+ * ⚠ `@mnemora/bullmq`（Issue #205）は初回 publish 前で、`NEVER_PUBLISHED_TARGETS`
+ * （`publish-pack-checks.mjs`）に載っている——下の version 関連の2つの it が、
+ * この1件だけ向きを変えて検査している理由はそこにある。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -36,6 +42,7 @@ const PUBLISH_TARGETS = [
   { name: "@mnemora/openai", dir: "packages/openai" },
   { name: "@mnemora/anthropic", dir: "packages/anthropic" },
   { name: "@mnemora/local-embedding", dir: "packages/local-embedding" },
+  { name: "@mnemora/bullmq", dir: "packages/bullmq" },
 ];
 
 function readManifest(dir) {
@@ -44,15 +51,22 @@ function readManifest(dir) {
   );
 }
 
-describe("publish 対象6パッケージの package.json（静的）", () => {
+describe("publish 対象パッケージの package.json（静的）", () => {
   for (const target of PUBLISH_TARGETS) {
     describe(target.name, () => {
       const manifest = readManifest(target.dir);
 
-      it("version が 0.0.0 のままではない", () => {
-        expect(manifest.version).not.toBe("0.0.0");
-        expect(manifest.version).toBeTruthy();
-      });
+      if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
+        // 初回 publish 前は 0.0.0 のままが正しい（ADR 0070。version 揃い検査からも外れる）。
+        it("初回 publish 前なので version は 0.0.0 のまま", () => {
+          expect(manifest.version).toBe("0.0.0");
+        });
+      } else {
+        it("version が 0.0.0 のままではない", () => {
+          expect(manifest.version).not.toBe("0.0.0");
+          expect(manifest.version).toBeTruthy();
+        });
+      }
 
       it("prepack が dist を作り直す（`pnpm pack` が空の tarball を出す穴を塞ぐ本体）", () => {
         expect(manifest.scripts?.prepack).toBe("pnpm run build");
@@ -143,8 +157,12 @@ describe("publish 対象6パッケージの package.json（静的）", () => {
     });
   }
 
-  it("publish 対象すべてで version が揃っている", () => {
-    const versions = new Set(PUBLISH_TARGETS.map((t) => readManifest(t.dir).version));
+  it("publish 対象すべてで version が揃っている（NEVER_PUBLISHED_TARGETS を除く）", () => {
+    const versions = new Set(
+      PUBLISH_TARGETS.filter((t) => !NEVER_PUBLISHED_TARGETS.has(t.name)).map(
+        (t) => readManifest(t.dir).version,
+      ),
+    );
     expect(versions.size).toBe(1);
   });
 });

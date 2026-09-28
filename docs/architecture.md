@@ -339,6 +339,7 @@ packages/
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: 上の図は、いまの `packages/` と次の点で違う。
 - `bullmq` は `Scheduler` を実装していない。`runtime.tick()` を BullMQ で駆動する（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)）。`"private": true` で、npm には公開していない。
+  - **⚠ 2026-09-29 追記（Issue #205）**: `"private": true` はもう正しくない——公開準備の PR が出ている（version の bump・実際の publish はまだ。ADR 0325 の追記参照）。
 - `postgres` が実装しているのは `MemoryStore`・`VectorStore`・`LexicalStore`（任意の `PostgresTrigramLexicalStore` を含む）・`EventStore`・`OutboxStore`・`TenantSettingsStore` であり、`RelationStore` は無い（§5.3、Phase 2）。
 - 図に無い `local-embedding`（外部サービスに繋がない `EmbeddingProvider`、[ADR 0085](./decisions/0085-local-embedding-provider.md)）がある。
 - `server`・`sdk` はまだ無い（Phase 4）。

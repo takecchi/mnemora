@@ -1,12 +1,23 @@
 {
   "name": "@mnemora/bullmq",
   "version": "0.0.0",
-  "private": true,
   "type": "module",
-  "description": "BullMQ で runtime.tick() を駆動する役（Issue #205 の2本目、ADR 0325 案B）。outbox は Postgres のまま正本——BullMQ はジョブの中身を持たず、「いま tick して」の合図だけを運ぶ。",
+  "description": "BullMQ で runtime.tick() を駆動する役。outbox は Postgres のまま正本——BullMQ はジョブの中身を持たず、「いま tick して」の合図だけを運ぶ（docs/decisions/0325-bullmq-tick-driver.md）。",
   "license": "MIT",
+  "homepage": "https://github.com/takecchi/mnemora/tree/main/packages/bullmq#readme",
+  "bugs": {
+    "url": "https://github.com/takecchi/mnemora/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/takecchi/mnemora.git",
+    "directory": "packages/bullmq"
+  },
   "engines": {
     "node": ">=22"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "exports": {
     ".": {
@@ -23,13 +34,14 @@
   "scripts": {
     "typecheck": "tsc -p tsconfig.json",
     "build": "tsc -p tsconfig.build.json",
+    "prepack": "pnpm run build",
     "test": "vitest run",
     "test:redis": "vitest run -c vitest.redis.config.mts"
   },
   "dependencies": {
     "@mnemora/core": "workspace:^",
     "bullmq": "6.3.8",
-    "ioredis": "6.0.0"
+    "ioredis": "^6.0.0"
   },
   "devDependencies": {
     "@mnemora/postgres": "workspace:*",

@@ -1,5 +1,5 @@
 /**
- * npm へ出す6パッケージと、**その publish 順序**を持つ唯一の定義（ADR 0060 決定1・ADR 0066）。
+ * npm へ出すパッケージと、**その publish 順序**を持つ唯一の定義（ADR 0060 決定1・ADR 0066）。
  *
  * **なぜ順序まで持つか**: ADR 0060 が「引き受けた負債」として
  * 「publish の順序は依存の向きで決まる（`core` → `testkit` / `openai` → `postgres`）。
@@ -49,4 +49,15 @@ export const PUBLISH_TARGETS = [
   // 依存の向きとしても `@mnemora/core` にしか依存しないので、末尾で整合する
   // （`scripts/__tests__/publish-targets.test.mjs` が機械的に検査する）。
   { name: "@mnemora/local-embedding", dir: "packages/local-embedding" },
+  // `@mnemora/bullmq` は末尾に置く——理由は上の anthropic / local-embedding のコメントと
+  // 同じ形（未公開のものが途中に居ると、その後ろが publish されない）。Issue #205。
+  // オーナーの回答（2026-09-28）「公開する準備をお願い」を受けて publish 対象へ加えたが、
+  // 【実測】2026-09-29、この担い手が `npm view @mnemora/bullmq version` を実行して E404
+  // （registry に一度も上がっていない）ことを確認した。⟹ 初版を Trusted Publishing (OIDC) で出すことはできない
+  // （npm/cli#8544 は OPEN。ADR 0066）ため、オーナーの手元からの bootstrap（段0）と
+  // 信頼発行元の設定（段1）が済むまでは、この行が publish 段に加わった直後の Release で
+  // 一度 404 で赤くなる（docs/release-v1.md の bullmq bootstrap 節・ADR 0325 追記参照）。
+  // 依存の向きとしては `@mnemora/core` にしか依存しないため、末尾でも整合する
+  // （`scripts/__tests__/publish-targets.test.mjs` が機械的に検査する）。
+  { name: "@mnemora/bullmq", dir: "packages/bullmq" },
 ];

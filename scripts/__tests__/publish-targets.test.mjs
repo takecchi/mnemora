@@ -19,8 +19,8 @@ function readManifest(dir) {
 }
 
 describe("PUBLISH_TARGETS（ADR 0066）", () => {
-  it("6パッケージである", () => {
-    expect(PUBLISH_TARGETS).toHaveLength(6);
+  it("7パッケージである", () => {
+    expect(PUBLISH_TARGETS).toHaveLength(7);
   });
 
   it("各 dir の package.json の name が、リストの name と一致する", () => {
