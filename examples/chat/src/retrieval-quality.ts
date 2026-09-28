@@ -4,8 +4,8 @@ import type {
   RecallAssociationQuery,
   RecallChannel,
   RecalledMemory,
+  RecalledScore,
   Runtime,
-  ScoreBreakdown,
 } from "@mnemora/core";
 import { DEFAULT_RECALL_CHANNELS, RECALL_CHANNELS } from "@mnemora/core";
 import { drainEmbedTicks } from "./embed-drain.js";
@@ -19,6 +19,7 @@ import {
   goldExternalId,
 } from "./probe-set.js";
 import { resolveExternalId } from "./provenance-trace.js";
+import { scoreTotalOrNull } from "./recalled-score.js";
 import { formatNoApiCallsNotice } from "./usage-meter.js";
 import type { UsageMeter } from "./usage-meter.js";
 
@@ -68,6 +69,30 @@ export const SCORE_TERMS = ["similarity", "decay", "tagMatch", "freshness", "str
 export type ScoreTerm = (typeof SCORE_TERMS)[number];
 
 /**
+ * `memory.score[term]` を、`RecalledScore`（`ScoreBreakdown | AffinityUnmeasuredScore`）から
+ * 安全に読む（Issue #548 方向2、
+ * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）。
+ * `decay`/`tagMatch`/`freshness`/`strength` はどちらの形にも在る共通の項。`similarity` は
+ * `AffinityUnmeasuredScore` には欄そのものが無い——**値は変えていない**（以前も
+ * `mandatory_companion`/`association`/lexical-only の候補では `similarity` は
+ * `undefined` だった。ここでは同じ `undefined` を、型が許す形で返すだけ）。
+ */
+function getScoreTerm(score: RecalledMemory["score"], term: ScoreTerm): number | undefined {
+  switch (term) {
+    case "similarity":
+      return score.affinityMeasured === false ? undefined : score.similarity;
+    case "decay":
+      return score.decay;
+    case "tagMatch":
+      return score.tagMatch;
+    case "freshness":
+      return score.freshness;
+    case "strength":
+      return score.strength;
+  }
+}
+
+/**
  * 返ってきた候補の集合の中で、その項が取った値の幅。
  *
  * **これが順位の説明の本体である。**幅が 0 の項は、その recall の順位付けに
@@ -113,7 +138,7 @@ export interface TermSpread {
 export function computeTermSpreads(memories: readonly RecalledMemory[]): TermSpread[] {
   return SCORE_TERMS.map((term) => {
     const values = memories
-      .map((memory) => memory.score[term])
+      .map((memory) => getScoreTerm(memory.score, term))
       .filter((value): value is number => value !== undefined);
     if (values.length === 0) {
       return { term, presentCount: 0, min: null, max: null, spread: null, distinctCount: 0 };
@@ -178,7 +203,12 @@ export interface ProbeScoreDetail {
   /** 1始まりの順位。 */
   rank: number;
   digest: string;
-  score: ScoreBreakdown;
+  /**
+   * Issue #548 方向2 / ADR 0351: `association` を on にした測定
+   * （`association-default-on-measure.ts`）では、この score が `AffinityUnmeasuredScore`
+   * （`total`/`similarity`/`lexicalMatch` 無し）のことがある。
+   */
+  score: RecalledScore;
 }
 
 /**
@@ -595,10 +625,17 @@ export async function runRetrievalQualityArm(
       scoreDetails: collectScoreDetails(result.memories, { goldRank, distractorRank }),
       termSpreads: computeTermSpreads(result.memories),
       recalledRows: result.memories.length,
-      lexicalMatchRows: result.memories.filter((m) => m.score.lexicalMatch !== undefined).length,
+      // Issue #548 方向2 / ADR 0351: affinityMeasured: false には lexicalMatch という欄自体が
+      // 無い（以前は undefined だった——値は変わらず、判定の形だけ変えている）。
+      lexicalMatchRows: result.memories.filter(
+        (m) => m.score.affinityMeasured !== false && m.score.lexicalMatch !== undefined,
+      ).length,
       decayFreshnessRowwise: computeDecayFreshnessRowwise(result.memories),
       associationRows: result.memories.filter((m) => m.retrievedVia === "association").length,
-      lastRecalledScore: result.memories.at(-1)?.score.total ?? null,
+      lastRecalledScore: (() => {
+        const last = result.memories.at(-1);
+        return last === undefined ? null : scoreTotalOrNull(last.score);
+      })(),
     });
   }
 
@@ -706,9 +743,23 @@ export function formatDecayFreshnessRowwise(rowwise: DecayFreshnessRowwise): str
   return `${rowwise.equalRows}/${rowwise.rows}行${suffix}`;
 }
 
-/** gold/distractor/1位のスコア内訳を、掛け算の形のまま1行ずつ出す。 */
+/**
+ * gold/distractor/1位のスコア内訳を、掛け算の形のまま1行ずつ出す。
+ *
+ * **2026-09-29（Issue #548 方向2、[ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）:**
+ * `affinityMeasured: false`（連想枠経由）は `total`/`similarity` を欄として持たない
+ * ——「掛け算の形」自体を出せないので、比較可能でないことをそのまま名乗る。
+ */
 export function formatScoreDetail(detail: ProbeScoreDetail): string {
   const s = detail.score;
+  if (s.affinityMeasured === false) {
+    return (
+      `#${detail.rank} [${detail.roles.join(",")}] total=n/a（affinityMeasured: false、` +
+      `連想枠経由で比較可能ではない） = decay ${formatScoreValue(s.decay)} × ` +
+      `tagMatch ${formatScoreValue(s.tagMatch)} × freshness ${formatScoreValue(s.freshness)} × ` +
+      `strength ${formatScoreValue(s.strength)}  ${detail.digest}`
+    );
+  }
   const similarity =
     s.similarity === undefined ? "(ANN 経由でない)" : formatScoreValue(s.similarity);
   return (

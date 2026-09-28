@@ -5,7 +5,7 @@ import { resolveDigest } from "../extraction.js";
 import { dropBlankTags } from "../llm-tags.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
-import type { ScoreBreakdown } from "../recall.js";
+import type { RecalledScore } from "../recall.js";
 import { defaultActivityDecayStrategy, defaultDecayStrategy } from "./decay.js";
 
 /**
@@ -221,8 +221,19 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
  *
  * `similarity` が `NaN`（測れなかった）のときは、無いものとして扱う（`lexicalMatch` があればそれを使う）。
  * 以前は `Math.max` が `NaN` をそのまま返し、`lexicalMatch` の値が捨てられていた。
+ *
+ * **2026-09-29 追記（Issue #548 方向2、[ADR 0351](../../../../docs/decisions/0351-association-score-without-total.md)）:**
+ * `RecalledMemory.score` の型が `ScoreBreakdown | AffinityUnmeasuredScore` になった後も、
+ * この関数の値は1バイトも変わらない——`affinityMeasured === false`（`AffinityUnmeasuredScore`。
+ * `similarity`/`lexicalMatch` を欄として持たない）は、上の「どちらも無い候補」と同じ
+ * 集合そのものである（`mandatory_companion`・`association` はどちらも
+ * `defaultScoringStrategy` に `similarity`/`lexicalMatch` を渡さないため常に
+ * `affinityMeasured: false` になる）。⟹ 型で先に判別できるようになった分、
+ * `score.similarity`/`score.lexicalMatch` を読む前に早期 return するだけで、
+ * 返す値（-Infinity）は以前と同じである。
  */
-export function computeAffinity(score: ScoreBreakdown): number {
+export function computeAffinity(score: RecalledScore): number {
+  if (score.affinityMeasured === false) return -Infinity;
   const similarity =
     score.similarity === undefined || Number.isNaN(score.similarity) ? -Infinity : score.similarity;
   return Math.max(similarity, score.lexicalMatch ?? -Infinity);

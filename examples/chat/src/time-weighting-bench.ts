@@ -39,6 +39,7 @@ import type {
   SeedUsageSummary,
 } from "./providers.js";
 import { createProviders } from "./providers.js";
+import { scoreTotalOrNull } from "./recalled-score.js";
 import type { TimeWeightingCase, TimeWeightingMemorySeed } from "./time-weighting-case.js";
 import { assertTimeWeightingCaseWellFormed } from "./time-weighting-case.js";
 import type { UsageMeter } from "./usage-meter.js";
@@ -340,12 +341,20 @@ async function collectContextDiagnostics(
       // ケースが直接書いた記憶」だけを見る）。
       return;
     }
-    const belowThreshold = m.score.total < DEFAULT_SCORE_THRESHOLD;
+    // Issue #548 方向2 / ADR 0351: association を明示して on にした呼び出しでは、
+    // このケースが直接書いた記憶（localId が付く）でも affinityMeasured: false
+    // （連想枠経由）で見つかることがある——total が無いので、上の localId 未対応と
+    // 同じ扱いで診断の対象外として飛ばす。
+    const total = scoreTotalOrNull(m.score);
+    if (total === null) {
+      return;
+    }
+    const belowThreshold = total < DEFAULT_SCORE_THRESHOLD;
     entries.push({
       localId,
       memoryId: m.memoryId,
       rank: index + 1,
-      total: m.score.total,
+      total,
       freshness: m.score.freshness,
       decay: m.score.decay,
       belowThreshold,

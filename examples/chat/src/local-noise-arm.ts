@@ -12,6 +12,7 @@ import {
 } from "./probe-set.js";
 import type { ProbeUtterance } from "./probe-set.js";
 import { resolveExternalId } from "./provenance-trace.js";
+import { requireMeasuredTotal } from "./recalled-score.js";
 import type { CapturedProbeCandidates } from "./synthetic-score-noise.js";
 
 /**
@@ -143,7 +144,8 @@ export async function captureGroupCandidates(
       distractorExternalId: group.probeSet.distractorExternalId(probe.id),
       candidates: result.memories.map((m, i) => ({
         externalId: resolvedExternalIds[i] ?? null,
-        score: m.score.total,
+        // association: null（上）なので affinityMeasured は必ず true（ADR 0351）。
+        score: requireMeasuredTotal(m.score),
       })),
     });
   }

@@ -1,5 +1,5 @@
 import type { MemoryId, RecallId } from "./ids.js";
-import type { Omission, RecalledMemory, ScoreBreakdown, StageTrace } from "./recall.js";
+import type { Omission, RecalledMemory, RecalledScore, StageTrace } from "./recall.js";
 
 /**
  * `Runtime.findCorrectionCandidates`（Issue #369 (C)「訂正の口」）の入出力。
@@ -70,8 +70,13 @@ export interface CorrectionCandidate {
    * という別の情報（recall の生の結果には無かった情報）を、この口が勝手に作り出さない。
    */
   recallRank: number;
-  /** `recall()` が返したスコアの内訳をそのまま運ぶ。 */
-  score: ScoreBreakdown;
+  /**
+   * `recall()` が返したスコアの内訳をそのまま運ぶ。**2026-09-29（Issue #548 方向2、
+   * [ADR 0351](../../../docs/decisions/0351-association-score-without-total.md)）：
+   * `affinityMeasured === false`（連想枠・必須の同伴取得経由）の候補は `total` を
+   * 持たない**——`RecalledMemory.score`（{@link RecalledScore} の doc）と同じ判別。
+   */
+  score: RecalledScore;
   /** `recall()` がどの経路で引いたか（`RecalledMemory.retrievedVia` のまま）。 */
   retrievedVia: RecalledMemory["retrievedVia"];
 }

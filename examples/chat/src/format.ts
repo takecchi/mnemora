@@ -1,4 +1,5 @@
 import type { RecallResult } from "@mnemora/core";
+import { scoreTotalOrNull } from "./recalled-score.js";
 
 /**
  * `recall()` の返り値のうち、roadmap.md 段階7の完了条件そのものである
@@ -9,7 +10,11 @@ export function formatRecall(result: RecallResult, label: string): string {
   lines.push(`--- recall (${label}) ---`);
   lines.push(`memories: ${result.memories.length} 件返却`);
   for (const m of result.memories) {
-    lines.push(`  - [${m.retrievedVia}] score=${m.score.total.toFixed(3)} digest="${m.digest}"`);
+    // Issue #548 方向2 / ADR 0351: affinityMeasured: false（連想枠・必須の同伴取得）は
+    // total を持たない——表示は「n/a」にする（比較可能な total ではないことをそのまま出す）。
+    const total = scoreTotalOrNull(m.score);
+    const scoreText = total === null ? "n/a" : total.toFixed(3);
+    lines.push(`  - [${m.retrievedVia}] score=${scoreText} digest="${m.digest}"`);
   }
   lines.push(`omitted (${result.omitted.length} 件):`);
   if (result.omitted.length === 0) {
