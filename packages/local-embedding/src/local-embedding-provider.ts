@@ -456,7 +456,9 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
           throw error;
         }
         lastError = error;
-        if (attempt < this.#retryAttempts) {
+        // 次の試行があるときだけ待つ。`attempt < this.#retryAttempts` と書くと、整数でない
+        // `retry.attempts`（例: 2.5）では最後の試行（2回目）の後にも待ってしまう。
+        if (attempt + 1 <= this.#retryAttempts) {
           await this.#sleep(this.#retryDelayMs(attempt));
         }
       }
