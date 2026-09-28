@@ -12,6 +12,7 @@ import type { Db } from "./client.js";
 import { assertSafeIdentifier, embeddingSpaceTableName } from "./embedding-space-table.js";
 import { isUuidLike, toPgTimestamp } from "./mapping.js";
 import { maybeAnalyzeAfterUpsert } from "./embedding-statistics.js";
+import { activityFloorSeqAliveCondition } from "./activity-decay-sql.js";
 
 /** `number[]` を pgvector のテキスト表現（`[1,2,3]`）に変換する。 */
 function toVectorLiteral(vector: number[]): string {
@@ -96,11 +97,17 @@ function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
       ? sql`m.decay_floor_at > ${toPgTimestamp(filter.decayFloorAtAfter)}`
       : undefined;
   // `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4——NULL は「この軸には
-  // 床が無い＝活動時計では沈まない」）。
-  const decayFloorSeqCondition =
-    filter.decayFloorSeqAfter !== undefined
-      ? sql`(m.decay_floor_seq IS NULL OR m.decay_floor_seq > ${filter.decayFloorSeqAfter})`
-      : undefined;
+  // 床が無い＝活動時計では沈まない」）。ADR 0348（Issue #338）:
+  // `decayFloorSeqUsesSubjectCounters` が true のときだけ、行の subject に対応する
+  // `tenant_subject_activity` を相関サブクエリで足す（`activityFloorSeqAliveCondition`
+  // の doc コメント参照）。false（既定）のテナントでは今日どおり単一パラメータ比較。
+  const decayFloorSeqCondition = activityFloorSeqAliveCondition({
+    decayFloorSeqAfter: filter.decayFloorSeqAfter,
+    usesSubjectCounters: filter.decayFloorSeqUsesSubjectCounters === true,
+    floorSeqExpr: sql`m.decay_floor_seq`,
+    tenantIdExpr: sql`m.tenant_id`,
+    subjectIdExpr: sql`m.subject_id`,
+  });
   if (
     filter.decayFloorAnyAxis === true &&
     decayFloorAtCondition !== undefined &&

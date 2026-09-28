@@ -253,11 +253,21 @@ export class InMemoryVectorStore implements VectorStore {
         // `m.decay_floor_at > ${decayFloorAtAfter}` と揃える。
         memory.decayFloorAt > opts.filter.decayFloorAtAfter;
       // 契約: `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4「NULL はこの軸には
-      // 床が無い＝活動時計では沈まない」）。
+      // 床が無い＝活動時計では沈まない」）。ADR 0348（Issue #338）:
+      // `decayFloorSeqUsesSubjectCounters` が true のときだけ、この行の subjectId に
+      // 対応する `S_x`（`this.memoryStore.subjectActivitySeq`）を足す
+      // （`activityFloorSeqAliveCondition`（postgres 側）と同じ式）。
+      const effectiveDecayFloorSeqAfter =
+        opts.filter.decayFloorSeqAfter === undefined
+          ? undefined
+          : opts.filter.decayFloorSeqUsesSubjectCounters === true && memory.subjectId != null
+            ? opts.filter.decayFloorSeqAfter +
+              (this.memoryStore.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+            : opts.filter.decayFloorSeqAfter;
       const passesDecayFloorSeq =
-        opts.filter.decayFloorSeqAfter === undefined ||
+        effectiveDecayFloorSeqAfter === undefined ||
         (memory.decayFloorSeq ?? null) === null ||
-        memory.decayFloorSeq! > opts.filter.decayFloorSeqAfter;
+        memory.decayFloorSeq! > effectiveDecayFloorSeqAfter;
 
       if (
         opts.filter.decayFloorAnyAxis === true &&

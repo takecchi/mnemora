@@ -1830,6 +1830,14 @@ export interface ArchiveDecayedOptions {
    * 紛れ込みうる——`packages/testkit` の適合テストが境界の歯を seq 側にも同じ形で置く。
    */
   clock?: DecayClock;
+  /**
+   * [ADR 0348](../../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `true` のときだけ、`nowSeq`（`T`）に、行の subject に対応する
+   * `tenant_subject_activity` の値（`S_x`）を足した値と比較する——段1の
+   * `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味・同じ最適化理由
+   * （既定/未使用のテナントでは相関サブクエリを足さない）。既定 `false`。
+   */
+  usesSubjectActivityCounters?: boolean;
 }
 
 /** {@link MemoryStore.archiveDecayed} の返り値（ADR 0114）。 */

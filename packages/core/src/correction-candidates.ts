@@ -45,6 +45,13 @@ export interface FindCorrectionCandidatesInput {
    * という事実そのものは変えない（{@link CorrectionCandidate.recallRank} の doc参照）。
    */
   excludeMemoryIds?: readonly MemoryId[];
+  /**
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: 内部で1回呼ぶ `recall()` へそのまま渡す
+   * `RecallQuery.activityCounting`。省略時 `"tenant"`（本 ADR 以前と1バイトも
+   * 変わらない挙動）。
+   */
+  activityCounting?: "tenant" | "subject";
 }
 
 /**

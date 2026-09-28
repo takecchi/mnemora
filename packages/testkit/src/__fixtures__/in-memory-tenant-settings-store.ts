@@ -50,8 +50,16 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * 書く側・読む側が同じ値を見る——`packages/core/src/__tests__/runtime-fakes.ts` の
    * `FakeTenantSettingsStore`/`FakeBackingStore` と同じ設計。**省略すると
    * `getActivitySeq` は常に `0` を返す**（`FakeTenantSettingsStore` と同じ規律）。
+   *
+   * [ADR 0348](../../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `subjectActivitySeqBacking` は `tenant_subject_activity` 相当——
+   * `tenantId` → `subjectId` → `S_x` の2段の `Map`。`InMemoryMemoryStore.createRecall`
+   * （`advanceActivityClock: { scope: "subject", subjectId }`）が書く側と共有する。
    */
-  constructor(private readonly activitySeqBacking?: Map<string, number>) {}
+  constructor(
+    private readonly activitySeqBacking?: Map<string, number>,
+    private readonly subjectActivitySeqBacking?: Map<string, Map<string, number>>,
+  ) {}
 
   /**
    * 行が無ければ全列を既定値で作ってから返す（`setDefaultHalfLifeHours`/`setEventRetention`/
@@ -220,6 +228,41 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    */
   async getActivitySeq(ctx: Ctx): Promise<number> {
     return this.activitySeqBacking?.get(ctx.tenantId) ?? 0;
+  }
+
+  /**
+   * [ADR 0348](../../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `subjectActivitySeqBacking` に、このテナントの行が1本でもあるか。
+   * `subjectActivitySeqBacking` 自体が渡されていなければ常に `false`
+   * （`getActivitySeq` が backing 無しで常に `0` を返すのと同じ規律）。
+   */
+  async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
+    const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
+    return bySubject !== undefined && bySubject.size > 0;
+  }
+
+  /**
+   * [ADR 0348](../../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `subjectActivitySeqBacking` から、渡された `subjectIds` ぶんを
+   * まとめて読む。行が無い `subjectId` はキーを省略する（`readSubjectActivitySeqs`
+   * （core）が `0` へ倒す）。
+   */
+  async getSubjectActivitySeqs(
+    ctx: Ctx,
+    subjectIds: string[],
+  ): Promise<Record<string, number>> {
+    const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
+    const out: Record<string, number> = {};
+    if (bySubject === undefined) {
+      return out;
+    }
+    for (const id of subjectIds) {
+      const value = bySubject.get(id);
+      if (value !== undefined) {
+        out[id] = value;
+      }
+    }
+    return out;
   }
 
   /**

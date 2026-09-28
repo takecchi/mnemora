@@ -44,6 +44,10 @@ import type {
 import type { Db } from "./client.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
+  activityFloorSeqAliveCondition,
+  activityFloorSeqDeadCondition,
+} from "./activity-decay-sql.js";
+import {
   isUuidLike,
   normalizeUuidCase,
   parsePgTimestamp,
@@ -1536,10 +1540,17 @@ export class PostgresMemoryStore implements MemoryStore {
       decayFloorAtAfter !== undefined
         ? sql`(decay_floor_at > ${toPgTimestamp(decayFloorAtAfter)}::timestamptz)`
         : undefined;
-    const activityAxisAlive =
-      decayFloorSeqAfter !== undefined
-        ? sql`(decay_floor_seq IS NULL OR decay_floor_seq > ${decayFloorSeqAfter})`
-        : undefined;
+    // ADR 0348（Issue #338）: `scope.decayFloorSeqUsesSubjectCounters` が true の
+    // ときだけ相関サブクエリで subject 単位のカウンタを足す（段1の `buildFilterConditions`
+    // と同じ述語、`activityFloorSeqAliveCondition` の doc コメント参照）。このテーブルは
+    // エイリアス無しの `memories` そのものなので `tenant_id`/`subject_id` をそのまま渡す。
+    const activityAxisAlive = activityFloorSeqAliveCondition({
+      decayFloorSeqAfter,
+      usesSubjectCounters: scope.decayFloorSeqUsesSubjectCounters === true,
+      floorSeqExpr: sql`decay_floor_seq`,
+      tenantIdExpr: sql`tenant_id`,
+      subjectIdExpr: sql`subject_id`,
+    });
     let isDecayed: SQL;
     if (wallAxisAlive === undefined && activityAxisAlive === undefined) {
       // ゲート無効（`RecallQuery.includeFullyDecayed: true`）。**0件と数える**
@@ -1843,6 +1854,11 @@ export class PostgresMemoryStore implements MemoryStore {
    * 使わない——`+1` は既存値に依存するため）。**`false`/未指定なら `UPDATE` を1本も
    * 撃たない**（既定 `'wall'` のテナントでは、この行を一度も触らない、という ADR の
    * 意味論をそのまま満たす）。
+   *
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `record.advanceActivityClock` が `{ scope: "subject", subjectId }`
+   * のときは、`tenant_activity`（`T`）ではなく `tenant_subject_activity`
+   * （`subjectId` の行、`S_x`）を同じトランザクションで `+1` する——**`T` には触れない。**
    */
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     // Issue #298 / ADR 0155: 新しく書く行は常に breakdownCaptured: true。「内訳を持たない
@@ -1869,21 +1885,39 @@ export class PostgresMemoryStore implements MemoryStore {
       RETURNING id
     `;
 
-    if (record.advanceActivityClock !== true) {
-      const result = await this.db.execute(insertRecall);
-      return (result.rows[0] as unknown as { id: string }).id;
+    if (record.advanceActivityClock === true) {
+      return this.db.transaction(async (tx) => {
+        const result = await tx.execute(insertRecall);
+        await tx.execute(sql`
+          INSERT INTO tenant_activity (tenant_id, activity_seq, updated_at)
+          VALUES (${ctx.tenantId}, 1, now())
+          ON CONFLICT (tenant_id) DO UPDATE
+            SET activity_seq = tenant_activity.activity_seq + 1, updated_at = now()
+        `);
+        return (result.rows[0] as unknown as { id: string }).id;
+      });
     }
 
-    return this.db.transaction(async (tx) => {
-      const result = await tx.execute(insertRecall);
-      await tx.execute(sql`
-        INSERT INTO tenant_activity (tenant_id, activity_seq, updated_at)
-        VALUES (${ctx.tenantId}, 1, now())
-        ON CONFLICT (tenant_id) DO UPDATE
-          SET activity_seq = tenant_activity.activity_seq + 1, updated_at = now()
-      `);
-      return (result.rows[0] as unknown as { id: string }).id;
-    });
+    if (
+      typeof record.advanceActivityClock === "object" &&
+      record.advanceActivityClock !== null &&
+      record.advanceActivityClock.scope === "subject"
+    ) {
+      const subjectId = record.advanceActivityClock.subjectId;
+      return this.db.transaction(async (tx) => {
+        const result = await tx.execute(insertRecall);
+        await tx.execute(sql`
+          INSERT INTO tenant_subject_activity (tenant_id, subject_id, activity_seq, updated_at)
+          VALUES (${ctx.tenantId}, ${subjectId}, 1, now())
+          ON CONFLICT (tenant_id, subject_id) DO UPDATE
+            SET activity_seq = tenant_subject_activity.activity_seq + 1, updated_at = now()
+        `);
+        return (result.rows[0] as unknown as { id: string }).id;
+      });
+    }
+
+    const result = await this.db.execute(insertRecall);
+    return (result.rows[0] as unknown as { id: string }).id;
   }
 
   /**
@@ -2817,7 +2851,15 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
         `PostgresMemoryStore.archiveDecayed: opts.nowSeq is required when clock is "${clock}"`,
       );
     }
-    return sql`(decay_floor_seq IS NOT NULL AND decay_floor_seq <= ${opts.nowSeq})`;
+    // ADR 0348（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
+    // `tenant_subject_activity` を相関サブクエリで足す。
+    return activityFloorSeqDeadCondition({
+      nowSeq: opts.nowSeq,
+      usesSubjectCounters: opts.usesSubjectActivityCounters === true,
+      floorSeqExpr: sql`decay_floor_seq`,
+      tenantIdExpr: sql`tenant_id`,
+      subjectIdExpr: sql`subject_id`,
+    });
   };
 
   let clockCondition: SQL;
