@@ -14,8 +14,10 @@ import { createLocalEmbeddingPipeline, type CreateLocalEmbeddingPipeline } from 
  * Issue #1140 の今の振る舞いを縛る歯。README「🔴 キャッシュのファイルが壊れていると、再試行でも次のプロセスでも
  * 直らない」。振る舞いは変えていない。
  *
- * - `cacheDir` の `tokenizer.json` が途中で切れていると（取得の中断を模す）、読み込みは再試行を使い切って
- *   失敗する。新しいインスタンス（次のプロセスと同じく、読み込みをやり直す）でも同じく失敗する。
+ * - `cacheDir` の `tokenizer.json` と onnx が途中で切れていると（取得の中断を模す。Issue #1140 が本物の
+ *   transformers.js で当てた4形のうち2つ）、読み込みは再試行を使い切って失敗する。新しいインスタンス（次の
+ *   プロセスと同じく、読み込みをやり直す）でも同じく失敗する。
+ *   ⚠ transformers.js は2つを並べて読むので、`cause` にどちらの失敗が出るかは回ごとに変わる（どちらでもよい）。
  * - 壊れたファイルは、失敗の後も1バイトも変わらずに残る（自動で消して取り直さない）。
  * - ネットワークには出ない: 既定のキャッシュ（`env.cacheDir`）に前段の確認の2ファイルを置き（#1239）、`env.fetch`
  *   は呼ばれたら記録して必ず失敗する。⟹ 失敗の原因は、壊れたファイルそのものである。
@@ -23,9 +25,11 @@ import { createLocalEmbeddingPipeline, type CreateLocalEmbeddingPipeline } from 
 
 const ctx: Ctx = { tenantId: "corrupt-cache" };
 const REPO = DEFAULT_LOCAL_EMBEDDING_REPO;
-const TOKENIZER = "tokenizer.json";
-/** 途中で切れた `tokenizer.json`（取得の中断を模す。Issue #1140 が本物の transformers.js で当てた4形の1つ）。 */
-const CORRUPT = `{"version": "1.0", "model": {"type": "Unigram", "vocab": [["<pad>", 0.0], ["<unk>"`;
+/** 途中で切れたファイル（取得の中断を模す）。 */
+const CORRUPT: Readonly<Record<string, string>> = {
+  "tokenizer.json": `{"version": "1.0", "model": {"type": "Unigram", "vocab": [["<pad>", 0.0], ["<unk>"`,
+  "onnx/model_quantized.onnx": "\u0008\u0007\u0012\u0004trunc",
+};
 
 let root: string;
 let cacheDir: string;
@@ -46,8 +50,9 @@ beforeAll(async () => {
   await put(defaultCacheDir, "tokenizer_config.json", "{}");
   await put(cacheDir, "config.json", JSON.stringify({ model_type: "modernbert" }));
   await put(cacheDir, "tokenizer_config.json", "{}");
-  await put(cacheDir, TOKENIZER, CORRUPT);
-  await put(cacheDir, "onnx/model_quantized.onnx", "not a model");
+  for (const [file, content] of Object.entries(CORRUPT)) {
+    await put(cacheDir, file, content);
+  }
   env.cacheDir = defaultCacheDir;
   env.fetch = (async (input: unknown) => {
     fetched.push(String(input));
@@ -87,13 +92,17 @@ describe("キャッシュのファイルが壊れていると、再試行でも�
     const first = await embedOnce();
     expect(first.loads).toBe(3);
     expect(first.error.message).toContain("壊れ");
-    // 原因は壊れたファイルの解釈（途中で切れた JSON）である。
-    expect(String((first.error as { cause?: unknown }).cause)).toMatch(/JSON/);
+    // 原因は壊れたファイルの解釈（途中で切れた JSON か onnx）である。
+    const cause = /JSON|Protobuf parsing failed/;
+    expect(String((first.error as { cause?: unknown }).cause)).toMatch(cause);
 
     const second = await embedOnce();
     expect(second.loads).toBe(3);
+    expect(String((second.error as { cause?: unknown }).cause)).toMatch(cause);
 
-    expect(await readFile(path.join(cacheDir, REPO, TOKENIZER), "utf8")).toBe(CORRUPT);
+    for (const [file, content] of Object.entries(CORRUPT)) {
+      expect(await readFile(path.join(cacheDir, REPO, file), "utf8")).toBe(content);
+    }
     expect(fetched).toEqual([]);
   }, 90_000);
 });

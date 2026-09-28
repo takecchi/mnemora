@@ -351,7 +351,7 @@ const provider = new LocalEmbeddingProvider({
 
 【実測 2026-09-27、transformers.js 4.2.0】onnx を途中で切る・onnx を 0 バイトにする・`tokenizer.json` を途中で切る・
 `config.json`・`tokenizer_config.json` を空にする、の4形で同じだった（Issue #1140）。歯は `src/__tests__/corrupt-cache-persists.test.ts`
-（途中で切れた `tokenizer.json`、ネットワークに出ない形）。
+（途中で切れた `tokenizer.json` と onnx、ネットワークに出ない形）。
 
 ### 🔴 `cacheDir` を渡しても、読み込みの前の確認は既定のキャッシュを見る
 
