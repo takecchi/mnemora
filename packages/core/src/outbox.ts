@@ -10,7 +10,12 @@ import type { OutboxJobKind } from "./interfaces/scheduler.js";
 export interface OutboxJobRecord {
   /** ジョブの id。 */
   id: string;
-  /** ジョブが属するテナント。 */
+  /**
+   * ジョブが属するテナント。
+   *
+   * ⚠ `ctx.tenantId: ""` で積んだジョブでは `""` になり、{@link OutboxJobRecordSchema}（`min(1)`）を通らない
+   * （今の振る舞い。入力の空文字は `Ctx` の doc のとおり受け付ける。schema は緩めていない）。
+   */
   tenantId: string;
   /** ジョブの種別（{@link OutboxJobKind}）。 */
   kind: OutboxJobKind;
@@ -20,7 +25,12 @@ export interface OutboxJobRecord {
   availableAt: Date;
   /** 最後に claim された時刻。一度も claim されていなければ `null`（リースの判定に使う）。 */
   claimedAt?: Date | null;
-  /** 最後に claim した worker の名前。 */
+  /**
+   * 最後に claim した worker の名前。
+   *
+   * ⚠ `claimBatch` に `claimedBy: ""` を渡すと `""` になり、{@link OutboxJobRecordSchema}（`min(1)`）を通らない
+   * （今の振る舞い。入力の空文字は拒まない。`ClaimOutboxJobsOptions.claimedBy` の doc。schema は緩めていない）。
+   */
   claimedBy?: string | null;
   /** claim された回数。claim のたびに1増える。`complete`/`fail` の CAS に使う（上限は無い）。 */
   attempts: number;

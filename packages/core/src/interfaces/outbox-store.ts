@@ -108,7 +108,12 @@ export interface ClaimOutboxJobsOptions {
   limit: number;
   /** 「今」の時刻。`available_at <= now` とリースの切れ目の判定に使う。 */
   now: Date;
-  /** claim した worker の名前（行の `claimed_by` に書く）。 */
+  /**
+   * claim した worker の名前（行の `claimed_by` に書く）。
+   *
+   * ⚠ **空文字も受け付ける**（今の振る舞い。検査しない）。そのとき返るジョブの `claimedBy` は `""` になり、
+   * `OutboxJobRecordSchema`（`claimedBy` は `min(1)`）を通らない。schema は緩めていない。
+   */
   claimedBy: string;
   /**
    * claim のリース長（ミリ秒）。`claimed_at` からこの時間が経過した行は、まだ
