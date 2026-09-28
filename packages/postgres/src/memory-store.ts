@@ -1167,6 +1167,11 @@ export class PostgresMemoryStore implements MemoryStore {
    * `id`・同じ `at` で複数回呼んでも2回目以降が no-op になり最終状態が変わらないのと
    * 同じ理由。戻り値は元の `ids`（重複・順序とも）に合わせて組み直す。
    *
+   * 去重と突き合わせの鍵は、uuid の形の id を小文字にそろえたものである。DB は uuid を大文字小文字を
+   * 区別せずに比べて小文字で返すので、`reinforce` は大文字の id でも同じ行を書く。渡された id のまま
+   * 突き合わせると、大文字の id だけで「memory not found」になり `reinforce` と結果が割れていた
+   * （`uppercase-uuid-lookup.postgres.test.ts`）。同じ記憶を小文字と大文字で渡したときも1回だけ処理する。
+   *
    * `ids` に存在しない・adapter の期待する形式でない id が含まれる場合:
    * **書ける対象（存在する well-formed な id）へは書き込みを済ませてから**、
    * `reinforce` と同じ「memory not found」の `Error` を投げる。⚠ **これは1件ずつの
@@ -1205,7 +1210,9 @@ export class PostgresMemoryStore implements MemoryStore {
       return [];
     }
 
-    const uniqueIds = [...new Set(ids)];
+    // 突き合わせの鍵（上の doc）。形の合わない id は鍵をそのまま使う——どの行とも一致しない。
+    const keyOf = (id: MemoryId): string => (isUuidLike(id) ? id.toLowerCase() : id);
+    const uniqueIds = [...new Set(ids.map(keyOf))];
     const wellFormedIds = uniqueIds.filter((id) => isUuidLike(id));
 
     const current = await exec.execute(sql`
@@ -1220,7 +1227,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // `ids` の元の順で最初に見つからない id（`reinforce` 単体を呼んだときに
     // 「memory not found」になる id）。上のコメントのとおり、書き込みは
     // これとは独立に「見つかった id 全部」へ行う。
-    const missingId = ids.find((id) => !currentById.has(id));
+    const missingId = ids.find((id) => !currentById.has(keyOf(id)));
     const existingIds = wellFormedIds.filter((id) => currentById.has(id));
 
     if (existingIds.length === 0) {
@@ -1296,7 +1303,7 @@ export class PostgresMemoryStore implements MemoryStore {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${missingId}`);
     }
 
-    return ids.map((id) => resultById.get(id)!);
+    return ids.map((id) => resultById.get(keyOf(id))!);
   }
 
   async recordUsage(
@@ -2111,23 +2118,32 @@ export class PostgresMemoryStore implements MemoryStore {
         ORDER BY id ASC
         FOR UPDATE
       `);
+      // 突き合わせの鍵は小文字にそろえる——DB は uuid を大文字小文字を区別せずに比べて小文字で返すので、
+      // 渡された id のままだと大文字の id だけで「memory not found」になっていた
+      // （`uppercase-uuid-lookup.postgres.test.ts`。`reinforceMany` と同じ）。⚠ 同じ記憶を小文字と大文字で
+      // 渡したとき（上の `first.id === second.id` を通り抜けた）は、渡された文字列どおりに突き合わせる
+      // ——そろえる前と同じく2つ目が「memory not found」になり、投げる例外の種類を変えない。
+      const sameRowSpelledTwice = first.id.toLowerCase() === second.id.toLowerCase();
+      const keyOf = (id: string): string => (sameRowSpelledTwice ? id : id.toLowerCase());
       const statusById = new Map(
         existing.rows.map((row) => {
           const r = row as unknown as { id: string; status: MemoryStatus };
-          return [r.id, r.status] as const;
+          return [keyOf(r.id), r.status] as const;
         }),
       );
-      if (!statusById.has(first.id)) {
+      const firstKey = keyOf(first.id);
+      const secondKey = keyOf(second.id);
+      if (!statusById.has(firstKey)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
       }
-      if (!statusById.has(second.id)) {
+      if (!statusById.has(secondKey)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${second.id}`);
       }
-      if (statusById.get(first.id) !== "active") {
-        throw new MemoryStatusConflictError(first.id, "active", statusById.get(first.id)!);
+      if (statusById.get(firstKey) !== "active") {
+        throw new MemoryStatusConflictError(first.id, "active", statusById.get(firstKey)!);
       }
-      if (statusById.get(second.id) !== "active") {
-        throw new MemoryStatusConflictError(second.id, "active", statusById.get(second.id)!);
+      if (statusById.get(secondKey) !== "active") {
+        throw new MemoryStatusConflictError(second.id, "active", statusById.get(secondKey)!);
       }
 
       const updateSide = async (id: MemoryId, oppositeId: MemoryId): Promise<Memory> => {
