@@ -826,7 +826,7 @@ export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_
  * - `"not_yet_valid"` — `status === 'active'` だが、いまの時点でまだ有効期間が始まっていない
  *   （`validFrom > now`）。統合元にしない。`validFrom` はその記憶の値。
  *
- * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)。破壊的変更）:
+ * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
  * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も統合元にして
  * `superseded` へ動かしていた。統合先は有効期間を持たない（`validFrom`/`validUntil` とも null。
  * [ADR 0164](../../../docs/decisions/0164-valid-from-until-recall.md)「射程外にしたもの」1）ので、期限切れ・
@@ -842,7 +842,9 @@ export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_
  *   残したまま）。
  * - `dryRun` でも同じ値で名指しする。この値の要素は `nothingReason` の数え方にも入らない。
  * - 🔴 **`ConsolidateSourceOutcome` を網羅的に分岐している呼び出し側は、この2値を扱う必要がある。**
- * - 2026-09-29 にクローン miku（オーナーではない）が決めた（公開 API の破壊的変更の委譲は ADR 0156。ADR 0089 の同日付の追記）。
+ * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の数え方の規律）。
+ *   同じ入力でも結果が変わる（統合されずに `nothing_to_consolidate` で返ることもある）。2026-09-29 にクローン miku
+ *   （オーナーではない）が決めた（ADR 0089 の同日付の追記）。
  */
 export type ConsolidateSourceOutcome =
   | { memoryId: MemoryId; kind: "superseded"; previousStatus: "active" }
