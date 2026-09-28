@@ -41,6 +41,9 @@ import {
  * - `embed`・`consolidate`: 1回だけ処理したときと同じ状態になる（consolidate は ADR 0089 の
  *   「読んで status で弾く」が効く）。
  * - `reflect`: 内省の Memory が2件になる（ADR 0091 決定11「冪等性は買わない」の帰結）。
+ * - `extract`（Issue #1092。`OutboxStore` の doc の 2026-09-28 追記）: LLM が2回とも同じ本文を返せば1件のまま
+ *   （冪等の鍵で同じ行に当たる）。違う本文を返すと2件とも `active` で残る。1回目の LLM が落ちて全文
+ *   フォールバックになり、2回目が成功すると、フォールバックの Memory と候補の2件が `active` で残る。
  *
  * 「書いた後・`complete` の前に落ちる」は、`complete`・`fail` がどちらも（リース競合ではない）
  * 例外で落ちる outbox で作る——`tick` は例外を投げて抜け、ジョブは claim されたまま残る。
@@ -49,6 +52,8 @@ import {
 let nowMs = 0;
 const clock = { now: () => new Date(nowMs) };
 let llmCall = 0;
+/** extract の LLM が順に返す本文。`null` は LLM の失敗（全文フォールバックへ倒れる）。 */
+let extractOutputs: Array<string | null> = [];
 const llm: LLMProvider = {
   complete: async () => ({ content: "" }),
   completeStructured: async (_ctx, req) => {
@@ -59,6 +64,11 @@ const llm: LLMProvider = {
     }
     if (schema === ReflectionLLMResultSchema) {
       return req.schema.parse({ outcome: "reflected", content: `内省 ${llmCall}` });
+    }
+    const next = extractOutputs.shift();
+    if (next === null) throw new Error("LLM が落ちた");
+    if (next !== undefined) {
+      return req.schema.parse({ memories: [{ content: next, provenanceKind: "stated" }] });
     }
     throw new Error("unexpected schema");
   },
@@ -212,7 +222,10 @@ async function seedWithNeighbor(kit: Kit, jobKind: "consolidate" | "reflect") {
 }
 
 /** 1回目の tick を「書いた後・complete の前」に落とし、リースを切らして2回目の tick で再配達する。 */
-async function crashThenRedeliver(kit: Kit, kinds: Array<"embed" | "consolidate" | "reflect">) {
+async function crashThenRedeliver(
+  kit: Kit,
+  kinds: Array<"embed" | "consolidate" | "reflect" | "extract">,
+) {
   kit.crash.crash = true;
   await expect(kit.runtime.tick(ctx, { kinds, leaseMs: LEASE_MS })).rejects.toThrow(
     /ワーカーが止まった/,
@@ -265,5 +278,25 @@ for (const [name, makeKit] of KITS) {
       expect(memories.filter((m) => m.provenanceKind === "reflected")).toHaveLength(2);
       expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(2);
     });
+
+    for (const [label, outputs, expectedActive] of [
+      ["同じ本文（A → A）: 1件のまま", ["候補A", "候補A"], 1],
+      ["違う本文（A → B）: 2件とも active で残る", ["候補A", "候補B"], 2],
+      ["LLM の失敗 → A: 全文フォールバックと候補の2件が active で残る", [null, "候補A"], 2],
+    ] as const) {
+      it(`extract: ${label}（#1092）`, async () => {
+        nowMs = Date.parse("2030-01-01T00:00:00.000Z");
+        const kit = await makeKit();
+        extractOutputs = [...outputs];
+        await kit.runtime.observe(ctx, { kind: "utterance", text: "発話", extract: "deferred" });
+        nowMs += 1000;
+        await crashThenRedeliver(kit, ["extract"]);
+        expect(extractOutputs).toEqual([]);
+        const memories = await kit.listMemories(ctx);
+        expect(memories.filter((m) => m.status === "active")).toHaveLength(expectedActive);
+        expect(memories).toHaveLength(expectedActive);
+        expect(await kit.eventStore.list(ctx, { kind: "created" })).toHaveLength(expectedActive);
+      });
+    }
   });
 }

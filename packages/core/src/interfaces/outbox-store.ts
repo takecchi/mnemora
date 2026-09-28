@@ -29,6 +29,15 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   ジョブは、別のワーカー（または同じワーカー）に再び claim され、**同じジョブが
  *   複数回処理されうる**。呼び出し側（`processExtractJob`/`processEmbedJob` 等）は
  *   この重複を前提にしてよい形（冪等）で書くこと。
+ *   ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)。
+ *   どうするかは決めていない）: **`extract` のジョブは、LLM の出力が変わると冪等にならない。**1回目が Memory を
+ *   書いた後・`complete` の前に止まり、リースが切れた後の2回目が同じジョブを処理すると、2回の LLM が同じ本文を
+ *   返したときだけ1件のまま（冪等の鍵で同じ行に当たる）である。違う本文を返すと2件とも `active` で残る。1回目の
+ *   LLM が落ちて全文フォールバックになり、2回目が成功すると、フォールバックの Memory と候補の2件が `active` で
+ *   残る。`reflect` も再配達で2件になる（`Runtime.reflect` の doc）。`embed`・`consolidate` は1回だけ処理したとき
+ *   と同じ状態になる。並行の2本の形は #1092 の本文。
+ *   【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
+ *   （`packages/postgres/src/__tests__/tick-sequential-redelivery.postgres.test.ts`）。
  *   **下の「Phase 1 では失敗したジョブの自動リトライを行わない」とは別の話**——
  *   あちらは `fail()` で終端状態になった（＝処理を試みて失敗が確定した）ジョブの話、
  *   こちらは終端状態に達しないまま止まったジョブを回収する話である。
