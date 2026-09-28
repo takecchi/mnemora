@@ -133,7 +133,19 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
       // 「いま」を読まないため、この1関数だけのモックで seed 全体の経路を確実に
       // 同じ ms へ固定できる（素の `new Date()`（引数無し）はモックしない——
       // V8 の内部実装への依存を避けるため）。
-      const frozenMs = Date.now();
+      //
+      // ⚠ 2026-09-28: 固定する値は「いま」ではなく、書き込みより約60秒前にする。
+      // `available_at` は Postgres の `now()`（書き込みのトランザクションの開始時刻）で書かれ、
+      // claim の `now` は固定した値 +1ms（`clockPastRecentDbWrites`）になる。固定する値を
+      // 読み取った瞬間の `Date.now()` にすると、このガードが発火するのは「読み取りから
+      // トランザクションの開始までに約1ms以上かかったとき」だけになる——書き込みの経路の速さに
+      // 依っていた。手元の実測では、プロセスの最初の書き込み（コードが冷えている）は約5.8ms
+      // かかって発火するが、温まった経路では300回中142回が1ms未満で、ガードが発火しなかった。
+      // CI でも1回、この形で赤くなった（run 36409314697 attempt 1、`promise resolved … instead of
+      // rejecting`）。60秒前なら、経路の速さにも、同じホストの上の小さな時計のずれにも依らず、
+      // claim の `now` が `available_at` に届かない。ms の境界そのものの機構は、上の「機構の証明」が
+      // 別に縛っている。
+      const frozenMs = Date.now() - 60_000;
       vi.spyOn(Date, "now").mockReturnValue(frozenMs);
 
       await expect(
