@@ -169,6 +169,46 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `tenant_subject_activity` に、このテナントの行が1本でもあるか。
+   * **`EXISTS` だけを見る**——`activity_seq` の値そのものは読まない（呼び出し側は
+   * `getSubjectActivitySeqs` を別途呼ぶ）。主キーの先頭列（`tenant_id`）で引けるので
+   * 追加の索引は要らない。
+   */
+  async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
+    const result = await this.db.execute(sql`
+      SELECT 1 FROM tenant_subject_activity WHERE tenant_id = ${ctx.tenantId} LIMIT 1
+    `);
+    return result.rows.length > 0;
+  }
+
+  /**
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `tenant_subject_activity.activity_seq`（`S_x`）を、渡した
+   * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略する
+   * （`readSubjectActivitySeqs`（core）が `0` へ倒す）。
+   *
+   * `activity_seq` は `bigint` 列——`getActivitySeq` と同じ理由で `Number()` に変換する。
+   */
+  async getSubjectActivitySeqs(
+    ctx: Ctx,
+    subjectIds: string[],
+  ): Promise<Record<string, number>> {
+    if (subjectIds.length === 0) {
+      return {};
+    }
+    const result = await this.db.execute(sql`
+      SELECT subject_id, activity_seq FROM tenant_subject_activity
+      WHERE tenant_id = ${ctx.tenantId} AND subject_id = ANY(${sql.param(subjectIds)}::text[])
+    `);
+    const out: Record<string, number> = {};
+    for (const row of result.rows as unknown as { subject_id: string; activity_seq: string | number }[]) {
+      out[row.subject_id] = Number(row.activity_seq);
+    }
+    return out;
+  }
+
+  /**
    * Issue #201 / ADR 0318: `tenant_settings.taxonomy_mode` の現在値。行が無ければ
    * `DEFAULT_TAXONOMY_MODE`（`'open'`）——`getDecayClock` と同じ規律。
    */
