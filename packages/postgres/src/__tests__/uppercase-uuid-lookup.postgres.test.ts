@@ -161,7 +161,10 @@ describe("PostgresMemoryStore.markContestedPair — 大文字の UUID でも在�
     expect([first.status, second.status]).toEqual(["contested", "contested"]);
   });
 
-  it("投げる入力を増やさない: 同じ記憶を小文字と大文字で渡すと、今どおり「memory not found」を投げ、何も書かない", async () => {
+  // ⚠ #1324 では、この入力が「memory not found」（`Error`）を投げることを縛っていた。store の入口で uuid の形の id を
+  // 小文字にそろえるようにしてから、TSDoc が約束する「同じ id なら RangeError」に変わった（例外の種類が約束どおりに
+  // なる。投げる入力の集合は変わらない）。意図して書き換えた歯である（`uppercase-uuid-store-entry.postgres.test.ts`）。
+  it("投げる入力を増やさない: 同じ記憶を小文字と大文字で渡すと、TSDoc どおり RangeError を投げ、何も書かない", async () => {
     const { store, ctx, create, side } = await setup();
     const a = await create("pair-self");
 
@@ -174,9 +177,8 @@ describe("PostgresMemoryStore.markContestedPair — 大文字の UUID でも在�
       (e: unknown) => e,
     );
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).constructor).toBe(Error);
-    expect((error as Error).message).toMatch(/memory not found/);
+    expect(error).toBeInstanceOf(RangeError);
+    expect((error as Error).message).toMatch(/must differ/);
     expect((await store.get(ctx, a.id))?.status).toBe("active");
   });
 });

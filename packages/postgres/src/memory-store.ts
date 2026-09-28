@@ -45,6 +45,7 @@ import type { Db } from "./client.js";
 import { maybeAnalyzeMemoriesAfterWrite } from "./memories-statistics.js";
 import {
   isUuidLike,
+  normalizeUuidCase,
   parsePgTimestamp,
   rowToLabel,
   rowToMemory,
@@ -1167,9 +1168,9 @@ export class PostgresMemoryStore implements MemoryStore {
    * `id`・同じ `at` で複数回呼んでも2回目以降が no-op になり最終状態が変わらないのと
    * 同じ理由。戻り値は元の `ids`（重複・順序とも）に合わせて組み直す。
    *
-   * 去重と突き合わせの鍵は、uuid の形の id を小文字にそろえたものである。DB は uuid を大文字小文字を
-   * 区別せずに比べて小文字で返すので、`reinforce` は大文字の id でも同じ行を書く。渡された id のまま
-   * 突き合わせると、大文字の id だけで「memory not found」になり `reinforce` と結果が割れていた
+   * 入口で uuid の形の id を小文字にそろえてから（`normalizeUuidCase`）去重・突き合わせる。DB は uuid を
+   * 大文字小文字を区別せずに比べて小文字で返すので、`reinforce` は大文字の id でも同じ行を書く。渡された id の
+   * まま突き合わせると、大文字の id だけで「memory not found」になり `reinforce` と結果が割れていた
    * （`uppercase-uuid-lookup.postgres.test.ts`）。同じ記憶を小文字と大文字で渡したときも1回だけ処理する。
    *
    * `ids` に存在しない・adapter の期待する形式でない id が含まれる場合:
@@ -1210,9 +1211,9 @@ export class PostgresMemoryStore implements MemoryStore {
       return [];
     }
 
-    // 突き合わせの鍵（上の doc）。形の合わない id は鍵をそのまま使う——どの行とも一致しない。
-    const keyOf = (id: MemoryId): string => (isUuidLike(id) ? id.toLowerCase() : id);
-    const uniqueIds = [...new Set(ids.map(keyOf))];
+    // 入口の正規化（上の doc）。形の合わない id はそのまま——どの行とも一致しない。
+    const normalizedIds = ids.map(normalizeUuidCase);
+    const uniqueIds = [...new Set(normalizedIds)];
     const wellFormedIds = uniqueIds.filter((id) => isUuidLike(id));
 
     const current = await exec.execute(sql`
@@ -1227,7 +1228,7 @@ export class PostgresMemoryStore implements MemoryStore {
     // `ids` の元の順で最初に見つからない id（`reinforce` 単体を呼んだときに
     // 「memory not found」になる id）。上のコメントのとおり、書き込みは
     // これとは独立に「見つかった id 全部」へ行う。
-    const missingId = ids.find((id) => !currentById.has(keyOf(id)));
+    const missingId = normalizedIds.find((id) => !currentById.has(id));
     const existingIds = wellFormedIds.filter((id) => currentById.has(id));
 
     if (existingIds.length === 0) {
@@ -1303,7 +1304,7 @@ export class PostgresMemoryStore implements MemoryStore {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${missingId}`);
     }
 
-    return ids.map((id) => resultById.get(keyOf(id))!);
+    return normalizedIds.map((id) => resultById.get(id)!);
   }
 
   async recordUsage(
@@ -2082,6 +2083,10 @@ export class PostgresMemoryStore implements MemoryStore {
     first: { id: MemoryId; event: NewMemoryEvent },
     second: { id: MemoryId; event: NewMemoryEvent },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    // 入口の正規化（`normalizeUuidCase`）。同じ行を小文字と大文字で渡したときも、下の検査で TSDoc どおり
+    // `RangeError` になる（そろえる前は、この検査を通り抜けて「memory not found」になっていた）。
+    first = { ...first, id: normalizeUuidCase(first.id) };
+    second = { ...second, id: normalizeUuidCase(second.id) };
     if (first.id === second.id) {
       throw new RangeError("PostgresMemoryStore: first.id and second.id must differ");
     }
@@ -2118,32 +2123,24 @@ export class PostgresMemoryStore implements MemoryStore {
         ORDER BY id ASC
         FOR UPDATE
       `);
-      // 突き合わせの鍵は小文字にそろえる——DB は uuid を大文字小文字を区別せずに比べて小文字で返すので、
-      // 渡された id のままだと大文字の id だけで「memory not found」になっていた
-      // （`uppercase-uuid-lookup.postgres.test.ts`。`reinforceMany` と同じ）。⚠ 同じ記憶を小文字と大文字で
-      // 渡したとき（上の `first.id === second.id` を通り抜けた）は、渡された文字列どおりに突き合わせる
-      // ——そろえる前と同じく2つ目が「memory not found」になり、投げる例外の種類を変えない。
-      const sameRowSpelledTwice = first.id.toLowerCase() === second.id.toLowerCase();
-      const keyOf = (id: string): string => (sameRowSpelledTwice ? id : id.toLowerCase());
+      // id は入口で小文字にそろえてあるので、DB が返す id とそのまま突き合わせられる。
       const statusById = new Map(
         existing.rows.map((row) => {
           const r = row as unknown as { id: string; status: MemoryStatus };
-          return [keyOf(r.id), r.status] as const;
+          return [r.id, r.status] as const;
         }),
       );
-      const firstKey = keyOf(first.id);
-      const secondKey = keyOf(second.id);
-      if (!statusById.has(firstKey)) {
+      if (!statusById.has(first.id)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${first.id}`);
       }
-      if (!statusById.has(secondKey)) {
+      if (!statusById.has(second.id)) {
         throw new Error(`PostgresMemoryStore: memory not found for tenant: ${second.id}`);
       }
-      if (statusById.get(firstKey) !== "active") {
-        throw new MemoryStatusConflictError(first.id, "active", statusById.get(firstKey)!);
+      if (statusById.get(first.id) !== "active") {
+        throw new MemoryStatusConflictError(first.id, "active", statusById.get(first.id)!);
       }
-      if (statusById.get(secondKey) !== "active") {
-        throw new MemoryStatusConflictError(second.id, "active", statusById.get(secondKey)!);
+      if (statusById.get(second.id) !== "active") {
+        throw new MemoryStatusConflictError(second.id, "active", statusById.get(second.id)!);
       }
 
       const updateSide = async (id: MemoryId, oppositeId: MemoryId): Promise<Memory> => {
@@ -2342,6 +2339,18 @@ export class PostgresMemoryStore implements MemoryStore {
       event: NewMemoryEvent;
     },
   ): Promise<{ first: Memory; second: Memory; events: [MemoryEvent, MemoryEvent] }> {
+    // 入口の正規化（`normalizeUuidCase`）。下の `rowById` の引き当てと `contested_with_id` との比較は JS で行う
+    // ので、そろえないと大文字の id だけで「memory not found」か `MemoryStatusConflictError` になっていた。
+    // 同じ行を小文字と大文字で渡したときも、次の検査で TSDoc どおり `RangeError` になる。
+    const normalizeSide = <T extends { id: MemoryId; supersededById?: MemoryId }>(side: T): T => ({
+      ...side,
+      id: normalizeUuidCase(side.id),
+      ...(side.supersededById === undefined
+        ? {}
+        : { supersededById: normalizeUuidCase(side.supersededById) }),
+    });
+    first = normalizeSide(first);
+    second = normalizeSide(second);
     if (first.id === second.id) {
       throw new RangeError("PostgresMemoryStore: first.id and second.id must differ");
     }
@@ -2471,21 +2480,35 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }> {
+    // 入口の正規化（`normalizeUuidCase`）。
+    survivor = {
+      ...survivor,
+      id: normalizeUuidCase(survivor.id),
+      contestedWithId: normalizeUuidCase(survivor.contestedWithId),
+    };
     if (!isUuidLike(survivor.id)) {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${survivor.id}`);
     }
 
     return this.db.transaction(async (tx) => {
-      const result = await tx.execute(sql`
-        UPDATE memories
-        SET status = 'active',
-            contested_with_id = NULL,
-            updated_at = now()
-        WHERE tenant_id = ${ctx.tenantId} AND id = ${survivor.id}
-          AND status = 'contested' AND contested_with_id = ${survivor.contestedWithId}
-        RETURNING *
-      `);
-      if (result.rows.length === 0) {
+      // 形の合わない `contestedWithId` は、どの行の `contested_with_id` とも一致しない——UPDATE を撃たず
+      // （撃つと uuid への型変換で DB の例外が漏れる）、下の読み直しで TSDoc どおり `MemoryStatusConflictError`
+      // （行が無ければ「memory not found」）に落とす。core の Fake と同じ結果になる
+      // （`uppercase-uuid-store-entry.postgres.test.ts`）。
+      const updatedRows = isUuidLike(survivor.contestedWithId)
+        ? (
+            await tx.execute(sql`
+              UPDATE memories
+              SET status = 'active',
+                  contested_with_id = NULL,
+                  updated_at = now()
+              WHERE tenant_id = ${ctx.tenantId} AND id = ${survivor.id}
+                AND status = 'contested' AND contested_with_id = ${survivor.contestedWithId}
+              RETURNING *
+            `)
+          ).rows
+        : [];
+      if (updatedRows.length === 0) {
         // 事前検証を通った直後にここへ来るとすれば TOCTOU——読み直して切り分ける
         // (`resolveContestedPair` と同じ作法)。
         const current = await tx.execute(sql`
@@ -2497,7 +2520,7 @@ export class PostgresMemoryStore implements MemoryStore {
         const observedStatus = (current.rows[0] as unknown as { status: MemoryStatus }).status;
         throw new MemoryStatusConflictError(survivor.id, "contested", observedStatus);
       }
-      const memory = rowToMemory(result.rows[0] as unknown as MemoryRow);
+      const memory = rowToMemory(updatedRows[0] as unknown as MemoryRow);
 
       const eventResult = await tx.execute(sql`
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
@@ -2570,6 +2593,8 @@ export class PostgresMemoryStore implements MemoryStore {
     event: { reason?: string; actor?: EventActor; at: Date },
     filter?: { onlyMemoryIds?: MemoryId[] },
   ): Promise<{ restored: Memory[] }> {
+    // 入口の正規化（`normalizeUuidCase`）。`meta.supersededById` に写す値を、列（`superseded_by_id`）の値と揃える。
+    supersededById = normalizeUuidCase(supersededById);
     if (!isUuidLike(supersededById)) {
       return { restored: [] };
     }
