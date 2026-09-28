@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
+import type { OpenAIChatClient } from "./client-types.js";
 import { OpenAILLMProviderError } from "./errors.js";
 import { translateForOpenAIStructuredOutput } from "./json-schema.js";
 import { needsRootWrap, toBaseJsonSchema, unwrapRootValue } from "./structured-root.js";
@@ -38,10 +39,15 @@ export interface OpenAILLMProviderOptions {
   model: string;
   /**
    * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
-   * キーの検査もしない。⚠ `openai` を自分の依存として入れるときは、`@mnemora/openai` が固定している版と
-   * 同じにすること——違う版だと型が食い違う（packages/openai/README.md の 2026-09-27 追記）。
+   * キーの検査もしない。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）:**
+   * この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIChatClient}
+   * である（以前は `Pick<OpenAI, "chat">` だった）。**`openai` を自分の依存として入れる版は、
+   * `@mnemora/openai` が固定している版と揃える必要が無い**——`OpenAI` インスタンスは、
+   * 版が違ってもこの構造型を満たす限りそのまま渡せる（packages/openai/README.md 参照）。
    */
-  client?: Pick<OpenAI, "chat">;
+  client?: OpenAIChatClient;
   /**
    * `chat.completions.create` へ渡す `temperature`（省略可能な純追加、Issue #690 段3a）。
    *
@@ -319,7 +325,7 @@ function toOpenAIMessages(
  * HTTP の失敗・認証の失敗・400 などは、SDK の例外がそのまま伝わる。
  */
 export class OpenAILLMProvider implements LLMProvider {
-  private readonly client: Pick<OpenAI, "chat">;
+  private readonly client: OpenAIChatClient;
   private readonly model: string;
   private readonly temperature?: number;
 

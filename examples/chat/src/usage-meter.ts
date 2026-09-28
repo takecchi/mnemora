@@ -8,7 +8,10 @@ import type { ProviderMode } from "./providers.js";
  * 実測する（PR 本文 (A)）。
  *
  * **`packages/openai` は変更しない。** `OpenAILLMProvider` / `OpenAIEmbeddingProvider` は
- * どちらもコンストラクタで `client`（`Pick<OpenAI, "chat">` / `Pick<OpenAI, "embeddings">`）を
+ * どちらもコンストラクタで `client`（`OpenAIChatClient` / `OpenAIEmbeddingsClient`——
+ * 2026-09-29 より前は `Pick<OpenAI, "chat">` / `Pick<OpenAI, "embeddings">`。
+ * [Issue #1221](https://github.com/takecchi/mnemora/issues/1221) /
+ * [ADR 0350](../../../docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）を
  * 注入できる（`packages/openai/src/__tests__/*.test.ts` が同じ穴を使っている）。この
  * provider 自身は `client.chat.completions.create` / `client.embeddings.create` が返す
  * `response.usage` を読んだあとに `{content}` / `T` / `number[][]` へ絞ってから呼び出し側へ

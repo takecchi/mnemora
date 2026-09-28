@@ -119,6 +119,47 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 **⚠ 2026-09-28 追記19（保留の解消。範囲は広げていない）**: オーナーの回答（ask_human `3f3411c5`）で、公開の fixture（`@mnemora/testkit/fixtures`）が、これまで受け入れていた不正な入力に新しく例外を投げる変更は、破壊的変更として扱わないと決まった。上の追記4〜18 の ⟹ の「上の保留」は、この節ではどれもこの種類の変更を指していた——`### Fixed` の PR #1135・#1157・#1165・#1170・#1183・#1190・#1243・#1250・#1252・#1265・#1270・#1280 の12項目である（前書きの「保留と非破壊の数え方」）。この12項目の ⚠ を「破壊的変更として扱わない」に書き換え、`### Fixed` に置いたまま確定させた。分類の見出しは変えていない。PR #1171 の `setEventRetention` は、もともと保留に入れず非破壊と数えていたので変わらない。`## [1.0.2]`・`## [1.0.1]` 節が保留と書いている PR #811・#813・#815・#923・#928 などにもこの回答は当たるが、出荷済みの節なので書き換えていない（`docs/migration-v1.md` の数え方の規律に追記した）。追記4〜18 の本文と ⟹ の行も、書いた時点の記録として書き換えていない。
 ⟹ **この節の範囲（`v1.0.2`…`f5ad59f`）で、破壊的変更は無い。計上を保留しているものも無い。**
 
+**2026-09-29 追記**: 上の18回の棚卸しの範囲（`f5ad59f` まで）の**外**——この節にまだ棚卸しで
+取り込まれていない、作業中の1件——として、下の `### Breaking` に破壊的変更が1件在る
+（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。**この節の他の項目と違い、
+棚卸しの「PR を全部当てた」手順を経て足したものではない**——変更を作った本人が、着地に
+先立って自分でこの節に足した項目である。次回以降の棚卸しは、この項目が既に在ることを
+前提に PR 番号の有無だけ確認すればよい。
+
+### Breaking
+
+- **`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が、SDK の
+  クラスから切り出した型から、SDK のクラスを名指ししない自前の構造型へ変わった**
+  （[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、
+  [PR #1377](https://github.com/takecchi/mnemora/pull/1377)、
+  [ADR 0350](./docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。
+  オーナーの回答（ask_human `f259eeb8`、逐語「型を SDK のクラスから切り離すってのは
+  だめですか？」）に基づく。
+
+  | パッケージ | 欄 | 以前の型 | 新しい型 |
+  |---|---|---|---|
+  | `@mnemora/openai` | `OpenAILLMProviderOptions.client` | `Pick<OpenAI, "chat">` | `OpenAIChatClient` |
+  | `@mnemora/openai` | `OpenAIEmbeddingProviderOptions.client` | `Pick<OpenAI, "embeddings">` | `OpenAIEmbeddingsClient` |
+  | `@mnemora/anthropic` | `AnthropicLLMProviderOptions.client` | `Pick<Anthropic, "messages">` | `AnthropicMessagesClient` |
+
+  **誰が影響を受けるか**:
+  - 🔴 **`Pick<OpenAI, "chat">`・`Pick<OpenAI, "embeddings">`・`Pick<Anthropic, "messages">`
+    を、自分のコードの型注釈にそのまま書いている利用者**（例: 独自の偽 client の型を
+    宣言している場合）は、新しい型名（`OpenAIChatClient`・`OpenAIEmbeddingsClient`・
+    `AnthropicMessagesClient`。どちらも `@mnemora/openai`/`@mnemora/anthropic` から
+    export される）へ書き換える必要がある。
+  - ⭕ **SDK の client インスタンス（`new OpenAI(...)`・`new Anthropic(...)`）をそのまま
+    `client` に渡しているだけの利用者は、型検査・実行時のどちらも影響を受けない**——
+    構造的に代入できる。**むしろ、以前は `@mnemora/openai`/`@mnemora/anthropic` が
+    固定している版と違う版の SDK を入れると型検査が壊れていたのが、この変更で
+    通るようになる**（今まで型で落ちていた組み合わせが緑になる。既存の README の
+    回避策「同じ版を `-E` で入れる」はもう要らない——`packages/openai/README.md`・
+    `packages/anthropic/README.md` から該当の案内を削除し、訂正を追記した）。
+  - ⭕ `client` を渡さない利用者（`apiKey` だけ、または環境変数）は影響を受けない。
+
+  `openai`・`@anthropic-ai/sdk` は引き続き `dependencies` に版を固定して持つ
+  （`peerDependencies` にはしない。理由は ADR 0350「決定」3）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
