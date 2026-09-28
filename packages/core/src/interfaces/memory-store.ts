@@ -809,8 +809,9 @@ export interface MemoryStore {
    * になる（`docs/autonomy.md`「してはいけないこと」表）。進めた後の値が要る呼び出し側は
    * `TenantSettingsStore.getActivitySeq` を別途読むこと。
    *
-   * ⚠ **`record` の中身は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と `@mnemora/testkit` の
-   * fixture で確かめた）。`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories`（その `score` など）が
+   * ⚠ **`record` の中身の形は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と `@mnemora/testkit` の
+   * fixture で確かめた）。拒むのは、列の型が受け付けない値——NUL を含む値と、JSON にできない必須の欄——だけである
+   * （Postgres は `text`・`jsonb` 列が拒み、fixture はそれに合わせて先に投げる）。`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories`（その `score` など）が
    * それぞれの型（`OmissionSchema`・`RecallUsageSchema`・`IndexBandSchema`・`StageTraceSchema`・`ScoreBreakdownSchema`）
    * に合わなくても、そのまま書く。⟹ **`getRecall` が返す `RecallRecord` は、それらの schema を通らないことがある**
    * （例: `returnedMemories` の要素の `score` が `{}` のまま読み戻る）。`Runtime` の `recall()` は検証した値だけを
