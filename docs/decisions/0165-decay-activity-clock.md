@@ -560,3 +560,25 @@
   - **(P1)/(P2) の切り分けは、前任のマネージャー（`mgr-4d5c8755`）が現物から導き、
     本 ADR の作成者が `vector-store.ts:72-73` と `memory-model.md:318,333` に
     当て直して再確認した。** 実際に走らせて測ってはいない（Postgres が無い）。
+
+## 追記（2026-09-28、[Issue #1014](https://github.com/takecchi/mnemora/issues/1014)）: 「決めたこと」5 と引き受けた負債5 は、今の実態と違う（どちらに揃えるかは未決）
+
+上の本文は書き換えていない。今の実態だけを書く。
+
+- **「決めたこと」5 は「`'wall'` のテナントで作られた Memory の `decay_base_seq` も 0 になる。後から `'activity'` へ
+  切り替えると、切り替え時点から減衰が始まる」と書いている。今の実装では、そうならない。**
+  - `'wall'` のテナントで作られた Memory は、活動時計の3つ組（`decay_base_seq`・`decay_floor_seq`・
+    `half_life_recalls`）が**3つとも `NULL`** のまま作られる（`runtime.ts` の `resolveActivityClockInputs` は `'wall'`
+    のテナントで何も返さない）。
+  - `NULL` は「決めたこと」4 のとおり「この軸には床が無い」なので、`'activity'` へ切り替えた後、活動時計がどれだけ
+    進んでも、その Memory は忘却ゲート・`sweepArchive` に選ばれない。切り替えた後に作られた Memory は選ばれる。
+  - 引き受けた負債5 の「切り替え直後に、既存の記憶がまとめて沈みうる」も起きない。起きるのは「切り替え前の記憶は、
+    活動時計では一度も沈まない」である。
+- 実装は「決めたこと」4 と 16（`'wall'` のテナントでは `tenant_activity` を読まない）の側に揃っている。
+- どちらに揃えるか（実装を「決めたこと」5 に寄せる／この節の実態を契約にする／切り替えの口に移行を持たせる）は、
+  [Issue #1014](https://github.com/takecchi/mnemora/issues/1014) で決まっていない。案と、ぶつかるもの（「決めたこと」16、
+  既存の記憶の書き換え）は同 Issue のコメントにある。
+- 【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
+  （`packages/postgres/src/__tests__/wall-to-activity-switch.postgres.test.ts`）。
+
+（この追記はクローン miku の委譲先が書いた。オーナーではない。）
