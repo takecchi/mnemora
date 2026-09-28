@@ -1540,7 +1540,7 @@ export class PostgresMemoryStore implements MemoryStore {
       decayFloorAtAfter !== undefined
         ? sql`(decay_floor_at > ${toPgTimestamp(decayFloorAtAfter)}::timestamptz)`
         : undefined;
-    // ADR 0348（Issue #338）: `scope.decayFloorSeqUsesSubjectCounters` が true の
+    // ADR 0352（Issue #338）: `scope.decayFloorSeqUsesSubjectCounters` が true の
     // ときだけ相関サブクエリで subject 単位のカウンタを足す（段1の `buildFilterConditions`
     // と同じ述語、`activityFloorSeqAliveCondition` の doc コメント参照）。このテーブルは
     // エイリアス無しの `memories` そのものなので `tenant_id`/`subject_id` をそのまま渡す。
@@ -1855,7 +1855,7 @@ export class PostgresMemoryStore implements MemoryStore {
    * 撃たない**（既定 `'wall'` のテナントでは、この行を一度も触らない、という ADR の
    * 意味論をそのまま満たす）。
    *
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `record.advanceActivityClock` が `{ scope: "subject", subjectId }`
    * のときは、`tenant_activity`（`T`）ではなく `tenant_subject_activity`
    * （`subjectId` の行、`S_x`）を同じトランザクションで `+1` する——**`T` には触れない。**
@@ -2851,7 +2851,7 @@ export function buildArchiveDecayedTargetSelect(ctx: Ctx, opts: ArchiveDecayedOp
         `PostgresMemoryStore.archiveDecayed: opts.nowSeq is required when clock is "${clock}"`,
       );
     }
-    // ADR 0348（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
+    // ADR 0352（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
     // `tenant_subject_activity` を相関サブクエリで足す。
     return activityFloorSeqDeadCondition({
       nowSeq: opts.nowSeq,

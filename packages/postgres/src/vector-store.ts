@@ -97,7 +97,7 @@ function buildFilterConditions(ctx: Ctx, filter: VectorFilter) {
       ? sql`m.decay_floor_at > ${toPgTimestamp(filter.decayFloorAtAfter)}`
       : undefined;
   // `decay_floor_seq IS NULL` の行は通す（ADR 0165 決めたこと4——NULL は「この軸には
-  // 床が無い＝活動時計では沈まない」）。ADR 0348（Issue #338）:
+  // 床が無い＝活動時計では沈まない」）。ADR 0352（Issue #338）:
   // `decayFloorSeqUsesSubjectCounters` が true のときだけ、行の subject に対応する
   // `tenant_subject_activity` を相関サブクエリで足す（`activityFloorSeqAliveCondition`
   // の doc コメント参照）。false（既定）のテナントでは今日どおり単一パラメータ比較。

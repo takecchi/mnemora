@@ -135,7 +135,7 @@ export interface VectorFilter {
    */
   decayFloorSeqAfter?: number;
   /**
-   * [ADR 0348](../../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `true` のとき、`decayFloorSeqAfter`（テナント単位の `T`）に、その
    * 行の `subject_id` に対応する subject 単位のカウンタ `S_x`（`tenant_subject_activity`）
    * を足した値と比較する——`decay_floor_seq > (decayFloorSeqAfter + COALESCE(S_x, 0))`。

@@ -6,7 +6,7 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+ * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
  * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
  * はできない？」）の歯。
  *
@@ -100,7 +100,7 @@ async function createEmbeddedMemory(
   return memory;
 }
 
-describe("recall() — activityCounting（ADR 0348、Issue #338）", () => {
+describe("recall() — activityCounting（ADR 0352、Issue #338）", () => {
   it("既定（'tenant'）: subject B に絞った recall を繰り返すと、subject A の記憶も沈む（回帰確認、本 ADR 以前と同じ挙動）", async () => {
     const { runtime, stores } = buildRuntime();
     await stores.tenantSettingsStore.setDecayClock(tenantCtx, "activity");

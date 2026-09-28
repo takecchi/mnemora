@@ -43,7 +43,7 @@ function event(memoryId: MemoryId, kind: NewMemoryEvent["kind"]): NewMemoryEvent
 
 const recallRecord = (
   text: string,
-  // ADR 0348（Issue #338）: 既定は今日どおり `true`（tenant_activity への +1）。
+  // ADR 0352（Issue #338）: 既定は今日どおり `true`（tenant_activity への +1）。
   // subject scope のアトミック性検査（tenant_subject_activity 側）は
   // `{ scope: "subject", subjectId }` を渡す。
   advanceActivityClock: true | { scope: "subject"; subjectId: string } = true,
@@ -319,7 +319,7 @@ const CASES: Case[] = [
     },
   ],
   ["createRecall", "tenant_activity", async (s) => () => s.createRecall(ctx, recallRecord("q"))],
-  // ADR 0348（Issue #338）: subject scope の場合は tenant_subject_activity が
+  // ADR 0352（Issue #338）: subject scope の場合は tenant_subject_activity が
   // 最後のほうに書かれるトランザクションになる——同じ「途中で失敗したら全部戻る」検査を
   // このテーブルに対しても行う。
   [

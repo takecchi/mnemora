@@ -741,7 +741,7 @@ export type ConsolidateTarget =
       maxCandidates?: number;
       minAffinity?: number;
       /**
-       * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+       * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
        * （Issue #338）: 種の digest で内部的に呼ぶ `recall()` へそのまま渡す
        * `RecallQuery.activityCounting`。**`{ query }` 形は `RecallQuery` 自体に
        * この欄を含められるので、ここには無い**——`{ seedMemoryId }` 形だけ、
@@ -975,7 +975,7 @@ export type ReflectTarget =
       maxCandidates?: number;
       minAffinity?: number;
       /**
-       * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+       * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
        * （Issue #338）: `ConsolidateTarget`（`{ seedMemoryId }` 形）の同名の欄と
        * 同じ——種の digest で内部的に呼ぶ `recall()` へそのまま渡す。省略時 `"tenant"`。
        */
@@ -3342,13 +3342,13 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const [tenantSeq, halfLifeRecalls, subjectSeq] = await Promise.all([
       readActivitySeq(deps.tenantSettingsStore, ctx),
       readDefaultHalfLifeRecalls(deps.tenantSettingsStore, ctx),
-      // ADR 0348（Issue #338）: 書き込む Memory の「有効ないま」は T + S_x
+      // ADR 0352（Issue #338）: 書き込む Memory の「有効ないま」は T + S_x
       // （x = ctx.subjectId。無ければ T のみ）——これから作る Memory の
       // decayBaseSeq/decayFloorSeq は、それが属する subject の視点で計算する。
       // 🔴 引き受けた負債: この解決は `ctx.subjectId` を「これから作る Memory の
       // subjectId」の代わりに使う。呼び出し側（`buildNewMemoriesForCandidates`）が
       // 複数 subject の候補を一括で作る場合、全候補が同じ `ctx.subjectId` 基準の
-      // 値を使うことになる（ADR 0348「確かめていないこと」）。
+      // 値を使うことになる（ADR 0352「確かめていないこと」）。
       ctx.subjectId !== undefined
         ? readSubjectActivitySeq(deps.tenantSettingsStore, ctx, ctx.subjectId)
         : Promise.resolve(0),
@@ -3375,7 +3375,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       return undefined;
     }
     const tenantSeq = await readActivitySeq(deps.tenantSettingsStore, ctx);
-    // ADR 0348（Issue #338）: 強化される Memory の「有効ないま」は T + S_x
+    // ADR 0352（Issue #338）: 強化される Memory の「有効ないま」は T + S_x
     // （x = ctx.subjectId）。🔴 引き受けた負債: 対象 Memory 自身の subjectId では
     // なく `ctx.subjectId` を使う（`resolveActivityClockInputs` と同じ負債）——
     // 使用報告ループが複数 subject の Memory を一括で強化する場合、全件が同じ
@@ -4727,7 +4727,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     // `text`/`activityCounting` 以外のフィールドを一切渡さない——閾値・limit・
     // channels・overFetchFactor はすべて recall() の既定に委ねる（interface 側の
-    // doc コメント参照）。ADR 0348（Issue #338）: `activityCounting` は
+    // doc コメント参照）。ADR 0352（Issue #338）: `activityCounting` は
     // `input.activityCounting` をそのまま渡す（省略時は recall() 側の既定
     // "tenant" に落ちる）。
     const recallResult = await recall(ctx, {
@@ -4796,7 +4796,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const nowSeq =
       opts.nowSeq ??
       (clock === "wall" ? undefined : await readActivitySeq(deps.tenantSettingsStore, ctx));
-    // ADR 0348（Issue #338）: 掃引はテナント全体を対象にする（subject を絞らない）ため、
+    // ADR 0352（Issue #338）: 掃引はテナント全体を対象にする（subject を絞らない）ため、
     // 行ごとに違う subject の `S_x` を都度計算する必要がある——
     // `hasSubjectActivityCounters?` が false（一度も subject カウンタを使っていない
     // テナント）なら相関サブクエリを足さない（プラン族を変えない、`archiveDecayed`
@@ -5883,7 +5883,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       } else {
         // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
         // 経路を通す（新しい「似ている」の判定を作らない）。
-        // ADR 0348（Issue #338）: `target.activityCounting` をそのまま渡す
+        // ADR 0352（Issue #338）: `target.activityCounting` をそのまま渡す
         // （省略時は recall() 側の既定 "tenant" に落ちる）。
         const recallResult = await recall(ctx, {
           text: seed.digest,
@@ -6271,7 +6271,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       } else {
         // 種の digest を text にして recall() を1回呼ぶ——{ query } 形とまったく同じ
         // 経路を通す（新しい「似ている」の判定を作らない）。
-        // ADR 0348（Issue #338）: `target.activityCounting` をそのまま渡す
+        // ADR 0352（Issue #338）: `target.activityCounting` をそのまま渡す
         // （省略時は recall() 側の既定 "tenant" に落ちる）。
         const recallResult = await recall(ctx, {
           text: seed.digest,

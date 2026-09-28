@@ -1917,7 +1917,7 @@ export interface RecallQuery {
    */
   includeSubjectless?: boolean;
   /**
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
    * はできない？」）: `decay_clock` が `'wall'` 以外のテナントで、この recall が
    * どのカウンタを `+1` するかを選ぶ。
@@ -2178,7 +2178,7 @@ export const RecallQuerySchema = z.object({
   includeFullyDecayed: z.boolean().optional(),
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),
-  // ADR 0348（Issue #338）: 数え方は前進の対象だけを選ぶ引数——読み取りには影響しない
+  // ADR 0352（Issue #338）: 数え方は前進の対象だけを選ぶ引数——読み取りには影響しない
   // （`RecallQuery.activityCounting` の doc コメント参照）。
   activityCounting: z.enum(["tenant", "subject"]).optional(),
   // .nullable() は明示的な off（ADR 0337）。.optional() は省略——省略時は
@@ -2247,7 +2247,7 @@ export interface RecallScope {
    */
   decayFloorAnyAxis?: boolean;
   /**
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味——
    * `true` なら `decayFloorSeqAfter`（`T`）に、その Memory の `subjectId` に対応する
    * `S_x` を足した値と比較する。`recall-runtime.ts` が
@@ -2546,7 +2546,7 @@ export interface NewRecallRecord {
    * `T`）を `+1` しなければならない。既定 `false`（省略時は今日と同じ挙動——
    * `activity_seq` は動かない）。
    *
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `{ scope: "subject"; subjectId }` を渡すと、実装は `T` ではなく
    * **`tenant_subject_activity`（`subjectId` の行、`S_x`）を同じトランザクションで
    * `+1` する**（`T` には触れない）。`RecallQuery.activityCounting: "subject"` を

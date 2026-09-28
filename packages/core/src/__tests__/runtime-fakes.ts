@@ -215,7 +215,7 @@ class FakeBackingStore {
    */
   activitySeq = new Map<string, number>();
   /**
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `tenant_subject_activity` 相当。`tenantId` → `subjectId` → `S_x`
    * の2段の `Map`。`FakeMemoryStore.createRecall`（書く側）と
    * `FakeTenantSettingsStore.getSubjectActivitySeqs`/`hasSubjectActivityCounters`
@@ -261,7 +261,7 @@ class FakeBackingStore {
 function isDecayedForScope(
   memory: Pick<Memory, "decayFloorAt" | "decayFloorSeq" | "subjectId">,
   scope: RecallScope,
-  // ADR 0348（Issue #338）: このテナントの subject 単位カウンタ（`Map<subjectId, S_x>`）。
+  // ADR 0352（Issue #338）: このテナントの subject 単位カウンタ（`Map<subjectId, S_x>`）。
   // `scope.decayFloorSeqUsesSubjectCounters` が true のときだけ参照する。
   subjectActivitySeqByTenant: Map<string, number> | undefined,
 ): boolean {
@@ -1406,7 +1406,7 @@ export class FakeMemoryStore implements MemoryStore {
       const current = this.backing.activitySeq.get(ctx.tenantId) ?? 0;
       this.backing.activitySeq.set(ctx.tenantId, current + 1);
     } else if (
-      // ADR 0348（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
+      // ADR 0352（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
       typeof record.advanceActivityClock === "object" &&
       record.advanceActivityClock !== null &&
       record.advanceActivityClock.scope === "subject"
@@ -1535,7 +1535,7 @@ export class FakeMemoryStore implements MemoryStore {
     // 同じ形に揃える——境界の非対称（ゲートは狭義 `>`、掃引は境界を含む `<=`）を
     // 1バイトも変えずに写す。`'either'` は AND（両方の軸で沈んでいるものだけ掃く）。
     const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
-    // ADR 0348（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
+    // ADR 0352（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
     // その Memory の subjectId に対応する `S_x` を足す（postgres 側
     // `activityFloorSeqDeadCondition` と同じ式）。
     const subjectActivitySeqByTenant = this.backing.subjectActivitySeq.get(ctx.tenantId);
@@ -2268,7 +2268,7 @@ export class FakeVectorStore implements VectorStore {
       const seqAxisAfter = opts.filter.decayFloorSeqAfter;
       const wallAlive =
         wallAxisAfter === undefined ? undefined : memory.decayFloorAt > wallAxisAfter;
-      // ADR 0348（Issue #338）: `decayFloorSeqUsesSubjectCounters` が true のときだけ、
+      // ADR 0352（Issue #338）: `decayFloorSeqUsesSubjectCounters` が true のときだけ、
       // この行の subjectId に対応する `S_x` を足す（postgres 側
       // `activityFloorSeqAliveCondition` と同じ式）。
       const effectiveSeqAxisAfter =
@@ -2884,7 +2884,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `backing.subjectActivitySeq` に、このテナントの行が1本でもあるか。
    */
   async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
@@ -2894,7 +2894,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   }
 
   /**
-   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * [ADR 0352](../../../docs/decisions/0352-activity-counting-per-call.md)
    * （Issue #338）: `backing.subjectActivitySeq` から、渡した `subjectIds` ぶんを
    * まとめて読む。行が無い `subjectId` はキーを省略する。
    */
