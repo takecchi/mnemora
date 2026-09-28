@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import ts from "typescript";
 import { describe, expect, it } from "vitest";
 import { extractGoalStatements } from "../north-star-default-probe-lib.mjs";
 
@@ -13,7 +14,8 @@ import { extractGoalStatements } from "../north-star-default-probe-lib.mjs";
  * - `- 口: \`<パッケージ>\` \`<名前>\`` —— 名前が `scripts/__snapshots__/public-api/<パッケージ>.d.ts`
  *   （公開 API のスナップショット、ADR 0178）に語として在る。
  * - `- 実装: \`<パス>\`` —— ファイルが在る。
- * - `- テスト: \`<パス>\` 「<it の名前>」` —— ファイルが在り、it の名前がそこに逐語で在る。
+ * - `- テスト: \`<パス>\` 「<it の名前>」` —— ファイルが在り、その名前が `it(`／`test(` の**第1引数として**
+ *   逐語で在り、その宣言が `.skip`／`.fails` でない（名前がコメントや別の文字列にあるだけでは足りない）。
  * - `docs/north-star.md`「目指す姿」の箇条それぞれに `### 項目N` の節が在る
  *   （箇条の数はここに焼き込まず、正典から読む）。
  *
@@ -80,6 +82,52 @@ function parsePathsDoc(markdown) {
 
 const IDENTIFIER_CHAR = "[A-Za-z0-9_$]";
 
+/** 走らない、または結果を反転する宣言。これが付いた it は「縛っている」に数えない。 */
+const NON_RUNNING_MODIFIERS = new Set(["skip", "fails"]);
+
+/**
+ * `source` の中で、`name` を第1引数に持つ `it(`／`test(` の宣言を探す。
+ * `it.skipIf(cond)(name, …)` のように呼び先が連なる形も、根が `it`／`test` なら宣言として数える。
+ *
+ * @param {string} source
+ * @param {string} name
+ * @returns {{ found: false } | { found: true, modifiers: string[] }}
+ */
+function findTestDeclaration(source, name) {
+  const sf = ts.createSourceFile("x.ts", source, ts.ScriptTarget.Latest, true);
+  /** @type {{ found: false } | { found: true, modifiers: string[] }} */
+  let result = { found: false };
+  const visit = (node) => {
+    if (result.found) return;
+    if (ts.isCallExpression(node)) {
+      const first = node.arguments[0];
+      const literal =
+        first && (ts.isStringLiteral(first) || ts.isNoSubstitutionTemplateLiteral(first))
+          ? first.text
+          : undefined;
+      if (literal === name) {
+        /** @type {string[]} */
+        const modifiers = [];
+        let callee = node.expression;
+        for (;;) {
+          if (ts.isCallExpression(callee)) callee = callee.expression;
+          else if (ts.isPropertyAccessExpression(callee)) {
+            modifiers.unshift(callee.name.text);
+            callee = callee.expression;
+          } else break;
+        }
+        if (ts.isIdentifier(callee) && (callee.text === "it" || callee.text === "test")) {
+          result = { found: true, modifiers };
+          return;
+        }
+      }
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return result;
+}
+
 /**
  * 参照ごとに実在を確かめ、見つからなかったものを文字列で返す（空なら全部在る）。
  *
@@ -109,8 +157,18 @@ function findMissingReferences(items, root) {
         missing.push(`項目${item} ${ref.kind}: ${ref.path} が無い`);
         continue;
       }
-      if (ref.kind === "テスト" && !readFileSync(file, "utf8").includes(ref.name)) {
-        missing.push(`項目${item} テスト: ${ref.path} に it「${ref.name}」が無い`);
+      if (ref.kind === "テスト") {
+        const declaration = findTestDeclaration(readFileSync(file, "utf8"), ref.name);
+        if (!declaration.found) {
+          missing.push(`項目${item} テスト: ${ref.path} に it「${ref.name}」が無い`);
+        } else {
+          const off = declaration.modifiers.filter((m) => NON_RUNNING_MODIFIERS.has(m));
+          if (off.length > 0) {
+            missing.push(
+              `項目${item} テスト: ${ref.path} の it「${ref.name}」は .${off.join(".")} になっている`,
+            );
+          }
+        }
       }
     }
   }
@@ -140,6 +198,44 @@ describe("docs/north-star-paths.md の参照先", () => {
 
   it("口・実装・テストの参照先がすべて実在する", () => {
     expect(findMissingReferences(items, REPO_ROOT)).toEqual([]);
+  });
+});
+
+describe("findTestDeclaration（陽性対照）", () => {
+  const NAME = "北極星の歯が指す it";
+
+  it("it(／test( の第1引数に在る名前は宣言として見つかり、修飾が無い", () => {
+    expect(findTestDeclaration(`it("${NAME}", () => {});`, NAME)).toEqual({
+      found: true,
+      modifiers: [],
+    });
+    expect(findTestDeclaration(`test(\`${NAME}\`, () => {});`, NAME)).toEqual({
+      found: true,
+      modifiers: [],
+    });
+  });
+
+  it("名前がコメントや it でない呼び出しの引数にあるだけなら、宣言としては見つからない", () => {
+    expect(findTestDeclaration(`// it("${NAME}")\nit("別の名前", () => {});`, NAME)).toEqual({
+      found: false,
+    });
+    expect(findTestDeclaration(`describe("${NAME}", () => {});`, NAME)).toEqual({ found: false });
+    expect(findTestDeclaration(`const s = "${NAME}";`, NAME)).toEqual({ found: false });
+  });
+
+  it(".skip／.fails／.skipIf(…) の修飾を拾う", () => {
+    expect(findTestDeclaration(`it.skip("${NAME}", () => {});`, NAME)).toEqual({
+      found: true,
+      modifiers: ["skip"],
+    });
+    expect(findTestDeclaration(`it.fails("${NAME}", () => {});`, NAME)).toEqual({
+      found: true,
+      modifiers: ["fails"],
+    });
+    expect(findTestDeclaration(`it.skipIf(x)("${NAME}", () => {});`, NAME)).toEqual({
+      found: true,
+      modifiers: ["skipIf"],
+    });
   });
 });
 

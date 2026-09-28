@@ -51,6 +51,7 @@
   - ⚠ 2026-09-27 追記（[Issue #208](https://github.com/takecchi/mnemora/issues/208) を閉じるときに足した）: `packages/` に reranking の実装は無い。段2の再スコア（`packages/core/src/strategies/scoring.ts`）は候補ごとに独立に評価する純関数で、候補どうしを見て並べ替える機構ではない。**LLM reranker は北極星が問い3 で一度落とした案である**（[north-star.md](./north-star.md) の「この問いが、実際に案を落とすことの確認」の表）。再び提案するなら、少なくとも次の条件を満たすこと（Issue #208 の受け入れ条件）: ①問い3（なぜ選ばれたかを後から説明できる）を満たすことを ADR に書く ②問い5（LLM を呼ばずに済ませられないか）に答える ③並べ替えた後も `ScoreBreakdown` に相当する説明が成り立つ ④想起の質を測る器（[Issue #109](https://github.com/takecchi/mnemora/issues/109)）が先に在り、`retrieval-baseline.json` の前後で hit@1 が実際に動いたことを示す ⑤動かなかったときにどうするかを着手前に書く。どの項が実際に順位を決めているかは [ADR 0081](./decisions/0081-similarity-is-the-only-term-that-ranks.md)・[ADR 0109](./decisions/0109-which-score-terms-actually-rank.md) が測っている。
 - `reflect()` の実運用（Background Cognition）
 - `packages/bullmq`（Scheduler の実装）
+  - **⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: `packages/bullmq` はその後できたが、`Scheduler` を実装していない。BullMQ のジョブで `runtime.tick()` を駆動するものである（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)、[architecture.md](./architecture.md) §5.6 の追記）。`private: true` で、npm には公開していない。
 - HTTP server（`packages/server`）
 
 これらは Phase 1 の範囲外だが、土台となる列・テーブルは 1.2 の通り Phase 1 に含める。
@@ -124,6 +125,8 @@
 ### 抽出モードについての注記
 
 段階3の Memory Extraction は `extract: 'sync' | 'deferred'` を API として持つが、**既定値をどちらにするかは §5 の通りオーナー判断待ち**である。Phase 1 は「Background Cognition を必須にしない」方針のため、`sync` を既定にしても矛盾しないが、この計画自体はどちらか一方に決め打ちしていない。
+
+**⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: 既定はもう決まっている。§5.2 の追記のとおり `sync` であり、実装も `extract` を省略した `observe()` を `sync` として扱う（`packages/core/src/runtime.ts` の `input.extract ?? "sync"`）。上の段落は計画の記録として残す。
 
 ---
 
@@ -239,7 +242,7 @@ outbox は今日どおり Postgres が正本のままで、`InlineScheduler` か
 | 監査ログの量 | `memory_events` テーブルのサイズが MemoryStore 本体を上回るペースで伸びる | テナント単位の保持期間設定と、期限切れ削除を `purged` イベントとして残す仕組みを Phase 3 で実装する。スキーマは Phase 1 から仕込んである。 |
 | multi-tenant での ANN 索引の効き（テナントごとの偏り） | 特定テナントだけ recall のレイテンシが悪化する、`EXPLAIN` で想定外の Seq Scan が出る | `tenant_id` を索引の先頭に置く設計を維持する。テナントごとの件数分布を監視し、必要ならパーティショニングを検討する（Phase 3 以降の課題として明示する）。 |
 | 「認知レイヤー」という位置づけが、実際には利用側のプロンプト構築と密結合になる | 呼び出し側が mnemora の返り値を丸ごとプロンプトに焼き込む実装になり、`budget` / `omitted` / `usage` を無視し始める | サンプルアプリで `budget` と `omitted` の扱いを模範として示す。「載せるかどうかを決めるのは呼び出し側の責任」であることをドキュメントで明記する。 |
-| Drizzle 公式ガイドの例（`1 - cosineDistance(...)` を降順で並べる書き方）では HNSW 索引が効かない可能性がある | `EXPLAIN` で Seq Scan が出る、recall のレイテンシがデータ量に比例して悪化する | 規約として、`ORDER BY` には距離演算子の結果をそのまま昇順で書き、式にしない。`testkit` に `EXPLAIN` で索引が使われることを確認する検査を含める（段階2の完了条件と同じもの）。 |
+| Drizzle 公式ガイドの例（`1 - cosineDistance(...)` を降順で並べる書き方）では HNSW 索引が効かない可能性がある | `EXPLAIN` で Seq Scan が出る、recall のレイテンシがデータ量に比例して悪化する | 規約として、`ORDER BY` には距離演算子の結果をそのまま昇順で書き、式にしない。`testkit` に `EXPLAIN` で索引が使われることを確認する検査を含める（段階2の完了条件と同じもの）。 **⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: この検査は `testkit` ではなく `packages/postgres` のテストに置かれている——生の SQL と `EXPLAIN` を扱うため（`packages/testkit/src/vector-store-conformance.ts` の冒頭の doc がそう書いている）。`testkit` の適合テストには `EXPLAIN` の検査は無い。 |
 | `drizzle-kit push` が生成する HNSW の DDL に operator class が欠落する不具合が報告されている | `push` で作成した索引が `EXPLAIN` で使われない、または `CREATE INDEX` の operator class が想定と違う | ベクトル索引の DDL は手書きのマイグレーションで管理し、`push` に任せない。 |
 | フィルタ問題（`tenant_id` / `status` / `decay_floor_at > now()`）とスコア問題（減衰・タグ・鮮度を掛ける再スコア）を混同して対処を誤る | `hnsw.iterative_scan` を有効にしたのにスコアの取りこぼしが直らない（あるいはその逆） | 二つを明確に分けて扱う。フィルタ問題には iterative index scan と `hnsw.ef_search` の調整、スコア問題には over-fetch と段2の再スコアで対処する。片方の対処でもう片方が直ると期待しない。 |
 | pgvector のバージョン要件（iterative scan は 0.8.0 以降、CVE-2026-3172 の修正は 0.8.2） | マネージド Postgres の環境で `hnsw.iterative_scan` が使えない、または既知の脆弱性が残ったバージョンが動いている | `SELECT * FROM pg_available_extensions WHERE name = 'vector'` で各環境のバージョンを確認する運用手順をドキュメントに明記する。要件を `>= 0.8.0`、推奨を `>= 0.8.2` として明文化する。**マネージド Postgres 各社が実際に提供するバージョンは確認できていない**（§6 参照）。⭐ **`CVE-2026-3172` は実在し、内容も一致する**（**2026-09-17 訂正**。それ以前この欄は「番号自体も裏が取れていない」と書いていたが、同日 MITRE CVE Services・NVD・GitHub advisory database（`cve_id=` で引くと [`GHSA-789c-mgqf-5hwx`](https://github.com/advisories/GHSA-789c-mgqf-5hwx)）を当てて**解消した**）。⚠ **ただし `>= 0.8.2` は「既知の CVE が1つも残らない下限」ではない**——`CVE-2026-18022`（CVSS 8.8 HIGH、⚠ **32bit システムのみ**）が `0.8.6` 未満のすべてに効く。⛔ **下限を動かすかは製品判断としてここでは決めていない。** 逐語・当てた先の一覧・判断材料は [`docs/memory-model.md`「前提: pgvector のバージョン」](./memory-model.md#前提-pgvector-のバージョン)の 2026-09-17 追記にまとめた。 |
