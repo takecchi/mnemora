@@ -243,8 +243,8 @@ console.log({ decayed, total: score.total, tokens, counter });
 
 ## ほかに export しているもの（約束は各 TSDoc）
 
-`@mnemora/core` は、この README に出てこない名前も多く export している（型・zod スキーマ・既定値・純関数を
-合わせて 390 余り）。`v1.0.0` の後に公開面へ入った名前を、用途ごとに並べる。
+`@mnemora/core` は、この README に出てこない名前も多く export している（型・zod スキーマ・既定値・純関数。
+何が在るかの正本は `scripts/__snapshots__/public-api/core.d.ts` で、⛔ ここに数を写さない）。`v1.0.0` の後に公開面へ入った名前を、用途ごとに並べる。
 
 | 用途 | 名前 |
 |---|---|
