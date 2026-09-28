@@ -3095,7 +3095,11 @@ function describeDroppedCandidate(
 ): DroppedCandidate {
   let innermost: unknown = error;
   const seen = new Set<unknown>([error]);
-  while (innermost instanceof Error && innermost.cause !== undefined && !seen.has(innermost.cause)) {
+  while (
+    innermost instanceof Error &&
+    innermost.cause !== undefined &&
+    !seen.has(innermost.cause)
+  ) {
     seen.add(innermost.cause);
     innermost = innermost.cause;
   }
@@ -3103,8 +3107,9 @@ function describeDroppedCandidate(
   const rawMessage = innermost instanceof Error ? innermost.message : String(innermost);
   const message = Array.from(
     rawMessage
-      .replace(/\u0000/g, "\\u0000")
-      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�"),
+      .split("\u0000")
+      .join("\\u0000")
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "\uFFFD"),
   )
     .slice(0, DROPPED_CANDIDATE_MESSAGE_MAX_CHARS)
     .join("");

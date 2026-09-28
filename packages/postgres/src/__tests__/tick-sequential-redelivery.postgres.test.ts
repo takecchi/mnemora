@@ -428,7 +428,10 @@ for (const [name, makeKit] of KITS) {
     it("extract: 1回目が候補の一部だけを書いて止まると、再配達は残りを書かず、reextract で回復する", async () => {
       nowMs = Date.parse("2030-01-01T00:00:00.000Z");
       const kit = await makeKit();
-      extractOutputs = [["候補1", "候補2"], ["候補1", "候補2"]];
+      extractOutputs = [
+        ["候補1", "候補2"],
+        ["候補1", "候補2"],
+      ];
       const { observationId } = await kit.runtime.observe(ctx, {
         kind: "utterance",
         text: "発話",

@@ -185,7 +185,12 @@ for (const [name, makeKit] of KITS) {
 
     it("deferred の extract ジョブでも、保存できない候補だけを落として残りを書き、ジョブは完了する", async () => {
       const kit = await makeKit();
-      const got = await observeWith(kit, ["一件目の事実", NUL, "三件目の事実"], "deferred", "deferred");
+      const got = await observeWith(
+        kit,
+        ["一件目の事実", NUL, "三件目の事実"],
+        "deferred",
+        "deferred",
+      );
       expect(got.threw).toBe(false);
       expect(got.contents).toEqual(["一件目の事実", "三件目の事実"]);
       expect(got.tick).toEqual({ processed: 1, failed: 0 });
