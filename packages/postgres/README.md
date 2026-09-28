@@ -311,7 +311,7 @@ CI で赤くなったら、コードではなくこの一覧のほうを直す�
 [ADR 0204](../../docs/decisions/0204-postgres-object-names-cover-functions.md) が
 ADR 0202 の「引き受けた負債1」を解消した）。
 
-### テーブル（10）
+### テーブル（11）
 
 - `labels`
 - `memories`
@@ -323,6 +323,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `recalls`
 - `tenant_activity`
 - `tenant_settings`
+- `tenant_subject_activity`
 
 ### 索引（24）
 
