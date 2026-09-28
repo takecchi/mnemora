@@ -69,12 +69,17 @@ export type ConsolidationLLMResult = z.infer<typeof ConsolidationLLMResultSchema
  * `@mnemora/openai` で同じ）。`{ query }`/`{ seedMemoryId }` の形は `recall()` の `limit` と
  * `maxCandidates` で件数が抑えられる。入力がモデルの上限を超えると、provider は API の拒否を
  * そのまま投げ、`outcome: "llm_failed"`（`llmFailure.kind: null`）になる——書き込みは0件である。
+ *
+ * Issue #1370: 統合結果の言語を、渡された記憶と同じ言語で書くよう明示する（無条件・
+ * 録音済みカセットには使われていない文面——`buildExtractionPrompt` の
+ * `subjectCandidates` 分岐と違い、`buildConsolidationPrompt` は録音のキーに縛られない）。
  */
 export function buildConsolidationPrompt(eligible: Memory[]): PromptSpec {
   return {
     system:
       "あなたは複数の記憶を1件に統合するアシスタントです。渡された記憶それぞれの本文と要旨を読み、" +
-      "重複を除いて1つの本文にまとめてください。矛盾する内容がある場合はどちらも書き残してください。",
+      "重複を除いて1つの本文にまとめてください。矛盾する内容がある場合はどちらも書き残してください。" +
+      "統合した本文と要旨は、渡された記憶と同じ言語で書いてください。",
     messages: [
       {
         role: "user",

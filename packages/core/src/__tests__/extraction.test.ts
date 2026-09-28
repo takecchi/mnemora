@@ -454,6 +454,96 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
     const withCandidates = llmCassetteKeyLocal(buildExtractionPrompt(observation, ["user:a"]));
     expect(withCandidates).not.toBe(withoutCandidates);
   });
+
+  /**
+   * Issue #1370: 本文の言語が観測と揃わない・話者を取り違える、の2件。
+   * `subjectCandidates` が渡されたときだけ system に足す（ADR 0051 のカセット鍵・
+   * Issue #704 評価用録音を動かさないため——本 PR の ADR 参照）。
+   */
+  describe("Issue #1370: 言語・話者の指示", () => {
+    it("subjectCandidates があると、出力言語を観測に揃える指示が system に足される", () => {
+      const observation = makeObservation();
+      const prompt = buildExtractionPrompt(observation, ["user:a"]);
+      expect(prompt.system).toContain(
+        "記憶の本文（content）と要旨（digest）は、観測の本文と同じ言語で書いてください",
+      );
+      // subjectId・provenanceKind などの識別子には適用しないことも明示している。
+      expect(prompt.system).toContain(
+        "subjectId や provenanceKind などの識別子はこの限りではありません",
+      );
+    });
+
+    it("subjectCandidates があると、話者取り違えを禁じる指示が system に足される", () => {
+      const observation = makeObservation();
+      const prompt = buildExtractionPrompt(observation, ["user:a"]);
+      expect(prompt.system).toContain(
+        "観測の発言の話者（本文の先頭の話者ラベル、または speaker）自身の発言は、" +
+          "その話者についての記憶として扱い、別の人物（利用者など）の発言・意見として書かないでください。",
+      );
+    });
+
+    it("subjectCandidates が無ければ（省略・空配列）、言語・話者の指示は足されず、①以前の文面と1バイトも違わない", () => {
+      const observation = makeObservation();
+      expect(buildExtractionPrompt(observation)).toEqual({
+        system: BASE_SYSTEM,
+        messages: [{ role: "user", content: "明日は東京に出張する予定です" }],
+      });
+      expect(buildExtractionPrompt(observation, [])).toEqual({
+        system: BASE_SYSTEM,
+        messages: [{ role: "user", content: "明日は東京に出張する予定です" }],
+      });
+    });
+
+    it("extractionContext だけ渡し、subjectCandidates を渡さなければ、system は今の文面と1バイトも違わない（固定）", () => {
+      const observation = makeObservation({
+        payload: {
+          text: "明日は東京に出張する予定です",
+          speaker: "田中",
+          extractionContext: { messages: [{ speaker: "assistant", text: "了解です" }] },
+        },
+      });
+      const prompt = buildExtractionPrompt(observation);
+      // 今の extractionContext 分岐の文面（extraction.ts 参照）をそのまま写し、
+      // Issue #1370 の変更がこの経路に1バイトも触れていないことを固定する。
+      const expectedSystem =
+        BASE_SYSTEM +
+        " 入力JSONのobservationだけを抽出対象にしてください。contextは参照先の解決にだけ使い、" +
+        "他の話者の発言を対象話者の事実として抽出しないでください。代名詞は文脈で一意に分かる場合だけ具体化し、" +
+        "分からない対象を補わないでください。直前の提案への明示的な同意・選択は、選択した具体的内容を対象話者の記憶として残してください。" +
+        "相対日付はoccurredAtとtimeZoneが両方ある場合だけobservedLocalDateを基準に暦日に具体化し、明日・昨日はrelativeDatesの計算済み日付を使ってください。" +
+        "記録日時recordedAtを発話日時の代わりに使わないでください。情報が足りなければ不明であることを本文に残してください。" +
+        " digestにも対象・話者・確定できた日付など回答に必要な情報を残してください。";
+      expect(prompt.system).toBe(expectedSystem);
+      // 言語・話者の新しい指示はこの経路には一切含まれない。
+      expect(prompt.system).not.toContain("観測の本文と同じ言語で書いてください");
+      expect(prompt.system).not.toContain(
+        "別の人物（利用者など）の発言・意見として書かないでください",
+      );
+    });
+
+    it("subjectCandidates と extractionContext の両方を渡すと、新しい話者の一文の直後に既存の『他の話者の発言を対象話者の事実として抽出しない』が続く（重複・矛盾しない）", () => {
+      const observation = makeObservation({
+        payload: {
+          text: "明日は東京に出張する予定です",
+          speaker: "田中",
+          extractionContext: { messages: [{ speaker: "assistant", text: "了解です" }] },
+        },
+      });
+      const prompt = buildExtractionPrompt(observation, ["user:a"]);
+      const newSpeakerSentence =
+        "観測の発言の話者（本文の先頭の話者ラベル、または speaker）自身の発言は、" +
+        "その話者についての記憶として扱い、別の人物（利用者など）の発言・意見として書かないでください。";
+      const existingContextSentence = "他の話者の発言を対象話者の事実として抽出しないでください。";
+      const system = prompt.system ?? "";
+      const newIndex = system.indexOf(newSpeakerSentence);
+      const existingIndex = system.indexOf(existingContextSentence);
+      expect(newIndex).toBeGreaterThanOrEqual(0);
+      expect(existingIndex).toBeGreaterThan(newIndex);
+      // 2文とも独立して現れる（互いを部分文字列として含んでいない＝重複していない）。
+      expect(newSpeakerSentence).not.toContain(existingContextSentence);
+      expect(existingContextSentence).not.toContain(newSpeakerSentence);
+    });
+  });
 });
 
 describe("sanitizeCandidateSubjectId（Issue #608 項目②(b)）", () => {
