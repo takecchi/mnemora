@@ -6,6 +6,10 @@ import { defineConfig } from "vitest/config";
 // core の dist が無いことを前提にする（packages/testkit/tsconfig.json の
 // paths 設定と同じ理由・同じ狙い）。
 export default defineConfig({
+  test: {
+    // recall() の戻り値の契約の検査（src/__tests__/setup-recall-output-contract.ts、TSDoc の7巡目 B1・B2）。
+    setupFiles: ["./src/__tests__/setup-recall-output-contract.ts"],
+  },
   resolve: {
     alias: {
       "@mnemora/core": fileURLToPath(new URL("../core/src/index.ts", import.meta.url)),
