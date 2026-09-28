@@ -160,6 +160,56 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   `openai`・`@anthropic-ai/sdk` は引き続き `dependencies` に版を固定して持つ
   （`peerDependencies` にはしない。理由は ADR 0350「決定」3）。
 
+**⚠ 2026-09-29 追記20**: 上の18回分の棚卸しとは別に、`f5ad59f`（18回目が数えた末尾）より後に
+`main` へ入った作業として、`@mnemora/core` に破壊的変更がもう1件確定した（[Issue #548](https://github.com/takecchi/mnemora/issues/548)
+方向2、[ADR 0351](./docs/decisions/0351-association-score-without-total.md)）。上の
+`2026-09-29 追記`（PR #1377、`@mnemora/openai`/`@mnemora/anthropic` の件）と同じ扱い
+——着地に先立って変更を作った本人がこの節に足した項目であり、棚卸しの「PR を全部当てた」
+手順を経て足したものではない。上の `### Breaking` へ2件目の項目として足した（追記19 と番号が
+続けて見えるが、追記19（保留の解消）とは別件である——追記19 は既存12項目の再分類、
+この追記20 は新しい確定1件）。🔴 `f5ad59f` からこの変更が着地するまでの間に他の PR
+（例: PR #1375・#1376・#1379・#1381・#1383）が `main` へ入っているが、それらを1本ずつ
+洗って分類する棚卸しはまだ行っていない。**次回の棚卸しで、この追記20が数えていない
+範囲（`f5ad59f`…この変更の着地点）を通しで数え直すこと。**
+
+- **`@mnemora/core` の `RecalledMemory.score`/`RecallRecordMemory.score`/`CorrectionCandidate.score`
+  の型が `ScoreBreakdown` から `ScoreBreakdown | AffinityUnmeasuredScore`（新設のUnion型、
+  エクスポート名 `RecalledScore`）に変わった**（[Issue #548](https://github.com/takecchi/mnemora/issues/548)
+  方向2、[ADR 0351](./docs/decisions/0351-association-score-without-total.md)）——
+  **`affinityMeasured` が `false` の記憶（連想枠 `retrievedVia: "association"`、および
+  必須の同伴取得 `retrievedVia: "mandatory_companion"`。どちらも段3・段3.5 のどちらの
+  経由でも該当する）の `score` は、`total`/`similarity`/`lexicalMatch` という欄を
+  持たなくなった**（`undefined` になるのではなく、欄自体が無い）。これらの欄を無条件に
+  読んでいる呼び出し側（例: `memory.score.total`）は、この版から型検査に落ちる
+  （実行時は今までも `association`/`mandatory_companion` の `total` は「比較可能ではない」
+  値だった——ADR 0282／Issue #548 の核心。今回は、その事実を型でも表すようにしただけで、
+  順位・既定値・どの記憶が返るかは1ビットも変えていない）。
+  - **`strategies/consolidate.ts` の `computeAffinity(score)` の引数型も
+    `ScoreBreakdown` → `RecalledScore` に変わった**（`RecalledMemory.score` を経由する
+    公開関数のため連鎖する）。**戻り値は1バイトも変わらない**——`affinityMeasured === false`
+    のときに `-Infinity` を返す分岐を早期 return にしただけで、以前も
+    `similarity`/`lexicalMatch` がどちらも無い候補には同じ `-Infinity` を返していた。
+  - **移行の手順（`m.score.affinityMeasured !== false` で絞り込む）**:
+    ```ts
+    const total = m.score.affinityMeasured !== false ? m.score.total : null;
+    ```
+    `affinityMeasured` が `true`/`undefined`（独自の `ScoringStrategy` を実装していて
+    この欄を埋めていない場合を含む——ADR 0282「設計問2」と同じ区別できない `undefined`
+    の扱いを、安全側＝`ScoreBreakdown` へ倒す）なら `m.score.total` が読める。`false`
+    （連想枠・必須の同伴取得）なら `total`/`similarity`/`lexicalMatch` は存在しない
+    ——その `score` は `decay`/`tagMatch`/`freshness`/`strength` だけを持つ。
+  - **`ScoringStrategy`（`strategies/scoring.ts` の公開の拡張点）自体は変えていない**——
+    独自の採点関数を実装している利用者のコードはこの変更の影響を受けない。
+  - **永続化済みの過去の `recalls` 行は影響を受けない**——`getRecall` で読み戻すと、
+    本 ADR より前に書かれた `association`/`mandatory_companion` の行は、書かれた
+    当時の形（`total` を持つ場合はそのまま）で返る。マイグレーションは無い（決定・理由は
+    ADR 0351 決定5）。
+  - **版の付け方について**: `README.md`「版の付け方」は `v1.0.0` 以降の破壊的変更は
+    major を上げるとしているが、この変更は `v1.1.0`（minor）に破壊的変更として入っている。
+    これはオーナーへの問い（ask_human `6911db12` 問6、2026-09-28）への回答——逐語
+    「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」——を根拠にした運用であり、
+    詳細は ADR 0351「文脈」節と `README.md`「版の付け方」の追記を見ること。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。

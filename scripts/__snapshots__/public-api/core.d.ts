@@ -127,7 +127,7 @@ export declare function fixedClock(at: Date): Clock;
 
 // ===== dist/correction-candidates.d.ts =====
 import type { MemoryId, RecallId } from "./ids.js";
-import type { Omission, RecalledMemory, ScoreBreakdown, StageTrace } from "./recall.js";
+import type { Omission, RecalledMemory, RecalledScore, StageTrace } from "./recall.js";
 export declare const DEFAULT_CORRECTION_CANDIDATE_LIMIT = 3;
 export interface FindCorrectionCandidatesInput {
     text: string;
@@ -138,7 +138,7 @@ export interface CorrectionCandidate {
     memoryId: MemoryId;
     digest: string;
     recallRank: number;
-    score: ScoreBreakdown;
+    score: RecalledScore;
     retrievedVia: RecalledMemory["retrievedVia"];
 }
 export interface FindCorrectionCandidatesResult {
@@ -2085,6 +2085,40 @@ export declare const ScoreBreakdownSchema: z.ZodObject<{
     total: z.ZodNumber;
     affinityMeasured: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
+export interface AffinityUnmeasuredScore {
+    affinityMeasured: false;
+    decay: number;
+    tagMatch: number;
+    freshness: number;
+    strength: number;
+}
+export declare const AffinityUnmeasuredScoreSchema: z.ZodObject<{
+    affinityMeasured: z.ZodLiteral<false>;
+    decay: z.ZodNumber;
+    tagMatch: z.ZodNumber;
+    freshness: z.ZodNumber;
+    strength: z.ZodNumber;
+}, z.core.$strip>;
+export type RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore;
+export declare const RecalledScoreSchema: z.ZodUnion<readonly [
+    z.ZodObject<{
+        similarity: z.ZodOptional<z.ZodNumber>;
+        lexicalMatch: z.ZodOptional<z.ZodNumber>;
+        decay: z.ZodNumber;
+        tagMatch: z.ZodNumber;
+        freshness: z.ZodNumber;
+        strength: z.ZodNumber;
+        total: z.ZodNumber;
+        affinityMeasured: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>,
+    z.ZodObject<{
+        affinityMeasured: z.ZodLiteral<false>;
+        decay: z.ZodNumber;
+        tagMatch: z.ZodNumber;
+        freshness: z.ZodNumber;
+        strength: z.ZodNumber;
+    }, z.core.$strip>
+]>;
 export interface RecalledMemory {
     memoryId: MemoryId;
     digest: string;
@@ -2093,7 +2127,7 @@ export interface RecalledMemory {
     contestedWith?: MemoryId;
     associationOf?: MemoryId;
     provenanceKind: ProvenanceKind;
-    score: ScoreBreakdown;
+    score: RecalledScore;
     speaker?: string | null;
     subjectId?: string | null;
     recordedAt?: Date;
@@ -2120,16 +2154,25 @@ export declare const RecalledMemorySchema: z.ZodObject<{
         reflected: "reflected";
         imported: "imported";
     }>;
-    score: z.ZodObject<{
-        similarity: z.ZodOptional<z.ZodNumber>;
-        lexicalMatch: z.ZodOptional<z.ZodNumber>;
-        decay: z.ZodNumber;
-        tagMatch: z.ZodNumber;
-        freshness: z.ZodNumber;
-        strength: z.ZodNumber;
-        total: z.ZodNumber;
-        affinityMeasured: z.ZodOptional<z.ZodBoolean>;
-    }, z.core.$strip>;
+    score: z.ZodUnion<readonly [
+        z.ZodObject<{
+            similarity: z.ZodOptional<z.ZodNumber>;
+            lexicalMatch: z.ZodOptional<z.ZodNumber>;
+            decay: z.ZodNumber;
+            tagMatch: z.ZodNumber;
+            freshness: z.ZodNumber;
+            strength: z.ZodNumber;
+            total: z.ZodNumber;
+            affinityMeasured: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>,
+        z.ZodObject<{
+            affinityMeasured: z.ZodLiteral<false>;
+            decay: z.ZodNumber;
+            tagMatch: z.ZodNumber;
+            freshness: z.ZodNumber;
+            strength: z.ZodNumber;
+        }, z.core.$strip>
+    ]>;
     speaker: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
     recordedAt: z.ZodOptional<z.ZodDate>;
@@ -2326,16 +2369,25 @@ export declare const RecallResultSchema: z.ZodObject<{
             reflected: "reflected";
             imported: "imported";
         }>;
-        score: z.ZodObject<{
-            similarity: z.ZodOptional<z.ZodNumber>;
-            lexicalMatch: z.ZodOptional<z.ZodNumber>;
-            decay: z.ZodNumber;
-            tagMatch: z.ZodNumber;
-            freshness: z.ZodNumber;
-            strength: z.ZodNumber;
-            total: z.ZodNumber;
-            affinityMeasured: z.ZodOptional<z.ZodBoolean>;
-        }, z.core.$strip>;
+        score: z.ZodUnion<readonly [
+            z.ZodObject<{
+                similarity: z.ZodOptional<z.ZodNumber>;
+                lexicalMatch: z.ZodOptional<z.ZodNumber>;
+                decay: z.ZodNumber;
+                tagMatch: z.ZodNumber;
+                freshness: z.ZodNumber;
+                strength: z.ZodNumber;
+                total: z.ZodNumber;
+                affinityMeasured: z.ZodOptional<z.ZodBoolean>;
+            }, z.core.$strip>,
+            z.ZodObject<{
+                affinityMeasured: z.ZodLiteral<false>;
+                decay: z.ZodNumber;
+                tagMatch: z.ZodNumber;
+                freshness: z.ZodNumber;
+                strength: z.ZodNumber;
+            }, z.core.$strip>
+        ]>;
         speaker: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         subjectId: z.ZodOptional<z.ZodNullable<z.ZodString>>;
         recordedAt: z.ZodOptional<z.ZodDate>;
@@ -2557,7 +2609,7 @@ export declare const RecallResultSchema: z.ZodObject<{
 }, z.core.$strip>;
 export interface RecallRecordMemory {
     memoryId: MemoryId;
-    score: ScoreBreakdown;
+    score: RecalledScore;
     retrievedVia: RecalledMemory["retrievedVia"];
     companionOf?: MemoryId;
     associationOf?: MemoryId;
@@ -3129,7 +3181,7 @@ import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
-import type { ScoreBreakdown } from "../recall.js";
+import type { RecalledScore } from "../recall.js";
 export declare function intersectAttributes(eligible: ReadonlyArray<Pick<Memory, "attributes">>): Attributes;
 export declare const ConsolidationLLMResultSchema: z.ZodObject<{
     content: z.ZodString;
@@ -3150,7 +3202,7 @@ export interface BuildConsolidatedMemoryParams {
     halfLifeRecalls?: number;
 }
 export declare function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): NewMemory;
-export declare function computeAffinity(score: ScoreBreakdown): number;
+export declare function computeAffinity(score: RecalledScore): number;
 
 // ===== dist/strategies/decay.d.ts =====
 export interface DecayParams {
