@@ -1869,9 +1869,15 @@ export interface ResolveContestedResult {
  *   （ADR 0150 負債2「片側だけの `contested`」と同じ形の壊れ方。**この口はそれを直さない**
  *   ——対象外として ineligible で返す）。
  * - `"opposite_not_orphaned"` — `contestedWithId` の指す Memory が見つかったが、
- *   `status` が `"forgotten"` ではない（`active`/`contested`/`superseded` のいずれか）。
+ *   `status` が `"forgotten"` ではない（`active`/`contested`/`superseded`/`archived` のいずれか）。
  *   まだ `resolveContestedPair`（決定3の CAS）で正規に解決できる可能性がある対象を、
  *   この口が代わりに割り込んで処理しないためのガード。
+ *   ⚠ 2026-09-28 訂正: ここは以前 `archived` を挙げていなかったが、実装は `"forgotten"` かどうかだけを見るので、
+ *   対向が `archived` のときもこの値になる（`oppositeStatus: "archived"`）。文書を実装に合わせた（実装は変えていない）。
+ *   `Runtime` の口には `contested` な記憶を `archived` にするものは無い（`sweepArchive` が掃くのは `active` だけ）が、
+ *   `MemoryStore.updateStatus` を直接呼べば作れる。歯は
+ *   `packages/postgres/src/__tests__/resolve-orphaned-contested-opposite-archived.postgres.test.ts`
+ *   （Postgres と testkit の fixture）。
  */
 export type ResolveOrphanedContestedEligibility =
   | { kind: "eligible"; contestedWithId: MemoryId }
@@ -2742,8 +2748,8 @@ export interface Runtime {
    *    - `contestedWithId` が `null` → `"no_contested_with_id"`（ADR 0150 負債2の形。
    *      この口はそれを対象にしない）。
    *    - `contestedWithId` の指す Memory を読み、見つからないか `status === "forgotten"`
-   *      なら `"eligible"`。それ以外（`active`/`contested`/`superseded` のいずれか）なら
-   *      `"opposite_not_orphaned"`。
+   *      なら `"eligible"`。それ以外（`active`/`contested`/`superseded`/`archived` のいずれか）なら
+   *      `"opposite_not_orphaned"`（{@link ResolveOrphanedContestedEligibility} の 2026-09-28 訂正）。
    * 3. `"eligible"` でなければ、書き込みを一切試みず
    *    `{ supported: true, outcome: { kind: "ineligible", eligibility } }` を返す。
    * 4. `"eligible"` なら `deps.memoryStore.resolveOrphanedContested` を呼ぶ。成功すれば
