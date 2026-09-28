@@ -128,6 +128,13 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - やり直さないときは LLM を呼ばず、何も書かない。**`reextract` が `extraction: "skipped"` と `atomicity: "not_attempted"` を返しうるようになった**（`memoryIds: []`、`skipped` には退けた記憶ごとに `status_not_active`）。以前の TSDoc は「`reextract` の `extraction` は `'skipped'` を取らない」と約束していた。
   - `ExtractionOutcome`・`WriteAtomicity`・`ReextractSkip` の型は変わらない（`'skipped'` と `'not_attempted'` は元から在る値）。⟹ 型で exhaustive に分岐している呼び手には影響しない。ただし「`reextract` からは `'skipped'` が来ない」と仮定したコードは見直しが要る。
   ⭕ 非破壊と数える（公開の宣言は変わらず、例外も増えない。作られる記憶が減る側の変化で、「忘れさせた事実が戻らない」という上位の約束を守る側にある。**クローン miku の判断であり、オーナーの判断ではない**）。
+- **抽出（`subjectCandidates` を渡す呼び出しに限る）・`consolidate`・`reflect` の system プロンプトに、出力言語と話者取り違えの指示を足した**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、オーナーの求めによる対応）——観測が日本語なのに記憶の本文・要旨の一部が英語になる、話者自身の発言が別の人物（利用者など）の発言・意見として記録される、の2件への対応。
+  - **適用条件**: `buildExtractionPrompt` の2文（言語・話者）は、`subjectCandidates` を渡した呼び出しにだけ足す（`extractionContext` を同時に渡す場合も含む）。`extractionContext` だけを渡す呼び出し・どちらも渡さない呼び出し（デフォルト経路）には**足さない**——`EXTRACTION_PROMPT_SYSTEM_BASE` 自体にも `extractionContext` 分岐にも1バイトも触れていない。理由: どちらかの文面を変えると、記録済みカセット（`examples/chat/cassettes/`、ADR 0051 の `llmCassetteKey`）と Issue #704 の評価用録音の鍵が動き、録り直しが要る。`consolidate`・`reflect` の system プロンプトには、この条件を付けず無条件で言語の一文を足す（録音の鍵に使われていないため）。
+  - **デフォルト経路（`subjectCandidates` を渡さない抽出呼び出し）へ同じ指示を広げるかは未決——オーナーの判断待ち**（[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md)）。広げれば上の録音がすべて動く。
+  - 抽出（条件に当たる呼び出し）・`consolidate`・`reflect` の結果（LLM に送る文面と、それに応じた出力）が変わりうる。**`RuntimeConfig.promptVersion` を上げることを勧める**（TSDoc の「抽出プロンプトを変えたら上げる」どおり）。
+  - **実測**（90件の合成日本語対話・`subjectCandidates: ["user","character"]`・`extractionContext` 無し・`gpt-5.4-mini` 実 API、before/after 各3 run、90×2×3=540 回の抽出。詳細・判定方法は ADR 0348）: この条件下で、話者取り違え（構造的信号——候補の `subjectId` が実際の話者と逆）は character 発話由来のうち **46/176（26.1%、Wilson 95% CI 20.2–33.1%）→ 0/168（CI 上限 2.2%）**——CI が重ならず明確な差。**英語混入（content/digest のラテン文字比率ルールで判定）は、件数が少なく（before 1/318・3/316）、before/after の 95% CI が重なるため、差は主張できない。**
+  ⚠ **上の構造的信号は `subjectCandidates` を渡す呼び出しに限った指標であり（`subjectId` はそのときしか返らない）、デフォルト経路の取り違え発生率・改善効果については何も示していない。**
+  ⭕ 非破壊と数える（公開の宣言・型は変わらず、例外も増えない。変わるのは LLM に送る system の文面と、それに応じて LLM が返す本文・要旨だけである）。
 
 ### Fixed
 

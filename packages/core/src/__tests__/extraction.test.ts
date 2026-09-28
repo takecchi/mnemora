@@ -468,7 +468,9 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
         "記憶の本文（content）と要旨（digest）は、観測の本文と同じ言語で書いてください",
       );
       // subjectId・provenanceKind などの識別子には適用しないことも明示している。
-      expect(prompt.system).toContain("subjectId や provenanceKind などの識別子はこの限りではありません");
+      expect(prompt.system).toContain(
+        "subjectId や provenanceKind などの識別子はこの限りではありません",
+      );
     });
 
     it("subjectCandidates があると、話者取り違えを禁じる指示が system に足される", () => {
@@ -514,7 +516,9 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
       expect(prompt.system).toBe(expectedSystem);
       // 言語・話者の新しい指示はこの経路には一切含まれない。
       expect(prompt.system).not.toContain("観測の本文と同じ言語で書いてください");
-      expect(prompt.system).not.toContain("別の人物（利用者など）の発言・意見として書かないでください");
+      expect(prompt.system).not.toContain(
+        "別の人物（利用者など）の発言・意見として書かないでください",
+      );
     });
 
     it("subjectCandidates と extractionContext の両方を渡すと、新しい話者の一文の直後に既存の『他の話者の発言を対象話者の事実として抽出しない』が続く（重複・矛盾しない）", () => {
