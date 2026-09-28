@@ -534,11 +534,20 @@ export interface ReextractResult {
    * **件数は持たない**（`ReextractSkip` 自体に `count`/`countKind` が無い。`recall.ts` の
    * `StageSkippedOmission` に倣った形。理由は ADR 0029 参照）。
    *
-   * `usedWholeObservationFallback` の早期 return、`candidates.length === 0` の早期 return、
-   * 本経路（`classifyReextractTargets` + `classifySupersedeFailure`）の3つの書き込み経路が
-   * ある——早期 return の2つは**`listBySourceObservation` を呼ぶ前に return する**ため、
-   * `skipped` には `{ kind: 'not_examined', ... }` が入る（「何も飛ばさなかった」ではなく
-   * 「既存を見ていない」）。
+   * 利用者の意思で退けた記憶を持つ Observation の早期 return、`usedWholeObservationFallback` の
+   * 早期 return、`candidates.length === 0` の早期 return、本経路（`classifyReextractTargets` +
+   * `classifySupersedeFailure`）の4つの書き込み経路がある——後ろ2つの早期 return は
+   * **`listBySourceObservation` を呼ぶ前に return する**ため、`skipped` には
+   * `{ kind: 'not_examined', ... }` が入る（「何も飛ばさなかった」ではなく「既存を見ていない」）。
+   *
+   * ⚠ 2026-09-28 追記（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
+   * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)。今の振る舞いを書くだけ）: 1つ目の
+   * 早期 return（退けた記憶が1件でも在ると抽出をやり直さない。条件は `Runtime.reextract` の doc を参照）は、
+   * 既存を見た上で LLM を呼ぶ前に return する。**`skipped` には退けた記憶ごとに `status_not_active`
+   * （`status` はその記憶の今の status）が1件ずつ入り、`not_examined` は入らない。**同じ Observation の
+   * 他の `active` な記憶はここに載らない。このとき `extraction: "skipped"`・`atomicity: "not_attempted"`・
+   * `memoryIds: []`・`supersededMemoryIds: []`・`extractionFailure: null`。【実測 2026-09-28】Postgres と testkit の
+   * fixture で同じ（`status_not_active` が入ることの歯は `reextract-withdrawn-memories.postgres.test.ts`）。
    */
   skipped: ReextractSkip[];
   /** 抽出がどう終わったか（{@link ExtractionOutcome}）。 */
