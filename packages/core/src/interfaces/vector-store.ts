@@ -352,9 +352,12 @@ export interface VectorStore {
    *
    * **契約: `queries` に同じ `key` が2回以上あるときは、最後のクエリの結果だけを返す**（後勝ち、
    * [Issue #1284](https://github.com/takecchi/mnemora/issues/1284)）。それより前の同じ key のクエリは、結果に
-   * 現れない。返す `Map` の並びは、その key が**最初に現れた位置**である——
-   * `new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ。
-   * どの key の結果も、`search()` と同じく `limit` を超えない。同じ key があっても、投げる入力は変わらない。
+   * 現れない。返す `Map` の並びは、その key が**最初に現れた位置**である——結果は
+   * `new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ。ただし、同じ key のうち
+   * **前のクエリだけが投げる入力**（そのベクトルだけが DB に拒まれる値。float4 の範囲を超える有限の値など）では、
+   * この式は投げるが、`searchMany` は投げずに返す——前のクエリは SQL に送らないため。
+   * どの key の結果も、`search()` と同じく `limit` を超えない。投げる入力は、2026-09-28 より前と比べて減る側にしか
+   * 変わらない（前のクエリのベクトルだけが DB に拒まれる値だった入力は、以前は投げ、今は投げない）。
    * `Runtime` はアンカーの `memoryId` を key にするので、同じ key を渡さない。
    * ⚠ 2026-09-28 までは、`PostgresVectorStore` がその key のクエリすべての結果を1つの配列に続けて積んでいた
    * （件数は結果の和で、`limit` を超えうる）。
