@@ -105,6 +105,10 @@ function observationSpeaker(observation: Observation): string | undefined {
  * 決まるため、既存の呼び出し（`subjectCandidates` を渡さない全ての録音済みシナリオ）の
  * 鍵はこの変更で動かない（Issue #370/#371 への配慮。ADR 0271 前提1と同じ実測手順で
  * 確かめている——本 PR の ADR 参照）。
+ *
+ * **Issue #1370（本文の言語・話者の取り違え）でも同じ規律を保つ**——この定数へは1バイトも
+ * 足さず、`subjectCandidates` が渡されたときだけ {@link buildLanguageAndSpeakerInstruction}
+ * を足す（`buildExtractionPrompt` 参照）。
  */
 const EXTRACTION_PROMPT_SYSTEM_BASE =
   "あなたは会話・イベント・文書から再利用可能な記憶を抽出するアシスタントです。" +
@@ -126,6 +130,36 @@ function buildSubjectCandidateInstruction(subjectCandidates: readonly string[]):
     "各記憶候補の subjectId には、この一覧の中から最も当てはまるものを1つだけ設定してください。" +
     "一覧のどれにも当てはまらない場合、またはその記憶が主題を持たない場合は、" +
     "その候補の subjectId に明示的に null を設定してください（省略しないでください）。"
+  );
+}
+
+/**
+ * Issue #1370: `subjectCandidates` が渡されたときだけ足す、出力言語と話者取り違えの指示。
+ *
+ * ⚠ **`EXTRACTION_PROMPT_SYSTEM_BASE` 自体にも `extractionContext` 分岐にも足さない。**
+ * `EXTRACTION_PROMPT_SYSTEM_BASE` を1バイトでも変えると、記録済みカセット
+ * （`examples/chat/cassettes/`、約1,194件）の `llmCassetteKey`（`{system, messages}` の
+ * sha256、ADR 0051）が全部動き、Issue #704 の評価用録音も録り直しが要る。`extractionContext`
+ * 分岐の文面を変えると、`extraction-context*.test.ts` の録音再生テストが壊れる
+ * （実測: 一文足しただけで51件が赤くなった）。⟹ **`subjectCandidates` を渡す呼び出し
+ * （録音に無いことを grep で確認済み）にだけ足すことで、両方の鍵を動かさずに直す。**
+ * デフォルト経路（`subjectCandidates` を渡さない呼び出し）へも同じ指示を広げるかは
+ * オーナー判断待ち（CHANGELOG `[1.1.0]` 参照）。
+ *
+ * 話者の一文は、`extractionContext` も同時に渡したときにこの直後へ続く既存の一文
+ * 「他の話者の発言を対象話者の事実として抽出しないでください」と**向きが逆で、補い合う**
+ * ——既存の一文は「他の話者（`extractionContext` 側）の発言を、対象話者（`speaker`）の
+ * 事実にしない」（他者→対象話者、の誤帰属を止める）のに対し、ここで足す一文は「対象話者
+ * （`speaker`）自身の発言を、別の人物（利用者など）の発言・意見にしない」（対象話者→他者、
+ * の誤帰属を止める）。**同じ「話者の取り違え」という1つの線の、両側をそれぞれ塞ぐ**もので、
+ * 重複も矛盾もしない。
+ */
+function buildLanguageAndSpeakerInstruction(): string {
+  return (
+    "記憶の本文（content）と要旨（digest）は、観測の本文と同じ言語で書いてください" +
+    "（subjectId や provenanceKind などの識別子はこの限りではありません）。" +
+    "観測の発言の話者（本文の先頭の話者ラベル、または speaker）自身の発言は、" +
+    "その話者についての記憶として扱い、別の人物（利用者など）の発言・意見として書かないでください。"
   );
 }
 
@@ -157,7 +191,8 @@ export function buildExtractionPrompt(
   // （`候補一覧が渡されています: `）を余計に足してしまう。
   const hasCandidates = subjectCandidates !== undefined && subjectCandidates.length > 0;
   let system = hasCandidates
-    ? `${EXTRACTION_PROMPT_SYSTEM_BASE} ${buildSubjectCandidateInstruction(subjectCandidates)}`
+    ? `${EXTRACTION_PROMPT_SYSTEM_BASE} ${buildSubjectCandidateInstruction(subjectCandidates)} ` +
+      buildLanguageAndSpeakerInstruction()
     : EXTRACTION_PROMPT_SYSTEM_BASE;
   const payload = observation.payload;
   const rawContext =
