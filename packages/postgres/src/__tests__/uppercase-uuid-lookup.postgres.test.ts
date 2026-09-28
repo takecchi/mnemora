@@ -40,6 +40,8 @@ afterAll(async () => {
 });
 
 const upper = (id: string) => id.toUpperCase();
+// 最初の英小文字だけを大文字にする——store の id（小文字）とも `upper` とも綴りが違う、同じ記憶の id。
+const capitalizeFirstLetter = (id: string) => id.replace(/[a-z]/, (c) => c.toUpperCase());
 
 describe("PostgresMemoryStore.reinforceMany — 大文字の UUID でも reinforce と同じ結果になる", () => {
   async function setup() {
@@ -287,7 +289,7 @@ describe.each(KITS)(
       }
     });
 
-    it("やりすぎの歯: 大文字小文字だけが違う id を同じ呼び出しに混ぜると、渡された文字列どおりに突き合わせる（2つ目は今どおり not_found）", async () => {
+    it("やりすぎの歯: 大文字小文字だけが違う id を同じ呼び出しに混ぜると、渡された文字列どおりに突き合わせる（大文字の側は今どおり not_found）", async () => {
       const kit = await makeKit();
       const memory = await create(kit, "forget-mixed");
 
@@ -301,6 +303,37 @@ describe.each(KITS)(
       ]);
       const events = await kit.eventStore.list(ctx, { memoryId: memory.id, kind: "forgotten" });
       expect(events).toHaveLength(1);
+    });
+
+    it("やりすぎの歯: 混ぜたときに not_found になるのは、並びの位置ではなく store の id と綴りが違う側である（大文字を先に渡しても大文字の側）", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "forget-mixed-upper-first");
+
+      const result = await kit.runtime.forget(ctx, { memoryIds: [upper(memory.id), memory.id] });
+
+      expect(result.outcomes).toEqual([
+        { memoryId: upper(memory.id), kind: "not_found" },
+        { memoryId: memory.id, kind: "forgotten", previousStatus: "active" },
+      ]);
+      const events = await kit.eventStore.list(ctx, { memoryId: memory.id, kind: "forgotten" });
+      expect(events).toHaveLength(1);
+    });
+
+    it("やりすぎの歯: 混ぜたどの綴りも store の id と違えば、全部が not_found になり、何も書かない", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "forget-mixed-no-exact");
+      const capitalized = capitalizeFirstLetter(memory.id);
+      expect([capitalized === memory.id, capitalized === upper(memory.id)]).toEqual([false, false]);
+
+      const result = await kit.runtime.forget(ctx, {
+        memoryIds: [capitalized, upper(memory.id)],
+      });
+
+      expect(result.outcomes).toEqual([
+        { memoryId: capitalized, kind: "not_found" },
+        { memoryId: upper(memory.id), kind: "not_found" },
+      ]);
+      expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
     });
 
     it("やりすぎの歯: forget の小文字の入力の結果は変わらない", async () => {
@@ -386,6 +419,40 @@ describe.each(KITS)(
         kind: "ineligible",
         sides: [
           { memoryId: memory.id, kind: "eligible" },
+          { memoryId: upper(memory.id), kind: "not_found" },
+        ],
+      });
+      expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
+    });
+
+    it("markContested: 大文字を先に渡しても、not_found になるのは大文字の側である（位置によらない。TSDoc の手順3）", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "contested-self-upper-first");
+
+      const result = await kit.runtime.markContested(ctx, upper(memory.id), memory.id);
+
+      expect(result.outcome).toEqual({
+        kind: "ineligible",
+        sides: [
+          { memoryId: upper(memory.id), kind: "not_found" },
+          { memoryId: memory.id, kind: "eligible" },
+        ],
+      });
+      expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("active");
+    });
+
+    it("markContested: どちらの側も store の id と綴りが違えば、両側とも not_found（TSDoc の手順3）", async () => {
+      const kit = await makeKit();
+      const memory = await create(kit, "contested-self-no-exact");
+      const capitalized = capitalizeFirstLetter(memory.id);
+      expect([capitalized === memory.id, capitalized === upper(memory.id)]).toEqual([false, false]);
+
+      const result = await kit.runtime.markContested(ctx, capitalized, upper(memory.id));
+
+      expect(result.outcome).toEqual({
+        kind: "ineligible",
+        sides: [
+          { memoryId: capitalized, kind: "not_found" },
           { memoryId: upper(memory.id), kind: "not_found" },
         ],
       });
