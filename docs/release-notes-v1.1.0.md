@@ -22,10 +22,10 @@
 
 | | |
 |---|---|
-| **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。改版 2026-09-26（`ec39629` の木）。改版 2026-09-27（`ef03a8f` の木。下の「改版の経緯」）。改版 2026-09-27（2回目）（`23f0076` の木。CHANGELOG の8回目の棚卸しに合わせた）。改版 2026-09-28（`c6ca5a4` の木。CHANGELOG の9回目の棚卸しに合わせた）。**改版 2026-09-28（2回目）**（`origin/main` = `de8a160` の木。CHANGELOG の10回目の棚卸しに合わせた） |
+| **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。改版 2026-09-26（`ec39629` の木）。改版 2026-09-27（`ef03a8f` の木。下の「改版の経緯」）。改版 2026-09-27（2回目）（`23f0076` の木。CHANGELOG の8回目の棚卸しに合わせた）。改版 2026-09-28（`c6ca5a4` の木。CHANGELOG の9回目の棚卸しに合わせた）。改版 2026-09-28（2回目）（`de8a160` の木。CHANGELOG の10回目の棚卸しに合わせた）。**改版 2026-09-28（3回目）**（`origin/main` = `dcf6ccb` の木。CHANGELOG の11回目の棚卸しに合わせた） |
 | **書いた人** | **担い手（クローン miku の委譲先）。オーナーではない。**（冒頭のバナー） |
-| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠の PR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.2` … `de8a160`** を数えたもの）が正。`v1.0.2`・`v1.0.1` として既に出荷済みの分は、同じファイルの `## [1.0.2] - 2026-09-27`・`## [1.0.1] - 2026-09-25` 節が正。保留と非破壊の数え方は `[1.1.0]` 節の前書きが正、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md) の「v1.0.2 → 次の版」の節が正 |
-| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `de8a160` から動いた、または sha が同じまま `[1.1.0]` 節の中身が変わった。② オーナーへの問い `3f3411c5` に答えが出た（この草稿は、公開の fixture が新しく例外を投げる変更を「破壊的として扱うかは未決」のまま書き、版の種類も決めていない）。③ `packages/postgres/migrations/` の最後尾が `0023_lexical_query_inner_quote_as_space.sql` でなくなった。④ `v1.0.2`（tag `b981ecd`）より新しい Release が切られた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
+| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠の PR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.2` … `dcf6ccb`** を数えたもの）が正。`v1.0.2`・`v1.0.1` として既に出荷済みの分は、同じファイルの `## [1.0.2] - 2026-09-27`・`## [1.0.1] - 2026-09-25` 節が正。保留と非破壊の数え方は `[1.1.0]` 節の前書きが正、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md) の「v1.0.2 → 次の版」の節が正 |
+| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `dcf6ccb` から動いた、または sha が同じまま `[1.1.0]` 節の中身が変わった。② オーナーへの問い `3f3411c5` に答えが出た（この草稿は、公開の fixture が新しく例外を投げる変更を「破壊的として扱うかは未決」のまま書き、版の種類も決めていない）。③ `packages/postgres/migrations/` の最後尾が `0023_lexical_query_inner_quote_as_space.sql` でなくなった。④ `v1.0.2`（tag `b981ecd`）より新しい Release が切られた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
 
 ⚠ **この文書は、正典の内容を意図的に複製している。**理由は `docs/release-notes-v1.0.0.md` と同じ——**Release 本文を読むのは repo の外に居る採用者**であり、リンクだけでは伝わらない。⟹ **複製を許す代わりに、上の「正はどれか」を必ず添える。**
 
@@ -41,9 +41,9 @@
 
 ## 貼る前に確かめること
 
-1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `de8a160` か。**
-   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`de8a160` から動いていたら、この草稿の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節（追記11 以降）を読み、この草稿へ足すこと。
-   ⚠ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**（前の版を書く過程で、sha を動かさずに `[1.1.0]` の `### Fixed` へ追記されることが3度起きた。PR #845・#846・#851）。⟹ `git diff de8a160 -- CHANGELOG.md` で `CHANGELOG.md` 自体の差分も当日見ること。
+1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `dcf6ccb` か。**
+   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`dcf6ccb` から動いていたら、この草稿の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節（追記12 以降）を読み、この草稿へ足すこと。
+   ⚠ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**（前の版を書く過程で、sha を動かさずに `[1.1.0]` の `### Fixed` へ追記されることが3度起きた。PR #845・#846・#851）。⟹ `git diff dcf6ccb -- CHANGELOG.md` で `CHANGELOG.md` 自体の差分も当日見ること。
 2. **オーナーへの問い `3f3411c5` に答えが出ているか。**`CHANGELOG.md` `[1.1.0]` 節の前書きの「保留と非破壊の数え方」が、まだ「未回答」と書いているかを見る。
    - **まだ未回答なら**: 下の草稿の「破壊的として扱うかは未決のもの」はそのままでよい。版の種類も、この草稿からは決めないこと。
    - **答えが出たら**: `CHANGELOG.md` `[1.1.0]` 節と `docs/migration-v1.md` の「v1.0.2 → 次の版」が書き換わっているはずなので、その表現に合わせて、下の節の見出し・文言と、この文書の題と草稿の見出しの版を直すこと。
@@ -110,6 +110,9 @@
 > - **`@mnemora/postgres` の `aggregateScope()` が、`digestBand.excludeMemoryIds` に uuid の形をしていない id が混ざると、DB の例外を投げていた不具合を直しました。**形の崩れた id は、ほかの読みの口と同じく「無いもの」として扱います（[Issue #1262](https://github.com/takecchi/mnemora/issues/1262)、[PR #1289](https://github.com/takecchi/mnemora/pull/1289)）。
 > - **`@mnemora/postgres` の `PostgresVectorStore.searchMany()` が、`queries` の `key` に NUL を含む文字列が在ると、DB の例外を投げていた不具合を直しました。**同じベクトルの `search()` と同じく投げません（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)、[PR #1299](https://github.com/takecchi/mnemora/pull/1299)）。
 > - **`@mnemora/postgres` の `PostgresVectorStore.searchMany()` が、`queries` に同じ `key` が2回以上あると、その key のクエリすべての結果を続けて積み、`limit` を超えうる結果を返していた不具合を直しました。**同じ key では最後のクエリの結果だけを返します（[Issue #1284](https://github.com/takecchi/mnemora/issues/1284)、[PR #1308](https://github.com/takecchi/mnemora/pull/1308)）。
+> - **`runtime.observe()` と `tick()` の抽出が、LLM の抽出結果に保存できない候補（本文の NUL、`@mnemora/postgres` の tsvector の上限を超える本文など）が在ると、手前の候補だけを書いたまま例外で止まっていた不具合を直しました。**その候補だけを落とし、残りの候補を書いて、投げません。落とした候補は、残った候補の `created` イベントの `meta.droppedCandidates` に残ります（本文は写しません）。全件が保存できないときは、これまでどおり例外を投げます（[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)、[PR #1318](https://github.com/takecchi/mnemora/pull/1318)）。
+> - **`tick()` の抽出のジョブが、リースが切れて逐次に再配達されると、LLM の出力が変わったときに2回分の Memory を両方 `active` で残していた不具合を直しました。**その Observation から今の抽出器の版で作られた Memory が在れば、LLM を呼ばずにジョブを完了にします。1回目が候補の一部だけを書いて止まった場合、残りの候補は作られないので、`reextract` で回復してください。並行に2本が同じジョブを処理する場合は、まだ塞げていません（[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)、[PR #1318](https://github.com/takecchi/mnemora/pull/1318)）。
+> - **`runtime.reextract()` が、forget・purge・訂正で退けた記憶の元の Observation に対しても抽出をやり直し、LLM が言い換えると、退けた事実が印の無い新しい `active` な記憶として戻っていた問題を直しました。**退けた記憶を持つ Observation では LLM を呼ばず、何も書かず、`extraction: "skipped"`・`atomicity: "not_attempted"` を返します。型は変わりませんが、これまでの TSDoc は「`reextract` の `extraction` は `'skipped'` を取らない」と約束していました。その前提で書いたコードは見直してください（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・[Issue #1149](https://github.com/takecchi/mnemora/issues/1149)、[PR #1319](https://github.com/takecchi/mnemora/pull/1319)。CHANGELOG では `### Changed`）。
 > - 一覧と根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Fixed` を見てください——ここでは複製しません（イベントの欄の約束どおりの記録、testkit の fixture を Postgres に揃えた修正、例外の文面の改善などが載っています）。
 >
 > **移行手順の詳細は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「v1.0.2 → 次の版」の節が正です。**
