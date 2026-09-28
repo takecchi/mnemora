@@ -31,6 +31,7 @@ import { ProvenanceKindSchema } from "../provenance.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
+import { MemoryEventKindSchema } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
   isEmbeddingStatusRollback,
@@ -134,6 +135,25 @@ type OutboxJobMutable = OutboxJobRecord;
  * ——`packages/testkit` の `buildStoredMemoryEvent`（`in-memory-event-store.ts`）と
  * 同じ形だが、ファイル冒頭のコメントの通り意図的に独立している。
  */
+/**
+ * 9回目の棚卸し: testkit の fixture（`assertStorableMemoryEvent`、`memory-event-check.ts`）と `@mnemora/postgres`
+ * （`memory_events` の CHECK 制約）が拒むイベントの形のうち、この Fake が持っていなかった2つを同じく拒む——
+ * `kind` が列挙に無いとき、`events_purged` なのに `memoryId` が `null` でないとき。文面は fixture と同じ形。
+ * `buildStoredEvent`（イベントを積むすべての口の合流点）が呼ぶ。
+ */
+function assertStorableFakeEvent(event: NewMemoryEvent): void {
+  if (event.kind === "events_purged" && event.memoryId !== null) {
+    throw new Error(
+      `memory_events.memoryId must be null for kind "events_purged" (got ${JSON.stringify(event.memoryId)})`,
+    );
+  }
+  if (!MemoryEventKindSchema.safeParse(event.kind).success) {
+    throw new Error(
+      `memory_events.kind must be one of ${MemoryEventKindSchema.options.join(", ")} (got ${JSON.stringify(event.kind)})`,
+    );
+  }
+}
+
 function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
   // Issue #807: `memory_events.at` は Postgres の `timestamptz` 列であり、Invalid Date
   // （`.getTime()` が `NaN`）を渡すと `PostgresEventStore.append` はクエリ実行時に
@@ -146,6 +166,7 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
   if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
     throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
   }
+  assertStorableFakeEvent(event);
   return {
     id: nextId("evt"),
     tenantId: ctx.tenantId,
@@ -289,6 +310,17 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewObservation,
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("FakeMemoryStore", input);
+    // 9回目の棚卸し: testkit の fixture と `@mnemora/postgres`（`timestamptz` 列）と同じく、Invalid Date の日時を拒む。
+    for (const [field, value] of [
+      ["recordedAt", input.recordedAt],
+      ["occurredAt", input.occurredAt],
+      ["validFrom", input.validFrom],
+      ["validUntil", input.validUntil],
+    ] as const) {
+      if (value != null && Number.isNaN(value.getTime())) {
+        throw new Error(`FakeMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
+      }
+    }
     const existing = input.externalId
       ? [...this.backing.observations.values()].find(
           (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
@@ -797,12 +829,15 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts.supersededById !== undefined && !this.backing.memories.has(opts.supersededById)) {
       throw new Error(`FakeMemoryStore: superseded-by memory not found: ${opts.supersededById}`);
     }
+    // 9回目の棚卸し: イベントを先に組み立てる（検査もここで走る）。以前は状態を書き換えた後に組み立てていたので、
+    // イベントが書けない（Invalid Date の `at` など）と、状態だけが書き換わったまま投げていた——Postgres は
+    // 1トランザクションで巻き戻り、fixture は状態を書き換える前に検査するので、どちらもそうはならない。
+    const storedEvent = buildStoredEvent(ctx, event);
     memory.status = status;
     if (opts.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
     }
     memory.updatedAt = new Date();
-    const storedEvent = buildStoredEvent(ctx, event);
     this.backing.events.push(storedEvent);
     return { memory, event: storedEvent };
   }
