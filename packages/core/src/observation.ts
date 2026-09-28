@@ -219,6 +219,16 @@ export type SubjectCandidatesInput = string[];
 /** Bounded, caller-selected context for extraction. Persisted with the observation.
  * An empty object opts into metadata-aware extraction without preceding messages.
  * Context is evidence for resolving references, not additional observations to extract.
+ *
+ * ⚠ **`timeZone` の検査が問うのは「`Intl.DateTimeFormat` が受け付けるか」だけである**（今の振る舞い。2026-09-28 追記）。
+ * エラーの文面は「Invalid IANA time zone」だが、IANA の名前（`Asia/Tokyo`）でない値も受け付ける——UTC からの差の書き方
+ * （`+09:00`・`-05:30`・`+0900`・`+09`）、略称（`JST`・`EST`）、大文字小文字の違う名前（`asia/tokyo`）。拒むのは
+ * `Intl.DateTimeFormat` が拒む値（`GMT+9`・`Not/AZone`・空文字など）だけである。【実測 2026-09-28、Node.js 22.23.3】
+ * 受け付ける値の集合は実行環境の `Intl`（ICU）に依存する。
+ * **値は正規化せず、渡された文字列のまま保存され、抽出のプロンプトにもそのまま入る**（`asia/tokyo` は `Asia/Tokyo` に、
+ * `JST` は `Asia/Tokyo` に揃えない。`EST` を `Intl` は `America/Panama` と解決するが、保存されるのは `EST` のまま）。
+ * 観測日時の暦日（`observedLocalDate`）は、渡された値を `Intl.DateTimeFormat` に渡して計算する。
+ * 検査を IANA の名前だけに絞ると、今は通る入力が例外になる（破壊的）ので、締めていない（クローン miku の判断）。
  */
 export const ExtractionContextSchema = z.object({
   messages: z

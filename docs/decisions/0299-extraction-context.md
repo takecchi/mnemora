@@ -660,3 +660,13 @@ n=5・2話題という規模で言えるのは、今回のバッチでは p1/p2 
 - `pnpm run format:check`（対象ファイルのみ）: pass（整形の手直しは不要だった）
 - ルートの `pnpm run test` 全体・DB テストは、依頼により実行していない
   （対象ファイルを名指しした実行のみ）
+
+## 追記5（2026-09-28、`timeZone` の検査が問うこと。今の振る舞いを書くだけ）
+
+上の「問題と決定」は「IANA timeZone」と書き、`ExtractionContextSchema` のエラーの文面も「Invalid IANA time zone」だが、
+検査が問うのは **「`Intl.DateTimeFormat` が受け付けるか」だけ**である。IANA の名前でない値——UTC からの差の書き方
+（`+09:00`・`+0900`・`+09`）、略称（`JST`・`EST`）、大文字小文字の違う名前（`asia/tokyo`）——も受け付け、値は正規化せず
+渡された文字列のまま保存され、抽出のプロンプトにも入る。【実測 2026-09-28、Node.js 22.23.3】受け付ける値の集合は実行環境の
+`Intl`（ICU）に依存する。検査を IANA の名前だけに絞ると、今は通る入力が例外になる（破壊的）ので、締めていない。
+エラーの文面も変えていない。詳細は `packages/core/src/observation.ts` の `ExtractionContextSchema` の TSDoc（クローン miku の判断）。
+上の本文は書き換えていない。

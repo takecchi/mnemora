@@ -30,9 +30,15 @@ export const ReflectionLLMResultSchema = z.discriminatedUnion("outcome", [
     /**
      * 省略・空文字は「LLM 側の digest 生成が失敗した」ものとして扱い、機械的な先頭文字列
      * 切り出しへフォールバックする（`resolveDigest`、extraction.ts と同じ規律）。
+     * ⚠ 2026-09-28 訂正: 以前は `min(1)` を付けていたので、空文字の digest は応答ごと拒まれ、`reflect()` は
+     * `llm_failed` になっていた（この doc と食い違っていた）。抽出・consolidate の schema と同じく空文字を受け付ける。
      */
-    digest: z.string().min(1).optional(),
-    tags: z.array(z.string().min(1)).optional(),
+    digest: z.string().optional(),
+    /**
+     * 空文字・空白だけの要素は `buildReflectedMemory` が `dropBlankTags` で落とす（抽出・consolidate と同じ）。
+     * ⚠ 2026-09-28 訂正: 以前は要素に `min(1)` を付けていたので、空文字の tag が1つでもあると応答ごと拒まれていた。
+     */
+    tags: z.array(z.string()).optional(),
   }),
   z.object({ outcome: z.literal("nothing") }),
 ]);
