@@ -570,3 +570,16 @@ CAS の破れや部分的な失敗という稀なケースで読み違えうる�
 
 - **挙動は変えていない。** 既存の値で2と3を言い換えられるものは無い。`eligible` は `dryRun` のときだけ出ると決めてあり、`status_not_active` は事実に反する。別の値を足すことは公開の union への追加になるので、採らなかった。
 - **反映先**: `packages/core/src/runtime.ts` の `ConsolidateSourceOutcome` の doc（3つの場合を列挙した）。上の表の本文は書き換えていない（`docs/decisions/README.md` の、採用済み ADR の扱い）。
+
+---
+
+## 2026-09-29 追記（クローン miku）: 有効期間の外にある記憶は統合元にしない（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)。破壊的変更）
+
+決定1・決定2は、統合元の適格性を「`active` でなければ弾く」とだけ決めていた。実装は `status === 'active'` だけを見ていたので、いまの時点で有効期間（`validFrom`/`validUntil`、ADR 0145・0164）の外にある `active` な記憶も統合元にして `superseded` へ動かしていた。統合先は有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた。`{ memoryIds }` だけでなく、`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）と、`{ query }` に `includeOutsideValidity: true` を渡して集めた記憶でも同じだった（2026-09-29、Postgres と testkit の fixture で実測）。
+
+- **決めたこと**: `status` の判定の後に、`recall()` の期間のゲート（ADR 0164 決定1）と同じ述語で、呼んだ時点の `clock.now()` に対して有効期間を見る。外にある記憶は統合元にせず、層2に足した `expired`（`validUntil` を運ぶ）・`not_yet_valid`（`validFrom` を運ぶ）で名指しする。語は `recall()` の `FilteredOmission.condition` から借りた（新しい綴りを作らない）。対象の形によらない。`nothingReason` の「統合元にできるもの」の数え方にも入らない。
+- **破壊的変更である**: 公開の union `ConsolidateSourceOutcome` に値を2つ足した（網羅的に分岐している呼び出し側は扱いを足す必要がある）。また、同じ入力でも統合されなくなる場合がある（期限切れを渡していた `{ memoryIds }` が `nothing_to_consolidate` になる等）。公開 API の破壊的変更は ADR 0156 で担い手に委ねられており、オーナーから「v1.X.0 で破壊的変更してよい」とクローン miku に伝えられている。その範囲で、この変更はクローン miku が決めた（オーナーの判断ではない）。
+- **採らなかった案**: 統合先に統合元の区間の積を付ける案。期限の無い記憶を期限のある記憶と統合すると、期限の無い側の中身まで期限とともに `recall()` から落ちる。ADR 0164「射程外にしたもの」1が「null のままが最も安全（何も落ちない）」とした理由とぶつかるので採らなかった。統合先の有効期間は今どおり null であり、いまは有効で将来の `validUntil` を持つ統合元の期限は、統合先に引き継がれない（ADR 0164 が別の判断として残したまま）。
+- **射程外**: `reflect` の材料の選び方（同じ形がある。Issue #1188 のコメント）。忘却の床（`decayFloorAt`）は `{ memoryIds }` では今どおり見ない。
+- **反映先**: `packages/core/src/runtime.ts` の `ConsolidateSourceOutcome`・`ConsolidateNothingReason`・`ConsolidateTarget` の doc。上の表の本文は書き換えていない（`docs/decisions/README.md` の、採用済み ADR の扱い）。
+- **歯**: `packages/core/src/__tests__/consolidate-validity-gate.test.ts`（Fake。境界とやりすぎの形を含む）、`packages/postgres/src/__tests__/consolidate-target-selection.postgres.test.ts`（Postgres と testkit の fixture。`{ memoryIds }`・`{ seedMemoryId }`・`{ query }` の各形）。
