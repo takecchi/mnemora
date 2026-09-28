@@ -105,7 +105,7 @@ describe("recall() — activityCounting（ADR 0348、Issue #338）", () => {
     const { runtime, stores } = buildRuntime();
     await stores.tenantSettingsStore.setDecayClock(tenantCtx, "activity");
 
-    const alice = await createEmbeddedMemory(stores, [1, 0], {
+    await createEmbeddedMemory(stores, [1, 0], {
       digest: "alice-memory",
       subjectId: "alice",
       decayBaseSeq: 0,
