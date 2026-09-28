@@ -633,7 +633,7 @@ pnpm run check:consumer-install
 **通過条件**: **exit 0** で、最後に `✔ 外から入れた確認を通った` が出ること。段ごとに `✔`/`✖` が出る——
 pack → tarball の `exports` と利用者が頼ってよい入口の一覧の突き合わせ → repo の外への `npm install`
 （`--ignore-scripts`・`--install-strategy=nested`）→ 型検査（`moduleResolution` `node16`・`bundler`、
-`skipLibCheck: true`）→ ESM で全入口を import。`✖` の段の下に、落ちた理由が出る。
+`skipLibCheck: true`）→ ESM で全入口を import → CommonJS で全入口を `require`（Node 22.12 以降の `require(esm)`。2026-09-28 に足した段）。`✖` の段の下に、落ちた理由が出る。
 ⚠ その後ろの `⚠ この確認が見ていない範囲:` の段は赤ではない（見ていない範囲の断りである）。
 
 **何を見るか**: 利用者が `npm install` した先から、出荷6パッケージの入口（`@mnemora/testkit/fixtures` を含む）が
@@ -691,19 +691,19 @@ pack → tarball の `exports` と利用者が頼ってよい入口の一覧の�
 
 **⚠ 段階1と段階2は同時に1つの操作でもよい。**GitHub の Release 作成 UI で新しい tag 名を
 入力すると、Release の公開と同時に tag も作られる
-（`.github/workflows/publish.yml:13-14` のコメントに明記。【読んで確かめた】）。
+（`.github/workflows/publish.yml` の `on:` の上のコメントに明記。【読んで確かめた】）。
 
 **⛔ 素の `git push origin v1.0.0`（tag の push だけ）では何も起きない。**
 `publish.yml` の引き金は `on: release: types: [published]` だけであり、
 `push: tags` は**意図的に持たせていない**
-（`publish.yml:8-19`。理由：Release UI から tag も同時に作られるため、両方を引き金にすると
+（`publish.yml` の `on:`。理由：Release UI から tag も同時に作られるため、両方を引き金にすると
 同じ版で2本走ってしまう。【読んで確かめた】）。**⟹ Release を作ることが「npm へ出してよい」の
-表明であり、その表明がリリースノートと一緒に GitHub 上に残る**（`publish.yml:9-11`）。
+表明であり、その表明がリリースノートと一緒に GitHub 上に残る**（`publish.yml` の `on:` の上のコメント）。
 
 ### 1.2 段階3（`publish.yml`）の各ステップと、どこを見れば成否が分かるか
 
 **見る場所**: GitHub の Actions タブ → ワークフロー名 `Publish` → job
-`npm publish（Trusted Publishing / OIDC）`（`publish.yml:38-39`。【読んで確かめた】）。
+`npm publish（Trusted Publishing / OIDC）`（`publish.yml` の job `publish` の `name:`。【読んで確かめた】）。
 
 #### ⚠ 段の番号は2系統ある。呼び分けを決めてある
 
@@ -740,16 +740,16 @@ pack → tarball の `exports` と利用者が頼ってよい入口の一覧の�
 | 3 | 4 | Update npm CLI | `npm install -g npm@latest` | §4.3 で詳述 |
 | 4 | 5 | Enable corepack | `corepack enable` | まれに失敗**【未検証・下記】** |
 | 5 | 6 | Install dependencies | `pnpm install --frozen-lockfile` | lockfile とpackage.jsonの不一致で失敗しうる |
-| 6 | 7 | Release の tag が main の履歴上に在ることを確かめる（`release` イベントのみ） | tag の commit が `origin/main` の祖先であることを検査 | 赤くなったら「main を通っていない commit から Release を作った」ことを疑う（`publish.yml:76-102`） |
+| 6 | 7 | Release の tag が main の履歴上に在ることを確かめる（`release` イベントのみ） | tag の commit が `origin/main` の祖先であることを検査 | 赤くなったら「main を通っていない commit から Release を作った」ことを疑う（`publish.yml` の同名のステップ） |
 | 7 | 8 | Release の tag の版を package.json へ書き込む（`release` イベントのみ） | `apply-release-version.mjs` が版を決めて書き込む（下の1.3節で詳述） | tag が semver でないと赤くなる |
 | 7' | 9 | 予行のときは package.json の版をそのまま使う（`workflow_dispatch` のみ） | `packages/core/package.json` の版をそのまま読む | — |
 | 8 | 10 | Typecheck / Lint / Format / Test / Build | 非DBの門を全部通す（`typecheck`/`lint`/`format:check`/`test`/`build`） | **ここで失敗すれば、まだ1パッケージも publish されていない**（§3.4 で重要） |
 | 9 | 11 | publish 梱包の門 | `pnpm run pack:check`（tarball の中身を検査。§2.3） | 同上。まだ publish 段の前 |
 | 10 | 12 | pnpm pack | 6パッケージを `pnpm pack` し、`--expect-version` で版のずれを検査 | tag の版と package.json の版がずれていると赤くなる（通常は7で揃えているので起きないはず） |
 | 11 | 13 | 予行か本番かを決める | `decide-publish-dry-run.mjs` が `dry_run` 出力を決める（§2.1） | — |
-| 12 | 14 | **npm publish（依存の向きの順に、tarball を上げる）** | 6パッケージを順に `npm publish` する。**ここが実際に registry へ書き込む唯一のステップ** | ログに `::group::npm publish <name>@<version>` が6回出るはず（`publish.yml:225`）。**各グループの中身を1つずつ見ること**（§3で詳述） |
+| 12 | 14 | **npm publish（依存の向きの順に、tarball を上げる）** | 6パッケージを順に `npm publish` する。**ここが実際に registry へ書き込む唯一のステップ** | ログに `::group::npm publish <name>@<version>` が6回出るはず（`publish.yml` の「npm publish（依存の向きの順に、tarball を上げる）」ステップ）。**各グループの中身を1つずつ見ること**（§3で詳述） |
 
-（【読んで確かめた】`.github/workflows/publish.yml` 全文、行番号は上表内に記載）
+（【読んで確かめた】`.github/workflows/publish.yml` 全文。2026-09-28、表と本文の行番号をステップ名に置き換えた——行番号は publish.yml が動けばずれる。実際に2か所ずれていた）
 
 > **⚠ 2026-09-17 追記（名乗りの復元）。** 上の表の「成否の見方」列のうち、
 > **1行目の「失敗はまれ」と 4行目の「まれに失敗」は【未検証】である。**
@@ -770,31 +770,31 @@ pack → tarball の `exports` と利用者が頼ってよい入口の一覧の�
 
 **版の権威は Release の tag である。`packages/<pkg>/package.json` の `version` は権威ではない**
 （「最後に誰かが書いた値」であって、npm 上の最新版とは限らない。
-`scripts/apply-release-version.mjs:9-11`。【読んで確かめた】）。
+`scripts/apply-release-version.mjs` の冒頭の doc コメント。【読んで確かめた】）。
 
 役割分担（【読んで確かめた】）:
 
 - **`scripts/release-version.mjs`**（判定・純関数・副作用なし）
-  - `versionFromTag(tagName)`（27-45行）: tag が `"v"` で始まることと、剥がした残りが
+  - `versionFromTag(tagName)`: tag が `"v"` で始まることと、剥がした残りが
     semver として妥当であることを検査する。`${TAG#v}` のような単純な文字列剥がしだと
-    `vfoo` が `foo` として書き込まれてしまう（コメント19-22行）ため、ここで落とす。
-  - `distTagFor({ version, githubPrerelease })`（62-79行）: dist-tag（`latest`/`next`）を決める。
+    `vfoo` が `foo` として書き込まれてしまう（同関数の上のコメント）ため、ここで落とす。
+  - `distTagFor({ version, githubPrerelease })`: dist-tag（`latest`/`next`）を決める。
     semver の prerelease 部（`-beta.1` 等）の有無と、GitHub Release の「pre-release」
     チェックボックスの有無を突き合わせ、**どちらか一方でも prerelease なら `next` にする**
-    （食い違いは `latest` を汚さない側へ倒す。66-76行）。
+    （食い違いは `latest` を汚さない側へ倒す）。
 - **`scripts/apply-release-version.mjs`**（書き込み・CLI）
   - 上記2関数を呼び、`PUBLISH_TARGETS`（6パッケージ）の各 `package.json` の
-    **`version` の行だけ**を正規表現で差し替える（50-88行）。`JSON.parse`→
+    **`version` の行だけ**を正規表現で差し替える。`JSON.parse`→
     `JSON.stringify` の往復はしない——理由は、prettier が `"files": ["dist"]` を
     1行に畳むのに対し `JSON.stringify` は必ず展開するため、書き戻すと直後の
-    `pnpm run format:check` が赤くなる（実際に踏んだ。コメント50-58行）。
-  - 書けたことを**読み直して**検算する（90-100行）。
-  - `$GITHUB_OUTPUT` へ `version=` と `npm_tag=` を書く（109-111行。`publish.yml` の
+    `pnpm run format:check` が赤くなる（実際に踏んだ。差し替える箇所の上のコメント）。
+  - 書けたことを**読み直して**検算する。
+  - `$GITHUB_OUTPUT` へ `version=` と `npm_tag=` を書く（ファイルの末尾。`publish.yml` の
     後続ステップが `steps.version.outputs.version` / `.npm_tag` として読む）。
 
 **`workflow_dispatch`（予行）のときは、この書き込みは走らない。**
 `packages/core/package.json` の版をそのまま読み、`npm_tag` は常に `latest` に固定される
-（`publish.yml:126-135`。【読んで確かめた】）。
+（`publish.yml` の「予行のときは package.json の版をそのまま使う」ステップ。【読んで確かめた】）。
 
 **この器でも実際に走らせた**【実測】2026-09-16、`origin/main` = `14a7c27`、clean な作業ツリー:
 
@@ -815,7 +815,7 @@ pack → tarball の `exports` と利用者が頼ってよい入口の一覧の�
 ### 1.4 `workspace:^` がいつ実版へ置換されるか
 
 **タイミング**: 上表の「10. pnpm pack」ステップで、6パッケージを `pnpm pack` した瞬間
-（`publish.yml:152-158`）。**「7. 版を書き込む」ステップの後**であることが前提になっている——
+（`publish.yml` の「pnpm pack」ステップ）。**「7. 版を書き込む」ステップの後**であることが前提になっている——
 `pnpm pack` は「その時点で作業ツリーに書かれている版」を見て `workspace:^` を解決するため
 （ADR 0070「測ったこと1」で実測: `v9.9.9` で `apply-release-version.mjs` を走らせたところ、
 tarball 内の `version` が `9.9.9`、`@mnemora/core` への依存が `^9.9.9` になった。
@@ -851,7 +851,7 @@ manifest を持つ tarball を上げるだけなので `workspace:` を見るこ
 | あり | あり | `next` |
 | どちらか一方だけ | — | `next`（`::warning::` 付き。`latest` を汚さない側へ倒す） |
 
-（`scripts/release-version.mjs:62-79`。【読んで確かめた】）
+（`scripts/release-version.mjs` の `distTagFor`。【読んで確かめた】）
 
 **v1.0.0 は通常のリリース（pre-release チェックなし・semver に `-` なし）であれば `latest` になる。**
 
@@ -869,8 +869,8 @@ manifest を持つ tarball を上げるだけなので `workspace:` を見るこ
 
 順序は依存の向き（自分が依存するパッケージが自分より前）で決まっており、
 `scripts/__tests__/publish-targets.test.mjs` が package.json の現物から機械的に検査する
-（`publish-targets.mjs:1-18`のコメント）。**⚠ 新しい7つ目のパッケージが増えたら、この配列に
-手で足す必要がある——見落としを機械的に検知する仕組みは無い**（同コメント14-17行）。
+（`publish-targets.mjs` の冒頭のコメント）。**⚠ 新しい7つ目のパッケージが増えたら、この配列に
+手で足す必要がある——見落としを機械的に検知する仕組みは無い**（同コメント）。
 
 ⭐ **追記（2026-09-17）— 上の一覧は手で書いた記録であり、権威ではない。**
 **権威は `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` そのものである。**
