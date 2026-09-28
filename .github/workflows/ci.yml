@@ -1114,6 +1114,85 @@ jobs:
           path: retrieval-quality.json
           if-no-files-found: ignore
 
+  retrieval-rank-listing:
+    name: "固定回帰ケースと同じ条件で probe ごとの順位を一覧にする（Issue #572、ADR 0276 追記。⛔ 門ではない）"
+    runs-on: ubuntu-latest
+    # Issue #572 / ADR 0276 の 2026-09-28 の追記。クローン miku の判断であり、オーナーの判断ではない。
+    #
+    # ADR 0227 の門（`example-chat` ジョブの `retrieval-quality-regression.postgres.test.ts`）は
+    # `goldRank !== null` だけを見て、順位を出力しない。`retrieval-quality` ジョブは probe ごとの
+    # 順位を生ログに出すが、実時計で走るので門と条件が違う。⟹ このジョブは、**門と同じ条件
+    # （`recorded`・固定時刻・`PROBES`）で probe ごとの順位とスコアの差を Job Summary に出す。**
+    #
+    # ⛔ **このジョブは門ではない。**
+    #   - 順位がどうであっても落ちない。落ちるのは bench が壊れて一覧を作れないとき
+    #     （例外・全 probe で候補が0件・probe の件数が合わない）だけ（`decideRankListingExit`）。
+    #   - `.github/required-status-checks.json` に入れない。どのジョブの `needs` にも入れない。
+    #     `scripts/__tests__/ci-yml-retrieval-rank-listing-wiring.test.mjs` がこの2つを固定する。
+    #   - 基準値とは比べない（順位を焼き込まない）。前の値は前の run の成果物で見ること。
+    #   - 門（`example-chat` ジョブ）の合否条件は1つも変えていない。
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: mnemora_ci
+          # `retrieval-quality` ジョブと同じ regime の宣言（Issue #148 ②）。
+          POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd="pg_isready -U postgres"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:5432/mnemora_ci
+      # 明示する（`retrieval-quality` ジョブと同じ理由。ADR 0068）。スクリプト自身も
+      # `MNEMORA_LLM`/`MNEMORA_EMBEDDING` を recorded に固定して渡す。
+      MNEMORA_PROVIDER_SOURCE: recorded
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable required extensions (vector / btree_gin / pgcrypto)
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci -c "select 1;" \
+            && PGPASSWORD=postgres psql -h localhost -U postgres -d mnemora_ci \
+              -c "CREATE EXTENSION IF NOT EXISTS vector;" \
+              -c "CREATE EXTENSION IF NOT EXISTS btree_gin;" \
+              -c "CREATE EXTENSION IF NOT EXISTS pgcrypto;"
+
+      - name: Run migrations (packages/postgres の唯一のマイグレーション実行口)
+        run: pnpm --filter @mnemora/postgres run migrate
+
+      - name: probe ごとの順位を一覧にして Job Summary に残す（⛔ 門ではない）
+        # 標準出力（Markdown）をそのまま Job Summary へ足す。終了コードは順位を見ない。
+        env:
+          MNEMORA_RANK_LISTING_JSON: ${{ github.workspace }}/retrieval-rank-listing.json
+        run: pnpm --silent --filter @mnemora/example-chat run retrieval-rank-listing >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 一覧そのもの（機械可読）を成果物として残す
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: retrieval-rank-listing
+          path: retrieval-rank-listing.json
+          if-no-files-found: ignore
+
   identifier-probes:
     name: 識別子・固有名詞 probe（#106）を @mnemora/local-embedding で実測し、値を残す
     runs-on: ubuntu-latest

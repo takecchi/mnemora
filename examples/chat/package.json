@@ -16,6 +16,7 @@
     "backfill": "tsx src/cli.ts backfill",
     "correction": "tsx src/cli.ts correction",
     "retrieval": "tsx src/cli.ts retrieval",
+    "retrieval-rank-listing": "tsx src/scripts/retrieval-rank-listing.ts",
     "time-term": "tsx src/cli.ts time-term",
     "validity": "tsx src/cli.ts validity",
     "embedding-fingerprint": "tsx src/cli.ts embedding-fingerprint",
