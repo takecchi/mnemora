@@ -307,6 +307,14 @@ export interface BudgetDroppedOmission {
  * ADR 0008 の基準（区別があると次の一手が変わるか）に照らして分ける:
  * `pending` は待てば解決する、`failed` はパイプラインの調査が要る、
  * `skipped` は意図した除外なので何もしなくてよい。
+ *
+ * ⚠ **`failed` でも、ベクトル行が在ることがある**（今の振る舞い、ADR 0053 の追記、Issue #962）。
+ * 埋め込みジョブが `VectorStore.upsert` を終えた後で `ready` の書き込み（または
+ * `PostgresVectorStore.upsert` の後の ANALYZE）が失敗すると、ワーカー1体でも `failed` が書かれる。このとき記憶は
+ * `recall` の `memories` に返りつつ、同じ呼び出しの `not_indexed{ reason: "failed" }` にも
+ * 数えられる。原因はパイプラインそのものではなく、その書き込みの一時的な失敗である。
+ * `Runtime.reembed(ctx, { statuses: ["failed"], limit })` で積み直してジョブを処理すれば、
+ * `ready` に戻る。
  */
 export type NotIndexedReason = "pending" | "failed" | "skipped";
 
