@@ -291,6 +291,31 @@ describeTenantSettingsStoreConformance({
       advanceActivityClock: true,
     });
   },
+  // [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+  // （Issue #338）: `advanceActivitySeq`（上）と同じ形——`tenant_subject_activity` は
+  // `PostgresMemoryStore.createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
+  // 経由でだけ進む。
+  advanceSubjectActivitySeq: async (ctx: Ctx, subjectId: string) => {
+    const { db } = await getTestClient();
+    await new PostgresMemoryStore(db).createRecall(ctx, {
+      tenantId: ctx.tenantId,
+      subjectId,
+      query: { text: "fixture" },
+      budget: null,
+      omitted: [],
+      usage: {
+        chars: 0,
+        estimatedTokens: 0,
+        counter: "heuristic",
+        byTier: { full: 0, digest: 0, index: 0 },
+        indexChars: 0,
+      },
+      indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+      explain: { stages: [] },
+      returnedMemories: [],
+      advanceActivityClock: { scope: "subject", subjectId },
+    });
+  },
   // Issue #201 / ADR 0318: PostgresTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
   // を実装している。
   supportsTaxonomyMode: true,
