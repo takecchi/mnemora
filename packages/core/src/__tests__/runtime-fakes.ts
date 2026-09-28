@@ -23,7 +23,8 @@ import type {
 } from "../interfaces/tenant-settings-store.js";
 import type { VectorStore, VectorFilter, VectorHit } from "../interfaces/vector-store.js";
 import type { LexicalStore, LexicalFilter, LexicalHit } from "../interfaces/lexical-store.js";
-import type { NotIndexedReason } from "../recall.js";
+import type { NotIndexedReason, RecallResult } from "../recall.js";
+import { FILTERED_CONDITION_SCOPE_RELATION, RecallResultSchema } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import { isStrengthInRange, MAX_STRENGTH } from "../memory.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
@@ -2824,4 +2825,68 @@ export function createFakeRuntimeStores(): {
     tenantSettingsStore: new FakeTenantSettingsStore(720, backing),
     embeddingProvider: new FakeEmbeddingProvider(),
   };
+}
+
+// ---------------------------------------------------------------------------
+// recall() の戻り値の契約の検査（TSDoc の7巡目 B1・B2）
+// ---------------------------------------------------------------------------
+
+/**
+ * `recall()` の戻り値が、出力の側の約束を守っているかを確かめ、破れていた点を文字列で返す（空なら守っている）。
+ * `./setup-recall-output-contract.ts` が、core のすべてのテストの `createRuntime` の `recall` をこれで包む。
+ *
+ * - **B1**: `RecallResultSchema` を通る。`outputValidation` が在るなら `ok: true` である（既定の `"report"` で
+ *   検証している。`"off"` のときも、ここで同じ schema を当てる）。
+ * - **B2**: schema が強制していない TSDoc の約束:
+ *   - `below_threshold.nearMisses` は上位5件まで・`score` の降順（`BelowThresholdOmission.nearMisses`）
+ *   - `ann_truncated.safetyRatio` は `certainty: "loss_possible"` のときだけ在り、必ず 1 未満（`AnnTruncatedOmission.safetyRatio`）
+ *   - `ann_unreached.severity` は runtime が必ず入れる（`AnnUnreachedOmission.severity`）
+ *   - `filtered.scopeRelation` は `FILTERED_CONDITION_SCOPE_RELATION[condition]`（`FilteredOmission.scopeRelation`）
+ *   - `unit_assembly_dropped.countKind` は `"lower_bound"`（`UnitAssemblyDroppedOmission`）
+ *   - 件数を持つ Omission の `count` は 0 ではない（0件なら積まない）
+ */
+export function checkRecallResultContract(result: RecallResult): string[] {
+  const problems: string[] = [];
+  const parsed = RecallResultSchema.safeParse(result);
+  if (!parsed.success) {
+    for (const issue of parsed.error.issues)
+      problems.push(`schema: ${issue.path.join(".")}: ${issue.message}`);
+  }
+  if (result.outputValidation !== undefined && !result.outputValidation.ok) {
+    problems.push(
+      `outputValidation.ok: false (${result.outputValidation.issues.map((i) => i.path).join(", ")})`,
+    );
+  }
+  for (const o of result.omitted) {
+    if (o.kind === "below_threshold" && o.nearMisses !== undefined) {
+      if (o.nearMisses.length > 5)
+        problems.push(`below_threshold.nearMisses が ${o.nearMisses.length} 件（上位5件まで）`);
+      for (let i = 1; i < o.nearMisses.length; i += 1) {
+        if (!(o.nearMisses[i - 1]!.score >= o.nearMisses[i]!.score))
+          problems.push("below_threshold.nearMisses が score の降順でない");
+      }
+    }
+    if (o.kind === "ann_truncated") {
+      if (o.certainty === "loss_possible") {
+        if (!(typeof o.safetyRatio === "number" && o.safetyRatio < 1))
+          problems.push(
+            `ann_truncated(loss_possible).safetyRatio = ${String(o.safetyRatio)}（1 未満であるはず）`,
+          );
+      } else if (o.safetyRatio !== undefined) {
+        problems.push(`ann_truncated(${o.certainty}) が safetyRatio を持つ`);
+      }
+    }
+    if (o.kind === "ann_unreached" && o.severity === undefined)
+      problems.push("ann_unreached.severity が無い");
+    if (
+      o.kind === "filtered" &&
+      o.scopeRelation !== FILTERED_CONDITION_SCOPE_RELATION[o.condition]
+    ) {
+      problems.push(`filtered(${o.condition}).scopeRelation = ${o.scopeRelation}`);
+    }
+    if (o.kind === "unit_assembly_dropped" && o.countKind !== "lower_bound")
+      problems.push(`unit_assembly_dropped.countKind = ${o.countKind}`);
+    if ("count" in o && o.count === 0) problems.push(`${o.kind} の count が 0`);
+  }
+  return problems;
 }
