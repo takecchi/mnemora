@@ -1396,6 +1396,11 @@ export interface RecalledMemory {
    *
    * 🔴 **型の上では省略可能だが、`recall-runtime.ts` は常にこの欄へ値か `null` を書く**
    * （`speaker` と同じ保証。ADR 0289 参照）。
+   *
+   * ⚠ **空文字の `subjectId` は、入力では受け付けるが、この出力の schema（{@link RecalledMemorySchema} の
+   * `subjectId` は `min(1)`）を通らない**（今の振る舞い）。`ctx.subjectId: ""`（{@link Ctx} の doc のとおり受け付ける）
+   * で書いた記憶を返すと、この欄が `""` になり、`recall()` の `outputValidation` が `ok: false`
+   * （`memories.<n>.subjectId`）になる。schema は緩めていない。
    */
   subjectId?: string | null;
   /**
