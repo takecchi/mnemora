@@ -3,6 +3,7 @@ import type { Ctx } from "@mnemora/core";
 import { PROBES, buildProbeSetConversation, findTopicKeywordViolations } from "../probe-set.js";
 import { armHeadline, resolveExternalId, runRetrievalQualityArm } from "../retrieval-quality.js";
 import { createExampleRuntime } from "../runtime-factory.js";
+import { assertAffinityMeasured } from "../recalled-score.js";
 import { formatNoApiCallsNotice } from "../usage-meter.js";
 import {
   closeTestClient,
@@ -274,7 +275,15 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
         // 確かめる(ADR 0108 の歯と同じ番人)。
         expect(result.memories.length).toBeGreaterThan(0);
 
-        const lexicalMatchRows = result.memories.filter((m) => m.score.lexicalMatch !== undefined);
+        // Issue #548 方向2 / ADR 0351: affinityMeasured: false（連想枠経由）には
+        // lexicalMatch という欄自体が無い——絞り込んでから読む。
+        for (const m of result.memories) {
+          assertAffinityMeasured(m.score);
+        }
+        const lexicalMatchRows = result.memories.filter((m) => {
+          assertAffinityMeasured(m.score);
+          return m.score.lexicalMatch !== undefined;
+        });
         expect(
           lexicalMatchRows.length,
           "この歯が赤いのは、examples/chat の Runtime から LexicalStore の配線が" +
@@ -284,6 +293,7 @@ describe("examples/chat: retrieval-quality の仕組み(擬似 provider・本物
         ).toBeGreaterThan(0);
         // 被覆率は (0, 1] の値を取る(ADR 0092)——0 や負値ではない。
         for (const memory of lexicalMatchRows) {
+          assertAffinityMeasured(memory.score);
           expect(memory.score.lexicalMatch).toBeGreaterThan(0);
           expect(memory.score.lexicalMatch).toBeLessThanOrEqual(1);
         }

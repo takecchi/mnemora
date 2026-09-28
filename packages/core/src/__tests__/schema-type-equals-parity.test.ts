@@ -18,6 +18,8 @@ import type {
   RecallUsageSchema,
   RecallBudgetSchema,
   ScoreBreakdownSchema,
+  AffinityUnmeasuredScoreSchema,
+  RecalledScoreSchema,
   RecalledMemorySchema,
   StageTraceSchema,
   RecallAssociationQuerySchema,
@@ -52,6 +54,8 @@ import type {
   RecallUsage,
   RecallBudget,
   ScoreBreakdown,
+  AffinityUnmeasuredScore,
+  RecalledScore,
   RecalledMemory,
   StageTrace,
   RecallAssociationQuery,
@@ -287,6 +291,16 @@ type _p20_RecallUsage = Expect<Equals<z.infer<typeof RecallUsageSchema>, RecallU
 type _p21_RecallBudget = Expect<Equals<z.infer<typeof RecallBudgetSchema>, RecallBudget>>;
 
 type _p22_ScoreBreakdown = Expect<Equals<z.infer<typeof ScoreBreakdownSchema>, ScoreBreakdown>>;
+
+// Issue #548 方向2 / ADR 0351: `RecalledMemory.score`/`RecallRecordMemory.score` の型
+// （`RecalledScore = ScoreBreakdown | AffinityUnmeasuredScore`）。`_OmissionInfer`/
+// `_p03_Omission_whole` と同じ形——個別の型（_p63）と union 全体（_p64）の両方を縛る。
+type _p63_AffinityUnmeasuredScore = Expect<
+  Equals<z.infer<typeof AffinityUnmeasuredScoreSchema>, AffinityUnmeasuredScore>
+>;
+
+type _RecalledScoreInfer = z.infer<typeof RecalledScoreSchema>;
+type _p64_RecalledScore_whole = Expect<Equals<_RecalledScoreInfer, RecalledScore>>;
 
 type _p23_RecalledMemory = Expect<Equals<z.infer<typeof RecalledMemorySchema>, RecalledMemory>>;
 
@@ -534,7 +548,7 @@ type _p62_ClaimKeyOptions = Expect<Equals<z.infer<typeof ClaimKeyOptionsSchema>,
 // =============================================================================
 
 const THIS_FILE_PATH = join(__dirname, "schema-type-equals-parity.test.ts");
-const EXPECTED_PAIR_COUNT = 62;
+const EXPECTED_PAIR_COUNT = 64;
 
 /**
  * このファイル自身のソースを読み、`type _pNN_Name = ...` の形の宣言（行頭、
@@ -608,7 +622,7 @@ function listTsFilesUnder(dir: string, files: string[] = []): string[] {
   return files;
 }
 
-const EXPECTED_SATISFIES_COUNT = 62;
+const EXPECTED_SATISFIES_COUNT = 63;
 
 describe("satisfies z.ZodType<...> の出現数が変わったら気づく（強制ではなく合図）", () => {
   it(`packages/core/src（__tests__ を除く）の satisfies z.ZodType<...> は${EXPECTED_SATISFIES_COUNT}件`, () => {

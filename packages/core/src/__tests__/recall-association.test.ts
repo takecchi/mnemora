@@ -200,11 +200,13 @@ describe("recall() — 連想枠（association、既定 on。ADR 0337）", () =>
     expect(assocEntry).toBeDefined();
     expect(assocEntry?.retrievedVia).toBe("association");
     expect(assocEntry?.associationOf).toBe(anchor.id);
-    // ⛔ アンカーとの類似度を score.similarity（クエリとの類似度の枠）に入れない。
-    expect(assocEntry?.score.similarity).toBeUndefined();
-    // ⟹ affinity が中立の1に退化しているので、この記憶の score.total は
-    // affinityMeasured: true の記憶と比較可能ではない（Issue #548 方向1、ADR 0282）。
+    // Issue #548 方向2 / ADR 0351: affinityMeasured: false の score は AffinityUnmeasuredScore
+    // の形になり、similarity/total は「undefined」ではなく欄そのものが無い
+    // ——⛔ アンカーとの類似度を score.similarity（クエリとの類似度の枠）に入れない、という
+    // 元の意図（ADR 0151）を、値ではなく型で保証するようになった。
     expect(assocEntry?.score.affinityMeasured).toBe(false);
+    expect(assocEntry?.score).not.toHaveProperty("similarity");
+    expect(assocEntry?.score).not.toHaveProperty("total");
 
     // 収穫が有った run では stage_skipped を積まない（収穫が無い run／null で
     // 明示的に off にした run とは区別する）。

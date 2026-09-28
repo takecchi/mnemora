@@ -7,7 +7,7 @@ import type { NewMemory } from "../memory.js";
 import type { VectorStore } from "../interfaces/vector-store.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import { createRuntime } from "../runtime.js";
-import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { assertAffinityMeasured, createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
  * `docs/recall.md` に書かれた既定値・上限・式が、`recall()` の実装と一致することを縛る。
@@ -206,7 +206,13 @@ describe("docs/recall.md の既定値・上限・式は recall() の振る舞い
       association: null,
       scoreThreshold: 0,
     });
-    const totals = new Map(all.memories.map((r) => [r.memoryId, r.score.total]));
+    // Issue #548 方向2 / ADR 0351: association: null・ann 経由のみなので affinityMeasured: true。
+    const totals = new Map(
+      all.memories.map((r) => {
+        assertAffinityMeasured(r.score);
+        return [r.memoryId, r.score.total] as const;
+      }),
+    );
     expect(totals.size).toBe(strengths.length);
     const expectedPassed = [...totals].filter(([, t]) => t >= threshold).map(([id]) => id);
     const expectedBelow = [...totals].filter(([, t]) => t < threshold);

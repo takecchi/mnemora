@@ -8,6 +8,7 @@ import {
 } from "../time-weighting-bench.js";
 import { TIME_WEIGHTING_CASE_SET_DEV } from "../time-weighting-case-set.dev.js";
 import { daysBefore, hoursBefore } from "../time-weighting-dates.js";
+import { assertAffinityMeasured } from "../recalled-score.js";
 import {
   closeTestClient,
   getTestClient,
@@ -115,8 +116,14 @@ describe("examples/chat: answer-time-weighting（本物の Postgres、配線検�
 
       expect(legacy.memories).toHaveLength(1);
       expect(eventAware.memories).toHaveLength(1);
-      expect(eventAware.memories[0]!.score.freshness).toBe(legacy.memories[0]!.score.freshness);
-      expect(eventAware.memories[0]!.score.total).toBe(legacy.memories[0]!.score.total);
+      // Issue #548 方向2 / ADR 0351: この唯一の候補は ann 経由（affinityMeasured: true）の
+      // はず——絞り込んでから total を読む。
+      const legacyScore = legacy.memories[0]!.score;
+      const eventAwareScore = eventAware.memories[0]!.score;
+      assertAffinityMeasured(legacyScore);
+      assertAffinityMeasured(eventAwareScore);
+      expect(eventAwareScore.freshness).toBe(legacyScore.freshness);
+      expect(eventAwareScore.total).toBe(legacyScore.total);
     } finally {
       await handle.close();
     }

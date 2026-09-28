@@ -23,7 +23,7 @@ import type {
 } from "../interfaces/tenant-settings-store.js";
 import type { VectorStore, VectorFilter, VectorHit } from "../interfaces/vector-store.js";
 import type { LexicalStore, LexicalFilter, LexicalHit } from "../interfaces/lexical-store.js";
-import type { NotIndexedReason, RecallResult } from "../recall.js";
+import type { NotIndexedReason, RecallResult, RecalledScore, ScoreBreakdown } from "../recall.js";
 import { FILTERED_CONDITION_SCOPE_RELATION, RecallResultSchema } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import { isStrengthInRange, MAX_STRENGTH } from "../memory.js";
@@ -2968,4 +2968,23 @@ export function checkRecallResultContract(result: RecallResult): string[] {
     if ("count" in o && o.count === 0) problems.push(`${o.kind} の count が 0`);
   }
   return problems;
+}
+
+/**
+ * `RecalledMemory.score`/`RecallRecordMemory.score` は `ScoreBreakdown |
+ * AffinityUnmeasuredScore` の判別可能な union（Issue #548 方向2、
+ * [ADR 0351](../../../../docs/decisions/0351-association-score-without-total.md)）。
+ * `total`/`similarity`/`lexicalMatch` を読む歯は、affinity を測っている（`"ann"`/`"lexical"`
+ * 経由で、`affinityMeasured` が `false` でない）ことをテストの入力自体から知っているが、
+ * 型はそれを知らない——ここで assert し、`ScoreBreakdown` 側へ絞り込む。
+ * `affinityMeasured === false` なら、その歯の前提（affinity を測る経路のはず）が崩れている
+ * ということなので、握り潰さず投げる。
+ */
+export function assertAffinityMeasured(score: RecalledScore): asserts score is ScoreBreakdown {
+  if (score.affinityMeasured === false) {
+    throw new Error(
+      "assertAffinityMeasured: score.affinityMeasured is false (AffinityUnmeasuredScore) — " +
+        "this test expected a measured (ann/lexical) score with total/similarity/lexicalMatch",
+    );
+  }
 }
