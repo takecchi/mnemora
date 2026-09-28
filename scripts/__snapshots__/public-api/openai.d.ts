@@ -1,11 +1,65 @@
+// ===== dist/client-types.d.ts =====
+export interface OpenAIChatMessageParam {
+    role: "system" | "user" | "assistant";
+    content: string;
+}
+export interface OpenAIChatResponseFormatJsonSchema {
+    type: "json_schema";
+    json_schema: {
+        name: string;
+        schema: Record<string, unknown>;
+        strict: true;
+    };
+}
+export interface OpenAIChatCompletionCreateParams {
+    model: string;
+    messages: OpenAIChatMessageParam[];
+    temperature?: number;
+    response_format?: OpenAIChatResponseFormatJsonSchema;
+}
+export interface OpenAIChatCompletionChoice {
+    finish_reason?: string | null;
+    message?: {
+        content?: string | null;
+        refusal?: string | null;
+    } | null;
+}
+export interface OpenAIChatCompletionResult {
+    choices: OpenAIChatCompletionChoice[];
+}
+export interface OpenAIChatClient {
+    chat: {
+        completions: {
+            create(params: OpenAIChatCompletionCreateParams, options?: unknown): PromiseLike<OpenAIChatCompletionResult>;
+        };
+    };
+}
+export interface OpenAIEmbeddingCreateParams {
+    model: string;
+    input: string[];
+    dimensions?: number;
+}
+export interface OpenAIEmbeddingItem {
+    embedding: number[];
+    index: number;
+}
+export interface OpenAIEmbeddingsResult {
+    data: OpenAIEmbeddingItem[];
+}
+export interface OpenAIEmbeddingsClient {
+    embeddings: {
+        create(params: OpenAIEmbeddingCreateParams, options?: unknown): PromiseLike<OpenAIEmbeddingsResult>;
+    };
+}
+
 // ===== dist/embedding-provider.d.ts =====
-import OpenAI from "openai";
 import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import type { OpenAIEmbeddingsClient } from "./client-types.js";
 export interface OpenAIEmbeddingProviderOptions {
     apiKey?: string;
     model: string;
     dimensions: number;
-    client?: Pick<OpenAI, "embeddings">;
+    client?: OpenAIEmbeddingsClient;
 }
 export declare class OpenAIEmbeddingProvider implements EmbeddingProvider {
     readonly space: EmbeddingSpaceId;
@@ -31,6 +85,7 @@ export declare class OpenAILLMProviderError extends Error {
 }
 
 // ===== dist/index.d.ts =====
+export * from "./client-types.js";
 export * from "./embedding-provider.js";
 export * from "./errors.js";
 export * from "./llm-provider.js";
@@ -46,12 +101,12 @@ export interface OpenAIJsonSchemaFormat {
 export declare function translateForOpenAIStructuredOutput<T>(name: string, schema: z.ZodType<T>): OpenAIJsonSchemaFormat;
 
 // ===== dist/llm-provider.d.ts =====
-import OpenAI from "openai";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { OpenAIChatClient } from "./client-types.js";
 export interface OpenAILLMProviderOptions {
     apiKey?: string;
     model: string;
-    client?: Pick<OpenAI, "chat">;
+    client?: OpenAIChatClient;
     temperature?: number;
 }
 export declare class OpenAILLMProvider implements LLMProvider {

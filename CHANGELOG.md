@@ -119,6 +119,47 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 **⚠ 2026-09-28 追記19（保留の解消。範囲は広げていない）**: オーナーの回答（ask_human `3f3411c5`）で、公開の fixture（`@mnemora/testkit/fixtures`）が、これまで受け入れていた不正な入力に新しく例外を投げる変更は、破壊的変更として扱わないと決まった。上の追記4〜18 の ⟹ の「上の保留」は、この節ではどれもこの種類の変更を指していた——`### Fixed` の PR #1135・#1157・#1165・#1170・#1183・#1190・#1243・#1250・#1252・#1265・#1270・#1280 の12項目である（前書きの「保留と非破壊の数え方」）。この12項目の ⚠ を「破壊的変更として扱わない」に書き換え、`### Fixed` に置いたまま確定させた。分類の見出しは変えていない。PR #1171 の `setEventRetention` は、もともと保留に入れず非破壊と数えていたので変わらない。`## [1.0.2]`・`## [1.0.1]` 節が保留と書いている PR #811・#813・#815・#923・#928 などにもこの回答は当たるが、出荷済みの節なので書き換えていない（`docs/migration-v1.md` の数え方の規律に追記した）。追記4〜18 の本文と ⟹ の行も、書いた時点の記録として書き換えていない。
 ⟹ **この節の範囲（`v1.0.2`…`f5ad59f`）で、破壊的変更は無い。計上を保留しているものも無い。**
 
+**2026-09-29 追記**: 上の18回の棚卸しの範囲（`f5ad59f` まで）の**外**——この節にまだ棚卸しで
+取り込まれていない、作業中の1件——として、下の `### Breaking` に破壊的変更が1件在る
+（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。**この節の他の項目と違い、
+棚卸しの「PR を全部当てた」手順を経て足したものではない**——変更を作った本人が、着地に
+先立って自分でこの節に足した項目である。次回以降の棚卸しは、この項目が既に在ることを
+前提に PR 番号の有無だけ確認すればよい。
+
+### Breaking
+
+- **`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が、SDK の
+  クラスから切り出した型から、SDK のクラスを名指ししない自前の構造型へ変わった**
+  （[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、
+  [PR #1377](https://github.com/takecchi/mnemora/pull/1377)、
+  [ADR 0350](./docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。
+  オーナーの回答（ask_human `f259eeb8`、逐語「型を SDK のクラスから切り離すってのは
+  だめですか？」）に基づく。
+
+  | パッケージ | 欄 | 以前の型 | 新しい型 |
+  |---|---|---|---|
+  | `@mnemora/openai` | `OpenAILLMProviderOptions.client` | `Pick<OpenAI, "chat">` | `OpenAIChatClient` |
+  | `@mnemora/openai` | `OpenAIEmbeddingProviderOptions.client` | `Pick<OpenAI, "embeddings">` | `OpenAIEmbeddingsClient` |
+  | `@mnemora/anthropic` | `AnthropicLLMProviderOptions.client` | `Pick<Anthropic, "messages">` | `AnthropicMessagesClient` |
+
+  **誰が影響を受けるか**:
+  - 🔴 **`Pick<OpenAI, "chat">`・`Pick<OpenAI, "embeddings">`・`Pick<Anthropic, "messages">`
+    を、自分のコードの型注釈にそのまま書いている利用者**（例: 独自の偽 client の型を
+    宣言している場合）は、新しい型名（`OpenAIChatClient`・`OpenAIEmbeddingsClient`・
+    `AnthropicMessagesClient`。どちらも `@mnemora/openai`/`@mnemora/anthropic` から
+    export される）へ書き換える必要がある。
+  - ⭕ **SDK の client インスタンス（`new OpenAI(...)`・`new Anthropic(...)`）をそのまま
+    `client` に渡しているだけの利用者は、型検査・実行時のどちらも影響を受けない**——
+    構造的に代入できる。**むしろ、以前は `@mnemora/openai`/`@mnemora/anthropic` が
+    固定している版と違う版の SDK を入れると型検査が壊れていたのが、この変更で
+    通るようになる**（今まで型で落ちていた組み合わせが緑になる。既存の README の
+    回避策「同じ版を `-E` で入れる」はもう要らない——`packages/openai/README.md`・
+    `packages/anthropic/README.md` から該当の案内を削除し、訂正を追記した）。
+  - ⭕ `client` を渡さない利用者（`apiKey` だけ、または環境変数）は影響を受けない。
+
+  `openai`・`@anthropic-ai/sdk` は引き続き `dependencies` に版を固定して持つ
+  （`peerDependencies` にはしない。理由は ADR 0350「決定」3）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
@@ -131,6 +172,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - やり直さないときは LLM を呼ばず、何も書かない。**`reextract` が `extraction: "skipped"` と `atomicity: "not_attempted"` を返しうるようになった**（`memoryIds: []`、`skipped` には退けた記憶ごとに `status_not_active`）。以前の TSDoc は「`reextract` の `extraction` は `'skipped'` を取らない」と約束していた。
   - `ExtractionOutcome`・`WriteAtomicity`・`ReextractSkip` の型は変わらない（`'skipped'` と `'not_attempted'` は元から在る値）。⟹ 型で exhaustive に分岐している呼び手には影響しない。ただし「`reextract` からは `'skipped'` が来ない」と仮定したコードは見直しが要る。
   ⭕ 非破壊と数える（公開の宣言は変わらず、例外も増えない。作られる記憶が減る側の変化で、「忘れさせた事実が戻らない」という上位の約束を守る側にある。**クローン miku の判断であり、オーナーの判断ではない**）。
+- **`@mnemora/testkit/fixtures` は、`EventStore.append` と、イベントを積む `MemoryStore` の口（`updateStatusWithEvent`・`supersedeWithNewMemories`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested` 等）に渡す `actor`・`meta` に、NUL（U+0000）か孤立サロゲート（対をなさない UTF-16 サロゲートコードユニット）を含む文字列（キーも値も、入れ子の中も）が在ると、状態を書き換える前に拒むようになった**（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、[PR #1379](https://github.com/takecchi/mnemora/pull/1379)）——以前は書き換えを通し、文字列をそのまま監査ログに残していた。`@mnemora/postgres` は `JSON.stringify(actor)`/`JSON.stringify(meta)` を `::jsonb` に渡す時点で同じ入力を拒んでいた（状態の書き換えとイベントの追記が同じトランザクションにあるので、途中まで書かれたものは残らない）ので、fixture も同じ形（状態を書き換える前に拒み、何も書かない）に揃えた。`Runtime` の口では、`reason`（`meta.reason`/`meta.note` に入る）と `actor.id` に呼び出し側の文字列がそのまま入るため、そこに NUL・孤立サロゲートがあると当たる——`forget` は `{ kind: "failed" }` を返し、`markContested` は例外を投げる（どちらも `@mnemora/postgres` と同じ外へ見える形）。対になったサロゲートペア（絵文字など）・結合文字・U+FFFD・空文字などは、Postgres が受け入れる文字列のまま引き続き通る。
+  ⭕ 非破壊と数える（根拠: オーナーの回答、ask_human `3f3411c5`、2026-09-28、回答「(あ) 破壊的とは扱わない」）。
 - **抽出（`subjectCandidates` を渡す呼び出しに限る）・`consolidate`・`reflect` の system プロンプトに、出力言語と話者取り違えの指示を足した**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[PR #1374](https://github.com/takecchi/mnemora/pull/1374)、オーナーの求めによる対応）——観測が日本語なのに記憶の本文・要旨の一部が英語になる、話者自身の発言が別の人物（利用者など）の発言・意見として記録される、の2件への対応。
   - **適用条件**: `buildExtractionPrompt` の2文（言語・話者）は、`subjectCandidates` を渡した呼び出しにだけ足す（`extractionContext` を同時に渡す場合も含む）。`extractionContext` だけを渡す呼び出し・どちらも渡さない呼び出し（デフォルト経路）には**足さない**——`EXTRACTION_PROMPT_SYSTEM_BASE` 自体にも `extractionContext` 分岐にも1バイトも触れていない。理由: どちらかの文面を変えると、記録済みカセット（`examples/chat/cassettes/`、ADR 0051 の `llmCassetteKey`）と Issue #704 の評価用録音の鍵が動き、録り直しが要る。`consolidate`・`reflect` の system プロンプトには、この条件を付けず無条件で言語の一文を足す（録音の鍵に使われていないため）。
   - **デフォルト経路（`subjectCandidates` を渡さない抽出呼び出し）へ同じ指示を広げるかは未決——オーナーの判断待ち**（[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md)）。広げれば上の録音がすべて動く。
@@ -281,6 +324,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`Runtime.reflect()` は、LLM が `digest: ""`（空文字）を返すと、TSDoc が約束する機械的な切り出しへのフォールバックをせず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #1354](https://github.com/takecchi/mnemora/pull/1354)）——`ReflectionLLMResultSchema` の `digest` が空文字を拒んでいた。抽出・`consolidate` と同じく空文字を受け付け、`resolveDigest` で `digestSource: "fallback"` の要旨にする。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 - **`Runtime.reflect()` は、LLM の `tags` に空文字の要素が1つでもあると、その tag だけを落とさず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #1354](https://github.com/takecchi/mnemora/pull/1354)）——`ReflectionLLMResultSchema` の `tags` の要素が空文字を拒んでいた。抽出・`consolidate` と同じく空文字の要素を受け付け、`dropBlankTags` で落とす（空白だけの要素はもともと落としていた）。公開の `ReflectionLLMResultSchema` を直接使う呼び出しでも、空文字の `digest`・`tags` の要素を含む応答を受け付けるようになる。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/postgres` の `restoreSupersededBy()` は、`event.at` が Invalid Date だと、戻す対象が無くても例外を投げていた**（[PR #1366](https://github.com/takecchi/mnemora/pull/1366)、[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）——対象が無ければ testkit の fixture と同じく `{ restored: [] }` を返す。対象が在るときは今どおり例外で、1件も戻さない（例外の種類も変えていない）。`Runtime.restoreSuperseded()` は時計の値を渡すので、踏むのは store を直接呼ぶ側だけである。⭕ 非破壊（例外を投げる入力が減る）。クローン miku の判断であり、オーナーの判断ではない。
+- **`Runtime.consolidate()` は、いまの時点で有効期間（`validFrom`/`validUntil`）の外にある `active` な記憶も統合元にしていた。統合先は有効期間を持たないので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた**（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）——`{ memoryIds }`、`{ seedMemoryId }` の種、`includeOutsideValidity: true` を渡した `{ query }` で起きていた。有効期間の外にある記憶は統合元にせず、動かさず、LLM にも渡さない。`sources` では新しい `kind` の `"expired"`（`validUntil` を運ぶ）・`"not_yet_valid"`（`validFrom` を運ぶ）で名指しする。判定は `recall()` の期間のゲートと同じ（[ADR 0089](./docs/decisions/0089-runtime-consolidate-shape.md) の 2026-09-29 追記）。統合先の有効期間は今までどおり持たない。⚠ 非破壊と数える（公開の union `ConsolidateSourceOutcome` に値を2つ足した——網羅的に分岐している呼び出し側は扱いを足す必要があるが、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、[`docs/migration-v1.md`](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」）。例外を投げる入力は変わらない。期限切れ・未到来の記憶を含めて呼ぶと結果が変わり、統合されずに `nothing_to_consolidate` で返ることもある）。`reflect()` の材料の選び方は変えていない。クローン miku の判断であり、オーナーの判断ではない。
 
 ---
 

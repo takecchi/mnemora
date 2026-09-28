@@ -24,14 +24,17 @@ import {
 
 /**
  * 監査ログ（`memory_events`）の `meta`・`actor` に JSON で往復しない値や、`jsonb` が受け付けない文字を
- * 渡したときの今の振る舞いを縛る（Issue #1211。`MemoryEvent.meta` の doc の 2026-09-27 追記）。
- * 振る舞いは変えていない。
+ * 渡したときの振る舞いを縛る（Issue #1211。`MemoryEvent.meta` の doc の 2026-09-27 追記・2026-09-29 追記）。
  *
  * 1. `EventStore.append` の `meta` の `Date`・`NaN`・`Infinity`・`-0`・`undefined`・BigInt は、
- *    `@mnemora/postgres` では JSON として保存した値で返り（BigInt は例外）、testkit の fixture ではそのまま返る。
- * 2. `Runtime` の口の `reason`・`actor.id` に NUL（U+0000）か孤立サロゲートが入ると、Postgres だけが
- *    監査ログの INSERT で失敗する。状態の書き換えも一緒に取り消され、途中まで書かれたものは残らない。
- *    fixture は書き換えて、文字列をそのまま監査ログに残す。
+ *    `@mnemora/postgres` では JSON として保存した値で返り（BigInt は例外）、testkit の fixture ではそのまま返る
+ *    （振る舞いは変えていない——2026-09-29 の変更の対象外。#1211 の「採らない案」のうち、この差は残した）。
+ * 2. `Runtime` の口の `reason`・`actor.id` に NUL（U+0000）か孤立サロゲート（上位・下位のどちらか単体）が入ると、
+ *    **2026-09-29 から、Postgres と testkit の fixture の両方が拒む**（オーナーの回答 ask_human `3f3411c5` を受けて、
+ *    以前は fixture だけが書き換えを通していたのを揃えた）。`forget` は `{ kind: "failed" }` を返し、Memory は
+ *    `active` のまま、イベントは0件。`markContested` は例外を投げ、両方の Memory が `active` のまま、イベントは
+ *    どちらも0件。サロゲートペア（絵文字）・結合文字・U+FFFD・空文字など、Postgres が受け入れる文字列は
+ *    引き続きどちらの実装でも通る（過剰実装で無いことの確認）。
  */
 
 const shared = {
@@ -115,7 +118,17 @@ async function createActive(kit: Kit) {
 const D = new Date("2026-01-01T00:00:00.000Z");
 const BAD_STRINGS: Array<[string, string]> = [
   ["NUL（U+0000）", "a\u0000b"],
-  ["孤立サロゲート", "a\uD800b"],
+  ["孤立サロゲート（上位、\\uD800 単体）", "a\uD800b"],
+  ["孤立サロゲート（下位、\\uDC00 単体）", "a\uDC00b"],
+];
+
+// Postgres が受け入れる（拒まない）文字列——fixture が新しく拒むようになった判定の
+// 過剰実装（サロゲートペアまで拒む・空文字を拒む等）で無いことを確かめる陽性対照。
+const GOOD_STRINGS: Array<[string, string]> = [
+  ["空文字", ""],
+  ["対になったサロゲートペア（絵文字 😀）", "a😀b"],
+  ["結合文字（é = e + U+0301）", "é"],
+  ["U+FFFD（置換文字）", "a�b"],
 ];
 
 afterAll(async () => {
@@ -230,7 +243,7 @@ describe("meta・actor の欄に関数・Symbol（今の振る舞い、Issue #12
   }
 });
 
-describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡したとき（今の振る舞い）", () => {
+describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡したとき（2026-09-29 から、両実装とも拒む）", () => {
   for (const [name, makeKit] of KITS) {
     for (const [label, bad] of BAD_STRINGS) {
       it(`${name}: forget の reason・actor.id に ${label}`, async () => {
@@ -240,17 +253,10 @@ describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡し
           const { outcomes } = await kit.runtime.forget(ctx, { memoryId: memory.id }, opts);
           const after = await kit.memoryStore.get(ctx, memory.id);
           const events = await kit.eventStore.list(ctx, { memoryId: memory.id });
-          if (name === "Postgres") {
-            expect(outcomes.map((o) => o.kind)).toEqual(["failed"]);
-            expect(after?.status).toBe("active");
-            expect(events).toEqual([]);
-          } else {
-            expect(outcomes.map((o) => o.kind)).toEqual(["forgotten"]);
-            expect(after?.status).toBe("forgotten");
-            expect(events).toHaveLength(1);
-            if ("reason" in opts) expect(events[0]!.meta.reason).toBe(bad);
-            else expect(events[0]!.actor.id).toBe(bad);
-          }
+          // 2026-09-29: Postgres も fixture も同じ形——Memory は active のまま、イベントは0件。
+          expect(outcomes.map((o) => o.kind)).toEqual(["failed"]);
+          expect(after?.status).toBe("active");
+          expect(events).toEqual([]);
         }
       });
 
@@ -259,17 +265,39 @@ describe("Runtime の reason・actor.id に NUL・孤立サロゲートを渡し
         const first = await createActive(kit);
         const second = await createActive(kit);
         const call = kit.runtime.markContested(ctx, first.id, second.id, { reason: bad });
-        if (name === "Postgres") {
-          await expect(call).rejects.toThrow(/memory_events/);
-        } else {
-          await expect(call).resolves.toMatchObject({ outcome: { kind: "contested" } });
+        // 2026-09-29: Postgres も fixture も同じ形——例外を投げ、両方の Memory が active のまま、
+        // どちらの側にもイベントは残らない。
+        await expect(call).rejects.toThrow();
+        expect((await kit.memoryStore.get(ctx, first.id))?.status).toBe("active");
+        expect((await kit.memoryStore.get(ctx, second.id))?.status).toBe("active");
+        expect(await kit.eventStore.list(ctx, { memoryId: first.id })).toEqual([]);
+        expect(await kit.eventStore.list(ctx, { memoryId: second.id })).toEqual([]);
+      });
+    }
+
+    for (const [label, good] of GOOD_STRINGS) {
+      it(`${name}: forget の reason・actor.id に ${label}（引き続き受け入れる、陽性対照）`, async () => {
+        const kit = await makeKit();
+        for (const opts of [{ reason: good }, { actor: { type: "human" as const, id: good } }]) {
+          const memory = await createActive(kit);
+          const { outcomes } = await kit.runtime.forget(ctx, { memoryId: memory.id }, opts);
+          expect(outcomes.map((o) => o.kind)).toEqual(["forgotten"]);
+          expect((await kit.memoryStore.get(ctx, memory.id))?.status).toBe("forgotten");
+          expect(await kit.eventStore.list(ctx, { memoryId: memory.id })).toHaveLength(1);
         }
-        const expected = name === "Postgres" ? "active" : "contested";
-        expect((await kit.memoryStore.get(ctx, first.id))?.status).toBe(expected);
-        expect((await kit.memoryStore.get(ctx, second.id))?.status).toBe(expected);
-        expect(await kit.eventStore.list(ctx, { memoryId: first.id })).toHaveLength(
-          name === "Postgres" ? 0 : 1,
-        );
+      });
+
+      it(`${name}: markContested の reason に ${label}（引き続き受け入れる、陽性対照）`, async () => {
+        const kit = await makeKit();
+        const first = await createActive(kit);
+        const second = await createActive(kit);
+        await expect(
+          kit.runtime.markContested(ctx, first.id, second.id, { reason: good }),
+        ).resolves.toMatchObject({ outcome: { kind: "contested" } });
+        expect((await kit.memoryStore.get(ctx, first.id))?.status).toBe("contested");
+        expect((await kit.memoryStore.get(ctx, second.id))?.status).toBe("contested");
+        expect(await kit.eventStore.list(ctx, { memoryId: first.id })).toHaveLength(1);
+        expect(await kit.eventStore.list(ctx, { memoryId: second.id })).toHaveLength(1);
       });
     }
   }

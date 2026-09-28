@@ -185,11 +185,17 @@ git diff --stat v0.4.0..v0.5.0 -- packages/postgres/migrations/      # → （�
 「出荷される面の差分」へ移した。⟹ ⚠ **本文の下のほうに在るこの2箇所には、手が届いていなかった。**
 
 🔴 **そして、この判定の「使えない理由」は
-[docs/release-notes-v1.0.0.md](./release-notes-v1.0.0.md) が既に逐語で書いていた**
+`docs/release-notes-v1.0.0.md` が既に逐語で書いていた**
 ——「⛔ **`git rev-list --count v0.5.0..origin/main` を、この判定に使わないこと**——
 **docs だけの commit でも増える**（実際に増えた）」。
 ⟹ ⭐⭐ **同じ判定を2つの文書が別々に持ち、片方だけが腐った形である。**
 ⛔ **これは「書き忘れ」ではなく、複製の帰結である**（`AGENTS.md` の反重複規律）。
+
+**⚠ 2026-09-29 追記（クローン miku の委譲先。Issue #762、オーナー回答「すでに完了した計画は
+全部消しちゃっていいと思うよ」により本 PR で削除）**: 上で引いた `docs/release-notes-v1.0.0.md`
+はこの追記時点で削除済みであり、当該の逐語はもう `main` に無い。**`v1.0.0` は出荷済み・tag は
+凍結済みであり、GitHub Release 本文と `CHANGELOG.md` の `[1.0.0]` 節に内容が残っている。**
+⛔ 上の本文（2026-09-21（2回目）の訂正）は書き換えていない——この追記は参照先が消えたことだけを記録する。
 
 ⚠ **この文書は複製をやめられない**——世代ごとの手順を持つのがこの文書の役目であり、
 **マイグレーションの要否は各世代の節に書かないと読む人に届かない。**
@@ -1056,9 +1062,16 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は0件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は1件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`f5ad59f`**（PR #1371）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18 と同じ範囲。追記14 は無い）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+
+**2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
+
+**移行の手順（`client` を独自の型注釈で書いている場合だけ）**:
+1. `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`/`Pick<Anthropic, "messages">` という型注釈を、`@mnemora/openai`/`@mnemora/anthropic` が export する `OpenAIChatClient`/`OpenAIEmbeddingsClient`/`AnthropicMessagesClient` へ置き換える。
+2. SDK の client インスタンス（`new OpenAI(...)`・`new Anthropic(...)`）をそのまま `client` に渡しているだけなら、直す必要は無い——旧版・新版どちらの SDK でも通る。
+3. 偽 client（テストダブル）を使っている場合は、新しい構造型（provider が実際に呼ぶメソッドと、そのメソッドが実際に送る引数・読む戻り値のフィールドだけ）に合わせる。
 
 **型の上**: `git diff v1.0.2..f5ad59f -- scripts/__snapshots__/public-api/` は追加だけで、削除・必須化・型の狭小化は無い。足されたのは `@mnemora/core` の `EVENT_RETENTION_KIND_INVALID_MESSAGE`・`assertValidEventRetentionKind`（PR #1171）と、`@mnemora/testkit` の `InMemoryMemoryStore` の private メンバ `rawGet`（PR #1114）である。`@mnemora/openai` の宣言の `import { z }` が `import type { z }` になった（PR #1147）が、公開する型は変わらない。
 

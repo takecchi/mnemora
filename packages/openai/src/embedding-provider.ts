@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
+import type { OpenAIEmbeddingsClient } from "./client-types.js";
 
 /**
  * {@link OpenAIEmbeddingProvider} のコンストラクタに渡す設定。
@@ -45,10 +46,13 @@ export interface OpenAIEmbeddingProviderOptions {
   /**
    * 自分で作った `OpenAI` のクライアント（再試行・timeout を変えたいとき。上の Issue #884 の追記）。
    * 渡すと `apiKey` は使わず、キーの検査もしない。
-   * ⚠ `openai` を自分の依存として入れるときは、`@mnemora/openai` が固定している版と同じにすること——
-   * 違う版だと型が食い違う（packages/openai/README.md の 2026-09-27 追記）。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）:**
+   * この欄の型は `openai` SDK のクラスを名指ししない自前の構造型 {@link OpenAIEmbeddingsClient}
+   * である（以前は `Pick<OpenAI, "embeddings">` だった）。**`openai` を自分の依存として入れる
+   * 版は、`@mnemora/openai` が固定している版と揃える必要が無い**（packages/openai/README.md 参照）。
    */
-  client?: Pick<OpenAI, "embeddings">;
+  client?: OpenAIEmbeddingsClient;
 }
 
 /**
@@ -62,7 +66,7 @@ export interface OpenAIEmbeddingProviderOptions {
 export class OpenAIEmbeddingProvider implements EmbeddingProvider {
   /** `{ provider: "openai", model, dimensions }`。構築時に決まり、変わらない。 */
   readonly space: EmbeddingSpaceId;
-  private readonly client: Pick<OpenAI, "embeddings">;
+  private readonly client: OpenAIEmbeddingsClient;
   private readonly model: string;
 
   constructor(options: OpenAIEmbeddingProviderOptions) {

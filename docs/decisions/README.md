@@ -371,6 +371,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0346](./0346-consumer-install-check-before-release.md) | 出荷6パッケージを repo の外に入れて確かめる道具を置き、既定の CI ではなくリリース前の手順で打つ | 採用 (2026-09) |
 | [0347](./0347-extract-write-path-redelivery-and-unsaveable-candidates.md) | extract のジョブは再配達で既に記憶が在れば書かず、保存できない候補はその候補だけを落として残りを書く | 採用 (2026-09) |
 | [0348](./0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md) | 抽出の出力言語・話者取り違えの指示は `subjectCandidates` 併用時にのみ足す — デフォルト経路はオーナー判断待ち | **提案 (2026-09)** |
+| [0350](./0350-provider-client-type-decoupled-from-sdk-classes.md) | `@mnemora/openai` / `@mnemora/anthropic` の `client` の型を SDK のクラスから切り離す（Issue #1221） | 採用 (2026-09) |
 | [0351](./0351-bullmq-publish-prep.md) | `@mnemora/bullmq` を npm 公開の準備状態にする — `PUBLISH_TARGETS` へ末尾で加え、初回 publish 前の version 検査を除外する仕掛けを足す（Issue #205） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
