@@ -295,7 +295,7 @@ describe("runtime.purge — reason / actor / digestSnapshot", () => {
     expect(defaultActorEvent?.actor).toEqual({ type: "system" });
   });
 
-  it("digestSnapshot は上書き前の digest であり、content は運ばない（purge 後、元の digest が残る唯一の場所）", async () => {
+  it("digestSnapshot は上書き前の digest であり、content は運ばない。purge 後の Memory の行には元の digest は残らない（元の digest が残るのは監査ログだけではない。MemoryStore.purgeMemory の TSDoc）", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(
       ctx,

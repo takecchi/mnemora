@@ -2620,6 +2620,24 @@ export class PostgresMemoryStore implements MemoryStore {
           sql`AND id = ANY(${sql.param(filter.onlyMemoryIds.filter((id) => isUuidLike(id)))}::uuid[])`
         : sql``;
 
+    // Issue #1229 の行3: `at` が Invalid Date のとき、下の1文は対象が無くても `at` を `timestamptz` に変えて例外になる。
+    // 戻す対象が無いなら、書くものが無いので testkit の fixture と同じく空で返す（例外の少ない側に揃えた。
+    // クローン miku の判断であり、オーナーの判断ではない）。対象が在るときは、下の1文をそのまま流すので、
+    // 今どおり同じ種類の例外になり、1件も戻さない。
+    if (Number.isNaN(event.at.getTime())) {
+      const exists = await this.db.execute(sql`
+        SELECT 1 FROM memories
+        WHERE tenant_id = ${ctx.tenantId}
+          AND superseded_by_id = ${supersededById}
+          AND status = 'superseded'
+          ${onlyMemoryIdsClause}
+        LIMIT 1
+      `);
+      if (exists.rows.length === 0) {
+        return { restored: [] };
+      }
+    }
+
     const result = await this.db.execute(sql`
       WITH target AS (
         SELECT id FROM memories

@@ -2118,8 +2118,8 @@ export class InMemoryMemoryStore implements MemoryStore {
     // 1件目を書き換える前に、書くイベントが書けるかを確かめる（`at` の Invalid Date・`actor` の
     // structuredClone できない値）。ループの中の `buildStoredMemoryEvent` で初めて投げると、先の行だけが
     // 戻ってイベントの無い半端な状態が残る——Postgres は1文で巻き戻る。対象が無いときは今までどおり
-    // 確かめない（投げる入力を増やさない。Postgres は対象が無くても Invalid Date の `at` を拒む——
-    // 投げるかどうかの違いとして残る）。
+    // 確かめない（投げる入力を増やさない。Postgres も対象が無ければ Invalid Date の `at` で空を返す——
+    // #1229 の行3で Postgres の側をこちらに揃えた）。
     if (targets.length > 0) {
       const template: NewMemoryEvent = {
         tenantId: ctx.tenantId,

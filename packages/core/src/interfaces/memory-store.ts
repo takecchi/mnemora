@@ -1542,13 +1542,14 @@ export interface MemoryStore {
    *   ——この口はそもそも「範囲に何件あるか分からない」問い合わせであり、0件は
    *   異常ではなく正常な結果の一種であるため。`archiveDecayed?` が対象0件で
    *   `{ archived: [] }` を返すのと同じ規律）。
-   *   ⚠ **2026-09-28 追記（今の振る舞い、[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）:
-   *   `event.at` が Invalid Date のときは、対象が0件でも2実装で違う。**`@mnemora/postgres` は、対象が無くても
-   *   `at` を `timestamptz` に変えるので例外になる（`invalid input syntax for type timestamp with time zone`。
-   *   drizzle の `Failed query` に包まれ、`cause` に入る）。testkit の fixture は、対象が在るときだけ `at` を
-   *   確かめるので、`{ restored: [] }` を返す。対象が在るときは、どちらも例外で、1件も戻さない。
+   *   ⚠ **2026-09-28 追記（[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）:
+   *   `event.at` が Invalid Date のときも、対象が0件なら `{ restored: [] }` を返す（例外にしない）。**2実装で同じ。
+   *   対象が在るときは、どちらも例外で、1件も戻さない（`@mnemora/postgres` は `invalid input syntax for type
+   *   timestamp with time zone` が drizzle の `Failed query` に包まれ、`cause` に入る）。
+   *   以前は `@mnemora/postgres` だけが、対象が無くても `at` を `timestamptz` に変えて例外になっていた。
+   *   例外の少ない側（testkit の fixture）に揃えた（クローン miku の判断であり、オーナーの判断ではない）。
    *   core の `Runtime.restoreSuperseded` は `clock.now()` を渡すので、ここに届くのは store を直接呼ぶ側だけである。
-   *   【実測 2026-09-28】`restore-superseded-invalid-at.postgres.test.ts`。
+   *   【実測 2026-09-28】`restore-superseded-invalid-at.postgres.test.ts`（Postgres と testkit の fixture）。
    * - 返す `restored` の順序は adapter に委ねる（`Runtime.restoreSuperseded` 側は
    *   これをそのまま `outcomes` の順序として運ぶだけで、特定の順序を要求しない）。
    * - 🔴 **原子性の証拠ではない。**`markContestedPair`/`supersedeWithNewMemories` の
