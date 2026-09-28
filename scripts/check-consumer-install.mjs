@@ -16,6 +16,8 @@
  *    `tsc --noEmit`（strict、`skipLibCheck: true`）に掛ける。
  * 5. すべての入口を import する `smoke.mjs` を node で実行する（解決先が install 先であること、
  *    export が1つ以上あること）。
+ * 6. すべての入口を `require` する `smoke.cjs` を node で実行する（README の前提「CommonJS からは
+ *    Node 22.12 以降の `require(esm)` で読み込める」。見るものは 5 と同じ。型は見ない）。
  *
  * どこかで落ちたら、その段を名指しして exit 1。
  *
@@ -32,6 +34,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
   EXPECTED_ENTRY_POINTS,
+  buildSmokeCjs,
   buildSmokeMjs,
   buildSmokeTs,
   buildTsconfig,
@@ -134,6 +137,7 @@ try {
 
   writeFileSync(join(consumerDir, "smoke.ts"), buildSmokeTs(EXPECTED_ENTRY_POINTS));
   writeFileSync(join(consumerDir, "smoke.mjs"), buildSmokeMjs(EXPECTED_ENTRY_POINTS));
+  writeFileSync(join(consumerDir, "smoke.cjs"), buildSmokeCjs(EXPECTED_ENTRY_POINTS));
   const tsc = join(consumerDir, "node_modules", "typescript", "bin", "tsc");
   for (const mr of ["node16", "bundler"]) {
     writeFileSync(join(consumerDir, `tsconfig.${mr}.json`), buildTsconfig(mr));
@@ -146,6 +150,10 @@ try {
     run(process.execPath, ["smoke.mjs"], consumerDir),
   );
   if (!esm.ok) failed = true;
+  const cjs = step("CommonJS で全入口を require（require(esm)）", () =>
+    run(process.execPath, ["smoke.cjs"], consumerDir),
+  );
+  if (!cjs.ok) failed = true;
 } catch {
   failed = true;
 } finally {
@@ -162,7 +170,7 @@ console.log(
   `\n${failed ? "✖ 外から入れた確認に失敗した" : "✔ 外から入れた確認を通った"}（入口 ${EXPECTED_ENTRY_POINTS.length} 個、合計 ${(total / 1000).toFixed(1)} 秒）。`,
 );
 console.log(
-  "⚠ この確認が見ていない範囲: 実行時の振る舞い（DB・実 API）、CommonJS からの利用、" +
+  "⚠ この確認が見ていない範囲: 実行時の振る舞い（DB・実 API）、CommonJS から require したときの型、" +
     "skipLibCheck: false（drizzle-orm の型定義そのものがエラーを出す。packages/postgres/README.md）、" +
     "README の例が自分の依存として要求するもの（#1117 の zod・@mnemora/openai のような、利用者の install 行の不足）。" +
     "依存はロックファイル無しで解決するので、上流の新しい版によって結果が変わりうる（ADR 0346）。",

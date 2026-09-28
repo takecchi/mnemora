@@ -365,6 +365,8 @@ type Omission =
       count: number; countKind: CountKind }
 ```
 
+**⚠ 2026-09-28 追記（文書と実装の照合、main fd74b23）**: **上の型例は、実装の型と一致していない。**実装が受け付ける値の正本は `packages/core/src/recall.ts` の `OmissionSchema`（と各 `*Omission` 型）である。型例に無いものは、`stage_skipped` の `stage: 'association'` と `reason: 'vector_store_lacks_get_vectors' | 'no_anchor'`、`filtered` の `condition: 'decayed' | 'expired' | 'not_yet_valid'` と必須の `scopeRelation`、`over_limit` の必須の `stage: 'rescore' | 'association'`、`ann_truncated` の `certainty` などの欄、`ann_unreached` の `severity?` である。多くは下の各追記が1つずつ書いている。型例は書き換えず、ここに追記する。
+
 **⚠ 2026-09 追記（[ADR 0153](./decisions/0153-recall-decay-floor-gate.md)、Issue #196）**:
 `filtered` の `condition` は上のコード例には無い `'decayed'` も持つ（本節の型例は書き換えない
 ——追記としてここに足す）。`decay_floor_at` を過ぎた（完全に減衰しきった）Memory が
@@ -909,6 +911,8 @@ interface TokenCounter {
 }
 ```
 
+**⚠ 2026-09-28 追記（文書と実装の照合、main fd74b23）**: 上の型例の `byTier` には無い任意欄 `association?: number` を、実装の `RecallUsage.byTier` は持つ。連想枠（§9）が返した digest の文字数の内訳であり、`digest` の一部である（`digest` に足す量ではない）。欄が在るのは連想枠を走らせたときで、連想枠は既定 on なので（[ADR 0337](./decisions/0337-recall-association-default-on.md)）、`association` を省略した通常の呼び出しでも在る。連想が0件でも `0` として在る。`association: null` を渡して連想を止めたときは、この欄が無い。型例は書き換えず、ここに追記する。
+
 ### ⚠ 目次帯は予算の対象外である（2026-09 訂正）
 
 **`budget` が縛るのは `memories` tier だけである。目次帯（`IndexBand`）は予算の対象外であり、
@@ -1002,7 +1006,7 @@ DIGEST_BAND_ENTRY_FIXED_OVERHEAD_CHARS + min(digest長, DIGEST_BAND_MAX_ENTRY_CH
 
 #### `recall()` の呼び出し例
 
-```ts
+```ts check
 const recalled = await runtime.recall(ctx, {
   text: "...",
   digestBandLimit: 10, // 既定 50 から下げる。0 は渡せない（1 が下限）
