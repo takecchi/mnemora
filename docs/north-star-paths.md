@@ -13,7 +13,8 @@
 - **行番号は書かない。**ファイルと、テストの it の名前（逐語）と、公開 API の名前で指す
   （`AGENTS.md`「数を、道具と生成物に焼き込まない」）。
 - **当て直した時点: 2026-09-28、`main = de8a160`。**それより後に `main` が動いた分は、
-  この一覧の中身としては確かめていない。
+  この一覧の中身としては確かめていない。項目1 の節だけは 2026-09-28、`main = e1d5b40` で
+  当て直した。
 
 ## 歯が確かめること / 確かめないこと
 
@@ -49,11 +50,12 @@ ADR 0216 決定7）である。この一覧は、それを置き換えない。
 - 実装: `packages/core/src/extraction.ts`
 - 実装: `packages/core/src/strategies/decay.ts`
 - 実装: `packages/core/src/recall-runtime.ts`
+- テスト: `packages/postgres/src/__tests__/north-star-item1-next-day.postgres.test.ts` 「注入した時計で observe し、1日と1時間進めてから recall しても、その記憶が返る（既定のテナント設定、includeFullyDecayed なし）」
+- テスト: `packages/postgres/src/__tests__/north-star-item1-next-day.postgres.test.ts` 「陽性対照: 同じ時計を1年進めると、その記憶は返らず filtered(decayed) に数えられる（時計が減衰ゲートまで届いている）」
 - テスト: `packages/core/src/__tests__/decay.test.ts` 「threshold 省略時の floorAt が 0.05 由来の絶対時刻になる」
 - テスト: `packages/core/src/__tests__/recall-decay-gate.test.ts` 「既定（includeFullyDecayed 未指定）では VectorStore.search の opts.filter.decayFloorAtAfter に「いま」が渡る」
 
-⚠ 「次の日にまだ返る」ことそのものを名指しで縛る it は、見つけていない
-（探したのは `packages/core/src/__tests__/*.test.ts` の it の名前の「次の日|翌日|1日|24時間」）。
+最初の2本は、Postgres と testkit の fixture の両方で走る。
 ⚠ 活動時計（`decayClock: 'activity'`）のテナントでは破れうる（#338、未実測）。
 
 ### 項目2
