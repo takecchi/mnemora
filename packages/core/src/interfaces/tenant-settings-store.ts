@@ -390,6 +390,11 @@ export interface TenantSettingsStore {
    * `tenant_settings.decay_clock` を設定する（UPSERT。行が無ければ作る）。`clock` が
    * `DecayClock` の3値のいずれでもない場合は `DECAY_CLOCK_INVALID_MESSAGE` を含む `Error` で
    * 失敗する（`assertValidDecayClock` 参照）。
+   *
+   * ⚠ **`'wall'` から `'activity'`/`'either'` へ切り替えても、`'wall'` の間に作られた記憶は活動時計では
+   * 沈まない**（活動時計の3つ組が `null` のまま＝床が無い。この口は既存の記憶を書き換えない）。
+   * 活動時計で沈むのは、切り替えた後に作られた記憶だけである。これを契約とする
+   * （[ADR 0165](../../../../docs/decisions/0165-decay-activity-clock.md) の 2026-09-28 追記2、Issue #1014）。
    */
   setDecayClock?(ctx: Ctx, clock: DecayClock): Promise<void>;
 
