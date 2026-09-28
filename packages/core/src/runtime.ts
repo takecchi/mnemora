@@ -1947,6 +1947,13 @@ export interface Runtime {
    * - LLM の呼び出しの失敗は投げない。全文フォールバックへ倒し、`extractionFailure` に載せる
    *   （docs/memory-model.md §4）。
    * - store が投げた例外は、そのまま伝わる（保存できない値の扱いは Issue #1063）。
+   *   ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)。
+   *   どうするかは決めていない）: LLM の抽出結果が schema は通るが保存できない値を含むと、候補は1件ずつ書かれる
+   *   （1つのトランザクションではない）ので、**保存できない候補の手前の候補は書かれたまま**例外になる。LLM 自体は
+   *   成功しているので、全文フォールバックの Memory は作られない（docs/memory-model.md §4 の安全弁は、LLM の呼び出しの
+   *   失敗だけを覆う）。保存できる値の範囲は store で違う——本文の NUL は `@mnemora/postgres` も testkit の fixture も
+   *   拒むが、語の多い 1MB 超の本文は Postgres だけが tsvector の上限で拒む（fixture は全件を書く）。
+   *   【実測 2026-09-28】`packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts`。
    *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
    *   書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の
    *   doc、Issue #1075）。
@@ -2128,6 +2135,21 @@ export interface Runtime {
    * - **`subjectCandidates` の口も無い**（`sanitizeCandidateSubjectId` の doc。この行はコードを読んで
    *   確かめただけで、実測はしていない）。LLM が返した候補の
    *   `subjectId` は一覧で検査されず、省略された候補は Observation の `subjectId` へ落ちる。
+   *
+   * ⚠ **2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
+   * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)。どうするかは決めていない）: 利用者の意思で退けた記憶
+   * （`forget`・`purge`・訂正）の元の Observation に `reextract` を呼ぶと、LLM の言い方しだいで、その事実が新しい
+   * `active` な Memory として戻る。**`reextract` は、退けたことを知らない。
+   * - 退けた記憶そのものは動かない（`skipped` に `status_not_active`。`forgotten`・`contested`、解決で負けた
+   *   `superseded` のどれでも同じ。ADR 0028）。
+   * - LLM が前回と**同じ本文**を返せば、冪等の鍵（content_hash）で既存の行に当たり、新しい行は作られない。
+   *   `purge` の後も content_hash は残るので同じである。
+   * - LLM が前回と**違う言い方**を返せば、新しい `active` な Memory が作られる。訂正の対（`contested`）にも入らず、
+   *   `recall()` に訂正の印なしで出る。⟹ 戻るかどうかは、LLM の言い回しが揺れるかどうかで決まる。
+   * - `observe()` の再送（同じ `externalId`）は、forget・purge した記憶について抽出をやり直さない
+   *   （ADR 0124 の追記、#897）。`reextract` にはこの規律が無い。
+   * 【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
+   * （`packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`）。
    */
   reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
   /**
@@ -2402,6 +2424,11 @@ export interface Runtime {
    * `recall()` 自身は一切変更していない——`restoreArchived` と同じく、`status` が
    * `'active'` へ戻った時点で既存の status ゲートへ他の `active` な Memory と全く
    * 同じ経路で合流する。
+   *
+   * ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1079](https://github.com/takecchi/mnemora/issues/1079) のコメント）:
+   * 置き換えた側（`supersededById`）が `forgotten` でも、この口はその群を `active` に戻す（置き換えた側の状態は見ない。
+   * 置き換えた側は `forgotten` のまま）。【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
+   * （`reextract-withdrawn-memories.postgres.test.ts`）。
    */
   restoreSuperseded(
     ctx: Ctx,
