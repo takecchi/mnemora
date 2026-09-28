@@ -317,7 +317,8 @@ export interface ObserveResult {
    * （歯は `packages/postgres/src/__tests__/observe-duplicate-candidates.postgres.test.ts`）。
    *
    * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1234](https://github.com/takecchi/mnemora/issues/1234)）:
-   * 候補は1件ずつ「書く → `created` イベントを積む」の順で、1つのトランザクションではない。**書いた直後、
+   * 候補は「書く → `created` イベントを積む」の順で、1つのトランザクションではない（2026-09-28 から、候補を全件
+   * 書いてから `created` を積む。Issue #1063、ADR 0347）。**書いた直後、
    * `created` を積む前にその1件が `forget` → `purge` されると、この配列にも purge した id が入り、その Memory の
    * 監査ログには `forgotten`・`purged` の**後に** `created` が積まれる（`at` もその順になる。`created` の
    * `digestSnapshot` は purge 前の digest）。`at` の順に読むと「消した後に作られた」と読めるが、実際は作られてから
@@ -1946,13 +1947,20 @@ export interface Runtime {
    *   {@link CLAIM_KEY_WITH_DEFERRED_EXTRACT_ERROR_PREFIX} で始まる `Error` を投げる（何も書く前）。
    * - LLM の呼び出しの失敗は投げない。全文フォールバックへ倒し、`extractionFailure` に載せる
    *   （docs/memory-model.md §4）。
-   * - store が投げた例外は、そのまま伝わる（保存できない値の扱いは Issue #1063）。
-   *   ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)。
-   *   どうするかは決めていない）: LLM の抽出結果が schema は通るが保存できない値を含むと、候補は1件ずつ書かれる
-   *   （1つのトランザクションではない）ので、**保存できない候補の手前の候補は書かれたまま**例外になる。LLM 自体は
-   *   成功しているので、全文フォールバックの Memory は作られない（docs/memory-model.md §4 の安全弁は、LLM の呼び出しの
-   *   失敗だけを覆う）。保存できる値の範囲は store で違う——本文の NUL は `@mnemora/postgres` も testkit の fixture も
-   *   拒むが、語の多い 1MB 超の本文は Postgres だけが tsvector の上限で拒む（fixture は全件を書く）。
+   * - store が投げた例外は、そのまま伝わる。ただし抽出した候補の書き込み（`createMemoryWithOutbox`）の例外は下のとおり。
+   *   ⚠ 2026-09-28 変更（[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)、
+   *   [ADR 0347](../../../docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)。
+   *   クローン miku の判断であり、オーナーの判断ではない）: LLM の抽出結果が schema は通るが保存できない値を含むと、
+   *   **その候補だけを落とし、残りの候補は書いて、投げない。**候補の書き込みが投げたことだけを根拠にする（core は
+   *   保存できない値と一時的な障害を見分けられない）。**全件が落ちたら、最初の例外をそのまま投げ、何も書かない**
+   *   （この変更の前から例外になっていた入力であり、投げる入力は減る側にだけ変わった）。
+   *   - 落とした候補は、残った候補の `created` イベントの `meta.droppedCandidates`（`index`・`contentHash`・
+   *     最も内側の原因の `code`・`message`。候補の本文は写さない）に残る。**この戻り値には出ない**
+   *     （`memoryIds` が候補の数より少なくなるだけ。`extraction` は `"ok"`・`extractionFailure` は `null` のまま）。
+   *   - 全文フォールバックの Memory は作られない（docs/memory-model.md §4 の安全弁は、LLM の呼び出しの失敗だけを覆う）。
+   *   - 保存できる値の範囲は store で違う——本文の NUL は `@mnemora/postgres` も testkit の fixture も拒むが、語の多い
+   *     1MB 超の本文は Postgres だけが tsvector の上限で拒む（fixture は全件を書く）。
+   *   - 候補を全件書いてから、`created` を積む（落とした候補は全件を書き終えるまで分からない）。
    *   【実測 2026-09-28】`packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts`。
    *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
    *   書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の
