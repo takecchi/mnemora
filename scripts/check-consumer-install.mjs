@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 /**
- * 出荷6パッケージを、利用者の立場で repo の外に入れて確かめる（ADR 0346）。
+ * 出荷パッケージ（PUBLISH_TARGETS。件数はそちらが唯一の定義）を、利用者の立場で
+ * repo の外に入れて確かめる（ADR 0346）。
  *
- * 1. `scripts/pack-publish-targets.mjs` で6つの tarball を作る（`pack:check` と同じ `pnpm pack`）。
+ * 1. `scripts/pack-publish-targets.mjs` で全対象の tarball を作る（`pack:check` と同じ `pnpm pack`）。
  * 2. 各 tarball の `exports` から列挙した入口を、`./check-consumer-install-lib.mjs` の
  *    `EXPECTED_ENTRY_POINTS` と両向きで突き合わせる（入口が消えた・増えた、を赤にする）。
- * 3. OS の一時ディレクトリ（repo の外）に空のプロジェクトを作り、6つの tarball と
+ * 3. OS の一時ディレクトリ（repo の外）に空のプロジェクトを作り、全対象の tarball と
  *    `typescript`・`@types/node`（ルートの devDependencies と同じ版）を `npm install --ignore-scripts` で入れる。
  *    `--ignore-scripts` は、依存の install スクリプト（onnxruntime-node の CUDA 用バイナリなど）が
  *    registry の外へ取りに行くのを止めるため。この検査はネイティブのバイナリを使わない。

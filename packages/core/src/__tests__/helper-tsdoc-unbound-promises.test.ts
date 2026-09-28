@@ -43,6 +43,18 @@ describe("B8: buildConsolidationPrompt・buildReflectionPrompt は、全件の�
     expect(buildReflectionPrompt(memories).system).toContain("outcome: 'nothing'");
     expect(buildConsolidationPrompt(memories).system).not.toContain("nothing");
   });
+
+  it("Issue #1370: buildConsolidationPrompt の system は、渡された記憶と同じ言語で書くよう指示する（無条件）", () => {
+    expect(buildConsolidationPrompt(memories).system).toContain(
+      "統合した本文と要旨は、渡された記憶と同じ言語で書いてください。",
+    );
+  });
+
+  it("Issue #1370: buildReflectionPrompt の system は、渡された記憶と同じ言語で書くよう指示する（無条件）", () => {
+    expect(buildReflectionPrompt(memories).system).toContain(
+      "新しい記憶の本文と要旨は、渡された記憶と同じ言語で書いてください。",
+    );
+  });
 });
 
 describe("B9: isBoundedScoringStrategy は nonSimilarityUpperBound を持つかで見分ける", () => {

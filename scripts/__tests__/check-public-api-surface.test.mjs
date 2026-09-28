@@ -25,8 +25,16 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const gate = fileURLToPath(new URL("../check-public-api-surface.mjs", import.meta.url));
 
-// `./publish-targets.mjs` の `PUBLISH_TARGETS` と同じ6パッケージのディレクトリ名。
-const PACKAGE_DIRS = ["core", "testkit", "openai", "postgres", "anthropic", "local-embedding"];
+// `./publish-targets.mjs` の `PUBLISH_TARGETS` と同じ7パッケージのディレクトリ名。
+const PACKAGE_DIRS = [
+  "core",
+  "testkit",
+  "openai",
+  "postgres",
+  "anthropic",
+  "local-embedding",
+  "bullmq",
+];
 
 /** @type {string | undefined} */
 let packagesRoot;
@@ -44,7 +52,7 @@ afterEach(() => {
   }
 });
 
-/** 6パッケージすべてに、最小限の `exports`/`dist/index.d.ts` を持つフィクスチャを作る。 */
+/** 7パッケージすべてに、最小限の `exports`/`dist/index.d.ts` を持つフィクスチャを作る。 */
 function newFixtureRoots() {
   const base = mkdtempSync(join(tmpdir(), "api-check-cli-"));
   packagesRoot = join(base, "packages");

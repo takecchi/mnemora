@@ -28,3 +28,4 @@ allowBuilds:
   msgpackr-extract: false
 minimumReleaseAgeExclude:
   - eslint@10.10.0
+  - '@anthropic-ai/sdk@0.129.0'

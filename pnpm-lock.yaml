@@ -91,6 +91,9 @@ importers:
       '@mnemora/testkit':
         specifier: workspace:^
         version: link:../testkit
+      anthropic-sdk-latest:
+        specifier: npm:@anthropic-ai/sdk@0.129.0
+        version: '@anthropic-ai/sdk@0.129.0(zod@4.5.4)'
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -107,7 +110,7 @@ importers:
         specifier: 6.3.8
         version: 6.3.8(ioredis@6.0.0)(pg@8.23.0)
       ioredis:
-        specifier: 6.0.0
+        specifier: ^6.0.0
         version: 6.0.0
     devDependencies:
       '@mnemora/postgres':
@@ -173,6 +176,9 @@ importers:
       '@mnemora/testkit':
         specifier: workspace:^
         version: link:../testkit
+      openai-latest:
+        specifier: npm:openai@7.23.0
+        version: openai@7.23.0(zod@4.5.4)
       typescript:
         specifier: 5.9.3
         version: 5.9.3
@@ -228,6 +234,15 @@ packages:
 
   '@anthropic-ai/sdk@0.124.0':
     resolution: {integrity: sha512-cN5O8i9UVxHeOQAzj/XjshWXG8KiibJDw9OGpH2Z/eR3n/RBxdoLxDJOcfqAJWvjaMDFfHTBADU04hWRJVkDyA==}
+    hasBin: true
+    peerDependencies:
+      zod: ^3.25.0 || ^4.0.0
+    peerDependenciesMeta:
+      zod:
+        optional: true
+
+  '@anthropic-ai/sdk@0.129.0':
+    resolution: {integrity: sha512-MH7LB20kNpGLUpPTe2OG5XvL/KhX8HUO9XyBaFjgFk6TLS4Xjt0VPIuMKywe7POKKPslX+QxSlVok9e+8kG5Nw==}
     hasBin: true
     peerDependencies:
       zod: ^3.25.0 || ^4.0.0
@@ -1466,6 +1481,30 @@ packages:
       zod:
         optional: true
 
+  openai@7.23.0:
+    resolution: {integrity: sha512-0ecOXnFSMNWZq6cUBcTV6Lf93y+fm8BH/+QzFvpoP1UGNOE5pnytRa6HAPGCw+3IS9SIAW7rc1M8yyzN1PiBAQ==}
+    engines: {node: '>=22.0.0'}
+    peerDependencies:
+      '@aws-sdk/credential-provider-node': '>=3.972.0 <4'
+      '@smithy/hash-node': '>=4.3.0 <5'
+      '@smithy/signature-v4': '>=5.4.0 <6'
+      undici: '>=5 <9'
+      ws: ^8.21.0
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@aws-sdk/credential-provider-node':
+        optional: true
+      '@smithy/hash-node':
+        optional: true
+      '@smithy/signature-v4':
+        optional: true
+      undici:
+        optional: true
+      ws:
+        optional: true
+      zod:
+        optional: true
+
   optionator@0.9.4:
     resolution: {integrity: sha512-6IpQ7mKUxRcZNLIObR0hz7lxsapSSIYNZJwXPGeF0mTVqGKFIXj1DQcMoT22S3ROcLyY/rz0PWaWZ9ayWmad9g==}
     engines: {node: '>= 0.8.0'}
@@ -1801,6 +1840,13 @@ packages:
 snapshots:
 
   '@anthropic-ai/sdk@0.124.0(zod@4.5.4)':
+    dependencies:
+      json-schema-to-ts: 3.1.1
+      standardwebhooks: 1.1.1
+    optionalDependencies:
+      zod: 4.5.4
+
+  '@anthropic-ai/sdk@0.129.0(zod@4.5.4)':
     dependencies:
       json-schema-to-ts: 3.1.1
       standardwebhooks: 1.1.1
@@ -2732,6 +2778,10 @@ snapshots:
       protobufjs: 7.6.6
 
   openai@7.10.0(zod@4.5.4):
+    optionalDependencies:
+      zod: 4.5.4
+
+  openai@7.23.0(zod@4.5.4):
     optionalDependencies:
       zod: 4.5.4
 

@@ -63,6 +63,10 @@ export type ReflectedLLMResult = Extract<ReflectionLLMResult, { outcome: "reflec
  * `@mnemora/openai` で同じ）。`{ query }`/`{ seedMemoryId }` の形は `recall()` の `limit` と
  * `maxCandidates` で件数が抑えられる。入力がモデルの上限を超えると、provider は API の拒否を
  * そのまま投げ、`outcome: "llm_failed"`（`llmFailure.kind: null`）になる——書き込みは0件である。
+ *
+ * Issue #1370: 新しい記憶の言語を、渡された記憶と同じ言語で書くよう明示する（無条件・
+ * 録音済みカセットには使われていない文面——`buildExtractionPrompt` の
+ * `subjectCandidates` 分岐と違い、`buildReflectionPrompt` は録音のキーに縛られない）。
  */
 export function buildReflectionPrompt(basis: Memory[]): PromptSpec {
   return {
@@ -70,7 +74,8 @@ export function buildReflectionPrompt(basis: Memory[]): PromptSpec {
       "あなたは複数の記憶から、まだ言語化されていない一般化や気づきを見つけるアシスタントです。" +
       "渡された記憶それぞれの本文と要旨を読み、それらに共通するパターンや示唆が実際にある場合" +
       "だけ、それを1件の新しい記憶としてまとめてください。共通点が見つからない、または単なる" +
-      "言い換えにしかならない場合は、無理に作らず outcome: 'nothing' を返してください。",
+      "言い換えにしかならない場合は、無理に作らず outcome: 'nothing' を返してください。" +
+      "新しい記憶の本文と要旨は、渡された記憶と同じ言語で書いてください。",
     messages: [
       {
         role: "user",

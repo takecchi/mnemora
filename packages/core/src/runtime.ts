@@ -662,13 +662,15 @@ export interface ForgetResult {
  *   畳みたいなら `query.association: null` を渡すこと。contested の同伴（`mandatory_companion`）は
  *   `status_not_active` で弾かれる。`{ seedMemoryId }` は `computeAffinity` の閾値で絞るので、
  *   連想や同伴で返った記憶（`similarity` も `lexicalMatch` も持たない）は入らない。
- * - **`{ memoryIds }` は、有効期間（`validFrom`/`validUntil`）も忘却の床（`decayFloorAt`）も見ない。**
- *   適格性は `status === 'active'` だけである（ADR 0089 決定2。忘却の床はコードを読んで確かめた
- *   だけで、実測はしていない）。統合先は有効期間を持たない
- *   （ADR 0164「射程外にしたもの」1）ので、期限切れの記憶を渡すと、その内容は期限の無い `active` な
- *   記憶として `recall()` に戻る（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)。
- *   引き継ぎ方は決めていない）。`{ query }`・`{ seedMemoryId }` は `recall()` の期間・忘却のゲートを
- *   通るので、期限切れ・減衰しきった記憶は最初から入らない。
+ * - **`{ memoryIds }` は、忘却の床（`decayFloorAt`）を見ない。**（忘却の床はコードを読んで確かめた
+ *   だけで、実測はしていない）。`{ query }`・`{ seedMemoryId }` の近傍は `recall()` の忘却のゲートを通る。
+ * - ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）: どの形でも、いまの
+ *   時点で有効期間（`validFrom`/`validUntil`）の外にある記憶は統合元にしない**（`sources` に `"expired"`/
+ *   `"not_yet_valid"`。{@link ConsolidateSourceOutcome} 参照）。それまでは `{ memoryIds }` が有効期間を見ず、
+ *   統合先は有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れの記憶の内容が期限の無い
+ *   `active` な記憶として `recall()` に戻っていた。`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）と、
+ *   `{ query }` に `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶も、同じく統合されていた
+ *   （2026-09-29 に Postgres と testkit の fixture で実測）。
  *
  * `{ seedMemoryId }` は「この記憶に似ているものを mnemora 自身が集めて、1つに畳め」という
  * 意味である（ADR 0152）。`{ query, maxCandidates }` と違い、**「似ている」の判定
@@ -801,8 +803,13 @@ export type ConsolidateOutcome =
 /**
  * `ConsolidateOutcome: "nothing_to_consolidate"` の理由（Issue #103、ADR 0089）。
  *
- * - `"no_eligible_sources"` — 渡された/引けた対象のうち `status: 'active'` が0件。
- * - `"single_eligible_source"` — `active` が1件だけ。1件を1件に「統合」しない。
+ * - `"no_eligible_sources"` — 渡された/引けた対象のうち、統合元にできるもの（`status: 'active'`
+ *   で、いまの時点で有効期間の内側）が0件。
+ * - `"single_eligible_source"` — 統合元にできるものが1件だけ。1件を1件に「統合」しない。
+ *
+ * ⚠ 2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）: 「統合元にできる」に
+ * 有効期間の条件が加わった（{@link ConsolidateSourceOutcome} の `"expired"`/`"not_yet_valid"`）。それまでは
+ * `status: 'active'` だけで数えていた。
  */
 export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_source";
 
@@ -829,11 +836,37 @@ export type ConsolidateNothingReason = "no_eligible_sources" | "single_eligible_
  *   それまでの doc は1つ目の場合だけを書いていた（ADR 0089 の同日付の追記）。
  * - `"eligible"` — `dryRun: true` のときだけ出る。`status === 'active'` で、実際に統合される
  *   側になったであろう対象。
+ * - `"expired"` — `status === 'active'` だが、いまの時点で有効期間が切れている
+ *   （`validUntil <= now`）。統合元にしない。`validUntil` はその記憶の値。
+ * - `"not_yet_valid"` — `status === 'active'` だが、いまの時点でまだ有効期間が始まっていない
+ *   （`validFrom > now`）。統合元にしない。`validFrom` はその記憶の値。
+ *
+ * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
+ * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も統合元にして
+ * `superseded` へ動かしていた。統合先は有効期間を持たない（`validFrom`/`validUntil` とも null。
+ * [ADR 0164](../../../docs/decisions/0164-valid-from-until-recall.md)「射程外にしたもの」1）ので、期限切れ・
+ * 未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた。
+ * - **判定は `status` の後**に行う（`forgotten` で期限切れの記憶は、今どおり `status_not_active`）。
+ *   述語は `recall()` の期間のゲート（ADR 0164 決定1）と同じで、時刻は `consolidate` を呼んだ時点の
+ *   `clock.now()`。逆転した区間（`validFrom > validUntil`。Issue #1042）は `"expired"` になる。
+ * - **対象の形によらない。**`{ memoryIds }` だけでなく、`{ seedMemoryId }` の種（`recall()` を通らずに
+ *   必ず候補に入る）と、`{ query }` に `includeOutsideValidity: true` や過去の `validAt` を渡して集めた
+ *   記憶にも効く——`query` の期間の指定は「何を集めるか」を決めるだけで、統合元にできるかは変えない。
+ * - 統合先の有効期間は今までどおり null（統合元の区間を引き継がない）。いまの時点で有効な統合元が、
+ *   将来の `validUntil` を持っていても、統合先はその期限を持たない（引き継ぎ方は ADR 0164 が別の判断として
+ *   残したまま）。
+ * - `dryRun` でも同じ値で名指しする。この値の要素は `nothingReason` の数え方にも入らない。
+ * - 🔴 **`ConsolidateSourceOutcome` を網羅的に分岐している呼び出し側は、この2値を扱う必要がある。**
+ * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の数え方の規律）。
+ *   同じ入力でも結果が変わる（統合されずに `nothing_to_consolidate` で返ることもある）。2026-09-29 にクローン miku
+ *   （オーナーではない）が決めた（ADR 0089 の同日付の追記）。
  */
 export type ConsolidateSourceOutcome =
   | { memoryId: MemoryId; kind: "superseded"; previousStatus: "active" }
   | { memoryId: MemoryId; kind: "not_found" }
   | { memoryId: MemoryId; kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> }
+  | { memoryId: MemoryId; kind: "expired"; validUntil: Date }
+  | { memoryId: MemoryId; kind: "not_yet_valid"; validFrom: Date }
   | { memoryId: MemoryId; kind: "status_changed_concurrently"; observedStatus: MemoryStatus | null }
   | { memoryId: MemoryId; kind: "failed"; error: string }
   | { memoryId: MemoryId; kind: "not_attempted" }
@@ -5897,7 +5930,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     type InitialClassification =
       | { kind: "not_found" }
       | { kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> }
+      | { kind: "expired"; validUntil: Date }
+      | { kind: "not_yet_valid"; validFrom: Date }
       | { kind: "active" };
+
+    // Issue #1188: `active` でも、いまの時点で有効期間の外にある記憶は統合元にしない。統合先は
+    // 有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れ・未到来の事実が、
+    // 期限の無い `active` な記憶として `recall()` に戻るため。述語は `recall()` の期間のゲート
+    // （`recall-runtime.ts` の `survivesValidityGate`、ADR 0164 決定1）と同じで、対象の形によらない。
+    const validAt = clock.now();
 
     const uniqueIds = Array.from(new Set(ids));
     // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`forget` と同じ形）。
@@ -5917,6 +5958,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           kind: "status_not_active",
           status: memory.status as Exclude<MemoryStatus, "active">,
         });
+      } else if (memory.validUntil != null && memory.validUntil <= validAt) {
+        // 逆転した区間（Issue #1042）は、どの時点でも期間の外にある。`expired` を先に見る。
+        initialById.set(id, { kind: "expired", validUntil: memory.validUntil });
+      } else if (memory.validFrom != null && memory.validFrom > validAt) {
+        initialById.set(id, { kind: "not_yet_valid", validFrom: memory.validFrom });
       } else {
         initialById.set(id, { kind: "active" });
       }
@@ -5924,7 +5970,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     /**
      * `ids`（入力順・重複を保つ）を `ConsolidateSourceOutcome[]` へ写す。`active` と分類された
-     * id だけ `activeOutcome` に委ねる——`not_found`/`status_not_active` はどの分岐でも同じ顔。
+     * id だけ `activeOutcome` に委ねる——`not_found`/`status_not_active`/`expired`/`not_yet_valid`
+     * はどの分岐でも同じ顔。
      */
     function mapSources(
       activeOutcome: (id: MemoryId) => ConsolidateSourceOutcome,
@@ -5936,6 +5983,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
         if (cls.kind === "status_not_active") {
           return { memoryId: id, kind: "status_not_active", status: cls.status };
+        }
+        if (cls.kind === "expired") {
+          return { memoryId: id, kind: "expired", validUntil: cls.validUntil };
+        }
+        if (cls.kind === "not_yet_valid") {
+          return { memoryId: id, kind: "not_yet_valid", validFrom: cls.validFrom };
         }
         return activeOutcome(id);
       });

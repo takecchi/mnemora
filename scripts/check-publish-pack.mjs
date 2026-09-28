@@ -1,9 +1,12 @@
 #!/usr/bin/env node
 /**
- * publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`。現在は
- * `@mnemora/core` / `@mnemora/testkit` / `@mnemora/openai` / `@mnemora/anthropic` /
- * `@mnemora/postgres` / `@mnemora/local-embedding` の6つ）を実際に `pnpm pack` し、
+ * publish 対象パッケージ（`./publish-targets.mjs` の `PUBLISH_TARGETS`。件数・名前は
+ * そちらが唯一の定義——ここには写さない）を実際に `pnpm pack` し、
  * **tarball の中身**を検査する門。
+ *
+ * ⚠ `PUBLISH_TARGETS` のうち `NEVER_PUBLISHED_TARGETS`（`publish-pack-checks.mjs`）に
+ * 載っているもの（初回 publish 前）は、version 検査（下の検査2）だけ対象外にする——
+ * `0.0.0` のままで正しいため（ADR 0070。詳細は `NEVER_PUBLISHED_TARGETS` の doc コメント）。
  *
  * **なぜ tarball の中身を見るか（作業ツリーの package.json を見るだけでは足りない理由）**
  *
@@ -54,6 +57,7 @@ import {
   findPrivateViolations,
   findExactPinnedDependencyViolations,
   EXACT_PINNED_DEPENDENCY_EXEMPTIONS,
+  NEVER_PUBLISHED_TARGETS,
 } from "./publish-pack-checks.mjs";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -117,7 +121,7 @@ console.log(
     "",
     "  検査項目:",
     "    1. workspace: プロトコルが依存に残っていないこと",
-    `    2. version が 0.0.0 でなく、${PUBLISH_TARGETS.length}パッケージとも同じ版であること`,
+    `    2. version が 0.0.0 でなく、NEVER_PUBLISHED_TARGETS を除く対象が同じ版であること`,
     "    3. main / types / bin / exports の指すファイルが tarball 内に実在すること",
     "    4. README.md が tarball に入っていること",
     '    5. publishConfig.access が "public" であること',
@@ -205,12 +209,23 @@ try {
     }
 
     // 2. version
-    const versionViolations = findVersionViolations(manifest);
-    for (const v of versionViolations) {
-      violations.push(`[${target.name}] ${v}`);
-    }
-    if (versionViolations.length === 0) {
-      versions.push({ name: target.name, version: manifest.version });
+    // ⚠ NEVER_PUBLISHED_TARGETS に載っているパッケージ（初回 publish 前）は、この検査を
+    // そのパッケージにだけ適用しない――0.0.0 のままで正しい（publish-pack-checks.mjs の
+    // NEVER_PUBLISHED_TARGETS の doc コメント参照）。version 揃い検査の対象数からも外す
+    // （下の targetCount 参照）。
+    if (NEVER_PUBLISHED_TARGETS.has(target.name)) {
+      console.log(
+        `  [${target.name}] version 検査を対象外にしました（初回 publish 前。0.0.0 のまま。` +
+          "NEVER_PUBLISHED_TARGETS）",
+      );
+    } else {
+      const versionViolations = findVersionViolations(manifest);
+      for (const v of versionViolations) {
+        violations.push(`[${target.name}] ${v}`);
+      }
+      if (versionViolations.length === 0) {
+        versions.push({ name: target.name, version: manifest.version });
+      }
     }
 
     // 3. main / types / bin / exports の実在
@@ -259,8 +274,12 @@ try {
     }
   }
 
-  // publish 対象すべてで同じ版であること（version 自体が有効だったものだけを比較する）
-  const versionSkewViolations = findVersionSkewViolations(versions, PUBLISH_TARGETS.length);
+  // publish 対象すべてで同じ版であること（version 自体が有効だったものだけを比較する）。
+  // NEVER_PUBLISHED_TARGETS は対象数からも外す――揃っているかどうかを問う対象ではない。
+  const publishedTargetCount = PUBLISH_TARGETS.filter(
+    (t) => !NEVER_PUBLISHED_TARGETS.has(t.name),
+  ).length;
+  const versionSkewViolations = findVersionSkewViolations(versions, publishedTargetCount);
   violations.push(...versionSkewViolations);
 } finally {
   for (const dir of cleanupDirs) {

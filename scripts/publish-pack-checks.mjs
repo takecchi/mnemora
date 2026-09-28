@@ -77,6 +77,11 @@ export function findExactPinnedDependencyViolations(manifest, exemptDependencyNa
  * `docs/autonomy.md` §2「ついでに直さない」に従い、対象を zod だけに絞ってここへ
  * 明示的に退避する。将来これらを緩めるときは、ここから名前を消すだけでよい。
  *
+ * ⚠ **`@mnemora/bullmq` の `bullmq` だけは例外——「未確認のまま残した負債」ではなく、
+ * 積極的に固定を選んだ理由が在る**（下の `"@mnemora/bullmq"` のエントリのコメント参照。
+ * ADR 0325「引き受けた負債」4）。緩めてよいかどうかを未確認のまま置いているわけではない
+ * ので、この一覧全体の「問題ない、ではなく未確認」という説明は `bullmq` には当たらない。
+ *
  * **唯一の定義であること**: `scripts/check-publish-pack.mjs`（実行時に使う側）と
  * `scripts/__tests__/check-publish-pack.test.mjs`（歯として検査する側）の両方がここから
  * import する。かつて2箇所に写しを置いて後からずれた例（`PUBLISH_TARGETS`。ADR 0066）を
@@ -87,7 +92,39 @@ export const EXACT_PINNED_DEPENDENCY_EXEMPTIONS = {
   "@mnemora/anthropic": ["@anthropic-ai/sdk"],
   "@mnemora/postgres": ["@types/pg", "drizzle-orm", "pg"],
   "@mnemora/local-embedding": ["@huggingface/transformers"],
+  // `bullmq` だけは他と理由が違う――`save-exact=true` の機械的な結果という消極的な理由
+  // ではなく、ADR 0325「引き受けた負債」4 が名指しした積極的な理由がある: BullMQ 6.x の
+  // Job Scheduler API（`queue.upsertJobScheduler`）は 5.x 以前には無く、メジャー版を
+  // 上げると型もビルドも壊れうる。範囲指定（`^6.3.8`）に緩めると、この repo が確かめて
+  // いない次のメジャー版が `pnpm install` で黙って入りうる――ここでは緩めない。
+  // `ioredis`（同じ package.json のもう一方の実行時依存）は対象外のまま残した
+  // （`^6.0.0` に緩め済み。bullmq 自身の peerDependencies が `ioredis: ">=5.0.0"` を
+  // 要求するだけで、メジャー版固有の API には依存していない）。
+  "@mnemora/bullmq": ["bullmq"],
 };
+
+/**
+ * NEVER_PUBLISHED_TARGETS(Issue #205 追加、初出は `@mnemora/bullmq`)。
+ *
+ * publish 対象(`PUBLISH_TARGETS`)に加えたが、**registry へ一度も publish されたことが
+ * 無い**パッケージの名前の集合。findVersionViolations / findVersionSkewViolations が前提に
+ * している「version は tag の値を受け取った実績があるはずだ」という仮定(ADR 0070)は、
+ * 初回 publish 前のパッケージには当てはまらない――version は `0.0.0` のまま置くのが正しい
+ * (`scripts/apply-release-version.mjs` が実際の Release で書き込むまで、手で版を振らない。
+ * ADR 0325 決定2 / docs/decisions/README.md の追記参照)。
+ *
+ * **ここに載っている間は**:
+ * - 単一パッケージの version 検査(`findVersionViolations`)を、そのパッケージにだけ適用しない
+ *   (`0.0.0` のままで違反にしない)。
+ * - 全パッケージ版揃い検査(`findVersionSkewViolations`)の対象数からも外す――
+ *   揃っているかどうかを問う対象そのものではないため。
+ *
+ * **消すとき**: そのパッケージが実際に一度でも publish されたら(オーナーが段0の
+ * bootstrap を実行したら)、この一覧から名前を消すこと――消した瞬間、他の publish 対象と
+ * 同じ検査を受けるようになる(`EXACT_PINNED_DEPENDENCY_EXEMPTIONS` と同じ「消せば検査が
+ * 始まる」設計)。
+ */
+export const NEVER_PUBLISHED_TARGETS = new Set(["@mnemora/bullmq"]);
 
 /**
  * `main` / `types` / `bin` / `exports` が指すファイルのうち、tarball 内に実在しないものを集める。

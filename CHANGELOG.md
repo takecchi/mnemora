@@ -62,7 +62,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 **`v1.0.1` 以前から直接この節までの範囲へ上げる場合は、下の `## [1.0.2]`・`## [1.0.1]` 節の migrate 案内も
 合わせて読むこと**（`v1.0.1` からは `0022`・`0023` の2本、`v1.0.0` からは `0019`〜`0023` の5本が要る）。
 
-**保留と非破壊の数え方**は、下の `## [1.0.2]` 節の前書き（追記とその訂正）の基準をそのまま使う。公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるものは、計上を保留する（オーナーへの問い `3f3411c5`、未回答）。例外を投げなくなった修正・例外を投げず結果だけが変わる修正・本物の adapter が一度も意図どおりに動いたことの無い入力を早めに拒む修正は、非破壊（⚠ 付き）と数える。**この判定はクローン miku の判断であり、オーナーの判断ではない**（覆りうる）。
+**保留と非破壊の数え方**は、下の `## [1.0.2]` 節の前書き（追記とその訂正）の基準をそのまま使う。公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるものは、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。⚠ 2026-09-28 更新: 回答が出るまでは「計上を保留する（オーナーへの問い `3f3411c5`、未回答）」と書いていた。下の追記4〜18 の「保留」は、書いた時点の記録として書き換えていない。下の追記19 を参照）。例外を投げなくなった修正・例外を投げず結果だけが変わる修正・本物の adapter が一度も意図どおりに動いたことの無い入力を早めに拒む修正は、非破壊（⚠ 付き）と数える。**この後者の判定はクローン miku の判断であり、オーナーの判断ではない**（覆りうる）。
 
 **PR #1187 の数え方**: `@mnemora/postgres` の語彙チャンネルが語の途中の `"` を空白として扱うようにした件も非破壊の Fixed と数える——例外を投げず、一致だけが変わる（**クローン miku の判断であり、オーナーの判断ではない**）。（⚠ 2026-09-27: PR #1187 はこの一文を、当時 `[1.1.0]` の前書きに在った追記2 の末尾に足していた。追記2 は `v1.0.1` の範囲の記録として `## [1.0.2]` 節へ移したので、`v1.0.2` より後の PR #1187 の一文だけをここへ移した）
 
@@ -116,6 +116,49 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 **⚠ 2026-09-28 追記18（18回目の棚卸し。`f5ad59f` まで広げた）**: 日付は UTC である（追記17 の「2026-09-29」は日本時間の日付で、UTC では 2026-09-28）。`86b42b1`…`f5ad59f` に `main` へ入った PR を first-parent で全部当てた（PR #1367・#1369・#1368・#1371。17回目の棚卸しの PR #1369 自身も範囲に入るが、`CHANGELOG.md` と docs だけである）。出荷される6パッケージの利用者に見える振る舞いの変更は無く、この節に足した項目も、棚卸しで直した項目も無い。分類は変えていない。
 この節は docs・README・テスト・scripts だけの変更を項目にしない（追記5〜17と同じ慣例）。出荷の `src` を触ったのは PR #1367 の `packages/core/src/event.ts`・`interfaces/event-store.ts`・`interfaces/memory-store.ts` だけで、どれも変更の前後を TypeScript の `transpileModule`（`removeComments: true`）で JS に落として比べ、同じであることを確かめた（差分が TSDoc だけ）。同じ比べ方で、コードの変わった PR #1366 の `packages/postgres/src/memory-store.ts` は差が出ることを確かめた（正の対照）。PR #1368・#1371 はテストとテストの道具（`packages/core/src/__tests__/runtime-fakes.ts` の core の Fake）だけで、`src/__tests__` は出荷物に入らない（`runtime-fakes.ts` は差が出るが、出荷されない）。公開 API の型の差分は無い（`git diff 86b42b1..f5ad59f -- scripts/__snapshots__/public-api/` が空）。マイグレーションは増えておらず、出荷されるパッケージの `package.json` と `pnpm-lock.yaml` にも差分は無い。
 ⟹ **この節の範囲（`v1.0.2`…`f5ad59f`）で、確定した破壊的変更は無い（上の保留を除く）。**
+**⚠ 2026-09-28 追記19（保留の解消。範囲は広げていない）**: オーナーの回答（ask_human `3f3411c5`）で、公開の fixture（`@mnemora/testkit/fixtures`）が、これまで受け入れていた不正な入力に新しく例外を投げる変更は、破壊的変更として扱わないと決まった。上の追記4〜18 の ⟹ の「上の保留」は、この節ではどれもこの種類の変更を指していた——`### Fixed` の PR #1135・#1157・#1165・#1170・#1183・#1190・#1243・#1250・#1252・#1265・#1270・#1280 の12項目である（前書きの「保留と非破壊の数え方」）。この12項目の ⚠ を「破壊的変更として扱わない」に書き換え、`### Fixed` に置いたまま確定させた。分類の見出しは変えていない。PR #1171 の `setEventRetention` は、もともと保留に入れず非破壊と数えていたので変わらない。`## [1.0.2]`・`## [1.0.1]` 節が保留と書いている PR #811・#813・#815・#923・#928 などにもこの回答は当たるが、出荷済みの節なので書き換えていない（`docs/migration-v1.md` の数え方の規律に追記した）。追記4〜18 の本文と ⟹ の行も、書いた時点の記録として書き換えていない。
+⟹ **この節の範囲（`v1.0.2`…`f5ad59f`）で、破壊的変更は無い。計上を保留しているものも無い。**
+
+**2026-09-29 追記**: 上の18回の棚卸しの範囲（`f5ad59f` まで）の**外**——この節にまだ棚卸しで
+取り込まれていない、作業中の1件——として、下の `### Breaking` に破壊的変更が1件在る
+（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）。**この節の他の項目と違い、
+棚卸しの「PR を全部当てた」手順を経て足したものではない**——変更を作った本人が、着地に
+先立って自分でこの節に足した項目である。次回以降の棚卸しは、この項目が既に在ることを
+前提に PR 番号の有無だけ確認すればよい。
+
+### Breaking
+
+- **`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が、SDK の
+  クラスから切り出した型から、SDK のクラスを名指ししない自前の構造型へ変わった**
+  （[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、
+  [PR #1377](https://github.com/takecchi/mnemora/pull/1377)、
+  [ADR 0350](./docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。
+  オーナーの回答（ask_human `f259eeb8`、逐語「型を SDK のクラスから切り離すってのは
+  だめですか？」）に基づく。
+
+  | パッケージ | 欄 | 以前の型 | 新しい型 |
+  |---|---|---|---|
+  | `@mnemora/openai` | `OpenAILLMProviderOptions.client` | `Pick<OpenAI, "chat">` | `OpenAIChatClient` |
+  | `@mnemora/openai` | `OpenAIEmbeddingProviderOptions.client` | `Pick<OpenAI, "embeddings">` | `OpenAIEmbeddingsClient` |
+  | `@mnemora/anthropic` | `AnthropicLLMProviderOptions.client` | `Pick<Anthropic, "messages">` | `AnthropicMessagesClient` |
+
+  **誰が影響を受けるか**:
+  - 🔴 **`Pick<OpenAI, "chat">`・`Pick<OpenAI, "embeddings">`・`Pick<Anthropic, "messages">`
+    を、自分のコードの型注釈にそのまま書いている利用者**（例: 独自の偽 client の型を
+    宣言している場合）は、新しい型名（`OpenAIChatClient`・`OpenAIEmbeddingsClient`・
+    `AnthropicMessagesClient`。どちらも `@mnemora/openai`/`@mnemora/anthropic` から
+    export される）へ書き換える必要がある。
+  - ⭕ **SDK の client インスタンス（`new OpenAI(...)`・`new Anthropic(...)`）をそのまま
+    `client` に渡しているだけの利用者は、型検査・実行時のどちらも影響を受けない**——
+    構造的に代入できる。**むしろ、以前は `@mnemora/openai`/`@mnemora/anthropic` が
+    固定している版と違う版の SDK を入れると型検査が壊れていたのが、この変更で
+    通るようになる**（今まで型で落ちていた組み合わせが緑になる。既存の README の
+    回避策「同じ版を `-E` で入れる」はもう要らない——`packages/openai/README.md`・
+    `packages/anthropic/README.md` から該当の案内を削除し、訂正を追記した）。
+  - ⭕ `client` を渡さない利用者（`apiKey` だけ、または環境変数）は影響を受けない。
+
+  `openai`・`@anthropic-ai/sdk` は引き続き `dependencies` に版を固定して持つ
+  （`peerDependencies` にはしない。理由は ADR 0350「決定」3）。
 
 ### Added
 
@@ -127,6 +170,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - `TenantSettingsStore` に `hasSubjectActivityCounters?`/`getSubjectActivitySeqs?` を、`VectorFilter`/`RecallScope` に `decayFloorSeqUsesSubjectCounters?` を、`ArchiveDecayedOptions` に `usesSubjectActivityCounters?` を、それぞれ省略可能な欄として足した——このテナントが一度も `"subject"` を使っていなければ、これらは常に既定へ倒れ、`@mnemora/postgres` の段1 SQL・`aggregateScope`・`archiveDecayed` は今日どおり単一パラメータの比較のままになる（プラン族を変えない）。
   - **`NewRecallRecord.advanceActivityClock` の型を `boolean` から `boolean | { scope: "subject"; subjectId: string }` に広げた。** `boolean` はこの union にそのまま含まれるため、既存の `true`/`false`/省略の呼び出しは1行も直さずに通る。
   - **新しい migration が1本増える**（`0024_tenant_subject_activity.sql`、`tenant_subject_activity` テーブルを新設するだけ）——利用者は `mnemora-postgres-migrate`（または `runMigrations`）を打つこと。
+- **`@mnemora/bullmq` を npm の公開対象に加えた**（[Issue #205](https://github.com/takecchi/mnemora/issues/205)、[ADR 0325](./docs/decisions/0325-bullmq-tick-driver.md) 追記、[ADR 0351](./docs/decisions/0351-bullmq-publish-prep.md)）——`private: true` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾に加えた。⚠ **初回 publish（段0のオーナー手元 bootstrap）はまだ済んでいない**——`npm install @mnemora/bullmq` はまだ 404 になる（手順は `docs/release-v1.md` §1.7）。version は `0.0.0` のまま（ADR 0070。version bump・publish・Release はオーナーの手）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
@@ -135,6 +179,15 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - やり直さないときは LLM を呼ばず、何も書かない。**`reextract` が `extraction: "skipped"` と `atomicity: "not_attempted"` を返しうるようになった**（`memoryIds: []`、`skipped` には退けた記憶ごとに `status_not_active`）。以前の TSDoc は「`reextract` の `extraction` は `'skipped'` を取らない」と約束していた。
   - `ExtractionOutcome`・`WriteAtomicity`・`ReextractSkip` の型は変わらない（`'skipped'` と `'not_attempted'` は元から在る値）。⟹ 型で exhaustive に分岐している呼び手には影響しない。ただし「`reextract` からは `'skipped'` が来ない」と仮定したコードは見直しが要る。
   ⭕ 非破壊と数える（公開の宣言は変わらず、例外も増えない。作られる記憶が減る側の変化で、「忘れさせた事実が戻らない」という上位の約束を守る側にある。**クローン miku の判断であり、オーナーの判断ではない**）。
+- **`@mnemora/testkit/fixtures` は、`EventStore.append` と、イベントを積む `MemoryStore` の口（`updateStatusWithEvent`・`supersedeWithNewMemories`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested` 等）に渡す `actor`・`meta` に、NUL（U+0000）か孤立サロゲート（対をなさない UTF-16 サロゲートコードユニット）を含む文字列（キーも値も、入れ子の中も）が在ると、状態を書き換える前に拒むようになった**（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、[PR #1379](https://github.com/takecchi/mnemora/pull/1379)）——以前は書き換えを通し、文字列をそのまま監査ログに残していた。`@mnemora/postgres` は `JSON.stringify(actor)`/`JSON.stringify(meta)` を `::jsonb` に渡す時点で同じ入力を拒んでいた（状態の書き換えとイベントの追記が同じトランザクションにあるので、途中まで書かれたものは残らない）ので、fixture も同じ形（状態を書き換える前に拒み、何も書かない）に揃えた。`Runtime` の口では、`reason`（`meta.reason`/`meta.note` に入る）と `actor.id` に呼び出し側の文字列がそのまま入るため、そこに NUL・孤立サロゲートがあると当たる——`forget` は `{ kind: "failed" }` を返し、`markContested` は例外を投げる（どちらも `@mnemora/postgres` と同じ外へ見える形）。対になったサロゲートペア（絵文字など）・結合文字・U+FFFD・空文字などは、Postgres が受け入れる文字列のまま引き続き通る。
+  ⭕ 非破壊と数える（根拠: オーナーの回答、ask_human `3f3411c5`、2026-09-28、回答「(あ) 破壊的とは扱わない」）。
+- **抽出（`subjectCandidates` を渡す呼び出しに限る）・`consolidate`・`reflect` の system プロンプトに、出力言語と話者取り違えの指示を足した**（[Issue #1370](https://github.com/takecchi/mnemora/issues/1370)、[PR #1374](https://github.com/takecchi/mnemora/pull/1374)、オーナーの求めによる対応）——観測が日本語なのに記憶の本文・要旨の一部が英語になる、話者自身の発言が別の人物（利用者など）の発言・意見として記録される、の2件への対応。
+  - **適用条件**: `buildExtractionPrompt` の2文（言語・話者）は、`subjectCandidates` を渡した呼び出しにだけ足す（`extractionContext` を同時に渡す場合も含む）。`extractionContext` だけを渡す呼び出し・どちらも渡さない呼び出し（デフォルト経路）には**足さない**——`EXTRACTION_PROMPT_SYSTEM_BASE` 自体にも `extractionContext` 分岐にも1バイトも触れていない。理由: どちらかの文面を変えると、記録済みカセット（`examples/chat/cassettes/`、ADR 0051 の `llmCassetteKey`）と Issue #704 の評価用録音の鍵が動き、録り直しが要る。`consolidate`・`reflect` の system プロンプトには、この条件を付けず無条件で言語の一文を足す（録音の鍵に使われていないため）。
+  - **デフォルト経路（`subjectCandidates` を渡さない抽出呼び出し）へ同じ指示を広げるかは未決——オーナーの判断待ち**（[ADR 0348](./docs/decisions/0348-extraction-language-and-speaker-instruction-gated-on-subject-candidates.md)）。広げれば上の録音がすべて動く。
+  - 抽出（条件に当たる呼び出し）・`consolidate`・`reflect` の結果（LLM に送る文面と、それに応じた出力）が変わりうる。**`RuntimeConfig.promptVersion` を上げることを勧める**（TSDoc の「抽出プロンプトを変えたら上げる」どおり）。
+  - **実測**（90件の合成日本語対話・`subjectCandidates: ["user","character"]`・`extractionContext` 無し・`gpt-5.4-mini` 実 API、before/after 各3 run、90×2×3=540 回の抽出。詳細・判定方法は ADR 0348）: この条件下で、話者取り違え（構造的信号——候補の `subjectId` が実際の話者と逆）は character 発話由来のうち **46/176（26.1%、Wilson 95% CI 20.2–33.1%）→ 0/168（CI 上限 2.2%）**——CI が重ならず明確な差。**英語混入（content/digest のラテン文字比率ルールで判定）は、件数が少なく（before 1/318・3/316）、before/after の 95% CI が重なるため、差は主張できない。**
+  ⚠ **上の構造的信号は `subjectCandidates` を渡す呼び出しに限った指標であり（`subjectId` はそのときしか返らない）、デフォルト経路の取り違え発生率・改善効果については何も示していない。**
+  ⭕ 非破壊と数える（公開の宣言・型は変わらず、例外も増えない。変わるのは LLM に送る system の文面と、それに応じて LLM が返す本文・要旨だけである）。
 
 ### Fixed
 
@@ -160,11 +213,11 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`TenantSettingsStore.setEventRetention` は、型の外の `kind`（`{ kind: "bogus" }` や綴りの誤り `{ kind: "Days", days: 30 }` など）を、例外にせずに保持期間を無期限（`event_retention_days = NULL`）として書いていた**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)）——`@mnemora/postgres` と `@mnemora/testkit/fixtures` の両方で同じ。短くしたつもりの呼び出しが、黙って「消さない」に倒れていた。`kind` が `"unlimited"`・`"days"` のどちらでもなければ、`EVENT_RETENTION_KIND_INVALID_MESSAGE` を含む `Error` を投げ、何も書かない（[PR #1171](https://github.com/takecchi/mnemora/pull/1171)。`assertValidEventRetentionKind`、上の Added。`setDecayClock`・`setTaxonomyMode` が型の外の文字列を実行時に拒むのと同じ形）。
   ⚠ 新しく例外を投げるが、型の外の `kind` は一度も意図どおりに動いたことの無い入力であり、それを本物の adapter が早めに拒むものなので、非破壊と数える（#1080・#1099・#1156 と同じ扱い。**クローン miku の判断であり、オーナーの判断ではない**）。testkit の fixture も新しく投げるが、core の共有の検査で Postgres と同時に変わるので、問い `3f3411c5` の保留には入れず、この項目1つで数える。
 - **`@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore` は、半減期の2つの口で、Postgres の `real`（float4）列が拒む値を受け付けていた**——`setDefaultHalfLifeRecalls` は float4 で 0 に丸まる値（例: `1e-46`）を、fixture だけの口 `setDefaultHalfLifeHours` は float4 で溢れる値（`1e39`・`Number.MAX_VALUE`）と 0 に丸まる値を受け付けて、そのまま返していた（Postgres は `"…" is out of range for type real` や CHECK で拒む）。`createMemory` の `halfLifeHours`（PR #1095）と同じく「`Math.fround(x)` が `Infinity` か 0 になるか」で拒む。非正規数に収まる値（`1e-40`）は受け付ける（[PR #1165](https://github.com/takecchi/mnemora/pull/1165)）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/openai` の `OpenAILLMProvider.completeStructured` は、根が object でないスキーマ（core の `ReflectionLLMResultSchema` のような判別可能ユニオン）を、OpenAI の strict な Structured Outputs が受け付けない形で送っていた**——根が `oneOf` のままで、`openai` SDK 自身の strict 変換（`toStrictJsonSchema`）は `Root schema must have type: 'object'` で拒み、実 API も HTTP 400（`'oneOf' is not permitted`）で拒んだ。⟹ `runtime.reflect()` を OpenAI の provider で呼ぶと、毎回 `llm_failed` になっていた。根が object でないスキーマは1つの欄 `result` を持つ object に包んで送り、返った値をその欄から取り出してから検査する。あわせて `oneOf` を `anyOf` にする（SDK が「strict は `oneOf` を受け付けない」とする。[PR #1147](https://github.com/takecchi/mnemora/pull/1147)）。根が object のスキーマは、送る形も読む形も変わらない（`translateForOpenAIStructuredOutput` の返り値も同じ）。
   ⚠ 例外を新しく投げず、根が object でないスキーマの送る形・読む形だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。偽の `client` で、根が union のスキーマに包まない JSON を返していたテストは、`ZodError` になる。
 - **`InMemoryMemoryStore.listActiveClaimPredicates`（`@mnemora/testkit` の擬似 `MemoryStore`）は、`query.limit` に負数・`NaN`・`Infinity`・非整数・bigint に収まらない値（2^63 以上）を渡されると例外を投げず、`slice(0, limit)` の丸めに従って違う件数を返していた**（[PR #1157](https://github.com/takecchi/mnemora/pull/1157)）（実測: 述語3つで `-1` は2件、`1.5` は1件、`NaN` は0件）——`PostgresMemoryStore.listActiveClaimPredicates` は生 SQL の `LIMIT`（bigint パラメータ）でこれらを拒む。`requeueEmbedJobs`（PR #1058）ほかと同じく、クエリの前に弾く Postgres 側に揃えた（正常系の挙動は変えていない）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`recall()` の `omitted` の `ann_truncated.assumptions` に出る `strength <= 1` の前提の文言が、「型（number）も DB 列（real）も保証していない」のままだった**（[PR #1152](https://github.com/takecchi/mnemora/pull/1152)）——ADR 0078 の後、同梱の実装（Postgres の CHECK 制約、testkit の fixture と core の Fake の書き込み時の検査）は値域 `(0, 1]` を守っている。文言を実態に合わせた（前提であることは変えていない。[ADR 0069](./docs/decisions/0069-ann-truncated-says-nothing-about-loss.md) の追記）。
   ⚠ 返り値の説明の文字列だけが変わる修正であり、非破壊と数える（クローン miku の判断、上の前書き）。
 - **`runtime.consolidate()` / `runtime.reflect()` の `{ seedMemoryId }` 形は、種が forget・purge された記憶でも、その `digest` を検索語にして近傍を集め、近傍どうしを統合・内省していた**（自動 job の `tick()` 経由も同じ。[Issue #1136](https://github.com/takecchi/mnemora/issues/1136)、[PR #1145](https://github.com/takecchi/mnemora/pull/1145)）——利用者が「使わないでほしい」と言った記憶が、束ねる相手を決め続けていた。種が forget・purge された記憶なら近傍を集めず、種1件だけを見て `nothing_to_consolidate`/`no_eligible_sources`（reflect は `nothing_to_reflect`/`no_eligible_basis`）を返す。種が `contested` / `superseded` の場合は今どおり近傍を集める。
@@ -183,7 +236,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/testkit/fixtures` の InMemory 一式は、区切り文字 `:` で繋いだキーを使っていたため、`:` を含む値で別の対象と衝突していた**（[PR #1146](https://github.com/takecchi/mnemora/pull/1146)）（上のラベルの項目と同じ形の残り）——`InMemoryMemoryStore` の抽出の冪等キー（`${tenantId}:${sourceObservationId}:${extractorVersion}:${contentHash}`）では、同じ Observation で版 `v:x`・hash `h` と版 `v`・hash `x:h` が同じキーになり、2件目の `createMemory` が1件目の Memory を返した。`:` を含むテナント（例: `t:<Observation の id>`）の `createMemory` が、**別テナントの Memory を返す**組み合わせもあった。`InMemoryVectorStore` は空間を `${provider}:${model}:${dimensions}:` の前方一致で絞っていたため、空間 `{p, m, 3}` の `search` が空間 `{p, m:3, 3}` のベクトルを返した。`tenantId`・`extractorVersion`・`contentHash`・空間の `model` は呼び手の値で `:` を含んでよく、`PostgresMemoryStore`・`PostgresVectorStore` は分かれていた（冪等は4列の UNIQUE、空間は別テーブル）。キーを組にして、各欄を完全一致で比べる。
   ⚠ 例外を投げず、公開の fixture の結果だけが変わる修正であり、非破壊と数える（クローン miku の判断。オーナーの判断ではない）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.registerLabel` は、NUL（U+0000）を含む名前を受け入れていた**（[PR #1135](https://github.com/takecchi/mnemora/pull/1135)）——`PostgresMemoryStore.registerLabel` は `labels.name`（`text` 列）が NUL を拒んで例外になる。ラベルの名前は `tags` の要素と同じ語彙で、`tags` の NUL はこの fixture の `createMemory` がすでに拒んでいる（Issue #816）。`registerLabel` も NUL を含む名前で例外を投げ、ラベルを作らない。
-  ⚠ 🔴 公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げる変更なので、計上を保留する（上の前書きの保留と同じ、オーナーへの問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/postgres` の `registerEmbeddingSpace` は、同じテーブル名に潰れる別の埋め込み空間の登録を黙って通し、2つの空間のベクトルが混ざっていた**（[Issue #1151](https://github.com/takecchi/mnemora/issues/1151)、[PR #1156](https://github.com/takecchi/mnemora/pull/1156)）——テーブル名（`embeddingSpaceTableName`）は provider・model を小文字にし英数字以外を `_` にしてから繋ぐので、`{a_b, c}` と `{a, b_c}`、`{openai, text-embedding-3-small}` と `{OpenAI, text_embedding_3_small}`、ASCII 以外の文字だけが違う model 名などは、次元が同じなら同じテーブルになる。テーブル名の導出は変えず、`registerEmbeddingSpace` がテーブルのコメントに空間の組（provider・model・dimensions の元の値）を記録し、別の組が記録されたテーブルへの登録を、何も書かずに `name` が `"EmbeddingSpaceTableConflictError"` の `Error` で拒むようにした（新しい export は無い）。同じ組の再登録はこれまでどおり通る。
   ⚠ 本物のアダプタが「黙ってベクトルが混ざる」入力を早めに拒む変更であり、破壊的とは数えない（Issue #1080 と同じ扱い。クローン miku の判断で、オーナーの判断ではない）。⚠ **射程**: この版より前に作られたテーブルにはコメントが無いので、この版で**最初に登録した組**を記録して通す——既に2つの空間が1つのテーブルを使っていた場合は、先に登録した側が持ち主になり、もう片方の登録が拒まれる——**衝突する2空間を起動のたびに両方登録していたデプロイは、この版から2つ目の登録（`EmbeddingSpaceTableConflictError`）で落ちるようになる。**混ざった行は分けない。利用者が自分で付けたテーブルのコメント（mnemora の形ではないもの）は上書きせず、そのテーブルは見張らない。コメントを書くにはテーブルの所有者の権限が要るが、登録は以前から `CREATE INDEX IF NOT EXISTS` で同じ権限を要していたので、登録できるロールの範囲は変わらない。
 - **`@mnemora/testkit/fixtures` の InMemory 一式は、Memory 以外の値でも内部の実体や呼び手の入力をそのまま持ち回っていた**（Issue #1108 の続き、[PR #1120](https://github.com/takecchi/mnemora/pull/1120)。Memory を返す口は下の項目）——`InMemoryMemoryStore.createObservationWithOutbox` が返した outbox ジョブが後の `claimBatch`・`complete` で遡って書き換わり、受け取った Observation・イベント・ラベル・recall 記録・ベクトル・`claimBatch` のジョブ（入れ子の `payload`・Date を含む）や、`createObservation`・`createRecall`・`EventStore.append`・`VectorStore.upsert`・`reinforce` の `at`・`claimBatch` の `now` に渡した入力を呼び手が後から書き換えると、store の中身まで変わった（`claimBatch` の `now` を書き換えるとリースが切れた扱いになった）。Postgres と同じく、返す時点・書き込む時点の複製でやり取りする。
@@ -232,23 +285,23 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   今までどおり `Date` である。
   ⭕ 非破壊と数える（例外を投げず、公開の fixture の結果だけが変わる。上の前書きの訂正で狭めた基準に当てた。クローン miku の判断であり、オーナーの判断ではない）。
 - **`@mnemora/testkit/fixtures` の `InMemoryEventStore.append` と、イベントを受け取る `InMemoryMemoryStore` の口は、`MemoryEventKind` に無い kind（型を外した呼び出し）のイベントを受け付けて記録していた**（[Issue #1096](https://github.com/takecchi/mnemora/issues/1096)、[PR #1170](https://github.com/takecchi/mnemora/pull/1170)）——`@mnemora/postgres` は CHECK 制約 `memory_events_kind_check` で拒み、1トランザクションで何も書かない。fixture も `Error`（`memory_events.kind must be one of … (got "…")`。イベントの `at` の検査と同じ形）で拒む。対象は `append` と `updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested` で、状態を書き換える前に確かめるので、拒んだときは何も書かない（イベントの `at` の Invalid Date の検査も、同じ位置で先に確かめるようにした。以前はこれらの口で、状態を書き換えた後に拒んでいた）。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` は、`memories` の列挙の列に型の列挙に無い値（型を外した呼び出し）を受け付けて記録していた**（[PR #1183](https://github.com/takecchi/mnemora/pull/1183)）——`@mnemora/postgres` は CHECK 制約（`memories_status_check`・`memories_digest_source_check`・`memories_embedding_status_check`・`memories_provenance_kind_check`）で拒み、何も書かない。fixture も `Error`（`memories.<列> must be one of … (got "…")`。上の `memory_events.kind` の検査と同じ形）で拒む。対象は `createMemory` 系の `status`・`digestSource`・`embeddingStatus`・`provenance.kind` と、`updateStatus`・`updateStatusWithEvent`・`setEmbeddingStatus`・`resolveContestedPair` で、見つからない id・CAS の食い違いの検査の後、状態を書き換える前に確かめる。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` の `createMemory` 系は、冪等の鍵（観測・抽出器の版・contentHash）が同じ既存の行が在るとき、書けない値（列挙に無い値・NUL・Invalid Date・値域の外の数）を確かめずに既存の行を返していた**（[PR #1190](https://github.com/takecchi/mnemora/pull/1190)）——`@mnemora/postgres` は `INSERT ... ON CONFLICT DO NOTHING` が衝突を見る前に値を検査するので、既存の行が在っても拒む。fixture も同じく、既存の行を返さずに拒む（文面は新しい行を作るときの検査と同じ）。対象は `createMemory`・`createMemoryWithOutbox`・`supersedeWithNewMemories` の新しい行。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` の `createObservation`・`createObservationWithOutbox` は、日時の欄（`occurredAt`・`recordedAt`・`validFrom`・`validUntil`）に Invalid Date を受け付けていた**（[PR #1243](https://github.com/takecchi/mnemora/pull/1243)）——新しい行ならそのまま保存し、`externalId` が同じ既存の行が在ればそれを返していた。`@mnemora/postgres` は `timestamptz` への変換で拒む（既存の行が在っても拒む）。fixture も `Error`（`<欄> must be a valid Date (got Invalid Date)`。Memory 側と同じ文面）で拒み、何も書かない。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` は、#1096・#1183 の外側に残っていた Postgres の CHECK 制約と型の変換に当たる入力を受け付けて記録していた**（[PR #1250](https://github.com/takecchi/mnemora/pull/1250)）——`provenance.kind` が `stated`/`inferred` で `sourceObservationId` が無い（`memories_check`）、`decayBaseSeq`・`decayFloorSeq` が整数でない・負・2^63 以上（`memories_decay_seq_non_negative` と `bigint`）、`halfLifeRecalls` が `(0, ∞)` の外・float4 に収まらない（`memories_half_life_recalls_range` と `real`）、`kind: "events_purged"` で `memoryId` が null でないイベント（`memory_events_check`）。fixture も `Error` で拒み、何も書かない。省略（`null`）は検査しない。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` は、参照・冪等の鍵が空文字 `""` のとき、それを「無い」として扱っていた**（[PR #1252](https://github.com/takecchi/mnemora/pull/1252)）——`createMemory` 系の `sourceObservationId`・`supersededById`・`contestedWithId` が `""` なら検査せずにそのまま保存し、`createObservation` 系の `externalId` が `""` なら毎回新しい行を作っていた。`@mnemora/postgres` は `null` だけを「無い」とする（空文字の参照は uuid として読めずに拒み、空文字の `externalId` は一意制約の鍵になる）。fixture も同じく、空文字の参照は参照先が無いとして `Error`（`… not found: `）で拒み、空文字の `externalId` の2回目は既存の行を返す。
-  ⚠ **破壊的変更として扱うかは保留**（空文字の参照で公開の fixture が新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。空文字の `externalId` の件は、例外を投げず結果だけが変わるので、それだけなら非破壊と数える基準に当たる（上の前書きの訂正の基準）。
+  ⚠ 空文字の参照で公開の fixture が新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。空文字の `externalId` の件は、例外を投げず結果だけが変わるので、非破壊と数える基準に当たる（上の前書きの訂正の基準）。
 - **`@mnemora/testkit/fixtures` の読みの口は、条件の Invalid Date と整数でない通し番号を受け付けていた**（[PR #1265](https://github.com/takecchi/mnemora/pull/1265)）——`InMemoryMemoryStore` の `purgeExpiredEvents`（`olderThan`）・`archiveDecayed`（`now`・`nowSeq`）・`aggregateScope`（日時の条件・`decayFloorSeqAfter`）・`findActiveByClaimKey`（`validFrom`・`validUntil`）、`InMemoryEventStore.list`（`since`・`until`）、`InMemoryVectorStore.search`・`InMemoryLexicalStore.search`（filter の日時・`decayFloorSeqAfter`）。`@mnemora/postgres` はクエリの時点で `timestamptz`・`bigint` への変換に失敗して拒む。fixture も `Error`（`<口>: <欄> must be a valid Date` / `must be an integer`）で拒む。省略は検査しない。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryTenantSettingsStore.setEventRetention` は、`days` が Postgres の `integer`（int4）に収まらない値（2^31 以上）も保存していた**（[PR #1270](https://github.com/takecchi/mnemora/pull/1270)）——`@mnemora/postgres` は `tenant_settings.event_retention_days` に書けずに拒む。fixture も `Error`（`setEventRetention: days does not fit in a Postgres "integer" (int4) column`）で拒み、前の設定を変えない。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore.createRecall` と `InMemoryOutboxStore.claimBatch` は、Postgres が行を書けずに拒む値も保存していた**（[PR #1280](https://github.com/takecchi/mnemora/pull/1280)）——`createRecall` の `subjectId`（`text`）と `query`・`budget`・`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories`（`jsonb`）に NUL（U+0000）を含む値、`budget` 以外の欄が JSON にならない値（`query: undefined` など。`NOT NULL` の列）、`claimBatch` の `claimedBy`（`text`）に NUL を含む値。fixture も `Error` で拒み、記録・活動時計・claim のどれも進めない。
-  ⚠ **破壊的変更として扱うかは保留**（公開の fixture が不正な入力に新しく例外を投げる件。判断待ちの問いは上の前書きの保留の注記を参照、問い `3f3411c5` の射程）。
+  ⚠ 公開の fixture が不正な入力に新しく例外を投げるが、**破壊的変更として扱わない**（オーナーの回答（ask_human `3f3411c5`）。上の前書きの「保留と非破壊の数え方」を参照）。
 - **`MemoryStore.reinforce`（と `reinforceMany`・`recordUsageAndReinforce`）は、未強化の記憶に作成時刻（`recordedAt`）より前の `at` を渡すと、減衰の起点を作成時刻より前へ戻していた**（[Issue #1093](https://github.com/takecchi/mnemora/issues/1093)、[PR #1173](https://github.com/takecchi/mnemora/pull/1173)）——`lastReinforcedAt` が `null` なら `at` によらず書いていたため、`lastReinforcedAt` が作成時刻より前になり、`decayFloorAt` が早まって忘却ゲートから早く消えた。活動時計の `decayBaseSeq`/`decayFloorSeq` も進んでいた。`@mnemora/postgres`・`@mnemora/testkit/fixtures` とも同じだった。規則を1つにした: **`at` が起点（`lastReinforcedAt ?? recordedAt`）より新しいときだけ書き、そうでなければ活動時計の欄も含めて何も書かない**（強化済みの記憶に古い `at` を渡したときの既存の規則と同じ）。作成時刻ちょうどの `at` も、既存の `lastReinforcedAt` の比較と同じく書かない。
   ⚠ 約束の見出し（`MemoryStore.reinforce` の TSDoc と [ADR 0048](./docs/decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)「減衰の起点を巻き戻さない」）に振る舞いを合わせた修正であり、例外を新しく投げないので、非破壊と数える（**クローン miku の判断であり、オーナーの判断ではない**）。⚠ **射程**: 活動時計のテナントで、`recordedAt` を書いた時計が runtime の時計より進んでいる使用報告は、この版から強化にならない（壁時計・活動時計のどちらでも）。作成と同じミリ秒の中の強化（固定の時計で、作成と使用報告・`restoreArchived` を同じ時刻に打つ形など）も書かれなくなる。既に作成時刻より前の起点を持っている記憶は変えない。
 - **`@mnemora/testkit/fixtures` の `InMemoryVectorStore` は、ベクトルを丸めずに（float64 のまま）比べていた**（[PR #1273](https://github.com/takecchi/mnemora/pull/1273)）——`@mnemora/postgres`（pgvector の `vector` 型）は成分を float4 で持つので、クエリとの距離の差が float4 の桁より小さい2件は、Postgres では同点になって `recorded_at` の新しい順で並び、fixture では距離の近い順に並んでいた（`limit` で切ったときに返る集合も割れた）。いまは fixture も、保存するベクトルとクエリを `Math.fround` で float4 に丸めてから比べ、何が同点になるかが Postgres と同じになる。`VectorHit.distance` と `getVectors` が返す `VectorEntry.vector` の値の下の桁が変わる（距離の値そのものは、pgvector が float4 で積算するぶん、なお Postgres と揃わない）。
@@ -278,6 +331,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`Runtime.reflect()` は、LLM が `digest: ""`（空文字）を返すと、TSDoc が約束する機械的な切り出しへのフォールバックをせず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #1354](https://github.com/takecchi/mnemora/pull/1354)）——`ReflectionLLMResultSchema` の `digest` が空文字を拒んでいた。抽出・`consolidate` と同じく空文字を受け付け、`resolveDigest` で `digestSource: "fallback"` の要旨にする。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 - **`Runtime.reflect()` は、LLM の `tags` に空文字の要素が1つでもあると、その tag だけを落とさず、応答ごと拒んで `outcome: "llm_failed"` にしていた**（[PR #1354](https://github.com/takecchi/mnemora/pull/1354)）——`ReflectionLLMResultSchema` の `tags` の要素が空文字を拒んでいた。抽出・`consolidate` と同じく空文字の要素を受け付け、`dropBlankTags` で落とす（空白だけの要素はもともと落としていた）。公開の `ReflectionLLMResultSchema` を直接使う呼び出しでも、空文字の `digest`・`tags` の要素を含む応答を受け付けるようになる。⭕ 非破壊（例外・`llm_failed` になる応答が減る）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/postgres` の `restoreSupersededBy()` は、`event.at` が Invalid Date だと、戻す対象が無くても例外を投げていた**（[PR #1366](https://github.com/takecchi/mnemora/pull/1366)、[Issue #1229](https://github.com/takecchi/mnemora/issues/1229)）——対象が無ければ testkit の fixture と同じく `{ restored: [] }` を返す。対象が在るときは今どおり例外で、1件も戻さない（例外の種類も変えていない）。`Runtime.restoreSuperseded()` は時計の値を渡すので、踏むのは store を直接呼ぶ側だけである。⭕ 非破壊（例外を投げる入力が減る）。クローン miku の判断であり、オーナーの判断ではない。
+- **`Runtime.consolidate()` は、いまの時点で有効期間（`validFrom`/`validUntil`）の外にある `active` な記憶も統合元にしていた。統合先は有効期間を持たないので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に戻っていた**（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）——`{ memoryIds }`、`{ seedMemoryId }` の種、`includeOutsideValidity: true` を渡した `{ query }` で起きていた。有効期間の外にある記憶は統合元にせず、動かさず、LLM にも渡さない。`sources` では新しい `kind` の `"expired"`（`validUntil` を運ぶ）・`"not_yet_valid"`（`validFrom` を運ぶ）で名指しする。判定は `recall()` の期間のゲートと同じ（[ADR 0089](./docs/decisions/0089-runtime-consolidate-shape.md) の 2026-09-29 追記）。統合先の有効期間は今までどおり持たない。⚠ 非破壊と数える（公開の union `ConsolidateSourceOutcome` に値を2つ足した——網羅的に分岐している呼び出し側は扱いを足す必要があるが、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、[`docs/migration-v1.md`](./docs/migration-v1.md) の「数え方の規律への追記（2026-09-28）」）。例外を投げる入力は変わらない。期限切れ・未到来の記憶を含めて呼ぶと結果が変わり、統合されずに `nothing_to_consolidate` で返ることもある）。`reflect()` の材料の選び方は変えていない。クローン miku の判断であり、オーナーの判断ではない。
 
 ---
 
