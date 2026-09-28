@@ -109,7 +109,15 @@ export interface MemoryEvent {
   id: EventId;
   /** イベントが属するテナント。 */
   tenantId: string;
-  /** `kind = 'events_purged'` の場合のみ null。 */
+  /**
+   * 対象の Memory の id。**`kind = 'events_purged'` のときは必ず `null`**（{@link MemoryEventSchema} の refine と、
+   * `@mnemora/postgres`・testkit の fixture が拒む。例外の種類は adapter で違う）。
+   *
+   * ⚠ 2026-09-28 追記（今の振る舞い）: **ほかの `kind` でも `null` は拒まない。**`EventStore.append` などに
+   * `{ kind: "created", memoryId: null }` を渡すと、Postgres も fixture もそのまま書いて返す（`MemoryEventSchema` も
+   * 通る）。同梱のコードが `null` で書くのは、store の `purgeExpiredEvents` が積む `events_purged` だけである
+   * ——`Runtime` が書くイベントは、どれも対象の Memory の id を持つ（`packages/core/src` を grep して確かめた）。
+   */
   memoryId: MemoryId | null;
   /** 何が起きたか（{@link MemoryEventKind}）。 */
   kind: MemoryEventKind;

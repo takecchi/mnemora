@@ -25,6 +25,21 @@ export interface EventStore {
    * ⚠ **`event.meta`・`event.actor` の値の中身は検査しない。**JSON で往復しない値と、NUL・孤立サロゲートを
    * 含む文字列の扱いは adapter によって違う——{@link MemoryEvent.meta} の doc の表を参照
    * （[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）。
+   *
+   * ⚠ 2026-09-28 追記（今の振る舞い。`@mnemora/postgres` と testkit の fixture へ同じ入力を当てて確かめた）:
+   * **`event` の形もほとんど検査しない。**
+   * - 列挙に無い `actor.type`、`actor: null`、オブジェクトでない `meta`（`null`・配列・文字列）、負の `sizeBeforeBytes` も、
+   *   そのまま書いて返す。**返った `MemoryEvent` は `MemoryEventSchema` を通らないことがある。**
+   * - 整数でない `sizeBeforeBytes`（例: `1.5`）は、**`@mnemora/postgres` だけが**例外を投げる（列が整数）。fixture は受け付けて返す。
+   * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
+   *   `ctx.tenantId`）。
+   * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・
+   *   存在しない（または形式の壊れた）`memoryId` である（例外の種類は adapter で違う）。
+   *
+   * `MemoryStore` の `event` を受け取る口（`updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・
+   * `markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）も、`event` について同じである
+   * ——`updateStatusWithEvent` は同じ入力を当てて確かめた。ほかの口は、fixture が同じ検査（`assertStorableMemoryEvent`）を通し、
+   * Postgres が同じ列へ書くことをコードで読んだ（実測はしていない）。
    */
   append(ctx: Ctx, event: NewMemoryEvent): Promise<MemoryEvent>;
   /**
