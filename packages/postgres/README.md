@@ -98,8 +98,11 @@ DATABASE_URL=postgresql://user:pass@localhost:5432/mydb npx mnemora-postgres-mig
   ロックの接続だけが切れると適用がロックの無いまま続き、別の実行と重なりえた）。打ち直せば、そのファイルから続きを当てる。
   `src/__tests__/migrate-connection-loss.test.ts` が縛っている。
 - 既定（`--extension-mode create`）で、拡張を作る権限の無いロールで流すと、`migration 0001_init.sql failed: permission denied to
-  create extension "vector"` で終わる（どうすればよいかは文言に出ない。上の「接続先には次の3拡張が要る」の項目のとおり、DBA 側で作ってから
-  `--extension-mode verify` で流す。#1212 に文言の件も書いた）。
+  create extension "vector"` で始まる文言で終わる。その次の行に、どうすればよいか（上の「接続先には次の3拡張が要る」の項目のとおり、
+  DBA 側で作ってから `--extension-mode verify` で流す）の案内が続く（[Issue #1212](https://github.com/takecchi/mnemora/issues/1212)。
+  1.0.2 までは案内が無かった）。案内が付くのは、`CREATE EXTENSION` が権限不足で失敗したとき（pg のエラーの `code` が `42501`、
+  `routine` が `execute_extension_script`）だけで、文言の先頭と例外の種類は変わらない。`src/__tests__/migration-failure-message.test.ts` と
+  `src/__tests__/extension-mode.postgres.test.ts` の測定4が縛っている。
 - `--extension-mode verify` の確認は、ロックを取る前（ほかのプロセスの移行を待つ前）に、起動した時点の
   `pg_extension` を読む。同時に既定の `create` のプロセスが拡張を作っている最中だと、`verify` のほうは
   「必要な拡張が見当たりません」で失敗しうる——拡張ができた後に打ち直せば通る。

@@ -254,6 +254,15 @@ describe("extensionMode: 'verify'（ADR 0093、本物の PostgreSQL）", () => {
     const createModeErr = await runMigrations(restrictedPool).catch((e: unknown) => e);
     expect(createModeErr).toBeInstanceOf(Error);
     expect(createModeErr).not.toBeInstanceOf(MissingExtensionsError);
+    // Issue #1212: 文言の先頭は変えない（先頭を正規表現で拾う呼び手が居うる）。
+    // どうすればよいか（DBA 側で作ってから verify で流す）は、その後ろに足す。
+    const createModeMessage = (createModeErr as Error).message;
+    expect(createModeMessage).toMatch(
+      /^migration 0001_init\.sql failed: permission denied to create extension "vector"/,
+    );
+    expect(((createModeErr as Error).cause as { code?: unknown }).code).toBe("42501");
+    expect(createModeMessage).toContain('extensionMode: "verify"');
+    expect(createModeMessage).toContain("--extension-mode verify");
     expect(await tableExists(pool, "observations")).toBe(false);
 
     // 4b: 同じロール・同じ状況で verify モードは制御された MissingExtensionsError になる。

@@ -12,6 +12,7 @@ import {
   releaseAdvisoryLock,
   releaseAdvisoryLockOnClient,
 } from "./advisory-lock.js";
+import { describeMigrationFailure } from "./migration-failure-message.js";
 import { resolveCurrentSchema } from "./resolve-current-schema.js";
 import {
   DEFAULT_EXTENSION_SCHEMA,
@@ -784,7 +785,8 @@ export async function runMigrations(
           // 二次エラーは意図的に握り潰す。ROLLBACK が本当に必要な場面
           // ——コネクションが生きている通常の DDL エラー——では今日どおり実行される）。
           await client.query("ROLLBACK").catch(() => {});
-          throw new Error(`migration ${file} failed: ${(err as Error).message}`, { cause: err });
+          // 拡張を作る権限が無いときだけ、文言の後ろに案内が付く（Issue #1212）。先頭は変わらない。
+          throw new Error(describeMigrationFailure(file, err), { cause: err });
         }
       } catch (err) {
         fileFailed = true;
