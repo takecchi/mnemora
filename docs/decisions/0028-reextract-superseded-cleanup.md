@@ -240,3 +240,30 @@ runtime が持つ `extractorVersion` に一致する既存 Memory」だけを取
 反映先: `packages/core/src/runtime.ts` の `Runtime.reextract`・
 `MemoryStore.listBySourceObservation` の doc コメント、`docs/memory-model.md`
 （reextract の説明箇所）、`docs/roadmap.md` §4 技術上のリスク表（該当行）。
+
+## 追記（2026-09-28、[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・[Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、reextract はやり直さない
+
+上の本文と追記は書き換えていない。本文の「`forgotten` は絶対に触らない」は、既存の行を supersede しないことだけを
+決めていた。同じ Observation から新しい記憶を作ってよいかは決めておらず、LLM が言い換えると、退けた事実が印の無い
+新しい `active` な記憶として戻っていた（#1079・#1149 の実測）。これを次のとおり決める。
+
+- **決めたこと:** 同じ Observation（今の `extractorVersion`、上の 2026-09-26 追記と同じ範囲）の記憶に、利用者の意思で
+  退けたものが1件でも在れば、`reextract` は抽出をやり直さない。LLM を呼ばず、何も書かない。observe の再送が
+  forget・purge した記憶について抽出をやり直さない規律（ADR 0124 の追記、#897）と同じである。Observation 全体を
+  やり直さない（同じ Observation の他の `active` な記憶も作り直さない）。
+- **数えるもの:**
+  - `forgotten`（purge を含む）
+  - `contested`（利用者の訂正でできたものも、claimKey の自動検出でできたものも。どちらも「この事実は争われている」
+    状態であり、やり直すと印の無い重複を作るため）
+  - 訂正の解決で負けた `superseded`（その記憶の最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）
+- **数えないもの（今どおりやり直す）:** 機構（`reextract`・`consolidate`）で置き換えた `superseded`、`archived`、
+  理由を読めない `superseded`（`superseded` イベントが無い・保持期間の掃除で消えた）。理由を読めないものを数えない
+  側に倒すのは、やり直せなくなるほうが利用者に見えにくい失敗になるためである。
+- **戻り値:** `extraction: "skipped"`、`atomicity: "not_attempted"`、`memoryIds: []`、`supersededMemoryIds: []`、
+  `skipped` には退けた記憶ごとに `status_not_active`（ADR 0029 の既存の値）。公開の型は変えていない。
+  `ReextractResult` の TSDoc の「`'skipped'` は取らない」という約束は、これに合わせて改めた。
+- 実装と歯: `packages/core/src/runtime.ts`（`Runtime.reextract` の doc）、
+  `packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`（2実装。退けた記憶の4形と、
+  やり直す側の4形）。
+
+（この追記はクローン miku の委譲先が書いた。判断はクローン miku のものであり、オーナーの判断ではない。）

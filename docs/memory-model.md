@@ -239,6 +239,14 @@ supersede しなかった理由（`contested`/`forgotten` だったので飛ば�
 そもそも既存を見ていない）は `ReextractResult.skipped` に出る
 （[ADR 0029](./decisions/0029-reextract-skip-visibility.md)）。
 
+⚠ **2026-09-28 追記（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
+[Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
+`reextract` は抽出をやり直さない。** 同じ Observation（今の `extractorVersion`）の記憶に、`forgotten`（purge を含む）・
+`contested`・訂正の解決で負けた `superseded` が1件でも在れば、LLM を呼ばず何も書かずに `extraction: "skipped"` を返す
+（退けた記憶ごとに `skipped` に `status_not_active`）。機構で置き換えた `superseded`・`archived`・理由を読めない
+`superseded` は数えない。observe の再送の規律（#897）と同じである。詳細は `Runtime.reextract` の doc と
+[ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) の 2026-09-28 追記。
+
 ⚠ **2026-09-26 追記（Issue #873）: `extractorVersion` を跨いだ旧い版の Memory は見ない。**
 「同じ Observation に対して抽出をもう一度走らせ」の判定対象は
 `MemoryStore.listBySourceObservation(ctx, observationId, extractorVersion)` が返す
