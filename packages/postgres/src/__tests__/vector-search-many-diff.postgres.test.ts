@@ -12,7 +12,9 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  * 契約（`VectorStore.searchMany?` の TSDoc）: 各 `queries[i]` の結果は、同じ `opts` で `search` を単独で呼んだ
  * 場合と、集合・順序ともに完全に一致する。返す `Map` の key は `queries` の key と同じ集合。
  * 同じ key が2回以上あるときは、**最後のクエリの結果だけ**を返し、`Map` の並びはその key が**最初に現れた位置**
- * である（Issue #1284）——`new Map(queries.map((q) => [q.key, search(q)]))` と同じ。
+ * である（Issue #1284）——結果は `new Map(queries.map((q) => [q.key, search(q)]))` と同じ。ただし、同じ key のうち
+ * 前のクエリだけが投げる入力（そのベクトルだけが DB に拒まれる値）では、この式は投げるが、`searchMany` は投げずに
+ * 返す（前のクエリは SQL に送らないため）。この歯の場面には、その入力は無い。
  *
  * - 比べるもの: `searchMany` の `Map` の並び（key と、その key の結果）と、`queries` の順に `search` を呼び、
  *   上の `new Map(…)` と同じく畳んだ並び（key と、その結果か「投げた」）。結果は memoryId を別名に伏せ、
