@@ -115,7 +115,9 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY, maxRetries: 0, t
 const llmProvider = new OpenAILLMProvider({ model: "gpt-4o-mini", client });
 ```
 
-⚠ 2026-09-27 追記: この例は `openai` を自分の依存として入れないと動かない（pnpm では `Cannot find package 'openai'`）。**入れる版は、`@mnemora/openai` が依存に固定している版（その `package.json` の `dependencies.openai`。今は `7.10.0`）と同じにすること**——`pnpm add openai`・`npm i openai` で最新（2026-09-27 時点で `7.23.0`）を入れると、`@mnemora/openai` の下に別の `openai` が並び、`client` を渡す行が型検査で `TS2322`（`Type 'OpenAI' is not assignable to type 'Pick<OpenAI, "chat">'`）になる（実行はできる）。`pnpm add -E openai@7.10.0`（npm は `npm i -E openai@7.10.0`）で入れれば通る【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】。
+⚠ 2026-09-27 追記: この例は `openai` を自分の依存として入れないと動かない（pnpm では `Cannot find package 'openai'`）。
+
+🔴 **2026-09-29 訂正（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](../../docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）: 上の「同じ版を入れること」はもう要らない。** `client` の型は `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`（`openai` パッケージのクラスをそのまま切り出した型）から、`@mnemora/openai` 自前の構造型（`OpenAIChatClient`/`OpenAIEmbeddingsClient`、`openai` パッケージの型を一切参照しない）へ変わった。**`openai` を自分の依存として入れる版は、`@mnemora/openai` が固定している版（`7.10.0`）と揃える必要が無い**——`pnpm add openai`・`npm i openai` で最新を入れても、`OpenAI` インスタンスはそのまま `client` に渡せる（版ごとの `RequestOptions`/`NullableHeaders` の食い違いは、構造型が SDK のクラスを名指ししなくなったことで解消した）。旧型 `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">` を自分の型注釈にそのまま書いていても、`OpenAI`/`OpenAIChatClient` の代入関係は壊れていない——ただし公開の宣言自体を指す型注釈（例: 独自の偽 client の型を `OpenAILLMProviderOptions["client"]` から `typeof` で取り出す等）は新しい型名を参照するよう直すこと。移行の詳細は [CHANGELOG.md](../../CHANGELOG.md) の `[1.1.0]` 節を見ること。
 
 ## ⚠ 2026-09-27 追記: `embed()` に渡せる入力の境界（実 API で当てた、今の振る舞い）
 

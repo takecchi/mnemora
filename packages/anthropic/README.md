@@ -201,7 +201,9 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, maxRetries
 const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client });
 ```
 
-⚠ 2026-09-27 追記: この例は `@anthropic-ai/sdk` を自分の依存として入れないと動かない（pnpm では `Cannot find package '@anthropic-ai/sdk'`）。**入れる版は、`@mnemora/anthropic` が依存に固定している版（その `package.json` の `dependencies["@anthropic-ai/sdk"]`。今は `0.124.0`）と同じにすること**——最新（2026-09-27 時点で `0.128.0`）を入れると、`client` を渡す行が型検査で `TS2322`（`Type 'Anthropic' is not assignable to type 'Pick<Anthropic, "messages">'`）になる（実行はできる）。`pnpm add -E @anthropic-ai/sdk@0.124.0` で入れれば通る【実測 2026-09-27、`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、ネットワークを切って走らせた】。
+⚠ 2026-09-27 追記: この例は `@anthropic-ai/sdk` を自分の依存として入れないと動かない（pnpm では `Cannot find package '@anthropic-ai/sdk'`）。
+
+🔴 **2026-09-29 訂正（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](../../docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）: 上の「同じ版を入れること」はもう要らない。** `client` の型は `Pick<Anthropic, "messages">`（`@anthropic-ai/sdk` パッケージのクラスをそのまま切り出した型）から、`@mnemora/anthropic` 自前の構造型 `AnthropicMessagesClient`（`@anthropic-ai/sdk` パッケージの型を一切参照しない）へ変わった。**`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している版（`0.124.0`）と揃える必要が無い**——最新を入れても、`Anthropic` インスタンスはそのまま `client` に渡せる。移行の詳細は [CHANGELOG.md](../../CHANGELOG.md) の `[1.1.0]` 節を見ること。
 
 ## ⚠ 2026-09-27 追記（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)）: `completeStructured` に渡せる zod の形（今の振る舞い）
 

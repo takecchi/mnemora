@@ -1,7 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
-import type { AnthropicContentBlock, AnthropicMessagesClient } from "./client-types.js";
+import type {
+  AnthropicContentBlock,
+  AnthropicMessageParam,
+  AnthropicMessagesClient,
+} from "./client-types.js";
 import { AnthropicLLMProviderError } from "./errors.js";
 import { translateForAnthropicStructuredOutput } from "./json-schema.js";
 
@@ -67,14 +71,10 @@ export interface AnthropicLLMProviderOptions {
   client?: AnthropicMessagesClient;
 }
 
-/** Anthropic の `messages` 配列は `role: "user" | "assistant"` のみ
- * （`role: "system"` は使えない。`system` は top-level パラメータ）。 */
-interface AnthropicMessageParam {
-  role: "user" | "assistant";
-  content: string;
-}
-
-/** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。 */
+/** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。
+ * `messages` の要素の型は {@link AnthropicMessageParam}（`client-types.ts`。
+ * Anthropic の `messages` 配列は `role: "user" | "assistant"` のみで、
+ * `role: "system"` は使えない——`system` は top-level パラメータ）。 */
 export interface AnthropicRequest {
   /** `PromptSpec.system`。無ければ鍵ごと無い（Anthropic では top-level の `system` に入る）。 */
   system?: string;

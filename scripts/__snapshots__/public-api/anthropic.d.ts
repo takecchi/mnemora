@@ -66,17 +66,13 @@ export declare function translateForAnthropicStructuredOutput<T>(schema: z.ZodTy
 
 // ===== dist/llm-provider.d.ts =====
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
-import type { AnthropicMessagesClient } from "./client-types.js";
+import type { AnthropicMessageParam, AnthropicMessagesClient } from "./client-types.js";
 export declare const DEFAULT_MAX_TOKENS = 16000;
 export interface AnthropicLLMProviderOptions {
     apiKey?: string;
     model: string;
     maxTokens?: number;
     client?: AnthropicMessagesClient;
-}
-interface AnthropicMessageParam {
-    role: "user" | "assistant";
-    content: string;
 }
 export interface AnthropicRequest {
     system?: string;
@@ -91,4 +87,3 @@ export declare class AnthropicLLMProvider implements LLMProvider {
     complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
     completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
 }
-export {};
