@@ -91,16 +91,24 @@ grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testki
 | `packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts` の6つの `describe*Conformance({` 呼び出し（`describeMemoryStoreConformance` / `describeVectorStoreConformance` / `describeLexicalStoreConformance` / `describeEventStoreConformance` / `describeOutboxStoreConformance` / `describeTenantSettingsStoreConformance`） | in-memory の擬似物（`__fixtures__/in-memory-*.ts`） | **走る**（常時）                                                          |
 | `packages/postgres/src/__tests__/conformance.postgres.test.ts` の6つの `describe*Conformance({` 呼び出し（`describeMemoryStoreConformance` / `describeEventStoreConformance` / `describeVectorStoreConformance` / `describeLexicalStoreConformance` / `describeOutboxStoreConformance` / `describeTenantSettingsStoreConformance`）          | **本物の Postgres + pgvector**                      | **走る**（`DATABASE_URL` 必須。無いと fail する——擬似物へ黙って倒れない） |
 
+**⚠ 2026-09-28 追記（文書と実装の照合、main c80b1a2）**: 上の「当たっている先は2つだけ」は、もう成り立たない。上の表の2つのほかに、次の呼び出し元が store 系の suite を呼んでいる。
+
+- `packages/postgres/src/__tests__/trigram-lexical-store.conformance.postgres.test.ts` の `describeLexicalStoreConformance({`——**本物の Postgres** 上の `PostgresTrigramLexicalStore`（opt-in の語彙 store）に当たる。`DATABASE_URL` 必須。
+- `packages/testkit/src/__tests__/memory-store-conformance.supports-labels-and-claim-key-optional.test.ts` の2つと `tenant-settings-store-conformance.supports-taxonomy-mode-optional.test.ts` の2つ——任意フラグを省略した呼び出しの形を確かめるための、テストの中で組み立てた store に当たる。
+- `packages/testkit/src/__tests__/migration-guide-tenant-settings-example.test.ts`——`docs/migration-v1.md` §6 の片をそのまま実行し、必須の3口だけを持つ最小の `TenantSettingsStore` に当たる。
+
+⟹ **本物の DB に当たるのは Postgres の2つのファイル（上の表の2行目と trigram の1つ）である。**それ以外は in-memory の擬似物か、テストの中で組み立てた store である。上の本文は当時の記録として残す。
+
 ### 2.2 `EmbeddingProvider` suite — 呼び出し元（下の表と、その後の 2026-09-28 追記。表は 2026-09-25 追記で6→7）
 
 | #   | 呼び出し元                                                                                                                        | 当たる実装                                                                                                                                               | CI で走るか     |
 | --- | --------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
-| 1   | `packages/testkit/src/__tests__/embedding-provider-fixtures.conformance.test.ts:17`                                               | `DeterministicEmbeddingProvider`                                                                                                                         | **走る**        |
-| 2   | 同上 `:58`                                                                                                                        | `RecordedEmbeddingProvider`（**テスト内で合成したカセット**。実 API の記録ではない）                                                                     | **走る**        |
+| 1   | `packages/testkit/src/__tests__/embedding-provider-fixtures.conformance.test.ts` の1つ目の `describeEmbeddingProviderConformance({` | `DeterministicEmbeddingProvider`                                                                                                                         | **走る**        |
+| 2   | 同上の2つ目                                                                                                                       | `RecordedEmbeddingProvider`（**テスト内で合成したカセット**。実 API の記録ではない）                                                                     | **走る**        |
 | 3   | `packages/local-embedding/src/__tests__/local-embedding-provider.conformance.test.ts` の `describeEmbeddingProviderConformance({` | `LocalEmbeddingProvider` ＋ 注入した replay pipeline（`fixtures/real-ruri-embeddings.json` = **本物の推論を1回録ったもの**。重みは落とさない）           | **走る**        |
-| 4   | `packages/local-embedding/src/__tests__/live.local-embedding.test.ts:379`                                                         | **本物の `LocalEmbeddingProvider`**（実際に ONNX の重みを落としてプロセス内推論）                                                                        | 🔴 **走らない** |
-| 5   | `packages/openai/src/__tests__/embedding-provider.conformance.test.ts:143`                                                        | `OpenAIEmbeddingProvider` ＋ 注入 client（`fixtures/recorded-openai-embeddings.json` の再生）                                                            | **走る**        |
-| 6   | `packages/openai/src/__tests__/live.openai.test.ts:111`                                                                           | **実 API**                                                                                                                                               | 🔴 **走らない** |
+| 4   | `packages/local-embedding/src/__tests__/live.local-embedding.test.ts` の `describeEmbeddingProviderConformance({`                 | **本物の `LocalEmbeddingProvider`**（実際に ONNX の重みを落としてプロセス内推論）                                                                        | 🔴 **走らない** |
+| 5   | `packages/openai/src/__tests__/embedding-provider.conformance.test.ts` の `describeEmbeddingProviderConformance({`                | `OpenAIEmbeddingProvider` ＋ 注入 client（`fixtures/recorded-openai-embeddings.json` の再生）                                                            | **走る**        |
+| 6   | `packages/openai/src/__tests__/live.openai.test.ts` の `describeEmbeddingProviderConformance({`                                   | **実 API**                                                                                                                                               | 🔴 **走らない** |
 | 7   | `packages/testkit/src/__tests__/embedding-provider-conformance-over-limit.test.ts`（2026-09-25 追記、Issue #449 / ADR 0305）      | この歯専用の最小 provider（`RejectsOverLimitEmbeddingProvider`。**本物のモデルではない**——`overLimitText` の歯が実際に何かを検出することを示す陽性対照） | **走る**        |
 
 ⚠ **#1・#2・#7 はどれも `overLimitText` を渡していない/渡している、が食い違う——** #1・#2 は
@@ -155,17 +163,29 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 
 ---
 
-## 3. 🔴 構造的に一度も走らない歯 — ファイルと it の数は下の表【現物】
+## 3. 🔴 構造的に一度も走らない歯 — ファイルは下の表【現物】
 
-**数え方**: 「CI のいまの構成では、どんな入力でも通過しない `it`」を **it 単位**で数えた。
+**数え方**: 「CI のいまの構成では、どんな入力でも通過しない `it`」を **it 単位**で数える。
 
-| ファイル                                                                           | 必要な env                                            | it                                                                         |
-| ---------------------------------------------------------------------------------- | ----------------------------------------------------- | -------------------------------------------------------------------------- |
-| `packages/anthropic/src/__tests__/live.anthropic.test.ts`                          | `ANTHROPIC_API_KEY` **かつ** `MNEMORA_LIVE_ANTHROPIC` | 2                                                                          |
-| `packages/openai/src/__tests__/live.openai.test.ts`                                | `OPENAI_API_KEY` **かつ** `MNEMORA_LIVE_OPENAI`       | **12**（直下2 ＋ 適合テスト10。2026-09-25 追記: 適合テストが9→10になった） |
-| `packages/local-embedding/src/__tests__/live.local-embedding.test.ts`              | `MNEMORA_LIVE_LOCAL_EMBEDDING`                        | **15**（直下5 ＋ 適合テスト10。2026-09-25 追記: 適合テストが9→10になった） |
-| `packages/local-embedding/src/__tests__/live.cache-warm-network-behaviour.test.ts` | `MNEMORA_LIVE_LOCAL_EMBEDDING`                        | 1                                                                          |
-| **合計**                                                                           |                                                       | **30**                                                                     |
+| ファイル                                                                           | 必要な env                                            | it                                                     |
+| ---------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------ |
+| `packages/anthropic/src/__tests__/live.anthropic.test.ts`                          | `ANTHROPIC_API_KEY` **かつ** `MNEMORA_LIVE_ANTHROPIC` | 直下の it                                              |
+| `packages/openai/src/__tests__/live.openai.test.ts`                                | `OPENAI_API_KEY` **かつ** `MNEMORA_LIVE_OPENAI`       | 直下の it ＋ `EmbeddingProvider` suite の it           |
+| `packages/local-embedding/src/__tests__/live.local-embedding.test.ts`              | `MNEMORA_LIVE_LOCAL_EMBEDDING`                        | 直下の it ＋ `EmbeddingProvider` suite の it           |
+| `packages/local-embedding/src/__tests__/live.cache-warm-network-behaviour.test.ts` | `MNEMORA_LIVE_LOCAL_EMBEDDING`                        | 直下の it                                              |
+
+**本数はここに書かない**（`main` が動けば変わる数である——[AGENTS.md](../AGENTS.md)「⚠ 数を、道具と生成物に焼き込まない」）。repo の根で、§1 と同じ式で数える:
+
+```sh
+# 直下の it（ファイルごと）
+grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/anthropic/src/__tests__/live.anthropic.test.ts packages/openai/src/__tests__/live.openai.test.ts packages/local-embedding/src/__tests__/live.local-embedding.test.ts packages/local-embedding/src/__tests__/live.cache-warm-network-behaviour.test.ts
+# openai と local-embedding の live が1回ずつ呼ぶ EmbeddingProvider suite の it
+grep -cE '^\s*(it|maybe[A-Za-z]*It)(\.[a-zA-Z]+(\([^)]*\))?)?\(' packages/testkit/src/embedding-provider-conformance.ts
+```
+
+⚠ §1 と同じく**宣言の行の数**である。suite の側の `maybe*It` は、gate が開いた後でも呼び出し元の設定で skip になりうる（下の「無条件7本」）。
+
+**⚠ 2026-09-28 追記**: この表には、以前は it の数（2・12・15・1、合計30）を手で書いていた。main `c80b1a2` で上の式を打つと同じ数だったが、門で照合している数ではないので、数を消して数え方に置き換えた（元の値は git の履歴に在る）。
 
 **`.github/workflows/ci.yml` に、この4つの env は設定値として1つも無い**【現物】
 （`grep` で出るのはコメント中の言及だけである）。
@@ -180,9 +200,9 @@ replay/fixture 系は上限を無効化した表引きであり、渡しても�
 [Issue #142](https://github.com/takecchi/mnemora/issues/142) は
 「**無条件7本**が緑かを見る」と書いている。**これは「env が無くても走る7本」ではない。**
 
-`packages/openai/src/__tests__/live.openai.test.ts` の **12本はすべて `live` gate の下に在る**
-【現物: `:43` / `:53` の `it.skipIf(!live)`、`:108` の `describe.skipIf(!live)`。
-`live` の定義は `:40`】（2026-09-25 追記: 適合テストが9→10になったため11→12）。
+`packages/openai/src/__tests__/live.openai.test.ts` の **it はすべて `live` gate の下に在る**
+【現物: 直下の it はどれも `it.skipIf(!live)`、適合テストは `describe.skipIf(!live)` の中。
+`live` の定義は同ファイルの `const live =`】。
 
 **「無条件7本」の正しい意味**: _gate が開いた後_、適合テスト10本のうち
 **決定性に依存する2本**（`maybeIt`。`deterministic: false` のとき自動で `it.skip` になる）と
@@ -221,8 +241,8 @@ ADR 0095 §7 が逐語でこう書いている:
 `LocalEmbeddingProvider` のコンストラクタは
 `model: options.modelId ?? DEFAULT_LOCAL_EMBEDDING_MODEL_ID` を `space` に入れるだけで、
 **実際に読み込んだモデルから導出していない**【現物:
-`packages/local-embedding/src/local-embedding-provider.ts`。`DEFAULT_LOCAL_EMBEDDING_REPO` は `:23`、
-`DEFAULT_LOCAL_EMBEDDING_MODEL_ID` は `:50`】。
+`packages/local-embedding/src/local-embedding-provider.ts` の `DEFAULT_LOCAL_EMBEDDING_REPO`・
+`DEFAULT_LOCAL_EMBEDDING_MODEL_ID`】。
 
 **ADR 0099 の変異試験の陰性対照がこれを名指しした**（逐語）:
 
@@ -309,16 +329,15 @@ ADR 0095 §7 が逐語でこう書いている:
 
 **判断材料をここに置く。⛔ いまは採っていない。**
 
-**走らせられる根拠**【現物】（2026-09-25 追記: 適合テストが9→10になったため14→15）:
+**走らせられる根拠**【現物】:
 
-- `packages/local-embedding` の live 15本と cache-warm 1本は、**鍵を必要としない。**
+- `packages/local-embedding` の live の歯と cache-warm の歯（§3 の表の下2行。本数は §3 の式で数える）は、**鍵を必要としない。**
   `MNEMORA_LIVE_LOCAL_EMBEDDING` を立てるだけで走る。**課金は発生しない。**
 - 要るのは**モデル一式4ファイル計42MB（うち重み本体36MB）のダウンロード**だけである。
-- **CI は既に、その重みを落としている**——`identifier-probes` / `consolidation-cost` /
-  `archive-sweep-cost` の3ジョブが `MNEMORA_EMBEDDING=local` を固定で使う
-  （[AGENTS.md](../AGENTS.md) の4層の表）。
+- **CI は既に、その重みを落としている**——CI の測定ジョブのいくつかが `MNEMORA_EMBEDDING=local` を固定で使う
+  （どのジョブかは `.github/workflows/ci.yml` を見ること。⛔ ここに数と名前を写さない。[AGENTS.md](../AGENTS.md) の4層の表）。
 
-⟹ **30本のうち16本は、「鍵が無いから走らない」のではない。**
+⟹ **§3 の歯のうち `local-embedding` の2ファイルの分は、「鍵が無いから走らない」のではない。**
 
 **いま採らなかった理由**:
 
@@ -419,6 +438,11 @@ assert する」歯が走る**（例: `expect(store.restoreSupersededBy).toBeUnd
 adapter 実装者を含む）は、コンパイルエラーにならずそのまま動き続け（型が壊れない）、
 実行すると上表の「省略」行の named it が1本増えるだけである——**これが型を必須にせずに
 「検査していない」を可視化する形**。
+
+**⚠ 2026-09-28 追記（文書と実装の照合、main c80b1a2）**: 上の「この1本だけ任意にした」は、もう成り立たない。いまは次のフラグも任意である（上の本文は当時の記録として残す）。
+
+- `MemoryStoreConformanceOptions` の `supportsLabels?`・`supportsFindActiveByClaimKey?`・`supportsListActiveClaimPredicates?`——どれも `supportsOnlyMemoryIdsFilter?` と同じ3状態で、省略すると「⚠ 未検査: <フラグ名> が指定されていない — adapter "<name>" に対して …の歯は検査していない」という named it が1本登録される。
+- `TenantSettingsStoreConformanceOptions` の `supportsTaxonomyMode?`——⚠ **これだけは形が違う。**省略すると `false` と同じに扱われ、taxonomy mode の歯は**何も登録されない**（named it も無い）。⟹ 出力からは「検査していない」が読めない（今の振る舞い。Issue #818 で必須から任意へ戻した経緯は `docs/migration-v1.md` の **6** の末尾）。
 
 ---
 
