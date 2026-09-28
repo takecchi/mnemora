@@ -282,4 +282,92 @@ describe("runtime.recall() の連想枠に忘却ゲートが掛かる — 本物
       "association",
     );
   });
+
+  /*
+   * `'either'` のテナントの約束（ADR 0172「引き受けた負債」4——実 Postgres の歯は `'either'` を
+   * 測っていなかった——を埋める）。約束が書かれている場所:
+   * - `DecayClock` の TSDoc（`packages/core/src/interfaces/tenant-settings-store.ts`）:
+   *   「`'either'`: どちらかが生きていれば通す（OR）。最も緩い。」（ADR 0165 決めたこと1）
+   * - `VectorFilter.decayFloorAnyAxis` の TSDoc（`packages/core/src/interfaces/vector-store.ts`）:
+   *   両方の境界が与えられているときに限り、その2つを OR で結ぶ。
+   * - 連想枠も段1と同じゲートを通す（ADR 0172）。
+   * ⟹ 片方の軸だけが生きている記憶は、**どちらの向きでも**連想枠から返る。両軸とも沈んでいれば返らない。
+   */
+  it("(庚) 'either' のテナントでは、活動時計が沈んでいても壁時計が生きていれば、連想枠から返る", async () => {
+    const ctx: Ctx = { tenantId: `tenant-assoc-either-activity-decayed-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
+    await tenantSettingsStore.setDecayClock(ctx, "either");
+    expect(await tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
+
+    const { anchor, associated } = await seedAnchorAndAssociated(
+      memoryStore,
+      vectorStore,
+      ctx,
+      {
+        decayFloorAt: FAR_FUTURE, // 壁時計は生きている
+        decayBaseSeq: 0,
+        decayFloorSeq: 0, // 活動時計は沈んでいる（nowSeq(=0) ちょうど。ゲートは狭義の `>`）
+      },
+      { decayBaseSeq: null, decayFloorSeq: null },
+    );
+
+    const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
+
+    const entry = result.memories.find((m) => m.memoryId === associated.id);
+    expect(entry?.retrievedVia).toBe("association");
+    expect(entry?.associationOf).toBe(anchor.id);
+  });
+
+  it("(辛) 'either' のテナントでは、壁時計が沈んでいても活動時計が生きていれば、連想枠から返る（逆の向き）", async () => {
+    const ctx: Ctx = { tenantId: `tenant-assoc-either-wall-decayed-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
+    await tenantSettingsStore.setDecayClock(ctx, "either");
+    expect(await tenantSettingsStore.getActivitySeq(ctx)).toBe(0);
+
+    const { anchor, associated } = await seedAnchorAndAssociated(
+      memoryStore,
+      vectorStore,
+      ctx,
+      {
+        decayFloorAt: new Date(NOW.getTime() - 1_000), // 壁時計は「いま」の1秒前に沈んでいる
+        decayBaseSeq: 0,
+        decayFloorSeq: 1, // 活動時計は生きている（decayFloorSeq(=1) > nowSeq(=0)）
+      },
+      { decayBaseSeq: null, decayFloorSeq: null },
+    );
+
+    const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
+
+    const entry = result.memories.find((m) => m.memoryId === associated.id);
+    expect(entry?.retrievedVia).toBe("association");
+    expect(entry?.associationOf).toBe(anchor.id);
+  });
+
+  it("(壬) 'either' のテナントでも、両方の軸で沈んでいれば、連想枠から返らない（OR は「常に通す」ではない）", async () => {
+    const ctx: Ctx = { tenantId: `tenant-assoc-either-both-decayed-${randomUUID()}` };
+    const { runtime, memoryStore, vectorStore, tenantSettingsStore } = await buildTestRuntime();
+    await tenantSettingsStore.setDecayClock(ctx, "either");
+
+    const { anchor, associated } = await seedAnchorAndAssociated(
+      memoryStore,
+      vectorStore,
+      ctx,
+      {
+        decayFloorAt: new Date(NOW.getTime() - 1_000), // 壁時計も沈んでいる
+        decayBaseSeq: 0,
+        decayFloorSeq: 0, // 活動時計も沈んでいる
+      },
+      { decayBaseSeq: null, decayFloorSeq: null },
+    );
+
+    const result = await runtime.recall(ctx, ASSOCIATION_QUERY);
+
+    // アンカーは返る（この配置が段3.5 まで届いていることの検算）。相方だけが落ちる。
+    // ⚠ 段3.5 の後置フィルタ（core の `survivesDecayGate`）も同じ述語で落とすので、SQL の押し下げ
+    // だけを外しても、この歯は緑のままである（ADR 0172「引き受けた負債」3 と同じ）。押し下げと後置の
+    // 両方を外したときに赤になる。
+    expect(result.memories.map((m) => m.memoryId)).toContain(anchor.id);
+    expect(result.memories.map((m) => m.memoryId)).not.toContain(associated.id);
+    expect(result.memories.some((m) => m.retrievedVia === "association")).toBe(false);
+  });
 });
