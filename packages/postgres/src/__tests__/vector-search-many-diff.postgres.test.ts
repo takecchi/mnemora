@@ -11,16 +11,18 @@ import { closeTestClient, getTestClient, TEST_EMBEDDING_SPACE } from "./test-db.
  *
  * 契約（`VectorStore.searchMany?` の TSDoc）: 各 `queries[i]` の結果は、同じ `opts` で `search` を単独で呼んだ
  * 場合と、集合・順序ともに完全に一致する。返す `Map` の key は `queries` の key と同じ集合。
+ * 同じ key が2回以上あるときは、**最後のクエリの結果だけ**を返し、`Map` の並びはその key が**最初に現れた位置**
+ * である（Issue #1284）——`new Map(queries.map((q) => [q.key, search(q)]))` と同じ。
  *
- * - 比べるもの: `searchMany` の `Map` の並び（key と、その key の結果）と、`queries` の順に `search` を呼んだ
- *   並び（key と、その結果か「投げた」）。結果は memoryId を別名に伏せ、距離を含めて比べる。
- *   `searchMany` が投げたときは、全部の key を「投げた」として並べる。
+ * - 比べるもの: `searchMany` の `Map` の並び（key と、その key の結果）と、`queries` の順に `search` を呼び、
+ *   上の `new Map(…)` と同じく畳んだ並び（key と、その結果か「投げた」）。結果は memoryId を別名に伏せ、
+ *   距離を含めて比べる。`searchMany` が投げたときは、全部の key を「投げた」として並べる。
  * - 当てるのは、`VectorFilter` の各欄・`limit` の境界・比較不能のクエリ・key の境界（下の `scenarios`）。
  *   ベクトルの成分は整数にしてある（float4 の丸めは #1268 の範囲）。
  *
- * 🔴 **許可リスト（`KNOWN_DIFFERENCES`）は、契約の外で、揃える先が未決の Issue に在る差だけを持つ**（key の重複は
- * Issue #1284。今の振る舞いは `searchMany?` の TSDoc に書いてある。例外の有無の差（Issue #1285、NUL を含む key）は
- * 直したので載せていない——`search` が投げない入力では `searchMany` も投げない）。
+ * 🔴 **許可リスト（`KNOWN_DIFFERENCES`）は、契約の外で、揃える先が未決の Issue に在る差だけを持つ**（今は空。
+ * key の重複（Issue #1284）は後勝ちに揃えたので、例外の有無の差（Issue #1285、NUL を含む key）は直したので、
+ * どちらも載せていない）。
  * 各項目は今の振る舞い（`search` 側と `searchMany` 側の戻り値の形）を持ち、実測と違えば落ちる。
  * 許可リストの外で差が出たら落ちる（契約に反する差は `searchMany` を直す）。差が出なくなったら、それも落ちる。
  */
@@ -33,29 +35,9 @@ interface KnownDifference {
   /** クエリごとの `search` の形（どれか1つでも投げたら `throws`）。 */
   search: Kind;
   searchMany: Kind;
-  /**
-   * key の重複の場面だけ: `searchMany` が返した `Map` の key の数、`queries` の長さ、その1つの key に
-   * 積まれた件数が `search` の結果の件数の和と同じか。
-   */
-  keys?: { searchMany: number; queries: number; hitsAreSumOfSearch: boolean };
 }
 
-const DUPLICATE_KEY = "https://github.com/takecchi/mnemora/issues/1284";
-
-const KNOWN_DIFFERENCES: Readonly<Record<string, KnownDifference>> = {
-  "queries:同じ key・同じベクトルを2回": {
-    issue: DUPLICATE_KEY,
-    search: "returns",
-    searchMany: "returns",
-    keys: { searchMany: 1, queries: 2, hitsAreSumOfSearch: true },
-  },
-  "queries:同じ key・違うベクトル": {
-    issue: DUPLICATE_KEY,
-    search: "returns",
-    searchMany: "returns",
-    keys: { searchMany: 1, queries: 2, hitsAreSumOfSearch: true },
-  },
-};
+const KNOWN_DIFFERENCES: Readonly<Record<string, KnownDifference>> = {};
 
 const SPACE = TEST_EMBEDDING_SPACE;
 const runTag = Math.random().toString(36).slice(2, 7);
@@ -87,6 +69,14 @@ interface Outcome {
   entries: Array<[string, Array<[string, number]> | "投げた"]>;
   kind: Kind;
 }
+
+/** `new Map(entries)` と同じく畳む: 同じ key は最初に現れた位置に、最後の値を置く（Issue #1284）。 */
+function foldLikeMap(outcome: Outcome): Outcome {
+  return { ...outcome, entries: [...new Map(outcome.entries)] };
+}
+
+const hasDuplicateKey = (queries: Query[]) =>
+  new Set(queries.map((q) => q.key)).size !== queries.length;
 
 async function runSearchMany(
   vs: PostgresVectorStore,
@@ -178,6 +168,11 @@ add("queries:1件", one([Q[0]!]));
 add("queries:同じベクトルを別の key で2回", one([Q[0]!, { key: "x2", vector: [1, 0, 0] }]));
 add("queries:同じ key・同じベクトルを2回", one([Q[0]!, Q[0]!]));
 add("queries:同じ key・違うベクトル", one([Q[0]!, { key: "x", vector: [0, 1, 0] }]));
+// 並びを縛る: key "x" は最初の位置（先頭）に、最後のベクトル（[1,0,1]）の結果で現れる。"y" はその後。
+add(
+  "queries:同じ key が離れて3回（間に別の key）",
+  one([Q[0]!, Q[1]!, { key: "x", vector: [0, 0, 1] }, { key: "x", vector: [1, 0, 1] }]),
+);
 add("queries:key が空文字", one([{ key: "", vector: [1, 0, 0] }]));
 add("queries:key に NUL", one([{ key: "k\u0000", vector: [1, 0, 0] }]));
 add("queries:次元違い（比較不能）", one([Q[0]!, { key: "short", vector: [1, 0] }]));
@@ -198,8 +193,12 @@ add(
   ),
 );
 
-const differing = new Map<string, { single: Outcome; many: Outcome; queries: number }>();
+const differing = new Map<string, { single: Outcome; many: Outcome }>();
 const observedSingle = new Map<string, Outcome>();
+/** key が重複しない場面の、畳む前の `search` の並びと `searchMany` の並び（過剰実装の歯が使う）。 */
+const uniqueKeyRuns = new Map<string, { raw: Outcome; many: Outcome }>();
+/** 最後の値を採ったか・並びを最初の位置にしたかを、名指しで見る場面（Issue #1284）。 */
+const duplicateKeyRuns = new Map<string, { raw: Outcome; many: Outcome; opts: Opts }>();
 
 describe("PostgresVectorStore.searchMany は、クエリごとの search を並べたものと同じ結果を返す", () => {
   beforeAll(async () => {
@@ -242,11 +241,17 @@ describe("PostgresVectorStore.searchMany は、クエリごとの search を並�
     for (const [name, build] of scenarios) {
       const s = build();
       const c = s.ctx ?? ctx;
-      const single = await runSearchEach(vs, s.queries, s.opts, c);
+      const raw = await runSearchEach(vs, s.queries, s.opts, c);
+      const single = foldLikeMap(raw);
       const many = await runSearchMany(vs, s.queries, s.opts, c);
       observedSingle.set(name, single);
+      if (hasDuplicateKey(s.queries)) {
+        duplicateKeyRuns.set(name, { raw, many, opts: s.opts });
+      } else {
+        uniqueKeyRuns.set(name, { raw, many });
+      }
       if (JSON.stringify(single.entries) !== JSON.stringify(many.entries)) {
-        differing.set(name, { single, many, queries: s.queries.length });
+        differing.set(name, { single, many });
       }
     }
   }, 240_000);
@@ -283,23 +288,9 @@ describe("PostgresVectorStore.searchMany は、クエリごとの search を並�
     );
     const mismatched = [...differing]
       .filter(([name]) => name in KNOWN_DIFFERENCES)
-      .map(([name, { single, many, queries }]) => {
+      .map(([name, { single, many }]) => {
         const { issue: _issue, ...expected } = KNOWN_DIFFERENCES[name]!;
-        const observed = {
-          search: single.kind,
-          searchMany: many.kind,
-          ...(expected.keys
-            ? {
-                keys: {
-                  searchMany: many.entries.length,
-                  queries,
-                  hitsAreSumOfSearch:
-                    many.entries.flatMap(([, r]) => (r === "投げた" ? [] : r)).length ===
-                    single.entries.flatMap(([, r]) => (r === "投げた" ? [] : r)).length,
-                },
-              }
-            : {}),
-        };
+        const observed = { search: single.kind, searchMany: many.kind };
         return { name, expected, observed };
       })
       .filter(({ expected, observed }) => JSON.stringify(expected) !== JSON.stringify(observed));
@@ -307,6 +298,33 @@ describe("PostgresVectorStore.searchMany は、クエリごとの search を並�
       { stale, unknown, mismatched },
       `許可リストが古いか、今の振る舞いと違う: ${JSON.stringify({ stale, unknown, mismatched }, null, 2)}`,
     ).toEqual({ stale: [], unknown: [], mismatched: [] });
+  });
+
+  it("🔴 同じ key が2回以上あると、最後のクエリの結果だけを、その key が最初に現れた位置に返す（Issue #1284）", () => {
+    expect(duplicateKeyRuns.size).toBeGreaterThanOrEqual(3);
+    for (const [name, { raw, many, opts }] of duplicateKeyRuns) {
+      const firstPositions = [...new Set(raw.entries.map(([k]) => k))];
+      const lastValue = (key: string) => raw.entries.filter(([k]) => k === key).at(-1)![1];
+      expect(
+        many.entries.map(([k]) => k),
+        `${name}: 並びは最初に現れた位置`,
+      ).toEqual(firstPositions);
+      for (const [key, result] of many.entries) {
+        expect(result, `${name}: key ${key} は最後のクエリの結果`).toEqual(lastValue(key));
+        // 結果を積まない（`search` と同じく limit を超えない）。
+        if (result !== "投げた") expect(result.length).toBeLessThanOrEqual(opts.limit);
+      }
+    }
+  });
+
+  it("過剰実装の歯: key が重複しない場面では、searchMany は畳む前の search の並びと完全に一致する", () => {
+    // key が重複しなければ畳んでも変わらないので、ここは `foldLikeMap` を通さずに比べる
+    // （後勝ちの処理が、重複の無い入力の結果や並びまで変えていないこと）。
+    expect(uniqueKeyRuns.size).toBeGreaterThan(40);
+    const changed = [...uniqueKeyRuns]
+      .filter(([, { raw, many }]) => JSON.stringify(raw.entries) !== JSON.stringify(many.entries))
+      .map(([name]) => name);
+    expect(changed).toEqual([]);
   });
 
   it("検算: 同点・比較不能・絞り込み・例外が実際に起きている（この歯が何も比べていない、にならないため）", () => {

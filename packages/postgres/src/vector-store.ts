@@ -354,10 +354,13 @@ export class PostgresVectorStore implements VectorStore {
    * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
    *
    * **key は SQL に送らない**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）: `VALUES` には
-   * `queries` の添字（`0..n-1`）を送り、戻った行を `queries[query_idx].key` へ引き直す。以前は key を `text` の
+   * 送るクエリの添字（`0..n-1`）を送り、戻った行を、そのクエリの key へ引き直す。以前は key を `text` の
    * パラメータとして送っていたので、NUL（U+0000）を含む key を Postgres が拒み、`search()` が投げない入力で
-   * `searchMany` だけが投げていた。同じ key が2回以上あるときは、引き直した先が同じ配列なので、今までどおり
-   * その key に結果を続けて積む（Issue #1284、契約の外で未決）。
+   * `searchMany` だけが投げていた。
+   *
+   * **同じ key が2回以上あるときは、最後のクエリだけを送る**（[Issue #1284](https://github.com/takecchi/mnemora/issues/1284)、
+   * `VectorStore.searchMany?` の契約）。`Map` の並びは、先に全部の key を `set` した順（最初に現れた位置）のまま。
+   * 以前は全部を送り、同じ配列に結果を続けて積んでいた（`limit` を超えうる）。
    *
    * **`hnsw.iterative_scan` は `search()` と同じ `withRelaxedOrderScan`（このファイル
    * 冒頭）を経由して1回だけ効かせる**——`LATERAL` は同じトランザクション・同じ SELECT
@@ -395,6 +398,11 @@ export class PostgresVectorStore implements VectorStore {
       // 契約: 空配列なら往復を発生させずに空の Map を返す。
       return resultMap;
     }
+    // 契約: 同じ key が2回以上あるときは、最後のクエリの結果だけを返す（Issue #1284）。
+    // `Map` の並びは上の `set` のまま（最初に現れた位置）。それより前のクエリは SQL に送らない。
+    const lastIndexByKey = new Map<string, number>();
+    queries.forEach((q, index) => lastIndexByKey.set(q.key, index));
+    const effectiveQueries = queries.filter((q, index) => lastIndexByKey.get(q.key) === index);
 
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
@@ -402,7 +410,7 @@ export class PostgresVectorStore implements VectorStore {
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
     // key ではなく添字を送る（上の doc コメント、Issue #1285）。
-    const valuesRows = queries.map((q, index) => {
+    const valuesRows = effectiveQueries.map((q, index) => {
       const effectiveQuery = toComparableQuery(q.vector, space.dimensions);
       return sql`(${index}::int, ${toVectorLiteral(effectiveQuery)}::vector)`;
     });
@@ -442,7 +450,7 @@ export class PostgresVectorStore implements VectorStore {
     for (const row of result.rows) {
       const r = row as unknown as { query_idx: number; memory_id: string; distance: number };
       resultMap
-        .get(queries[r.query_idx]!.key)
+        .get(effectiveQueries[r.query_idx]!.key)
         ?.push({ memoryId: r.memory_id, distance: r.distance });
     }
     return resultMap;
