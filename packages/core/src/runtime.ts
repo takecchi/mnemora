@@ -2631,6 +2631,7 @@ export interface Runtime {
    * の「呼び出し側の自由文」とは別物）。`opts.reason` を渡すと `meta.note` に追加で入る。
    * `meta.contestedWithId` には相手の id が入る（A のイベントには B、B には A。Issue #1160——解決で
    * `contested_with_id` はクリアされるので、監査ログに残さないと誰と対だったかを後から追えない）。
+   * 入るのは store が返した相手の id（列の値と同じ形。`@mnemora/postgres` では小文字）であり、渡された id ではない。
    * `digestSnapshot` にはその Memory の現在の `digest` を入れる（`content` は運ばない。
    * `forget`/`reextract` と同じ規律）。
    *
@@ -2668,7 +2669,8 @@ export interface Runtime {
    * 2. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `firstId`/`secondId`
    *    のどちらでもなければ、同じく書き込み前に `RangeError`
    *    （`Runtime.resolveContested: resolution.winnerId must be firstId or secondId`）を
-   *    投げる。
+   *    投げる。⚠ `winnerId` が片側と大文字小文字だけ違うときは、store の `get` で同じ記憶かを確かめ、同じ記憶なら
+   *    その側を勝者として扱う（`@mnemora/postgres` の uuid。大文字小文字を区別する store では今どおり `RangeError`）。
    * 3. `deps.memoryStore.resolveContestedPair` が無ければ、ここで打ち切り
    *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す——フォールバック
    *    経路は無い（`MemoryStore.resolveContestedPair` の interface JSDoc 参照）。
@@ -2678,6 +2680,8 @@ export interface Runtime {
    *    [ADR 0046](../../../docs/decisions/0046-contested-pair-invariant-tooth.md) の対不変
    *    条件を読む側からも守る）。どちらか一方でも `"eligible"` でなければ、書き込みを
    *    一切試みず `{ supported: true, outcome: { kind: "ineligible", sides: [...] } }` を返す。
+   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（同じ記憶を小文字と大文字で渡したときは、
+   *    渡された文字列どおりに突き合わせる）。相互参照は store が返した相手の id と比べる。
    * 5. 両側とも `"eligible"` なら `deps.memoryStore.resolveContestedPair` を呼ぶ。
    *    - `resolution.kind === "both_active"`: 両側とも `status: "active"`。
    *    - `resolution.kind === "supersede"`: `winnerId` 側は `status: "active"`、もう一方は
@@ -2701,6 +2705,7 @@ export interface Runtime {
    * 渡すと `meta.note` に追加で入る（`meta.reason`/`meta.resolution` は上書きしない）。
    * どのイベント（勝者・敗者・`both_active` の両側）にも `meta.contestedWithId`（相手の id）が入る（Issue #1160）。
    * 敗者の `superseded` は、加えて `meta.supersededById`（勝者の id。値は同じ）も持つ。
+   * どちらの meta の id も store が返した id（列の値と同じ形）であり、渡された id ではない。
    * `digestSnapshot` にはその Memory の現在の `digest` を入れる（`content` は運ばない。
    * `markContested`/`forget`/`reextract` と同じ規律）。
    *
@@ -3155,7 +3160,7 @@ function describeDroppedCandidate(
 
 /**
  * `getMany` が返した記憶を、渡された id で引き当てるときの鍵を作る関数を返す（`forget`・`restoreArchived`・`consolidate`・`reflect`・
- * `purge`・`markContested`）。`ids` はその呼び出しに渡された id の全部。
+ * `purge`・`markContested`・`resolveContested`）。`ids` はその呼び出しに渡された id の全部。
  *
  * store が返す `Memory.id` は、渡した id と文字列として一致するとは限らない——`@mnemora/postgres` は uuid を
  * 大文字小文字を区別せずに比べ、小文字で返す（`get("…ABC…")` が `id: "…abc…"` の記憶を返す）。渡された id のまま
@@ -5318,6 +5323,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const actor = opts?.actor ?? { type: "system" };
     // Issue #1160: 両側のイベントに対向の id（`contestedWithId`）を載せる——解決のときに
     // `contested_with_id` はクリアされるので、監査ログに残さないと「誰と対だったか」が後から追えない。
+    // 載せるのは store が返した相手の id である（渡された id ではない）——列（`contested_with_id`）の値と揃える
+    // （`@mnemora/postgres` に大文字の UUID を渡しても、列もこの meta も小文字になる）。
+    const firstMemory = byId.get(lookupKey(firstId))!;
+    const secondMemory = byId.get(lookupKey(secondId))!;
     const buildMeta = (contestedWithId: MemoryId): Record<string, unknown> =>
       opts?.reason === undefined
         ? { reason: "contested", contestedWithId }
@@ -5334,8 +5343,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             memoryId: firstId,
             kind: "updated",
             actor,
-            digestSnapshot: byId.get(lookupKey(firstId))!.digest,
-            meta: buildMeta(secondId),
+            digestSnapshot: firstMemory.digest,
+            meta: buildMeta(secondMemory.id),
           },
         },
         {
@@ -5345,8 +5354,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             memoryId: secondId,
             kind: "updated",
             actor,
-            digestSnapshot: byId.get(lookupKey(secondId))!.digest,
-            meta: buildMeta(firstId),
+            digestSnapshot: secondMemory.digest,
+            meta: buildMeta(firstMemory.id),
           },
         },
       );
@@ -5393,14 +5402,35 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     if (firstId === secondId) {
       throw new RangeError("Runtime.resolveContested: firstId and secondId must differ");
     }
-    if (
-      resolution.kind === "supersede" &&
-      resolution.winnerId !== firstId &&
-      resolution.winnerId !== secondId
-    ) {
-      throw new RangeError(
-        "Runtime.resolveContested: resolution.winnerId must be firstId or secondId",
-      );
+    // 勝者がどちらの側か（渡された `firstId`/`secondId` のどちらか）。`both_active` では使わない。
+    let winnerSideId: MemoryId | undefined;
+    if (resolution.kind === "supersede") {
+      if (resolution.winnerId === firstId || resolution.winnerId === secondId) {
+        winnerSideId = resolution.winnerId;
+      } else {
+        // `winnerId` が片側と大文字小文字だけ違うときは、同じ記憶かを store に聞く（`@mnemora/postgres` は uuid を
+        // 大文字小文字を区別せずに比べる）。store が同じ記憶と言えば勝者として扱い、言わなければ今どおり
+        // `RangeError`（大文字小文字を区別する store では今どおり）。どちらの側とも大文字小文字を無視しても違う
+        // `winnerId` は、今どおり store を読まずに落とす。`firstId`/`secondId` 自身が大文字小文字だけ違う
+        // （どちらとも一致しうる）ときも、どちらと決められないので今どおり落とす。
+        const lower = resolution.winnerId.toLowerCase();
+        const candidates = [firstId, secondId].filter((id) => id.toLowerCase() === lower);
+        const candidate = candidates.length === 1 ? candidates[0]! : undefined;
+        if (candidate !== undefined) {
+          const [winner, side] = await Promise.all([
+            deps.memoryStore.get(ctx, resolution.winnerId),
+            deps.memoryStore.get(ctx, candidate),
+          ]);
+          if (winner !== null && side !== null && winner.id === side.id) {
+            winnerSideId = candidate;
+          }
+        }
+        if (winnerSideId === undefined) {
+          throw new RangeError(
+            "Runtime.resolveContested: resolution.winnerId must be firstId or secondId",
+          );
+        }
+      }
     }
 
     // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`markContested` と同じ作法。
@@ -5414,6 +5444,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       id: MemoryId,
       memory: Memory | undefined,
       otherId: MemoryId,
+      otherMemory: Memory | undefined,
     ): ResolveContestedSideOutcome => {
       if (memory === undefined) {
         return { memoryId: id, kind: "not_found" };
@@ -5421,7 +5452,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (memory.status !== "contested") {
         return { memoryId: id, kind: "status_not_contested", status: memory.status };
       }
-      if (memory.contestedWithId !== otherId) {
+      // 相互参照は、store が返した相手の id と比べる（`contestedWithId` も store の値である）。相手が見つからない
+      // ときは、今どおり渡された id と比べる。
+      if (memory.contestedWithId !== (otherMemory?.id ?? otherId)) {
         // ADR 0046 が数え上げた「一対一が破れた状態」——今日の実装では
         // `markContestedPair`（ADR 0134）経由でしか `contestedWithId` は書かれないため
         // 到達しないはずだが、防御的に分類する（`PurgeOutcome.conflicted` と同じ立場）。
@@ -5435,15 +5468,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
 
     const found = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`markContested` と同じ形）。
+    const lookupKey = memoryLookupKeyFor([firstId, secondId]);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
 
-    const firstMemory = byId.get(firstId);
-    const secondMemory = byId.get(secondId);
-    const firstSide = classify(firstId, firstMemory, secondId);
-    const secondSide = classify(secondId, secondMemory, firstId);
+    const firstMemory = byId.get(lookupKey(firstId));
+    const secondMemory = byId.get(lookupKey(secondId));
+    const firstSide = classify(firstId, firstMemory, secondId, secondMemory);
+    const secondSide = classify(secondId, secondMemory, firstId, firstMemory);
     if (firstSide.kind !== "eligible" || secondSide.kind !== "eligible") {
       return { supported: true, outcome: { kind: "ineligible", sides: [firstSide, secondSide] } };
     }
@@ -5454,6 +5489,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 載せる——解決のときに `contested_with_id` はクリアされるので、`both_active` の対は監査ログに
     // 残さないと誰と対だったかが消える。敗者の `superseded` は `supersededById` も持つ（値は同じ）が、
     // 同じキーで相手を引けるように `contestedWithId` も入れる。
+    // meta に載せる id（`contestedWithId`・`supersededById`）は store が返した id である（渡された id ではない）
+    // ——列の値と揃える（`@mnemora/postgres` に大文字の UUID を渡しても、この meta は小文字になる）。
     const buildMeta = (contestedWithId: MemoryId): Record<string, unknown> =>
       opts?.reason === undefined
         ? { reason: "contested_resolved", resolution: resolutionKind, contestedWithId }
@@ -5495,14 +5532,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       if (resolution.kind === "both_active") {
         return { id, status: "active", event: buildEvent("updated") };
       }
-      if (id === resolution.winnerId) {
+      if (id === winnerSideId) {
         return { id, status: "active", event: buildEvent("updated") };
       }
+      // store へ渡す `supersededById` は渡された `winnerId` のまま（store へ渡す値は変えない）。meta には
+      // 勝者の store の id（＝この側の相手）を載せる。
       return {
         id,
         status: "superseded",
         supersededById: resolution.winnerId,
-        event: buildEvent("superseded", resolution.winnerId),
+        event: buildEvent("superseded", contestedWithId),
       };
     };
 
@@ -5510,8 +5549,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       const { first, second } = await resolveContestedPair.call(
         deps.memoryStore,
         ctx,
-        buildSide(firstId, firstMemory!, secondId),
-        buildSide(secondId, secondMemory!, firstId),
+        buildSide(firstId, firstMemory!, secondMemory!.id),
+        buildSide(secondId, secondMemory!, firstMemory!.id),
       );
       return { supported: true, outcome: { kind: "resolved", first, second } };
     } catch (error) {
@@ -5519,14 +5558,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 安全弁（`markContested` と同じ形。1回だけ再読して打ち切る——上限の無い再試行
         // ループを作らない）。
         const refetched = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
-        const refetchedById = new Map(refetched.map((m) => [m.id, m]));
+        const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
         return {
           supported: true,
           outcome: {
             kind: "conflict",
             conflicts: [
-              { id: firstId, observedStatus: refetchedById.get(firstId)?.status ?? null },
-              { id: secondId, observedStatus: refetchedById.get(secondId)?.status ?? null },
+              {
+                id: firstId,
+                observedStatus: refetchedById.get(lookupKey(firstId))?.status ?? null,
+              },
+              {
+                id: secondId,
+                observedStatus: refetchedById.get(lookupKey(secondId))?.status ?? null,
+              },
             ],
           },
         };
