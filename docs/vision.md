@@ -140,6 +140,8 @@ mnemora が明示的にスコープ外とするもの。
 | **Subject** | テナント内の**分割。整理の単位。** 跨いでも事故ではない。 |
 | **Embedding Space** | (モデル, 次元) の組。mnemora は次元を固定せず、「空間」を単位にする。 |
 
+**⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: 上の表の「(モデル, 次元) の組」は、実装では `(provider, model, dimensions)` の3つ組である（`@mnemora/core` の `EmbeddingSpaceId`）。埋め込みの表の名前も、この3つから作る（`packages/postgres/src/embedding-space-table.ts`）。表の文言は当時の記録として残す。
+
 ### Tenant と Subject を混同しない
 
 この二つはよく似た概念に見えるが、意味が異なる。**Tenant は隔離境界であり、Subject は整理の単位である。**
@@ -147,6 +149,17 @@ mnemora が明示的にスコープ外とするもの。
 例として Discord Bot を考える。ひとつの Bot がいくつものサーバー（Discord のギルド）に導入されるとき、**「Bot の導入先ギルド」が Tenant** になる。あるギルドの記憶が別のギルドに漏れることは、設計上あってはならない事故である。一方、**「そのギルド内の各ユーザー」は Subject** になる。同じギルド内でユーザー A の記憶とユーザー B の記憶が混ざることは望ましくないが、これは整理の失敗であって、Tenant を跨ぐ事故とは性質が違う。
 
 `tenantId` は全テーブルで NOT NULL とし、すべての一意制約・索引の先頭に置く。`subjectId` はテナント内の分割軸のひとつにすぎない。この非対称性——**Tenant を跨ぐことは事故だが、Subject を跨ぐことは事故ではない**——を、用語としても実装としても曖昧にしない。詳細は `docs/architecture.md` の multi-tenant の節に譲る。
+
+**⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: 上の「全テーブルで NOT NULL・すべての一意制約・索引の先頭」は設計の意図であり、今の `@mnemora/postgres` の構成には次の例外がある（マイグレーションを全部当てた DB の `information_schema`・`pg_index` で確かめた。本文は意図の記録として残す）。
+
+- **NOT NULL**: `tenant_id` を持つ表では、どれも NOT NULL である。マイグレーションの台帳 `_mnemora_migrations` だけは `tenant_id` の列を持たない（テナントのデータではない）。
+- **先頭が `tenant_id` でない索引**:
+  - 代理キーの主キー——`labels`・`memories`・`memory_events`・`observations`・`outbox`・`recalls` の `id`（uuid）。
+  - `idx_memories_contested_with`（`contested_with_id` が先頭）。
+  - 埋め込み空間ごとの HNSW 索引 `idx_memory_embeddings_hnsw_<space>`（`embedding` が先頭。ベクトル索引は `tenant_id` を先頭に置けない）。
+  - 台帳の主キー（`name`）。
+
+⟹ テナントで絞るのは、索引の先頭列ではなく、問い合わせの述語（`tenant_id = $1`）である。
 
 ## 名前について
 
