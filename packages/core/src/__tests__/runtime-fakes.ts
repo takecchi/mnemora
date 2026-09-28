@@ -215,6 +215,14 @@ class FakeBackingStore {
    */
   activitySeq = new Map<string, number>();
   /**
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `tenant_subject_activity` 相当。`tenantId` → `subjectId` → `S_x`
+   * の2段の `Map`。`FakeMemoryStore.createRecall`（書く側）と
+   * `FakeTenantSettingsStore.getSubjectActivitySeqs`/`hasSubjectActivityCounters`
+   * （読む側）が同じ `FakeBackingStore` を共有する——`activitySeq`（上）と同じ理由。
+   */
+  subjectActivitySeq = new Map<string, Map<string, number>>();
+  /**
    * Issue #201 PR-B（[ADR 0323](../../../docs/decisions/0323-taxonomy-recall-filter.md)）:
    * `labels` 相当。`packages/testkit` の `InMemoryMemoryStore` と同じ key 形式
    * （`JSON.stringify([tenantId, name])`）——`recall-taxonomy-filter.test.ts` が `listLabels`/
@@ -251,19 +259,28 @@ class FakeBackingStore {
  * - 軸が1本も渡されていない（ゲート無効）: 常に `false`（0件と数える）
  */
 function isDecayedForScope(
-  memory: Pick<Memory, "decayFloorAt" | "decayFloorSeq">,
+  memory: Pick<Memory, "decayFloorAt" | "decayFloorSeq" | "subjectId">,
   scope: RecallScope,
+  // ADR 0348（Issue #338）: このテナントの subject 単位カウンタ（`Map<subjectId, S_x>`）。
+  // `scope.decayFloorSeqUsesSubjectCounters` が true のときだけ参照する。
+  subjectActivitySeqByTenant: Map<string, number> | undefined,
 ): boolean {
   const { decayFloorAtAfter, decayFloorSeqAfter } = scope;
   if (decayFloorAtAfter === undefined && decayFloorSeqAfter === undefined) return false;
   const wallAlive =
     decayFloorAtAfter === undefined ? undefined : memory.decayFloorAt > decayFloorAtAfter;
-  const activityAlive =
+  const effectiveDecayFloorSeqAfter =
     decayFloorSeqAfter === undefined
+      ? undefined
+      : scope.decayFloorSeqUsesSubjectCounters === true && memory.subjectId != null
+        ? decayFloorSeqAfter + (subjectActivitySeqByTenant?.get(memory.subjectId) ?? 0)
+        : decayFloorSeqAfter;
+  const activityAlive =
+    effectiveDecayFloorSeqAfter === undefined
       ? undefined
       : memory.decayFloorSeq === undefined ||
         memory.decayFloorSeq === null ||
-        memory.decayFloorSeq > decayFloorSeqAfter;
+        memory.decayFloorSeq > effectiveDecayFloorSeqAfter;
   if (scope.decayFloorAnyAxis === true && wallAlive !== undefined && activityAlive !== undefined) {
     return !(wallAlive || activityAlive);
   }
@@ -1266,7 +1283,7 @@ export class FakeMemoryStore implements MemoryStore {
       // `totalInScope`・群カウント・目次帯のいずれからも除かれない（スコープ内に在る）。
       // 述語は `PostgresMemoryStore.aggregateScope` の `isDecayed` と、
       // `recall-runtime.ts` の `survivesDecayGate` の否定と、同じものでなければならない。
-      if (isDecayedForScope(memory, scope)) {
+      if (isDecayedForScope(memory, scope, this.backing.subjectActivitySeq.get(ctx.tenantId))) {
         filteredDecayed += 1;
       }
       const key = memory.subjectId ?? null;
@@ -1388,6 +1405,20 @@ export class FakeMemoryStore implements MemoryStore {
     if (record.advanceActivityClock === true) {
       const current = this.backing.activitySeq.get(ctx.tenantId) ?? 0;
       this.backing.activitySeq.set(ctx.tenantId, current + 1);
+    } else if (
+      // ADR 0348（Issue #338）: `T` ではなく `S_x`（subject 単位）を進める。
+      typeof record.advanceActivityClock === "object" &&
+      record.advanceActivityClock !== null &&
+      record.advanceActivityClock.scope === "subject"
+    ) {
+      const subjectId = record.advanceActivityClock.subjectId;
+      let bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
+      if (bySubject === undefined) {
+        bySubject = new Map<string, number>();
+        this.backing.subjectActivitySeq.set(ctx.tenantId, bySubject);
+      }
+      const current = bySubject.get(subjectId) ?? 0;
+      bySubject.set(subjectId, current + 1);
     }
     return id;
   }
@@ -1504,6 +1535,10 @@ export class FakeMemoryStore implements MemoryStore {
     // 同じ形に揃える——境界の非対称（ゲートは狭義 `>`、掃引は境界を含む `<=`）を
     // 1バイトも変えずに写す。`'either'` は AND（両方の軸で沈んでいるものだけ掃く）。
     const passesWall = (m: Memory): boolean => m.decayFloorAt.getTime() <= nowMs;
+    // ADR 0348（Issue #338）: `usesSubjectActivityCounters` が true のときだけ、
+    // その Memory の subjectId に対応する `S_x` を足す（postgres 側
+    // `activityFloorSeqDeadCondition` と同じ式）。
+    const subjectActivitySeqByTenant = this.backing.subjectActivitySeq.get(ctx.tenantId);
     const passesActivity = (m: Memory): boolean => {
       if (opts.nowSeq === undefined) {
         throw new Error(
@@ -1511,7 +1546,12 @@ export class FakeMemoryStore implements MemoryStore {
         );
       }
       const decayFloorSeq = m.decayFloorSeq ?? null;
-      return decayFloorSeq !== null && decayFloorSeq <= opts.nowSeq;
+      if (decayFloorSeq === null) return false;
+      const effectiveNowSeq =
+        opts.usesSubjectActivityCounters === true && m.subjectId != null
+          ? opts.nowSeq + (subjectActivitySeqByTenant?.get(m.subjectId) ?? 0)
+          : opts.nowSeq;
+      return decayFloorSeq <= effectiveNowSeq;
     };
     const passesClock = (m: Memory): boolean => {
       if (clock === "wall") return passesWall(m);
@@ -2228,12 +2268,22 @@ export class FakeVectorStore implements VectorStore {
       const seqAxisAfter = opts.filter.decayFloorSeqAfter;
       const wallAlive =
         wallAxisAfter === undefined ? undefined : memory.decayFloorAt > wallAxisAfter;
-      const seqAlive =
+      // ADR 0348（Issue #338）: `decayFloorSeqUsesSubjectCounters` が true のときだけ、
+      // この行の subjectId に対応する `S_x` を足す（postgres 側
+      // `activityFloorSeqAliveCondition` と同じ式）。
+      const effectiveSeqAxisAfter =
         seqAxisAfter === undefined
+          ? undefined
+          : opts.filter.decayFloorSeqUsesSubjectCounters === true && memory.subjectId != null
+            ? seqAxisAfter +
+              (this.backing.subjectActivitySeq.get(ctx.tenantId)?.get(memory.subjectId) ?? 0)
+            : seqAxisAfter;
+      const seqAlive =
+        effectiveSeqAxisAfter === undefined
           ? undefined
           : memory.decayFloorSeq === null || memory.decayFloorSeq === undefined
             ? true
-            : memory.decayFloorSeq > seqAxisAfter;
+            : memory.decayFloorSeq > effectiveSeqAxisAfter;
       if (
         opts.filter.decayFloorAnyAxis === true &&
         wallAlive !== undefined &&
@@ -2831,6 +2881,38 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async getActivitySeq(ctx: Ctx): Promise<number> {
     if (this.backing === undefined) return 0;
     return this.backing.activitySeq.get(ctx.tenantId) ?? 0;
+  }
+
+  /**
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `backing.subjectActivitySeq` に、このテナントの行が1本でもあるか。
+   */
+  async hasSubjectActivityCounters(ctx: Ctx): Promise<boolean> {
+    if (this.backing === undefined) return false;
+    const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
+    return bySubject !== undefined && bySubject.size > 0;
+  }
+
+  /**
+   * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
+   * （Issue #338）: `backing.subjectActivitySeq` から、渡した `subjectIds` ぶんを
+   * まとめて読む。行が無い `subjectId` はキーを省略する。
+   */
+  async getSubjectActivitySeqs(
+    ctx: Ctx,
+    subjectIds: string[],
+  ): Promise<Record<string, number>> {
+    const out: Record<string, number> = {};
+    if (this.backing === undefined) return out;
+    const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);
+    if (bySubject === undefined) return out;
+    for (const id of subjectIds) {
+      const value = bySubject.get(id);
+      if (value !== undefined) {
+        out[id] = value;
+      }
+    }
+    return out;
   }
 
   /**
