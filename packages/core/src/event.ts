@@ -81,8 +81,9 @@ export interface EventActor {
   /** 誰が行ったか。`"system"` は runtime 自身（自動の job など）、`"human"`・`"clone"` は呼び出し側が申告する（上の doc）。 */
   type: "human" | "system" | "clone";
   /**
-   * 中身は検査しない。NUL（U+0000）か孤立サロゲートを含むと、`@mnemora/postgres` では監査ログの書き込みが
-   * 失敗する——{@link MemoryEvent.meta} の doc 参照（Issue #1211）。
+   * 中身は検査しない。NUL（U+0000）か孤立サロゲートを含むと、`@mnemora/postgres` でも
+   * `@mnemora/testkit` の fixture でも監査ログの書き込みが失敗する——
+   * {@link MemoryEvent.meta} の doc 参照（Issue #1211）。
    */
   id?: string;
 }
@@ -144,14 +145,20 @@ export interface MemoryEvent {
    * | `-0` | `0` に変わる | そのまま保持する |
    * | `undefined` の欄（`actor.id` も） | 欄ごと消える | `undefined` の欄が残る |
    * | BigInt | 例外（`append` が失敗する） | そのまま保持する |
-   * | 文字列の中の NUL（U+0000）・孤立サロゲート | 例外（書き込みが失敗する） | そのまま保持する |
+   * | 文字列の中の NUL（U+0000）・孤立サロゲート | 例外（書き込みが失敗する） | 例外（`Error`。状態もイベントも書く前に投げる） |
    * | 関数・Symbol（欄の値として。`actor` の欄も） | その欄が消える（配列の要素なら `null`）。残りを書いて成功する | 例外（`DataCloneError`。`structuredClone` が写せない）。状態もイベントも書く前に投げる（PR #1231） |
    *
    * NUL・孤立サロゲートの行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
    * `@mnemora/postgres` では、状態の書き換えとイベントが同じトランザクションにあるので、両方とも取り消され、
    * 途中まで書かれたものは残らない（`forget` は `{ kind: "failed" }` を返し、`markContested` は DB の例外を投げる）。
-   * testkit の fixture は状態を書き換え、文字列をそのまま監査ログに残す。
-   * Observation・Memory の `jsonb` の欄では fixture も NUL を拒む（PR #1073）が、イベントの側にはその検査が無い。
+   * **testkit の fixture も、2026-09-29 から同じ入力を拒むようになった**（[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)、
+   * オーナーの回答 ask_human `3f3411c5` を受けて。以前は状態を書き換え、文字列をそのまま監査ログに残していた）
+   * ——`assertStorableMemoryEvent`（`packages/testkit/src/__fixtures__/memory-event-check.ts`）が状態を書き換える前に
+   * `Error` を投げる。`Runtime.forget` はそれを捕まえて `{ kind: "failed" }` にし、`Runtime.markContested` は
+   * 捕まえずに外へ投げる——どちらも `@mnemora/postgres` が同じ口で外へ見せる形と揃う。
+   * Observation・Memory の `jsonb` の欄では fixture も NUL を拒む（PR #1073）が、孤立サロゲートは #1075 のとおり
+   * Postgres の `jsonb` だけが拒む（イベントの側とは違う——イベントの `meta`/`actor` はこの PR で NUL・孤立サロゲートの
+   * 両方を拒むようになったが、Observation/Memory の `jsonb` 欄の孤立サロゲートは対象外のまま。#1211 の「重ならないもの」）。
    * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`event-meta-roundtrip.postgres.test.ts`。
    * `Runtime` の口は `forget` と `markContested` で当てた）。関数・Symbol の行は 2026-09-28 に足した
    * （同じファイル。`EventStore.append` と `MemoryStore.updateStatusWithEvent` で当てた）。
