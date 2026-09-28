@@ -409,6 +409,21 @@ export interface MemoryStore {
    * ⟹ 呼び出し側は「成功した」ことだけでは、書き込んだ値と読み返した値が一致するとは
    * 限らない——Postgres 経由では、`text` 列の欄の孤立サロゲートは静かに書き換わり、
    * `jsonb` 列の欄では書き込みそのものが失敗する。
+   *
+   * ⚠ **`input.provenance` の中身は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と
+   * `@mnemora/testkit` の fixture へ同じ入力を当てて確かめた）。型（`Provenance`、`provenance.ts`）の欄が欠けている・
+   * 値域の外にある（例: `stated` の `sourceObservationId`・`at` が無い、`consolidated` の `sources` が空、
+   * `imported` の `batchId` が無い、`inferred` の `confidence` が `2`、`at` が空文字）ものも、そのまま書いて
+   * 返す。**返った Memory は `MemorySchema` を通らないことがある。**`provenance.sourceObservationId` と
+   * `input.sourceObservationId` が食い違っていても検査しない。
+   * 拒むのは次の3つだけで、どちらの adapter でも例外になる（投げる例外の種類は adapter で違う）:
+   * - `provenance.kind` が列挙（`stated`・`inferred`・`consolidated`・`reflected`・`imported`）に無い
+   *   ——Postgres は DB の CHECK の例外（drizzle が包んだ `Failed query`）、fixture は
+   *   `memories.provenance_kind must be one of …` を投げる。
+   * - `provenance.kind` が `stated`・`inferred` なのに `input.sourceObservationId` が `null`
+   *   ——Postgres は DB の CHECK の例外、fixture は `provenance.kind "…" requires sourceObservationId` を投げる。
+   * - `provenance` が `null`——どちらも `TypeError`（`provenance.kind` を読めない）。
+   * `Runtime` は `provenance` を自分で組み立てて渡すので、ここに届くのは store を直接呼ぶ側である。
    */
   createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
   /**
@@ -424,6 +439,10 @@ export interface MemoryStore {
    * 🔴 `createMemory` と同じ [ADR 0140](../../../../docs/decisions/0140-contested-write-side-companion-required.md)
    * の制約を受ける。⚠ `input.contestedWithId` のテナント一致も `createMemory` と同じく
    * 検査しない（`isContestedWithoutCompanion` の doc コメント、Issue #854）。
+   *
+   * ⚠ `input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は `MemorySchema` を
+   * 通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い `stated`/`inferred`・
+   * `null` の3つだけ。`createMemory` の doc 参照）。
    */
   createMemoryWithOutbox(
     ctx: Ctx,
@@ -789,6 +808,14 @@ export interface MemoryStore {
    * `RecallId` から `{ recallId, activitySeq? }` のような形へ変えること自体が破壊的変更
    * になる（`docs/autonomy.md`「してはいけないこと」表）。進めた後の値が要る呼び出し側は
    * `TenantSettingsStore.getActivitySeq` を別途読むこと。
+   *
+   * ⚠ **`record` の中身の形は検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と `@mnemora/testkit` の
+   * fixture で確かめた）。拒むのは、列の型が受け付けない値——NUL を含む値と、JSON にできない必須の欄——だけである
+   * （Postgres は `text`・`jsonb` 列が拒み、fixture はそれに合わせて先に投げる）。`omitted`・`usage`・`indexBand`・`explain`・`returnedMemories`（その `score` など）が
+   * それぞれの型（`OmissionSchema`・`RecallUsageSchema`・`IndexBandSchema`・`StageTraceSchema`・`ScoreBreakdownSchema`）
+   * に合わなくても、そのまま書く。⟹ **`getRecall` が返す `RecallRecord` は、それらの schema を通らないことがある**
+   * （例: `returnedMemories` の要素の `score` が `{}` のまま読み戻る）。`Runtime` の `recall()` は検証した値だけを
+   * 渡すので、ここに届くのは store を直接呼ぶ側である。
    */
   createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId>;
   /**
@@ -940,6 +967,10 @@ export interface MemoryStore {
    * `createMemory` と同じく検査しない（`isContestedWithoutCompanion` の doc コメント、
    * Issue #854）。`supersede[].supersededByIndex` は `news` への索引であり
    * `MemoryId` を直接受け取らないため、この注意は当たらない（上の doc 参照）。
+   *
+   * ⚠ `news[i].input.provenance` の中身も `createMemory` と同じく検査しない（返った Memory は
+   * `MemorySchema` を通らないことがある。拒むのは列挙に無い `kind`・列の `sourceObservationId` が無い
+   * `stated`/`inferred`・`null` の3つだけ。`createMemory` の doc 参照）。
    */
   supersedeWithNewMemories?(
     ctx: Ctx,
