@@ -105,3 +105,41 @@ fixture）で縛っていた。
   全件が落ちても投げない・`meta` のキーを常に付ける・外側の `message` を使う・確認を `reextract` にも入れる、の
   8つがそれぞれ赤になった。
 - 確かめていないこと: core の Fake（`packages/core/src/__tests__/runtime-fakes.ts`）での同じ当て方。並行の2本の形。
+
+## 追記（2026-09-28）: core の Fake での当て方と、並行の2本の実測
+
+上の「確かめていないこと」の2点を、テストだけで確かめた。**振る舞いは変えていない。**
+
+### core の Fake
+
+- `packages/core/src/__tests__/extract-redelivery-unsaveable-fake.test.ts` で、上の2本の歯と同じ場面を
+  `createFakeRuntimeStores()` に当てた。**結果は Postgres・testkit の fixture と同じだった**（本文の NUL の候補だけを
+  落とし、`meta.droppedCandidates` の `code` は testkit の fixture と同じく `null`。全件が落ちたら投げる。逐次の
+  再配達では2回目が LLM を呼ばず書かない。旧い版だけなら抽出する。一部だけ書いて止まった残りは `reextract` で回復する）。
+- 語の多い 1MB 超の本文は当てていない。Fake は testkit の fixture と同じく受け入れる（Postgres は tsvector の
+  上限で拒む）。`Runtime.observe` の doc の「保存できる値の範囲は store で違う」のとおりである。
+- 変異試験（戻した後、緑に戻ることも確かめた）: 決定1の確認を外すと再配達の5件が赤、候補を落とさずに投げると
+  NUL の2件が赤になった。
+
+### 並行の2本（Postgres で実測）
+
+`packages/postgres/src/__tests__/tick-concurrent-extract.postgres.test.ts`（Postgres だけ）。**今の振る舞いを縛る歯で
+あり、望ましい姿ではない。**1本のテストの中で2つの `tick` を `Promise.all` で走らせ、順序は時計と門で決めた——
+①が claim して決定1の確認を通り LLM の中で止まる → 時計をリースより先へ進め、②が同じジョブを claim（attempts 2）し、
+決定1の確認を通って書いて `complete` する → ①を進める。
+
+| ①の LLM | ②の LLM | 残る Memory（その Observation から） | `created` |
+|---|---|---|---|
+| `候補A` | `候補B` | `候補A`・`候補B` が両方 `active` | 2件（`extracted`） |
+| `候補A` | `候補A` | `候補A` の1件（冪等の鍵で同じ行に当たる） | 1件 |
+| 失敗 | `候補B` | `候補B` と全文フォールバック（`発話`）が両方 `active` | 2件（`extracted`・`extraction_failed_whole_observation_fallback`） |
+
+- どの形でも、extract の行は②が `complete` する（attempts 2・`claimed_by` は②）。①の `TickResult` は
+  `processed: 0`・`failed: 0`・`leaseConflicts` に `extract` の `complete` が1件。embed のジョブは残った Memory の数だけ積まれる。
+- ⟹ 「引き受けた負債」の1行目のとおり、**決定1の確認は並行の2本を塞がない。**形は Issue #1092 本文の L1・L5 と
+  同じで、この ADR の前から変わっていない。
+- 同じテストを5回続けて走らせ、5回とも同じ結果だった。
+- 変異試験（戻した後、緑に戻ることも確かめた）: リース競合の `complete` を `processed` にも数えると3件が赤、
+  候補を書く直前にもう一度同じ確認を入れる（並行を塞ぐ側へ倒す）と、違う本文と LLM の失敗の2件が赤になった
+  （同じ本文の1件は、どちらでも1件なので緑のまま）。
+- 当てていないこと: ②が先に LLM の中で止まり①が先に書く順、3本以上、testkit の fixture と core の Fake での並行。
