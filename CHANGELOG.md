@@ -251,6 +251,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/local-embedding` の読み込み失敗のメッセージは、`retry.attempts` に整数でない値（例: `2.5`）を渡すと、実際には2回しか試していないのに「2.5 回試した」と書いていた**（[PR #1331](https://github.com/takecchi/mnemora/pull/1331)）——実際に試した回数を書く。⭕ 非破壊（例外の文面だけが変わる。投げる入力・試す回数は変わらない）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/local-embedding` の読み込み失敗と `unknown_input_limit` のメッセージは、再変換したモデルを「`options.repo` に指せば使える」とだけ案内していたが、`repo` だけを差し替えると構築時に例外になる**（[PR #1331](https://github.com/takecchi/mnemora/pull/1331)）——`options.modelId` にそのモデルを名乗る id も渡すよう案内する（メッセージの先頭の形は変えていない）。⭕ 非破壊（例外の種類・`kind`・投げる条件は変えず、文面だけが変わる）。クローン miku の判断であり、オーナーの判断ではない（13回目の棚卸しで足した。上の追記13）。
 - **`@mnemora/openai` の `completeStructured()` は、スキーマがもともと `null` を許す位置（必須の `.nullable()` の欄・`.nullable()` の配列の要素・根の `.nullable()`）にモデルが `null` を返すと、その `null` まで消して `ZodError` を投げていた**（[PR #1337](https://github.com/takecchi/mnemora/pull/1337)）——`null` を消して検査して落ちたときだけ、元のスキーマが許す位置の `null` を残して検査し直す（それでも落ちれば最初の `ZodError` を投げる）。`.optional()` と `.nullable().optional()`（[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)）の欄の `null` は今どおり省略になり、1段目で通る入力の結果は変わらない。⭕ 非破壊（例外が減る側。公開の型は変わらない）。クローン miku の判断であり、オーナーの判断ではない。
+- **`@mnemora/local-embedding` の読み込みの再試行は、`retry.attempts` に整数でない値（例: `2.5`）を渡すと、最後の試行の後にも1回余分に待っていた**（[PR #1340](https://github.com/takecchi/mnemora/pull/1340)）——次の試行があるときだけ待つ。⭕ 非破壊（試行の回数と投げる例外は変わらず、待ち時間だけが短くなる。整数の `attempts` では変わらない）。クローン miku の判断であり、オーナーの判断ではない。
 
 ---
 

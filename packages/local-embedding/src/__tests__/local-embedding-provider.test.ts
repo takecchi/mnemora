@@ -344,6 +344,33 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     expect(waited).toEqual([100, 200]);
   });
 
+  it("attempts が整数でなくても、最後の試行の後には待たない（試行の回数と投げる例外は変わらない）", async () => {
+    const waited: number[] = [];
+    let calls = 0;
+    const createPipeline: CreateLocalEmbeddingPipeline = async () => {
+      calls += 1;
+      throw new Error(`失敗 ${calls} 回目`);
+    };
+    const provider = new LocalEmbeddingProvider({
+      createPipeline,
+      retry: { attempts: 2.5, delayMs: (attempt) => attempt * 100 },
+      sleep: async (ms) => {
+        waited.push(ms);
+      },
+    });
+
+    const error = await provider.embed(ctx, ["テキスト"]).then(
+      () => expect.fail("例外が投げられなかった"),
+      (reason: unknown) => reason as Error,
+    );
+    // 2.5 ⟹ 試すのは2回（attempt 1・2）。待つのはその間の1回だけ。
+    expect(calls).toBe(2);
+    expect(waited).toEqual([100]);
+    expect(error.message).toMatch(/^LocalEmbeddingProvider: モデルを読み込めなかった/);
+    expect(error.message).toContain("2 回試したが取得できなかった");
+    expect((error.cause as Error).message).toBe("失敗 2 回目");
+  });
+
   it("最後まで失敗したときの cause は、最後の試行のエラーである", async () => {
     let calls = 0;
     const createPipeline: CreateLocalEmbeddingPipeline = async () => {
