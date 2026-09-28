@@ -281,6 +281,42 @@ describe("parseMigrateCliOptions: 不正なスキーマ名", () => {
   });
 });
 
+describe("parseMigrateCliOptions: 環境変数の空文字（今の振る舞い。README「専用スキーマを指定する」）", () => {
+  // 空文字は「未指定」に倒さない。MNEMORA_ANALYZE_MEMORIES だけは空文字を偽として扱う（上の describe）。
+  it("MNEMORA_SCHEMA= は未指定ではなく、不正なスキーマ名としてエラーになる", () => {
+    const result = parseMigrateCliOptions([], { MNEMORA_SCHEMA: "" });
+    expectErr(result);
+    expect(result.error.message).toMatch(/unsafe SQL identifier/);
+  });
+
+  it("MNEMORA_EXTENSION_SCHEMA= だけを設定すると、--schema 無しの --extension-schema と同じエラーになる", () => {
+    const result = parseMigrateCliOptions([], { MNEMORA_EXTENSION_SCHEMA: "" });
+    expectErr(result);
+    expect(result.error.message).toMatch(/--schema/);
+  });
+
+  it("MNEMORA_SCHEMA を設定して MNEMORA_EXTENSION_SCHEMA= にすると、不正なスキーマ名としてエラーになる", () => {
+    const result = parseMigrateCliOptions([], {
+      MNEMORA_SCHEMA: "s",
+      MNEMORA_EXTENSION_SCHEMA: "",
+    });
+    expectErr(result);
+    expect(result.error.message).toMatch(/unsafe SQL identifier/);
+  });
+
+  it("MNEMORA_EXTENSION_MODE= は create / verify 以外の値としてエラーになる", () => {
+    const result = parseMigrateCliOptions([], { MNEMORA_EXTENSION_MODE: "" });
+    expectErr(result);
+    expect(result.error.message).toMatch(/--extension-mode/);
+  });
+
+  it("引数が環境変数に勝つのは空文字でも同じ: --schema s があれば MNEMORA_SCHEMA= は見ない", () => {
+    const result = parseMigrateCliOptions(["--schema", "s"], { MNEMORA_SCHEMA: "" });
+    expectOk(result);
+    expect(result.options.schema).toBe("s");
+  });
+});
+
 describe("parseMigrateCliOptions: 未知の引数・値の欠けた引数", () => {
   it("未知のオプションはエラーになる", () => {
     const result = parseMigrateCliOptions(["--foo"], {});
