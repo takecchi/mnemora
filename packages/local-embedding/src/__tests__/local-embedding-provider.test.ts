@@ -391,6 +391,27 @@ describe("読み込みの再試行 (Issue #261 / ADR 0141)", () => {
     expect((single as Error).message).not.toContain("回試したが取得できなかった");
   });
 
+  it("メッセージの試行回数は、実際に試した整数の回数である（attempts が整数でなくても設定値をそのまま書かない）", async () => {
+    let calls = 0;
+    const createPipeline: CreateLocalEmbeddingPipeline = async () => {
+      calls += 1;
+      throw new Error("落ちる");
+    };
+    const error = await new LocalEmbeddingProvider({
+      createPipeline,
+      sleep: async () => {},
+      retry: { attempts: 2.5 },
+    })
+      .embed(ctx, ["テキスト"])
+      .then(
+        () => null,
+        (reason: unknown) => reason,
+      );
+    expect(calls).toBe(2);
+    expect((error as Error).message).toContain("2 回試したが取得できなかった");
+    expect((error as Error).message).not.toContain("2.5 回");
+  });
+
   /**
    * 🔴 **`kind` の付いた失敗（ADR 0090）はリトライしない。**
    * 入力・設定の問題であり、同じ入力で再試行しても結果は変わらない

@@ -63,6 +63,45 @@ describe("toAnthropicRequest", () => {
     expect(result.system).toBeUndefined();
     expect("system" in result).toBe(false);
   });
+
+  it("content が空文字の role: 'system' のメッセージだけなら、system キー自体を持たない（空の system を送らない）", () => {
+    const result = toAnthropicRequest({
+      system: "",
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+      ],
+    });
+    expect("system" in result).toBe(false);
+    expect(result.messages).toEqual([{ role: "user", content: "hi" }]);
+  });
+
+  it("空文字の system は連結に入れない（区切りの改行も増やさない）", () => {
+    const result = toAnthropicRequest({
+      system: "基本指示",
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+        { role: "system", content: "追加指示" },
+      ],
+    });
+    expect(result.system).toBe("基本指示\n追加指示");
+  });
+
+  it("complete も、空の system を messages.create に送らない", async () => {
+    const create = vi.fn().mockResolvedValue({ stop_reason: "end_turn", ...textResponse("x") });
+    const provider = new AnthropicLLMProvider({
+      model: "m",
+      client: { messages: { create } } as never,
+    });
+    await provider.complete(ctx, {
+      messages: [
+        { role: "system", content: "" },
+        { role: "user", content: "hi" },
+      ],
+    });
+    expect(create.mock.calls[0]?.[0]).not.toHaveProperty("system");
+  });
 });
 
 describe("AnthropicLLMProvider.complete", () => {

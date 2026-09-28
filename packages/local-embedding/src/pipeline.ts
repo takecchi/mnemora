@@ -82,7 +82,9 @@ export interface LocalEmbeddingPipeline {
   readonly maxInputTokens: number;
   /**
    * 各テキストのトークン数を、**切り詰めずに**数えて返す
-   * （`texts` と同じ順・同じ長さの配列）。推論の前に上限超過を検出するために使う。
+   * （`texts` と同じ順・同じ長さの配列）。
+   * ⚠ `LocalEmbeddingProvider` はこれも `maxInputTokens` も読まない。上限超過を推論の前に検出するのは
+   * `embed` の実装の仕事である（{@link buildLocalEmbeddingPipeline} の `embed` はそうしている）。
    */
   countTokens(texts: string[]): number[];
   /** 実際にベクトルへ変換する。 */
@@ -159,7 +161,8 @@ export function buildLocalEmbeddingPipeline(
       `LocalEmbeddingProvider: モデルが入力トークン数の上限を宣言していない` +
         `（tokenizer の model_max_length = ${String(maxInputTokens)}）。` +
         `上限が分からないと、入力が黙って切り捨てられたことを検出できない。` +
-        `tokenizer_config.json に model_max_length を持つモデルを options.repo に指すか、` +
+        `tokenizer_config.json に model_max_length を持つモデルを options.repo に指す（options.modelId にそのモデルを名乗る id も渡す。` +
+        `repo だけを差し替えると構築時に例外になる）か、` +
         `options.createPipeline で pipeline を注入すること`,
     );
   }
