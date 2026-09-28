@@ -28,7 +28,8 @@ import {
  *
  * - `{ query }` は `recall()` の `memories` を `retrievedVia` によらず全部採る。連想枠（既定 on）で
  *   返った記憶も適格になり、`query.association: null` で外れる。
- * - `{ memoryIds }` は有効期間を見ない。統合先は有効期間を持たない（Issue #1188）。
+ * - どの形でも、いまの時点で有効期間の外にある記憶は統合元にしない（`expired`/`not_yet_valid`）。統合先は
+ *   今どおり有効期間を持たない（Issue #1188。2026-09-29 に「有効期間を見ない」から変えた）。
  * 2実装（Postgres・testkit の InMemory）で同じ結果になることも見る。
  */
 
@@ -165,27 +166,98 @@ describe("consolidate の対象の選び方（今の振る舞い）", () => {
         ]);
       });
 
-      it("{ memoryIds } は期限切れの記憶も統合し、統合先は有効期間を持たない（Issue #1188）", async () => {
-        const kit = await makeKit();
-        const expired = await add(kit, [1, 0, 0], {
-          validUntil: new Date("2026-01-01T00:00:00.000Z"),
-        } as Partial<NewMemory>);
-        const current = await add(kit, [0.95, 0.05, 0]);
+      it("有効期間の外にある記憶は、どの形でも統合元にしない（Issue #1188。2026-09-29 変更）", async () => {
+        const PAST = new Date("2026-01-01T00:00:00.000Z");
+        const FUTURE = new Date("2027-01-01T00:00:00.000Z");
 
-        const viaQuery = await kit.runtime.consolidate(ctx, {
-          target: { query: { vector: [1, 0, 0], limit: 5, association: null } },
-          dryRun: true,
-        });
-        expect(viaQuery.sources.map((s) => s.memoryId)).toEqual([current]);
+        // { memoryIds }: 期限切れ E と有効な F。E を除くと1件なので統合しない。
+        {
+          const kit = await makeKit();
+          const expired = await add(kit, [1, 0, 0], { validUntil: PAST } as Partial<NewMemory>);
+          const current = await add(kit, [0.95, 0.05, 0]);
+          const result = await kit.runtime.consolidate(ctx, {
+            target: { memoryIds: [expired, current] },
+          });
+          expect(result).toMatchObject({
+            outcome: "nothing_to_consolidate",
+            nothingReason: "single_eligible_source",
+            consolidatedMemoryId: null,
+            llmCalls: 0,
+          });
+          expect(result.sources).toEqual([
+            { memoryId: expired, kind: "expired", validUntil: PAST },
+            { memoryId: current, kind: "not_attempted" },
+          ]);
+          expect((await kit.memoryStore.get(ctx, expired))?.status).toBe("active");
+          expect((await kit.memoryStore.get(ctx, current))?.status).toBe("active");
+        }
 
-        const result = await kit.runtime.consolidate(ctx, {
-          target: { memoryIds: [expired, current] },
-        });
-        expect(result.outcome).toBe("consolidated");
-        const consolidated = await kit.memoryStore.get(ctx, result.consolidatedMemoryId!);
-        expect(consolidated?.status).toBe("active");
-        expect(consolidated?.validFrom ?? null).toBeNull();
-        expect(consolidated?.validUntil ?? null).toBeNull();
+        // { memoryIds }: 未到来 U と有効な F・G。U を除いた2件を統合し、統合先は今どおり有効期間を持たない。
+        {
+          const kit = await makeKit();
+          const future = await add(kit, [1, 0, 0], { validFrom: FUTURE } as Partial<NewMemory>);
+          const f = await add(kit, [0.95, 0.05, 0]);
+          const g = await add(kit, [0.9, 0.1, 0]);
+          const result = await kit.runtime.consolidate(ctx, {
+            target: { memoryIds: [future, f, g] },
+          });
+          expect(result.outcome).toBe("consolidated");
+          expect(result.sources).toEqual([
+            { memoryId: future, kind: "not_yet_valid", validFrom: FUTURE },
+            { memoryId: f, kind: "superseded", previousStatus: "active" },
+            { memoryId: g, kind: "superseded", previousStatus: "active" },
+          ]);
+          const consolidated = await kit.memoryStore.get(ctx, result.consolidatedMemoryId!);
+          expect(consolidated?.status).toBe("active");
+          expect(consolidated?.validFrom ?? null).toBeNull();
+          expect(consolidated?.validUntil ?? null).toBeNull();
+          expect((await kit.memoryStore.get(ctx, future))?.status).toBe("active");
+        }
+
+        // { seedMemoryId }: 期限切れの種は recall() を通らずに候補に入るが、統合元にはしない。
+        {
+          const kit = await makeKit();
+          const seed = await add(kit, [1, 0, 0], { validUntil: PAST } as Partial<NewMemory>);
+          const n1 = await add(kit, [0.99, 0.01, 0]);
+          const n2 = await add(kit, [0.98, 0.02, 0]);
+          const result = await kit.runtime.consolidate(ctx, {
+            target: { seedMemoryId: seed, minAffinity: 0 },
+            dryRun: true,
+          });
+          expect(result.outcome).toBe("dry_run");
+          expect(result.sources).toEqual([
+            { memoryId: seed, kind: "expired", validUntil: PAST },
+            { memoryId: n1, kind: "eligible" },
+            { memoryId: n2, kind: "eligible" },
+          ]);
+        }
+
+        // { query }: includeOutsideValidity で集めても、期限切れは統合元にしない。
+        {
+          const kit = await makeKit();
+          const expired = await add(kit, [1, 0, 0], { validUntil: PAST } as Partial<NewMemory>);
+          const current = await add(kit, [0.95, 0.05, 0]);
+          const viaDefault = await kit.runtime.consolidate(ctx, {
+            target: { query: { vector: [1, 0, 0], limit: 5, association: null } },
+            dryRun: true,
+          });
+          expect(viaDefault.sources.map((s) => s.memoryId)).toEqual([current]);
+          const viaOutside = await kit.runtime.consolidate(ctx, {
+            target: {
+              query: {
+                vector: [1, 0, 0],
+                limit: 5,
+                association: null,
+                includeOutsideValidity: true,
+              },
+            },
+            dryRun: true,
+          });
+          expect(viaOutside.sources).toEqual([
+            { memoryId: expired, kind: "expired", validUntil: PAST },
+            { memoryId: current, kind: "not_attempted" },
+          ]);
+        }
       });
     });
   }

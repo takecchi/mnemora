@@ -2758,6 +2758,14 @@ export type ConsolidateSourceOutcome = {
     status: Exclude<MemoryStatus, "active">;
 } | {
     memoryId: MemoryId;
+    kind: "expired";
+    validUntil: Date;
+} | {
+    memoryId: MemoryId;
+    kind: "not_yet_valid";
+    validFrom: Date;
+} | {
+    memoryId: MemoryId;
     kind: "status_changed_concurrently";
     observedStatus: MemoryStatus | null;
 } | {
