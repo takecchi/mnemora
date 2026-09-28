@@ -438,9 +438,13 @@ export interface ContestedDetectionOutcome {
  * `memory_usage` 入力用の値）と、この型が持つ `ReextractResult.skipped` フィールドは
  * **別の語彙**である——前者は「この呼び出しで抽出そのものを行ったか」、後者は
  * 「既存 Memory を supersede しなかった理由」。名前が似ているだけで無関係。
- * `reextract` の `extraction` は常に `'ok'` か `'llm_failed_whole_observation'` のどちらかで、
- * `'skipped'` は取らない——呼び出し側が明示的に指定した Observation に対して常に抽出を
- * 試みるため（deferred も冪等な再送もここには来ない）。
+ * `reextract` の `extraction` は `'ok'` か `'llm_failed_whole_observation'` のどちらかが基本である
+ * （deferred も冪等な再送もここには来ない）。
+ * ⚠ **2026-09-28 変更（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
+ * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
+ * `extraction: 'skipped'`（observe の再送が抽出をやり直さないときと同じ意味）を返す。**以前は「`'skipped'` は取らない」
+ * と約束していた。型は変わらない（`'skipped'` は元から `ExtractionOutcome` に在る）が、「`'skipped'` は来ない」と
+ * 仮定したコードは見直しが要る。条件は `Runtime.reextract` の doc を参照。
  */
 /**
  * この呼び出しで「正典が要求する1トランザクション」が使えたかどうか（Issue #134 /
@@ -451,7 +455,8 @@ export interface ContestedDetectionOutcome {
  * - `'store_unsupported'` — 口が無い adapter だったので、今日どおり作成と supersede を
  *   別々の書き込みとして行った（docs/memory-model.md §11 行5 は**満たされていない**）。
  * - `'not_attempted'` — **書き込みを1件も試みていない。**`reextract` の安全弁（LLM が
- *   また失敗した／候補が0件）で早期 return した場合。⛔ この状態を上の2つのどちらかに
+ *   また失敗した／候補が0件）で早期 return した場合と、利用者の意思で退けた記憶を持つ Observation で
+ *   抽出をやり直さなかった場合（2026-09-28 から。Issue #1079・#1149）。⛔ この状態を上の2つのどちらかに
  *   寄せない——「口が無かった」と「そもそも書いていない」は別のことであり、潰すと
  *   呼び手は「§11 行5 が破れた」と「破れる機会が無かった」を区別できなくなる。
  *   名前は `ConsolidationResult` の `not_attempted`（ADR 0087 決定5）に揃えた。
@@ -2156,20 +2161,23 @@ export interface Runtime {
    *   確かめただけで、実測はしていない）。LLM が返した候補の
    *   `subjectId` は一覧で検査されず、省略された候補は Observation の `subjectId` へ落ちる。
    *
-   * ⚠ **2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
-   * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)。どうするかは決めていない）: 利用者の意思で退けた記憶
-   * （`forget`・`purge`・訂正）の元の Observation に `reextract` を呼ぶと、LLM の言い方しだいで、その事実が新しい
-   * `active` な Memory として戻る。**`reextract` は、退けたことを知らない。
-   * - 退けた記憶そのものは動かない（`skipped` に `status_not_active`。`forgotten`・`contested`、解決で負けた
-   *   `superseded` のどれでも同じ。ADR 0028）。
-   * - LLM が前回と**同じ本文**を返せば、冪等の鍵（content_hash）で既存の行に当たり、新しい行は作られない。
-   *   `purge` の後も content_hash は残るので同じである。
-   * - LLM が前回と**違う言い方**を返せば、新しい `active` な Memory が作られる。訂正の対（`contested`）にも入らず、
-   *   `recall()` に訂正の印なしで出る。⟹ 戻るかどうかは、LLM の言い回しが揺れるかどうかで決まる。
-   * - `observe()` の再送（同じ `externalId`）は、forget・purge した記憶について抽出をやり直さない
-   *   （ADR 0124 の追記、#897）。`reextract` にはこの規律が無い。
-   * 【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
-   * （`packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`）。
+   * ⚠ **2026-09-28 変更（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・
+   * [Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）: 利用者の意思で退けた記憶を持つ Observation では、
+   * 抽出をやり直さない。**`observe()` の再送が forget・purge した記憶について抽出をやり直さない規律（ADR 0124 の追記、
+   * #897）と同じである。やり直すと、LLM の言い方しだいで、退けた事実が印の無い新しい `active` な Memory として戻るため。
+   * - **退けた記憶として数えるもの**（同じ Observation・今の `extractorVersion` の記憶のうち、1件でも在れば）:
+   *   `forgotten`（purge を含む）、`contested`（利用者の訂正でできたものも、claimKey の自動検出でできたものも）、
+   *   訂正の解決で負けた `superseded`（その記憶の最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。
+   * - **数えないもの:** 機構（`reextract`・`consolidate`）で置き換えた `superseded`、`archived`、理由を読めない
+   *   `superseded`（`superseded` イベントが無い・保持期間の掃除で消えた）。理由を読めないものを数えない側に倒すのは、
+   *   やり直せなくなるほうが利用者に見えにくい失敗になるためである。
+   * - **やり直さないときの戻り値:** LLM を呼ばず、何も書かない。`extraction: "skipped"`、`atomicity: "not_attempted"`、
+   *   `memoryIds: []`、`supersededMemoryIds: []`、`extractionFailure: null`、`skipped` には退けた記憶ごとに
+   *   `status_not_active`。同じ Observation の他の `active` な記憶も作り直さない（Observation 全体をやり直さない）。
+   * - 判定のために、`superseded` の記憶1件ごとに `EventStore.list` を1回読む。
+   * - ⚠ 2026-09-28 のこの変更の前は、退けたことを知らずにやり直していた（言い換えなら新しい `active` を作っていた）。
+   * 歯: `packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`（2実装。退けた記憶の4形と、
+   * やり直す側の4形——退けた記憶が無い・機構の superseded 2形・理由の読めない superseded）。
    */
   reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult>;
   /**
@@ -3678,6 +3686,37 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * 持つため、機構都合の reextract がその対の片方だけを動かすと契約を壊しかねない
    * （ADR 0028「確かめていないこと」参照）。
    */
+  /**
+   * Issue #1079・#1149: その Observation（今の `extractorVersion`）から作られた記憶のうち、利用者の意思で
+   * 退けたものを返す。数えるのは `forgotten`（purge を含む）・`contested`（利用者の訂正でも、claimKey の
+   * 自動検出でも）・訂正の解決で負けた `superseded`（最新の `superseded` イベントの `meta.reason` が
+   * `"contested_resolved"`）。機構（reextract・consolidate）で置き換えた `superseded` と、理由を読めない
+   * `superseded`（イベントが無い・保持期間の掃除で消えた）は数えない——やり直せなくなるほうが、利用者に
+   * 見えにくい失敗になるため。
+   */
+  async function listWithdrawnBySourceObservation(
+    ctx: Ctx,
+    observationId: ObservationId,
+  ): Promise<Memory[]> {
+    const existing = await deps.memoryStore.listBySourceObservation(
+      ctx,
+      observationId,
+      extractorVersion,
+    );
+    const withdrawn: Memory[] = [];
+    for (const memory of existing) {
+      if (memory.status === "forgotten" || memory.status === "contested") {
+        withdrawn.push(memory);
+        continue;
+      }
+      if (memory.status !== "superseded") continue;
+      const events = await deps.eventStore.list(ctx, { memoryId: memory.id, kind: "superseded" });
+      // `list` は `at` の昇順（`EventStore.list` の doc）。最後の1件が今の superseded の理由である。
+      if (events.at(-1)?.meta.reason === "contested_resolved") withdrawn.push(memory);
+    }
+    return withdrawn;
+  }
+
   async function reextract(ctx: Ctx, observationId: ObservationId): Promise<ReextractResult> {
     const observation = await deps.memoryStore.getObservation(ctx, observationId);
     if (!observation) {
@@ -3690,6 +3729,26 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       throw new Error(
         `runtime.reextract: observation ${observationId} is a usage report (kind: "usage") and is never extracted`,
       );
+    }
+
+    // Issue #1079・#1149: 利用者の意思で退けた記憶が1件でも在れば、抽出をやり直さない（observe の再送の
+    // #897 と同じ規律）。やり直すと、LLM の言い方しだいで退けた事実が印の無い `active` として戻るため。
+    // LLM を呼ぶ前に確かめ、何も書かない。
+    const withdrawn = await listWithdrawnBySourceObservation(ctx, observationId);
+    if (withdrawn.length > 0) {
+      return {
+        observationId,
+        memoryIds: [],
+        supersededMemoryIds: [],
+        skipped: withdrawn.map((memory) => ({
+          kind: "status_not_active" as const,
+          memoryId: memory.id,
+          status: memory.status as Exclude<MemoryStatus, "active">,
+        })),
+        atomicity: "not_attempted",
+        extraction: "skipped",
+        extractionFailure: null,
+      };
     }
 
     const { candidates, usedWholeObservationFallback, failure } = await extractCandidates(

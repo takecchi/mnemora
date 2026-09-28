@@ -6,7 +6,6 @@ import {
   LIFECYCLE_OPS,
   LIFECYCLE_STATES,
   LIFECYCLE_TABLE,
-  REEXTRACT_NEW_MEMORY_FROM_FORGOTTEN_OBSERVATION,
   REEXTRACT_TABLE,
   type LifecycleKit,
   type ReextractOldState,
@@ -75,18 +74,7 @@ describe("状態遷移の表（testkit の fixture）: reextract と、元の Ob
     "古い Memory が %s",
     async (oldState) => {
       const observed = await runReextractCell(fixtureKit(), oldState);
-      const { newMemories, ...promised } = observed;
-      expect(promised).toEqual(REEXTRACT_TABLE[oldState]);
-      // 🔴 未決（Issue #1079）: core 側の同じ it の注記を参照。
-      if (oldState === "forgotten" || oldState === "purged") {
-        if (REEXTRACT_NEW_MEMORY_FROM_FORGOTTEN_OBSERVATION === "creates") {
-          expect(newMemories).toBe(1);
-        } else if (REEXTRACT_NEW_MEMORY_FROM_FORGOTTEN_OBSERVATION === "does_not_create") {
-          expect(newMemories).toBe(0);
-        }
-      } else {
-        expect(newMemories).toBe(1);
-      }
+      expect(observed).toEqual(REEXTRACT_TABLE[oldState]);
     },
   );
 });
