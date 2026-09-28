@@ -31,6 +31,7 @@ import { ProvenanceKindSchema } from "../provenance.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
+import { MemoryEventKindSchema } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
   isEmbeddingStatusRollback,
@@ -134,18 +135,27 @@ type OutboxJobMutable = OutboxJobRecord;
  * ——`packages/testkit` の `buildStoredMemoryEvent`（`in-memory-event-store.ts`）と
  * 同じ形だが、ファイル冒頭のコメントの通り意図的に独立している。
  */
-function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
-  // Issue #807: `memory_events.at` は Postgres の `timestamptz` 列であり、Invalid Date
-  // （`.getTime()` が `NaN`）を渡すと `PostgresEventStore.append` はクエリ実行時に
-  // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
-  // `packages/testkit` の `buildStoredMemoryEvent` と同じ判定・同じ理由）。`event.at` が
-  // 省略されている（`undefined`）場合は「無い」であって Invalid Date ではないので
-  // 検査しない——下の `?? new Date()` で現在時刻になる。この関数は `FakeEventStore.append`
-  // だけでなく `FakeMemoryStore` の `updateStatusWithEvent` 等、イベントを積むすべての口が
-  // 通る単一の合流点であり、ここで検査すればそれらすべてを一度に覆える。
-  if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
-    throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+/**
+ * 9回目の棚卸し: testkit の fixture（`assertStorableMemoryEvent`、`memory-event-check.ts`）と `@mnemora/postgres`
+ * （`memory_events` の CHECK 制約）が拒むイベントの形のうち、この Fake が持っていなかった2つを同じく拒む——
+ * `kind` が列挙に無いとき、`events_purged` なのに `memoryId` が `null` でないとき。文面は fixture と同じ形。
+ * `buildStoredEvent`（イベントを積むすべての口の合流点）が呼ぶ。
+ */
+function assertStorableFakeEvent(event: NewMemoryEvent): void {
+  if (event.kind === "events_purged" && event.memoryId !== null) {
+    throw new Error(
+      `memory_events.memoryId must be null for kind "events_purged" (got ${JSON.stringify(event.memoryId)})`,
+    );
   }
+  if (!MemoryEventKindSchema.safeParse(event.kind).success) {
+    throw new Error(
+      `memory_events.kind must be one of ${MemoryEventKindSchema.options.join(", ")} (got ${JSON.stringify(event.kind)})`,
+    );
+  }
+}
+
+function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
+  assertBuildableFakeEvent(event);
   return {
     id: nextId("evt"),
     tenantId: ctx.tenantId,
@@ -157,6 +167,27 @@ function buildStoredEvent(ctx: Ctx, event: NewMemoryEvent): MemoryEvent {
     sizeBeforeBytes: event.sizeBeforeBytes ?? null,
     meta: event.meta,
   };
+}
+
+/**
+ * `buildStoredEvent` が投げる検査だけを、イベントを組み立てずに走らせる（id を採番しない）。
+ * `supersedeWithNewMemories` は `meta.supersededById` に作った記憶の id を入れるので、記憶を作る前には
+ * イベントを組み立て切れない——そこで、記憶を作る前にこの検査だけを全対象について済ませる
+ * （testkit の fixture が同じ段で `assertStorableMemoryEvent` を呼ぶのと同じ形）。
+ */
+function assertBuildableFakeEvent(event: NewMemoryEvent): void {
+  // Issue #807: `memory_events.at` は Postgres の `timestamptz` 列であり、Invalid Date
+  // （`.getTime()` が `NaN`）を渡すと `PostgresEventStore.append` はクエリ実行時に
+  // `invalid input syntax for type timestamp with time zone` で例外を投げる（実測。
+  // `packages/testkit` の `buildStoredMemoryEvent` と同じ判定・同じ理由）。`event.at` が
+  // 省略されている（`undefined`）場合は「無い」であって Invalid Date ではないので
+  // 検査しない——`buildStoredEvent` の `?? new Date()` で現在時刻になる。`buildStoredEvent` は `FakeEventStore.append`
+  // だけでなく `FakeMemoryStore` の `updateStatusWithEvent` 等、イベントを積むすべての口が
+  // 通る単一の合流点であり、ここで検査すればそれらすべてを一度に覆える。
+  if (event.at !== undefined && Number.isNaN(event.at.getTime())) {
+    throw new Error(`memory_events.at must be a valid Date (got Invalid Date)`);
+  }
+  assertStorableFakeEvent(event);
 }
 
 class FakeBackingStore {
@@ -289,6 +320,17 @@ export class FakeMemoryStore implements MemoryStore {
     input: NewObservation,
   ): IdempotentCreateResult<Observation> {
     assertObservationHasNoNul("FakeMemoryStore", input);
+    // 9回目の棚卸し: testkit の fixture と `@mnemora/postgres`（`timestamptz` 列）と同じく、Invalid Date の日時を拒む。
+    for (const [field, value] of [
+      ["recordedAt", input.recordedAt],
+      ["occurredAt", input.occurredAt],
+      ["validFrom", input.validFrom],
+      ["validUntil", input.validUntil],
+    ] as const) {
+      if (value != null && Number.isNaN(value.getTime())) {
+        throw new Error(`FakeMemoryStore: ${field} must be a valid Date (got Invalid Date)`);
+      }
+    }
     const existing = input.externalId
       ? [...this.backing.observations.values()].find(
           (o) => o.tenantId === ctx.tenantId && o.externalId === input.externalId,
@@ -797,12 +839,15 @@ export class FakeMemoryStore implements MemoryStore {
     if (opts.supersededById !== undefined && !this.backing.memories.has(opts.supersededById)) {
       throw new Error(`FakeMemoryStore: superseded-by memory not found: ${opts.supersededById}`);
     }
+    // 9回目の棚卸し: イベントを先に組み立てる（検査もここで走る）。以前は状態を書き換えた後に組み立てていたので、
+    // イベントが書けない（Invalid Date の `at` など）と、状態だけが書き換わったまま投げていた——Postgres は
+    // 1トランザクションで巻き戻り、fixture は状態を書き換える前に検査するので、どちらもそうはならない。
+    const storedEvent = buildStoredEvent(ctx, event);
     memory.status = status;
     if (opts.supersededById !== undefined) {
       memory.supersededById = opts.supersededById;
     }
     memory.updatedAt = new Date();
-    const storedEvent = buildStoredEvent(ctx, event);
     this.backing.events.push(storedEvent);
     return { memory, event: storedEvent };
   }
@@ -850,6 +895,10 @@ export class FakeMemoryStore implements MemoryStore {
       if (!memory || memory.tenantId !== ctx.tenantId) {
         throw new Error(`FakeMemoryStore: memory not found for tenant: ${target.id}`);
       }
+      // 書けないイベント（Invalid Date の `at`、列挙に無い `kind` など）も、記憶を作る前・状態を書き換える前に投げる
+      // ——以前は news を作り、先の対象を superseded にした後で投げていた。`meta.supersededById` は作った記憶の
+      // id で埋めるので、ここでは組み立てずに検査だけを走らせる（`assertBuildableFakeEvent`）。
+      assertBuildableFakeEvent(target.event);
     }
     // ⚠ Issue #768: `InMemoryMemoryStore.supersedeWithNewMemories` は news 側にも
     // ADR 0140 の制約を課すが、この Fake は意図して課さない（`createMemoryIdempotent`
@@ -1528,11 +1577,13 @@ export class FakeMemoryStore implements MemoryStore {
     if (memory.status !== "forgotten" || (memory.purgedAt ?? null) !== null) {
       throw new MemoryPurgeConflictError(id, memory.status, memory.purgedAt ?? null);
     }
+    // イベントを先に組み立てる（検査もここで走る）。書けないイベントなら、状態を書き換える前に投げる——
+    // `updateStatusWithEvent`（#1368）と同じ形。Postgres は1トランザクションで巻き戻り、fixture は書き換える前に検査する。
+    const storedEvent = buildStoredEvent(ctx, event);
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
     memory.purgedAt = new Date();
     memory.updatedAt = new Date();
-    const storedEvent = buildStoredEvent(ctx, event);
     this.backing.events.push(storedEvent);
     return { memory, event: storedEvent };
   }
@@ -1577,16 +1628,18 @@ export class FakeMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(second.id, "active", secondMemory.status);
     }
 
-    // 3. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
+    // 3. イベントを2件とも先に組み立てる（検査もここで走る）。書けないイベントなら、どちらの状態も書き換える前に
+    // 投げる——`updateStatusWithEvent`（#1368）と同じ形。
+    const firstEvent = buildStoredEvent(ctx, first.event);
+    const secondEvent = buildStoredEvent(ctx, second.event);
+
+    // 4. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
     firstMemory.status = "contested";
     firstMemory.contestedWithId = second.id;
     firstMemory.updatedAt = new Date();
     secondMemory.status = "contested";
     secondMemory.contestedWithId = first.id;
     secondMemory.updatedAt = new Date();
-
-    const firstEvent = buildStoredEvent(ctx, first.event);
-    const secondEvent = buildStoredEvent(ctx, second.event);
     this.backing.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
@@ -1642,7 +1695,12 @@ export class FakeMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(second.id, "contested", secondMemory.status);
     }
 
-    // 3. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
+    // 3. イベントを2件とも先に組み立てる（検査もここで走る）。書けないイベントなら、どちらの状態も書き換える前に
+    // 投げる——`updateStatusWithEvent`（#1368）と同じ形。
+    const firstEvent = buildStoredEvent(ctx, first.event);
+    const secondEvent = buildStoredEvent(ctx, second.event);
+
+    // 4. ここから先は両方成功する（in-memory であり、途中失敗の余地が無い）。
     firstMemory.status = first.status;
     firstMemory.contestedWithId = null;
     if (first.supersededById !== undefined) {
@@ -1655,9 +1713,6 @@ export class FakeMemoryStore implements MemoryStore {
       secondMemory.supersededById = second.supersededById;
     }
     secondMemory.updatedAt = new Date();
-
-    const firstEvent = buildStoredEvent(ctx, first.event);
-    const secondEvent = buildStoredEvent(ctx, second.event);
     this.backing.events.push(firstEvent, secondEvent);
 
     return { first: firstMemory, second: secondMemory, events: [firstEvent, secondEvent] };
@@ -1682,11 +1737,12 @@ export class FakeMemoryStore implements MemoryStore {
       throw new MemoryStatusConflictError(survivor.id, "contested", memory.status);
     }
 
+    // イベントを先に組み立てる（検査もここで走る）。書けないイベントなら、状態を書き換える前に投げる——
+    // `updateStatusWithEvent`（#1368）と同じ形。
+    const storedEvent = buildStoredEvent(ctx, survivor.event);
     memory.status = "active";
     memory.contestedWithId = null;
     memory.updatedAt = new Date();
-
-    const storedEvent = buildStoredEvent(ctx, survivor.event);
     this.backing.events.push(storedEvent);
 
     return { memory, event: storedEvent };
@@ -1802,12 +1858,11 @@ export class FakeMemoryStore implements MemoryStore {
     const actor = event.actor ?? { type: "system" };
     const meta = { reason: event.reason ?? "unsuperseded", supersededById };
 
-    const restored: Memory[] = [];
-    for (const memory of targets) {
-      memory.status = "active";
-      memory.supersededById = null;
-      memory.updatedAt = new Date();
-      const storedEvent = buildStoredEvent(ctx, {
+    // 全対象のイベントを先に組み立てる（検査もここで走る）。書けないイベント（Invalid Date の `at` など）なら、
+    // 1件も戻す前に投げる——以前は対象ごとに戻してから組み立てていたので、先の対象だけが `active` に戻ったまま
+    // 投げていた。`updateStatusWithEvent`（#1368）と同じ形。対象が無ければ組み立てないので、今どおり空で返る。
+    const storedEvents = targets.map((memory) =>
+      buildStoredEvent(ctx, {
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "unsuperseded",
@@ -1816,10 +1871,17 @@ export class FakeMemoryStore implements MemoryStore {
         digestSnapshot: memory.digest,
         sizeBeforeBytes: null,
         meta,
-      });
-      this.backing.events.push(storedEvent);
+      }),
+    );
+
+    const restored: Memory[] = [];
+    targets.forEach((memory, i) => {
+      memory.status = "active";
+      memory.supersededById = null;
+      memory.updatedAt = new Date();
+      this.backing.events.push(storedEvents[i]!);
       restored.push(memory);
-    }
+    });
     return { restored };
   }
 
