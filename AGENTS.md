@@ -233,6 +233,7 @@ git status --porcelain                                                # 空に�
 | 文書 | 何が書いてあるか |
 |---|---|
 | [docs/north-star.md](./docs/north-star.md) | **正典。**目的 / 目指す姿 / 物差し / 迷ったときの問い / やらないこと |
+| [docs/north-star-paths.md](./docs/north-star-paths.md) | 正典「目指す姿」の各項目を満たしている出荷物の経路（公開 API・実装・テスト）の一覧。**オーナーの確認待ち**。参照先の実在だけを歯が確かめる |
 | [docs/vision.md](./docs/vision.md) | プロジェクトの理解 / 用語 / 設計上の非目標 / 名前 |
 | [docs/architecture.md](./docs/architecture.md) | 全体アーキテクチャ / package 構成 / 主要 interface |
 | [docs/memory-model.md](./docs/memory-model.md) | DB schema 案 / Memory lifecycle / provenance / 矛盾 / 忘却 / 監査ログ |
