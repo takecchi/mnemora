@@ -3057,6 +3057,58 @@ function extractObservationPayload(
 }
 
 /**
+ * Issue #1063（ADR 0347）: 抽出で保存できずに落とした候補1件の記録。残った候補の `created` イベントの
+ * `meta.droppedCandidates` に入る（公開の型ではない。`meta` は自由形式の欄である）。
+ *
+ * 🔴 **候補の本文は写さない。**落ちた理由がまさに本文（NUL・1MB 超）であることが多く、写すと
+ * `created` の追記まで同じ理由で落ちる。候補は `index`（LLM が返した順の 0 起点）と `contentHash` で指す。
+ */
+interface DroppedCandidate {
+  index: number;
+  contentHash: string;
+  /** 最も内側の原因が名乗った文字列の `code`（pg なら SQLSTATE）。無ければ `null`。 */
+  code: string | null;
+  /** 最も内側の原因の `message`。NUL と孤立サロゲートは目に見える形に置き換え、500 文字で切る。 */
+  message: string;
+}
+
+const DROPPED_CANDIDATE_MESSAGE_MAX_CHARS = 500;
+
+/**
+ * `createMemoryWithOutbox` が投げた例外から {@link DroppedCandidate} を作る。
+ *
+ * 外側の `message` は使わない——drizzle の `Failed query: <SQL> params: …` は params（候補の本文）を
+ * 含むので、本文を写さない規律が破れる。`cause` の連鎖の最も内側（pg のエラー文・fixture の文言）を使う。
+ */
+function describeDroppedCandidate(
+  index: number,
+  contentHash: string,
+  error: unknown,
+): DroppedCandidate {
+  let innermost: unknown = error;
+  const seen = new Set<unknown>([error]);
+  while (innermost instanceof Error && innermost.cause !== undefined && !seen.has(innermost.cause)) {
+    seen.add(innermost.cause);
+    innermost = innermost.cause;
+  }
+  const rawCode = (innermost as { code?: unknown } | null | undefined)?.code;
+  const rawMessage = innermost instanceof Error ? innermost.message : String(innermost);
+  const message = Array.from(
+    rawMessage
+      .replace(/\u0000/g, "\\u0000")
+      .replace(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/g, "�"),
+  )
+    .slice(0, DROPPED_CANDIDATE_MESSAGE_MAX_CHARS)
+    .join("");
+  return {
+    index,
+    contentHash,
+    code: typeof rawCode === "string" && rawCode.length > 0 ? rawCode : null,
+    message,
+  };
+}
+
+/**
  * {@link Runtime} を組み立てる。
  *
  * ⚠ **組み立ての時点では、`deps` も `deps.config` も検査しない**（今の振る舞い。
@@ -3201,6 +3253,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     observation: Observation,
     outcome: ExtractionOutcome,
     failure: ExtractionFailure | null,
+    droppedCandidates: readonly DroppedCandidate[] = [],
   ): Promise<void> {
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
@@ -3222,6 +3275,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         ...(outcome === "llm_failed_whole_observation"
           ? { failureKind: failure?.kind ?? null }
           : {}),
+        // Issue #1063（ADR 0347）: 同じ抽出で保存できずに落とした候補があったときだけ足す——
+        // 落とした候補が無い呼び出しの meta の形は変えない。
+        ...(droppedCandidates.length > 0 ? { droppedCandidates: [...droppedCandidates] } : {}),
       },
     });
   }
@@ -3367,16 +3423,33 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const jobKinds: OutboxJobKind[] = autoQueueConsolidateReflectOnExtract
       ? ["embed", "consolidate", "reflect"]
       : ["embed"];
-    for (const newMemory of newMemories) {
+    // Issue #1063（ADR 0347）: 保存できない候補（store が拒む値——本文の NUL、Postgres の tsvector の上限など）は、
+    // その候補だけを落として残りを書く。core は「保存できない値」と一時的な障害を見分けられず、上限も adapter の
+    // 都合なので事前には検査できない——`createMemoryWithOutbox` が投げたことだけを根拠にする。
+    // ⚠ 捕まえるのは `createMemoryWithOutbox` だけ。書けた後の `created` の追記・衝突の検出の失敗は今どおり投げる。
+    // 🔴 全件が落ちたら、最初の例外をそのまま投げる（今も例外になる入力であり、例外の集合は増えない。
+    // 店が丸ごと落ちている一時的な障害も、今どおり例外で伝わる）。
+    // 落とした候補は、残った候補の `created` の `meta.droppedCandidates` に残す。そのために、候補を全件
+    // 書いてから `created` を積む（落とした候補は、全件を書き終えるまで分からない）。
+    const written: Array<{ memory: Memory; created: boolean }> = [];
+    const dropped: DroppedCandidate[] = [];
+    let firstError: { error: unknown } | null = null;
+    for (const [index, newMemory] of newMemories.entries()) {
       contentHashes.add(newMemory.contentHash);
-      const { memory, created } = await deps.memoryStore.createMemoryWithOutbox(
-        ctx,
-        newMemory,
-        jobKinds,
-      );
+      try {
+        written.push(await deps.memoryStore.createMemoryWithOutbox(ctx, newMemory, jobKinds));
+      } catch (error) {
+        firstError ??= { error };
+        dropped.push(describeDroppedCandidate(index, newMemory.contentHash, error));
+      }
+    }
+    if (written.length === 0 && firstError !== null) {
+      throw firstError.error;
+    }
+    for (const { memory, created } of written) {
       memoryIds.push(memory.id);
       if (created) {
-        await appendCreatedEvent(ctx, memory, observation, outcome, failure);
+        await appendCreatedEvent(ctx, memory, observation, outcome, failure, dropped);
         // Issue #372: 書き込み時（新しい Memory が active になる時点）の延長として、
         // opt-in のときだけ検出を走らせる。**冪等な再送（`created === false`）では
         // 走らせない**——「新しく active になった」わけではないため。
@@ -4023,6 +4096,24 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const observation = await deps.memoryStore.getObservation(ctx, observationId);
     if (!observation) {
       throw new Error(`runtime.tick: extract job references missing observation: ${observationId}`);
+    }
+    // Issue #1092（ADR 0347）: 再配達（1回目が書いた後・`complete` の前に止まり、リースが切れた後の2回目）で
+    // 違う LLM の出力を足さない。その Observation から今の抽出器の版で作られた Memory が1件でも在れば、抽出は
+    // 済んでいるものとして LLM を呼ばずに返す（`tick` が `complete` する）。
+    // - status では絞らない: 全文フォールバック・forget / purge した Memory も「在る」に数える
+    //   （再配達で、忘れさせた内容を蘇らせない。#897 と同じ向き）。
+    // - 版で絞る: 旧い版の Memory しか無ければ、今どおり新しい版で抽出する（#873）。
+    // - ここ（extract ジョブの handler）にだけ置く。sync の observe は Observation を作った直後であり、
+    //   `reextract` は既存が在ってもやり直すのが目的なので、どちらもこの判定を通らない。
+    // ⚠ 塞げないもの: 並行の2本（どちらも書く前にこの読みを通る。#1092 本文）。1回目が候補の一部だけを書いて
+    //   止まった場合の残り（作られない。`reextract` で回復する）。
+    const existing = await deps.memoryStore.listBySourceObservation(
+      ctx,
+      observation.id,
+      extractorVersion,
+    );
+    if (existing.length > 0) {
+      return;
     }
     await runExtraction(ctx, observation);
   }
