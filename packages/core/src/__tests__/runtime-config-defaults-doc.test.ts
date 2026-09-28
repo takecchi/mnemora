@@ -104,7 +104,9 @@ describe("RuntimeConfig の既定値は TSDoc の値と一致する", () => {
   });
 
   it("対照: 空でない値は、空白だけの値も含めて、そのまま書く（既定値に倒すのは空文字だけ）", async () => {
-    expect(await inferredProvenanceWith({ llmModelId: "gpt-x", promptVersion: "p9" })).toMatchObject({
+    expect(
+      await inferredProvenanceWith({ llmModelId: "gpt-x", promptVersion: "p9" }),
+    ).toMatchObject({
       model: "gpt-x",
       promptVersion: "p9",
     });

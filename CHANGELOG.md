@@ -259,6 +259,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/core` の `countKindForUnits()`・`unitAssemblyShortfall()` は、件数の和だけで数えていたので、1件が二重に入り別の1件が抜けると `exact`・`0` を返していた**（[PR #1350](https://github.com/takecchi/mnemora/pull/1350)）——候補の `memory.id` の集合で数える（二重計上だけなら今どおり `unknown`・`0`）。⭕ 非破壊（結果だけが変わる。型は変わらない）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/core` の `compareScoredCandidates()` は、実効時刻が Invalid Date だと `NaN` を返し、`memory.id` のタイブレークに届かなかった**（[PR #1350](https://github.com/takecchi/mnemora/pull/1350)）——時刻のどちらかが Invalid Date なら同点として扱い、`memory.id` で決める。⭕ 非破壊（結果だけが変わる）。クローン miku の判断であり、オーナーの判断ではない。
 - **`@mnemora/core` の `calibrateRecallFootprint()` は、`memoryCount` が2種類以上ある標本で最小二乗の傾きが0以下になると、`charsPerDigest` に0以下の値を `borrowedFromDefault` に名前を出さずに返していた**（[PR #1351](https://github.com/takecchi/mnemora/pull/1351)）——その係数で `estimateRecallFootprint()` を呼ぶと `chars` が負になった。`memoryCount` が1種類の枝と同じく、傾きが0以下なら既定値から借りて `borrowedFromDefault` に `"charsPerDigest"` を出し、切片は借りた傾きのもとで標本の平均を通るように決める。傾きが正の標本の結果は変わらない。⭕ 非破壊（結果が変わるのは傾きが0以下の標本だけで、例外は増えない）。クローン miku の判断であり、オーナーの判断ではない。
+- **`createRuntime()` の `RuntimeConfig.llmModelId`・`promptVersion` は、空文字を渡すと、抽出した推論の記憶の `provenance` に空文字のまま書いていた**（[PR #1355](https://github.com/takecchi/mnemora/pull/1355)）——その `provenance` は `ProvenanceSchema`（`model`・`promptVersion` は空文字を拒む）を通らなかった。TSDoc の「省略時は `"unknown"`・`"v1"`」どおり、空文字は省略と同じに扱い、既定値を書く。空白だけの値と、空でない値は、これまでどおりそのまま書く。⭕ 非破壊（結果が変わるのは空文字を渡したときだけで、例外は増えない）。クローン miku の判断であり、オーナーの判断ではない。
 
 ---
 
