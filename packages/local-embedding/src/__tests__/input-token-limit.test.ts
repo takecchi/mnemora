@@ -199,6 +199,21 @@ describe("LocalEmbeddingProvider 越しに見たとき", () => {
     await expect(provider.embed(ctx, ["あいうえお"])).rejects.toThrow(/上限を超えている/);
   });
 
+  // `errors.ts` の `LocalEmbeddingInputTooLongDetail.characters` の doc: prefix を付けた後の長さである。
+  it("detail の characters と tokens は、prefix を付けた後の文字列で数える", async () => {
+    const provider = new LocalEmbeddingProvider({
+      prefix: "検索文書: ",
+      createPipeline: async () => buildLocalEmbeddingPipeline(fakeExtractor(10).extractor),
+    });
+    const error = await provider.embed(ctx, ["あいうえお"]).then(
+      () => expect.fail("例外が投げられなかった"),
+      (reason: unknown) => reason as LocalEmbeddingProviderError,
+    );
+    // 渡したのは5文字、prefix（6文字）を付けて11文字。
+    expect(error.detail?.characters).toBe(11);
+    expect(error.detail?.tokens).toBe(11);
+  });
+
   /**
    * 🔴 **種類を潰さない歯。**
    *

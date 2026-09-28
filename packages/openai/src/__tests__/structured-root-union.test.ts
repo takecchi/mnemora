@@ -97,6 +97,31 @@ describe("OpenAI の strict が受け付ける形で送る（SDK 自身の stric
       additionalProperties: false,
     });
   });
+
+  // `structured-root.ts` の `wrapRootSchema` の doc・README の表の注: 根そのものを指す `$ref: "#"` は
+  // 書き換えないので、根が再帰する union を包むと、子の参照は包みの object を指す（今の振る舞いを縛る）。
+  it("根が再帰する union は、子の $ref: '#' が包みの object（{ result }）を指したまま送る", () => {
+    type Node = { kind: "leaf" } | { kind: "node"; children: Node[] };
+    const NodeSchema: z.ZodType<Node> = z.lazy(() =>
+      z.discriminatedUnion("kind", [
+        z.object({ kind: z.literal("leaf") }),
+        z.object({ kind: z.literal("node"), children: z.array(NodeSchema) }),
+      ]),
+    );
+    const { schema: sent } = translateForOpenAIStructuredOutput("x", NodeSchema);
+    // 根は包みの object で、その唯一の欄が元の union。
+    expect(sent["type"]).toBe("object");
+    expect(sent["required"]).toEqual(["result"]);
+    const union = (sent["properties"] as { result: { anyOf: Array<Record<string, unknown>> } })
+      .result;
+    const nodeBranch = union.anyOf.find(
+      (branch) => (branch["properties"] as { kind: { const: string } }).kind.const === "node",
+    )!;
+    const children = (nodeBranch["properties"] as { children: { items: unknown } }).children;
+    // 子は根（＝包みの object）を指す。元の union を指す `$defs` の参照にはなっていない。
+    expect(children.items).toEqual({ $ref: "#" });
+    expect(sent["$defs"]).toBeUndefined();
+  });
 });
 
 describe("completeStructured: 根が object でないスキーマの往復", () => {

@@ -218,6 +218,12 @@ const llmProvider = new AnthropicLLMProvider({ model: "claude-opus-5", client })
 | `transform` | 送る前に `Error`「`Transforms cannot be represented in JSON Schema`」 |
 | `z.record`・`z.lazy`（再帰）・`default`・根が union | 翻訳は通り、送る。**送った後に Anthropic が受けるかは確かめていない** |
 
+⚠ 2026-09-28 追記: `z.record` は「通る」が、**送られる形は元のスキーマと意味が違う。**SDK の `transformJSONSchema` が
+`additionalProperties: false` を強制し、record のキーと値の制約（`propertyNames` など）を `description` に JSON の文字列として
+降格させるので、送る JSON Schema は `{ "type": "object", "properties": {}, "additionalProperties": false, "description": "{propertyNames: …}" }`
+になる——**空の object しか許さない形**である（`z.record(z.string(), z.string())` を翻訳して確かめた。Anthropic の実 API には当てていない）。
+⟹ Anthropic が制約どおりに出力すれば、record の欄はいつも `{}` で返る。歯は `src/__tests__/structured-output-zod-shapes.test.ts`。
+
 文面は zod・SDK のもので、プロンプトの本文や API キーは含まない。`@mnemora/openai` は同じ形を送る前には落とさず、
 送った後に OpenAI が 400 で拒む（あちらの README に実測）。2つの provider の振る舞いをそろえるかは決めていない（#1148）。
 

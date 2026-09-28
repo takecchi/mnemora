@@ -317,8 +317,10 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    *
    * 投げるもの（どれも reject として届く）:
    * - モデルの読み込みの失敗は {@link LocalEmbeddingProvider.warmup} と同じ。
-   * - 入力がモデルの上限トークン数を超えれば、`kind: "input_too_long"` の `LocalEmbeddingProviderError`
-   *   （推論の前に検査する。切り詰めない）。
+   * - 既定の pipeline（`createPipeline` を省いたとき。`buildLocalEmbeddingPipeline` で組み立てた pipeline も同じ）では、
+   *   入力がモデルの上限トークン数を超えれば、`kind: "input_too_long"` の `LocalEmbeddingProviderError`
+   *   （推論の前に検査する。切り詰めない）。⚠ **このクラス自身は上限を検査しない**——`createPipeline` で差し替えた
+   *   pipeline の `maxInputTokens`・`countTokens` は読まない。差し替えた pipeline では、上限を守るのはその `embed` の責任である。
    * - 返ったベクトルの件数が `texts` と違う・次元が `space.dimensions` と違う・有限でない成分を含むときは、素の `Error`。
    */
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
@@ -435,7 +437,11 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    */
   async #startLoad(): Promise<LocalEmbeddingPipeline> {
     let lastError: unknown;
+    // メッセージには、実際に試した回数（整数）を載せる。`retry.attempts` に整数でない値
+    // （例: 2.5）が渡ると、下のループは切り捨てた回数だけ回るので、設定値をそのまま書くと食い違う。
+    let attemptsMade = 0;
     for (let attempt = 1; attempt <= this.#retryAttempts; attempt += 1) {
+      attemptsMade = attempt;
       try {
         return await this.#createPipeline(this.#spec);
       } catch (error) {
@@ -461,7 +467,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       this.#createPipeline === createLocalEmbeddingPipeline
         ? lastTransformersCacheDir()
         : undefined;
-    throw new Error(describeLoadFailure(this.#spec, this.#retryAttempts, defaultCacheDir), {
+    throw new Error(describeLoadFailure(this.#spec, attemptsMade, defaultCacheDir), {
       cause: lastError,
     });
   }
@@ -500,7 +506,7 @@ const UNKNOWN_TRANSFORMERS_CACHE_PLACE =
  */
 function describeLoadFailure(
   spec: LocalEmbeddingModelSpec,
-  attempts: number,
+  attemptsMade: number,
   defaultCacheDir: string | undefined,
 ): string {
   const where =
@@ -514,9 +520,9 @@ function describeLoadFailure(
     cacheRoot !== undefined
       ? `${cacheRoot.replace(/[\\/]+$/, "")}/${spec.repo}`
       : `${UNKNOWN_TRANSFORMERS_CACHE_PLACE} の下の ${spec.repo}`;
-  // attempts <= 1 のときは「1回試した」と言っても情報が増えないので黙る
+  // attemptsMade <= 1 のときは「1回試した」と言っても情報が増えないので黙る
   // （リトライを無効化した呼び出し側・既存のテストの文面と揃える）。
-  const attemptsNote = attempts > 1 ? `${attempts} 回試したが取得できなかった。` : "";
+  const attemptsNote = attemptsMade > 1 ? `${attemptsMade} 回試したが取得できなかった。` : "";
   return (
     `LocalEmbeddingProvider: モデルを読み込めなかった` +
     `（repo=${spec.repo} / dtype=${spec.dtype} / ${where}）。${attemptsNote}` +
@@ -524,8 +530,9 @@ function describeLoadFailure(
     ` キャッシュのファイルが壊れている場合（取得の中断など。cause が Protobuf や JSON の解析の失敗になる）:` +
     `同じ場所から何度読んでも失敗する。 ${repoCache} を消すと、次の読み込みで取り直す。` +
     ` repo が取得できなくなっている場合: 元モデルは公式の cl-nagoya/ruri-v3-30m（apache-2.0）` +
-    `であり、ONNX への変換は自分でやり直せる。変換したものは options.repo に指すことで使える` +
-    `（別の変換先でも、自分で変換したものでもよい）。` +
+    `であり、ONNX への変換は自分でやり直せる。変換したものは options.repo に指し、options.modelId に` +
+    `そのモデルを名乗る id を渡すことで使える（別の変換先でも、自分で変換したものでもよい。repo だけを差し替えると` +
+    `構築時に例外になる）。` +
     ` 手順は @mnemora/local-embedding の README「モデルが取得できなくなったら（再変換の手順）」にある`
   );
 }
