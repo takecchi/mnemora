@@ -247,10 +247,7 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
    * まとめて読む。行が無い `subjectId` はキーを省略する（`readSubjectActivitySeqs`
    * （core）が `0` へ倒す）。
    */
-  async getSubjectActivitySeqs(
-    ctx: Ctx,
-    subjectIds: string[],
-  ): Promise<Record<string, number>> {
+  async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     const bySubject = this.subjectActivitySeqBacking?.get(ctx.tenantId);
     const out: Record<string, number> = {};
     if (bySubject === undefined) {

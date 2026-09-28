@@ -190,10 +190,7 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
    *
    * `activity_seq` は `bigint` 列——`getActivitySeq` と同じ理由で `Number()` に変換する。
    */
-  async getSubjectActivitySeqs(
-    ctx: Ctx,
-    subjectIds: string[],
-  ): Promise<Record<string, number>> {
+  async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     if (subjectIds.length === 0) {
       return {};
     }
@@ -202,7 +199,10 @@ export class PostgresTenantSettingsStore implements TenantSettingsStore {
       WHERE tenant_id = ${ctx.tenantId} AND subject_id = ANY(${sql.param(subjectIds)}::text[])
     `);
     const out: Record<string, number> = {};
-    for (const row of result.rows as unknown as { subject_id: string; activity_seq: string | number }[]) {
+    for (const row of result.rows as unknown as {
+      subject_id: string;
+      activity_seq: string | number;
+    }[]) {
       out[row.subject_id] = Number(row.activity_seq);
     }
     return out;

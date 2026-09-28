@@ -2898,10 +2898,7 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
    * （Issue #338）: `backing.subjectActivitySeq` から、渡した `subjectIds` ぶんを
    * まとめて読む。行が無い `subjectId` はキーを省略する。
    */
-  async getSubjectActivitySeqs(
-    ctx: Ctx,
-    subjectIds: string[],
-  ): Promise<Record<string, number>> {
+  async getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>> {
     const out: Record<string, number> = {};
     if (this.backing === undefined) return out;
     const bySubject = this.backing.subjectActivitySeq.get(ctx.tenantId);

@@ -460,10 +460,7 @@ export interface TenantSettingsStore {
    * `subjectIds` についてまとめて読む。行が無い `subjectId` はキーを省略してよい
    * （呼び出し側の `readSubjectActivitySeqs` が `0` へ倒す）。**読み出し専用。**
    */
-  getSubjectActivitySeqs?(
-    ctx: Ctx,
-    subjectIds: string[],
-  ): Promise<Record<string, number>>;
+  getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
 
   /**
    * Issue #201 / [ADR 0318](../../../../docs/decisions/0318-taxonomy-labels.md):

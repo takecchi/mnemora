@@ -4,7 +4,12 @@ import { buildNewMemoryFixture } from "@mnemora/testkit";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { closeTestClient, getTestClient, resetTestDatabase, TEST_EMBEDDING_SPACE } from "./test-db.js";
+import {
+  closeTestClient,
+  getTestClient,
+  resetTestDatabase,
+  TEST_EMBEDDING_SPACE,
+} from "./test-db.js";
 
 /**
  * [ADR 0348](../../../docs/decisions/0348-activity-counting-per-call.md)
