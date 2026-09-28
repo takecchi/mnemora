@@ -29,6 +29,7 @@ const TABLES = [
   "recalls",
   "recall_usages",
   "tenant_activity",
+  "tenant_subject_activity",
 ];
 let seq = 0;
 
@@ -40,7 +41,13 @@ function event(memoryId: MemoryId, kind: NewMemoryEvent["kind"]): NewMemoryEvent
   return { memoryId, kind, actor: { type: "system" }, meta: {} } as NewMemoryEvent;
 }
 
-const recallRecord = (text: string) =>
+const recallRecord = (
+  text: string,
+  // ADR 0348（Issue #338）: 既定は今日どおり `true`（tenant_activity への +1）。
+  // subject scope のアトミック性検査（tenant_subject_activity 側）は
+  // `{ scope: "subject", subjectId }` を渡す。
+  advanceActivityClock: true | { scope: "subject"; subjectId: string } = true,
+) =>
   ({
     tenantId: ctx.tenantId,
     subjectId: null,
@@ -57,7 +64,7 @@ const recallRecord = (text: string) =>
     indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
     explain: { stages: [] },
     returnedMemories: [],
-    advanceActivityClock: true,
+    advanceActivityClock,
   }) as never;
 
 async function memory(store: PostgresMemoryStore, over: object = {}) {
@@ -312,6 +319,15 @@ const CASES: Case[] = [
     },
   ],
   ["createRecall", "tenant_activity", async (s) => () => s.createRecall(ctx, recallRecord("q"))],
+  // ADR 0348（Issue #338）: subject scope の場合は tenant_subject_activity が
+  // 最後のほうに書かれるトランザクションになる——同じ「途中で失敗したら全部戻る」検査を
+  // このテーブルに対しても行う。
+  [
+    "createRecall（subject scope）",
+    "tenant_subject_activity",
+    async (s) => () =>
+      s.createRecall(ctx, recallRecord("q", { scope: "subject", subjectId: "alice" })),
+  ],
   [
     "requeueEmbedJobs",
     "outbox",

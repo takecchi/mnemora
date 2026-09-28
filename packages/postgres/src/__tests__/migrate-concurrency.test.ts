@@ -174,9 +174,11 @@ describe("runMigrations の排他（advisory lock）", () => {
       expect(r.lock.waitedMs).toBeGreaterThanOrEqual(0);
     }
 
-    // DB は完全な状態に落ち着いている（10テーブル・台帳1行）。中途半端な状態が残らない。
+    // DB は完全な状態に落ち着いている（11テーブル・台帳1行）。中途半端な状態が残らない。
     // Issue #201 / ADR 0318: migrations/0020_taxonomy_labels.sql が labels/memory_labels
-    // を足したため 8→10 になった（回帰ではない）。
+    // を足したため 8→10 になった（回帰ではない）。ADR 0348 / Issue #338:
+    // migrations/0024_tenant_subject_activity.sql が tenant_subject_activity を
+    // 足したため 10→11 になった（同じく回帰ではない）。
     const tables = await pool.query<{ tablename: string }>(
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename ASC",
     );
@@ -192,6 +194,7 @@ describe("runMigrations の排他（advisory lock）", () => {
       "recalls",
       "tenant_activity",
       "tenant_settings",
+      "tenant_subject_activity",
     ]);
     const ledger = await pool.query<{ name: string }>(
       "SELECT name FROM _mnemora_migrations ORDER BY name ASC",
