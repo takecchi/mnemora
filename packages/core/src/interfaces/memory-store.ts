@@ -363,6 +363,16 @@ export interface MemoryStore {
    *
    * `createObservationWithOutbox` も同じである。今の振る舞いは
    * `packages/postgres/src/__tests__/lone-surrogate-observation.postgres.test.ts` が縛っている。
+   *
+   * ⚠ **`input` の欄の中身は、ほとんど検査しない**（今の振る舞い。2026-09-28 に `@mnemora/postgres` と testkit の fixture へ
+   * 同じ入力を当てて確かめた。`createObservationWithOutbox` も同じ）:
+   * - 空文字の `kind`・`subjectId`・`externalId`、文字列でない値を持つ `attributes`（例: `{ a: 1 }`）も、そのまま書いて返す。
+   *   **返った Observation は `ObservationSchema` を通らないことがある**（`kind` 等は `min(1)`、`attributes` の値は文字列）。
+   * - `input.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
+   *   `ctx.tenantId`。`input.tenantId` のテナントからは読めない）。
+   * - `payload` が `undefined` のとき、**`@mnemora/postgres` だけが**例外を投げる（`payload` 列が NOT NULL）。fixture は受け付けて返す。
+   * - 拒むのは、列の型が受けない値——Invalid Date の日時、NUL を含む `kind`・`payload`（上の NUL の節）、JSON にできない値
+   *   （BigInt は `TypeError`）——である。
    */
   createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
   /** roadmap.md 段階3: outbox ジョブから observationId を渡された側が本文を取り直すための読み出し。 */
