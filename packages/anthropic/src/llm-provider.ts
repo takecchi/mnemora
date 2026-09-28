@@ -1,6 +1,11 @@
 import Anthropic from "@anthropic-ai/sdk";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
+import type {
+  AnthropicContentBlock,
+  AnthropicMessageParam,
+  AnthropicMessagesClient,
+} from "./client-types.js";
 import { AnthropicLLMProviderError } from "./errors.js";
 import { translateForAnthropicStructuredOutput } from "./json-schema.js";
 
@@ -55,20 +60,21 @@ export interface AnthropicLLMProviderOptions {
   maxTokens?: number;
   /**
    * 自分で作った `Anthropic` のクライアント（再試行・timeout を変えたいとき）。渡すと `apiKey` は使わず、
-   * キーの検査もしない。⚠ `@anthropic-ai/sdk` を自分の依存として入れるときは、`@mnemora/anthropic` が固定している
-   * 版と同じにすること——違う版だと型が食い違う（packages/anthropic/README.md の 2026-09-27 追記）。
+   * キーの検査もしない。
+   *
+   * ⚠ **2026-09-29 追記（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)）:**
+   * この欄の型は `@anthropic-ai/sdk` のクラスを名指ししない自前の構造型
+   * {@link AnthropicMessagesClient} である（以前は `Pick<Anthropic, "messages">` だった）。
+   * **`@anthropic-ai/sdk` を自分の依存として入れる版は、`@mnemora/anthropic` が固定している
+   * 版と揃える必要が無い**（packages/anthropic/README.md 参照）。
    */
-  client?: Pick<Anthropic, "messages">;
+  client?: AnthropicMessagesClient;
 }
 
-/** Anthropic の `messages` 配列は `role: "user" | "assistant"` のみ
- * （`role: "system"` は使えない。`system` は top-level パラメータ）。 */
-interface AnthropicMessageParam {
-  role: "user" | "assistant";
-  content: string;
-}
-
-/** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。 */
+/** `toAnthropicRequest` の戻り値。`messages.create` にそのまま展開して渡す形。
+ * `messages` の要素の型は {@link AnthropicMessageParam}（`client-types.ts`。
+ * Anthropic の `messages` 配列は `role: "user" | "assistant"` のみで、
+ * `role: "system"` は使えない——`system` は top-level パラメータ）。 */
 export interface AnthropicRequest {
   /** `PromptSpec.system`。無ければ鍵ごと無い（Anthropic では top-level の `system` に入る）。 */
   system?: string;
@@ -125,7 +131,7 @@ export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
  * `TypeError: Cannot read properties of undefined (reading 'find')` を投げる——
  * `AnthropicLLMProviderError` の `kind` 分類には一切載らない。詳細は `errors.ts`
  * 冒頭コメントの同日付追記を参照。 */
-function firstTextBlock(content: Anthropic.Messages.ContentBlock[]): string | undefined {
+function firstTextBlock(content: AnthropicContentBlock[]): string | undefined {
   return content.find((block) => block.type === "text")?.text;
 }
 
@@ -177,7 +183,7 @@ function assertNotRefusedOrTruncated(response: {
  * HTTP の失敗・認証の失敗などは、SDK の例外がそのまま伝わる。
  */
 export class AnthropicLLMProvider implements LLMProvider {
-  private readonly client: Pick<Anthropic, "messages">;
+  private readonly client: AnthropicMessagesClient;
   private readonly model: string;
   private readonly maxTokens: number;
 

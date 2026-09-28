@@ -52,6 +52,7 @@
 - `reflect()` の実運用（Background Cognition）
 - `packages/bullmq`（Scheduler の実装）
   - **⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: `packages/bullmq` はその後できたが、`Scheduler` を実装していない。BullMQ のジョブで `runtime.tick()` を駆動するものである（[ADR 0325](./decisions/0325-bullmq-tick-driver.md)、[architecture.md](./architecture.md) §5.6 の追記）。`private: true` で、npm には公開していない。
+  - **⚠ 2026-09-29 追記（Issue #205、オーナー回答 2026-09-28「公開する準備をお願い」）**: `private: true` はもう正しくない——`private` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾へ加える PR が出ている。⛔ **publish・tag・Release・version の bump はまだしていない**（オーナーの手。version は `0.0.0` のまま、ADR 0070）。詳細は ADR 0325 の追記と `docs/release-v1.md` の該当節。
 - HTTP server（`packages/server`）
 
 これらは Phase 1 の範囲外だが、土台となる列・テーブルは 1.2 の通り Phase 1 に含める。
@@ -220,6 +221,9 @@ outbox は今日どおり Postgres が正本のままで、`InlineScheduler` か
 既定のまま残る）。⟹ **「差し替えるだけで済む」という見立ては、案Aの形では検証されておらず、
 実際には別の設計（案B）が採られた。** 理由・採らなかった案は ADR 0325 参照。
 **`@mnemora/bullmq` は `private: true` であり、npm には出ていない**（同 ADR 決定2）。
+
+**⚠ 2026-09-29 追記**: 上と同じ訂正——`private: true` はもう正しくない（Issue #205、
+オーナー回答 2026-09-28）。詳細は直前の「Phase 3」節の同日追記を見ること。
 
 ### Phase 4
 

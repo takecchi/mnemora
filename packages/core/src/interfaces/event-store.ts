@@ -34,7 +34,9 @@ export interface EventStore {
    * - `event.tenantId` が `ctx.tenantId` と違っても拒まず、**`ctx.tenantId` のテナントとして書く**（返る値の `tenantId` も
    *   `ctx.tenantId`）。
    * - 拒むのは、列挙に無い `kind`・`memoryId` が非 `null` の `events_purged`（{@link MemoryEvent.memoryId}）・Invalid Date の `at`・
-   *   存在しない（または形式の壊れた）`memoryId` である（例外の種類は adapter で違う）。
+   *   存在しない（または形式の壊れた）`memoryId`・`actor`/`meta` に含まれる NUL（U+0000）か孤立サロゲートの文字列
+   *   （2026-09-29、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)。両方とも adapter で同じ入力を拒む）である
+   *   （例外の種類は adapter で違う）。
    *
    * `MemoryStore` の `event` を受け取る口（`updateStatusWithEvent`・`supersedeWithNewMemories`・`purgeMemory`・
    * `markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`）も、`event` について同じである

@@ -581,3 +581,20 @@ bullmq 自身が `autorun: true` のとき内部で行っている
 本文の次の参照は、**書いた時点から**指す先が無かった（または違う先を指していた）。git の履歴で、指す先がその形で在ったことが一度も無いことを確かめた。本文は書き換えず、正しい先をここに記す（`docs/decisions/README.md` の「採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」）。
 
 - 「npm/cli#8544 は 2026-09-25 時点で OPEN」の段落のリンク `./0066-npm-trusted-publishing.md` は、存在しないファイル名である。正しくは [ADR 0066](./0066-start-publishing-with-oidc.md)。
+
+## 追記（2026-09-29、Issue #205、この書き手はクローンの委譲先——オーナー本人ではない）: 公開準備へ
+
+**⚠ この PR をマージした後、段0（手元からの初回 publish）と段1（Trusted Publisher 設定）を済ませずに次の Release を切ると、ほかの6本は出るが `@mnemora/bullmq` だけが 404 で落ち、publish ジョブは赤になる（末尾に置いたので、ほかの6本が取り残されることはない）。**
+
+**本文の決定2（「`private: true`。`scripts/publish-targets.mjs` には入れない」）は、本文には書き換えず、ここに追記する形で更新する**（`docs/decisions/README.md`「採用済み ADR の本文は書き換えない。訂正が要るなら、その場に追記する」）。
+
+オーナーの回答（2026-09-28、【受】——このセッションを委任したマネージャーからの申し送りであり、この書き手自身は一次ソースを確認していない）: 「公開する準備をお願い」。⟹ 本文「これが覆るとしたら」が挙げた条件（「BullMQ を npm に出す判断がオーナーから下りたとき」）が発火した。
+
+**この追記が実際に行った変更**（詳細・検討した案・引き受けた負債は [ADR 0351](./0351-bullmq-publish-prep.md) に独立の ADR として記録した——本 ADR の決定2を訂正する箇所が広く、この本文へ埋め込むと本文と追記の境界が読みにくくなるため）:
+
+- `packages/bullmq/package.json` から `private: true` を外し、他の publish 対象と同じ必須フィールドを揃えた。**`version` は `0.0.0` のまま**（publish・tag・Release・version bump はオーナーの手に残す）。
+- `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾に `@mnemora/bullmq` を加えた——本文「これが覆るとしたら」が指示したとおりの位置。
+- 初回 publish 前のパッケージの version 検査を除外する `NEVER_PUBLISHED_TARGETS` を新設し、`pnpm run pack:check`（毎PRのCIでも走る）がこの PR 自身で赤くならないようにした。
+- `packages/bullmq/README.md` を新設した。
+
+**まだ行っていないこと**: npm publish（段0）・Trusted Publisher 設定（段1）・直接 publish 許可（段2）・Release（段3）。オーナー向けの具体的な手順は [docs/release-v1.md](../release-v1.md) の `@mnemora/bullmq` 初回 publish の節を見ること。

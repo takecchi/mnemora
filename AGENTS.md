@@ -47,10 +47,12 @@
 | `packages/openai` | `EmbeddingProvider` / `LLMProvider` |
 | `packages/anthropic` | `LLMProvider` の Anthropic 実装。**`EmbeddingProvider` は実装しない**（Anthropic は埋め込み API を提供していないため。[ADR 0072](./docs/decisions/0072-anthropic-llm-provider.md)） |
 | `packages/local-embedding` | **外部サービスに繋がない `EmbeddingProvider`**。ONNX のモデルをプロセス内・CPU で推論する（[ADR 0085](./docs/decisions/0085-local-embedding-provider.md)）。⚠ **鍵は要らないが、実行時に4ファイル計42MB（うち重み本体36MB）を落とす**（ADR 0085 決定7の実測） |
+| `packages/bullmq` | `Scheduler` は実装せず、BullMQ で `runtime.tick()` を駆動する役（[ADR 0325](./docs/decisions/0325-bullmq-tick-driver.md)）。outbox は Postgres のまま正本。⚠ **npm 公開の準備中——まだ一度も publish されていない**（Issue #205。オーナーの手元 bootstrap が要る。[docs/release-v1.md](./docs/release-v1.md) の該当節） |
 | `examples/chat` | サンプル CLI と、**naive（会話ログ全部）と mnemora を実測比較する `compare`** |
 
 **Phase 1 に入っていないもの**は `docs/roadmap.md` §1.3 の通り（関係グラフ本体・reranking・
-`reflect()` の実運用・`packages/bullmq`・HTTP server）。
+`reflect()` の実運用・HTTP server）。**`packages/bullmq` は上の表のとおり既に在る**
+（`docs/roadmap.md` §1.3 の 2026-09-28 追記を見ること——見立てと違う形で前倒しに実装された）。
 
 **テストは本物の Postgres + pgvector に対して走る。**`packages/postgres` と `examples/chat` の
 検査は `DATABASE_URL` が無いと失敗する——**擬似物へ黙ってフォールバックしない。**
