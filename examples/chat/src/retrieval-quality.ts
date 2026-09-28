@@ -296,6 +296,15 @@ export interface ProbeOutcome {
    * `association-default-on-measure.ts` だけである。
    */
   associationRows?: number;
+  /**
+   * 返った候補のうち最下位(`result.memories` の末尾)の `score.total`。候補が0件なら null。
+   *
+   * **なぜ足すか**(Issue #572、ADR 0276 の 2026-09-28 の追記): gold の順位が離散量として
+   * 余裕を持って見えても、スコアでは最下位候補と紙一重のことがある(Issue #572 の実測では
+   * `diet` の gold と10位の差が 1.34%)。その差を `retrieval-rank-listing` の一覧に出すための
+   * 欄である。⛔ 既存の欄の意味を変えない追加であり、この欄を門に使う歯は無い。
+   */
+  lastRecalledScore?: number | null;
 }
 
 function average(values: number[]): number {
@@ -589,6 +598,7 @@ export async function runRetrievalQualityArm(
       lexicalMatchRows: result.memories.filter((m) => m.score.lexicalMatch !== undefined).length,
       decayFreshnessRowwise: computeDecayFreshnessRowwise(result.memories),
       associationRows: result.memories.filter((m) => m.retrievedVia === "association").length,
+      lastRecalledScore: result.memories.at(-1)?.score.total ?? null,
     });
   }
 
