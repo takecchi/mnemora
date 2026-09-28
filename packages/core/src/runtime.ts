@@ -2281,6 +2281,9 @@ export interface Runtime {
    *    `{ outcomes: [] }`。
    * 2. `getMany` で一括読み。存在しなければ `"not_found"`。`status !== "archived"`
    *    なら `"status_not_archived"`（現在の `status` を添える。書き込み無し）。
+   *    在るかどうかは `getMany` の答えに従い、store が返した id と渡された id を小文字にそろえて突き合わせる
+   *    （`@mnemora/postgres` では大文字の UUID も在る記憶になる）。大文字小文字だけが違う id を同じ呼び出しに
+   *    混ぜたときは、渡された文字列どおりに突き合わせる。
    * 3. それ以外（`status === "archived"`）は、観測した `"archived"` を `expectedStatus`
    *    にした compare-and-swap で `updateStatusWithEvent(ctx, id, "active",
    *    { expectedStatus: "archived" }, { kind: "restored", ... })` を呼ぶ。
@@ -2494,7 +2497,9 @@ export interface Runtime {
    *
    * 対象は `target` を `MemoryId[]` に正規化した上で**入力順に**処理する:
    * - 対象が存在しない、または compare-and-swap の再読で `null` になった場合は
-   *   `{ kind: 'not_found' }`。
+   *   `{ kind: 'not_found' }`。在るかどうかは `getMany` の答えに従い、store が返した id と渡された id を
+   *   小文字にそろえて突き合わせる（`@mnemora/postgres` では大文字の UUID も在る記憶になる）。大文字小文字
+   *   だけが違う id を同じ呼び出しに混ぜたときは、渡された文字列どおりに突き合わせる。
    * - 既に `forgotten` の場合は `{ kind: 'already_forgotten' }`（書き込み無し）。
    * - それ以外は観測した現在の status を `expectedStatus` にした
    *   compare-and-swap で `forgotten` へ更新する。{@link MemoryStatusConflictError}
@@ -2543,6 +2548,8 @@ export interface Runtime {
    *    `{ supported: false, outcomes: [...すべて "not_attempted"] }` として返す。
    * 3. `getMany` で一括読み。存在しなければ `"not_found"`。`status !== "forgotten"`
    *    なら `"status_not_forgotten"`（現在の `status` を添える。書き込み無し）。
+   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（大文字小文字だけが違う id を同じ呼び出しに
+   *    混ぜたときは、渡された文字列どおりに突き合わせる）。
    *    `status === "forgotten"` かつ `purgedAt` が非 `null` なら `"already_purged"`
    *    （書き込み無し）。
    * 4. それ以外（`status === "forgotten"` かつ `purgedAt === null`）は、`opts.dryRun`
@@ -2614,6 +2621,8 @@ export interface Runtime {
    *    に分類する（`"not_found"`/`"status_not_active"`/`"eligible"`）。どちらか一方でも
    *    `"eligible"` でなければ、書き込みを一切試みず
    *    `{ supported: true, outcome: { kind: "ineligible", sides: [...] } }` を返す。
+   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（同じ記憶を小文字と大文字で渡したときは、
+   *    渡された文字列どおりに突き合わせるので、2つ目は `"not_found"` になる）。
    * 4. 両側とも `"eligible"` なら `deps.memoryStore.markContestedPair` を呼ぶ。成功すれば
    *    `{ supported: true, outcome: { kind: "contested", first, second } }`。
    * 5. {@link MemoryStatusConflictError} が投げられたら（3で読んだ後、4で書く前に別の
@@ -3144,6 +3153,35 @@ function describeDroppedCandidate(
     contentHash,
     code: typeof rawCode === "string" && rawCode.length > 0 ? rawCode : null,
     message,
+  };
+}
+
+/**
+ * `getMany` が返した記憶を、渡された id で引き当てるときの鍵を作る関数を返す（`forget`・`restoreArchived`・
+ * `purge`・`markContested`）。`ids` はその呼び出しに渡された id の全部。
+ *
+ * store が返す `Memory.id` は、渡した id と文字列として一致するとは限らない——`@mnemora/postgres` は uuid を
+ * 大文字小文字を区別せずに比べ、小文字で返す（`get("…ABC…")` が `id: "…abc…"` の記憶を返す）。渡された id のまま
+ * 引くと、store が「在る」と言う記憶を `not_found` にしていた（`uppercase-uuid-lookup.postgres.test.ts`）。
+ * ⟹ 両側を小文字にして突き合わせる。**store へ渡す id は変えない**——在るかどうかは store の `get`/`getMany` が
+ * 決め、Runtime はそれに従うだけである（大文字小文字を区別する store では、大文字の id は今どおり `not_found`）。
+ *
+ * ⚠ **大文字小文字だけが違う id を同じ呼び出しに混ぜたときは、その id どうしは渡された文字列どおりに突き合わせる**
+ * （小文字にそろえる前と同じ）。`getMany` の戻りだけでは、「store がどちらも在ると言った」と「片方だけ在ると
+ * 言った」を区別できないため。⟹ `@mnemora/postgres` の `forget({ memoryIds: [小文字, 大文字] })` の2つ目は
+ * `not_found` のまま残る。
+ */
+function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string {
+  const spellingsByLower = new Map<string, Set<MemoryId>>();
+  for (const id of ids) {
+    const lower = id.toLowerCase();
+    const spellings = spellingsByLower.get(lower) ?? new Set<MemoryId>();
+    spellings.add(id);
+    spellingsByLower.set(lower, spellings);
+  }
+  return (id) => {
+    const lower = id.toLowerCase();
+    return (spellingsByLower.get(lower)?.size ?? 0) > 1 ? id : lower;
   };
 }
 
@@ -4660,6 +4698,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     opts?: RestoreArchivedOptions,
   ): Promise<RestoreArchivedResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。
+    const lookupKey = memoryLookupKeyFor(ids);
     if (ids.length === 0) {
       return { outcomes: [] };
     }
@@ -4694,14 +4734,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
 
     const actor = opts?.actor ?? { type: "system" };
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
-      const current = byId.get(id);
+      const current = byId.get(lookupKey(id));
       if (current === undefined) {
         outcomes.push({ memoryId: id, kind: "not_found" });
         continue;
@@ -4730,7 +4770,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             meta: opts?.reason === undefined ? {} : { reason: opts.reason },
           },
         );
-        byId.set(id, memory);
+        byId.set(lookupKey(id), memory);
 
         // マネージャー決定（Issue #196 / ADR 0153「restoreArchived と忘却ゲートの
         // 相互作用」）: 復帰そのものが「いま必要だ」という明示の信号なので、
@@ -4758,7 +4798,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         let reinforceError: string | undefined;
         try {
           const reinforced = await deps.memoryStore.reinforce(ctx, id, reinforcedAt, reinforceOpts);
-          byId.set(id, reinforced);
+          byId.set(lookupKey(id), reinforced);
         } catch (err) {
           reinforceError = err instanceof Error ? err.message : String(err);
         }
@@ -4792,12 +4832,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             // 別の呼び出しが先に同じ復帰（archived → active）を済ませていた——
             // 求めていた状態に既に居るのは対立ではない（`forget` の
             // `already_forgotten` と同じ扱い。interface doc コメント参照）。
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({ memoryId: id, kind: "status_not_archived", status: "active" });
           } else {
             // active 以外の別の状態に変わっていた（または archived のまま、という
             // 二重の競合）——求めていない状態への変化なので conflicted として扱う。
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({
               memoryId: id,
               kind: "conflicted",
@@ -4966,6 +5006,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     opts?: ForgetOptions,
   ): Promise<ForgetResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。
+    const lookupKey = memoryLookupKeyFor(ids);
     if (ids.length === 0) {
       return { outcomes: [] };
     }
@@ -5004,14 +5046,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // （`forget.test.ts` の「重複した id は…往復を増やさない」）。
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
 
     const actor = opts?.actor ?? { type: "system" };
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
-      const current = byId.get(id);
+      const current = byId.get(lookupKey(id));
       if (current === undefined) {
         outcomes.push({ memoryId: id, kind: "not_found" });
         continue;
@@ -5037,7 +5079,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             meta: opts?.reason === undefined ? {} : { reason: opts.reason },
           },
         );
-        byId.set(id, memory);
+        byId.set(lookupKey(id), memory);
         outcomes.push({ memoryId: id, kind: "forgotten", previousStatus: observedStatus });
       } catch (error) {
         if (error instanceof MemoryStatusConflictError) {
@@ -5055,10 +5097,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           if (refetched === null) {
             outcomes.push({ memoryId: id, kind: "not_found" });
           } else if (refetched.status === "forgotten") {
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({ memoryId: id, kind: "already_forgotten" });
           } else {
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({
               memoryId: id,
               kind: "conflicted",
@@ -5084,6 +5126,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    */
   async function purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。
+    const lookupKey = memoryLookupKeyFor(ids);
 
     // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（ADR 0100/ADR 0114 と
     // 同じ作法。分割代入したメソッドは `this` を失う）。
@@ -5125,7 +5169,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // `forget` と同じ理由（往復の節約。`ADR 0087`）——正しさのためではない。
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
 
     const actor = opts?.actor ?? { type: "system" };
@@ -5133,7 +5177,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     for (let i = 0; i < ids.length; i += 1) {
       const id = ids[i]!;
-      const current = byId.get(id);
+      const current = byId.get(lookupKey(id));
       if (current === undefined) {
         outcomes.push({ memoryId: id, kind: "not_found" });
         continue;
@@ -5171,7 +5215,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             meta: opts?.reason === undefined ? {} : { reason: opts.reason },
           },
         );
-        byId.set(id, memory);
+        byId.set(lookupKey(id), memory);
         outcomes.push({ memoryId: id, kind: "purged", previousStatus: "forgotten" });
 
         // ADR 0124 決定5: ベストエフォート。失敗しても "purged" の判定は変えない
@@ -5198,10 +5242,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           if (refetched === null) {
             outcomes.push({ memoryId: id, kind: "not_found" });
           } else if ((refetched.purgedAt ?? null) !== null) {
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({ memoryId: id, kind: "already_purged" });
           } else if (refetched.status !== "forgotten") {
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({
               memoryId: id,
               kind: "status_not_forgotten",
@@ -5210,7 +5254,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           } else {
             // status === "forgotten" かつ purgedAt === null のまま——本 PR の時点では
             // 到達しないはずの防御的な分岐（ADR 0124 決定2「並行呼び出し」参照）。
-            byId.set(id, refetched);
+            byId.set(lookupKey(id), refetched);
             outcomes.push({
               memoryId: id,
               kind: "conflicted",
@@ -5260,13 +5304,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     };
 
     const found = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。同じ記憶を小文字と大文字で
+    // 渡したときは渡された文字列どおりに突き合わせるので、2つ目は今どおり `not_found`（`ineligible`）になる。
+    const lookupKey = memoryLookupKeyFor([firstId, secondId]);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
 
-    const firstSide = classify(firstId, byId.get(firstId));
-    const secondSide = classify(secondId, byId.get(secondId));
+    const firstSide = classify(firstId, byId.get(lookupKey(firstId)));
+    const secondSide = classify(secondId, byId.get(lookupKey(secondId)));
     if (firstSide.kind !== "eligible" || secondSide.kind !== "eligible") {
       return { supported: true, outcome: { kind: "ineligible", sides: [firstSide, secondSide] } };
     }
@@ -5290,7 +5337,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             memoryId: firstId,
             kind: "updated",
             actor,
-            digestSnapshot: byId.get(firstId)!.digest,
+            digestSnapshot: byId.get(lookupKey(firstId))!.digest,
             meta: buildMeta(secondId),
           },
         },
@@ -5301,7 +5348,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
             memoryId: secondId,
             kind: "updated",
             actor,
-            digestSnapshot: byId.get(secondId)!.digest,
+            digestSnapshot: byId.get(lookupKey(secondId))!.digest,
             meta: buildMeta(firstId),
           },
         },
@@ -5312,14 +5359,20 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // 安全弁（`forget`/`restoreArchived`/`purge` と同じ形。1回だけ再読して打ち切る
         // ——上限の無い再試行ループを作らない）。
         const refetched = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
-        const refetchedById = new Map(refetched.map((m) => [m.id, m]));
+        const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
         return {
           supported: true,
           outcome: {
             kind: "conflict",
             conflicts: [
-              { id: firstId, observedStatus: refetchedById.get(firstId)?.status ?? null },
-              { id: secondId, observedStatus: refetchedById.get(secondId)?.status ?? null },
+              {
+                id: firstId,
+                observedStatus: refetchedById.get(lookupKey(firstId))?.status ?? null,
+              },
+              {
+                id: secondId,
+                observedStatus: refetchedById.get(lookupKey(secondId))?.status ?? null,
+              },
             ],
           },
         };
