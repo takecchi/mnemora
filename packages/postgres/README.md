@@ -228,7 +228,7 @@ npx mnemora-postgres-migrate --help
 `migrate:analyze` は、初回のデータ投入が終わった後と、デプロイの最後に打つ（上の
 「⚠ 新規インストール後、最初のデータ投入が終わったら `--analyze-memories` を実行すること」）。
 
-## 動く最小の例（型検査のみ確認・DB へは未実行）
+## 動く最小の例（CI の門では検査していない）
 
 ```ts
 import {
@@ -281,7 +281,9 @@ await runtime.observe(ctx, {
 
 上のコードを動かす前に、`mnemora-postgres-migrate` で該当 DB にスキーマを適用しておくこと。
 
-⚠ 2026-09-27 追記: 見出しの「DB へは未実行」は当時の記録である。`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、`npx mnemora-postgres-migrate` の後に、この例の LLM・埋め込みだけを `@mnemora/testkit` の決定的な provider に差し替えて Postgres 17 + pgvector に対して走らせ、observe → tick → recall が通ることを確かめた。例そのまま（OpenAI）は鍵を要るので走らせていない——鍵が無いと `new OpenAIEmbeddingProvider(...)` の時点で OpenAI の SDK が `Missing credentials` で止まる。
+⚠ この例には `ts check` の印を付けていない。`pnpm check:doc-snippets` はこの README の片を `packages/postgres` から解決し、このパッケージは `@mnemora/openai` に依存していないので、印を付けると `@mnemora/openai` が見つからずに落ちる。`examples/chat`（`@mnemora/openai` にも依存している）を起点にすれば型検査は通る（2026-09-28、main fd74b23 で確かめた）。⟹ **この例が今の公開 API で型検査に通ることを、CI は確かめていない。**
+
+⚠ 2026-09-27 追記: 当時の見出しにあった「DB へは未実行」は、その時点の記録である。`pnpm pack` した tarball を repo の外の空のプロジェクトに入れ、`npx mnemora-postgres-migrate` の後に、この例の LLM・埋め込みだけを `@mnemora/testkit` の決定的な provider に差し替えて Postgres 17 + pgvector に対して走らせ、observe → tick → recall が通ることを確かめた。例そのまま（OpenAI）は鍵を要るので走らせていない——鍵が無いと `new OpenAIEmbeddingProvider(...)` の時点で OpenAI の SDK が `Missing credentials` で止まる。
 
 ## adapter として自作する場合
 
