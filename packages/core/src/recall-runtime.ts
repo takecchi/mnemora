@@ -175,6 +175,9 @@ function compareDescendingNaNLast(a: number, b: number): number {
  *    `vector-store.ts` の3段目の tie-break と同じ性質の限界を引き継ぐ
  *    （ADR 0170「確かめていないこと」）。
  *
+ * 実効時刻のどちらかが Invalid Date（`getTime()` が `NaN`）のときは、2段目を同点として扱い、3段目の
+ * `memory.id` で決める（比較の戻り値を `NaN` にしない）。以前は `NaN` を返し、3段目に届かなかった。
+ *
  * テストからも直接呼べるよう、export する（`threshold-partition.test.ts` が
  * `partitionByThreshold` を直接 import しているのと同じ作法）。
  */
@@ -183,7 +186,7 @@ export function compareScoredCandidates(a: ScoredCandidate, b: ScoredCandidate):
   if (scoreCompare !== 0) return scoreCompare;
   const aTime = (a.memory.occurredAt ?? a.memory.recordedAt).getTime();
   const bTime = (b.memory.occurredAt ?? b.memory.recordedAt).getTime();
-  if (aTime !== bTime) return bTime - aTime;
+  if (!Number.isNaN(aTime) && !Number.isNaN(bTime) && aTime !== bTime) return bTime - aTime;
   return a.memory.id < b.memory.id ? -1 : a.memory.id > b.memory.id ? 1 : 0;
 }
 
@@ -300,10 +303,26 @@ function effectiveTokenBudget(budget: RecallBudget | undefined): number | undefi
  *
  * **⟹ 単位が候補を網羅していれば `'exact'`、していなければ `'unknown'` と名乗る。**
  * 嘘をつくのではなく黙る。
+ *
+ * 数えるのは件数ではなく、単位に入った候補の `memory.id` の集合である——1件が二重に入り、別の1件が
+ * 抜けていると、件数の和だけは合ってしまう（以前はそれで `'exact'` になっていた）。**二重に入った
+ * 候補が1件も無く、かつ異なる id の数が `candidateCount` と等しいとき**だけ `'exact'` を返す。
  */
 export function countKindForUnits(units: readonly Unit[], candidateCount: number): CountKind {
   const covered = units.reduce((sum, unit) => sum + unit.members.length, 0);
-  return covered === candidateCount ? "exact" : "unknown";
+  const distinct = distinctMemberIds(units);
+  return covered === distinct && distinct === candidateCount ? "exact" : "unknown";
+}
+
+/** 単位に入った候補の、異なる `memory.id` の数。 */
+function distinctMemberIds(units: readonly Unit[]): number {
+  const ids = new Set<string>();
+  for (const unit of units) {
+    for (const member of unit.members) {
+      ids.add(member.memory.id);
+    }
+  }
+  return ids.size;
 }
 
 /**
@@ -316,10 +335,12 @@ export function countKindForUnits(units: readonly Unit[], candidateCount: number
  * **⚠ この関数の 0 を返す2つの経路（覆えている / 二重計上）は、`recall()` からは
  * 区別できない。**どちらも omission が出ないという同じ結果になるためである。
  * ⟹ **向きの判断そのものは、この関数を直接呼ぶ歯で測る。**
+ *
+ * 覆えた数は、単位に入った候補の異なる `memory.id` の数で数える（{@link countKindForUnits} と同じ）。
+ * 1件が二重に入り別の1件が抜けていても、抜けた1件を数える（以前は件数の和で数えていたので 0 だった）。
  */
 export function unitAssemblyShortfall(units: readonly Unit[], candidateCount: number): number {
-  const covered = units.reduce((sum, unit) => sum + unit.members.length, 0);
-  return Math.max(0, candidateCount - covered);
+  return Math.max(0, candidateCount - distinctMemberIds(units));
 }
 
 /**

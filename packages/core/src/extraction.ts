@@ -227,10 +227,15 @@ export function buildExtractionPrompt(
 /**
  * 機械的な先頭文字列切り出し（docs/memory-model.md §4 の安全弁）。
  * `content` は生成の成否に関わらず常に保持される前提で、`digest` だけをこの関数で埋める。
+ *
+ * 負の `maxLength` は `0` として扱う（本文が空のときも。空なら `"（内容なし）"`、空でなければ `"…"`）。
  */
 export function truncateForFallbackDigest(content: string, maxLength: number): string {
   const trimmed = content.trim();
-  if (trimmed.length <= maxLength) {
+  // 負の上限は上限0（本文を残さない）として扱う。以前はここで負のまま比べていたので、本文が空のとき
+  // だけ `maxLength: 0` と結果が分かれていた（0 なら "（内容なし）"、負なら "…"）。
+  const limit = maxLength < 0 ? 0 : maxLength;
+  if (trimmed.length <= limit) {
     return trimmed.length > 0 ? trimmed : "（内容なし）";
   }
   // `String.prototype.slice(0, n)` は n が負数だと「末尾から n 文字を除く」という
@@ -239,7 +244,7 @@ export function truncateForFallbackDigest(content: string, maxLength: number): s
   // （本文を残さない）の下限として扱う。サロゲートペアの内側で切って孤立サロゲートを
   // 作らないための丸めも `sliceWithoutSplittingSurrogatePair` に集約してある
   // （`text-truncation.ts` の doc コメント参照）。
-  return `${sliceWithoutSplittingSurrogatePair(trimmed, maxLength)}…`;
+  return `${sliceWithoutSplittingSurrogatePair(trimmed, limit)}…`;
 }
 
 /** {@link resolveDigest} の戻り値。 */
