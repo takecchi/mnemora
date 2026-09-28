@@ -29,13 +29,19 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   ジョブは、別のワーカー（または同じワーカー）に再び claim され、**同じジョブが
  *   複数回処理されうる**。呼び出し側（`processExtractJob`/`processEmbedJob` 等）は
  *   この重複を前提にしてよい形（冪等）で書くこと。
- *   ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)。
- *   どうするかは決めていない）: **`extract` のジョブは、LLM の出力が変わると冪等にならない。**1回目が Memory を
- *   書いた後・`complete` の前に止まり、リースが切れた後の2回目が同じジョブを処理すると、2回の LLM が同じ本文を
- *   返したときだけ1件のまま（冪等の鍵で同じ行に当たる）である。違う本文を返すと2件とも `active` で残る。1回目の
- *   LLM が落ちて全文フォールバックになり、2回目が成功すると、フォールバックの Memory と候補の2件が `active` で
- *   残る。`reflect` も再配達で2件になる（`Runtime.reflect` の doc）。`embed`・`consolidate` は1回だけ処理したとき
- *   と同じ状態になる。並行の2本の形は #1092 の本文。
+ *   ⚠ 2026-09-28 変更（[Issue #1092](https://github.com/takecchi/mnemora/issues/1092)、
+ *   [ADR 0347](../../../../docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)。
+ *   クローン miku の判断であり、オーナーの判断ではない）: **`extract` のジョブは、逐次の再配達では2回目が何も
+ *   書かない。**`processExtractJob` は LLM を呼ぶ前に、その Observation から今の抽出器の版で作られた Memory
+ *   （status を問わない）が在るかを見て、在れば抽出を済んだものとしてジョブを完了にする。⟹ 1回目が書いた後・
+ *   `complete` の前に止まり、リースが切れた後の2回目が同じジョブを処理しても、LLM の出力によらず1回目の分だけが
+ *   残る（1回目が全文フォールバックなら、それが残る）。
+ *   - 塞げないもの: **並行の2本**（どちらも書く前にこの確認を通る。#1092 の本文）。
+ *   - 引き換え: **1回目が候補の一部だけを書いて止まった場合、残りの候補は作られない。**`Runtime.reextract` で
+ *     回復する（`reextract` はこの確認を通らない）。
+ *   - 旧い版の Memory しか無い Observation は、今どおり新しい版で抽出する。
+ *   `reflect` は再配達で2件になる（`Runtime.reflect` の doc）。`embed`・`consolidate` は1回だけ処理したときと同じ
+ *   状態になる。
  *   【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ
  *   （`packages/postgres/src/__tests__/tick-sequential-redelivery.postgres.test.ts`）。
  *   **下の「Phase 1 では失敗したジョブの自動リトライを行わない」とは別の話**——

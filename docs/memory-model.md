@@ -900,7 +900,7 @@ events_purged / restored / unsuperseded`）はこの列挙をそのまま使い�
 表現する。`kind` の値を増やしすぎると監査ログの分岐がアプリケーションコード側に漏れ出すため、
 「状態が実際に変わった大分類」だけを `kind` にし、理由の粒度は `meta` に落とす。
 
-**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1234](https://github.com/takecchi/mnemora/issues/1234)）**: ある Memory のイベントを `at` の順に読んでも、状態が変わった順とは限らない。`observe()` は候補を1件ずつ「書く → `created` を積む」の順で書き、1つのトランザクションではない。その間にその1件が `forget` → `purge` されると、`created` は `forgotten`・`purged` の後に積まれ、`at` もその順になる（`created` の `digestSnapshot` は purge 前の digest）。「消した後に作られた」と読める並びは、作成の記録が遅れて積まれたものである。`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ。
+**⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1234](https://github.com/takecchi/mnemora/issues/1234)）**: ある Memory のイベントを `at` の順に読んでも、状態が変わった順とは限らない。`observe()` は候補を「書く → `created` を積む」の順で書き、1つのトランザクションではない（2026-09-28 から、候補を全件書いてから `created` を積む。[ADR 0347](./decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）。その間にその1件が `forget` → `purge` されると、`created` は `forgotten`・`purged` の後に積まれ、`at` もその順になる（`created` の `digestSnapshot` は purge 前の digest）。「消した後に作られた」と読める並びは、作成の記録が遅れて積まれたものである。`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ。
 
 **⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1211](https://github.com/takecchi/mnemora/issues/1211)）**: `actor` と `meta` は JSON として保存される前提の欄で、値の中身は検査しない。`@mnemora/postgres` は `JSON.stringify` して `jsonb` に書くので、`Date` は文字列に、`NaN`・`Infinity` は `null` に、`-0` は `0` になり、`undefined` の欄は消える。BigInt と、NUL（U+0000）か孤立サロゲートを含む文字列は例外になる。`@mnemora/testkit` の fixture はどれもそのまま保持する。core が自分で入れる値はどれも JSON で往復するが、`Runtime` の口に渡す `reason`・`actor.id` は呼び出し側の文字列のまま入る。そこに NUL か孤立サロゲートがあると、Postgres では状態の書き換えごと取り消される（途中まで書かれたものは残らない）。fixture では書き換えが通り、文字列がそのまま残る。どちらかに揃える約束はしていない（詳細は `MemoryEvent.meta` の TSDoc）。
 2026-09-28 追補: 欄の値が関数か Symbol のときは向きが逆になる——`@mnemora/postgres` はその欄を落として（配列の要素なら `null` にして）残りを書いて成功し、fixture は `DataCloneError` を投げる（状態もイベントも書く前に投げる、PR #1231）。これも揃える約束はしていない。
@@ -1653,6 +1653,11 @@ LLM 呼び出しを含め、呼び出し側の1回の `await` の中で完結す
   extractorVersion, supersededById }`、作り直した行は行2と同じ `created`。`active → superseded` の `meta.reason` は、
   入口ごとに `'reextract_superseded'`（行5）・`'consolidated'`（行12）・`'contested_resolved'`（行7）の3つで、行15の
   `dryRun` が運ぶ `supersededReason` はこの値である。
+- 行2の `created` の `meta.droppedCandidates`（2026-09-28 から。[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)、
+  [ADR 0347](./decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）: 同じ抽出で、store が保存できずに落とした
+  候補があったときだけ付く。要素は `{ index, contentHash, code, message }`（`index` は LLM が返した順の 0 起点。候補の本文は写さない）。
+  残った候補の `created` のすべてに同じ配列が付く。落とした候補が無ければ、このキーは無い（`meta` の形は変わらない）。
+  全件が落ちた抽出は例外になり、`created` は1件も積まれない。
 - 行4・行14・行15の強化は、`at` が起点（`last_reinforced_at ?? recorded_at`）より狭義に新しいときだけ書く。そうで
   なければ、活動時計の欄も含めて何も書かない（Issue #1093、[ADR 0048](./decisions/0048-reinforce-does-not-move-decay-origin-backwards.md)
   の追記）。
