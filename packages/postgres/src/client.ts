@@ -1,4 +1,4 @@
-import { Pool, type PoolConfig } from "pg";
+import { Pool, type PoolClient, type PoolConfig } from "pg";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "./schema.js";
 import {
@@ -18,7 +18,14 @@ export interface PostgresClient {
    * （`closePostgresClient`）。⚠ `error` のリスナーは付けていない——付けるのは利用者である（packages/postgres/README.md）。
    */
   pool: Pool;
-  /** 同じプールの上の drizzle。`PostgresMemoryStore` などの store に渡す。 */
+  /**
+   * 同じプールの上の drizzle。`PostgresMemoryStore` などの store に渡す。
+   *
+   * ⚠ drizzle に渡しているのは `pool` そのものではなく、`connect` だけを包んだ Proxy である
+   * （Issue #868、ADR 0349、{@link createPostgresClient}）。そのため、drizzle が実行時に生やす `db.$client`
+   * （型 {@link Db} には載っていない）は `pool` と同一ではない（`db.$client === pool` は `false`）。
+   * `db.$client` の `instanceof Pool`・`totalCount`・`on`・`end()` などは、本物の `pool` に届く。
+   */
   db: Db;
 }
 
@@ -59,7 +66,24 @@ export interface PostgresClient {
  * リスナーが無ければ Node のプロセスごと落ちる。避けるには、返した `pool` に呼び出し側が
  * `client.pool.on("error", …)` を付けること——付ければ、切れた接続は捨てられ、次の呼び出しは新しい接続で通る
  * （`packages/postgres/README.md`「接続の `error` リスナーは、利用者が付ける」）。`db.transaction()` の途中で
- * 切れる場合は別であり、このリスナーでは避けられない（Issue #868）。
+ * 切れる場合は別であり、それは下の Proxy が受け持つ（Issue #868）。
+ *
+ * ## drizzle に渡すのは、`connect` だけを包んだ Proxy（Issue #868、ADR 0349）
+ *
+ * drizzle-orm の `db.transaction()`（`NodePgSession.transaction`）は、渡された pool の
+ * `connect()` で接続を借りるが、借りた接続に `error` リスナーを付けない。pg-pool は
+ * 借りた接続を渡す直前に自分の idle 用リスナーを外すので、トランザクションの最中に接続が
+ * 切れると、リスナーが1つも無いまま `error` が出て、Node のプロセスごと落ちる。
+ *
+ * そこで drizzle には `new Proxy(pool, …)` を渡し、`connect` だけを
+ * {@link connectWithErrorListener} に差し替える。それ以外のプロパティは本物の `pool` から
+ * その都度読み、関数なら本物の `pool` に束縛して返す。
+ *
+ * - **公開する `pool` は書き換えない。**利用者が `client.pool.connect()` で借りた接続には、
+ *   mnemora のリスナーは付かない（ADR 0339 と同じく、自分たちが借りたものにだけ付ける）。
+ * - 付けたリスナーは `release()` で外す。外さないと、同じ物理接続を借り直すたびに積み上がる。
+ * - callback 形の `connect(cb)` は包まずに本物へ渡す（drizzle は promise 形しか使わない）。
+ * - ⚠ `db.$client === pool` は `false` になる（`$client` は型 {@link Db} に載っていないので、型は変わらない）。
  */
 export function createPostgresClient(
   connectionString: string,
@@ -78,8 +102,51 @@ export function createPostgresClient(
   }
 
   const pool = new Pool({ connectionString, ...poolConfig });
-  const db = drizzle(pool, { schema });
+  const db = drizzle(poolWithCheckoutErrorListener(pool), { schema });
   return { pool, db };
+}
+
+/**
+ * 借りた接続に付ける、何もしない `error` リスナー。
+ *
+ * 🔴 **同じ関数参照を `on` と `removeListener` の両方に使うこと**（`advisory-lock.ts` の
+ * `NOOP_CLIENT_ERROR_HANDLER` と同じ理由）。呼ぶたびに `() => {}` を作ると外せなくなる。
+ * 実際のエラーは、進行中のクエリの reject として呼び出し側に届く。
+ */
+const NOOP_CHECKOUT_ERROR_HANDLER = (): void => {};
+
+/**
+ * `pool.connect()`（promise 形）で借りた接続に {@link NOOP_CHECKOUT_ERROR_HANDLER} を付け、
+ * `release()` のときに外す。pg-pool は借りるたびに `client.release` を付け直すので、
+ * ここで差し替えた `release` は、この1回の貸し出しにしか効かない。
+ */
+async function connectWithErrorListener(pool: Pool): Promise<PoolClient> {
+  const client = await pool.connect();
+  client.on("error", NOOP_CHECKOUT_ERROR_HANDLER);
+  const release = client.release;
+  client.release = (err?: Error | boolean) => {
+    client.removeListener("error", NOOP_CHECKOUT_ERROR_HANDLER);
+    release.call(client, err);
+  };
+  return client;
+}
+
+/** drizzle に渡す Proxy を作る（{@link createPostgresClient} の「drizzle に渡すのは…」参照）。 */
+function poolWithCheckoutErrorListener(pool: Pool): Pool {
+  return new Proxy(pool, {
+    get(target, prop) {
+      if (prop === "connect") {
+        return (...args: unknown[]) =>
+          args.length === 0
+            ? connectWithErrorListener(target)
+            : (target.connect as (...a: unknown[]) => unknown).apply(target, args);
+      }
+      const value: unknown = Reflect.get(target, prop, target);
+      return typeof value === "function"
+        ? (value as (...a: unknown[]) => unknown).bind(target)
+        : value;
+    },
+  });
 }
 
 /**
