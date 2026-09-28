@@ -99,6 +99,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
 
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`@mnemora/core` の `runtime.reextract()` は、利用者の意思で退けた記憶を持つ Observation では、抽出をやり直さなくなった**（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・[Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）——以前は退けたことを知らずにやり直し、LLM が言い換えると、forget・purge・訂正で退けた事実が印の無い新しい `active` な Memory として戻っていた。`observe()` の再送が forget・purge した記憶について抽出をやり直さない規律（#897）に揃えた。
+  - 退けた記憶として数えるもの（同じ Observation・今の `extractorVersion` の記憶のうち、1件でも在れば）: `forgotten`（purge を含む）、`contested`（利用者の訂正でも claimKey の自動検出でも）、訂正の解決で負けた `superseded`（最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。機構（reextract・consolidate）で置き換えた `superseded` と、理由を読めない `superseded`（イベントが無い・保持期間の掃除で消えた）は数えず、今どおりやり直す。
+  - やり直さないときは LLM を呼ばず、何も書かない。**`reextract` が `extraction: "skipped"` と `atomicity: "not_attempted"` を返しうるようになった**（`memoryIds: []`、`skipped` には退けた記憶ごとに `status_not_active`）。以前の TSDoc は「`reextract` の `extraction` は `'skipped'` を取らない」と約束していた。
+  - `ExtractionOutcome`・`WriteAtomicity`・`ReextractSkip` の型は変わらない（`'skipped'` と `'not_attempted'` は元から在る値）。⟹ 型で exhaustive に分岐している呼び手には影響しない。ただし「`reextract` からは `'skipped'` が来ない」と仮定したコードは見直しが要る。
+  ⭕ 非破壊と数える（公開の宣言は変わらず、例外も増えない。作られる記憶が減る側の変化で、「忘れさせた事実が戻らない」という上位の約束を守る側にある。**クローン miku の判断であり、オーナーの判断ではない**）。
+
 ### Fixed
 
 - **`@mnemora/postgres` の `aggregateScope()` は、`digestBand.excludeMemoryIds` に uuid の形をしていない id（空文字を含む）が混ざると、`invalid input syntax for type uuid` の DB の例外を投げていた**（[Issue #1262](https://github.com/takecchi/mnemora/issues/1262)、[PR #1289](https://github.com/takecchi/mnemora/pull/1289)）——除外の id をそのまま `::uuid[]` に渡していた。`get`・`getMany` など、ほかの読みの口の「形の崩れた id は無いもの」の扱い（`restoreSuperseded` の `onlyMemoryIds` を揃えた PR #1195 と同じ線）に揃え、形式不正な id は除外の対象から外すだけにした（ほかの id の除外はそのまま効く。`@mnemora/testkit/fixtures` の InMemory は、もともとそう返していた）。`Runtime.recall` は実在する id だけを渡すので、この形になるのは `aggregateScope` を直接呼ぶ経路だけである。
