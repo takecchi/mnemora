@@ -28,7 +28,15 @@ export interface OutboxJobRecord {
   completedAt?: Date | null;
   /** 失敗（終端）にした時刻。失敗していなければ `null`。 */
   failedAt?: Date | null;
-  /** `fail` に渡したエラーの文字列。 */
+  /**
+   * `fail` に渡したエラーの文字列。
+   *
+   * ⚠ **利用者の本文を含みうる**（今の振る舞い。[Issue #1064](https://github.com/takecchi/mnemora/issues/1064)）。
+   * `tick()` は処理の失敗の例外の文面（`cause` の連鎖を含む）を、削らずに載せる。`@mnemora/postgres` で DB への書き込みが失敗したときの文面は、
+   * 失敗したクエリの文と params をそのまま含むので、Memory の本文などの利用者のテキストが丸ごと入る。
+   * 長さの上限も無く、本文の大きさに比例して大きくなる（1MB を超えた実測の例が Issue #1064 に在る）。
+   * ⟹ この欄をログ・監視・外部へ流すときは、本文が載りうるものとして扱うこと。削る・上限を置くかは決まっていない。
+   */
   lastError?: string | null;
   /** 積んだ時刻。 */
   createdAt: Date;
