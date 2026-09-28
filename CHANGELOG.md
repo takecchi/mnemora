@@ -105,6 +105,14 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
 
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`@mnemora/core` の `runtime.reextract()` は、利用者の意思で退けた記憶を持つ Observation では、抽出をやり直さなくなった**（[Issue #1079](https://github.com/takecchi/mnemora/issues/1079)・[Issue #1149](https://github.com/takecchi/mnemora/issues/1149)）——以前は退けたことを知らずにやり直し、LLM が言い換えると、forget・purge・訂正で退けた事実が印の無い新しい `active` な Memory として戻っていた。`observe()` の再送が forget・purge した記憶について抽出をやり直さない規律（#897）に揃えた。
+  - 退けた記憶として数えるもの（同じ Observation・今の `extractorVersion` の記憶のうち、1件でも在れば）: `forgotten`（purge を含む）、`contested`（利用者の訂正でも claimKey の自動検出でも）、訂正の解決で負けた `superseded`（最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。機構（reextract・consolidate）で置き換えた `superseded` と、理由を読めない `superseded`（イベントが無い・保持期間の掃除で消えた）は数えず、今どおりやり直す。
+  - やり直さないときは LLM を呼ばず、何も書かない。**`reextract` が `extraction: "skipped"` と `atomicity: "not_attempted"` を返しうるようになった**（`memoryIds: []`、`skipped` には退けた記憶ごとに `status_not_active`）。以前の TSDoc は「`reextract` の `extraction` は `'skipped'` を取らない」と約束していた。
+  - `ExtractionOutcome`・`WriteAtomicity`・`ReextractSkip` の型は変わらない（`'skipped'` と `'not_attempted'` は元から在る値）。⟹ 型で exhaustive に分岐している呼び手には影響しない。ただし「`reextract` からは `'skipped'` が来ない」と仮定したコードは見直しが要る。
+  ⭕ 非破壊と数える（公開の宣言は変わらず、例外も増えない。作られる記憶が減る側の変化で、「忘れさせた事実が戻らない」という上位の約束を守る側にある。**クローン miku の判断であり、オーナーの判断ではない**）。
+
 ### Fixed
 
 - **`Runtime.observe()`（同期の抽出）と `tick()` の `extract` のジョブは、LLM の抽出結果に store が保存できない候補（本文の NUL、`@mnemora/postgres` の tsvector の上限を超える本文など）が在ると、手前の候補だけを書いたまま例外で止まっていた**（[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)、[PR #1318](https://github.com/takecchi/mnemora/pull/1318)、[ADR 0347](./docs/decisions/0347-extract-write-path-redelivery-and-unsaveable-candidates.md)）——候補は1件ずつ書かれ、1つのトランザクションではない。いまはその候補だけを落とし、残りの候補は書いて、投げない。落とした候補は、残った候補の `created` イベントの `meta.droppedCandidates`（`index`・`contentHash`・最も内側の原因の `code`・`message`。本文は写さない）に残り、`observe()` の戻り値には出ない。全件が保存できなければ、今どおり最初の例外を投げ、何も書かない。候補は全件を書いてから `created` を積む順になった。

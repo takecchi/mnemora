@@ -210,41 +210,53 @@ export const LIFECYCLE_TABLE: Record<LifecycleState, Record<LifecycleOp, CellExp
 // ---------------------------------------------------------------------------
 // reextract（元の Observation 由来の古い Memory の扱い）
 
-/**
- * 🔴 **未決（Issue #1079）**: forget / purge 済みの Memory の Observation に reextract を呼んだとき、
- * 原文から新しい Memory を作るかどうかは、まだ約束が無い。
- * **決まったら、この1か所だけを書き換える**——`"creates"` なら新しい Memory が1件作られること、
- * `"does_not_create"` なら作られないことを、下の reextract のマスがすべて表明するようになる。
- * `"undecided"` の間は、新しい Memory の有無は表明しない（古い Memory の扱いだけを見る）。
- */
-export const REEXTRACT_NEW_MEMORY_FROM_FORGOTTEN_OBSERVATION:
-  "undecided" | "creates" | "does_not_create" = "undecided";
-
 export type ReextractOldState = "active" | "contested" | "forgotten" | "purged";
-/** 古い Memory（全文フォールバック）の出発状態 → reextract の後の古い Memory（ADR 0028 / 0029）。 */
+/**
+ * 古い Memory（全文フォールバック）の出発状態 → reextract の後の古い Memory と、新しく作られた Memory の件数
+ * （ADR 0028 / 0029）。
+ *
+ * `newMemories`: 利用者の意思で退けた記憶（`contested`・`forgotten`・purge 済み）を持つ Observation では、
+ * reextract は抽出をやり直さず、新しい Memory を作らない（Issue #1079・#1149、ADR 0028 の 2026-09-28 追記）。
+ * 以前は `contested` でも1件作り、forget・purge 済みは「未決」として表明していなかった。
+ */
 export const REEXTRACT_TABLE: Record<
   ReextractOldState,
-  { old: LifecycleState; oldEvents: string[]; superseded: number; skipped: string[] }
+  {
+    old: LifecycleState;
+    oldEvents: string[];
+    superseded: number;
+    skipped: string[];
+    newMemories: number;
+  }
 > = {
   active: {
     old: "superseded",
     oldEvents: ["superseded:reextract_superseded"],
     superseded: 1,
     skipped: [],
+    newMemories: 1,
   },
   contested: {
     old: "contested",
     oldEvents: [],
     superseded: 0,
     skipped: ["status_not_active:contested"],
+    newMemories: 0,
   },
   forgotten: {
     old: "forgotten",
     oldEvents: [],
     superseded: 0,
     skipped: ["status_not_active:forgotten"],
+    newMemories: 0,
   },
-  purged: { old: "purged", oldEvents: [], superseded: 0, skipped: ["status_not_active:forgotten"] },
+  purged: {
+    old: "purged",
+    oldEvents: [],
+    superseded: 0,
+    skipped: ["status_not_active:forgotten"],
+    newMemories: 0,
+  },
 };
 
 // ---------------------------------------------------------------------------
