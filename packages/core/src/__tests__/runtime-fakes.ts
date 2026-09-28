@@ -27,6 +27,7 @@ import type { NotIndexedReason, RecallResult } from "../recall.js";
 import { FILTERED_CONDITION_SCOPE_RELATION, RecallResultSchema } from "../recall.js";
 import type { MemoryId, ObservationId, RecallId } from "../ids.js";
 import { isStrengthInRange, MAX_STRENGTH } from "../memory.js";
+import { ProvenanceKindSchema } from "../provenance.js";
 import type { EmbeddingStatus, Memory, MemoryStatus, NewMemory } from "../memory.js";
 import type { NewObservation, Observation } from "../observation.js";
 import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../event.js";
@@ -395,6 +396,22 @@ export class FakeMemoryStore implements MemoryStore {
    *   この2件の回帰テストが書けなくなる（Issue #768 の調査で実測）。
    */
   private createMemoryIdempotent(ctx: Ctx, input: NewMemory): IdempotentCreateResult<Memory> {
+    // 8回目の TSDoc の棚卸し: testkit の fixture（`InMemoryMemoryStore.createMemoryIdempotent`）と
+    // `@mnemora/postgres` が拒む `provenance` の形のうち、2つをこの Fake も同じく拒む（冪等の衝突の判定より前。
+    // fixture と同じ位置）——`provenance.kind` が列挙に無いとき、と `provenance` が `null` のとき（次の行が
+    // fixture と同じく `TypeError` を投げる）。
+    //
+    // ⚠ **3つ目（`stated`・`inferred` なのに列の `sourceObservationId` が `null`）は、意図して拒まない。**
+    // fixture と Postgres は拒むが、core の既存のテストのうち25件（`recall-pipeline`・`recall-basis-lost`・
+    // `recall-association`・`recall-exclude-provenance-filter`・`runtime` の5ファイル）が、`sourceObservationId: null`
+    // の `inferred`・`stated` の Memory をこの Fake に書いて前提にしている。拒むとそれらのデータを書き換えることに
+    // なり、各テストが縛っているものが変わりうるので、揃えない（`fake-provenance-rejects.test.ts` が今の振る舞いを縛る）。
+    const provenanceKind = input.provenance.kind;
+    if (!ProvenanceKindSchema.safeParse(provenanceKind).success) {
+      throw new Error(
+        `FakeMemoryStore: memories.provenance_kind must be one of ${ProvenanceKindSchema.options.join(", ")} (got ${JSON.stringify(provenanceKind)})`,
+      );
+    }
     const idemKey = this.backing.extractionKey(
       ctx.tenantId,
       input.sourceObservationId ?? null,
