@@ -331,3 +331,47 @@ pass を期待するテスト3本すべて（無変異・MRR境界・hit@1境界
   `example-chat` ジョブの `test:db` を通して CI 上で実際に緑のまま通ることは、
   この作業では GitHub Actions 上で観測していない**——手元の `initdb` インスタンスでの
   実行のみ確認した。CI 上での確認は、この PR の CI 実行そのものに委ねる。
+
+> **追記（2026-09-28、Issue #572）—— 門と同じ条件で、probe ごとの順位の一覧を「門ではない別のジョブ」で出す。**
+> **⚠ クローン miku の判断であり、オーナーの判断ではない**（ADR 0220）。⛔ 本文は書き換えない。
+>
+> **何を足したか**: `.github/workflows/ci.yml` に新しいジョブ `retrieval-rank-listing` を足した。
+> 門（ADR 0227、`retrieval-quality-regression.postgres.test.ts`）と同じ条件——`recorded`・
+> `fixedClock(2030-01-01)`・`probe-set.ts` の `PROBES`（1件も変えない）——で
+> `runRetrievalQualityArm` を1回走らせ、probe ごとに gold と distractor の順位・gold のスコア・
+> 最下位候補のスコア・その差・候補数を Job Summary の表と成果物（`retrieval-rank-listing.json`）に出す
+> （`examples/chat/src/retrieval-rank-listing.ts`・`src/scripts/retrieval-rank-listing.ts`）。
+> 最下位候補のスコアを出すため、`ProbeOutcome` に任意の欄 `lastRecalledScore` を足した（既存の欄は変えない）。
+>
+> **なぜ段1〜3 の文脈に置くか**: 段2 は「現行の門と新しい判定が何に赤くなるかを並べて残す」ことだった。
+> 門は `goldRank` を出力しないため、段2 の測定は毎回ログの文字列を拾い、順位そのものは手元の計装で
+> 出し直すしかなかった（Issue #572 のコメント）。この一覧は、その材料を PR の Checks から読める
+> 場所に常に出す口であり、段2 の運用の追加である。⛔ 段3（門の差し替え）には当たらない。
+>
+> **門ではないことの中身**:
+> - 順位で落ちない。非0になるのは bench が壊れて一覧を作れないとき（例外・全 probe で候補が0件・
+>   probe の件数が合わない）だけ（`decideRankListingExit`）。
+> - `.github/required-status-checks.json` に入れていない。このジョブは `needs` を持たず、どのジョブの
+>   `needs` にも入っていない（`scripts/__tests__/ci-yml-retrieval-rank-listing-wiring.test.mjs` が固定する）。
+>   `ci-yml-measurement-jobs-wiring.test.mjs` の測定ジョブの一覧にも足した（job レベルの `if:` と
+>   `continue-on-error` を持たないことを固定する）。
+> - `example-chat` ジョブ・門のテスト・並走判定（段1）の合否条件は1つも変えていない。
+> - 基準値とは比べない。順位もスコアも基準値ファイルへ焼き込まない（ADR 0227 が順位を焼き込まなかった
+>   理由と同じ）。
+>
+> ⚠ ただし、新しい純関数の歯（`retrieval-rank-listing.test.ts`）と配線の歯は、既存の required ジョブ
+> （`examples/chat` の `test:db`、`typecheck / lint / test / build`）の中で走る。これらは道具の正しさを
+> 見る決定的な歯で、順位や想起の質には依らない。⟹ 想起の質の門の合否条件は変わらないが、
+> 「required ジョブで走るテストの本数」は増える。
+>
+> **確かめたこと**【実測、2026-09-28、base `de8a160`、手元の PostgreSQL 17 + pgvector（`initdb`、
+> UTF8 / C.UTF-8）】: 一覧の順位は 1/1/2/6/1/1/2 で ADR 0227 の記録と同じだった。`diet` の gold と
+> 最下位候補の差は 0.002455 で、Issue #572 の 2026-09-23 のコメントの値と小数第6位まで一致した。
+> 変異試験: 終了コードを順位で決める変異・常に 0 にする変異・全0件の検査を外す変異は、それぞれ純関数の
+> 歯で赤になった。固定時刻を 2020 年に倒すと、スクリプトは exit 1 で終わった（embed ジョブが claim されず
+> 例外になる）。retrieval 用ではないカセット（`answer.claim-key.json`）を渡すと、全 probe の候補が0件になり
+> exit 1 で終わった。どれも戻した後は緑に戻った。
+>
+> **確かめていないこと**: CI の器での Job Summary の見え方（この PR の CI 実行に委ねる）。
+> 一部の probe だけ候補が欠ける壊れ方（例: `compare.json` を渡したとき）は exit 0 のまま一覧に「圏外」と
+> 出る——これを「bench が壊れた」と見なすかは、この追記では決めていない。

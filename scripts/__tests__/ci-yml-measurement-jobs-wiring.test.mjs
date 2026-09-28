@@ -121,6 +121,9 @@ const MEASUREMENT_JOB_IDS = Object.freeze([
   "archive-sweep-cost",
   "time-term",
   "validity",
+  // Issue #426 の7本の後から足した(Issue #572、ADR 0276 の 2026-09-28 の追記)。
+  // 同じく required ではない測定ジョブであり、skip されない配線であることを同じ形で固定する。
+  "retrieval-rank-listing",
 ]);
 
 /**
