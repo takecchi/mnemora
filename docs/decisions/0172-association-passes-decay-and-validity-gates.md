@@ -384,4 +384,20 @@ artifact `compare` を取得して突き合わせたところ、`rows` は基準
 - **この修正が、連想枠から返る件数を実運用でどれだけ減らすか**——測っていない
   （減らす方向であることは構造から言えるが、量は測っていない）。
 
+## その後（2026-09-28）—— 「引き受けた負債」4（`'either'` を実 Postgres で測っていない）を埋めた
+
+`packages/postgres/src/__tests__/recall-association-gates.postgres.test.ts` に、`decay_clock: 'either'` の
+テナントの歯を3本足した。
+
+- (庚) 活動時計が沈んでいても、壁時計が生きていれば返る。
+- (辛) 逆の向き。壁時計が沈んでいても、活動時計が生きていれば返る。
+- (壬) 両方の軸で沈んでいれば返らない。
+
+約束は `DecayClock` の TSDoc（「`'either'`: どちらかが生きていれば通す（OR）」、ADR 0165 決めたこと1）と
+`VectorFilter.decayFloorAnyAxis` の TSDoc である。
+
+【変異試験、`cp` で退避して戻した】
+- `PostgresVectorStore` の OR を AND に変えると、(庚)・(辛) が赤になった。
+- SQL の押し下げを外すだけでは、(壬) は緑のままだった。段3.5 の後置フィルタが同じ述語で落とすためで、「引き受けた負債」3 と同じ形である。押し下げと core の後置（`survivesDecayGate`）の両方を外すと、(壬) が赤になった。
+
 Refs #347
