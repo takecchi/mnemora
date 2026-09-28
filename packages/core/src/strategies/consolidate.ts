@@ -213,7 +213,12 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
  * クエリへの近さを測っていない）。**どちらも無い候補には -Infinity を渡し、
  * どんな `minAffinity`（有限値である限り）でも必ず落ちるようにする**——
  * 「似ているかどうか分からない」を「似ている」側へ倒さない。
+ *
+ * `similarity` が `NaN`（測れなかった）のときは、無いものとして扱う（`lexicalMatch` があればそれを使う）。
+ * 以前は `Math.max` が `NaN` をそのまま返し、`lexicalMatch` の値が捨てられていた。
  */
 export function computeAffinity(score: ScoreBreakdown): number {
-  return Math.max(score.similarity ?? -Infinity, score.lexicalMatch ?? -Infinity);
+  const similarity =
+    score.similarity === undefined || Number.isNaN(score.similarity) ? -Infinity : score.similarity;
+  return Math.max(similarity, score.lexicalMatch ?? -Infinity);
 }

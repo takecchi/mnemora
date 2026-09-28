@@ -143,11 +143,19 @@ describe("countKindForUnits（ADR 0045）", () => {
   // ⚠ ここで測っているのは `slice` の網羅性ではない。それは言語の保証であり同語反復になる。
   //    測っているのは「候補がそれぞれちょうど1つの単位に入ったか」という、
   //    単位を組む繰り返しの性質である。
+  // 候補の id は単位をまたいで一意にする（実際の単位の組み方と同じ形）。二重計上の歯は、既存の id を
+  // もう1つの単位へ入れて作る（`duplicateOf`）。⚠ 2026-09-28: 以前は単位ごとに `m-0` から振り直していたので、
+  // 単位をまたいで id が重なっていた——件数だけで数えていた実装の上でしか成り立たない形だった
+  // （`countKindForUnits`・`unitAssemblyShortfall` を id の集合で数えるようにしたので、形を直した）。
   function units(...memberCounts: number[]) {
+    let next = 0;
     return memberCounts.map((n) => ({
-      members: Array.from({ length: n }, (_, i) => candidate(`m-${i}`, 0)),
+      members: Array.from({ length: n }, () => candidate(`m-${next++}`, 0)),
       rankScore: 0,
     }));
+  }
+  function duplicateOf(id: string) {
+    return { members: [candidate(id, 0)], rankScore: 0 };
   }
 
   it("単位が候補を網羅していれば 'exact' と名乗る", () => {
@@ -161,7 +169,7 @@ describe("countKindForUnits（ADR 0045）", () => {
   });
 
   it("🔴 同じ候補が二重に単位へ入っていても 'unknown' へ落ちる", () => {
-    expect(countKindForUnits(units(1, 2, 1, 1), 4)).toBe("unknown");
+    expect(countKindForUnits([...units(1, 2, 1), duplicateOf("m-0")], 4)).toBe("unknown");
   });
 
   it("候補も単位も0なら網羅（'exact'）", () => {
@@ -172,11 +180,19 @@ describe("countKindForUnits（ADR 0045）", () => {
 describe("unitAssemblyShortfall（ADR 0043）", () => {
   // **🔴 向きの判断を測る歯である。**`recall()` からは「覆えている」と「二重計上」が
   // どちらも omission 無しになって区別が付かない ⟹ ここで直接測るしかない。
+  // 候補の id は単位をまたいで一意にする（実際の単位の組み方と同じ形）。二重計上の歯は、既存の id を
+  // もう1つの単位へ入れて作る（`duplicateOf`）。⚠ 2026-09-28: 以前は単位ごとに `m-0` から振り直していたので、
+  // 単位をまたいで id が重なっていた——件数だけで数えていた実装の上でしか成り立たない形だった
+  // （`countKindForUnits`・`unitAssemblyShortfall` を id の集合で数えるようにしたので、形を直した）。
   function units(...memberCounts: number[]) {
+    let next = 0;
     return memberCounts.map((n) => ({
-      members: Array.from({ length: n }, (_, i) => candidate(`m-${i}`, 0)),
+      members: Array.from({ length: n }, () => candidate(`m-${next++}`, 0)),
       rankScore: 0,
     }));
+  }
+  function duplicateOf(id: string) {
+    return { members: [candidate(id, 0)], rankScore: 0 };
   }
 
   it("覆えていれば 0（不足なし）", () => {
@@ -192,7 +208,7 @@ describe("unitAssemblyShortfall（ADR 0043）", () => {
   it("🔴 二重計上でも 0（差の絶対値ではない。向きが意味を持つ）", () => {
     // 候補4件に対して単位が5件ぶん覆っている＝どこかが二重に入っている。
     // 候補は*消えて*いないので「落ちた」と名乗ってはいけない。
-    expect(unitAssemblyShortfall(units(1, 2, 1, 1), 4)).toBe(0);
+    expect(unitAssemblyShortfall([...units(1, 2, 1), duplicateOf("m-0")], 4)).toBe(0);
   });
 
   it("候補も単位も0なら 0", () => {

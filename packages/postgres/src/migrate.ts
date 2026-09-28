@@ -190,11 +190,18 @@ const CREATE_EXTENSION_LINE_PATTERN =
   "^[ \\t]*CREATE EXTENSION IF NOT EXISTS[ \\t]+(\\S+?);[ \\t]*\\r?\\n?";
 
 /**
- * `migrations/*.sql` 本文から `CREATE EXTENSION IF NOT EXISTS <name>;` 単体行をすべて抽出する。
- * 一致条件は「行頭（前後の空白は許す）から始まり `;` で終わるその行そのもの」。
- * 現状の `migrations/*.sql`（`0001_init.sql` の3行のみ）の書き方に厳密に合わせてある
- * ——複数の `CREATE EXTENSION` を1行にまとめる、コメントと同居させる、といった書き方は
- * 対象外（そのような行は今のところ存在しない。増えたらこの関数もそのぶん拡張すること）。
+ * `migrations/*.sql` 本文から `CREATE EXTENSION IF NOT EXISTS <name>;` の行をすべて抽出する。
+ * 一致するのは「行頭（前の空白は許す）から `CREATE EXTENSION IF NOT EXISTS`、空白、空白を含まない
+ * 名前、`;`」までである（大文字小文字は区別しない）。現状の `migrations/*.sql`（`0001_init.sql` の3行のみ）の
+ * 書き方に合わせてある。`WITH SCHEMA` などを伴う書き方は一致せず、複数の `CREATE EXTENSION` を1行に
+ * まとめると先頭の1つだけが一致する（そのような行は今のところ存在しない。増えたらこの関数もそのぶん拡張すること）。
+ *
+ * ⚠ 2026-09-28 追記（今の振る舞い。正規表現は変えていない）:
+ * - **`;` の後ろは行末でなくてもよい。**`CREATE EXTENSION IF NOT EXISTS pgcrypto; -- c` のように後ろに
+ *   コメントが同居する行も一致する。`line` は `;` とその直後の空白・改行までで、後ろのコメントは含まない
+ *   ——`stripCreateExtensionStatements` はその部分だけを取り除くので、`-- c` は本文に残る。
+ * - **`name` は書かれたとおりの綴りで、引用符を外さない。**`CREATE EXTENSION IF NOT EXISTS "btree_gin";` の
+ *   `name` は `"btree_gin"`（二重引用符を含む）になる。
  */
 export function matchCreateExtensionLines(
   sql: string,
