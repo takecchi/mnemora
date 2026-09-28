@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertValidEventRetentionDays,
   DEFAULT_HALF_LIFE_HOURS,
+  isHalfLifeHoursInRange,
   type Ctx,
   type EventRetention,
   type EventRetentionSetting,
@@ -77,13 +78,24 @@ describeMemoryStoreConformance({
   // supportsListActiveClaimPredicates）は意図的に渡さない。
 });
 
+/**
+ * 必須の3口だけを持つ最小の store。`setDefaultHalfLifeHours` は適合テストへ渡すフック（store の口ではない）で、
+ * 行が在るテナントは retention が未設定でも unlimited になる（Postgres の行と同じ3状態）。
+ */
 class MinimalTenantSettingsStore implements TenantSettingsStore {
   private readonly retention = new Map<string, EventRetentionSetting>();
-  async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
-    return DEFAULT_HALF_LIFE_HOURS;
+  private readonly halfLifeHours = new Map<string, number>();
+  setDefaultHalfLifeHours(ctx: Ctx, hours: number): void {
+    if (!isHalfLifeHoursInRange(hours)) throw new Error(`half life hours out of range: ${hours}`);
+    this.halfLifeHours.set(ctx.tenantId, hours);
+  }
+  async getDefaultHalfLifeHours(ctx: Ctx): Promise<number> {
+    return this.halfLifeHours.get(ctx.tenantId) ?? DEFAULT_HALF_LIFE_HOURS;
   }
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
-    return this.retention.get(ctx.tenantId) ?? { kind: "unset" };
+    const retention = this.retention.get(ctx.tenantId);
+    if (retention) return retention;
+    return this.halfLifeHours.has(ctx.tenantId) ? { kind: "unlimited" } : { kind: "unset" };
   }
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
     if (retention.kind === "days") assertValidEventRetentionDays(retention.days);
@@ -92,9 +104,11 @@ class MinimalTenantSettingsStore implements TenantSettingsStore {
 }
 
 const TENANT_NAME = "omitted optional flags (tenant settings)";
+const tenantStore = new MinimalTenantSettingsStore();
 describeTenantSettingsStoreConformance({
   name: TENANT_NAME,
-  createStore: () => new MinimalTenantSettingsStore(),
+  createStore: () => tenantStore,
+  setDefaultHalfLifeHours: (ctx, hours) => tenantStore.setDefaultHalfLifeHours(ctx, hours),
   supportsDecayClock: false,
   // ⭐ supportsTaxonomyMode は意図的に渡さない。
 });
