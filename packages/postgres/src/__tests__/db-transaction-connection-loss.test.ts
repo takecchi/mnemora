@@ -32,7 +32,8 @@ describe("db.transaction(): 接続が外部要因で失われたとき", () => {
   ): Promise<number> {
     for (let attempt = 0; attempt < 100; attempt += 1) {
       const { rows } = await pool.query(
-        "SELECT pid FROM pg_stat_activity WHERE query ILIKE $1 AND pid <> pg_backend_pid()",
+        // idle の接続にも最後のクエリが残るので、実行中のものだけに絞る。
+        "SELECT pid FROM pg_stat_activity WHERE state = 'active' AND query ILIKE $1 AND pid <> pg_backend_pid()",
         [likePattern],
       );
       if (rows.length > 0) {

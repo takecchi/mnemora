@@ -74,8 +74,11 @@ describe("createPostgresClient: drizzle に渡す Proxy", () => {
       });
       let pid: number | undefined;
       for (let attempt = 0; attempt < 100 && pid === undefined; attempt += 1) {
+        // ⚠ state = 'active' に絞り、探す文字列は引数で渡す。idle の接続の `query` 欄には最後に打った
+        // クエリが残るので、文字列を SQL に直に書くと、この探索自身の接続が他の探索に見つかりうる。
         const { rows } = await client.pool.query<{ pid: number }>(
-          "SELECT pid FROM pg_stat_activity WHERE query ILIKE '%pg_sleep(5)%' AND pid <> pg_backend_pid()",
+          "SELECT pid FROM pg_stat_activity WHERE state = 'active' AND query ILIKE $1 AND pid <> pg_backend_pid()",
+          ["%pg_sleep(5)%"],
         );
         pid = rows[0]?.pid;
         if (pid === undefined) await sleep(50);
