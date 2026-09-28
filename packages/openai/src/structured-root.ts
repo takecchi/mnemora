@@ -38,6 +38,11 @@ export function needsRootWrap(base: JsonSchemaNode): boolean {
 /**
  * 強化済みのスキーマを、{@link WRAPPED_ROOT_KEY} だけを持つ object に包む。`$defs` は根に残す
  * （`#/$defs/...` の参照が指す先を変えないため）。
+ *
+ * ⚠ **根そのものを指す参照（`$ref: "#"`）は書き換えない**（今の振る舞い）。根が自分自身を再帰で含む
+ * union（`z.lazy` で根の union を子に持つ形）を包むと、子の `$ref: "#"` は元の union ではなく**包みの object**
+ * （`{ result: … }`）を指すようになり、送る形が元のスキーマと変わる。core の4つのスキーマはこの形を使わない。
+ * 歯は `__tests__/structured-root-union.test.ts` の「根が再帰する union」。
  */
 export function wrapRootSchema(hardened: JsonSchemaNode): JsonSchemaNode {
   const { $defs, ...inner } = hardened;

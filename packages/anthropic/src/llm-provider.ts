@@ -88,6 +88,11 @@ export interface AnthropicRequest {
  * (2) `prompt.messages` のうち `role === "system"` のものは**黙って捨てず**、
  *     top-level `system` へ改行区切りで連結し、
  * (3) 残りの `user`/`assistant` だけを `messages` に入れる。
+ *
+ * 空文字の system（`prompt.system` も、`role === "system"` のメッセージの `content` も）は連結に入れない。
+ * どれも空なら `system` の鍵ごと持たない（{@link AnthropicRequest.system} の「無ければ鍵ごと無い」）。
+ * 以前は `prompt.system` の空文字だけを落とし、`content` が空文字の `role: "system"` のメッセージは
+ * `system: ""` として送っていた。
  */
 export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
   const systemParts: string[] = [];
@@ -98,7 +103,9 @@ export function toAnthropicRequest(prompt: PromptSpec): AnthropicRequest {
   const messages: AnthropicMessageParam[] = [];
   for (const message of prompt.messages) {
     if (message.role === "system") {
-      systemParts.push(message.content);
+      if (message.content) {
+        systemParts.push(message.content);
+      }
       continue;
     }
     messages.push({ role: message.role, content: message.content });
