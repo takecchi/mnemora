@@ -3,6 +3,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   EXPECTED_ENTRY_POINTS,
+  buildSmokeCjs,
   buildSmokeMjs,
   buildSmokeTs,
   buildTsconfig,
@@ -74,6 +75,16 @@ describe("生成するファイル", () => {
   it("smoke.mjs は解決先が node_modules の配下であることと、export の有無を見る", () => {
     const src = buildSmokeMjs(["@a/b"]);
     expect(src).toContain('["@a/b"]');
+    expect(src).toContain('"/node_modules/"');
+    expect(src).toContain("Object.keys(mod).length === 0");
+  });
+
+  it("smoke.cjs は require で読み、解決先が node_modules の配下であることと、export の有無を見る", () => {
+    const src = buildSmokeCjs(["@a/b"]);
+    expect(src).toContain('["@a/b"]');
+    expect(src).toContain("require.resolve(spec)");
+    expect(src).toContain("require(spec)");
+    expect(src).not.toContain("import(");
     expect(src).toContain('"/node_modules/"');
     expect(src).toContain("Object.keys(mod).length === 0");
   });

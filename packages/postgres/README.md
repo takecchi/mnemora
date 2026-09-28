@@ -213,6 +213,7 @@ npx mnemora-postgres-migrate --help
   エラー（終了コード 1）になる。
 - 不正なスキーマ名（PostgreSQL の識別子として使えない・63バイト超）や未知の引数、
   値の無い `--schema` もエラー（終了コード 1）で止まる。
+- 環境変数を空文字にしても「未指定」にはならない（今の振る舞い）: `MNEMORA_SCHEMA=`・`MNEMORA_EXTENSION_SCHEMA=`・`MNEMORA_EXTENSION_MODE=` は、どれもエラー（終了コード 1）になる。空文字を偽として扱うのは `MNEMORA_ANALYZE_MEMORIES` だけである。
 
 `package.json` の `scripts` に組み込む例:
 

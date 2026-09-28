@@ -87,6 +87,39 @@ console.log(\`ESM: \${entries.length} 個の入口をすべて import できた\
 `;
 }
 
+/**
+ * CommonJS から全入口を `require` する `smoke.cjs` の中身。README（core・postgres の「前提」）が約束する
+ * 「CommonJS からは Node 22.12 以降の `require(esm)` で読み込める」を、install 先で確かめる。
+ * `smoke.mjs` と同じく、解決先が `node_modules` の配下であることと、名前が1つ以上 export されていることを見る。
+ * ⚠ 型（TypeScript の `module: nodenext` から `require` したときの型解決）は見ない。
+ *
+ * @param {readonly string[]} entries
+ */
+export function buildSmokeCjs(entries) {
+  return `"use strict";
+const entries = ${JSON.stringify(entries)};
+const failures = [];
+for (const spec of entries) {
+  try {
+    const resolved = require.resolve(spec);
+    if (!resolved.includes("/node_modules/")) {
+      failures.push(\`\${spec}: install 先の node_modules の外へ解決した（\${resolved}）\`);
+      continue;
+    }
+    const mod = require(spec);
+    if (Object.keys(mod).length === 0) failures.push(\`\${spec}: export が1つも無い\`);
+  } catch (error) {
+    failures.push(\`\${spec}: \${error instanceof Error ? \`\${error.code ?? error.name}: \${error.message}\` : String(error)}\`);
+  }
+}
+if (failures.length > 0) {
+  console.error(failures.join("\\n"));
+  process.exit(1);
+}
+console.log(\`CommonJS: \${entries.length} 個の入口をすべて require できた（require(esm)）\`);
+`;
+}
+
 /** 型検査の tsconfig（`moduleResolution` ごと）。`skipLibCheck: true` は利用者の既定に合わせる。 */
 export function buildTsconfig(moduleResolution) {
   const module = moduleResolution === "node16" ? "Node16" : "ESNext";
