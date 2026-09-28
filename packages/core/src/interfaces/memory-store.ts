@@ -1140,8 +1140,18 @@ export interface MemoryStore {
    *   ままである。**
    * - `event.digestSnapshot` は呼び出し側が上書き**前**の digest を渡すこと
    *   （このメソッド自身は snapshot を作らない——`updateStatusWithEvent` と同じ、
-   *   「呼び出し側が読んだ値を event に埋める」規律）。**purge 後、元の digest が残る
-   *   唯一の場所はこの監査ログである**（`content` は事後もどこにも残らない）。
+   *   「呼び出し側が読んだ値を event に埋める」規律）。**purge の後、`memories` の行には元の
+   *   `content`・`digest` は残らない。**元の digest は、この監査ログ（`digestSnapshot`）のほかに、
+   *   purge より前に撃った recall の記録にも残る——`recalls.index_band` の digest 帯と、
+   *   `consolidate`/`reflect` が種の digest を `text` にして撃った recall の `recalls.query` である。
+   *   recall の記録の分は、イベントの保持期間の掃除（{@link MemoryStore.purgeExpiredEvents}）で監査ログを
+   *   消した後にも残る。`memories` の外に残るもの（元の Observation の `payload` など）の一覧は
+   *   `docs/memory-model.md` §9 の 2026-09-27 追記にある。どこまで消すかは決まっていない
+   *   （[Issue #994](https://github.com/takecchi/mnemora/issues/994)・
+   *   [Issue #995](https://github.com/takecchi/mnemora/issues/995)）。
+   *   ⚠ 2026-09-28 訂正: ここは以前「purge 後、元の digest が残る唯一の場所はこの監査ログである
+   *   （`content` は事後もどこにも残らない）」と書いていたが、上の recall の記録の分と
+   *   Observation の `payload` があり、実装と合っていなかった。文書を実装に合わせた（実装は変えていない）。
    */
   purgeMemory?(
     ctx: Ctx,
