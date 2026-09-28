@@ -45,8 +45,8 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 **この節は `v1.0.2` からの差分を対象とする。**
 
-⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`23f0076`**（PR #1224）の範囲を
-数えたものである（2026-09-27 の4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から、6回目の棚卸しで `4514cec` から、7回目の棚卸しで `9f58833` から、8回目の棚卸しで `ef03a8f` から広げた。下の追記4〜追記8。それより前の棚卸しの経緯は `## [1.0.2]` 節にある）。
+⭐ **数えた基準を明記する。**この節は `v1.0.2`（tag が指す `b981ecd`、PR #1098）… **`c6ca5a4`**（PR #1300）の範囲を
+数えたものである（2026-09-27 の4回目の棚卸しで `3a8448c` から、5回目の棚卸しで `9b6eca2` から、6回目の棚卸しで `4514cec` から、7回目の棚卸しで `9f58833` から、8回目の棚卸しで `ef03a8f` から、2026-09-28 の9回目の棚卸しで `23f0076` から広げた。下の追記4〜追記9。それより前の棚卸しの経緯は `## [1.0.2]` 節にある）。
 ⭐ **この sha が名乗るのは「この節がどこまで数えたか」であって、「ここで打ち切った」ではない。**
 ⟹ ⭕ **`origin/main` がこれより進んでいても、この節は腐っていない**——**まだ数えていない範囲が
 増えただけである。**🔴 **この性質が成り立つのは、この節が件数を持たないからである。**
@@ -92,15 +92,18 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ⟹ **この節の範囲（`v1.0.2`…`23f0076`）で、確定した破壊的変更は無い（上の保留を除く）。**
 
+**⚠ 2026-09-28 追記9（9回目の棚卸し。`c6ca5a4` まで広げた）**: `23f0076`…`c6ca5a4` に `main` へ入った PR を全部当てた（PR #1225・#1227・#1230・#1231・#1233・#1235・#1236・#1240〜#1243・#1245〜#1247・#1249〜#1252・#1254・#1255・#1257〜#1259・#1261・#1263・#1265〜#1267・#1269〜#1275・#1278〜#1283・#1286〜#1291・#1293〜#1300。8回目の棚卸しの PR #1228 自身は除く）。出荷される6パッケージの利用者に見える振る舞いの変更は次の10本で、どれも項目があり、PR 番号でも受けている。`@mnemora/testkit/fixtures` の PR #1231（途中で投げたときに書いた分を残さない）・PR #1273（ベクトルを float4 に丸めて比べる）は非破壊、PR #1243・#1250・#1252・#1265・#1270・#1280（公開の fixture が Postgres の拒む値に新しく例外を投げる）は保留（問い `3f3411c5` の射程。PR #1252 の空文字の `externalId` の件だけは、例外を投げず結果だけが変わる）、`@mnemora/postgres` の PR #1289（`aggregateScope` の `excludeMemoryIds`）・PR #1299（`searchMany` の NUL を含む key）は例外を投げなくなる側の非破壊である。ほかはこの節に項目として足していない——この節は docs・README だけの変更を項目にしない（追記5〜8と同じ慣例）。PR #1227・#1233・#1235・#1240・#1241・#1245・#1247・#1249・#1254・#1257・#1261・#1263・#1266・#1269・#1279・#1283・#1286・#1288・#1296・#1297・#1298 は出荷の `src` を触ったが、変更の前後の各ファイルをコメントを除いて JS と TS に落として比べ、同じであることを確かめた（差分がコメント・TSDoc だけ。同じ比べ方で PR #1289・#1270 は差が出ることも確かめた）。README を変えたのは PR #1246（`@mnemora/local-embedding`：`cacheDir` を渡しても読み込みの前の確認は既定のキャッシュを見ること）・PR #1257（`@mnemora/postgres`：専用スキーマでの `pg_trgm` の置き場所）で、どちらも今の振る舞いを書いたもの。PR #1236 は CI・scripts と `examples/chat` だけ、PR #1282 は `packages/postgres/vitest.config.mts`（出荷しない）だけ、ほかはテスト・scripts・CI・docs だけである。公開 API の型の差分は無い（`git diff 23f0076..c6ca5a4 -- scripts/__snapshots__/public-api/` が空）。マイグレーションは増えていない。棚卸しで直したもの: PR #1289・#1299 の項目に PR 番号を足した（Issue #1262・#1285 の番号でしか受けていなかった）。
+⟹ **この節の範囲（`v1.0.2`…`c6ca5a4`）で、確定した破壊的変更は無い（上の保留を除く）。**
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
 
 ### Fixed
 
-- **`@mnemora/postgres` の `aggregateScope()` は、`digestBand.excludeMemoryIds` に uuid の形をしていない id（空文字を含む）が混ざると、`invalid input syntax for type uuid` の DB の例外を投げていた**（[Issue #1262](https://github.com/takecchi/mnemora/issues/1262)）——除外の id をそのまま `::uuid[]` に渡していた。`get`・`getMany` など、ほかの読みの口の「形の崩れた id は無いもの」の扱い（`restoreSuperseded` の `onlyMemoryIds` を揃えた PR #1195 と同じ線）に揃え、形式不正な id は除外の対象から外すだけにした（ほかの id の除外はそのまま効く。`@mnemora/testkit/fixtures` の InMemory は、もともとそう返していた）。`Runtime.recall` は実在する id だけを渡すので、この形になるのは `aggregateScope` を直接呼ぶ経路だけである。
+- **`@mnemora/postgres` の `aggregateScope()` は、`digestBand.excludeMemoryIds` に uuid の形をしていない id（空文字を含む）が混ざると、`invalid input syntax for type uuid` の DB の例外を投げていた**（[Issue #1262](https://github.com/takecchi/mnemora/issues/1262)、[PR #1289](https://github.com/takecchi/mnemora/pull/1289)）——除外の id をそのまま `::uuid[]` に渡していた。`get`・`getMany` など、ほかの読みの口の「形の崩れた id は無いもの」の扱い（`restoreSuperseded` の `onlyMemoryIds` を揃えた PR #1195 と同じ線）に揃え、形式不正な id は除外の対象から外すだけにした（ほかの id の除外はそのまま効く。`@mnemora/testkit/fixtures` の InMemory は、もともとそう返していた）。`Runtime.recall` は実在する id だけを渡すので、この形になるのは `aggregateScope` を直接呼ぶ経路だけである。
   ⭕ 非破壊と数える（例外を投げなくなる側の修正で、形の正しい id の結果は変わらない。クローン miku の判断であり、オーナーの判断ではない）。
-- **`@mnemora/postgres` の `PostgresVectorStore.searchMany()` は、`queries` の `key` に NUL（U+0000）を含む文字列が在ると、DB の例外を投げていた**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）——key を `text` のパラメータとして SQL に送っていたので、Postgres が NUL を拒んでいた。同じベクトルの `search()` は投げない。key を SQL に送らず、`queries` の添字を送って、戻ってから key に引き直すようにした。`VectorStore.searchMany?` の TSDoc に「`search()` が投げない入力では `searchMany` も投げない」を書いた。`Runtime` の段3.5 は key にアンカーの `memoryId` を使うので、この差が出ていたのは `VectorStore` を直接呼ぶ経路だけである。同じ key が2回以上あるときの振る舞い（[Issue #1284](https://github.com/takecchi/mnemora/issues/1284)、未決）は変えていない。
+- **`@mnemora/postgres` の `PostgresVectorStore.searchMany()` は、`queries` の `key` に NUL（U+0000）を含む文字列が在ると、DB の例外を投げていた**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)、[PR #1299](https://github.com/takecchi/mnemora/pull/1299)）——key を `text` のパラメータとして SQL に送っていたので、Postgres が NUL を拒んでいた。同じベクトルの `search()` は投げない。key を SQL に送らず、`queries` の添字を送って、戻ってから key に引き直すようにした。`VectorStore.searchMany?` の TSDoc に「`search()` が投げない入力では `searchMany` も投げない」を書いた。`Runtime` の段3.5 は key にアンカーの `memoryId` を使うので、この差が出ていたのは `VectorStore` を直接呼ぶ経路だけである。同じ key が2回以上あるときの振る舞い（[Issue #1284](https://github.com/takecchi/mnemora/issues/1284)、未決）は変えていない。
   ⭕ 非破壊と数える（例外を投げなくなる側の修正で、NUL を含まない key の結果は変わらない。公開の型も変わらない。クローン miku の判断であり、オーナーの判断ではない）。
 - **`@mnemora/testkit/fixtures` の `InMemoryMemoryStore` は、いくつかの口で、書き始めた後に投げて、書いた分を残していた**（[PR #1231](https://github.com/takecchi/mnemora/pull/1231)）——Postgres は1トランザクションで巻き戻るので何も残らない。`supersedeWithNewMemories` は `news` の2件目以降が書けない（本文に NUL・元の Observation が無い など）と、先に作った Memory・outbox・ラベルを残していた。`updateStatusWithEvent`・`supersedeWithNewMemories`・`markContestedPair`・`resolveContestedPair`・`resolveOrphanedContested`・`purgeMemory` は、イベントの `meta`・`actor` が `structuredClone` できない（関数・Symbol を含む）と、状態を書き換えた後に `DataCloneError` を投げていた。`restoreSupersededBy` は `at` が Invalid Date か `actor` が写せないと、1件目だけを戻してイベントを残さずに投げていた。いまはどれも書く前に投げる（または、書いた分を取り消してから投げる）。
   ⭕ 非破壊と数える（投げる入力は変わらない——今まで投げた入力で今までどおり投げ、状態が呼ぶ前のまま残るだけである。今まで投げなかった入力では投げない。クローン miku の判断であり、オーナーの判断ではない）。

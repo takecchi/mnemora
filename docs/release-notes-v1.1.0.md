@@ -22,10 +22,10 @@
 
 | | |
 |---|---|
-| **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。改版 2026-09-26（`ec39629` の木）。改版 2026-09-27（`ef03a8f` の木。下の「改版の経緯」）。**改版 2026-09-27（2回目）**（`origin/main` = `23f0076` の木。CHANGELOG の8回目の棚卸しに合わせた） |
+| **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。改版 2026-09-26（`ec39629` の木）。改版 2026-09-27（`ef03a8f` の木。下の「改版の経緯」）。改版 2026-09-27（2回目）（`23f0076` の木。CHANGELOG の8回目の棚卸しに合わせた）。**改版 2026-09-28**（`origin/main` = `c6ca5a4` の木。CHANGELOG の9回目の棚卸しに合わせた） |
 | **書いた人** | **担い手（クローン miku の委譲先）。オーナーではない。**（冒頭のバナー） |
-| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠の PR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.2` … `23f0076`** を数えたもの）が正。`v1.0.2`・`v1.0.1` として既に出荷済みの分は、同じファイルの `## [1.0.2] - 2026-09-27`・`## [1.0.1] - 2026-09-25` 節が正。保留と非破壊の数え方は `[1.1.0]` 節の前書きが正、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md) の「v1.0.2 → 次の版」の節が正 |
-| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `23f0076` から動いた、または sha が同じまま `[1.1.0]` 節の中身が変わった。② オーナーへの問い `3f3411c5` に答えが出た（この草稿は、公開の fixture が新しく例外を投げる変更を「破壊的として扱うかは未決」のまま書き、版の種類も決めていない）。③ `packages/postgres/migrations/` の最後尾が `0023_lexical_query_inner_quote_as_space.sql` でなくなった。④ `v1.0.2`（tag `b981ecd`）より新しい Release が切られた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
+| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠の PR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.2` … `c6ca5a4`** を数えたもの）が正。`v1.0.2`・`v1.0.1` として既に出荷済みの分は、同じファイルの `## [1.0.2] - 2026-09-27`・`## [1.0.1] - 2026-09-25` 節が正。保留と非破壊の数え方は `[1.1.0]` 節の前書きが正、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md) の「v1.0.2 → 次の版」の節が正 |
+| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `c6ca5a4` から動いた、または sha が同じまま `[1.1.0]` 節の中身が変わった。② オーナーへの問い `3f3411c5` に答えが出た（この草稿は、公開の fixture が新しく例外を投げる変更を「破壊的として扱うかは未決」のまま書き、版の種類も決めていない）。③ `packages/postgres/migrations/` の最後尾が `0023_lexical_query_inner_quote_as_space.sql` でなくなった。④ `v1.0.2`（tag `b981ecd`）より新しい Release が切られた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
 
 ⚠ **この文書は、正典の内容を意図的に複製している。**理由は `docs/release-notes-v1.0.0.md` と同じ——**Release 本文を読むのは repo の外に居る採用者**であり、リンクだけでは伝わらない。⟹ **複製を許す代わりに、上の「正はどれか」を必ず添える。**
 
@@ -41,9 +41,9 @@
 
 ## 貼る前に確かめること
 
-1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `23f0076` か。**
-   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`23f0076` から動いていたら、この草稿の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節（追記9 以降）を読み、この草稿へ足すこと。
-   ⚠ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**（前の版を書く過程で、sha を動かさずに `[1.1.0]` の `### Fixed` へ追記されることが3度起きた。PR #845・#846・#851）。⟹ `git diff 23f0076 -- CHANGELOG.md` で `CHANGELOG.md` 自体の差分も当日見ること。
+1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `c6ca5a4` か。**
+   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`c6ca5a4` から動いていたら、この草稿の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節（追記10 以降）を読み、この草稿へ足すこと。
+   ⚠ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**（前の版を書く過程で、sha を動かさずに `[1.1.0]` の `### Fixed` へ追記されることが3度起きた。PR #845・#846・#851）。⟹ `git diff c6ca5a4 -- CHANGELOG.md` で `CHANGELOG.md` 自体の差分も当日見ること。
 2. **オーナーへの問い `3f3411c5` に答えが出ているか。**`CHANGELOG.md` `[1.1.0]` 節の前書きの「保留と非破壊の数え方」が、まだ「未回答」と書いているかを見る。
    - **まだ未回答なら**: 下の草稿の「破壊的として扱うかは未決のもの」はそのままでよい。版の種類も、この草稿からは決めないこと。
    - **答えが出たら**: `CHANGELOG.md` `[1.1.0]` 節と `docs/migration-v1.md` の「v1.0.2 → 次の版」が書き換わっているはずなので、その表現に合わせて、下の節の見出し・文言と、この文書の題と草稿の見出しの版を直すこと。
@@ -78,6 +78,12 @@
 > - `InMemoryEventStore.append` とイベントを受け取る `InMemoryMemoryStore` の口が、`MemoryEventKind` に無い kind を拒みます（[Issue #1096](https://github.com/takecchi/mnemora/issues/1096)、[PR #1170](https://github.com/takecchi/mnemora/pull/1170)）。
 > - `InMemoryMemoryStore` が、`memories` の列挙の列（`status`・`digestSource`・`embeddingStatus`・`provenance.kind`）に列挙に無い値を拒みます（[PR #1183](https://github.com/takecchi/mnemora/pull/1183)）。
 > - `InMemoryMemoryStore` の `createMemory` 系が、冪等の鍵が同じ既存の行が在っても、書けない値を拒みます（[PR #1190](https://github.com/takecchi/mnemora/pull/1190)）。
+> - `InMemoryMemoryStore` の `createObservation`・`createObservationWithOutbox` が、日時の欄の Invalid Date を拒みます（[PR #1243](https://github.com/takecchi/mnemora/pull/1243)）。
+> - `InMemoryMemoryStore` が、Postgres の CHECK 制約と型の変換に当たる値（`stated`/`inferred` で `sourceObservationId` が無い、活動時計の通し番号・`halfLifeRecalls` の範囲の外、`events_purged` で `memoryId` が在るイベント）を拒みます（[PR #1250](https://github.com/takecchi/mnemora/pull/1250)）。
+> - `InMemoryMemoryStore` が、空文字 `""` の参照（`sourceObservationId`・`supersededById`・`contestedWithId`）を、参照先が無いとして拒みます。空文字の `externalId` は、2回目から既存の行を返すようになります（こちらは例外ではなく結果が変わるだけです。[PR #1252](https://github.com/takecchi/mnemora/pull/1252)）。
+> - 読みの口（`purgeExpiredEvents`・`archiveDecayed`・`aggregateScope`・`findActiveByClaimKey`・`InMemoryEventStore.list` など）が、条件の Invalid Date と整数でない通し番号を拒みます（[PR #1265](https://github.com/takecchi/mnemora/pull/1265)）。
+> - `InMemoryTenantSettingsStore.setEventRetention` が、Postgres の `integer` に収まらない `days` を拒みます（[PR #1270](https://github.com/takecchi/mnemora/pull/1270)）。
+> - `InMemoryMemoryStore.createRecall` と `InMemoryOutboxStore.claimBatch` が、Postgres が書けない値（NUL を含む文字列・JSON にならない値など）を拒みます（[PR #1280](https://github.com/takecchi/mnemora/pull/1280)）。
 >
 > <!-- ⚠ 下の2件を非破壊と数えたのはクローン miku の判断であり、オーナーの判断ではない（CHANGELOG [1.1.0] の各項目の注）。 -->
 > ### ⚠ 新しく例外を投げるが、破壊的変更とは数えていないもの
@@ -101,6 +107,8 @@
 > - **LLM が空白だけの本文を返したときに、その本文の Memory が書かれていた不具合を直しました**（[Issue #1065](https://github.com/takecchi/mnemora/issues/1065)、[PR #1128](https://github.com/takecchi/mnemora/pull/1128)）。
 > - **`@mnemora/postgres` の `runMigrations()`（と `mnemora-postgres-migrate`）が、advisory lock を持つ接続だけが切れたときに、ロックの無いまま適用を続け、別の実行と重なりえた不具合を直しました。**ロックの下の本体を、ロックを持つ接続そのもので流します（[Issue #1212](https://github.com/takecchi/mnemora/issues/1212)、[PR #1220](https://github.com/takecchi/mnemora/pull/1220)）。
 > - **`@mnemora/local-embedding` のモデルの読み込みに失敗したときのメッセージが、`cacheDir` を省いたときのキャッシュの場所を npm の配置で決め打ちに名指していた不具合を直しました。**pnpm などでも、実際に解決された場所を名指します（[PR #1223](https://github.com/takecchi/mnemora/pull/1223)）。
+> - **`@mnemora/postgres` の `aggregateScope()` が、`digestBand.excludeMemoryIds` に uuid の形をしていない id が混ざると、DB の例外を投げていた不具合を直しました。**形の崩れた id は、ほかの読みの口と同じく「無いもの」として扱います（[Issue #1262](https://github.com/takecchi/mnemora/issues/1262)、[PR #1289](https://github.com/takecchi/mnemora/pull/1289)）。
+> - **`@mnemora/postgres` の `PostgresVectorStore.searchMany()` が、`queries` の `key` に NUL を含む文字列が在ると、DB の例外を投げていた不具合を直しました。**同じベクトルの `search()` と同じく投げません（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)、[PR #1299](https://github.com/takecchi/mnemora/pull/1299)）。
 > - 一覧と根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Fixed` を見てください——ここでは複製しません（イベントの欄の約束どおりの記録、testkit の fixture を Postgres に揃えた修正、例外の文面の改善などが載っています）。
 >
 > **移行手順の詳細は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「v1.0.2 → 次の版」の節が正です。**
