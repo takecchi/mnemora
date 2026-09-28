@@ -253,6 +253,40 @@ describe.each(KITS)(
       });
     });
 
+    it("やりすぎの歯: 同じ記憶を大文字を先に渡しても、not_found になるのは大文字の側で、どちらの綴りも store の id と違えば両側とも not_found（位置によらない）", async () => {
+      const kit = await makeKit();
+      const { a, b } = await contestedPair(kit, "self-order");
+      const capitalized = a.id.replace(/[a-z]/, (c) => c.toUpperCase());
+      expect([capitalized === a.id, capitalized === upper(a.id)]).toEqual([false, false]);
+
+      const upperFirst = await kit.runtime.resolveContested(ctx, upper(a.id), a.id, {
+        kind: "both_active",
+      });
+      const noExact = await kit.runtime.resolveContested(ctx, capitalized, upper(a.id), {
+        kind: "both_active",
+      });
+
+      expect(upperFirst.outcome).toEqual({
+        kind: "ineligible",
+        sides: [
+          { memoryId: upper(a.id), kind: "not_found" },
+          { memoryId: a.id, kind: "pair_broken", contestedWithId: b.id },
+        ],
+      });
+      expect(noExact.outcome).toEqual({
+        kind: "ineligible",
+        sides: [
+          { memoryId: capitalized, kind: "not_found" },
+          { memoryId: upper(a.id), kind: "not_found" },
+        ],
+      });
+      const statuses = [
+        (await kit.memoryStore.get(ctx, a.id))?.status,
+        (await kit.memoryStore.get(ctx, b.id))?.status,
+      ];
+      expect(statuses).toEqual(["contested", "contested"]);
+    });
+
     it("確かめ: resolveOrphanedContested は大文字の id でも store が在ると言う生存側を解決し、meta.contestedWithId は列の値", async () => {
       const kit = await makeKit();
       const { a, b } = await contestedPair(kit, "orphan");

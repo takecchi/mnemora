@@ -2622,7 +2622,9 @@ export interface Runtime {
    *    `"eligible"` でなければ、書き込みを一切試みず
    *    `{ supported: true, outcome: { kind: "ineligible", sides: [...] } }` を返す。
    *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（同じ記憶を小文字と大文字で渡したときは、
-   *    渡された文字列どおりに突き合わせるので、2つ目は `"not_found"` になる）。
+   *    渡された文字列どおりに突き合わせるので、store が返す id と同じ綴りで渡した側だけが在る記憶になり、
+   *    もう一方は `"not_found"` になる。どちらの位置に渡したかによらない——`@mnemora/postgres` では大文字で
+   *    渡した側が `"not_found"`。どちらの側も store の id と綴りが違えば、両側とも `"not_found"`）。
    * 4. 両側とも `"eligible"` なら `deps.memoryStore.markContestedPair` を呼ぶ。成功すれば
    *    `{ supported: true, outcome: { kind: "contested", first, second } }`。
    * 5. {@link MemoryStatusConflictError} が投げられたら（3で読んだ後、4で書く前に別の
@@ -3176,8 +3178,10 @@ function describeDroppedCandidate(
  *
  * ⚠ **大文字小文字だけが違う id を同じ呼び出しに混ぜたときは、その id どうしは渡された文字列どおりに突き合わせる**
  * （小文字にそろえる前と同じ）。`getMany` の戻りだけでは、「store がどちらも在ると言った」と「片方だけ在ると
- * 言った」を区別できないため。⟹ `@mnemora/postgres` の `forget({ memoryIds: [小文字, 大文字] })` の2つ目は
- * `not_found` のまま残る。
+ * 言った」を区別できないため。⟹ store が返す id と同じ綴りで渡した id だけが在る記憶になり、ほかの綴りは
+ * `not_found` のまま残る。**並びの位置によらない**——`@mnemora/postgres` の `forget({ memoryIds: [小文字, 大文字] })`
+ * でも `[大文字, 小文字]` でも、`not_found` になるのは大文字の側である。どの綴りも store の id と違えば
+ * （`[先頭だけ大文字, 大文字]` など）、全部が `not_found` になる。
  */
 function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string {
   const spellingsByLower = new Map<string, Set<MemoryId>>();
@@ -5313,7 +5317,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
 
     const found = await deps.memoryStore.getMany(ctx, [firstId, secondId]);
     // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc）。同じ記憶を小文字と大文字で
-    // 渡したときは渡された文字列どおりに突き合わせるので、2つ目は今どおり `not_found`（`ineligible`）になる。
+    // 渡したときは渡された文字列どおりに突き合わせるので、store の id と綴りが違う側は今どおり `not_found`
+    // （`ineligible`）になる。どちらの位置に渡したかによらない。
     const lookupKey = memoryLookupKeyFor([firstId, secondId]);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
