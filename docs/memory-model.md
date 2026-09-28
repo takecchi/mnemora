@@ -444,6 +444,16 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
   `kind: 'updated'`・`meta.reason: 'claim_key_conflict_unresolved'`（`'contested'` とは
   別のタグ）で1件だけ残し、件数を数えられるようにする。
 
+  ⚠ **2026-09-28 追記（今の振る舞い。[Issue #933](https://github.com/takecchi/mnemora/issues/933)）: 同じ鍵の主張が
+  1件ずつ届く経路では、この「2件以上」の分岐には届かない。**毎回 `detectContested: true` を渡して1件ずつ
+  `observe()` すると、2件目で1件目と対になって両方 `contested` になり、`findActiveByClaimKey?` の一致
+  （`active` だけ）から外れる。⟹ 3件目は一致が0件で `no_conflict`・`active` のまま、`contestedWithId` も
+  `claim_key_conflict_unresolved` のイベントも持たずに残り、4件目は3件目と新しい対になる。
+  「同じ鍵に3件以上が並んだ件数を数えられる」は、この経路では成り立たない（1件目・2件目を検出なしで
+  作ったなど、`active` のまま2件以上が並んだときだけ上の分岐に入る）。経緯と、直すときに要るもの
+  （`contested` の行を一致に数える口）は [ADR 0324](./decisions/0324-claim-key-contested-detection.md) の
+  2026-09-27 の追記にある。**直していない**（方針は Issue #933 で決まっていない）。
+
 **`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
 （行6）までであり、`contested → active | superseded`（行7）は今日どおり
 `resolveContested` の明示呼び出しのみ。
@@ -1065,6 +1075,14 @@ NOT NULL とし、全ての一意制約・索引の先頭列に置く**（[ADR 0
 
 - **`>= 0.8.0` を必須**とする。iterative index scan（`hnsw.iterative_scan`）が §7 の
   フィルタ問題対処に必要なため。
+  > ⚠ **2026-09-28 追記（今の振る舞い。[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)。上の行は書き換えていない）:
+  > 実装はこの版を検査しない。**`runMigrations` の `extensionMode: "verify"` が見るのは `vector` の拡張が在るか
+  > （`pg_extension.extname`）だけで、版（`extversion`）は読まない。起動時・`registerEmbeddingSpace`・store の生成時にも
+  > 版を確かめる処理は無い。⟹ 0.8.0 未満の pgvector でも、ここでは名乗らずに進む。0.8 に頼っているのは
+  > `packages/postgres/src/vector-store.ts` の `SET LOCAL hnsw.iterative_scan` で、0.8.0 未満では版と PostgreSQL の版の
+  > 組み合わせによって、そこで ERROR になるか、黙って効かない（Issue #1301 の表。上流のソースからの推論を含み、
+  > 0.8.0 未満の実物では測っていない）。「必須」は、利用者が満たすべき前提として残してある。検査を足す・警告を出す・
+  > 書き方を変えるかは Issue #1301 で決まっていない。
 - **`>= 0.8.2` を推奨**とする（2026-02-26 リリース。CVE-2026-3172 のバッファオーバーフロー
   修正を含む）。
   > **⚠ 2026-09-17 追記（名乗りの復元。上の行は書き換えていない）。**
