@@ -1,0 +1,108 @@
+# @mnemora/bullmq
+
+BullMQ で `runtime.tick()` を駆動する役
+（[docs/decisions/0325-bullmq-tick-driver.md](../../docs/decisions/0325-bullmq-tick-driver.md)）。
+
+## ⚠ まだ npm には出ていない
+
+**このパッケージは、npm へ公開する準備中である**（Issue #205、オーナー回答 2026-09-28）。
+`scripts/publish-targets.mjs` の publish 対象には加わっているが、**初版はまだ手元から
+publish（bootstrap）されていない**——`npm view @mnemora/bullmq` は 2026-09-29 時点で
+`404 Not Found` を返す（この repo の担い手が実測）。⟹ 下の「インストール」の
+コマンドは、**bootstrap が済むまでは動かない。** 経緯とオーナー向けの手順は
+[docs/release-v1.md](../../docs/release-v1.md) の `@mnemora/bullmq` 初回 publish の節と、
+[ADR 0325](../../docs/decisions/0325-bullmq-tick-driver.md) の追記を見ること。
+
+## ⚠ `Scheduler` を実装しない
+
+`@mnemora/core` の `Scheduler` interface（`enqueue`）は実装しない——本番コードのどこからも
+呼ばれておらず、実装しても呼び手が無い（ADR 0325「根拠①への応答」）。このパッケージが
+することは、**BullMQ の Worker が定期的に発火するたびに `runtime.tick()` を呼ぶ**、
+それだけである。
+
+**outbox は今日どおり Postgres が正本のまま。** BullMQ（Redis）はジョブの中身を一切
+持たない——運ぶのは「いま tick して」という合図だけであり、outbox の行と Redis 側の
+ジョブが二重に帳簿を持つことはない。同時 tick からの二重処理を防いでいるのは
+`@mnemora/postgres` の `PostgresOutboxStore.claimBatch`（`FOR UPDATE SKIP LOCKED`）で
+あって、このパッケージや BullMQ 自身ではない（詳しくは ADR 0325「測ったこと」）。
+
+## インストール
+
+```bash
+pnpm add @mnemora/bullmq @mnemora/core
+# または
+npm i @mnemora/bullmq @mnemora/core
+```
+
+**Redis が要る。** BullMQ は Redis（または互換サーバ）への接続を前提にする
+——`connection` オプションにその接続先を渡す（下の例参照）。このパッケージ自身は
+Redis サーバを同梱・起動しない。
+
+## 前提
+
+- Node.js >= 22
+- **ESM のみ**（`"type": "module"`）。CommonJS からは Node 22.12 以降の
+  `require(esm)` で読み込める（TypeScript は `module`/`moduleResolution` を `nodenext` にし、
+  TypeScript 5.8 以降を使うこと。5.7 以前の `nodenext` と、どの版の `node16` も `TS1479` になる）
+- **Redis（または互換サーバ）が要る。** `test`（`pnpm --filter @mnemora/bullmq run test`）は
+  純関数（`resolveConcurrency`）だけを検査し Redis を要らないが、`test:redis`
+  （`pnpm --filter @mnemora/bullmq run test:redis`）は実際に BullMQ の `Queue`/`Worker` を
+  構築するため Redis を要る（`.github/workflows/ci.yml` の `bullmq` job は
+  `redis:7` の service container を使う）
+- `runtime` は `Pick<Runtime, "tick">`——`@mnemora/core` の `createRuntime()` が返す
+  `Runtime` 全体ではなく、`tick` メソッドさえ満たせば渡せる
+
+## 動く最小の例（Redis が無いため未実行——型のみ確認）
+
+```ts
+import { createBullmqTickDriver } from "@mnemora/bullmq";
+import type { Runtime } from "@mnemora/core";
+
+declare const runtime: Runtime;
+
+const driver = createBullmqTickDriver({
+  connection: { host: "127.0.0.1", port: 6379 },
+  queueName: "mnemora-tick",
+  runtime,
+  ctx: { tenantId: "acme" },
+  tick: { leaseMs: 30 * 60 * 1000, kinds: ["embed"] },
+  everyMs: 5_000,
+});
+
+await driver.start();
+// ... プロセスが生きている間、5秒おきに runtime.tick() が呼ばれる ...
+await driver.stop();
+```
+
+**`start()` を呼ぶまでジョブは処理しない。** `createBullmqTickDriver(...)` は
+Queue/Worker を構築するだけで、Worker は `autorun: false` で作る——ジョブの処理は
+`start()` が明示的に `worker.run()` を呼んで初めて始まる。
+
+**`stop()` の後は再開できない。** `stop()` を呼んだ driver は使い捨てである。その後に
+もう一度 `start()` を呼ぶと Error を投げる（BullMQ の `Queue`/`Worker` は `close()` した後、
+同じインスタンスを再利用できないため）。もう一度動かしたいときは
+`createBullmqTickDriver(...)` を新しく呼び直すこと。
+
+## 複数プロセスで動かすとき
+
+**同じ `queueName` に対して複数プロセスが `createBullmqTickDriver(...).start()` を
+呼んでよい。** BullMQ の Job Scheduler（`queue.upsertJobScheduler`）を `jobSchedulerId`
+固定値で登録するため、二重登録にはならない——発火した個々の tick ジョブは、その時点で
+空いているどのプロセスの Worker が処理してもよい（BullMQ の通常の負荷分散）。
+
+🔴 **これは「同じテナントに対して2つの `runtime.tick()` が同時に走らない」ことを
+保証しない。** その重なりから outbox の二重処理を防いでいるのは、上に書いたとおり
+`@mnemora/postgres` 側の行ロックである。
+
+詳しい API（`CreateBullmqTickDriverOptions` の各フィールド）は
+[`src/tick-driver.ts`](./src/tick-driver.ts) の doc コメントを見ること。
+
+## 確かめていないこと
+
+- BullMQ の Job Scheduler が実運用のワークロードでどの程度「重なる」かは測っていない。
+- BullMQ 自身の可用性・再接続・Redis 障害時の挙動は検査していない。
+- 複数マシン・ネットワーク越しの複数 OS プロセスからの同時 tick は測っていない
+  （同一ホスト上の複数 OS プロセスまでは ADR 0325 の歯が測っている）。
+
+（詳細は [ADR 0325](../../docs/decisions/0325-bullmq-tick-driver.md) の
+「確かめていないこと」「引き受けた負債」を見ること）

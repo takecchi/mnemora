@@ -1,5 +1,5 @@
 /**
- * `scripts/check-consumer-install.mjs`（出荷6パッケージを repo の外に入れて、利用者の立場で
+ * `scripts/check-consumer-install.mjs`（出荷パッケージ（PUBLISH_TARGETS）を repo の外に入れて、利用者の立場で
  * 型と入口を確かめる道具。ADR 0346）の、ネットワークを使わない部品。
  *
  * ## 利用者が頼ってよい入口の一覧（{@link EXPECTED_ENTRY_POINTS}）
@@ -18,6 +18,7 @@ export const EXPECTED_ENTRY_POINTS = Object.freeze([
   "@mnemora/anthropic",
   "@mnemora/postgres",
   "@mnemora/local-embedding",
+  "@mnemora/bullmq",
 ]);
 
 /**

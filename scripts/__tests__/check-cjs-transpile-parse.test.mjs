@@ -25,11 +25,19 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
 const gate = fileURLToPath(new URL("../check-cjs-transpile-parse.mjs", import.meta.url));
 
-// `./publish-targets.mjs` の `PUBLISH_TARGETS` と同じ6パッケージ名（ディレクトリ名）。
+// `./publish-targets.mjs` の `PUBLISH_TARGETS` と同じ7パッケージ名（ディレクトリ名）。
 // 門はこのリストを `./publish-targets.mjs` から読むが、歯はフィクスチャの形を
 // 手で組み立てる必要があるので、`scripts/__tests__/check-publish-pack.test.mjs` に
 // ならって名前だけをここにも直書きする。
-const PACKAGE_DIRS = ["core", "testkit", "openai", "postgres", "anthropic", "local-embedding"];
+const PACKAGE_DIRS = [
+  "core",
+  "testkit",
+  "openai",
+  "postgres",
+  "anthropic",
+  "local-embedding",
+  "bullmq",
+];
 
 /** @type {string | undefined} */
 let fixtureRoot;
@@ -49,7 +57,7 @@ function newFixtureRoot() {
   return packagesDir;
 }
 
-/** 6パッケージすべてに、CommonJS として問題なく解析できる `dist/index.js` を置く。 */
+/** 7パッケージすべてに、CommonJS として問題なく解析できる `dist/index.js` を置く。 */
 function writeCleanDistForAll(packagesDir) {
   for (const name of PACKAGE_DIRS) {
     const distDir = join(packagesDir, name, "dist");
@@ -101,7 +109,7 @@ describe("scripts/check-cjs-transpile-parse.mjs（CJS 構文解析の門）", ()
 
     expect(status, `期待した EXIT=0 にならなかった。出力:\n${output}`).toBe(0);
     expect(output).toContain("個の配布物が CommonJS として解析できました");
-    // 6パッケージ×1ファイルずつを検査したこと（数を出す、を固定する）。
+    // 7パッケージ×1ファイルずつを検査したこと（数は PACKAGE_DIRS.length から動的に取る）。
     expect(output).toContain(`✔ ${PACKAGE_DIRS.length} 個の配布物`);
   });
 
