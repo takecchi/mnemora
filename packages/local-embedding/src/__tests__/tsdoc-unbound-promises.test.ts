@@ -75,7 +75,7 @@ describe("warmup(): 読み込みに失敗すると reject する（TSDoc）", ()
 
 describe("buildLocalEmbeddingPipeline: mean pooling と L2 normalize で固定する（createLocalEmbeddingPipeline の doc）", () => {
   it("extractor を { pooling: 'mean', normalize: true } で呼ぶ", async () => {
-    const extractor = vi.fn(async (texts: string[]) => vectors(texts.length));
+    const extractor = vi.fn(async (texts: string[], _options: unknown) => vectors(texts.length));
     const pipeline = buildLocalEmbeddingPipeline(
       Object.assign(extractor, {
         tokenizer: { model_max_length: 10, encode: (text: string) => Array.from(text) },
