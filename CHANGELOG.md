@@ -131,6 +131,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 - **`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が、SDK の
   クラスから切り出した型から、SDK のクラスを名指ししない自前の構造型へ変わった**
   （[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、
+  [PR #1377](https://github.com/takecchi/mnemora/pull/1377)、
   [ADR 0350](./docs/decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。
   オーナーの回答（ask_human `f259eeb8`、逐語「型を SDK のクラスから切り離すってのは
   だめですか？」）に基づく。
