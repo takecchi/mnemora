@@ -138,6 +138,19 @@ export function isUuidLike(value: string): boolean {
   return UUID_PATTERN.test(value);
 }
 
+/**
+ * store の入口で、uuid の形の id を小文字にそろえる（形の合わない id はそのまま返す）。
+ *
+ * DB は uuid を大文字小文字を区別せずに比べ、小文字で返す。⟹ 渡された id を JS で比べる箇所（`Map` を引く・
+ * `===`）や、渡された id を記録に写す箇所（`memory_events.meta`）は、大文字の UUID だけで DB の値と食い違う。
+ * 入口でそろえれば、その先は DB と同じ形の id だけを扱える（`uppercase-uuid-store-entry.postgres.test.ts`）。
+ * ⚠ store の中の正規化であり、呼び出し側（Runtime）から渡される値は変えない。呼び出し側が組んだイベントの
+ * `meta` の中身は、store が解釈しない値なのでそろえない。
+ */
+export function normalizeUuidCase<T extends string>(id: T): T {
+  return (isUuidLike(id) ? id.toLowerCase() : id) as T;
+}
+
 export interface MemoryRow {
   id: string;
   tenant_id: string;

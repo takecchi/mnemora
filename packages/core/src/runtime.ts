@@ -2901,7 +2901,8 @@ export interface Runtime {
    *    種が見つからない、または種が forget・purge された記憶なら（Issue #1136）、`recall()` を
    *    呼ばず、対象は種の id 1件のみになる。
    * 2. `getMany` で一括読み。無ければ `not_found`、`status !== 'active'` なら
-   *    `status_not_active`、`active` なら eligible。
+   *    `status_not_active`、`active` なら eligible。在るかどうかの突き合わせは `restoreArchived` の手順2と同じ
+   *    （大文字小文字だけが違う id を同じ呼び出しに混ぜたときは、渡された文字列どおりに突き合わせる）。
    * 3. eligible が0件なら `nothing_to_consolidate`/`no_eligible_sources`、1件だけなら
    *    `nothing_to_consolidate`/`single_eligible_source`——どちらも `llmCalls: 0`・書き込み無し。
    *    **eligible は重複を除いて数える**（`reflect` の手順3と同じ。2026-09-27 追記、ADR 0089 の
@@ -3002,6 +3003,8 @@ export interface Runtime {
    *    `status !== 'active'` なら `status_not_active`、`active` かつ
    *    `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を
    *    土台にまた reflect する自己増幅を、形の側で止める）、それ以外は eligible。
+   *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（大文字小文字だけが違う id を同じ呼び出しに
+   *    混ぜたときは、渡された文字列どおりに突き合わせる）。
    * 3. eligible（重複除去）が0件なら `nothing_to_reflect`/`no_eligible_basis` で打ち切る
    *    ——**LLM を呼ばない**（`llmCalls: 0`）。`consolidate` と違い、eligible が1件だけでも
    *    ここでは打ち切らない（1件からの一般化も意味を持ちうる）。
@@ -3151,7 +3154,7 @@ function describeDroppedCandidate(
 }
 
 /**
- * `getMany` が返した記憶を、渡された id で引き当てるときの鍵を作る関数を返す（`forget`・`restoreArchived`・
+ * `getMany` が返した記憶を、渡された id で引き当てるときの鍵を作る関数を返す（`forget`・`restoreArchived`・`consolidate`・`reflect`・
  * `purge`・`markContested`）。`ids` はその呼び出しに渡された id の全部。
  *
  * store が返す `Memory.id` は、渡した id と文字列として一致するとは限らない——`@mnemora/postgres` は uuid を
@@ -5710,7 +5713,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         const recallResult = await recall(ctx, { text: seed.digest });
         const minAffinity = target.minAffinity ?? DEFAULT_CONSOLIDATE_MIN_AFFINITY;
         const neighborIds = recallResult.memories
-          .filter((m) => m.memoryId !== target.seedMemoryId)
+          // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
+          // 渡された `seedMemoryId` のままだと、`@mnemora/postgres` に大文字の UUID を渡したとき種が近傍にも
+          // 入り、同じ記憶が大文字と小文字で2回並んでいた（`uppercase-uuid-store-entry.postgres.test.ts`）。
+          .filter((m) => m.memoryId !== seed.id)
           .filter((m) => computeAffinity(m.score) >= minAffinity)
           .map((m) => m.memoryId);
         // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと
@@ -5749,14 +5755,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       | { kind: "active" };
 
     const uniqueIds = Array.from(new Set(ids));
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`forget` と同じ形）。
+    const lookupKey = memoryLookupKeyFor(uniqueIds);
     const found = await deps.memoryStore.getMany(ctx, uniqueIds);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
     const initialById = new Map<MemoryId, InitialClassification>();
     for (const id of uniqueIds) {
-      const memory = byId.get(id);
+      const memory = byId.get(lookupKey(id));
       if (memory === undefined) {
         initialById.set(id, { kind: "not_found" });
       } else if (memory.status !== "active") {
@@ -5838,7 +5846,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    const eligibleMemories = eligibleIds.map((id) => byId.get(id)!);
+    const eligibleMemories = eligibleIds.map((id) => byId.get(lookupKey(id))!);
 
     // 5. LLM を1回呼ぶ。失敗したら1件も書かず、eligible だったものは not_attempted に落とす。
     let llmResult: ConsolidationLLMResult;
@@ -5935,7 +5943,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           id,
           supersededByIndex: 0,
           expectedStatus: "active" as MemoryStatus,
-          event: buildConsolidateSupersedeEvent(byId.get(id)!),
+          event: buildConsolidateSupersedeEvent(byId.get(lookupKey(id))!),
         })),
       );
 
@@ -5989,7 +5997,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 7. eligible を1件ずつ superseded へ CAS する（`reextract` のループと同じ形）。
     for (let i = 0; i < eligibleIds.length; i += 1) {
       const id = eligibleIds[i]!;
-      const source = byId.get(id)!;
+      const source = byId.get(lookupKey(id))!;
       try {
         await deps.memoryStore.updateStatusWithEvent(
           ctx,
@@ -6068,7 +6076,10 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         const recallResult = await recall(ctx, { text: seed.digest });
         const minAffinity = target.minAffinity ?? DEFAULT_REFLECT_MIN_AFFINITY;
         const neighborIds = recallResult.memories
-          .filter((m) => m.memoryId !== target.seedMemoryId)
+          // 種を除く比較は、store が返した種の id（`seed.id`）で行う——`recall()` が返すのも store の id である。
+          // 渡された `seedMemoryId` のままだと、`@mnemora/postgres` に大文字の UUID を渡したとき種が近傍にも
+          // 入り、同じ記憶が大文字と小文字で2回並んでいた（`uppercase-uuid-store-entry.postgres.test.ts`）。
+          .filter((m) => m.memoryId !== seed.id)
           .filter((m) => computeAffinity(m.score) >= minAffinity)
           .map((m) => m.memoryId);
         // 種は minAffinity の判定を受けず、必ず先頭に置く（種の embedding がまだ無いと
@@ -6107,14 +6118,16 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       | { kind: "eligible" };
 
     const uniqueIds = Array.from(new Set(ids));
+    // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`forget` と同じ形）。
+    const lookupKey = memoryLookupKeyFor(uniqueIds);
     const found = await deps.memoryStore.getMany(ctx, uniqueIds);
     const byId = new Map<MemoryId, Memory>();
     for (const memory of found) {
-      byId.set(memory.id, memory);
+      byId.set(lookupKey(memory.id), memory);
     }
     const initialById = new Map<MemoryId, InitialClassification>();
     for (const id of uniqueIds) {
-      const memory = byId.get(id);
+      const memory = byId.get(lookupKey(id));
       if (memory === undefined) {
         initialById.set(id, { kind: "not_found" });
       } else if (memory.status !== "active") {
@@ -6187,7 +6200,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       };
     }
 
-    const eligibleMemories = eligibleIds.map((id) => byId.get(id)!);
+    const eligibleMemories = eligibleIds.map((id) => byId.get(lookupKey(id))!);
 
     // 5. LLM を1回呼ぶ。失敗したら1件も書かない。
     let llmResult: ReflectionLLMResult;
