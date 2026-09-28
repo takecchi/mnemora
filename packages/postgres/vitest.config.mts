@@ -13,6 +13,8 @@ export default defineConfig({
     fileParallelism: false,
     hookTimeout: 30_000,
     testTimeout: 30_000,
+    // recall() の戻り値の契約の検査（src/__tests__/setup-recall-output-contract.ts、TSDoc の7巡目 B1・B2）。
+    setupFiles: ["./src/__tests__/setup-recall-output-contract.ts"],
   },
   resolve: {
     alias: {
