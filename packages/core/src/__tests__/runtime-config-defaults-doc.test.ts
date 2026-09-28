@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { Ctx } from "../ctx.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { truncateForFallbackDigest } from "../extraction.js";
+import { ProvenanceSchema } from "../provenance.js";
 import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
@@ -73,6 +74,44 @@ describe("RuntimeConfig の既定値は TSDoc の値と一致する", () => {
     );
     expect(documentedDefault("autoQueueConsolidateReflectOnExtract")).toBe("false");
     expect(createWithOutbox.mock.calls.map((call) => call[2])).toEqual([["embed"]]);
+  });
+
+  /** `config` を渡して inferred の候補を1件抽出させ、書かれた provenance を返す。 */
+  async function inferredProvenanceWith(config: { llmModelId?: string; promptVersion?: string }) {
+    const stores = createFakeRuntimeStores();
+    const runtime = createRuntime({
+      ...stores,
+      llmProvider: {
+        complete: async () => ({ content: "unused" }),
+        completeStructured: async (_c, req) =>
+          req.schema.parse({ memories: [{ content: "推論", provenanceKind: "inferred" }] }),
+      },
+      hashContent: (c: string) => `h:${c}`,
+      config,
+    });
+    const result = await runtime.observe(ctx, { kind: "utterance", text: "発話" });
+    return (await stores.memoryStore.get(ctx, result.memoryIds[0]!))!.provenance;
+  }
+
+  it("llmModelId・promptVersion の空文字は省略と同じに扱い、既定値を書く（provenance は ProvenanceSchema を通る）", async () => {
+    const provenance = await inferredProvenanceWith({ llmModelId: "", promptVersion: "" });
+    expect(provenance).toMatchObject({
+      kind: "inferred",
+      model: documentedDefault("llmModelId"),
+      promptVersion: documentedDefault("promptVersion"),
+    });
+    expect(ProvenanceSchema.safeParse(provenance).success).toBe(true);
+  });
+
+  it("対照: 空でない値は、空白だけの値も含めて、そのまま書く（既定値に倒すのは空文字だけ）", async () => {
+    expect(await inferredProvenanceWith({ llmModelId: "gpt-x", promptVersion: "p9" })).toMatchObject({
+      model: "gpt-x",
+      promptVersion: "p9",
+    });
+    expect(await inferredProvenanceWith({ llmModelId: " ", promptVersion: " " })).toMatchObject({
+      model: " ",
+      promptVersion: " ",
+    });
   });
 
   it("defaultClaimedBy", async () => {

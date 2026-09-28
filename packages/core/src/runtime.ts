@@ -107,10 +107,13 @@ export interface RuntimeConfig {
   extractorVersion?: string;
   /**
    * `provenance.inferred.model` に書き込むモデル識別子。呼び出し側の LLMProvider の実体に合わせる。
-   * 省略時は `"unknown"`。
+   * 省略時（`undefined`・空文字）は `"unknown"`。空白だけの値はそのまま書く。
    */
   llmModelId?: string;
-  /** `provenance.inferred.promptVersion`。抽出プロンプトを変えたら上げる。省略時は `"v1"`。 */
+  /**
+   * `provenance.inferred.promptVersion`。抽出プロンプトを変えたら上げる。省略時（`undefined`・空文字）は `"v1"`。
+   * 空白だけの値はそのまま書く。
+   */
   promptVersion?: string;
   /**
    * digest フォールバック（機械的な先頭文字列切り出し）の最大文字数。既定 200。
@@ -118,7 +121,10 @@ export interface RuntimeConfig {
    * digest は `"…"` だけになる（本文は `content` にそのまま残る）。
    */
   digestFallbackLength?: number;
-  /** `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。省略時は `"runtime.tick"`。 */
+  /**
+   * `tick` の既定 claimedBy 値。複数ワーカーを区別したい場合に指定する。省略時は `"runtime.tick"`。
+   * ⚠ 空文字は既定に倒れず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
+   */
   defaultClaimedBy?: string;
   /**
    * [Issue #204](https://github.com/takecchi/mnemora/issues/204) /
@@ -1068,6 +1074,7 @@ export interface TickOptions {
   kinds?: OutboxJobKind[];
   /**
    * claim した worker の名前（outbox の行の `claimed_by`）。省略すると `RuntimeConfig.defaultClaimedBy`、それも無ければ `"runtime.tick"`。
+   * ⚠ 空文字は省略と同じにはならず、そのまま `OutboxStore.claimBatch` に渡る（`ClaimOutboxJobsOptions.claimedBy` の doc）。
    */
   claimedBy?: string;
 }
@@ -3219,8 +3226,10 @@ function memoryLookupKeyFor(ids: readonly MemoryId[]): (id: MemoryId) => string 
 export function createRuntime(deps: RuntimeDeps): Runtime {
   const clock = deps.clock ?? systemClock;
   const extractorVersion = deps.config?.extractorVersion ?? DEFAULT_EXTRACTOR_VERSION;
-  const llmModelId = deps.config?.llmModelId ?? DEFAULT_LLM_MODEL_ID;
-  const promptVersion = deps.config?.promptVersion ?? DEFAULT_PROMPT_VERSION;
+  // 空文字は省略と同じに扱う（`RuntimeConfig.llmModelId`・`promptVersion` の TSDoc）。空文字のまま書くと、
+  // inferred の provenance が `ProvenanceSchema`（`model`・`promptVersion` は `min(1)`）を通らなくなる。
+  const llmModelId = deps.config?.llmModelId || DEFAULT_LLM_MODEL_ID;
+  const promptVersion = deps.config?.promptVersion || DEFAULT_PROMPT_VERSION;
   const digestFallbackLength = deps.config?.digestFallbackLength ?? DEFAULT_DIGEST_FALLBACK_LENGTH;
   const defaultClaimedBy = deps.config?.defaultClaimedBy ?? DEFAULT_CLAIMED_BY;
   const autoQueueConsolidateReflectOnExtract =

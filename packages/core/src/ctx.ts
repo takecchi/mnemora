@@ -31,6 +31,12 @@ import { z } from "zod";
  * `Runtime` も同梱の store もこの schema で `ctx` を検査しないので、`tenantId: ""` や `subjectId: "   "` は
  * そのまま1つのテナント・主題として動く（`claimKey` の主語と述語・ラベル名・`tags` の要素も同じ）。
  * 例外は `observe` の `externalId` で、入力の schema が空文字を拒む（空白だけは受け付ける）。
+ *
+ * ⚠ **空文字の `tenantId`・`subjectId` は受け付けるが、出力の側の schema を通らない値を作る**（今の振る舞い）。
+ * `subjectId: ""` で書いた記憶を `recall()` が返すと `RecalledMemory.subjectId` が `""` になり
+ * （`RecalledMemorySchema` は `min(1)`）、`recall()` の `outputValidation` が `ok: false` になる。
+ * `tenantId: ""` で積んだ outbox のジョブは `OutboxJobRecord.tenantId` が `""` になり、`OutboxJobRecordSchema`
+ * （`min(1)`）を通らない。どちらの schema も緩めていない。
  */
 export interface Ctx {
   /** 隔離の単位（必須）。呼び出し側が渡す不透明な文字列で、store はこの値で行を分ける。跨いだら事故である。 */
