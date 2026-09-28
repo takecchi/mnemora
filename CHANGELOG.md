@@ -120,6 +120,7 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
+- **`@mnemora/bullmq` を npm の公開対象に加えた**（[Issue #205](https://github.com/takecchi/mnemora/issues/205)、[ADR 0325](./docs/decisions/0325-bullmq-tick-driver.md) 追記、[ADR 0351](./docs/decisions/0351-bullmq-publish-prep.md)）——`private: true` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾に加えた。⚠ **初回 publish（段0のオーナー手元 bootstrap）はまだ済んでいない**——`npm install @mnemora/bullmq` はまだ 404 になる（手順は `docs/release-v1.md` §1.7）。version は `0.0.0` のまま（ADR 0070。version bump・publish・Release はオーナーの手）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 

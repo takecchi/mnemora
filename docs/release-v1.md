@@ -898,6 +898,88 @@ node -e 'import("./scripts/publish-targets.mjs").then(m=>{for(const t of m.PUBLI
 
 ---
 
+### 1.7 `@mnemora/bullmq` の初回 publish（bootstrap）——オーナー向け手順（Issue #205）
+
+⚠ **この PR をマージした後、段0（手元からの初回 publish）と段1（Trusted Publisher 設定）を済ませずに次の Release を切ると、ほかの6本は出るが `@mnemora/bullmq` だけが 404 で落ち、publish ジョブは赤になる（末尾に置いたので、ほかの6本が取り残されることはない）。**
+
+**この節は、`@mnemora/bullmq` を `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` へ加える PR（ADR 0325 追記・[ADR 0351](./decisions/0351-bullmq-publish-prep.md)）に合わせて書いた、オーナーがそのまま手元で実行できる手順である。** [ADR 0096](./decisions/0096-bootstrap-local-embedding-onto-npm.md)（`@mnemora/local-embedding` の bootstrap）の段0〜段3の前例に沿って書く。
+
+#### どの tag／commit から梱包するか（ADR 0096 の反省を読んで決めた）
+
+**推奨: 次の通常の Release（このタスクのためだけに特別な Release を切る必要は無い）を待ち、その Release の tag から梱包する——ADR 0096 が採った順序（(a) 案）と同じ形。**
+
+理由:
+
+- ADR 0096 は「(b) 既存の最新 tag に合わせる」案を検討し、**落とした**——その時点の最新 tag には `packages/local-embedding` のディレクトリ自体が存在せず、「どの commit も指さない版」になるため（測ったこと4）。**`@mnemora/bullmq` も同じ構造の罠に当たる**——このPRがマージされる前の直近の Release tag には `packages/bullmq` は存在する（ADR 0325 で先に着地済み）ものの、**この PR（`private` を外し `PUBLISH_TARGETS` へ加える変更）自体はまだ含まれていない**。この PR がまだ入っていない tag から梱包すると、`scripts/apply-release-version.mjs`／`scripts/pack-publish-targets.mjs` はそもそも `@mnemora/bullmq` を対象と認識しない（`PUBLISH_TARGETS` にまだ載っていないため）。⟹ **この PR がマージされた後の、次の Release の tag を使うこと。**
+- ADR 0096「引き受けた負債」7 は「素の consumer での往復（tarball を install して確かめる）は段0の前に置くこと」という教訓を残している。⟹ 下の手順は、`npm publish` の前に `pnpm run pack:check` と（可能なら）`pnpm run check:consumer-install` を通す形にした。
+- ADR 0096「測ったこと7」は「落ち方の予測（403）が外れ、実際は404だった」と記録している。⟹ 下の手順でも、落ち方を断定せず「404 になりうる」とだけ書く。
+
+【推論、確かめていない】上記は ADR 0096 の記録から導いた判断であり、`@mnemora/bullmq` 固有の事情（Redis を実行時依存に持つこと）が段0の手順そのものに影響するかどうかは、実際に段0を実行してみないと分からない。
+
+#### 段0: 手元から初回 publish する
+
+```bash
+# 1. 次の Release（このPRを含む）の tag を checkout する
+git fetch --tags
+git checkout v<次のRelease版>   # 例: v1.1.0。origin/main の最新 Release を gh release view で確認する
+
+# 2. 依存を入れる（CI と同じ経路）
+corepack enable
+pnpm install --frozen-lockfile
+
+# 3. 版を書き込む（CI と同じスクリプト。手で version を書かない——ADR 0070）
+RELEASE_TAG=v<次のRelease版> node scripts/apply-release-version.mjs
+# ⟹ packages/bullmq/package.json の version が書き換わる（コミットしない。作業ツリー上だけ）
+
+# 4. ビルドし、梱包の門を通す
+pnpm --filter @mnemora/core run build
+pnpm --filter @mnemora/bullmq run build
+pnpm run pack:check   # 7パッケージとも通ること。bullmq もこの時点では NEVER_PUBLISHED_TARGETS の対象外になっている
+                       # （version が書き込まれているため。除外リストは publish 後に手で消す——下記「済んだ後にすること」）
+
+# 5. tarball を作る（pnpm pack。順序は PUBLISH_TARGETS のとおり）
+mkdir -p /tmp/mnemora-publish-tarballs
+node scripts/pack-publish-targets.mjs /tmp/mnemora-publish-tarballs
+
+# 6. npm へログインする（2FA が要る。対話的に打つ）
+npm login
+
+# 7. @mnemora/bullmq の tarball だけを publish する
+#    ⚠ 手元からの publish には --provenance は付かない（OIDC ではないため。ADR 0096 と同じ）
+npm publish /tmp/mnemora-publish-tarballs/mnemora-bullmq-*.tgz --access public
+```
+
+#### 段1: npmjs.com で Trusted Publisher を設定する
+
+npmjs.com で `@mnemora/bullmq` のパッケージ設定を開き、Trusted Publisher を追加する:
+
+- **Publisher**: GitHub Actions
+- **Organization**: `takecchi`
+- **Repository**: `mnemora`
+- **Workflow filename**: `publish.yml`
+- **Environment**: （他6パッケージと同じ設定に揃える——この書き手は npmjs.com の画面を確認していない。`docs/release-v1.md` §4.2 の表を見ながら、既存6パッケージと同じ値を選ぶこと）
+
+⚠ **この書き手は npmjs.com の実際の画面文言・入力欄の名前を確認していない**（この器から npmjs.com の画面を見られない。§4.2 と同じ制約）。上の項目名は ADR 0066／ADR 0096 の記述から借りたものであり、実際の UI のラベルと一字一句一致するとは限らない。
+
+#### 段2: 直接 publish を許可する
+
+**`npm trust` CLI には許可アクションを切り替える口が無い**（ADR 0096「測ったこと1」——`npm trust github --help` のフラグに存在しない）。⟹ **npmjs.com の web UI で「直接 publish を許可する」設定を有効にすること**（他6パッケージが 0.1.1 の時点で受けたのと同じ設定。§4.2）。
+
+#### 確認する
+
+```bash
+npm view @mnemora/bullmq version
+npm view @mnemora/bullmq dist-tags
+```
+
+**provenance の確認**は §5.2／§5.4 のスクリプトが `PUBLISH_TARGETS` から動的にパッケージ名を取るため、`@mnemora/bullmq` を追加で書き直す必要は無い——**段0 直後の `@mnemora/bullmq` には provenance が付かない**（ADR 0096 の `local-embedding@0.1.4` と同じ理由。手元 publish は OIDC を経由しないため）。次の Release から §5.4 のスクリプトを実行すれば、7本目として同じ形で確認できる。
+
+#### 済んだ後にすること
+
+段0が完了したら、`scripts/publish-pack-checks.mjs` の `NEVER_PUBLISHED_TARGETS` から `"@mnemora/bullmq"` を消す PR を出すこと（[ADR 0351](./decisions/0351-bullmq-publish-prep.md)「引き受けた負債」1）——消し忘れると、以後も version 検査がこの1パッケージにだけ効かないまま残る。
+
+---
+
 ## 2. 事前にできること・できないこと
 
 ### 2.1 `workflow_dispatch`（予行、`dry_run: true`）で検証できること
