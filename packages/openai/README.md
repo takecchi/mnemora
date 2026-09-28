@@ -163,6 +163,21 @@ mnemora の runtime は、recall のクエリを trim して空なら埋め込�
 実 API が受けることの十分条件ではない。`@mnemora/anthropic` は同じ形の一部を**送る前に**素の `Error` で落とす（あちらの README）。
 2つの provider の振る舞いをそろえる（送る前に落とす・失敗に種類を付ける）かは決めていない（#1148）。
 
+### 戻りの `null` の扱い（2026-09-28 追記）
+
+strict への翻訳は `.optional()` の欄を「必須 + `null` 許容」にして送るので、戻りの `null` は次のように読む。
+
+| スキーマの位置 | モデルが `null` を返したとき |
+| --- | --- |
+| `.optional()` の欄 | 省略（キーが無い）として返る |
+| 必須の `.nullable()` の欄・`.nullable()` の配列の要素・根の `.nullable()` | `null` のまま返る |
+| `.nullable().optional()` の欄 | 省略として返る（`null` のままにはならない。[Issue #1082](https://github.com/takecchi/mnemora/issues/1082)——翻訳が足した `null` と区別できないため） |
+
+⚠ 以前は、上の表の2行目の `null` も消していたので、`nullable` の欄は `ZodError` になっていた（上の表の「通る」は送る側の話だった）。
+いまは、`null` を消して検査して落ちたときだけ、スキーマが許す `null` を残して検査し直す（通る入力の結果は変えず、それでも落ちれば最初の
+`ZodError` を投げる）。union の枝ごとに扱いが割れる欄の `null` は消す側に倒す。`@mnemora/anthropic` は `null` をそのまま検査する。
+歯は `src/__tests__/structured-nullable-roundtrip.test.ts`。
+
 ## もっと詳しく
 
 - [docs/architecture.md](../../docs/architecture.md) §3.8・§5.4・§5.5 — `LLMProvider` / `EmbeddingProvider` の契約
