@@ -1,11 +1,12 @@
 import { vi } from "vitest";
 import type * as RuntimeModule from "../runtime.js";
-import { failOnRecallOutputContractViolations } from "./recall-output-contract-harness.js";
+import { failOnRuntimeOutputContractViolations } from "./runtime-output-contract-harness.js";
 
 /**
- * core のすべてのテストで、`createRuntime` が返す `recall()` の戻り値を
- * `checkRecallResultContract`（`./runtime-fakes.ts`）に通す（TSDoc の7巡目 B1・B2）。
- * 配線の部品は `./recall-output-contract-harness.ts`（testkit・postgres の setup ファイルと共有）。
+ * core のすべてのテストで、`createRuntime` が返す `Runtime` の各メソッドの戻り値を検査に通す
+ * （`recall()` は `checkRecallResultContract`〔`./runtime-fakes.ts`〕、それ以外の16メソッドは
+ * `./runtime-return-contract.ts` の `checkXxxContract`。TSDoc の7巡目 B1・B2、8巡目で拡張）。
+ * 配線の部品は `./runtime-output-contract-harness.ts`（testkit・postgres の setup ファイルと共有）。
  *
  * ⛔ **わざと契約を破らせるテストだけを、下の一覧で名前で外す。**外すのは、呼び出し側が
  * 差せる拡張点を使って壊れた出力を作り、それが検出されること自体を確かめているテストである。
@@ -20,8 +21,8 @@ const DELIBERATELY_VIOLATING_TESTS: readonly string[] = [
 ];
 
 vi.mock("../runtime.js", async (importOriginal) => {
-  const { wrapRuntimeModule } = await import("./recall-output-contract-harness.js");
+  const { wrapRuntimeModule } = await import("./runtime-output-contract-harness.js");
   return wrapRuntimeModule(await importOriginal<typeof RuntimeModule>());
 });
 
-failOnRecallOutputContractViolations(DELIBERATELY_VIOLATING_TESTS);
+failOnRuntimeOutputContractViolations(DELIBERATELY_VIOLATING_TESTS);
