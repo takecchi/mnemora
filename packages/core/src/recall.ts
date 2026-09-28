@@ -1503,6 +1503,12 @@ export const RecalledMemorySchema = z.object({
 
 /**
  * `explain.stages` の段の名前。`scope` は段0、`candidate_generation` は段1、`rescore` は段2、`contradiction_resolution` は段3、`budget_truncation` は段4、`index_band` は段5、`record` は段6（docs/recall.md §2）。
+ *
+ * ⚠ **段3.5（連想枠）に当たる名前は無く、`explain.stages` には記録されない**（今の振る舞い。
+ * [Issue #865](https://github.com/takecchi/mnemora/issues/865)）。連想枠を走らせたかは
+ * `usage.byTier.association` の有無に、返した記憶は `RecalledMemory.retrievedVia === "association"`
+ * （と `associationOf`）に出る。飛ばしたときの `stage_skipped`・`maxCount` を超えた分の `over_limit` は、
+ * `omitted` に `stage: "association"` で出る。この union に値を足すかは決まっていない。
  */
 export type RecallStageName =
   | "scope"

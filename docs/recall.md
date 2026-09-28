@@ -23,7 +23,7 @@ type RecallResult = {
   omitted: Omission[]           // 返らなかったものの分類（§4）
   index: IndexBand              // 目次帯。被覆不変条件を担う（§5）
   usage: RecallUsage            // 焼かれた量の計測（§6）
-  explain: { stages: StageTrace[] } // どの段が走り、どの段が走らなかったか（§2）
+  explain: { stages: StageTrace[] } // どの段が走り、どの段が走らなかったか（§2）。段3.5（連想枠）は記録しない（§2、Issue #865）
 }
 ```
 
