@@ -633,3 +633,9 @@ $ DATABASE_URL=postgresql://worker@127.0.0.1:<専用ポート>/mnemora_test \
 - [ADR 0289](./0289-recalled-memory-speaker-subject.md) — `RecalledMemory` に任意欄＋runtime 保証で足す形の直接の先例。決定7・引き受けた負債2の形はこれを踏襲した
 - `docs/migration-v1.md` — 破壊的変更の数え方。「非破壊の根拠」節
 - `AGENTS.md`「手元で Postgres を立てる」— 本 ADR の実機検証の手順
+
+## 追記（2026-09-28）: 「文脈」で未決としていた [Issue #541](https://github.com/takecchi/mnemora/issues/541) の線が引かれた
+
+⚠ **この追記は、クローン miku の委譲先が書いたものである。オーナー本人の文章ではない。**
+
+オーナーの回答（ask_human `d9364c91`）で、**公開の union 型に値を足す変更は、破壊的変更として数えない**と決まった（`docs/migration-v1.md` の「数え方の規律への追記（2026-09-28）」）。⛔ この ADR の本文と決定は書き換えておらず、この追記でも決定を変えていない——union に値を足す案を採り直すかは、改めて判断すること。この追記が記録するのは、本文が「未決」と書いた前提が今は成り立たないことだけである。
