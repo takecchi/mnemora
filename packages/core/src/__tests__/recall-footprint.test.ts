@@ -365,6 +365,54 @@ describe("calibrateRecallFootprint — 3階建て", () => {
     expect(profile.fixedIndexChars).toBe(fallback.fixedIndexChars);
   });
 
+  it("(b') memoryCount が1種類で、借りた切片が標本の総量より大きい（傾きが0以下）→ charsPerDigest も借りて名乗る", () => {
+    const fallback = BUILTIN_RECALL_FOOTPRINT_PROFILE;
+    const samples: RecallFootprintSample[] = [
+      { totalChars: fallback.fixedIndexChars - 1, memoryCount: 10, bandEntryCount: 0 },
+    ];
+    const profile = calibrateRecallFootprint(samples, fallback);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual(["fixedIndexChars", "charsPerDigest"]);
+    expect(profile.charsPerDigest).toBe(fallback.charsPerDigest);
+  });
+
+  // 最小二乗の枝（memoryCount が2種類以上）でも、1種類の枝と同じ規律を守る——
+  // digest の平均長が0以下であることはありえないので、その傾きを係数として採らず、
+  // 既定値から借りて borrowedFromDefault に名前で出す（借りていない顔で負の係数を返さない）。
+  it.each([
+    ["負", [2000, 500]],
+    ["ちょうど0", [800, 800]],
+  ])(
+    "(d) memoryCount が2種類以上で、最小二乗の傾きが%sになる → charsPerDigest を既定値から借りて名乗り、見積もりの chars は負にならない",
+    (_label, [y1, y2]) => {
+      const fallback = BUILTIN_RECALL_FOOTPRINT_PROFILE;
+      const samples: RecallFootprintSample[] = [
+        { totalChars: y1!, memoryCount: 1, bandEntryCount: 0 },
+        { totalChars: y2!, memoryCount: 3, bandEntryCount: 0 },
+      ];
+      const profile = calibrateRecallFootprint(samples, fallback);
+      if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+      expect(profile.origin.borrowedFromDefault).toEqual(["charsPerDigest"]);
+      expect(profile.charsPerDigest).toBe(fallback.charsPerDigest);
+      // 切片は、借りた傾きのもとで標本から決める（平均を通る直線）。
+      const meanX = (1 + 3) / 2;
+      const meanY = (y1! + y2!) / 2;
+      expect(profile.fixedIndexChars).toBeCloseTo(meanY - fallback.charsPerDigest * meanX, 9);
+      const estimate = estimateRecallFootprint({ memoryCountInScope: 5, limit: 10 }, profile);
+      expect(estimate.chars).toBeGreaterThan(0);
+    },
+  );
+
+  it("(d) の対照: 最小二乗の傾きが正なら、何も借りない（(a) と同じ）", () => {
+    const profile = calibrateRecallFootprint([
+      { totalChars: 500, memoryCount: 1, bandEntryCount: 0 },
+      { totalChars: 501, memoryCount: 3, bandEntryCount: 0 },
+    ]);
+    if (profile.origin.kind !== "calibrated") throw new Error("unreachable");
+    expect(profile.origin.borrowedFromDefault).toEqual([]);
+    expect(profile.charsPerDigest).toBeCloseTo(0.5, 9);
+  });
+
   it("⭐ (a) と (c) は origin.kind だけでは区別できないが、borrowedFromDefault で分岐できる", () => {
     const allDataDriven = calibrateRecallFootprint([
       { totalChars: 300, memoryCount: 5, bandEntryCount: 0 },

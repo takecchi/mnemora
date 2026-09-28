@@ -341,6 +341,11 @@ function structuralCarryForSample(sample: RecallFootprintSample): number {
  * **標本が足りないときに黙って既定値へ倒れない。**どの係数を借りたかは
  * `origin.borrowedFromDefault` に名前で出る（`FootprintProfileOrigin` の doc）。
  *
+ * **標本から求めた傾き（`charsPerDigest`）が0以下なら、その値を採らない。**digest の平均長が0以下で
+ * あることはありえないので、`memoryCount` が1種類の枝でも2種類以上（最小二乗）の枝でも、傾きを既定値から
+ * 借りて `borrowedFromDefault` に名前で出す。最小二乗の枝では、切片は借りた傾きのもとで標本の平均を通るように
+ * 決める（2026-09-28 までは、最小二乗の枝だけが負の傾きを借りた印なしに返していた）。
+ *
  * ### 構造項を差し引いてから最小二乗する（Issue #340 フォローアップ / ADR 0306）
  *
  * 「帯が空の標本では `totalChars = fixedIndexChars + memoryCount * charsPerDigest` が
@@ -383,7 +388,16 @@ export function calibrateRecallFootprint(
     const sxx = usable.reduce((a, s) => a + s.memoryCount * s.memoryCount, 0);
     const sxy = usable.reduce((a, s) => a + s.memoryCount * s.totalChars, 0);
     const denominator = n * sxx - sx * sx;
-    charsPerDigest = (n * sxy - sx * sy) / denominator;
+    const slope = (n * sxy - sx * sy) / denominator;
+    if (slope > 0) {
+      charsPerDigest = slope;
+    } else {
+      // ⚠ 下の `distinct === 1` の枝と同じ規律——**digest の平均長が0以下であることはありえない。**
+      // 最小二乗の傾きが0以下になるのは標本の側の事情（件数が増えるほど総量が減る、など）であり、
+      // その値をそのまま係数として採ると以後の見積もりが静かに壊れる（`chars` が負になる）。
+      // ⟹ 傾きは既定値から借りて名前で出し、切片は借りた傾きのもとで標本の平均を通るように決める。
+      borrowed.push("charsPerDigest");
+    }
     fixedIndexChars = (sy - charsPerDigest * sx) / n;
   } else if (distinct === 1) {
     // `memoryCount` が1種類しかない ⟹ 切片は決まらない。切片を既定値から借りて、
