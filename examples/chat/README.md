@@ -87,8 +87,15 @@ pnpm --filter @mnemora/example-chat run verify:compare
 ```
 
 `OPENAI_API_KEY` を環境に設定すると本物の OpenAI（LLM 抽出・Embedding）で動く。
-設定しなければ `@mnemora/testkit` の決定的な擬似 provider で動く——**どちらで動いているかは
-起動直後に必ず画面へ出す**（黙って擬似物にフォールバックしない）。
+設定しなければ、コマンドによって2つに分かれる:
+
+- `compare`・`recall-footprint-calibration-samples`・`retrieval`・`answer`・`answer-time-weighting` は、
+  **記録した実 API の応答を再生する**（`recorded`。記録に無い入力は擬似物へ倒れず例外になる。ADR 0051 / ADR 0068）。
+  鍵が在っても再生したいときは `MNEMORA_PROVIDER_SOURCE=recorded` を付ける。
+- それ以外（`chat`・`scope` など）は `@mnemora/testkit` の決定的な擬似 provider で動く。
+  ⚠ `identifier-probes` などの測定コマンドには、埋め込みを `local` に固定するものがある（各節を見ること）。
+
+**どちらで動いているかは起動直後に必ず画面へ出す**（`[provider]` の行。黙って擬似物にフォールバックしない）。
 
 **⚠ ただし `packages/openai` の live テストは、`OPENAI_API_KEY` だけでは走らない。**
 `MNEMORA_LIVE_OPENAI` も設定したときだけ本物を叩く——**鍵を持っていることは、いま課金して
