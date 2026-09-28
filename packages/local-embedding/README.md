@@ -68,6 +68,9 @@ API キーは要らない。ネットワークが要るのは**初回のモデ�
 ⚠ **トークン数と文字数の比は文章によって変わるので、字数は目安にしかならない**）。
 
 **上限を超えた入力を渡すと `embed()` は例外を投げる**（[ADR 0090](../../docs/decisions/0090-embedding-input-token-limit.md)）。
+⚠ これは既定の pipeline（`createPipeline` を省いたとき、または `buildLocalEmbeddingPipeline` で組み立てたとき）の振る舞いである。
+`LocalEmbeddingProvider` 自身は上限を検査しない——`createPipeline` で自前の pipeline を差したときは、上限を守るのはその pipeline の `embed` である
+（`maxInputTokens`・`countTokens` は宣言として要るが、`LocalEmbeddingProvider` はどちらも読まない）。
 
 ```ts check
 import { isLocalEmbeddingProviderError } from "@mnemora/local-embedding";
@@ -485,15 +488,20 @@ Optimum の文書から書いたものであり、**動くことを確かめて�
 **確かめた経路**（このパッケージのコードとして成立している）:
 
 ```ts check
-// 自分の Hugging Face repo へ push して、その id を指す。
-new LocalEmbeddingProvider({ repo: "your-org/ruri-v3-30m-ONNX" });
+// 自分の Hugging Face repo へ push して、その id を指す。repo を差し替えるときは modelId も渡す
+// （上の「`repo` を上書きするなら `modelId` も上書きすること」。repo だけだと構築時に例外になる）。
+new LocalEmbeddingProvider({ repo: "your-org/ruri-v3-30m-ONNX", modelId: "ruri-v3-30m-your-org/sym" });
 
 // 置き場所（キャッシュ）を移すだけならこちら。
 new LocalEmbeddingProvider({ cacheDir: "/var/lib/mnemora/models" });
 ```
 
+`modelId` には、そのモデルを名乗る別の id を渡す。既定の重みと同じ出力になることを確かめた私設ミラーだけは、
+既定と同じ `DEFAULT_LOCAL_EMBEDDING_MODEL_ID`（`"ruri-v3-30m/sym"`）を渡してよい。
+
 `repo` と `cacheDir` が `createPipeline` へそのまま渡ることは
-`src/__tests__/local-embedding-provider.test.ts` で検査している。
+`src/__tests__/local-embedding-provider.test.ts` で検査している。この節と次の節の `new LocalEmbeddingProvider(...)` が
+構築時に例外を投げないことは `src/__tests__/readme-constructor-examples.test.ts` で検査している（ネットワークには出ない）。
 
 #### ネットワークに一切出ずに、手元のファイルだけで動かす
 
@@ -539,8 +547,11 @@ const createPipeline: CreateLocalEmbeddingPipeline = async (spec) => {
   return buildLocalEmbeddingPipeline(extractor);
 };
 
-const provider = new LocalEmbeddingProvider({ repo: "my-ruri", createPipeline });
+const provider = new LocalEmbeddingProvider({ repo: "my-ruri", modelId: "ruri-v3-30m-my-ruri/sym", createPipeline });
 ```
+
+⚠ 2026-09-28 追記: 下の「確かめたこと」の実測（2026-09-10）の後、`repo` だけを差し替えると構築時に例外を投げる検査が入った
+（Issue #142 / ADR 0247）。そのため、上の例に `modelId` を足した（以前の形 `{ repo: "my-ruri", createPipeline }` は構築で投げる）。
 
 **確かめたこと**: この形で 256 次元のベクトルが返り、
 「今日は雨が降っている」と「本日は雨天である」の cos が **0.9482** になった

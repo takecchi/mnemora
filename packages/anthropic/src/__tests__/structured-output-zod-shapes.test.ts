@@ -72,4 +72,26 @@ describe("AnthropicLLMProvider.completeStructured: 送る前に落ちる zod の
       .catch(() => undefined);
     expect(create).toHaveBeenCalledTimes(1);
   });
+
+  // README の 2026-09-28 追記: z.record は送られるが、送る形は空の object しか許さない
+  // （キーと値の制約は description へ降格する）。今の振る舞いを縛る。SDK の版上げで形が変われば赤になる。
+  it("z.record は、空の object しか許さない形（additionalProperties: false、properties は空）で送る", async () => {
+    const { create, provider } = providerWithSpy();
+    await provider
+      .completeStructured(ctx, {
+        prompt,
+        schema: z.object({ x: z.record(z.string(), z.string()) }) as z.ZodType<unknown>,
+      })
+      .catch(() => undefined);
+    const sent = (
+      create.mock.calls[0] as unknown as [
+        { output_config: { format: { schema: { properties: { x: Record<string, unknown> } } } } },
+      ]
+    )[0];
+    const x = sent.output_config.format.schema.properties.x;
+    expect(x.type).toBe("object");
+    expect(x.properties).toEqual({});
+    expect(x.additionalProperties).toBe(false);
+    expect(x.description).toContain("propertyNames");
+  });
 });
