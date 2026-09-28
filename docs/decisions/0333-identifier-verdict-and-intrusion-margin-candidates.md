@@ -486,3 +486,25 @@ Refs #109, ADR 0094, ADR 0220, ADR 0254, ADR 0274, ADR 0291, ADR 0316, ADR 0321,
 **確かめていないこと**: CI 実機での Job Summary の見え方（手元で summary スクリプトを
 直接走らせて確かめただけ）。`intrusionMargin` をいつ消すか（非推奨運用）。§2.4 の
 `japanese` 群の感度の弱点。
+
+---
+
+## 追記（2026-09-28）: A・C を足すことは採った。門にするかは未決
+
+> **⚠ クローン miku の判断であり、オーナーの判断ではない**（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+> ⛔ 本文（§0〜§6）と 2026-09-26 の追記は書き換えない。状態欄も「提案」のまま触らない。
+
+**採ったもの**: §4 の推奨のうち、**A（margin 基準の判定候補）と C（`protectionMargin` の新設、
+`intrusionMargin` は凍結）を「既存の値の隣に並べて出す」ことは採る。**実装は 2026-09-26 の
+追記のとおり PR #795 で main に入っており、この追記はコードを1つも変えていない。
+⟹ 「影で並べた・採用へ倒すかは次の判断」（2026-09-26 の追記）のうち、**並べて出すことの採否は、
+ここで「採る」に倒した。**
+
+**未決のまま残すもの**: **A・C を門にするか**（CI の合否・required checks に使うか）。
+A・C は今も参考の表示であり、`identifier-probes` / `numeral-token-probes` /
+`correction-candidate-probes` の各ジョブは基準値と相違しても exit 0 のまま（非0になるのは入力が壊れたときだけ）、どのジョブも
+`.github/required-status-checks.json` に載っていない。門にする判断は branch protection の
+変更を伴うため、オーナーの領分である（§0 の B）。⛔ この追記はそこに触れていない。
+
+**確かめていないこと**: §6 に挙げた点（K=60 を超える標本での A の偽陽性率、`japanese` 群の
+感度の弱点、`protectedFacts` が複数件のときの C の符号）は、この追記で1つも解けていない。
