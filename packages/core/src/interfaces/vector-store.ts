@@ -350,13 +350,16 @@ export interface VectorStore {
    * ⚠ 2026-09-28 までは `PostgresVectorStore` が key を `text` として SQL に送っていたので、NUL を含む key で
    * 投げていた（`search()` には key が無いので投げない）。
    *
-   * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの。契約の外で、どちらに揃えるかは未決）:**
-   * - **`queries` に同じ `key` が2回以上あるとき**（[Issue #1284](https://github.com/takecchi/mnemora/issues/1284)）:
-   *   `PostgresVectorStore` は `Map` の1つの key に、その key のクエリすべての結果を続けて積む（件数は結果の和で、
-   *   `limit` を超えうる。塊の順は約束しない）。`search()` を並べたものとは一致しない。`Runtime` はアンカーの
-   *   `memoryId` を key にするので、同じ key を渡さない。
+   * **契約: `queries` に同じ `key` が2回以上あるときは、最後のクエリの結果だけを返す**（後勝ち、
+   * [Issue #1284](https://github.com/takecchi/mnemora/issues/1284)）。それより前の同じ key のクエリは、結果に
+   * 現れない。返す `Map` の並びは、その key が**最初に現れた位置**である——
+   * `new Map(queries.map((q) => [q.key, search(ctx, space, q.vector, opts)]))` と同じ。
+   * どの key の結果も、`search()` と同じく `limit` を超えない。同じ key があっても、投げる入力は変わらない。
+   * `Runtime` はアンカーの `memoryId` を key にするので、同じ key を渡さない。
+   * ⚠ 2026-09-28 までは、`PostgresVectorStore` がその key のクエリすべての結果を1つの配列に続けて積んでいた
+   * （件数は結果の和で、`limit` を超えうる）。
    * 【実測 2026-09-28】`packages/postgres/src/__tests__/vector-search-many-diff.postgres.test.ts`
-   * （`search()` を並べたものとの差分の歯。例外の有無も比べる。上の #1284 は許可リストに Issue を名指しして載せてある）。
+   * （`search()` を並べたものとの差分の歯。例外の有無も比べる。同じ key の場面は、上の `new Map(…)` と同じく畳んで比べる）。
    */
   searchMany?(
     ctx: Ctx,
