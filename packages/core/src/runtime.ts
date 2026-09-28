@@ -1025,6 +1025,17 @@ export interface TickOptions {
    * 処理時間より長いときにだけ効く。
    * `now - leaseMs` が `Date` の範囲を外れる値（`NaN` を含む）は、どちらの実装でも例外になる。
    *
+   * ⚠ **2026-09-28 追記（今の振る舞いを書いたもの、Issue #1184）: `leaseMs` を省略して呼ぶと**（JavaScript からの
+   * 呼び出し・`as` を経由した呼び出し）、Runtime は検査せず、`undefined` のまま `OutboxStore.claimBatch` へ渡す。
+   * 例外は store の側で起きるので、**例外の顔は store で違う**（どちらも `RangeError`・`TypeError` ではない）:
+   * - `@mnemora/postgres`: DB が拒んだ例外（drizzle が包んだ `Error`。SQLSTATE は `err.cause.code` の `22007`）。
+   * - testkit の fixture: 名前の無い `Error`（文面は `claimBatch: now - leaseMs must be a valid Date` で始まる。
+   *   `cause.code` は持たない）。
+   * どちらも claim する前に落ちるので、ジョブは claim されない（同じ時刻の次の `tick` で取れる）。
+   * `leaseMs` に `NaN` を渡したときも同じ顔になる。第2引数ごと省略した `tick(ctx)` は、どちらの実装でも
+   * `opts` を読むところで `TypeError` になる。種類を揃えるかは #1184 で決めていない。
+   * 【実測 2026-09-28】`packages/postgres/src/__tests__/runtime-entry-exception-kinds.postgres.test.ts`。
+   *
    * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、Issue #1200）: ジョブの処理がリースより長く掛かっても、
    * その間に別の `tick` が同じジョブを取らなければ、完了は通り、`TickResult` には何も出ない**
    * （`attempts` が変わらないので `complete` の CAS が通る。`processed` に数えられ、`leaseConflicts` は空）。
@@ -1975,7 +1986,8 @@ export interface Runtime {
    *
    * `opts.leaseMs` は必須（ADR 0032）。`tick(ctx)` を引数無しで呼ぶことはできない
    * ——`claimBatch` の claim リース長は運用方針であり、`packages/core` が既定値を
-   * 発明せず呼び出し側に決めさせるための意図した破壊的変更。
+   * 発明せず呼び出し側に決めさせるための意図した破壊的変更。`leaseMs` を省略したとき（型を外した呼び出し）の
+   * 例外は、Runtime ではなく store が投げ、顔が store で違う（{@link TickOptions.leaseMs}）。
    *
    * 🔴 **処理する kind は {@link TICK_SUPPORTED_JOB_KINDS} が唯一の出所である**
    * （ADR 0082、issue #105）。`opts.kinds` の既定値もそこを指す。そこに無い kind を
