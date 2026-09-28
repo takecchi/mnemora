@@ -129,6 +129,14 @@ describe("mnemora-postgres-migrate（子プロセス起動、DB 無し）", () =
     },
   );
 
+  it("MNEMORA_SCHEMA=（空文字）: 未指定には倒さず、DB に繋ぐ前に終了コード1で止まる", async () => {
+    const result = await runCli([], { MNEMORA_SCHEMA: "" });
+
+    expect(result.exitCode).toBe(1);
+    expect(result.stderr).toContain("unsafe SQL identifier");
+    expect(result.stderr).not.toContain("DATABASE_URL");
+  });
+
   it("未知の引数（--nope）: 終了コード1", async () => {
     const result = await runCli(["--nope"], {});
 

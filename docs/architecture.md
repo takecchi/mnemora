@@ -149,6 +149,13 @@ CPU を出して溜まったジョブを消化する必要がある。この継�
 **2026-09 追記（ADR 0032）**: `opts.leaseMs` は必須で既定値を持たない——`tick(ctx)` を
 引数無しで呼ぶことはできない。理由は §5.11 の `ClaimOutboxJobsOptions.leaseMs` を参照。
 
+**⚠ 2026-09-28 追記（文書と実装の照合、main fd74b23）**: この節の上の段落は、実装と2点で違う。
+
+- **抽出の既定は決まっている。**上の段落は「どちらを既定にするかはオーナーの判断が必要」と書くが、既定は `sync` に決まり（[docs/roadmap.md](./roadmap.md) §5.2、この文書の末尾「確かめていないこと」の追記）、実装も `extract` を省略した `observe()` を `sync` として扱う（`packages/core/src/runtime.ts` の `input.extract ?? "sync"`）。
+- **Runtime は `Scheduler` を使わない。**`createRuntime()` の `RuntimeDeps` に `Scheduler` を渡す欄は無く、`InlineScheduler` は export されているが、runtime のどこからも呼ばれない。`extract: 'deferred'` の抽出と埋め込みは outbox に積まれ、`runtime.tick(ctx, opts)` を呼んだときだけ進む——§3.2 の図の「Scheduler 経由」「Scheduler が起動」も、いまは `tick()` のことである。「Redis も BullMQ も無い最小構成」が成り立つのは、`InlineScheduler` ではなく outbox と `tick()` による。`@mnemora/bullmq` も `Scheduler` ではなく `tick()` を駆動する（§5.6 の追記）。
+
+上の段落は当時の設計の記録として書き換えず、ここに追記する。
+
 **2026-09 追記（ADR 0082、issue #105）**: `tick` が**実際に処理する分岐を持つ** kind は
 `packages/core/src/runtime.ts` の `TICK_SUPPORTED_JOB_KINDS` が**唯一の出所**である
 （`opts.kinds` の既定値もそこを指す）。**`OutboxJobKind` に名前が在ることは、`tick` が

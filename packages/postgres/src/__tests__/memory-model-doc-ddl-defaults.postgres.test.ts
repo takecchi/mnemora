@@ -7,7 +7,7 @@ import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js"
 
 /**
  * `docs/memory-model.md` の `CREATE TABLE` に書かれた列の既定（`DEFAULT …`）と、列の値を名前で縛る
- * `CHECK (col IN (…))` の名前の集合が、マイグレーションを当てた本物の DB と一致することを縛る。**doc の値は `docs/memory-model.md` を実行時に読んで**、
+ * `CHECK (col IN (…))` の名前の集合と、列の型・NULL 可否が、マイグレーションを当てた本物の DB と一致することを縛る。**doc の値は `docs/memory-model.md` を実行時に読んで**、
  * **実装の値は DB の `information_schema.columns`・`pg_constraint` から**取って突き合わせる。
  *
  * - doc の DDL は、後から migration で足した列をすべては写していない（同文書の 2026-09-27 追記）。
@@ -57,6 +57,46 @@ function documentedChecks(): { table: string; column: string; names: string[] }[
     }
   }
   return checks;
+}
+
+/** doc の型の書き方 → `information_schema.columns.udt_name`。ここに無い型が doc に現れたら赤にする。 */
+const DOC_TYPE_TO_UDT: Record<string, string> = {
+  text: "text",
+  "text[]": "_text",
+  uuid: "uuid",
+  "uuid[]": "_uuid",
+  timestamptz: "timestamptz",
+  real: "float4",
+  jsonb: "jsonb",
+  bigint: "int8",
+  integer: "int4",
+  int: "int4",
+  smallint: "int2",
+  boolean: "bool",
+  date: "date",
+  vector: "vector",
+};
+
+/** doc の `CREATE TABLE` の列ごとの型と NULL 可否（`NOT NULL` か `PRIMARY KEY` なら NULL 不可）。 */
+function documentedColumns(): { table: string; column: string; type: string; notNull: boolean }[] {
+  const columns: { table: string; column: string; type: string; notNull: boolean }[] = [];
+  for (const [, table, body] of MEMORY_MODEL_DOC.matchAll(
+    /^CREATE TABLE (\w+) \(\n([\s\S]*?)\n\);/gm,
+  )) {
+    for (const line of body!.split("\n")) {
+      const code = line.replace(/--.*$/, "");
+      const m = code.match(/^\s+([a-z_]+)\s+([a-z]+(?:\[\])?)/);
+      if (!m || ["primary", "unique", "check", "foreign", "constraint", "exclude"].includes(m[1]!))
+        continue;
+      columns.push({
+        table: table!,
+        column: m[1]!,
+        type: m[2]!,
+        notNull: /NOT NULL|PRIMARY KEY/i.test(code),
+      });
+    }
+  }
+  return columns;
 }
 
 /** `'open'::text` → `'open'`、`'{}'::text[]` → `'{}'`（cast を外す）。 */
@@ -123,6 +163,38 @@ describe("docs/memory-model.md の CREATE TABLE の列の既定は、マイグ�
         return { at: `${d.table}.${d.column}`, doc: d.names, db };
       })
       .filter((m) => m.db.length !== 1 || m.db[0]!.join(",") !== m.doc.join(","));
+    expect(mismatches).toEqual([]);
+  });
+
+  it("doc に書かれた列の型と NULL 可否", async () => {
+    const { pool } = await getTestClient();
+    const docColumns = documentedColumns();
+    const rows = await pool.query<{
+      table_name: string;
+      column_name: string;
+      udt_name: string;
+      is_nullable: "YES" | "NO";
+    }>(
+      `SELECT table_name, column_name, udt_name, is_nullable FROM information_schema.columns
+        WHERE table_schema = current_schema() AND table_name = ANY($1)`,
+      [[...new Set(docColumns.map((d) => d.table))]],
+    );
+    const tablesInDb = new Set(rows.rows.map((r) => r.table_name));
+    const actual = new Map(rows.rows.map((r) => [`${r.table_name}.${r.column_name}`, r]));
+
+    const compared = docColumns.filter((d) => tablesInDb.has(d.table));
+    // 全部を飛ばしていないこと（memories・observations・recalls など主要な表の列を見ていること）。
+    expect(compared.length).toBeGreaterThan(50);
+    const mismatches = compared
+      .map((d) => {
+        const db = actual.get(`${d.table}.${d.column}`);
+        return {
+          at: `${d.table}.${d.column}`,
+          doc: `${DOC_TYPE_TO_UDT[d.type] ?? `(未知の型 ${d.type})`} ${d.notNull ? "NOT NULL" : "NULL"}`,
+          db: db ? `${db.udt_name} ${db.is_nullable === "NO" ? "NOT NULL" : "NULL"}` : "(列が無い)",
+        };
+      })
+      .filter((m) => m.doc !== m.db);
     expect(mismatches).toEqual([]);
   });
 
