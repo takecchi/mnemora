@@ -80,6 +80,11 @@ export interface OpenAILLMProviderOptions {
  * クローン miku の判断で、スキーマ・翻訳を変える案は採らず、今の振る舞いを記録した
  * （選び直す余地は Issue に残してある）。ほかの3つのスキーマ（統合・内省・claim key）には
  * `.nullable()` の欄が無い。
+ *
+ * ⚠ **2026-09-28 追記:** この変換だけでは、スキーマがもともと `null` を許す位置（必須の `.nullable()`・
+ * 配列の要素・根）の `null` まで消して `ZodError` にしていた（README は `nullable` を「通る」としていた）。
+ * いまはこの変換を1段目とし、`ZodError` のときだけ {@link keepSchemaNulls} で検査し直す
+ * （{@link parseStructuredValue}）。上の #1082 の振る舞い（`.nullable().optional()` の `null` は省略）は変えていない。
  */
 function stripNulls(value: unknown): unknown {
   if (value === null) {
@@ -99,6 +104,138 @@ function stripNulls(value: unknown): unknown {
     return result;
   }
   return value;
+}
+
+type JsonSchemaNode = Record<string, unknown>;
+
+function isSchemaNode(value: unknown): value is JsonSchemaNode {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** `$ref`（根 `#` と `#/$defs/...`）を辿る。辿れなければ `undefined`。 */
+function resolveRef(node: unknown, root: JsonSchemaNode, depth = 0): JsonSchemaNode | undefined {
+  if (!isSchemaNode(node) || depth > 32) {
+    return undefined;
+  }
+  const ref = node["$ref"];
+  if (typeof ref !== "string") {
+    return node;
+  }
+  if (ref === "#") {
+    return root;
+  }
+  const match = /^#\/\$defs\/(.+)$/.exec(ref);
+  const defs = root["$defs"];
+  return match && isSchemaNode(defs) ? resolveRef(defs[match[1]!], root, depth + 1) : undefined;
+}
+
+/** `anyOf`/`oneOf` を平らにした選択肢（`$ref` は辿る）。 */
+function schemaBranches(node: unknown, root: JsonSchemaNode, depth = 0): JsonSchemaNode[] {
+  const resolved = resolveRef(node, root);
+  if (resolved === undefined || depth > 32) {
+    return [];
+  }
+  const alternatives = resolved["anyOf"] ?? resolved["oneOf"];
+  return Array.isArray(alternatives)
+    ? alternatives.flatMap((alternative) => schemaBranches(alternative, root, depth + 1))
+    : [resolved];
+}
+
+function admitsNull(node: unknown, root: JsonSchemaNode): boolean {
+  return schemaBranches(node, root).some((branch) => {
+    const type = branch["type"];
+    return (
+      type === "null" ||
+      (Array.isArray(type) && type.includes("null")) ||
+      ("const" in branch && branch["const"] === null) ||
+      (Array.isArray(branch["enum"]) && branch["enum"].includes(null))
+    );
+  });
+}
+
+/**
+ * {@link stripNulls} の2段目。元のスキーマ（翻訳の前の JSON Schema）が `null` を許す位置の `null` だけを残し、
+ * ほかの `null` は {@link stripNulls} と同じく消す。
+ *
+ * 残すのは次の位置だけである:
+ * - object の欄: **その欄が元の `required` に入り**、かつ `null` を許すとき。`.optional()` 由来の欄
+ *   （`.nullable().optional()` を含む。Issue #1082）の `null` は、翻訳が足した `null` と区別できないので消す。
+ *   union で候補の枝が複数あるときは、その欄を持つ**すべての枝**が「必須かつ `null` を許す」ときだけ残す。
+ * - 配列の要素・根: その位置のスキーマが `null` を許すとき。
+ *
+ * スキーマが分からない位置（`$ref` が辿れない・候補の枝が無い）では消す側に倒す。
+ */
+function keepSchemaNulls(value: unknown, node: unknown, root: JsonSchemaNode): unknown {
+  if (value === null) {
+    return admitsNull(node, root) ? null : undefined;
+  }
+  const branches = schemaBranches(node, root);
+  if (Array.isArray(value)) {
+    const items = branches.flatMap((branch) =>
+      branch["items"] !== undefined ? [branch["items"]] : [],
+    );
+    const itemNode = items.length === 1 ? items[0] : { anyOf: items };
+    return value.map((item) => keepSchemaNulls(item, itemNode, root));
+  }
+  if (typeof value === "object") {
+    const objects = branches.filter((branch) => isSchemaNode(branch["properties"]));
+    const result: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(value)) {
+      const candidates = objects.filter((branch) =>
+        Object.hasOwn(branch["properties"] as JsonSchemaNode, key),
+      );
+      const propertyOf = (branch: JsonSchemaNode) => (branch["properties"] as JsonSchemaNode)[key];
+      if (child === null) {
+        const keep =
+          candidates.length > 0 &&
+          candidates.every(
+            (branch) =>
+              Array.isArray(branch["required"]) &&
+              branch["required"].includes(key) &&
+              admitsNull(propertyOf(branch), root),
+          );
+        if (keep) {
+          result[key] = null;
+        }
+        continue;
+      }
+      const childNode =
+        candidates.length === 1
+          ? propertyOf(candidates[0]!)
+          : { anyOf: candidates.map(propertyOf) };
+      const kept = keepSchemaNulls(child, childNode, root);
+      if (kept !== undefined) {
+        result[key] = kept;
+      }
+    }
+    return result;
+  }
+  return value;
+}
+
+/**
+ * 戻りの JSON（根を包んで送ったなら取り出した後の値）を `schema` で検査する。
+ *
+ * 1. {@link stripNulls} で `null` を消して検査し、通ればそれを返す（今までの形。ここで通る入力の結果は変えない）。
+ * 2. `ZodError` のときだけ、{@link keepSchemaNulls} で元のスキーマが許す `null` を残して検査し直し、通ればそれを返す。
+ * 3. 2でも落ちたら、**1の `ZodError` をそのまま投げる**（2の失敗は投げない）。
+ *
+ * ⟹ 変わるのは、今までは `ZodError` になっていた入力の結果だけである。
+ */
+function parseStructuredValue<T>(
+  schema: StructuredRequest<T>["schema"],
+  base: JsonSchemaNode,
+  value: unknown,
+): T {
+  const first = schema.safeParse(stripNulls(value));
+  if (first.success) {
+    return first.data;
+  }
+  const second = schema.safeParse(keepSchemaNulls(value, base, base));
+  if (second.success) {
+    return second.data;
+  }
+  throw first.error;
 }
 
 /**
@@ -238,6 +375,10 @@ export class OpenAILLMProvider implements LLMProvider {
    * 投げるもの: 拒否・切り詰めは `complete` と同じ {@link OpenAILLMProviderError}（`kind: "refusal"`・`"truncated"`）、
    * 本文が空・欠落なら `kind: "no_content"`。本文が JSON として壊れていれば `JSON.parse` の `SyntaxError`、
    * `req.schema` に合わなければ zod の `ZodError` がそのまま伝わる（どちらも `kind` を持たない）。
+   *
+   * 戻りの `null`: `.optional()` の欄の `null`（strict への翻訳が足したもの）は省略へ戻す。スキーマがもともと `null` を許す
+   * 必須の欄（`.nullable()`）・配列の要素・根の `null` は `null` のまま返す。`.nullable().optional()` の欄の `null` は
+   * 省略として届く（Issue #1082。`stripNulls` の doc）。
    */
   async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
     const format = translateForOpenAIStructuredOutput("mnemora_structured_output", req.schema);
@@ -259,13 +400,13 @@ export class OpenAILLMProvider implements LLMProvider {
     const parsedJson: unknown = JSON.parse(raw);
     // OpenAI の strict モードは JSON Schema としての形は保証するが、それが core の zod
     // スキーマとして意味的に妥当かは別問題。上の stripNulls で null → 省略へ変換してから
-    // もう一度 zod でパースし、core・呼び出し側には常に検証済みの T を返す。
+    // もう一度 zod でパースし（落ちたら元のスキーマが許す null を残して検査し直す。
+    // `parseStructuredValue`）、core・呼び出し側には常に検証済みの T を返す。
     //
     // 根が object でないスキーマは包んで送っている（`translateForOpenAIStructuredOutput`、
     // `structured-root.ts`）ので、包みの欄から取り出してから検査する。
-    const value = needsRootWrap(toBaseJsonSchema(req.schema))
-      ? unwrapRootValue(parsedJson)
-      : parsedJson;
-    return req.schema.parse(stripNulls(value));
+    const base = toBaseJsonSchema(req.schema);
+    const value = needsRootWrap(base) ? unwrapRootValue(parsedJson) : parsedJson;
+    return parseStructuredValue(req.schema, base, value);
   }
 }
