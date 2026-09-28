@@ -1947,6 +1947,13 @@ export interface Runtime {
    * - LLM の呼び出しの失敗は投げない。全文フォールバックへ倒し、`extractionFailure` に載せる
    *   （docs/memory-model.md §4）。
    * - store が投げた例外は、そのまま伝わる（保存できない値の扱いは Issue #1063）。
+   *   ⚠ 2026-09-28 追記（今の振る舞いを書くだけ。[Issue #1063](https://github.com/takecchi/mnemora/issues/1063)。
+   *   どうするかは決めていない）: LLM の抽出結果が schema は通るが保存できない値を含むと、候補は1件ずつ書かれる
+   *   （1つのトランザクションではない）ので、**保存できない候補の手前の候補は書かれたまま**例外になる。LLM 自体は
+   *   成功しているので、全文フォールバックの Memory は作られない（docs/memory-model.md §4 の安全弁は、LLM の呼び出しの
+   *   失敗だけを覆う）。保存できる値の範囲は store で違う——本文の NUL は `@mnemora/postgres` も testkit の fixture も
+   *   拒むが、語の多い 1MB 超の本文は Postgres だけが tsvector の上限で拒む（fixture は全件を書く）。
+   *   【実測 2026-09-28】`packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts`。
    *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
    *   書く前に例外になり、testkit / core の Fake では通る（`MemoryStore.createObservation` の
    *   doc、Issue #1075）。
