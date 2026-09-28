@@ -29,7 +29,8 @@ export interface LocalEmbeddingInputTooLongDetail {
   /** モデルが受け付ける上限トークン数。 */
   readonly maxInputTokens: number;
   /**
-   * その入力の文字数。
+   * その入力の文字数。⚠ **`prefix`（`LocalEmbeddingProviderOptions.prefix`）を付けた後の文字列の長さである**
+   * （`tokens` も同じく prefix を含めて数える）。`embed(ctx, texts)` に渡した文字列の長さとは、prefix の長さだけ違う。
    * ⚠ **トークン数と文字数の比は文章によって変わる。**この値は原因を追うための参考であり、
    * **判定に使っている値ではない**（判定は `tokens` と `maxInputTokens` の比較である）。
    */

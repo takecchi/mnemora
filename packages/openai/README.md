@@ -158,6 +158,11 @@ mnemora の runtime は、recall のクエリを trim して空なら埋め込�
 | `z.date`                                                                 | 400「`schema must have a 'type' key`」                     |
 | `transform`                                                              | 400「`schema must have a 'type' key`」                     |
 
+⚠ 2026-09-28 追記: 「根が union」と「`z.lazy`（再帰）」は別々に通ったが、**根の union が自分自身を再帰で含む形**
+（子に根の union を持つ）は、包むときに根を指す参照（`$ref: "#"`）を書き換えないので、子の参照が包みの object
+（`{ result: … }`）を指す——送る形が元のスキーマと変わる（翻訳の結果で確かめた。実 API には当てていない）。
+core の4つのスキーマはこの形を使わない。歯は `src/__tests__/structured-root-union.test.ts`。
+
 拒まれたときの文面はスキーマの位置だけで、プロンプトの本文と API キーは載らなかった（確かめた）。⚠ `z.date`・`transform` は、
 `openai` SDK 自身の strict 検査（`lib/transform.js` の `toStrictJsonSchema`）は通るが、実 API は拒む——SDK の検査を通ることは、
 実 API が受けることの十分条件ではない。`@mnemora/anthropic` は同じ形の一部を**送る前に**素の `Error` で落とす（あちらの README）。
