@@ -1616,6 +1616,15 @@ export class PostgresMemoryStore implements MemoryStore {
     // （ADR 0307 が `digestBand` について下した判断と同じ理由）。**`hasQualifyingLabel`
     // （`RecallQuery.labels` による絞り込み、指定されていれば）の内側を数える**——
     // グルーピングは「絞り込み済みの現在のスコープ」をテナントの語彙全体で内訳する。
+    //
+    // ⚠ **1件の Memory は、1つのラベル群に1回だけ数える**（`GroupCount.count` は Memory の件数）。
+    // `tags` は作成時の値をそのまま持つので、同じ名前が重なりうる（LLM の `tags` は重複を除かずに
+    // 書かれる）。以前は `unnest(tags)` をそのまま数えていて、重なった名前の群を多く数えていた
+    // （testkit の fixture は `Set` で1回に数える）。`array_position(tags, tag) = position` で、その名前が
+    // `tags` の中で最初に現れた位置だけを残す——並べ替え（`DISTINCT`）を足さずに済む形を選んだ。
+    // 【実測 2026-09-28】10万行（`tags` に重複を含む行 6,482）の aggregateScope で、中央値は直す前
+    // 94〜98ms、この形 98〜107ms、`LATERAL (SELECT DISTINCT unnest(tags))` 106〜115ms、
+    // `count(DISTINCT id)` 213〜228ms（PR 本文）。
     const taxonomyGroupCandidates = scope.taxonomyGroupCandidates;
     const taxonomyGroupColumns =
       taxonomyGroupCandidates !== undefined
@@ -1624,11 +1633,12 @@ export class PostgresMemoryStore implements MemoryStore {
           SELECT coalesce(json_agg(json_build_object('key', tag, 'count', tag_count)), '[]'::json)
           FROM (
             SELECT tag, count(*)::int AS tag_count
-            FROM memories, unnest(tags) AS tag
+            FROM memories, unnest(tags) WITH ORDINALITY AS labels_of_memory(tag, position)
             WHERE tenant_id = ${ctx.tenantId} ${subjectFilter} ${attributesFilter}
               AND status IN ('active', 'contested') AND ${inPeriod} AND ${isValid}
               AND ${hasQualifyingLabel}
               AND tag = ANY(${sql.param([...taxonomyGroupCandidates])}::text[])
+              AND array_position(tags, tag) = position
             GROUP BY tag
           ) t
         ) AS taxonomy_label_groups,
@@ -2243,6 +2253,9 @@ export class PostgresMemoryStore implements MemoryStore {
       validUntil: Date | null;
     },
   ): Promise<Memory[]> {
+    // 入口の正規化（`normalizeUuidCase`）。下の除外は JS で比べるので、DB が返す小文字の id に揃える
+    // ——以前は大文字の UUID を渡すと自分自身が返っていた（`get` は同じ行を返すのに）。
+    const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
     const validFrom = toPgTimestamp(query.validFrom);
     const validUntil = toPgTimestamp(query.validUntil);
     const result = await this.db.execute(sql`
@@ -2264,7 +2277,7 @@ export class PostgresMemoryStore implements MemoryStore {
     `);
     return result.rows
       .map((row) => rowToMemory(row as unknown as MemoryRow))
-      .filter((memory) => memory.id !== query.excludeMemoryId);
+      .filter((memory) => memory.id !== excludeMemoryId);
   }
 
   /**
