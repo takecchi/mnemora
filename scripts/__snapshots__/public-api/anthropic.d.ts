@@ -1,3 +1,40 @@
+// ===== dist/client-types.d.ts =====
+export interface AnthropicMessageParam {
+    role: "user" | "assistant";
+    content: string;
+}
+export interface AnthropicJSONOutputFormat {
+    type: "json_schema";
+    schema: Record<string, unknown>;
+}
+export interface AnthropicOutputConfig {
+    format?: AnthropicJSONOutputFormat | null;
+}
+export interface AnthropicMessageCreateParams {
+    model: string;
+    max_tokens: number;
+    system?: string;
+    messages: AnthropicMessageParam[];
+    output_config?: AnthropicOutputConfig;
+}
+export interface AnthropicContentBlock {
+    type: string;
+    text?: string;
+}
+export interface AnthropicStopDetails {
+    category?: string | null;
+}
+export interface AnthropicMessageResult {
+    content: AnthropicContentBlock[];
+    stop_reason?: string | null;
+    stop_details?: AnthropicStopDetails | null;
+}
+export interface AnthropicMessagesClient {
+    messages: {
+        create(params: AnthropicMessageCreateParams, options?: unknown): PromiseLike<AnthropicMessageResult>;
+    };
+}
+
 // ===== dist/errors.d.ts =====
 export type AnthropicLLMFailureKind = "refusal" | "truncated" | "no_content";
 export interface AnthropicLLMProviderErrorOptions {
@@ -14,6 +51,7 @@ export declare class AnthropicLLMProviderError extends Error {
 }
 
 // ===== dist/index.d.ts =====
+export * from "./client-types.js";
 export * from "./errors.js";
 export * from "./llm-provider.js";
 export * from "./json-schema.js";
@@ -27,14 +65,14 @@ export interface AnthropicJsonSchemaFormat {
 export declare function translateForAnthropicStructuredOutput<T>(schema: z.ZodType<T>): AnthropicJsonSchemaFormat;
 
 // ===== dist/llm-provider.d.ts =====
-import Anthropic from "@anthropic-ai/sdk";
 import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { AnthropicMessagesClient } from "./client-types.js";
 export declare const DEFAULT_MAX_TOKENS = 16000;
 export interface AnthropicLLMProviderOptions {
     apiKey?: string;
     model: string;
     maxTokens?: number;
-    client?: Pick<Anthropic, "messages">;
+    client?: AnthropicMessagesClient;
 }
 interface AnthropicMessageParam {
     role: "user" | "assistant";
