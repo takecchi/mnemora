@@ -153,3 +153,36 @@ fixture）で縛っていた。
 上限で拒む」は、migration 0025 より前の振る舞いである。この ADR の決定（保存できない候補だけを落とし、残りを書く）は
 変わらない——本文の NUL などは今も落ちる。
 `packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts` の 1MB 超の歯は、2実装とも3件を書く主張に反転した。
+
+## 追記（2026-09-29）: 決定4「正常な入力で最後に残る状態は変わらない」は、opt-in の claim key 衝突検出では成り立たなかった
+
+**⚠ この追記もクローンの委譲で動く担い手が書いた。オーナー本人ではない**（ADR 0220）。
+
+決定4（「候補を全件書いてから `created` を積む……以前は候補ごとに『書く → `created` を積む』を
+繰り返していた。正常な入力で最後に残る状態は変わらない」）は、`created` イベントの記録について
+述べたものであり、それ自体は今も正しい。しかし、**この決定が書き込みループと `created`/検出
+ループを分離した副作用として、[Issue #835](https://github.com/takecchi/mnemora/issues/835) の
+`ClaimKeyOptions.detectContested`（opt-in、ADR 0324）を有効にした経路では「正常な入力で最後に
+残る状態」が変わっていた**。
+
+**機序**: 分離前（本 ADR より前、`f7c8d1e`）は「書く → `created` を積む → （opt-in なら）検出する」
+を候補ごとに繰り返していたため、同じ observation から抽出された兄弟候補のうち1件目が検出されて
+`contested`（非 `active`）になった*後*でなければ、2件目が書かれなかった——1件目・2件目が同時に
+`active` として一致に現れることは無かった。分離後（本 ADR、`8c45801`）は全件を先に書いてから
+検出するため、兄弟どうしが互いにまだ `active` な状態で検出の一致に混入する。
+
+**実測**: 先行 observe が作った Memory M1（例: `lived_in_kyoto`）が在るとき、後続の1回の
+`observe()` が同じ claim key の2件（訂正の新値と旧値の言い直し）を生むケースで、記録の再生
+（`answer.claim-key.known-predicates-{1,2,3}.json`）の `negation-moved-city`・
+`schedule-change-deadline` が訂正 `contested` 4/4 → 2/4 に落ちた（M1 が訂正されているのに
+`contested` にならない）。1回の `observe()` が同じ claim key の2件を生む誤検出（`other-period-city-this-year`）
+は、この分離より前から別の理由（claim key の既定プロンプトの性質）で存在していた——退行したのは
+「先行 Memory がある場合に訂正を検出できる」側だけである。詳細な機序・実測・bisect（`f7c8d1e` で緑・
+`8c45801` で赤）は [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+を見ること。
+
+**吸収**: [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md) が、
+`Runtime.detectClaimKeyContested`（core 側だけ）で、検出中の Memory と同じ `sourceObservationId`
+を持つ一致を件数を数える前に除くようにして、この退行を直した。本 ADR の決定1〜4（extract の
+再配達・保存できない候補の扱い）自体は変えていない——`createMemoryWithOutbox` の呼び出しを
+候補ごとに捕まえる形・全件書いてから `created` を積む形は、`8c45801` のまま残る。

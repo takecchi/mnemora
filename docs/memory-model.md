@@ -456,6 +456,17 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
   （`contested` の行を一致に数える口）は [ADR 0324](./decisions/0324-claim-key-contested-detection.md) の
   2026-09-27 の追記にある。**直していない**（方針は Issue #933 で決まっていない）。
 
+  ⚠ **2026-09-29 追記（別の経路。[Issue #835](https://github.com/takecchi/mnemora/issues/835)、
+  [ADR 0377](./decisions/0377-claim-key-contested-detection-excludes-same-observation-siblings.md)）:
+  上の追記が扱うのは「同じ鍵の主張が1件ずつ届く」経路だが、**1回の `observe()` が同じ鍵の
+  複数候補を一度に生む**経路には別の問題があった——PR #1318（ADR 0347）が抽出の書き込みを
+  「全件書く→全件について検出」の2ループへ分けた副作用で、同じ observation から抽出された
+  兄弟どうしが互いの検出時点で既に `active` になり、`findActiveByClaimKey?` の一致に誤って
+  混入していた。ADR 0377 は、検出中の Memory と同じ `sourceObservationId` を持つ一致を
+  件数を数える前に除くようにして、これを直した——同じ observation の兄弟は、今は互いに
+  `contested` にならない（1つの発話内の言い直しが2件に分かれる場合を除き、失うものは無い。
+  詳細は ADR 0377）。**この追記が扱う経路（1件ずつ届く場合）は、直っていない。**
+
 **`superseded` へ進む経路は依然として無い**——検出が書けるのは `active → contested`
 （行6）までであり、`contested → active | superseded`（行7）は今日どおり
 `resolveContested` の明示呼び出しのみ。

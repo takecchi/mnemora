@@ -333,14 +333,27 @@ export interface ClaimKeyOptions {
    * `knownPredicates` を `enabled: false` と組み合わせても無視されるのと同じ「渡された
    * が効かない」規約）。
    *
-   * ⚠ **同じ発話の中の、時期だけが違う2文も contested になる**（今の振る舞い、Issue #835）。
-   * 例: 1回の `observe()` から「去年は札幌で働いていた。」「今年は福岡で働いている。」の2件が
-   * 抽出されると、`deriveClaimKeys` は2件に同じ鍵（`user/work_location`）を付ける。
-   * 「去年」「今年」は `validFrom`/`validUntil` に入らないので有効期間が重なるとみなされ、
-   * 訂正ではないのに対が contested になる。これは `knownPredicatesFromStore` の語彙ヒントより
-   * 前の、既定の claim key のプロンプトで起きる（ADR 0326 (d)、ADR 0329 の負債1の追記）。
-   * 【実測 2026-09-28】記録の再生（`answer.claim-key.known-predicates-{1,2,3}.json`）でも、
-   * 実 API（gpt-4o-mini、n=3）でも、6回とも成立した。
+   * ⚠ **【2026-09-29 修正、ADR 0377】以前は、同じ発話の中の、時期だけが違う2文も
+   * contested になっていた**（Issue #835）。例: 1回の `observe()` から「去年は札幌で
+   * 働いていた。」「今年は福岡で働いている。」の2件が抽出されると、`deriveClaimKeys` は
+   * 2件に同じ鍵（`user/work_location`）を付ける。「去年」「今年」は `validFrom`/
+   * `validUntil` に入らないので有効期間が重なるとみなされ、`knownPredicatesFromStore`
+   * の語彙ヒントより前の、既定の claim key のプロンプトの性質でこの対が生まれていた
+   * （ADR 0326 (d)、ADR 0329 の負債1の追記）。【実測 2026-09-28、修正前】記録の再生
+   * （`answer.claim-key.known-predicates-{1,2,3}.json`）でも、実 API（gpt-4o-mini、
+   * n=3）でも、6回とも contested が成立していた。
+   *
+   * **今は、この対は contested にならない。** `Runtime.detectClaimKeyContested`
+   * （`runtime.ts`）が、同じ observation（＝同じ発話）から抽出された兄弟どうしを、
+   * 一致件数を数える前に除くようになった（ADR 0347・PR #1318 が抽出の書き込みを
+   * 「全件書く→全件について検出」の2ループへ分けた副作用として、兄弟が互いの検出時点で
+   * 既に `active` になっていたことが原因。詳細・実測は
+   * [ADR 0377](../../../docs/decisions/0377-claim-key-contested-detection-excludes-same-observation-siblings.md)）。
+   * ⚠ **この直しは損失も伴う**——1つの発話の中の言い直し（「金曜じゃなくて水曜」のような、
+   * 抽出で2件に分かれてしまう言い直し）も、同じ理由で今後は互いに contested にならない
+   * （ADR 0377「失うもの」）。**別の observation（別ターン）どうしの対（訂正の典型形）は
+   * 今までどおり contested になる**——`negation-moved-city`・`schedule-change-deadline`
+   * 等（ADR 0329 の測定ケース）を見ること。
    */
   detectContested?: boolean;
   /**
@@ -357,8 +370,11 @@ export interface ClaimKeyOptions {
    * ある」が、同じ `user/new_hobby_intent` などに寄せられる。`detectContested: true` と組むと、
    * その対は訂正ではないのに contested になり、Issue #832（ADR 0335）以降は回答プロンプトの
    * `[矛盾候補:]` まで届く。語彙ヒントの文言を変えて塞ぐ試みは、どれも訂正の取りこぼしか
-   * 別の誤検出を招いた（ADR 0329 の負債1の追記「否定的結果」、Issue #835）。
-   * 【実測 2026-09-28】`{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`、
+   * 別の誤検出を招いた（ADR 0329 の負債1の追記「否定的結果」、Issue #835）。**この誤検出
+   * （語彙の吸い寄せ、別 observation どうし）は塞いでいない**——語彙ヒントに下限を置く案
+   * （issue #835 のコメント）も、訂正を助けている場面と誤検出の場面を語彙の数で分けられず
+   * 見送った（ADR 0377「効かないもの」）。
+   * 【実測 2026-09-28、修正前】`{ enabled: true, detectContested: true, knownPredicatesFromStore: true }`、
    * 訂正4件と誤検出2件（`unknown-favorite-number`・`other-period-city-this-year`）:
    *
    * | 回し方 | 訂正の contested | 誤検出の contested |
@@ -367,7 +383,14 @@ export interface ClaimKeyOptions {
    * | 実 API（gpt-4o-mini、n=3） | 4/4 ×3 | 2/2 ×3 |
    *
    * 再生の3回目と実 API の2回は、同じ会話の filler どうしの対も余分に contested になった。
-   * 後者の誤検出（時期だけが違う2文）は語彙ヒントより前で起きる（`detectContested` の doc）。
+   * 上の表の誤検出2件のうち、**`other-period-city-this-year`（時期だけが違う2文、同じ
+   * observation）は 2026-09-29 に直った**（`detectContested` の doc、ADR 0377）——
+   * `knownPredicatesFromStore` を経由しない既定の claim key プロンプトの性質で起きていた
+   * ため、この欄（`knownPredicatesFromStore`）自体の変更ではない。**`unknown-favorite-number`
+   * （語彙の吸い寄せ、別 observation）は直っていない**——上の段落のとおり残っている。
+   * 【実測 2026-09-29、修正後】記録の再生（同じ種カセット、seed 1〜3）で、訂正4/4 ×3・
+   * 誤検出は `unknown-favorite-number` の1/2 ×3 のみ（`other-period-city-this-year` は
+   * 0/2 ×3）——ADR 0377 の「陽性対照」節に実測の詳細がある。
    */
   knownPredicatesFromStore?: boolean | { limit?: number };
   /**

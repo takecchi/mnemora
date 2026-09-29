@@ -1548,6 +1548,17 @@ export interface MemoryStore {
    *   だけで、順序に依存する判断をしない。
    * - **LLM を一度も呼ばない。**列の等値比較・範囲比較・索引アクセスだけで完結する
    *   （北極星 問い5）。
+   *
+   * ⚠ **（ADR 0377、Issue #835 候補1）この口自体は `sourceObservationId` で絞らない
+   * ——同じ observation から抽出された兄弟 Memory どうしも、他の契約（鍵・有効期間・
+   * `contentHash`）を満たせば返り値に含めてよい。** 呼び出し側（`Runtime.
+   * detectClaimKeyContested`）が、返り値から「検出中の memory と同じ
+   * `sourceObservationId`」を持つ行を件数を数える前に除く前提で実装されている
+   * （`memory.sourceObservationId` が `null` のときは除かない）。この口の contract に
+   * `LIMIT` は無いので、adapter が独自に結果件数を絞らない限りこの前提は保てる——
+   * ただし interface 自体は adapter が `LIMIT` を付けることを禁じていない（その場合
+   * core 側の除外が効かないことがある）。詳細は ADR 0377 の「店へ押し下げない理由」を
+   * 見ること。
    */
   findActiveByClaimKey?(
     ctx: Ctx,
