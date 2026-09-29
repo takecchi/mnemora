@@ -712,9 +712,11 @@ describe("⚠ 基準値より悪い arm を目立つ節で警告する(門では
     const baseline = baselineFrom(measured);
     baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
     const markdown = buildSummaryMarkdown({ measured, baseline });
-    const lines = markdown.split("\n");
-    const worsenedRow = lines.find((line) => line.includes(measured.arms[1].armLabel));
-    const healthyRow = lines.find((line) => line.includes(measured.arms[2].armLabel));
+    // 表の行だけを見る(先頭が "|" の行)——「基準値より悪い値がある」節の箇条書きにも
+    // armLabel が出るため、それと混同しないようにする。
+    const tableLines = markdown.split("\n").filter((line) => line.startsWith("|"));
+    const worsenedRow = tableLines.find((line) => line.includes(measured.arms[1].armLabel));
+    const healthyRow = tableLines.find((line) => line.includes(measured.arms[2].armLabel));
     expect(worsenedRow).toContain("⚠");
     expect(healthyRow).not.toContain("⚠");
   });

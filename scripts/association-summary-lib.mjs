@@ -65,6 +65,35 @@
  * 別フィールドとして持たせる代わりに、既存の2フィールドの組から導出する。
  */
 
+/**
+ * ⚠ **基準値より悪化した arm を判定する対象指標(ADR 0385)。**
+ *
+ * `label` は Markdown 上の表示名、`field` は `arms[]`(実測・基準値とも共通)の
+ * フィールド名。**この4つはタスク仕様が名指ししたものであり、増減するときは
+ * `WORSENED_TOLERANCE` も合わせて見直すこと。**
+ */
+const WORSENED_METRICS = [
+  { field: "goldReturnedCount", label: "gold" },
+  { field: "hit1Count", label: "hit@1" },
+  { field: "hit10Count", label: "hit@10" },
+  { field: "mrr", label: "MRR" },
+];
+
+/**
+ * ⚠ **悪化と判定する許容幅(0 = 1件でも下回れば警告)。**
+ *
+ * ADR 0385 の実測(CI `ubuntu-latest` で association-probes を5回以上再実行)により
+ * 決めた値をここに置く——**唯一の出所は ADR 0385 であり、値の根拠(揺れの実測結果)は
+ * そちらに書く。**`buildWorsenedArmsSection`/`findWorsenedArms` はこの定数を読むだけで、
+ * 数字の妥当性そのものは判断しない。
+ */
+export const WORSENED_TOLERANCE = {
+  goldReturnedCount: 0,
+  hit1Count: 0,
+  hit10Count: 0,
+  mrr: 0,
+};
+
 /** 現在の仕様(Issue #291)で固定されている arm の本数。 */
 const ARM_COUNT = 4;
 /** 現在の仕様で固定されている delta の本数(いずれも baseline=off との対比)。 */
@@ -627,7 +656,90 @@ function buildWarmupWarningLines(measured) {
   ];
 }
 
-/** 基準値との差分を短い文字列にまとめる(1セル分)。 */
+/**
+ * `arm` が基準値(`baselineArm`)に対して、`WORSENED_METRICS` のどれかで
+ * `WORSENED_TOLERANCE` を超えて悪化しているかを見る。
+ *
+ * @param {Record<string, any>} arm
+ * @param {Record<string, any> | undefined} baselineArm
+ * @returns {{ field: string, label: string, baselineValue: number, measuredValue: number, diff: number }[]}
+ */
+function findWorsenedFields(arm, baselineArm) {
+  if (!baselineArm) {
+    return [];
+  }
+  const worsened = [];
+  for (const { field, label } of WORSENED_METRICS) {
+    const tolerance = WORSENED_TOLERANCE[field] ?? 0;
+    const diff = arm[field] - baselineArm[field];
+    if (diff < -tolerance) {
+      worsened.push({
+        field,
+        label,
+        baselineValue: baselineArm[field],
+        measuredValue: arm[field],
+        diff,
+      });
+    }
+  }
+  return worsened;
+}
+
+/**
+ * 実測の全 arm を基準値と突き合わせ、悪化している arm だけを返す(門ではない——
+ * ここでは検出するだけで、`buildSummaryMarkdown` はこの結果を exit code に反映しない)。
+ *
+ * @param {Record<string, any>} measured
+ * @param {{ arms: Record<string, unknown>[] } | undefined} baseline
+ * @returns {{ arm: Record<string, any>, worsenedFields: ReturnType<typeof findWorsenedFields> }[]}
+ */
+function findWorsenedArms(measured, baseline) {
+  if (!baseline) {
+    return [];
+  }
+  const baselineArms = indexBaselineArms(baseline);
+  const results = [];
+  for (const arm of measured.arms) {
+    const worsenedFields = findWorsenedFields(arm, baselineArms.get(armShortKey(arm)));
+    if (worsenedFields.length > 0) {
+      results.push({ arm, worsenedFields });
+    }
+  }
+  return results;
+}
+
+/**
+ * ⚠ **基準値より悪い arm がある場合だけ、Summary の上のほうに出す節(門ではない)。**
+ * 悪化した arm が無ければ `undefined`(常に同じ節を出すと、読む人が「毎回出るだけの
+ * 定型文」として読み飛ばすようになる——`identifier-probe-summary-lib.mjs` の
+ * 「一致なら1行、違うときだけ展開する」と同じ判断)。
+ *
+ * @param {ReturnType<typeof findWorsenedArms>} worsenedArms
+ */
+function buildWorsenedArmsSection(worsenedArms) {
+  if (worsenedArms.length === 0) {
+    return undefined;
+  }
+  const lines = [
+    "## ⚠ 基準値より悪い値がある（門ではない）",
+    "",
+    "🔴 これは失敗ではない——このベンチは required ではなく(ADR 0158)、相違しても" +
+      " exit code は変えない。下の arm ごとの差を読み、意図した変化かどうかを人が判断すること。",
+    "",
+  ];
+  for (const { arm, worsenedFields } of worsenedArms) {
+    const fieldSummaries = worsenedFields.map(
+      ({ field, label, baselineValue, measuredValue, diff }) => {
+        const diffText = field === "mrr" ? formatSignedMrr(diff) : formatSignedInt(diff);
+        return `${label}: 基準値${baselineValue} → 実測${measuredValue}(${diffText})`;
+      },
+    );
+    lines.push(`- **${arm.armLabel}**: ${fieldSummaries.join(" / ")}`);
+  }
+  return lines.join("\n");
+}
+
+/** 基準値との差分を短い文字列にまとめる(1セル分)。悪化していれば先頭に ⚠ を付ける。 */
 function formatArmBaselineDiff(arm, baselineArm) {
   if (!baselineArm) {
     return "基準値なし";
@@ -636,8 +748,10 @@ function formatArmBaselineDiff(arm, baselineArm) {
   const hit1Diff = arm.hit1Count - baselineArm.hit1Count;
   const hit10Diff = arm.hit10Count - baselineArm.hit10Count;
   const mrrDiff = arm.mrr - baselineArm.mrr;
+  const worsened = findWorsenedFields(arm, baselineArm);
+  const prefix = worsened.length > 0 ? "⚠ " : "";
   return (
-    `gold${formatSignedInt(goldDiff)} / hit1${formatSignedInt(hit1Diff)} / ` +
+    `${prefix}gold${formatSignedInt(goldDiff)} / hit1${formatSignedInt(hit1Diff)} / ` +
     `hit10${formatSignedInt(hit10Diff)} / MRR${formatSignedMrr(mrrDiff)}`
   );
 }
@@ -879,6 +993,14 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   const lines = ["# association-probes（連想枠 / ADR 0151・Issue #291）", ""];
   lines.push(buildConditionsLine(measured));
   lines.push(...buildWarmupWarningLines(measured));
+
+  // ⚠ 基準値より悪い arm があれば、Summary の一番上のほう(arm別まとめの表より前)に
+  // 目立つ節として出す(門ではない——検出するだけで、確定・判断は人に残す)。
+  const worsenedArms = findWorsenedArms(measured, baseline);
+  const worsenedArmsSection = buildWorsenedArmsSection(worsenedArms);
+  if (worsenedArmsSection) {
+    lines.push("", worsenedArmsSection);
+  }
 
   lines.push(
     "",
