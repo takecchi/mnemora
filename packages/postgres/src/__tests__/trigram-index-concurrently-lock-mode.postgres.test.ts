@@ -105,13 +105,13 @@ async function indexState(pool: Pool): Promise<{ valid: boolean; def: string } |
   return rows[0];
 }
 
-/** 走行中の `CREATE INDEX CONCURRENTLY` を実行している自DBの backend の pid が出るまで待つ。 */
+/** 走行中の `CREATE INDEX`（`CONCURRENTLY` 付きか否かは問わず。外した変異でも backend を見つけ、ロックの assertion で落とすため）を実行している自DBの backend の pid が出るまで待つ。 */
 async function waitForConcurrentBuildPid(pool: Pool): Promise<number> {
   for (let i = 0; i < 100; i++) {
     const { rows } = await pool.query<{ pid: number }>(
       `SELECT pid FROM pg_stat_activity
         WHERE datname = current_database() AND pid <> pg_backend_pid()
-          AND btrim(query, E' \n\t') ILIKE 'CREATE INDEX CONCURRENTLY%'
+          AND btrim(query, E' \n\t') ILIKE 'CREATE INDEX%'
           AND state = 'active'`,
     );
     if (rows[0]) return rows[0].pid;
