@@ -18,7 +18,7 @@
 -- 大量に連続する——索引が無いと、削除する行1件ごとに子表の Seq Scan が走り、
 -- 「行数 × 子表の全行数」の費用になる。
 --
--- ## 単一列索引（6本）
+-- ## 単一列索引（8本）
 --
 -- | 索引 | 対象の参照整合性チェック |
 -- |---|---|
@@ -28,6 +28,15 @@
 -- | `idx_memory_labels_memory_id` | `memory_labels.memory_id → memories(id)` |
 -- | `idx_memories_source_observation_id` | `memories.source_observation_id → observations(id)` |
 -- | `idx_memories_superseded_by_id` | `memories.superseded_by_id → memories(id)`（自己参照） |
+-- | `idx_memory_relations_from_memory_id` | `memory_relations.from_memory_id → memories(id)` |
+-- | `idx_memory_relations_to_memory_id` | `memory_relations.to_memory_id → memories(id)` |
+--
+-- `memory_relations`（migration 0026、Issue #207/#933 PR2）の既存の索引
+-- `idx_memory_relations_from`/`_to` は `(tenant_id, from_memory_id, kind)`/
+-- `(tenant_id, to_memory_id, kind)` で `tenant_id` が先頭にあり、上と同じ理由で参照整合性
+-- チェックに使えない。`eraseTenant?` だけでなく、`memories` の行を消すすべての経路で
+-- 1行ごとに `memory_relations` の全行を走査することになるため、ここで足す（クローン miku
+-- の判断、ADR 0383）。
 --
 -- **`memories.contested_with_id`（自己参照 FK）には足さない**——`0004_contested_with_index.sql`
 -- が作った `idx_memories_contested_with (contested_with_id) WHERE contested_with_id IS NOT NULL`
@@ -77,6 +86,12 @@ CREATE INDEX idx_memories_source_observation_id
 
 CREATE INDEX idx_memories_superseded_by_id
   ON memories (superseded_by_id);
+
+CREATE INDEX idx_memory_relations_from_memory_id
+  ON memory_relations (from_memory_id);
+
+CREATE INDEX idx_memory_relations_to_memory_id
+  ON memory_relations (to_memory_id);
 
 -- ## 埋め込み空間テーブルの (memory_id) 索引（既存の空間へ遡って足す）
 --

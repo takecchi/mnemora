@@ -236,9 +236,31 @@ IS NOT NULL)` で解決する（`limit` には数えない）。**
 
   11. **索引（`migrations/0027_erase_tenant_fk_indexes.sql`）**:
 
-      - 単一列索引6本: `memory_events(memory_id)`・`recall_usages(memory_id)`・
+      - 単一列索引8本: `memory_events(memory_id)`・`recall_usages(memory_id)`・
         `recall_usages(recall_id)`・`memory_labels(memory_id)`・
-        `memories(source_observation_id)`・`memories(superseded_by_id)`。
+        `memories(source_observation_id)`・`memories(superseded_by_id)`・
+        `memory_relations(from_memory_id)`・`memory_relations(to_memory_id)`。
+      - **`memory_relations` の2本は、実測の報告の後に足した**（クローン miku の判断、
+        2026-09-30）。`memory_relations`（migration 0026、Issue #207/#933 PR2、
+        ADR 0381）はこの PR の途中で main に入った表で、既存の索引
+        `idx_memory_relations_from`/`_to` は `(tenant_id, from_memory_id, kind)`/
+        `(tenant_id, to_memory_id, kind)` と `tenant_id` が先頭にある——ほかの6本と同じ
+        理由で参照整合性チェックに使えない。`eraseTenant` だけでなく `purge` も
+        `memories` を消すので、索引が無いと `memories` を1行消すたびに
+        `memory_relations` の全行（全テナント分）を走査することになり、この ADR が狙う
+        大きなテナントの削除でそのまま重さになる。
+        **検査がこの索引を使うことの歯**:
+        `erase-tenant-fk-index-used-by-ri-check.postgres.test.ts`。参照整合性チェックは
+        トリガの中の問い合わせで、`EXPLAIN ANALYZE` はその計画を見せない（トリガの時間と
+        回数だけ）。代わりに、`enable_seqscan = off` の専用の接続で `memories` の行を1件
+        消し、`pg_stat_user_indexes.idx_scan` が2本とも増えることを見る
+        （`pg_stat_force_next_flush()` の後に読む）。`enable_seqscan = off` にするのは、
+        テストの表が小さく、そのままではプランナーが全件走査を選ぶため——この歯が縛るのは
+        「検査の問い合わせがこの索引で引ける」ことである。2本を migration から抜く変異で
+        赤になることを確かめた。
+      - `eraseTenant` は `memory_relations` の行も消す（`MemoryStore.eraseTenant?` の
+        中で、`memories` より先に）。`purgeMemory` がこの表に触れない決定（ADR 0381
+        決定10）は変えていない。
       - **`memories(contested_with_id)` には足さない**——既存の部分索引
         `idx_memories_contested_with`（`migrations/0004_contested_with_index.sql`、
         ADR 0062）が同じ役目を果たしていることを `pg_indexes` で確認した
@@ -335,7 +357,7 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
   **手順**: テナント `T` に memories 10万行（うち1%が `superseded_by_id` で他の
   行を指す）・埋め込み8次元の空間・対応する `memory_events`/`recall_usages`/
   `memory_labels` を作り、`EXPLAIN (ANALYZE, BUFFERS)` で子→親の順に削除文を
-  測定した。「索引あり」は本 ADR が追加する6本+埋め込みの `(memory_id)` を
+  測定した。「索引あり」は本 ADR が当初追加した6本+埋め込みの `(memory_id)` を
   セッション内の一時索引として作った状態、「索引なし」はそれらが無い状態。
 
   | 測定                                             | 索引なし                                                                                                                   | 索引あり |
@@ -364,7 +386,7 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
   書き込み（`INSERT`/`UPDATE`/`DELETE`）は索引の構築が終わるまで止まる。
   ADR 0059・ADR 0062（[#1423](https://github.com/takecchi/mnemora/issues/1423)
   で訂正済み）が `memories` への同種の索引について実測した「100万行で約2.1秒」
-  という形が、この6本の索引にも同様に当てはまると見込まれる（この PR 自身では
+  という形が、この8本の索引にも同様に当てはまると見込まれる（この PR 自身では
   100万行規模の再実測はしていない——`docs/migration-v1.md` の運用の注意として
   この形で明記する）。
 
@@ -402,6 +424,7 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
   | M3: `tenant_settings` を消さない                                     | `erase-tenant-reobserve-fresh.postgres.test.ts`         | 赤（`getEventRetention` が `unset` ではなく `unlimited`）                                                                                                                                                                                                                                                                                                          |
   | M4: migration から `idx_memory_events_memory_id` を抜く              | `erase-tenant-fk-indexes.postgres.test.ts`              | 赤                                                                                                                                                                                                                                                                                                                                                                 |
   | M5: 消す間 `memories` 全体を `SHARE ROW EXCLUSIVE` でロックし2秒待つ | `erase-tenant-concurrent-other-tenant.postgres.test.ts` | 赤（別テナントへの INSERT が1秒以内に終わらない）。⚠ 当初の形（閾値5秒・消去が途中かを確かめない）では、この変異で緑のままだった——事前検査の `SELECT` が取る `AccessShareLock` を「消去中」と取り違えていた。`AccessShareLock` より強いロックを持つまで待ち、閾値を1秒にし、INSERT が終わった時点で消去がまだ途中であることを確かめる形に直した（対照は3回とも緑） |
+  | M6: `0027` から `memory_relations` の単一列索引2本を抜く | `erase-tenant-fk-indexes.postgres.test.ts`・`erase-tenant-fk-index-used-by-ri-check.postgres.test.ts` | 2本とも赤（索引が無い／`idx_scan` の行が返らない） |
   | 直す前の実装（`4fbaf2a`）に、決定8の新しい歯だけを持ち込む           | `erase-tenant.postgres.test.ts`（自己参照以外の経路）   | 赤（`blocked_by_foreign_reference` ではなく、`memory_events_memory_id_fkey` の外部キー違反の例外）                                                                                                                                                                                                                                                                 |
 
 - **確かめていないこと**:

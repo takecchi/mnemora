@@ -1777,9 +1777,10 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 **どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
 
 **DB マイグレーション**: 要る——`0027_erase_tenant_fk_indexes.sql`。外部キー検査のための
-単一列の索引6本（`memory_events(memory_id)`・`recall_usages(memory_id)`・
+単一列の索引8本（`memory_events(memory_id)`・`recall_usages(memory_id)`・
 `recall_usages(recall_id)`・`memory_labels(memory_id)`・
-`memories(source_observation_id)`・`memories(superseded_by_id)`）を足し、既存の埋め込み
+`memories(source_observation_id)`・`memories(superseded_by_id)`・
+`memory_relations(from_memory_id)`・`memory_relations(to_memory_id)`）を足し、既存の埋め込み
 空間の表（`memory_embeddings_<space>`）にも `(memory_id)` の索引を遡って足す。
 
 ⚠ **運用の注意——索引を作るあいだ、書き込みが止まる。**この migration の `CREATE INDEX`

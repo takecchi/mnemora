@@ -36,7 +36,7 @@ async function indexExists(
 }
 
 describe("migrations/0027_erase_tenant_fk_indexes.sql が作る索引（Issue #1207 / ADR 0383）", () => {
-  it("単一列索引6本が実在する", async () => {
+  it("単一列索引8本が実在する", async () => {
     const { pool } = await getTestClient();
     const expected: Array<[table: string, index: string]> = [
       ["memory_events", "idx_memory_events_memory_id"],
@@ -45,6 +45,8 @@ describe("migrations/0027_erase_tenant_fk_indexes.sql が作る索引（Issue #1
       ["memory_labels", "idx_memory_labels_memory_id"],
       ["memories", "idx_memories_source_observation_id"],
       ["memories", "idx_memories_superseded_by_id"],
+      ["memory_relations", "idx_memory_relations_from_memory_id"],
+      ["memory_relations", "idx_memory_relations_to_memory_id"],
     ];
     for (const [table, index] of expected) {
       expect({ table, index, exists: await indexExists(pool, table, index) }).toEqual({
