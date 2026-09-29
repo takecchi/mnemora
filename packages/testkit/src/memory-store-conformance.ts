@@ -127,6 +127,40 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsSupersedeWithNewMemories: boolean;
   /**
+   * Issue #1226 / ADR 0375（PR1、#1427。この枝ではまだ main に無い）決定7
+   * （クローン miku の判断）: 対象の `MemoryStore` 実装が `createMemoryWithOutbox`/
+   * `supersedeWithNewMemories?` の `opts.abortIfForgotten`（`SourceMemoryForgottenError`
+   * を投げて書き込みを打ち切る、書き込みと同一トランザクションの `SELECT … FOR UPDATE`
+   * による見直し）を実装しているかどうか。
+   *
+   * ⚠ **`supportsOnlyMemoryIdsFilter`/`supportsLabels` と同じ、任意（省略可）の3状態フラグ
+   * である。`supportsSupersedeWithNewMemories` のように必須にしない**——[ADR 0237](../../../docs/decisions/0237-restore-superseded-dry-run-preview.md)
+   * が「新しい独立した能力のフラグを必須にすると、その能力を知らない既存の呼び出し側の
+   * `describeMemoryStoreConformance(...)` がコンパイルできなくなる」と学んだのと同じ理由
+   * （PR #524 が `supportsPreviewRestoreSupersededBy` を必須にして壊し、PR #526 で
+   * `?` へ戻した前例）。`opts.abortIfForgotten` は `createMemoryWithOutbox`/
+   * `supersedeWithNewMemories?` という**既存の**任意メソッドに足した**新しい**パラメータ
+   * であり、`@mnemora/postgres` 以外の既存 adapter がこれを実装していないことは
+   * 「壊れている」ではない（interface の doc コメント「渡しても無視され、例外は
+   * 投げられない」参照）——**この能力を持たない adapter が大半である前提**で、
+   * 新しく必須フラグを足して壊す判断は採らない。
+   *
+   * - `true`: 契約の歯（`abortIfForgotten` に forgotten な id を含めると
+   *   `SourceMemoryForgottenError` を投げ、`news`/`supersede`・INSERT のどちらも一切
+   *   書かれない、forgotten でない id だけなら今日どおり書き込む、空配列・省略なら
+   *   見直しを一切行わない）を実行する。`supersedeWithNewMemories?` 自体を実装しない
+   *   adapter（`supportsSupersedeWithNewMemories: false`）では、この歯のうち
+   *   `supersedeWithNewMemories` 側だけを自動的に飛ばす。
+   * - `false`: `abortIfForgotten` に forgotten な id を渡しても無視され、今日どおり
+   *   書き込みが行われることを積極的に assert する——`supportsOnlyMemoryIdsFilter: false`
+   *   と同じ「メソッド自体は在るが、この欄は効かない」形。
+   * - **省略（`undefined`）**: この adapter に対してこの歯を検査していない、という
+   *   意思表示。⛔ **黙って何も登録しない、にはしない**——常に green で終わる named
+   *   `it` を1本登録し、テスト名で「検査していない」ことを明示する
+   *   （`supportsOnlyMemoryIdsFilter`/`supportsLabels` と同じ規律）。
+   */
+  supportsAbortIfForgotten?: boolean;
+  /**
    * Issue #210 / ADR 0115: 対象の `MemoryStore` 実装が `purgeExpiredEvents`
    * （任意メソッド）を実装しているかどうか。**必須。**
    *
@@ -381,6 +415,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     prepareRecallId,
     claimEmbedJobs,
     supportsSupersedeWithNewMemories,
+    supportsAbortIfForgotten,
     supportsPurgeExpiredEvents,
     listPurgedEvents,
     supportsArchiveDecayed,
@@ -3907,6 +3942,172 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       it("supersedeWithNewMemories は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
         expect(store.supersedeWithNewMemories).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // opts.abortIfForgotten（Issue #1226、ADR 0375 決定7）。`createMemoryWithOutbox`/
+    // `supersedeWithNewMemories?` という既存の任意メソッドに足した新しいパラメータ——
+    // `supportsAbortIfForgotten` は3状態の任意フラグ（`supportsOnlyMemoryIdsFilter`/
+    // `supportsLabels` と同じ形、doc コメント参照）。
+    // -------------------------------------------------------------------
+
+    if (supportsAbortIfForgotten === true) {
+      it("createMemoryWithOutbox は abortIfForgotten に forgotten な id を含むと SourceMemoryForgottenError を投げ、何も書かない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const forgottenSource = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "abort-if-forgotten-source" }),
+        );
+        await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+
+        await expect(
+          store.createMemoryWithOutbox(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "abort-if-forgotten-new",
+            }),
+            ["embed"],
+            { abortIfForgotten: [forgottenSource.id] },
+          ),
+        ).rejects.toMatchObject({
+          name: "SourceMemoryForgottenError",
+          method: "createMemoryWithOutbox",
+          forgottenIds: [forgottenSource.id],
+        });
+      });
+
+      it("createMemoryWithOutbox は abortIfForgotten の id が forgotten でなければ今日どおり書く", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const activeSource = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "abort-if-forgotten-active" }),
+        );
+
+        const result = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-forgotten-new-2",
+          }),
+          ["embed"],
+          { abortIfForgotten: [activeSource.id] },
+        );
+        expect(result.created).toBe(true);
+      });
+
+      it("createMemoryWithOutbox は abortIfForgotten を省略すると見直しを一切行わない（今日どおり）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const forgottenSource = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "abort-if-forgotten-omit" }),
+        );
+        await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+
+        const result = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-forgotten-omit-new",
+          }),
+          ["embed"],
+        );
+        expect(result.created).toBe(true);
+      });
+
+      if (supportsSupersedeWithNewMemories) {
+        it("supersedeWithNewMemories は opts.abortIfForgotten に forgotten な id を含むと SourceMemoryForgottenError を投げ、news も supersede も一切書かない", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const forgottenSource = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "abort-if-forgotten-supersede-a",
+            }),
+          );
+          await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+          const otherSource = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "abort-if-forgotten-supersede-b",
+            }),
+          );
+
+          await expect(
+            store.supersedeWithNewMemories!(
+              ctx,
+              [
+                {
+                  input: buildNewMemoryFixture({
+                    tenantId: "tenant-1",
+                    contentHash: "abort-if-forgotten-supersede-news",
+                  }),
+                  jobKinds: [],
+                },
+              ],
+              [
+                {
+                  id: forgottenSource.id,
+                  supersededByIndex: 0,
+                  expectedStatus: "active",
+                  event: buildSupersedeEvent(ctx, forgottenSource.id, forgottenSource.digest),
+                },
+                {
+                  id: otherSource.id,
+                  supersededByIndex: 0,
+                  expectedStatus: "active",
+                  event: buildSupersedeEvent(ctx, otherSource.id, otherSource.digest),
+                },
+              ],
+              { abortIfForgotten: [forgottenSource.id, otherSource.id] },
+            ),
+          ).rejects.toMatchObject({
+            name: "SourceMemoryForgottenError",
+            method: "supersedeWithNewMemories",
+            forgottenIds: [forgottenSource.id],
+          });
+
+          // otherSource は superseded へ動いていない——news も一切書かれていない証拠。
+          const stillOther = await store.get(ctx, otherSource.id);
+          expect(stillOther?.status).toBe("active");
+          expect(stillOther?.supersededById).toBeNull();
+        });
+      }
+    } else if (supportsAbortIfForgotten === false) {
+      it("createMemoryWithOutbox は abortIfForgotten を渡しても無視し、forgotten な id があっても今日どおり書く", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const forgottenSource = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-forgotten-ignored",
+          }),
+        );
+        await store.updateStatus(ctx, forgottenSource.id, "forgotten");
+
+        const result = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "abort-if-forgotten-ignored-new",
+          }),
+          ["embed"],
+          { abortIfForgotten: [forgottenSource.id] },
+        );
+        expect(result.created).toBe(true);
+      });
+    } else {
+      // `supportsAbortIfForgotten` を省略した adapter。`it.skip` にしない理由は
+      // `supportsOnlyMemoryIdsFilter`/`supportsLabels` の同じ分岐を参照。
+      it(`⚠ 未検査: supportsAbortIfForgotten が指定されていない — adapter "${name}" に対して opts.abortIfForgotten の歯は検査していない`, () => {
+        expect(supportsAbortIfForgotten).toBeUndefined();
       });
     }
 

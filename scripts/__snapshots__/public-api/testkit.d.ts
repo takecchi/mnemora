@@ -508,6 +508,7 @@ export interface MemoryStoreConformanceOptions {
     listEventsForMemory: (ctx: Ctx, memoryId: MemoryId) => Promise<MemoryEvent[]> | MemoryEvent[];
     claimEmbedJobs: (ctx: Ctx, now: Date) => Promise<OutboxJobRecord[]> | OutboxJobRecord[];
     supportsSupersedeWithNewMemories: boolean;
+    supportsAbortIfForgotten?: boolean;
     supportsPurgeExpiredEvents: boolean;
     listPurgedEvents: (ctx: Ctx) => Promise<MemoryEvent[]> | MemoryEvent[];
     supportsArchiveDecayed: boolean;
