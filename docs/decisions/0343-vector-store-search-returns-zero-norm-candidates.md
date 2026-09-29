@@ -446,3 +446,21 @@ v1.0.1 で作った DB（Postgres adapter を通してデータを投入した�
 mnemora が作った空間のテーブルだけを見分ける台帳は無く、この追記でも足していない。
 外部テーブルは、PostgreSQL の文書上 `table_type = 'FOREIGN'` になるので除かれるはずだが、
 FDW を入れた環境で実測してはいない。
+
+## 追記（2026-09-29）—— ADR 0059/0062 の対象も確かめた
+
+⛔ 上の本文・上の2件の追記は1バイトも書き換えていない。同じ形で追記する。
+
+**クローン miku の委譲先が書いた（オーナーではない）。**
+
+上の2026-09-27追記（「ロックモードの実測は `ShareLock` であり…」）は、「ADR 0059/0062
+（`memories` テーブルの別の索引についての記録）も書き換えていない——それらが対象にした
+索引で実際に何が起きたかは、この追記では再確認していない」と書いていた。[Issue #760]
+(https://github.com/takecchi/mnemora/issues/760) の作業で、この追記の書き手が
+`idx_memories_period_ann_stage`（`0003_period_ann_stage_index.sql`）と
+`idx_memories_contested_with`（`0004_contested_with_index.sql`）について同じ手順で
+実測し直した。**結果はどちらも同じ食い違い（`ShareLock` であり `ACCESS EXCLUSIVE` ではない）
+だった**——詳細・数値は [ADR 0059](./0059-period-in-ann-stage.md) と
+[ADR 0062](./0062-contested-with-id-fk-index.md) それぞれの2026-09-29追記を参照
+（ここには写さない。理由は `AGENTS.md`「⚠ 数を、道具と生成物に焼き込まない」と同じ——
+`main` が動くと変わりうる数値の唯一の出所は、対象の ADR 自身に置く）。
