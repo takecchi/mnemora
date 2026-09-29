@@ -21,6 +21,8 @@ import type {
   ClaimKey,
   Ctx,
   EmbeddingStatus,
+  EraseTenantStoreOptions,
+  EraseTenantStoreResult,
   EventActor,
   LabelSummary,
   Memory,
@@ -3461,6 +3463,265 @@ export class PostgresMemoryStore implements MemoryStore {
     `);
     return rowToLabel(result.rows[0] as unknown as LabelRow);
   }
+
+  /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+   * `MemoryStore.eraseTenant?` の Postgres 実装。契約の全文は `@mnemora/core` の
+   * interface doc（`packages/core/src/interfaces/memory-store.ts`）を見ること。
+   *
+   * ## 検査（`blocked_by_foreign_reference`）
+   *
+   * 削除と**同じトランザクションの先頭で**、他テナントの行がこのテナントの行を外部キーで
+   * 参照していないかを数える（{@link countForeignReferences}）。参照の経路は表名を
+   * 焼き込まず、`pg_constraint` から `current_schema()` の単一列の外部キーのうち、
+   * 参照する側・される側の両方に `tenant_id` 列がある全部を数え上げる——
+   * `memories` の自己参照（`superseded_by_id`/`contested_with_id`）・
+   * `memories.source_observation_id`・`memory_events`/`recall_usages`/`memory_labels`
+   * の参照に加え、**埋め込み空間の表（`memory_embeddings_<space>`、`ON DELETE CASCADE`）
+   * も入る**。CASCADE の表を入れないと、他テナントの埋め込みの行が `memories` の削除に
+   * 巻き込まれて黙って消える（「他テナントの行は書き換えない」に反する）。後から表が
+   * 増えても（例: `memory_relations`）、外部キーを張っていれば自動で入る。
+   *
+   * 1件でもあれば、**1行も消さずに** `{ kind: "blocked_by_foreign_reference", count }`
+   * を返す——`dryRun` でも同じ検査をする。検査と削除の間に他テナントが参照を作って
+   * 外部キー違反（SQLSTATE 23503）になった場合は、トランザクションごとロールバック
+   * されたうえで数え直し、`blocked_by_foreign_reference` を返す（数え直して0件なら、
+   * 他テナント由来ではないので元の例外をそのまま投げる）。
+   *
+   * 数える問い合わせは、参照される側を `tenant_id = $1` で絞り、参照する側を外部キーの
+   * 列で引く——`migrations/0027_erase_tenant_fk_indexes.sql` の単一列索引が効く向きである。
+   *
+   * ## 本体
+   *
+   * `dryRun` の有無に関わらず `db.transaction` で包む——複数の表にまたがる
+   * budget（`opts.limit`）の消費を、1つの一貫したスナップショットの上で数えるため
+   * （`purgeExpiredEventsByRetention` と同じ判断）。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
+    const dryRun = opts.dryRun === true;
+    try {
+      return await this.db.transaction(async (tx) => {
+        const blocked = await countForeignReferences(tx, ctx.tenantId);
+        if (blocked > 0) {
+          return { kind: "blocked_by_foreign_reference", count: blocked };
+        }
+        return this.eraseTenantBody(tx, ctx, opts.limit, dryRun);
+      });
+    } catch (err) {
+      if (sqlStateOf(err) !== PG_FOREIGN_KEY_VIOLATION_SQLSTATE) {
+        throw err;
+      }
+      const count = await countForeignReferences(this.db, ctx.tenantId);
+      if (count === 0) {
+        throw err;
+      }
+      return { kind: "blocked_by_foreign_reference", count };
+    }
+  }
+
+  /**
+   * {@link PostgresMemoryStore.eraseTenant} の本体。表ごとに budget（残りの削除可能数）を
+   * 消費しながら、子→親の順（クラス外の interface doc「契約」の並びと同じ）で処理する。
+   *
+   * `dryRun` のときは `DELETE`/`UPDATE` を一切発行せず、`SELECT count(*)` で
+   * 「削除していたら消えていたであろう件数」だけを数える——自己参照の `NULL` 化
+   * （`memories` の手前）も dryRun では行わない（カウントには影響しないため）。
+   *
+   * `reachedLimit` は「ある表でちょうど budget 分だけ削除/カウントできた」ときに
+   * `true` にする保守的な近似——実際にはその表にもう行が残っていなくても `true` に
+   * なることがある。呼び直しても安全（次の呼び出しは0件で通過するだけ）。
+   */
+  private async eraseTenantBody(
+    tx: Db,
+    ctx: Ctx,
+    limit: number,
+    dryRun: boolean,
+  ): Promise<EraseTenantStoreResult> {
+    let remaining = limit;
+    let total = 0;
+    let reachedLimit = false;
+
+    // 単一列 PK（id）の表向けの汎用ステップ。`table` はこの関数の呼び出し元がすべて
+    // ハードコードした文字列リテラルであり、利用者入力ではない——`sql.identifier` は
+    // ここでは「同じ形の文を表ごとに書き写さない」ための道具として使うだけである。
+    const drainById = async (table: string, budget: number): Promise<number> => {
+      if (dryRun) {
+        const result = await tx.execute(sql`
+          SELECT count(*)::int AS count FROM (
+            SELECT 1 FROM ${sql.identifier(table)} WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
+          ) s
+        `);
+        return (result.rows[0] as unknown as { count: number }).count;
+      }
+      const result = await tx.execute(sql`
+        WITH victims AS (
+          SELECT id FROM ${sql.identifier(table)} WHERE tenant_id = ${ctx.tenantId} LIMIT ${budget}
+        )
+        DELETE FROM ${sql.identifier(table)} AS t
+        USING victims v
+        WHERE t.tenant_id = ${ctx.tenantId} AND t.id = v.id
+        RETURNING t.id
+      `);
+      return result.rows.length;
+    };
+
+    const runStep = async (step: () => Promise<number>): Promise<void> => {
+      if (remaining <= 0) {
+        reachedLimit = true;
+        return;
+      }
+      const budgetBeforeStep = remaining;
+      const deleted = await step();
+      total += deleted;
+      remaining -= deleted;
+      if (deleted === budgetBeforeStep && deleted > 0) {
+        reachedLimit = true;
+      }
+    };
+
+    // 1. memory_labels（memories・labels 両方の子。先に消す）
+    await runStep(() =>
+      dryRun
+        ? tx
+            .execute(
+              sql`
+              SELECT count(*)::int AS count FROM (
+                SELECT 1 FROM memory_labels WHERE tenant_id = ${ctx.tenantId} LIMIT ${remaining}
+              ) s
+            `,
+            )
+            .then((r) => (r.rows[0] as unknown as { count: number }).count)
+        : tx
+            .execute(
+              sql`
+              WITH victims AS (
+                SELECT memory_id, label_id FROM memory_labels
+                WHERE tenant_id = ${ctx.tenantId} LIMIT ${remaining}
+              )
+              DELETE FROM memory_labels ml
+              USING victims v
+              WHERE ml.tenant_id = ${ctx.tenantId}
+                AND ml.memory_id = v.memory_id AND ml.label_id = v.label_id
+              RETURNING ml.memory_id
+            `,
+            )
+            .then((r) => r.rows.length),
+    );
+
+    // 2. recall_usages（recalls・memories 両方の子）
+    await runStep(() =>
+      dryRun
+        ? tx
+            .execute(
+              sql`
+              SELECT count(*)::int AS count FROM (
+                SELECT 1 FROM recall_usages WHERE tenant_id = ${ctx.tenantId} LIMIT ${remaining}
+              ) s
+            `,
+            )
+            .then((r) => (r.rows[0] as unknown as { count: number }).count)
+        : tx
+            .execute(
+              sql`
+              WITH victims AS (
+                SELECT recall_id, memory_id FROM recall_usages
+                WHERE tenant_id = ${ctx.tenantId} LIMIT ${remaining}
+              )
+              DELETE FROM recall_usages ru
+              USING victims v
+              WHERE ru.tenant_id = ${ctx.tenantId}
+                AND ru.recall_id = v.recall_id AND ru.memory_id = v.memory_id
+              RETURNING ru.recall_id
+            `,
+            )
+            .then((r) => r.rows.length),
+    );
+
+    // 3. memory_events（memories の子）
+    await runStep(() => drainById("memory_events", remaining));
+
+    // 3b. memory_relations（memories の子——`from_memory_id`/`to_memory_id` の両方が
+    // `memories(id)` を参照する。Issue #207/#933 PR2、migration 0026）。`purgeMemory` は
+    // この表に触れない（ADR 0381 決定10）が、テナントを丸ごと消すときは消す（ADR 0383）。
+    await runStep(() => drainById("memory_relations", remaining));
+
+    // 4. memories——削除の前に、このテナントの自己参照（superseded_by_id/contested_with_id）
+    // を丸ごと NULL 化する。理由: `limit` で区切ったバッチをまたいで自己参照が残っていると
+    // （このバッチで消す行を、まだ消していない別バッチの行が指している場合）、
+    // `memories(id)` への FK（`ON DELETE` 指定なし＝既定の `NO ACTION`）が違反になる
+    // （`MemoryStore.eraseTenant` interface doc の契約節を参照。CHECK 制約との整合は
+    // `migrations/0001_init.sql` を読んで確認済み——`superseded_by_id`/`contested_with_id`
+    // を含む CHECK は無い）。budget には数えない（削除ではないため）。dryRun では行わない
+    // （カウントに影響しない）。
+    await runStep(async () => {
+      if (!dryRun) {
+        await tx.execute(sql`
+          UPDATE memories
+          SET superseded_by_id = NULL, contested_with_id = NULL
+          WHERE tenant_id = ${ctx.tenantId}
+            AND (superseded_by_id IS NOT NULL OR contested_with_id IS NOT NULL)
+        `);
+      }
+      return drainById("memories", remaining);
+    });
+
+    // 5. observations（memories の親——source_observation_id の参照元である memories 行が
+    // このテナントに1件でも残っていると、その行を消せば FK 違反になる。上のステップで
+    // このテナントの memories が budget 不足で残っていれば、このステップの budget は
+    // 既に0になっているため、`runStep` の冒頭チェックで何もしない）。
+    await runStep(() => drainById("observations", remaining));
+
+    // 6. recalls（recall_usages は既にステップ2で消えている）
+    await runStep(() => drainById("recalls", remaining));
+
+    // 7. labels（memory_labels は既にステップ1で消えている）
+    await runStep(() => drainById("labels", remaining));
+
+    // 8. tenant_activity（tenant_id が PK。高々1行）
+    await runStep(() =>
+      dryRun
+        ? tx
+            .execute(
+              sql`SELECT count(*)::int AS count FROM tenant_activity WHERE tenant_id = ${ctx.tenantId}`,
+            )
+            .then((r) => (r.rows[0] as unknown as { count: number }).count)
+        : tx
+            .execute(
+              sql`DELETE FROM tenant_activity WHERE tenant_id = ${ctx.tenantId} RETURNING tenant_id`,
+            )
+            .then((r) => r.rows.length),
+    );
+
+    // 9. tenant_subject_activity（(tenant_id, subject_id) が PK。テナントあたり複数行ありうる）
+    await runStep(() =>
+      dryRun
+        ? tx
+            .execute(
+              sql`
+              SELECT count(*)::int AS count FROM (
+                SELECT 1 FROM tenant_subject_activity WHERE tenant_id = ${ctx.tenantId} LIMIT ${remaining}
+              ) s
+            `,
+            )
+            .then((r) => (r.rows[0] as unknown as { count: number }).count)
+        : tx
+            .execute(
+              sql`
+              WITH victims AS (
+                SELECT subject_id FROM tenant_subject_activity
+                WHERE tenant_id = ${ctx.tenantId} LIMIT ${remaining}
+              )
+              DELETE FROM tenant_subject_activity t
+              USING victims v
+              WHERE t.tenant_id = ${ctx.tenantId} AND t.subject_id = v.subject_id
+              RETURNING t.subject_id
+            `,
+            )
+            .then((r) => r.rows.length),
+    );
+
+    return { kind: "executed", deleted: total, reachedLimit };
+  }
 }
 
 /**
@@ -3648,4 +3909,76 @@ export function buildPurgeExpiredEventsTargetSelect(
       AND kind <> 'events_purged'
     ORDER BY at ASC
     LIMIT ${opts.limit + 1}`;
+}
+
+/** 外部キー違反の SQLSTATE（`eraseTenant` が他テナントからの参照を見分けるのに使う）。 */
+const PG_FOREIGN_KEY_VIOLATION_SQLSTATE = "23503";
+
+/**
+ * 例外から SQLSTATE を取り出す。drizzle は pg のエラーを `cause` に包むことがあるため、
+ * `cause` を辿る（`__tests__/foreign-key-violation.postgres.test.ts` の `sqlStateOf` と同じ形）。
+ */
+function sqlStateOf(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 8 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") {
+      return code;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/**
+ * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+ * 他テナントの行が、テナント `tenantId` の行を外部キーで参照している件数を数える。
+ *
+ * 経路は `pg_constraint` から数え上げる（表名を焼き込まない）: `current_schema()` の中の
+ * 単一列の外部キーで、参照する側・される側の両方に `tenant_id` 列があるもの全部。
+ * 複数列の外部キー（`tenant_id` を含めればテナントを跨げない）と、`tenant_id` を持たない
+ * 表からの参照は対象外（ADR 0383）。
+ */
+async function countForeignReferences(tx: Db, tenantId: string): Promise<number> {
+  const paths = await tx.execute(sql`
+    SELECT child.relname AS child_table, ca.attname AS child_column,
+           parent.relname AS parent_table, pa.attname AS parent_column
+    FROM pg_constraint con
+    JOIN pg_class child ON child.oid = con.conrelid
+    JOIN pg_class parent ON parent.oid = con.confrelid
+    JOIN pg_namespace n ON n.oid = child.relnamespace
+    JOIN pg_attribute ca ON ca.attrelid = con.conrelid AND ca.attnum = con.conkey[1]
+    JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = con.confkey[1]
+    WHERE con.contype = 'f'
+      AND n.nspname = current_schema()
+      AND parent.relnamespace = child.relnamespace
+      AND array_length(con.conkey, 1) = 1
+      AND EXISTS (
+        SELECT 1 FROM pg_attribute t
+        WHERE t.attrelid = child.oid AND t.attname = 'tenant_id' AND NOT t.attisdropped
+      )
+      AND EXISTS (
+        SELECT 1 FROM pg_attribute t
+        WHERE t.attrelid = parent.oid AND t.attname = 'tenant_id' AND NOT t.attisdropped
+      )
+    ORDER BY child.relname, ca.attname
+  `);
+  let total = 0;
+  for (const row of paths.rows) {
+    const p = row as unknown as {
+      child_table: string;
+      child_column: string;
+      parent_table: string;
+      parent_column: string;
+    };
+    const result = await tx.execute(sql`
+      SELECT count(*)::int AS count
+      FROM ${sql.identifier(p.parent_table)} AS mine
+      JOIN ${sql.identifier(p.child_table)} AS other
+        ON other.${sql.identifier(p.child_column)} = mine.${sql.identifier(p.parent_column)}
+      WHERE mine.tenant_id = ${tenantId} AND other.tenant_id <> ${tenantId}
+    `);
+    total += (result.rows[0] as unknown as { count: number }).count;
+  }
+  return total;
 }

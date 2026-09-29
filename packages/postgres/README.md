@@ -339,7 +339,7 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `tenant_settings`
 - `tenant_subject_activity`
 
-### 索引（27）
+### 索引（35）
 
 - `idx_labels_by_status`
 - `idx_memories_attributes`
@@ -354,17 +354,25 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `idx_memories_recall_gate`
 - `idx_memories_recall_gate_seq`
 - `idx_memories_requeue_embed`
+- `idx_memories_source_observation_id`
 - `idx_memories_superseded_by`
+- `idx_memories_superseded_by_id`
 - `idx_memories_tags`
 - `idx_memory_events_by_kind`
 - `idx_memory_events_by_memory`
 - `idx_memory_events_by_retention`
+- `idx_memory_events_memory_id`
 - `idx_memory_labels_by_label`
+- `idx_memory_labels_memory_id`
 - `idx_memory_relations_from`
+- `idx_memory_relations_from_memory_id`
 - `idx_memory_relations_to`
+- `idx_memory_relations_to_memory_id`
 - `idx_observations_by_subject`
 - `idx_outbox_claimable`
 - `idx_outbox_pending`
+- `idx_recall_usages_memory_id`
+- `idx_recall_usages_recall_id`
 - `idx_recalls_by_subject`
 - `uq_memories_extraction`
 - `uq_observations_external_id`
@@ -427,6 +435,11 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 - テーブル: `memory_embeddings_<space>`
 - 索引（HNSW）: `idx_memory_embeddings_hnsw_<space>`
 - 索引（ゼロベクトル用の部分索引、Issue #956 / ADR 0343）: `idx_memory_embeddings_zero_norm_<space>`
+- 索引（`(memory_id)` 単一列、Issue #1207 / ADR 0383）: `idx_memory_embeddings_memory_id_<space>`
+  ——`memories` の行を削除するたびに走る参照整合性チェックのための索引。既存の空間には
+  `migrations/0027_erase_tenant_fk_indexes.sql` の `DO` ブロックが遡って作る（上の
+  「索引」の見出しの数には含めない——動的な `EXECUTE format(...)` で作るため、この README を
+  生成する道具が静的な `CREATE INDEX` としては数えない。[ADR 0202](../../docs/decisions/0202-postgres-shared-db-object-names.md) と同じ扱い）。
 
 `<space>` は `provider` / `model` / `dimensions` を小文字化・非英数字を `_` に置換して
 連結したスラグ（例: `openai_text_embedding_3_small_1536`）。**PostgreSQL の識別子は

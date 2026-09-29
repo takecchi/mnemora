@@ -1,5 +1,6 @@
 import type { Ctx } from "../ctx.js";
 import type { OutboxJobRecord } from "../outbox.js";
+import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 import type { OutboxJobKind } from "./scheduler.js";
 
 /**
@@ -215,4 +216,26 @@ export interface OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date },
   ): Promise<void>;
+  /**
+   * `ctx.tenantId` に属する `outbox` の行を跡形なく消す
+   * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
+   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ4つの口の1つ
+   * （`MemoryStore.eraseTenant?`/`VectorStore.eraseTenant?`/`TenantSettingsStore.eraseTenant?`
+   * と同じ形）。
+   *
+   * 🔴 **任意メソッドである。**理由は `VectorStore.eraseTenant?` と同じ
+   * （`MemoryStore.eraseTenant` の doc コメント参照）——テナント消去はまれな操作であり、
+   * 対応していない adapter は `eraseTenant`（独立関数）の `{ kind: "store_unsupported" }`
+   * で名指しされる。
+   *
+   * **契約**:
+   * - 完了・失敗・未処理を問わず、`ctx.tenantId` の行を `opts.limit` を目安に削除する
+   *   （Issue #1207 の実測が指摘した「完了した行がいつまで残るかは決まっていない」への、
+   *   テナント消去の場面に限った回答——保持方針そのものは決めていない）。
+   * - `opts.dryRun === true` のときは削除を一切行わず、削除していたら消えていたであろう
+   *   件数だけを返す。
+   * - `result.reachedLimit === true` なら、呼び出し側は同じ `opts` で呼び直すこと。
+   *   何度呼んでも安全。
+   */
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }

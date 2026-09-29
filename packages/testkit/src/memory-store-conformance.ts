@@ -417,6 +417,21 @@ export interface MemoryStoreConformanceOptions {
    */
   supportsResolveOrphanedContested?: boolean;
   /**
+   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md): 対象の
+   * `MemoryStore` 実装が `eraseTenant`（任意メソッド）を実装しているかどうか。**必須。**
+   *
+   * `supportsArchiveDecayed`/`supportsPurgeMemory`/`supportsMarkContestedPair`/
+   * `supportsResolveContestedPair`/`supportsRestoreSupersededBy`/
+   * `supportsPreviewRestoreSupersededBy` と同じ判断——省略可にしない。`true` なら契約の歯
+   * （このテナントに属する行（memories/observations/recalls 等）を跡形なく消す、他テナント
+   * は無傷のまま残る、`limit`/`reachedLimit`（保守的な近似）・呼び直せば最終的に全部消える、
+   * `dryRun` で1行も変わらない、消去後に同じ tenantId を再利用して新規に作り直せる——以前の
+   * データの痕跡（冪等キーの衝突等）が残らない）を実行する。`false` なら
+   * `expect(store.eraseTenant).toBeUndefined()` を積極的に assert する——`it.skip` には
+   * しない。
+   */
+  supportsEraseTenant: boolean;
+  /**
    * Issue #207/#933 PR2（ADR 0381）: 対象の `MemoryStore` 実装が `markContestedGroup`
    * （任意メソッド）を実装しているかどうか。**任意**（省略可、
    * `supportsResolveOrphanedContested` と同じ3状態）。
@@ -507,6 +522,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsFindContestedByClaimKey,
     supportsListActiveClaimPredicates,
     supportsResolveOrphanedContested,
+    supportsEraseTenant,
     supportsMarkContestedGroup,
     supportsResolveContestedGroup,
     countScopeAggregateQueries,
@@ -11198,6 +11214,221 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` の同じ分岐を参照。
       it(`⚠ 未検査: supportsLabels が指定されていない — adapter "${name}" に対して listLabels/registerLabel の歯は検査していない`, () => {
         expect(supportsLabels).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // eraseTenant（Issue #1207 / ADR 0383: テナント消去、任意メソッド）
+    // -------------------------------------------------------------------
+
+    if (supportsEraseTenant) {
+      it("eraseTenant はテナントの行（memories/observations/recalls）を跡形なく消し、他テナントは無傷のまま残す", async () => {
+        const store = await createStore();
+        const ctxA: Ctx = { tenantId: "erase-tenant-a" };
+        const ctxB: Ctx = { tenantId: "erase-tenant-b" };
+
+        const seed = async (ctx: Ctx) => {
+          const obs1 = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId }),
+          );
+          const obs2 = await store.createObservation(
+            ctx,
+            buildNewObservationFixture({ tenantId: ctx.tenantId }),
+          );
+          const mem1 = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              sourceObservationId: obs1.id,
+              extractorVersion: "v1",
+              contentHash: `erase-tenant-${ctx.tenantId}-1`,
+            }),
+          );
+          const mem2 = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              sourceObservationId: obs2.id,
+              extractorVersion: "v1",
+              contentHash: `erase-tenant-${ctx.tenantId}-2`,
+            }),
+          );
+          const recallId = await store.createRecall(ctx, {
+            tenantId: ctx.tenantId,
+            subjectId: null,
+            query: { text: "hello" },
+            budget: null,
+            omitted: [],
+            usage: {
+              chars: 0,
+              estimatedTokens: 0,
+              counter: "heuristic",
+              byTier: { full: 0, digest: 0, index: 0 },
+              indexChars: 0,
+            },
+            indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+            explain: { stages: [] },
+            returnedMemories: [],
+          });
+          return { obs1, obs2, mem1, mem2, recallId };
+        };
+
+        const a = await seed(ctxA);
+        const b = await seed(ctxB);
+
+        const result = await store.eraseTenant!(ctxA, { limit: 1000 });
+        expect(result.kind).toBe("executed");
+        if (result.kind !== "executed") {
+          throw new Error("unreachable: this test has no cross-tenant reference to block on");
+        }
+        expect(result.deleted).toBeGreaterThan(0);
+        expect(result.reachedLimit).toBe(false);
+
+        // tenant-a: 消えている。
+        expect(await store.get(ctxA, a.mem1.id)).toBeNull();
+        expect(await store.get(ctxA, a.mem2.id)).toBeNull();
+        expect(await store.getObservation(ctxA, a.obs1.id)).toBeNull();
+        expect(await store.getObservation(ctxA, a.obs2.id)).toBeNull();
+        expect(await store.getRecall(ctxA, a.recallId)).toBeNull();
+
+        // tenant-b: 無傷のまま残る。
+        expect((await store.get(ctxB, b.mem1.id))?.id).toBe(b.mem1.id);
+        expect((await store.get(ctxB, b.mem2.id))?.id).toBe(b.mem2.id);
+        expect((await store.getObservation(ctxB, b.obs1.id))?.id).toBe(b.obs1.id);
+        expect((await store.getObservation(ctxB, b.obs2.id))?.id).toBe(b.obs2.id);
+        expect((await store.getRecall(ctxB, b.recallId))?.tenantId).toBe(ctxB.tenantId);
+      });
+
+      it("eraseTenant は limit に達すると reachedLimit: true を返し、同じ opts で呼び直すと最終的に全部消える", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-limit" };
+        const memoryIds: MemoryId[] = [];
+        for (let i = 0; i < 5; i++) {
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: ctx.tenantId,
+              contentHash: `erase-tenant-limit-${i}`,
+            }),
+          );
+          memoryIds.push(memory.id);
+        }
+
+        const opts = { limit: 2 };
+        let result = await store.eraseTenant!(ctx, opts);
+        if (result.kind !== "executed") {
+          throw new Error("unreachable: this test has no cross-tenant reference to block on");
+        }
+        expect(result.reachedLimit).toBe(true);
+
+        let guard = 0;
+        while (result.reachedLimit) {
+          if (++guard > 20) {
+            throw new Error(
+              "eraseTenant did not converge after 20 retries — possible infinite loop",
+            );
+          }
+          result = await store.eraseTenant!(ctx, opts);
+          if (result.kind !== "executed") {
+            throw new Error("unreachable: this test has no cross-tenant reference to block on");
+          }
+        }
+
+        for (const id of memoryIds) {
+          expect(await store.get(ctx, id)).toBeNull();
+        }
+      });
+
+      it("eraseTenant は dryRun: true のとき、削除件数を返すが実際には何も消さない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-dry-run" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: ctx.tenantId, contentHash: "erase-tenant-dry-run-1" }),
+        );
+
+        const result = await store.eraseTenant!(ctx, { limit: 1000, dryRun: true });
+        if (result.kind !== "executed") {
+          throw new Error("unreachable: this test has no cross-tenant reference to block on");
+        }
+        expect(result.deleted).toBeGreaterThan(0);
+
+        const after = await store.get(ctx, memory.id);
+        expect(after?.id).toBe(memory.id);
+      });
+
+      it("eraseTenant で消去した後、同じ tenantId を再利用して createObservation/createMemory を新規に作り直せる（以前の冪等キーとの衝突が残らない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "erase-tenant-reuse" };
+
+        const before = await store.createObservationWithOutbox(
+          ctx,
+          buildNewObservationFixture({
+            tenantId: ctx.tenantId,
+            externalId: "erase-tenant-reuse-ext",
+          }),
+          [],
+        );
+        expect(before.created).toBe(true);
+        // 前提の確認: 消去前は同じ externalId で呼ぶと冪等に既存行を返す。
+        const beforeAgain = await store.createObservationWithOutbox(
+          ctx,
+          buildNewObservationFixture({
+            tenantId: ctx.tenantId,
+            externalId: "erase-tenant-reuse-ext",
+          }),
+          [],
+        );
+        expect(beforeAgain.created).toBe(false);
+        expect(beforeAgain.observation.id).toBe(before.observation.id);
+
+        const beforeMemory = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            sourceObservationId: before.observation.id,
+            extractorVersion: "v1",
+            contentHash: "erase-tenant-reuse-hash",
+          }),
+          [],
+        );
+        expect(beforeMemory.created).toBe(true);
+
+        const result = await store.eraseTenant!(ctx, { limit: 1000 });
+        expect(result.kind).toBe("executed");
+
+        // 消去後、同じ externalId・同じ contentHash で作り直すと、以前の行の痕跡なく
+        // 新規に作られる（`created: true`・以前とは違う id）。
+        const after = await store.createObservationWithOutbox(
+          ctx,
+          buildNewObservationFixture({
+            tenantId: ctx.tenantId,
+            externalId: "erase-tenant-reuse-ext",
+          }),
+          [],
+        );
+        expect(after.created).toBe(true);
+        expect(after.observation.id).not.toBe(before.observation.id);
+
+        const afterMemory = await store.createMemoryWithOutbox(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: ctx.tenantId,
+            sourceObservationId: after.observation.id,
+            extractorVersion: "v1",
+            contentHash: "erase-tenant-reuse-hash",
+          }),
+          [],
+        );
+        expect(afterMemory.created).toBe(true);
+        expect(afterMemory.memory.id).not.toBe(beforeMemory.memory.id);
+        expect(await store.get(ctx, beforeMemory.memory.id)).toBeNull();
+      });
+    } else {
+      it("eraseTenant は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.eraseTenant).toBeUndefined();
       });
     }
   });

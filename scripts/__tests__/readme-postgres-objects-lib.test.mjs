@@ -142,7 +142,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル12・索引27・関数6になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル12・索引35・関数6になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -167,10 +167,13 @@ describe("deriveMigrationObjects", () => {
     // Issue #207/#933 / ADR 0381: migrations/0026_memory_relations.sql が
     // `memory_relations`（テーブル+1）と `idx_memory_relations_from`/`idx_memory_relations_to`
     // （索引+2）を足した。11→12・24→26 も同様に反映であり、回帰ではない。
+    // Issue #1207 / ADR 0383: migrations/0027_erase_tenant_fk_indexes.sql が外部キー検査用の
+    // 単一列索引8本（`idx_memory_events_memory_id` 等。`memory_relations` の2本を含む）を足した。26→34 も同様に反映であり、
+    // 回帰ではない（埋め込み空間の表の `(memory_id)` 索引は `DO` ブロックの動的 SQL で、数に入らない）。
     expect(result.tables).toHaveLength(12);
     // ADR 0384 / PR #1455: migrations/0028_digest_band_index.sql が `idx_memories_digest_band`
-    // （索引+1）を足した。26→27 も同様に反映であり、回帰ではない。
-    expect(result.indexes).toHaveLength(27);
+    // （索引+1）を足した。34→35 も同様に反映であり、回帰ではない。
+    expect(result.indexes).toHaveLength(35);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

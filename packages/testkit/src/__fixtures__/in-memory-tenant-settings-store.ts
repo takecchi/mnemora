@@ -13,6 +13,8 @@ import {
 import type {
   Ctx,
   DecayClock,
+  EraseTenantResult,
+  EraseTenantStoreOptions,
   EventRetention,
   EventRetentionSetting,
   TaxonomyMode,
@@ -316,5 +318,18 @@ export class InMemoryTenantSettingsStore implements TenantSettingsStore {
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
     assertValidTaxonomyMode(mode);
     this.ensureRow(ctx.tenantId).taxonomyMode = mode;
+  }
+
+  /**
+   * Issue #1207 / ADR 0383: `rows`/`eventRetentionDays` の該当テナントの行を消す。
+   * 高々1行なので `reachedLimit` は常に `false`（interface doc 参照）。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const existed = this.rows.has(ctx.tenantId) || this.eventRetentionDays.has(ctx.tenantId);
+    if (!opts.dryRun) {
+      this.rows.delete(ctx.tenantId);
+      this.eventRetentionDays.delete(ctx.tenantId);
+    }
+    return { deleted: existed ? 1 : 0, reachedLimit: false };
   }
 }

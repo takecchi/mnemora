@@ -2,6 +2,8 @@ import {
   OutboxLeaseConflictError,
   type ClaimOutboxJobsOptions,
   type Ctx,
+  type EraseTenantResult,
+  type EraseTenantStoreOptions,
   type OutboxJobRecord,
   type OutboxStore,
 } from "@mnemora/core";
@@ -159,5 +161,31 @@ export class InMemoryOutboxStore implements OutboxStore {
     // Issue #1237: 省略時は壁時計。⚠ `availableAt` の再計算はしない（interface の doc 参照）。
     job.failedAt = opts?.at ?? new Date();
     job.lastError = error;
+  }
+
+  /**
+   * Issue #1207 / ADR 0383: このテナントの `jobs`（完了・失敗・未処理を問わず）を、
+   * `opts.limit` を目安に消す。`this.jobs` は `InMemoryMemoryStore` と共有される配列
+   * （クラス冒頭の doc コメント参照）なので、`splice` でその場から取り除く
+   * （新しい配列に差し替えると共有が壊れる）。
+   *
+   * `reachedLimit` は「削除した件数が `opts.limit` ちょうどだったか」だけで決める
+   * （interface doc の「保守的な近似」）——ちょうど使い切った場合、実際にはもう
+   * 残っていなくても `true` を返すことがある。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const matchingIndexes: number[] = [];
+    for (let i = 0; i < this.jobs.length && matchingIndexes.length < opts.limit; i++) {
+      if (this.jobs[i]!.tenantId === ctx.tenantId) {
+        matchingIndexes.push(i);
+      }
+    }
+    if (!opts.dryRun) {
+      // 後ろから splice する——前から取り除くと、後続のインデックスがずれる。
+      for (let i = matchingIndexes.length - 1; i >= 0; i--) {
+        this.jobs.splice(matchingIndexes[i]!, 1);
+      }
+    }
+    return { deleted: matchingIndexes.length, reachedLimit: matchingIndexes.length === opts.limit };
   }
 }

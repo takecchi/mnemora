@@ -429,6 +429,26 @@ const recalled = await runtime.recall(ctx, { text: "..." })
 - `OutboxStore conformance` — 「クロステナントの claimBatch は他テナントの未処理ジョブを返さない」
 - `EventStore conformance` — 「クロステナントの list は他テナントのイベントを含まない」
 
+### テナントを丸ごと消す（`eraseTenant`）
+
+利用者に「このテナントを消してほしい」と求められたら、**`eraseTenant(ctx, deps, opts)`**
+（`@mnemora/core` の独立関数。`Runtime` のメソッドではない）を運用側から明示的に呼ぶ。
+`tick()`/`observe()` からは呼ばれない。
+
+- `deps` は `memoryStore` / `vectorStore` / `outboxStore` / `tenantSettingsStore`。
+  4つの port の任意メソッド `eraseTenant?` を使い、**1つでも無ければ何も消さずに
+  `store_unsupported`（どの port かを名指し）を返す。**
+- `opts` は `{ confirmTenantId, limit, dryRun? }`。`confirmTenantId` は `ctx.tenantId` と
+  一致しなければならない（取り違え防止）。戻り値の `reachedLimit` が `true` の間は呼び直す。
+- 他テナントの行がこのテナントの行を参照していたら、**1行も消さずに
+  `blocked_by_foreign_reference` を返す**（他テナントの行は書き換えない）。
+- 消去の記録は DB に残さない。消した後に同じ `tenantId` で `observe()` すると、新しい
+  テナントとして一から始まる。
+
+`forget()` → `purge()`（1件ずつの記憶の消去）との違いと、それぞれの後に何が残るかは
+[docs/memory-model.md](./docs/memory-model.md) §9、決めたことは
+[ADR 0383](./docs/decisions/0383-erase-tenant.md) にある。
+
 ### ⚠ mnemora が保証していないこと
 
 **`tenantId` は呼び出し側が渡す不透明な文字列である。mnemora はテナントの台帳を持たず、

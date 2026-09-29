@@ -201,6 +201,43 @@ export declare const EmbeddingSpaceIdSchema: z.ZodObject<{
     dimensions: z.ZodNumber;
 }, z.core.$strip>;
 
+// ===== dist/erase-tenant.d.ts =====
+import type { Ctx } from "./ctx.js";
+import type { MemoryStore } from "./interfaces/memory-store.js";
+import type { OutboxStore } from "./interfaces/outbox-store.js";
+import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js";
+import type { VectorStore } from "./interfaces/vector-store.js";
+export type EraseTenantMissingStore = "memoryStore" | "vectorStore" | "outboxStore" | "tenantSettingsStore";
+export type EraseTenantOutcome = {
+    kind: "store_unsupported";
+    missing: EraseTenantMissingStore[];
+} | {
+    kind: "blocked_by_foreign_reference";
+    count: number;
+} | {
+    kind: "executed";
+    dryRun: boolean;
+    deleted: {
+        memoryStore: number;
+        vectorStore: number;
+        outboxStore: number;
+        tenantSettingsStore: number;
+    };
+    reachedLimit: boolean;
+};
+export interface EraseTenantOptions {
+    confirmTenantId: string;
+    limit: number;
+    dryRun?: boolean;
+}
+export interface EraseTenantDeps {
+    memoryStore: MemoryStore;
+    vectorStore: VectorStore;
+    outboxStore: OutboxStore;
+    tenantSettingsStore: TenantSettingsStore;
+}
+export declare function eraseTenant(ctx: Ctx, deps: EraseTenantDeps, opts: EraseTenantOptions): Promise<EraseTenantOutcome>;
+
 // ===== dist/event-retention-purge.d.ts =====
 import type { Ctx } from "./ctx.js";
 import type { MemoryStore, PurgeExpiredEventsResult } from "./interfaces/memory-store.js";
@@ -247,8 +284,8 @@ export interface EventActor {
 }
 export declare const EventActorSchema: z.ZodObject<{
     type: z.ZodEnum<{
-        human: "human";
         system: "system";
+        human: "human";
         clone: "clone";
     }>;
     id: z.ZodOptional<z.ZodString>;
@@ -282,8 +319,8 @@ export declare const MemoryEventSchema: z.ZodObject<{
     at: z.ZodDate;
     actor: z.ZodObject<{
         type: z.ZodEnum<{
-            human: "human";
             system: "system";
+            human: "human";
             clone: "clone";
         }>;
         id: z.ZodOptional<z.ZodString>;
@@ -312,8 +349,8 @@ export declare const NewMemoryEventSchema: z.ZodObject<{
     at: z.ZodOptional<z.ZodDate>;
     actor: z.ZodObject<{
         type: z.ZodEnum<{
-            human: "human";
             system: "system";
+            human: "human";
             clone: "clone";
         }>;
         id: z.ZodOptional<z.ZodString>;
@@ -482,6 +519,7 @@ export * from "./runtime.js";
 export * from "./recall-runtime.js";
 export * from "./recall-output-validation.js";
 export * from "./event-retention-purge.js";
+export * from "./erase-tenant.js";
 
 // ===== dist/inline-scheduler.d.ts =====
 import type { Ctx } from "./ctx.js";
@@ -798,7 +836,24 @@ export interface MemoryStore {
     }>;
     listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
     registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
+    eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
 }
+export interface EraseTenantStoreOptions {
+    limit: number;
+    dryRun?: boolean;
+}
+export interface EraseTenantResult {
+    deleted: number;
+    reachedLimit: boolean;
+}
+export type EraseTenantStoreResult = {
+    kind: "executed";
+    deleted: number;
+    reachedLimit: boolean;
+} | {
+    kind: "blocked_by_foreign_reference";
+    count: number;
+};
 export interface LabelSummary {
     name: string;
     status: "registered" | "proposed";
@@ -860,6 +915,7 @@ export interface RequeueEmbedJobsResult {
 // ===== dist/interfaces/outbox-store.d.ts =====
 import type { Ctx } from "../ctx.js";
 import type { OutboxJobRecord } from "../outbox.js";
+import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 import type { OutboxJobKind } from "./scheduler.js";
 export interface ClaimOutboxJobsOptions {
     kinds?: OutboxJobKind[];
@@ -882,6 +938,7 @@ export interface OutboxStore {
     fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
         at?: Date;
     }): Promise<void>;
+    eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 // ===== dist/interfaces/relation-store.d.ts =====
@@ -915,6 +972,7 @@ export interface Scheduler {
 
 // ===== dist/interfaces/tenant-settings-store.d.ts =====
 import type { Ctx } from "../ctx.js";
+import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 export declare const DEFAULT_HALF_LIFE_HOURS = 720;
 export declare function isHalfLifeHoursInRange(value: number): boolean;
 export type EventRetention = {
@@ -957,6 +1015,7 @@ export interface TenantSettingsStore {
     getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
     getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
+    eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 export declare const DECAY_CLOCK_UNSUPPORTED_MESSAGE = "this TenantSettingsStore does not support setDecayClock";
 export declare function readDecayClock(store: TenantSettingsStore, ctx: Ctx): Promise<DecayClock>;
@@ -987,6 +1046,7 @@ import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { MemoryId } from "../ids.js";
 import type { MemoryStatus } from "../memory.js";
+import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 import type { ProvenanceKind } from "../provenance.js";
 export interface VectorFilter {
     tenantId: string;
@@ -1027,6 +1087,7 @@ export interface VectorStore {
     }): Promise<Map<string, VectorHit[]>>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+    eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
     getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }
 

@@ -44,6 +44,9 @@ import type {
   AggregateScopeOptions,
   ArchiveDecayedOptions,
   ArchiveDecayedResult,
+  EraseTenantResult,
+  EraseTenantStoreOptions,
+  EraseTenantStoreResult,
   LabelSummary,
   MemoryStore,
   PurgeExpiredEventsByRetentionOptions,
@@ -777,6 +780,113 @@ export class FakeMemoryStore implements MemoryStore {
     };
     this.backing.labels.set(key, registered);
     return registered;
+  }
+
+  /**
+   * Issue #1207 / ADR 0383: `packages/testkit` の `InMemoryMemoryStore.eraseTenant` と
+   * 同じ実装（`this.backing.*` を使う点だけが違う）。詳細な doc コメントはそちらを参照。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
+    const dryRun = opts.dryRun === true;
+    let remaining = opts.limit;
+    let total = 0;
+    let reachedLimit = false;
+
+    const drainMap = <V>(map: Map<string, V>, tenantOf: (value: V) => string): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victims: string[] = [];
+      for (const [key, value] of map) {
+        if (victims.length >= budget) break;
+        if (tenantOf(value) === ctx.tenantId) victims.push(key);
+      }
+      if (!dryRun) for (const key of victims) map.delete(key);
+      return victims.length;
+    };
+    const drainKeyedMap = <V>(map: Map<string, V>): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victims: string[] = [];
+      for (const key of map.keys()) {
+        if (victims.length >= budget) break;
+        const [tenantId] = JSON.parse(key) as [string, ...unknown[]];
+        if (tenantId === ctx.tenantId) victims.push(key);
+      }
+      if (!dryRun) for (const key of victims) map.delete(key);
+      return victims.length;
+    };
+    const drainSet = (set: Set<string>, belongsToTenant: (key: string) => boolean): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victims: string[] = [];
+      for (const key of set) {
+        if (victims.length >= budget) break;
+        if (belongsToTenant(key)) victims.push(key);
+      }
+      if (!dryRun) for (const key of victims) set.delete(key);
+      return victims.length;
+    };
+    const drainArray = <V>(array: V[], tenantOf: (value: V) => string): number => {
+      if (remaining <= 0) return 0;
+      const budget = remaining;
+      const victimIndexes: number[] = [];
+      for (let i = 0; i < array.length && victimIndexes.length < budget; i++) {
+        if (tenantOf(array[i]!) === ctx.tenantId) victimIndexes.push(i);
+      }
+      if (!dryRun)
+        for (let i = victimIndexes.length - 1; i >= 0; i--) array.splice(victimIndexes[i]!, 1);
+      return victimIndexes.length;
+    };
+
+    const steps: Array<() => number> = [
+      () => drainKeyedMap(this.backing.memoryLabels),
+      () => drainSet(this.backing.usages, (key) => key.startsWith(`${ctx.tenantId}:`)),
+      () => drainArray(this.backing.events, (event) => event.tenantId),
+      // memory_relations（Issue #207/#933 PR2）
+      () => drainArray(this.backing.relations, (relation) => relation.tenantId),
+      () => {
+        const deleted = drainMap(this.backing.memories, (memory) => memory.tenantId);
+        if (!dryRun) {
+          for (const key of [...this.backing.extractionIndex.keys()]) {
+            const [tenantId] = JSON.parse(key) as [string, ...unknown[]];
+            if (tenantId === ctx.tenantId) this.backing.extractionIndex.delete(key);
+          }
+        }
+        return deleted;
+      },
+      () => drainMap(this.backing.observations, (observation) => observation.tenantId),
+      () => drainMap(this.backing.recalls, (recall) => recall.tenantId),
+      () => drainKeyedMap(this.backing.labels),
+      () => {
+        if (remaining <= 0) return 0;
+        if (!this.backing.activitySeq.has(ctx.tenantId)) return 0;
+        if (!dryRun) this.backing.activitySeq.delete(ctx.tenantId);
+        return 1;
+      },
+      () => {
+        if (remaining <= 0) return 0;
+        if (!this.backing.subjectActivitySeq.has(ctx.tenantId)) return 0;
+        if (!dryRun) this.backing.subjectActivitySeq.delete(ctx.tenantId);
+        return 1;
+      },
+    ];
+
+    for (const step of steps) {
+      if (remaining <= 0) {
+        reachedLimit = true;
+        break;
+      }
+      const budgetBeforeStep = remaining;
+      const deleted = step();
+      total += deleted;
+      remaining -= deleted;
+      if (deleted === budgetBeforeStep && deleted > 0) {
+        reachedLimit = true;
+        break;
+      }
+    }
+
+    return { kind: "executed", deleted: total, reachedLimit };
   }
 
   async createMemory(ctx: Ctx, input: NewMemory): Promise<Memory> {
@@ -2536,6 +2646,30 @@ export class FakeOutboxStore implements OutboxStore {
     job.failedAt = new Date();
     job.lastError = error;
   }
+
+  /**
+   * Issue #1207 / ADR 0383: `packages/testkit` の `InMemoryOutboxStore.eraseTenant` と
+   * 同じ実装（`this.backing.outboxJobs` を使う点だけが違う）。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const dryRun = opts.dryRun === true;
+    const matchingIndexes: number[] = [];
+    for (
+      let i = 0;
+      i < this.backing.outboxJobs.length && matchingIndexes.length < opts.limit;
+      i++
+    ) {
+      if (this.backing.outboxJobs[i]!.tenantId === ctx.tenantId) {
+        matchingIndexes.push(i);
+      }
+    }
+    if (!dryRun) {
+      for (let i = matchingIndexes.length - 1; i >= 0; i--) {
+        this.backing.outboxJobs.splice(matchingIndexes[i]!, 1);
+      }
+    }
+    return { deleted: matchingIndexes.length, reachedLimit: matchingIndexes.length === opts.limit };
+  }
 }
 
 /**
@@ -2859,6 +2993,23 @@ export class FakeVectorStore implements VectorStore {
       }
     }
     return results;
+  }
+
+  /**
+   * Issue #1207 / ADR 0383: `packages/testkit` の `InMemoryVectorStore.eraseTenant` と
+   * 同じ実装。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const dryRun = opts.dryRun === true;
+    const matchingKeys: string[] = [];
+    for (const [key, entry] of this.entries) {
+      if (matchingKeys.length >= opts.limit) break;
+      if (entry.tenantId === ctx.tenantId) matchingKeys.push(key);
+    }
+    if (!dryRun) {
+      for (const key of matchingKeys) this.entries.delete(key);
+    }
+    return { deleted: matchingKeys.length, reachedLimit: matchingKeys.length === opts.limit };
   }
 }
 
@@ -3420,6 +3571,30 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
   async setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void> {
     assertValidTaxonomyMode(mode);
     this.taxonomyModeByTenant.set(ctx.tenantId, mode);
+  }
+
+  /**
+   * Issue #1207 / ADR 0383: `packages/testkit` の `InMemoryTenantSettingsStore.eraseTenant`
+   * と同じ契約。この Fake は `InMemoryTenantSettingsStore` と違い、テナントの設定を
+   * 1つの「行」（Map）にまとめていない——`eventRetentionDays`・`decayClockByTenant`・
+   * `halfLifeRecallsByTenant`・`taxonomyModeByTenant` の4つの Map に分かれているため、
+   * どれか1つでもこのテナントのキーを持っていれば「行が存在した」とみなす。
+   * `getDefaultHalfLifeHours` が返す `halfLifeHours`（コンストラクタ引数、テナント別では
+   * ない固定値）はこのメソッドの対象外——テナントごとの状態ではないため。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const existed =
+      this.eventRetentionDays.has(ctx.tenantId) ||
+      this.decayClockByTenant.has(ctx.tenantId) ||
+      this.halfLifeRecallsByTenant.has(ctx.tenantId) ||
+      this.taxonomyModeByTenant.has(ctx.tenantId);
+    if (opts.dryRun !== true) {
+      this.eventRetentionDays.delete(ctx.tenantId);
+      this.decayClockByTenant.delete(ctx.tenantId);
+      this.halfLifeRecallsByTenant.delete(ctx.tenantId);
+      this.taxonomyModeByTenant.delete(ctx.tenantId);
+    }
+    return { deleted: existed ? 1 : 0, reachedLimit: false };
   }
 }
 

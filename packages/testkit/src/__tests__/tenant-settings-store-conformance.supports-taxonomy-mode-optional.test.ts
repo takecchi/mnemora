@@ -80,6 +80,8 @@ describeTenantSettingsStoreConformance({
   setDefaultHalfLifeHours: control.setDefaultHalfLifeHours,
   supportsDecayClock: false,
   supportsTaxonomyMode: true,
+  // Issue #1207 / ADR 0383: `control.store` は手組みのオブジェクトで、eraseTenant を実装していない。
+  supportsEraseTenant: false,
 });
 
 // --- 本題: v1.0.0 の呼び出し形そのもの。supportsTaxonomyMode を渡さない ---
@@ -89,6 +91,8 @@ describeTenantSettingsStoreConformance({
   createStore: () => omitted.store,
   setDefaultHalfLifeHours: omitted.setDefaultHalfLifeHours,
   supportsDecayClock: false,
+  // Issue #1207 / ADR 0383: `omitted.store` は手組みのオブジェクトで、eraseTenant を実装していない。
+  supportsEraseTenant: false,
 });
 
 describe("supportsTaxonomyMode を省略した呼び出し（v1.0.0 の呼び出し形）は型検査を通り、taxonomy 系の適合項目を実行しない", () => {
