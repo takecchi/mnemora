@@ -165,9 +165,10 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
         // 閾値は 1 秒——索引ありの1行 INSERT は数ミリ秒で終わる。消去側がテーブル単位の
         // ロックで2秒止める変異（`LOCK TABLE memories IN SHARE ROW EXCLUSIVE MODE` + 2秒）で
         // 赤になることを確かめてある。
-        expect(await settlesWithin(write, 1000), "別テナントへの INSERT が 1 秒以内に終わらない").toBe(
-          true,
-        );
+        expect(
+          await settlesWithin(write, 1000),
+          "別テナントへの INSERT が 1 秒以内に終わらない",
+        ).toBe(true);
         await write;
         // 書き込みが終わった時点で、消去はまだ途中でなければならない（そうでなければ、
         // 「消している最中」を測っていない）。
