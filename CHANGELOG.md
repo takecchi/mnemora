@@ -664,8 +664,7 @@ PR #1393・Issue #1232）になった。**
   - **`Runtime.reextract` の「退けた記憶」の判定は、いまは `extractorVersion` を問わない。** 版を跨いでも、1件でも `forgotten`（purge を含む）・`contested`・訂正の解決で負けた `superseded` があれば、その Observation の抽出全体を打ち切る（同じ版のときと同じ規律。`extraction: "skipped"`・`atomicity: "not_attempted"`・`memoryIds: []`、`skipped` に退けた記憶ごとの `status_not_active`）。同じ Observation の、退けていない他の `active` な事実も作り直さない。
   - **帰結**: 版を上げても、退けたものを含む Observation は新しい版の記憶を1件も作らない。⟹ 運用側が旧い版の記憶を forget すると、その Observation のほかの（退けていない）事実も、以後の reextract では想起から作られなくなる。`skipped` に `status_not_active` が出た Observation では、旧い版の記憶を残すことが運用側の手がかりになる。
   - **版を跨いだ `active` の扱い（上の Issue #873 の項目「運用側の責務」）は変えていない**——supersede 対象の判定は今どおり今の `extractorVersion` 限定のままで、退けたものが無い Observation では、今どおり新しい版で抽出され、旧い版の `active` は supersede されない。
-  - **`@mnemora/postgres`（`PostgresMemoryStore`）・`@mnemora/testkit/fixtures`（`InMemoryMemoryStore`）はこの口を実装済み。** 自前で `MemoryStore` を実装している場合は、このメソッドを実装しないと型検査が落ちる——実装は `tenant_id`・`source_observation_id` が一致する行を返すだけでよい（`extractor_version` の絞り込みを外した形）。
-  ⭕⚠ 非破壊と数えなかった（公開 interface への必須メソッドの追加であり、自前実装は型検査で落ちる。`docs/migration-v1.md` 項目28）。
+  - **`@mnemora/postgres`（`PostgresMemoryStore`）・`@mnemora/testkit/fixtures`（`InMemoryMemoryStore`）はこの口を実装済み。** 自前で `MemoryStore` を実装している場合は、このメソッドを実装しないと型検査が落ちる——実装は `tenant_id`・`source_observation_id` が一致する行を返すだけでよい（`extractor_version` の絞り込みを外した形）。詳細・移行の手順は [docs/migration-v1.md](./docs/migration-v1.md) 項目28。
 
 **⚠ 2026-09-30 追記28**: 上の25回分の棚卸しとは別に、着地に先立って変更を作った本人が
 この節へ足した項目（上の追記19・20 と同じ扱い）。[Issue #933](https://github.com/takecchi/mnemora/issues/933)
