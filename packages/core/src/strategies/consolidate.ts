@@ -2,6 +2,7 @@ import { z } from "zod";
 import type { Attributes } from "../attributes.js";
 import type { Ctx } from "../ctx.js";
 import { resolveDigest } from "../extraction.js";
+import { intersectValidity } from "../validity.js";
 import { dropBlankTags } from "../llm-tags.js";
 import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
@@ -134,6 +135,9 @@ export interface BuildConsolidatedMemoryParams {
  * - `tags`: LLM が返した `tags` があればそれを使い、無ければ eligible の `tags` の和集合。
  * - `attributes`: eligible 全件の積集合（`intersectAttributes`、ADR 0312 決定4）。
  * - `occurredAt`: eligible の `occurredAt` のうち最も新しいもの。全部 `null` なら `null`。
+ * - `validFrom` / `validUntil`: eligible 全件の**区間の積**（`intersectValidity`、`validity.ts`。
+ *   Issue #1188 残り、ADR 0368）——`validFrom` は最大値、`validUntil` は最小値。全部
+ *   `null` なら両方 `null`（今までの振る舞いのまま）。
  * - `sourceObservationId` / `extractorVersion`: 常に `null`（Observation 由来ではない）。
  */
 export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): NewMemory {
@@ -192,6 +196,8 @@ export function buildConsolidatedMemory(params: BuildConsolidatedMemoryParams): 
     // Issue #153（ADR 0312 決定4）: 積集合。`intersectAttributes`（上）参照。
     attributes: intersectAttributes(eligible),
     occurredAt,
+    // Issue #1188 残り（ADR 0368）: 区間の積。`intersectValidity`（`validity.ts`）参照。
+    ...intersectValidity(eligible),
     recordedAt: now,
     lastReinforcedAt: null,
     strength: 1,
