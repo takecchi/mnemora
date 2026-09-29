@@ -403,6 +403,11 @@ PR #1393・Issue #1232）になった。**
   ——既存の末尾に足した省略可能な引数で、0〜2引数の既存の呼び出しは1行も直さず通る非破壊の変更
   （`InMemoryMemoryStore.eventRetentionDays` と共有する場合に渡す。ADR 0165 決めたこと13の
   `subjectActivitySeqBacking?` と同じ形）。
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` に `revision` を渡すと、キャッシュの置き場所が `<根>/<encodeURIComponent(revision)>/<repo>/<file>` に変わり、温めたキャッシュだけでオフラインで読めるようになった**（[Issue #1403](https://github.com/takecchi/mnemora/issues/1403)、[PR #1404](https://github.com/takecchi/mnemora/pull/1404)、[ADR 0365](./docs/decisions/0365-local-embedding-revision-in-remote-path-template.md)）——以前は `revision` を transformers.js の `pipeline()` にそのまま渡しており、置き場所は `<根>/<repo>/<revision>/<file>` だった。読み込みの前段の確認は `revision` を運ばず `main` の鍵を探すので、温めていても `resolve/main/config.json` へ出て、ネットワークが無いと読めなかった（Issue #1239 の直し方も、ここには届いていなかった）。いまは既定の `createPipeline` が、`revision` を `pipeline()` に渡さず、`pipeline()` を呼んでいる間だけ `env.remotePathTemplate` に埋め込み、キャッシュの根を revision ごとに分ける（成功でも失敗でも元へ戻す）。根は `cacheDir` を渡していればそれ、渡していなければ既定のキャッシュで、`cacheDir` の有無で振る舞いは分かれない。ネットワークがあるときに、前段の確認が `main` の `config.json` を見ることもなくなった。`revision` を渡さない使い方は変わらない。
+  - ⚠ **`revision` を渡している人は、既存のキャッシュが1回外れて、モデル一式（約42MB）を取り直す。**古い置き場所（`<根>/<repo>/<revision>/`）は自動では消さない。
+  - ⚠ **ネットワークがない場所では、先に新しい根へ温め直す必要がある**（`revision` を渡して一度読み込めばよい）。
+  - ⚠ `env.remotePathTemplate` も `env.cacheDir` と同じくプロセス全体で共有される大域であり、このパッケージを経由しない transformers.js の利用が差し替えの最中に読み込むと、差し替え後の値を見うる（README・ADR 0365）。
+  ⭕ 非破壊と数える（⚠ 付き。公開の型も API も変わらない。取り直しは1回で済み、ネットワークがあれば自然に直る。**クローン miku の判断であり、オーナーの判断ではない**）。
 
 ### Fixed
 
