@@ -1064,7 +1064,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は11件**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`7e1c68a`**（PR #1431）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27・追記28 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`62def34`**（PR #1434）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27・追記28・追記29 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 **2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
 
@@ -1123,6 +1123,10 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 ⚠ **注記(ii) 見出しの件数が8件のまま進んでいなかったこと**: 上の見出し「未リリース。確定は8件」は、9150d4c #1428 が項目26（下）を足したとき（項目26末尾の ⟹ の集計は9件へ更新済みだった）に、**見出しの数字だけ 8→9 へ上げ忘れていた**。その後 7e1c68a #1431 が項目27（⟹ の集計は10件）を足したときも、見出しの数字は直っていなかった（8件のまま）——この棚卸しで10件に直した。
 
 ⟹ **この節の範囲（`v1.0.2`…`7e1c68a`）で、確定した破壊的変更は、なお10件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238、PR #1417・Issue #1412、PR #1427・Issue #994/#995/#1207、PR #1428・Issue #1226、PR #1431・Issue #933）である。**
+
+⚠ **2026-09-30 追記（27回目の棚卸し。CHANGELOG の追記29 と同じ範囲）**: この節が数える範囲の起点は `8b434bb`（PR #1433、26回目の棚卸し自身。前回・追記28 が数えた終点は `7e1c68a` であり、`8b434bb` はその直後に着地した1本目である）。`8b434bb`…`62def34` に着地した PR（8b434bb #1433、b33ae0b #1435、62def34 #1434）のうち、PR #1433 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（26回目の棚卸し自身）。PR #1434（`examples/chat` の矛盾候補の印の非対称化、ADR 0379 の新設・ADR 0295 への追記・`docs/decisions/README.md` の追記のみ）は、`examples/chat` が `private` で出荷される面の外、`packages/*/src` にも触れていないため、この節の対象外である。PR #1435（Issue #1432、ADR 0380）は、着地の時点で本人が既にこの節へ項目28として足しており（上）、この棚卸しでは CHANGELOG 側に欠けていた PR 番号へのリンクを足しただけである（本文・分類は書き換えていない、CHANGELOG の追記29を見よ）。**範囲外だが、この棚卸しの作業中に項目24（PR #1417）・項目26（PR #1428）に PR 番号へのリンクが無いことに気づいたので、あわせて足した**（CHANGELOG 側は先行する棚卸しで既にリンク済みだった）。この回で新しく確定した破壊的変更は無い。正の対照（`git diff --stat 7e1c68a..62def34 -- 'packages/*/src/**' ':!**/__tests__/**'` の5ファイル。すべて PR #1435 だけの変更で、重なる hunk は無い）・型の上（`git diff 7e1c68a..62def34 -- scripts/__snapshots__/public-api/` は `core.d.ts`・`postgres.d.ts`・`testkit.d.ts` の3ファイル、いずれも `listBySourceObservationAllVersions` の宣言1行の追加のみ）の詳細は CHANGELOG の `[1.1.0]` 節の追記29を見ること——ここには複製しない。
+
+⟹ **この節の範囲（`v1.0.2`…`62def34`）で、確定した破壊的変更は、なお11件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238、PR #1417・Issue #1412、PR #1427・Issue #994/#995/#1207、PR #1428・Issue #1226、PR #1431・Issue #933、PR #1435・Issue #1432）である。**
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
@@ -1342,6 +1346,7 @@ PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #12
 ### 24. `packages/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/`EventStore`/`OutboxStore` 実装にさらに約束を新しく課すようになった（`@mnemora/testkit`）
 
 [Issue #1412](https://github.com/takecchi/mnemora/issues/1412)（Issue #1238 棚卸しの続き）、
+[PR #1417](https://github.com/takecchi/mnemora/pull/1417)、
 [ADR 0373](./decisions/0373-conformance-suite-issue-1412-promises.md)。**この項目は、
 上の棚卸しの範囲（`54b05bc`。PR #1407）の外——着地に先立って変更を作った本人が
 この節に足した1件である**（項目19・20・21・22・23 と同じ扱い）。
@@ -1438,6 +1443,7 @@ PR #1427・Issue #994・#995・#1207（ADR 0375））になった。**
 ### 26. `MemoryStore.createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts.abortIfForgotten`（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [Issue #1226](https://github.com/takecchi/mnemora/issues/1226)、
+[PR #1428](https://github.com/takecchi/mnemora/pull/1428)、
 [ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7・2026-09-30 追記。
 **PR1（[PR #1427](https://github.com/takecchi/mnemora/pull/1427)、項目25）の後に
 着地した、この節の2件目である。**
@@ -1545,6 +1551,7 @@ PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決�
 ### 28. `MemoryStore` に必須メソッド `listBySourceObservationAllVersions` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
+[PR #1435](https://github.com/takecchi/mnemora/pull/1435)、
 [ADR 0380](./decisions/0380-reextract-withdrawn-across-extractor-versions.md)。
 
 **何が変わったか**: `extractorVersion` を上げた runtime インスタンスで `reextract()` を
