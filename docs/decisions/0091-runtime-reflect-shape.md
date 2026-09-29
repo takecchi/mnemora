@@ -584,3 +584,54 @@
   - **`reflect` を実際の利用者（Issue #104 の報告者）が使えるかを確かめていない。**
     `target` を必須にしたことで、報告者の「ルールが自動で育つ」という期待に対しては
     **呼び出し側がまだ「いつ・何を」決める必要が残っている。**
+
+---
+
+## 2026-09-29 追記: 有効期間の外にある記憶は材料にしない（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）
+
+決定9 は「材料の適格性」を `status === 'active'` と `provenance.kind !== 'reflected'` の2条件だけで
+決めていた。実装もその2条件だけを見ていたので、いまの時点で有効期間（`validFrom`/`validUntil`、
+ADR 0145・0164）の外にある `active` な記憶も材料にして、内省の Memory の `provenance.sources` に
+入れていた。内省の記憶は有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れ・未到来の
+事実が、期限の無い `active` な記憶として `recall()` に戻っていた。`{ memoryIds }` だけでなく、
+`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）と、`{ query }` に
+`includeOutsideValidity: true` を渡して集めた記憶でも同じだった（`consolidate` の 2026-09-29 追記
+（ADR 0089）と同じ穴。実装・レビューを分けた別の作業として見つかった）。
+
+⚠ **この ADR の 2026-09-27 追記に相当する `ReflectTarget` の doc コメントに誤りがあった**
+——「`{ query }`・`{ seedMemoryId }` は `recall()` の期間のゲートを通るので、期限切れの記憶は
+材料に入らない」と書いていたが、`{ seedMemoryId }` の種と `includeOutsideValidity: true` を渡した
+`{ query }` は、そのゲートを通らない・外せる経路であり、実際には材料に入っていた
+（2026-09-29、testkit の fixture と Postgres で実測）。
+
+- **決めたこと**: `status` の判定の後・`provenance.kind === 'reflected'`（`basis_is_reflected`）の
+  判定の前に、`consolidate()`・`recall()` の期間のゲート（ADR 0164 決定1）と同じ述語で、呼んだ
+  時点の `clock.now()` に対して有効期間を見る。外にある記憶は材料にせず、層2に足した
+  `expired`（`validUntil` を運ぶ）・`not_yet_valid`（`validFrom` を運ぶ）で名指しする。語は
+  `ConsolidateSourceOutcome` から借りた（ADR 0089 の 2026-09-29 追記と同じ、新しい綴りを作らない）。
+  対象の形によらない。`no_eligible_basis` の「材料にできるもの」の数え方にも入る
+  （eligible が0件になれば LLM を呼ばない、という決定3（層1.5）の既存の規律は変えていない）。
+  - **述語は1箇所（`packages/core/src/validity.ts` の `classifyValidity`、非公開）に切り出した**
+    ——`recall-runtime.ts` の `survivesValidityGate` と `consolidate()` も同じ関数を呼ぶ
+    （ADR 0038「実装が2つあると食い違う」の穴を避ける規律の適用）。振る舞いは変えていない
+    ——`survivesValidityGate` はブール値しか返さないので、`classifyValidity` が `validUntil` を
+    先に見る順序へ変えても、逆転した区間で結果が変わらないことを歯で確かめた
+    （元の実装は `validFrom` を先に見ていたが、逆転した区間ではどちらの順で見ても除外側に落ちる）。
+- **破壊的変更とは数えない**: 公開の union `ReflectBasisOutcome` に値を2つ足した（網羅的に分岐している
+  呼び出し側は扱いを足す必要がある）が、union に値を足す変更は破壊的変更として数えない
+  （オーナーの回答（ask_human `d9364c91`）、`docs/migration-v1.md`「数え方の規律への追記
+  （2026-09-28）」、`consolidate` の同日付の変更と同じ扱い）。同じ入力でも材料にならなくなる場合が
+  あるが、例外を投げず結果だけが変わる修正なので、`CHANGELOG.md` の `[1.1.0]` の数え方では
+  非破壊（⚠ 付き）である。この変更と数え方は、この作業を行った者が決めた（オーナーの判断ではない）。
+- **採らなかった案**: `consolidate` の却下案と同じ理由で、内省の記憶に材料の区間の積を付ける案は
+  採らなかった——決定4（内省は「足す」操作）は変えておらず、内省の記憶の有効期間は今どおり null
+  のままである。
+- **射程外**: `consolidate` 側の判定は既に ADR 0089 で直っている（この追記の対象ではない）。
+- **反映先**: `packages/core/src/runtime.ts` の `ReflectTarget`・`ReflectBasisOutcome` の doc、
+  `Runtime.reflect` の手順2。`packages/core/src/recall-runtime.ts` の `survivesValidityGate` の doc
+  （述語の切り出し先を指すよう追記。述語自体は変えていない）。上の決定9の本文は書き換えていない
+  （`docs/decisions/README.md`、採用済み ADR の扱い）。
+- **歯**: `packages/core/src/__tests__/reflect-validity-gate.test.ts`（Fake。境界・判定の優先順
+  （`status` → 有効期間 → `basis_is_reflected`）・やりすぎの形を含む）、
+  `packages/postgres/src/__tests__/reflect-target-selection.postgres.test.ts`（Postgres と testkit
+  の fixture。`{ memoryIds }`・`{ seedMemoryId }`・`{ query }` の各形）。

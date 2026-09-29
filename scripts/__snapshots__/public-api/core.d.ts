@@ -2871,6 +2871,14 @@ export type ReflectBasisOutcome = {
     status: Exclude<MemoryStatus, "active">;
 } | {
     memoryId: MemoryId;
+    kind: "expired";
+    validUntil: Date;
+} | {
+    memoryId: MemoryId;
+    kind: "not_yet_valid";
+    validFrom: Date;
+} | {
+    memoryId: MemoryId;
     kind: "basis_is_reflected";
 } | {
     memoryId: MemoryId;
