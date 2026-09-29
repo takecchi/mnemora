@@ -498,14 +498,11 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       expect(memoryStore.events).toHaveLength(0);
     });
 
-    it("陽性対照: number（123）・数字に見える文字列（\"123n\"）は引き続き通る", async () => {
+    it('陽性対照: number（123）・数字に見える文字列（"123n"）は引き続き通る', async () => {
       const memoryStore = new InMemoryMemoryStore();
       const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
       const m = await memory(memoryStore);
-      const appended = await eventStore.append(
-        ctx,
-        event(m.id, "updated", { n: 123, s: "123n" }),
-      );
+      const appended = await eventStore.append(ctx, event(m.id, "updated", { n: 123, s: "123n" }));
       expect(appended.meta).toEqual({ n: 123, s: "123n" });
     });
   });
