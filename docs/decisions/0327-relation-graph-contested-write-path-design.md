@@ -1,6 +1,6 @@
 # ADR 0327: 関係グラフ本体（Issue #207）の段1 — `memory_relations` へ何を移すか・既存列からの移行の形・多者間 `contested` の解き方（設計のみ）
 
-- **状態**: 提案 (2026-09)
+- **状態**: 採用（決定1[1-a〜1-d]・決定2[(ii) 別口新設]・決定3[4-a〜4-e]・決定4[(a) pairwise、ただし対象範囲は ADR 0381 決定1により「重なる組」に修正]。4-f は手続き上の申し送りで判定対象外。2026-09-30、クローン miku の判断（オーナーではない）で「採用」へ倒した——詳細は末尾の追記） (2026-09)
 - **日付**: 2026-09-25
 
 **⚠ 出所の凡例**（[ADR 0292](./0292-relation-graph-table-depth-omitted-design.md) の体裁をそのまま踏む）。
@@ -700,3 +700,34 @@ migration・`markContestedGroup`/`resolveContestedGroup`（store 側の口）は
 群にも対応させる拡張、という2つの読み方がありうることが分かった——どちらを実装すべきかは
 この PR の範囲では決めず、マネージャーへの報告で判断を仰いだ。詳細は ADR 0381 §5 を見る
 こと。
+
+## 追記（2026-09-30、Issue #207 の受け入れ条件の確認、クローン miku の判断）
+
+> ⚠ この追記は、クローン miku から切り出された担い手が書いた。⛔ オーナー本人の判定
+> ではない（ADR 0220）。
+
+[ADR 0381](./0381-contested-group-write-path-implementation.md)（状態: 採用）が実装した
+内容、および上の2つの追記（ADR 0378・0381 を指すもの）を根拠に、本 ADR の決定を個別に
+仕分けた。基準は ADR 0283 決定1の定義（「その決定が `main` で現に採られているか」）。
+
+| 決定 | 判定 | 根拠 |
+|---|---|---|
+| 決定1-a（`supersedes` は表に移さない） | **採用** | 今日も `status`/`supersededById` 列のまま。`memory_relations` に `supersedes` に当たる `kind` は無い（現物） |
+| 決定1-b（`contested`/`contradicts` は表に移す） | **採用** | `memory_relations` テーブル・`RelationStore` が実装され、多者間 `contradicts` を保持する（ADR 0381） |
+| 決定1-c（`derivedFrom`/`provenance` は表に移さない） | **採用** | `provenance.sources`/`provenance.basis.memoryIds` は今日も不変のまま `memories` 行に残る（変更なし） |
+| 決定1-d（`companion` は移す対象そのものが無い） | **採用** | `companionOf` は今日も recall 実行時にその場で組み立てる注記のまま（`RecalledMemory.companionOf`）。`memory_relations.kind` に `'companion'` は無い |
+| 決定2（書き込み経路。(i)二重書き/(ii)別口新設/(iii)表を唯一の真実にする、のうち (ii) を推奨） | **採用（(ii) 別口新設）** | ADR 0378 決定1が (ii) を確定し、ADR 0381 §9 決定7がそのまま実装（`markContested`/`resolveContested` は今日どおり2引数、多者間は `markContestedGroup?`/`resolveContestedGroup?` という別口） |
+| 決定3・4-a（既定 off を保つ） | **採用** | `relationStore` を配線しない呼び出しは1バイトも変わらない（ADR 0381 §4.1 で実測込みに確認済み） |
+| 決定3・4-b（多者間を recall に載せるには新しい書き込み操作が要る） | **採用** | `MemoryStore.markContestedGroup?`/`Runtime.markContestedGroup?` として実装（ADR 0381 §3・§4） |
+| 決定3・4-c（N者の解消の意味論は次段で決める） | **採用（ADR 0378 決定3の形で確定）** | 勝者1件で `active`・残り `superseded`、`both_active` なら全員 `active`（ADR 0381 §9 決定3） |
+| 決定3・4-d（recall 段3の契約 companion と `over_limit` の衝突は本 ADR では解けない） | **採用（ADR 0381 §5 が解決）** | オーナー側クローンが (b)（既存の必須取得の拡張。`RecallQuery.relations?` は作らない）を選び、`DEFAULT_RECALL_ASSOCIATION.maxCount` の流用・群ごとの `over_limit(stage:"relation")` という形で実装した（ADR 0381 §5.3〜§5.5） |
+| 決定3・4-e（`ContestedDetectionOutcome.result` に `contested_group` を純追加） | **採用** | `packages/core/src/runtime.ts` の型・ADR 0381 §4.2 |
+| 決定3・4-f（CHANGELOG/`docs/migration-v1.md` の計上は次段の責務） | 手続き上の申し送りであり、採用/不採用の判定対象としない | 破壊的変更の計上そのものは実装 PR（#1431/#1442）の責務として引き継がれた |
+| 決定4（3件以上の表現。(a) pairwise 完全グラフを推奨） | **採用（ただし対象範囲を修正）** | ADR 0378 決定2が (a) を確定。ただし ADR 0381 決定1（§9）が「一致した全員」ではなく「互いに有効期間が重なる組」だけを結ぶ、と読み替えている——完全グラフという形自体は採用されたが、エッジを張る対象の定義が本 ADR の原案から変わっている |
+
+**この仕分けにより、本 ADR の実質的な決定はほぼ全て「採用」に倒れる。**残っているのは
+決定4の対象範囲の修正（ADR 0381 決定1を参照すること）と、決定3・4-fの手続き的な申し送り
+だけである。Issue #207 の受け入れ条件「1〜3 が ADR で決まっている」への当てはめは
+[ADR 0292](./0292-relation-graph-table-depth-omitted-design.md) の同名の追記に書いた。
+不採用のまま残った論点・測っていない点は
+[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) に切り出した。

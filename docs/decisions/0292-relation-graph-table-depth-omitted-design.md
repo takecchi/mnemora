@@ -1,6 +1,6 @@
 # ADR 0292: 関係グラフ本体（Issue #207）の段0 — テーブル形・探索の深さ上限・`omitted` への出し方を決める（設計のみ）
 
-- **状態**: 提案 (2026-09)
+- **状態**: 採用（決定1-a・1-b・1-c・3-a・3-b のみ。決定1-d・2-a・2-b・2-c・3-c は「提案のまま」（不採用）。2026-09-30、クローン miku の判断（オーナーではない）で一部を「採用」へ倒した——詳細は末尾の追記） (2026-09)
 - **日付**: 2026-09-25
 
 **⚠ 各主張の出所を分ける**（[ADR 0185](./0185-contradiction-detection-path.md)・[ADR 0291](./0291-primary-probe-coverage-map-correction-candidate-domain.md) の体裁を踏む）。
@@ -612,3 +612,59 @@ Refs #207
 決定2・決定3）と、Issue #207/#933 PR2 のマネージャー依頼が求める「recall 段3の変更」が
 同じものを指しているのか、別のものを指しているのかを、段階Bの調査で確認しきれなかった
 ため、実装を見送りマネージャーへ判断を仰いだ。詳細は ADR 0381 §5 を見ること。
+
+## 追記（2026-09-30、Issue #207 の受け入れ条件の確認、クローン miku の判断）
+
+> ⚠ この追記は、クローン miku から切り出された担い手が書いた。⛔ オーナー本人の判定
+> ではない（ADR 0220）。
+
+[ADR 0381](./0381-contested-group-write-path-implementation.md)（状態: 採用）が段階A・段階B
+（[PR #1431](https://github.com/takecchi/mnemora/pull/1431)・[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
+`main` = `30f6855`）で実装した内容を根拠に、本 ADR の決定を個別に「採用」/「提案のまま
+（不採用）」に仕分けた。基準は ADR 0283 決定1の定義（「その決定が `main` で現に採られて
+いるか」）。
+
+| 決定 | 判定 | 根拠 |
+|---|---|---|
+| 決定1-a（テーブル形、`kind` を `'contradicts'` の1値に絞る） | **採用** | ADR 0381 §9 決定11、`packages/postgres/migrations/0026_memory_relations.sql`、`packages/core/src/interfaces/relation-store.ts` の `RelationKind = "contradicts"` |
+| 決定1-b（対称な `contradicts` を双方向2行で書く、`OR` クエリを作らない） | **採用** | ADR 0381 §1 fix1（自己結合で両方向の行を生成）、§9 決定11「1組につき向きを変えて2行」 |
+| 決定1-c（`RelationStore` は独立 interface、`Store` バンドルへの組み込みは任意） | **採用** | ADR 0381 §9 決定7、`RuntimeDeps.relationStore?`（`packages/core/src/interfaces/relation-store.ts`） |
+| 決定1-d（`markContested`/`resolveContested` が表にも書くかは持ち越し） | **提案のまま（不採用）** | 本 ADR 自身はこの問いを決めていない。判断は ADR 0327 決定2→ADR 0378 決定1（(ii) 別口新設）に引き継がれ、そちらで解決済み——本 ADR の決定1-dとしては何も採られていない |
+| 決定2-a（深さは1段に固定、可変パラメータにしない） | **提案のまま（不採用）** | ADR 0381 §5.4・§5.5 が「関係の行でつながった全員」まで辿る BFS に置き換えた。1段固定という設計は採られていない。下の「クローン miku の判断——決定1」を見ること |
+| 決定2-b（`RecallRelationQuery.maxCount`/`RecallQuery.relations?` という独立 opt-in チャンネル） | **提案のまま（不採用）** | ADR 0381 §5.3・§6「採らなかった案」——既存の必須の同伴取得（段3）を拡張する形を採り、この新しいクエリ欄は作らないとオーナー側クローンが明示的に決めた |
+| 決定2-c（予算（段4）の内側に置く） | **提案のまま（不採用）** | 対象の opt-in チャンネル自体（決定2-b）が実装されなかったため、適用対象が無い |
+| 決定3-a（`over_limit` に `stage: "relation"` を追加。`countKind` は常に `'exact'`） | **採用（`stage: "relation"` の追加のみ。`countKind` 常に `'exact'` の部分は拡張された）** | `packages/core/src/recall.ts` の `OverLimitOmission.stage` union に `"relation"` が在る。ただし ADR 0381 §5.4・§5.5 の安全弁により `countKind: "lower_bound"` も現れる——「常に `exact`」という本 ADR の記述は、その後 `lower_bound` を追加する形で上書きされている（`packages/core/src/recall.ts` の `CountKind = "exact" \| "lower_bound" \| "unknown"`） |
+| 決定3-b（`stage_skipped` に `stage: "relation"`、`reason: "relation_store_unavailable"`） | **採用** | ADR 0381 §5.3 が同じ形をそのまま実装（`packages/core/src/recall-runtime.ts`） |
+| 決定3-c（1段より先は `Omission` を増やさず `explain.stages[].detail.relationDepthCapped` という型無し診断キーに置く） | **提案のまま（不採用）** | 「1段」という前提自体が決定2-aの不採用により成立しない。`relationDepthCapped` というキーは実装されていない（`grep -rn "relationDepthCapped" packages/` は0件） |
+
+### クローン miku の判断（オーナーではない）——決定1: 深さの上限は、件数の上限で代える
+
+Issue #207 の受け入れ条件のうち「探索の深さに上限を置き、上限で打ち切ったことを
+`omitted` に出す」を、本 ADR が設計した「深さ1段固定」という形ではなく、ADR 0381
+§5.4・§5.5 が実際に実装した**件数の上限**——群ごとの表示上限10件
+（`over_limit(stage:"relation")`、`DEFAULT_RECALL_ASSOCIATION.maxCount` を流用）と、
+探索そのものを止める安全弁（群ごとに、訪れた数が100件＝上限の10倍を超えたら打ち切る、
+`countKind: "lower_bound"`）——で満たされていると判定する。
+
+**理由**:
+
+1. 決定2-a（深さ1段固定）は、ADR 0381 §5.4 で「関係の行でつながった全員」まで辿る形に
+   明示的に置き換わっている。もはや「深さ」という単一の段数では実装の挙動を説明できない
+   ——BFS の到達範囲は群の連結構造に依存し、段数のパラメータを持たない。
+2. 一方、Issue #207 が懸念していた実質（無制限に広がらないこと・打ち切りを黙らせない
+   こと）は、件数という別の軸の歯止めで満たされている——群ごとに10件を超えた分は
+   `over_limit(stage:"relation")` に積まれ（ADR 0381 §5.5 の歯で確認済み）、探索自体が
+   100件で打ち切られた場合は `countKind: "lower_bound"` で「測っていない」と正直に言う
+   （ADR 0381 §5.4・§7 負債5）。
+3. ⟹ **「深さ」という Issue #207 の文言には忠実でないが、「上限を置く」「打ち切りを
+   `omitted` に出す」という受け入れ条件の実質は満たされている**、とクローン miku が
+   判定した。オーナー本人が「深さ」という文言どおりの段数上限を別途求める可能性は
+   否定できない——そのときはこの判定を覆し、決定2-a を「採用」からではなく改めて
+   新しい ADR で決め直すことになる。
+
+この仕分けにより、Issue #207 の受け入れ条件「1〜3 が ADR で決まっている」は、本 ADR・
+[ADR 0327](./0327-relation-graph-contested-write-path-design.md)・
+[ADR 0381](./0381-contested-group-write-path-implementation.md)（それぞれ採用した決定の
+範囲で）を合わせて満たされたと判定した。不採用のまま残った決定（`contradicts` 以外の
+種類、`RecallQuery.relations?` 等）と、実装が測っていない点は
+[Issue #1449](https://github.com/takecchi/mnemora/issues/1449) に切り出した。
