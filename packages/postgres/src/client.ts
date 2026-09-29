@@ -85,7 +85,7 @@ export interface PostgresClient {
  * それは下の Proxy が受け持つ（Issue #868）。
  *
  * ⚠ **ADR 0339・ADR 0020 が却下したのは「黙って捨てる」形（空のリスナー）であり、この「名乗る」形は
- * その却下理由には当たらない**（[ADR 0356](../../docs/decisions/0356-pool-default-error-listener-warns-by-default.md)）。
+ * その却下理由には当たらない**（[ADR 0356](../../../docs/decisions/0356-pool-default-error-listener-warns-by-default.md)）。
  *
  * ## drizzle に渡すのは、`connect` だけを包んだ Proxy（Issue #868、ADR 0349）
  *
