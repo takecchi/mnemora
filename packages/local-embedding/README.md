@@ -396,13 +396,12 @@ transformers.js の `env.cacheDir` を `cacheDir` と同じ場所へ一時的に
 - ⭐ **`cacheDir` を渡さない（既定のキャッシュそのものを温めた）使い方は、今までどおり変わらない**——`env.cacheDir` に
   触るのは `spec.cacheDir` が指定されているときだけである。
 - ⚠ **`env` はプロセス全体で共有される大域であり、このパッケージだけのものではない。**差し替えは
-  `pipeline()` を呼んでいる間だけの一時的なものだが、その**間**は次の2つが `cacheDir` を見うる:
-  - **このパッケージを経由しない、同じプロセスの他の transformers.js の利用**（自分で `import("@huggingface/transformers")`
-    して `pipeline()` を直接呼ぶコードや、`@mnemora/local-embedding` 以外の別のライブラリ）。
-  - `createLocalEmbeddingPipeline` の**呼び出し自体は、プロセス内で1本に直列化してある**——`cacheDir` の違う2つの
-    `LocalEmbeddingProvider`（や `warmup()`/`embed()` の並行呼び出し）が同時に読み込もうとしても、
-    どちらかがもう片方の差し替えの最中の値を見ることは無い（後述）。**このパッケージを経由しない利用は、
-    この直列化の外に居る。**
+  `pipeline()` を呼んでいる間だけの一時的なものだが、その**間**に**このパッケージを経由しない、同じプロセスの
+  他の transformers.js の利用**（自分で `import("@huggingface/transformers")` して `pipeline()` を直接呼ぶコード、
+  自前の `createPipeline`、`@mnemora/local-embedding` 以外の別のライブラリ）が読み込むと、差し替えた後の値
+  （`cacheDir`）を見うる。**それらは下の直列化の外に居るので、このパッケージからは守れない。**
+  `cacheDir` の違う2つの `LocalEmbeddingProvider`（や `warmup()`/`embed()` の並行呼び出し）どうしは、
+  下の直列化により、もう片方の差し替えの最中の値を見ない。
 - ⭐ **`createLocalEmbeddingPipeline` を呼ぶ経路（＝このパッケージがモデルを読み込む唯一の経路）は、
   プロセス内で1本の待ち行列に直列化してある。**`cacheDir` を差し替えていないだけの呼び出しも、
   この待ち行列を通る——通さないと、差し替えている最中の値が漏れて見えてしまう。
