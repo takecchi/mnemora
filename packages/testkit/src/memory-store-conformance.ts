@@ -3393,6 +3393,65 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(reloaded?.strength).toBeCloseTo(initialStrength, 6);
     });
 
+    // -------------------------------------------------------------------
+    // 使用報告による強化は memory_events に書かない
+    // （docs/memory-model.md §11 行4 の 2026-09-26 改訂、Issue #871）。
+    // -------------------------------------------------------------------
+
+    it("⚠ reinforce は memory_events に1行も積まない（docs/memory-model.md §11 行4、Issue #871）", async () => {
+      // 「使われたか」の記録は recall_usages の行の存在で表す——監査ログに同じ事実を
+      // 二重には持たない、という決定そのものを縛る。今の振る舞いの固定であり、
+      // 望ましい姿の主張ではない。
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memory = await store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1" }));
+      const before = await listEventsForMemory(ctx, memory.id);
+
+      const reinforcedAt = new Date(memory.recordedAt.getTime() + 1000 * 60 * 60 * 24 * 30);
+      const reinforced = await store.reinforce(ctx, memory.id, reinforcedAt);
+
+      // 前提: reinforce 自体は効いている（何も起きていないなら「増えない」は無意味な緑）。
+      expect(reinforced.lastReinforcedAt?.getTime()).toBe(reinforcedAt.getTime());
+
+      const after = await listEventsForMemory(ctx, memory.id);
+      expect(after).toHaveLength(before.length);
+    });
+
+    it("⚠ reinforceMany（任意メソッド、あれば）も memory_events に1行も積まない（Issue #874/#871）", async () => {
+      const store = await createStore();
+      if (typeof store.reinforceMany !== "function") {
+        // 任意メソッド——実装していない adapter ではこの歯は成立しない（skip 相当）。
+        return;
+      }
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryA = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "reinforce-many-events-a" }),
+      );
+      const memoryB = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "reinforce-many-events-b" }),
+      );
+      const beforeA = await listEventsForMemory(ctx, memoryA.id);
+      const beforeB = await listEventsForMemory(ctx, memoryB.id);
+
+      const reinforcedAt = new Date(memoryA.recordedAt.getTime() + 1000 * 60 * 60 * 24 * 30);
+      const [resultA, resultB] = await store.reinforceMany(
+        ctx,
+        [memoryA.id, memoryB.id],
+        reinforcedAt,
+      );
+
+      // 前提: reinforceMany 自体は効いている。
+      expect(resultA?.lastReinforcedAt?.getTime()).toBe(reinforcedAt.getTime());
+      expect(resultB?.lastReinforcedAt?.getTime()).toBe(reinforcedAt.getTime());
+
+      const afterA = await listEventsForMemory(ctx, memoryA.id);
+      const afterB = await listEventsForMemory(ctx, memoryB.id);
+      expect(afterA).toHaveLength(beforeA.length);
+      expect(afterB).toHaveLength(beforeB.length);
+    });
+
     it("⚠ createMemory は値域の外の strength を拒む（ADR 0078）", async () => {
       // **`strength` は `total = similarity × decay × tagMatch × freshness × strength` に
       // 掛かる係数であり、上限が無いと値を1つ大きく書いた Memory がそのテナントの想起を
