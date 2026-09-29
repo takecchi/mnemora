@@ -42,8 +42,8 @@
   ## 案A: `idx_memories_digest_band` 部分索引
 
   1. **`(tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC) WHERE status IN
-     ('active', 'contested')` の部分索引を足す**（`packages/postgres/migrations/0028_digest_band_index.sql`。番号が 0027 を飛ぶのは、
-     同じ時期に PR #1444 が `0027_erase_tenant_fk_indexes.sql` を持つため。`runMigrations` は
+     ('active', 'contested')` の部分索引を足す**（`packages/postgres/migrations/0028_digest_band_index.sql`。この PR は当初 `0027` を名乗っていたが、PR #1444 が
+     `0027_erase_tenant_fk_indexes.sql` を先に持ったので `0028` に振り直した。`runMigrations` は
      ファイル名の昇順で未適用のものを適用するだけで、番号の連続は要求しない）。
      - `status IN (...)` を索引の**列**ではなく**部分述語**にする——複数値の等値条件を
        列に含めると、B-tree は値ごとに別々の範囲になり `ORDER BY <expr> DESC, id DESC`
