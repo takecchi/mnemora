@@ -201,19 +201,58 @@ knownPredicatesFromStore: true }`）:
 の誤検出は3回とも残った——「効かないもの」節の予想どおりである。
 
 ⚠ **`real=0` は確認できなかった。**3回とも `LLM seed=37 real=2`
-（embedding は3回とも `real=0`）。**real になった2件は、いずれも
+（embedding は3回とも `real=0`）。real になった2件は、いずれも
 `other-period-city-this-year` の turn#2・turn#4（filler「新しい趣味を始めようと
 思っている」「相談したいことがある」）の claim key 派生呼び出しであり、種カセット
-（`answer.claim-key.known-predicates-{1,2,3}.json`）にヒットしなかった**——ダミーの
+（`answer.claim-key.known-predicates-{1,2,3}.json`）にヒットしなかった——ダミーの
 API キーで 401 になり、`claimKeyFailure` として捕まった（`observe()` 自体は例外に
-ならない。claim key が付かないので検出は試みられない）。この2ターンは
-`work_location`（本 ADR が直した対）とは無関係な filler であり、`other-period-city-this-year`
-のターン0（実際に測りたい対）は3回とも種カセットにヒットしている
-（`real` に含まれない）。**原因は特定していない**——この診断スクリプトが選ぶ6ケースの
-組み合わせ・実行順が、`known-predicates-N.json` を記録した元の実行（14ケース全部を
-含む、ADR 0329 の記録手順）と厳密に一致していないために、`knownPredicatesFromStore` が
-組み立てる語彙ヒントの文言が2箇所だけ食い違った可能性がある。**headline の結果
-（上の表）には影響しない**——real になった2ターンは対象の claim key を持たないため。
+ならない。claim key が付かないので検出は試みられない）。
+
+**原因は実行順ではない。原因は、本 ADR の決定1が直した対象そのもの
+（Sapporo/Fukuoka の `work_location`）が、後続の filler の語彙ヒントに新しく
+入ってきたことである。**
+
+【実測 2026-09-29、実装枝、`OpenAILLMProvider.prototype.complete`/`completeStructured`
+を一時的に monkey-patch して 401 に落ちる直前の `PromptSpec.system` を横取りする
+追跡外の確認スクリプト（`measure-claim-key-835-mgr-check.ts`、コミットしていない）を
+seed 1〜3 で実行】real になった2呼び出しが実際に送ろうとした system プロンプトは、
+3シードすべてで「既知の predicate 候補一覧: `work_location`」の1語だけだった
+（`deriveClaimKeys` が turn#0 で Sapporo/Fukuoka に割り当てる predicate 名は LLM 呼び出し
+ごとに揺れる——seed 1・3 は `work_location`、seed 2 は `working_location`——が、
+**語彙ヒントが1語だけで、その1語が turn#0 の work_location 系 predicate である**という
+構造は3シードとも同じだった）。
+
+機序は `listActiveClaimPredicates`（`packages/postgres/src/memory-store.ts`、
+`status = 'active'` の predicate だけを返す）である。turn#0 の直後、決定1（本 ADR）の
+除外により Sapporo/Fukuoka の2件は互いに `contested` にならず**両方とも `active` の
+まま残る**——このため turn#2 以降の `listActiveClaimPredicates` がこの predicate を
+拾い、無関係な filler の語彙ヒントへ加える。
+
+対して `answer.claim-key.known-predicates-{1,2,3}.json`（3ファイルとも）には、
+この2つの filler の claim key 派生呼び出しに `work`/`working` を含む語彙ヒントが
+付いた記録が1件も無い（3ファイル全体を `work`（大小無視）で機械的に検索して確認——
+【現物】）。**理由**: この3ファイルを記録した時点の main は、既に本 ADR の (a) の
+誤検出を持っていた——turn#0 で Sapporo/Fukuoka が互いを誤って `contested`
+（非 `active`）にしていたため、記録時点では turn#2 以降の
+`listActiveClaimPredicates` が常に空を返していた（記録に残る該当呼び出しは、
+語彙ヒントの無い system プロンプトである）。**⟹ 本 ADR が (a) を直した副作用として、
+Sapporo/Fukuoka が `active` のまま残るようになり、後続の filler 2ターンの語彙ヒントが
+記録と食い違うようになった——候補1が意図どおりに効いた結果である。**
+
+**headline の結果（上の表）には影響しない**——real になった2ターンは対象の claim key
+（`work_location`）を持たない filler であり、訂正4件・`other-period-city-this-year`
+のターン0（実際に測りたい対）は3回とも種カセットにヒットしている。
+
+**確かめていないこと**: 401 で claim key 派生が落ちたこの2ターンは、`claimKeyFailure`
+を持ったまま claim key 無し（`claim_key_subject`/`claim_key_predicate` とも `NULL`）で
+保存され、`detectClaimKeyContested` 自体が呼ばれない（`contestedDetection: []`）。
+**この2つの filler が、候補1の適用後に実 API の下で互いに `contested` になるかどうかは、
+この記録の再生では判定できていない。**issue コメント
+[5860966614](https://github.com/takecchi/mnemora/issues/835#issuecomment-5860966614)
+が実 API（gpt-4o-mini、main、3回中2回）で観測した「filler どうしの対の成立」に相当する
+事象が候補1の適用後も起きるかは、実 API を当てないと分からない——ダミー鍵での記録の
+再生は、この2ターンについては構造的に判定できない（両方とも claim key 自体が
+付かないため）。
 
 ## 効かないもの
 
@@ -283,6 +322,11 @@ pnpm --filter @mnemora/core exec vitest run \
   絡んだときの振る舞い。本 ADR は触れていない。
 - **U3・U4**（issue #835 の未決点、回答の質への影響・`[矛盾候補:]` の確度）は本 ADR の
   範囲外。
+- **`other-period-city-this-year` の filler 2件（turn#2・turn#4）が、候補1の適用後に
+  実 API の下で互いに `contested` になるか。**上の「測ったこと」節のとおり、記録の
+  再生ではこの2件の claim key 派生がダミー鍵の 401 で落ち、claim key 自体が付かない
+  （`detectClaimKeyContested` が呼ばれない）ため、この記録の再生では構造的に判定
+  できない。
 
 ## ADR 0324 決定5・決定6 との関係
 
