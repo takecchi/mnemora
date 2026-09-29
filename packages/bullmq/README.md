@@ -3,15 +3,13 @@
 BullMQ で `runtime.tick()` を駆動する役
 （[docs/decisions/0325-bullmq-tick-driver.md](../../docs/decisions/0325-bullmq-tick-driver.md)）。
 
-## ⚠ まだ npm には出ていない
+## npm への公開
 
-**このパッケージは、npm へ公開する準備中である**（Issue #205、オーナー回答 2026-09-28）。
-`scripts/publish-targets.mjs` の publish 対象には加わっているが、**初版はまだ手元から
-publish（bootstrap）されていない**——`npm view @mnemora/bullmq` は 2026-09-29 時点で
-`404 Not Found` を返す（この repo の担い手が実測）。⟹ 下の「インストール」の
-コマンドは、**bootstrap が済むまでは動かない。** 経緯とオーナー向けの手順は
-[docs/release-v1.md](../../docs/release-v1.md) の `@mnemora/bullmq` 初回 publish の節と、
-[ADR 0325](../../docs/decisions/0325-bullmq-tick-driver.md) の追記を見ること。
+**`v1.1.0` から npm に出ている**（Issue #205）。初版 `1.1.0` は 2026-09-30 にオーナーが手元から
+publish した（bootstrap。手順は [docs/release-v1.md](../../docs/release-v1.md) の `@mnemora/bullmq`
+初回 publish の節）。⚠ **この初版には provenance が付いていない**——手元からの publish は
+OIDC を経由しないため。次の版からは、ほかの `@mnemora/*` と同じく Release の publish ワークフローが
+provenance 付きで上げる。
 
 ## ⚠ `Scheduler` を実装しない
 

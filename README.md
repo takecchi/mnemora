@@ -291,7 +291,7 @@ adapter を自作してテストするなら `@mnemora/testkit` も devDependenc
 - [packages/anthropic/README.md](./packages/anthropic/README.md)
 - [packages/testkit/README.md](./packages/testkit/README.md)
 - [packages/local-embedding/README.md](./packages/local-embedding/README.md)（埋め込みを手元の CPU で回す。API キーは要らないが、初回にモデルを取得する）
-- [packages/bullmq/README.md](./packages/bullmq/README.md)（BullMQ で `runtime.tick()` を駆動する。Redis が要る。⚠ **npm 公開の準備中——まだ publish されていない**。Issue #205）
+- [packages/bullmq/README.md](./packages/bullmq/README.md)（BullMQ で `runtime.tick()` を駆動する。Redis が要る。`v1.1.0` から npm に出ている）
 
 ---
 

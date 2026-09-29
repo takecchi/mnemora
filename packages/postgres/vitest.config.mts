@@ -43,8 +43,10 @@ const SERIAL_TEST_FILES = [
   // Issue #1207 / ADR 0383: 同上——pg_locks を読む（eraseTenant している最中に
   // 別テナントへの書き込みが待たされないことを、自分の pid のロック mode で確認する）。
   "src/__tests__/erase-tenant-concurrent-other-tenant.postgres.test.ts",
-  // worker 専用 DB の `memories` に `ANALYZE` を明示的に打ち、同じ DB を後から使う
-  // ファイルのプランの見積もりを変えうるもの（Issue #1415、ADR 0374）。
+  // 統計が「無い」状態（`reltuples` の有無）を意図して作り、その有無の移り変わりを
+  // 確かめるもの（Issue #1415、ADR 0374 の 2026-09-30 追記「直列の群へ入れる基準を
+  // 書き直す」）。統計を「使う」EXPLAIN の歯は、reset の後に列を絞らない
+  // `ANALYZE memories` を打ってから assert する限り、並列の群でよい（同じ追記）。
   "src/__tests__/recall-roundtrip-count.postgres.test.ts",
   "src/__tests__/search-many-primary-key-lookup.postgres.test.ts",
   "src/__tests__/search-primary-key-lookup.postgres.test.ts",

@@ -518,3 +518,40 @@ __tests__/*.ts scripts/*.mjs` で確認したが、`README.md` の内容を検�
   確認できない。
 - **CI 全体の緑。** この PR を出した後、`node scripts/ci-green-check.mjs --pr <番号>`
   で確認する（下記、報告参照）。
+
+---
+
+## 追記（2026-09-30）—— ロックモードの実測は `ShareLock` であり、`ACCESS EXCLUSIVE` ではなかった
+
+⛔ 上の本文は1バイトも書き換えていない。同じ形で追記する。
+
+クローン miku の委譲先が書いた（オーナーではない）。レビューで見つかった所見を受けて書く。
+
+上の「決定3」は、`ANALYZE` の性質を際立たせる対比として**「素の `CREATE INDEX`
+（`ACCESS EXCLUSIVE` を取り、`memories` への全ての書き込みを止める——[ADR 0062](
+./0062-contested-with-id-fk-index.md) (c) が実測・記録済み）とは性質が異なり」**と
+書いていた。**この `ACCESS EXCLUSIVE` という記述は、参照先の
+[ADR 0062](./0062-contested-with-id-fk-index.md) (c) 自身の2026-09-29追記で
+訂正済みだった**——実測し直した結果、素の（`CONCURRENTLY` を付けない）
+`CREATE INDEX` が `memories` に取るロックは `ShareLock` であり、読み取り
+（`SELECT`）は止めず、書き込み（`INSERT`/`UPDATE`/`DELETE`）だけを止める
+（同じ訂正は [ADR 0059](./0059-period-in-ann-stage.md) の同日追記にもある）。
+本 ADR は ADR 0062 が訂正される**前**（2026-09-16）に書かれたため、この訂正を
+引き継げていなかった。
+
+⟹ **決定3の対比は「読み書きすべてを止める `ACCESS EXCLUSIVE`」対「何も止めない
+`SHARE UPDATE EXCLUSIVE`」ではなく、「書き込みだけを止める `ShareLock`」対
+「何も止めない `SHARE UPDATE EXCLUSIVE`」である。**「`ANALYZE` は書き込みを止めない
+設計だと文書からは読める」という決定3の結論そのものは変わらない——訂正されるのは
+対比先（素の `CREATE INDEX`）の記述だけである。
+
+**同じ誤り（素の `CREATE INDEX` = `ACCESS EXCLUSIVE`）が残っている他の場所**:
+`packages/postgres/migrations/0003_period_ann_stage_index.sql`・
+`packages/postgres/migrations/0008_memories_lexical_index.sql` のコメントにも
+同じ誤りが残っているが、migration のチェックサムに響くため直していない
+（`packages/postgres/src/migrate.ts` の適用済みマイグレーションのチェックサム検査、
+ADR 0032 参照）。`packages/postgres/src/migrate.ts` の `runAnalyzeMemories` の doc
+コメント、`packages/postgres/src/trigram-lexical-store.ts` の
+`ensureTrigramLexicalFunctions`/`createOptionalTrigramIndex` の doc コメント、
+[ADR 0319](./0319-optional-trigram-lexical-store.md) の該当箇所は、この訂正と
+あわせて直した（本 PR、別コミット）。
