@@ -66,7 +66,11 @@
      を追加し、`upsertProposedLabels` の呼び出しごとに書き込み、`purgeMemory` で読んで
      消費する形にした。`packages/testkit` 側は `supersedeWithNewMemories` の
      ロールバック（CAS 失敗時に「まだ何も書いていない」へ戻す既存の作法）にも、この
-     新しい `memoryLabels` を対象として組み込んだ。
+     新しい `memoryLabels` を対象として組み込んだ。`packages/testkit` の
+     `InMemoryMemoryStore` は公開の fixture なので、`.d.ts` に private メンバ
+     `memoryLabels`・`memoryLabelKey` が現れる（公開 API の snapshot
+     `scripts/__snapshots__/public-api/testkit.d.ts` を更新した）。`private` なので
+     利用者のコードからは参照できず、型としては非破壊である（PR #1114 の `rawGet` と同じ扱い）。
 
   3. **(a) の実装は破壊的変更として数える。** `packages/testkit` の conformance
      suite（`describeMemoryStoreConformance`）に、この3点（tags/attributes/claim key

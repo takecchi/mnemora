@@ -1388,7 +1388,12 @@ store の中は変わらない」を満たしていなかった（この変更�
 （`memory_labels` 相当）を外して `proposedCount` を減らし、このテナントの
 `recalls` の `IndexBand.digestBand` からこの `memoryId` のエントリを見つけて
 `digest` をトゥームストーンへ書き換えるようになった。**型は変えていない**
-（`purgeMemory?` のシグネチャ自体は同じ）——中身・移行の手順は
+（`purgeMemory?` のシグネチャ自体は同じ）。公開 API の型の差分
+（`scripts/__snapshots__/public-api/testkit.d.ts`）は、`@mnemora/testkit` の
+`InMemoryMemoryStore` に private メンバ `memoryLabels`・`memoryLabelKey` が増えたこと
+だけである——`private` なので利用者のコードからは参照できず、このクラスは以前から
+private メンバを持つので型の互換の性質も変わらない（PR #1114 の `rawGet` と同じ扱い）。
+破壊的と数える理由は型ではなく、下の conformance と実行時の振る舞いである。中身・移行の手順は
 [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`MemoryStore.purgeMemory?`
 が消す範囲を広げた」の項目）を見ること。**ここには複製しない。**
 

@@ -535,6 +535,10 @@ PR #1393・Issue #1232）になった。**
   いずれも `content`/`digest`/`purgedAt` と同じトランザクションで行う——CAS が
   弾かれれば（対象が `forgotten` でない・既に purge 済み）、これらの書き込みも
   一切起きない。**型は変えていない**（`purgeMemory?` のシグネチャは同じ）。
+  公開 API の型の差分は、`@mnemora/testkit` の `InMemoryMemoryStore` に private メンバ
+  `memoryLabels`・`memoryLabelKey` の2つが増えたことだけである（Fake が Memory ごとの
+  label の紐付けを持つようになったため。このクラスは以前から private メンバを持つので、
+  型の互換の性質は変わらない——PR #1114 の `rawGet` と同じ扱い）。
 
   **残ると決めたもの（(b)、これまでどおり）**: `recalls.query`（`memoryId` で
   特定できないため対象外）、`memories.content_hash`、`memories.provenance.speaker`・
