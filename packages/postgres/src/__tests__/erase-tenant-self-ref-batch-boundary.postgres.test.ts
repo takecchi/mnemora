@@ -159,7 +159,7 @@ describe("自己参照がバッチ境界をまたいでも eraseTenant は全部
     const eventFor = (memoryId: string) => ({
       tenantId: T,
       memoryId: memoryId as never,
-      kind: "contested" as const,
+      kind: "updated" as const,
       at: new Date(),
       actor: { type: "system" as const },
       meta: {},
