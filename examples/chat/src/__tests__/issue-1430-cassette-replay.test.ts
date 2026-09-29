@@ -48,10 +48,6 @@ function loadRawCassette(fileName: string): RawCassette {
   return JSON.parse(readFileSync(cassettePath(fileName), "utf8")) as RawCassette;
 }
 
-function questionSuffix(question: string): string {
-  return `\n\n質問: ${question}`;
-}
-
 /** 矛盾候補欄に非対称文面（「訂正の可能性」/「訂正された可能性」）を含む、記憶経路の回答プロンプトを1件探す。 */
 function findAsymmetricMnemoraEntry(cassette: RawCassette): {
   key: string;
