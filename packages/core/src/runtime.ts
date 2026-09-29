@@ -23,6 +23,7 @@ import type {
   ExtractionOutcome,
 } from "./extraction.js";
 import { assertLLMContentNotBlank } from "./llm-content.js";
+import { classifyValidity } from "./validity.js";
 import { heuristicTokenCounter } from "./heuristic-token-counter.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
@@ -946,11 +947,17 @@ export interface ConsolidationResult {
  * - **`{ query }` は、`recall()` の `memories` を `retrievedVia` によらず全部採る。**連想枠は既定 on
  *   （ADR 0337）なので、クエリには当たっていない「連想で返った」`active` な記憶も材料として適格になる。
  *   クエリに当たったものだけを材料にしたいなら `query.association: null` を渡すこと。
- * - **`{ memoryIds }` は有効期間（`validFrom`/`validUntil`）を見ない。**適格性は `status === 'active'`
- *   だけである。内省の記憶は有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れの記憶を
- *   材料に渡すと、それを材料にした内省の記憶が期限の無い `active` な記憶として `recall()` に出る
- *   （[Issue #1188](https://github.com/takecchi/mnemora/issues/1188) のコメント。引き継ぎ方は決めていない）。
- *   `{ query }`・`{ seedMemoryId }` は `recall()` の期間のゲートを通るので、期限切れの記憶は材料に入らない。
+ * - **`{ memoryIds }` は、忘却の床（`decayFloorAt`）を見ない。**（忘却の床はコードを読んで確かめた
+ *   だけで、実測はしていない）。`{ query }`・`{ seedMemoryId }` の近傍は `recall()` の忘却のゲートを通る。
+ * - ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）: どの形でも、いまの
+ *   時点で有効期間（`validFrom`/`validUntil`）の外にある記憶は材料にしない**（`basis` に `"expired"`/
+ *   `"not_yet_valid"`。{@link ReflectBasisOutcome} 参照）。それまでは `{ memoryIds }` が有効期間を見ず、
+ *   統合先と同じく内省の記憶も有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れの記憶の
+ *   内容が期限の無い `active` な記憶として `recall()` に戻っていた。**この2026-09-27 追記自身に誤りがあった**
+ *   ——旧文は「`{ query }`・`{ seedMemoryId }` は `recall()` の期間のゲートを通るので、期限切れの記憶は材料に
+ *   入らない」と書いていたが、`{ seedMemoryId }` の種（`recall()` を通らずに候補に入る）と、`{ query }` に
+ *   `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶は、実際には材料に入っていた
+ *   （2026-09-29 に testkit の fixture で実測。`consolidate` の同日付の追記と同じ穴）。
  */
 export type ReflectTarget =
   | { memoryIds: MemoryId[] }
@@ -1026,16 +1033,44 @@ export type ReflectNothingReason = "no_eligible_basis" | "llm_declined";
  * - `"used"` — 実際に新しい Memory の `provenance.sources` に入った土台。
  * - `"not_found"` — その id の Memory がそもそも無い（`ConsolidateSourceOutcome` と同じ意味）。
  * - `"status_not_active"` — `status !== 'active'`（`forgotten` はここで確実に弾かれる）。
- * - `"basis_is_reflected"` — `status: 'active'` だが `provenance.kind === 'reflected'`。
- *   自己増幅（reflect の産物を土台にまた reflect すること）を形の側で止める。
+ * - `"expired"` — `status === 'active'` だが、いまの時点で有効期間が切れている
+ *   （`validUntil <= now`）。材料にしない。`validUntil` はその記憶の値。
+ * - `"not_yet_valid"` — `status === 'active'` だが、いまの時点でまだ有効期間が始まっていない
+ *   （`validFrom > now`）。材料にしない。`validFrom` はその記憶の値。
+ * - `"basis_is_reflected"` — `status: 'active'` で、いまの時点で有効期間の内側だが
+ *   `provenance.kind === 'reflected'`。自己増幅（reflect の産物を土台にまた reflect すること）を
+ *   形の側で止める。
  * - `"eligible"` — 土台として採れる状態だったが、この呼び出しでは結局使われなかった
  *   （`dryRun: true` で下見しただけ／LLM 呼び出しが失敗した／LLM が「無い」と答えた、
  *   のいずれか）。
+ *
+ * ⚠ **2026-09-29 変更（[Issue #1188](https://github.com/takecchi/mnemora/issues/1188)）:
+ * `"expired"`/`"not_yet_valid"` を足した。**それまでは、有効期間の外にある `active` な記憶も材料にして
+ * `used`/`eligible` にしていた。内省の記憶は有効期間を持たない（統合先と同じく ADR 0164
+ * 「射程外にしたもの」1）ので、期限切れ・未到来の事実が、期限の無い `active` な記憶として `recall()` に
+ * 戻っていた。
+ * - **判定は `status` の後・`basis_is_reflected` の前**に行う（`forgotten` で期限切れの記憶は、今どおり
+ *   `status_not_active`）。述語は `consolidate()` および `recall()` の期間のゲート
+ *   （`recall-runtime.ts` の `survivesValidityGate`、ADR 0164 決定1）と同じ `classifyValidity` を呼ぶ
+ *   （`./validity.js`、非公開）。時刻は `reflect` を呼んだ時点の `clock.now()`。逆転した区間
+ *   （`validFrom > validUntil`。Issue #1042）は `"expired"` になる。
+ * - **対象の形によらない。**`{ memoryIds }` だけでなく、`{ seedMemoryId }` の種（`recall()` を通らずに
+ *   必ず候補に入る）と、`{ query }` に `includeOutsideValidity: true` や過去の `validAt` を渡して集めた
+ *   記憶にも効く。
+ * - 内省の記憶の有効期間は今までどおり null（材料の区間を引き継がない）。
+ * - `dryRun` でも同じ値で名指しする。この値の要素は `nothingReason` の数え方にも入らない
+ *   （`no_eligible_basis` は今までどおり「eligible が0件」で判定する）。
+ * - 🔴 **`ReflectBasisOutcome` を網羅的に分岐している呼び出し側は、この2値を扱う必要がある。**
+ * - 破壊的変更とは数えない（union に値を足す変更は数えない。オーナーの回答、`docs/migration-v1.md` の
+ *   数え方の規律、`consolidate` の同日付の変更と同じ扱い）。同じ入力でも結果が変わる（材料にならず
+ *   `nothing_to_reflect` で返ることもある）。
  */
 export type ReflectBasisOutcome =
   | { memoryId: MemoryId; kind: "used" }
   | { memoryId: MemoryId; kind: "not_found" }
   | { memoryId: MemoryId; kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> }
+  | { memoryId: MemoryId; kind: "expired"; validUntil: Date }
+  | { memoryId: MemoryId; kind: "not_yet_valid"; validFrom: Date }
   | { memoryId: MemoryId; kind: "basis_is_reflected" }
   | { memoryId: MemoryId; kind: "eligible" };
 
@@ -3062,8 +3097,10 @@ export interface Runtime {
    *    種が見つからない、または種が forget・purge された記憶なら（Issue #1136）、`recall()` を
    *    呼ばず、対象は種の id 1件のみになる。
    * 2. `getMany` で一括読み。**この優先順で**分類する: 無ければ `not_found`、
-   *    `status !== 'active'` なら `status_not_active`、`active` かつ
-   *    `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を
+   *    `status !== 'active'` なら `status_not_active`、`active` かつ、いまの時点で有効期間
+   *    （`validFrom`/`validUntil`）の外なら `expired`/`not_yet_valid`（2026-09-29 追記、Issue #1188。
+   *    `consolidate()`・`recall()` と同じ `classifyValidity` 述語、`clock.now()` に対して見る）、
+   *    `active` かつ期間の内側で `provenance.kind === 'reflected'` なら `basis_is_reflected`（reflect の産物を
    *    土台にまた reflect する自己増幅を、形の側で止める）、それ以外は eligible。
    *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（大文字小文字だけが違う id を同じ呼び出しに
    *    混ぜたときは、渡された文字列どおりに突き合わせる）。
@@ -5869,6 +5906,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // 有効期間を持たない（ADR 0164「射程外にしたもの」1）ので、期限切れ・未到来の事実が、
     // 期限の無い `active` な記憶として `recall()` に戻るため。述語は `recall()` の期間のゲート
     // （`recall-runtime.ts` の `survivesValidityGate`、ADR 0164 決定1）と同じで、対象の形によらない。
+    // ⚠ 2026-09-29 追記: 述語そのものは `classifyValidity`（`./validity.js`）に切り出した——
+    // `reflect()` も同じ関数を呼ぶ（1箇所に置く規律、`classifyValidity` の doc コメント参照）。
     const validAt = clock.now();
 
     const uniqueIds = Array.from(new Set(ids));
@@ -5889,13 +5928,9 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           kind: "status_not_active",
           status: memory.status as Exclude<MemoryStatus, "active">,
         });
-      } else if (memory.validUntil != null && memory.validUntil <= validAt) {
-        // 逆転した区間（Issue #1042）は、どの時点でも期間の外にある。`expired` を先に見る。
-        initialById.set(id, { kind: "expired", validUntil: memory.validUntil });
-      } else if (memory.validFrom != null && memory.validFrom > validAt) {
-        initialById.set(id, { kind: "not_yet_valid", validFrom: memory.validFrom });
       } else {
-        initialById.set(id, { kind: "active" });
+        const validity = classifyValidity(memory, validAt);
+        initialById.set(id, validity === null ? { kind: "active" } : validity);
       }
     }
 
@@ -6239,12 +6274,22 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     // 2. `getMany` で一括読み、id ごとに「まだ何も書いていない時点」の分類を固定する。
-    // 優先順: not_found → status_not_active → basis_is_reflected → eligible。
+    // 優先順: not_found → status_not_active → expired/not_yet_valid → basis_is_reflected → eligible。
+    // Issue #1188（2026-09-29 追記）: status の判定の後・provenance の判定の前に、いまの時点で
+    // 有効期間の外にある記憶を弾く。内省の記憶は有効期間を持たない（ADR 0164「射程外にしたもの」1）
+    // ので、期限切れ・未到来の記憶を材料にすると、その内容が期限の無い `active` な記憶として
+    // `recall()` に戻ってしまうため（`consolidate` の同じ判定と同じ理由・同じ述語）。
     type InitialClassification =
       | { kind: "not_found" }
       | { kind: "status_not_active"; status: Exclude<MemoryStatus, "active"> }
+      | { kind: "expired"; validUntil: Date }
+      | { kind: "not_yet_valid"; validFrom: Date }
       | { kind: "basis_is_reflected" }
       | { kind: "eligible" };
+
+    // 述語は `classifyValidity`（`consolidate` と同じ関数）——対象の形（memoryIds/query/seedMemoryId）
+    // によらず全候補に当てる。時刻は呼んだ時点の `clock.now()` で固定する（土台ごとに違う時刻を見ない）。
+    const validAt = clock.now();
 
     const uniqueIds = Array.from(new Set(ids));
     // store が返した id と渡された id の突き合わせ（`memoryLookupKeyFor` の doc。`forget` と同じ形）。
@@ -6264,10 +6309,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           kind: "status_not_active",
           status: memory.status as Exclude<MemoryStatus, "active">,
         });
-      } else if (memory.provenance.kind === "reflected") {
-        initialById.set(id, { kind: "basis_is_reflected" });
       } else {
-        initialById.set(id, { kind: "eligible" });
+        const validity = classifyValidity(memory, validAt);
+        if (validity !== null) {
+          initialById.set(id, validity);
+        } else if (memory.provenance.kind === "reflected") {
+          initialById.set(id, { kind: "basis_is_reflected" });
+        } else {
+          initialById.set(id, { kind: "eligible" });
+        }
       }
     }
 
@@ -6285,6 +6335,12 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         }
         if (cls.kind === "status_not_active") {
           return { memoryId: id, kind: "status_not_active", status: cls.status };
+        }
+        if (cls.kind === "expired") {
+          return { memoryId: id, kind: "expired", validUntil: cls.validUntil };
+        }
+        if (cls.kind === "not_yet_valid") {
+          return { memoryId: id, kind: "not_yet_valid", validFrom: cls.validFrom };
         }
         if (cls.kind === "basis_is_reflected") {
           return { memoryId: id, kind: "basis_is_reflected" };
