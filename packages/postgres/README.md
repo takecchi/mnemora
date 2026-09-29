@@ -352,13 +352,14 @@ ADR 0202 の「引き受けた負債1」を解消した）。
 - `uq_memories_extraction`
 - `uq_observations_external_id`
 
-### 関数（5）
+### 関数（6）
 
 - `mnemora_lexical_coverage`
 - `mnemora_lexical_normalize`
 - `mnemora_lexical_query_or`
 - `mnemora_lexical_query_terms`
 - `mnemora_lexical_query_tsqueries`
+- `mnemora_lexical_tsvector`
 
 ⚠ **引数シグネチャ（`(text)` 等）までは検査していない。**`CREATE OR REPLACE FUNCTION`
 で同名を別シグネチャに置き換えても、この歯は気づかない
@@ -393,6 +394,12 @@ PostgreSQL は**同名・別シグネチャの多重定義（オーバーロー�
 を `CREATE OR REPLACE FUNCTION` で置き換えている（語の途中の `"` を空白として扱う修正）。**引数・戻り値の
 シグネチャ（`(text) RETURNS tsquery[]`）は 0009 と同じ**で、同名・別シグネチャの多重定義は作っていない
 （関数は5つのまま）。⟹ 名前だけを見る形を据え置く判断（ADR 0204「引き受けた負債」1番）は変えていない。
+
+⚠ **2026-09-29 追記**: `migrations/0025_lexical_tsvector_fallback.sql`（Issue #1222、ADR 0364）が
+`mnemora_lexical_tsvector(text) RETURNS tsvector`（`LANGUAGE plpgsql`）を1本足した——`CREATE FUNCTION`
+（`OR REPLACE` ではない、上の判断が対象にしている形のまま）で、以後変更していない。**関数は6つになった**
+（上の「5関数」という当時の実測件数は、この commit より前の履歴を指すものとして書き換えていない）。
+シグネチャの重複は無く、⟹ 名前だけを見る形を据え置く判断は変えていない。
 
 ### 実行時に増える系列（埋め込み空間ごと）
 

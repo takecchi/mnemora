@@ -15,6 +15,7 @@ import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresEventStore } from "../event-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { PostgresLexicalStore } from "../lexical-store.js";
 import {
   closeTestClient,
   getTestClient,
@@ -23,13 +24,18 @@ import {
 } from "./test-db.js";
 
 /**
- * 大きさの端の今の振る舞いを縛る（振る舞いは変えていない）。
+ * 大きさの端の今の振る舞いを縛る。
  *
- * 1. LLM が失敗したときの全文フォールバック（Issue #1222）: 語の多い本文で tsvector が 1MB を超えると、
- *    `@mnemora/postgres` ではフォールバックの Memory が書けず、`observe()` が DB の例外を投げる。
- *    Observation と extract ジョブは残り、Memory は0件。testkit の fixture は1件残す。
+ * 1. LLM が失敗したときの全文フォールバック（Issue #1222、migrations/0025・ADR 0364で直した）:
+ *    語の多い本文で tsvector が1MBを超えても、`@mnemora/postgres` はフォールバックの Memory を
+ *    書ける——`mnemora_lexical_tsvector`（`idx_memories_lexical` の式）が、1MBを超える本文
+ *    だけ先頭150,000文字で tsvector を作り直すため。**本文は1文字も欠けずに `memories.content`
+ *    へ残る**——縮退するのは語彙**索引**（先頭150,000文字だけが語彙検索の対象になる）だけで、
+ *    保存される本文そのものではない。⚠ **これは 2026-09-27 に書いた「Postgres では動かない」
+ *    という記録（PR #1224、`docs/memory-model.md` §4・`extraction.ts` の同日追記）を反転させる**
+ *    ——このファイルの歯自体も、その反転後の振る舞いを縛る側へ書き換えた。
  * 2. claimKey の主語・述語（Issue #1074 の続き、`Ctx` の doc）: 索引の1行の上限を超える長さは、
- *    Postgres だけが例外にする。
+ *    Postgres だけが例外にする（この振る舞いは本 PR の対象外——変えていない）。
  */
 
 const shared = {
@@ -134,21 +140,45 @@ describe("LLM が失敗したときの全文フォールバックと本文の大
       if (kit.counts) expect((await kit.counts()).memories).toBe(1);
     });
 
-    it(`${name}: 約1.2MB の語の多い本文`, async () => {
+    it(`${name}: 約1.2MB の語の多い本文でも、フォールバックの Memory が1件残り、本文が1文字も欠けない（Issue #1222、migrations/0025）`, async () => {
       const kit = await makeKit();
-      const call = kit.runtime.observe(ctx, { kind: "utterance", text: manyWords(1_200_000) });
+      // 先頭と末尾に一意な語を置く——「先頭部分の語は語彙検索で引ける」ことと
+      // 「本文は丸ごと保存される（末尾の語も文字として残る）」ことを、別々に確かめるため。
+      const text = `MNEMORA-FRONT-MARKER ${manyWords(1_200_000)} MNEMORA-TAIL-MARKER`;
+      const result = await kit.runtime.observe(ctx, { kind: "utterance", text });
+
+      expect(result.extraction).toBe("llm_failed_whole_observation");
+      expect(result.memoryIds).toHaveLength(1);
+      if (kit.counts) expect((await kit.counts()).memories).toBe(1);
+
+      // 本文は1文字も欠けずに保存される（縮退するのは語彙索引だけ）。
+      const memory = await kit.memoryStore.get(ctx, result.memoryIds[0]!);
+      expect(memory?.content).toBe(text);
+
       if (name === "Postgres") {
-        await expect(call).rejects.toThrow();
-        await call.catch((error: unknown) => {
-          const cause = (error as { cause?: { message?: string } }).cause;
-          expect(cause?.message).toMatch(/string is too long for tsvector/);
+        // 先頭150,000文字の中に在る語は語彙検索で引ける。
+        const { db } = await getTestClient();
+        const lexicalStore = new PostgresLexicalStore(db);
+        const hits = await lexicalStore.search(ctx, "MNEMORA-FRONT-MARKER", {
+          limit: 10,
+          filter: { tenantId: ctx.tenantId },
         });
-        expect(await kit.counts!()).toEqual({ observations: 1, memories: 0, pendingExtract: 1 });
-      } else {
-        const result = await call;
-        expect(result.extraction).toBe("llm_failed_whole_observation");
-        expect(result.memoryIds).toHaveLength(1);
+        expect(hits.map((h) => h.memoryId)).toContain(result.memoryIds[0]);
       }
+    });
+
+    it(`${name}: 約1.2MB の語の多い本文を createMemory 直接で書いても通る（observe() 経由と同じ結論）`, async () => {
+      const kit = await makeKit();
+      const text = manyWords(1_200_000);
+      const create = kit.memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: "whole-observation-fallback-size-direct",
+          content: text,
+        }),
+      );
+      await expect(create).resolves.toMatchObject({ content: text });
     });
   }
 });

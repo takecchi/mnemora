@@ -53,13 +53,15 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  * 持つ」）。**`decayFloorAtAfter` は無い**——`LexicalFilter` がそもそも持っていない
  * フィールドである（`interfaces/lexical-store.ts` の doc、ADR 0011）。
  *
- * **🔴 本文側と query 側で、通す関数が違う。**どちらも
- * `migrations/0008_memories_lexical_index.sql` に在り、実測の根拠もそこに書いてある。
+ * **🔴 本文側と query 側で、通す関数が違う。**
  *
  * | 側 | 関数 | 何をするか |
  * |---|---|---|
- * | 本文（索引式） | `mnemora_lexical_normalize` | ASCII の連なりの**前後に空白を入れる** |
- * | クエリ | `mnemora_lexical_query_terms` | **非 ASCII の連なりを空白に落とす** |
+ * | 本文（索引式） | `mnemora_lexical_tsvector`（`migrations/0025_*.sql`、Issue #1222） | `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が1MBを超える本文だけ先頭150,000文字で作り直す |
+ * | クエリ | `mnemora_lexical_query_terms`（`migrations/0008_*.sql`） | **非 ASCII の連なりを空白に落とす** |
+ *
+ * `mnemora_lexical_normalize`（ASCII の連なりの前後に空白を入れる）は
+ * `migrations/0008_*.sql` に在り、実測の根拠もそこに書いてある。
  *
  * **非対称なのは意図である。**両方に同じ関数を通すと、日本語の残りが1つの語彙になって
  * `websearch_to_tsquery` の既定（AND）で結ばれ、
@@ -79,7 +81,9 @@ const TS_RANK_CD_NORMALIZATION = 32 | 1;
  * 返らなかった。`mnemora_lexical_query_or` はクエリを語ごとに分解し、
  * 語ごとの tsquery を `|`（OR）で結ぶ。`mnemora_lexical_coverage` は
  * 一致した語彙数 ÷ クエリ語彙の総数を返す——これが `LexicalHit.coverage` になる。
- * **`WHERE` の左辺（索引式）は0008 と1バイトも変えていない**——OR で結んだ
+ * **`WHERE` の左辺（索引式）は0009 の時点から1バイトも変えていない**（0025 で
+ * `mnemora_lexical_normalize` 直書きから `mnemora_lexical_tsvector` へ差し替えたのは
+ * 索引の定義側であり、この式の組み立て方自体は変えていない）——OR で結んだ
  * tsquery も同じ GIN 式索引で引ける（`@@` の右辺が変わるだけで、左辺の式が
  * 変わらなければ式索引は選ばれ続ける）。
  *
@@ -213,21 +217,24 @@ export function buildLexicalSearchSelect(
   }
 
   // 🔴 本文側と query 側で、通す関数が違う（migrations/0008_*.sql に実測の根拠が在る）。
-  // 本文側は mnemora_lexical_normalize（ASCII の連なりの前後に空白を入れる）、
-  // query 側は mnemora_lexical_query_terms（非 ASCII の連なりを空白に落とす。
-  // mnemora_lexical_query_or の内部で呼ばれる）。日本語を残すと、その全体が1語彙に
-  // なって AND で結ばれ、「PROJ-1234について前に何か言ってたっけ？」が
+  // 本文側は mnemora_lexical_tsvector（migrations/0025、Issue #1222）——
+  // `to_tsvector('simple', mnemora_lexical_normalize(content))` を試し、tsvector が
+  // 1MB を超える本文だけ本文の先頭150,000文字で作り直す。1MB に収まる本文では
+  // 今までと1バイトも違わない tsvector を返す（ADR 0364「歯」節、実測で完全一致を
+  // 縛っている）。query 側は mnemora_lexical_query_terms（非 ASCII の連なりを空白に
+  // 落とす。mnemora_lexical_query_or の内部で呼ばれる）。日本語を残すと、その全体が
+  // 1語彙になって AND で結ばれ、「PROJ-1234について前に何か言ってたっけ？」が
   // 1件も引けなくなる（ADR 0084 §2.1）。
   //
   // 🔴 ADR 0092: クエリ全体を1つの tsquery にするのではなく、語ごとに OR で結ぶ
-  // （mnemora_lexical_query_or）。`WHERE` の左辺（索引式）は 0008 と同じ式のまま——
+  // （mnemora_lexical_query_or）。`WHERE` の左辺（索引式）は 0025 と同じ式のまま——
   // 変えているのは `@@` の右辺（tsquery そのものの組み立て方）だけである。
   //
   // Issue #878: ここ（WHERE・rank）は書き換えていない——`query` の具体的な値が
   // プランナから見える形を保つため（このファイル冒頭の buildLexicalSearchSelect doc
   // 「WHERE/ORDER BY 側の mnemora_lexical_query_or(query) は書き換えていない」参照）。
   const tsQueryOr = sql`mnemora_lexical_query_or(${cappedQuery})`;
-  conditions.push(sql`to_tsvector('simple', mnemora_lexical_normalize(content)) @@ ${tsQueryOr}`);
+  conditions.push(sql`mnemora_lexical_tsvector(content) @@ ${tsQueryOr}`);
   const whereClause = sql.join(conditions, sql` AND `);
 
   return sql`
@@ -241,15 +248,16 @@ export function buildLexicalSearchSelect(
       -- migrations/0009_memories_lexical_or_coverage.sql の mnemora_lexical_coverage
       -- と同じ式（一致した語彙数 / クエリ語彙の総数）。query を渡して呼ぶ代わりに、
       -- 上の qc で1回だけ計算した terms を受け取る形にしてある。式そのものは
-      -- 1バイトも変えていない（このファイル冒頭の buildLexicalSearchSelect doc 参照）。
+      -- （mnemora_lexical_tsvector への差し替え以外）1バイトも変えていない
+      -- （このファイル冒頭の buildLexicalSearchSelect doc 参照）。
       (
         SELECT count(*) FILTER (
-                 WHERE to_tsvector('simple', mnemora_lexical_normalize(content)) @@ tq
+                 WHERE mnemora_lexical_tsvector(content) @@ tq
                )::float8 / NULLIF(count(*), 0)
         FROM unnest(qc.terms) AS tq
       ) AS coverage,
       ts_rank_cd(
-        to_tsvector('simple', mnemora_lexical_normalize(content)),
+        mnemora_lexical_tsvector(content),
         ${tsQueryOr},
         ${TS_RANK_CD_NORMALIZATION}
       ) AS rank
@@ -265,7 +273,9 @@ export function buildLexicalSearchSelect(
  * ADR 0084、[ADR 0092](../../../docs/decisions/0092-lexical-or-coverage.md)、Issue #106）。
  *
  * `MemoryStore` が真実の源であり、この語彙索引（`migrations/0008_memories_lexical_index.sql`
- * の式索引）は `memories.content` の上に張った再構築可能な派生索引に過ぎない
+ * が作り、`migrations/0025_lexical_tsvector_fallback.sql`（Issue #1222）が式を
+ * `mnemora_lexical_tsvector(content)` へ作り直した式索引）は `memories.content` の
+ * 上に張った再構築可能な派生索引に過ぎない
  * （`VectorStore` と同じ非対称。`interfaces/lexical-store.ts` の doc）。
  * **書き込み口を持たない**——索引は `memories` への書き込みに自動で追随するため、
  * 同期の口が要らない（同 doc）。
