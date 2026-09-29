@@ -29,6 +29,7 @@ export declare const DEFAULT_LOCAL_EMBEDDING_DIMENSIONS = 256;
 export declare const DEFAULT_LOCAL_EMBEDDING_MODEL_ID = "ruri-v3-30m/sym";
 export declare const DEFAULT_LOCAL_EMBEDDING_PREFIX = "";
 export declare const DEFAULT_LOCAL_EMBEDDING_NUM_THREADS = 4;
+export declare const DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE = 128;
 export declare const DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS = 3;
 export declare function defaultLocalEmbeddingRetryDelayMs(attempt: number): number;
 export interface LocalEmbeddingRetryOptions {
@@ -43,6 +44,7 @@ export interface LocalEmbeddingProviderOptions {
     prefix?: string;
     cacheDir?: string;
     numThreads?: number;
+    maxBatchSize?: number;
     revision?: string;
     createPipeline?: CreateLocalEmbeddingPipeline;
     retry?: LocalEmbeddingRetryOptions;

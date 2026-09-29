@@ -103,8 +103,32 @@ describe("retry.attempts: 0 以下は1回に丸める（コンストラクタの
   });
 });
 
-describe("embed(): 受け取った配列を分割せずに1回で推論する（README の peak RSS の節）", () => {
-  it("300件を渡すと、pipeline.embed は1回だけ、300件のまま呼ばれる", async () => {
+/**
+ * ⚠ 2026-09-29 更新（Issue #1141 / ADR 0358）: このブロックは以前
+ * 「embed(): 受け取った配列を分割せずに1回で推論する」という題で、件数によらず
+ * 常に1回であることを固定していた。**それは当時の振る舞いの棚卸しであって、
+ * 望ましい姿の主張ではなかった**（このファイル冒頭の docstring）。
+ * `maxBatchSize`（既定 128）の導入で、既定値以下は今までどおり1回のままだが、
+ * 既定値を超える件数は分割されるようになった——その新しい既定の振る舞いを、
+ * このブロックが改めて固定する。既定値以下でビット一致することは
+ * `max-batch-size.test.ts` がより詳しく測る。
+ */
+describe("embed(): 件数が maxBatchSize 以下なら1回、超えたら分割して推論する（README の peak RSS の節、Issue #1141 / ADR 0358）", () => {
+  it("既定値（128件）以下なら、pipeline.embed は1回だけ、渡した件数のまま呼ばれる", async () => {
+    const embed = vi.fn(async (texts: string[]) => vectors(texts.length));
+    const createPipeline: CreateLocalEmbeddingPipeline = async () => ({
+      maxInputTokens: 10,
+      countTokens: (texts) => texts.map(() => 1),
+      embed,
+    });
+    const provider = new LocalEmbeddingProvider({ createPipeline });
+    const texts = Array.from({ length: 100 }, (_, i) => String(i));
+    await expect(provider.embed(ctx, texts)).resolves.toHaveLength(100);
+    expect(embed).toHaveBeenCalledTimes(1);
+    expect(embed.mock.calls[0]?.[0]).toHaveLength(100);
+  });
+
+  it("300件を渡すと、既定の maxBatchSize（128）ずつ、128・128・44 の3回に分けて呼ばれる", async () => {
     const embed = vi.fn(async (texts: string[]) => vectors(texts.length));
     const createPipeline: CreateLocalEmbeddingPipeline = async () => ({
       maxInputTokens: 10,
@@ -114,8 +138,8 @@ describe("embed(): 受け取った配列を分割せずに1回で推論する（
     const provider = new LocalEmbeddingProvider({ createPipeline });
     const texts = Array.from({ length: 300 }, (_, i) => String(i));
     await expect(provider.embed(ctx, texts)).resolves.toHaveLength(300);
-    expect(embed).toHaveBeenCalledTimes(1);
-    expect(embed.mock.calls[0]?.[0]).toHaveLength(300);
+    expect(embed).toHaveBeenCalledTimes(3);
+    expect(embed.mock.calls.map((call) => call[0]?.length)).toEqual([128, 128, 44]);
   });
 });
 

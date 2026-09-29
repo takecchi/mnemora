@@ -379,5 +379,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0354](./0354-atomic-event-retention-purge.md) | 保持期間の読みと `memory_events` の削除を1つの原子的な操作にする（新しい任意メソッド） | 採用 (2026-09) |
 | [0355](./0355-inject-clock-into-store-writes.md) | 案1 — 時刻の欄を任意にし、runtime から注入した時計を store の書き込みへ渡す | 採用 (2026-09) |
 | [0356](./0356-pool-default-error-listener-warns-by-default.md) | `createPostgresClient` の `pool` に既定の `error` リスナーを付け、名乗って続行する | 採用 (2026-09) |
+| [0358](./0358-local-embedding-provider-splits-large-batches.md) | `LocalEmbeddingProvider` は既定で128件を超えるバッチを分割する（Issue #1141） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
