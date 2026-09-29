@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Ctx, LLMProvider, MemoryId, MemoryStore, Runtime } from "@mnemora/core";
-import { createRuntime } from "@mnemora/core";
+import type {
+  Ctx,
+  LLMProvider,
+  MemoryId,
+  MemoryStore,
+  Runtime,
+  StructuredRequest,
+} from "@mnemora/core";
+import { createRuntime, ExtractionResultSchema } from "@mnemora/core";
 import {
   InMemoryEventStore,
   InMemoryMemoryStore,
@@ -45,6 +52,21 @@ function makeLlm(next: { content: string; calls: number }): LLMProvider {
         memories: [{ content: next.content, provenanceKind: "stated" }],
       });
       return extracted.success ? extracted.data : req.schema.parse({ content: next.content });
+    },
+  };
+}
+
+/** 1回の observe で複数件の候補を返す LLM（`next.contents` の順に返す。呼ばれた回数を数える）。 */
+type MultiNext = { contents: string[]; calls: number };
+function makeMultiLlm(next: MultiNext): LLMProvider {
+  return {
+    complete: async () => ({ content: "unused" }),
+    completeStructured: async (_ctx, req) => {
+      next.calls += 1;
+      const extracted = req.schema.safeParse({
+        memories: next.contents.map((content) => ({ content, provenanceKind: "stated" as const })),
+      });
+      return extracted.success ? extracted.data : req.schema.parse({ content: next.contents[0] });
     },
   };
 }
@@ -248,6 +270,237 @@ for (const [name, makeKit] of KITS) {
       expect((await kit.memoryStore.get(ctx, d))!.status).toBe("active");
       expect((await kit.memoryStore.get(ctx, e))!.status).toBe("active");
       expect((await kit.memoryStore.get(ctx, f))!.status).toBe("forgotten");
+    });
+  });
+}
+
+// =====================================================================
+// Issue #1432 / ADR 0380: extractorVersion を跨いだ reextract は、前の版で退けた記憶を
+// 見落とさない。v1 の runtime で退け、v2 の runtime（同じ store・`config.extractorVersion`
+// だけ違う）で reextract したときの振る舞いを縛る。
+// =====================================================================
+
+interface CrossVersionKit {
+  memoryStore: MemoryStore;
+  /** `extractorVersion` だけ違う runtime を、同じ store 一式の上に作る。 */
+  runtimeFor(llmProvider: LLMProvider, extractorVersion: string): Runtime;
+}
+
+function commonRuntimeDeps() {
+  return {
+    embeddingProvider: {
+      space: TEST_EMBEDDING_SPACE,
+      embed: async (_ctx: Ctx, texts: string[]) => texts.map(() => [1, 0, 0]),
+    },
+    hashContent: (content: string) => createHash("sha256").update(content).digest("hex"),
+  };
+}
+
+const CROSS_VERSION_KITS: Array<[string, () => Promise<CrossVersionKit>]> = [
+  [
+    "testkit の InMemory",
+    async () => {
+      const memoryStore = new InMemoryMemoryStore();
+      const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+      const vectorStore = new InMemoryVectorStore(memoryStore);
+      const outboxStore = new InMemoryOutboxStore(memoryStore.outboxJobs);
+      const tenantSettingsStore = new InMemoryTenantSettingsStore(memoryStore.activitySeq);
+      return {
+        memoryStore,
+        runtimeFor: (llmProvider, extractorVersion) =>
+          createRuntime({
+            ...commonRuntimeDeps(),
+            llmProvider,
+            memoryStore,
+            eventStore,
+            vectorStore,
+            outboxStore,
+            tenantSettingsStore,
+            config: { extractorVersion },
+          }),
+      };
+    },
+  ],
+  [
+    "Postgres",
+    async () => {
+      await resetTestDatabase();
+      const { db } = await getTestClient();
+      const memoryStore = new PostgresMemoryStore(db);
+      const eventStore = new PostgresEventStore(db);
+      const vectorStore = new PostgresVectorStore(db);
+      const outboxStore = new PostgresOutboxStore(db);
+      const tenantSettingsStore = new PostgresTenantSettingsStore(db);
+      return {
+        memoryStore,
+        runtimeFor: (llmProvider, extractorVersion) =>
+          createRuntime({
+            ...commonRuntimeDeps(),
+            llmProvider,
+            memoryStore,
+            eventStore,
+            vectorStore,
+            outboxStore,
+            tenantSettingsStore,
+            config: { extractorVersion },
+          }),
+      };
+    },
+  ],
+];
+
+/** 抽出のスキーマと claim key 導出のスキーマの両方に答える LLM（claim key は毎回同じ鍵を返す）。 */
+function makeClaimKeyLlm(next: Next): LLMProvider {
+  return {
+    complete: async () => ({ content: "unused" }),
+    completeStructured: async <T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> => {
+      if ((req.schema as unknown) === ExtractionResultSchema) {
+        next.calls += 1;
+        return req.schema.parse({
+          memories: [{ content: next.content, provenanceKind: "stated" }],
+        }) as T;
+      }
+      return req.schema.parse({ claims: [{ subject: "user", predicate: "favorite_count" }] }) as T;
+    },
+  };
+}
+
+/** `withdraw` の状態にしたあと、v2 の runtime で reextract する（5形 + none）。 */
+type CrossVersionWithdraw =
+  "forget" | "purge" | "contested_correction" | "contested_claim_key" | "resolved" | "none";
+
+async function crossVersionReextractAfter(
+  makeKit: () => Promise<CrossVersionKit>,
+  withdraw: CrossVersionWithdraw,
+) {
+  const kit = await makeKit();
+  const v1Next: Next = { content: ORIGINAL, calls: 0 };
+  const v1 =
+    withdraw === "contested_claim_key"
+      ? kit.runtimeFor(makeClaimKeyLlm(v1Next), "v1")
+      : kit.runtimeFor(makeLlm(v1Next), "v1");
+  const first = await v1.observe(ctx, {
+    kind: "utterance",
+    text: "猫は3匹いる",
+    // claim key の自動検出は対になる**両方**の observe が opt-in していないと働かない
+    // （1件目に claim key が無ければ、2件目と比べる相手がそもそも無い）。
+    ...(withdraw === "contested_claim_key"
+      ? { claimKey: { enabled: true, detectContested: true } }
+      : {}),
+  });
+  const x = first.memoryIds[0]!;
+  let y: MemoryId | undefined;
+  switch (withdraw) {
+    case "forget":
+    case "purge":
+      await v1.forget(ctx, { memoryId: x });
+      if (withdraw === "purge") {
+        expect((await v1.purge(ctx, { memoryId: x })).outcomes[0]?.kind).toBe("purged");
+      }
+      break;
+    case "contested_correction":
+    case "resolved":
+      v1Next.content = "猫は2匹";
+      y = (await v1.observe(ctx, { kind: "utterance", text: "猫は2匹だった" })).memoryIds[0]!;
+      await v1.markContested(ctx, x, y);
+      if (withdraw === "resolved") {
+        await v1.resolveContested(ctx, x, y, { kind: "supersede", winnerId: y });
+      }
+      break;
+    case "contested_claim_key":
+      // 同じ claim key を2回 observe すると、claim key の自動検出（ADR 0324）が2件目で
+      // 1件目と対にして両方 contested にする。markContested を呼ばない（訂正とは別の経路）。
+      v1Next.content = "猫は2匹";
+      y = (
+        await v1.observe(ctx, {
+          kind: "utterance",
+          text: "猫は2匹だった",
+          claimKey: { enabled: true, detectContested: true },
+        })
+      ).memoryIds[0]!;
+      break;
+    case "none":
+      break;
+  }
+
+  const v2Next: Next = { content: REPHRASED, calls: 0 };
+  const v2 = kit.runtimeFor(makeLlm(v2Next), "v2");
+  const result = await v2.reextract(ctx, first.observationId);
+  return {
+    result,
+    llmCalls: v2Next.calls,
+    xStatus: (await kit.memoryStore.get(ctx, x))!.status,
+    yStatus: y === undefined ? undefined : (await kit.memoryStore.get(ctx, y))!.status,
+  };
+}
+
+for (const [name, makeKit] of CROSS_VERSION_KITS) {
+  describe(`${name}: extractorVersion を上げた runtime で reextract を呼ぶ（Issue #1432・ADR 0380）`, () => {
+    for (const [withdraw, xStatus, yStatus] of [
+      ["forget", "forgotten", undefined],
+      ["purge", "forgotten", undefined],
+      ["contested_correction", "contested", "contested"],
+      ["contested_claim_key", "contested", "contested"],
+      ["resolved", "superseded", "active"],
+    ] as const) {
+      it(`${withdraw}（v1 で退けた）: v2 の reextract もやり直さない（LLM を呼ばず、何も書かず、skipped で名乗る）`, async () => {
+        const got = await crossVersionReextractAfter(makeKit, withdraw);
+        expect(got.llmCalls).toBe(0);
+        expect(got.result).toMatchObject({
+          memoryIds: [],
+          supersededMemoryIds: [],
+          atomicity: "not_attempted",
+          extraction: "skipped",
+          extractionFailure: null,
+        });
+        expect(got.result.skipped).toContainEqual(
+          expect.objectContaining({ kind: "status_not_active", status: xStatus }),
+        );
+        expect(got.xStatus).toBe(xStatus);
+        expect(got.yStatus).toBe(yStatus);
+      });
+    }
+
+    it("none（v1 で何も退けていない）: v2 は今どおり抽出し、v1 の active は supersede されない（#873 は変えていない）", async () => {
+      const got = await crossVersionReextractAfter(makeKit, "none");
+      expect(got.llmCalls).toBe(1);
+      expect(got.result.extraction).toBe("ok");
+      expect(got.result.memoryIds).toHaveLength(1);
+      expect(got.result.supersededMemoryIds).toEqual([]);
+      // v1 の active はそのまま——版を跨いだ active の扱いは変えていない（Issue #873）。
+      expect(got.xStatus).toBe("active");
+    });
+
+    it("退けていない隣の事実（同じ Observation から v1 で抽出された active な記憶）も、v2 では作られない", async () => {
+      const kit = await makeKit();
+      const v1Next: MultiNext = { contents: ["猫は3匹", "犬は1匹"], calls: 0 };
+      const v1 = kit.runtimeFor(makeMultiLlm(v1Next), "v1");
+      // 1回の observe で2件の候補を抽出させる（同じ Observation から2件の Memory ができる）。
+      const first = await v1.observe(ctx, { kind: "utterance", text: "猫は3匹、犬は1匹いる" });
+      expect(first.memoryIds).toHaveLength(2);
+      const [catId, dogId] = first.memoryIds as [string, string];
+      // 猫の事実だけを forget する。犬の事実は退けていない、隣の active な記憶。
+      await v1.forget(ctx, { memoryId: catId });
+
+      const v2Next: MultiNext = { contents: ["猫を3匹飼っている", "犬を1匹飼っている"], calls: 0 };
+      const v2 = kit.runtimeFor(makeMultiLlm(v2Next), "v2");
+      const result = await v2.reextract(ctx, first.observationId);
+
+      // Observation 全体を打ち切る——犬の事実（隣の active な記憶）も v2 では作り直されない。
+      expect(v2Next.calls).toBe(0);
+      expect(result.extraction).toBe("skipped");
+      expect(result.memoryIds).toEqual([]);
+      expect(result.skipped).toContainEqual(
+        expect.objectContaining({
+          kind: "status_not_active",
+          memoryId: catId,
+          status: "forgotten",
+        }),
+      );
+      // 犬の事実自身は skipped に載らない（退けた記憶だけを載せる、ADR 0028 追記の規律のまま）。
+      expect(result.skipped).not.toContainEqual(expect.objectContaining({ memoryId: dogId }));
+      expect((await kit.memoryStore.get(ctx, dogId))!.status).toBe("active");
+      expect((await kit.memoryStore.get(ctx, catId))!.status).toBe("forgotten");
     });
   });
 }

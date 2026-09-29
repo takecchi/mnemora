@@ -262,6 +262,30 @@ supersede しなかった理由（`contested`/`forgotten` だったので飛ば�
 （`docs/roadmap.md` §4 技術上のリスク表）はこの性質の上に成り立っている。詳細は
 [ADR 0028](./decisions/0028-reextract-superseded-cleanup.md) の 2026-09-26 追記。
 
+⚠ **2026-09-30 追記（[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
+[ADR 0380](./decisions/0380-reextract-withdrawn-across-extractor-versions.md)）: 上の
+2026-09-28 追記（「利用者の意思で退けた記憶を持つ Observation では、reextract は抽出を
+やり直さない」）の判定は、`extractorVersion` を**問わなくなった**。** 2026-09-28 時点の
+判定は「同じ Observation・**今の** `extractorVersion` の記憶」だけを見ており、
+`extractorVersion` を上げた別の runtime インスタンスで reextract すると、前の版で
+forget・contest した記憶を見落とし、退けたはずの内容と同じ意味の Memory が印の無い
+新しい `active` として書き直されていた（Issue #1432 本文、実測——Fake・Postgres 双方）。
+いまは `MemoryStore.listBySourceObservationAllVersions`（ADR 0380 で新設した必須メソッド）
+を使い、版を問わず `forgotten`・`contested`・訂正の解決で負けた `superseded` を数える。
+
+- **帰結**: 版を上げても、退けたものを含む Observation は新しい版の記憶を1件も作らない。
+  ⟹ 運用側が旧い版の記憶を forget すると、その Observation のほかの（退けていない）事実も、
+  以後の reextract では想起から作られなくなる。
+- **運用側が見分ける手がかり**: `ReextractResult.skipped` に `status_not_active` が出た
+  Observation では、旧い版の記憶を残すこと（forget を早まらないこと）。
+- **変えていないもの**: 直上の2026-09-26 追記（Issue #873「版を跨いだ旧い版は退役させない・
+  運用側の責務」）は、そのまま有効である。supersede 対象の判定は今どおり
+  `listBySourceObservation(ctx, observationId, extractorVersion)`（**今の**
+  `extractorVersion` 限定）のままで、退けたものが無い Observation では、今どおり新しい版で
+  抽出され、旧い版の `active` は supersede されない。
+
+詳細・却下した案・EXPLAIN の実測は [ADR 0380](./decisions/0380-reextract-withdrawn-across-extractor-versions.md)。
+
 ---
 
 ## 5. 矛盾の扱い

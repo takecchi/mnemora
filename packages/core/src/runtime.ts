@@ -573,6 +573,15 @@ export interface ReextractResult {
    * 他の `active` な記憶はここに載らない。このとき `extraction: "skipped"`・`atomicity: "not_attempted"`・
    * `memoryIds: []`・`supersededMemoryIds: []`・`extractionFailure: null`。【実測 2026-09-28】Postgres と testkit の
    * fixture で同じ（`status_not_active` が入ることの歯は `reextract-withdrawn-memories.postgres.test.ts`）。
+   *
+   * ⚠ **2026-09-30 変更（[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
+   * [ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）:
+   * 上の「退けた記憶」の判定は `extractorVersion` を問わなくなった。** `extractorVersion` を
+   * 上げた runtime インスタンスで reextract しても、前の版の `forgotten`/`contested`/
+   * 訂正の解決で負けた `superseded` があれば同じく `skipped` に `status_not_active` が入り、
+   * 抽出をやり直さない。**`skipped` に版の欄は足していない**（`memoryId` から
+   * `MemoryStore.get` で版をたどれるため）。詳細は `Runtime.reextract` の doc の
+   * 2026-09-30 変更を参照。
    */
   skipped: ReextractSkip[];
   /** 抽出がどう終わったか（{@link ExtractionOutcome}）。 */
@@ -2463,6 +2472,28 @@ export interface Runtime {
    * `AbortError` 相当）、`extraction: "llm_failed_whole_observation"` には倒さない。
    * LLM 呼び出しは、supersede 対象を読む・書くよりも前に行う——abort の時点では何も
    * 書かれていない。
+   *
+   * ⚠ **2026-09-30 変更（[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
+   * [ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)）:
+   * 「退けた記憶」の判定（上の2026-09-28 変更）は、`extractorVersion` を**問わなくなった**。**
+   * 2026-09-28 時点では「同じ Observation・**今の** `extractorVersion` の記憶」だけを見ており、
+   * `extractorVersion` を上げた runtime インスタンスで reextract すると、前の版で
+   * forget・contest した記憶を見落とし、退けたはずの内容と同じ意味の Memory を印の無い新しい
+   * `active` として書き直しうる欠陥があった（実測、Fake・Postgres 双方、Issue #1432 本文）。
+   * いまは {@link MemoryStore.listBySourceObservationAllVersions} を使い、版を問わず
+   * `forgotten`・`contested`・訂正の解決で負けた `superseded` を数える。
+   * - **帰結**: 版を跨いでも、1件でも退けたものがあれば、その Observation の抽出全体を打ち切る
+   *   （同じ版のときと同じ規律）。⟹ 運用側が旧い版の記憶を forget すると、その Observation の
+   *   ほかの（退けていない）事実も、以後 reextract では新しい版の記憶として作られなくなる。
+   *   `skipped` に `status_not_active` が出た Observation では、旧い版の記憶を残すことが
+   *   運用側の手がかりになる。
+   * - **変えていないもの**: **supersede 対象の判定**（`existingBefore`、下の実装）は今どおり
+   *   `listBySourceObservation(ctx, observationId, extractorVersion)` のまま——**今の
+   *   `extractorVersion` に一致する `active` な Memory しか supersede しない**。上の
+   *   2026-09-26 追記（Issue #873「版を跨いだ旧い版は退役させない・運用側の責務」）はそのまま
+   *   有効である。版を跨いで退けたものが無い Observation では、今どおり新しい版で抽出され、
+   *   旧い版の `active` は supersede されない。
+   * - 詳細・却下した案・EXPLAIN の実測は ADR 0380。
    */
   reextract(ctx: Ctx, observationId: ObservationId, opts?: AbortOptions): Promise<ReextractResult>;
   /**
@@ -4209,22 +4240,35 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
    * （ADR 0028「確かめていないこと」参照）。
    */
   /**
-   * Issue #1079・#1149: その Observation（今の `extractorVersion`）から作られた記憶のうち、利用者の意思で
-   * 退けたものを返す。数えるのは `forgotten`（purge を含む）・`contested`（利用者の訂正でも、claimKey の
-   * 自動検出でも）・訂正の解決で負けた `superseded`（最新の `superseded` イベントの `meta.reason` が
-   * `"contested_resolved"`）。機構（reextract・consolidate）で置き換えた `superseded` と、理由を読めない
-   * `superseded`（イベントが無い・保持期間の掃除で消えた）は数えない——やり直せなくなるほうが、利用者に
+   * Issue #1079・#1149・[#1432](https://github.com/takecchi/mnemora/issues/1432): その
+   * Observation から作られた記憶のうち、利用者の意思で退けたものを返す。**`extractorVersion` を
+   * 問わない**（[ADR 0380](../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)、
+   * 2026-09-30）——`extractorVersion` を上げた runtime インスタンスで reextract しても、前の版で
+   * forget・contest した記憶を見落とさないようにするため。数えるのは `forgotten`（purge を含む）・
+   * `contested`（利用者の訂正でも、claimKey の自動検出でも）・訂正の解決で負けた `superseded`
+   * （最新の `superseded` イベントの `meta.reason` が `"contested_resolved"`）。機構
+   * （reextract・consolidate）で置き換えた `superseded` と、理由を読めない `superseded`
+   * （イベントが無い・保持期間の掃除で消えた）は数えない——やり直せなくなるほうが、利用者に
    * 見えにくい失敗になるため。
+   *
+   * ⚠ **2026-09-30 変更（Issue #1432・ADR 0380）: 以前は `listBySourceObservation(ctx,
+   * observationId, extractorVersion)` を使い、今の runtime の `extractorVersion` に一致する
+   * Memory しか見ていなかった。** 前の版で forget・contest した記憶は見えず、`extractorVersion`
+   * を上げて reextract すると、退けたはずの内容が印の無い新しい `active` として書き直されて
+   * いた（実測、Fake・Postgres 双方、Issue #1432 本文）。いまは
+   * {@link MemoryStore.listBySourceObservationAllVersions} を使い、版を問わず退けたものを見る。
+   * **帰結**: 版を跨いでも、1件でも退けたものがあれば、その Observation の抽出全体を打ち切る
+   * （同じ版のときと同じ規律）——版を上げても、退けたものを含む Observation は新しい版の記憶を
+   * 1件も作らない。⟹ 運用側が旧い版の記憶を退役させる（forget する）と、その Observation の
+   * ほかの事実も、以後 reextract では想起から作られなくなる。**版を跨いだ `active` の扱い
+   * （#873「運用側の責務」）は変えていない**——退けたものが無い Observation では、今どおり
+   * 新しい版で抽出され、旧い版の `active` は supersede されない。
    */
   async function listWithdrawnBySourceObservation(
     ctx: Ctx,
     observationId: ObservationId,
   ): Promise<Memory[]> {
-    const existing = await deps.memoryStore.listBySourceObservation(
-      ctx,
-      observationId,
-      extractorVersion,
-    );
+    const existing = await deps.memoryStore.listBySourceObservationAllVersions(ctx, observationId);
     const withdrawn: Memory[] = [];
     for (const memory of existing) {
       if (memory.status === "forgotten" || memory.status === "contested") {

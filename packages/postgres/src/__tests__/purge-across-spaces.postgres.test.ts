@@ -200,12 +200,14 @@ describe("PostgresVectorStore.deleteAcrossSpaces のテーブル列挙（Issue #
     dimensions: 3,
   };
   const ENUM_TABLE = embeddingSpaceTableName(ENUM_SPACE);
-  // `SCHEMA_ALT` にだけ登録する space——`SCHEMA_DEFAULT` からは同名のテーブルが
-  // 一切見えない（`SCHEMA_DEFAULT` スコープの接続の `search_path` にも無い）。
-  // 条件1（`current_schema()` を跨がない）が外れると、列挙がこのテーブル名を拾って
-  // しまい、`SCHEMA_DEFAULT` スコープの接続からは解決できない relation への
-  // `DELETE` を発行して例外になる——「別スキーマの行を誤って消す」だけでなく
-  // 「無関係な purge が突然落ちる」という、より実害の大きい壊れ方を検出できる。
+  // `SCHEMA_ALT` にだけ登録する space——`SCHEMA_DEFAULT` にはこの名前のテーブルが
+  // 一切存在しない。`DELETE` はスキーマ修飾されている（ADR 0382「`DELETE` は
+  // スキーマ修飾する」）ため、条件1（`current_schema()` を跨がない）が外れて
+  // このテーブル名を列挙してしまうと、`"mnemora_pas_alt"."<table>"` へ明示的に
+  // `DELETE` を発行してしまう——`ENUM_TABLE`（両スキーマにある同名テーブル）の歯
+  // だけでは「別スキーマの同名テーブルが消える」ことしか示せないので、この
+  // `ALT_ONLY_SPACE` の歯で「同名でなくても、列挙にさえ入れば消えてしまう」ことも
+  // 別に示す。
   const ALT_ONLY_SPACE: EmbeddingSpaceId = {
     provider: "test",
     model: "purge-across-spaces-alt-only",
@@ -302,12 +304,10 @@ describe("PostgresVectorStore.deleteAcrossSpaces のテーブル列挙（Issue #
   });
 
   it("条件1: current_schema() を跨がない——別スキーマにしか無い space のテーブルは列挙されない（陽性対照つき、report 参照）", async () => {
-    // `ENUM_TABLE`（両スキーマにある同名テーブル）だけでは、この条件を落としても
-    // DELETE 文自体が search_path 経由で結局 SCHEMA_DEFAULT 側の同名テーブルに
-    // 解決されるため、赤にならない（手元で確かめた——上の陽性対照の節に記録）。
-    // `ALT_ONLY_TABLE`（SCHEMA_ALT にしか無い名前）を使うと、条件1を落とした列挙は
-    // このテーブル名を拾ってしまい、`SCHEMA_DEFAULT` スコープの接続からは解決できない
-    // relation への `DELETE` を発行して例外になる——この歯はその形で赤くなる。
+    // `ENUM_TABLE` の歯（上）が「同名テーブルでも別スキーマの行は消えない」ことを
+    // 示すのに対し、こちらは「そもそも列挙に入らない」ことを、同名でないテーブルで
+    // 別途示す（`DELETE` がスキーマ修飾されているため、同名かどうかに関わらず
+    // 列挙に入れば消えてしまう——両方の歯を残す理由）。
     const tenantId = "tenant-cross-schema-alt-only";
     const memoryId = randomUUID();
 

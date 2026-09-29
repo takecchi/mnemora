@@ -335,3 +335,15 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
 決定4は「🔴 purge 後、元の digest が残る唯一の場所はこの監査ログである（`content` は事後もどこにも残らない——これが「物理削除」の実質）」と書いていた。[Issue #994](https://github.com/takecchi/mnemora/issues/994)・[Issue #995](https://github.com/takecchi/mnemora/issues/995)・[Issue #1207](https://github.com/takecchi/mnemora/issues/1207) が、この「唯一」が実装と食い違うこと（`recalls.index_band`・`recalls.query`・`memories.tags`/`attributes`/claim key・`labels`/`memory_labels` 等にも元の内容・派生物が残ること）を実測した。
 
 **[ADR 0375](./0375-purge-scope-widened.md) が、purge の約束そのものを広げ直した——「唯一の場所」という主張はもう成り立たない。** ADR 0375 は (a) 消す対象を `tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の digest 帯まで広げ、(b) それでも残るもの（`recalls.query`・`content_hash`・`provenance.speaker`・`observations.payload`・監査ログの `digest_snapshot` 自身・別 space の embedding 等）を明記した表を持つ。`packages/core/src/interfaces/memory-store.ts` の `MemoryStore.purgeMemory?` の TSDoc は ADR 0375 に合わせて書き換えてある——この ADR 0124 本文は書き換えず、この追記で指し先を更新するだけに留める。
+
+---
+
+## 追記（2026-09-30）: 決定5の「今の space だけ」は ADR 0382 で上書きした
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜7・引き受けた負債・確かめていないこと）と、上の各追記は書き換えていない。**当時の記録として残す。
+
+決定5は「`Runtime.purge` は `purgeMemory` の成功後、`deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)` を呼ぶ」——**今の `embeddingProvider.space` という1つの空間だけ**を対象にしたベストエフォートの削除だった。[Issue #995](https://github.com/takecchi/mnemora/issues/995)・[Issue #1425](https://github.com/takecchi/mnemora/issues/1425) が、埋め込みモデルを移した後は旧 space の embedding が purge の対象外のまま残ることを指摘した（ADR 0375 決定5が一度この欠陥を認識した上で Issue #1425 に切り出していた）。
+
+**[ADR 0382](./0382-vector-store-delete-across-spaces.md) が、決定5の「今の space だけ」を上書きした——`VectorStore` に必須メソッド `deleteAcrossSpaces` を足し、`Runtime.purge` は `deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)` の代わりに `deps.vectorStore.deleteAcrossSpaces(ctx, [id])`（adapter が持つ全 space が対象）を呼ぶ。** 加えて、`already_purged`（`dryRun` を除く）でもベストエフォートで同じ呼び出しを行うよう広げた——決定5当時はこの分岐で `vectorStore.delete` を呼んでいなかった。ベストエフォート（失敗を握り潰し `"purged"`/`"already_purged"` の判定を変えない）という決定5の骨格そのものは変えていない——対象を「1つの space」から「全 space」へ広げただけである。この ADR 0124 本文は書き換えず、この追記で指し先を更新するだけに留める。

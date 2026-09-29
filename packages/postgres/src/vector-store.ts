@@ -17,6 +17,7 @@ import {
 import { isUuidLike, toPgTimestamp } from "./mapping.js";
 import { maybeAnalyzeAfterUpsert } from "./embedding-statistics.js";
 import { activityFloorSeqAliveCondition } from "./activity-decay-sql.js";
+import { assertSafeSchemaName } from "./schema-namespace.js";
 import {
   PGVECTOR_CAPABILITY_QUERY,
   type PgvectorCapabilityRow,
@@ -794,9 +795,9 @@ export class PostgresVectorStore implements VectorStore {
    *
    * 1. **`current_schema()` の中のテーブルだけ**——スキーマを跨がない。dedicated-schema
    *    （`registerEmbeddingSpace` の `options.schema`）で複数の mnemora デプロイが
-   *    同じ DB に同居していても、この接続が見ているスキーマの外のテーブルには触れない
-   *    （`PostgresVectorStore` の DML は `search_path` 任せであり、この点は他のメソッド
-   *    と同じ前提——`schema-namespace.ts` のクラス doc 参照）。
+   *    同じ DB に同居していても、この接続が見ているスキーマの外のテーブルには触れない。
+   *    **列挙で見つけたスキーマ名を、`DELETE` 文自体にも明示的に付ける**（下記参照）
+   *    ——`search_path` の解決には頼らない。
    * 2. **テーブル名が `memory_embeddings_` で始まる**（{@link EMBEDDING_SPACE_TABLE_PREFIX}、
    *    `embeddingSpaceTableName` の導出と同じ接頭辞）。
    * 3. **`memory_id` 列が、同じスキーマの `memories(id)` を外部キーで参照している**
@@ -806,6 +807,21 @@ export class PostgresVectorStore implements VectorStore {
    * `registerEmbeddingSpace`（`vector-space.ts`）が作るテーブルは、この3条件を
    * すべて満たす（`tenant_id`/`memory_id` の複合主キー、`memory_id uuid NOT NULL
    * REFERENCES memories(id)`）。
+   *
+   * **`DELETE` はスキーマ修飾する（`search_path` に頼らない）。** 列挙のクエリが
+   * `n.nspname`（テーブルの属するスキーマ名）も一緒に返し、`DELETE` の対象を
+   * `${sql.identifier(schema)}.${sql.identifier(table)}` の形で完全修飾する
+   * ——`upsert`/`search`/`delete` 等の他のメソッド（未修飾の裸のテーブル名を使い、
+   * 接続の `search_path` に解決を任せる、`schema-namespace.ts` のクラス doc が言う
+   * 既定の DML の形）とはこの1点だけ異なる。⚠ **理由**: `current_schema()` は
+   * 接続の `search_path` の**先頭**を指すだけであり、`search_path` が複数のスキーマを
+   * 含む構成（利用者が `ALTER ROLE ... SET search_path = s1, s2` 等で設定した場合）
+   * では、未修飾の `DELETE FROM <table>` が実際に解決するスキーマと
+   * `current_schema()` が一致しない可能性がある——列挙を `current_schema()` で絞っても、
+   * 未修飾の `DELETE` がその絞り込みどおりのテーブルに当たる保証にはならない
+   * （2つのスキーマに同名のテーブルが存在する場合、列挙した `n.nspname` と、
+   * `DELETE` が実際に解決するスキーマがずれうる）。スキーマ名を明示することで、
+   * 「列挙で選んだテーブル」と「実際に `DELETE` するテーブル」を1対1に固定する。
    *
    * **台帳を持たない**（ADR 0002 決定—— space ごとに別テーブルという設計そのものが
    * 「このテナントが使った space の一覧」を別に持たなくても、カタログを読めば
@@ -830,8 +846,9 @@ export class PostgresVectorStore implements VectorStore {
       // 対象の列番号(attnum)を並べた配列——`array_length(con.conkey, 1) = 1` で
       // 「単一列の外部キー」に絞り、`conkey[1]`/`confkey[1]`（Postgres 配列は1始まり）
       // でその1列の attnum を取り、`pg_attribute` で列名（`memory_id`/`id`）を確かめる。
+      // `n.nspname` も返す——`DELETE` をスキーマ修飾するために使う（上の doc コメント）。
       const tables = await tx.execute(sql`
-        SELECT c.relname AS table_name
+        SELECT c.relname AS table_name, n.nspname AS schema_name
         FROM pg_constraint con
         JOIN pg_class c ON c.oid = con.conrelid
         JOIN pg_namespace n ON n.oid = c.relnamespace
@@ -851,12 +868,17 @@ export class PostgresVectorStore implements VectorStore {
           AND pkatt.attname = 'id'
       `);
       for (const row of tables.rows) {
-        const table = (row as unknown as { table_name: string }).table_name;
-        // `pg_class.relname` は既に有効な PostgreSQL 識別子だが、`assertSafeIdentifier`
-        // を通す——他のメソッドと同じ「SQL 注入対策の最後の砦」の規律をここでも揃える。
+        const { table_name: table, schema_name: schema } = row as unknown as {
+          table_name: string;
+          schema_name: string;
+        };
+        // `pg_class.relname`/`pg_namespace.nspname` は既に有効な PostgreSQL 識別子だが、
+        // `assertSafeIdentifier`/`assertSafeSchemaName` を通す——他のメソッドと同じ
+        // 「SQL 注入対策の最後の砦」の規律をここでも揃える。
         assertSafeIdentifier(table);
+        assertSafeSchemaName(schema);
         await tx.execute(sql`
-          DELETE FROM ${sql.identifier(table)}
+          DELETE FROM ${sql.identifier(schema)}.${sql.identifier(table)}
           WHERE tenant_id = ${ctx.tenantId} AND memory_id = ANY(${sql.param(validIds)}::uuid[])
         `);
       }

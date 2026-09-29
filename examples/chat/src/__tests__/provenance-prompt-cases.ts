@@ -139,6 +139,18 @@ import type { RecalledMemory } from "@mnemora/core";
  * （`basis-lost-*`）を追加した時点では `buildMnemoraPrompt` はまだ `basisLost` を読まないので、
  * 印が出ることを期待する2件（`basis-lost-inferred`・`basis-lost-with-contradiction`）だけが
  * 赤くなることが期待される（`basis-kept-inferred-no-mark` は実装前後どちらでも緑）。
+ *
+ * **2026-09-30（Issue #1430、ADR 0379、矛盾候補欄を非対称にする回）**: `contestedWith`
+ * （どちらの向きでも）由来の対で、両側が `recordedAt`（記録順）を持つときだけ、矛盾候補欄の
+ * 文面を非対称にする——新しい側は「記録順N の「相手」より後の記録（訂正の可能性）」、
+ * 古い側は「記録順N の「相手」が後に記録された（訂正された可能性）」。**それ以外
+ * （`companionOf` だけが由来／記録順が片方でも分からない）は、これまでの対称な文面
+ * （`「相手」`）のまま**——既存の18件（`contested-with-*` を含む、いずれも
+ * `recordedAt` を渡していない）は無関係のまま緑のはずである。末尾4件
+ * （`contested-with-asymmetric-*`）を追加した時点では、`contradictionSegment` は
+ * まだ `order`/`isContestedCounterpart` を見ないので、非対称文面を期待する2件
+ * （`contested-with-asymmetric-both-recorded`・`contested-with-asymmetric-combined-origin`）
+ * だけが赤くなることが期待される（残り2件は対称文面のままなので実装前後どちらでも緑）。
  */
 
 const SCORE = { decay: 1, tagMatch: 1, freshness: 1, strength: 1, total: 1 };
@@ -698,5 +710,151 @@ export const PROVENANCE_PROMPT_CASES: ProvenancePromptCase[] = [
       "- [由来:inferred] [主題:user-1] [矛盾候補:「対立する主張」] [根拠:失われた] 推論された主張",
       "- [由来:stated] [話者:六郎] [主題:user-1] [矛盾候補:「推論された主張」] 対立する主張",
     ],
+  },
+  {
+    id: "contested-with-asymmetric-both-recorded",
+    description:
+      "contestedWith の対で、両側が recordedAt を持つ（Issue #1430）: 新しい側は" +
+      "「…より後の記録（訂正の可能性）」、古い側は「…が後に記録された（訂正された可能性）」",
+    memories: [
+      {
+        memoryId: "m-cw-older",
+        digest: "定例会議は金曜日",
+        retrievedVia: "ann",
+        contestedWith: "m-cw-newer",
+        provenanceKind: "stated",
+        speaker: "太郎",
+        subjectId: "user-1",
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T09:00:00.000Z"),
+      },
+      {
+        memoryId: "m-cw-newer",
+        digest: "定例会議は水曜日に変更",
+        retrievedVia: "ann",
+        contestedWith: "m-cw-older",
+        provenanceKind: "stated",
+        speaker: "太郎",
+        subjectId: "user-1",
+        score: SCORE,
+        recordedAt: new Date("2026-01-05T10:00:00.000Z"),
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:太郎] [主題:user-1] " +
+        "[矛盾候補:記録順2の「定例会議は水曜日に変更」が後に記録された（訂正された可能性）] " +
+        "[記録順:1] 定例会議は金曜日",
+      "- [由来:stated] [話者:太郎] [主題:user-1] " +
+        "[矛盾候補:記録順1の「定例会議は金曜日」より後の記録（訂正の可能性）] " +
+        "[記録順:2] 定例会議は水曜日に変更",
+    ],
+    expectedLegend: true,
+  },
+  {
+    id: "contested-with-order-known-only-one-side",
+    description:
+      "contestedWith の対で、片方しか recordedAt を持たない: 記録順が片方でも分からないので、" +
+      "非対称にはせず、従来どおりの対称な文面（相手の digest だけ）のまま",
+    memories: [
+      {
+        memoryId: "m-cw-partial-a",
+        digest: "予定は火曜",
+        retrievedVia: "ann",
+        contestedWith: "m-cw-partial-b",
+        provenanceKind: "stated",
+        speaker: "花子",
+        subjectId: "user-2",
+        score: SCORE,
+        recordedAt: new Date("2026-01-06T00:00:00.000Z"),
+      },
+      {
+        memoryId: "m-cw-partial-b",
+        digest: "予定は水曜",
+        retrievedVia: "ann",
+        contestedWith: "m-cw-partial-a",
+        provenanceKind: "stated",
+        speaker: "花子",
+        subjectId: "user-2",
+        score: SCORE,
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:花子] [主題:user-2] [矛盾候補:「予定は水曜」] [記録順:1] 予定は火曜",
+      "- [由来:stated] [話者:花子] [主題:user-2] [矛盾候補:「予定は火曜」] 予定は水曜",
+    ],
+    expectedLegend: true,
+  },
+  {
+    id: "contested-with-companion-order-known-but-old-wording",
+    description:
+      "companionOf だけが由来（contestedWith を経由しない）の対は、両側が recordedAt を" +
+      "持っていても非対称にしない——非対称化は contestedWith 由来の対だけに限る",
+    memories: [
+      {
+        memoryId: "m-comp-owner-order",
+        digest: "休みは月曜",
+        retrievedVia: "ann",
+        provenanceKind: "stated",
+        speaker: "次郎",
+        subjectId: "user-3",
+        score: SCORE,
+        recordedAt: new Date("2026-01-07T00:00:00.000Z"),
+      },
+      {
+        memoryId: "m-comp-companion-order",
+        digest: "休みは火曜",
+        retrievedVia: "mandatory_companion",
+        companionOf: "m-comp-owner-order",
+        provenanceKind: "stated",
+        speaker: "三郎",
+        subjectId: "user-3",
+        score: SCORE,
+        recordedAt: new Date("2026-01-07T01:00:00.000Z"),
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:次郎] [主題:user-3] [矛盾候補:「休みは火曜」] [記録順:1] 休みは月曜",
+      "- [由来:stated] [話者:三郎] [主題:user-3] [矛盾候補:「休みは月曜」] [記録順:2] 休みは火曜",
+    ],
+    expectedLegend: true,
+  },
+  {
+    id: "contested-with-asymmetric-combined-origin",
+    description:
+      "同じ相手が companionOf と contestedWith の両方で来る（片方が companionOf を持ち、" +
+      "もう片方が contestedWith を持つ）: contested 扱いになり、非対称文面が出る",
+    memories: [
+      {
+        memoryId: "m-combo-a",
+        digest: "会議は10時",
+        retrievedVia: "ann",
+        contestedWith: "m-combo-b",
+        provenanceKind: "stated",
+        speaker: "花子",
+        subjectId: "user-4",
+        score: SCORE,
+        recordedAt: new Date("2026-01-08T00:00:00.000Z"),
+      },
+      {
+        memoryId: "m-combo-b",
+        digest: "会議は11時に変更",
+        retrievedVia: "mandatory_companion",
+        companionOf: "m-combo-a",
+        provenanceKind: "stated",
+        speaker: "花子",
+        subjectId: "user-4",
+        score: SCORE,
+        recordedAt: new Date("2026-01-08T01:00:00.000Z"),
+      },
+    ],
+    expectedLines: [
+      "- [由来:stated] [話者:花子] [主題:user-4] " +
+        "[矛盾候補:記録順2の「会議は11時に変更」が後に記録された（訂正された可能性）] " +
+        "[記録順:1] 会議は10時",
+      "- [由来:stated] [話者:花子] [主題:user-4] " +
+        "[矛盾候補:記録順1の「会議は10時」より後の記録（訂正の可能性）] " +
+        "[記録順:2] 会議は11時に変更",
+    ],
+    expectedLegend: true,
   },
 ];

@@ -424,3 +424,33 @@ reextract」は、forget（および purge）した事実が、抽出器の版�
 （LLM 呼び出しの最中の forget/purge の割り込み）とは別の軸の問題であること、
 `extractorVersion` を上げる操作自体が Issue #873 で既に別の性質として記録済み
 であることから、本 PR ではこれ以上追わない。
+
+---
+
+## 追記（2026-09-30）: 決定5・「引き受けた負債」4・「これが覆るとしたら」は ADR 0382 で上書きした
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜8・検討した代替案・引き受けた負債・確かめたこと・確かめていないこと）は
+書き換えていない。**当時の記録として残す。
+
+決定5は「別の space の embedding は、この PR では消さない。新しい Issue に切り出す」
+とし、`VectorStore` に「全 space を列挙・削除する口」が無いこと・口を新設するなら
+必須/任意のどちらにするか・「テナントが過去に使った space の一覧」の台帳をどこに
+持たせるかが未決であることを記録し、[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)
+に切り出した。「引き受けた負債」4は「別 space の embedding は残ったまま（決定5）。
+Issue #1425 に切り出しただけで、この PR は1行も直していない」と書き、「これが覆る
+としたら」は「`VectorStore` に space を列挙する口が別 Issue で決まったとき ⟹
+`Runtime.purge` がその口を使って全 space の embedding を消すよう決定5を上書きする」
+と予告していた。
+
+**[ADR 0382](./0382-vector-store-delete-across-spaces.md) が、この予告のとおり決定5・
+「引き受けた負債」4・「これが覆るとしたら」を上書きした。** `VectorStore` に**必須**
+メソッド `deleteAcrossSpaces(ctx, memoryIds)` を足し（決定5が未決としていた
+「必須/任意のどちらか」は必須と決めた——任意にすると、対応していない adapter では
+別 space の embedding が結局消えないという限界が残るため）、`Runtime.purge` がこれを
+呼んで全 space の embedding を消すようになった。「台帳をどこに持たせるか」（決定5の
+もう1つの未決事項）には、`@mnemora/postgres` の実装はカタログ（`pg_constraint` 等）を
+読んで空間を列挙する形で答え、別表の台帳は新設していない——[ADR 0002](./0002-embedding-space-tables.md)
+の「space ごとに別テーブル」という設計そのものが、カタログを読めば列挙できる形に
+なっている。この ADR 0375 本文は書き換えず、この追記で指し先を更新するだけに留める。
