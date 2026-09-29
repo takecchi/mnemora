@@ -1,4 +1,5 @@
 import {
+  computeEventRetentionCutoff,
   ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
@@ -35,6 +36,8 @@ import type {
   ObservationId,
   OutboxJobKind,
   OutboxJobRecord,
+  PurgeExpiredEventsByRetentionOptions,
+  PurgeExpiredEventsByRetentionOutcome,
   PurgeExpiredEventsOptions,
   PurgeExpiredEventsResult,
   RecallId,
@@ -482,6 +485,16 @@ export class InMemoryMemoryStore implements MemoryStore {
    * 同じ値を見る——`activitySeq`（上）と同じ「同一プロセス内の参照共有」の形。
    */
   readonly subjectActivitySeq = new Map<string, Map<string, number>>();
+
+  /**
+   * Issue #1232 / [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md):
+   * `tenant_settings.event_retention_days` 相当。`purgeExpiredEventsByRetention` が読む。
+   * `InMemoryTenantSettingsStore` にこの Map をそのまま渡すことで、`setEventRetention`
+   * （書く側）と `purgeExpiredEventsByRetention`（読む側）が同じ値を見る——`activitySeq`（上）と
+   * 同じ「同一プロセス内の参照共有」の形。キーが無い（`Map.has` が `false`）テナントは
+   * `{ kind: "unset" }`、値が `null` なら `{ kind: "unlimited" }`、数値なら `{ kind: "days" }`。
+   */
+  readonly eventRetentionDays = new Map<string, number | null>();
 
   /**
    * Issue #201 / ADR 0318: `labels` 相当のインメモリ表。key は {@link labelKey}。
@@ -1087,19 +1100,23 @@ export class InMemoryMemoryStore implements MemoryStore {
 
   /**
    * Issue #210 / ADR 0115: `events` 配列（`InMemoryEventStore` と共有、ADR 0031）から
-   * 期限切れの行を消す。`EventStore`（`InMemoryEventStore`）のメソッドは一切呼ばない
-   * ——append-only の型に触れず、`events` 配列を直接操作する
-   * （`PostgresMemoryStore.purgeExpiredEvents` が `PostgresEventStore` を経由せず
-   * `memory_events` へ直接 SQL を発行するのと同じ形）。
+   * 期限切れの行を消す本体。`purgeExpiredEvents` と `purgeExpiredEventsByRetention`
+   * （Issue #1232、ADR 0354）が共有する——**書き写さない**。**同期関数である**——
+   * `await` を1つも挟まない（`purgeExpiredEventsByRetention` が「保持期間を読んでから
+   * 消すまで」を同じ同期区間に閉じるための前提。クラス冒頭の doc コメント参照）。
+   *
+   * `EventStore`（`InMemoryEventStore`）のメソッドは一切呼ばない——append-only の型に触れず、
+   * `events` 配列を直接操作する（`PostgresMemoryStore.purgeExpiredEventsBody` が
+   * `PostgresEventStore` を経由せず `memory_events` へ直接 SQL を発行するのと同じ形）。
    *
    * `kind = 'events_purged'` の行は対象から除外する（無限後退を避ける、interface doc
    * 参照）。`at` 昇順に並べ替えてから `opts.limit` 件（+1件、`reachedLimit` 判定用）を
    * 見る。`dryRun` のときは `this.events` を一切変更しない。
    */
-  async purgeExpiredEvents(
+  private purgeExpiredEventsSync(
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
-  ): Promise<PurgeExpiredEventsResult> {
+  ): PurgeExpiredEventsResult {
     // 条件の日時は Postgres の timestamptz へ変換できなければならない（query-check.ts）。
     assertQueryDate("purgeExpiredEvents", "olderThan", opts.olderThan);
     // `PostgresMemoryStore.purgeExpiredEvents`（`buildPurgeExpiredEventsTargetSelect`）は
@@ -1186,6 +1203,47 @@ export class InMemoryMemoryStore implements MemoryStore {
     this.events.push(storedEvent);
 
     return snapshot({ purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun });
+  }
+
+  /**
+   * Issue #210 / ADR 0115: {@link InMemoryMemoryStore.purgeExpiredEventsSync} を呼ぶだけの
+   * 薄い async ラッパー（`MemoryStore.purgeExpiredEvents?` の公開シグネチャを満たす）。
+   */
+  async purgeExpiredEvents(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsOptions,
+  ): Promise<PurgeExpiredEventsResult> {
+    return this.purgeExpiredEventsSync(ctx, opts);
+  }
+
+  /**
+   * Issue #1232 / [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md):
+   * `MemoryStore.purgeExpiredEventsByRetention?` の in-memory 実装。保持期間
+   * （`this.eventRetentionDays`、コンストラクタで渡された `InMemoryTenantSettingsStore` と
+   * 共有する Map）を読んでから {@link InMemoryMemoryStore.purgeExpiredEventsSync} を呼ぶまで、
+   * **`await` を1つも挟まない**——同期関数を呼ぶだけなので、この呼び出し全体が1つの
+   * 同期区間になり、他の呼び出しが「読んだ」と「消す」の間に割り込む余地が無い
+   * （本物のトランザクションではないが、in-memory 実装として原子性を模す唯一の手段。
+   * `purgeExpiredEventsSync` の doc コメントと同じ理由）。
+   */
+  async purgeExpiredEventsByRetention(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsByRetentionOptions,
+  ): Promise<PurgeExpiredEventsByRetentionOutcome> {
+    if (!this.eventRetentionDays.has(ctx.tenantId)) {
+      return { kind: "unset" };
+    }
+    const days = this.eventRetentionDays.get(ctx.tenantId)!;
+    if (days === null) {
+      return { kind: "unlimited" };
+    }
+    const olderThan = computeEventRetentionCutoff(opts.now, days);
+    const result = this.purgeExpiredEventsSync(ctx, {
+      olderThan,
+      limit: opts.limit,
+      dryRun: opts.dryRun,
+    });
+    return { kind: "executed", result };
   }
 
   /**

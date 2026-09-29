@@ -83,17 +83,21 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
     expect(await eventStore.list(ctx, {})).toHaveLength(1);
   });
 
-  it("retention が days だが store が purgeExpiredEvents を実装していないとき { kind: 'store_unsupported' } を返す", async () => {
-    const { memoryStore, tenantSettingsStore } = createFakeRuntimeStores();
+  it("retention が days だが store が purgeExpiredEventsByRetention を実装していないとき { kind: 'store_unsupported' } を返す（purgeExpiredEvents を実装していても、旧経路へは落ちない）", async () => {
+    const { memoryStore, eventStore, tenantSettingsStore } = createFakeRuntimeStores();
     await tenantSettingsStore.setEventRetention(ctx, { kind: "days", days: 30 });
-    // FakeMemoryStore は既定で purgeExpiredEvents を実装している（ADR 0115）ので、
-    // ここでは「未実装の adapter」を明示的に模す——任意メソッドを外すだけであり、
-    // 挙動をスタブに差し替えるモックではない。⚠ `delete` は使わない: `purgeExpiredEvents`
-    // はクラスのプロトタイプに定義されたメソッドであり、インスタンス自身のプロパティでは
-    // ないため `delete instance.method` は何もしない（プロトタイプ側がそのまま見える）。
-    // `undefined` を明示的に代入することで、`MemoryStore.purgeExpiredEvents?` が
+    await seedOldEvent(memoryStore, eventStore, new Date("2000-01-01T00:00:00.000Z"));
+    // FakeMemoryStore は既定で purgeExpiredEvents と purgeExpiredEventsByRetention の両方を
+    // 実装している（Issue #1232 の修正）。ここでは「新しい原子的な口だけを持たない adapter」を
+    // 明示的に模す——`purgeExpiredEvents` はあえて残す（実装していても旧経路（`purgeExpiredEvents`
+    // への自動フォールバック）は無い、という決定そのものを検査するため）。⚠ `delete` は使わない:
+    // `purgeExpiredEventsByRetention` はクラスのプロトタイプに定義されたメソッドであり、インスタンス
+    // 自身のプロパティではないため `delete instance.method` は何もしない（プロトタイプ側がそのまま
+    // 見える）。`undefined` を明示的に代入することで、`MemoryStore.purgeExpiredEventsByRetention?` が
     // 「存在しない」と判定される状態を作る。
-    (memoryStore as { purgeExpiredEvents?: unknown }).purgeExpiredEvents = undefined;
+    (memoryStore as { purgeExpiredEventsByRetention?: unknown }).purgeExpiredEventsByRetention =
+      undefined;
+    expect(memoryStore.purgeExpiredEvents).toBeDefined();
 
     const outcome = await purgeExpiredEventsForTenant(
       ctx,
@@ -102,6 +106,8 @@ describe("purgeExpiredEventsForTenant（Issue #210 / ADR 0115）", () => {
     );
 
     expect(outcome).toEqual({ kind: "store_unsupported" });
+    // 1件も消えないこと（`purgeExpiredEvents` へは一切触れていない）。
+    expect(await eventStore.list(ctx, {})).toHaveLength(1);
   });
 
   it("retention が days のとき、now から days 日ぶん遡った olderThan で実際に削除する", async () => {

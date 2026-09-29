@@ -496,6 +496,10 @@ interface MemoryStore {
     conflicted: Array<{ id: MemoryId; observedStatus: MemoryStatus }>;
   }>;
   purgeExpiredEvents?(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+  purgeExpiredEventsByRetention?(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsByRetentionOptions,
+  ): Promise<PurgeExpiredEventsByRetentionOutcome>;
   archiveDecayed?(ctx: Ctx, opts: ArchiveDecayedOptions): Promise<ArchiveDecayedResult>;
   purgeMemory?(
     ctx: Ctx,

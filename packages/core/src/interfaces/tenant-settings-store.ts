@@ -339,6 +339,19 @@ export function assertValidTaxonomyMode(value: string): asserts value is Taxonom
  *   LLM を待っている間に変えた設定は、**その呼び出しで書く記憶に効く**。
  * - `purgeExpiredEventsForTenant`（保持期間の掃除）: `getEventRetention` を呼び出しの始めに読む。
  * 「呼び出しの始めの値で揃える」ことは約束していない（揃えるのは新しい方針になる）。
+ *
+ * ⚠ **2026-09-29 追記: 上の `purgeExpiredEventsForTenant` の行は、もう「今の振る舞い」の全体では
+ * ない（[Issue #1232](https://github.com/takecchi/mnemora/issues/1232) の修正、
+ * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。**
+ * `purgeExpiredEventsForTenant` が呼び出しの始めに読む `getEventRetention` は、いまも
+ * unset/unlimited を判定するためだけに残っている——ただし `days` のときに実際へ使う保持期間は、
+ * この最初の読みの値では**ない**。`MemoryStore.purgeExpiredEventsByRetention?` が、
+ * 自分自身の内部でもう一度保持期間を読み直し（Postgres なら `tenant_settings` 行を
+ * `FOR SHARE` で読む同一トランザクションの中で）、その読み直した値で cutoff を計算して
+ * 削除まで行う——**「呼び出しの始めの値で揃える」という前段落の記述は、`purgeExpiredEventsByRetention?`
+ * を実装した adapter に対してはもう当てはまらない**（「揃えるのは新しい方針になる」の
+ * 「新しい方針」がこれである）。この口を実装していない adapter は
+ * `{ kind: "store_unsupported" }` になり、そもそも保持期間を読まない。
  */
 export interface TenantSettingsStore {
   /**
@@ -377,6 +390,15 @@ export interface TenantSettingsStore {
    * ⚠ **走っている掃除は止めない**（2026-09-27 追記、今の振る舞い。Issue #1232）。既に保持期間を読み終えた
    * `purgeExpiredEventsForTenant` は、この呼び出しが返った後でも、読んだときの日数で消す
    * （`purgeExpiredEventsForTenant` の doc 参照）。
+   *
+   * ⚠ **2026-09-29 追記: 上の段落はもう成り立たない（Issue #1232 の修正、
+   * [ADR 0354](../../../../docs/decisions/0354-atomic-event-retention-purge.md)）。**
+   * `MemoryStore.purgeExpiredEventsByRetention?` を実装している adapter では、走っている掃除は
+   * この呼び出しの `UPDATE`/`INSERT` が持つ行ロックと衝突する——掃除の内部の読みは、この呼び出しが
+   * commit するまで待たされ、commit した後の最新の値を見る（`purgeExpiredEventsForTenant` の
+   * 2026-09-29 追記、`packages/postgres/src/__tests__/purge-expired-events-by-retention-concurrency.postgres.test.ts`）。
+   * この口を実装していない adapter（`purgeExpiredEventsForTenant` が `store_unsupported` を返す
+   * adapter）には、この訂正は当てはまらない——そもそも掃除が走らない。
    */
   setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void>;
 
