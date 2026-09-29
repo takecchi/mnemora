@@ -104,7 +104,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -118,6 +118,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     readonly outboxJobs: OutboxJobRecord[];
     readonly activitySeq: Map<string, number>;
     readonly subjectActivitySeq: Map<string, Map<string, number>>;
+    readonly eventRetentionDays: Map<string, number | null>;
     private readonly labels;
     private labelKey;
     private upsertProposedLabels;
@@ -173,7 +174,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             observedStatus: MemoryStatus;
         }>;
     }>;
+    private purgeExpiredEventsSync;
     purgeExpiredEvents(ctx: Ctx, opts: PurgeExpiredEventsOptions): Promise<PurgeExpiredEventsResult>;
+    purgeExpiredEventsByRetention(ctx: Ctx, opts: PurgeExpiredEventsByRetentionOptions): Promise<PurgeExpiredEventsByRetentionOutcome>;
     setEmbeddingStatus(ctx: Ctx, id: MemoryId, status: EmbeddingStatus): Promise<Memory>;
     reinforce(ctx: Ctx, id: MemoryId, at: Date, opts?: ReinforceOptions): Promise<Memory>;
     reinforceMany(ctx: Ctx, ids: MemoryId[], at: Date, opts?: ReinforceOptions): Promise<Memory[]>;
@@ -284,8 +287,11 @@ import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMo
 export declare class InMemoryTenantSettingsStore implements TenantSettingsStore {
     private readonly activitySeqBacking?;
     private readonly subjectActivitySeqBacking?;
+    private readonly eventRetentionDaysBacking?;
     private readonly rows;
-    constructor(activitySeqBacking?: Map<string, number> | undefined, subjectActivitySeqBacking?: Map<string, Map<string, number>> | undefined);
+    private readonly ownEventRetentionDays;
+    constructor(activitySeqBacking?: Map<string, number> | undefined, subjectActivitySeqBacking?: Map<string, Map<string, number>> | undefined, eventRetentionDaysBacking?: Map<string, number | null> | undefined);
+    private get eventRetentionDays();
     private ensureRow;
     setDefaultHalfLifeHours(tenantId: string, hours: number): void;
     getDefaultHalfLifeHours(ctx: Ctx): Promise<number>;

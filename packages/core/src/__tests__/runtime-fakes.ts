@@ -44,12 +44,15 @@ import type {
   ArchiveDecayedResult,
   LabelSummary,
   MemoryStore,
+  PurgeExpiredEventsByRetentionOptions,
+  PurgeExpiredEventsByRetentionOutcome,
   PurgeExpiredEventsOptions,
   PurgeExpiredEventsResult,
   ReinforceOptions,
   RequeueEmbedJobsOptions,
   RequeueEmbedJobsResult,
 } from "../interfaces/memory-store.js";
+import { computeEventRetentionCutoff } from "../event-retention-purge.js";
 import type { NewRecallRecord, RecallRecord, RecallScope, ScopeAggregate } from "../recall.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { OutboxJobRecord } from "../outbox.js";
@@ -229,6 +232,14 @@ class FakeBackingStore {
    * `registerLabel` 経由でここを操作する。
    */
   labels = new Map<string, LabelSummary>();
+  /**
+   * Issue #1232 / [ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md):
+   * `tenant_settings.event_retention_days` 相当。`FakeMemoryStore.purgeExpiredEventsByRetention`
+   * （読む側）と `FakeTenantSettingsStore.setEventRetention`（書く側）が同じ `FakeBackingStore` を
+   * 共有する——`activitySeq`（上）と同じ理由。キーが無ければ `unset`、`null` なら `unlimited`、
+   * 数値なら `days` （`packages/testkit` の `InMemoryMemoryStore.eventRetentionDays` と同じ形）。
+   */
+  eventRetentionDays = new Map<string, number | null>();
 
   extractionKey(
     tenantId: string,
@@ -960,14 +971,17 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #210 / ADR 0115: `InMemoryMemoryStore.purgeExpiredEvents`（`packages/testkit`）と
+   * Issue #210 / ADR 0115: `InMemoryMemoryStore.purgeExpiredEventsSync`（`packages/testkit`）と
    * 同じ意味論。`backing.events` を直接操作し、`FakeEventStore` のメソッドは一切呼ばない
-   * ——append-only の型に触れない、という契約を Fake 側でも保つ。
+   * ——append-only の型に触れない、という契約を Fake 側でも保つ。`purgeExpiredEvents` と
+   * `purgeExpiredEventsByRetention`（Issue #1232、ADR 0354）が共有する本体——**書き写さない**。
+   * **同期関数である**——`await` を1つも挟まない（`purgeExpiredEventsByRetention` が
+   * 「保持期間を読んでから消すまで」を同じ同期区間に閉じるための前提）。
    */
-  async purgeExpiredEvents(
+  private purgeExpiredEventsSync(
     ctx: Ctx,
     opts: PurgeExpiredEventsOptions,
-  ): Promise<PurgeExpiredEventsResult> {
+  ): PurgeExpiredEventsResult {
     // `PostgresMemoryStore.purgeExpiredEvents` は `opts.limit`（+1件）を生 SQL の
     // `LIMIT`（bigint パラメータ）にそのまま渡すため、`NaN`・`Infinity`・非整数と
     // `opts.limit <= -2` は例外になる（実測）。ただし `opts.limit === -1` の1点だけは
@@ -1028,6 +1042,45 @@ export class FakeMemoryStore implements MemoryStore {
     this.backing.events.push(storedEvent);
 
     return { purged, reachedLimit, oldestPurgedAt, newestPurgedAt, dryRun };
+  }
+
+  /**
+   * Issue #210 / ADR 0115: {@link FakeMemoryStore.purgeExpiredEventsSync} を呼ぶだけの
+   * 薄い async ラッパー（`MemoryStore.purgeExpiredEvents?` の公開シグネチャを満たす）。
+   */
+  async purgeExpiredEvents(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsOptions,
+  ): Promise<PurgeExpiredEventsResult> {
+    return this.purgeExpiredEventsSync(ctx, opts);
+  }
+
+  /**
+   * Issue #1232 / [ADR 0354](../../../docs/decisions/0354-atomic-event-retention-purge.md):
+   * `MemoryStore.purgeExpiredEventsByRetention?` の Fake 実装。`backing.eventRetentionDays`
+   * （`FakeTenantSettingsStore.setEventRetention` と共有）を読んでから
+   * {@link FakeMemoryStore.purgeExpiredEventsSync} を呼ぶまで、**`await` を1つも挟まない**
+   * ——`packages/testkit` の `InMemoryMemoryStore.purgeExpiredEventsByRetention` と同じ形・
+   * 同じ理由。
+   */
+  async purgeExpiredEventsByRetention(
+    ctx: Ctx,
+    opts: PurgeExpiredEventsByRetentionOptions,
+  ): Promise<PurgeExpiredEventsByRetentionOutcome> {
+    if (!this.backing.eventRetentionDays.has(ctx.tenantId)) {
+      return { kind: "unset" };
+    }
+    const days = this.backing.eventRetentionDays.get(ctx.tenantId)!;
+    if (days === null) {
+      return { kind: "unlimited" };
+    }
+    const olderThan = computeEventRetentionCutoff(opts.now, days);
+    const result = this.purgeExpiredEventsSync(ctx, {
+      olderThan,
+      limit: opts.limit,
+      dryRun: opts.dryRun,
+    });
+    return { kind: "executed", result };
   }
 
   /**
@@ -2787,7 +2840,13 @@ export class FakeEventStore implements EventStore {
 export class FakeTenantSettingsStore implements TenantSettingsStore {
   // ADR 0007 / ADR 0050: テナントごとに持つ（以前は1つだけ持ち、`ctx` を読まずに共有していた。
   // 歯は `fake-tenant-settings-event-retention-per-tenant.test.ts`）。
-  private eventRetentionByTenant = new Map<string, EventRetention>();
+  //
+  // Issue #1232 / ADR 0354（2026-09-29 追記）: 保持期間そのものの値は、`backing` が渡されていれば
+  // `backing.eventRetentionDays`（`FakeMemoryStore.purgeExpiredEventsByRetention` と共有する Map）に
+  // 持つ——`activitySeq`/`subjectActivitySeq` と同じ「同一プロセス内の参照共有」の形。`backing` が
+  // 渡されなければ、このインスタンス専用の `ownEventRetentionDays` を使う（`getActivitySeq` が
+  // `backing` 無しで常に `0` を返すのと同じ規律——共有が無くても単体では動く）。
+  private readonly ownEventRetentionDays = new Map<string, number | null>();
   private decayClockByTenant = new Map<string, DecayClock>();
   private halfLifeRecallsByTenant = new Map<string, number>();
   /**
@@ -2810,19 +2869,31 @@ export class FakeTenantSettingsStore implements TenantSettingsStore {
     private readonly backing?: FakeBackingStore,
   ) {}
 
+  /** {@link FakeTenantSettingsStore.backing} が渡されていればそれを、無ければ自前の Map を返す。 */
+  private get eventRetentionDays(): Map<string, number | null> {
+    return this.backing?.eventRetentionDays ?? this.ownEventRetentionDays;
+  }
+
   async getDefaultHalfLifeHours(_ctx: Ctx): Promise<number> {
     return this.halfLifeHours;
   }
 
   async getEventRetention(ctx: Ctx): Promise<EventRetention> {
-    return this.eventRetentionByTenant.get(ctx.tenantId) ?? { kind: "unset" };
+    if (!this.eventRetentionDays.has(ctx.tenantId)) {
+      return { kind: "unset" };
+    }
+    const days = this.eventRetentionDays.get(ctx.tenantId)!;
+    if (days === null) {
+      return { kind: "unlimited" };
+    }
+    return { kind: "days", days };
   }
 
   async setEventRetention(ctx: Ctx, retention: EventRetentionSetting): Promise<void> {
     if (retention.kind === "days") {
       assertValidEventRetentionDays(retention.days);
     }
-    this.eventRetentionByTenant.set(ctx.tenantId, retention);
+    this.eventRetentionDays.set(ctx.tenantId, retention.kind === "days" ? retention.days : null);
   }
 
   async getDecayClock(ctx: Ctx): Promise<DecayClock> {
