@@ -1760,16 +1760,17 @@ jobs:
         # `association-summary.mjs` 自体は「入力そのものが壊れている」ときだけ
         # 非0で終わる(JSON が読めない/parse できない/形が想定と違う)。
         #
-        # ⚠ **まだ `--baseline` を渡していない。**
-        # `examples/chat/association-baseline.json` はまだ存在しない——このベンチは
-        # CI で1度も実測されておらず、基準値の数字をでっち上げずに置けるものが無い
-        # (判断の詳細は Issue #291 の PR 本文/報告)。実測が積み上がり、基準値を
-        # 手作業で作れるようになったら、このステップに `--baseline` を足すこと
-        # (`identifier-probes` ジョブと同じ形)。
+        # `--baseline` は `examples/chat/association-baseline.json`(ADR 0385。CI
+        # `ubuntu-latest` での実測から手作業で置いた)を渡す——`identifier-probes`
+        # ジョブと同じ形。相違しても exit code には影響しない(このベンチは
+        # required ではない、ADR 0158)。基準値より悪化した arm(gold/hit1/hit10/MRR)が
+        # あれば、`association-summary-lib.mjs` が Job Summary の上のほうに警告節を
+        # 出す(⛔ これも門ではない——検出するだけで確定・判断は人に残す)。
         if: always()
         run: |
           node scripts/association-summary.mjs \
             --measured "${{ github.workspace }}/association-probe.json" \
+            --baseline examples/chat/association-baseline.json \
             >> "$GITHUB_STEP_SUMMARY"
 
       - name: 実測値そのもの（機械可読）を成果物として残す

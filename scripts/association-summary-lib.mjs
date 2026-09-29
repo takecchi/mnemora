@@ -27,14 +27,22 @@
  * 参照整合性が壊れている(例: `deltas[].baselineArmLabel` が `arms[].armLabel` の
  * どれとも一致しない)ときだけである。**
  *
- * ## ⚠ この repo にはまだ基準値ファイルが無い(2026-09-16 時点)
+ * ## 基準値ファイル `examples/chat/association-baseline.json`(ADR 0385)
  *
- * `examples/chat/association-baseline.json` はまだ作っていない——このベンチは
- * CI で1度も実測されていないため、数字をでっち上げずに置く基準値が無い。
- * `--baseline` は任意であり、省略すれば基準値なしで動く(`buildSummaryMarkdown` の
- * `baseline` は optional)。基準値が用意できたら、この関数の `validateBaseline` を
- * 通る形で `examples/chat/association-baseline.json` を作り、`ci.yml` の summary
- * ステップに `--baseline` を足すこと。
+ * CI(`ubuntu-latest`)で association-probes を5回以上再実行し、arm ごとの値が
+ * 揺れないこと(ADR 0167 が Issue #316 の非決定性を直したことの裏取り)を確かめた上で
+ * 置いた基準値である。`ci.yml` の summary ステップが `--baseline` として渡す。
+ * `--baseline` は今も任意であり(`buildSummaryMarkdown` の `baseline` は optional)、
+ * 省略すれば基準値なしで動く——単体テスト・手元実行では省略してよい。
+ *
+ * ## ⚠ 基準値より悪化した arm を目立たせる(門にはしない、ADR 0385)
+ *
+ * `gold`(goldReturnedCount)/`hit@1`/`hit@10`/`MRR` のいずれかが基準値を下回った arm を、
+ * Markdown の上のほう(`## arm 別まとめ`の表より前)に「## ⚠ 基準値より悪い値がある
+ * （門ではない）」節として列挙する(`buildWorsenedArmsSection`)。許容幅は
+ * `WORSENED_TOLERANCE`(このファイルが export する定数)——ADR 0385 の実測(揺れ0)により
+ * 既定は全指標0にしてある。**exit code には一切触れない**——上の「⛔ 門にしない」節と
+ * 同じ規律で、検出するだけに留める。
  *
  * ## 🔴 hit@10 は連想枠の効果を測れない(表の下に必ず注記する)
  *
@@ -501,8 +509,8 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`examples/chat/association-baseline.json`。まだ存在しない——
- * 冒頭 docstring 参照)の形を検査する。arm レベルの数値だけを要求し、
+ * 基準値ファイル(`examples/chat/association-baseline.json`。ADR 0385、冒頭 docstring
+ * 参照)の形を検査する。arm レベルの数値だけを要求し、
  * `probes`/`stageSkippedReasons` は要求しない(基準値と比べるのは arm 別まとめの
  * 行だけであり、probe 明細までは比べない仕様のため)。
  *
@@ -1068,8 +1076,9 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   } else {
     lines.push(
       "",
-      "ℹ️ 基準値ファイルが渡されていない——このベンチはまだ CI で実測していないため、" +
-        "`examples/chat/association-baseline.json` はまだ存在しない。",
+      "ℹ️ 基準値ファイルが渡されていない——`examples/chat/association-baseline.json`" +
+        "（ADR 0385）は存在するが、この呼び出しには `--baseline` が渡されなかった" +
+        "(手元実行や単体テストではよくある。CI の `ci.yml` は渡している)。",
     );
   }
 
