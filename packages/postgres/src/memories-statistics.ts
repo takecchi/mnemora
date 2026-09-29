@@ -62,6 +62,16 @@ export function resetMemoriesWriteCounterForTesting(): void {
   memoriesWriteCounts.clear();
 }
 
+/**
+ * テスト専用: プロセスローカルのカウンタの現在値を覗く。production コードからは
+ * 呼ばない。Issue #1419: 「カウンタが期待どおりの範囲から始まり、ループの前後で
+ * 実際に等比の閾値を跨いだか」を歯自身が確かめられるようにするため
+ * （`memories-statistics.postgres.test.ts` 参照）。
+ */
+export function peekMemoriesWriteCounterForTesting(): number {
+  return memoriesWriteCounts.get(MEMORIES_TABLE) ?? 0;
+}
+
 export interface MaybeAnalyzeMemoriesResult {
   /** この呼び出しを含む、このプロセスが `memories` に書き込んだ累計行数。 */
   count: number;
