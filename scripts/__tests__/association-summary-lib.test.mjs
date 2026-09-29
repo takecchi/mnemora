@@ -607,3 +607,128 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("5/12");
   });
 });
+
+/**
+ * ⚠ **基準値より悪い arm を、Summary の上のほうに目立つ節で警告する(⛔ 門ではない)。**
+ *
+ * 対象指標は `gold`(goldReturnedCount) / `hit@1`(hit1Count) / `hit@10`(hit10Count) /
+ * `MRR`(mrr) の4つ——タスク仕様が名指しした指標。**exit code には一切触れない**
+ * (このファイルは純関数だけを持ち、`process.exit` を持たない——CLI 側の
+ * `association-summary.mjs` の exit 0 は `association-summary.test.mjs` が別途固定する)。
+ *
+ * 許容幅は `WORSENED_TOLERANCE`(このファイルが export する定数)から読む。CI 実測
+ * (ADR 0385)で揺れが0だったため、既定値は0——1件でも下回れば警告する。
+ */
+describe("⚠ 基準値より悪い arm を目立つ節で警告する(門ではない)", () => {
+  const WORSENED_HEADING = "## ⚠ 基準値より悪い値がある（門ではない）";
+
+  it("全指標が基準値と同じか上回っていれば、警告節を出さない", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).not.toContain(WORSENED_HEADING);
+  });
+
+  it("基準値が渡されていなければ、警告節を出さない(比べる相手が無い)", () => {
+    const markdown = buildSummaryMarkdown({ measured: makeMeasured() });
+    expect(markdown).not.toContain(WORSENED_HEADING);
+  });
+
+  it("🔴 gold(goldReturnedCount)が基準値より低い arm があれば、警告節が出て arm名と差を含む", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    // on3 arm の基準値を、実測より1件多く(=実測が1件悪い)する。
+    baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).toContain(WORSENED_HEADING);
+    expect(markdown).toContain(measured.arms[1].armLabel);
+    expect(markdown).toContain("gold");
+  });
+
+  it("🔴 hit1Count が基準値より低い arm があれば、警告節に含まれる", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[2].hit1Count = measured.arms[2].hit1Count + 1;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).toContain(WORSENED_HEADING);
+    expect(markdown).toContain(measured.arms[2].armLabel);
+    expect(markdown).toContain("hit@1");
+  });
+
+  it("🔴 hit10Count が基準値より低い arm があれば、警告節に含まれる(hit@10注記とは別の話)", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[3].hit10Count = measured.arms[3].hit10Count + 1;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).toContain(WORSENED_HEADING);
+    expect(markdown).toContain(measured.arms[3].armLabel);
+    expect(markdown).toContain("hit@10");
+  });
+
+  it("🔴 mrr が基準値より低い arm があれば、警告節に含まれる", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[1].mrr = measured.arms[1].mrr + 0.5;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).toContain(WORSENED_HEADING);
+    expect(markdown).toContain(measured.arms[1].armLabel);
+    expect(markdown).toContain("MRR");
+  });
+
+  it("改善(基準値より高い)だけの相違では警告節を出さない", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount - 1;
+    baseline.arms[1].hit1Count = measured.arms[1].hit1Count - 1;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).not.toContain(WORSENED_HEADING);
+  });
+
+  it("🔴 悪化した arm が複数あれば、両方とも警告節に列挙される", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
+    baseline.arms[2].mrr = measured.arms[2].mrr + 0.5;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).toContain(WORSENED_HEADING);
+    expect(markdown).toContain(measured.arms[1].armLabel);
+    expect(markdown).toContain(measured.arms[2].armLabel);
+  });
+
+  it("⭐ 警告節は「## arm 別まとめ」より前(上)に出る(目立つ位置、Summary の上のほう)", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    const worsenedIndex = markdown.indexOf(WORSENED_HEADING);
+    const armSummaryIndex = markdown.indexOf("## arm 別まとめ");
+    expect(worsenedIndex).toBeGreaterThanOrEqual(0);
+    expect(armSummaryIndex).toBeGreaterThanOrEqual(0);
+    expect(worsenedIndex).toBeLessThan(armSummaryIndex);
+  });
+
+  it("🔴 arm 別まとめの表でも、悪化した arm の「基準値との差」セルに ⚠ が付く", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    // 表の行だけを見る(先頭が "|" の行)——「基準値より悪い値がある」節の箇条書きにも
+    // armLabel が出るため、それと混同しないようにする。
+    const tableLines = markdown.split("\n").filter((line) => line.startsWith("|"));
+    const worsenedRow = tableLines.find((line) => line.includes(measured.arms[1].armLabel));
+    const healthyRow = tableLines.find((line) => line.includes(measured.arms[2].armLabel));
+    expect(worsenedRow).toContain("⚠");
+    expect(healthyRow).not.toContain("⚠");
+  });
+
+  it("非0の許容幅の中に収まる悪化は警告しない(WORSENED_TOLERANCE を直接読んで検査する)", async () => {
+    const { WORSENED_TOLERANCE } = await import("../association-summary-lib.mjs");
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    const mrrTolerance = WORSENED_TOLERANCE.mrr ?? 0;
+    // 許容幅ちょうどの悪化(許容幅より大きくはしない)は警告しない。
+    baseline.arms[1].mrr = measured.arms[1].mrr + mrrTolerance;
+    const markdown = buildSummaryMarkdown({ measured, baseline });
+    expect(markdown).not.toContain(WORSENED_HEADING);
+  });
+});
