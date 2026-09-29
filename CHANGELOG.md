@@ -57,6 +57,25 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 (c) `[1.1.0]` 節では「追記29」の名前が2か所（27回目の棚卸し自身の段落と、PR #1437 が着地時に足した段落）で使われているが、そのことは同じ節の中で開示されていない——追記28 には「⚠『追記28』がこの節に2か所ある」という注記があるのに対し、追記29 にはそれが無い。出荷済みの節はもう書き換えないので、この事実をここに記録するだけに留める。
 
+### Breaking
+
+- **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった。新しい interface `RelationStore` と、それを検査する新設の conformance suite も増えた**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)・[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）。**この節の範囲で1件目の破壊的変更。**
+  - `describeMemoryStoreConformance` に、新しい任意メソッド `markContestedGroup?`/`resolveContestedGroup?` を検査する `it` と、任意フラグ `supportsMarkContestedGroup?`/`supportsResolveContestedGroup?`（既存の3状態フラグと同じ形）が増えた。群の一部だけを渡した `resolveContestedGroup?` を専用のエラー `ContestedGroupMembershipMismatchError`（新設）で拒む約束と、有効期間の重なりの境目（半開区間）の約束も検査する。
+  - 新設の `describeRelationStoreConformance` が、`RelationStore` の実装を検査する。
+  - **誰が影響を受けるか**: 自前の `MemoryStore` 実装を conformance suite に当てている利用者のうち、上の2つの任意フラグを `true` で渡しているのに口を実装していない場合だけ。口を実装しない・フラグを渡さない利用者は影響を受けない。
+  - ⭕ 次は**非破壊と数える**（union に値を足す変更。オーナーの回答 ask_human `d9364c91`）: `ContestedDetectionOutcome.result` の `"contested_group"`、`Omission` の `over_limit`/`stage_skipped` の `stage` の `"relation"`。網羅的な `switch` でこれらの型を扱っているコードは型検査が落ちうる。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の項目29。**DB マイグレーション**: 新しい migration `0026_memory_relations.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。
+
+### Added
+
+- **多者間（3件以上）の `contested` を表す関係グラフ `memory_relations` と、それを書く・読む口を足した**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)/[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0292](./docs/decisions/0292-relation-graph-table-depth-omitted-design.md)、[ADR 0327](./docs/decisions/0327-relation-graph-contested-write-path-design.md)、[ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）——`markContested`/`resolveContested` は1対1の対にしか対応せず、1つの記憶が複数の記憶と同時に争われる場合を表せなかった。
+  - **新しい migration `0026_memory_relations.sql`。** `memory_relations`（`kind` は当面 `'contradicts'` の1値。1組につき向きを変えて2行）を新設する。2者の対は今までどおり `contested_with_id` の列で持ち、既存のデータは動かさない。
+  - **新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）。** `@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`（`InMemoryRelationStore`）が実装する。配線は任意（`RuntimeDeps.relationStore?`）。
+  - **`MemoryStore` と `Runtime` に任意メソッド `markContestedGroup?`/`resolveContestedGroup?`（`markContested`/`resolveContested` の N者版）。** 関係の行は、有効期間が重なる組の間にだけ張る。対に3件目が来たら、対の列を空にして群へ移す。群どうしが一致したら合併する。解消（`supersede` と `both_active`）では関係の行も消す。
+  - **`Runtime.observe()` の claim key 衝突検出**: `detectContested` が on で `RelationStore` が配線されていれば、一致が2件以上（または `contested` の1件だけ）のとき、記録だけを積む代わりに群として書き込み、`ContestedDetectionOutcome.result` に `"contested_group"` を返す。`RelationStore` を配線しない呼び出しは、1バイトも変わらない。
+  - **recall の段3（対立する記憶を必ず並べて出す）が、群にも効くようになった。** 関係の行でつながった全員を幅優先でたどり、群ごとに10件（`DEFAULT_RECALL_ASSOCIATION.maxCount`）まで、`validFrom` の新しい順・同じなら id の順に残して並べる。切った件数は群ごとに `over_limit { stage: "relation" }` に出す。`RelationStore` が配線されていなければ `stage_skipped { stage: "relation" }` を出す。
+  - ⭕ 非破壊と数える（どれも省略可能。conformance suite の要件が増えた分だけを、上の `### Breaking` に数えた）。
+
 ---
 
 ## [1.1.0] - 2026-09-30
@@ -863,32 +882,6 @@ PR #1393・Issue #1232）になった。**
   「今の space だけを消す」ように壊す変異で、testkit の conformance の歯が赤くなる
   ことも確認した。いずれも戻すと緑に戻った。
 
-**⚠ 2026-09-30 追記30**: 上の棚卸しとは別に、着地に先立って変更を作った本人がこの節へ
-足した項目（上の追記19・20・28 と同じ扱い）。[Issue #207](https://github.com/takecchi/mnemora/issues/207)/
-[Issue #933](https://github.com/takecchi/mnemora/issues/933) の PR2、
-[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
-[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)（クローン
-miku の委譲先の判断であり、オーナーの判断ではない）。
-
-- **`ContestedDetectionOutcome.result`（`@mnemora/core`）の判別可能 union に
-  `"contested_group"` が増えた**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)・
-  [Issue #933](https://github.com/takecchi/mnemora/issues/933)、
-  [PR #1442](https://github.com/takecchi/mnemora/pull/1442)、
-  [ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)）——
-  Issue #933 PR1（ADR 0378、上の追記28）が「多者間のグループを実際に `contested` として
-  束ねる書き込みは範囲外」としていた部分を実装した。`ClaimKeyOptions.formContestedGroups?:
-  boolean`（新設、既定 `false`。`enabled`/`detectContested` と組み合わせたときだけ意味を
-  持つ）を `true` にして呼んだときだけ、一致が2件以上（または既に `contested` な1件）の
-  検出結果を、evidence-only（`"unresolved_conflict"`）の代わりに、`Runtime.
-  markContestedGroup`（下記）を実際に呼んで群として書き込んだ結果として返す。**既定
-  `false` は Issue #933 PR1 の挙動を1バイトも変えない**——`formContestedGroups` を渡さない
-  呼び出しでは `"contested_group"` は一度も現れない。群のメンバーは、既存の2者間の対の
-  相方（穴A）・`RuntimeDeps.relationStore?` が配線されていれば既存の3件以上の群（合併）も
-  含めて組み立てる。**誰が影響を受けるか**: `result.kind` を網羅的に分岐しているコードだけ、
-  型検査が落ちる。**移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) 項目29。
-  **DB マイグレーション**: 不要（`memory_relations` テーブル自体は migration 0026、段階Aで
-  既に導入済み）。
-
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。
@@ -922,15 +915,6 @@ miku の委譲先の判断であり、オーナーの判断ではない）。
   - **この opt-in は Observation の `payload` に印として永続化されるため、`extract: 'deferred'`・`reextract` でも同じ形で再現される。** `subjectCandidates`/`claimKey`（どちらも `extract: 'deferred'` と同時に渡すと例外になる）とは異なり、`extractData`/`extractTitle` は deferred と同時に指定しても例外にならない。
   - **上限は設けていない**（`content`/`name` が今も上限を持たないのと同じ。詳細は ADR 0369）。
   ⭕ 非破壊と数える（新しい省略可能な欄を足しただけで、既存の宣言・呼び出しは変わらない。既定の振る舞いは1バイトも変えていない）。
-- **多者間（3件以上）の `contested` を表す関係グラフ `memory_relations` と、それを書く・読む口を足した**（[Issue #207](https://github.com/takecchi/mnemora/issues/207)/[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR2、[ADR 0292](./docs/decisions/0292-relation-graph-table-depth-omitted-design.md)、[ADR 0327](./docs/decisions/0327-relation-graph-contested-write-path-design.md)、[ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)、[ADR 0381](./docs/decisions/0381-contested-group-write-path-implementation.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）——`markContested`/`resolveContested`（ADR 0134/ADR 0150）は1対1の対にしか対応せず、[#207](https://github.com/takecchi/mnemora/issues/207) が求める「1つの記憶が複数の記憶と同時に争われる」多者間ケースを表現できなかった。
-  - **新しい migration `0026_memory_relations.sql`。** `memory_relations`（`tenant_id`・`from_memory_id`・`to_memory_id`・`kind`。`kind` は当面 `'contradicts'` の1値。対称な関係は双方向2行で書く）を新設する。利用者は `mnemora-postgres-migrate`（または `runMigrations`）を打つこと。
-  - **新しい interface `RelationStore`（`link`/`unlink`/`listRelated`）を `@mnemora/core` に足した。** `@mnemora/postgres`（`PostgresRelationStore`）・`@mnemora/testkit`（`InMemoryRelationStore`）が実装する。`Store` バンドルへの組み込みは任意（`RuntimeDeps.relationStore?`）——配線しなくても `recall()` は今日どおり動く。
-  - **`MemoryStore` に新しい任意メソッド `markContestedGroup?`/`resolveContestedGroup?`（3件以上専用、`markContestedPair?`/`resolveContestedPair?` の N者版）を足した。** `@mnemora/postgres`・`@mnemora/testkit/fixtures` はこの口を実装済み。有効期間が重なる組にだけ `memory_relations` の行を張る（Postgres は単一の `INSERT ... SELECT` で、`findActiveByClaimKey?` と同じ半開区間の式を使う）。`resolveContestedGroup?` は「渡した `members` が、関係の行でつながった今も `contested` な群の全員と一致すること」を CAS で課す——群の一部だけを渡した解消は拒み、何も書かない（forget 等で群を離れたメンバーは、関係の行が残っていても「今の群」に数えない）。
-  - **`Runtime` に新しい任意メソッド `markContestedGroup?`/`resolveContestedGroup?`（`markContested`/`resolveContested` の N者版）を足した。** `getMany` で各メンバーの適格性を読んでから store の口を呼ぶ、読み側の分類層——`createRuntime()` の戻り値には必ず実装されている。
-  - **`Runtime.observe()` の claim key 衝突検出に `contested_group` 分岐を足した**（`ClaimKeyOptions.formContestedGroups?: boolean`、既定 `false`。上の `### Breaking` の項目参照）。
-  - **`packages/testkit` に新しい conformance suite `describeRelationStoreConformance` を足した**（9 it）。既存の `describeMemoryStoreConformance` にも `markContestedGroup?`/`resolveContestedGroup?` を検査する任意フラグ（`supportsMarkContestedGroup?`/`supportsResolveContestedGroup?`）が増えた。
-  - ⭕ 非破壊と数える（`RelationStore`/`markContestedGroup?`/`resolveContestedGroup?`（store 側・`Runtime` 側どちらも）はすべて省略可能。配線しない・呼ばない既存の利用者は1バイトも変わらない。`ContestedDetectionOutcome.result` の union 拡張だけを別項目として `### Breaking` に数えた）。
-  - **recall 側（機構3の必須の同伴取得、段3）は、この時点でもまだ3件以上の群に対応していない**——詳細・未決着点は ADR 0381 §5。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
