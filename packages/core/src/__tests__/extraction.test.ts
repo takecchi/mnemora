@@ -444,8 +444,11 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
     expect(prompt.system).toContain("user:b");
     // ADR 0271「引き受けた負債1」の申し送り: 一覧に無い・主題が無いなら null を明示させる。
     expect(prompt.system).toContain("null");
-    // messages（ユーザー発話本文）は候補一覧の影響を受けない。
-    expect(prompt.messages).toEqual([{ role: "user", content: "明日は東京に出張する予定です" }]);
+    // messages は候補一覧そのものの影響を受けない。話者（既定の fixture は speaker あり）だけが、
+    // Issue #1370（PR1）で本文の前に1行足される（extractionContext が無い候補経路）。
+    expect(prompt.messages).toEqual([
+      { role: "user", content: "話者（speaker）: 田中\n\n明日は東京に出張する予定です" },
+    ]);
   });
 
   it("subjectCandidates を渡すと、鍵（llmCassetteKey 相当）は渡さない場合と異なる", () => {
@@ -561,7 +564,7 @@ describe("buildExtractionPrompt（Issue #608 項目②(b)）", () => {
       });
 
       it("候補あり＋speaker なし → 今と同じ（本文だけ）", () => {
-        const observation = makeObservation();
+        const observation = makeObservation({ payload: { text: SPEAKER_TEXT } });
         expect(buildExtractionPrompt(observation, ["user:a"]).messages).toEqual([
           { role: "user", content: SPEAKER_TEXT },
         ]);
