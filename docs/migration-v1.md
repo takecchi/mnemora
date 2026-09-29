@@ -1062,7 +1062,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は7件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は8件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`1998b2b`**（PR #1421）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
@@ -1372,9 +1372,58 @@ store の中は変わらない」を満たしていなかった（この変更�
 
 **DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
 
-⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は7件
+### 25. `MemoryStore.purgeMemory?` が消す範囲が広がった——`tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の digest 帯（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #994](https://github.com/takecchi/mnemora/issues/994)・
+[Issue #995](https://github.com/takecchi/mnemora/issues/995)・
+[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+[PR #1427](https://github.com/takecchi/mnemora/pull/1427)、
+[ADR 0375](./decisions/0375-purge-scope-widened.md)。**この項目は、上の棚卸しの範囲の
+外——purge の法的な射程を広げる作業として、この節に足す1件である。**
+
+**何が変わったか**: `MemoryStore.purgeMemory?`（任意メソッド）の契約が広がった。
+これまで `content`/`digest`/`purgedAt` だけを書いていたのが、同じ書き込みで
+`tags` を `[]` へ、`attributes` を `{}` へ、claim key の2列（`claimKey`）を `null`
+へ上書きし、同じトランザクションでこの Memory に紐づく label の紐付け
+（`memory_labels` 相当）を外して `proposedCount` を減らし、このテナントの
+`recalls` の `IndexBand.digestBand` からこの `memoryId` のエントリを見つけて
+`digest` をトゥームストーンへ書き換えるようになった。**型は変えていない**
+（`purgeMemory?` のシグネチャ自体は同じ）。公開 API の型の差分
+（`scripts/__snapshots__/public-api/testkit.d.ts`）は、`@mnemora/testkit` の
+`InMemoryMemoryStore` に private メンバ `memoryLabels`・`memoryLabelKey` が増えたこと
+だけである——`private` なので利用者のコードからは参照できず、このクラスは以前から
+private メンバを持つので型の互換の性質も変わらない（PR #1114 の `rawGet` と同じ扱い）。
+破壊的と数える理由は型ではなく、下の conformance と実行時の振る舞いである。中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`MemoryStore.purgeMemory?`
+が消す範囲を広げた」の項目）を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: `packages/testkit` の conformance suite
+（`describeMemoryStoreConformance`）に、この広げた範囲を縛る `it` を3本足した
+——上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance
+スイートの判定を厳しくする変更」に当たる。加えて、`purgeMemory?` を自前実装
+している第三者 adapter が「purge は `content`/`digest`/`purgedAt` 以外を変えない」
+という前提でテストを書いていた場合、この PR のあとに揃えた conformance を
+当てると新しく落ちうる（実行時に壊れる）。項目21（PR #1394）・項目23（PR #1413）・
+項目24（Issue #1412）と同じ判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装（`purgeMemory?` を持つもの）を、
+`packages/testkit` の conformance suite に対して走らせている利用者のうち、この
+PR が足した約束のどれかを満たしていない場合。**`purgeMemory?` を実装していない
+adapter（`Runtime.purge` が `supported: false` を返す構成）は影響を受けない。**
+**適合テストを走らせていない利用者は、型検査には現れないまま、`@mnemora/postgres`・
+`@mnemora/testkit` を使っている場合は実行時の振る舞いが変わる**——purge の後、
+これまで残っていた `tags`/`attributes`/claim key・label の紐付け・`recalls.index_band`
+の元の digest が消える／伏せられる。
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要（新しい列・表は追加していない。既存列への書き込み範囲が
+広がっただけ）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は8件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
-PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412）になった。**
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
+PR #1427・Issue #994・#995・#1207（ADR 0375））になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

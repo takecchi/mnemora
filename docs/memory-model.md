@@ -880,7 +880,7 @@ Phase 1 は `memories.tags`（`text[]`、常に open な自由記述）のみを
 | `tags` を持つ Memory が新しく作られる（抽出・統合・省察・再抽出の新しい行を含む） | その名前の行が無ければ `proposed`・`proposedCount: 1` で作る。`proposed` なら `proposedCount` を1進める。`registered` なら何も変えない |
 | `registerLabel?` | 行が無ければ `registered`・`proposedCount: 0` で作る。`proposed` なら `registered` にする。`registered` なら何もしない（冪等） |
 | Memory が `forgotten`・`archived`・`superseded` になる | **何も変わらない**（行も `proposedCount` も残る） |
-| Memory を purge する | 何も変わらない（[Issue #995](https://github.com/takecchi/mnemora/issues/995) の射程） |
+| Memory を purge する | **その Memory の紐付け（`memory_labels`）を外し、`status: 'proposed'` の行の `proposedCount` を1減らす（床は0。`registered` な行は減らさない）。行そのもの（`labels` の名前）は消えない**（[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定1・決定2、2026-09-29。[Issue #995](https://github.com/takecchi/mnemora/issues/995) が起票した「何も言っていない」を埋めた） |
 | `registered` を `proposed` に戻す・ラベルを却下する・消す | **口が無い** |
 
 ⟹ 利用者から見ると、次の2つが起こる。
@@ -1070,27 +1070,36 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 16976ea）**: `purge()` が書き換えるのは、いまは `memories` の `content`・`digest`・`purged_at` だけであり、あわせて今の `embeddingProvider.space` の埋め込み行をベストエフォートで消す（ADR 0124 決定4・決定5）。それ以外の次のものは元の値のまま残る——`tags`・`attributes`・claimKey の2列・`content_hash`、`labels`/`memory_labels` の行、別の空間の埋め込み行、元の Observation の `payload`、`memory_events.digest_snapshot`、そして purge より前の recall の記録（`recalls.index_band` の digest 帯、および `consolidate`/`reflect` が種の digest を `text` にして撃った recall の `recalls.query`）。ここでは現状を記録するだけで、どこまで消すかは決まっていない（[Issue #994](https://github.com/takecchi/mnemora/issues/994)・[Issue #995](https://github.com/takecchi/mnemora/issues/995)、オーナーの判断待ち）。
 
+**⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md)）: 上の段落は、もう今の振る舞いではない。** `purge()` の射程を広げた。いま `purge()` が書き換えるのは `memories` の `content`・`digest`・`purged_at` に加えて **`tags`（`[]` へ）・`attributes`（`{}` へ）・claimKey の2列（`NULL` へ）**であり、あわせて **その Memory の `memory_labels` の紐付けをすべて外し、`status: 'proposed'` の `labels.proposedCount` を外した本数だけ減らし**、**このテナントの `recalls.index_band` の digest 帯（`digestBand`）からその `memoryId` のエントリを見つけて `digest` をトゥームストーンへ書き換える**。上の段落が「残る」と書いていたもののうち、`tags`・`attributes`・claimKey・`labels`/`memory_labels`・`index_band` の digest 帯はこれで消える側になった——`content_hash`・別の空間の埋め込み行・元の Observation の `payload`・`memory_events.digest_snapshot`・`recalls.query` は、引き続き残る（ADR 0375「(b) 残る」表）。どこまで消すかは、この範囲について**決まった**（Issue #994・#995 は解消。#1207 の残りは下の表を見ること）。
+
 **⚠ 2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1226](https://github.com/takecchi/mnemora/issues/1226)）**: `consolidate`/`reflect` が LLM を待っている間に、その元の記憶を `forget`・`purge` しても、統合先・内省の Memory はその本文を入れた LLM の出力から作られ、`active` で書かれる（`purge()` が `"purged"` を返した後でも）。書き込みの前に元の状態を見直す仕組みは無い（`embed` ジョブの同じ形は [Issue #1035](https://github.com/takecchi/mnemora/issues/1035) で直した）。`@mnemora/postgres` と `@mnemora/testkit` の fixture で同じ。見直して打ち切るかどうかは決まっていない。
+
+**⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md) 決定7）**: 上の「見直して打ち切るかどうかは決まっていない」は、**方向は決まった**——forget でも purge でも打ち切る。`@mnemora/postgres` の `store_supported` 経路（`purgeMemory?` を持つ adapter）は同一トランザクション内で材料行を `SELECT … FOR UPDATE` で見直してから書き、それ以外の経路は書く直前に読み直すだけで小さな窓が残る。**実装・実測は別 PR（PR2）で行う**——この版はまだ上の段落どおり（見直しの仕組みが無い）のままである。
 
 **⚠ 2026-09-27 追記（[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、今の振る舞いを書くだけ）: 1つのテナントを消去した後に、表ごとに何が残るか。**
 テナント単位で消去する口は無い。ここでは「そのテナントの全記憶を `forget` → `purge` し、`setEventRetention({ kind: "days", days: 1 })` の後に
 `purgeExpiredEventsForTenant` で保持期間の掃除をした後」を消去とみなし、`@mnemora/postgres` の全表を当てた（【実測】自分専用の PostgreSQL 17 + pgvector。
 別テナントの行は変わらない）。上の追記と重なるものは「上の追記」とだけ書く。
 
+**⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md)）: 下の表は ADR 0375 の実装に合わせて書き直した。** 「決まっていない」だったもののうち、`tags`・`memory_labels`（紐付け）・`recalls.index_band` の digest 帯は、この版で**消える側に決まった**——(a) として `purgeMemory` の契約に入った。それ以外（`provenance.speaker`・`subject_id`・`content_hash`・`recalls.query`・`recall_usages`・`outbox`・`tenant_settings` 等）は、purge の約束の対象外のまま (b) として明記した——「決まっていない」ではなく「残ると決めた」。
+
 | 表 | 消去の後 | 約束 |
 |---|---|---|
-| `memories` | 行は残る（purged）。`content`・`digest` は消える | 上の追記（`tags`・`attributes`・claimKey・`content_hash` が残る）。**加えて `provenance.speaker`（observe の `speaker`）と `subject_id` も残る**。決まっていない（#995・#1207） |
-| `observations` | 行は残る。`payload`・`attributes`・`subject_id`・`external_id` は元のまま | 上の追記（`payload`）。`subject_id`・`external_id` は決まっていない（#1207） |
-| `memory_embeddings_<space>`（今の空間） | 消える | ADR 0124 決定5（別の空間の表は上の追記） |
-| `labels`・`memory_labels` | 残る | 上の追記 |
-| `recalls` | **行は全部残る**（利用者が撃った recall と、`consolidate`・`reflect` の自動ジョブが中で撃った recall の両方）。`query`（問いの本文・種の digest）・`index_band`・`explain`（scope の `subjectId`）・`returned_memories` は元のまま | digest 帯と種の digest は上の追記（#994）。問いの本文と、行そのものの保持期間は決まっていない（#1207。ADR 0290 が「recalls の保持方針」を先の話としている） |
-| `recall_usages` | 残る（id だけ） | 決まっていない（#1207） |
-| `outbox` | 完了した行は残る（`payload` は id だけ） | 完了した行を消す経路も保持期間も無い（#1207）。`last_error` は #1064 |
-| `memory_events` | 保持期間の掃除で消える。**`events_purged` の行は残る** | ADR 0115 決定4（`events_purged` は掃除の対象外） |
-| `tenant_settings`・`tenant_activity` | 設定の行は残る | 決まっていない（#1207） |
+| `memories` | 行は残る（purged）。**(a)** `content`・`digest`・`tags`・`attributes`・claimKey は消える | **(b)** `content_hash`・`provenance.speaker`・`subject_id` は残る。ADR 0375「(b) 残る」表（`provenance`/識別子は `basisLost` の解決・呼び手の識別子の性質上、消す対象にしない） |
+| `observations` | 行は残る。`payload`・`attributes`・`subject_id`・`external_id` は元のまま | **(b)** Observation は追記専用（forget/purge の経路が無い）。Observation を消せるようにするかは既存原則を覆すかどうかの別判断（#1207 コメントでオーナーへ問いを残した） |
+| `memory_embeddings_<space>`（今の空間） | 消える | ADR 0124 決定5 |
+| **別の space の embedding** | **残る** | **(b)** `VectorStore` に全 space を列挙・削除する口が無い（決定5）。[Issue #1425](https://github.com/takecchi/mnemora/issues/1425) に切り出し済み |
+| `labels` | 行は残る（消す口が無い、ADR 0318）が、**(a)** `proposed` の `proposedCount` はこのテナントで purge した分だけ減る | 近似値のまま（ADR 0318「引き受けた負債」1・ADR 0375 決定1「引き受けた負債」2） |
+| `memory_labels` | **(a)** purge した Memory の紐付けは消える | ADR 0375 決定1・決定2 |
+| `recalls` | **行は全部残る**（保持方針は未決）。`query`（問いの本文・種の digest）・`explain`（scope の `subjectId`）・`returned_memories` は元のまま。**(a)** `index_band.digestBand` のうち該当 `memoryId` の `digest` は伏せられる | `query` は `memoryId` で特定できないため対象外（決定4）。行の保持期間は決まっていない（#1207。ADR 0290 が「recalls の保持方針」を先の話としている） |
+| `recall_usages` | 残る（id だけ） | **(b)** 決まっていない（#1207） |
+| `outbox` | 完了した行は残る（`payload` は id だけ） | **(b)** 完了した行を消す経路も保持期間も無い（#1207）。`last_error` は #1064 |
+| `memory_events` | 保持期間の掃除で消える。**`events_purged` の行は残る** | ADR 0115 決定4（`events_purged` は掃除の対象外）。`digest_snapshot` 自体は監査ログの目的上、意図的に残す |
+| `tenant_settings`・`tenant_activity` | 設定の行は残る | **(b)** 決まっていない（#1207） |
 
-⟹ **この版で「1つのテナントを跡形なく消す」手段は無い。**purge は法的な要求（`purge()` の doc）に応える口だが、残るものは上の表のとおりである。
-今の振る舞いは `packages/postgres/src/__tests__/tenant-erasure-residue.postgres.test.ts` が縛っている（約束を足すものではない）。
+⟹ **この版でも「1つのテナントを跡形なく消す」手段は無い。**purge は法的な要求（`purge()` の doc）に応える口だが、(b) に挙げたものは今回も残る。
+テナント単位の消去の口を新設する判断は #1207「考えられる方向」1 のまま、引き続き決まっていない。
+今の振る舞いは `packages/postgres/src/__tests__/tenant-erasure-residue.postgres.test.ts` が縛っている——**(a) の部分は ADR 0375 の約束として、(b) の部分はこれまでどおり「今の振る舞いの記録」として。**
 
 ---
 

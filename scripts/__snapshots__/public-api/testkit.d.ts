@@ -120,7 +120,9 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     readonly subjectActivitySeq: Map<string, Map<string, number>>;
     readonly eventRetentionDays: Map<string, number | null>;
     private readonly labels;
+    private readonly memoryLabels;
     private labelKey;
+    private memoryLabelKey;
     private upsertProposedLabels;
     private createObservationIdempotent;
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
