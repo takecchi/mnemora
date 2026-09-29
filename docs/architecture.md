@@ -1208,7 +1208,7 @@ type TaxonomyMode = 'open' | 'strict';
 > **Issue #1207（2026-09-30 追記、[ADR 0383](./decisions/0383-erase-tenant.md)）**:
 > `eraseTenant?`（任意メソッド）を足した——`ctx.tenantId` の `tenant_settings` 行を消す。
 > `tenant_id` が主キーのため高々1行——`reachedLimit` は常に `false`。独立関数
-> `eraseTenant`（`packages/core/src/erase-tenant.ts`）が束ねる4つの口のうち、
+> `eraseTenant`（`packages/core/src/erase-tenant.ts`）が束ねる port の中で
 > **最後に**呼ばれる（他 port の削除が完了した後）。
 
 契約:
