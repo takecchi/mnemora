@@ -1353,6 +1353,11 @@ conformance suite を当てると新しく落ちる（実行時に壊れる）�
 実装を、`packages/testkit` の conformance suite に対して走らせている利用者のうち、
 この PR が足した約束のどれかを満たしていない場合。**適合テストを走らせていない・
 自前実装を持たない利用者は影響を受けない。**
+**`packages/testkit/README.md` の最小の例（`MyEventStore`）のとおりに書いた `EventStore`
+も落ちる**——その例は `append` で受け取った入力をそのまま保存して返し、`get` も
+保存した行をそのまま返していたので、A8 の「渡した入力・返した値を呼び手が書き換えても、
+store の中は変わらない」を満たしていなかった（この変更で、例のほうを
+`structuredClone` で写す形に直した）。
 
 **どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
 
