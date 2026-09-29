@@ -378,6 +378,12 @@ PR #1393・Issue #1232）になった。**
   - 既存の CI の門・測定（ADR 0253 の重み指紋の門、Issue #565 の出力ベクトルの指紋測定、`identifier-probes` 等の基準値）はどれも128件を大きく下回る件数でしか `embed()` を呼んでおらず、この変更で値は動かない（確認範囲・根拠は ADR 0358）。
   - 不正な `maxBatchSize`（`NaN`・0以下）は `retry.attempts` と同じ流儀で1に丸め、投げない。非整数は切り捨てて使う。`Infinity` は「分割しない」を表す有効な値として扱う。
   ⭕ 非破壊と数える（新しい省略可能な option を足しただけで、既存の宣言・呼び出しは変わらない。**クローン miku の委譲先の判断であり、オーナーの判断ではない**）。
+- **`observe()` の `event.data`・`document.title` を抽出（LLM）へ渡すかどうかを、呼び出し側が選べるようになった**（[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)、[ADR 0369](./docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）——以前は `event.data`・`document.title` は Observation の `payload` に保存されるだけで、抽出のプロンプトにも LLM 失敗時の全文フォールバックの本文にも入らなかった（PR #1346。この既定は変えていない）。
+  - **`ObserveEventInput.extractData?: boolean`・`ObserveDocumentInput.extractTitle?: boolean` を足した（既定 `false`）。** `true` を渡すと、抽出のプロンプトと全文フォールバックの本文の両方に、`data` がキーを1つ以上持つオブジェクトなら `${name}\n\n${JSON.stringify(data)}`、`title` が空でない文字列なら `${title}\n\n${content}` の形で入る。`data` が空・`title` が空なら、`true` を渡しても既定（`name`/`content` だけ）と同じになる。
+  - **`false`・省略の呼び出しは、payload・プロンプト・フォールバック本文がバイト単位で今と同じ**——`payload` に `extractData`/`extractTitle` キー自体が増えない。記録済みカセット（`llmCassetteKey`、ADR 0051）の鍵も動かない。
+  - **この opt-in は Observation の `payload` に印として永続化されるため、`extract: 'deferred'`・`reextract` でも同じ形で再現される。** `subjectCandidates`/`claimKey`（どちらも `extract: 'deferred'` と同時に渡すと例外になる）とは異なり、`extractData`/`extractTitle` は deferred と同時に指定しても例外にならない。
+  - **上限は設けていない**（`content`/`name` が今も上限を持たないのと同じ。詳細は ADR 0369）。
+  ⭕ 非破壊と数える（新しい省略可能な欄を足しただけで、既存の宣言・呼び出しは変わらない。既定の振る舞いは1バイトも変えていない）。
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
