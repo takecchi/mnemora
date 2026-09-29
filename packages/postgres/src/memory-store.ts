@@ -597,6 +597,30 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
+   * ADR 0380: `reextract` が「版を跨いで退けた記憶」を判定するための列挙。**SELECT のみ**
+   * ——`uq_memories_extraction (tenant_id, source_observation_id, extractor_version,
+   * content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも Index Scan に使える
+   * （ADR 0380 の EXPLAIN 実測）。`extractor_version`・`status` のどちらでも絞らない。
+   */
+  async listBySourceObservationAllVersions(
+    ctx: Ctx,
+    observationId: ObservationId,
+  ): Promise<Memory[]> {
+    // source_observation_id 列は uuid 型。この口の契約は「無い == []」なので、
+    // 形式が壊れた observationId もクエリを投げる前に空配列へ寄せる
+    // （mapping.ts の isUuidLike の doc参照）。
+    if (!isUuidLike(observationId)) {
+      return [];
+    }
+    const result = await this.db.execute(sql`
+      SELECT * FROM memories
+      WHERE tenant_id = ${ctx.tenantId}
+        AND source_observation_id = ${observationId}
+    `);
+    return result.rows.map((row) => rowToMemory(row as unknown as MemoryRow));
+  }
+
+  /**
    * ADR 0030（安全弁3）: `opts.expectedStatus` を渡すと `AND status = ${expectedStatus}` を
    * 足した条件付き UPDATE になる（compare-and-swap）。**`expectedStatus` が無いときは
    * 今日と一字も変えない**——このメソッドの大半の呼び出し元（`archived`/`forgotten` への

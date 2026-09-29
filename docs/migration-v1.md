@@ -1062,9 +1062,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は8件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は11件**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`1998b2b`**（PR #1421）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`7e1c68a`**（PR #1431）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27・追記28 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 **2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
 
@@ -1113,6 +1113,16 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 ⚠ **2026-09-29 追記（25回目の棚卸し。CHANGELOG の追記27 と同じ範囲）**: この節が数える範囲は、さらに `1998b2b` まで広がった。`c04ae5d`…`1998b2b` に着地した PR（94f8e17 #1417、7f596dc #1418、82a6785 #1420、1cfd3fd #1422、1998b2b #1421）のうち、PR #1420 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（24回目の棚卸し自身）。PR #1418・PR #1422 はテスト専用の PR で、出荷の `src` を1行も触っていない（PR #1422 が `packages/postgres/src/memories-statistics.ts` に足した `peekMemoriesWriteCounterForTesting()` はテスト専用関数で、`packages/postgres/src/index.ts` からは export されない）ので、この節の対象外である。PR #1417（Issue #1412、ADR 0373）は、着地の時点で本人が既にこの節へ項目24として足しており（上）、この棚卸しではリンクと分類を検証し、直すものは無かった。PR #1421（Issue #1415、ADR 0374）は `PostgresVectorStore.search()`/`searchMany()` の実行計画だけを変えるもので、公開の型を1バイトも変えていない（非破壊。詳細は CHANGELOG の `[1.1.0]` 節の同項目）——あわせて、PR #1421 が PR #1410（ADR 0362）の統計あり・無し切り替えの仕組み自体を `StatsPresenceGate` へ置き換えたことを、CHANGELOG の `[1.1.0]` 節 `### Fixed` の PR #1410 の項目の末尾に注記で足した（本文は書き換えていない）。この回で新しく確定した破壊的変更は無い。正の対照（`git diff --stat c04ae5d..1998b2b -- 'packages/*/src/**' ':!**/__tests__/**'` の6ファイル）・型の上（`git diff c04ae5d..1998b2b -- scripts/__snapshots__/public-api/` は `testkit.d.ts`・`postgres.d.ts` の2ファイルのみ、どちらも追加のみ）の詳細は CHANGELOG の `[1.1.0]` 節の追記27を見ること——ここには複製しない。
 
 ⟹ **この節の範囲（`v1.0.2`…`1998b2b`）で、確定した破壊的変更は、なお7件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238、PR #1417・Issue #1412）である。**
+
+⚠ **2026-09-30 追記（26回目の棚卸し。CHANGELOG の追記28 と同じ範囲）**: この節が数える範囲は、さらに `7e1c68a` まで広がった。`1998b2b`…`7e1c68a` に着地した PR（c8f82c5 #1423、1e7bda7 #1426、b84586b #1424、3d84c22 #1427、ecc1782 #1429、9150d4c #1428、7e1c68a #1431）のうち、PR #1426 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（25回目の棚卸し自身）。PR #1423（doc・テスト専用）・PR #1429（`examples/chat` の scripts・カセットと ADR 追記のみ、`examples/chat` は `private` で出荷される面の外）は、どちらもこの節の対象外である。PR #1427（Issue #994/#995/#1207、ADR 0375）は、着地の時点で本人が既にこの節へ項目25として足しており（上）、この棚卸しではリンクと分類を検証し、直すものは無かった。PR #1428（Issue #1226、ADR 0375 決定7）も、着地の時点で本人が既にこの節へ項目26として足しており（下）、この棚卸しでは CHANGELOG 側に欠けていた PR 番号へのリンクを足しただけである（本文・分類は書き換えていない、CHANGELOG の追記28を見よ）。**この棚卸しの作業中に origin/main がさらに1本進み**、PR #1431（[Issue #933](https://github.com/takecchi/mnemora/issues/933) PR1、[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)）も、着地の時点で本人が既にこの節へ項目27として足していた（下）——範囲をここまで広げ直し、この棚卸しではリンクと分類を検証し、直すものは無かった。この回で新しく確定した破壊的変更は無い。正の対照（`git diff --stat 1998b2b..7e1c68a -- 'packages/*/src/**' ':!**/__tests__/**'` の6ファイル。うち `runtime.ts`・`memory-store-conformance.ts` の2ファイルは複数 PR の重なる hunk のため単純な numstat の和と一致しないが、`git log --first-parent` で範囲を触った commit がこの棚卸しの4 PR（#1424・#1427・#1428・#1431）だけであることを確認した）・型の上（`git diff 1998b2b..7e1c68a -- scripts/__snapshots__/public-api/` は `core.d.ts`・`postgres.d.ts`・`testkit.d.ts` の3ファイル、どれも追加のみ）の詳細は CHANGELOG の `[1.1.0]` 節の追記28を見ること——ここには複製しない。
+
+⚠ **「追記28」という番号は、CHANGELOG に2か所ある。**1つ目はこの棚卸し自身の段落。2つ目は、PR #1431 が着地時に足した段落である。先例（追記19・追記23・追記25 の注、CHANGELOG 前書き）と同じ理由の重複——別の担い手が別の理由で同じ次の番号を使ったものと見られる。**過去の追記の本文は書き換えないので、どちらの番号もそのまま残す。**
+
+⚠ **注記(i) 見出しの件数と番号付き項目の数の食い違い**: 上の見出しの件数は PR の数で数えており、番号付き項目は9つ（項目19〜27、下）しか無い。差の1件は PR #1377（Issue #1221）で、番号付き項目を持たず、上の1069行目付近の段落（「上の棚卸しの範囲の外……ここには複製しない」）だけに載っている——その段落自身の方針による**意図した形**であり、見落としではない。
+
+⚠ **注記(ii) 見出しの件数が8件のまま進んでいなかったこと**: 上の見出し「未リリース。確定は8件」は、9150d4c #1428 が項目26（下）を足したとき（項目26末尾の ⟹ の集計は9件へ更新済みだった）に、**見出しの数字だけ 8→9 へ上げ忘れていた**。その後 7e1c68a #1431 が項目27（⟹ の集計は10件）を足したときも、見出しの数字は直っていなかった（8件のまま）——この棚卸しで10件に直した。
+
+⟹ **この節の範囲（`v1.0.2`…`7e1c68a`）で、確定した破壊的変更は、なお10件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238、PR #1417・Issue #1412、PR #1427・Issue #994/#995/#1207、PR #1428・Issue #1226、PR #1431・Issue #933）である。**
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
@@ -1531,6 +1541,63 @@ suite に対して走らせている利用者のうち、`supportsFindContestedB
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
 2026-09-30 追記）、PR #1431・Issue #933）になった。**
+
+### 28. `MemoryStore` に必須メソッド `listBySourceObservationAllVersions` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
+[ADR 0380](./decisions/0380-reextract-withdrawn-across-extractor-versions.md)。
+
+**何が変わったか**: `extractorVersion` を上げた runtime インスタンスで `reextract()` を
+呼ぶと、前の版で `forget`（purge を含む）・`contested` にした記憶を見落とし、退けた
+はずの内容と同じ意味の Memory が印の無い新しい `active` として書き直されうる欠陥
+（Issue #1432 本文）を閉じた。`Runtime.reextract` の「退けた記憶」の判定は、いまは
+`extractorVersion` を問わず同じ Observation 由来の Memory を見る。
+
+- **`MemoryStore` に必須メソッド
+  `listBySourceObservationAllVersions(ctx, observationId): Promise<Memory[]>` を追加した**
+  （既存の `listBySourceObservation` は1行も変えていない。SELECT のみ、マイグレーション・
+  索引は追加しない）。
+- 版を跨いでも、1件でも退けたものがあれば、その Observation の抽出全体を打ち切る
+  （同じ版のときと同じ規律。同じ Observation の他の、退けていない `active` な事実も
+  作り直さない）。**帰結**: 運用側が旧い版の記憶を forget すると、その Observation の
+  ほかの事実も、以後の reextract では想起から作られなくなる。`skipped` に
+  `status_not_active` が出た Observation では、旧い版の記憶を残すことが運用側の
+  手がかりになる（詳細は CHANGELOG・ADR 0380）。
+- **版を跨いだ `active` の扱い（項目「Issue #873」の「運用側の責務」）は変えていない**
+  ——supersede 対象の判定は今どおり今の `extractorVersion` 限定のまま。
+
+中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`
+（「`MemoryStore` に `listBySourceObservationAllVersions` が増えた」の項目）を見ること
+——**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: `MemoryStore` は公開 interface であり、既存メソッドと同じ並びに
+**必須**メソッドを追加した——自前で `MemoryStore` を実装している第三者は、このメソッドを
+実装しないとその実装が interface を満たさなくなる（項目12「`Runtime` に必須メソッド
+`restoreSuperseded` が増えた」等と同じ扱い）。任意メソッド（`?`）にしなかった理由は
+ADR 0380「検討した代替案」を見ること。
+
+**誰が影響を受けるか**: `@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore`
+以外で自前の `MemoryStore` 実装を持っている利用者だけ、型検査が落ちる。`runtime.reextract`
+を直接呼ぶだけの利用者（`@mnemora/postgres`・`@mnemora/testkit` を使う場合を含む）は、
+型的な変更を受けない——挙動だけが変わる（版を跨いで退けた記憶がある Observation では、
+今まで作られていた新しい `active` が作られなくなる）。
+
+**どう直すか**: 自前の `MemoryStore` 実装に
+`listBySourceObservationAllVersions(ctx, observationId)` を実装する——
+`tenant_id`・`source_observation_id` が一致する行を、`extractor_version`・`status` の
+どちらでも絞らずに返すだけでよい（`listBySourceObservation` の実装から
+`extractor_version` の絞り込みを外した形）。
+
+**DB マイグレーション**: 不要（新しい列・表は追加していない。既存の一意索引
+`uq_memories_extraction (tenant_id, source_observation_id, extractor_version,
+content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも Index Scan に
+使える。ADR 0380 の EXPLAIN 実測を参照）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は11件
+（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
+PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
+2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380））になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

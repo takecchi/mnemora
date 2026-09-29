@@ -439,6 +439,7 @@ interface MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null
   ): Promise<Memory[]>;
+  listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
   updateStatus(
     ctx: Ctx,
     id: MemoryId,

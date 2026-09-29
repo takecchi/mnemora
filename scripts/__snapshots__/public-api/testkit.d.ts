@@ -149,6 +149,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
     listByTenant(ctx: Ctx): Memory[];
     listBySourceObservation(ctx: Ctx, observationId: ObservationId, extractorVersion: string | null): Promise<Memory[]>;
+    listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
     updateStatus(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts?: {
         supersededById?: MemoryId;
         expectedStatus?: MemoryStatus;

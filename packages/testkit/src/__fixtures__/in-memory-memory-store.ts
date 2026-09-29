@@ -878,6 +878,23 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
+   * ADR 0380: `reextract` が「版を跨いで退けた記憶」を判定するための列挙（**SELECT のみ**）。
+   * `listBySourceObservation` と違い `extractorVersion`・`status` のどちらでも絞らない。
+   */
+  async listBySourceObservationAllVersions(
+    ctx: Ctx,
+    observationId: ObservationId,
+  ): Promise<Memory[]> {
+    const results: Memory[] = [];
+    for (const memory of this.memories.values()) {
+      if (memory.tenantId !== ctx.tenantId) continue;
+      if (memory.sourceObservationId !== observationId) continue;
+      results.push(snapshot(memory));
+    }
+    return results;
+  }
+
+  /**
    * ADR 0030: `opts.expectedStatus` があるときだけ compare-and-swap にする（postgres 実装と同じ意味論）。
    *
    * 投げるもの: `"contested"` への遷移は常に {@link ContestedWithoutCompanionError}、`expectedStatus` と食い違えば
