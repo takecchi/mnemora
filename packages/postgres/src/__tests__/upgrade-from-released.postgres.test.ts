@@ -85,6 +85,7 @@ for (const fixture of FIXTURES) {
   describe(`公開済みの ${tag} で作った DB を今の migration で上げる（${fixture}）`, () => {
     let client: PostgresClient;
     let rowsBefore: unknown[];
+    let rowsAfter: unknown[];
     let pendingBefore: string[];
     const applied: string[][] = [];
 
@@ -134,6 +135,13 @@ for (const fixture of FIXTURES) {
       for (const space of Object.values(SPACES)) {
         await registerEmbeddingSpace(client.pool, space);
       }
+      // Issue #1416: 「migration の前後で行が変わらない」の"後"の値も、ここ（beforeAll。
+      // 他の it() がまだ1本も割り込めない場所）で一緒に凍結する。下の it() の中で
+      // snapshotRows() を読み直すと、tick/observe・forget→purge・resolveOrphanedContested
+      // の it()（同じ describe で同じ DB を書き換える）がそれより先に走ったかどうかに
+      // 結果が左右される——vitest の実行順は既定では宣言順だが、`--sequence.shuffle` では
+      // 変わる（実測: seed 1790682813243 ほかで赤くなった）。
+      rowsAfter = await snapshotRows();
     });
 
     afterAll(async () => {
@@ -155,8 +163,11 @@ for (const fixture of FIXTURES) {
       expect(rows[0]!.indexdef).not.toContain("mnemora_lexical_normalize(content)");
     });
 
-    it("migration の前後で既存の記憶の行（状態・埋め込みの状態・関係・本文）が変わらない", async () => {
-      expect(await snapshotRows()).toEqual(rowsBefore);
+    // Issue #1416: ここで DB を読み直さない。rowsBefore と rowsAfter はどちらも beforeAll の
+    // 中で凍結済み——この it() 自身がいつ実行されるか（他の it() がどれだけ DB を
+    // 書き換えた後か）に結果が依存しないようにするため。
+    it("migration の前後で既存の記憶の行（状態・埋め込みの状態・関係・本文）が変わらない", () => {
+      expect(rowsAfter).toEqual(rowsBefore);
     });
 
     it("zero-norm 部分索引は空間ごとにちょうど1本（migration と registerEmbeddingSpace で重複しない）", async () => {
