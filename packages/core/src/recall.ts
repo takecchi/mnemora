@@ -1987,6 +1987,31 @@ export interface RecallQuery {
    */
   includeSubjectless?: boolean;
   /**
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338、オーナーの回答 ask_human 61355570「呼び出す際の引数で指定できるように
+   * はできない？」）: `decay_clock` が `'wall'` 以外のテナントで、この recall が
+   * どのカウンタを `+1` するかを選ぶ。
+   *
+   * - **`"tenant"`（既定・省略時）**: テナント単位のカウンタ `T`
+   *   （`tenant_activity.activity_seq`）を `+1` する——**本 ADR 以前と1バイトも
+   *   変わらない挙動。**
+   * - **`"subject"`**: `ctx.subjectId` が指定されているときだけ、その subject の
+   *   カウンタ `S_x`（`tenant_subject_activity`、新設）を `+1` する（`T` には
+   *   触れない）。`ctx.subjectId` が無い（テナント全体 recall）ときは `"tenant"` と
+   *   同じ——絞っていない recall に "誰の" カウンタを進めるかという問いは無い。
+   *
+   * **読み取り（忘却ゲート・段2の再スコア・掃引）は、この欄の値に関わらず常に
+   * 「その Memory の subject の有効ないま」（`T + S_x`。`subjectId` が無い記憶は `T`
+   * のみ）を使う。**この欄が変えるのは前進（+1）の対象だけである——`"tenant"` を
+   * 選んでいても、他の呼び出しが `"subject"` で進めた `S_x` は読み取りに反映される。
+   *
+   * **既定 `"tenant"` の呼び出しだけを続ける限り、`tenant_subject_activity` は
+   * 一度も書き込まれず、読み取り側の SQL も相関サブクエリを足さない
+   * （`TenantSettingsStore.hasSubjectActivityCounters?` が `false` のまま）**——
+   * この欄を1本も使わないテナントには、ビット単位で本 ADR 以前と同じ挙動が保たれる。
+   */
+  activityCounting?: "tenant" | "subject";
+  /**
    * **段2（再スコア）の時間項の方針を明示的に選ぶ**
    * （Issue #690、[ADR 0300](../../../docs/decisions/0300-time-weighting-policy-opt-in.md)）。
    *
@@ -2223,6 +2248,9 @@ export const RecallQuerySchema = z.object({
   includeFullyDecayed: z.boolean().optional(),
   validAt: z.date().optional(),
   includeOutsideValidity: z.boolean().optional(),
+  // ADR 0353（Issue #338）: 数え方は前進の対象だけを選ぶ引数——読み取りには影響しない
+  // （`RecallQuery.activityCounting` の doc コメント参照）。
+  activityCounting: z.enum(["tenant", "subject"]).optional(),
   // .nullable() は明示的な off（ADR 0337）。.optional() は省略——省略時は
   // recall-runtime.ts が DEFAULT_RECALL_ASSOCIATION を適用する。zod で null と
   // undefined を区別できることは歯（recall-association.test.ts）で固定してある。
@@ -2288,6 +2316,15 @@ export interface RecallScope {
    * （`ArchiveDecayedOptions.clock` の doc「⭐」）。ここはゲート側なので OR。
    */
   decayFloorAnyAxis?: boolean;
+  /**
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338）: `VectorFilter.decayFloorSeqUsesSubjectCounters` と同じ意味——
+   * `true` なら `decayFloorSeqAfter`（`T`）に、その Memory の `subjectId` に対応する
+   * `S_x` を足した値と比較する。`recall-runtime.ts` が
+   * `TenantSettingsStore.hasSubjectActivityCounters?` の結果をそのまま置くだけであり、
+   * このテナントが一度も subject カウンタを使っていなければ `false`。
+   */
+  decayFloorSeqUsesSubjectCounters?: boolean;
   /**
    * `RecallQuery.includeSubjectless` がそのまま入る（Issue #608 項目③(b)、
    * [ADR 0286](../../../docs/decisions/0286-recall-include-subjectless.md)）。
@@ -2374,6 +2411,7 @@ export const RecallScopeSchema = z.object({
   decayFloorAtAfter: z.date().optional(),
   decayFloorSeqAfter: z.number().optional(),
   decayFloorAnyAxis: z.boolean().optional(),
+  decayFloorSeqUsesSubjectCounters: z.boolean().optional(),
   includeSubjectless: z.boolean().optional(),
   attributes: StoredAttributesSchema.optional(),
   labels: z.array(z.string()).optional(),
@@ -2584,20 +2622,31 @@ export interface NewRecallRecord {
   /**
    * [ADR 0165](../../../docs/decisions/0165-decay-activity-clock.md) 決めたこと5:
    * `true` のとき、`MemoryStore.createRecall` の実装は `recalls` への INSERT と
-   * **同一トランザクションで** `tenant_activity.activity_seq` を `+1` しなければならない。
-   * 既定 `false`（省略時は今日と同じ挙動——`activity_seq` は動かない）。
+   * **同一トランザクションで** `tenant_activity.activity_seq`（テナント単位のカウンタ
+   * `T`）を `+1` しなければならない。既定 `false`（省略時は今日と同じ挙動——
+   * `activity_seq` は動かない）。
+   *
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338）: `{ scope: "subject"; subjectId }` を渡すと、実装は `T` ではなく
+   * **`tenant_subject_activity`（`subjectId` の行、`S_x`）を同じトランザクションで
+   * `+1` する**（`T` には触れない）。`RecallQuery.activityCounting: "subject"` を
+   * 選び、かつ `ctx.subjectId` が指定された recall のときだけ、呼び出し側
+   * （`recall-runtime.ts`）がこの形を渡す。
    *
    * **1単位 = `recall()` 1回。** `observe()` はこのカウンタに触れない（ADR 0165
    * 決めたこと6）——活動時計が測るのは「記憶が、想起される機会を何回見送られたか」であり、
    * 書き込みは機会ではない。
    *
-   * **呼び出し側の責務**: `true` を渡すのは、そのテナントの `decay_clock` が
+   * **呼び出し側の責務**: `false` 以外を渡すのは、そのテナントの `decay_clock` が
    * `'wall'` 以外（`'activity'`/`'either'`）のときに限る（ADR 0165 決めたこと5
    * 「`activity_seq` を進めるのは `decay_clock != 'wall'` のテナントに限る」）。
    * この欄自体は `decay_clock` を読まない——`createRecall` の呼び出し側
    * （`packages/core/src/recall-runtime.ts` 等）がテナント設定を読んで渡す。
+   *
+   * ⭐ **非破壊**: `boolean` はこの union にそのまま含まれるため、既存の
+   * `advanceActivityClock: true`/`false`/省略はすべて型の変更前と同じ意味のまま通る。
    */
-  advanceActivityClock?: boolean;
+  advanceActivityClock?: boolean | { scope: "subject"; subjectId: string };
 }
 
 /**
