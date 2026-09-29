@@ -317,4 +317,61 @@ describe("eraseTenant（Issue #1207 / ADR 0383、本物の Postgres）", () => {
     const otherReread = await memoryStore.get(ctxOther, other.id);
     expect(otherReread?.supersededById).toBe(mine.id);
   }, 60_000);
+
+  it("blocked_by_foreign_reference: 自己参照以外の経路（埋め込みの表の CASCADE・memory_events）でも止まり、どちらのテナントの行も1行も変わらない", async () => {
+    // クローン miku の決定（ADR 0383）: 他テナントからの参照に当たったら止める。他テナントの
+    // 行は書き換えない。途中まで消えた状態を残さない。
+    // ⚠ 埋め込みの表の `memory_id` は `ON DELETE CASCADE` なので、検査が自己参照しか
+    // 見ないと、他テナントの埋め込みの行が `memories` の削除に巻き込まれて黙って消える。
+    // ⚠ `vectorStore`/`outboxStore` を `memoryStore` より先に呼ぶと、止まった時点で
+    // このテナントの埋め込み・outbox の行が既に消えている。
+    await resetTestDatabase();
+    const { db, pool } = await getTestClient();
+    const runtime = buildRuntime(db);
+    const tenantSettingsStore = new PostgresTenantSettingsStore(db);
+    const T = "erase-tenant-blocked-paths";
+    const OTHER = "erase-tenant-blocked-paths-other";
+    await seedTenant(runtime, tenantSettingsStore, T);
+    await seedTenant(runtime, tenantSettingsStore, OTHER);
+
+    const { rows } = await pool.query<{ id: string }>(
+      "SELECT id FROM memories WHERE tenant_id = $1 ORDER BY id LIMIT 1",
+      [T],
+    );
+    const mineId = rows[0]!.id;
+    const space = embeddingSpaceTableName(TEST_EMBEDDING_SPACE);
+    // 他テナントの行から、このテナントの記憶を指す（生 SQL で作る——#854/#1051 のとおり、
+    // 外部キーはテナントを見ないのでスキーマとしては作れる）。
+    await pool.query(
+      `INSERT INTO ${space} (tenant_id, memory_id, embedding, model)
+       SELECT $1, $2, embedding, model FROM ${space} WHERE tenant_id = $3 LIMIT 1`,
+      [OTHER, mineId, T],
+    );
+    await pool.query(
+      `INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, meta)
+       VALUES (gen_random_uuid(), $1, $2, 'updated', now(), '{"type":"system"}'::jsonb, '{}'::jsonb)`,
+      [OTHER, mineId],
+    );
+
+    const beforeT = await countAll(pool, T);
+    const beforeOther = await countAll(pool, OTHER);
+    // 埋め込み・outbox に実際に行があることを確かめてからでないと、「消えていない」を示せない。
+    expect(beforeT[space]).toBeGreaterThan(0);
+    expect(beforeT.outbox).toBeGreaterThan(0);
+
+    const deps = {
+      memoryStore: new PostgresMemoryStore(db),
+      vectorStore: new PostgresVectorStore(db),
+      outboxStore: new PostgresOutboxStore(db),
+      tenantSettingsStore,
+    };
+    const outcome = await eraseTenant({ tenantId: T }, deps, {
+      confirmTenantId: T,
+      limit: 100_000,
+    });
+    expect(outcome).toEqual({ kind: "blocked_by_foreign_reference", count: 2 });
+
+    expect(await countAll(pool, T)).toEqual(beforeT);
+    expect(await countAll(pool, OTHER)).toEqual(beforeOther);
+  }, 120_000);
 });

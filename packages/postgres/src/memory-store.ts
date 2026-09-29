@@ -3100,26 +3100,27 @@ export class PostgresMemoryStore implements MemoryStore {
    * `MemoryStore.eraseTenant?` の Postgres 実装。契約の全文は `@mnemora/core` の
    * interface doc（`packages/core/src/interfaces/memory-store.ts`）を見ること。
    *
-   * ## 事前検査（`blocked_by_foreign_reference`）
+   * ## 検査（`blocked_by_foreign_reference`）
    *
-   * 削除を試みる**前**に、他テナントの `memories` 行がこのテナントの `memories` 行を
-   * `superseded_by_id`/`contested_with_id`（どちらも `memories(id)` への自己参照 FK、
-   * `ON DELETE` 指定なし＝既定の `NO ACTION`）で参照していないかを検査する。1件でも
-   * あれば、**削除を一切試みず** `{ kind: "blocked_by_foreign_reference", count }` を
-   * 返す——`dryRun` でも同じ検査をする（「消せない」はプレビューでも分かったほうが
-   * 有用なため）。
+   * 削除と**同じトランザクションの先頭で**、他テナントの行がこのテナントの行を外部キーで
+   * 参照していないかを数える（{@link countForeignReferences}）。参照の経路は表名を
+   * 焼き込まず、`pg_constraint` から `current_schema()` の単一列の外部キーのうち、
+   * 参照する側・される側の両方に `tenant_id` 列がある全部を数え上げる——
+   * `memories` の自己参照（`superseded_by_id`/`contested_with_id`）・
+   * `memories.source_observation_id`・`memory_events`/`recall_usages`/`memory_labels`
+   * の参照に加え、**埋め込み空間の表（`memory_embeddings_<space>`、`ON DELETE CASCADE`）
+   * も入る**。CASCADE の表を入れないと、他テナントの埋め込みの行が `memories` の削除に
+   * 巻き込まれて黙って消える（「他テナントの行は書き換えない」に反する）。後から表が
+   * 増えても（例: `memory_relations`）、外部キーを張っていれば自動で入る。
    *
-   * この検査は `memories(superseded_by_id)`/`memories(contested_with_id)` の単一列索引
-   * （`migrations/0027_erase_tenant_fk_indexes.sql`。`contested_with_id` は既存の
-   * `idx_memories_contested_with` を流用）で効率よく引ける——これらの索引が本来
-   * 存在する理由（ADR 0059・ADR 0062）が指摘した「`tenant_id` 先頭の複合索引は
-   * この向きの参照整合性チェックに使えない」を、この検査でも踏まえている。
+   * 1件でもあれば、**1行も消さずに** `{ kind: "blocked_by_foreign_reference", count }`
+   * を返す——`dryRun` でも同じ検査をする。検査と削除の間に他テナントが参照を作って
+   * 外部キー違反（SQLSTATE 23503）になった場合は、トランザクションごとロールバック
+   * されたうえで数え直し、`blocked_by_foreign_reference` を返す（数え直して0件なら、
+   * 他テナント由来ではないので元の例外をそのまま投げる）。
    *
-   * ⚠ **この検査が対象にするのは `memories` の自己参照だけである。** `memory_events.
-   * memory_id`・`recall_usages.memory_id`・`memories.source_observation_id` も
-   * 理論上は他テナントの行から参照されうる（FK がテナントで絞られていないため）が、
-   * 通常の書き込み経路はテナントを跨いで参照を作らない——`blocked_by_foreign_reference`
-   * の検出範囲をこの1種類に絞ったことは ADR 0383「引き受けた負債」に明記する。
+   * 数える問い合わせは、参照される側を `tenant_id = $1` で絞り、参照する側を外部キーの
+   * 列で引く——`migrations/0027_erase_tenant_fk_indexes.sql` の単一列索引が効く向きである。
    *
    * ## 本体
    *
@@ -3128,20 +3129,25 @@ export class PostgresMemoryStore implements MemoryStore {
    * （`purgeExpiredEventsByRetention` と同じ判断）。
    */
   async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult> {
-    const blockedResult = await this.db.execute(sql`
-      SELECT count(DISTINCT other.id)::int AS count
-      FROM memories other
-      JOIN memories mine
-        ON (other.superseded_by_id = mine.id OR other.contested_with_id = mine.id)
-      WHERE mine.tenant_id = ${ctx.tenantId} AND other.tenant_id <> ${ctx.tenantId}
-    `);
-    const blockedCount = (blockedResult.rows[0] as unknown as { count: number }).count;
-    if (blockedCount > 0) {
-      return { kind: "blocked_by_foreign_reference", count: blockedCount };
-    }
-
     const dryRun = opts.dryRun === true;
-    return this.db.transaction((tx) => this.eraseTenantBody(tx, ctx, opts.limit, dryRun));
+    try {
+      return await this.db.transaction(async (tx) => {
+        const blocked = await countForeignReferences(tx, ctx.tenantId);
+        if (blocked > 0) {
+          return { kind: "blocked_by_foreign_reference", count: blocked };
+        }
+        return this.eraseTenantBody(tx, ctx, opts.limit, dryRun);
+      });
+    } catch (err) {
+      if (sqlStateOf(err) !== PG_FOREIGN_KEY_VIOLATION_SQLSTATE) {
+        throw err;
+      }
+      const count = await countForeignReferences(this.db, ctx.tenantId);
+      if (count === 0) {
+        throw err;
+      }
+      return { kind: "blocked_by_foreign_reference", count };
+    }
   }
 
   /**
@@ -3529,4 +3535,76 @@ export function buildPurgeExpiredEventsTargetSelect(
       AND kind <> 'events_purged'
     ORDER BY at ASC
     LIMIT ${opts.limit + 1}`;
+}
+
+/** 外部キー違反の SQLSTATE（`eraseTenant` が他テナントからの参照を見分けるのに使う）。 */
+const PG_FOREIGN_KEY_VIOLATION_SQLSTATE = "23503";
+
+/**
+ * 例外から SQLSTATE を取り出す。drizzle は pg のエラーを `cause` に包むことがあるため、
+ * `cause` を辿る（`__tests__/foreign-key-violation.postgres.test.ts` の `sqlStateOf` と同じ形）。
+ */
+function sqlStateOf(error: unknown): string | undefined {
+  let current: unknown = error;
+  for (let depth = 0; depth < 8 && current !== null && current !== undefined; depth += 1) {
+    const code = (current as { code?: unknown }).code;
+    if (typeof code === "string") {
+      return code;
+    }
+    current = (current as { cause?: unknown }).cause;
+  }
+  return undefined;
+}
+
+/**
+ * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+ * 他テナントの行が、テナント `tenantId` の行を外部キーで参照している件数を数える。
+ *
+ * 経路は `pg_constraint` から数え上げる（表名を焼き込まない）: `current_schema()` の中の
+ * 単一列の外部キーで、参照する側・される側の両方に `tenant_id` 列があるもの全部。
+ * 複数列の外部キー（`tenant_id` を含めればテナントを跨げない）と、`tenant_id` を持たない
+ * 表からの参照は対象外（ADR 0383）。
+ */
+async function countForeignReferences(tx: Db, tenantId: string): Promise<number> {
+  const paths = await tx.execute(sql`
+    SELECT child.relname AS child_table, ca.attname AS child_column,
+           parent.relname AS parent_table, pa.attname AS parent_column
+    FROM pg_constraint con
+    JOIN pg_class child ON child.oid = con.conrelid
+    JOIN pg_class parent ON parent.oid = con.confrelid
+    JOIN pg_namespace n ON n.oid = child.relnamespace
+    JOIN pg_attribute ca ON ca.attrelid = con.conrelid AND ca.attnum = con.conkey[1]
+    JOIN pg_attribute pa ON pa.attrelid = con.confrelid AND pa.attnum = con.confkey[1]
+    WHERE con.contype = 'f'
+      AND n.nspname = current_schema()
+      AND parent.relnamespace = child.relnamespace
+      AND array_length(con.conkey, 1) = 1
+      AND EXISTS (
+        SELECT 1 FROM pg_attribute t
+        WHERE t.attrelid = child.oid AND t.attname = 'tenant_id' AND NOT t.attisdropped
+      )
+      AND EXISTS (
+        SELECT 1 FROM pg_attribute t
+        WHERE t.attrelid = parent.oid AND t.attname = 'tenant_id' AND NOT t.attisdropped
+      )
+    ORDER BY child.relname, ca.attname
+  `);
+  let total = 0;
+  for (const row of paths.rows) {
+    const p = row as unknown as {
+      child_table: string;
+      child_column: string;
+      parent_table: string;
+      parent_column: string;
+    };
+    const result = await tx.execute(sql`
+      SELECT count(*)::int AS count
+      FROM ${sql.identifier(p.parent_table)} AS mine
+      JOIN ${sql.identifier(p.child_table)} AS other
+        ON other.${sql.identifier(p.child_column)} = mine.${sql.identifier(p.parent_column)}
+      WHERE mine.tenant_id = ${tenantId} AND other.tenant_id <> ${tenantId}
+    `);
+    total += (result.rows[0] as unknown as { count: number }).count;
+  }
+  return total;
 }

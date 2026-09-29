@@ -134,7 +134,7 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     });
   });
 
-  it("呼び出しの順序は vectorStore → outboxStore → memoryStore → tenantSettingsStore である", async () => {
+  it("呼び出しの順序は memoryStore → vectorStore → outboxStore → tenantSettingsStore である", async () => {
     const stores = createFakeRuntimeStores();
     const order: string[] = [];
     const wrap =
@@ -171,20 +171,23 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
       { confirmTenantId: ctx.tenantId, limit: 100 },
     );
 
-    expect(order).toEqual(["vectorStore", "outboxStore", "memoryStore", "tenantSettingsStore"]);
+    expect(order).toEqual(["memoryStore", "vectorStore", "outboxStore", "tenantSettingsStore"]);
   });
 
-  it("memoryStore が blocked_by_foreign_reference を返したら、その count をそのまま返し、tenantSettingsStore には触れない", async () => {
+  it("memoryStore が blocked_by_foreign_reference を返したら、その count をそのまま返し、ほかの3つの port には触れない（途中まで消えた状態を残さない）", async () => {
     const stores = createFakeRuntimeStores();
     stores.memoryStore.eraseTenant = async (): Promise<EraseTenantStoreResult> => ({
       kind: "blocked_by_foreign_reference",
       count: 3,
     });
-    let tenantSettingsTouched = false;
-    stores.tenantSettingsStore.eraseTenant = async (): Promise<EraseTenantResult> => {
-      tenantSettingsTouched = true;
+    const touched: string[] = [];
+    const touch = (name: string) => async (): Promise<EraseTenantResult> => {
+      touched.push(name);
       return { deleted: 0, reachedLimit: false };
     };
+    stores.vectorStore.eraseTenant = touch("vectorStore");
+    stores.outboxStore.eraseTenant = touch("outboxStore");
+    stores.tenantSettingsStore.eraseTenant = touch("tenantSettingsStore");
 
     const outcome = await eraseTenant(
       ctx,
@@ -198,7 +201,7 @@ describe("eraseTenant（Issue #1207 / ADR 0383）", () => {
     );
 
     expect(outcome).toEqual({ kind: "blocked_by_foreign_reference", count: 3 });
-    expect(tenantSettingsTouched).toBe(false);
+    expect(touched).toEqual([]);
   });
 
   it("いずれかの port の eraseTenant が例外を投げたら、その例外をそのまま素通しする", async () => {

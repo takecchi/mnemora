@@ -37,21 +37,23 @@ import type { VectorStore } from "./interfaces/vector-store.js";
  * 直接消す（ADR 0115 決定4が `EventStore` を経由せず `MemoryStore` 側で `memory_events` を
  * 扱ってきたのと同じ形。ADR 0383 参照）。
  *
- * ## 呼び出しの順序: vectorStore → outboxStore → memoryStore → tenantSettingsStore
+ * ## 呼び出しの順序: memoryStore → vectorStore → outboxStore → tenantSettingsStore
  *
- * 設定（`tenantSettingsStore`）を最後にする——`getEventRetention` 等が読む設定は、
+ * **`memoryStore` を最初にする。**`memoryStore.eraseTenant?` は
+ * {@link EraseTenantOutcome} の `blocked_by_foreign_reference` を返しうる唯一の port で
+ * あり、それが起きたときに**ほかの port へまだ1行も触れていない**状態を保つため
+ * （クローン miku の決定「止めるときは、途中まで消えた状態を残さない」、ADR 0383）。
+ * `blocked_by_foreign_reference` のとき、`memoryStore` の側は1行も消していない
+ * （検査は削除と同じトランザクションの先頭で行う）。
+ *
+ * 設定（`tenantSettingsStore`）は最後にする——`getEventRetention` 等が読む設定は、
  * 途中で処理が中断してもまだ「テナントが存在する」ことの手がかりとして残る。
- * `memoryStore` を `tenantSettingsStore` より前にするのは、`memoryStore.eraseTenant?`
- * が {@link EraseTenantOutcome} の `blocked_by_foreign_reference` を返しうる唯一の
- * port であり、それが起きたときに `tenantSettingsStore` へまだ触れていない状態を保つため。
  *
  * ⚠ **4つの port は別々の呼び出しであり、分散トランザクションではない。**
- * `memoryStore.eraseTenant?` が `blocked_by_foreign_reference` を返すと、この関数は
- * それをそのまま呼び出し側へ返す——**その時点で既に完了している `vectorStore`/
- * `outboxStore` の削除は、それぞれのトランザクションで既にコミット済みであり、
- * ロールバックされない。** 次に同じ `opts` で呼び直せば、`vectorStore`/`outboxStore`
- * は既に空なので0件で通過し、`memoryStore` だけが（参照が解消されない限り）再び同じ
- * 結果を返す——副作用が二重に起きることはない（各 store の `eraseTenant?` は冪等）。
+ * `blocked_by_foreign_reference` 以外の理由（接続断など）で途中の port が例外を投げた
+ * 場合、それより前の port の削除はコミット済みのまま残る。次に同じ `opts` で呼び直せば、
+ * 済んだ port は0件で通過する——各 store の `eraseTenant?` は冪等であり、副作用が
+ * 二重に起きることはない。
  *
  * ## 引数の検査（書き込み前）
  *
@@ -164,7 +166,7 @@ export async function eraseTenant(
 
   const storeOpts = { limit: opts.limit, dryRun: opts.dryRun };
 
-  // 順序: vectorStore → outboxStore → memoryStore → tenantSettingsStore（interface doc 参照）。
+  // 順序: memoryStore → vectorStore → outboxStore → tenantSettingsStore（上の doc 参照）。
   // 上のチェックで4つとも存在することを確認済み（non-null アサーション）。
   //
   // 🔴 **`deps.xxxStore.eraseTenant` をローカル変数へ取り出してから呼ばない。**
@@ -174,13 +176,14 @@ export async function eraseTenant(
   // 使っていると `this` が `undefined` になって壊れる。**必ず `deps.vectorStore.
   // eraseTenant!(...)` の形（プロパティアクセスした式をそのまま呼ぶ）で呼び、
   // レシーバを保つ。**
-  const vectorResult = await deps.vectorStore.eraseTenant!(ctx, storeOpts);
-  const outboxResult = await deps.outboxStore.eraseTenant!(ctx, storeOpts);
   const memoryResult = await deps.memoryStore.eraseTenant!(ctx, storeOpts);
 
   if (memoryResult.kind === "blocked_by_foreign_reference") {
     return { kind: "blocked_by_foreign_reference", count: memoryResult.count };
   }
+
+  const vectorResult = await deps.vectorStore.eraseTenant!(ctx, storeOpts);
+  const outboxResult = await deps.outboxStore.eraseTenant!(ctx, storeOpts);
 
   const tenantSettingsResult = await deps.tenantSettingsStore.eraseTenant!(ctx, storeOpts);
 
