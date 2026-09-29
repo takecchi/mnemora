@@ -2,14 +2,18 @@
 /**
  * Issue #1239 の歯（`cache-dir-preflight-default-cache.test.ts`）が使う、専用の計測プロセス。
  *
- * `@huggingface/transformers` の `pipeline()` に `cache_dir` を渡して（`../../pipeline.ts` の
- * `createLocalEmbeddingPipeline` が `spec.cacheDir` を `cache_dir` として渡すのと同じ形）読み込ませ、
- * そのとき外へ出ようとした要求を数える。
+ * `@mnemora/local-embedding`（**ビルド済みの dist**。`createLocalEmbeddingPipeline` 経由——
+ * 直接 `@huggingface/transformers` の `pipeline()` を呼ぶのではない）に `cacheDir` を渡して
+ * 読み込ませ、そのとき外へ出ようとした要求を数える。
  *
  * - `env.cacheDir`（transformers.js の既定のキャッシュ）を、引数の `<defaultCacheDir>` に向ける——
- *   テストが既定のキャッシュを空にしたり、2ファイルを置いたりできるようにするため。本物の既定の置き場
+ *   テストが既定のキャッシュを空にできるようにするため。本物の既定の置き場
  *   （パッケージの中の `.cache/`）には触らない。
  * - `env.fetch` は、呼ばれたら記録して必ず失敗する（ネットワークに出ない）。
+ * - **`@huggingface/transformers` を先に import して `env` を掴んでから、`@mnemora/local-embedding`
+ *   を import する**——`createLocalEmbeddingPipeline` 自身は `@huggingface/transformers` を
+ *   遅延 import するが、Node のモジュールキャッシュにより同じシングルトンを指すので、
+ *   ここで行った `env` の差し替えは `createLocalEmbeddingPipeline` の内部にも効く。
  * - 読み込みそのものの成否は `outcome` に出すだけで、この歯の主張ではない（テストは偽のモデルの
  *   ファイルを置くので、ネットワークに出なくても、ファイルを解釈する段で失敗しうる）。
  *
@@ -29,7 +33,7 @@ if (!defaultCacheDir || !cacheDir || !repo || !dtype) {
   process.exit(2);
 }
 
-const { pipeline, env } = await import("@huggingface/transformers");
+const { env } = await import("@huggingface/transformers");
 
 env.cacheDir = defaultCacheDir;
 /** @type {string[]} */
@@ -39,13 +43,16 @@ env.fetch = async (input) => {
   throw new TypeError("fetch failed (probe-preflight-default-cache: network is disabled)");
 };
 
+const { createLocalEmbeddingPipeline } = await import("@mnemora/local-embedding");
+
 let outcome = "loaded";
 let error = null;
 try {
-  await pipeline("feature-extraction", repo, {
+  await createLocalEmbeddingPipeline({
+    repo,
     dtype,
-    cache_dir: cacheDir,
-    session_options: { intraOpNumThreads: 1, interOpNumThreads: 1 },
+    cacheDir,
+    numThreads: 1,
   });
 } catch (err) {
   outcome = "failed";

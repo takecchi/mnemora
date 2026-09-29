@@ -461,6 +461,11 @@ cos の分布も広く閾値運用しやすい。しかし重み 2.2GB（q8 で 
    確かめた**（2026-09-10T00:37Z。手順は README に置いた）。
    ⟹ **オフライン導入は「できない」のではなく「注入点を使う」である。**
    ⛔ このパッケージが `env` を勝手に書き換えることはしない（大域を黙って触らない）。
+   ⚠ **2026-09-29 追記（Issue #1239）**: 直前の一文は、`cacheDir` を渡したときについては成り立たなくなった。
+   既定の `createPipeline` は、`cacheDir` を渡されたときに限り、`pipeline()` を呼んでいる間だけ `env.cacheDir` を
+   `cacheDir` へ向け、成功でも失敗でも元へ戻す。このパッケージの読み込みどうしは直列化してある。
+   `env.localModelPath`・`env.allowRemoteModels` には今も触らないので、上の「`createPipeline` を差す仕事」は変わらない。
+   理由と限界は [ADR 0361](./0361-local-embedding-cache-dir-env-swap.md)。
 4. **🔴 `EmbeddingProvider` の適合テストは、今も存在しない。**
    `packages/testkit` の適合テストは Store 系5種だけで、provider 向けは1本も無い
    （[ADR 0072](./0072-anthropic-llm-provider.md) の負債1）。
