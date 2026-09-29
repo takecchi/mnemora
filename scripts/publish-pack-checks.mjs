@@ -106,23 +106,25 @@ export const EXACT_PINNED_DEPENDENCY_EXEMPTIONS = {
 /**
  * NEVER_PUBLISHED_TARGETS(Issue #205 追加、初出は `@mnemora/bullmq`)。
  *
- * publish 対象(`PUBLISH_TARGETS`)に加えたが、**registry へ一度も publish されたことが
- * 無い**パッケージの名前の集合。findVersionViolations / findVersionSkewViolations が前提に
- * している「version は tag の値を受け取った実績があるはずだ」という仮定(ADR 0070)は、
- * 初回 publish 前のパッケージには当てはまらない――version は `0.0.0` のまま置くのが正しい
- * (`scripts/apply-release-version.mjs` が実際の Release で書き込むまで、手で版を振らない。
- * ADR 0325 決定2 / docs/decisions/README.md の追記参照)。
+ * **git 上の `version` が `0.0.0` のままでよい**publish 対象(`PUBLISH_TARGETS`)の名前の集合。
+ * publish 時には、ほかの対象と同じく `scripts/apply-release-version.mjs` が tag の版へ
+ * 書き換える(ADR 0070)。git 上の `version` はオーナーの持ち場であり、道具の都合で手で版を
+ * 振らない(ADR 0325 決定2 / docs/decisions/README.md の追記参照)。
+ *
+ * ⚠ **名前と意味がずれている。**もとは「registry へ一度も publish されたことが無い」の意味で
+ * 足したが、`@mnemora/bullmq` は 1.1.0 で publish 済みである(2026-09-29、オーナーの手元での
+ * 初回。`docs/release-v1.md` §1.7)。git 上の `version` が `0.0.0` のままなので、一覧には
+ * 残している。名前を変えるか、`version` を揃えて一覧から消すかは、オーナーの判断を待つ。
  *
  * **ここに載っている間は**:
  * - 単一パッケージの version 検査(`findVersionViolations`)を、そのパッケージにだけ適用しない
  *   (`0.0.0` のままで違反にしない)。
  * - 全パッケージ版揃い検査(`findVersionSkewViolations`)の対象数からも外す――
- *   揃っているかどうかを問う対象そのものではないため。
+ *   git 上の `version` が他と揃っていないため。
  *
- * **消すとき**: そのパッケージが実際に一度でも publish されたら(オーナーが段0の
- * bootstrap を実行したら)、この一覧から名前を消すこと――消した瞬間、他の publish 対象と
- * 同じ検査を受けるようになる(`EXACT_PINNED_DEPENDENCY_EXEMPTIONS` と同じ「消せば検査が
- * 始まる」設計)。
+ * **消すとき**: git 上の `version` が他の publish 対象と揃ったら、この一覧から名前を消すこと
+ * ――消した瞬間、他の publish 対象と同じ検査を受けるようになる
+ * (`EXACT_PINNED_DEPENDENCY_EXEMPTIONS` と同じ「消せば検査が始まる」設計)。
  */
 export const NEVER_PUBLISHED_TARGETS = new Set(["@mnemora/bullmq"]);
 
