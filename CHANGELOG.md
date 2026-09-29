@@ -579,6 +579,8 @@ PR #1393・Issue #1232）になった。**
   - **`@mnemora/openai` の拒否の文面（`OpenAILLMProviderError`、ADR 0075）や pg の型変換エラーの生メッセージ（`invalid input syntax for type ... : "<値>"`）は、`params:` という目印を持たないため今回は塞がっていない**——長さの上限（4096文字）だけがこれを抑える（ADR 0363「引き受けた負債」）。
   - **既存行（この変更より前に書き込まれた `last_error`）の掃除はしていない**——今後も本文を含んだまま残る（ADR 0363「決定5」）。
   - ⭕ 非破壊と数える（`OutboxJob.lastError` の型は変わらない。例外は増減しない。変わるのは、この欄の**文字列の中身**——`params:` 以降が印に置き換わり、長さに上限が掛かる——だけである。同種の前例として、この欄の中身を変えた過去の変更（Issue #969「cause の連鎖を足す」・PR #1060「NUL を `\u0000` に置き換える」・Issue #1080「API キーを含まない例外にする」）は、いずれも `### Fixed` に置かれ、破壊的とは数えられていない。クローン miku の判断であり、オーナーの判断ではない）。
+- **`@mnemora/local-embedding` の `LocalEmbeddingProvider` に `cacheDir` を渡して温めても、ネットワークが無いと読み込めなかった**（[Issue #1239](https://github.com/takecchi/mnemora/issues/1239)、[PR #1401](https://github.com/takecchi/mnemora/pull/1401)、[ADR 0361](./docs/decisions/0361-local-embedding-cache-dir-env-swap.md)）——以前は、`cacheDir` にモデルの4ファイルが揃っていても、`@huggingface/transformers@4.2.0` の `pipeline()` の前段の確認が既定のキャッシュ（`env.cacheDir`）だけを見て、そこが空なら Hugging Face へ取りに出ていた（PR #1246 が README に今の振る舞いとして書いていたもの）。いまは既定の `createPipeline` が、`cacheDir` を渡されたときに限り `pipeline()` を呼んでいる間だけ `env.cacheDir` を `cacheDir` に向け、成功でも失敗でも元へ戻す。`cacheDir` が温まっていれば、既定のキャッシュが空でもネットワークへの要求は0回になる。このパッケージの読み込みどうしはプロセス内で直列化するので、`cacheDir` の違う provider が並行して読み込んでも、互いの差し替えの最中の値を見ない（そのぶん、インスタンスをまたいだ読み込みは並行しなくなった）。⚠ このパッケージを経由しない同じプロセスの transformers.js の利用は、差し替えの最中に読み込むと `cacheDir` を見うる（README・ADR 0361）。`cacheDir` を渡さない使い方は変わらない。🔴 `revision` を `main` 以外にすると、前段の確認が `main` の鍵を探すので、この直し方は届かず、オフラインでは今も読めない（README に書いただけで、実装は変えていない）。
+  ⭕ 非破壊と数える（公開の宣言・型は変わらない。例外で失敗していた読み込みが成功する側にだけ変わる。クローン miku の判断であり、オーナーの判断ではない）。
 
 ---
 

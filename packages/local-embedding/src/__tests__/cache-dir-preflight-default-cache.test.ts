@@ -13,20 +13,31 @@ import {
 const execFileAsync = promisify(execFile);
 
 /**
- * Issue #1239（#1004）の今の振る舞いを縛る歯。README「オフラインで使うなら、既定のキャッシュも温める」。
+ * Issue #1239 の直った振る舞いを縛る歯。README「`cacheDir` を渡すと、読み込みの前段の確認も
+ * そこを見る」。
  *
- * `cacheDir` にモデルの4ファイルが揃っていても、`@huggingface/transformers@4.2.0` の `pipeline()` は読み込みの
- * 前段の確認（`get_pipeline_files`）で `config.json`・`tokenizer_config.json` の有無を**既定のキャッシュ
- * （`env.cacheDir`）だけ**で確かめ、無ければネットワークへ取りに行く。既定のキャッシュにその2つが在れば、
- * ネットワークへの要求は0回になる。
+ * `@huggingface/transformers@4.2.0` の `pipeline()` は、読み込みの前段の確認
+ * （`get_pipeline_files` の中の `get_config` / `get_file_metadata`）で `config.json`・
+ * `tokenizer_config.json` の有無を**既定のキャッシュ（`env.cacheDir`）だけ**で確かめ、
+ * `cache_dir` オプションを運ばない。`createLocalEmbeddingPipeline`（`pipeline.ts`）は、
+ * `spec.cacheDir` が指定されているとき、`pipeline()` を呼んでいる間だけ `env.cacheDir` を
+ * 同じ場所へ差し替えることでこれを直す。
  *
+ * - **`createLocalEmbeddingPipeline` 経由で読み込む**——`@huggingface/transformers` の
+ *   `pipeline()` を直接呼ぶのではない（直した対象そのものを通す）。
  * - ネットワークには出ない: 子プロセスの `env.fetch` は、呼ばれたら記録して必ず失敗する。
  * - 本物の重みは要らない: `cacheDir` に置くのは中身の無い偽のファイルで、この歯が見るのは「外へ出ようと
- *   したか・どこへ」だけである（出なかった場合も、偽のファイルを解釈する段で読み込みは失敗する）。
+ *   したか・どこへ」だけである（偽のファイルなので、この先の解釈は失敗してよい——読み込みの成否は
+ *   この歯の主張ではない）。
  * - 既定のキャッシュは、子プロセスの `env.cacheDir` を一時ディレクトリへ向けて模す（本物の置き場には触らない）。
+ * - `@mnemora/local-embedding` は**ビルド済みの dist**を使う（`probe-preflight-default-cache.mjs`
+ *   の doc）——このテストを走らせる前に `pnpm --filter @mnemora/local-embedding run build`
+ *   （と、依存する `pnpm --filter @mnemora/core run build`）が要る。
  *
- * ⭐ transformers.js の版が上がり、前段の確認が `cache_dir` を運ぶようになれば、1つ目の歯が赤くなる
- * （要求が0回になる）。そのときは README の節とこの歯を一緒に直すこと。
+ * ⭐ この歯が赤くなるのは2通りある——**転じて別の意味を持つ**——ので、赤くなったら理由を見分けること:
+ * (a) `pipeline.ts` の `env.cacheDir` の差し替えが壊れた（退行）。
+ * (b) transformers.js の版が上がり、前段の確認自身が `cache_dir` を運ぶようになった（前進。
+ *     その場合はこの差し替え自体が不要になりうる——README と ADR 0361 を一緒に見直すこと）。
  */
 
 const PROBE = fileURLToPath(
@@ -64,6 +75,8 @@ beforeEach(async () => {
   root = await mkdtemp(path.join(tmpdir(), "mnemora-local-embedding-preflight-"));
   defaultCacheDir = path.join(root, "default-cache");
   cacheDir = path.join(root, "cache-dir");
+  // 既定のキャッシュは常に空にする——直った振る舞いでは、そこに何も置かなくてよいことを
+  // 主張するため（旧い歯は、既定のキャッシュに手当てを置く形を縛っていた）。
   await mkdir(defaultCacheDir, { recursive: true });
   // `cacheDir` には4ファイルとも揃える（中身は偽物）。
   await put(cacheDir, "config.json", JSON.stringify({ model_type: "modernbert" }));
@@ -76,27 +89,11 @@ afterEach(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe("cacheDir を渡しても、読み込みの前段の確認は既定のキャッシュを見る（transformers.js 4.2.0、Issue #1239）", () => {
-  it("既定のキャッシュが空なら、cacheDir に4ファイルが揃っていても config.json を取りにネットワークへ出て、読み込みは失敗する", async () => {
-    const result = await probe();
-    expect(result.urls).toEqual([`https://huggingface.co/${REPO}/resolve/main/config.json`]);
-    expect(result.outcome).toBe("failed");
-    expect(result.error).toContain("network is disabled");
-  }, 90_000);
-
-  it("既定のキャッシュに config.json だけが在っても、tokenizer_config.json を確かめにネットワークへ出る", async () => {
-    await put(defaultCacheDir, "config.json", JSON.stringify({ model_type: "modernbert" }));
-    const result = await probe();
-    expect(result.urls).toEqual([
-      `https://huggingface.co/${REPO}/resolve/main/tokenizer_config.json`,
-    ]);
-  }, 90_000);
-
-  it("既定のキャッシュに config.json と tokenizer_config.json の2つが在れば、ネットワークへの要求は0回", async () => {
-    await put(defaultCacheDir, "config.json", JSON.stringify({ model_type: "modernbert" }));
-    await put(defaultCacheDir, "tokenizer_config.json", "{}");
+describe("createLocalEmbeddingPipeline({ cacheDir }): 既定のキャッシュが空でも、前段の確認はネットワークへ出ない（直った Issue #1239）", () => {
+  it("cacheDir に4ファイルが揃っていれば、既定のキャッシュが空でも、ネットワークへの要求は0回", async () => {
     const result = await probe();
     expect(result.urls).toEqual([]);
+    expect(result.fetchCount).toBe(0);
     // 読み込みの成否はこの歯の主張ではない（偽のファイルなので、ネットワークに出ずにその先で失敗する）。
     expect(result.error ?? "").not.toContain("network is disabled");
   }, 90_000);
