@@ -378,6 +378,8 @@ PR #1393・Issue #1232）になった。**
 
 ### Fixed
 
+- **`@mnemora/openai`・`@mnemora/anthropic` の `completeStructured` は、利用者が渡す zod スキーマのうち送れない形（`z.record`・`z.tuple`・`z.date`・`transform`）を、provider ごとに違う形で・違う時点で落としていた**（[Issue #1148](https://github.com/takecchi/mnemora/issues/1148)、[PR #1399](https://github.com/takecchi/mnemora/pull/1399)、[ADR 0360](./docs/decisions/0360-schema-unsupported-thrown-before-send.md)）——`@mnemora/openai` は送ってからベンダーに拒ませ（HTTP 400、`kind` の外）、`@mnemora/anthropic` は送る前に落ちるが素の `Error`（`kind` の外）だった。いまはどちらの provider も、`chat.completions.create`/`messages.create` を呼ぶ前に、送れない形を検査して `OpenAILLMProviderError`/`AnthropicLLMProviderError` の新しい `kind: "schema_unsupported"` で落とす。元の例外は `cause`（ES2022 の `Error.cause`）に載る。`@mnemora/openai` は zod 自身の既定（throw）と、`openai` SDK 自身の strict 変換 `toStrictJsonSchema` を実際に送る JSON Schema に通す検査（戻り値は使わず、送るのは今までどおり mnemora 自身の翻訳結果）の両方で捕まえる。core が渡す4つのスキーマ（抽出・claim key・統合・内省）が送る JSON は1バイトも変わらない（実測済み）。ネットワーク失敗・応答側の失敗（`ZodError` 等）・拒否/切り詰め/空応答（`kind: "refusal"`/`"truncated"`/`"no_content"`）の扱いは変えていない。`z.lazy`・`default`・根が union の包み（PR #1147）・Anthropic 側の `z.record`（翻訳自体は失敗しないため対象外）は今までどおり通る。
+  ⭕ 非破壊と数える（`OpenAILLMFailureKind`/`AnthropicLLMFailureKind` という公開の union に値を1つ足しただけ——union に値を足す変更は破壊的変更として数えない、オーナーの回答（ask_human `d9364c91`）、`docs/migration-v1.md`「数え方の規律への追記（2026-09-28）」。`*ProviderErrorOptions` に足した `cause?: unknown` も省略可能な追加のみ）。
 - **`Runtime`（`@mnemora/core`）は、`RuntimeDeps.clock` に注入した時計を、監査ログ（`memory_events.at`）・
   `purgedAt`・recall の記録の `createdAt`・outbox の `availableAt`/`createdAt`/`completedAt`/`failedAt`
   には渡していなかった**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
