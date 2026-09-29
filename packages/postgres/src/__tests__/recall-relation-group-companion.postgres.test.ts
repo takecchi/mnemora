@@ -367,4 +367,39 @@ describe("runtime.recall() — 段3が多者間の contested 群も同伴取得�
       [{ kind: "over_limit", stage: "relation", count: 2, countKind: "exact" }],
     );
   });
+
+  it("2026-09-30（ADR 0381 決定4）: 群の単位の中で、起点の後ろの同伴は、たどる順ではなく validFrom の新しい順→id の順に並ぶ（2段先の記憶のほうが新しい形）", async () => {
+    const { runtime, memoryStore, vectorStore, relationStore } = await buildTestRuntime({
+      withRelationStore: true,
+    });
+    const ctx: Ctx = { tenantId: TENANT };
+    // owner は a とだけ重なる。a（古い）は c1・c2（新しい）と重なる。c1・c2 は owner と
+    // 重ならない。⟹ たどる順は owner → a → c1・c2 だが、新しい順は c2 → c1 → a。
+    const owner = await createEmbeddedMemory(memoryStore, vectorStore, ctx, [1, 0, 0], {
+      validFrom: new Date("2025-12-01T00:00:00Z"),
+      validUntil: null,
+    });
+    const make = (validFrom: Date, validUntil: Date | null) =>
+      memoryStore.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: TENANT,
+          embeddingStatus: "pending",
+          validFrom,
+          validUntil,
+        }),
+      );
+    const a = await make(new Date("2000-01-01T00:00:00Z"), null);
+    const c1 = await make(new Date("2024-01-01T00:00:00Z"), new Date("2025-11-01T00:00:00Z"));
+    const c2 = await make(new Date("2024-06-01T00:00:00Z"), new Date("2025-11-01T00:00:00Z"));
+    await runtime.markContestedGroup!(ctx, [owner.id, a.id, c1.id, c2.id]);
+    const related = await relationStore.listRelated(ctx, owner.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: owner は a とだけ直接つながる。
+
+    const result = await runtime.recall(ctx, { vector: [1, 0, 0] });
+    const groupIds = new Set([owner.id, a.id, c1.id, c2.id]);
+    const shown = result.memories.map((m) => m.memoryId).filter((id) => groupIds.has(id));
+
+    expect(shown).toEqual([owner.id, c2.id, c1.id, a.id]);
+  });
 });

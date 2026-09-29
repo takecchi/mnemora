@@ -431,3 +431,49 @@ describe("recall() — 段3の上限と安全弁は群ごとに効く（2026-09-
     ]);
   });
 });
+
+describe("recall() — 群の単位の中の見せる順（2026-09-30、ADR 0381 決定4）", () => {
+  it("起点の後ろの同伴は、たどる順ではなく validFrom の新しい順→id の順に並ぶ（2段先の記憶のほうが新しい形）", async () => {
+    const { runtime, stores } = buildRuntime({ withRelationStore: true });
+    // owner は a とだけ重なる。a（古い）は c1・c2（新しい）と重なる。c1・c2 は owner と
+    // 重ならない。⟹ たどる順は owner → a → c1・c2 だが、新しい順は c2 → c1 → a。
+    const owner = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "owner",
+        validFrom: new Date("2026-01-01T00:00:00Z"),
+        validUntil: null,
+      }),
+    );
+    const a = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({ digest: "a", validFrom: new Date("2000-01-01T00:00:00Z"), validUntil: null }),
+    );
+    const c1 = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "c1",
+        validFrom: new Date("2024-01-01T00:00:00Z"),
+        validUntil: new Date("2025-12-01T00:00:00Z"),
+      }),
+    );
+    const c2 = await stores.memoryStore.createMemory(
+      ctx,
+      newMemory({
+        digest: "c2",
+        validFrom: new Date("2024-06-01T00:00:00Z"),
+        validUntil: new Date("2025-12-01T00:00:00Z"),
+      }),
+    );
+    await runtime.markContestedGroup!(ctx, [owner.id, a.id, c1.id, c2.id]);
+    const related = await stores.relationStore.listRelated(ctx, owner.id, "contradicts");
+    expect(related.map((r) => r.memoryId)).toEqual([a.id]); // 前提: owner は a とだけ直接つながる。
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, owner.id, [1, 0]);
+
+    const result = await runtime.recall(ctx, { vector: [1, 0] });
+    const groupIds = new Set([owner.id, a.id, c1.id, c2.id]);
+    const shown = result.memories.map((m) => m.memoryId).filter((id) => groupIds.has(id));
+
+    expect(shown).toEqual([owner.id, c2.id, c1.id, a.id]);
+  });
+});

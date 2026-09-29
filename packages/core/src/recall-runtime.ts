@@ -353,6 +353,24 @@ function collectGroupComponent(
   return result;
 }
 
+/**
+ * Issue #207/#933 PR2（ADR 0381 決定4）: 多者間の群の同伴を、残す10件を選ぶときと、
+ * 単位の中で見せるときの両方で使う並び。`validFrom` の新しい順、同じなら id の順。
+ * `validFrom` が無い記憶は「新しさの情報が無い」として最後尾（最も古い扱い）に送る。
+ */
+function compareByValidFromDescThenId(a: Memory, b: Memory): number {
+  const aTime =
+    a.validFrom === null || a.validFrom === undefined
+      ? Number.NEGATIVE_INFINITY
+      : a.validFrom.getTime();
+  const bTime =
+    b.validFrom === null || b.validFrom === undefined
+      ? Number.NEGATIVE_INFINITY
+      : b.validFrom.getTime();
+  if (aTime !== bTime) return bTime - aTime;
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
 function unitChars(unit: Unit): number {
   return unit.members.reduce((sum, m) => sum + m.memory.digest.length, 0);
 }
@@ -1583,18 +1601,7 @@ export async function runRecall(
         const eligible = discoveredMemories.filter((m) => survivesAttributesFilter(m));
         // 決まったこと（この回のマネージャー指示）: validFrom の新しい順→id の順。
         // validFrom が無い候補は「新しさの情報が無い」として最後尾（最も古い扱い）。
-        const sorted = [...eligible].sort((a, b) => {
-          const aTime =
-            a.validFrom === null || a.validFrom === undefined
-              ? Number.NEGATIVE_INFINITY
-              : a.validFrom.getTime();
-          const bTime =
-            b.validFrom === null || b.validFrom === undefined
-              ? Number.NEGATIVE_INFINITY
-              : b.validFrom.getTime();
-          if (aTime !== bTime) return bTime - aTime;
-          return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-        });
+        const sorted = [...eligible].sort(compareByValidFromDescThenId);
         const capped = sorted.slice(0, DEFAULT_RECALL_ASSOCIATION.maxCount);
         const overLimitRelationCount = sorted.length - capped.length;
         if (overLimitRelationCount > 0) {
@@ -1675,7 +1682,14 @@ export async function runRecall(
       // 候補集合に実在する仲間を集める。
       const componentIds = collectGroupComponent(candidate.memory.id, relationEdges, byId);
       if (componentIds.length > 1) {
-        const members = componentIds.map((id) => byId.get(id)!);
+        // 見せる順（ADR 0381 決定4）: 起点の候補を先頭に置き、残りは残す10件を選んだ順と
+        // 同じ `validFrom` の新しい順→id の順に並べる。`collectGroupComponent` がたどる順は
+        // 関係の行の挿入順や store の返し方で変わりうるので、見せる順には使わない。
+        const [head, ...rest] = componentIds.map((id) => byId.get(id)!);
+        const members = [
+          head!,
+          ...rest.sort((x, y) => compareByValidFromDescThenId(x.memory, y.memory)),
+        ];
         for (const member of members) {
           consumed.add(member.memory.id);
         }
