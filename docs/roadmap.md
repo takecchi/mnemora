@@ -10,39 +10,11 @@
 
 ## 1. Phase 1（MVP）の範囲
 
-### 1.1 オーナー指定の範囲
-
-- monorepo の構成
-- core interfaces
-- Observation / Memory の型
-- PostgreSQL 実装の MemoryStore
-- pgvector
-- EmbeddingProvider
-- `observe()`
-- 基本の Memory Extraction
-- `recall()`
-- vector + tag + freshness のスコアリング
-- 説明とスコア内訳
-- unit テスト・integration テスト
-- サンプルのチャットアプリ
-- **Background Cognition（`reflect()` の実運用・Scheduler）は必須にしない**
-
-### 1.2 追加する項目とその理由
-
-以下は、この計画の中で Phase 1 に追加したものである。**すべて「後から入れられない、または後から入れると割高になる」という理由に基づく。** 各項目に理由を併記する。
-
-| 項目 | なぜ Phase 1 か（＝なぜ後から入れられないか） |
-|---|---|
-| `packages/testkit`（store 適合テスト一式） | 「差し替え可能」は、実行可能な適合テストが無ければ願望にすぎない。core が定義するのは型だけでなく冪等性・テナント分離・順序といった振る舞いの契約であり、それを検証する手段を持たないまま2つ目の adapter を書くと、契約は気づかれずに崩れる。 |
-| `memory_events`（監査ログ）と `status` 列 | 監査ログは「記録を開始する前に起きたこと」を遡って復元できない。後から追加すると、追加前の期間だけ永久に空白になる。`status` も同様で、後付けだと既存データの `status` を推測で埋めることになり、正確性を失う。 |
-| `superseded_by_id` 列（列だけ。関係グラフ本体は Phase 2） | 列を後から追加すること自体はマイグレーションで可能だが、「対向する記憶をスコアに関係なく必ず一緒に取得する」という Phase 1 の検索契約（`recall` が `status = 'active'` で絞る際の前提）が、この列の存在を最初から要求している。列が無い状態で検索ロジックを書き、後から列を足すと検索側の作り直しになる。 |
-| `recalls` + `recall_usages` テーブル | 説明可能性（「何を返し、何を返さなかったか」の記録）と強化（「実際に使われたものだけ強化する」）は、同一の機構——recall を識別子付きで記録し、使用報告を受け取る仕組み——を必要とする。片方のためだけに作ると、もう片方のために作り直すことになる。 |
-| `decay_floor_at` 列（Phase 1 では書き込むだけ） | Phase 2 で忘却の実処理を入れる際、この列がスキーマに無いとマイグレーションと同時に全件の再計算が発生する。Phase 1 のうちから書き込んでおけば、Phase 2 は「読み取りに使い始める」だけで済む。 |
-| `recall` の `omitted` と `usage` | 説明可能性は後付けできない。パイプラインの各段（フィルタ・閾値・予算）が「なぜ落としたか」を持ったまま返す設計になっていないと、後から理由だけを復元することはできない。 |
-| 目次帯（`index`）。ただし Phase 1 は第3階（群カウント）のみ、digest 帯は Phase 2 | digest 帯は taxonomy（ラベルの語彙管理）を要求するが、群カウントは subject 単位の集計だけで成立する。「recall が0件でも、何が在るかは言える」という最も価値の高い性質は、群カウントだけで既に得られる。 |
-
-**⚠ 2026-09 訂正（digest 帯の実装 PR、[ADR 0073](./decisions/0073-digest-band-bounded-without-taxonomy.md)）: 上の表の「digest 帯は taxonomy（ラベルの語彙管理）を要求する」は誤りだった。**要求しない。taxonomy を要するのは `taxonomy` 軸によるグルーピングのほうであり、帯そのものではない（[recall.md](./recall.md) §5 の訂正を見よ）。**digest 帯はオーナーの指示により前倒しで実装済みであり、schema / migration の変更を伴わなかった。**⛔ ただし前倒ししたのはこの1機能だけであり、Phase 1 / Phase 2 の線は動いていない。
-
+> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)、オーナー回答「すでに完了した計画は全部消しちゃっていいと思うよ」）**: 中身がすべて着地した次の節を消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L13-L45) で読める。
+> - §1.1 オーナー指定の範囲
+> - §1.2 追加する項目とその理由
+>
+> 節番号は振り直していない（§1.3 はそのまま §1.3 である）。
 
 ### 1.3 Phase 1 から明示的に外すもの
 
@@ -55,79 +27,15 @@
   - **⚠ 2026-09-29 追記（Issue #205、オーナー回答 2026-09-28「公開する準備をお願い」）**: `private: true` はもう正しくない——`private` を外し `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` 末尾へ加える PR が出ている。⛔ **publish・tag・Release・version の bump はまだしていない**（オーナーの手。version は `0.0.0` のまま、ADR 0070）。詳細は ADR 0325 の追記と `docs/release-v1.md` の該当節。
 - HTTP server（`packages/server`）
 
-これらは Phase 1 の範囲外だが、土台となる列・テーブルは 1.2 の通り Phase 1 に含める。
+これらは Phase 1 の範囲外だが、土台となる列・テーブルは 1.2 の通り Phase 1 に含める。（⚠ 2026-09-29 追記: 参照先の §1.2 は削除した（#762）。当時の本文は上の墓標のリンク先。列・テーブルはすべて main に在る。）
 
 ---
 
 ## 2. 実装の順序
 
-7つの段階に分ける。各段階は前の段階の成果物に依存する。**「何日で終わるか」ではなく「何ができたら次に進めるか」で区切る。**
-
-### 段階1: 土台
-
-- monorepo の構成（`packages/core`, `packages/testkit` の骨格）
-- core interfaces（`MemoryStore`, `VectorStore`, `EmbeddingProvider`, `Scheduler` などの型定義。zod によるスキーマ）
-- Observation / Memory の型（`status`, `superseded_by_id`, `decay_floor_at`, `embeddingStatus`, `provenance` を含む）
-
-**完了の判定条件**: `packages/core` が単体でビルドでき、外部実装が無くても型として矛盾が無い。`testkit` の適合テストの雛形（2テナント分のデータを入れて走らせる枠組み）が、プレースホルダ実装に対して動く（中身の正しさではなく、テスト自体が実行できることを確認する段階）。
-
-### 段階2: 保存
-
-- `packages/postgres` の `MemoryStore` / `VectorStore` 実装
-- pgvector の導入。ベクトル索引（HNSW）の DDL は手書きのマイグレーションで管理する（`drizzle-kit push` には任せない。理由は §4 のリスク表を参照）
-- `status`, `superseded_by_id`, `decay_floor_at`, `embeddingStatus` の各列
-- `memory_events`（監査ログ）、`recalls` + `recall_usages`
-- 依存: 段階1の interface が確定していること
-
-**完了の判定条件**: `testkit` の適合テストが postgres 実装に対してすべて通る（2テナント分離のテストを含む）。ベクトル索引を使う `ORDER BY` について、`EXPLAIN` で実際に HNSW 索引が使われることを確認する検査が通る。
-
-### 段階3: 取り込み
-
-- `observe()` の実装
-- 基本の Memory Extraction（Observation から Memory を抽出し、digest を生成する。digest は NOT NULL）
-- `EmbeddingProvider`（`packages/openai`）
-- 冪等性: `externalId` による Observation の重複排除、`(observationId, extractorVersion)` による抽出の冪等性、`(tenant_id, source_observation_id, extractor_version, content_hash)` の一意制約
-- 依存: 段階2の store
-
-**完了の判定条件**: 同じ Observation を二重に送っても Memory が重複して作られない。抽出された Memory には必ず digest が入っている。`embeddingStatus` が `pending → ready`（または `failed`）に正しく遷移する。
-
-### 段階4: 想起
-
-- `recall()` の実装
-- 二段検索（段1: 索引が効く形のフィルタ + ANN、段2: over-fetch した候補への再スコア）
-- vector + tag + freshness のスコアリング（freshness は `occurred_at ?? recorded_at` を使う）
-- `omitted` の分類、`usage` の計測、`budget` オプション
-- 依存: 段階3で埋め込み済みの Memory が存在すること
-
-**完了の判定条件**: `omitted` の各 kind（少なくとも `filtered`, `below_threshold`, `over_limit`, `budget_dropped`, `not_indexed`, `ann_truncated`）が、Phase 1 で発生しうる条件下で実際に返せることを確認済み。段1の `ORDER BY` が `EXPLAIN` で HNSW 索引を使っていることを確認済み。
-
-### 段階5: 説明
-
-- `explain.stages`（どの段が走り、どの段が走らなかったかのトレース）
-- スコア内訳の返却
-- 目次帯の第3階（群カウント）
-
-**完了の判定条件**: `recall` の返り値だけを見て、「なぜこの Memory が返ったか／返らなかったか」を人間が説明できる。第3階の群カウントの総和が、スコープ内の総数と一致する（被覆不変条件が `recall()` 1回の返り値について成立する）。
-
-### 段階6: 検証
-
-- unit テスト・integration テスト一式
-- `testkit` を使った postgres 実装への網羅的な適用
-
-**完了の判定条件**: CI で `core` / `testkit` / `postgres` / `openai` の主要パスが緑になる。
-
-### 段階7: サンプル
-
-- サンプルのチャットアプリ
-- 依存: 段階6が緑であること（壊れている可能性のある API の上にサンプルを書かない）
-
-**完了の判定条件**: サンプルアプリが `observe → recall` の往復を実演し、`omitted` と `usage` を画面またはログに可視化する。
-
-### 抽出モードについての注記
-
-段階3の Memory Extraction は `extract: 'sync' | 'deferred'` を API として持つが、**既定値をどちらにするかは §5 の通りオーナー判断待ち**である。Phase 1 は「Background Cognition を必須にしない」方針のため、`sync` を既定にしても矛盾しないが、この計画自体はどちらか一方に決め打ちしていない。
-
-**⚠ 2026-09-28 追記（文書と実装の照合、main 3838352）**: 既定はもう決まっている。§5.2 の追記のとおり `sync` であり、実装も `extract` を省略した `observe()` を `sync` として扱う（`packages/core/src/runtime.ts` の `input.extract ?? "sync"`）。上の段落は計画の記録として残す。
+> **⚠ 2026-09-29 削除（[Issue #762](https://github.com/takecchi/mnemora/issues/762)）**: 段階1〜7 はすべて着地した（段階1 #2 `1eee055`、段階2 #3 `87ff014`、段階3 #4 `ab693b1`、段階4・5 #5 `5ef173f`、段階6・7 #6 `669274c`）。抽出モードの既定は §5.2 で `sync` に決まっている。そのため、この節の中身を消した。当時の本文は [`635c93d` の `docs/roadmap.md`](https://github.com/takecchi/mnemora/blob/635c93dcda148f44cf6b51ac2407b28596fccb32/docs/roadmap.md#L62-L131) で読める。コード・テスト・CI のコメントに残っている「roadmap.md 段階N」は、この墓標から辿ること。消した見出し:
+> - 段階1: 土台 / 段階2: 保存 / 段階3: 取り込み / 段階4: 想起 / 段階5: 説明 / 段階6: 検証 / 段階7: サンプル
+> - 抽出モードについての注記
 
 ---
 
