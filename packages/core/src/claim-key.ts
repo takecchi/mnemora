@@ -406,27 +406,6 @@ export interface ClaimKeyOptions {
    * 使いたい呼び出し側は、同じ配列をここへも明示的に渡すこと）。
    */
   knownSubjects?: string[];
-  /**
-   * Issue #207/#933 PR2（ADR 0327、ADR 0378、ADR 0381）: `detectContested: true` の
-   * 「一致が2件以上、または一致がちょうど1件だがその1件が既に `contested`」の分岐
-   * （`Runtime.detectClaimKeyContested` の doc コメント参照）で、`deps.memoryStore.
-   * markContestedGroup` が配線されていれば evidence だけに留めず実際に
-   * `Runtime.markContestedGroup` を呼んで群として書き込む。**既定 `false`（省略と同じ）。**
-   * `detectContested` が `false`/省略のままこれだけ `true` にしても意味を持たない
-   * （`detectContested` と同じ「渡されたが効かない」規約——検出そのものが走らない）。
-   *
-   * 🔴 **既定を `false` にしたのは後方互換のためである。**Issue #933 PR1（ADR 0378）の
-   * 時点では、この分岐は常に evidence-only（`memory_events` に根拠を積むだけ、状態は
-   * 一切動かさない）だった。`@mnemora/testkit`/`packages/core` の `FakeMemoryStore` は
-   * Issue #207/#933 PR2 の段階Aから `markContestedGroup`/`resolveContestedGroup` を常に
-   * 実装している（適合テストのため）——もしこの欄が既定で `true` に相当する挙動だったら、
-   * PR1 が確立した「evidence-only、`result.kind: 'unresolved_conflict'`」を期待する既存の
-   * 歯（`claim-key-single-contested-match.test.ts` 等）が、それらの歯を1文字も変更して
-   * いないのに Stage B の変更だけで挙動が変わって落ちる。**既定 `false` は、この欄を渡さない
-   * 限り PR1 の挙動を1ビットも変えないための意図的な選択である**（`autoQueueConsolidateReflectOnExtract`・
-   * `knownPredicatesFromStore` と同じ「既定は今までどおり、opt-in だけが新しい」規約）。
-   */
-  formContestedGroups?: boolean;
 }
 
 /** `ClaimKeyOptions` の zod スキーマ。値を実行時に検査するときに使う（型 `ClaimKeyOptions` と揃えてある）。 */
@@ -438,5 +417,4 @@ export const ClaimKeyOptionsSchema = z.object({
     .union([z.boolean(), z.object({ limit: z.number().int().positive().optional() })])
     .optional(),
   knownSubjects: z.array(z.string().min(1)).optional(),
-  formContestedGroups: z.boolean().optional(),
 }) satisfies z.ZodType<ClaimKeyOptions>;

@@ -46,6 +46,41 @@ export class MemoryStatusConflictError extends Error {
 }
 
 /**
+ * Issue #207/#933 PR2（ADR 0381、2026-09-30 の直し）: `MemoryStore.resolveContestedGroup?`
+ * の CAS のうち、「渡された `members` が、`memory_relations` でつながった今も `contested`
+ * な群の全員と一致すること」が破れたときに投げる。
+ *
+ * 🔴 **`MemoryStatusConflictError` を再利用しない。**当初は
+ * `MemoryStatusConflictError(missingId, "contested", "contested")`（`expectedStatus`
+ * と `observedStatus` が同じ値になる特別な使い方）で表していたが、「この id 自身の
+ * 状態は問題ないが、群の全員としてこの呼び出しに含まれていなかった」という意味は
+ * `MemoryStatusConflictError` の本来の意味（期待した値と違う値を観測した）とは異なる
+ * ——`MemoryPurgeConflictError` が `MemoryStatusConflictError` を再利用しなかったのと
+ * 同じ理由（このファイルの `MemoryPurgeConflictError` の doc コメント参照）で、専用の
+ * 型を切った。
+ *
+ * `missingMemberId` は、到達集合（`members` から `kind: 'contradicts'` を辿って求めた
+ * 集合のうち `status === 'contested'` のもの）にあるが `members` に含まれていなかった、
+ * 欠けたメンバーの id を1件だけ名指しする（複数欠けていても最初の1件のみ）。
+ *
+ * `Runtime.resolveContestedGroup?` は、`deps.relationStore` の配線の有無に関わらず、
+ * この例外を捕まえて `{ kind: "ineligible", ... }` に写す（`MemoryStatusConflictError`
+ * を `conflict` に写すのとは別の分岐——「部分解消」は TOCTOU による競合ではなく、
+ * 呼び出し側が最初から適格でない集合を渡したことを表すため）。
+ */
+export class ContestedGroupMembershipMismatchError extends Error {
+  constructor(readonly missingMemberId: MemoryId) {
+    super(
+      `MemoryStore.resolveContestedGroup: the members passed do not match the full set of ` +
+        `the memory_relations-connected group that is still status="contested" ` +
+        `(missing member: ${missingMemberId}). Nothing was written — pass the complete group ` +
+        "(use RelationStore.listRelated to discover the rest, then filter to status='contested').",
+    );
+    this.name = "ContestedGroupMembershipMismatchError";
+  }
+}
+
+/**
  * Issue #1226（ADR 0375 決定7、クローン miku の判断）: `createMemoryWithOutbox`/
  * `supersedeWithNewMemories` の `opts.abortIfForgotten` に渡した id のうち、書き込みの
  * 直前に見直したら1件でも `status === "forgotten"`（`forget()` のみ・`forget()` の後
@@ -1709,10 +1744,10 @@ export interface MemoryStore {
    *   （決定10——関係の行は残すが `status` はもう `'contested'` ではない）は、この
    *   到達集合に含めない**——「今の群」を、行の有無ではなく `status` で判定する。
    *   足りないメンバーが見つかった場合、その1件を名指しして
-   *   {@link MemoryStatusConflictError}（`expectedStatus`/`observedStatus` とも
-   *   `'contested'`——「この id 自身の状態は問題ないが、群の全員としてこの呼び出しに
-   *   含まれていなかった」ことを表す、通常の CAS 違反〔`expectedStatus !==
-   *   observedStatus`〕とは意味が異なる特別な使い方）を投げ、何も書き込まない。
+   *   {@link ContestedGroupMembershipMismatchError}（2026-09-30 のさらなる直し、
+   *   ADR 0381 §7 解消——当初は `MemoryStatusConflictError(missingId, "contested",
+   *   "contested")` という `expectedStatus`/`observedStatus` が同じ値になる特別な
+   *   使い方だったが、専用の型に切り出した）を投げ、何も書き込まない。
    * - 存在しない id は「memory not found」の `Error`。それ以外の CAS 違反は
    *   {@link MemoryStatusConflictError}（`expectedStatus` は常に `'contested'`）。
    *   全部成功するか全部失敗するかのどちらか。

@@ -674,8 +674,9 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 
 本 ADR の決定5・決定6（3方向の分岐: 0件／ちょうど1件かつ`active`／それ以外）が定める
 「それ以外」の枝（2件以上、または既に `contested` な1件）は、[ADR 0378](./0378-claim-key-contested-detection-covers-contested-matches.md)
-決定5の evidence-only のまま——ただし `ClaimKeyOptions.formContestedGroups: true`
-（既定 `false`、opt-in）を渡した呼び出しに限り、`Runtime.markContestedGroup` を呼んで
-実際に群として書き込むようになった。本 ADR が定めた3方向の分岐そのもの（どの枝に入るかの
-判定条件）は変更していない——変更したのは「それ以外」の枝の中で何をするかだけである。
-詳細は ADR 0381 §4 を見ること。
+決定5の evidence-only のまま——ただし `detectContested: true` かつ `RuntimeDeps.
+relationStore` が配線されている呼び出しに限り、`Runtime.markContestedGroup` を呼んで
+実際に群として書き込むようになった（2026-09-30 のさらなる直し、オーナー側クローンの
+判断で opt-in の専用フラグは廃止し、既存の `relationStore` の配線を条件にした）。本 ADR
+が定めた3方向の分岐そのもの（どの枝に入るかの判定条件）は変更していない——変更したのは
+「それ以外」の枝の中で何をするかだけである。詳細は ADR 0381 §4 を見ること。

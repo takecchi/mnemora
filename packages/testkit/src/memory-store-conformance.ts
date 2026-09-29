@@ -11,6 +11,7 @@ import type {
   RecallId,
 } from "@mnemora/core";
 import {
+  ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
@@ -7508,7 +7509,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         expect(result.members.map((m) => m.status)).toEqual(["active", "superseded", "superseded"]);
       });
 
-      it("resolveContestedGroup: 群の一部だけを渡すと MemoryStatusConflictError で何も書かない（2026-09-30 の直し、ADR 0381）", async () => {
+      it("resolveContestedGroup: 群の一部だけを渡すと ContestedGroupMembershipMismatchError で何も書かない（2026-09-30 の直し、ADR 0381）", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
         // 4件の群を作り、3件（>= 3 の下限は満たす）だけを渡して「部分解消」を試す
@@ -7544,7 +7545,13 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         ]).catch((error: unknown) => {
           caught = error;
         });
-        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
+        // 再利用をやめ、専用のエラー型（ContestedGroupMembershipMismatchError）を
+        // 投げるようになった——エラーの型まで縛る。
+        expect(caught).toBeInstanceOf(ContestedGroupMembershipMismatchError);
+        expect((caught as ContestedGroupMembershipMismatchError).missingMemberId).toBe(
+          memories[3]!.id,
+        );
 
         // 何も書き換えていない——4件とも contested のまま。
         for (const m of memories) {

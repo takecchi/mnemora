@@ -8,15 +8,15 @@ import { createRuntime } from "../runtime.js";
 import { createFakeRuntimeStores } from "./runtime-fakes.js";
 
 /**
- * Issue #207/#933 PR2（ADR 0327、ADR 0378、ADR 0381、段階B）: `detectClaimKeyContested` の
- * `contested_group` 分岐——`ClaimKeyOptions.formContestedGroups: true` を渡し、かつ
- * `deps.memoryStore.markContestedGroup` が配線されているときだけ、evidence-only
- * （`unresolved_conflict`）の代わりに実際に `Runtime.markContestedGroup` を呼んで群として
- * 書き込む。
+ * Issue #207/#933 PR2（ADR 0327、ADR 0378、ADR 0381、段階B。2026-09-30 のさらなる直し
+ * ——オーナー側クローンの判断で opt-in のフラグ〔`ClaimKeyOptions.formContestedGroups`〕を
+ * 廃止した）: `detectClaimKeyContested` の `contested_group` 分岐——群を作る条件は
+ * 「`detectContested` が on で、かつ `RuntimeDeps.relationStore` が配線されていること」
+ * （`deps.memoryStore.markContestedGroup` が有るだけでは群を作らない）。
  *
- * **既定 `false` は Issue #933 PR1（ADR 0378）の挙動を1ビットも変えない**——
- * `claim-key-single-contested-match.test.ts`/`claim-key.test.ts` 等の PR1 の歯は、この PR
- * では1文字も変更していない（`ClaimKeyOptions.formContestedGroups` の doc コメント参照）。
+ * **`relationStore` を配線しない呼び出しは Issue #933 PR1（ADR 0378）の挙動を1ビットも
+ * 変えない**——`claim-key-single-contested-match.test.ts`/`claim-key.test.ts` 等の PR1 の
+ * 歯は、`relationStore` を一度も配線していないため、この PR では1文字も変更していない。
  */
 
 const ctx: Ctx = { tenantId: "tenant-207-group-detect" };
@@ -87,11 +87,11 @@ function buildRuntimeWithStores(contents: string[], opts: { withRelationStore?: 
   return { runtime, stores };
 }
 
-describe("claim key の検出: formContestedGroups の既定 false（PR1 の挙動を変えない）", () => {
-  it("formContestedGroups を渡さない呼び出しは、relationStore が配線されていても unresolved_conflict のまま（3件が競合しても群を作らない）", async () => {
+describe("claim key の検出: relationStore が配線されていなければ PR1 のまま（既定を変えない）", () => {
+  it("relationStore を配線しない呼び出しは unresolved_conflict のまま（3件が競合しても群を作らない）", async () => {
     const { runtime, stores } = buildRuntimeWithStores(
       ["住所は東京", "住所は大阪", "住所は名古屋"],
-      { withRelationStore: true },
+      { withRelationStore: false },
     );
 
     const first = await runtime.observe(ctx, {
@@ -129,7 +129,7 @@ describe("claim key の検出: formContestedGroups の既定 false（PR1 の挙�
   });
 });
 
-describe("claim key の検出: formContestedGroups: true の新規3件衝突", () => {
+describe("claim key の検出: relationStore 配線時の新規3件衝突", () => {
   it("互いに重なる3件が一度に競合し、markContestedGroup が呼ばれて全員 contested になる", async () => {
     const { runtime, stores } = buildRuntimeWithStores(
       ["住所は東京", "住所は大阪", "住所は名古屋"],
@@ -139,21 +139,21 @@ describe("claim key の検出: formContestedGroups: true の新規3件衝突", (
     const first = await runtime.observe(ctx, {
       kind: "utterance",
       text: "住所は東京",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2020-01-01T00:00:00Z"),
       validUntil: new Date("2025-01-01T00:00:00Z"),
     });
     const second = await runtime.observe(ctx, {
       kind: "utterance",
       text: "住所は大阪",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2020-06-01T00:00:00Z"),
       validUntil: new Date("2025-06-01T00:00:00Z"),
     });
     const third = await runtime.observe(ctx, {
       kind: "utterance",
       text: "住所は名古屋",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2020-09-01T00:00:00Z"),
       validUntil: new Date("2025-09-01T00:00:00Z"),
     });
@@ -172,11 +172,11 @@ describe("claim key の検出: formContestedGroups: true の新規3件衝突", (
   });
 });
 
-describe("claim key の検出: formContestedGroups: true の穴A（既存の2者間の対の吸収）", () => {
+describe("claim key の検出: relationStore 配線時の穴A（既存の2者間の対の吸収）", () => {
   it("先に対になった1件目・2件目に、3件目が片方とだけ重なって届くと、対の相方も群に吸収される", async () => {
     // claim-key-single-contested-match.test.ts（PR1）と同じ再現の形——直す前に
-    // unresolved_conflict になっていたシナリオを、formContestedGroups: true では
-    // 群として実際に吸収できることを見る。
+    // unresolved_conflict になっていたシナリオを、relationStore 配線時には群として
+    // 実際に吸収できることを見る。
     const { runtime, stores } = buildRuntimeWithStores(
       ["住所は東京", "住所は大阪", "住所は名古屋"],
       { withRelationStore: true },
@@ -185,14 +185,14 @@ describe("claim key の検出: formContestedGroups: true の穴A（既存の2者
     const first = await runtime.observe(ctx, {
       kind: "utterance",
       text: "住所は東京",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2020-01-01T00:00:00Z"),
       validUntil: new Date("2025-01-01T00:00:00Z"),
     });
     const second = await runtime.observe(ctx, {
       kind: "utterance",
       text: "住所は大阪",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2019-01-01T00:00:00Z"),
       validUntil: new Date("2021-01-01T00:00:00Z"),
     });
@@ -207,7 +207,7 @@ describe("claim key の検出: formContestedGroups: true の穴A（既存の2者
     const third = await runtime.observe(ctx, {
       kind: "utterance",
       text: "住所は名古屋",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       // 1件目（2020-2025）とだけ重なり、2件目（2019-2021）とは重ならない。
       validFrom: new Date("2024-01-01T00:00:00Z"),
       validUntil: new Date("2026-01-01T00:00:00Z"),
@@ -237,7 +237,7 @@ describe("claim key の検出: formContestedGroups: true の穴A（既存の2者
   });
 });
 
-describe("claim key の検出: formContestedGroups: true の合併（既存の2つの群が1つに統合される）", () => {
+describe("claim key の検出: relationStore 配線時の合併（既存の2つの群が1つに統合される）", () => {
   it("新しい記憶が2つの既存群それぞれのメンバーと直接重なると、両方の群の全メンバーが1つの群へ合流する", async () => {
     const { runtime, stores } = buildRuntimeWithStores(["新しい記憶"], {
       withRelationStore: true,
@@ -309,7 +309,7 @@ describe("claim key の検出: formContestedGroups: true の合併（既存の2�
     const triggering = await runtime.observe(ctx, {
       kind: "utterance",
       text: "新しい記憶",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2025-01-01T00:00:00Z"),
       validUntil: new Date("2025-02-01T00:00:00Z"),
     });
@@ -335,7 +335,7 @@ describe("claim key の検出: formContestedGroups: true の合併（既存の2�
   });
 });
 
-describe("claim key の検出: formContestedGroups: true だが群が3件未満にしか広がらない場合", () => {
+describe("claim key の検出: relationStore が配線されていなければ、群が3件未満にしか広がらない", () => {
   it("relationStore が配線されていなければ、穴A吸収だけでは3件に届かない構図は unresolved_conflict のままフォールバックする", async () => {
     // 既存群（3件以上、contestedWithId===null）のメンバー1件だけが新しい記憶と重なり、
     // relationStore が無いので残りのメンバーを辿れない——素朴に memberIdSet に
@@ -378,7 +378,7 @@ describe("claim key の検出: formContestedGroups: true だが群が3件未満�
     const triggering = await runtime.observe(ctx, {
       kind: "utterance",
       text: "新しい記憶",
-      claimKey: { enabled: true, detectContested: true, formContestedGroups: true },
+      claimKey: { enabled: true, detectContested: true },
       validFrom: new Date("2020-01-01T00:00:00Z"),
       validUntil: new Date("2020-02-01T00:00:00Z"),
     });

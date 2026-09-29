@@ -1,5 +1,6 @@
 import {
   computeEventRetentionCutoff,
+  ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
@@ -2381,7 +2382,9 @@ export class InMemoryMemoryStore implements MemoryStore {
         return memory !== null && memory.status === "contested";
       });
       if (missing.length > 0) {
-        throw new MemoryStatusConflictError(missing[0]!, "contested", "contested");
+        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
+        // 再利用をやめ、専用のエラーを投げる。
+        throw new ContestedGroupMembershipMismatchError(missing[0]!);
       }
     }
 

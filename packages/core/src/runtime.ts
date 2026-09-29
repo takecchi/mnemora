@@ -32,6 +32,7 @@ import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
 import {
+  ContestedGroupMembershipMismatchError,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   PURGE_TOMBSTONE_CONTENT,
@@ -463,15 +464,16 @@ export interface ObserveResult {
  *   検出中の Memory は `active` のまま痕跡も残らなかった（例: 3件目の有効期間が、既に
  *   対になった1件目・2件目のうち片方とだけ重なる場合）。
  *
- * ⚠ **2026-09-30 の直し（Issue #207/#933 PR2、ADR 0381、段階B）**: `matchCount >= 2`、
- * または `matchCount === 1` だがその1件が既に `contested` の場合、`deps.memoryStore.
- * markContestedGroup` が配線されていて、かつ「群のメンバー」の組み立て（下の
- * `detectClaimKeyContested` 実装コメント参照。穴Aの吸収・既存群の合併を含む）の結果が
- * **3件以上**になれば、`result.kind === "contested_group"` になる——`Runtime.
- * markContestedGroup` を実際に呼んだ結果を運ぶ。それ以外（`markContestedGroup` が
- * 配線されていない、または組み立てた群が2件以下にしかならない——例: 穴Aの相方も
- * `RelationStore` も無く、群を安全に3件以上へ広げる手段が無い場合）は、今まで通り
- * `result.kind === "unresolved_conflict"`（evidence だけ）になる。
+ * ⚠ **2026-09-30 の直し（Issue #207/#933 PR2、ADR 0381、段階B。2026-09-30 のさらなる
+ * 直しで `deps.relationStore` の配線を条件にした）**: `matchCount >= 2`、または
+ * `matchCount === 1` だがその1件が既に `contested` の場合、`deps.relationStore` と
+ * `deps.memoryStore.markContestedGroup` の両方が配線されていて、かつ「群のメンバー」の
+ * 組み立て（下の `detectClaimKeyContested` 実装コメント参照。穴Aの吸収・既存群の合併を
+ * 含む）の結果が**3件以上**になれば、`result.kind === "contested_group"` になる——
+ * `Runtime.markContestedGroup` を実際に呼んだ結果を運ぶ。それ以外（`relationStore`/
+ * `markContestedGroup` のどちらかが配線されていない、または組み立てた群が2件以下にしか
+ * ならない場合）は、今まで通り `result.kind === "unresolved_conflict"`（evidence だけ）
+ * になる。
  */
 export interface ContestedDetectionOutcome {
   /** 検出の対象にした、新しく作った Memory の id。 */
@@ -4195,7 +4197,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   async function detectClaimKeyContested(
     ctx: Ctx,
     memory: Memory,
-    formContestedGroups = false,
   ): Promise<ContestedDetectionOutcome | null> {
     const claimKey = memory.claimKey ?? null;
     if (claimKey === null) {
@@ -4274,13 +4275,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     // それ以外（matches.length >= 2、または matches.length === 1 だがその1件が既に
     // `contested`）: 1対1の `contestedWithId` だけでは表せない（ADR 0185 決定5）。
     //
-    // 2026-09-30 の直し（Issue #207/#933 PR2、ADR 0327、ADR 0378、ADR 0381、段階B）:
-    // 呼び出し側が `ClaimKeyOptions.formContestedGroups: true` を渡し、かつ
-    // `deps.memoryStore.markContestedGroup` が配線されていれば、evidence だけに留めず
-    // 実際に群として書き込みを試みる。**`formContestedGroups` の既定は `false`**——
-    // Issue #933 PR1（ADR 0378）が確立した evidence-only の挙動を、この欄を渡さない
-    // 呼び出しでは1ビットも変えない（`ClaimKeyOptions.formContestedGroups` の doc
-    // コメント参照。PR1 の歯を1つも書き換えていない理由）。群のメンバーを次の順で広げる:
+    // 2026-09-30 の直し（Issue #207/#933 PR2、ADR 0327、ADR 0378、ADR 0381、段階B。
+    // 2026-09-30 のさらなる直し、オーナー側クローンの判断で `ClaimKeyOptions.
+    // formContestedGroups` フラグを廃止し、`deps.relationStore` の配線を条件にした）:
+    // `deps.relationStore` が配線されており、かつ `deps.memoryStore.markContestedGroup`
+    // も配線されていれば、evidence だけに留めず実際に群として書き込みを試みる——
+    // `deps.memoryStore.markContestedGroup` が在るだけでは群を作らない（`relationStore`
+    // が無いと、後述の穴A吸収・合併の判定に使う `listRelated` そのものが呼べないため）。
+    // **`deps.relationStore` を配線しない呼び出しでは、この分岐は1ビットも変わらない**
+    // ——Issue #933 PR1（ADR 0378）が確立した evidence-only の挙動のままになる
+    // （PR1 の歯を1つも書き換えていない理由。PR1 の歯は `relationStore` を一度も
+    // 配線していないため、影響を受けない）。群のメンバーを次の順で広げる:
     //   1. 種——検出中の `memory` 自身と、`matches` の全員。
     //   2. 穴A（既存の2者間の対の吸収）——`matches` のうち `status === 'contested'` かつ
     //      `contestedWithId !== null` なものは、その相手（`contestedWithId` が指す id）も
@@ -4308,14 +4313,15 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       memberIds: MemoryId[];
       markContestedGroup: MarkContestedGroupResult;
     } | null = null;
-    if (formContestedGroups && deps.memoryStore.markContestedGroup !== undefined) {
+    if (deps.relationStore !== undefined && deps.memoryStore.markContestedGroup !== undefined) {
+      const relationStore = deps.relationStore;
       const memberIdSet = new Set<MemoryId>([memory.id, ...matches.map((m) => m.id)]);
       for (const m of matches) {
         if (m.status === "contested" && (m.contestedWithId ?? null) !== null) {
           memberIdSet.add(m.contestedWithId!);
         }
       }
-      if (deps.relationStore !== undefined) {
+      {
         const seedIds = matches
           .filter((m) => m.status === "contested" && (m.contestedWithId ?? null) === null)
           .map((m) => m.id);
@@ -4324,7 +4330,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         const discovered = new Set<MemoryId>();
         while (queue.length > 0) {
           const current = queue.shift()!;
-          const related = await deps.relationStore.listRelated(ctx, current, "contradicts");
+          const related = await relationStore.listRelated(ctx, current, "contradicts");
           for (const r of related) {
             if (!memberIdSet.has(r.memoryId)) {
               discovered.add(r.memoryId);
@@ -4412,7 +4418,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     failure: ExtractionFailure | null,
     claimKeys?: readonly (ClaimKey | null)[],
     detectContested?: boolean,
-    formContestedGroups?: boolean,
   ): Promise<{
     memoryIds: MemoryId[];
     contentHashes: Set<string>;
@@ -4472,11 +4477,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         // opt-in のときだけ検出を走らせる。**冪等な再送（`created === false`）では
         // 走らせない**——「新しく active になった」わけではないため。
         if (detectContested === true) {
-          const outcomeForMemory = await detectClaimKeyContested(
-            ctx,
-            memory,
-            formContestedGroups === true,
-          );
+          const outcomeForMemory = await detectClaimKeyContested(ctx, memory);
           if (outcomeForMemory !== null) {
             contestedDetection.push(outcomeForMemory);
           }
@@ -4657,7 +4658,6 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       failure,
       claimKeys,
       claimKeyOptions?.detectContested === true,
-      claimKeyOptions?.formContestedGroups === true,
     );
     return { memoryIds, outcome, failure, rejectedSubjectIds, claimKeyFailure, contestedDetection };
   }
@@ -5726,6 +5726,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         lexicalStore: deps.lexicalStore,
         embeddingProvider: deps.embeddingProvider,
         tenantSettingsStore: deps.tenantSettingsStore,
+        relationStore: deps.relationStore,
         clock,
         tokenCounter,
         outputValidation: deps.outputValidation,
@@ -7111,6 +7112,19 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       );
       return { supported: true, outcome: { kind: "resolved", members: writtenMembers } };
     } catch (error) {
+      // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: store 側が
+      // ContestedGroupMembershipMismatchError を投げた場合（部分解消）は、
+      // `deps.relationStore` の配線の有無に関わらず ineligible に写す——TOCTOU による
+      // 競合（MemoryStatusConflictError、下）とは別の意味（読んだ時点から呼び出し側が
+      // 最初から適格でない集合を渡していた）であり、`conflict`（1回だけ再読して打ち切る
+      // 安全弁）には分類しない。`sides` は手順5で読んだ時点の分類（全員 "eligible"）を
+      // そのまま運び、`missingMembers` にエラーが名指しした1件を積む。
+      if (error instanceof ContestedGroupMembershipMismatchError) {
+        return {
+          supported: true,
+          outcome: { kind: "ineligible", sides, missingMembers: [error.missingMemberId] },
+        };
+      }
       if (error instanceof MemoryStatusConflictError) {
         // 安全弁（`resolveContested` と同じ形。1回だけ再読して打ち切る）。
         const refetched = await deps.memoryStore.getMany(ctx, [...memberIds]);

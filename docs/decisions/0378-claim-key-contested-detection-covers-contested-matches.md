@@ -436,10 +436,11 @@ Refs #933 #207
 > のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
 
 段階B で、本 ADR 決定5（PR1 の範囲、「2件以上／既に contested な1件」は `markContested` を
-呼ばず evidence だけを積む）を、`ClaimKeyOptions.formContestedGroups: true`（既定 `false`、
-opt-in）を渡した呼び出しに限って上書きした——`deps.memoryStore.markContestedGroup` が
-配線されており、かつ群のメンバー（穴Aの吸収・既存群の合併を含む）が3件以上に組み上がる
-ときだけ、evidence-only の代わりに実際に `Runtime.markContestedGroup` を呼んで群として
-書き込む。**既定 `false` のため、この ADR が確立した決定5の挙動そのもの（`formContestedGroups`
-を渡さない既存の呼び出し）は1バイトも変えていない。**詳細・理由・境界条件は ADR 0381 §4 を
-見ること。
+呼ばず evidence だけを積む）を、`detectContested: true` かつ `RuntimeDeps.relationStore`
+が配線されている呼び出しに限って上書きした（2026-09-30 のさらなる直し、オーナー側クローンの
+判断で opt-in の専用フラグは廃止し、既存の `relationStore` の配線を条件にした）——
+`deps.relationStore`・`deps.memoryStore.markContestedGroup` の両方が配線されており、かつ
+群のメンバー（穴Aの吸収・既存群の合併を含む）が3件以上に組み上がるときだけ、evidence-only
+の代わりに実際に `Runtime.markContestedGroup` を呼んで群として書き込む。**`relationStore`
+を配線しない既存の呼び出しは1バイトも変わらない**——この ADR が確立した決定5の挙動そのもの
+のままである。詳細・理由・境界条件は ADR 0381 §4 を見ること。

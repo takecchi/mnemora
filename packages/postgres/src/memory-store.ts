@@ -6,6 +6,7 @@ import {
   defaultDecayStrategy,
 } from "@mnemora/core";
 import {
+  ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   EMBEDDING_STATUS_ROLLBACK,
   isContestedWithoutCompanion,
@@ -3103,8 +3104,10 @@ export class PostgresMemoryStore implements MemoryStore {
       const missing = [...reachableIds].filter((id) => !idSetForCheck.has(id));
       if (missing.length > 0) {
         // 群の一部だけを渡した——足りない側（まだ contested のまま群に残っているのに
-        // 渡されなかったメンバー）を名指しして、何も書かずに CAS 違反として扱う。
-        throw new MemoryStatusConflictError(missing[0] as MemoryId, "contested", "contested");
+        // 渡されなかったメンバー）を名指しして、何も書かずに専用のエラーとして扱う
+        // （2026-09-30 のさらなる直し、ADR 0381 §7 解消——
+        // MemoryStatusConflictError の再利用をやめた）。
+        throw new ContestedGroupMembershipMismatchError(missing[0] as MemoryId);
       }
 
       const updatedById = new Map<MemoryId, Memory>();

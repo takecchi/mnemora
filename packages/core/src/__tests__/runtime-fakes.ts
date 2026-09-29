@@ -35,6 +35,7 @@ import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../ev
 import { MemoryEventKindSchema } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
+  ContestedGroupMembershipMismatchError,
   isEmbeddingStatusRollback,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
@@ -2087,7 +2088,9 @@ export class FakeMemoryStore implements MemoryStore {
         }
       }
       if (missing.length > 0) {
-        throw new MemoryStatusConflictError(missing[0]!, "contested", "contested");
+        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
+        // 再利用をやめ、専用のエラーを投げる。
+        throw new ContestedGroupMembershipMismatchError(missing[0]!);
       }
     }
 

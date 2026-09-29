@@ -198,7 +198,7 @@ describe("runtime.resolveContestedGroup — fix2: 群の一部だけを渡すと
 });
 
 describe("runtime.resolveContestedGroup — relationStore が配線されていなければ、この読み側の確認は行わない", () => {
-  it("4件の群のうち3件だけを渡しても、Runtime 層は missingMembers を検査しない（store 側の CAS だけに任せる）が、store 側の CAS が拒むので結局 conflict になる", async () => {
+  it("4件の群のうち3件だけを渡しても、Runtime 層は missingMembers を検査しない（store 側の CAS だけに任せる）が、store 側の CAS が拒み ineligible になる（2026-09-30 のさらなる直し、ADR 0381 §7）", async () => {
     const { runtime, stores } = buildRuntime({ withRelationStore: false });
     const a = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "A" }));
     const b = await stores.memoryStore.createMemory(ctx, newMemory({ digest: "B" }));
@@ -212,8 +212,13 @@ describe("runtime.resolveContestedGroup — relationStore が配線されてい�
 
     // Runtime 層は sides をすべて "eligible" と判定する（relationStore が無いので
     // missingMembers を検査しない）が、store 側（FakeMemoryStore.resolveContestedGroup）の
-    // CAS が同じ理由で拒む——MemoryStatusConflictError を捕まえて conflict になる。
-    expect(result.outcome.kind).toBe("conflict");
+    // CAS が同じ理由で拒む——ContestedGroupMembershipMismatchError を投げる。Runtime は
+    // この専用のエラーを、relationStore の配線の有無に関わらず ineligible に写す
+    // （MemoryStatusConflictError の conflict とは別の分岐——ADR 0381 §7 解消）。
+    expect(result.outcome.kind).toBe("ineligible");
+    if (result.outcome.kind === "ineligible") {
+      expect(result.outcome.missingMembers).toEqual([d.id]);
+    }
     for (const id of [a.id, b.id, c.id, d.id]) {
       const stored = await stores.memoryStore.get(ctx, id);
       expect(stored?.status).toBe("contested");
