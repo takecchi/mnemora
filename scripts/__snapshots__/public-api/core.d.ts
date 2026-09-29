@@ -745,6 +745,14 @@ export interface MemoryStore {
         validFrom: Date | null;
         validUntil: Date | null;
     }): Promise<Memory[]>;
+    findContestedByClaimKey?(ctx: Ctx, query: {
+        subjectId: string | null;
+        claimKey: ClaimKey;
+        excludeMemoryId: MemoryId;
+        contentHash: string;
+        validFrom: Date | null;
+        validUntil: Date | null;
+    }): Promise<Memory[]>;
     listActiveClaimPredicates?(ctx: Ctx, query: {
         subjectId: string | null;
         limit: number;

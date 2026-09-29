@@ -14,13 +14,16 @@ import {
 } from "./test-db.js";
 
 /**
- * claim key の自動 contested 検出（ADR 0324）で、同じ鍵の主張が1件ずつ届く経路の今の振る舞いを、
+ * claim key の自動 contested 検出（ADR 0324）で、同じ鍵の主張が1件ずつ届く経路の振る舞いを、
  * `@mnemora/postgres` で縛る（Issue #933。core の Fake での同じ歯は
- * `packages/core/src/__tests__/claim-key-sequential-arrival.test.ts`）。
+ * `packages/core/src/__tests__/claim-key-sequential-arrival.test.ts`——直った理由・
+ * 分岐の詳細はそちらの doc コメントを見ること。ここでは重複しない）。
  *
- * 毎回 `detectContested: true` を渡して1件ずつ observe すると、3件目は `no_conflict` で `active` のまま痕跡を
- * 残さず、4件目は3件目と新しい対になる。`claim_key_conflict_unresolved` のイベントは一度も積まれない。
- * ⚠ 望ましい姿の主張ではない（直していない）。直すときは、この歯ごと書き換えること。
+ * **ADR 0378（Issue #933 案2）で直った後**: `PostgresMemoryStore.findContestedByClaimKey`
+ * を実装しているので、3件目・4件目は `findActiveByClaimKey`（`active`）+
+ * `findContestedByClaimKey`（`contested`）を合わせた一致で `unresolved_conflict` になり、
+ * `memory_events` に `claim_key_conflict_unresolved` の evidence が積まれる。1件目・2件目の
+ * 対（`contested`/`contestedWithId`）は、3件目・4件目が届いても壊れない。
  */
 
 const ctx: Ctx = { tenantId: "claim-key-sequential-933" };
@@ -51,8 +54,8 @@ afterAll(async () => {
   await closeTestClient();
 });
 
-describe("claim key の検出: 同じ鍵の主張が1件ずつ届く経路（Issue #933、今の振る舞い。@mnemora/postgres）", () => {
-  it("3件目は no_conflict で痕跡を残さず、4件目は3件目と新しい対になり、unresolved のイベントは積まれない", async () => {
+describe("claim key の検出: 同じ鍵の主張が1件ずつ届く経路（Issue #933、ADR 0378 で直った後。@mnemora/postgres）", () => {
+  it("3件目・4件目は unresolved_conflict で matchCount が2件以上になり、evidence が積まれる。1・2件目の対は壊れない", async () => {
     await resetTestDatabase();
     const { db } = await getTestClient();
     const memoryStore: MemoryStore = new PostgresMemoryStore(db);
@@ -86,20 +89,53 @@ describe("claim key の検出: 同じ鍵の主張が1件ずつ届く経路（Iss
 
     expect(
       results.map((r) => r.contestedDetection?.map((d) => [d.matchCount, d.result.kind])),
-    ).toEqual([[[0, "no_conflict"]], [[1, "contested"]], [[0, "no_conflict"]], [[1, "contested"]]]);
-    // 3件目は、observe した直後は active（1件目・2件目と結ばれない）。
-    expect(statusAfterEach).toEqual(["active", "contested", "active", "contested"]);
+    ).toEqual([
+      [[0, "no_conflict"]],
+      [[1, "contested"]],
+      [[2, "unresolved_conflict"]],
+      [[3, "unresolved_conflict"]],
+    ]);
+    // 3件目・4件目は、observe した直後もどちらも active（誰とも対にならない）。
+    expect(statusAfterEach).toEqual(["active", "contested", "active", "active"]);
 
     const memories = await Promise.all(ids.map((id) => memoryStore.get(ctx, id)));
-    expect(memories.map((m) => m?.contestedWithId)).toEqual([ids[1], ids[0], ids[3], ids[2]]);
+    expect(memories.map((m) => m?.status)).toEqual(["contested", "contested", "active", "active"]);
+    // 1件目・2件目の対は、3件目・4件目が届いても壊れない。
+    expect(memories[0]?.contestedWithId).toBe(ids[1]);
+    expect(memories[1]?.contestedWithId).toBe(ids[0]);
+    expect(memories[2]?.contestedWithId ?? null).toBeNull();
+    expect(memories[3]?.contestedWithId ?? null).toBeNull();
 
-    for (const id of ids) {
+    // 決定6の evidence（直る前は一度も積まれなかった）は、3件目・4件目に積まれる。
+    const unresolvedEventsFor = async (id: (typeof ids)[number]) => {
       const events = await eventStore.list(ctx, { memoryId: id });
-      expect(
-        events.filter(
-          (e) => (e.meta as { reason?: string } | null)?.reason === "claim_key_conflict_unresolved",
-        ),
-      ).toEqual([]);
-    }
+      return events.filter(
+        (e) => (e.meta as { reason?: string } | null)?.reason === "claim_key_conflict_unresolved",
+      );
+    };
+    expect(await unresolvedEventsFor(ids[0]!)).toEqual([]);
+    expect(await unresolvedEventsFor(ids[1]!)).toEqual([]);
+
+    const thirdEvents = await unresolvedEventsFor(ids[2]!);
+    expect(thirdEvents).toHaveLength(1);
+    const thirdNote = JSON.parse((thirdEvents[0]!.meta as { note: string }).note) as {
+      matchCount: number;
+      matches: Array<{ id: string; status: string }>;
+    };
+    expect(thirdNote.matchCount).toBe(2);
+    expect(thirdNote.matches.map((m) => m.status).sort()).toEqual(["contested", "contested"]);
+
+    const fourthEvents = await unresolvedEventsFor(ids[3]!);
+    expect(fourthEvents).toHaveLength(1);
+    const fourthNote = JSON.parse((fourthEvents[0]!.meta as { note: string }).note) as {
+      matchCount: number;
+      matches: Array<{ id: string; status: string }>;
+    };
+    expect(fourthNote.matchCount).toBe(3);
+    expect(fourthNote.matches.map((m) => m.status).sort()).toEqual([
+      "active",
+      "contested",
+      "contested",
+    ]);
   });
 });

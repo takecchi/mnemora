@@ -1490,11 +1490,47 @@ id を含めると `SourceMemoryForgottenError` を投げて何も書かない�
 `createMemoryWithOutbox`/`supersedeWithNewMemories` が、`opts.abortIfForgotten` を
 渡されたときだけ追加の `SELECT … FOR UPDATE` を発行する）。
 
-⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は9件
+### 27. `packages/testkit` の conformance suite が、自前の `MemoryStore` 実装に約束を新しく課すようになった（`@mnemora/core`・`@mnemora/testkit`）
+
+[Issue #933](https://github.com/takecchi/mnemora/issues/933)（claim key の自動 contested
+検出が、同じ鍵の主張が1件ずつ届く経路で3件目以降を検出できない）の PR1、
+[PR #1431](https://github.com/takecchi/mnemora/pull/1431)、
+[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)。
+
+**何が変わったか**: `@mnemora/core` の `MemoryStore` に、新しい任意メソッド
+`findContestedByClaimKey?`（`findActiveByClaimKey?` と同じ絞り込みで、`status = 'active'`
+の代わりに `status = 'contested'` の行を返す）が増えた。`packages/testkit` の
+`describeMemoryStoreConformance` に、これを検査する `it` と、新しい任意フラグ
+`MemoryStoreConformanceOptions.supportsFindContestedByClaimKey?: boolean`
+（`supportsFindActiveByClaimKey?` と同じ3状態）が増えた。**公開の型は、この2つの
+任意の追加以外は変わっていない**——中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の
+`[1.1.0]` 節 `### Breaking`（「`@mnemora/core` の `MemoryStore` に…」の項目）を見ること。
+**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる
+「conformance スイートの判定を厳しくする変更」に当たる——型検査は壊れないが、
+`supportsFindContestedByClaimKey: true` を渡して `findContestedByClaimKey` を実装して
+いない自前実装は、conformance suite を当てると新しく落ちる。項目23・24・25・26 と同じ
+判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore` 実装を、`packages/testkit` の conformance
+suite に対して走らせている利用者のうち、`supportsFindContestedByClaimKey: true` を
+渡しているが `findContestedByClaimKey` を実装していない場合。**`findContestedByClaimKey?`
+を実装しない・`supportsFindContestedByClaimKey` を渡さない利用者は影響を受けない**
+——後方互換。`Runtime.detectClaimKeyContested` 自体も、この口が無い adapter に対しては
+今まで通り `findActiveByClaimKey?`（`active` のみ）の一致だけで判定する。
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要——既存の索引 `idx_memories_claim_key`
+（`(tenant_id, subject_id, claim_key_subject, claim_key_predicate)`、`status` を条件に
+含めない汎用索引）がそのまま使える。新しい migration は追加していない。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は10件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
-2026-09-30 追記））になった。**
+2026-09-30 追記）、PR #1431・Issue #933）になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

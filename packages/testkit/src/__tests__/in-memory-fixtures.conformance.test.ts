@@ -118,6 +118,8 @@ describeMemoryStoreConformance({
   supportsLabels: true,
   // Issue #372: InMemoryMemoryStore は findActiveByClaimKey を実装している。
   supportsFindActiveByClaimKey: true,
+  // Issue #933 案2 / ADR 0378: InMemoryMemoryStore は findContestedByClaimKey を実装している。
+  supportsFindContestedByClaimKey: true,
   // Issue #691続き / ADR 0329: InMemoryMemoryStore は listActiveClaimPredicates を
   // 実装している。
   supportsListActiveClaimPredicates: true,

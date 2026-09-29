@@ -2527,6 +2527,51 @@ export class PostgresMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #933（案2、`docs/decisions/0378-*.md`）: `MemoryStore.findContestedByClaimKey?`
+   * の実装（interface 側の doc コメントに契約全体がある）。`findActiveByClaimKey` と
+   * 完全に同じクエリで、`status = 'active'` の代わりに `status = 'contested'` を見るだけ
+   * ——`idx_memories_claim_key` は `status` を索引の条件に含めていない汎用索引なので
+   * （`migrations/0021_memories_claim_key.sql` の doc コメント「status を索引に含めない
+   * 理由」）、この口のために新しい索引・新しい migration は要らない。索引が実際に
+   * 使われることは `__tests__/claim-key-index.postgres.test.ts` が EXPLAIN で縛る。
+   */
+  async findContestedByClaimKey(
+    ctx: Ctx,
+    query: {
+      subjectId: string | null;
+      claimKey: ClaimKey;
+      excludeMemoryId: MemoryId;
+      contentHash: string;
+      validFrom: Date | null;
+      validUntil: Date | null;
+    },
+  ): Promise<Memory[]> {
+    const excludeMemoryId = normalizeUuidCase(query.excludeMemoryId);
+    const validFrom = toPgTimestamp(query.validFrom);
+    const validUntil = toPgTimestamp(query.validUntil);
+    const result = await this.db.execute(sql`
+      SELECT * FROM memories
+      WHERE tenant_id = ${ctx.tenantId}
+        AND ${subjectIdMatches(query.subjectId)}
+        AND claim_key_subject = ${query.claimKey.subject}
+        AND claim_key_predicate = ${query.claimKey.predicate}
+        AND status = 'contested'
+        AND content_hash <> ${query.contentHash}
+        AND (
+          ${validFrom}::timestamptz IS NULL OR valid_until IS NULL
+          OR ${validFrom}::timestamptz < valid_until
+        )
+        AND (
+          valid_from IS NULL OR ${validUntil}::timestamptz IS NULL
+          OR valid_from < ${validUntil}::timestamptz
+        )
+    `);
+    return result.rows
+      .map((row) => rowToMemory(row as unknown as MemoryRow))
+      .filter((memory) => memory.id !== excludeMemoryId);
+  }
+
+  /**
    * Issue #691続き（ADR 0329）: `MemoryStore.listActiveClaimPredicates?` の実装
    * （interface 側の doc コメントに契約全体がある。ここはクエリの組み立てだけ）。
    * `idx_memories_claim_key`（`(tenant_id, subject_id, claim_key_subject,

@@ -645,6 +645,63 @@ PR #1393・Issue #1232）になった。**
   `ReflectBasisOutcome` を扱っている利用者は、この種の追加でも型検査が落ちうる、という
   影響の実例として記録する。
 
+**⚠ 2026-09-30 追記28**: 上の25回分の棚卸しとは別に、着地に先立って変更を作った本人が
+この節へ足した項目（上の追記19・20 と同じ扱い）。[Issue #933](https://github.com/takecchi/mnemora/issues/933)
+（claim key の自動 contested 検出が、同じ鍵の主張が1件ずつ届く経路で3件目以降を検出できず
+痕跡も残さない）の PR1、[ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)。
+
+- **`@mnemora/core` の `MemoryStore` に、新しい任意メソッド `findContestedByClaimKey?` が
+  増えた。`packages/testkit` の conformance suite に、これを検査する約束が新しく課された
+  ——自前で `MemoryStore` を実装している人へ**（[Issue #933](https://github.com/takecchi/mnemora/issues/933)、
+  [PR #1431](https://github.com/takecchi/mnemora/pull/1431)、
+  [ADR 0378](./docs/decisions/0378-claim-key-contested-detection-covers-contested-matches.md)）。
+
+  claim key の自動 contested 検出（[ADR 0324](./docs/decisions/0324-claim-key-contested-detection.md)）は、
+  同じ鍵の主張が1件ずつ届く自然な運用シーケンスで、3件目以降を検出できず、`memory_events`
+  にも痕跡を残さなかった——`MemoryStore.findActiveByClaimKey?` が `status = 'active'` の
+  行しか見ないため、既に対になった1件目・2件目は候補から構造的に外れていた（Issue #933）。
+
+  この PR（Issue #933 の PR1、案2）は、新しい任意メソッド `MemoryStore.
+  findContestedByClaimKey?`（`findActiveByClaimKey?` と同じ絞り込みで、`status = 'active'`
+  の代わりに `status = 'contested'` を見る）を足し、`Runtime.detectClaimKeyContested` が
+  これを実装している store でだけ、`findActiveByClaimKey?` の一致と合わせて数えるように
+  した。合わせた一致が2件以上のときは、今までどおり `markContested` を呼ばず
+  （[#207](https://github.com/takecchi/mnemora/issues/207)/`memory_relations` が無いと
+  1対1では表現できない、ADR 0324 決定5・決定6）、状態を一切動かさずに `memory_events` へ
+  `claim_key_conflict_unresolved` の evidence を積むだけに留める——3件目以降の検出漏れが
+  直り、少なくとも痕跡が残るようになった。**多者間のグループを実際に `contested` として
+  束ねる書き込み（`RelationStore` が要る）は、この PR の範囲外**（PR2、ADR 0378・
+  [ADR 0327](./docs/decisions/0327-relation-graph-contested-write-path-design.md)）。
+
+  `packages/testkit` の conformance suite（`describeMemoryStoreConformance`）に、
+  `findContestedByClaimKey?` を検査する新しい任意フラグ
+  `MemoryStoreConformanceOptions.supportsFindContestedByClaimKey?: boolean` が増えた
+  ——`supportsFindActiveByClaimKey?` と同じ3状態（`true`/`false`/省略）。
+
+  **誰が影響を受けるか**:
+  - 自前の `MemoryStore` を実装していて、`findContestedByClaimKey?` を実装しない場合は、
+    今までどおり `findActiveByClaimKey?`（`active` のみ）の一致だけで判定される
+    ——**後方互換。振る舞いは1バイトも変わらない。**
+  - `describeMemoryStoreConformance` を自前実装に対して走らせている場合、
+    `supportsFindContestedByClaimKey` を渡さないと「未検査」の named it が1本登録される
+    （他の任意フラグと同じ、実行は失敗しない）。`true`/`false` を渡す場合は、実装の有無に
+    合わせて正しい方を渡すこと。
+
+  **なぜ破壊的と数えるか**: `docs/migration-v1.md`「数え方の規律への追記
+  （2026-09-28）」規律2 の ⛔ が「conformance スイートの判定を厳しくする変更は、
+  これまでどおり上の定義と各世代の分け方で数える」と明記しており、項目23・24 と同じ
+  理由——型検査は壊れないが、`supportsFindContestedByClaimKey: true` を渡して
+  `findContestedByClaimKey` を実装していない自前実装は、conformance suite を当てると
+  新しく落ちる。
+
+  **移行の手順**: `findContestedByClaimKey?` を実装する場合は、`findActiveByClaimKey?`
+  と同じ絞り込みで `status = 'contested'` の行を返すように書き、conformance suite に
+  `supportsFindContestedByClaimKey: true` を渡す。実装しない場合は何もしなくてよい
+  （省略時は「未検査」のまま、後方互換の振る舞いが保たれる）。
+
+  **DB マイグレーション**: 不要（既存の索引 `idx_memories_claim_key` は `status` を条件に
+  含めない汎用索引であり、そのまま使える——新しい migration は追加していない）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。

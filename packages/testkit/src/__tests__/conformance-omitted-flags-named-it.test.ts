@@ -74,9 +74,9 @@ describeMemoryStoreConformance({
   supportsResolveContestedPair: true,
   supportsRestoreSupersededBy: true,
   supportsPreviewRestoreSupersededBy: true,
-  // ⭐ 任意の6つ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
-  // supportsListActiveClaimPredicates / supportsResolveOrphanedContested / supportsAbortIfForgotten、
-  // 2026-09-30 に6つ目を追加、Issue #1226）は意図的に渡さない。
+  // ⭐ 任意の7つ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
+  // supportsFindContestedByClaimKey / supportsListActiveClaimPredicates /
+  // supportsResolveOrphanedContested / supportsAbortIfForgotten）は意図的に渡さない。
 });
 
 /**
@@ -127,7 +127,7 @@ function testsUnder(root: RunnerTask, needle: string): RunnerTask[] {
 }
 
 describe("docs/conformance.md §9: 任意フラグを省略したときに登録される it", () => {
-  it("MemoryStore: 省略した6つのフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
+  it("MemoryStore: 省略した7つのフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
     task,
   }) => {
     const tests = testsUnder(task.file, MEMORY_NAME);
@@ -138,6 +138,7 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
       "supportsOnlyMemoryIdsFilter",
       "supportsLabels",
       "supportsFindActiveByClaimKey",
+      "supportsFindContestedByClaimKey",
       "supportsListActiveClaimPredicates",
       "supportsResolveOrphanedContested",
       "supportsAbortIfForgotten",
