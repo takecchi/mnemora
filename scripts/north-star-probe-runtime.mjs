@@ -276,7 +276,8 @@ export async function runItem5(mods, hashContent) {
       `${originalReturnedBefore ? "返った" : "返らなかった"}。2件目を observe() した後（` +
       "markContested/resolveContested/applyCorrection は一切呼んでいない既定経路のまま）、" +
       `同じクエリで A は${originalReturnedAfter ? "返った" : "返らなかった"}。⟹ ${verdict}。` +
-      "注: 明示操作 applyCorrection（ADR 0242、docs/roadmap.md §7.15）を使う経路は、この" +
+      "注: 明示操作 applyCorrection（ADR 0242、docs/roadmap.md §7.15。⚠ 同§は 2026-09-29 に削除（#762）、" +
+      "当時の本文は 635c93d の版）を使う経路は、この" +
       "probe では測っていない。",
   };
 }
@@ -382,7 +383,8 @@ export function notMeasuredItemResults() {
         "機械に載せない（ADR 0216 決定4）。採用者が供給するのは「後から説明できる」の" +
         "読み戻す口（`getRecall`）を呼ぶことだけであり、それが配線か・データか・判定かの" +
         "意味判定は grep でも型検査でも出ない。人手の監査は `docs/roadmap.md` §7.4 の" +
-        "表が持つ。",
+        "表が持つ（⚠ 同§は 2026-09-29 に削除（#762）。当時の表は 635c93d の版、" +
+        "現在形は `docs/north-star-paths.md`）。",
     },
     {
       item: 4,
@@ -390,7 +392,8 @@ export function notMeasuredItemResults() {
       fact:
         "機械に載せない（ADR 0216 決定4）。「使われない記憶が、静かに遠ざかる」の対比は" +
         "使用報告（`usedMemoryIds`）という mnemora が原理的に持てない情報に依存し、意味の" +
-        "判定を要する。人手の監査は `docs/roadmap.md` §7.4 の表が持つ。",
+        "判定を要する。人手の監査は `docs/roadmap.md` §7.4 の表が持つ（⚠ 同§は 2026-09-29 に" +
+        "削除（#762）。当時の表は 635c93d の版、現在形は `docs/north-star-paths.md`）。",
     },
   ];
 }
