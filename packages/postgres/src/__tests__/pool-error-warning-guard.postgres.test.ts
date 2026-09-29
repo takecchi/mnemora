@@ -153,12 +153,29 @@ describe("setup-pool-error-warning-guard.ts: 既定の pool error 警告が漏�
 describe("setup-pool-error-warning-guard.ts: 本物の vitest 設定に載っていて、examples/chat の複製が正本と一致する", () => {
   const repoRoot = fileURLToPath(new URL("../../../../", import.meta.url));
 
+  /**
+   * `setupFiles` は、トップレベルの `test.setupFiles`（`examples/chat` はこちら）だけでなく、
+   * `test.projects[].test.setupFiles`（`packages/postgres` は Issue #1277 / ADR 0371 以降
+   * こちら——並列 project と直列 project のそれぞれが自分の `setupFiles` を持つ）にも
+   * 載りうる。両方を合わせて返す——「守りが実際に効く setupFiles のどこかに載っている」
+   * ことを見たいのであって、どちらの形で書かれているかは見ない。
+   */
   async function setupFilesOf(configPath: string): Promise<string[]> {
     const mod = (await import(configPath)) as {
-      default: { test?: { setupFiles?: string | string[] } };
+      default: {
+        test?: {
+          setupFiles?: string | string[];
+          projects?: Array<{ test?: { setupFiles?: string | string[] } }>;
+        };
+      };
     };
-    const setupFiles = mod.default.test?.setupFiles ?? [];
-    return Array.isArray(setupFiles) ? setupFiles : [setupFiles];
+    const toArray = (files: string | string[] | undefined): string[] =>
+      files === undefined ? [] : Array.isArray(files) ? files : [files];
+    const topLevel = toArray(mod.default.test?.setupFiles);
+    const fromProjects = (mod.default.test?.projects ?? []).flatMap((p) =>
+      toArray(p.test?.setupFiles),
+    );
+    return [...topLevel, ...fromProjects];
   }
 
   it.each([
