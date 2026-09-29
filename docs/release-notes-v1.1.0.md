@@ -87,7 +87,10 @@
 >     ```ts
 >     const total = m.score.affinityMeasured !== false ? m.score.total : null;
 >     ```
+>   - `affinityMeasured` が `true`/`undefined`（独自の `ScoringStrategy` がこの欄を埋めていない場合を含む）なら、これまでどおり `m.score.total` が読めます。`false`（連想枠・必須の同伴取得）なら `total`/`similarity`/`lexicalMatch` は存在せず、`decay`/`tagMatch`/`freshness`/`strength` だけを持ちます。
+>   - **`computeAffinity(score)`（`@mnemora/core`）の引数型も `ScoreBreakdown` から `RecalledScore` に変わりました。**戻り値は変わりません。
 >   - **`.decay`/`.tagMatch`/`.freshness`/`.strength` だけを読んでいる方、独自の `ScoringStrategy` を実装している方は影響を受けません。**
+>   - **永続化済みの過去の `recalls` 行は影響を受けません**——`getRecall` で読み戻すと、この変更より前に書かれた行は書かれた当時の形（`total` を持つ場合はそのまま）で返ります。
 >   - **順位・既定値・どの記憶が返るかは1ビットも変わりません**——実行時はもともと `association`/`mandatory_companion` の `total` は比較可能ではなかった値で、今回はその事実を型でも表すようにしただけです。DB マイグレーションは不要です。
 >   - 詳しい移行手順は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「v1.0.2 → 次の版」の節（項目19）、一覧・根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Breaking` を見てください。
 >
