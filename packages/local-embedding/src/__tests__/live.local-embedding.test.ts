@@ -1,12 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_LOCAL_EMBEDDING_DTYPE,
+  DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE,
   DEFAULT_LOCAL_EMBEDDING_NUM_THREADS,
   DEFAULT_LOCAL_EMBEDDING_REPO,
   LocalEmbeddingProvider,
 } from "../local-embedding-provider.js";
 import { buildLocalEmbeddingPipeline, createLocalEmbeddingPipeline } from "../pipeline.js";
 import type {
+  CreateLocalEmbeddingPipeline,
   LocalEmbeddingExtractor,
   LocalEmbeddingModelSpec,
   LocalEmbeddingTokenizer,
@@ -59,6 +61,12 @@ function cosine(a: number[], b: number[]): number {
     nb += other * other;
   }
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+/** ベクトルの配列を Float32 のバイト列にする（「ビット一致」を実際にバイトで比べるため）。 */
+function toFloat32Bytes(vectors: number[][]): Buffer {
+  const f32 = new Float32Array(vectors.flat());
+  return Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength);
 }
 
 describe("live: local embedding (MNEMORA_LIVE_LOCAL_EMBEDDING が無ければ skipped と表示される)", () => {
@@ -344,6 +352,104 @@ describe("live: 8192トークンの壁 (MNEMORA_LIVE_LOCAL_EMBEDDING が無け�
       expect(typed.detail?.maxInputTokens).toBe(8192);
     },
     300_000,
+  );
+});
+
+/**
+ * live: `maxBatchSize`（Issue #1141 / ADR 0358）——**既定値以下の件数では、
+ * 本物のモデルの出力がビット一致すること**を測る。
+ *
+ * ⚠ **これは「分割ありの provider」と「分割の無い provider」を比べる歯ではない。**
+ * `maxBatchSize` 以下の件数では**どちらの provider も分割しない**——比べているのは
+ * 「既定の provider（`maxBatchSize` 既定 128）」と「`maxBatchSize` を巨大にして
+ * 分割を無効化した provider」が、**どちらも同じ1回の推論**（`pipeline.embed(prefixed)` を
+ * 同じ引数で1回呼ぶ）に帰着することを、**本物のモデル越しに**確かめるものである。
+ * （分割すると q8 の出力が動きうることは ADR 0110 §4 が既に実測済みであり、
+ * 128件を超える件数での「分割前後の値の違い」を測る歯ではない——超えたときに
+ * 値が変わりうること自体は仕様として許容している。ADR 0358 参照。）
+ *
+ * 同じ `extractor`（同じ読み込み済みモデル）を両方の provider に注入することで、
+ * 「2回モデルを読み込んだら値が変わった」という別の要因を排除している。
+ */
+describe("live: maxBatchSize 以下の件数は、既定値と無効化のどちらでもビット一致する (Issue #1141 / ADR 0358、MNEMORA_LIVE_LOCAL_EMBEDDING が無ければ skipped と表示される)", () => {
+  let sharedExtractorPromise: Promise<LocalEmbeddingExtractor> | null = null;
+  function loadSharedExtractorForBatchTest(): Promise<LocalEmbeddingExtractor> {
+    sharedExtractorPromise ??= (async () => {
+      const { pipeline } = await import("@huggingface/transformers");
+      const extractor = await pipeline("feature-extraction", DEFAULT_LOCAL_EMBEDDING_REPO, {
+        dtype: DEFAULT_LOCAL_EMBEDDING_DTYPE,
+        session_options: {
+          intraOpNumThreads: DEFAULT_LOCAL_EMBEDDING_NUM_THREADS,
+          interOpNumThreads: 1,
+        },
+      });
+      return extractor as unknown as LocalEmbeddingExtractor;
+    })();
+    return sharedExtractorPromise;
+  }
+
+  it.skipIf(!live)(
+    "既定値ちょうど（128件）: 既定の provider と maxBatchSize を無効化した provider の出力が Float32 のバイト列で完全一致する",
+    async () => {
+      const extractor = await loadSharedExtractorForBatchTest();
+      const createPipeline: CreateLocalEmbeddingPipeline = async () =>
+        buildLocalEmbeddingPipeline(extractor);
+
+      const providerDefault = new LocalEmbeddingProvider({ createPipeline });
+      const providerNoSplit = new LocalEmbeddingProvider({
+        createPipeline,
+        maxBatchSize: Number.MAX_SAFE_INTEGER,
+      });
+
+      const texts = Array.from(
+        { length: DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE },
+        (_, i) => `テスト用の短い文その${i}。`,
+      );
+
+      // ⚠ 直列で呼ぶ（同じ extractor へ同時に2本の推論を投げて競合させない）。
+      const vectorsDefault = await providerDefault.embed(
+        { tenantId: "live-max-batch-size" },
+        texts,
+      );
+      const vectorsNoSplit = await providerNoSplit.embed(
+        { tenantId: "live-max-batch-size" },
+        texts,
+      );
+
+      expect(vectorsDefault).toHaveLength(DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE);
+      expect(vectorsNoSplit).toHaveLength(DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE);
+      expect(toFloat32Bytes(vectorsDefault)).toEqual(toFloat32Bytes(vectorsNoSplit));
+    },
+    120_000,
+  );
+
+  it.skipIf(!live)(
+    "既定値より少ない件数（3件）でも、同様にビット一致する",
+    async () => {
+      const extractor = await loadSharedExtractorForBatchTest();
+      const createPipeline: CreateLocalEmbeddingPipeline = async () =>
+        buildLocalEmbeddingPipeline(extractor);
+
+      const providerDefault = new LocalEmbeddingProvider({ createPipeline });
+      const providerNoSplit = new LocalEmbeddingProvider({
+        createPipeline,
+        maxBatchSize: Number.MAX_SAFE_INTEGER,
+      });
+
+      const texts = ["今日は雨が降っている", "会議は水曜日に延期になった", "猫が窓辺で眠っている"];
+
+      const vectorsDefault = await providerDefault.embed(
+        { tenantId: "live-max-batch-size" },
+        texts,
+      );
+      const vectorsNoSplit = await providerNoSplit.embed(
+        { tenantId: "live-max-batch-size" },
+        texts,
+      );
+
+      expect(toFloat32Bytes(vectorsDefault)).toEqual(toFloat32Bytes(vectorsNoSplit));
+    },
+    120_000,
   );
 });
 

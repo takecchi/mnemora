@@ -6,7 +6,7 @@ import type {
   LocalEmbeddingPipeline,
 } from "./pipeline.js";
 import { createLocalEmbeddingPipeline } from "./pipeline.js";
-import { isLocalEmbeddingProviderError } from "./errors.js";
+import { LocalEmbeddingProviderError, isLocalEmbeddingProviderError } from "./errors.js";
 import { lastTransformersCacheDir } from "./transformers-cache-place.js";
 
 /**
@@ -69,6 +69,32 @@ export const DEFAULT_LOCAL_EMBEDDING_PREFIX = "";
  * オーバーサブスクリプションで損をする。
  */
 export const DEFAULT_LOCAL_EMBEDDING_NUM_THREADS = 4;
+
+/**
+ * 既定の最大バッチサイズ。**Issue #1141 / ADR 0358。**
+ *
+ * `embed(ctx, texts)` は、`texts.length` がこの値以下なら**今までどおり1回**で
+ * 推論する（ビット一致）。超えたときだけ、先頭からこの件数ずつに分けて順に推論し、
+ * 結果を順番どおりに連結する。
+ *
+ * **128 を選んだ理由**: 実測（Issue #1141、2026-09-27・2026-09-29）による——
+ * 1回の `embed()` に渡す件数が増えるほど peak RSS が伸び、同じ件数でも
+ * 128件ずつに分けたほうが小さくなる（例: 512件を1回で渡すと peak RSS
+ * 485〜712MB・533〜897ms、128件ずつ4回に分けると 386〜490MB・484〜754ms——
+ * 短文・長さの混ざった文の双方で確認した。README「良くなること」節・ADR 0358 参照）。
+ * `examples/chat` の既存のベンチ（`src/bench/embedding-cache.ts` の
+ * `batchSize` 既定 64、`src/bench/association-scale-bench.ts` の
+ * `MNEMORA_ASSOC_SCALE_EMBED_BATCH` 既定 64）よりは大きいが、Issue 本文が
+ * 例示した「2048件を128件ずつ」と同じ桁に揃えた。
+ *
+ * ⚠ **q8 では、バッチの長さ構成が変わると出力ベクトルがわずかに動く**
+ * （ADR 0095 決定5・ADR 0099 追記・ADR 0110 §4 で実測済み）。この既定値**以下**の
+ * 件数を渡す既存の呼び出し（`packages/core` の本番経路は常に1件）は、
+ * この変更の前後でビット単位で変わらない——1回で推論する経路そのものを
+ * 変えていないため。既定値**より多い**件数を直接 `embed()` に渡す呼び出しだけが、
+ * 分割の対象になる。
+ */
+export const DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE = 128;
 
 /**
  * 既定の合計試行回数（初回を含む）。**Issue #261 / ADR 0141。**
@@ -156,6 +182,22 @@ export interface LocalEmbeddingProviderOptions {
   /** onnxruntime の intra-op スレッド数。既定 `4`。 */
   numThreads?: number;
   /**
+   * `embed(ctx, texts)` を1回の推論に渡す最大件数。既定
+   * {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}（128）。
+   *
+   * `texts.length` がこの値以下なら、今までどおり1回の推論で済ませる
+   * （ビット一致）。超えたときだけ、先頭からこの件数ずつに分けて順に推論し、
+   * 結果を順番どおりに連結する——分割すると、q8 ではベクトルがわずかに動きうる
+   * （{@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE} の doc・ADR 0358 参照）。
+   *
+   * ⚠ **不正な値（`NaN`・0以下・非整数）は、`retry.attempts` と同じ流儀で
+   * 素通しせずに丸める**——分割ループの刻み幅・`Array.prototype.slice` の
+   * 引数に直接使うため、そのまま通すと無限ループや、テキストが静かに消える
+   * 空バッチを起こしうる。`NaN`・0以下は 1（1件ずつ）に、非整数は
+   * 切り捨てて使う。`Infinity` は「分割しない」として有効な値である。
+   */
+  maxBatchSize?: number;
+  /**
    * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら transformers.js の既定
    * （`"main"`）のままで、この option を足す前と同じ呼び出しになる**（Issue #597）。
    *
@@ -212,6 +254,7 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
   readonly #retryAttempts: number;
   readonly #retryDelayMs: (attempt: number) => number;
   readonly #sleep: (ms: number) => Promise<void>;
+  readonly #maxBatchSize: number;
 
   /**
    * ⭐ **読み込み中／読み込み済みの Promise そのものを握る**（`LocalEmbeddingPipeline` ではなく）。
@@ -281,6 +324,19 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     this.#retryAttempts = Number.isNaN(rawRetryAttempts) ? 1 : Math.max(1, rawRetryAttempts);
     this.#retryDelayMs = options.retry?.delayMs ?? defaultLocalEmbeddingRetryDelayMs;
     this.#sleep = options.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+    // ⭐ `retry.attempts` と同じ流儀で、0以下・NaN は「分割ループが前進できる」
+    // 最小値 1（1件ずつ）に丸める——素通しすると `slice(i, i + maxBatchSize)` が
+    // 無限ループ（0以下）や静かな空バッチ（NaN）を起こす。`retry.attempts` と
+    // 違い、非整数（例: 128.7）は `Math.floor` で切り捨てる——こちらはループの
+    // 刻み幅・`slice` の引数に直接使うため、整数に揃えておかないと `i +=
+    // maxBatchSize` の蓄積が範囲を跨いで半端な位置で区切ってしまう
+    // （`retry.attempts` は上限との `<=` 比較にしか使わないので、その心配が無い）。
+    // `Infinity` は「分割しない」を表す有効な値としてそのまま通す
+    // （`Math.floor(Infinity) === Infinity`、`Math.max(1, Infinity) === Infinity`）。
+    const rawMaxBatchSize = options.maxBatchSize ?? DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE;
+    this.#maxBatchSize = Number.isNaN(rawMaxBatchSize)
+      ? 1
+      : Math.max(1, Math.floor(rawMaxBatchSize));
     this.space = Object.freeze({
       provider: LOCAL_EMBEDDING_PROVIDER_ID,
       model: options.modelId ?? DEFAULT_LOCAL_EMBEDDING_MODEL_ID,
@@ -322,6 +378,12 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
    *   （推論の前に検査する。切り詰めない）。⚠ **このクラス自身は上限を検査しない**——`createPipeline` で差し替えた
    *   pipeline の `maxInputTokens`・`countTokens` は読まない。差し替えた pipeline では、上限を守るのはその `embed` の責任である。
    * - 返ったベクトルの件数が `texts` と違う・次元が `space.dimensions` と違う・有限でない成分を含むときは、素の `Error`。
+   *
+   * ⭐ **`texts.length` が `maxBatchSize`（既定 {@link DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE}）
+   * 以下なら、今までどおり1回の `pipeline.embed()` で済ませる（ビット一致）。**超えたときだけ、
+   * 先頭から `maxBatchSize` 件ずつに分けて順に（直列で）推論し、結果を順番どおりに連結する
+   * （Issue #1141 / ADR 0358）。prefix の付与・上限トークン数の検査の順序は変わらない
+   * ——分割するかどうかを決める前に、まず `texts` 全体に prefix を付ける。
    */
   async embed(_ctx: Ctx, texts: string[]): Promise<number[][]> {
     // `packages/openai` と同じ早期 return。**空でモデルを起こさない。**
@@ -344,7 +406,13 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
     // 分岐を消して、経路を1本にしてある。`"" + text` は元の文字列そのものなので、
     // 増えるのは配列1本の確保だけで、その費用は推論の前では見えない。
     const prefixed = texts.map((text) => this.#prefix + text);
-    const vectors = await pipeline.embed(prefixed);
+    // ⭐ 件数が maxBatchSize 以下なら、今までどおり1回で丸ごと渡す（ビット一致）。
+    // 超えたときだけ #embedInChunks に回す——分岐の片方は今日の呼び出しと1バイトも
+    // 変わらない（同じ関数を、同じ引数で、同じ経路で呼ぶ）。
+    const vectors =
+      prefixed.length <= this.#maxBatchSize
+        ? await pipeline.embed(prefixed)
+        : await this.#embedInChunks(pipeline, prefixed);
 
     // ⭐ 件数の一致だけは確かめる。
     //
@@ -396,6 +464,36 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       }
     }
 
+    return vectors;
+  }
+
+  /**
+   * `prefixed`（既に prefix を付けた配列）を、先頭から `#maxBatchSize` 件ずつに分けて
+   * **直列で**（`Promise.all` にしない）順に推論し、結果を順番どおりに連結する。
+   *
+   * ⛔ **直列にする理由**: 並列にすると、onnxruntime のセッションに複数の推論が
+   * 同時に走る——スレッド（`numThreads`）の奪い合いで速くなる保証が無く、
+   * かつ「RSS を抑える」という本来の目的（Issue #1141）と衝突する
+   * （複数バッチ分のメモリを同時に確保することになる）。
+   *
+   * ⚠ **`kind: "input_too_long"` の例外は、`detail.index` をこのチャンクの
+   * 開始位置ぶんだけ足し戻してから投げ直す。**`pipeline.embed()` は「渡された
+   * 配列の何番目か」しか知らない（`errors.ts` の doc）——分割すると、そのままでは
+   * 2個目以降のチャンクで「バッチ内の位置」が返り、`embed(ctx, texts)` の契約
+   * （「渡した配列全体での位置」）と食い違う。
+   */
+  async #embedInChunks(pipeline: LocalEmbeddingPipeline, prefixed: string[]): Promise<number[][]> {
+    const vectors: number[][] = [];
+    for (let offset = 0; offset < prefixed.length; offset += this.#maxBatchSize) {
+      const chunk = prefixed.slice(offset, offset + this.#maxBatchSize);
+      let chunkVectors: number[][];
+      try {
+        chunkVectors = await pipeline.embed(chunk);
+      } catch (error) {
+        throw rebaseInputTooLongIndex(error, offset);
+      }
+      vectors.push(...chunkVectors);
+    }
     return vectors;
   }
 
@@ -473,6 +571,38 @@ export class LocalEmbeddingProvider implements EmbeddingProvider {
       cause: lastError,
     });
   }
+}
+
+/**
+ * `#embedInChunks` が捕まえた例外を、投げ直す前に**チャンクの開始位置ぶんだけ**
+ * `index` を足し戻す（Issue #1141 / ADR 0358）。
+ *
+ * ⚠ **`kind: "input_too_long"` 以外はそのまま投げ直す。**種類の分かっていない失敗
+ * （ネットワーク断など、チャンク単位の推論そのものが失敗した場合）に `index` の
+ * 概念は無く、触るべきではない。
+ *
+ * **メッセージの数字だけを機械的に差し替え、それ以外の文面は複製しない**
+ * （`pipeline.ts` の `embed` が組み立てるメッセージ全体を書き写すと、
+ * 片方だけ直して他方を直し忘れる腐り方をする）。
+ */
+function rebaseInputTooLongIndex(error: unknown, chunkOffset: number): unknown {
+  if (
+    !isLocalEmbeddingProviderError(error) ||
+    error.kind !== "input_too_long" ||
+    error.detail === null
+  ) {
+    return error;
+  }
+  const globalIndex = error.detail.index + chunkOffset;
+  return new LocalEmbeddingProviderError(
+    "input_too_long",
+    error.message.replace(
+      /^LocalEmbeddingProvider: \d+ 番目/,
+      `LocalEmbeddingProvider: ${globalIndex} 番目`,
+    ),
+    { ...error.detail, index: globalIndex },
+    { cause: error },
+  );
 }
 
 /**

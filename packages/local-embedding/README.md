@@ -23,12 +23,32 @@ API キーは要らない。ネットワークが要るのは**初回のモデ�
 | **ベクトルが小さい**             | 256次元。`text-embedding-3-small` の 1536 次元に対して 1/6 で、索引も小さい               |
 | **軽い**                         | 重み 36MB（q8）/ peak RSS 362MB / 4スレッドで **985 文/秒**（32コア機での実測）           |
 
-⚠ **peak RSS は、1回の `embed()` に渡す件数に比例して増える。** `LocalEmbeddingProvider` は受け取った配列を
-分割せずに1回で推論する（362MB は [ADR 0085](../../docs/decisions/0085-local-embedding-provider.md) の選定時の実測）。
+⚠ **peak RSS は、1回の推論に渡す件数に比例して増える**
+（362MB は [ADR 0085](../../docs/decisions/0085-local-embedding-provider.md) の選定時の実測）。
 【実測 2026-09-27、既定の設定（q8・4スレッド）、1件20〜70文字の短文、プロセスの peak RSS】1件 259MB /
 128件 630MB / 512件 1.7GB / 2048件 6.1GB。同じ2048件を128件ずつ渡すと 822MB で、時間も短かった
-（9.1秒 → 6.8秒）。mnemora の runtime（embed ジョブ・recall のクエリ）は1件ずつ渡す。**大量のテキストを
-自分で `embed()` に渡すときは、呼び手が分割すること。**
+（9.1秒 → 6.8秒）。
+
+⭐ **`LocalEmbeddingProvider` は既定で128件ずつに分けて推論する**
+（[Issue #1141](https://github.com/takecchi/mnemora/issues/1141) / [ADR 0358](../../docs/decisions/0358-local-embedding-provider-splits-large-batches.md)、2026-09-29）。
+`embed(ctx, texts)` に渡す件数が `maxBatchSize`（既定 `DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE` = **128**）
+**以下**なら、今までどおり1回の推論で済ませる——**この範囲では、この変更の前後でビット単位で変わらない。**
+**128件を超える件数を直接渡したときだけ**、先頭から `maxBatchSize` 件ずつに分けて順に（直列で）推論し、
+結果を順番どおりに連結する。mnemora の runtime（embed ジョブ・recall のクエリ）は常に1件ずつ渡すため、
+この分割は runtime の経路には影響しない——影響するのは、利用者が `embed()` を直接呼んで129件以上を
+まとめて渡すとき（移行・一括の再埋め込みなど）だけである。**そのときも、既定のままで分割は自動的に
+行われる**——実測（上記・[ADR 0358](../../docs/decisions/0358-local-embedding-provider-splits-large-batches.md)）
+による既定値なので、多くの場合は `maxBatchSize` を自分で指定する必要は無い。より小さい・大きい単位に
+分けたいときだけ `maxBatchSize` を指定すること。
+
+⚠ **分割すると、q8 ではベクトルがわずかに変わりうる。**このモデルの量子化（q8）は、バッチの長さ構成に
+依存して出力が動くことが実測されている
+（[ADR 0095](../../docs/decisions/0095-embedding-provider-conformance.md) 決定5・
+[ADR 0099](../../docs/decisions/0099-conformance-against-real-embedding-providers.md) 追記・
+[ADR 0110](../../docs/decisions/0110-single-char-token-discriminator.md) §4）。⟹ 129件以上を一度に渡すと、
+分割しなかった場合と比べてベクトルがわずかに動く——ただし、これは分割**する前から**、本物の埋め込みモデルが
+バッチ不変性を約束していないこと（ADR 0095 決定5）の帰結であり、この変更が新しく持ち込んだ性質ではない。
+**128件以下の呼び出し（mnemora の runtime を含む）は、この変更の前後でベクトルが1ビットも変わらない。**
 
 ### 🔴 良くならないこと（このモデルでも解けないもの）
 
@@ -94,8 +114,10 @@ try {
 悪くなったことが検索結果の質にしか現れず、原因を追えなくなる。**
 落とせば `runtime.tick()` が `embeddingStatus: 'failed'` を書くので、**問い合わせられる状態が残る。**
 
-⛔ **このパッケージは入力を自動で分割しない。**どう割るか（文境界・重ね幅・割った後の統合）は
-想起の質を直接動かす設計判断であり、**呼び出し側の判断として残してある**（ADR 0090 §3.5）。
+⛔ **このパッケージは入力（1件の長いテキストの中身）を自動で分割しない。**どう割るか（文境界・重ね幅・
+割った後の統合）は想起の質を直接動かす設計判断であり、**呼び出し側の判断として残してある**（ADR 0090 §3.5）。
+⚠ **これは `texts`（配列）を件数で分けて推論する話とは別である**——後者（`maxBatchSize`）は
+「良くなること」節・[ADR 0358](../../docs/decisions/0358-local-embedding-provider-splits-large-batches.md) を見ること。
 
 ### 確かめていないこと
 
@@ -412,6 +434,7 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 | `prefix`         | `""`                                          | 全テキストの先頭に付ける文字列                                                                                                                                    |
 | `cacheDir`       | 未指定（`@huggingface/transformers/.cache/`） | モデルの置き場所                                                                                                                                                  |
 | `numThreads`     | `4`                                           | onnxruntime の intra-op スレッド数                                                                                                                                |
+| `maxBatchSize`   | `128`                                         | `embed()` を1回の推論に渡す最大件数。超えた分は分けて呼ぶ（ビット一致するのはこの値以下。Issue #1141 / ADR 0358）                                                 |
 | `revision`       | 未指定（transformers.js の既定 `"main"`）     | Hugging Face の revision（枝名・tag・commit sha）。⚠ 渡したときの実挙動は本物のモデルで確かめていない。キャッシュ鍵・重みの指紋の照合との関係も未決（Issue #597） |
 | `createPipeline` | transformers.js                               | モデルを読み込む関数（**テスト用の注入点**）                                                                                                                      |
 | `retry`          | `{ attempts: 3 }`                             | 読み込みが「種類の分かっていない」失敗（多くはネットワーク）をリトライする回数・間隔（Issue #261 / ADR 0141）                                                     |
@@ -419,7 +442,8 @@ await embeddingProvider.warmup(); // 最初のリクエストにロード時間�
 
 既定値は `DEFAULT_LOCAL_EMBEDDING_REPO`・`DEFAULT_LOCAL_EMBEDDING_DTYPE`・`DEFAULT_LOCAL_EMBEDDING_DIMENSIONS`・
 `DEFAULT_LOCAL_EMBEDDING_MODEL_ID`・`DEFAULT_LOCAL_EMBEDDING_PREFIX`・`DEFAULT_LOCAL_EMBEDDING_NUM_THREADS`・
-`DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS` として export している（`space.provider` の `"local"` は `LOCAL_EMBEDDING_PROVIDER_ID`）。
+`DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE`・`DEFAULT_LOCAL_EMBEDDING_RETRY_ATTEMPTS` として export している
+（`space.provider` の `"local"` は `LOCAL_EMBEDDING_PROVIDER_ID`）。
 
 **`numThreads` の既定が 4 なのは実測による**——32コア機で、既定（コア数まかせ）の
 819 文/秒 に対し 4スレッドで **985 文/秒**だった。**増やすほど速くなるわけではない。**
