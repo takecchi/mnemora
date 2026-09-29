@@ -159,7 +159,9 @@ describe("deriveMigrationObjects", () => {
     // が `idx_memories_attributes`（索引+1）を足した。8→10・20→23 はその反映であり、
     // 回帰ではない。Issue #371: migrations/0021_memories_claim_key.sql が
     // `idx_memories_claim_key`（索引+1）を足した。23→24 も同様に反映であり、回帰ではない。
-    expect(result.tables).toHaveLength(10);
+    // ADR 0352 / Issue #338: migrations/0024_tenant_subject_activity.sql が
+    // `tenant_subject_activity`（テーブル+1）を足した。10→11 も同様に反映であり、回帰ではない。
+    expect(result.tables).toHaveLength(11);
     expect(result.indexes).toHaveLength(24);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",

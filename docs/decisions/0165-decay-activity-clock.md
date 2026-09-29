@@ -606,3 +606,24 @@
   `packages/postgres/src/__tests__/wall-to-activity-switch.postgres.test.ts`（2実装）である。
 
 （この追記はクローン miku の委譲先が書いた。判断はクローン miku のものであり、オーナーの判断ではない。）
+
+## 追記3（2026-09-29、[Issue #338](https://github.com/takecchi/mnemora/issues/338) / [ADR 0353](./0353-activity-counting-per-call.md)）: 「これが覆るとしたら」1 が指した分岐に、オーナーが答えた
+
+上の本文は書き換えていない。今の実態だけを書く。
+
+- **「これが覆るとしたら」1 は「`observe()` を数える、`subject` 単位で数える、といった変種へ動く。
+  これはオーナーの判断を要する種類の分岐である」と書いていた。** [ADR 0311](./0311-activity-clock-boundary-measured-soft-and-hard.md)
+  が P/Q/R0 の3案を並べてオーナーへ返し、**オーナーは「呼び出す際の引数で指定できるようにはできない？
+  これは使用者次第の内容だと思ったんだけど」（ask_human 61355570、逐語）と答えた。**
+- ⟹ **`subject` 単位で数える変種を、P 案（絞ったら自動）ではなく、呼び出しごとの引数
+  （`RecallQuery.activityCounting`、既定 `'tenant'`）として実装した。** 詳細は ADR 0353。
+- **「決めたこと」6（1単位 = `recall()` 1回、`observe()` は数えない）は変わっていない。** 変わったのは
+  「誰の（どのカウンタの）1回として数えるか」という軸だけであり、「何が1単位か」という軸は本 ADR のまま。
+- `tenant_activity`（`T`）に加えて `tenant_subject_activity`（`S_x`、subject 単位）を持つ。読み取り
+  （忘却ゲート・段2再スコア・掃引・作成/強化時の起点）は常に `T + S_x` を使う——`activityCounting` は
+  前進（+1）の対象だけを選ぶ。既定 `'tenant'` のテナントには、ビット単位で本 ADR 以前と同じ挙動が保たれる
+  （`TenantSettingsStore.hasSubjectActivityCounters?` が `false` のテナントでは、SQL も相関サブクエリを
+  足さない）。
+
+（この追記はクローンの委譲で動くセッションが書いた。判断はオーナーの回答を実装した設計判断であり、
+その設計判断自体はオーナーの判断ではない——ADR 0353 参照。）

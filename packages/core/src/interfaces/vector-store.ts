@@ -135,6 +135,22 @@ export interface VectorFilter {
    */
   decayFloorSeqAfter?: number;
   /**
+   * [ADR 0353](../../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338）: `true` のとき、`decayFloorSeqAfter`（テナント単位の `T`）に、その
+   * 行の `subject_id` に対応する subject 単位のカウンタ `S_x`（`tenant_subject_activity`）
+   * を足した値と比較する——`decay_floor_seq > (decayFloorSeqAfter + COALESCE(S_x, 0))`。
+   * `subject_id IS NULL` の行は `S_x` が無いので `T` のみと比較する（`COALESCE(..., 0)`
+   * がそのまま表す）。
+   *
+   * **既定 `false`/省略: 今日どおり `T` のみの単一パラメータ比較**（`decay_floor_seq >
+   * decayFloorSeqAfter`）——`tenant_subject_activity` を一度も参照しない。adapter は
+   * `TenantSettingsStore.hasSubjectActivityCounters?` が `false`（未実装を含む）を
+   * 返すテナントでは、この欄を常に `false`/省略のまま渡すべきである——**EXPLAIN の
+   * プラン族を変えないための最適化**（本欄の doc、`readHasSubjectActivityCounters` の
+   * doc コメント参照）。
+   */
+  decayFloorSeqUsesSubjectCounters?: boolean;
+  /**
    * `decayFloorAtAfter` と `decayFloorSeqAfter` の結び方を切り替える（ADR 0165 決めたこと1、
    * `decay_clock: 'either'` の表現）。既定 `false`（未指定時と同じ）。
    *

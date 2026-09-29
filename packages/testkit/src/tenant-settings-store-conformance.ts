@@ -84,6 +84,19 @@ export interface TenantSettingsStoreConformanceOptions {
   advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
 
   /**
+   * [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+   * （Issue #338）: `supportsDecayClock: true` のときに使う。
+   * `tenant_subject_activity`（`subjectId` の行、`S_x`）を+1する
+   * （`MemoryStore.createRecall({ advanceActivityClock: { scope: "subject", subjectId } })`
+   * を呼ぶことを想定）。`hasSubjectActivityCounters`/`getSubjectActivitySeqs` は読み出し
+   * 専用なので、`TenantSettingsStore` 単体では進める口が無い——`advanceActivitySeq` と
+   * 同じ理由で、呼び出し側が `MemoryStore` と同じバッキングを経由してこのフックを実装する。
+   * 省略時はこのフックを使う歯をスキップする（`false`/`{}` を返すことの歯は
+   * `supportsDecayClock: true` だけで検査する）。
+   */
+  advanceSubjectActivitySeq?: (ctx: Ctx, subjectId: string) => Promise<void> | void;
+
+  /**
    * Issue #201 / [ADR 0318](../../../docs/decisions/0318-taxonomy-labels.md):
    * `getTaxonomyMode`/`setTaxonomyMode` を検査するかどうか。**省略時は `false` 相当**
    * ——taxonomy 系の適合項目は登録・実行されない。
@@ -125,6 +138,7 @@ export function describeTenantSettingsStoreConformance(
     supportsDecayClock,
     setDefaultHalfLifeRecalls,
     advanceActivitySeq,
+    advanceSubjectActivitySeq,
     supportsTaxonomyMode,
   } = options;
 
@@ -375,6 +389,51 @@ export function describeTenantSettingsStoreConformance(
           await advanceActivitySeq(ctxB);
           expect(await store.getActivitySeq!(ctxA)).toBe(2);
           expect(await store.getActivitySeq!(ctxB)).toBe(1);
+        });
+      }
+
+      // [ADR 0353](../../../docs/decisions/0353-activity-counting-per-call.md)
+      // （Issue #338）: hasSubjectActivityCounters / getSubjectActivitySeqs。
+      it("hasSubjectActivityCounters: 行が無いテナントには false を返す", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-subject-activity-unset-${Math.random()}` };
+        expect(await store.hasSubjectActivityCounters!(ctx)).toBe(false);
+      });
+
+      it("getSubjectActivitySeqs: 行が無い subjectId はキーを省略する（空配列を渡せば空オブジェクト）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: `tenant-subject-activity-seqs-unset-${Math.random()}` };
+        expect(await store.getSubjectActivitySeqs!(ctx, [])).toEqual({});
+        expect(await store.getSubjectActivitySeqs!(ctx, ["alice"])).toEqual({});
+      });
+
+      if (advanceSubjectActivitySeq) {
+        it("hasSubjectActivityCounters / getSubjectActivitySeqs: advanceSubjectActivitySeq を呼ぶと true・カウンタが1ずつ進む（別 subject には影響しない）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: `tenant-subject-activity-advance-${Math.random()}` };
+          expect(await store.hasSubjectActivityCounters!(ctx)).toBe(false);
+          await advanceSubjectActivitySeq(ctx, "alice");
+          expect(await store.hasSubjectActivityCounters!(ctx)).toBe(true);
+          expect(await store.getSubjectActivitySeqs!(ctx, ["alice", "bob"])).toEqual({ alice: 1 });
+          await advanceSubjectActivitySeq(ctx, "alice");
+          await advanceSubjectActivitySeq(ctx, "bob");
+          expect(await store.getSubjectActivitySeqs!(ctx, ["alice", "bob"])).toEqual({
+            alice: 2,
+            bob: 1,
+          });
+          // テナント全体のカウンタ（getActivitySeq）には触れない——別テーブル。
+          expect(await store.getActivitySeq!(ctx)).toBe(0);
+        });
+
+        it("getSubjectActivitySeqs: テナントごとに独立している", async () => {
+          const store = await createStore();
+          const ctxA: Ctx = { tenantId: `tenant-subject-activity-a-${Math.random()}` };
+          const ctxB: Ctx = { tenantId: `tenant-subject-activity-b-${Math.random()}` };
+          await advanceSubjectActivitySeq(ctxA, "alice");
+          await advanceSubjectActivitySeq(ctxA, "alice");
+          await advanceSubjectActivitySeq(ctxB, "alice");
+          expect(await store.getSubjectActivitySeqs!(ctxA, ["alice"])).toEqual({ alice: 2 });
+          expect(await store.getSubjectActivitySeqs!(ctxB, ["alice"])).toEqual({ alice: 1 });
         });
       }
     }
