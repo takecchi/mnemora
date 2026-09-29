@@ -329,4 +329,19 @@ describe("association-summary.mjs（子プロセスで起動）", () => {
     ]);
     expect(result.status).not.toBe(0);
   });
+
+  it("🔴 基準値より悪い arm があっても exit 0 のまま、警告節が Markdown に出る(門ではない)", () => {
+    const measured = makeMeasured();
+    const baseline = baselineFrom(measured);
+    baseline.arms[1].goldReturnedCount = measured.arms[1].goldReturnedCount + 1;
+    const result = run([
+      "--measured",
+      writeJson("measured.json", measured),
+      "--baseline",
+      writeJson("baseline.json", baseline),
+    ]);
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout).toContain("## ⚠ 基準値より悪い値がある（門ではない）");
+    expect(result.stdout).toContain(measured.arms[1].armLabel);
+  });
 });
