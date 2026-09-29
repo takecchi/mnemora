@@ -139,7 +139,8 @@ const spaceB: EmbeddingSpaceId = { provider: "test", model: "fixture-model-b", d
  * `VectorStore` の適合テスト（docs/architecture.md §5.2）。
  *
  * ここで検査するのは `VectorStore` の基本契約——upsert/search/delete の往復、
- * テナント分離、**space 分離**（ADR 0065）、limit の遵守、そして `filter`
+ * テナント分離、**space 分離**（ADR 0065）、`:` を含む space の model でも別の space と
+ * 衝突しないこと（Issue #1238 A3、区切り文字）、limit の遵守、そして `filter`
  * （`status`/`subjectId`/`decayFloorAtAfter`/`excludeProvenanceKinds`/`occurredAfter`/
  * `occurredBefore`）が実際に効くこと（ADR 0034、`excludeProvenanceKinds` は ADR 0056、
  * `occurredAfter`/`occurredBefore` は ADR 0059）——である。`EXPLAIN` で HNSW 索引が

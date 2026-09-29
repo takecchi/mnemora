@@ -26,6 +26,20 @@ suite は、存在しない」はもう成り立たない。`describeLLMProvider
 関わるものだけを、その分だけ更新してある**（§1・§2.3・§8）。**他の6 suite・他の節の数は
 この追記の対象外**——2026-09-17（または2026-09-25）時点の値のままである。
 
+**⚠ 2026-09-29 追記（Issue #1238 /
+[ADR 0372](./decisions/0372-conformance-suite-issue-1238-promises.md)）**:
+`MemoryStore`・`VectorStore`・`EventStore` の3 suite に、次の7つの約束を検査する歯を
+足した——`supersedeWithNewMemories` の途中失敗のロールバック・区切り文字（`:`・`::`）を
+含む値の非衝突（冪等キー・ベクトルのキー・ラベル）・2テナント並行での取り違え・
+`onlyMemoryIds`/preview の形式不正 id・未強化の記憶への reinforce の起点・
+`listActiveClaimPredicates` の片方欠落 claim key・`EventStore.append` の `meta`/`actor`
+（core が入れる形だけ）の往復。**住所・呼び出し元の一覧（§1・§2.1）に変更は無い**
+（新しい suite・新しい呼び出し元を足したのではなく、既存3 suite の中身が増えただけ）。
+**この節の数（it の宣言数）はどこにも書いていないので、この追記でも数えていない**
+（§1 の数え方の式で数えること）。Issue #1238 が棚卸しした残りの候補（A2・A8・A10〜A15、
+PR #1296 のコメント1・2）は、この追記の対象外——足すかどうかは決めていない
+（ADR 0372「決めたこと」3）。
+
 ---
 
 ## 1. 何が在るか — 8 suite
@@ -463,3 +477,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
   `packages/openai/src/__tests__/llm-provider.conformance.test.ts`・
   `packages/anthropic/src/__tests__/llm-provider.conformance.test.ts` を読んで数えた【現物】）。
   **他の7 suite・他の節の数はこの追記の対象外**——それぞれ直前の更新時点の値のままである。
+- **2026-09-29 追記**（Issue #1238 / [ADR 0372](./decisions/0372-conformance-suite-issue-1238-promises.md)）:
+  `MemoryStore`・`VectorStore`・`EventStore` の3 suite に7つの約束の歯を足したことに伴い、
+  冒頭に追記した。**住所・呼び出し元の一覧（§1・§2.1）は変わっていない**ので、そこは
+  更新していない。**it の数はどこにも書いていないので、更新の対象自体が無い。**
+  他の節・他の追記が数えた範囲はこの追記の対象外。

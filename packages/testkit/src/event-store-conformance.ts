@@ -51,6 +51,9 @@ const _eventStoreShapeCheck: _EventStoreHasNoUpdateOrDelete = true;
  * - list の kind フィルタ・memoryId フィルタ
  * - list の並び順（`at` 昇順）・`limit`（並べ替えた後に適用）・`since`/`until`（両端含む）
  *   （docs/decisions/0042、`packages/core/src/interfaces/event-store.ts` の doc コメント）
+ * - `meta`/`actor` が、core が入れる形（文字列・id・id の配列）だけのまま読み戻る
+ *   （Issue #1238 A9、#1211 の表の外の値——Date・NaN・-0・undefined・BigInt・NUL・
+ *   孤立サロゲート・関数——は adapter によって往復が違うため対象外）
  */
 export function describeEventStoreConformance(options: EventStoreConformanceOptions): void {
   const { name, createStore, prepareMemoryId } = options;
