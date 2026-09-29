@@ -1166,6 +1166,8 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 
 **DB マイグレーション**（既存の言及。上の項目19 とは別件）: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）と `0024_tenant_subject_activity.sql`（活動時計の subject 単位のカウンタ、PR #1380）の2本が増えている。`v1.0.2` から上げる場合は、6パッケージを上げた後に `npx mnemora-postgres-migrate`（`DATABASE_URL` を渡す。または `runMigrations`。上の「DB マイグレーション」）が要る——このリポジトリの workspace 内なら `pnpm --filter @mnemora/postgres run migrate` でも同じ。`v1.0.1` からは `0022`〜`0024` の3本、`v1.0.0` からは `0019`〜`0024` の6本が要る。（⚠ 2026-09-27 訂正: この行は workspace 内の形 `pnpm --filter @mnemora/postgres run migrate` だけを書いていた。利用者のプロジェクトには `--filter` で指せる workspace が無いので、その形では打てない。⚠ **2026-09-29 訂正（22回目の棚卸し）**: この行はここまで `0023` の1本のままだった——`0024` は21回目の棚卸し（CHANGELOG 追記22）の時点で既にこの節の範囲に入っていたが、この行は直っていなかった。気づいた時点で直す。**クローン miku の判断であり、オーナーの判断ではない**）
 
+⚠ **2026-09-29 追記（Issue #1222、[ADR 0364](./decisions/0364-lexical-tsvector-fallback-for-oversized-content.md)）**: マイグレーションがさらに1本増え、上の「2本」は**3本**（`0023`〜`0025`）になった——`0025_lexical_tsvector_fallback.sql` は `idx_memories_lexical`（語彙チャンネルの式索引）を `DROP INDEX` + `CREATE INDEX` で作り直す（`CONCURRENTLY` 不可）。**この migration の適用中、`memories` への読み書きが `ACCESS EXCLUSIVE` ロックで止まる**——【実測】10万行で約1.2秒（旧式の索引作り直し約1.0秒に対し+20.3%。行数にほぼ比例して伸びる見込み）。あわせて、この索引式を通る `memories` への INSERT/UPDATE が恒常的にわずかに遅くなる（【実測】10万行の INSERT で約+17.6%）。実測の詳細は ADR 0364「実測」節。`v1.0.1` からは `0022`〜`0025` の4本、`v1.0.0` からは `0019`〜`0025` の7本が要る（上の「3本」「6本」を置き換える）。
+
 【実測 2026-09-27】この節の手順を、利用者の側で通した（`main` = `47b2aa6`）。
 1. npm から `@mnemora/*@1.0.2` の6パッケージを入れた素のプロジェクト（`npm`、`"type": "module"`、TypeScript 5.9 の `nodenext`）で、`npx mnemora-postgres-migrate` を空の DB に打った（`0001`〜`0022`）。
 2. 1.0.2 のコードでデータを入れた。

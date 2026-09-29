@@ -180,7 +180,14 @@ function buildLanguageAndSpeakerInstruction(): string {
  * DB の例外（`string is too long for tsvector`）を投げる。Observation と extract ジョブは残り、Memory は1件も
  * 残らない。`tick()` での再試行も同じ所で失敗し、ジョブは `failed` になる。上限は本文の長さではなく tsvector の
  * 大きさで決まる（ランダムな16進の語では約0.9MB で落ち、空白の無い日本語の続き書きは 1.8MB でも通った）。
- * testkit の fixture は1件残す。どう直すかは決まっていない。
+ * testkit の fixture は1件残す。
+ * ⚠ 2026-09-29 追記（上の追記を反転させる。`packages/postgres/migrations/0025_lexical_tsvector_fallback.sql`、
+ * `docs/decisions/0364-lexical-tsvector-fallback-for-oversized-content.md`）:
+ * **`@mnemora/postgres` も直った。**`idx_memories_lexical` の式に、tsvector が1MBを超える本文だけ
+ * 本文の先頭150,000文字で作り直すフォールバックを挟んだ（`mnemora_lexical_tsvector`）。**`@mnemora/postgres`
+ * も testkit の fixture と同じく、本文は1文字も落ちずに1件の Memory として残る**——`memories.content` は
+ * 無傷のまま全文を保存する。縮退するのは語彙**索引**だけで、150,000文字より後ろにしか現れない語は
+ * `LexicalStore`（語彙チャンネル）からは引けない（ベクトル検索等、他の recall チャンネルには影響しない）。
  */
 export function buildExtractionPrompt(
   observation: Observation,
@@ -327,8 +334,10 @@ function fallbackWholeObservationCandidate(observation: Observation): ExtractedM
  * - `llm_failed_whole_observation` — LLM 呼び出し自体が失敗し、Observation の全文を
  *   1件の Memory として残す安全弁へ倒れた（docs/memory-model.md §4「曖昧なら厚い側に倒す」）。
  *   **この Memory は「抽出された」ものではない。** 未処理の生テキストである。
- *   ⚠ `@mnemora/postgres` では、語の多い大きな本文だとこの Memory を書けず、`observe()` が DB の例外を
- *   投げる（{@link buildExtractionPrompt} の doc、Issue #1222）。
+ *   ⚠ **2026-09-29 から `@mnemora/postgres` も、語の多い大きな本文でこの Memory を書ける**
+ *   （`migrations/0025`・ADR 0364、Issue #1222。以前は DB の例外を投げていた——
+ *   {@link buildExtractionPrompt} の doc の追記を見ること）。1MBを超える本文は、
+ *   本文自体は無傷で残るが、先頭150,000文字より後ろの語は語彙チャンネルからは引けない。
  * - `skipped` — この呼び出しでは抽出を実行していない（`deferred`、`memory_usage`、冪等な再送）。
  */
 export type ExtractionOutcome = "ok" | "llm_failed_whole_observation" | "skipped";

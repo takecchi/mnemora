@@ -719,7 +719,7 @@ export function buildTrigramLexicalSearchSelect(
   // GIN 索引がプランナに選ばれるのはこの演算子形のときだけ（`word_similarity(...)` を
   // 関数として書くと索引は使われない。このファイル冒頭の doc「【実測】」参照）。
   conditions.push(sql`(
-    to_tsvector('simple', mnemora_lexical_normalize(content)) @@ ${asciiTsQuery}
+    mnemora_lexical_tsvector(content) @@ ${asciiTsQuery}
     OR (${jaTerm} IS NOT NULL AND content %> ${jaTerm})
   )`);
   const whereClause = sql.join(conditions, sql` AND `);
@@ -740,7 +740,7 @@ export function buildTrigramLexicalSearchSelect(
         coalesce(
           (
             SELECT count(*) FILTER (
-                     WHERE to_tsvector('simple', mnemora_lexical_normalize(content)) @@ tq
+                     WHERE mnemora_lexical_tsvector(content) @@ tq
                    )::float8 / NULLIF(count(*), 0)
             FROM unnest(qc.terms) AS tq
           ),
@@ -752,7 +752,7 @@ export function buildTrigramLexicalSearchSelect(
       ) AS coverage,
       (
         ts_rank_cd(
-          to_tsvector('simple', mnemora_lexical_normalize(content)),
+          mnemora_lexical_tsvector(content),
           ${asciiTsQuery},
           33
         )

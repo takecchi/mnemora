@@ -2142,8 +2142,8 @@ export interface Runtime {
    *     最も内側の原因の `code`・`message`。候補の本文は写さない）に残る。**この戻り値には出ない**
    *     （`memoryIds` が候補の数より少なくなるだけ。`extraction` は `"ok"`・`extractionFailure` は `null` のまま）。
    *   - 全文フォールバックの Memory は作られない（docs/memory-model.md §4 の安全弁は、LLM の呼び出しの失敗だけを覆う）。
-   *   - 保存できる値の範囲は store で違う——本文の NUL は `@mnemora/postgres` も testkit の fixture も拒むが、語の多い
-   *     1MB 超の本文は Postgres だけが tsvector の上限で拒む（fixture は全件を書く）。
+   *   - 本文の NUL は `@mnemora/postgres` も testkit の fixture も拒む。語の多い 1MB 超の本文は、どちらも受け入れる
+   *     （Postgres は migration 0025 以降。それ以前は Postgres だけが tsvector の上限で拒んでいた。Issue #1222・ADR 0364）。
    *   - 候補を全件書いてから、`created` を積む（落とした候補は全件を書き終えるまで分からない）。
    *   【実測 2026-09-28】`packages/postgres/src/__tests__/observe-unsaveable-candidate.postgres.test.ts`。
    *   ⚠ 例: 孤立サロゲートを含む `text` などの欄は、`@mnemora/postgres` では Observation を
@@ -3746,7 +3746,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     const jobKinds: OutboxJobKind[] = autoQueueConsolidateReflectOnExtract
       ? ["embed", "consolidate", "reflect"]
       : ["embed"];
-    // Issue #1063（ADR 0347）: 保存できない候補（store が拒む値——本文の NUL、Postgres の tsvector の上限など）は、
+    // Issue #1063（ADR 0347）: 保存できない候補（store が拒む値——本文の NUL など。Postgres の tsvector の上限は migration 0025 で拒まなくなった、#1222）は、
     // その候補だけを落として残りを書く。core は「保存できない値」と一時的な障害を見分けられず、上限も adapter の
     // 都合なので事前には検査できない——`createMemoryWithOutbox` が投げたことだけを根拠にする。
     // ⚠ 捕まえるのは `createMemoryWithOutbox` だけ。書けた後の `created` の追記・衝突の検出の失敗は今どおり投げる。
