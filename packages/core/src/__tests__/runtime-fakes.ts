@@ -818,6 +818,20 @@ export class FakeMemoryStore implements MemoryStore {
     return results;
   }
 
+  /** ADR 0380: 版を問わず同じ Observation 由来の Memory を列挙する（**SELECT のみ**）。 */
+  async listBySourceObservationAllVersions(
+    ctx: Ctx,
+    observationId: ObservationId,
+  ): Promise<Memory[]> {
+    const results: Memory[] = [];
+    for (const memory of this.backing.memories.values()) {
+      if (memory.tenantId !== ctx.tenantId) continue;
+      if (memory.sourceObservationId !== observationId) continue;
+      results.push(memory);
+    }
+    return results;
+  }
+
   /**
    * ADR 0030: `opts.expectedStatus` があるときだけ compare-and-swap にする
    * （postgres 実装・testkit の in-memory 実装と同じ意味論）。

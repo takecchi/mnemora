@@ -383,6 +383,17 @@ export interface AggregateScopeOptions {
  * `handleMemoryUsage` の `recordUsage` → `reinforce` ループが使用報告1件ごとに
  * 直列に往復していた N+1 を、この口があるときだけ束ねるための一括版。契約は
  * `reinforceMany` 自身の doc コメント参照。
+ *
+ * [Issue #1432](https://github.com/takecchi/mnemora/issues/1432) /
+ * [ADR 0380](../../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)
+ * （2026-09-30、クローン miku の委譲先）で **必須メソッド** `listBySourceObservationAllVersions`
+ * を追加した: ある Observation から作られた Memory を、`extractorVersion` を問わず列挙する
+ * （**SELECT のみ**）。`Runtime.reextract` が「版を跨いで退けた記憶」を判定するために使う
+ * ——`listBySourceObservation` は `extractorVersion` の絞り込みが契約そのものであり
+ * （Issue #873）、この判定にはそのまま使えないため、別の口を新設した。**破壊的変更**
+ * （自前の `MemoryStore` 実装はこのメソッドが無いとコンパイルできなくなる）。省略可能な
+ * sentinel（例: `extractorVersion` に `undefined` を渡すと絞り込まない）にする案・任意
+ * メソッド（`?`）にする案は採らなかった——理由は ADR 0380「採らなかった案」参照。
  */
 export interface MemoryStore {
   /**
@@ -564,6 +575,9 @@ export interface MemoryStore {
    * この口には一切現れない**（Issue #873）。`Runtime.reextract` はこの口を自分の
    * `extractorVersion` で呼ぶため、旧い版の Memory を見つけて退役させる手段にはならない
    * ——それは呼び出し側が別途行う責務である（`Runtime.reextract` の doc コメント参照）。
+   * **版を問わず同じ Observation 由来の Memory が要る場合は
+   * {@link MemoryStore.listBySourceObservationAllVersions} を使うこと**（ADR 0380）
+   * ——この口自体の契約（版で絞り込む）は変えていない。
    *
    * ⚠ **返す順序は規定しない**（今の振る舞い。2026-09-27 に実測。`@mnemora/postgres` と
    * testkit の fixture で並びが違う）。件数の上限・続きから読む口も無く、該当する行を全部返す。
@@ -573,6 +587,25 @@ export interface MemoryStore {
     observationId: ObservationId,
     extractorVersion: string | null,
   ): Promise<Memory[]>;
+  /**
+   * [ADR 0380](../../../../docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)
+   * （Issue #1432）: ある Observation から作られた Memory を、`extractorVersion` を**問わず**
+   * 列挙する（**SELECT のみ**。マイグレーション・索引を追加しない——既存の一意索引
+   * `uq_memories_extraction (tenant_id, source_observation_id, extractor_version, content_hash)`
+   * は `(tenant_id, source_observation_id)` の前方一致でも使える）。`status` でも絞らない
+   * ——`active`/`forgotten`/`contested`/`superseded`/`archived` のどれも返す。
+   *
+   * `listBySourceObservation` との違いはただ1つ、`extractorVersion` で絞り込まないことだけ
+   * である。`Runtime.reextract` は、`extractorVersion` を上げた runtime インスタンスでも
+   * 「利用者の意思で退けた記憶」を見落とさないために、この口を使う（Issue #1432 本文）。
+   *
+   * `observationId` が adapter の期待する形式でない場合は「存在しない」と同じ空配列を返す
+   * （例外を投げない。`listBySourceObservation` と同じ規律）。
+   *
+   * ⚠ **返す順序は規定しない**（`listBySourceObservation` と同じ規律）。件数の上限・
+   * 続きから読む口も無く、該当する行を全部返す。
+   */
+  listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
   /**
    * PR「update-status-compare-and-swap」（安全弁3、docs/decisions/0030-*.md）:
    * `opts.expectedStatus` を渡すと、書き込み時点で対象 Memory の `status` が

@@ -1542,6 +1542,63 @@ PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
 2026-09-30 追記）、PR #1431・Issue #933）になった。**
 
+### 28. `MemoryStore` に必須メソッド `listBySourceObservationAllVersions` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、
+[ADR 0380](./decisions/0380-reextract-withdrawn-across-extractor-versions.md)。
+
+**何が変わったか**: `extractorVersion` を上げた runtime インスタンスで `reextract()` を
+呼ぶと、前の版で `forget`（purge を含む）・`contested` にした記憶を見落とし、退けた
+はずの内容と同じ意味の Memory が印の無い新しい `active` として書き直されうる欠陥
+（Issue #1432 本文）を閉じた。`Runtime.reextract` の「退けた記憶」の判定は、いまは
+`extractorVersion` を問わず同じ Observation 由来の Memory を見る。
+
+- **`MemoryStore` に必須メソッド
+  `listBySourceObservationAllVersions(ctx, observationId): Promise<Memory[]>` を追加した**
+  （既存の `listBySourceObservation` は1行も変えていない。SELECT のみ、マイグレーション・
+  索引は追加しない）。
+- 版を跨いでも、1件でも退けたものがあれば、その Observation の抽出全体を打ち切る
+  （同じ版のときと同じ規律。同じ Observation の他の、退けていない `active` な事実も
+  作り直さない）。**帰結**: 運用側が旧い版の記憶を forget すると、その Observation の
+  ほかの事実も、以後の reextract では想起から作られなくなる。`skipped` に
+  `status_not_active` が出た Observation では、旧い版の記憶を残すことが運用側の
+  手がかりになる（詳細は CHANGELOG・ADR 0380）。
+- **版を跨いだ `active` の扱い（項目「Issue #873」の「運用側の責務」）は変えていない**
+  ——supersede 対象の判定は今どおり今の `extractorVersion` 限定のまま。
+
+中身・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`
+（「`MemoryStore` に `listBySourceObservationAllVersions` が増えた」の項目）を見ること
+——**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: `MemoryStore` は公開 interface であり、既存メソッドと同じ並びに
+**必須**メソッドを追加した——自前で `MemoryStore` を実装している第三者は、このメソッドを
+実装しないとその実装が interface を満たさなくなる（項目12「`Runtime` に必須メソッド
+`restoreSuperseded` が増えた」等と同じ扱い）。任意メソッド（`?`）にしなかった理由は
+ADR 0380「検討した代替案」を見ること。
+
+**誰が影響を受けるか**: `@mnemora/postgres`・`@mnemora/testkit` の `InMemoryMemoryStore`
+以外で自前の `MemoryStore` 実装を持っている利用者だけ、型検査が落ちる。`runtime.reextract`
+を直接呼ぶだけの利用者（`@mnemora/postgres`・`@mnemora/testkit` を使う場合を含む）は、
+型的な変更を受けない——挙動だけが変わる（版を跨いで退けた記憶がある Observation では、
+今まで作られていた新しい `active` が作られなくなる）。
+
+**どう直すか**: 自前の `MemoryStore` 実装に
+`listBySourceObservationAllVersions(ctx, observationId)` を実装する——
+`tenant_id`・`source_observation_id` が一致する行を、`extractor_version`・`status` の
+どちらでも絞らずに返すだけでよい（`listBySourceObservation` の実装から
+`extractor_version` の絞り込みを外した形）。
+
+**DB マイグレーション**: 不要（新しい列・表は追加していない。既存の一意索引
+`uq_memories_extraction (tenant_id, source_observation_id, extractor_version,
+content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも Index Scan に
+使える。ADR 0380 の EXPLAIN 実測を参照）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は10件
+（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
+PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
+2026-09-30 追記）、Issue #1432（ADR 0380））になった。**
+
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
 （⚠ 2026-09-27: この見出しは PR #1192 が「v1.0.1 → 次の版」の節を書き換えたときに一緒に消えており、下の3項目が「v1.0.2 → 次の版」の節の中に在るように読めていた。見出しを戻した。下の3項目は v0.1.9 → v0.2.0 の話である）

@@ -2783,6 +2783,150 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     });
 
     // -------------------------------------------------------------------
+    // listBySourceObservationAllVersions（ADR 0380・Issue #1432・runtime.reextract の
+    // 「版を跨いで退けた記憶」判定の前提）
+    // -------------------------------------------------------------------
+
+    it("listBySourceObservationAllVersions は同じ Observation の Memory を extractorVersion を問わず列挙する", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const v1 = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-allversions-v1",
+        }),
+      );
+      const v2 = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v2",
+          contentHash: "hash-allversions-v2",
+        }),
+      );
+      const noVersion = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: null,
+          contentHash: "hash-allversions-null",
+        }),
+      );
+      // 別の Observation の Memory は混ざってはならない。
+      const otherObservation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: otherObservation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-allversions-other-observation",
+        }),
+      );
+
+      const listed = await store.listBySourceObservationAllVersions(ctx, observation.id);
+      expect(listed.map((m) => m.id).sort()).toEqual([v1.id, v2.id, noVersion.id].sort());
+    });
+
+    it("listBySourceObservationAllVersions は status を問わず返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const observation = await store.createObservation(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1" }),
+      );
+      const active = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-allversions-status-active",
+        }),
+      );
+      const toForget = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-allversions-status-forgotten",
+        }),
+      );
+      await store.updateStatus(ctx, toForget.id, "forgotten");
+      const toArchive = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: "tenant-1",
+          sourceObservationId: observation.id,
+          extractorVersion: "v1",
+          contentHash: "hash-allversions-status-archived",
+        }),
+      );
+      await store.updateStatus(ctx, toArchive.id, "archived");
+
+      const listed = await store.listBySourceObservationAllVersions(ctx, observation.id);
+      const byId = new Map(listed.map((m) => [m.id, m.status]));
+      expect(byId.get(active.id)).toBe("active");
+      expect(byId.get(toForget.id)).toBe("forgotten");
+      expect(byId.get(toArchive.id)).toBe("archived");
+      expect(listed).toHaveLength(3);
+    });
+
+    it("listBySourceObservationAllVersions はクロステナントの Memory を返さない（テナント分離）", async () => {
+      const store = await createStore();
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const observationA = await store.createObservation(
+        ctxA,
+        buildNewObservationFixture({ tenantId: "tenant-a" }),
+      );
+      await store.createMemory(
+        ctxA,
+        buildNewMemoryFixture({
+          tenantId: "tenant-a",
+          sourceObservationId: observationA.id,
+          extractorVersion: "v1",
+          contentHash: "hash-allversions-tenant-a",
+        }),
+      );
+
+      const listedFromB = await store.listBySourceObservationAllVersions(ctxB, observationA.id);
+      expect(listedFromB).toEqual([]);
+
+      const listedFromA = await store.listBySourceObservationAllVersions(ctxA, observationA.id);
+      expect(listedFromA).toHaveLength(1);
+    });
+
+    it("listBySourceObservationAllVersions は形式不正な observationId に対して例外を投げず空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(
+        store.listBySourceObservationAllVersions(ctx, "does-not-exist"),
+      ).resolves.toEqual([]);
+    });
+
+    it("listBySourceObservationAllVersions は well-formed だが実在しない observationId に対して空配列を返す", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.listBySourceObservationAllVersions(ctx, randomUUID())).resolves.toEqual(
+        [],
+      );
+    });
+
+    // -------------------------------------------------------------------
     // createMemoryWithOutbox（roadmap.md 段階3・transactional outbox）
     // -------------------------------------------------------------------
 

@@ -638,6 +638,7 @@ export interface MemoryStore {
     get(ctx: Ctx, id: MemoryId): Promise<Memory | null>;
     getMany(ctx: Ctx, ids: MemoryId[]): Promise<Memory[]>;
     listBySourceObservation(ctx: Ctx, observationId: ObservationId, extractorVersion: string | null): Promise<Memory[]>;
+    listBySourceObservationAllVersions(ctx: Ctx, observationId: ObservationId): Promise<Memory[]>;
     updateStatus(ctx: Ctx, id: MemoryId, status: MemoryStatus, opts?: {
         supersededById?: MemoryId;
         expectedStatus?: MemoryStatus;
