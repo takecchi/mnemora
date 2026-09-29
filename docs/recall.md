@@ -187,7 +187,7 @@ recall は次の7段からなる。各段は「入力」「出力」「落ちる
 
 **⚠ 2026-09-27 追記（文書と実装の照合、main 6dd4787）**: 上の「既定の recall は `status = 'active'` のみを返し」は正確ではない。段1の status ゲートは `status IN ('active', 'contested')` である（§3「段1のクエリ骨格」の訂正1）。`contested` は候補になるが、対向と一緒でなければ返らない——対向が取れなければ Unit ごと落ちて `unit_assembly_dropped` になる（§4 の表）。この規則は段3.5（連想枠）が選んだ `contested` にも同じようにかかる（§9.2 手順7、Issue #959）。
 
-**⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示）**: 上の「対向する Memory」は、2者間の対（`contestedWithId` を直接参照する）だけを想定していたが、多者間（3件以上）の `contested` 群にも広げた。`contestedWithId` を持たない `contested`（群のメンバー、`memory_relations` で束ねられる）は、`RuntimeDeps.relationStore`（`RelationStore.listRelated`、1段だけ）を辿って仲間を同伴として取得する——`contestedWithId` の直接参照だけを見る2者間の規則（`fetchMandatoryCompanions`、`packages/core/src/recall-runtime.ts`）は1バイトも変えていない。
+**⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示）**: 上の「対向する Memory」は、2者間の対（`contestedWithId` を直接参照する）だけを想定していたが、多者間（3件以上）の `contested` 群にも広げた。`contestedWithId` を持たない `contested`（群のメンバー、`memory_relations` で束ねられる）は、`RuntimeDeps.relationStore`（`RelationStore.listRelated`）を**幅優先で、関係の行でつながった全員に達するまで**辿って仲間を同伴として取得する——`resolveContestedGroup?` の CAS（`WITH RECURSIVE`）が「群」を関係の行で連結した全員として扱うのに揃えた（2026-09-30 のさらなる直し。当初は1段だけだったが、オーナー側クローンの決定でこの形になった）。`contestedWithId` の直接参照だけを見る2者間の規則（`fetchMandatoryCompanions`、`packages/core/src/recall-runtime.ts`）は1バイトも変えていない。
 
 - **`RuntimeDeps.relationStore` が配線されていなければ、この拡張は動かない**（北極星の問い2、省略可能）——群のメンバーは今までどおり単独では返らず、対向が取れない `contested` と同じ扱い（`unit_assembly_dropped`）に落ちる。そのような候補がこの recall に実際に現れたときだけ、`omitted` に `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` を1件積む（[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定3-b と同じ「実行する理由が無ければ積まない」区別）。
 - **上限は {@link DEFAULT_RECALL_ASSOCIATION}.maxCount（既定10）を流用する**——連想枠専用の別の欄（`RecallQuery.relations?`、ADR 0292 決定2-b が設計したが、この回では作らないと決めた）は無い。上限を超えた分は **`validFrom` の新しい順→`id` の順**で切り、`over_limit { stage: "relation", countKind: "exact" }` に積む（索引つきテーブルへの通常の `WHERE` 検索であり、ANN のような近似が無いため常に `"exact"`）。
@@ -507,9 +507,9 @@ scope の候補を ANN が拾いきれている」という前提に立ってい
 
 **`over_limit(stage: 'association')` の次の一手（2026-09-17 追記、[Issue #375](https://github.com/takecchi/mnemora/issues/375) / [ADR 0188](./decisions/0188-association-over-limit-omission.md)）**: 連想枠（§9）が `RecallAssociationQuery.maxCount` で切り捨てた分だと分かる。`over_limit(stage: 'rescore')` とは別の一手——`limit` を増やしても連想枠の切り捨ては直らない（切り捨ての件数を決めているのは `maxCount` だけである）。⚠ **ただし「連想枠が段2の `limit` を一切見ていない」わけではない**（2026-09-17 訂正、[Issue #377](https://github.com/takecchi/mnemora/issues/377)）——アンカーの取り方には `limit` が効く（§9.2「⚠ `anchorCount` の天井は `RecallQuery.limit` である」）。`limit` を増やすと起点にできるアンカーが増えるので、**連想枠が拾ってくる候補の顔ぶれは変わりうる。**変わらないのは「`maxCount` で切られる事実そのもの」であり、アンカーが増えれば切り捨て件数はむしろ増えうる。`maxCount` を増やすと、切り捨てられていた候補が `retrievedVia: 'association'` として本体へ入ってくる。⚠ この札が積まれても `RecallResult.memories` の合計件数は変わらない——連想枠は「元々居なかった候補を追加する」機能であり、切り捨てられた分は最初から `memories` に入っていない。
 
-**`over_limit(stage: 'relation')`・`stage_skipped(stage: 'relation')` の次の一手（2026-09-30 追記、Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示）**: 段3（§8）が、多者間の `contested` 群（`contestedWithId` を持たない `contested`）を `RelationStore.listRelated` で1段だけ辿って同伴取得するようになった。
+**`over_limit(stage: 'relation')`・`stage_skipped(stage: 'relation')` の次の一手（2026-09-30 追記、Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示。同日のさらなる追記で「1段」から「関係の行でつながった全員」に変わった）**: 段3（§8）が、多者間の `contested` 群（`contestedWithId` を持たない `contested`）を `RelationStore.listRelated` で**幅優先に、関係の行でつながった全員に達するまで**辿って同伴取得するようになった。訪れた id は二度と辿らず、`status !== 'contested'`（群を離れたメンバー）はそこで打ち切る（その先へは辿らない）。
 
-- **`over_limit(stage: 'relation')`**: 1段の中で見つかった群の仲間の候補が、上限（`DEFAULT_RECALL_ASSOCIATION.maxCount`、既定10）を超えて切り捨てられた分。**次の一手は今日は無い**——`association` の `maxCount` のような、呼び出し側がこの上限だけを動かせる専用のクエリ欄は無い（この回のマネージャー指示: `RecallQuery.relations?` という新しい欄は作らない、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2-b が設計していたが採らなかった）。減らす手立ては群そのものを小さくする（`resolveContestedGroup?` で一部を解消する）以外に無い。`countKind` は常に `'exact'`——索引つきテーブルへの通常の `WHERE` 検索であり、ANN のような近似が無い（`association` の fanout 切り捨てと同じ理由）。
+- **`over_limit(stage: 'relation')`**: 探索で見つかった群の仲間の候補が、上限（`DEFAULT_RECALL_ASSOCIATION.maxCount`、既定10）を超えて切り捨てられた分。**この上限に owner（元々候補に居た記憶）自身は数えない**——新しく見つけた companion だけを数える（`detail.companionsAdded` と同じ「足した件数だけを数える」規約、`packages/core/src/recall-runtime.ts`）。**次の一手は今日は無い**——`association` の `maxCount` のような、呼び出し側がこの上限だけを動かせる専用のクエリ欄は無い（この回のマネージャー指示: `RecallQuery.relations?` という新しい欄は作らない、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2-b が設計していたが採らなかった）。減らす手立ては群そのものを小さくする（`resolveContestedGroup?` で一部を解消する）以外に無い。**`countKind` は、探索が自然に尽きていれば `'exact'`、探索自体の安全弁（訪れた数が `maxCount` の10倍を超えた）で打ち切った場合は `'lower_bound'`**——索引つきテーブルへの通常の `WHERE` 検索であり ANN のような近似は無いが、安全弁で打ち切った場合は「その先にまだ候補が在るかもしれない」ため正確さを名乗れない。
 - **`stage_skipped(stage: 'relation', reason: 'relation_store_unavailable')`**: `RuntimeDeps.relationStore` が配線されていないため、探索そのものを行わなかった。**このレコードが積まれるのは、この recall に実際に `contestedWithId` の無い `contested` 候補が現れたときだけ**（`association` の `no_anchor` と同じ「実行する理由が無ければ積まない」区別）——次の一手は `relationStore` を配線すること。
 - **並び順は `validFrom` の新しい順→`id` の順**（`validFrom` が無い候補は最も古い扱い）——連想枠の `over_limit(association)` とは異なり、切り捨てられた候補の集合は「新しさ」で決まる（連想枠はランキングスコアで決まる）。この違いは、連想枠がスコアリングされた候補プールから切るのに対し、`relation` は同伴取得（スコアに関係なく足す経路）の中でしか切らないためである。
 
@@ -1310,10 +1310,27 @@ recall は既定で `status = 'active'` の Memory のみを候補にする。�
 
 **⚠ 2026-09-30 追記（Issue #207/#933 PR2、[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2・3、[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md)、この回のマネージャー指示）: 上の「対向する Memory」「ペア」という言い方は、いまは2者間の対だけを指さない。** 多者間（3件以上）の `contested` 群（`memory_relations`、`Runtime.markContestedGroup?` が書く）も、`RuntimeDeps.relationStore` が配線されていれば同じ段3で同伴取得の対象になる——「予算と衝突したときの優先順位」もペア単位ではなく**単位（Unit）単位**で読み替える（`Unit.members` は3件以上を持ちうる。`recall-runtime.ts` の `Unit` 型 doc コメント参照）。
 
-- **仕組み**: `contestedWithId` を持たない `contested`（群のメンバー）1件につき、`RelationStore.listRelated(ctx, id, 'contradicts')` を**1段だけ**呼ぶ（多段の探索はしない——[ADR 0292](./decisions/0292-relation-graph-table-depth-omitted-design.md) 決定2-a と同じ「測れない拡張を先取りしない」判断をこの既存の必須取得にもそのまま適用する）。複数の owner から辿った辺を1つの無向グラフとして束ね、連結成分ごとに1つの単位（3件以上になりうる）にまとめる——2者間の対（`contestedWithId` の直接参照）の組み立てとは別の経路であり、既存の規則は1文字も変えていない。
+- **仕組み（2026-09-30 のさらなる直し）**: `contestedWithId` を持たない `contested`
+  （群のメンバー、`withinLimit` に既に居るもの＝ owner）を起点に、
+  `RelationStore.listRelated(ctx, id, 'contradicts')` を**幅優先で**辿る（複数の owner
+  が居れば多始点 BFS）。訪れた id は二度と `listRelated` を呼ばない。**`status !==
+  'contested'`（群を離れたメンバー、decision10）な id は、そこで打ち切る**——辺は記録
+  するが、その先へは辿らない。`resolveContestedGroup?` の CAS（fix2、`WITH
+  RECURSIVE`）が「群」を関係の行で連結した全員として扱うのに揃え、recall のこの
+  経路も同じ範囲を「群」と呼ぶ——当初は1段だけだったが、`resolveContestedGroup?`
+  の CAS と recall とで「群」の範囲が食い違う・対立する記憶が並べて出ない、という
+  弱さがあったため、オーナー側クローンの決定でこの形になった。複数の owner から
+  辿った辺を1つの無向グラフとして束ね、連結成分ごとに1つの単位（3件以上になりうる）
+  にまとめる——2者間の対（`contestedWithId` の直接参照）の組み立てとは別の経路で
+  あり、既存の規則は1文字も変えていない。
+- **探索自体の安全弁**: 訪れた id の数が `DEFAULT_RECALL_ASSOCIATION.maxCount`
+  （既定10）の10倍を超えたら BFS を打ち切る——大きな群で `listRelated` を呼び続け
+  ないための実務的な上限であり、厳密な保証ではない。打ち切った場合は
+  `over_limit(stage:'relation')` の `countKind` を `'lower_bound'` にする（上の
+  「段3: 矛盾の解決と必須の同伴取得」の追記参照）。
 - **`RuntimeDeps.relationStore` を配線しない呼び出しでは、この拡張は一切動かない**（北極星の問い2）——群のメンバーは今までどおり単独で返らず、`unit_assembly_dropped` に落ちる。
 - **上限・並び順・切り捨ての出し方**は上の「段3: 矛盾の解決と必須の同伴取得」の追記を見ること。
-- **`RecalledMemory.contestedWith`（2者間専用の欄、ADR 0335）は群のメンバーには付かない**——`contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3 の継承）のため。群の一員であることは `companionOf`（同伴取得の起点になった owner の id、群のうち先に見つかった1件）でしか読めない。
+- **`RecalledMemory.contestedWith`（2者間専用の欄、ADR 0335）は群のメンバーには付かない**——`contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3 の継承）のため。群の一員であることは `companionOf`（BFS で実際に辿った経路上の1つ前の id——owner とは限らず、複数ホップ先の companion 経由のこともある）でしか読めない。
 - **`docs/memory-model.md` §5 機構3「対向は必ず隣接させる」は、この拡張により「対向（2件）」から「群（1件以上）」へ一般化された**——詳細は同ファイルを見ること。
 ---
 

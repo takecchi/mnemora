@@ -312,10 +312,11 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
 このため、recall 段3への group 対応は当時**この PR には含めず**、上の食い違いをマネージャーへの
 報告に明記し、(a)/(b) のどちらを実装すべきかの判断を仰いだ。
 
-### 5.3 オーナー側クローンが (b) を選び、実装した【伝・判】
+### 5.3 オーナー側クローンが (b) を選び、実装した【伝・判】（当時の記録——探索の深さは §5.4 で「1段」から変わった）
 
 マネージャー経由で、オーナー側クローンが (b)（既存の段3自体をN者の群に拡張する。
-`RecallQuery.relations?` という新しい欄は作らない）を選んだと伝わった。実装した内容:
+`RecallQuery.relations?` という新しい欄は作らない）を選んだと伝わった。実装した内容
+（探索の深さ以外は §5.4 の後もそのまま有効）:
 
 - **`RuntimeDeps.relationStore?`/`RecallRuntimeDeps.relationStore?` を通じて配線される
   `RelationStore` を使う。** `Runtime.recall()` が組み立てる `RecallRuntimeDeps` に
@@ -359,6 +360,63 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
 6件、`packages/postgres/src/__tests__/recall-relation-group-companion.postgres.test.ts`
 3件）を追加し、赤（別 worktree）・変異試験（段3の上限）も確認した（§8）。
 
+### 5.4 さらなる直し: 「1段だけ」から「関係の行でつながった全員」へ【伝・判、2026-09-30 のさらなる直し】
+
+オーナー側クローンが、§5.3 の「1段だけ」を「群（関係の行でつながった全員）を辿る」形へ
+改めるよう決定した。理由（伝聞）: `resolveContestedGroup?` の CAS（fix2、§2、
+`WITH RECURSIVE`）は「群」を関係の行で連結した全員として扱っているのに、recall だけが
+1段で止まると「群」が場所によって違う範囲を指すことになる。また、連れて来た companion
+の側から見て相手（owner から2ホップ以上先のメンバー）が欠ける形は、「対立する記憶は
+必ず並べて出す」という機構3の約束として弱い。
+
+実装した内容（§5.3 の記述のうち、探索の深さに関わる部分だけを次に差し替える）:
+
+- **`RelationStore.listRelated` を幅優先（BFS）で辿る。** `groupOwners`（`withinLimit`
+  のうち `contestedWithId` を持たない `contested`）を始点にした多始点 BFS——訪れた id は
+  `visited` に積み、二度と `listRelated` を呼ばない。
+- **`status !== 'contested'` な id は、そこで打ち切る。** 辺は記録する（`relationEdges`
+  ——単位組み立ての `collectGroupComponent` が同じグラフを再利用するため）が、その id
+  からは `listRelated` を呼ばない・その先へは辿らない。decision10 で群を離れた
+  メンバー（forget・supersede・purge・archive）を含む。
+- **探索自体を止める安全弁**: 訪れた id の数（`visited.size`）が
+  `DEFAULT_RECALL_ASSOCIATION.maxCount`（既定10）の**10倍**を超えたら、BFS を打ち切る
+  （`EXPLORATION_VISIT_LIMIT`、`packages/core/src/recall-runtime.ts`）。**理由**:
+  たどる回数に上限が無いと、大きな群で `listRelated` を呼び続けることになる——10倍
+  という値は、「上限より遥かに多く辿れば、真の `validFrom` 最新 `maxCount` 件をほぼ
+  確実に含む」という実務的な安全域であり、厳密な保証ではない（[ADR 0292](./0292-relation-graph-table-depth-omitted-design.md)
+  決定2-a と同じ「測れない拡張を先取りしない」判断を、可変にはせず固定倍率で踏襲
+  した）。安全弁で打ち切った場合、`over_limit(stage:'relation')` の `countKind` を
+  `'lower_bound'` にする——探索が自然に尽きていれば `'exact'` のまま。
+- **BFS の順序と「残す順」の関係**: BFS は**発見順**（訪れた順）で候補を集めるだけであり、
+  並べる基準にはしない。BFS が終わった（または安全弁で打ち切った）**後**に、集まった
+  候補全体を `validFrom` の新しい順→`id` の順で並べ替えてから `maxCount` 件に切る
+  （§5.3 のとおり、変更していない）。**安全弁で打ち切った場合、BFS が発見順で先に
+  見つけた候補が優先されるわけではない**——打ち切るまでに発見できた候補**全部**を
+  対象に並べ替えてから切るため、真に最新の `validFrom` を持つ候補が後から見つかる
+  順序で発見されていても、打ち切るまでに発見できていれば正しく上位に来る。安全弁が
+  発動した場合にだけ、探索の外側にまだ存在するかもしれない候補を取りこぼす可能性が
+  残る（`countKind: 'lower_bound'` で正直に言う、上記）。
+- **10件の数え方（owner 自身を含めるかどうか）**: **含めない。** 2者間の段3
+  （`fetchMandatoryCompanions`）には上限の概念自体が無い（`contestedWithId` は常に
+  ちょうど1件の相手を指すため）ため直接の前例は無いが、`stages.push({stage:
+  "contradiction_resolution", detail: {companionsAdded: allCompanions.length}})`
+  （`packages/core/src/recall-runtime.ts`）が「同伴として**足した**件数」だけを数える
+  既存の規約と揃え、`maxCount` も「新しく見つけて足す companion」だけを数える——
+  owner（既に `withinLimit` に居る、足していない候補）は数えない。
+- **`companionOf`**: BFS で実際に辿った経路上の1つ前の id（`discoveredVia`）を指す
+  ——owner とは限らない（複数ホップ先の companion 経由で見つかることもある）。
+  §5.3 が記録した負債（「最初に辺を記録した owner を指す」という単純化）を、より
+  正確な形に置き換えた——ただし複数の親から同時に到達可能な場合にどちらを指すかが
+  実装の内部順序に依存する曖昧さ自体は残る（§7 負債3）。
+
+新しい歯を2本足した（Fake・Postgres 各1本）: A-B・A-C がつながり B-C はつながって
+いない形で、B を引くと A・C まで並ぶこと——1段だけの実装ではこの歯は赤くなる
+（`packages/core/src/__tests__/recall-relation-group-companion.test.ts`・
+`packages/postgres/src/__tests__/recall-relation-group-companion.postgres.test.ts`、
+それぞれ新しい `it` を1本追加。赤→緑は別 worktree〔§5.3 直前の commit を起点〕で
+確認した）。§5.3 で足した「群が11件以上なら10件で切れる」歯は、この直しでも
+（BFS が1段で自然に尽きるケースとして）緑のまま通ることを確認した。
+
 ---
 
 ## 6. 採らなかった案
@@ -382,22 +440,26 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
 ## 7. 引き受けた負債
 
 1. **`resolveContestedGroup?` の `winnerId` の大文字小文字救済が無い**（§6）。
-2. **recall 段3の多者間の同伴取得は、深さ1段だけしか辿らない**（§5.3）。owner
-   （この recall の候補に既に居る群のメンバー）から直接辿れない仲間（owner 経由では
-   なく、companion 同士でしか繋がっていない仲間）は見つからない——`markContestedGroup?`
-   の fix1（§1）は「重なる組だけ」に行を張るため、群が完全なクリークになるとは限らず、
-   この限界は理論上起こりうる。ADR 0292 決定2-a と同じ「測れない拡張を先取りしない」
-   判断をそのまま踏襲したが、深さを増やす場合は新しい ADR が要る（ADR 0292 §8「これが
-   覆るとしたら」と同じ位置づけ）。
-3. **`companionOf` は、複数の owner から到達可能な companion の場合、どの owner を指すかが
-   実装の内部順序（`groupOwners` の走査順）に依存し、呼び出し側からは予測できない**
-   （§5.3）。2者版（`contestedWithId` が常に1つの相手を指す）には無かった曖昧さである。
-   影響は説明可能性の欄（`RecalledMemory.companionOf`）だけであり、`memories`/`omitted`
-   の中身・件数には影響しない。
+2. **解消済み（§5.4）: recall 段3の多者間の同伴取得は、当初は深さ1段だけしか辿らな
+   かった。** オーナー側クローンの決定で、幅優先で「関係の行でつながった全員」に達す
+   るまで辿る形に変わった——`resolveContestedGroup?` の CAS（`WITH RECURSIVE`）と同じ
+   範囲を「群」として扱うようになった。この探索を無条件に行うと大きな群で
+   `listRelated` を呼び続けることになるため、代わりに次の負債を引き受けた（負債5）。
+3. **`companionOf` は、複数の親から同時に到達可能な companion の場合、どちらを指すかが
+   実装の内部順序（BFS が辿る順）に依存し、呼び出し側からは予測できない**
+   （§5.3・§5.4）。2者版（`contestedWithId` が常に1つの相手を指す）には無かった
+   曖昧さである。影響は説明可能性の欄（`RecalledMemory.companionOf`）だけであり、
+   `memories`/`omitted` の中身・件数には影響しない。
 4. **recall 段3の多者間の同伴取得の上限（`DEFAULT_RECALL_ASSOCIATION.maxCount` の流用）
    を、呼び出し側が個別に調整する手段が無い**（§5.3、§6）。`association` の `maxCount`
    のような専用のクエリ欄を持たないため、群が大きすぎる場合の唯一の対処は
    `resolveContestedGroup?` で群そのものを縮めることである。
+5. **探索自体を止める安全弁（訪れた数が `maxCount` の10倍）を超える巨大な群では、
+   真に `validFrom` が最新の `maxCount` 件と一致しない可能性がある**（§5.4）。
+   `over_limit(stage:'relation')` の `countKind` を `'lower_bound'` に倒して「測って
+   いない」と正直に言う設計にしたが、安全弁の倍率（10倍）自体は固定値であり、呼び
+   出し側から調整する手段は無い（負債4と同じ理由）。この倍率を超える群が実際にどの
+   程度の頻度で起こりうるかは測っていない（§8「確かめていないこと」）。
 
 ---
 
@@ -423,8 +485,16 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
   `stage_skipped(stage:'relation')` が積まれ群が単独で出ないこと・候補が無ければ
   どちらの omission も積まれないこと（`recall-relation-group-companion.test.ts`
   6件・`recall-relation-group-companion.postgres.test.ts` 3件、Fake・本物の Postgres
-  両方）。赤（別 worktree、この PR の直前の commit を起点）・変異試験（段3の上限の
+  両方）。赤（別 worktree、bc239f9 を起点）・変異試験（段3の上限の
   `slice` を無効化し、狙った歯だけが赤くなることを確認）。
+- **さらなる直し（§5.4）**: A-B・A-C がつながり B-C はつながっていない形で、B を引くと
+  A・C まで幅優先で並ぶこと（owner から2ホップ先の companion が実際に見つかることを
+  実測——`recall-relation-group-companion.test.ts`・`.postgres.test.ts` にそれぞれ新しい
+  `it` を1本追加、7件・4件）。1段だけの実装（bc239f9）に対しては赤くなることを、別
+  worktree（bc239f9 起点）で確認した。§5.3 で足した「群が11件以上なら10件で切れる」歯
+  （星型トポロジ、BFS が1段で自然に尽きるケース）が、この直しでも緑のまま通ることを
+  確認した——ただし `explorationTruncated`（安全弁で打ち切った場合）が `true` になる
+  ケース（`countKind: 'lower_bound'`）の歯は書いていない（下記「確かめていないこと」）。
 
 **確かめていないこと**:
 - `@mnemora/openai`/`@mnemora/anthropic`/`@mnemora/bullmq` など、`packages/core`/
@@ -432,6 +502,7 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
   変更していないため、影響は無いはずだが、実際に動かしては確認していない）。
 - 大規模な `memory_relations` グラフ（数百〜数千件規模）での `markContestedGroup`/
   `resolveContestedGroup`/`detectClaimKeyContested`/recall 段3の合併ロジックの性能。
-- recall 段3の同伴取得が、深さ2段以上必要な非クリーク構造の群で実際に一部を
-  取りこぼすケース（§7 負債2）の実測——理論上の限界としては記録したが、実際に
-  そのような群を作って確かめてはいない。
+- **探索自体の安全弁（訪れた数が `maxCount` の10倍＝100件を超えたら打ち切る）が実際に
+  発動するケース**（`over_limit(stage:'relation')` の `countKind` が `'lower_bound'` に
+  なる歯）は書いていない——100件規模の群を作る歯のコストと、この回で明示された歯
+  （A-B-C の多段・11件以上での上限）の範囲を優先した。§7 負債5として記録した。

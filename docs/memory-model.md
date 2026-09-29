@@ -541,8 +541,11 @@ Memory を探す」）が索引アクセスで済む形にしてある——`sup
 
   ⚠ **同日のさらなる追記: `recall()` 側（機構3の必須の同伴取得、下記 §5・§8）もこの群に
   対応した。** `contestedWithId` を持たない `contested`（3件以上の群のメンバー）は、
-  `RuntimeDeps.relationStore` が配線されていれば `RelationStore.listRelated` で1段だけ
-  辿って仲間を同伴取得する——2者間の対（`contestedWithId` の直接参照）の既存規則は
+  `RuntimeDeps.relationStore` が配線されていれば `RelationStore.listRelated` を
+  **幅優先で、関係の行でつながった全員に達するまで**辿って仲間を同伴取得する
+  （さらに同日の直しで「1段だけ」から変わった——`resolveContestedGroup?` の CAS
+  〔`WITH RECURSIVE`〕と同じ範囲を「群」として扱う。探索自体には安全弁がある、
+  `docs/recall.md` 参照）——2者間の対（`contestedWithId` の直接参照）の既存規則は
   1バイトも変えていない。上限（`DEFAULT_RECALL_ASSOCIATION.maxCount`、既定10）・並び順
   （`validFrom` の新しい順→`id` の順）・`relationStore` 未配線時の扱い（`stage_skipped
   { stage: "relation" }`、候補が実際に無ければ積まない）の詳細は `docs/recall.md`
