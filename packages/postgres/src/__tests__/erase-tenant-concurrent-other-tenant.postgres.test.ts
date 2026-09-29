@@ -1,17 +1,15 @@
-import { afterAll, describe, expect, it } from "vitest";
+import { Pool } from "pg";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { Ctx } from "@mnemora/core";
 import { eraseTenant } from "@mnemora/core";
 import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
-import { closePostgresClient, createPostgresClient } from "../client.js";
-import {
-  closeTestClient,
-  getTestClient,
-  requireDatabaseUrl,
-  resetTestDatabase,
-} from "./test-db.js";
+import { closePostgresClient, createPostgresClient, type PostgresClient } from "../client.js";
+import { runMigrations } from "../migrate.js";
+import { requireDatabaseUrl } from "./test-db.js";
+import { dropTempDatabase } from "./temp-database.js";
 
 /**
  * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
@@ -23,15 +21,59 @@ import {
  *
  * `create-index-lock-mode.postgres.test.ts`（Issue #760、ADR 0059・0062）の
  * `settlesWithin` と同じ形の手法を使う。**この歯自身は `pg_locks` を読む**（自分の
- * 接続の pid に絞って、対象テーブルに対する自分のロックの mode を確認する）ため、
- * `packages/postgres/vitest.config.mts` の `SERIAL_TEST_FILES` に入れてある
- * （「`pg_locks` という文字列が本文にあるかどうか」で機械的に決めている一覧、
- * ADR 0371）。
+ * 接続の pid に絞って、対象テーブルに対する自分のロックの mode を確認する）。
+ *
+ * ## 自分専用の DB で走らせる（2026-09-30、クローン miku の判断）
+ *
+ * この歯は2万行を入れて消す。以前は直列の群の共有 DB（`<base>_serial`）の上で走らせて
+ * いたが、PR #1444 の CI で、後に同じ DB を使う `search-many-primary-key-lookup
+ * .postgres.test.ts`（「統計が無い」前提の歯）がこの PR の枝でだけ揺れた。原因は手元で
+ * 再現できず特定していないが、大量の書き込みを共有 DB に残さないよう、`CREATE DATABASE`
+ * で作る自分専用の DB の上で走らせる（`embedding-statistics.postgres.test.ts` と同じ形）。
+ *
+ * `pg_locks` はクラスタ全体の表なので、読むときは必ず `database` を自分の DB の oid に
+ * 絞る——こうすると、ほかの DB（並列の worker）の接続のロックを数えない。ADR 0371 が
+ * 直列に残す理由（DB ごとの分離で塞がらない、クラスタ全体に効くもの）がこれで消えるので、
+ * このファイルは並列の群で走らせる（ADR 0374 の基準の「統計が無い状態を意図して作る
+ * ファイル」にも当たらない）。
  */
 
+const TEST_DATABASE = "mnemora_erase_tenant_concurrent_test";
+
+function connectionStringFor(database: string): string {
+  const url = new URL(requireDatabaseUrl());
+  url.pathname = `/${database}`;
+  return url.toString();
+}
+
+let adminPool: Pool | undefined;
+function admin(): Pool {
+  adminPool ??= new Pool({ connectionString: requireDatabaseUrl(), max: 1 });
+  return adminPool;
+}
+
+let client: PostgresClient | undefined;
+
+beforeAll(async () => {
+  await dropTempDatabase(admin(), TEST_DATABASE);
+  await admin().query(`CREATE DATABASE ${TEST_DATABASE}`);
+  client = createPostgresClient(connectionStringFor(TEST_DATABASE));
+  await runMigrations(client.pool);
+}, 60_000);
+
 afterAll(async () => {
-  await closeTestClient();
-});
+  if (client) {
+    await closePostgresClient(client);
+  }
+  await dropTempDatabase(admin(), TEST_DATABASE);
+  if (adminPool) {
+    await adminPool.end();
+    adminPool = undefined;
+  }
+}, 60_000);
+
+/** `pg_locks` を自分の DB に絞る条件（クラスタ全体の表なので、ほかの DB の行を数えない）。 */
+const OWN_DATABASE = "database = (SELECT oid FROM pg_database WHERE datname = current_database())";
 
 /** `p` が `ms` のうちに決着した（resolve/reject どちらでも）か。 */
 async function settlesWithin(p: Promise<unknown>, ms: number): Promise<boolean> {
@@ -51,8 +93,7 @@ const BULK_ROWS = 20_000;
 
 describe("eraseTenant している最中も、別テナントの行への INSERT/SELECT は待たされない（Issue #1207 / ADR 0383）", () => {
   it("大量データを消している間、別テナントへの書き込み・読み取りが短い statement_timeout の内に完了する", async () => {
-    await resetTestDatabase();
-    const { db, pool } = await getTestClient();
+    const { db, pool } = client!;
     const T = "erase-tenant-concurrent-victim";
     const OTHER = "erase-tenant-concurrent-bystander";
 
@@ -112,6 +153,7 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
       const { rows } = await pool.query<{ n: number }>(
         `SELECT count(*)::int AS n FROM pg_locks
          WHERE relation = 'memories'::regclass AND locktype = 'relation'
+           AND ${OWN_DATABASE}
            AND granted AND pid <> pg_backend_pid()
            AND mode <> 'AccessShareLock'`,
       );
@@ -128,7 +170,7 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
 
     // 別接続（短い statement_timeout 付き）——ブロックされていれば必ずこの中で
     // キャンセルされる。ブロックされていなければ、statement_timeout よりずっと早く終わる。
-    const bystanderClient = createPostgresClient(requireDatabaseUrl(), {
+    const bystanderClient = createPostgresClient(connectionStringFor(TEST_DATABASE), {
       options: "-c statement_timeout=5000",
       max: 1,
     });
@@ -180,6 +222,7 @@ describe("eraseTenant している最中も、別テナントの行への INSERT
         const { rows: lockRows } = await holder.query<{ mode: string }>(
           `SELECT mode FROM pg_locks
            WHERE relation = 'memories'::regclass
+             AND ${OWN_DATABASE}
              AND pid = pg_backend_pid()
              AND locktype = 'relation'`,
         );

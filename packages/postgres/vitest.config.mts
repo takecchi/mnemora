@@ -40,9 +40,6 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/extension-mode.postgres.test.ts",
   "src/__tests__/migrate-concurrency.test.ts",
   "src/__tests__/vector-space-concurrency.test.ts",
-  // Issue #1207 / ADR 0383: 同上——pg_locks を読む（eraseTenant している最中に
-  // 別テナントへの書き込みが待たされないことを、自分の pid のロック mode で確認する）。
-  "src/__tests__/erase-tenant-concurrent-other-tenant.postgres.test.ts",
   // 統計が「無い」状態（`reltuples` の有無）を意図して作り、その有無の移り変わりを
   // 確かめるもの（Issue #1415、ADR 0374 の 2026-09-30 追記「直列の群へ入れる基準を
   // 書き直す」）。統計を「使う」EXPLAIN の歯は、reset の後に列を絞らない
