@@ -1062,9 +1062,13 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は12件**
+## 🔴 破壊的変更（v1.0.2 → v1.1.0）—— ⚠ **出荷済み。確定は12件**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`62def34`**（PR #1434）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27・追記28・追記29 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+`v1.1.0` は **2026-09-29T19:53:06Z に published**（`gh release view v1.1.0` で `isDraft: false`・`isPrerelease: false`、tag が指す commit は `5eb6e9d`、PR #1443）。**両端が tag で閉じたので、この世代の範囲はもう動かない。**
+
+⚠ **2026-09-30 追記（v1.1.0 の出荷に伴う締め。CHANGELOG は既に出荷済みの `[1.1.0]` 節を書き換えず、訂正を `[1.2.0]` 節「v1.1.0 の記載の訂正」に置いた——下の段落の追記の列挙にはこれ以上増えない）**: `62def34`…`5eb6e9d` に着地した PR（e153e59 #1439、6a2f542 #1440、54a6318 #1437、52e6557 #1438、5eb6e9d #1443）のうち、PR #1440 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（27回目の棚卸し自身、下の「27回目の棚卸し」の段落と、この節頭の範囲の表記を書いた）。PR #1439（Issue #835、`examples/chat` の再生スクリプトのみ）は `examples/chat` が `private` で出荷される面の外、`packages/*/src` にも触れていないため、この節の対象外である。PR #1437（Issue #1425、ADR 0382）は、着地の時点で本人が既にこの節へ項目30として足しており（下）、確定した破壊的変更である。PR #1438 は `CHANGELOG.md` だけ（`[1.1.0]` の見出しに出荷日を起こす）、PR #1443 は `scripts/`（publish gate とそのテスト）だけで、どちらも `packages/*/src` にも `scripts/__snapshots__/public-api/` にも触れていない（`git diff 54a6318 52e6557 -- scripts/__snapshots__/public-api/ packages/` と `git diff 52e6557 5eb6e9d -- scripts/__snapshots__/public-api/ packages/` はどちらも空）。この回で新しく確定した破壊的変更は無い。⟹ **この節の範囲（`v1.0.2`…`v1.1.0` = `5eb6e9d`）で、確定した破壊的変更は、なお12件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、PR #1408・Issue #1301、PR #1413・Issue #1238、PR #1417・Issue #1412、PR #1427・Issue #994/#995/#1207、PR #1428・Issue #1226、PR #1431・Issue #933、PR #1435・Issue #1432、PR #1437・Issue #1425）である。**
+
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`5eb6e9d`**（tag `v1.1.0`、PR #1443）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25・追記26・追記27・追記28・追記29 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である。⚠ 「追記25」は CHANGELOG に2か所ある——23回目の棚卸し自身の段落と、PR #1408 が着地時に足した段落である。下の「24回目の棚卸し」の追記に同じ注記がある。⚠ `[1.1.0]` 節が出荷済みになったため、これ以上「追記N」は増えない——`62def34` より後の訂正は [CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節「v1.1.0 の記載の訂正」を見ること）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 **2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
 
@@ -1617,6 +1621,7 @@ PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決�
 ### 30. `VectorStore` に必須メソッド `deleteAcrossSpaces` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
 
 [Issue #1425](https://github.com/takecchi/mnemora/issues/1425)、
+[PR #1437](https://github.com/takecchi/mnemora/pull/1437)、
 [ADR 0382](./decisions/0382-vector-store-delete-across-spaces.md)。**この項目は、上の
 棚卸しの範囲の外——ADR 0375 決定5が切り出した未決事項に対する、この節に足す1件である。**
 
@@ -1670,7 +1675,7 @@ PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決�
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412、
 PR #1427・Issue #994・#995・#1207（ADR 0375）、Issue #1226（ADR 0375 決定7・
 2026-09-30 追記）、PR #1431・Issue #933、Issue #1432（ADR 0380）、
-Issue #1425（ADR 0382）) になった。**
+PR #1437・Issue #1425（ADR 0382）) になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
