@@ -235,7 +235,7 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
 
 - **`MemoryStore`/`OutboxStore` を自前で実装している人へ**: 時刻を渡す欄が、任意の欄として増えた
   （[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
-  [ADR 0354](./docs/decisions/0354-inject-clock-into-store-writes.md)）——
+  [ADR 0355](./docs/decisions/0355-inject-clock-into-store-writes.md)）——
   `MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox` の第4引数
   `opts?: { now?: Date }`（積む outbox 行の `availableAt`/`createdAt`）、
   `MemoryStore.supersedeWithNewMemories?` の末尾の引数 `opts?: { now?: Date }`（同じ）、
@@ -307,7 +307,7 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
 - **`Runtime`（`@mnemora/core`）は、`RuntimeDeps.clock` に注入した時計を、監査ログ（`memory_events.at`）・
   `purgedAt`・recall の記録の `createdAt`・outbox の `availableAt`/`createdAt`/`completedAt`/`failedAt`
   には渡していなかった**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
-  [ADR 0354](./docs/decisions/0354-inject-clock-into-store-writes.md)）——これらは store が
+  [ADR 0355](./docs/decisions/0355-inject-clock-into-store-writes.md)）——これらは store が
   書き込みのときに埋める壁時計（`new Date()`/`now()`）のままだった。**壁時計より過去の時計を
   注入すると、`tick()` は積んだジョブを1本も取れなかった**（`available_at` が壁時計、claim は
   `available_at <= now`＝注入した時計のジョブしか取らないため。`processed: 0` で、何も名乗らない）

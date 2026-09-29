@@ -6,7 +6,7 @@
  * テストで固定時刻を注入できるようにするための境界。
  *
  * ⭐ **2026-09-29 追記（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
- * ADR 0354）: 注入した時計は、runtime が書き込む時刻のほぼ全部に届く。** 2026-09-27・09-28 の
+ * ADR 0355）: 注入した時計は、runtime が書き込む時刻のほぼ全部に届く。** 2026-09-27・09-28 の
  * 実測（このファイルの旧い版、履歴は git blame）は「監査ログの `at`・`purgedAt`・recall の
  * `createdAt`・outbox の3欄は壁時計になる」という**直っていない振る舞い**を記録していた——
  * 本追記はその後の状態を書く。
@@ -45,7 +45,7 @@
  * `MemoryStore.create{Observation,Memory}WithOutbox`・`supersedeWithNewMemories?` の `opts`・
  * `requeueEmbedJobs` の `writeOpts`・`OutboxStore.complete`/`fail` の `opts`・
  * `NewRecallRecord.createdAt` はいずれも省略可能——省略すると実装は壁時計
- * （`new Date()`）を使う（今日までと同じ挙動）。**型としては追加のみ**（ADR 0354「決めたこと」）。
+ * （`new Date()`）を使う（今日までと同じ挙動）。**型としては追加のみ**（ADR 0355「決めたこと」）。
  */
 export interface Clock {
   /** 現在時刻を返す。runtime が「今」を得る唯一の口（テストでは固定の時刻を返す実装を注入する）。 */

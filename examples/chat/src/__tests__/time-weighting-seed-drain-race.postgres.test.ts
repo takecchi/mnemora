@@ -27,7 +27,7 @@ import {
  * この検査は、**自然発生のタイミング競合に頼らない**（この器では50回中0回しか
  * 自然発生しなかった——`clockPastRecentDbWrites` の docstring・PR の報告参照）:
  *
- * 1本目は、この機構が Issue #1237（ADR 0354）で**無くなった**ことを確かめる。
+ * 1本目は、この機構が Issue #1237（ADR 0355）で**無くなった**ことを確かめる。
  * `available_at` は Postgres の `now()`（us 精度）ではなく、呼び出し側が渡す時刻
  * （省略時は JS の壁時計、ms 精度）で書かれる。⟹ 書いた行の `available_at` は ms の
  * 境界ちょうどであり、同じ瞬間を `now` に渡した `claimBatch` がそのジョブを取れる。
@@ -136,7 +136,7 @@ describe("examples/chat: time-weighting seed 直後の embed drain が available
       // rejecting`）。60秒前なら、経路の速さにも、同じホストの上の小さな時計のずれにも依らず、
       // claim の `now` が `available_at` に届かない。ms の境界そのものの機構は、上の「機構の証明」が
       // 別に縛っている。
-      // ⚠ 2026-09-29（Issue #1237、ADR 0354）: `available_at` は今は `now()` ではなく、store の
+      // ⚠ 2026-09-29（Issue #1237、ADR 0355）: `available_at` は今は `now()` ではなく、store の
       // 既定の JS の壁時計（`seed` は時刻を渡さない）で書かれる。60秒前に固定した claim の `now` が
       // 届かないことは変わらないので、このガードの検査はそのまま成り立つ。
       const frozenMs = Date.now() - 60_000;
