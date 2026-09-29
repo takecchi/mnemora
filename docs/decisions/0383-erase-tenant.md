@@ -351,11 +351,13 @@ deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
   9.3MB・`recall_usages(memory_id)`/`recall_usages(recall_id)` 各0.4〜0.5MB・
   `memory_labels(memory_id)` 0.2MB。
 
-  **書き込み側のコスト**（索引が INSERT を遅くするかどうか。`memory_events` への
-  5万行 INSERT、ROLLBACK で反復、3回ずつ）: 索引なし平均 0.96秒（0.98秒/0.90秒/
-  1.00秒）・索引あり平均 1.04秒（0.86秒/0.98秒/1.27秒）。**差は約8%で、3回の
-  ばらつき（0.86〜1.27秒、約1.5倍の幅）の中に収まる——単一列 B-tree 索引6〜7本
-  ぶんの INSERT 側コストは、ノイズと見分けが付かない程度に小さい。**
+  **書き込み側のコスト**（索引が INSERT を遅くするかどうか）: 同じ Postgres・同じ
+  データで、`memory_events` へ他テナントの `memories` を元に5万行を INSERT し
+  `ROLLBACK` する。索引なしの場合と、同じトランザクションの中で単一列の索引7本を
+  `CREATE INDEX` してから同じ INSERT をする場合を、交互に3回ずつ測った（`psql` の
+  `\timing`）。索引なし 0.879秒/0.899秒/0.930秒（平均 0.90秒）・索引あり
+  0.922秒/0.976秒/0.935秒（平均 0.94秒）。**差は約4〜5%で、3回のばらつき
+  （索引なしの中だけで約6%の幅）に近い——INSERT 側の費用は小さい。**
 
   **止まる時間（運用上の注意）**: 本 migration の `CREATE INDEX`（`CONCURRENTLY`
   を使わない素の形）は対象テーブルに `ShareLock` を取る——読み取りは止めないが、
