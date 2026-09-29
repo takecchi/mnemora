@@ -644,6 +644,12 @@ type GroupCount = {
 > `groups`/`totalInScope`/`filtered*` は空/0 になる——ADR 0024 が退けた
 > 「値を受け取って黙って無視する」失敗を繰り返さないよう、この欄を実装しない
 > adapter は `countKind: 'exact'` を返し続ける契約にしてある（ADR 0384「決めたこと」）。
+> **⚠ `"skip"` のとき、`ann_unreached`（§「`ann_truncated` と `ann_unreached` の違い」）は
+> 判定されない。** 判定の母数 `eligible`（`totalInScope` − 未索引）が `0` になるため、
+> 近似索引が scope の候補を取りこぼしていても鳴らない——**`"skip"` の呼び出しで
+> `ann_unreached` が無いことは「拾いきった」を意味しない。** `explain.stages` の
+> `annReturnedFewerThanReachable` も同じ理由で立たない。今は「判定していない」と名乗る
+> 診断も出ない（ADR 0384「決めたこと」7）。
 > ⛔ **上の「近似を要求するオプションも持たない」は消さない**（ADR 0213 決定5）
 > ——`"skip"` は近似ではなく「止める」であり、上の文が指していた「`pg_stats` 等に
 > 基づく安価な推定」は今も存在しない。
