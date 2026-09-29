@@ -25,10 +25,10 @@
 |---|---|
 | **書いた日** | 初版 2026-09-26（`origin/main` = `190f365` の木）。改版 2026-09-26（`ec39629` の木）。改版 2026-09-27（`ef03a8f` の木。下の「改版の経緯」）。改版 2026-09-27（2回目）（`23f0076` の木。CHANGELOG の8回目の棚卸しに合わせた）。改版 2026-09-28（`c6ca5a4` の木。CHANGELOG の9回目の棚卸しに合わせた）。改版 2026-09-28（2回目）（`de8a160` の木。CHANGELOG の10回目の棚卸しに合わせた）。改版 2026-09-28（3回目）（`dcf6ccb` の木。CHANGELOG の11回目の棚卸しに合わせた）。改版 2026-09-28（4回目）（`7d5f944` の木。CHANGELOG の12回目の棚卸しに合わせた）。改版 2026-09-28（5回目）（`a2fb621` の木。CHANGELOG の13回目の棚卸しに合わせた）。改版 2026-09-28（6回目）（`9378719` の木。CHANGELOG の15回目の棚卸しに合わせた。14回目は直すものが無く、改版しなかった）。改版 2026-09-28（7回目）（`0d282c1` の木。CHANGELOG の16回目の棚卸しに合わせた）。改版 2026-09-29（`86b42b1` の木。CHANGELOG の17回目の棚卸しに合わせた）。**改版 2026-09-28（UTC。直前の「2026-09-29」は日本時間の日付で、UTC では同じ 2026-09-28）**（`origin/main` = `f5ad59f` の木。CHANGELOG の18回目の棚卸しに合わせた）。改版 2026-09-28（8回目）（`origin/main` = `545cc54` の木に PR #1376 を載せたもの。問い `3f3411c5` の答えと、CHANGELOG の追記19 に合わせた）。改版 2026-09-29（`36f5f13` の木。Issue #762 により
 `docs/release-notes-v1.0.0.md` を削除したのに合わせ、同ファイルへの参照2箇所を出荷済み版への
-言及として書き換えた——CHANGELOG の棚卸し内容は変えていない）。**改版 2026-09-29（19回目の棚卸し）**（`origin/main` = `80c79df` の木。CHANGELOG の19回目の棚卸し・追記20 に合わせた。この回で PR #1377（Issue #1221）の破壊的変更が範囲に入ったので、「🔴 破壊的変更」の節を新設した）。**改版 2026-09-29（20回目の棚卸し）**（`origin/main` = `329bdb1` の木。CHANGELOG の20回目の棚卸し・追記21 に合わせた。この回で PR #1385（Issue #548 方向2、ADR 0352）の破壊的変更も範囲に入ったので、「🔴 破壊的変更」の節に2件目の項目を足した） |
+言及として書き換えた——CHANGELOG の棚卸し内容は変えていない）。**改版 2026-09-29（19回目の棚卸し）**（`origin/main` = `80c79df` の木。CHANGELOG の19回目の棚卸し・追記20 に合わせた。この回で PR #1377（Issue #1221）の破壊的変更が範囲に入ったので、「🔴 破壊的変更」の節を新設した）。**改版 2026-09-29（20回目の棚卸し）**（`origin/main` = `329bdb1` の木。CHANGELOG の20回目の棚卸し・追記21 に合わせた。この回で PR #1385（Issue #548 方向2、ADR 0352）の破壊的変更も範囲に入ったので、「🔴 破壊的変更」の節に2件目の項目を足した）。**改版 2026-09-29（21回目の棚卸し）**（`origin/main` = `94dafe0` の木。CHANGELOG の21回目の棚卸し・追記22 に合わせた。この回で新しく確定した破壊的変更は無い——PR #1380（Issue #338、ADR 0353）の活動時計の数え方は非破壊と数え、「新機能」と「自前の `MemoryStore` を実装している方へ」の節を新設し、postgres のマイグレーション案内を1本→2本に直した） |
 | **書いた人** | **担い手（クローン miku の委譲先）。オーナーではない。**（冒頭のバナー） |
-| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠の PR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.2` … `329bdb1`** を数えたもの）が正。`v1.0.2`・`v1.0.1` として既に出荷済みの分は、同じファイルの `## [1.0.2] - 2026-09-27`・`## [1.0.1] - 2026-09-25` 節が正。保留と非破壊の数え方は `[1.1.0]` 節の前書きが正、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md) の「v1.0.2 → 次の版」の節が正 |
-| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `329bdb1` から動いた、または sha が同じまま `[1.1.0]` 節の中身が変わった。② `CHANGELOG.md` の `[1.1.0]` 節の前書きの「保留と非破壊の数え方」で、公開の fixture が新しく例外を投げる変更の扱いが「破壊的変更として扱わない」（オーナーの回答（ask_human `3f3411c5`））から変わった（⚠ 2026-09-28 まではここを「問い `3f3411c5` に答えが出た」としていた。答えが出たので、この草稿を答えに合わせて直した）。③ `packages/postgres/migrations/` の最後尾が `0023_lexical_query_inner_quote_as_space.sql` でなくなった。④ `v1.0.2`（tag `b981ecd`）より新しい Release が切られた。⑤ `CHANGELOG.md` の `[1.1.0]` 節 `### Breaking` の中身（PR #1377・Issue #1221、PR #1385・Issue #548 方向2）が変わった、またはこの節に3件目以降の破壊的変更が増えた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
+| **正はどれか** | ⛔ **この草稿ではない。**変更の一覧と根拠の PR/Issue は [`CHANGELOG.md`](../CHANGELOG.md) の `## [1.1.0] - 未リリース` 節（**`v1.0.2` … `94dafe0`** を数えたもの）が正。`v1.0.2`・`v1.0.1` として既に出荷済みの分は、同じファイルの `## [1.0.2] - 2026-09-27`・`## [1.0.1] - 2026-09-25` 節が正。保留と非破壊の数え方は `[1.1.0]` 節の前書きが正、破壊的変更の定義・移行手順は [`migration-v1.md`](./migration-v1.md) の「v1.0.2 → 次の版」の節が正 |
+| **腐りの判定** | **次のいずれかが起きていたら腐っている**: ① `CHANGELOG.md` の `[1.1.0]` 節が数えた sha が `94dafe0` から動いた、または sha が同じまま `[1.1.0]` 節の中身が変わった。② `CHANGELOG.md` の `[1.1.0]` 節の前書きの「保留と非破壊の数え方」で、公開の fixture が新しく例外を投げる変更の扱いが「破壊的変更として扱わない」（オーナーの回答（ask_human `3f3411c5`））から変わった（⚠ 2026-09-28 まではここを「問い `3f3411c5` に答えが出た」としていた。答えが出たので、この草稿を答えに合わせて直した）。③ `packages/postgres/migrations/` の最後尾が `0024_tenant_subject_activity.sql` でなくなった。④ `v1.0.2`（tag `b981ecd`）より新しい Release が切られた。⑤ `CHANGELOG.md` の `[1.1.0]` 節 `### Breaking` の中身（PR #1377・Issue #1221、PR #1385・Issue #548 方向2）が変わった、またはこの節に3件目以降の破壊的変更が増えた。⟹ **どれか1つでも当てはまったら、この草稿ではなく当日の一次情報を信じ、貼る前に本文を直すこと。** |
 
 ⚠ **この文書は、正典の内容を意図的に複製している。**理由は出荷済みの版の release-notes 草稿と同じ——**Release 本文を読むのは repo の外に居る採用者**であり、リンクだけでは伝わらない。⟹ **複製を許す代わりに、上の「正はどれか」を必ず添える。**
 
@@ -44,14 +44,14 @@
 
 ## 貼る前に確かめること
 
-1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `329bdb1` か。**
-   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`329bdb1` から動いていたら、この草稿の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節（追記22 以降。追記19 は「保留の解消」、追記20・追記21 はこの改版の根拠で、どちらも織り込み済み）を読み、この草稿へ足すこと。
-   ⚠ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**（前の版を書く過程で、sha を動かさずに `[1.1.0]` の `### Fixed` へ追記されることが3度起きた。PR #845・#846・#851）。⟹ `git diff 329bdb1 -- CHANGELOG.md` で `CHANGELOG.md` 自体の差分も当日見ること。
+1. **`CHANGELOG.md` の `## [1.1.0] - 未リリース` 節が数えた sha が、まだ `94dafe0` か。**
+   `grep -n '数えた基準を明記する' -A2 CHANGELOG.md` などで当日引き直すこと。⛔ **`94dafe0` から動いていたら、この草稿の一覧が漏れを持つ**——動いた分だけ CHANGELOG の該当節（追記23 以降。追記19 は「保留の解消」、追記20・追記21・追記22 はこの改版の根拠で、いずれも織り込み済み）を読み、この草稿へ足すこと。
+   ⚠ **「表示されている sha が同じ」だけでは、内容が増えていないことの証明にならない**（前の版を書く過程で、sha を動かさずに `[1.1.0]` の `### Fixed` へ追記されることが3度起きた。PR #845・#846・#851）。⟹ `git diff 94dafe0 -- CHANGELOG.md` で `CHANGELOG.md` 自体の差分も当日見ること。
 2. **公開の fixture が新しく例外を投げる変更の扱いが、まだ「破壊的変更として扱わない」か。**`CHANGELOG.md` `[1.1.0]` 節の前書きの「保留と非破壊の数え方」を見る（オーナーの回答（ask_human `3f3411c5`）、2026-09-28）。
    - **そう書いてあれば**: 下の草稿の「公開の fixture が新しく例外を投げるもの」の節はそのままでよい。
    - **変わっていたら**: `CHANGELOG.md` `[1.1.0]` 節と `docs/migration-v1.md` の「v1.0.2 → 次の版」の表現に合わせて、下の節の見出し・文言と、この文書の題と草稿の見出しの版を直すこと。
    - ⚠ 2026-09-28 まで、この項目は「問い `3f3411c5` に答えが出ているか」だった。答えが出たので、上のとおり直した。
-3. **マイグレーションの最後尾が `packages/postgres/migrations/` と一致しているか。**`ls packages/postgres/migrations/ | tail -2` で、当日 `0023_lexical_query_inner_quote_as_space.sql` が最後尾か確認する。**`0024` 以降が増えていたら**、下の「postgres を使っている方へ」の案内を直すこと。
+3. **マイグレーションの最後尾が `packages/postgres/migrations/` と一致しているか。**`ls packages/postgres/migrations/ | tail -2` で、当日 `0024_tenant_subject_activity.sql` が最後尾か確認する。**`0025` 以降が増えていたら**、下の「postgres を使っている方へ」の案内を直すこと。
 4. **`v1.0.2` より新しい Release が切られていないか。**`git tag -l "v1.*"`・`gh release list --limit 5`・`npm view @mnemora/core dist-tags` を当日その場で引き直すこと。**新しい版があれば、`CHANGELOG.md` にも対応する節が足されているはずである。**無ければこの草稿の起点が壊れているので、貼る前に本文を書き直すこと。
 5. **本文中のリンク（PR/Issue）が実在し、番号を間違えていないか。**貼る前にもう一度 `gh pr view <n>` で軽く見直すこと。
 6. **`CHANGELOG.md` `[1.1.0]` 節の `### Breaking` が、まだ PR #1377（Issue #1221）・PR #1385（Issue #548 方向2）の2件だけか。**`LC_ALL=C.UTF-8 grep -n '^### Breaking' -A3 CHANGELOG.md` で当日引き直すこと。**3件目以降が増えていたら**、下の「🔴 破壊的変更」の節を CHANGELOG の内容に合わせて足すこと。**この節自体が消えていたら**（例: PR #1377・#1385 が両方とも revert された）、下の「🔴 破壊的変更」の節も削ること。
@@ -70,7 +70,7 @@
 >
 > ### 🔴 まず
 >
-> - **postgres を使っている方へ**: `v1.0.2` からマイグレーションが1本増えています（`0023_lexical_query_inner_quote_as_space.sql`、語彙チャンネルのクエリの `"` の扱い、[PR #1187](https://github.com/takecchi/mnemora/pull/1187)）。`mnemora-postgres-migrate`（または `runMigrations`）を打ってください。`v1.0.1` から上げる場合は `0022`・`0023` の2本、`v1.0.0` から上げる場合は `0019`〜`0023` の5本が要ります。
+> - **postgres を使っている方へ**: `v1.0.2` からマイグレーションが2本増えています（`0023_lexical_query_inner_quote_as_space.sql`、語彙チャンネルのクエリの `"` の扱い、[PR #1187](https://github.com/takecchi/mnemora/pull/1187)。`0024_tenant_subject_activity.sql`、活動時計の subject 単位のカウンタ、[PR #1380](https://github.com/takecchi/mnemora/pull/1380)）。`mnemora-postgres-migrate`（または `runMigrations`）を打ってください。`v1.0.1` から上げる場合は `0022`〜`0024` の3本、`v1.0.0` から上げる場合は `0019`〜`0024` の6本が要ります。
 >
 > <!-- ⚠ 19回目の棚卸しで新設。中身は CHANGELOG [1.1.0] の ### Breaking の複製（AGENTS.md の反重複規律の例外——Release 本文は repo の外の読者向けなので、この文書自体が意図的に複製している。上の「この文書は、正典の内容を意図的に複製している」参照）。 -->
 > ### 🔴 破壊的変更
@@ -93,6 +93,23 @@
 >   - **永続化済みの過去の `recalls` 行は影響を受けません**——`getRecall` で読み戻すと、この変更より前に書かれた行は書かれた当時の形（`total` を持つ場合はそのまま）で返ります。
 >   - **順位・既定値・どの記憶が返るかは1ビットも変わりません**——実行時はもともと `association`/`mandatory_companion` の `total` は比較可能ではなかった値で、今回はその事実を型でも表すようにしただけです。DB マイグレーションは不要です。
 >   - 詳しい移行手順は [docs/migration-v1.md](https://github.com/takecchi/mnemora/blob/main/docs/migration-v1.md) の「v1.0.2 → 次の版」の節（項目19）、一覧・根拠は [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Breaking` を見てください。
+>
+> <!-- ⚠ 21回目の棚卸しで追加。中身は CHANGELOG [1.1.0] の ### Added の活動時計の項目の複製。 -->
+> ### 活動時計の数え方を呼び出しごとに選べるようになりました
+>
+> - **`decay_clock` が `'wall'` 以外のテナントで、活動時計の数え方（recall のたびに進むカウンタ）を、呼び出しごとに選べるようになりました**（[Issue #338](https://github.com/takecchi/mnemora/issues/338)、[PR #1380](https://github.com/takecchi/mnemora/pull/1380)、[ADR 0353](https://github.com/takecchi/mnemora/blob/main/docs/decisions/0353-activity-counting-per-call.md)）——以前は、`subject` を絞った recall でもテナント全体のカウンタ（`tenant_activity.activity_seq`）だけが進み、絞っていない別 subject の記憶の忘却も一緒に進んでいました。
+>   - **`RecallQuery.activityCounting?: "tenant" | "subject"`（既定 `"tenant"`）が増えました。**`"subject"` を選び、かつ `ctx.subjectId` を指定した recall は、テナント全体のカウンタではなく、その subject 専用のカウンタ（新テーブル `tenant_subject_activity`）だけを進めます。**既定 `"tenant"` の呼び出しは、この機能の追加前後でビット単位で挙動が変わりません。**
+>   - `findCorrectionCandidates`・`consolidate`/`reflect` の `{ seedMemoryId }` 形にも同じ `activityCounting` を足しました。**`tick()` が駆動する自動 consolidate/reflect ジョブには届きません**（既定 `"tenant"` のまま）。
+>   - **マイグレーションが1本増えます**（`0024_tenant_subject_activity.sql`、`tenant_subject_activity` テーブルを新設するだけです）——上の「🔴 まず」の postgres の案内を見てください。
+>   - 詳しくは [CHANGELOG.md](https://github.com/takecchi/mnemora/blob/main/CHANGELOG.md) の `[1.1.0]` `### Added` を見てください。
+>
+> <!-- ⚠ 21回目の棚卸しで追加。自前 store 実装者向けの注意——非破壊だが自前実装への影響がある（CHANGELOG [1.1.0] の追記22、docs/migration-v1.md の「⭕ 非破壊と数えたもの（オーナーの回答に当てたもの。21回目の棚卸しで足した）」と同じ内容）。 -->
+> ### ⚠ 自前の `MemoryStore` を実装している方へ（破壊的変更とは数えていません）
+>
+> - **`NewRecallRecord.advanceActivityClock` の型が `boolean` から `boolean | { scope: "subject"; subjectId: string }` に広がりました**（[PR #1380](https://github.com/takecchi/mnemora/pull/1380)）。`boolean` はこの union にそのまま含まれるため、既存の `true`/`false`/省略の呼び出しは1行も直さず通ります——**破壊的変更とは数えていません。**
+>   - **`MemoryStore.createRecall` を自前実装している方への注意**: `if (record.advanceActivityClock)` のような真偽値としての分岐は、`{ scope: "subject", subjectId }` が来ると（object は truthy なので）真になり、意図せずテナント全体のカウンタを進めてしまいます。
+>   - `=== true`（テナント全体のカウンタを進める）と、object（`scope: "subject"` で、その `subjectId` の subject 単位カウンタを進める）の分岐を、別々に扱ってください。
+>   - **既定の `activityCounting: "tenant"` で呼ばれる既存の呼び出しでは、`advanceActivityClock` に object は来ません**（常に `boolean`）——挙動は変わりません。
 >
 > <!-- ⚠ 下の節を破壊的変更と数えないのは、オーナーの回答（ask_human 3f3411c5）による（CHANGELOG [1.1.0] の前書きと各項目の注）。 -->
 > ### ⚠ 公開の fixture が新しく例外を投げるもの（`@mnemora/testkit/fixtures`。破壊的変更とは数えていません）
