@@ -22,9 +22,16 @@
  *
  * どこかで落ちたら、その段を名指しして exit 1。
  *
- * ⚠ **既定の CI には入れていない。リリース前に人が打つ**（`docs/release-v1.md` 0.11）。
- * npm registry から依存を取り（キャッシュが空なら約 550MB）、ロックファイル無しで範囲を解決するので、
- * 上流の新しい版で PR と無関係に赤になりうる（理由と実測は ADR 0346）。
+ * ⚠ **この道具自体（1〜6段すべて）は既定の CI には入れていない。リリース前に人が打つ**
+ * （`docs/release-v1.md` 0.11）。npm registry から依存を取り（キャッシュが空なら約 550MB）、
+ * ロックファイル無しで範囲を解決するので、上流の新しい版で PR と無関係に赤になりうる
+ * （理由と実測は ADR 0346）。
+ *
+ * **6段目（README の `require(esm)` の約束）だけは、registry に出ない別の道具
+ * （`scripts/check-cjs-require-smoke.mjs`。ADR 0387）が毎 PR の CI（`.github/workflows/ci.yml`
+ * の `cjs-require-smoke` ジョブ。required status check ではない）で確かめている。**
+ * それ以外（型・ESM 経路・入口一覧の突き合わせ・依存の宣言漏れ・registry とのずれ）は、
+ * 引き続きこの道具だけが見る——リリース前に人が打つ運用のままである。
  *
  * 使い方: `pnpm run check:consumer-install`（`--keep` で一時ディレクトリを残す）
  */
