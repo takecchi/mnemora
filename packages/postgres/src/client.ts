@@ -7,6 +7,7 @@ import {
   assertSafeSchemaName,
   searchPathFor,
 } from "./schema-namespace.js";
+import { POOL_ERROR_WARNING_PREFIX } from "./pool-error-warning.js";
 
 /** このパッケージの store が受け取る drizzle のデータベース（`NodePgDatabase`、このパッケージのスキーマ付き）。 */
 export type Db = NodePgDatabase<typeof schema>;
@@ -15,7 +16,13 @@ export type Db = NodePgDatabase<typeof schema>;
 export interface PostgresClient {
   /**
    * `pg` の接続プール。`runMigrations`・`registerEmbeddingSpace` に渡す。閉じるのは呼び出し側の責任
-   * （`closePostgresClient`）。⚠ `error` のリスナーは付けていない——付けるのは利用者である（packages/postgres/README.md）。
+   * （`closePostgresClient`）。
+   *
+   * ⚠ **`error` のリスナーは常に1つ付いている**（Issue #1213。2026-09-29 に反転した——
+   * 以前は付けず、利用者が付けることが前提だった）。**待機中**の接続が DB 側から切られると
+   * （Postgres の再起動など）、既定では `console.warn` で名乗って続行する（プロセスは落ちない）。
+   * `config.onPoolError` を渡すか、この `pool` に自分で `client.pool.on("error", …)` を付ければ、
+   * 既定の警告は出なくなる（packages/postgres/README.md「pool の `error`」）。
    */
   pool: Pool;
   /**
@@ -60,13 +67,25 @@ export interface PostgresClient {
  * 呼び出し側が既に `config.options` を渡していた場合は、**その値の後ろに空白区切りで
  * 追記する**（上書きして黙って捨てない）。
  *
- * ## ⚠ `pool` に `error` リスナーは付けない（今の振る舞い、Issue #1213）
+ * ## `pool` の `error`: 既定で名乗り、続行する（Issue #1213）
  *
- * pool の中で待機している接続が DB 側から切られる（Postgres の再起動など）と、`Pool` が `error` を出し、
- * リスナーが無ければ Node のプロセスごと落ちる。避けるには、返した `pool` に呼び出し側が
- * `client.pool.on("error", …)` を付けること——付ければ、切れた接続は捨てられ、次の呼び出しは新しい接続で通る
- * （`packages/postgres/README.md`「接続の `error` リスナーは、利用者が付ける」）。`db.transaction()` の途中で
- * 切れる場合は別であり、それは下の Proxy が受け持つ（Issue #868）。
+ * pool の中で待機している接続が DB 側から切られる（Postgres の再起動など）と、`Pool` が `error` を出す。
+ * **`createPostgresClient` は常に `pool.on("error", …)` を付けるので、リスナーが無くて Node のプロセスごと
+ * 落ちることは無い。**
+ *
+ * - `config.onPoolError` を渡していれば、それだけを呼ぶ（既定の警告は出さない）。
+ * - 渡していなければ、`${POOL_ERROR_WARNING_PREFIX} pool の待機中の接続が失われた。捨てて続行する: <message>`
+ *   の形で `console.warn` する——**ただし、emit の時点で `pool.listenerCount("error") === 1`
+ *   （自分しか聞いていない）ときだけ。** 利用者が自分で `client.pool.on("error", …)` を付けていれば
+ *   （`onPoolError` を渡していなくても）、この既定の警告は出ない。付けた順番（`createPostgresClient` の
+ *   呼び出しより先か後か）には依らない——判定を emit の時点で行うため。
+ *
+ * どちらの場合も、切れた接続は pool から捨てられ、次の呼び出しは新しい接続で通る
+ * （`packages/postgres/README.md`「pool の `error`」）。`db.transaction()` の途中で切れる場合は別であり、
+ * それは下の Proxy が受け持つ（Issue #868）。
+ *
+ * ⚠ **ADR 0339・ADR 0020 が却下したのは「黙って捨てる」形（空のリスナー）であり、この「名乗る」形は
+ * その却下理由には当たらない**（[ADR 0354](../../docs/decisions/0354-pool-default-error-listener-warns-by-default.md)）。
  *
  * ## drizzle に渡すのは、`connect` だけを包んだ Proxy（Issue #868、ADR 0349）
  *
@@ -87,9 +106,9 @@ export interface PostgresClient {
  */
 export function createPostgresClient(
   connectionString: string,
-  config?: PoolConfig & SchemaNamespaceOptions,
+  config?: PoolConfig & SchemaNamespaceOptions & { onPoolError?: (error: Error) => void },
 ): PostgresClient {
-  const { schema: namespaceSchema, extensionSchema, ...poolConfig } = config ?? {};
+  const { schema: namespaceSchema, extensionSchema, onPoolError, ...poolConfig } = config ?? {};
 
   if (namespaceSchema !== undefined) {
     assertSafeSchemaName(namespaceSchema);
@@ -102,6 +121,20 @@ export function createPostgresClient(
   }
 
   const pool = new Pool({ connectionString, ...poolConfig });
+  pool.on("error", (error: Error) => {
+    if (onPoolError) {
+      onPoolError(error);
+      return;
+    }
+    // 二重の警告を抑える: 利用者が自分で `pool.on("error", …)` を付けていれば
+    // （付けた順番に依らず）、emit の時点でリスナーは2つ以上になっている。
+    if (pool.listenerCount("error") === 1) {
+      console.warn(
+        `${POOL_ERROR_WARNING_PREFIX} pool の待機中の接続が失われた。捨てて続行する: ${error.message}`,
+        error,
+      );
+    }
+  });
   const db = drizzle(poolWithCheckoutErrorListener(pool), { schema });
   return { pool, db };
 }

@@ -30,7 +30,9 @@ export interface PostgresClient {
     pool: Pool;
     db: Db;
 }
-export declare function createPostgresClient(connectionString: string, config?: PoolConfig & SchemaNamespaceOptions): PostgresClient;
+export declare function createPostgresClient(connectionString: string, config?: PoolConfig & SchemaNamespaceOptions & {
+    onPoolError?: (error: Error) => void;
+}): PostgresClient;
 export declare function closePostgresClient(client: PostgresClient): Promise<void>;
 
 // ===== dist/content-hash.d.ts =====
