@@ -14,6 +14,7 @@ import { describe, expect, it } from "vitest";
 import type { Ctx, MemoryId, NewMemoryEvent, ObservationId } from "@mnemora/core";
 import { buildNewMemoryFixture } from "../test-data.js";
 import { InMemoryMemoryStore } from "../__fixtures__/in-memory-memory-store.js";
+import { InMemoryEventStore } from "../__fixtures__/in-memory-event-store.js";
 
 const ctx: Ctx = { tenantId: "no-partial-write" };
 let seq = 0;
@@ -321,6 +322,191 @@ describe("InMemoryMemoryStore: 途中で投げても、書いた分を残さな�
       const { restored } = await store.restoreSupersededBy(ctx, anchor.id, { at: new Date() });
       expect(restored).toHaveLength(2);
       expect(store.events).toHaveLength(2);
+    });
+  });
+
+  describe("イベントの meta・actor に BigInt があるとき、状態を書き換えない（Issue #1384）", () => {
+    // `@mnemora/postgres` の `JSON.stringify` が投げるのと同じ `TypeError`・同じ文言
+    // （`assertStorableMemoryEvent`、`packages/testkit/src/__fixtures__/memory-event-check.ts`）。
+    const BIGINT_MESSAGE = /Do not know how to serialize a BigInt/;
+    const bigint = { b: 10n };
+
+    it("EventStore.append", async () => {
+      const memoryStore = new InMemoryMemoryStore();
+      const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+      const m = await memory(memoryStore);
+      const before = await stateOf(memoryStore);
+      await expect(eventStore.append(ctx, event(m.id, "updated", bigint))).rejects.toThrow(
+        BIGINT_MESSAGE,
+      );
+      expect(await stateOf(memoryStore)).toBe(before);
+    });
+
+    it("updateStatusWithEvent", async () => {
+      const store = new InMemoryMemoryStore();
+      const m = await memory(store);
+      const before = await stateOf(store);
+      await expect(
+        store.updateStatusWithEvent(
+          ctx,
+          m.id,
+          "forgotten",
+          { expectedStatus: "active" },
+          event(m.id, "forgotten", bigint),
+        ),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("supersedeWithNewMemories（supersede 側のイベント）", async () => {
+      const store = new InMemoryMemoryStore();
+      const old = await memory(store);
+      const before = await stateOf(store);
+      await expect(
+        store.supersedeWithNewMemories(
+          ctx,
+          [
+            {
+              input: buildNewMemoryFixture({ content: "new", contentHash: "new" } as never),
+              jobKinds: ["embed"],
+            },
+          ],
+          [
+            {
+              id: old.id,
+              supersededByIndex: 0,
+              expectedStatus: "active",
+              event: event(old.id, "superseded", bigint),
+            },
+          ],
+        ),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("markContestedPair（2件目のイベント）", async () => {
+      const store = new InMemoryMemoryStore();
+      const a = await memory(store);
+      const b = await memory(store);
+      const before = await stateOf(store);
+      await expect(
+        store.markContestedPair(
+          ctx,
+          { id: a.id, event: event(a.id, "updated") },
+          { id: b.id, event: event(b.id, "updated", bigint) },
+        ),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("resolveContestedPair（2件目のイベント）", async () => {
+      const store = new InMemoryMemoryStore();
+      const a = await memory(store);
+      const b = await memory(store);
+      await store.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id, "updated") },
+        { id: b.id, event: event(b.id, "updated") },
+      );
+      const before = await stateOf(store);
+      await expect(
+        store.resolveContestedPair(
+          ctx,
+          { id: a.id, status: "active", event: event(a.id, "updated") },
+          {
+            id: b.id,
+            status: "superseded",
+            supersededById: a.id,
+            event: event(b.id, "superseded", bigint),
+          },
+        ),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("resolveOrphanedContested", async () => {
+      const store = new InMemoryMemoryStore();
+      const a = await memory(store);
+      const b = await memory(store);
+      await store.markContestedPair(
+        ctx,
+        { id: a.id, event: event(a.id, "updated") },
+        { id: b.id, event: event(b.id, "updated") },
+      );
+      const before = await stateOf(store);
+      await expect(
+        store.resolveOrphanedContested(ctx, {
+          id: a.id,
+          contestedWithId: b.id,
+          event: event(a.id, "updated", bigint),
+        }),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("purgeMemory", async () => {
+      const store = new InMemoryMemoryStore();
+      const m = await memory(store);
+      await store.updateStatus(ctx, m.id, "forgotten");
+      const before = await stateOf(store);
+      await expect(
+        store.purgeMemory(
+          ctx,
+          m.id,
+          { content: "[purged]", digest: "[purged]" },
+          event(m.id, "purged", bigint),
+        ),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("restoreSupersededBy", async () => {
+      // `restoreSupersededBy` の `event` 引数に `meta` は無い（`meta` は内部で組み立てる）ので、
+      // ここで呼び手が渡せる欄のうち BigInt を入れられるのは `actor` だけ。
+      const store = new InMemoryMemoryStore();
+      const anchor = await memory(store);
+      for (let i = 0; i < 2; i++) {
+        const m = await memory(store);
+        await store.updateStatus(ctx, m.id, "superseded", { supersededById: anchor.id });
+      }
+      const before = await stateOf(store);
+      await expect(
+        store.restoreSupersededBy(ctx, anchor.id, {
+          at: new Date(),
+          actor: { type: "system", extra: 10n } as never,
+        }),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(await stateOf(store)).toBe(before);
+    });
+
+    it("入れ子・配列の要素・actor の中でも同じく拒む", async () => {
+      const memoryStore = new InMemoryMemoryStore();
+      const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+      const m = await memory(memoryStore);
+      await expect(
+        eventStore.append(ctx, event(m.id, "updated", { nested: { b: 10n } })),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      await expect(
+        eventStore.append(ctx, event(m.id, "updated", { xs: [1, 10n] })),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      await expect(
+        eventStore.append(ctx, {
+          ...event(m.id, "updated"),
+          actor: { type: "system", extra: 10n } as never,
+        }),
+      ).rejects.toThrow(BIGINT_MESSAGE);
+      expect(memoryStore.events).toHaveLength(0);
+    });
+
+    it("陽性対照: number（123）・数字に見える文字列（\"123n\"）は引き続き通る", async () => {
+      const memoryStore = new InMemoryMemoryStore();
+      const eventStore = new InMemoryEventStore(memoryStore, memoryStore.events);
+      const m = await memory(memoryStore);
+      const appended = await eventStore.append(
+        ctx,
+        event(m.id, "updated", { n: 123, s: "123n" }),
+      );
+      expect(appended.meta).toEqual({ n: 123, s: "123n" });
     });
   });
 });
