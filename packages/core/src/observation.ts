@@ -288,7 +288,7 @@ export interface ObserveUtteranceInput {
   text: string;
 }
 
-/** `observe` に渡す出来事。⚠ 抽出に渡るのは `name` だけである（`data` の doc）。 */
+/** `observe` に渡す出来事。⚠ 抽出に渡るのは既定では `name` だけである（`data` の doc、`extractData` で opt-in できる）。 */
 export interface ObserveEventInput {
   /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
   extractionContext?: ExtractionContext;
@@ -315,15 +315,23 @@ export interface ObserveEventInput {
    * `deriveClaimKeys` は一度も呼ばれない。 */
   claimKey?: ClaimKeyOptions;
   /**
-   * 出来事の名前。**抽出（LLM）に渡すのはこの欄だけである**（今の振る舞い。下の `data` の doc 参照）。
-   * LLM 呼び出しが失敗したときの全文フォールバックの Memory も、この欄の文字列だけを本文にする。
+   * 出来事の名前。**`extractData`（下記）を渡さない既定の呼び出しでは、抽出（LLM）に渡すのは
+   * この欄だけである**（今の振る舞い。下の `data` の doc 参照）。LLM 呼び出しが失敗したときの
+   * 全文フォールバックの Memory も、既定ではこの欄の文字列だけを本文にする。
    */
   name: string;
   /**
-   * ⚠ **この欄は抽出（LLM）に渡らない**（今の振る舞い。[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
+   * ⚠ **既定ではこの欄は抽出（LLM）に渡らない**（[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
    * testkit の fixture の両方で、抽出のプロンプトと全文フォールバックの Memory の本文が `name` だけで
-   * あることを実測した）。`data` は Observation の `payload` に保存されるだけで、そこから作られる
-   * Memory の本文には入らない。抽出に使わせたい内容は `name` に書くか、`utterance` / `document` で渡すこと。
+   * あることを実測した、既定の振る舞い）。`data` は Observation の `payload` に保存されるだけで、
+   * 既定ではそこから作られる Memory の本文には入らない。
+   *
+   * **`extractData: true` を渡すと opt-in できる**（下記）——抽出のプロンプトと LLM 失敗時の
+   * 全文フォールバックの本文の両方に、`data` がキーを1つ以上持つオブジェクトのときだけ
+   * `${name}\n\n${JSON.stringify(data)}` の形で入る（`data` を渡さない・空オブジェクト `{}` の
+   * ときは、`extractData: true` でも `name` だけになる——既定と同じ）。抽出に使わせたい内容を
+   * `name` に書くか、`utterance` / `document` で渡す（今までの回避策）は、`extractData` を
+   * 渡さなければ今までどおり有効である。
    *
    * 出来事に付けるデータ。**JSON として保存される前提の欄である**
    * （[Issue #1076](https://github.com/takecchi/mnemora/issues/1076)）。
@@ -341,12 +349,29 @@ export interface ObserveEventInput {
    * | `BigInt` | 例外（`JSON.stringify` が投げる） | 同じ |
    *
    * どちらも例外にならない値では、書き込みは成功する。その後の `getObservation`・
-   * `reextract`・監査の読み返しは、adapter によって違う値を見る。
+   * `reextract`・監査の読み返しは、adapter によって違う値を見る。**`extractData: true` の
+   * プロンプトへ入るのは、この JSON 往復を経た後の `data`（`extractObservationPayload` が
+   * `payload` へ書いた値）である**——adapter によって `JSON.stringify(data)` の中身が変わりうる。
    */
   data?: Record<string, unknown>;
+  /**
+   * Issue #1185: `data` を抽出（LLM）に渡すかどうかの opt-in。**既定は `false`（渡さない、
+   * 上の `data` の doc 参照）。** `true` のときだけ、Observation の `payload` に
+   * `extractData: true` という印が保存される——`false`・省略のときは `payload` にこの欄自体が
+   * 増えない（`payload` は今の振る舞いと1バイトも変わらない）。
+   *
+   * この印は Observation に永続化されるため、`extract: 'deferred'`（`processExtractJob` が
+   * 後から読み直す）・`reextract`（`getObservation` で読み直す）のどちらでも同じ形で再現される
+   * ——`subjectCandidates`/`claimKey`（deferred と同時に使えない）とは異なり、`extractData` は
+   * deferred と同時に指定しても例外にならない。
+   *
+   * 上限は無い（`content`/`name` が今も上限を持たないのと同じ。詳細は
+   * [ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)）。
+   */
+  extractData?: boolean;
 }
 
-/** `observe` に渡す文書。⚠ 抽出に渡るのは `content` だけである（`title` の doc）。 */
+/** `observe` に渡す文書。⚠ 抽出に渡るのは既定では `content` だけである（`title` の doc、`extractTitle` で opt-in できる）。 */
 export interface ObserveDocumentInput {
   /** 抽出に添える文脈（直前の会話・タイムゾーン）。Observation に一緒に保存される。形と上限は {@link ExtractionContextSchema}。 */
   extractionContext?: ExtractionContext;
@@ -373,13 +398,38 @@ export interface ObserveDocumentInput {
    * `deriveClaimKeys` は一度も呼ばれない。 */
   claimKey?: ClaimKeyOptions;
   /**
-   * ⚠ **この欄は抽出（LLM）に渡らない**（今の振る舞い。[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
-   * testkit の fixture の両方で実測した）。抽出のプロンプトと全文フォールバックの Memory の本文は
-   * `content` だけで作る。`title` は Observation の `payload` に保存されるだけである。
+   * ⚠ **既定ではこの欄は抽出（LLM）に渡らない**（[Issue #1185](https://github.com/takecchi/mnemora/issues/1185)。2026-09-27 に `@mnemora/postgres` と
+   * testkit の fixture の両方で実測した、既定の振る舞い）。既定では抽出のプロンプトと全文
+   * フォールバックの Memory の本文は `content` だけで作る。`title` は Observation の `payload`
+   * に保存されるだけである。
+   *
+   * **`extractTitle: true` を渡すと opt-in できる**（下記）——抽出のプロンプトと LLM 失敗時の
+   * 全文フォールバックの本文の両方に、`title` が空でない文字列のときだけ `${title}\n\n${content}`
+   * の形で入る。`title` を渡さない・空文字のときは `extractTitle: true` でも今の既定と同じ
+   * （`content` だけ）になる。**例外: `extractTitle: true` かつ `content` が空文字（`observe()` の
+   * 入力としては `content` は必須で空文字を拒むため、通常はこの型から作った Observation でしか
+   * 起こらない。`reextract` が読み直す既存データ等）で `title` が空でないときは、`title` だけを
+   * 本文にする**（末尾の区切りが浮かないよう、`${title}\n\n${content}` の代わりに `title` 単体
+   * にする）。
    */
   title?: string;
-  /** 抽出（LLM）に渡す本文。全文フォールバックの Memory も、この欄だけを本文にする。 */
+  /** 抽出（LLM）に渡す本文。既定ではこの欄だけを本文にする（全文フォールバックの Memory も同じ）。 */
   content: string;
+  /**
+   * Issue #1185: `title` を抽出（LLM）に渡すかどうかの opt-in。**既定は `false`（渡さない、
+   * 上の `title` の doc 参照）。** `true` のときだけ、Observation の `payload` に
+   * `extractTitle: true` という印が保存される——`false`・省略のときは `payload` にこの欄自体が
+   * 増えない（`payload` は今の振る舞いと1バイトも変わらない）。
+   *
+   * この印は Observation に永続化されるため、`extract: 'deferred'`（`processExtractJob` が
+   * 後から読み直す）・`reextract`（`getObservation` で読み直す）のどちらでも同じ形で再現される
+   * ——`subjectCandidates`/`claimKey`（deferred と同時に使えない）とは異なり、`extractTitle` は
+   * deferred と同時に指定しても例外にならない。
+   *
+   * 上限は無い（`content`/`name` が今も上限を持たないのと同じ。詳細は
+   * [ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)）。
+   */
+  extractTitle?: boolean;
 }
 
 /**
@@ -478,6 +528,7 @@ const ObserveEventInputSchema = z.object({
   claimKey: ClaimKeyOptionsSchema.optional(),
   name: z.string().min(1),
   data: z.record(z.string(), z.unknown()).optional(),
+  extractData: z.boolean().optional(),
 }) satisfies z.ZodType<ObserveEventInput>;
 
 const ObserveDocumentInputSchema = z.object({
@@ -494,6 +545,7 @@ const ObserveDocumentInputSchema = z.object({
   claimKey: ClaimKeyOptionsSchema.optional(),
   title: z.string().min(1).optional(),
   content: z.string().min(1),
+  extractTitle: z.boolean().optional(),
 }) satisfies z.ZodType<ObserveDocumentInput>;
 
 const ObserveMemoryUsageInputSchema = z.object({

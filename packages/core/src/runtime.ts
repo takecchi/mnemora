@@ -3309,9 +3309,24 @@ function extractObservationPayload(
     case "utterance":
       return { text: input.text, speaker: input.speaker, ...context };
     case "event":
-      return { name: input.name, data: input.data ?? {}, ...context };
+      // Issue #1185: `extractData: true` のときだけ payload に印を足す。`false`・省略では
+      // `payload` は今までと1バイトも変わらない（`extractData` キー自体が増えない）
+      // ——`observationPayloadText`（extraction.ts）はこの印を見て `data` を本文へ合成する。
+      return {
+        name: input.name,
+        data: input.data ?? {},
+        ...(input.extractData === true ? { extractData: true } : {}),
+        ...context,
+      };
     case "document":
-      return { title: input.title, content: input.content, ...context };
+      // Issue #1185: `extractTitle: true` のときだけ payload に印を足す（`event` の
+      // `extractData` と同じ規律）。
+      return {
+        title: input.title,
+        content: input.content,
+        ...(input.extractTitle === true ? { extractTitle: true } : {}),
+        ...context,
+      };
     default: {
       const exhaustive: never = input;
       throw new Error(`unreachable observe input kind: ${String(exhaustive)}`);
