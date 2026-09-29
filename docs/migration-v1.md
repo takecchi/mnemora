@@ -1064,11 +1064,13 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は2件**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`80c79df`**（PR #1382）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20 と同じ範囲。追記14・追記19 は無い——追記19 は棚卸しではなく「保留の解消」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`329bdb1`**（PR #1388）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21 と同じ範囲。追記14・追記19 は無い——追記19 は棚卸しではなく「保留の解消」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 **2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
 
 ⚠ **2026-09-29 追記（19回目の棚卸し。CHANGELOG の追記20 と同じ範囲）**: 直前の段落は、書いた時点（`f5ad59f` までの棚卸しの外）の記録として書き換えていないが、もう現在の状態ではない——この節が数える範囲は `80c79df` まで広がっており、Issue #1221（PR #1377）はいまはこの節の棚卸しの範囲の**内**に入っている（CHANGELOG の追記20 を参照）。
+
+⚠ **2026-09-29 追記（20回目の棚卸し。CHANGELOG の追記21 と同じ範囲）**: この節が数える範囲は、さらに `329bdb1` まで広がった。この回で新しく確定した破壊的変更は下の項目19（PR #1385、Issue #548 方向2）で、番号付きの一覧に足した——項目19 自身は `f5ad59f` より後に着地した時点（PR #1385 の commit 自身）で既にこの節に足されており、この棚卸しでは PR 番号の欠けを直しただけである（下の項目19 を参照）。同じ範囲で着地した PR #1388（Issue #1188、reflect が有効期間の外の記憶を材料にしない件）は、公開 union `ReflectBasisOutcome` に値を2つ足すだけで、union に値を足す変更は破壊的と数えない（オーナーの回答（ask_human `d9364c91`）、上の「数え方の規律への追記（2026-09-28）」）ので、この節には項目を足していない（下の「実行時」の一覧に足した）。PR #1378（Issue #868、`db.transaction()` の接続断で落ちない件）は `@mnemora/postgres` の公開の型を変えないので、この節の対象外である（CHANGELOG の `[1.1.0]` 節 `### Fixed` を見ること）。
 
 **移行の手順（`client` を独自の型注釈で書いている場合だけ）**:
 1. `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`/`Pick<Anthropic, "messages">` という型注釈を、`@mnemora/openai`/`@mnemora/anthropic` が export する `OpenAIChatClient`/`OpenAIEmbeddingsClient`/`AnthropicMessagesClient` へ置き換える。
@@ -1082,6 +1084,8 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 （既存欄 `score: ScoreBreakdown` → `score: ScoreBreakdown | AffinityUnmeasuredScore`）を伴う
 ——次回この段落を棚卸しするときは、`f5ad59f` より後の範囲まで diff を取り直すこと。
 
+**⚠ 2026-09-29 追記（20回目の棚卸し）: 上の「次回」を行った。**`git diff v1.0.2..329bdb1 -- scripts/__snapshots__/public-api/` は、`anthropic.d.ts`・`bullmq.d.ts`・`core.d.ts`・`openai.d.ts`・`testkit.d.ts` の5ファイルに差分が在り、`postgres.d.ts` には無い（`@mnemora/postgres` の PR #1378 は `client.pool`/`client.db` の公開の型を変えない——`$client` は drizzle が実行時に生やす欄で `.d.ts` には元から載っていない。CHANGELOG の `[1.1.0]` 節 `### Fixed` の PR #1378 の項目のとおり）。`core.d.ts` の差分は、この段落が既に数えていた項目19（PR #1385。`RecalledScore`/`AffinityUnmeasuredScore` の追加、型の狭小化を伴う）に加えて、`ReflectBasisOutcome` に `"expired"`・`"not_yet_valid"` の2値が増えた分（PR #1388）——後者は union への値の追加で、削除・必須化・狭小化ではない（オーナーの回答（ask_human `d9364c91`）により破壊的と数えない。下の「実行時」の一覧に足した）。`anthropic.d.ts`・`openai.d.ts`・`bullmq.d.ts` の差分は、この段落が既に数えていた19回目の棚卸し分（PR #1377 の型置き換え、bullmq の初登場）と同じで、この範囲で新たに増えたものではない。`testkit.d.ts` の1行も同様（PR #1114 の `rawGet`。4回目の棚卸し以来、既に数えていた分——上の「型の上」の段落を参照）。
+
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
 - ⭕ **破壊的変更と数えないと決まったもの**——公開の fixture が、これまで受け入れていた不正な入力に新しく例外を投げるもの（オーナーの回答（ask_human `3f3411c5`）。2026-09-28 までは「計上を保留しているもの」としてここに置いていた。上の「数え方の規律への追記（2026-09-28）」）:
@@ -1094,12 +1098,14 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
   - ほかにも同じ種類のものがあれば、CHANGELOG の `[1.1.0]` 節の各項目の ⚠ を正とする。
 - ⭕ **非破壊と数えたもの**（⚠ 付き。**この判定はクローン miku の判断であり、オーナーの判断ではない**）——`registerEmbeddingSpace` が同じテーブル名に潰れる別の空間の登録を拒むようになった（PR #1156）、`setEventRetention` が型の外の `kind` を拒むようになった（PR #1171。fixture も core の共有の検査で同時に変わる）、`@mnemora/postgres` の語彙チャンネルが語の途中の `"` を空白として扱うようになった（PR #1187。一致だけが変わる）、ほか。一覧は CHANGELOG の `[1.1.0]` 節を見ること。
 - ⭕ **非破壊と数えたもの（オーナーの回答に当てたもの。19回目の棚卸しで足した）**——testkit の fixture が `reason`・`actor.id` の NUL・孤立サロゲートを拒むようになった（PR #1379。公開の fixture が新しく例外を投げる変更は破壊的と数えない、オーナーの回答（ask_human `3f3411c5`））、`consolidate()` の結果の公開 union `ConsolidateSourceOutcome` に `"expired"`・`"not_yet_valid"` の2値が増えた（PR #1383。union に値を足す変更は破壊的と数えない、オーナーの回答（ask_human `d9364c91`））。
+- ⭕ **非破壊と数えたもの（オーナーの回答に当てたもの。20回目の棚卸しで足した）**——`reflect()` の結果の公開 union `ReflectBasisOutcome` に `"expired"`・`"not_yet_valid"` の2値が増えた（PR #1388、Issue #1188。union に値を足す変更は破壊的と数えない、オーナーの回答（ask_human `d9364c91`）。`consolidate()` を直した PR #1383 の `ConsolidateSourceOutcome` と同じ形）。`@mnemora/postgres` が `db.transaction()` の最中の接続断でプロセスごと落ちなくなった（PR #1378、Issue #868。公開の型は変わらない——`client.db.$client` の同一性だけが変わる。上の「型の上」の段落を参照）。
 
 ⚠ **bullmq について（19回目の棚卸しで初めて注記）**: PR #1382 で `@mnemora/bullmq` が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` に加わったが、まだ一度も publish されていない（version は `0.0.0` のまま）。この節が数えるのは「利用者が版を上げるときに何をどう直すか」であり、一度も publish されていない package には該当する利用者が存在しない。⟹ **この節は bullmq をまだ対象に含めていない。**bullmq が実際に publish された後、bullmq 自身に破壊的変更が着地すれば、その時点でこの節（かそれに続く世代の節）の対象に加える。
 
 ### 19. `RecalledMemory.score`/`RecallRecordMemory.score`/`CorrectionCandidate.score` が `ScoreBreakdown` から `ScoreBreakdown | AffinityUnmeasuredScore` になった（`@mnemora/core`）
 
 [Issue #548](https://github.com/takecchi/mnemora/issues/548) 方向2、
+[PR #1385](https://github.com/takecchi/mnemora/pull/1385)、
 [ADR 0352](./decisions/0352-association-score-without-total.md)。**この1件は、これまでの
 17件（v0.1.9→v0.2.0）〜18件（v0.4.0→v0.5.0）と違い、`v1.0.0` 以降に確定した最初の
 破壊的変更である**——`v1.0.0`〜`v1.0.2` は0件のまま出荷された（上の各節）。
