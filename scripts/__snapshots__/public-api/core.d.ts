@@ -602,13 +602,17 @@ export interface AggregateScopeOptions {
 export interface MemoryStore {
     createObservation(ctx: Ctx, input: NewObservation): Promise<Observation>;
     getObservation(ctx: Ctx, id: ObservationId): Promise<Observation | null>;
-    createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[]): Promise<{
+    createObservationWithOutbox(ctx: Ctx, input: NewObservation, jobKinds: OutboxJobKind[], opts?: {
+        now?: Date;
+    }): Promise<{
         observation: Observation;
         created: boolean;
         jobs: OutboxJobRecord[];
     }>;
     createMemory(ctx: Ctx, input: NewMemory): Promise<Memory>;
-    createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[]): Promise<{
+    createMemoryWithOutbox(ctx: Ctx, input: NewMemory, jobKinds: OutboxJobKind[], opts?: {
+        now?: Date;
+    }): Promise<{
         memory: Memory;
         created: boolean;
         jobs: OutboxJobRecord[];
@@ -805,8 +809,12 @@ export declare class OutboxLeaseConflictError extends Error {
 }
 export interface OutboxStore {
     claimBatch(ctx: Ctx, opts: ClaimOutboxJobsOptions): Promise<OutboxJobRecord[]>;
-    complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void>;
-    fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void>;
+    complete(ctx: Ctx, jobId: string, expectedAttempts: number, opts?: {
+        at?: Date;
+    }): Promise<void>;
+    fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
+        at?: Date;
+    }): Promise<void>;
 }
 
 // ===== dist/interfaces/scheduler.d.ts =====
@@ -2657,6 +2665,7 @@ export interface NewRecallRecord {
         scope: "subject";
         subjectId: string;
     };
+    createdAt?: Date;
 }
 export interface RecallRecord {
     recallId: RecallId;
