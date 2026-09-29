@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { validateMeasured } from "../association-summary-lib.mjs";
+import { validateBaseline, validateMeasured } from "../association-summary-lib.mjs";
 import { blankOutWorkflowComments } from "../workflow-comment-blank-lib.mjs";
 import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
 
@@ -31,11 +31,10 @@ import { spawnSyncWithDeadline } from "./spawn-with-deadline.mjs";
  * 「配線が変わった」か「書き方が変わった」かを見て、**配線が変わっていないなら
  * 取り出し方のほうを直すこと(歯を消さないこと)。**
  *
- * ⚠ **`examples/chat/association-baseline.json` はまだ存在しない**(Issue #291。
- * このベンチは CI で1度も実測されていないため、数字をでっち上げずに置ける基準値が
- * 無い)。⟹ この歯は `--baseline` の配線を検査しない——`identifier-probes` ジョブの
- * 歯と違う点はここだけである。基準値ファイルができたら、`ci.yml` 側に `--baseline`
- * を足し、この歯にも `identifier-probe-summary` 型の baseline 検査を追加すること。
+ * `examples/chat/association-baseline.json`(ADR 0385。CI `ubuntu-latest` での実測から
+ * 手作業で置いた)ができたので、`ci-yml-identifier-probes-wiring.test.mjs` と同じ形で
+ * `--baseline` の配線(コミット済みの基準値ファイルを指しているか・そのファイルが
+ * `validateBaseline` を通るか)もここで固定する。
  */
 
 const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
@@ -153,6 +152,10 @@ const summaryStep = steps.find((step) => step.run.includes("association-summary.
 const artifactStep = steps.find((step) => step.name.includes("成果物として残す"));
 const cacheStep = steps.find((step) => step.name.includes("キャッシュ"));
 
+/** 基準値ファイル(本物。ADR 0385)。差分の有無を作り分けるための土台にも使う。 */
+const baselineRelativePath = "examples/chat/association-baseline.json";
+const baseline = JSON.parse(readFileSync(join(repoRoot, baselineRelativePath), "utf8"));
+
 /**
  * ある段の生テキスト(`- name: <name>` から次の段の `- name:` まで)を切り出し、
  * コメントを空白へ潰したものを返す(`ci-yml-identifier-probes-wiring.test.mjs` の
@@ -197,6 +200,12 @@ function blockDeclaresAlways(blankedBlock) {
 function readWithField(blankedBlock, field) {
   const matched = new RegExp(`^\\s*${field}:\\s*(.+)$`, "m").exec(blankedBlock ?? "");
   return matched ? matched[1].trim() : undefined;
+}
+
+/** `--baseline <path>` を yml から読む(引用符あり・なしの両方を拾う)。 */
+function summaryStepBaselinePath() {
+  const matched = /--baseline\s+(?:"([^"]+)"|([^\s\\]+))/.exec(summaryStep?.run ?? "");
+  return matched ? (matched[1] ?? matched[2]) : undefined;
 }
 
 function substituteWorkspace(text, workspace) {
@@ -295,8 +304,20 @@ describe("ci.yml の association-probes ジョブの配線(Issue #291)", () => {
     expect(blockDeclaresAlways(block)).toBe(true);
   });
 
-  it("要約の段が --baseline を渡していない(まだ基準値ファイルが無いため)", () => {
-    expect(summaryStep.run).not.toContain("--baseline");
+  it("🔴 要約の段が --baseline をコミット済みの基準値ファイルへ渡している(ADR 0385)", () => {
+    // ⭐ **これが「輪が閉じている」ことの固定点**(`ci-yml-identifier-probes-wiring
+    // .test.mjs` と同じ形)。この行が消えると、値が動いても誰も気づかず、
+    // 誰も基準値を更新せず、新しい値が PR の diff に現れなくなる。
+    expect(summaryStepBaselinePath(), "要約の段に --baseline の指定が無い").toBe(
+      baselineRelativePath,
+    );
+  });
+
+  it("🔴 --baseline が指すファイルが、実際に validateBaseline を通る", () => {
+    // パスが合っていても中身が要約の期待する形でなければ、CI では
+    // 「基準値 JSON が使えない」で非0になる——それは repo に置いてある時点で分かる。
+    const result = validateBaseline(baseline);
+    expect(result.ok, result.ok ? "" : result.error).toBe(true);
   });
 
   it("⭐ ジョブ先頭のコメントが「門ではない」ことを明記している", () => {

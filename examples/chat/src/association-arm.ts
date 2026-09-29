@@ -228,6 +228,36 @@ function average(values: number[]): number {
   return values.reduce((sum, v) => sum + v, 0) / values.length;
 }
 
+/**
+ * `AssociationArmReport.associationEnabled` を、`recall()` へ実際に渡す
+ * `association`（`RecallAssociationQuery | null`）から決める純関数（ADR 0385 §7 で
+ * 見つかったバグの修正、2026-09-30）。
+ *
+ * 🔴 **もともとは `association !== undefined` だった。** ADR 0337（`packages/core` の
+ * `RecallQuery.association` の既定を on にする決定）後、この関数の直上のコメントの
+ * とおり "off" arm は `recall()` へ `association: null` を**明示的に**渡すよう直された
+ * ——だが `associationEnabled` の判定側は `!== null` に更新されておらず、`null` も
+ * 「defined」と判定されたままだった。**⟹ "off" arm でも `associationEnabled` が
+ * `true` になっていた**（`null !== undefined` は JavaScript では `true`）。値そのもの
+ * （`goldReturnedCount`/`hit1Count`/`mrr` 等）には影響しないが、`armShortKey`/
+ * `buildArmSummaryTable`（`scripts/association-summary-lib.mjs`）が読む「連想枠」列の
+ * 表示が "off" arm でも `on(maxCount=null)` になる、という表示不具合を生んでいた
+ * （詳細は ADR 0385 §7）。
+ *
+ * `null`/`undefined` のどちらも「連想枠を渡していない＝off」として扱う
+ * （`!= null` は `null`/`undefined` の両方を弾く、緩い等価比較を意図して使っている）。
+ * テストのために独立した純関数として export した——`runAssociationArm` 本体は
+ * 本物の `Runtime`/`MemoryStore`（実質 Postgres）を要求し重いため
+ * （`docs/autonomy.md` の `initdb` 手順が要る）、この判定だけを軽く固定する。
+ * **呼び出し側（下の `runAssociationArm` の `return` 文）がこの関数を実際に呼んでいる
+ * ことは、`examples/chat/src/__tests__/association-arm.test.ts` がソースを読んで
+ * 構造的に固定する**（この関数を単体でテストするだけでは、呼び出し側が別のロジックへ
+ * 差し替わった場合を検出できないため）。
+ */
+export function computeAssociationEnabled(association: RecallAssociationQuery | null): boolean {
+  return association != null;
+}
+
 export async function runAssociationArm(
   options: RunAssociationArmOptions,
 ): Promise<AssociationArmReport> {
@@ -398,7 +428,7 @@ export async function runAssociationArm(
 
   return {
     armLabel: options.armLabel,
-    associationEnabled: association !== undefined,
+    associationEnabled: computeAssociationEnabled(association),
     associationMaxCount: options.association?.maxCount ?? null,
     probeCount: probes.length,
     ingestedCount: utterances.length,

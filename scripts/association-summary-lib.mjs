@@ -27,14 +27,22 @@
  * 参照整合性が壊れている(例: `deltas[].baselineArmLabel` が `arms[].armLabel` の
  * どれとも一致しない)ときだけである。**
  *
- * ## ⚠ この repo にはまだ基準値ファイルが無い(2026-09-16 時点)
+ * ## 基準値ファイル `examples/chat/association-baseline.json`(ADR 0385)
  *
- * `examples/chat/association-baseline.json` はまだ作っていない——このベンチは
- * CI で1度も実測されていないため、数字をでっち上げずに置く基準値が無い。
- * `--baseline` は任意であり、省略すれば基準値なしで動く(`buildSummaryMarkdown` の
- * `baseline` は optional)。基準値が用意できたら、この関数の `validateBaseline` を
- * 通る形で `examples/chat/association-baseline.json` を作り、`ci.yml` の summary
- * ステップに `--baseline` を足すこと。
+ * CI(`ubuntu-latest`)で association-probes を5回以上再実行し、arm ごとの値が
+ * 揺れないこと(ADR 0167 が Issue #316 の非決定性を直したことの裏取り)を確かめた上で
+ * 置いた基準値である。`ci.yml` の summary ステップが `--baseline` として渡す。
+ * `--baseline` は今も任意であり(`buildSummaryMarkdown` の `baseline` は optional)、
+ * 省略すれば基準値なしで動く——単体テスト・手元実行では省略してよい。
+ *
+ * ## ⚠ 基準値より悪化した arm を目立たせる(門にはしない、ADR 0385)
+ *
+ * `gold`(goldReturnedCount)/`hit@1`/`hit@10`/`MRR` のいずれかが基準値を下回った arm を、
+ * Markdown の上のほう(`## arm 別まとめ`の表より前)に「## ⚠ 基準値より悪い値がある
+ * （門ではない）」節として列挙する(`buildWorsenedArmsSection`)。許容幅は
+ * `WORSENED_TOLERANCE`(このファイルが export する定数)——ADR 0385 の実測(揺れ0)により
+ * 既定は全指標0にしてある。**exit code には一切触れない**——上の「⛔ 門にしない」節と
+ * 同じ規律で、検出するだけに留める。
  *
  * ## 🔴 hit@10 は連想枠の効果を測れない(表の下に必ず注記する)
  *
@@ -64,6 +72,35 @@
  * `identifier-probe-summary-lib.mjs` の「群の名前」に相当するものを、この bench では
  * 別フィールドとして持たせる代わりに、既存の2フィールドの組から導出する。
  */
+
+/**
+ * ⚠ **基準値より悪化した arm を判定する対象指標(ADR 0385)。**
+ *
+ * `label` は Markdown 上の表示名、`field` は `arms[]`(実測・基準値とも共通)の
+ * フィールド名。**この4つはタスク仕様が名指ししたものであり、増減するときは
+ * `WORSENED_TOLERANCE` も合わせて見直すこと。**
+ */
+const WORSENED_METRICS = [
+  { field: "goldReturnedCount", label: "gold" },
+  { field: "hit1Count", label: "hit@1" },
+  { field: "hit10Count", label: "hit@10" },
+  { field: "mrr", label: "MRR" },
+];
+
+/**
+ * ⚠ **悪化と判定する許容幅(0 = 1件でも下回れば警告)。**
+ *
+ * ADR 0385 の実測(CI `ubuntu-latest` で association-probes を5回以上再実行)により
+ * 決めた値をここに置く——**唯一の出所は ADR 0385 であり、値の根拠(揺れの実測結果)は
+ * そちらに書く。**`buildWorsenedArmsSection`/`findWorsenedArms` はこの定数を読むだけで、
+ * 数字の妥当性そのものは判断しない。
+ */
+export const WORSENED_TOLERANCE = {
+  goldReturnedCount: 0,
+  hit1Count: 0,
+  hit10Count: 0,
+  mrr: 0,
+};
 
 /** 現在の仕様(Issue #291)で固定されている arm の本数。 */
 const ARM_COUNT = 4;
@@ -472,8 +509,8 @@ export function validateMeasured(data) {
 }
 
 /**
- * 基準値ファイル(`examples/chat/association-baseline.json`。まだ存在しない——
- * 冒頭 docstring 参照)の形を検査する。arm レベルの数値だけを要求し、
+ * 基準値ファイル(`examples/chat/association-baseline.json`。ADR 0385、冒頭 docstring
+ * 参照)の形を検査する。arm レベルの数値だけを要求し、
  * `probes`/`stageSkippedReasons` は要求しない(基準値と比べるのは arm 別まとめの
  * 行だけであり、probe 明細までは比べない仕様のため)。
  *
@@ -627,7 +664,90 @@ function buildWarmupWarningLines(measured) {
   ];
 }
 
-/** 基準値との差分を短い文字列にまとめる(1セル分)。 */
+/**
+ * `arm` が基準値(`baselineArm`)に対して、`WORSENED_METRICS` のどれかで
+ * `WORSENED_TOLERANCE` を超えて悪化しているかを見る。
+ *
+ * @param {Record<string, any>} arm
+ * @param {Record<string, any> | undefined} baselineArm
+ * @returns {{ field: string, label: string, baselineValue: number, measuredValue: number, diff: number }[]}
+ */
+function findWorsenedFields(arm, baselineArm) {
+  if (!baselineArm) {
+    return [];
+  }
+  const worsened = [];
+  for (const { field, label } of WORSENED_METRICS) {
+    const tolerance = WORSENED_TOLERANCE[field] ?? 0;
+    const diff = arm[field] - baselineArm[field];
+    if (diff < -tolerance) {
+      worsened.push({
+        field,
+        label,
+        baselineValue: baselineArm[field],
+        measuredValue: arm[field],
+        diff,
+      });
+    }
+  }
+  return worsened;
+}
+
+/**
+ * 実測の全 arm を基準値と突き合わせ、悪化している arm だけを返す(門ではない——
+ * ここでは検出するだけで、`buildSummaryMarkdown` はこの結果を exit code に反映しない)。
+ *
+ * @param {Record<string, any>} measured
+ * @param {{ arms: Record<string, unknown>[] } | undefined} baseline
+ * @returns {{ arm: Record<string, any>, worsenedFields: ReturnType<typeof findWorsenedFields> }[]}
+ */
+function findWorsenedArms(measured, baseline) {
+  if (!baseline) {
+    return [];
+  }
+  const baselineArms = indexBaselineArms(baseline);
+  const results = [];
+  for (const arm of measured.arms) {
+    const worsenedFields = findWorsenedFields(arm, baselineArms.get(armShortKey(arm)));
+    if (worsenedFields.length > 0) {
+      results.push({ arm, worsenedFields });
+    }
+  }
+  return results;
+}
+
+/**
+ * ⚠ **基準値より悪い arm がある場合だけ、Summary の上のほうに出す節(門ではない)。**
+ * 悪化した arm が無ければ `undefined`(常に同じ節を出すと、読む人が「毎回出るだけの
+ * 定型文」として読み飛ばすようになる——`identifier-probe-summary-lib.mjs` の
+ * 「一致なら1行、違うときだけ展開する」と同じ判断)。
+ *
+ * @param {ReturnType<typeof findWorsenedArms>} worsenedArms
+ */
+function buildWorsenedArmsSection(worsenedArms) {
+  if (worsenedArms.length === 0) {
+    return undefined;
+  }
+  const lines = [
+    "## ⚠ 基準値より悪い値がある（門ではない）",
+    "",
+    "🔴 これは失敗ではない——このベンチは required ではなく(ADR 0158)、相違しても" +
+      " exit code は変えない。下の arm ごとの差を読み、意図した変化かどうかを人が判断すること。",
+    "",
+  ];
+  for (const { arm, worsenedFields } of worsenedArms) {
+    const fieldSummaries = worsenedFields.map(
+      ({ field, label, baselineValue, measuredValue, diff }) => {
+        const diffText = field === "mrr" ? formatSignedMrr(diff) : formatSignedInt(diff);
+        return `${label}: 基準値${baselineValue} → 実測${measuredValue}(${diffText})`;
+      },
+    );
+    lines.push(`- **${arm.armLabel}**: ${fieldSummaries.join(" / ")}`);
+  }
+  return lines.join("\n");
+}
+
+/** 基準値との差分を短い文字列にまとめる(1セル分)。悪化していれば先頭に ⚠ を付ける。 */
 function formatArmBaselineDiff(arm, baselineArm) {
   if (!baselineArm) {
     return "基準値なし";
@@ -636,8 +756,10 @@ function formatArmBaselineDiff(arm, baselineArm) {
   const hit1Diff = arm.hit1Count - baselineArm.hit1Count;
   const hit10Diff = arm.hit10Count - baselineArm.hit10Count;
   const mrrDiff = arm.mrr - baselineArm.mrr;
+  const worsened = findWorsenedFields(arm, baselineArm);
+  const prefix = worsened.length > 0 ? "⚠ " : "";
   return (
-    `gold${formatSignedInt(goldDiff)} / hit1${formatSignedInt(hit1Diff)} / ` +
+    `${prefix}gold${formatSignedInt(goldDiff)} / hit1${formatSignedInt(hit1Diff)} / ` +
     `hit10${formatSignedInt(hit10Diff)} / MRR${formatSignedMrr(mrrDiff)}`
   );
 }
@@ -880,6 +1002,14 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   lines.push(buildConditionsLine(measured));
   lines.push(...buildWarmupWarningLines(measured));
 
+  // ⚠ 基準値より悪い arm があれば、Summary の一番上のほう(arm別まとめの表より前)に
+  // 目立つ節として出す(門ではない——検出するだけで、確定・判断は人に残す)。
+  const worsenedArms = findWorsenedArms(measured, baseline);
+  const worsenedArmsSection = buildWorsenedArmsSection(worsenedArms);
+  if (worsenedArmsSection) {
+    lines.push("", worsenedArmsSection);
+  }
+
   lines.push(
     "",
     "## arm 別まとめ",
@@ -946,8 +1076,9 @@ export function buildSummaryMarkdown({ measured, baseline }) {
   } else {
     lines.push(
       "",
-      "ℹ️ 基準値ファイルが渡されていない——このベンチはまだ CI で実測していないため、" +
-        "`examples/chat/association-baseline.json` はまだ存在しない。",
+      "ℹ️ 基準値ファイルが渡されていない——`examples/chat/association-baseline.json`" +
+        "（ADR 0385）は存在するが、この呼び出しには `--baseline` が渡されなかった" +
+        "(手元実行や単体テストではよくある。CI の `ci.yml` は渡している)。",
     );
   }
 

@@ -140,6 +140,82 @@ describe("InMemoryLexicalStore.search — 非ASCIIだけのクエリ・ASCII境�
   });
 });
 
+describe("InMemoryLexicalStore.search — Unicode正規化・全角半角は一致に効かない（Issue #952、docs/recall.md §3 の表）", () => {
+  // NFC の café（é は単一の合成済み文字 U+00E9）。
+  const CAFE_NFC = "café";
+  // NFD の café（e + 結合アキュートアクセント U+0301）。
+  const CAFE_NFD = "café";
+
+  it("café（NFC）を書き、café（NFD）で引くと一致しない（表1行目）", async () => {
+    const { memoryStore, lexicalStore } = makeStore();
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: TENANT, content: CAFE_NFC, contentHash: "cafe-nfc-write" }),
+    );
+
+    const hits = await lexicalStore.search(ctx, CAFE_NFD, {
+      limit: 10,
+      filter: { tenantId: TENANT },
+    });
+
+    expect(hits).toEqual([]);
+  });
+
+  it("全角ＡＢＣを書き、半角ABCで引くと一致しない（表2行目）", async () => {
+    const { memoryStore, lexicalStore } = makeStore();
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        content: "ＡＢＣ",
+        contentHash: "zenkaku-abc-write",
+      }),
+    );
+
+    const hits = await lexicalStore.search(ctx, "ABC", {
+      limit: 10,
+      filter: { tenantId: TENANT },
+    });
+
+    expect(hits).toEqual([]);
+  });
+
+  it("café（NFD、結合文字）を書き、cafe（無アクセントASCII）で引くと一致する（表3行目）", async () => {
+    const { memoryStore, lexicalStore } = makeStore();
+    const memory = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({ tenantId: TENANT, content: CAFE_NFD, contentHash: "cafe-nfd-write" }),
+    );
+
+    const hits = await lexicalStore.search(ctx, "cafe", {
+      limit: 10,
+      filter: { tenantId: TENANT },
+    });
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.memoryId).toBe(memory.id);
+  });
+
+  it("café（NFC）を書き、cafe（無アクセントASCII）で引くと一致しない（表4行目）", async () => {
+    const { memoryStore, lexicalStore } = makeStore();
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: TENANT,
+        content: CAFE_NFC,
+        contentHash: "cafe-nfc-vs-ascii-write",
+      }),
+    );
+
+    const hits = await lexicalStore.search(ctx, "cafe", {
+      limit: 10,
+      filter: { tenantId: TENANT },
+    });
+
+    expect(hits).toEqual([]);
+  });
+});
+
 describe("InMemoryLexicalStore.search — 回帰しないこと（Issue #951 の修正が既存の約束を壊していないか）", () => {
   it("PROJ-1234 は大文字小文字を区別せず引ける（実測: 本物の Postgres は両 regime とも1件）", async () => {
     const { memoryStore, lexicalStore } = makeStore();
