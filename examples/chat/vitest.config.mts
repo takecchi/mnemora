@@ -8,6 +8,9 @@ export default defineConfig({
     fileParallelism: false,
     hookTimeout: 30_000,
     testTimeout: 30_000,
+    // createPostgresClient の既定の pool error 警告が出たら落とす守り（Issue #1213）。
+    // packages/postgres/vitest.config.mts の同名 setupFile と同じ役割（値は複製——同ファイルの doc 参照）。
+    setupFiles: ["./src/__tests__/setup-pool-error-warning-guard.ts"],
   },
   resolve: {
     alias: {

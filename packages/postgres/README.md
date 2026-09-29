@@ -506,33 +506,61 @@ HNSW 索引の接頭辞（27バイト）よりさらに6バイト長い**——�
 > [ADR 0331](../../docs/decisions/0331-extension-creation-shared-advisory-lock.md)
 > 「引き受ける負債」・追記参照。
 
-## ⚠ 接続の `error` リスナーは、利用者が付ける（今の振る舞い）
+## pool の `error`: 既定で名乗り、`onPoolError`/自分の `pool.on` で黙らせる
 
-`createPostgresClient` が作る `pool`（node-postgres の `Pool`）には、`error` リスナーを付けていない。
+`createPostgresClient` が作る `pool`（node-postgres の `Pool`）には、**常に `error` リスナーが1つ付いている。**
 **pool の中で待機している接続が DB 側から切られると**（Postgres の再起動・フェイルオーバー・運用者による切断など）、
-`Pool` が `error` イベントを出し、リスナーが無いので **Node のプロセスごと落ちる**（`Unhandled 'error' event`）。
-mnemora の呼び出しが1本も進んでいないときでも起きる【実測 2026-09-27、`pg_ctl restart -m fast`】。
+`Pool` が `error` イベントを出す——**以前はここにリスナーが無く、Node のプロセスごと落ちていた**（下の「2026-09-29
+追記」参照）。**いまは落ちない。** mnemora の呼び出しが1本も進んでいないときに切られても同じである
+【実測 2026-09-27、`pg_ctl restart -m fast`】。
 
-避けるには、利用者の側で `client.pool.on("error", …)` を付ける:
+既定の振る舞い: 切れた接続は pool から捨てられ、次の呼び出しは新しい接続で通る（`idle in transaction` も残らない。
+`src/__tests__/pool-idle-connection-loss.test.ts` が縛っている）。加えて、`console.warn` で名乗る:
 
-```ts
-const client = createPostgresClient(process.env.DATABASE_URL!);
-client.pool.on("error", (error) => {
-  // 記録するだけでよい。死んだ接続は pool が捨てる。
-  console.error("postgres pool error", error.message);
-});
+```
+[@mnemora/postgres] pool の待機中の接続が失われた。捨てて続行する: terminating connection due to administrator command
 ```
 
-付けた場合、切れた接続は pool から捨てられ、次の呼び出しは新しい接続で通る（`idle in transaction` も残らない。
-`src/__tests__/pool-idle-connection-loss.test.ts` が縛っている）。
+名乗るだけで止めたい・自分で処理したい場合は、次のどちらかを選ぶ（**どちらも既定の警告は出さなくなる**）:
+
+- **`onPoolError` を渡す**（渡した関数だけが呼ばれる）:
+
+  ```ts
+  const client = createPostgresClient(process.env.DATABASE_URL!, {
+    onPoolError: (error) => {
+      console.error("postgres pool error", error.message, (error as NodeJS.ErrnoException).code);
+    },
+  });
+  ```
+
+- **自分で `client.pool.on("error", …)` を付ける**（`onPoolError` を渡していない場合に効く。
+  付ける順番は問わない——`createPostgresClient` の呼び出しより先でも後でもよい。判定は `error` が
+  emit された時点で行うため）:
+
+  ```ts
+  const client = createPostgresClient(process.env.DATABASE_URL!);
+  client.pool.on("error", (error) => {
+    console.error("postgres pool error", error.message);
+  });
+  ```
 
 - これは**待機中の接続**の話である。`db.transaction()` の途中（mnemora のストアが借りている最中の接続）で切れた場合は、
   `createPostgresClient` が drizzle に渡す包みがその接続に `error` リスナーを付けて外すので、プロセスは落ちず、その呼び出しが reject する
   （[Issue #868](https://github.com/takecchi/mnemora/issues/868)。`src/__tests__/db-transaction-connection-loss.test.ts` が縛っている）。
-  公開する `client.pool` 自体には付けないので、利用者が `client.pool.connect()` で借りた接続には、利用者がリスナーを付けること。
-- mnemora の側でリスナーを付けるか・設定にするかは決まっていない（[Issue #1213](https://github.com/takecchi/mnemora/issues/1213)）。
-  マイグレーションと `registerEmbeddingSpace` が借りる接続には、mnemora が自分でリスナーを付けている
+  公開する `client.pool` 自体には mnemora 既定のハンドラ以外を付けないので、利用者が `client.pool.connect()` で借りた接続には、利用者がリスナーを付けること。
+- マイグレーションと `registerEmbeddingSpace` が借りる接続には、mnemora が自分でリスナーを付けている
   （[ADR 0339](../../docs/decisions/0339-checked-out-client-error-listener.md)。こちらは借りている最中の接続の話）。
+
+### 2026-09-29 追記: 以前は「利用者が付ける」が今の振る舞いだった（Issue #1213）
+
+**この節は、PR #1215（2026-09-27）の時点では「⚠ 接続の `error` リスナーは、利用者が付ける（今の振る舞い）」
+という見出しで、`createPostgresClient` がリスナーを一切付けない・付けなければプロセスごと落ちる、という
+振る舞いを固定していた。** 本 PR（Issue #1213）がその前提を反転させた——`createPostgresClient` は常に
+リスナーを1つ付け、既定では警告して続行する。[ADR 0339](../../docs/decisions/0339-checked-out-client-error-listener.md)・
+[ADR 0020](../../docs/decisions/0020-temp-database-drain-before-drop.md) が却下したのは**黙って捨てる形**
+（空のリスナー）であり、本 PR の既定の振る舞いは**名乗る形**なので、その却下理由には当たらない
+（詳細・区別・引き受けた負債は
+[ADR 0356](../../docs/decisions/0356-pool-default-error-listener-warns-by-default.md)）。
 
 ## 例外の見分け方（catch するとき）
 

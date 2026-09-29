@@ -7,11 +7,15 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { closeTestClient, getTestClient, requireDatabaseUrl } from "./test-db.js";
 
 /**
- * `createPostgresClient` の `Pool` は `error` リスナーを付けない（今の振る舞い、Issue #1213）。pool の中で
- * **待機中**の接続が DB 側から切られる（Postgres の再起動・フェイルオーバー・運用者の切断）と、pg の `Pool`
- * が `error` を emit する——リスナーが無ければプロセスが落ちる。**利用者が `client.pool.on("error", …)` を
- * 付けていれば**、死んだ接続は pool から捨てられ、次の呼び出しは新しい接続で通る。この歯は後者だけを縛る
- * （リスナーは、この歯の中で利用者の役として付ける。実装は変えていない）。
+ * `createPostgresClient` の `Pool` は常に `error` リスナーを1つ付ける（Issue #1213。2026-09-29 に
+ * 反転した——以前はリスナーを付けず、利用者が付けることが前提だった）。pool の中で**待機中**の接続が
+ * DB 側から切られる（Postgres の再起動・フェイルオーバー・運用者の切断）と、pg の `Pool` が `error` を
+ * emit する。**`onPoolError` を渡さず、利用者も `client.pool.on("error", …)` を付けなければ**、
+ * `createPostgresClient` 自身の既定のリスナーが `console.warn` で名乗って続行する
+ * （`src/__tests__/readme-unbound-promises.postgres.test.ts` の A が縛る）。**利用者が
+ * `client.pool.on("error", …)` を付けていれば**（この歯がその役をする）、既定の警告は出ず、死んだ接続は
+ * pool から捨てられ、次の呼び出しは新しい接続で通る。この歯は後者（利用者が自分でリスナーを付けた場合）
+ * だけを縛る（リスナーは、この歯の中で利用者の役として付ける。実装は変えていない）。
  *
  * 切り方は `pg_terminate_backend`（Postgres の再起動と同じ `terminating connection due to administrator
  * command` が届く）。CI の Postgres はサービスコンテナで再起動できないため、これで代える。
