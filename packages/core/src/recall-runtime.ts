@@ -16,6 +16,7 @@ import {
 import type { MemoryId } from "./ids.js";
 import { NOT_INDEXED_REASONS } from "./recall.js";
 import type { Memory } from "./memory.js";
+import { classifyValidity } from "./validity.js";
 import {
   ANN_TRUNCATION_UNDECIDABLE_LEXICAL_ACTIVE,
   DEFAULT_ASSOCIATION_ANCHOR_COUNT,
@@ -672,12 +673,16 @@ export async function runRecall(
    *
    * **⚠ ここでは件数を数えない。** `expired`/`not_yet_valid` の exact な件数は
    * `aggregateScope` から取る（`period` と同じ扱い。`FilteredOmission.condition` の doc 参照）。
+   *
+   * ⚠ **2026-09-29 追記（Issue #1188）: 述語そのものは `classifyValidity`（`./validity.js`、
+   * 非公開）に切り出した。** `consolidate()`/`reflect()` も同じ関数を呼ぶ——1箇所に置く理由は
+   * `classifyValidity` の doc コメントを見ること。境界・挙動は変えていない
+   * （`classifyValidity` は先に `validUntil` を見るが、真偽値としての結果はどちらの順で見ても
+   * 変わらない——逆転した区間では両方の条件が同時に「外」を指すため）。
    */
   const survivesValidityGate = (memory: Memory): boolean => {
     if (scope.validAt === undefined) return true;
-    if (memory.validFrom != null && memory.validFrom > scope.validAt) return false;
-    if (memory.validUntil != null && memory.validUntil <= scope.validAt) return false;
-    return true;
+    return classifyValidity(memory, scope.validAt) === null;
   };
 
   /**
