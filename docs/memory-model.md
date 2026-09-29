@@ -92,6 +92,14 @@ kind ごとに形が違う部分）は `provenance` jsonb 列にまとめる。�
 今のところ立たない——`basis.memoryIds` を持つ `inferred` を書く経路（`createMemory` を
 直接叩く等）が在ってはじめて効く。詳細は ADR 0342「引き受けた負債」。
 
+**⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md)）: 「Observation は
+追記専用で forget/purge/削除の経路がコードに無く」に、1つだけ例外ができた。**
+`eraseTenant`（`packages/core/src/erase-tenant.ts`、独立関数、明示呼び出し専用）は
+**1つの Observation ではなく、テナントに属する `observations` 全行**を物理削除する
+——`forget`/`purge`（1つの Memory・1つの Observation を対象にした既存の口）には
+引き続きこの経路が無い。この上の段落・ADR 0257 が言う「探していない」という設計は、
+`Runtime.forget`/`Runtime.purge` の射程についての記述としては変わっていない。
+
 ---
 
 ## 3. 三つ（四つ）の時計
@@ -1156,6 +1164,10 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 ⟹ **この版でも「1つのテナントを跡形なく消す」手段は無い。**purge は法的な要求（`purge()` の doc）に応える口だが、(b) に挙げたものは今回も残る。
 テナント単位の消去の口を新設する判断は #1207「考えられる方向」1 のまま、引き続き決まっていない。
 今の振る舞いは `packages/postgres/src/__tests__/tenant-erasure-residue.postgres.test.ts` が縛っている——**(a) の部分は ADR 0375 の約束として、(b) の部分はこれまでどおり「今の振る舞いの記録」として。**
+
+**⚠ 2026-09-30 追記（[ADR 0383](./decisions/0383-erase-tenant.md)）: 「テナント単位の消去の口を新設する判断」はもう決まった——上の「⟹」段落と直前の1文は、もう今の振る舞いではない。** `forget` → `purge` → 保持期間の掃除という組み合わせ（上の表が縛る、(b) の残存を含む「今の振る舞い」）とは**別に**、独立関数 `eraseTenant`（`packages/core/src/erase-tenant.ts`、`Runtime` のメソッドではない。明示呼び出し専用で `tick()`/`observe()` には配線しない）を新設した。`eraseTenant` は、上の表が挙げた表を**すべて**含め、テナントに属する行を跡形なく物理削除する——`memories`・`observations`・`memory_events`・`recalls`・`recall_usages`・`labels`・`memory_labels`・`tenant_activity`・`tenant_subject_activity`・`outbox`・`tenant_settings`・全空間の `memory_embeddings_*`。DB に消去の記録は一切残らない（`events_purged` 相当の行も積まない）。呼び出し側は4つの port（`MemoryStore`/`VectorStore`/`OutboxStore`/`TenantSettingsStore`）すべてが任意メソッド `eraseTenant?` を実装している必要があり、1つでも欠けていれば何も消さずに `store_unsupported` を返す。詳細・契約・実測は ADR 0383 を参照。
+
+**この追記が上書きしないもの**: `recalls` の保持方針（生きているテナントの分。ADR 0290 が未決のまま）——`eraseTenant` は「丸ごと消す」操作であり、「どれだけの期間保持するか」という問いには答えていない。`forget`/`purge`（1つの Memory を対象にした既存の口）自体の契約も変わっていない——上の表・ADR 0375 の約束は「1つの Memory を purge したとき」の話として、引き続きそのまま成り立つ。
 
 ---
 

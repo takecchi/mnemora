@@ -571,6 +571,7 @@ interface MemoryStore {
   ): Promise<{ candidates: Array<{ memoryId: MemoryId; supersededReason: string | null }> }>;
   listLabels?(ctx: Ctx): Promise<LabelSummary[]>;
   registerLabel?(ctx: Ctx, name: string): Promise<LabelSummary>;
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
 }
 
 type MemoryStatus = 'active' | 'superseded' | 'contested' | 'archived' | 'forgotten';
@@ -706,6 +707,7 @@ interface VectorStore {
   ): Promise<VectorHit[]>;
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
   deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
   getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
   searchMany?(
     ctx: Ctx,
@@ -762,6 +764,15 @@ interface VectorEntry {
 > [docs/migration-v1.md](./migration-v1.md) 項目30を参照。契約の詳細（存在しない/
 > 形式不正な id は no-op、他テナントの行は消さない、空配列は no-op）はソースの
 > doc コメントを参照すること。
+
+> **Issue #1207（2026-09-30 追記、[ADR 0383](./decisions/0383-erase-tenant.md)）**:
+> `eraseTenant?`（任意メソッド）を足した——`ctx.tenantId` に属する行を、adapter が
+> 持つ**全 space**から`opts.limit`を目安に消す。独立関数 `eraseTenant`
+> （`packages/core/src/erase-tenant.ts`、`MemoryStore`/`OutboxStore`/
+> `TenantSettingsStore` の同名の口と束ねて呼ぶ、`Runtime` のメソッドではない）専用の
+> 口であり、`deleteAcrossSpaces`（必須メソッド、`Runtime.purge` が呼ぶ）とは別物——
+> あちらは「特定の `memoryIds`」が対象、こちらは「このテナントの行全部」が対象。
+> `deleteAcrossSpaces` と違い任意メソッドにした理由はソースの doc コメントを参照。
 
 契約:
 - **`MemoryStore` が真実の源(source of truth)であり、`VectorStore` は再構築可能な派生索引である。**
@@ -1100,8 +1111,14 @@ interface OutboxStore {
     expectedAttempts: number,
     opts?: { at?: Date }
   ): Promise<void>;
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 ```
+
+> **Issue #1207（2026-09-30 追記、[ADR 0383](./decisions/0383-erase-tenant.md)）**:
+> `eraseTenant?`（任意メソッド）を足した——`ctx.tenantId` の `outbox` 行（完了・失敗・
+> 未処理を問わず）を `opts.limit` を目安に消す。独立関数 `eraseTenant`
+> （`packages/core/src/erase-tenant.ts`）専用の口。
 
 `MemoryStore.createObservationWithOutbox` / `createMemoryWithOutbox`（§5.1）が
 transactional outbox の「書く」側だとすれば、`OutboxStore` は `runtime.tick()`（§3.3）が
@@ -1154,6 +1171,7 @@ interface TenantSettingsStore {
   getSubjectActivitySeqs?(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
   getTaxonomyMode?(ctx: Ctx): Promise<TaxonomyMode>;
   setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 type EventRetention = { kind: 'unset' } | { kind: 'unlimited' } | { kind: 'days'; days: number };
@@ -1186,6 +1204,12 @@ type TaxonomyMode = 'open' | 'strict';
 > `tenant_subject_activity` の読み取り）を足した。どちらも任意メソッドで、省略時は
 > 「subject カウンタを一度も使っていない」（`false`・全 subject が 0）に倒れる。
 > 上のコード片は実体に合わせて更新済み。
+
+> **Issue #1207（2026-09-30 追記、[ADR 0383](./decisions/0383-erase-tenant.md)）**:
+> `eraseTenant?`（任意メソッド）を足した——`ctx.tenantId` の `tenant_settings` 行を消す。
+> `tenant_id` が主キーのため高々1行——`reachedLimit` は常に `false`。独立関数
+> `eraseTenant`（`packages/core/src/erase-tenant.ts`）が束ねる4つの口のうち、
+> **最後に**呼ばれる（他 port の削除が完了した後）。
 
 契約:
 - テナントに `tenant_settings` 行が無い場合は `DEFAULT_HALF_LIFE_HOURS`（720、DB 側の

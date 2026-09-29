@@ -104,7 +104,7 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -288,11 +288,12 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     }>;
     listLabels(ctx: Ctx): Promise<LabelSummary[]>;
     registerLabel(ctx: Ctx, name: string): Promise<LabelSummary>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantStoreResult>;
     private extractionKey;
 }
 
 // ===== dist/__fixtures__/in-memory-outbox-store.d.ts =====
-import { type ClaimOutboxJobsOptions, type Ctx, type OutboxJobRecord, type OutboxStore } from "@mnemora/core";
+import { type ClaimOutboxJobsOptions, type Ctx, type EraseTenantResult, type EraseTenantStoreOptions, type OutboxJobRecord, type OutboxStore } from "@mnemora/core";
 export declare class InMemoryOutboxStore implements OutboxStore {
     private readonly jobs;
     constructor(jobs: OutboxJobRecord[]);
@@ -303,10 +304,11 @@ export declare class InMemoryOutboxStore implements OutboxStore {
     fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number, opts?: {
         at?: Date;
     }): Promise<void>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 // ===== dist/__fixtures__/in-memory-tenant-settings-store.d.ts =====
-import type { Ctx, DecayClock, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
+import type { Ctx, DecayClock, EraseTenantResult, EraseTenantStoreOptions, EventRetention, EventRetentionSetting, TaxonomyMode, TenantSettingsStore } from "@mnemora/core";
 export declare class InMemoryTenantSettingsStore implements TenantSettingsStore {
     private readonly activitySeqBacking?;
     private readonly subjectActivitySeqBacking?;
@@ -329,10 +331,11 @@ export declare class InMemoryTenantSettingsStore implements TenantSettingsStore 
     getSubjectActivitySeqs(ctx: Ctx, subjectIds: string[]): Promise<Record<string, number>>;
     getTaxonomyMode(ctx: Ctx): Promise<TaxonomyMode>;
     setTaxonomyMode(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 // ===== dist/__fixtures__/in-memory-vector-store.d.ts =====
-import type { Ctx, EmbeddingSpaceId, MemoryId, VectorEntry, VectorFilter, VectorHit, VectorStore } from "@mnemora/core";
+import type { Ctx, EmbeddingSpaceId, EraseTenantResult, EraseTenantStoreOptions, MemoryId, VectorEntry, VectorFilter, VectorHit, VectorStore } from "@mnemora/core";
 import type { InMemoryMemoryStore } from "./in-memory-memory-store.js";
 export declare class InMemoryVectorStore implements VectorStore {
     private readonly memoryStore;
@@ -346,6 +349,7 @@ export declare class InMemoryVectorStore implements VectorStore {
     }): Promise<VectorHit[]>;
     delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
     deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+    eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
     getVectors(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
 }
 
@@ -535,6 +539,7 @@ export interface MemoryStoreConformanceOptions {
     supportsFindContestedByClaimKey?: boolean;
     supportsListActiveClaimPredicates?: boolean;
     supportsResolveOrphanedContested?: boolean;
+    supportsEraseTenant: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
@@ -551,6 +556,7 @@ export interface OutboxStoreConformanceOptions {
     seedJob: (ctx: Ctx, input: SeedOutboxJobInput) => Promise<OutboxJobRecord>;
     peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
     supportsRealConcurrency?: boolean;
+    supportsEraseTenant: boolean;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;
 
@@ -565,6 +571,7 @@ export interface TenantSettingsStoreConformanceOptions {
     advanceActivitySeq?: (ctx: Ctx) => Promise<void> | void;
     advanceSubjectActivitySeq?: (ctx: Ctx, subjectId: string) => Promise<void> | void;
     supportsTaxonomyMode?: boolean;
+    supportsEraseTenant: boolean;
 }
 export declare function describeTenantSettingsStoreConformance(options: TenantSettingsStoreConformanceOptions): void;
 
@@ -596,5 +603,6 @@ export interface VectorStoreConformanceOptions {
     prepareMemoryId: (ctx: Ctx, attrs?: PrepareMemoryIdAttrs) => Promise<MemoryId> | MemoryId;
     prepareEmbeddingSpace: (space: EmbeddingSpaceId) => Promise<void> | void;
     supportsGetVectors: boolean;
+    supportsEraseTenant: boolean;
 }
 export declare function describeVectorStoreConformance(options: VectorStoreConformanceOptions): void;
