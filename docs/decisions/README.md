@@ -403,5 +403,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0380](./0380-reextract-withdrawn-across-extractor-versions.md) | `reextract` は、版を跨いで退けた記憶を見る——`MemoryStore.listBySourceObservationAllVersions` を新設する | 採用 (2026-09) |
 | [0381](./0381-contested-group-write-path-implementation.md) | 多者間 `contested`（`memory_relations`）の書き込み経路の実装 —— Issue #207/#933 PR2 段階B の直しと設計判断 | 採用 (2026-09) |
 | [0382](./0382-vector-store-delete-across-spaces.md) | `VectorStore` に `deleteAcrossSpaces`（必須メソッド）を足す——`purge` が全 space の embedding を消す | 採用 (2026-09) |
+| [0383](./0383-erase-tenant.md) | テナント単位で全表から行を消す `eraseTenant` を足す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
