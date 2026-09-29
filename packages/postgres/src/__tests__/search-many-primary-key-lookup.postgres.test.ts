@@ -9,20 +9,29 @@ import { registerEmbeddingSpace } from "../vector-space.js";
 import { captureClientQuery, closeTestClient, explainCaptured, getTestClient } from "./test-db.js";
 
 /**
- * Issue #1181 / ADR 0362: `PostgresVectorStore.searchMany` は、統計の有無で
- * `memories` の引き方を2つ持つ（`pg_class.reltuples` で切り替える、追記・案2）。
+ * Issue #1181/#1415 / ADR 0374: `PostgresVectorStore.searchMany` は、統計の有無で
+ * `memories` の引き方を2つ持つ——`this.statsPresenceGate`（インスタンス・表ごとに
+ * 「両方の統計が確認済みか」を覚える、`vector-store.ts` の `StatsPresenceGate` の
+ * doc 参照）で切り替える。**ADR 0362 が最初に採った「1本の SQL に両枝を入れて
+ * `pg_class.reltuples` の One-Time Filter で切り替える」やり方は、Issue #1415 の
+ * 実測（統計がある場面で `search()` に同じ仕組みを適用したところ +5.06ms、線を
+ * 大きく超えた）を受けて置き換えられた——この歯もその置き換えに合わせて書き直す。**
  *
  * 1. **統計が無い**（`ANALYZE` 前）小さいテナントでも、`memories` を主キー
  *    （`memories_pkey`）で引く——`m.id = e.memory_id` を `Join Filter` として
  *    後から捨てる、統計に依存した悪いプラン（Issue #1181 本文の実測）に戻らない
  *    ことを縛る。
  * 2. **統計がある**場合は、`search()` と同じ素の `JOIN`（今の main の形）が
- *    そのまま走ることを縛る——`memories_pkey` を経由する形（1の枝）が実際には
- *    実行されない（`EXPLAIN` で `(never executed)`）ことを確認する。
+ *    **1バイトも変わらずに**そのまま送られることを縛る——送った SQL のテキスト
+ *    そのものに `reltuples`/`OFFSET 0`/`CROSS JOIN LATERAL` が一切現れないことを
+ *    確認する（ADR 0362 の「1本の SQL に両方の形を持たせる」仕組み自体が
+ *    無くなったので、`(never executed)` の枝を探すという以前の確認方法はもう
+ *    成立しない——統計がある場面では候補D の SQL 自体が生成されない）。
  *
  * ⚠ **速さは縛らない**（環境・PostgreSQL の版・器の負荷に依存する）。縛るのは
- * プランの形（`memories_pkey` を使うこと・`m.id = e.memory_id` が `Join Filter`
- * として現れないこと）だけである。
+ * プランの形・送られる SQL の形（`memories_pkey` を使うこと・`m.id = e.memory_id`
+ * が `Join Filter` として現れないこと・統計がある場面で候補D の痕跡が SQL に
+ * 全く現れないこと）だけである。
  *
  * **共有の `TEST_EMBEDDING_SPACE`（`test-db.ts`）は使わない**——他の歯
  * （`recall.postgres.test.ts` 等）が既にその表を `ANALYZE` 済みにしていることが
@@ -95,7 +104,7 @@ describe("searchMany: 統計が無くても memories を主キーで引く（Iss
     expect(plan, `EXPLAIN 全文:\n${plan}`).not.toMatch(/Join Filter: \(m\.id = e\.memory_id\)/);
   }, 60_000);
 
-  it("EXPLAIN で、統計がある場合は今のSQL（main の形）がそのまま走る（memories_pkey 経由の枝は実行されない）", async () => {
+  it("統計がある場合は、送る SQL 自体が今の main の形のまま（候補D の痕跡が一切現れない）", async () => {
     const { db, pool } = await getTestClient();
     const space: EmbeddingSpaceId = {
       provider: "test-issue-1181",
@@ -138,25 +147,26 @@ describe("searchMany: 統計が無くても memories を主キーで引く（Iss
       (text) => text.includes(table) && /values/i.test(text),
       () => vectorStore.searchMany(ctx, space, queries, { limit: 40, filter }),
     );
-    const plan = await explainCaptured(pool, captured, "ANALYZE, FORMAT TEXT");
 
-    // `One-Time Filter` の切り替え自体が在ることを確認する。
-    expect(plan, `EXPLAIN 全文:\n${plan}`).toMatch(/One-Time Filter/);
-    // 候補D の枝は `CROSS JOIN LATERAL (SELECT * FROM memories WHERE id = e.memory_id
-    // OFFSET 0) m` という形に由来するため、EXPLAIN 上は「`Subquery Scan on m`
-    // （またはエイリアス `m_1`・`m_2`…）」という固有の形で現れる——`search()` と同じ
-    // 素の `JOIN`（統計ありの枝）は `memories` を直接参照するテーブルスキャンであり、
-    // この「派生テーブルとしての m」の形にはならない。⟹ この行がどれも
-    // `(never executed)` であれば、統計ありの場面で候補D の枝が実際には動いていない
-    // ことが分かる（`memories_pkey` 自体は、統計ありの枝が独自に Nested Loop で
-    // 選ぶこともあるため、`memories_pkey` の使用の有無そのものは縛らない）。
-    const subqueryScanOnMLines = plan
-      .split("\n")
-      .filter((line) => /Subquery Scan on m(_\d+)?\b/.test(line));
-    expect(subqueryScanOnMLines.length, `EXPLAIN 全文:\n${plan}`).toBeGreaterThan(0);
-    for (const line of subqueryScanOnMLines) {
-      expect(line, `EXPLAIN 全文:\n${plan}`).toMatch(/\(never executed\)/);
-      expect(line, `EXPLAIN 全文:\n${plan}`).not.toMatch(/actual time=/);
-    }
+    // ADR 0374: 統計が確認済みになったあとは、`reltuples`/One-Time Filter/候補D の
+    // 痕跡を一切持たない、今の main と同じ2枝の SQL がそのまま送られる。
+    expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(/reltuples/i);
+    expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(/OFFSET 0/i);
+    expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(/to_regclass/i);
+    // ⚠ `CROSS JOIN LATERAL` 自体は searchMany() の VALUES 束ね（アンカーごとの
+    // LATERAL、クラス doc コメント参照）で常に現れるため縛らない——候補D 特有の
+    // `CROSS JOIN LATERAL (SELECT * FROM memories WHERE id = e.memory_id OFFSET 0)`
+    // という形だけを見る。
+    expect(captured.text, `送られた SQL:\n${captured.text}`).not.toMatch(
+      /CROSS JOIN LATERAL\s*\(\s*SELECT \* FROM memories/i,
+    );
+    // `vector_norm(e.embedding) > 0` 枝・`= 0` 枝の2つだけ——候補D を混ぜていた頃の
+    // 4枝には戻っていない（`UNION ALL` は1回だけ現れる）。
+    expect(captured.text.match(/UNION ALL/gi)?.length, `送られた SQL:\n${captured.text}`).toBe(1);
+
+    const plan = await explainCaptured(pool, captured, "ANALYZE, FORMAT TEXT");
+    // 素の `JOIN memories m ON ...` が走ることの確認（`Subquery Scan on m` という
+    // 候補D 特有の形は現れない——候補D の SQL 自体を送っていないため）。
+    expect(plan, `EXPLAIN 全文:\n${plan}`).not.toMatch(/Subquery Scan on m/);
   }, 60_000);
 });

@@ -11,6 +11,16 @@ import { PgvectorVersionUnsupportedError } from "../pgvector-capability.js";
  * 検査すること・インスタンスごとに成功をキャッシュすること・失敗はキャッシュしないことを、
  * `db.execute`/`db.transaction` を差し替えた偽の `Db` で固定する。
  *
+ * **Issue #1415 / ADR 0374 追記**: `search()`/`searchMany()` は、この能力検査に加えて
+ * `StatsPresenceGate`（`vector-store.ts` の doc 参照）も持つ——未確認の間は
+ * `db.execute` で `reltuples` を読む別の往復を払う。この歯の本題は
+ * `PgvectorCapabilityGate` であって `StatsPresenceGate` ではないため、
+ * `createFakeDb` は `reltuples` を含むクエリを検出し、常に「両方の表が確認済み」
+ * という行を返す（`queryLiteralText`/`createFakeDb` の doc コメント参照）——
+ * こうしておくと `StatsPresenceGate` の往復は最初の1回だけ静かに消費され、
+ * この歯が元々検査していた「能力検査の呼び出し回数・順序」の期待値は
+ * Issue #1415 の前後で変えずに済む。
+ *
  * 本物の Postgres + pgvector 0.8.0 に対する実測は
  * `search-hnsw` 系・`recall-roundtrip-count.postgres.test.ts` 等の `*.postgres.test.ts`
  * が担う（このファイルは判定ロジックと呼び出し順序だけを見る）。
@@ -23,18 +33,51 @@ const SUPPORTED_ROW = { extversion: "0.8.0", vartype: "enum", enumvals: ["off", 
 const UNSUPPORTED_ROW = { extversion: "0.7.4", vartype: null, enumvals: null };
 
 /**
- * `db.execute`（能力検査専用——`PostgresVectorStore` は `search`/`searchMany` の中で、
- * トランザクション**外**の `db.execute` を能力検査以外に一度も呼ばない）と
- * `db.transaction`（`SET LOCAL` + 本体 SELECT）を差し替えた偽の `Db`。
+ * drizzle の `SQL`（`sql\`...\``/`sql.raw(...)` の戻り値）から、リテラル部分だけを
+ * 繋いだテキストを取り出す（`queryChunks` の文字列チャンクだけを拾い、パラメータの
+ * 値は無視する——`vector-store-pgvector-capability.test.ts` がクエリの**種類**を
+ * 見分けるためだけに使う、簡易な検査）。
+ */
+function queryLiteralText(query: unknown): string {
+  const chunks = (query as { queryChunks?: unknown[] }).queryChunks ?? [];
+  return chunks
+    .map((chunk) =>
+      Array.isArray((chunk as { value?: unknown }).value)
+        ? ((chunk as { value: unknown[] }).value as string[]).join("")
+        : "",
+    )
+    .join("");
+}
+
+/**
+ * `db.execute` を2種類に分けて差し替えた偽の `Db`。
+ *
+ * - **能力検査**（`PgvectorCapabilityGate`、`PGVECTOR_CAPABILITY_QUERY`）——
+ *   このファイルの本題。`capabilityRows` を今までどおり位置で読む。
+ * - **統計確認**（Issue #1415 / ADR 0374、`StatsPresenceGate.bothPresent`）——
+ *   このファイルの本題ではない。`reltuples` を含むクエリだと分かったら、
+ *   常に「両方の表の統計が確認済み」（`reltuples >= 0`）な行を返す——`capabilityRows`
+ *   の位置を一切消費しない。`StatsPresenceGate` は一度確認済みになったら二度と
+ *   `db.execute` を呼ばないため、この固定応答は最初の1回だけ効き、以後の
+ *   `search()`/`searchMany()` 呼び出しでは（能力検査だけが）`db.execute` を呼ぶ
+ *   ——このファイルが元々検査していた「能力検査の呼び出し回数・順序」は、
+ *   この分離によって Issue #1415 以前とまったく同じ形のまま検査できる。
+ *
+ * `db.transaction`（`SET LOCAL` + 本体 SELECT）も差し替える。
  */
 function createFakeDb(capabilityRows: readonly (Record<string, unknown> | undefined)[]) {
-  let executeCallCount = 0;
+  let capabilityExecuteCallCount = 0;
+  let statsExecuteCallCount = 0;
   let transactionCallCount = 0;
 
   const db = {
-    execute: async (_query: unknown) => {
-      const row = capabilityRows[executeCallCount];
-      executeCallCount += 1;
+    execute: async (query: unknown) => {
+      if (/reltuples/i.test(queryLiteralText(query))) {
+        statsExecuteCallCount += 1;
+        return { rows: [{ embedding_reltuples: 100, memories_reltuples: 100 }] };
+      }
+      const row = capabilityRows[capabilityExecuteCallCount];
+      capabilityExecuteCallCount += 1;
       return { rows: row === undefined ? [] : [row] };
     },
     transaction: async (cb: (tx: unknown) => Promise<unknown>) => {
@@ -48,7 +91,8 @@ function createFakeDb(capabilityRows: readonly (Record<string, unknown> | undefi
 
   return {
     db: db as unknown as Db,
-    getExecuteCallCount: () => executeCallCount,
+    getExecuteCallCount: () => capabilityExecuteCallCount,
+    getStatsExecuteCallCount: () => statsExecuteCallCount,
     getTransactionCallCount: () => transactionCallCount,
   };
 }
