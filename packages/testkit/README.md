@@ -58,13 +58,21 @@ class MyEventStore implements EventStore {
     if (event.memoryId !== null && !knownMemoryIds.has(event.memoryId)) {
       throw new Error(`append: unknown memoryId: ${event.memoryId}`);
     }
-    const row: MemoryEvent = { id: randomUUID(), at: event.at ?? new Date(), ...event };
+    // structuredClone で複製して持つ——受け取った入力（meta の配列・オブジェクト）を
+    // 呼び手が後から書き換えても、store の中身は変わらない（適合テストが検査する約束）。
+    const row: MemoryEvent = structuredClone({
+      id: randomUUID(),
+      at: event.at ?? new Date(),
+      ...event,
+    });
     this.rows.push(row);
-    return row;
+    return structuredClone(row);
   }
 
   async get(ctx: Ctx, id: EventId): Promise<MemoryEvent | null> {
-    return this.rows.find((row) => row.tenantId === ctx.tenantId && row.id === id) ?? null;
+    const row = this.rows.find((row) => row.tenantId === ctx.tenantId && row.id === id);
+    // 返す値も複製する——呼び手が受け取った値を書き換えても、次の get は影響を受けない。
+    return row ? structuredClone(row) : null;
   }
 
   async list(ctx: Ctx, filter: EventFilter): Promise<MemoryEvent[]> {

@@ -40,6 +40,24 @@ suite は、存在しない」はもう成り立たない。`describeLLMProvider
 PR #1296 のコメント1・2）は、この追記の対象外——足すかどうかは決めていない
 （ADR 0372「決めたこと」3）。
 
+**⚠ 2026-09-29 追記（Issue #1412（Issue #1238 棚卸しの続き）/
+[ADR 0373](./decisions/0373-conformance-suite-issue-1412-promises.md)）**:
+直前の追記が「対象外」とした残りの候補のうち、A8（渡した入力・返した値が store の中と
+切り離されていること。`MemoryStore`・`VectorStore`・`EventStore`・`OutboxStore` の
+4 suite だけ——`LexicalStore`・`TenantSettingsStore` は切り離すべき参照そのものを
+持たないため外した）・A10（`events_purged` の `meta` の日時3欄が ISO 8601 の文字列で
+あること）・A11（`getRecall` の `query` が JSON を通る欄のまま読み戻ること）と、
+PR #1296 棚卸しのコメント1（`resolveOrphanedContested?` の CAS 違反で
+`MemoryStatusConflictError`）・コメント2（`ContestedWithoutCompanionError`/
+`MemoryStatusConflictError`/`MemoryPurgeConflictError` の型付きフィールドの値）を
+`MemoryStore`・`VectorStore`・`EventStore`・`OutboxStore` に足した。**住所・呼び出し元の
+一覧（§1・§2.1）に変更は無い**（既存4 suite の中身が増えただけ）。**新しい任意の
+適合フラグが1本増えた**（`MemoryStoreConformanceOptions.supportsResolveOrphanedContested?`
+——§9 参照）。**この節の数（it の宣言数）はどこにも書いていないので、この追記でも
+数えていない。**A12（`purgeExpiredEvents` の並行の正しさ）は、この追記の対象外——
+conformance suite の外から adapter の中に遅延を差し込めず、赤くなりうる歯を書けない
+（Issue #1412 のコメント）。
+
 ---
 
 ## 1. 何が在るか — 8 suite
@@ -458,6 +476,8 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
 - `MemoryStoreConformanceOptions` の `supportsLabels?`・`supportsFindActiveByClaimKey?`・`supportsListActiveClaimPredicates?`——どれも `supportsOnlyMemoryIdsFilter?` と同じ3状態で、省略すると「⚠ 未検査: <フラグ名> が指定されていない — adapter "<name>" に対して …の歯は検査していない」という named it が1本登録される。
 - `TenantSettingsStoreConformanceOptions` の `supportsTaxonomyMode?`——⚠ **これだけは形が違う。**省略すると `false` と同じに扱われ、taxonomy mode の歯は**何も登録されない**（named it も無い）。⟹ 出力からは「検査していない」が読めない（今の振る舞い。Issue #818 で必須から任意へ戻した経緯は `docs/migration-v1.md` の **6** の末尾）。
 
+**⚠ 2026-09-29 追記（Issue #1412 コメント1、[ADR 0373](./decisions/0373-conformance-suite-issue-1412-promises.md)）**: `MemoryStoreConformanceOptions` に `supportsResolveOrphanedContested?` が増えた——`resolveOrphanedContested?`（任意メソッド、CAS 違反で `MemoryStatusConflictError` を投げること）を検査する。上の `supportsLabels?` 等と同じ3状態。`packages/testkit/src/__tests__/in-memory-fixtures.conformance.test.ts`・`packages/postgres/src/__tests__/conformance.postgres.test.ts` はどちらも `true` を渡している。
+
 ---
 
 ## 出所について
@@ -481,4 +501,11 @@ adapter 実装者を含む）は、コンパイルエラーにならずそのま
   `MemoryStore`・`VectorStore`・`EventStore` の3 suite に7つの約束の歯を足したことに伴い、
   冒頭に追記した。**住所・呼び出し元の一覧（§1・§2.1）は変わっていない**ので、そこは
   更新していない。**it の数はどこにも書いていないので、更新の対象自体が無い。**
+  他の節・他の追記が数えた範囲はこの追記の対象外。
+- **2026-09-29 追記**（Issue #1412（Issue #1238 棚卸しの続き）/
+  [ADR 0373](./decisions/0373-conformance-suite-issue-1412-promises.md)）:
+  `MemoryStore`・`VectorStore`・`EventStore`・`OutboxStore` の4 suite に A8・A10・A11・
+  PR #1296 棚卸しコメント1・2 の約束の歯を足したことに伴い、冒頭と §9 に追記した。
+  **住所・呼び出し元の一覧（§1・§2.1）は変わっていない**ので、そこは更新していない。
+  **it の数はどこにも書いていないので、更新の対象自体が無い。**
   他の節・他の追記が数えた範囲はこの追記の対象外。

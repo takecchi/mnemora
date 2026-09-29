@@ -1062,7 +1062,7 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は6件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は7件**
 
 ⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`54b05bc`**（PR #1407）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
@@ -1319,6 +1319,53 @@ conformance suite を当てると新しく落ちる（実行時に壊れる）�
 ⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は6件
 （PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
 PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238）になった。**
+
+### 24. `packages/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/`EventStore`/`OutboxStore` 実装にさらに約束を新しく課すようになった（`@mnemora/testkit`）
+
+[Issue #1412](https://github.com/takecchi/mnemora/issues/1412)（Issue #1238 棚卸しの続き）、
+[ADR 0373](./decisions/0373-conformance-suite-issue-1412-promises.md)。**この項目は、
+上の棚卸しの範囲（`54b05bc`。PR #1407）の外——着地に先立って変更を作った本人が
+この節に足した1件である**（項目19・20・21・22・23 と同じ扱い）。
+
+**何が変わったか**: `describeMemoryStoreConformance`・`describeVectorStoreConformance`・
+`describeEventStoreConformance`・`describeOutboxStoreConformance` に、Issue #1238 が
+挙げた候補のうち A8（`MemoryStore`/`VectorStore`/`EventStore`/`OutboxStore` の4つに
+限定——渡した入力・返した値が store の中の実体と切り離されていること）・A10
+（`events_purged` の meta の `oldestPurgedAt`/`newestPurgedAt`/`olderThan` が ISO 8601
+の文字列であること）・A11（`getRecall` の `query` が JSON を通る欄のまま読み戻ること）
+と、PR #1296 棚卸しのコメント1（`resolveOrphanedContested?` の CAS 違反で
+`MemoryStatusConflictError`）・コメント2（`ContestedWithoutCompanionError`/
+`MemoryStatusConflictError`/`MemoryPurgeConflictError` の型付きフィールドの値）を
+検査する `it` が増えた。**公開の型は、新しい任意フィールド
+`MemoryStoreConformanceOptions.supportsResolveOrphanedContested?: boolean`
+（既存の `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` と同じ
+3状態・省略可の形）が増えた以外は変わっていない**——中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`@mnemora/testkit`
+の conformance suite が…」の項目）を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 足した `it` は、上の「数え方の規律への追記
+（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に
+当たる——型検査は壊れないが、この約束のどれかを満たしていない自前実装は、
+conformance suite を当てると新しく落ちる（実行時に壊れる）。項目21（PR #1394）・
+項目23（PR #1413）と同じ判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore`/`VectorStore`/`EventStore`/`OutboxStore`
+実装を、`packages/testkit` の conformance suite に対して走らせている利用者のうち、
+この PR が足した約束のどれかを満たしていない場合。**適合テストを走らせていない・
+自前実装を持たない利用者は影響を受けない。**
+**`packages/testkit/README.md` の最小の例（`MyEventStore`）のとおりに書いた `EventStore`
+も落ちる**——その例は `append` で受け取った入力をそのまま保存して返し、`get` も
+保存した行をそのまま返していたので、A8 の「渡した入力・返した値を呼び手が書き換えても、
+store の中は変わらない」を満たしていなかった（この変更で、例のほうを
+`structuredClone` で写す形に直した）。
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は7件
+（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238、Issue #1412）になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

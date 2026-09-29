@@ -74,8 +74,8 @@ describeMemoryStoreConformance({
   supportsResolveContestedPair: true,
   supportsRestoreSupersededBy: true,
   supportsPreviewRestoreSupersededBy: true,
-  // ⭐ 任意の4つ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
-  // supportsListActiveClaimPredicates）は意図的に渡さない。
+  // ⭐ 任意の5つ（supportsOnlyMemoryIdsFilter / supportsLabels / supportsFindActiveByClaimKey /
+  // supportsListActiveClaimPredicates / supportsResolveOrphanedContested）は意図的に渡さない。
 });
 
 /**
@@ -126,7 +126,7 @@ function testsUnder(root: RunnerTask, needle: string): RunnerTask[] {
 }
 
 describe("docs/conformance.md §9: 任意フラグを省略したときに登録される it", () => {
-  it("MemoryStore: 省略した4つのフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
+  it("MemoryStore: 省略した5つのフラグのそれぞれに「⚠ 未検査」の named it が1本ずつ登録される", ({
     task,
   }) => {
     const tests = testsUnder(task.file, MEMORY_NAME);
@@ -138,6 +138,7 @@ describe("docs/conformance.md §9: 任意フラグを省略したときに登録
       "supportsLabels",
       "supportsFindActiveByClaimKey",
       "supportsListActiveClaimPredicates",
+      "supportsResolveOrphanedContested",
     ]) {
       const unchecked = names.filter((n) =>
         n.startsWith(`⚠ 未検査: ${flag} が指定されていない — adapter "${MEMORY_NAME}" に対して `),

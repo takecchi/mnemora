@@ -105,6 +105,9 @@ describeMemoryStoreConformance({
   // Issue #691続き / ADR 0329: PostgresMemoryStore は listActiveClaimPredicates を
   // 実装している。
   supportsListActiveClaimPredicates: true,
+  // Issue #1412 コメント1 / ADR 0373: PostgresMemoryStore は resolveOrphanedContested を
+  // 実装している。
+  supportsResolveOrphanedContested: true,
 });
 
 describeEventStoreConformance({
