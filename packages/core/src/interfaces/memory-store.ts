@@ -2068,18 +2068,14 @@ export interface MemoryStore {
    *   含む `CHECK` は無い）ため、`NULL` へ書き換えて構わない——このテナントを丸ごと
    *   消す以上、「何に置き換わったか」「どれと矛盾していたか」という参照先の情報を
    *   残す意味も無い。
-   * - 🔴 **他テナントの行がこのテナントの行を `superseded_by_id`/`contested_with_id` で
-   *   参照している場合、`{ kind: "blocked_by_foreign_reference"; count }` を返し、
-   *   このメソッドが行う削除は一切コミットしない**（他テナントの行は一度も書き換えない）。
-   *   `count` は参照している他テナントの行数。**この検査・削除は1つのトランザクションの
-   *   中で行う**——検査で見つからなければ、その同じトランザクションでそのまま削除を進める。
-   *   ⚠ **`eraseTenant`（独立関数）の呼び出し全体で見ると、この `blocked_by_foreign_reference`
-   *   が返るより前に処理された他の port（`vectorStore`/`outboxStore`）の削除は、
-   *   それぞれ別のトランザクションで既にコミット済みである**——4つの port は同じ DB でも
-   *   別々の呼び出し（分散トランザクションではない）なので、`memoryStore` だけを
-   *   ロールバックしても他 port の削除は戻らない。次に同じ `opts` で呼び直せば、
-   *   `vectorStore`/`outboxStore` は既に空なので0件で通過し、`memoryStore` だけが
-   *   （参照が解消されない限り）再び同じ結果を返す——副作用が二重に起きることはない。
+   * - 🔴 **他テナントの行がこのテナントの行を参照している場合（外部キーのどの経路でも。
+   *   埋め込み空間の表のように、このテナントの行を消すと巻き込まれて消える行も含む）、
+   *   `{ kind: "blocked_by_foreign_reference"; count }` を返し、1行も消さない**
+   *   （他テナントの行は一度も書き換えない）。`count` は参照している他テナントの行数。
+   *   **この検査・削除は1つのトランザクションの中で行う**——検査で見つからなければ、その
+   *   同じトランザクションでそのまま削除を進める。`eraseTenant`（独立関数）はこの口を
+   *   4つの port の中で最初に呼ぶので、これが返ったときほかの port にはまだ触れていない
+   *   （ADR 0383 決定5・決定8）。
    * - `opts.dryRun === true` のときは、削除もこの自己参照の書き換えも一切行わず、
    *   削除していたら消えていたであろう件数だけを返す（`purgeExpiredEventsByRetention`
    *   の `dryRun` と同じ意味）。
@@ -2144,7 +2140,7 @@ export type EraseTenantStoreResult =
   | { kind: "executed"; deleted: number; reachedLimit: boolean }
   | {
       kind: "blocked_by_foreign_reference";
-      /** 他テナントの行のうち、このテナントの行を `superseded_by_id`/`contested_with_id` で参照している件数。 */
+      /** 他テナントの行のうち、このテナントの行を（外部キーのいずれかの経路で）参照している件数。 */
       count: number;
     };
 

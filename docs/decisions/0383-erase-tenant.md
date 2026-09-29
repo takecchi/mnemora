@@ -93,9 +93,9 @@
        対応していない adapter を壊す理由がここでは弱い、と判断した。
 
      - `{ kind: "blocked_by_foreign_reference"; count: number }` —— 他テナントの
-       行がこのテナントの行を `superseded_by_id`/`contested_with_id` で参照している。
-       **他テナントの行は一切書き換えない。`memoryStore.eraseTenant?` 内のバッチは
-       ロールバックし、途中まで消えた状態を残さない。**
+       行がこのテナントの行を外部キーで参照している（経路は決定8）。
+       **他テナントの行は一切書き換えない。1行も消さずに止め、途中まで消えた状態を
+       残さない**（`memoryStore` を最初に呼ぶ——決定5）。
 
      - `{ kind: "executed"; dryRun: boolean; deleted: {...}; reachedLimit: boolean }`
        —— 実行した（または `dryRun` でプレビューした）。`reachedLimit === true`
@@ -105,25 +105,31 @@
      それ以外の失敗（DB 接続断など）は**例外を素通しする**
      （`purgeExpiredEventsForTenant` と同じ）。
 
-  5. **呼び出し順序: `vectorStore` → `outboxStore` → `memoryStore` →
+  5. **呼び出し順序: `memoryStore` → `vectorStore` → `outboxStore` →
      `tenantSettingsStore`（設定は最後）。**
 
-     **理由**: 途中で処理が中断しても、`tenant_settings` の行が残っている限り
-     `getEventRetention` 等の読み手は「まだ設定が生きているテナント」として
-     扱い続ける——消去が未完了であることの手がかりが残る。先に設定を消すと、
+     **`memoryStore` を最初にする理由**: `blocked_by_foreign_reference` を返しうる
+     唯一の port であり、止めるときに**ほかの port へまだ1行も触れていない**状態を
+     保つため（クローン miku の決定「途中まで消えた状態を残さない」）。
+     ⚠ 当初の実装は `vectorStore` → `outboxStore` → `memoryStore` の順で、止まった
+     時点でこのテナントの埋め込み・outbox の行が既に消えていた。クローンの決定に
+     反するので、この PR の中で順序を入れ替えた（歯:
+     `erase-tenant.postgres.test.ts` の「自己参照以外の経路でも止まり、どちらの
+     テナントの行も1行も変わらない」、core 側は `erase-tenant.test.ts`）。
+     埋め込みの表を `memories` の後に消しても費用は小さい——`memory_embeddings_*`
+     の `memory_id` は `ON DELETE CASCADE` で、`migrations/0027` が `(memory_id)`
+     索引を足したので CASCADE の検索は索引で引ける（D-full の実測で10万行 1.87秒）。
+
+     **設定を最後にする理由**: 途中で処理が中断しても、`tenant_settings` の行が
+     残っている限り `getEventRetention` 等の読み手は「まだ設定が生きているテナント」
+     として扱い続ける——消去が未完了であることの手がかりが残る。先に設定を消すと、
      未完了のまま `getEventRetention` が既定値（`unset`）へ静かに戻ってしまい、
-     消去が終わっていないことに気づきにくくなる。`memoryStore` を最後から2番目に
-     したのは、`blocked_by_foreign_reference` を返しうる唯一の port であり、
-     それが起きたときに `tenantSettingsStore` へまだ触れていない状態を保つため。
+     消去が終わっていないことに気づきにくくなる。
 
      **⚠ 4つの port は別々の呼び出しであり、分散トランザクションではない。**
-     `memoryStore.eraseTenant?` が `blocked_by_foreign_reference` を返すと、
-     **その時点で既に完了している `vectorStore`/`outboxStore` の削除は、
-     それぞれのトランザクションで既にコミット済みであり、ロールバックされない。**
-     次に同じ `opts` で呼び直せば、`vectorStore`/`outboxStore` は既に空なので
-     0件で通過し、`memoryStore` だけが（参照が解消されない限り）再び同じ結果を
-     返す——副作用が二重に起きることはないが、「他テナントの行は一切書き換えない」
-     という保証は `memoryStore` 単体のトランザクションについてだけ厳密に成立する。
+     `blocked_by_foreign_reference` 以外の理由（接続断など）で途中の port が例外を
+     投げた場合、それより前の port の削除はコミット済みのまま残る。次に同じ `opts`
+     で呼び直せば、済んだ port は0件で通過する（各 store の `eraseTenant?` は冪等）。
 
   6. **MemoryStore 内は `limit` ごとに1トランザクション。** 子→親の順
      （`memory_labels`・`recall_usages`・`memory_events` → `memories` →
@@ -144,8 +150,8 @@
   7. **同じテナント内の自己参照（`memories.superseded_by_id`/`contested_with_id`）
      は、`memories` を削除する前に、そのテナントの行**全体**について
      `UPDATE memories SET superseded_by_id = NULL, contested_with_id = NULL
-     WHERE tenant_id = $1 AND (superseded_by_id IS NOT NULL OR contested_with_id
-     IS NOT NULL)` で解決する（`limit` には数えない）。**
+WHERE tenant_id = $1 AND (superseded_by_id IS NOT NULL OR contested_with_id
+IS NOT NULL)` で解決する（`limit` には数えない）。**
 
      **理由**: `limit` で区切ったバッチをまたいで自己参照が残っていると
      （このバッチで消す行を、まだ削除していない別バッチの行が指している場合）、
@@ -179,27 +185,38 @@
      可能だが、事前検査のほうがエラー処理のコード経路が単純（トランザクションを
      一度も開かずに判定できる）ため、事前検査を選んだ。
 
-  8. **他テナントの行がこのテナントの行を FK で参照している場合の検出は、
-     `memories.superseded_by_id`/`contested_with_id` の自己参照 FK に限定する。**
-     `memories` を削除する前に、次のクエリで検査する:
+  8. **他テナントの行がこのテナントの行を外部キーで参照している場合の検出は、
+     外部キーの全経路を `pg_constraint` から数え上げて行う（表名を焼き込まない）。**
+     対象は、`current_schema()` の中の単一列の外部キーのうち、参照する側・される側の
+     両方に `tenant_id` 列があるもの全部——`memories` の自己参照
+     （`superseded_by_id`/`contested_with_id`）・`memories.source_observation_id`・
+     `memory_events.memory_id`・`recall_usages.memory_id`/`recall_id`・
+     `memory_labels.memory_id`/`label_id`・**埋め込み空間の表の `memory_id`**。
+     後から表が増えても（例: #933 PR2 の `memory_relations`）、外部キーを張れば
+     自動で入る。経路ごとに次の形で数える（参照される側を `tenant_id` で絞り、
+     参照する側を外部キーの列で引く——`migrations/0027` の単一列索引が効く向き）:
 
      ```sql
-     SELECT count(DISTINCT other.id) FROM memories other
-     JOIN memories mine ON (other.superseded_by_id = mine.id OR other.contested_with_id = mine.id)
+     SELECT count(*) FROM <parent> mine JOIN <child> other ON other.<fk> = mine.<pk>
      WHERE mine.tenant_id = $1 AND other.tenant_id <> $1
      ```
 
-     1件でも見つかれば、`memories` の削除トランザクションを一切開かずに
-     `blocked_by_foreign_reference` を返す（dryRun でも同じ検査をする——
-     「消せない」はプレビューでも分かったほうが有用なため）。
+     **埋め込み空間の表を入れるのが要点である。** `memory_id` は `ON DELETE CASCADE`
+     なので、検査に入れないと他テナントの埋め込みの行が `memories` の削除に巻き込まれて
+     黙って消える（クローンの決定「他テナントの行は書き換えない」に反する）。
+     ⚠ 当初の実装は `memories` の自己参照だけを検査しており、それ以外の経路では生の
+     外部キー違反の例外になり、埋め込みの表では他テナントの行が消えていた。クローンの
+     決定に反するので、この PR の中で直した。
 
-     **⚠ この検出範囲は `memories` の自己参照だけである。** `memory_events.
-     memory_id`・`recall_usages.memory_id`・`memories.source_observation_id` も
-     理論上は他テナントの行から参照されうる（FK 自体はテナントで絞られていない）
-     が、mnemora のどの書き込み経路（`createMemory`/`createObservationWithOutbox`/
-     `createRecall` 等）もテナントを跨いだ参照を作らない——通常運用でこの種の
-     参照は発生しない。検出範囲をこの1種類に絞ったことは「引き受けた負債」に
-     明記する。
+     検査は `memories` の削除と**同じトランザクションの先頭で**行い、1件でも
+     見つかれば1行も消さずに `blocked_by_foreign_reference` を返す（dryRun でも
+     同じ検査をする）。検査と削除の間に他テナントが参照を作って外部キー違反
+     （SQLSTATE 23503）になった場合は、トランザクションごとロールバックされたうえで
+     数え直して `blocked_by_foreign_reference` を返す——数え直して0件なら他テナント
+     由来ではないので、元の例外をそのまま投げる。
+
+     **対象外**: 複数列の外部キー（`tenant_id` を含めればテナントを跨げない）と、
+     `tenant_id` を持たない表からの参照（今のスキーマには無い）。
 
   9. **DB には消去の記録を何も残さない。** `memory_events` に `events_purged`
      相当の行を積んだりしない——`memory_events` テーブル自体を消す対象に含めて
@@ -247,7 +264,7 @@
       `eraseTenant?`（Issue #1207、本 ADR）は、埋め込み空間テーブルの列挙条件を
       共通化する。** `packages/postgres/src/embedding-space-catalog.ts` の
       `listEmbeddingSpaceTables(tx)` に切り出し、`PostgresVectorStore.
-      deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
+deleteAcrossSpaces`（元は `vector-store.ts` に直接書かれていた）と
       `PostgresVectorStore.eraseTenant` の両方がこの関数を呼ぶ。
 
       **⚠ SQL（migration の `DO` ブロック）からはこの TypeScript 関数を呼べない**
@@ -271,17 +288,14 @@
 
 - **引き受けた負債**:
 
-  1. **`blocked_by_foreign_reference` の検出は `memories` の自己参照 FK だけに
-     限定している（決定8）。** `memory_events.memory_id`・`recall_usages.
-     memory_id`・`memories.source_observation_id` が他テナントから参照される
-     状態（通常運用では作れないが、直接 SQL を書けば作れる）は検出しない——
-     その状態で `eraseTenant` を呼ぶと、検出されない `blocked_by_foreign_reference`
-     ではなく、生の FK 違反例外がそのまま素通しされる（契約上は「その他の失敗」
-     に分類される）。
-  2. **`vectorStore`/`outboxStore` の削除が完了した後に `memoryStore` が
-     `blocked_by_foreign_reference` を返すと、`vectorStore`/`outboxStore` 側の
-     削除はロールバックされない（決定5）。** 4 port は分散トランザクションでは
-     ないため、これは構造的な限界であり、この PR では解消しない。
+  1. **`blocked_by_foreign_reference` の検査は、呼び出しごとに外部キーの経路の
+     数だけ問い合わせを打つ（決定8）。** 経路ごとに、このテナントの行を
+     `tenant_id` で絞って外部キーの列の索引で引くので、今の実測規模では小さいが、
+     バッチ（`limit`）ごとに毎回走る。
+  2. **`blocked_by_foreign_reference` 以外の理由で途中の port が例外を投げると、
+     それより前の port の削除はコミット済みのまま残る（決定5）。** 4 port は
+     分散トランザクションではないため、これは構造的な限界である。呼び直せば
+     済んだ port は0件で通過する。
   3. **`reachedLimit` は保守的な近似であり、実際より多く「まだ残っている」と
      報告することがある（決定6）。** 呼び出し側に無駄なもう1回の呼び出しを
      させるだけで安全性は損なわないが、効率上のわずかな負債ではある。
@@ -302,10 +316,10 @@
   1. **オーナーが「対応していない adapter を壊してでも `eraseTenant?` を必須に
      する」と判断したとき**（決定4「任意メソッドにした理由」参照）⟹
      `VectorStore.deleteAcrossSpaces`（ADR 0382）と同じ形で必須化する ADR を書く。
-  2. **`memory_events.memory_id`・`recall_usages.memory_id`・`memories.
-     source_observation_id` が他テナントから参照される具体的な運用上の事故が
-     報告されたとき**（負債1）⟹ `blocked_by_foreign_reference` の検出範囲を
-     広げる ADR を書く。
+  2. **テナントを跨いだ参照をスキーマで禁じる（外部キーを `(tenant_id, id)` の
+     複合にする）と決めたとき** ⟹ 決定8の検査は要らなくなる。複合キーにする案は
+     実測の報告の段階でクローンが採らなかった（migration が大きく、止まる時間も
+     長いため）。
   3. **`recalls` の保持方針が別途決まったとき**（ADR 0290「これが覆るとしたら」2番、
      負債5）⟹ `eraseTenant` の `recalls` の扱いも、その方針に合わせて見直す
      必要が生じるかもしれない。
@@ -324,12 +338,12 @@
   測定した。「索引あり」は本 ADR が追加する6本+埋め込みの `(memory_id)` を
   セッション内の一時索引として作った状態、「索引なし」はそれらが無い状態。
 
-  | 測定 | 索引なし | 索引あり |
-  |---|---|---|
-  | memories 2,000行削除（子表への RI チェック込み） | 90.0秒（うち `memory_events` の FK チェック 54.4秒・埋め込みテーブルの CASCADE チェック 32.6秒） | 0.50秒 |
-  | memories 10万行（テナント全件）一括削除 | （測定していない——索引なしでの全件規模は「90.0秒/2,000行」からの外挿で数十分オーダーになると見積もられ、実測は打ち切った） | 22.9秒 |
-  | observations 10万行削除 | （同上） | 3.8秒 |
-  | `limit` で1万行に区切ったバッチ1回 | — | 約2.2秒 |
+  | 測定                                             | 索引なし                                                                                                                   | 索引あり |
+  | ------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- | -------- |
+  | memories 2,000行削除（子表への RI チェック込み） | 90.0秒（うち `memory_events` の FK チェック 54.4秒・埋め込みテーブルの CASCADE チェック 32.6秒）                           | 0.50秒   |
+  | memories 10万行（テナント全件）一括削除          | （測定していない——索引なしでの全件規模は「90.0秒/2,000行」からの外挿で数十分オーダーになると見積もられ、実測は打ち切った） | 22.9秒   |
+  | observations 10万行削除                          | （同上）                                                                                                                   | 3.8秒    |
+  | `limit` で1万行に区切ったバッチ1回               | —                                                                                                                          | 約2.2秒  |
 
   **索引サイズ**（テナント10万行・他テナント20万行の状態、`pg_relation_size`）:
   `memory_events(memory_id)` 12MB（表47MB）・`memories(source_observation_id)`
@@ -358,12 +372,12 @@
   テストファイルだけを `cp` でコピーして実行した。実装は無い——`@mnemora/core` に
   `eraseTenant` が存在しないため、import の時点で失敗する）:
 
-  | テストファイル | 使い捨て worktree での結果 |
-  |---|---|
-  | `packages/postgres/src/__tests__/erase-tenant-fk-indexes.postgres.test.ts` | 赤（`eraseTenant` が存在しない・索引が無い） |
-  | `packages/postgres/src/__tests__/erase-tenant-all-tenant-tables.postgres.test.ts` | 赤（同上） |
-  | `packages/postgres/src/__tests__/erase-tenant-self-ref-batch-boundary.postgres.test.ts` | 赤（同上） |
-  | `packages/postgres/src/__tests__/erase-tenant-reobserve-fresh.postgres.test.ts` | 赤（同上） |
+  | テストファイル                                                                          | 使い捨て worktree での結果                   |
+  | --------------------------------------------------------------------------------------- | -------------------------------------------- |
+  | `packages/postgres/src/__tests__/erase-tenant-fk-indexes.postgres.test.ts`              | 赤（`eraseTenant` が存在しない・索引が無い） |
+  | `packages/postgres/src/__tests__/erase-tenant-all-tenant-tables.postgres.test.ts`       | 赤（同上）                                   |
+  | `packages/postgres/src/__tests__/erase-tenant-self-ref-batch-boundary.postgres.test.ts` | 赤（同上）                                   |
+  | `packages/postgres/src/__tests__/erase-tenant-reobserve-fresh.postgres.test.ts`         | 赤（同上）                                   |
 
   （PR 本文に実際のコマンドと出力を貼る。）
 
@@ -371,19 +385,30 @@
   実装を一度 green にした状態で、`PostgresMemoryStore.eraseTenantBody` の自己参照
   `NULL` 化の `UPDATE`（決定7）を `if (false && !dryRun)` で無効化した）:
 
-  | 壊し方 | 結果 |
-  |---|---|
+  | 壊し方                   | 結果                                                                                                                                                                                                |
+  | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
   | 自己参照 NULL 化を無効化 | 2件とも赤——`error: update or delete on table "memories" violates foreign key constraint "memories_superseded_by_id_fkey"` / `"memories_contested_with_id_fkey"`（SQLSTATE 23503）、狙いどおりの例外 |
-  | 復元 | 2件とも緑に戻る（`diff` で元ファイルと完全一致を確認） |
+  | 復元                     | 2件とも緑に戻る（`diff` で元ファイルと完全一致を確認）                                                                                                                                              |
+
+  **変異試験（2回目、別の worktree `/tmp/mgr-f6cb1d7b-red` で、枝の実装に1か所ずつ
+  変異を入れ、対照（変異なし）が緑であることを確かめたうえで）**:
+
+  | 変異                                                                 | 歯                                                      | 結果                                                                                                                                                                                                                                                                                                                                                               |
+  | -------------------------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+  | M1: 自己参照の NULL 化を抜く                                         | `erase-tenant-self-ref-batch-boundary.postgres.test.ts` | 2件とも赤（SQLSTATE 23503）                                                                                                                                                                                                                                                                                                                                        |
+  | M2: `tenant_subject_activity` の削除を抜く                           | `erase-tenant-all-tenant-tables.postgres.test.ts`       | 赤（消し切った後に行が残る表を名指し）                                                                                                                                                                                                                                                                                                                             |
+  | M3: `tenant_settings` を消さない                                     | `erase-tenant-reobserve-fresh.postgres.test.ts`         | 赤（`getEventRetention` が `unset` ではなく `unlimited`）                                                                                                                                                                                                                                                                                                          |
+  | M4: migration から `idx_memory_events_memory_id` を抜く              | `erase-tenant-fk-indexes.postgres.test.ts`              | 赤                                                                                                                                                                                                                                                                                                                                                                 |
+  | M5: 消す間 `memories` 全体を `SHARE ROW EXCLUSIVE` でロックし2秒待つ | `erase-tenant-concurrent-other-tenant.postgres.test.ts` | 赤（別テナントへの INSERT が1秒以内に終わらない）。⚠ 当初の形（閾値5秒・消去が途中かを確かめない）では、この変異で緑のままだった——事前検査の `SELECT` が取る `AccessShareLock` を「消去中」と取り違えていた。`AccessShareLock` より強いロックを持つまで待ち、閾値を1秒にし、INSERT が終わった時点で消去がまだ途中であることを確かめる形に直した（対照は3回とも緑） |
+  | 直す前の実装（`4fbaf2a`）に、決定8の新しい歯だけを持ち込む           | `erase-tenant.postgres.test.ts`（自己参照以外の経路）   | 赤（`blocked_by_foreign_reference` ではなく、`memory_events_memory_id_fkey` の外部キー違反の例外）                                                                                                                                                                                                                                                                 |
 
 - **確かめていないこと**:
 
   - 索引あり・100万行規模での `CREATE INDEX` の止まる時間の再実測（ADR 0059・
     ADR 0062 の実測を借用しているだけで、本 PR 自身では測っていない）。
-  - `vectorStore`/`outboxStore` の削除が終わった直後に `memoryStore` が
-    `blocked_by_foreign_reference` を返す、という決定5の状態を実際に作って
-    「その後の呼び直しで副作用が二重に起きない」ことを実測する歯（設計上そう
-    なるはずだが、専用の歯は書いていない）。
+  - 検査と削除の間に他テナントが参照を作って外部キー違反になる競合（決定8の
+    数え直しの経路）を、実際に割り込ませて起こす歯（経路はコードにあるが、
+    専用の歯は書いていない）。
   - 本番相当のネットワーク越しの Postgres（自分専用インスタンス、ローカル
     ソケット接続での実測である）。
   - `packages/bullmq`・`examples/chat` など、`eraseTenant` を呼ぶ運用側の
