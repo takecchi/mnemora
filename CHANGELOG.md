@@ -444,7 +444,7 @@ PR #1393・Issue #1232）になった。**
 - **`@mnemora/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/
   `EventStore`/`OutboxStore` 実装にさらに約束を新しく課すようになった——これらを
   自前で実装している人へ**（[Issue #1412](https://github.com/takecchi/mnemora/issues/1412)
-  （Issue #1238 棚卸しの続き）、[PR #1414](https://github.com/takecchi/mnemora/pull/1414)、
+  （Issue #1238 棚卸しの続き）、この PR（`feat/conformance-issue-1412`）、
   [ADR 0373](./docs/decisions/0373-conformance-suite-issue-1412-promises.md)）。
 
   Issue #1412 は、PR #1413（項目23）が切り出さなかった Issue #1238 の残りの候補のうち、

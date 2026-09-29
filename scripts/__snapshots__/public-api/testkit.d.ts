@@ -520,6 +520,7 @@ export interface MemoryStoreConformanceOptions {
     supportsLabels?: boolean;
     supportsFindActiveByClaimKey?: boolean;
     supportsListActiveClaimPredicates?: boolean;
+    supportsResolveOrphanedContested?: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 

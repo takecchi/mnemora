@@ -1,8 +1,26 @@
 // `MemoryStore`/`OutboxStore` の interface の TSDoc が例外の種類まで約束する (口, クラス) の13組について、
 // 公開の fixture（`InMemoryMemoryStore`/`InMemoryOutboxStore`）が約束のクラスを投げ、約束の欄
 // （`method`・`memoryId`・`expectedStatus`・`observedStatus`・`observedPurgedAt`・`jobId`・
-// `expectedAttempts`・`observedAttempts`）に正しい値を詰めることを縛る。適合テスト（conformance suite）の
-// 多くはクラスまでしか見ておらず、`resolveOrphanedContested` は適合テストに歯が無い。
+// `expectedAttempts`・`observedAttempts`）に正しい値を詰めることを縛る。
+//
+// ⚠ 2026-09-29 追記（Issue #1412 コメント2、ADR 0373）: この13組のうち、
+// `ContestedWithoutCompanionError` の5組すべて（`createMemory`・`createMemoryWithOutbox`・
+// `updateStatus`・`updateStatusWithEvent`・`supersedeWithNewMemories`）・
+// `MemoryStatusConflictError` のうち `updateStatusWithEvent`・`markContestedPair`・
+// `resolveContestedPair`・`resolveOrphanedContested`（CAS 違反、survivor が contested で
+// ない場合のみ）・`MemoryPurgeConflictError`（`purgeMemory` の2度目呼び出し）は、
+// `packages/testkit/src/memory-store-conformance.ts` にも同じ欄を縛る `it` が増え、
+// **外部 adapter（`@mnemora/postgres` を含む）にも課されるようになった**——もう
+// 「適合テストの多くはクラスまでしか見ておらず」ではない。**この歯を削らない理由**は、
+// (1) `resolveOrphanedContested` の「contestedWithId の食い違い」パターン・
+// `MemoryPurgeConflictError` の「forgotten でない行は observedPurgedAt=null」パターン・
+// `updateStatus` の `MemoryStatusConflictError`（こちらは本 PR より前から別の既存の歯が
+// conformance suite で見ている）は、この一覧ほど網羅的な形では conformance suite に
+// 出ていない、(2) この歯は DB 不要・実行が速く、`packages/testkit` 内だけで13組を
+// まとめて見渡せる一覧としての価値は変わらない、(3) `OutboxLeaseConflictError` の4組は
+// 今回も conformance suite の対象外（Issue #1412 の切り出し範囲外——ADR 0373
+// 「引き受けた負債」参照）ため。
+//
 // ここは `packages/testkit` 内だけで完結する歯で、`*-conformance.ts`（外部の adapter も走らせる公開面）には
 // 足さない（#809）。Postgres と並べて同じ欄を比べる歯は
 // `packages/postgres/src/__tests__/store-boundary-diff.postgres.test.ts` の `TYPED_THROWS`。

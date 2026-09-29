@@ -156,10 +156,44 @@
     `supportsResolveOrphanedContested` の `true` 分岐を広げる。
 
 - **確かめたこと（変異試験、`AGENTS.md`/`docs/autonomy.md` §2 の作法——別の git
-  worktree で `cp` により退避・変異・`-t` で絞って赤くなることを確認・`cp` で
-  復元・緑に戻ることを確認）**:
+  worktree（`git worktree add` で本 PR の commit から作った、作業ツリー本体とは
+  別の checkout）で `cp` により退避・変異・`-t` で絞って赤くなることを確認・`cp` で
+  復元・緑に戻ることを確認。作業ツリー本体は一度も変異させていない）**:
 
-  （後述——作業ツリー本体は変異させていない。詳細は PR 本文を見ること。）
+  | # | it（suite） | 壊し方 | 赤 | 緑（復元後） |
+  |---|---|---|---|---|
+  | A8-1 | `createMemory` は入力（tags・attributes・validFrom）を渡した後に呼び手が書き換えても、保存した値は変わらない（MemoryStore） | `in-memory-memory-store.ts`: `createMemory` 保存直前の `structuredClone(memory)` を `memory`（参照そのまま）へ | 4 failed | 4 passed |
+  | A8-2 | `get` が返した Memory を呼び手が書き換えても、次の `get` は影響を受けない（MemoryStore） | `get` の `snapshot(memory)` を `memory` へ | 4 failed | 4 passed |
+  | A8-3 | `getMany` が返した Memory 配列の要素を呼び手が書き換えても、次の `getMany` は影響を受けない（MemoryStore） | `getMany` の `results.push(snapshot(memory))` を `results.push(memory)` へ | 4 failed | 4 passed |
+  | A8-4 | `supersedeWithNewMemories` が返した `created[].memory` を呼び手が書き換えても、次の `get` は影響を受けない（MemoryStore） | `supersedeWithNewMemories` の戻り値の `snapshot({ created, superseded, conflicted })` を素通しへ | 4 failed | 4 passed |
+  | A8-5 | `upsert` した入力の配列を呼び手が後から書き換えても、保存したベクトルは変わらない（VectorStore） | `in-memory-vector-store.ts`: `upsert` の `vector: vector.map(Math.fround)` を `vector: vector`（参照そのまま）へ | 1 failed | 1 passed |
+  | A8-6 | `getVectors` が返した vector の配列を呼び手が書き換えても、次の `getVectors` は影響を受けない（VectorStore） | `getVectors` の `vector: [...entry.vector]` を `vector: entry.vector` へ | 1 failed | 1 passed |
+  | A8-7 | `append` の入力 meta（配列を含む）を呼び手が後から書き換えても、保存した値は変わらない（EventStore） | `in-memory-event-store.ts`: `buildStoredMemoryEvent` の `structuredClone({...})` を素通しへ | 1 failed | 1 passed |
+  | A8-8 | `get` が返した meta を呼び手が書き換えても、次の `get` は影響を受けない（EventStore） | `get` の `structuredClone(event)` を `event` へ | 1 failed | 1 passed |
+  | A8-9 | `claimBatch` が返した payload を呼び手が書き換えても、store 側の行は変わらない（OutboxStore） | `in-memory-outbox-store.ts`: `claimBatch` 戻り値の `claimed.map((job) => structuredClone(job))` を `claimed` へ | 1 failed | 1 passed |
+  | A10 | `purgeExpiredEvents` が積む `events_purged` の meta の `oldestPurgedAt`/`newestPurgedAt`/`olderThan` は ISO 8601 の文字列である | `in-memory-memory-store.ts`: `meta.olderThan: opts.olderThan.toISOString()` を `opts.olderThan`（Date のまま）へ | 4 failed | 4 passed |
+  | A11 | `getRecall` は `query` を、渡した値のまま読み戻す | `getRecall` の `query: row.query` に余分なフィールド（`mutated: true`）を混入 | 4 failed | 4 passed |
+  | コメント1-1・1-2 | `resolveOrphanedContested` の CAS 違反2パターン（survivor が contested でない／`contestedWithId` の食い違い） | `resolveOrphanedContested` の CAS 判定 `if (memory.status !== "contested" || ...)` を `if (false)` へ（1回の変異で両 it が同時に赤くなることを確認） | 2 failed | 2 passed |
+  | コメント2-1・2-2 | `createMemory`/`createMemoryWithOutbox` が投げる `ContestedWithoutCompanionError` の method/memoryId | 共通の throw 元 `throw new ContestedWithoutCompanionError(method, null)` の `memoryId` を非 null の固定値へ（1回の変異で両 it が同時に赤くなることを確認） | 8 failed | 8 passed |
+  | コメント2-3 | `updateStatus` が投げる `ContestedWithoutCompanionError` の method/memoryId | `updateStatus` の throw 元の `memoryId`（`id`）を `null` へ | 4 failed | 4 passed |
+  | コメント2-4 | `updateStatusWithEvent` が投げる `ContestedWithoutCompanionError` の method/memoryId | `updateStatusWithEvent` の throw 元の `memoryId`（`id`）を `null` へ | 4 failed | 4 passed |
+  | コメント2-5 | `supersedeWithNewMemories` が投げる `ContestedWithoutCompanionError` の method/memoryId | `supersedeWithNewMemories` の throw 元の `memoryId` を非 null の固定値へ | 4 failed | 4 passed |
+  | コメント2-6 | `updateStatusWithEvent` が CAS で投げる `MemoryStatusConflictError` の3欄 | `updateStatusWithEvent` の CAS throw の `observedStatus`（`memory.status`）を固定値 `"forgotten"` へ | 4 failed | 4 passed |
+  | コメント2-7 | `markContestedPair` が CAS で投げる `MemoryStatusConflictError` の3欄 | `markContestedPair` の `second` 側 CAS throw の `observedStatus` を固定値 `"forgotten"` へ | 4 failed | 4 passed |
+  | コメント2-8 | `resolveContestedPair` が CAS で投げる `MemoryStatusConflictError` の3欄 | `resolveContestedPair` の `second` 側 CAS throw の `observedStatus` を固定値 `"forgotten"` へ | 4 failed | 4 passed |
+  | コメント2-9 | `purgeMemory` が2度目に投げる `MemoryPurgeConflictError` の `observedStatus`/`observedPurgedAt` | `purgeMemory` の CAS throw の `observedPurgedAt` を固定値 `new Date(0)` へ | 4 failed | 4 passed |
+
+  （「赤」の件数が1より大きいのは、同じ `it` が複数の呼び出し元ファイル——
+  `in-memory-fixtures.conformance.test.ts`・`conformance-omitted-flags-named-it.test.ts`・
+  `memory-store-conformance.supports-labels-and-claim-key-optional.test.ts`
+  （2通り）——で登録されているため。`VectorStore`/`EventStore`/`OutboxStore` の
+  歯は `in-memory-fixtures.conformance.test.ts` だけに登録されているので1件。）
+
+  各変異ごとに、復元後 `diff` で元ファイルと一致することを確認した
+  （`cp` で退避したコピーとの完全一致。`git diff --stat` は worktree 全体で0——
+  作業ツリー本体には変異が伝播していない）。上の変異は、PR「testkit: conformance
+  suite に Issue #1238 の7つの約束を足す」（PR #1413）と同じ理由で、恒久の歯として
+  残さない（決めたこと7）。
 
 - **確かめていないこと**:
 
