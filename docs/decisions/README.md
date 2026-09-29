@@ -388,5 +388,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0364](./0364-lexical-tsvector-fallback-for-oversized-content.md) | `idx_memories_lexical` の式に、tsvector が1MBを超える本文だけ先頭150,000文字へ縮退するフォールバックを挟む | 採用 (2026-09) |
 | [0365](./0365-local-embedding-revision-in-remote-path-template.md) | `LocalEmbeddingProvider` に `revision` を渡したら、`env.remotePathTemplate` に埋め込み、キャッシュの根を revision ごとに分ける（Issue #1403） | 採用 (2026-09) |
 | [0366](./0366-trigram-extension-follows-vector-schema.md) | `probeTrigramLexicalSupport` は `pg_trgm` を、`vector` が入っているスキーマへ合わせる（引数は増やさない。Issue #1256） | 採用 (2026-09) |
+| [0368](./0368-consolidate-reflect-validity-intersection.md) | `consolidate`/`reflect` の統合先・内省の記憶は、材料の有効期間の積を引き継ぐ（Issue #1188 残り） | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

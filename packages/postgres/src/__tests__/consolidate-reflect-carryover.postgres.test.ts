@@ -171,7 +171,10 @@ describe("runtime.consolidate/reflect — 付随データの引き継ぎ（本�
     // strength/halfLifeHours
     expect(created!.strength).toBe(1);
 
-    // validFrom/validUntil/claimKey: buildConsolidatedMemory は約束していない
+    // validFrom/validUntil: eligible の区間の積（Issue #1188 残り、ADR 0368）。a・b は
+    // どちらも持たない（`seedTwoActiveMemories` は付けていない）ので、積も両方 null——
+    // 下の専用の it が実際に非 null な区間を持つケースを検査する。
+    // claimKey: buildConsolidatedMemory は約束していない
     // （strategies/consolidate.ts に doc コメントが無い、docs/memory-model.md 負債3）。
     // 実際の挙動を記録するだけ——落ちて null になる。
     expect(created!.validFrom).toBeNull();
@@ -307,6 +310,8 @@ describe("runtime.consolidate/reflect — 付随データの引き継ぎ（本�
     expect(new Set(created!.tags)).toEqual(new Set(["tag-a", "tag-shared", "tag-b"]));
     expect(created!.strength).toBe(1);
     expect(created!.embeddingStatus).toBe("pending");
+    // validFrom/validUntil: eligible の区間の積（Issue #1188 残り、ADR 0368）。a・b は
+    // どちらも持たないので、積も両方 null——下の専用の it が非 null な区間を検査する。
     expect(created!.validFrom).toBeNull();
     expect(created!.validUntil).toBeNull();
     expect(created!.claimKey).toBeNull();
@@ -332,6 +337,77 @@ describe("runtime.consolidate/reflect — 付随データの引き継ぎ（本�
     expect(tickResult.processed).toBe(1);
     const readyMemory = await memoryStore.get(ctx, newId);
     expect(readyMemory!.embeddingStatus).toBe("ready");
+  });
+
+  /**
+   * Issue #1188 残り（ADR 0368）: `validFrom`/`validUntil` は eligible の区間の積で、
+   * `Date`（timestamptz）として本物の Postgres を実際に往復する——`buildNewMemoryFixture`
+   * で書き込み、`PostgresMemoryStore.get` で読み戻した値が、JS の `Date` として一致する
+   * ことを確かめる（マイクロ秒側の丸めで ms がずれないこと）。
+   */
+  it("consolidate/reflect: validFrom/validUntil は eligible の区間の積として Postgres を往復する", async () => {
+    await resetTestDatabase();
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const ctx: Ctx = { tenantId: TENANT };
+    // `buildRuntime` の clock は実時刻+1秒（上のコメント参照）なので、eligible 判定
+    // （`classifyValidity`）を通すには実時刻からの相対値にする必要がある
+    // （`OCCURRED_AT_A`/`OCCURRED_AT_B` と同じ理由）。
+    const validFromE = new Date(Date.now() - 2 * 60 * 60 * 1000); // 2時間前
+    const validUntilE = new Date(Date.now() + 100 * 60 * 60 * 1000); // 100時間後
+    const validFromF = new Date(Date.now() - 30 * 60 * 1000); // 30分前（E より後 ⟹ 積の validFrom）
+    const validUntilF = new Date(Date.now() + 50 * 60 * 60 * 1000); // 50時間後（E より前 ⟹ 積の validUntil）
+
+    async function seedEAndF(store: PostgresMemoryStore) {
+      const e = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: `carryover-validity-e-${Math.random()}`,
+          content: "本文E",
+          validFrom: validFromE,
+          validUntil: validUntilE,
+        }),
+      );
+      const f = await store.createMemory(
+        ctx,
+        buildNewMemoryFixture({
+          tenantId: ctx.tenantId,
+          contentHash: `carryover-validity-f-${Math.random()}`,
+          content: "本文F",
+          validFrom: validFromF,
+          validUntil: validUntilF,
+        }),
+      );
+      return { e, f };
+    }
+
+    const { e: e1, f: f1 } = await seedEAndF(memoryStore);
+    const consolidateRuntime = await buildRuntime(
+      memoryStore,
+      llmReturning({ content: "統合後の本文" }),
+    );
+    const consolidateResult = await consolidateRuntime.consolidate(ctx, {
+      target: { memoryIds: [e1.id, f1.id] },
+    });
+    expect(consolidateResult.outcome).toBe("consolidated");
+    const consolidated = await memoryStore.get(ctx, consolidateResult.consolidatedMemoryId!);
+    // validFrom は最大値（F 側）、validUntil は最小値（F 側）。
+    expect(consolidated!.validFrom?.toISOString()).toBe(validFromF.toISOString());
+    expect(consolidated!.validUntil?.toISOString()).toBe(validUntilF.toISOString());
+
+    const { e: e2, f: f2 } = await seedEAndF(memoryStore);
+    const reflectRuntime = await buildRuntime(
+      memoryStore,
+      llmReturning({ outcome: "reflected", content: "反映結果の本文" }),
+    );
+    const reflectResult = await reflectRuntime.reflect(ctx, {
+      target: { memoryIds: [e2.id, f2.id] },
+    });
+    expect(reflectResult.outcome).toBe("reflected");
+    const reflected = await memoryStore.get(ctx, reflectResult.reflectedMemoryId!);
+    expect(reflected!.validFrom?.toISOString()).toBe(validFromF.toISOString());
+    expect(reflected!.validUntil?.toISOString()).toBe(validUntilF.toISOString());
   });
 
   it("consolidate: subjectId が割れていれば null になる（eligible の主題が一致しない）", async () => {
