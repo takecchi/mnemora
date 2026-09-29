@@ -77,15 +77,18 @@ Issue 本文は「判断が要る」として3案を挙げ、直し方を決め�
 `current_schema()` を1回のクエリで取る。
 
 - `vector` が見つからない、またはそのスキーマが `current_schema()` と同じ
-  （＝ `schema` を渡さない既定の構成では常にこちら）ときは、**発行する SQL 文字列を
-  1バイトも変えない**（`CREATE EXTENSION IF NOT EXISTS pg_trgm`、`SCHEMA` を指定しない）。
-  `trigram-probe-dedicated-schema.postgres.test.ts`「(d) 既定の構成」の歯が、実際に発行
-  された SQL 文字列を記録して縛っている。
-- そうでなければ（＝専用スキーマの構成で、`vector` が `extensionSchema` に入っている）、
-  `assertSafeSchemaName`（`schema-namespace.ts`。文字種を `embedding-space-table.ts` の
-  `assertSafeIdentifier` と共有し、長さも見る）で検証してから、`migrate.ts` の
-  `CREATE EXTENSION ... WITH SCHEMA "${extensionSchema}"` と同じ作法（検証 + 二重引用符）で
-  埋め込む。
+  （`schema` を渡さない既定の構成で、`vector` が `search_path` の先頭のスキーマに在る場合）
+  ときは、**発行する SQL 文字列を 1バイトも変えない**（`CREATE EXTENSION IF NOT EXISTS pg_trgm`、
+  `SCHEMA` を指定しない）。`trigram-probe-dedicated-schema.postgres.test.ts`「(d) 既定の構成」の
+  歯が、実際に発行された SQL 文字列を記録して縛っている。
+- そうでなければ（専用スキーマの構成で `vector` が `extensionSchema` に入っている場合。**⚠ 既定の
+  構成でも、利用者が `vector` を先頭以外のスキーマ——拡張専用のスキーマなど——に置いている場合を
+  含む**。そのとき `pg_trgm` は、今までは先頭のスキーマに入っていたが、以後は `vector` と同じ
+  スキーマに入る。同歯「(e)」が縛る）、`sql.identifier`（二重引用符で囲み、中の `"` を `""`
+  にする）で識別子として埋め込む。**`assertSafeSchemaName` では検証しない**——カタログから
+  読んだ名前は mnemora が検証して作った名前とは限らず（上の既定の構成の場合）、弾くと今まで
+  通っていた構成が `extension_create_failed` で落ちるようになるため（同歯「(e)」は大文字・
+  記号・`"` を含むスキーマ名で縛っている）。
 
 **なぜ引数を足さないか（Issue 本文の案1を「そのままは」採らない理由）**: `vector` の
 スキーマは `runMigrations` が既に決めている——専用スキーマの構成では常に
@@ -173,15 +176,14 @@ Issue 本文は「判断が要る」として3案を挙げ、直し方を決め�
 
 1. **`ALTER EXTENSION ... SET SCHEMA` を自動化していない**——決定2に書いたとおり、
    既存の壊れた DB を直すのは運用者の一度きりの作業として残る。
-2. **`vector` が `extensionSchema` に無い変則的な構成**（利用者が独自に `vector` を
-   別の場所へ移動させた、など）は、この ADR の検出の対象外——`vector` が見つからない
-   扱いになり、`pg_trgm` は `current_schema()` に入る（今までと同じ振る舞い）。この
-   ケース自体は `runMigrations` の契約から外れた使い方であり、範囲外とする。
-3. **`assertSafeSchemaName` は文字種・長さしか見ない**（`schema-namespace.ts` の doc
-   「⚠ 見るのは文字種と長さだけ」）。`vector` のスキーマが `pg_` で始まる予約名だった
-   場合の挙動は、この ADR の対象外——`runMigrations` 自身がそのスキーマ名を作る時点で
-   同じ制約を受けているため、`probeTrigramLexicalSupport` 側で新たに壊れることはない
-   （推測。実測はしていない）。
+2. **`vector` が `extensionSchema` ではない場所に在る構成**（利用者が独自に `vector` を
+   別のスキーマへ置いた・移した、など）では、`pg_trgm` もそこへ入る——「`vector` と同じ
+   場所」という規則をそのまま当てるだけで、特別扱いはしない。そのスキーマが `search_path`
+   に無ければ、手順4が `extension_not_visible` で名乗る（`vector` 自体も見えないはずなので、
+   その構成では mnemora の他の部分も先に落ちる）。
+3. **`vector` が `pg_extension` に無いとき**（`runMigrations` を通さずに probe だけを呼んだ、など）
+   は今までと同じ `SCHEMA` 無しの `CREATE EXTENSION` に倒す。そのときの置き場所は
+   `search_path` の先頭であり、この ADR の直しは効かない。
 
 ## これが覆るとしたら何が起きたときか
 

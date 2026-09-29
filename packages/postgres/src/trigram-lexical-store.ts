@@ -8,7 +8,6 @@ import {
   capLexicalQueryWords,
 } from "./lexical-query-cap.js";
 import { toPgTimestamp } from "./mapping.js";
-import { assertSafeSchemaName } from "./schema-namespace.js";
 
 /**
  * `LexicalStore` の **opt-in** 実装（[Issue #278](https://github.com/takecchi/mnemora/issues/278)、
@@ -328,7 +327,9 @@ function isPermissionDenied(message: string): boolean {
  * として `extensionSchema` に入れたもの）のスキーマを引き、そのスキーマが現在の `search_path` の
  * 先頭（`current_schema()`）と違うときだけ `WITH SCHEMA "<そのスキーマ>"` を付けて `pg_trgm` を
  * 入れる。** `vector` が見つからないとき、または `vector` のスキーマが `current_schema()` と同じ
- * とき（＝ `schema` を渡さない既定の構成では常にこちら）は、発行する SQL 文字列は今日と1バイトも
+ * とき（`schema` を渡さない既定の構成で、`vector` が `search_path` の先頭のスキーマに在る場合。
+ * ⚠ 既定の構成でも `vector` を先頭以外のスキーマに置いていれば、`pg_trgm` もそこへ入る——
+ * 今までは先頭のスキーマに入っていた）は、発行する SQL 文字列は今日と1バイトも
  * 変わらない（`CREATE EXTENSION IF NOT EXISTS pg_trgm`、`SCHEMA` を指定しない。
  * `trigram-probe-dedicated-schema.postgres.test.ts` の「既定の構成で SQL 文字列が変わらない」歯
  * が縛る）。**⟹ 専用スキーマの構成で新しく作る DB は、どの名前空間から呼んでも `pg_trgm` は
@@ -384,9 +385,11 @@ async function probeTrigramLexicalSupportWithCause(
     // Issue #1256: `vector` 拡張（`runMigrations` が `REQUIRED_EXTENSIONS` として
     // `extensionSchema` に入れたもの）のスキーマを読み、それが現在の `search_path` の先頭
     // （`current_schema()`）と違うときだけ、そこへ `WITH SCHEMA` で `pg_trgm` を入れる。
-    // `vector` が無い、またはスキーマが一致するとき（＝ `schema` を渡さない既定の構成では
-    // 常にこちら）は、発行する SQL 文字列を今日と1バイトも変えない
-    // （`trigram-probe-dedicated-schema.postgres.test.ts` の歯が縛る）。
+    // `vector` が無い、またはスキーマが一致するとき（`schema` を渡さない既定の構成で、
+    // `vector` が `search_path` の先頭のスキーマに在る場合）は、発行する SQL 文字列を今日と
+    // 1バイトも変えない（`trigram-probe-dedicated-schema.postgres.test.ts` の歯が縛る）。
+    // ⚠ 既定の構成でも、`vector` を先頭以外のスキーマ（拡張専用のスキーマなど）に置いていれば、
+    // `pg_trgm` もそこへ入る（今までは先頭のスキーマに入っていた）。
     const vectorSchemaResult = await db.execute(sql`
       SELECT n.nspname AS ext_schema, current_schema() AS cur_schema
       FROM pg_extension e JOIN pg_namespace n ON n.oid = e.extnamespace
@@ -398,13 +401,12 @@ async function probeTrigramLexicalSupportWithCause(
       vectorSchemaRow !== undefined &&
       vectorSchemaRow.ext_schema !== vectorSchemaRow.cur_schema
     ) {
-      // `assertSafeSchemaName` で検証してから、識別子として引用符付きで埋め込む
-      // （`migrate.ts` の `CREATE EXTENSION ... WITH SCHEMA "${extensionSchema}"` と同じ作法）。
-      assertSafeSchemaName(vectorSchemaRow.ext_schema);
+      // スキーマ名はカタログから読んだ値であり、mnemora が検証した名前とは限らない（利用者が
+      // `vector` を大文字や記号を含むスキーマに入れていることがある）。`assertSafeSchemaName` で
+      // 弾くと、今まで通っていた構成が `extension_create_failed` で落ちるようになるため、弾かずに
+      // `sql.identifier`（二重引用符で囲み、中の `"` を `""` にする）で識別子として埋め込む。
       await db.execute(
-        sql.raw(
-          `CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA "${vectorSchemaRow.ext_schema}"`,
-        ),
+        sql`CREATE EXTENSION IF NOT EXISTS pg_trgm WITH SCHEMA ${sql.identifier(vectorSchemaRow.ext_schema)}`,
       );
     } else {
       await db.execute(sql`CREATE EXTENSION IF NOT EXISTS pg_trgm`);

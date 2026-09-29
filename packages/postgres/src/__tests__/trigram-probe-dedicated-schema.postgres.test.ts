@@ -21,8 +21,8 @@ import { dropTempDatabase } from "./temp-database.js";
  * `CREATE EXTENSION IF NOT EXISTS pg_trgm` は、`vector` 拡張（`runMigrations` が
  * `REQUIRED_EXTENSIONS` として `extensionSchema` に入れたもの）のスキーマを読み、そこへ
  * `WITH SCHEMA` で入れる——`vector` が見つからない、またはそのスキーマが現在の
- * `search_path` の先頭（`current_schema()`）と同じとき（＝ `schema` を渡さない既定の構成）
- * は、発行する SQL 文字列を今日と1バイトも変えない。
+ * `search_path` の先頭（`current_schema()`）と同じとき（`schema` を渡さない既定の構成で、
+ * `vector` が先頭のスキーマに在る場合）は、発行する SQL 文字列を今日と1バイトも変えない。
  *
  * 作った（または既にあった）`pg_trgm` が、この接続の `search_path` から見えなければ、
  * `{ ok: false, reason: "extension_not_visible", detail }` を返す（`detail` は拡張が実際に
@@ -41,6 +41,8 @@ import { dropTempDatabase } from "./temp-database.js";
  *     になる。
  * (d) 既定の構成（`schema` を渡さない）では、発行される SQL 文字列が変わらないことを、
  *     実際に発行された SQL を記録して確かめる。
+ * (e) 既定の構成でも、`vector` が `search_path` の先頭以外のスキーマ（`assertSafeSchemaName`
+ *     を通らない名前）に在れば、`pg_trgm` はそこへ入り `{ ok: true }` になる。
  */
 
 let adminPool: Pool | undefined;
@@ -284,6 +286,40 @@ describe("probeTrigramLexicalSupport と専用スキーマ（Issue #1256 修正�
           restore();
         }
         expect(texts).toEqual(["CREATE EXTENSION IF NOT EXISTS pg_trgm"]);
+      } finally {
+        await closePostgresClient(client);
+      }
+    });
+  });
+
+  describe("(e) 既定の構成で、vector が search_path の先頭以外のスキーマに在る", () => {
+    const DB = "mnemora_trgm_probe_schema_vector_elsewhere";
+    // 大文字と記号を含む——mnemora の `assertSafeSchemaName` を通らない名前。利用者が
+    // 自分で `vector` をこういうスキーマに置いていても、probe は落ちずにそこへ合わせる。
+    const VECTOR_SCHEMA = 'Ext-"Schema"';
+    const quoted = `"${VECTOR_SCHEMA.replace(/"/g, '""')}"`;
+
+    afterAll(async () => {
+      await dropTempDatabase(admin(), DB);
+    });
+
+    it("pg_trgm は vector と同じスキーマに入り、ok:true になる", async () => {
+      await dropTempDatabase(admin(), DB);
+      await admin().query(`CREATE DATABASE ${DB}`);
+      await admin().query(`ALTER DATABASE ${DB} SET search_path = public, ${quoted}`);
+      const client = createPostgresClient(connectionStringFor(DB), { max: 2 });
+      try {
+        await client.pool.query(`CREATE SCHEMA ${quoted}`);
+        await client.pool.query(`CREATE EXTENSION vector WITH SCHEMA ${quoted}`);
+        const utf8 = await isUtf8(client.pool);
+        await runMigrations(client.pool);
+        if (!utf8) {
+          return;
+        }
+
+        expect(await probeTrigramLexicalSupport(client.db)).toEqual({ ok: true });
+        expect(await extensionSchemasOf(client.pool, "pg_trgm")).toEqual([VECTOR_SCHEMA]);
+        await assertSearchWorks(client.db);
       } finally {
         await closePostgresClient(client);
       }
