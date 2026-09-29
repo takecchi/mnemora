@@ -247,6 +247,42 @@ PR #1393・Issue #1232）になった。**
     「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」——を根拠にした運用であり、
     詳細は ADR 0352「文脈」節と `README.md`「版の付け方」の追記を見ること。
 
+- **`MemoryStore`/`OutboxStore` を自前で実装している人へ**: 時刻を渡す欄が、任意の欄として増えた
+  （[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
+  [ADR 0355](./docs/decisions/0355-inject-clock-into-store-writes.md)）——
+  `MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox` の第4引数
+  `opts?: { now?: Date }`（積む outbox 行の `availableAt`/`createdAt`）、
+  `MemoryStore.supersedeWithNewMemories?` の末尾の引数 `opts?: { now?: Date }`（同じ）、
+  `MemoryStore.requeueEmbedJobs` の第3引数 `writeOpts?: { now?: Date }`（積み直す embed
+  ジョブの `availableAt`/`createdAt`）、
+  `OutboxStore.complete`/`fail` の末尾の引数 `opts?: { at?: Date }`
+  （`completedAt`/`failedAt`）、`NewRecallRecord.createdAt?: Date`（`recalls` 行の
+  `createdAt`）。**型の上では追加だけである**——構造的部分型の下では、既存の実装（この
+  引数を受け取らない・この欄を書かない）も、TypeScript の型検査はそのまま通る
+  （ADR 0165 決めたこと13 と同じ理由）。
+  - ⚠ **型検査を通ることは、正しく動くことを意味しない。** この欄を無視する（省略時に
+    実装が壁時計 `new Date()` を使うのではなく、渡された値を無視し続ける）実装は、
+    `packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance`
+    が本 PR で足した「渡した時刻を守る」歯（`opts.now`/`opts.at`/`createdAt` を渡すと、
+    書く行がその値になることを検査する）に落ちる。同じ歯は、既存の欄の使い方も2つ検査する
+    ——`purgeMemory` の `purgedAt` が `event.at`（省略時は1つの壁時計の値を両方に使う）と
+    同じ値になること、`archiveDecayed` が積む `archived` イベントの `at` が `opts.now` に
+    なること。
+  - ⚠ **この欄を実装しないままだと、Issue #1237 が指摘した壊れ方が自分の実装にだけ残る**
+    ——`RuntimeDeps.clock` に壁時計より過去の時刻を注入すると、`tick()` は積んだジョブを
+    1本も取れない（`available_at` が壁時計のまま、claim は `available_at <= now`
+    ＝注入した時計のジョブしか取らないため）。`@mnemora/postgres`・
+    `@mnemora/testkit/fixtures` の2実装は、本 PR でこの欄を守るよう直した
+    （`packages/postgres/src/__tests__/injected-clock-reach.postgres.test.ts`）。
+  - **移行の手順**:
+    1. 自分の `MemoryStore`/`OutboxStore` 実装で、上に挙げた口の書き込みが
+       `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt`（省略時は `new Date()`）を実際に使うよう直す。
+    2. `purgeMemory` の `purgedAt` を `event.at` に、`archiveDecayed` の `archived` の `at` を
+       `opts.now` に揃える。
+    3. `packages/testkit` の適合テストを実装に対して走らせ、緑になることを確認する
+       （`docs/conformance.md`）。
+    直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）。
+    直して初めて、注入した時計がこれらの欄にも届く。
 - **`@mnemora/core` の `purgeExpiredEventsForTenant`（保持期間の掃除の呼び出し口）は、
   `MemoryStore.purgeExpiredEventsByRetention?` を実装していない adapter に対して
   `{ kind: "store_unsupported" }` を返すようになった——`MemoryStore.purgeExpiredEvents?`
@@ -344,6 +380,20 @@ PR #1393・Issue #1232）になった。**
   - **観測できる値の変化**: `claimBatch` が返す `OutboxJobRecord.availableAt` は、取り直された job では呼び出し時の `now` になる（以前は積んだときの値のまま不変だった）。
   - 上限（`attempts` が N を超えたら `fail` にする等）で終端にする設計は入れていない（ADR 0032「これが覆るとしたら」が範囲外として残した論点のまま、Issue #1196 が挙げた「決めていないこと」のうち今回答えたのは「後回しにする」の1点だけ）。`TickResult` に「この tick で取り直した件数」を出す観測の追加は見送った——理由は ADR 0357「引き受けた負債」参照。
   ⭕ 非破壊と数える（型は変わらず、例外の増減もない。変わるのは `available_at` の観測値と、リース切れの繰り返しに対する取る順の実質的な帰結だけである。**クローン miku の判断であり、オーナーの判断ではない**）。
+- **`Runtime`（`@mnemora/core`）は、`RuntimeDeps.clock` に注入した時計を、監査ログ（`memory_events.at`）・
+  `purgedAt`・recall の記録の `createdAt`・outbox の `availableAt`/`createdAt`/`completedAt`/`failedAt`
+  には渡していなかった**（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
+  [ADR 0355](./docs/decisions/0355-inject-clock-into-store-writes.md)）——これらは store が
+  書き込みのときに埋める壁時計（`new Date()`/`now()`）のままだった。**壁時計より過去の時計を
+  注入すると、`tick()` は積んだジョブを1本も取れなかった**（`available_at` が壁時計、claim は
+  `available_at <= now`＝注入した時計のジョブしか取らないため。`processed: 0` で、何も名乗らない）
+  ——過去の会話を当時の時刻で取り込み直す用途や、固定時刻でのテストで、extract・embed が
+  一切走らなかった。いまは `Runtime` が書き込むすべての口に `clock.now()`（`sweepArchive` は
+  呼び出し側が渡す `opts.now`）を渡すので、注入した時計が壁時計より過去でも `tick()` はジョブを
+  取れる。新しい欄（上の `### Breaking` の項目）は全部省略可能——`opts`/`createdAt` を渡さない
+  呼び出しは今までどおり壁時計になる。
+  ⭕ 非破壊と数える（型は追加のみ。既存の呼び出し（`Runtime` 経由・store を直接呼ぶ経路の
+  どちらも）は、今までと同じ壁時計の値を書き続ける。変わるのは `Runtime` 自身が渡す値だけである）。
 - **`@mnemora/postgres` のストアが `db.transaction()` を実行している最中に DB の接続が切れると（DB の再起動・フェイルオーバー・`pg_terminate_backend` など）、呼び出しが reject するだけで済まずに、Node のプロセスごと `Error: Connection terminated unexpectedly` の uncaught exception で落ちていた**（[Issue #868](https://github.com/takecchi/mnemora/issues/868)、[PR #1378](https://github.com/takecchi/mnemora/pull/1378)、ADR 0349）——drizzle-orm の `db.transaction()` は pool から借りた接続に `error` リスナーを付けず、pg-pool は貸し出す直前に自分のリスナーを外すため、トランザクションの最中はリスナーが1つも無かった。`MemoryStore`・`VectorStore`・語彙ストアの、トランザクションを張るすべての口が当たっていた。いまは `createPostgresClient` が drizzle に、`connect` だけを包んだ `Proxy` を渡し、借りた接続に何もしない `error` リスナーを付けて、返すときに外す。切れた呼び出しは今までどおり reject し、次の呼び出しは新しい接続で通る。直し方（Proxy で包む）は**オーナーの回答（ask_human 7844da4c）**である。
   - **振る舞いが1つ変わる: `client.db.$client === client.pool` が `true` から `false` になる。**`$client` は drizzle が実行時に生やす欄で、公開の型 `Db` には載っていないため、型（`.d.ts`）は変わらない。`client.db.$client` の `instanceof Pool`・`totalCount`・`on`・`end()` などは、今までどおり本物の `client.pool` に届く。
   - **公開する `client.pool` は書き換えない。**利用者が `client.pool.connect()` で借りた接続にはリスナーは付かず、待機中の接続が切れたときに備えて `client.pool.on("error", …)` を付けるのは今までどおり利用者である（[Issue #1213](https://github.com/takecchi/mnemora/issues/1213) は未決のまま）。

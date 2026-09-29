@@ -31,6 +31,14 @@ export interface OutboxStoreConformanceOptions {
    */
   seedJob: (ctx: Ctx, input: SeedOutboxJobInput) => Promise<OutboxJobRecord>;
   /**
+   * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `complete`/`fail`
+   * が積む `completedAt`/`failedAt` を検査するための、終端後も読める「生の行を読む」フック
+   * （`claimBatch` は `completed_at`/`failed_at` が付いた行を対象から外すため使えない）。
+   * 省略した adapter では、この欄を検査する歯は `it.skip` になる——測っていないことが
+   * 緑ではなく skip として見える。
+   */
+  peekJob?: (ctx: Ctx, jobId: string) => Promise<OutboxJobRecord | null>;
+  /**
    * **本物の並行で `claimBatch` を測れる adapter だけが `true` を渡す**（ADR 0206）。
    *
    * `true` のとき「並行に撃った `claimBatch` が二重 claim しない」歯が走り、**省略/false の
@@ -108,7 +116,7 @@ const CONCURRENT_CLAIM_ROUNDS = 10;
  *   （`claimed_at IS NULL` だけにする案を却下した理由そのもの——見えない停止にしない）。
  */
 export function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void {
-  const { name, createStore, seedJob, supportsRealConcurrency } = options;
+  const { name, createStore, seedJob, peekJob, supportsRealConcurrency } = options;
 
   describe(`OutboxStore conformance (${name})`, () => {
     it("claimBatch は available_at <= now の未処理ジョブを返す", async () => {
@@ -216,6 +224,59 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       });
       expect(claimed.map((j) => j.id)).not.toContain(job.id);
     });
+
+    /**
+     * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `opts.at` を
+     * 渡すと `completedAt`/`failedAt` にその値を使う——runtime が注入した時計をここへ渡す。
+     */
+    (peekJob ? it : it.skip)(
+      "complete は opts.at を渡すと completedAt にその値を使う",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, { kind: "extract" });
+        const at = new Date("2020-01-01T00:00:00.000Z");
+
+        await store.complete(ctx, job.id, job.attempts, { at });
+
+        const after = await peekJob!(ctx, job.id);
+        expect(after?.completedAt).toEqual(at);
+      },
+    );
+
+    (peekJob ? it : it.skip)("fail は opts.at を渡すと failedAt にその値を使う", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const job = await seedJob(ctx, { kind: "extract" });
+      const at = new Date("2020-01-01T00:00:00.000Z");
+
+      await store.fail(ctx, job.id, "simulated failure", job.attempts, { at });
+
+      const after = await peekJob!(ctx, job.id);
+      expect(after?.failedAt).toEqual(at);
+    });
+
+    /** ⭐ 非破壊の確認: `opts` を省略すると、今日どおり壁時計になる。 */
+    (peekJob ? it : it.skip)(
+      "complete/fail は opts を省略すると、completedAt/failedAt は壁時計になる",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const completeJob = await seedJob(ctx, { kind: "extract" });
+        const failJob = await seedJob(ctx, { kind: "embed" });
+        const startedAt = Date.now();
+
+        await store.complete(ctx, completeJob.id, completeJob.attempts);
+        await store.fail(ctx, failJob.id, "simulated failure", failJob.attempts);
+
+        const completedAfter = await peekJob!(ctx, completeJob.id);
+        const failedAfter = await peekJob!(ctx, failJob.id);
+        expect(completedAfter?.completedAt?.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+        expect(completedAfter?.completedAt?.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+        expect(failedAfter?.failedAt?.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+        expect(failedAfter?.failedAt?.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+      },
+    );
 
     it("complete は存在しないジョブ id に対して例外を投げない（べき等な終端更新、expectedAttempts の値に関わらず）", async () => {
       const store = await createStore();
