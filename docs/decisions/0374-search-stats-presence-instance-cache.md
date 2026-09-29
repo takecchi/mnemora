@@ -302,3 +302,94 @@
   - 統計が後で消える場面が実運用で頻繁に起きることが分かった場合、決定3の
     負債（結果は正しいが遅くなる）が許容できなくなり、再確認の仕組みを
     検討し直す必要が出るかもしれない。
+
+## 追記（2026-09-30）—— 「memories 側の状態は、他のファイルが何をしていようと変わらない」は成り立たない（実測で訂正）
+
+⛔ 上の本文は1バイトも書き換えていない。同じ形で追記する。
+
+クローン miku の委譲先が書いた（オーナーではない）。レビューで見つかった所見を受けて書く。
+
+上の「**`ANALYZE memories` を打つ歯が、並列の群で他のファイルに影響しないか**」節は、
+`migrations/0005_analyze_memories.sql` が新規インストールの空テーブルに `ANALYZE` を
+打つため `memories.reltuples` が worker DB の複製直後から `0`（統計あり側）に固定されて
+いることを根拠に、**「`memories` 側の状態は、他のファイルが何をしていようと変わらない」**
+と書いていた。**これは TEMPLATE 複製直後の1点だけを見た記述であり、`resetTestDatabase()`
+（各テストファイルが最初に呼ぶ、`TRUNCATE ... RESTART IDENTITY CASCADE`）がその後に
+`memories.reltuples` に何をするかは確かめていなかった。**
+
+**実測（2026-09-30、PostgreSQL 17.11、この作業専用の使い捨て DB、`packages/postgres` の
+migration を素の状態から適用した直後）**:
+
+```sql
+-- 1) migrate 直後（= worker DB が TEMPLATE から複製された直後と同じ状態）
+SELECT reltuples FROM pg_class WHERE relname = 'memories';
+-- => 0
+
+-- 2) 45,000行 INSERT（provenance_kind='imported' の最小行）→ ANALYZE
+--    INSERT INTO memories (...) SELECT ... FROM generate_series(1, 45000);
+ANALYZE memories;
+SELECT reltuples FROM pg_class WHERE relname = 'memories';
+-- => 45000
+SELECT attname, n_distinct FROM pg_stats WHERE tablename = 'memories' AND attname = 'status';
+-- => status | 1   （全行 status='active' なので n_distinct=1）
+
+-- 3) resetTestDatabase() と同じ操作
+TRUNCATE TABLE memories RESTART IDENTITY CASCADE;
+SELECT reltuples FROM pg_class WHERE relname = 'memories';
+-- => -1   （「未 ANALYZE」のセンチネルへ戻る）
+SELECT attname, n_distinct FROM pg_stats WHERE tablename = 'memories' AND attname = 'status';
+-- => status | 1   （消えずに残る。列統計は TRUNCATE では掃除されない）
+```
+
+⟹ **`TRUNCATE` は `memories.reltuples` を「未 ANALYZE」（`-1`）へ戻す。**
+`StatsPresenceGate`（決定1のコード片）は `reltuples >= 0` かどうかで「統計あり」を
+判定するため、**`TRUNCATE` の直後は「未確認」の状態に戻る。**一方 `pg_stats`
+（列統計、`n_distinct` 等）は `TRUNCATE` では消えない——今回の実測では値そのものは
+変わらなかったが、「消えずに残る」こと自体が「他のファイルが何をしていようと変わらない」
+という本文の主張と食い違う（`reltuples` と `pg_stats` とで `TRUNCATE` に対する挙動が違う、
+という区別を本文は書いていなかった）。
+
+⟹ **本文「`memories` 側の状態は、他のファイルが何をしていようと変わらない」は、
+TEMPLATE 複製直後の1点にしか当てはまらない。**同じ worker DB を使う別のファイル
+（または同じファイルの前のテスト）が `resetTestDatabase()` を呼んだ後は、
+`memories.reltuples` は `-1` に戻っている——**「変わらない」ではなく「そのテストが
+呼んだ直近の `resetTestDatabase()` の直後の状態に依存する」が正しい。**
+
+**実害は確認されていない**——`search-primary-key-lookup`・`search-many-primary-key-lookup`・
+`search-stats-presence-result-equivalence`・`recall-roundtrip-count` は、上の
+2026-09-29追記により既に `SERIAL_TEST_FILES` へ移してある。本追記の書き手は、残る
+並列の群のうち `memories`/`ANALYZE` に触れる11ファイル（`analyze-memories`・
+`claim-key-index`・`embedding-statistics`・`memories-statistics`・
+`recall-filter-selectivity`・`recall`・`search-stats-presence-scope`・
+`trigram-lexical-store-index`・`superseded-and-extraction-index`・
+`vector-search-zero-norm`・`vector-store-search-many`、いずれも `.postgres.test.ts`。
+`packages/postgres/src/__tests__/*.postgres.test.ts` を `grep -rln "ANALYZE memories"`
+で当たった範囲——列挙した場所の網羅は示せない）を `vitest run --project
+postgres-db-parallel` でまとめて実行し（2026-09-30 実測）、**61件全て green** だった。
+各ファイルが自分の呼ぶ `resetTestDatabase()` の直後の状態から検算しているため、
+他のファイルの `ANALYZE`/`TRUNCATE` の影響を受けていない、と読める。
+
+**ただし、これは「今の歯がすべて自衛している」ことの確認であり、「今後書かれる歯も
+自動的に安全」という保証ではない。**`resetTestDatabase()` を呼ばず、または呼んだ後に
+統計が「ある」ことを前提にする歯を新しく書くと、その歯は「直前にどのファイルが
+どの順で `memories` を ANALYZE 済みにしたか」という実行順に依存しうる——並列の群では
+worker DB を共有する複数ファイルの実行順は保証されない。
+
+**直列/並列の分類基準（この状態変化をどう扱うべきか）は、この追記では判断しない——
+オーナー判断待ちとして残す。**本追記は「本文の主張が成り立たない」ことの訂正に留め、
+`vitest.config.mts` の `SERIAL_TEST_FILES` は変更していない。
+
+### この追記が確かめていないこと
+
+- `pg_stats` の他の列・他の欄（`n_distinct` 以外）が `TRUNCATE` でどう振る舞うかは、
+  `status` 列の `n_distinct` 1点しか見ていない。
+- 上に挙げた11ファイル以外に、`memories`/`ANALYZE` に触れる並列の群のファイルが
+  無いことは、`grep` 1回の結果でしかなく、網羅を示す手段は取っていない。
+- 実際の CI（`postgres-db-parallel` ジョブ、この実測より多いファイル数・別の
+  `maxWorkers`）での再現は行っていない——本追記の実測はこの作業専用の使い捨て DB
+  1本の上で行った。
+- `StatsPresenceGate` の instance 単位のキャッシュ（`confirmed` Set、決定1）が
+  `TRUNCATE` 後も「確認済み」のまま残る場合（本文「引き受けた負債」1番目が既に
+  記録している論点）との関係は、この追記では検証し直していない——今回の実測は
+  `reltuples`/`pg_stats` という DB 側の状態だけを見ており、`StatsPresenceGate`
+  インスタンスの `confirmed` Set の中身までは覗いていない。
