@@ -2715,11 +2715,16 @@ export async function runRecall(
   // 在るので、ここでは `finalMemories` の memoryId を明示的に除外して集約を取る。
   // -------------------------------------------------------------------
   const digestBandLimit = validatedQuery.digestBandLimit ?? DEFAULT_DIGEST_BAND_LIMIT;
+  // ADR 0384 案C: 既定 "exact"（省略時と1バイトも変わらない）。"skip" は
+  // AggregateScopeOptions.scopeAggregate へそのまま渡すだけ——値の変換・解釈は
+  // MemoryStore 実装側の仕事である（RecallQuery.scopeAggregate の doc コメント参照）。
+  const scopeAggregateMode = validatedQuery.scopeAggregate ?? "exact";
   const aggregate = await deps.memoryStore.aggregateScope(ctx, scope, {
     digestBand: {
       limit: digestBandLimit,
       excludeMemoryIds: finalMemories.map((m) => m.memoryId),
     },
+    scopeAggregate: scopeAggregateMode,
   });
   // Issue #152/#153（ADR 0312 追記）: `MemoryStore.aggregateScope` の `digests` は
   // adapter が組み立てる——`scope.attributes` を無視する自作 adapter だと、絞り込みの
@@ -2788,6 +2793,14 @@ export async function runRecall(
     stage: "index_band",
     // ⚠ detail に件数を足さない（ADR 0011）。件数は digestBandCoverage が名乗る。
     // detail は型無しの診断欄であり、同じ意味の件数を2箇所に置くと食い違いうる。
+    //
+    // ADR 0384 案C の `scopeAggregate` はここに足さない——`RecallQuery.scopeAggregate`
+    // を渡さない・`"exact"` を渡した呼び出しの出力は「1バイトも変わらない」ことが
+    // マネージャー決定であり、`detail` に新しいキーを足すと既定の出力（`explain.stages`
+    // を含む JSON 全体）が変わってしまう（`recall-channels.test.ts` 「既定は ADR 0084
+    // 以前と1バイトも変わらない」の全体一致テストで実測した——一度足して赤くなった）。
+    // "skip" が効いたかどうかは `IndexBand.countKind`（`'unknown'`）と
+    // `IndexBand.totalInScope`（`0`）で読み解ける——ここに重ねて記録しない。
     executed: true,
     detail: { totalInScope: aggregate.totalInScope },
   });

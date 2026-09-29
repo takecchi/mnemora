@@ -325,6 +325,28 @@ export interface AggregateScopeOptions {
      */
     excludeMemoryIds: readonly MemoryId[];
   };
+  /**
+   * 件数集計（群カウント・`totalInScope`・`filtered*`・`notIndexed`）を止めるかどうか
+   * （[ADR 0384](../../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
+   * 案C、`RecallQuery.scopeAggregate` のそのままの値）。
+   *
+   * **既定・省略時は `"exact"`**——今日どおり厳密集計する。`"skip"` を渡された実装は、
+   * **実際に集計をしない**（SQL を発行しない・ループを回さない等、実装ごとの手段で
+   * 費用そのものを払わないこと）。値だけ受け取って計算は今までどおり行い、返り値だけを
+   * 差し替える実装は禁止する——`"skip"` の目的は「費用の掛かる集計を止めること」であり、
+   * 費用を払ったまま値を隠す実装はその目的を満たさない（ADR 0024 の事故と同種の
+   * 「頼んだのに黙って別のことをする」を繰り返さない）。
+   *
+   * **この欄を実装しない adapter（`scopeAggregate` を一切読まない）は、常に厳密集計し
+   * `countKind: 'exact'` を返さなければならない**——`digestBand?`（上）と同じ「渡さない
+   * ことが意味を持つ」設計とは違い、**この欄は「読まれなかったときの安全側が定義されている」
+   * 設計である**: 無視されても `"exact"` のまま動くので、値の意味が壊れることは無い。
+   * `"skip"` を頼んだのに `"exact"` が返ってきても、それは「この adapter は
+   * `scopeAggregate` に対応していない」という事実を `countKind` がそのまま正直に
+   * 名乗っている状態であり、`"skip"` を頼んだのに `countKind: 'exact'` の顔をした
+   * 未集計の値が返ることは無い（ADR 0384「決めたこと」参照）。
+   */
+  scopeAggregate?: "exact" | "skip";
 }
 
 /**
@@ -343,8 +365,12 @@ export interface AggregateScopeOptions {
  * - `status = 'contested'` の Memory を単独で返してはならない。対向する Memory を
  *   スコアに関係なく必ず一緒に取得できなければならない（mandatory companion retrieval）。
  * - `aggregateScope` の返り値は近似を許すが、`countKind` を必ず伴う（Phase 1 は常に厳密。
- *   PR 本文の「設計上の疑義」参照）。**`axis: 'subject'` の `groups` の総和は必ず
- *   `totalInScope` と一致する。**`axis: 'taxonomy'`（Issue #201 PR-B、
+ *   PR 本文の「設計上の疑義」参照。**⚠ 2026-09-30 追記（ADR 0384 案C）**: これは
+ *   `opts.scopeAggregate` を渡さない・`"exact"` を渡した呼び出しの話であり、`"skip"` を
+ *   渡した呼び出しは `countKind: 'unknown'` を返す——「Phase 1 は常に厳密」という
+ *   以前の書き方は、その opt-in が無かった時点のものである）。**`axis: 'subject'` の
+ *   `groups` の総和は必ず `totalInScope` と一致する**（`"skip"` でも `groups: []`・
+ *   `totalInScope: 0` として一致する）。`axis: 'taxonomy'`（Issue #201 PR-B、
  *   [ADR 0323](../../../../docs/decisions/0323-taxonomy-recall-filter.md)）は
  *   ラベルの多対多により総和が一致しない——別の被覆保証（`GroupCount` の doc コメント）
  *   を持つ。
@@ -941,6 +967,13 @@ export interface MemoryStore {
    * `opts.digestBand` を渡すと、`ScopeAggregate.digests`/`digestEligible` も
    * **同じ集約クエリから**埋めて返す（`ScopeAggregate` の doc コメント参照）。
    * 渡さない場合は `digests: []`・`digestEligible: { count: 0, countKind: 'exact' }`。
+   *
+   * `opts.scopeAggregate: "skip"`（[ADR 0384](../../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)
+   * 案C）を渡すと、群カウント・`totalInScope`・`filtered*`・`notIndexed` の集計を止める
+   * ——`groups: []`・`totalInScope: 0`・これらの `countKind` は `'unknown'` になる。
+   * `digestBand` は独立した経路なので、`scopeAggregate: "skip"` と同時に渡しても
+   * `digests` は今日どおり返る（`digestEligible` だけは件数の一種なので `count: 0`・
+   * `countKind: 'unknown'`）。`AggregateScopeOptions.scopeAggregate` の doc コメント参照。
    */
   aggregateScope(
     ctx: Ctx,
