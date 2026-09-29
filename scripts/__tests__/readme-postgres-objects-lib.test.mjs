@@ -142,7 +142,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル11・索引24・関数6になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル11・索引30・関数6になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -164,8 +164,11 @@ describe("deriveMigrationObjects", () => {
     // ADR 0364 / Issue #1222: migrations/0025_lexical_tsvector_fallback.sql が
     // `mnemora_lexical_tsvector`（関数+1）を足し、`idx_memories_lexical` を作り直した（索引は数が変わらない）。
     // 関数 5→6 も同様に反映であり、回帰ではない。
+    // Issue #1207 / ADR 0383: migrations/0027_erase_tenant_fk_indexes.sql が外部キー検査用の
+    // 単一列索引6本（`idx_memory_events_memory_id` 等）を足した。24→30 も同様に反映であり、
+    // 回帰ではない（埋め込み空間の表の `(memory_id)` 索引は `DO` ブロックの動的 SQL で、数に入らない）。
     expect(result.tables).toHaveLength(11);
-    expect(result.indexes).toHaveLength(24);
+    expect(result.indexes).toHaveLength(30);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

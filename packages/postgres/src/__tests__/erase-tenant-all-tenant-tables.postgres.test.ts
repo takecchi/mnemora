@@ -5,6 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { listEmbeddingSpaceTables } from "../embedding-space-catalog.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 import {
   buildEraseTenantTestRuntime,
@@ -73,6 +74,28 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
 
     const tables = await listTenantScopedTables(pool);
     expect(tables.length).toBeGreaterThan(0);
+
+    // 埋め込み空間の表は、並行して走る他のテストファイルも同じスキーマに作る
+    // （CI で `memory_embeddings_test_*` 等を3本拾って落ちた）。`listEmbeddingSpaceTables`
+    // （`deleteAcrossSpaces`/`eraseTenant?` と同じ列挙）が返す表には、次元を読んで
+    // 両テナントとも行を入れる——それ以外の知らない表は、下で名指しで落ちるまま。
+    const spaceTables = new Set((await listEmbeddingSpaceTables(db)).map((e) => e.table));
+    for (const table of tables.filter((t) => spaceTables.has(t))) {
+      for (const tenantId of [T, OTHER]) {
+        await pool.query(
+          `INSERT INTO ${table} (tenant_id, memory_id, embedding, model)
+           SELECT m.tenant_id, m.id,
+                  ('[' || array_to_string(array_fill(0.5::float8, ARRAY[a.atttypmod]), ',') || ']')::vector,
+                  'erase-all-tables'
+           FROM memories m
+           CROSS JOIN pg_attribute a
+           WHERE m.tenant_id = $1
+             AND a.attrelid = $2::regclass AND a.attname = 'embedding'
+           ON CONFLICT DO NOTHING`,
+          [tenantId, table],
+        );
+      }
+    }
 
     // 全表に1行以上入っていることを確認する——1行も入れられなかった表を名指しで報告する。
     const notSeeded: string[] = [];

@@ -2516,7 +2516,7 @@ export class InMemoryMemoryStore implements MemoryStore {
   }
 
   /**
-   * Issue #1207 / [ADR 0383](../../../docs/decisions/0383-erase-tenant.md):
+   * Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md):
    * このテナントに属する行を、`memory_labels`・`recall_usages`・`memory_events` →
    * `memories`（+ 冪等キー `extractionIndex`）→ `observations` → `recalls` → `labels` →
    * `tenant_activity`・`tenant_subject_activity` の順で消す
