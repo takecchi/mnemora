@@ -913,14 +913,24 @@ ADR 0292 決定1-c）——配線しなくても `recall()` は今日どおり�
   は `deps.relationStore` が配線されていれば、store の CAS（ADR 0381 fix2）と同じ「群の一部
   だけを渡した解消を拒む」確認を読み側でも行う。
 - `detectClaimKeyContested`（`Runtime.observe()` の claim key 衝突検出、ADR 0378）に
-  `contested_group` 分岐を追加した——`ClaimKeyOptions.formContestedGroups?: boolean`
-  （既定 `false`、opt-in）を渡した呼び出しに限り、`deps.memoryStore.markContestedGroup` を
-  実際に呼んで群として書き込む。既定 `false` にしたのは、Issue #933 PR1（ADR 0378）が確立した
-  evidence-only の挙動を持つ既存の歯を1つも書き換えないためである（ADR 0381 §4）。
-- **recall 段3（`contradiction_resolution`、必須の同伴取得）への配線は、段階Bでもまだ無い。**
-  ADR 0292 決定2・決定3（状態: 提案）が設計した「独立した opt-in の探索チャンネル
-  （`RecallQuery.relations?`）」と、既存の必須の同伴取得自体をN者の群に拡張する案のどちらを
-  実装すべきかが確認できておらず、ADR 0381 §5 がマネージャーへ判断を仰いでいる。
+  `contested_group` 分岐を追加した——`detectContested: true` かつ `RuntimeDeps.
+  relationStore` が配線されている呼び出しに限り、`deps.memoryStore.markContestedGroup` を
+  実際に呼んで群として書き込む（2026-09-30 のさらなる直し、オーナー側クローンの判断で
+  当初の専用フラグ `ClaimKeyOptions.formContestedGroups?` を廃止し、`relationStore` の
+  配線そのものを条件にした）。`relationStore` を配線しない呼び出しの挙動は1バイトも
+  変わらない——Issue #933 PR1（ADR 0378）が確立した evidence-only の挙動を持つ既存の
+  歯を1つも書き換えていない理由（ADR 0381 §4）。
+- **recall 段3（`contradiction_resolution`、必須の同伴取得）を多者間の群にも広げた
+  （2026-09-30 のさらなる直し）。** `contestedWithId` を持たない `contested`（群の
+  メンバー）は、`deps.relationStore` が配線されていれば `RelationStore.listRelated` で
+  1段だけ辿って仲間を同伴取得する——`RecallQuery.relations?`（ADR 0292 決定2・決定3が
+  設計していた独立した opt-in の探索チャンネル）は作らず、既存の必須の同伴取得
+  （常時・無条件で走る段3）をそのまま N者の群へ一般化する形を採った（この回の
+  マネージャー指示、オーナー側クローンの判断）。上限は `DEFAULT_RECALL_ASSOCIATION.
+  maxCount`（既定10）を流用し、`validFrom` の新しい順→`id` の順で切り、`Omission` に
+  `over_limit { stage: "relation" }`・`stage_skipped { stage: "relation", reason:
+  "relation_store_unavailable" }` を積む。詳細は [docs/recall.md](./recall.md) §2 段3・
+  §8、ADR 0381 §5 を見ること。
 
 ---
 
