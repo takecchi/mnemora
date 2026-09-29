@@ -4939,6 +4939,212 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         const afterA = await store.get(ctxA, memoryA.id);
         expect(afterA?.content).toBe(memoryA.content); // tenant-a 側は無傷
       });
+
+      /**
+       * [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md) 決定1（Issue #995）:
+       * `content`/`digest` だけでなく `tags`・`attributes`・`claimKey` も purge で空にする
+       * ——「その記憶の本文から直接たどれる派生物」を一緒に消す、という広げた契約の歯。
+       */
+      it("purgeMemory は tags・attributes・claim key を消す（ADR 0375 決定1）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-tags-attrs-claim-key",
+            status: "forgotten",
+            tags: ["secret-tag"],
+            attributes: { owner: "alice" },
+            claimKey: { subject: "user", predicate: "home_city" },
+          }),
+        );
+
+        const { memory: returned } = await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+        const after = await store.get(ctx, memory.id);
+
+        expect({
+          returnedTags: returned.tags,
+          returnedAttributes: returned.attributes,
+          returnedClaimKey: returned.claimKey,
+          afterTags: after?.tags,
+          afterAttributes: after?.attributes,
+          afterClaimKey: after?.claimKey,
+        }).toEqual({
+          returnedTags: [],
+          returnedAttributes: {},
+          returnedClaimKey: null,
+          afterTags: [],
+          afterAttributes: {},
+          afterClaimKey: null,
+        });
+      });
+
+      if (supportsLabels) {
+        /**
+         * [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md) 決定2
+         * （Issue #995）: purge はこの Memory の label の紐付けを外し、`status: 'proposed'`
+         * のまま残る label の `proposedCount` を外した本数だけ減らす。**近似のままである**
+         * ——他の Memory が同じ label を使い続けていれば、その分の `proposedCount` は残る
+         * （ADR 0318「引き受けた負債」1）。
+         */
+        it("purgeMemory は label の紐付けを外し、proposed な label の proposedCount を減らす（ADR 0375 決定2）", async () => {
+          const store = await createStore();
+          const ctx: Ctx = { tenantId: "tenant-1" };
+          const memory = await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "purge-memory-label-unlink-target",
+              status: "forgotten",
+              tags: ["shared-tag"],
+            }),
+          );
+          // 別の Memory が同じ label を使い続ける——purge されるのは片方だけ。
+          await store.createMemory(
+            ctx,
+            buildNewMemoryFixture({
+              tenantId: "tenant-1",
+              contentHash: "purge-memory-label-unlink-keep",
+              tags: ["shared-tag"],
+            }),
+          );
+          const before = (await store.listLabels!(ctx)).find((l) => l.name === "shared-tag");
+          expect(before?.proposedCount).toBe(2);
+
+          await store.purgeMemory!(
+            ctx,
+            memory.id,
+            { content: "[purged]", digest: "[purged]" },
+            {
+              tenantId: "tenant-1",
+              memoryId: memory.id,
+              kind: "purged",
+              actor: { type: "system" },
+              digestSnapshot: memory.digest,
+              meta: {},
+            },
+          );
+
+          const after = (await store.listLabels!(ctx)).find((l) => l.name === "shared-tag");
+          expect(after).toEqual({
+            name: "shared-tag",
+            status: "proposed",
+            proposedCount: 1,
+            registeredAt: null,
+          });
+        });
+      }
+
+      /**
+       * [ADR 0375](../../../docs/decisions/0375-purge-scope-widened.md) 決定3・決定4
+       * （Issue #994）: purge はこのテナントの `recalls` の目次帯（`IndexBand.digestBand`）
+       * から、この `memoryId` のエントリを見つけて `digest` をトゥームストーンへ書き換える。
+       * 他のエントリ・他テナントの行・`recalls.query`（決定4、`memoryId` で特定できない
+       * ため対象外）は変えない。
+       */
+      it("purgeMemory は recalls.index_band の digestBand から、この memoryId の digest を伏せる（ADR 0375 決定3・決定4）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const otherCtx: Ctx = { tenantId: "tenant-other" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-index-band-target",
+            status: "forgotten",
+            digest: "秘密の目次帯要旨",
+          }),
+        );
+        const untouched = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-index-band-untouched",
+          }),
+        );
+        const recallUsage = {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic" as const,
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        };
+        const recallId = await store.createRecall(ctx, {
+          tenantId: "tenant-1",
+          subjectId: null,
+          query: { text: "q" },
+          budget: null,
+          omitted: [],
+          usage: recallUsage,
+          indexBand: {
+            groups: [],
+            totalInScope: 2,
+            countKind: "exact",
+            digestBand: [
+              { memoryId: memory.id, digest: memory.digest },
+              { memoryId: untouched.id, digest: untouched.digest, truncated: true },
+            ],
+          },
+          explain: { stages: [] },
+          returnedMemories: [],
+        });
+        // 他テナントの行が、たまたま同じ memoryId 文字列を index_band に持っていても、
+        // テナントの境界の外は書き換えない（`WHERE tenant_id = ctx.tenantId` の歯）。
+        const otherRecallId = await store.createRecall(otherCtx, {
+          tenantId: "tenant-other",
+          subjectId: null,
+          query: { text: "q" },
+          budget: null,
+          omitted: [],
+          usage: recallUsage,
+          indexBand: {
+            groups: [],
+            totalInScope: 1,
+            countKind: "exact",
+            digestBand: [{ memoryId: memory.id, digest: memory.digest }],
+          },
+          explain: { stages: [] },
+          returnedMemories: [],
+        });
+
+        await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        const record = await store.getRecall(ctx, recallId);
+        expect(record?.indexBand.digestBand).toEqual([
+          { memoryId: memory.id, digest: "[purged]" },
+          { memoryId: untouched.id, digest: untouched.digest, truncated: true },
+        ]);
+
+        const otherRecord = await store.getRecall(otherCtx, otherRecallId);
+        expect(otherRecord?.indexBand.digestBand).toEqual([
+          { memoryId: memory.id, digest: memory.digest },
+        ]);
+      });
     } else {
       it("purgeMemory は任意メソッドであり、この adapter は実装していない", async () => {
         const store = await createStore();
