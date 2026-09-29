@@ -144,9 +144,18 @@ export interface MemoryEvent {
    * | `NaN`・`Infinity`・`-Infinity` | `null` に変わる | そのまま保持する |
    * | `-0` | `0` に変わる | そのまま保持する |
    * | `undefined` の欄（`actor.id` も） | 欄ごと消える | `undefined` の欄が残る |
-   * | BigInt | 例外（`append` が失敗する） | そのまま保持する |
+   * | BigInt（入れ子・配列の要素も） | 例外（`TypeError: Do not know how to serialize a BigInt`。`append` が失敗する） | **2026-09-29 追記（Issue #1384）: 同じ `TypeError`・同じ文言で拒む。**状態もイベントも書く前に投げる。以前は fixture がそのまま保持していた |
    * | 文字列の中の NUL（U+0000）・孤立サロゲート | 例外（書き込みが失敗する） | 例外（`Error`。状態もイベントも書く前に投げる） |
    * | 関数・Symbol（欄の値として。`actor` の欄も） | その欄が消える（配列の要素なら `null`）。残りを書いて成功する | 例外（`DataCloneError`。`structuredClone` が写せない）。状態もイベントも書く前に投げる（PR #1231） |
+   *
+   * ⚠ **BigInt の行は他のどの行よりも先に評価される。**`@mnemora/postgres` の `EventStore.append` は
+   * `INSERT` の引数（`actor`・`meta` を含む）を全部 JS 側で評価してから初めて DB へ問い合わせを送るため、
+   * `actor`/`meta` のどこかに BigInt があると、`kind` が列挙に無くても・`memoryId` が実在しなくても・
+   * `at` が Invalid Date でも・NUL/孤立サロゲートがあっても、**それらを Postgres 自身が検査する機会が
+   * 無いまま `TypeError` になる**（【実測 2026-09-29】`kind` 不正・`at` Invalid Date・`memoryId` 実在しない、
+   * のそれぞれと `meta` の BigInt を同時に渡し、いずれも `TypeError: Do not know how to serialize a BigInt`
+   * になることを確認した）。fixture 側の `assertStorableMemoryEvent` もこの優先順位に合わせ、BigInt の検査を
+   * 最初に置いている。
    *
    * NUL・孤立サロゲートの行は、`Runtime` の口に渡す `reason`（`meta.reason` か `meta.note` に入る）と `actor.id` にも当たる。
    * `@mnemora/postgres` では、状態の書き換えとイベントが同じトランザクションにあるので、両方とも取り消され、
@@ -161,7 +170,8 @@ export interface MemoryEvent {
    * 両方を拒むようになったが、Observation/Memory の `jsonb` 欄の孤立サロゲートは対象外のまま。#1211 の「重ならないもの」）。
    * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture（`event-meta-roundtrip.postgres.test.ts`。
    * `Runtime` の口は `forget` と `markContested` で当てた）。関数・Symbol の行は 2026-09-28 に足した
-   * （同じファイル。`EventStore.append` と `MemoryStore.updateStatusWithEvent` で当てた）。
+   * （同じファイル。`EventStore.append` と `MemoryStore.updateStatusWithEvent` で当てた）。BigInt の行は
+   * 2026-09-29 に揃えた（Issue #1384、同じファイルに歯を足した）。
    */
   meta: Record<string, unknown>;
 }
