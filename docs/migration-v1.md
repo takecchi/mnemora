@@ -582,6 +582,7 @@ describeTenantSettingsStoreConformance({
   // v0.2.0 で必須になった:
   supportsDecayClock: false, // 自作 adapter が getDecayClock/setDecayClock/
                               // getDefaultHalfLifeRecalls/getActivitySeq を実装していないなら false
+  supportsEraseTenant: false, // v1.2.0 から必須（項目31）
 });
 ```
 
@@ -1775,6 +1776,8 @@ port に足したメソッドは任意（`?`）なので、自前の store の�
 使っている利用者は、migration の適用（下）が要る。
 
 **どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+移行ガイドの既存の例（項目6 の `describeTenantSettingsStoreConformance` の片）も、
+今の型で通るよう `supportsEraseTenant: false` を足して合わせて直した。
 
 **DB マイグレーション**: 要る——`0027_erase_tenant_fk_indexes.sql`。外部キー検査のための
 単一列の索引8本（`memory_events(memory_id)`・`recall_usages(memory_id)`・
