@@ -506,3 +506,101 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
   発動するケース**（`over_limit(stage:'relation')` の `countKind` が `'lower_bound'` に
   なる歯）は書いていない——100件規模の群を作る歯のコストと、この回で明示された歯
   （A-B-C の多段・11件以上での上限）の範囲を優先した。§7 負債5として記録した。
+
+---
+
+## 9. 段階Aで確定した11個の決定【伝】
+
+冒頭の注記が言う「段階Aで確定した11個の決定」を、ここに番号付きで残す。いずれも
+オーナー側クローン（miku）が決め、マネージャー経由で渡された前提である（伝聞の1段）。
+コードや歯の中の「ADR 0381 決定N」は、この節の番号を指す。
+
+### 決定1: 関係の行は、有効期間が重なる組の間にだけ張る
+
+群はひとまとまりに扱うが、`memory_relations` の行を張るのは互いに有効期間が重なる
+組だけにする。[ADR 0378](./0378-claim-key-contested-detection-covers-contested-matches.md)
+決定2（3件以上は完全グラフ）は、**「一致した全員を結ぶ」ではなく「互いに重なる者どうしは
+全部結ぶ」と読み替えた**。
+
+**理由**: [ADR 0324](./0324-claim-key-contested-detection.md) 決定4 は、有効期間の重なりを
+矛盾の必要条件にしている。対 A-B に、A とだけ重なる C が来たとき、完全グラフのまま B と C を
+結ぶと、根拠の無い組（例: 2020年は東京、2024年は大阪——両方とも正しいことがありうる）を
+`contested` と記録してしまう。重なりの判定を Postgres では SQL の1か所に寄せたことは §1 を見ること。
+
+### 決定2: C が別々の群や対の両方に一致したら、合併する
+
+合併した群でも、行は決定1に従って張る（組み立ては §4.2）。
+
+### 決定3: N者の解消は2者の意味を広げ、関係の行の扱いも2者に揃える
+
+勝者を選べば勝者は `active`、ほかは `superseded`。`both_active` なら全員 `active`。
+**どちらでも、メンバーを結んでいた関係の行を消す**——2者の `resolveContestedPair` が
+決着の種類によらず `contested_with_id` を NULL にするのと揃える。「一度解消したら再び
+争わせない」印は作らない。後から同じ鍵の新しい記憶が来て一致すれば、それは新しい矛盾で
+あり、また群になる。
+
+### 決定4: recall 段3は、`contestedWithId` の無い contested から群をたどる
+
+上限は10件（`DEFAULT_RECALL_ASSOCIATION.maxCount`、ADR 0378 決定6）。`validFrom` の
+新しい順、同じなら id の順で残し、切った件数を `over_limit`（`stage: "relation"`）に出す。
+探索の深さは §5.4 を見ること（1段から、関係の行でつながった全員へ変わった）。
+
+### 決定5: 穴A —— 対 A-B に C が来たら、A・B の列を空にして表へ移す
+
+1トランザクションで、id 昇順に `FOR UPDATE` でロックし、CAS（A・B は `contested` で
+互いを指す、C は `active`）を確かめてから、A・B の `contested_with_id` を NULL にし、
+C を `contested` にし、関係の行と `memory_events` を書く。3件から2件に戻っても表のまま
+（ADR 0378 決定4）。
+
+### 決定6: `RelationStore` が配線されていない store では、記録だけを積む
+
+状態を動かさず `claim_key_conflict_unresolved` を積む（ADR 0378 決定5）。この経路の
+振る舞いは PR2 でも変えない。
+
+### 決定7: port の形 —— 書き込みは `MemoryStore` の任意メソッド、読み取りは `RelationStore`
+
+群の書き込み（作成・穴A の合流・合併）は `memories` の状態と関係の表を同じトランザクションで
+書くので、`MemoryStore.markContestedGroup?`/`resolveContestedGroup?` に置く
+（`createMemoryWithOutbox`・`markContestedPair` と同じ作法）。読み取りは新しい port
+`RelationStore`（`stores.relations?` で任意に配線）に置く。
+
+### 決定8: `ContestedDetectionOutcome.result` に `contested_group` を足す
+
+起きる条件は、`RelationStore` があって「一致が2件以上」または「一致が `contested` の
+1件だけ」のとき（§4.1）。union に値を足すだけなので、破壊的には数えない。
+
+### 決定9: 群のメンバーに2者の `resolveContested` を呼ぶと `ineligible` になる
+
+群のメンバーは `contestedWithId` を持たないので、今の CAS のままでそうなる。新しい処理は
+足さず、歯で縛る。
+
+### 決定10: 群から抜けたメンバーの関係の行は残す。purge は関係の表に触らない
+
+forget・supersede・purge・archive で抜けたメンバーの行は消さない（今の `contestedWithId`
+と同じ扱い）。recall 段3は、`contested` でない相手を status の門で弾く。関係の行は
+memory の id しか持たず本文を持たないので、purge は触らない。そのかわり、purge の後に
+残るものの一覧（[ADR 0375](./0375-purge-scope-widened.md) の (b)）に「`memory_relations`
+の行」を足した（0375 は採用済みなので、末尾に日付付きの追記で足した）。
+
+### 決定11: migration は ADR 0292 決定1 の形。既存の2者データは動かさない
+
+`memory_relations`（`tenant_id`、from/to は `REFERENCES memories(id)`、`kind` は CHECK で
+`'contradicts'` だけ、UNIQUE、from/to の索引2本、1組につき向きを変えて2行）。
+backfill はしない（ADR 0378 決定1 の (ii)）。
+
+---
+
+## 10. CI で見つかった、表と port の一覧の追随（2026-09-30）【判】
+
+migration 0026 と `RelationStore` の実体ができたことで、表・索引・port の一覧を縛る歯が
+CI で赤くなった（run 36618996608）。どれも数を緩めず、一覧を実物に合わせた:
+
+- `packages/postgres/README.md` の「この package が作るオブジェクト」（テーブル 11→12、
+  索引 24→26）と、`scripts/__tests__/readme-postgres-objects-lib.test.mjs` の回帰止め。
+- `packages/postgres/src/__tests__/migrate-concurrency.test.ts` の表の一覧に `memory_relations`。
+- `docs/memory-model.md` の `memory_relations` の DDL は、`kind` に4値を持つ Phase 2 の
+  下書きのままだった——実物（`'contradicts'` の1値）に書き直した。値が1つの `IN` は
+  Postgres が `=` に畳んで返すので、`memory-model-doc-ddl-defaults.postgres.test.ts` の
+  CHECK の読み取りをその形にも広げた。
+- `RelationStore` は [ADR 0273](./0273-architecture-section5-is-a-copy.md) の「予告」から
+  「写し」へ移し、§5 の port の写しを縛る歯の対象に入れた（0273 の末尾の追記）。

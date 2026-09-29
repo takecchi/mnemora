@@ -174,11 +174,13 @@ describe("runMigrations の排他（advisory lock）", () => {
       expect(r.lock.waitedMs).toBeGreaterThanOrEqual(0);
     }
 
-    // DB は完全な状態に落ち着いている（11テーブル・台帳1行）。中途半端な状態が残らない。
+    // DB は完全な状態に落ち着いている（12テーブル・台帳1行）。中途半端な状態が残らない。
     // Issue #201 / ADR 0318: migrations/0020_taxonomy_labels.sql が labels/memory_labels
     // を足したため 8→10 になった（回帰ではない）。ADR 0353 / Issue #338:
     // migrations/0024_tenant_subject_activity.sql が tenant_subject_activity を
-    // 足したため 10→11 になった（同じく回帰ではない）。
+    // 足したため 10→11 になった（同じく回帰ではない）。Issue #207/#933 / ADR 0381:
+    // migrations/0026_memory_relations.sql が memory_relations を足したため 11→12 に
+    // なった（同じく回帰ではない）。
     const tables = await pool.query<{ tablename: string }>(
       "SELECT tablename FROM pg_tables WHERE schemaname = 'public' ORDER BY tablename ASC",
     );
@@ -188,6 +190,7 @@ describe("runMigrations の排他（advisory lock）", () => {
       "memories",
       "memory_events",
       "memory_labels",
+      "memory_relations",
       "observations",
       "outbox",
       "recall_usages",

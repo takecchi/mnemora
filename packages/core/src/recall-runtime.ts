@@ -1519,7 +1519,7 @@ export async function runRecall(
       // 呼び続けないようにする——`maxCount` の10倍という値は、「上限より遥かに多く
       // 辿れば、真の validFrom 最新 maxCount 件をほぼ確実に含む」という実務的な安全域
       // であり、厳密な保証ではない。これを超える巨大な群は `countKind` を
-      // `"lower_bound"` に倒して「測っていない」と正直に言う（[ADR 0292](./0292-relation-graph-table-depth-omitted-design.md)
+      // `"lower_bound"` に倒して「測っていない」と正直に言う（[ADR 0292](../../../docs/decisions/0292-relation-graph-table-depth-omitted-design.md)
       // 決定2-a と同じ「測れない拡張を先取りしない」判断——今日は可変にしない）。
       const EXPLORATION_VISIT_LIMIT = DEFAULT_RECALL_ASSOCIATION.maxCount * 10;
       const visited = new Set<MemoryId>(groupOwners.map((o) => o.memory.id));

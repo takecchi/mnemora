@@ -1597,7 +1597,7 @@ Phase 1 は**稼働中の空間を1つに限る**。2つ目の空間（例えば
 見つからなかった。空間ごとのテーブル分割で回避しているため mnemora の設計には影響しないが、
 確認できなかった事実として明記する。
 
-### `memory_relations`（Phase 2）
+### `memory_relations`（`migrations/0026_memory_relations.sql`）
 
 ```sql
 CREATE TABLE memory_relations (
@@ -1605,8 +1605,7 @@ CREATE TABLE memory_relations (
   tenant_id       text        NOT NULL,
   from_memory_id  uuid        NOT NULL REFERENCES memories(id),
   to_memory_id    uuid        NOT NULL REFERENCES memories(id),
-  kind            text        NOT NULL CHECK (kind IN
-                     ('contradicts','supersedes','consolidates_from','derived_from')),
+  kind            text        NOT NULL CHECK (kind IN ('contradicts')),
   created_at      timestamptz NOT NULL DEFAULT now(),
   UNIQUE (tenant_id, from_memory_id, to_memory_id, kind)
 );
@@ -1615,9 +1614,12 @@ CREATE INDEX idx_memory_relations_from ON memory_relations (tenant_id, from_memo
 CREATE INDEX idx_memory_relations_to   ON memory_relations (tenant_id, to_memory_id, kind);
 ```
 
-Phase 1 で `status` / `superseded_by_id` / `contested_with_id` が担っている一対一の関係を、
-Phase 2 では多対多に一般化する。`memories` 側の3列は Phase 2 移行後も残し、
-「最も重要な1件」のキャッシュ的な役割として使い続けてよい（索引で引く高速経路として）。
+3件以上が互いに `contested` になった群だけを、この表で持つ（`kind` は今は `'contradicts'` の
+1値だけ）。2者の対は今までどおり `contested_with_id` の列で持ち、この表には書かない。対に
+3件目が来たときは、対の列を空にしてこの表へ移す。行は有効期間が重なる組の間にだけ、1組につき
+向きを変えて2行張る（[ADR 0378](./decisions/0378-claim-key-contested-detection-covers-contested-matches.md)
+決定1・[ADR 0381](./decisions/0381-contested-group-write-path-implementation.md) 決定1・決定5・決定11）。
+2026-09-30 より前のこの節は、`kind` に4値を持つ Phase 2 の下書きだった——実物に合わせて書き直した。
 
 ### `memory_events`（Phase 1）
 

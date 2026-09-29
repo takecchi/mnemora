@@ -533,8 +533,8 @@ interface MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent }
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
-  // Issue #207/#933 PR2（ADR 0381、2026-09-30 追記）: markContestedPair?/resolveContestedPair? の
-  // N者版（3件以上専用。2者は今日どおり上の2つのまま）。
+  /** Issue #207/#933 PR2（ADR 0381、2026-09-30 追記）: markContestedPair?/resolveContestedPair? の
+   *  N者版（3件以上専用。2者は今日どおり上の2つのまま）。 */
   markContestedGroup?(
     ctx: Ctx,
     members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>

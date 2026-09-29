@@ -1965,7 +1965,7 @@ export class FakeMemoryStore implements MemoryStore {
       memory.contestedWithId = null;
       memory.updatedAt = new Date();
     }
-    // ADR 0381 決定1: 有効期間が重なる組だけに関係の行を張る（ADR 0324 決定4との整合）。
+    // ADR 0381 §1: 有効期間が重なる組だけに関係の行を張る（ADR 0324 決定4との整合）。
     const overlaps = (a: Memory, b: Memory): boolean =>
       (a.validFrom === null ||
         a.validFrom === undefined ||
@@ -2024,7 +2024,7 @@ export class FakeMemoryStore implements MemoryStore {
    * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.resolveContestedGroup?` の実装
    * （契約は interface 側の doc コメントにある）。`resolveContestedPair` と対称——
    * 決着の種類に関わらず、このメンバー全員を結んでいた関係の行を消す
-   * （ADR 0381 決定3）。
+   * （`MemoryStore.resolveContestedGroup?` の契約）。
    */
   async resolveContestedGroup(
     ctx: Ctx,

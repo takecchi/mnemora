@@ -156,9 +156,15 @@ describe("docs/memory-model.md の CREATE TABLE の列の既定は、マイグ�
     expect(compared.length).toBeGreaterThan(0);
     const mismatches = compared
       .map((d) => {
-        // pg_get_constraintdef は `CHECK ((status = ANY (ARRAY['active'::text, …])))` の形で返す
+        // pg_get_constraintdef は `CHECK ((status = ANY (ARRAY['active'::text, …])))` の形で返す。
+        // 値が1つだけの `IN ('contradicts')` は Postgres が `=` に畳み、
+        // `CHECK ((kind = 'contradicts'::text))` の形で返す（memory_relations、ADR 0381 決定11）。
         const db = rows.rows
-          .filter((r) => r.table_name === d.table && r.def.includes(`((${d.column} = ANY`))
+          .filter(
+            (r) =>
+              r.table_name === d.table &&
+              (r.def.includes(`((${d.column} = ANY`) || r.def.includes(`((${d.column} = '`)),
+          )
           .map((r) => [...r.def.matchAll(/'([^']*)'::/g)].map((x) => x[1]!).sort());
         return { at: `${d.table}.${d.column}`, doc: d.names, db };
       })
