@@ -53,7 +53,7 @@ export interface OpenAIEmbeddingsClient {
 }
 
 // ===== dist/embedding-provider.d.ts =====
-import type { Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
+import type { AbortOptions, Ctx, EmbeddingProvider, EmbeddingSpaceId } from "@mnemora/core";
 import type { OpenAIEmbeddingsClient } from "./client-types.js";
 export interface OpenAIEmbeddingProviderOptions {
     apiKey?: string;
@@ -66,7 +66,7 @@ export declare class OpenAIEmbeddingProvider implements EmbeddingProvider {
     private readonly client;
     private readonly model;
     constructor(options: OpenAIEmbeddingProviderOptions);
-    embed(_ctx: Ctx, texts: string[]): Promise<number[][]>;
+    embed(_ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 
 // ===== dist/errors.d.ts =====
@@ -102,7 +102,7 @@ export interface OpenAIJsonSchemaFormat {
 export declare function translateForOpenAIStructuredOutput<T>(name: string, schema: z.ZodType<T>): OpenAIJsonSchemaFormat;
 
 // ===== dist/llm-provider.d.ts =====
-import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type { AbortOptions, Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
 import type { OpenAIChatClient } from "./client-types.js";
 export interface OpenAILLMProviderOptions {
     apiKey?: string;
@@ -115,6 +115,6 @@ export declare class OpenAILLMProvider implements LLMProvider {
     private readonly model;
     private readonly temperature?;
     constructor(options: OpenAILLMProviderOptions);
-    complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-    completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+    complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+    completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }

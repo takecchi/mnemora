@@ -4,7 +4,14 @@ import OpenAI from "openai";
 // OpenAI 自身の strict 変換を通るかを、送る前に検査するためだけに使う——戻り値は使わない
 // （送るのは今までどおり mnemora 自身の翻訳結果である）。
 import { toStrictJsonSchema } from "openai/lib/transform";
-import type { Ctx, LLMProvider, LLMResponse, PromptSpec, StructuredRequest } from "@mnemora/core";
+import type {
+  AbortOptions,
+  Ctx,
+  LLMProvider,
+  LLMResponse,
+  PromptSpec,
+  StructuredRequest,
+} from "@mnemora/core";
 import { assertApiKeyFitsInHeader } from "./api-key.js";
 import type { OpenAIChatClient } from "./client-types.js";
 import { OpenAILLMProviderError } from "./errors.js";
@@ -357,6 +364,13 @@ function toOpenAIMessages(
  *
  * 拒否・切り詰め・空応答は {@link OpenAILLMProviderError} の `kind` で返る（`instanceof` ではなく `kind` で分岐すること）。
  * HTTP の失敗・認証の失敗・400 などは、SDK の例外がそのまま伝わる。
+ *
+ * ⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）:
+ * `complete`/`completeStructured` の第3引数 `opts?.signal` を、そのまま
+ * `chat.completions.create` の request options（`{ signal }`）へ渡す。** SDK が既定で
+ * 対応する `AbortSignal` の仕組みに委ねているだけであり、`@mnemora/openai` 自身は
+ * 中断のロジックを持たない。
  */
 export class OpenAILLMProvider implements LLMProvider {
   private readonly client: OpenAIChatClient;
@@ -389,12 +403,15 @@ export class OpenAILLMProvider implements LLMProvider {
    * `kind: "truncated"` の {@link OpenAILLMProviderError} を投げる。⚠ どちらでもない空応答は、例外にせず空文字を返す
    * （ADR 0072「引き受けた負債」2。`@mnemora/anthropic` も同じ形）。
    */
-  async complete(_ctx: Ctx, req: PromptSpec): Promise<LLMResponse> {
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: toOpenAIMessages(req),
-      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
-    });
+  async complete(_ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse> {
+    const response = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages: toOpenAIMessages(req),
+        ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
+      },
+      { signal: opts?.signal },
+    );
     assertNotRefusedOrTruncated(response.choices[0]);
     // ⚠ **ここの `?? ""` は残した。** ADR 0072「引き受けた負債」2 の通り、
     // `@mnemora/anthropic` も同じ形であり、片方だけ throw にすると差し替えられなくなる。
@@ -424,7 +441,11 @@ export class OpenAILLMProvider implements LLMProvider {
    * 必須の欄（`.nullable()`）・配列の要素・根の `null` は `null` のまま返す。`.nullable().optional()` の欄の `null` は
    * 省略として届く（Issue #1082。`stripNulls` の doc）。
    */
-  async completeStructured<T>(_ctx: Ctx, req: StructuredRequest<T>): Promise<T> {
+  async completeStructured<T>(
+    _ctx: Ctx,
+    req: StructuredRequest<T>,
+    opts?: AbortOptions,
+  ): Promise<T> {
     let format: OpenAIJsonSchemaFormat;
     try {
       format = translateAndValidateStructuredOutputFormat(req.schema);
@@ -434,12 +455,15 @@ export class OpenAILLMProvider implements LLMProvider {
       // 呼んでいない——拒否・切り詰め・応答の検証エラーとは混ぜない（ADR 0360）。
       throw new OpenAILLMProviderError({ kind: "schema_unsupported", cause });
     }
-    const response = await this.client.chat.completions.create({
-      model: this.model,
-      messages: toOpenAIMessages(req.prompt),
-      response_format: { type: "json_schema", json_schema: format },
-      ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
-    });
+    const response = await this.client.chat.completions.create(
+      {
+        model: this.model,
+        messages: toOpenAIMessages(req.prompt),
+        response_format: { type: "json_schema", json_schema: format },
+        ...(this.temperature !== undefined ? { temperature: this.temperature } : {}),
+      },
+      { signal: opts?.signal },
+    );
     // ⭐ **`content` を読む前に拒否・切り詰めを見る。**順序が本質である
     // ——後ろに置くと、拒否が `no_content` に化けて種類が潰れる（拒否時は `content` が `null`）。
     assertNotRefusedOrTruncated(response.choices[0]);

@@ -252,8 +252,8 @@ interface StructuredRequest<T> {
 }
 
 interface LLMProvider {
-  complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+  complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }
 ```
 
@@ -835,8 +835,8 @@ type RelationKind = 'contradicts' | 'supports' | 'derived_from';
 
 ```ts
 interface LLMProvider {
-  complete(ctx: Ctx, req: PromptSpec): Promise<LLMResponse>;
-  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>): Promise<T>;
+  complete(ctx: Ctx, req: PromptSpec, opts?: AbortOptions): Promise<LLMResponse>;
+  completeStructured<T>(ctx: Ctx, req: StructuredRequest<T>, opts?: AbortOptions): Promise<T>;
 }
 ```
 
@@ -866,12 +866,19 @@ interface LLMProvider {
 既定値であり mnemora の契約ではない——変えたい呼び出し側は `client` に自前の SDK
 インスタンスを渡す。
 
+⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+[ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）**:
+`complete`/`completeStructured` は任意の第3引数 `opts?: AbortOptions`
+（`{ signal?: AbortSignal }`）を受け取る。`opts.signal` が abort されると、runtime は
+provider の Promise の解決を待たずに reject する（provider がこの引数を無視しても、
+runtime 自身が provider の Promise と abort を競わせる）。既定の時間の上限は今回も無い。
+
 ### 5.5 EmbeddingProvider — Phase 1
 
 ```ts
 interface EmbeddingProvider {
   readonly space: EmbeddingSpaceId;
-  embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
+  embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
 ```
 
@@ -909,6 +916,12 @@ interface EmbeddingProvider {
 こちらだけ）。保証するのは、長さが一致し成分がすべて有限のベクトルのときの振る舞いだけである。
 クローン miku の判断で、core での検査・adapter を揃える案は採らず、今の振る舞いを記録した（選び直す
 余地は Issue に残してある）。書き分けは `VectorStore.upsert` の TSDoc。
+
+⚠ **2026-09-29 追記（[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+[ADR 0359](./decisions/0359-abort-signal-for-provider-calls.md)。クローン miku の判断）**:
+`embed` は任意の第3引数 `opts?: AbortOptions` を受け取る。挙動は `LLMProvider`（§5.4 同日付
+追記）と同じ——`packages/local-embedding` は推論の前後で abort 済みかどうかを確認するだけで、
+推論の途中では中断できない。
 
 ### 5.6 Scheduler — interface は Phase 1（既定 `InlineScheduler`）、BullMQ 実装は後続フェーズ
 

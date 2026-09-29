@@ -59,11 +59,16 @@ describe("OpenAIEmbeddingProvider", () => {
       [0.1, 0.1],
       [0.2, 0.2],
     ]);
-    expect(create).toHaveBeenCalledWith({
-      model: "text-embedding-3-small",
-      input: ["a", "b"],
-      dimensions: 2,
-    });
+    expect(create).toHaveBeenCalledWith(
+      {
+        model: "text-embedding-3-small",
+        input: ["a", "b"],
+        dimensions: 2,
+      },
+      // Issue #1200 / ADR 0359: `embed` は常に第2引数（request options）を渡す
+      // ——`opts?.signal` を省略した呼び出しでは `{ signal: undefined }` になる。
+      { signal: undefined },
+    );
   });
 
   /**

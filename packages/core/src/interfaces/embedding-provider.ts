@@ -1,3 +1,4 @@
+import type { AbortOptions } from "../abort.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 
@@ -56,10 +57,20 @@ import type { EmbeddingSpaceId } from "../embedding.js";
  * 上の #884 の追記、`@mnemora/local-embedding` は推論のタイムアウトを持たない）。待っている間、
  * runtime は DB の接続を握らない（【実測 2026-09-27】`@mnemora/postgres` で `max: 1` の pool の横から
  * 別の DB 操作が通った。歯は `packages/postgres/src/__tests__/provider-hang.postgres.test.ts`）。
+ *
+ * ⚠ **2026-09-29 追記（クローン miku の判断。[Issue #1200](https://github.com/takecchi/mnemora/issues/1200)、
+ * [ADR 0359](../../../../docs/decisions/0359-abort-signal-for-provider-calls.md)）: 上の「中断の口も渡さない」は
+ * もう成り立たない。** `embed` は任意の第3引数 `opts?: AbortOptions` を受け取る。挙動は
+ * `LLMProvider.complete`/`completeStructured`（`llm-provider.ts` 同日付追記）と同じ——
+ * 呼ぶ前に既に abort 済みなら呼ばずに reject、呼んでいる間に abort されたら provider が
+ * 対応していなくても runtime が reject する、既定の時間の上限は今回も無い。
+ * `@mnemora/openai` は SDK 呼び出しへ `{ signal }` を渡す。`@mnemora/local-embedding` は
+ * 推論の**前後**で `signal.throwIfAborted()` 相当を確かめるだけであり、**推論の途中では
+ * 止まらない**（transformers.js のパイプライン呼び出し自体を中断する口を持たないため）。
  */
 export interface EmbeddingProvider {
   /** この provider が作るベクトルの埋め込み空間（`provider`・`model`・`dimensions`）。構築時に決まり、変わらない（1インスタンス = 1空間）。 */
   readonly space: EmbeddingSpaceId;
-  /** `texts` を埋め込み、同じ件数・同じ順でベクトルを返す。空配列なら `[]`（上の追記: 件数・次元の守り方は実装ごとに違う）。 */
-  embed(ctx: Ctx, texts: string[]): Promise<number[][]>;
+  /** `texts` を埋め込み、同じ件数・同じ順でベクトルを返す。空配列なら `[]`（上の追記: 件数・次元の守り方は実装ごとに違う）。`opts.signal` は上の2026-09-29追記を参照。 */
+  embed(ctx: Ctx, texts: string[], opts?: AbortOptions): Promise<number[][]>;
 }
