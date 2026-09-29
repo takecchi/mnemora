@@ -114,6 +114,12 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
   - **recall の段3（対立する記憶を必ず並べて出す）が、群にも効くようになった。** 関係の行でつながった全員を幅優先でたどり、群ごとに10件（`DEFAULT_RECALL_ASSOCIATION.maxCount`）まで、`validFrom` の新しい順・同じなら id の順に残して並べる。切った件数は群ごとに `over_limit { stage: "relation" }` に出す。`RelationStore` が配線されていなければ `stage_skipped { stage: "relation" }` を出す。
   - ⭕ 非破壊と数える（どれも省略可能。conformance suite の要件が増えた分だけを、上の `### Breaking` に数えた）。
 
+### Changed（後方互換だが挙動が変わりうるもの）
+
+- **`purge()` の `recalls.index_band` の書き換えが、テナントの `recalls` を全部読まなくなった**（[ADR 0389](./docs/decisions/0389-recalls-digest-band-index.md)、[ADR 0375](./docs/decisions/0375-purge-scope-widened.md)「引き受けた負債」1 の解消）。
+  - **新しい migration `0030_recalls_digest_band_index.sql`。** `recalls` に式の GIN 索引 `idx_recalls_digest_band`（`(index_band->'digestBand') jsonb_path_ops`）を1本足す。`@mnemora/postgres` を使っていれば、上げたあとに migrate を当てること（`mnemora-postgres-migrate` か `runMigrations`）。公開 API・purge の結果は変わらない。
+  - ⚠ **`CREATE INDEX` は `CONCURRENTLY` を使わない**（`0027` などと同じ前例）。作るあいだ `recalls` への書き込みが止まる。作成時間・索引サイズ・`recalls` の INSERT への上乗せの実測は ADR 0389。
+
 ---
 
 ## [1.1.0] - 2026-09-30
