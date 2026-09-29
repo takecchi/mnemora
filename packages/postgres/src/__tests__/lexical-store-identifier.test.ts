@@ -436,3 +436,112 @@ describe("PostgresLexicalStore.search — 日本語の文に埋め込まれた�
     ).toBe(false);
   });
 });
+
+describe("PostgresLexicalStore.search — Unicode正規化・全角半角は一致に効かない（Issue #952、docs/recall.md §3 の表）", () => {
+  beforeEach(async () => {
+    await resetTestDatabase();
+  });
+
+  afterAll(async () => {
+    await closeTestClient();
+  });
+
+  const UNICODE_TENANT = "lexical-unicode-normalization-tenant";
+  // NFC の café（é は単一の合成済み文字 U+00E9）。
+  const CAFE_NFC = "café";
+  // NFD の café（e + 結合アキュートアクセント U+0301）。
+  const CAFE_NFD = "café";
+
+  it("café（NFC）を書き、café（NFD）で引くと一致しない（表1行目）", async () => {
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const lexicalStore = new PostgresLexicalStore(db);
+    const ctx: Ctx = { tenantId: UNICODE_TENANT };
+
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: UNICODE_TENANT,
+        contentHash: "cafe-nfc-write",
+        content: CAFE_NFC,
+      }),
+    );
+
+    const hits = await lexicalStore.search(ctx, CAFE_NFD, {
+      limit: 10,
+      filter: { tenantId: UNICODE_TENANT },
+    });
+
+    expect(hits).toEqual([]);
+  });
+
+  it("全角ＡＢＣを書き、半角ABCで引くと一致しない（表2行目）", async () => {
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const lexicalStore = new PostgresLexicalStore(db);
+    const ctx: Ctx = { tenantId: UNICODE_TENANT };
+
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: UNICODE_TENANT,
+        contentHash: "zenkaku-abc-write",
+        content: "ＡＢＣ",
+      }),
+    );
+
+    const hits = await lexicalStore.search(ctx, "ABC", {
+      limit: 10,
+      filter: { tenantId: UNICODE_TENANT },
+    });
+
+    expect(hits).toEqual([]);
+  });
+
+  it("café（NFD、結合文字）を書き、cafe（無アクセントASCII）で引くと一致する（表3行目）", async () => {
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const lexicalStore = new PostgresLexicalStore(db);
+    const ctx: Ctx = { tenantId: UNICODE_TENANT };
+
+    const memory = await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: UNICODE_TENANT,
+        contentHash: "cafe-nfd-write",
+        content: CAFE_NFD,
+      }),
+    );
+
+    const hits = await lexicalStore.search(ctx, "cafe", {
+      limit: 10,
+      filter: { tenantId: UNICODE_TENANT },
+    });
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0]?.memoryId).toBe(memory.id);
+  });
+
+  it("café（NFC）を書き、cafe（無アクセントASCII）で引くと一致しない（表4行目）", async () => {
+    const { db } = await getTestClient();
+    const memoryStore = new PostgresMemoryStore(db);
+    const lexicalStore = new PostgresLexicalStore(db);
+    const ctx: Ctx = { tenantId: UNICODE_TENANT };
+
+    await memoryStore.createMemory(
+      ctx,
+      buildNewMemoryFixture({
+        tenantId: UNICODE_TENANT,
+        contentHash: "cafe-nfc-vs-ascii-write",
+        content: CAFE_NFC,
+      }),
+    );
+
+    const hits = await lexicalStore.search(ctx, "cafe", {
+      limit: 10,
+      filter: { tenantId: UNICODE_TENANT },
+    });
+
+    expect(hits).toEqual([]);
+  });
+});
