@@ -504,6 +504,60 @@ PR #1393・Issue #1232）になった。**
 
   **DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
 
+- **`MemoryStore.purgeMemory?` が消す範囲を広げた——自前実装している人へ**
+  （[Issue #994](https://github.com/takecchi/mnemora/issues/994)・
+  [Issue #995](https://github.com/takecchi/mnemora/issues/995)・
+  [Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+  [ADR 0375](./docs/decisions/0375-purge-scope-widened.md)）。
+  purge の約束（オーナー代理・クローン miku の決定）を「その記憶の本文と、本文から
+  直接たどれる派生物（digest を含む記録・埋め込み・tags などの付帯情報）を消す」と
+  具体化し、`purgeMemory?` の同じ書き込みに次を追加した。
+
+  | 何を | どうなるか |
+  |---|---|
+  | `memories.tags` | `[]`（空配列）へ上書き |
+  | `memories.attributes` | `{}`（空オブジェクト）へ上書き |
+  | `memories.claim_key_subject`/`claim_key_predicate` | `NULL` へ上書き |
+  | `memory_labels`（この Memory の紐付け） | 削除。`status: 'proposed'` のまま残る `labels.proposed_count` を外した本数だけ減らす（床0。`registered` は触らない。近似値のまま——ADR 0318 が既に引き受けている近似の延長） |
+  | `recalls.index_band.digestBand`（このテナントの全 recall 記録のうち、この `memoryId` を含むエントリ） | `digest` をトゥームストーン（`purgeMemory` に渡された値。既定 `"[purged]"`）へ書き換える。`truncated` は落とす |
+
+  いずれも `content`/`digest`/`purgedAt` と同じトランザクションで行う——CAS が
+  弾かれれば（対象が `forgotten` でない・既に purge 済み）、これらの書き込みも
+  一切起きない。**型は変えていない**（`purgeMemory?` のシグネチャは同じ）。
+
+  **残ると決めたもの（(b)、これまでどおり）**: `recalls.query`（`memoryId` で
+  特定できないため対象外）、`memories.content_hash`、`memories.provenance.speaker`・
+  `subject_id`（`basisLost` の解決・呼び手の識別子という性質）、
+  `observations.payload`（Observation は追記専用、purge の経路が無い）、
+  `memory_events.digest_snapshot`（監査ログの目的上、意図的に残す）、
+  `recall_usages`・完了した `outbox` の行、**今の `embeddingProvider.space` 以外の
+  embedding**（`VectorStore` に全 space を列挙・削除する口が無いため。新しい
+  [Issue #1425](https://github.com/takecchi/mnemora/issues/1425) に切り出した——
+  `VectorStore` への義務追加は別判断）。
+
+  **なぜ破壊的と数えるか**: `packages/testkit` の conformance suite に、この広げた
+  範囲（tags/attributes/claim key が消える・label の紐付けが外れる・
+  `recalls.index_band` の digest が伏せられる）を縛る `it` を3本足した——上の
+  「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance
+  スイートの判定を厳しくする変更」に当たる。`purgeMemory?` を自前実装している
+  第三者 adapter が「purge は `content`/`digest`/`purgedAt` 以外を変えない」という
+  前提でテストを書いていた場合、この版から conformance suite を当てると新しく
+  落ちうる。
+
+  **誰が影響を受けるか**: 自前の `MemoryStore` 実装（`purgeMemory?` を持つもの）を、
+  conformance suite に対して走らせている利用者のうち、上の3点のどれかを満たして
+  いない場合。**`purgeMemory?` を実装していない adapter は影響を受けない。**
+  **適合テストを走らせていない利用者も、`@mnemora/postgres`・`@mnemora/testkit`
+  を使っていれば実行時の振る舞いが変わる**——purge の後、これまで残っていた
+  `tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の元の
+  digest が消える／伏せられるようになる。
+
+  **移行の手順**: 自前の `MemoryStore` 実装を持つ場合、`purgeMemory?` に上の5点の
+  書き込みを足す。足さなければ、conformance suite が新しく赤くなる（実装しない
+  という選択も可能——`purgeMemory?` 自体が任意メソッドであることは変わらない）。
+
+  **DB マイグレーション**: 不要（新しい列・表は追加していない）。
+
 ### Added
 
 - **`@mnemora/core` に `EVENT_RETENTION_KIND_INVALID_MESSAGE` と `assertValidEventRetentionKind(value: string)` を足した**（[Issue #1168](https://github.com/takecchi/mnemora/issues/1168)、[PR #1171](https://github.com/takecchi/mnemora/pull/1171)）——`setEventRetention` の `kind` を検査する口で、`DECAY_CLOCK_INVALID_MESSAGE`/`assertValidDecayClock`・`TAXONOMY_MODE_INVALID_MESSAGE`/`assertValidTaxonomyMode` と同じ形。`@mnemora/postgres` と `@mnemora/testkit/fixtures` の `setEventRetention` がこの関数を呼ぶ（下の Fixed の項目）。公開の名前の追加だけで、既存の宣言は変えていない。

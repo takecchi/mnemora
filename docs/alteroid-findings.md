@@ -181,6 +181,13 @@
   **期限切れの削除自体が `purged` イベントとして残る**（件数と期間のみ）。
   「消えたことが見える」を、ログの掃除に対しても保つ。
 
+  > ⚠ 訂正注記（2026-09-29、[ADR 0375](./decisions/0375-purge-scope-widened.md) 作業中に気づいた）:
+  > 上の「`purged` イベント」は取り違えである。期限切れの `memory_events` の削除自体が積むのは
+  > `kind: 'purged'` ではなく **`kind: 'events_purged'`**（`memory_id` は必ず `NULL`。
+  > `memories` を物理削除する `purge()` が積む `kind: 'purged'`（`memory_id` を持つ）とは別のイベント種）
+  > ——[ADR 0115](./decisions/0115-event-retention-purge.md) と `docs/memory-model.md` §9 参照。
+  > 本文はここでは書き換えず、注記だけを足す。
+
 ---
 
 ## 補足: alteroid から得られなかったもの
