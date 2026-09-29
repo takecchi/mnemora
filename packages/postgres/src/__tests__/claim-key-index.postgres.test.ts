@@ -131,7 +131,9 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
         validUntil: null,
       }),
     );
-    expect(text).toContain("idx_memories_claim_key");
+    // 0029 の `idx_memories_claim_predicates`（`status = 'active'` の部分索引）も、`findActiveByClaimKey` の
+    // 等値条件を `subject_id` まで Index Cond に使えるので、プランナがそちらを選ぶことがある（実測）。
+    expect(text).toMatch(/idx_memories_claim_(key|predicates)/);
     expect(text).not.toContain("Seq Scan on memories");
     expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*subject_id/);
   });
@@ -162,7 +164,9 @@ describe("claimKey の SQL は idx_memories_claim_key を subject_id まで使�
     const text = await plan(listMatcher, () =>
       store.listActiveClaimPredicates(ctx, { subjectId, limit: 50 }),
     );
-    expect(text).toContain("idx_memories_claim_key");
+    // 0029 が専用の部分索引 `idx_memories_claim_predicates` を足した。どちらの索引でも `subject_id` まで
+    // 索引の条件に使えていればよい（どちらが選ばれるかは専用の歯 `claim-predicates-index.postgres.test.ts` が見る）。
+    expect(text).toMatch(/idx_memories_claim_(key|predicates)/);
     expect(text).not.toContain("Seq Scan on memories");
     expect(text).toMatch(/(Index|Recheck) Cond: [^\n]*subject_id/);
   });
