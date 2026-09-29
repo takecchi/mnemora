@@ -36,12 +36,13 @@ export interface AnthropicMessagesClient {
 }
 
 // ===== dist/errors.d.ts =====
-export type AnthropicLLMFailureKind = "refusal" | "truncated" | "no_content";
+export type AnthropicLLMFailureKind = "refusal" | "truncated" | "no_content" | "schema_unsupported";
 export interface AnthropicLLMProviderErrorOptions {
     kind: AnthropicLLMFailureKind;
     stopReason?: string | null;
     refusalCategory?: string | null;
     message?: string;
+    cause?: unknown;
 }
 export declare class AnthropicLLMProviderError extends Error {
     readonly kind: AnthropicLLMFailureKind;
