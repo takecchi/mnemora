@@ -239,4 +239,41 @@ describe("recall() — activityCounting（ADR 0353、Issue #338）", () => {
     expect(await stores.tenantSettingsStore.getActivitySeq(tenantCtx)).toBe(0);
     expect(await stores.tenantSettingsStore.hasSubjectActivityCounters(tenantCtx)).toBe(false);
   });
+
+  it("一度も 'subject' を使っていないテナントでは、段1へ渡す VectorFilter.decayFloorSeqUsesSubjectCounters は常に false のまま——tenant_subject_activity を一度も参照しない、という決めたこと4 の配線そのものを検査する", async () => {
+    const { runtime, stores } = buildRuntime();
+    await stores.tenantSettingsStore.setDecayClock(tenantCtx, "activity");
+
+    await createEmbeddedMemory(stores, [1, 0], {
+      digest: "alice-memory",
+      subjectId: "alice",
+      decayBaseSeq: 0,
+      decayFloorSeq: DECAY_FLOOR_SEQ,
+      halfLifeRecalls: HALF_LIFE_RECALLS,
+      decayFloorAt: FAR_FUTURE,
+    });
+
+    // 段1（ANN）へ実際に渡される VectorFilter を、`vectorStore.search` を薄く
+    // 包んで捕まえる——`hasSubjectActivityCounters()` が false を返す（=このテナントは
+    // 一度も "subject" を使っていない）にもかかわらず、呼び出し側の配線がそれを無視して
+    // `decayFloorSeqUsesSubjectCounters: true` を渡ってしまう退行を検出する。
+    // ⚠ 機能的な結果（どの記憶が返るか）はどちらの値でも変わらない
+    // （`tenant_subject_activity` に行が無ければ `COALESCE(..., 0)` で同じ値になるため）
+    // ——この歯が無ければ、この配線の劣化は他のどの歯にも引っかからない。
+    const capturedFilters: Array<boolean | undefined> = [];
+    const originalSearch = stores.vectorStore.search.bind(stores.vectorStore);
+    stores.vectorStore.search = (async (...args: Parameters<typeof originalSearch>) => {
+      capturedFilters.push(args[3].filter.decayFloorSeqUsesSubjectCounters);
+      return originalSearch(...args);
+    }) as typeof stores.vectorStore.search;
+
+    expect(await stores.tenantSettingsStore.hasSubjectActivityCounters(tenantCtx)).toBe(false);
+
+    await runtime.recall(aliceCtx, { vector: [1, 0], scoreThreshold: 0 });
+
+    expect(capturedFilters.length).toBeGreaterThan(0);
+    for (const captured of capturedFilters) {
+      expect(captured).not.toBe(true);
+    }
+  });
 });

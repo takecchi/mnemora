@@ -214,12 +214,18 @@
   | 4 | テナント全体の判定で `S_x` を無視する（`recall-runtime.ts` の `decayFloorSeqUsesSubjectCounters` を `false` 固定） | ⚠ **core 側の Fake テストは赤くならなかった**——後置フィルタ（`activityAxisAlive`）という多層防御が同じ判定を再現するため。段1 SQL 単体を直接叩く `packages/postgres/src/__tests__/activity-counting-per-call.postgres.test.ts` を新設し、そちらでは赤になることを確認した |
   | 5 | `S_x` を別 subject の記憶にも足す（相関サブクエリの `subject_id` 条件を外し `sum()` にする） | 上記 postgres テストが赤（A が B の `S_x` で沈む） |
   | 6 | 作成時の `base_seq` に `S_x` を足し忘れる（`resolveActivityClockInputs` が `tenantSeq` のみ返す） | `decay-activity-clock-writes.test.ts` の新設ケースが赤 |
+  | 7 | `hasSubjectActivityCounters` が実際には `false`（このテナントは一度も `"subject"` を使っていない）のに、呼び出し側の配線が相関サブクエリを常に足してしまう（`recall-runtime.ts`/`runtime.ts` の `hasSubjectCounters`/`usesSubjectActivityCounters` の解決を、`TenantSettingsStore` を読まず常に `true` に固定） | ⚠ **既存のどの歯も赤くならなかった**——`tenant_subject_activity` に行が無いテナントでは `COALESCE(..., 0)` が効くため、機能的な結果（どの記憶が返るか）は変わらない。**決めたこと4「EXPLAIN のプラン族を1つも変えない」という主張そのものを検査する歯が無かった**、という真の穴。`packages/core/src/__tests__/activity-counting-per-call.test.ts` に、`vectorStore.search` を薄く包んで実際に渡る `VectorFilter.decayFloorSeqUsesSubjectCounters` を捕まえる新しいケースを追加し、この変異で赤くなることを確認した上で復元した |
 
   **変異4が core 側では検出できなかったことは、ADR 0165 が既に持っていた
   「多層防御（段1の押し下げが壊れても後置フィルタが拾う）」という設計の性質が、
   そのまま本 ADR にも当たることの実地の確認である**——欠陥ではなく、設計どおり。
   ただし「段1 SQL 自体が正しいか」は後置フィルタでは検証できないため、
   postgres 側の専用テストを本 ADR の一部として追加した。
+
+  **変異7は4とは逆方向（やりすぎ側）で、こちらは本物の欠陥候補だった**——結果が
+  変わらないという理由で見落とされていた検査の穴であり、[PR #1380](https://github.com/takecchi/mnemora/pull/1380)
+  のレビューで見つけて歯を足した。実装そのものは変異7の状態になっていなかった
+  （実装は正しいままだった）——足りなかったのは検査だけである。
 
 - **引き受けた負債**:
 
