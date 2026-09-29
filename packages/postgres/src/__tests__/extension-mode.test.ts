@@ -137,7 +137,11 @@ const SUPPORTED_CAPABILITY_ROW = {
 function createFakePool(
   options: {
     extensionRows?: readonly string[];
-    capabilityRow?: { extversion: string | null; vartype: string | null; enumvals: string[] | null } | null;
+    capabilityRow?: {
+      extversion: string | null;
+      vartype: string | null;
+      enumvals: string[] | null;
+    } | null;
   } = {},
 ): {
   pool: Pool;
