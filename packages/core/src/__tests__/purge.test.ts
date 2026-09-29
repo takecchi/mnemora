@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { Ctx } from "../ctx.js";
+import type { EmbeddingSpaceId } from "../embedding.js";
 import type { LLMProvider } from "../interfaces/llm-provider.js";
 import { defaultDecayStrategy } from "../strategies/decay.js";
 import type { MemoryId } from "../ids.js";
 import type { MemoryStatus, NewMemory } from "../memory.js";
 import { createRuntime } from "../runtime.js";
-import { createFakeRuntimeStores } from "./runtime-fakes.js";
+import { createFakeRuntimeStores, FakeEmbeddingProvider } from "./runtime-fakes.js";
 
 /**
  * `runtime.purge`（Issue #198、[ADR 0124](../../../../docs/decisions/0124-purge-physical-delete.md)）の歯。
@@ -381,8 +382,61 @@ describe("runtime.purge — dryRun（下見）", () => {
   });
 });
 
+describe("runtime.purge — 別 space の embedding も消える（Issue #1425、ADR 0382）", () => {
+  class SecondSpaceEmbeddingProvider extends FakeEmbeddingProvider {
+    override readonly space: EmbeddingSpaceId = {
+      provider: "fake",
+      model: "fake-model-v2",
+      dimensions: 2,
+    };
+  }
+
+  it("embeddingProvider を新しい space に切り替えて purge すると、旧 space の embedding 行も消える", async () => {
+    const stores = createFakeRuntimeStores();
+    const commonDeps = {
+      memoryStore: stores.memoryStore,
+      outboxStore: stores.outboxStore,
+      vectorStore: stores.vectorStore,
+      eventStore: stores.eventStore,
+      tenantSettingsStore: stores.tenantSettingsStore,
+      llmProvider: notUsedLlm,
+      hashContent: (content: string) => `sha256(${content})`,
+      clock: { now: () => NOW },
+    };
+    // 「旧 space」で embed していた時代の runtime。
+    const runtimeOld = createRuntime({
+      ...commonDeps,
+      embeddingProvider: stores.embeddingProvider,
+    });
+    // 「新 space」へ埋め込みモデルを移した後の runtime——purge はこちらで呼ぶ
+    // （`deps.embeddingProvider.space` が読まれるのは purge を呼んだ runtime の側だが、
+    // `deleteAcrossSpaces` は space を問わず全 space から消す）。
+    const newProvider = new SecondSpaceEmbeddingProvider();
+    const runtimeNew = createRuntime({ ...commonDeps, embeddingProvider: newProvider });
+
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "active" }));
+    // 旧 space（切り替え前）の embedding。
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
+    // 新 space（切り替え後）の embedding。
+    await stores.vectorStore.upsert(ctx, newProvider.space, memory.id, [0, 1]);
+    expect(stores.vectorStore.entries.size).toBe(2);
+
+    await runtimeOld.forget(ctx, { memoryId: memory.id });
+    const purged = await runtimeNew.purge(ctx, { memoryId: memory.id });
+    expect(purged.outcomes[0]?.kind).toBe("purged");
+
+    const remaining = [...stores.vectorStore.entries.values()].filter(
+      (entry) => entry.memoryId === memory.id,
+    );
+    expect(
+      remaining,
+      "旧 space・新 space の両方が消えているはず（deleteAcrossSpaces）",
+    ).toHaveLength(0);
+  });
+});
+
 describe("runtime.purge — 対応する embedding が実際に消える", () => {
-  it("purge すると VectorStore.delete が呼ばれ、embedding が消える", async () => {
+  it("purge すると VectorStore.deleteAcrossSpaces が呼ばれ、embedding が消える", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(
       ctx,
@@ -396,10 +450,10 @@ describe("runtime.purge — 対応する embedding が実際に消える", () =>
     expect(stores.vectorStore.entries.size).toBe(0);
   });
 
-  it("VectorStore.delete が例外を投げても、purged の判定は変わらない（ADR 0124 決定5、ベストエフォート）", async () => {
+  it("VectorStore.deleteAcrossSpaces が例外を投げても、purged の判定は変わらない（ADR 0124 決定5・ADR 0382、ベストエフォート）", async () => {
     const { runtime, stores } = buildRuntime();
     const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
-    stores.vectorStore.delete = async () => {
+    stores.vectorStore.deleteAcrossSpaces = async () => {
       throw new Error("simulated vector store outage");
     };
 
@@ -410,6 +464,36 @@ describe("runtime.purge — 対応する embedding が実際に消える", () =>
     ]);
     const stored = await stores.memoryStore.get(ctx, memory.id);
     expect(stored?.purgedAt).toBeInstanceOf(Date); // MemoryStore 側の書き込みは確定している
+  });
+});
+
+describe("runtime.purge — already_purged の再実行でも embedding をベストエフォートで消す（Issue #1425、ADR 0382）", () => {
+  it("既に purge 済みの記憶で、後から見つかった embedding も deleteAcrossSpaces で消える", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    // 1回目の purge（embedding は無い状態のまま）。
+    const first = await runtime.purge(ctx, { memoryId: memory.id });
+    expect(first.outcomes[0]?.kind).toBe("purged");
+
+    // purge 後に見つかった旧 space の embedding を模す（memories 行自体は purge 後も残るので
+    // upsert は成功する）。
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
+    expect(stores.vectorStore.entries.size).toBe(1);
+
+    const second = await runtime.purge(ctx, { memoryId: memory.id });
+    expect(second.outcomes[0]?.kind).toBe("already_purged");
+    expect(stores.vectorStore.entries.size).toBe(0);
+  });
+
+  it("dryRun: true のときは、already_purged でも embedding を消さない", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await runtime.purge(ctx, { memoryId: memory.id });
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
+
+    const dryRunResult = await runtime.purge(ctx, { memoryId: memory.id }, { dryRun: true });
+    expect(dryRunResult.outcomes[0]?.kind).toBe("already_purged");
+    expect(stores.vectorStore.entries.size).toBe(1);
   });
 });
 
@@ -466,6 +550,24 @@ describe("runtime.purge — 並行（purgeMemory が MemoryPurgeConflictError �
 
     expect(result.outcomes).toEqual([{ memoryId: memory.id, kind: "already_purged" }]);
     expect(purgedEvents(stores, memory.id)).toHaveLength(0);
+  });
+
+  it("再読すると既に purge 済み⟹ already_purged でも embedding をベストエフォートで消す（Issue #1425、ADR 0382）", async () => {
+    const { runtime, stores } = buildRuntime();
+    const memory = await stores.memoryStore.createMemory(ctx, newMemory({ status: "forgotten" }));
+    await stores.vectorStore.upsert(ctx, stores.embeddingProvider.space, memory.id, [1, 0]);
+    stores.memoryStore.beforeUpdateStatus = (id) => {
+      if (id === memory.id) {
+        memory.purgedAt = new Date();
+        memory.content = "[purged]";
+        memory.digest = "[purged]";
+      }
+    };
+
+    const result = await runtime.purge(ctx, { memoryId: memory.id });
+
+    expect(result.outcomes).toEqual([{ memoryId: memory.id, kind: "already_purged" }]);
+    expect(stores.vectorStore.entries.size).toBe(0);
   });
 
   it("再読すると status が forgotten でなくなっていた⟹ status_not_forgotten", async () => {

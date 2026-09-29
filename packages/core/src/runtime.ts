@@ -1856,9 +1856,13 @@ export interface PurgeOptions {
   /**
    * 🔴 **下見（issue #198 の受け入れ条件が名指しする「dryRun 相当の下見」）。**
    * `true` のとき、一切の書き込み（`content`/`digest`/`purgedAt` の更新、
-   * `memory_events` への追記、`VectorStore.delete`）を行わず、「実行していたら何が
-   * 起きたか」だけを {@link PurgeOutcome} の `"would_purge"`/`"already_purged"`/
-   * `"status_not_forgotten"`/`"not_found"` として返す。省略時 `false`。
+   * `memory_events` への追記、`VectorStore.deleteAcrossSpaces`）を行わず、「実行していたら
+   * 何が起きたか」だけを {@link PurgeOutcome} の `"would_purge"`/`"already_purged"`/
+   * `"status_not_forgotten"`/`"not_found"` として返す。**`already_purged` のときも
+   * `dryRun: true` では `VectorStore.deleteAcrossSpaces` を呼ばない**（Issue #1425、
+   * ADR 0382）——`dryRun` は名前どおり「何も書かない」ことが約束であり、`already_purged`
+   * が既に書き込み0件を意味していても、この欄がある限りベストエフォートの副作用
+   * （embedding の削除）も止める。省略時 `false`。
    */
   dryRun?: boolean;
 }
@@ -1869,15 +1873,19 @@ export interface PurgeOptions {
  * `purge` 固有の2値（`"would_purge"`/`"already_purged"`）を足す。
  *
  * - `"purged"`: この呼び出しで実際に `content`/`digest` をトゥームストーンで上書きし、
- *   `purgedAt` を設定し、`memory_events` に `kind: 'purged'` を積んだ（`VectorStore.delete`
- *   もベストエフォートで試みた——失敗してもこの kind は変わらない。`Runtime.purge` の
- *   doc コメント参照）。`previousStatus` は常に `"forgotten"`。
+ *   `purgedAt` を設定し、`memory_events` に `kind: 'purged'` を積んだ
+ *   （`VectorStore.deleteAcrossSpaces` もベストエフォートで試みた——失敗してもこの kind は
+ *   変わらない。`Runtime.purge` の doc コメント参照）。`previousStatus` は常に `"forgotten"`。
  * - `"would_purge"`: `opts.dryRun: true` のとき、対象が `status === "forgotten"` かつ
  *   未 purge（`purgedAt` が `null`）であり、`dryRun: false` で呼べば `"purged"` に
  *   なったはずであることを示す。**書き込みは一切起きていない。**
  * - `"already_purged"`: 対象は既に purge 済み（`purgedAt` が非 `null`）だった。
- *   **書き込みは一切起きていない**（`dryRun` の有無に関わらず同じ kind——「何も起きない」
- *   という結論自体は `dryRun` で変わらない）。
+ *   **`MemoryStore` への書き込みは一切起きていない**（`dryRun` の有無に関わらず同じ
+ *   kind——「何も起きない」という結論自体は `dryRun` で変わらない）。**`dryRun` が
+ *   `false`（省略時を含む）なら、`VectorStore.deleteAcrossSpaces` をベストエフォートで
+ *   試みる**（Issue #1425、ADR 0382——埋め込みモデルを移した後に purge を再実行すると、
+ *   旧 space に残った埋め込みをこの kind でも後始末できる）。`dryRun: true` のときは
+ *   呼ばない。
  * - `"status_not_forgotten"`: 対象の `status` が `"forgotten"` ではなかった
  *   （`purge` は `forgotten` からのみ遷移できる、ADR 0124 決定1）。`status` に現在値が入る。
  *   **書き込みは一切起きていない。**
@@ -2853,19 +2861,25 @@ export interface Runtime {
    *    在るかどうかの突き合わせは `restoreArchived` の手順2と同じ（大文字小文字だけが違う id を同じ呼び出しに
    *    混ぜたときは、渡された文字列どおりに突き合わせる）。
    *    `status === "forgotten"` かつ `purgedAt` が非 `null` なら `"already_purged"`
-   *    （書き込み無し）。
+   *    （`MemoryStore` への書き込み無し）。**`opts.dryRun` が `false`（省略時を含む）
+   *    なら、`deps.vectorStore.deleteAcrossSpaces(ctx, [id])` をベストエフォートで試みる**
+   *    （Issue #1425、ADR 0382——既に purge 済みの記憶を、埋め込みモデルを移した後に
+   *    再実行したときの後始末。`dryRun: true` のときは呼ばない）。
    * 4. それ以外（`status === "forgotten"` かつ `purgedAt === null`）は、`opts.dryRun`
    *    なら書き込みをせず `"would_purge"` を返す。そうでなければ
    *    `deps.memoryStore.purgeMemory(ctx, id, { content: PURGE_TOMBSTONE_CONTENT,
    *    digest: PURGE_TOMBSTONE_DIGEST }, event)` を呼ぶ。成功したら `"purged"` を返し、
-   *    続けて `deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)` を
-   *    ベストエフォートで試みる（例外は握り潰す——ADR 0124 決定5。`MemoryStore` 側の
-   *    書き込みは既に確定しているため、この失敗を理由に `"purged"` を `"failed"` に
+   *    続けて `deps.vectorStore.deleteAcrossSpaces(ctx, [id])` を
+   *    ベストエフォートで試みる（例外は握り潰す——ADR 0124 決定5・ADR 0382。`MemoryStore`
+   *    側の書き込みは既に確定しているため、この失敗を理由に `"purged"` を `"failed"` に
    *    格下げすると「安全に再試行できる」という `"failed"`/`"not_attempted"` の意味を
-   *    裏切る）。
+   *    裏切る。**今の `embeddingProvider.space` だけでなく、adapter が持つ全 space から
+   *    消す**——Issue #1425、旧 space に残った埋め込みも対象にする）。
    * 5. {@link MemoryPurgeConflictError} が投げられたら**1回だけ**再読し、
-   *    再読した `purgedAt` が非 `null` なら `"already_purged"`、`status` が
-   *    `"forgotten"` でなければ `"status_not_forgotten"`、行が消えていれば
+   *    再読した `purgedAt` が非 `null` なら `"already_purged"`（この分岐は `dryRun` では
+   *    到達しない——`purgeMemory` 自体を呼んでいないため。手順3と同じく
+   *    `deps.vectorStore.deleteAcrossSpaces(ctx, [id])` をベストエフォートで試みる）、
+   *    `status` が `"forgotten"` でなければ `"status_not_forgotten"`、行が消えていれば
    *    `"not_found"`、それ以外（`status === "forgotten"` かつ `purgedAt === null` の
    *    まま）なら `"conflicted"`——**上限の無い再試行ループにはしない。**
    * 6. それ以外の例外（DB 接続断等）は `"failed"` を積んだ上で**その場で処理を打ち切り**、
@@ -5829,10 +5843,11 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
-   * `Runtime.purge` の実装（Issue #198、ADR 0124）。doc コメントは interface 側
-   * （`purge` の JSDoc）にある——ここはアルゴリズムそのものだけ。`forget`/`restoreArchived`
-   * と意図的に同じ骨格を持つ。CAS の条件・`dryRun`・`supported`・`vectorStore.delete` の
-   * 4点だけが違う。
+   * `Runtime.purge` の実装（Issue #198、ADR 0124。Issue #1425/ADR 0382 で
+   * `vectorStore.deleteAcrossSpaces` に置き換え、`already_purged` でも呼ぶよう広げた）。
+   * doc コメントは interface 側（`purge` の JSDoc）にある——ここはアルゴリズムそのものだけ。
+   * `forget`/`restoreArchived` と意図的に同じ骨格を持つ。CAS の条件・`dryRun`・`supported`・
+   * `vectorStore.deleteAcrossSpaces` の4点だけが違う。
    */
   async function purge(ctx: Ctx, target: PurgeTarget, opts?: PurgeOptions): Promise<PurgeResult> {
     const ids: MemoryId[] = "memoryId" in target ? [target.memoryId] : target.memoryIds;
@@ -5902,6 +5917,17 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
       }
       if ((current.purgedAt ?? null) !== null) {
         outcomes.push({ memoryId: id, kind: "already_purged" });
+        // Issue #1425 / ADR 0382: 既に purge 済みでも、埋め込みの後始末はベストエフォート
+        // で試みる——埋め込みモデルを移した後に再実行すれば、旧 space に残った行を
+        // 消せるようにするため（`kind` の意味は変えない。書き込みが起きていない、という
+        // 判定はそのまま）。`dryRun` のときは呼ばない。
+        if (!dryRun) {
+          try {
+            await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
+          } catch {
+            // 握り潰す。ADR 0124/0382「引き受けた負債」参照。
+          }
+        }
         continue;
       }
 
@@ -5929,13 +5955,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         byId.set(lookupKey(id), memory);
         outcomes.push({ memoryId: id, kind: "purged", previousStatus: "forgotten" });
 
-        // ADR 0124 決定5: ベストエフォート。失敗しても "purged" の判定は変えない
+        // ADR 0124 決定5・ADR 0382: ベストエフォート。失敗しても "purged" の判定は変えない
         // ——MemoryStore 側の書き込みは既に確定しており、ここで "failed" に格下げすると
-        // 「安全に再試行できる」という failed/not_attempted の意味を裏切る。
+        // 「安全に再試行できる」という failed/not_attempted の意味を裏切る。Issue #1425:
+        // 今の space だけでなく、この adapter が持つ全 space から消す。
         try {
-          await deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id);
+          await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
         } catch {
-          // 握り潰す。ADR 0124「引き受けた負債」参照。
+          // 握り潰す。ADR 0124/0382「引き受けた負債」参照。
         }
       } catch (error) {
         if (error instanceof MemoryPurgeConflictError) {
@@ -5955,6 +5982,14 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
           } else if ((refetched.purgedAt ?? null) !== null) {
             byId.set(lookupKey(id), refetched);
             outcomes.push({ memoryId: id, kind: "already_purged" });
+            // Issue #1425 / ADR 0382: この分岐は purgeMemory を呼んだ後の競合の後始末
+            // であり dryRun では到達しない（dryRun は purgeMemory 自体を呼ばない）——
+            // 上の already_purged 分岐と同じくベストエフォートで埋め込みを消す。
+            try {
+              await deps.vectorStore.deleteAcrossSpaces(ctx, [id]);
+            } catch {
+              // 握り潰す。ADR 0124/0382「引き受けた負債」参照。
+            }
           } else if (refetched.status !== "forgotten") {
             byId.set(lookupKey(id), refetched);
             outcomes.push({

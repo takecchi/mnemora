@@ -705,6 +705,7 @@ interface VectorStore {
     opts: { limit: number; filter: VectorFilter }
   ): Promise<VectorHit[]>;
   delete(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId): Promise<void>;
+  deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
   getVectors?(ctx: Ctx, space: EmbeddingSpaceId, memoryIds: MemoryId[]): Promise<VectorEntry[]>;
   searchMany?(
     ctx: Ctx,
@@ -748,6 +749,19 @@ interface VectorEntry {
 > `recall-runtime.ts` の段3.5がアンカーごとの `search()` 呼び出しへ戻る。契約の詳細
 > （各クエリの結果が `search()` を単独で呼んだ場合と集合・順序ともに完全一致すること等）は
 > ソースの doc コメントを参照すること。
+
+> **Issue #1425（2026-09-30 追記、[ADR 0382](./decisions/0382-vector-store-delete-across-spaces.md)）**:
+> `deleteAcrossSpaces`（**必須メソッド**）を足した——`delete` が今の `space` の行しか
+> 消せず、埋め込みモデルを移した後に残る旧 space の行を `Runtime.purge` が消す口が
+> 無かった（Issue #995・#1207 が最初に指摘、ADR 0375 決定5が切り出した）。
+> `ctx.tenantId` に属する `memoryIds` の行を、adapter が持つ**全 space**から消す
+> ——`upsert`/`search`/`delete` と違い `space` 引数を取らない。`getVectors?`/`searchMany?`
+> とは異なり**任意メソッドにしなかった**——対応していない adapter では別 space の
+> embedding が結局消えないという限界が残るため（ADR 0382「検討した代替案」）。
+> **破壊的変更**（第三者の `VectorStore` adapter に新しい義務を課す）——
+> [docs/migration-v1.md](./migration-v1.md) 項目30を参照。契約の詳細（存在しない/
+> 形式不正な id は no-op、他テナントの行は消さない、空配列は no-op）はソースの
+> doc コメントを参照すること。
 
 契約:
 - **`MemoryStore` が真実の源(source of truth)であり、`VectorStore` は再構築可能な派生索引である。**

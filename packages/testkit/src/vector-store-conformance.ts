@@ -420,6 +420,89 @@ export function describeVectorStoreConformance(options: VectorStoreConformanceOp
       await expect(store.delete(ctx, space, randomUUID())).resolves.toBeUndefined();
     });
 
+    // -------------------------------------------------------------------
+    // deleteAcrossSpaces（Issue #1425、ADR 0382）: `delete` と違い `space` を取らず、
+    // adapter が持つ全 space から消す（必須メソッド）。space 分離の歯（上、ADR 0065）と
+    // 同じ2つの space（`space`/`spaceB`）を使い、「両方から消える」ことを固定する。
+    // `delete` の族A（存在しない/形式不正な memoryId は no-op、`isUuidLike` の doc 参照）
+    // と同じ規律を、空配列も含めて別々の it で固定する。
+    // -------------------------------------------------------------------
+
+    it("deleteAcrossSpaces: 複数 space にある同じ memoryId の行が、全部消える", async () => {
+      const store = await createStore();
+      await prepareEmbeddingSpace(spaceB);
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+
+      await store.upsert(ctx, space, memoryId, [1, 0, 0]);
+      await store.upsert(ctx, spaceB, memoryId, [0, 0, 1]);
+
+      await store.deleteAcrossSpaces(ctx, [memoryId]);
+
+      const hitsA = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      const hitsB = await store.search(ctx, spaceB, [0, 0, 1], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hitsA.map((hit) => hit.memoryId)).not.toContain(memoryId);
+      expect(hitsB.map((hit) => hit.memoryId)).not.toContain(memoryId);
+    });
+
+    it("deleteAcrossSpaces: 他テナントに属する memoryId を渡しても、その行は消えない（tenant 境界）", async () => {
+      const store = await createStore();
+      await prepareEmbeddingSpace(spaceB);
+      const ctxA: Ctx = { tenantId: "tenant-a" };
+      const ctxB: Ctx = { tenantId: "tenant-b" };
+      const memoryIdA = await prepareMemoryId(ctxA);
+
+      await store.upsert(ctxA, space, memoryIdA, [1, 0, 0]);
+      await store.upsert(ctxA, spaceB, memoryIdA, [0, 0, 1]);
+
+      // ctxB（別テナント）から、ctxA の memoryId を指定して呼ぶ——ctxA の行に触れないこと。
+      await store.deleteAcrossSpaces(ctxB, [memoryIdA]);
+
+      const hitsA = await store.search(ctxA, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-a" },
+      });
+      const hitsBSpace = await store.search(ctxA, spaceB, [0, 0, 1], {
+        limit: 10,
+        filter: { tenantId: "tenant-a" },
+      });
+      expect(hitsA.map((hit) => hit.memoryId)).toContain(memoryIdA);
+      expect(hitsBSpace.map((hit) => hit.memoryId)).toContain(memoryIdA);
+    });
+
+    it("deleteAcrossSpaces は形式不正な memoryId に対して例外を投げない（no-op）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.deleteAcrossSpaces(ctx, ["does-not-exist"])).resolves.toBeUndefined();
+    });
+
+    it("deleteAcrossSpaces は well-formed だが実在しない memoryId に対して例外を投げない（no-op）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      await expect(store.deleteAcrossSpaces(ctx, [randomUUID()])).resolves.toBeUndefined();
+    });
+
+    it("deleteAcrossSpaces: 空配列なら例外を投げず、何も消さない", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      await store.upsert(ctx, space, memoryId, [1, 0, 0]);
+
+      await expect(store.deleteAcrossSpaces(ctx, [])).resolves.toBeUndefined();
+
+      const hits = await store.search(ctx, space, [1, 0, 0], {
+        limit: 10,
+        filter: { tenantId: "tenant-1" },
+      });
+      expect(hits.map((hit) => hit.memoryId)).toContain(memoryId);
+    });
+
     it("search は limit を超えない件数を返す", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };

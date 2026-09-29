@@ -401,5 +401,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0378](./0378-claim-key-contested-detection-covers-contested-matches.md) | claim key の自動 contested 検出は、3件目以降も一致に数える —— `findContestedByClaimKey?`（PR1）と、多者間 `contested` を表へ束ねる書き込み経路の全体設計（PR2、Issue #933・#207・ADR 0327 の続き） | 採用 (2026-09) |
 | [0379](./0379-contested-tag-asymmetric-wording.md) | 矛盾候補欄の文面を記録順で非対称にし（案1）、実際に非対称文面が出た回だけ system 文に読み方の一文を足す（案3）。C2（案1＋案3、既定オン）を採用する（Issue #1430） | **採用: (2026-09)** |
 | [0380](./0380-reextract-withdrawn-across-extractor-versions.md) | `reextract` は、版を跨いで退けた記憶を見る——`MemoryStore.listBySourceObservationAllVersions` を新設する | 採用 (2026-09) |
+| [0382](./0382-vector-store-delete-across-spaces.md) | `VectorStore` に `deleteAcrossSpaces`（必須メソッド）を足す——`purge` が全 space の embedding を消す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

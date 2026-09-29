@@ -18,6 +18,7 @@ function innerStore(): VectorStore {
   return {
     upsert: async () => {},
     delete: async () => {},
+    deleteAcrossSpaces: async () => {},
     search: async () => [hit("stage1")],
     searchMany: async (_ctx, _space, queries) =>
       new Map(queries.map((q) => [q.key, [hit(`anchor-of-${q.key}`)]])),

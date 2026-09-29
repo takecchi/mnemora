@@ -1138,12 +1138,13 @@ purged_at timestamptz NULL   -- 非NULLなら content/digest はトゥームス�
 
 **⚠ 2026-09-29 追記（[ADR 0375](./decisions/0375-purge-scope-widened.md)）: 下の表は ADR 0375 の実装に合わせて書き直した。** 「決まっていない」だったもののうち、`tags`・`memory_labels`（紐付け）・`recalls.index_band` の digest 帯は、この版で**消える側に決まった**——(a) として `purgeMemory` の契約に入った。それ以外（`provenance.speaker`・`subject_id`・`content_hash`・`recalls.query`・`recall_usages`・`outbox`・`tenant_settings` 等）は、purge の約束の対象外のまま (b) として明記した——「決まっていない」ではなく「残ると決めた」。
 
+**⚠ 2026-09-30 追記（[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)、[ADR 0382](./decisions/0382-vector-store-delete-across-spaces.md)）: 下の表の「別の space の embedding」行は、もう「残る」ではない。** `VectorStore` に `deleteAcrossSpaces`（必須メソッド）を足し、`Runtime.purge` が `space` を指定しない全 space 削除の口を呼ぶようになった——**(a)** として、別 space の embedding も消える側に決まった。`already_purged` の再実行でも同じ口をベストエフォートで呼ぶ（埋め込みモデルを移した後に purge を再実行すると、旧 space に残った行を後始末できる）。
+
 | 表 | 消去の後 | 約束 |
 |---|---|---|
 | `memories` | 行は残る（purged）。**(a)** `content`・`digest`・`tags`・`attributes`・claimKey は消える | **(b)** `content_hash`・`provenance.speaker`・`subject_id` は残る。ADR 0375「(b) 残る」表（`provenance`/識別子は `basisLost` の解決・呼び手の識別子の性質上、消す対象にしない） |
 | `observations` | 行は残る。`payload`・`attributes`・`subject_id`・`external_id` は元のまま | **(b)** Observation は追記専用（forget/purge の経路が無い）。Observation を消せるようにするかは既存原則を覆すかどうかの別判断（#1207 コメントでオーナーへ問いを残した） |
-| `memory_embeddings_<space>`（今の空間） | 消える | ADR 0124 決定5 |
-| **別の space の embedding** | **残る** | **(b)** `VectorStore` に全 space を列挙・削除する口が無い（決定5）。[Issue #1425](https://github.com/takecchi/mnemora/issues/1425) に切り出し済み |
+| `memory_embeddings_<space>`（**全空間**） | 消える | ADR 0124 決定5（今の space）・**(a)** ADR 0382（別 space。[Issue #1425](https://github.com/takecchi/mnemora/issues/1425)） |
 | `labels` | 行は残る（消す口が無い、ADR 0318）が、**(a)** `proposed` の `proposedCount` はこのテナントで purge した分だけ減る | 近似値のまま（ADR 0318「引き受けた負債」1・ADR 0375 決定1「引き受けた負債」2） |
 | `memory_labels` | **(a)** purge した Memory の紐付けは消える | ADR 0375 決定1・決定2 |
 | `recalls` | **行は全部残る**（保持方針は未決）。`query`（問いの本文・種の digest）・`explain`（scope の `subjectId`）・`returned_memories` は元のまま。**(a)** `index_band.digestBand` のうち該当 `memoryId` の `digest` は伏せられる | `query` は `memoryId` で特定できないため対象外（決定4）。行の保持期間は決まっていない（#1207。ADR 0290 が「recalls の保持方針」を先の話としている） |

@@ -57,6 +57,7 @@ export function wrapVectorStoreWithSpy(inner: VectorStore, spy: VectorStoreSpy):
       : {}),
     upsert: (ctx, space, memoryId, vector) => inner.upsert(ctx, space, memoryId, vector),
     delete: (ctx, space, memoryId) => inner.delete(ctx, space, memoryId),
+    deleteAcrossSpaces: (ctx, memoryIds) => inner.deleteAcrossSpaces(ctx, memoryIds),
     search: async (ctx, space, query, opts) => {
       const t0 = performance.now();
       const hits = await inner.search(ctx, space, query, opts);

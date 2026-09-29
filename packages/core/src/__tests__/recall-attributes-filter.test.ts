@@ -290,6 +290,13 @@ class AttributesFilterStrippingVectorStore implements VectorStore {
     return this.inner.delete(ctx, space, memoryId);
   }
 
+  deleteAcrossSpaces(
+    ctx: Ctx,
+    memoryIds: Parameters<VectorStore["deleteAcrossSpaces"]>[1],
+  ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+    return this.inner.deleteAcrossSpaces(ctx, memoryIds);
+  }
+
   search(
     ctx: Ctx,
     space: EmbeddingSpaceId,

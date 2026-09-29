@@ -460,6 +460,13 @@ class AssociationGateStrippingVectorStore implements VectorStore {
     return this.inner.delete(ctx, space, memoryId);
   }
 
+  deleteAcrossSpaces(
+    ctx: Ctx,
+    memoryIds: Parameters<VectorStore["deleteAcrossSpaces"]>[1],
+  ): ReturnType<VectorStore["deleteAcrossSpaces"]> {
+    return this.inner.deleteAcrossSpaces(ctx, memoryIds);
+  }
+
   getVectors(
     ctx: Ctx,
     space: EmbeddingSpaceId,

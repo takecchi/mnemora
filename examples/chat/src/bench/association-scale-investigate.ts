@@ -173,6 +173,7 @@ function wrapVectorStoreWithSpy(inner: VectorStore, spy: VectorStoreSpy): Vector
       : {}),
     upsert: (ctx, space, memoryId, vector) => inner.upsert(ctx, space, memoryId, vector),
     delete: (ctx, space, memoryId) => inner.delete(ctx, space, memoryId),
+    deleteAcrossSpaces: (ctx, memoryIds) => inner.deleteAcrossSpaces(ctx, memoryIds),
     search: (ctx, space, query, opts) => inner.search(ctx, space, query, opts),
     getVectors: async (ctx, space, memoryIds) => {
       spy.getVectorsCalls.push([...memoryIds]);

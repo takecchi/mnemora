@@ -6,7 +6,15 @@ import type { EmbeddingSpaceId } from "@mnemora/core";
  * スラグがこれを超える場合は末尾を切り詰め、衝突を避けるためのハッシュ片を足す。
  */
 const MAX_IDENTIFIER_BYTES = 63;
+// ⚠ `scripts/readme-postgres-objects-lib.mjs` が次の行を、文字列リテラルを直接代入する形として
+// 正規表現で読み、README の接頭辞と突き合わせる。別の定数からの代入などに書き換えないこと。
 const TABLE_PREFIX = "memory_embeddings_";
+/**
+ * 埋め込み空間ごとのテーブル名の接頭辞。`deleteAcrossSpaces`（`vector-store.ts`、
+ * Issue #1425、ADR 0382）が、カタログ（`pg_class`）からこの接頭辞で始まるテーブルを
+ * 列挙する条件の1つとして参照するため export する。
+ */
+export const EMBEDDING_SPACE_TABLE_PREFIX = TABLE_PREFIX;
 const HNSW_INDEX_PREFIX = "idx_memory_embeddings_hnsw_";
 /**
  * Issue #956: HNSW（cosine 距離）は norm が0のベクトルをそもそも索引へ入れない

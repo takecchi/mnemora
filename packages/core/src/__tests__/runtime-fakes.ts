@@ -2533,6 +2533,24 @@ export class FakeVectorStore implements VectorStore {
   }
 
   /**
+   * Issue #1425 / ADR 0382: `ctx.tenantId` に属する `memoryIds` の行を、この store が
+   * 持つ**全 space**から消す。`packages/testkit` の `InMemoryVectorStore.deleteAcrossSpaces`
+   * と同じ意味論——`entries` の値が持つ `tenantId`/`memoryId` の一致だけを見て、
+   * space（key の先頭3要素）は問わない。
+   */
+  async deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void> {
+    if (memoryIds.length === 0) {
+      return;
+    }
+    const idSet = new Set<MemoryId>(memoryIds);
+    for (const [key, entry] of this.entries) {
+      if (entry.tenantId === ctx.tenantId && idSet.has(entry.memoryId)) {
+        this.entries.delete(key);
+      }
+    }
+  }
+
+  /**
    * Issue #200 / ADR 0151: 連想枠の歯が使う。`InMemoryVectorStore`
    * （`packages/testkit`）の同名メソッドと同じ意味論——存在しない memoryId・
    * 他テナントの memoryId は静かに結果から落ちる（tenant 境界は key の一致で掛かる）。
@@ -2574,6 +2592,7 @@ export function withoutGetVectors(store: FakeVectorStore): VectorStore {
     upsert: (ctx, space, memoryId, vector) => store.upsert(ctx, space, memoryId, vector),
     search: (ctx, space, query, opts) => store.search(ctx, space, query, opts),
     delete: (ctx, space, memoryId) => store.delete(ctx, space, memoryId),
+    deleteAcrossSpaces: (ctx, memoryIds) => store.deleteAcrossSpaces(ctx, memoryIds),
   };
 }
 
@@ -2593,6 +2612,7 @@ export function withReversedGetVectorsOrder(store: FakeVectorStore): VectorStore
     upsert: (ctx, space, memoryId, vector) => store.upsert(ctx, space, memoryId, vector),
     search: (ctx, space, query, opts) => store.search(ctx, space, query, opts),
     delete: (ctx, space, memoryId) => store.delete(ctx, space, memoryId),
+    deleteAcrossSpaces: (ctx, memoryIds) => store.deleteAcrossSpaces(ctx, memoryIds),
     getVectors: async (ctx, space, memoryIds) => {
       const entries = await store.getVectors(ctx, space, memoryIds);
       return [...entries].reverse();
