@@ -455,6 +455,26 @@ Issue #1425 に切り出しただけで、この PR は1行も直していない
 の「space ごとに別テーブル」という設計そのものが、カタログを読めば列挙できる形に
 なっている。この ADR 0375 本文は書き換えず、この追記で指し先を更新するだけに留める。
 
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
+
+Issue #207/#933 PR2 が migration 0026 で新設した `memory_relations`（多者間 `contested` の
+関係グラフ、ADR 0292 決定1）は、本 ADR が広げた `purgeMemory` の削除範囲には**含めていない**
+——`purgeMemory` は `memory_relations` の行に一切触れない。これは見落としではなく、
+Issue #207/#933 PR2（決定10、マネージャー経由でオーナー側のクローンから渡された確定済みの
+設計）が明示的に選んだ形である: forget・supersede・purge・archive で群を離れたメンバーの
+`memory_relations` 行は**残す**——`resolveContestedGroup?` の CAS（本 ADR 0381 fix2）が
+「群の全員」を関係の行の有無ではなく `status === 'contested'` で判定することで、行が残って
+いても既に purge 済みのメンバーが「今の群」に誤って数えられることはない。
+
+なお、コーディネータからの伝聞によれば、Issue #1207 の担当が別途「`tenant_id` 列を持つ
+全ての表を数え上げ、テナント消去後に0行であることを確かめる歯」を追加する予定であり、
+`memory_relations` もそこに含まれる——**テナント丸ごとの消去（本 ADR の射程外、Issue #1207
+の範囲）とは別に、`purgeMemory`（1件ずつの purge、本 ADR の射程）が `memory_relations` に
+触れない、という上の決定は変わらない。**
+
 ---
 
 ## 追記（2026-09-30）: 「これが覆るとしたら」1番は ADR 0383 で実行した

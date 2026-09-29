@@ -1480,10 +1480,16 @@ MNEMORA_IDENTIFIER_PROBE_OPENAI_JSON=... DATABASE_URL=... \
 
 **⛔ 門ではない。**基準値
 （[identifier-probe-baseline.openai.json](./identifier-probe-baseline.openai.json)）との
-差分と、測定前に決めた「並走の判定」（hit@1 低下・MRR 低下）を Job Summary に出すだけで、
-相違しても・判定が red でも CI は落ちない——この4群のうち少なくとも2群
-（`identifiersSparse`/`identifiersDense`）は、**実測で偽陽性率に低い上限を置けなかった**
-（実 API の埋め込みは呼び出しをまたいで完全には決定的でない）。実測した値と射程は
+差分を Job Summary に出す。**判定は2つ並ぶ**——**margin基準の判定**
+（[ADR 0333](../../docs/decisions/0333-identifier-verdict-and-intrusion-margin-candidates.md)
+§2・2026-09-30 追記。baseline margin の標本標準偏差の3倍以上縮んだ probe が2件以上あれば
+red）がこのジョブの判定であり、その下に**旧判定**（測定前に決めた「hit@1 低下・MRR 低下」、
+[ADR 0316](../../docs/decisions/0316-openai-embedding-false-positive-ceiling.md)、移行の
+追跡用に残している）が続く。どちらが red でも CI は落ちない——この4群のうち少なくとも2群
+（`identifiersSparse`/`identifiersDense`）は、**旧判定では実測で偽陽性率に低い上限を
+置けなかった**（実 API の埋め込みは呼び出しをまたいで完全には決定的でない）。margin基準・
+旧判定それぞれの実測した値と射程は
+[ADR 0333](../../docs/decisions/0333-identifier-verdict-and-intrusion-margin-candidates.md)・
 [ADR 0316](../../docs/decisions/0316-openai-embedding-false-positive-ceiling.md) に記録して
 ある。⛔ **ここには実測値を写さない**（数を焼き込まない規律）。
 
@@ -1584,8 +1590,11 @@ node scripts/numeral-token-probe-summary.mjs \
 [cassettes/numeral-token-probes.openai.json](./cassettes/numeral-token-probes.openai.json)
 を再生）でも走らせる。基準値は
 [numeral-token-probe-baseline.openai.json](./numeral-token-probe-baseline.openai.json)。
-⛔ 門ではない。再計測の手順・実測した偽陽性率の上限はルートの README.md と
-ADR 0316 を見ること(⛔ ここには実測値を写さない)。
+⛔ 門ではない。Job Summary の判定は margin基準（ADR 0333）が先、旧判定（ADR 0316、移行の
+追跡用）が続く——`identifier-probes` の同名節と同じ構成。再計測の手順・実測した偽陽性率の
+上限はルートの README.md と ADR 0316・
+[ADR 0333](../../docs/decisions/0333-identifier-verdict-and-intrusion-margin-candidates.md)
+を見ること(⛔ ここには実測値を写さない)。
 
 ---
 

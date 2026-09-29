@@ -494,6 +494,7 @@ export * from "./embedding.js";
 export * from "./outbox.js";
 export * from "./idempotent-create.js";
 export * from "./interfaces/memory-store.js";
+export * from "./interfaces/relation-store.js";
 export * from "./interfaces/vector-store.js";
 export * from "./interfaces/lexical-store.js";
 export * from "./interfaces/event-store.js";
@@ -623,6 +624,10 @@ export declare class MemoryStatusConflictError extends Error {
     readonly expectedStatus: MemoryStatus;
     readonly observedStatus: MemoryStatus | null;
     constructor(memoryId: MemoryId, expectedStatus: MemoryStatus, observedStatus: MemoryStatus | null);
+}
+export declare class ContestedGroupMembershipMismatchError extends Error {
+    readonly missingMemberId: MemoryId;
+    constructor(missingMemberId: MemoryId);
 }
 export declare class SourceMemoryForgottenError extends Error {
     readonly method: "createMemoryWithOutbox" | "supersedeWithNewMemories";
@@ -776,6 +781,22 @@ export interface MemoryStore {
         memory: Memory;
         event: MemoryEvent;
     }>;
+    markContestedGroup?(ctx: Ctx, members: ReadonlyArray<{
+        id: MemoryId;
+        event: NewMemoryEvent;
+    }>): Promise<{
+        members: Memory[];
+        events: MemoryEvent[];
+    }>;
+    resolveContestedGroup?(ctx: Ctx, members: ReadonlyArray<{
+        id: MemoryId;
+        status: "active" | "superseded";
+        supersededById?: MemoryId;
+        event: NewMemoryEvent;
+    }>): Promise<{
+        members: Memory[];
+        events: MemoryEvent[];
+    }>;
     findActiveByClaimKey?(ctx: Ctx, query: {
         subjectId: string | null;
         claimKey: ClaimKey;
@@ -918,6 +939,21 @@ export interface OutboxStore {
         at?: Date;
     }): Promise<void>;
     eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+}
+
+// ===== dist/interfaces/relation-store.d.ts =====
+import type { Ctx } from "../ctx.js";
+import type { MemoryId } from "../ids.js";
+export type RelationKind = "contradicts";
+export interface Relation {
+    memoryId: MemoryId;
+    kind: RelationKind;
+    createdAt: Date;
+}
+export interface RelationStore {
+    link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
 }
 
 // ===== dist/interfaces/scheduler.d.ts =====
@@ -1735,6 +1771,7 @@ import type { Clock } from "./interfaces/clock.js";
 import type { Ctx } from "./ctx.js";
 import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { MemoryStore } from "./interfaces/memory-store.js";
+import type { RelationStore } from "./interfaces/relation-store.js";
 import type { TokenCounter } from "./interfaces/token-counter.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
 import type { LexicalStore } from "./interfaces/lexical-store.js";
@@ -1746,6 +1783,7 @@ import type { RecallOutputValidationMode } from "./recall-output-validation.js";
 export interface RecallRuntimeDeps {
     memoryStore: MemoryStore;
     vectorStore: VectorStore;
+    relationStore?: RelationStore;
     tenantSettingsStore?: TenantSettingsStore;
     lexicalStore?: LexicalStore;
     embeddingProvider: EmbeddingProvider;
@@ -1791,8 +1829,8 @@ export declare const CountKindSchema: z.ZodEnum<{
 }>;
 export interface StageSkippedOmission {
     kind: "stage_skipped";
-    stage: "candidate_generation" | "rescore" | "index_band" | "association";
-    reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor";
+    stage: "candidate_generation" | "rescore" | "index_band" | "association" | "relation";
+    reason: "embedding_provider_unavailable" | "empty_query_content" | "vector_store_lacks_get_vectors" | "no_anchor" | "relation_store_unavailable";
 }
 export type ScopeRelation = "outside_scope" | "within_scope";
 export declare const ScopeRelationSchema: z.ZodEnum<{
@@ -1818,7 +1856,7 @@ export interface BelowThresholdOmission {
 }
 export interface OverLimitOmission {
     kind: "over_limit";
-    stage: "rescore" | "association";
+    stage: "rescore" | "association" | "relation";
     count: number;
     countKind: CountKind;
 }
@@ -1881,12 +1919,14 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
             rescore: "rescore";
             index_band: "index_band";
             association: "association";
+            relation: "relation";
         }>;
         reason: z.ZodEnum<{
             embedding_provider_unavailable: "embedding_provider_unavailable";
             empty_query_content: "empty_query_content";
             vector_store_lacks_get_vectors: "vector_store_lacks_get_vectors";
             no_anchor: "no_anchor";
+            relation_store_unavailable: "relation_store_unavailable";
         }>;
     }, z.core.$strip>,
     z.ZodObject<{
@@ -1931,6 +1971,7 @@ export declare const OmissionSchema: z.ZodDiscriminatedUnion<[
         stage: z.ZodEnum<{
             rescore: "rescore";
             association: "association";
+            relation: "relation";
         }>;
         count: z.ZodNumber;
         countKind: z.ZodEnum<{
@@ -2542,12 +2583,14 @@ export declare const RecallResultSchema: z.ZodObject<{
                 rescore: "rescore";
                 index_band: "index_band";
                 association: "association";
+                relation: "relation";
             }>;
             reason: z.ZodEnum<{
                 embedding_provider_unavailable: "embedding_provider_unavailable";
                 empty_query_content: "empty_query_content";
                 vector_store_lacks_get_vectors: "vector_store_lacks_get_vectors";
                 no_anchor: "no_anchor";
+                relation_store_unavailable: "relation_store_unavailable";
             }>;
         }, z.core.$strip>,
         z.ZodObject<{
@@ -2592,6 +2635,7 @@ export declare const RecallResultSchema: z.ZodObject<{
             stage: z.ZodEnum<{
                 rescore: "rescore";
                 association: "association";
+                relation: "relation";
             }>;
             count: z.ZodNumber;
             countKind: z.ZodEnum<{
@@ -2817,6 +2861,7 @@ import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js"
 import type { TokenCounter } from "./interfaces/token-counter.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
 import type { LexicalStore } from "./interfaces/lexical-store.js";
+import type { RelationStore } from "./interfaces/relation-store.js";
 import type { MemoryId, ObservationId, RecallId } from "./ids.js";
 import type { Memory, MemoryStatus } from "./memory.js";
 import type { ObserveInput } from "./observation.js";
@@ -2844,6 +2889,7 @@ export interface RuntimeDeps {
     outboxStore: OutboxStore;
     vectorStore: VectorStore;
     lexicalStore?: LexicalStore;
+    relationStore?: RelationStore;
     eventStore: EventStore;
     tenantSettingsStore: TenantSettingsStore;
     llmProvider: LLMProvider;
@@ -2877,6 +2923,10 @@ export interface ContestedDetectionOutcome {
     } | {
         kind: "unresolved_conflict";
         matchMemoryIds: MemoryId[];
+    } | {
+        kind: "contested_group";
+        memberIds: MemoryId[];
+        markContestedGroup: MarkContestedGroupResult;
     };
 }
 export type WriteAtomicity = "store_supported" | "store_unsupported" | "not_attempted";
@@ -3317,6 +3367,77 @@ export interface ResolveOrphanedContestedResult {
     supported: boolean;
     outcome: ResolveOrphanedContestedOutcome;
 }
+export type MarkContestedGroupSideOutcome = {
+    memoryId: MemoryId;
+    kind: "eligible";
+} | {
+    memoryId: MemoryId;
+    kind: "not_found";
+} | {
+    memoryId: MemoryId;
+    kind: "status_conflict";
+    status: MemoryStatus;
+    contestedWithId: MemoryId | null;
+};
+export type MarkContestedGroupOutcome = {
+    kind: "contested_group";
+    members: Memory[];
+} | {
+    kind: "ineligible";
+    sides: MarkContestedGroupSideOutcome[];
+} | {
+    kind: "conflict";
+    conflicts: ReadonlyArray<{
+        id: MemoryId;
+        observedStatus: MemoryStatus | null;
+    }>;
+} | {
+    kind: "not_attempted";
+};
+export interface MarkContestedGroupOptions {
+    actor?: EventActor;
+    reason?: string;
+}
+export interface MarkContestedGroupResult {
+    supported: boolean;
+    outcome: MarkContestedGroupOutcome;
+}
+export type ResolveContestedGroupSideOutcome = {
+    memoryId: MemoryId;
+    kind: "eligible";
+} | {
+    memoryId: MemoryId;
+    kind: "not_found";
+} | {
+    memoryId: MemoryId;
+    kind: "status_not_contested";
+    status: Exclude<MemoryStatus, "contested">;
+};
+export type ResolveContestedGroupOutcome = {
+    kind: "resolved";
+    members: Memory[];
+} | {
+    kind: "ineligible";
+    sides: ResolveContestedGroupSideOutcome[];
+    missingMembers: MemoryId[];
+} | {
+    kind: "conflict";
+    conflicts: ReadonlyArray<{
+        id: MemoryId;
+        observedStatus: MemoryStatus | null;
+    }>;
+} | {
+    kind: "not_attempted";
+};
+export type ContestedGroupResolution = ContestedResolution;
+export interface ResolveContestedGroupOptions {
+    actor?: EventActor;
+    reason?: string;
+}
+export interface ResolveContestedGroupResult {
+    supported: boolean;
+    outcome: ResolveContestedGroupOutcome;
+}
 export interface Runtime {
     observe(ctx: Ctx, input: ObserveInput, opts?: AbortOptions): Promise<ObserveResult>;
     tick(ctx: Ctx, opts: TickOptions): Promise<TickResult>;
@@ -3333,6 +3454,8 @@ export interface Runtime {
     markContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, opts?: MarkContestedOptions): Promise<MarkContestedResult>;
     resolveContested(ctx: Ctx, firstId: MemoryId, secondId: MemoryId, resolution: ContestedResolution, opts?: ResolveContestedOptions): Promise<ResolveContestedResult>;
     resolveOrphanedContested?(ctx: Ctx, survivorId: MemoryId, opts?: ResolveOrphanedContestedOptions): Promise<ResolveOrphanedContestedResult>;
+    markContestedGroup?(ctx: Ctx, memberIds: readonly MemoryId[], opts?: MarkContestedGroupOptions): Promise<MarkContestedGroupResult>;
+    resolveContestedGroup?(ctx: Ctx, memberIds: readonly MemoryId[], resolution: ContestedGroupResolution, opts?: ResolveContestedGroupOptions): Promise<ResolveContestedGroupResult>;
     applyCorrection(ctx: Ctx, input: ApplyCorrectionInput): Promise<ApplyCorrectionResult>;
     consolidate(ctx: Ctx, opts: ConsolidateOptions): Promise<ConsolidationResult>;
     reflect(ctx: Ctx, opts: ReflectOptions): Promise<ReflectionResult>;

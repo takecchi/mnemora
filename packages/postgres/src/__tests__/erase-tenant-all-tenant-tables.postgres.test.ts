@@ -5,6 +5,7 @@ import { PostgresMemoryStore } from "../memory-store.js";
 import { PostgresVectorStore } from "../vector-store.js";
 import { PostgresOutboxStore } from "../outbox-store.js";
 import { PostgresTenantSettingsStore } from "../tenant-settings-store.js";
+import { PostgresRelationStore } from "../relation-store.js";
 import { listEmbeddingSpaceTables } from "../embedding-space-catalog.js";
 import { closeTestClient, getTestClient, resetTestDatabase } from "./test-db.js";
 import {
@@ -71,6 +72,19 @@ describe("eraseTenant は tenant_id を持つ全表からこのテナントの�
     const tenantSettingsStore = new PostgresTenantSettingsStore(db);
     await seedAllTablesForTenant(runtime, tenantSettingsStore, T, S);
     await seedAllTablesForTenant(runtime, tenantSettingsStore, OTHER, S);
+    // memory_relations（Issue #207/#933 PR2、migration 0026）。seed の補助関数は runtime の
+    // 経路だけで行を作るが、関係の行は claim key 衝突検出を on にしないと張られないため、
+    // ここで `RelationStore.link` を直接呼んで両テナントに1組ずつ張る。
+    const relationStore = new PostgresRelationStore(db);
+    for (const tenantId of [T, OTHER]) {
+      const { rows: ids } = await pool.query<{ id: string }>(
+        "SELECT id FROM memories WHERE tenant_id = $1 ORDER BY id LIMIT 2",
+        [tenantId],
+      );
+      expect(ids.length).toBe(2);
+      await relationStore.link({ tenantId }, "contradicts", ids[0]!.id, ids[1]!.id);
+      await relationStore.link({ tenantId }, "contradicts", ids[1]!.id, ids[0]!.id);
+    }
 
     const tables = await listTenantScopedTables(pool);
     expect(tables.length).toBeGreaterThan(0);

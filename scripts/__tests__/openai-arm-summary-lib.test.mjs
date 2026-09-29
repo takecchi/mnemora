@@ -15,11 +15,15 @@ import {
  *
  * ⭐ **最重要の検査**: 基準値と比べていること・一致なら1行で黙り違うときだけ展開すること
  * (`identifier-probe-summary-lib.test.mjs` と同じ規律)。
- * ⭐ **この集合固有の検査**: 「並走の判定」(`decideShadowVerdict`)が
+ * ⭐ **この集合固有の検査**: 「旧判定」(`decideShadowVerdict`、ADR 0316)が
  * `examples/chat/src/openai-arm-verdict.ts` の `decideEmbeddingDriftVerdict` と
  * 同じ規則で動くこと、かつ**この判定は `buildSummaryMarkdown` の出力に現れるだけで
  * exit code には影響しないこと**(この歯は純粋にオブジェクトの戻り値だけを見る——
- * exit code の検査は CLI を子プロセスで起動する歯の範囲外にある)。
+ * exit code の検査は CLI を子プロセスで起動する歯の範囲外にある)。**2026-09-30 の
+ * ADR 0333 追記以降、このジョブの判定は margin基準
+ * (`decideMarginShadowVerdict`/`buildMarginShadowVerdictSection`)であり、
+ * `decideShadowVerdict` は移行の追跡用に残っている旧判定である**
+ * (`openai-arm-margin-verdict-promotion.test.mjs` が実データでこの入れ替わりを縛る)。
  */
 
 function makeGroup(overrides = {}) {
@@ -122,7 +126,7 @@ describe("diffGroup", () => {
   });
 });
 
-describe("decideShadowVerdict(⛔ 門ではない。並走の判定)", () => {
+describe("decideShadowVerdict(⛔ 門ではない。旧判定・ADR 0316。2026-09-30以降はこのジョブの判定ではない)", () => {
   it("基準値と完全一致なら green", () => {
     const baseline = makeGroup();
     const verdict = decideShadowVerdict(baseline, baseline);
@@ -168,11 +172,11 @@ describe("buildSummaryMarkdown", () => {
       baseline: { groups: [group] },
     });
     expect(markdown).toContain("✅ 一致");
-    expect(markdown).toContain("並走の判定");
+    expect(markdown).toContain("旧判定");
     expect(markdown).toContain("✅ 0/1 群が red");
   });
 
-  it("red のときは並走の判定節に🔴が出る", () => {
+  it("red のときは旧判定節に🔴が出る", () => {
     const baseline = makeGroup();
     const measured = makeGroup({ hit1Count: 20 });
     const markdown = buildSummaryMarkdown({
@@ -183,39 +187,54 @@ describe("buildSummaryMarkdown", () => {
     expect(markdown).toContain("🔴 1/1 群が red");
   });
 
-  it("baseline を渡さなければ比較節も並走の判定節も出さない", () => {
+  it("baseline を渡さなければ比較節も旧判定節も判定節(margin基準)も出さない", () => {
     const markdown = buildSummaryMarkdown({
       title: "テスト",
       measured: makeMeasured([makeGroup()]),
     });
     expect(markdown).not.toContain("基準値との差分");
-    expect(markdown).not.toContain("並走の判定");
+    expect(markdown).not.toContain("旧判定");
+    expect(markdown).not.toContain("判定: margin基準");
   });
 
-  it("baseline を渡すと参考節(margin基準)も出る——「判定には使っていない」の文言を含む", () => {
+  it("baseline を渡すと判定節(margin基準)も出る——「このジョブの判定である」の文言を含み、「判定には使っていない」は含まない", () => {
     const group = makeGroup();
     const markdown = buildSummaryMarkdown({
       title: "テスト",
       measured: makeMeasured([group]),
       baseline: { groups: [group] },
     });
-    expect(markdown).toContain("参考: margin基準の判定候補");
-    expect(markdown).toContain("判定には使っていない");
+    expect(markdown).toContain("判定: margin基準");
+    expect(markdown).toContain("このジョブの判定である");
     expect(markdown).toContain("ADR 0333");
   });
 
-  it("baseline を渡さなければ参考節(margin基準)も出さない", () => {
+  it("baseline を渡さなければ判定節(margin基準)も出さない", () => {
     const markdown = buildSummaryMarkdown({
       title: "テスト",
       measured: makeMeasured([makeGroup()]),
     });
-    expect(markdown).not.toContain("参考: margin基準の判定候補");
+    expect(markdown).not.toContain("判定: margin基準");
+  });
+
+  it("判定節(margin基準)が旧判定節より前にある", () => {
+    const group = makeGroup();
+    const markdown = buildSummaryMarkdown({
+      title: "テスト",
+      measured: makeMeasured([group]),
+      baseline: { groups: [group] },
+    });
+    const marginIndex = markdown.indexOf("## 判定: margin基準");
+    const legacyIndex = markdown.indexOf("## 旧判定");
+    expect(marginIndex).toBeGreaterThan(-1);
+    expect(legacyIndex).toBeGreaterThan(-1);
+    expect(marginIndex).toBeLessThan(legacyIndex);
   });
 });
 
 /**
  * `decideMarginShadowVerdict`/`buildMarginShadowVerdictSection` の歯(ADR 0333 §2・§4.1・
- * §4.3「A」。⛔ 参考であり判定には使っていない)。
+ * §4.3「A」。2026-09-30 追記でこのジョブの判定に採った——⛔ ただし門ではない)。
  *
  * baseline の5probeの margin([0.10, 0.12, 0.08, 0.11, 0.09])は
  * mean=0.10・標本標準偏差(n-1)=0.01581138830...(電卓で検算済み)——
@@ -237,8 +256,8 @@ function makeGroupWithMargins(probeMarginOverrides = {}, groupOverrides = {}) {
   return makeGroup({ probeMargins: makeProbeMargins(probeMarginOverrides), ...groupOverrides });
 }
 
-describe("decideMarginShadowVerdict(⛔ 参考。判定には使っていない)", () => {
-  it("2件が3σ以上縮むと参考red", () => {
+describe("decideMarginShadowVerdict(このジョブの判定。⛔ 門ではない)", () => {
+  it("2件が3σ以上縮むとred", () => {
     const baseline = makeGroupWithMargins();
     const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
     const verdict = decideMarginShadowVerdict(measured, baseline);
@@ -247,7 +266,7 @@ describe("decideMarginShadowVerdict(⛔ 参考。判定には使っていない)
     expect(verdict.shrunkProbeCount).toBe(2);
   });
 
-  it("1件だけ3σ以上縮んでも参考green(minShrunkProbes=2)", () => {
+  it("1件だけ3σ以上縮んでもgreen(minShrunkProbes=2)", () => {
     const baseline = makeGroupWithMargins();
     const measured = makeGroupWithMargins({ p1: 0.1 - 0.05 });
     const verdict = decideMarginShadowVerdict(measured, baseline);
@@ -334,13 +353,14 @@ describe("decideMarginShadowVerdict(⛔ 参考。判定には使っていない)
   });
 });
 
-describe("buildMarginShadowVerdictSection(⛔ 参考。判定には使っていない)", () => {
-  it("参考redでも、見出し・本文に「判定には使っていない」が明記される", () => {
+describe("buildMarginShadowVerdictSection(このジョブの判定。⛔ 門ではない)", () => {
+  it("redのとき、見出し・本文に「このジョブの判定である」が明記される(「判定には使っていない」は含まない)", () => {
     const baseline = makeGroupWithMargins();
     const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
     const section = buildMarginShadowVerdictSection([measured], [baseline]);
     expect(section).toContain("🔴");
-    expect(section).toContain("判定には使っていない");
+    expect(section).toContain("このジョブの判定である");
+    expect(section).not.toContain("判定には使っていない");
     expect(section).toContain("ADR 0333");
   });
 
@@ -352,9 +372,9 @@ describe("buildMarginShadowVerdictSection(⛔ 参考。判定には使ってい�
     expect(section).not.toContain("🔴");
   });
 
-  it("参考節が red でも、既存の並走の判定(decideShadowVerdict)の結果は変わらない", () => {
-    // 並走の判定(ADR 0316)は hit1Count/mrrOverall だけを見る——margin(参考節)を
-    // どれだけ動かしても、既存の判定は影響を受けない(⛔ 判定を混ぜていないことの直接確認)。
+  it("判定節(margin基準)が red でも、旧判定(decideShadowVerdict)の結果は変わらない——判定を混ぜていない", () => {
+    // 旧判定(ADR 0316)は hit1Count/mrrOverall だけを見る——margin(判定節)を
+    // どれだけ動かしても、旧判定は影響を受けない(⛔ 判定を混ぜていないことの直接確認)。
     const baseline = makeGroupWithMargins();
     const measured = makeGroupWithMargins({ p1: 0.1 - 0.05, p2: 0.12 - 0.05 });
     const marginVerdict = decideMarginShadowVerdict(measured, baseline);
@@ -368,7 +388,7 @@ describe("buildMarginShadowVerdictSection(⛔ 参考。判定には使ってい�
       measured: makeMeasured([measured]),
       baseline: { groups: [baseline] },
     });
-    expect(markdown).toContain("✅ 0/1 群が red"); // 既存の並走の判定は green のまま
-    expect(markdown).toContain("🔴(参考)"); // 参考節だけが red
+    expect(markdown).toContain("✅ 0/1 群が red。"); // 旧判定(ADR 0316)は green のまま
+    expect(markdown).toContain("🔴 1/1 群が red(比較できた群のうち)。"); // 判定節(margin基準)だけが red
   });
 });

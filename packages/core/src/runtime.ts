@@ -32,6 +32,7 @@ import type { EmbeddingProvider } from "./interfaces/embedding-provider.js";
 import type { EventStore } from "./interfaces/event-store.js";
 import type { LLMProvider } from "./interfaces/llm-provider.js";
 import {
+  ContestedGroupMembershipMismatchError,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
   PURGE_TOMBSTONE_CONTENT,
@@ -58,6 +59,7 @@ import type { TenantSettingsStore } from "./interfaces/tenant-settings-store.js"
 import type { TokenCounter } from "./interfaces/token-counter.js";
 import type { VectorStore } from "./interfaces/vector-store.js";
 import type { LexicalStore } from "./interfaces/lexical-store.js";
+import type { RelationStore } from "./interfaces/relation-store.js";
 import type { MemoryId, ObservationId, RecallId } from "./ids.js";
 import type { Memory, MemoryStatus, NewMemory } from "./memory.js";
 import type {
@@ -252,6 +254,20 @@ export interface RuntimeDeps {
    * 理由は `RecallQuery.channels` の doc に書いてある。
    */
   lexicalStore?: LexicalStore;
+  /**
+   * `memory_relations` を読む store（Issue #207/#933 PR2、ADR 0292 決定1、ADR 0327、
+   * ADR 0381）。
+   *
+   * **省略可能である。**省略しても mnemora は成立する（北極星の問い2）——省略時は
+   * `detectClaimKeyContested` の `contested_group` 分岐が組み立てる `members` は常に
+   * 「新しく重なった相手」だけになり、既存の穴A（2者間の対）の相方吸収・既存群の合併は
+   * 行われない（`markContestedGroup`/`resolveContestedGroup` 自体は呼べるが、
+   * 呼び出し側がこの store 無しに安全に集合を広げる手段が無いため）。`resolveContestedGroup`
+   * の「渡された `members` が群の全員と一致するか」という読み側の事前確認
+   * （`Runtime.resolveContestedGroup` の doc コメント手順6）も、この欄が無ければ行わず
+   * store 側の CAS だけに任せる。
+   */
+  relationStore?: RelationStore;
   /** 監査ログ（`memory_events`）を読み書きする store。 */
   eventStore: EventStore;
   /** テナントの設定（既定の半減期・減衰の時計・保持期間など）を読む store。 */
@@ -447,6 +463,17 @@ export interface ObserveResult {
  *   `contested` だった場合）——直す前は `markContested` へ進んで `ineligible` になり、
  *   検出中の Memory は `active` のまま痕跡も残らなかった（例: 3件目の有効期間が、既に
  *   対になった1件目・2件目のうち片方とだけ重なる場合）。
+ *
+ * ⚠ **2026-09-30 の直し（Issue #207/#933 PR2、ADR 0381、段階B。2026-09-30 のさらなる
+ * 直しで `deps.relationStore` の配線を条件にした）**: `matchCount >= 2`、または
+ * `matchCount === 1` だがその1件が既に `contested` の場合、`deps.relationStore` と
+ * `deps.memoryStore.markContestedGroup` の両方が配線されていて、かつ「群のメンバー」の
+ * 組み立て（下の `detectClaimKeyContested` 実装コメント参照。穴Aの吸収・既存群の合併を
+ * 含む）の結果が**3件以上**になれば、`result.kind === "contested_group"` になる——
+ * `Runtime.markContestedGroup` を実際に呼んだ結果を運ぶ。それ以外（`relationStore`/
+ * `markContestedGroup` のどちらかが配線されていない、または組み立てた群が2件以下にしか
+ * ならない場合）は、今まで通り `result.kind === "unresolved_conflict"`（evidence だけ）
+ * になる。
  */
 export interface ContestedDetectionOutcome {
   /** 検出の対象にした、新しく作った Memory の id。 */
@@ -459,7 +486,12 @@ export interface ContestedDetectionOutcome {
   result:
     | { kind: "no_conflict" }
     | { kind: "contested"; withMemoryId: MemoryId; markContested: MarkContestedResult }
-    | { kind: "unresolved_conflict"; matchMemoryIds: MemoryId[] };
+    | { kind: "unresolved_conflict"; matchMemoryIds: MemoryId[] }
+    | {
+        kind: "contested_group";
+        memberIds: MemoryId[];
+        markContestedGroup: MarkContestedGroupResult;
+      };
 }
 
 /**
@@ -2180,6 +2212,171 @@ export interface ResolveOrphanedContestedResult {
 }
 
 /**
+ * `runtime.markContestedGroup` がメンバー1件を分類する適格性（Issue #207/#933 PR2、
+ * ADR 0327 §4-c、ADR 0378、ADR 0381）。`MarkContestedSideOutcome`（2者版）と同じ
+ * 「無いを分類して返す」流儀だが、`MemoryStore.markContestedGroup` の CAS が
+ * `active`/`contested`（穴A の相方吸収）/`contested`（既存群の合併吸収）の3通りを
+ * 許すぶん、分類も3者版になる（interface 側の `MemoryStore.markContestedGroup` JSDoc の
+ * 契約と1対1対応）。
+ *
+ * - `"eligible"` — 次のいずれか: (1) `status === 'active'`。(2) `status === 'contested'` かつ
+ *   `contestedWithId` が渡された `members` の**他の**誰かの id と一致する（穴Aの吸収）。
+ *   (3) `status === 'contested'` かつ `contestedWithId === null`（既存群の合併吸収——
+ *   実際にその群と `members` がつながっているかは `Runtime` 側で
+ *   `detectClaimKeyContested`/呼び出し側が `RelationStore.listRelated` を使って確かめる
+ *   前提であり、この分類自体は行レベルの形だけを見る）。
+ * - `"not_found"` — そのテナントにその id の Memory がそもそも無い。
+ * - `"status_conflict"` — 上の3通りのいずれにも当てはまらない（`contested` だが
+ *   `contestedWithId` が `members` の外を指す、または `superseded`/`archived`/`forgotten`）。
+ *   `status`・観測した `contestedWithId` を積む。
+ */
+export type MarkContestedGroupSideOutcome =
+  | { memoryId: MemoryId; kind: "eligible" }
+  | { memoryId: MemoryId; kind: "not_found" }
+  | {
+      memoryId: MemoryId;
+      kind: "status_conflict";
+      status: MemoryStatus;
+      contestedWithId: MemoryId | null;
+    };
+
+/**
+ * `runtime.markContestedGroup` 全体の結末（Issue #207/#933 PR2、ADR 0327 §4-c、ADR 0378、
+ * ADR 0381）。`MarkContestedOutcome`（2者版）と対称の語彙——「対象が適格でなかった」
+ * 「書き込み時点で競合した」「対応していない」を1つの `false`/例外に潰さない。
+ *
+ * - `"contested_group"` — 全メンバーを `status: 'contested'`・`contestedWithId: null` へ
+ *   動かし、有効期間が重なる組に `memory_relations` を張った。**部分成功は無い。**
+ * - `"ineligible"` — `getMany` で読んだ時点で、1件以上が `"eligible"` でなかった。
+ *   **書き込みは一切試みていない。**
+ * - `"conflict"` — 読んだ時点では全員 `"eligible"` だったが、書き込み時点で
+ *   {@link MemoryStatusConflictError} が投げられた（TOCTOU）。1回だけ再読した現在の
+ *   `status` を `conflicts` に積む。
+ * - `"not_attempted"` — `MemoryStore.markContestedGroup` が実装されていない
+ *   （`MarkContestedGroupResult.supported: false`）。フォールバック経路は無い。
+ */
+export type MarkContestedGroupOutcome =
+  | { kind: "contested_group"; members: Memory[] }
+  | { kind: "ineligible"; sides: MarkContestedGroupSideOutcome[] }
+  | {
+      kind: "conflict";
+      conflicts: ReadonlyArray<{ id: MemoryId; observedStatus: MemoryStatus | null }>;
+    }
+  | { kind: "not_attempted" };
+
+/**
+ * `runtime.markContestedGroup` の任意オプション（Issue #207/#933 PR2、ADR 0381）。
+ * `MarkContestedOptions`（2者版）と同じ形。
+ */
+export interface MarkContestedGroupOptions {
+  /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
+  actor?: EventActor;
+  /**
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested'` であり、
+   * この欄では上書きしない——`markContested` の `opts.reason` → `meta.note` と同じ形）。
+   * 省略時は `meta` に `note` キー自体を持たせない。
+   */
+  reason?: string;
+}
+
+/**
+ * `runtime.markContestedGroup` の結果（Issue #207/#933 PR2、ADR 0381）。
+ */
+export interface MarkContestedGroupResult {
+  /**
+   * `MemoryStore.markContestedGroup` が実装されていたか。**`false` のとき `outcome` は
+   * 必ず `{ kind: "not_attempted" }`。**
+   */
+  supported: boolean;
+  /** どう終わったか（{@link MarkContestedGroupOutcome}）。 */
+  outcome: MarkContestedGroupOutcome;
+}
+
+/**
+ * `runtime.resolveContestedGroup` がメンバー1件を分類する適格性（Issue #207/#933 PR2、
+ * ADR 0327 §4-c、ADR 0378 決定3、ADR 0381）。`ResolveContestedSideOutcome`（2者版）と
+ * 違い、群のメンバーは `contestedWithId` を持たない設計（`markContestedGroup` 契約）なので
+ * `"pair_broken"` に相当する分類は無い——`status` だけを見る。
+ *
+ * - `"eligible"` — `status === "contested"`。
+ * - `"not_found"` — そのテナントにその id の Memory がそもそも無い。
+ * - `"status_not_contested"` — 存在はするが `status !== "contested"`。
+ */
+export type ResolveContestedGroupSideOutcome =
+  | { memoryId: MemoryId; kind: "eligible" }
+  | { memoryId: MemoryId; kind: "not_found" }
+  | {
+      memoryId: MemoryId;
+      kind: "status_not_contested";
+      status: Exclude<MemoryStatus, "contested">;
+    };
+
+/**
+ * `runtime.resolveContestedGroup` 全体の結末（Issue #207/#933 PR2、ADR 0381）。
+ * `ResolveContestedOutcome`（2者版）と対称の語彙。
+ *
+ * - `"resolved"` — 全メンバーを `resolution` に従って `active`/`superseded` へ動かし、
+ *   このメンバー間の `memory_relations` を双方向とも削除した。
+ * - `"ineligible"` — 読んだ時点で、1件以上が `"eligible"` でなかった——**うち `members` が
+ *   `memory_relations` でつながった「今も `contested` な」群の一部しか渡されていなかった
+ *   場合も含む**（2026-09-30 の直し、ADR 0381）。この場合は `sides` に含めきれない欠けた
+ *   メンバーの id を `missingMembers` に積む（`sides` は渡された `members` だけを分類する
+ *   ため、渡されなかった欠けたメンバーはそもそも `sides` に現れない）。**書き込みは一切
+ *   試みていない。**
+ * - `"conflict"` — 読んだ時点では全員 `"eligible"` だったが、書き込み時点で
+ *   {@link MemoryStatusConflictError} が投げられた（TOCTOU、または store 側の
+ *   全体一致 CAS 違反）。1回だけ再読した現在の `status` を `conflicts` に積む。
+ * - `"not_attempted"` — `MemoryStore.resolveContestedGroup` が実装されていない。
+ */
+export type ResolveContestedGroupOutcome =
+  | { kind: "resolved"; members: Memory[] }
+  | {
+      kind: "ineligible";
+      sides: ResolveContestedGroupSideOutcome[];
+      missingMembers: MemoryId[];
+    }
+  | {
+      kind: "conflict";
+      conflicts: ReadonlyArray<{ id: MemoryId; observedStatus: MemoryStatus | null }>;
+    }
+  | { kind: "not_attempted" };
+
+/**
+ * `runtime.resolveContestedGroup` に「どちらが正しいか」を渡すための判別可能 union
+ * （Issue #207/#933 PR2、ADR 0378 決定3、ADR 0381）。`ContestedResolution`（2者版）と
+ * 完全に同じ形——新しい決着の種類は増やさない。`"supersede"` の `winnerId` は
+ * `members` のうちのちょうど1件を指す。
+ */
+export type ContestedGroupResolution = ContestedResolution;
+
+/**
+ * `runtime.resolveContestedGroup` の任意オプション（Issue #207/#933 PR2、ADR 0381）。
+ * `ResolveContestedOptions`（2者版）と同じ形。
+ */
+export interface ResolveContestedGroupOptions {
+  /** `memory_events.actor`。省略時 `{ type: "system" }`。 */
+  actor?: EventActor;
+  /**
+   * `memory_events.meta.note` へ足す補足（`meta.reason` は常に固定値 `'contested_resolved'`
+   * であり、この欄では上書きしない）。省略時は `meta` に `note` キー自体を持たせない。
+   */
+  reason?: string;
+}
+
+/**
+ * `runtime.resolveContestedGroup` の結果（Issue #207/#933 PR2、ADR 0381）。
+ */
+export interface ResolveContestedGroupResult {
+  /**
+   * `MemoryStore.resolveContestedGroup` が実装されていたか。**`false` のとき `outcome` は
+   * 必ず `{ kind: "not_attempted" }`。**
+   */
+  supported: boolean;
+  /** どう終わったか（{@link ResolveContestedGroupOutcome}）。 */
+  outcome: ResolveContestedGroupOutcome;
+}
+
+/**
  * `createRuntime()` が返す runtime。中核の5動詞（`observe`・`recall`・`reflect`・`consolidate`・`forget`）と、保守・是正・説明の口を持つ。
  * どのメソッドも第一引数に `ctx`（`tenantId` 必須）を取る。一覧と分類は README の「外から見える API」を見ること。
  */
@@ -3128,6 +3325,145 @@ export interface Runtime {
     opts?: ResolveOrphanedContestedOptions,
   ): Promise<ResolveOrphanedContestedResult>;
   /**
+   * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378、ADR 0381）: `docs/memory-model.md` §11
+   * lifecycle 行6「`active → contested`」を、**3件以上**（群）へ書く**明示的操作**。
+   * `markContested`（2者専用、ADR 0134）の形を手本にした N者版——「対象が適格だったか」
+   * を読み側で判定してから `MemoryStore.markContestedGroup` を呼ぶ、という2段構えを
+   * そのまま踏襲する。
+   *
+   * **この操作自身も「矛盾しているかどうか」を判定しない。**呼び出し側
+   * （`detectClaimKeyContested` の `contested_group` 分岐、または人・上位のアプリケーション
+   * 層）が「この `members` は対向する」と既に決めていることを前提に、その決定を
+   * 機械的に書き込むだけである。**穴Aの吸収（既存の2者間の対の相方を含める）・合併
+   * （複数の既存群を1つに束ねる）の判定は、この口の呼び出し側の責務である**
+   * （`MemoryStore.markContestedGroup` の interface JSDoc の契約 2・3）——この口は
+   * 渡された `members` をそのまま検査して書くだけで、`RelationStore` を自分で読みには
+   * 行かない。
+   *
+   * 手順（`markContested` と同じ順で追える）:
+   * 1. `memberIds.length < 3` は呼び出し前の programmer error として扱い、`RangeError`
+   *    （`Runtime.markContestedGroup: memberIds must have at least 3 entries`）を投げる。
+   *    書き込みは一切試みない。
+   * 2. `memberIds` に同じ id が2回以上現れるのも programmer error として扱い、`RangeError`
+   *    （`Runtime.markContestedGroup: memberIds must be unique`）を投げる。
+   * 3. `deps.memoryStore.markContestedGroup` が無ければ、ここで打ち切り
+   *    `{ supported: false, outcome: { kind: "not_attempted" } }` を返す——フォールバック
+   *    経路は無い。
+   * 4. `getMany(memberIds)` で一括読み、それぞれを
+   *    {@link MarkContestedGroupSideOutcome} に分類する（`"not_found"`/`"status_conflict"`/
+   *    `"eligible"`。適格性は `MemoryStore.markContestedGroup` の契約2・3と同じ3通り）。
+   *    1件でも `"eligible"` でなければ、書き込みを一切試みず
+   *    `{ supported: true, outcome: { kind: "ineligible", sides } }` を返す。
+   * 5. 全員 `"eligible"` なら、この口自身が各メンバーの `event`（`kind: 'updated'`・
+   *    `meta.reason: 'contested'`、下記）を組み立てて `deps.memoryStore.markContestedGroup`
+   *    を呼ぶ——`markContested`（2者版）が `firstId`/`secondId` だけを受け取り `event` は
+   *    自分で組み立てるのと同じ分担（`MemoryStore.markContestedGroup` の `members[].event` は
+   *    この口が埋める）。成功すれば
+   *    `{ supported: true, outcome: { kind: "contested_group", members } }`。
+   * 6. {@link MemoryStatusConflictError} が投げられたら（4で読んだ後、5で書く前に別の
+   *    書き込みが割り込んだ TOCTOU）、**1回だけ**再読して `conflicts` に全員の現在の
+   *    `status` を積み、`{ supported: true, outcome: { kind: "conflict", conflicts } }`
+   *    を返す——上限の無い再試行ループにはしない。
+   *
+   * `memory_events` へ全メンバーそれぞれ1件ずつ積む。`kind: 'updated'`・
+   * `meta.reason: 'contested'`（`markContested` と同じ固定値）。`opts.reason` を渡すと
+   * `meta.note` に追加で入る。**`meta.contestedWithId` は積まない**——群のメンバーは
+   * `contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3）であり、「誰と対だったか」は
+   * `memory_relations` の行（`RelationStore.listRelated`）から辿る。
+   *
+   * ⚠ **`recall()` 側は一切変更していない。**`status` が `'contested'` になった時点で、
+   * 既存の段1 status ゲート・段3 mandatory companion retrieval と全く同じ経路へ合流する
+   * ——`markContested` と同じ理由。
+   *
+   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**明示的に呼んだときだけ動く。
+   *
+   * 🔴 **任意メソッドである。**`resolveOrphanedContested?`（上、Issue #825 続き）と同じ理由
+   * ——`@mnemora/core` は v1.0.0 として npm に公開済みであり、`Runtime` interface を自前で
+   * 実装している利用者にとって、v1.0.0 の後に必須メソッドが増えることは破壊的変更になる。
+   * ⟹ **`createRuntime` が返す `Runtime` には必ずこのメソッドが実装されている**
+   * ——省略されるのは利用者が独自に `Runtime` を実装する場合の後方互換のためだけである。
+   */
+  markContestedGroup?(
+    ctx: Ctx,
+    memberIds: readonly MemoryId[],
+    opts?: MarkContestedGroupOptions,
+  ): Promise<MarkContestedGroupResult>;
+  /**
+   * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378 決定3、ADR 0381）: `docs/memory-model.md`
+   * §11 lifecycle 行7「`contested` → `active | superseded`」を、群へ書く**明示的操作**。
+   * `markContestedGroup`（上）の解決側であり、`resolveContested`（2者版）の形を手本に
+   * 対称に書いてある。
+   *
+   * **この操作自身も「どちらが正しいか」を判定しない。**呼び出し側が既に下した決定
+   * （{@link ContestedGroupResolution}）を機械的に書き込むだけである。
+   *
+   * 手順:
+   * 1. `memberIds.length < 3` は `RangeError`
+   *    （`Runtime.resolveContestedGroup: memberIds must have at least 3 entries`）。
+   * 2. `memberIds` の id 重複は `RangeError`
+   *    （`Runtime.resolveContestedGroup: memberIds must be unique`）。
+   * 3. `resolution.kind === "supersede"` のとき、`resolution.winnerId` が `memberIds` の
+   *    どの id とも一致しなければ `RangeError`
+   *    （`Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds`）。
+   *    `resolveContested`（2者版）と同じ大文字小文字の救済（store に同じ記憶かを聞く）は
+   *    行わない——群は3件以上あり、「どれとも大文字小文字だけ違う」場合に候補を一意に
+   *    絞れないケースが2者よりずっと起きやすいため、単純な完全一致だけで判定する
+   *    （クローン miku の判断——2者版の救済ロジックを N者へそのまま持ち上げると、複数の
+   *    候補が同時にヒットしたときの振る舞いを新しく決めなければならず、ADR 0381 で
+   *    決めた範囲を超える）。
+   * 4. `deps.memoryStore.resolveContestedGroup` が無ければ
+   *    `{ supported: false, outcome: { kind: "not_attempted" } }`。
+   * 5. `getMany(memberIds)` で一括読み、{@link ResolveContestedGroupSideOutcome}
+   *    に分類する（`"not_found"`/`"status_not_contested"`/`"eligible"`）。
+   * 6. ⚠ **2026-09-30 の直し（ADR 0381）: store 側の CAS（`MemoryStore.resolveContestedGroup`
+   *    契約）が「`members` は `memory_relations` でつながった今も `contested` な群の全員と
+   *    一致しなければならない」を要求するのに合わせ、この読み側でも同じ確認を行う**——
+   *    `deps.relationStore`（配線されていれば）で `memberIds` から `kind: 'contradicts'`
+   *    を辿って到達する id を求め、そのうち `status === 'contested'`（`getMany` で追加で
+   *    読む）のものが `memberIds` の外にあれば、それを `missingMembers` に積んで
+   *    `{ supported: true, outcome: { kind: "ineligible", sides, missingMembers } }` を返す
+   *    ——書き込みは一切試みない。`deps.relationStore` が配線されていなければ、この
+   *    読み側の確認は行わず store 側の CAS だけに任せる（store が
+   *    {@link MemoryStatusConflictError} を投げれば手順8の `conflict` に落ちる——
+   *    `expectedStatus === observedStatus === 'contested'` という特別な形で区別できる、
+   *    `MemoryStore.resolveContestedGroup` の interface JSDoc 参照）。
+   * 7. 手順5・6のどちらでも1件でも `"eligible"` でなければ、書き込みを一切試みず
+   *    `{ supported: true, outcome: { kind: "ineligible", sides, missingMembers: [] } }`
+   *    を返す（手順6で既に `missingMembers` が埋まっている場合を除く）。
+   * 8. 全員 `"eligible"` なら、この口自身が各メンバーの `status`/`supersededById`/`event` を
+   *    `resolution` から組み立てて `deps.memoryStore.resolveContestedGroup` を呼ぶ
+   *    （`resolveContested`（2者版）が `resolution` だけを受け取り、`MemoryStore.
+   *    resolveContestedPair` へ渡す `status`/`event` は自分で組み立てるのと同じ分担）。
+   *    - `resolution.kind === "both_active"`: 全員 `status: "active"`。
+   *    - `resolution.kind === "supersede"`: `winnerId` 側は `status: "active"`、
+   *      他の全員は `status: "superseded"` + `supersededById: <winnerId>`。
+   *
+   *    成功すれば `{ supported: true, outcome: { kind: "resolved", members } }`。
+   *    {@link MemoryStatusConflictError} が投げられたら（TOCTOU、または store 側の全体一致
+   *    CAS 違反）、**1回だけ**再読して `conflicts` に積み、
+   *    `{ supported: true, outcome: { kind: "conflict", conflicts } }` を返す。
+   *
+   * `memory_events` へ全メンバーそれぞれ1件ずつ積む。`"supersede"` は勝者に `kind: 'updated'`、
+   * 他の全員に `kind: 'superseded'`。`"both_active"` は全員 `kind: 'updated'`。
+   * `meta.reason` は固定値 `'contested_resolved'`、`meta.resolution` に
+   * `'supersede' | 'both_active'`。`opts.reason` を渡すと `meta.note` に追加で入る。
+   * `meta.contestedWithId` は積まない（`markContestedGroup` と同じ理由——群のメンバーは
+   * その欄自体を持たない）。
+   *
+   * ⚠ **`recall()` 側は一切変更していない。**`markContested`/`resolveContested` と同じ
+   * 理由。
+   *
+   * 🔴 **`tick()`/`observe()` からは一度も呼ばれない。**
+   *
+   * 🔴 **任意メソッドである。**`markContestedGroup?`（上）と同じ理由。
+   */
+  resolveContestedGroup?(
+    ctx: Ctx,
+    memberIds: readonly MemoryId[],
+    resolution: ContestedGroupResolution,
+    opts?: ResolveContestedGroupOptions,
+  ): Promise<ResolveContestedGroupResult>;
+  /**
    * 北極星「目指す姿」項目5「間違いを正すと、古いほうが先に出てこなくなる」を、
    * **出荷される面**（`Runtime` の公開 interface）から駆動できるようにする、
    * `findCorrectionCandidates`（発見、ADR 0232）と `markContested`/`resolveContested`
@@ -3937,7 +4273,115 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     }
 
     // それ以外（matches.length >= 2、または matches.length === 1 だがその1件が既に
-    // `contested`）: #207 が無いと1対1で表せない（ADR 0185 決定5）。
+    // `contested`）: 1対1の `contestedWithId` だけでは表せない（ADR 0185 決定5）。
+    //
+    // 2026-09-30 の直し（Issue #207/#933 PR2、ADR 0327、ADR 0378、ADR 0381、段階B。
+    // 2026-09-30 のさらなる直し、オーナー側クローンの判断で `ClaimKeyOptions.
+    // formContestedGroups` フラグを廃止し、`deps.relationStore` の配線を条件にした）:
+    // `deps.relationStore` が配線されており、かつ `deps.memoryStore.markContestedGroup`
+    // も配線されていれば、evidence だけに留めず実際に群として書き込みを試みる——
+    // `deps.memoryStore.markContestedGroup` が在るだけでは群を作らない（`relationStore`
+    // が無いと、後述の穴A吸収・合併の判定に使う `listRelated` そのものが呼べないため）。
+    // **`deps.relationStore` を配線しない呼び出しでは、この分岐は1ビットも変わらない**
+    // ——Issue #933 PR1（ADR 0378）が確立した evidence-only の挙動のままになる
+    // （PR1 の歯を1つも書き換えていない理由。PR1 の歯は `relationStore` を一度も
+    // 配線していないため、影響を受けない）。群のメンバーを次の順で広げる:
+    //   1. 種——検出中の `memory` 自身と、`matches` の全員。
+    //   2. 穴A（既存の2者間の対の吸収）——`matches` のうち `status === 'contested'` かつ
+    //      `contestedWithId !== null` なものは、その相手（`contestedWithId` が指す id）も
+    //      群に加える。相方自身は claim key の一致条件（有効期間の重なり等）を満たさない
+    //      ことがあるため、`matches` に現れないことがある——`contestedWithId` を直接
+    //      辿ることでその欠けを埋める。
+    //   3. 合併（複数の既存群の統合）——`deps.relationStore` が配線されていれば、ここまでの
+    //      メンバーのうち `status === 'contested'` な id から `kind: 'contradicts'` を
+    //      辿って到達できる id をすべて候補に加える（BFS）。**候補は `getMany` で読み直し、
+    //      `status === 'contested'` のものだけを実際に群へ加える**——decision10（forget 等で
+    //      群を離れたメンバーの関係の行は残す）により、BFS は既に群を離れた id も拾い
+    //      うるため、そのまま加えると `markContestedGroup` の CAS 全体が
+    //      `status_conflict` で落ちてしまう（`resolveContestedGroup` の fix2 と同じ
+    //      「行の有無ではなく status で今の群を判定する」規律）。resolve 済みの群は関係の
+    //      行を削除している（`resolveContestedGroup` 契約）ので、ここで見つかるのは今も
+    //      現存する群だけである。`matches` が2つの既存群それぞれのメンバーを1件ずつ
+    //      含んでいた場合、両方の群の全メンバーがここで合流し、1つの群になる。
+    // 広げた結果が3件未満（`markContestedGroup` の最小人数を満たさない——例:
+    // `relationStore` が配線されておらず、既存群の残りのメンバーを辿れない場合）のときは
+    // 呼ばない。`markContestedGroup` を呼んで `outcome.kind !== "contested_group"`
+    // （`ineligible`/`conflict`。TOCTOU 等）になった場合も含め、どちらも今まで通りの
+    // evidence-only の `memory_events` 追記 + `unresolved_conflict` へフォールバックする
+    // ——状態が動かなかった呼び出しで、根拠だけは必ず残す（ADR 0378 決定5の踏襲）。
+    let groupOutcome: {
+      memberIds: MemoryId[];
+      markContestedGroup: MarkContestedGroupResult;
+    } | null = null;
+    if (deps.relationStore !== undefined && deps.memoryStore.markContestedGroup !== undefined) {
+      const relationStore = deps.relationStore;
+      const memberIdSet = new Set<MemoryId>([memory.id, ...matches.map((m) => m.id)]);
+      for (const m of matches) {
+        if (m.status === "contested" && (m.contestedWithId ?? null) !== null) {
+          memberIdSet.add(m.contestedWithId!);
+        }
+      }
+      {
+        const seedIds = matches
+          .filter((m) => m.status === "contested" && (m.contestedWithId ?? null) === null)
+          .map((m) => m.id);
+        const visited = new Set(seedIds);
+        const queue = [...seedIds];
+        const discovered = new Set<MemoryId>();
+        while (queue.length > 0) {
+          const current = queue.shift()!;
+          const related = await relationStore.listRelated(ctx, current, "contradicts");
+          for (const r of related) {
+            if (!memberIdSet.has(r.memoryId)) {
+              discovered.add(r.memoryId);
+            }
+            if (!visited.has(r.memoryId)) {
+              visited.add(r.memoryId);
+              queue.push(r.memoryId);
+            }
+          }
+        }
+        if (discovered.size > 0) {
+          const discoveredMemories = await deps.memoryStore.getMany(ctx, [...discovered]);
+          for (const m of discoveredMemories) {
+            if (m.status === "contested") {
+              memberIdSet.add(m.id);
+            }
+          }
+        }
+      }
+      if (memberIdSet.size >= 3) {
+        const memberIds = [...memberIdSet];
+        const note = JSON.stringify({
+          kind: "claim_key_conflict_group",
+          claimKey,
+          subjectId: memory.subjectId ?? null,
+          triggering: describeSide(memory),
+          matches: matches.map(describeSide),
+          matchCount: matches.length,
+          memberIds,
+        });
+        const markResult = await markContestedGroup(ctx, memberIds, { reason: note });
+        if (markResult.outcome.kind === "contested_group") {
+          groupOutcome = { memberIds, markContestedGroup: markResult };
+        }
+      }
+    }
+    if (groupOutcome !== null) {
+      return {
+        memoryId: memory.id,
+        claimKey,
+        matchCount: matches.length,
+        result: {
+          kind: "contested_group",
+          memberIds: groupOutcome.memberIds,
+          markContestedGroup: groupOutcome.markContestedGroup,
+        },
+      };
+    }
+
+    // markContestedGroup を呼ばなかった（配線されていない／群が3件未満にしか広がらな
+    // かった）、または呼んだが `contested_group` にならなかった: 今まで通り
     // markContested を呼ばず、根拠だけを memory_events に残す。
     await deps.eventStore.append(ctx, {
       tenantId: ctx.tenantId,
@@ -5282,6 +5726,7 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
         lexicalStore: deps.lexicalStore,
         embeddingProvider: deps.embeddingProvider,
         tenantSettingsStore: deps.tenantSettingsStore,
+        relationStore: deps.relationStore,
         clock,
         tokenCounter,
         outputValidation: deps.outputValidation,
@@ -6428,6 +6873,278 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
   }
 
   /**
+   * `Runtime.markContestedGroup` の実装（Issue #207/#933 PR2、ADR 0327 §4-c、ADR 0378、
+   * ADR 0381）。doc コメントは interface 側（`markContestedGroup` の JSDoc）にある——
+   * ここはアルゴリズムそのものだけ。`markContested`（2者版）の実装と同じ形で書いてある。
+   */
+  async function markContestedGroup(
+    ctx: Ctx,
+    memberIds: readonly MemoryId[],
+    opts?: MarkContestedGroupOptions,
+  ): Promise<MarkContestedGroupResult> {
+    if (memberIds.length < 3) {
+      throw new RangeError("Runtime.markContestedGroup: memberIds must have at least 3 entries");
+    }
+    const idSet = new Set<MemoryId>();
+    for (const id of memberIds) {
+      if (idSet.has(id)) {
+        throw new RangeError("Runtime.markContestedGroup: memberIds must be unique");
+      }
+      idSet.add(id);
+    }
+
+    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`markContested` と
+    // 同じ作法。分割代入したメソッドは `this` を失う）。
+    const markContestedGroupPort = deps.memoryStore.markContestedGroup;
+    if (markContestedGroupPort === undefined) {
+      return { supported: false, outcome: { kind: "not_attempted" } };
+    }
+
+    const lookupKey = memoryLookupKeyFor(memberIds);
+    const found = await deps.memoryStore.getMany(ctx, [...memberIds]);
+    const byId = new Map<MemoryId, Memory>();
+    for (const memory of found) {
+      byId.set(lookupKey(memory.id), memory);
+    }
+    const memberKeySet = new Set(memberIds.map((id) => lookupKey(id)));
+
+    const classify = (id: MemoryId, memory: Memory | undefined): MarkContestedGroupSideOutcome => {
+      if (memory === undefined) {
+        return { memoryId: id, kind: "not_found" };
+      }
+      if (memory.status === "active") {
+        return { memoryId: id, kind: "eligible" };
+      }
+      if (memory.status === "contested") {
+        const contestedWithId = memory.contestedWithId ?? null;
+        if (contestedWithId === null || memberKeySet.has(lookupKey(contestedWithId))) {
+          return { memoryId: id, kind: "eligible" };
+        }
+      }
+      return {
+        memoryId: id,
+        kind: "status_conflict",
+        status: memory.status,
+        contestedWithId: memory.contestedWithId ?? null,
+      };
+    };
+
+    const sides = memberIds.map((id) => classify(id, byId.get(lookupKey(id))));
+    if (sides.some((s) => s.kind !== "eligible")) {
+      return { supported: true, outcome: { kind: "ineligible", sides } };
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
+    const meta: Record<string, unknown> =
+      opts?.reason === undefined
+        ? { reason: "contested" }
+        : { reason: "contested", note: opts.reason };
+
+    try {
+      // markContested（2者版）と同じく、群全員の `updated` イベントに同じ `at` を使う。
+      const now = clock.now();
+      const { members: writtenMembers } = await markContestedGroupPort.call(
+        deps.memoryStore,
+        ctx,
+        memberIds.map((id) => {
+          const memory = byId.get(lookupKey(id))!;
+          const event: NewMemoryEvent = {
+            tenantId: ctx.tenantId,
+            memoryId: id,
+            kind: "updated",
+            at: now,
+            actor,
+            digestSnapshot: memory.digest,
+            meta,
+          };
+          return { id, event };
+        }),
+      );
+      return { supported: true, outcome: { kind: "contested_group", members: writtenMembers } };
+    } catch (error) {
+      if (error instanceof MemoryStatusConflictError) {
+        // 安全弁（`markContested`/`resolveContested`/`forget`/`restoreArchived`/`purge` と
+        // 同じ形。1回だけ再読して打ち切る——上限の無い再試行ループを作らない）。
+        const refetched = await deps.memoryStore.getMany(ctx, [...memberIds]);
+        const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
+        return {
+          supported: true,
+          outcome: {
+            kind: "conflict",
+            conflicts: memberIds.map((id) => ({
+              id,
+              observedStatus: refetchedById.get(lookupKey(id))?.status ?? null,
+            })),
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * `Runtime.resolveContestedGroup` の実装（Issue #207/#933 PR2、ADR 0327 §4-c、
+   * ADR 0378 決定3、ADR 0381）。doc コメントは interface 側
+   * （`resolveContestedGroup` の JSDoc）にある——ここはアルゴリズムそのものだけ。
+   * `resolveContested`（2者版）の実装と同じ形で書いてある。
+   */
+  async function resolveContestedGroup(
+    ctx: Ctx,
+    memberIds: readonly MemoryId[],
+    resolution: ContestedGroupResolution,
+    opts?: ResolveContestedGroupOptions,
+  ): Promise<ResolveContestedGroupResult> {
+    if (memberIds.length < 3) {
+      throw new RangeError("Runtime.resolveContestedGroup: memberIds must have at least 3 entries");
+    }
+    const idSet = new Set<MemoryId>();
+    for (const id of memberIds) {
+      if (idSet.has(id)) {
+        throw new RangeError("Runtime.resolveContestedGroup: memberIds must be unique");
+      }
+      idSet.add(id);
+    }
+    let winnerId: MemoryId | undefined;
+    if (resolution.kind === "supersede") {
+      if (!memberIds.includes(resolution.winnerId)) {
+        throw new RangeError(
+          "Runtime.resolveContestedGroup: resolution.winnerId must be one of memberIds",
+        );
+      }
+      winnerId = resolution.winnerId;
+    }
+
+    // `.call(deps.memoryStore, ...)` で `this` を明示的に束ね直す（`resolveContested` と
+    // 同じ作法）。
+    const resolveContestedGroupPort = deps.memoryStore.resolveContestedGroup;
+    if (resolveContestedGroupPort === undefined) {
+      return { supported: false, outcome: { kind: "not_attempted" } };
+    }
+
+    const lookupKey = memoryLookupKeyFor(memberIds);
+    const found = await deps.memoryStore.getMany(ctx, [...memberIds]);
+    const byId = new Map<MemoryId, Memory>();
+    for (const memory of found) {
+      byId.set(lookupKey(memory.id), memory);
+    }
+
+    const classify = (
+      id: MemoryId,
+      memory: Memory | undefined,
+    ): ResolveContestedGroupSideOutcome => {
+      if (memory === undefined) {
+        return { memoryId: id, kind: "not_found" };
+      }
+      if (memory.status !== "contested") {
+        return { memoryId: id, kind: "status_not_contested", status: memory.status };
+      }
+      return { memoryId: id, kind: "eligible" };
+    };
+
+    const sides = memberIds.map((id) => classify(id, byId.get(lookupKey(id))));
+
+    // 2026-09-30 の直し（ADR 0381、fix2「resolve で群の一部だけを渡したら弾く」の
+    // Runtime 側の確認）: `deps.relationStore` が配線されていれば、`memberIds` から
+    // `kind: 'contradicts'` を辿って到達する id のうち、`status === 'contested'` な
+    // ものが `memberIds` の外にあれば、部分解消として拒む。store 側の CAS
+    // （`MemoryStore.resolveContestedGroup`）と同じ「forget 等で群から抜けたメンバー
+    // （もう `contested` ではない）は数えない」規律で判定する。
+    const memberKeySet = new Set(memberIds.map((id) => lookupKey(id)));
+    let missingMembers: MemoryId[] = [];
+    if (deps.relationStore !== undefined) {
+      const visitedKeys = new Set(memberKeySet);
+      const visitedIds: MemoryId[] = [...memberIds];
+      const queue: MemoryId[] = [...memberIds];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        const related = await deps.relationStore.listRelated(ctx, current, "contradicts");
+        for (const r of related) {
+          const key = lookupKey(r.memoryId);
+          if (!visitedKeys.has(key)) {
+            visitedKeys.add(key);
+            visitedIds.push(r.memoryId);
+            queue.push(r.memoryId);
+          }
+        }
+      }
+      const extraIds = visitedIds.filter((id) => !memberKeySet.has(lookupKey(id)));
+      if (extraIds.length > 0) {
+        const extraMemories = await deps.memoryStore.getMany(ctx, extraIds);
+        missingMembers = extraMemories.filter((m) => m.status === "contested").map((m) => m.id);
+      }
+    }
+
+    if (sides.some((s) => s.kind !== "eligible") || missingMembers.length > 0) {
+      return { supported: true, outcome: { kind: "ineligible", sides, missingMembers } };
+    }
+
+    const actor = opts?.actor ?? { type: "system" };
+    const resolutionKind = resolution.kind;
+    const buildMeta = (): Record<string, unknown> =>
+      opts?.reason === undefined
+        ? { reason: "contested_resolved", resolution: resolutionKind }
+        : { reason: "contested_resolved", resolution: resolutionKind, note: opts.reason };
+
+    try {
+      const now = clock.now();
+      const membersInput = memberIds.map((id) => {
+        const memory = byId.get(lookupKey(id))!;
+        const isWinner = resolutionKind === "supersede" && id === winnerId;
+        const status: "active" | "superseded" =
+          resolutionKind === "both_active" || isWinner ? "active" : "superseded";
+        const event: NewMemoryEvent = {
+          tenantId: ctx.tenantId,
+          memoryId: id,
+          kind: status === "active" ? "updated" : "superseded",
+          at: now,
+          actor,
+          digestSnapshot: memory.digest,
+          meta: buildMeta(),
+        };
+        return status === "superseded"
+          ? { id, status, supersededById: winnerId!, event }
+          : { id, status, event };
+      });
+      const { members: writtenMembers } = await resolveContestedGroupPort.call(
+        deps.memoryStore,
+        ctx,
+        membersInput,
+      );
+      return { supported: true, outcome: { kind: "resolved", members: writtenMembers } };
+    } catch (error) {
+      // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: store 側が
+      // ContestedGroupMembershipMismatchError を投げた場合（部分解消）は、
+      // `deps.relationStore` の配線の有無に関わらず ineligible に写す——TOCTOU による
+      // 競合（MemoryStatusConflictError、下）とは別の意味（読んだ時点から呼び出し側が
+      // 最初から適格でない集合を渡していた）であり、`conflict`（1回だけ再読して打ち切る
+      // 安全弁）には分類しない。`sides` は手順5で読んだ時点の分類（全員 "eligible"）を
+      // そのまま運び、`missingMembers` にエラーが名指しした1件を積む。
+      if (error instanceof ContestedGroupMembershipMismatchError) {
+        return {
+          supported: true,
+          outcome: { kind: "ineligible", sides, missingMembers: [error.missingMemberId] },
+        };
+      }
+      if (error instanceof MemoryStatusConflictError) {
+        // 安全弁（`resolveContested` と同じ形。1回だけ再読して打ち切る）。
+        const refetched = await deps.memoryStore.getMany(ctx, [...memberIds]);
+        const refetchedById = new Map(refetched.map((m) => [lookupKey(m.id), m]));
+        return {
+          supported: true,
+          outcome: {
+            kind: "conflict",
+            conflicts: memberIds.map((id) => ({
+              id,
+              observedStatus: refetchedById.get(lookupKey(id))?.status ?? null,
+            })),
+          },
+        };
+      }
+      throw error;
+    }
+  }
+
+  /**
    * `Runtime.applyCorrection` の実装（Issue #369、[ADR 0242](../../../docs/decisions/0242-runtime-apply-correction.md)）。
    * doc コメントは interface 側（`applyCorrection` の JSDoc）にある——ここは手順そのもの
    * だけ。`markContested`/`resolveContested` を呼ぶだけの薄い orchestration であり、
@@ -7329,6 +8046,8 @@ export function createRuntime(deps: RuntimeDeps): Runtime {
     markContested,
     resolveContested,
     resolveOrphanedContested,
+    markContestedGroup,
+    resolveContestedGroup,
     applyCorrection,
     consolidate,
     reflect,

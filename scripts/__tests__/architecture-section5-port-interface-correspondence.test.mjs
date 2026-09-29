@@ -24,7 +24,9 @@ import { describe, expect, it } from "vitest";
  *
  * 1. **写し（実体が在るもの）** ⟹ 本歯の対象。`TARGET_INTERFACE_NAMES` /
  *    `SCORING_STRATEGY_TARGET_NAME` に持つ名前だけを実体と突き合わせる。
- * 2. **予告（`RelationStore`・`Sensor`・`SpeechPolicy`。実体が無いと文書自身が明記している）**
+ * 2. **予告（`Sensor`・`SpeechPolicy`。実体が無いと文書自身が明記している）**
+ *    （`RelationStore` もここに居たが、2026-09-30 に実体ができて1番へ移った——Issue #207/#933
+ *    PR2、ADR 0381、ADR 0273 の追記）
  *    ⟹ ⛔ **本歯の対象にしない。**素朴に「§5 が名前を挙げているものを全部実体と比べる」歯を
  *    作ると、この3つが「実体が無い」という理由だけで常に赤くなる——ADR 0269 が「採らなかった
  *    案1」で指摘した偽陽性そのものである。⟹ この3つは `TARGET_INTERFACE_NAMES` に**入れない**。
@@ -153,13 +155,14 @@ const TARGET_INTERFACE_NAMES = [
   "Clock",
   "OutboxStore",
   "TenantSettingsStore",
+  "RelationStore",
 ];
 
 const SCORING_STRATEGY_TARGET_NAME = "ScoringStrategy";
 
 // 🔴 category 2（実体が無いと文書自身が明記している。ADR 0269 決定3・ADR 0273「3つに割る」2番）
 // ⟹ 本歯の対象に「入れない」ことそのものを、下の it で機械的に確認する。
-const PLACEHOLDER_NAMES_NOT_TARGETED = ["RelationStore", "Sensor", "SpeechPolicy"];
+const PLACEHOLDER_NAMES_NOT_TARGETED = ["Sensor", "SpeechPolicy"];
 
 function section5Span(text) {
   const heading = "## 5. 主要 interface";
@@ -295,7 +298,7 @@ describe("docs/architecture.md §5 の port interface が、公開 API snapshot�
     expect(extractMemberNames(synthetic)).toEqual(["foo", "bar", "baz", "qux"]);
   });
 
-  it("やりすぎ側: 対象一覧に、実体の無い3個（RelationStore/Sensor/SpeechPolicy）が含まれていない", () => {
+  it("やりすぎ側: 対象一覧に、実体の無い2個（Sensor/SpeechPolicy）が含まれていない", () => {
     for (const placeholder of PLACEHOLDER_NAMES_NOT_TARGETED) {
       expect(
         TARGET_INTERFACE_NAMES,
@@ -305,7 +308,7 @@ describe("docs/architecture.md §5 の port interface が、公開 API snapshot�
     }
   });
 
-  it("やりすぎ側: 実体の無い3個（RelationStore/Sensor/SpeechPolicy）は、公開 API snapshot に1件も現れない（対象にしなくても正しい理由）", () => {
+  it("やりすぎ側: 実体の無い2個（Sensor/SpeechPolicy）は、公開 API snapshot に1件も現れない（対象にしなくても正しい理由）", () => {
     for (const placeholder of PLACEHOLDER_NAMES_NOT_TARGETED) {
       const idx = findDeclarationOpenBraceIndex(snapshotText, placeholder);
       expect(

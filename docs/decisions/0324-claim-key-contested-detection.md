@@ -666,3 +666,17 @@ fixtures）/`@mnemora/openai` の dist を直接 import し、`Runtime.observe()
 **直し方**: 一致がちょうど1件のときも、その1件の `status` を見てから分岐する——`active` なら今まで通り `markContested`、`contested` なら（一致が2件以上のときと同じ形で）`markContested` を呼ばず `memory_events` へ `claim_key_conflict_unresolved` の evidence を積むだけに留める。**決定5・決定6が定めた3方向の分岐（0件／1件かつactive／それ以外）そのものは、この形へ精緻化されただけで、`markContested` を呼ぶ条件が狭まった以外に意味は変わっていない。**
 
 歯は core の Fake（`packages/core/src/__tests__/claim-key-single-contested-match.test.ts`）と本物の Postgres（`packages/postgres/src/__tests__/claim-key-single-contested-match.postgres.test.ts`）に追加した。詳細は ADR 0378 の同日追記を見ること。
+
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
+
+本 ADR の決定5・決定6（3方向の分岐: 0件／ちょうど1件かつ`active`／それ以外）が定める
+「それ以外」の枝（2件以上、または既に `contested` な1件）は、[ADR 0378](./0378-claim-key-contested-detection-covers-contested-matches.md)
+決定5の evidence-only のまま——ただし `detectContested: true` かつ `RuntimeDeps.
+relationStore` が配線されている呼び出しに限り、`Runtime.markContestedGroup` を呼んで
+実際に群として書き込むようになった（2026-09-30 のさらなる直し、オーナー側クローンの
+判断で opt-in の専用フラグは廃止し、既存の `relationStore` の配線を条件にした）。本 ADR
+が定めた3方向の分岐そのもの（どの枝に入るかの判定条件）は変更していない——変更したのは
+「それ以外」の枝の中で何をするかだけである。詳細は ADR 0381 §4 を見ること。

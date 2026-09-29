@@ -104,7 +104,15 @@ export declare class InMemoryLexicalStore implements LexicalStore {
 }
 
 // ===== dist/__fixtures__/in-memory-memory-store.d.ts =====
-import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+import type { AggregateScopeOptions, ArchiveDecayedOptions, ArchiveDecayedResult, ClaimKey, Ctx, EmbeddingStatus, EraseTenantStoreOptions, EraseTenantStoreResult, EventActor, LabelSummary, Memory, MemoryEvent, MemoryId, MemoryStatus, MemoryStore, NewMemory, NewMemoryEvent, NewObservation, NewRecallRecord, Observation, ObservationId, OutboxJobKind, OutboxJobRecord, PurgeExpiredEventsByRetentionOptions, PurgeExpiredEventsByRetentionOutcome, PurgeExpiredEventsOptions, PurgeExpiredEventsResult, RecallId, RecallRecord, RecallScope, ReinforceOptions, RelationKind, RequeueEmbedJobsOptions, RequeueEmbedJobsResult, ScopeAggregate } from "@mnemora/core";
+export interface StoredRelation {
+    id: string;
+    tenantId: string;
+    fromMemoryId: MemoryId;
+    toMemoryId: MemoryId;
+    kind: RelationKind;
+    createdAt: Date;
+}
 export declare class InMemoryMemoryStore implements MemoryStore {
     private readonly observations;
     private readonly memories;
@@ -121,6 +129,7 @@ export declare class InMemoryMemoryStore implements MemoryStore {
     readonly eventRetentionDays: Map<string, number | null>;
     private readonly labels;
     private readonly memoryLabels;
+    readonly relations: StoredRelation[];
     private labelKey;
     private memoryLabelKey;
     private upsertProposedLabels;
@@ -241,6 +250,23 @@ export declare class InMemoryMemoryStore implements MemoryStore {
             MemoryEvent
         ];
     }>;
+    markContestedGroup(ctx: Ctx, members: ReadonlyArray<{
+        id: MemoryId;
+        event: NewMemoryEvent;
+    }>): Promise<{
+        members: Memory[];
+        events: MemoryEvent[];
+    }>;
+    private linkRelationPair;
+    resolveContestedGroup(ctx: Ctx, members: ReadonlyArray<{
+        id: MemoryId;
+        status: "active" | "superseded";
+        supersededById?: MemoryId;
+        event: NewMemoryEvent;
+    }>): Promise<{
+        members: Memory[];
+        events: MemoryEvent[];
+    }>;
     resolveOrphanedContested(ctx: Ctx, survivor: {
         id: MemoryId;
         contestedWithId: MemoryId;
@@ -305,6 +331,17 @@ export declare class InMemoryOutboxStore implements OutboxStore {
         at?: Date;
     }): Promise<void>;
     eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
+}
+
+// ===== dist/__fixtures__/in-memory-relation-store.d.ts =====
+import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
+import type { InMemoryMemoryStore, StoredRelation } from "./in-memory-memory-store.js";
+export declare class InMemoryRelationStore implements RelationStore {
+    private readonly relations;
+    constructor(_memoryStore: InMemoryMemoryStore, relations?: StoredRelation[]);
+    link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
 }
 
 // ===== dist/__fixtures__/in-memory-tenant-settings-store.d.ts =====
@@ -448,6 +485,7 @@ export declare function describeEventStoreConformance(options: EventStoreConform
 
 // ===== dist/fixtures.d.ts =====
 export { InMemoryMemoryStore } from "./__fixtures__/in-memory-memory-store.js";
+export { InMemoryRelationStore } from "./__fixtures__/in-memory-relation-store.js";
 export { InMemoryVectorStore } from "./__fixtures__/in-memory-vector-store.js";
 export { InMemoryLexicalStore } from "./__fixtures__/in-memory-lexical-store.js";
 export { InMemoryEventStore } from "./__fixtures__/in-memory-event-store.js";
@@ -456,6 +494,7 @@ export { InMemoryTenantSettingsStore } from "./__fixtures__/in-memory-tenant-set
 
 // ===== dist/index.d.ts =====
 export * from "./memory-store-conformance.js";
+export * from "./relation-store-conformance.js";
 export * from "./vector-store-conformance.js";
 export * from "./embedding-provider-conformance.js";
 export * from "./llm-provider-conformance.js";
@@ -522,6 +561,11 @@ export interface MemoryStoreConformanceOptions {
     createStore: () => MemoryStore | Promise<MemoryStore>;
     prepareRecallId: (ctx: Ctx) => Promise<RecallId> | RecallId;
     listEventsForMemory: (ctx: Ctx, memoryId: MemoryId) => Promise<MemoryEvent[]> | MemoryEvent[];
+    listRelationsForMemory?: (ctx: Ctx, memoryId: MemoryId) => Promise<Array<{
+        memoryId: MemoryId;
+    }>> | Array<{
+        memoryId: MemoryId;
+    }>;
     claimEmbedJobs: (ctx: Ctx, now: Date) => Promise<OutboxJobRecord[]> | OutboxJobRecord[];
     supportsSupersedeWithNewMemories: boolean;
     supportsAbortIfForgotten?: boolean;
@@ -540,6 +584,8 @@ export interface MemoryStoreConformanceOptions {
     supportsListActiveClaimPredicates?: boolean;
     supportsResolveOrphanedContested?: boolean;
     supportsEraseTenant: boolean;
+    supportsMarkContestedGroup?: boolean;
+    supportsResolveContestedGroup?: boolean;
 }
 export declare function describeMemoryStoreConformance(options: MemoryStoreConformanceOptions): void;
 
@@ -559,6 +605,15 @@ export interface OutboxStoreConformanceOptions {
     supportsEraseTenant: boolean;
 }
 export declare function describeOutboxStoreConformance(options: OutboxStoreConformanceOptions): void;
+
+// ===== dist/relation-store-conformance.d.ts =====
+import type { Ctx, MemoryId, RelationStore } from "@mnemora/core";
+export interface RelationStoreConformanceOptions {
+    name: string;
+    createStore: () => RelationStore | Promise<RelationStore>;
+    prepareMemoryId: (ctx: Ctx) => Promise<MemoryId> | MemoryId;
+}
+export declare function describeRelationStoreConformance(options: RelationStoreConformanceOptions): void;
 
 // ===== dist/tenant-settings-store-conformance.d.ts =====
 import type { Ctx, TenantSettingsStore } from "@mnemora/core";

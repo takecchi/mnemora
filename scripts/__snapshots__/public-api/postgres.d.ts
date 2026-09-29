@@ -62,6 +62,7 @@ export declare class PostgresEventStore implements EventStore {
 export * from "./client.js";
 export * from "./advisory-lock.js";
 export * from "./memory-store.js";
+export * from "./relation-store.js";
 export * from "./vector-store.js";
 export * from "./lexical-store.js";
 export * from "./trigram-lexical-store.js";
@@ -245,6 +246,22 @@ export declare class PostgresMemoryStore implements MemoryStore {
         memory: Memory;
         event: MemoryEvent;
     }>;
+    markContestedGroup(ctx: Ctx, members: ReadonlyArray<{
+        id: MemoryId;
+        event: NewMemoryEvent;
+    }>): Promise<{
+        members: Memory[];
+        events: MemoryEvent[];
+    }>;
+    resolveContestedGroup(ctx: Ctx, members: ReadonlyArray<{
+        id: MemoryId;
+        status: "active" | "superseded";
+        supersededById?: MemoryId;
+        event: NewMemoryEvent;
+    }>): Promise<{
+        members: Memory[];
+        events: MemoryEvent[];
+    }>;
     restoreSupersededBy(ctx: Ctx, supersededById: MemoryId, event: {
         reason?: string;
         actor?: EventActor;
@@ -369,6 +386,17 @@ export declare function assertPgvectorCapabilityViaQuery(queryable: {
         rows: unknown[];
     }>;
 }): Promise<void>;
+
+// ===== dist/relation-store.d.ts =====
+import type { Ctx, MemoryId, Relation, RelationKind, RelationStore } from "@mnemora/core";
+import type { Db } from "./client.js";
+export declare class PostgresRelationStore implements RelationStore {
+    private readonly db;
+    constructor(db: Db);
+    link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void>;
+    listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]>;
+}
 
 // ===== dist/schema-namespace.d.ts =====
 export declare const DEFAULT_EXTENSION_SCHEMA = "public";

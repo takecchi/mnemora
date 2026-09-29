@@ -2,6 +2,7 @@ import type { ClaimKey } from "../claim-key.js";
 import type { Ctx } from "../ctx.js";
 import type { EmbeddingProvider } from "../interfaces/embedding-provider.js";
 import type { EventStore } from "../interfaces/event-store.js";
+import type { Relation, RelationKind, RelationStore } from "../interfaces/relation-store.js";
 import { OutboxLeaseConflictError } from "../interfaces/outbox-store.js";
 import type { ClaimOutboxJobsOptions, OutboxStore } from "../interfaces/outbox-store.js";
 import type { OutboxJobKind } from "../interfaces/scheduler.js";
@@ -34,6 +35,7 @@ import type { EventActor, MemoryEvent, NewMemoryEvent, EventFilter } from "../ev
 import { MemoryEventKindSchema } from "../event.js";
 import type { EventId } from "../ids.js";
 import {
+  ContestedGroupMembershipMismatchError,
   isEmbeddingStatusRollback,
   MemoryPurgeConflictError,
   MemoryStatusConflictError,
@@ -196,6 +198,20 @@ function assertBuildableFakeEvent(event: NewMemoryEvent): void {
   assertStorableFakeEvent(event);
 }
 
+/**
+ * Issue #207/#933 PR2（ADR 0381）: `memory_relations` の1行相当。
+ * `packages/testkit` の `StoredRelation`（`in-memory-memory-store.ts`）と同じ形——
+ * このファイルは意図的に独立している（ファイル冒頭のコメント参照）ので複製する。
+ */
+interface FakeStoredRelation {
+  id: string;
+  tenantId: string;
+  fromMemoryId: MemoryId;
+  toMemoryId: MemoryId;
+  kind: RelationKind;
+  createdAt: Date;
+}
+
 class FakeBackingStore {
   observations = new Map<string, Observation>();
   memories = new Map<string, Memory>();
@@ -250,6 +266,14 @@ class FakeBackingStore {
    * 数値なら `days` （`packages/testkit` の `InMemoryMemoryStore.eventRetentionDays` と同じ形）。
    */
   eventRetentionDays = new Map<string, number | null>();
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `memory_relations` 相当。`packages/testkit` の
+   * `InMemoryMemoryStore.relations`（`StoredRelation`）と同じ形——このファイルは
+   * 意図的に独立している（ファイル冒頭のコメント参照）ので、ここでも同じ形を
+   * 複製して持つ。`FakeMemoryStore.markContestedGroup`/`resolveContestedGroup` が書き、
+   * `FakeRelationStore.listRelated` が読む。
+   */
+  relations: FakeStoredRelation[] = [];
 
   extractionKey(
     tenantId: string,
@@ -818,6 +842,8 @@ export class FakeMemoryStore implements MemoryStore {
       () => drainKeyedMap(this.backing.memoryLabels),
       () => drainSet(this.backing.usages, (key) => key.startsWith(`${ctx.tenantId}:`)),
       () => drainArray(this.backing.events, (event) => event.tenantId),
+      // memory_relations（Issue #207/#933 PR2）
+      () => drainArray(this.backing.relations, (relation) => relation.tenantId),
       () => {
         const deleted = drainMap(this.backing.memories, (memory) => memory.tenantId);
         if (!dryRun) {
@@ -2000,6 +2026,212 @@ export class FakeMemoryStore implements MemoryStore {
   }
 
   /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.markContestedGroup?` の実装
+   * （契約は interface 側の doc コメントにある）。`markContestedPair` と同じ
+   * 「事前検証してから書く」作法。
+   */
+  async markContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("FakeMemoryStore: members must have at least 3 entries");
+    }
+    const ids = members.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("FakeMemoryStore: member ids must be unique");
+    }
+
+    // 1. 事前検証——存在確認。まだ何も書いていない。
+    const memories: Memory[] = [];
+    for (const m of members) {
+      const memory = await this.get(ctx, m.id);
+      if (!memory) {
+        throw new Error(`FakeMemoryStore: memory not found for tenant: ${m.id}`);
+      }
+      memories.push(memory);
+    }
+
+    // 2. 事前検証——CAS。まだ何も書いていない。
+    for (const memory of memories) {
+      this.beforeUpdateStatus?.(memory.id);
+      const eligible =
+        memory.status === "active" ||
+        (memory.status === "contested" &&
+          (memory.contestedWithId === null ||
+            memory.contestedWithId === undefined ||
+            ids.includes(memory.contestedWithId)));
+      if (!eligible) {
+        throw new MemoryStatusConflictError(memory.id, "active", memory.status);
+      }
+    }
+
+    // 3. イベントを全件先に組み立てる（検査もここで走る）。
+    const events = members.map((m) => buildStoredEvent(ctx, m.event));
+
+    // 4. ここから先は全部成功する。
+    for (const memory of memories) {
+      memory.status = "contested";
+      memory.contestedWithId = null;
+      memory.updatedAt = new Date();
+    }
+    // ADR 0381 §1: 有効期間が重なる組だけに関係の行を張る（ADR 0324 決定4との整合）。
+    const overlaps = (a: Memory, b: Memory): boolean =>
+      (a.validFrom === null ||
+        a.validFrom === undefined ||
+        b.validUntil === null ||
+        b.validUntil === undefined ||
+        a.validFrom < b.validUntil) &&
+      (b.validFrom === null ||
+        b.validFrom === undefined ||
+        a.validUntil === null ||
+        a.validUntil === undefined ||
+        b.validFrom < a.validUntil);
+    const linkPair = (fromId: MemoryId, toId: MemoryId): void => {
+      const exists = (a: MemoryId, b: MemoryId) =>
+        this.backing.relations.some(
+          (r) =>
+            r.tenantId === ctx.tenantId &&
+            r.fromMemoryId === a &&
+            r.toMemoryId === b &&
+            r.kind === "contradicts",
+        );
+      const now = new Date();
+      if (!exists(fromId, toId)) {
+        this.backing.relations.push({
+          id: nextId("rel"),
+          tenantId: ctx.tenantId,
+          fromMemoryId: fromId,
+          toMemoryId: toId,
+          kind: "contradicts",
+          createdAt: now,
+        });
+      }
+      if (!exists(toId, fromId)) {
+        this.backing.relations.push({
+          id: nextId("rel"),
+          tenantId: ctx.tenantId,
+          fromMemoryId: toId,
+          toMemoryId: fromId,
+          kind: "contradicts",
+          createdAt: now,
+        });
+      }
+    };
+    for (let i = 0; i < memories.length; i++) {
+      for (let j = i + 1; j < memories.length; j++) {
+        if (overlaps(memories[i]!, memories[j]!)) {
+          linkPair(memories[i]!.id, memories[j]!.id);
+        }
+      }
+    }
+    this.backing.events.push(...events);
+
+    return { members: memories, events };
+  }
+
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `MemoryStore.resolveContestedGroup?` の実装
+   * （契約は interface 側の doc コメントにある）。`resolveContestedPair` と対称——
+   * 決着の種類に関わらず、このメンバー全員を結んでいた関係の行を消す
+   * （`MemoryStore.resolveContestedGroup?` の契約）。
+   */
+  async resolveContestedGroup(
+    ctx: Ctx,
+    members: ReadonlyArray<{
+      id: MemoryId;
+      status: "active" | "superseded";
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }> {
+    if (members.length < 3) {
+      throw new RangeError("FakeMemoryStore: members must have at least 3 entries");
+    }
+    const ids = members.map((m) => m.id);
+    if (new Set(ids).size !== ids.length) {
+      throw new RangeError("FakeMemoryStore: member ids must be unique");
+    }
+
+    const memories: Memory[] = [];
+    for (const m of members) {
+      const memory = await this.get(ctx, m.id);
+      if (!memory) {
+        throw new Error(`FakeMemoryStore: memory not found for tenant: ${m.id}`);
+      }
+      memories.push(memory);
+    }
+    for (const memory of memories) {
+      this.beforeUpdateStatus?.(memory.id);
+      if (memory.status !== "contested") {
+        throw new MemoryStatusConflictError(memory.id, "contested", memory.status);
+      }
+    }
+
+    // 2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` が、関係の行で
+    // つながった「今も contested な」群の全員と一致することを CAS で課す
+    // （`PostgresMemoryStore.resolveContestedGroup` と同じ形）。
+    {
+      const idSet = new Set(ids);
+      const visited = new Set<MemoryId>(ids);
+      const queue = [...ids];
+      while (queue.length > 0) {
+        const current = queue.shift()!;
+        for (const r of this.backing.relations) {
+          if (
+            r.tenantId === ctx.tenantId &&
+            r.fromMemoryId === current &&
+            r.kind === "contradicts" &&
+            !visited.has(r.toMemoryId)
+          ) {
+            visited.add(r.toMemoryId);
+            queue.push(r.toMemoryId);
+          }
+        }
+      }
+      const missing: MemoryId[] = [];
+      for (const id of visited) {
+        if (idSet.has(id)) continue;
+        const memory = await this.get(ctx, id);
+        if (memory !== null && memory.status === "contested") {
+          missing.push(id);
+        }
+      }
+      if (missing.length > 0) {
+        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
+        // 再利用をやめ、専用のエラーを投げる。
+        throw new ContestedGroupMembershipMismatchError(missing[0]!);
+      }
+    }
+
+    const events = members.map((m) => buildStoredEvent(ctx, m.event));
+
+    for (let i = 0; i < members.length; i++) {
+      const m = members[i]!;
+      const memory = memories[i]!;
+      memory.status = m.status;
+      memory.contestedWithId = null;
+      if (m.supersededById !== undefined) {
+        memory.supersededById = m.supersededById;
+      }
+      memory.updatedAt = new Date();
+    }
+    const idSet = new Set(ids);
+    this.backing.relations = this.backing.relations.filter(
+      (r) =>
+        !(
+          r.tenantId === ctx.tenantId &&
+          idSet.has(r.fromMemoryId) &&
+          idSet.has(r.toMemoryId) &&
+          r.kind === "contradicts"
+        ),
+    );
+    this.backing.events.push(...events);
+
+    return { members: memories, events };
+  }
+
+  /**
    * Issue #825（ADR 0150 追記）: `resolveContestedPair` の解決側 CAS を満たせなくなった
    * 生存側1件だけを対象にした別の任意メソッド。`beforeUpdateStatus` は CAS 判定の直前に
    * 発火する——`updateStatusWithEvent`/`resolveContestedPair` と同じ位置（TOCTOU 再現の
@@ -2251,6 +2483,57 @@ export class FakeMemoryStore implements MemoryStore {
     });
 
     return { candidates };
+  }
+}
+
+/**
+ * Issue #207/#933 PR2（ADR 0381）: `RelationStore` の Fake 実装。`FakeEventStore` と
+ * 同じ形——`FakeBackingStore.relations` をそのまま共有する（`FakeMemoryStore.
+ * markContestedGroup`/`resolveContestedGroup` が書いた行もここから読める）。
+ */
+export class FakeRelationStore implements RelationStore {
+  constructor(private readonly backing: FakeBackingStore) {}
+
+  async link(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    const exists = this.backing.relations.some(
+      (r) =>
+        r.tenantId === ctx.tenantId &&
+        r.fromMemoryId === fromId &&
+        r.toMemoryId === toId &&
+        r.kind === kind,
+    );
+    if (exists) return;
+    this.backing.relations.push({
+      id: nextId("rel"),
+      tenantId: ctx.tenantId,
+      fromMemoryId: fromId,
+      toMemoryId: toId,
+      kind,
+      createdAt: new Date(),
+    });
+  }
+
+  async unlink(ctx: Ctx, kind: RelationKind, fromId: MemoryId, toId: MemoryId): Promise<void> {
+    this.backing.relations = this.backing.relations.filter(
+      (r) =>
+        !(
+          r.tenantId === ctx.tenantId &&
+          r.fromMemoryId === fromId &&
+          r.toMemoryId === toId &&
+          r.kind === kind
+        ),
+    );
+  }
+
+  async listRelated(ctx: Ctx, memoryId: MemoryId, kind?: RelationKind): Promise<Relation[]> {
+    return this.backing.relations
+      .filter(
+        (r) =>
+          r.tenantId === ctx.tenantId &&
+          r.fromMemoryId === memoryId &&
+          (kind === undefined || r.kind === kind),
+      )
+      .map((r) => ({ memoryId: r.toMemoryId, kind: r.kind, createdAt: r.createdAt }));
   }
 }
 
@@ -3355,6 +3638,12 @@ export function createFakeRuntimeStores(): {
   eventStore: FakeEventStore;
   tenantSettingsStore: FakeTenantSettingsStore;
   embeddingProvider: FakeEmbeddingProvider;
+  /**
+   * Issue #207/#933 PR2（ADR 0381）。`lexicalStore` と同じく**常に生成する**が、
+   * `RuntimeDeps.relationStore` へ配線するかどうかは呼び出し側の裁量——配線しない歯は
+   * この値を渡さないだけでよい（既定 off・`RelationStore` 無し経路を縛る歯が使う）。
+   */
+  relationStore: FakeRelationStore;
 } {
   const backing = new FakeBackingStore();
   return {
@@ -3367,6 +3656,7 @@ export function createFakeRuntimeStores(): {
     // `activity_seq` を `getActivitySeq` が同じ値として読み戻せる（上のクラス doc 参照）。
     tenantSettingsStore: new FakeTenantSettingsStore(720, backing),
     embeddingProvider: new FakeEmbeddingProvider(),
+    relationStore: new FakeRelationStore(backing),
   };
 }
 

@@ -11,6 +11,7 @@ import type {
   RecallId,
 } from "@mnemora/core";
 import {
+  ContestedGroupMembershipMismatchError,
   ContestedWithoutCompanionError,
   defaultActivityDecayStrategy,
   defaultDecayStrategy,
@@ -90,6 +91,18 @@ export interface MemoryStoreConformanceOptions {
    * 族の失敗を、フックの省略という形で再現することになる。
    */
   listEventsForMemory: (ctx: Ctx, memoryId: MemoryId) => Promise<MemoryEvent[]> | MemoryEvent[];
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: `markContestedGroup` が `memory_relations` へ
+   * 書いた行を、`memoryId` を起点に読むフック（`listEventsForMemory` と同じ理由——
+   * `MemoryStore` 自体には関係を読む操作が無い。それは `RelationStore` の責務）。
+   * `supportsMarkContestedGroup: true` を渡すときは、有効期間が重なる組にだけ行を
+   * 張ることを検査する歯のために、これも渡すこと。省略すると、その歯は生成されない
+   * （CAS 系の歯はこのフックを使わないので、省略しても他の歯には影響しない）。
+   */
+  listRelationsForMemory?: (
+    ctx: Ctx,
+    memoryId: MemoryId,
+  ) => Promise<Array<{ memoryId: MemoryId }>> | Array<{ memoryId: MemoryId }>;
   /**
    * ADR 0079: `requeueEmbedJobs` が積み直した `embed` ジョブを、**運搬役が実際に
    * claim できるところまで**検査するためのフック。**必須。**
@@ -418,6 +431,33 @@ export interface MemoryStoreConformanceOptions {
    * しない。
    */
   supportsEraseTenant: boolean;
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: 対象の `MemoryStore` 実装が `markContestedGroup`
+   * （任意メソッド）を実装しているかどうか。**任意**（省略可、
+   * `supportsResolveOrphanedContested` と同じ3状態）。
+   *
+   * `true` なら契約の歯（3件以上の `active` な Memory を `contested` へ束ねる、
+   * 有効期間が重なる組にだけ `memory_relations` の行を張る、既存の2者対〔穴A〕を
+   * 吸収する、`members.length < 3`/重複 id は `RangeError`、CAS 違反は
+   * {@link MemoryStatusConflictError}）を実行する。`false` なら
+   * `expect(store.markContestedGroup).toBeUndefined()` を積極的に assert する
+   * ——`it.skip` にはしない。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
+   */
+  supportsMarkContestedGroup?: boolean;
+  /**
+   * Issue #207/#933 PR2（ADR 0381）: 対象の `MemoryStore` 実装が `resolveContestedGroup`
+   * （任意メソッド）を実装しているかどうか。**任意**（省略可、同じ3状態）。
+   *
+   * `true` なら契約の歯（`both_active`/`supersede` のどちらでも関係の行を消す、
+   * CAS 違反〔`status !== 'contested'`〕は {@link MemoryStatusConflictError}）を実行
+   * する。`false` なら `expect(store.resolveContestedGroup).toBeUndefined()` を
+   * 積極的に assert する。省略したときは「⚠ 未検査」の named it を1本だけ登録する。
+   *
+   * ⚠ **この歯は `supportsMarkContestedGroup` も同時に `true` であることを前提にする**
+   * （`resolveContestedPair`/`supportsResolveContestedPair` と同じ判断——群を作る手段が
+   * 無いと解消の歯が組めない）。
+   */
+  supportsResolveContestedGroup?: boolean;
 }
 
 /**
@@ -444,6 +484,7 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     name,
     createStore,
     listEventsForMemory,
+    listRelationsForMemory,
     prepareRecallId,
     claimEmbedJobs,
     supportsSupersedeWithNewMemories,
@@ -463,6 +504,8 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
     supportsListActiveClaimPredicates,
     supportsResolveOrphanedContested,
     supportsEraseTenant,
+    supportsMarkContestedGroup,
+    supportsResolveContestedGroup,
   } = options;
 
   describe(`MemoryStore conformance (${name})`, () => {
@@ -7061,6 +7104,485 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       // `supportsOnlyMemoryIdsFilter`/`supportsListActiveClaimPredicates` の同じ分岐を参照。
       it(`⚠ 未検査: supportsResolveOrphanedContested が指定されていない — adapter "${name}" に対して resolveOrphanedContested の歯は検査していない`, () => {
         expect(supportsResolveOrphanedContested).toBeUndefined();
+      });
+    }
+
+    // -------------------------------------------------------------------
+    // markContestedGroup / resolveContestedGroup（Issue #207/#933 PR2、任意メソッド、
+    // ADR 0381）。
+    // -------------------------------------------------------------------
+
+    if (supportsMarkContestedGroup === true) {
+      it("3件の active な Memory を渡すと、全員 contested になり、contestedWithId は付かない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memories = await Promise.all(
+          ["group-fresh-a", "group-fresh-b", "group-fresh-c"].map((contentHash) =>
+            store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1", contentHash })),
+          ),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: { reason: "contested" },
+        });
+
+        const result = await store.markContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, event: event(m.id) })),
+        );
+        expect(result.members.map((m) => m.status)).toEqual([
+          "contested",
+          "contested",
+          "contested",
+        ]);
+        expect(result.members.map((m) => m.contestedWithId ?? null)).toEqual([null, null, null]);
+        expect(result.events).toHaveLength(3);
+
+        for (const m of memories) {
+          const after = await store.get(ctx, m.id);
+          expect(after?.status).toBe("contested");
+          expect(after?.contestedWithId ?? null).toBeNull();
+        }
+      });
+
+      it("有効期間が重ならない組には memory_relations の行を張らない（ADR 0381 決定1）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // a: 2020-2021, b: 2022-2023（a と重ならない）, c: 2020.5-2022.5（両方と重なる）
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-overlap-a",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00Z"),
+            validUntil: new Date("2021-01-01T00:00:00Z"),
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-overlap-b",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2022-01-01T00:00:00Z"),
+            validUntil: new Date("2023-01-01T00:00:00Z"),
+          }),
+        );
+        const c = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-overlap-c",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-07-01T00:00:00Z"),
+            validUntil: new Date("2022-07-01T00:00:00Z"),
+          }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: { reason: "contested" },
+        });
+
+        await store.markContestedGroup!(ctx, [
+          { id: a.id, event: event(a.id) },
+          { id: b.id, event: event(b.id) },
+          { id: c.id, event: event(c.id) },
+        ]);
+
+        if (listRelationsForMemory) {
+          const fromA = (await listRelationsForMemory(ctx, a.id)).map((r) => r.memoryId);
+          const fromB = (await listRelationsForMemory(ctx, b.id)).map((r) => r.memoryId);
+          const fromC = (await listRelationsForMemory(ctx, c.id)).map((r) => r.memoryId);
+          // a・b は重ならない——互いを指す行は無い。c はどちらとも重なる。
+          expect(fromA.sort()).toEqual([c.id]);
+          expect(fromB.sort()).toEqual([c.id]);
+          expect(fromC.sort()).toEqual([a.id, b.id].sort());
+        }
+      });
+
+      it("境目でちょうど接する組（後者の validFrom が前者の validUntil と一致）には行を張らない——半開区間 [validFrom, validUntil) は境目を含まない（2026-09-30 の直し、ADR 0381）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // a: [2020-01-01, 2021-01-01), b: [2021-01-01, 2022-01-01)——validUntil_a === validFrom_b。
+        // c は a・b の両方と重なる橋渡し役（3件とも群には入るが、a-b 間にだけ行が無いことを見る）。
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-boundary-a",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-01-01T00:00:00.000Z"),
+            validUntil: new Date("2021-01-01T00:00:00.000Z"),
+          }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-boundary-b",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2021-01-01T00:00:00.000Z"),
+            validUntil: new Date("2022-01-01T00:00:00.000Z"),
+          }),
+        );
+        const c = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "group-boundary-c",
+            claimKey: { subject: "user", predicate: "address" },
+            validFrom: new Date("2020-06-01T00:00:00.000Z"),
+            validUntil: new Date("2021-06-01T00:00:00.000Z"),
+          }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+
+        await store.markContestedGroup!(ctx, [
+          { id: a.id, event: event(a.id) },
+          { id: b.id, event: event(b.id) },
+          { id: c.id, event: event(c.id) },
+        ]);
+
+        if (listRelationsForMemory) {
+          const fromA = (await listRelationsForMemory(ctx, a.id)).map((r) => r.memoryId);
+          const fromB = (await listRelationsForMemory(ctx, b.id)).map((r) => r.memoryId);
+          // a・b はちょうど境目で接するだけ——重ならない。c とはどちらも重なる。
+          expect(fromA.sort()).toEqual([c.id]);
+          expect(fromB.sort()).toEqual([c.id]);
+        }
+      });
+
+      it("穴A: 既存の対（A・B）を吸収して群を作れる——A・Bの対は壊れ、3件とも contested のまま残る", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-holeA-a" }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-holeA-b" }),
+        );
+        const c = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-holeA-c" }),
+        );
+        const pairEvent = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await store.markContestedPair!(
+          ctx,
+          { id: a.id, event: pairEvent(a.id) },
+          { id: b.id, event: pairEvent(b.id) },
+        );
+
+        const result = await store.markContestedGroup!(ctx, [
+          { id: a.id, event: pairEvent(a.id) },
+          { id: b.id, event: pairEvent(b.id) },
+          { id: c.id, event: pairEvent(c.id) },
+        ]);
+        expect(result.members.map((m) => m.status)).toEqual([
+          "contested",
+          "contested",
+          "contested",
+        ]);
+        expect(result.members.map((m) => m.contestedWithId ?? null)).toEqual([null, null, null]);
+
+        const afterA = await store.get(ctx, a.id);
+        const afterB = await store.get(ctx, b.id);
+        expect(afterA?.contestedWithId ?? null).toBeNull();
+        expect(afterB?.contestedWithId ?? null).toBeNull();
+      });
+
+      it("members.length < 3 は RangeError（書き込み前）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-too-few-a" }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-too-few-b" }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await expect(
+          store.markContestedGroup!(ctx, [
+            { id: a.id, event: event(a.id) },
+            { id: b.id, event: event(b.id) },
+          ]),
+        ).rejects.toThrow(RangeError);
+      });
+
+      it("重複した id は RangeError（書き込み前）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-dup-a" }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-dup-b" }),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await expect(
+          store.markContestedGroup!(ctx, [
+            { id: a.id, event: event(a.id) },
+            { id: b.id, event: event(b.id) },
+            { id: a.id, event: event(a.id) },
+          ]),
+        ).rejects.toThrow(RangeError);
+      });
+
+      it("CAS 違反（1件が active でも吸収可能な contested でもない）は MemoryStatusConflictError を投げ、どの行も書き換えない", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const a = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-cas-a" }),
+        );
+        const b = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-cas-b" }),
+        );
+        const archived = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "group-cas-archived" }),
+        );
+        await store.updateStatus(ctx, archived.id, "archived");
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+
+        let caught: unknown;
+        await store.markContestedGroup!(ctx, [
+          { id: a.id, event: event(a.id) },
+          { id: b.id, event: event(b.id) },
+          { id: archived.id, event: event(archived.id) },
+        ]).catch((error: unknown) => {
+          caught = error;
+        });
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+
+        const afterA = await store.get(ctx, a.id);
+        const afterB = await store.get(ctx, b.id);
+        expect(afterA?.status).toBe("active");
+        expect(afterB?.status).toBe("active");
+      });
+    } else if (supportsMarkContestedGroup === false) {
+      it("markContestedGroup は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.markContestedGroup).toBeUndefined();
+      });
+    } else {
+      it(`⚠ 未検査: supportsMarkContestedGroup が指定されていない — adapter "${name}" に対して markContestedGroup の歯は検査していない`, () => {
+        expect(supportsMarkContestedGroup).toBeUndefined();
+      });
+    }
+
+    if (supportsMarkContestedGroup === true && supportsResolveContestedGroup === true) {
+      it("resolveContestedGroup（both_active）: 全員 active に戻り、CAS 違反は MemoryStatusConflictError", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memories = await Promise.all(
+          ["group-resolve-both-a", "group-resolve-both-b", "group-resolve-both-c"].map(
+            (contentHash) =>
+              store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1", contentHash })),
+          ),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await store.markContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, event: event(m.id) })),
+        );
+
+        const result = await store.resolveContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, status: "active" as const, event: event(m.id) })),
+        );
+        expect(result.members.map((m) => m.status)).toEqual(["active", "active", "active"]);
+        expect(result.members.map((m) => m.contestedWithId ?? null)).toEqual([null, null, null]);
+
+        if (listRelationsForMemory) {
+          // ADR 0381 決定3: both_active で関係の行も消える。
+          for (const m of memories) {
+            expect(await listRelationsForMemory(ctx, m.id)).toEqual([]);
+          }
+        }
+
+        // 決着後に CAS 違反（もう contested ではない）を試すと MemoryStatusConflictError。
+        let caught: unknown;
+        await store.resolveContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, status: "active" as const, event: event(m.id) })),
+        ).catch((error: unknown) => {
+          caught = error;
+        });
+        expect(caught).toBeInstanceOf(MemoryStatusConflictError);
+
+        // 「一度解消したら再び争わせない」印は無い——同じ3件へもう一度 markContestedGroup を
+        // 呼べる（後から同じ claim key の新しい記憶が来て一致すれば、また群になりうる）。
+        const regrouped = await store.markContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, event: event(m.id) })),
+        );
+        expect(regrouped.members.map((m) => m.status)).toEqual([
+          "contested",
+          "contested",
+          "contested",
+        ]);
+      });
+
+      it("resolveContestedGroup（supersede）: 勝者だけ active、他は superseded", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memories = await Promise.all(
+          [
+            "group-resolve-supersede-a",
+            "group-resolve-supersede-b",
+            "group-resolve-supersede-c",
+          ].map((contentHash) =>
+            store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1", contentHash })),
+          ),
+        );
+        const [winner, loser1, loser2] = memories;
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await store.markContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, event: event(m.id) })),
+        );
+
+        const result = await store.resolveContestedGroup!(ctx, [
+          { id: winner!.id, status: "active", event: event(winner!.id) },
+          {
+            id: loser1!.id,
+            status: "superseded",
+            supersededById: winner!.id,
+            event: event(loser1!.id),
+          },
+          {
+            id: loser2!.id,
+            status: "superseded",
+            supersededById: winner!.id,
+            event: event(loser2!.id),
+          },
+        ]);
+        expect(result.members.map((m) => m.status)).toEqual(["active", "superseded", "superseded"]);
+      });
+
+      it("resolveContestedGroup: 群の一部だけを渡すと ContestedGroupMembershipMismatchError で何も書かない（2026-09-30 の直し、ADR 0381）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // 4件の群を作り、3件（>= 3 の下限は満たす）だけを渡して「部分解消」を試す
+        // ——4件目がまだ contested のまま群に残っている。
+        const memories = await Promise.all(
+          [
+            "group-partial-resolve-a",
+            "group-partial-resolve-b",
+            "group-partial-resolve-c",
+            "group-partial-resolve-d",
+          ].map((contentHash) =>
+            store.createMemory(ctx, buildNewMemoryFixture({ tenantId: "tenant-1", contentHash })),
+          ),
+        );
+        const event = (memoryId: MemoryId): NewMemoryEvent => ({
+          tenantId: "tenant-1",
+          memoryId,
+          kind: "updated",
+          actor: { type: "system" },
+          digestSnapshot: "digest",
+          meta: {},
+        });
+        await store.markContestedGroup!(
+          ctx,
+          memories.map((m) => ({ id: m.id, event: event(m.id) })),
+        );
+
+        let caught: unknown;
+        await store.resolveContestedGroup!(ctx, [
+          { id: memories[0]!.id, status: "active", event: event(memories[0]!.id) },
+          { id: memories[1]!.id, status: "active", event: event(memories[1]!.id) },
+          { id: memories[2]!.id, status: "active", event: event(memories[2]!.id) },
+        ]).catch((error: unknown) => {
+          caught = error;
+        });
+        // 2026-09-30 のさらなる直し（ADR 0381 §7 解消）: MemoryStatusConflictError の
+        // 再利用をやめ、専用のエラー型（ContestedGroupMembershipMismatchError）を
+        // 投げるようになった——エラーの型まで縛る。
+        expect(caught).toBeInstanceOf(ContestedGroupMembershipMismatchError);
+        expect((caught as ContestedGroupMembershipMismatchError).missingMemberId).toBe(
+          memories[3]!.id,
+        );
+
+        // 何も書き換えていない——4件とも contested のまま。
+        for (const m of memories) {
+          const after = await store.get(ctx, m.id);
+          expect(after?.status).toBe("contested");
+        }
+      });
+    } else if (supportsResolveContestedGroup === false) {
+      it("resolveContestedGroup は任意メソッドであり、この adapter は実装していない", async () => {
+        const store = await createStore();
+        expect(store.resolveContestedGroup).toBeUndefined();
+      });
+    } else if (supportsResolveContestedGroup === undefined) {
+      it(`⚠ 未検査: supportsResolveContestedGroup が指定されていない — adapter "${name}" に対して resolveContestedGroup の歯は検査していない`, () => {
+        expect(supportsResolveContestedGroup).toBeUndefined();
       });
     }
 

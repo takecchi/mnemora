@@ -46,6 +46,41 @@ export class MemoryStatusConflictError extends Error {
 }
 
 /**
+ * Issue #207/#933 PR2（ADR 0381、2026-09-30 の直し）: `MemoryStore.resolveContestedGroup?`
+ * の CAS のうち、「渡された `members` が、`memory_relations` でつながった今も `contested`
+ * な群の全員と一致すること」が破れたときに投げる。
+ *
+ * 🔴 **`MemoryStatusConflictError` を再利用しない。**当初は
+ * `MemoryStatusConflictError(missingId, "contested", "contested")`（`expectedStatus`
+ * と `observedStatus` が同じ値になる特別な使い方）で表していたが、「この id 自身の
+ * 状態は問題ないが、群の全員としてこの呼び出しに含まれていなかった」という意味は
+ * `MemoryStatusConflictError` の本来の意味（期待した値と違う値を観測した）とは異なる
+ * ——`MemoryPurgeConflictError` が `MemoryStatusConflictError` を再利用しなかったのと
+ * 同じ理由（このファイルの `MemoryPurgeConflictError` の doc コメント参照）で、専用の
+ * 型を切った。
+ *
+ * `missingMemberId` は、到達集合（`members` から `kind: 'contradicts'` を辿って求めた
+ * 集合のうち `status === 'contested'` のもの）にあるが `members` に含まれていなかった、
+ * 欠けたメンバーの id を1件だけ名指しする（複数欠けていても最初の1件のみ）。
+ *
+ * `Runtime.resolveContestedGroup?` は、`deps.relationStore` の配線の有無に関わらず、
+ * この例外を捕まえて `{ kind: "ineligible", ... }` に写す（`MemoryStatusConflictError`
+ * を `conflict` に写すのとは別の分岐——「部分解消」は TOCTOU による競合ではなく、
+ * 呼び出し側が最初から適格でない集合を渡したことを表すため）。
+ */
+export class ContestedGroupMembershipMismatchError extends Error {
+  constructor(readonly missingMemberId: MemoryId) {
+    super(
+      `MemoryStore.resolveContestedGroup: the members passed do not match the full set of ` +
+        `the memory_relations-connected group that is still status="contested" ` +
+        `(missing member: ${missingMemberId}). Nothing was written — pass the complete group ` +
+        "(use RelationStore.listRelated to discover the rest, then filter to status='contested').",
+    );
+    this.name = "ContestedGroupMembershipMismatchError";
+  }
+}
+
+/**
  * Issue #1226（ADR 0375 決定7、クローン miku の判断）: `createMemoryWithOutbox`/
  * `supersedeWithNewMemories` の `opts.abortIfForgotten` に渡した id のうち、書き込みの
  * 直前に見直したら1件でも `status === "forgotten"`（`forget()` のみ・`forget()` の後
@@ -1617,6 +1652,127 @@ export interface MemoryStore {
     ctx: Ctx,
     survivor: { id: MemoryId; contestedWithId: MemoryId; event: NewMemoryEvent },
   ): Promise<{ memory: Memory; event: MemoryEvent }>;
+  /**
+   * Issue #207/#933 PR2（ADR 0292 決定1、ADR 0327 §2・§4-b・§5、ADR 0378 決定1〜4、
+   * ADR 0381）: `docs/memory-model.md` §11 lifecycle 行6「`active → contested`」を、
+   * **3件以上**（群）へ書く口。`markContestedPair`（ADR 0134、2者専用）の形を手本にした、
+   * N者版。呼び出し側（`Runtime`）が「誰を群に含めるか」（穴A＝既存の対の吸収・複数の
+   * 既存群の合併を含む）を決め、この口はその集合を受け取って**1トランザクションで**
+   * 書くだけである——`markContestedPair` と同じ「判定はしない・渡された集合をそのまま
+   * 書く」規律。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`markContestedPair?`/`resolveContestedPair?` と同じ理由）。
+   *
+   * ⚠ **フォールバック経路を持たない**（`markContestedPair?` と同じ判断）。この口を
+   * 実装しない adapter に対しては、`Runtime.markContestedGroup` は「対応していない」と
+   * だけ返す——`RelationStore` が配線されていない場合と同じ扱いで、PR1（ADR 0378 決定5）
+   * の「状態を動かさず evidence だけ積む」経路のままになる。
+   *
+   * 契約:
+   * - **`members.length < 3` は呼び出し前の programmer error として扱う**（`RangeError`。
+   *   メッセージ: `markContestedGroup: members must have at least 3 entries`）。2者は
+   *   `markContestedPair` の領分のまま（ADR 0378 決定1 の (ii)）——この口は3件以上専用。
+   * - 🔴 **`members` に同じ `id` が2回以上現れるのは programmer error として扱う。**
+   *   実装は `RangeError`（メッセージ: `markContestedGroup: member ids must be
+   *   unique`）を、書き込みを一切行う前に投げる。
+   * - **各メンバーが呼び出し時点で次のいずれかであること**（CAS。行ごとに判定する）:
+   *   1. `status === 'active'`（新しく群に加わる）。
+   *   2. `status === 'contested'` かつ `contestedWithId` が **他の** `members` の
+   *      いずれかの `id` と一致する（既存の2者間の対〔穴A〕を吸収する——対の相方も
+   *      必ず同じ `members` に含めるのは呼び出し側の責務。含めずに片方だけ渡すと、
+   *      その片方は次の3の条件に落ちてしまい `MemoryStatusConflictError` になる）。
+   *   3. `status === 'contested'` かつ `contestedWithId === null`（既存の3件以上の
+   *      群のメンバーを吸収する〔合併〕——その群が本当にこの `members` の他の誰かと
+   *      つながっているかは、この口自身は検査しない。呼び出し側が
+   *      `RelationStore.listRelated` で確かめてから渡す前提）。
+   *   上のどれにも当てはまらない（`status === 'contested'` かつ `contestedWithId` が
+   *   `members` の外を指す、または `active`/`contested` 以外）場合は CAS 違反として
+   *   扱う。
+   * - **どちらの id もそのテナントに存在しない場合、`updateStatusWithEvent` と同じ
+   *   「memory not found」の `Error` を投げる。**書き込みは一切行われない。
+   * - **CAS が破れた場合は {@link MemoryStatusConflictError} を投げる。**
+   *   `expectedStatus` は常に `'active'`（CAS 条件が複数あるが、型としては
+   *   `MarkContestedSideOutcome`/`markContestedPair` と同じ語彙に揃える——「新規に
+   *   群へ入れる資格が無かった」という1つの意味として扱う）。**全部成功するか全部
+   *   失敗するかのどちらかである**——部分成功は無い（`markContestedPair` と同じ理由）。
+   * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う:
+   *   1. 全メンバーの `status = 'contested'`・`contestedWithId = NULL` に更新する
+   *      （群のメンバーは `contestedWithId` を持たない、ADR 0378 決定1 §3.3 の
+   *      「多者間ケースにまでこの『キャッシュ』の比喩を広げない」判断の継承）。
+   *   2. `memory_relations` へ、**有効期間が重なるメンバーの組だけ**（ADR 0381
+   *      決定1——「完全グラフ」は「一致した全員を結ぶ」ではなく「その中で実際に
+   *      重なる組を結ぶ」と読み替える）、双方向2行ずつ `kind: 'contradicts'` で
+   *      追記する。**既に同じ行が存在する場合は無視する**（`ON CONFLICT DO NOTHING`
+   *      相当——穴A・合併で一部の対が既に表に住んでいることがあるため）。
+   *   3. `memory_events` へ、`members[].event` をそれぞれ1件ずつ追記する
+   *      （`event.kind` は呼び出し側が渡した値をそのまま使う。`markContestedPair` と
+   *      同じ「渡された event をそのまま積む」規律）。
+   * - 🔴 **原子性の証拠ではない。**`markContestedPair` の doc コメントと同じ注意
+   *   ——この口が在ることは adapter がこの口を実装したことしか意味しない。
+   */
+  markContestedGroup?(
+    ctx: Ctx,
+    members: ReadonlyArray<{ id: MemoryId; event: NewMemoryEvent }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
+  /**
+   * Issue #207/#933 PR2（ADR 0327 §4-c、ADR 0378 決定3、ADR 0381）: `markContestedGroup`
+   * の解決側。`resolveContestedPair`（ADR 0150、2者専用）の形を手本にした N者版——
+   * `ContestedResolution`（`{kind:"supersede",winnerId}` | `{kind:"both_active"}`）の
+   * 意味を、2者からそのまま群へ広げる（ADR 0378 決定3）。新しい決着の種類は増やさない。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `MemoryStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる（`markContestedPair?`/`resolveContestedPair?` と同じ理由）。
+   *
+   * ⚠ **フォールバック経路を持たない**（`resolveContestedPair?` と同じ判断）。
+   *
+   * 契約（`markContestedGroup`・`resolveContestedPair` と対称。差分だけを述べる）:
+   * - **`members.length < 3` は呼び出し前の programmer error**（`RangeError`。
+   *   メッセージ: `resolveContestedGroup: members must have at least 3 entries`）。
+   * - 🔴 **重複 `id` も programmer error**（`RangeError`。メッセージ:
+   *   `resolveContestedGroup: member ids must be unique`）。
+   * - **各メンバーが呼び出し時点で `status === 'contested'` であること**（CAS）。
+   *   群のメンバーは `contestedWithId` を持たない設計（`markContestedGroup` 契約）
+   *   なので、`resolveContestedPair` の「相互参照が成立していること」に相当する検査は
+   *   無い——`status` だけを見る。
+   * - ⚠ **2026-09-30 の直し（ADR 0381 追記、段階Bの穴埋め）: `members` は、
+   *   `memory_relations` でつながった「今も `contested` な」群の全員と一致しなければ
+   *   ならない（CAS）。**一部だけを渡した解消（部分解消）は拒む——`members` から
+   *   `memory_relations`（`kind: 'contradicts'`）を辿って求めた到達集合のうち、
+   *   `status === 'contested'` のものが `members` の id 集合と完全に一致することを
+   *   要求する。**forget・supersede・purge・archive で群から抜けたメンバー
+   *   （決定10——関係の行は残すが `status` はもう `'contested'` ではない）は、この
+   *   到達集合に含めない**——「今の群」を、行の有無ではなく `status` で判定する。
+   *   足りないメンバーが見つかった場合、その1件を名指しして
+   *   {@link ContestedGroupMembershipMismatchError}（2026-09-30 のさらなる直し、
+   *   ADR 0381 §7 解消——当初は `MemoryStatusConflictError(missingId, "contested",
+   *   "contested")` という `expectedStatus`/`observedStatus` が同じ値になる特別な
+   *   使い方だったが、専用の型に切り出した）を投げ、何も書き込まない。
+   * - 存在しない id は「memory not found」の `Error`。それ以外の CAS 違反は
+   *   {@link MemoryStatusConflictError}（`expectedStatus` は常に `'contested'`）。
+   *   全部成功するか全部失敗するかのどちらか。
+   * - すべての条件を満たす場合のみ、**1トランザクションで**次を行う:
+   *   1. 各メンバーを `members[].status`（`'active'` か `'superseded'`）へ更新し、
+   *      `'superseded'` を指定した側は `members[].supersededById` も書く。
+   *   2. **`both_active`・`supersede` のどちらでも**、この `members` 全員を結んでいた
+   *      `memory_relations` の行を**双方向とも削除する**——2者版 `resolveContestedPair`
+   *      が決着の種類に関わらず常に `contestedWithId = NULL` へ戻すのと同じ扱いに
+   *      揃える（ADR 0381 決定3「関係の行の扱いも2者に揃える」）。「一度解消したら
+   *      再び争わせない」ための印は作らない——後から同じ claim key の新しい記憶が来て
+   *      一致すれば、また群になりうる。
+   *   3. `memory_events` へ、`members[].event` をそれぞれ1件ずつ追記する。
+   * - 🔴 **原子性の証拠ではない。**`markContestedGroup`/`resolveContestedPair` の
+   *   doc コメントと同じ注意。
+   */
+  resolveContestedGroup?(
+    ctx: Ctx,
+    members: ReadonlyArray<{
+      id: MemoryId;
+      status: "active" | "superseded";
+      supersededById?: MemoryId;
+      event: NewMemoryEvent;
+    }>,
+  ): Promise<{ members: Memory[]; events: MemoryEvent[] }>;
   /**
    * Issue #372（(B) 第2段。`docs/decisions/`「主張キーの衝突を検出する」ADR、ADR 0185
    * 決定4・ADR 0320 決定7・決定8 の続き）: 「同じ tenant・同じ `subjectId`・同じ claim key

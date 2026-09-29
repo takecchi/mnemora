@@ -429,3 +429,18 @@ recall 側には一切触れていない（決定6・PR2 の範囲）。
 ---
 
 Refs #933 #207
+
+## 追記（2026-09-30、Issue #207/#933 PR2 段階B、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)、[ADR 0381](./0381-contested-group-write-path-implementation.md)）
+
+> ⚠ この追記は、自動化された担い手（クローン miku のセッションから切り出された担い手）
+> のものである。⛔ オーナー本人の判定ではない（ADR 0220）。
+
+段階B で、本 ADR 決定5（PR1 の範囲、「2件以上／既に contested な1件」は `markContested` を
+呼ばず evidence だけを積む）を、`detectContested: true` かつ `RuntimeDeps.relationStore`
+が配線されている呼び出しに限って上書きした（2026-09-30 のさらなる直し、オーナー側クローンの
+判断で opt-in の専用フラグは廃止し、既存の `relationStore` の配線を条件にした）——
+`deps.relationStore`・`deps.memoryStore.markContestedGroup` の両方が配線されており、かつ
+群のメンバー（穴Aの吸収・既存群の合併を含む）が3件以上に組み上がるときだけ、evidence-only
+の代わりに実際に `Runtime.markContestedGroup` を呼んで群として書き込む。**`relationStore`
+を配線しない既存の呼び出しは1バイトも変わらない**——この ADR が確立した決定5の挙動そのもの
+のままである。詳細・理由・境界条件は ADR 0381 §4 を見ること。

@@ -20,6 +20,7 @@ export * from "./outbox.js";
 export * from "./idempotent-create.js";
 
 export * from "./interfaces/memory-store.js";
+export * from "./interfaces/relation-store.js";
 export * from "./interfaces/vector-store.js";
 export * from "./interfaces/lexical-store.js";
 export * from "./interfaces/event-store.js";

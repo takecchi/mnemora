@@ -432,3 +432,17 @@ Issue #604 が引き受けた「掃引して棚卸しするところまで」を
 - ⛔ **drift 4件の修理・歯の追加は行っていない**——依頼の指示により本 ADR の範囲外。
 - ⛔ **`docs/decisions/README.md`（ADR 索引）は触っていない**——ADR 0137 決定2の運用に
   従い、マージする側がマージ直前に再生成する前提である。
+
+---
+
+## 追記（2026-09-30、Issue #207/#933 PR2・[ADR 0381](./0381-contested-group-write-path-implementation.md)）: `RelationStore` は「予告」から「写し」へ移った
+
+「3つに割る」の2番（予告）に挙げた3つのうち、`RelationStore` は実体ができた
+（`packages/core/src/interfaces/relation-store.ts`、[PR #1442](https://github.com/takecchi/mnemora/pull/1442)）。
+公開 API snapshot に現れるようになったため、`scripts/__tests__/architecture-section5-port-interface-correspondence.test.mjs`
+の警報（「RelationStore が公開 API snapshot に見つかった」）が鳴った。
+
+**扱い**: `RelationStore` を1番（写し）に移し、歯の `TARGET_INTERFACE_NAMES` に入れた——
+§5 のコード片がメンバー名の集合で実体と一致することを、ほかの port と同じく縛る。
+2番（予告）に残るのは `Sensor`・`SpeechPolicy` の2つである。本文の「3つ」は、この追記の
+時点から「2つ」と読むこと（本文は書き換えない）。
