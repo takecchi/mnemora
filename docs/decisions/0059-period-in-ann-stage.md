@@ -536,3 +536,69 @@ PR #69 で足された。実測の数字と、`tenant_id` 先頭の索引・`ANA
 **⚠ PR #69 の期間中に PostgreSQL 17.11 で再測定したところ、本 ADR の元の数値は
 再現せず（`ANALYZE` 前 35.0/39.8/42.4ms → `ANALYZE` 後 4.6/4.5/5.6ms、という別の
 数字が測れた——詳細・裏取りは ADR 0062 参照）。
+
+## 追記（2026-09-29）—— ロックモードの実測は `ShareLock` であり、`ACCESS EXCLUSIVE` ではなかった
+
+⛔ 上の本文は1バイトも書き換えていない。同じ形で追記する。
+
+**クローン miku の委譲先が書いた（オーナーではない）。**
+
+上の本文（「引き受ける負債として記録する」1番・「これが覆るとしたら」・「確かめていないこと」）は、
+`idx_memories_period_ann_stage` の `CREATE INDEX` が `memories` に `ACCESS EXCLUSIVE`
+ロックを取ると記録していた。**これは実測に基づくものではなかった**——本文自身が
+「`migrate.ts` のトランザクション構造・`ACCESS EXCLUSIVE` ロックの発生自体は現物のコードと
+PostgreSQL の一般的な仕様から導いたものであり、実際に本番規模でロック待ちがどれだけ
+発生するかは測っていない」と書いているとおりである。
+
+[ADR 0343](./0343-vector-store-search-returns-zero-norm-candidates.md) の2026-09-27追記が、
+別の索引（埋め込みテーブルの部分索引）について実測し直し、「`ACCESS EXCLUSIVE` ではなく
+`ShareLock` だった」と訂正した。この追記の書き手は、同じ手順を
+`idx_memories_period_ann_stage`（`0003_period_ann_stage_index.sql`）自身に対して
+実測し直した。
+
+- `BEGIN; <0003_period_ann_stage_index.sql の CREATE INDEX>;`（`COMMIT` 前）で開いた
+  トランザクションが `memories` に持つロックを、別セッションから `pg_locks.mode` で
+  読むと **`ShareLock`** だった（`AccessExclusiveLock` ではない）。
+- 同じ状態で、別セッションからの `SELECT count(*) FROM memories` は即座に完了した
+  （読み取りは止まらない）。
+- 同じ状態で、別セッションからの `INSERT`・`UPDATE`・`DELETE` は `statement_timeout=3000`
+  で `canceling statement due to statement timeout` になった（**書き込みだけ止まる**）。
+- 作成時間: 100,000行で **168ms**、1,000,000行で **2,146ms**（PostgreSQL 17.11、
+  pgvector 0.8.0）。参考: `CONCURRENTLY` を使えば `ShareUpdateExclusiveLock` になり、
+  1,000,000行でも 2,380ms で INSERT を止めずに作れる（`packages/postgres/src/migrate.ts`
+  の実行系ではこの経路は使えないという本文の記述は変わらない）。
+- `packages/postgres/src/migrate.ts` の `runMigrations` 経由（1ファイル＝1トランザクション、
+  advisory lock）で `0003_period_ann_stage_index.sql` を流しても同じ——`ShareLock` で、
+  書き込みだけ止まった。
+
+⟹ **本文・「引き受ける負債として記録する」1番・「これが覆るとしたら」2番目・
+「確かめていないこと」の `ACCESS EXCLUSIVE` という記述は、この実測とは食い違う。
+本文は書き換えず、この追記で訂正する。**「書き込みが止まる」という結論自体は
+正しいままである——止まる範囲が「読み書きすべて」ではなく「書き込みだけ」だった、
+という訂正である。
+
+**「これが覆るとしたら」2番目の引き金を言い直す**: 「索引作成の `ACCESS EXCLUSIVE`
+ロックが実運用で許容できない長さになったら」ではなく、**「索引作成中、`memories` への
+書き込みが止まる時間が、実運用で許容できない長さになったら」**、非トランザクションの
+移行経路（`CONCURRENTLY` を使える実行系）を別途設計する、より大きな判断の引き金になる。
+
+この主張（ShareLock・読みは止まらず書きだけ止まる）は、実行時に
+`packages/postgres/src/__tests__/create-index-lock-mode.postgres.test.ts` が縛る
+（[Issue #760](https://github.com/takecchi/mnemora/issues/760)）。
+
+**#760 を閉じた理由**: #760 は「この引き金が実運用で既に引かれているか」をオーナーに
+問うものだった。オーナーの回答——2026-09-24「mnemora には本番サーバーが無い」、
+2026-09-28「使っているのは自分だけ」——から、実運用でこの引き金は引かれていないと
+判断し、#760 は本追記と歯を足したうえで閉じた。**「引かれていない」という判断はこの
+追記の書き手のものであり、引き金が引かれたと分かったら新しい Issue を立てること。**
+
+### この追記が確かめていないこと
+
+- 1,000万行を大きく超える規模での作成時間・ロック時間は測っていない。
+- 並行して書き込み負荷がかかった状態（複数の書き込みが同時に `statement_timeout`
+  待ちになる状況）は測っていない——1本の書き込みが1本の索引作成の後ろで待つ、
+  という単純な形しか確かめていない。
+- 実測環境は PostgreSQL 17.11 の1点のみ。バージョンやテーブルの列構成によって
+  ロックモードが変わる余地があるかどうかは確認していない。
+- `idx_memories_contested_with`（`0004_contested_with_index.sql`）についての実測は
+  [ADR 0062](./0062-contested-with-id-fk-index.md) 追記を参照——本追記では扱っていない。
