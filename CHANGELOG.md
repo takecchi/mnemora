@@ -233,7 +233,7 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
     「v1.X.0とかで破壊的変更しちゃっていいよ僕しか使ってないし」——を根拠にした運用であり、
     詳細は ADR 0352「文脈」節と `README.md`「版の付け方」の追記を見ること。
 
-- **`MemoryStore`/`OutboxStore` を自前で実装している人へ**: 時刻の欄が4つ、任意の欄として増えた
+- **`MemoryStore`/`OutboxStore` を自前で実装している人へ**: 時刻を渡す欄が、任意の欄として増えた
   （[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
   [ADR 0354](./docs/decisions/0354-inject-clock-into-store-writes.md)）——
   `MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox` の第4引数
@@ -247,18 +247,25 @@ PR #1382（Issue #205、ADR 0325 追記、ADR 0351、`### Added`）は `@mnemora
     実装が壁時計 `new Date()` を使うのではなく、渡された値を無視し続ける）実装は、
     `packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance`
     が本 PR で足した「渡した時刻を守る」歯（`opts.now`/`opts.at`/`createdAt` を渡すと、
-    書く行がその値になることを検査する）に落ちる。
+    書く行がその値になることを検査する）に落ちる。同じ歯は、既存の欄の使い方も2つ検査する
+    ——`purgeMemory` の `purgedAt` が `event.at`（省略時は1つの壁時計の値を両方に使う）と
+    同じ値になること、`archiveDecayed` が積む `archived` イベントの `at` が `opts.now` に
+    なること。
   - ⚠ **この欄を実装しないままだと、Issue #1237 が指摘した壊れ方が自分の実装にだけ残る**
     ——`RuntimeDeps.clock` に壁時計より過去の時刻を注入すると、`tick()` は積んだジョブを
     1本も取れない（`available_at` が壁時計のまま、claim は `available_at <= now`
     ＝注入した時計のジョブしか取らないため）。`@mnemora/postgres`・
     `@mnemora/testkit/fixtures` の2実装は、本 PR でこの欄を守るよう直した
     （`packages/postgres/src/__tests__/injected-clock-reach.postgres.test.ts`）。
-  - **移行の手順**: 自分の `MemoryStore`/`OutboxStore` 実装で、上記4箇所の書き込みが
-    `opts.now`/`opts.at`/`record.createdAt`（省略時は `new Date()`）を実際に使うよう直し、
-    `packages/testkit` の適合テストを実装に対して走らせて緑になることを確認する
-    （`docs/conformance.md`）。`Runtime` を経由する呼び出しは、直さなくても今までどおり
-    動く（壁時計のまま）——直すことで、初めて注入した時計がこれらの欄にも届くようになる。
+  - **移行の手順**:
+    1. 自分の `MemoryStore`/`OutboxStore` 実装で、上に挙げた口の書き込みが
+       `opts.now`/`opts.at`/`record.createdAt`（省略時は `new Date()`）を実際に使うよう直す。
+    2. `purgeMemory` の `purgedAt` を `event.at` に、`archiveDecayed` の `archived` の `at` を
+       `opts.now` に揃える。
+    3. `packages/testkit` の適合テストを実装に対して走らせ、緑になることを確認する
+       （`docs/conformance.md`）。
+    直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）。
+    直して初めて、注入した時計がこれらの欄にも届く。
 
 ### Added
 
