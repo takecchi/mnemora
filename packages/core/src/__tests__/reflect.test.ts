@@ -1104,6 +1104,123 @@ describe("buildReflectedMemory（純関数） — attributes は積集合（Issu
   });
 });
 
+// Issue #1188 残り（ADR 0368）: `validFrom`/`validUntil` は eligible の区間の積。
+// consolidate.test.ts の同名 describe と同じ形（`intersectValidity` は共有する純関数）。
+describe("buildReflectedMemory（純関数） — validFrom/validUntil は eligible 全件の区間の積（ADR 0368）", () => {
+  function fixtureMemory(overrides: Partial<Memory> = {}): Memory {
+    const recordedAt = overrides.recordedAt ?? NOW;
+    const strength = overrides.strength ?? 1;
+    const halfLifeHours = overrides.halfLifeHours ?? 24 * 365 * 10;
+    return {
+      id: overrides.id ?? `mem-${Math.random()}`,
+      tenantId: "tenant-1",
+      subjectId: null,
+      sourceObservationId: null,
+      extractorVersion: null,
+      content: "本文",
+      contentHash: "hash",
+      digest: "digest",
+      digestSource: "llm",
+      provenance: { kind: "imported", batchId: "fixture" },
+      status: "active" as MemoryStatus,
+      supersededById: null,
+      contestedWithId: null,
+      tags: [],
+      occurredAt: null,
+      recordedAt,
+      lastReinforcedAt: null,
+      strength,
+      halfLifeHours,
+      decayFloorAt: defaultDecayStrategy.floorAt({
+        recordedAt,
+        lastReinforcedAt: null,
+        strength,
+        halfLifeHours,
+      }),
+      embeddingStatus: "pending",
+      createdAt: recordedAt,
+      updatedAt: recordedAt,
+      ...overrides,
+    };
+  }
+
+  it("両端とも eligible ごとに違う: validFrom は最大値、validUntil は最小値", () => {
+    const memory = buildReflectedMemory({
+      ctx,
+      eligible: [
+        fixtureMemory({
+          id: "m1",
+          validFrom: new Date("2026-01-01T00:00:00.000Z"),
+          validUntil: new Date("2026-06-01T00:00:00.000Z"),
+        }),
+        fixtureMemory({
+          id: "m2",
+          validFrom: new Date("2026-02-01T00:00:00.000Z"),
+          validUntil: new Date("2026-08-01T00:00:00.000Z"),
+        }),
+      ],
+      llmResult: { outcome: "reflected", content: "反芻結果" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.validFrom).toEqual(new Date("2026-02-01T00:00:00.000Z"));
+    expect(memory.validUntil).toEqual(new Date("2026-06-01T00:00:00.000Z"));
+  });
+
+  it("片端だけ持つ eligible どうし: 無い側は制限にならない", () => {
+    const memory = buildReflectedMemory({
+      ctx,
+      eligible: [
+        fixtureMemory({ id: "m1", validFrom: new Date("2026-01-01T00:00:00.000Z") }),
+        fixtureMemory({ id: "m2", validUntil: new Date("2026-08-01T00:00:00.000Z") }),
+      ],
+      llmResult: { outcome: "reflected", content: "反芻結果" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.validFrom).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(memory.validUntil).toEqual(new Date("2026-08-01T00:00:00.000Z"));
+  });
+
+  it("やりすぎの歯: 全 eligible が両方 null なら、今どおり両方 null", () => {
+    const memory = buildReflectedMemory({
+      ctx,
+      eligible: [fixtureMemory({ id: "m1" }), fixtureMemory({ id: "m2" })],
+      llmResult: { outcome: "reflected", content: "反芻結果" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.validFrom ?? null).toBeNull();
+    expect(memory.validUntil ?? null).toBeNull();
+  });
+
+  it("材料1件でも、その eligible 自身の区間をそのまま持つ", () => {
+    const memory = buildReflectedMemory({
+      ctx,
+      eligible: [
+        fixtureMemory({
+          id: "m1",
+          validFrom: new Date("2026-01-01T00:00:00.000Z"),
+          validUntil: new Date("2026-06-01T00:00:00.000Z"),
+        }),
+      ],
+      llmResult: { outcome: "reflected", content: "反芻結果" },
+      hashContent: (c) => `hash(${c})`,
+      digestFallbackLength: 200,
+      halfLifeHours: 24,
+      now: NOW,
+    });
+    expect(memory.validFrom).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+    expect(memory.validUntil).toEqual(new Date("2026-06-01T00:00:00.000Z"));
+  });
+});
+
 /**
  * Issue #849 / ADR 0157 決定2 追記: `reflect()` は LLM 呼び出しが失敗しても例外を投げず、
  * `outcome: "llm_failed"`（`llmFailure` 付き）を正常な戻り値として返す（ADR 0089 の公開の

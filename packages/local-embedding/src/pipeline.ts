@@ -17,7 +17,7 @@
  */
 
 import { LocalEmbeddingProviderError } from "./errors.js";
-import { recordTransformersCacheDir } from "./transformers-cache-place.js";
+import { recordTransformersCacheDir, revisionCacheRoot } from "./transformers-cache-place.js";
 
 /** dtype（量子化の別）。transformers.js が受け付ける値のうち、ここで意味があるものを並べる。 */
 export type LocalEmbeddingDtype = "fp32" | "fp16" | "q8" | "int8" | "uint8" | "q4" | "q4f16";
@@ -39,6 +39,8 @@ export interface LocalEmbeddingModelSpec {
   /**
    * Hugging Face の revision（枝名・tag・commit sha）。**未指定なら `pipeline()` へ渡さない**
    * ——transformers.js の既定（`"main"`）のまま、いまと同じ呼び出しになる（Issue #597）。
+   * 指定したときは、既定の `createPipeline` がキャッシュの根を `<根>/<encodeURIComponent(revision)>` に分け、
+   * `revision` を `env.remotePathTemplate` に埋め込む（Issue #1403。{@link createLocalEmbeddingPipeline}）。
    */
   readonly revision?: string | undefined;
 }
@@ -323,6 +325,23 @@ function withCacheDirLock<T>(task: () => Promise<T>): Promise<T> {
  * 読めなければ「差し替えられない」として、読み込みそのものは止めない
  * （下の `recordTransformersCacheDir` の読み出しと同じ理由・同じ形）。
  *
+ * 🔴 **`spec.revision` があるときは、`revision` を `pipeline()` に渡さず、`env.remotePathTemplate`
+ * に埋め込む（Issue #1403・ADR 0365）。**
+ *
+ * 前段の確認は `cache_dir` だけでなく `revision` も運ばないので、`revision` を渡すと、前段の確認だけが
+ * `main` の鍵（`<repo>/config.json`）を探し、実際の読み込みは `<repo>/<revision>/<file>` を探す。
+ * ⟹ `revision` を固定した利用者は、温めてもオフラインで読めなかった。
+ * いまは `pipeline()` を呼んでいる間だけ、次の2つを差し替える（どちらも公開の設定）。
+ *
+ * - `env.remotePathTemplate` の `{revision}` を、`encodeURIComponent(revision)` に置き換える
+ *   （利用者が変えた template を土台にする）。前段の確認も実際の読み込みも、同じ revision の URL を見る。
+ * - キャッシュの根（`cache_dir` と `env.cacheDir`）を `<基の根>/<encodeURIComponent(revision)>` にする
+ *   （`revisionCacheRoot`）。基の根は `spec.cacheDir`、無ければ既定の `env.cacheDir`。
+ *
+ * ⚠ `env` を読めない・`env.cacheDir` も `spec.cacheDir` も無い・`env.remotePathTemplate` が
+ * 文字列でない、のどれかなら、この差し替えはせず、今までどおり `revision` を `pipeline()` へ渡す。
+ * `spec.revision` が無いときは、何も変えない。
+ *
  * ⛔ **この関数を呼ぶ経路は、上の {@link withCacheDirLock} を必ず通る。**
  * 直列化していないと、並行した2本目以降の呼び出しが、1本目の差し替えの最中の値を見てしまう
  * （`withCacheDirLock` の doc の実測）。
@@ -339,33 +358,49 @@ async function loadWithCacheDirSwap(
   // 呼ぶ前に記録する（`transformers-cache-place.ts`）。`env` を持たない差し替えもある——vitest の
   // `vi.mock` は、返していない export を読むだけで例外を投げる。メッセージのための読み出しなので、
   // 読めなければ「分からない」にして、読み込みそのものは止めない。
-  let env: { cacheDir?: unknown } | undefined;
+  let env: SwappableTransformersEnv | undefined;
   try {
-    env = (transformers as { env?: { cacheDir?: unknown } }).env;
+    env = (transformers as { env?: SwappableTransformersEnv }).env;
   } catch {
     env = undefined;
   }
   recordTransformersCacheDir(env?.cacheDir);
 
-  // `spec.cacheDir` が指定されていて、かつ `env` が読めたときだけ差し替える。`restoreCacheDir` に
-  // 戻す処理そのものを持たせる（`env` を一度 const（`swappableEnv`）へ写すことで、以降の
-  // クロージャの中でも「読めた」という型の絞り込みを保つ——`let env` のままだと、`finally` の
-  // 中で毎回 non-null 断定が要る）。
-  let restoreCacheDir: (() => void) | undefined;
-  if (env !== undefined && spec.cacheDir !== undefined) {
+  // Issue #1403: `revision` を `env.remotePathTemplate` に埋め込めるか。埋め込めるときだけ、キャッシュの根を
+  // revision ごとに分け、`revision` は `pipeline()` へ渡さない。埋め込めないときは今までどおり渡す。
+  const revisionPin = planRevisionPin(spec, env);
+  const cacheDir = revisionPin?.cacheRoot ?? spec.cacheDir;
+
+  // `env` が読めて、差し替える値があるときだけ差し替える。`restore` に戻す処理そのものを持たせる
+  // （`env` を一度 const（`swappableEnv`）へ写すことで、以降のクロージャの中でも「読めた」という型の
+  // 絞り込みを保つ——`let env` のままだと、`finally` の中で毎回 non-null 断定が要る）。
+  const restores: (() => void)[] = [];
+  if (env !== undefined) {
     const swappableEnv = env;
-    const previousCacheDir = swappableEnv.cacheDir;
-    swappableEnv.cacheDir = spec.cacheDir;
-    restoreCacheDir = () => {
-      swappableEnv.cacheDir = previousCacheDir;
-    };
+    if (cacheDir !== undefined) {
+      const previousCacheDir = swappableEnv.cacheDir;
+      swappableEnv.cacheDir = cacheDir;
+      restores.push(() => {
+        swappableEnv.cacheDir = previousCacheDir;
+      });
+    }
+    if (revisionPin !== undefined) {
+      const previousTemplate = swappableEnv.remotePathTemplate;
+      swappableEnv.remotePathTemplate = revisionPin.remotePathTemplate;
+      restores.push(() => {
+        swappableEnv.remotePathTemplate = previousTemplate;
+      });
+    }
   }
   try {
     const extractor = await pipeline("feature-extraction", spec.repo, {
       dtype: spec.dtype,
-      ...(spec.cacheDir !== undefined ? { cache_dir: spec.cacheDir } : {}),
+      ...(cacheDir !== undefined ? { cache_dir: cacheDir } : {}),
       // Issue #597: 指定されたときだけ渡す。未指定なら鍵ごと渡さず、いまと同じ呼び出しにする。
-      ...(spec.revision !== undefined ? { revision: spec.revision } : {}),
+      // Issue #1403: template に埋め込んだときは渡さない（渡すと、鍵が `<repo>/<revision>/<file>` に戻る）。
+      ...(spec.revision !== undefined && revisionPin === undefined
+        ? { revision: spec.revision }
+        : {}),
       // 32コア機での実測: 既定（コア数まかせ）819 文/秒 に対し、4スレッドで 985 文/秒。
       // スレッドを増やすほど速くなるわけではない——オーバーサブスクリプションのほうが高くつく。
       session_options: { intraOpNumThreads: spec.numThreads, interOpNumThreads: 1 },
@@ -377,6 +412,37 @@ async function loadWithCacheDirSwap(
     return buildLocalEmbeddingPipeline(extractor as unknown as LocalEmbeddingExtractor);
   } finally {
     // ⭐ 成功でも失敗でも、必ず元の値へ戻す（`try` の中で return していても finally は走る）。
-    restoreCacheDir?.();
+    for (const restore of restores.reverse()) restore();
   }
+}
+
+/** `loadWithCacheDirSwap` が読み書きする、transformers.js の `env` の項目（どちらも公開の設定）。 */
+interface SwappableTransformersEnv {
+  cacheDir?: unknown;
+  remotePathTemplate?: unknown;
+}
+
+/**
+ * `revision` を `env.remotePathTemplate` に埋め込むときの値（Issue #1403・ADR 0365）。埋め込めないなら
+ * `undefined`——そのときは今までどおり `revision` を `pipeline()` へ渡す。
+ *
+ * 埋め込めないのは、`spec.revision` が無い・`env` を読めない・`env.remotePathTemplate` が文字列でない・
+ * 基の根（`spec.cacheDir`、無ければ既定の `env.cacheDir`）が無い、のどれかのとき。
+ */
+function planRevisionPin(
+  spec: LocalEmbeddingModelSpec,
+  env: SwappableTransformersEnv | undefined,
+): { readonly cacheRoot: string; readonly remotePathTemplate: string } | undefined {
+  if (spec.revision === undefined || env === undefined) return undefined;
+  const template = env.remotePathTemplate;
+  if (typeof template !== "string") return undefined;
+  const defaultCacheDir =
+    typeof env.cacheDir === "string" && env.cacheDir !== "" ? env.cacheDir : undefined;
+  const baseCacheDir = spec.cacheDir ?? defaultCacheDir;
+  if (baseCacheDir === undefined) return undefined;
+  return {
+    cacheRoot: revisionCacheRoot(baseCacheDir, spec.revision),
+    // transformers.js 自身も `{revision}` を `encodeURIComponent` して埋める（utils/hub.js）。同じ形にする。
+    remotePathTemplate: template.replaceAll("{revision}", encodeURIComponent(spec.revision)),
+  };
 }

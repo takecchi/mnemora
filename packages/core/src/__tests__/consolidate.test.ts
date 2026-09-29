@@ -1414,6 +1414,85 @@ describe("buildConsolidatedMemory（純関数）", () => {
       expect(memory.attributes).toEqual({});
     });
   });
+
+  // Issue #1188 残り（ADR 0368）: `validFrom`/`validUntil` は eligible の区間の積。
+  describe("validFrom/validUntil は eligible 全件の区間の積（ADR 0368）", () => {
+    it("両端とも eligible ごとに違う: validFrom は最大値、validUntil は最小値", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [
+          fixtureMemory({
+            id: "m1",
+            validFrom: new Date("2026-01-01T00:00:00.000Z"),
+            validUntil: new Date("2026-06-01T00:00:00.000Z"),
+          }),
+          fixtureMemory({
+            id: "m2",
+            validFrom: new Date("2026-02-01T00:00:00.000Z"),
+            validUntil: new Date("2026-08-01T00:00:00.000Z"),
+          }),
+        ],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.validFrom).toEqual(new Date("2026-02-01T00:00:00.000Z"));
+      expect(memory.validUntil).toEqual(new Date("2026-06-01T00:00:00.000Z"));
+    });
+
+    it("片端だけ持つ eligible どうし: 無い側は制限にならない", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [
+          fixtureMemory({ id: "m1", validFrom: new Date("2026-01-01T00:00:00.000Z") }),
+          fixtureMemory({ id: "m2", validUntil: new Date("2026-08-01T00:00:00.000Z") }),
+        ],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.validFrom).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+      expect(memory.validUntil).toEqual(new Date("2026-08-01T00:00:00.000Z"));
+    });
+
+    it("やりすぎの歯: 全 eligible が両方 null なら、今どおり両方 null", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [fixtureMemory({ id: "m1" }), fixtureMemory({ id: "m2" })],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.validFrom ?? null).toBeNull();
+      expect(memory.validUntil ?? null).toBeNull();
+    });
+
+    it("材料1件でも、その eligible 自身の区間をそのまま持つ", () => {
+      const memory = buildConsolidatedMemory({
+        ctx,
+        eligible: [
+          fixtureMemory({
+            id: "m1",
+            validFrom: new Date("2026-01-01T00:00:00.000Z"),
+            validUntil: new Date("2026-06-01T00:00:00.000Z"),
+          }),
+        ],
+        llmResult: { content: "統合後" },
+        hashContent: (c) => `hash(${c})`,
+        digestFallbackLength: 200,
+        halfLifeHours: 24,
+        now: NOW,
+      });
+      expect(memory.validFrom).toEqual(new Date("2026-01-01T00:00:00.000Z"));
+      expect(memory.validUntil).toEqual(new Date("2026-06-01T00:00:00.000Z"));
+    });
+  });
 });
 
 describe("runtime.consolidate — 口が在る adapter（ADR 0100）", () => {

@@ -635,3 +635,13 @@ ADR 0145・0164）の外にある `active` な記憶も材料にして、内省�
   （`status` → 有効期間 → `basis_is_reflected`）・やりすぎの形を含む）、
   `packages/postgres/src/__tests__/reflect-target-selection.postgres.test.ts`（Postgres と testkit
   の fixture。`{ memoryIds }`・`{ seedMemoryId }`・`{ query }` の各形）。
+
+## 2026-09-29 追記2（クローン miku の委譲先）: 上の「採らなかった案」（区間の積）を、[ADR 0368](./0368-consolidate-reflect-validity-intersection.md) で採る
+
+すぐ上の「採らなかった案」は、`consolidate` の却下案（ADR 0089 の 2026-09-29 追記）と同じ理由で、
+内省の記憶に材料の区間の積を付ける案を退けていた。**Issue #1188 の残り（`consolidate`・`reflect`
+どちらも積む）として、`consolidate` 側と揃えてこの判断を覆した。** 反芻した本文も材料すべての
+示唆を含むので、どれか1つの期限が切れた時点で本文の一部が偽になる——`reflect` は材料を
+`superseded` にしないので、ADR 0368 が `consolidate` 側に記録した「代償」（期限の無い記憶が
+他の記憶の期限と一緒に superseded で recall から消える）はこちら側には無い。理由・採らなかった
+案・引き受けた負債の詳細は ADR 0368 を見ること。

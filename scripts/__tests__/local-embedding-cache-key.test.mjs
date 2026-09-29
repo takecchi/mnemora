@@ -112,9 +112,9 @@ describe("print-local-embedding-cache-key.mjs: 鍵の接尾辞の組み立て（
     );
   });
 
-  it("⚠ 中身の形の版は、revision を渡した後の形（<repo>/<revision>/<file>）で保存し直した版である（Issue #1004）", () => {
-    // 版を戻すと、revision を渡す前に保存された <repo>/<file> の形のキャッシュが、また当たる。
-    expect(CACHE_LAYOUT_TAG).toBe("revision-layout-1");
+  it("⚠ 中身の形の版は、revision ごとの根（<根>/<revision>/<repo>/<file>）で保存し直した版である（Issue #1004・#1403）", () => {
+    // 版を戻すと、古い形（<repo>/<file>、または <repo>/<revision>/<file>）で保存されたキャッシュが、また当たる。
+    expect(CACHE_LAYOUT_TAG).toBe("revision-root-2");
   });
 
   it("🔴 接頭辞を持たない（ci.yml 側のリテラルと二重にならない）", () => {

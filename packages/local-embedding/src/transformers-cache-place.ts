@@ -21,3 +21,21 @@ export function recordTransformersCacheDir(cacheDir: unknown): void {
 export function lastTransformersCacheDir(): string | undefined {
   return lastCacheDir;
 }
+
+/**
+ * `revision` を渡したときのキャッシュの根——`<基の根>/<encodeURIComponent(revision)>`（Issue #1403・ADR 0365）。
+ *
+ * 基の根は、`cacheDir` を渡していればそれ、渡していなければ transformers.js の既定のキャッシュ
+ * （`env.cacheDir`）である。`cacheDir` の有無で振る舞いを分けない。
+ *
+ * 🔴 **なぜ根を revision ごとに分けるか。**既定の `createPipeline` は、`revision` を `pipeline()` に渡す
+ * 代わりに `env.remotePathTemplate` へ埋め込む（`pipeline.ts`）。そのため transformers.js はキャッシュを
+ * `main` と同じ `<repo>/<file>` の鍵で引く。根を分けないと、`revision` 無しで温めた中身が、固定した
+ * revision の中身として黙って読まれる。
+ *
+ * ⚠ この根の形は mnemora が決めたものであり、transformers.js の内部の鍵の形ではない。
+ * `encodeURIComponent` にするのは、枝名の `/` などでディレクトリが掘られないようにするため。
+ */
+export function revisionCacheRoot(baseCacheDir: string, revision: string): string {
+  return `${baseCacheDir.replace(/[\\/]+$/, "")}/${encodeURIComponent(revision)}`;
+}

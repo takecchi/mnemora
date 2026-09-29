@@ -2218,7 +2218,7 @@ export declare class PostgresTenantSettingsStore implements TenantSettingsStore 
 import type { SQL } from "drizzle-orm";
 import type { Ctx, LexicalFilter, LexicalHit, LexicalStore } from "@mnemora/core";
 import type { Db } from "./client.js";
-export type TrigramLexicalUnavailableReason = "server_encoding_not_utf8" | "extension_unavailable" | "extension_create_denied" | "extension_create_failed" | "locale_no_japanese_trigrams";
+export type TrigramLexicalUnavailableReason = "server_encoding_not_utf8" | "extension_unavailable" | "extension_create_denied" | "extension_create_failed" | "locale_no_japanese_trigrams" | "extension_not_visible";
 export interface TrigramLexicalProbeOk {
     readonly ok: true;
 }
