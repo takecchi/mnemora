@@ -394,5 +394,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0369](./0369-opt-in-extract-event-data-and-document-title.md) | `event.data`・`document.title` を抽出（LLM）へ渡す口を、opt-in の任意欄として足す | 採用 (2026-09) |
 | [0371](./0371-db-tests-per-worker-database.md) | `packages/postgres` の DB テストをファイル並列にする——worker ごとに専用 DB を TEMPLATE で複製する | 採用 (2026-09) |
 | [0372](./0372-conformance-suite-issue-1238-promises.md) | Issue #1238 の棚卸しのうち7件を conformance suite の `it` として足す | 採用 (2026-09) |
+| [0373](./0373-conformance-suite-issue-1412-promises.md) | Issue #1412（Issue #1238 棚卸しの続き）のうち A8・A10・A11・コメント1・2 を conformance suite の `it` として足す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

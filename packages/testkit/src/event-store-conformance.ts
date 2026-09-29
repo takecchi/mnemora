@@ -399,5 +399,56 @@ export function describeEventStoreConformance(options: EventStoreConformanceOpti
       expect(fetched?.actor).toEqual(actor);
       expect(fetched?.meta).toEqual(meta);
     });
+
+    // -------------------------------------------------------------------
+    // Issue #1412 A8（Issue #1238 棚卸し、ADR 0373）: 渡した入力・返した値が、
+    // store の中の実体と切り離されている。
+    // -------------------------------------------------------------------
+
+    it("append の入力 meta（配列を含む）を呼び手が後から書き換えても、保存した値は変わらない（Issue #1412 A8）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      const sources = [randomUUID(), randomUUID()];
+      const meta = { reason: "consolidated", sources };
+
+      const expectedMeta = { reason: "consolidated", sources: [...sources] };
+
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({ tenantId: "tenant-1", memoryId, meta }),
+      );
+      // ⚠ `sources` はここで書き換える（`meta.sources` と同じ参照）。上で `expectedMeta` を
+      // 先に独立した複製として作っておかないと、期待値そのものがこの書き換えを拾ってしまう。
+      meta.reason = "mutated-by-caller";
+      meta.sources.push(randomUUID());
+
+      const fetched = await store.get(ctx, appended.id);
+      expect(fetched?.meta).toEqual(expectedMeta);
+      expect(appended.meta).toEqual(expectedMeta);
+    });
+
+    it("get が返した meta を呼び手が書き換えても、次の get は影響を受けない（Issue #1412 A8）", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const memoryId = await prepareMemoryId(ctx);
+      const sources = [randomUUID(), randomUUID()];
+
+      const appended = await store.append(
+        ctx,
+        buildNewMemoryEventFixture({
+          tenantId: "tenant-1",
+          memoryId,
+          meta: { reason: "consolidated", sources },
+        }),
+      );
+
+      const first = await store.get(ctx, appended.id);
+      (first!.meta as { reason: string }).reason = "mutated-by-caller";
+      (first!.meta.sources as string[]).push(randomUUID());
+
+      const second = await store.get(ctx, appended.id);
+      expect(second?.meta).toEqual({ reason: "consolidated", sources });
+    });
   });
 }

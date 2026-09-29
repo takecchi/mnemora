@@ -118,6 +118,9 @@ describeMemoryStoreConformance({
   // Issue #691続き / ADR 0329: InMemoryMemoryStore は listActiveClaimPredicates を
   // 実装している。
   supportsListActiveClaimPredicates: true,
+  // Issue #1412 コメント1 / ADR 0373: InMemoryMemoryStore は resolveOrphanedContested を
+  // 実装している。
+  supportsResolveOrphanedContested: true,
 });
 
 // `InMemoryVectorStore` は `status`/`subjectId`/`decayFloorAt`（Memory の属性であり

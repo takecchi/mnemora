@@ -278,6 +278,38 @@ export function describeOutboxStoreConformance(options: OutboxStoreConformanceOp
       },
     );
 
+    // -------------------------------------------------------------------
+    // Issue #1412 A8（Issue #1238 棚卸し、ADR 0373）: 渡した入力・返した値が、
+    // store の中の実体と切り離されている。`peekJob` を持つ adapter だけを対象にする
+    // ——`claimBatch` で claim した後の行を、claim 以外の経路で読み直す必要があるため
+    // （`peekJob` の doc コメントと同じ理由）。
+    // -------------------------------------------------------------------
+
+    (peekJob ? it : it.skip)(
+      "claimBatch が返した payload を呼び手が書き換えても、store 側の行は変わらない（Issue #1412 A8）",
+      async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const job = await seedJob(ctx, {
+          kind: "extract",
+          payload: { observationId: "obs-1", tags: ["original-tag"] },
+        });
+
+        const claimed = await store.claimBatch(ctx, {
+          limit: 10,
+          now: new Date(),
+          claimedBy: "worker-1",
+          leaseMs: DEFAULT_LEASE_MS,
+        });
+        const claimedJob = claimed.find((j) => j.id === job.id)!;
+        (claimedJob.payload as Record<string, unknown>).observationId = "mutated-by-caller";
+        (claimedJob.payload.tags as string[]).push("mutated-by-caller");
+
+        const after = await peekJob!(ctx, job.id);
+        expect(after?.payload).toEqual({ observationId: "obs-1", tags: ["original-tag"] });
+      },
+    );
+
     it("complete は存在しないジョブ id に対して例外を投げない（べき等な終端更新、expectedAttempts の値に関わらず）", async () => {
       const store = await createStore();
       const ctx: Ctx = { tenantId: "tenant-1" };
