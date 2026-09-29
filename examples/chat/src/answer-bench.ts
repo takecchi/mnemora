@@ -33,12 +33,7 @@ import { checkContentPreserved } from "./answer-content-preservation.js";
 import type { AnswerJudgement } from "./answer-judge.js";
 import { judgeAnswer, reconcileVerdicts } from "./answer-judge.js";
 import type { IngestConversationOptions } from "./mnemora-path.js";
-import {
-  buildMnemoraPrompt,
-  ingestConversation,
-  promptHasContestedCorrectionMarker,
-  queryRecall,
-} from "./mnemora-path.js";
+import { buildMnemoraPromptDetail, ingestConversation, queryRecall } from "./mnemora-path.js";
 import { naivePrompt } from "./naive-path.js";
 import type {
   CreateProvidersOptions,
@@ -72,9 +67,10 @@ export const ANSWER_SYSTEM_PROMPT =
   "以下の会話ログだけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。";
 
 /**
- * 案3（Issue #1430、切替可能）: `contestedCorrectionGuidance` を有効にした呼び出しで、
- * mnemora 経路のプロンプトに実際に非対称の「訂正の可能性」印
- * （`promptHasContestedCorrectionMarker`、`mnemora-path.ts`）が出たときだけ、
+ * 案3（Issue #1430、既定オン・切替可能。ADR 0379 決定「C2 採用」）:
+ * `contestedCorrectionGuidance` を有効にした呼び出しで、mnemora 経路のプロンプトに
+ * 実際に非対称の「訂正の可能性」文面（`buildMnemoraPromptDetail` が構造として返す
+ * `hasContestedCorrectionWording`、`mnemora-path.ts`）が出たときだけ、
  * `ANSWER_SYSTEM_PROMPT` の直後にそのまま連結する一文。
  *
  * **区切りに空白を入れない**——`ANSWER_SYSTEM_PROMPT` 自身が句点「。」で終わる2文
@@ -381,14 +377,19 @@ export function buildNaiveAnswerPromptSpec(answerCase: AnswerCase): PromptSpec {
 }
 
 /**
- * mnemora 経路の system 文を決める（Issue #1430、案3・切替可能）。
+ * mnemora 経路の system 文を決める（Issue #1430、案3・切替可能・既定オン）。
  *
- * `contestedCorrectionGuidance` が `true` で、かつ `mnemoraPromptBody`
- * （`buildMnemoraPrompt` の出力）に実際に非対称の「訂正の可能性」印
- * （`promptHasContestedCorrectionMarker`）が出たときだけ、`ANSWER_SYSTEM_PROMPT` に
+ * `contestedCorrectionGuidance` が `true` で、かつ `hasContestedCorrectionWording`
+ * （`buildMnemoraPromptDetail(recall).hasContestedCorrectionWording`——描画の途中で
+ * 非対称文面（案1）を実際に選んだかどうかという**構造の結果**。`mnemora-path.ts` の
+ * `MnemoraPromptDetail` docstring参照）が `true` のときだけ、`ANSWER_SYSTEM_PROMPT` に
  * `CONTESTED_CORRECTION_GUIDANCE` を（空白を挟まず）連結する。それ以外は
- * `ANSWER_SYSTEM_PROMPT` のまま——**opt-in のフラグそのものではなく、「実際に印が
- * 出たか」で決める**（マネージャー指示）。
+ * `ANSWER_SYSTEM_PROMPT` のまま——**opt-in のフラグそのものだけでは足さない。実際に
+ * 非対称文面が出たかどうかで決める**。この判定は `buildMnemoraPromptDetail` が描画の
+ * 分岐そのものから返す値であり、できあがったプロンプト文字列を後から部分文字列で
+ * 走査し直すものではない——`digest` の本文にたまたま「（訂正の可能性）」という
+ * 文字列が含まれていても、`hasContestedCorrectionWording` はその影響を受けない
+ * （`issue-1430-contested-correction.test.ts` の「digest に紛れ込んでも」歯を参照）。
  *
  * ⚠ **naive 経路には適用しない**（呼び出し側が意図的に、mnemora 側だけに渡す）——
  * naive のプロンプトは recall に依らず `[矛盾候補:]` の印を一度も含まないため、
@@ -396,12 +397,17 @@ export function buildNaiveAnswerPromptSpec(answerCase: AnswerCase): PromptSpec {
  * のまま変わらない（§2.2 決定2「両経路で完全に同一」からの、この案3だけの意図的な
  * 逸脱——mnemora 側だけに矛盾候補の印が出うるので、system の読み方の指示も
  * mnemora 側だけに足す）。
+ *
+ * **既定は `contestedCorrectionGuidance: true`**（Issue #1430、ADR 0379 決定「C2 採用」）
+ * ——`hasContestedCorrectionWording` が `false` の回（印そのものが無い・
+ * `companionOf` だけが由来・記録順が片方でも分からない contested）は、フラグが
+ * `true` のままでも system は今までどおり `ANSWER_SYSTEM_PROMPT` のまま変わらない。
  */
 export function resolveMnemoraAnswerSystemPrompt(
-  mnemoraPromptBody: string,
+  hasContestedCorrectionWording: boolean,
   contestedCorrectionGuidance: boolean,
 ): string {
-  if (contestedCorrectionGuidance && promptHasContestedCorrectionMarker(mnemoraPromptBody)) {
+  if (contestedCorrectionGuidance && hasContestedCorrectionWording) {
     return `${ANSWER_SYSTEM_PROMPT}${CONTESTED_CORRECTION_GUIDANCE}`;
   }
   return ANSWER_SYSTEM_PROMPT;
@@ -550,12 +556,14 @@ export async function runAnswerCase(
   // 1バイトも挙動が変わらない。明示するのは
   // `examples/chat/src/bench/association-default-on-measure.ts` だけである。
   association?: RecallAssociationQuery | null,
-  // 案3（Issue #1430、切替可能。既定 false で挙動は変わらない）。true のときだけ、
+  // 案3（Issue #1430、既定オン・切替可能。ADR 0379 決定「C2 採用」）。true のときだけ、
   // mnemora 経路の system 文に `CONTESTED_CORRECTION_GUIDANCE` を足す——**足すかどうかは
-  // opt-in のフラグそのものではなく、組み立てた本文に実際に非対称の「訂正の可能性」印が
-  // 出たかどうかで決める**（`promptHasContestedCorrectionMarker`）。印が出なければ
-  // `contestedCorrectionGuidance: true` でも system は `ANSWER_SYSTEM_PROMPT` のまま。
-  contestedCorrectionGuidance = false,
+  // opt-in のフラグそのものではなく、`buildMnemoraPromptDetail` が構造として返す
+  // `hasContestedCorrectionWording`（実際に非対称文面を出したか）で決める**。
+  // `hasContestedCorrectionWording` が false の回（印が無い・`companionOf` だけが由来・
+  // 記録順が片方でも分からない contested）は、`contestedCorrectionGuidance: true`
+  // （既定）のままでも system は `ANSWER_SYSTEM_PROMPT` のまま変わらない。
+  contestedCorrectionGuidance = true,
 ): Promise<AnswerCaseRunResult> {
   const embeddingSpace = embeddingSpaceSlug(embeddingProvider.space);
   const ctx: Ctx = { tenantId: `${tenantPrefix}-${embeddingSpace}-${answerCase.id}` };
@@ -581,10 +589,13 @@ export async function runAnswerCase(
   const afterRecallEmb = embeddingProvider.snapshot();
 
   const naivePromptSpec: PromptSpec = buildNaiveAnswerPromptSpec(answerCase);
-  const mnemoraPromptBody = buildMnemoraPrompt(recall);
+  const mnemoraPromptDetail = buildMnemoraPromptDetail(recall);
   const mnemoraPromptSpec: PromptSpec = {
-    system: resolveMnemoraAnswerSystemPrompt(mnemoraPromptBody, contestedCorrectionGuidance),
-    messages: [buildPromptMessage(`${mnemoraPromptBody}${questionSuffix}`)],
+    system: resolveMnemoraAnswerSystemPrompt(
+      mnemoraPromptDetail.hasContestedCorrectionWording,
+      contestedCorrectionGuidance,
+    ),
+    messages: [buildPromptMessage(`${mnemoraPromptDetail.body}${questionSuffix}`)],
   };
 
   const beforeAnswerLLM = llmProvider.snapshot();
@@ -672,8 +683,8 @@ export async function runAnswerBench(
   ingestOptions: IngestConversationOptions = {},
   // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない（ADR 0337 追記2026-09-26）。
   association?: RecallAssociationQuery | null,
-  // `runAnswerCase` と同じ規律——省略すれば挙動は変わらない（Issue #1430）。
-  contestedCorrectionGuidance = false,
+  // `runAnswerCase` と同じ規律——既定 `true`（Issue #1430、ADR 0379 決定「C2 採用」）。
+  contestedCorrectionGuidance = true,
 ): Promise<AnswerCaseRunResult[]> {
   const results: AnswerCaseRunResult[] = [];
   for (const answerCase of cases) {

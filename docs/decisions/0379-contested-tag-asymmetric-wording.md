@@ -1,20 +1,18 @@
-# ADR 0379: 矛盾候補欄の文面を非対称にする（案1）。system 文への一文追記（案3）は切替可能な形で実装し、既定で使うかどうかはオーナー判断待ちとする（Issue #1430）
+# ADR 0379: 矛盾候補欄の文面を記録順で非対称にし（案1）、実際に非対称文面が出た回だけ system 文に読み方の一文を足す（案3）。C2（案1＋案3、既定オン）を採用する（Issue #1430）
 
-- **状態**: 案1（矛盾候補欄の非対称文面）は採用。案3（system への一文追記、切替可能）は実装済みだが、
-  `examples/chat` の既定経路（CLI の `answer`・記録スクリプト等）でオン(既定 `true`)にするかどうかは
-  **オーナー判断待ち** (2026-09-30)
-- **日付**: 2026-09-30
+- **状態**: 採用: C2（案1＋案3、既定オン） (2026-09-30（JST）)
+- **日付**: 2026-09-30（JST）
 
 > **⚠ 本文はクローンの委譲で動く担い手が書いた。オーナー本人の執筆ではない。**
 > 投稿者名はオーナー本人を意味しない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
-> 案の選択（案1を実装し既定の描画にする、案2は採らない、案3は切替可能な形で実装するが既定は
-> off のまま）はこの担い手が Issue #1430 の記述に沿って決めた。**C1/C2 のどちらを
-> `examples/chat` の既定にするか（あるいはどちらも既定にしないか）はこの ADR では決めない
-> ——オーナー側の判断を仰ぐ。**
+> 案の選択（案1を実装し既定の描画にする、案2は採らない、案3は既定オンで実装する、
+> C1 ではなく C2 を採用する）は、実装を委譲された担い手が Issue #1430 の記述と
+> この ADR の初稿を確認したオーナー側の指示に沿って決めた。
 
 ⚠ **番号について**: [ADR 0179](./0179-adr-number-assigned-at-merge.md) のとおり、最終番号は
 マージ直前に確定する。この時点で `0378` は別の並行 PR（Issue #933、PR #1431）が予約済みだった
-ため `0379` を使う。
+ため `0379` を使う。索引（`docs/decisions/README.md`）もマージする側がマージ直前に生成する
+（[ADR 0137](./0137-adr-index-generated-from-source.md)）——この PR では触れていない。
 
 ### 出所の凡例
 
@@ -23,7 +21,13 @@
 - **【受】** — Issue 本文・過去 ADR として受け取り、再導出していない（出所を明記する）。
 
 断りの無い【現物】【実測】は、本作業の分岐元 `origin/main` = `ecc1782`（PR #1429 のマージ）の
-木で、2026-09-30 に行った。
+木で行った。
+
+**⚠ 日付は JST（`Asia/Tokyo`）である。** 実 API の測定（下記「測定」節）は、記録した
+カセットの `recordedAt`（UTC、【実測】）で見ると `2026-09-29T16:07〜17:32Z` に収まる——
+これは JST では `2026-09-30 01:07〜02:32` であり、比較の基準にした PR #1429・
+ADR 0377 の追記（いずれも JST 基準で「2026-09-30」と書いている）と同じ日である。
+⟹ この ADR も日付を変えず「2026-09-30（JST）」と明記する。
 
 ---
 
@@ -34,17 +38,18 @@
 渡すプロンプトの文言をどう組み立てるかという話である。`packages/*` のライブラリ API・型・
 戻り値は1バイトも変えていない。** `@mnemora/core` の `recall()` が返す `RecalledMemory` の
 形（`contestedWith?: MemoryId`、`recordedAt?: Date` 等）はそのまま——変わるのは、
-`examples/chat/src/mnemora-path.ts` の `buildMnemoraPrompt`（回答プロンプトを組み立てる
-純関数、`examples/chat` 側の実装）が、その `RecalledMemory` の集合から**どの文字列を
-作るか**だけである。ライブラリを使う他の呼び出し側（`examples/chat` 以外の統合）は、
-この ADR の影響を一切受けない。
+`examples/chat/src/mnemora-path.ts` の `buildMnemoraPrompt`/`buildMnemoraPromptDetail`
+（回答プロンプトを組み立てる純関数、`examples/chat` 側の実装）が、その `RecalledMemory` の
+集合から**どの文字列を作るか**、そして `examples/chat/src/answer-bench.ts` が**どの
+system 文を選ぶか**だけである。ライブラリを使う他の呼び出し側（`examples/chat` 以外の
+統合）は、この ADR の影響を一切受けない。
 
 ## 1. 文脈
 
 ### Issue #1430 が報告した観測
 
 [Issue #1430](https://github.com/takecchi/mnemora/issues/1430) は、PR #1429 の実測
-（同日 2026-09-30、main `b84586b` 上）を報告している。要点:
+（2026-09-30（JST）、main `b84586b` 上）を報告している。要点:
 
 - opt-in の `claimKey.detectContested`（[ADR 0324](./0324-claim-key-opt-in-detection.md)）で
   本物の訂正が `contested` になると、`buildMnemoraPrompt` は両側の記憶に対称な
@@ -85,8 +90,8 @@ Issue は3つの案を並べていた（選ぶのは担当とオーナー、と�
 （ask_human 327fd89b、2026-09-25T21:11Z）として「矛盾候補の印を付ける」ことを既に決めている
 ——contested な対には印を付けるべきだ、という結論そのものは #1430 でも覆っていない。
 Issue #1430 が問題にしたのは「印の**付け方**（対称・無条件の同じ文面）」であって、
-「印を付けるかどうか」ではない。**この ADR は印を付けること自体は維持し、文面だけを
-直す。**
+「印を付けるかどうか」ではない。**この ADR は印を付けること自体は維持し、文面と
+system の読み方の指示を直す。**
 
 ## 2. 決定
 
@@ -110,17 +115,15 @@ Issue #1430 が問題にしたのは「印の**付け方**（対称・無条件�
 今までの形のまま保つ。
 
 **同じ相手が `companionOf` と `contestedWith` の両方で来た場合は `contested` 扱い**
-（非対称文面を出す）——マネージャー指示どおり、`contestedWith` が一度でも成立していれば
-新文面を優先する。
+（非対称文面を出す）——`contestedWith` が一度でも成立していれば新文面を優先する。
 
-この変更は**opt-in のフラグを新設せずに、`buildMnemoraPrompt` 自体の描画規則を直接
-書き換えた**——`contestedWith` を実際に使う呼び出し側（`claimKey.detectContested: true` を
-渡す呼び出し）は、この PR がマージされた時点で自動的に新しい文面を受け取る。これは
-「対称な文面が本物の訂正の回答を損ねる」という Issue #1430 の実測に対する**直接の
-修正**であり、切り替えて確かめる性質の変更ではないと判断した（下記「測定」の C1/A' 対比が
-根拠）。
+この変更は**opt-in のフラグを新設せずに、矛盾候補欄の描画規則を直接書き換えた**——
+`contestedWith` を実際に使う呼び出し側（`claimKey.detectContested: true` を渡す呼び出し）
+は、この PR がマージされた時点で自動的に新しい文面を受け取る。これは「対称な文面が本物の
+訂正の回答を損ねる」という Issue #1430 の実測に対する**直接の修正**であり、切り替えて
+確かめる性質の変更ではないと判断した（下記「測定」の C1/A' 対比が根拠）。
 
-### 決定2（案3・実装するが既定 off、切替可能）: system 文への一文追記は「実際に印が出たか」で on/off を決める
+### 決定2（案3・採用、既定オン）: system 文への一文追記は、実際に非対称文面が出た回だけ行う。判定は構造で見る
 
 `examples/chat/src/answer-bench.ts` に次を足した:
 
@@ -129,28 +132,38 @@ export const CONTESTED_CORRECTION_GUIDANCE =
   "矛盾候補の印がある記憶どうしは、記録順の新しい方を現在の値として答えてください。";
 
 export function resolveMnemoraAnswerSystemPrompt(
-  mnemoraPromptBody: string,
+  hasContestedCorrectionWording: boolean,
   contestedCorrectionGuidance: boolean,
 ): string {
-  if (contestedCorrectionGuidance && promptHasContestedCorrectionMarker(mnemoraPromptBody)) {
+  if (contestedCorrectionGuidance && hasContestedCorrectionWording) {
     return `${ANSWER_SYSTEM_PROMPT}${CONTESTED_CORRECTION_GUIDANCE}`;
   }
   return ANSWER_SYSTEM_PROMPT;
 }
 ```
 
-`runAnswerCase`/`runAnswerBench` に `contestedCorrectionGuidance`（既定 `false`）を足した
-——**既存の呼び出し（`cli.ts` の `recordAnswer`/`runAnswer`、`record-answer-*.ts` 等）は
-1つも変更していないので、実質的に何も変わらない。** 明示的に `true` を渡すのは、本 ADR の
-測定用に新設したスクリプト（`examples/chat/src/scripts/measure-1430-contested-tag-direction.ts`）
-の C2 条件だけである。
+`runAnswerCase`/`runAnswerBench` の `contestedCorrectionGuidance` の**既定を `true` にした**
+（Issue #1430、本 ADR の決定「C2 を採用」）。既存の呼び出し（`cli.ts` の
+`recordAnswer`/`runAnswer`、`record-answer-*.ts` 等）は1つも呼び出しコード自体を
+変更していない——ただし既定が変わったことで、これらの呼び出しも今後は
+`contestedCorrectionGuidance: true` 相当で動く。**それでも、非対称文面が実際に出ない
+回（下記「既定の経路が変わらないことの歯」参照）は system が今までと1バイトも
+変わらない。**
 
-**「on/off はフラグそのものではなく、実際に案1の非対称文面が出たかどうかで決める」**
-——`promptHasContestedCorrectionMarker`（`mnemora-path.ts`、`buildMnemoraPrompt` の出力に
-「（訂正の可能性）」/「（訂正された可能性）」のどちらかの部分文字列が含まれるかを見るだけの
-純関数）が `false` を返す回（＝非対称文面が1つも出なかった回。記録順が分からない、
-印そのものが無い等）は、`contestedCorrectionGuidance: true` を渡していても system は
-`ANSWER_SYSTEM_PROMPT` のまま変わらない。
+**判定は「実際に印が出たか」を、文字列ではなく構造で見る。** 当初の実装（本 ADR の
+初稿、C1/C2 の実 API 測定時点）は `promptHasContestedCorrectionMarker`（できあがった
+プロンプト文字列を「（訂正の可能性）」等の部分文字列で走査する関数）を使っていたが、
+**この判定関数は削除した。** 代わりに、`buildMnemoraPrompt` と並ぶ
+`buildMnemoraPromptDetail(recall): { body: string; hasContestedCorrectionWording: boolean }`
+を新設した——`body` は `buildMnemoraPrompt` の出力と1バイトも変わらず（`buildMnemoraPrompt`
+自体は `buildMnemoraPromptDetail(recall).body` を返すだけの薄いラッパーになった。**公開
+シグネチャ・出力は変えていない**）、`hasContestedCorrectionWording` は矛盾候補欄の描画
+（`contradictionSegment`）が非対称文面の分岐を**実際に選んだかどうか**を、行ごと・欄ごとに
+集約した構造の値である。`digest` の本文にたまたま「（訂正の可能性）」という文字列が
+紛れ込んでいても、`hasContestedCorrectionWording` はその影響を受けない
+（`issue-1430-contested-correction.test.ts` の decoy 歯で固定、下記「既定の経路が
+変わらないことの歯」参照）。`resolveMnemoraAnswerSystemPrompt` はこの構造の値だけを見て
+system を決め、プロンプト文字列そのものを一切読まない。
 
 区切りは**空白を挟まず**、`ANSWER_SYSTEM_PROMPT` の末尾の句点「。」の直後にそのまま
 `CONTESTED_CORRECTION_GUIDANCE` を連結する——`ANSWER_SYSTEM_PROMPT` 自身が「…答えて
@@ -162,38 +175,56 @@ export function resolveMnemoraAnswerSystemPrompt(
 system は変わらない——両経路の system を完全に同一に保つ既存の規律（`answer-bench.ts`
 §2.2 決定2）からの、この案3だけの意図的な逸脱である。
 
-**この ADR は「C1（案1のみ）と C2（案1+案3）のどちらを `examples/chat` の既定経路
-（CLI の `answer` コマンド・記録スクリプト等）で使うか」を決めない。** 下の測定は
-C2 が C1 より一貫して良い結果を示したが、n=5・1日・gpt-4o-mini 限定の観測であり、
-一般化の根拠にするには小さい。**オーナー側の判断を仰ぐ。**
+### 決定「C1 ではなく C2 を採用する」
 
-### 決定3: 既定の経路は1バイトも変えない
+初稿（本 ADR の 2026-09-30（JST）時点の最初のバージョン）は、C1（案1のみ）と C2
+（案1＋案3）のどちらを既定にするかをオーナー判断待ちとしていた。**オーナー側の指示を
+受け、C2 を採用する。** 下の「測定」節のとおり、C2 は C1 よりも一貫して verdict が
+良かった（`schedule-change-meeting-day` 5/5・`schedule-change-deadline` 5/5、C1 は
+それぞれ 4/5・3/5）。
 
-- 印そのものが出ない recall（矛盾関係が無い）。
-- `companionOf` だけが由来の recall（`contestedWith` を経由しない）。
-- `contestedWith` 由来でも、記録順が片方でも分からない recall。
+**この決定の射程は狭い**——次の3点を明記する:
 
-これらは `contradictionSegment` の新しい非対称化条件（決定1）に一つも当てはまらないため、
-`buildMnemoraPrompt` の出力は**今までと1バイトも変わらない**。`resolveMnemoraAnswerSystemPrompt`
-も、呼び出し側が `contestedCorrectionGuidance` を渡さない限り（既定 `false`）
-`ANSWER_SYSTEM_PROMPT` のまま変わらない。下の「既定の経路が変わらないことの歯」節に、
-これを固定した決定的な単体試験を列挙する。
+1. **n=5・1日・gpt-4o-mini だけの観測であり、一般化していない。** 他の回答モデル・
+   より大きい n での再現は確かめていない。
+2. **`schedule-change-deadline` の改善が、矛盾候補欄の文面（案1）によるものか、
+   その日の claim key 抽出の揺れによるものかは切り分けていない。** 参考: 同じ
+   ケースは、PR #1429 が測った (B)（印なし）条件でも **fail 5/5** だった
+   （両条件とも同じ理由で誤ると当時判断されていた。[ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+   追記〔2026-09-30〕参照）——今回 C1/C2 で改善したことは、文面の効果を示唆する
+   一方、単独では原因を確定できない。
+3. **`other-period-city-this-year`（誤検出2件のうち、この日たまたま `contested` が
+   成立した方）は、案3を実際に試せた回が少ない。** 印が届いた回数（n=5中）は
+   A' 2/5・C1 0/5・C2 3/5——3条件とも「届いた回」と「届かなかった回」が混在しており、
+   案3の効果をこのケースについて十分な回数で確かめられていない。
 
 ## 3. 実装
 
 - `examples/chat/src/mnemora-path.ts`
   - `contradictionSegment` が `order`（`ReadonlyMap<string, number>`、`recordedOrderById`
     の戻り値）を受け取るようにし、`contestedWith` 由来かどうかを判定する
-    `isContestedCounterpart` を新設した。
-  - `promptHasContestedCorrectionMarker`（export）を新設した——案3の on/off 判定と、
-    単体試験の両方から使う。
+    `isContestedCounterpart` を新設した。`contradictionSegment` は文字列だけでなく
+    `hasAsymmetricWording`（構造のフラグ）も返すようになった。
+  - `renderRecalledMemoryLine` も同様に、行の文字列と `hasAsymmetricWording` を対で
+    返すようになった。
+  - `buildMnemoraPromptDetail(recall): { body: string; hasContestedCorrectionWording:
+    boolean }`（export）を新設。`buildMnemoraPrompt(recall): string` は
+    `buildMnemoraPromptDetail(recall).body` を返すだけの後方互換ラッパーになった——
+    **公開シグネチャ・出力は1バイトも変えていない。**
+  - `promptHasContestedCorrectionMarker`（部分文字列で見る旧判定関数）は**削除した**。
+    どこからも参照していない。
 - `examples/chat/src/answer-bench.ts`
-  - `CONTESTED_CORRECTION_GUIDANCE`・`resolveMnemoraAnswerSystemPrompt`（export）を新設。
-  - `runAnswerCase`/`runAnswerBench` に `contestedCorrectionGuidance`（既定 `false`）を
-    末尾の任意引数として足した。
-- `examples/chat/src/scripts/measure-1430-contested-tag-direction.ts`（新規）
+  - `CONTESTED_CORRECTION_GUIDANCE`・`resolveMnemoraAnswerSystemPrompt`（export、
+    `hasContestedCorrectionWording: boolean` を受け取るシグネチャに変更）。
+  - `runAnswerCase`/`runAnswerBench` の `contestedCorrectionGuidance` の既定を
+    `true` にした。呼び出し側は `buildMnemoraPromptDetail` を呼び、
+    `.hasContestedCorrectionWording` を `resolveMnemoraAnswerSystemPrompt` に渡す。
+- `examples/chat/src/scripts/measure-1430-contested-tag-direction.ts`
   - #835 候補4のスクリプト（`measure-835-candidate4-answer-quality.ts`、PR #1429）と同じ
-    対象6ケース・n=5・`ClaimKeyOptions` の骨組みを再利用し、C1/C2 の2条件を実 API で測る。
+    対象6ケース・n=5・`ClaimKeyOptions` の骨組みを再利用し、C1/C2 の2条件を実 API で
+    測定した（測定は完了しており、以降このスクリプトを再実行する予定は無い）。
+    `promptHasContestedCorrectionMarker` の削除に合わせて、診断ログの一部を
+    `systemExtended`（構造の判定結果をそのまま表す）だけに整理した。
 - `packages/*` は1バイトも変更していない。
 
 ## 4. 既定の経路が変わらないことの歯
@@ -207,35 +238,81 @@ C2 が C1 より一貫して良い結果を示したが、n=5・1日・gpt-4o-mi
   ときの両方を Fake の `RecalledMemory` で固定した。
 - `examples/chat/src/__tests__/provenance-prompt-contract.test.ts`: 上のケース集合を読んで
   `buildMnemoraPrompt` の実際の出力と1行ずつ厳密一致で比較する（既存の歯、無変更）。
-- `examples/chat/src/__tests__/issue-1430-contested-correction.test.ts`（新規）:
-  `promptHasContestedCorrectionMarker`・`resolveMnemoraAnswerSystemPrompt` の単体試験。
-  「フラグ true でも印が出なければ system は変わらない」「フラグ false なら印が出ていても
-  変わらない」を固定している。
+- `examples/chat/src/__tests__/issue-1430-contested-correction.test.ts`（構造の判定に
+  合わせて全面的に書き直した）:
+  - `buildMnemoraPromptDetail(recall).hasContestedCorrectionWording` が、印なし・
+    `companionOf` だけが由来・記録順が片方でも分からない contested のいずれでも
+    `false` のままであることを固定。
+  - **🔴 digest の本文にたまたま「（訂正の可能性）」／「（訂正された可能性）」という
+    文字列が紛れ込んでいても、矛盾関係が無い（または companionOf だけが由来の対称な
+    矛盾候補と共存している）場合は `hasContestedCorrectionWording` が `false` のまま**
+    ——`body`（プロンプト文字列）には確かにその文字列が含まれることを先に確認した上で、
+    判定が部分文字列の走査に戻っていないことを固定する。
+  - `buildMnemoraPrompt(recall)` が `buildMnemoraPromptDetail(recall).body` と1バイトも
+    変わらないことを固定。
+  - `resolveMnemoraAnswerSystemPrompt` が、`hasContestedCorrectionWording`/
+    `contestedCorrectionGuidance` の4通りの組み合わせすべてで期待どおりの system を
+    返すことを固定（既定 `true` のときに印が無ければ足さないケースを含む）。
+- `examples/chat/src/__tests__/issue-1430-cassette-replay.test.ts`: 本 ADR の初稿の
+  測定で録った C1/C2 カセットから、非対称文面を含む回答プロンプトをそれぞれ1件取り出し、
+  `parseMnemoraPromptBody`→`recordedRenderer` で再構成した上で `llmCassetteKey` で
+  元の記録と同じ鍵が引けることを確かめる（DB/API 不要）。**この歯はカセットの生の
+  バイト列だけを見るので、今回の構造化リファクタリングの影響を受けずそのまま緑のまま
+  保たれる**——【実測】どおり、無変更で緑だった。
 - 既存の `answer-bench.postgres.test.ts`・`cassette-coverage.test.ts`・
   `basis-lost-prompt-roundtrip.test.ts`・`answer-trials-material.test.ts`・
   `answer-trials-render.test.ts` は無変更のまま緑（下記「確かめたこと」参照）。
 
-### 赤の確認（別 worktree、`origin/main` = `ecc1782`）
+### 赤の確認（別 worktree、直前のコミット基準）
 
-`git worktree add` で作った別 worktree に、**新しいテストファイルだけ**（実装の変更は
-含めず）コピーして走らせた（`git checkout origin/main -- <path>` は使っていない）。
+初稿（本 ADR の最初のバージョンを含むコミット）に対して、**今回の変更点**
+（`hasContestedCorrectionWording` が構造の値であること・`contestedCorrectionGuidance`
+の既定が `true` であること）を狙った新しい歯だけを別 worktree にコピーして確かめた
+（`git checkout origin/main -- <path>` は使っていない）。この worktree は本ブランチの
+直前のコミット（C1/C2 実測を含む初回コミット、`promptHasContestedCorrectionMarker` が
+部分文字列判定で `contestedCorrectionGuidance` の既定が `false` だった時点）を基準にした
+——**今回の変更（構造化・既定オン化）だけを狙って赤を確認するため**、Issue #1430 全体が
+まだ無い `origin/main` ではなく、この基準を選んだ。
+
+【実測 2026-09-30（JST）】`pnpm --filter @mnemora/example-chat exec vitest run
+src/__tests__/issue-1430-contested-correction.test.ts` の結果:
 
 ```
-Test Files  2 failed (2)
-     Tests  12 failed | 25 passed (37)
+Test Files  1 failed (1)
+     Tests  11 failed | 2 passed (13)
 ```
 
-- `provenance-prompt-contract.test.ts`: 新設4件のうち非対称文面を期待する2件
-  （`contested-with-asymmetric-both-recorded`・`contested-with-asymmetric-combined-origin`）
-  が、`main` の対称な旧実装のままでは期待値と食い違って赤になった（`AssertionError:
-  expected […] to deeply equal […]`、`「訂正された可能性」`等を含まない旧文面が返る）。
-  残り2件（記録順が片方だけ・companion 由来）は `main` でも対称な旧文面のままなので緑
-  だった——これは意図どおり（既定の経路は `main` でも変わらない）。
-- `issue-1430-contested-correction.test.ts`: `promptHasContestedCorrectionMarker`・
-  `resolveMnemoraAnswerSystemPrompt` が `main` にまだ存在しないため `TypeError: … is not
-  a function` で10件が赤になった。
+赤くなった11件のうち、`buildMnemoraPromptDetail` を呼ぶ8件（`hasContestedCorrectionWording`
+の全ケース・後方互換ラッパーの歯）は
 
-## 5. 測定【実測 2026-09-30】
+```
+TypeError: buildMnemoraPromptDetail is not a function
+```
+
+で落ちた（この時点のコミットには `buildMnemoraPromptDetail` が無く、旧来の
+`buildMnemoraPrompt`/`promptHasContestedCorrectionMarker` しか無いため）。
+`resolveMnemoraAnswerSystemPrompt` を呼ぶ3件は
+
+```
+TypeError: promptBody.includes is not a function
+  ❯ promptHasContestedCorrectionMarker src/mnemora-path.ts:518:21
+  ❯ resolveMnemoraAnswerSystemPrompt src/answer-bench.ts:404:38
+```
+
+で落ちた（この時点のシグネチャが `resolveMnemoraAnswerSystemPrompt(mnemoraPromptBody:
+string, contestedCorrectionGuidance: boolean)` のままであり、新しい歯が渡す `boolean`
+第1引数を文字列として扱おうとして `promptHasContestedCorrectionMarker` 内部で例外に
+なったもの）。残り2件（`resolveMnemoraAnswerSystemPrompt(true, false)`・
+`resolveMnemoraAnswerSystemPrompt(false, false)`、どちらも第2引数＝
+`contestedCorrectionGuidance` 相当の位置に `false` を渡すケース）は**たまたま緑になった**
+——旧実装の `if (contestedCorrectionGuidance && promptHasContestedCorrectionMarker(...))`
+が、第2引数が `false` のとき短絡評価で `promptHasContestedCorrectionMarker` を一度も
+呼ばずに `ANSWER_SYSTEM_PROMPT` を返すため、期待値と偶然一致した。**この2件が緑なのは
+実装が正しいからではなく、短絡評価がこの2ケースだけ例外を踏まずに済んだからである**
+——赤の確認として意味があるのは残りの11件であり、この2件の「緑」を「この時点でも
+部分的に正しい」根拠として読まないこと。
+
+## 5. 測定【実測 2026-09-30（JST）】
 
 ⚠ **n=5・1日・gpt-4o-mini 限定の観測である。一般化はしない。** 対象は #835 候補4
 （PR #1429）と同じ6ケース（訂正4件 + 誤検出2件）。claim key は3条件とも同じ
@@ -244,27 +321,31 @@ Test Files  2 failed (2)
 - **A'**（旧文面・印あり、同日の対照）: 変更前の `main`（別 worktree、`ecc1782`）で、
   既存の `measure-835-candidate4-answer-quality.ts`（`MNEMORA_CANDIDATE4_CONDITION=with-tag`）
   をそのまま5回実行した。
-- **C1**（案1のみ、`contestedCorrectionGuidance` を渡さない＝既定 `false`）。
-- **C2**（案1＋案3、`contestedCorrectionGuidance: true`）。
+- **B**（印なし）: 新たには回していない。PR #1429（[ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
+  追記〔2026-09-30〕）の結果を再利用する——全件 pass だったが、`schedule-change-deadline`
+  だけは fail 5/5 だった（A' と同じ誤り方）。
+- **C1**（案1のみ、`contestedCorrectionGuidance: false` を明示）。
+- **C2**（案1＋案3、`contestedCorrectionGuidance: true`。**この ADR が採用する条件**）。
 
 ### verdict（一次判定、pass/5）
 
-| ケース | 種別 | A'（旧文面） | C1（新文面のみ） | C2（新文面+system） |
-|---|---|---|---|---|
-| `schedule-change-meeting-day` | 訂正 | **fail 5/5**（`"分かりません"`） | **pass 4/5・fail 1/5**（`"分かりません。"`） | **pass 5/5** |
-| `negation-moved-city` | 訂正 | pass 5/5 | pass 5/5 | pass 5/5 |
-| `schedule-change-deadline` | 訂正 | **fail 5/5**（`"…20日です。"`、期待は25日） | **pass 3/5・fail 2/5**（`"分かりません"`） | **pass 5/5** |
-| `negation-moved-job` | 訂正 | pass 5/5 | pass 5/5 | pass 5/5 |
-| `unknown-favorite-number` | 誤検出 | pass 5/5（`"分かりません"`、must-abstain） | pass 5/5 | pass 5/5 |
-| `other-period-city-this-year` | 誤検出 | pass 5/5 | pass 5/5 | pass 5/5 |
+| ケース | 種別 | B（印なし、PR #1429） | A'（旧文面、同日対照） | C1（新文面のみ） | C2（新文面+system、採用） |
+|---|---|---|---|---|---|
+| `schedule-change-meeting-day` | 訂正 | pass 5/5 | **fail 5/5**（`"分かりません"`） | **pass 4/5・fail 1/5**（`"分かりません。"`） | **pass 5/5** |
+| `negation-moved-city` | 訂正 | pass 5/5 | pass 5/5 | pass 5/5 | pass 5/5 |
+| `schedule-change-deadline` | 訂正 | **fail 5/5**（`"…20日です。"`、期待は25日） | **fail 5/5**（同じ誤り） | **pass 3/5・fail 2/5**（`"分かりません"`） | **pass 5/5** |
+| `negation-moved-job` | 訂正 | pass 5/5 | pass 5/5 | pass 5/5 | pass 5/5 |
+| `unknown-favorite-number` | 誤検出 | pass 5/5 | pass 5/5（`"分かりません"`、must-abstain） | pass 5/5 | pass 5/5 |
+| `other-period-city-this-year` | 誤検出 | pass 5/5 | pass 5/5 | pass 5/5 | pass 5/5 |
 
 **Issue #1430 が報告した `schedule-change-meeting-day` の fail 5/5 は、同日の A' 対照でも
-そのまま再現した。** C1（非対称文面だけ）はこのケースを 4/5 まで回復させ、C2（非対称文面
-+ system の一文）は 5/5（完全回復）にした。**`schedule-change-deadline`（PR #1429 時点では
-両条件とも fail 5/5 だった別の訂正ケース）も、A' では今回も fail 5/5 のままだったが、
-C1 は 3/5、C2 は 5/5 まで改善した**——このケースは元々「両条件で同じ理由（タグとは無関係の
-可能性が高い）で fail する」と ADR 0377 追記が書いていたが、今回の C1/C2 の結果は、
-少なくとも一部はタグの文面が効いていた可能性を示す（原因の完全な切り分けはしていない）。
+そのまま再現した。** C1（非対称文面だけ）はこのケースを 4/5 まで回復させ、C2（採用条件、
+非対称文面 + system の一文）は 5/5（完全回復）にした。**`schedule-change-deadline` は
+B（印なし）・A'（旧文面）のどちらでも fail 5/5 だった**——つまり「印が無くても」「対称な
+印があっても」誤り続けていたケースであり、C1 が 3/5・C2 が 5/5 まで改善したことは、
+矛盾候補欄の文面（案1）が効いた可能性を示す一方、**同じ日に生じた claim key 抽出の揺れ
+（このケースの `contested` 成立の仕方が回によって違った可能性）による偶然の改善の可能性も
+排除できていない**——原因は切り分けていない。
 
 ### 矛盾候補の印が実際に回答プロンプトへ届いた回数（n=5中）
 
@@ -280,13 +361,14 @@ C1 は 3/5、C2 は 5/5 まで改善した**——このケースは元々「両
 `other-period-city-this-year`（誤検出2件のうち、この日たまたま `contested` が成立した方）
 は、3条件とも「届いた回」と「届かなかった回」が混在する——**同じ入力・同じ
 `ClaimKeyOptions` でも、claim key 抽出は LLM 呼び出しであり run ごとに揺れる**（決定的では
-ない）。C1 で 0/5 だった（一度も届かなかった）ことは、C1 のコード変更（`buildMnemoraPrompt`
-の描画規則）とは無関係——`contested` 自体が成立しなかった回なので、非対称化条件の
-判定にすら入っていない。もう一方の誤検出 `unknown-favorite-number` は3条件とも5/5で
+ない）。C1 で 0/5 だった（一度も届かなかった）ことは、C1 のコード変更（矛盾候補欄の描画
+規則）とは無関係——`contested` 自体が成立しなかった回なので、非対称化条件の判定にすら
+入っていない。**C2 でも 3/5 しか届いておらず、案3（system 追記）をこのケースについて
+十分な回数で試せていない。** もう一方の誤検出 `unknown-favorite-number` は3条件とも5/5で
 安定して届き、3条件とも一貫して pass（must-abstain の「分かりません」）だった——**新文面・
 system 追記のどちらも、この誤検出ケースの正しい棄権を崩さなかった。**
 
-### 費用・呼び出し回数【実測 2026-09-30】
+### 費用・呼び出し回数【実測 2026-09-30（JST）】
 
 | 条件 | chat 呼び出し（n=5合計） | 費用（n=5合計） |
 |---|---|---|
@@ -296,7 +378,9 @@ system 追記のどちらも、この誤検出ケースの正しい棄権を崩�
 | **合計** | **417** | **$0.026112**（見積もり約 $0.027、停止基準 $0.055 の約47%） |
 
 記録: `examples/chat/cassettes/answer.claim-key.issue1430-{legacy-with-tag,c1,c2}-{1..5}.json`
-（新規15ファイル。既存のカセットは1バイトも変更していない）。
+（新規15ファイル。既存のカセットは1バイトも変更していない）。この決定（C2 採用）の確定に
+あたり、追加の実 API 呼び出しは行っていない——本節の数値は上の測定（2026-09-30（JST））の
+再掲である。
 
 ### C1 のプロンプト抜粋（`answer.claim-key.issue1430-c1-1.json`、`schedule-change-meeting-day`）
 
@@ -317,8 +401,8 @@ user:
 回答: 水曜日です。
 ```
 
-C2 の同じケースでは、system がさらに次のように連結される（`answer.claim-key.issue1430-c2-1.json`
-実測）:
+C2（採用条件）の同じケースでは、system がさらに次のように連結される
+（`answer.claim-key.issue1430-c2-1.json` 実測）:
 
 ```
 以下の会話ログだけを根拠に、簡潔に答えてください。根拠が無ければ『分かりません』と答えてください。矛盾候補の印がある記憶どうしは、記録順の新しい方を現在の値として答えてください。
@@ -332,23 +416,31 @@ C2 の同じケースでは、system がさらに次のように連結される�
 - `pnpm --filter @mnemora/example-chat exec vitest run` で関連ファイル（
   `provenance-prompt-contract.test.ts`・`mnemora-path.test.ts`・
   `basis-lost-prompt-roundtrip.test.ts`・`answer-trials-material.test.ts`・
-  `answer-trials-render.test.ts`・`provenance-trace.test.ts`・
-  `answer-content-preservation.test.ts`・`cassette-coverage.test.ts`・
-  `issue-1430-contested-correction.test.ts`）: 全緑（150件）。
-- `answer-bench.postgres.test.ts`（本物の Postgres + pgvector）: 緑（3件）。
+  `answer-trials-render.test.ts`・`cassette-coverage.test.ts`・`answer-bench.test.ts`・
+  `issue-1430-contested-correction.test.ts`・`issue-1430-cassette-replay.test.ts`）: 全緑。
+- `answer-bench.postgres.test.ts`（本物の Postgres + pgvector）: 緑
+  ——`contestedCorrectionGuidance` の既定が `true` になっても、対象ケース
+  （`ANSWER_CASE_SET_DEV[0]`、claim key opt-in 無し）は非対称文面が構造として出ないため、
+  naive/mnemora の system が完全に同一であるという既存の assertion（§2.2 決定2）は
+  そのまま成立する。
 - `git diff --stat examples/chat/cassettes/` は新規ファイル15件の追加のみ
   （既存カセットへの変更0件）。
+- `git diff --stat -- packages/` は空（`packages/*` は1バイトも変更していない）。
 
 ## 7. 確かめていないこと
 
 - ⛔ n を増やしても C1/C2 の改善が同じ比率で保たれるか（本測定は n=5・1回のみ）。
 - ⛔ 他の回答モデルでの挙動（gpt-4o-mini だけで測った）。
-- ⛔ `schedule-change-deadline` が今回 C1/C2 で改善した原因が、本当に矛盾候補欄の文面
-  （案1）なのか、それとも同日の別要因（claim key 抽出の揺れ等）なのか——切り分けていない。
+- ⛔ `schedule-change-deadline` が C1/C2 で改善した原因が、本当に矛盾候補欄の文面
+  （案1）なのか、それとも同日の別要因（claim key 抽出の揺れ等）なのか——**切り分けて
+  いない**。B（印なし）でも fail 5/5 だったことから、印の有無だけでは説明できない
+  何らかの要因があることは分かるが、それが案1の文面なのか別要因なのかは確定していない。
 - ⛔ 誤検出（U1 の対象）に印が届く回をもっと増やした場合の挙動——`other-period-city-this-year`
-  は3条件とも一部の回でしか `contested` が成立しなかった。
-- ⛔ C1 と C2 のどちらを `examples/chat` の既定にすべきか（決定2のとおり、この ADR では
-  決めない）。
+  は3条件とも一部の回でしか `contested` が成立せず、**案3を試せた回が特に少ない
+  （C2 でも 3/5）**。
+- ⛔ C2 を既定にしたことで、`contestedCorrectionGuidance` を明示的に渡していない他の
+  実運用経路（CLI の `answer` コマンド等）が、本測定の対象6ケース以外でどう振る舞うか
+  ——本 ADR は対象6ケースの範囲でしか確かめていない。
 
 ## 8. 関連
 
@@ -363,6 +455,9 @@ C2 の同じケースでは、system がさらに次のように連結される�
 - [ADR 0324](./0324-claim-key-opt-in-detection.md)・[ADR 0326](./0326-claim-key-known-predicates.md)・
   [ADR 0329](./0329-claim-key-known-predicates-from-store.md)・
   [ADR 0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md)
-  （claim key・`detectContested` の経緯、#835）。
+  （claim key・`detectContested` の経緯、#835。特に ADR 0377 追記〔2026-09-30〕の B 条件
+  結果を本 ADR の測定表に再利用した）。
+- [ADR 0137](./0137-adr-index-generated-from-source.md)・[ADR 0179](./0179-adr-number-assigned-at-merge.md)
+  （ADR 索引・番号確定はマージする側の作業。本 PR では触れていない）。
 - [Issue #835](https://github.com/takecchi/mnemora/issues/835) U4（`[矛盾候補:]` に確度を
   載せるか。本 ADR の案1・案3はどちらも確度を明示せず載せない方向の実装である）。

@@ -1964,26 +1964,33 @@ ADR 0309）**。ADR 0295 追記2 が見つけた `schedule-change-meeting-day`�
 **旧形式のまま**変わらない——ADR 0301 の対照の基準として使い続けるため。
 
 ⚠ **矛盾候補欄の文面は、`contestedWith` 由来の対で両側の記録順が分かるときだけ非対称
-になる（Issue #1430、ADR 0379、2026-09-30）。** 実 API（gpt-4o-mini）の対照で、対称な
-文面（両側とも `[矛盾候補:「<相手の digest>」]`）だと、本物の訂正
-（`schedule-change-meeting-day`）で回答が5回とも「分かりません」に倒れることを実測した。
-`contestedWith`（どちらの向きでも）由来の対で、`m` と相手の双方が `[記録順:N]` を
-持つときだけ、文面を次のように変える:
+になる（Issue #1430、ADR 0379、2026-09-30（JST）。C2＝案1＋案3を採用）。** 実 API
+（gpt-4o-mini）の対照で、対称な文面（両側とも `[矛盾候補:「<相手の digest>」]`）だと、
+本物の訂正（`schedule-change-meeting-day`）で回答が5回とも「分かりません」に倒れることを
+実測した。`contestedWith`（どちらの向きでも）由来の対で、`m` と相手の双方が
+`[記録順:N]` を持つときだけ、文面を次のように変える:
 
 - 自分が新しい側: `[矛盾候補:記録順{相手の記録順}の「{相手digest}」より後の記録（訂正の可能性）]`
 - 自分が古い側: `[矛盾候補:記録順{相手の記録順}の「{相手digest}」が後に記録された（訂正された可能性）]`
 
 **それ以外（`companionOf` だけが由来・記録順が片方でも分からない）は、対称な旧文面の
-まま1バイトも変わらない。** `answer-bench.ts` の `runAnswerCase`/`runAnswerBench` には、
-system 文に一文
+まま1バイトも変わらない。** `mnemora-path.ts` の `buildMnemoraPromptDetail(recall)` は、
+`buildMnemoraPrompt` と同じ `body` に加えて、非対称文面が実際に出たかを表す
+**構造の値** `hasContestedCorrectionWording` を返す（`buildMnemoraPrompt(recall): string`
+という既存の公開シグネチャ・出力は1バイトも変えていない——`buildMnemoraPromptDetail` の
+`.body` を返す後方互換のラッパーになっただけである）。`answer-bench.ts` の
+`runAnswerCase`/`runAnswerBench` には、system 文に一文
 （`"矛盾候補の印がある記憶どうしは、記録順の新しい方を現在の値として答えてください。"`）を
-追記する `contestedCorrectionGuidance`（既定 `false`、opt-in の任意引数）も足した——
-**追記するかどうかはフラグそのものではなく、実際に上の非対称文面が出たかどうかで
-決まる**（`promptHasContestedCorrectionMarker`）。実 API での n=5 測定（新文面のみ／
-新文面+system追記の2条件）・確かめていないことは
+追記する `contestedCorrectionGuidance`（**既定 `true`**、任意引数）も足した——**追記する
+かどうかはフラグそのものではなく、`hasContestedCorrectionWording` が実際に `true` か
+どうかで決まる**（できあがったプロンプト文字列を部分文字列で走査するのではなく、
+描画の分岐そのものから構造として決まる値である）。印が出ない回・`companionOf` だけが
+由来の回・記録順が片方でも分からない回は、フラグが既定 `true` のままでも system は
+`ANSWER_SYSTEM_PROMPT` のまま変わらない。実 API での n=5 測定（A'/C1/C2 の3条件、B は
+PR #1429 の結果を再利用）・射程（n=5・1日・gpt-4o-mini 限定、一般化していない）・
+切り分けていないこと（`schedule-change-deadline` の改善原因、`other-period-city-this-year`
+で案3を試せた回が少ないこと）は
 [ADR 0379](../../docs/decisions/0379-contested-tag-asymmetric-wording.md) を参照。
-`examples/chat` の既定経路（CLI の `answer` コマンド等）で `contestedCorrectionGuidance`
-を使うかどうかは、本変更の時点ではまだ決めていない（オーナー判断待ち）。
 
 #### 種カセットを渡して記録する（`MNEMORA_RECORD_SEED_CASSETTE`、Issue #691 続き、ADR 0309 §4.5.1）
 

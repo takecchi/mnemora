@@ -11,7 +11,6 @@ import type { AnswerCase } from "../answer-case.js";
 import { ANSWER_CASE_SET_DEV } from "../answer-case-set.dev.js";
 import { ANSWER_CASE_SET_EVAL } from "../answer-case-set.eval.js";
 import { ANSWER_ORDER_LEGEND_CASSETTE_PATH, loadCassette, saveCassette } from "../cassette-io.js";
-import { promptHasContestedCorrectionMarker } from "../mnemora-path.js";
 
 /**
  * Issue #1430: 矛盾候補欄の非対称文面（案1）と、system への一文追記（案3）を、実 API
@@ -24,11 +23,14 @@ import { promptHasContestedCorrectionMarker } from "../mnemora-path.js";
  * `other-period-city-this-year`）。
  *
  * **2条件**（`MNEMORA_1430_CONDITION` で選ぶ）:
- * - `"c1"`: 案1（非対称文面）のみ。`runAnswerCase` の `contestedCorrectionGuidance` は
- *   渡さない（既定 false）——system は常に `ANSWER_SYSTEM_PROMPT` のまま。
+ * - `"c1"`: 案1（非対称文面）のみ。`runAnswerCase` へ `contestedCorrectionGuidance: false`
+ *   を明示的に渡す——system は常に `ANSWER_SYSTEM_PROMPT` のまま
+ *   （`runAnswerCase` 自体の既定は Issue #1430・ADR 0379「C2 採用」以降 `true` だが、
+ *   この条件では明示的に上書きする）。
  * - `"c2"`: 案1＋案3。`contestedCorrectionGuidance: true` を渡す——実際に非対称文面が
- *   出た回だけ、system に `CONTESTED_CORRECTION_GUIDANCE` が足される
- *   （`resolveMnemoraAnswerSystemPrompt` の「opt-in ではなく印の有無で決める」規律）。
+ *   出た回だけ、system に `CONTESTED_CORRECTION_GUIDANCE` が足される（構造として
+ *   `hasContestedCorrectionWording` が true の回だけ、という規律。
+ *   `resolveMnemoraAnswerSystemPrompt` docstring参照）。
  *
  * claim key は #835 候補4の (A) 印あり条件と同じ
  * `{ enabled: true, detectContested: true, knownPredicatesFromStore: true }` を両条件で使う
@@ -143,8 +145,11 @@ async function main(): Promise<void> {
       );
       const mnemoraContent = result.mnemora.promptSpec.messages[0]?.content ?? "";
       const contradictionTagCount = (mnemoraContent.match(/\[矛盾候補:/g) ?? []).length;
-      const correctionMarkerFired = promptHasContestedCorrectionMarker(mnemoraContent);
       const mnemoraSystem = result.mnemora.promptSpec.system ?? "";
+      // `systemExtended`（下記ログ）が、非対称文面（案1）が実際に出たかどうかの構造の
+      // 判定結果をそのまま表す——`contestedCorrectionGuidance` を明示している条件では、
+      // system が拡張された ⟺ `buildMnemoraPromptDetail` の `hasContestedCorrectionWording`
+      // が true だった、という対応になる（`resolveMnemoraAnswerSystemPrompt` の docstring）。
 
       const embeddingSpace = embeddingSpaceSlug(handle.embeddingProvider.space);
       const tenantId = `${tenantPrefix}-${embeddingSpace}-${answerCase.id}`;
@@ -159,7 +164,6 @@ async function main(): Promise<void> {
       console.log(
         `[measure-1430] case=${answerCase.id} condition=${condition} ` +
           `contradictionTagCount=${contradictionTagCount} contestedMemories=${contestedCount} ` +
-          `correctionMarkerFired=${correctionMarkerFired} ` +
           `systemExtended=${mnemoraSystem !== ANSWER_SYSTEM_PROMPT} ` +
           `mnemora.verdict=${result.mnemora.verdict} ` +
           `mnemora.judgement.outcome=${result.mnemora.judgement?.outcome ?? "無し"} ` +

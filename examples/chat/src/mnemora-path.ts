@@ -267,8 +267,7 @@ function contradictionCounterpartIds(m: RecalledMemory, all: readonly RecalledMe
 /**
  * `m` と `id` の対が `contestedWith`（どちらの向きでも）由来かどうか（Issue #1430）。
  * `companionOf` 由来だけの対（`contestedWith` を一度も経由しない）は `false` を返す——
- * 同じ相手が両方の由来で来た場合（companion かつ contested）は `true`（contested 扱い、
- * マネージャー指示どおり）。
+ * 同じ相手が両方の由来で来た場合（companion かつ contested）は `true`（contested 扱い）。
  */
 function isContestedCounterpart(
   m: RecalledMemory,
@@ -280,6 +279,20 @@ function isContestedCounterpart(
   }
   const counterpart = all.find((x) => x.memoryId === id);
   return counterpart !== undefined && counterpart.contestedWith === m.memoryId;
+}
+
+/** {@link contradictionSegment} の戻り値。欄の文字列と、その欄が非対称文面（案1、下記docstring）を出したかを対で返す。 */
+interface ContradictionSegmentResult {
+  /** 矛盾候補欄の文字列。矛盾関係が無ければ `undefined`。 */
+  segment: string | undefined;
+  /**
+   * この欄の中に、非対称文面（「訂正の可能性」／「訂正された可能性」）を1件以上
+   * 出したら `true`。**この判定は描画の途中の分岐そのもの（構造）であり、出来上がった
+   * 文字列を後から部分文字列で走査して調べ直すものではない**——`digest` の本文に
+   * たまたま同じ文字列が含まれていても、この値には一切影響しない
+   * （`buildMnemoraPromptDetail` の docstring・Issue #1430 参照）。
+   */
+  hasAsymmetricWording: boolean;
 }
 
 /**
@@ -305,13 +318,14 @@ function contradictionSegment(
   m: RecalledMemory,
   all: readonly RecalledMemory[],
   order: ReadonlyMap<string, number>,
-): string | undefined {
+): ContradictionSegmentResult {
   const counterpartIds = contradictionCounterpartIds(m, all);
   if (counterpartIds.length === 0) {
-    return undefined;
+    return { segment: undefined, hasAsymmetricWording: false };
   }
   const byId = new Map(all.map((x) => [x.memoryId, x] as const));
   const myOrder = order.get(m.memoryId);
+  let hasAsymmetricWording = false;
   const parts = counterpartIds.map((id) => {
     const counterpart = byId.get(id);
     if (counterpart === undefined) {
@@ -320,6 +334,7 @@ function contradictionSegment(
     if (isContestedCounterpart(m, id, all)) {
       const counterpartOrder = order.get(id);
       if (myOrder !== undefined && counterpartOrder !== undefined && myOrder !== counterpartOrder) {
+        hasAsymmetricWording = true;
         return myOrder > counterpartOrder
           ? `記録順${counterpartOrder}の「${counterpart.digest}」より後の記録（訂正の可能性）`
           : `記録順${counterpartOrder}の「${counterpart.digest}」が後に記録された（訂正された可能性）`;
@@ -327,7 +342,7 @@ function contradictionSegment(
     }
     return `「${counterpart.digest}」`;
   });
-  return `[矛盾候補:${parts.join("／")}]`;
+  return { segment: `[矛盾候補:${parts.join("／")}]`, hasAsymmetricWording };
 }
 
 /**
@@ -438,6 +453,12 @@ function occurredAtSegment(m: RecalledMemory): string | undefined {
   return m.occurredAt === null ? "[出来事時刻:不明]" : `[出来事時刻:${m.occurredAt.toISOString()}]`;
 }
 
+/** {@link renderRecalledMemoryLine} の戻り値。行の文字列と、その行が非対称文面を出したかを対で返す。 */
+interface RecalledMemoryLineResult {
+  line: string;
+  hasAsymmetricWording: boolean;
+}
+
 /**
  * 1件の `RecalledMemory` を1行に描画する。
  * 欄の順序: 由来 → 話者 → 主題 → 矛盾候補 → 根拠 → 記録順 → 出来事時刻 → digest。
@@ -446,22 +467,49 @@ function renderRecalledMemoryLine(
   m: RecalledMemory,
   all: readonly RecalledMemory[],
   order: ReadonlyMap<string, number>,
-): string {
+): RecalledMemoryLineResult {
+  const contradiction = contradictionSegment(m, all, order);
   const segments = [
     `[由来:${m.provenanceKind}]`,
     speakerSegment(m),
     subjectSegment(m),
-    contradictionSegment(m, all, order),
+    contradiction.segment,
     basisSegment(m),
     recordedOrderSegment(m, order),
     occurredAtSegment(m),
   ].filter((s): s is string => s !== undefined);
-  return `- ${segments.join(" ")} ${m.digest}`;
+  return {
+    line: `- ${segments.join(" ")} ${m.digest}`,
+    hasAsymmetricWording: contradiction.hasAsymmetricWording,
+  };
+}
+
+/**
+ * {@link buildMnemoraPromptDetail} の戻り値。
+ *
+ * `hasContestedCorrectionWording` は、案3（`answer-bench.ts` の
+ * `resolveMnemoraAnswerSystemPrompt`）が system 文へ一文を足すかどうかの判定に使う
+ * **構造の結果**である——`body`（できあがった文字列）を後から部分文字列で走査して
+ * 調べ直すものではない。描画の途中（`contradictionSegment`）で「非対称文面（案1）を
+ * 実際に選んだかどうか」の分岐そのものを、行ごと・欄ごとに拾い上げて集約する。
+ * ⟹ `digest` の本文にたまたま「（訂正の可能性）」という文字列が含まれていても、
+ * それだけでは `true` にならない（Issue #1430、判定を文字列一致から構造に置き換えた回）。
+ */
+export interface MnemoraPromptDetail {
+  /** {@link buildMnemoraPrompt} が返すのと同じ文字列。 */
+  body: string;
+  /**
+   * 矛盾候補欄が、非対称文面（`contestedWith` 由来・両側の記録順が分かる対にだけ出す
+   * 「訂正の可能性」／「訂正された可能性」）を1件以上出したら `true`。
+   */
+  hasContestedCorrectionWording: boolean;
 }
 
 /**
  * mnemora path が実際にプロンプトへ積む文字列を、`recall()` の返り値だけから組み立てる
- * ——「mnemora はプロンプトを組み立てない」ことを実演する関数。
+ * ——「mnemora はプロンプトを組み立てない」ことを実演する関数。**`body` の組み立て規則は
+ * {@link buildMnemoraPrompt} と同一**（あちらはこの関数の `body` だけを返す薄い
+ * ラッパーであり、2箇所に手で複製していない）。
  *
  * **積むのは `recall.memories` の各行と、`recall.index.totalInScope` から作る
  * `(索引: …)` の1行だけである。目次帯（`recall.index`）の中身——digest 帯・群カウント
@@ -492,30 +540,31 @@ function renderRecalledMemoryLine(
  * （`sortMemoriesForDisplay` の doc を参照）。この関数の**出力文字列**からは
  * 元のスコア順を復元できない——スコア順が要る呼び出し側は `recall.memories` を
  * 直接見ること。
+ *
+ * **2026-09-30（Issue #1430）**: `hasContestedCorrectionWording`（上記docstring）を
+ * 足した。`buildMnemoraPrompt(recall): string` という既存の公開シグネチャ・出力は
+ * 1バイトも変えていない——あちらは `buildMnemoraPromptDetail(recall).body` を返すだけの
+ * 後方互換のラッパーになった。
  */
-export function buildMnemoraPrompt(recall: RecallResult): string {
+export function buildMnemoraPromptDetail(recall: RecallResult): MnemoraPromptDetail {
   const order = recordedOrderById(recall.memories);
   const displayOrder = sortMemoriesForDisplay(recall.memories, order);
-  const digestLines = displayOrder
-    .map((m) => renderRecalledMemoryLine(m, recall.memories, order))
-    .join("\n");
+  const rendered = displayOrder.map((m) => renderRecalledMemoryLine(m, recall.memories, order));
+  const digestLines = rendered.map((r) => r.line).join("\n");
+  const hasContestedCorrectionWording = rendered.some((r) => r.hasAsymmetricWording);
   const indexLine = `(索引: スコープ内 ${recall.index.totalInScope} 件のうち ${recall.memories.length} 件を提示)`;
   const legendLine = order.size > 0 ? ORDER_LEGEND_LINE : "";
-  return [legendLine, digestLines, indexLine].filter((s) => s.length > 0).join("\n");
+  const body = [legendLine, digestLines, indexLine].filter((s) => s.length > 0).join("\n");
+  return { body, hasContestedCorrectionWording };
 }
 
 /**
- * `buildMnemoraPrompt` の出力に、`contestedSegment`（Issue #1430）由来の非対称な
- * 「訂正の可能性」／「訂正された可能性」印が1つでも含まれているかを判定する。
- *
- * `answer-bench.ts` の案3（system 文への一文追記、切替可能）が、**opt-in のフラグ
- * ではなく「実際に印が出たか」で on/off を決める**ための判定関数——マネージャー指示の
- * 「判定は…実際に印が出たかで行う」をそのままコードにしたもの。両方の新文面の接頭辞
- * （「より後の記録（訂正の可能性）」/「が後に記録された（訂正された可能性）」）は
- * `（訂正` で始まるので、この部分文字列だけを見れば両方を1回の `includes` で拾える。
+ * `buildMnemoraPromptDetail(recall).body` と同じ（後方互換のラッパー）。
+ * `hasContestedCorrectionWording` も要る呼び出し側（`answer-bench.ts` の
+ * `runAnswerCase`）は {@link buildMnemoraPromptDetail} を直接呼ぶこと。
  */
-export function promptHasContestedCorrectionMarker(promptBody: string): boolean {
-  return promptBody.includes("（訂正の可能性）") || promptBody.includes("（訂正された可能性）");
+export function buildMnemoraPrompt(recall: RecallResult): string {
+  return buildMnemoraPromptDetail(recall).body;
 }
 
 /**
