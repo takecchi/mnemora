@@ -466,6 +466,11 @@ cos の分布も広く閾値運用しやすい。しかし重み 2.2GB（q8 で 
    `cacheDir` へ向け、成功でも失敗でも元へ戻す。このパッケージの読み込みどうしは直列化してある。
    `env.localModelPath`・`env.allowRemoteModels` には今も触らないので、上の「`createPipeline` を差す仕事」は変わらない。
    理由と限界は [ADR 0361](./0361-local-embedding-cache-dir-env-swap.md)。
+   ⚠ **2026-09-29 追記（Issue #1403）**: 上の「【現物】`repo` に絶対パスは渡せない」は事実ではなかった。
+   4.2.0 で、モデルの4ファイルを置いたディレクトリの絶対パスを `repo` に渡すと、`env` に触らずにネットワーク0回で読めた
+   （実測。`packages/local-embedding/README.md` の「ネットワークに一切出ずに…」節）。また、既定の `createPipeline` は
+   `revision` を渡されたときに限り、`pipeline()` を呼んでいる間だけ `env.remotePathTemplate` も差し替えるようになった
+   （[ADR 0365](./0365-local-embedding-revision-in-remote-path-template.md)）。
 4. **🔴 `EmbeddingProvider` の適合テストは、今も存在しない。**
    `packages/testkit` の適合テストは Store 系5種だけで、provider 向けは1本も無い
    （[ADR 0072](./0072-anthropic-llm-provider.md) の負債1）。
