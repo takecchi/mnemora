@@ -1963,6 +1963,28 @@ ADR 0309）**。ADR 0295 追記2 が見つけた `schedule-change-meeting-day`�
 である。`answer-trials`（下記セクション）が読む `cassettes/answer.json` は
 **旧形式のまま**変わらない——ADR 0301 の対照の基準として使い続けるため。
 
+⚠ **矛盾候補欄の文面は、`contestedWith` 由来の対で両側の記録順が分かるときだけ非対称
+になる（Issue #1430、ADR 0379、2026-09-30）。** 実 API（gpt-4o-mini）の対照で、対称な
+文面（両側とも `[矛盾候補:「<相手の digest>」]`）だと、本物の訂正
+（`schedule-change-meeting-day`）で回答が5回とも「分かりません」に倒れることを実測した。
+`contestedWith`（どちらの向きでも）由来の対で、`m` と相手の双方が `[記録順:N]` を
+持つときだけ、文面を次のように変える:
+
+- 自分が新しい側: `[矛盾候補:記録順{相手の記録順}の「{相手digest}」より後の記録（訂正の可能性）]`
+- 自分が古い側: `[矛盾候補:記録順{相手の記録順}の「{相手digest}」が後に記録された（訂正された可能性）]`
+
+**それ以外（`companionOf` だけが由来・記録順が片方でも分からない）は、対称な旧文面の
+まま1バイトも変わらない。** `answer-bench.ts` の `runAnswerCase`/`runAnswerBench` には、
+system 文に一文
+（`"矛盾候補の印がある記憶どうしは、記録順の新しい方を現在の値として答えてください。"`）を
+追記する `contestedCorrectionGuidance`（既定 `false`、opt-in の任意引数）も足した——
+**追記するかどうかはフラグそのものではなく、実際に上の非対称文面が出たかどうかで
+決まる**（`promptHasContestedCorrectionMarker`）。実 API での n=5 測定（新文面のみ／
+新文面+system追記の2条件）・確かめていないことは
+[ADR 0379](../../docs/decisions/0379-contested-tag-asymmetric-wording.md) を参照。
+`examples/chat` の既定経路（CLI の `answer` コマンド等）で `contestedCorrectionGuidance`
+を使うかどうかは、本変更の時点ではまだ決めていない（オーナー判断待ち）。
+
 #### 種カセットを渡して記録する（`MNEMORA_RECORD_SEED_CASSETTE`、Issue #691 続き、ADR 0309 §4.5.1）
 
 `record:answer`/`record:answer-time-weighting` は毎回、抽出（`observe()`）を実 API で
