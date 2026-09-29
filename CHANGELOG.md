@@ -357,7 +357,7 @@ PR #1393・Issue #1232）になった。**
   （[ADR 0284](./docs/decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md)）に
   対応しているかを起動時に検査するようになった——対応していなければ新しい
   `PgvectorVersionUnsupportedError` を投げる**（[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、
-  [PR #TBD](https://github.com/takecchi/mnemora/pull/TBD)、
+  [PR #1408](https://github.com/takecchi/mnemora/pull/1408)、
   [ADR 0367](./docs/decisions/0367-pgvector-capability-check.md)）。
 
   **どこで検査するか**: `PostgresVectorStore.search()`/`searchMany()`（インスタンスごとに
