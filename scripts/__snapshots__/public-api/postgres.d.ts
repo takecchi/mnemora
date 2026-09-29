@@ -2311,6 +2311,7 @@ import type { Db } from "./client.js";
 export declare class PostgresVectorStore implements VectorStore {
     private readonly db;
     private readonly pgvectorCapabilityGate;
+    private readonly statsPresenceGate;
     constructor(db: Db);
     upsert(ctx: Ctx, space: EmbeddingSpaceId, memoryId: MemoryId, vector: number[]): Promise<void>;
     search(ctx: Ctx, space: EmbeddingSpaceId, query: number[], opts: {

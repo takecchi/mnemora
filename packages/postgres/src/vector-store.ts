@@ -266,39 +266,166 @@ function buildLateralMemoryConditions(filter: VectorFilter) {
 }
 
 /**
- * `searchMany` 専用（ADR 0362 追記・案2）。`<table>` を `pg_class.reltuples` で読み、
- * 一度も `ANALYZE`/`VACUUM` されていなければ負の値（`-1`、PostgreSQL 14 以降の意味。
- * [ADR 0062](../../../docs/decisions/0062-contested-with-id-fk-index.md) 実測参照）を返す
- * ——「統計が無い」ことそのものを見る、新しい閾値を作らない判定。
- *
- * `to_regclass` は search_path 経由でテーブルを解決する（識別子として埋め込むのではなく、
- * テキストのパラメータとして渡す——`sql.identifier` は使わない。`to_regclass` は文字列
- * を引数に取る関数であり、識別子の位置ではない）。
- *
- * クエリベクトル・アンカーの添字を一度も参照しない定数の副問い合わせなので、
- * Postgres はこれを「One-Time Filter」として（`LATERAL` の繰り返しに関係なく）
- * 1回だけ評価する（ADR 0362 追記「実測」参照、`EXPLAIN` で確認済み）。
+ * `search()`/`searchMany()` の両方が使う `e` 側の `WHERE` 条件（統計が無い場面の枝、
+ * 候補D で使う。`m` 側は `buildLateralMemoryConditions` が別に返す。ADR 0362・0374）。
  */
-function reltuplesOf(tableName: string) {
-  return sql`(SELECT reltuples FROM pg_class WHERE oid = to_regclass(${tableName}))`;
+function buildEmbeddingConditions(ctx: Ctx, filter: VectorFilter) {
+  return sql`e.tenant_id = ${filter.tenantId} AND e.tenant_id = ${ctx.tenantId}`;
 }
 
 /**
- * `memories`・埋め込み表の**どちらも** `ANALYZE`/`VACUUM` 済み（`reltuples >= 0`）
- * であることを表す（ADR 0362 追記・案2）。真のときだけ、`search()` と同じ素の
- * `JOIN`（`buildFilterConditions` の形）の枝を実行する。
+ * `search()`/`searchMany()` の両方が使う、**統計がある場面**の2枝
+ * （`vector_norm > 0`/`= 0`）の `UNION ALL`——`memories` を素の `JOIN memories m ON
+ * m.id = e.memory_id AND m.tenant_id = e.tenant_id` で引く、今日と同じ形（ADR 0374、
+ * Issue #1415 で `search()`/`searchMany()` に共通のヘルパーへ括り出した。**この関数が
+ * 組み立てる SQL は、Issue #1415 の前後で1バイトも変えていない**——`search()` が
+ * 元々インラインで持っていたテキストと同一の構造をそのまま返す）。
+ *
+ * `distanceExpr` は距離演算子の右辺（`search()` では `${queryLiteral}::vector`
+ * というリテラル、`searchMany()` では `q.qvec` という `LATERAL` の外側の列——
+ * どちらも `sql` の1つの式として同じ場所に嵌まる）。
  */
-function statsPresentCondition(table: string) {
-  return sql`${reltuplesOf(table)} >= 0 AND ${reltuplesOf("memories")} >= 0`;
+function buildStatsPresentBranches(
+  table: string,
+  whereClause: SQL,
+  distanceExpr: SQL,
+  limit: number,
+) {
+  return sql`
+    (
+      SELECT e.memory_id AS memory_id, e.embedding <=> ${distanceExpr} AS distance,
+             m.recorded_at AS recorded_at
+      FROM ${sql.identifier(table)} e
+      JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+      WHERE ${whereClause} AND vector_norm(e.embedding) > 0
+      ORDER BY e.embedding <=> ${distanceExpr}, m.recorded_at DESC, e.memory_id
+      LIMIT ${limit}
+    )
+    UNION ALL
+    (
+      SELECT e.memory_id AS memory_id, e.embedding <=> ${distanceExpr} AS distance,
+             m.recorded_at AS recorded_at
+      FROM ${sql.identifier(table)} e
+      JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
+      WHERE ${whereClause} AND vector_norm(e.embedding) = 0
+      ORDER BY m.recorded_at DESC, e.memory_id
+      LIMIT ${limit}
+    )
+  `;
 }
 
 /**
- * `statsPresentCondition` の否定（どちらか一方でも `reltuples < 0`）。真のときだけ、
- * `memories` を主キーで引く候補D（`LATERAL` + `OFFSET 0`）の枝を実行する
- * （ADR 0362 追記・案2）。
+ * `search()`/`searchMany()` の両方が使う、**統計が無い場面**の2枝の `UNION ALL`
+ * ——`memories` を主キー（`memories_pkey`）で引く候補D の形（ADR 0362・0374、
+ * Issue #1181/#1415）。`LATERAL` の中身は `id = e.memory_id` だけ（`SELECT *`）、
+ * `OFFSET 0` は最適化の柵、テナント境界（`m.tenant_id = e.tenant_id`）は柵の外——
+ * いずれも ADR 0362「決定」節が実測で固定した3点をそのまま引き継ぐ。
  */
-function statsMissingCondition(table: string) {
-  return sql`${reltuplesOf(table)} < 0 OR ${reltuplesOf("memories")} < 0`;
+function buildStatsMissingBranches(
+  table: string,
+  embeddingConditions: SQL,
+  memoryConditions: SQL,
+  distanceExpr: SQL,
+  limit: number,
+) {
+  return sql`
+    (
+      SELECT e.memory_id AS memory_id, e.embedding <=> ${distanceExpr} AS distance,
+             m.recorded_at AS recorded_at
+      FROM ${sql.identifier(table)} e
+      CROSS JOIN LATERAL (
+        SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
+      ) m
+      WHERE ${embeddingConditions} AND vector_norm(e.embedding) > 0 AND ${memoryConditions}
+      ORDER BY e.embedding <=> ${distanceExpr}, m.recorded_at DESC, e.memory_id
+      LIMIT ${limit}
+    )
+    UNION ALL
+    (
+      SELECT e.memory_id AS memory_id, e.embedding <=> ${distanceExpr} AS distance,
+             m.recorded_at AS recorded_at
+      FROM ${sql.identifier(table)} e
+      CROSS JOIN LATERAL (
+        SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
+      ) m
+      WHERE ${embeddingConditions} AND vector_norm(e.embedding) = 0 AND ${memoryConditions}
+      ORDER BY m.recorded_at DESC, e.memory_id
+      LIMIT ${limit}
+    )
+  `;
+}
+
+/**
+ * `memories`・埋め込み表の統計（`pg_class.reltuples`）が両方とも「一度は
+ * `ANALYZE`/`VACUUM` された」（`>= 0`）ことを、`PostgresVectorStore` の
+ * インスタンス・表ごとに一度だけ確かめ、以後は確かめ直さない（ADR 0374、
+ * Issue #1415）。
+ *
+ * ## なぜインスタンス・表ごとか
+ *
+ * - **表ごと**: `memories` は全空間で共有されるが、埋め込み表は空間（`EmbeddingSpaceId`）
+ *   ごとに別の物理テーブル（`memory_embeddings_<space>`）を持つ。ある空間の埋め込み表が
+ *   統計を持っていても、別の空間の埋め込み表はまだ持たないことがある——覚えるのは
+ *   埋め込み表の名前ごと（`memories` はテナントに関係なく共有1テーブルなので、
+ *   `memories` 自体は表名を持たない特別な1エントリとして覚える）。
+ * - **インスタンスごと**（モジュールの大域変数・`static` にしない）: プロセス内に
+ *   複数の `PostgresVectorStore` インスタンスが在るとき（例: 複数テナント・複数
+ *   接続を使い分ける利用側のコード）、片方が統計を確認済みでも、もう片方は
+ *   別に確認する——インスタンスをまたいで共有すると、テストで「別のインスタンスは
+ *   まだ確認していない」という前提が壊れ、覚え間違いを検出できなくなる
+ *   （歯は `search-stats-presence-scope.postgres.test.ts`）。
+ * - **テナントごとには持たない**: 統計は `pg_class` の表単位の情報であり、
+ *   テナント単位の情報ではない——`reltuples` の値そのものがテナントを区別しない
+ *   （テナントが変わっても、確認済みの状態は同じインスタンス内で共有される）。
+ *
+ * ## 統計が後で消えたら（`TRUNCATE` 等）
+ *
+ * **一度 `true` を覚えたら、そのインスタンスの寿命の間ずっと `true` のまま**——
+ * 統計が後で消えても（`TRUNCATE`・表の作り直し等）確認し直さない。この場合、
+ * **結果は変わらず、遅くなるだけ**（統計が無いのに「ある」前提の SQL を送る
+ * ため、Issue #1181/#1415 が直す前と同じプランに戻る可能性があるが、結果の
+ * 正しさには影響しない——`search()`/`searchMany()` のどちらの枝も、`filter`
+ * が指す集合・順序・同点の決着は同じであることを歯（`__tests__/vector-search-many-diff.postgres.test.ts`・
+ * 新設の結果一致の歯）で縛っている）。依頼主はこの代償を受け入れた（ADR 0374）。
+ *
+ * ## `pg_class.reltuples` の意味
+ *
+ * 一度も `ANALYZE`/`VACUUM` されていない表は `reltuples` が負（`-1`、
+ * PostgreSQL 14 以降の意味。[ADR 0062](../../../docs/decisions/0062-contested-with-id-fk-index.md)
+ * 実測参照）になる——「統計が無い」ことそのものを見る、新しい閾値を作らない判定。
+ * `to_regclass` は search_path 経由でテーブルを解決する（識別子ではなくテキストの
+ * パラメータとして渡す）。
+ */
+class StatsPresenceGate {
+  /** 表名（`memories` は固定の特別なキー）ごとに、確認済み（`reltuples >= 0`）かどうか。 */
+  private readonly confirmed = new Set<string>();
+
+  /**
+   * `table`（埋め込み表）と `memories` の両方が確認済みなら、往復を発生させずに
+   * `true` を返す。どちらかがまだ未確認なら、1回の往復で両方の `reltuples` を
+   * 読み、`>= 0` だったものだけを確認済みにする。戻り値は「両方が確認済みか」。
+   */
+  async bothPresent(db: Db, table: string): Promise<boolean> {
+    if (this.confirmed.has(table) && this.confirmed.has("memories")) {
+      return true;
+    }
+    const result = await db.execute(sql`
+      SELECT
+        (SELECT reltuples FROM pg_class WHERE oid = to_regclass(${table})) AS embedding_reltuples,
+        (SELECT reltuples FROM pg_class WHERE oid = to_regclass('memories')) AS memories_reltuples
+    `);
+    const row = result.rows[0] as unknown as {
+      embedding_reltuples: string | number;
+      memories_reltuples: string | number;
+    };
+    if (Number(row.embedding_reltuples) >= 0) {
+      this.confirmed.add(table);
+    }
+    if (Number(row.memories_reltuples) >= 0) {
+      this.confirmed.add("memories");
+    }
+    return this.confirmed.has(table) && this.confirmed.has("memories");
+  }
 }
 
 /**
@@ -343,6 +470,10 @@ export class PostgresVectorStore implements VectorStore {
   // Issue #1301 / ADR 0367: インスタンスごとに1つ。`search()`/`searchMany()` の両方の
   // `withRelaxedOrderScan` 呼び出しで共有する（`PgvectorCapabilityGate` の doc 参照）。
   private readonly pgvectorCapabilityGate = new PgvectorCapabilityGate();
+  // Issue #1415 / ADR 0374: インスタンスごとに1つ。`search()`/`searchMany()` の両方が
+  // 共有する（`StatsPresenceGate` の doc 参照——表ごとに確認済みかを覚え、
+  // テナントごとには持たない）。
+  private readonly statsPresenceGate = new StatsPresenceGate();
 
   constructor(private readonly db: Db) {}
 
@@ -440,29 +571,28 @@ export class PostgresVectorStore implements VectorStore {
     // が両枝を再び1本の順序（距離→`recorded_at` DESC→`memory_id`）へ並べ直し、
     // `LIMIT` をもう一度適用する——ゼロベクトルの行が実在の上位候補を押し出すことは
     // ない（`NaN` は常に最後尾）。往復は増やさない（1本の SQL 文のまま）。
+    // Issue #1415 / ADR 0374: `memories`・埋め込み表の両方の統計が確認済みなら
+    // （`StatsPresenceGate.bothPresent` の doc 参照）、今日と1バイトも変わらない
+    // `buildStatsPresentBranches` の形をそのまま走らせる。未確認のときだけ、確認の
+    // ための往復を1回払い、必要なら候補D（`buildStatsMissingBranches`）に切り替える
+    // ——ADR 0362 の「One-Time Filter で1本の SQL に両枝を入れる」やり方は、統計が
+    // ある場面の実測コストが線を超えたため、この往復ベースの仕組みに替えた
+    // （ADR 0374 参照）。
+    const statsPresent = await this.statsPresenceGate.bothPresent(this.db, table);
+    const branches = statsPresent
+      ? buildStatsPresentBranches(table, whereClause, sql`${queryLiteral}::vector`, opts.limit)
+      : buildStatsMissingBranches(
+          table,
+          buildEmbeddingConditions(ctx, opts.filter),
+          buildLateralMemoryConditions(opts.filter),
+          sql`${queryLiteral}::vector`,
+          opts.limit,
+        );
     const result = await withRelaxedOrderScan(this.db, this.pgvectorCapabilityGate, (tx) =>
       tx.execute(sql`
         SELECT combined.memory_id AS memory_id, combined.distance AS distance
         FROM (
-          (
-            SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance,
-                   m.recorded_at AS recorded_at
-            FROM ${sql.identifier(table)} e
-            JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-            WHERE ${whereClause} AND vector_norm(e.embedding) > 0
-            ORDER BY e.embedding <=> ${queryLiteral}::vector, m.recorded_at DESC, e.memory_id
-            LIMIT ${opts.limit}
-          )
-          UNION ALL
-          (
-            SELECT e.memory_id AS memory_id, e.embedding <=> ${queryLiteral}::vector AS distance,
-                   m.recorded_at AS recorded_at
-            FROM ${sql.identifier(table)} e
-            JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-            WHERE ${whereClause} AND vector_norm(e.embedding) = 0
-            ORDER BY m.recorded_at DESC, e.memory_id
-            LIMIT ${opts.limit}
-          )
+          ${branches}
         ) AS combined
         ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
         LIMIT ${opts.limit}
@@ -487,39 +617,45 @@ export class PostgresVectorStore implements VectorStore {
    * 共有する（`buildLateralMemoryConditions` 経由）——クエリベクトルを
    * 一度も参照しないので、`LATERAL` の中でそのまま使い回せる。
    *
-   * **⚠ ADR 0362（Issue #1181）: `memories` の引き方は、統計の有無で2つの形を
-   * 1本の SQL の中に並べ、実行時にどちらか一方だけを動かす。**
+   * **`memories` の引き方は `search()` と完全に同じ仕組みで切り替える（Issue #1415
+   * / ADR 0374、ADR 0362 を置き換える）**: `this.statsPresenceGate`（`search()` と
+   * 同じインスタンスを共有、クラス doc コメント参照）に「`memories`・この埋め込み表の
+   * 両方の統計が確認済みか」を尋ね、
    *
-   * - **統計がある**（`memories`・埋め込み表のどちらも `pg_class.reltuples >= 0`。
-   *   `statsPresentCondition` 参照）ときは、`search()` と同じ素の `JOIN memories m
-   *   ON m.id = e.memory_id AND m.tenant_id = e.tenant_id`（`buildFilterConditions`
-   *   の `WHERE`）をそのまま使う——**この枝は `search()` の枝と1バイトも違わない**
-   *   （プランも `Hash Join` 等、統計に基づいて今まで選ばれてきたものがそのまま
-   *   選ばれる。歯は `search-many-primary-key-lookup.postgres.test.ts`）。
-   * - **統計が無い**（どちらか一方でも `reltuples < 0`。「一度も `ANALYZE`/`VACUUM`
-   *   されていない」の意味、PostgreSQL 14 以降。[ADR 0062](../../../docs/decisions/0062-contested-with-id-fk-index.md)
-   *   実測参照）ときは、`CROSS JOIN LATERAL (SELECT * FROM memories WHERE id =
-   *   e.memory_id OFFSET 0) m` を使う——`memories` を主キー（`memories_pkey`）
-   *   で引かせる形（Issue #1181 本文・`buildLateralMemoryConditions` の doc
-   *   コメント参照）。`OFFSET 0` は Postgres の伝統的な「最適化の柵」——この
-   *   副問い合わせを外側へ引き上げず、`e` の行ごとに独立して評価させる。
-   *   テナント境界（`m.tenant_id = e.tenant_id`）は柵の**外**
-   *   （`buildLateralMemoryConditions` が返す条件の中）に置く——柵の中に入れると
-   *   `memories_pkey` 以外の索引も候補になり得て、Issue #1181 の欠陥に戻る
-   *   （実測で確認済み）。
+   * - **確認済み**なら、`search()` と1バイトも変わらない `buildStatsPresentBranches`
+   *   （素の `JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id`、
+   *   `buildFilterConditions` の `WHERE`）をそのまま使う——プランも `Hash Join` 等、
+   *   統計に基づいて今まで選ばれてきたものがそのまま選ばれる（歯は
+   *   `search-many-primary-key-lookup.postgres.test.ts`）。
+   * - **未確認**（表を初めて見る、または過去に見て `reltuples < 0` だった）なら
+   *   `buildStatsMissingBranches`（候補D、`CROSS JOIN LATERAL (SELECT * FROM
+   *   memories WHERE id = e.memory_id OFFSET 0) m`）を使う——`memories` を主キー
+   *   （`memories_pkey`）で引かせる形（Issue #1181 本文・`buildLateralMemoryConditions`
+   *   の doc コメント参照）。`OFFSET 0` は Postgres の伝統的な「最適化の柵」——この
+   *   副問い合わせを外側へ引き上げず、`e` の行ごとに独立して評価させる。テナント境界
+   *   （`m.tenant_id = e.tenant_id`）は柵の**外**（`buildLateralMemoryConditions` が
+   *   返す条件の中）に置く——柵の中に入れると `memories_pkey` 以外の索引も候補に
+   *   なり得て、Issue #1181 の欠陥に戻る（実測で確認済み）。
    *
-   * **どちらを動かすかは `pg_class.reltuples`（`statsPresentCondition`/
-   * `statsMissingCondition`、往復を増やさず1本の SQL 内で判定）で切り替える**
-   * ——新しい閾値・裁量値は作らない。`reltuples` の読み取り自体はクエリベクトル・
-   * アンカーの添字を参照しない定数の副問い合わせなので、Postgres は
-   * 「One-Time Filter」として（`LATERAL` の繰り返しに関係なく）1回だけ評価する
-   * （`EXPLAIN` で確認済み、ADR 0362 追記「実測」参照）。動かない側の枝は
-   * `(never executed)` になり、実行コストを払わない。
+   * **往復数**: `statsPresenceGate` が「未確認」の間だけ、`reltuples` を読む
+   * ための往復が1回余分に掛かる（`StatsPresenceGate.bothPresent` 自身が投げる
+   * `SELECT`）——この余分な往復は `queries.length`（アンカー数）に依存しない
+   * （表ごとに1回だけ、`searchMany` 自体の呼び出し回数にも依存しない・確認後は
+   * 二度と払わない）。確認済みになったあとは、今日と同じ1往復（この `SELECT`
+   * 1本）だけに戻る。
    *
-   * **クエリの形だけでは直せなかった**（統計がある場面で `Hash Join` を失う代償が、
-   * 固い測り直しでは既定のアンカー数でも許容線（約2ms）を超えたため）——
-   * 「クエリの形だけで直す」という当初の依頼の範囲を、統計の有無を見る分岐で
-   * 外れている（依頼主が受け入れた。ADR 0362 追記参照）。
+   * **ADR 0362（Issue #1181 当初の決定）からの変更点**: 以前はここで
+   * `pg_class.reltuples` を**このクエリ自身の中**でスカラー副問い合わせとして読み、
+   * 統計あり・無しの4枝を1本の `UNION ALL` に並べ、Postgres の「One-Time Filter」
+   * （実行計画がクエリ全体に対して1回だけ評価する、`LATERAL` の繰り返しに影響
+   * されない）に切り替えを任せていた——往復は増えないが、統計がある場面でも
+   * `memories`・埋め込み表の `reltuples` を毎回読みに行く分のプランナのコストを
+   * 払い続けていた。Issue #1415 で `search()` に同じやり方を適用したところ、
+   * 統計がある場面（`recall()` 全体、N=200・アンカー3）で **+5.06ms**
+   * という、許容線（約2ms）を大きく超える悪化が固い測り直しで出た（ADR 0374
+   * 「実測」参照）——この仕組みを `search()`/`searchMany()` の両方から外し、
+   * インスタンスへの記憶（このクラス doc コメント、`StatsPresenceGate` の doc
+   * コメント参照）に置き換えた。
    *
    * **key は SQL に送らない**（[Issue #1285](https://github.com/takecchi/mnemora/issues/1285)）: `VALUES` には
    * 送るクエリの添字（`0..n-1`）を送り、戻った行を、そのクエリの key へ引き直す。以前は key を `text` の
@@ -542,13 +678,10 @@ export class PostgresVectorStore implements VectorStore {
    * `Index Scan using ...hnsw...` が選ばれ、アンカーの数だけ `loops=N` で
    * 繰り返される——`Seq Scan` に落ちない。
    *
-   * Issue #956（ADR 0343）: `LATERAL` の中身は `vector_norm(e.embedding) > 0` の
-   * ORDER BY 押し下げ枝 + `= 0` の部分索引枝を持つ——これが統計あり・統計なしの
-   * 各枝それぞれに現れるので、`UNION ALL` は合計4枝になる（上のクラス doc 参照）。
-   * **往復数は変えていない**——`UNION ALL`/再ソートは `LATERAL` サブクエリの中に
-   * 収めてあり、`queries.length` が増えても発行する SQL 文は今日と同じ1本のまま
-   * （`vector-store-search-many.postgres.test.ts` の「往復数が anchorCount に依存しない」
-   * 歯を壊さないことを実測で確認済み）。
+   * Issue #956（ADR 0343）: `buildStatsPresentBranches`/`buildStatsMissingBranches`
+   * の中身は、それぞれ `vector_norm(e.embedding) > 0` の ORDER BY 押し下げ枝 + `= 0`
+   * の部分索引枝を持つ（`UNION ALL` 2枝、`search()` と共有するヘルパー——上の
+   * クラス doc 参照）。
    */
   async searchMany(
     ctx: Ctx,
@@ -574,17 +707,29 @@ export class PostgresVectorStore implements VectorStore {
 
     const table = embeddingSpaceTableName(space);
     assertSafeIdentifier(table);
-    // 統計ありの枝: `search()` と同じ素の `WHERE`（`buildFilterConditions`）。
-    const legacyWhereClause = buildFilterConditions(ctx, opts.filter);
-    // 統計なしの枝（候補D）: `e` 側と `m` 側は別の場所で合流する（クラス doc
-    // コメント、ADR 0362 参照）——`e` 側はここでの素の `WHERE`、`m` 側は LATERAL の
-    // 外側の `WHERE`（`buildLateralMemoryConditions`、テナント境界を含む）。
-    const embeddingConditions = sql`e.tenant_id = ${opts.filter.tenantId} AND e.tenant_id = ${ctx.tenantId}`;
-    const memoryConditions = buildLateralMemoryConditions(opts.filter);
-    // どちらの枝を動かすかは `pg_class.reltuples` で切り替える（往復を増やさない。
-    // クラス doc コメント参照）。
-    const statsPresent = statsPresentCondition(table);
-    const statsMissing = statsMissingCondition(table);
+
+    // Issue #1415 / ADR 0374: `search()` と同じ `StatsPresenceGate` を共有する
+    // ——両方の統計が確認済みなら、`search()` と1バイトも変わらない
+    // `buildStatsPresentBranches`（素の `JOIN memories m ON ...`）を、未確認/無しなら
+    // 候補D（`buildStatsMissingBranches`）を使う。ADR 0362 の「1本の SQL に両枝を
+    // 入れて One-Time Filter で切り替える」やり方は、統計がある場面の実測コストが
+    // 線を超えたため、この往復ベースの仕組みに替えた（ADR 0374 参照）。
+    const statsPresent = await this.statsPresenceGate.bothPresent(this.db, table);
+    const distanceExpr = sql`q.qvec`;
+    const branches = statsPresent
+      ? buildStatsPresentBranches(
+          table,
+          buildFilterConditions(ctx, opts.filter),
+          distanceExpr,
+          opts.limit,
+        )
+      : buildStatsMissingBranches(
+          table,
+          buildEmbeddingConditions(ctx, opts.filter),
+          buildLateralMemoryConditions(opts.filter),
+          distanceExpr,
+          opts.limit,
+        );
 
     // `search()` と同じ次元不一致の扱い（Issue #867 案B）——クエリごとに独立して適用する。
     // key ではなく添字を送る（上の doc コメント、Issue #1285）。
@@ -600,51 +745,7 @@ export class PostgresVectorStore implements VectorStore {
         CROSS JOIN LATERAL (
           SELECT combined.memory_id AS memory_id, combined.distance AS distance
           FROM (
-            (
-              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
-                     m.recorded_at AS recorded_at
-              FROM ${sql.identifier(table)} e
-              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-              WHERE ${legacyWhereClause} AND vector_norm(e.embedding) > 0 AND (${statsPresent})
-              ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
-              LIMIT ${opts.limit}
-            )
-            UNION ALL
-            (
-              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
-                     m.recorded_at AS recorded_at
-              FROM ${sql.identifier(table)} e
-              JOIN memories m ON m.id = e.memory_id AND m.tenant_id = e.tenant_id
-              WHERE ${legacyWhereClause} AND vector_norm(e.embedding) = 0 AND (${statsPresent})
-              ORDER BY m.recorded_at DESC, e.memory_id
-              LIMIT ${opts.limit}
-            )
-            UNION ALL
-            (
-              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
-                     m.recorded_at AS recorded_at
-              FROM ${sql.identifier(table)} e
-              CROSS JOIN LATERAL (
-                SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
-              ) m
-              WHERE ${embeddingConditions} AND vector_norm(e.embedding) > 0 AND ${memoryConditions}
-                AND (${statsMissing})
-              ORDER BY e.embedding <=> q.qvec, m.recorded_at DESC, e.memory_id
-              LIMIT ${opts.limit}
-            )
-            UNION ALL
-            (
-              SELECT e.memory_id AS memory_id, e.embedding <=> q.qvec AS distance,
-                     m.recorded_at AS recorded_at
-              FROM ${sql.identifier(table)} e
-              CROSS JOIN LATERAL (
-                SELECT * FROM memories WHERE id = e.memory_id OFFSET 0
-              ) m
-              WHERE ${embeddingConditions} AND vector_norm(e.embedding) = 0 AND ${memoryConditions}
-                AND (${statsMissing})
-              ORDER BY m.recorded_at DESC, e.memory_id
-              LIMIT ${opts.limit}
-            )
+            ${branches}
           ) AS combined
           ORDER BY combined.distance, combined.recorded_at DESC, combined.memory_id
           LIMIT ${opts.limit}

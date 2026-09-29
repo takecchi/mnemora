@@ -6,6 +6,17 @@
 節にそのまま残し、上書きした経緯は「統計がある場面で Hash Join を保つ別の形は無いか」
 節に書く。
 
+**🔴 2026-09-29 追記: この ADR が採った「案2」（1本の SQL に統計あり・無しの2形を
+並べ、`pg_class.reltuples` の One-Time Filter で切り替える）の仕組みは、
+[ADR 0374](./0374-search-stats-presence-instance-cache.md) が置き換えた。** Issue #1415
+で `search()` に同じ案2を適用し固く測り直したところ、統計がある場面（N=200・アンカー3）
+で `recall()` の前後差の中央値が +5.06ms となり許容線（2ms）を大きく超えたため、
+`search()`/`searchMany()` の両方を、`PostgresVectorStore` インスタンスが表ごとに
+統計の有無を一度だけ確認して覚える仕組み（`StatsPresenceGate`、通称「案A」）へ
+切り替えた。**本文（「決定」以下）はこの ADR が書かれた当時の記録として書き換えていない**
+——実測データ・reltuples の性質（`memories.reltuples` が0に固定される件等）は
+ADR 0374 でも引き続き前提として使っている。
+
 - **状態**: 採用 (2026-09)
 - **日付**: 2026-09-29
 

@@ -198,6 +198,38 @@ export async function captureClientQuery(
 }
 
 /**
+ * `matcher` に一致するクエリが `fn()` の実行中に何回発行されたかを数える
+ * （Issue #1415 / ADR 0374: `StatsPresenceGate` が「未確認の間だけ余分な往復を1回
+ * 払い、確認後は往復を増やさない」ことを検査するために使う——`captureClientQuery`
+ * と違い、0回でも例外を投げない。仕組みは `captureClientQuery` と同じ
+ * `Client.prototype.query` のパッチ（ADR 0284、doc コメント参照）だが、こちらは
+ * 1回だけ捕まえて上書きするのではなく、一致した回数を積む）。
+ */
+export async function countMatchingQueries(
+  matcher: (text: string) => boolean,
+  fn: () => Promise<unknown>,
+): Promise<number> {
+  let count = 0;
+  const originalQuery = Client.prototype.query;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (Client.prototype as any).query = function (this: Client, ...args: unknown[]) {
+    const [config] = args as [string | { text: string }];
+    const text = typeof config === "string" ? config : config.text;
+    if (matcher(text)) {
+      count += 1;
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (originalQuery as any).apply(this, args);
+  };
+  try {
+    await fn();
+  } finally {
+    Client.prototype.query = originalQuery;
+  }
+  return count;
+}
+
+/**
  * `captureClientQuery` が捕まえたクエリを、**捕まえたのと同じ transaction の文脈**で
  * `EXPLAIN` する（Issue #671 / ADR 0284 追記）。
  *
