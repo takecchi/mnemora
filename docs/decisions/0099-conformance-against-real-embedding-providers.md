@@ -276,3 +276,17 @@ provenance 付きで**写して**いるのと同じ作法を採る。⟹ 写し�
   まったく別の repo 文字列に変えても、適合テスト11本は**全部緑のまま**だった。
   `space.model` は宣言であって、読み込んだ重みの素性ではない。**この穴は塞いでいない。**
 - **`LLMProvider` の適合テストは今も無い**（ADR 0072 負債1 の埋め込み側だけを返済した状態が続く）。
+
+---
+
+⚠ **2026-09-29 追記（本文は書き換えていない）。**「呼び出し側（`recall-runtime.ts` /
+`runtime.ts`）が複数件をまとめて `embed()` に渡す設計である」という上の一文は、
+[ADR 0110](./0110-single-char-token-discriminator.md) §8 歯1
+（`packages/core/src/__tests__/embed-batch-size.test.ts`）で実際には
+「常に1件ずつ渡す」ことが機械的に固定されている——**この ADR の時点ではまだ
+その歯が無かった**。あわせて、`LocalEmbeddingProvider` 自身は
+[Issue #1141](https://github.com/takecchi/mnemora/issues/1141) /
+[ADR 0358](./0358-local-embedding-provider-splits-large-batches.md) により、
+既定で128件を超える件数を分割して推論するようになった——**この ADR が実測した
+「バッチの長さ構成でベクトルが動く」性質を、既定値以下では踏まないが（1回で
+渡す経路そのものは変えていない）、128件を超える件数を直接渡す呼び手は踏む。**
