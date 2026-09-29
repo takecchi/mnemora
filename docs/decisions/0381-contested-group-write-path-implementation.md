@@ -34,8 +34,16 @@ PR2 として実装した。段階Aで `RelationStore`・`MemoryStore.markContes
    `Runtime.markContested`/`resolveContested` と対称の層）を実装した（§3）。
 3. `detectClaimKeyContested` の `contested_group` 分岐（穴Aの吸収・合併を含むメンバーの
    組み立て）を実装した（§4）。
-4. **recall 段3（`contradiction_resolution`、必須の同伴取得）への group 対応は、この PR では
-   実装しなかった。**理由と、この ADR が見つけた設計上の未決着点を§5に記録する。
+4. **recall 段3（`contradiction_resolution`、必須の同伴取得）を多者間の群にも広げた**
+   （§5）。当初、オーナー側クローンへ判断を仰ぐ必要のある食い違い（ADR 0292 が設計した
+   別の opt-in チャンネルと、既存の必須取得の拡張のどちらを指すか）を見つけて実装を
+   見送ったが、後の指示で「既存の必須取得を拡張する・新しい `RecallQuery` の欄は作らない」
+   と決まったため、その方針で実装した（§5.3）。
+5. `ClaimKeyOptions.formContestedGroups?` という専用の opt-in フラグを新設していたが、
+   後の指示で廃止し、`RuntimeDeps.relationStore` の配線そのものを条件にした（§4.1）。
+6. `resolveContestedGroup?` の部分解消チェック（fix2）が投げていた
+   `MemoryStatusConflictError` の転用を、専用のエラー
+   `ContestedGroupMembershipMismatchError` に切り出した（§2.4）。
 
 **本 ADR が答えないこと**: `memory_relations` テーブルの形自体（ADR 0292 決定1）、
 多者間 `contested` を書く口の契約自体（ADR 0327・段階A、`MemoryStore.markContestedGroup?`
@@ -107,11 +115,7 @@ Postgres では正しく「1マイクロ秒だけ重なる」と判定され、�
 
 - **Postgres**: `WITH RECURSIVE` で `memory_relations`（`kind: 'contradicts'`）を辿って
   到達する id を求め、そのうち `memories.status = 'contested'` のものを、渡された id 集合と
-  突き合わせる。欠けがあれば `MemoryStatusConflictError(missingId, "contested", "contested")`
-  を投げ、何も書かない——**`expectedStatus === observedStatus === 'contested'`** という、
-  通常の CAS 違反（`expectedStatus !== observedStatus`）とは意味が異なる特別な使い方である
-  （「この id 自身の状態は問題ないが、群の全員としてこの呼び出しに含まれていなかった」ことを
-  表す）。
+  突き合わせる。欠けがあれば専用のエラー（§2.4）を投げ、何も書かない。
 - **InMemory・Fake**: 同じ判定を BFS（`this.relations`/`this.backing.relations` を手で辿る）
   で行う——SQL の `WITH RECURSIVE` に相当するグラフ探索を JS で書いた。
 
@@ -133,16 +137,34 @@ forget 等で離脱したメンバー（関係の行は残るが `status` はも
 **前**に同じ確認を読み側でも行う——`memberIds` から `kind: 'contradicts'` を辿って到達する
 `status === 'contested'` な id が `memberIds` の外にあれば、書き込みを一切試みず
 `{ kind: "ineligible", sides, missingMembers }` を返す。**`relationStore` が配線されて
-いなければ、この読み側の確認は行わず store 側の CAS だけに任せる**——store が
-`MemoryStatusConflictError` を投げれば `{ kind: "conflict", ... }` に落ちる（動作としては
-安全だが、`ineligible`/`conflict` のどちらに分類されるかが `relationStore` の有無で変わる。
-§7「引き受けた負債」に記録する）。
+いなければ、この読み側の確認は行わず store 側の CAS だけに任せる**——store 側の CAS が
+専用のエラー（§2.4）を投げれば、`relationStore` の配線有無に関わらず、Runtime はそれを
+捕まえて同じ `{ kind: "ineligible", ... }` に写す（下記）。
 
 適合テスト（`packages/testkit/src/memory-store-conformance.ts`）に、群の一部だけを渡す歯を
-足した——4件の群を作り、3件だけを解消しようとして `MemoryStatusConflictError` になり、
+足した——4件の群を作り、3件だけを解消しようとして専用のエラー（§2.4）になり、
 4件とも `status: 'contested'` のまま変わらないことを、Postgres・InMemory の両方で確認した。
 `packages/core/src/__tests__/resolve-contested-group.test.ts`（Fake、Runtime 層）にも
-同じ形の歯と、`relationStore` の有無で挙動が変わることを示す歯を足した（§7参照）。
+同じ形の歯を足した。
+
+### 2.4 専用のエラー `ContestedGroupMembershipMismatchError`【判、2026-09-30 のさらなる直し】
+
+当初、fix2 の CAS 違反は `MemoryStatusConflictError(missingId, "contested", "contested")`
+（`expectedStatus === observedStatus === 'contested'` という、通常の CAS 違反
+〔`expectedStatus !== observedStatus`〕とは意味が異なる特別な使い方）で表していた。
+オーナー側クローンの指示により、この転用をやめ、専用の型 `ContestedGroupMembershipMismatchError`
+（`packages/core/src/interfaces/memory-store.ts`）を新設した——`MemoryPurgeConflictError`
+が `MemoryStatusConflictError` を再利用しなかったのと同じ理由（`observedStatus` が
+`expectedStatus` と同じ値になりうる場面では、「期待した値と違う値を観測した」という
+`MemoryStatusConflictError` の前提そのものが成り立たない）。
+
+Postgres・InMemory・Fake の `resolveContestedGroup` 実装すべてがこの専用エラーを投げる
+よう変更した。`Runtime.resolveContestedGroup?` は、**`deps.relationStore` の配線の有無に
+関わらず**この専用エラーを捕まえて `{ kind: "ineligible", sides, missingMembers:
+[error.missingMemberId] }` に写す——旧版が持っていた「`relationStore` の配線有無で
+`ineligible`/`conflict` のどちらに分類されるかが変わる」という負債（旧 §7 の1番目）は、
+これで解消した。適合テスト・`packages/core` のテストも、投げられる例外の**型**まで
+（`instanceof ContestedGroupMembershipMismatchError`）縛るよう更新した。
 
 ---
 
@@ -174,25 +196,28 @@ forget 等で離脱したメンバー（関係の行は残るが `status` はも
 
 ## 4. `detectClaimKeyContested` の `contested_group` 分岐【判】
 
-### 4.1 `ClaimKeyOptions.formContestedGroups?: boolean`（既定 `false`）を新設した【判】
+### 4.1 群を作る条件は「`detectContested` が on かつ `RuntimeDeps.relationStore` が配線されていること」【判・伝、2026-09-30 のさらなる直し】
 
 `detectContested: true` の「一致が2件以上、または一致がちょうど1件だがその1件が既に
 `contested`」の分岐（ADR 0378 決定5が「evidence-only、状態を動かさない」と決めた分岐）で、
-`formContestedGroups: true` を渡し、かつ `deps.memoryStore.markContestedGroup` が
-配線されていれば、evidence だけに留めず実際に `Runtime.markContestedGroup` を呼んで群として
-書き込む。
+`deps.relationStore` と `deps.memoryStore.markContestedGroup` の両方が配線されていれば、
+evidence だけに留めず実際に `Runtime.markContestedGroup` を呼んで群として書き込む。
+**`deps.memoryStore.markContestedGroup` が配線されているだけでは群を作らない**——
+`relationStore` も要る（穴Aの吸収・合併の判定〔§4.2〕に `listRelated` そのものが要るため）。
 
-**既定を `false` にしたのは意図的な判断である。**Issue #933 PR1（ADR 0378）が確立した
-「evidence-only」の挙動を期待する既存の歯（`claim-key-single-contested-match.test.ts` 等、
-PR1の歯）は、`packages/core/src/__tests__/runtime-fakes.ts` の `FakeMemoryStore` が
-段階Aから `markContestedGroup`/`resolveContestedGroup` を常に実装しているため、もし
-この新しい書き込みが既定で有効だったら、PR1の歯を1文字も変更していないのに Stage B の
-コード変更だけで結果が変わって落ちる——**「PR1 の歯を書き換えない」という制約と、
-「detectClaimKeyContested の contested_group 分岐を実装する」という Stage B の要求を
-両立させる唯一の道が、この opt-in だった。** 既定 `false` を選んだことで、PR1 のテスト
-ファイルは1文字も変更せずに全て緑のまま通る（実測、§8）。命名・配置
-（`ClaimKeyOptions` の新フィールド）は `autoQueueConsolidateReflectOnExtract`・
-`knownPredicatesFromStore` と同じ「既定は今までどおり、opt-in だけが新しい」規約に揃えた。
+**当初は `ClaimKeyOptions.formContestedGroups?: boolean`（既定 `false`）という専用の
+opt-in フラグを新設していた**が、オーナー側クローンの指示によりこのフラグを廃止し、
+既存の `relationStore` の配線そのものを条件にした（この節の見出しの条件）。
+
+**`relationStore` を配線しない呼び出しの挙動は1バイトも変わらない**——**Issue #933
+PR1（ADR 0378）が確立した「evidence-only」の挙動を期待する既存の歯（
+`claim-key-single-contested-match.test.ts` 等、PR1の歯）は、`packages/core/src/
+__tests__/runtime-fakes.ts` の `FakeMemoryStore` が段階Aから `markContestedGroup`/
+`resolveContestedGroup` を常に実装している一方、PR1 の歯はどれも `relationStore` を
+一度も配線していない**ため、フラグを廃止して条件を `relationStore` の配線へ移しても、
+PR1 の歯は影響を受けない——実測で確認した（全6ファイル、§8）。「PR1 の歯を書き換えない」
+という制約と、「detectClaimKeyContested の contested_group 分岐を実装する」という要求は、
+専用フラグを持たない今の形でも両立する。
 
 ### 4.2 メンバーの組み立て（穴A・合併）【判】
 
@@ -226,9 +251,13 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
 
 ---
 
-## 5. recall 段3（`contradiction_resolution`）への group 対応 —— この PR では実装しなかった
+## 5. recall 段3（`contradiction_resolution`）への group 対応
 
-### 5.1 コーディネータからの依頼と、見つけた食い違い【判】
+**⚠ 2026-09-30 のさらなる直し: 実装した。**§5.1・§5.2 は最初にこの担い手が見つけた
+食い違いと、その時点で実装を見送った判断の記録として残す（当時の記録、書き換えない）。
+オーナー側クローンが (b) を選んだ経緯・実装した内容は §5.3 に書く。
+
+### 5.1 コーディネータからの依頼と、見つけた食い違い【判】（当時の記録）
 
 コーディネータの依頼は「recall 段3: 上限10（`DEFAULT_RECALL_ASSOCIATION.maxCount`）、
 `validFrom` の新しい順→id の順で切り、切った件数を `explain` に、`"relation"` という
@@ -265,7 +294,7 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
   であり、3件以上の群を「隣接」させる意味自体が新しい設計判断を要る）という、
   ADR 0292 が明示的に範囲外とした問いに触れる。
 
-### 5.2 この PR での判断: 実装を見送り、判断をマネージャー/オーナーへ返す【判】
+### 5.2 この PR での当時の判断: 実装を見送り、判断をマネージャー/オーナーへ返す【判】（当時の記録）
 
 **この食い違いを、この担い手の判断だけで一方に決めて実装することはしなかった。**理由:
 
@@ -280,11 +309,55 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
    呼び方）は (b) 寄りに読めるが、`maxCount` を新しい必須フィールドにする設計（ADR 0292
    決定2-b）と食い違う——**言葉だけでは一意に決まらない。**
 
-このため、recall 段3への group 対応は**この PR には含めず**、上の食い違いをマネージャーへの
-報告に明記し、(a)/(b) のどちらを実装すべきかの判断を仰ぐ。`docs/recall.md`・
-`docs/architecture.md` の recall 関連の節も、この理由でこの PR では変更していない
-（変更したのは `RuntimeDeps.relationStore?`・`Runtime.markContestedGroup?`/
-`resolveContestedGroup?` の追加箇所だけ）。
+このため、recall 段3への group 対応は当時**この PR には含めず**、上の食い違いをマネージャーへの
+報告に明記し、(a)/(b) のどちらを実装すべきかの判断を仰いだ。
+
+### 5.3 オーナー側クローンが (b) を選び、実装した【伝・判】
+
+マネージャー経由で、オーナー側クローンが (b)（既存の段3自体をN者の群に拡張する。
+`RecallQuery.relations?` という新しい欄は作らない）を選んだと伝わった。実装した内容:
+
+- **`RuntimeDeps.relationStore?`/`RecallRuntimeDeps.relationStore?` を通じて配線される
+  `RelationStore` を使う。** `Runtime.recall()` が組み立てる `RecallRuntimeDeps` に
+  `relationStore: deps.relationStore` をそのまま渡す。
+- **`contestedWithId` を持たない `contested`（群のメンバー）ごとに、`RelationStore.
+  listRelated(ctx, id, 'contradicts')` を1段だけ呼ぶ**（ADR 0292 決定2-a「深さは1段に
+  固定する」の判断を、この既存の必須取得にもそのまま踏襲した——多段の探索は今回も
+  作らない。理由も同じ: 測る手段が無い拡張を先取りしない）。複数の owner（群のメンバー
+  のうち、この recall の候補〔`withinLimit`〕に既に居るもの）から辿った辺を1つの無向
+  グラフとして束ね（`relationEdges`）、連結成分ごとに1つの単位（`Unit`。3件以上を
+  持ちうる）にまとめる——2者間の対（`contestedWithId` の直接参照、`fetchMandatoryCompanions`）
+  の既存の組み立ては1文字も変えていない。別の関数として並存させた。
+- **上限は `DEFAULT_RECALL_ASSOCIATION.maxCount`（既定10）を流用する。** 連想枠専用の
+  値を借りるだけで、これを直接動かす新しい `RecallQuery` の欄は作っていない——(a) が
+  設計していた `RecallRelationQuery.maxCount`（専用の必須フィールド）は採らなかった。
+  超えた分は `over_limit { stage: "relation", countKind: "exact" }` に積む。
+- **並び順は `validFrom` の新しい順→`id` の順**（`validFrom` が無い候補は最も古い扱い）
+  ——この回のマネージャー指示で決まった値をそのまま実装した。連想枠の `over_limit` が
+  ランキングスコアで切るのとは異なる基準であることを `docs/recall.md` に明記した。
+- **`RuntimeDeps.relationStore` が配線されていない場合**: 群のメンバーは今までどおり
+  単独では返らず `unit_assembly_dropped` に落ちる。**この recall に実際に
+  `contestedWithId` の無い `contested` 候補が現れたときだけ**
+  `stage_skipped { stage: "relation", reason: "relation_store_unavailable" }` を積む
+  （ADR 0292 決定3-b・`association` の `no_anchor` と同じ「実行する理由が無ければ
+  積まない」区別を踏襲した）。
+- **群を離れた（もう `contested` ではない）メンバーは、今の `status` の門で弾く**——
+  fix2（§2.2）・`resolveContestedGroup?` の CAS と同じ「行の有無ではなく `status` で
+  今の群を判定する」規律をここでも踏襲した。
+- **`companionOf`（どの owner を起点に見つかったか）は、複数の owner から到達可能な
+  companion の場合、最初に辺を記録した owner を指す**——`fetchMandatoryCompanions`
+  （2者版）の「対向は必ず1つ」という前提が無いため、N者では本質的に一意に決まらない
+  選択である。§7 の負債として記録する。
+- **`RecalledMemory.contestedWith`（2者間専用、ADR 0335）は群のメンバーには付かない**
+  ——`contestedWithId` 自体を持たない設計（ADR 0378 決定1 §3.3）のため、この欄の型
+  （単一の `MemoryId`）が最初からN者に対応していない。群の一員であることを示す欄は
+  `companionOf` だけである。
+
+`docs/recall.md`（§2 段3、§8）・`docs/memory-model.md`（§5 機構3）・
+`docs/architecture.md`（`RuntimeDeps.relationStore?` の節）を、実装した内容に合わせて
+更新した。新しい歯（`packages/core/src/__tests__/recall-relation-group-companion.test.ts`
+6件、`packages/postgres/src/__tests__/recall-relation-group-companion.postgres.test.ts`
+3件）を追加し、赤（別 worktree）・変異試験（段3の上限）も確認した（§8）。
 
 ---
 
@@ -292,31 +365,39 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
 
 - **`resolveContestedGroup?` の `winnerId` の大文字小文字救済を2者版と同じ形で実装する**:
   見送った（§3）。複数候補が同時にヒットする場合の振る舞いを新しく決める必要があり、
-  この PR の範囲（fix1・fix2・Runtime層・検出層）を超えると判断した。
-- **`formContestedGroups` の既定を `true` にする**: 見送った（§4.1）。「PR1 の歯を
-  書き換えない」という制約と両立しない。
-- **recall 段3への group 対応を、ADR 0292 の設計のどちらかに賭けて実装する**: 見送った
-  （§5）。影響範囲（recall の不変条件）と ADR の意思決定順序の両方の理由で、確認を待つ
-  ほうが安全だと判断した。
+  この PR の範囲を超えると判断した——この判断は今回も変わっていない（§7）。
+- **`formContestedGroups` という専用フラグを持たせたまま、既定を `true` にする**:
+  見送った（§4.1、当時の記録）。「PR1 の歯を書き換えない」という制約と両立しない。
+  最終的にはフラグ自体を廃止し、`relationStore` の配線を条件にする形に変わった。
+- **recall 段3への group 対応を、ADR 0292 の設計 (a)（独立した opt-in チャンネル
+  `RecallQuery.relations?`）で実装する**: 見送った（§5.3）。オーナー側クローンが (b)
+  （既存の必須取得の拡張）を選んだため。
+- **recall 段3の同伴取得の上限に、`association` と同じ専用のクエリ欄
+  （`RecallRelationQuery.maxCount` 相当）を新設する**: 見送った（§5.3）。この回の
+  マネージャー指示で「`RecallQuery.relations?` は作らない」と明示され、既存の
+  `DEFAULT_RECALL_ASSOCIATION.maxCount` を流用する形に決まった。
 
 ---
 
 ## 7. 引き受けた負債
 
-1. **`resolveContestedGroup?` の部分解消チェック（fix2）は、`relationStore` の配線有無で
-   `ineligible`/`conflict` のどちらに分類されるかが変わる。**動作としては両方とも
-   「何も書かれない」で安全だが、呼び出し側が結果を見て分岐する場合、`relationStore` の
-   配線状況に依存した分岐が必要になる。ドキュメント（interface JSDoc）には明記したが、
-   型で強制してはいない。
-2. **recall 段3への group 対応が未実装のままである**（§5）。今日の実装では、3件以上の
-   `contested` 群が `recall()` に出ても、`contradiction_resolution`（段3）はその群の
-   メンバーを同伴として引き寄せない——`contestedWithId` が `null` の群メンバーは、
-   `fetchMandatoryCompanions` の対象にならない（`recall-runtime.ts` の実装は本 PR で
-   一切変更していない）。呼び出し側が個別に `recall()` の結果を見て、`status === 'contested'`
-   かつ `contestedWithId === null` の Memory を見つけたら、`RelationStore.listRelated`
-   を自分で呼んで群の他のメンバーを補う、という回避策は可能だが、`docs/memory-model.md`
-   §5 機構3が要求する「必ず隣接」は今日満たされていない。
-3. **`resolveContestedGroup?` の `winnerId` の大文字小文字救済が無い**（§6）。
+1. **`resolveContestedGroup?` の `winnerId` の大文字小文字救済が無い**（§6）。
+2. **recall 段3の多者間の同伴取得は、深さ1段だけしか辿らない**（§5.3）。owner
+   （この recall の候補に既に居る群のメンバー）から直接辿れない仲間（owner 経由では
+   なく、companion 同士でしか繋がっていない仲間）は見つからない——`markContestedGroup?`
+   の fix1（§1）は「重なる組だけ」に行を張るため、群が完全なクリークになるとは限らず、
+   この限界は理論上起こりうる。ADR 0292 決定2-a と同じ「測れない拡張を先取りしない」
+   判断をそのまま踏襲したが、深さを増やす場合は新しい ADR が要る（ADR 0292 §8「これが
+   覆るとしたら」と同じ位置づけ）。
+3. **`companionOf` は、複数の owner から到達可能な companion の場合、どの owner を指すかが
+   実装の内部順序（`groupOwners` の走査順）に依存し、呼び出し側からは予測できない**
+   （§5.3）。2者版（`contestedWithId` が常に1つの相手を指す）には無かった曖昧さである。
+   影響は説明可能性の欄（`RecalledMemory.companionOf`）だけであり、`memories`/`omitted`
+   の中身・件数には影響しない。
+4. **recall 段3の多者間の同伴取得の上限（`DEFAULT_RECALL_ASSOCIATION.maxCount` の流用）
+   を、呼び出し側が個別に調整する手段が無い**（§5.3、§6）。`association` の `maxCount`
+   のような専用のクエリ欄を持たないため、群が大きすぎる場合の唯一の対処は
+   `resolveContestedGroup?` で群そのものを縮めることである。
 
 ---
 
@@ -327,19 +408,30 @@ MemoryId[]; markContestedGroup: MarkContestedGroupResult }` を足した。
   重なると判定され、ちょうど一致する組（重ならない）には行が張られないこと
   （`mark-contested-group-microsecond-boundary.postgres.test.ts`）。
 - fix2: Postgres・InMemory の両方で、群の一部だけを渡す `resolveContestedGroup` が
-  `MemoryStatusConflictError` になり、何も書かれないこと（`memory-store-conformance.ts`）。
+  専用のエラー（`ContestedGroupMembershipMismatchError`、§2.4）になり、何も書かれない
+  こと（`memory-store-conformance.ts`）。Runtime 層は `relationStore` の配線有無に
+  関わらずこれを `ineligible` に写すこと（`resolve-contested-group.test.ts`）。
 - Runtime 層: `Runtime.markContestedGroup?`/`resolveContestedGroup?` の ineligible 分類・
-  CAS・TOCTOU・`relationStore` 有無での挙動差（`mark-contested-group.test.ts`・
-  `resolve-contested-group.test.ts`）。
-- 検出層: `formContestedGroups` の既定 `false` が PR1 の挙動を変えないこと
-  （PR1 の全6ファイルを再実行し、1文字も変更せず緑のまま通ることを確認）。穴Aの吸収・
-  合併（2つの既存群の統合）・relationStore 無しでのフォールバックが期待通り動くこと
+  CAS・TOCTOU（`mark-contested-group.test.ts`・`resolve-contested-group.test.ts`）。
+- 検出層: `relationStore` を配線しない呼び出しが PR1 の挙動を変えないこと（PR1 の
+  全6ファイルを再実行し、1文字も変更せず緑のまま通ることを確認）。穴Aの吸収・合併
+  （2つの既存群の統合）・`relationStore` 無しでのフォールバックが期待通り動くこと
   （`claim-key-contested-group-detection.test.ts`）。
+- recall 段3: 群のうち1件だけが候補に上がると残りが同伴取得されること・隣接すること・
+  群を離れたメンバーが含まれないこと・上限（`validFrom` 降順→`id` 順）で切られ
+  `over_limit(stage:'relation')` に積まれること・`relationStore` 未配線時に
+  `stage_skipped(stage:'relation')` が積まれ群が単独で出ないこと・候補が無ければ
+  どちらの omission も積まれないこと（`recall-relation-group-companion.test.ts`
+  6件・`recall-relation-group-companion.postgres.test.ts` 3件、Fake・本物の Postgres
+  両方）。赤（別 worktree、この PR の直前の commit を起点）・変異試験（段3の上限の
+  `slice` を無効化し、狙った歯だけが赤くなることを確認）。
 
 **確かめていないこと**:
-- recall 段3への group 対応の実装そのもの（§5、意図的に未実装）。
 - `@mnemora/openai`/`@mnemora/anthropic`/`@mnemora/bullmq` など、`packages/core`/
   `packages/postgres`/`packages/testkit` 以外のパッケージへの影響（この PR はこれらを
   変更していないため、影響は無いはずだが、実際に動かしては確認していない）。
 - 大規模な `memory_relations` グラフ（数百〜数千件規模）での `markContestedGroup`/
-  `resolveContestedGroup`/`detectClaimKeyContested` の合併ロジックの性能。
+  `resolveContestedGroup`/`detectClaimKeyContested`/recall 段3の合併ロジックの性能。
+- recall 段3の同伴取得が、深さ2段以上必要な非クリーク構造の群で実際に一部を
+  取りこぼすケース（§7 負債2）の実測——理論上の限界としては記録したが、実際に
+  そのような群を作って確かめてはいない。
