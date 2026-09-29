@@ -214,8 +214,12 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const externalId = input.externalId ?? null;
+    // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
+    // 同じ値を使う（job ごとに違う `now()` を呼ばない）。
+    const outboxNow = opts?.now ?? new Date();
     return this.db.transaction(async (tx) => {
       const inserted = await tx.execute(sql`
         INSERT INTO observations (id, tenant_id, subject_id, external_id, kind, payload, occurred_at, recorded_at, valid_from, valid_until, attributes)
@@ -260,9 +264,9 @@ export class PostgresMemoryStore implements MemoryStore {
             ${ctx.tenantId},
             ${kind},
             ${JSON.stringify({ observationId: observation.id })}::jsonb,
-            now(),
+            ${toPgTimestamp(outboxNow)},
             0,
-            now()
+            ${toPgTimestamp(outboxNow)}
           )
           RETURNING *
         `);
@@ -381,11 +385,14 @@ export class PostgresMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     // ADR 0140: トランザクションを開く前に落とす（`createMemory` と同じ位置・同じ理由）。
     if (isContestedWithoutCompanion(input.status, input.contestedWithId)) {
       throw new ContestedWithoutCompanionError("createMemoryWithOutbox", null);
     }
+    // Issue #1237: `createObservationWithOutbox` と同じ理由——省略時は1回だけ壁時計を読む。
+    const outboxNow = opts?.now ?? new Date();
     const sourceObservationId = input.sourceObservationId ?? null;
     const extractorVersion = input.extractorVersion ?? null;
     const provenanceKind = input.provenance.kind;
@@ -458,9 +465,9 @@ export class PostgresMemoryStore implements MemoryStore {
             ${ctx.tenantId},
             ${kind},
             ${JSON.stringify({ memoryId: memory.id })}::jsonb,
-            now(),
+            ${toPgTimestamp(outboxNow)},
             0,
-            now()
+            ${toPgTimestamp(outboxNow)}
           )
           RETURNING *
         `);
@@ -1867,6 +1874,9 @@ export class PostgresMemoryStore implements MemoryStore {
       breakdownCaptured: true,
       memories: record.returnedMemories,
     };
+    // Issue #1237: 省略時は1回だけ壁時計を読む（`advanceActivityClock` の分岐によらず
+    // 同じ値を使う——下の3分岐はどれもこの1つの `insertRecall` を実行するだけである）。
+    const createdAt = record.createdAt ?? new Date();
     const insertRecall = sql`
       INSERT INTO recalls (
         id, tenant_id, subject_id, query, budget, omitted, usage, index_band, explain,
@@ -1880,7 +1890,7 @@ export class PostgresMemoryStore implements MemoryStore {
         ${JSON.stringify(record.indexBand)}::jsonb,
         ${JSON.stringify(record.explain)}::jsonb,
         ${JSON.stringify(returnedMemories)}::jsonb,
-        now()
+        ${toPgTimestamp(createdAt)}
       )
       RETURNING id
     `;
@@ -2029,7 +2039,7 @@ export class PostgresMemoryStore implements MemoryStore {
       inserted_events AS (
         INSERT INTO memory_events (id, tenant_id, memory_id, kind, at, actor, digest_snapshot, size_before_bytes, meta)
         SELECT
-          gen_random_uuid(), ${ctx.tenantId}, a.id, 'archived', now(),
+          gen_random_uuid(), ${ctx.tenantId}, a.id, 'archived', ${toPgTimestamp(opts.now)},
           '{"type":"system"}'::jsonb, a.digest, NULL, '{}'::jsonb
         FROM archived a
         RETURNING memory_id
@@ -2063,12 +2073,16 @@ export class PostgresMemoryStore implements MemoryStore {
       throw new Error(`PostgresMemoryStore: memory not found for tenant: ${id}`);
     }
 
+    // Issue #1237: `purged_at` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
+    // 2回読んで別の値になることがないよう、ここで一度だけ決める。
+    const at = event.at ?? new Date();
+
     return this.db.transaction(async (tx) => {
       const result = await tx.execute(sql`
         UPDATE memories
         SET content = ${tombstone.content},
             digest = ${tombstone.digest},
-            purged_at = now(),
+            purged_at = ${toPgTimestamp(at)},
             updated_at = now()
         WHERE tenant_id = ${ctx.tenantId} AND id = ${id}
           AND status = 'forgotten' AND purged_at IS NULL
@@ -2100,7 +2114,7 @@ export class PostgresMemoryStore implements MemoryStore {
           ${ctx.tenantId},
           ${event.memoryId},
           ${event.kind},
-          ${toPgTimestamp(event.at ?? new Date())},
+          ${toPgTimestamp(at)},
           ${JSON.stringify(event.actor)}::jsonb,
           ${event.digestSnapshot ?? null},
           ${event.sizeBeforeBytes ?? null},

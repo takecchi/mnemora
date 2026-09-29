@@ -106,18 +106,25 @@ export class PostgresOutboxStore implements OutboxStore {
     return result.rows.map((row) => rowToOutboxJob(row as unknown as OutboxJobRow));
   }
 
-  async complete(ctx: Ctx, jobId: string, expectedAttempts: number): Promise<void> {
+  async complete(
+    ctx: Ctx,
+    jobId: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void> {
     // id 列は uuid 型。べき等な終端更新（存在しない/形式が不正な id でも例外を投げない）
     // という契約のため、UUID の形をしていない入力はここで静かに無視する
     // （実 DB 検査で判明: 素通しすると invalid input syntax for type uuid で例外になる）。
     if (!isUuidLike(jobId)) {
       return;
     }
+    // Issue #1237: 省略時は壁時計。
+    const completedAt = opts?.at ?? new Date();
     // Issue #826: 相手側の終端（fail）が既に付いていたら、この UPDATE は0行のまま
     // 何も書かない（`failed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     const result = await this.db.execute(sql`
       UPDATE outbox
-      SET completed_at = now()
+      SET completed_at = ${toPgTimestamp(completedAt)}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
         AND failed_at IS NULL
       RETURNING id
@@ -128,7 +135,13 @@ export class PostgresOutboxStore implements OutboxStore {
     await this.raiseIfLeaseConflict(ctx, jobId, expectedAttempts);
   }
 
-  async fail(ctx: Ctx, jobId: string, error: string, expectedAttempts: number): Promise<void> {
+  async fail(
+    ctx: Ctx,
+    jobId: string,
+    error: string,
+    expectedAttempts: number,
+    opts?: { at?: Date },
+  ): Promise<void> {
     if (!isUuidLike(jobId)) {
       return;
     }
@@ -138,11 +151,13 @@ export class PostgresOutboxStore implements OutboxStore {
     // 黙って消さず、目に見える6文字の `\u0000` に置き換えて書く。
     // 歯は `__tests__/outbox-fail-nul-last-error.postgres.test.ts`。
     const storableError = error.replaceAll("\u0000", "\\u0000");
+    // Issue #1237: 省略時は壁時計。⚠ `available_at` は再計算しない（interface の doc 参照）。
+    const failedAt = opts?.at ?? new Date();
     // Issue #826: 相手側の終端（complete）が既に付いていたら、この UPDATE は0行のまま
     // 何も書かない（`completed_at IS NULL` を WHERE に足す——先に付いた終端を勝たせる）。
     const result = await this.db.execute(sql`
       UPDATE outbox
-      SET failed_at = now(), last_error = ${storableError}
+      SET failed_at = ${toPgTimestamp(failedAt)}, last_error = ${storableError}
       WHERE tenant_id = ${ctx.tenantId} AND id = ${jobId} AND attempts = ${expectedAttempts}
         AND completed_at IS NULL
       RETURNING id

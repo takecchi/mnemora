@@ -5,29 +5,43 @@
  * `Clock` を直接は使わない。`Clock` は runtime が「現在時刻」を取得する唯一の場所であり、
  * テストで固定時刻を注入できるようにするための境界。
  *
- * ⚠ **2026-09-27 追記（今の振る舞いを書いたもの、[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)）:
- * 注入した時計が届くのは、runtime が自分で時刻を決める所だけである。**Observation・Memory の `recordedAt`、
- * `decayFloorAt`、`tick` が `claimBatch` に渡す `now` は注入した時計に従う。一方、store が書き込みのときに埋める
- * 時刻——監査ログ（`memory_events`）の `at`（runtime が `at` を渡すのは `restoreSupersededBy` だけ）、`purgedAt`、
- * recall の記録の `createdAt`、outbox の `createdAt`・`availableAt`・`completedAt`——は壁時計になる。
- * ⟹ **壁時計より過去の時刻を注入すると、`tick` は積んだジョブを1本も取らない**（`available_at` が壁時計で、
- * claim は `available_at <= now` のジョブだけを取るため。`processed: 0` で、何も名乗らない）。過去の時刻での
- * 取り込み直しやテストでは、extract も embed も走らない。
- * 【実測 2026-09-27】`@mnemora/postgres` と testkit の fixture で同じ（`injected-clock-reach.postgres.test.ts`）。
+ * ⭐ **2026-09-29 追記（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、
+ * ADR 0354）: 注入した時計は、runtime が書き込む時刻のほぼ全部に届く。** 2026-09-27・09-28 の
+ * 実測（このファイルの旧い版、履歴は git blame）は「監査ログの `at`・`purgedAt`・recall の
+ * `createdAt`・outbox の3欄は壁時計になる」という**直っていない振る舞い**を記録していた——
+ * 本追記はその後の状態を書く。
  *
- * ⚠ **2026-09-28 追記（復帰と掃引の口、同じ Issue #1237）:** reinforce（`lastReinforcedAt`・`decayFloorAt`）は、
- * どの経路でも注入した時計に従う——`observe` の使用報告・`restoreArchived`・`restoreSuperseded` のどれでも、
- * runtime が `clock.now()` を渡す。一方、監査ログの `at` は口によって割れている:
+ * **注入した時計が届くもの**（`Runtime` の書き込み系メソッドすべてに共通）:
+ * - Observation・Memory の `recordedAt`、`decayFloorAt`、reinforce の `lastReinforcedAt`。
+ * - `tick` が `claimBatch`/`complete`/`fail` に渡す `now`/`opts.at`。
+ * - runtime が書くすべての `memory_events.at`（`created`・`restored`・`forgotten`・`purged`・
+ *   `archived`・`superseded`・`unsuperseded`・`updated`（contested 系含む）のどれでも、runtime は
+ *   `clock.now()` を渡す。`archived`（`sweepArchive` 経由）だけは例外で、呼び出し側が明示的に渡す
+ *   `ArchiveDecayedOptions.now` を使う——これも「注入した時計に従う」側であり、
+ *   `sweepArchive(ctx, { now: clock.now(), ... })` と呼べば同じ時計になる）。
+ * - `purgeMemory` の `purgedAt`（`event.at` と同じ値。runtime は両方に同じ `clock.now()` を渡す）。
+ * - `MemoryStore.createRecall`/`NewRecallRecord.createdAt`（recall の記録の時刻）。
+ * - `MemoryStore.create{Observation,Memory}WithOutbox` の `opts.now`（積む outbox 行の
+ *   `availableAt`・`createdAt`）。
  *
- * | 口 | 監査ログのイベント | `at` の出どころ |
- * |---|---|---|
- * | `sweepArchive` | `archived` | 壁時計（どれを選ぶかの基準は、呼び出し側が渡す `opts.now`。注入した時計ではない） |
- * | `restoreArchived` | `restored` | 壁時計 |
- * | `restoreSuperseded` | `unsuperseded` | 注入した時計（runtime が `at` を渡す唯一の口） |
+ * ⟹ **壁時計より過去の時計を注入しても、`tick` は積んだジョブを取れる**——`available_at` が
+ * 注入した時計に従うため、`claimBatch` の `available_at <= now` が同じ時計の中で閉じる。
+ * 【実測 2026-09-29】`@mnemora/postgres` と testkit の fixture で同じ
+ * （`injected-clock-reach.postgres.test.ts`）。
  *
- * ⟹ 同じ「戻す」操作でも、`restored` と `unsuperseded` は別の時計で打たれる。時計を注入した runtime で、ある
- * Memory の監査ログを `at` で並べると、この2つの口のイベントは別の時計の順に並ぶ。
- * 【実測 2026-09-28】`@mnemora/postgres` と testkit の fixture で同じ（同じテストファイル）。
+ * **今も壁時計のまま残るもの**（本 Issue の範囲外。`Runtime`/`Clock` の管轄ではない列・関数）:
+ * - `updated_at` 列（`memories`/`outbox` 等）。
+ * - `vector_embeddings.created_at`。
+ * - `registered_at`（`TenantSettingsStore` 系）。
+ * - `tenant_settings` の補助的な列（`tenant_activity.updated_at` 等）。
+ * - `packages/core/src/event-retention-purge.ts` の `purgeExpiredEventsForTenant` の
+ *   `opts.now`（既定 `new Date()`）——`Runtime` のメソッドではなく
+ *   `{ memoryStore, tenantSettingsStore }` だけを受け取る独立した部品であり、
+ *   `RuntimeDeps.clock` を受け取らない（Issue #1237 コメント参照）。
+ *
+ * `MemoryStore.create{Observation,Memory}WithOutbox` の `opts`・`OutboxStore.complete`/`fail`
+ * の `opts`・`NewRecallRecord.createdAt` はいずれも省略可能——省略すると実装は壁時計
+ * （`new Date()`）を使う（今日までと同じ挙動）。**型としては追加のみ**（ADR 0354「決めたこと」）。
  */
 export interface Clock {
   /** 現在時刻を返す。runtime が「今」を得る唯一の口（テストでは固定の時刻を返す実装を注入する）。 */

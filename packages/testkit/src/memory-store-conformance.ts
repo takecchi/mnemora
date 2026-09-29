@@ -757,6 +757,42 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(jobs).toEqual([]);
     });
 
+    /**
+     * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `opts.now` を
+     * 渡すと、積む outbox 行の `availableAt`/`createdAt` にその値を使う——`runtime` が
+     * 注入した時計（`clock.now()`）をここへ渡すことで、壁時計より過去の時計を注入しても
+     * `tick` が積んだジョブを取れるようにする（`Clock` の doc コメント参照）。
+     */
+    it("createObservationWithOutbox は opts.now を渡すと、outbox 行の availableAt・createdAt にその値を使う", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const now = new Date("2020-01-01T00:00:00.000Z");
+      const { jobs } = await store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-opts-now-1" }),
+        ["extract"],
+        { now },
+      );
+      expect(jobs[0]?.availableAt).toEqual(now);
+      expect(jobs[0]?.createdAt).toEqual(now);
+    });
+
+    /** ⭐ 非破壊の確認: `opts` を省略すると、今日どおり壁時計になる。 */
+    it("createObservationWithOutbox は opts を省略すると、outbox 行の availableAt・createdAt は壁時計になる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const startedAt = Date.now();
+      const { jobs } = await store.createObservationWithOutbox(
+        ctx,
+        buildNewObservationFixture({ tenantId: "tenant-1", externalId: "ext-opts-now-2" }),
+        ["extract"],
+      );
+      expect(jobs[0]!.availableAt.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+      expect(jobs[0]!.availableAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+      expect(jobs[0]!.createdAt.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+      expect(jobs[0]!.createdAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+    });
+
     // -------------------------------------------------------------------
     // createMemory の冪等性（docs/architecture.md §3.5、§5.1）
     // -------------------------------------------------------------------
@@ -1929,6 +1965,37 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       expect(jobs).toHaveLength(1);
       expect(jobs[0]?.kind).toBe("embed");
       expect(jobs[0]?.payload.memoryId).toBe(memory.id);
+    });
+
+    /** [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `createObservationWithOutbox` の同じ欄と同じ理由。 */
+    it("createMemoryWithOutbox は opts.now を渡すと、outbox 行の availableAt・createdAt にその値を使う", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const now = new Date("2020-01-01T00:00:00.000Z");
+      const { jobs } = await store.createMemoryWithOutbox(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "hash-opts-now-1" }),
+        ["embed"],
+        { now },
+      );
+      expect(jobs[0]?.availableAt).toEqual(now);
+      expect(jobs[0]?.createdAt).toEqual(now);
+    });
+
+    /** ⭐ 非破壊の確認: `opts` を省略すると、今日どおり壁時計になる。 */
+    it("createMemoryWithOutbox は opts を省略すると、outbox 行の availableAt・createdAt は壁時計になる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const startedAt = Date.now();
+      const { jobs } = await store.createMemoryWithOutbox(
+        ctx,
+        buildNewMemoryFixture({ tenantId: "tenant-1", contentHash: "hash-opts-now-2" }),
+        ["embed"],
+      );
+      expect(jobs[0]!.availableAt.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+      expect(jobs[0]!.availableAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
+      expect(jobs[0]!.createdAt.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+      expect(jobs[0]!.createdAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
     });
 
     it("createMemoryWithOutbox は抽出の冪等キーに衝突したら created: false・jobs: [] を返す", async () => {
@@ -3590,6 +3657,35 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
         });
       });
 
+      /**
+       * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `archived`
+       * イベントの `at` は `opts.now`（呼び出し側が渡した「いま」）と同じ値でなければならない
+       * ——壁時計（`new Date()`）ではない。既定 `'wall'` の掃引は `decay_floor_at <= opts.now`
+       * で選ぶので、`opts.now` を壁時計と大きくずらしても「選ぶ基準」と「イベントの時刻」が
+       * 食い違わないことをここで縛る。
+       */
+      it("archiveDecayed が積む archived イベントの at は opts.now と同じ値になる（壁時計ではない）", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        // 壁時計から大きく離れた `now` を選ぶことで、実装が `now()`/`new Date()`
+        // （壁時計）へこっそり倒れていないかを検出できるようにする。
+        const now = new Date("2031-01-01T00:00:00.000Z");
+        const decayed = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "archive-decayed-at-opts-now",
+            decayFloorAt: new Date(now.getTime() - 1_000),
+          }),
+        );
+
+        await store.archiveDecayed!(ctx, { now, limit: 10 });
+        const events = await listEventsForMemory(ctx, decayed.id);
+        expect(events.map((e) => ({ kind: e.kind, at: e.at }))).toEqual([
+          { kind: "archived", at: now },
+        ]);
+      });
+
       it("archiveDecayed は active 以外（contested/superseded/forgotten/既に archived）を対象にしない", async () => {
         const store = await createStore();
         const ctx: Ctx = { tenantId: "tenant-1" };
@@ -4022,6 +4118,80 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
           eventDigestSnapshot: "元の要旨",
           eventKinds: ["purged"],
         });
+      });
+
+      /**
+       * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `event.at` を
+       * 渡すと、`purgedAt` にも同じ値を使う——1つの壁時計を2回読んで別の値になることが
+       * ないよう、`purged_at` と `memory_events.at` は常に一致しなければならない。
+       */
+      it("purgeMemory は event.at を渡すと、purgedAt にも同じ値を使う", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-at",
+            status: "forgotten",
+          }),
+        );
+        const at = new Date("2020-01-01T00:00:00.000Z");
+
+        const { memory: returned, event } = await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            at,
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        expect(event.at).toEqual(at);
+        expect(returned.purgedAt).toEqual(at);
+      });
+
+      /**
+       * ⭐ 非破壊の確認: `event.at` を省略すると、今日どおり壁時計になる——**かつ**
+       * `purgedAt` と `memory_events.at` は同じ壁時計の読み取りでなければならない
+       * （2回 `new Date()` を呼んで別の値になることがない）。
+       */
+      it("purgeMemory は event.at を省略すると、purgedAt と event.at は同じ壁時計の値になる", async () => {
+        const store = await createStore();
+        const ctx: Ctx = { tenantId: "tenant-1" };
+        const memory = await store.createMemory(
+          ctx,
+          buildNewMemoryFixture({
+            tenantId: "tenant-1",
+            contentHash: "purge-memory-wall-now",
+            status: "forgotten",
+          }),
+        );
+        const startedAt = Date.now();
+
+        const { memory: returned, event } = await store.purgeMemory!(
+          ctx,
+          memory.id,
+          { content: "[purged]", digest: "[purged]" },
+          {
+            tenantId: "tenant-1",
+            memoryId: memory.id,
+            kind: "purged",
+            actor: { type: "system" },
+            digestSnapshot: memory.digest,
+            meta: {},
+          },
+        );
+
+        expect(returned.purgedAt).toEqual(event.at);
+        expect(event.at.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+        expect(event.at.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
       });
 
       it.each(["active", "archived", "superseded", "contested"] as const)(
@@ -7297,6 +7467,64 @@ export function describeMemoryStoreConformance(options: MemoryStoreConformanceOp
       });
       expect(typeof recallId).toBe("string");
       expect(recallId.length).toBeGreaterThan(0);
+    });
+
+    /**
+     * [Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」: `record.createdAt`
+     * を渡すと、書き込む行の `createdAt` にその値を使う——`runtime` が注入した時計をここへ
+     * 渡すことで、recall の記録の時刻も注入した時計に従うようにする。
+     */
+    it("createRecall は record.createdAt を渡すと、書く行の createdAt にその値を使う", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const createdAt = new Date("2020-01-01T00:00:00.000Z");
+      const recallId = await store.createRecall(ctx, {
+        tenantId: "tenant-1",
+        subjectId: null,
+        createdAt,
+        query: { text: "hello" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic",
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
+      const record = await store.getRecall(ctx, recallId);
+      expect(record?.createdAt).toEqual(createdAt);
+    });
+
+    /** ⭐ 非破壊の確認: `createdAt` を省略すると、今日どおり壁時計になる。 */
+    it("createRecall は createdAt を省略すると、書く行の createdAt は壁時計になる", async () => {
+      const store = await createStore();
+      const ctx: Ctx = { tenantId: "tenant-1" };
+      const startedAt = Date.now();
+      const recallId = await store.createRecall(ctx, {
+        tenantId: "tenant-1",
+        subjectId: null,
+        query: { text: "hello" },
+        budget: null,
+        omitted: [],
+        usage: {
+          chars: 0,
+          estimatedTokens: 0,
+          counter: "heuristic",
+          byTier: { full: 0, digest: 0, index: 0 },
+          indexChars: 0,
+        },
+        indexBand: { groups: [], totalInScope: 0, countKind: "exact" },
+        explain: { stages: [] },
+        returnedMemories: [],
+      });
+      const record = await store.getRecall(ctx, recallId);
+      expect(record!.createdAt.getTime()).toBeGreaterThanOrEqual(startedAt - 1000);
+      expect(record!.createdAt.getTime()).toBeLessThanOrEqual(Date.now() + 1000);
     });
 
     // -------------------------------------------------------------------

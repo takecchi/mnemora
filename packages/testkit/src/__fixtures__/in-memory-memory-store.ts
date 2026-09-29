@@ -579,20 +579,23 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     kind: OutboxJobKind,
     payload: Record<string, unknown>,
+    // Issue #1237: 既定は壁時計——呼び出し側（`supersedeWithNewMemories` 等、この Issue の
+    // 範囲外の口）が明示的に渡さない限り、今日と同じ挙動のまま。
+    now: Date = new Date(),
   ): OutboxJobRecord {
     const job: OutboxJobRecord = {
       id: nextId("job"),
       tenantId: ctx.tenantId,
       kind,
       payload,
-      availableAt: new Date(),
+      availableAt: now,
       claimedAt: null,
       claimedBy: null,
       attempts: 0,
       completedAt: null,
       failedAt: null,
       lastError: null,
-      createdAt: new Date(),
+      createdAt: now,
     };
     this.outboxJobs.push(job);
     return job;
@@ -602,13 +605,17 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewObservation,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ observation: Observation; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: observation, created } = this.createObservationIdempotent(ctx, input);
     if (!created) {
       return { observation: snapshot(observation), created: false, jobs: [] };
     }
+    // Issue #1237: 省略時は1回だけ壁時計を読み、この呼び出しで積む outbox 行すべてに
+    // 同じ値を使う（`@mnemora/postgres` と同じ規律）。
+    const outboxNow = opts?.now ?? new Date();
     const jobs = jobKinds.map((kind) =>
-      this.enqueueOutboxJob(ctx, kind, { observationId: observation.id }),
+      this.enqueueOutboxJob(ctx, kind, { observationId: observation.id }, outboxNow),
     );
     return snapshot({ observation, created: true, jobs });
   }
@@ -730,6 +737,7 @@ export class InMemoryMemoryStore implements MemoryStore {
     ctx: Ctx,
     input: NewMemory,
     jobKinds: OutboxJobKind[],
+    opts?: { now?: Date },
   ): Promise<{ memory: Memory; created: boolean; jobs: OutboxJobRecord[] }> {
     const { value: memory, created } = this.createMemoryIdempotent(
       ctx,
@@ -739,7 +747,11 @@ export class InMemoryMemoryStore implements MemoryStore {
     if (!created) {
       return { memory: snapshot(memory), created: false, jobs: [] };
     }
-    const jobs = jobKinds.map((kind) => this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }));
+    // Issue #1237: `createObservationWithOutbox` と同じ理由——省略時は1回だけ壁時計を読む。
+    const outboxNow = opts?.now ?? new Date();
+    const jobs = jobKinds.map((kind) =>
+      this.enqueueOutboxJob(ctx, kind, { memoryId: memory.id }, outboxNow),
+    );
     return { memory: snapshot(memory), created: true, jobs: snapshot(jobs) };
   }
 
@@ -1611,7 +1623,12 @@ export class InMemoryMemoryStore implements MemoryStore {
   async createRecall(ctx: Ctx, record: NewRecallRecord): Promise<RecallId> {
     assertRecallRecordStorable(record);
     const id = nextId("rcl");
-    this.recalls.set(id, { ...snapshot(record), tenantId: ctx.tenantId, createdAt: new Date() });
+    // Issue #1237: 省略時は壁時計。
+    this.recalls.set(id, {
+      ...snapshot(record),
+      tenantId: ctx.tenantId,
+      createdAt: record.createdAt ?? new Date(),
+    });
     if (record.advanceActivityClock === true) {
       const current = this.activitySeq.get(ctx.tenantId) ?? 0;
       this.activitySeq.set(ctx.tenantId, current + 1);
@@ -1820,6 +1837,8 @@ export class InMemoryMemoryStore implements MemoryStore {
         tenantId: ctx.tenantId,
         memoryId: memory.id,
         kind: "archived",
+        // Issue #1237: `archived` の `at` は `opts.now`（`@mnemora/postgres` と同じ）。
+        at: opts.now,
         actor: { type: "system" },
         digestSnapshot,
         sizeBeforeBytes: null,
@@ -1860,11 +1879,14 @@ export class InMemoryMemoryStore implements MemoryStore {
     }
     assertStorableMemoryEvent(event);
     assertCloneableMemoryEvent(event);
+    // Issue #1237: `purgedAt` と `memory_events.at` を同じ値にする——省略時も1つの壁時計を
+    // 2回読んで別の値になることがないよう、ここで一度だけ決める（`@mnemora/postgres` と同じ規律）。
+    const at = event.at ?? new Date();
     memory.content = tombstone.content;
     memory.digest = tombstone.digest;
-    memory.purgedAt = new Date();
+    memory.purgedAt = at;
     memory.updatedAt = new Date();
-    const storedEvent = buildStoredMemoryEvent(ctx, event);
+    const storedEvent = buildStoredMemoryEvent(ctx, { ...event, at });
     this.events.push(storedEvent);
     return snapshot({ memory, event: storedEvent });
   }
