@@ -1754,20 +1754,22 @@ union 拡張一般の影響であり、この文書が破壊的変更として�
 ⚠ **非破壊の追記（2026-09-30、[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、
 [ADR 0384](./decisions/0384-digest-band-index-and-scope-aggregate-skip.md)）**:
 `aggregateScope` の目次帯（digestBand）まわりの性能改善で、新しい migration
-`0027_digest_band_index.sql` が1本増えた（部分索引 `idx_memories_digest_band` の
+`0028_digest_band_index.sql` が1本増えた（部分索引 `idx_memories_digest_band` の
 追加のみ。列・型・SQL 文・返り値はどれも変えていない）。**この文書の定義では
 破壊的変更に数えない**——ここに書くのは、DB を更新する利用者向けの実務上の
 案内である。`RecallQuery.scopeAggregate?: "exact" | "skip"`（同 PR、既定 `"exact"`
 で1バイトも変わらない）は新しい任意の欄1つの追加のみで、DB マイグレーションは
 伴わない。
 
-**DB マイグレーション**: 新しい migration `0027_digest_band_index.sql` が1本増える
-（部分索引の追加のみ）。`v1.1.0` から上げる場合は `0026`〜`0027` の2本、
-`v1.0.2` からは `0023`〜`0027` の5本が要る。索引の構築は素の `CREATE INDEX`
+**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える
+（部分索引の追加のみ）。`v1.1.0` から上げる場合は `0026` と `0028` の2本、
+`v1.0.2` からは `0023`〜`0026` と `0028` の5本が要る（番号が `0027` を飛ぶのは、同じ時期に
+PR #1444 が `0027_erase_tenant_fk_indexes.sql` を持つため。`runMigrations` はファイル名の昇順で
+未適用のものを適用するだけで、番号の連続は要求しない）。索引の構築は素の `CREATE INDEX`
 （`CONCURRENTLY` 不可、`packages/postgres/src/migrate.ts` が各 migration ファイルを
-1トランザクションで包むため）——対象テーブル（`memories`）に `ACCESS EXCLUSIVE`
-ロックを取る。本番適用時はこの停止時間を見込むこと（実測は ADR 0384「測ったこと」
-を見ること、規模ごとの構築時間は個別に測っていない）。
+1トランザクションで包むため）——対象テーブル（`memories`）に `SHARE` ロックを取る
+（**書き込みは構築が終わるまで止まり、読み取りは通る**。`ACCESS EXCLUSIVE` ではない）。
+本番適用時は書き込みが止まる時間を見込むこと（構築時間は ADR 0384「測ったこと」を見ること）。
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

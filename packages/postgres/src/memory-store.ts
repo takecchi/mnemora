@@ -1744,7 +1744,7 @@ export class PostgresMemoryStore implements MemoryStore {
     //
     // [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)（案A）:
     // `digests` の `ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` は
-    // `migrations/0027_digest_band_index.sql` の部分索引
+    // `migrations/0028_digest_band_index.sql` の部分索引
     // `idx_memories_digest_band (tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC)
     // WHERE status IN ('active', 'contested')` に支えられる——ADR 0307「引き受けた負債」
     // 2番が残した「in-scope 件数ぶんの Seq Scan + top-N Sort」の穴を塞ぐ。

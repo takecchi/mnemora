@@ -12,7 +12,7 @@ import {
 
 /**
  * [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)（案A）:
- * `migrations/0027_digest_band_index.sql` が足した部分索引
+ * `migrations/0028_digest_band_index.sql` が足した部分索引
  * `idx_memories_digest_band (tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC)
  * WHERE status IN ('active', 'contested')` を、`PostgresMemoryStore.aggregateScope` の
  * `digestBand` サブクエリ（目次帯・第3階）が実際に使うことを縛る。
@@ -30,7 +30,7 @@ import {
  * - 歯3（同値）: 索引を使う自然な計画と、索引経路を全部外した seq scan 強制の計画が、
  *   同じ digest の集合（順序込み）を返すこと。
  *
- * 変異試験（赤→緑の確認、PR 本文参照）: `migrations/0027_digest_band_index.sql` の
+ * 変異試験（赤→緑の確認、PR 本文参照）: `migrations/0028_digest_band_index.sql` の
  * `WHERE status IN ('active', 'contested')` を落とす／列順を入れ替えると、歯1・歯2が
  * 赤くなることを手で確認した。
  */

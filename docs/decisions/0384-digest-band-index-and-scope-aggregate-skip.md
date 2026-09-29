@@ -43,7 +43,7 @@
   ## 案A: `idx_memories_digest_band` 部分索引
 
   1. **`(tenant_id, COALESCE(occurred_at, recorded_at) DESC, id DESC) WHERE status IN
-     ('active', 'contested')` の部分索引を足す**（`packages/postgres/migrations/0027_digest_band_index.sql`）。
+     ('active', 'contested')` の部分索引を足す**（`packages/postgres/migrations/0028_digest_band_index.sql`）。
      - `status IN (...)` を索引の**列**ではなく**部分述語**にする——複数値の等値条件を
        列に含めると、B-tree は値ごとに別々の範囲になり `ORDER BY <expr> DESC, id DESC`
        の全順序を1本のスキャンでは提供できない（値ごとの結果をマージする必要があり、

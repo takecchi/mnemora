@@ -1,4 +1,4 @@
--- 0027_digest_band_index.sql
+-- 0028_digest_band_index.sql
 --
 -- Issue #355 の残件（ADR 0307「引き受けた負債」2番）/ [ADR 0384](../../../docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md)（案A）:
 -- `PostgresMemoryStore.aggregateScope` の `digestBand` サブクエリ（目次帯・第3階、
@@ -60,8 +60,10 @@
 -- `packages/postgres/src/migrate.ts` が各移行ファイルを1トランザクションで包んでおり、
 -- `CREATE INDEX CONCURRENTLY` はトランザクションブロックの中では実行できない
 -- （0002/0003/0007/0010 などと同じ理由・同じ形）。素の `CREATE INDEX` は対象テーブルに
--- `ACCESS EXCLUSIVE` ロックを取る——行数が増えた本番で適用するときは、この停止時間を
--- 見込むこと。
+-- `SHARE` ロックを取る——**書き込み（INSERT/UPDATE/DELETE）は構築が終わるまで止まるが、
+-- 読み取り（SELECT）は通る**（`ACCESS EXCLUSIVE` ではない。同じ主張を
+-- `create-index-lock-mode.postgres.test.ts` が別の索引で固定している）。行数が増えた本番で
+-- 適用するときは、書き込みが止まる時間を見込むこと。
 
 CREATE INDEX idx_memories_digest_band
   ON memories (tenant_id, (COALESCE(occurred_at, recorded_at)) DESC, id DESC)

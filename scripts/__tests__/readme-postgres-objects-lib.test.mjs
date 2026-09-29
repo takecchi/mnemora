@@ -142,7 +142,7 @@ describe("deriveMigrationObjects", () => {
     expect(result.functions).toEqual(["mnemora_lexical_normalize"]);
   });
 
-  it("packages/postgres/migrations の現物から導くと、テーブル12・索引26・関数6になる（回帰止め）", async () => {
+  it("packages/postgres/migrations の現物から導くと、テーブル12・索引27・関数6になる（回帰止め）", async () => {
     const { readdirSync, readFileSync } = await import("node:fs");
     const { fileURLToPath } = await import("node:url");
     const migrationsDir = fileURLToPath(
@@ -168,7 +168,9 @@ describe("deriveMigrationObjects", () => {
     // `memory_relations`（テーブル+1）と `idx_memory_relations_from`/`idx_memory_relations_to`
     // （索引+2）を足した。11→12・24→26 も同様に反映であり、回帰ではない。
     expect(result.tables).toHaveLength(12);
-    expect(result.indexes).toHaveLength(26);
+    // ADR 0384 / PR #1455: migrations/0028_digest_band_index.sql が `idx_memories_digest_band`
+    // （索引+1）を足した。26→27 も同様に反映であり、回帰ではない。
+    expect(result.indexes).toHaveLength(27);
     expect(result.functions).toEqual([
       "mnemora_lexical_coverage",
       "mnemora_lexical_normalize",

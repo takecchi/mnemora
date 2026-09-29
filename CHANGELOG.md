@@ -85,9 +85,9 @@ Release の tag にあるという既存の決定（[ADR 0070](./docs/decisions/
 
 ### Changed（後方互換だが挙動が変わりうるもの）
 
-- **`@mnemora/postgres` の `aggregateScope` が、目次帯（`digestBand`）を組むときの内部の索引の使い方だけを変えた**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案A）——`ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` を支える部分索引 `idx_memories_digest_band`（新しい migration `0027_digest_band_index.sql`）を足した。**SQL 文・返り値の中身/順序/件数は1バイトも変えていない**——索引を追加しただけである。
+- **`@mnemora/postgres` の `aggregateScope` が、目次帯（`digestBand`）を組むときの内部の索引の使い方だけを変えた**（[PR #1455](https://github.com/takecchi/mnemora/pull/1455)、[ADR 0384](./docs/decisions/0384-digest-band-index-and-scope-aggregate-skip.md) 案A）——`ORDER BY COALESCE(occurred_at, recorded_at) DESC, id DESC LIMIT n` を支える部分索引 `idx_memories_digest_band`（新しい migration `0028_digest_band_index.sql`）を足した。**SQL 文・返り値の中身/順序/件数は1バイトも変えていない**——索引を追加しただけである。
   - 【実測】100万行・`max_parallel_workers_per_gather=0`・同時1・warm・digestBand込み: 全体 p50 1652.6ms → 1211.6ms（約27%減）。EXPLAIN では `digestBand` 側の `Seq Scan` + top-N `Sort`（542.6ms）が `Index Scan`（0.12ms）に置き換わったことを確認した——約4,500倍。テナント全体を `GROUP BY subject_id` で束ねる本体（支配項）は変わっていない。10万行では cold/warm-after とも約25〜30%減（詳細は ADR 0384「測ったこと」）。
-  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0027_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `ACCESS EXCLUSIVE` ロックを取る。
+  - **移行の手順**は [docs/migration-v1.md](./docs/migration-v1.md) の「DB マイグレーション」節。**DB マイグレーション**: 新しい migration `0028_digest_band_index.sql` が1本増える（`mnemora-postgres-migrate` か `runMigrations` を打つこと）。索引の構築は素の `CREATE INDEX`（`CONCURRENTLY` 不可）で、対象テーブルに `SHARE` ロックを取る（書き込みは構築が終わるまで止まり、読み取りは通る）。
   ⭕ 非破壊と数える（SQL 文・返り値は変わらない。索引を1本追加しただけ）。
 
 ---
