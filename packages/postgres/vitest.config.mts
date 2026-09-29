@@ -40,6 +40,9 @@ const SERIAL_TEST_FILES = [
   "src/__tests__/extension-mode.postgres.test.ts",
   "src/__tests__/migrate-concurrency.test.ts",
   "src/__tests__/vector-space-concurrency.test.ts",
+  // Issue #1207 / ADR 0383: 同上——pg_locks を読む（eraseTenant している最中に
+  // 別テナントへの書き込みが待たされないことを、自分の pid のロック mode で確認する）。
+  "src/__tests__/erase-tenant-concurrent-other-tenant.postgres.test.ts",
   // worker 専用 DB の `memories` に `ANALYZE` を明示的に打ち、同じ DB を後から使う
   // ファイルのプランの見積もりを変えうるもの（Issue #1415、ADR 0374）。
   "src/__tests__/recall-roundtrip-count.postgres.test.ts",
