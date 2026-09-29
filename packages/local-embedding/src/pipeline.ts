@@ -330,7 +330,9 @@ function withCacheDirLock<T>(task: () => Promise<T>): Promise<T> {
 export const createLocalEmbeddingPipeline: CreateLocalEmbeddingPipeline = (spec) =>
   withCacheDirLock(() => loadWithCacheDirSwap(spec));
 
-async function loadWithCacheDirSwap(spec: LocalEmbeddingModelSpec): Promise<LocalEmbeddingPipeline> {
+async function loadWithCacheDirSwap(
+  spec: LocalEmbeddingModelSpec,
+): Promise<LocalEmbeddingPipeline> {
   const transformers = await import("@huggingface/transformers");
   const { pipeline } = transformers;
   // 読み込みに失敗したときのメッセージが、実際に置かれる場所を名指せるように、`pipeline()` を

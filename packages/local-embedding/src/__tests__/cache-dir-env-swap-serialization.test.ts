@@ -83,9 +83,9 @@ describe("createLocalEmbeddingPipeline: env.cacheDir の差し替えと直列化
     pipelineMock.mockImplementation(async () => {
       throw new Error("boom");
     });
-    await expect(createLocalEmbeddingPipeline(baseSpec({ cacheDir: "/warm/cache" }))).rejects.toThrow(
-      "boom",
-    );
+    await expect(
+      createLocalEmbeddingPipeline(baseSpec({ cacheDir: "/warm/cache" })),
+    ).rejects.toThrow("boom");
     expect(envMock.cacheDir).toBe("/original/cache");
   });
 
