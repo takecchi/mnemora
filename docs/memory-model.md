@@ -1108,6 +1108,30 @@ NOT NULL とし、全ての一意制約・索引の先頭列に置く**（[ADR 0
   > 組み合わせによって、そこで ERROR になるか、黙って効かない（Issue #1301 の表。上流のソースからの推論を含み、
   > 0.8.0 未満の実物では測っていない）。「必須」は、利用者が満たすべき前提として残してある。検査を足す・警告を出す・
   > 書き方を変えるかは Issue #1301 で決まっていない。
+  >
+  > **⚠ 2026-09-29 追記（実装した。Issue #1301、[ADR 0367](./decisions/0367-pgvector-capability-check.md)。
+  > 上の行と直前の追記は、当時の記録として書き換えていない——もう今の振る舞いではない）:**
+  > **`@mnemora/postgres` は今、2箇所で検査する**——(a) `PostgresVectorStore` の
+  > `search()`/`searchMany()`（インスタンスごとに初回の呼び出しでだけ。`SET LOCAL
+  > hnsw.iterative_scan` を発行する前に決着する）、(b) `runMigrations`
+  > （`extensionMode` の `create`/`verify` 両方。`create` は新規インストールでは
+  > マイグレーション適用後、`verify` は拡張の存在確認の直後・advisory lock 取得前）。
+  > 対応していなければ `PgvectorVersionUnsupportedError`（`installed`/`required`/
+  > `missingCapability` を持つ）を投げる。
+  >
+  > **判定は `extversion` の文字列比較ではなく、能力で行う**——同じ接続で `vector` 型を
+  > 使ってから `pg_settings` の `hnsw.iterative_scan` 行の `vartype`/`enumvals` を読み、
+  > `enumvals` に `relaxed_order` を含むかで決める。`current_setting()` は使わない
+  > （`postgresql.conf`／`ALTER DATABASE`／`ALTER ROLE`／同一接続の過去の `SET` が作る
+  > placeholder の値をそのまま返してしまい、0.8 未満でも誤って「対応している」と
+  > 判定しうることを実測した——ADR 0367 決定2）。⟹ **ライブラリが実際に 0.8.0 以上なら、
+  > `extversion` が何らかの理由で古い値のままでも落ちない**（`ALTER EXTENSION vector
+  > UPDATE;` の実行漏れを誤って弾かない）。落ちるのは実際に iterative scan が効かない
+  > 構成だけである。
+  >
+  > **検査を外す opt-out は無い**（意図的な決定、ADR 0367 決定1）。0.5.x・0.6〜0.7.x の
+  > 実物での実測はまだ無く、代理実測（予約されない接頭辞の下での架空の名前）に留まる
+  > ——詳細は ADR 0367「確かめていないこと」。
 - **`>= 0.8.2` を推奨**とする（2026-02-26 リリース。CVE-2026-3172 のバッファオーバーフロー
   修正を含む）。
   > **⚠ 2026-09-17 追記（名乗りの復元。上の行は書き換えていない）。**

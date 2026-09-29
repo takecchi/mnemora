@@ -72,6 +72,19 @@ npm i @mnemora/postgres @mnemora/core
     DB の例外（`function word_similarity(…) does not exist`）で落ちる。複数の名前空間で使うなら、先に
     共通のスキーマへ `CREATE EXTENSION pg_trgm WITH SCHEMA public` などで入れておくこと
     （今の振る舞い。[Issue #1256](https://github.com/takecchi/mnemora/issues/1256)）。
+- **pgvector は `>= 0.8.0` が必須。** `hnsw.iterative_scan`（`relaxed_order`、ANN 段の
+  フィルタ問題対処、[ADR 0284](../../docs/decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md)）を
+  使うため。`>= 0.8.2`（CVE-2026-3172 のバッファオーバーフロー修正を含む）を推奨する。
+  **満たしていないと `PgvectorVersionUnsupportedError` が投げられる**——検査は2箇所:
+  `PostgresVectorStore.search()`/`searchMany()`（インスタンスごとに初回呼び出しでだけ）と
+  `mnemora-postgres-migrate`（`--extension-mode create`/`verify` 両方）。判定は
+  `pg_extension.extversion` の文字列比較ではなく、`pg_settings` の
+  `hnsw.iterative_scan` 行が実際に `relaxed_order` を解釈できるかという**能力**で行う
+  （[ADR 0367](../../docs/decisions/0367-pgvector-capability-check.md)）——ライブラリが
+  実際に 0.8.0 以上なら `extversion` が古いままでも通る。エラーメッセージには
+  `installed`（読めた版。無ければ `undefined`）・`required`（`"0.8.0"`）・
+  `missingCapability`（`"hnsw.iterative_scan"`）が載る。**検査を外すオプションは無い。**
+  直し方はライブラリを 0.8.0 以上へ上げるか、`ALTER EXTENSION vector UPDATE;` を実行すること。
 - 接続文字列は環境変数 `DATABASE_URL` で渡す。
 
 ## マイグレーション（`mnemora-postgres-migrate`）
