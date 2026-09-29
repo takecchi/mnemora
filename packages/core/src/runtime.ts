@@ -683,7 +683,7 @@ export interface ForgetResult {
  *   `{ query }` に `includeOutsideValidity: true`・過去の `validAt` を渡して集めた記憶も、同じく統合されていた
  *   （2026-09-29 に Postgres と testkit の fixture で実測）。
  * - ⚠ **2026-09-29 追記2（Issue #1188 残り、[ADR 0368](../../../docs/decisions/0368-consolidate-reflect-validity-intersection.md)）:
- *   統合先は eligible の有効期間の**積**を引き継ぐ（`intersectValidity`、`strategies/consolidate.ts`）
+ *   統合先は eligible の有効期間の**積**を引き継ぐ（`intersectValidity`、`validity.ts`）
  *   ——今までは常に `validFrom`/`validUntil` とも `null` だった。**代償**: 期限の無い記憶 F と、
  *   将来の期限を持つ記憶 E を一緒に統合すると、統合先は E の期限を持ち、F は他の統合元と同じく
  *   `superseded` になる——期限後は F 由来の内容も `recall()` に出なくなる（F 自身の行は

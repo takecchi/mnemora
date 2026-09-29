@@ -3259,10 +3259,6 @@ import type { PromptSpec } from "../interfaces/llm-provider.js";
 import type { Memory, NewMemory } from "../memory.js";
 import type { RecalledScore } from "../recall.js";
 export declare function intersectAttributes(eligible: ReadonlyArray<Pick<Memory, "attributes">>): Attributes;
-export declare function intersectValidity(eligible: ReadonlyArray<Pick<Memory, "validFrom" | "validUntil">>): {
-    validFrom: Date | null;
-    validUntil: Date | null;
-};
 export declare const ConsolidationLLMResultSchema: z.ZodObject<{
     content: z.ZodString;
     digest: z.ZodOptional<z.ZodString>;

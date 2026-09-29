@@ -69,9 +69,13 @@
 どれか1つの元の記憶の期限が切れた時点で、統合先・内省の記憶の本文の一部（その元の記憶に
 由来する主張）はもう真ではなくなる。和・最新を採らなかった理由は「採らなかった案」を見ること。
 
-**実装**: `packages/core/src/strategies/consolidate.ts` に `intersectValidity` を、
-`intersectAttributes`（ADR 0312 決定4、同じ形の積の純関数）の隣に足した。`buildConsolidatedMemory`
-（同ファイル）と `buildReflectedMemory`（`reflect.ts`）の両方が、この関数を呼んで
+**実装**: `packages/core/src/validity.ts` に `intersectValidity` を、期間の述語
+`classifyValidity`（PR #1383/#1388）の隣に足した。`intersectAttributes`（ADR 0312 決定4、同じ形の積の
+純関数）の隣（`strategies/consolidate.ts`）には置かない——そのファイルは `index.ts` が
+`export *` で公開するので、置くと `intersectValidity` が公開 API に出る。公開 API は一度出すと
+semver で縛られ、利用者がこの関数を使う理由も無いので、`index.ts` から出さない内部のファイルに
+置いた（依頼主クローン miku の判断）。`buildConsolidatedMemory`（`strategies/consolidate.ts`）と
+`buildReflectedMemory`（`strategies/reflect.ts`）の両方が、この関数を呼んで
 `validFrom`/`validUntil` を組み立てる——`intersectAttributes` を2経路が共有しているのと
 同じ理由（「複数の既存 Memory から新しい Memory を組み立てる」という同じ形の操作であり、
 同じ判定を2箇所で複製しない）。
@@ -84,9 +88,8 @@
 シグネチャも変えていない**——`BuildConsolidatedMemoryParams`/`BuildReflectedMemoryParams` の
 欄・`buildConsolidatedMemory`/`buildReflectedMemory` の引数と返り値の型（`NewMemory`。
 `validFrom`/`validUntil` は ADR 0145 以来、省略可能な欄として既に公開されている）は1バイトも
-変わらない。**公開 API の差分は `intersectValidity` という新しい関数の追加だけ**であり、
-既存の公開の型の削除・必須化・狭小化は無い（`api:check` の差分は追加のみであることを
-【実測】確認した）。破壊的変更かどうかの判断は CHANGELOG の `[1.1.0]` 節の本項目を見ること
+変わらない。**公開 API の差分は無い**——`intersectValidity` は `index.ts` から出さない
+`validity.ts` に置いたので、`pnpm run api:check` の snapshot は main と同じである（【実測】確認した）。破壊的変更かどうかの判断は CHANGELOG の `[1.1.0]` 節の本項目を見ること
 ——ここには複製しない。
 
 **空の積（`validFrom >= validUntil` になる組み合わせ）は起こらない。** `eligible` は
