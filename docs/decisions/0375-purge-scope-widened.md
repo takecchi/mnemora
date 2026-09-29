@@ -386,3 +386,41 @@ CHANGELOG の同項目に、この実例を影響の一言として書いた（�
   Observation を抽出した結果であり、供える記憶が forgotten になっても本文が漏れる
   という Issue #1226 と同種の問題を起こさないため、この PR の範囲外とした（意図的な
   除外であり、見落としではない）。
+
+**⚠ 2026-09-30 追記3（同日。この除外は受け入れられた。上の箇条書きは書き換えず、
+実測結果をここに足す）**: 除外の理由を一行で言うと——**reextract は元の Observation
+から抽出し直す操作で、forget された記憶の本文を材料にしないため**（`extractCandidates`
+に渡すのは `observation` であり、既存 Memory の `content` を読んで渡す経路は無い）。
+
+**実測（使い捨てのテスト、Fake・Postgres の両方。commit していない）**: `forget`（と
+`forget` → `purge`）した記憶を持つ Observation を、**同じ `extractorVersion`** で
+`reextract()` すると、`packages/postgres/src/__tests__/reextract-withdrawn-memories.postgres.test.ts`
+（Issue #1079・#1149、既存の歯、今回あわせて再実行して確認）が縛るとおり——`listWithdrawnBySourceObservation`
+が forgotten（purge 済みかどうかは問わない。`purge()` は `forgotten` でない記憶を拒むため、
+両者は同じ条件で判定できる）を検出し、**LLM を呼ばず・何も書かずに `extraction: "skipped"`
+を返す**。forgotten の場合と purged の場合で結果に違いは無い（どちらも `status:
+"forgotten"` として同じ分岐に入る）。ここでは新しい active な記憶は一切書かれない。
+
+**別の runtime インスタンス（`extractorVersion` を上げたもの）で reextract すると、
+挙動が変わる**——これは Issue #873（2026-09-26 追記、`Runtime.reextract` の doc コメント）
+が既に記録している「`extractorVersion` は runtime インスタンスに固定され、
+`listBySourceObservation`/`listWithdrawnBySourceObservation` は同じ `extractorVersion`
+の記憶しか見ない」という性質の、forgotten/purged な記憶についての具体化である。使い捨ての
+テストで実測した: `v1` の runtime で観測・抽出した記憶を forget→purge した後、**`v2`**
+の runtime インスタンス（同じ `MemoryStore`・同じテナント・同じ Observation）で
+`reextract()` を呼ぶと、`v1` の forgotten な記憶は `listWithdrawnBySourceObservation`
+（`v2` の `extractorVersion` でしか見ない）に一切現れず、**LLM が呼ばれ、新しい
+`active` な Memory が `extractorVersion: "v2"` として作られる**（`outcome` 相当:
+`extraction: "ok"`、`memoryIds` に1件）。その本文は、確かめたとおり Observation を
+渡した抽出結果であり（材料はやはり Observation の payload/text）、`v1` の forgotten な
+記憶の `content` 列を読む経路は無い——ただし、同じ Observation（同じ元の発話）を
+材料にしている以上、実運用の LLM では「forget したはずの事実と意味的に同じ内容」が
+新しい `active` な記憶として書かれうる。Fake・Postgres の両方で同じ結果だった。
+
+**気になる点として報告する（判断はしない）**: 上の「別の `extractorVersion` での
+reextract」は、forget（および purge）した事実が、抽出器の版を上げるという運用操作
+だけで、本文としては別経路（`observation` 経由）からではあるが、意味的には同じ内容が
+`active` として書き直されうる、という形に見える。これが Issue #1226 の範囲
+（LLM 呼び出しの最中の forget/purge の割り込み）とは別の軸の問題であること、
+`extractorVersion` を上げる操作自体が Issue #873 で既に別の性質として記録済み
+であることから、本 PR ではこれ以上追わない。
