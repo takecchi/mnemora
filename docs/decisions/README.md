@@ -404,5 +404,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0381](./0381-contested-group-write-path-implementation.md) | 多者間 `contested`（`memory_relations`）の書き込み経路の実装 —— Issue #207/#933 PR2 段階B の直しと設計判断 | 採用 (2026-09) |
 | [0382](./0382-vector-store-delete-across-spaces.md) | `VectorStore` に `deleteAcrossSpaces`（必須メソッド）を足す——`purge` が全 space の embedding を消す | 採用 (2026-09) |
 | [0385](./0385-association-probes-baseline-from-ci-measurement.md) | association-probes の基準値を CI 実測（6回）から置き、基準値より悪化した arm を警告する節を足す — 許容幅は0、ADR 0158 が挙げた #316/#317 の前提は CI でも成立した（Issue #291） | 採用 (2026-09) |
+| [0387](./0387-cjs-require-esm-smoke-in-default-ci.md) | README の「CommonJS からは require(esm) で読める」を、registry に出ない切り出し版で毎 PR の CI に入れる | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

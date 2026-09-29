@@ -382,6 +382,46 @@ jobs:
         # 変異試験でビルドを挟まずに済ませるための意図的な設計）。
         run: pnpm --filter @mnemora/bullmq run test:redis
 
+  cjs-require-smoke:
+    # README（`packages/core`・`packages/postgres` ほかの「前提」）が約束する
+    # 「CommonJS からは Node 22.12 以降の `require(esm)` で読み込める」を、毎 PR の CI で確かめる
+    # （ADR 0387）。
+    #
+    # 🔴 **required status check には入れていない。** `.github/required-status-checks.json`
+    # の宣言（branch protection の写し）に本ジョブは無い——required にするかどうかは
+    # branch protection 側の設定変更を伴いオーナー領分（`docs/autonomy.md` §3）であり、
+    # 本 PR の範囲外。⟹ このジョブが赤くても GitHub の Merge ボタンは単独では止まらない
+    # （上の `bullmq` ジョブと同じ形）。
+    #
+    # 既存の `scripts/check-consumer-install.mjs`（ADR 0346）は同じ約束をより広い範囲
+    # （型・ESM 経路・入口一覧の突き合わせも）で確かめるが、npm registry から約550MB を
+    # 取り直し・ロックファイル無しで依存の範囲を解決するため、既定の CI には入れていない
+    # （リリース前に人が打つ。`docs/release-v1.md` 0.11）。**このジョブは registry に一切
+    # 出ない設計（`scripts/check-cjs-require-smoke.mjs`）にすることで、その理由を外し、
+    # CJS の `require(esm)` の一点だけを毎 PR で見る。**
+    name: "CommonJS から require(esm) で読み込めること（README の前提、ADR 0387）"
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        # README の約束が要求する最低版（22.12）以上であること。`scripts/check-cjs-require-smoke.mjs`
+        # 自身も `process.version` を見て 22.12 未満なら実行前に赤で止まる（二重の安全弁）。
+        uses: actions/setup-node@v6
+        with:
+          node-version: "22"
+
+      - name: Enable corepack
+        run: corepack enable
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: "CommonJS の require(esm) だけを、registry に出ずに確かめる（ADR 0387）"
+        run: pnpm run check:cjs-require-smoke
+
   example-chat:
     # 🔴🔴 ⛔ 直上の `name:` は変えない —— この文字列は branch protection の
     # required status check の*文脈名*そのものである【実測、2026-09-23】:
