@@ -154,7 +154,9 @@ function steppingClockFrom(base: Date): Clock {
 /** `base` の前後 `windowMs`（既定1時間）以内の時刻か。注入した時計はここに落ちる。 */
 function isNear(date: Date | null | undefined, base: Date, windowMs = 3_600_000): boolean {
   return (
-    date instanceof Date && date.getTime() >= base.getTime() && date.getTime() < base.getTime() + windowMs
+    date instanceof Date &&
+    date.getTime() >= base.getTime() &&
+    date.getTime() < base.getTime() + windowMs
   );
 }
 
