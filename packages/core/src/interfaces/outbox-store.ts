@@ -93,7 +93,7 @@ import type { OutboxJobKind } from "./scheduler.js";
  *   止まり続ける job を後回しにする・隔離する・上限で終端にする、はしていない（新しい方針、
  *   [Issue #1196](https://github.com/takecchi/mnemora/issues/1196)）。
  *   🔴 **2026-09-29 追記（上の先頭詰まりを解消した。[Issue #1196](https://github.com/takecchi/mnemora/issues/1196)、
- *   [ADR 0357](../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
+ *   [ADR 0357](../../../../docs/decisions/0357-outbox-reclaim-requeues-to-tail.md)。クローン miku
  *   の判断であり、オーナーの判断ではない）: `claimBatch` は、リースが切れた行を**取り直す**
  *   （＝claim 時点で `claimed_at` が既に非 NULL）ときに限り、`available_at` を `opts.now`
  *   へ書き直す。**初めての claim**（`claimed_at` が NULL だった行）では `available_at` を
