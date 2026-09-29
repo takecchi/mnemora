@@ -22,12 +22,15 @@ import {
 } from "./test-db.js";
 
 /**
- * `observe` の `event` の `data` と `document` の `title` は、抽出（LLM）のプロンプトにも、LLM が失敗したときの
- * 全文フォールバックの Memory の本文にも入らない（今の振る舞い。`packages/core/src/observation.ts` の TSDoc、Issue #1185）。
- * testkit の fixture と `@mnemora/postgres` の両方で縛る。
+ * `observe` の `event` の `data` と `document` の `title` は、**既定では**抽出（LLM）のプロンプトにも、LLM が
+ * 失敗したときの全文フォールバックの Memory の本文にも入らない（既定の振る舞い。`packages/core/src/observation.ts`
+ * の TSDoc、Issue #1185）。testkit の fixture と `@mnemora/postgres` の両方で縛る。
  *
- * ⚠ 望ましい姿の主張ではない（`data`・`title` をプロンプトに足すかは Issue #1185 で決まっていない）。直すときは、
- * この歯ごと書き換えること。
+ * ⚠ Issue #1185 は「渡すかどうか」を **opt-in**（`extractData`/`extractTitle`、既定 `false`）で決めた
+ * （オーナー判断。[ADR 0369](../../../docs/decisions/0369-opt-in-extract-event-data-and-document-title.md)）。
+ * この歯が縛るのは opt-in しなかった既定の呼び出しだけである——opt-in したときの振る舞いは
+ * `observe-event-data-document-title-extract-opt-in.postgres.test.ts` が縛る。直すときは、この歯ごと
+ * 書き換えること。
  */
 
 const ctx: Ctx = { tenantId: "observe-data-title-1185" };
@@ -120,7 +123,7 @@ function inputs() {
 }
 
 describe.each(KITS)(
-  "event の data・document の title は抽出に渡らない（Issue #1185、今の振る舞い）: %s",
+  "event の data・document の title は既定では抽出に渡らない（Issue #1185、opt-in しない既定の振る舞い）: %s",
   (_name, build) => {
     it("抽出のプロンプトに data・title は入らず、name・content は入る", async () => {
       const { dataMarker, titleMarker, event, document } = inputs();

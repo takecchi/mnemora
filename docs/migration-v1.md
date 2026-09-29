@@ -1062,9 +1062,9 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 **DB マイグレーション**: `0022_embedding_zero_norm_index.sql` が1本増えている（Issue #956 / ADR 0343）。`v1.0.0` から上げる場合は `0019`〜`0022` の4本が要る。（⚠ 2026-09-27: PR #1187 がこの行に `0023` を書き足していたが、`0023` は `v1.0.2` の後に入ったので、この世代の行から外して下の「v1.0.2 → 次の版」の節へ移した）
 
-## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は4件**
+## 🔴 破壊的変更（v1.0.2 → 次の版）—— **未リリース。確定は6件**
 
-⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`fd20e14`**（PR #1397）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
+⛔ **次の版の tag はまだ切られていない。**この節は `v1.0.2`（`b981ecd`）… **`54b05bc`**（PR #1407）の範囲を数えたものである（[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の追記4〜追記13 と追記15〜追記18・追記20・追記21・追記22・追記24・追記25 と同じ範囲。追記14・追記19・追記23 は無い——追記19 は棚卸しではなく「保留の解消」、追記23 は棚卸しではなく PR #1393 が着地時に足した「破壊的変更の確定」である）。`main` がこれより進めば、数えていない範囲が増えるだけで、この節は腐らない。⛔ ここに件数を書かないこと（[ADR 0234](./decisions/0234-bake-no-numbers-into-tools-and-artifacts.md)）。
 
 **2026-09-29 追記**: 上の棚卸しの範囲（`f5ad59f` まで）の**外**——着地に先立って変更を作った本人が足した1件——として、`@mnemora/openai`・`@mnemora/anthropic` の `*ProviderOptions.client` の型が確定した破壊的変更である（[Issue #1221](https://github.com/takecchi/mnemora/issues/1221)、[ADR 0350](./decisions/0350-provider-client-type-decoupled-from-sdk-classes.md)）。中身は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節の `### Breaking` を見ること——**ここには複製しない。**
 
@@ -1081,6 +1081,10 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 
 ⚠ **2026-09-29 追記（22回目の棚卸し。CHANGELOG の追記24 と同じ範囲）——PR #1394 の数え直し。この判断はクローン miku の判断であり、オーナーの判断ではない。** PR #1394（[Issue #1237](https://github.com/takecchi/mnemora/issues/1237)「案1」、[ADR 0355](./decisions/0355-inject-clock-into-store-writes.md)）は、着地の時点で本人が下の「実行時」の一覧に「⭕ 非破壊と数えたもの」として置いていた（`MemoryStore.create{Observation,Memory}WithOutbox`・`supersedeWithNewMemories?`/`requeueEmbedJobs`/`OutboxStore.complete`/`fail`/`NewRecallRecord.createdAt` の型は追加だけ）。だが CHANGELOG は同じ変更を `### Breaking` に「`MemoryStore`/`OutboxStore` を自前で実装している人へ」として既に置いており、この節が集計する確定件数（上の3件）には含めていなかった——見出しの下に項目としては在るのに、件数には数えられていない食い違いがあった。上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔（「fixture 以外の公開の場所…と、conformance スイートの判定を厳しくする変更…は、これまでどおり上の定義と各世代の分け方で数える」）に照らすと、この変更が `packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に足した「渡した時刻を守る」歯は、まさに conformance スイートの判定を厳しくする変更であり、既存の自前実装（この欄を無視する実装）は型検査を通ったまま、conformance スイートを当てると新しく落ちる。⟹ **この棚卸しで、破壊的変更と数え直し、下に項目21として足した。**下の「⭕ 非破壊と数えたもの（この棚卸しの範囲より後に着地した1件。…）」の行は、着地時点の記録として書き換えていない（消していない）——直後に訂正を重ねた（下）。
 ⟹ **この節の範囲（`v1.0.2`…`fd20e14`）で、確定した破壊的変更は4件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」）になった。**
+
+⚠ **2026-09-29 追記（23回目の棚卸し。CHANGELOG の追記25 と同じ範囲）**: この節が数える範囲は、さらに `54b05bc` まで広がった。`fd20e14`…`54b05bc` に着地した PR（44480a5 #1396、1618694 #1399、00321e1 #1398、ca27946 #1400、cd5b1d5 #1401、d7df706 #1402、f312c4d #1404、8e467c6 #1405、a53b2b7 #1406、54b05bc #1407）のうち、PR #1400 は `CHANGELOG.md`・`docs/migration-v1.md`・`docs/release-notes-v1.1.0.md` だけ（22回目の棚卸し自身）。残り9 PR はどれも公開の型の追加だけ（`AbortSignal` の口・`schema_unsupported`/`cause`・`extension_not_visible` の union 値）か、公開の型を1バイトも変えない挙動の直しであり、破壊的とは数えない（詳細は CHANGELOG の `[1.1.0]` 節の各項目と、下の「型の上」の追記）。この回で新しく確定した破壊的変更は無い。
+
+⟹ **この節の範囲（`v1.0.2`…`54b05bc`）で、確定した破壊的変更は、なお4件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」）である。**
 
 **移行の手順（`client` を独自の型注釈で書いている場合だけ）**:
 1. `Pick<OpenAI, "chat">`/`Pick<OpenAI, "embeddings">`/`Pick<Anthropic, "messages">` という型注釈を、`@mnemora/openai`/`@mnemora/anthropic` が export する `OpenAIChatClient`/`OpenAIEmbeddingsClient`/`AnthropicMessagesClient` へ置き換える。
@@ -1099,6 +1103,8 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 **⚠ 2026-09-29 追記（21回目の棚卸し）**: `git diff v1.0.2..94dafe0 -- scripts/__snapshots__/public-api/` は `core.d.ts`・`postgres.d.ts`・`testkit.d.ts` に新しい差分が在る——どれも PR #1380（Issue #338、ADR 0353）の分で、追加のみ（削除・必須化・狭小化は無い）。`core.d.ts`: `FindCorrectionCandidatesInput`・`RecallQuery`・`ConsolidateTarget`・`ReflectTarget` に `activityCounting?: "tenant" | "subject"` を、`ArchiveDecayedOptions` に `usesSubjectActivityCounters?` を、`VectorFilter`/`RecallScope` に `decayFloorSeqUsesSubjectCounters?` を、`TenantSettingsStore` に `hasSubjectActivityCounters?`/`getSubjectActivitySeqs?` を、それぞれ省略可能な欄・メソッドとして足した。`NewRecallRecord.advanceActivityClock` は `boolean` から `boolean | { scope: "subject"; subjectId: string }` へ広がった（下の「実行時」の一覧、非破壊）。`postgres.d.ts`: `PostgresTenantSettingsStore` に `hasSubjectActivityCounters`/`getSubjectActivitySeqs` を実装として足した。`testkit.d.ts`: `InMemoryMemoryStore` に読み取り専用の `subjectActivitySeq` プロパティが増え、`InMemoryTenantSettingsStore` のコンストラクタに省略可能な第2引数 `subjectActivitySeqBacking?: Map<string, Map<string, number>>` が増えた——引数を末尾に足しただけで、0引数・1引数の既存の呼び出しは1行も直さず通る（下の「⭕ 非破壊と数えたもの（オーナーの回答に当てたもの。21回目の棚卸しで足した）」を参照）。`anthropic.d.ts`・`openai.d.ts`・`bullmq.d.ts` に、この範囲で新たに増えた差分は無い。
 
 **⚠ 2026-09-29 追記（22回目の棚卸し）**: `git diff v1.0.2..fd20e14 -- scripts/__snapshots__/public-api/` は `core.d.ts`・`postgres.d.ts`・`testkit.d.ts`・`local-embedding.d.ts` に新しい差分が在る（追加のみ、削除・必須化・狭小化は無い）。`core.d.ts`: `computeEventRetentionCutoff(now, days)`・`MemoryStore.purgeExpiredEventsByRetention?`・`PurgeExpiredEventsByRetentionOptions`・`PurgeExpiredEventsByRetentionOutcome`（PR #1393、上の項目20）。`MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox`/`supersedeWithNewMemories?` の `opts?: { now?: Date }`・`requeueEmbedJobs` の `writeOpts?: { now?: Date }`・`OutboxStore.complete`/`fail` の `opts?: { at?: Date }`・`NewRecallRecord.createdAt?: Date`（PR #1394、下の項目21）。`RecallStageName` に `"association"` が増え、`StageTraceSchema`/`RecallResultSchema` にも反映された（PR #1392、Issue #865。union への値の追加で破壊的と数えない——オーナーの回答（ask_human `d9364c91`）と同じ理由）。`postgres.d.ts`: `createPostgresClient` の設定に `onPoolError?: (error: Error) => void`（PR #1395、Issue #1213）と、`PostgresMemoryStore` に `purgeExpiredEventsByRetention`（PR #1393）・上記の `opts?`/`writeOpts?` 各引数（PR #1394）。`testkit.d.ts`: `InMemoryMemoryStore.eventRetentionDays`・`InMemoryTenantSettingsStore` のコンストラクタに `eventRetentionDaysBacking?: Map<string, number | null>`（PR #1393）、`OutboxStoreConformanceOptions.peekJob?`（PR #1394——適合テストが上の「渡した時刻を守る」歯を検査するために増やした口自体であり、これも型としては追加）と上記 `opts?`/`writeOpts?` 各引数（PR #1394）。`local-embedding.d.ts`: `DEFAULT_LOCAL_EMBEDDING_MAX_BATCH_SIZE = 128`・`LocalEmbeddingProviderOptions.maxBatchSize?: number`（PR #1397、Issue #1141。非破壊）。`anthropic.d.ts`・`openai.d.ts`・`bullmq.d.ts` に、この範囲で新たに増えた差分は無い。出荷される6パッケージの `package.json`・`pnpm-lock.yaml` に差分は無い。
+
+**⚠ 2026-09-29 追記（23回目の棚卸し）**: `git diff v1.0.2..54b05bc -- scripts/__snapshots__/public-api/` は、上の4ファイルに加えて `anthropic.d.ts`・`openai.d.ts` にも新しい差分を持つ（`bullmq.d.ts` は19回目の棚卸し分（bullmq の初登場）のまま、新たな差分は無い）。`fd20e14`…`54b05bc` で増えた分は追加のみ（削除・必須化・狭小化は無い）——`core.d.ts`: 新設の `abort.ts` が export する `AbortOptions`・`abortReason`・`isAbort`・`runAbortable`、`deriveClaimKeys`/`extractCandidates`/`runRecall` に `signal?: AbortSignal`、`EmbeddingProvider.embed`/`LLMProvider.complete`/`completeStructured`/`Runtime.observe`/`recall`/`findCorrectionCandidates`/`reextract` に `opts?: AbortOptions`、`ConsolidateOptions`/`ReflectOptions`/`TickOptions` に `signal?: AbortSignal`（すべて PR #1398、Issue #1200）。`anthropic.d.ts`・`openai.d.ts`: 同じ `AbortOptions` の追加（PR #1398）に加え、`AnthropicLLMFailureKind`/`OpenAILLMFailureKind` に `"schema_unsupported"` が増え、`*ProviderErrorOptions` に `cause?: unknown` が増えた（PR #1399、Issue #1148）。`local-embedding.d.ts`: `LocalEmbeddingProvider.embed` に `opts?: AbortOptions`（PR #1398）——PR #1401（Issue #1239）・PR #1404（Issue #1403）は `cacheDir`/`revision` の既存の欄の挙動だけを直しており、公開の型は変えていない。`postgres.d.ts`: `TrigramLexicalUnavailableReason` に `"extension_not_visible"` が増えた（PR #1405、Issue #1256。union への値の追加で破壊的と数えない——オーナーの回答（ask_human `d9364c91`）と同じ理由）——PR #1396（Issue #1196）・PR #1402（Issue #1064）・PR #1406（Issue #1222）・PR #1407（Issue #1188 残り）は、どれも公開の型を変えていない。`testkit.d.ts`・`bullmq.d.ts` に、この範囲で新たに増えた差分は無い。出荷される6パッケージの `package.json`・`pnpm-lock.yaml` に差分は無い。
 
 **実行時**: 分け方は上の世代と同じ（CHANGELOG の `[1.1.0]` 節の前書き）。
 
@@ -1121,6 +1127,8 @@ npm の `@mnemora/core@0.3.0` の `dist/*.d.ts` にも `restoreSuperseded` は�
 - ⭕ **非破壊と数えたもの（この棚卸しの範囲より後に着地した1件。上の各行と違い、棚卸しで拾ったのではなく、変更を作った本人が着地時に足した）**——`MemoryStore.createObservationWithOutbox`/`createMemoryWithOutbox`/`supersedeWithNewMemories?` に `opts?: { now?: Date }` が、`MemoryStore.requeueEmbedJobs` に `writeOpts?: { now?: Date }` が、`OutboxStore.complete`/`fail` に `opts?: { at?: Date }` が、`NewRecallRecord` に `createdAt?: Date` が、それぞれ省略可能な欄として増えた（Issue #1237「案1」、ADR 0355）。既存の呼び出し（これらを渡さない）は型としても意味としても1バイトも変わらず通る——非破壊。**ただし `MemoryStore`/`OutboxStore` を自前で実装している場合は、この新しい欄を守る（省略時は壁時計を使う）ように直さないと、`packages/testkit` の適合テストが落ち、`RuntimeDeps.clock` に壁時計より過去の時計を注入したときに `tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装にだけ残る。**詳しくは CHANGELOG.md の `[1.1.0]` 節 `### Breaking`（「`MemoryStore`/`OutboxStore` を自前で実装している人へ」の項目）を見ること——ここには複製しない。
 
   ⚠ **2026-09-29 訂正（22回目の棚卸し）。この判断はクローン miku の判断であり、オーナーの判断ではない。** 直前の行は「非破壊」と数えていたが、これは**型**だけを見た判定である。この変更が `packages/testkit` の `describeMemoryStoreConformance`/`describeOutboxStoreConformance` に足した「渡した時刻を守る」歯は、まさに上の「数え方の規律への追記（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」であり、同 ⛔ は「これまでどおり上の定義と各世代の分け方で数える」と明記している——既存の自前実装（この欄を無視する実装）は型検査を通ったまま、conformance スイートを当てると新しく落ちる（実行時に壊れる）。⟹ **この棚卸しで、破壊的変更と数え直した。**下に項目21として足した（上の「🔴 破壊的変更」節の見出しと確定件数を4件に直した）。この行自体は着地時点の記録として書き換えていない。
+
+- ⭕ **非破壊と数えたもの（オーナーの回答に当てたもの。23回目の棚卸しで足した）**——`@mnemora/postgres` の `probeTrigramLexicalSupport`/`PostgresTrigramLexicalStore.create` が返す公開 union `TrigramLexicalUnavailableReason` に `"extension_not_visible"` が増えた（PR #1405、Issue #1256、ADR 0366。union に値を足す変更は破壊的と数えない、オーナーの回答（ask_human `d9364c91`）と同じ理由）。⚠ **新しく作る DB では挙動が変わる**——`pg_trgm` を `vector` 拡張と同じスキーマへ揃えて入れるようになった（詳細は CHANGELOG の `[1.1.0]` 節の同項目）。あわせて、`@mnemora/local-embedding` の `LocalEmbeddingProvider` に `AbortOptions` の第3引数が増えた（`embed()`、PR #1398、Issue #1200。`opts` を渡さない既存の呼び出しは1バイトも変わらない）。PR #1396（Issue #1196、outbox の先頭詰まり）・PR #1401（Issue #1239、`cacheDir` のオフライン読み込み）・PR #1402（Issue #1064、`lastError` の `params` 省略と長さの上限）・PR #1404（Issue #1403、`revision` のオフライン読み込み）・PR #1406（Issue #1222、`idx_memories_lexical` の tsvector フォールバック。⚠ migration 0025 で `memories` への読み書きが一時的に `ACCESS EXCLUSIVE` ロックで止まる。下の「DB マイグレーション」を見ること）・PR #1407（Issue #1188 残り、統合先・内省の記憶の有効期間の積）は、いずれも公開の型を1バイトも変えていない（`git diff v1.0.2..54b05bc -- scripts/__snapshots__/public-api/` に対応する差分が無い）。詳細は CHANGELOG の `[1.1.0]` 節の各項目を見ること——ここには複製しない。
 
 ⚠ **bullmq について（19回目の棚卸しで初めて注記）**: PR #1382 で `@mnemora/bullmq` が `scripts/publish-targets.mjs` の `PUBLISH_TARGETS` に加わったが、まだ一度も publish されていない（version は `0.0.0` のまま）。この節が数えるのは「利用者が版を上げるときに何をどう直すか」であり、一度も publish されていない package には該当する利用者が存在しない。⟹ **この節は bullmq をまだ対象に含めていない。**bullmq が実際に publish された後、bullmq 自身に破壊的変更が着地すれば、その時点でこの節（かそれに続く世代の節）の対象に加える。
 
@@ -1166,7 +1174,7 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 
 **DB マイグレーション**（既存の言及。上の項目19 とは別件）: `0023_lexical_query_inner_quote_as_space.sql`（語彙チャンネルのクエリで、語の途中の `"` を空白として扱う。PR #1187）と `0024_tenant_subject_activity.sql`（活動時計の subject 単位のカウンタ、PR #1380）の2本が増えている。`v1.0.2` から上げる場合は、6パッケージを上げた後に `npx mnemora-postgres-migrate`（`DATABASE_URL` を渡す。または `runMigrations`。上の「DB マイグレーション」）が要る——このリポジトリの workspace 内なら `pnpm --filter @mnemora/postgres run migrate` でも同じ。`v1.0.1` からは `0022`〜`0024` の3本、`v1.0.0` からは `0019`〜`0024` の6本が要る。（⚠ 2026-09-27 訂正: この行は workspace 内の形 `pnpm --filter @mnemora/postgres run migrate` だけを書いていた。利用者のプロジェクトには `--filter` で指せる workspace が無いので、その形では打てない。⚠ **2026-09-29 訂正（22回目の棚卸し）**: この行はここまで `0023` の1本のままだった——`0024` は21回目の棚卸し（CHANGELOG 追記22）の時点で既にこの節の範囲に入っていたが、この行は直っていなかった。気づいた時点で直す。**クローン miku の判断であり、オーナーの判断ではない**）
 
-⚠ **2026-09-29 追記（Issue #1222、[ADR 0364](./decisions/0364-lexical-tsvector-fallback-for-oversized-content.md)）**: マイグレーションがさらに1本増え、上の「2本」は**3本**（`0023`〜`0025`）になった——`0025_lexical_tsvector_fallback.sql` は `idx_memories_lexical`（語彙チャンネルの式索引）を `DROP INDEX` + `CREATE INDEX` で作り直す（`CONCURRENTLY` 不可）。**この migration の適用中、`memories` への読み書きが `ACCESS EXCLUSIVE` ロックで止まる**——【実測】10万行で約1.2秒（旧式の索引作り直し約1.0秒に対し+20.3%。行数にほぼ比例して伸びる見込み）。あわせて、この索引式を通る `memories` への INSERT/UPDATE が恒常的にわずかに遅くなる（【実測】10万行の INSERT で約+17.6%）。実測の詳細は ADR 0364「実測」節。`v1.0.1` からは `0022`〜`0025` の4本、`v1.0.0` からは `0019`〜`0025` の7本が要る（上の「3本」「6本」を置き換える）。
+⚠ **2026-09-29 追記（Issue #1222、[PR #1406](https://github.com/takecchi/mnemora/pull/1406)、[ADR 0364](./decisions/0364-lexical-tsvector-fallback-for-oversized-content.md)）**（⚠ 23回目の棚卸し: この段落はここまで PR 番号のリンクが無いまま書いていた——`a53b2b7` #1406 として着地済みなので、リンクを足した。数値・本文は着地時点のまま書き換えていない）: マイグレーションがさらに1本増え、上の「2本」は**3本**（`0023`〜`0025`）になった——`0025_lexical_tsvector_fallback.sql` は `idx_memories_lexical`（語彙チャンネルの式索引）を `DROP INDEX` + `CREATE INDEX` で作り直す（`CONCURRENTLY` 不可）。**この migration の適用中、`memories` への読み書きが `ACCESS EXCLUSIVE` ロックで止まる**——【実測】10万行で約1.2秒（旧式の索引作り直し約1.0秒に対し+20.3%。行数にほぼ比例して伸びる見込み）。あわせて、この索引式を通る `memories` への INSERT/UPDATE が恒常的にわずかに遅くなる（【実測】10万行の INSERT で約+17.6%）。実測の詳細は ADR 0364「実測」節。`v1.0.1` からは `0022`〜`0025` の4本、`v1.0.0` からは `0019`〜`0025` の7本が要る（上の「3本」「6本」を置き換える）。
 
 【実測 2026-09-27】この節の手順を、利用者の側で通した（`main` = `47b2aa6`）。
 1. npm から `@mnemora/*@1.0.2` の6パッケージを入れた素のプロジェクト（`npm`、`"type": "module"`、TypeScript 5.9 の `nodenext`）で、`npx mnemora-postgres-migrate` を空の DB に打った（`0001`〜`0022`）。
@@ -1256,6 +1264,61 @@ const total = m.score.affinityMeasured !== false ? m.score.total : null;
 **どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること（自分の実装で `opts.now`/`writeOpts.now`/`opts.at`/`record.createdAt` を実際に使うよう直し、`packages/testkit` の適合テストを走らせて緑になることを確認する）。直さない間も、`Runtime` からの呼び出しは今までどおり動く（これらの欄は壁時計のまま）——`RuntimeDeps.clock` に壁時計より過去の時計を注入したときにだけ、`tick()` がジョブを1本も取れない問題（Issue #1237 の本文）が自分の実装に残る。
 
 **DB マイグレーション**: 不要（スキーマは変えていない）。
+
+**⚠ 2026-09-29 追記**: 上の棚卸しの範囲（`fd20e14` まで）の**外**——着地に先立って変更を作った本人がこの節に足した1件——として、`@mnemora/postgres` に破壊的変更がもう1件確定した（[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、[ADR 0367](./decisions/0367-pgvector-capability-check.md)）。上の「2026-09-29 追記（20回目の棚卸し）」（項目19）・「2026-09-29 追記」（項目20）と同じ扱い——棚卸しの「PR を全部当てた」手順を経て足したものではない。下に項目22として足した（上の「🔴 破壊的変更」節の見出しの確定件数を5件に直した）。🔴 `fd20e14` からこの変更が着地するまでの間に他の PR が `main` へ入っている可能性があるが、それらを1本ずつ洗って分類する棚卸しはまだ行っていない。**次回の棚卸しで、この追記が数えていない範囲（`fd20e14`…この変更の着地点）を通しで数え直すこと。**
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は5件（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、PR #1394・Issue #1237「案1」、Issue #1301）になった。**
+
+### 22. `@mnemora/postgres` が、pgvector の `hnsw.iterative_scan` 対応を起動時に検査するようになった（`@mnemora/postgres`）
+
+[Issue #1301](https://github.com/takecchi/mnemora/issues/1301)、
+[ADR 0367](./decisions/0367-pgvector-capability-check.md)。
+
+**何が変わったか**: `PostgresVectorStore.search()`/`searchMany()`（インスタンスごとに初回の呼び出しでだけ）と `runMigrations`（`extensionMode` の `create`/`verify` 両方）が、pgvector が `hnsw.iterative_scan` の `relaxed_order`（[ADR 0284](./decisions/0284-hnsw-iterative-scan-relaxed-order-adopted.md)）に対応しているかを検査するようになった。対応していなければ、新しい `PgvectorVersionUnsupportedError` を投げる。**公開の型としては追加だけ**（新しいエラークラスの export）——中身・実測・移行の手順は [CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking` を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 今まで例外を投げずに進んでいた（0.5.x・PostgreSQL 15 未満）か、`recall()` の2回目の呼び出しから未分類の ERROR で落ちていた（0.6.0〜0.7.x × PostgreSQL 15 以上）構成が、この版からは `mnemora-postgres-migrate` の実行時、または `search()`/`searchMany()` の初回呼び出し時に、はっきりした型のエラーで落ちるようになる——実行時の振る舞いが変わるという意味での Breaking である（PR #1393・項目20 と同じ理由）。
+
+**誰が影響を受けるか**: pgvector が 0.8.0 未満、または `ALTER EXTENSION vector UPDATE;` をまだ実行していないために `hnsw.iterative_scan` が使えないままの環境。**判定は版の文字列ではなく能力で行うため、ライブラリが実際に 0.8.0 以上ある環境は、`pg_extension.extversion` が古く見えていても影響を受けない**（ADR 0367 決定2）。
+
+**どう直すか**: pgvector を 0.8.0 以上へ上げるか、`ALTER EXTENSION vector UPDATE;` を実行する。**検査を外すオプションは無い。**
+
+**DB マイグレーション**: 不要（スキーマは変えていない。検査は既存のマイグレーション適用の手順に相乗りする）。
+
+### 23. `packages/testkit` の conformance suite が、自前の `MemoryStore`/`VectorStore`/`EventStore` 実装に7つの約束を新しく課すようになった（`@mnemora/testkit`）
+
+[Issue #1238](https://github.com/takecchi/mnemora/issues/1238)、
+[PR #1413](https://github.com/takecchi/mnemora/pull/1413)、
+[ADR 0372](./decisions/0372-conformance-suite-issue-1238-promises.md)。**この項目は、
+上の棚卸しの範囲（`54b05bc`。PR #1407）の外——着地に先立って変更を作った本人が
+この節に足した1件である**（項目19・20・21・22 と同じ扱い——棚卸しの「PR を全部当てた」
+手順を経て足したものではない）。
+
+**何が変わったか**: `describeMemoryStoreConformance`・`describeVectorStoreConformance`・
+`describeEventStoreConformance` に、7つの約束（`supersedeWithNewMemories` のロール
+バック・区切り文字を含む値の非衝突・テナント分離×並行・`onlyMemoryIds` の形式不正
+id・reinforce の起点・claim key の片方欠落・EventStore の meta/actor 往復）を検査する
+`it` が増えた。**公開の型は1バイトも変えていない**——中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.1.0]` 節 `### Breaking`（「`@mnemora/testkit` の
+conformance suite が…」の項目）を見ること。**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: 足した7つの `it` は、上の「数え方の規律への追記
+（2026-09-28）」規律2 の ⛔ が挙げる「conformance スイートの判定を厳しくする変更」に
+当たる——型検査は壊れないが、この7つの約束のどれかを満たしていない自前実装は、
+conformance suite を当てると新しく落ちる（実行時に壊れる）。項目21（PR #1394）と
+同じ判断である。
+
+**誰が影響を受けるか**: 自前の `MemoryStore`/`VectorStore`/`EventStore` 実装を、
+`packages/testkit` の conformance suite に対して走らせている利用者のうち、7つの
+約束のどれかを満たしていない場合。**適合テストを走らせていない・自前実装を
+持たない利用者は影響を受けない。**
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+
+**DB マイグレーション**: 不要（スキーマは変えていない。テストのみの変更）。
+
+⟹ **この節の範囲（`v1.0.2`…この変更の着地点）で、確定した破壊的変更は6件
+（PR #1377・Issue #1221、PR #1385・Issue #548 方向2、PR #1393・Issue #1232、
+PR #1394・Issue #1237「案1」、Issue #1301、Issue #1238）になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 
