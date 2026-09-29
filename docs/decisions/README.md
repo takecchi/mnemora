@@ -316,7 +316,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0289](./0289-recalled-memory-speaker-subject.md) | `RecalledMemory` に `speaker`/`subjectId` を任意欄として足す —— Issue #579 案D を、型ではなく runtime の保証で守る（非破壊） | 採用 (2026-09) |
 | [0290](./0290-activity-seq-read-path-documented-not-implemented.md) | Issue #338 案2（`activity_seq` の進みから recall 頻度を測る）の段0 — 読み口は既に在ったので、実装はせず文書化だけを足す | 採用 (2026-09) |
 | [0291](./0291-primary-probe-coverage-map-correction-candidate-domain.md) | 主測定の被覆の地図（第2弾）— 北極星から見た被覆表と、次に作る領域として「訂正候補探索」を選ぶ | **提案 (2026-09)** |
-| [0292](./0292-relation-graph-table-depth-omitted-design.md) | 関係グラフ本体（Issue #207）の段0 — テーブル形・探索の深さ上限・`omitted` への出し方を決める（設計のみ） | **提案 (2026-09)** |
+| [0292](./0292-relation-graph-table-depth-omitted-design.md) | 関係グラフ本体（Issue #207）の段0 — テーブル形・探索の深さ上限・`omitted` への出し方を決める（設計のみ） | 採用 (2026-09) |
 | [0293](./0293-remove-pr-text-checks-and-release-followup-notice.md) | PR タイトル/本文を見る CI ステップ3本と、リリース後の追随通知ワークフローを削除する | 採用 (2026-09) |
 | [0294](./0294-lexical-tie-density-bench.md) | `retrieval` ベンチの語彙チャンネル構成（ADR 0148）でタイ密度を測るベンチを足す — 測るだけで、Issue #394 の取り扱いには何も答えない | 採用 (2026-09) |
 | [0295](./0295-answer-prompt-provenance-rendering.md) | 回答プロンプトに由来・話者・主題・矛盾関係を描画する形式を決める（Issue #691、`examples/chat` 限定・非破壊） | 採用 (2026-09) |
@@ -351,7 +351,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0324](./0324-claim-key-contested-detection.md) | 主張キー（(B) 第2段）の検出実装 — 列と索引だけで衝突を見つけ、`contested` までで止める（Issue #372） | 採用 (2026-09) |
 | [0325](./0325-bullmq-tick-driver.md) | `@mnemora/bullmq` は `Scheduler` を実装せず、BullMQ で `runtime.tick()` を駆動する（Issue #205 の2本目） | 採用 (2026-09) |
 | [0326](./0326-answer-path-claim-key-contested-opt-in-measurement.md) | examples/chat の answer 経路に claimKey/detectContested を評価用 opt-in する — `[矛盾候補:]` が0件だった理由を実測する（Issue #691 続き） | 採用 (2026-09) |
-| [0327](./0327-relation-graph-contested-write-path-design.md) | 関係グラフ本体（Issue #207）の段1 — `memory_relations` へ何を移すか・既存列からの移行の形・多者間 `contested` の解き方（設計のみ） | **提案 (2026-09)** |
+| [0327](./0327-relation-graph-contested-write-path-design.md) | 関係グラフ本体（Issue #207）の段1 — `memory_relations` へ何を移すか・既存列からの移行の形・多者間 `contested` の解き方（設計のみ） | 採用 (2026-09) |
 | [0328](./0328-local-embedding-output-cross-runner-reproducibility-measured.md) | `local` 埋め込みの出力は、ランナーをまたいで同じになるか——x64 どうしはビット一致、x64 と arm64 は系統的に不一致（Issue #565、測っただけ。門にはしない） | **提案 (2026-09)** |
 | [0329](./0329-claim-key-known-predicates-from-store.md) | `knownPredicates` を store の既存 predicate 一覧から動的に渡す — ADR 0326「採らなかった案B」を実装し、実測する（Issue #691 続き） | 採用 (2026-09) |
 | [0330](./0330-openai-embedding-live-conformance-and-determinism-measured.md) | 実 API の `OpenAIEmbeddingProvider` に適合テストを当て、決定性を測った——無条件7本は緑、単独入力は一致、3件バッチは一致しない（Issue #142 ①、測っただけ。宣言は変えない） | **提案 (2026-09)** |
@@ -401,7 +401,7 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0378](./0378-claim-key-contested-detection-covers-contested-matches.md) | claim key の自動 contested 検出は、3件目以降も一致に数える —— `findContestedByClaimKey?`（PR1）と、多者間 `contested` を表へ束ねる書き込み経路の全体設計（PR2、Issue #933・#207・ADR 0327 の続き） | 採用 (2026-09) |
 | [0379](./0379-contested-tag-asymmetric-wording.md) | 矛盾候補欄の文面を記録順で非対称にし（案1）、実際に非対称文面が出た回だけ system 文に読み方の一文を足す（案3）。C2（案1＋案3、既定オン）を採用する（Issue #1430） | **採用: (2026-09)** |
 | [0380](./0380-reextract-withdrawn-across-extractor-versions.md) | `reextract` は、版を跨いで退けた記憶を見る——`MemoryStore.listBySourceObservationAllVersions` を新設する | 採用 (2026-09) |
-| [0381](./0381-contested-group-write-path-implementation.md) | 多者間 `contested`（`memory_relations`）の書き込み経路の実装 —— Issue #207/#933 PR2 段階B の直しと設計判断 | **提案 (2026-09)** |
+| [0381](./0381-contested-group-write-path-implementation.md) | 多者間 `contested`（`memory_relations`）の書き込み経路の実装 —— Issue #207/#933 PR2 段階B の直しと設計判断 | 採用 (2026-09) |
 | [0382](./0382-vector-store-delete-across-spaces.md) | `VectorStore` に `deleteAcrossSpaces`（必須メソッド）を足す——`purge` が全 space の embedding を消す | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->
