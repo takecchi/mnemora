@@ -570,10 +570,57 @@ export async function ensureTrigramLexicalFunctions(db: Db): Promise<void> {
  * 大きな `memories` に対して実行する場合は、呼び出し側が `CONCURRENTLY` 付きの索引を
  * 別途自分で組み立てることもできる——この関数はあくまで「動く最小形」を提供するだけで
  * あり、唯一の経路として使うことを強制しない。
+ *
+ * ⟹ **`CONCURRENTLY` 付きで張りたい呼び出し側のために、
+ * {@link createOptionalTrigramIndexConcurrently} を別に用意した**（この関数の SQL は変えていない）。
  */
 export async function createOptionalTrigramIndex(db: Db): Promise<void> {
   await db.execute(sql`
     CREATE INDEX IF NOT EXISTS idx_memories_trigram
+      ON memories USING gin (tenant_id, content gin_trgm_ops)
+      WHERE status IN ('active', 'contested')
+  `);
+}
+
+/**
+ * {@link createOptionalTrigramIndex} と**同じ形の索引**（名前・`gin (tenant_id, content gin_trgm_ops)`・
+ * `WHERE status IN ('active', 'contested')`）を、`CREATE INDEX CONCURRENTLY` で張る。
+ * `memories` への `INSERT`/`UPDATE`/`DELETE` を止めない（`ShareUpdateExclusiveLock`。素の版は
+ * `ShareLock` で書き込みを止める。歯: `trigram-index-concurrently-lock-mode.postgres.test.ts`）。
+ *
+ * ⚠ **トランザクションの外で呼ぶこと。**`CREATE INDEX CONCURRENTLY` / `DROP INDEX CONCURRENTLY` は
+ * トランザクションブロックの中では実行できない（Postgres が拒否する）。`db` には
+ * `db.transaction(...)` の `tx` ではなく、プール由来の `Db` を渡す。migration の経路には
+ * 載せない（Issue #760 で、`CONCURRENTLY` を流せる migration の経路は作らないと決めた）。
+ *
+ * **前回の `CONCURRENTLY` が失敗・中断すると、`indisvalid = false` の索引が残る**（`IF NOT EXISTS` は
+ * 名前だけを見るので、残ったまま何もせず返ってしまい、検索には使われない索引が居座る）。
+ * そこでこの関数は、`memories` と同じスキーマに INVALID な `idx_memories_trigram` が在れば
+ * `DROP INDEX CONCURRENTLY` で消してから作り直す。VALID な索引が既にあれば何もしない
+ * （冪等）。
+ *
+ * ⚠ **複数の呼び出し元が同時に呼んだときの競合（片方が DROP している間に他方が CREATE する等）は
+ * 防いでいない**（ADR 0319 2026-09-30 追記「確かめていないこと」）。
+ */
+export async function createOptionalTrigramIndexConcurrently(db: Db): Promise<void> {
+  // `CREATE INDEX` は索引をテーブルと同じスキーマに作るので、`memories`（search_path で解決）と
+  // 同じスキーマの `idx_memories_trigram` だけを見る。
+  const invalid = await db.execute(sql`
+    SELECT format('%I.%I', n.nspname, c.relname) AS qualified_name
+      FROM pg_index i
+      JOIN pg_class c ON c.oid = i.indexrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+     WHERE i.indrelid = to_regclass('memories')
+       AND c.relname = 'idx_memories_trigram'
+       AND NOT i.indisvalid
+  `);
+  const row = invalid.rows[0] as { qualified_name: string } | undefined;
+  if (row !== undefined) {
+    // 名前は上の SELECT が `format('%I.%I')` で引用済み。
+    await db.execute(sql.raw(`DROP INDEX CONCURRENTLY IF EXISTS ${row.qualified_name}`));
+  }
+  await db.execute(sql`
+    CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_memories_trigram
       ON memories USING gin (tenant_id, content gin_trgm_ops)
       WHERE status IN ('active', 'contested')
   `);

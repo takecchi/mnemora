@@ -2301,6 +2301,7 @@ export declare function probeTrigramLexicalSupport(db: Db): Promise<TrigramLexic
 export declare const TRIGRAM_NOISE_STOPWORD_PATTERN: string;
 export declare function ensureTrigramLexicalFunctions(db: Db): Promise<void>;
 export declare function createOptionalTrigramIndex(db: Db): Promise<void>;
+export declare function createOptionalTrigramIndexConcurrently(db: Db): Promise<void>;
 export declare const DEFAULT_TRIGRAM_WORD_SIMILARITY_THRESHOLD = 0.3;
 export declare function buildTrigramLexicalSearchSelect(query: string, opts: {
     limit: number;
