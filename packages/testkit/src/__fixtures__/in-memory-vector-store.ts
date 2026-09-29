@@ -1,6 +1,8 @@
 import type {
   Ctx,
   EmbeddingSpaceId,
+  EraseTenantResult,
+  EraseTenantStoreOptions,
   MemoryId,
   VectorEntry,
   VectorFilter,
@@ -370,6 +372,29 @@ export class InMemoryVectorStore implements VectorStore {
         this.entries.delete(key);
       }
     }
+  }
+
+  /**
+   * Issue #1207 / ADR 0383: `ctx.tenantId` に属する行を、**全 space**から `opts.limit`
+   * を目安に消す。`deleteAcrossSpaces` と同じ「space（key の先頭3要素）は問わず、
+   * `tenantId` の一致だけを見る」形。
+   */
+  async eraseTenant(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult> {
+    const matchingKeys: string[] = [];
+    for (const [key, entry] of this.entries) {
+      if (matchingKeys.length >= opts.limit) {
+        break;
+      }
+      if (entry.tenantId === ctx.tenantId) {
+        matchingKeys.push(key);
+      }
+    }
+    if (!opts.dryRun) {
+      for (const key of matchingKeys) {
+        this.entries.delete(key);
+      }
+    }
+    return { deleted: matchingKeys.length, reachedLimit: matchingKeys.length === opts.limit };
   }
 
   async getVectors(

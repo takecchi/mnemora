@@ -116,6 +116,8 @@ describeMemoryStoreConformance({
   // Issue #1412 コメント1 / ADR 0373: PostgresMemoryStore は resolveOrphanedContested を
   // 実装している。
   supportsResolveOrphanedContested: true,
+  // Issue #1207 / ADR 0383: PostgresMemoryStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
   // Issue #207/#933 PR2 / ADR 0381: PostgresMemoryStore は markContestedGroup /
   // resolveContestedGroup を実装している。
   supportsMarkContestedGroup: true,
@@ -203,6 +205,8 @@ describeVectorStoreConformance({
   },
   // Issue #200 / ADR 0151: PostgresVectorStore は getVectors を実装している。
   supportsGetVectors: true,
+  // Issue #1207 / ADR 0383: PostgresVectorStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });
 
 describeLexicalStoreConformance({
@@ -280,6 +284,8 @@ describeOutboxStoreConformance({
    * 並行数が `max` を超えると、超えたぶんは接続待ちになり並行度が落ちる。
    */
   supportsRealConcurrency: true,
+  // Issue #1207 / ADR 0383: PostgresOutboxStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });
 
 describeTenantSettingsStoreConformance({
@@ -361,6 +367,8 @@ describeTenantSettingsStoreConformance({
   // Issue #201 / ADR 0318: PostgresTenantSettingsStore は getTaxonomyMode/setTaxonomyMode
   // を実装している。
   supportsTaxonomyMode: true,
+  // Issue #1207 / ADR 0383: PostgresTenantSettingsStore は eraseTenant を実装している。
+  supportsEraseTenant: true,
 });
 
 afterAll(async () => {

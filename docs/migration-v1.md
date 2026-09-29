@@ -582,6 +582,7 @@ describeTenantSettingsStoreConformance({
   // v0.2.0 で必須になった:
   supportsDecayClock: false, // 自作 adapter が getDecayClock/setDecayClock/
                               // getDefaultHalfLifeRecalls/getActivitySeq を実装していないなら false
+  supportsEraseTenant: false, // v1.2.0 から必須（項目31）
 });
 ```
 
@@ -1750,6 +1751,57 @@ union 拡張一般の影響であり、この文書が破壊的変更として�
 
 ⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は1件
 （PR #1442・Issue #207・#933 PR2（ADR 0381））である。**
+
+### 31. テナント単位で全表から行を消す `eraseTenant` が増え、conformance suite に省略できない `supportsEraseTenant` が増えた（`@mnemora/core`・`@mnemora/postgres`・`@mnemora/testkit`）
+
+[Issue #1207](https://github.com/takecchi/mnemora/issues/1207)、
+[PR #1444](https://github.com/takecchi/mnemora/pull/1444)、
+[ADR 0383](./decisions/0383-erase-tenant.md)。
+
+**何が変わったか**: `@mnemora/core` に独立関数 `eraseTenant(ctx, deps, opts)` が増え、
+`MemoryStore`・`VectorStore`・`OutboxStore`・`TenantSettingsStore` に任意メソッド
+`eraseTenant?` が増えた。`packages/testkit` の4つの conformance suite の options に
+`supportsEraseTenant: boolean` が**省略できない**形で増えた。`@mnemora/postgres` に
+DB マイグレーション `0027_erase_tenant_fk_indexes.sql` が増えた。中身・移行の手順は
+[CHANGELOG.md](../CHANGELOG.md) の `[1.2.0]` 節 `### Breaking` を見ること。
+**ここには複製しない。**
+
+**なぜ破壊的と数えるか**: conformance suite を呼んでいるコードは、`supportsEraseTenant`
+を渡すまで型検査が通らない。項目27（任意のフラグが増えた）より一段強く、型の上で壊れる。
+port に足したメソッドは任意（`?`）なので、自前の store の実装そのものは壊れない。
+
+**誰が影響を受けるか**: `packages/testkit` の `describeMemoryStoreConformance`・
+`describeVectorStoreConformance`・`describeOutboxStoreConformance`・
+`describeTenantSettingsStoreConformance` を呼んでいる利用者。`@mnemora/postgres` を
+使っている利用者は、migration の適用（下）が要る。
+
+**どう直すか**: CHANGELOG の同項目の「移行の手順」を見ること。
+移行ガイドの既存の例（項目6 の `describeTenantSettingsStoreConformance` の片）も、
+今の型で通るよう `supportsEraseTenant: false` を足して合わせて直した。
+
+**DB マイグレーション**: 要る——`0027_erase_tenant_fk_indexes.sql`。外部キー検査のための
+単一列の索引8本（`memory_events(memory_id)`・`recall_usages(memory_id)`・
+`recall_usages(recall_id)`・`memory_labels(memory_id)`・
+`memories(source_observation_id)`・`memories(superseded_by_id)`・
+`memory_relations(from_memory_id)`・`memory_relations(to_memory_id)`）を足し、既存の埋め込み
+空間の表（`memory_embeddings_<space>`）にも `(memory_id)` の索引を遡って足す。
+
+⚠ **運用の注意——索引を作るあいだ、書き込みが止まる。**この migration の `CREATE INDEX`
+は `CONCURRENTLY` を使わない（`0004` などと同じ前例、ADR 0059・ADR 0062）。
+`CREATE INDEX` は対象の表に `ShareLock` を取る——読み取りは止めないが、`INSERT`/
+`UPDATE`/`DELETE` は索引ができるまで待たされる。止まる時間の目安は、ADR 0059・ADR 0062
+（[#1423](https://github.com/takecchi/mnemora/issues/1423) で訂正済み）が `memories`
+への同じ種類の索引で実測した「100万行で約2.1秒」の形である。この PR 自身は 100万行規模で
+測り直していない。書き込みの多い時間帯を避けて当てること。
+
+なぜ索引が要るか（実測、[ADR 0383](./decisions/0383-erase-tenant.md)）: PG 17.11、消す
+テナント 10万 memories・ほかのテナント計20万 memories で、子の表を先に消してから
+`memories` を消すと、索引なしでは2000行で 90.0 秒（`memory_events` の外部キー検査が
+ほかのテナントの行も含めて表全体を走査する）、索引ありでは 0.50 秒だった。INSERT の遅れは
+約4〜5%（`memory_events` へ5万行、3回ずつ。測り方は ADR 0383）。
+
+⟹ **この節の範囲（`v1.1.0`…この変更の着地点）で、確定した破壊的変更は2件
+（PR #1442・Issue #207・#933 PR2（ADR 0381）、PR #1444・Issue #1207（ADR 0383））になった。**
 
 ## 🟡 後方互換だが挙動が変わりうるもの（v0.1.9 → v0.2.0）
 

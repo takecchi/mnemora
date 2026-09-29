@@ -156,6 +156,7 @@ describeMemoryStoreConformance({
   supportsLabels: true,
   supportsFindActiveByClaimKey: true,
   supportsListActiveClaimPredicates: true,
+  supportsEraseTenant: true,
 });
 
 // --- 本題: v1.0.0 の呼び出し形そのもの。supportsLabels/supportsFindActiveByClaimKey を渡さない ---
@@ -177,6 +178,7 @@ describeMemoryStoreConformance({
   supportsPreviewRestoreSupersededBy: true,
   supportsOnlyMemoryIdsFilter: true,
   supportsListActiveClaimPredicates: true,
+  supportsEraseTenant: true,
   // ⭐ supportsLabels / supportsFindActiveByClaimKey は意図的に渡さない — v1.0.0 の
   // 呼び出し形そのもの（Issue #818）。
 });

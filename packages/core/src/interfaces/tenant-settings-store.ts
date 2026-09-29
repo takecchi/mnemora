@@ -1,4 +1,5 @@
 import type { Ctx } from "../ctx.js";
+import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 
 /**
  * `tenant_settings.default_half_life_hours` の DB 側デフォルト（720時間 = 30日、
@@ -504,6 +505,28 @@ export interface TenantSettingsStore {
    * `Error` で失敗する（`assertValidTaxonomyMode` 参照）。`setDecayClock?` と同じ形。
    */
   setTaxonomyMode?(ctx: Ctx, mode: TaxonomyMode): Promise<void>;
+
+  /**
+   * `ctx.tenantId` の `tenant_settings` 行を消す
+   * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
+   * `packages/core/src/erase-tenant.ts` の独立関数 `eraseTenant` が束ねて呼ぶ4つの口の
+   * 1つで、**順序は最後**（設定を先に消すと、途中で処理が中断した場合に
+   * `getEventRetention` 等が既定値へ静かに戻ってしまい、消去が完了していないことに
+   * 気づきにくくなるため）。
+   *
+   * 🔴 **任意メソッドである。**理由は `VectorStore.eraseTenant?`/`OutboxStore.eraseTenant?`
+   * と同じ（`MemoryStore.eraseTenant` の doc コメント参照）。
+   *
+   * **契約**:
+   * - `tenant_settings` の行は `tenant_id` を主キーとするため、高々1行しか存在しない
+   *   ——`opts.limit` が1未満になることは呼び出し元（独立関数 `eraseTenant`）が
+   *   書き込み前に弾くので、この口が `limit` で打ち切られることは実質無い。
+   *   `result.reachedLimit` は常に `false` を返してよい。
+   * - `opts.dryRun === true` のときは削除を一切行わず、行が存在すれば `deleted: 1`、
+   *   存在しなければ `deleted: 0` を返す。
+   * - 行が存在しなくても例外にしない（`deleted: 0` を返すだけ）。
+   */
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
 }
 
 /**

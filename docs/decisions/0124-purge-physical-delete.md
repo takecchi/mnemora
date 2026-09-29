@@ -346,4 +346,26 @@ issue のヒント（「`purge` は `forgotten` からの遷移なので、`reca
 
 決定5は「`Runtime.purge` は `purgeMemory` の成功後、`deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)` を呼ぶ」——**今の `embeddingProvider.space` という1つの空間だけ**を対象にしたベストエフォートの削除だった。[Issue #995](https://github.com/takecchi/mnemora/issues/995)・[Issue #1425](https://github.com/takecchi/mnemora/issues/1425) が、埋め込みモデルを移した後は旧 space の embedding が purge の対象外のまま残ることを指摘した（ADR 0375 決定5が一度この欠陥を認識した上で Issue #1425 に切り出していた）。
 
+---
+
+## 追記（2026-09-30）: 「`memories` 行自体は残す」は `purgeMemory` に限った話であり、`eraseTenant`（ADR 0383）には当たらない
+
+クローン miku の委譲先が書いた。オーナーではない（[ADR 0220](./0220-issue-comment-author-does-not-distinguish-owner-from-agent.md)）。
+
+**上の本文（決定1〜7・引き受けた負債・確かめていないこと）と、上の各追記は書き換えていない。**当時の記録として残す。
+
+本文冒頭の issue の受け入れ条件は「`purge()` が実行された場合、`memories` 行自体は残す
+（`memory_events` からの外部キー参照整合性のため…）」と書いていた。**これは今も
+`Runtime.purge`/`MemoryStore.purgeMemory?`（1つの Memory を対象にした物理削除）に
+ついては正しいまま——本 ADR 0124 の決定はここでは覆っていない。**
+
+**[ADR 0383](./0383-erase-tenant.md) が足した独立関数 `eraseTenant`（1つのテナントを
+丸ごと対象にする、別の新しい操作）は、この制約の対象外である。** `eraseTenant` は
+`memory_events`（外部キー参照整合性の理由そのもの）を含め、テナントに属する表を
+すべて削除するため、`memories` 行自体も物理的に削除する——「行自体は残す」という
+制約が要求していた「`memory_events` からの参照整合性」を、`memory_events` 自体を
+同じ操作で消すことで満たす形になっている。`purgeMemory?`（1つの Memory を forgotten
+から物理削除する既存の口）と `eraseTenant`（1つのテナントを丸ごと消す新しい口）は
+別の操作であり、前者の制約は後者には引き継がれない。
+
 **[ADR 0382](./0382-vector-store-delete-across-spaces.md) が、決定5の「今の space だけ」を上書きした——`VectorStore` に必須メソッド `deleteAcrossSpaces` を足し、`Runtime.purge` は `deps.vectorStore.delete(ctx, deps.embeddingProvider.space, id)` の代わりに `deps.vectorStore.deleteAcrossSpaces(ctx, [id])`（adapter が持つ全 space が対象）を呼ぶ。** 加えて、`already_purged`（`dryRun` を除く）でもベストエフォートで同じ呼び出しを行うよう広げた——決定5当時はこの分岐で `vectorStore.delete` を呼んでいなかった。ベストエフォート（失敗を握り潰し `"purged"`/`"already_purged"` の判定を変えない）という決定5の骨格そのものは変えていない——対象を「1つの space」から「全 space」へ広げただけである。この ADR 0124 本文は書き換えず、この追記で指し先を更新するだけに留める。

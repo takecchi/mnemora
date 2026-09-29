@@ -254,6 +254,7 @@ console.log({ decayed, total: score.total, tokens, counter });
 | taxonomy・テナント設定 | `TaxonomyMode`・`DEFAULT_TAXONOMY_MODE`・`readTaxonomyMode`・`writeTaxonomyMode`・`assertValidTaxonomyMode`・`TAXONOMY_MODE_INVALID_MESSAGE`・`TAXONOMY_MODE_UNSUPPORTED_MESSAGE`・`LabelSummary`、保持期間の `assertValidEventRetentionKind`・`EVENT_RETENTION_KIND_INVALID_MESSAGE` |
 | recall | 段2の時間項の方針 `TimeWeightingPolicy`・`TIME_WEIGHTING_POLICIES`・`DEFAULT_TIME_WEIGHTING_POLICY`、語彙チャンネルの打ち切りの報告 `AnnUnreachedSeverity`・`AnnUnreachedSeveritySchema` |
 | contested・superseded の後始末 | `Runtime.resolveOrphanedContested` の `ResolveOrphanedContestedOptions`・`ResolveOrphanedContestedResult`・`ResolveOrphanedContestedOutcome`・`ResolveOrphanedContestedEligibility`、`restoreSuperseded` の `dryRun` の候補を操作ごとに束ねる `groupSupersededCandidatesByOperation`・`SupersededOperationGroup`（[docs/memory-model.md](../../docs/memory-model.md) §11 行15） |
+| テナント消去 | あるテナントに属する行を跡形なく消す独立関数 `eraseTenant`（`Runtime` のメソッドではない。`tick()`/`observe()` には配線しない、明示呼び出し専用——`purgeExpiredEventsForTenant` と同じ置き方）と、その `EraseTenantOptions`・`EraseTenantOutcome`・`EraseTenantDeps`。`MemoryStore`/`VectorStore`/`OutboxStore`/`TenantSettingsStore` それぞれの任意メソッド `eraseTenant?` とその `EraseTenantStoreOptions`・`EraseTenantResult`・（`MemoryStore` のみ）`EraseTenantStoreResult`。詳細は [docs/memory-model.md](../../docs/memory-model.md) §9・[ADR 0383](../../docs/decisions/0383-erase-tenant.md) |
 
 ## もっと詳しく
 

@@ -3,6 +3,7 @@ import type { Ctx } from "../ctx.js";
 import type { EmbeddingSpaceId } from "../embedding.js";
 import type { MemoryId } from "../ids.js";
 import type { MemoryStatus } from "../memory.js";
+import type { EraseTenantStoreOptions, EraseTenantResult } from "./memory-store.js";
 import type { ProvenanceKind } from "../provenance.js";
 
 /**
@@ -420,6 +421,38 @@ export interface VectorStore {
    *   実装がテーブルを何本持つかは関知しない。
    */
   deleteAcrossSpaces(ctx: Ctx, memoryIds: readonly MemoryId[]): Promise<void>;
+  /**
+   * `ctx.tenantId` に属する行を、この adapter が持つ**全 space**から跡形なく消す
+   * （Issue #1207 / [ADR 0383](../../../../docs/decisions/0383-erase-tenant.md)）。
+   * `deleteAcrossSpaces` が「特定の `memoryId` の集合」を対象にするのに対し、
+   * こちらは「このテナントの行全部」が対象——`packages/core/src/erase-tenant.ts` の
+   * 独立関数 `eraseTenant` が、`MemoryStore.eraseTenant?`/`OutboxStore.eraseTenant?`/
+   * `TenantSettingsStore.eraseTenant?` と束ねて呼ぶ4つの口の1つ。
+   *
+   * 🔴 **任意メソッドである。**必須にすると `VectorStore` を実装する第三者の adapter を
+   * 壊す破壊的変更になる——`deleteAcrossSpaces`（決定的に必須にした ADR 0382）とは
+   * 判断が違う。**理由**: `deleteAcrossSpaces` は `Runtime.purge`（既存の、日常的に
+   * 呼ばれる操作）の一部として「対応していない adapter では別 space の embedding が
+   * 結局消えない」という限界が常時効いてしまうため必須にしたが、`eraseTenant`（この
+   * 独立関数）はテナント消去というまれな操作であり、対応していない adapter は
+   * `eraseTenant`（独立関数）の `{ kind: "store_unsupported" }` で名指しされる——
+   * 「口が無い」ことが呼び出し側に見える形で伝わり、劣化した代替を試みることもない
+   * （ADR 0050 が必須化した理由が当たらない構造は `MemoryStore.eraseTenant` の doc
+   * コメントと同じ）。破壊的変更の許可自体は v1.X.0 で出ている
+   * （オーナー回答 ask_human 6911db12）が、対応していない第三者 adapter を壊す理由が
+   * ここでは弱い、とADR 0383が判断した。
+   *
+   * **契約**:
+   * - `opts.limit` を目安に、adapter が持つ全 space のテーブルから、このテナントの行を
+   *   削除する。space 間の順序は問わない——space どうしは互いを参照しない。
+   * - `opts.dryRun === true` のときは削除を一切行わず、削除していたら消えていたであろう
+   *   件数だけを返す。
+   * - `result.reachedLimit === true` なら、呼び出し側は同じ `opts` で呼び直すこと。
+   *   何度呼んでも安全（空になった space は0件を返すだけ）。
+   * - `ctx.tenantId` に属さない行は消さない（`delete`/`deleteAcrossSpaces` と同じ
+   *   テナント境界）。
+   */
+  eraseTenant?(ctx: Ctx, opts: EraseTenantStoreOptions): Promise<EraseTenantResult>;
   /**
    * アンカーとなる Memory のベクトルをまとめて取得する（連想枠、Issue #200）。
    *
