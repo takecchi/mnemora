@@ -399,5 +399,6 @@ alteroid (github.com/takecchi/alteroid) を根拠として引く箇所は、確�
 | [0375](./0375-purge-scope-widened.md) | `purge()` が消す範囲を広げる——`tags`/`attributes`/claim key・label の紐付け・`recalls.index_band` の digest 帯 | 採用 (2026-09) |
 | [0377](./0377-claim-key-contested-detection-excludes-same-observation-siblings.md) | claim key の衝突検出は、同じ observation（＝同じ発話）から抽出された兄弟 Memory どうしを一致から除く（Issue #835 候補1） | 採用 (2026-09) |
 | [0378](./0378-claim-key-contested-detection-covers-contested-matches.md) | claim key の自動 contested 検出は、3件目以降も一致に数える —— `findContestedByClaimKey?`（PR1）と、多者間 `contested` を表へ束ねる書き込み経路の全体設計（PR2、Issue #933・#207・ADR 0327 の続き） | 採用 (2026-09) |
+| [0380](./0380-reextract-withdrawn-across-extractor-versions.md) | `reextract` は、版を跨いで退けた記憶を見る——`MemoryStore.listBySourceObservationAllVersions` を新設する | 採用 (2026-09) |
 
 <!-- ADR-INDEX:GENERATED:END -->

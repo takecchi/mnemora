@@ -659,6 +659,12 @@ PR #1393・Issue #1232）になった。**
   `Record`/`switch` で `ConsolidateOutcome`/`ReflectOutcome`/`ConsolidateSourceOutcome`/
   `ReflectBasisOutcome` を扱っている利用者は、この種の追加でも型検査が落ちうる、という
   影響の実例として記録する。
+- **`MemoryStore` に必須メソッド `listBySourceObservationAllVersions` が増えた**（[Issue #1432](https://github.com/takecchi/mnemora/issues/1432)、[ADR 0380](./docs/decisions/0380-reextract-withdrawn-across-extractor-versions.md)。クローン miku の委譲先の判断であり、オーナーの判断ではない）——`extractorVersion` を上げた runtime インスタンスで `reextract()` を呼ぶと、前の版で `forget`（purge を含む）・`contested` にした記憶を見落とし、退けたはずの内容と同じ意味の Memory が印の無い新しい `active` として書き直されうる欠陥があった。`Runtime.reextract` の「利用者の意思で退けた記憶を持つ Observation では抽出をやり直さない」という判定（上の Issue #1079・#1149 の項目）が、`extractorVersion` を跨ぐと効かなくなっていた。
+  - **`MemoryStore` に `listBySourceObservationAllVersions(ctx, observationId): Promise<Memory[]>` を追加した。** ある Observation から作られた Memory を、`extractorVersion`・`status` のどちらでも絞らずに列挙する（**SELECT のみ**。マイグレーション・索引は追加しない——既存の一意索引 `uq_memories_extraction (tenant_id, source_observation_id, extractor_version, content_hash)` が `(tenant_id, source_observation_id)` の前方一致でも Index Scan に使える）。**既存の `listBySourceObservation` は1行も変えていない。**
+  - **`Runtime.reextract` の「退けた記憶」の判定は、いまは `extractorVersion` を問わない。** 版を跨いでも、1件でも `forgotten`（purge を含む）・`contested`・訂正の解決で負けた `superseded` があれば、その Observation の抽出全体を打ち切る（同じ版のときと同じ規律。`extraction: "skipped"`・`atomicity: "not_attempted"`・`memoryIds: []`、`skipped` に退けた記憶ごとの `status_not_active`）。同じ Observation の、退けていない他の `active` な事実も作り直さない。
+  - **帰結**: 版を上げても、退けたものを含む Observation は新しい版の記憶を1件も作らない。⟹ 運用側が旧い版の記憶を forget すると、その Observation のほかの（退けていない）事実も、以後の reextract では想起から作られなくなる。`skipped` に `status_not_active` が出た Observation では、旧い版の記憶を残すことが運用側の手がかりになる。
+  - **版を跨いだ `active` の扱い（上の Issue #873 の項目「運用側の責務」）は変えていない**——supersede 対象の判定は今どおり今の `extractorVersion` 限定のままで、退けたものが無い Observation では、今どおり新しい版で抽出され、旧い版の `active` は supersede されない。
+  - **`@mnemora/postgres`（`PostgresMemoryStore`）・`@mnemora/testkit/fixtures`（`InMemoryMemoryStore`）はこの口を実装済み。** 自前で `MemoryStore` を実装している場合は、このメソッドを実装しないと型検査が落ちる——実装は `tenant_id`・`source_observation_id` が一致する行を返すだけでよい（`extractor_version` の絞り込みを外した形）。詳細・移行の手順は [docs/migration-v1.md](./docs/migration-v1.md) 項目28。
 
 **⚠ 2026-09-30 追記28**: 上の25回分の棚卸しとは別に、着地に先立って変更を作った本人が
 この節へ足した項目（上の追記19・20 と同じ扱い）。[Issue #933](https://github.com/takecchi/mnemora/issues/933)
